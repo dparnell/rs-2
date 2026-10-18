@@ -7,7 +7,9 @@
 
 extern crate alloc;
 
+mod acpi;
 mod api;
+mod apic;
 mod arch;
 mod codepage;
 mod config;
@@ -63,6 +65,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     arch::idt::init();
     arch::init_fpu();
     mm::init(info);
+    acpi::init(info.rsdp);
     irq::init();
     task::sched::init();
     fs::init(info);
@@ -71,6 +74,9 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     infoseg::init();
     kbd::init();
     arch::enable_interrupts();
+    if !apic::init() {
+        println!("apic: not available, using the 8259 PICs");
+    }
 
     let cmdline = info.cmdline();
     println!("command line: {cmdline}");

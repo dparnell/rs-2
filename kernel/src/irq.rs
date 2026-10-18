@@ -32,6 +32,10 @@ pub fn register(irq: u8, h: Handler) {
 }
 
 pub fn unmask(irq: u8) {
+    if crate::apic::active() {
+        crate::apic::route_irq(irq);
+        return;
+    }
     unsafe {
         if irq < 8 {
             outb(0x21, inb(0x21) & !(1 << irq));
@@ -43,6 +47,10 @@ pub fn unmask(irq: u8) {
 }
 
 fn eoi(irq: u8) {
+    if crate::apic::active() {
+        crate::apic::eoi();
+        return;
+    }
     unsafe {
         if irq >= 8 {
             outb(0xa0, 0x20);
@@ -53,7 +61,7 @@ fn eoi(irq: u8) {
 
 pub fn handle(irq: u8, f: &mut TrapFrame) {
     // Spurious IRQ 7 / 15 have no in-service bit.
-    if irq == 7 || irq == 15 {
+    if (irq == 7 || irq == 15) && !crate::apic::active() {
         unsafe {
             let port = if irq == 7 { 0x20 } else { 0xa0 };
             outb(port, 0x0b);

@@ -7,6 +7,7 @@ use crate::arch::{self, inb, outb, outw};
 pub fn reboot() -> ! {
     arch::disable_interrupts();
     crate::println!("Restarting...");
+    crate::acpi::reset();
     unsafe {
         outb(0xcf9, 0x02);
         outb(0xcf9, 0x06);
@@ -25,6 +26,7 @@ pub fn reboot() -> ! {
 
 /// Power off (QEMU/Bochs ACPI ports; ACPI proper comes later).
 pub fn power_off() -> ! {
+    crate::acpi::power_off();
     unsafe {
         outw(0x604, 0x2000);
         outw(0xb004, 0x2000);

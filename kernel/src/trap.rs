@@ -29,6 +29,7 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
             crate::irq::handle((v - IRQ_BASE) as u8, f);
         }
         v if v == API_VECTOR as u64 => crate::api::dispatch(f),
+        v if v == crate::apic::SPURIOUS as u64 => {}
         v => crate::println!("spurious interrupt {v:#x}"),
     }
     if f.from_user() && crate::task::before_user_return(f) {
