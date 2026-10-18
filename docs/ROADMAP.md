@@ -29,7 +29,8 @@ Status markers: done, in progress, planned.
   handlers; see the coverage table in [COMPATIBILITY.md](COMPATIBILITY.md)
 - done: kernel stress test (RS2\STRESS.EXE) and the leak, race and
   wake-up bugs it found; kernel object counters for leak checks
-- done: kernel threads (no OS/2 process) with a work queue
+- done: kernel threads (no OS/2 process) with a work queue; the scheduler
+  reports a thread that blocks while holding a spin lock
 - planned:
   DosDevIOCtl coverage, bound message segments, mandatory file locks,
   SMP-safe locking (the kernel still relies on one CPU and interrupts off)

@@ -144,7 +144,10 @@ Status: **works** = the tested function behaves as on OS/2;
   owner died were not woken; semaphore waits interrupted by a signal
   returned ERROR_TIMEOUT; uncollected children stayed in the process
   table after their parent ended; DosKillProcess from another process
-  skipped the exit list; DosSleep ended early on stray wake-ups.
+  skipped the exit list; DosSleep ended early on stray wake-ups; a
+  program touching more memory than the machine has could starve the
+  kernel heap (user pages now leave a 4 MB reserve); 16-bit timers wrote
+  to the physical frame of a RAM semaphore even after it was freed.
 
 ## Missing or incomplete
 
