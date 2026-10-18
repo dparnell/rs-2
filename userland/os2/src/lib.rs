@@ -11,6 +11,7 @@ extern crate alloc;
 pub mod dos;
 pub mod fmt;
 pub mod heap;
+pub mod msg;
 pub mod path;
 pub mod vio;
 
@@ -20,6 +21,7 @@ pub mod vio;
 static HEAP: heap::Os2Heap = heap::Os2Heap;
 
 pub use dos::*;
+pub use msg::*;
 
 /// Write bytes to standard output.
 pub fn write(b: &[u8]) {

@@ -364,7 +364,10 @@ pub fn vio_get_cp(c: &mut Ctx) -> u32 {
 
 pub fn vio_set_cp(c: &mut Ctx) -> u32 {
     let cp = c.arg(1) as u16;
-    let Some(cp) = crate::codepage::CodePage::from_number(cp) else { return 355 }; // ERROR_VIO_BAD_CP
+    let cp = match crate::nls::screen_cp(cp) {
+        Ok(cp) => cp,
+        Err(e) => return e,
+    };
     screen::with(|s| s.set_codepage(cp));
     0
 }

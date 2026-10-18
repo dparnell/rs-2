@@ -52,9 +52,9 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (1, 52) => v::vio_wrt_n_cell,
         (1, 53) => v::vio_wrt_n_char,
         // ---- KBDCALLS ----
-        (2, 3) => k::kbd_get_cp,
+        (2, 3) => nls::kbd_get_cp,
         (2, 4) => k::kbd_char_in,
-        (2, 5) => k::ok,           // KbdSetCp
+        (2, 5) => nls::kbd_set_cp,
         (2, 7) => k::ok,           // KbdSynch
         (2, 9) => k::kbd_string_in,
         (2, 10) => k::kbd_get_status,
@@ -91,8 +91,9 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 14) => dos16_set_sig_handler,
         (0, 43) => dos16_create_cs_alias,
         (0, 52) | (0, 231) => dos_dev_config,
-        (0, 130) => dos16_get_cp,
-        (0, 153) | (0, 164) | (0, 288) | (0, 289) => dos_set_cp,
+        (0, 130) => nls::dos16_get_cp,
+        (0, 153) | (0, 288) => nls::dos_set_cp,
+        (0, 164) | (0, 289) => nls::dos_set_process_cp,
         (0, 567) => file::dos16_open_l,
         (0, 568) => file::dos16_set_file_ptr_l,
         (0, 570) => file::dos16_set_file_size_l,
@@ -343,7 +344,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 281) => file::dos_read,
         (0, 282) => file::dos_write,
         (0, 286) => dos_beep,
-        (0, 291) => dos_query_cp,
+        (0, 291) => nls::dos_query_cp,
         (0, 299) => dos_alloc_mem,
         (0, 304) => dos_free_mem,
         (0, 305) => dos_set_mem,
@@ -835,17 +836,6 @@ fn dos16_get_mod_handle(c: &mut Ctx) -> u32 {
 
 // ---- System information ----
 
-fn dos_query_cp(c: &mut Ctx) -> u32 {
-    let (cb, buf, pcb) = (c.arg(0), c.arg(1), c.arg(2));
-    let cps = [850u32, 850, 437];
-    let n = (cb as usize / 4).min(cps.len());
-    for (i, cp) in cps.iter().take(n).enumerate() {
-        c.write_u32(buf + 4 * i as u32, *cp);
-    }
-    c.write_u32(pcb, (n * 4) as u32);
-    if n < cps.len() { err::BUFFER_OVERFLOW } else { 0 }
-}
-
 fn sys_info_value(i: u32) -> u32 {
     let total = crate::mm::phys::total_frames() * 4096;
     let free = crate::mm::phys::free_count() * 4096;
@@ -913,26 +903,6 @@ fn dos_set_rel_max_fh(c: &mut Ctx) -> u32 {
     let n = c.process.handles.lock().len().max(20) as u32;
     c.write_u32(c.arg(1), n);
     0
-}
-
-// ---- Code pages ----
-
-fn dos16_get_cp(c: &mut Ctx) -> u32 {
-    let (cb, p, pcb) = (c.arg(0), c.ptr(1), c.ptr(2));
-    let cps = [850u16, 850, 437];
-    let n = (cb as usize / 2).min(cps.len());
-    for (i, cp) in cps.iter().take(n).enumerate() {
-        c.write_u16(p + 2 * i as u32, *cp);
-    }
-    c.write_u16(pcb, (n * 2) as u16);
-    if n < cps.len() { err::BUFFER_OVERFLOW } else { 0 }
-}
-
-fn dos_set_cp(c: &mut Ctx) -> u32 {
-    match c.arg(0) {
-        437 | 850 => 0,
-        _ => 472, // ERROR_INVALID_CODE_PAGE
-    }
 }
 
 // ---- Signals (16-bit) ----

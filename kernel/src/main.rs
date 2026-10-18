@@ -26,6 +26,8 @@ mod power;
 mod log;
 mod mm;
 mod mouse;
+mod nls;
+mod nls_data;
 mod npipe;
 mod rtc;
 mod screen;
@@ -147,6 +149,7 @@ pub mod boot {
 
     pub fn start(cmdline: &str) {
         let cfg = crate::config::load().unwrap_or_default();
+        crate::config::apply_nls(&cfg);
         if let Some(lp) = &cfg.libpath {
             crate::fs::set_libpath(lp);
         }

@@ -20,6 +20,10 @@ pub struct Config {
     /// RUN= programs started detached.
     pub run: Vec<(String, String)>,
     pub codepage: Vec<u16>,
+    /// COUNTRY=nnn[,file]: the country code.
+    pub country: Option<u16>,
+    /// DEVINFO=KBD,layout[,file]: the keyboard layout id.
+    pub keyboard: Option<String>,
     pub pause_on_error: bool,
     /// Driver statements we do not load (BASEDEV/DEVICE/IFS).
     pub drivers: Vec<String>,
@@ -64,12 +68,30 @@ pub fn parse(text: &str) -> Config {
             "CODEPAGE" => {
                 c.codepage = val.split(',').filter_map(|s| s.trim().parse().ok()).collect();
             }
+            "COUNTRY" => c.country = val.split(',').next().and_then(|v| v.trim().parse().ok()),
+            "DEVINFO" => {
+                let mut parts = val.split(',').map(str::trim);
+                if parts.next().is_some_and(|d| d.eq_ignore_ascii_case("KBD")) {
+                    c.keyboard = parts.next().filter(|l| !l.is_empty()).map(|l| l.to_ascii_uppercase());
+                }
+            }
             "PAUSEONERROR" => c.pause_on_error = val.eq_ignore_ascii_case("YES"),
             "BASEDEV" | "DEVICE" | "IFS" => c.drivers.push(alloc::format!("{key}={val}")),
             _ => {}
         }
     }
     c
+}
+
+/// Apply the national language statements: COUNTRY, CODEPAGE and the
+/// keyboard layout of DEVINFO=KBD.
+pub fn apply_nls(c: &Config) {
+    if let Some(id) = &c.keyboard {
+        if !crate::kbd::layout::set_layout(id) {
+            crate::println!("config.sys: unknown keyboard layout {id}");
+        }
+    }
+    crate::nls::configure(c.country, &c.codepage);
 }
 
 /// Read and parse CONFIG.SYS from drive C:, if present.

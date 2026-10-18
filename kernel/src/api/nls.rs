@@ -1,119 +1,174 @@
-//! NLS: country information, case mapping, collation, DBCS ranges.
-
-use alloc::vec::Vec;
+//! NLS: country information, case mapping, collation, DBCS ranges and
+//! code page APIs (the tables live in `crate::nls`).
 
 use super::{err, Ctx};
-
-/// Upper case for code page 850 / 437 (code pages share the ASCII range
-/// and most accented letters in 0x80-0xA5).
-pub fn upper(cp: u16, b: u8) -> u8 {
-    if b.is_ascii_lowercase() {
-        return b - 32;
-    }
-    const COMMON: &[(u8, u8)] = &[
-        (0x81, 0x9a), (0x82, 0x90), (0x84, 0x8e), (0x86, 0x8f), (0x87, 0x80),
-        (0x91, 0x92), (0x94, 0x99), (0xa4, 0xa5),
-    ];
-    const CP850: &[(u8, u8)] = &[
-        (0xa0, 0xb5), (0x83, 0xb6), (0x85, 0xb7), (0xc6, 0xc7), (0x88, 0xd2),
-        (0x89, 0xd3), (0x8a, 0xd4), (0xa1, 0xd6), (0x8c, 0xd7), (0x8b, 0xd8),
-        (0x8d, 0xde), (0xa2, 0xe0), (0x93, 0xe2), (0x95, 0xe3), (0xe4, 0xe5),
-        (0xa3, 0xe9), (0x96, 0xea), (0x97, 0xeb), (0xec, 0xed), (0x9b, 0x9d),
-        (0xd0, 0xd1), (0xe7, 0xe8),
-    ];
-    if let Some(&(_, u)) = COMMON.iter().find(|&&(l, _)| l == b) {
-        return u;
-    }
-    if cp == 850 {
-        if let Some(&(_, u)) = CP850.iter().find(|&&(l, _)| l == b) {
-            return u;
-        }
-    }
-    b
-}
+use crate::nls;
 
 /// Read a COUNTRYCODE (country, code page); 0 means the current value.
-fn country_code(c: &Ctx, p: u32) -> (u32, u32) {
+fn country_code(c: &Ctx, p: u32) -> Result<(u16, u16), u32> {
+    let (country, cp) = if c.is16 {
+        let (Some(a), Some(b)) = (c.read_u16(p), c.read_u16(p + 2)) else { return Err(err::INVALID_ADDRESS) };
+        (a as u32, b as u32)
+    } else {
+        let (Some(a), Some(b)) = (c.read_u32(p), c.read_u32(p + 4)) else { return Err(err::INVALID_ADDRESS) };
+        (a, b)
+    };
+    nls::resolve(c.process.pid, country, cp)
+}
+
+fn write_count(c: &Ctx, pcb: u32, n: u32) {
     if c.is16 {
-        (c.read_u16(p).unwrap_or(0) as u32, c.read_u16(p + 2).unwrap_or(0) as u32)
+        c.write_u16(pcb, n as u16);
     } else {
-        (c.read_u32(p).unwrap_or(0), c.read_u32(p + 4).unwrap_or(0))
+        c.write_u32(pcb, n);
     }
 }
 
-fn effective_cp(cp: u32) -> u16 {
-    if cp == 0 { 850 } else { cp as u16 }
-}
-
-/// COUNTRYINFO for the United States.
-fn country_info(is16: bool, country: u32, cp: u16) -> Vec<u8> {
-    let mut b = Vec::new();
-    let country = if country == 0 { 1 } else { country };
-    if is16 {
-        b.extend_from_slice(&(country as u16).to_le_bytes());
-        b.extend_from_slice(&cp.to_le_bytes());
-        b.extend_from_slice(&0u16.to_le_bytes()); // fsDateFmt: MDY
-    } else {
-        b.extend_from_slice(&country.to_le_bytes());
-        b.extend_from_slice(&(cp as u32).to_le_bytes());
-        b.extend_from_slice(&0u32.to_le_bytes());
-    }
-    b.extend_from_slice(b"$\0\0\0\0"); // szCurrency
-    b.extend_from_slice(b",\0"); // thousands
-    b.extend_from_slice(b".\0"); // decimal
-    b.extend_from_slice(b"-\0"); // date separator
-    b.extend_from_slice(b":\0"); // time separator
-    b.push(0); // fsCurrencyFmt
-    b.push(2); // cDecimalPlace
-    b.push(0); // fsTimeFmt: 12 hour
-    b.extend_from_slice(&[0; 4]); // abReserved1
-    b.extend_from_slice(b",\0"); // data separator
-    b.extend_from_slice(&[0; 10]); // abReserved2
-    b
-}
-
+/// DosQueryCtryInfo / DosGetCtryInfo (cb, pctryc, pctryi, pcbActual).
 pub fn dos_get_ctry_info(c: &mut Ctx) -> u32 {
-    // (cb, pctryc, pctryi, pcbActual)
     let (cb, pcc, pci, pcb) = if c.is16 { (c.arg(0), c.ptr(1), c.ptr(2), c.ptr(3)) } else { (c.arg(0), c.arg(1), c.arg(2), c.arg(3)) };
-    let (country, cp) = country_code(c, pcc);
-    let b = country_info(c.is16, country, effective_cp(cp));
+    let (country, cp) = match country_code(c, pcc) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let b = nls::country_info(country, cp, c.is16);
     let n = b.len().min(cb as usize);
-    c.write(pci, &b[..n]);
-    if c.is16 { c.write_u16(pcb, n as u16) } else { c.write_u32(pcb, n as u32) };
+    if !c.write(pci, &b[..n]) {
+        return err::INVALID_ADDRESS;
+    }
+    write_count(c, pcb, n as u32);
     if n < b.len() { err::BUFFER_OVERFLOW } else { 0 }
 }
 
+/// DosMapCase / DosCaseMap (cb, pctryc, pch).
 pub fn dos_case_map(c: &mut Ctx) -> u32 {
-    // (cb, pctryc, pch)
     let (len, pcc, p) = if c.is16 { (c.arg(0), c.ptr(1), c.ptr(2)) } else { (c.arg(0), c.arg(1), c.arg(2)) };
-    let (_, cp) = country_code(c, pcc);
-    let cp = effective_cp(cp);
+    let (country, cp) = match country_code(c, pcc) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
     let Some(mut v) = c.read_vec(p, len) else { return err::INVALID_ADDRESS };
-    for b in v.iter_mut() {
-        *b = upper(cp, *b);
+    let map = nls::case_map(country, cp);
+    let lead = nls::dbcs_ranges(cp);
+    let mut i = 0;
+    while i < v.len() {
+        let b = v[i];
+        if lead.iter().any(|&(lo, hi)| (lo..=hi).contains(&b)) {
+            // Double-byte characters are left alone.
+            i += 2;
+            continue;
+        }
+        v[i] = map[b as usize];
+        i += 1;
     }
     c.write(p, &v);
     0
 }
 
+/// DosQueryCollate / DosGetCollate (cb, pctryc, pch, pcch).
 pub fn dos_get_collate(c: &mut Ctx) -> u32 {
-    // (cb, pctryc, pch, pcch)
     let (cb, pcc, p, pcb) = if c.is16 { (c.arg(0), c.ptr(1), c.ptr(2), c.ptr(3)) } else { (c.arg(0), c.arg(1), c.arg(2), c.arg(3)) };
-    let (_, cp) = country_code(c, pcc);
-    let cp = effective_cp(cp);
-    let table: Vec<u8> = (0..=255u8).map(|b| upper(cp, b)).collect();
+    let (country, cp) = match country_code(c, pcc) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let table = nls::collate(country, cp);
     let n = table.len().min(cb as usize);
-    c.write(p, &table[..n]);
-    if c.is16 { c.write_u16(pcb, n as u16) } else { c.write_u32(pcb, n as u32) };
+    if !c.write(p, &table[..n]) {
+        return err::INVALID_ADDRESS;
+    }
+    write_count(c, pcb, n as u32);
+    if n < table.len() { err::BUFFER_OVERFLOW } else { 0 }
+}
+
+/// DosQueryDBCSEnv / DosGetDBCSEv (cb, pctryc, pch): pairs of lead byte
+/// ranges ending with 0,0.
+pub fn dos_get_dbcs_env(c: &mut Ctx) -> u32 {
+    let (cb, pcc, p) = if c.is16 { (c.arg(0), c.ptr(1), c.ptr(2)) } else { (c.arg(0), c.arg(1), c.arg(2)) };
+    let (_, cp) = match country_code(c, pcc) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let mut b = alloc::vec::Vec::new();
+    for &(lo, hi) in nls::dbcs_ranges(cp) {
+        b.extend_from_slice(&[lo, hi]);
+    }
+    b.extend_from_slice(&[0, 0]);
+    let n = b.len().min(cb as usize);
+    if !c.write(p, &b[..n]) {
+        return err::INVALID_ADDRESS;
+    }
+    if n < b.len() { err::BUFFER_OVERFLOW } else { 0 }
+}
+
+/// The DosQueryCp list: the process's code page, then the prepared ones.
+fn cp_list(c: &Ctx) -> alloc::vec::Vec<u16> {
+    let mut v = alloc::vec![nls::process_cp(c.process.pid)];
+    v.extend(nls::prepared().iter().copied().filter(|&cp| cp != 0));
+    v
+}
+
+/// DosQueryCp (cb, arCP, pcCP): ULONG entries; the count is in bytes.
+pub fn dos_query_cp(c: &mut Ctx) -> u32 {
+    let (cb, buf, pcb) = (c.arg(0), c.arg(1), c.arg(2));
+    let cps = cp_list(c);
+    let n = (cb as usize / 4).min(cps.len());
+    for (i, cp) in cps.iter().take(n).enumerate() {
+        c.write_u32(buf + 4 * i as u32, *cp as u32);
+    }
+    c.write_u32(pcb, (n * 4) as u32);
+    if n < cps.len() { err::BUFFER_OVERFLOW } else { 0 }
+}
+
+/// 16-bit DosGetCp (cb, pCodePageList, pcbCodePageList): USHORT entries.
+pub fn dos16_get_cp(c: &mut Ctx) -> u32 {
+    let (cb, p, pcb) = (c.arg(0), c.ptr(1), c.ptr(2));
+    let cps = cp_list(c);
+    let n = (cb as usize / 2).min(cps.len());
+    for (i, cp) in cps.iter().take(n).enumerate() {
+        c.write_u16(p + 2 * i as u32, *cp);
+    }
+    c.write_u16(pcb, (n * 2) as u16);
+    if n < cps.len() { err::BUFFER_OVERFLOW } else { 0 }
+}
+
+/// DosSetProcessCp / DosSetProcCp: the process code page.
+pub fn dos_set_process_cp(c: &mut Ctx) -> u32 {
+    let cp = c.arg(0) as u16;
+    match nls::set_process_cp(c.process.pid, cp) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
+}
+
+/// DosSetCp: the process code page and the session's display and
+/// keyboard code pages.
+pub fn dos_set_cp(c: &mut Ctx) -> u32 {
+    let cp = c.arg(0) as u16;
+    if let Err(e) = nls::set_process_cp(c.process.pid, cp) {
+        return e;
+    }
+    if let Ok(page) = nls::screen_cp(cp) {
+        crate::screen::with(|s| s.set_codepage(page));
+    }
+    if let Ok(k) = nls::keyboard_cp(cp) {
+        crate::kbd::layout::set_codepage(k);
+    }
     0
 }
 
-pub fn dos_get_dbcs_env(c: &mut Ctx) -> u32 {
-    // (cb, pctryc, pch): pairs of lead-byte ranges, terminated by 0,0.
-    let (cb, p) = if c.is16 { (c.arg(0), c.ptr(2)) } else { (c.arg(0), c.arg(2)) };
-    if cb < 2 {
-        return err::BUFFER_OVERFLOW;
+/// KbdSetCp (usReserved, usCodePage, hkbd).
+pub fn kbd_set_cp(c: &mut Ctx) -> u32 {
+    match nls::keyboard_cp(c.arg(1) as u16) {
+        Ok(cp) => {
+            crate::kbd::layout::set_codepage(cp);
+            0
+        }
+        Err(e) => e,
     }
-    c.write(p, &[0, 0]);
-    0
+}
+
+/// KbdGetCp (ulReserved, pidCP, hkbd).
+pub fn kbd_get_cp(c: &mut Ctx) -> u32 {
+    if c.write_u16(c.ptr(1), crate::kbd::layout::codepage()) { 0 } else { err::INVALID_ADDRESS }
 }
