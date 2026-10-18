@@ -1,0 +1,9 @@
+[package]
+name = "unpack"
+description = "List and extract OS/2 installer packed files (FTCOMP)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2-pack = { path = "../../crates/os2-pack" }

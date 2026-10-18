@@ -26,6 +26,10 @@ name = "os2-exe"
 version = "0.1.0"
 
 [[package]]
+name = "os2-pack"
+version = "0.1.0"
+
+[[package]]
 name = "rs2-boot"
 version = "0.1.0"
 dependencies = [
@@ -39,6 +43,13 @@ dependencies = [
  "bootinfo",
  "fat",
  "os2-exe",
+]
+
+[[package]]
+name = "unpack"
+version = "0.1.0"
+dependencies = [
+ "os2-pack",
 ]
 
 [[package]]

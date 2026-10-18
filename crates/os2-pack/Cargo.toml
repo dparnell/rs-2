@@ -1,0 +1,6 @@
+[package]
+name = "os2-pack"
+description = "no_std reader for OS/2 installer packed files (FTCOMP, UNPACK/UNPACK2)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
