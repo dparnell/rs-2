@@ -4,8 +4,15 @@
 //! (character, attribute) cells, exactly like VGA text memory, rendered into
 //! the linear framebuffer with an 8x16 font. Kernel messages and VIO
 //! sessions both draw into it.
+//!
+//! Every session has its own `Screen`; only the foreground one is
+//! `visible` and draws into the framebuffer, the others just keep their
+//! cells until they are switched to.
 
 use bootinfo::{Framebuffer, PHYS_MAP_BASE};
+
+use alloc::boxed::Box;
+use alloc::vec::Vec;
 
 use crate::codepage::CodePage;
 use crate::sync::SpinLock;
@@ -59,18 +66,46 @@ pub struct Screen {
     cursor: Option<(usize, usize)>,
     /// Attribute used by the kernel console.
     pub attr: u8,
+    /// Shown on the framebuffer (the foreground session).
+    visible: bool,
 }
 
 unsafe impl Send for Screen {}
 
-pub static SCREEN: SpinLock<Option<&'static mut Screen>> = SpinLock::new(None);
+/// The screens of all sessions; session 1 (the boot session) owns the
+/// statically allocated one.
+pub struct Screens {
+    boot: Option<&'static mut Screen>,
+    others: Vec<(u32, Box<Screen>)>,
+    /// The session shown on the framebuffer.
+    pub visible: u32,
+}
+
+pub static SCREEN: SpinLock<Screens> = SpinLock::new(Screens { boot: None, others: Vec::new(), visible: 1 });
+
+impl Screens {
+    pub fn get(&mut self, sid: u32) -> Option<&mut Screen> {
+        if sid == 1 {
+            return self.boot.as_deref_mut();
+        }
+        self.others.iter_mut().find(|(s, _)| *s == sid).map(|(_, b)| &mut **b)
+    }
+}
 
 /// Backing storage for the screen state (too big for the boot stack).
 static mut SCREEN_STATE: core::mem::MaybeUninit<Screen> = core::mem::MaybeUninit::uninit();
 
 impl Screen {
-    /// Initialise the screen in place.
+    /// Initialise the boot screen in place.
     fn init_at(slot: &'static mut core::mem::MaybeUninit<Screen>, fb: Framebuffer) -> &'static mut Screen {
+        let s = Screen::init_hidden(slot, fb, CodePage::Cp850);
+        s.visible = true;
+        s.set_mode(80, 25);
+        s
+    }
+
+    /// A screen for a background session: same framebuffer, not visible.
+    fn init_hidden(slot: &mut core::mem::MaybeUninit<Screen>, fb: Framebuffer, cp: CodePage) -> &mut Screen {
         let s = slot.as_mut_ptr();
         unsafe {
             core::ptr::addr_of_mut!((*s).cells).write_bytes(0, 1);
@@ -81,12 +116,13 @@ impl Screen {
             core::ptr::addr_of_mut!((*s).rows).write(25);
             core::ptr::addr_of_mut!((*s).x0).write(0);
             core::ptr::addr_of_mut!((*s).y0).write(0);
-            core::ptr::addr_of_mut!((*s).codepage).write(CodePage::Cp850);
+            core::ptr::addr_of_mut!((*s).codepage).write(cp);
             core::ptr::addr_of_mut!((*s).palette).write([0; 16]);
             core::ptr::addr_of_mut!((*s).cur_row).write(0);
             core::ptr::addr_of_mut!((*s).cur_col).write(0);
             core::ptr::addr_of_mut!((*s).cursor).write(None);
             core::ptr::addr_of_mut!((*s).attr).write(0x07);
+            core::ptr::addr_of_mut!((*s).visible).write(false);
         }
         let s = unsafe { &mut *s };
         for row in s.cells.iter_mut() {
@@ -96,7 +132,7 @@ impl Screen {
             let (r, g, b) = (rgb >> 16, (rgb >> 8) & 0xff, rgb & 0xff);
             s.palette[i] = if fb.format == 0 { r | g << 8 | b << 16 } else { rgb };
         }
-        s.set_codepage(CodePage::Cp850);
+        s.set_codepage(cp);
         s.set_mode(80, 25);
         s
     }
@@ -123,6 +159,9 @@ impl Screen {
         self.rows = rows.min(max_r).max(1);
         self.x0 = (self.fb.width as usize - self.cols * CELL_W) / 2;
         self.y0 = (self.fb.height as usize - self.rows * CELL_H) / 2;
+        if !self.visible {
+            return;
+        }
         // Clear the whole framebuffer so no stale border remains.
         let total = self.fb.stride as usize * self.fb.height as usize;
         for i in 0..total {
@@ -147,6 +186,9 @@ impl Screen {
     }
 
     fn draw(&mut self, row: usize, col: usize) {
+        if !self.visible {
+            return;
+        }
         let cell = self.cells[row][col];
         let ch = (cell & 0xff) as usize;
         let attr = (cell >> 8) as usize;
@@ -204,6 +246,9 @@ impl Screen {
             for c in 0..self.cols {
                 self.cells[r][c] = if r + n <= bottom { self.cells[r + n][c] } else { fill };
             }
+        }
+        if !self.visible {
+            return;
         }
         // Move the pixels of the surviving rows in one copy, then draw only
         // the rows that came into view.
@@ -279,9 +324,51 @@ pub fn init(fb: Framebuffer) {
         return;
     }
     let slot = unsafe { &mut *core::ptr::addr_of_mut!(SCREEN_STATE) };
-    *SCREEN.lock() = Some(Screen::init_at(slot, fb));
+    SCREEN.lock().boot = Some(Screen::init_at(slot, fb));
 }
 
+/// The screen of the calling thread's session.
 pub fn with<R>(f: impl FnOnce(&mut Screen) -> R) -> Option<R> {
-    SCREEN.lock().as_mut().map(|s| f(s))
+    with_session(crate::session::current(), f)
+}
+
+pub fn with_session<R>(sid: u32, f: impl FnOnce(&mut Screen) -> R) -> Option<R> {
+    SCREEN.lock().get(sid).map(f)
+}
+
+/// Create the (hidden) screen of a new session.
+pub fn create(sid: u32) {
+    let mut g = SCREEN.lock();
+    let Some(fb) = g.boot.as_ref().map(|b| b.fb) else { return };
+    let cp = g.boot.as_ref().map_or(CodePage::Cp850, |b| b.codepage);
+    let mut slot = Box::<Screen>::new_uninit();
+    Screen::init_hidden(&mut slot, fb, cp);
+    let b = unsafe { slot.assume_init() };
+    g.others.push((sid, b));
+}
+
+pub fn destroy(sid: u32) {
+    let mut g = SCREEN.lock();
+    g.others.retain(|(s, _)| *s != sid);
+}
+
+/// Show session `sid` on the framebuffer.
+pub fn show(sid: u32) {
+    let mut g = SCREEN.lock();
+    if g.get(sid).is_none() || g.visible == sid {
+        return;
+    }
+    let old = g.visible;
+    if let Some(s) = g.get(old) {
+        s.visible = false;
+    }
+    g.visible = sid;
+    if let Some(s) = g.get(sid) {
+        s.visible = true;
+        let (c, r) = (s.cols, s.rows);
+        let (row, col) = (s.cur_row, s.cur_col);
+        s.set_mode(c, r);
+        s.cur_row = row;
+        s.cur_col = col;
+    }
 }

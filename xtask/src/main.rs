@@ -355,6 +355,10 @@ fn run(o: &Opts) -> bool {
         if !typed && start.elapsed() >= Duration::from_secs(type_at) {
             typed = true;
             for key in keys(o.typing.as_deref().unwrap()) {
+                if key == "sleep" {
+                    std::thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
                 monitor(&sock, &format!("sendkey {key}"));
                 std::thread::sleep(Duration::from_millis(60));
             }
@@ -387,11 +391,18 @@ fn run(o: &Opts) -> bool {
     true
 }
 
-/// QEMU key names for a string.
+/// QEMU key names for a string. "^X" is Ctrl+X, "{name}" a QEMU key name
+/// as is (e.g. {ctrl-esc}, {alt-esc}, {down}), "{sleep}" a one second pause.
 fn keys(s: &str) -> Vec<String> {
     let mut v = Vec::new();
     let mut ctrl = false;
-    for ch in s.chars() {
+    let mut chars = s.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '{' {
+            let name: String = chars.by_ref().take_while(|&c| c != '}').collect();
+            v.push(name);
+            continue;
+        }
         // "^X" sends Ctrl+X.
         if ch == '^' && !ctrl {
             ctrl = true;

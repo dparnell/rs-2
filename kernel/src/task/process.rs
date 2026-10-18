@@ -79,6 +79,8 @@ pub struct Process {
     pub loaded: SpinLock<Vec<(Arc<Module>, u32)>>,
     /// Logical video buffer (VioGetBuf), 0 if none.
     pub lvb: SpinLock<u32>,
+    /// Session (screen group) the process belongs to.
+    pub session: AtomicU32,
     /// Signal waiting for delivery to thread 1.
     pub pending_signal: SpinLock<Option<u32>>,
     /// 16-bit signal handlers: (far handler, action) per signal number.
@@ -129,6 +131,8 @@ pub struct ExecParams<'a> {
     pub parent: Option<Arc<Process>>,
     pub handles: Vec<Option<Handle>>,
     pub detached: bool,
+    /// Session to run in.
+    pub session: u32,
 }
 
 pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
@@ -230,6 +234,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         loaded: SpinLock::new(Vec::new()),
         searches: SpinLock::new(alloc::collections::BTreeMap::new()),
         lvb: SpinLock::new(0),
+        session: AtomicU32::new(p.session),
         signals: SpinLock::new([(0, 0); 8]),
         pending_signal: SpinLock::new(None),
     });
@@ -278,10 +283,13 @@ fn write_linfoseg(
     // selEnvironment, offCmdLine, cbDataSegment, cbStack, cbHeap, hmod,
     // selDS.
     let mut b = Vec::new();
-    for w in [p.pid as u16, p.ppid as u16, 0x200, t.tid as u16, 1] {
+    let sg = p.session.load(Ordering::Relaxed);
+    let fg = (sg == crate::session::foreground()) as u8;
+    for w in [p.pid as u16, p.ppid as u16, 0x200, t.tid as u16, sg as u16] {
         b.extend_from_slice(&w.to_le_bytes());
     }
-    b.extend_from_slice(&[0, 0, 1, exe_type(exe) as u8, 0]);
+    // rfProcStatus, dummy1, fForeground (USHORT), typeProcess, dummy2.
+    b.extend_from_slice(&[0, 0, fg, 0, exe_type(exe) as u8, 0]);
     // Align: selEnvironment at offset 16.
     while b.len() < 16 {
         b.push(0);
@@ -400,6 +408,7 @@ impl Process {
         crate::api::sem::process_ended(self.pid);
         crate::api::timer::process_ended(self.pid);
         crate::api::queue::process_ended(self.pid);
+        crate::session::process_ended(self.pid, self.exit_info().map_or(0, |e| e.code));
         // Close handles (pipes see their writers disappear).
         let hs = core::mem::take(&mut *self.handles.lock());
         drop(hs);

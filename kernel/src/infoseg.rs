@@ -57,6 +57,18 @@ pub fn init() {
     update();
 }
 
+/// The foreground session changed (sgCurrent, pidForeground).
+pub fn set_foreground(sg: u32, pid: u32) {
+    if OBJ.get().is_none() {
+        return;
+    }
+    let p = page();
+    unsafe {
+        *p.add(24) = sg as u8;
+        (p.add(28) as *mut u16).write_unaligned(pid as u16);
+    }
+}
+
 /// Map the infoseg into a new address space.
 pub fn attach(space: &mut AddressSpace) {
     if let Some(o) = OBJ.get() {

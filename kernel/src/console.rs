@@ -16,16 +16,21 @@ struct Tty {
     serial_hold: bool,
 }
 
-static TTY: crate::sync::SpinLock<Tty> =
-    crate::sync::SpinLock::new(Tty { esc: [0; 32], esc_len: 0, in_esc: false, attr: 0x07, saved: (0, 0), serial_hold: false });
+/// TTY state by session.
+static TTY: crate::sync::SpinLock<alloc::collections::BTreeMap<u32, Tty>> =
+    crate::sync::SpinLock::new(alloc::collections::BTreeMap::new());
+
+const NEW_TTY: Tty = Tty { esc: [0; 32], esc_len: 0, in_esc: false, attr: 0x07, saved: (0, 0), serial_hold: false };
 
 /// Write bytes as TTY output (VioWrtTTY semantics).
 pub fn write(bytes: &[u8]) {
-    let mut t = TTY.lock();
+    let sid = crate::session::current();
+    let mut ttys = TTY.lock();
+    let t = ttys.entry(sid).or_insert(NEW_TTY);
     // The serial echo is a plain log of the text: escape sequences would
     // move the cursor of the terminal on the other end.
     let mut echo = alloc::vec::Vec::with_capacity(bytes.len());
-    screen::with(|s| {
+    screen::with_session(sid, |s| {
         for &b in bytes {
             if t.in_esc {
                 if t.esc_len < t.esc.len() {
@@ -36,7 +41,7 @@ pub fn write(bytes: &[u8]) {
                 if b.is_ascii_alphabetic() {
                     let seq = t.esc;
                     let n = t.esc_len;
-                    ansi(&mut t, s, &seq[..n]);
+                    ansi(t, s, &seq[..n]);
                     match b {
                         b's' => t.serial_hold = true,
                         b'u' => t.serial_hold = false,
@@ -68,10 +73,15 @@ pub fn write(bytes: &[u8]) {
         let (r, c) = (s.cur_row, s.cur_col.min(s.cols - 1));
         s.set_cursor(Some((r, c)));
     });
-    drop(t);
+    drop(ttys);
     for b in echo {
         crate::serial::write_byte(b);
     }
+}
+
+/// A session ended.
+pub fn drop_session(sid: u32) {
+    TTY.lock().remove(&sid);
 }
 
 fn params(seq: &[u8]) -> ([u16; 8], usize) {

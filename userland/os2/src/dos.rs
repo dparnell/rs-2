@@ -299,6 +299,33 @@ unsafe extern "C" {
     pub fn DosCallNPipe(name: *const u8, inb: *const u8, cb_in: u32, out: *mut u8, cb_out: u32, actual: *mut u32, ms: u32) -> APIRET;
 }
 
+/// STARTDATA (DosStartSession), up to SessionType and the icon fields.
+#[repr(C, packed)]
+pub struct StartData {
+    pub length: u16,
+    pub related: u16,
+    pub fgbg: u16,
+    pub trace: u16,
+    pub title: *const u8,
+    pub name: *const u8,
+    pub inputs: *const u8,
+    pub termq: *const u8,
+    pub env: *const u8,
+    pub inherit: u16,
+    pub session_type: u16,
+}
+
+unsafe extern "C" {
+    #[link_name = "SESMGR.37"]
+    pub fn DosStartSession(sd: *const StartData, sid: *mut u32, pid: *mut u32) -> APIRET;
+    #[link_name = "SESMGR.38"]
+    pub fn DosSelectSession(sid: u32) -> APIRET;
+    #[link_name = "SESMGR.40"]
+    pub fn DosStopSession(scope: u32, sid: u32) -> APIRET;
+}
+
+pub const EXEC_BACKGROUND: u32 = 4;
+
 pub const NP_ACCESS_DUPLEX: u32 = 2;
 pub const NP_NOWAIT: u32 = 0x8000;
 pub const NP_TYPE_MESSAGE: u32 = 0x0400;

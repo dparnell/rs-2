@@ -147,6 +147,11 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 418) => ok, // DosAcknowledgeSignalException
         (0, 16) => file::dos16_make_pipe,
         (0, 239) => file::dos_create_pipe,
+        // ---- SESMGR ----
+        (6, 8) | (6, 40) => super::sesmgr::dos_stop_session,
+        (6, 9) | (6, 38) => super::sesmgr::dos_select_session,
+        (6, 14) | (6, 39) => super::sesmgr::dos_set_session,
+        (6, 17) | (6, 37) => super::sesmgr::dos_start_session,
         (0, 240) => super::npipe::dos_call_npipe,
         (0, 241) => super::npipe::dos_connect_npipe,
         (0, 242) => super::npipe::dos_disconnect_npipe,

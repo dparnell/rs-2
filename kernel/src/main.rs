@@ -28,6 +28,7 @@ mod npipe;
 mod rtc;
 mod screen;
 mod serial;
+mod session;
 mod sync;
 mod task;
 mod trap;
@@ -189,6 +190,7 @@ pub mod boot {
             parent: None,
             handles: Vec::new(),
             detached,
+            session: 1,
         });
         match r {
             Ok(p) => Some(p.pid),

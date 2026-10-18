@@ -36,7 +36,8 @@ const SIGA_ERROR: u32 = 3;
 pub fn foreground() -> Option<Arc<Process>> {
     let all: Vec<Arc<Process>> = process::all();
     all.into_iter()
-        .filter(|p| p.exit_info().is_none() && !p.detached.load(Ordering::Relaxed))
+        .filter(|p| p.exit_info().is_none() && (!p.detached.load(Ordering::Relaxed) || crate::session::is_leader(p.pid)))
+        .filter(|p| p.session.load(Ordering::Relaxed) == crate::session::foreground())
         .max_by_key(|p| p.pid)
 }
 

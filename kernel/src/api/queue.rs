@@ -101,6 +101,34 @@ fn write(c: &Ctx, h: u32, request: u32, len: u32, addr: u32, priority: u32) -> u
     0
 }
 
+/// Write an element from the kernel (session termination notices): the
+/// data is placed in memory allocated in the queue owner's address space,
+/// which the reader frees with DosFreeMem.
+pub fn post_kernel(name: &str, request: u32, data: &[u8]) {
+    let name = name.to_ascii_uppercase();
+    let Some(owner) = QUEUES.lock().values().find(|q| q.name == name).map(|q| q.owner) else { return };
+    let Some(p) = crate::task::process::by_pid(owner) else { return };
+    let addr = {
+        let mut sp = p.space.lock();
+        let flags = crate::vm::pag::READ | crate::vm::pag::WRITE | crate::vm::pag::COMMIT;
+        let Ok(a) = sp.alloc(data.len().max(1) as u32, flags, crate::vm::SegKind::Data, None) else { return };
+        sp.poke_bytes(a, data);
+        a
+    };
+    let notify = {
+        let mut qs = QUEUES.lock();
+        let Some(q) = qs.values_mut().find(|q| q.name == name) else { return };
+        let code = q.next_code;
+        q.next_code = q.next_code.wrapping_add(1).max(1);
+        q.elements.push(Element { pid: 0, request, len: data.len() as u32, addr, priority: 0, code });
+        q.notify.clone()
+    };
+    for s in notify {
+        super::sem::post_event_handle(s);
+    }
+    ARRIVALS.wake_all();
+}
+
 /// Read or peek. `code` 0 = first element, else the element with that
 /// code. Returns the element.
 fn take(c: &Ctx, h: u32, code: u32, wait: bool, remove: bool, hsem: u32) -> Result<Element, u32> {

@@ -16,7 +16,9 @@ Status markers: done, in progress, planned.
 - done: VIO, KBD, MSG (message files), NLS
 - done: the original CMD.EXE runs interactively; userland/apitest passes
 - done: named pipes (byte and message mode, DosTransactNPipe, DosCallNPipe)
-- planned: sessions (DosStartSession, screen switching),
+- done: sessions: DosStartSession/Select/Set/StopSession, a virtual screen
+  and keyboard queue per session, Ctrl+Esc window list, Alt+Esc
+- planned:
   DosDevIOCtl coverage, bound message segments, DLL termination routines,
   semaphore and memory corner cases found by running more programs
 

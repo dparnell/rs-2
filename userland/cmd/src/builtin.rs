@@ -96,7 +96,8 @@ pub fn run(sh: &mut Shell, s: &Simple) -> Option<u32> {
         "IF" => crate::batch::if_cmd(sh, s),
         "FOR" => crate::batch::for_cmd(sh, s),
         "SHIFT" => crate::batch::shift(sh),
-        "START" | "DETACH" => start(sh, s),
+        "START" => start_session(sh, s),
+        "DETACH" => start(sh, s),
         "SETLOCAL" => {
             sh.locals.push((sh.env.clone(), current_dir(0)));
             0
@@ -453,7 +454,7 @@ fn vol(s: &Simple) -> u32 {
 }
 
 fn start(sh: &mut Shell, s: &Simple) -> u32 {
-    // Run the command without waiting (in this session).
+    // DETACH: run the program in the background, without a session.
     let words = s.words();
     let Some(prog) = words.iter().find(|w| !w.starts_with('/')) else { return 0 };
     let rest = s.args.split_once(prog.as_str()).map(|(_, r)| r.trim()).unwrap_or("");
@@ -469,13 +470,85 @@ fn start(sh: &mut Shell, s: &Simple) -> u32 {
     let env = sh.env_block();
     let c = cstr(&path);
     let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
-    let rc = unsafe { DosExecPgm(core::ptr::null_mut(), 0, EXEC_ASYNC, block.as_ptr(), env.as_ptr(), &mut res, c.as_ptr()) };
+    let rc = unsafe { DosExecPgm(core::ptr::null_mut(), 0, EXEC_BACKGROUND, block.as_ptr(), env.as_ptr(), &mut res, c.as_ptr()) };
     if rc != 0 {
         sys_error(rc);
     } else {
         outln(&alloc::format!("The process identification number is {}.", res.code_terminate));
     }
     rc
+}
+
+/// START ["title"] [/K|/C|/N] [/F|/B] [/FS|/WIN|/PM|/DOS] [/I] [/MAX|/MIN]
+/// [command [arguments]]: run a command in a new session.
+fn start_session(sh: &mut Shell, s: &Simple) -> u32 {
+    let mut rest = s.args.trim();
+    let mut title = String::new();
+    if let Some(r) = rest.strip_prefix('"') {
+        let (t, after) = r.split_once('"').unwrap_or((r, ""));
+        title = t.into();
+        rest = after.trim_start();
+    }
+    let (mut keep, mut direct, mut background) = (false, false, false);
+    while let Some(r) = rest.strip_prefix('/') {
+        let (sw, after) = r.split_once(' ').unwrap_or((r, ""));
+        match sw.to_ascii_uppercase().as_str() {
+            "K" => keep = true,
+            "C" => keep = false,
+            "N" => direct = true,
+            "B" => background = true,
+            "F" => background = false,
+            "FS" | "WIN" | "PM" | "DOS" | "I" | "MAX" | "MIN" | "PGM" => {}
+            _ => {
+                sys_error(87);
+                return 87;
+            }
+        }
+        rest = after.trim_start();
+    }
+    let (prog, args) = rest.split_once(' ').map(|(p, a)| (p, a.trim())).unwrap_or((rest, ""));
+    // A program started directly (/N, or an .EXE without /K); otherwise a
+    // command processor runs the command.
+    let path = if prog.is_empty() { None } else { crate::exec::find_program(sh, prog) };
+    let is_exe = path.as_deref().is_some_and(|p| p.to_ascii_uppercase().ends_with(".EXE"));
+    let (name, inputs) = if prog.is_empty() {
+        (None, String::new())
+    } else if direct || (is_exe && !keep) {
+        let Some(p) = path else {
+            sys_error(2);
+            return 2;
+        };
+        (Some(p), String::from(args))
+    } else {
+        (None, alloc::format!("{} {}", if keep { "/K" } else { "/C" }, rest))
+    };
+    if title.is_empty() {
+        title = if prog.is_empty() { String::from("OS/2 Window") } else { String::from(prog) };
+    }
+    let ctitle = cstr(&title);
+    let cname = name.as_deref().map(cstr);
+    let cinputs = cstr(&inputs);
+    let env = sh.env_block();
+    let sd = StartData {
+        length: core::mem::size_of::<StartData>() as u16,
+        related: 0,
+        fgbg: background as u16,
+        trace: 0,
+        title: ctitle.as_ptr(),
+        name: cname.as_ref().map_or(core::ptr::null(), |n| n.as_ptr()),
+        inputs: cinputs.as_ptr(),
+        termq: core::ptr::null(),
+        env: env.as_ptr(),
+        inherit: 0,
+        session_type: 0,
+    };
+    let (mut sid, mut pid) = (0, 0);
+    let rc = unsafe { DosStartSession(&sd, &mut sid, &mut pid) };
+    if rc != 0 && rc != 457 {
+        sys_error(rc);
+        return rc;
+    }
+    0
 }
 
 fn help() {

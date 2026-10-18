@@ -17,7 +17,7 @@ impl Write for Out {
         crate::serial::write_str(s);
         if unsafe { TO_SCREEN } {
             if let Some(mut g) = crate::screen::SCREEN.try_lock() {
-                if let Some(scr) = g.as_mut() {
+                if let Some(scr) = g.get(1) {
                     scr.write_str(s);
                 }
             }

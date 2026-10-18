@@ -5,7 +5,7 @@
 //! feed them through [`scancode`], so shift state and key translation live
 //! here only.
 
-use alloc::collections::VecDeque;
+use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
 
 use crate::arch::idt::TrapFrame;
@@ -40,12 +40,13 @@ pub mod shift {
 }
 
 struct State {
-    queue: VecDeque<KeyInfo>,
+    /// Key events by session.
+    queues: BTreeMap<u32, VecDeque<KeyInfo>>,
     shift: u16,
     e0: bool,
 }
 
-static STATE: SpinLock<State> = SpinLock::new(State { queue: VecDeque::new(), shift: 0, e0: false });
+static STATE: SpinLock<State> = SpinLock::new(State { queues: BTreeMap::new(), shift: 0, e0: false });
 static WAITERS: WaitQueue = WaitQueue::new();
 
 // US layout, scancode set 1, unshifted and shifted.
@@ -75,6 +76,19 @@ pub fn scancode(sc: u8) {
     };
     if let Some(k) = ev {
         let ctrl = k.shift & shift::CONTROL != 0;
+        let alt = k.shift & shift::ALT != 0;
+        // Session switching hot keys.
+        if k.scan == 0x01 && (ctrl || alt) {
+            if ctrl {
+                crate::session::toggle_list();
+            } else {
+                crate::session::select_next();
+            }
+            return;
+        }
+        if crate::session::list_key(&k) {
+            return;
+        }
         if k.ch == 3 && ctrl {
             crate::api::signal::keyboard(crate::api::signal::SIG_CTRLC);
             return;
@@ -83,7 +97,8 @@ pub fn scancode(sc: u8) {
             crate::api::signal::keyboard(crate::api::signal::SIG_CTRLBREAK);
             return;
         }
-        STATE.lock().queue.push_back(k);
+        let fg = crate::session::foreground();
+        STATE.lock().queues.entry(fg).or_default().push_back(k);
         WAITERS.wake_all();
     }
 }
@@ -176,16 +191,21 @@ fn translate(s: &mut State, sc: u8) -> Option<KeyInfo> {
     Some(k)
 }
 
-/// Next key event, waiting if `wait`.
+fn pending(sid: u32) -> bool {
+    STATE.lock().queues.get(&sid).is_some_and(|q| !q.is_empty())
+}
+
+/// Next key event for the calling thread's session, waiting if `wait`.
 pub fn get_key(wait: bool) -> Option<KeyInfo> {
+    let sid = crate::session::current();
     loop {
-        if let Some(k) = STATE.lock().queue.pop_front() {
+        if let Some(k) = STATE.lock().queues.get_mut(&sid).and_then(|q| q.pop_front()) {
             return Some(k);
         }
         if !wait {
             return None;
         }
-        if !WAITERS.wait_until(None, || !STATE.lock().queue.is_empty()) {
+        if !WAITERS.wait_until(None, || pending(sid)) {
             // Interrupted by a signal or termination.
             return None;
         }
@@ -193,11 +213,18 @@ pub fn get_key(wait: bool) -> Option<KeyInfo> {
 }
 
 pub fn peek_key() -> Option<KeyInfo> {
-    STATE.lock().queue.front().copied()
+    let sid = crate::session::current();
+    STATE.lock().queues.get(&sid).and_then(|q| q.front().copied())
 }
 
 pub fn flush() {
-    STATE.lock().queue.clear();
+    let sid = crate::session::current();
+    STATE.lock().queues.remove(&sid);
+}
+
+/// A session ended.
+pub fn drop_queue(sid: u32) {
+    STATE.lock().queues.remove(&sid);
 }
 
 pub fn shift_state() -> u16 {

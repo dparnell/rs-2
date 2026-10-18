@@ -21,7 +21,7 @@ const EXEC_ASYNCRESULT: u32 = 2;
 const EXEC_BACKGROUND: u32 = 4;
 
 /// Read a double-NUL terminated block of strings.
-fn read_block(c: &Ctx, addr: u32, max: usize) -> Option<Vec<String>> {
+pub(super) fn read_block(c: &Ctx, addr: u32, max: usize) -> Option<Vec<String>> {
     let mut v = Vec::new();
     let mut a = addr;
     loop {
@@ -50,7 +50,7 @@ fn inherited_handles(p: &Process) -> Vec<Option<Handle>> {
 }
 
 /// The parent's environment strings.
-fn parent_env(c: &Ctx) -> Vec<String> {
+pub(super) fn parent_env(c: &Ctx) -> Vec<String> {
     read_block(c, c.process.env, 4096).unwrap_or_default()
 }
 
@@ -86,6 +86,7 @@ fn exec(c: &mut Ctx) -> u32 {
         parent: Some(c.process.clone()),
         handles: inherited_handles(&c.process),
         detached: mode == EXEC_ASYNC || mode == EXEC_BACKGROUND,
+        session: c.process.session.load(core::sync::atomic::Ordering::Relaxed),
     });
     let child = match r {
         Ok(p) => p,

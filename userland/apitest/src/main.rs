@@ -36,6 +36,7 @@ fn main(s: &Startup) -> u32 {
     timers();
     shared_memory();
     queues();
+    sessions();
     exit_list();
     let f = FAILS.load(Ordering::Relaxed);
     println!("apitest done: {f} failure(s)");
@@ -324,6 +325,38 @@ fn named_pipes() {
         check("server side", SERVER.load(Ordering::Relaxed) == 7);
         DosClose(h);
         check("pipe gone", DosWaitNPipe(name, 10) == 2);
+    }
+}
+
+fn sessions() {
+    unsafe {
+        let mut hq = 0;
+        DosCreateQueue(&mut hq, 0, b"\\QUEUES\\APITEST\\TERM\0".as_ptr());
+        let sd = StartData {
+            length: core::mem::size_of::<StartData>() as u16,
+            related: 1,
+            fgbg: 1,
+            trace: 0,
+            title: b"apitest child\0".as_ptr(),
+            name: b"C:\\OS2\\CMD.EXE\0".as_ptr(),
+            inputs: b"/C exit 7\0".as_ptr(),
+            termq: b"\\QUEUES\\APITEST\\TERM\0".as_ptr(),
+            env: null(),
+            inherit: 0,
+            session_type: 0,
+        };
+        let (mut sid, mut pid) = (0, 0);
+        let rc = DosStartSession(&sd, &mut sid, &mut pid);
+        check("DosStartSession related", rc == 0 && sid != 0 && pid != 0);
+        let mut req = RequestData::default();
+        let mut cb = 0;
+        let mut pb: *const u8 = null();
+        let mut prio = 0u8;
+        let rc = DosReadQueue(hq, &mut req, &mut cb, &mut pb, 0, 0, &mut prio, 0);
+        let ok = rc == 0 && cb == 4 && *(pb as *const u16) == sid as u16 && *(pb.add(2) as *const u16) == 7;
+        check("session termination queue", ok);
+        check("stop ended session fails", DosStopSession(0, sid) == 371);
+        DosCloseQueue(hq);
     }
 }
 

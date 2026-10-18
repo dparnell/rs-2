@@ -23,6 +23,7 @@ pub mod queue;
 pub mod resource;
 pub mod signal;
 pub mod sem;
+pub mod sesmgr;
 pub mod shmem;
 pub mod timer;
 pub mod vio;
