@@ -171,8 +171,8 @@ fn deliver(c: &Ctx, text: &[u8], buf: u32, cb: u32) -> (u32, u32) {
 /// DosTrueGetMessage (16-bit MSG.2 and 32-bit MSG.6).
 pub fn dos_true_get_message(c: &mut Ctx) -> u32 {
     // The 32-bit entry gets the bound message segment first (the
-    // DosGetMessage library stub pushes it in front of the arguments); the
-    // 16-bit one gets it last.
+    // DosGetMessage library stub pushes it in front of the arguments and
+    // the API pops it: see Ctx::pop32); the 16-bit one gets it last.
     let (table, count, buf, cb, num, pfile, pcb) = if c.is16 {
         (c.ptr(0), c.arg(1), c.ptr(2), c.arg(3), c.arg(4), c.ptr(5), c.ptr(6))
     } else {
@@ -217,8 +217,7 @@ pub fn dos_put_message(c: &mut Ctx) -> u32 {
 pub fn dos_query_message_cp(c: &mut Ctx) -> u32 {
     // DosIQueryMessageCP(pb, cb, pszFile, pcbBuf, pMsgSeg): list of code
     // pages the message file supports (we report the current one).
-    // 32-bit: the message segment comes first, as for DosTrueGetMessage.
-    let (buf, cb, pcb) = if c.is16 { (c.ptr(0), c.arg(1), c.ptr(3)) } else { (c.arg(1), c.arg(2), c.arg(4)) };
+    let (buf, cb, pcb) = if c.is16 { (c.ptr(0), c.arg(1), c.ptr(3)) } else { (c.arg(0), c.arg(1), c.arg(3)) };
     // Format: count, codepages..., language id, sublanguage id.
     let words = [1u16, 850, 1, 0];
     let mut b = Vec::new();

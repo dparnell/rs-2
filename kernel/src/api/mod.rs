@@ -199,6 +199,10 @@ pub struct Ctx<'a> {
     pub no_return: bool,
     /// Override for the value placed in DX (16-bit APIs returning ULONG).
     pub dx: Option<u16>,
+    /// Argument bytes a 32-bit API pops itself (the bound message segment
+    /// that the DosGetMessage library stub pushes in front of the
+    /// arguments of DosTrueGetMessage).
+    pop32: u32,
 }
 
 pub type Handler = fn(&mut Ctx) -> u32;
@@ -222,7 +226,7 @@ impl Ctx<'_> {
             }
         } else {
             f.rip = ret as u64;
-            f.rsp = (f.rsp as u32).wrapping_add(4) as u64;
+            f.rsp = (f.rsp as u32).wrapping_add(4 + self.pop32) as u64;
             f.rax = result as u64;
         }
         self.no_return = true;
@@ -399,6 +403,7 @@ pub fn dispatch(f: &mut TrapFrame) {
             args_at: stack_linear + 4,
             no_return: true,
             dx: None,
+            pop32: 0,
         };
         proc::thread_returned(&mut ctx);
         return;
@@ -444,6 +449,7 @@ pub fn dispatch(f: &mut TrapFrame) {
         args_at: stack_linear + 4,
         no_return: false,
         dx: None,
+        pop32: if !is16 && module == 4 && ordinal == 6 { 4 } else { 0 },
     };
     let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed);
     if trace {

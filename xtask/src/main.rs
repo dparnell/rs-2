@@ -387,8 +387,9 @@ fn run(o: &Opts) -> bool {
     }
     let _ = child.wait();
     if o.headless {
-        if let Ok(log) = std::fs::read_to_string(&serial) {
-            print!("{log}");
+        // Programs print code page 850 text: not necessarily UTF-8.
+        if let Ok(log) = std::fs::read(&serial) {
+            print!("{}", String::from_utf8_lossy(&log));
         }
     }
     true
