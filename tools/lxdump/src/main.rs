@@ -36,6 +36,31 @@ fn main() -> ExitCode {
                 println!("{:04x}: {}", i * 16, hex.join(" "));
             }
         }
+        "res" => {
+            // lxdump res FILE TYPE ID: hex dump of one resource.
+            let data = std::fs::read(&args[1]).unwrap();
+            let (ty, id): (u16, u16) = (args[2].parse().unwrap(), args[3].parse().unwrap());
+            let Ok(Format::Lx { header }) = os2_exe::detect(&data) else { panic!("not LX") };
+            let m = lx::Module::parse(&data, header).unwrap();
+            let objs = m.objects().unwrap();
+            let Some(r) = m.resources().unwrap().into_iter().find(|r| r.type_id == ty && r.name_id == id) else {
+                eprintln!("no resource {ty}.{id}");
+                return ExitCode::FAILURE;
+            };
+            let o = &objs[r.object as usize - 1];
+            let mut bytes = Vec::new();
+            let mut buf = vec![0; m.header.page_size as usize];
+            for p in 0..o.page_count {
+                m.load_page(o.page_index + p, &mut buf).unwrap();
+                bytes.extend_from_slice(&buf);
+            }
+            let res = &bytes[r.offset as usize..(r.offset + r.size) as usize];
+            for (i, c) in res.chunks(16).enumerate() {
+                let hex: Vec<String> = c.iter().map(|b| format!("{b:02x}")).collect();
+                let asc: String = c.iter().map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' }).collect();
+                println!("{:04x}: {:<48} {asc}", i * 16, hex.join(" "));
+            }
+        }
         "xref" => {
             // lxdump xref FILE MODULE ORDINAL: fixup sites importing it.
             let data = std::fs::read(&args[1]).unwrap();

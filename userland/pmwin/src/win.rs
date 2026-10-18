@@ -1,5 +1,5 @@
-//! Windows: classes, creation and destruction, positions, text, painting
-//! and the frame window.
+//! Windows: classes, creation and destruction, positions, focus and
+//! activation, text, window words and painting.
 
 #![allow(non_snake_case)]
 
@@ -12,6 +12,7 @@ use crate::color::{self, resolve};
 use crate::gpiapi::{self, PointL, RectL};
 use crate::msg::{post, send};
 use crate::pointer;
+use crate::frame::{self, FCF_SHELLPOSITION, FID_CLIENT};
 use crate::state::{st, Class, Frame};
 
 pub const WM_CREATE: u32 = 0x0001;
@@ -29,7 +30,6 @@ pub const WM_MOUSEMOVE: u32 = 0x0070;
 pub const WM_BUTTON1DOWN: u32 = 0x0071;
 pub const WM_BUTTON1UP: u32 = 0x0072;
 pub const WM_CHAR: u32 = 0x007a;
-pub const SC_CLOSE: u32 = 0x8004;
 
 const SWP_SIZE: u32 = 0x0001;
 const SWP_MOVE: u32 = 0x0002;
@@ -39,13 +39,6 @@ const SWP_HIDE: u32 = 0x0010;
 const SWP_ACTIVATE: u32 = 0x0080;
 const HWND_TOP: u32 = 3;
 
-const FCF_TITLEBAR: u32 = 0x0001;
-const FCF_SYSMENU: u32 = 0x0002;
-const FCF_SIZEBORDER: u32 = 0x0008;
-const FCF_DLGBORDER: u32 = 0x0100;
-const FCF_BORDER: u32 = 0x0200;
-const FCF_SHELLPOSITION: u32 = 0x0400;
-const FID_CLIENT: u32 = 0x8008;
 
 const QW_NEXT: i32 = 0;
 const QW_PREV: i32 = 1;
@@ -54,8 +47,7 @@ const QW_BOTTOM: i32 = 3;
 const QW_OWNER: i32 = 4;
 const QW_PARENT: i32 = 5;
 
-/// Height of a frame's title bar.
-pub const TITLE_H: i32 = 22;
+pub use frame::TITLE_H;
 
 fn cstr(p: *const u8) -> Vec<u8> {
     if p.is_null() {
@@ -103,22 +95,22 @@ pub extern "C" fn WinRegisterClass(_hab: u32, name: *const u8, proc_: u32, style
     1
 }
 
-/// Built-in classes (frame) registered on initialisation.
+/// Built-in classes registered on initialisation.
 pub fn register_builtin() {
-    let s = st();
-    s.classes.push(Class { name: b"#1".to_vec(), proc_: frame_proc as *const () as u32, style: 0x20, words: 0 });
+    crate::ctl::register_builtin();
 }
 
 // ---- Creation and destruction ----
 
 #[allow(clippy::too_many_arguments)]
-fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, owner: u32, id: u32, ctl: u32) -> u32 {
+pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, owner: u32, id: u32, ctl: u32) -> u32 {
     let s = st();
     let Some(c) = s.class(class) else { return 0 };
     let (proc_, cstyle, words) = (c.proc_, c.style, c.words);
     let queue = s.my_queue();
     // Class styles CS_CLIPCHILDREN etc. are window styles too.
     let style = style | (cstyle & 0x3e00_0000);
+    let parent = if parent == 0 { HWND_DESKTOP } else { parent };
     let class_id = s.classes.iter().position(|x| x.name.eq_ignore_ascii_case(class)).unwrap_or(0) as u32;
     let Some(h) = s.desk.create(parent, owner, class_id, style, pos, id, queue, proc_, words.div_ceil(4) as usize + 1) else {
         return 0;
@@ -138,7 +130,7 @@ fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, owner: 
     h
 }
 
-fn destroy(h: u32) {
+pub fn destroy(h: u32) {
     let s = st();
     if !s.desk.exists(h) || h == HWND_DESKTOP {
         return;
@@ -154,6 +146,7 @@ fn destroy(h: u32) {
     let gone = s.desk.destroy(h);
     for g in &gone {
         s.frames.remove(g);
+        s.ctl.remove(g);
         s.timers.retain(|t| t.hwnd != *g);
         if s.focus == *g {
             s.focus = 0;
@@ -171,6 +164,7 @@ fn destroy(h: u32) {
     if showing {
         s.desk.invalidate_screen(r);
     }
+    crate::menu::forget(&gone);
 }
 
 fn collect(h: u32, out: &mut Vec<u32>) {
@@ -200,11 +194,22 @@ pub extern "C" fn WinCreateWindow(
     _pres: u32,
 ) -> u32 {
     let class = class_name(class);
-    let h = create(parent, &class, &cstr(name), style, Rect::new(x, y, x + cx, y + cy), owner, id, ctl);
-    if h != 0 && class == b"#1" {
-        st().frames.insert(h, Frame { fcf: ctl, client: 0 });
+    let pos = Rect::new(x, y, x + cx, y + cy);
+    if class == b"#1" {
+        // FRAMECDATA: cb, flCreateFlags, hmodResources, idResources.
+        let (fcf, hmod) = if ctl == 0 {
+            (0, 0)
+        } else {
+            let p = ctl as *const u8;
+            unsafe { ((p.add(2) as *const u32).read_unaligned(), (p.add(6) as *const u16).read_unaligned() as u32) }
+        };
+        let h = frame::create(parent, style, fcf, &cstr(name), pos, owner, id, hmod);
+        if h != 0 && style & ws::VISIBLE != 0 {
+            show(h, true);
+        }
+        return h;
     }
-    h
+    create(parent, &class, &cstr(name), style, pos, owner, id, ctl)
 }
 
 /// WinCreateStdWindow(hwndParent, flStyle, pflCreateFlags, pszClientClass,
@@ -217,7 +222,7 @@ pub extern "C" fn WinCreateStdWindow(
     client_class: *const u8,
     title: *const u8,
     client_style: u32,
-    _hmod: u32,
+    hmod: u32,
     id: u32,
     phwnd_client: *mut u32,
 ) -> u32 {
@@ -230,12 +235,10 @@ pub extern "C" fn WinCreateStdWindow(
         s.cascade = (s.cascade + 1) % 8;
         pos = Rect::new(off, h / 3 - off / 2, off + w * 3 / 5, h / 3 - off / 2 + h * 3 / 5);
     }
-    let frame_style = style & !ws::VISIBLE | ws::CLIPCHILDREN | ws::CLIPSIBLINGS;
-    let frame = create(parent, b"#1", &cstr(title), frame_style, pos, 0, id, fcf);
+    let frame = frame::create(parent, style, fcf, &cstr(title), pos, 0, id, hmod);
     if frame == 0 {
         return 0;
     }
-    st().frames.insert(frame, Frame { fcf, client: 0 });
     let class = class_name(client_class);
     if !class.is_empty() {
         let client = create(frame, &class, b"", client_style | ws::VISIBLE, Rect::default(), frame, FID_CLIENT, 0);
@@ -249,7 +252,7 @@ pub extern "C" fn WinCreateStdWindow(
         if !phwnd_client.is_null() {
             unsafe { phwnd_client.write_unaligned(client) };
         }
-        layout(frame);
+        frame::layout(frame);
     }
     if style & ws::VISIBLE != 0 {
         show(frame, true);
@@ -269,42 +272,12 @@ pub extern "C" fn WinDestroyWindow(h: u32) -> u32 {
 
 // ---- Position, visibility, z-order, activation ----
 
-/// Frame border width.
-fn border(fcf: u32) -> i32 {
-    if fcf & FCF_SIZEBORDER != 0 {
-        4
-    } else if fcf & FCF_DLGBORDER != 0 {
-        3
-    } else if fcf & FCF_BORDER != 0 {
-        1
-    } else {
-        0
-    }
-}
-
 /// Client rectangle of a frame, in frame coordinates.
 pub fn client_rect(frame: u32) -> Rect {
-    let s = st();
-    let fcf = s.frames.get(&frame).map_or(0, |f| f.fcf);
-    let (cx, cy) = s.desk.get(frame).map_or((0, 0), |w| (w.cx, w.cy));
-    let b = border(fcf);
-    let t = if fcf & FCF_TITLEBAR != 0 { TITLE_H } else { 0 };
-    Rect::new(b, b, (cx - b).max(b), (cy - b - t).max(b))
+    frame::client_rect(frame)
 }
 
-/// Place the frame's client inside the frame controls.
-fn layout(frame: u32) {
-    let Some(client) = st().frames.get(&frame).map(|f| f.client).filter(|&c| c != 0) else { return };
-    let r = client_rect(frame);
-    let old = st().desk.get(client).map(|w| (w.cx, w.cy)).unwrap_or((0, 0));
-    st().desk.set_pos(client, r.left, r.bottom, r.width(), r.height());
-    if old != (r.width(), r.height()) {
-        let pack = |a: i32, b: i32| (a as u32 & 0xffff) | (b as u32) << 16;
-        send(client, WM_SIZE, pack(old.0, old.1), pack(r.width(), r.height()));
-    }
-}
-
-fn show(h: u32, on: bool) {
+pub fn show(h: u32, on: bool) {
     let was = st().desk.get(h).is_some_and(|w| w.visible_style());
     if was != on {
         st().desk.set_visible(h, on);
@@ -335,24 +308,28 @@ pub fn activate(h: u32) {
     let old = s.active;
     s.desk.to_top(top);
     s.active = top;
+    let saved = s.frames.get(&top).map_or(0, |f| f.focus_save);
     let client = s.frames.get(&top).map_or(top, |f| if f.client != 0 { f.client } else { top });
+    let client = if saved != 0 && saved != top && s.desk.is_ancestor(top, saved) { saved } else { client };
     if old != top {
         if old != 0 && s.desk.exists(old) {
-            s.desk.invalidate(old, None, false);
             send(old, WM_ACTIVATE, 0, old);
         }
-        st().desk.invalidate(top, None, false);
         send(top, WM_ACTIVATE, 1, top);
     }
     set_focus(client);
 }
 
-fn set_focus(h: u32) {
+pub fn set_focus(h: u32) {
     let old = st().focus;
     if old == h {
         return;
     }
     st().focus = h;
+    let top = top_level(h);
+    if let Some(f) = st().frames.get_mut(&top) {
+        f.focus_save = h;
+    }
     if old != 0 && st().desk.exists(old) {
         send(old, WM_SETFOCUS, h, 0);
     }
@@ -372,7 +349,7 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
     if (nx, ny, ncx, ncy) != (ox, oy, ocx, ocy) {
         s.desk.set_pos(h, nx, ny, ncx, ncy);
         if s.frames.contains_key(&h) {
-            layout(h);
+            frame::layout(h);
         } else if (ncx, ncy) != (ocx, ocy) {
             let pack = |a: i32, b: i32| (a as u32 & 0xffff) | (b as u32) << 16;
             send(h, WM_SIZE, pack(ocx, ocy), pack(ncx, ncy));
@@ -519,8 +496,9 @@ pub extern "C" fn WinQueryDesktopWindow(_hab: u32, _hdc: u32) -> u32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn WinSetParent(h: u32, _parent: u32, _redraw: u32) -> u32 {
-    st().desk.exists(h) as u32
+pub extern "C" fn WinSetParent(h: u32, parent: u32, _redraw: u32) -> u32 {
+    let parent = if parent == 0 { HWND_DESKTOP } else { parent };
+    st().desk.set_parent(h, parent) as u32
 }
 
 /// WinMapWindowPoints(hwndFrom, hwndTo, aptl, cwpt)
@@ -548,11 +526,28 @@ pub extern "C" fn WinMapWindowPoints(from: u32, to: u32, pts: *mut PointL, n: i3
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetWindowText(h: u32, text: *const u8) -> u32 {
-    let t = cstr(text);
+    set_text(h, &cstr(text))
+}
+
+/// Set a window's text; a frame and its title bar share theirs.
+pub fn set_text(h: u32, t: &[u8]) -> u32 {
     let s = st();
     let Some(w) = s.desk.get_mut(h) else { return 0 };
-    w.text = t;
+    w.text = t.to_vec();
+    let (id, parent) = (w.id, w.parent);
     s.desk.invalidate(h, None, false);
+    let other = if s.frames.contains_key(&h) {
+        WinWindowFromID(h, frame::FID_TITLEBAR)
+    } else if id == frame::FID_TITLEBAR && s.frames.contains_key(&parent) {
+        parent
+    } else {
+        0
+    };
+    if let Some(w) = st().desk.get_mut(other) {
+        w.text = t.to_vec();
+        st().desk.invalidate(other, None, false);
+    }
+    crate::entry::text_changed(h);
     1
 }
 
@@ -830,110 +825,4 @@ pub fn paint_desktop() {
         }
     }
     pointer::show(s);
-}
-
-fn frame_paint(h: u32) {
-    let hps = WinBeginPaint(h, 0, core::ptr::null_mut());
-    let s = st();
-    let fcf = s.frames.get(&h).map_or(0, |f| f.fcf);
-    let active = s.active == h;
-    let Some(w) = s.desk.get(h) else { return };
-    let (cx, cy) = (w.cx, w.cy);
-    let title = w.text.clone();
-    let mut surface = s.surface;
-    if let Some(e) = gpiapi::entry(s, hps) {
-        let b = border(fcf);
-        let full = Rect::new(0, 0, cx, cy);
-        e.ps.fill_rect(&mut surface, full, color::sys(if active { color::SYSCLR_ACTIVEBORDER } else { color::SYSCLR_INACTIVEBORDER }));
-        // Outline.
-        e.ps.color = 0x000000;
-        e.ps.move_to(Point::new(0, 0));
-        e.ps.draw_box(&mut surface, Point::new(cx - 1, cy - 1), true, false);
-        if fcf & FCF_TITLEBAR != 0 {
-            let t = Rect::new(b, cy - b - TITLE_H, cx - b, cy - b);
-            let tc = if active { color::SYSCLR_ACTIVETITLE } else { color::SYSCLR_INACTIVETITLE };
-            e.ps.fill_rect(&mut surface, t, color::sys(tc));
-            let mut text_left = t.left;
-            if fcf & FCF_SYSMENU != 0 {
-                // System menu button: a square with a bar.
-                let m = Rect::new(t.left, t.bottom, t.left + TITLE_H, t.top);
-                e.ps.fill_rect(&mut surface, m, 0xcccccc);
-                e.ps.fill_rect(&mut surface, Rect::new(m.left + 5, m.bottom + 9, m.right - 5, m.bottom + 13), 0x000000);
-                text_left = m.right;
-            }
-            let font = e.ps.font;
-            let tw = font.text_width(&title);
-            let x = text_left + ((t.right - text_left) - tw).max(0) / 2;
-            e.ps.color = color::sys(if active { color::SYSCLR_ACTIVETITLETEXT } else { color::SYSCLR_INACTIVETITLETEXT });
-            e.ps.back_mix = gpi::Mix::LeaveAlone;
-            e.ps.char_string_at(&mut surface, Point::new(x, t.bottom + 3 + font.descender), &title);
-        }
-    }
-    WinEndPaint(hps);
-}
-
-/// Which part of a frame a point (frame coordinates) is in.
-enum FrameHit {
-    SysMenu,
-    Title,
-    Other,
-}
-
-fn frame_hit(h: u32, p: Point) -> FrameHit {
-    let s = st();
-    let fcf = s.frames.get(&h).map_or(0, |f| f.fcf);
-    let Some(w) = s.desk.get(h) else { return FrameHit::Other };
-    if fcf & FCF_TITLEBAR == 0 {
-        return FrameHit::Other;
-    }
-    let b = border(fcf);
-    let t = Rect::new(b, w.cy - b - TITLE_H, w.cx - b, w.cy - b);
-    if !t.contains(p) {
-        return FrameHit::Other;
-    }
-    if fcf & FCF_SYSMENU != 0 && p.x < t.left + TITLE_H {
-        return FrameHit::SysMenu;
-    }
-    FrameHit::Title
-}
-
-pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
-    match msg {
-        WM_PAINT => {
-            frame_paint(h);
-            0
-        }
-        WM_BUTTON1DOWN => {
-            let p = Point::new(mp1 as i16 as i32, (mp1 >> 16) as i16 as i32);
-            match frame_hit(h, p) {
-                FrameHit::SysMenu => {
-                    send(h, WM_SYSCOMMAND, SC_CLOSE, 0);
-                }
-                FrameHit::Title => {
-                    let s = st();
-                    let (wx, wy) = s.desk.get(h).map_or((0, 0), |w| (w.x, w.y));
-                    let ptr = s.pointer;
-                    s.drag = Some(crate::state::Drag { hwnd: h, dx: ptr.x - wx, dy: ptr.y - wy });
-                    s.capture = h;
-                }
-                FrameHit::Other => {}
-            }
-            1
-        }
-        WM_SYSCOMMAND if mp1 & 0xffff == SC_CLOSE => {
-            let client = st().frames.get(&h).map_or(0, |f| f.client);
-            post(if client != 0 { client } else { h }, WM_CLOSE, 0, 0);
-            0
-        }
-        WM_CLOSE => {
-            let client = st().frames.get(&h).map_or(0, |f| f.client);
-            if client != 0 {
-                post(client, WM_CLOSE, 0, 0);
-            } else {
-                crate::msg::WinDefWindowProc(h, msg, mp1, mp2);
-            }
-            0
-        }
-        _ => crate::msg::WinDefWindowProc(h, msg, mp1, mp2),
-    }
 }

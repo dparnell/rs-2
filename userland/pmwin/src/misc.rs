@@ -8,6 +8,7 @@ use alloc::vec::Vec;
 use gpi::{Point, Rect, Surface};
 
 use crate::color;
+use crate::res;
 use crate::pointer;
 use crate::state::{self, st};
 use crate::win;
@@ -37,10 +38,10 @@ unsafe extern "C" {
     fn Rs2MapDisplay(info: *mut DisplayInfo) -> u32;
     #[link_name = "RS2API.2"]
     fn Rs2ReadInput(ev: *mut Input, ms: u32) -> u32;
-    #[link_name = "DOSCALLS.352"]
-    fn DosGetResource(hmod: u32, ty: u32, id: u32, ppb: *mut *const u8) -> u32;
-    #[link_name = "DOSCALLS.353"]
-    fn DosFreeResource(pb: *const u8) -> u32;
+    #[link_name = "DOSCALLS.329"]
+    fn DosWaitEventSem(hev: u32, ms: u32) -> u32;
+    #[link_name = "DOSCALLS.334"]
+    fn DosRequestMutexSem(hmtx: u32, ms: u32) -> u32;
     #[link_name = "DOSCALLS.286"]
     fn DosBeep(freq: u32, ms: u32) -> u32;
 }
@@ -162,34 +163,61 @@ pub extern "C" fn WinSubclassWindow(h: u32, proc_: u32) -> u32 {
     core::mem::replace(&mut w.proc_, proc_)
 }
 
-/// WinLoadString(hab, hmod, id, cchMax, pchBuffer): string tables are
-/// bundles of 16 strings (resource id = id / 16 + 1): a code page word,
-/// then for each string a length byte (including the NUL) and the text.
+/// WinLoadString(hab, hmod, id, cchMax, pchBuffer)
 #[unsafe(no_mangle)]
 pub extern "C" fn WinLoadString(_hab: u32, hmod: u32, id: u32, cch: i32, buf: *mut u8) -> i32 {
+    load_string(res::RT_STRING, hmod, id, cch, buf)
+}
+
+/// WinLoadMessage(hab, hmod, id, cchMax, pchBuffer): message tables have
+/// the string table layout.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinLoadMessage(_hab: u32, hmod: u32, id: u32, cch: i32, buf: *mut u8) -> i32 {
+    load_string(res::RT_MESSAGE, hmod, id, cch, buf)
+}
+
+fn load_string(ty: u32, hmod: u32, id: u32, cch: i32, buf: *mut u8) -> i32 {
     if buf.is_null() || cch <= 0 {
         return 0;
     }
-    let mut p: *const u8 = core::ptr::null();
-    if unsafe { DosGetResource(hmod, 5, id / 16 + 1, &mut p) } != 0 || p.is_null() {
-        unsafe { *buf = 0 };
-        return 0;
-    }
-    let mut at = unsafe { p.add(2) };
-    for _ in 0..id % 16 {
-        let len = unsafe { *at } as usize;
-        at = unsafe { at.add(1 + len) };
-    }
-    let len = unsafe { *at } as usize;
-    let text = unsafe { core::slice::from_raw_parts(at.add(1), len.saturating_sub(1)) };
-    let text = &text[..text.iter().position(|&b| b == 0).unwrap_or(text.len())];
-    let n = text.len().min(cch as usize - 1);
-    unsafe {
-        core::ptr::copy_nonoverlapping(text.as_ptr(), buf, n);
-        *buf.add(n) = 0;
-        DosFreeResource(p);
-    }
-    n as i32
+    let text = res::string(hmod, ty, id).unwrap_or_default();
+    crate::ctl::copy_out(&text, cch as usize, buf) as i32
+}
+
+/// WinWaitEventSem(hev, ulTimeout): waits without holding PMWIN.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWaitEventSem(hev: u32, ms: u32) -> u32 {
+    crate::lock::unlocked(|| unsafe { DosWaitEventSem(hev, ms) })
+}
+
+/// WinRequestMutexSem(hmtx, ulTimeout)
+#[unsafe(no_mangle)]
+pub extern "C" fn WinRequestMutexSem(hmtx: u32, ms: u32) -> u32 {
+    crate::lock::unlocked(|| unsafe { DosRequestMutexSem(hmtx, ms) })
+}
+
+/// WinOpenWindowDC(hwnd): device contexts are not separate objects yet;
+/// a window's DC is identified by the window.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinOpenWindowDC(h: u32) -> u32 {
+    if st().desk.exists(h) { 0x1_0000 | h } else { 0 }
+}
+
+/// Presentation parameters are accepted and ignored (controls use the
+/// system colours and font).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetPresParam(h: u32, _id: u32, _cb: u32, _pv: u32) -> u32 {
+    st().desk.exists(h) as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryPresParam(_h: u32, _id1: u32, _id2: u32, _pid: u32, _cb: u32, _pv: u32, _fs: u32) -> u32 {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinRemovePresParam(h: u32, _id: u32) -> u32 {
+    st().desk.exists(h) as u32
 }
 
 fn cstr(p: *const u8) -> Vec<u8> {

@@ -284,6 +284,28 @@ impl Desktop {
         }
     }
 
+    /// Move a window (keeping its position relative to the new parent)
+    /// to the top of a new parent's children.
+    pub fn set_parent(&mut self, h: Hwnd, parent: Hwnd) -> bool {
+        if !self.exists(parent) || self.is_ancestor(h, parent) {
+            return false;
+        }
+        let Some(old) = self.get(h).map(|w| w.parent) else { return false };
+        let r = self.screen_rect(h);
+        if let Some(pw) = self.windows.get_mut(&old) {
+            pw.children.retain(|&c| c != h);
+        }
+        if let Some(pw) = self.windows.get_mut(&parent) {
+            pw.children.push(h);
+        }
+        if let Some(w) = self.windows.get_mut(&h) {
+            w.parent = parent;
+        }
+        self.invalidate_screen(r);
+        self.invalidate(h, None, true);
+        true
+    }
+
     /// Bring a window to the top of its siblings.
     pub fn to_top(&mut self, h: Hwnd) {
         let Some(p) = self.get(h).map(|w| w.parent) else { return };

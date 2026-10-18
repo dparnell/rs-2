@@ -8,13 +8,27 @@
 extern crate alloc;
 extern crate os2;
 
+mod accel;
+mod bitmap;
+mod button;
 mod color;
+mod ctl;
+mod dlg;
+mod draw;
+mod entry;
 mod exports;
+mod frame;
 mod gpiapi;
+mod listbox;
+mod lock;
+mod menu;
 mod misc;
 mod msg;
 mod pointer;
+mod res;
+mod scrollbar;
 mod state;
+mod statics;
 mod win;
 
 /// _DLL_InitTerm(hmod, flag).

@@ -7,8 +7,10 @@ use gpi::Point;
 use pmwin::HWND_DESKTOP;
 
 use crate::gpiapi::PointL;
+use crate::ctl;
 use crate::pointer;
 use crate::state::{self, now, st, QMsg, Queue, WndProc};
+use crate::{accel, frame, lock, menu};
 use crate::win::{self, *};
 
 /// INPUTEVENT from Rs2ReadInput.
@@ -31,11 +33,51 @@ const EV_KEY: u16 = 1;
 const EV_MOUSE: u16 = 2;
 const EV_REPAINT: u16 = 3;
 
-/// Call a window procedure.
+/// Call a window procedure. A window of another thread gets the message
+/// through its queue while the caller waits for the reply.
 pub fn send(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
-    let Some(p) = st().desk.get(h).map(|w| w.proc_).filter(|&p| p != 0) else { return 0 };
+    let s = st();
+    let Some((p, q)) = s.desk.get(h).map(|w| (w.proc_, w.queue)).filter(|&(p, _)| p != 0) else { return 0 };
+    let me = state::tid();
+    if let Some(queue) = s.queues.get_mut(&q).filter(|x| x.tid != me) {
+        let id = s.next_sent;
+        s.next_sent += 1;
+        queue.sent.push_back(state::Sent { id, hwnd: h, msg, mp1, mp2 });
+        return wait_reply(q, id);
+    }
     let f: WndProc = unsafe { core::mem::transmute(p as usize) };
     f(h, msg, mp1, mp2)
+}
+
+/// Wait for the reply to a message sent to queue `q`, answering messages
+/// sent to the caller meanwhile.
+fn wait_reply(q: u32, id: u32) -> u32 {
+    loop {
+        let Some(queue) = st().queues.get_mut(&q) else { return 0 };
+        if let Some(i) = queue.replies.iter().position(|r| r.0 == id) {
+            return queue.replies.swap_remove(i).1;
+        }
+        if !queue.sent.iter().any(|m| m.id == id) && !st().queues.contains_key(&q) {
+            return 0;
+        }
+        answer_sent();
+        lock::sleep(1);
+    }
+}
+
+/// Process the messages other threads sent to the caller's queue.
+fn answer_sent() {
+    loop {
+        let s = st();
+        let q = s.my_queue();
+        let Some(m) = s.queues.get_mut(&q).and_then(|x| x.sent.pop_front()) else { return };
+        let r = send(m.hwnd, m.msg, m.mp1, m.mp2);
+        // The reply goes to the queue the message was sent to (the
+        // sender polls there).
+        if let Some(x) = st().queues.get_mut(&q) {
+            x.replies.push((m.id, r));
+        }
+    }
 }
 
 /// Queue a message for the window's thread (hwnd 0: the caller's queue).
@@ -57,7 +99,7 @@ pub extern "C" fn WinCreateMsgQueue(_hab: u32, _cmsg: i32) -> u32 {
     }
     let h = s.next_hmq;
     s.next_hmq += 1;
-    s.queues.insert(h, Queue { msgs: Default::default(), tid });
+    s.queues.insert(h, Queue { msgs: Default::default(), tid, sent: Default::default(), replies: Default::default() });
     h
 }
 
@@ -115,7 +157,7 @@ pub extern "C" fn WinDispatchMsg(_hab: u32, pq: *const QMsg) -> u32 {
 
 /// Default processing.
 #[unsafe(no_mangle)]
-pub extern "C" fn WinDefWindowProc(h: u32, msg: u32, _mp1: u32, _mp2: u32) -> u32 {
+pub extern "C" fn WinDefWindowProc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         WM_CLOSE => {
             let q = st().desk.get(h).map_or(0, |w| w.queue);
@@ -130,6 +172,18 @@ pub extern "C" fn WinDefWindowProc(h: u32, msg: u32, _mp1: u32, _mp2: u32) -> u3
             WinEndPaint(hps);
             0
         }
+        // Keys a window does not use go up to its parent (a frame
+        // control's or a dialog item's frame).
+        WM_CHAR => {
+            let parent = ctl::parent(h);
+            if parent != HWND_DESKTOP && parent != pmwin::HWND_OBJECT && parent != 0 {
+                send(parent, msg, mp1, mp2)
+            } else {
+                0
+            }
+        }
+        // The default for WM_MENUSELECT lets the command be posted.
+        ctl::WM_MENUSELECT => 1,
         _ => 0,
     }
 }
@@ -144,10 +198,16 @@ fn pack(x: i32, y: i32) -> u32 {
 fn pump(ms: u32) {
     let mut wait = ms;
     loop {
-        let mut ev = Input::default();
-        if unsafe { Rs2ReadInput(&mut ev, wait) } != 0 {
-            return;
-        }
+        let ev = match unsafe { (*core::ptr::addr_of_mut!(PENDING)).take() } {
+            Some(ev) => ev,
+            None => {
+                let mut ev = Input::default();
+                if unsafe { Rs2ReadInput(&mut ev, wait) } != 0 {
+                    return;
+                }
+                ev
+            }
+        };
         wait = 0;
         match ev.kind {
             EV_MOUSE => mouse(Point::new(ev.a as i32, ev.b as i32), ev.flags as u8),
@@ -168,40 +228,63 @@ fn mouse(p: Point, buttons: u8) {
     let s = st();
     pointer::move_to(s, p);
     let prev = core::mem::replace(&mut s.buttons, buttons);
-    // Moving a frame by its title bar.
-    if let Some(d) = s.drag.as_ref() {
-        let (h, nx, ny) = (d.hwnd, p.x - d.dx, p.y - d.dy);
-        if buttons & 1 == 0 {
-            s.drag = None;
-            s.capture = 0;
-        }
-        let (cx, cy) = s.desk.get(h).map_or((0, 0), |w| (w.cx, w.cy));
-        WinSetWindowPos(h, 0, nx, ny, cx, cy, 0x0002);
+    // Moving or sizing a frame.
+    if s.drag.is_some() {
+        frame::track(p, buttons);
         return;
     }
     let target = if s.capture != 0 { s.capture } else { s.desk.window_at(p) };
     if target == 0 {
         return;
     }
-    let o = s.desk.origin(target);
-    let mp1 = pack(p.x - o.x, p.y - o.y);
     let down = buttons & !prev;
     let up = prev & !buttons;
-    if down & 1 != 0 && target != HWND_DESKTOP {
+    // Disabled windows (the owner of a modal dialog) get no input; a
+    // click brings up the window that disabled it.
+    if s.capture == 0 && !input_enabled(target) {
+        if down != 0 {
+            let top = win::top_level(target);
+            if let Some(&d) = st().desk.get(HWND_DESKTOP).and_then(|w| w.children.iter().rev().find(|&&c| st().desk.get(c).is_some_and(|x| x.owner == top && x.visible_style()))) {
+                win::activate(d);
+            }
+        }
+        return;
+    }
+    let o = st().desk.origin(target);
+    let mp1 = pack(p.x - o.x, p.y - o.y);
+    if down & 1 != 0 && target != HWND_DESKTOP && st().capture == 0 && !menu::is_menu(target) {
         win::activate(target);
     }
     if down == 0 && up == 0 {
         post(target, WM_MOUSEMOVE, mp1, 0);
     }
-    // Button 1 left, 2 right, 3 middle: WM_BUTTONnDOWN = 0x71 + 3(n-1).
+    let t = now();
+    // Button 1 left, 2 right, 3 middle: WM_BUTTONnDOWN = 0x71 + 3(n-1),
+    // a second press nearby within half a second is WM_BUTTONnDBLCLK.
     for (bit, n) in [(1u8, 0u32), (2, 1), (4, 2)] {
         if down & bit != 0 {
-            post(target, WM_BUTTON1DOWN + 3 * n, mp1, 0);
+            let (lt, lp, lb) = st().last_click;
+            let dbl = lb == bit && t.wrapping_sub(lt) < 500 && (lp.x - p.x).abs() < 4 && (lp.y - p.y).abs() < 4;
+            st().last_click = if dbl { (0, Point::new(-100, -100), 0) } else { (t, p, bit) };
+            post(target, if dbl { WM_BUTTON1DOWN + 2 } else { WM_BUTTON1DOWN } + 3 * n, mp1, 0);
         }
         if up & bit != 0 {
             post(target, WM_BUTTON1UP + 3 * n, mp1, 0);
         }
     }
+}
+
+/// Neither the window nor one of its ancestors is disabled.
+fn input_enabled(h: u32) -> bool {
+    let s = st();
+    let mut cur = h;
+    while let Some(w) = s.desk.get(cur) {
+        if w.style & pmwin::ws::DISABLED != 0 {
+            return false;
+        }
+        cur = w.parent;
+    }
+    true
 }
 
 /// WM_CHAR: mp1 = fs | repeat << 16 | scan << 24, mp2 = char | vkey << 16.
@@ -217,6 +300,12 @@ fn key(ev: &Input) {
     let scan = (ev.a >> 8) & 0xff;
     let up = ev.a >> 24 & 1 != 0;
     let shift = ev.flags as u32;
+    // Ctrl+letter arrives as a control character; PM reports the letter.
+    let ch = if shift & 0x4 != 0 && (1..=26).contains(&ch) {
+        ch + if shift & 0x3 != 0 { b'A' as u32 - 1 } else { b'a' as u32 - 1 }
+    } else {
+        ch
+    };
     let mut fs = KC_SCANCODE;
     if ch != 0 && ch != 0xe0 {
         fs |= KC_CHAR;
@@ -239,7 +328,7 @@ fn key(ev: &Input) {
     }
     let s = st();
     let target = if s.focus != 0 { s.focus } else { s.active };
-    if target != 0 {
+    if target != 0 && input_enabled(target) {
         post(target, WM_CHAR, fs | 1 << 16 | scan << 24, (if fs & KC_CHAR != 0 { ch } else { 0 }) | vkey << 16);
     }
 }
@@ -248,6 +337,7 @@ fn key(ev: &Input) {
 fn virtual_key(scan: u32, ch: u32) -> u32 {
     match (scan, ch) {
         (0x0e, _) => 0x05, // VK_BACKSPACE
+        (0x0f, _) if ch == 0 => 0x07, // VK_BACKTAB
         (0x0f, _) => 0x06, // VK_TAB
         (0x1c, _) => 0x08, // VK_NEWLINE
         (0x01, _) => 0x0f, // VK_ESC
@@ -320,15 +410,24 @@ fn run_timers() -> u32 {
 /// Next message for the calling thread; `remove` takes it off the queue.
 fn next_message(filter: u32, remove: bool, wait: bool) -> Option<QMsg> {
     loop {
-        pump(0);
+        answer_sent();
+        let input = st().input_queue() == st().my_queue();
+        if input {
+            pump(0);
+        }
         let wait_ms = run_timers();
-        win::paint_desktop();
+        if input {
+            win::paint_desktop();
+        }
         let s = st();
         let q = s.my_queue();
         let queue = s.queues.get_mut(&q)?;
         let at = queue.msgs.iter().position(|m| filter == 0 || m.hwnd == filter || m.hwnd == 0);
         if let Some(i) = at {
-            let m = if remove { queue.msgs.remove(i)? } else { queue.msgs[i] };
+            let mut m = if remove { queue.msgs.remove(i)? } else { queue.msgs[i] };
+            if remove && m.msg == WM_CHAR {
+                accel::translate(&mut m);
+            }
             return Some(m);
         }
         if let Some(h) = s.desk.paint_pending(q) {
@@ -338,9 +437,23 @@ fn next_message(filter: u32, remove: bool, wait: bool) -> Option<QMsg> {
         if !wait {
             return None;
         }
-        pump(wait_ms.min(50));
+        if input {
+            lock::unlocked(|| wait_input(wait_ms.min(50)));
+        } else {
+            lock::sleep(wait_ms.clamp(1, 20));
+        }
     }
 }
+
+/// Wait for kernel input; the event is kept for the next pump.
+fn wait_input(ms: u32) {
+    let mut ev = Input::default();
+    if unsafe { Rs2ReadInput(&mut ev, ms) } == 0 {
+        unsafe { PENDING = Some(ev) };
+    }
+}
+
+static mut PENDING: Option<Input> = None;
 
 /// WinGetMsg(hab, pqmsg, hwndFilter, msgFirst, msgLast): FALSE for WM_QUIT.
 #[unsafe(no_mangle)]

@@ -8,18 +8,45 @@ macro_rules! aligned {
         pub extern "C" fn $tramp() {
             core::arch::naked_asm!(
                 "push ebp", "mov ebp, esp", "and esp, -16",
+                "call {enter}",
                 "sub esp, {pad}",
                 "push esi", "push edi", "push ecx",
                 "lea esi, [ebp + 8]", "lea edi, [esp + 12]", "mov ecx, {n}", "rep movsd",
                 "pop ecx", "pop edi", "pop esi",
-                "call {f}", "mov esp, ebp", "pop ebp", "ret",
+                "call {f}", "add esp, {pad}",
+                "sub esp, 16", "mov [esp], eax", "mov [esp + 4], edx",
+                "call {leave}",
+                "mov eax, [esp]", "mov edx, [esp + 4]",
+                "mov esp, ebp", "pop ebp", "ret",
                 pad = const ($copy * 4 + 15) / 16 * 16, n = const $copy, f = sym $target,
+                enter = sym crate::lock::enter, leave = sym crate::lock::leave,
             );
         }
     )*};
 }
 
 aligned! {
+    __a_WinLoadAccelTable => crate::accel::WinLoadAccelTable, 3;
+    __a_WinCreateAccelTable => crate::accel::WinCreateAccelTable, 2;
+    __a_WinDestroyAccelTable => crate::accel::WinDestroyAccelTable, 1;
+    __a_WinSetAccelTable => crate::accel::WinSetAccelTable, 3;
+    __a_WinQueryAccelTable => crate::accel::WinQueryAccelTable, 2;
+    __a_WinTranslateAccel => crate::accel::WinTranslateAccel, 4;
+    __a_WinCopyAccelTable => crate::accel::WinCopyAccelTable, 3;
+    __a_WinLoadDlg => crate::dlg::WinLoadDlg, 6;
+    __a_WinCreateDlg => crate::dlg::WinCreateDlg, 5;
+    __a_WinProcessDlg => crate::dlg::WinProcessDlg, 1;
+    __a_WinDismissDlg => crate::dlg::WinDismissDlg, 2;
+    __a_WinDlgBox => crate::dlg::WinDlgBox, 6;
+    __a_WinDefDlgProc => crate::dlg::WinDefDlgProc, 4;
+    __a_WinEnumDlgItem => crate::dlg::WinEnumDlgItem, 3;
+    __a_WinSendDlgItemMsg => crate::dlg::WinSendDlgItemMsg, 5;
+    __a_WinQueryDlgItemText => crate::dlg::WinQueryDlgItemText, 4;
+    __a_WinQueryDlgItemTextLength => crate::dlg::WinQueryDlgItemTextLength, 2;
+    __a_WinSetDlgItemText => crate::dlg::WinSetDlgItemText, 3;
+    __a_WinQueryDlgItemShort => crate::dlg::WinQueryDlgItemShort, 4;
+    __a_WinSetDlgItemShort => crate::dlg::WinSetDlgItemShort, 4;
+    __a_WinMapDlgPoints => crate::dlg::WinMapDlgPoints, 4;
     __a_GpiSetColor => crate::gpiapi::GpiSetColor, 2;
     __a_GpiQueryColor => crate::gpiapi::GpiQueryColor, 1;
     __a_GpiSetBackColor => crate::gpiapi::GpiSetBackColor, 2;
@@ -41,6 +68,9 @@ aligned! {
     __a_GpiCreatePS => crate::gpiapi::GpiCreatePS, 4;
     __a_GpiDestroyPS => crate::gpiapi::GpiDestroyPS, 1;
     __a_GpiAssociate => crate::gpiapi::GpiAssociate, 2;
+    __a_WinLoadMenu => crate::menu::WinLoadMenu, 3;
+    __a_WinCreateMenu => crate::menu::WinCreateMenu, 2;
+    __a_WinPopupMenu => crate::menu::WinPopupMenu, 7;
     __a_WinInitialize => crate::misc::WinInitialize, 1;
     __a_WinTerminate => crate::misc::WinTerminate, 1;
     __a_WinQueryAnchorBlock => crate::misc::WinQueryAnchorBlock, 1;
@@ -55,6 +85,13 @@ aligned! {
     __a_WinQueryClassInfo => crate::misc::WinQueryClassInfo, 3;
     __a_WinSubclassWindow => crate::misc::WinSubclassWindow, 2;
     __a_WinLoadString => crate::misc::WinLoadString, 5;
+    __a_WinLoadMessage => crate::misc::WinLoadMessage, 5;
+    __a_WinWaitEventSem => crate::misc::WinWaitEventSem, 2;
+    __a_WinRequestMutexSem => crate::misc::WinRequestMutexSem, 2;
+    __a_WinOpenWindowDC => crate::misc::WinOpenWindowDC, 1;
+    __a_WinSetPresParam => crate::misc::WinSetPresParam, 4;
+    __a_WinQueryPresParam => crate::misc::WinQueryPresParam, 7;
+    __a_WinRemovePresParam => crate::misc::WinRemovePresParam, 2;
     __a_WinMessageBox => crate::misc::WinMessageBox, 6;
     __a_WinCreateMsgQueue => crate::msg::WinCreateMsgQueue, 2;
     __a_WinDestroyMsgQueue => crate::msg::WinDestroyMsgQueue, 1;
