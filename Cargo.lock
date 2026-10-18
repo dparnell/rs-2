@@ -15,6 +15,10 @@ name = "fat"
 version = "0.1.0"
 
 [[package]]
+name = "hpfs"
+version = "0.1.0"
+
+[[package]]
 name = "lxdump"
 version = "0.1.0"
 dependencies = [
@@ -42,6 +46,7 @@ version = "0.1.0"
 dependencies = [
  "bootinfo",
  "fat",
+ "hpfs",
  "os2-exe",
 ]
 
@@ -57,4 +62,5 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "fat",
+ "hpfs",
 ]

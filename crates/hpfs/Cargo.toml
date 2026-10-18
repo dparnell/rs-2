@@ -1,0 +1,6 @@
+[package]
+name = "hpfs"
+description = "no_std HPFS (High Performance File System): read, write and format"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
