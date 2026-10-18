@@ -28,7 +28,10 @@ impl Saved {
 /// Point `h` at `new` (a handle), remembering the old one.
 fn redirect_handle(saved: &mut Saved, h: u32, new: u32) {
     let mut copy = 0xffff_ffff;
-    unsafe { DosDupHandle(h, &mut copy) };
+    unsafe {
+        DosDupHandle(h, &mut copy);
+        DosSetFHState(copy, OPEN_FLAGS_NOINHERIT);
+    }
     saved.0.push((h, copy));
     let mut target = h;
     unsafe { DosDupHandle(new, &mut target) };
@@ -67,6 +70,7 @@ fn apply(redirs: &[Redir]) -> Result<Saved, u32> {
                 }
                 redirect_handle(&mut saved, r.handle, hf);
                 unsafe { DosClose(hf) };
+                let _ = OPEN_FLAGS_NOINHERIT;
             }
         }
     }
@@ -84,7 +88,12 @@ pub fn run_pipeline(sh: &mut Shell, p: &Pipeline) {
     let mut pipes: Vec<(u32, u32)> = Vec::new();
     for _ in 0..n - 1 {
         let (mut r, mut w) = (0, 0);
-        unsafe { DosCreatePipe(&mut r, &mut w, 4096) };
+        unsafe {
+            DosCreatePipe(&mut r, &mut w, 4096);
+            // Only the redirected standard handles may reach the children.
+            DosSetFHState(r, OPEN_FLAGS_NOINHERIT);
+            DosSetFHState(w, OPEN_FLAGS_NOINHERIT);
+        }
         pipes.push((r, w));
     }
     let mut children = Vec::new();

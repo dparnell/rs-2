@@ -1,0 +1,9 @@
+[package]
+name = "utils"
+description = "rs2 base utilities: MORE, FIND, SORT, ATTRIB, TREE, XCOPY"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

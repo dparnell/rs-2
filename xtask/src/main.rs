@@ -192,7 +192,17 @@ fn build(o: &Opts) -> Option<PathBuf> {
 
 /// Programs in userland/ to package, with their LX names.
 const USER_PROGRAMS: &[(&str, &str)] =
-    &[("apitest", "RS2\\APITEST.EXE"), ("testdll", "RS2\\TESTDLL.DLL"), ("cmd", "RS2\\CMD.EXE")];
+    &[
+        ("apitest", "RS2\\APITEST.EXE"),
+        ("testdll", "RS2\\TESTDLL.DLL"),
+        ("cmd", "RS2\\CMD.EXE"),
+        ("more", "OS2\\MORE.EXE"),
+        ("find", "OS2\\FIND.EXE"),
+        ("sort", "OS2\\SORT.EXE"),
+        ("attrib", "OS2\\ATTRIB.EXE"),
+        ("tree", "OS2\\TREE.EXE"),
+        ("xcopy", "OS2\\XCOPY.EXE"),
+    ];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
@@ -369,6 +379,11 @@ fn keys(s: &str) -> Vec<String> {
             '%' => "shift-5".into(),
             '!' => "shift-1".into(),
             '&' => "shift-7".into(),
+            '@' => "shift-2".into(),
+            '#' => "shift-3".into(),
+            '$' => "shift-4".into(),
+            '(' => "shift-9".into(),
+            ')' => "shift-0".into(),
             '[' => "bracket_left".into(),
             ']' => "bracket_right".into(),
             _ => continue,

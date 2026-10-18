@@ -153,6 +153,7 @@ pub fn dos_close(c: &mut Ctx) -> u32 {
             _ => return err::INVALID_HANDLE,
         }
     };
+    c.process.noinherit.lock().remove(&(hf as u32));
     drop(old);
     0
 }
@@ -309,6 +310,9 @@ fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32) -> 
     };
     let of = OpenFile::new(p, file, omode)?;
     let h = add(c, Handle::File(of))?;
+    if omode & mode::NOINHERIT != 0 {
+        c.process.noinherit.lock().insert(h);
+    }
     Ok((h, action))
 }
 
@@ -439,16 +443,20 @@ pub fn dos_dup_handle(c: &mut Ctx) -> u32 {
         drop(old_h);
         want
     };
+    // A duplicate does not take over the no-inherit mark.
+    c.process.noinherit.lock().remove(&new);
     if c.is16 { c.write_u16(pnew, new as u16) } else { c.write_u32(pnew, new) };
     0
 }
 
 fn fh_state(c: &Ctx, hf: u32) -> Result<u32, u32> {
-    Ok(match get(c, hf).ok_or(err::INVALID_HANDLE)? {
+    let base = match get(c, hf).ok_or(err::INVALID_HANDLE)? {
         Handle::File(f) => f.mode.load(core::sync::atomic::Ordering::Relaxed) & 0x7fff,
         Handle::Pipe(p) => p.mode(),
         _ => mode::READWRITE | mode::DENYNONE,
-    })
+    };
+    let ni = if c.process.noinherit.lock().contains(&hf) { mode::NOINHERIT } else { 0 };
+    Ok((base & !mode::NOINHERIT) | ni)
 }
 
 pub fn dos_query_fh_state(c: &mut Ctx) -> u32 {
@@ -463,6 +471,14 @@ pub fn dos_query_fh_state(c: &mut Ctx) -> u32 {
 
 pub fn dos_set_fh_state(c: &mut Ctx) -> u32 {
     let (hf, state) = (c.arg(0), c.arg(1));
+    if get(c, hf).is_some() {
+        let mut ni = c.process.noinherit.lock();
+        if state & mode::NOINHERIT != 0 {
+            ni.insert(hf);
+        } else {
+            ni.remove(&hf);
+        }
+    }
     // Only the inheritance, write-through and fail-on-error bits change.
     let changeable = mode::NOINHERIT | mode::WRITE_THROUGH | mode::FAILONERROR | 0x1000;
     match get(c, hf) {

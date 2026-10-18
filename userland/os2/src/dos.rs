@@ -401,3 +401,10 @@ unsafe extern "C" {
     #[link_name = "DOSCALLS.235"]
     pub fn DosKillProcess(action: u32, pid: u32) -> APIRET;
 }
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.221"]
+    pub fn DosSetFHState(hf: u32, state: u32) -> APIRET;
+    #[link_name = "DOSCALLS.276"]
+    pub fn DosQueryFHState(hf: u32, state: *mut u32) -> APIRET;
+}

@@ -45,6 +45,8 @@ pub struct Process {
     pub threads: SpinLock<Vec<Arc<Thread>>>,
     next_tid: AtomicU32,
     pub handles: SpinLock<Vec<Option<Handle>>>,
+    /// Handle slots marked OPEN_FLAGS_NOINHERIT (a per-handle property).
+    pub noinherit: SpinLock<alloc::collections::BTreeSet<u32>>,
     /// Linear addresses of the environment and command line.
     pub env: u32,
     pub cmdline: u32,
@@ -206,6 +208,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         threads: SpinLock::new(Vec::new()),
         next_tid: AtomicU32::new(1),
         handles: SpinLock::new(handles),
+        noinherit: SpinLock::new(alloc::collections::BTreeSet::new()),
         env,
         cmdline: env + cmd_off,
         info,

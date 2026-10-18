@@ -8,7 +8,7 @@ use core::sync::atomic::Ordering;
 use super::{err, Ctx};
 use crate::arch::gdt::{TIB_SEL, USER_CS, USER_DS};
 use crate::arch::idt::TrapFrame;
-use crate::fs::{mode, Handle};
+use crate::fs::Handle;
 use crate::loader;
 use crate::task::thread::State;
 use crate::task::{process, sched, Process};
@@ -38,16 +38,14 @@ fn read_block(c: &Ctx, addr: u32, max: usize) -> Option<Vec<String>> {
     Some(v)
 }
 
-/// Handles a child inherits: everything not marked no-inherit.
+/// Handles a child inherits: every slot not marked no-inherit.
 fn inherited_handles(p: &Process) -> Vec<Option<Handle>> {
+    let ni = p.noinherit.lock().clone();
     p.handles
         .lock()
         .iter()
-        .map(|h| match h {
-            Some(Handle::File(f)) if f.mode.load(Ordering::Relaxed) & mode::NOINHERIT != 0 => None,
-            Some(Handle::Pipe(pe)) if pe.mode() & mode::NOINHERIT != 0 => None,
-            other => other.clone(),
-        })
+        .enumerate()
+        .map(|(i, h)| if ni.contains(&(i as u32)) { None } else { h.clone() })
         .collect()
 }
 
