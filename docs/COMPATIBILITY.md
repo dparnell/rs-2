@@ -19,7 +19,8 @@ Status: **works** = the tested function behaves as on OS/2;
 
 | Program | Status | Notes |
 |---------|--------|-------|
-| CMD.EXE (IBM) | works | Interactive use, internal commands, pipes, redirection, batch files, `DATE`/`TIME` set the clock, REXX `.CMD` files. |
+| CMD.EXE (IBM) | works | Interactive use, internal commands, pipes, redirection, `SET`, batch files (`FOR`, `IF`, `IF ERRORLEVEL`, `GOTO`, `SETLOCAL`/`ENDLOCAL`, `DETACH`), `DATE`/`TIME` set the clock, REXX `.CMD` files. |
+| CMD.EXE (rs2) | works | Runs REXX `.CMD` files through REXX.DLL when it is installed, and the IBM utilities. |
 | REXX (REXX.DLL, REXXAPI.DLL, REXXINIT.DLL) | works | `.CMD` files starting with `/* */` run through CMD. Tested: arithmetic, procedures/recursion, `PARSE`, `PULL` from the keyboard, the external data queue (`QUEUE`/`PUSH`/`PULL`/`QUEUED`), stream I/O (`LINEOUT`, `LINEIN`, `LINES`, `STREAM`), commands sent to CMD (`'dir'`, `rc`), `INTERPRET`, `SIGNAL ON SYNTAX`, `TIME('E')`, `RANDOM`, `VALUE(..., 'OS2ENVIRONMENT')`, error reports (`REX0040: Error 40 running ...`). A file with bare LF line ends gives REX0013, which is REXX's own behaviour. |
 | REXXUTIL.DLL | partial | `SysLoadFuncs` works; tested `SysCls`, `SysCurPos`, `SysTextScreenRead`, `SysTextScreenSize`, `SysSleep`, `SysGetKey`, `SysFileTree`, `SysFileDelete`, `SysMkDir`, `SysRmDir`, `SysDriveMap`, `SysTempFileName`, `SysBootDrive`, `SysVersion`, `SysOS2Ver`, `SysSearchPath`. `SysIni` fails (needs PMSHAPI/PMWIN). EA functions see no EAs. |
 | REXXTRY.CMD | works | With an expression on the command line and interactively. |
@@ -112,6 +113,11 @@ Status: **works** = the tested function behaves as on OS/2;
 - The 32-bit `DosTrueGetMessage` receives the bound message segment as an
   extra first argument and pops it (`RET 4`).
 - 16-bit `DosCreateThread` pushes a far return address below `pbStack`.
+- The environment segment holds the program's full path between the
+  variables and the command line and is exactly as long as its contents,
+  as on OS/2 (IBM CMD.EXE's first `SET` corrupted the environment).
+- `THK16_UNITHUNK` (DOSCALL1's generic register-based 16-to-32 thunk) and
+  the register-based 16-bit `DosSelToFlat`/`DosFlatToSel`.
 - New APIs: `DosSubSetMem`/`DosSubAllocMem`/`DosSubFreeMem`/`DosSubUnsetMem`
   and 16-bit `DosSubSet`/`DosSubAlloc`/`DosSubFree`, `DosSizeSeg`,
   `DosEditName`, `DosEnumAttribute`, `DosQuerySysState`, `DosCopy`,
