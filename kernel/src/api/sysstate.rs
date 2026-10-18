@@ -226,8 +226,14 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
             // Runtime-linked libraries.
             let libs: Vec<u16> = p.loaded.lock().iter().map(|(m, _)| m.hmte).collect();
             let lib_at = o.at();
-            for h in &libs {
-                o.u16(*h);
+            if list & QS_MTE != 0 {
+                for h in &libs {
+                    o.u16(*h);
+                }
+            } else {
+                // Without module records the process name goes here
+                // (PSTAT /C shows it).
+                o.str(&p.exe.path);
             }
             o.align();
             // Private 32-bit semaphores, 16-bit system semaphores open and

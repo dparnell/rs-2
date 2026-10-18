@@ -86,6 +86,12 @@ pub struct Thread {
     pub tls: UnsafeCell<[u32; super::process::TLS_DWORDS]>,
     /// DosEnterMustComplete nesting: signals wait while it is non-zero.
     pub must_complete: AtomicU32,
+    /// Termination unwind (XCPT_[ASYNC_]PROCESS_TERMINATE to the exception
+    /// handlers before the thread dies): 0 not started, 1 running, 2 done.
+    pub exit_unwind: AtomicU8,
+    /// The thread ends itself (DosExit, returning from its function): its
+    /// handlers see XCPT_PROCESS_TERMINATE rather than the asynchronous one.
+    pub sync_exit: AtomicBool,
 }
 
 unsafe impl Send for Thread {}
@@ -130,6 +136,8 @@ impl Thread {
             owned_stack: AtomicU32::new(0),
             tls: UnsafeCell::new([0; super::process::TLS_DWORDS]),
             must_complete: AtomicU32::new(0),
+            exit_unwind: AtomicU8::new(0),
+            sync_exit: AtomicBool::new(false),
         }
     }
 

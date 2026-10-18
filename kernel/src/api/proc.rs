@@ -344,6 +344,7 @@ fn start_thread(c: &Ctx, frame: TrapFrame, base: u32, top: u32, ptid: u32, suspe
 /// Called when a 32-bit thread function returns into the exit stub.
 pub fn thread_returned(c: &mut Ctx) -> u32 {
     let code = c.f.rax as u32;
+    c.thread.sync_exit.store(true, Ordering::Relaxed);
     let live = c.process.threads.lock().iter().filter(|t| t.state() != State::Dead).count();
     if live > 1 {
         c.thread.request_exit();

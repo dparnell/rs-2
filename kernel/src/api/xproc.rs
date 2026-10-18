@@ -432,3 +432,99 @@ pub fn dos_suppress_popups(c: &mut Ctx) -> u32 {
     }
     0
 }
+
+// ---- File system RAM semaphores ----
+
+const ERROR_EXCL_SEM_ALREADY_OWNED: u32 = 101;
+
+/// Woken when a DOSFSRSEM is released.
+static FSRSEM_FREE: crate::task::WaitQueue = crate::task::WaitQueue::new();
+
+/// 16-bit DosFSRamSemRequest(pDosFSRSem, lTimeOut): a recursive mutex in
+/// the caller's memory, DOSFSRSEM { cb, pid, tid, cUsage, client, sem }.
+pub fn dos16_fsram_sem_request(c: &mut Ctx) -> u32 {
+    let (p, ms) = (c.ptr(0), c.arg(1));
+    let me = (c.process.pid as u16, c.thread.tid as u16);
+    let try_take = || -> Option<u32> {
+        let (pid, tid, n) = (c.read_u16(p + 2)?, c.read_u16(p + 4)?, c.read_u16(p + 6)?);
+        if n == 0 || (pid, tid) == me {
+            c.write_u16(p + 2, me.0);
+            c.write_u16(p + 4, me.1);
+            c.write_u16(p + 6, n.wrapping_add(1));
+            return Some(0);
+        }
+        // The owner may have ended without releasing it.
+        let alive = process::by_pid(pid as u32)
+            .is_some_and(|q| q.threads.lock().iter().any(|t| t.tid == tid as u32 && t.state() != State::Dead));
+        if alive {
+            return None;
+        }
+        c.write_u16(p + 2, me.0);
+        c.write_u16(p + 4, me.1);
+        c.write_u16(p + 6, 1);
+        Some(err::SEM_OWNER_DIED)
+    };
+    if c.read_u16(p).is_none() {
+        return err::INVALID_ADDRESS;
+    }
+    if let Some(r) = try_take() {
+        return r;
+    }
+    if ms == 0 {
+        return err::SEM_TIMEOUT;
+    }
+    let deadline = (ms != u32::MAX).then(|| crate::irq::ticks() + ms as u64 * crate::irq::HZ / 1000);
+    let mut r = None;
+    FSRSEM_FREE.wait_until(deadline, || {
+        r = try_take();
+        r.is_some()
+    });
+    match r {
+        Some(v) => v,
+        None if c.thread.exit_requested() || c.thread.interrupted() => err::INTERRUPT,
+        None => err::SEM_TIMEOUT,
+    }
+}
+
+/// 16-bit DosFSRamSemClear(pDosFSRSem)
+pub fn dos16_fsram_sem_clear(c: &mut Ctx) -> u32 {
+    let p = c.ptr(0);
+    let me = (c.process.pid as u16, c.thread.tid as u16);
+    let (Some(pid), Some(tid), Some(n)) = (c.read_u16(p + 2), c.read_u16(p + 4), c.read_u16(p + 6)) else {
+        return err::INVALID_ADDRESS;
+    };
+    if n == 0 || (pid, tid) != me {
+        return ERROR_EXCL_SEM_ALREADY_OWNED;
+    }
+    c.write_u16(p + 6, n - 1);
+    if n == 1 {
+        c.write_u16(p + 2, 0);
+        c.write_u16(p + 4, 0);
+        FSRSEM_FREE.wake_all();
+    }
+    0
+}
+
+/// 16-bit DosSysTrace(major, length, minor, buffer): system trace points
+/// are not recorded (tracing is off).
+pub fn dos16_sys_trace(_c: &mut Ctx) -> u32 {
+    0
+}
+
+/// DosQueryThreadContext(tid, level, pcxt): the user registers of another
+/// thread of the process (suspend it first for a stable answer).
+pub fn dos_query_thread_context(c: &mut Ctx) -> u32 {
+    let (tid, level, pctx) = (c.arg(0), c.arg(1), c.arg(2));
+    if level == 0 || level & !0x7 != 0 {
+        return err::INVALID_PARAMETER;
+    }
+    let t = c.process.threads.lock().iter().find(|t| t.tid == tid && t.state() != State::Dead).cloned();
+    let Some(t) = t else { return err::INVALID_THREADID };
+    if Arc::ptr_eq(&t, &c.thread) {
+        return err::INVALID_THREADID;
+    }
+    let f = *t.user_frame();
+    let mut sp = c.space();
+    super::exceptions::save_context(&mut sp, pctx, &f);
+    0
+}

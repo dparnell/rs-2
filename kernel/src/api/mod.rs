@@ -504,7 +504,10 @@ pub fn dispatch(f: &mut TrapFrame) {
     if trace {
         crate::trace!("    -> {}", result);
     }
-    if ctx.no_return || thread.exit_requested() {
+    // A thread told to end does not return from the call, unless it is
+    // running its exception handlers for the termination.
+    let unwinding = thread.exit_unwind.load(core::sync::atomic::Ordering::Relaxed) == 1;
+    if ctx.no_return || (thread.exit_requested() && !unwinding) {
         return;
     }
     let _ = ss_big;

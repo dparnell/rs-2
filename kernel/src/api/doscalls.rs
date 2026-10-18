@@ -157,6 +157,10 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 113) => super::xproc::dos_dump_process,
         (0, 114) => super::xproc::dos_suppress_popups,
         (0, 444) => not_supported, // DosForceSystemDump
+        (0, 161) => super::xproc::dos16_fsram_sem_request,
+        (0, 162) => super::xproc::dos16_fsram_sem_clear,
+        (0, 90) => super::xproc::dos16_sys_trace,
+        (0, 877) => super::xproc::dos_query_thread_context,
         // ---- System services ----
         (0, 876) => super::sysctl::dos_sys_ctl,
         (0, 995) => super::sysctl::dos_system_service,
@@ -449,6 +453,7 @@ fn dos_exit(c: &mut Ctx) -> u32 {
 
 fn exit(c: &mut Ctx, action: u32, code: u32) -> u32 {
     let p = c.process.clone();
+    c.thread.sync_exit.store(true, core::sync::atomic::Ordering::Relaxed);
     let live = p.threads.lock().iter().filter(|t| t.state() != crate::task::thread::State::Dead).count();
     // EXIT_THREAD (0) on the last thread ends the process too.
     if action == 0 && live > 1 {

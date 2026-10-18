@@ -146,7 +146,10 @@ pub fn before_user_return(f: &mut TrapFrame) -> bool {
     sched::maybe_preempt();
     let t = sched::current();
     if t.exit_requested() {
-        return true;
+        // 32-bit exception handlers see the termination first (and may run
+        // user code for it); then the thread ends.
+        let p = t.process();
+        return !p.is_some_and(|p| crate::api::exceptions::exit_unwind(f, &p, &t));
     }
     let Some(p) = t.process() else { return false };
     crate::api::proc::hold_if_needed(&t, &p);

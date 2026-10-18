@@ -199,11 +199,77 @@ pub fn run() {
         check("500 raised exceptions handled", NESTED_SEEN.load(Ordering::Relaxed) == 0);
         DosUnsetExceptionHandler(&mut s);
 
+        // Termination: a killed thread's handlers see
+        // XCPT_ASYNC_PROCESS_TERMINATE, one that exits itself sees
+        // XCPT_PROCESS_TERMINATE; a handler that faults meanwhile does not
+        // keep the thread alive.
+        TERM.store(0, Ordering::Relaxed);
+        let t = crate::thread(term_victim, 0);
+        DosSleep(50);
+        crate::api::DosKillThread(t);
+        let rc = crate::join(t);
+        check("killed thread's handler sees XCPT_ASYNC_PROCESS_TERMINATE", rc == 0 && TERM.load(Ordering::Relaxed) == 0xC001_0002);
+        TERM.store(0, Ordering::Relaxed);
+        let t = crate::thread(term_self, 0);
+        crate::join(t);
+        check("exiting thread's handler sees XCPT_PROCESS_TERMINATE", TERM.load(Ordering::Relaxed) == 0xC001_0001);
+        TERM.store(0, Ordering::Relaxed);
+        let t = crate::thread(term_faulty, 0);
+        DosSleep(50);
+        crate::api::DosKillThread(t);
+        check("faulting termination handler ends the thread", crate::join(t) == 0 && TERM.load(Ordering::Relaxed) == 1);
+
         // Unhandled trap in a child: TC_TRAP.
         let (cause, _) = run_child("crash");
         check("unhandled access violation ends the child with TC_TRAP", cause == 2);
         let (cause, code) = run_child("raise");
         check("unhandled raised exception ends the child", cause == 2 || (cause == 0 && code != 0));
+    }
+}
+
+static TERM: AtomicU32 = AtomicU32::new(0);
+
+unsafe extern "C" fn term_handler(rep: *mut ExceptionReportRecord, _: *mut ExceptionRegistrationRecord, _: *mut ContextRecord, _: *mut u8) -> u32 {
+    unsafe {
+        if (*rep).flags & EH_UNWINDING != 0 && ((*rep).num == 0xC001_0001 || (*rep).num == 0xC001_0002) {
+            TERM.store((*rep).num, Ordering::Relaxed);
+        }
+    }
+    XCPT_CONTINUE_SEARCH
+}
+
+unsafe extern "C" fn faulty_handler(rep: *mut ExceptionReportRecord, _: *mut ExceptionRegistrationRecord, _: *mut ContextRecord, _: *mut u8) -> u32 {
+    unsafe {
+        if (*rep).flags & EH_UNWINDING != 0 {
+            TERM.fetch_add(1, Ordering::Relaxed);
+            core::arch::asm!("xor eax, eax", "mov dword ptr [eax], ecx", out("eax") _, in("ecx") 1);
+        }
+    }
+    XCPT_CONTINUE_SEARCH
+}
+
+unsafe extern "C" fn term_victim(_: u32) {
+    let mut r = rec(term_handler);
+    unsafe {
+        DosSetExceptionHandler(&mut r);
+        DosSleep(100_000);
+        DosUnsetExceptionHandler(&mut r);
+    }
+}
+
+unsafe extern "C" fn term_self(_: u32) {
+    let mut r = rec(term_handler);
+    unsafe {
+        DosSetExceptionHandler(&mut r);
+        DosExit(EXIT_THREAD, 0);
+    }
+}
+
+unsafe extern "C" fn term_faulty(_: u32) {
+    let mut r = rec(faulty_handler);
+    unsafe {
+        DosSetExceptionHandler(&mut r);
+        DosSleep(100_000);
     }
 }
 
