@@ -201,10 +201,15 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
         crate::batch::start(sh, &path, args);
         return Ok(None);
     }
-    // Arguments: "program\0arguments\0\0".
+    // Arguments: "program\0 arguments\0\0". The arguments keep the blank
+    // that separated them from the name, as with the OS/2 CMD.EXE; some
+    // programs (IBM LABEL) skip the first word otherwise.
     let mut block = Vec::new();
     block.extend_from_slice(name.as_bytes());
     block.push(0);
+    if !args.is_empty() && !args.starts_with([' ', '\t']) {
+        block.push(b' ');
+    }
     block.extend_from_slice(args.as_bytes());
     block.push(0);
     block.push(0);

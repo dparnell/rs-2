@@ -177,6 +177,10 @@ impl FileSystem for FatFs {
     fn set_label(&self, label: &str) -> Result<(), u32> {
         self.inner.vol.lock().set_label(label).map_err(map)
     }
+
+    fn device(&self) -> Option<Arc<dyn BlockDev>> {
+        Some(self.inner.vol.lock().dev.0.clone())
+    }
 }
 
 fn apply(e: &mut fat::Entry, info: &SetInfo) {

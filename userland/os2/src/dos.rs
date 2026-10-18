@@ -460,3 +460,66 @@ unsafe extern "C" {
     #[link_name = "DOSCALLS.276"]
     pub fn DosQueryFHState(hf: u32, state: *mut u32) -> APIRET;
 }
+
+pub const OPEN_FLAGS_DASD: u32 = 0x8000;
+pub const OPEN_FLAGS_FAIL_ON_ERROR: u32 = 0x2000;
+pub const OPEN_SHARE_DENYREADWRITE: u32 = 0x0010;
+pub const IOCTL_DISK: u32 = 8;
+pub const DSK_LOCKDRIVE: u32 = 0x00;
+pub const DSK_UNLOCKDRIVE: u32 = 0x01;
+pub const DSK_REDETERMINEMEDIA: u32 = 0x02;
+pub const DSK_WRITETRACK: u32 = 0x44;
+pub const DSK_GETDEVICEPARAMS: u32 = 0x63;
+pub const DSK_READTRACK: u32 = 0x64;
+
+/// BIOSPARAMETERBLOCK (DSK_GETDEVICEPARAMS).
+#[repr(C, packed)]
+#[derive(Default, Clone, Copy)]
+pub struct BiosParameterBlock {
+    pub bytes_per_sector: u16,
+    pub sectors_per_cluster: u8,
+    pub reserved_sectors: u16,
+    pub fats: u8,
+    pub root_entries: u16,
+    pub sectors: u16,
+    pub media: u8,
+    pub sectors_per_fat: u16,
+    pub sectors_per_track: u16,
+    pub heads: u16,
+    pub hidden_sectors: u32,
+    pub large_sectors: u32,
+    pub reserved: [u8; 6],
+    pub cylinders: u16,
+    pub device_type: u8,
+    pub device_attr: u16,
+}
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.284"]
+    pub fn DosDevIOCtl(
+        h: u32,
+        category: u32,
+        function: u32,
+        params: *mut u8,
+        cb_params: u32,
+        pcb_params: *mut u32,
+        data: *mut u8,
+        cb_data: u32,
+        pcb_data: *mut u32,
+    ) -> APIRET;
+    #[link_name = "DOSCALLS.222"]
+    pub fn DosSetFSInfo(disk: u32, level: u32, buf: *const u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.277"]
+    pub fn DosQueryFSAttach(dev: *const u8, ordinal: u32, level: u32, buf: *mut u8, pcb: *mut u32) -> APIRET;
+    /// DosGetMessage (DosTrueGetMessage).
+    #[link_name = "MSG.6"]
+    pub fn DosGetMessage(
+        table: *const *const u8,
+        count: u32,
+        buf: *mut u8,
+        cb: u32,
+        msgnum: u32,
+        file: *const u8,
+        pcb: *mut u32,
+    ) -> APIRET;
+}

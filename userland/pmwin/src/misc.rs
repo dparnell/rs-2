@@ -196,13 +196,6 @@ pub extern "C" fn WinRequestMutexSem(hmtx: u32, ms: u32) -> u32 {
     crate::lock::unlocked(|| unsafe { DosRequestMutexSem(hmtx, ms) })
 }
 
-/// WinOpenWindowDC(hwnd): device contexts are not separate objects yet;
-/// a window's DC is identified by the window.
-#[unsafe(no_mangle)]
-pub extern "C" fn WinOpenWindowDC(h: u32) -> u32 {
-    if st().desk.exists(h) { 0x1_0000 | h } else { 0 }
-}
-
 /// Presentation parameters are accepted and ignored (controls use the
 /// system colours and font).
 #[unsafe(no_mangle)]

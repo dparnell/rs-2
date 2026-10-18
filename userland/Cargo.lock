@@ -25,11 +25,22 @@ name = "gpi"
 version = "0.1.0"
 
 [[package]]
+name = "gpitest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "helpmgr-dll"
 version = "0.1.0"
 dependencies = [
  "os2",
 ]
+
+[[package]]
+name = "hpfs"
+version = "0.1.0"
 
 [[package]]
 name = "install"
@@ -84,5 +95,7 @@ dependencies = [
 name = "utils"
 version = "0.1.0"
 dependencies = [
+ "fat",
+ "hpfs",
  "os2",
 ]

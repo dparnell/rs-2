@@ -52,6 +52,7 @@ pub struct PsEntry {
     pub color_index: i32,
     pub back_index: i32,
     pub rgb_mode: bool,
+    pub gpi: crate::gpiapi::PsExtra,
 }
 
 pub struct Timer {

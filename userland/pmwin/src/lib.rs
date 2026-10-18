@@ -19,6 +19,8 @@ mod entry;
 mod exports;
 mod frame;
 mod gpiapi;
+mod gpiobj;
+mod gpitext;
 mod listbox;
 mod lock;
 mod menu;

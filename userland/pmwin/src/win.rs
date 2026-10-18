@@ -668,10 +668,7 @@ pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
     }
     pointer::hide(s);
     if hps != 0 {
-        if let Some(e) = gpiapi::entry(s, hps) {
-            e.ps.clip = clip;
-            e.ps.origin = o;
-        }
+        gpiapi::begin_paint(s, hps, h, o, clip);
         return hps;
     }
     gpiapi::create(s, h, o, clip)
@@ -680,7 +677,7 @@ pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
     let s = st();
-    gpiapi::destroy(s, hps);
+    gpiapi::end_paint(s, hps);
     pointer::show(s);
     1
 }
@@ -712,7 +709,7 @@ pub extern "C" fn WinFillRect(hps: u32, prcl: *const RectL, c: i32) -> u32 {
     let mut surface = s.surface;
     pointer::hide(s);
     let ok = gpiapi::entry(s, hps).map(|e| {
-        let rgb = if e.rgb_mode && c >= 0 { c as u32 } else { resolve(c) };
+        let rgb = gpiapi::rgb(e, c);
         e.ps.fill_rect(&mut surface, r, rgb);
     });
     pointer::show(s);
@@ -731,11 +728,11 @@ pub extern "C" fn WinInvalidateRect(h: u32, prcl: *const RectL, children: u32) -
     1
 }
 
-/// WinInvalidateRegion(hwnd, hrgn, fIncludeChildren): regions are not
-/// supported yet, so the whole window is invalidated.
+/// WinInvalidateRegion(hwnd, hrgn, fIncludeChildren): 0 = the whole
+/// window.
 #[unsafe(no_mangle)]
-pub extern "C" fn WinInvalidateRegion(h: u32, _hrgn: u32, children: u32) -> u32 {
-    WinInvalidateRect(h, core::ptr::null(), children)
+pub extern "C" fn WinInvalidateRegion(h: u32, hrgn: u32, children: u32) -> u32 {
+    crate::gpiobj::invalidate_region(h, hrgn, children != 0) as u32
 }
 
 #[unsafe(no_mangle)]

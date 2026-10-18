@@ -262,6 +262,7 @@ fn build(o: &Opts) -> Option<PathBuf> {
 const USER_PROGRAMS: &[(&str, &str)] =
     &[
         ("apitest", "RS2\\APITEST.EXE"),
+        ("gpitest", "RS2\\GPITEST.EXE"),
         ("testdll", "RS2\\TESTDLL.DLL"),
         ("cmd", "OS2\\CMD.EXE"),
         ("more", "OS2\\MORE.EXE"),
@@ -275,6 +276,11 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmgpi", "OS2\\DLL\\PMGPI.DLL"),
         ("pmctls", "OS2\\DLL\\PMCTLS.DLL"),
         ("helpmgr", "OS2\\DLL\\HELPMGR.DLL"),
+        ("label", "OS2\\LABEL.EXE"),
+        ("chkdsk", "OS2\\CHKDSK.EXE"),
+        ("format", "OS2\\FORMAT.EXE"),
+        ("mode", "OS2\\MODE.EXE"),
+        ("help", "OS2\\HELP.EXE"),
     ];
 
 /// Build the userland workspace and convert each program to LX.
