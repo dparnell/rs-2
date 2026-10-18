@@ -278,3 +278,14 @@ unsafe extern "C" {
     #[link_name = "DOSCALLS.260"]
     pub fn DosDupHandle(old: u32, new: *mut u32) -> APIRET;
 }
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.318"]
+    pub fn DosLoadModule(fail: *mut u8, cbfail: u32, name: *const u8, phmod: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.321"]
+    pub fn DosQueryProcAddr(hmod: u32, ordinal: u32, name: *const u8, ppfn: *mut usize) -> APIRET;
+    #[link_name = "DOSCALLS.322"]
+    pub fn DosFreeModule(hmod: u32) -> APIRET;
+    #[link_name = "DOSCALLS.319"]
+    pub fn DosQueryModuleHandle(name: *const u8, phmod: *mut u32) -> APIRET;
+}

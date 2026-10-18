@@ -145,7 +145,8 @@ fn build(o: &Opts) -> Option<PathBuf> {
 }
 
 /// Programs in userland/ to package, with their LX names.
-const USER_PROGRAMS: &[(&str, &str)] = &[("apitest", "RS2\\APITEST.EXE")];
+const USER_PROGRAMS: &[(&str, &str)] =
+    &[("apitest", "RS2\\APITEST.EXE"), ("testdll", "RS2\\TESTDLL.DLL")];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
@@ -164,12 +165,14 @@ fn build_userland() -> Option<image::FileList> {
     let mut files = Vec::new();
     for (bin, dest) in USER_PROGRAMS {
         let elf = ul.join("target/i686-unknown-linux-gnu/release").join(bin);
-        let lx = out_dir.join(format!("{}.exe", bin));
-        let ok = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
-            .current_dir(root())
-            .args(["run", "-q", "--release", "-p", "elf2lx", "--"])
-            .arg(&elf)
-            .arg(&lx)
+        let lx = out_dir.join(dest.rsplit('\\').next().unwrap());
+        let mut cmd = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
+        cmd.current_dir(root()).args(["run", "-q", "--release", "-p", "elf2lx", "--"]).arg(&elf).arg(&lx);
+        if dest.ends_with(".DLL") {
+            let defs = ul.join(bin).join("exports.def");
+            cmd.arg("--dll").arg("--exports").arg(defs);
+        }
+        let ok = cmd
             .status()
             .ok()?
             .success();

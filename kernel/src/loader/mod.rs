@@ -143,6 +143,8 @@ pub struct Module {
     /// DLL initialisation entry, if the module wants it.
     pub init: Option<Start>,
     pub per_process_init: bool,
+    /// Global (once per system) initialisation has run.
+    pub global_init_done: core::sync::atomic::AtomicBool,
     /// Kept for resources.
     pub image: Option<Arc<[u8]>>,
 }
@@ -236,6 +238,7 @@ pub fn init() {
             start: None,
             init: None,
             per_process_init: false,
+            global_init_done: core::sync::atomic::AtomicBool::new(true),
             image: None,
         }));
     }
@@ -277,9 +280,11 @@ pub fn attach(m: &Arc<Module>, space: &mut AddressSpace) -> Result<(), u32> {
     if m.format == Format::Virtual {
         return Ok(());
     }
-    if let Some(o) = m.objects.first() {
-        if space.region(o.base).is_some() {
-            return Ok(());
+    if m.is_dll {
+        if let Some(o) = m.objects.first() {
+            if space.region(o.base).is_some() {
+                return Ok(());
+            }
         }
     }
     if m.is_dll {
@@ -291,7 +296,7 @@ pub fn attach(m: &Arc<Module>, space: &mut AddressSpace) -> Result<(), u32> {
                 }
             } else {
                 space
-                    .alloc(o.size, o.prot | crate::vm::pag::COMMIT, o.seg, Some(o.base))
+                    .alloc_instance(o.base, o.size, o.prot | crate::vm::pag::COMMIT, o.seg)
                     .map_err(|_| err::NOT_ENOUGH_MEMORY)?;
                 if let Some(l) = o.limit {
                     space.set_seg_limit(o.base, l);

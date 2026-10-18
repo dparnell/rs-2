@@ -273,6 +273,7 @@ pub fn load(
         start: if dll { None } else { start_info },
         init: if dll { start_info } else { None },
         per_process_init: h.module_flags & mflags::PER_PROCESS_INIT != 0,
+        global_init_done: core::sync::atomic::AtomicBool::new(false),
         image: Some(data.clone()),
     }))
 }

@@ -13,6 +13,7 @@ pub mod doscalls;
 pub mod exceptions;
 pub mod file;
 pub mod kbdapi;
+pub mod module;
 pub mod msg;
 pub mod nls;
 pub mod proc;
@@ -194,6 +195,30 @@ pub struct Ctx<'a> {
 pub type Handler = fn(&mut Ctx) -> u32;
 
 impl Ctx<'_> {
+    /// Emulate the API's return to its caller now, with `result` in
+    /// EAX/AX (the far return and argument pop for 16-bit APIs).
+    pub fn complete_return(&mut self, result: u32) {
+        let stack = self.args_at - 4;
+        let ret = self.read_u32(stack).unwrap_or(0);
+        let f = &mut *self.f;
+        if self.is16 {
+            let argbytes: u32 = self.sig.iter().map(|&s| sigs::size(s)).sum();
+            f.rip = (ret & 0xffff) as u64;
+            f.cs = (ret >> 16) as u64;
+            let sp = (f.rsp as u32 & 0xffff).wrapping_add(4 + argbytes) & 0xffff;
+            f.rsp = (f.rsp & !0xffff) | sp as u64;
+            f.rax = (f.rax & !0xffff) | (result & 0xffff) as u64;
+            if let Some(dx) = self.dx {
+                f.rdx = (f.rdx & !0xffff) | dx as u64;
+            }
+        } else {
+            f.rip = ret as u64;
+            f.rsp = (f.rsp as u32).wrapping_add(4) as u64;
+            f.rax = result as u64;
+        }
+        self.no_return = true;
+    }
+
     pub fn space(&self) -> SpinGuard<'_, AddressSpace> {
         self.process.space.lock()
     }
@@ -334,6 +359,10 @@ pub fn dispatch(f: &mut TrapFrame) {
         process.exit(0, code);
         return;
     }
+    if module == 0 && ordinal == module::INIT_RETURN_ORDINAL {
+        module::returned(f, &process, &thread);
+        return;
+    }
     if module == 0 && ordinal == exceptions::HANDLER_RETURN_ORDINAL {
         exceptions::handler_returned(f, &process, &thread);
         return;
@@ -436,33 +465,6 @@ pub fn dispatch(f: &mut TrapFrame) {
     if ctx.no_return || thread.exit_requested() {
         return;
     }
-    let dx = ctx.dx;
-    let f = ctx.f;
-    // Emulate the return.
-    if is16 {
-        let ret = {
-            let mut b = [0u8; 4];
-            process.space.lock().read_bytes(stack_linear, &mut b);
-            u32::from_le_bytes(b)
-        };
-        let argbytes: u32 = sig.iter().map(|&s| sigs::size(s)).sum();
-        f.rip = (ret & 0xffff) as u64;
-        f.cs = (ret >> 16) as u64;
-        let sp = (f.rsp as u32 & 0xffff).wrapping_add(4 + argbytes) & 0xffff;
-        f.rsp = (f.rsp & !0xffff) | sp as u64;
-        f.rax = (f.rax & !0xffff) | (result & 0xffff) as u64;
-        if let Some(dx) = dx {
-            f.rdx = (f.rdx & !0xffff) | dx as u64;
-        }
-        let _ = ss_big;
-    } else {
-        let ret = {
-            let mut b = [0u8; 4];
-            process.space.lock().read_bytes(stack_linear, &mut b);
-            u32::from_le_bytes(b)
-        };
-        f.rip = ret as u64;
-        f.rsp = (f.rsp as u32).wrapping_add(4) as u64;
-        f.rax = result as u64;
-    }
+    let _ = ss_big;
+    ctx.complete_return(result);
 }

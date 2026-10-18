@@ -371,6 +371,27 @@ impl AddressSpace {
         Ok(base)
     }
 
+    /// Allocate per-process instance data for a DLL at the address its
+    /// module reserved in the shared arena.
+    pub fn alloc_instance(&mut self, base: u32, size: u32, flags: u32, seg: SegKind) -> Result<u32, VmError> {
+        let size = size.next_multiple_of(PAGE);
+        let end = base + size.next_multiple_of(TILE);
+        if self.regions.values().any(|r| base < r.reserved_end() && r.base < end) {
+            return Err(VmError::InvalidAddress);
+        }
+        let state = if flags & pag::COMMIT != 0 { PageState::Committed } else { PageState::Reserved };
+        self.insert(Region {
+            base,
+            size,
+            flags,
+            pages: vec![state; (size / PAGE) as usize],
+            backing: Backing::Private,
+            seg,
+            seg_limit: None,
+        });
+        Ok(base)
+    }
+
     /// Map a shared object (it already has an address in the shared arena).
     pub fn map_shared(&mut self, obj: Arc<SharedMem>, flags: u32, seg: SegKind) {
         self.insert(Region {

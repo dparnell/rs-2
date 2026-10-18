@@ -138,6 +138,12 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 418) => ok, // DosAcknowledgeSignalException
         (0, 16) => file::dos16_make_pipe,
         (0, 239) => file::dos_create_pipe,
+        (0, 44) | (0, 318) => super::module::dos_load_module,
+        (0, 45) => super::module::dos16_get_proc_addr,
+        (0, 46) | (0, 322) => super::module::dos_free_module,
+        (0, 163) | (0, 323) => super::module::dos_query_app_type,
+        (0, 321) => super::module::dos_query_proc_addr,
+        (0, 586) => super::module::dos_query_proc_type,
         (0, 690) => ok, // DosSMSetTitle
         (0, 712) => dos16_sm_pm_present,
         // ---- 16-bit DOSCALLS ----

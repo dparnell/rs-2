@@ -65,6 +65,8 @@ pub struct Thread {
     /// Exceptions being dispatched to this thread's handlers (innermost
     /// last).
     pub xcpt: crate::sync::SpinLock<alloc::vec::Vec<crate::api::exceptions::Dispatch>>,
+    /// DLL init/term routines running on this thread.
+    pub init_run: crate::sync::SpinLock<Option<crate::api::module::InitRun>>,
     /// Saved FPU/SSE state while the thread is switched out.
     pub fpu: UnsafeCell<Box<FpuState>>,
 }
@@ -94,6 +96,7 @@ impl Thread {
             exit_requested: AtomicBool::new(false),
             xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
             fpu: UnsafeCell::new(FpuState::initial()),
+            init_run: crate::sync::SpinLock::new(None),
         })
     }
 
@@ -117,6 +120,7 @@ impl Thread {
             exit_requested: AtomicBool::new(false),
             xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
             fpu: UnsafeCell::new(FpuState::initial()),
+            init_run: crate::sync::SpinLock::new(None),
         });
         // Initial kernel stack: TrapFrame at the top, below it a
         // switch_stacks frame returning into thread_trampoline.

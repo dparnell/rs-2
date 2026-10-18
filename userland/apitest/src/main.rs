@@ -31,6 +31,7 @@ fn main(s: &Startup) -> u32 {
     threads_and_sems();
     exceptions();
     pipes();
+    dlls();
     exit_list();
     let f = FAILS.load(Ordering::Relaxed);
     println!("apitest done: {f} failure(s)");
@@ -254,4 +255,32 @@ unsafe extern "C" fn on_exit(code: u32) {
 fn exit_list() {
     let rc = unsafe { DosExitList(EXLST_ADD | 0x100, on_exit) };
     check("DosExitList add", rc == 0);
+}
+
+unsafe extern "C" {
+    #[link_name = "TESTDLL.1"]
+    fn TestAdd(a: u32, b: u32) -> u32;
+    #[link_name = "TESTDLL.TestInitCount"]
+    fn TestInitCount() -> u32;
+}
+
+fn dlls() {
+    unsafe {
+        check("import by ordinal", TestAdd(40, 2) == 42);
+        check("DLL init ran once", TestInitCount() == 1);
+        let mut h = 0;
+        let rc = DosLoadModule(null_mut(), 0, b"TESTDLL\0".as_ptr(), &mut h);
+        check("DosLoadModule", rc == 0 && h != 0);
+        let mut h2 = 0;
+        check("DosQueryModuleHandle", DosQueryModuleHandle(b"TESTDLL\0".as_ptr(), &mut h2) == 0 && h2 == h);
+        let mut pfn: usize = 0;
+        let rc = DosQueryProcAddr(h, 0, b"TestGreeting\0".as_ptr(), &mut pfn);
+        let greet: extern "C" fn() -> *const u8 = core::mem::transmute(pfn);
+        let p = greet();
+        check("DosQueryProcAddr by name", rc == 0 && *p == b'h');
+        check("init not repeated", TestInitCount() == 1);
+        let rc = DosLoadModule(null_mut(), 0, b"NOSUCH\0".as_ptr(), &mut h2);
+        check("DosLoadModule missing", rc == 2 || rc == 126);
+        check("DosFreeModule", DosFreeModule(h) == 0);
+    }
 }

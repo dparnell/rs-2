@@ -59,6 +59,8 @@ pub struct Process {
     /// Woken when one of this process's threads ends, resumes or the
     /// critical section is released.
     pub thread_waiters: WaitQueue,
+    /// DLLs with per-process initialisation that have run it here.
+    pub inited: SpinLock<Vec<u16>>,
     /// Exit list routines: (order, address, 16-bit).
     pub exitlist: SpinLock<Vec<(u8, u32, bool)>>,
     /// Thread running the exit list (0 = none) and whether it should
@@ -209,6 +211,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         child_waiters: WaitQueue::new(),
         thread_waiters: WaitQueue::new(),
         critsec: SpinLock::new((0, 0)),
+        inited: SpinLock::new(Vec::new()),
         exitlist: SpinLock::new(Vec::new()),
         exitlist_tid: AtomicU32::new(0),
         exitlist_next: core::sync::atomic::AtomicBool::new(false),
@@ -224,6 +227,9 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         let mut sp = proc.space.lock();
         write_linfoseg(&proc, &mut sp, &start, &exe, &t, env, cmd_off);
     }
+    // DLL initialisation runs on thread 1 before the entry point.
+    let calls = crate::api::module::init_order(core::slice::from_ref(&exe), &proc);
+    crate::api::module::start(&proc, &t, t.user_frame(), calls, true, None);
     PROCESSES.lock().push(proc.clone());
     sched::start(t);
     Ok(proc)
