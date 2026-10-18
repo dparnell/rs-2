@@ -168,6 +168,11 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 301) => super::shmem::dos_get_named_shared_mem,
         (0, 302) => super::shmem::dos_get_shared_mem,
         (0, 303) => super::shmem::dos_give_shared_mem,
+        (0, 155) => super::resource::dos16_get_resource,
+        (0, 207) => super::resource::dos16_get_resource2,
+        (0, 208) | (0, 353) => super::resource::dos_free_resource,
+        (0, 352) => super::resource::dos_get_resource,
+        (0, 572) => super::resource::dos_query_resource_size,
         (0, 690) => ok, // DosSMSetTitle
         (0, 712) => dos16_sm_pm_present,
         // ---- 16-bit DOSCALLS ----

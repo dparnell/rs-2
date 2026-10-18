@@ -46,7 +46,7 @@ impl WaitQueue {
             }
             sched::block(deadline);
             self.waiters.lock().retain(|t| !Arc::ptr_eq(t, &me));
-            if me.exit_requested() {
+            if me.exit_requested() || me.interrupted() {
                 return false;
             }
             if me.timed_out() && !ready() {
@@ -127,6 +127,10 @@ pub fn before_user_return(f: &mut TrapFrame) -> bool {
     let Some(p) = t.process() else { return false };
     crate::api::proc::hold_if_needed(&t, &p);
     if crate::api::proc::exit_list_step(&t, &p, f) || t.exit_requested() {
+        return true;
+    }
+    crate::api::signal::deliver(&t, &p, f);
+    if t.exit_requested() {
         return true;
     }
     let space = p.space.lock();

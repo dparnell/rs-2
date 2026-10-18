@@ -18,6 +18,8 @@ pub mod msg;
 pub mod nls;
 pub mod proc;
 pub mod queue;
+pub mod resource;
+pub mod signal;
 pub mod sem;
 pub mod shmem;
 pub mod timer;

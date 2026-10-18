@@ -75,6 +75,8 @@ pub struct Process {
     pub loaded: SpinLock<Vec<(Arc<Module>, u32)>>,
     /// Logical video buffer (VioGetBuf), 0 if none.
     pub lvb: SpinLock<u32>,
+    /// Signal waiting for delivery to thread 1.
+    pub pending_signal: SpinLock<Option<u32>>,
     /// 16-bit signal handlers: (far handler, action) per signal number.
     pub signals: SpinLock<[(u32, u32); 8]>,
     /// Open directory searches (DosFindFirst handles).
@@ -220,6 +222,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         searches: SpinLock::new(alloc::collections::BTreeMap::new()),
         lvb: SpinLock::new(0),
         signals: SpinLock::new([(0, 0); 8]),
+        pending_signal: SpinLock::new(None),
     });
     let stack_bottom = stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000));
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;

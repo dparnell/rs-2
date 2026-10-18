@@ -62,6 +62,8 @@ pub struct Thread {
     /// Set when the thread must terminate at its next return to user mode
     /// (or when its current wait is interrupted).
     exit_requested: AtomicBool,
+    /// A signal is pending: blocking waits return early.
+    interrupted: AtomicBool,
     /// Exceptions being dispatched to this thread's handlers (innermost
     /// last).
     pub xcpt: crate::sync::SpinLock<alloc::vec::Vec<crate::api::exceptions::Dispatch>>,
@@ -94,6 +96,7 @@ impl Thread {
             idle: true,
             suspend: AtomicU32::new(0),
             exit_requested: AtomicBool::new(false),
+            interrupted: AtomicBool::new(false),
             xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
             fpu: UnsafeCell::new(FpuState::initial()),
             init_run: crate::sync::SpinLock::new(None),
@@ -118,6 +121,7 @@ impl Thread {
             idle: false,
             suspend: AtomicU32::new(0),
             exit_requested: AtomicBool::new(false),
+            interrupted: AtomicBool::new(false),
             xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
             fpu: UnsafeCell::new(FpuState::initial()),
             init_run: crate::sync::SpinLock::new(None),
@@ -206,6 +210,18 @@ impl Thread {
 
     pub fn request_exit(&self) {
         self.exit_requested.store(true, Ordering::Release);
+    }
+
+    pub fn interrupt(&self) {
+        self.interrupted.store(true, Ordering::Release);
+    }
+
+    pub fn clear_interrupt(&self) {
+        self.interrupted.store(false, Ordering::Release);
+    }
+
+    pub fn interrupted(&self) -> bool {
+        self.interrupted.load(Ordering::Acquire)
     }
 
     pub fn exit_requested(&self) -> bool {

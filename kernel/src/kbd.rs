@@ -64,6 +64,15 @@ fn irq(_f: &mut TrapFrame) {
         translate(&mut s, sc)
     };
     if let Some(k) = ev {
+        let ctrl = k.shift & shift::CONTROL != 0;
+        if k.ch == 3 && ctrl {
+            crate::api::signal::keyboard(crate::api::signal::SIG_CTRLC);
+            return;
+        }
+        if ctrl && k.scan == 0x46 {
+            crate::api::signal::keyboard(crate::api::signal::SIG_CTRLBREAK);
+            return;
+        }
         STATE.lock().queue.push_back(k);
         WAITERS.wake_all();
     }
@@ -166,7 +175,10 @@ pub fn get_key(wait: bool) -> Option<KeyInfo> {
         if !wait {
             return None;
         }
-        WAITERS.wait_until(None, || !STATE.lock().queue.is_empty());
+        if !WAITERS.wait_until(None, || !STATE.lock().queue.is_empty()) {
+            // Interrupted by a signal or termination.
+            return None;
+        }
     }
 }
 
@@ -187,7 +199,10 @@ pub fn shift_state() -> u16 {
 pub fn read_line(max: usize) -> Vec<u8> {
     let mut line: Vec<u8> = Vec::new();
     loop {
-        let Some(k) = get_key(true) else { continue };
+        let Some(k) = get_key(true) else {
+            // Interrupted: return what we have.
+            return line;
+        };
         match k.ch {
             b'\r' => {
                 crate::console::write(b"\r\n");

@@ -60,7 +60,9 @@ pub fn kbd_string_in(c: &mut Ctx) -> u32 {
     } else {
         let echo = mask & ECHO_OFF == 0;
         loop {
-            let Some(k) = kbd::get_key(true) else { break };
+            let Some(k) = kbd::get_key(true) else {
+                return err::INTERRUPT;
+            };
             match k.ch {
                 ch if ch as u16 == turnaround => break,
                 8 => {

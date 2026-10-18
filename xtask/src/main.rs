@@ -263,7 +263,18 @@ fn run(o: &Opts) -> bool {
 /// QEMU key names for a string.
 fn keys(s: &str) -> Vec<String> {
     let mut v = Vec::new();
+    let mut ctrl = false;
     for ch in s.chars() {
+        // "^X" sends Ctrl+X.
+        if ch == '^' && !ctrl {
+            ctrl = true;
+            continue;
+        }
+        if ctrl {
+            ctrl = false;
+            v.push(format!("ctrl-{}", ch.to_ascii_lowercase()));
+            continue;
+        }
         let k = match ch {
             'a'..='z' | '0'..='9' => ch.to_string(),
             'A'..='Z' => format!("shift-{}", ch.to_ascii_lowercase()),
