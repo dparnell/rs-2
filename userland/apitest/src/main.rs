@@ -12,6 +12,8 @@ use os2::*;
 
 os2::entry!(main);
 
+mod console;
+
 static FAILS: AtomicU32 = AtomicU32::new(0);
 
 fn check(name: &str, ok: bool) {
@@ -38,6 +40,7 @@ fn main(s: &Startup) -> u32 {
     shared_memory();
     queues();
     sessions();
+    console::run();
     exit_list();
     let f = FAILS.load(Ordering::Relaxed);
     println!("apitest done: {f} failure(s)");

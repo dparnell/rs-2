@@ -153,7 +153,7 @@ fn program(base: u16, p: &Port) {
         outb(base, div as u8);
         outb(base + 1, (div >> 8) as u8);
         outb(base + 3, lcr);
-        outb(base + 2, 0xc7); // FIFO on, cleared, 14-byte trigger
+        outb(base + 2, 0xc1); // FIFO on, 14-byte trigger (pending input kept)
         outb(base + 4, p.mcr | 0x08);
         outb(base + 1, if p.irq_on { 0x01 } else { 0x00 });
     }
