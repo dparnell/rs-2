@@ -1,9 +1,11 @@
 [package]
 name = "utils"
-description = "rs2 base utilities: MORE, FIND, SORT, ATTRIB, TREE, XCOPY"
+description = "rs2 base utilities: MORE, FIND, SORT, ATTRIB, TREE, XCOPY, LABEL, CHKDSK, FORMAT, MODE, HELP"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
 
 [dependencies]
 os2 = { path = "../os2" }
+fat = { path = "../../crates/fat" }
+hpfs = { path = "../../crates/hpfs" }

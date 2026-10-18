@@ -96,6 +96,10 @@ pub trait FileSystem: Send + Sync {
     fn max_component(&self) -> usize {
         255
     }
+    /// The volume's block device, for DASD access and remounting.
+    fn device(&self) -> Option<Arc<dyn block::BlockDev>> {
+        None
+    }
 }
 
 pub trait FsFile: Send + Sync {
@@ -118,6 +122,9 @@ pub fn mount(drive: u8, fs: Arc<dyn FileSystem>) {
 }
 
 pub fn drive(d: u8) -> Option<Arc<dyn FileSystem>> {
+    if locked_by_other(d) {
+        return None;
+    }
     DRIVES.lock().get(d as usize).cloned().flatten()
 }
 
@@ -128,7 +135,158 @@ pub fn drive_map() -> u32 {
 
 /// The file system for a path, or ERROR_INVALID_DRIVE.
 pub fn fs_of(p: &FullPath) -> Result<Arc<dyn FileSystem>, u32> {
+    if locked_by_other(p.drive) {
+        return Err(err::DRIVE_LOCKED);
+    }
     drive(p.drive).ok_or(err::INVALID_DRIVE)
+}
+
+// ---- Volume locking and remounting (DASD access) ----
+
+/// Process holding DSK_LOCKDRIVE on each drive (0 = not locked).
+static LOCKS: SpinLock<[u32; 26]> = SpinLock::new([0; 26]);
+
+fn current_pid() -> u32 {
+    crate::task::sched::current_opt().and_then(|t| t.process()).map_or(0, |p| p.pid)
+}
+
+/// True if another process has locked drive `d`.
+pub fn locked_by_other(d: u8) -> bool {
+    let owner = LOCKS.lock().get(d as usize).copied().unwrap_or(0);
+    owner != 0 && owner != current_pid()
+}
+
+/// DSK_LOCKDRIVE: fails while files are open on the drive.
+pub fn lock_drive(d: u8) -> Result<(), u32> {
+    let prefix = alloc::format!("{}:", (b'A' + d) as char);
+    if SHARES.lock().keys().any(|k| k.starts_with(&prefix)) {
+        return Err(err::DRIVE_LOCKED);
+    }
+    let pid = current_pid();
+    let mut l = LOCKS.lock();
+    if l[d as usize] != 0 && l[d as usize] != pid {
+        return Err(err::DRIVE_LOCKED);
+    }
+    l[d as usize] = pid;
+    Ok(())
+}
+
+pub fn unlock_drive(d: u8) {
+    LOCKS.lock()[d as usize] = 0;
+}
+
+/// Recognise the file system on `dev`: the boot sector names HPFS
+/// volumes, otherwise FAT is tried first. A volume nothing recognises is
+/// still mounted so that FORMAT can open it.
+pub fn probe_volume(dev: Arc<dyn block::BlockDev>) -> Arc<dyn FileSystem> {
+    let mut bs = alloc::vec![0u8; dev.sector_size().max(512)];
+    let hpfs_boot = dev.read(0, &mut bs).is_ok() && &bs[54..58] == b"HPFS";
+    if !hpfs_boot {
+        if let Ok(fs) = fatfs::FatFs::mount(dev.clone()) {
+            return fs;
+        }
+    }
+    if hpfsfs::probe(&dev) {
+        if let Ok(fs) = hpfsfs::HpfsFs::mount(dev.clone()) {
+            return fs;
+        }
+    }
+    if hpfs_boot {
+        if let Ok(fs) = fatfs::FatFs::mount(dev.clone()) {
+            return fs;
+        }
+    }
+    Arc::new(Unformatted(dev))
+}
+
+/// Mount drive `d` again after its volume was rewritten (FORMAT, CHKDSK /F).
+pub fn remount(d: u8) -> Result<(), u32> {
+    let dev = DRIVES.lock()[d as usize].as_ref().and_then(|f| f.device()).ok_or(err::INVALID_DRIVE)?;
+    let fs = probe_volume(dev);
+    crate::trace!("drive {}: remounted ({})", (b'A' + d) as char, fs.name());
+    DRIVES.lock()[d as usize] = Some(fs);
+    Ok(())
+}
+
+/// A volume without a recognised file system.
+struct Unformatted(Arc<dyn block::BlockDev>);
+
+impl FileSystem for Unformatted {
+    fn name(&self) -> &'static str {
+        "UNKNOWN"
+    }
+    fn stat(&self, _: &str) -> Result<FileInfo, u32> {
+        Err(err::NOT_READY)
+    }
+    fn list(&self, _: &str) -> Result<Vec<FileInfo>, u32> {
+        Err(err::NOT_READY)
+    }
+    fn open(&self, _: &str) -> Result<Arc<dyn FsFile>, u32> {
+        Err(err::NOT_READY)
+    }
+    fn create(&self, _: &str, _: u32) -> Result<Arc<dyn FsFile>, u32> {
+        Err(err::NOT_READY)
+    }
+    fn delete(&self, _: &str) -> Result<(), u32> {
+        Err(err::NOT_READY)
+    }
+    fn mkdir(&self, _: &str) -> Result<(), u32> {
+        Err(err::NOT_READY)
+    }
+    fn rmdir(&self, _: &str) -> Result<(), u32> {
+        Err(err::NOT_READY)
+    }
+    fn rename(&self, _: &str, _: &str) -> Result<(), u32> {
+        Err(err::NOT_READY)
+    }
+    fn set_info(&self, _: &str, _: &SetInfo) -> Result<(), u32> {
+        Err(err::NOT_READY)
+    }
+    fn volume(&self) -> Result<VolumeInfo, u32> {
+        Err(err::NOT_READY)
+    }
+    fn device(&self) -> Option<Arc<dyn block::BlockDev>> {
+        Some(self.0.clone())
+    }
+}
+
+/// A drive opened with OPEN_FLAGS_DASD: the volume as a sequence of
+/// sectors. Closing the last handle releases a lock taken through it and
+/// remounts the volume if it was written.
+pub struct Dasd {
+    pub drive: u8,
+    pub dev: Arc<dyn block::BlockDev>,
+    pub pos: SpinLock<u64>,
+    pub locked: core::sync::atomic::AtomicBool,
+    pub written: core::sync::atomic::AtomicBool,
+}
+
+impl Dasd {
+    pub fn new(drive: u8, dev: Arc<dyn block::BlockDev>) -> Arc<Dasd> {
+        Arc::new(Dasd {
+            drive,
+            dev,
+            pos: SpinLock::new(0),
+            locked: core::sync::atomic::AtomicBool::new(false),
+            written: core::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    /// Remount if the volume was written since the last remount.
+    pub fn remount_if_written(&self) {
+        if self.written.swap(false, Ordering::Relaxed) {
+            let _ = remount(self.drive);
+        }
+    }
+}
+
+impl Drop for Dasd {
+    fn drop(&mut self) {
+        if self.locked.load(Ordering::Relaxed) {
+            unlock_drive(self.drive);
+        }
+        self.remount_if_written();
+    }
 }
 
 /// Current time as an FDATE/FTIME pair.
@@ -269,6 +427,8 @@ pub enum Handle {
     PhysDisk(u32),
     /// The DOS$ device (reboot IOCtl).
     DosDev,
+    /// A logical drive opened for DASD access.
+    Drive(Arc<Dasd>),
 }
 
 impl Handle {

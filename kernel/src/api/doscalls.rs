@@ -219,6 +219,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 873) | (0, 998) => super::module::dos_set_ext_libpath,
         (0, 874) | (0, 999) => super::module::dos_query_ext_libpath,
         (0, 53) | (0, 284) => super::ioctl::dos_dev_ioctl,
+        (0, 99) => super::ioctl::dos16_dev_ioctl2,
         (0, 129) | (0, 287) => super::ioctl::dos_physical_disk,
         (0, 206) | (0, 415) => ok, // DosShutdown: file systems write through
         (0, 690) => ok, // DosSMSetTitle

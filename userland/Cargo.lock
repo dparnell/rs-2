@@ -25,6 +25,10 @@ name = "gpi"
 version = "0.1.0"
 
 [[package]]
+name = "hpfs"
+version = "0.1.0"
+
+[[package]]
 name = "install"
 version = "0.1.0"
 dependencies = [
@@ -70,5 +74,7 @@ dependencies = [
 name = "utils"
 version = "0.1.0"
 dependencies = [
+ "fat",
+ "hpfs",
  "os2",
 ]

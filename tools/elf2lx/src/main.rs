@@ -138,6 +138,7 @@ const OBJ_WRITE: u32 = 0x0002;
 const OBJ_EXEC: u32 = 0x0004;
 const OBJ_SHARED: u32 = 0x0010;
 const OBJ_BIG: u32 = 0x2000;
+const OBJ_ALIAS16: u32 = 0x1000;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -208,8 +209,9 @@ fn main() -> ExitCode {
                 data[at..at + from.len()].copy_from_slice(from);
             }
         }
+        // Code gets 16:16 (code) aliases so programs can thunk to 16-bit APIs.
         let flags = OBJ_READ | OBJ_BIG | match g.0 {
-            0 => OBJ_EXEC,
+            0 => OBJ_EXEC | OBJ_ALIAS16,
             1 => OBJ_WRITE,
             _ => OBJ_WRITE | OBJ_SHARED,
         };

@@ -273,6 +273,11 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("install", "OS2\\INSTALL.EXE"),
         ("pmwin", "OS2\\DLL\\PMWIN.DLL"),
         ("pmgpi", "OS2\\DLL\\PMGPI.DLL"),
+        ("label", "OS2\\LABEL.EXE"),
+        ("chkdsk", "OS2\\CHKDSK.EXE"),
+        ("format", "OS2\\FORMAT.EXE"),
+        ("mode", "OS2\\MODE.EXE"),
+        ("help", "OS2\\HELP.EXE"),
     ];
 
 /// Build the userland workspace and convert each program to LX.

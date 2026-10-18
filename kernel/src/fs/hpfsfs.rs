@@ -220,6 +220,10 @@ impl FileSystem for HpfsFs {
     fn set_label(&self, label: &str) -> Result<(), u32> {
         self.inner.vol.lock().set_label(label).map_err(map)
     }
+
+    fn device(&self) -> Option<Arc<dyn BlockDev>> {
+        Some(self.inner.vol.lock().dev.0.clone())
+    }
 }
 
 fn apply(e: &mut hpfs::Entry, info: &SetInfo) {
