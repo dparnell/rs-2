@@ -62,6 +62,19 @@ pub fn init() {
         }
         parts.extend(found);
     }
+    // The boot partition is C:.
+    let boot = crate::boot_info().boot_device;
+    if boot.kind == 1 {
+        if let Some(i) = parts.iter().position(|p| p.start == boot.start && p.count == boot.size) {
+            let p = parts.remove(i);
+            match crate::fs::fatfs::FatFs::mount(Arc::new(p)) {
+                Ok(fs) => crate::fs::mount(2, fs),
+                Err(e) => crate::println!("boot partition: cannot mount ({e})"),
+            }
+        } else {
+            crate::println!("boot partition not found (start {})", boot.start);
+        }
+    }
     // Primary partitions, then logical drives.
     parts.sort_by_key(|p| !p.primary);
     for p in parts {

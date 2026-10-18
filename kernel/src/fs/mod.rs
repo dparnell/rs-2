@@ -340,6 +340,11 @@ pub fn find_module(name: &str) -> Option<(String, Arc<[u8]>)> {
 /// `X.IMG` becomes drive X:.
 pub fn init(info: &bootinfo::BootInfo) {
     set_libpath("C:\\OS2\\DLL;C:\\OS2;C:\\;C:\\OS2\\APPS\\DLL;C:\\RS2");
+    // Booted from a disk partition: that partition becomes C: (mounted by
+    // the storage drivers), so no RAM disk.
+    if info.boot_device.kind == 1 {
+        return;
+    }
     for m in info.modules() {
         let name = m.name().to_ascii_uppercase();
         let Some(letter) = name.strip_suffix(".IMG") else { continue };

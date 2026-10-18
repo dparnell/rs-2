@@ -14,7 +14,7 @@ use core::ffi::c_void;
 use core::fmt::{self, Write};
 use core::ptr;
 
-use bootinfo::{BootInfo, Framebuffer, MemoryKind, MemoryRegion, Module, KERNEL_BASE, PHYS_MAP_BASE};
+use bootinfo::{BootDevice, BootInfo, Framebuffer, MemoryKind, MemoryRegion, Module, KERNEL_BASE, PHYS_MAP_BASE};
 use efi::*;
 
 static mut ST: *mut SystemTable = ptr::null_mut();
@@ -280,6 +280,39 @@ fn build_page_tables(kernel: &Kernel, phys_top: u64) -> u64 {
     pml4 as u64
 }
 
+/// Walk the boot device's device path for a hard drive or CD-ROM node.
+fn boot_device(device: Handle) -> BootDevice {
+    let mut bd = BootDevice::default();
+    let mut dp: *mut c_void = ptr::null_mut();
+    if (bs().handle_protocol)(device, &DEVICE_PATH_GUID, &mut dp) != SUCCESS {
+        return bd;
+    }
+    let mut p = dp as *const u8;
+    unsafe {
+        loop {
+            let ty = *p;
+            let sub = *p.add(1);
+            let len = u16::from_le_bytes([*p.add(2), *p.add(3)]) as usize;
+            if ty == 0x7f || len < 4 {
+                break;
+            }
+            if ty == 4 && sub == 1 && len >= 42 {
+                // Media / Hard Drive node.
+                bd.kind = 1;
+                bd.partition = (p.add(4) as *const u32).read_unaligned();
+                bd.start = (p.add(8) as *const u64).read_unaligned();
+                bd.size = (p.add(16) as *const u64).read_unaligned();
+                core::ptr::copy_nonoverlapping(p.add(24), bd.signature.as_mut_ptr(), 16);
+                bd.sig_type = *p.add(41);
+            } else if ty == 4 && sub == 2 && bd.kind == 0 {
+                bd.kind = 2;
+            }
+            p = p.add(len);
+        }
+    }
+    bd
+}
+
 fn find_rsdp() -> u64 {
     let s = st();
     let tables = unsafe { core::slice::from_raw_parts(s.config_table, s.table_count) };
@@ -338,6 +371,7 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
     let mut root = ptr::null_mut();
     check(unsafe { ((*(fs as *mut SimpleFs)).open_volume)(fs as *mut SimpleFs, &mut root) }, "OpenVolume");
     let root = Dir(root);
+    let boot_dev = boot_device(device);
 
     let info_pages = core::mem::size_of::<BootInfo>().div_ceil(4096);
     let info_phys = alloc_pages(info_pages);
@@ -362,6 +396,8 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
     }
     load_modules(&root, info);
     info.rsdp = find_rsdp();
+    info.boot_device = boot_dev;
+    println!("  boot device kind {} partition {} start {}", boot_dev.kind, boot_dev.partition, boot_dev.start);
     info.framebuffer = setup_framebuffer();
 
     // Kernel stack: 256 KB, reached through the direct map.

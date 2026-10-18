@@ -36,6 +36,10 @@ struct Opts {
     iso: Option<PathBuf>,
     /// Attach this raw disk image as an extra hard disk.
     hdd: Option<PathBuf>,
+    /// `disk`: make an installed-system disk.
+    system: bool,
+    /// `run`: boot from the --hdd disk only (no ESP directory).
+    boot_hdd: bool,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -50,6 +54,8 @@ fn parse(args: &[String]) -> Opts {
         type_at: None,
         iso: None,
         hdd: None,
+        system: false,
+        boot_hdd: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -64,6 +70,8 @@ fn parse(args: &[String]) -> Opts {
                 i += 1;
                 o.screenshot = Some(PathBuf::from(&args[i]));
             }
+            "--system" => o.system = true,
+            "--boot-hdd" => o.boot_hdd = true,
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
@@ -107,10 +115,22 @@ fn main() -> ExitCode {
         "run" => build(&o).is_some_and(|_| run(&o)),
         "iso" => build(&o).is_some_and(|esp| iso(&o, &esp)),
         "disk" => {
-            // A test hard disk from work/disk.txt (same manifest format).
-            let files = std::fs::read_to_string(root().join("work/disk.txt"))
+            // A test hard disk from work/disk.txt (same manifest format);
+            // with --system, an installed system: the ESP tree plus the
+            // boot volume files in one bootable FAT partition.
+            let mut files = std::fs::read_to_string(root().join("work/disk.txt"))
                 .map(|t| image::manifest(&root(), &t))
                 .unwrap_or_default();
+            if o.system {
+                let Some(esp) = build(&o) else { return ExitCode::FAILURE };
+                files.clear();
+                walk(&esp, "", &mut files);
+                files.retain(|(_, d)| !d.ends_with("C.IMG"));
+                files.extend(build_userland().unwrap_or_default());
+                if let Ok(t) = std::fs::read_to_string(root().join("work/modules.txt")) {
+                    files.extend(image::manifest(&root(), &t));
+                }
+            }
             let out = o.output.clone().unwrap_or_else(|| root().join("work/disk.img"));
             std::fs::write(&out, image::disk(&files, "RS2DISK", 64)).unwrap();
             println!("wrote {}", out.display());
@@ -251,6 +271,7 @@ fn run(o: &Opts) -> bool {
         .arg(format!("if=pflash,format=raw,file={}", vars.display()))
         .args(match &o.iso {
             Some(iso) => vec!["-cdrom".to_string(), iso.display().to_string()],
+            None if o.boot_hdd => vec![],
             None => vec!["-drive".to_string(), format!("format=raw,file=fat:rw:{}", work.join("esp").display())],
         })
         .arg("-monitor")

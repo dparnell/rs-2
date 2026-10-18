@@ -70,6 +70,24 @@ impl Module {
     }
 }
 
+/// The device the loader was started from (from its UEFI device path).
+#[derive(Debug, Clone, Copy, Default)]
+#[repr(C)]
+pub struct BootDevice {
+    /// 0 = unknown, 1 = hard disk partition, 2 = CD-ROM (El Torito).
+    pub kind: u32,
+    /// Partition number (1-based) for hard disks.
+    pub partition: u32,
+    /// Start and size of the partition in 512-byte sectors.
+    pub start: u64,
+    pub size: u64,
+    /// MBR disk signature (first 4 bytes) or GPT partition GUID.
+    pub signature: [u8; 16],
+    /// 1 = MBR, 2 = GPT.
+    pub sig_type: u8,
+    pub _pad: [u8; 7],
+}
+
 #[repr(C)]
 pub struct BootInfo {
     pub magic: u64,
@@ -85,6 +103,7 @@ pub struct BootInfo {
     /// Physical address and size of the kernel image as loaded.
     pub kernel_phys: u64,
     pub kernel_len: u64,
+    pub boot_device: BootDevice,
 }
 
 impl BootInfo {
