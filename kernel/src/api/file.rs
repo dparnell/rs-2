@@ -132,6 +132,25 @@ pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
     (status, n as u32)
 }
 
+/// DosReadAsync / DosWriteAsync(hf, phsemRam, pusErrCode, pvBuf, cbBuf,
+/// pcbBytes): done synchronously, then the RAM semaphore is cleared.
+fn async_io(c: &mut Ctx, write: bool) -> u32 {
+    let (hf, psem, perr, buf, cb, pn) = (c.arg(0), c.ptr(1), c.ptr(2), c.ptr(3), c.arg(4), c.ptr(5));
+    let (e, n) = if write { write_handle(c, hf, buf, cb) } else { read_handle(c, hf, buf, cb) };
+    c.write_u16(perr, e as u16);
+    c.write_u16(pn, n as u16);
+    super::sem::clear_ram16(c, psem);
+    0
+}
+
+pub fn dos16_read_async(c: &mut Ctx) -> u32 {
+    async_io(c, false)
+}
+
+pub fn dos16_write_async(c: &mut Ctx) -> u32 {
+    async_io(c, true)
+}
+
 pub fn dos16_write(c: &mut Ctx) -> u32 {
     let (e, n) = write_handle(c, c.arg(0), c.ptr(1), c.arg(2));
     c.write_u16(c.ptr(3), n as u16);
@@ -610,6 +629,9 @@ fn path_op(c: &Ctx, arg: usize, op: impl FnOnce(&dyn fs::FileSystem, &FullPath) 
         Ok(p) => p,
         Err(e) => return e,
     };
+    if super::tracing() {
+        crate::trace!("    path {}", p.display());
+    }
     let fsys = match fs::fs_of(&p) {
         Ok(f) => f,
         Err(e) => return e,
@@ -1294,4 +1316,49 @@ pub fn dos_edit_name(c: &mut Ctx) -> u32 {
     }
     t.push(0);
     if c.write(pt, &t) { 0 } else { err::INVALID_ADDRESS }
+}
+
+/// DosEnumAttribute(ulRefType, pvFile, ulEntry, pvBuf, cbBuf, pulCount,
+/// ulInfoLevel): extended attributes are not stored yet, so every file
+/// has none (the count comes back 0).
+pub fn dos_enum_attribute(c: &mut Ctx) -> u32 {
+    let (reftype, pfile, pcount, level) = if c.is16 {
+        (c.arg(0), c.arg(1), c.ptr(5), c.arg(6))
+    } else {
+        (c.arg(0), c.arg(1), c.arg(5), c.arg(6))
+    };
+    if level != 1 {
+        return err::INVALID_LEVEL;
+    }
+    match reftype {
+        // ENUMEA_REFTYPE_FHANDLE: pvFile points at the handle.
+        0 => {
+            let p = if c.is16 { c.far16_to_flat(pfile) } else { pfile };
+            let hf = if c.is16 { c.read_u16(p).map(u32::from) } else { c.read_u32(p) };
+            let Some(hf) = hf else { return err::INVALID_ADDRESS };
+            if get(c, hf).is_none() {
+                return err::INVALID_HANDLE;
+            }
+        }
+        // ENUMEA_REFTYPE_PATH
+        1 => {
+            let p = if c.is16 { c.far16_to_flat(pfile) } else { pfile };
+            let name = match read_path(c, p) {
+                Ok(n) => n,
+                Err(e) => return e,
+            };
+            let path = match resolve(c, &name) {
+                Ok(p) => p,
+                Err(e) => return e,
+            };
+            if let Err(e) = fs::stat(&path) {
+                return e;
+            }
+        }
+        _ => return err::INVALID_PARAMETER,
+    }
+    if !c.write_u32(pcount, 0) {
+        return err::INVALID_ADDRESS;
+    }
+    0
 }

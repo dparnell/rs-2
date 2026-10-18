@@ -623,6 +623,13 @@ pub fn dos16_sem_set(c: &mut Ctx) -> u32 {
     }
 }
 
+/// Clear a 16-bit RAM semaphore at a flat address (asynchronous I/O
+/// completion).
+pub fn clear_ram16(c: &Ctx, flat: u32) {
+    c.write_u32(flat, 0);
+    RAM16_WAIT.wake_all();
+}
+
 pub fn dos16_sem_clear(c: &mut Ctx) -> u32 {
     let me = (c.process.pid, c.thread.tid);
     match sem16(c, c.arg(0)) {

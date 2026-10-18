@@ -248,6 +248,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 182) => file::dos_query_fs_attach,
         (0, 184) => file::dos16_find_first2,
         (0, 191) | (0, 261) => file::dos_edit_name,
+        (0, 204) | (0, 372) => file::dos_enum_attribute,
         (0, 85) => ok,  // DosSetMaxFH
         (0, 89) => dos16_set_vec,
         (0, 91) => dos16_get_env,
@@ -256,6 +257,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 120) => ok, // DosError
         (0, 127) => dos16_mem_avail,
         (0, 137) => file::dos16_read,
+        (0, 149) => file::dos16_read_async,
+        (0, 150) => file::dos16_write_async,
         (0, 138) => file::dos16_write,
         (0, 152) => dos16_scan_env,
         (0, 215) => dos16_page_size,
