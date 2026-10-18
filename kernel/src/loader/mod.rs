@@ -143,6 +143,8 @@ pub struct Module {
     /// DLL initialisation entry, if the module wants it.
     pub init: Option<Start>,
     pub per_process_init: bool,
+    /// LX: call the init/term routine with flag 1 when each process ends.
+    pub per_process_term: bool,
     /// Global (once per system) initialisation has run.
     pub global_init_done: core::sync::atomic::AtomicBool,
     /// Kept for resources.
@@ -238,6 +240,7 @@ pub fn init() {
             start: None,
             init: None,
             per_process_init: false,
+            per_process_term: false,
             global_init_done: core::sync::atomic::AtomicBool::new(true),
             image: None,
         }));

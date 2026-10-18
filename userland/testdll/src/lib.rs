@@ -17,6 +17,11 @@ static INITS: AtomicU32 = AtomicU32::new(0);
 pub extern "C" fn _start(_hmod: u32, flag: u32) -> u32 {
     if flag == 0 {
         INITS.fetch_add(1, Ordering::Relaxed);
+    } else {
+        // Termination: visible in the output so tests can check it ran.
+        let msg = b"TESTDLL terminated\r\n";
+        let mut n = 0;
+        unsafe { os2::DosWrite(1, msg.as_ptr(), msg.len() as u32, &mut n) };
     }
     1
 }

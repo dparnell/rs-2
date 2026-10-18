@@ -40,6 +40,9 @@ pub struct InitRun {
     /// Address that receives the module handle (DosLoadModule) and whether
     /// it is a 16-bit (USHORT) location.
     pub result_handle: Option<(u32, bool, u16)>,
+    /// Termination routines at process end: when they are done the exit
+    /// list machinery finishes the exit.
+    pub then_exit: bool,
 }
 
 /// Modules (dependencies first) whose init routine must run for `space`.
@@ -70,6 +73,47 @@ pub fn init_order(roots: &[Arc<Module>], p: &Process) -> Vec<InitCall> {
         visit(r, p, &mut seen, &mut out);
     }
     out
+}
+
+/// DLL termination calls due when `p` ends: modules with per-process
+/// termination whose initialisation ran, dependents before dependencies.
+pub fn term_order(p: &Process) -> Vec<InitCall> {
+    let mut roots = alloc::vec![p.exe.clone()];
+    roots.extend(p.loaded.lock().iter().map(|(m, _)| m.clone()));
+    let mut seen: Vec<u16> = Vec::new();
+    let mut order: Vec<Arc<Module>> = Vec::new();
+    fn visit(m: &Arc<Module>, seen: &mut Vec<u16>, order: &mut Vec<Arc<Module>>) {
+        if seen.contains(&m.hmte) {
+            return;
+        }
+        seen.push(m.hmte);
+        for imp in &m.imports {
+            visit(imp, seen, order);
+        }
+        order.push(m.clone());
+    }
+    for r in &roots {
+        visit(r, &mut seen, &mut order);
+    }
+    order.into_iter().rev().filter(|m| needs_term(m, p)).map(|module| InitCall { module, flag: 1 }).collect()
+}
+
+fn needs_term(m: &Module, p: &Process) -> bool {
+    m.is_dll
+        && m.per_process_term
+        && m.init.is_some_and(|s| !s.entry.is16)
+        && if m.per_process_init { p.inited.lock().contains(&m.hmte) } else { m.global_init_done.load(Ordering::Relaxed) }
+}
+
+/// Start the termination calls at process end.
+pub fn start_term(p: &Process, t: &Thread, f: &mut TrapFrame, calls: Vec<InitCall>) -> bool {
+    if !start(p, t, f, calls, false, None) {
+        return false;
+    }
+    if let Some(r) = t.init_run.lock().as_mut() {
+        r.then_exit = true;
+    }
+    true
 }
 
 /// Point `f` at the init routine of `call`, returning to the gate.
@@ -125,7 +169,7 @@ pub fn start(p: &Process, t: &Thread, f: &mut TrapFrame, calls: Vec<InitCall>, a
     if calls.is_empty() {
         return false;
     }
-    let run = InitRun { calls: calls.into(), resume: *f, at_start, result_handle };
+    let run = InitRun { calls: calls.into(), resume: *f, at_start, result_handle, then_exit: false };
     setup_call(p, t, f, run.calls.front().unwrap());
     *t.init_run.lock() = Some(run);
     true
@@ -165,6 +209,10 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     let run = guard.take().unwrap();
     drop(guard);
     *f = run.resume;
+    if run.then_exit {
+        p.exitlist_next.store(true, Ordering::Relaxed);
+        return;
+    }
     if let Some((addr, is16, h)) = run.result_handle {
         let mut sp = p.space.lock();
         if is16 {
@@ -223,17 +271,29 @@ pub fn dos_load_module(c: &mut Ctx) -> u32 {
 
 pub fn dos_free_module(c: &mut Ctx) -> u32 {
     let h = c.arg(0) as u16;
-    let mut l = c.process.loaded.lock();
-    match l.iter().position(|(m, _)| m.hmte == h) {
-        Some(i) => {
-            l[i].1 -= 1;
-            if l[i].1 == 0 {
-                l.remove(i);
-            }
-            0
+    let freed = {
+        let mut l = c.process.loaded.lock();
+        let Some(i) = l.iter().position(|(m, _)| m.hmte == h) else { return err::INVALID_HANDLE };
+        l[i].1 -= 1;
+        if l[i].1 > 0 {
+            return 0;
         }
-        None => err::INVALID_HANDLE,
+        l.remove(i).0
+    };
+    // The last reference in this process: run its termination routine,
+    // unless the module is still in use through the program's imports.
+    let still_used = term_order(&c.process).iter().any(|x| Arc::ptr_eq(&x.module, &freed));
+    if still_used || !needs_term(&freed, &c.process) {
+        return 0;
     }
+    if freed.per_process_init {
+        c.process.inited.lock().retain(|&x| x != freed.hmte);
+    }
+    c.complete_return(0);
+    let (p, t) = (c.process.clone(), c.thread.clone());
+    start(&p, &t, c.f, alloc::vec![InitCall { module: freed, flag: 1 }], false, None);
+    c.no_return = true;
+    0
 }
 
 fn module_by_handle(c: &Ctx, h: u32) -> Option<Arc<Module>> {

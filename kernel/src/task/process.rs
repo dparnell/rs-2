@@ -71,6 +71,8 @@ pub struct Process {
     /// proceed to the next routine at its next return to user mode.
     pub exitlist_tid: AtomicU32,
     pub exitlist_next: core::sync::atomic::AtomicBool,
+    /// DLL termination routines have been started (process end).
+    pub terms_started: core::sync::atomic::AtomicBool,
     /// Critical section owner (tid, 0 = none) and nesting count.
     pub critsec: SpinLock<(u32, u32)>,
     /// Started with EXEC_ASYNC: nobody will collect the result.
@@ -230,6 +232,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         exitlist: SpinLock::new(Vec::new()),
         exitlist_tid: AtomicU32::new(0),
         exitlist_next: core::sync::atomic::AtomicBool::new(false),
+        terms_started: core::sync::atomic::AtomicBool::new(false),
         detached: core::sync::atomic::AtomicBool::new(p.detached),
         loaded: SpinLock::new(Vec::new()),
         searches: SpinLock::new(alloc::collections::BTreeMap::new()),
@@ -351,10 +354,11 @@ impl Process {
             }
             *e = Some(ExitInfo { cause, code });
         }
-        // With an exit list, the current thread runs it first (in user
-        // mode) and the other threads end now.
+        // With an exit list or DLL termination routines, the current
+        // thread runs them first (in user mode) and the other threads end
+        // now.
         let me = sched::current_opt();
-        let have_list = !self.exitlist.lock().is_empty();
+        let have_list = !self.exitlist.lock().is_empty() || !crate::api::module::term_order(self).is_empty();
         if let (true, Some(me)) = (have_list, me) {
             if me.process().is_some_and(|p| Arc::ptr_eq(&p, self)) {
                 for t in self.threads.lock().iter() {

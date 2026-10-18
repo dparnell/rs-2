@@ -519,6 +519,13 @@ pub fn exit_list_step(t: &Arc<crate::task::thread::Thread>, p: &Arc<Process>, f:
             i.map(|i| l.remove(i))
         };
         let Some((_, pfn, is16)) = next else {
+            // Then the DLL termination routines.
+            if !p.terms_started.swap(true, Ordering::Relaxed) {
+                let calls = super::module::term_order(p);
+                if super::module::start_term(p, t, f, calls) {
+                    return false;
+                }
+            }
             // Done: now really terminate.
             p.exitlist_tid.store(0, Ordering::Relaxed);
             let info = p.exit_info().unwrap_or(process::ExitInfo { cause: 0, code: 0 });
