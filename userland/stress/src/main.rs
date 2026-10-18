@@ -15,6 +15,7 @@ mod ipc;
 mod kill;
 mod mem;
 mod misc;
+mod more;
 mod procs;
 mod sems;
 mod signals;
@@ -204,6 +205,7 @@ const SECTIONS: &[(&str, fn())] = &[
     ("files", files::run),
     ("ipc", ipc::run),
     ("misc", misc::run),
+    ("more", more::run),
 ];
 
 fn words(s: &[u8]) -> Vec<String> {

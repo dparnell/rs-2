@@ -215,7 +215,7 @@ Not implemented (importing files on the media):
 ## Stress test
 
 `RS2\STRESS.EXE` (userland/stress) runs sections `threads sems kill signals
-xcpt procs mem files ipc misc` (all by default, or the ones named on the
+xcpt procs mem files ipc misc more` (all by default, or the ones named on the
 command line) and prints PASS/FAIL per check; `STRESS ctrlc` waits in a
 pipe read for Ctrl+C. It uses `RS2API.100` (`Rs2QueryCounters`: free
 pages, live threads, processes and process objects, semaphores, shared

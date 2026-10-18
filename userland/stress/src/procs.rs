@@ -42,6 +42,8 @@ pub fn child(args: &[String]) -> u32 {
         "namedshm" => crate::mem::child_namedshm(),
         "files" => crate::files::child_files(),
         "oom" => crate::mem::child_oom(),
+        "flood" => crate::more::child_flood(rest),
+        "npserver" => crate::more::child_npserver(),
         _ => 255,
     }
 }
