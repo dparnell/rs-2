@@ -16,6 +16,7 @@ mod infoseg;
 mod irq;
 mod kbd;
 mod loader;
+mod pipe;
 mod log;
 mod mm;
 mod rtc;

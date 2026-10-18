@@ -9,6 +9,7 @@
 //! Extra files for `\RS2\MODULES` are listed in `work/modules.txt`, one path
 //! per line (relative to the repository root).
 
+mod image;
 mod png;
 
 use std::io::{Read, Write};
@@ -115,16 +116,14 @@ fn build(o: &Opts) -> Option<PathBuf> {
     if cmdline.exists() {
         copy(&cmdline, &esp.join("RS2/CMDLINE"));
     }
+    // Drive C: as a FAT image built from work/modules.txt.
     let list = root().join("work/modules.txt");
     if let Ok(text) = std::fs::read_to_string(&list) {
-        for line in text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')) {
-            // "path" or "path -> NAME"
-            let (src, name) = match line.split_once("->") {
-                Some((s, n)) => (s.trim(), n.trim().to_string()),
-                None => (line, Path::new(line).file_name().unwrap().to_string_lossy().into_owned()),
-            };
-            copy(&root().join(src), &esp.join("RS2/MODULES").join(name));
-        }
+        let files = image::manifest(&root(), &text);
+        let img = image::build(&files, "RS2", 16, None);
+        let out = esp.join("RS2/MODULES/C.IMG");
+        std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+        std::fs::write(&out, img).unwrap();
     }
     Some(esp)
 }

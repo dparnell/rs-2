@@ -4,7 +4,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use super::{err, Ctx, Handler};
-use crate::fs::Handle;
+use super::file;
 use crate::loader;
 use crate::task::{process, sched};
 use crate::vm::{self, pag, SegKind};
@@ -24,8 +24,40 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 48) => dos16_get_mod_name,
         (0, 49) => dos16_get_machine_mode,
         (0, 50) => dos_beep,
-        (0, 59) => dos_close,
-        (0, 77) => dos16_qhand_type,
+        (0, 56) => file::dos_reset_buffer,
+        (0, 57) => file::dos_set_current_dir,
+        (0, 58) => file::dos16_chg_file_ptr,
+        (0, 59) => file::dos_close,
+        (0, 60) => file::dos_delete,
+        (0, 61) => file::dos_dup_handle,
+        (0, 63) => file::dos_find_close,
+        (0, 64) => file::dos16_find_first,
+        (0, 65) => file::dos16_find_next,
+        (0, 66) => file::dos_create_dir,
+        (0, 67) => file::dos_move,
+        (0, 68) => file::dos_set_file_size,
+        (0, 70) => file::dos16_open,
+        (0, 71) => file::dos_query_current_dir,
+        (0, 72) => file::dos_query_current_disk,
+        (0, 73) => file::dos_query_fh_state,
+        (0, 74) => file::dos_query_file_info,
+        (0, 75) => file::dos16_qfile_mode,
+        (0, 76) => file::dos_query_fs_info,
+        (0, 77) => file::dos_query_htype_any,
+        (0, 78) => dos16_qverify,
+        (0, 80) => file::dos_delete_dir,
+        (0, 81) => file::dos_set_default_disk,
+        (0, 82) => file::dos_set_fh_state,
+        (0, 83) => file::dos_set_file_info,
+        (0, 84) => file::dos16_set_file_mode,
+        (0, 86) => ok, // DosSetVerify
+        (0, 95) => file::dos16_open2,
+        (0, 97) => file::dos_set_fs_info,
+        (0, 98) => file::dos_query_path_info,
+        (0, 104) => file::dos_set_path_info,
+        (0, 151) => file::dos_search_path,
+        (0, 182) => file::dos_query_fs_attach,
+        (0, 184) => file::dos16_find_first2,
         (0, 85) => ok,  // DosSetMaxFH
         (0, 89) => dos16_set_vec,
         (0, 91) => dos16_get_env,
@@ -33,21 +65,48 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 94) => dos16_get_pid,
         (0, 120) => ok, // DosError
         (0, 127) => dos16_mem_avail,
-        (0, 137) => dos16_read,
-        (0, 138) => dos16_write,
+        (0, 137) => file::dos16_read,
+        (0, 138) => file::dos16_write,
         (0, 152) => dos16_scan_env,
         (0, 215) => dos16_page_size,
         // ---- 32-bit DOSCALLS ----
         (0, 209) => ok, // DosSetMaxFH
         (0, 212) => ok, // DosError
-        (0, 224) => dos_query_htype,
+        (0, 218) => file::dos_set_file_info,
+        (0, 219) => file::dos_set_path_info,
+        (0, 220) => file::dos_set_default_disk,
+        (0, 221) => file::dos_set_fh_state,
+        (0, 222) => file::dos_set_fs_info,
+        (0, 223) => file::dos_query_path_info,
+        (0, 224) => file::dos_query_htype_any,
+        (0, 225) => dos_query_verify,
+        (0, 226) => file::dos_delete_dir,
+        (0, 228) => file::dos_search_path,
         (0, 227) => dos_scan_env,
         (0, 229) => dos_sleep,
         (0, 230) => dos_get_date_time,
         (0, 234) => dos_exit,
-        (0, 257) => dos_close,
-        (0, 281) => dos_read,
-        (0, 282) => dos_write,
+        (0, 254) => file::dos_reset_buffer,
+        (0, 255) => file::dos_set_current_dir,
+        (0, 256) => file::dos_set_file_ptr,
+        (0, 257) => file::dos_close,
+        (0, 259) => file::dos_delete,
+        (0, 260) => file::dos_dup_handle,
+        (0, 263) => file::dos_find_close,
+        (0, 264) => file::dos_find_first,
+        (0, 265) => file::dos_find_next,
+        (0, 270) => file::dos_create_dir,
+        (0, 271) => file::dos_move,
+        (0, 272) => file::dos_set_file_size,
+        (0, 273) => file::dos_open,
+        (0, 274) => file::dos_query_current_dir,
+        (0, 275) => file::dos_query_current_disk,
+        (0, 276) => file::dos_query_fh_state,
+        (0, 277) => file::dos_query_fs_attach,
+        (0, 278) => file::dos_query_fs_info,
+        (0, 279) => file::dos_query_file_info,
+        (0, 281) => file::dos_read,
+        (0, 282) => file::dos_write,
         (0, 286) => dos_beep,
         (0, 291) => dos_query_cp,
         (0, 299) => dos_alloc_mem,
@@ -62,6 +121,9 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 355) => dos_unset_exception_handler,
         (0, 382) => dos_set_rel_max_fh,
         (0, 425) => dos_flat_to_sel,
+        (0, 981) => file::dos_open_l,
+        (0, 988) => file::dos_set_file_ptr_l,
+        (0, 989) => file::dos_set_file_size_l,
         (0, 426) => dos_sel_to_flat,
         _ => return None,
     };
@@ -70,120 +132,6 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
 
 fn ok(_c: &mut Ctx) -> u32 {
     err::NO_ERROR
-}
-
-// ---- Handles ----
-
-fn handle(c: &Ctx, hf: u32) -> Option<Handle> {
-    c.process.handles.lock().get(hf as usize).cloned().flatten()
-}
-
-/// Write to a handle; returns (error, bytes written).
-fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
-    let Some(h) = handle(c, hf) else { return (err::INVALID_HANDLE, 0) };
-    let Some(data) = c.read_vec(buf, len) else { return (err::INVALID_ADDRESS, 0) };
-    match h {
-        Handle::Con => {
-            crate::console::write(&data);
-            (0, len)
-        }
-        Handle::Nul => (0, len),
-        Handle::File(_) => (err::ACCESS_DENIED, 0),
-    }
-}
-
-fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
-    let Some(h) = handle(c, hf) else { return (err::INVALID_HANDLE, 0) };
-    match h {
-        Handle::Con => {
-            let line = crate::kbd::read_line(len as usize);
-            let n = line.len().min(len as usize);
-            if !c.write(buf, &line[..n]) {
-                return (err::INVALID_ADDRESS, 0);
-            }
-            (0, n as u32)
-        }
-        Handle::Nul => (0, 0),
-        Handle::File(f) => {
-            let mut f = f.lock();
-            let pos = f.pos as usize;
-            let avail = f.data.len().saturating_sub(pos);
-            let n = avail.min(len as usize);
-            let chunk: Vec<u8> = f.data[pos..pos + n].to_vec();
-            if !c.write(buf, &chunk) {
-                return (err::INVALID_ADDRESS, 0);
-            }
-            f.pos += n as u64;
-            (0, n as u32)
-        }
-    }
-}
-
-fn dos16_write(c: &mut Ctx) -> u32 {
-    let (e, n) = write_handle(c, c.arg(0), c.ptr(1), c.arg(2));
-    c.write_u16(c.ptr(3), n as u16);
-    e
-}
-
-fn dos_write(c: &mut Ctx) -> u32 {
-    let (e, n) = write_handle(c, c.arg(0), c.arg(1), c.arg(2));
-    c.write_u32(c.arg(3), n);
-    e
-}
-
-fn dos16_read(c: &mut Ctx) -> u32 {
-    let (e, n) = read_handle(c, c.arg(0), c.ptr(1), c.arg(2));
-    c.write_u16(c.ptr(3), n as u16);
-    e
-}
-
-fn dos_read(c: &mut Ctx) -> u32 {
-    let (e, n) = read_handle(c, c.arg(0), c.arg(1), c.arg(2));
-    c.write_u32(c.arg(3), n);
-    e
-}
-
-fn dos_close(c: &mut Ctx) -> u32 {
-    let hf = c.arg(0) as usize;
-    let mut hs = c.process.handles.lock();
-    match hs.get_mut(hf) {
-        Some(slot @ Some(_)) => {
-            *slot = None;
-            0
-        }
-        _ => err::INVALID_HANDLE,
-    }
-}
-
-/// (type, device attribute) for DosQHandType / DosQueryHType.
-fn htype(c: &Ctx, hf: u32) -> Option<(u32, u32)> {
-    Some(match handle(c, hf)? {
-        // HANDTYPE_DEVICE; attributes: char device, CON in/out.
-        Handle::Con => (1, 0x8083),
-        Handle::Nul => (1, 0x8084),
-        Handle::File(_) => (0, 0),
-    })
-}
-
-fn dos16_qhand_type(c: &mut Ctx) -> u32 {
-    let Some((t, a)) = htype(c, c.arg(0)) else { return err::INVALID_HANDLE };
-    c.write_u16(c.ptr(1), t as u16);
-    c.write_u16(c.ptr(2), a as u16);
-    0
-}
-
-fn dos_query_htype(c: &mut Ctx) -> u32 {
-    let Some((t, a)) = htype(c, c.arg(0)) else { return err::INVALID_HANDLE };
-    c.write_u32(c.arg(1), t);
-    c.write_u32(c.arg(2), a);
-    0
-}
-
-fn dos_set_rel_max_fh(c: &mut Ctx) -> u32 {
-    // Report the current maximum.
-    let n = c.process.handles.lock().len().max(20) as u32;
-    c.write_u32(c.arg(1), n);
-    0
 }
 
 // ---- Process ----
@@ -243,6 +191,12 @@ fn dos16_get_env(c: &mut Ctx) -> u32 {
     c.write_u16(c.ptr(0), vm::tile_selector(p.env));
     c.write_u16(c.ptr(1), (p.cmdline - p.env) as u16);
     0
+}
+
+/// Value of an environment variable.
+pub fn env_value(c: &Ctx, name: &str) -> Option<alloc::string::String> {
+    let a = scan_env(c, name)?;
+    c.read_str(a, 4096)
 }
 
 /// Find `name` in the environment; returns the address of its value.
@@ -596,5 +550,22 @@ fn dos_query_sys_info(c: &mut Ctx) -> u32 {
     for (n, i) in (first..=last).enumerate() {
         c.write_u32(buf + 4 * n as u32, sys_info_value(i));
     }
+    0
+}
+
+fn dos16_qverify(c: &mut Ctx) -> u32 {
+    c.write_u16(c.ptr(0), 0);
+    0
+}
+
+fn dos_query_verify(c: &mut Ctx) -> u32 {
+    c.write_u32(c.arg(0), 0);
+    0
+}
+
+fn dos_set_rel_max_fh(c: &mut Ctx) -> u32 {
+    // Report the current maximum.
+    let n = c.process.handles.lock().len().max(20) as u32;
+    c.write_u32(c.arg(1), n);
     0
 }

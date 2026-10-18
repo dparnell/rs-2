@@ -11,6 +11,7 @@
 
 pub mod doscalls;
 pub mod exceptions;
+pub mod file;
 pub mod names;
 mod names_gen;
 mod sigs;

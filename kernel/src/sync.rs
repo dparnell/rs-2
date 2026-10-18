@@ -103,3 +103,57 @@ impl<T> Once<T> {
         if self.done.load(Ordering::Acquire) { unsafe { (*self.value.get()).as_ref() } } else { None }
     }
 }
+
+/// A sleeping lock for thread context (may be held across blocking I/O).
+pub struct Mutex<T> {
+    locked: AtomicBool,
+    waiters: crate::task::WaitQueue,
+    value: UnsafeCell<T>,
+}
+
+unsafe impl<T: Send> Sync for Mutex<T> {}
+unsafe impl<T: Send> Send for Mutex<T> {}
+
+impl<T> Mutex<T> {
+    pub const fn new(value: T) -> Self {
+        Self { locked: AtomicBool::new(false), waiters: crate::task::WaitQueue::new(), value: UnsafeCell::new(value) }
+    }
+
+    pub fn lock(&self) -> MutexGuard<'_, T> {
+        loop {
+            if self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+                return MutexGuard { m: self };
+            }
+            // Before the scheduler runs (early boot) just spin.
+            if crate::task::sched::current_opt().is_none() {
+                core::hint::spin_loop();
+                continue;
+            }
+            self.waiters.wait_until(None, || !self.locked.load(Ordering::Acquire));
+        }
+    }
+}
+
+pub struct MutexGuard<'a, T> {
+    m: &'a Mutex<T>,
+}
+
+impl<T> Deref for MutexGuard<'_, T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        unsafe { &*self.m.value.get() }
+    }
+}
+
+impl<T> DerefMut for MutexGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut T {
+        unsafe { &mut *self.m.value.get() }
+    }
+}
+
+impl<T> Drop for MutexGuard<'_, T> {
+    fn drop(&mut self) {
+        self.m.locked.store(false, Ordering::Release);
+        self.m.waiters.wake_one();
+    }
+}

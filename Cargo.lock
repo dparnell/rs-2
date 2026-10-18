@@ -33,9 +33,13 @@ name = "rs2-kernel"
 version = "0.1.0"
 dependencies = [
  "bootinfo",
+ "fat",
  "os2-exe",
 ]
 
 [[package]]
 name = "xtask"
 version = "0.1.0"
+dependencies = [
+ "fat",
+]

@@ -56,6 +56,8 @@ pub struct Process {
     pub exit_waiters: WaitQueue,
     /// Modules loaded with DosLoadModule (with use counts).
     pub loaded: SpinLock<Vec<(Arc<Module>, u32)>>,
+    /// Open directory searches (DosFindFirst handles).
+    pub searches: SpinLock<alloc::collections::BTreeMap<u32, crate::api::file::Search>>,
 }
 
 static NEXT_PID: AtomicU32 = AtomicU32::new(1);
@@ -185,6 +187,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         exit: SpinLock::new(None),
         exit_waiters: WaitQueue::new(),
         loaded: SpinLock::new(Vec::new()),
+        searches: SpinLock::new(alloc::collections::BTreeMap::new()),
     });
     let stack_bottom = stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000));
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;
