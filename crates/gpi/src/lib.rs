@@ -3,18 +3,28 @@
 //! Draws into a [`Surface`] of 32-bit pixels using PM device coordinates:
 //! the origin is the bottom-left corner and y grows upwards. Every drawing
 //! operation is clipped to a list of device rectangles (the visible region
-//! of a window). No OS dependencies, so it is unit-tested on the host.
+//! of a window, intersected with the application's clip region and clip
+//! path). No OS dependencies, so it is unit-tested on the host.
 
 #![no_std]
 
 extern crate alloc;
 
+pub mod bitmap;
 pub mod color;
 pub mod font;
+pub mod math;
+pub mod pattern;
 mod ps;
+pub mod raster;
 mod rect;
+pub mod region;
 mod surface;
+pub mod xform;
 
-pub use ps::{Mix, Ps};
+pub use bitmap::Bitmap;
+pub use ps::*;
 pub use rect::{Point, Rect};
+pub use region::Region;
 pub use surface::Surface;
+pub use xform::Matrix;
