@@ -3,7 +3,7 @@
 //! Shared by the kernel (as its HPFS driver) and the build tool (to make
 //! test disks). Supports reading and writing files and directories, long
 //! case-preserving names with case-insensitive lookup through the volume's
-//! code page case map, reading extended attributes, and formatting.
+//! code page case map, extended attributes, and formatting.
 //!
 //! Paths are relative to the volume root, components separated by `\` or
 //! `/`. Name characters U+0000-U+00FF stand for code page bytes. Times are
@@ -56,6 +56,8 @@ pub enum Error {
     Corrupt,
     ReadOnly,
     AccessDenied,
+    /// The EAs of a file would exceed 64 KB.
+    EaTooLong,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -312,7 +314,7 @@ impl<D: BlockDevice> Volume<D> {
         Ok(b)
     }
 
-    fn check_writable(&self) -> Result<()> {
+    pub(crate) fn check_writable(&self) -> Result<()> {
         if self.readonly { Err(Error::ReadOnly) } else { Ok(()) }
     }
 
@@ -643,7 +645,7 @@ impl<D: BlockDevice> Volume<D> {
     }
 
     /// Find the DIRENT of `e`, even if it was renamed since `e` was read.
-    fn locate(&mut self, e: &Entry) -> Result<(dir::Dnode, usize)> {
+    pub(crate) fn locate(&mut self, e: &Entry) -> Result<(dir::Dnode, usize)> {
         if e.fnode == self.root {
             let dn = self.dir_root(self.root)?;
             return self.find_dirent(dn, DOTDOT)?.ok_or(Error::Corrupt);

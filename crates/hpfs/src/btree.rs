@@ -20,7 +20,7 @@ pub(crate) fn init_header(b: &mut [u8], hdr: usize, cap: u8, flags: u8) {
     wr16(b, hdr + bt::FIRST_FREE, bt::ENTRIES as u16);
 }
 
-fn write_leaves(b: &mut [u8], hdr: usize, ext: &[Extent], cap: usize, flags: u8) {
+pub(crate) fn write_leaves(b: &mut [u8], hdr: usize, ext: &[Extent], cap: usize, flags: u8) {
     init_header(b, hdr, (cap - ext.len()) as u8, flags);
     b[hdr + bt::USED] = ext.len() as u8;
     wr16(b, hdr + bt::FIRST_FREE, (bt::ENTRIES + ext.len() * bt::LEAF_SIZE) as u16);
@@ -35,7 +35,7 @@ fn write_leaves(b: &mut [u8], hdr: usize, ext: &[Extent], cap: usize, flags: u8)
 }
 
 /// Internal entries for children `(first file sector, ALSEC)`.
-fn write_nodes(b: &mut [u8], hdr: usize, kids: &[(u32, u32)], cap: usize, flags: u8) {
+pub(crate) fn write_nodes(b: &mut [u8], hdr: usize, kids: &[(u32, u32)], cap: usize, flags: u8) {
     init_header(b, hdr, (cap - kids.len()) as u8, flags | bt::INTERNAL);
     b[hdr + bt::USED] = kids.len() as u8;
     wr16(b, hdr + bt::FIRST_FREE, (bt::ENTRIES + kids.len() * bt::NODE_SIZE) as u16);
@@ -49,7 +49,7 @@ fn write_nodes(b: &mut [u8], hdr: usize, kids: &[(u32, u32)], cap: usize, flags:
     }
 }
 
-fn new_alsec(sec: u32) -> Vec<u8> {
+pub(crate) fn new_alsec(sec: u32) -> Vec<u8> {
     let mut a = vec![0u8; SECTOR];
     wr32(&mut a, 0, ALSEC_MAGIC);
     wr32(&mut a, alsec::SELF, sec);

@@ -61,6 +61,7 @@ fn map(e: hpfs::Error) -> u32 {
         hpfs::Error::Corrupt => err::NOT_READY,
         hpfs::Error::ReadOnly => err::WRITE_PROTECT,
         hpfs::Error::AccessDenied => err::ACCESS_DENIED,
+        hpfs::Error::EaTooLong => err::EA_LIST_TOO_LONG,
     }
 }
 

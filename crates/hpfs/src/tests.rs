@@ -154,12 +154,61 @@ impl Check {
             let f = v.read_fnode(d.fnode).unwrap();
             assert_eq!(rd32(&f, layout::fnode::UP), fno, "fnode up of {:?}", d.name);
             assert_eq!(f[layout::fnode::NAME_LEN] as usize, d.name.len());
+            self.eas(v, &f, d);
             if d.attr & attr::DIRECTORY != 0 {
                 self.dir(v, d.fnode, false);
             } else {
                 self.file(v, d.fnode, d.size);
             }
         }
+    }
+
+    /// The EA storage of F-node `f` is claimed once, and the DIRENT's EA
+    /// size and flags match it.
+    fn eas(&mut self, v: &mut Volume<Mem>, f: &[u8], d: &dir::Dirent) {
+        use layout::{de, fnode};
+        let int = rd16(f, fnode::EA_INT_SIZE) as u32;
+        let ext = rd32(f, fnode::EA_EXT_SIZE);
+        let off = rd16(f, fnode::EA_OFFSET) as usize;
+        assert!(off >= fnode::EA_AREA && off + int as usize + rd16(f, fnode::ACL_INT_SIZE) as usize <= 512);
+        assert_eq!(d.ea_size, int + ext, "EA size of {:?}", d.name);
+        assert_eq!(d.flags & de::HAS_EA != 0, int + ext > 0, "EA flag of {:?}", d.name);
+        if ext > 0 {
+            let sec = rd32(f, fnode::EA_SECTOR);
+            if f[fnode::EA_IN_ANODE] & 1 != 0 {
+                let a = v.read_sector(sec).unwrap();
+                assert_eq!(rd32(&a, 0), layout::ALSEC_MAGIC);
+                self.claim(v, sec, 1);
+                let (runs, alsecs) = v.tree_of(&a, layout::alsec::BTREE).unwrap();
+                for s in alsecs {
+                    self.claim(v, s, 1);
+                }
+                let mut next = 0;
+                for x in runs {
+                    assert_eq!(x.file, next, "EA runs not contiguous");
+                    next += x.len;
+                    self.claim(v, x.disk, x.len);
+                }
+                assert_eq!(next, ext.div_ceil(512));
+            } else {
+                self.claim(v, sec, ext.div_ceil(512));
+            }
+        }
+        let e = Entry {
+            name: String::new(),
+            attr: 0,
+            size: 0,
+            fnode: d.fnode,
+            parent: 0,
+            created: 0,
+            accessed: 0,
+            modified: 0,
+            ea_size: d.ea_size,
+        };
+        let eas = v.read_eas(&e).unwrap();
+        let need = eas.iter().filter(|x| x.flags & 0x80 != 0).count() as u32;
+        assert_eq!(rd32(f, fnode::NEED_EAS), need);
+        assert_eq!(d.flags & de::NEED_EA != 0, need > 0);
     }
 
     fn file(&mut self, v: &mut Volume<Mem>, fno: u32, size: u32) {
@@ -523,6 +572,92 @@ fn extended_attributes() {
     let free = v.info().free_sectors;
     v.delete("withea").unwrap();
     assert_eq!(v.info().free_sectors, free + 1 + 2);
+}
+
+fn eas_of(v: &mut Volume<Mem>, path: &str) -> Vec<Ea> {
+    let e = v.lookup(path).unwrap();
+    v.read_eas(&e).unwrap()
+}
+
+fn ea(name: &str, len: usize, seed: u32) -> Ea {
+    Ea { flags: 0, name: name.as_bytes().to_vec(), value: pattern(len, seed) }
+}
+
+#[test]
+fn write_extended_attributes() {
+    let mut v = fresh(8);
+    let free0 = v.info().free_sectors;
+    v.mkdir("dir", NOW).unwrap();
+    let mut e = v.create_file("dir\\file.txt", 0, NOW).unwrap();
+    v.write(&mut e, 0, &pattern(3000, 1), NOW).unwrap();
+    let e = v.lookup("dir\\file.txt").unwrap();
+    // Small: inside the F-node.
+    let small = std::vec![ea(".TYPE", 20, 1), Ea { flags: 0x80, name: b"CRIT".to_vec(), value: b"x".to_vec() }];
+    v.write_eas(&e, &small).unwrap();
+    assert_eq!(v.read_eas(&e).unwrap(), small);
+    let f = v.read_fnode(e.fnode).unwrap();
+    assert_eq!(rd32(&f, layout::fnode::EA_EXT_SIZE), 0);
+    check(&mut v, free0);
+    // Large: one run outside.
+    let large = std::vec![ea(".LONGNAME", 2000, 2), ea(".ICON", 4000, 3)];
+    v.write_eas(&e, &large).unwrap();
+    assert_eq!(eas_of(&mut v, "dir\\file.txt"), large);
+    assert_eq!(v.lookup("dir\\file.txt").unwrap().ea_size, 2 * 4 + 10 + 6 + 6000);
+    check(&mut v, free0);
+    // Fragmented free space forces an ALSEC tree: fill the volume, then
+    // free every other small file so only small holes remain.
+    for i in 0..200 {
+        let mut h = v.create_file(&format!("h{i}"), 0, NOW).unwrap();
+        v.write(&mut h, 0, &[1u8; 512], NOW).unwrap();
+    }
+    let mut fill = v.create_file("fill", 0, NOW).unwrap();
+    let mut off = 0u64;
+    while v.write(&mut fill, off, &[0u8; 4096], NOW).is_ok() {
+        off += 4096;
+    }
+    while v.write(&mut fill, off, &[0u8; 512], NOW).is_ok() {
+        off += 512;
+    }
+    for i in (0..200).step_by(2) {
+        v.delete(&format!("h{i}")).unwrap();
+    }
+    let big = std::vec![ea("BIG", 60_000, 4)];
+    let d = v.lookup("dir").unwrap();
+    v.write_eas(&d, &big).unwrap();
+    let f = v.read_fnode(d.fnode).unwrap();
+    assert_eq!(f[layout::fnode::EA_IN_ANODE], 1);
+    let a = v.read_sector(rd32(&f, layout::fnode::EA_SECTOR)).unwrap();
+    std::println!("EA ALSEC flags {:#x}, {} used", a[layout::alsec::BTREE], a[layout::alsec::BTREE + 5]);
+    assert_eq!(eas_of(&mut v, "dir"), big);
+    check(&mut v, free0);
+    v.delete("fill").unwrap();
+    for i in (1..200).step_by(2) {
+        v.delete(&format!("h{i}")).unwrap();
+    }
+    // The root directory has EAs too.
+    let root = v.lookup("").unwrap();
+    v.write_eas(&root, &[ea("ROOT", 10, 9)]).unwrap();
+    assert_eq!(eas_of(&mut v, ""), std::vec![ea("ROOT", 10, 9)]);
+    check(&mut v, free0);
+    // Too large.
+    assert_eq!(v.write_eas(&e, &[ea("X", 65_530, 0)]).unwrap_err(), Error::EaTooLong);
+    // Survives a remount; removing and deleting frees everything.
+    let mut v = remount(v);
+    assert_eq!(eas_of(&mut v, "dir\\file.txt"), large);
+    let e = v.lookup("dir\\file.txt").unwrap();
+    v.write_eas(&e, &[]).unwrap();
+    assert!(v.read_eas(&e).unwrap().is_empty());
+    assert_eq!(v.lookup("dir\\file.txt").unwrap().ea_size, 0);
+    check(&mut v, free0);
+    v.write_eas(&e, &large).unwrap();
+    v.delete("dir\\file.txt").unwrap();
+    let d = v.lookup("dir").unwrap();
+    v.write_eas(&d, &[ea("D", 3000, 5)]).unwrap();
+    v.rmdir("dir").unwrap();
+    let root = v.lookup("").unwrap();
+    v.write_eas(&root, &[]).unwrap();
+    check(&mut v, free0);
+    assert_eq!(v.info().free_sectors, free0);
 }
 
 #[test]
