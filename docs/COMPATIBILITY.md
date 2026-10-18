@@ -9,7 +9,9 @@ IBM `CMD.EXE` as the shell, the programs under `C:\IBM` and `C:\TK`, the
 REXX DLLs in `C:\OS2\DLL`, and `OSO001.MSG`, `OSO001H.MSG`, `REX.MSG`,
 `REXH.MSG` in `C:\OS2\SYSTEM` (the kernel's MSG code looks there and
 along `DPATH`). The IBM files are test inputs only and are not part of
-the repository or the rs2 ISO.
+the repository or the rs2 ISO. Programs with bound messages (MSGBIND)
+also run without OSO001.MSG; see [Messages and national language
+support](#messages-and-national-language-support).
 
 Status: **works** = the tested function behaves as on OS/2;
 **partial** = runs, but something tested is missing or differs;
@@ -63,7 +65,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | UNPACK.EXE, UNPACK2.EXE | works | Unpack IBM packed files (UNPACK hands newer files to UNPACK2). |
 | XCOPY.EXE | works | Including `/S /E`, wildcard targets. |
 | XDFCOPY.EXE | works | Reports that XDFLOPPY.FLT is not loaded. |
-| KEYB.COM | fails | Imports PMMERGE (Presentation Manager). |
+| KEYB.COM | fails | Imports PMMERGE (Presentation Manager). rs2 has its own KEYB.EXE. |
 | ANSI.EXE | works | |
 | MKSYSLVL.EXE, LAPSDEL.EXE | works | (tested earlier) |
 
@@ -83,6 +85,32 @@ Status: **works** = the tested function behaves as on OS/2;
 | PACK.EXE, PACK2.EXE | partial | PACK.MSG is not on the media. |
 | WORMS.EXE (sample) | works | Mouse pointer and clicks through MOUCALLS (Exit by clicking). |
 | TIMER0.EXE (sample) | works | Reports that the TIMER0$ sample driver is missing. |
+
+## Messages and national language support
+
+Bound messages, tested with OSO001.MSG removed from the disk: XCOPY,
+REPLACE (old-style stub with the header at CS:0), BACKUP, RESTORE and
+HELPMSG (16-bit, version 2 segments) and XDFCOPY (32-bit, its own
+component XDF) print their messages from the bound segment, as on OS/2.
+Messages a program did not bind still need the file: SORT, and EAUTIL
+for SYS1003, report `SYS0318: Message file OSO001.MSG cannot be found
+for message  1003.` (DOSCALL1 inserts the number with a leading blank).
+
+With `COUNTRY=049`, `CODEPAGE=437,850` and `DEVINFO=KBD,GR,...` in
+CONFIG.SYS, IBM CMD.EXE's DATE and DIR use German formats (`dd.mm.yy`,
+`10.19`), rs2 CMD's CHCP lists 437 and 850 and switches between them,
+and the keyboard types the German layout (dead keys, AltGr).
+
+| Area | Status | Notes |
+|------|--------|-------|
+| DosGetMessage, DosInsMessage, DosPutMessage | works | Bound segments first, then the file (as named, DPATH, root of the boot drive). Class `?` gives MR_MID_NOT_FOUND; E/W get the `SYSnnnn: ` prefix; `%1`-`%9` up to the count, other `%` sequences are kept (MKMSGF consumes `%0`); truncation ends with CR LF (316); the retriever's own SYS0316-0321 texts on errors. DosPutMessage breaks lines at 80 columns as DOSCALL1 does. |
+| DosQueryMessageCP | works | 16- and 32-bit (the stubs append the bound segment as a fifth argument; the 32-bit entry does not pop it). Code pages, language and sublanguage from the bound block or the file's extended header. |
+| Country information | works | 87 countries (date order, separators, currency, decimals, clock, list separator). Compared with IBM's COUNTRY.SYS: 209 of 282 tables identical; the others differ in dummy entries of COUNTRY.SYS (country 1 with foreign code pages) and Arabic currency glyphs. |
+| Case maps | works | 21 single-byte code pages (437, 850, 852, 855, 857, 860-866, 869, 874, 1125, 813, 819, 912, 915, 921, 1004); DBCS code pages map ASCII only. 263 of 282 identical to COUNTRY.SYS. |
+| Collating sequences | partial | Western code pages match IBM's tables (country 1 group, Nordic and Spanish variants); Central European, Turkish, Cyrillic and Greek use alphabet-order weights that sort correctly but are not IBM's numbering (103 of 282 identical). |
+| DBCS environment | works | Lead byte ranges for 932/942/943, 934/944, 936/938/946/948, 949, 950, 1381, 1386; empty for single-byte code pages (all identical to COUNTRY.SYS). |
+| Code pages | works | DosQueryCp, DosSetProcessCp (prepared code pages only, ERROR_INVALID_CODE_PAGE otherwise), DosSetCp, VioSetCp, KbdSetCp/KbdGetCp, CONFIG.SYS CODEPAGE= and COUNTRY=. The screen shows all single-byte code pages above. |
+| Keyboard layouts | works | US UK GR FR BE NL IT SP LA PO SG SF SV SU DK NO IS CF TR PL with AltGr (or Ctrl+Alt) and dead keys; DEVINFO=KBD,xx; rs2 KEYB.EXE. No Cyrillic, Greek or Hebrew layouts yet. |
 
 ## Fixed while getting these to run
 
@@ -116,6 +144,11 @@ Status: **works** = the tested function behaves as on OS/2;
 - The environment segment holds the program's full path between the
   variables and the command line and is exactly as long as its contents,
   as on OS/2 (IBM CMD.EXE's first `SET` corrupted the environment).
+- rs2's own programs called `MSG.6` as if it were DosGetMessage; the
+  os2 crate now has OS2386.LIB's stub (push the bound segment, let
+  DosTrueGetMessage pop it), so HELP and the utilities get message texts.
+- rs2 CMD wrote accented characters as UTF-8 (two bytes); user programs
+  now write text one code page byte per character.
 - `THK16_UNITHUNK` (DOSCALL1's generic register-based 16-to-32 thunk) and
   the register-based 16-bit `DosSelToFlat`/`DosFlatToSel`.
 - New APIs: `DosSubSetMem`/`DosSubAllocMem`/`DosSubFreeMem`/`DosSubUnsetMem`
@@ -134,10 +167,9 @@ Status: **works** = the tested function behaves as on OS/2;
 - SYSLEVEL lists nothing yet: re-test now that DASD drive opens exist.
 - Extended attributes are not stored: `DosEnumAttribute` reports none and
   EA writes are accepted and dropped.
-- Bound message segments (MSGBIND) are not read: programs fall back to the
-  message files, so they need OSO001.MSG and friends on disk.
 - `DosQuerySysState` reports no semaphores or shared memory.
 - Writing to QEMU's virtual FAT drive (the ESP directory) can hang (seen
   with BACKUP); FAT disk images are fine.
-- The 32-bit `DosQueryMessageCP` argument layout is unverified (no caller
-  found among the tested programs).
+- IBM KEYB.COM needs PMMERGE; its KEYBOARD.DCP tables are not read (rs2
+  has its own layouts and KEYB.EXE).
+- Message files with DBCS text: DosPutMessage writes them unwrapped.

@@ -13,7 +13,10 @@ Status markers: done, in progress, planned.
   DosExecPgm/DosCWait, threads, 16- and 32-bit semaphores, exception
   handling, exit lists, timers, queues, shared memory, resources,
   Ctrl+C signals, module APIs, CONFIG.SYS processing
-- done: VIO, KBD, MOU (PS/2 and USB mice, text pointer), MSG (message files), NLS
+- done: VIO, KBD, MOU (PS/2 and USB mice, text pointer), MSG (message
+  files and bound message segments), NLS (87 countries, 21 single-byte
+  and the DBCS code pages, CODEPAGE=/COUNTRY=), national keyboard layouts
+  (DEVINFO=KBD, KEYB)
 - done: the original CMD.EXE runs interactively; userland/apitest passes
 - done: DLL termination routines
 - done: IBM REXX (.CMD scripts, REXXUTIL, the REXX API server) and most
@@ -23,7 +26,7 @@ Status markers: done, in progress, planned.
 - done: sessions: DosStartSession/Select/Set/StopSession, a virtual screen
   and keyboard queue per session, Ctrl+Esc window list, Alt+Esc
 - planned:
-  DosDevIOCtl coverage, bound message segments,
+  DosDevIOCtl coverage,
   semaphore and memory corner cases found by running more programs
 
 ## Milestone 2: storage and installed systems (in progress)
@@ -48,7 +51,8 @@ Status markers: done, in progress, planned.
   FORMAT (FAT, HPFS) on DASD handles and the category 8 disk IOCtls, MODE
   (screen mode through a 16-bit VIO thunk), HELP
 - planned: CHKDSK repair for HPFS, FDISK/LVM and the rest of the base
-  utilities; own message files (OSO001.MSG) and country data; REXX
+  utilities; own message files (OSO001.MSG); Cyrillic/Greek/Hebrew
+  keyboard layouts; REXX
 
 ## Milestone 4: Presentation Manager (started)
 
