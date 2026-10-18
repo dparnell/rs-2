@@ -129,16 +129,56 @@ fn build(o: &Opts) -> Option<PathBuf> {
     if cmdline.exists() {
         copy(&cmdline, &esp.join("RS2/CMDLINE"));
     }
+    // rs2 user programs (Rust, i686) converted to LX.
+    let userland = build_userland()?;
     // Drive C: as a FAT image built from work/modules.txt.
     let list = root().join("work/modules.txt");
     if let Ok(text) = std::fs::read_to_string(&list) {
-        let files = image::manifest(&root(), &text);
+        let mut files = image::manifest(&root(), &text);
+        files.extend(userland);
         let img = image::build(&files, "RS2", 16, None);
         let out = esp.join("RS2/MODULES/C.IMG");
         std::fs::create_dir_all(out.parent().unwrap()).unwrap();
         std::fs::write(&out, img).unwrap();
     }
     Some(esp)
+}
+
+/// Programs in userland/ to package, with their LX names.
+const USER_PROGRAMS: &[(&str, &str)] = &[("apitest", "RS2\\APITEST.EXE")];
+
+/// Build the userland workspace and convert each program to LX.
+fn build_userland() -> Option<image::FileList> {
+    let ul = root().join("userland");
+    let status = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
+        .current_dir(&ul)
+        .args(["build", "--release"])
+        .env_remove("CARGO_TARGET_DIR")
+        .status()
+        .ok()?;
+    if !status.success() {
+        return None;
+    }
+    let out_dir = root().join("work/userland");
+    std::fs::create_dir_all(&out_dir).unwrap();
+    let mut files = Vec::new();
+    for (bin, dest) in USER_PROGRAMS {
+        let elf = ul.join("target/i686-unknown-linux-gnu/release").join(bin);
+        let lx = out_dir.join(format!("{}.exe", bin));
+        let ok = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
+            .current_dir(root())
+            .args(["run", "-q", "--release", "-p", "elf2lx", "--"])
+            .arg(&elf)
+            .arg(&lx)
+            .status()
+            .ok()?
+            .success();
+        if !ok {
+            return None;
+        }
+        files.push((lx, dest.to_string()));
+    }
+    Some(files)
 }
 
 fn ovmf() -> (PathBuf, PathBuf) {

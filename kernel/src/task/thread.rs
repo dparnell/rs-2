@@ -23,6 +23,21 @@ pub enum State {
 #[repr(C, align(16))]
 struct KStack([u8; KSTACK_SIZE]);
 
+/// FXSAVE area: x87, MMX and SSE state.
+#[repr(C, align(16))]
+pub struct FpuState(pub [u8; 512]);
+
+impl FpuState {
+    /// State after FNINIT with the default MXCSR.
+    pub fn initial() -> alloc::boxed::Box<FpuState> {
+        let mut f = alloc::boxed::Box::new(FpuState([0; 512]));
+        f.0[0..2].copy_from_slice(&0x037fu16.to_le_bytes()); // FCW
+        f.0[24..28].copy_from_slice(&0x1f80u32.to_le_bytes()); // MXCSR
+        f.0[28..32].copy_from_slice(&0xffffu32.to_le_bytes()); // MXCSR_MASK
+        f
+    }
+}
+
 pub struct Thread {
     /// System-wide unique id.
     pub id: u32,
@@ -47,6 +62,11 @@ pub struct Thread {
     /// Set when the thread must terminate at its next return to user mode
     /// (or when its current wait is interrupted).
     exit_requested: AtomicBool,
+    /// Exceptions being dispatched to this thread's handlers (innermost
+    /// last).
+    pub xcpt: crate::sync::SpinLock<alloc::vec::Vec<crate::api::exceptions::Dispatch>>,
+    /// Saved FPU/SSE state while the thread is switched out.
+    pub fpu: UnsafeCell<Box<FpuState>>,
 }
 
 unsafe impl Send for Thread {}
@@ -72,6 +92,8 @@ impl Thread {
             idle: true,
             suspend: AtomicU32::new(0),
             exit_requested: AtomicBool::new(false),
+            xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
+            fpu: UnsafeCell::new(FpuState::initial()),
         })
     }
 
@@ -93,6 +115,8 @@ impl Thread {
             idle: false,
             suspend: AtomicU32::new(0),
             exit_requested: AtomicBool::new(false),
+            xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
+            fpu: UnsafeCell::new(FpuState::initial()),
         });
         // Initial kernel stack: TrapFrame at the top, below it a
         // switch_stacks frame returning into thread_trampoline.

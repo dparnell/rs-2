@@ -1,0 +1,18 @@
+# OS/2 programs written in Rust. Built for i686 and converted to LX by
+# tools/elf2lx (cargo xtask builds them).
+[workspace]
+resolver = "3"
+members = ["os2", "apitest"]
+
+[workspace.package]
+edition = "2024"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+
+[profile.dev]
+panic = "abort"
+opt-level = 1
+
+[profile.release]
+panic = "abort"
+opt-level = "s"

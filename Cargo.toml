@@ -1,8 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "boot", "kernel", "tools/lxdump", "xtask"]
+members = ["crates/*", "boot", "kernel", "tools/lxdump", "tools/elf2lx", "xtask"]
 # boot and kernel are cross-compiled by xtask.
-default-members = ["crates/os2-exe", "crates/bootinfo", "crates/fat", "tools/lxdump", "xtask"]
+default-members = ["crates/os2-exe", "crates/bootinfo", "crates/fat", "tools/lxdump", "tools/elf2lx", "xtask"]
 
 [workspace.package]
 edition = "2024"

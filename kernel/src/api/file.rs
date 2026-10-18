@@ -1147,3 +1147,40 @@ pub fn console_handles() -> Vec<Option<Handle>> {
 pub fn device_handle(d: Device) -> Handle {
     Handle::device(d)
 }
+
+// ---- Pipes ----
+
+fn make_pipe(c: &Ctx, size: u32) -> Result<(u32, u32), u32> {
+    let (r, w) = crate::pipe::create(size as usize);
+    let hr = add(c, Handle::Pipe(r))?;
+    let hw = match add(c, Handle::Pipe(w)) {
+        Ok(h) => h,
+        Err(e) => {
+            c.process.handles.lock()[hr as usize] = None;
+            return Err(e);
+        }
+    };
+    Ok((hr, hw))
+}
+
+pub fn dos_create_pipe(c: &mut Ctx) -> u32 {
+    match make_pipe(c, c.arg(2)) {
+        Ok((r, w)) => {
+            c.write_u32(c.arg(0), r);
+            c.write_u32(c.arg(1), w);
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+pub fn dos16_make_pipe(c: &mut Ctx) -> u32 {
+    match make_pipe(c, c.arg(2)) {
+        Ok((r, w)) => {
+            c.write_u16(c.ptr(0), r as u16);
+            c.write_u16(c.ptr(1), w as u16);
+            0
+        }
+        Err(e) => e,
+    }
+}

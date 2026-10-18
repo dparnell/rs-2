@@ -465,3 +465,104 @@ pub fn hold_if_needed(t: &Arc<crate::task::thread::Thread>, p: &Arc<Process>) {
         }
     }
 }
+
+// ---- Exit lists ----
+
+/// Gate slot (0, 4): an exit list routine returned without calling
+/// DosExitList(EXLST_EXIT); treated the same.
+pub const EXITLIST_RETURN_ORDINAL: u32 = 4;
+
+pub fn dos_exit_list(c: &mut Ctx) -> u32 {
+    let (code, pfn) = (c.arg(0), c.arg(1));
+    let order = ((code >> 8) & 0xff) as u8;
+    match code & 0xff {
+        1 => {
+            let mut l = c.process.exitlist.lock();
+            if !l.iter().any(|e| e.1 == pfn) {
+                l.push((order, pfn, c.is16));
+            }
+            0
+        }
+        2 => {
+            let mut l = c.process.exitlist.lock();
+            let n = l.len();
+            l.retain(|e| e.1 != pfn);
+            if l.len() == n { err::INVALID_FUNCTION } else { 0 }
+        }
+        3 => {
+            if c.process.exitlist_tid.load(Ordering::Relaxed) != c.thread.tid {
+                return err::INVALID_FUNCTION;
+            }
+            // Run the next routine (or finish) on the way back to user mode.
+            c.process.exitlist_next.store(true, Ordering::Relaxed);
+            c.no_return = true;
+            0
+        }
+        _ => err::INVALID_DATA,
+    }
+}
+
+/// Called before returning to user mode: if this thread is running the
+/// exit list, redirect it into the next routine. Returns true when the list
+/// is done and the thread (and process) must now end.
+pub fn exit_list_step(t: &Arc<crate::task::thread::Thread>, p: &Arc<Process>, f: &mut TrapFrame) -> bool {
+    if p.exitlist_tid.load(Ordering::Relaxed) != t.tid || !p.exitlist_next.swap(false, Ordering::Relaxed) {
+        return false;
+    }
+    let code = p.exit_info().map_or(0, |e| e.cause);
+    loop {
+        // Lowest order code first.
+        let next = {
+            let mut l = p.exitlist.lock();
+            let i = l.iter().enumerate().min_by_key(|(_, e)| e.0).map(|(i, _)| i);
+            i.map(|i| l.remove(i))
+        };
+        let Some((_, pfn, is16)) = next else {
+            // Done: now really terminate.
+            p.exitlist_tid.store(0, Ordering::Relaxed);
+            let info = p.exit_info().unwrap_or(process::ExitInfo { cause: 0, code: 0 });
+            p.finish_exit(info);
+            return true;
+        };
+        let stub = loader::gate::slot_address(0, EXITLIST_RETURN_ORDINAL);
+        let mut sp = p.space.lock();
+        let frame16 = sp.descriptor(f.cs as u16) & (1 << 54) == 0 && f.cs as u16 & 4 != 0;
+        if is16 && frame16 {
+            // routine(USHORT usTermCode), far _Pascal.
+            let ss_base = vm::desc_base(sp.descriptor(f.ss as u16));
+            let spv = (f.rsp as u32 & 0xffff).wrapping_sub(6) & 0xffff;
+            let mut b = Vec::new();
+            b.extend_from_slice(&(stub as u16).to_le_bytes());
+            b.extend_from_slice(&vm::tile_selector(stub).to_le_bytes());
+            b.extend_from_slice(&(code as u16).to_le_bytes());
+            sp.poke_bytes(ss_base + spv, &b);
+            f.rsp = (f.rsp & !0xffff) | spv as u64;
+            f.cs = (pfn >> 16) as u64;
+            f.rip = (pfn & 0xffff) as u64;
+            return false;
+        }
+        if !is16 {
+            // routine(ULONG ulTermCode), _System.
+            let mut esp = f.rsp as u32;
+            if !frame16 {
+                esp = esp.wrapping_sub(8);
+            } else {
+                // Coming from 16-bit code: use the main thread's stack top.
+                esp = t.stack_top.load(Ordering::Relaxed).wrapping_sub(64);
+            }
+            let mut b = Vec::new();
+            b.extend_from_slice(&stub.to_le_bytes());
+            b.extend_from_slice(&code.to_le_bytes());
+            sp.poke_bytes(esp, &b);
+            f.rsp = esp as u64;
+            f.cs = USER_CS as u64;
+            f.ss = USER_DS as u64;
+            f.ds = USER_DS as u64;
+            f.es = USER_DS as u64;
+            f.fs = TIB_SEL as u64;
+            f.rip = pfn as u64;
+            return false;
+        }
+        // A 16-bit routine while in 32-bit code: skipped.
+    }
+}

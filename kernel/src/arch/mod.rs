@@ -119,3 +119,19 @@ pub fn cpuid(leaf: u32, sub: u32) -> (u32, u32, u32, u32) {
 pub fn rdtsc() -> u64 {
     unsafe { core::arch::x86_64::_rdtsc() }
 }
+
+/// Enable the FPU and SSE for user code: CR0.MP=1, EM=0, TS=0, NE=1;
+/// CR4.OSFXSR and OSXMMEXCPT.
+pub fn init_fpu() {
+    unsafe {
+        let mut cr0: u64;
+        asm!("mov {}, cr0", out(reg) cr0);
+        cr0 = (cr0 | (1 << 1) | (1 << 5)) & !((1 << 2) | (1 << 3));
+        asm!("mov cr0, {}", in(reg) cr0);
+        let mut cr4: u64;
+        asm!("mov {}, cr4", out(reg) cr4);
+        cr4 |= (1 << 9) | (1 << 10);
+        asm!("mov cr4, {}", in(reg) cr4);
+        asm!("fninit");
+    }
+}

@@ -59,6 +59,12 @@ pub struct Process {
     /// Woken when one of this process's threads ends, resumes or the
     /// critical section is released.
     pub thread_waiters: WaitQueue,
+    /// Exit list routines: (order, address, 16-bit).
+    pub exitlist: SpinLock<Vec<(u8, u32, bool)>>,
+    /// Thread running the exit list (0 = none) and whether it should
+    /// proceed to the next routine at its next return to user mode.
+    pub exitlist_tid: AtomicU32,
+    pub exitlist_next: core::sync::atomic::AtomicBool,
     /// Critical section owner (tid, 0 = none) and nesting count.
     pub critsec: SpinLock<(u32, u32)>,
     /// Started with EXEC_ASYNC: nobody will collect the result.
@@ -203,6 +209,9 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         child_waiters: WaitQueue::new(),
         thread_waiters: WaitQueue::new(),
         critsec: SpinLock::new((0, 0)),
+        exitlist: SpinLock::new(Vec::new()),
+        exitlist_tid: AtomicU32::new(0),
+        exitlist_next: core::sync::atomic::AtomicBool::new(false),
         detached: core::sync::atomic::AtomicBool::new(p.detached),
         loaded: SpinLock::new(Vec::new()),
         searches: SpinLock::new(alloc::collections::BTreeMap::new()),
@@ -316,6 +325,27 @@ impl Process {
             }
             *e = Some(ExitInfo { cause, code });
         }
+        // With an exit list, the current thread runs it first (in user
+        // mode) and the other threads end now.
+        let me = sched::current_opt();
+        let have_list = !self.exitlist.lock().is_empty();
+        if let (true, Some(me)) = (have_list, me) {
+            if me.process().is_some_and(|p| Arc::ptr_eq(&p, self)) {
+                for t in self.threads.lock().iter() {
+                    if !Arc::ptr_eq(t, &me) {
+                        sched::kill(t);
+                    }
+                }
+                self.exitlist_tid.store(me.tid, Ordering::Relaxed);
+                self.exitlist_next.store(true, Ordering::Relaxed);
+                return;
+            }
+        }
+        self.finish_exit(ExitInfo { cause, code });
+    }
+
+    /// Make every thread end.
+    pub fn finish_exit(self: &Arc<Self>, _info: ExitInfo) {
         for t in self.threads.lock().iter() {
             sched::kill(t);
         }
@@ -349,6 +379,7 @@ impl Process {
             }
         }
         self.threads.lock().clear();
+        crate::api::sem::process_ended(self.pid);
         // Close handles (pipes see their writers disappear).
         let hs = core::mem::take(&mut *self.handles.lock());
         drop(hs);

@@ -1,0 +1,6 @@
+[package]
+name = "elf2lx"
+description = "Convert i686 ELF executables (linked with --emit-relocs) into OS/2 LX modules"
+edition.workspace = true
+version.workspace = true
+license.workspace = true

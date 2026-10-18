@@ -257,6 +257,13 @@ pub fn schedule() {
         // owners (SCHED.current / dead list, a process thread list, idle).
         let save = prev.rsp_slot();
         let target = unsafe { *next.rsp_slot() };
+        // Eager FPU/SSE switch (the kernel itself never uses the FPU).
+        unsafe {
+            let p = (*prev.fpu.get()).0.as_mut_ptr();
+            let n = (*next.fpu.get()).0.as_ptr();
+            core::arch::asm!("fxsave64 [{}]", in(reg) p, options(nostack));
+            core::arch::asm!("fxrstor64 [{}]", in(reg) n, options(nostack));
+        }
         drop(prev);
         drop(next);
         unsafe { switch_stacks(save, target) };

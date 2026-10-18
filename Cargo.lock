@@ -7,6 +7,10 @@ name = "bootinfo"
 version = "0.1.0"
 
 [[package]]
+name = "elf2lx"
+version = "0.1.0"
+
+[[package]]
 name = "fat"
 version = "0.1.0"
 

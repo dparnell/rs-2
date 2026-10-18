@@ -101,6 +101,43 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 156) => super::proc::dos16_get_ppid,
         (0, 311) => super::proc::dos_create_thread,
         (0, 349) => super::proc::dos_wait_thread,
+        (0, 20) => super::sem::dos16_sem_set_wait,
+        (0, 22) => super::sem::dos16_mux_sem_wait,
+        (0, 23) => super::sem::dos16_close_sem,
+        (0, 24) => super::sem::dos16_create_sem,
+        (0, 25) => super::sem::dos16_open_sem,
+        (0, 140) => super::sem::dos16_sem_request,
+        (0, 141) => super::sem::dos16_sem_clear,
+        (0, 142) => super::sem::dos16_sem_wait,
+        (0, 143) => super::sem::dos16_sem_set,
+        (0, 324) => super::sem::dos_create_event_sem,
+        (0, 325) => super::sem::dos_open_event_sem,
+        (0, 326) => super::sem::dos_close_event_sem,
+        (0, 327) => super::sem::dos_reset_event_sem,
+        (0, 328) => super::sem::dos_post_event_sem,
+        (0, 329) => super::sem::dos_wait_event_sem,
+        (0, 330) => super::sem::dos_query_event_sem,
+        (0, 331) => super::sem::dos_create_mutex_sem,
+        (0, 332) => super::sem::dos_open_mutex_sem,
+        (0, 333) => super::sem::dos_close_mutex_sem,
+        (0, 334) => super::sem::dos_request_mutex_sem,
+        (0, 335) => super::sem::dos_release_mutex_sem,
+        (0, 336) => super::sem::dos_query_mutex_sem,
+        (0, 337) => super::sem::dos_create_mux_wait_sem,
+        (0, 338) => super::sem::dos_open_mux_wait_sem,
+        (0, 339) => super::sem::dos_close_mux_wait_sem,
+        (0, 340) => super::sem::dos_wait_mux_wait_sem,
+        (0, 341) => super::sem::dos_add_mux_wait_sem,
+        (0, 342) => super::sem::dos_delete_mux_wait_sem,
+        (0, 343) => super::sem::dos_query_mux_wait_sem,
+        (0, 7) | (0, 296) => super::proc::dos_exit_list,
+        (0, 356) => super::exceptions::dos_raise_exception,
+        (0, 357) => super::exceptions::dos_unwind_exception,
+        (0, 378) => dos_set_signal_exception_focus,
+        (0, 380) | (0, 381) => dos_must_complete,
+        (0, 418) => ok, // DosAcknowledgeSignalException
+        (0, 16) => file::dos16_make_pipe,
+        (0, 239) => file::dos_create_pipe,
         (0, 690) => ok, // DosSMSetTitle
         (0, 712) => dos16_sm_pm_present,
         // ---- 16-bit DOSCALLS ----
@@ -469,14 +506,18 @@ fn dos_alloc_mem(c: &mut Ctx) -> u32 {
 }
 
 fn dos_free_mem(c: &mut Ctx) -> u32 {
-    match c.space().free(c.arg(0)) {
+    let base = c.arg(0);
+    let r = c.space().free(base);
+    match r {
         Ok(()) => 0,
         Err(e) => e.code(),
     }
 }
 
 fn dos_set_mem(c: &mut Ctx) -> u32 {
-    match c.space().set_mem(c.arg(0), c.arg(1), c.arg(2)) {
+    let (a, n, f) = (c.arg(0), c.arg(1), c.arg(2));
+    let r = c.space().set_mem(a, n, f);
+    match r {
         Ok(()) => 0,
         Err(e) => e.code(),
     }
@@ -747,5 +788,22 @@ fn dos_dev_config(c: &mut Ctx) -> u32 {
 
 fn dos16_sm_pm_present(c: &mut Ctx) -> u32 {
     c.write_u16(c.ptr(0), 0);
+    0
+}
+
+fn dos_set_signal_exception_focus(c: &mut Ctx) -> u32 {
+    // (flag, pulTimes)
+    let p = c.arg(1);
+    if p != 0 {
+        c.write_u32(p, 1);
+    }
+    0
+}
+
+fn dos_must_complete(c: &mut Ctx) -> u32 {
+    let p = c.arg(0);
+    if p != 0 {
+        c.write_u32(p, 1);
+    }
     0
 }

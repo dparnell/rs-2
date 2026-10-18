@@ -16,6 +16,7 @@ pub mod kbdapi;
 pub mod msg;
 pub mod nls;
 pub mod proc;
+pub mod sem;
 pub mod vio;
 pub mod names;
 mod names_gen;
@@ -331,6 +332,17 @@ pub fn dispatch(f: &mut TrapFrame) {
         // A 32-bit program returned from its entry point.
         let code = f.rax as u32;
         process.exit(0, code);
+        return;
+    }
+    if module == 0 && ordinal == exceptions::HANDLER_RETURN_ORDINAL {
+        exceptions::handler_returned(f, &process, &thread);
+        return;
+    }
+    if module == 0 && ordinal == proc::EXITLIST_RETURN_ORDINAL {
+        // An exit list routine returned: continue with the next one.
+        if process.exitlist_tid.load(core::sync::atomic::Ordering::Relaxed) == thread.tid {
+            process.exitlist_next.store(true, core::sync::atomic::Ordering::Relaxed);
+        }
         return;
     }
     if module == 0 && ordinal == proc::THREAD_EXIT_ORDINAL {

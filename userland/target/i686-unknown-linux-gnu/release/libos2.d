@@ -1,0 +1,1 @@
+/Users/danielparnell/Documents/Develoment/rs2/userland/target/i686-unknown-linux-gnu/release/libos2.rlib: /Users/danielparnell/Documents/Develoment/rs2/userland/os2/src/dos.rs /Users/danielparnell/Documents/Develoment/rs2/userland/os2/src/fmt.rs /Users/danielparnell/Documents/Develoment/rs2/userland/os2/src/lib.rs

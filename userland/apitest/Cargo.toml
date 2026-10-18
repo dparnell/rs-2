@@ -1,0 +1,9 @@
+[package]
+name = "apitest"
+description = "Exercises the rs2 kernel API; prints PASS/FAIL per check"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

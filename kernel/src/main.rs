@@ -58,6 +58,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     println!("framebuffer {}x{} at {:#x}", fb.width, fb.height, fb.base);
     arch::gdt::init();
     arch::idt::init();
+    arch::init_fpu();
     mm::init(info);
     irq::init();
     task::sched::init();
