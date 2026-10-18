@@ -83,6 +83,8 @@ pub struct SharedMem {
     pub frames: SpinLock<Vec<u64>>,
     /// Commit state shared by all mappings.
     pub pages: SpinLock<Vec<PageState>>,
+    /// The frames belong to a device (the framebuffer), not to the object.
+    pub device: bool,
 }
 
 impl SharedMem {
@@ -95,6 +97,21 @@ impl SharedMem {
             flags,
             frames: SpinLock::new(vec![0; n]),
             pages: SpinLock::new(vec![PageState::Reserved; n]),
+            device: false,
+        })
+    }
+
+    /// An object over device memory starting at physical address `phys`.
+    pub fn new_device(base: u32, size: u32, flags: u32, phys: u64) -> Arc<Self> {
+        let n = (size / PAGE) as usize;
+        Arc::new(SharedMem {
+            base,
+            size,
+            name: None,
+            flags,
+            frames: SpinLock::new((0..n).map(|i| phys + (i as u64) * PAGE as u64).collect()),
+            pages: SpinLock::new(vec![PageState::Committed; n]),
+            device: true,
         })
     }
 
@@ -111,7 +128,7 @@ impl SharedMem {
 impl Drop for SharedMem {
     fn drop(&mut self) {
         for &f in self.frames.lock().iter() {
-            if f != 0 {
+            if f != 0 && !self.device {
                 phys::free(f);
             }
         }

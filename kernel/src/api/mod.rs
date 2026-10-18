@@ -22,6 +22,7 @@ pub mod npipe;
 pub mod proc;
 pub mod queue;
 pub mod resource;
+pub mod rs2api;
 pub mod signal;
 pub mod sem;
 pub mod sesmgr;

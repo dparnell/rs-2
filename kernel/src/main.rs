@@ -14,6 +14,7 @@ mod arch;
 mod codepage;
 mod config;
 mod console;
+mod display;
 mod drivers;
 mod fs;
 mod infoseg;

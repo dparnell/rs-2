@@ -26,6 +26,26 @@ pub struct Session {
     pub termq: Option<String>,
 }
 
+/// The Presentation Manager session, if one has been started.
+static PM: AtomicU32 = AtomicU32::new(0);
+
+pub fn pm_session() -> u32 {
+    PM.load(Ordering::Relaxed)
+}
+
+/// The Presentation Manager session, created on first use: a session whose
+/// screen is drawn by PM itself.
+pub fn pm_session_or_create() -> u32 {
+    let s = pm_session();
+    if s != 0 {
+        return s;
+    }
+    let sid = create(String::from("Presentation Manager"), foreground(), None, None);
+    crate::screen::with_session(sid, |s| s.graphics = true);
+    PM.store(sid, Ordering::Relaxed);
+    sid
+}
+
 static SESSIONS: SpinLock<Vec<Session>> = SpinLock::new(Vec::new());
 static FOREGROUND: AtomicU32 = AtomicU32::new(1);
 static NEXT_ID: AtomicU32 = AtomicU32::new(2);
@@ -98,6 +118,10 @@ pub fn select(sid: u32) -> bool {
     crate::screen::show(sid);
     let leader = if sid == 1 { 0 } else { SESSIONS.lock().iter().find(|s| s.id == sid).map_or(0, |s| s.leader) };
     crate::infoseg::set_foreground(sid, leader);
+    if sid == pm_session() {
+        // PM repaints the screen when it comes back.
+        crate::display::post_repaint();
+    }
     true
 }
 
@@ -111,6 +135,17 @@ pub fn select_next() {
 
 /// A process ended; if it led a session, the session ends.
 pub fn process_ended(pid: u32, code: u32) {
+    // The PM session ends with its last process.
+    let pm = pm_session();
+    if pm != 0 && !crate::task::process::all().iter().any(|p| p.pid != pid && p.exit_info().is_none() && p.session.load(Ordering::Relaxed) == pm) {
+        PM.store(0, Ordering::Relaxed);
+        let back = SESSIONS.lock().iter().find(|s| s.id == pm).map_or(1, |s| s.parent_session);
+        if foreground() == pm {
+            select(if exists(back) && back != pm { back } else { 1 });
+        }
+        discard(pm);
+        crate::display::reset_input();
+    }
     let s = {
         let mut ss = SESSIONS.lock();
         let Some(i) = ss.iter().position(|s| s.leader == pid) else { return };

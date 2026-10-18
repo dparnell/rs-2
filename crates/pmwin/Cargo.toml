@@ -1,0 +1,9 @@
+[package]
+name = "pmwin"
+description = "no_std window system core for rs2's Presentation Manager"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+gpi = { path = "../gpi" }

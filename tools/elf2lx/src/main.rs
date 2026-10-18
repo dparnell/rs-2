@@ -136,6 +136,7 @@ fn object_in(objects: &[Object], addr: u32) -> Option<usize> {
 const OBJ_READ: u32 = 0x0001;
 const OBJ_WRITE: u32 = 0x0002;
 const OBJ_EXEC: u32 = 0x0004;
+const OBJ_SHARED: u32 = 0x0010;
 const OBJ_BIG: u32 = 0x2000;
 
 fn main() -> ExitCode {
@@ -172,11 +173,19 @@ fn main() -> ExitCode {
     }
     let elf = parse(std::fs::read(&args[0]).expect("read input"));
 
-    // Objects: gather allocated sections by writability.
+    // Objects: gather allocated sections into code, data and shared data
+    // (sections named .shared*, one copy for all processes of a DLL).
     let alloc: Vec<&Section> = elf.sections.iter().filter(|s| s.flags & 2 != 0 && s.size > 0).collect();
-    let mut groups: Vec<(bool, u32, u32)> = Vec::new(); // (writable, start, end)
+    let kind = |s: &Section| -> u8 {
+        if s.name.starts_with(".shared") {
+            2
+        } else {
+            (s.flags & 1 != 0) as u8
+        }
+    };
+    let mut groups: Vec<(u8, u32, u32)> = Vec::new(); // (kind, start, end)
     for s in &alloc {
-        let w = s.flags & 1 != 0;
+        let w = kind(s);
         match groups.iter_mut().find(|g| g.0 == w) {
             Some(g) => {
                 g.1 = g.1.min(s.addr);
@@ -191,7 +200,7 @@ fn main() -> ExitCode {
         let base = g.1 & !0xffff;
         let size = g.2 - base;
         let mut data = vec![0u8; size as usize];
-        for s in alloc.iter().filter(|s| (s.flags & 1 != 0) == g.0) {
+        for s in alloc.iter().filter(|s| kind(s) == g.0) {
             if s.ty != 8 {
                 // not NOBITS
                 let from = &elf.data[s.offset as usize..(s.offset + s.size) as usize];
@@ -199,7 +208,11 @@ fn main() -> ExitCode {
                 data[at..at + from.len()].copy_from_slice(from);
             }
         }
-        let flags = OBJ_READ | OBJ_BIG | if g.0 { OBJ_WRITE } else { OBJ_EXEC };
+        let flags = OBJ_READ | OBJ_BIG | match g.0 {
+            0 => OBJ_EXEC,
+            1 => OBJ_WRITE,
+            _ => OBJ_WRITE | OBJ_SHARED,
+        };
         objects.push(Object { base, size, flags, data });
     }
 
@@ -570,7 +583,7 @@ fn write_lx(
     w32(&mut h, 0x74, modules.len() as u32);
     w32(&mut h, 0x78, import_procs as u32);
     w32(&mut h, 0x80, data_pages as u32);
-    let autodata = objects.iter().position(|o| o.flags & OBJ_WRITE != 0 && !o.data.is_empty());
+    let autodata = objects.iter().position(|o| o.flags & OBJ_WRITE != 0 && o.flags & OBJ_SHARED == 0 && !o.data.is_empty());
     w32(&mut h, 0x94, autodata.map_or(0, |a| a as u32 + 1));
     w32(&mut h, 0xac, if dll { 0 } else { esp });
     out.extend_from_slice(&h);

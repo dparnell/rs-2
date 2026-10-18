@@ -38,6 +38,13 @@ name = "os2-pack"
 version = "0.1.0"
 
 [[package]]
+name = "pmwin"
+version = "0.1.0"
+dependencies = [
+ "gpi",
+]
+
+[[package]]
 name = "rs2-boot"
 version = "0.1.0"
 dependencies = [

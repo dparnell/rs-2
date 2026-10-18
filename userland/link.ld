@@ -9,5 +9,8 @@ SECTIONS {
     . = ALIGN(0x10000);
     .data : { *(.data .data.*) *(.got) *(.got.plt) }
     .bss : { *(.bss .bss.*) *(COMMON) }
+    /* DLL data shared by all processes (#[link_section = ".shared"]). */
+    . = ALIGN(0x10000);
+    .shared : { *(.shared .shared.*) }
     /DISCARD/ : { *(.eh_frame*) *(.note*) *(.comment) }
 }

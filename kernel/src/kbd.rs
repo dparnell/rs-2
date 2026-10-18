@@ -98,6 +98,10 @@ pub fn scancode(sc: u8) {
             return;
         }
         let fg = crate::session::foreground();
+        if fg == crate::session::pm_session() {
+            crate::display::key(&k, false);
+            return;
+        }
         STATE.lock().queues.entry(fg).or_default().push_back(k);
         WAITERS.wake_all();
     }

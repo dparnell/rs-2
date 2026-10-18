@@ -147,6 +147,10 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 418) => ok, // DosAcknowledgeSignalException
         (0, 16) => file::dos16_make_pipe,
         (0, 239) => file::dos_create_pipe,
+        // ---- RS2API ----
+        (8, 1) => super::rs2api::rs2_map_display,
+        (8, 2) => super::rs2api::rs2_read_input,
+        (8, 3) => super::rs2api::rs2_query_pointer,
         // ---- MOUCALLS ----
         (3, 1) => super::mou::mou_get_ptr_shape,
         (3, 2) => super::mou::mou_set_ptr_shape,

@@ -68,6 +68,9 @@ pub struct Screen {
     pub attr: u8,
     /// Shown on the framebuffer (the foreground session).
     visible: bool,
+    /// The session draws graphics itself (Presentation Manager): its text
+    /// cells are never rendered.
+    pub graphics: bool,
 }
 
 unsafe impl Send for Screen {}
@@ -123,6 +126,7 @@ impl Screen {
             core::ptr::addr_of_mut!((*s).cursor).write(None);
             core::ptr::addr_of_mut!((*s).attr).write(0x07);
             core::ptr::addr_of_mut!((*s).visible).write(false);
+            core::ptr::addr_of_mut!((*s).graphics).write(false);
         }
         let s = unsafe { &mut *s };
         for row in s.cells.iter_mut() {
@@ -159,7 +163,7 @@ impl Screen {
         self.rows = rows.min(max_r).max(1);
         self.x0 = (self.fb.width as usize - self.cols * CELL_W) / 2;
         self.y0 = (self.fb.height as usize - self.rows * CELL_H) / 2;
-        if !self.visible {
+        if !self.visible || self.graphics {
             return;
         }
         // Clear the whole framebuffer so no stale border remains.
@@ -186,7 +190,7 @@ impl Screen {
     }
 
     fn draw(&mut self, row: usize, col: usize) {
-        if !self.visible {
+        if !self.visible || self.graphics {
             return;
         }
         let cell = self.cells[row][col];
@@ -247,7 +251,7 @@ impl Screen {
                 self.cells[r][c] = if r + n <= bottom { self.cells[r + n][c] } else { fill };
             }
         }
-        if !self.visible {
+        if !self.visible || self.graphics {
             return;
         }
         // Move the pixels of the surviving rows in one copy, then draw only
@@ -334,6 +338,11 @@ pub fn with<R>(f: impl FnOnce(&mut Screen) -> R) -> Option<R> {
 
 pub fn with_session<R>(sid: u32, f: impl FnOnce(&mut Screen) -> R) -> Option<R> {
     SCREEN.lock().get(sid).map(f)
+}
+
+/// The framebuffer, if there is one.
+pub fn framebuffer() -> Option<Framebuffer> {
+    SCREEN.lock().boot.as_ref().map(|b| b.fb)
 }
 
 /// Create the (hidden) screen of a new session.

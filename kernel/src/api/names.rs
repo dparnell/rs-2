@@ -28,7 +28,8 @@ pub fn is16(module: u8, ordinal: u16) -> bool {
     }
     match find(module, ordinal) {
         Some(e) => e.2,
-        None => module != 0 || ordinal < 200,
+        // RS2API (8) is 32-bit.
+        None => (module != 0 && module != 8) || (module == 0 && ordinal < 200),
     }
 }
 

@@ -94,6 +94,10 @@ pub fn drop_session(sid: u32) {
 /// movement with y growing downwards.
 pub fn motion(buttons: u8, dx: i32, dy: i32) {
     let sid = crate::session::foreground();
+    if sid == crate::session::pm_session() {
+        crate::display::mouse(buttons, dx, dy);
+        return;
+    }
     let time = crate::irq::uptime_ms() as u32;
     let mut s = STATE.lock();
     let prev = core::mem::replace(&mut s.buttons, buttons);
