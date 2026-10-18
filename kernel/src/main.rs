@@ -10,14 +10,21 @@ extern crate alloc;
 mod api;
 mod arch;
 mod codepage;
+mod console;
+mod fs;
+mod infoseg;
 mod irq;
+mod kbd;
+mod loader;
 mod log;
 mod mm;
+mod rtc;
 mod screen;
 mod serial;
 mod sync;
 mod task;
 mod trap;
+mod vm;
 
 use bootinfo::BootInfo;
 
@@ -51,20 +58,51 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     arch::gdt::init();
     arch::idt::init();
     mm::init(info);
-    for m in info.modules() {
-        println!("module {} ({} bytes)", m.name(), m.len);
-    }
     irq::init();
+    task::sched::init();
+    fs::init(info);
+    loader::init();
+    infoseg::init();
+    kbd::init();
     arch::enable_interrupts();
-    let start = irq::ticks();
-    while irq::ticks() < start + 100 {
+
+    let cmdline = info.cmdline();
+    println!("command line: {cmdline}");
+    let init = cmdline
+        .split_whitespace()
+        .find_map(|w| w.strip_prefix("init="))
+        .unwrap_or("CMD.EXE");
+    // Arguments for init follow "--".
+    let args = cmdline.split_once(" -- ").map_or("", |(_, a)| a);
+    start_init(init, args);
+    // This boot context is now the idle thread.
+    loop {
+        task::sched::schedule();
         arch::halt();
     }
-    println!("timer ok: {} ticks", irq::ticks());
-    let v = alloc::vec![1u32, 2, 3];
-    println!("heap ok: {:?}", v);
-    loop {
-        arch::halt();
+}
+
+fn start_init(program: &str, args: &str) {
+    use alloc::string::ToString;
+    let env = alloc::vec![
+        "PATH=C:\\;C:\\OS2".to_string(),
+        "DPATH=C:\\;C:\\OS2".to_string(),
+        "COMSPEC=C:\\CMD.EXE".to_string(),
+        "OS2_SHELL=C:\\CMD.EXE".to_string(),
+        "PROMPT=$i[$p]".to_string(),
+    ];
+    let path = alloc::format!("C:\\{}", program.to_ascii_uppercase());
+    let r = task::process::exec(task::process::ExecParams {
+        path: &path,
+        program,
+        args,
+        env,
+        parent: None,
+        handles: alloc::vec::Vec::new(),
+    });
+    match r {
+        Ok(p) => println!("started {} as process {}", path, p.pid),
+        Err(e) => println!("cannot start {path}: error {e}"),
     }
 }
 
