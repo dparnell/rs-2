@@ -1,0 +1,9 @@
+[package]
+name = "cmd"
+description = "rs2 command interpreter (CMD.EXE)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

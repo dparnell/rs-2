@@ -6,8 +6,17 @@
 
 #![no_std]
 
+extern crate alloc;
+
 pub mod dos;
 pub mod fmt;
+pub mod heap;
+pub mod path;
+
+/// Programs using `alloc` get the OS/2 heap.
+#[cfg(feature = "heap")]
+#[global_allocator]
+static HEAP: heap::Os2Heap = heap::Os2Heap;
 
 pub use dos::*;
 
@@ -93,6 +102,7 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
 // themselves.
 
 #[unsafe(no_mangle)]
+#[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn memset(d: *mut u8, c: i32, n: usize) -> *mut u8 {
     for i in 0..n {
         unsafe { d.add(i).write_volatile(c as u8) };
@@ -101,6 +111,7 @@ pub unsafe extern "C" fn memset(d: *mut u8, c: i32, n: usize) -> *mut u8 {
 }
 
 #[unsafe(no_mangle)]
+#[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn memcpy(d: *mut u8, s: *const u8, n: usize) -> *mut u8 {
     for i in 0..n {
         unsafe { d.add(i).write_volatile(s.add(i).read_volatile()) };
@@ -109,6 +120,7 @@ pub unsafe extern "C" fn memcpy(d: *mut u8, s: *const u8, n: usize) -> *mut u8 {
 }
 
 #[unsafe(no_mangle)]
+#[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn memmove(d: *mut u8, s: *const u8, n: usize) -> *mut u8 {
     if (d as usize) < (s as usize) {
         for i in 0..n {
@@ -123,6 +135,7 @@ pub unsafe extern "C" fn memmove(d: *mut u8, s: *const u8, n: usize) -> *mut u8 
 }
 
 #[unsafe(no_mangle)]
+#[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
     for i in 0..n {
         let (x, y) = unsafe { (a.add(i).read_volatile(), b.add(i).read_volatile()) };
@@ -134,6 +147,7 @@ pub unsafe extern "C" fn memcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
 }
 
 #[unsafe(no_mangle)]
+#[allow(suspicious_runtime_symbol_definitions)]
 pub unsafe extern "C" fn bcmp(a: *const u8, b: *const u8, n: usize) -> i32 {
     unsafe { memcmp(a, b, n) }
 }

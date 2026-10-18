@@ -118,8 +118,11 @@ pub mod boot {
     }
 
     fn find_program(p: &str) -> String {
-        if p.contains(['\\', ':']) {
+        if p.contains(':') {
             return p.to_string();
+        }
+        if p.contains('\\') {
+            return alloc::format!("C:\\{}", p.trim_start_matches('\\'));
         }
         for dir in ["C:\\", "C:\\OS2\\", "C:\\RS2\\"] {
             let full = alloc::format!("{dir}{p}");

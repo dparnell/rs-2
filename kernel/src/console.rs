@@ -9,10 +9,12 @@ struct Tty {
     esc_len: usize,
     in_esc: bool,
     attr: u8,
+    /// Cursor position saved by ESC[s.
+    saved: (usize, usize),
 }
 
 static TTY: crate::sync::SpinLock<Tty> =
-    crate::sync::SpinLock::new(Tty { esc: [0; 32], esc_len: 0, in_esc: false, attr: 0x07 });
+    crate::sync::SpinLock::new(Tty { esc: [0; 32], esc_len: 0, in_esc: false, attr: 0x07, saved: (0, 0) });
 
 /// Write bytes as TTY output (VioWrtTTY semantics).
 pub fn write(bytes: &[u8]) {
@@ -102,6 +104,11 @@ fn ansi(t: &mut Tty, s: &mut screen::Screen, seq: &[u8]) {
             }
             s.cur_row = 0;
             s.cur_col = 0;
+        }
+        b's' => t.saved = (s.cur_row, s.cur_col),
+        b'u' => {
+            s.cur_row = t.saved.0.min(s.rows - 1);
+            s.cur_col = t.saved.1.min(s.cols - 1);
         }
         b'K' => {
             let fill = 0x20 | (t.attr as u16) << 8;

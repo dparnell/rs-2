@@ -340,11 +340,9 @@ pub fn find_module(name: &str) -> Option<(String, Arc<[u8]>)> {
 /// `X.IMG` becomes drive X:.
 pub fn init(info: &bootinfo::BootInfo) {
     set_libpath("C:\\OS2\\DLL;C:\\OS2;C:\\;C:\\OS2\\APPS\\DLL;C:\\RS2");
-    // Booted from a disk partition: that partition becomes C: (mounted by
-    // the storage drivers), so no RAM disk.
-    if info.boot_device.kind == 1 {
-        return;
-    }
+    // A boot volume image (C.IMG) from the loader is C: (live media and
+    // development); otherwise an installed system's boot partition becomes
+    // C: when the storage drivers find it.
     for m in info.modules() {
         let name = m.name().to_ascii_uppercase();
         let Some(letter) = name.strip_suffix(".IMG") else { continue };
@@ -361,4 +359,9 @@ pub fn init(info: &bootinfo::BootInfo) {
             Err(e) => crate::println!("{name}: cannot mount ({e})"),
         }
     }
+}
+
+/// True if the loader supplied a C: boot volume image.
+pub fn has_boot_image(info: &bootinfo::BootInfo) -> bool {
+    info.modules().iter().any(|m| m.name().eq_ignore_ascii_case("C.IMG"))
 }

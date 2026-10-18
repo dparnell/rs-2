@@ -330,3 +330,74 @@ unsafe extern "C" {
     #[link_name = "QUECALLS.11"]
     pub fn DosCloseQueue(hq: u32) -> APIRET;
 }
+
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct FileStatus3 {
+    pub fdate_creation: u16,
+    pub ftime_creation: u16,
+    pub fdate_access: u16,
+    pub ftime_access: u16,
+    pub fdate_write: u16,
+    pub ftime_write: u16,
+    pub cb_file: u32,
+    pub cb_alloc: u32,
+    pub attr: u32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct FsAllocate {
+    pub id: u32,
+    pub sectors_per_unit: u32,
+    pub units: u32,
+    pub units_avail: u32,
+    pub bytes_per_sector: u16,
+}
+
+#[repr(C)]
+pub struct FsInfo {
+    pub serial: u32,
+    pub cch_label: u8,
+    pub label: [u8; 12],
+}
+
+pub const FIL_QUERYFULLNAME: u32 = 5;
+pub const FSIL_ALLOC: u32 = 1;
+pub const FSIL_VOLSER: u32 = 2;
+pub const FILE_READONLY: u32 = 0x01;
+pub const FILE_HIDDEN: u32 = 0x02;
+pub const FILE_SYSTEM: u32 = 0x04;
+pub const FILE_ARCHIVED: u32 = 0x20;
+pub const EXEC_ASYNC: u32 = 1;
+pub const OPEN_ACCESS_WRITEONLY: u32 = 0x0001;
+pub const OPEN_FLAGS_NOINHERIT: u32 = 0x0080;
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.275"]
+    pub fn DosQueryCurrentDisk(pdisk: *mut u32, plogical: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.220"]
+    pub fn DosSetDefaultDisk(disk: u32) -> APIRET;
+    #[link_name = "DOSCALLS.274"]
+    pub fn DosQueryCurrentDir(disk: u32, buf: *mut u8, pcb: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.255"]
+    pub fn DosSetCurrentDir(dir: *const u8) -> APIRET;
+    #[link_name = "DOSCALLS.223"]
+    pub fn DosQueryPathInfo(path: *const u8, level: u32, buf: *mut u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.219"]
+    pub fn DosSetPathInfo(path: *const u8, level: u32, buf: *const u8, cb: u32, opts: u32) -> APIRET;
+    #[link_name = "DOSCALLS.279"]
+    pub fn DosQueryFileInfo(hf: u32, level: u32, buf: *mut u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.278"]
+    pub fn DosQueryFSInfo(disk: u32, level: u32, buf: *mut u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.271"]
+    pub fn DosMove(from: *const u8, to: *const u8) -> APIRET;
+    #[link_name = "DOSCALLS.292"]
+    pub fn DosSetDateTime(dt: *const DateTime) -> APIRET;
+    #[link_name = "DOSCALLS.224"]
+    pub fn DosQueryHType(hf: u32, ptype: *mut u32, pattr: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.272"]
+    pub fn DosSetFileSize(hf: u32, size: u32) -> APIRET;
+    #[link_name = "DOSCALLS.235"]
+    pub fn DosKillProcess(action: u32, pid: u32) -> APIRET;
+}

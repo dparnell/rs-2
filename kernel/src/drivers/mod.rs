@@ -64,7 +64,7 @@ pub fn init() {
     }
     // The boot partition is C:.
     let boot = crate::boot_info().boot_device;
-    if boot.kind == 1 {
+    if boot.kind == 1 && !crate::fs::has_boot_image(crate::boot_info()) {
         if let Some(i) = parts.iter().position(|p| p.start == boot.start && p.count == boot.size) {
             let p = parts.remove(i);
             match crate::fs::fatfs::FatFs::mount(Arc::new(p)) {

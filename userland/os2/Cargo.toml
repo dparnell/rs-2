@@ -4,3 +4,7 @@ description = "OS/2 API bindings and a minimal runtime for rs2 user programs"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+
+[features]
+default = ["heap"]
+heap = []

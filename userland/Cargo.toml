@@ -2,7 +2,7 @@
 # tools/elf2lx (cargo xtask builds them).
 [workspace]
 resolver = "3"
-members = ["os2", "apitest", "testdll"]
+members = ["os2", "apitest", "testdll", "cmd"]
 
 [workspace.package]
 edition = "2024"

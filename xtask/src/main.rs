@@ -192,7 +192,7 @@ fn build(o: &Opts) -> Option<PathBuf> {
 
 /// Programs in userland/ to package, with their LX names.
 const USER_PROGRAMS: &[(&str, &str)] =
-    &[("apitest", "RS2\\APITEST.EXE"), ("testdll", "RS2\\TESTDLL.DLL")];
+    &[("apitest", "RS2\\APITEST.EXE"), ("testdll", "RS2\\TESTDLL.DLL"), ("cmd", "RS2\\CMD.EXE")];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
