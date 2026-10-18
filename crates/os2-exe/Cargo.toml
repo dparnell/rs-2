@@ -1,0 +1,6 @@
+[package]
+name = "os2-exe"
+description = "no_std parser for OS/2 MZ/NE/LX executable modules"
+edition.workspace = true
+version.workspace = true
+license.workspace = true

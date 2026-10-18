@@ -1,0 +1,8 @@
+[package]
+name = "lxdump"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2-exe = { path = "../../crates/os2-exe" }
