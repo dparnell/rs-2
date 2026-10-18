@@ -90,10 +90,12 @@ pub extern "C" fn WinCreateDlg(parent: u32, owner: u32, proc_: u32, pdlgt: *cons
 
 /// The dialog's position on its parent: template coordinates are
 /// relative to the owner (or the screen, or the pointer), kept on the
-/// screen.
-fn place(parent: u32, owner: u32, t: &DlgItemT) -> Rect {
+/// screen. The template size is the area inside the frame controls.
+fn place(parent: u32, owner: u32, t: &DlgItemT, fcf: u32) -> Rect {
+    let b = frame::border(fcf);
+    let title = if fcf & (frame::FCF_TITLEBAR | frame::FCF_SYSMENU) != 0 { frame::TITLE_H } else { 0 };
     let s = st();
-    let (cx, cy) = (t.cx * DU_X, t.cy * DU_Y);
+    let (cx, cy) = (t.cx * DU_X + 2 * b, t.cy * DU_Y + 2 * b + title);
     let (mut x, mut y) = (t.x * DU_X, t.y * DU_Y);
     if t.style & FS_MOUSEALIGN != 0 {
         x += s.pointer.x;
@@ -119,14 +121,15 @@ fn create(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u32) -> u32
             fcf |= f;
         }
     }
-    let pos = place(parent, owner, t);
+    let pos = place(parent, owner, t, fcf);
     let h = frame::create(parent, t.style & !ws::VISIBLE, fcf, &t.text, pos, owner, t.id, 0);
     if h == 0 {
         return 0;
     }
     ctl::set_data(h, Dlg { result: 0, dismissed: false, disabled_owner: 0 });
+    let b = frame::border(fcf);
     for c in &t.children {
-        create_item(h, h, c);
+        create_item(h, h, c, b);
     }
     let proc_ = if proc_ == 0 { def_dlg_entry as *const () as u32 } else { proc_ };
     if let Some(w) = st().desk.get_mut(h) {
@@ -149,7 +152,9 @@ fn create(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u32) -> u32
     h
 }
 
-fn create_item(parent: u32, dlg: u32, t: &DlgItemT) {
+/// Create a dialog item and its children, `off` pixels in from the
+/// parent's origin.
+fn create_item(parent: u32, dlg: u32, t: &DlgItemT, off: i32) {
     let mut class = t.class.clone();
     let mut style = t.style;
     if st().class(&class).is_none() {
@@ -157,11 +162,11 @@ fn create_item(parent: u32, dlg: u32, t: &DlgItemT) {
         class = b"#5".to_vec();
         style = (style & 0xffff_0000) | 0x09;
     }
-    let pos = Rect::new(t.x * DU_X, t.y * DU_Y, (t.x + t.cx) * DU_X, (t.y + t.cy) * DU_Y);
+    let pos = Rect::new(t.x * DU_X, t.y * DU_Y, (t.x + t.cx) * DU_X, (t.y + t.cy) * DU_Y).offset(off, off);
     let h = win::create(parent, &class, &t.text, style, pos, dlg, t.id, t.ctl as u32);
     for c in &t.children {
         if h != 0 {
-            create_item(h, dlg, c);
+            create_item(h, dlg, c, 0);
         }
     }
 }

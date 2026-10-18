@@ -86,16 +86,18 @@ pub fn for_static(h: u32) -> Option<Bmp> {
     decode(res::load(0, res::RT_BITMAP, id)?)
 }
 
-/// Draw a bitmap with its bottom-left corner at the window origin.
-pub fn blit(c: &mut draw::Canvas, b: &Bmp) {
-    for y in 0..b.h {
-        let row = &b.pixels[(y * b.w) as usize..((y + 1) * b.w) as usize];
+/// Draw a bitmap stretched to `w` x `h` pixels at the window origin.
+pub fn blit(c: &mut draw::Canvas, b: &Bmp, w: i32, h: i32) {
+    for y in 0..h {
+        let sy = (y as i64 * b.h as i64 / h.max(1) as i64) as i32;
+        let row = &b.pixels[(sy * b.w) as usize..((sy + 1) * b.w) as usize];
+        let at = |x: i32| row[(x as i64 * b.w as i64 / w.max(1) as i64) as usize];
         let mut x = 0;
-        while x < b.w {
+        while x < w {
             // Runs of one colour as one fill.
-            let col = row[x as usize];
+            let col = at(x);
             let mut e = x + 1;
-            while e < b.w && row[e as usize] == col {
+            while e < w && at(e) == col {
                 e += 1;
             }
             c.fill(Rect::new(x, y, e, y + 1), col);

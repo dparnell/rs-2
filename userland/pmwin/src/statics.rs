@@ -20,6 +20,7 @@ const SS_FGNDFRAME: u32 = 0x08;
 const SS_HALFTONEFRAME: u32 = 0x09;
 const SS_BKGNDFRAME: u32 = 0x0a;
 const SS_SYSICON: u32 = 0x0b;
+const SS_AUTOSIZE: u32 = 0x40;
 
 const WM_CREATE: u32 = 0x0001;
 const SM_SETHANDLE: u32 = 0x0100;
@@ -68,7 +69,9 @@ fn paint(h: u32) {
             SS_ICON | SS_SYSICON | SS_BITMAP => {
                 c.fill(r, bg);
                 if let Some(b) = &bmp {
-                    crate::bitmap::blit(c, b);
+                    // Stretched to the control (SS_AUTOSIZE sized the
+                    // control to the bitmap).
+                    crate::bitmap::blit(c, b, r.width(), r.height());
                 }
             }
             _ => c.fill(r, bg),
@@ -83,9 +86,9 @@ pub extern "C" fn static_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_CREATE => {
-            // A bitmap static takes the bitmap's size, keeping its top
-            // edge and horizontal centre.
-            if ctl::style(h) & 0x7f == SS_BITMAP {
+            // SS_AUTOSIZE: a bitmap static takes the bitmap's size,
+            // keeping its top edge and horizontal centre.
+            if ctl::style(h) & 0x7f == SS_BITMAP && ctl::style(h) & SS_AUTOSIZE != 0 {
                 if let Some(b) = crate::bitmap::for_static(h) {
                     if let Some(w) = crate::state::st().desk.get(h) {
                         let (x, y) = (w.x + w.cx / 2 - b.w / 2, w.y + w.cy - b.h);
