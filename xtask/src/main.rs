@@ -336,6 +336,36 @@ fn ovmf() -> (PathBuf, PathBuf) {
     (code, vars)
 }
 
+/// The xHCI controller, hubs and USB devices.
+fn usb_devices(o: &Opts, c: &mut Command) {
+    if !o.usb_kbd && !o.usb_mouse && o.usb_disks.is_empty() && o.usb_hubs == 0 {
+        return;
+    }
+    c.args(["-device", "qemu-xhci,id=xhci"]);
+    // Port path of the hub the devices go behind ("" = root ports).
+    let mut hub = String::new();
+    for n in 0..o.usb_hubs {
+        let port = if n == 0 { "1".to_string() } else { format!("{hub}.8") };
+        c.arg("-device").arg(format!("usb-hub,bus=xhci.0,port={port},id=hub{n}"));
+        hub = port;
+    }
+    let mut next = 0;
+    let mut port = || {
+        next += 1;
+        if hub.is_empty() { String::new() } else { format!(",port={hub}.{next}") }
+    };
+    if o.usb_kbd {
+        c.arg("-device").arg(format!("usb-kbd,bus=xhci.0,id=usbkbd{}", port()));
+    }
+    if o.usb_mouse {
+        c.arg("-device").arg(format!("usb-mouse,bus=xhci.0,id=usbmouse{}", port()));
+    }
+    for (n, d) in o.usb_disks.iter().enumerate() {
+        c.arg("-drive").arg(format!("if=none,id=ud{n},format=raw,file={}", d.display()));
+        c.arg("-device").arg(format!("usb-storage,bus=xhci.0,drive=ud{n},id=usbdisk{n}{}", port()));
+    }
+}
+
 fn run(o: &Opts) -> bool {
     let (code, vars) = ovmf();
     let work = root().join("work");
@@ -424,36 +454,6 @@ fn run(o: &Opts) -> bool {
         }
     }
     true
-}
-
-/// The xHCI controller, hubs and USB devices.
-fn usb_devices(o: &Opts, c: &mut Command) {
-    if !o.usb_kbd && !o.usb_mouse && o.usb_disks.is_empty() && o.usb_hubs == 0 {
-        return;
-    }
-    c.args(["-device", "qemu-xhci,id=xhci"]);
-    // Port path of the hub the devices go behind ("" = root ports).
-    let mut hub = String::new();
-    for n in 0..o.usb_hubs {
-        let port = if n == 0 { "1".to_string() } else { format!("{hub}.8") };
-        c.arg("-device").arg(format!("usb-hub,bus=xhci.0,port={port},id=hub{n}"));
-        hub = port;
-    }
-    let mut next = 0;
-    let mut port = || {
-        next += 1;
-        if hub.is_empty() { String::new() } else { format!(",port={hub}.{next}") }
-    };
-    if o.usb_kbd {
-        c.arg("-device").arg(format!("usb-kbd,bus=xhci.0,id=usbkbd{}", port()));
-    }
-    if o.usb_mouse {
-        c.arg("-device").arg(format!("usb-mouse,bus=xhci.0,id=usbmouse{}", port()));
-    }
-    for (n, d) in o.usb_disks.iter().enumerate() {
-        c.arg("-drive").arg(format!("if=none,id=ud{n},format=raw,file={}", d.display()));
-        c.arg("-device").arg(format!("usb-storage,bus=xhci.0,drive=ud{n},id=usbdisk{n}{}", port()));
-    }
 }
 
 /// QEMU key names for a string.
