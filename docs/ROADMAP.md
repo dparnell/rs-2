@@ -15,6 +15,9 @@ Status markers: done, in progress, planned.
   Ctrl+C signals, module APIs, CONFIG.SYS processing
 - done: VIO, KBD, MSG (message files), NLS
 - done: the original CMD.EXE runs interactively; userland/apitest passes
+- done: IBM REXX (.CMD scripts, REXXUTIL, the REXX API server) and most
+  text-mode base utilities and Toolkit tools; see
+  [COMPATIBILITY.md](COMPATIBILITY.md)
 - done: named pipes (byte and message mode, DosTransactNPipe, DosCallNPipe)
 - planned: sessions (DosStartSession, screen switching),
   DosDevIOCtl coverage, bound message segments, DLL termination routines,
