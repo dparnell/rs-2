@@ -380,6 +380,16 @@ fn run(o: &Opts) -> bool {
     let type_at = o.type_at.unwrap_or(timeout.saturating_sub(8));
     let mut monitored = o.monitor.is_none();
     while Instant::now() < deadline {
+        if !typed && start.elapsed() >= Duration::from_secs(type_at) {
+            typed = true;
+            for key in keys(o.typing.as_deref().unwrap()) {
+                monitor(&sock, &format!("sendkey {key}"));
+                std::thread::sleep(Duration::from_millis(60));
+            }
+        }
+        if let Ok(Some(_)) = child.try_wait() {
+            break;
+        }
         if !monitored && start.elapsed() >= Duration::from_secs(o.monitor_at.unwrap_or(0)) {
             monitored = true;
             for cmd in o.monitor.as_deref().unwrap().split(';').map(str::trim) {
@@ -390,16 +400,6 @@ fn run(o: &Opts) -> bool {
                 }
                 std::thread::sleep(Duration::from_millis(500));
             }
-        }
-        if !typed && start.elapsed() >= Duration::from_secs(type_at) {
-            typed = true;
-            for key in keys(o.typing.as_deref().unwrap()) {
-                monitor(&sock, &format!("sendkey {key}"));
-                std::thread::sleep(Duration::from_millis(60));
-            }
-        }
-        if let Ok(Some(_)) = child.try_wait() {
-            break;
         }
         std::thread::sleep(Duration::from_millis(200));
     }
