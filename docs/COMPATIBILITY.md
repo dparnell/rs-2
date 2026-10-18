@@ -129,6 +129,10 @@ Status: **works** = the tested function behaves as on OS/2;
 - `DosGetMessage`: an insertion table slot holding NULL made the call fail
   with ERROR_INVALID_ADDRESS; OS/2 only reads the strings the message uses
   (SYSLEVEL listed nothing).
+- A text-mode program that initialises PM (REXXUTIL's `SysIni` calls
+  WinInitialize in rs2's PMWIN) was moved into the PM session, so CMD.EXE
+  never got another key after running RXTEST.CMD; only PM programs join
+  the PM session now.
 - Found by the stress test (`RS2\STRESS.EXE`, see below): every program
   run leaked its executable module and file image; thread IDs were never
   reused (1020 threads per process lifetime) and thread stacks never
@@ -152,11 +156,6 @@ Status: **works** = the tested function behaves as on OS/2;
   other but reads and writes are not checked against them.
 - The `DosProtect*` functions hand out a file handle lock ID but do not
   check it.
-- After a REXX error raised inside an external function (`SysIni`, which
-  needs PMSHAPI, in RXTEST.CMD) IBM CMD.EXE prints REX0040 and then spins
-  calling `DosHoldSignal` instead of reading the next command (it also
-  calls `DosFreeSeg(0)` just before). Other REXX errors (REX0013) return
-  to the prompt normally. Not resolved; present before this round too.
 - The 32-bit `DosQueryMessageCP` argument layout is unverified (no caller
   found among the tested programs).
 
