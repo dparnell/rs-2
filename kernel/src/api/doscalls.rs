@@ -246,6 +246,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 151) => file::dos_search_path,
         (0, 182) => file::dos_query_fs_attach,
         (0, 184) => file::dos16_find_first2,
+        (0, 191) | (0, 261) => file::dos_edit_name,
         (0, 85) => ok,  // DosSetMaxFH
         (0, 89) => dos16_set_vec,
         (0, 91) => dos16_get_env,

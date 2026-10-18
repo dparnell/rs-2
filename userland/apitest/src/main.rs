@@ -112,7 +112,29 @@ fn suballoc() {
     }
 }
 
+fn edit_name() {
+    let cases: [(&[u8], &[u8], &[u8]); 5] = [
+        (b"HELLO.CMD\0", b"*.BAK\0", b"HELLO.BAK"),
+        (b"README.TXT\0", b"*.*\0", b"README.TXT"),
+        (b"ABCDEF.TXT\0", b"??X*\0", b"ABXDEF.TXT"),
+        (b"FILE.TAR.GZ\0", b"*.Z\0", b"FILE.TAR.Z"),
+        (b"C:\\DIR\\NAME.EXT\0", b"NEW.*\0", b"NEW.EXT"),
+    ];
+    let mut ok = true;
+    for (src, edit, want) in cases {
+        let mut buf = [0u8; 64];
+        let rc = unsafe { DosEditName(1, src.as_ptr(), edit.as_ptr(), buf.as_mut_ptr(), 64) };
+        let n = buf.iter().position(|&b| b == 0).unwrap_or(0);
+        if rc != 0 || &buf[..n] != want {
+            ok = false;
+            println!("  DosEditName {:?}: rc {rc} {:?}", core::str::from_utf8(edit), core::str::from_utf8(&buf[..n]));
+        }
+    }
+    check("DosEditName", ok);
+}
+
 fn files() {
+    edit_name();
     unsafe {
         let mut hf = 0;
         let mut action = 0;

@@ -704,8 +704,9 @@ fn write_status(c: &Ctx, info: &FileInfo, level: u32, buf: u32, cb: u32) -> u32 
             }
             if c.write(buf, &b) { 0 } else { err::INVALID_ADDRESS }
         }
-        3 => {
-            // FIL_QUERYEASFROMLIST: EAOP2 -> report no EAs (empty FEA2LIST).
+        3 | 4 => {
+            // FIL_QUERYEASFROMLIST / FIL_QUERYALLEAS: EAOP2 -> report no
+            // EAs (empty FEA2LIST).
             let eaop = buf;
             let Some(fpfea2) = c.read_u32(eaop + 4) else { return err::INVALID_ADDRESS };
             let p = if c.is16 { c.far16_to_flat(fpfea2) } else { fpfea2 };
@@ -714,7 +715,12 @@ fn write_status(c: &Ctx, info: &FileInfo, level: u32, buf: u32, cb: u32) -> u32 
             }
             0
         }
-        _ => err::INVALID_LEVEL,
+        _ => {
+            if super::tracing() {
+                crate::trace!("    info level {level} not supported");
+            }
+            err::INVALID_LEVEL
+        }
     }
 }
 
@@ -736,6 +742,10 @@ pub fn dos_query_path_info(c: &mut Ctx) -> u32 {
             return err::BUFFER_OVERFLOW;
         }
         c.write_str(buf, &full);
+        return 0;
+    }
+    if level == 6 {
+        // FIL_NAMEISVALID: the name resolved.
         return 0;
     }
     if path::has_wildcards(&name) {
@@ -1220,4 +1230,68 @@ pub fn dos16_make_pipe(c: &mut Ctx) -> u32 {
         }
         Err(e) => e,
     }
+}
+
+/// Apply a wildcard edit string to a file name component (the target of
+/// `COPY *.TXT *.BAK`): `?` takes the source character at that position,
+/// `*` the source up to the edit string's next character, `.` moves to
+/// the source's next extension.
+pub fn edit_name(src: &[u8], edit: &[u8]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    for (k, &ch) in edit.iter().enumerate() {
+        match ch {
+            b'?' => {
+                if i < src.len() && src[i] != b'.' {
+                    out.push(src[i]);
+                    i += 1;
+                }
+            }
+            b'*' => {
+                let stop = match edit.get(k + 1) {
+                    None => src.len(),
+                    Some(b'.') => src[i..].iter().rposition(|&c| c == b'.').map_or(src.len(), |p| i + p),
+                    Some(&n) => src[i..].iter().position(|&c| c.eq_ignore_ascii_case(&n)).map_or(src.len(), |p| i + p),
+                };
+                out.extend_from_slice(&src[i..stop]);
+                i = stop;
+            }
+            b'.' => {
+                while i < src.len() && src[i] != b'.' {
+                    i += 1;
+                }
+                if i < src.len() {
+                    i += 1;
+                }
+                out.push(b'.');
+            }
+            c => {
+                out.push(c);
+                if i < src.len() && src[i] != b'.' {
+                    i += 1;
+                }
+            }
+        }
+    }
+    while out.last() == Some(&b'.') {
+        out.pop();
+    }
+    out
+}
+
+/// DosEditName(level, pszSource, pszEdit, pszTarget, cbTarget)
+pub fn dos_edit_name(c: &mut Ctx) -> u32 {
+    let (level, ps, pe, pt, cb) =
+        if c.is16 { (c.arg(0), c.ptr(1), c.ptr(2), c.ptr(3), c.arg(4)) } else { (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4)) };
+    if level != 1 {
+        return err::INVALID_PARAMETER;
+    }
+    let (Some(s), Some(e)) = (c.read_str(ps, 260), c.read_str(pe, 260)) else { return err::INVALID_ADDRESS };
+    let last = |x: &str| -> Vec<u8> { x.rsplit(['\\', '/', ':']).next().unwrap_or("").bytes().collect() };
+    let mut t = edit_name(&last(&s), &last(&e));
+    if t.len() + 1 > cb as usize {
+        return err::BUFFER_OVERFLOW;
+    }
+    t.push(0);
+    if c.write(pt, &t) { 0 } else { err::INVALID_ADDRESS }
 }

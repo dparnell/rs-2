@@ -450,3 +450,8 @@ unsafe extern "C" {
     #[link_name = "DOSCALLS.347"]
     pub fn DosSubUnsetMem(base: *mut u8) -> APIRET;
 }
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.261"]
+    pub fn DosEditName(level: u32, source: *const u8, edit: *const u8, target: *mut u8, cb: u32) -> APIRET;
+}
