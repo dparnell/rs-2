@@ -46,11 +46,8 @@ pub fn kbd_char_in(c: &mut Ctx) -> u32 {
     if let Err(e) = conkbd::may_read(sid(), h) {
         return e;
     }
-    let k = match kbd::get_key(wait == 0) {
-        Some(k) => k,
-        None if wait == 0 && c.thread.interrupted() => return err::INTERRUPT,
-        None => no_key(),
-    };
+    // Interrupted by a signal: an empty record, as with IO_NOWAIT.
+    let k = kbd::get_key(wait == 0).unwrap_or_else(no_key);
     if c.write(p, &key_bytes(&k)) { 0 } else { err::INVALID_ADDRESS }
 }
 

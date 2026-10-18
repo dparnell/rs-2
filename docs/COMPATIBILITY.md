@@ -47,7 +47,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | HELPMSG.EXE | works | Message and explanation from OSO001.MSG/OSO001H.MSG. |
 | LABEL.COM | works | Shows and sets the volume label. |
 | MAKEINI.EXE | works | Usage text only. |
-| MODE.COM | works | `MODE CO80`. |
+| MODE.COM | works | `MODE CO80`, `MODE CO80,43`/`50`/`60` (the 8x16, 8x14 and 8x8 fonts), `MODE COMn:baud,parity,databits,stopbits` and the COM status display. |
 | MORE.COM | works | |
 | PATCH.EXE | works | Usage text only. |
 | PSTAT.EXE | works | `/C` processes and threads, `/L` libraries (via `DosQuerySysState`). |
@@ -57,6 +57,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | SETBOOT.EXE | works | `/Q`: "Boot Manager is not installed". |
 | SORT.EXE | works | |
 | STRACE.EXE | works | Usage text (loads `DOSCALL1` by name). |
+| TEDIT.EXE | works | Opens, edits (cursor keys, typing in the file and on the command line) and redraws through VIO and KBD. |
 | SYSLEVEL.EXE | partial | Runs but lists nothing: it opens drives with DASD opens, which return ERROR_NOT_SUPPORTED. |
 | TREE.COM | works | `TREE [d:] [/F]`. |
 | UNDELETE.COM | works | Reports the missing `DELDIR` setting. |
@@ -84,6 +85,67 @@ Status: **works** = the tested function behaves as on OS/2;
 | WORMS.EXE (sample) | works | Mouse pointer and clicks through MOUCALLS (Exit by clicking). |
 | TIMER0.EXE (sample) | works | Reports that the TIMER0$ sample driver is missing. |
 
+## Console subsystems and character devices
+
+What VIO, KBD, the device monitors and the character devices do, and how
+it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
+`rs2\apitest keys` shows the packets a keyboard monitor sees):
+
+- Text modes 40/80/132 columns by any number of rows that fits the
+  framebuffer; the font is the largest of 8x16, 8x14 and 8x8 that fits
+  (at 1024x768: 25 and 43 rows 8x16, 50 rows 8x14, 60 rows 8x8). The
+  8x14 and 8x8 fonts are derived from unscii-16 (public domain) by
+  `tools/scripts/mksmallfonts.py`. VioGetFont/VioSetFont (current and
+  built-in fonts, user fonts).
+- VioGetState/VioSetState: palette registers, DAC colour registers,
+  border colour, blink versus background intensity (blinking is drawn),
+  underline location, target display. Cursor shapes in scan lines or
+  percentages, hidden cursor.
+- VioGetPhysBuf and the SCREEN$ SCR_ALLOCLDT IOCtl map a "video memory"
+  buffer with the session's cells in VGA layout; writes appear on the
+  screen within a few ticks. VioGetBuf/VioShowBuf (logical buffer),
+  VioScrLock/UnLock, VioSavRedrawWait/Undo and VioModeWait/Undo
+  (notified on session switches and pop-ups), VioPrtSc/PrtScToggle and
+  the PrtSc key (to LPT1, which is a sink).
+- VioPopUp/VioEndPopUp: a separate pop-up screen over the foreground
+  session (opaque or transparent), keyboard input goes to it, session
+  switching is held off; the screen comes back unchanged. The kernel's
+  hard-error pop-up (e.g. SYS0021 "The drive is not ready" when a CD is
+  ejected) offers Retry, return the error, or end the program;
+  DosError(0) turns it off for a process.
+- VioWrtTTY ANSI support per session (VioSetAnsi): cursor movement and
+  positioning, save/restore, erase display/line, attributes (bold,
+  blink, reverse, concealed, colours, bright colours), `ESC[6n` (the
+  cursor position report is typed into the keyboard buffer), screen
+  modes and line wrap (`ESC[=7h/l`).
+- KBD: per-session logical keyboards (KbdOpen/KbdClose, KbdGetFocus/
+  KbdFreeFocus), KBDINFO per keyboard (echo, ASCII/binary, turnaround
+  character, interim flags, shift reporting), KbdXlate, KbdSetCp/GetCp,
+  KbdGetHWID. Line editing for KbdStringIn and cooked DosRead from CON:
+  Left/Right, Home/End, Ins (insert/overwrite), Del, Backspace, Esc,
+  F1/F3 (copy from the previous line); binary DosRead returns keys as
+  typed. In ASCII mode Ctrl+C raises the signal and Ctrl+S suspends
+  screen output until the next key; Ctrl+Break always signals. The
+  shift state includes Insert and the lock keys held down; PS/2
+  keyboards get LED and typematic commands (KBD_SETTYPAMATICRATE, `MODE
+  CON RATE= DELAY=`), USB keyboards repeat at the same rate.
+- Device monitors (MONCALLS): DosMonOpen/Reg/Read/Write/Close for KBD$
+  (14-byte key packets, makes and breaks with the raw scan code) and
+  MOUSE$.
+- Replacement subsystems: VioRegister/VioGlobalReg/VioDeRegister,
+  KbdRegister/KbdDeRegister, MouRegister/MouDeRegister route the chosen
+  functions to a 16-bit entry point in a DLL (not tested with a real
+  replacement subsystem yet).
+- Devices: `COM1`-`COM4` (16550 UARTs; receive interrupt driven, DCB
+  read timeouts; category 1 IOCtls for baud rate, line control, modem
+  control, DCB, queues, errors; tested with QEMU's second serial port:
+  `-- -chardev socket,id=c2,path=...,server=on,wait=off -serial
+  chardev:c2`), `LPT1`-`LPT3` and `PRN` (sinks with printer status
+  IOCtls), `CLOCK$` (read/write the clock record), `MOUSE$`/`POINTER$`
+  (category 7 queries), `KBD$` category 4 IOCtls (input mode, interim
+  flags, shift state, typematic rate, read/peek, code page, translate,
+  hardware ID). COM1 also carries the kernel log.
+
 ## Fixed while getting these to run
 
 - Loader: DLL objects whose preferred base is below the shared arena (the
@@ -103,6 +165,9 @@ Status: **works** = the tested function behaves as on OS/2;
   checks for overflow.
 - `DosExecPgm`/`DosLoadModule` report the failing module in the failure
   buffer; `DosExecPgm` looks for a bare program name along `PATH`.
+- rs2 CMD's DIR panicked on volume labels longer than 11 characters (CD
+  labels); the AHCI driver now reads the sense data after a failed ATAPI
+  command, so a changed medium's unit attention is cleared.
 - REXX API server: the PM shell normally loads `REXXINIT` at start-up
   (`SYS_DLLS LoadOneTime`). rs2 starts `SYSDLLS.EXE REXXINIT` (an rs2
   program that keeps the DLL resident) when REXXINIT.DLL is present.
@@ -137,6 +202,10 @@ Status: **works** = the tested function behaves as on OS/2;
 - Bound message segments (MSGBIND) are not read: programs fall back to the
   message files, so they need OSO001.MSG and friends on disk.
 - `DosQuerySysState` reports no semaphores or shared memory.
+- AVIO (VioCreatePS and the other Presentation Manager VIO calls) is not
+  implemented; keyboard layouts other than US are the NLS work.
+- Changing a CD for a different one is not detected (the old volume stays
+  mounted); re-inserting the same medium and choosing Retry works.
 - Writing to QEMU's virtual FAT drive (the ESP directory) can hang (seen
   with BACKUP); FAT disk images are fine.
 - The 32-bit `DosQueryMessageCP` argument layout is unverified (no caller

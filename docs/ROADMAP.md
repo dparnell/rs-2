@@ -14,6 +14,13 @@ Status markers: done, in progress, planned.
   handling, exit lists, timers, queues, shared memory, resources,
   Ctrl+C signals, module APIs, CONFIG.SYS processing
 - done: VIO, KBD, MOU (PS/2 and USB mice, text pointer), MSG (message files), NLS
+- done: VIO/KBD completeness: text modes with 8x16/8x14/8x8 fonts (43,
+  50, 60 rows), physical buffer, palette/DAC/blink state, pop-ups and the
+  hard-error pop-up (DosError), save/redraw and mode notifications,
+  replacement subsystems, logical keyboards and focus, line editing,
+  Ctrl+S, PS/2 LEDs and typematic; device monitors (KBD$, MOUSE$)
+- done: character devices COM1-COM4 (16550) with the ASYNC IOCtls and
+  `MODE COMn`, LPT1-3, CLOCK$, MOUSE$/POINTER$, KBD$ and SCREEN$ IOCtls
 - done: the original CMD.EXE runs interactively; userland/apitest passes
 - done: DLL termination routines
 - done: IBM REXX (.CMD scripts, REXXUTIL, the REXX API server) and most
@@ -22,7 +29,7 @@ Status markers: done, in progress, planned.
 - done: named pipes (byte and message mode, DosTransactNPipe, DosCallNPipe)
 - done: sessions: DosStartSession/Select/Set/StopSession, a virtual screen
   and keyboard queue per session, Ctrl+Esc window list, Alt+Esc
-- planned:
+- planned: AVIO (VIO in PM windows), parallel port hardware,
   DosDevIOCtl coverage, bound message segments,
   semaphore and memory corner cases found by running more programs
 
