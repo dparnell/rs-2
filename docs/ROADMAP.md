@@ -16,6 +16,9 @@ Status markers: done, in progress, planned.
 - done: VIO, KBD, MOU (PS/2 and USB mice, text pointer), MSG (message files), NLS
 - done: the original CMD.EXE runs interactively; userland/apitest passes
 - done: DLL termination routines
+- done: IBM REXX (.CMD scripts, REXXUTIL, the REXX API server) and most
+  text-mode base utilities and Toolkit tools; see
+  [COMPATIBILITY.md](COMPATIBILITY.md)
 - done: named pipes (byte and message mode, DosTransactNPipe, DosCallNPipe)
 - done: sessions: DosStartSession/Select/Set/StopSession, a virtual screen
   and keyboard queue per session, Ctrl+Esc window list, Alt+Esc

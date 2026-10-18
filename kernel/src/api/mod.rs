@@ -27,6 +27,9 @@ pub mod signal;
 pub mod sem;
 pub mod sesmgr;
 pub mod shmem;
+pub mod submem;
+pub mod sysstate;
+pub mod thunk;
 pub mod timer;
 pub mod vio;
 pub mod names;
@@ -200,6 +203,10 @@ pub struct Ctx<'a> {
     pub no_return: bool,
     /// Override for the value placed in DX (16-bit APIs returning ULONG).
     pub dx: Option<u16>,
+    /// Argument bytes a 32-bit API pops itself (the bound message segment
+    /// that the DosGetMessage library stub pushes in front of the
+    /// arguments of DosTrueGetMessage).
+    pop32: u32,
 }
 
 pub type Handler = fn(&mut Ctx) -> u32;
@@ -223,10 +230,16 @@ impl Ctx<'_> {
             }
         } else {
             f.rip = ret as u64;
-            f.rsp = (f.rsp as u32).wrapping_add(4) as u64;
+            f.rsp = (f.rsp as u32).wrapping_add(4 + self.pop32) as u64;
             f.rax = result as u64;
         }
         self.no_return = true;
+    }
+
+    /// Linear address of the first argument byte (above the return
+    /// address).
+    pub fn args_base(&self) -> u32 {
+        self.args_at
     }
 
     pub fn space(&self) -> SpinGuard<'_, AddressSpace> {
@@ -336,6 +349,11 @@ pub fn is_16bit(module: u32, ordinal: u32) -> bool {
 /// Log every API call to the serial port (`apitrace` on the command line).
 pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// True while `apitrace` is on.
+pub fn tracing() -> bool {
+    TRACE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 static WARNED: SpinLock<Vec<(u32, u32)>> = SpinLock::new(Vec::new());
 
 /// Linear address of `cs:rip`.
@@ -373,6 +391,10 @@ pub fn dispatch(f: &mut TrapFrame) {
         module::returned(f, &process, &thread);
         return;
     }
+    if module == 0 && ordinal == thunk::UNITHUNK_RETURN_ORDINAL {
+        thunk::returned(f, thread.id);
+        return;
+    }
     if module == 0 && ordinal == exceptions::HANDLER_RETURN_ORDINAL {
         exceptions::handler_returned(f, &process, &thread);
         return;
@@ -395,6 +417,7 @@ pub fn dispatch(f: &mut TrapFrame) {
             args_at: stack_linear + 4,
             no_return: true,
             dx: None,
+            pop32: 0,
         };
         proc::thread_returned(&mut ctx);
         return;
@@ -440,16 +463,20 @@ pub fn dispatch(f: &mut TrapFrame) {
         args_at: stack_linear + 4,
         no_return: false,
         dx: None,
+        pop32: if !is16 && module == 4 && ordinal == 6 { 4 } else { 0 },
     };
     let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed);
     if trace {
+        let ret = ctx.read_u32(ctx.args_at - 4).unwrap_or(0);
         crate::trace!(
-            "[{}:{}] {}.{} {}",
+            "[{}:{}] {}.{} {} from {:x} sp {:x}",
             process.pid,
             thread.tid,
             gate::MODULES[module as usize],
             ordinal,
-            names::display(module as u8, ordinal as u16)
+            names::display(module as u8, ordinal as u16),
+            ret,
+            stack_linear
         );
     }
     let result = match doscalls::handler(module as u8, ordinal as u16) {

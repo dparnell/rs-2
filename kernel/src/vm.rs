@@ -30,6 +30,10 @@ pub const PAGE: u32 = 4096;
 pub const TILE: u32 = 0x1_0000;
 pub const ARENA_START: u32 = 0x0001_0000;
 pub const TILED_TOP: u32 = 0x2000_0000;
+/// Lowest address the shared arena grows down to. DLL objects asking for a
+/// base below it (the linker default 0x10000 of application DLLs) are
+/// relocated, as OS/2 does, since that range belongs to private arenas.
+pub const SHARED_FLOOR: u32 = 0x0400_0000;
 /// The API gate occupies the top 128 KB of the shared arena.
 pub const GATE_BASE: u32 = 0x1ffe_0000;
 pub const GATE_SIZE: u32 = 0x2_0000;
@@ -196,7 +200,7 @@ pub fn reserve_shared(size: u32, at: Option<u32>) -> Option<u32> {
     let overlaps =
         |a: &BTreeMap<u32, u32>, base: u32| a.iter().any(|(&b, &s)| base < b + s && b < base + size);
     if let Some(base) = at {
-        if base % TILE != 0 || base + size > TILED_TOP || overlaps(&a, base) {
+        if base % TILE != 0 || base < SHARED_FLOOR || base + size > TILED_TOP || overlaps(&a, base) {
             return None;
         }
         a.insert(base, size);
@@ -205,7 +209,7 @@ pub fn reserve_shared(size: u32, at: Option<u32>) -> Option<u32> {
     let mut top = GATE_BASE;
     loop {
         let base = top.checked_sub(size)?;
-        if base < 0x0400_0000 {
+        if base < SHARED_FLOOR {
             return None;
         }
         match a.iter().find(|&(&b, &s)| base < b + s && b < base + size) {

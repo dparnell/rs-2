@@ -22,8 +22,10 @@ programs unmodified, natively, on 64-bit PCs.
 
 *An unmodified Presentation Manager sample on rs2's own PMWIN/PMGPI.*
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and
-[docs/ROADMAP.md](docs/ROADMAP.md) for what is done and what is next.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design,
+[docs/ROADMAP.md](docs/ROADMAP.md) for what is done and what is next, and
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the original OS/2
+programs tested so far.
 
 ## Building
 

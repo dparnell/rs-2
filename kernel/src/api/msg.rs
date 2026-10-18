@@ -170,13 +170,19 @@ fn deliver(c: &Ctx, text: &[u8], buf: u32, cb: u32) -> (u32, u32) {
 
 /// DosTrueGetMessage (16-bit MSG.2 and 32-bit MSG.6).
 pub fn dos_true_get_message(c: &mut Ctx) -> u32 {
+    // The 32-bit entry gets the bound message segment first (the
+    // DosGetMessage library stub pushes it in front of the arguments and
+    // the API pops it: see Ctx::pop32); the 16-bit one gets it last.
     let (table, count, buf, cb, num, pfile, pcb) = if c.is16 {
         (c.ptr(0), c.arg(1), c.ptr(2), c.arg(3), c.arg(4), c.ptr(5), c.ptr(6))
     } else {
-        (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4), c.arg(5), c.arg(6))
+        (c.arg(1), c.arg(2), c.arg(3), c.arg(4), c.arg(5), c.arg(6), c.arg(7))
     };
     let Some(file) = c.read_str(pfile, 260) else { return err::INVALID_ADDRESS };
     let Some(ins) = read_table(c, table, count) else { return err::INVALID_ADDRESS };
+    if super::tracing() {
+        crate::trace!("    message {num} from {file}");
+    }
     let (e, text) = get_message(c, &ins, num, &file);
     let (e2, n) = deliver(c, &text, buf, cb);
     if c.is16 { c.write_u16(pcb, n as u16) } else { c.write_u32(pcb, n) };

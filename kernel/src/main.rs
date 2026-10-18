@@ -176,6 +176,13 @@ pub mod boot {
         for (p, a) in &cfg.run {
             spawn(&find_program(p), a, &env, true);
         }
+        // The PM shell's SYS_DLLS LoadOneTime list: REXXINIT starts the
+        // REXX API server thread. SYSDLLS keeps such modules resident.
+        let sys_dlls: Vec<&str> = ["REXXINIT"].into_iter().filter(|m| crate::fs::find_module(m).is_some()).collect();
+        let loader = find_program("SYSDLLS.EXE");
+        if !sys_dlls.is_empty() && crate::fs::read_file(&loader).is_some() {
+            spawn(&loader, &sys_dlls.join(" "), &env, true);
+        }
         let mut queue: VecDeque<(String, String)> = cfg.call.iter().map(|(p, a)| (find_program(p), a.clone())).collect();
         queue.push_back((shell_path.clone(), shell.1.clone()));
         let restart = init.is_none();

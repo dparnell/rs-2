@@ -5,6 +5,7 @@
 //! lxdump imports FILE...    one line per imported symbol: MODULE.ORD or MODULE.NAME
 //! lxdump verify FILE...     decode every page and fixup, report failures
 //! lxdump page FILE N        hex dump of decoded LX page N
+//! lxdump fixups FILE N      fixup records of LX page N
 //! ```
 
 use std::collections::BTreeSet;
@@ -59,6 +60,23 @@ fn main() -> ExitCode {
                 let hex: Vec<String> = c.iter().map(|b| format!("{b:02x}")).collect();
                 let asc: String = c.iter().map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' }).collect();
                 println!("{:04x}: {:<48} {asc}", i * 16, hex.join(" "));
+            }
+        }
+        "fixups" => {
+            let data = std::fs::read(&args[1]).unwrap();
+            let n: u32 = args[2].parse().unwrap();
+            let Ok(Format::Lx { header }) = os2_exe::detect(&data) else { panic!("not LX") };
+            let m = lx::Module::parse(&data, header).unwrap();
+            for f in m.fixups(n).unwrap() {
+                let srcs: Vec<String> = f.sources.iter().map(|s| format!("{s:#x}")).collect();
+                println!(
+                    "{} {:?}{} -> {:?} +{:#x}",
+                    srcs.join(","),
+                    f.kind,
+                    if f.alias { " alias" } else { "" },
+                    f.target,
+                    f.additive
+                );
             }
         }
         "xref" => {

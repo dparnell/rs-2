@@ -159,6 +159,19 @@ impl Module {
             if ordinal == 0 || ordinal >= gate::ORDINALS {
                 return Err(err::INVALID_ORDINAL);
             }
+            // Absolute exports: THK32R3DS (295) and DOS32FLATDS (370), the
+            // flat data selector used by 16->32 thunks.
+            if m == 0 && (ordinal == 295 || ordinal == 370) {
+                return Ok(Target::constant(crate::arch::gdt::USER_DS));
+            }
+            // DOSHUGESHIFT (135) and DOSHUGEINCR (136): tiled selectors of
+            // a huge segment are 8 apart.
+            if m == 0 && ordinal == 135 {
+                return Ok(Target::constant(3));
+            }
+            if m == 0 && ordinal == 136 {
+                return Ok(Target::constant(8));
+            }
             let a = gate::slot_address(m, ordinal);
             // Kernel APIs reachable both flat and 16:16.
             let mut t = Target::flat32(a, true);
@@ -214,6 +227,11 @@ pub fn find_loaded(name: &str) -> Option<Arc<Module>> {
     REGISTRY.lock().modules.iter().find(|m| m.name.eq_ignore_ascii_case(name)).cloned()
 }
 
+/// Every module loaded in the system (DosQuerySysState).
+pub fn all_modules() -> Vec<Arc<Module>> {
+    REGISTRY.lock().modules.clone()
+}
+
 pub fn by_handle(hmte: u16) -> Option<Arc<Module>> {
     REGISTRY.lock().modules.iter().find(|m| m.hmte == hmte).cloned()
 }
@@ -252,7 +270,23 @@ pub fn init() {
 pub fn module_name(s: &str) -> String {
     let base = s.rsplit(['\\', '/', ':']).next().unwrap_or(s);
     let base = base.split('.').next().unwrap_or(base);
-    base.to_ascii_uppercase()
+    let up = base.to_ascii_uppercase();
+    // DOSCALL1.DLL is where OS/2 implements DOSCALLS; here both are the
+    // kernel's API module.
+    if up == "DOSCALL1" { String::from("DOSCALLS") } else { up }
+}
+
+/// Name of the module behind the last load failure (what DosLoadModule and
+/// DosExecPgm report in their failure-name buffer).
+static FAIL_NAME: SpinLock<Option<String>> = SpinLock::new(None);
+
+pub fn set_fail(name: &str) {
+    *FAIL_NAME.lock() = Some(module_name(name));
+}
+
+/// Take the recorded failing module name.
+pub fn take_fail() -> Option<String> {
+    FAIL_NAME.lock().take()
 }
 
 /// Load (or find) a DLL system-wide without attaching it anywhere.
@@ -263,9 +297,10 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     }
     let (path, data) = crate::fs::find_module(name).ok_or_else(|| {
         crate::println!("loader: module {name} not found");
+        set_fail(name);
         err::MOD_NOT_FOUND
     })?;
-    let m = load_image(&path, data, true, None)?;
+    let m = load_image(&path, data, true, None).inspect_err(|e| crate::println!("loader: {path}: error {e}"))?;
     register(m.clone());
     Ok(m)
 }

@@ -123,6 +123,7 @@ pub fn load(
                             import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"),
                             ordinal
                         );
+                        super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
                         e
                     })?
                 }
@@ -130,6 +131,7 @@ pub fn load(
                     let name = m.imported_name(name_offset).map(s).map_err(|_| err::BAD_EXE_FORMAT)?;
                     import_target(&imports, module, ImportBy::Name(&name)).map_err(|e| {
                         crate::println!("loader: {}: import {} not found", path, name);
+                        super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
                         e
                     })?
                 }

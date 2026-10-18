@@ -198,7 +198,9 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
         return Err(1041);
     };
     if path.to_ascii_uppercase().ends_with(".CMD") {
-        crate::batch::start(sh, &path, args);
+        if !crate::rexx::run(sh, &path, args) {
+            crate::batch::start(sh, &path, args);
+        }
         return Ok(None);
     }
     // Arguments: "program\0 arguments\0\0". The arguments keep the blank
@@ -207,6 +209,9 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
     let mut block = Vec::new();
     block.extend_from_slice(name.as_bytes());
     block.push(0);
+    // IBM's CMD.EXE starts the argument string with the blank that
+    // separated it from the program name; some IBM utilities (FIND, LABEL)
+    // rely on that.
     if !args.is_empty() && !args.starts_with([' ', '\t']) {
         block.push(b' ');
     }

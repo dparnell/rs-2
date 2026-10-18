@@ -43,6 +43,8 @@ pub struct InitRun {
     /// Termination routines at process end: when they are done the exit
     /// list machinery finishes the exit.
     pub then_exit: bool,
+    /// Linear address below which the routines' stack frames go.
+    pub stack_top: u32,
 }
 
 /// Modules (dependencies first) whose init routine must run for `space`.
@@ -117,11 +119,10 @@ pub fn start_term(p: &Process, t: &Thread, f: &mut TrapFrame, calls: Vec<InitCal
 }
 
 /// Point `f` at the init routine of `call`, returning to the gate.
-fn setup_call(p: &Process, t: &Thread, f: &mut TrapFrame, call: &InitCall) {
+fn setup_call(p: &Process, f: &mut TrapFrame, call: &InitCall, top: u32) {
     let m = &call.module;
     let start = m.init.unwrap();
     let ret = gate::slot_address(0, INIT_RETURN_ORDINAL);
-    let top = t.stack_top.load(Ordering::Relaxed);
     let mut sp = p.space.lock();
     if start.entry.is16 {
         // Far call on a 16-bit view of the thread's stack: DI = module
@@ -169,8 +170,18 @@ pub fn start(p: &Process, t: &Thread, f: &mut TrapFrame, calls: Vec<InitCall>, a
     if calls.is_empty() {
         return false;
     }
-    let run = InitRun { calls: calls.into(), resume: *f, at_start, result_handle, then_exit: false };
-    setup_call(p, t, f, run.calls.front().unwrap());
+    // At process start the stack is empty; inside DosLoadModule the
+    // routines run below the caller's live frames.
+    let stack_top = if at_start {
+        t.stack_top.load(Ordering::Relaxed)
+    } else {
+        let sp = p.space.lock();
+        let d = sp.descriptor(f.ss as u16);
+        let esp = if vm::desc_big(d) { f.rsp as u32 } else { f.rsp as u32 & 0xffff };
+        vm::desc_base(d).wrapping_add(esp).wrapping_sub(0x100)
+    };
+    let run = InitRun { calls: calls.into(), resume: *f, at_start, result_handle, stack_top, then_exit: false };
+    setup_call(p, f, run.calls.front().unwrap(), stack_top);
     *t.init_run.lock() = Some(run);
     true
 }
@@ -202,8 +213,9 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
         }
     }
     if let Some(next) = run.calls.front().cloned() {
+        let top = run.stack_top;
         drop(guard);
-        setup_call(p, t, f, &next);
+        setup_call(p, f, &next, top);
         return;
     }
     let run = guard.take().unwrap();
@@ -228,6 +240,10 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
 
 fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
     let Some(name) = c.read_str(pname, 260) else { return err::INVALID_ADDRESS };
+    if super::tracing() {
+        crate::trace!("    load {name}");
+    }
+    let _ = loader::take_fail();
     let r = {
         let mut sp = c.space();
         loader::load_dll(&name, &mut sp)
@@ -235,6 +251,7 @@ fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
     let m = match r {
         Ok(m) => m,
         Err(e) => {
+            let name = loader::take_fail().unwrap_or(name);
             if fail != 0 && cbfail > 0 {
                 let n = (cbfail as usize - 1).min(name.len());
                 c.write_str(fail, &name[..n]);
@@ -309,6 +326,9 @@ pub fn dos_query_proc_addr(c: &mut Ctx) -> u32 {
     let Some(m) = module_by_handle(c, h) else { return err::INVALID_HANDLE };
     let t = if pname != 0 && ord == 0 {
         let Some(name) = c.read_str(pname, 256) else { return err::INVALID_ADDRESS };
+        if super::tracing() {
+            crate::trace!("    proc {name} in {}", m.name);
+        }
         m.resolve_name(&name, 0)
     } else {
         m.resolve_ordinal(ord, 0)
@@ -333,6 +353,9 @@ pub fn dos16_get_proc_addr(c: &mut Ctx) -> u32 {
         m.resolve_ordinal(pname_raw & 0xffff, 0)
     } else {
         let Some(name) = c.read_str(c.far16_to_flat(pname_raw), 256) else { return err::INVALID_ADDRESS };
+        if super::tracing() {
+            crate::trace!("    proc {name} in {}", m.name);
+        }
         match name.strip_prefix('#').and_then(|n| n.parse::<u32>().ok()) {
             Some(o) => m.resolve_ordinal(o, 0),
             None => m.resolve_name(&name, 0),

@@ -27,6 +27,7 @@ fn main(s: &Startup) -> u32 {
     println!("rs2 apitest, args: {:?}", core::str::from_utf8(s.args()).unwrap_or("?"));
     info_blocks();
     memory();
+    suballoc();
     files();
     threads_and_sems();
     exceptions();
@@ -84,7 +85,57 @@ fn memory() {
     }
 }
 
+fn suballoc() {
+    unsafe {
+        let mut heap = null_mut();
+        // Sparse: only reserved; the suballocator commits what it uses.
+        let rc = DosAllocMem(&mut heap, 0x4000, PAG_READ | PAG_WRITE);
+        check("DosSubSetMem init sparse", rc == 0 && DosSubSetMem(heap, DOSSUB_INIT | DOSSUB_SPARSE_OBJ, 0x2000) == 0);
+        let (mut a, mut b, mut c) = (null_mut(), null_mut(), null_mut());
+        let ok = DosSubAllocMem(heap, &mut a, 100) == 0
+            && DosSubAllocMem(heap, &mut b, 100) == 0
+            && DosSubAllocMem(heap, &mut c, 0x1000) == 0;
+        check("DosSubAllocMem x3", ok && a != b && b != c && (a as u32) % 8 == 0);
+        *a = 1;
+        *c.add(0xfff) = 2;
+        check("suballocated blocks usable", *a == 1 && *c.add(0xfff) == 2);
+        let mut big = null_mut();
+        check("DosSubAllocMem too much", DosSubAllocMem(heap, &mut big, 0x1800) == 311);
+        check("DosSubFreeMem", DosSubFreeMem(heap, b, 100) == 0 && DosSubFreeMem(heap, a, 100) == 0);
+        check("DosSubFreeMem twice overlaps", DosSubFreeMem(heap, a, 100) == 312);
+        let mut d = null_mut();
+        check("freed space reused", DosSubAllocMem(heap, &mut d, 200) == 0 && d == a);
+        check("DosSubSetMem shrink fails", DosSubSetMem(heap, DOSSUB_GROW, 0x1000) == 310);
+        check("DosSubSetMem grow", DosSubSetMem(heap, DOSSUB_GROW | DOSSUB_SPARSE_OBJ, 0x4000) == 0);
+        check("DosSubAllocMem after grow", DosSubAllocMem(heap, &mut big, 0x1800) == 0);
+        check("DosSubUnsetMem", DosSubUnsetMem(heap) == 0);
+        DosFreeMem(heap);
+    }
+}
+
+fn edit_name() {
+    let cases: [(&[u8], &[u8], &[u8]); 5] = [
+        (b"HELLO.CMD\0", b"*.BAK\0", b"HELLO.BAK"),
+        (b"README.TXT\0", b"*.*\0", b"README.TXT"),
+        (b"ABCDEF.TXT\0", b"??X*\0", b"ABXDEF.TXT"),
+        (b"FILE.TAR.GZ\0", b"*.Z\0", b"FILE.TAR.Z"),
+        (b"C:\\DIR\\NAME.EXT\0", b"NEW.*\0", b"NEW.EXT"),
+    ];
+    let mut ok = true;
+    for (src, edit, want) in cases {
+        let mut buf = [0u8; 64];
+        let rc = unsafe { DosEditName(1, src.as_ptr(), edit.as_ptr(), buf.as_mut_ptr(), 64) };
+        let n = buf.iter().position(|&b| b == 0).unwrap_or(0);
+        if rc != 0 || &buf[..n] != want {
+            ok = false;
+            println!("  DosEditName {:?}: rc {rc} {:?}", core::str::from_utf8(edit), core::str::from_utf8(&buf[..n]));
+        }
+    }
+    check("DosEditName", ok);
+}
+
 fn files() {
+    edit_name();
     unsafe {
         let mut hf = 0;
         let mut action = 0;
@@ -135,6 +186,23 @@ fn files() {
         );
         check("DosFindFirst", rc == 0 && count == 1 && fb.cb_file == msg.len() as u32);
         DosFindClose(hdir);
+        // DosCopy: new target, refusal without DCPY_EXISTING, replace, append.
+        let size_of = |p: &[u8]| -> u32 {
+            let mut fs: FileFindBuf3 = core::mem::zeroed();
+            let mut h = HDIR_CREATE;
+            let mut n = 1;
+            let rc = DosFindFirst(p.as_ptr(), &mut h, 0, &mut fs as *mut _ as *mut u8, core::mem::size_of::<FileFindBuf3>() as u32, &mut n, FIL_STANDARD);
+            DosFindClose(h);
+            if rc == 0 { fs.cb_file } else { u32::MAX }
+        };
+        let src = b"C:\\APITEST.TMP\0".as_ptr();
+        let dst = b"C:\\APICOPY.TMP\0";
+        let l = msg.len() as u32;
+        check("DosCopy", DosCopy(src, dst.as_ptr(), 0) == 0 && size_of(dst) == l);
+        check("DosCopy existing refused", DosCopy(src, dst.as_ptr(), 0) != 0);
+        check("DosCopy DCPY_EXISTING", DosCopy(src, dst.as_ptr(), DCPY_EXISTING) == 0 && size_of(dst) == l);
+        check("DosCopy DCPY_APPEND", DosCopy(src, dst.as_ptr(), DCPY_APPEND) == 0 && size_of(dst) == 2 * l);
+        check("DosForceDelete", DosForceDelete(dst.as_ptr()) == 0 && size_of(dst) == u32::MAX);
         check("DosDelete", DosDelete(b"C:\\APITEST.TMP\0".as_ptr()) == 0);
         check("DosCreateDir", DosCreateDir(b"C:\\APIDIR\0".as_ptr(), null_mut()) == 0);
         check("DosDeleteDir", DosDeleteDir(b"C:\\APIDIR\0".as_ptr()) == 0);

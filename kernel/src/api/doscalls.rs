@@ -207,6 +207,15 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 36) => super::shmem::dos16_get_shr_seg,
         (0, 37) => super::shmem::dos16_give_seg,
         (0, 121) => super::shmem::dos16_get_seg,
+        (0, 146) => super::submem::dos16_sub_set,
+        (0, 147) => super::submem::dos16_sub_alloc,
+        (0, 148) => super::submem::dos16_sub_free,
+        (0, 368) => super::sysstate::dos_query_sys_state,
+        (0, 576) => super::thunk::thk16_unithunk,
+        (0, 344) => super::submem::dos_sub_set_mem,
+        (0, 345) => super::submem::dos_sub_alloc_mem,
+        (0, 346) => super::submem::dos_sub_free_mem,
+        (0, 347) => super::submem::dos_sub_unset_mem,
         (0, 300) => super::shmem::dos_alloc_shared_mem,
         (0, 301) => super::shmem::dos_get_named_shared_mem,
         (0, 302) => super::shmem::dos_get_shared_mem,
@@ -232,6 +241,16 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 34) => dos16_alloc_seg,
         (0, 38) => dos16_realloc_seg,
         (0, 39) => dos16_free_seg,
+        (0, 28) => dos16_set_date_time,
+        (0, 292) => dos_set_date_time,
+        (0, 40) => dos16_alloc_huge,
+        (0, 41) => dos16_get_huge_shift,
+        (0, 210) => ok, // DosSetVerify
+        (0, 110) | (0, 203) => file::dos_delete, // DosForceDelete (no DELDIR)
+        (0, 185) => file::dos_create_dir,       // DosMkDir2 (EAs ignored)
+        (0, 201) | (0, 258) => file::dos_copy,
+        (0, 417) => file::dos_replace_module,
+        (0, 126) => dos16_size_seg,
         (0, 47) => dos16_get_mod_handle,
         (0, 48) => dos16_get_mod_name,
         (0, 49) => dos16_get_machine_mode,
@@ -270,6 +289,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 151) => file::dos_search_path,
         (0, 182) => file::dos_query_fs_attach,
         (0, 184) => file::dos16_find_first2,
+        (0, 191) | (0, 261) => file::dos_edit_name,
+        (0, 204) | (0, 372) => file::dos_enum_attribute,
         (0, 85) => ok,  // DosSetMaxFH
         (0, 89) => dos16_set_vec,
         (0, 91) => dos16_get_env,
@@ -278,6 +299,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 120) => ok, // DosError
         (0, 127) => dos16_mem_avail,
         (0, 137) => file::dos16_read,
+        (0, 149) => file::dos16_read_async,
+        (0, 150) => file::dos16_write_async,
         (0, 138) => file::dos16_write,
         (0, 152) => dos16_scan_env,
         (0, 215) => dos16_page_size,
@@ -337,6 +360,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 988) => file::dos_set_file_ptr_l,
         (0, 989) => file::dos_set_file_size_l,
         (0, 426) => dos_sel_to_flat,
+        (0, 423) => dos16_flat_to_sel,
+        (0, 424) => dos16_sel_to_flat,
         _ => return None,
     };
     Some(h)
@@ -502,6 +527,68 @@ fn write_datetime(c: &Ctx, a: u32) -> u32 {
     if c.write(a, &b) { 0 } else { err::INVALID_ADDRESS }
 }
 
+/// DosSetDateTime(pDateTime): DATETIME as for DosGetDateTime.
+fn set_datetime(c: &Ctx, a: u32) -> u32 {
+    let Some(b) = c.read_vec(a, 8) else { return err::INVALID_ADDRESS };
+    let year = u16::from_le_bytes([b[6], b[7]]);
+    let t = crate::rtc::DateTime {
+        hour: b[0],
+        minute: b[1],
+        second: b[2],
+        day: b[4],
+        month: b[5],
+        year,
+        weekday: crate::rtc::weekday(year, b[5], b[4]),
+    };
+    let days = [31, if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if t.hour > 23 || t.minute > 59 || t.second > 59 || b[3] > 99 || !(1..=12).contains(&t.month) || !(1980..=2079).contains(&year)
+        || t.day == 0 || t.day > days[t.month as usize - 1]
+    {
+        return err::TS_DATETIME;
+    }
+    crate::rtc::set(&t);
+    0
+}
+
+fn dos16_set_date_time(c: &mut Ctx) -> u32 {
+    set_datetime(c, c.ptr(0))
+}
+
+fn dos_set_date_time(c: &mut Ctx) -> u32 {
+    set_datetime(c, c.arg(0))
+}
+
+/// DosAllocHuge(cSegs, cbPartial, psel, cMaxSegs, fsAlloc): consecutive
+/// tiles, so the selectors step by the huge increment (8).
+fn dos16_alloc_huge(c: &mut Ctx) -> u32 {
+    let (nsegs, partial, psel, flags) = (c.arg(0), c.arg(1), c.ptr(2), c.arg(4));
+    if flags & 3 != 0 {
+        return err::INVALID_PARAMETER; // shared huge segments: not yet
+    }
+    let size = nsegs * 0x10000 + partial;
+    if size == 0 {
+        return err::INVALID_PARAMETER;
+    }
+    let r = c.space().alloc(size, pag::READ | pag::WRITE | pag::COMMIT, SegKind::Data, None);
+    match r {
+        Ok(base) => {
+            if partial != 0 {
+                c.space().set_seg_limit(base + nsegs * 0x10000, partial - 1);
+            }
+            c.write_u16(psel, vm::tile_selector(base));
+            0
+        }
+        Err(_) => err::NOT_ENOUGH_MEMORY,
+    }
+}
+
+/// DosGetHugeShift(pusShiftCount): selectors of a huge object are
+/// 1 << 3 apart.
+fn dos16_get_huge_shift(c: &mut Ctx) -> u32 {
+    c.write_u16(c.ptr(0), 3);
+    0
+}
+
 fn dos16_get_date_time(c: &mut Ctx) -> u32 {
     write_datetime(c, c.ptr(0))
 }
@@ -549,6 +636,9 @@ fn dos16_realloc_seg(c: &mut Ctx) -> u32 {
         n => n,
     };
     let base = vm::tiled_flat(c.arg(1) as u16, 0);
+    if super::tracing() {
+        crate::trace!("    realloc sel {:x} size {:x}", c.arg(1), size);
+    }
     let mut sp = c.space();
     let Some(r) = sp.regions.get(&base) else { return err::INVALID_ACCESS };
     let cur = r.size;
@@ -558,6 +648,17 @@ fn dos16_realloc_seg(c: &mut Ctx) -> u32 {
         }
     }
     sp.set_seg_limit(base, size - 1);
+    0
+}
+
+fn dos16_size_seg(c: &mut Ctx) -> u32 {
+    // DosSizeSeg(sel, pulSize)
+    let (sel, out) = (c.arg(0) as u16, c.ptr(1));
+    let d = c.space().descriptor(sel);
+    if sel < 4 || d & (1 << 47) == 0 {
+        return err::INVALID_ACCESS;
+    }
+    c.write_u32(out, vm::desc_limit(d).wrapping_add(1));
     0
 }
 
@@ -637,6 +738,20 @@ fn dos_flat_to_sel(c: &mut Ctx) -> u32 {
     // value on the stack for _System callers.
     let a = c.f.rax as u32;
     (vm::tile_selector(a) as u32) << 16 | (a & 0xffff)
+}
+
+/// 16-bit DosFlatToSel / DosSelToFlat: EAX in, all of EAX out (the gate
+/// return only replaces AX, so EAX is set here as well).
+fn dos16_flat_to_sel(c: &mut Ctx) -> u32 {
+    let v = dos_flat_to_sel(c);
+    c.f.rax = v as u64;
+    v
+}
+
+fn dos16_sel_to_flat(c: &mut Ctx) -> u32 {
+    let v = dos_sel_to_flat(c);
+    c.f.rax = v as u64;
+    v
 }
 
 fn dos_sel_to_flat(c: &mut Ctx) -> u32 {

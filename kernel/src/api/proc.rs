@@ -61,6 +61,9 @@ fn exec(c: &mut Ctx) -> u32 {
         (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4), c.arg(5), c.arg(6))
     };
     let Some(name) = c.read_str(pname, 260) else { return err::INVALID_ADDRESS };
+    if super::tracing() {
+        crate::trace!("    exec {name}");
+    }
     // Arguments: "program\0arguments\0\0" (either part may be missing).
     let (argv0, args) = if pargs == 0 {
         (name.clone(), String::new())
@@ -69,15 +72,33 @@ fn exec(c: &mut Ctx) -> u32 {
         let rest = c.read_str(pargs + a0.len() as u32 + 1, 4096).unwrap_or_default();
         (a0, rest)
     };
+    if super::tracing() {
+        crate::trace!("    argv0 {argv0:?} args {args:?}");
+    }
     let env = if penv == 0 { parent_env(c) } else { read_block(c, penv, 4096).unwrap_or_default() };
-    let path = match super::file::resolve(c, &name) {
+    let mut path = match super::file::resolve(c, &name) {
         Ok(p) => p,
         Err(e) => return e,
     };
+    // A bare program name is looked for in the current directory, then
+    // along the caller's PATH (UNPACK starts "UNPACK2.EXE" this way).
+    if !name.contains(['\\', '/', ':']) && crate::fs::stat(&path).is_err() {
+        let dirs = super::doscalls::env_value(c, "PATH").unwrap_or_default();
+        for d in dirs.split(';').filter(|d| !d.is_empty()) {
+            let cand = alloc::format!("{}\\{}", d.trim_end_matches('\\'), name);
+            if let Ok(p) = super::file::resolve(c, &cand) {
+                if crate::fs::stat(&p).is_ok() {
+                    path = p;
+                    break;
+                }
+            }
+        }
+    }
     let mode = flags & 7;
     if !matches!(mode, EXEC_SYNC | EXEC_ASYNC | EXEC_ASYNCRESULT | EXEC_BACKGROUND) {
         return err::INVALID_FUNCTION;
     }
+    let _ = crate::loader::take_fail();
     let r = process::exec(process::ExecParams {
         path: &path.display(),
         program: &argv0,
@@ -91,9 +112,12 @@ fn exec(c: &mut Ctx) -> u32 {
     let child = match r {
         Ok(p) => p,
         Err(e) => {
+            // The module that failed: a missing DLL or the one lacking an
+            // import, else the program itself.
+            let culprit = crate::loader::take_fail().unwrap_or(name);
             if fail != 0 && cbfail > 0 {
-                let n = (cbfail as usize - 1).min(name.len());
-                c.write_str(fail, &name[..n]);
+                let n = (cbfail as usize - 1).min(culprit.len());
+                c.write_str(fail, &culprit[..n]);
             }
             return e;
         }
@@ -241,7 +265,18 @@ pub fn dos16_create_thread(c: &mut Ctx) -> u32 {
     // top of the new thread's stack.
     let (pfn, ptid, stack) = (c.arg(0), c.ptr(1), c.arg(2));
     let ss = (stack >> 16) as u16;
-    let sp_off = stack & 0xffff;
+    // The thread function is entered as if far-called: a return address
+    // (to the thread exit stub) goes below pbStack, where the caller may
+    // have stored the function's arguments.
+    let sp_off = (stack & 0xffff).wrapping_sub(4) & 0xffff;
+    {
+        let ret = crate::loader::gate::slot_address(0, THREAD_EXIT_ORDINAL);
+        let far = (vm::tile_selector(ret) as u32) << 16 | (ret & 0xffff);
+        let at = c.space().linear(ss, sp_off).unwrap_or(0);
+        if !c.write_u32(at, far) {
+            return err::INVALID_ADDRESS;
+        }
+    }
     let frame = TrapFrame {
         rflags: 0x202,
         cs: (pfn >> 16) as u64,

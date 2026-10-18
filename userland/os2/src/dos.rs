@@ -523,3 +523,32 @@ unsafe extern "C" {
         pcb: *mut u32,
     ) -> APIRET;
 }
+
+// Memory suballocation.
+pub const DOSSUB_INIT: u32 = 0x01;
+pub const DOSSUB_GROW: u32 = 0x02;
+pub const DOSSUB_SPARSE_OBJ: u32 = 0x04;
+pub const DOSSUB_SERIALIZE: u32 = 0x08;
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.344"]
+    pub fn DosSubSetMem(base: *mut u8, flags: u32, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.345"]
+    pub fn DosSubAllocMem(base: *mut u8, ppb: *mut *mut u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.346"]
+    pub fn DosSubFreeMem(base: *mut u8, pb: *mut u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.347"]
+    pub fn DosSubUnsetMem(base: *mut u8) -> APIRET;
+}
+
+pub const DCPY_EXISTING: u32 = 1;
+pub const DCPY_APPEND: u32 = 2;
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.258"]
+    pub fn DosCopy(source: *const u8, target: *const u8, options: u32) -> APIRET;
+    #[link_name = "DOSCALLS.110"]
+    pub fn DosForceDelete(name: *const u8) -> APIRET;
+    #[link_name = "DOSCALLS.261"]
+    pub fn DosEditName(level: u32, source: *const u8, edit: *const u8, target: *mut u8, cb: u32) -> APIRET;
+}

@@ -8,7 +8,10 @@ use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use super::process::Process;
 use crate::arch::idt::TrapFrame;
 
-pub const KSTACK_SIZE: usize = 32 * 1024;
+/// Kernel stack per thread. The loader recurses through DLL dependencies
+/// with large frames (unoptimised builds especially): 32 KB overflowed into
+/// the neighbouring heap block when a program pulled in a chain of DLLs.
+pub const KSTACK_SIZE: usize = 128 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
@@ -142,6 +145,12 @@ impl Thread {
             *t.rsp.get() = sp;
         }
         t
+    }
+
+    /// The lowest word of the kernel stack is still zero (it is allocated
+    /// zeroed and only an almost-overflowing stack reaches it).
+    pub fn kstack_intact(&self) -> bool {
+        self.kstack.0[..8].iter().all(|&b| b == 0)
     }
 
     pub fn kstack_top(&self) -> u64 {
