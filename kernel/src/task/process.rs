@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use super::thread::Thread;
 use super::{sched, WaitQueue};
@@ -43,6 +43,15 @@ pub struct Process {
     pub pid: u32,
     pub ppid: u32,
     pub space: SpinLock<AddressSpace>,
+    /// The address space's page tables, LDT and CPU mask, for context
+    /// switches (which must not take the space lock: a CPU holding it may
+    /// be waiting for this one to acknowledge a TLB shootdown).
+    pub cr3: u64,
+    pub ldt_base: u64,
+    pub cpus: Arc<AtomicU64>,
+    /// Thread whose thread-local memory is in the TLS page (0 = none):
+    /// threads of a process using it never run on two CPUs at once.
+    pub tls_owner: AtomicU32,
     pub exe: Arc<Module>,
     pub threads: SpinLock<Vec<Arc<Thread>>>,
     next_tid: AtomicU32,
@@ -244,6 +253,10 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
     let proc = Arc::new(Process {
         pid,
         ppid,
+        cr3: space.root,
+        ldt_base: space.ldt.as_ptr() as u64,
+        cpus: space.cpus.clone(),
+        tls_owner: AtomicU32::new(0),
         space: SpinLock::new(space),
         exe: exe.clone(),
         threads: SpinLock::new(Vec::new()),

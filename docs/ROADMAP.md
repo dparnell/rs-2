@@ -42,8 +42,8 @@ Status markers: done, in progress, planned.
 - done: kernel threads (no OS/2 process) with a work queue; the scheduler
   reports a thread that blocks while holding a spin lock
 - planned: AVIO (VIO in PM windows), parallel port hardware,
-  DosDevIOCtl coverage, mandatory file locks, SMP-safe locking (the kernel
-  still relies on one CPU and interrupts off)
+  DosDevIOCtl coverage, mandatory file locks, finer-grained kernel locking
+  (in place of the big kernel lock)
 
 ## Milestone 2: storage and installed systems (in progress)
 
@@ -56,7 +56,9 @@ Status markers: done, in progress, planned.
   boot on the next free drive letters and unmounts them on removal
 - planned: virtio-blk, NVMe/xHCI interrupts
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
-- planned: SMP, MSI/MSI-X
+- done: SMP: all processors started (INIT/SIPI), per-CPU GDT/TSS/LAPIC
+  timer, shared run queues, big kernel lock, IPI wake-ups and TLB shootdown
+- planned: MSI/MSI-X
 - done: HPFS (read/write/format)
 - done: extended attributes on FAT12/16 (`EA DATA. SF`), FAT32
   (FAT32.IFS-style EA files) and HPFS, with the EA APIs, DosCopy/DosMove

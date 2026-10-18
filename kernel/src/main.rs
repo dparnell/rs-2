@@ -36,6 +36,7 @@ mod rtc;
 mod screen;
 mod serial;
 mod session;
+mod smp;
 mod sync;
 mod task;
 mod trap;
@@ -71,6 +72,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     let fb = &info.framebuffer;
     println!("framebuffer {}x{} at {:#x}", fb.width, fb.height, fb.base);
     arch::gdt::init();
+    smp::init_bsp();
     arch::idt::init();
     arch::init_fpu();
     mm::init(info);
@@ -94,13 +96,11 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     if cmdline.split_whitespace().any(|w| w == "apitrace") {
         api::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
     }
+    smp::start_aps();
     drivers::hotplug::start();
     boot::start(cmdline);
-    // This boot context is now the idle thread.
-    loop {
-        task::sched::schedule();
-        arch::halt();
-    }
+    // This boot context is now CPU 0's idle thread.
+    task::sched::idle_loop();
 }
 
 /// Start-up sequence: CONFIG.SYS, CALL= programs, RUN= programs, then the
@@ -272,6 +272,7 @@ pub fn backtrace(mut rbp: u64) {
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     arch::disable_interrupts();
+    smp::halt_others();
     log::print_unlocked(format_args!("\nKERNEL PANIC: {info}\n"));
     let rbp: u64;
     unsafe { core::arch::asm!("mov {}, rbp", out(reg) rbp) };

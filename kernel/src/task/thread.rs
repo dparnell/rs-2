@@ -78,6 +78,11 @@ pub struct Thread {
     /// and a name for messages.
     pub kentry: crate::sync::SpinLock<Option<Box<dyn FnOnce() + Send>>>,
     pub kname: &'static str,
+    /// Running on a CPU, or still on its stack while being switched away
+    /// from: no other CPU may resume it.
+    pub on_cpu: AtomicBool,
+    /// Holds the big kernel lock (smp.rs).
+    pub holds_bkl: AtomicBool,
     /// Base of the user stack the kernel allocated for the thread
     /// (DosCreateThread), released when the thread ends; 0 = none.
     pub owned_stack: AtomicU32,
@@ -133,6 +138,8 @@ impl Thread {
             init_run: crate::sync::SpinLock::new(None),
             kentry: crate::sync::SpinLock::new(None),
             kname: "",
+            on_cpu: AtomicBool::new(idle),
+            holds_bkl: AtomicBool::new(false),
             owned_stack: AtomicU32::new(0),
             tls: UnsafeCell::new([0; super::process::TLS_DWORDS]),
             must_complete: AtomicU32::new(0),

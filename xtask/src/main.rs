@@ -54,6 +54,8 @@ struct Opts {
     hdd: Option<PathBuf>,
     /// Attach this raw disk image as an NVMe drive.
     nvme: Option<PathBuf>,
+    /// `run`: number of processors.
+    smp: u32,
     /// `disk`: make an installed-system disk.
     system: bool,
     /// `run`: boot from the --hdd disk only (no ESP directory).
@@ -87,6 +89,7 @@ fn parse(args: &[String]) -> Opts {
         iso: None,
         hdd: None,
         nvme: None,
+        smp: 2,
         system: false,
         boot_hdd: false,
         dist: false,
@@ -129,6 +132,10 @@ fn parse(args: &[String]) -> Opts {
             "--nvme" => {
                 i += 1;
                 o.nvme = Some(PathBuf::from(&args[i]));
+            }
+            "--smp" => {
+                i += 1;
+                o.smp = args[i].parse().expect("--smp count");
             }
             "--iso" => {
                 i += 1;
@@ -389,7 +396,7 @@ fn run(o: &Opts) -> bool {
     let sock = work.join("qemu-monitor.sock");
     let _ = std::fs::remove_file(&sock);
     let mut c = Command::new("qemu-system-x86_64");
-    c.args(["-machine", "q35", "-cpu", "max", "-m", "512M", "-no-reboot"])
+    c.args(["-machine", "q35", "-cpu", "max", "-m", "512M", "-no-reboot", "-smp", &o.smp.to_string()])
         .arg("-drive")
         .arg(format!("if=pflash,format=raw,readonly=on,file={}", code.display()))
         .arg("-drive")

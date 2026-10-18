@@ -233,8 +233,22 @@ fn shared_overlaps(base: u32, size: u32) -> bool {
 pub struct AddressSpace {
     /// Physical address of the PML4.
     pub root: u64,
+    /// CPUs that have it loaded (bit n = CPU n), for TLB shootdowns. Shared
+    /// with the owning process, which updates it on context switches
+    /// without taking the address space lock.
+    pub cpus: Arc<core::sync::atomic::AtomicU64>,
     pub ldt: Box<[u64; LDT_ENTRIES]>,
     pub regions: BTreeMap<u32, Region>,
+}
+
+/// Load an address space on this CPU: page tables, LDT, and the CPU mask
+/// used for TLB shootdowns. Needs no lock (the context switch path).
+pub fn activate(root: u64, ldt: u64, cpus: &core::sync::atomic::AtomicU64) {
+    cpus.fetch_or(crate::smp::this().bit(), core::sync::atomic::Ordering::SeqCst);
+    if paging::current_root() != root {
+        unsafe { crate::arch::write_cr3(root) };
+    }
+    gdt::load_ldt(ldt, LDT_ENTRIES);
 }
 
 /// Errors in OS/2 terms.
@@ -261,7 +275,7 @@ impl AddressSpace {
     pub fn new() -> Option<Self> {
         let root = paging::new_root()?;
         let ldt: Box<[u64; LDT_ENTRIES]> = unsafe { Box::new_zeroed().assume_init() };
-        let mut s = AddressSpace { root, ldt, regions: BTreeMap::new() };
+        let mut s = AddressSpace { root, cpus: Arc::new(core::sync::atomic::AtomicU64::new(0)), ldt, regions: BTreeMap::new() };
         s.map_gate();
         crate::infoseg::attach(&mut s);
         Some(s)
@@ -282,10 +296,7 @@ impl AddressSpace {
 
     /// Make this address space current (CR3 and LDT).
     pub fn activate(&self) {
-        if paging::current_root() != self.root {
-            unsafe { crate::arch::write_cr3(self.root) };
-        }
-        gdt::load_ldt(self.ldt.as_ptr() as u64, LDT_ENTRIES);
+        activate(self.root, self.ldt.as_ptr() as u64, &self.cpus);
     }
 
     /// Region containing `addr`.
@@ -317,8 +328,18 @@ impl AddressSpace {
     pub fn find_private(&self, size: u32) -> Option<u32> {
         let size = size.next_multiple_of(TILE);
         let mut base = ARENA_START;
-        while base + size <= TILED_TOP {
-            if self.free_in_private(base, size) {
+        while base.checked_add(size)? <= TILED_TOP {
+            let end = base + size;
+            // Regions are disjoint and sorted: if the last one starting
+            // below `end` reaches past `base`, no window starting before
+            // its end fits, so continue after it.
+            if let Some((_, r)) = self.regions.range(..end).next_back() {
+                if r.reserved_end() > base {
+                    base = r.reserved_end().next_multiple_of(TILE);
+                    continue;
+                }
+            }
+            if !shared_overlaps(base, size) {
                 return Some(base);
             }
             base += TILE;
@@ -429,13 +450,24 @@ impl AddressSpace {
     /// Release the object starting at `base`.
     pub fn free(&mut self, base: u32) -> Result<(), VmError> {
         let r = self.regions.remove(&base).ok_or(VmError::InvalidAddress)?;
+        let mut frames = Vec::new();
+        let mut unmapped = false;
         for i in 0..r.size / PAGE {
             let va = (r.base + i * PAGE) as u64;
             if let Some(old) = paging::unmap(self.root, va) {
+                unmapped = true;
                 if matches!(r.backing, Backing::Private) {
-                    phys::free(old & paging::ADDR_MASK);
+                    frames.push(old & paging::ADDR_MASK);
                 }
             }
+        }
+        // Other CPUs running this process must forget the pages before
+        // the frames can be reused.
+        if unmapped {
+            self.shootdown();
+        }
+        for f in frames {
+            phys::free(f);
         }
         self.clear_descriptors(r.base, r.reserved_end());
         Ok(())
@@ -450,13 +482,16 @@ impl AddressSpace {
         if r.base + (last + 1) * PAGE > r.base + r.size {
             return Err(VmError::InvalidAddress);
         }
+        let mut frames = Vec::new();
+        let mut changed = false;
         for i in first..=last {
             let va = (r.base + i * PAGE) as u64;
             if flags & pag::DECOMMIT != 0 {
                 r.set_page_state(i as usize, PageState::Reserved);
                 if let Some(old) = paging::unmap(root, va) {
+                    changed = true;
                     if matches!(r.backing, Backing::Private) {
-                        phys::free(old & paging::ADDR_MASK);
+                        frames.push(old & paging::ADDR_MASK);
                     }
                 }
             } else if flags & pag::COMMIT != 0 {
@@ -469,18 +504,37 @@ impl AddressSpace {
             // Re-protect present pages.
             for i in first..=last {
                 let va = (r.base + i * PAGE) as u64;
-                if let Some(e) = paging::entry(root, va) {
-                    if e & PRESENT != 0 {
-                        let mut e = e & !WRITABLE;
+                if let Some(old) = paging::entry(root, va) {
+                    if old & PRESENT != 0 {
+                        let mut e = old & !WRITABLE;
                         if flags & pag::WRITE != 0 {
                             e |= WRITABLE;
                         }
                         paging::set_entry(root, va, e);
+                        // Only taking access away needs other CPUs' TLBs
+                        // flushed.
+                        if old & WRITABLE != 0 && e & WRITABLE == 0 {
+                            changed = true;
+                        }
                     }
                 }
             }
         }
+        if changed {
+            self.shootdown();
+        }
+        for f in frames {
+            phys::free(f);
+        }
         Ok(())
+    }
+
+    /// Flush the TLBs of the other CPUs that have this space loaded.
+    fn shootdown(&self) {
+        let mask = self.cpus.load(core::sync::atomic::Ordering::SeqCst);
+        if mask & !crate::smp::this().bit() != 0 {
+            crate::smp::tlb_shootdown(mask);
+        }
     }
 
     /// Bring the page containing `addr` in. `write` requests write access.

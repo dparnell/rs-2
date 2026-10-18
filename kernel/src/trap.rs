@@ -17,24 +17,37 @@ pub const IRQ_BASE: u64 = 0x20;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn dispatch(f: &mut TrapFrame) {
+    use crate::smp;
+    let user = f.from_user();
     match f.vector {
         v if v < 32 => {
-            if f.from_user() {
+            if user {
+                // Kernel code runs under the big kernel lock (smp.rs).
+                smp::bkl_acquire();
                 crate::task::user_exception(f);
             } else if !crate::mm::fault::kernel_fault(f) {
                 kernel_exception(f);
             }
         }
+        // Interrupt handlers only use spin locks.
         v if (IRQ_BASE..IRQ_BASE + 16).contains(&v) => {
             crate::irq::handle((v - IRQ_BASE) as u8, f);
         }
-        v if v == API_VECTOR as u64 => crate::api::dispatch(f),
+        v if v == API_VECTOR as u64 => {
+            smp::bkl_acquire();
+            crate::api::dispatch(f);
+        }
+        v if (smp::IPI_RESCHEDULE as u64..=smp::IPI_HALT as u64).contains(&v) => smp::ipi(v as u8),
         v if v == crate::apic::SPURIOUS as u64 => {}
         v => crate::println!("spurious interrupt {v:#x}"),
     }
-    if f.from_user() && crate::task::before_user_return(f) {
-        // No references are held in this frame.
-        crate::task::sched::exit_current();
+    if user {
+        smp::bkl_acquire();
+        if crate::task::before_user_return(f) {
+            // No references are held in this frame.
+            crate::task::sched::exit_current();
+        }
+        smp::bkl_release();
     }
 }
 

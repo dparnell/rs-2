@@ -1,8 +1,12 @@
 //! Thread scheduling and context switching.
 //!
-//! Single processor, non-preemptive kernel: a thread is only switched out
-//! when it blocks or when it is about to return to user mode with its time
-//! slice used up.
+//! Non-preemptive kernel: a thread is only switched out when it blocks or
+//! when it is about to return to user mode with its time slice used up.
+//! Every CPU runs the same scheduler over shared run queues; each has its
+//! own current and idle thread (smp.rs). A thread is marked `on_cpu` from
+//! the moment a CPU picks it until that CPU has finished switching away
+//! from it, so it is never resumed on two CPUs, or on one while another is
+//! still on its stack.
 //!
 //! OS/2 priorities are a class (idle, regular, time-critical, foreground
 //! server) plus a level 0-31; threads run strictly by priority, round robin
@@ -17,6 +21,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use super::thread::{State, Thread};
 use crate::arch::{self, gdt};
 use crate::irq;
+use crate::smp;
 use crate::sync::SpinLock;
 
 /// Ticks per time slice.
@@ -25,24 +30,17 @@ const SLICE: u64 = 32;
 struct Sched {
     /// Ready threads by effective priority (index 0 = lowest).
     ready: [VecDeque<Arc<Thread>>; 4],
-    current: Option<Arc<Thread>>,
-    idle: Option<Arc<Thread>>,
     sleepers: Vec<Arc<Thread>>,
-    /// Threads that exited; reaped once off their stack.
+    /// Threads that exited; freed once no CPU is on their stack.
     dead: Vec<Arc<Thread>>,
-    slice_end: u64,
 }
 
 static SCHED: SpinLock<Sched> = SpinLock::new(Sched {
     ready: [VecDeque::new(), VecDeque::new(), VecDeque::new(), VecDeque::new()],
-    current: None,
-    idle: None,
     sleepers: Vec::new(),
     dead: Vec::new(),
-    slice_end: 0,
 });
 
-static NEED_RESCHED: AtomicBool = AtomicBool::new(false);
 static LOCK_WARNED: AtomicBool = AtomicBool::new(false);
 
 global_asm!(
@@ -69,8 +67,10 @@ switch_stacks:
 .global thread_trampoline
 // First switch into a new thread lands here with rsp at its TrapFrame.
 thread_trampoline:
+    call {finish}
     jmp trap_return
-"#
+"#,
+    finish = sym finish_switch,
 );
 
 unsafe extern "C" {
@@ -78,20 +78,27 @@ unsafe extern "C" {
     pub fn thread_trampoline();
 }
 
-/// Turn the boot context into the idle thread.
+/// Turn the boot context into CPU 0's idle thread.
 pub fn init() {
     let idle = Thread::new_idle();
-    let mut s = SCHED.lock();
-    s.current = Some(idle.clone());
-    s.idle = Some(idle);
+    let c = smp::this();
+    *c.idle() = Some(idle.clone());
+    *c.current() = Some(idle);
 }
 
+/// The thread running on this CPU.
 pub fn current() -> Arc<Thread> {
-    SCHED.lock().current.clone().expect("no current thread")
+    current_opt().expect("no current thread")
 }
 
 pub fn current_opt() -> Option<Arc<Thread>> {
-    SCHED.lock().current.clone()
+    let was = arch::interrupts_enabled();
+    arch::disable_interrupts();
+    let t = smp::this().current().clone();
+    if was {
+        arch::enable_interrupts();
+    }
+    t
 }
 
 fn class_index(t: &Thread) -> usize {
@@ -106,18 +113,33 @@ fn class_index(t: &Thread) -> usize {
 
 /// Make a thread runnable.
 pub fn wake(t: &Arc<Thread>) {
-    let mut s = SCHED.lock();
-    if t.state() == State::Ready || t.state() == State::Running || t.state() == State::Dead {
+    let i = {
+        let mut s = SCHED.lock();
+        if t.state() == State::Ready || t.state() == State::Running || t.state() == State::Dead {
+            return;
+        }
+        t.set_state(State::Ready);
+        s.sleepers.retain(|x| !Arc::ptr_eq(x, t));
+        let i = class_index(t);
+        s.ready[i].push_back(t.clone());
+        i
+    };
+    // An idle CPU takes it; otherwise one running something of a lower
+    // class is preempted.
+    let me = smp::this();
+    if me.cur_class.load(Ordering::Relaxed) == smp::IDLE_CLASS {
+        me.need_resched.store(true, Ordering::Relaxed);
         return;
     }
-    t.set_state(State::Ready);
-    s.sleepers.retain(|x| !Arc::ptr_eq(x, t));
-    let i = class_index(t);
-    s.ready[i].push_back(t.clone());
-    // A higher class than the running thread preempts it.
-    if let Some(c) = &s.current {
-        if i > class_index(c) || c.is_idle() {
-            NEED_RESCHED.store(true, Ordering::Relaxed);
+    if let Some(c) = smp::online().find(|c| c.cur_class.load(Ordering::Relaxed) == smp::IDLE_CLASS) {
+        smp::kick(c);
+        return;
+    }
+    for c in smp::online() {
+        if (c.cur_class.load(Ordering::Relaxed) as usize) < i {
+            c.need_resched.store(true, Ordering::Relaxed);
+            smp::kick(c);
+            return;
         }
     }
 }
@@ -209,9 +231,17 @@ pub fn kill(t: &Arc<Thread>) {
     }
 }
 
-/// Called from the timer interrupt.
+/// Called from the timer interrupt on every CPU.
 pub fn tick() {
     let now = irq::ticks();
+    let c = smp::this();
+    if now >= c.slice_end.load(Ordering::Relaxed) {
+        c.need_resched.store(true, Ordering::Relaxed);
+    }
+    // Sleepers are woken by the boot processor.
+    if c.index() != 0 {
+        return;
+    }
     let mut woke = Vec::new();
     {
         let mut s = SCHED.lock();
@@ -223,9 +253,6 @@ pub fn tick() {
                 true
             }
         });
-        if now >= s.slice_end {
-            NEED_RESCHED.store(true, Ordering::Relaxed);
-        }
     }
     for t in woke {
         t.set_timed_out(true);
@@ -234,21 +261,62 @@ pub fn tick() {
 }
 
 pub fn need_resched() -> bool {
-    NEED_RESCHED.load(Ordering::Relaxed)
+    smp::this().need_resched.load(Ordering::Relaxed)
+}
+
+fn has_ready() -> bool {
+    SCHED.lock().ready.iter().any(|q| q.iter().any(|t| !t.on_cpu.load(Ordering::Acquire)))
 }
 
 /// Preempt if the time slice ran out and someone else can run.
 pub fn maybe_preempt() {
-    if NEED_RESCHED.swap(false, Ordering::Relaxed) {
-        let has_other = {
-            let s = SCHED.lock();
-            s.ready.iter().any(|q| !q.is_empty())
-        };
-        if has_other {
+    if smp::this().need_resched.swap(false, Ordering::Relaxed) {
+        if has_ready() {
             yield_now();
         } else {
-            SCHED.lock().slice_end = irq::ticks() + SLICE;
+            smp::this().slice_end.store(irq::ticks() + SLICE, Ordering::Relaxed);
         }
+    }
+}
+
+/// The idle loop of every CPU.
+pub fn idle_loop() -> ! {
+    loop {
+        schedule();
+        // Halt unless something became ready meanwhile; `sti; hlt` lets
+        // no interrupt slip in between.
+        arch::disable_interrupts();
+        if has_ready() || need_resched() {
+            arch::enable_interrupts();
+            continue;
+        }
+        unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
+    }
+}
+
+/// Release the thread this CPU switched away from (it is now off our
+/// stack). Runs first thing in every thread a switch lands in.
+pub extern "C" fn finish_switch() {
+    let c = smp::this();
+    if let Some(prev) = c.switched_from().take() {
+        prev.on_cpu.store(false, Ordering::Release);
+    }
+}
+
+/// A process using thread-local memory swaps it through one page, so only
+/// one of its threads may be on a CPU at a time: claim the page for `t`.
+fn claim_tls(t: &Thread, me: &Thread) -> bool {
+    let Some(p) = t.process() else { return true };
+    if p.tls_phys.load(Ordering::Relaxed) == 0 {
+        return true;
+    }
+    let owner = p.tls_owner.load(Ordering::Acquire);
+    let mine = owner == me.id && me.process().is_some_and(|q| Arc::ptr_eq(&p, &q));
+    if owner == 0 || owner == t.id || mine {
+        p.tls_owner.store(t.id, Ordering::Release);
+        true
+    } else {
+        false
     }
 }
 
@@ -265,47 +333,72 @@ pub fn schedule() {
     }
     let was = arch::interrupts_enabled();
     arch::disable_interrupts();
-    let (prev, next) = {
+    let c = smp::this();
+    let me = c.current().clone().expect("no current thread");
+    // Give up the kernel lock while others run; take it back on return.
+    let had_bkl = smp::bkl_release_for(&me);
+    let next = {
         let mut s = SCHED.lock();
         // Only threads still marked ready (a thread that died or blocked
-        // again must not run from a stale queue entry).
+        // again must not run from a stale queue entry), and not one that
+        // another CPU is still switching away from.
+        let mut skipped = Vec::new();
         let next = loop {
             match (0..4).rev().find_map(|i| s.ready[i].pop_front()) {
-                Some(t) if t.state() == State::Ready => break t,
-                Some(_) => continue,
-                None => break s.idle.clone().unwrap(),
+                Some(t) if t.state() != State::Ready => continue,
+                Some(t) if t.on_cpu.load(Ordering::Acquire) && !Arc::ptr_eq(&t, &me) => skipped.push(t),
+                Some(t) if !claim_tls(&t, &me) => skipped.push(t),
+                Some(t) => break Some(t),
+                None => break None,
             }
         };
-        let prev = s.current.replace(next.clone()).unwrap();
-        s.slice_end = irq::ticks() + SLICE;
-        // Free threads that died earlier (we are not on their stacks).
-        s.dead.retain(|d| Arc::ptr_eq(d, &prev));
-        (prev, next)
+        for t in skipped.into_iter().rev() {
+            let i = class_index(&t);
+            s.ready[i].push_front(t);
+        }
+        let next = match next {
+            Some(t) => t,
+            // Nothing else: keep running a thread that can still run, else
+            // idle.
+            None if me.state() == State::Running && !me.is_idle() => me.clone(),
+            None => c.idle().clone().unwrap(),
+        };
+        next.on_cpu.store(true, Ordering::Release);
+        // Free threads that died earlier and are off every stack.
+        s.dead.retain(|d| d.on_cpu.load(Ordering::Acquire) || Arc::ptr_eq(d, &me));
+        next
     };
-    NEED_RESCHED.store(false, Ordering::Relaxed);
-    if !prev.kstack_intact() {
-        panic!("kernel stack overflow in thread {} (tid {})", prev.id, prev.tid);
+    c.slice_end.store(irq::ticks() + SLICE, Ordering::Relaxed);
+    c.need_resched.store(false, Ordering::Relaxed);
+    c.cur_class.store(if next.is_idle() { smp::IDLE_CLASS } else { class_index(&next) as u8 }, Ordering::Relaxed);
+    if !me.kstack_intact() {
+        panic!("kernel stack overflow in thread {} (tid {})", me.id, me.tid);
     }
-    if !Arc::ptr_eq(&prev, &next) {
+    if !Arc::ptr_eq(&me, &next) {
         next.set_state(State::Running);
-        prepare_switch(&prev, &next);
-        // Drop our references before switching: a dead thread never comes
-        // back to release them. Both threads stay alive through their
-        // owners (SCHED.current / dead list, a process thread list, idle).
-        let save = prev.rsp_slot();
+        prepare_switch(&me, &next);
+        let save = me.rsp_slot();
         let target = unsafe { *next.rsp_slot() };
         // Eager FPU/SSE switch (the kernel itself never uses the FPU).
         unsafe {
-            let p = (*prev.fpu.get()).0.as_mut_ptr();
+            let p = (*me.fpu.get()).0.as_mut_ptr();
             let n = (*next.fpu.get()).0.as_ptr();
             core::arch::asm!("fxsave64 [{}]", in(reg) p, options(nostack));
             core::arch::asm!("fxrstor64 [{}]", in(reg) n, options(nostack));
         }
-        drop(prev);
-        drop(next);
+        *c.current() = Some(next);
+        // The new thread clears `me.on_cpu` once we are off this stack. A
+        // dead thread never comes back, so no references may stay here.
+        *c.switched_from() = Some(me);
         unsafe { switch_stacks(save, target) };
-    } else if prev.state() != State::Dead {
-        prev.set_state(State::Running);
+        // Back on this thread, possibly on another CPU.
+        finish_switch();
+    } else if me.state() != State::Dead {
+        me.set_state(State::Running);
+        drop(me);
+    }
+    if had_bkl {
+        smp::bkl_acquire();
     }
     if was {
         arch::enable_interrupts();
@@ -315,11 +408,22 @@ pub fn schedule() {
 fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
     gdt::set_kernel_stack(next.kstack_top());
     crate::api::xproc::switch_tls(prev, next);
-    match next.process() {
+    let (pp, np) = (prev.process(), next.process());
+    let same = matches!((&pp, &np), (Some(a), Some(b)) if Arc::ptr_eq(a, b));
+    if let Some(pp) = &pp {
+        // The thread-local memory page is free for other CPUs once saved.
+        if !same && pp.tls_owner.load(Ordering::Relaxed) == prev.id {
+            pp.tls_owner.store(0, Ordering::Release);
+        }
+        if !same {
+            // This CPU leaves the previous address space (TLB shootdowns).
+            pp.cpus.fetch_and(!smp::this().bit(), Ordering::SeqCst);
+        }
+    }
+    match np {
         Some(p) => {
-            let same = prev.process().is_some_and(|q| Arc::ptr_eq(&p, &q));
             if !same || prev.state() == State::Dead {
-                p.space.lock().activate();
+                crate::vm::activate(p.cr3, p.ldt_base, &p.cpus);
             }
             gdt::set_tib_base(next.tib(), 0xfff);
         }

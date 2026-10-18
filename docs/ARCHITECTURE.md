@@ -41,6 +41,23 @@ behaviour (Ghidra, the debug kernel's `.map` files) and to test
 compatibility by running original binaries. None of it is copied into the
 rs2 build or the install ISO.
 
+**Multiprocessor.** All processors the ACPI MADT lists are started at
+boot (INIT/SIPI through a real-mode trampoline below 640 KB; `nosmp` on
+the kernel command line keeps the others parked). Each CPU has its own
+GDT and TSS (the TIB and LDT descriptors are per thread), LAPIC timer,
+idle thread and per-CPU block, reached through the GS base: the trap path
+runs `swapgs` on every transition, so OS/2 code can keep using GS as an
+ordinary selector. User code runs on all CPUs at once; kernel code (API
+calls, exceptions, kernel threads) runs under one big kernel lock that a
+thread drops whenever it blocks or returns to user mode, while interrupt
+handlers use only spin locks. Run queues are shared; a thread is never
+resumed on one CPU while another is still switching away from it.
+Unmapping or write-protecting pages flushes the TLBs of the other CPUs
+that have the address space loaded (IPI shootdown). Threads of a process
+that uses thread-local memory (swapped through one page) never run on two
+CPUs at once. Finer-grained locking can replace the big lock subsystem by
+subsystem later.
+
 **Kernel threads.** Work that has to wait in thread context without
 belonging to an OS/2 process (setting up a hot-plugged USB stick, which
 needs SCSI commands) runs on kernel threads (`task::kthread`): they run

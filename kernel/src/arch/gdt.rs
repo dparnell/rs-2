@@ -15,6 +15,9 @@
 //!
 //! Entries from `FIRST_DYNAMIC` up are handed out for global selectors such
 //! as the 16-bit info segments.
+//!
+//! Every CPU has its own copy (the TSS, LDT and TIB entries differ per
+//! CPU); [`set_entry`] writes a global entry into all of them.
 
 use core::arch::asm;
 use core::mem::size_of;
@@ -91,12 +94,32 @@ pub mod flags {
     pub const LONG: u8 = 0x2;
 }
 
+/// This CPU's GDT.
 fn gdt() -> &'static mut [u64; ENTRIES] {
-    unsafe { &mut (*core::ptr::addr_of_mut!(GDT)).0 }
+    let p = unsafe { *crate::smp::this().gdt.get() };
+    if p.is_null() {
+        return unsafe { &mut (*core::ptr::addr_of_mut!(GDT)).0 };
+    }
+    unsafe { &mut *(p as *mut [u64; ENTRIES]) }
 }
 
+pub fn boot_gdt() -> *mut u64 {
+    unsafe { (*core::ptr::addr_of_mut!(GDT)).0.as_mut_ptr() }
+}
+
+pub fn boot_tss() -> *mut Tss {
+    core::ptr::addr_of_mut!(TSS)
+}
+
+/// Set a global entry, on every CPU.
 pub fn set_entry(index: usize, value: u64) {
-    gdt()[index] = value;
+    unsafe { (*core::ptr::addr_of_mut!(GDT)).0[index] = value };
+    for c in crate::smp::online() {
+        let p = unsafe { *c.gdt.get() };
+        if !p.is_null() {
+            unsafe { *p.add(index) = value };
+        }
+    }
 }
 
 pub fn entry(index: usize) -> u64 {
@@ -127,13 +150,72 @@ pub fn set_tib_base(base: u32, limit: u32) {
         descriptor(base, limit, PRESENT | DPL3 | CODE_DATA | WRITABLE | ACCESSED, flags::BIG);
 }
 
-/// Kernel stack used when an interrupt arrives from user mode.
+/// Kernel stack used when an interrupt arrives from user mode (this CPU).
 pub fn set_kernel_stack(rsp0: u64) {
-    unsafe { (*core::ptr::addr_of_mut!(TSS)).rsp[0] = rsp0 };
+    let t = unsafe { *crate::smp::this().tss.get() };
+    let t = if t.is_null() { core::ptr::addr_of_mut!(TSS) } else { t };
+    unsafe { (*t).rsp[0] = rsp0 };
 }
 
 pub const IST_DOUBLE_FAULT: u8 = 1;
 pub const IST_NMI: u8 = 2;
+
+#[repr(C, align(4096))]
+struct ApTables {
+    gdt: Gdt,
+    tss: Tss,
+    df: Stack,
+    nmi: Stack,
+}
+
+/// Give an application processor its own GDT (a copy of the boot one),
+/// TSS and exception stacks, and load them.
+pub fn init_ap(c: &'static crate::smp::PerCpu) {
+    let t: &'static mut ApTables = alloc::boxed::Box::leak(unsafe { alloc::boxed::Box::new_zeroed().assume_init() });
+    unsafe {
+        t.gdt.0.copy_from_slice(&(*core::ptr::addr_of!(GDT)).0);
+        t.tss.ist[IST_DOUBLE_FAULT as usize - 1] = core::ptr::addr_of!(t.df) as u64 + size_of::<Stack>() as u64;
+        t.tss.ist[IST_NMI as usize - 1] = core::ptr::addr_of!(t.nmi) as u64 + size_of::<Stack>() as u64;
+        t.tss.iomap = size_of::<Tss>() as u16;
+        *c.gdt.get() = t.gdt.0.as_mut_ptr();
+        *c.tss.get() = core::ptr::addr_of_mut!(t.tss);
+    }
+    let tss = core::ptr::addr_of!(t.tss) as u64;
+    set_system(TSS_SEL as usize / 8, tss, size_of::<Tss>() as u32 - 1, access::TSS64);
+    load(t.gdt.0.as_ptr());
+}
+
+/// Load a GDT, reload the segment registers and the task register.
+fn load(base: *const u64) {
+    #[repr(C, packed)]
+    struct Ptr {
+        limit: u16,
+        base: u64,
+    }
+    let ptr = Ptr { limit: (ENTRIES * 8 - 1) as u16, base: base as u64 };
+    unsafe {
+        asm!(
+            "lgdt [{ptr}]",
+            "push {cs}",
+            "lea {tmp}, [rip + 2f]",
+            "push {tmp}",
+            "retfq",
+            "2:",
+            "mov ds, {ds:x}",
+            "mov es, {ds:x}",
+            "mov ss, {ds:x}",
+            "xor {tmp:e}, {tmp:e}",
+            "mov fs, {tmp:x}",
+            // GS is left alone: its base is the per-CPU block (smp.rs).
+            "ltr {tss:x}",
+            ptr = in(reg) &ptr,
+            cs = in(reg) KERNEL_CS as u64,
+            ds = in(reg) KERNEL_DS,
+            tss = in(reg) TSS_SEL,
+            tmp = out(reg) _,
+        );
+    }
+}
 
 pub fn init() {
     use access::*;
@@ -161,32 +243,6 @@ pub fn init() {
         tss.ist[IST_NMI as usize - 1] = core::ptr::addr_of!(NMI_STACK) as u64 + size_of::<Stack>() as u64;
         tss.iomap = size_of::<Tss>() as u16;
         set_system(TSS_SEL as usize / 8, core::ptr::addr_of!(TSS) as u64, size_of::<Tss>() as u32 - 1, TSS64);
-
-        #[repr(C, packed)]
-        struct Ptr {
-            limit: u16,
-            base: u64,
-        }
-        let ptr = Ptr { limit: (ENTRIES * 8 - 1) as u16, base: g.as_ptr() as u64 };
-        asm!(
-            "lgdt [{ptr}]",
-            "push {cs}",
-            "lea {tmp}, [rip + 2f]",
-            "push {tmp}",
-            "retfq",
-            "2:",
-            "mov ds, {ds:x}",
-            "mov es, {ds:x}",
-            "mov ss, {ds:x}",
-            "xor {tmp:e}, {tmp:e}",
-            "mov fs, {tmp:x}",
-            "mov gs, {tmp:x}",
-            "ltr {tss:x}",
-            ptr = in(reg) &ptr,
-            cs = in(reg) KERNEL_CS as u64,
-            ds = in(reg) KERNEL_DS,
-            tss = in(reg) TSS_SEL,
-            tmp = out(reg) _,
-        );
     }
+    load(g.as_ptr());
 }

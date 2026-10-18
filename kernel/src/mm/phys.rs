@@ -25,6 +25,16 @@ pub fn virt_to_phys(v: *const u8) -> u64 {
     v as u64 - PHYS_MAP_BASE
 }
 
+/// A usable page below 640 KB, kept for the AP start-up trampoline.
+static LOW_PAGE: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+pub fn low_page() -> Option<u64> {
+    match LOW_PAGE.load(core::sync::atomic::Ordering::Relaxed) {
+        0 => None,
+        p => Some(p),
+    }
+}
+
 pub fn init(info: &BootInfo) {
     let top = info
         .memory()
@@ -54,8 +64,12 @@ pub fn init(info: &BootInfo) {
             f.clear(fr);
         }
     }
-    // Keep the real-mode area (trampolines for AP startup) and the bitmap.
+    // Keep the real-mode area (trampolines for AP startup) and the bitmap;
+    // remember a usable page there for the AP trampoline.
     for fr in 0..(0x10_0000 / PAGE) {
+        if fr > 0 && fr < 0x9f && !f.is_set(fr) && LOW_PAGE.load(core::sync::atomic::Ordering::Relaxed) == 0 {
+            LOW_PAGE.store(fr * PAGE, core::sync::atomic::Ordering::Relaxed);
+        }
         f.set(fr);
     }
     for fr in bitmap_phys / PAGE..(bitmap_phys + bytes).div_ceil(PAGE) {
@@ -70,6 +84,10 @@ pub fn init(info: &BootInfo) {
 }
 
 impl Frames {
+    fn is_set(&self, fr: u64) -> bool {
+        self.bitmap[(fr / 64) as usize] & (1 << (fr % 64)) != 0
+    }
+
     fn set(&mut self, fr: u64) {
         let (w, b) = ((fr / 64) as usize, fr % 64);
         if self.bitmap[w] & (1 << b) == 0 {

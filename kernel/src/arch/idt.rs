@@ -67,6 +67,11 @@ trap_stubs:
 .endr
 
 trap_common:
+    // From user mode: GS base becomes the per-CPU block (smp.rs).
+    test qword ptr [rsp + 24], 3
+    jz 3f
+    swapgs
+3:
     push rax
     push rbx
     push rcx
@@ -103,6 +108,11 @@ trap_return:
     test qword ptr [rsp + 22*8], 3
     jz 1f
     // Returning to user mode: selectors were validated by the dispatcher.
+    // Hand GS base back to user mode; loading the GS selector below then
+    // sets it from the user's descriptor. No interrupt may arrive in
+    // between (iretq restores the user's IF).
+    cli
+    swapgs
     mov rax, [rsp + 3*8]
     mov ds, ax
     mov rax, [rsp + 2*8]

@@ -75,8 +75,15 @@ pub fn handle(irq: u8, f: &mut TrapFrame) {
     }
     eoi(irq);
     if irq == 0 {
-        TICKS.fetch_add(1, Ordering::Relaxed);
-        crate::task::timer_tick(f);
+        // Every CPU's LAPIC timer arrives here; the boot processor keeps
+        // the time and runs the periodic work, the others only account
+        // their time slice.
+        if crate::smp::this().index() == 0 {
+            TICKS.fetch_add(1, Ordering::Relaxed);
+            crate::task::timer_tick(f);
+        } else {
+            crate::task::sched::tick();
+        }
         return;
     }
     if let Some(h) = unsafe { (*core::ptr::addr_of!(HANDLERS))[irq as usize] } {

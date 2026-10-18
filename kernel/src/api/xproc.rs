@@ -206,6 +206,8 @@ pub fn dos_alloc_thread_local_memory(c: &mut Ctx) -> u32 {
             crate::mm::paging::translate(sp.root, page as u64)
         };
         let Some(phys) = phys else { return err::NOT_ENOUGH_MEMORY };
+        // The caller's values are in the page now (see sched::claim_tls).
+        c.process.tls_owner.store(c.thread.id, Ordering::Release);
         c.process.tls_phys.store(phys, Ordering::Relaxed);
     }
     let used = c.process.tls_used.load(Ordering::Relaxed);
