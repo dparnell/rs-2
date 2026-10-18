@@ -33,8 +33,8 @@ Status: **works** = the tested function behaves as on OS/2;
 | Program | Status | Notes |
 |---------|--------|-------|
 | ATTRIB.EXE | works | List and change attributes. |
-| BACKUP.EXE | partial | Copies the files to the target drive; the only second drive in the test setup is QEMU's virtual FAT (the ESP), where the final attribute update of `\BACKUP\CONTROL.001` hangs. Not tried on a real disk. |
-| RESTORE.EXE | not tested | Needs a backup set (see BACKUP). |
+| BACKUP.EXE | works | To a FAT disk (`--hdd` image). On QEMU's virtual FAT drive (the ESP directory) the final attribute update of `\BACKUP\CONTROL.001` hangs. |
+| RESTORE.EXE | works | Restores a deleted file from that backup set. |
 | BLDLEVEL.EXE | works | |
 | CACHE.EXE | partial | `DosFSCtl` is not implemented; reports the error and default values. |
 | COMP.COM | works | Including the Y/N prompts. |
@@ -133,5 +133,7 @@ Status: **works** = the tested function behaves as on OS/2;
   message files, so they need OSO001.MSG and friends on disk.
 - `DosQuerySysState` reports no semaphores or shared memory.
 - `DosStartSession` (REXX `START`, other programs that start sessions).
+- Writing to QEMU's virtual FAT drive (the ESP directory) can hang (seen
+  with BACKUP); FAT disk images are fine.
 - The 32-bit `DosQueryMessageCP` argument layout is unverified (no caller
   found among the tested programs).
