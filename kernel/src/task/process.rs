@@ -54,6 +54,15 @@ pub struct Process {
     pub cwd: SpinLock<(u8, [String; 26])>,
     pub exit: SpinLock<Option<ExitInfo>>,
     pub exit_waiters: WaitQueue,
+    /// Woken when a child of this process ends.
+    pub child_waiters: WaitQueue,
+    /// Woken when one of this process's threads ends, resumes or the
+    /// critical section is released.
+    pub thread_waiters: WaitQueue,
+    /// Critical section owner (tid, 0 = none) and nesting count.
+    pub critsec: SpinLock<(u32, u32)>,
+    /// Started with EXEC_ASYNC: nobody will collect the result.
+    pub detached: core::sync::atomic::AtomicBool,
     /// Modules loaded with DosLoadModule (with use counts).
     pub loaded: SpinLock<Vec<(Arc<Module>, u32)>>,
     /// Logical video buffer (VioGetBuf), 0 if none.
@@ -105,6 +114,7 @@ pub struct ExecParams<'a> {
     pub env: Vec<String>,
     pub parent: Option<Arc<Process>>,
     pub handles: Vec<Option<Handle>>,
+    pub detached: bool,
 }
 
 pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
@@ -190,6 +200,10 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         cwd: SpinLock::new(cwd),
         exit: SpinLock::new(None),
         exit_waiters: WaitQueue::new(),
+        child_waiters: WaitQueue::new(),
+        thread_waiters: WaitQueue::new(),
+        critsec: SpinLock::new((0, 0)),
+        detached: core::sync::atomic::AtomicBool::new(p.detached),
         loaded: SpinLock::new(Vec::new()),
         searches: SpinLock::new(alloc::collections::BTreeMap::new()),
         lvb: SpinLock::new(0),
@@ -292,32 +306,66 @@ impl Process {
         self.exe.is16
     }
 
-    /// Terminate the whole process. Must be called on one of its threads;
-    /// does not return.
-    pub fn exit(self: &Arc<Self>, cause: u32, code: u32) -> ! {
+    /// Terminate the whole process: records the result and makes every
+    /// thread (including the caller) exit at its next return to user mode.
+    pub fn exit(self: &Arc<Self>, cause: u32, code: u32) {
+        {
+            let mut e = self.exit.lock();
+            if e.is_some() {
+                return;
+            }
+            *e = Some(ExitInfo { cause, code });
+        }
+        for t in self.threads.lock().iter() {
+            sched::kill(t);
+        }
+    }
+
+    /// Called by `exit_current` as each thread dies; the last one finishes
+    /// the process.
+    pub fn thread_exited(self: &Arc<Self>) {
+        {
+            // A dying owner releases the critical section.
+            let me = sched::current().tid;
+            let mut cs = self.critsec.lock();
+            if cs.0 == me {
+                *cs = (0, 0);
+            }
+        }
+        self.thread_waiters.wake_all();
+        let alive = self
+            .threads
+            .lock()
+            .iter()
+            .filter(|t| t.state() != super::thread::State::Dead)
+            .count();
+        if alive > 0 {
+            return;
+        }
         {
             let mut e = self.exit.lock();
             if e.is_none() {
-                *e = Some(ExitInfo { cause, code });
+                *e = Some(ExitInfo { cause: 0, code: 0 });
             }
         }
-        let me = sched::current();
-        for t in self.threads.lock().iter() {
-            if !Arc::ptr_eq(t, &me) {
-                sched::kill(t);
-            }
-        }
-        // Close handles.
-        self.handles.lock().clear();
+        self.threads.lock().clear();
+        // Close handles (pipes see their writers disappear).
+        let hs = core::mem::take(&mut *self.handles.lock());
+        drop(hs);
         self.exit_waiters.wake_all();
-        if let Some(parent) = by_pid(self.ppid) {
-            parent.exit_waiters.wake_all();
+        let parent = by_pid(self.ppid);
+        match &parent {
+            Some(pp) => pp.child_waiters.wake_all(),
+            None => {}
         }
+        let keep = parent.is_some() && !self.detached.load(Ordering::Relaxed);
         if self.ppid == 0 {
+            let code = self.exit_info().map_or(0, |e| e.code);
             crate::println!("[process {} ({}) ended, code {}]", self.pid, self.exe.name, code);
+        }
+        if !keep {
             reap(self.pid);
         }
-        sched::exit_current()
     }
 
     pub fn exit_info(&self) -> Option<ExitInfo> {

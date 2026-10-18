@@ -163,26 +163,30 @@ pub fn yield_now() {
     schedule();
 }
 
-/// Mark the current thread dead and switch away for good.
+/// Mark the current thread dead and switch away for good. The caller must
+/// not hold references (they would never be dropped).
 pub fn exit_current() -> ! {
     let t = current();
+    let process = t.process();
     {
         let mut s = SCHED.lock();
         t.set_state(State::Dead);
         s.dead.push(t);
     }
+    if let Some(p) = process {
+        p.thread_exited();
+    }
     schedule();
     unreachable!("dead thread rescheduled");
 }
 
-/// Stop another thread for good (process termination).
+/// Make a thread terminate: it unwinds out of any wait and dies at its
+/// next return to user mode.
 pub fn kill(t: &Arc<Thread>) {
-    let mut s = SCHED.lock();
-    for q in s.ready.iter_mut() {
-        q.retain(|x| !Arc::ptr_eq(x, t));
+    t.request_exit();
+    if t.state() == State::Blocked || t.state() == State::Suspended {
+        wake(t);
     }
-    s.sleepers.retain(|x| !Arc::ptr_eq(x, t));
-    t.set_state(State::Dead);
 }
 
 /// Called from the timer interrupt.
@@ -266,11 +270,21 @@ pub fn schedule() {
 
 fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
     gdt::set_kernel_stack(next.kstack_top());
-    if let Some(p) = next.process() {
-        let same = prev.process().is_some_and(|q| Arc::ptr_eq(&p, &q));
-        if !same {
-            p.space.lock().activate();
+    match next.process() {
+        Some(p) => {
+            let same = prev.process().is_some_and(|q| Arc::ptr_eq(&p, &q));
+            if !same || prev.state() == State::Dead {
+                p.space.lock().activate();
+            }
+            gdt::set_tib_base(next.tib(), 0xfff);
         }
-        gdt::set_tib_base(next.tib(), 0xfff);
+        None => {
+            // Kernel threads run on the kernel page tables so a process's
+            // tables can be freed while idle runs.
+            let k = crate::mm::paging::kernel_root();
+            if crate::mm::paging::current_root() != k {
+                unsafe { crate::arch::write_cr3(k) };
+            }
+        }
     }
 }

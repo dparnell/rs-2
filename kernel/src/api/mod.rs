@@ -15,6 +15,7 @@ pub mod file;
 pub mod kbdapi;
 pub mod msg;
 pub mod nls;
+pub mod proc;
 pub mod vio;
 pub mod names;
 mod names_gen;
@@ -330,6 +331,22 @@ pub fn dispatch(f: &mut TrapFrame) {
         // A 32-bit program returned from its entry point.
         let code = f.rax as u32;
         process.exit(0, code);
+        return;
+    }
+    if module == 0 && ordinal == proc::THREAD_EXIT_ORDINAL {
+        // A 32-bit thread function returned.
+        let mut ctx = Ctx {
+            f,
+            thread: thread.clone(),
+            process: process.clone(),
+            is16: false,
+            sig: &[],
+            args_at: stack_linear + 4,
+            no_return: true,
+            dx: None,
+        };
+        proc::thread_returned(&mut ctx);
+        return;
     }
     let (raw_module, raw_ordinal) = (module, ordinal);
     let (m8, o16) = names::canonical(module as u8, ordinal as u16);
@@ -360,6 +377,7 @@ pub fn dispatch(f: &mut TrapFrame) {
             name
         );
         process.exit(2, 0xffff);
+        return;
     }
 
     let mut ctx = Ctx {
@@ -403,7 +421,7 @@ pub fn dispatch(f: &mut TrapFrame) {
     if trace {
         crate::trace!("    -> {}", result);
     }
-    if ctx.no_return {
+    if ctx.no_return || thread.exit_requested() {
         return;
     }
     let dx = ctx.dx;

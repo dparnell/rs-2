@@ -103,6 +103,7 @@ fn start_init(program: &str, args: &str) {
         env,
         parent: None,
         handles: alloc::vec::Vec::new(),
+        detached: false,
     });
     match r {
         Ok(p) => println!("started {} as process {}", path, p.pid),

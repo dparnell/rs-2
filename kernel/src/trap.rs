@@ -31,8 +31,9 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
         v if v == API_VECTOR as u64 => crate::api::dispatch(f),
         v => crate::println!("spurious interrupt {v:#x}"),
     }
-    if f.from_user() {
-        crate::task::before_user_return(f);
+    if f.from_user() && crate::task::before_user_return(f) {
+        // No references are held in this frame.
+        crate::task::sched::exit_current();
     }
 }
 

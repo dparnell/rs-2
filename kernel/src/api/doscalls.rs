@@ -87,6 +87,20 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 567) => file::dos16_open_l,
         (0, 568) => file::dos16_set_file_ptr_l,
         (0, 570) => file::dos16_set_file_size_l,
+        (0, 2) | (0, 280) => super::proc::dos_wait_child,
+        (0, 3) | (0, 232) => super::proc::dos_enter_crit_sec,
+        (0, 6) | (0, 233) => super::proc::dos_exit_crit_sec,
+        (0, 9) => super::proc::dos16_get_prty,
+        (0, 10) | (0, 235) => super::proc::dos_kill_process,
+        (0, 11) | (0, 236) => super::proc::dos_set_priority,
+        (0, 26) | (0, 237) => super::proc::dos_resume_thread,
+        (0, 27) | (0, 238) => super::proc::dos_suspend_thread,
+        (0, 111) => super::proc::dos_kill_thread,
+        (0, 144) | (0, 283) => super::proc::dos_exec_pgm,
+        (0, 145) => super::proc::dos16_create_thread,
+        (0, 156) => super::proc::dos16_get_ppid,
+        (0, 311) => super::proc::dos_create_thread,
+        (0, 349) => super::proc::dos_wait_thread,
         (0, 690) => ok, // DosSMSetTitle
         (0, 712) => dos16_sm_pm_present,
         // ---- 16-bit DOSCALLS ----
@@ -223,11 +237,14 @@ fn dos_exit(c: &mut Ctx) -> u32 {
 
 fn exit(c: &mut Ctx, action: u32, code: u32) -> u32 {
     let p = c.process.clone();
+    let live = p.threads.lock().iter().filter(|t| t.state() != crate::task::thread::State::Dead).count();
     // EXIT_THREAD (0) on the last thread ends the process too.
-    if action == 0 && p.threads.lock().iter().filter(|t| t.state() != crate::task::thread::State::Dead).count() > 1 {
-        sched::exit_current();
+    if action == 0 && live > 1 {
+        c.thread.request_exit();
+    } else {
+        p.exit(0, code);
     }
-    p.exit(0, code)
+    0
 }
 
 fn dos16_get_pid(c: &mut Ctx) -> u32 {

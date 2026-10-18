@@ -44,6 +44,9 @@ pub struct Thread {
     idle: bool,
     /// Pending suspend count (DosSuspendThread).
     pub suspend: AtomicU32,
+    /// Set when the thread must terminate at its next return to user mode
+    /// (or when its current wait is interrupted).
+    exit_requested: AtomicBool,
 }
 
 unsafe impl Send for Thread {}
@@ -68,6 +71,7 @@ impl Thread {
             stack_top: AtomicU32::new(0),
             idle: true,
             suspend: AtomicU32::new(0),
+            exit_requested: AtomicBool::new(false),
         })
     }
 
@@ -88,6 +92,7 @@ impl Thread {
             stack_top: AtomicU32::new(0),
             idle: false,
             suspend: AtomicU32::new(0),
+            exit_requested: AtomicBool::new(false),
         });
         // Initial kernel stack: TrapFrame at the top, below it a
         // switch_stacks frame returning into thread_trampoline.
@@ -169,6 +174,14 @@ impl Thread {
 
     pub fn timed_out(&self) -> bool {
         self.timed_out.load(Ordering::Relaxed)
+    }
+
+    pub fn request_exit(&self) {
+        self.exit_requested.store(true, Ordering::Release);
+    }
+
+    pub fn exit_requested(&self) -> bool {
+        self.exit_requested.load(Ordering::Acquire)
     }
 
     pub fn tib(&self) -> u32 {

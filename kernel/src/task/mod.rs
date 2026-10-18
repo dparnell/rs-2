@@ -46,6 +46,9 @@ impl WaitQueue {
             }
             sched::block(deadline);
             self.waiters.lock().retain(|t| !Arc::ptr_eq(t, &me));
+            if me.exit_requested() {
+                return false;
+            }
             if me.timed_out() && !ready() {
                 return false;
             }
@@ -111,11 +114,20 @@ pub fn timer_tick(_f: &mut TrapFrame) {
 }
 
 /// Last chance before `iretq` to user mode: preemption and sanity checks on
-/// the selectors we are about to load.
-pub fn before_user_return(f: &mut TrapFrame) {
+/// the selectors we are about to load. Returns true if the current thread
+/// must terminate instead (the caller then calls `sched::exit_current`
+/// without holding references).
+pub fn before_user_return(f: &mut TrapFrame) -> bool {
     sched::maybe_preempt();
     let t = sched::current();
-    let Some(p) = t.process() else { return };
+    if t.exit_requested() {
+        return true;
+    }
+    let Some(p) = t.process() else { return false };
+    crate::api::proc::hold_if_needed(&t, &p);
+    if t.exit_requested() {
+        return true;
+    }
     let space = p.space.lock();
     let ok_data = |sel: u64| -> bool {
         let sel = sel as u16;
@@ -158,6 +170,8 @@ pub fn before_user_return(f: &mut TrapFrame) {
             ss
         );
         p.exit(2, 0xffff);
+        return true;
     }
     let _ = gdt::USER_CS;
+    false
 }

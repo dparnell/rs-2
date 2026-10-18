@@ -704,6 +704,10 @@ impl AddressSpace {
 
 impl Drop for AddressSpace {
     fn drop(&mut self) {
+        // Never free the tables we are running on.
+        if paging::current_root() == self.root {
+            unsafe { crate::arch::write_cr3(paging::kernel_root()) };
+        }
         let bases: Vec<u32> = self.regions.keys().copied().collect();
         for b in bases {
             let _ = self.free(b);
