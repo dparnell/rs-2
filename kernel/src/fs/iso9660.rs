@@ -153,6 +153,9 @@ impl FileSystem for Iso9660 {
     fn name(&self) -> &'static str {
         "CDFS"
     }
+    fn device(&self) -> Option<Arc<dyn BlockDev>> {
+        Some(self.dev.clone())
+    }
 
     fn stat(&self, path: &str) -> Result<FileInfo, u32> {
         let r = self.lookup(path)?;

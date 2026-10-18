@@ -258,7 +258,17 @@ impl Port {
                     let mut fis = h2d(0xa0, 0, 0, 1);
                     fis[5] = (bytes & 0xff) as u8;
                     fis[6] = (bytes >> 8) as u8;
-                    st.command(&fis, Some(&pk), bytes, false)?;
+                    if let Err(e) = st.command(&fis, Some(&pk), bytes, false) {
+                        // REQUEST SENSE clears a unit attention (medium
+                        // changed), so that a retry can succeed.
+                        let mut rs = [0u8; 12];
+                        rs[0] = 0x03;
+                        rs[4] = 18;
+                        let mut f2 = h2d(0xa0, 0, 0, 1);
+                        f2[5] = 18;
+                        let _ = st.command(&f2, Some(&rs), 18, false);
+                        return Err(e);
+                    }
                 }
             }
             if !write {

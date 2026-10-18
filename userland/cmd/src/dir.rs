@@ -155,7 +155,7 @@ fn header(drive: u32) {
     let letter = (b'A' + drive as u8 - 1) as char;
     outln("");
     if rc == 0 {
-        let label = os2::path::from_bytes(&fi.label[..fi.cch_label as usize]);
+        let label = os2::path::from_bytes(&fi.label[..(fi.cch_label as usize).min(fi.label.len())]);
         if label.is_empty() {
             outln(&alloc::format!("The volume in drive {letter} has no label."));
         } else {
