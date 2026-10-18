@@ -351,7 +351,7 @@ pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
         (0x45, false) => shift_held(0x2000, release),
         (0x3a, false) => shift_held(0x4000, release),
         (0x54, false) => shift_held(0x8000, release),
-        _ => 0,
+        _ => kbd::shift_state() & 0xf000,
     };
     let mut after = after;
     if let Some(k) = ev {

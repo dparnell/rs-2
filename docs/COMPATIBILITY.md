@@ -134,8 +134,9 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   MOUSE$.
 - Replacement subsystems: VioRegister/VioGlobalReg/VioDeRegister,
   KbdRegister/KbdDeRegister, MouRegister/MouDeRegister route the chosen
-  functions to a 16-bit entry point in a DLL (not tested with a real
-  replacement subsystem yet).
+  functions to a 16-bit entry point in a DLL (apitest registers a
+  16-bit replacement in TESTDLL.DLL that answers VioGetCurPos and passes
+  VioSetCurPos on to the base VIO).
 - Devices: `COM1`-`COM4` (16550 UARTs; receive interrupt driven, DCB
   read timeouts; category 1 IOCtls for baud rate, line control, modem
   control, DCB, queues, errors; tested with QEMU's second serial port:

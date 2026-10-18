@@ -20,6 +20,14 @@ unsafe extern "C" {
     fn VIOGETANSI();
     #[link_name = "VIOCALLS.5"]
     fn VIOSETANSI();
+    #[link_name = "VIOCALLS.6"]
+    fn VIODEREGISTER();
+    #[link_name = "VIOCALLS.9"]
+    fn VIOGETCURPOS();
+    #[link_name = "VIOCALLS.15"]
+    fn VIOSETCURPOS();
+    #[link_name = "VIOCALLS.45"]
+    fn VIOREGISTER();
     #[link_name = "VIOCALLS.7"]
     fn VIOSCROLLUP();
     #[link_name = "VIOCALLS.11"]
@@ -185,6 +193,7 @@ pub fn run() {
     physbuf(&b);
     keyboard(&b);
     monitors(&b);
+    subsystem(&b);
     devices(&b);
     unsafe { DosFreeMem(mem) };
 }
@@ -445,6 +454,26 @@ fn monitors(b: &Buf) {
     let (ch, scan, _) = key_in(b, false);
     check("DosMonWrite to the session", rc == 0 && ch == b'q' && scan == 0x10);
     check("DosMonClose", call(DOSMONCLOSE, &[hm]) == 0 && call(DOSMONCLOSE, &[hm]) == 381);
+}
+
+/// VioRegister with TESTDLL's 16-bit VIOREPLACE: it answers VioGetCurPos
+/// itself and passes VioSetCurPos on to the base VIO.
+fn subsystem(b: &Buf) {
+    let (m, e) = (b.p(0xe00), b.p(0xe20));
+    b.bytes(0xe00, 8).copy_from_slice(b"TESTDLL\0");
+    b.bytes(0xe20, 11).copy_from_slice(b"VIOREPLACE\0");
+    let mask: u32 = 1 | 1 << 5;
+    let rc = call(VIOREGISTER, &[m[0], m[1], e[0], e[1], (mask >> 16) as u16, mask as u16, 0, 0]);
+    check("VioRegister", rc == 0);
+    let (r, c) = (b.p(0xe40), b.p(0xe42));
+    set16(b, 0xe40, 0);
+    set16(b, 0xe42, 0);
+    let rc = call(VIOGETCURPOS, &[r[0], r[1], c[0], c[1], 0]);
+    check("replacement VioGetCurPos", rc == 0 && w16(b, 0xe40) == 7 && w16(b, 0xe42) == 9);
+    let rc = call(VIOSETCURPOS, &[3, 4, 0]);
+    let rc2 = call(VIODEREGISTER, &[]);
+    call(VIOGETCURPOS, &[r[0], r[1], c[0], c[1], 0]);
+    check("passed on to the base VIO, VioDeRegister", rc == 0 && rc2 == 0 && w16(b, 0xe40) == 3 && w16(b, 0xe42) == 4);
 }
 
 fn open(name: &[u8]) -> Result<u32, u32> {

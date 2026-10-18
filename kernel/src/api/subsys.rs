@@ -147,7 +147,8 @@ fn register(c: &mut Ctx, module: u8, name: u32, entry_name: u32, masks: [u32; 2]
     };
     let Ok(module_obj) = r else { return fail };
     let Ok(t) = module_obj.resolve_name(&e, 0) else { return fail };
-    let entry = if t.is16 { (t.sel as u32) << 16 | t.off as u32 } else { return fail };
+    // A 32-bit export is entered through the 16:16 alias of its object.
+    let entry = if t.is16 { (t.sel as u32) << 16 | t.off as u32 } else { (crate::vm::tile_selector(t.flat) as u32) << 16 | (t.flat & 0xffff) };
     REGS.lock().push(Reg { module, sid, pid: c.process.pid, entry, masks, _name: m });
     0
 }

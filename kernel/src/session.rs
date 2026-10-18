@@ -160,6 +160,9 @@ fn end_popup_of(pid: u32) -> Result<(), u32> {
     }
     let fg = foreground();
     crate::screen::show(fg);
+    if fg == pm_session() && fg != 0 {
+        crate::display::post_repaint();
+    }
     crate::screen::destroy(POPUP_SID);
     crate::kbd::drop_queue(POPUP_SID);
     crate::console::drop_session(POPUP_SID);
