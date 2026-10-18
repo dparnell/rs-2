@@ -9,8 +9,8 @@ programs unmodified, natively, on 64-bit PCs.
 - The OS/2 kernel API (DOSCALLS: files, memory, processes, threads,
   semaphores, exceptions, timers, queues, shared memory, pipes, modules,
   resources, signals) plus VIO, KBD, MSG and NLS.
-- UEFI boot from CD, USB stick or hard disk; AHCI, NVMe, partitions (MBR/GPT),
-  FAT and ISO 9660.
+- UEFI boot from CD, USB stick or hard disk; AHCI, NVMe, USB keyboard/mouse (xHCI),
+  partitions (MBR/GPT), FAT, HPFS and ISO 9660.
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 
@@ -39,7 +39,7 @@ from `work/modules.txt`, which is how original OS/2 programs are tested.
 |------|----------|
 | `kernel/` | the kernel |
 | `boot/` | UEFI loader |
-| `crates/` | shared libraries: executable formats, FAT, boot hand-off |
+| `crates/` | shared libraries: executable formats, FAT, HPFS, installer unpacking, boot hand-off |
 | `userland/` | OS/2 programs in Rust (CMD, utilities, installer, tests) |
 | `tools/` | `elf2lx`, `lxdump`, Ghidra scripts, analysis scripts |
 | `xtask/` | build tool: images, ISO, QEMU |
