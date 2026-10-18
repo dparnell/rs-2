@@ -390,6 +390,22 @@ mod tests {
         assert_eq!(&bm.pixels[0..3], &[0x222222, 0x333333, 0x222222]);
     }
 
+    /// The Toolkit's sample bitmaps, when the media is extracted.
+    #[test]
+    fn toolkit_bitmaps() {
+        extern crate std;
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../work/media/boot/toolkit/os2tk45/samples/pm/");
+        for f in ["bmpsamp/yosemite.bmp", "clipbrd/clipbrd.bmp"] {
+            let Ok(data) = std::fs::read(std::format!("{dir}{f}")) else { continue };
+            let (info, _) = parse_file(&data).unwrap();
+            let bm = load(&data).unwrap();
+            assert_eq!((bm.width, bm.height), (info.width, info.height), "{f}");
+            // Not a blank image.
+            let first = bm.pixels[0];
+            assert!(bm.pixels.iter().any(|&p| p != first), "{f}");
+        }
+    }
+
     #[test]
     fn rops() {
         assert_eq!(rop3(0xcc, 0, 0x123456, 0xffffff), 0x123456);

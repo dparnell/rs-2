@@ -12,6 +12,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use os2::*;
 
+extern crate alloc;
+
 os2::entry!(main);
 
 #[repr(C)]
@@ -163,6 +165,8 @@ unsafe extern "C" {
     fn GpiQueryBitmapBits(hps: u32, start: i32, n: i32, buf: *mut u8, bmi: *mut u8) -> i32;
     #[link_name = "PMGPI.355"]
     fn GpiBitBlt(dst: u32, src: u32, n: i32, p: *const PointL, rop: i32, opts: u32) -> i32;
+    #[link_name = "PMGPI.557"]
+    fn GpiWCBitBlt(dst: u32, hbm: u32, n: i32, p: *const PointL, rop: i32, opts: u32) -> i32;
     #[link_name = "PMGPI.603"]
     fn GpiDrawBits(hps: u32, bits: *const u8, bmi: *const u8, n: i32, p: *const PointL, rop: i32, opts: u32) -> i32;
     #[link_name = "PMGPI.592"]
@@ -490,6 +494,29 @@ fn self_checks(hab: u32) {
 const WM_PAINT: u32 = 0x23;
 
 static HAB: AtomicU32 = AtomicU32::new(0);
+/// C:\YOSEMITE.BMP (the Toolkit's jigsaw picture), when present.
+static PICTURE: AtomicU32 = AtomicU32::new(0);
+
+/// Load a bitmap file into a GPI bitmap with GpiCreateBitmap(CBM_INIT),
+/// as the jigsaw sample does.
+fn load_picture(name: &[u8]) -> u32 {
+    unsafe {
+        let (mut hf, mut action) = (0, 0);
+        if DosOpen(name.as_ptr(), &mut hf, &mut action, 0, 0, 1, 0x40, null_mut()) != 0 {
+            return 0;
+        }
+        let mut data = alloc::vec![0u8; 512 * 1024];
+        let mut n = 0;
+        DosRead(hf, data.as_mut_ptr(), data.len() as u32, &mut n);
+        DosClose(hf);
+        if n < 30 || &data[0..2] != b"BM" {
+            return 0;
+        }
+        let off = u32::from_le_bytes([data[10], data[11], data[12], data[13]]) as usize;
+        let info = data.as_ptr().add(14);
+        GpiCreateBitmap(0, info, 4, data.as_ptr().add(off), info)
+    }
+}
 
 /// A small 8-bit bitmap: a gradient with a colour table (BITMAPINFO2).
 fn gradient() -> ([u8; 16 + 256 * 4], [u8; 16 * 16]) {
@@ -700,7 +727,15 @@ unsafe fn paint(hwnd: u32) {
         let x = 190;
         label(x, y + 150, b"GpiDrawBits");
         let (bmi, bits) = gradient();
-        GpiDrawBits(hps, bits.as_ptr(), bmi.as_ptr(), 4, [pt(x, y), pt(x + 127, y + 127), pt(0, 0), pt(16, 16)].as_ptr(), ROP_SRCCOPY, 0);
+        GpiDrawBits(hps, bits.as_ptr(), bmi.as_ptr(), 4, [pt(x, y), pt(x + 63, y + 127), pt(0, 0), pt(16, 16)].as_ptr(), ROP_SRCCOPY, 0);
+        let pic = PICTURE.load(Ordering::Relaxed);
+        if pic != 0 {
+            let mut bp = [0u8; 12];
+            bp[0] = 12;
+            GpiQueryBitmapParameters(pic, bp.as_mut_ptr());
+            let (w, h) = (u16::from_le_bytes([bp[4], bp[5]]) as i32, u16::from_le_bytes([bp[6], bp[7]]) as i32);
+            GpiWCBitBlt(hps, pic, 4, [pt(x + 68, y), pt(x + 167, y + 127), pt(0, 0), pt(w, h)].as_ptr(), ROP_SRCCOPY, 0);
+        }
 
         let x = 370;
         label(x, y + 150, b"Transforms");
@@ -767,6 +802,11 @@ fn main(_s: &Startup) -> u32 {
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
     check("WinInitialize/WinCreateMsgQueue", hab != 0 && hmq != 0);
     self_checks(hab);
+    let pic = load_picture(b"C:\\YOSEMITE.BMP\0");
+    if pic != 0 {
+        check("GpiCreateBitmap from a bitmap file", true);
+    }
+    PICTURE.store(pic, Ordering::Relaxed);
     let f = FAILS.load(Ordering::Relaxed);
     println!("gpitest done: {f} failure(s)");
     unsafe {
