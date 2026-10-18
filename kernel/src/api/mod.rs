@@ -25,6 +25,7 @@ pub mod signal;
 pub mod sem;
 pub mod shmem;
 pub mod submem;
+pub mod sysstate;
 pub mod timer;
 pub mod vio;
 pub mod names;

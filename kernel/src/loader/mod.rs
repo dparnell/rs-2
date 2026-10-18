@@ -217,6 +217,11 @@ pub fn find_loaded(name: &str) -> Option<Arc<Module>> {
     REGISTRY.lock().modules.iter().find(|m| m.name.eq_ignore_ascii_case(name)).cloned()
 }
 
+/// Every module loaded in the system (DosQuerySysState).
+pub fn all_modules() -> Vec<Arc<Module>> {
+    REGISTRY.lock().modules.clone()
+}
+
 pub fn by_handle(hmte: u16) -> Option<Arc<Module>> {
     REGISTRY.lock().modules.iter().find(|m| m.hmte == hmte).cloned()
 }

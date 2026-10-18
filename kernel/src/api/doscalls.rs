@@ -179,6 +179,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 146) => super::submem::dos16_sub_set,
         (0, 147) => super::submem::dos16_sub_alloc,
         (0, 148) => super::submem::dos16_sub_free,
+        (0, 368) => super::sysstate::dos_query_sys_state,
         (0, 344) => super::submem::dos_sub_set_mem,
         (0, 345) => super::submem::dos_sub_alloc_mem,
         (0, 346) => super::submem::dos_sub_free_mem,
