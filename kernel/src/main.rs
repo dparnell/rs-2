@@ -68,6 +68,9 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
 
     let cmdline = info.cmdline();
     println!("command line: {cmdline}");
+    if cmdline.split_whitespace().any(|w| w == "apitrace") {
+        api::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
     let init = cmdline
         .split_whitespace()
         .find_map(|w| w.strip_prefix("init="))

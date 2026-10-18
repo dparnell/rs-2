@@ -290,6 +290,9 @@ pub fn is_16bit(module: u32, ordinal: u32) -> bool {
     names::is16(module as u8, ordinal as u16)
 }
 
+/// Log every API call to the serial port (`apitrace` on the command line).
+pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 static WARNED: SpinLock<Vec<(u32, u32)>> = SpinLock::new(Vec::new());
 
 /// Linear address of `cs:rip`.
@@ -347,6 +350,17 @@ pub fn dispatch(f: &mut TrapFrame) {
         no_return: false,
         dx: None,
     };
+    let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed);
+    if trace {
+        crate::trace!(
+            "[{}:{}] {}.{} {}",
+            process.pid,
+            thread.tid,
+            gate::MODULES[module as usize],
+            ordinal,
+            names::display(module as u8, ordinal as u16)
+        );
+    }
     let result = match doscalls::handler(module as u8, ordinal as u16) {
         Some(h) => h(&mut ctx),
         None => {
@@ -364,6 +378,9 @@ pub fn dispatch(f: &mut TrapFrame) {
             err::CALL_NOT_IMPLEMENTED
         }
     };
+    if trace {
+        crate::trace!("    -> {}", result);
+    }
     if ctx.no_return {
         return;
     }

@@ -410,7 +410,8 @@ fn dos_alloc_mem(c: &mut Ctx) -> u32 {
     if flags & (pag::READ | pag::WRITE | pag::EXECUTE) == 0 {
         return err::INVALID_PARAMETER;
     }
-    match c.space().alloc(cb, flags, SegKind::Data, None) {
+    let r = c.space().alloc(cb, flags, SegKind::Data, None);
+    match r {
         Ok(base) => {
             c.write_u32(ppb, base);
             0
