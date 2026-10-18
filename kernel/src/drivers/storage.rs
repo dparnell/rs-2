@@ -13,6 +13,11 @@
 //! then clearing the halt of both bulk endpoints). A failed command
 //! fetches sense data; UNIT ATTENTION and NOT READY (becoming ready) are
 //! retried.
+//!
+//! Every command costs three bulk round trips, and the file systems read
+//! the same sectors (FAT, directories) over and over, one at a time. So
+//! small reads go through a cache of aligned 4 KB chunks per unit; writes
+//! go straight to the device and update the chunks they overlap.
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -43,6 +48,9 @@ const TIMEOUT_MS: u64 = 10_000;
 const CONTROL_TIMEOUT_MS: u64 = 2000;
 /// How long a unit may take to become ready at attach time.
 const READY_MS: u64 = 5000;
+/// Read cache: chunk size and number of chunks per unit.
+const CHUNK: usize = 4096;
+const CACHE_CHUNKS: usize = 64;
 
 // SCSI operation codes.
 const TEST_UNIT_READY: u8 = 0x00;
@@ -297,15 +305,74 @@ fn be64(b: &[u8]) -> u64 {
     (be32(b) as u64) << 32 | be32(&b[4..]) as u64
 }
 
+/// Recently read chunks: (chunk number, last use, data).
+struct Cache {
+    chunks: Vec<(u64, u64, Vec<u8>)>,
+    uses: u64,
+}
+
 /// A logical unit as a block device.
 pub struct Lun {
     bot: Arc<Bot>,
     lun: u8,
     block: usize,
     blocks: u64,
+    cache: Mutex<Cache>,
 }
 
 impl Lun {
+    /// Blocks per cache chunk.
+    fn per_chunk(&self) -> u64 {
+        (CHUNK / self.block).max(1) as u64
+    }
+
+    /// A read within one chunk, through the cache.
+    fn cached_read(&self, lba: u64, buf: &mut [u8]) -> Result<(), u32> {
+        let per = self.per_chunk();
+        let n = lba / per;
+        let mut c = self.cache.lock();
+        c.uses += 1;
+        let uses = c.uses;
+        let i = match c.chunks.iter().position(|e| e.0 == n) {
+            Some(i) => i,
+            None => {
+                let first = n * per;
+                let count = per.min(self.blocks - first) as usize;
+                let mut data = alloc::vec![0u8; count * self.block];
+                self.transfer(first, &mut data, false)?;
+                if c.chunks.len() >= CACHE_CHUNKS {
+                    let old = (0..c.chunks.len()).min_by_key(|&i| c.chunks[i].1).unwrap_or(0);
+                    c.chunks.swap_remove(old);
+                }
+                c.chunks.push((n, uses, data));
+                c.chunks.len() - 1
+            }
+        };
+        let e = &mut c.chunks[i];
+        e.1 = uses;
+        let off = ((lba - n * per) as usize) * self.block;
+        buf.copy_from_slice(&e.2[off..off + buf.len()]);
+        Ok(())
+    }
+
+    /// Blocks at `lba` were written with `data` (None: the write failed):
+    /// update the cached chunks they overlap, or forget them.
+    fn written(&self, lba: u64, count: u64, data: Option<&[u8]>) {
+        let (per, bs) = (self.per_chunk(), self.block as u64);
+        let end = lba + count;
+        let mut c = self.cache.lock();
+        c.chunks.retain(|e| data.is_some() || e.0 * per >= end || (e.0 + 1) * per <= lba);
+        let Some(data) = data else { return };
+        for e in c.chunks.iter_mut() {
+            let (first, last) = (e.0 * per, e.0 * per + (e.2.len() as u64) / bs);
+            let (from, to) = (lba.max(first), end.min(last));
+            if from < to {
+                let src = &data[((from - lba) * bs) as usize..((to - lba) * bs) as usize];
+                e.2[((from - first) * bs) as usize..((to - first) * bs) as usize].copy_from_slice(src);
+            }
+        }
+    }
+
     fn transfer(&self, lba: u64, buf: &mut [u8], write: bool) -> Result<(), u32> {
         let bs = self.block;
         if buf.len() % bs != 0 || lba + (buf.len() / bs) as u64 > self.blocks {
@@ -374,12 +441,21 @@ impl BlockDev for Lun {
     }
 
     fn read(&self, lba: u64, buf: &mut [u8]) -> Result<(), u32> {
-        self.transfer(lba, buf, false)
+        let count = (buf.len() / self.block) as u64;
+        let per = self.per_chunk();
+        let valid = buf.len() % self.block == 0 && count > 0 && lba + count <= self.blocks;
+        if valid && lba / per == (lba + count - 1) / per {
+            self.cached_read(lba, buf)
+        } else {
+            self.transfer(lba, buf, false)
+        }
     }
 
     fn write(&self, lba: u64, buf: &[u8]) -> Result<(), u32> {
         let mut tmp = buf.to_vec();
-        self.transfer(lba, &mut tmp, true)
+        let r = self.transfer(lba, &mut tmp, true);
+        self.written(lba, (buf.len() / self.block) as u64, r.is_ok().then_some(buf));
+        r
     }
 }
 
@@ -459,7 +535,8 @@ fn setup_lun(bot: &Arc<Bot>, st: &mut State, lun: u8) -> Option<(Lun, bool)> {
         (blocks * block as u64) >> 20
     );
     let optical = matches!(kind, TYPE_CDROM | TYPE_OPTICAL) && block == 2048;
-    Some((Lun { bot: bot.clone(), lun, block, blocks }, optical))
+    let cache = Mutex::new(Cache { chunks: Vec::new(), uses: 0 });
+    Some((Lun { bot: bot.clone(), lun, block, blocks, cache }, optical))
 }
 
 /// Set up a configured Bulk-Only device: its logical units with media,

@@ -360,7 +360,6 @@ fn run(o: &Opts) -> bool {
     } else {
         c.args(["-serial", "stdio"]);
     }
-    c.args(&o.qemu_extra);
     if let Some(d) = &o.hdd {
         c.arg("-drive").arg(format!("format=raw,file={}", d.display()));
     }
@@ -369,6 +368,8 @@ fn run(o: &Opts) -> bool {
         c.args(["-device", "nvme,drive=nvm0,serial=rs2nvme"]);
     }
     usb_devices(o, &mut c);
+    // Last, so extra devices can refer to the controllers above.
+    c.args(&o.qemu_extra);
     let mut child = c.spawn().expect("start qemu");
     let Some(timeout) = o.timeout else {
         return child.wait().map(|s| s.success()).unwrap_or(false);
