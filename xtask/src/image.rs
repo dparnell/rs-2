@@ -94,3 +94,53 @@ pub fn manifest(root: &Path, text: &str) -> FileList {
     }
     v
 }
+
+/// An MBR-partitioned disk image with one FAT partition (starting at
+/// sector 2048) holding `files`.
+pub fn disk(files: &FileList, label: &str, size_mb: u64) -> Vec<u8> {
+    let total = (size_mb << 20) as usize;
+    let start = 2048usize;
+    let part_bytes = total - start * 512;
+    // Build the partition contents with the hidden-sector count set.
+    let part = MemDisk(RefCell::new(vec![0u8; part_bytes]));
+    fat::format(&part, &fat::FormatParams { label, serial: 0x2026_1018, fat_type: None, hidden_sectors: start as u32 })
+        .expect("format");
+    let mut vol = fat::Volume::mount(part).expect("mount");
+    let ts = now();
+    for (src, dest) in files {
+        let data = std::fs::read(src).unwrap_or_else(|e| panic!("{}: {e}", src.display()));
+        let dest = dest.replace('/', "\\").to_ascii_uppercase();
+        let parts: Vec<&str> = dest.split('\\').filter(|s| !s.is_empty()).collect();
+        let mut p = String::new();
+        for d in &parts[..parts.len() - 1] {
+            if !p.is_empty() {
+                p.push('\\');
+            }
+            p.push_str(d);
+            if vol.lookup(&p).is_err() {
+                vol.mkdir(&p, ts).unwrap();
+            }
+        }
+        let mut e = vol.create_file(&dest, 0, ts).unwrap();
+        vol.write(&mut e, 0, &data, ts).unwrap();
+    }
+    let fat_type = vol.fat_type;
+    let part = vol.dev.0.into_inner();
+    let mut img = vec![0u8; total];
+    img[start * 512..].copy_from_slice(&part);
+    let ty: u8 = match fat_type {
+        fat::FatType::Fat12 => 0x01,
+        fat::FatType::Fat16 => 0x06,
+        fat::FatType::Fat32 => 0x0c,
+    };
+    let e = 446;
+    img[e] = 0x80; // active
+    img[e + 1..e + 4].copy_from_slice(&[0xfe, 0xff, 0xff]);
+    img[e + 4] = ty;
+    img[e + 5..e + 8].copy_from_slice(&[0xfe, 0xff, 0xff]);
+    img[e + 8..e + 12].copy_from_slice(&(start as u32).to_le_bytes());
+    img[e + 12..e + 16].copy_from_slice(&((part_bytes / 512) as u32).to_le_bytes());
+    img[510] = 0x55;
+    img[511] = 0xaa;
+    img
+}

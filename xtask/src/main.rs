@@ -34,6 +34,8 @@ struct Opts {
     type_at: Option<u64>,
     /// Boot from this ISO (as a CD) instead of the ESP directory.
     iso: Option<PathBuf>,
+    /// Attach this raw disk image as an extra hard disk.
+    hdd: Option<PathBuf>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -47,6 +49,7 @@ fn parse(args: &[String]) -> Opts {
         typing: None,
         type_at: None,
         iso: None,
+        hdd: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -60,6 +63,10 @@ fn parse(args: &[String]) -> Opts {
             "--screenshot" => {
                 i += 1;
                 o.screenshot = Some(PathBuf::from(&args[i]));
+            }
+            "--hdd" => {
+                i += 1;
+                o.hdd = Some(PathBuf::from(&args[i]));
             }
             "--iso" => {
                 i += 1;
@@ -99,6 +106,16 @@ fn main() -> ExitCode {
         "build" => build(&o).is_some(),
         "run" => build(&o).is_some_and(|_| run(&o)),
         "iso" => build(&o).is_some_and(|esp| iso(&o, &esp)),
+        "disk" => {
+            // A test hard disk from work/disk.txt (same manifest format).
+            let files = std::fs::read_to_string(root().join("work/disk.txt"))
+                .map(|t| image::manifest(&root(), &t))
+                .unwrap_or_default();
+            let out = o.output.clone().unwrap_or_else(|| root().join("work/disk.img"));
+            std::fs::write(&out, image::disk(&files, "RS2DISK", 64)).unwrap();
+            println!("wrote {}", out.display());
+            true
+        }
         _ => {
             eprintln!("unknown command {cmd}");
             false
@@ -244,6 +261,9 @@ fn run(o: &Opts) -> bool {
         c.args(["-serial", "stdio"]);
     }
     c.args(&o.qemu_extra);
+    if let Some(d) = &o.hdd {
+        c.arg("-drive").arg(format!("format=raw,file={}", d.display()));
+    }
     let mut child = c.spawn().expect("start qemu");
     let Some(timeout) = o.timeout else {
         return child.wait().map(|s| s.success()).unwrap_or(false);

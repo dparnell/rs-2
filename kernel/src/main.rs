@@ -11,6 +11,7 @@ mod api;
 mod arch;
 mod codepage;
 mod console;
+mod drivers;
 mod fs;
 mod infoseg;
 mod irq;
@@ -63,6 +64,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     irq::init();
     task::sched::init();
     fs::init(info);
+    drivers::init();
     loader::init();
     infoseg::init();
     kbd::init();

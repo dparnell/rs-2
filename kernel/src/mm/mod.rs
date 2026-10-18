@@ -2,6 +2,7 @@
 
 pub mod fault;
 pub mod heap;
+pub mod mmio;
 pub mod paging;
 pub mod phys;
 

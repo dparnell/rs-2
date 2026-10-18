@@ -5,6 +5,7 @@
 
 pub mod block;
 pub mod fatfs;
+pub mod iso9660;
 pub mod path;
 
 use alloc::collections::BTreeMap;
