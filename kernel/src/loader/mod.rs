@@ -157,6 +157,11 @@ impl Module {
             if ordinal == 0 || ordinal >= gate::ORDINALS {
                 return Err(err::INVALID_ORDINAL);
             }
+            // Absolute exports: THK32R3DS (295) and DOS32FLATDS (370), the
+            // flat data selector used by 16->32 thunks.
+            if m == 0 && (ordinal == 295 || ordinal == 370) {
+                return Ok(Target::constant(crate::arch::gdt::USER_DS));
+            }
             let a = gate::slot_address(m, ordinal);
             // Kernel APIs reachable both flat and 16:16.
             let mut t = Target::flat32(a, true);
@@ -262,7 +267,7 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
         crate::println!("loader: module {name} not found");
         err::MOD_NOT_FOUND
     })?;
-    let m = load_image(&path, data, true, None)?;
+    let m = load_image(&path, data, true, None).inspect_err(|e| crate::println!("loader: {path}: error {e}"))?;
     register(m.clone());
     Ok(m)
 }

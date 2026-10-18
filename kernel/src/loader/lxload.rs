@@ -177,7 +177,7 @@ pub fn load(
                 for &src in &f.sources {
                     let at = page_off + src as isize;
                     let src_flat = bases[oi].0 as i64 + at as i64;
-                    apply(img, at, f.kind, &t, src_flat as u32);
+                    apply(img, at, f.kind, &t, src_flat as u32, f.alias);
                 }
             }
         }
@@ -285,9 +285,12 @@ fn add(t: Target, additive: u32) -> Target {
     Target { flat: t.flat.wrapping_add(additive), off: t.off.wrapping_add(additive as u16), ..t }
 }
 
-fn apply(img: &mut [u8], at: isize, kind: SourceKind, t: &Target, src_flat: u32) {
+fn apply(img: &mut [u8], at: isize, kind: SourceKind, t: &Target, src_flat: u32, alias: bool) {
     match kind {
         SourceKind::Byte => patch(img, at, &[t.off as u8]),
+        // A selector fixup to a 32-bit object means its flat selector
+        // (thunks load FLAT DS this way); with the alias flag, its tile.
+        SourceKind::Selector16 if !t.is16 && !alias && t.flat_sel != 0 => patch(img, at, &t.flat_sel.to_le_bytes()),
         SourceKind::Selector16 => patch(img, at, &t.sel.to_le_bytes()),
         SourceKind::Pointer1616 => {
             patch(img, at, &t.off.to_le_bytes());

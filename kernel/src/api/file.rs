@@ -389,7 +389,7 @@ pub fn dos16_open_l(c: &mut Ctx) -> u32 {
         Ok(n) => n,
         Err(e) => return e,
     };
-    let size = (c.arg(3) as u64) << 32 | c.arg(4) as u64;
+    let size = c.arg(3) as u64 | (c.arg(4) as u64) << 32;
     match open(c, &name, size, c.arg(5), c.arg(6), c.arg(7)) {
         Ok((h, act)) => {
             c.write_u16(c.ptr(1), h as u16);
@@ -402,7 +402,9 @@ pub fn dos16_open_l(c: &mut Ctx) -> u32 {
 
 pub fn dos16_set_file_ptr_l(c: &mut Ctx) -> u32 {
     // Dos16SetFilePtrL(hf, LONGLONG ib, ULONG method, PLONGLONG pibActual)
-    let off = ((c.arg(1) as u64) << 32 | c.arg(2) as u64) as i64;
+    // The LONGLONG arrives as two dwords, low part first (CMD.EXE seeks
+    // back with 0xfffffff1, 0xffffffff).
+    let off = (c.arg(1) as u64 | (c.arg(2) as u64) << 32) as i64;
     match seek(c, c.arg(0), off, c.arg(3)) {
         Ok(p) => {
             let a = c.ptr(4);
@@ -415,7 +417,7 @@ pub fn dos16_set_file_ptr_l(c: &mut Ctx) -> u32 {
 }
 
 pub fn dos16_set_file_size_l(c: &mut Ctx) -> u32 {
-    set_size(c, c.arg(0), (c.arg(1) as u64) << 32 | c.arg(2) as u64)
+    set_size(c, c.arg(0), c.arg(1) as u64 | (c.arg(2) as u64) << 32)
 }
 
 pub fn dos16_open2(c: &mut Ctx) -> u32 {

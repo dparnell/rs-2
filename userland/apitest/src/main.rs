@@ -27,6 +27,7 @@ fn main(s: &Startup) -> u32 {
     println!("rs2 apitest, args: {:?}", core::str::from_utf8(s.args()).unwrap_or("?"));
     info_blocks();
     memory();
+    suballoc();
     files();
     threads_and_sems();
     exceptions();
@@ -80,6 +81,34 @@ fn memory() {
         check("DosQueryMem committed run", fl & PAG_COMMIT != 0 && cb == 0x1000);
         check("DosFreeMem", DosFreeMem(p) == 0);
         check("DosFreeMem twice fails", DosFreeMem(p) != 0);
+    }
+}
+
+fn suballoc() {
+    unsafe {
+        let mut heap = null_mut();
+        // Sparse: only reserved; the suballocator commits what it uses.
+        let rc = DosAllocMem(&mut heap, 0x4000, PAG_READ | PAG_WRITE);
+        check("DosSubSetMem init sparse", rc == 0 && DosSubSetMem(heap, DOSSUB_INIT | DOSSUB_SPARSE_OBJ, 0x2000) == 0);
+        let (mut a, mut b, mut c) = (null_mut(), null_mut(), null_mut());
+        let ok = DosSubAllocMem(heap, &mut a, 100) == 0
+            && DosSubAllocMem(heap, &mut b, 100) == 0
+            && DosSubAllocMem(heap, &mut c, 0x1000) == 0;
+        check("DosSubAllocMem x3", ok && a != b && b != c && (a as u32) % 8 == 0);
+        *a = 1;
+        *c.add(0xfff) = 2;
+        check("suballocated blocks usable", *a == 1 && *c.add(0xfff) == 2);
+        let mut big = null_mut();
+        check("DosSubAllocMem too much", DosSubAllocMem(heap, &mut big, 0x1800) == 311);
+        check("DosSubFreeMem", DosSubFreeMem(heap, b, 100) == 0 && DosSubFreeMem(heap, a, 100) == 0);
+        check("DosSubFreeMem twice overlaps", DosSubFreeMem(heap, a, 100) == 312);
+        let mut d = null_mut();
+        check("freed space reused", DosSubAllocMem(heap, &mut d, 200) == 0 && d == a);
+        check("DosSubSetMem shrink fails", DosSubSetMem(heap, DOSSUB_GROW, 0x1000) == 310);
+        check("DosSubSetMem grow", DosSubSetMem(heap, DOSSUB_GROW | DOSSUB_SPARSE_OBJ, 0x4000) == 0);
+        check("DosSubAllocMem after grow", DosSubAllocMem(heap, &mut big, 0x1800) == 0);
+        check("DosSubUnsetMem", DosSubUnsetMem(heap) == 0);
+        DosFreeMem(heap);
     }
 }
 

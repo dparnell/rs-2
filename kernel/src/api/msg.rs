@@ -177,6 +177,9 @@ pub fn dos_true_get_message(c: &mut Ctx) -> u32 {
     };
     let Some(file) = c.read_str(pfile, 260) else { return err::INVALID_ADDRESS };
     let Some(ins) = read_table(c, table, count) else { return err::INVALID_ADDRESS };
+    if super::tracing() {
+        crate::trace!("    message {num} from {file}");
+    }
     let (e, text) = get_message(c, &ins, num, &file);
     let (e2, n) = deliver(c, &text, buf, cb);
     if c.is16 { c.write_u16(pcb, n as u16) } else { c.write_u32(pcb, n) };

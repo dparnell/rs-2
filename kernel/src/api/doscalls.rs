@@ -176,6 +176,10 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 36) => super::shmem::dos16_get_shr_seg,
         (0, 37) => super::shmem::dos16_give_seg,
         (0, 121) => super::shmem::dos16_get_seg,
+        (0, 344) => super::submem::dos_sub_set_mem,
+        (0, 345) => super::submem::dos_sub_alloc_mem,
+        (0, 346) => super::submem::dos_sub_free_mem,
+        (0, 347) => super::submem::dos_sub_unset_mem,
         (0, 300) => super::shmem::dos_alloc_shared_mem,
         (0, 301) => super::shmem::dos_get_named_shared_mem,
         (0, 302) => super::shmem::dos_get_shared_mem,
@@ -200,6 +204,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 34) => dos16_alloc_seg,
         (0, 38) => dos16_realloc_seg,
         (0, 39) => dos16_free_seg,
+        (0, 126) => dos16_size_seg,
         (0, 47) => dos16_get_mod_handle,
         (0, 48) => dos16_get_mod_name,
         (0, 49) => dos16_get_machine_mode,
@@ -526,6 +531,17 @@ fn dos16_realloc_seg(c: &mut Ctx) -> u32 {
         }
     }
     sp.set_seg_limit(base, size - 1);
+    0
+}
+
+fn dos16_size_seg(c: &mut Ctx) -> u32 {
+    // DosSizeSeg(sel, pulSize)
+    let (sel, out) = (c.arg(0) as u16, c.ptr(1));
+    let d = c.space().descriptor(sel);
+    if sel < 4 || d & (1 << 47) == 0 {
+        return err::INVALID_ACCESS;
+    }
+    c.write_u32(out, vm::desc_limit(d).wrapping_add(1));
     0
 }
 

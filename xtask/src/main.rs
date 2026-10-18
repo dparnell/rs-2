@@ -236,6 +236,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("attrib", "OS2\\ATTRIB.EXE"),
         ("tree", "OS2\\TREE.EXE"),
         ("xcopy", "OS2\\XCOPY.EXE"),
+        ("sysdlls", "OS2\\SYSDLLS.EXE"),
         ("install", "OS2\\INSTALL.EXE"),
     ];
 

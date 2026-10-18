@@ -24,6 +24,7 @@ pub mod resource;
 pub mod signal;
 pub mod sem;
 pub mod shmem;
+pub mod submem;
 pub mod timer;
 pub mod vio;
 pub mod names;
@@ -333,6 +334,11 @@ pub fn is_16bit(module: u32, ordinal: u32) -> bool {
 /// Log every API call to the serial port (`apitrace` on the command line).
 pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// True while `apitrace` is on.
+pub fn tracing() -> bool {
+    TRACE.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 static WARNED: SpinLock<Vec<(u32, u32)>> = SpinLock::new(Vec::new());
 
 /// Linear address of `cs:rip`.
@@ -440,13 +446,16 @@ pub fn dispatch(f: &mut TrapFrame) {
     };
     let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed);
     if trace {
+        let ret = ctx.read_u32(ctx.args_at - 4).unwrap_or(0);
         crate::trace!(
-            "[{}:{}] {}.{} {}",
+            "[{}:{}] {}.{} {} from {:x} sp {:x}",
             process.pid,
             thread.tid,
             gate::MODULES[module as usize],
             ordinal,
-            names::display(module as u8, ordinal as u16)
+            names::display(module as u8, ordinal as u16),
+            ret,
+            stack_linear
         );
     }
     let result = match doscalls::handler(module as u8, ordinal as u16) {

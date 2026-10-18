@@ -433,3 +433,20 @@ unsafe extern "C" {
     #[link_name = "DOSCALLS.276"]
     pub fn DosQueryFHState(hf: u32, state: *mut u32) -> APIRET;
 }
+
+// Memory suballocation.
+pub const DOSSUB_INIT: u32 = 0x01;
+pub const DOSSUB_GROW: u32 = 0x02;
+pub const DOSSUB_SPARSE_OBJ: u32 = 0x04;
+pub const DOSSUB_SERIALIZE: u32 = 0x08;
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.344"]
+    pub fn DosSubSetMem(base: *mut u8, flags: u32, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.345"]
+    pub fn DosSubAllocMem(base: *mut u8, ppb: *mut *mut u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.346"]
+    pub fn DosSubFreeMem(base: *mut u8, pb: *mut u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.347"]
+    pub fn DosSubUnsetMem(base: *mut u8) -> APIRET;
+}
