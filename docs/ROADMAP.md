@@ -17,6 +17,13 @@ Status markers: done, in progress, planned.
   files and bound message segments), NLS (87 countries, 21 single-byte
   and the DBCS code pages, CODEPAGE=/COUNTRY=), national keyboard layouts
   (DEVINFO=KBD, KEYB)
+- done: VIO/KBD completeness: text modes with 8x16/8x14/8x8 fonts (43,
+  50, 60 rows), physical buffer, palette/DAC/blink state, pop-ups and the
+  hard-error pop-up (DosError), save/redraw and mode notifications,
+  replacement subsystems, logical keyboards and focus, line editing,
+  Ctrl+S, PS/2 LEDs and typematic; device monitors (KBD$, MOUSE$)
+- done: character devices COM1-COM4 (16550) with the ASYNC IOCtls and
+  `MODE COMn`, LPT1-3, CLOCK$, MOUSE$/POINTER$, KBD$ and SCREEN$ IOCtls
 - done: the original CMD.EXE runs interactively; userland/apitest passes
 - done: DLL termination routines
 - done: IBM REXX (.CMD scripts, REXXUTIL, the REXX API server) and most
@@ -25,7 +32,7 @@ Status markers: done, in progress, planned.
 - done: named pipes (byte and message mode, DosTransactNPipe, DosCallNPipe)
 - done: sessions: DosStartSession/Select/Set/StopSession, a virtual screen
   and keyboard queue per session, Ctrl+Esc window list, Alt+Esc
-- planned:
+- planned: AVIO (VIO in PM windows), parallel port hardware,
   DosDevIOCtl coverage,
   semaphore and memory corner cases found by running more programs
 

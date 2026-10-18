@@ -34,13 +34,22 @@ pub fn is16(module: u8, ordinal: u16) -> bool {
 }
 
 pub fn display(module: u8, ordinal: u16) -> &'static str {
+    if module == 9 {
+        return MONCALLS.iter().find(|m| m.1 == ordinal).map_or("?", |m| m.0);
+    }
     find(module, ordinal).map_or("?", |e| e.3)
 }
+
+/// MONCALLS (not in the Toolkit 4.5 import libraries).
+const MONCALLS: [(&str, u16); 5] = [("DosMonWrite", 1), ("DosMonRead", 2), ("DosMonClose", 3), ("DosMonOpen", 4), ("DosMonReg", 5)];
 
 /// Ordinal for an import by name.
 pub fn ordinal(module: &str, name: &str) -> Option<u16> {
     let up = name.to_ascii_uppercase();
     let m = module.to_ascii_uppercase();
+    if m == "MONCALLS" {
+        return MONCALLS.iter().find(|x| x.0.eq_ignore_ascii_case(&up)).map(|x| x.1);
+    }
     ALIASES
         .binary_search_by(|a| (a.0, a.1).cmp(&(m.as_str(), up.as_str())))
         .ok()

@@ -1,25 +1,26 @@
 //! KBDCALLS: the keyboard API.
+//!
+//! Every session has a default logical keyboard (handle 0) and those
+//! created with KbdOpen, each with its own KBDINFO (echo, ASCII/binary
+//! mode, turnaround character, shift reporting). They share the session's
+//! key queue; a logical keyboard other than the default must hold the focus
+//! (KbdGetFocus) to read. The state lives in `crate::conkbd`.
 
 use alloc::vec::Vec;
 
 use super::{err, Ctx};
+use crate::conkbd::{self, mask, Info};
 use crate::kbd::{self, KeyInfo};
-use crate::sync::SpinLock;
 
-/// KBDINFO for the session: fsMask, chTurnAround, fsInterim.
-struct Status {
-    mask: u16,
-    turnaround: u16,
-    interim: u16,
+const ERROR_KBD_INVALID_IOWAIT: u32 = 375;
+const ERROR_KBD_INVALID_LENGTH: u32 = 376;
+const ERROR_KBD_INVALID_ECHO_MASK: u32 = 377;
+const ERROR_KBD_INVALID_INPUT_MASK: u32 = 378;
+const ERROR_KBD_INVALID_CODEPAGE: u32 = 448;
+
+fn sid() -> u32 {
+    crate::session::io_session()
 }
-
-static STATUS: SpinLock<Status> = SpinLock::new(Status { mask: 0x0009, turnaround: 0x0d, interim: 0 });
-
-const ECHO_ON: u16 = 0x0001;
-const ECHO_OFF: u16 = 0x0002;
-const BINARY: u16 = 0x0004;
-const ASCII: u16 = 0x0008;
-const SHIFT_STATE: u16 = 0x0010;
 
 fn key_bytes(k: &KeyInfo) -> [u8; 10] {
     let mut b = [0u8; 10];
@@ -32,113 +33,236 @@ fn key_bytes(k: &KeyInfo) -> [u8; 10] {
     b
 }
 
+fn no_key() -> KeyInfo {
+    KeyInfo { status: 0, shift: kbd::shift_state(), ..Default::default() }
+}
+
+/// KbdCharIn(pkbci, fWait, hkbd).
 pub fn kbd_char_in(c: &mut Ctx) -> u32 {
-    let (p, nowait) = (c.ptr(0), c.arg(1) != 0);
-    let k = kbd::get_key(!nowait).unwrap_or(KeyInfo { status: 0, shift: kbd::shift_state(), ..Default::default() });
+    let (p, wait, h) = (c.ptr(0), c.arg(1), c.arg(2) as u16);
+    if wait > 1 {
+        return ERROR_KBD_INVALID_IOWAIT;
+    }
+    if let Err(e) = conkbd::may_read(sid(), h) {
+        return e;
+    }
+    // Interrupted by a signal: an empty record, as with IO_NOWAIT.
+    let k = kbd::get_key(wait == 0).unwrap_or_else(no_key);
     if c.write(p, &key_bytes(&k)) { 0 } else { err::INVALID_ADDRESS }
 }
 
+/// KbdPeek(pkbci, hkbd): fbStatus 0 when no key is waiting.
 pub fn kbd_peek(c: &mut Ctx) -> u32 {
-    let k = kbd::peek_key().unwrap_or(KeyInfo { status: 0, shift: kbd::shift_state(), ..Default::default() });
-    if c.write(c.ptr(0), &key_bytes(&k)) { 0 } else { err::INVALID_ADDRESS }
+    let (p, h) = (c.ptr(0), c.arg(1) as u16);
+    if let Err(e) = conkbd::may_read(sid(), h) {
+        return e;
+    }
+    let k = kbd::peek_key().unwrap_or_else(no_key);
+    if c.write(p, &key_bytes(&k)) { 0 } else { err::INVALID_ADDRESS }
 }
 
+/// KbdStringIn(pch, pchIn {cb, cchIn}, fsWait, hkbd). ASCII mode: an
+/// edited line (echoed if ECHO_ON), ended by the turnaround character,
+/// which is stored after the text but not counted. Binary mode: cb
+/// characters as typed (with IO_NOWAIT only those already waiting).
 pub fn kbd_string_in(c: &mut Ctx) -> u32 {
-    // KbdStringIn(pch, pchIn {cb, cchIn}, fsWait, hkbd)
-    let (p, pin, nowait) = (c.ptr(0), c.ptr(1), c.arg(2) != 0);
+    let (p, pin, wait, h) = (c.ptr(0), c.ptr(1), c.arg(2), c.arg(3) as u16);
+    if wait > 1 {
+        return ERROR_KBD_INVALID_IOWAIT;
+    }
     let Some(cb) = c.read_u16(pin) else { return err::INVALID_ADDRESS };
-    let (mask, turnaround) = {
-        let s = STATUS.lock();
-        (s.mask, s.turnaround)
-    };
+    if cb == 0 || cb > 255 {
+        return ERROR_KBD_INVALID_LENGTH;
+    }
+    let s = sid();
+    if let Err(e) = conkbd::may_read(s, h) {
+        return e;
+    }
+    let info = conkbd::info(s, h).unwrap_or(Info { mask: mask::ECHO_ON | mask::ASCII, turnaround: 0x0d, interim: 0 });
     let mut out: Vec<u8> = Vec::new();
-    if mask & BINARY != 0 {
+    if info.mask & mask::BINARY != 0 {
         while out.len() < cb as usize {
-            let Some(k) = kbd::get_key(!nowait) else { break };
+            let Some(k) = kbd::get_key_from(s, wait == 0) else { break };
             out.push(k.ch);
         }
-    } else {
-        let echo = mask & ECHO_OFF == 0;
-        loop {
-            let Some(k) = kbd::get_key(true) else {
-                return err::INTERRUPT;
-            };
-            match k.ch {
-                ch if ch as u16 == turnaround => break,
-                8 => {
-                    if out.pop().is_some() && echo {
-                        crate::console::write(b"\x08 \x08");
-                    }
-                }
-                0 | 0xe0 => {}
-                ch => {
-                    if out.len() + 1 < cb as usize {
-                        out.push(ch);
-                        if echo {
-                            crate::console::write(&[ch]);
-                        }
-                    }
-                }
-            }
+        if out.is_empty() && wait == 0 && c.thread.interrupted() {
+            return err::INTERRUPT;
         }
-        if echo {
-            crate::console::write(b"\r");
-        }
+        c.write(p, &out);
+        c.write_u16(pin + 2, out.len() as u16);
+        return 0;
     }
+    let echo = info.mask & mask::ECHO_OFF == 0;
+    let turnaround = info.turnaround as u8;
+    let Some(mut line) = conkbd::read_line(s, cb as usize - 1, echo, turnaround) else { return err::INTERRUPT };
+    if echo {
+        crate::console::write(b"\r");
+    }
+    let n = line.len();
     // The turnaround character follows the text but is not counted.
-    let n = out.len();
-    if mask & BINARY == 0 && n < cb as usize {
-        out.push(turnaround as u8);
+    if n < cb as usize {
+        line.push(turnaround);
     }
-    c.write(p, &out);
+    c.write(p, &line);
     c.write_u16(pin + 2, n as u16);
     0
 }
 
-pub fn kbd_flush_buffer(_c: &mut Ctx) -> u32 {
+pub fn kbd_flush_buffer(c: &mut Ctx) -> u32 {
+    if let Err(e) = conkbd::info(sid(), c.arg(0) as u16) {
+        return e;
+    }
     kbd::flush();
     0
 }
 
+/// KbdGetStatus(KBDINFO {cb, fsMask, chTurnAround, fsInterim, fsState}).
 pub fn kbd_get_status(c: &mut Ctx) -> u32 {
-    let p = c.ptr(0);
-    let s = STATUS.lock();
+    let (p, h) = (c.ptr(0), c.arg(1) as u16);
+    let Some(cb) = c.read_u16(p) else { return err::INVALID_ADDRESS };
+    if cb < 10 {
+        return ERROR_KBD_INVALID_LENGTH;
+    }
+    let i = match conkbd::info(sid(), h) {
+        Ok(i) => i,
+        Err(e) => return e,
+    };
     let mut b = Vec::new();
-    for w in [10u16, s.mask, s.turnaround, s.interim, kbd::shift_state()] {
+    for w in [10u16, i.mask, i.turnaround, i.interim, kbd::shift_state()] {
         b.extend_from_slice(&w.to_le_bytes());
     }
-    drop(s);
     if c.write(p, &b) { 0 } else { err::INVALID_ADDRESS }
 }
 
+/// KbdSetStatus(KBDINFO): fsMask selects what changes.
 pub fn kbd_set_status(c: &mut Ctx) -> u32 {
-    let Some(raw) = c.read_vec(c.ptr(0), 10) else { return err::INVALID_ADDRESS };
+    let (p, h) = (c.ptr(0), c.arg(1) as u16);
+    let Some(raw) = c.read_vec(p, 10) else { return err::INVALID_ADDRESS };
     let w = |i: usize| u16::from_le_bytes([raw[i * 2], raw[i * 2 + 1]]);
-    let mask = w(1);
-    let mut s = STATUS.lock();
-    if mask & (ECHO_ON | ECHO_OFF) != 0 {
-        s.mask = (s.mask & !(ECHO_ON | ECHO_OFF)) | (mask & (ECHO_ON | ECHO_OFF));
+    if w(0) < 10 {
+        return ERROR_KBD_INVALID_LENGTH;
     }
-    if mask & (BINARY | ASCII) != 0 {
-        s.mask = (s.mask & !(BINARY | ASCII)) | (mask & (BINARY | ASCII));
+    let m = w(1);
+    if m & mask::ECHO_ON != 0 && m & mask::ECHO_OFF != 0 {
+        return ERROR_KBD_INVALID_ECHO_MASK;
     }
-    if mask & 0x0040 != 0 {
-        s.turnaround = w(2);
+    if m & mask::BINARY != 0 && m & mask::ASCII != 0 {
+        return ERROR_KBD_INVALID_INPUT_MASK;
     }
-    if mask & 0x0020 != 0 {
-        s.interim = w(3);
+    if m & 0xfe00 != 0 {
+        return err::INVALID_PARAMETER;
     }
-    let _ = SHIFT_STATE;
+    let s = sid();
+    let mut i = match conkbd::info(s, h) {
+        Ok(i) => i,
+        Err(e) => return e,
+    };
+    let echo = mask::ECHO_ON | mask::ECHO_OFF;
+    let input = mask::BINARY | mask::ASCII;
+    if m & echo != 0 {
+        i.mask = (i.mask & !echo) | (m & echo);
+    }
+    if m & input != 0 {
+        i.mask = (i.mask & !input) | (m & input);
+        i.mask = (i.mask & !mask::SHIFT_REPORT) | (m & mask::SHIFT_REPORT);
+    } else if m & mask::SHIFT_REPORT != 0 {
+        i.mask |= mask::SHIFT_REPORT;
+    }
+    if i.mask & mask::BINARY != 0 && m & mask::ECHO_ON != 0 {
+        return ERROR_KBD_INVALID_ECHO_MASK;
+    }
+    if m & mask::MODIFY_TURNAROUND != 0 {
+        i.turnaround = if m & mask::TWO_BYTE_TURNAROUND != 0 { w(2) } else { w(2) & 0xff };
+    }
+    if m & mask::MODIFY_INTERIM != 0 {
+        i.interim = w(3);
+    }
+    if m & mask::MODIFY_STATE != 0 {
+        conkbd::set_shift(w(4));
+    }
+    match conkbd::set_info(s, h, i) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
+}
+
+/// KbdGetCp(ulReserved, pidCP, hkbd).
+pub fn kbd_get_cp(c: &mut Ctx) -> u32 {
+    let mut cp = conkbd::codepage(sid());
+    if cp == 0 {
+        cp = crate::screen::with(|s| s.codepage().number()).unwrap_or(850);
+    }
+    c.write_u16(c.ptr(1), cp);
     0
 }
 
-pub fn kbd_get_cp(c: &mut Ctx) -> u32 {
-    c.write_u16(c.ptr(1), 850);
+/// KbdSetCp(usReserved, idCP, hkbd): 0 selects the default.
+pub fn kbd_set_cp(c: &mut Ctx) -> u32 {
+    let cp = c.arg(1) as u16;
+    if cp != 0 && crate::codepage::CodePage::from_number(cp).is_none() {
+        return ERROR_KBD_INVALID_CODEPAGE;
+    }
+    conkbd::set_codepage(sid(), cp);
     0
 }
 
 pub fn kbd_open(c: &mut Ctx) -> u32 {
-    c.write_u16(c.ptr(0), 1);
+    let h = conkbd::open(sid(), c.process.pid);
+    c.write_u16(c.ptr(0), h);
+    0
+}
+
+pub fn kbd_close(c: &mut Ctx) -> u32 {
+    match conkbd::close(sid(), c.arg(0) as u16) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
+}
+
+/// KbdGetFocus(fWait, hkbd).
+pub fn kbd_get_focus(c: &mut Ctx) -> u32 {
+    let (wait, h) = (c.arg(0), c.arg(1) as u16);
+    if wait > 1 {
+        return ERROR_KBD_INVALID_IOWAIT;
+    }
+    match conkbd::get_focus(sid(), h, wait == 0) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
+}
+
+pub fn kbd_free_focus(c: &mut Ctx) -> u32 {
+    match conkbd::free_focus(sid(), c.arg(0) as u16) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
+}
+
+/// KbdXlate(KBDTRANS, hkbd): the character for chScan in the shift state
+/// fsState (fsDD 0x80 = E0-prefixed key); fsXlate 1 = complete.
+pub fn kbd_xlate(c: &mut Ctx) -> u32 {
+    let p = c.ptr(0);
+    let Some(raw) = c.read_vec(p, 18) else { return err::INVALID_ADDRESS };
+    let scan = raw[1];
+    let state = u16::from_le_bytes([raw[4], raw[5]]);
+    let dd = u16::from_le_bytes([raw[10], raw[11]]);
+    let k = kbd::xlate(scan, state, dd & 0x80 != 0);
+    let (ch, status) = match k {
+        Some(k) => (k.ch, k.status),
+        None => (0, 0x01),
+    };
+    c.write_u8(p, ch);
+    c.write_u8(p + 2, status);
+    c.write_u16(p + 12, 1);
+    0
+}
+
+/// KbdSetCustXt(pTable, hkbd): a custom translation table (accepted; the
+/// layout tables are the keyboard layer's).
+pub fn kbd_set_cust_xt(c: &mut Ctx) -> u32 {
+    if c.ptr(0) == 0 {
+        return err::INVALID_ADDRESS;
+    }
     0
 }
 

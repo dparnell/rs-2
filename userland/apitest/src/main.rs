@@ -16,6 +16,8 @@ mod eas;
 
 os2::entry!(main);
 
+mod console;
+
 static FAILS: AtomicU32 = AtomicU32::new(0);
 
 fn check(name: &str, ok: bool) {
@@ -29,6 +31,10 @@ fn check(name: &str, ok: bool) {
 
 fn main(s: &Startup) -> u32 {
     println!("rs2 apitest, args: {:?}", core::str::from_utf8(s.args()).unwrap_or("?"));
+    if core::str::from_utf8(s.args()).is_ok_and(|a| a.trim() == "keys") {
+        console::keys();
+        return 0;
+    }
     info_blocks();
     memory();
     suballoc();
@@ -45,6 +51,7 @@ fn main(s: &Startup) -> u32 {
     sessions();
     messages();
     nls();
+    console::run();
     exit_list();
     let f = FAILS.load(Ordering::Relaxed);
     println!("apitest done: {f} failure(s)");

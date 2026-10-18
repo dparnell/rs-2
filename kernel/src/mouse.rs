@@ -131,15 +131,30 @@ pub fn motion(buttons: u8, dx: i32, dy: i32) {
         fs = ev::MOTION;
     }
     if fs & m.event_mask != 0 || (fs == 0 && prev != 0) {
-        if m.queue.len() >= QUEUE_MAX {
-            m.queue.pop_front();
+        let e = Event { fs: fs & m.event_mask, time, row: m.row as i16, col: m.col as i16 };
+        // Mouse monitors see the event first.
+        if !crate::monitor::input(crate::monitor::Dev::Mouse, sid, &crate::monitor::mouse_packet(&e)) {
+            if m.queue.len() >= QUEUE_MAX {
+                m.queue.pop_front();
+            }
+            m.queue.push_back(e);
         }
-        m.queue.push_back(Event { fs: fs & m.event_mask, time, row: m.row as i16, col: m.col as i16 });
     }
     if moved && m.shown {
         redraw(sid, m);
     }
     drop(s);
+    WAITERS.wake_all();
+}
+
+/// An event that went through the mouse monitors of session `sid`.
+pub fn monitor_deliver(sid: u32, e: Event) {
+    with(sid, |m| {
+        if m.queue.len() >= QUEUE_MAX {
+            m.queue.pop_front();
+        }
+        m.queue.push_back(e);
+    });
     WAITERS.wake_all();
 }
 

@@ -40,3 +40,34 @@ pub extern "C" fn TestInitCount() -> u32 {
 pub extern "C" fn TestGreeting() -> *const u8 {
     b"hello from TESTDLL\0".as_ptr()
 }
+
+// A replacement VIO subsystem entry (VioRegister) in 16-bit code, reached
+// through the code object's 16:16 alias. VioGetCurPos (index 0) reports
+// row 7, column 9; everything else goes to the base VIO (AX = -1). The
+// caller's stack may be the flat one, so it is addressed through EBP.
+core::arch::global_asm!(
+    ".section .text.vioreplace,\"ax\"",
+    ".p2align 8",
+    ".globl VIOREPLACE",
+    "VIOREPLACE:",
+    ".code16",
+    "    push ebp",
+    "    mov ebp, esp",
+    // [ebp+4] router return, [ebp+8] index, [ebp+10] caller DS,
+    // [ebp+12] caller return, [ebp+16] hvio, [ebp+18] pusColumn,
+    // [ebp+22] pusRow.
+    "    cmp word ptr [ebp + 8], 0",
+    "    jne 2f",
+    "    les bx, [ebp + 22]",
+    "    mov word ptr es:[bx], 7",
+    "    les bx, [ebp + 18]",
+    "    mov word ptr es:[bx], 9",
+    "    xor ax, ax",
+    "    pop ebp",
+    "    .byte 0xcb", // retf (16-bit)
+    "2:",
+    "    mov ax, 0xffff",
+    "    pop ebp",
+    "    .byte 0xcb", // retf (16-bit)
+    ".code32",
+);

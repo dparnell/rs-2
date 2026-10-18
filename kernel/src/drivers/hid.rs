@@ -17,8 +17,14 @@ use crate::sync::SpinLock;
 use crate::task::WaitQueue;
 
 /// Typematic delay and rate (30 characters per second).
-const REPEAT_DELAY_MS: u64 = 500;
-const REPEAT_MS: u64 = 33;
+static REPEAT_DELAY: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(500);
+static REPEAT_INTERVAL: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(33);
+
+/// Software typematic of USB keyboards (KBD_SETTYPAMATICRATE).
+pub fn set_typematic(delay_ms: u64, interval_ms: u64) {
+    REPEAT_DELAY.store(delay_ms, core::sync::atomic::Ordering::Relaxed);
+    REPEAT_INTERVAL.store(interval_ms.max(1), core::sync::atomic::Ordering::Relaxed);
+}
 /// Mouse events kept when nobody reads them.
 const MOUSE_QUEUE: usize = 64;
 
@@ -248,7 +254,7 @@ fn keyboard_report(k: &mut Keyboard, data: &[u8], now: u64, codes: &mut Codes) {
     }
     for &u in keys.iter().filter(|&&u| u != 0 && !k.keys.contains(&u)) {
         codes.usage(u, false, ctrl);
-        k.repeat = repeats(u).then_some((u, now + REPEAT_DELAY_MS));
+        k.repeat = repeats(u).then_some((u, now + REPEAT_DELAY.load(core::sync::atomic::Ordering::Relaxed)));
     }
     for (bit, &sc) in MODIFIERS.iter().enumerate() {
         if k.mods & !mods & (1 << bit) != 0 {
@@ -293,7 +299,7 @@ pub fn tick() {
             if let Some((u, at)) = k.repeat {
                 if now >= at {
                     codes.usage(u, false, k.mods & 0x11 != 0);
-                    k.repeat = Some((u, now + REPEAT_MS));
+                    k.repeat = Some((u, now + REPEAT_INTERVAL.load(core::sync::atomic::Ordering::Relaxed)));
                 }
             }
         }

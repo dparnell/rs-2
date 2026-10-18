@@ -59,6 +59,118 @@ pub fn foreground() -> u32 {
     FOREGROUND.load(Ordering::Relaxed)
 }
 
+// ---- Pop-ups (VioPopUp, hard errors) ----
+
+/// Screen and keyboard queue id of the pop-up.
+pub const POPUP_SID: u32 = 0xffff;
+
+struct Popup {
+    /// Process that owns it (its VIO and KBD calls go to the pop-up).
+    owner: u32,
+}
+
+static POPUP: SpinLock<Option<Popup>> = SpinLock::new(None);
+static POPUP_WAIT: crate::task::WaitQueue = crate::task::WaitQueue::new();
+
+fn current_pid() -> u32 {
+    crate::task::sched::current_opt().and_then(|t| t.process()).map_or(0, |p| p.pid)
+}
+
+/// The session whose screen and keyboard the calling thread uses: its own,
+/// or the pop-up while its process owns one.
+pub fn io_session() -> u32 {
+    let pid = current_pid();
+    if pid != 0 && POPUP.lock().as_ref().is_some_and(|p| p.owner == pid) {
+        return POPUP_SID;
+    }
+    current()
+}
+
+/// The session that receives keystrokes: the pop-up while one is shown,
+/// else the foreground session.
+pub fn input_session() -> u32 {
+    if POPUP.lock().is_some() { POPUP_SID } else { foreground() }
+}
+
+pub fn popup_active() -> bool {
+    POPUP.lock().is_some()
+}
+
+/// Whether process `pid` owns the pop-up.
+pub fn popup_owner(pid: u32) -> bool {
+    POPUP.lock().as_ref().is_some_and(|p| p.owner == pid)
+}
+
+/// Show a pop-up screen for the calling process over whatever is in the
+/// foreground. Opaque pop-ups are a cleared 80x25 screen; transparent ones
+/// start as a copy of the screen. Fails with ERROR_VIO_EXISTING_POPUP if
+/// another pop-up is up and `wait` is false.
+pub fn popup_begin(wait: bool, transparent: bool) -> Result<(), u32> {
+    let pid = current_pid();
+    loop {
+        {
+            let mut g = POPUP.lock();
+            match g.as_ref() {
+                None => {
+                    *g = Some(Popup { owner: pid });
+                    break;
+                }
+                Some(p) if p.owner == pid => return Err(406),
+                Some(_) if !wait => return Err(406),
+                Some(_) => {}
+            }
+        }
+        if !POPUP_WAIT.wait_until(None, || POPUP.lock().is_none()) {
+            return Err(crate::api::err::INTERRUPT);
+        }
+    }
+    close_list();
+    let fg = foreground();
+    crate::api::vio::notify_popup(fg, true);
+    crate::screen::create(POPUP_SID);
+    if transparent {
+        let mut g = crate::screen::SCREEN.lock();
+        let src: Option<*const crate::screen::Screen> = g.get(fg).map(|s| s as *const _);
+        if let (Some(src), Some(dst)) = (src, g.get(POPUP_SID)) {
+            // Distinct screens: the pop-up was just created.
+            dst.copy_from(unsafe { &*src });
+        }
+    }
+    crate::kbd::drop_queue(POPUP_SID);
+    crate::screen::show(POPUP_SID);
+    crate::screen::with_session(POPUP_SID, |s| {
+        let pos = (s.cur_row, s.cur_col);
+        s.set_cursor(Some(pos));
+    });
+    Ok(())
+}
+
+/// End the calling process's pop-up (ERROR_VIO_NO_POPUP if it has none).
+pub fn popup_end() -> Result<(), u32> {
+    end_popup_of(current_pid())
+}
+
+fn end_popup_of(pid: u32) -> Result<(), u32> {
+    {
+        let mut g = POPUP.lock();
+        if !g.as_ref().is_some_and(|p| p.owner == pid) {
+            return Err(405);
+        }
+        *g = None;
+    }
+    let fg = foreground();
+    crate::screen::show(fg);
+    if fg == pm_session() && fg != 0 {
+        crate::display::post_repaint();
+    }
+    crate::screen::destroy(POPUP_SID);
+    crate::kbd::drop_queue(POPUP_SID);
+    crate::console::drop_session(POPUP_SID);
+    crate::api::vio::notify_popup(fg, false);
+    POPUP_WAIT.wake_all();
+    Ok(())
+}
+
 /// Create a session with its own (hidden) screen and keyboard queue.
 pub fn create(title: String, parent_session: u32, parent_pid: Option<u32>, termq: Option<String>) -> u32 {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
@@ -114,8 +226,13 @@ pub fn select(sid: u32) -> bool {
         return false;
     }
     close_list();
-    FOREGROUND.store(sid, Ordering::Relaxed);
-    crate::screen::show(sid);
+    let old = FOREGROUND.swap(sid, Ordering::Relaxed);
+    if !popup_active() {
+        crate::screen::show(sid);
+    }
+    if old != sid {
+        crate::api::vio::notify_switch(old, sid);
+    }
     let leader = if sid == 1 { 0 } else { SESSIONS.lock().iter().find(|s| s.id == sid).map_or(0, |s| s.leader) };
     crate::infoseg::set_foreground(sid, leader);
     if sid == pm_session() {
@@ -127,6 +244,9 @@ pub fn select(sid: u32) -> bool {
 
 /// Alt+Esc: the next session in order.
 pub fn select_next() {
+    if popup_active() {
+        return;
+    }
     let ids: Vec<u32> = list().into_iter().map(|(i, _)| i).collect();
     let fg = foreground();
     let at = ids.iter().position(|&i| i == fg).unwrap_or(0);
@@ -135,6 +255,11 @@ pub fn select_next() {
 
 /// A process ended; if it led a session, the session ends.
 pub fn process_ended(pid: u32, code: u32) {
+    let _ = end_popup_of(pid);
+    crate::api::vio::process_ended(pid);
+    crate::api::subsys::process_ended(pid);
+    crate::api::harderr::process_ended(pid);
+    crate::monitor::process_ended(pid);
     // The PM session ends with its last process.
     let pm = pm_session();
     if pm != 0 && !crate::task::process::all().iter().any(|p| p.pid != pid && p.exit_info().is_none() && p.session.load(Ordering::Relaxed) == pm) {
@@ -169,6 +294,8 @@ pub fn process_ended(pid: u32, code: u32) {
     crate::kbd::drop_queue(s.id);
     crate::console::drop_session(s.id);
     crate::mouse::drop_session(s.id);
+    crate::conkbd::drop_session(s.id);
+    crate::api::vio::drop_session(s.id);
 }
 
 // ---- The window list (Ctrl+Esc) ----
@@ -189,6 +316,9 @@ const LIST_WIDTH: usize = 40;
 
 /// Ctrl+Esc: open the window list, or close it if open.
 pub fn toggle_list() {
+    if popup_active() {
+        return;
+    }
     if LIST.lock().is_some() {
         close_list();
         return;

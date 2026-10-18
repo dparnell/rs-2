@@ -110,6 +110,7 @@ pub fn timer_tick(_f: &mut TrapFrame) {
     sched::tick();
     crate::api::timer::tick();
     crate::drivers::xhci::tick();
+    crate::screen::tick(crate::irq::ticks());
     if crate::irq::ticks() % 250 == 0 {
         crate::infoseg::update();
     }

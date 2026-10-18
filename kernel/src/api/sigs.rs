@@ -257,6 +257,14 @@ const MOUCALLS: &[(u16, &str)] = &[
     (30, "pw"), // MouSetThreshold
 ];
 
+const MONCALLS: &[(u16, &str)] = &[
+    (1, "ppw"),   // DosMonWrite(pbOutBuf, pbDataBuf, cbData)
+    (2, "pwpp"),  // DosMonRead(pbInBuf, fWait, pbDataBuf, pcbData)
+    (3, "w"),     // DosMonClose(hmon)
+    (4, "pp"),    // DosMonOpen(pszDevName, phmon)
+    (5, "wppww"), // DosMonReg(hmon, pbInBuf, pbOutBuf, fPosition, index)
+];
+
 const MSG: &[(u16, &str)] = &[
     (7, "pwppp"),    // DosIQueryMessageCP
     (1, "wwp"),      // DosPutMessage
@@ -309,6 +317,7 @@ pub fn lookup(module: u8, ordinal: u16) -> Option<&'static [u8]> {
         5 => NLS,
         6 => SESMGR,
         7 => QUECALLS,
+        9 => MONCALLS,
         _ => return None,
     };
     table.iter().find(|e| e.0 == ordinal).map(|e| e.1.as_bytes())

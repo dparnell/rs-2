@@ -29,6 +29,7 @@ fn next_letter() -> Option<u8> {
 }
 
 fn try_mount_fat(dev: Arc<dyn BlockDev>, what: &str) -> bool {
+    let dev = crate::api::harderr::wrap(dev);
     match crate::fs::fatfs::FatFs::mount(dev) {
         Ok(fs) => {
             if let Some(d) = next_letter() {
@@ -46,6 +47,7 @@ fn try_mount_hpfs(dev: Arc<dyn BlockDev>, what: &str) -> bool {
     if !crate::fs::hpfsfs::probe(&dev) {
         return false;
     }
+    let dev = crate::api::harderr::wrap(dev);
     match crate::fs::hpfsfs::HpfsFs::mount(dev) {
         Ok(fs) => {
             if let Some(d) = next_letter() {
@@ -158,7 +160,7 @@ pub fn init() {
             .or_else(|| find(&same))
             .or_else(|| find(&holds_kernel));
         match found {
-            Some(i) => match crate::fs::fatfs::FatFs::mount(Arc::new(parts.remove(i))) {
+            Some(i) => match crate::fs::fatfs::FatFs::mount(crate::api::harderr::wrap(Arc::new(parts.remove(i)))) {
                 Ok(fs) => crate::fs::mount(2, fs),
                 Err(e) => crate::println!("boot partition: cannot mount ({e})"),
             },
@@ -193,7 +195,8 @@ pub fn init() {
         if cd.sector_count() == 0 {
             continue;
         }
-        match crate::fs::iso9660::Iso9660::mount(cd.clone()) {
+        // Hard errors (medium removed) go through the pop-up.
+        match crate::fs::iso9660::Iso9660::mount(crate::api::harderr::wrap(cd.clone())) {
             Ok(fs) => {
                 if let Some(d) = next_letter() {
                     crate::fs::mount(d, fs);

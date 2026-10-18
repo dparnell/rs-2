@@ -197,6 +197,10 @@ unsafe extern "C" {
     ) -> APIRET;
     #[link_name = "DOSCALLS.257"]
     pub fn DosClose(hf: u32) -> APIRET;
+    /// DosError(FERR_*): bit 0 enables hard-error pop-ups, bit 1 disables
+    /// exception pop-ups.
+    #[link_name = "DOSCALLS.212"]
+    pub fn DosError(fl: u32) -> APIRET;
     #[link_name = "DOSCALLS.256"]
     pub fn DosSetFilePtr(hf: u32, off: i32, method: u32, actual: *mut u32) -> APIRET;
     #[link_name = "DOSCALLS.259"]

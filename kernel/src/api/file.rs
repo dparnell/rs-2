@@ -67,7 +67,12 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
             crate::console::write(&data);
             (0, len)
         }
-        Handle::Nul | Handle::Clock | Handle::Kbd | Handle::DosDev | Handle::Drive(_) => (0, len),
+        Handle::Clock => match crate::chardev::clock_write(&data) {
+            Ok(()) => (0, len),
+            Err(e) => (e, 0),
+        },
+        Handle::Char(d) => (0, crate::chardev::write(d, &data) as u32),
+        Handle::Nul | Handle::Kbd | Handle::DosDev | Handle::Drive(_) => (0, len),
         Handle::PhysDisk(_) => (err::ACCESS_DENIED, 0),
         Handle::File(f) => {
             if f.access() == mode::READONLY {
@@ -101,9 +106,11 @@ pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
     let mut status = 0;
     let data: Vec<u8> = match h {
         Handle::Con | Handle::Kbd => {
-            crate::kbd::read_cooked(len as usize)
+            crate::conkbd::read_cooked(len as usize)
         }
-        Handle::Nul | Handle::Screen | Handle::Clock | Handle::DosDev | Handle::PhysDisk(_) | Handle::Drive(_) => Vec::new(),
+        Handle::Clock => crate::chardev::clock_read(),
+        Handle::Char(d) => crate::chardev::read(d, len as usize),
+        Handle::Nul | Handle::Screen | Handle::DosDev | Handle::PhysDisk(_) | Handle::Drive(_) => Vec::new(),
         Handle::File(f) => {
             if f.access() == mode::WRITEONLY {
                 return (err::ACCESS_DENIED, 0);
@@ -319,7 +326,7 @@ fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32, eas
         return Ok((add(c, Handle::NPipe(end))?, 1));
     }
     if let Some(d) = fs::device_name(name) {
-        let h = add(c, Handle::device(d))?;
+        let h = add(c, Handle::open_device(d)?)?;
         return Ok((h, 1));
     }
     if omode & mode::DASD != 0 {
@@ -648,6 +655,7 @@ pub fn htype(c: &Ctx, hf: u32) -> Option<(u32, u32)> {
         Handle::PhysDisk(_) => (1, 0x8000),
         Handle::Drive(_) => (0, 0),
         Handle::DosDev => (1, 0x8080),
+        Handle::Char(_) => (1, 0x8080),
     })
 }
 

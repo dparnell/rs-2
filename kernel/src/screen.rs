@@ -2,49 +2,127 @@
 //!
 //! Modern machines boot without a VGA text mode, so the screen is a grid of
 //! (character, attribute) cells, exactly like VGA text memory, rendered into
-//! the linear framebuffer with an 8x16 font. Kernel messages and VIO
-//! sessions both draw into it.
+//! the linear framebuffer with an 8x16, 8x14 or 8x8 font (the largest that
+//! fits the number of rows: at 1024x768, 25 and 43 rows use 8x16, 50 rows
+//! 8x14 and 60 rows 8x8). Kernel messages and VIO sessions both draw into
+//! it. The colours go through VGA-style palette registers and a DAC, and
+//! attribute bit 7 means blinking or a bright background, as on a VGA.
 //!
 //! Every session has its own `Screen`; only the foreground one is
 //! `visible` and draws into the framebuffer, the others just keep their
 //! cells until they are switched to.
+//!
+//! A session can map a "physical" text buffer (VioGetPhysBuf): a shared
+//! object holding the cells in VGA layout that programs write directly;
+//! [`tick`] renders what changed.
 
 use bootinfo::{Framebuffer, PHYS_MAP_BASE};
 
 use alloc::boxed::Box;
+use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use crate::codepage::CodePage;
 use crate::sync::SpinLock;
+use crate::vm::SharedMem;
 
 pub const CELL_W: usize = 8;
+/// Tallest font.
 pub const CELL_H: usize = 16;
 pub const MAX_COLS: usize = 132;
-pub const MAX_ROWS: usize = 60;
+pub const MAX_ROWS: usize = 100;
 
-/// The standard VGA palette (RGB).
-const PALETTE: [u32; 16] = [
-    0x000000, 0x0000aa, 0x00aa00, 0x00aaaa, 0xaa0000, 0xaa00aa, 0xaa5500, 0xaaaaaa,
-    0x555555, 0x5555ff, 0x55ff55, 0x55ffff, 0xff5555, 0xff55ff, 0xffff55, 0xffffff,
-];
+/// Font heights, tallest first.
+pub const FONT_HEIGHTS: [usize; 3] = [16, 14, 8];
 
-static FONT: &[u8] = include_bytes!("../assets/unscii-16.bin");
+/// Default VGA palette registers: attribute colour -> DAC entry.
+const DEFAULT_PALREGS: [u8; 16] = [0, 1, 2, 3, 4, 5, 0x14, 7, 0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f];
 
-fn font_glyph(c: char) -> Option<&'static [u8]> {
-    let n = FONT.len() / 20;
+/// Default DAC entry `i` (6 bits per gun): the EGA 64-colour palette
+/// (bits 0-2 = blue, green, red at 2/3, bits 3-5 at 1/3 intensity).
+fn default_dac(i: usize) -> (u8, u8, u8) {
+    let gun = |hi: usize, lo: usize| ((i >> hi & 1) * 0x2a + (i >> lo & 1) * 0x15) as u8;
+    if i < 64 { (gun(2, 5), gun(1, 4), gun(0, 3)) } else { (0, 0, 0) }
+}
+
+static FONT16: &[u8] = include_bytes!("../assets/unscii-16.bin");
+static FONT14: &[u8] = include_bytes!("../assets/unscii-14.bin");
+static FONT8: &[u8] = include_bytes!("../assets/unscii-8.bin");
+
+/// The glyph for `c` in the built-in font of height `h`.
+fn font_glyph(c: char, h: usize) -> Option<&'static [u8]> {
+    let font = match h {
+        8 => FONT8,
+        14 => FONT14,
+        _ => FONT16,
+    };
+    let h = if h == 8 || h == 14 { h } else { 16 };
+    let rec = 4 + h;
+    let n = font.len() / rec;
     let key = c as u32;
     let (mut lo, mut hi) = (0, n);
     while lo < hi {
         let mid = (lo + hi) / 2;
-        let rec = &FONT[mid * 20..mid * 20 + 20];
-        let cp = u32::from_le_bytes([rec[0], rec[1], rec[2], rec[3]]);
+        let r = &font[mid * rec..mid * rec + rec];
+        let cp = u32::from_le_bytes([r[0], r[1], r[2], r[3]]);
         match cp.cmp(&key) {
-            core::cmp::Ordering::Equal => return Some(&rec[4..]),
+            core::cmp::Ordering::Equal => return Some(&r[4..]),
             core::cmp::Ordering::Less => lo = mid + 1,
             core::cmp::Ordering::Greater => hi = mid,
         }
     }
     None
+}
+
+/// The 256-character font of a code page at height `h` (`h` bytes per
+/// character), as VioGetFont returns it.
+pub fn rom_font(cp: CodePage, h: usize) -> Vec<u8> {
+    let mut v = Vec::with_capacity(256 * h);
+    for b in 0..256 {
+        let g = font_glyph(cp.glyph(b as u8), h).or_else(|| font_glyph('?', h)).unwrap();
+        v.extend_from_slice(&g[..h]);
+    }
+    v
+}
+
+/// The text buffer of VioGetPhysBuf: cells in VGA layout (row-major,
+/// character then attribute) in a shared object mapped into programs.
+pub struct PhysBuf {
+    pub obj: Arc<SharedMem>,
+    pages: Vec<*mut u8>,
+}
+
+impl PhysBuf {
+    pub const SIZE: u32 = 0x8000;
+
+    fn new() -> Option<PhysBuf> {
+        let base = crate::vm::reserve_shared(Self::SIZE, None)?;
+        let obj = SharedMem::new(base, Self::SIZE, crate::vm::pag::READ | crate::vm::pag::WRITE, None);
+        let mut pages = Vec::new();
+        for i in 0..(Self::SIZE / crate::vm::PAGE) as usize {
+            let f = obj.frame(i)?;
+            pages.push(crate::mm::phys::phys_to_virt(f));
+        }
+        for p in obj.pages.lock().iter_mut() {
+            *p = crate::vm::PageState::Committed;
+        }
+        Some(PhysBuf { obj, pages })
+    }
+
+    fn at(&self, off: usize) -> *mut u16 {
+        let page = crate::vm::PAGE as usize;
+        unsafe { self.pages[off / page].add(off % page) as *mut u16 }
+    }
+
+    fn get(&self, i: usize) -> u16 {
+        unsafe { self.at(i * 2).read_volatile() }
+    }
+
+    fn set(&self, i: usize, v: u16) {
+        if i * 2 + 2 <= Self::SIZE as usize {
+            unsafe { self.at(i * 2).write_volatile(v) }
+        }
+    }
 }
 
 pub struct Screen {
@@ -57,13 +135,31 @@ pub struct Screen {
     y0: usize,
     cells: [[u16; MAX_COLS]; MAX_ROWS],
     glyphs: [[u8; CELL_H]; 256],
+    /// Height of a character cell (the font in use).
+    pub cell_h: usize,
+    /// A font loaded with VioSetFont is in use (until the next mode set).
+    pub user_font: bool,
     codepage: CodePage,
+    /// Colours of the 16 attribute values in framebuffer format.
     palette: [u32; 16],
+    /// VGA palette registers and DAC (6 bits per gun).
+    pub palregs: [u8; 16],
+    pub dac: [(u8, u8, u8); 256],
+    /// Border colour (attribute colour index).
+    pub overscan: u8,
+    /// Attribute bit 7 blinks the character (true) or brightens the
+    /// background (false).
+    pub blink: bool,
+    blink_off: bool,
+    /// Underline scan line (VIOSETULINELOC; monochrome only).
+    pub underline: u16,
     /// Text cursor for kernel console output.
     pub cur_row: usize,
     pub cur_col: usize,
     /// Hardware-style cursor shown for VIO.
     cursor: Option<(usize, usize)>,
+    /// VIOCURSORINFO: yStart, cEnd, cx, attr (0xFFFF = hidden).
+    pub cursor_type: [u16; 4],
     /// Attribute used by the kernel console.
     pub attr: u8,
     /// Shown on the framebuffer (the foreground session).
@@ -71,6 +167,8 @@ pub struct Screen {
     /// The session draws graphics itself (Presentation Manager): its text
     /// cells are never rendered.
     pub graphics: bool,
+    /// Mapped VioGetPhysBuf buffer.
+    pub phys: Option<PhysBuf>,
 }
 
 unsafe impl Send for Screen {}
@@ -119,23 +217,33 @@ impl Screen {
             core::ptr::addr_of_mut!((*s).rows).write(25);
             core::ptr::addr_of_mut!((*s).x0).write(0);
             core::ptr::addr_of_mut!((*s).y0).write(0);
+            core::ptr::addr_of_mut!((*s).cell_h).write(CELL_H);
+            core::ptr::addr_of_mut!((*s).user_font).write(false);
             core::ptr::addr_of_mut!((*s).codepage).write(cp);
             core::ptr::addr_of_mut!((*s).palette).write([0; 16]);
+            core::ptr::addr_of_mut!((*s).palregs).write(DEFAULT_PALREGS);
+            core::ptr::addr_of_mut!((*s).dac).write([(0, 0, 0); 256]);
+            core::ptr::addr_of_mut!((*s).overscan).write(0);
+            core::ptr::addr_of_mut!((*s).blink).write(true);
+            core::ptr::addr_of_mut!((*s).blink_off).write(false);
+            core::ptr::addr_of_mut!((*s).underline).write(31);
             core::ptr::addr_of_mut!((*s).cur_row).write(0);
             core::ptr::addr_of_mut!((*s).cur_col).write(0);
             core::ptr::addr_of_mut!((*s).cursor).write(None);
+            core::ptr::addr_of_mut!((*s).cursor_type).write([14, 15, 1, 0]);
             core::ptr::addr_of_mut!((*s).attr).write(0x07);
             core::ptr::addr_of_mut!((*s).visible).write(false);
             core::ptr::addr_of_mut!((*s).graphics).write(false);
+            core::ptr::addr_of_mut!((*s).phys).write(None);
         }
         let s = unsafe { &mut *s };
         for row in s.cells.iter_mut() {
             row.fill(0x0720);
         }
-        for (i, &rgb) in PALETTE.iter().enumerate() {
-            let (r, g, b) = (rgb >> 16, (rgb >> 8) & 0xff, rgb & 0xff);
-            s.palette[i] = if fb.format == 0 { r | g << 8 | b << 16 } else { rgb };
+        for i in 0..256 {
+            s.dac[i] = default_dac(i);
         }
+        s.update_palette();
         s.set_codepage(cp);
         s.set_mode(80, 25);
         s
@@ -147,33 +255,127 @@ impl Screen {
 
     pub fn set_codepage(&mut self, cp: CodePage) {
         self.codepage = cp;
-        for b in 0..256 {
-            let c = cp.glyph(b as u8);
-            let g = font_glyph(c).or_else(|| font_glyph('?')).unwrap();
-            self.glyphs[b].copy_from_slice(g);
-        }
+        self.user_font = false;
+        self.load_font();
         self.redraw();
     }
 
-    /// Change the text geometry, clamped to what fits the framebuffer.
+    /// Glyphs of the code page from the built-in font of the cell height.
+    fn load_font(&mut self) {
+        let h = self.cell_h;
+        for b in 0..256 {
+            let c = self.codepage.glyph(b as u8);
+            let g = font_glyph(c, h).or_else(|| font_glyph('?', h)).unwrap();
+            self.glyphs[b] = [0; CELL_H];
+            self.glyphs[b][..h].copy_from_slice(&g[..h]);
+        }
+    }
+
+    /// The font in use, `cell_h` bytes per character.
+    pub fn font(&self) -> Vec<u8> {
+        let mut v = Vec::with_capacity(256 * self.cell_h);
+        for g in self.glyphs.iter() {
+            v.extend_from_slice(&g[..self.cell_h]);
+        }
+        v
+    }
+
+    /// Load a user font (VioSetFont): 256 characters of `h` rows. Fails if
+    /// the current number of rows does not fit with that height.
+    pub fn set_font(&mut self, h: usize, data: &[u8]) -> bool {
+        if !(1..=CELL_H).contains(&h) || data.len() < 256 * h || self.rows * h > self.fb.height as usize {
+            return false;
+        }
+        for b in 0..256 {
+            self.glyphs[b] = [0; CELL_H];
+            self.glyphs[b][..h].copy_from_slice(&data[b * h..b * h + h]);
+        }
+        self.user_font = true;
+        if h != self.cell_h {
+            self.cell_h = h;
+            self.layout();
+        } else {
+            self.redraw();
+        }
+        true
+    }
+
+    /// Recompute the 16 attribute colours from the palette registers and
+    /// the DAC.
+    pub fn update_palette(&mut self) {
+        for i in 0..16 {
+            let (r, g, b) = self.dac[(self.palregs[i] & 0x3f) as usize];
+            let scale = |v: u8| ((v as u32 & 0x3f) * 255 + 31) / 63;
+            let (r, g, b) = (scale(r), scale(g), scale(b));
+            self.palette[i] = if self.fb.format == 0 { r | g << 8 | b << 16 } else { r << 16 | g << 8 | b };
+        }
+    }
+
+    /// The largest built-in font height for `rows` rows, if any fits.
+    pub fn font_for(&self, rows: usize) -> Option<usize> {
+        FONT_HEIGHTS.into_iter().find(|&h| rows * h <= self.fb.height as usize)
+    }
+
+    /// Whether a `cols` x `rows` text mode fits the framebuffer.
+    pub fn mode_fits(&self, cols: usize, rows: usize) -> bool {
+        cols >= 1 && rows >= 1 && cols <= MAX_COLS && rows <= MAX_ROWS && cols * CELL_W <= self.fb.width as usize && self.font_for(rows).is_some()
+    }
+
+    /// Change the text geometry, clamped to what fits the framebuffer; the
+    /// font is the largest that fits the rows. Resets the cursor shape.
     pub fn set_mode(&mut self, cols: usize, rows: usize) {
         let max_c = (self.fb.width as usize / CELL_W).min(MAX_COLS);
-        let max_r = (self.fb.height as usize / CELL_H).min(MAX_ROWS);
+        let max_r = (self.fb.height as usize / FONT_HEIGHTS[2]).min(MAX_ROWS);
         self.cols = cols.min(max_c).max(1);
         self.rows = rows.min(max_r).max(1);
-        self.x0 = (self.fb.width as usize - self.cols * CELL_W) / 2;
-        self.y0 = (self.fb.height as usize - self.rows * CELL_H) / 2;
+        let h = self.font_for(self.rows).unwrap_or(FONT_HEIGHTS[2]);
+        let reload = h != self.cell_h || self.user_font;
+        self.cell_h = h;
+        self.user_font = false;
+        if reload {
+            self.load_font();
+        }
+        self.cursor_type = [(h - 2) as u16, (h - 1) as u16, 1, self.cursor_type[3]];
+        self.cur_row = self.cur_row.min(self.rows - 1);
+        self.cur_col = 0;
+        self.sync_phys();
+        self.layout();
+    }
+
+    /// Centre the text area and redraw everything.
+    fn layout(&mut self) {
+        self.x0 = (self.fb.width as usize).saturating_sub(self.cols * CELL_W) / 2;
+        self.y0 = (self.fb.height as usize).saturating_sub(self.rows * self.cell_h) / 2;
         if !self.visible || self.graphics {
             return;
         }
-        // Clear the whole framebuffer so no stale border remains.
-        let total = self.fb.stride as usize * self.fb.height as usize;
-        for i in 0..total {
-            unsafe { self.pixels.add(i).write_volatile(0) };
-        }
-        self.cur_row = self.cur_row.min(self.rows - 1);
-        self.cur_col = 0;
+        self.clear_border();
         self.redraw();
+    }
+
+    /// Fill the framebuffer outside the text area with the border colour.
+    fn clear_border(&mut self) {
+        let c = self.palette[(self.overscan & 15) as usize];
+        let (w, h, stride) = (self.fb.width as usize, self.fb.height as usize, self.fb.stride as usize);
+        let (tx1, ty1) = (self.x0 + self.cols * CELL_W, self.y0 + self.rows * self.cell_h);
+        for y in 0..h {
+            let line = unsafe { self.pixels.add(y * stride) };
+            let inside = y >= self.y0 && y < ty1;
+            for x in 0..w {
+                if inside && x >= self.x0 && x < tx1 {
+                    continue;
+                }
+                unsafe { line.add(x).write_volatile(c) };
+            }
+        }
+    }
+
+    /// Set the border colour.
+    pub fn set_overscan(&mut self, c: u8) {
+        self.overscan = c & 15;
+        if self.visible && !self.graphics {
+            self.clear_border();
+        }
     }
 
     pub fn cell(&self, row: usize, col: usize) -> u16 {
@@ -186,6 +388,9 @@ impl Screen {
             return;
         }
         self.cells[row][col] = cell;
+        if let Some(p) = &self.phys {
+            p.set(row * self.cols + col, cell);
+        }
         self.draw(row, col);
     }
 
@@ -196,17 +401,27 @@ impl Screen {
         let cell = self.cells[row][col];
         let ch = (cell & 0xff) as usize;
         let attr = (cell >> 8) as usize;
-        let fg = self.palette[attr & 15];
-        let bg = self.palette[(attr >> 4) & 15];
-        let show_cursor = self.cursor == Some((row, col));
+        let mut fg = self.palette[attr & 15];
+        let bg = self.palette[(attr >> 4) & if self.blink { 7 } else { 15 }];
+        if self.blink && attr & 0x80 != 0 && self.blink_off {
+            fg = bg;
+        }
+        let h = self.cell_h;
+        let cursor = if self.cursor == Some((row, col)) && self.cursor_type[3] != 0xffff {
+            Some(self.cursor_lines())
+        } else {
+            None
+        };
         let stride = self.fb.stride as usize;
         let px = self.x0 + col * CELL_W;
-        let py = self.y0 + row * CELL_H;
+        let py = self.y0 + row * h;
         let glyph = &self.glyphs[ch];
-        for y in 0..CELL_H {
+        for y in 0..h {
             let mut bits = glyph[y];
-            if show_cursor && y >= CELL_H - 3 {
-                bits = 0xff;
+            if let Some((a, b)) = cursor {
+                if (a <= b && y >= a && y <= b) || (a > b && (y >= a || y <= b)) {
+                    bits = 0xff;
+                }
             }
             let line = unsafe { self.pixels.add((py + y) * stride + px) };
             for x in 0..CELL_W {
@@ -216,12 +431,29 @@ impl Screen {
         }
     }
 
+    /// First and last scan line of the cursor. Negative values in
+    /// VIOCURSORINFO are percentages of the cell height.
+    fn cursor_lines(&self) -> (usize, usize) {
+        let h = self.cell_h as i32;
+        let line = |v: u16| -> usize {
+            let v = v as i16 as i32;
+            let l = if v < 0 { ((-v).min(100) * h + 99) / 100 - 1 } else { v };
+            l.clamp(0, h - 1) as usize
+        };
+        (line(self.cursor_type[0]), line(self.cursor_type[1]))
+    }
+
     pub fn redraw(&mut self) {
         for r in 0..self.rows {
             for c in 0..self.cols {
                 self.draw(r, c);
             }
         }
+    }
+
+    /// The cursor position, if the cursor is drawn.
+    pub fn cursor(&self) -> Option<(usize, usize)> {
+        self.cursor
     }
 
     pub fn set_cursor(&mut self, pos: Option<(usize, usize)>) {
@@ -239,6 +471,24 @@ impl Screen {
         }
     }
 
+    /// Change the cursor shape (VioSetCurType) and redraw it.
+    pub fn set_cursor_type(&mut self, t: [u16; 4]) {
+        self.cursor_type = t;
+        if let Some((r, c)) = self.cursor {
+            if r < self.rows && c < self.cols {
+                self.draw(r, c);
+            }
+        }
+    }
+
+    /// Switch attribute bit 7 between blink and background intensity.
+    pub fn set_blink(&mut self, blink: bool) {
+        if self.blink != blink {
+            self.blink = blink;
+            self.redraw();
+        }
+    }
+
     /// Scroll rows `top..=bottom` up by `n`, filling with `fill`.
     pub fn scroll_up(&mut self, top: usize, bottom: usize, n: usize, fill: u16) {
         let bottom = bottom.min(self.rows - 1);
@@ -251,17 +501,18 @@ impl Screen {
                 self.cells[r][c] = if r + n <= bottom { self.cells[r + n][c] } else { fill };
             }
         }
+        self.sync_phys_rows(top, bottom);
         if !self.visible || self.graphics {
             return;
         }
         // Move the pixels of the surviving rows in one copy, then draw only
         // the rows that came into view.
         let stride = self.fb.stride as usize;
-        let row_px = CELL_H * stride;
+        let row_px = self.cell_h * stride;
         let keep = bottom + 1 - top - n;
         if keep > 0 {
             unsafe {
-                let dst = self.pixels.add((self.y0 + top * CELL_H) * stride);
+                let dst = self.pixels.add((self.y0 + top * self.cell_h) * stride);
                 let src = dst.add(n * row_px);
                 core::ptr::copy(src, dst, keep * row_px);
             }
@@ -283,6 +534,75 @@ impl Screen {
         }
     }
 
+    /// Copy the cells into the mapped physical buffer.
+    fn sync_phys(&mut self) {
+        let rows = self.rows;
+        self.sync_phys_rows(0, rows - 1);
+    }
+
+    fn sync_phys_rows(&mut self, top: usize, bottom: usize) {
+        let Some(p) = &self.phys else { return };
+        for r in top..=bottom.min(self.rows - 1) {
+            for c in 0..self.cols {
+                p.set(r * self.cols + c, self.cells[r][c]);
+            }
+        }
+    }
+
+    /// Map (create) the physical text buffer of this screen.
+    pub fn phys_buf(&mut self) -> Option<Arc<SharedMem>> {
+        if self.phys.is_none() {
+            self.phys = Some(PhysBuf::new()?);
+            self.sync_phys();
+        }
+        self.phys.as_ref().map(|p| p.obj.clone())
+    }
+
+    /// Take over what programs wrote into the physical buffer without
+    /// drawing (before a redraw).
+    fn pull_phys(&mut self) {
+        let Some(p) = &self.phys else { return };
+        for r in 0..self.rows {
+            for c in 0..self.cols {
+                self.cells[r][c] = p.get(r * self.cols + c);
+            }
+        }
+    }
+
+    /// Pick up what programs wrote into the physical buffer.
+    fn refresh_phys(&mut self) {
+        let Some(p) = &self.phys else { return };
+        let (rows, cols) = (self.rows, self.cols);
+        let mut changed: Vec<(usize, usize, u16)> = Vec::new();
+        for r in 0..rows {
+            for c in 0..cols {
+                let v = p.get(r * cols + c);
+                if v != self.cells[r][c] {
+                    changed.push((r, c, v));
+                }
+            }
+        }
+        for (r, c, v) in changed {
+            self.cells[r][c] = v;
+            self.draw(r, c);
+        }
+    }
+
+    /// Toggle the blink phase and redraw blinking cells.
+    fn blink_tick(&mut self) {
+        if !self.blink {
+            return;
+        }
+        self.blink_off = !self.blink_off;
+        for r in 0..self.rows {
+            for c in 0..self.cols {
+                if self.cells[r][c] & 0x8000 != 0 {
+                    self.draw(r, c);
+                }
+            }
+        }
+    }
+
     /// Kernel console output: interpret CR, LF, BS and TAB.
     pub fn write_char(&mut self, b: u8) {
         match b {
@@ -293,24 +613,35 @@ impl Screen {
             b'\r' => self.cur_col = 0,
             8 => self.cur_col = self.cur_col.saturating_sub(1),
             b'\t' => self.cur_col = (self.cur_col + 8) & !7,
-            _ => {
-                if self.cur_col >= self.cols {
-                    self.cur_col = 0;
-                    self.cur_row += 1;
-                }
-                self.scroll_if_needed();
-                let cell = b as u16 | (self.attr as u16) << 8;
-                self.put(self.cur_row, self.cur_col, cell);
-                self.cur_col += 1;
-            }
+            _ => self.write_cell(b as u16 | (self.attr as u16) << 8, true),
         }
         self.scroll_if_needed();
     }
 
-    fn scroll_if_needed(&mut self) {
+    /// Put a cell at the cursor and advance; at the end of the line the
+    /// cursor wraps if `wrap`, else stays on the last column.
+    pub fn write_cell(&mut self, cell: u16, wrap: bool) {
+        if self.cur_col >= self.cols {
+            if wrap {
+                self.cur_col = 0;
+                self.cur_row += 1;
+            } else {
+                self.cur_col = self.cols - 1;
+            }
+        }
+        self.scroll_if_needed();
+        self.put(self.cur_row, self.cur_col, cell);
+        self.cur_col += 1;
+        if !wrap && self.cur_col >= self.cols {
+            self.cur_col = self.cols - 1;
+        }
+    }
+
+    pub fn scroll_if_needed(&mut self) {
         if self.cur_row >= self.rows {
             let fill = 0x20 | (self.attr as u16) << 8;
-            self.scroll_up(0, self.rows - 1, 1, fill);
+            let n = self.cur_row + 1 - self.rows;
+            self.scroll_up(0, self.rows - 1, n, fill);
             self.cur_row = self.rows - 1;
         }
     }
@@ -320,6 +651,26 @@ impl Screen {
             let b = self.codepage.from_char(c).unwrap_or(b'?');
             self.write_char(if c == '\n' { b'\n' } else { b });
         }
+    }
+
+    /// Copy the text state of another screen (transparent pop-ups).
+    pub fn copy_from(&mut self, o: &Screen) {
+        self.cells = o.cells;
+        self.glyphs = o.glyphs;
+        self.cell_h = o.cell_h;
+        self.user_font = o.user_font;
+        self.codepage = o.codepage;
+        self.palregs = o.palregs;
+        self.dac = o.dac;
+        self.overscan = o.overscan;
+        self.blink = o.blink;
+        self.cols = o.cols;
+        self.rows = o.rows;
+        self.cur_row = o.cur_row;
+        self.cur_col = o.cur_col;
+        self.cursor_type = o.cursor_type;
+        self.update_palette();
+        self.layout();
     }
 }
 
@@ -331,9 +682,10 @@ pub fn init(fb: Framebuffer) {
     SCREEN.lock().boot = Some(Screen::init_at(slot, fb));
 }
 
-/// The screen of the calling thread's session.
+/// The screen the calling thread's VIO output goes to (its session's, or
+/// the pop-up it owns).
 pub fn with<R>(f: impl FnOnce(&mut Screen) -> R) -> Option<R> {
-    with_session(crate::session::current(), f)
+    with_session(crate::session::io_session(), f)
 }
 
 pub fn with_session<R>(sid: u32, f: impl FnOnce(&mut Screen) -> R) -> Option<R> {
@@ -374,10 +726,32 @@ pub fn show(sid: u32) {
     g.visible = sid;
     if let Some(s) = g.get(sid) {
         s.visible = true;
-        let (c, r) = (s.cols, s.rows);
-        let (row, col) = (s.cur_row, s.cur_col);
-        s.set_mode(c, r);
-        s.cur_row = row;
-        s.cur_col = col;
+        if !s.graphics {
+            s.pull_phys();
+            s.layout();
+        }
+    }
+}
+
+/// The session shown on the framebuffer.
+pub fn visible() -> u32 {
+    SCREEN.lock().visible
+}
+
+/// Timer tick: render changes to a mapped physical buffer (about 30 times
+/// a second) and blink (about twice a second).
+pub fn tick(ticks: u64) {
+    if ticks % 32 != 0 {
+        return;
+    }
+    let Some(mut g) = SCREEN.try_lock() else { return };
+    let v = g.visible;
+    let Some(s) = g.get(v) else { return };
+    if s.graphics {
+        return;
+    }
+    s.refresh_phys();
+    if ticks % 256 == 0 {
+        s.blink_tick();
     }
 }
