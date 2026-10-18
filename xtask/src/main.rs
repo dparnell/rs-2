@@ -10,6 +10,7 @@
 //! per line (relative to the repository root).
 
 mod image;
+mod iso;
 mod png;
 
 use std::io::{Read, Write};
@@ -31,6 +32,8 @@ struct Opts {
     /// Keystrokes to send (\n = Enter), and when (seconds after start).
     typing: Option<String>,
     type_at: Option<u64>,
+    /// Boot from this ISO (as a CD) instead of the ESP directory.
+    iso: Option<PathBuf>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -43,6 +46,7 @@ fn parse(args: &[String]) -> Opts {
         qemu_extra: vec![],
         typing: None,
         type_at: None,
+        iso: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -56,6 +60,10 @@ fn parse(args: &[String]) -> Opts {
             "--screenshot" => {
                 i += 1;
                 o.screenshot = Some(PathBuf::from(&args[i]));
+            }
+            "--iso" => {
+                i += 1;
+                o.iso = Some(PathBuf::from(&args[i]));
             }
             "--type" => {
                 i += 1;
@@ -125,6 +133,7 @@ fn build(o: &Opts) -> Option<PathBuf> {
     let _ = std::fs::remove_dir_all(&esp);
     copy(&boot.join("rs2-boot.efi"), &esp.join("EFI/BOOT/BOOTX64.EFI"));
     copy(&kernel.join("rs2-kernel"), &esp.join("RS2/KERNEL"));
+    strip(&esp.join("RS2/KERNEL"));
     let cmdline = root().join("work/cmdline.txt");
     if cmdline.exists() {
         copy(&cmdline, &esp.join("RS2/CMDLINE"));
@@ -184,13 +193,30 @@ fn build_userland() -> Option<image::FileList> {
     Some(files)
 }
 
+/// Remove debug information (keeps the boot image small).
+fn strip(file: &Path) {
+    let sysroot = Command::new("rustc").args(["--print", "sysroot"]).output().ok();
+    let Some(out) = sysroot else { return };
+    let sysroot = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let host = Command::new("rustc").args(["-vV"]).output().ok().map(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .find_map(|l| l.strip_prefix("host: ").map(str::to_string))
+            .unwrap_or_default()
+    });
+    let objcopy = Path::new(&sysroot).join("lib/rustlib").join(host.unwrap_or_default()).join("bin/rust-objcopy");
+    if objcopy.exists() {
+        let _ = Command::new(objcopy).arg("--strip-debug").arg(file).status();
+    }
+}
+
 fn ovmf() -> (PathBuf, PathBuf) {
     let share = PathBuf::from("/opt/homebrew/share/qemu");
     let code = share.join("edk2-x86_64-code.fd");
+    // A fresh variable store every run, so stale boot entries from other
+    // configurations never get in the way.
     let vars = root().join("work/ovmf-vars.fd");
-    if !vars.exists() {
-        copy(&share.join("edk2-i386-vars.fd"), &vars);
-    }
+    copy(&share.join("edk2-i386-vars.fd"), &vars);
     (code, vars)
 }
 
@@ -206,8 +232,10 @@ fn run(o: &Opts) -> bool {
         .arg(format!("if=pflash,format=raw,readonly=on,file={}", code.display()))
         .arg("-drive")
         .arg(format!("if=pflash,format=raw,file={}", vars.display()))
-        .arg("-drive")
-        .arg(format!("format=raw,file=fat:rw:{}", work.join("esp").display()))
+        .args(match &o.iso {
+            Some(iso) => vec!["-cdrom".to_string(), iso.display().to_string()],
+            None => vec!["-drive".to_string(), format!("format=raw,file=fat:rw:{}", work.join("esp").display())],
+        })
         .arg("-monitor")
         .arg(format!("unix:{},server,nowait", sock.display()));
     if o.headless {
@@ -322,8 +350,30 @@ fn monitor(sock: &Path, cmd: &str) {
     }
 }
 
-fn iso(_o: &Opts, _esp: &Path) -> bool {
-    eprintln!("iso: not implemented yet");
+/// All files below `dir`, with their paths relative to it.
+fn walk(dir: &Path, rel: &str, out: &mut image::FileList) {
+    let Ok(rd) = std::fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let r = if rel.is_empty() { name.clone() } else { format!("{rel}\\{name}") };
+        if e.path().is_dir() {
+            walk(&e.path(), &r, out);
+        } else {
+            out.push((e.path(), r));
+        }
+    }
+}
+
+fn iso(o: &Opts, esp: &Path) -> bool {
+    let mut files = Vec::new();
+    walk(esp, "", &mut files);
+    let img = image::build(&files, "RS2BOOT", 1, None);
+    let out = o.output.clone().unwrap_or_else(|| root().join("work/rs2.iso"));
+    let readme = b"rs2 - an OS/2 Warp 4.52 compatible operating system written in Rust.\r\n\
+Boot this disc (or a USB stick it was written to) on a UEFI machine.\r\n"
+        .to_vec();
+    iso::write(&out, "RS2_LIVE", &img, &[("README.TXT".to_string(), readme)]);
+    println!("wrote {} ({} MB)", out.display(), std::fs::metadata(&out).map(|m| m.len() >> 20).unwrap_or(0));
     let _ = Stdio::null();
-    false
+    true
 }

@@ -51,7 +51,7 @@ fn now() -> fat::Timestamp {
 /// Create a FAT image containing `files`. `min_mb` sets a lower size bound.
 pub fn build(files: &FileList, label: &str, min_mb: u64, fat_type: Option<fat::FatType>) -> Vec<u8> {
     let total: u64 = files.iter().map(|(s, _)| std::fs::metadata(s).map(|m| m.len()).unwrap_or(0)).sum();
-    let mb = ((total * 5 / 4) >> 20) + 8;
+    let mb = ((total * 11 / 10) >> 20) + 2;
     let size = (mb.max(min_mb) << 20) as usize;
     let disk = MemDisk(RefCell::new(vec![0u8; size]));
     fat::format(&disk, &fat::FormatParams { label, serial: 0x1995_0904, fat_type, hidden_sectors: 0 })
