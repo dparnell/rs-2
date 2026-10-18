@@ -1,0 +1,15 @@
+[package]
+name = "rs2-kernel"
+description = "rs2 kernel (build with --target x86_64-unknown-none)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rs2-kernel"
+test = false
+bench = false
+
+[dependencies]
+bootinfo = { path = "../crates/bootinfo" }
+os2-exe = { path = "../crates/os2-exe" }

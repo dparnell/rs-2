@@ -3,6 +3,10 @@
 version = 4
 
 [[package]]
+name = "bootinfo"
+version = "0.1.0"
+
+[[package]]
 name = "lxdump"
 version = "0.1.0"
 dependencies = [
@@ -11,4 +15,23 @@ dependencies = [
 
 [[package]]
 name = "os2-exe"
+version = "0.1.0"
+
+[[package]]
+name = "rs2-boot"
+version = "0.1.0"
+dependencies = [
+ "bootinfo",
+]
+
+[[package]]
+name = "rs2-kernel"
+version = "0.1.0"
+dependencies = [
+ "bootinfo",
+ "os2-exe",
+]
+
+[[package]]
+name = "xtask"
 version = "0.1.0"

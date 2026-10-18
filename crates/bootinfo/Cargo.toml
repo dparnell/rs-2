@@ -1,0 +1,6 @@
+[package]
+name = "bootinfo"
+description = "Hand-off structure between the rs2 UEFI loader and kernel"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
