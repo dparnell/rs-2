@@ -972,13 +972,23 @@ pub fn dos_query_fs_attach(c: &mut Ctx) -> u32 {
     let mut out = Vec::new();
     out.extend_from_slice(&3u16.to_le_bytes()); // FSAT_LOCALDRV
     out.extend_from_slice(&(name.len() as u16).to_le_bytes());
-    out.extend_from_slice(&(fsd.len() as u16).to_le_bytes());
-    out.extend_from_slice(&0u16.to_le_bytes());
-    out.extend_from_slice(name.as_bytes());
-    out.push(0);
-    out.extend_from_slice(fsd.as_bytes());
-    out.push(0);
-    out.push(0);
+    if c.is16 {
+        // DosQFSAttach fills an FSQBUFFER: each length precedes its string.
+        out.extend_from_slice(name.as_bytes());
+        out.push(0);
+        out.extend_from_slice(&(fsd.len() as u16).to_le_bytes());
+        out.extend_from_slice(fsd.as_bytes());
+        out.push(0);
+        out.extend_from_slice(&0u16.to_le_bytes());
+    } else {
+        out.extend_from_slice(&(fsd.len() as u16).to_le_bytes());
+        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(name.as_bytes());
+        out.push(0);
+        out.extend_from_slice(fsd.as_bytes());
+        out.push(0);
+        out.push(0);
+    }
     let have = if c.is16 { c.read_u16(pcb).map(|v| v as u32) } else { c.read_u32(pcb) }.unwrap_or(0);
     if (have as usize) < out.len() {
         return err::BUFFER_OVERFLOW;

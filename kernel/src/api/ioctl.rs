@@ -116,12 +116,33 @@ pub fn dos_dev_ioctl(c: &mut Ctx) -> u32 {
             pcb_data: c.arg(8),
         }
     };
+    dispatch(c, &r)
+}
+
+/// DosDevIOCtl2 (16-bit): DosDevIOCtl with buffer lengths.
+pub fn dos16_dev_ioctl2(c: &mut Ctx) -> u32 {
+    // (pData, cbData, pParms, cbParms, usFunction, usCategory, hDevice)
+    let r = Req {
+        handle: c.arg(6),
+        category: c.arg(5),
+        function: c.arg(4),
+        params: c.ptr(2),
+        params_len: c.arg(3),
+        data: c.ptr(0),
+        data_len: c.arg(1),
+        pcb_params: 0,
+        pcb_data: 0,
+    };
+    dispatch(c, &r)
+}
+
+fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
     let Some(h) = super::file::get(c, r.handle) else { return err::INVALID_HANDLE };
     match (h, r.category) {
-        (Handle::PhysDisk(n), 9) => phys(c, n, &r),
-        (Handle::Drive(d), 8) => logical(c, &d, &r),
-        (_, 0xd5) => dos_dev(c, &r),
-        (Handle::Kbd | Handle::Con, 4) => kbd(c, &r),
+        (Handle::PhysDisk(n), 9) => phys(c, n, r),
+        (Handle::Drive(d), 8) => logical(c, &d, r),
+        (_, 0xd5) => dos_dev(c, r),
+        (Handle::Kbd | Handle::Con, 4) => kbd(c, r),
         _ => err::INVALID_CATEGORY,
     }
 }
@@ -219,6 +240,10 @@ fn logical(c: &Ctx, d: &crate::fs::Dasd, r: &Req) -> u32 {
             d.written.store(false, Ordering::Relaxed);
             crate::fs::remount(d.drive).err().unwrap_or(0)
         }
+        // DSK_BEGINFORMAT (the file system to be written; nothing to do)
+        // and DSK_FORMATVERIFY (low-level format of a track: a hard disk
+        // needs none).
+        0x04 | 0x45 => 0,
         // DSK_BLOCKREMOVABLE: fixed disk.
         0x20 => {
             c.write_u8(r.data, 1);
