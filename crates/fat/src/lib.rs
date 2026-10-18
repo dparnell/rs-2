@@ -13,6 +13,7 @@
 extern crate alloc;
 
 pub mod check;
+pub mod ea;
 mod name;
 
 use alloc::string::String;
@@ -36,6 +37,12 @@ pub enum Error {
     Corrupt,
     ReadOnly,
     AccessDenied,
+    /// `EA DATA. SF` (or an EA file) is damaged or does not match.
+    EaCorrupt,
+    /// No free EA handle is left.
+    EaTableFull,
+    /// The EA set is larger than 64 KB.
+    EaTooLong,
 }
 
 pub type Result<T> = core::result::Result<T, Error>;
@@ -109,8 +116,11 @@ pub struct Entry {
     pub created: Timestamp,
     pub accessed: u16,
     pub modified: Timestamp,
-    /// OS/2 extended attribute handle (FAT12/16 only).
+    /// OS/2 extended attribute handle (FAT12/16 only; offset 0x14).
     pub ea_handle: u16,
+    /// Byte 0x0C: Windows NT lower-case flags (0x08, 0x10) and, on FAT32,
+    /// the FAT32.IFS EA flags ([`ea::FAT32_HAS_EAS`]).
+    pub nt_flags: u8,
     pub slot: Option<Slot>,
 }
 
@@ -130,6 +140,7 @@ impl Entry {
             accessed: 0,
             modified: Timestamp::default(),
             ea_handle: 0,
+            nt_flags: 0,
             slot: None,
         }
     }
@@ -514,7 +525,8 @@ impl<D: BlockDevice> Volume<D> {
     pub fn read_dir(&self, dir: Dir) -> Result<Vec<Entry>> {
         let mut out = Vec::new();
         let mut lfn: Vec<u16> = Vec::new();
-        let mut lfn_parts: Vec<(u8, [u16; 13])> = Vec::new();
+        // (sequence number, checksum, characters)
+        let mut lfn_parts: Vec<(u8, u8, [u16; 13])> = Vec::new();
         let mut sec = vec![0u8; self.bps as usize];
         let mut cur_lba = u64::MAX;
         let mut index = 0;
@@ -538,7 +550,7 @@ impl<D: BlockDevice> Volume<D> {
                 for (k, o) in [1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30].iter().enumerate() {
                     chars[k] = rd16(d, *o);
                 }
-                lfn_parts.push((d[0] & 0x1f, chars));
+                lfn_parts.push((d[0] & 0x1f, d[13], chars));
                 continue;
             }
             if d[11] & attr::VOLUME != 0 {
@@ -551,8 +563,16 @@ impl<D: BlockDevice> Volume<D> {
                 continue;
             }
             lfn.clear();
+            // Long-name parts left over from an entry rewritten in place
+            // (or by a system without long names) do not match.
+            let mut n83 = [0u8; 11];
+            n83.copy_from_slice(&d[0..11]);
+            let sum = ea::lfn_checksum(&n83);
+            if lfn_parts.iter().any(|p| p.1 != sum) {
+                lfn_parts.clear();
+            }
             lfn_parts.sort_by_key(|p| p.0);
-            for (_, chars) in &lfn_parts {
+            for (_, _, chars) in &lfn_parts {
                 for &ch in chars {
                     if ch == 0 || ch == 0xffff {
                         break;
@@ -574,6 +594,7 @@ impl<D: BlockDevice> Volume<D> {
                 accessed: rd16(d, 18),
                 modified: Timestamp { time: rd16(d, 22), date: rd16(d, 24) },
                 ea_handle: if self.fat_type == FatType::Fat32 { 0 } else { hi as u16 },
+                nt_flags: d[12],
                 slot: Some(Slot { dir, index: index - 1 }),
             });
         }
@@ -657,6 +678,7 @@ impl<D: BlockDevice> Volume<D> {
         let mut d = [0u8; 32];
         d[0..11].copy_from_slice(name83);
         d[11] = e.attr;
+        d[12] = e.nt_flags;
         d[14..16].copy_from_slice(&e.created.time.to_le_bytes());
         d[16..18].copy_from_slice(&e.created.date.to_le_bytes());
         d[18..20].copy_from_slice(&e.accessed.to_le_bytes());
@@ -670,7 +692,29 @@ impl<D: BlockDevice> Volume<D> {
     }
 
     /// Rewrite an entry's metadata (size, cluster, attributes, times).
+    /// The EA reference on disk (handle or FAT32 flags) is kept: it belongs
+    /// to the EA code, and `e` may be an older copy.
     pub fn update_entry(&mut self, e: &Entry) -> Result<()> {
+        let Some(slot) = e.slot else { return Ok(()) };
+        let name83 = name::pack_83(&e.short).ok_or(Error::InvalidName)?;
+        let mut raw = self.raw_entry(e, &name83);
+        let (lba, off) = self.entry_pos(slot.dir, slot.index)?.ok_or(Error::Corrupt)?;
+        let mut sec = vec![0u8; self.bps as usize];
+        self.read_sector(lba, &mut sec)?;
+        let d = &sec[off..off + 32];
+        if d[0] != 0 && d[0] != 0xe5 && d[11] != attr::LFN {
+            if self.fat_type == FatType::Fat32 {
+                raw[12] = (raw[12] & !ea::FAT32_EA_MASK) | (d[12] & ea::FAT32_EA_MASK);
+            } else {
+                raw[20..22].copy_from_slice(&d[20..22]);
+            }
+        }
+        sec[off..off + 32].copy_from_slice(&raw);
+        self.write_sector(lba, &sec)
+    }
+
+    /// Write an entry exactly as given (EA reference included).
+    fn write_entry(&mut self, e: &Entry) -> Result<()> {
         let Some(slot) = e.slot else { return Ok(()) };
         let name83 = name::pack_83(&e.short).ok_or(Error::InvalidName)?;
         let raw = self.raw_entry(e, &name83);
@@ -727,9 +771,10 @@ impl<D: BlockDevice> Volume<D> {
             accessed: now.date,
             modified: now,
             ea_handle: 0,
+            nt_flags: 0,
             slot: Some(slot),
         };
-        self.update_entry(&e)?;
+        self.write_entry(&e)?;
         Ok(e)
     }
 
@@ -758,23 +803,34 @@ impl<D: BlockDevice> Volume<D> {
         dotdot.modified = now;
         dotdot.size = 0;
         dotdot.ea_handle = 0;
+        dotdot.nt_flags = 0;
         let raw = self.raw_entry(&dotdot, b"..         ");
         self.write_entry_raw(Slot { dir: Dir::Cluster(c), index: 1 }, &raw)?;
         Ok(e)
     }
 
     fn mark_deleted(&mut self, slot: Slot) -> Result<()> {
-        let (lba, off) = self.entry_pos(slot.dir, slot.index)?.ok_or(Error::Corrupt)?;
         let mut sec = vec![0u8; self.bps as usize];
-        self.read_sector(lba, &mut sec)?;
-        sec[off] = 0xe5;
-        // Remove preceding long-name entries in the same sector.
-        let mut o = off;
-        while o >= 32 && sec[o - 32 + 11] == attr::LFN && sec[o - 32] != 0xe5 {
-            o -= 32;
-            sec[o] = 0xe5;
+        let mut index = slot.index;
+        let mut first = true;
+        // The entry, then the long-name entries before it.
+        loop {
+            let (lba, off) = self.entry_pos(slot.dir, index)?.ok_or(Error::Corrupt)?;
+            self.read_sector(lba, &mut sec)?;
+            if !first && (sec[off + 11] != attr::LFN || sec[off] == 0xe5 || sec[off] == 0) {
+                break;
+            }
+            // The last long-name part (the first on disk) carries 0x40.
+            let last_part = !first && sec[off] & 0x40 != 0;
+            sec[off] = 0xe5;
+            self.write_sector(lba, &sec)?;
+            first = false;
+            if index == 0 || last_part {
+                break;
+            }
+            index -= 1;
         }
-        self.write_sector(lba, &sec)
+        Ok(())
     }
 
     pub fn delete(&mut self, path: &str) -> Result<()> {
@@ -782,13 +838,15 @@ impl<D: BlockDevice> Volume<D> {
         if e.is_dir() {
             return Err(Error::IsADirectory);
         }
-        if e.attr & attr::READONLY != 0 {
+        if e.attr & attr::READONLY != 0 || self.is_ea_file(&e) {
             return Err(Error::AccessDenied);
         }
+        let slot = e.slot.ok_or(Error::AccessDenied)?;
+        self.drop_eas(&e)?;
         if e.cluster != 0 {
             self.free_chain(e.cluster)?;
         }
-        self.mark_deleted(e.slot.ok_or(Error::AccessDenied)?)
+        self.mark_deleted(slot)
     }
 
     pub fn rmdir(&mut self, path: &str) -> Result<()> {
@@ -800,6 +858,7 @@ impl<D: BlockDevice> Volume<D> {
         if !self.read_dir(Dir::Cluster(e.cluster))?.is_empty() {
             return Err(Error::DirectoryNotEmpty);
         }
+        self.drop_eas(&e)?;
         self.free_chain(e.cluster)?;
         self.mark_deleted(slot)
     }
@@ -808,6 +867,9 @@ impl<D: BlockDevice> Volume<D> {
     pub fn rename(&mut self, from: &str, to: &str) -> Result<()> {
         let e = self.lookup(from)?;
         let old_slot = e.slot.ok_or(Error::AccessDenied)?;
+        if self.is_ea_file(&e) {
+            return Err(Error::AccessDenied);
+        }
         let (parent, name) = self.parent(to)?;
         let short = to_83(&name).ok_or(Error::InvalidName)?;
         let pdir = self.dir_of(&parent);
@@ -823,12 +885,13 @@ impl<D: BlockDevice> Volume<D> {
         if same_dir {
             // Overwrite in place (drops any long name).
             self.update_entry(&ne)?;
-            return Ok(());
+            return self.eas_renamed(&e, &ne);
         }
         let slot = self.free_slot(pdir)?;
         ne.slot = Some(slot);
-        self.update_entry(&ne)?;
+        self.write_entry(&ne)?;
         self.mark_deleted(old_slot)?;
+        self.eas_renamed(&e, &ne)?;
         if ne.is_dir() {
             // Fix "..".
             let raw_parent = if parent.cluster == self.root_cluster { 0 } else { parent.cluster };
@@ -1377,6 +1440,166 @@ mod tests {
     #[test]
     fn fat32() {
         roundtrip(80 << 20, Some(FatType::Fat32), FatType::Fat32);
+    }
+
+    fn ea(name: &str, len: usize, seed: u8) -> ea::Ea {
+        ea::Ea { flags: 0, name: name.as_bytes().to_vec(), value: (0..len).map(|i| (i as u8).wrapping_mul(31).wrapping_add(seed)).collect() }
+    }
+
+    fn clean(v: &mut Volume<Mem>) {
+        let (f, t) = scan(v, false);
+        assert!(f.is_empty(), "{f:?}");
+        assert_eq!(t.lost_chains, 0);
+    }
+
+    fn ea_roundtrip(ty: FatType, bytes: usize) {
+        let dev = Mem(RefCell::new(std::vec![0u8; bytes]));
+        format(&dev, &FormatParams { label: "EA", serial: 7, fat_type: Some(ty), hidden_sectors: 0 }).unwrap();
+        let mut v = Volume::mount(dev).unwrap();
+        let now = Timestamp::new(2026, 10, 18, 12, 0, 0);
+        let free0 = v.info().unwrap().free_clusters;
+        v.mkdir("DIR", now).unwrap();
+        let mut a = v.create_file("A.TXT", 0, now).unwrap();
+        v.write(&mut a, 0, b"hello", now).unwrap();
+        v.create_file("DIR\\B.TXT", 0, now).unwrap();
+        let a = v.lookup("A.TXT").unwrap();
+        assert!(v.read_eas(&a).unwrap().is_empty());
+        let set1 = std::vec![ea(".TYPE", 20, 1), ea(".LONGNAME", 9, 2)];
+        v.write_eas(&a, &set1, now).unwrap();
+        assert_eq!(v.read_eas(&a).unwrap(), set1);
+        // A stale copy of the entry (as an open file holds) still finds them,
+        // and rewriting its metadata keeps the reference.
+        let mut stale = a.clone();
+        v.write(&mut stale, 5, b" world", now).unwrap();
+        assert_eq!(v.read_eas(&v.lookup("A.TXT").unwrap()).unwrap(), set1);
+        let d = v.lookup("DIR").unwrap();
+        let dset = std::vec![ea(".ICON", 3000, 3)];
+        v.write_eas(&d, &dset, now).unwrap();
+        let b = v.lookup("DIR\\B.TXT").unwrap();
+        let bset = std::vec![ea("BIG", 60_000, 4)];
+        v.write_eas(&b, &bset, now).unwrap();
+        clean(&mut v);
+        // Grow and shrink sets in the middle of the file.
+        let set2 = std::vec![ea(".TYPE", 5000, 5)];
+        v.write_eas(&a, &set2, now).unwrap();
+        assert_eq!(v.read_eas(&v.lookup("DIR").unwrap()).unwrap(), dset);
+        assert_eq!(v.read_eas(&v.lookup("DIR\\B.TXT").unwrap()).unwrap(), bset);
+        assert_eq!(v.read_eas(&v.lookup("A.TXT").unwrap()).unwrap(), set2);
+        v.write_eas(&d, &std::vec![ea("X", 1, 6)], now).unwrap();
+        assert_eq!(v.read_eas(&v.lookup("DIR\\B.TXT").unwrap()).unwrap(), bset);
+        assert_eq!(v.read_eas(&v.lookup("A.TXT").unwrap()).unwrap(), set2);
+        clean(&mut v);
+        // Too large.
+        assert_eq!(v.write_eas(&a, &[ea("HUGE", 65_530, 0)], now).unwrap_err(), Error::EaTooLong);
+        // Rename and move keep EAs.
+        v.rename("A.TXT", "C.TXT").unwrap();
+        v.rename("C.TXT", "DIR\\D.TXT").unwrap();
+        assert_eq!(v.read_eas(&v.lookup("DIR\\D.TXT").unwrap()).unwrap(), set2);
+        clean(&mut v);
+        // Remount and read back.
+        let mut v = Volume::mount(v.dev).unwrap();
+        assert_eq!(v.read_eas(&v.lookup("DIR\\D.TXT").unwrap()).unwrap(), set2);
+        // Many files with small EAs (FAT12/16: more handle tables).
+        for i in 0..300 {
+            let mut e = v.create_file(&std::format!("DIR\\F{i}.X"), 0, now).unwrap();
+            v.write(&mut e, 0, b"x", now).unwrap();
+            let e = v.lookup(&std::format!("DIR\\F{i}.X")).unwrap();
+            v.write_eas(&e, &[ea("N", i % 50, i as u8)], now).unwrap();
+        }
+        clean(&mut v);
+        for i in (0..300).step_by(7) {
+            assert_eq!(v.read_eas(&v.lookup(&std::format!("DIR\\F{i}.X")).unwrap()).unwrap(), std::vec![ea("N", i % 50, i as u8)]);
+        }
+        // Deleting files and removing EAs frees the space again.
+        for i in 0..300 {
+            v.delete(&std::format!("DIR\\F{i}.X")).unwrap();
+        }
+        let d = v.lookup("DIR").unwrap();
+        v.write_eas(&d, &[], now).unwrap();
+        assert!(v.read_eas(&v.lookup("DIR").unwrap()).unwrap().is_empty());
+        v.delete("DIR\\D.TXT").unwrap();
+        v.delete("DIR\\B.TXT").unwrap();
+        clean(&mut v);
+        assert!(v.read_dir(Dir::Cluster(v.lookup("DIR").unwrap().cluster)).unwrap().is_empty());
+        v.rmdir("DIR").unwrap();
+        clean(&mut v);
+        let left = free0 - v.info().unwrap().free_clusters;
+        if ty == FatType::Fat32 {
+            assert_eq!(left, 0);
+        } else {
+            // Only EA DATA. SF's header remains.
+            let f = v.load_ea_file().unwrap().unwrap();
+            assert_eq!(left, f.entry.size / v.cluster_size());
+            assert!(f.offsets.iter().all(|&o| o == ea::UNUSED));
+            let root = v.read_dir(v.root_dir()).unwrap();
+            let e = root.iter().find(|e| e.short == ea::EA_FILE_NAME).unwrap();
+            assert_eq!(e.attr, 0x27);
+        }
+    }
+
+    #[test]
+    fn eas_fat12() {
+        ea_roundtrip(FatType::Fat12, 1_474_560);
+    }
+
+    #[test]
+    fn eas_fat16() {
+        ea_roundtrip(FatType::Fat16, 32 << 20);
+    }
+
+    #[test]
+    fn eas_fat32() {
+        ea_roundtrip(FatType::Fat32, 80 << 20);
+    }
+
+    #[test]
+    fn eas_checker_repairs() {
+        let mut v = sample(FatType::Fat16, 32 << 20);
+        let now = Timestamp::new(2026, 10, 18, 12, 0, 0);
+        let a = v.lookup("A.TXT").unwrap();
+        let c = v.lookup("C.TXT").unwrap();
+        v.write_eas(&a, &[ea("ONE", 10, 1)], now).unwrap();
+        v.write_eas(&c, &[ea("TWO", 10, 2)], now).unwrap();
+        clean(&mut v);
+        // C.TXT's handle copied to B.TXT.
+        let h = v.ea_handle_of(&v.lookup("C.TXT").unwrap()).unwrap();
+        let mut b = v.lookup("DIR\\B.TXT").unwrap();
+        b.ea_handle = h;
+        v.write_entry(&b).unwrap();
+        let (f, _) = scan(&mut v, false);
+        assert_eq!(f, std::vec![check::Finding::EaShared("\\DIR\\B.TXT".into())]);
+        // Point A.TXT at a handle that does not exist: its set is orphaned.
+        let mut a = v.lookup("A.TXT").unwrap();
+        a.ea_handle = 200;
+        v.write_entry(&a).unwrap();
+        let (f, _) = scan(&mut v, true);
+        assert!(f.contains(&check::Finding::EaMissing("\\A.TXT".into())), "{f:?}");
+        assert!(f.iter().any(|x| matches!(x, check::Finding::EaOrphaned(_))), "{f:?}");
+        clean(&mut v);
+        assert!(v.read_eas(&v.lookup("DIR\\B.TXT").unwrap()).unwrap().is_empty());
+        assert!(v.read_eas(&v.lookup("A.TXT").unwrap()).unwrap().is_empty());
+        assert_eq!(v.read_eas(&v.lookup("C.TXT").unwrap()).unwrap(), std::vec![ea("TWO", 10, 2)]);
+    }
+
+    /// OS/2's own EA DATA. SF on the Warp 4.52 boot floppy.
+    #[test]
+    fn os2_floppy_eas() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../work/media/client/bootimgs/disk_0_1.img");
+        let Ok(img) = std::fs::read(path) else { return };
+        let mut v = Volume::mount(Mem(RefCell::new(img))).unwrap();
+        let k = v.lookup("OS2KRNL").unwrap();
+        assert_ne!(k.ea_handle, 0);
+        let eas = v.read_eas(&k).unwrap();
+        assert!(eas.iter().any(|e| e.name == b".TYPE"), "{eas:?}");
+        let d = v.lookup("OS2DASD.DMD").unwrap();
+        let eas = v.read_eas(&d).unwrap();
+        assert_eq!(eas[0].name, b".APPTYPE");
+        clean(&mut v);
+        // Our writes keep it well formed.
+        let now = Timestamp::new(2026, 10, 18, 12, 0, 0);
+        v.write_eas(&d, &[ea(".SUBJECT", 2000, 1)], now).unwrap();
+        clean(&mut v);
+        assert!(v.read_eas(&v.lookup("OS2KRNL").unwrap()).unwrap().iter().any(|e| e.name == b".TYPE"));
     }
 
     #[test]

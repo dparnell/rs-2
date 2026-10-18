@@ -111,6 +111,7 @@ pub mod err {
     pub const THREAD_1_INACTIVE: u32 = 210;
     pub const INVALID_EA_NAME: u32 = 254;
     pub const EA_LIST_INCONSISTENT: u32 = 255;
+    pub const EA_LIST_TOO_LONG: u32 = 256;
     pub const NO_MORE_ITEMS: u32 = 259;
     pub const SEARCH_STRUC_REUSED: u32 = 260;
     pub const EAS_DIDNT_FIT: u32 = 275;
@@ -118,6 +119,7 @@ pub mod err {
     pub const EA_TABLE_FULL: u32 = 277;
     pub const INVALID_EA_HANDLE: u32 = 278;
     pub const EAS_NOT_SUPPORTED: u32 = 282;
+    pub const NEED_EAS_FOUND: u32 = 283;
     pub const NOT_OWNER: u32 = 288;
     pub const TOO_MANY_POSTS: u32 = 298;
     pub const ALREADY_POSTED: u32 = 299;

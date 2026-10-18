@@ -36,6 +36,9 @@ fn map(e: fat::Error) -> u32 {
         fat::Error::Corrupt => err::NOT_READY,
         fat::Error::ReadOnly => err::WRITE_PROTECT,
         fat::Error::AccessDenied => err::ACCESS_DENIED,
+        fat::Error::EaCorrupt => err::EA_FILE_CORRUPT,
+        fat::Error::EaTableFull => err::EA_TABLE_FULL,
+        fat::Error::EaTooLong => err::EA_LIST_TOO_LONG,
     }
 }
 

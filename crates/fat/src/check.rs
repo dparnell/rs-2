@@ -33,6 +33,17 @@ pub enum Finding {
     BadSubdirectory(String),
     /// A directory could not be read.
     UnreadableDirectory(String),
+    /// The entry refers to extended attributes that do not exist or are
+    /// damaged; the reference was (or would be) removed.
+    EaMissing(String),
+    /// The entry shares its EA handle with an earlier entry; its
+    /// reference was (or would be) removed.
+    EaShared(String),
+    /// Extended attributes that belong to no file (an EA handle, or a
+    /// FAT32 EA file); freed when fixing.
+    EaOrphaned(String),
+    /// `EA DATA. SF` is damaged: its header is unreadable.
+    EaFileCorrupt,
 }
 
 /// Totals for the report, in clusters.
@@ -68,6 +79,8 @@ pub struct Checker<'a, D: BlockDevice> {
     pub totals: Totals,
     /// Lost chains: (first cluster, length).
     lost: Vec<(u32, u32)>,
+    /// FAT12/16 entries with an EA handle: (path, handle, sector, offset).
+    ea_refs: Vec<(String, u16, u64, usize)>,
 }
 
 /// A directory entry as found on disk, with its location.
@@ -76,29 +89,38 @@ struct Raw {
     attr: u8,
     cluster: u32,
     size: u32,
+    /// EA handle (FAT12/16).
+    ea: u16,
     lba: u64,
     off: usize,
+}
+
+/// The first FAT, one entry per cluster.
+fn load_fat<D: BlockDevice>(vol: &Volume<D>) -> Result<Vec<u32>> {
+    let bps = vol.bps as usize;
+    let mut raw = vec![0u8; vol.fat_size as usize * bps];
+    vol.dev.read(vol.reserved as u64, &mut raw)?;
+    let n = vol.clusters as usize + 2;
+    let mut fat = vec![0u32; n];
+    for (c, v) in fat.iter_mut().enumerate() {
+        *v = match vol.fat_type {
+            FatType::Fat12 => {
+                let o = c + c / 2;
+                let w = u16::from_le_bytes([raw[o], raw[o + 1]]) as u32;
+                if c & 1 != 0 { w >> 4 } else { w & 0xfff }
+            }
+            FatType::Fat16 => u16::from_le_bytes([raw[c * 2], raw[c * 2 + 1]]) as u32,
+            FatType::Fat32 => u32::from_le_bytes(raw[c * 4..c * 4 + 4].try_into().unwrap()) & 0x0fff_ffff,
+        };
+    }
+    Ok(fat)
 }
 
 impl<'a, D: BlockDevice> Checker<'a, D> {
     /// Load the first FAT.
     pub fn new(vol: &'a mut Volume<D>, fix: bool) -> Result<Self> {
-        let bps = vol.bps as usize;
-        let mut raw = vec![0u8; vol.fat_size as usize * bps];
-        vol.dev.read(vol.reserved as u64, &mut raw)?;
-        let n = vol.clusters as usize + 2;
-        let mut fat = vec![0u32; n];
-        for (c, v) in fat.iter_mut().enumerate() {
-            *v = match vol.fat_type {
-                FatType::Fat12 => {
-                    let o = c + c / 2;
-                    let w = u16::from_le_bytes([raw[o], raw[o + 1]]) as u32;
-                    if c & 1 != 0 { w >> 4 } else { w & 0xfff }
-                }
-                FatType::Fat16 => u16::from_le_bytes([raw[c * 2], raw[c * 2 + 1]]) as u32,
-                FatType::Fat32 => u32::from_le_bytes(raw[c * 4..c * 4 + 4].try_into().unwrap()) & 0x0fff_ffff,
-            };
-        }
+        let fat = load_fat(vol)?;
+        let n = fat.len();
         Ok(Checker {
             vol,
             fix,
@@ -108,6 +130,7 @@ impl<'a, D: BlockDevice> Checker<'a, D> {
             findings: Vec::new(),
             totals: Totals::default(),
             lost: Vec::new(),
+            ea_refs: Vec::new(),
         })
     }
 
@@ -231,6 +254,7 @@ impl<'a, D: BlockDevice> Checker<'a, D> {
                     attr: d[11],
                     cluster: u16::from_le_bytes([d[26], d[27]]) as u32 | hi << 16,
                     size: u32::from_le_bytes([d[28], d[29], d[30], d[31]]),
+                    ea: if fat32 { 0 } else { u16::from_le_bytes([d[20], d[21]]) },
                     lba,
                     off,
                 });
@@ -285,6 +309,9 @@ impl<'a, D: BlockDevice> Checker<'a, D> {
                 }
                 let full = alloc::format!("{path}\\{}", e.name);
                 let dir = e.attr & attr::DIRECTORY != 0;
+                if e.ea != 0 {
+                    self.ea_refs.push((full.clone(), e.ea, e.lba, e.off));
+                }
                 let mut chain = Vec::new();
                 if e.cluster != 0 {
                     if !self.valid(e.cluster) {
@@ -338,7 +365,7 @@ impl<'a, D: BlockDevice> Checker<'a, D> {
                     self.set_entry_size(e, chain.len() as u32 * cs)?;
                 }
                 let n = used as u32;
-                if e.name == "EA DATA.SF" && is_root {
+                if is_root && e.name == crate::ea::EA_FILE_NAME {
                     self.totals.ea_clusters += n;
                 } else if e.attr & (attr::HIDDEN | attr::SYSTEM) != 0 {
                     self.totals.hidden += 1;
@@ -349,7 +376,98 @@ impl<'a, D: BlockDevice> Checker<'a, D> {
                 }
             }
         }
+        self.check_eas()?;
         self.find_lost();
+        Ok(())
+    }
+
+    /// Check extended attribute references against their storage.
+    fn check_eas(&mut self) -> Result<()> {
+        if self.vol.fat_type == FatType::Fat32 {
+            return self.check_fat32_eas();
+        }
+        let refs = core::mem::take(&mut self.ea_refs);
+        let file = match self.vol.load_ea_file() {
+            Ok(f) => f,
+            Err(Error::EaCorrupt) => {
+                self.findings.push(Finding::EaFileCorrupt);
+                None
+            }
+            Err(e) => return Err(e),
+        };
+        let mut used = vec![false; file.as_ref().map_or(0, |f| f.offsets.len())];
+        for (path, h, lba, off) in refs {
+            let ok = match &file {
+                Some(f) => f.location(h).is_some() && self.vol.read_set(f, h).is_ok(),
+                None => false,
+            };
+            let shared = ok && used[h as usize];
+            if ok && !shared {
+                used[h as usize] = true;
+                continue;
+            }
+            self.findings.push(if shared { Finding::EaShared(path) } else { Finding::EaMissing(path) });
+            let raw = Raw { name: String::new(), attr: 0, cluster: 0, size: 0, ea: 0, lba, off };
+            self.patch(&raw, |d| d[20..22].fill(0))?;
+        }
+        let Some(mut f) = file else { return Ok(()) };
+        let orphans: Vec<u16> =
+            (1..f.offsets.len()).filter(|&h| !used[h] && f.offsets[h] != crate::ea::UNUSED).map(|h| h as u16).collect();
+        for h in orphans {
+            self.findings.push(Finding::EaOrphaned(alloc::format!("EA handle {h}")));
+            if self.fix {
+                if f.location(h).is_some() && self.vol.read_set(&f, h).is_ok() {
+                    let now = f.entry.modified;
+                    self.vol.remove_set(&mut f, h, true, now)?;
+                    // Keep the in-memory FAT in step with the freed clusters.
+                    self.reload_fat()?;
+                } else {
+                    f.offsets[h as usize] = crate::ea::UNUSED;
+                    let now = f.entry.modified;
+                    self.vol.store_header(&mut f, now)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// FAT32: every entry flagged as having EAs has a readable EA file,
+    /// and every EA file has its owner.
+    fn check_fat32_eas(&mut self) -> Result<()> {
+        let mut stack = alloc::vec![(self.vol.root_dir(), String::new())];
+        while let Some((dir, path)) = stack.pop() {
+            let Ok(entries) = self.vol.read_dir(dir) else { continue };
+            for e in &entries {
+                let full = alloc::format!("{path}\\{}", e.name);
+                if crate::ea::is_ea_companion(&e.name) {
+                    let owner = &e.name[..e.name.len() - crate::ea::EA_SUFFIX.len()];
+                    if !entries.iter().any(|o| o.name.eq_ignore_ascii_case(owner)) {
+                        self.findings.push(Finding::EaOrphaned(full));
+                        if self.fix {
+                            self.vol.remove_plain(e)?;
+                            self.reload_fat()?;
+                        }
+                    }
+                    continue;
+                }
+                if e.is_dir() && e.cluster != 0 {
+                    stack.push((Dir::Cluster(e.cluster), full.clone()));
+                }
+                if e.nt_flags & crate::ea::FAT32_EA_MASK != 0 && self.vol.read_eas(e).is_err() {
+                    self.findings.push(Finding::EaMissing(full));
+                    if self.fix {
+                        let slot = e.slot.ok_or(Error::Corrupt)?;
+                        self.vol.set_ea_ref(slot, |d| d[12] &= !crate::ea::FAT32_EA_MASK)?;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Re-read the first FAT after the volume code changed it.
+    fn reload_fat(&mut self) -> Result<()> {
+        self.fat = load_fat(self.vol)?;
         Ok(())
     }
 

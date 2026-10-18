@@ -105,6 +105,10 @@ fn check_fat(d: u8, fix: bool, verbose: bool) -> u32 {
             Finding::CrossLinked { path, cluster } => alloc::format!("{letter}:{path} is cross-linked on cluster {cluster}."),
             Finding::BadSubdirectory(p) => alloc::format!("{letter}:{p} is an incorrect subdirectory."),
             Finding::UnreadableDirectory(p) => alloc::format!("CHKDSK cannot read the directory {letter}:{p}."),
+            Finding::EaMissing(p) => alloc::format!("The extended attributes of {letter}:{p} are missing or damaged; the reference has been removed."),
+            Finding::EaShared(p) => alloc::format!("{letter}:{p} shares its extended attributes with another file; the reference has been removed."),
+            Finding::EaOrphaned(p) => alloc::format!("Extended attributes without an owner ({p}) have been freed."),
+            Finding::EaFileCorrupt => alloc::format!("The extended attribute file on drive {letter}: is damaged."),
         };
         outln(&msg);
     }
