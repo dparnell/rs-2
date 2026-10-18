@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! cargo xtask build [--release]            build loader + kernel, stage work/esp
-//! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG] [-- QEMU ARGS]
+//! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG]
+//!                  [--hdd IMG] [--nvme IMG] [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! ```
 //!
@@ -36,6 +37,8 @@ struct Opts {
     iso: Option<PathBuf>,
     /// Attach this raw disk image as an extra hard disk.
     hdd: Option<PathBuf>,
+    /// Attach this raw disk image as an NVMe drive.
+    nvme: Option<PathBuf>,
     /// `disk`: make an installed-system disk.
     system: bool,
     /// `run`: boot from the --hdd disk only (no ESP directory).
@@ -56,6 +59,7 @@ fn parse(args: &[String]) -> Opts {
         type_at: None,
         iso: None,
         hdd: None,
+        nvme: None,
         system: false,
         boot_hdd: false,
         dist: false,
@@ -79,6 +83,10 @@ fn parse(args: &[String]) -> Opts {
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
+            }
+            "--nvme" => {
+                i += 1;
+                o.nvme = Some(PathBuf::from(&args[i]));
             }
             "--iso" => {
                 i += 1;
@@ -303,6 +311,10 @@ fn run(o: &Opts) -> bool {
     c.args(&o.qemu_extra);
     if let Some(d) = &o.hdd {
         c.arg("-drive").arg(format!("format=raw,file={}", d.display()));
+    }
+    if let Some(d) = &o.nvme {
+        c.arg("-drive").arg(format!("file={},format=raw,if=none,id=nvm0", d.display()));
+        c.args(["-device", "nvme,drive=nvm0,serial=rs2nvme"]);
     }
     let mut child = c.spawn().expect("start qemu");
     let Some(timeout) = o.timeout else {
