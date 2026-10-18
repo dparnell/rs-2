@@ -4,7 +4,8 @@
 //! cargo xtask build [--release]            build loader + kernel, stage work/esp
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG]
 //!                  [--hdd IMG] [--nvme IMG] [--usb-kbd] [--usb-mouse] [--usb-disk IMG]...
-//!                  [--usb-hub]... [--boot-hdd] [-- QEMU ARGS]
+//!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
+//!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs] [-o FILE]       test hard disk from work/disk.txt
 //! ```
@@ -15,7 +16,8 @@
 //! `--usb-disk` attaches a raw image as a USB stick (repeatable). Each
 //! `--usb-hub` adds a tier of USB hubs: the first sits on root port 1, each
 //! further one on port 8 of the previous, and the USB devices go behind
-//! the last. `--boot-hdd` leaves out the ESP directory, so the machine boots
+//! the last (ids `usbkbd`, `usbmouse`, `usbdisk0`... for `--monitor`
+//! device_del). `--boot-hdd` leaves out the ESP directory, so the machine boots
 //! from the attached disks (e.g. the ISO as a USB stick).
 
 mod hpfsimg;
@@ -42,6 +44,10 @@ struct Opts {
     /// Keystrokes to send (\n = Enter), and when (seconds after start).
     typing: Option<String>,
     type_at: Option<u64>,
+    /// QEMU monitor commands (separated by ';', "sleep N" pauses) to send,
+    /// and when.
+    monitor: Option<String>,
+    monitor_at: Option<u64>,
     /// Boot from this ISO (as a CD) instead of the ESP directory.
     iso: Option<PathBuf>,
     /// Attach this raw disk image as an extra hard disk.
@@ -75,6 +81,8 @@ fn parse(args: &[String]) -> Opts {
         qemu_extra: vec![],
         typing: None,
         type_at: None,
+        monitor: None,
+        monitor_at: None,
         iso: None,
         hdd: None,
         nvme: None,
@@ -126,6 +134,14 @@ fn parse(args: &[String]) -> Opts {
             "--type" => {
                 i += 1;
                 o.typing = Some(args[i].replace("\\n", "\n"));
+            }
+            "--monitor" => {
+                i += 1;
+                o.monitor = Some(args[i].clone());
+            }
+            "--monitor-at" => {
+                i += 1;
+                o.monitor_at = Some(args[i].parse().expect("--monitor-at seconds"));
             }
             "--type-at" => {
                 i += 1;
@@ -361,7 +377,19 @@ fn run(o: &Opts) -> bool {
     let deadline = start + Duration::from_secs(timeout);
     let mut typed = o.typing.is_none();
     let type_at = o.type_at.unwrap_or(timeout.saturating_sub(8));
+    let mut monitored = o.monitor.is_none();
     while Instant::now() < deadline {
+        if !monitored && start.elapsed() >= Duration::from_secs(o.monitor_at.unwrap_or(0)) {
+            monitored = true;
+            for cmd in o.monitor.as_deref().unwrap().split(';').map(str::trim) {
+                // "sleep N" waits N seconds between commands.
+                match cmd.strip_prefix("sleep ") {
+                    Some(n) => std::thread::sleep(Duration::from_secs(n.parse().expect("sleep seconds"))),
+                    None => monitor(&sock, cmd),
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
+        }
         if !typed && start.elapsed() >= Duration::from_secs(type_at) {
             typed = true;
             for key in keys(o.typing.as_deref().unwrap()) {
@@ -416,14 +444,14 @@ fn usb_devices(o: &Opts, c: &mut Command) {
         if hub.is_empty() { String::new() } else { format!(",port={hub}.{next}") }
     };
     if o.usb_kbd {
-        c.arg("-device").arg(format!("usb-kbd,bus=xhci.0{}", port()));
+        c.arg("-device").arg(format!("usb-kbd,bus=xhci.0,id=usbkbd{}", port()));
     }
     if o.usb_mouse {
-        c.arg("-device").arg(format!("usb-mouse,bus=xhci.0{}", port()));
+        c.arg("-device").arg(format!("usb-mouse,bus=xhci.0,id=usbmouse{}", port()));
     }
     for (n, d) in o.usb_disks.iter().enumerate() {
         c.arg("-drive").arg(format!("if=none,id=ud{n},format=raw,file={}", d.display()));
-        c.arg("-device").arg(format!("usb-storage,bus=xhci.0,drive=ud{n}{}", port()));
+        c.arg("-device").arg(format!("usb-storage,bus=xhci.0,drive=ud{n},id=usbdisk{n}{}", port()));
     }
 }
 
