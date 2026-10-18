@@ -10,7 +10,7 @@ use gpi::{Point, Ps, Rect, Surface};
 use crate::color;
 use crate::gpiapi;
 use crate::state::st;
-use crate::win::{WinBeginPaint, WinEndPaint, WinGetPS, WinReleasePS};
+use crate::win::{WinBeginPaint, WinEndPaint};
 
 pub const TEXT: u32 = 0x000000;
 pub const GRAY_TEXT: u32 = 0x808080;
@@ -52,15 +52,6 @@ pub fn paint(h: u32, f: impl FnOnce(&mut Canvas)) {
     let hps = WinBeginPaint(h, 0, core::ptr::null_mut());
     with(h, hps, f);
     WinEndPaint(hps);
-}
-
-/// Draw on a window outside WM_PAINT (immediate feedback).
-pub fn now(h: u32, f: impl FnOnce(&mut Canvas)) {
-    let hps = WinGetPS(h);
-    crate::pointer::hide(st());
-    with(h, hps, f);
-    crate::pointer::show(st());
-    WinReleasePS(hps);
 }
 
 fn with(h: u32, hps: u32, f: impl FnOnce(&mut Canvas)) {

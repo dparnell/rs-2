@@ -26,7 +26,6 @@ pub const FCF_BORDER: u32 = 0x0200;
 pub const FCF_SHELLPOSITION: u32 = 0x0400;
 pub const FCF_ACCELTABLE: u32 = 0x8000;
 pub const FCF_HIDEBUTTON: u32 = 0x0100_0000;
-pub const FCF_CLOSEBUTTON: u32 = 0x0400_0000;
 
 pub const FID_SYSMENU: u32 = 0x8002;
 pub const FID_TITLEBAR: u32 = 0x8003;
@@ -195,6 +194,7 @@ fn place(h: u32, r: Rect) {
 }
 
 /// Client rectangle of a frame, in frame coordinates.
+#[allow(dead_code)]
 pub fn client_rect(frame: u32) -> Rect {
     let client = st().frames.get(&frame).map_or(0, |f| f.client);
     match st().desk.get(client) {
@@ -258,6 +258,11 @@ fn maximize(h: u32, on: bool) {
     } else {
         menu::replace_id(mm, SC_RESTORE, SC_MAXIMIZE);
     }
+    let sys = WinWindowFromID(h, FID_SYSMENU);
+    menu::enable_item(sys, SC_RESTORE, on);
+    menu::enable_item(sys, SC_MAXIMIZE, !on && fcf(h) & FCF_MAXBUTTON != 0);
+    menu::enable_item(sys, SC_MOVE, !on);
+    menu::enable_item(sys, SC_SIZE, !on && fcf(h) & FCF_SIZEBORDER != 0);
     WinSetWindowPos(h, 0, target.0, target.1, target.2, target.3, 0x0003);
 }
 

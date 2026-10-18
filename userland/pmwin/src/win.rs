@@ -10,10 +10,10 @@ use pmwin::{ws, HWND_DESKTOP};
 
 use crate::color::{self, resolve};
 use crate::gpiapi::{self, PointL, RectL};
-use crate::msg::{post, send};
+use crate::msg::send;
 use crate::pointer;
 use crate::frame::{self, FCF_SHELLPOSITION, FID_CLIENT};
-use crate::state::{st, Class, Frame};
+use crate::state::{st, Class};
 
 pub const WM_CREATE: u32 = 0x0001;
 pub const WM_DESTROY: u32 = 0x0002;
@@ -281,11 +281,6 @@ pub extern "C" fn WinDestroyWindow(h: u32) -> u32 {
 }
 
 // ---- Position, visibility, z-order, activation ----
-
-/// Client rectangle of a frame, in frame coordinates.
-pub fn client_rect(frame: u32) -> Rect {
-    frame::client_rect(frame)
-}
 
 pub fn show(h: u32, on: bool) {
     let was = st().desk.get(h).is_some_and(|w| w.visible_style());

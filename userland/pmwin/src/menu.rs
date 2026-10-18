@@ -450,6 +450,16 @@ pub fn item_disabled(h: u32, id: u32) -> bool {
     find(h, id as u16, true).and_then(|(m, i)| item_ref(m, i)).is_some_and(|it| it.attr & MIA_DISABLED != 0)
 }
 
+/// Enable or disable an item (in submenus too).
+pub fn enable_item(h: u32, id: u32, on: bool) {
+    if let Some((m, i)) = find(h, id as u16, true) {
+        if let Some(it) = item_ref(m, i) {
+            it.attr = if on { it.attr & !MIA_DISABLED } else { it.attr | MIA_DISABLED };
+        }
+        ctl::invalidate(m);
+    }
+}
+
 /// Change an item's id (the maximize button becomes restore).
 pub fn replace_id(h: u32, old: u32, new: u32) {
     if let Some(it) = find(h, old as u16, false).and_then(|(m, i)| item_ref(m, i)) {

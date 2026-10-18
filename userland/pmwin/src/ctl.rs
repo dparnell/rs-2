@@ -5,7 +5,7 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use crate::msg::{post, send};
+use crate::msg::send;
 use crate::state::{st, Class};
 
 pub const WM_ENABLE: u32 = 0x0004;
@@ -181,11 +181,6 @@ pub fn invalidate(h: u32) {
 /// WM_CONTROL to the owner: mp1 = (id, code), mp2 = the control.
 pub fn notify(h: u32, code: u32) -> u32 {
     send(owner(h), WM_CONTROL, mp(id(h), code), h)
-}
-
-/// WM_COMMAND posted to the owner.
-pub fn command(h: u32, cmd: u32, src: u32, pointer: bool) {
-    post(owner(h), WM_COMMAND, cmd, mp(src, pointer as u32));
 }
 
 /// Mouse position of a mouse message.

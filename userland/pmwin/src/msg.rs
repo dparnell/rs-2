@@ -57,9 +57,6 @@ fn wait_reply(q: u32, id: u32) -> u32 {
         if let Some(i) = queue.replies.iter().position(|r| r.0 == id) {
             return queue.replies.swap_remove(i).1;
         }
-        if !queue.sent.iter().any(|m| m.id == id) && !st().queues.contains_key(&q) {
-            return 0;
-        }
         answer_sent();
         lock::sleep(1);
     }

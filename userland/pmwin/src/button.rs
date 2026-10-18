@@ -10,16 +10,14 @@ use crate::draw::{self, Canvas};
 use crate::lock::wndproc;
 use crate::msg::{post, WinDefWindowProc};
 use crate::state::st;
-use crate::win::{self, WM_BUTTON1DOWN, WM_BUTTON1UP, WM_CHAR, WM_MOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SYSCOMMAND};
+use crate::win::{WM_BUTTON1DOWN, WM_BUTTON1UP, WM_CHAR, WM_MOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SYSCOMMAND};
 
 const WM_CREATE: u32 = 0x0001;
 
 pub const BS_PUSHBUTTON: u32 = 0;
-pub const BS_CHECKBOX: u32 = 1;
 pub const BS_AUTOCHECKBOX: u32 = 2;
 pub const BS_RADIOBUTTON: u32 = 3;
 pub const BS_AUTORADIOBUTTON: u32 = 4;
-pub const BS_3STATE: u32 = 5;
 pub const BS_AUTO3STATE: u32 = 6;
 pub const BS_USERBUTTON: u32 = 7;
 const BS_HELP: u32 = 0x0100;
