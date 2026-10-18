@@ -90,6 +90,23 @@ pub fn child_storm(seed: u32) -> u32 {
     if storm(seed, 300) { 0 } else { 1 }
 }
 
+/// Child: commit and touch 64 MB blocks until memory runs out.
+pub fn child_oom() -> u32 {
+    let mut n = 0;
+    loop {
+        let mut p = null_mut();
+        let rc = unsafe { DosAllocMem(&mut p, 64 << 20, PAG_READ | PAG_WRITE | PAG_COMMIT) };
+        if rc != 0 {
+            // Address space or memory exhausted before a page fault failed.
+            return if n > 0 { 0 } else { 1 };
+        }
+        for i in 0..(64 << 20) / 4096 {
+            unsafe { *p.add(i * 4096) = 1 };
+        }
+        n += 1;
+    }
+}
+
 /// Child: get shared memory given to us at `addr`, add 1 to its first
 /// dword, return the new value.
 pub fn child_getshm(addr: u32) -> u32 {
@@ -208,6 +225,18 @@ pub fn run() {
         check("DosQueryMemState", rc == 0 && cb >= 0x1000 && fl & 1 != 0);
         DosFreeMem(p);
     }
+
+    // A child that touches more memory than the machine has: it fails
+    // (an exception ends it, or DosAllocMem says no), the system goes on
+    // and gets the memory back.
+    let before = avail_mem();
+    let (cause, code) = run_child("oom");
+    unsafe { DosSleep(100) };
+    let after = avail_mem();
+    if before.saturating_sub(after) > 256 * 1024 {
+        println!("  out-of-memory child: cause {cause} code {code}, {} KB not returned", before.saturating_sub(after) / 1024);
+    }
+    check("out-of-memory child ends and its memory comes back", (cause == 2 || (cause == 0 && code == 0)) && before.saturating_sub(after) <= 256 * 1024);
 
     // Physical memory comes back after processes end.
     let (_, _) = run_child("mem 1");

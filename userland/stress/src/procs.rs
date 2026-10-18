@@ -41,6 +41,7 @@ pub fn child(args: &[String]) -> u32 {
         "getshm" => crate::mem::child_getshm(num(rest, 0)),
         "namedshm" => crate::mem::child_namedshm(),
         "files" => crate::files::child_files(),
+        "oom" => crate::mem::child_oom(),
         _ => 255,
     }
 }

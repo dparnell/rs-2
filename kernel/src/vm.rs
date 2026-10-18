@@ -123,7 +123,7 @@ impl SharedMem {
     pub fn frame(&self, i: usize) -> Option<u64> {
         let mut f = self.frames.lock();
         if f[i] == 0 {
-            f[i] = phys::alloc()?;
+            f[i] = phys::alloc_user()?;
         }
         Some(f[i])
     }
@@ -511,7 +511,7 @@ impl AddressSpace {
             }
         }
         let frame = match &r.backing {
-            Backing::Private => phys::alloc(),
+            Backing::Private => phys::alloc_user(),
             Backing::Shared(s) => s.frame(i),
         };
         let Some(frame) = frame else { return Fault::NoMemory };
@@ -627,7 +627,7 @@ impl AddressSpace {
                 continue;
             }
             let frame = match &r.backing {
-                Backing::Private => phys::alloc(),
+                Backing::Private => phys::alloc_user(),
                 Backing::Shared(s) => s.frame(i),
             };
             let Some(frame) = frame else { return false };
