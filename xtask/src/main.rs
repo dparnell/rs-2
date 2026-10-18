@@ -359,6 +359,12 @@ fn run(o: &Opts) -> bool {
                     std::thread::sleep(Duration::from_secs(1));
                     continue;
                 }
+                // Mouse input: {mouse_move dx dy}, {mouse_button n}.
+                if key.starts_with("mouse_") {
+                    monitor(&sock, &key);
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
                 monitor(&sock, &format!("sendkey {key}"));
                 std::thread::sleep(Duration::from_millis(60));
             }
@@ -392,7 +398,8 @@ fn run(o: &Opts) -> bool {
 }
 
 /// QEMU key names for a string. "^X" is Ctrl+X, "{name}" a QEMU key name
-/// as is (e.g. {ctrl-esc}, {alt-esc}, {down}), "{sleep}" a one second pause.
+/// as is (e.g. {ctrl-esc}, {alt-esc}, {down}), "{sleep}" a one second pause,
+/// "{mouse_move dx dy}" / "{mouse_button n}" QEMU mouse commands.
 fn keys(s: &str) -> Vec<String> {
     let mut v = Vec::new();
     let mut ctrl = false;

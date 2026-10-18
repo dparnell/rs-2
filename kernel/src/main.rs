@@ -24,6 +24,7 @@ mod pipe;
 mod power;
 mod log;
 mod mm;
+mod mouse;
 mod npipe;
 mod rtc;
 mod screen;
@@ -75,6 +76,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     loader::init();
     infoseg::init();
     kbd::init();
+    mouse::init();
     arch::enable_interrupts();
     if !apic::init() {
         println!("apic: not available, using the 8259 PICs");

@@ -133,6 +133,7 @@ pub fn process_ended(pid: u32, code: u32) {
     crate::screen::destroy(s.id);
     crate::kbd::drop_queue(s.id);
     crate::console::drop_session(s.id);
+    crate::mouse::drop_session(s.id);
 }
 
 // ---- The window list (Ctrl+Esc) ----

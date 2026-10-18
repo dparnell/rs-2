@@ -13,13 +13,14 @@ Status markers: done, in progress, planned.
   DosExecPgm/DosCWait, threads, 16- and 32-bit semaphores, exception
   handling, exit lists, timers, queues, shared memory, resources,
   Ctrl+C signals, module APIs, CONFIG.SYS processing
-- done: VIO, KBD, MSG (message files), NLS
+- done: VIO, KBD, MOU (PS/2 and USB mice, text pointer), MSG (message files), NLS
 - done: the original CMD.EXE runs interactively; userland/apitest passes
+- done: DLL termination routines
 - done: named pipes (byte and message mode, DosTransactNPipe, DosCallNPipe)
 - done: sessions: DosStartSession/Select/Set/StopSession, a virtual screen
   and keyboard queue per session, Ctrl+Esc window list, Alt+Esc
 - planned:
-  DosDevIOCtl coverage, bound message segments, DLL termination routines,
+  DosDevIOCtl coverage, bound message segments,
   semaphore and memory corner cases found by running more programs
 
 ## Milestone 2: storage and installed systems (in progress)

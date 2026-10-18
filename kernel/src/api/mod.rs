@@ -15,6 +15,7 @@ pub mod file;
 pub mod ioctl;
 pub mod kbdapi;
 pub mod module;
+pub mod mou;
 pub mod msg;
 pub mod nls;
 pub mod npipe;

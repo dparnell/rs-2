@@ -279,6 +279,8 @@ fn mouse_report(s: &mut State, data: &[u8], now: u64) {
     }
     s.events.push_back(ev);
     MOUSE_WAITERS.wake_all();
+    // USB y grows downwards, as the mouse layer expects.
+    crate::mouse::motion(ev.buttons, ev.dx, ev.dy);
 }
 
 /// Typematic repeat; called from the USB poll.
