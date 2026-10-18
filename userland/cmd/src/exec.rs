@@ -205,6 +205,12 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
     let mut block = Vec::new();
     block.extend_from_slice(name.as_bytes());
     block.push(0);
+    // IBM's CMD.EXE starts the argument string with the blank that
+    // separated it from the program name; some IBM utilities (FIND) rely
+    // on that.
+    if !args.is_empty() {
+        block.push(b' ');
+    }
     block.extend_from_slice(args.as_bytes());
     block.push(0);
     block.push(0);

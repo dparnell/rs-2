@@ -72,6 +72,9 @@ fn exec(c: &mut Ctx) -> u32 {
         let rest = c.read_str(pargs + a0.len() as u32 + 1, 4096).unwrap_or_default();
         (a0, rest)
     };
+    if super::tracing() {
+        crate::trace!("    argv0 {argv0:?} args {args:?}");
+    }
     let env = if penv == 0 { parent_env(c) } else { read_block(c, penv, 4096).unwrap_or_default() };
     let mut path = match super::file::resolve(c, &name) {
         Ok(p) => p,

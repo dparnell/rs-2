@@ -101,7 +101,7 @@ pub fn all() -> Vec<Arc<Process>> {
 /// Build the environment block: `VAR=VALUE\0...\0` followed by the command
 /// line `program\0arguments\0\0`. Returns the block and the offset of the
 /// command line.
-fn env_block(env: &[String], program: &str, args: &str) -> (Vec<u8>, u32) {
+fn env_block(env: &[String], path: &str, program: &str, args: &str) -> (Vec<u8>, u32) {
     let mut b = Vec::new();
     for e in env {
         b.extend_from_slice(e.as_bytes());
@@ -110,6 +110,11 @@ fn env_block(env: &[String], program: &str, args: &str) -> (Vec<u8>, u32) {
     if env.is_empty() {
         b.push(0);
     }
+    b.push(0);
+    // OS/2 puts the program's full path between the environment and the
+    // command line; CMD.EXE finds the end of the environment by walking
+    // back over it from the command line.
+    b.extend_from_slice(path.as_bytes());
     b.push(0);
     let cmd = b.len() as u32;
     b.extend_from_slice(program.as_bytes());
@@ -138,11 +143,15 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
     let start = exe.start.ok_or(loader::err::INVALID_MODULETYPE)?;
 
     // Environment (its own tile so 16-bit code gets a selector for it).
-    let (block, cmd_off) = env_block(&p.env, p.program, p.args);
+    let (block, cmd_off) = env_block(&p.env, p.path, p.program, p.args);
     let env = space
         .alloc(block.len() as u32, pag::READ | pag::WRITE | pag::COMMIT, SegKind::Data, None)
         .map_err(|e| e.code())?;
     space.poke_bytes(env, &block);
+    // The segment is exactly as long as the block, as on OS/2: CMD.EXE
+    // sizes the environment with DosSizeSeg and keeps the command line at
+    // the end of the segment when it adds variables.
+    space.set_seg_limit(env, block.len() as u32 - 1);
 
     // Information area: PIB, TIBs, local infoseg.
     let info = space

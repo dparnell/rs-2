@@ -26,6 +26,7 @@ pub mod sem;
 pub mod shmem;
 pub mod submem;
 pub mod sysstate;
+pub mod thunk;
 pub mod timer;
 pub mod vio;
 pub mod names;
@@ -232,6 +233,12 @@ impl Ctx<'_> {
         self.no_return = true;
     }
 
+    /// Linear address of the first argument byte (above the return
+    /// address).
+    pub fn args_base(&self) -> u32 {
+        self.args_at
+    }
+
     pub fn space(&self) -> SpinGuard<'_, AddressSpace> {
         self.process.space.lock()
     }
@@ -379,6 +386,10 @@ pub fn dispatch(f: &mut TrapFrame) {
     }
     if module == 0 && ordinal == module::INIT_RETURN_ORDINAL {
         module::returned(f, &process, &thread);
+        return;
+    }
+    if module == 0 && ordinal == thunk::UNITHUNK_RETURN_ORDINAL {
+        thunk::returned(f, thread.id);
         return;
     }
     if module == 0 && ordinal == exceptions::HANDLER_RETURN_ORDINAL {

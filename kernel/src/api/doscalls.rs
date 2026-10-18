@@ -180,6 +180,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 147) => super::submem::dos16_sub_alloc,
         (0, 148) => super::submem::dos16_sub_free,
         (0, 368) => super::sysstate::dos_query_sys_state,
+        (0, 576) => super::thunk::thk16_unithunk,
         (0, 344) => super::submem::dos_sub_set_mem,
         (0, 345) => super::submem::dos_sub_alloc_mem,
         (0, 346) => super::submem::dos_sub_free_mem,
@@ -327,6 +328,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 988) => file::dos_set_file_ptr_l,
         (0, 989) => file::dos_set_file_size_l,
         (0, 426) => dos_sel_to_flat,
+        (0, 423) => dos16_flat_to_sel,
+        (0, 424) => dos16_sel_to_flat,
         _ => return None,
     };
     Some(h)
@@ -601,6 +604,9 @@ fn dos16_realloc_seg(c: &mut Ctx) -> u32 {
         n => n,
     };
     let base = vm::tiled_flat(c.arg(1) as u16, 0);
+    if super::tracing() {
+        crate::trace!("    realloc sel {:x} size {:x}", c.arg(1), size);
+    }
     let mut sp = c.space();
     let Some(r) = sp.regions.get(&base) else { return err::INVALID_ACCESS };
     let cur = r.size;
@@ -700,6 +706,20 @@ fn dos_flat_to_sel(c: &mut Ctx) -> u32 {
     // value on the stack for _System callers.
     let a = c.f.rax as u32;
     (vm::tile_selector(a) as u32) << 16 | (a & 0xffff)
+}
+
+/// 16-bit DosFlatToSel / DosSelToFlat: EAX in, all of EAX out (the gate
+/// return only replaces AX, so EAX is set here as well).
+fn dos16_flat_to_sel(c: &mut Ctx) -> u32 {
+    let v = dos_flat_to_sel(c);
+    c.f.rax = v as u64;
+    v
+}
+
+fn dos16_sel_to_flat(c: &mut Ctx) -> u32 {
+    let v = dos_sel_to_flat(c);
+    c.f.rax = v as u64;
+    v
 }
 
 fn dos_sel_to_flat(c: &mut Ctx) -> u32 {
