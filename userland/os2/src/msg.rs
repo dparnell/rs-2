@@ -106,6 +106,10 @@ unsafe extern "C" {
     pub fn DosQueryCp(cb: u32, cps: *mut u32, pcb: *mut u32) -> APIRET;
     #[link_name = "DOSCALLS.289"]
     pub fn DosSetProcessCp(cp: u32) -> APIRET;
+    /// DosSetCp: the process code page and the session's display and
+    /// keyboard code pages.
+    #[link_name = "DOSCALLS.288"]
+    pub fn DosSetCp(cp: u32) -> APIRET;
 }
 
 /// DosQueryMessageCP: code pages and language of a message file.

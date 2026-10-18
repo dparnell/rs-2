@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 /// A NUL-terminated copy of `s` for passing to the API.
 pub fn cstr(s: &str) -> Vec<u8> {
-    let mut v: Vec<u8> = s.bytes().collect();
+    let mut v: Vec<u8> = crate::text_bytes(s).into_owned();
     v.push(0);
     v
 }

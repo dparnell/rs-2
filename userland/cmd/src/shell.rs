@@ -38,9 +38,9 @@ impl Shell {
     pub fn env_block(&self) -> Vec<u8> {
         let mut b = Vec::new();
         for (k, v) in &self.env {
-            b.extend_from_slice(k.as_bytes());
+            b.extend_from_slice(&os2::text_bytes(k));
             b.push(b'=');
-            b.extend_from_slice(v.as_bytes());
+            b.extend_from_slice(&os2::text_bytes(v));
             b.push(0);
         }
         b.push(0);
@@ -55,8 +55,9 @@ impl Shell {
         let mut i = 0;
         while i < b.len() {
             if b[i] != b'%' {
-                out.push(b[i] as char);
-                i += 1;
+                let ch = line[i..].chars().next().unwrap_or('?');
+                out.push(ch);
+                i += ch.len_utf8();
                 continue;
             }
             if i + 1 < b.len() && b[i + 1] == b'%' {
