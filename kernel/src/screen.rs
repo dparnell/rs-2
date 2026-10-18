@@ -196,16 +196,39 @@ impl Screen {
     /// Scroll rows `top..=bottom` up by `n`, filling with `fill`.
     pub fn scroll_up(&mut self, top: usize, bottom: usize, n: usize, fill: u16) {
         let bottom = bottom.min(self.rows - 1);
-        if top > bottom {
+        if top > bottom || n == 0 {
             return;
         }
+        let n = n.min(bottom - top + 1);
         for r in top..=bottom {
             for c in 0..self.cols {
                 self.cells[r][c] = if r + n <= bottom { self.cells[r + n][c] } else { fill };
             }
         }
-        for r in top..=bottom {
+        // Move the pixels of the surviving rows in one copy, then draw only
+        // the rows that came into view.
+        let stride = self.fb.stride as usize;
+        let row_px = CELL_H * stride;
+        let keep = bottom + 1 - top - n;
+        if keep > 0 {
+            unsafe {
+                let dst = self.pixels.add((self.y0 + top * CELL_H) * stride);
+                let src = dst.add(n * row_px);
+                core::ptr::copy(src, dst, keep * row_px);
+            }
+        }
+        let hide = self.cursor;
+        for r in top + keep..=bottom {
             for c in 0..self.cols {
+                self.draw(r, c);
+            }
+        }
+        // The cursor may have been moved along with the pixels.
+        if let Some((r, c)) = hide {
+            if r >= top && r <= bottom && r >= n {
+                self.draw(r - n, c);
+            }
+            if r < self.rows && c < self.cols {
                 self.draw(r, c);
             }
         }
