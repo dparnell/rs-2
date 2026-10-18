@@ -529,3 +529,48 @@ fn devices(_b: &Buf) {
     }
     check("DosError disable/enable", unsafe { DosError(0) } == 0 && unsafe { DosError(1) } == 0 && unsafe { DosError(4) } == 87);
 }
+
+/// `apitest keys`: a keyboard monitor sees the next keystrokes (make and
+/// break), passes them on, and the program reads them with KbdCharIn.
+pub fn keys() {
+    let mut mem = null_mut();
+    if unsafe { DosAllocMem(&mut mem, 0x10000, PAG_READ | PAG_WRITE | PAG_COMMIT) } != 0 {
+        return;
+    }
+    let b = Buf(mem);
+    let (n, h) = (b.p(0x10), b.p(0));
+    b.bytes(0x10, 5).copy_from_slice(b"KBD$\0");
+    let rc = call(DOSMONOPEN, &[n[0], n[1], h[0], h[1]]);
+    let hm = w16(&b, 0);
+    set16(&b, 0x100, 128);
+    set16(&b, 0x200, 128);
+    let (i, o) = (b.p(0x100), b.p(0x200));
+    let rc2 = call(DOSMONREG, &[hm, i[0], i[1], o[0], o[1], 1, 0xffff]);
+    println!("monitor open {rc} reg {rc2}: press a key");
+    // A make and its break.
+    for _ in 0..2 {
+        set16(&b, 0x300, 64);
+        let (d, cb) = (b.p(0x400), b.p(0x300));
+        let rc = call(DOSMONREAD, &[i[0], i[1], 0, d[0], d[1], cb[0], cb[1]]);
+        let len = w16(&b, 0x300);
+        let p = b.bytes(0x400, len as usize);
+        if rc != 0 || len < 14 {
+            println!("DosMonRead {rc}");
+            break;
+        }
+        println!(
+            "packet: raw {:02x} char {:02x} scan {:02x} status {:02x} shift {:04x} ddflags {:04x}",
+            p[1],
+            p[2],
+            p[3],
+            p[4],
+            u16::from_le_bytes([p[6], p[7]]),
+            u16::from_le_bytes([p[12], p[13]])
+        );
+        call(DOSMONWRITE, &[o[0], o[1], d[0], d[1], len]);
+    }
+    let (ch, scan, st) = key_in(&b, true);
+    println!("KbdCharIn after the monitor: char {ch:02x} scan {scan:02x} status {st:02x}");
+    call(DOSMONCLOSE, &[hm]);
+    unsafe { DosFreeMem(mem) };
+}

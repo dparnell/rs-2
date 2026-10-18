@@ -27,6 +27,10 @@ fn check(name: &str, ok: bool) {
 
 fn main(s: &Startup) -> u32 {
     println!("rs2 apitest, args: {:?}", core::str::from_utf8(s.args()).unwrap_or("?"));
+    if core::str::from_utf8(s.args()).is_ok_and(|a| a.trim() == "keys") {
+        console::keys();
+        return 0;
+    }
     info_blocks();
     memory();
     suballoc();
