@@ -162,6 +162,14 @@ impl Module {
             if m == 0 && (ordinal == 295 || ordinal == 370) {
                 return Ok(Target::constant(crate::arch::gdt::USER_DS));
             }
+            // DOSHUGESHIFT (135) and DOSHUGEINCR (136): tiled selectors of
+            // a huge segment are 8 apart.
+            if m == 0 && ordinal == 135 {
+                return Ok(Target::constant(3));
+            }
+            if m == 0 && ordinal == 136 {
+                return Ok(Target::constant(8));
+            }
             let a = gate::slot_address(m, ordinal);
             // Kernel APIs reachable both flat and 16:16.
             let mut t = Target::flat32(a, true);

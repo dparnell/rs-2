@@ -451,7 +451,14 @@ unsafe extern "C" {
     pub fn DosSubUnsetMem(base: *mut u8) -> APIRET;
 }
 
+pub const DCPY_EXISTING: u32 = 1;
+pub const DCPY_APPEND: u32 = 2;
+
 unsafe extern "C" {
+    #[link_name = "DOSCALLS.258"]
+    pub fn DosCopy(source: *const u8, target: *const u8, options: u32) -> APIRET;
+    #[link_name = "DOSCALLS.110"]
+    pub fn DosForceDelete(name: *const u8) -> APIRET;
     #[link_name = "DOSCALLS.261"]
     pub fn DosEditName(level: u32, source: *const u8, edit: *const u8, target: *mut u8, cb: u32) -> APIRET;
 }

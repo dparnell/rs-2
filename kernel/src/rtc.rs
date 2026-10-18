@@ -60,6 +60,42 @@ pub fn now() -> DateTime {
     }
 }
 
+fn cmos_write(reg: u8, v: u8) {
+    unsafe {
+        outb(0x70, reg);
+        outb(0x71, v);
+    }
+}
+
+/// Set the clock (DosSetDateTime).
+pub fn set(t: &DateTime) {
+    let status_b = cmos(0x0b);
+    let bcd = status_b & 0x04 == 0;
+    let enc = |v: u8| if bcd { (v / 10) << 4 | (v % 10) } else { v };
+    let mut hour = t.hour;
+    if status_b & 0x02 == 0 {
+        // 12-hour mode: 1-12 with bit 7 for PM.
+        let pm = hour >= 12;
+        hour %= 12;
+        if hour == 0 {
+            hour = 12;
+        }
+        hour = enc(hour) | if pm { 0x80 } else { 0 };
+    } else {
+        hour = enc(hour);
+    }
+    // Hold updates while writing.
+    cmos_write(0x0b, status_b | 0x80);
+    cmos_write(0x00, enc(t.second));
+    cmos_write(0x02, enc(t.minute));
+    cmos_write(0x04, hour);
+    cmos_write(0x07, enc(t.day));
+    cmos_write(0x08, enc(t.month));
+    cmos_write(0x09, enc((t.year % 100) as u8));
+    cmos_write(0x32, enc((t.year / 100) as u8));
+    cmos_write(0x0b, status_b & !0x80);
+}
+
 /// Day of week, 0 = Sunday (Sakamoto's method).
 pub fn weekday(y: u16, m: u8, d: u8) -> u8 {
     const T: [u16; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];

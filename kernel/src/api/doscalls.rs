@@ -208,6 +208,15 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 34) => dos16_alloc_seg,
         (0, 38) => dos16_realloc_seg,
         (0, 39) => dos16_free_seg,
+        (0, 28) => dos16_set_date_time,
+        (0, 292) => dos_set_date_time,
+        (0, 40) => dos16_alloc_huge,
+        (0, 41) => dos16_get_huge_shift,
+        (0, 210) => ok, // DosSetVerify
+        (0, 110) | (0, 203) => file::dos_delete, // DosForceDelete (no DELDIR)
+        (0, 185) => file::dos_create_dir,       // DosMkDir2 (EAs ignored)
+        (0, 201) | (0, 258) => file::dos_copy,
+        (0, 417) => file::dos_replace_module,
         (0, 126) => dos16_size_seg,
         (0, 47) => dos16_get_mod_handle,
         (0, 48) => dos16_get_mod_name,
@@ -481,6 +490,68 @@ fn write_datetime(c: &Ctx, a: u32) -> u32 {
     b[8..10].copy_from_slice(&(-1i16).to_le_bytes());
     b[10] = t.weekday;
     if c.write(a, &b) { 0 } else { err::INVALID_ADDRESS }
+}
+
+/// DosSetDateTime(pDateTime): DATETIME as for DosGetDateTime.
+fn set_datetime(c: &Ctx, a: u32) -> u32 {
+    let Some(b) = c.read_vec(a, 8) else { return err::INVALID_ADDRESS };
+    let year = u16::from_le_bytes([b[6], b[7]]);
+    let t = crate::rtc::DateTime {
+        hour: b[0],
+        minute: b[1],
+        second: b[2],
+        day: b[4],
+        month: b[5],
+        year,
+        weekday: crate::rtc::weekday(year, b[5], b[4]),
+    };
+    let days = [31, if year % 4 == 0 && (year % 100 != 0 || year % 400 == 0) { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    if t.hour > 23 || t.minute > 59 || t.second > 59 || b[3] > 99 || !(1..=12).contains(&t.month) || !(1980..=2079).contains(&year)
+        || t.day == 0 || t.day > days[t.month as usize - 1]
+    {
+        return err::TS_DATETIME;
+    }
+    crate::rtc::set(&t);
+    0
+}
+
+fn dos16_set_date_time(c: &mut Ctx) -> u32 {
+    set_datetime(c, c.ptr(0))
+}
+
+fn dos_set_date_time(c: &mut Ctx) -> u32 {
+    set_datetime(c, c.arg(0))
+}
+
+/// DosAllocHuge(cSegs, cbPartial, psel, cMaxSegs, fsAlloc): consecutive
+/// tiles, so the selectors step by the huge increment (8).
+fn dos16_alloc_huge(c: &mut Ctx) -> u32 {
+    let (nsegs, partial, psel, flags) = (c.arg(0), c.arg(1), c.ptr(2), c.arg(4));
+    if flags & 3 != 0 {
+        return err::INVALID_PARAMETER; // shared huge segments: not yet
+    }
+    let size = nsegs * 0x10000 + partial;
+    if size == 0 {
+        return err::INVALID_PARAMETER;
+    }
+    let r = c.space().alloc(size, pag::READ | pag::WRITE | pag::COMMIT, SegKind::Data, None);
+    match r {
+        Ok(base) => {
+            if partial != 0 {
+                c.space().set_seg_limit(base + nsegs * 0x10000, partial - 1);
+            }
+            c.write_u16(psel, vm::tile_selector(base));
+            0
+        }
+        Err(_) => err::NOT_ENOUGH_MEMORY,
+    }
+}
+
+/// DosGetHugeShift(pusShiftCount): selectors of a huge object are
+/// 1 << 3 apart.
+fn dos16_get_huge_shift(c: &mut Ctx) -> u32 {
+    c.write_u16(c.ptr(0), 3);
+    0
 }
 
 fn dos16_get_date_time(c: &mut Ctx) -> u32 {

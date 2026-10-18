@@ -185,6 +185,23 @@ fn files() {
         );
         check("DosFindFirst", rc == 0 && count == 1 && fb.cb_file == msg.len() as u32);
         DosFindClose(hdir);
+        // DosCopy: new target, refusal without DCPY_EXISTING, replace, append.
+        let size_of = |p: &[u8]| -> u32 {
+            let mut fs: FileFindBuf3 = core::mem::zeroed();
+            let mut h = HDIR_CREATE;
+            let mut n = 1;
+            let rc = DosFindFirst(p.as_ptr(), &mut h, 0, &mut fs as *mut _ as *mut u8, core::mem::size_of::<FileFindBuf3>() as u32, &mut n, FIL_STANDARD);
+            DosFindClose(h);
+            if rc == 0 { fs.cb_file } else { u32::MAX }
+        };
+        let src = b"C:\\APITEST.TMP\0".as_ptr();
+        let dst = b"C:\\APICOPY.TMP\0";
+        let l = msg.len() as u32;
+        check("DosCopy", DosCopy(src, dst.as_ptr(), 0) == 0 && size_of(dst) == l);
+        check("DosCopy existing refused", DosCopy(src, dst.as_ptr(), 0) != 0);
+        check("DosCopy DCPY_EXISTING", DosCopy(src, dst.as_ptr(), DCPY_EXISTING) == 0 && size_of(dst) == l);
+        check("DosCopy DCPY_APPEND", DosCopy(src, dst.as_ptr(), DCPY_APPEND) == 0 && size_of(dst) == 2 * l);
+        check("DosForceDelete", DosForceDelete(dst.as_ptr()) == 0 && size_of(dst) == u32::MAX);
         check("DosDelete", DosDelete(b"C:\\APITEST.TMP\0".as_ptr()) == 0);
         check("DosCreateDir", DosCreateDir(b"C:\\APIDIR\0".as_ptr(), null_mut()) == 0);
         check("DosDeleteDir", DosDeleteDir(b"C:\\APIDIR\0".as_ptr()) == 0);

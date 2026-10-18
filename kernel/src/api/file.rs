@@ -790,13 +790,15 @@ pub fn dos_query_file_info(c: &mut Ctx) -> u32 {
     write_status(c, &info, level, buf, cb)
 }
 
-fn parse_set_info(c: &Ctx, buf: u32, cb: u32) -> Option<SetInfo> {
-    let raw = c.read_vec(buf, cb.min(24))?;
+/// FILESTATUS (level 1) or FILESTATUS3L (level 11, 64-bit sizes: the
+/// attributes move from offset 20 to 28).
+fn parse_set_info(c: &Ctx, buf: u32, cb: u32, level: u32) -> Option<SetInfo> {
+    let raw = c.read_vec(buf, cb.min(32))?;
     if raw.len() < 12 {
         return None;
     }
     let st = |i: usize| Stamp { date: u16::from_le_bytes([raw[i], raw[i + 1]]), time: u16::from_le_bytes([raw[i + 2], raw[i + 3]]) };
-    let attr_off = 20;
+    let attr_off = if level == 11 { 28 } else { 20 };
     let attr = if raw.len() >= attr_off + 2 { Some(u16::from_le_bytes([raw[attr_off], raw[attr_off + 1]]) as u32) } else { None };
     Some(SetInfo { attr, created: Some(st(0)), accessed: Some(st(4)), modified: Some(st(8)) })
 }
@@ -804,25 +806,25 @@ fn parse_set_info(c: &Ctx, buf: u32, cb: u32) -> Option<SetInfo> {
 pub fn dos_set_path_info(c: &mut Ctx) -> u32 {
     // DosSetPathInfo(psz, level, pInfo, cbInfo, flOptions)
     let (level, buf, cb) = if c.is16 { (c.arg(1), c.ptr(2), c.arg(3)) } else { (c.arg(1), c.arg(2), c.arg(3)) };
-    if level == 2 {
+    if level == 2 || level == 12 {
         return 0; // EAs: accepted, not stored yet
     }
-    if level != 1 {
+    if level != 1 && level != 11 {
         return err::INVALID_LEVEL;
     }
-    let Some(info) = parse_set_info(c, buf, cb) else { return err::INVALID_ADDRESS };
+    let Some(info) = parse_set_info(c, buf, cb, level) else { return err::INVALID_ADDRESS };
     path_op(c, 0, |f, p| f.set_info(&p.rel(), &info))
 }
 
 pub fn dos_set_file_info(c: &mut Ctx) -> u32 {
     let (hf, level, buf, cb) = if c.is16 { (c.arg(0), c.arg(1), c.ptr(2), c.arg(3)) } else { (c.arg(0), c.arg(1), c.arg(2), c.arg(3)) };
-    if level == 2 {
+    if level == 2 || level == 12 {
         return 0;
     }
-    if level != 1 {
+    if level != 1 && level != 11 {
         return err::INVALID_LEVEL;
     }
-    let Some(info) = parse_set_info(c, buf, cb) else { return err::INVALID_ADDRESS };
+    let Some(info) = parse_set_info(c, buf, cb, level) else { return err::INVALID_ADDRESS };
     match get(c, hf) {
         Some(Handle::File(f)) => f.file.set_info(&info).err().unwrap_or(0),
         Some(_) => 0,
@@ -1361,4 +1363,123 @@ pub fn dos_enum_attribute(c: &mut Ctx) -> u32 {
         return err::INVALID_ADDRESS;
     }
     0
+}
+
+// ---- DosCopy ----
+
+const DCPY_EXISTING: u32 = 1;
+const DCPY_APPEND: u32 = 2;
+
+fn child(p: &FullPath, name: &str) -> FullPath {
+    let mut c = p.clone();
+    c.parts.push(String::from(name));
+    c
+}
+
+/// Copy a file or a directory tree.
+pub fn copy_path(src: &FullPath, dst: &FullPath, opt: u32) -> Result<(), u32> {
+    let sfs = fs::fs_of(src)?;
+    let dfs = fs::fs_of(dst)?;
+    let info = sfs.stat(&src.rel())?;
+    if info.is_dir() {
+        match dfs.stat(&dst.rel()) {
+            Ok(d) if d.is_dir() => {}
+            Ok(_) => return Err(err::ACCESS_DENIED),
+            Err(_) => dfs.mkdir(&dst.rel())?,
+        }
+        for e in sfs.list(&src.rel())? {
+            if e.name == "." || e.name == ".." {
+                continue;
+            }
+            copy_path(&child(src, &e.name), &child(dst, &e.name), opt)?;
+        }
+        return Ok(());
+    }
+    let from = sfs.open(&src.rel())?;
+    let existing = dfs.stat(&dst.rel()).ok();
+    if existing.as_ref().is_some_and(|d| d.is_dir()) {
+        return copy_path(src, &child(dst, src.file_name()), opt);
+    }
+    let (to, mut at) = match existing {
+        Some(_) if opt & DCPY_APPEND != 0 => {
+            let f = dfs.open(&dst.rel())?;
+            let n = f.size();
+            (f, n)
+        }
+        Some(d) if opt & DCPY_EXISTING != 0 => {
+            if d.attr & attr::READONLY != 0 {
+                return Err(err::ACCESS_DENIED);
+            }
+            let f = dfs.open(&dst.rel())?;
+            f.set_size(0)?;
+            (f, 0)
+        }
+        Some(_) => return Err(err::ACCESS_DENIED),
+        None => (dfs.create(&dst.rel(), info.attr & 0x27)?, 0),
+    };
+    let mut buf = alloc::vec![0u8; 0x10000];
+    let mut off = 0u64;
+    loop {
+        let n = from.read(off, &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        to.write(at, &buf[..n])?;
+        off += n as u64;
+        at += n as u64;
+    }
+    let _ = to.set_info(&SetInfo {
+        attr: Some(info.attr & 0x27),
+        created: Some(info.created),
+        accessed: Some(info.accessed),
+        modified: Some(info.modified),
+    });
+    to.flush()
+}
+
+/// DosCopy(pszSource, pszTarget, ulOptions)
+pub fn dos_copy(c: &mut Ctx) -> u32 {
+    let (ps, pd, opt) = if c.is16 { (c.ptr(0), c.ptr(1), c.arg(2)) } else { (c.arg(0), c.arg(1), c.arg(2)) };
+    let (src, dst) = match (read_path(c, ps), read_path(c, pd)) {
+        (Ok(s), Ok(d)) => (s, d),
+        (Err(e), _) | (_, Err(e)) => return e,
+    };
+    if path::has_wildcards(&src) || path::has_wildcards(&dst) {
+        return err::INVALID_NAME;
+    }
+    let (s, d) = match (resolve(c, &src), resolve(c, &dst)) {
+        (Ok(s), Ok(d)) => (s, d),
+        (Err(e), _) | (_, Err(e)) => return e,
+    };
+    if super::tracing() {
+        crate::trace!("    copy {} -> {}", s.display(), d.display());
+    }
+    copy_path(&s, &d, opt).err().unwrap_or(0)
+}
+
+/// DosReplaceModule(pszOld, pszNew, pszBackup): modules are not locked
+/// while in use here, so this is a copy (with an optional backup first).
+pub fn dos_replace_module(c: &mut Ctx) -> u32 {
+    let (pold, pnew, pbak) = (c.arg(0), c.arg(1), c.arg(2));
+    let old = match read_path(c, pold).and_then(|n| resolve(c, &n)) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    if pbak != 0 {
+        let bak = match read_path(c, pbak).and_then(|n| resolve(c, &n)) {
+            Ok(p) => p,
+            Err(e) => return e,
+        };
+        if let Err(e) = copy_path(&old, &bak, DCPY_EXISTING) {
+            return e;
+        }
+    }
+    if pnew == 0 {
+        return 0;
+    }
+    let new = match read_path(c, pnew).and_then(|n| resolve(c, &n)) {
+        Ok(p) => p,
+        Err(e) => return e,
+    };
+    copy_path(&new, &old, DCPY_EXISTING).err().unwrap_or(0)
 }
