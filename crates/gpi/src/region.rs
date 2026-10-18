@@ -286,3 +286,20 @@ mod tests {
         assert_eq!(g.rects(), alloc::vec![Rect::new(2, 0, 8, 4)]);
     }
 }
+
+#[cfg(test)]
+mod more_tests {
+    use super::*;
+
+    #[test]
+    fn xor_then_clip() {
+        let a = Region::from_rect(Rect::new(370, 205, 470, 305));
+        let b = Region::from_rect(Rect::new(430, 235, 530, 325));
+        let mut c = a.combine(&b, Op::Xor);
+        assert!(c.contains(Point::new(380, 250)));
+        c.offset(147, 104);
+        let vis = Region::from_rects(&[Rect::new(147, 104, 877, 650)]);
+        let g = vis.combine(&c, Op::And);
+        assert!(g.contains(Point::new(527, 354)), "{:?}", g.rects());
+    }
+}

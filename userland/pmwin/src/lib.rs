@@ -11,6 +11,8 @@ extern crate os2;
 mod color;
 mod exports;
 mod gpiapi;
+mod gpiobj;
+mod gpitext;
 mod misc;
 mod msg;
 mod pointer;

@@ -1,0 +1,9 @@
+[package]
+name = "gpitest"
+description = "Exercises PMGPI: self-checks on memory bitmaps (PASS/FAIL) and a window showing the primitives"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

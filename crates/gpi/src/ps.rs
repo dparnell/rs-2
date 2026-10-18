@@ -1719,3 +1719,22 @@ mod tests {
         assert!(!ps.pop_attrs(1));
     }
 }
+
+#[cfg(test)]
+mod clip_tests {
+    use super::*;
+    use alloc::vec;
+
+    #[test]
+    fn clip_region_with_origin() {
+        let mut buf = vec![0xffffffu32; 200 * 200];
+        let mut s = unsafe { Surface::new(buf.as_mut_ptr(), 200, 200, 200, false) };
+        let mut ps = Ps::new(Point::new(50, 50), vec![Rect::new(50, 50, 150, 150), Rect::new(0, 0, 10, 10)]);
+        ps.set_clip_region(Some(Region::from_rect(Rect::new(10, 10, 40, 40))));
+        assert_eq!(ps.clip, vec![Rect::new(60, 60, 90, 90)]);
+        ps.gpi_move(Point::new(0, 20));
+        ps.gpi_line(&mut s, Point::new(99, 20));
+        assert_eq!(s.get(70, 70), Some(0));
+        assert_eq!(s.get(55, 70), Some(0xffffff));
+    }
+}
