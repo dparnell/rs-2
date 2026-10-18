@@ -555,7 +555,21 @@ fn monitor(sock: &Path, cmd: &str) {
             let mut buf = [0u8; 4096];
             let _ = s.read(&mut buf);
             let _ = writeln!(s, "{cmd}");
-            let _ = s.read(&mut buf);
+            // Show what queries ("info registers", ...) answer.
+            if cmd.starts_with("info") || cmd.starts_with("x ") || cmd.starts_with("xp ") {
+                std::thread::sleep(Duration::from_millis(300));
+                let mut out = Vec::new();
+                while let Ok(n) = s.read(&mut buf) {
+                    if n == 0 {
+                        break;
+                    }
+                    out.extend_from_slice(&buf[..n]);
+                }
+                eprintln!("monitor {cmd}:
+{}", String::from_utf8_lossy(&out));
+            } else {
+                let _ = s.read(&mut buf);
+            }
         }
         Err(e) => eprintln!("monitor: {e}"),
     }

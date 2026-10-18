@@ -156,7 +156,9 @@ fn read_table(c: &Ctx, table: u32, count: u32) -> Option<Vec<Vec<u8>>> {
     for i in 0..count.min(9) {
         let raw = c.read_u32(table + i * 4)?;
         let p = if c.is16 { c.far16_to_flat(raw) } else { raw };
-        let s = c.read_str(p, 1024)?;
+        // OS/2 only touches the strings the message refers to: unused
+        // slots may hold anything (SYSLEVEL passes NULLs).
+        let s = c.read_str(p, 1024).unwrap_or_default();
         v.push(s.into_bytes());
     }
     Some(v)
