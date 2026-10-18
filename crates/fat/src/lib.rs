@@ -1328,9 +1328,9 @@ mod tests {
             assert!(t.recovered >= 1);
             assert!(v.lookup("FILE0000.CHK").is_ok());
             assert_eq!(v.lookup("DIR\\B.TXT").unwrap().size, 20_000u32.div_ceil(cs) * cs);
-            // After repair only the (unfixable) cross-link remains.
+            // The cross-linked file was cut before the shared cluster.
             let (f, t) = scan(&mut v, false);
-            assert!(f.iter().all(|x| matches!(x, check::Finding::CrossLinked { .. })), "{ty:?}: {f:?}");
+            assert!(f.is_empty(), "{ty:?}: {f:?}");
             assert_eq!(t.lost_chains, 0);
         }
     }

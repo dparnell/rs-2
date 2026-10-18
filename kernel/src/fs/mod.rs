@@ -203,7 +203,7 @@ pub fn probe_volume(dev: Arc<dyn block::BlockDev>) -> Arc<dyn FileSystem> {
 pub fn remount(d: u8) -> Result<(), u32> {
     let dev = DRIVES.lock()[d as usize].as_ref().and_then(|f| f.device()).ok_or(err::INVALID_DRIVE)?;
     let fs = probe_volume(dev);
-    crate::println!("drive {}: remounted ({})", (b'A' + d) as char, fs.name());
+    crate::trace!("drive {}: remounted ({})", (b'A' + d) as char, fs.name());
     DRIVES.lock()[d as usize] = Some(fs);
     Ok(())
 }

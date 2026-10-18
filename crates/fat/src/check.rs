@@ -168,7 +168,13 @@ impl<'a, D: BlockDevice> Checker<'a, D> {
                 break;
             }
             if o != FREE_OWNER {
+                // The first owner keeps the shared clusters; this chain
+                // ends before them (unless they are its very first).
                 self.findings.push(Finding::CrossLinked { path: String::from(path), cluster: c });
+                if let Some(&last) = chain.last() {
+                    let eoc = self.vol.eoc();
+                    self.set_fat(last, eoc)?;
+                }
                 break;
             }
             self.owner[c as usize] = id;

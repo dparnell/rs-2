@@ -13,7 +13,7 @@ use crate::util::*;
 const NAMES: &[&str] = &[
     "CD", "CHDIR", "CLS", "COPY", "DATE", "DEL", "ERASE", "DIR", "ECHO", "EXIT", "MD", "MKDIR", "PATH",
     "DPATH", "PROMPT", "RD", "RMDIR", "REN", "RENAME", "SET", "TIME", "TYPE", "VER", "VOL", "REM", "PAUSE",
-    "GOTO", "CALL", "IF", "FOR", "SHIFT", "START", "DETACH", "SETLOCAL", "ENDLOCAL", "HELP", "VERIFY",
+    "GOTO", "CALL", "IF", "FOR", "SHIFT", "START", "DETACH", "SETLOCAL", "ENDLOCAL", "VERIFY",
     "MOVE", "CHCP", "ANSI", "EXTPROC", "KEYS",
 ];
 
@@ -110,10 +110,6 @@ pub fn run(sh: &mut Shell, s: &Simple) -> Option<u32> {
                     DosSetCurrentDir(c.as_ptr());
                 }
             }
-            0
-        }
-        "HELP" => {
-            help();
             0
         }
         "CHCP" => {
@@ -476,14 +472,6 @@ fn start(sh: &mut Shell, s: &Simple) -> u32 {
         outln(&alloc::format!("The process identification number is {}.", res.code_terminate));
     }
     rc
-}
-
-fn help() {
-    outln("rs2 command interpreter. Internal commands:");
-    outln("  CD CHDIR CLS COPY DATE DEL ERASE DIR ECHO EXIT MD MKDIR PATH DPATH");
-    outln("  PROMPT RD RMDIR REN RENAME MOVE SET TIME TYPE VER VOL PAUSE START");
-    outln("  Batch files (.CMD): REM GOTO CALL IF FOR SHIFT SETLOCAL ENDLOCAL");
-    outln("  Operators: < > >> 2> 2>&1 | & && ||");
 }
 
 pub fn date_string() -> String {

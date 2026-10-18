@@ -237,6 +237,11 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("tree", "OS2\\TREE.EXE"),
         ("xcopy", "OS2\\XCOPY.EXE"),
         ("install", "OS2\\INSTALL.EXE"),
+        ("label", "OS2\\LABEL.EXE"),
+        ("chkdsk", "OS2\\CHKDSK.EXE"),
+        ("format", "OS2\\FORMAT.EXE"),
+        ("mode", "OS2\\MODE.EXE"),
+        ("help", "OS2\\HELP.EXE"),
     ];
 
 /// Build the userland workspace and convert each program to LX.
