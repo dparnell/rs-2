@@ -61,6 +61,9 @@ fn exec(c: &mut Ctx) -> u32 {
         (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4), c.arg(5), c.arg(6))
     };
     let Some(name) = c.read_str(pname, 260) else { return err::INVALID_ADDRESS };
+    if super::tracing() {
+        crate::trace!("    exec {name}");
+    }
     // Arguments: "program\0arguments\0\0" (either part may be missing).
     let (argv0, args) = if pargs == 0 {
         (name.clone(), String::new())
@@ -70,10 +73,24 @@ fn exec(c: &mut Ctx) -> u32 {
         (a0, rest)
     };
     let env = if penv == 0 { parent_env(c) } else { read_block(c, penv, 4096).unwrap_or_default() };
-    let path = match super::file::resolve(c, &name) {
+    let mut path = match super::file::resolve(c, &name) {
         Ok(p) => p,
         Err(e) => return e,
     };
+    // A bare program name is looked for in the current directory, then
+    // along the caller's PATH (UNPACK starts "UNPACK2.EXE" this way).
+    if !name.contains(['\\', '/', ':']) && crate::fs::stat(&path).is_err() {
+        let dirs = super::doscalls::env_value(c, "PATH").unwrap_or_default();
+        for d in dirs.split(';').filter(|d| !d.is_empty()) {
+            let cand = alloc::format!("{}\\{}", d.trim_end_matches('\\'), name);
+            if let Ok(p) = super::file::resolve(c, &cand) {
+                if crate::fs::stat(&p).is_ok() {
+                    path = p;
+                    break;
+                }
+            }
+        }
+    }
     let mode = flags & 7;
     if !matches!(mode, EXEC_SYNC | EXEC_ASYNC | EXEC_ASYNCRESULT | EXEC_BACKGROUND) {
         return err::INVALID_FUNCTION;
