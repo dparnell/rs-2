@@ -175,10 +175,19 @@ pub fn unlock_drive(d: u8) {
     LOCKS.lock()[d as usize] = 0;
 }
 
+/// The drive whose volume device is at address `dev` (hard-error
+/// messages).
+pub fn drive_of_device(dev: usize) -> Option<u8> {
+    let d = DRIVES.lock();
+    d.iter().position(|f| f.as_ref().and_then(|f| f.device()).is_some_and(|x| Arc::as_ptr(&x) as *const () as usize == dev)).map(|i| i as u8)
+}
+
 /// Recognise the file system on `dev`: the boot sector names HPFS
 /// volumes, otherwise FAT is tried first. A volume nothing recognises is
 /// still mounted so that FORMAT can open it.
 pub fn probe_volume(dev: Arc<dyn block::BlockDev>) -> Arc<dyn FileSystem> {
+    // Hard errors of the volume's device go through the pop-up.
+    let dev = crate::api::harderr::wrap(dev);
     let mut bs = alloc::vec![0u8; dev.sector_size().max(512)];
     let hpfs_boot = dev.read(0, &mut bs).is_ok() && &bs[54..58] == b"HPFS";
     if !hpfs_boot {
@@ -306,10 +315,34 @@ pub enum Device {
     Screen,
     Clock,
     DosDev,
+    Char(CharDev),
 }
 
-/// Recognise device names (`CON`, `NUL`, `\DEV\KBD$`, `CON.TXT`, ...).
+/// Character devices other than the console ones (`crate::chardev`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CharDev {
+    /// COM1-COM4 (0-based).
+    Com(u8),
+    /// LPT1-LPT3 (0-based).
+    Lpt(u8),
+    Mouse,
+    Pointer,
+}
+
+impl CharDev {
+    pub fn name(&self) -> String {
+        match self {
+            CharDev::Com(n) => alloc::format!("\\DEV\\COM{}", n + 1),
+            CharDev::Lpt(n) => alloc::format!("\\DEV\\LPT{}", n + 1),
+            CharDev::Mouse => String::from("\\DEV\\MOUSE$"),
+            CharDev::Pointer => String::from("\\DEV\\POINTER$"),
+        }
+    }
+}
+
+/// Recognise device names (`CON`, `NUL`, `\DEV\KBD$`, `CON.TXT`, `COM2:`, ...).
 pub fn device_name(path: &str) -> Option<Device> {
+    let path = path.strip_suffix(':').unwrap_or(path);
     let base = path.rsplit(['\\', '/', ':']).next().unwrap_or(path);
     let base = base.split('.').next().unwrap_or(base).to_ascii_uppercase();
     let dev = match base.as_str() {
@@ -319,7 +352,15 @@ pub fn device_name(path: &str) -> Option<Device> {
         "SCREEN$" => Device::Screen,
         "CLOCK$" => Device::Clock,
         "DOS$" => Device::DosDev,
-        _ => return None,
+        "AUX" => Device::Char(CharDev::Com(0)),
+        "PRN" => Device::Char(CharDev::Lpt(0)),
+        "MOUSE$" => Device::Char(CharDev::Mouse),
+        "POINTER$" => Device::Char(CharDev::Pointer),
+        b => match (b.strip_prefix("COM"), b.strip_prefix("LPT")) {
+            (Some(n), _) if matches!(n, "1" | "2" | "3" | "4") => Device::Char(CharDev::Com(n.as_bytes()[0] - b'1')),
+            (_, Some(n)) if matches!(n, "1" | "2" | "3") => Device::Char(CharDev::Lpt(n.as_bytes()[0] - b'1')),
+            _ => return None,
+        },
     };
     // `\DEV\X` or a bare name (any directory).
     Some(dev)
@@ -429,6 +470,8 @@ pub enum Handle {
     DosDev,
     /// A logical drive opened for DASD access.
     Drive(Arc<Dasd>),
+    /// A serial or printer port, the mouse.
+    Char(CharDev),
 }
 
 impl Handle {
@@ -440,7 +483,21 @@ impl Handle {
             Device::Screen => Handle::Screen,
             Device::Clock => Handle::Clock,
             Device::DosDev => Handle::DosDev,
+            Device::Char(d) => Handle::Char(d),
         }
+    }
+
+    /// Open a device: COM ports must exist.
+    pub fn open_device(d: Device) -> Result<Handle, u32> {
+        if let Device::Char(CharDev::Com(n)) = d {
+            crate::chardev::com_open(n as usize)?;
+        }
+        if let Device::Char(CharDev::Mouse | CharDev::Pointer) = d {
+            if !crate::mouse::present() {
+                return Err(err::FILE_NOT_FOUND);
+            }
+        }
+        Ok(Handle::device(d))
     }
 }
 

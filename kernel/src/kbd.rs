@@ -6,7 +6,6 @@
 //! here only.
 
 use alloc::collections::{BTreeMap, VecDeque};
-use alloc::vec::Vec;
 
 use crate::arch::idt::TrapFrame;
 use crate::arch::inb;
@@ -70,41 +69,40 @@ fn irq(_f: &mut TrapFrame) {
 /// Process one set-1 scancode byte (0xE0 prefixes included). Safe to call
 /// from interrupt context (the PS/2 IRQ, the USB poll in the timer tick).
 pub fn scancode(sc: u8) {
-    let ev = {
-        let mut s = STATE.lock();
-        translate(&mut s, sc)
-    };
-    if let Some(k) = ev {
-        let ctrl = k.shift & shift::CONTROL != 0;
-        let alt = k.shift & shift::ALT != 0;
-        // Session switching hot keys.
-        if k.scan == 0x01 && (ctrl || alt) {
-            if ctrl {
-                crate::session::toggle_list();
-            } else {
-                crate::session::select_next();
-            }
-            return;
-        }
-        if crate::session::list_key(&k) {
-            return;
-        }
-        if k.ch == 3 && ctrl {
-            crate::api::signal::keyboard(crate::api::signal::SIG_CTRLC);
-            return;
-        }
-        if ctrl && k.scan == 0x46 {
-            crate::api::signal::keyboard(crate::api::signal::SIG_CTRLBREAK);
-            return;
-        }
-        let fg = crate::session::foreground();
-        if fg == crate::session::pm_session() {
-            crate::display::key(&k, false);
-            return;
-        }
-        STATE.lock().queues.entry(fg).or_default().push_back(k);
-        WAITERS.wake_all();
+    if crate::conkbd::raw_byte(sc) {
+        return;
     }
+    let (ev, before, after) = {
+        let mut s = STATE.lock();
+        let before = s.shift;
+        let ev = translate(&mut s, sc);
+        (ev, before, s.shift)
+    };
+    crate::conkbd::key_event(sc, before, after, ev);
+}
+
+/// Queue a key event for session `sid` (after hot keys and monitors).
+pub fn push(sid: u32, k: KeyInfo) {
+    STATE.lock().queues.entry(sid).or_default().push_back(k);
+    WAITERS.wake_all();
+}
+
+/// Put a key event back at the front of the queue of session `sid`.
+pub fn unget(sid: u32, k: KeyInfo) {
+    STATE.lock().queues.entry(sid).or_default().push_front(k);
+    WAITERS.wake_all();
+}
+
+/// Translate a scan code in a given shift state without side effects
+/// (KbdXlate); `ext` for E0-prefixed keys.
+pub fn xlate(scan: u8, shift: u16, ext: bool) -> Option<KeyInfo> {
+    let mut s = State { queues: BTreeMap::new(), shift, e0: ext };
+    translate(&mut s, scan & 0x7f)
+}
+
+/// Set the shift and lock state (KbdSetStatus, KBD_SETSHIFTSTATE).
+pub fn set_shift_state(v: u16) {
+    STATE.lock().shift = v;
 }
 
 fn translate(s: &mut State, sc: u8) -> Option<KeyInfo> {
@@ -201,7 +199,11 @@ fn pending(sid: u32) -> bool {
 
 /// Next key event for the calling thread's session, waiting if `wait`.
 pub fn get_key(wait: bool) -> Option<KeyInfo> {
-    let sid = crate::session::current();
+    get_key_from(crate::session::io_session(), wait)
+}
+
+/// Next key event of session `sid`, waiting if `wait`.
+pub fn get_key_from(sid: u32, wait: bool) -> Option<KeyInfo> {
     loop {
         if let Some(k) = STATE.lock().queues.get_mut(&sid).and_then(|q| q.pop_front()) {
             return Some(k);
@@ -217,14 +219,14 @@ pub fn get_key(wait: bool) -> Option<KeyInfo> {
 }
 
 pub fn peek_key() -> Option<KeyInfo> {
-    let sid = crate::session::current();
+    let sid = crate::session::io_session();
     STATE.lock().queues.get(&sid).and_then(|q| q.front().copied())
 }
 
 pub fn flush() {
-    let sid = crate::session::current();
+    let sid = crate::session::io_session();
     STATE.lock().queues.remove(&sid);
-    COOKED.lock().clear();
+    crate::conkbd::flush(sid);
 }
 
 /// A session ended.
@@ -232,59 +234,6 @@ pub fn drop_queue(sid: u32) {
     STATE.lock().queues.remove(&sid);
 }
 
-/// The part of an edited CON input line not yet consumed by DosRead.
-static COOKED: SpinLock<VecDeque<u8>> = SpinLock::new(VecDeque::new());
-
-/// DosRead from CON in cooked mode: hands out an edited line, keeping what
-/// does not fit in the caller's buffer for the next read (programs read
-/// one byte at a time).
-pub fn read_cooked(len: usize) -> Vec<u8> {
-    if COOKED.lock().is_empty() {
-        let line = read_line(256);
-        COOKED.lock().extend(line);
-    }
-    let mut q = COOKED.lock();
-    let n = len.min(q.len());
-    q.drain(..n).collect()
-}
-
 pub fn shift_state() -> u16 {
     STATE.lock().shift
-}
-
-/// Read an edited line from the keyboard with echo (CON input). The result
-/// ends with CR LF, as OS/2 returns it.
-pub fn read_line(max: usize) -> Vec<u8> {
-    let mut line: Vec<u8> = Vec::new();
-    loop {
-        let Some(k) = get_key(true) else {
-            // Interrupted: return what we have.
-            return line;
-        };
-        match k.ch {
-            b'\r' => {
-                crate::console::write(b"\r\n");
-                line.extend_from_slice(b"\r\n");
-                return line;
-            }
-            8 => {
-                if line.pop().is_some() {
-                    crate::console::write(b"\x08 \x08");
-                }
-            }
-            0x1b => {
-                for _ in 0..line.len() {
-                    crate::console::write(b"\x08 \x08");
-                }
-                line.clear();
-            }
-            0 | 0xe0 => {}
-            c => {
-                if line.len() + 2 < max.max(3) {
-                    line.push(c);
-                    crate::console::write(&[c]);
-                }
-            }
-        }
-    }
 }

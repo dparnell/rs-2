@@ -15,7 +15,7 @@ pub const SLOT_SIZE: u32 = 4;
 
 /// Kernel-implemented modules, in gate slot order.
 pub const MODULES: &[&str] =
-    &["DOSCALLS", "VIOCALLS", "KBDCALLS", "MOUCALLS", "MSG", "NLS", "SESMGR", "QUECALLS", "RS2API"];
+    &["DOSCALLS", "VIOCALLS", "KBDCALLS", "MOUCALLS", "MSG", "NLS", "SESMGR", "QUECALLS", "RS2API", "MONCALLS"];
 
 pub fn module_index(name: &str) -> Option<u32> {
     MODULES.iter().position(|m| m.eq_ignore_ascii_case(name)).map(|i| i as u32)

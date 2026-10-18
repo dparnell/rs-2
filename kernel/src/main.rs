@@ -11,8 +11,10 @@ mod acpi;
 mod api;
 mod apic;
 mod arch;
+mod chardev;
 mod codepage;
 mod config;
+mod conkbd;
 mod console;
 mod display;
 mod drivers;
@@ -25,6 +27,7 @@ mod pipe;
 mod power;
 mod log;
 mod mm;
+mod monitor;
 mod mouse;
 mod npipe;
 mod rtc;
@@ -78,6 +81,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     infoseg::init();
     kbd::init();
     mouse::init();
+    chardev::init();
     arch::enable_interrupts();
     if !apic::init() {
         println!("apic: not available, using the 8259 PICs");

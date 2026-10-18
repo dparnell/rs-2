@@ -13,7 +13,9 @@ pub mod doscalls;
 pub mod exceptions;
 pub mod file;
 pub mod ioctl;
+pub mod harderr;
 pub mod kbdapi;
+pub mod moncalls;
 pub mod module;
 pub mod mou;
 pub mod msg;
@@ -28,6 +30,7 @@ pub mod sem;
 pub mod sesmgr;
 pub mod shmem;
 pub mod submem;
+pub mod subsys;
 pub mod sysstate;
 pub mod thunk;
 pub mod timer;
@@ -362,6 +365,13 @@ fn code_linear(space: &AddressSpace, cs: u16, rip: u64) -> u32 {
 }
 
 pub fn dispatch(f: &mut TrapFrame) {
+    dispatch_with(f, true, None);
+}
+
+/// Run the API at the trapping gate slot. `route`: replacement subsystems
+/// may take the call; `forced`: complete the call with this result instead
+/// of running it (a replacement subsystem handled it).
+pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
     let thread = sched::current();
     let Some(process) = thread.process() else { return };
     // The trapping instruction is the 2-byte `int 0x99` before RIP.
@@ -393,6 +403,13 @@ pub fn dispatch(f: &mut TrapFrame) {
     }
     if module == 0 && ordinal == thunk::UNITHUNK_RETURN_ORDINAL {
         thunk::returned(f, thread.id);
+        return;
+    }
+    if (1..=3).contains(&module) && ordinal == subsys::RETURN_ORDINAL {
+        let tid = thread.id;
+        drop(thread);
+        drop(process);
+        subsys::returned(f, tid);
         return;
     }
     if module == 0 && ordinal == exceptions::HANDLER_RETURN_ORDINAL {
@@ -479,9 +496,13 @@ pub fn dispatch(f: &mut TrapFrame) {
             stack_linear
         );
     }
-    let result = match doscalls::handler(module as u8, ordinal as u16) {
-        Some(h) => h(&mut ctx),
-        None => {
+    if forced.is_none() && route && subsys::route(&mut ctx, module as u8, ordinal as u16) {
+        return;
+    }
+    let result = match (forced, doscalls::handler(module as u8, ordinal as u16)) {
+        (Some(r), _) => r,
+        (None, Some(h)) => h(&mut ctx),
+        (None, None) => {
             let mut w = WARNED.lock();
             if !w.contains(&(module, ordinal)) {
                 w.push((module, ordinal));

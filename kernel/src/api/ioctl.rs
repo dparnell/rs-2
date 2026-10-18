@@ -16,7 +16,7 @@ use alloc::vec;
 
 use super::{err, Ctx};
 use crate::fs::block::BlockDev;
-use crate::fs::Handle;
+use crate::fs::{CharDev, Handle};
 
 const HEADS: u64 = 255;
 const SPT: u64 = 63;
@@ -143,8 +143,51 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
         (Handle::Drive(d), 8) => logical(c, &d, r),
         (_, 0xd5) => dos_dev(c, r),
         (Handle::Kbd | Handle::Con, 4) => kbd(c, r),
+        (Handle::Kbd | Handle::Con, 0xb) => general_kbd(c, r),
+        (Handle::Char(CharDev::Com(n)), 1) => {
+            let need = match r.function {
+                0x41 | 0x46 => 2,
+                0x42 => 3,
+                0x43 => 5,
+                0x44 => 1,
+                0x53 => 11,
+                _ => 0,
+            };
+            let params = if need > 0 {
+                match c.read_vec(r.params, need) {
+                    Some(p) => p,
+                    None => return err::INVALID_ADDRESS,
+                }
+            } else {
+                alloc::vec::Vec::new()
+            };
+            match crate::chardev::com_ioctl(n as usize, r.function, &params) {
+                Ok(d) => put_data(c, r, need, &d),
+                Err(e) => e,
+            }
+        }
+        (Handle::Char(CharDev::Com(n)), 0xb) => crate::chardev::com_general(n as usize, r.function).err().unwrap_or(0),
+        (Handle::Char(CharDev::Lpt(_)), 5) => match crate::chardev::lpt_ioctl(r.function) {
+            Ok(d) => put_data(c, r, 0, &d),
+            Err(e) => e,
+        },
+        (Handle::Char(CharDev::Mouse | CharDev::Pointer), 7) => mouse(c, r),
+        (Handle::Screen, 3) => screen(c, r),
         _ => err::INVALID_CATEGORY,
     }
+}
+
+/// Copy IOCtl result data to the caller (ERROR_BUFFER_OVERFLOW if it does
+/// not fit) and report the lengths used.
+fn put_data(c: &Ctx, r: &Req, plen: u32, d: &[u8]) -> u32 {
+    if d.len() as u32 > r.data_len {
+        return err::BUFFER_OVERFLOW;
+    }
+    if !d.is_empty() && !c.write(r.data, d) {
+        return err::INVALID_ADDRESS;
+    }
+    set_lens(c, r, plen, d.len() as u32);
+    0
 }
 
 fn set_lens(c: &Ctx, r: &Req, p: u32, d: u32) {
@@ -367,20 +410,191 @@ fn dos_dev(_c: &Ctx, r: &Req) -> u32 {
     err::INVALID_FUNCTION
 }
 
-/// Category 4 (keyboard): a few query functions.
+/// Category 4 (keyboard) on KBD$ and CON.
 fn kbd(c: &Ctx, r: &Req) -> u32 {
+    use crate::conkbd;
+    let sid = crate::session::io_session();
+    let pbyte = || c.read_u8(r.params);
+    let pword = |o: u32| c.read_u16(r.params + o);
     match r.function {
-        // KBD_GETSESMGRHOTKEY / KBD_GETINPUTMODE: report defaults.
-        0x71 | 0x76 => {
-            c.write_u8(r.data, 0);
+        // KBD_SETTRANSTABLE (a translation table: the layout tables belong
+        // to the keyboard layer), KBD_SETFGNDSCREENGRP,
+        // KBD_SETSESMGRHOTKEY, KBD_SETFOCUS, KBD_SETKCB,
+        // KBD_SETREADNOTIFICATION, KBD_SETNLS, KBD_CREATE, KBD_DESTROY:
+        // accepted.
+        0x50 | 0x55 | 0x56 | 0x57 | 0x58 | 0x59 | 0x5c | 0x5d | 0x5e => 0,
+        // KBD_SETINPUTMODE: BINARY_MODE 0x80, SHIFT_REPORT_MODE 0x01.
+        0x51 => {
+            let Some(m) = pbyte() else { return err::INVALID_ADDRESS };
+            let Ok(mut i) = conkbd::info(sid, 0) else { return err::INVALID_HANDLE };
+            i.mask &= !(conkbd::mask::BINARY | conkbd::mask::ASCII | conkbd::mask::SHIFT_REPORT);
+            i.mask |= if m & 0x80 != 0 { conkbd::mask::BINARY } else { conkbd::mask::ASCII };
+            if m & 1 != 0 {
+                i.mask |= conkbd::mask::SHIFT_REPORT;
+            }
+            conkbd::set_info(sid, 0, i).err().unwrap_or(0)
+        }
+        // KBD_SETINTERIMFLAG
+        0x52 => {
+            let Some(m) = pbyte() else { return err::INVALID_ADDRESS };
+            let Ok(mut i) = conkbd::info(sid, 0) else { return err::INVALID_HANDLE };
+            i.interim = m as u16;
+            conkbd::set_info(sid, 0, i).err().unwrap_or(0)
+        }
+        // KBD_SETSHIFTSTATE: SHIFTSTATE { fsState, fNLS }
+        0x53 => {
+            let Some(v) = pword(0) else { return err::INVALID_ADDRESS };
+            conkbd::set_shift(v);
             0
+        }
+        // KBD_SETTYPAMATICRATE: RATEDELAY { usDelay ms, usRate cps }
+        0x54 => {
+            let (Some(d), Some(rate)) = (pword(0), pword(2)) else { return err::INVALID_ADDRESS };
+            conkbd::set_typematic(d as u32, rate as u32);
+            0
+        }
+        // KBD_ALTERKBDLED: show the shift state's locks.
+        0x5a => {
+            conkbd::set_shift(crate::kbd::shift_state());
+            0
+        }
+        0x71 => {
+            let m = conkbd::info(sid, 0).map_or(0, |i| i.mask);
+            let v = if m & conkbd::mask::BINARY != 0 { 0x80 } else { 0 } | (m & conkbd::mask::SHIFT_REPORT != 0) as u8;
+            put_data(c, r, 0, &[v])
+        }
+        0x72 => {
+            let v = conkbd::info(sid, 0).map_or(0, |i| i.interim) as u8;
+            put_data(c, r, 0, &[v])
         }
         // KBD_GETSHIFTSTATE: SHIFTSTATE { fsState, fNLS }
         0x73 => {
-            c.write_u16(r.data, crate::kbd::shift_state());
-            c.write_u8(r.data + 2, 0);
+            let s = crate::kbd::shift_state().to_le_bytes();
+            put_data(c, r, 0, &[s[0], s[1], 0])
+        }
+        // KBD_READCHAR: param = count | KBD_READ_NOWAIT; KBDKEYINFO records.
+        0x74 => {
+            let Some(p) = pword(0) else { return err::INVALID_ADDRESS };
+            let (n, nowait) = ((p & 0x7fff).max(1), p & 0x8000 != 0);
+            let mut out = alloc::vec::Vec::new();
+            for i in 0..n {
+                let Some(k) = crate::kbd::get_key_from(sid, !nowait && i == 0) else { break };
+                out.extend_from_slice(&key_record(&k));
+            }
+            c.write_u16(r.params, (out.len() / 10) as u16);
+            put_data(c, r, 2, &out)
+        }
+        // KBD_PEEKCHAR: param = status (KBD_DATA_RECEIVED, KBD_DATA_BINARY).
+        0x75 => {
+            let k = crate::kbd::peek_key();
+            let bin = if conkbd::binary(sid) { 0x8000 } else { 0 };
+            c.write_u16(r.params, k.is_some() as u16 | bin);
+            put_data(c, r, 2, &key_record(&k.unwrap_or_default()))
+        }
+        // KBD_GETSESMGRHOTKEY: no hot keys to report.
+        0x76 => put_data(c, r, 2, &0u16.to_le_bytes()),
+        // KBD_GETKEYBDTYPE: KBDTYPE, enhanced keyboard.
+        0x77 => put_data(c, r, 0, &[1, 0, 0, 0, 0, 0]),
+        // KBD_GETCODEPAGEID: CPID
+        0x78 => {
+            let mut cp = conkbd::codepage(sid);
+            if cp == 0 {
+                cp = crate::screen::with(|s| s.codepage().number()).unwrap_or(850);
+            }
+            let b = cp.to_le_bytes();
+            put_data(c, r, 0, &[b[0], b[1], 0, 0])
+        }
+        // KBD_XLATESCAN: KBDTRANS
+        0x79 => {
+            let Some(mut t) = c.read_vec(r.data, 18) else { return err::INVALID_ADDRESS };
+            let state = u16::from_le_bytes([t[4], t[5]]);
+            let ext = u16::from_le_bytes([t[10], t[11]]) & 0x80 != 0;
+            match crate::kbd::xlate(t[1], state, ext) {
+                Some(k) => {
+                    t[0] = k.ch;
+                    t[2] = k.status;
+                }
+                None => t[2] = 0x01,
+            }
+            t[12] = 1;
+            t[13] = 0;
+            put_data(c, r, 2, &t)
+        }
+        // KBD_QUERYKBDHARDWAREID: KBDHWID
+        0x7a => put_data(c, r, 0, &[8, 0, 0x41, 0xab, 0, 0, 0, 0]),
+        // KBD_QUERYKBDCODEPAGESUPPORT: count, then the code pages.
+        0x7b => put_data(c, r, 0, &[2, 0, 0x52, 0x03, 0xb5, 0x01]),
+        _ => err::INVALID_FUNCTION,
+    }
+}
+
+fn key_record(k: &crate::kbd::KeyInfo) -> [u8; 10] {
+    let s = k.shift.to_le_bytes();
+    let t = k.time.to_le_bytes();
+    [k.ch, k.scan, k.status, 0, s[0], s[1], t[0], t[1], t[2], t[3]]
+}
+
+/// Category 0xB (general) on the keyboard: DEV_FLUSHINPUT.
+fn general_kbd(_c: &Ctx, r: &Req) -> u32 {
+    match r.function {
+        1 => {
+            crate::kbd::flush();
             0
         }
+        2 => 0,
+        _ => err::INVALID_FUNCTION,
+    }
+}
+
+/// Category 7 (pointing device) on MOUSE$: the query functions.
+fn mouse(c: &Ctx, r: &Req) -> u32 {
+    let sid = c.process.session.load(core::sync::atomic::Ordering::Relaxed);
+    let words: alloc::vec::Vec<u16> = match r.function {
+        0x60 => alloc::vec![3],
+        0x61 => alloc::vec![50],
+        0x62 => alloc::vec![crate::mouse::with(sid, |m| m.dev_status)],
+        0x64 => alloc::vec![crate::mouse::with(sid, |m| m.queue.len() as u16), 64],
+        0x65 => alloc::vec![crate::mouse::with(sid, |m| m.event_mask)],
+        0x66 => {
+            let (a, b) = crate::mouse::with(sid, |m| m.scale);
+            alloc::vec![a, b]
+        }
+        0x67 => {
+            let (a, b) = crate::mouse::with(sid, |m| (m.row as u16, m.col as u16));
+            alloc::vec![a, b]
+        }
+        0x69 => alloc::vec![0],
+        0x50..=0x5d => return 0,
+        _ => return err::INVALID_FUNCTION,
+    };
+    let b: alloc::vec::Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+    put_data(c, r, 0, &b)
+}
+
+/// Category 3 on SCREEN$: SCR_ALLOCLDT maps the text buffer (physical
+/// B8000/B0000) and returns its selector; SCR_DEALLOCLDT.
+fn screen(c: &Ctx, r: &Req) -> u32 {
+    match r.function {
+        0x70 => {
+            // Parameters: LDTADDRINFO { PULONG pulPhysAddr, USHORT cb }.
+            let Some(pp) = c.read_u32(r.params) else { return err::INVALID_ADDRESS };
+            let pp = if c.is16 { c.far16_to_flat(pp) } else { pp };
+            let Some(phys) = c.read_u32(pp) else { return err::INVALID_ADDRESS };
+            if !(0xa0000..0xc0000).contains(&phys) {
+                return err::INVALID_PARAMETER;
+            }
+            let sid = crate::session::io_session();
+            let Some(obj) = crate::screen::with_session(sid, |s| s.phys_buf()).flatten() else { return err::NOT_ENOUGH_MEMORY };
+            {
+                let mut sp = c.space();
+                if !sp.regions.contains_key(&obj.base) {
+                    sp.map_shared(obj.clone(), crate::vm::pag::READ | crate::vm::pag::WRITE, crate::vm::SegKind::Data);
+                }
+            }
+            let sel = crate::vm::tile_selector(obj.base);
+            put_data(c, r, 6, &sel.to_le_bytes())
+        }
+        0x71 => 0,
         _ => err::INVALID_FUNCTION,
     }
 }
