@@ -1,6 +1,7 @@
 //! Device drivers.
 
 pub mod ahci;
+pub mod nvme;
 pub mod part;
 pub mod pci;
 
@@ -50,6 +51,11 @@ pub fn init() {
                     ahci::Kind::Ata => disks.push(p),
                     ahci::Kind::Atapi => optical.push(p),
                 }
+            }
+        }
+        if (d.class, d.subclass, d.progif) == (1, 8, 2) {
+            for ns in nvme::probe(d) {
+                disks.push(ns);
             }
         }
     }
