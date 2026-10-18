@@ -118,7 +118,17 @@ pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, own
     if let Some(w) = s.desk.get_mut(h) {
         w.text = text.to_vec();
     }
-    if send(h, WM_CREATE, ctl, 0) != 0 {
+    // WM_CREATE: mp1 = control data, mp2 = CREATESTRUCT (pCtlData,
+    // pPresParams, id, hwndInsertBehind, hwndOwner, cy, cx, y, x,
+    // flStyle, pszText, pszClass, hwndParent).
+    let mut tz = text.to_vec();
+    tz.push(0);
+    let mut cz = class.to_vec();
+    cz.push(0);
+    let cs: [u32; 13] = [
+        ctl, 0, id, 3, owner, pos.height() as u32, pos.width() as u32, pos.bottom as u32, pos.left as u32, style, tz.as_ptr() as u32, cz.as_ptr() as u32, parent,
+    ];
+    if send(h, WM_CREATE, ctl, cs.as_ptr() as u32) != 0 {
         // A non-zero result from WM_CREATE fails the creation.
         destroy(h);
         return 0;

@@ -25,6 +25,13 @@ name = "gpi"
 version = "0.1.0"
 
 [[package]]
+name = "helpmgr-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "install"
 version = "0.1.0"
 dependencies = [
@@ -35,6 +42,13 @@ dependencies = [
 [[package]]
 name = "os2"
 version = "0.1.0"
+
+[[package]]
+name = "pmctls-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
 
 [[package]]
 name = "pmgpi-dll"

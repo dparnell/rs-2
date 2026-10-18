@@ -1,0 +1,13 @@
+[package]
+name = "helpmgr-dll"
+description = "HELPMGR.DLL: the help manager (stubs: help is not shown yet)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "helpmgr"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
