@@ -1,4 +1,9 @@
-//! PS/2 keyboard: scancode set 1 to OS/2 key events.
+//! Keyboard: scancode set 1 to OS/2 key events.
+//!
+//! The PS/2 controller delivers set-1 scancodes on IRQ 1; USB keyboards
+//! (`drivers::hid`) translate their reports into the same scancodes and
+//! feed them through [`scancode`], so shift state and key translation live
+//! here only.
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -58,7 +63,12 @@ pub fn init() {
 }
 
 fn irq(_f: &mut TrapFrame) {
-    let sc = unsafe { inb(0x60) };
+    scancode(unsafe { inb(0x60) });
+}
+
+/// Process one set-1 scancode byte (0xE0 prefixes included). Safe to call
+/// from interrupt context (the PS/2 IRQ, the USB poll in the timer tick).
+pub fn scancode(sc: u8) {
     let ev = {
         let mut s = STATE.lock();
         translate(&mut s, sc)

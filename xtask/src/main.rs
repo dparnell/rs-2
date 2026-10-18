@@ -3,7 +3,7 @@
 //! ```text
 //! cargo xtask build [--release]            build loader + kernel, stage work/esp
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG]
-//!                  [--hdd IMG] [--nvme IMG] [-- QEMU ARGS]
+//!                  [--hdd IMG] [--nvme IMG] [--usb-kbd] [--usb-mouse] [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs] [-o FILE]       test hard disk from work/disk.txt
 //! ```
@@ -49,6 +49,9 @@ struct Opts {
     dist: bool,
     /// `disk`: an HPFS partition instead of FAT.
     hpfs: bool,
+    /// `run`: add an xHCI controller with a USB keyboard / mouse.
+    usb_kbd: bool,
+    usb_mouse: bool,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -68,6 +71,8 @@ fn parse(args: &[String]) -> Opts {
         boot_hdd: false,
         dist: false,
         hpfs: false,
+        usb_kbd: false,
+        usb_mouse: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -86,6 +91,8 @@ fn parse(args: &[String]) -> Opts {
             "--boot-hdd" => o.boot_hdd = true,
             "--dist" => o.dist = true,
             "--hpfs" => o.hpfs = true,
+            "--usb-kbd" => o.usb_kbd = true,
+            "--usb-mouse" => o.usb_mouse = true,
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
@@ -326,6 +333,15 @@ fn run(o: &Opts) -> bool {
     if let Some(d) = &o.nvme {
         c.arg("-drive").arg(format!("file={},format=raw,if=none,id=nvm0", d.display()));
         c.args(["-device", "nvme,drive=nvm0,serial=rs2nvme"]);
+    }
+    if o.usb_kbd || o.usb_mouse {
+        c.args(["-device", "qemu-xhci,id=xhci"]);
+    }
+    if o.usb_kbd {
+        c.args(["-device", "usb-kbd,bus=xhci.0"]);
+    }
+    if o.usb_mouse {
+        c.args(["-device", "usb-mouse,bus=xhci.0"]);
     }
     let mut child = c.spawn().expect("start qemu");
     let Some(timeout) = o.timeout else {

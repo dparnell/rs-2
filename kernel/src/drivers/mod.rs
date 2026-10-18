@@ -1,9 +1,12 @@
 //! Device drivers.
 
 pub mod ahci;
+pub mod hid;
 pub mod nvme;
 pub mod part;
 pub mod pci;
+pub mod usb;
+pub mod xhci;
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -69,6 +72,9 @@ pub fn init() {
                     ahci::Kind::Atapi => optical.push(p),
                 }
             }
+        }
+        if (d.class, d.subclass, d.progif) == (0x0c, 3, 0x30) {
+            xhci::probe(d);
         }
         if (d.class, d.subclass, d.progif) == (1, 8, 2) {
             for ns in nvme::probe(d) {
