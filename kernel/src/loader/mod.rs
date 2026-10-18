@@ -262,6 +262,19 @@ pub fn module_name(s: &str) -> String {
     base.to_ascii_uppercase()
 }
 
+/// Name of the module behind the last load failure (what DosLoadModule and
+/// DosExecPgm report in their failure-name buffer).
+static FAIL_NAME: SpinLock<Option<String>> = SpinLock::new(None);
+
+pub fn set_fail(name: &str) {
+    *FAIL_NAME.lock() = Some(module_name(name));
+}
+
+/// Take the recorded failing module name.
+pub fn take_fail() -> Option<String> {
+    FAIL_NAME.lock().take()
+}
+
 /// Load (or find) a DLL system-wide without attaching it anywhere.
 pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     let mname = module_name(name);
@@ -270,6 +283,7 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     }
     let (path, data) = crate::fs::find_module(name).ok_or_else(|| {
         crate::println!("loader: module {name} not found");
+        set_fail(name);
         err::MOD_NOT_FOUND
     })?;
     let m = load_image(&path, data, true, None).inspect_err(|e| crate::println!("loader: {path}: error {e}"))?;

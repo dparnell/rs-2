@@ -195,6 +195,7 @@ fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
     if super::tracing() {
         crate::trace!("    load {name}");
     }
+    let _ = loader::take_fail();
     let r = {
         let mut sp = c.space();
         loader::load_dll(&name, &mut sp)
@@ -202,6 +203,7 @@ fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
     let m = match r {
         Ok(m) => m,
         Err(e) => {
+            let name = loader::take_fail().unwrap_or(name);
             if fail != 0 && cbfail > 0 {
                 let n = (cbfail as usize - 1).min(name.len());
                 c.write_str(fail, &name[..n]);

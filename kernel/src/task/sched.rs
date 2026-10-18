@@ -249,6 +249,9 @@ pub fn schedule() {
         (prev, next)
     };
     NEED_RESCHED.store(false, Ordering::Relaxed);
+    if !prev.kstack_intact() {
+        panic!("kernel stack overflow in thread {} (tid {})", prev.id, prev.tid);
+    }
     if !Arc::ptr_eq(&prev, &next) {
         next.set_state(State::Running);
         prepare_switch(&prev, &next);

@@ -78,6 +78,7 @@ fn exec(c: &mut Ctx) -> u32 {
     if !matches!(mode, EXEC_SYNC | EXEC_ASYNC | EXEC_ASYNCRESULT | EXEC_BACKGROUND) {
         return err::INVALID_FUNCTION;
     }
+    let _ = crate::loader::take_fail();
     let r = process::exec(process::ExecParams {
         path: &path.display(),
         program: &argv0,
@@ -90,9 +91,12 @@ fn exec(c: &mut Ctx) -> u32 {
     let child = match r {
         Ok(p) => p,
         Err(e) => {
+            // The module that failed: a missing DLL or the one lacking an
+            // import, else the program itself.
+            let culprit = crate::loader::take_fail().unwrap_or(name);
             if fail != 0 && cbfail > 0 {
-                let n = (cbfail as usize - 1).min(name.len());
-                c.write_str(fail, &name[..n]);
+                let n = (cbfail as usize - 1).min(culprit.len());
+                c.write_str(fail, &culprit[..n]);
             }
             return e;
         }
