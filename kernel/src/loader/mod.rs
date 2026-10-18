@@ -259,7 +259,10 @@ pub fn init() {
 pub fn module_name(s: &str) -> String {
     let base = s.rsplit(['\\', '/', ':']).next().unwrap_or(s);
     let base = base.split('.').next().unwrap_or(base);
-    base.to_ascii_uppercase()
+    let up = base.to_ascii_uppercase();
+    // DOSCALL1.DLL is where OS/2 implements DOSCALLS; here both are the
+    // kernel's API module.
+    if up == "DOSCALL1" { String::from("DOSCALLS") } else { up }
 }
 
 /// Name of the module behind the last load failure (what DosLoadModule and
