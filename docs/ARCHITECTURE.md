@@ -41,6 +41,15 @@ behaviour (Ghidra, the debug kernel's `.map` files) and to test
 compatibility by running original binaries. None of it is copied into the
 rs2 build or the install ISO.
 
+**Kernel threads.** Work that has to wait in thread context without
+belonging to an OS/2 process (setting up a hot-plugged USB stick, which
+needs SCSI commands) runs on kernel threads (`task::kthread`): they run
+on the kernel page tables, are scheduled like other threads and are fed
+through an `Inbox` that interrupt handlers may post to. The kernel is
+not preemptive: a thread runs until it blocks, yields or returns to user
+mode with its time slice used up, and SpinLocks disable interrupts, so a
+lock must never be held across a wait.
+
 ## Boot
 
 1. UEFI firmware loads `\EFI\BOOT\BOOTX64.EFI` (`boot/`, Rust, `x86_64-unknown-uefi`).

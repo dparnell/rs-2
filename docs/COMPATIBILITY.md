@@ -26,7 +26,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | REXXTRY.CMD | works | With an expression on the command line and interactively. |
 | RXQUEUE.EXE | works | `dir \| rxqueue`, then the queue read from another REXX process. |
 | RXSUBCOM.EXE | works | Usage text only. |
-| REXXC.EXE | fails | Imports `REXX.24`, which this REXX.DLL does not export (the files come from different REXX versions). |
+| REXXC.EXE | fails | Object REXX's tokenizer: it imports `REXX.24` (`RexxTranslateProgram`) and `REXX.114`, which only Object REXX's interpreter exports. That is OREXX.DLL on the media (module name REXX, installed as REXX.DLL when Object REXX is selected), and it needs the SOM runtime (SOM, SOMD, SOMTC, REXXSOM), which rs2 does not have yet. Not a kernel issue. |
 | CALLREXX.EXE (Toolkit sample) | works | 32-bit program calling `RexxStart` with a function file. |
 
 ## Base utilities
@@ -34,10 +34,11 @@ Status: **works** = the tested function behaves as on OS/2;
 | Program | Status | Notes |
 |---------|--------|-------|
 | ATTRIB.EXE | works | List and change attributes. |
-| BACKUP.EXE | works | To a FAT disk (`--hdd` image). On QEMU's virtual FAT drive (the ESP directory) the final attribute update of `\BACKUP\CONTROL.001` hangs. |
+| BACKUP.EXE | works | To a FAT disk (`--hdd` image). On QEMU's virtual FAT drive (the ESP directory) QEMU itself stops when the attribute of `\BACKUP\CONTROL.001` is changed right after it was written: its monitor no longer answers either, so the hang is in QEMU's vvfat driver, not in rs2. |
 | RESTORE.EXE | works | Restores a deleted file from that backup set. |
 | BLDLEVEL.EXE | works | |
-| CACHE.EXE | partial | `DosFSCtl` is not implemented; reports the error and default values. |
+| CACHE.EXE | works | Shows and sets the HPFS cache parameters (`DosFSCtl` 0x9001-0x9003); lazy writing is reported off, as rs2's HPFS writes through. |
+| CACHEJFS.EXE, DEFRAGFS.EXE, EXTENDFS.EXE, CLRBBLKS.EXE | works | Report that there is no JFS (`DosFSCtl` to the JFS FSD fails with ERROR_INVALID_FSD_NAME). |
 | COMP.COM | works | Including the Y/N prompts. |
 | DISKCOMP.COM | works | Reports that it cannot use a hard disk (no diskette drive). |
 | EAUTIL.EXE | works | Files have no EAs (EAs are not stored yet). |
@@ -52,12 +53,12 @@ Status: **works** = the tested function behaves as on OS/2;
 | PATCH.EXE | works | Usage text only. |
 | PSTAT.EXE | works | `/C` processes and threads, `/L` libraries (via `DosQuerySysState`). |
 | PSFILES.EXE | works | |
-| PSSEMS.EXE | partial | Runs; no semaphores are reported by `DosQuerySysState`. |
+| PSSEMS.EXE | works | Shared event and mutex semaphores with their openers. |
 | REPLACE.EXE | works | Add (`/A`) and replace. |
 | SETBOOT.EXE | works | `/Q`: "Boot Manager is not installed". |
 | SORT.EXE | works | |
 | STRACE.EXE | works | Usage text (loads `DOSCALL1` by name). |
-| SYSLEVEL.EXE | partial | Runs but lists nothing: it opens drives with DASD opens, which return ERROR_NOT_SUPPORTED. |
+| SYSLEVEL.EXE | works | Finds `SYSLEVEL.OS2` and lists the component, version and CSD levels. |
 | TREE.COM | works | `TREE [d:] [/F]`. |
 | UNDELETE.COM | works | Reports the missing `DELDIR` setting. |
 | UNPACK.EXE, UNPACK2.EXE | works | Unpack IBM packed files (UNPACK hands newer files to UNPACK2). |
@@ -74,7 +75,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | ALP.EXE | works | Assembles a small source to an object file (needs ALP.MSG). |
 | LINK386.EXE | works | Links that object file into an LX executable. |
 | NMAKE.EXE | works | Builds a makefile target, running commands through CMD. NMMSG.MSG is not on the media, so error texts are missing. |
-| EXEHDR.EXE | partial | Dumps executables. On the LINK386 output above it reports an internal library error (DDE4.MSG is not on the media) and then crashes in the C runtime's heap check. |
+| EXEHDR.EXE | partial | NE files are dumped completely. On every LX file (ALP.EXE as well as the LINK386 output) it prints the header and object table, then its C runtime reports an internal error whose text is in DDE4.MSG (not on the media) and faults freeing a heap block whose header holds the text EXE (the VAC heap signature check at 0x2907D). No failing API call precedes it (every DosRead/DosSetFilePtr result checked); not resolved. |
 | IMPLIB.EXE | works | |
 | MAPSYM.EXE, MARKEXE.EXE | works | |
 | MKMSGF.EXE, MSGBIND.EXE | works | Usage text only. |
@@ -125,19 +126,100 @@ Status: **works** = the tested function behaves as on OS/2;
   `DosAllocHuge`, `DosGetHugeShift`, `DosReadAsync`, `DosWriteAsync`,
   `DosQueryPathInfo` levels 4 and 6, `DosSetFileInfo`/`DosSetPathInfo`
   level 11.
+- `DosGetMessage`: an insertion table slot holding NULL made the call fail
+  with ERROR_INVALID_ADDRESS; OS/2 only reads the strings the message uses
+  (SYSLEVEL listed nothing).
+- Found by the stress test (`RS2\STRESS.EXE`, see below): every program
+  run leaked its executable module and file image; thread IDs were never
+  reused (1020 threads per process lifetime) and thread stacks never
+  freed; a thread woken between marking itself blocked and blocking could
+  sit on the run queue twice and a stale entry resume a dead thread;
+  waits missed kills and signals that arrived before they went to sleep;
+  a killed or signalled pipe writer waited for a reader forever and an
+  interrupted pipe read returned end-of-file; waiters on a mutex whose
+  owner died were not woken; semaphore waits interrupted by a signal
+  returned ERROR_TIMEOUT; uncollected children stayed in the process
+  table after their parent ended; DosKillProcess from another process
+  skipped the exit list; DosSleep ended early on stray wake-ups.
 
 ## Missing or incomplete
 
-- `DosFSCtl` (CACHE, CACHEJFS, DEFRAGFS, EXTENDFS, CLRBBLKS),
-  `DosSysCtl`, `DosQueryRASInfo`, `DosDumpProcess`,
-  `DosSystemService`.
-- SYSLEVEL lists nothing yet: re-test now that DASD drive opens exist.
 - Extended attributes are not stored: `DosEnumAttribute` reports none and
   EA writes are accepted and dropped.
 - Bound message segments (MSGBIND) are not read: programs fall back to the
   message files, so they need OSO001.MSG and friends on disk.
-- `DosQuerySysState` reports no semaphores or shared memory.
-- Writing to QEMU's virtual FAT drive (the ESP directory) can hang (seen
-  with BACKUP); FAT disk images are fine.
+- File locks (`DosSetFileLocks`) are advisory: they conflict with each
+  other but reads and writes are not checked against them.
+- The `DosProtect*` functions hand out a file handle lock ID but do not
+  check it.
+- After a REXX error raised inside an external function (`SysIni`, which
+  needs PMSHAPI, in RXTEST.CMD) IBM CMD.EXE prints REX0040 and then spins
+  calling `DosHoldSignal` instead of reading the next command (it also
+  calls `DosFreeSeg(0)` just before). Other REXX errors (REX0013) return
+  to the prompt normally. Not resolved; present before this round too.
 - The 32-bit `DosQueryMessageCP` argument layout is unverified (no caller
   found among the tested programs).
+
+## Kernel API (DOSCALLS) coverage
+
+The gate logs every unimplemented call once (`[unimplemented API ...]`).
+The table below comes from `lxdump imports` over every executable and DLL
+on the media (work/media, work/unpacked), counting the files that import
+each DOSCALLS ordinal rs2 does not implement (DOSCALL1.DLL itself and
+drivers left out).
+
+Added in this round: `DosSendSignalException`,
+`DosAcknowledgeSignalException` (further signals of a kind are held until
+acknowledged), `DosSetSignalExceptionFocus`, `DosEnterMustComplete`/
+`DosExitMustComplete` (signals held), `DosAllocThreadLocalMemory`/
+`DosFreeThreadLocalMemory`, `DosCreateThread2`, `DosVerifyPidTid`,
+`DosQueryModFromEIP`, `DosQueryThreadContext`, `DosDumpProcess` (a text
+dump \PDUMP.nnn), `DosSuppressPopUps`, `DosSysCtl` and
+`DosSystemService` (documented errors), `DosQueryRASInfo`,
+`DosQueryABIOSSupport`, `DosPerfSysCall` (CPU utilisation),
+`DosErrClass`, 16-bit `DosQSysInfo`, `DosGet/SetProcessorStatus`, spin
+locks, `DosTestPSD`, `DosShutdown` (flushes open files),
+`DosTmrQueryTime` interpolated from the TSC, `DosFSCtl` (generic
+functions and the HPFS cache controls) and `DosFSAttach`,
+`DosSetFileLocks`/`DosSetFileLocksL`/16-bit `DosFileLocks`/
+`DosCancelLockRequest`, the 32-bit `DosProtect*` functions,
+`DosAliasMem`, `DosQueryMemState`, `DosReallocHuge`, `DosLockSeg`/
+`DosUnlockSeg`, `DosSetMaxFH`/`DosSetRelMaxFH`, 16-bit
+`DosFSRamSemRequest`/`DosFSRamSemClear`, `DosSendSignal`,
+`DosFlagProcess`, `DosSysTrace`, the `DosPM*` semaphore variants;
+`DosKillProcess` with DKP_PROCESSTREE; `DosQuerySysState` now reports
+16- and 32-bit semaphores and shared memory; `DosCloseEventSem`/
+`DosCloseMutexSem` return ERROR_SEM_BUSY while threads wait; threads
+killed or ending with their process call their exception handlers with
+XCPT_ASYNC_PROCESS_TERMINATE / XCPT_PROCESS_TERMINATE first.
+
+Not implemented (importing files on the media):
+
+| Ordinals | Functions | Used by |
+|----------|-----------|---------|
+| 308-310, 266-268, 373-376 | DosOpenVDD, DosRequestVDD, DosCloseVDD, DosQuery/SetDOSProperty | 29 files: Win-OS/2 and VDM support (SEAMLESS, PMVDMH, WINCFG, display drivers). Needs DOS sessions. |
+| 157 | DosCallback | 19: 16-bit display drivers, PMSPL, PMMERGE (ring-2 code calling ring 3). |
+| 547, 115-117, 262, 293, 294, 546, 866-872, 577-581 | THK32_UNITHUNK, THK32* thunk helpers, HT16/HT32_STARTUP/CLEANUP | 12 (THK32_UNITHUNK: LIBUNI, UCONV, SHPIINST, VGAGRADD); the rest PM DLLs. |
+| 88 | 16-bit DosSystemService | 7: HARDERR, SYSINST1, VIDEOPMI, PMMERGE. Needs a signature; the 32-bit entry (995) is answered. |
+| 216, 217, 419 | DosLocalInfo, DosGlobalInfo, DosTIB | 4: display drivers, PMMERGE. |
+| 682-717, 845-865, 745-769, 771-844, 853-857 | Session manager, keyboard, video and mouse shell internals (DosSm*, Kbd*/Vio* registration, BVS/BKS/BMS, QH*, SM* arrays) | HARDERR, PMMERGE, BVH*.DLL: the parts of the shell rs2 replaces. |
+| 440-442, 437-439 | DosOpen/Reset/CloseChangeNotify | PMWP (Workplace Shell). |
+| 582, 584 | DosQueryHeaderInfo | jvm.dll |
+| 316, 165, 364-367, 422, 430-436 | DosDynamicTrace, performance counters, LOG* | DTRACE, TRACE, MPCPUMON, FFST. |
+| 317, 12 | DosDebug, DosPTrace | debuggers (PMMERGE imports DosDebug). |
+| 359 | 16-bit DosQueryModFromCS | PMMERGE (no signature yet). |
+| 51, 69, 160 | DosCLIAccess, DosPortAccess, DosR2StackRealloc | I/O privilege: not available to rs2 programs. |
+| 996, 990 | DosListIO, DosListIOL | no importer on the media. |
+| 246, 247, 297, 358, 377, 414, 416, 548, 563, 564, 592, 594, 600, 649, 878, 875, 596, 574, 575, 585, 588 | DosRawRead/WriteNPipe, Dos32AllocProtectedMem, DosQueryPageUsage, DosProfile, thread affinity, DOSCALL1-internal entries (exception dispatcher, DLL term dispatch, ...), DosCloseMessageFile, PM 16-bit semaphore helpers, monitor I/O | at most one importer each, mostly PMMERGE or DOSCALL1 itself. |
+| 186-189, 214, 420, 421, 573, 587, 622-635 | 16-bit DosFileIO, DosFindNotify*, DosMaxPathLen, DosTmrQuery*, DosQueryResourceSize, DosQueryProcType, DosProtect* | only DOSCALL1.DLL imports them (its 16-bit thunks); the 32-bit versions are implemented. |
+
+## Stress test
+
+`RS2\STRESS.EXE` (userland/stress) runs sections `threads sems kill signals
+xcpt procs mem files ipc misc` (all by default, or the ones named on the
+command line) and prints PASS/FAIL per check; `STRESS ctrlc` waits in a
+pipe read for Ctrl+C. It uses `RS2API.100` (`Rs2QueryCounters`: free
+pages, live threads, processes and process objects, semaphores, shared
+memory objects, open files, queues, timers, kernel heap use, file locks)
+to check that nothing leaks, and prints the counters after each section.
+All checks pass under rs2's CMD and IBM's CMD.EXE.
