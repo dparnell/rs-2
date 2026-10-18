@@ -198,6 +198,23 @@ pub fn peek_key() -> Option<KeyInfo> {
 
 pub fn flush() {
     STATE.lock().queue.clear();
+    COOKED.lock().clear();
+}
+
+/// The part of an edited CON input line not yet consumed by DosRead.
+static COOKED: SpinLock<VecDeque<u8>> = SpinLock::new(VecDeque::new());
+
+/// DosRead from CON in cooked mode: hands out an edited line, keeping what
+/// does not fit in the caller's buffer for the next read (programs read
+/// one byte at a time).
+pub fn read_cooked(len: usize) -> Vec<u8> {
+    if COOKED.lock().is_empty() {
+        let line = read_line(256);
+        COOKED.lock().extend(line);
+    }
+    let mut q = COOKED.lock();
+    let n = len.min(q.len());
+    q.drain(..n).collect()
 }
 
 pub fn shift_state() -> u16 {

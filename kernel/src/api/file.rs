@@ -95,8 +95,7 @@ pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
     let mut status = 0;
     let data: Vec<u8> = match h {
         Handle::Con | Handle::Kbd => {
-            let line = crate::kbd::read_line(len as usize);
-            line
+            crate::kbd::read_cooked(len as usize)
         }
         Handle::Nul | Handle::Screen | Handle::Clock | Handle::DosDev | Handle::PhysDisk(_) => Vec::new(),
         Handle::File(f) => {

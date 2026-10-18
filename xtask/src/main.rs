@@ -356,8 +356,14 @@ fn run(o: &Opts) -> bool {
         if !typed && start.elapsed() >= Duration::from_secs(type_at) {
             typed = true;
             for key in keys(o.typing.as_deref().unwrap()) {
+                // "~" pauses; Enter waits a moment so a program started by
+                // the line is reading before the next keys arrive.
+                if key == "pause" {
+                    std::thread::sleep(Duration::from_secs(3));
+                    continue;
+                }
                 monitor(&sock, &format!("sendkey {key}"));
-                std::thread::sleep(Duration::from_millis(60));
+                std::thread::sleep(Duration::from_millis(if key == "ret" { 1000 } else { 60 }));
             }
         }
         if let Ok(Some(_)) = child.try_wait() {
@@ -408,6 +414,7 @@ fn keys(s: &str) -> Vec<String> {
             'A'..='Z' => format!("shift-{}", ch.to_ascii_lowercase()),
             ' ' => "spc".into(),
             '\n' => "ret".into(),
+            '~' => "pause".into(),
             '\\' => "backslash".into(),
             ':' => "shift-semicolon".into(),
             ';' => "semicolon".into(),

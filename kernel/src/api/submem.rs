@@ -91,7 +91,12 @@ fn insert_free(c: &Ctx, h: &Heap, off: u32, len: u32) -> Result<(), u32> {
 
 /// DosSubSetMem(pbBase, flag, cb)
 pub fn dos_sub_set_mem(c: &mut Ctx) -> u32 {
-    let (base, flags, cb) = (c.arg(0), c.arg(1), c.arg(2) & !(GRAIN - 1));
+    let (base, flags, cb) = (c.arg(0), c.arg(1), c.arg(2));
+    set_mem(c, base, flags, cb)
+}
+
+fn set_mem(c: &Ctx, base: u32, flags: u32, cb: u32) -> u32 {
+    let cb = cb & !(GRAIN - 1);
     if flags & !(DOSSUB_INIT | DOSSUB_GROW | DOSSUB_SPARSE_OBJ | DOSSUB_SERIALIZE) != 0 {
         return err::DOSSUB_BADFLAG;
     }
@@ -135,12 +140,19 @@ pub fn dos_sub_set_mem(c: &mut Ctx) -> u32 {
 /// DosSubAllocMem(pbBase, ppb, cb)
 pub fn dos_sub_alloc_mem(c: &mut Ctx) -> u32 {
     let (base, ppb, cb) = (c.arg(0), c.arg(1), c.arg(2));
-    let h = match open(c, base) {
-        Ok(h) => h,
-        Err(e) => return e,
-    };
+    match alloc(c, base, cb) {
+        Ok(a) => {
+            c.write_u32(ppb, a);
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+fn alloc(c: &Ctx, base: u32, cb: u32) -> Result<u32, u32> {
+    let h = open(c, base)?;
     if cb == 0 || cb > h.size {
-        return err::DOSSUB_BADSIZE;
+        return Err(err::DOSSUB_BADSIZE);
     }
     let want = cb.next_multiple_of(GRAIN);
     let mut link = base + 12;
@@ -160,18 +172,21 @@ pub fn dos_sub_alloc_mem(c: &mut Ctx) -> u32 {
             if h.flags & DOSSUB_SPARSE_OBJ != 0 {
                 commit(c, base + cur, want);
             }
-            c.write_u32(ppb, base + cur);
-            return 0;
+            return Ok(base + cur);
         }
         link = base + cur;
         cur = next;
     }
-    err::DOSSUB_NOMEM
+    Err(err::DOSSUB_NOMEM)
 }
 
 /// DosSubFreeMem(pbBase, pb, cb)
 pub fn dos_sub_free_mem(c: &mut Ctx) -> u32 {
     let (base, pb, cb) = (c.arg(0), c.arg(1), c.arg(2));
+    free(c, base, pb, cb)
+}
+
+fn free(c: &Ctx, base: u32, pb: u32, cb: u32) -> u32 {
     let h = match open(c, base) {
         Ok(h) => h,
         Err(e) => return e,
@@ -192,4 +207,41 @@ pub fn dos_sub_unset_mem(c: &mut Ctx) -> u32 {
         Ok(_) => 0,
         Err(e) => e,
     }
+}
+
+// ---- 16-bit: a heap in one segment, offsets instead of pointers ----
+
+fn seg_base(c: &Ctx, sel: u32) -> u32 {
+    c.far16_to_flat(sel << 16)
+}
+
+/// DosSubSet(sel, fFlags, cbSize): 1 = initialise, 0 = new (larger) size.
+pub fn dos16_sub_set(c: &mut Ctx) -> u32 {
+    let (sel, flags, cb) = (c.arg(0), c.arg(1), c.arg(2));
+    let cb = if cb == 0 { 0x10000 } else { cb };
+    let base = seg_base(c, sel);
+    if base == 0 || base == 0xffff_ffff {
+        return err::DOSSUB_BADSELECTOR;
+    }
+    set_mem(c, base, if flags & 1 != 0 { DOSSUB_INIT } else { DOSSUB_GROW }, cb)
+}
+
+/// DosSubAlloc(sel, pusOffset, cbSize)
+pub fn dos16_sub_alloc(c: &mut Ctx) -> u32 {
+    let (sel, poff, cb) = (c.arg(0), c.ptr(1), c.arg(2));
+    let base = seg_base(c, sel);
+    match alloc(c, base, if cb == 0 { 0x10000 } else { cb }) {
+        Ok(a) => {
+            c.write_u16(poff, (a - base) as u16);
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+/// DosSubFree(sel, usOffset, cbSize)
+pub fn dos16_sub_free(c: &mut Ctx) -> u32 {
+    let (sel, off, cb) = (c.arg(0), c.arg(1), c.arg(2));
+    let base = seg_base(c, sel);
+    free(c, base, base + off, if cb == 0 { 0x10000 } else { cb })
 }
