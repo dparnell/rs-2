@@ -438,6 +438,20 @@ fn bios_handoff(cap: *mut u8, clock: &mut Clock) {
     }
 }
 
+/// Intel 7/8/9-series chipsets power up with their ports routed to the
+/// EHCI controllers; route every port that can switch to the xHCI
+/// (XUSB2PR/USB3_PSSEN from their masks XUSB2PRM/USB3PRM).
+fn intel_port_routing(dev: &pci::Device) {
+    const SWITCHABLE: [u16; 5] = [0x1e31, 0x8c31, 0x9c31, 0x8cb1, 0x9cb1];
+    if dev.vendor != 0x8086 || !SWITCHABLE.contains(&dev.device) {
+        return;
+    }
+    let usb3 = dev.read(0xdc) & 0xf;
+    dev.write(0xd8, (dev.read(0xd8) & !0xf) | usb3);
+    let usb2 = dev.read(0xd4) & 0x7fff;
+    dev.write(0xd0, (dev.read(0xd0) & !0x7fff) | usb2);
+}
+
 fn alloc_pages(n: usize, limit: u64) -> Option<u64> {
     phys::alloc_contig(n as u64, limit)
 }
@@ -468,6 +482,7 @@ pub fn probe(dev: &pci::Device) {
     let name = alloc::format!("xhci {:02x}:{:02x}.{}", dev.bus, dev.dev, dev.func);
 
     bios_handoff(cap, &mut clock);
+    intel_port_routing(dev);
     // Halt, then reset.
     if rd32(op, USBSTS) & STS_HCH == 0 {
         wr32(op, USBCMD, rd32(op, USBCMD) & !CMD_RUN);
@@ -877,7 +892,13 @@ impl Ctrl {
             Step::Ep0Dequeue => {
                 let d = self.devs[p].as_mut().unwrap();
                 d.step = d.resume;
-                self.control_done(p);
+                if d.step == Step::Running {
+                    // A stalled LED report: the keyboard has no LEDs.
+                    d.ctl_busy = false;
+                } else {
+                    // A stalled optional request: carry on.
+                    self.control_done(p);
+                }
             }
             _ => {}
         }
@@ -1123,7 +1144,10 @@ impl Ctrl {
                     self.configure_endpoints(p);
                 }
             }
-            Step::Running => d.ctl_busy = false,
+            Step::Running => {
+                d.ctl_busy = false;
+                crate::trace!("usb: slot {} LEDs set to {:#x}", d.slot, d.leds);
+            }
             _ => {}
         }
     }
