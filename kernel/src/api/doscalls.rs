@@ -162,15 +162,81 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 7) | (0, 296) => super::proc::dos_exit_list,
         (0, 356) => super::exceptions::dos_raise_exception,
         (0, 357) => super::exceptions::dos_unwind_exception,
-        (0, 378) => dos_set_signal_exception_focus,
-        (0, 380) | (0, 381) => dos_must_complete,
-        (0, 418) => ok, // DosAcknowledgeSignalException
+        (0, 378) => super::xproc::dos_set_signal_exception_focus,
+        (0, 379) => super::xproc::dos_send_signal_exception,
+        (0, 380) => super::xproc::dos_enter_must_complete,
+        (0, 381) => super::xproc::dos_exit_must_complete,
+        (0, 418) => super::xproc::dos_acknowledge_signal_exception,
+        (0, 134) => super::xproc::dos16_send_signal,
+        (0, 15) => super::xproc::dos16_flag_process,
+        (0, 454) => super::xproc::dos_alloc_thread_local_memory,
+        (0, 455) => super::xproc::dos_free_thread_local_memory,
+        (0, 997) => super::xproc::dos_create_thread2,
+        (0, 460) => super::xproc::dos_verify_pid_tid,
+        (0, 360) => super::xproc::dos_query_mod_from_eip,
+        (0, 113) => super::xproc::dos_dump_process,
+        (0, 114) => super::xproc::dos_suppress_popups,
+        (0, 444) => not_supported, // DosForceSystemDump
+        (0, 161) => super::xproc::dos16_fsram_sem_request,
+        (0, 162) => super::xproc::dos16_fsram_sem_clear,
+        (0, 90) => super::xproc::dos16_sys_trace,
+        (0, 877) => super::xproc::dos_query_thread_context,
+        // ---- System services ----
+        (0, 876) => super::sysctl::dos_sys_ctl,
+        (0, 995) => super::sysctl::dos_system_service,
+        (0, 112) => super::sysctl::dos_query_ras_info,
+        (0, 371) => super::sysctl::dos_query_abios_support,
+        (0, 976) => super::sysctl::dos_perf_sys_call,
+        (0, 139) | (0, 211) => super::sysctl::dos_err_class,
+        (0, 166) => super::sysctl::dos16_qsys_info,
+        (0, 447) => super::sysctl::dos_get_processor_status,
+        (0, 448) => super::sysctl::dos_set_processor_status,
+        (0, 453) => super::sysctl::dos_test_psd,
+        (0, 557) => super::sysctl::dos_create_spin_lock,
+        (0, 558) => super::sysctl::dos_acquire_spin_lock,
+        (0, 559) => super::sysctl::dos_release_spin_lock,
+        (0, 560) => super::sysctl::dos_free_spin_lock,
+        // ---- File system control, locks, protected handles ----
+        (0, 285) => super::fsctl::dos_fsctl,
+        (0, 183) => super::fsctl::dos16_fsctl,
+        (0, 181) | (0, 269) => super::fsctl::dos_fs_attach,
+        (0, 428) => super::filelock::dos_set_file_locks,
+        (0, 986) => super::filelock::dos_set_file_locks_l,
+        (0, 62) => super::filelock::dos16_file_locks,
+        (0, 429) | (0, 987) => super::filelock::dos_cancel_lock_request,
+        (0, 637) => super::filelock::dos_protect_open,
+        (0, 982) => super::filelock::dos_protect_open_l,
+        (0, 639) => super::filelock::dos_protect_set_file_locks,
+        (0, 983) => super::filelock::dos_protect_set_file_locks_l,
+        (0, 638) => file::dos_close,
+        (0, 641) => file::dos_read,
+        (0, 642) => file::dos_write,
+        (0, 621) => file::dos_set_file_ptr,
+        (0, 640) => file::dos_set_file_size,
+        (0, 643) => file::dos_set_file_info,
+        (0, 644) => file::dos_set_fh_state,
+        (0, 645) => file::dos_query_fh_state,
+        (0, 646) => file::dos_query_file_info,
+        (0, 636) => file::dos_enum_attribute,
+        (0, 984) => file::dos_set_file_ptr_l,
+        (0, 985) => file::dos_set_file_size_l,
+        // ---- Memory ----
+        (0, 298) => super::memx::dos_alias_mem,
+        (0, 307) => super::memx::dos_query_mem_state,
+        (0, 42) => super::memx::dos16_realloc_huge,
+        (0, 122) | (0, 123) => super::memx::dos16_lock_seg,
+        // ---- PM variants of the semaphore calls (no message queue here) ----
+        (0, 561) | (0, 591) => super::sem::dos_wait_event_sem,
+        (0, 562) | (0, 590) => super::sem::dos_post_event_sem,
+        (0, 593) => super::sem::dos_request_mutex_sem,
+        (0, 595) => super::sem::dos_wait_mux_wait_sem,
         (0, 16) => file::dos16_make_pipe,
         (0, 239) => file::dos_create_pipe,
         // ---- RS2API ----
         (8, 1) => super::rs2api::rs2_map_display,
         (8, 2) => super::rs2api::rs2_read_input,
         (8, 3) => super::rs2api::rs2_query_pointer,
+        (8, 100) => super::sysctl::rs2_query_counters,
         // ---- MOUCALLS ----
         (3, 1) => super::mou::mou_get_ptr_shape,
         (3, 2) => super::mou::mou_set_ptr_shape,
@@ -223,8 +289,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 31) | (0, 290) => super::timer::dos_stop_timer,
         (0, 350) => super::timer::dos_async_timer,
         (0, 351) => super::timer::dos_start_timer,
-        (0, 362) => super::timer::dos_tmr_query_freq,
-        (0, 363) => super::timer::dos_tmr_query_time,
+        (0, 362) => super::sysctl::dos_tmr_query_freq,
+        (0, 363) => super::sysctl::dos_tmr_query_time,
         (0, 35) => super::shmem::dos16_alloc_shr_seg,
         (0, 36) => super::shmem::dos16_get_shr_seg,
         (0, 37) => super::shmem::dos16_give_seg,
@@ -252,7 +318,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 53) | (0, 284) => super::ioctl::dos_dev_ioctl,
         (0, 99) => super::ioctl::dos16_dev_ioctl2,
         (0, 129) | (0, 287) => super::ioctl::dos_physical_disk,
-        (0, 206) | (0, 415) => ok, // DosShutdown: file systems write through
+        (0, 206) | (0, 415) => super::sysctl::dos_shutdown,
         (0, 690) => ok, // DosSMSetTitle
         (0, 712) => dos16_sm_pm_present,
         // ---- 16-bit DOSCALLS ----
@@ -313,7 +379,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 184) => file::dos16_find_first2,
         (0, 191) | (0, 261) => file::dos_edit_name,
         (0, 204) | (0, 372) => file::dos_enum_attribute,
-        (0, 85) => ok,  // DosSetMaxFH
+        (0, 85) => super::xproc::dos_set_max_fh,
         (0, 89) => dos16_set_vec,
         (0, 91) => dos16_get_env,
         (0, 92) => dos16_get_version,
@@ -327,7 +393,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 152) => dos16_scan_env,
         (0, 215) => dos16_page_size,
         // ---- 32-bit DOSCALLS ----
-        (0, 209) => ok, // DosSetMaxFH
+        (0, 209) => super::xproc::dos_set_max_fh,
         (0, 218) => file::dos_set_file_info,
         (0, 219) => file::dos_set_path_info,
         (0, 220) => file::dos_set_default_disk,
@@ -375,7 +441,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 348) => dos_query_sys_info,
         (0, 354) => dos_set_exception_handler,
         (0, 355) => dos_unset_exception_handler,
-        (0, 382) => dos_set_rel_max_fh,
+        (0, 382) => super::xproc::dos_set_rel_max_fh,
         (0, 425) => dos_flat_to_sel,
         (0, 981) => file::dos_open_l,
         (0, 988) => file::dos_set_file_ptr_l,
@@ -392,6 +458,10 @@ fn ok(_c: &mut Ctx) -> u32 {
     err::NO_ERROR
 }
 
+fn not_supported(_c: &mut Ctx) -> u32 {
+    err::NOT_SUPPORTED
+}
+
 // ---- Process ----
 
 fn dos16_exit(c: &mut Ctx) -> u32 {
@@ -404,6 +474,7 @@ fn dos_exit(c: &mut Ctx) -> u32 {
 
 fn exit(c: &mut Ctx, action: u32, code: u32) -> u32 {
     let p = c.process.clone();
+    c.thread.sync_exit.store(true, core::sync::atomic::Ordering::Relaxed);
     let live = p.threads.lock().iter().filter(|t| t.state() != crate::task::thread::State::Dead).count();
     // EXIT_THREAD (0) on the last thread ends the process too.
     if action == 0 && live > 1 {
@@ -918,12 +989,6 @@ fn dos_query_verify(c: &mut Ctx) -> u32 {
     0
 }
 
-fn dos_set_rel_max_fh(c: &mut Ctx) -> u32 {
-    // Report the current maximum.
-    let n = c.process.handles.lock().len().max(20) as u32;
-    c.write_u32(c.arg(1), n);
-    0
-}
 
 // ---- Signals (16-bit) ----
 
@@ -991,19 +1056,4 @@ fn dos16_sm_pm_present(c: &mut Ctx) -> u32 {
     0
 }
 
-fn dos_set_signal_exception_focus(c: &mut Ctx) -> u32 {
-    // (flag, pulTimes)
-    let p = c.arg(1);
-    if p != 0 {
-        c.write_u32(p, 1);
-    }
-    0
-}
 
-fn dos_must_complete(c: &mut Ctx) -> u32 {
-    let p = c.arg(0);
-    if p != 0 {
-        c.write_u32(p, 1);
-    }
-    0
-}

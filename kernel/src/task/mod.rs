@@ -1,5 +1,6 @@
 //! Processes, threads and scheduling.
 
+pub mod kthread;
 pub mod process;
 pub mod sched;
 pub mod thread;
@@ -25,10 +26,21 @@ impl WaitQueue {
         Self { waiters: SpinLock::new(VecDeque::new()) }
     }
 
-    /// Block the current thread until woken or the deadline (in ticks)
-    /// passes. Returns false on timeout. `ready` is re-checked with the
-    /// queue locked to avoid lost wake-ups.
-    pub fn wait_until(&self, deadline: Option<u64>, mut ready: impl FnMut() -> bool) -> bool {
+    /// Block the current thread until `ready` holds, the deadline (in
+    /// ticks) passes, or the thread is told to terminate or has a signal
+    /// pending. Returns false in the latter cases. `ready` is re-checked with
+    /// the queue locked to avoid lost wake-ups.
+    pub fn wait_until(&self, deadline: Option<u64>, ready: impl FnMut() -> bool) -> bool {
+        self.wait(deadline, true, ready)
+    }
+
+    /// Wait for `ready` regardless of termination requests and signals
+    /// (kernel locks and work queues that must not be abandoned).
+    pub fn wait_uninterruptible(&self, ready: impl FnMut() -> bool) {
+        self.wait(None, false, ready);
+    }
+
+    fn wait(&self, deadline: Option<u64>, interruptible: bool, mut ready: impl FnMut() -> bool) -> bool {
         loop {
             let me = sched::current();
             {
@@ -39,6 +51,11 @@ impl WaitQueue {
                 if deadline.is_some_and(|d| crate::irq::ticks() >= d) {
                     return false;
                 }
+                // Do not go to sleep with a kill or a signal pending: the
+                // wake-up that announced it has already happened.
+                if interruptible && (me.exit_requested() || me.interrupted()) {
+                    return false;
+                }
                 w.push_back(me.clone());
                 // Mark blocked while holding the queue lock so a wake between
                 // here and block() is not lost.
@@ -46,13 +63,18 @@ impl WaitQueue {
             }
             sched::block(deadline);
             self.waiters.lock().retain(|t| !Arc::ptr_eq(t, &me));
-            if me.exit_requested() || me.interrupted() {
-                return false;
+            if interruptible && (me.exit_requested() || me.interrupted()) {
+                return ready();
             }
             if me.timed_out() && !ready() {
                 return false;
             }
         }
+    }
+
+    /// Whether a thread matching `f` is waiting.
+    pub fn has_waiter(&self, f: impl Fn(&Thread) -> bool) -> bool {
+        self.waiters.lock().iter().any(|t| f(t))
     }
 
     pub fn wake_one(&self) {
@@ -108,6 +130,7 @@ pub fn resolve_user_fault(addr: u64, error: u64) -> bool {
 
 pub fn timer_tick(_f: &mut TrapFrame) {
     sched::tick();
+    crate::api::sysctl::tick(sched::current_opt().is_none_or(|t| t.is_idle()));
     crate::api::timer::tick();
     crate::drivers::xhci::tick();
     crate::screen::tick(crate::irq::ticks());
@@ -124,7 +147,10 @@ pub fn before_user_return(f: &mut TrapFrame) -> bool {
     sched::maybe_preempt();
     let t = sched::current();
     if t.exit_requested() {
-        return true;
+        // 32-bit exception handlers see the termination first (and may run
+        // user code for it); then the thread ends.
+        let p = t.process();
+        return !p.is_some_and(|p| crate::api::exceptions::exit_unwind(f, &p, &t));
     }
     let Some(p) = t.process() else { return false };
     crate::api::proc::hold_if_needed(&t, &p);

@@ -514,6 +514,8 @@ enum Cmd {
 
 struct Ctrl {
     name: String,
+    /// Position in CTRLS.
+    index: usize,
     op: *mut u8,
     rt: *mut u8,
     db: *mut u8,
@@ -622,6 +624,7 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     let pending = core::mem::take(&mut c.new_storage);
     let idx = {
         let mut cs = CTRLS.lock();
+        c.index = cs.len();
         cs.push(c);
         cs.len() - 1
     };
@@ -746,6 +749,7 @@ fn start(dev: &pci::Device) -> Option<Ctrl> {
         booting: false,
         new_storage: Vec::new(),
         sync_cmds: Vec::new(),
+        index: 0,
     };
     // Power the ports (when the controller switches port power).
     if hcc1 & (1 << 3) != 0 {
@@ -939,6 +943,9 @@ impl Ctrl {
         }
         if matches!(d.step, Step::Running) {
             crate::println!("{}: port {} device removed", self.name, d.path());
+            if d.msc.is_some() {
+                STORAGE_EVENTS.post(StorageEvent::Removed(Handle { ctrl: self.index, dev: i, epoch: d.epoch }));
+            }
         }
         if d.slot != 0 {
             let trb = self.cmd.push(0, 0, TRB_DISABLE_SLOT << 10 | (d.slot as u32) << 24);
@@ -1590,7 +1597,7 @@ impl Ctrl {
 
     fn start_running(&mut self, i: usize) {
         let name = self.name.clone();
-        let booting = self.booting;
+        let (booting, index) = (self.booting, self.index);
         let d = self.dev(i);
         d.step = Step::Running;
         let (path, vendor, product, slot) = (d.path(), d.desc.vendor, d.desc.product, d.slot);
@@ -1608,7 +1615,9 @@ impl Ctrl {
             if booting {
                 self.new_storage.push(i);
             } else {
-                crate::println!("{name}: port {path}: connected after boot, not mounted");
+                // Set up and mounted by the hot-plug kernel thread.
+                let h = Handle { ctrl: index, dev: i, epoch: d.epoch };
+                STORAGE_EVENTS.post(StorageEvent::Added(h));
             }
             return;
         }
@@ -1702,7 +1711,7 @@ impl Ctrl {
 }
 
 /// A configured device, as thread-context callers name it.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Handle {
     ctrl: usize,
     dev: usize,
@@ -1730,6 +1739,20 @@ pub struct StorageDev {
     pub product: u16,
     /// "xhci 00:03.0 port 1.2", for messages.
     pub name: String,
+}
+
+/// Mass storage devices that came or went after boot.
+pub enum StorageEvent {
+    Added(Handle),
+    Removed(Handle),
+}
+
+pub static STORAGE_EVENTS: crate::task::kthread::Inbox<StorageEvent> = crate::task::kthread::Inbox::new();
+
+/// The Bulk-Only interface of a hot-plugged device, if it is still there.
+pub fn hotplug_storage(h: Handle) -> Option<StorageDev> {
+    let s = storage_info(h.ctrl, h.dev)?;
+    (s.handle == h).then_some(s)
 }
 
 fn storage_info(ctrl: usize, dev: usize) -> Option<StorageDev> {

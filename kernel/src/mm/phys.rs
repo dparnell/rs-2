@@ -134,6 +134,26 @@ pub fn alloc() -> Option<u64> {
     Some(p)
 }
 
+/// Frames kept back from user memory so the kernel (heap, page tables,
+/// DMA buffers) can still allocate when programs have used up the rest.
+const USER_RESERVE: u64 = 1024;
+
+/// Allocate one zeroed frame for user memory: fails (the program sees an
+/// exception or ERROR_NOT_ENOUGH_MEMORY) once only the kernel's reserve is
+/// left.
+pub fn alloc_user() -> Option<u64> {
+    let p = {
+        let mut g = FRAMES.lock();
+        let f = g.as_mut()?;
+        if f.free <= USER_RESERVE {
+            return None;
+        }
+        f.alloc()?
+    };
+    unsafe { core::ptr::write_bytes(phys_to_virt(p), 0, PAGE as usize) };
+    Some(p)
+}
+
 /// Allocate `n` zeroed, physically contiguous frames below `limit`.
 pub fn alloc_contig(n: u64, limit: u64) -> Option<u64> {
     let p = FRAMES.lock().as_mut()?.alloc_contig(n, 1, limit)?;

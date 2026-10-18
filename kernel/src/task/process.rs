@@ -26,6 +26,8 @@ pub mod info {
     pub const MAX_THREADS: u32 = 0x3fc;
     /// Local information segment (16-bit), in its own tile.
     pub const LINFOSEG: u32 = 0x1_0000;
+    /// Thread-local memory page (the running thread's copy).
+    pub const TLS: u32 = 0x1_8000;
     pub const SIZE: u32 = 0x2_0000;
 }
 
@@ -89,9 +91,32 @@ pub struct Process {
     pub signals: SpinLock<[(u32, u32); 8]>,
     /// Open directory searches (DosFindFirst handles).
     pub searches: SpinLock<alloc::collections::BTreeMap<u32, crate::api::file::Search>>,
+    /// XCPT_SIGNAL kinds delivered and not yet acknowledged (bit per
+    /// 16-bit signal number): further ones wait.
+    pub sig_held: AtomicU32,
+    /// DosSetSignalExceptionFocus nesting.
+    pub sig_focus: AtomicU32,
+    /// Physical page holding the running thread's thread-local memory (0 =
+    /// none allocated yet) and the dwords in use (bit mask).
+    pub tls_phys: core::sync::atomic::AtomicU64,
+    pub tls_used: AtomicU32,
+    /// File handle limit (DosSetMaxFH / DosSetRelMaxFH).
+    pub max_fh: AtomicU32,
 }
 
+/// Thread-local memory: dwords per thread (in the process information area).
+pub const TLS_DWORDS: usize = 32;
+
 static NEXT_PID: AtomicU32 = AtomicU32::new(1);
+
+/// Process objects not yet freed (leak checks: a reaped process must go).
+pub static LIVE: AtomicU32 = AtomicU32::new(0);
+
+impl Drop for Process {
+    fn drop(&mut self) {
+        LIVE.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 static PROCESSES: SpinLock<Vec<Arc<Process>>> = SpinLock::new(Vec::new());
 
 pub fn by_pid(pid: u32) -> Option<Arc<Process>> {
@@ -215,6 +240,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         Some(q) => q.cwd.lock().clone(),
         None => (2, Default::default()),
     };
+    LIVE.fetch_add(1, Ordering::Relaxed);
     let proc = Arc::new(Process {
         pid,
         ppid,
@@ -249,6 +275,14 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         session: AtomicU32::new(p.session),
         signals: SpinLock::new([(0, 0); 8]),
         pending_signal: SpinLock::new(None),
+        sig_held: AtomicU32::new(0),
+        sig_focus: AtomicU32::new(0),
+        tls_phys: core::sync::atomic::AtomicU64::new(0),
+        tls_used: AtomicU32::new(0),
+        max_fh: AtomicU32::new(match &p.parent {
+            Some(q) => q.max_fh.load(Ordering::Relaxed),
+            None => 20,
+        }),
     });
     let stack_bottom = stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000));
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;
@@ -324,10 +358,21 @@ fn write_linfoseg(
 impl Process {
     /// Create a thread (not yet started).
     pub fn new_thread(self: &Arc<Self>, frame: TrapFrame, stack_bottom: u32, stack_top: u32) -> Result<Arc<Thread>, u32> {
-        let tid = self.next_tid.fetch_add(1, Ordering::Relaxed);
-        if tid > info::MAX_THREADS {
-            return Err(164); // ERROR_MAX_THRDS_REACHED
-        }
+        // Thread IDs are reused as on OS/2: the lowest one not in the list
+        // (ended threads stay there until DosWaitThread collects them); when
+        // all are taken, ended threads nobody collected give theirs up.
+        let tid = {
+            let mut ts = self.threads.lock();
+            let free = |ts: &Vec<Arc<Thread>>| (1..=info::MAX_THREADS).find(|&n| !ts.iter().any(|t| t.tid == n));
+            match free(&ts) {
+                Some(n) => n,
+                None => {
+                    ts.retain(|t| t.state() != super::thread::State::Dead);
+                    free(&ts).ok_or(164u32)? // ERROR_MAX_THRDS_REACHED
+                }
+            }
+        };
+        self.next_tid.store(tid + 1, Ordering::Relaxed);
         let t = Thread::new_user(self, tid, frame);
         let tib = self.info + info::TIB0 + tid * info::TIB_STRIDE;
         t.set_tib(tib);
@@ -380,6 +425,28 @@ impl Process {
                 return;
             }
         }
+        // Ended from outside (DosKillProcess, a signal's default action
+        // posted by another process): thread 1 (or the first live thread)
+        // leaves whatever it waits for and runs the exit list.
+        if have_list {
+            let runner = {
+                let ts = self.threads.lock();
+                let live = |t: &&Arc<Thread>| t.state() != super::thread::State::Dead && !t.exit_requested();
+                ts.iter().find(|t| t.tid == 1 && live(t)).or_else(|| ts.iter().find(live)).cloned()
+            };
+            if let Some(r) = runner {
+                for t in self.threads.lock().iter() {
+                    if !Arc::ptr_eq(t, &r) {
+                        sched::kill(t);
+                    }
+                }
+                self.exitlist_tid.store(r.tid, Ordering::Relaxed);
+                self.exitlist_next.store(true, Ordering::Relaxed);
+                r.interrupt();
+                sched::wake(&r);
+                return;
+            }
+        }
         self.finish_exit(ExitInfo { cause, code });
     }
 
@@ -399,6 +466,16 @@ impl Process {
             let mut cs = self.critsec.lock();
             if cs.0 == me {
                 *cs = (0, 0);
+            }
+            drop(cs);
+            // Mutexes it owned: waiters get ERROR_SEM_OWNER_DIED now.
+            crate::api::sem::thread_ended(self.pid, me);
+            crate::api::xproc::thread_ended(self, me);
+            // The stack DosCreateThread allocated (the thread is in the
+            // kernel now and never touches it again).
+            let stack = sched::current().owned_stack.swap(0, Ordering::Relaxed);
+            if stack != 0 {
+                let _ = self.space.lock().free(stack);
             }
         }
         self.thread_waiters.wake_all();
@@ -421,6 +498,10 @@ impl Process {
         crate::api::sem::process_ended(self.pid);
         crate::api::timer::process_ended(self.pid);
         crate::api::queue::process_ended(self.pid);
+        crate::api::xproc::process_ended(self.pid);
+        crate::api::sysctl::process_ended(self.pid);
+        // The program's module (and the file image it keeps).
+        loader::unregister_exe(&self.exe);
         crate::session::process_ended(self.pid, self.exit_info().map_or(0, |e| e.code));
         // Close handles (pipes see their writers disappear).
         let hs = core::mem::take(&mut *self.handles.lock());
@@ -431,7 +512,14 @@ impl Process {
             Some(pp) => pp.child_waiters.wake_all(),
             None => {}
         }
-        let keep = parent.is_some() && !self.detached.load(Ordering::Relaxed);
+        // Kept for DosWaitChild only while the parent is alive to collect it.
+        let keep = parent.as_ref().is_some_and(|pp| pp.exit_info().is_none()) && !self.detached.load(Ordering::Relaxed);
+        // Our own children that ended and were never collected go now.
+        for q in all() {
+            if q.ppid == self.pid && q.exit_info().is_some() && q.threads.lock().is_empty() {
+                reap(q.pid);
+            }
+        }
         if self.ppid == 0 {
             let code = self.exit_info().map_or(0, |e| e.code);
             crate::println!("[process {} ({}) ended, code {}]", self.pid, self.exe.name, code);

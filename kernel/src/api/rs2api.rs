@@ -18,10 +18,15 @@ pub fn rs2_map_display(c: &mut Ctx) -> u32 {
             sp.map_shared(obj.clone(), crate::vm::pag::READ | crate::vm::pag::WRITE, crate::vm::SegKind::Data);
         }
     }
-    // The process now belongs to the PM session, which comes to the front.
-    let pm = session::pm_session_or_create();
-    c.process.session.store(pm, Ordering::Relaxed);
-    session::select(pm);
+    // A PM program now belongs to the PM session, which comes to the
+    // front. A text-mode program that only initialises PM (REXXUTIL's
+    // SysIni calls WinInitialize) stays in its session: moving it took its
+    // keyboard away, and CMD.EXE never saw another key.
+    if c.process.exe.app_type == 3 {
+        let pm = session::pm_session_or_create();
+        c.process.session.store(pm, Ordering::Relaxed);
+        session::select(pm);
+    }
     let at = c.arg(0);
     for (i, v) in [obj.base + offset, w, h, stride, red_low as u32].into_iter().enumerate() {
         c.write_u32(at + i as u32 * 4, v);

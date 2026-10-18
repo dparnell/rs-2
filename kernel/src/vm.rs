@@ -123,7 +123,7 @@ impl SharedMem {
     pub fn frame(&self, i: usize) -> Option<u64> {
         let mut f = self.frames.lock();
         if f[i] == 0 {
-            f[i] = phys::alloc()?;
+            f[i] = phys::alloc_user()?;
         }
         Some(f[i])
     }
@@ -511,7 +511,7 @@ impl AddressSpace {
             }
         }
         let frame = match &r.backing {
-            Backing::Private => phys::alloc(),
+            Backing::Private => phys::alloc_user(),
             Backing::Shared(s) => s.frame(i),
         };
         let Some(frame) = frame else { return Fault::NoMemory };
@@ -627,7 +627,7 @@ impl AddressSpace {
                 continue;
             }
             let frame = match &r.backing {
-                Backing::Private => phys::alloc(),
+                Backing::Private => phys::alloc_user(),
                 Backing::Shared(s) => s.frame(i),
             };
             let Some(frame) = frame else { return false };
@@ -714,6 +714,17 @@ impl AddressSpace {
         });
         self.ldt[(tile >> 16) as usize] = seg_descriptor(base, limit.min(0xffff), kind, pag::READ);
         Ok(tile_selector(tile))
+    }
+
+    /// Change the limit of one tile's descriptor (huge segments).
+    pub fn set_tile_limit(&mut self, addr: u32, limit: u32) {
+        let Some(r) = self.region(addr) else { return };
+        let (kind, flags) = (r.seg, r.flags);
+        if kind == SegKind::None || addr >= TILED_TOP {
+            return;
+        }
+        let tile = addr & !(TILE - 1);
+        self.ldt[(tile >> 16) as usize] = seg_descriptor(tile, limit, kind, flags);
     }
 
     /// Change a 16-bit segment's size (DosReallocSeg).

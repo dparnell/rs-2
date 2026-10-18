@@ -28,7 +28,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | REXXTRY.CMD | works | With an expression on the command line and interactively. |
 | RXQUEUE.EXE | works | `dir \| rxqueue`, then the queue read from another REXX process. |
 | RXSUBCOM.EXE | works | Usage text only. |
-| REXXC.EXE | fails | Imports `REXX.24`, which this REXX.DLL does not export (the files come from different REXX versions). |
+| REXXC.EXE | fails | Object REXX's tokenizer: it imports `REXX.24` (`RexxTranslateProgram`) and `REXX.114`, which only Object REXX's interpreter exports. That is OREXX.DLL on the media (module name REXX, installed as REXX.DLL when Object REXX is selected), and it needs the SOM runtime (SOM, SOMD, SOMTC, REXXSOM), which rs2 does not have yet. Not a kernel issue. |
 | CALLREXX.EXE (Toolkit sample) | works | 32-bit program calling `RexxStart` with a function file. |
 
 ## Base utilities
@@ -36,10 +36,11 @@ Status: **works** = the tested function behaves as on OS/2;
 | Program | Status | Notes |
 |---------|--------|-------|
 | ATTRIB.EXE | works | List and change attributes. |
-| BACKUP.EXE | works | To a FAT disk (`--hdd` image). On QEMU's virtual FAT drive (the ESP directory) the final attribute update of `\BACKUP\CONTROL.001` hangs. |
+| BACKUP.EXE | works | To a FAT disk (`--hdd` image). On QEMU's virtual FAT drive (the ESP directory) QEMU itself stops when the attribute of `\BACKUP\CONTROL.001` is changed right after it was written: its monitor no longer answers either, so the hang is in QEMU's vvfat driver, not in rs2. |
 | RESTORE.EXE | works | Restores a deleted file from that backup set. |
 | BLDLEVEL.EXE | works | |
-| CACHE.EXE | partial | `DosFSCtl` is not implemented; reports the error and default values. |
+| CACHE.EXE | works | Shows and sets the HPFS cache parameters (`DosFSCtl` 0x9001-0x9003); lazy writing is reported off, as rs2's HPFS writes through. |
+| CACHEJFS.EXE, DEFRAGFS.EXE, EXTENDFS.EXE, CLRBBLKS.EXE | works | Report that there is no JFS (`DosFSCtl` to the JFS FSD fails with ERROR_INVALID_FSD_NAME). |
 | COMP.COM | works | Including the Y/N prompts. |
 | DISKCOMP.COM | works | Reports that it cannot use a hard disk (no diskette drive). |
 | EAUTIL.EXE | works | Splits a file's EAs into a hold file (`/S`) and joins them back (`/J`) on FAT16, FAT32 and HPFS (16-bit `DosEnumAttribute`, `DosQFileInfo` level 3, `DosSetFileInfo` level 2). |
@@ -54,13 +55,13 @@ Status: **works** = the tested function behaves as on OS/2;
 | PATCH.EXE | works | Usage text only. |
 | PSTAT.EXE | works | `/C` processes and threads, `/L` libraries (via `DosQuerySysState`). |
 | PSFILES.EXE | works | |
-| PSSEMS.EXE | partial | Runs; no semaphores are reported by `DosQuerySysState`. |
+| PSSEMS.EXE | works | Shared event and mutex semaphores with their openers. |
 | REPLACE.EXE | works | Add (`/A`) and replace. |
 | SETBOOT.EXE | works | `/Q`: "Boot Manager is not installed". |
 | SORT.EXE | works | |
 | STRACE.EXE | works | Usage text (loads `DOSCALL1` by name). |
 | TEDIT.EXE | works | Opens, edits (cursor keys, typing in the file and on the command line) and redraws through VIO and KBD. |
-| SYSLEVEL.EXE | partial | Runs but lists nothing: it opens drives with DASD opens, which return ERROR_NOT_SUPPORTED. |
+| SYSLEVEL.EXE | works | Finds `SYSLEVEL.OS2` and lists the component, version and CSD levels. |
 | TREE.COM | works | `TREE [d:] [/F]`. |
 | UNDELETE.COM | works | Reports the missing `DELDIR` setting. |
 | UNPACK.EXE, UNPACK2.EXE | works | Unpack IBM packed files (UNPACK hands newer files to UNPACK2). |
@@ -77,7 +78,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | ALP.EXE | works | Assembles a small source to an object file (needs ALP.MSG). |
 | LINK386.EXE | works | Links that object file into an LX executable. |
 | NMAKE.EXE | works | Builds a makefile target, running commands through CMD. NMMSG.MSG is not on the media, so error texts are missing. |
-| EXEHDR.EXE | partial | Dumps executables. On the LINK386 output above it reports an internal library error (DDE4.MSG is not on the media) and then crashes in the C runtime's heap check. |
+| EXEHDR.EXE | partial | NE files are dumped completely. On every LX file (ALP.EXE as well as the LINK386 output) it prints the header and object table, then its C runtime reports an internal error whose text is in DDE4.MSG (not on the media) and faults freeing a heap block whose header holds the text EXE (the VAC heap signature check at 0x2907D). No failing API call precedes it (every DosRead/DosSetFilePtr result checked); not resolved. |
 | IMPLIB.EXE | works | |
 | MAPSYM.EXE, MARKEXE.EXE | works | |
 | MKMSGF.EXE, MSGBIND.EXE | works | Usage text only. |
@@ -235,12 +236,31 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   levels 2 and 3, `DosEnumAttribute`; `DosCopy` copies EAs and `DosMove`
   keeps them; CHKDSK checks EA references.
 
+- `DosGetMessage`: an insertion table slot holding NULL made the call fail
+  with ERROR_INVALID_ADDRESS; OS/2 only reads the strings the message uses
+  (SYSLEVEL listed nothing).
+- A text-mode program that initialises PM (REXXUTIL's `SysIni` calls
+  WinInitialize in rs2's PMWIN) was moved into the PM session, so CMD.EXE
+  never got another key after running RXTEST.CMD; only PM programs join
+  the PM session now.
+- Found by the stress test (`RS2\STRESS.EXE`, see below): every program
+  run leaked its executable module and file image; thread IDs were never
+  reused (1020 threads per process lifetime) and thread stacks never
+  freed; a thread woken between marking itself blocked and blocking could
+  sit on the run queue twice and a stale entry resume a dead thread;
+  waits missed kills and signals that arrived before they went to sleep;
+  a killed or signalled pipe writer waited for a reader forever and an
+  interrupted pipe read returned end-of-file; waiters on a mutex whose
+  owner died were not woken; semaphore waits interrupted by a signal
+  returned ERROR_TIMEOUT; uncollected children stayed in the process
+  table after their parent ended; DosKillProcess from another process
+  skipped the exit list; DosSleep ended early on stray wake-ups; a
+  program touching more memory than the machine has could starve the
+  kernel heap (user pages now leave a 4 MB reserve); 16-bit timers wrote
+  to the physical frame of a RAM semaphore even after it was freed.
+
 ## Missing or incomplete
 
-- `DosFSCtl` (CACHE, CACHEJFS, DEFRAGFS, EXTENDFS, CLRBBLKS),
-  `DosSysCtl`, `DosQueryRASInfo`, `DosDumpProcess`,
-  `DosSystemService`.
-- SYSLEVEL lists nothing yet: re-test now that DASD drive opens exist.
 - Extended attributes: `ERROR_NEED_EAS_FOUND` is only reported by
   `DosCopy` (critical EAs to a target without EA support); `DosOpen` does
   not refuse files with critical EAs to programs that are not EA-aware.
@@ -248,13 +268,18 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   (unverified). IBM's CHKDSK could not check rs2-written FAT volumes
   (`UFAT.DLL` is not on the media); the FAT32 EA flag values follow
   FAT32.IFS from memory and are unverified against a real disk.
-- `DosQuerySysState` reports no semaphores or shared memory.
 - AVIO (VioCreatePS and the other Presentation Manager VIO calls) is not
-  implemented; keyboard layouts other than US are the NLS work.
+  implemented.
 - Changing a CD for a different one is not detected (the old volume stays
   mounted); re-inserting the same medium and choosing Retry works.
-- Writing to QEMU's virtual FAT drive (the ESP directory) can hang (seen
-  with BACKUP); FAT disk images are fine.
+- Writing to QEMU's virtual FAT drive (the ESP directory) can hang QEMU
+  itself (seen with BACKUP; QEMU's monitor stops answering too); FAT disk
+  images are fine.
 - IBM KEYB.COM needs PMMERGE; its KEYBOARD.DCP tables are not read (rs2
   has its own layouts and KEYB.EXE).
 - Message files with DBCS text: DosPutMessage writes them unwrapped.
+- File locks (`DosSetFileLocks`) are advisory: they conflict with each
+  other but reads and writes are not checked against them.
+- The `DosProtect*` functions hand out a file handle lock ID but do not
+  check it.
+

@@ -211,3 +211,12 @@ pub fn alloc_shared_seg(c: &Ctx, size: u32, giveable: bool, gettable: bool) -> R
     }
     create(c, size, flags, None, SegKind::Data, Some(size - 1)).map(vm::tile_selector)
 }
+
+/// Live shared memory objects (DosQuerySysState, leak checks).
+pub fn objects() -> Vec<Arc<SharedMem>> {
+    OBJECTS.lock().iter().filter_map(|e| e.obj.upgrade()).collect()
+}
+
+pub fn count() -> u32 {
+    objects().len() as u32
+}

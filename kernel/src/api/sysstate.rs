@@ -1,5 +1,6 @@
-//! DosQuerySysState: processes, threads, modules, semaphores and open files
-//! as used by PSTAT, PSFILES, PSSEMS and friends.
+//! DosQuerySysState: processes, threads, modules, semaphores (16- and
+//! 32-bit), shared memory and open files as used by PSTAT, PSFILES, PSSEMS
+//! and friends.
 //!
 //! Layout as in the Toolkit's bsedos.h (QSPTRREC first; each process record
 //! is followed by its arrays, then its thread records, then the next
@@ -17,6 +18,7 @@ const QS_PROCESS: u32 = 0x0001;
 const QS_SEMAPHORE: u32 = 0x0002;
 const QS_MTE: u32 = 0x0004;
 const QS_FILESYS: u32 = 0x0008;
+const QS_SHMEMORY: u32 = 0x0010;
 const QS_THREAD: u32 = 0x0100;
 
 const PREC_SIZE: usize = 60;
@@ -109,10 +111,109 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
     let global = o.at();
     o.zeros(12);
 
-    // 16-bit semaphore head (no system semaphores are reported).
+    let sems32 = super::sem::snapshot32();
+    let sems16 = super::sem::snapshot16();
+    // Shared memory objects with the processes that have them mapped.
+    let all_procs = crate::task::process::all();
+    let shms: Vec<(Arc<crate::vm::SharedMem>, Vec<u32>)> = super::shmem::objects()
+        .into_iter()
+        .filter(|m| !m.device)
+        .map(|m| {
+            let users = all_procs.iter().filter(|p| p.space.lock().regions.contains_key(&m.base)).map(|p| p.pid).collect();
+            (m, users)
+        })
+        .collect();
+
+    // 16-bit system semaphores: QSS16HEADREC, then a QSS16REC each.
     let sem16 = o.at();
     o.u32(QS_SEMAPHORE);
     o.zeros(16);
+    if list & QS_SEMAPHORE != 0 && !sems16.is_empty() {
+        let first = o.ptr(o.at());
+        o.put32(sem16 + 4, first);
+        let n = sems16.len();
+        for (i, (name, owner, flags, refs, cnt, _)) in sems16.iter().enumerate() {
+            let rec = o.at();
+            o.u32(0);
+            o.u16(*owner);
+            o.u8(*flags);
+            o.u8(*refs);
+            o.u8(*cnt);
+            o.u8(0);
+            o.u16(0);
+            o.u16(i as u16 + 1);
+            o.str(name);
+            o.align();
+            if i + 1 < n {
+                let next = o.ptr(o.at());
+                o.put32(rec, next);
+            }
+        }
+    }
+
+    // 32-bit semaphores: a QSS32REC each, linked, name after the record.
+    let mut sem32_head = 0u32;
+    if list & QS_SEMAPHORE != 0 {
+        let mut prev: Option<usize> = None;
+        for s in &sems32 {
+            let rec = o.at();
+            match prev {
+                Some(pv) => {
+                    let p = o.ptr(rec);
+                    o.put32(pv, p);
+                }
+                None => sem32_head = o.ptr(rec),
+            }
+            prev = Some(rec);
+            o.u32(0); // pNextRec
+            o.u16(s.flags);
+            o.u16(0);
+            o.u32(0); // pName
+            o.u32(0); // QSHUN: pMuxQ / pSemRec
+            o.u16(s.count);
+            o.u16(s.extra);
+            o.u32(0); // blockid
+            o.u16(s.handle as u16);
+            o.u16(s.opens.len() as u16);
+            // PSSEMS finds the OpenQ entries a dword further on than the
+            // Toolkit's QSS32REC says.
+            o.u32(0);
+            for (pid, n) in &s.opens {
+                o.u16(*pid as u16);
+                o.u16(*n as u16);
+            }
+            if let Some(n) = &s.name {
+                let at = o.ptr(o.at());
+                o.put32(rec + 8, at);
+                o.str(n);
+            }
+            o.align();
+        }
+    }
+
+    // Shared memory: a QSMREC each (next, handle, selector, references,
+    // name).
+    let mut shm_head = 0u32;
+    if list & QS_SHMEMORY != 0 {
+        let mut prev: Option<usize> = None;
+        for (i, (m, users)) in shms.iter().enumerate() {
+            let rec = o.at();
+            match prev {
+                Some(pv) => {
+                    let p = o.ptr(rec);
+                    o.put32(pv, p);
+                }
+                None => shm_head = o.ptr(rec),
+            }
+            prev = Some(rec);
+            o.u32(0);
+            o.u16(i as u16 + 1);
+            o.u16(crate::vm::tile_selector(m.base));
+            o.u16(users.len() as u16);
+            o.str(m.name.as_deref().unwrap_or(""));
+            o.align();
+        }
+    }
     let empty = o.at();
     o.u32(0);
 
@@ -126,7 +227,44 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
             // Runtime-linked libraries.
             let libs: Vec<u16> = p.loaded.lock().iter().map(|(m, _)| m.hmte).collect();
             let lib_at = o.at();
-            for h in &libs {
+            if list & QS_MTE != 0 {
+                for h in &libs {
+                    o.u16(*h);
+                }
+            } else {
+                // Without module records the process name goes here
+                // (PSTAT /C shows it).
+                o.str(&p.exe.path);
+            }
+            o.align();
+            // Private 32-bit semaphores, 16-bit system semaphores open and
+            // shared memory mapped by the process.
+            let pid = p.pid;
+            let private: Vec<u16> = sems32
+                .iter()
+                .filter(|s| s.flags & 1 == 0 && s.opens.iter().any(|o| o.0 == pid))
+                .map(|s| s.handle as u16)
+                .collect();
+            let sem32_at = o.at();
+            for h in &private {
+                o.u16(*h);
+            }
+            o.align();
+            let s16: Vec<u16> = sems16
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| s.5.contains(&pid))
+                .map(|(i, _)| i as u16 + 1)
+                .collect();
+            let sem16_at = o.at();
+            for h in &s16 {
+                o.u16(*h);
+            }
+            o.align();
+            let mine: Vec<u16> =
+                shms.iter().enumerate().filter(|(_, (_, u))| u.contains(&pid)).map(|(i, _)| i as u16 + 1).collect();
+            let shm_at = o.at();
+            for h in &mine {
                 o.u16(*h);
             }
             o.align();
@@ -185,15 +323,15 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
             o.put32(rec + 20, 1); // screen group
             o.put16(rec + 24, p.exe.hmte);
             o.put16(rec + 26, threads.len() as u16);
-            o.put32(rec + 28, 0); // c32PSem
-            o.put32(rec + 32, 0); // p32SemRec
-            o.put16(rec + 36, 0); // c16Sem
+            o.put32(rec + 28, private.len() as u32); // c32PSem
+            o.put32(rec + 32, if private.is_empty() { 0 } else { o.ptr(sem32_at) }); // p32SemRec
+            o.put16(rec + 36, s16.len() as u16); // c16Sem
             o.put16(rec + 38, libs.len() as u16);
-            o.put16(rec + 40, 0); // cShrMem
+            o.put16(rec + 40, mine.len() as u16); // cShrMem
             o.put16(rec + 42, hs.len() as u16);
-            o.put32(rec + 44, o.ptr(empty));
+            o.put32(rec + 44, if s16.is_empty() { o.ptr(empty) } else { o.ptr(sem16_at) });
             o.put32(rec + 48, o.ptr(lib_at));
-            o.put32(rec + 52, o.ptr(empty));
+            o.put32(rec + 52, if mine.is_empty() { o.ptr(empty) } else { o.ptr(shm_at) });
             o.put32(rec + 56, o.ptr(fs_at));
         }
         // End of the process records.
@@ -279,10 +417,10 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
     o.put32(0, o.ptr(global));
     o.put32(4, if list & QS_PROCESS != 0 { o.ptr(proc_head) } else { 0 });
     o.put32(8, if list & QS_SEMAPHORE != 0 { o.ptr(sem16) } else { 0 });
-    o.put32(12, 0);
-    o.put32(16, 0);
+    o.put32(12, sem32_head);
+    o.put32(16, shm_head);
     o.put32(20, if list & QS_MTE != 0 && lib_head != 0 { o.ptr(lib_head) } else { 0 });
-    o.put32(24, 0);
+    o.put32(24, shm_head);
     o.put32(28, if list & QS_FILESYS != 0 { o.ptr(fs_head) } else { 0 });
 
     if o.b.len() > cb as usize {

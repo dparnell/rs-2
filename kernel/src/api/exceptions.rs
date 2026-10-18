@@ -104,6 +104,8 @@ pub struct Unwind {
     pub target_ip: u32,
     /// Saved caller state for the final transfer.
     pub resume: TrapFrame,
+    /// Termination unwind: the thread ends when it is done.
+    pub exit: bool,
 }
 
 fn rd(sp: &mut vm::AddressSpace, a: u32) -> Option<u32> {
@@ -139,7 +141,7 @@ fn translate(f: &TrapFrame) -> (u32, Vec<u32>) {
 }
 
 /// Fill a context record from a trap frame.
-fn save_context(sp: &mut vm::AddressSpace, at: u32, f: &TrapFrame) {
+pub(crate) fn save_context(sp: &mut vm::AddressSpace, at: u32, f: &TrapFrame) {
     let mut b = alloc::vec![0u8; CONTEXT_SIZE as usize];
     let put = |b: &mut Vec<u8>, o: u32, v: u32| b[o as usize..o as usize + 4].copy_from_slice(&v.to_le_bytes());
     put(&mut b, ctx::FLAGS, 0x7); // CONTEXT_FULL
@@ -302,7 +304,14 @@ pub fn handler_returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
 }
 
 fn finish_unwind(sp: &mut vm::AddressSpace, f: &mut TrapFrame, u: &Unwind, t: &Arc<Thread>) {
-    let _ = (sp, t);
+    let _ = sp;
+    if u.exit {
+        t.exit_unwind.store(2, core::sync::atomic::Ordering::Relaxed);
+    }
+    // Dispatches of exceptions raised further down the stack than where
+    // execution resumes are over (their handlers will never return).
+    let resume_sp = u.resume.rsp as u32;
+    t.xcpt.lock().retain(|d| d.report > resume_sp);
     *f = u.resume;
     if u.target_ip != 0 {
         f.rip = u.target_ip as u64;
@@ -326,7 +335,7 @@ pub fn dos_unwind_exception(c: &mut super::Ctx) -> u32 {
     let proc = c.process.clone();
     let mut sp = proc.space.lock();
     let head = rd(&mut sp, tib).unwrap_or(xcpt::END_OF_CHAIN);
-    let u = Unwind { target, target_ip, resume };
+    let u = Unwind { target, target_ip, resume, exit: false };
     if head == target || head == xcpt::END_OF_CHAIN || head == 0 {
         finish_unwind(&mut sp, c.f, &u, &t);
         c.no_return = true;
@@ -382,8 +391,59 @@ pub fn dos_raise_exception(c: &mut super::Ctx) -> u32 {
     0
 }
 
+/// The thread must end: call its 32-bit exception handlers with
+/// XCPT_ASYNC_PROCESS_TERMINATE (killed, or another thread ended the
+/// process) or XCPT_PROCESS_TERMINATE (it ended itself), unwinding the
+/// whole chain, before it dies. Returns true while handler code is to run
+/// (the frame points at it), false when the thread can die now.
+pub fn exit_unwind(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool {
+    use core::sync::atomic::Ordering;
+    match t.exit_unwind.load(Ordering::Relaxed) {
+        1 => return true,
+        2 => return false,
+        _ => {}
+    }
+    t.exit_unwind.store(2, Ordering::Relaxed);
+    let tib = t.tib();
+    if tib == 0 || p.exitlist_tid.load(Ordering::Relaxed) == t.tid {
+        return false;
+    }
+    let mut sp = p.space.lock();
+    if !flat32(&sp, f) {
+        return false;
+    }
+    let Some(head) = rd(&mut sp, tib) else { return false };
+    if head == xcpt::END_OF_CHAIN || head == 0 {
+        return false;
+    }
+    let code = if t.sync_exit.load(Ordering::Relaxed) { xcpt::PROCESS_TERMINATE } else { xcpt::ASYNC_PROCESS_TERMINATE };
+    let esp = (f.rsp as u32).wrapping_sub(512) & !15;
+    let report = esp.wrapping_sub(REPORT_SIZE) & !15;
+    let mut r = alloc::vec![0u8; REPORT_SIZE as usize];
+    r[0..4].copy_from_slice(&code.to_le_bytes());
+    r[4..8].copy_from_slice(&(xcpt::EH_UNWINDING | xcpt::EH_EXIT_UNWIND).to_le_bytes());
+    if !sp.poke_bytes(report, &r) {
+        return false;
+    }
+    let context = report.wrapping_sub(CONTEXT_SIZE) & !15;
+    save_context(&mut sp, context, f);
+    let u = Unwind { target: xcpt::END_OF_CHAIN, target_ip: 0, resume: *f, exit: true };
+    let d = Dispatch { report, context, reg: head, unwind: Some(u), code };
+    call_handler(&mut sp, f, &d, context.wrapping_sub(16));
+    drop(sp);
+    t.xcpt.lock().push(d);
+    t.exit_unwind.store(1, Ordering::Relaxed);
+    true
+}
+
 /// No handler took the exception: what OS/2 does by default.
 pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32) {
+    // A fault while the thread is ending (in a termination handler): just
+    // let it die.
+    if t.exit_requested() {
+        t.exit_unwind.store(2, core::sync::atomic::Ordering::Relaxed);
+        return;
+    }
     match code {
         xcpt::SIGNAL => {
             p.exit(3, 0);

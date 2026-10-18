@@ -74,6 +74,24 @@ pub struct Thread {
     pub init_run: crate::sync::SpinLock<Option<crate::api::module::InitRun>>,
     /// Saved FPU/SSE state while the thread is switched out.
     pub fpu: UnsafeCell<Box<FpuState>>,
+    /// Kernel threads: the function to run (taken when the thread starts)
+    /// and a name for messages.
+    pub kentry: crate::sync::SpinLock<Option<Box<dyn FnOnce() + Send>>>,
+    pub kname: &'static str,
+    /// Base of the user stack the kernel allocated for the thread
+    /// (DosCreateThread), released when the thread ends; 0 = none.
+    pub owned_stack: AtomicU32,
+    /// Thread-local memory (DosAllocThreadLocalMemory) while the thread is
+    /// switched out; the process's TLS page holds the running thread's.
+    pub tls: UnsafeCell<[u32; super::process::TLS_DWORDS]>,
+    /// DosEnterMustComplete nesting: signals wait while it is non-zero.
+    pub must_complete: AtomicU32,
+    /// Termination unwind (XCPT_[ASYNC_]PROCESS_TERMINATE to the exception
+    /// handlers before the thread dies): 0 not started, 1 running, 2 done.
+    pub exit_unwind: AtomicU8,
+    /// The thread ends itself (DosExit, returning from its function): its
+    /// handlers see XCPT_PROCESS_TERMINATE rather than the asynchronous one.
+    pub sync_exit: AtomicBool,
 }
 
 unsafe impl Send for Thread {}
@@ -81,54 +99,85 @@ unsafe impl Sync for Thread {}
 
 static NEXT_ID: AtomicU32 = AtomicU32::new(1);
 
+/// Threads alive (created and not yet freed), for the leak checks.
+pub static LIVE: AtomicU32 = AtomicU32::new(0);
+
+impl Drop for Thread {
+    fn drop(&mut self) {
+        LIVE.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 impl Thread {
-    pub fn new_idle() -> Arc<Thread> {
-        Arc::new(Thread {
-            id: 0,
-            tid: 0,
-            process: None,
+    fn blank(id: u32, tid: u32, process: Option<Weak<Process>>, state: State, priority: u32, idle: bool) -> Thread {
+        LIVE.fetch_add(1, Ordering::Relaxed);
+        Thread {
+            id,
+            tid,
+            process,
             kstack: unsafe { Box::new_zeroed().assume_init() },
             rsp: UnsafeCell::new(0),
-            state: AtomicU8::new(State::Running as u8),
-            priority: AtomicU32::new(1 << 8),
+            state: AtomicU8::new(state as u8),
+            priority: AtomicU32::new(priority),
             wake_at: AtomicU64::new(u64::MAX),
             timed_out: AtomicBool::new(false),
             tib: AtomicU32::new(0),
             stack_base: AtomicU32::new(0),
             stack_top: AtomicU32::new(0),
-            idle: true,
+            idle,
             suspend: AtomicU32::new(0),
             exit_requested: AtomicBool::new(false),
             interrupted: AtomicBool::new(false),
             xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
             fpu: UnsafeCell::new(FpuState::initial()),
             init_run: crate::sync::SpinLock::new(None),
-        })
+            kentry: crate::sync::SpinLock::new(None),
+            kname: "",
+            owned_stack: AtomicU32::new(0),
+            tls: UnsafeCell::new([0; super::process::TLS_DWORDS]),
+            must_complete: AtomicU32::new(0),
+            exit_unwind: AtomicU8::new(0),
+            sync_exit: AtomicBool::new(false),
+        }
+    }
+
+    pub fn new_idle() -> Arc<Thread> {
+        Arc::new(Thread::blank(0, 0, None, State::Running, 1 << 8, true))
+    }
+
+    /// Create a kernel thread (no process) that runs `f` and then ends.
+    pub fn new_kernel(name: &'static str, f: Box<dyn FnOnce() + Send>) -> Arc<Thread> {
+        let mut t = Thread::blank(NEXT_ID.fetch_add(1, Ordering::Relaxed), 0, None, State::Blocked, 2 << 8, false);
+        t.kname = name;
+        *t.kentry.lock() = Some(f);
+        let t = Arc::new(t);
+        // switch_stacks pops six registers and returns into kthread_start,
+        // which is entered with the stack aligned as after a call.
+        let top = t.kstack_top() & !15;
+        unsafe {
+            let mut sp = top - 8;
+            *(sp as *mut u64) = 0;
+            sp -= 8;
+            *(sp as *mut u64) = super::kthread::kthread_start as *const () as usize as u64;
+            for _ in 0..6 {
+                sp -= 8;
+                *(sp as *mut u64) = 0;
+            }
+            *t.rsp.get() = sp;
+        }
+        t
     }
 
     /// Create a user thread that starts with register state `frame`.
     pub fn new_user(process: &Arc<Process>, tid: u32, frame: TrapFrame) -> Arc<Thread> {
-        let t = Arc::new(Thread {
-            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+        let t = Arc::new(Thread::blank(
+            NEXT_ID.fetch_add(1, Ordering::Relaxed),
             tid,
-            process: Some(Arc::downgrade(process)),
-            kstack: unsafe { Box::new_zeroed().assume_init() },
-            rsp: UnsafeCell::new(0),
-            state: AtomicU8::new(State::Blocked as u8),
-            priority: AtomicU32::new(2 << 8),
-            wake_at: AtomicU64::new(u64::MAX),
-            timed_out: AtomicBool::new(false),
-            tib: AtomicU32::new(0),
-            stack_base: AtomicU32::new(0),
-            stack_top: AtomicU32::new(0),
-            idle: false,
-            suspend: AtomicU32::new(0),
-            exit_requested: AtomicBool::new(false),
-            interrupted: AtomicBool::new(false),
-            xcpt: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
-            fpu: UnsafeCell::new(FpuState::initial()),
-            init_run: crate::sync::SpinLock::new(None),
-        });
+            Some(Arc::downgrade(process)),
+            State::Blocked,
+            2 << 8,
+            false,
+        ));
         // Initial kernel stack: TrapFrame at the top, below it a
         // switch_stacks frame returning into thread_trampoline.
         let top = t.kstack_top();

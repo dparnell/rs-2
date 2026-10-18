@@ -465,7 +465,8 @@ fn read_table(c: &Ctx, table: u32, count: u32) -> Option<Vec<Vec<u8>>> {
             v.push(Vec::new());
             continue;
         }
-        let s = c.read_str(p, 1024)?;
+        // Unused slots may hold anything (SYSLEVEL passes NULLs).
+        let s = c.read_str(p, 1024).unwrap_or_default();
         v.push(s.into_bytes());
     }
     Some(v)

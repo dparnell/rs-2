@@ -43,6 +43,7 @@ static SCHED: SpinLock<Sched> = SpinLock::new(Sched {
 });
 
 static NEED_RESCHED: AtomicBool = AtomicBool::new(false);
+static LOCK_WARNED: AtomicBool = AtomicBool::new(false);
 
 global_asm!(
     r#"
@@ -132,10 +133,23 @@ pub fn block(deadline: Option<u64>) {
     let t = current();
     {
         let mut s = SCHED.lock();
+        // Woken between deciding to block and getting here (callers mark
+        // themselves blocked under their wait queue's lock): it is already
+        // on the run queue. Take it off again and carry on, so it is never
+        // queued twice.
+        if t.state() == State::Ready {
+            for q in s.ready.iter_mut() {
+                q.retain(|x| !Arc::ptr_eq(x, &t));
+            }
+            t.set_state(State::Running);
+            return;
+        }
         t.set_state(State::Blocked);
         if let Some(d) = deadline {
             t.set_wake_at(d);
-            s.sleepers.push(t.clone());
+            if !s.sleepers.iter().any(|x| Arc::ptr_eq(x, &t)) {
+                s.sleepers.push(t.clone());
+            }
         } else {
             t.set_wake_at(u64::MAX);
         }
@@ -149,7 +163,13 @@ pub fn sleep_ms(ms: u64) {
         yield_now();
         return;
     }
-    block(Some(irq::ticks() + ms * irq::HZ / 1000));
+    // Other wake-ups (a stray wake of a wait queue the thread left) do not
+    // end the sleep early; termination requests and signals do.
+    let deadline = irq::ticks().saturating_add(ms.saturating_mul(irq::HZ) / 1000);
+    let t = current();
+    while irq::ticks() < deadline && !t.exit_requested() && !t.interrupted() {
+        block(Some(deadline));
+    }
 }
 
 pub fn yield_now() {
@@ -234,14 +254,28 @@ pub fn maybe_preempt() {
 
 /// Pick the next thread and switch to it.
 pub fn schedule() {
+    // Switching away while holding a spin lock would leave it locked for
+    // the next thread, which then spins forever with interrupts off.
+    let held = crate::sync::held_spin_locks();
+    if held != 0 && !LOCK_WARNED.swap(true, Ordering::Relaxed) {
+        crate::println!("[scheduler: switching with {held} spin lock(s) held]");
+        let rbp: u64;
+        unsafe { core::arch::asm!("mov {}, rbp", out(reg) rbp) };
+        crate::backtrace(rbp);
+    }
     let was = arch::interrupts_enabled();
     arch::disable_interrupts();
     let (prev, next) = {
         let mut s = SCHED.lock();
-        let next = (0..4)
-            .rev()
-            .find_map(|i| s.ready[i].pop_front())
-            .unwrap_or_else(|| s.idle.clone().unwrap());
+        // Only threads still marked ready (a thread that died or blocked
+        // again must not run from a stale queue entry).
+        let next = loop {
+            match (0..4).rev().find_map(|i| s.ready[i].pop_front()) {
+                Some(t) if t.state() == State::Ready => break t,
+                Some(_) => continue,
+                None => break s.idle.clone().unwrap(),
+            }
+        };
         let prev = s.current.replace(next.clone()).unwrap();
         s.slice_end = irq::ticks() + SLICE;
         // Free threads that died earlier (we are not on their stacks).
@@ -280,6 +314,7 @@ pub fn schedule() {
 
 fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
     gdt::set_kernel_stack(next.kstack_top());
+    crate::api::xproc::switch_tls(prev, next);
     match next.process() {
         Some(p) => {
             let same = prev.process().is_some_and(|q| Arc::ptr_eq(&p, &q));

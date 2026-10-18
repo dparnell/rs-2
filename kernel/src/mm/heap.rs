@@ -125,15 +125,27 @@ impl Heap {
     }
 }
 
+/// Bytes handed out (leak checks).
+static USED: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+pub fn used() -> usize {
+    USED.load(core::sync::atomic::Ordering::Relaxed)
+}
+
 pub struct KernelAllocator;
 
 unsafe impl GlobalAlloc for KernelAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        unsafe { HEAP.lock().alloc(layout) }
+        let p = unsafe { HEAP.lock().alloc(layout) };
+        if !p.is_null() {
+            USED.fetch_add(layout.size().max(MIN).next_multiple_of(MIN), core::sync::atomic::Ordering::Relaxed);
+        }
+        p
     }
 
     unsafe fn dealloc(&self, p: *mut u8, layout: Layout) {
         let size = layout.size().max(MIN).next_multiple_of(MIN);
+        USED.fetch_sub(size, core::sync::atomic::Ordering::Relaxed);
         // Blocks that absorbed a tiny tail are freed without it; the few
         // bytes are recovered when neighbours coalesce.
         unsafe { HEAP.lock().insert(p as usize, size) };

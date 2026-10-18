@@ -12,10 +12,13 @@
 pub mod doscalls;
 pub mod exceptions;
 pub mod file;
+pub mod filelock;
+pub mod fsctl;
 pub mod ioctl;
 pub mod harderr;
 pub mod kbdapi;
 pub mod moncalls;
+pub mod memx;
 pub mod module;
 pub mod mou;
 pub mod msg;
@@ -31,10 +34,12 @@ pub mod sesmgr;
 pub mod shmem;
 pub mod submem;
 pub mod subsys;
+pub mod sysctl;
 pub mod sysstate;
 pub mod thunk;
 pub mod timer;
 pub mod vio;
+pub mod xproc;
 pub mod names;
 mod names_gen;
 mod sigs;
@@ -522,7 +527,10 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
     if trace {
         crate::trace!("    -> {}", result);
     }
-    if ctx.no_return || thread.exit_requested() {
+    // A thread told to end does not return from the call, unless it is
+    // running its exception handlers for the termination.
+    let unwinding = thread.exit_unwind.load(core::sync::atomic::Ordering::Relaxed) == 1;
+    if ctx.no_return || (thread.exit_requested() && !unwinding) {
         return;
     }
     let _ = ss_big;

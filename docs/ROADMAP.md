@@ -32,9 +32,18 @@ Status markers: done, in progress, planned.
 - done: named pipes (byte and message mode, DosTransactNPipe, DosCallNPipe)
 - done: sessions: DosStartSession/Select/Set/StopSession, a virtual screen
   and keyboard queue per session, Ctrl+Esc window list, Alt+Esc
+- done: the rest of the kernel API programs on the media use outside PM
+  and DOS sessions (DosFSCtl, DosSysCtl, DosPerfSysCall, thread-local
+  memory, signal exceptions between processes, must-complete sections,
+  file locks, DosProtect*, DosAliasMem, ...); termination exceptions for
+  handlers; see the coverage table in [COMPATIBILITY.md](COMPATIBILITY.md)
+- done: kernel stress test (RS2\STRESS.EXE) and the leak, race and
+  wake-up bugs it found; kernel object counters for leak checks
+- done: kernel threads (no OS/2 process) with a work queue; the scheduler
+  reports a thread that blocks while holding a spin lock
 - planned: AVIO (VIO in PM windows), parallel port hardware,
-  DosDevIOCtl coverage,
-  semaphore and memory corner cases found by running more programs
+  DosDevIOCtl coverage, mandatory file locks, SMP-safe locking (the kernel
+  still relies on one CPU and interrupts off)
 
 ## Milestone 2: storage and installed systems (in progress)
 
@@ -43,7 +52,9 @@ Status markers: done, in progress, planned.
 - done: NVMe (polled)
 - done: USB: xHCI (polled), boot-protocol HID keyboard and mouse, hot-plug
 - done: USB hubs (nested), USB mass storage (bulk-only), boot from a USB stick
-- planned: virtio-blk, NVMe/xHCI interrupts, USB storage hot-plug mounting
+- done: USB storage hot-plug: a kernel thread mounts sticks connected after
+  boot on the next free drive letters and unmounts them on removal
+- planned: virtio-blk, NVMe/xHCI interrupts
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - planned: SMP, MSI/MSI-X
 - done: HPFS (read/write/format)

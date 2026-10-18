@@ -9,6 +9,10 @@ pub trait BlockDev: Send + Sync {
     fn sector_count(&self) -> u64;
     fn read(&self, lba: u64, buf: &mut [u8]) -> Result<(), u32>;
     fn write(&self, lba: u64, buf: &[u8]) -> Result<(), u32>;
+    /// The USB device holding the medium, if it is on one (removal).
+    fn usb_device(&self) -> Option<crate::drivers::xhci::Handle> {
+        None
+    }
 }
 
 /// A disk image in memory (handed over by the boot loader).

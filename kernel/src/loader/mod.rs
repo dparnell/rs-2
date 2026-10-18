@@ -218,9 +218,14 @@ static REGISTRY: SpinLock<Registry> = SpinLock::new(Registry { modules: Vec::new
 
 fn alloc_hmte() -> u16 {
     let mut r = REGISTRY.lock();
-    let h = r.next_hmte;
-    r.next_hmte += 1;
-    h
+    // Handles of programs that ended are reused (after wrapping around).
+    loop {
+        let h = r.next_hmte;
+        r.next_hmte = if h == 0xfff0 { 0x100 } else { h + 1 };
+        if !r.modules.iter().any(|m| m.hmte == h) {
+            return h;
+        }
+    }
 }
 
 pub fn find_loaded(name: &str) -> Option<Arc<Module>> {
@@ -238,6 +243,13 @@ pub fn by_handle(hmte: u16) -> Option<Arc<Module>> {
 
 fn register(m: Arc<Module>) {
     REGISTRY.lock().modules.push(m);
+}
+
+/// A process ended: its executable module goes away (DLLs stay loaded).
+pub fn unregister_exe(m: &Arc<Module>) {
+    if !m.is_dll {
+        REGISTRY.lock().modules.retain(|x| !Arc::ptr_eq(x, m));
+    }
 }
 
 pub fn init() {

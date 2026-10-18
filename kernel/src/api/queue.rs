@@ -325,3 +325,8 @@ pub fn process_ended(pid: u32) {
         q.owner != pid && !q.opens.is_empty()
     });
 }
+
+/// Queues in existence (leak checks).
+pub fn count() -> u32 {
+    QUEUES.lock().len() as u32
+}
