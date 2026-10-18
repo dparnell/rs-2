@@ -2,9 +2,11 @@
 
 pub mod ahci;
 pub mod hid;
+pub mod hub;
 pub mod nvme;
 pub mod part;
 pub mod pci;
+pub mod storage;
 pub mod usb;
 pub mod xhci;
 
@@ -56,6 +58,48 @@ fn try_mount_hpfs(dev: Arc<dyn BlockDev>, what: &str) -> bool {
     true
 }
 
+fn le32(b: &[u8], o: usize) -> u32 {
+    u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+}
+
+/// Whether partition `p` carries the boot device's signature: the MBR
+/// disk signature or the GPT unique partition GUID.
+fn has_boot_signature(p: &part::Partition, boot: &bootinfo::BootDevice) -> bool {
+    let ss = p.dev.sector_size();
+    let mut s = alloc::vec![0u8; ss];
+    match boot.sig_type {
+        1 => p.dev.read(0, &mut s).is_ok() && s[440..444] == boot.signature[..4],
+        2 => {
+            if p.dev.read(1, &mut s).is_err() || &s[0..8] != b"EFI PART" {
+                return false;
+            }
+            let lba = le32(&s, 72) as u64 | (le32(&s, 76) as u64) << 32;
+            let (count, size) = (le32(&s, 80).min(256) as usize, le32(&s, 84) as usize);
+            if !(128..=ss).contains(&size) {
+                return false;
+            }
+            let mut e = alloc::vec![0u8; ss];
+            (0..count).any(|n| {
+                let off = n * size;
+                p.dev.read(lba + (off / ss) as u64, &mut e).is_ok() && {
+                    let x = &e[off % ss..off % ss + size];
+                    le32(x, 32) as u64 | (le32(x, 36) as u64) << 32 == p.start && x[16..32] == boot.signature
+                }
+            })
+        }
+        _ => false,
+    }
+}
+
+/// Whether `p` is a FAT partition with \RS2\KERNEL on it.
+fn holds_kernel(p: &part::Partition) -> bool {
+    if !is_fat_type(p.mbr_type) && p.gpt_type != part::GPT_BASIC_DATA && p.gpt_type != part::GPT_EFI_SYSTEM {
+        return false;
+    }
+    let w = part::Partition { dev: p.dev.clone(), ..*p };
+    crate::fs::fatfs::FatFs::mount(Arc::new(w)).is_ok_and(|fs| fs.stat("RS2\\KERNEL").is_ok())
+}
+
 /// Find storage, scan partitions and assign drive letters: hard disk
 /// volumes first (primary partitions, then logical drives), then optical
 /// drives — the order OS/2 uses.
@@ -64,6 +108,8 @@ pub fn init() {
     crate::println!("pci: {} functions", devs.len());
     let mut disks: Vec<Arc<dyn BlockDev>> = Vec::new();
     let mut optical: Vec<Arc<dyn BlockDev>> = Vec::new();
+    // USB storage comes after the built-in drives.
+    let (mut usb_disks, mut usb_optical) = (Vec::new(), Vec::new());
     for d in &devs {
         if (d.class, d.subclass, d.progif) == (1, 6, 1) {
             for p in ahci::probe(d) {
@@ -74,7 +120,9 @@ pub fn init() {
             }
         }
         if (d.class, d.subclass, d.progif) == (0x0c, 3, 0x30) {
-            xhci::probe(d);
+            for (dev, is_optical) in xhci::probe(d) {
+                if is_optical { usb_optical.push(dev) } else { usb_disks.push(dev) }
+            }
         }
         if (d.class, d.subclass, d.progif) == (1, 8, 2) {
             for ns in nvme::probe(d) {
@@ -82,6 +130,8 @@ pub fn init() {
             }
         }
     }
+    disks.append(&mut usb_disks);
+    optical.append(&mut usb_optical);
     let mut parts: Vec<part::Partition> = Vec::new();
     for disk in &disks {
         let found = part::scan(disk);
@@ -93,17 +143,26 @@ pub fn init() {
         }
         parts.extend(found);
     }
-    // The boot partition is C:.
+    // The boot partition is C: unless the loader brought a C.IMG: the one
+    // the firmware booted from, by position, signature and, to tell apart
+    // disks with the same layout, \RS2\KERNEL on it; failing that, the
+    // first FAT partition holding \RS2\KERNEL.
     let boot = crate::boot_info().boot_device;
-    if boot.kind == 1 && !crate::fs::has_boot_image(crate::boot_info()) {
-        if let Some(i) = parts.iter().position(|p| p.start == boot.start && p.count == boot.size) {
-            let p = parts.remove(i);
-            match crate::fs::fatfs::FatFs::mount(Arc::new(p)) {
+    if !crate::fs::has_boot_image(crate::boot_info()) {
+        let same = |p: &part::Partition| boot.kind == 1 && p.start == boot.start && p.count == boot.size;
+        let signed = |p: &part::Partition| same(p) && has_boot_signature(p, &boot);
+        let find = |f: &dyn Fn(&part::Partition) -> bool| parts.iter().position(f);
+        let found = find(&|p| signed(p) && holds_kernel(p))
+            .or_else(|| find(&|p| same(p) && holds_kernel(p)))
+            .or_else(|| find(&signed))
+            .or_else(|| find(&same))
+            .or_else(|| find(&holds_kernel));
+        match found {
+            Some(i) => match crate::fs::fatfs::FatFs::mount(Arc::new(parts.remove(i))) {
                 Ok(fs) => crate::fs::mount(2, fs),
                 Err(e) => crate::println!("boot partition: cannot mount ({e})"),
-            }
-        } else {
-            crate::println!("boot partition not found (start {})", boot.start);
+            },
+            None => crate::println!("boot partition not found (start {})", boot.start),
         }
     }
     // Primary partitions, then logical drives.

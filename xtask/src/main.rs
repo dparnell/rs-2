@@ -3,13 +3,22 @@
 //! ```text
 //! cargo xtask build [--release]            build loader + kernel, stage work/esp
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG]
-//!                  [--hdd IMG] [--nvme IMG] [--usb-kbd] [--usb-mouse] [-- QEMU ARGS]
+//!                  [--hdd IMG] [--nvme IMG] [--usb-kbd] [--usb-mouse] [--usb-disk IMG]...
+//!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
+//!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs] [-o FILE]       test hard disk from work/disk.txt
 //! ```
 //!
 //! Extra files for `\RS2\MODULES` are listed in `work/modules.txt`, one path
 //! per line (relative to the repository root).
+//!
+//! `--usb-disk` attaches a raw image as a USB stick (repeatable). Each
+//! `--usb-hub` adds a tier of USB hubs: the first sits on root port 1, each
+//! further one on port 8 of the previous, and the USB devices go behind
+//! the last (ids `usbkbd`, `usbmouse`, `usbdisk0`... for `--monitor`
+//! device_del). `--boot-hdd` leaves out the ESP directory, so the machine boots
+//! from the attached disks (e.g. the ISO as a USB stick).
 
 mod hpfsimg;
 mod image;
@@ -35,6 +44,10 @@ struct Opts {
     /// Keystrokes to send (\n = Enter), and when (seconds after start).
     typing: Option<String>,
     type_at: Option<u64>,
+    /// QEMU monitor commands (separated by ';', "sleep N" pauses) to send,
+    /// and when.
+    monitor: Option<String>,
+    monitor_at: Option<u64>,
     /// Boot from this ISO (as a CD) instead of the ESP directory.
     iso: Option<PathBuf>,
     /// Attach this raw disk image as an extra hard disk.
@@ -52,6 +65,10 @@ struct Opts {
     /// `run`: add an xHCI controller with a USB keyboard / mouse.
     usb_kbd: bool,
     usb_mouse: bool,
+    /// `run`: raw images attached as USB mass storage devices.
+    usb_disks: Vec<PathBuf>,
+    /// `run`: tiers of USB hubs in front of the USB devices.
+    usb_hubs: u32,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -64,6 +81,8 @@ fn parse(args: &[String]) -> Opts {
         qemu_extra: vec![],
         typing: None,
         type_at: None,
+        monitor: None,
+        monitor_at: None,
         iso: None,
         hdd: None,
         nvme: None,
@@ -73,6 +92,8 @@ fn parse(args: &[String]) -> Opts {
         hpfs: false,
         usb_kbd: false,
         usb_mouse: false,
+        usb_disks: vec![],
+        usb_hubs: 0,
     };
     let mut i = 0;
     while i < args.len() {
@@ -93,6 +114,11 @@ fn parse(args: &[String]) -> Opts {
             "--hpfs" => o.hpfs = true,
             "--usb-kbd" => o.usb_kbd = true,
             "--usb-mouse" => o.usb_mouse = true,
+            "--usb-hub" => o.usb_hubs += 1,
+            "--usb-disk" => {
+                i += 1;
+                o.usb_disks.push(PathBuf::from(&args[i]));
+            }
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
@@ -108,6 +134,14 @@ fn parse(args: &[String]) -> Opts {
             "--type" => {
                 i += 1;
                 o.typing = Some(args[i].replace("\\n", "\n"));
+            }
+            "--monitor" => {
+                i += 1;
+                o.monitor = Some(args[i].clone());
+            }
+            "--monitor-at" => {
+                i += 1;
+                o.monitor_at = Some(args[i].parse().expect("--monitor-at seconds"));
             }
             "--type-at" => {
                 i += 1;
@@ -302,6 +336,36 @@ fn ovmf() -> (PathBuf, PathBuf) {
     (code, vars)
 }
 
+/// The xHCI controller, hubs and USB devices.
+fn usb_devices(o: &Opts, c: &mut Command) {
+    if !o.usb_kbd && !o.usb_mouse && o.usb_disks.is_empty() && o.usb_hubs == 0 {
+        return;
+    }
+    c.args(["-device", "qemu-xhci,id=xhci"]);
+    // Port path of the hub the devices go behind ("" = root ports).
+    let mut hub = String::new();
+    for n in 0..o.usb_hubs {
+        let port = if n == 0 { "1".to_string() } else { format!("{hub}.8") };
+        c.arg("-device").arg(format!("usb-hub,bus=xhci.0,port={port},id=hub{n}"));
+        hub = port;
+    }
+    let mut next = 0;
+    let mut port = || {
+        next += 1;
+        if hub.is_empty() { String::new() } else { format!(",port={hub}.{next}") }
+    };
+    if o.usb_kbd {
+        c.arg("-device").arg(format!("usb-kbd,bus=xhci.0,id=usbkbd{}", port()));
+    }
+    if o.usb_mouse {
+        c.arg("-device").arg(format!("usb-mouse,bus=xhci.0,id=usbmouse{}", port()));
+    }
+    for (n, d) in o.usb_disks.iter().enumerate() {
+        c.arg("-drive").arg(format!("if=none,id=ud{n},format=raw,file={}", d.display()));
+        c.arg("-device").arg(format!("usb-storage,bus=xhci.0,drive=ud{n},id=usbdisk{n}{}", port()));
+    }
+}
+
 fn run(o: &Opts) -> bool {
     let (code, vars) = ovmf();
     let work = root().join("work");
@@ -326,7 +390,6 @@ fn run(o: &Opts) -> bool {
     } else {
         c.args(["-serial", "stdio"]);
     }
-    c.args(&o.qemu_extra);
     if let Some(d) = &o.hdd {
         c.arg("-drive").arg(format!("format=raw,file={}", d.display()));
     }
@@ -334,15 +397,9 @@ fn run(o: &Opts) -> bool {
         c.arg("-drive").arg(format!("file={},format=raw,if=none,id=nvm0", d.display()));
         c.args(["-device", "nvme,drive=nvm0,serial=rs2nvme"]);
     }
-    if o.usb_kbd || o.usb_mouse {
-        c.args(["-device", "qemu-xhci,id=xhci"]);
-    }
-    if o.usb_kbd {
-        c.args(["-device", "usb-kbd,bus=xhci.0"]);
-    }
-    if o.usb_mouse {
-        c.args(["-device", "usb-mouse,bus=xhci.0"]);
-    }
+    usb_devices(o, &mut c);
+    // Last, so extra devices can refer to the controllers above.
+    c.args(&o.qemu_extra);
     let mut child = c.spawn().expect("start qemu");
     let Some(timeout) = o.timeout else {
         return child.wait().map(|s| s.success()).unwrap_or(false);
@@ -351,6 +408,7 @@ fn run(o: &Opts) -> bool {
     let deadline = start + Duration::from_secs(timeout);
     let mut typed = o.typing.is_none();
     let type_at = o.type_at.unwrap_or(timeout.saturating_sub(8));
+    let mut monitored = o.monitor.is_none();
     while Instant::now() < deadline {
         if !typed && start.elapsed() >= Duration::from_secs(type_at) {
             typed = true;
@@ -371,6 +429,17 @@ fn run(o: &Opts) -> bool {
         }
         if let Ok(Some(_)) = child.try_wait() {
             break;
+        }
+        if !monitored && start.elapsed() >= Duration::from_secs(o.monitor_at.unwrap_or(0)) {
+            monitored = true;
+            for cmd in o.monitor.as_deref().unwrap().split(';').map(str::trim) {
+                // "sleep N" waits N seconds between commands.
+                match cmd.strip_prefix("sleep ") {
+                    Some(n) => std::thread::sleep(Duration::from_secs(n.parse().expect("sleep seconds"))),
+                    None => monitor(&sock, cmd),
+                }
+                std::thread::sleep(Duration::from_millis(500));
+            }
         }
         std::thread::sleep(Duration::from_millis(200));
     }
