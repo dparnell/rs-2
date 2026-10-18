@@ -1,0 +1,6 @@
+[package]
+name = "fat"
+description = "no_std FAT12/16/32 file system: read, write and format"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
