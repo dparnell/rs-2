@@ -119,6 +119,7 @@ pub fn dos_dev_ioctl(c: &mut Ctx) -> u32 {
     let Some(h) = super::file::get(c, r.handle) else { return err::INVALID_HANDLE };
     match (h, r.category) {
         (Handle::PhysDisk(n), 9) => phys(c, n, &r),
+        (Handle::Drive(d), 8) => logical(c, &d, &r),
         (_, 0xd5) => dos_dev(c, &r),
         (Handle::Kbd | Handle::Con, 4) => kbd(c, &r),
         _ => err::INVALID_CATEGORY,
@@ -190,6 +191,115 @@ fn phys(c: &Ctx, n: u32, r: &Req) -> u32 {
         }
         _ => err::INVALID_FUNCTION,
     }
+}
+
+/// Category 8 (logical disk) on a drive opened with OPEN_FLAGS_DASD. Track
+/// addresses use the same synthetic geometry as category 9, relative to
+/// the start of the volume; the BPB reports it.
+fn logical(c: &Ctx, d: &crate::fs::Dasd, r: &Req) -> u32 {
+    use core::sync::atomic::Ordering;
+    match r.function {
+        // DSK_LOCKDRIVE / DSK_UNLOCKDRIVE
+        0x00 => match crate::fs::lock_drive(d.drive) {
+            Ok(()) => {
+                d.locked.store(true, Ordering::Relaxed);
+                0
+            }
+            Err(e) => e,
+        },
+        0x01 => {
+            if d.locked.swap(false, Ordering::Relaxed) {
+                crate::fs::unlock_drive(d.drive);
+            }
+            d.remount_if_written();
+            0
+        }
+        // DSK_REDETERMINEMEDIA: mount whatever is on the volume now.
+        0x02 => {
+            d.written.store(false, Ordering::Relaxed);
+            crate::fs::remount(d.drive).err().unwrap_or(0)
+        }
+        // DSK_BLOCKREMOVABLE: fixed disk.
+        0x20 => {
+            c.write_u8(r.data, 1);
+            set_lens(c, r, 1, 1);
+            0
+        }
+        // DSK_GETDEVICEPARAMS: BIOSPARAMETERBLOCK (36 bytes).
+        0x63 => {
+            let b = device_params(&d.dev);
+            if !c.write(r.data, &b) {
+                return err::INVALID_ADDRESS;
+            }
+            set_lens(c, r, 2, b.len() as u32);
+            0
+        }
+        // DSK_READTRACK / DSK_WRITETRACK: TRACKLAYOUT.
+        0x64 | 0x44 => {
+            let Some(p) = c.read_vec(r.params, 9) else { return err::INVALID_ADDRESS };
+            let head = u16::from_le_bytes([p[1], p[2]]) as u64;
+            let cyl = u16::from_le_bytes([p[3], p[4]]) as u64;
+            let first = u16::from_le_bytes([p[5], p[6]]) as u32;
+            let count = u16::from_le_bytes([p[7], p[8]]) as u32;
+            // Sector numbers (1-based) come from the track table.
+            let Some(t) = c.read_vec(r.params + 9, (first + count) * 4) else { return err::INVALID_ADDRESS };
+            let num = |i: u32| u16::from_le_bytes([t[i as usize * 4], t[i as usize * 4 + 1]]) as u64;
+            let track = (cyl * HEADS + head) * SPT;
+            let ss = d.dev.sector_size() as u32;
+            let write = r.function == 0x44;
+            // Runs of consecutive sector numbers in one transfer each.
+            let mut i = first;
+            while i < first + count {
+                let start = num(i);
+                if start == 0 {
+                    return err::INVALID_PARAMETER;
+                }
+                let mut n = 1;
+                while i + n < first + count && num(i + n) == start + n as u64 {
+                    n += 1;
+                }
+                let e = rw(c, &d.dev, track + start - 1, n, r.data + (i - first) * ss, write);
+                if e != 0 {
+                    return e;
+                }
+                i += n;
+            }
+            if write {
+                d.written.store(true, Ordering::Relaxed);
+            }
+            set_lens(c, r, 9 + (first + count) * 4, count * ss);
+            0
+        }
+        _ => err::INVALID_FUNCTION,
+    }
+}
+
+/// The BPB of the medium (when it holds a FAT boot sector) with the
+/// device's size and synthetic geometry.
+fn device_params(dev: &Arc<dyn BlockDev>) -> [u8; 36] {
+    let ss = dev.sector_size();
+    let sectors = dev.sector_count().min(u32::MAX as u64) as u32;
+    let mut bs = vec![0u8; ss.max(512)];
+    let mut b = [0u8; 36];
+    let have = dev.read(0, &mut bs).is_ok() && u16::from_le_bytes([bs[11], bs[12]]) as usize == ss && bs[13] != 0;
+    if have {
+        // usBytesPerSector .. usSectorsPerFAT, cHiddenSectors
+        b[0..13].copy_from_slice(&bs[11..24]);
+        b[17..21].copy_from_slice(&bs[28..32]);
+    } else {
+        b[0..2].copy_from_slice(&(ss as u16).to_le_bytes());
+        b[10] = 0xf8;
+    }
+    let small = if sectors < 0x10000 { sectors as u16 } else { 0 };
+    b[8..10].copy_from_slice(&small.to_le_bytes());
+    b[13..15].copy_from_slice(&(SPT as u16).to_le_bytes());
+    b[15..17].copy_from_slice(&(HEADS as u16).to_le_bytes());
+    b[21..25].copy_from_slice(&(if small == 0 { sectors } else { 0 }).to_le_bytes());
+    let cyl = (sectors as u64).div_ceil(HEADS * SPT).min(0xffff) as u16;
+    b[31..33].copy_from_slice(&cyl.to_le_bytes());
+    b[33] = 5; // DEVTYPE_FIXED
+    b[34..36].copy_from_slice(&1u16.to_le_bytes()); // non-removable
+    b
 }
 
 fn rw(c: &Ctx, d: &Arc<dyn BlockDev>, lba: u64, count: u32, data: u32, write: bool) -> u32 {

@@ -137,6 +137,7 @@ const OBJ_READ: u32 = 0x0001;
 const OBJ_WRITE: u32 = 0x0002;
 const OBJ_EXEC: u32 = 0x0004;
 const OBJ_BIG: u32 = 0x2000;
+const OBJ_ALIAS16: u32 = 0x1000;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -199,7 +200,8 @@ fn main() -> ExitCode {
                 data[at..at + from.len()].copy_from_slice(from);
             }
         }
-        let flags = OBJ_READ | OBJ_BIG | if g.0 { OBJ_WRITE } else { OBJ_EXEC };
+        // Code gets 16:16 (code) aliases so programs can thunk to 16-bit APIs.
+        let flags = OBJ_READ | OBJ_BIG | if g.0 { OBJ_WRITE } else { OBJ_EXEC | OBJ_ALIAS16 };
         objects.push(Object { base, size, flags, data });
     }
 

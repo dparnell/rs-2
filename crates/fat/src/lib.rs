@@ -12,6 +12,7 @@
 
 extern crate alloc;
 
+pub mod check;
 mod name;
 
 use alloc::string::String;
@@ -224,7 +225,7 @@ impl<D: BlockDevice> Volume<D> {
             l.copy_from_slice(&bs[43..54]);
             (0, rd32(&bs, 39), l)
         };
-        Ok(Volume {
+        let mut v = Volume {
             dev,
             fat_type,
             bps,
@@ -243,7 +244,13 @@ impl<D: BlockDevice> Volume<D> {
             hint: 2,
             free_count: None,
             readonly: false,
-        })
+        };
+        // The label proper is the root directory entry; the boot sector
+        // holds a copy.
+        if let Ok((_, Some(l))) = v.label_entry() {
+            v.label = l;
+        }
+        Ok(v)
     }
 
     pub fn set_readonly(&mut self, ro: bool) {
@@ -965,16 +972,66 @@ impl<D: BlockDevice> Volume<D> {
         self.update_entry(e)
     }
 
+    /// The root directory's volume label entry: (index of the first free
+    /// or label slot, label if present).
+    fn label_entry(&self) -> Result<(Option<u32>, Option<[u8; 11]>)> {
+        let dir = self.root_dir();
+        let mut sec = vec![0u8; self.bps as usize];
+        let mut cur = u64::MAX;
+        let mut free = None;
+        let mut index = 0;
+        while let Some((lba, off)) = self.entry_pos(dir, index)? {
+            if lba != cur {
+                self.read_sector(lba, &mut sec)?;
+                cur = lba;
+            }
+            let d = &sec[off..off + 32];
+            if d[0] == 0 {
+                return Ok((free.or(Some(index)), None));
+            }
+            if d[0] == 0xe5 {
+                free = free.or(Some(index));
+            } else if d[11] != attr::LFN && d[11] & attr::VOLUME != 0 {
+                let mut l = [0u8; 11];
+                l.copy_from_slice(&d[0..11]);
+                return Ok((Some(index), Some(l)));
+            }
+            index += 1;
+        }
+        Ok((free, None))
+    }
+
+    /// Set the volume label (root directory entry and boot sector); an
+    /// empty label removes it.
     pub fn set_label(&mut self, label: &str) -> Result<()> {
+        if self.readonly {
+            return Err(Error::ReadOnly);
+        }
         let mut l = [b' '; 11];
         for (d, s) in l.iter_mut().zip(label.bytes()) {
             *d = s.to_ascii_uppercase();
+        }
+        let (slot, _) = self.label_entry()?;
+        let dir = self.root_dir();
+        if label.is_empty() {
+            if let (Some(i), Some(_)) = self.label_entry()? {
+                self.mark_deleted(Slot { dir, index: i })?;
+            }
+        } else {
+            let slot = match slot {
+                Some(i) => Slot { dir, index: i },
+                None => self.free_slot(dir)?,
+            };
+            let mut raw = [0u8; 32];
+            raw[0..11].copy_from_slice(&l);
+            raw[11] = attr::VOLUME;
+            self.write_entry_raw(slot, &raw)?;
         }
         self.label = l;
         let mut bs = vec![0u8; self.bps as usize];
         self.read_sector(0, &mut bs)?;
         let at = if self.fat_type == FatType::Fat32 { 71 } else { 43 };
-        bs[at..at + 11].copy_from_slice(&l);
+        bs[at..at + 11].copy_from_slice(if label.is_empty() { b"NO NAME    " } else { &l });
         self.write_sector(0, &bs)
     }
 }
@@ -1086,6 +1143,9 @@ pub fn format<D: BlockDevice>(dev: &D, p: &FormatParams) -> Result<()> {
     for (d, s) in label.iter_mut().zip(p.label.bytes()) {
         *d = s.to_ascii_uppercase();
     }
+    if p.label.is_empty() {
+        label = *b"NO NAME    ";
+    }
     if fat_type == FatType::Fat32 {
         bs[36..40].copy_from_slice(&fat_size.to_le_bytes());
         bs[44..48].copy_from_slice(&2u32.to_le_bytes());
@@ -1140,6 +1200,13 @@ pub fn format<D: BlockDevice>(dev: &D, p: &FormatParams) -> Result<()> {
             }
         }
         dev.write(base, &sec)?;
+    }
+    if !p.label.is_empty() {
+        // The label entry opens the root directory.
+        let mut sec = vec![0u8; bps as usize];
+        sec[0..11].copy_from_slice(&label);
+        sec[11] = attr::VOLUME;
+        dev.write((reserved + fats * fat_size) as u64, &sec)?;
     }
     Ok(())
 }
@@ -1207,6 +1274,94 @@ mod tests {
         v.rmdir("OS2\\DLL").unwrap();
         assert!(v.info().unwrap().free_clusters > free_before);
         assert_eq!(v.create_file("LONGFILENAME.TEXT", 0, now).unwrap_err(), Error::InvalidName);
+    }
+
+    fn sample(ty: FatType, bytes: usize) -> Volume<Mem> {
+        let dev = Mem(RefCell::new(std::vec![0u8; bytes]));
+        format(&dev, &FormatParams { label: "CHK", serial: 1, fat_type: Some(ty), hidden_sectors: 0 }).unwrap();
+        let mut v = Volume::mount(dev).unwrap();
+        let now = Timestamp::new(2026, 10, 18, 12, 0, 0);
+        v.mkdir("DIR", now).unwrap();
+        for (name, len) in [("A.TXT", 10_000usize), ("DIR\\B.TXT", 20_000), ("C.TXT", 5_000)] {
+            let mut e = v.create_file(name, 0, now).unwrap();
+            v.write(&mut e, 0, &std::vec![7u8; len], now).unwrap();
+        }
+        v
+    }
+
+    fn scan(v: &mut Volume<Mem>, fix: bool) -> (Vec<check::Finding>, check::Totals) {
+        let mut c = check::Checker::new(v, fix).unwrap();
+        c.scan().unwrap();
+        c.recover(true, Timestamp::default()).unwrap();
+        (c.findings.clone(), c.totals.clone())
+    }
+
+    #[test]
+    fn check_clean_and_damaged() {
+        for (ty, size) in [(FatType::Fat12, 1_474_560), (FatType::Fat16, 32 << 20), (FatType::Fat32, 80 << 20)] {
+            let mut v = sample(ty, size);
+            let (f, t) = scan(&mut v, false);
+            assert!(f.is_empty(), "{ty:?}: {f:?}");
+            assert_eq!((t.files, t.dirs, t.lost_chains), (3, 1, 0));
+            let cs = v.cluster_size();
+            assert_eq!(t.file_clusters, 10_000u32.div_ceil(cs) + 20_000u32.div_ceil(cs) + 5_000u32.div_ceil(cs));
+            // A lost two-cluster chain, a cross-link (C.TXT's chain points
+            // into A.TXT's) and a file whose size is too large.
+            let free = v.clusters - 10;
+            v.set_fat_entry(free, free + 1).unwrap();
+            v.set_fat_entry(free + 1, v.eoc()).unwrap();
+            let a = v.lookup("A.TXT").unwrap().cluster;
+            let c = v.lookup("C.TXT").unwrap().cluster;
+            v.set_fat_entry(c, a).unwrap();
+            let mut b = v.lookup("DIR\\B.TXT").unwrap();
+            b.size = 1_000_000;
+            v.update_entry(&b).unwrap();
+            let (f, t) = scan(&mut v, false);
+            assert!(f.contains(&check::Finding::CrossLinked { path: "\\C.TXT".into(), cluster: a }), "{ty:?}: {f:?}");
+            assert!(f.contains(&check::Finding::SizeAdjusted("\\DIR\\B.TXT".into())));
+            // The planted chain, and the rest of C.TXT cut off by the link.
+            assert_eq!(t.lost_chains, 2);
+            assert_eq!(t.lost_clusters, 2 + 5_000u32.div_ceil(cs) - 1);
+            // Nothing was written without fix.
+            assert_eq!(v.lookup("DIR\\B.TXT").unwrap().size, 1_000_000);
+            let (_, t) = scan(&mut v, true);
+            assert!(t.recovered >= 1);
+            assert!(v.lookup("FILE0000.CHK").is_ok());
+            assert_eq!(v.lookup("DIR\\B.TXT").unwrap().size, 20_000u32.div_ceil(cs) * cs);
+            // After repair only the (unfixable) cross-link remains.
+            let (f, t) = scan(&mut v, false);
+            assert!(f.iter().all(|x| matches!(x, check::Finding::CrossLinked { .. })), "{ty:?}: {f:?}");
+            assert_eq!(t.lost_chains, 0);
+        }
+    }
+
+    #[test]
+    fn check_broken_chain() {
+        let mut v = sample(FatType::Fat16, 32 << 20);
+        let a = v.lookup("A.TXT").unwrap().cluster;
+        // Point A.TXT's first cluster at a free cluster: the chain ends
+        // there (that cluster is kept, as its link is the bad one).
+        v.set_fat_entry(a, v.clusters - 1).unwrap();
+        let (f, _) = scan(&mut v, true);
+        assert!(f.contains(&check::Finding::BadChain("\\A.TXT".into())), "{f:?}");
+        let (f, t) = scan(&mut v, false);
+        assert!(f.is_empty(), "{f:?}");
+        assert_eq!(t.lost_chains, 0);
+        assert_eq!(v.lookup("A.TXT").unwrap().size, 2 * v.cluster_size());
+    }
+
+    #[test]
+    fn labels() {
+        let mut v = sample(FatType::Fat16, 32 << 20);
+        assert_eq!(&v.label, b"CHK        ");
+        v.set_label("NEW LABEL").unwrap();
+        let v2 = Volume::mount(v.dev).unwrap();
+        assert_eq!(&v2.label, b"NEW LABEL  ");
+        assert_eq!(v2.read_dir(v2.root_dir()).unwrap().len(), 3);
+        let mut v2 = v2;
+        v2.set_label("").unwrap();
+        let v3 = Volume::mount(v2.dev).unwrap();
+        assert_eq!(&v3.label, b"NO NAME    ");
     }
 
     #[test]

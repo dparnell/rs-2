@@ -58,13 +58,16 @@ fn check_names(fs: &dyn fs::FileSystem, p: &FullPath) -> Result<(), u32> {
 
 pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
     let Some(h) = get(c, hf) else { return (err::INVALID_HANDLE, 0) };
+    if let Handle::Drive(d) = &h {
+        return dasd_rw(c, d, buf, len, true);
+    }
     let Some(data) = c.read_vec(buf, len) else { return (err::INVALID_ADDRESS, 0) };
     match h {
         Handle::Con | Handle::Screen => {
             crate::console::write(&data);
             (0, len)
         }
-        Handle::Nul | Handle::Clock | Handle::Kbd | Handle::DosDev => (0, len),
+        Handle::Nul | Handle::Clock | Handle::Kbd | Handle::DosDev | Handle::Drive(_) => (0, len),
         Handle::PhysDisk(_) => (err::ACCESS_DENIED, 0),
         Handle::File(f) => {
             if f.access() == mode::READONLY {
@@ -92,13 +95,16 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
 
 pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
     let Some(h) = get(c, hf) else { return (err::INVALID_HANDLE, 0) };
+    if let Handle::Drive(d) = &h {
+        return dasd_rw(c, d, buf, len, false);
+    }
     let mut status = 0;
     let data: Vec<u8> = match h {
         Handle::Con | Handle::Kbd => {
             let line = crate::kbd::read_line(len as usize);
             line
         }
-        Handle::Nul | Handle::Screen | Handle::Clock | Handle::DosDev | Handle::PhysDisk(_) => Vec::new(),
+        Handle::Nul | Handle::Screen | Handle::Clock | Handle::DosDev | Handle::PhysDisk(_) | Handle::Drive(_) => Vec::new(),
         Handle::File(f) => {
             if f.access() == mode::WRITEONLY {
                 return (err::ACCESS_DENIED, 0);
@@ -189,6 +195,20 @@ fn seek(c: &Ctx, hf: u32, off: i64, method: u32) -> Result<u64, u32> {
             *pos = np as u64;
             Ok(np as u64)
         }
+        Handle::Drive(d) => {
+            let mut pos = d.pos.lock();
+            let base = match method {
+                0 => 0i64,
+                1 => *pos as i64,
+                2 => (d.dev.sector_count() * d.dev.sector_size() as u64) as i64,
+                _ => return Err(err::INVALID_FUNCTION),
+            };
+            if base + off < 0 {
+                return Err(err::NEGATIVE_SEEK);
+            }
+            *pos = (base + off) as u64;
+            Ok(*pos)
+        }
         Handle::Pipe(_) | Handle::NPipe(_) => Err(err::SEEK_ON_DEVICE),
         _ => Ok(0),
     }
@@ -274,7 +294,7 @@ fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32) -> 
         return Ok((h, 1));
     }
     if omode & mode::DASD != 0 {
-        return Err(err::NOT_SUPPORTED);
+        return open_dasd(c, name);
     }
     let p = resolve(c, name)?;
     if p.parts.is_empty() {
@@ -331,6 +351,53 @@ fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32) -> 
         c.process.noinherit.lock().insert(h);
     }
     Ok((h, action))
+}
+
+/// OPEN_FLAGS_DASD: `"D:"` opens the volume of drive D: as sectors.
+fn open_dasd(c: &Ctx, name: &str) -> Result<(u32, u32), u32> {
+    let b = name.as_bytes();
+    if b.len() != 2 || b[1] != b':' || !b[0].is_ascii_alphabetic() {
+        return Err(err::INVALID_PARAMETER);
+    }
+    let d = b[0].to_ascii_uppercase() - b'A';
+    if fs::locked_by_other(d) {
+        return Err(err::DRIVE_LOCKED);
+    }
+    let fsys = fs::drive(d).ok_or(err::INVALID_DRIVE)?;
+    let dev = fsys.device().ok_or(err::NOT_SUPPORTED)?;
+    Ok((add(c, Handle::Drive(fs::Dasd::new(d, dev)))?, 1))
+}
+
+/// DosRead/DosWrite on a DASD handle: bytes of the volume at the file
+/// pointer (sector-granular underneath).
+fn dasd_rw(c: &Ctx, d: &fs::Dasd, buf: u32, len: u32, write: bool) -> (u32, u32) {
+    let ss = d.dev.sector_size() as u64;
+    let size = d.dev.sector_count() * ss;
+    let mut pos = d.pos.lock();
+    let len = (len as u64).min(size.saturating_sub(*pos)) as usize;
+    if len == 0 {
+        return (0, 0);
+    }
+    let first = *pos / ss;
+    let last = (*pos + len as u64).div_ceil(ss);
+    let mut data = alloc::vec![0u8; ((last - first) * ss) as usize];
+    if let Err(e) = d.dev.read(first, &mut data) {
+        return (e, 0);
+    }
+    let at = (*pos - first * ss) as usize;
+    if write {
+        if !c.read(buf, &mut data[at..at + len]) {
+            return (err::INVALID_ADDRESS, 0);
+        }
+        if let Err(e) = d.dev.write(first, &data) {
+            return (e, 0);
+        }
+        d.written.store(true, core::sync::atomic::Ordering::Relaxed);
+    } else if !c.write(buf, &data[at..at + len]) {
+        return (err::INVALID_ADDRESS, 0);
+    }
+    *pos += len as u64;
+    (0, len as u32)
 }
 
 pub fn dos_open(c: &mut Ctx) -> u32 {
@@ -526,6 +593,7 @@ pub fn htype(c: &Ctx, hf: u32) -> Option<(u32, u32)> {
         Handle::File(_) => (0, 0),
         Handle::Pipe(_) | Handle::NPipe(_) => (2, 0),
         Handle::PhysDisk(_) => (1, 0x8000),
+        Handle::Drive(_) => (0, 0),
         Handle::DosDev => (1, 0x8080),
     })
 }
