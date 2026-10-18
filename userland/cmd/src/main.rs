@@ -10,6 +10,7 @@ mod builtin;
 mod dir;
 mod exec;
 mod parse;
+mod rexx;
 mod shell;
 mod util;
 

@@ -198,7 +198,9 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
         return Err(1041);
     };
     if path.to_ascii_uppercase().ends_with(".CMD") {
-        crate::batch::start(sh, &path, args);
+        if !crate::rexx::run(sh, &path, args) {
+            crate::batch::start(sh, &path, args);
+        }
         return Ok(None);
     }
     // Arguments: "program\0arguments\0\0".

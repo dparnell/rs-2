@@ -129,6 +129,8 @@ impl Shell {
 
     /// Run one input line.
     pub fn run_line(&mut self, line: &str) {
+        // "@" in front of a command only suppresses its echo.
+        let line = line.trim_start().strip_prefix('@').unwrap_or(line);
         let line = self.expand(line);
         let mut skip = false;
         let mut last_sep = Sep::Always;
