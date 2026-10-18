@@ -2,9 +2,11 @@
 
 pub mod ahci;
 pub mod hid;
+pub mod hub;
 pub mod nvme;
 pub mod part;
 pub mod pci;
+pub mod storage;
 pub mod usb;
 pub mod xhci;
 
@@ -64,6 +66,8 @@ pub fn init() {
     crate::println!("pci: {} functions", devs.len());
     let mut disks: Vec<Arc<dyn BlockDev>> = Vec::new();
     let mut optical: Vec<Arc<dyn BlockDev>> = Vec::new();
+    // USB storage comes after the built-in drives.
+    let (mut usb_disks, mut usb_optical) = (Vec::new(), Vec::new());
     for d in &devs {
         if (d.class, d.subclass, d.progif) == (1, 6, 1) {
             for p in ahci::probe(d) {
@@ -74,7 +78,9 @@ pub fn init() {
             }
         }
         if (d.class, d.subclass, d.progif) == (0x0c, 3, 0x30) {
-            xhci::probe(d);
+            for (dev, is_optical) in xhci::probe(d) {
+                if is_optical { usb_optical.push(dev) } else { usb_disks.push(dev) }
+            }
         }
         if (d.class, d.subclass, d.progif) == (1, 8, 2) {
             for ns in nvme::probe(d) {
@@ -82,6 +88,8 @@ pub fn init() {
             }
         }
     }
+    disks.append(&mut usb_disks);
+    optical.append(&mut usb_optical);
     let mut parts: Vec<part::Partition> = Vec::new();
     for disk in &disks {
         let found = part::scan(disk);
