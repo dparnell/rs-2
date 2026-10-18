@@ -310,7 +310,24 @@ pub fn find_module(name: &str) -> Option<(String, Arc<[u8]>)> {
         return read_file(name).map(|d| (name.to_string(), d));
     }
     let file = if name.contains('.') { name.to_string() } else { alloc::format!("{name}.DLL") };
-    for dir in libpath() {
+    // BeginLIBPATH, LIBPATH, EndLIBPATH of the loading process.
+    let (begin, end) = crate::task::sched::current_opt()
+        .and_then(|t| t.process())
+        .map(|p| {
+            let x = p.ext_libpath.lock();
+            (x.0.clone(), x.1.clone())
+        })
+        .unwrap_or_default();
+    let mut dirs: Vec<String> = begin.split(';').filter(|s| !s.is_empty()).map(String::from).collect();
+    dirs.extend(libpath());
+    dirs.extend(end.split(';').filter(|s| !s.is_empty()).map(String::from));
+    let cwd = crate::task::sched::current_opt().and_then(|t| t.process()).map(|p| {
+        let c = p.cwd.lock();
+        alloc::format!("{}:\\{}", (b'A' + c.0) as char, c.1[c.0 as usize])
+    });
+    for dir in dirs {
+        // "." is the loading process's current directory.
+        let dir = if dir == "." { cwd.clone().unwrap_or_else(|| String::from("C:\\")) } else { dir };
         let full = alloc::format!("{}\\{}", dir.trim_end_matches('\\'), file);
         if let Some(d) = read_file(&full) {
             return Some((full.to_ascii_uppercase(), d));

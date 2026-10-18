@@ -173,6 +173,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 208) | (0, 353) => super::resource::dos_free_resource,
         (0, 352) => super::resource::dos_get_resource,
         (0, 572) => super::resource::dos_query_resource_size,
+        (0, 873) | (0, 998) => super::module::dos_set_ext_libpath,
+        (0, 874) | (0, 999) => super::module::dos_query_ext_libpath,
         (0, 690) => ok, // DosSMSetTitle
         (0, 712) => dos16_sm_pm_present,
         // ---- 16-bit DOSCALLS ----

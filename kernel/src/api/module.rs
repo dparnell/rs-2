@@ -357,3 +357,54 @@ pub fn dos_query_app_type(c: &mut Ctx) -> u32 {
     if c.is16 { c.write_u16(ptype, t as u16) } else { c.write_u32(ptype, t) };
     0
 }
+
+// ---- Extended LIBPATH ----
+
+const BEGIN_LIBPATH: u32 = 1;
+const END_LIBPATH: u32 = 2;
+const LIBPATHSTRICT: u32 = 3;
+
+pub fn dos_set_ext_libpath(c: &mut Ctx) -> u32 {
+    // (pszExtLIBPATH, flags)
+    let (p, flags) = (if c.is16 { c.ptr(0) } else { c.arg(0) }, c.arg(1));
+    let Some(v) = c.read_str(p, 1024) else { return err::INVALID_ADDRESS };
+    let mut x = c.process.ext_libpath.lock();
+    match flags {
+        BEGIN_LIBPATH => x.0 = expand(&v, &x.0),
+        END_LIBPATH => x.1 = expand(&v, &x.1),
+        LIBPATHSTRICT => x.2 = v.eq_ignore_ascii_case("T"),
+        _ => return err::INVALID_PARAMETER,
+    }
+    0
+}
+
+/// Replace %BeginLIBPATH% / %EndLIBPATH% with the current value.
+fn expand(v: &str, cur: &str) -> alloc::string::String {
+    let mut out = alloc::string::String::new();
+    let up = v.to_ascii_uppercase();
+    let mut i = 0;
+    while i < v.len() {
+        if up[i..].starts_with("%BEGINLIBPATH%") || up[i..].starts_with("%ENDLIBPATH%") {
+            out.push_str(cur);
+            i += if up[i..].starts_with("%B") { 14 } else { 12 };
+        } else {
+            out.push(v.as_bytes()[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
+pub fn dos_query_ext_libpath(c: &mut Ctx) -> u32 {
+    let (p, flags) = (if c.is16 { c.ptr(0) } else { c.arg(0) }, c.arg(1));
+    let v = {
+        let x = c.process.ext_libpath.lock();
+        match flags {
+            BEGIN_LIBPATH => x.0.clone(),
+            END_LIBPATH => x.1.clone(),
+            LIBPATHSTRICT => alloc::string::String::from(if x.2 { "T" } else { "" }),
+            _ => return err::INVALID_PARAMETER,
+        }
+    };
+    if c.write_str(p, &v) { 0 } else { err::INVALID_ADDRESS }
+}

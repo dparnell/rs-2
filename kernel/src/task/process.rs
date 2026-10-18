@@ -59,6 +59,8 @@ pub struct Process {
     /// Woken when one of this process's threads ends, resumes or the
     /// critical section is released.
     pub thread_waiters: WaitQueue,
+    /// BeginLIBPATH, EndLIBPATH, LIBPATHSTRICT.
+    pub ext_libpath: SpinLock<(String, String, bool)>,
     /// DLLs with per-process initialisation that have run it here.
     pub inited: SpinLock<Vec<u16>>,
     /// Exit list routines: (order, address, 16-bit).
@@ -214,6 +216,10 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         thread_waiters: WaitQueue::new(),
         critsec: SpinLock::new((0, 0)),
         inited: SpinLock::new(Vec::new()),
+        ext_libpath: SpinLock::new(match &p.parent {
+            Some(q) => q.ext_libpath.lock().clone(),
+            None => (String::new(), String::new(), false),
+        }),
         exitlist: SpinLock::new(Vec::new()),
         exitlist_tid: AtomicU32::new(0),
         exitlist_next: core::sync::atomic::AtomicBool::new(false),
@@ -407,6 +413,9 @@ impl Process {
         }
         if !keep {
             reap(self.pid);
+        }
+        if self.ppid == 0 {
+            crate::boot::process_ended(self.pid);
         }
     }
 

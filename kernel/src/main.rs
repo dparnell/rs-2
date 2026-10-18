@@ -10,6 +10,7 @@ extern crate alloc;
 mod api;
 mod arch;
 mod codepage;
+mod config;
 mod console;
 mod drivers;
 mod fs;
@@ -75,13 +76,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     if cmdline.split_whitespace().any(|w| w == "apitrace") {
         api::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
     }
-    let init = cmdline
-        .split_whitespace()
-        .find_map(|w| w.strip_prefix("init="))
-        .unwrap_or("CMD.EXE");
-    // Arguments for init follow "--".
-    let args = cmdline.split_once(" -- ").map_or("", |(_, a)| a);
-    start_init(init, args);
+    boot::start(cmdline);
     // This boot context is now the idle thread.
     loop {
         task::sched::schedule();
@@ -89,28 +84,143 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     }
 }
 
-fn start_init(program: &str, args: &str) {
-    use alloc::string::ToString;
-    let env = alloc::vec![
-        "PATH=C:\\OS2;C:\\OS2\\SYSTEM;C:\\".to_string(),
-        "DPATH=C:\\OS2;C:\\OS2\\SYSTEM;C:\\".to_string(),
-        "COMSPEC=C:\\CMD.EXE".to_string(),
-        "OS2_SHELL=C:\\CMD.EXE".to_string(),
-        "PROMPT=$i[$p]".to_string(),
-    ];
-    let path = alloc::format!("C:\\{}", program.to_ascii_uppercase());
-    let r = task::process::exec(task::process::ExecParams {
-        path: &path,
-        program,
-        args,
-        env,
-        parent: None,
-        handles: alloc::vec::Vec::new(),
-        detached: false,
-    });
-    match r {
-        Ok(p) => println!("started {} as process {}", path, p.pid),
-        Err(e) => println!("cannot start {path}: error {e}"),
+/// Start-up sequence: CONFIG.SYS, CALL= programs, RUN= programs, then the
+/// protected-mode shell (restarted if it exits).
+pub mod boot {
+    use alloc::collections::VecDeque;
+    use alloc::string::{String, ToString};
+    use alloc::vec::Vec;
+
+    use crate::sync::SpinLock;
+
+    struct Boot {
+        env: Vec<String>,
+        /// Programs still to run synchronously, then the shell.
+        queue: VecDeque<(String, String)>,
+        shell: (String, String),
+        current: u32,
+        /// Restart the shell when it exits (not for an init= override).
+        restart: bool,
+    }
+
+    static STATE: SpinLock<Option<Boot>> = SpinLock::new(None);
+
+    fn default_env() -> Vec<String> {
+        [
+            "PATH=C:\\OS2;C:\\OS2\\SYSTEM;C:\\RS2;C:\\",
+            "DPATH=C:\\OS2;C:\\OS2\\SYSTEM;C:\\RS2;C:\\",
+            "PROMPT=$i[$p]",
+            "HELP=C:\\OS2\\HELP",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+    }
+
+    fn find_program(p: &str) -> String {
+        if p.contains(['\\', ':']) {
+            return p.to_string();
+        }
+        for dir in ["C:\\", "C:\\OS2\\", "C:\\RS2\\"] {
+            let full = alloc::format!("{dir}{p}");
+            if crate::fs::read_file(&full).is_some() {
+                return full;
+            }
+        }
+        alloc::format!("C:\\{p}")
+    }
+
+    pub fn start(cmdline: &str) {
+        let cfg = crate::config::load().unwrap_or_default();
+        if let Some(lp) = &cfg.libpath {
+            crate::fs::set_libpath(lp);
+        }
+        let mut env = default_env();
+        for e in &cfg.env {
+            let key = e.split('=').next().unwrap_or("");
+            env.retain(|x| !x.split('=').next().unwrap_or("").eq_ignore_ascii_case(key));
+            env.push(e.clone());
+        }
+        let init = cmdline.split_whitespace().find_map(|w| w.strip_prefix("init="));
+        let args = cmdline.split_once(" -- ").map_or("", |(_, a)| a);
+        let shell = match (init, &cfg.protshell) {
+            (Some(i), _) => (i.to_string(), args.to_string()),
+            (None, Some(p)) => p.clone(),
+            (None, None) => ("CMD.EXE".to_string(), String::new()),
+        };
+        let shell_path = find_program(&shell.0);
+        if !env.iter().any(|e| e.starts_with("COMSPEC=")) {
+            env.push(alloc::format!("COMSPEC={shell_path}"));
+        }
+        if !env.iter().any(|e| e.starts_with("OS2_SHELL=")) {
+            env.push(alloc::format!("OS2_SHELL={shell_path}"));
+        }
+        if !cfg.drivers.is_empty() {
+            crate::println!("config.sys: {} driver statements handled by native drivers", cfg.drivers.len());
+        }
+        for (p, a) in &cfg.run {
+            spawn(&find_program(p), a, &env, true);
+        }
+        let mut queue: VecDeque<(String, String)> = cfg.call.iter().map(|(p, a)| (find_program(p), a.clone())).collect();
+        queue.push_back((shell_path.clone(), shell.1.clone()));
+        let restart = init.is_none();
+        *STATE.lock() = Some(Boot { env, queue, shell: (shell_path, shell.1), current: 0, restart });
+        next();
+    }
+
+    fn spawn(path: &str, args: &str, env: &[String], detached: bool) -> Option<u32> {
+        let program = path.rsplit('\\').next().unwrap_or(path).to_string();
+        let r = crate::task::process::exec(crate::task::process::ExecParams {
+            path,
+            program: &program,
+            args,
+            env: env.to_vec(),
+            parent: None,
+            handles: Vec::new(),
+            detached,
+        });
+        match r {
+            Ok(p) => Some(p.pid),
+            Err(e) => {
+                crate::println!("cannot start {path}: error {e}");
+                None
+            }
+        }
+    }
+
+    /// Start the next boot program (or restart the shell).
+    fn next() {
+        loop {
+            let (item, env, last) = {
+                let mut g = STATE.lock();
+                let Some(b) = g.as_mut() else { return };
+                let last = b.queue.len() <= 1;
+                if b.queue.is_empty() && !b.restart {
+                    return;
+                }
+                let item = b.queue.pop_front().unwrap_or_else(|| b.shell.clone());
+                (item, b.env.clone(), last)
+            };
+            match spawn(&item.0, &item.1, &env, false) {
+                Some(pid) => {
+                    if let Some(b) = STATE.lock().as_mut() {
+                        b.current = pid;
+                    }
+                    return;
+                }
+                // A shell that cannot start is not retried forever.
+                None if last => return,
+                None => {}
+            }
+        }
+    }
+
+    /// A top-level process ended.
+    pub fn process_ended(pid: u32) {
+        let ours = STATE.lock().as_ref().is_some_and(|b| b.current == pid);
+        if ours {
+            next();
+        }
     }
 }
 
