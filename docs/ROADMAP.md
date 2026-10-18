@@ -29,7 +29,8 @@ Status markers: done, in progress, planned.
 - done: boot from an installed disk (UEFI)
 - done: NVMe (polled)
 - done: USB: xHCI (polled), boot-protocol HID keyboard and mouse, hot-plug
-- planned: virtio-blk, USB hubs and mass storage, NVMe/xHCI interrupts
+- done: USB hubs (nested), USB mass storage (bulk-only), boot from a USB stick
+- planned: virtio-blk, NVMe/xHCI interrupts, USB storage hot-plug mounting
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - planned: SMP, MSI/MSI-X
 - done: HPFS (read/write/format; extended attributes read-only)
