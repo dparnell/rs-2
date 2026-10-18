@@ -244,7 +244,18 @@ pub fn dos16_create_thread(c: &mut Ctx) -> u32 {
     // top of the new thread's stack.
     let (pfn, ptid, stack) = (c.arg(0), c.ptr(1), c.arg(2));
     let ss = (stack >> 16) as u16;
-    let sp_off = stack & 0xffff;
+    // The thread function is entered as if far-called: a return address
+    // (to the thread exit stub) goes below pbStack, where the caller may
+    // have stored the function's arguments.
+    let sp_off = (stack & 0xffff).wrapping_sub(4) & 0xffff;
+    {
+        let ret = crate::loader::gate::slot_address(0, THREAD_EXIT_ORDINAL);
+        let far = (vm::tile_selector(ret) as u32) << 16 | (ret & 0xffff);
+        let at = c.space().linear(ss, sp_off).unwrap_or(0);
+        if !c.write_u32(at, far) {
+            return err::INVALID_ADDRESS;
+        }
+    }
     let frame = TrapFrame {
         rflags: 0x202,
         cs: (pfn >> 16) as u64,
