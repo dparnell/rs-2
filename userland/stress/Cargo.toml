@@ -1,0 +1,9 @@
+[package]
+name = "stress"
+description = "Kernel stress and robustness tests: threads, semaphores, kills, signals, exceptions, process trees, memory, files, pipes, queues"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

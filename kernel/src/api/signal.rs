@@ -35,10 +35,12 @@ const SIGA_ERROR: u32 = 3;
 /// live process in the (single) session.
 pub fn foreground() -> Option<Arc<Process>> {
     let all: Vec<Arc<Process>> = process::all();
+    // A process that asked for the focus (DosSetSignalExceptionFocus)
+    // comes before the most recently started one.
     all.into_iter()
         .filter(|p| p.exit_info().is_none() && (!p.detached.load(Ordering::Relaxed) || crate::session::is_leader(p.pid)))
         .filter(|p| p.session.load(Ordering::Relaxed) == crate::session::foreground())
-        .max_by_key(|p| p.pid)
+        .max_by_key(|p| (p.sig_focus.load(Ordering::Relaxed) > 0, p.pid))
 }
 
 /// Thread that receives signals (thread 1, or the first live thread).
@@ -51,8 +53,23 @@ fn target_thread(p: &Process) -> Option<Arc<Thread>> {
 pub fn post(p: &Arc<Process>, sig: u32) {
     *p.pending_signal.lock() = Some(sig);
     if let Some(t) = target_thread(p) {
+        let held = !p.is_16bit() && p.sig_held.load(Ordering::Relaxed) & (1 << sig) != 0;
+        if held || t.must_complete.load(Ordering::Relaxed) > 0 {
+            return;
+        }
         t.interrupt();
         sched::wake(&t);
+    }
+}
+
+/// A held signal may be delivered now (DosAcknowledgeSignalException,
+/// DosExitMustComplete): make its thread look at it.
+pub fn release(p: &Arc<Process>) {
+    if p.pending_signal.lock().is_some() {
+        if let Some(t) = target_thread(p) {
+            t.interrupt();
+            sched::wake(&t);
+        }
     }
 }
 
@@ -69,9 +86,19 @@ pub fn deliver(t: &Arc<Thread>, p: &Arc<Process>, f: &mut TrapFrame) -> bool {
     if target_thread(p).map(|x| x.id) != Some(t.id) {
         return false;
     }
+    let Some(peek) = *p.pending_signal.lock() else { return false };
+    // Held: inside a must-complete section, or (32-bit) the previous
+    // signal of this kind has not been acknowledged yet. It stays pending;
+    // waits are not interrupted meanwhile.
+    let held = p.sig_held.load(Ordering::Relaxed) & (1 << peek) != 0;
+    if t.must_complete.load(Ordering::Relaxed) > 0 || (!p.is_16bit() && held) {
+        t.clear_interrupt();
+        return false;
+    }
     let Some(sig) = p.pending_signal.lock().take() else { return false };
     t.clear_interrupt();
     if !p.is_16bit() {
+        p.sig_held.fetch_or(1 << sig, Ordering::Relaxed);
         let info = match sig {
             SIG_CTRLBREAK => XCPT_SIGNAL_BREAK,
             SIG_KILLPROCESS => XCPT_SIGNAL_KILLPROC,

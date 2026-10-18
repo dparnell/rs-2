@@ -56,7 +56,7 @@ impl<T> Inbox<T> {
             if let Some(v) = self.items.lock().pop_front() {
                 return v;
             }
-            self.wait.wait_until(None, || !self.items.lock().is_empty());
+            self.wait.wait_uninterruptible(|| !self.items.lock().is_empty());
         }
     }
 }

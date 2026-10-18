@@ -192,10 +192,32 @@ pub fn dos_wait_child(c: &mut Ctx) -> u32 {
 }
 
 pub fn dos_kill_process(c: &mut Ctx) -> u32 {
-    let (_scope, pid) = (c.arg(0), c.arg(1));
+    let (scope, pid) = (c.arg(0), c.arg(1));
     let Some(p) = process::by_pid(pid) else { return err::INVALID_PROCID };
+    if p.exit_info().is_some() {
+        return err::INVALID_PROCID;
+    }
     if p.pid != c.process.pid && p.ppid != c.process.pid {
         return err::NOT_DESCENDANT;
+    }
+    // DKP_PROCESSTREE (1): the descendants too, deepest first.
+    if scope & 1 != 0 {
+        let mut tree = alloc::vec![p.pid];
+        let mut i = 0;
+        while i < tree.len() {
+            let parent = tree[i];
+            for q in process::all() {
+                if q.ppid == parent && q.exit_info().is_none() && !tree.contains(&q.pid) {
+                    tree.push(q.pid);
+                }
+            }
+            i += 1;
+        }
+        for &d in tree.iter().skip(1).rev() {
+            if let Some(q) = process::by_pid(d) {
+                q.exit(3, 0);
+            }
+        }
     }
     p.exit(3, 0); // TC_KILLPROCESS
     0
@@ -216,26 +238,36 @@ pub const THREAD_EXIT_ORDINAL: u32 = 1;
 pub fn dos_create_thread(c: &mut Ctx) -> u32 {
     // DosCreateThread(ptid, pfn, param, flag, cbStack)
     let (ptid, pfn, param, flag, cb) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4));
-    let size = cb.max(8192).next_multiple_of(vm::PAGE);
-    let r = c.space().alloc(size, pag::READ | pag::WRITE, SegKind::Data, None);
-    let base = match r {
-        Ok(b) => b,
-        Err(e) => return e.code(),
-    };
-    {
-        let mut sp = c.space();
-        if flag & 2 != 0 {
-            // STACK_COMMITTED
-            let _ = sp.set_mem(base, size, pag::COMMIT | pag::READ | pag::WRITE);
-        } else {
-            // Top page committed, a guard page below it grows the stack.
-            let _ = sp.set_mem(base + size - vm::PAGE, vm::PAGE, pag::COMMIT | pag::READ | pag::WRITE);
-            if size >= 2 * vm::PAGE {
-                let _ = sp.set_mem(base + size - 2 * vm::PAGE, vm::PAGE, pag::COMMIT | pag::GUARD | pag::READ | pag::WRITE);
+    create_thread32(c, ptid, pfn, param, flag, cb, None)
+}
+
+/// A 32-bit thread running pfn(param): on a stack the system allocates
+/// (freed when the thread ends) or, from DosCreateThread2, on the caller's
+/// stack `user` (base, size).
+pub(super) fn create_thread32(c: &Ctx, ptid: u32, pfn: u32, param: u32, flag: u32, cb: u32, user: Option<(u32, u32)>) -> u32 {
+    let (base, top, owned) = match user {
+        Some((b, n)) => (b, b + n, 0),
+        None => {
+            let size = cb.max(8192).next_multiple_of(vm::PAGE);
+            let r = c.space().alloc(size, pag::READ | pag::WRITE, SegKind::Data, None);
+            let base = match r {
+                Ok(b) => b,
+                Err(e) => return e.code(),
+            };
+            let mut sp = c.space();
+            if flag & 2 != 0 {
+                // STACK_COMMITTED
+                let _ = sp.set_mem(base, size, pag::COMMIT | pag::READ | pag::WRITE);
+            } else {
+                // Top page committed, a guard page below it grows the stack.
+                let _ = sp.set_mem(base + size - vm::PAGE, vm::PAGE, pag::COMMIT | pag::READ | pag::WRITE);
+                if size >= 2 * vm::PAGE {
+                    let _ = sp.set_mem(base + size - 2 * vm::PAGE, vm::PAGE, pag::COMMIT | pag::GUARD | pag::READ | pag::WRITE);
+                }
             }
+            (base, base + size, base)
         }
-    }
-    let top = base + size;
+    };
     // Return address and parameter, with the parameter 16-byte aligned as
     // compilers expect at a function entry (SSE spills).
     let sp = ((top - 4) & !15) - 4;
@@ -257,7 +289,11 @@ pub fn dos_create_thread(c: &mut Ctx) -> u32 {
         fs: TIB_SEL as u64,
         ..Default::default()
     };
-    start_thread(c, frame, base, top, ptid, flag & 1 != 0, false)
+    let r = start_thread(c, frame, base, top, ptid, flag & 1 != 0, false, owned);
+    if r != 0 && owned != 0 {
+        let _ = c.space().free(owned);
+    }
+    r
 }
 
 pub fn dos16_create_thread(c: &mut Ctx) -> u32 {
@@ -288,14 +324,15 @@ pub fn dos16_create_thread(c: &mut Ctx) -> u32 {
         ..Default::default()
     };
     let base = c.space().linear(ss, 0).unwrap_or(0);
-    start_thread(c, frame, base, base + sp_off, ptid, false, true)
+    start_thread(c, frame, base, base + sp_off, ptid, false, true, 0)
 }
 
-fn start_thread(c: &Ctx, frame: TrapFrame, base: u32, top: u32, ptid: u32, suspended: bool, tid16: bool) -> u32 {
+fn start_thread(c: &Ctx, frame: TrapFrame, base: u32, top: u32, ptid: u32, suspended: bool, tid16: bool, owned_stack: u32) -> u32 {
     let t = match c.process.new_thread(frame, base, top) {
         Ok(t) => t,
         Err(e) => return e,
     };
+    t.owned_stack.store(owned_stack, Ordering::Relaxed);
     if tid16 { c.write_u16(ptid, t.tid as u16) } else { c.write_u32(ptid, t.tid) };
     if suspended {
         t.suspend.store(1, Ordering::Relaxed);
@@ -367,7 +404,9 @@ pub fn dos_kill_thread(c: &mut Ctx) -> u32 {
     if tid == c.thread.tid {
         return err::INVALID_THREADID;
     }
-    let t = c.process.threads.lock().iter().find(|t| t.tid == tid).cloned();
+    // Only a live thread of this process (one that ended and waits to be
+    // collected cannot be killed).
+    let t = c.process.threads.lock().iter().find(|t| t.tid == tid && t.state() != State::Dead && !t.exit_requested()).cloned();
     match t {
         Some(t) => {
             sched::kill(&t);
@@ -488,14 +527,14 @@ pub fn dos16_get_prty(c: &mut Ctx) -> u32 {
 /// the process's critical section. Called before returning to user mode.
 pub fn hold_if_needed(t: &Arc<crate::task::thread::Thread>, p: &Arc<Process>) {
     let blocked = || {
-        if t.exit_requested() {
+        if t.exit_requested() || p.exitlist_tid.load(Ordering::Relaxed) == t.tid {
             return false;
         }
         let cs = p.critsec.lock().0;
         t.suspend.load(Ordering::Relaxed) > 0 || (cs != 0 && cs != t.tid)
     };
     while blocked() {
-        p.thread_waiters.wait_until(None, || !blocked());
+        p.thread_waiters.wait_uninterruptible(|| !blocked());
         if t.exit_requested() {
             break;
         }
@@ -545,6 +584,9 @@ pub fn exit_list_step(t: &Arc<crate::task::thread::Thread>, p: &Arc<Process>, f:
     if p.exitlist_tid.load(Ordering::Relaxed) != t.tid || !p.exitlist_next.swap(false, Ordering::Relaxed) {
         return false;
     }
+    // A thread pulled out of a wait to run the exit list (see
+    // Process::exit) must not see its routines' waits interrupted.
+    t.clear_interrupt();
     let code = p.exit_info().map_or(0, |e| e.cause);
     loop {
         // Lowest order code first.

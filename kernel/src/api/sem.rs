@@ -164,6 +164,10 @@ fn close(c: &mut Ctx) -> u32 {
             return ERROR_SEM_BUSY;
         }
     }
+    // Threads of this process still wait on it.
+    if s.waiters.has_waiter(|t| t.process().is_some_and(|p| p.pid == pid)) {
+        return ERROR_SEM_BUSY;
+    }
     let empty = {
         let mut o = s.opens.lock();
         if let Some(i) = o.iter().position(|(p, _)| *p == pid) {
@@ -251,7 +255,7 @@ pub fn dos_wait_event_sem(c: &mut Ctx) -> u32 {
     }
     if s.waiters.wait_until(deadline(ms), || event_posted(&s)) {
         0
-    } else if c.thread.exit_requested() {
+    } else if c.thread.exit_requested() || c.thread.interrupted() {
         err::INTERRUPT
     } else {
         ERROR_TIMEOUT
@@ -322,7 +326,7 @@ pub fn dos_request_mutex_sem(c: &mut Ctx) -> u32 {
     });
     match result {
         Some(r) => r,
-        None if c.thread.exit_requested() => err::INTERRUPT,
+        None if c.thread.exit_requested() || c.thread.interrupted() => err::INTERRUPT,
         None => ERROR_TIMEOUT,
     }
 }
@@ -478,7 +482,7 @@ pub fn dos_wait_mux_wait_sem(c: &mut Ctx) -> u32 {
             c.write_u32(puser, u);
             0
         }
-        None if c.thread.exit_requested() => err::INTERRUPT,
+        None if c.thread.exit_requested() || c.thread.interrupted() => err::INTERRUPT,
         None => ERROR_TIMEOUT,
     }
 }
@@ -534,6 +538,102 @@ pub fn dos_query_mux_wait_sem(c: &mut Ctx) -> u32 {
     let shared = if m.shared { DC_SEM_SHARED } else { 0 };
     c.write_u32(pattr, shared | if all { DCMW_WAIT_ALL } else { DCMW_WAIT_ANY });
     0
+}
+
+/// A thread ended: mutexes it owned are free now, marked "owner died", and
+/// their waiters (including muxwaits) must look again.
+pub fn thread_ended(pid: u32, tid: u32) {
+    let sems: Vec<Arc<Sem>> = TABLE.lock().sems.values().cloned().collect();
+    let mut any = false;
+    for s in sems {
+        let freed = match &mut *s.kind.lock() {
+            Kind::Mutex { owner, count, died } if *owner == Some((pid, tid)) => {
+                *owner = None;
+                *count = 0;
+                *died = true;
+                true
+            }
+            _ => false,
+        };
+        if freed {
+            s.waiters.wake_all();
+            any = true;
+        }
+    }
+    // 16-bit system semaphores owned by the thread are released.
+    for s in SYS16.lock().values_mut() {
+        if s.owner == Some((pid, tid)) {
+            s.owner = None;
+            s.count = 0;
+            any = true;
+        }
+    }
+    if any {
+        wake_muxwaits();
+        SYS16_WAIT.wake_all();
+        RAM16_WAIT.wake_all();
+    }
+}
+
+/// A 32-bit semaphore as DosQuerySysState describes it.
+pub struct Sem32Info {
+    pub handle: u32,
+    pub name: Option<String>,
+    /// QS_DC_SEM_SHARED, QS_DCM_MUTEX_SEM, QS_DCE_EVENT_SEM, ... flags.
+    pub flags: u16,
+    /// Posts (event), request count (mutex) or records (muxwait).
+    pub count: u16,
+    /// Owning thread's tid (mutex) or waiters (muxwait).
+    pub extra: u16,
+    pub opens: Vec<(u32, u32)>,
+}
+
+pub fn snapshot32() -> Vec<Sem32Info> {
+    let sems: Vec<(u32, Arc<Sem>)> = TABLE.lock().sems.iter().map(|(&h, s)| (h, s.clone())).collect();
+    let mut out = Vec::new();
+    for (h, s) in sems {
+        let mut flags = if s.shared { 0x0001 } else { 0 };
+        let (count, extra) = match &*s.kind.lock() {
+            Kind::Event { posts } => {
+                flags |= 0x0010;
+                if *posts > 0 {
+                    flags |= 0x0040;
+                }
+                (*posts as u16, 0)
+            }
+            Kind::Mutex { owner, count, died } => {
+                flags |= 0x0008;
+                if *died {
+                    flags |= 0x0080;
+                }
+                (*count as u16, owner.map_or(0, |o| o.1 as u16))
+            }
+            Kind::MuxWait { recs, all } => {
+                flags |= 0x0020 | if *all { 0x0004 } else { 0x0002 };
+                (recs.len() as u16, 0)
+            }
+        };
+        out.push(Sem32Info { handle: h, name: s.name.clone(), flags, count, extra, opens: s.opens.lock().clone() });
+    }
+    out
+}
+
+/// 16-bit system semaphores: (name, owner tid, flags, references, owner
+/// request count, processes that have it open).
+pub fn snapshot16() -> Vec<(String, u16, u8, u8, u8, Vec<u32>)> {
+    SYS16
+        .lock()
+        .values()
+        .map(|s| {
+            let flags = if s.exclusive { 0x08 } else { 0 };
+            (s.name.clone(), s.owner.map_or(0, |o| o.1 as u16), flags, s.opens.len().min(255) as u8, s.count.min(255) as u8, s.opens.clone())
+        })
+        .collect()
+}
+
+/// Number of 32-bit and 16-bit system semaphores (leak checks).
+pub fn counts() -> (u32, u32) {
+    (TABLE.lock().sems.len() as u32, SYS16.lock().len() as u32)
 }
 
 /// Release semaphore resources of a process that ended.
@@ -600,7 +700,7 @@ fn wait16(c: &Ctx, ms: u32, cond: impl FnMut() -> bool) -> u32 {
     let q = &RAM16_WAIT;
     if q.wait_until(deadline(ms), cond) {
         0
-    } else if c.thread.exit_requested() {
+    } else if c.thread.exit_requested() || c.thread.interrupted() {
         err::INTERRUPT
     } else {
         err::SEM_TIMEOUT

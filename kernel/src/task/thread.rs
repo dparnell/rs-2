@@ -81,6 +81,11 @@ pub struct Thread {
     /// Base of the user stack the kernel allocated for the thread
     /// (DosCreateThread), released when the thread ends; 0 = none.
     pub owned_stack: AtomicU32,
+    /// Thread-local memory (DosAllocThreadLocalMemory) while the thread is
+    /// switched out; the process's TLS page holds the running thread's.
+    pub tls: UnsafeCell<[u32; super::process::TLS_DWORDS]>,
+    /// DosEnterMustComplete nesting: signals wait while it is non-zero.
+    pub must_complete: AtomicU32,
 }
 
 unsafe impl Send for Thread {}
@@ -123,6 +128,8 @@ impl Thread {
             kentry: crate::sync::SpinLock::new(None),
             kname: "",
             owned_stack: AtomicU32::new(0),
+            tls: UnsafeCell::new([0; super::process::TLS_DWORDS]),
+            must_complete: AtomicU32::new(0),
         }
     }
 

@@ -1,5 +1,5 @@
 //! Timers: DosAsyncTimer/DosStartTimer/DosStopTimer, the 16-bit
-//! DosTimerAsync/Start/Stop, and the high-resolution DosTmrQuery*.
+//! DosTimerAsync/Start/Stop (DosTmrQuery* are in sysctl).
 
 use alloc::vec::Vec;
 
@@ -143,19 +143,7 @@ pub fn dos16_timer_start(c: &mut Ctx) -> u32 {
     start16(c, true)
 }
 
-/// Frequency of DosTmrQueryTime (the 8254 input clock, as OS/2 reports).
-pub const TMR_FREQ: u64 = 1_193_167;
-
-pub fn dos_tmr_query_freq(c: &mut Ctx) -> u32 {
-    c.write_u32(c.arg(0), TMR_FREQ as u32);
-    0
-}
-
-pub fn dos_tmr_query_time(c: &mut Ctx) -> u32 {
-    let ms = irq::uptime_ms();
-    let v = ms * TMR_FREQ / 1000;
-    let p = c.arg(0);
-    c.write_u32(p, v as u32);
-    c.write_u32(p + 4, (v >> 32) as u32);
-    0
+/// Active timers (leak checks).
+pub fn count() -> u32 {
+    TIMERS.lock().len() as u32
 }

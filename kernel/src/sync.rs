@@ -129,7 +129,7 @@ impl<T> Mutex<T> {
                 core::hint::spin_loop();
                 continue;
             }
-            self.waiters.wait_until(None, || !self.locked.load(Ordering::Acquire));
+            self.waiters.wait_uninterruptible(|| !self.locked.load(Ordering::Acquire));
         }
     }
 }

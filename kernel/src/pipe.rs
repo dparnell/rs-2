@@ -70,7 +70,10 @@ impl PipeEnd {
             return Err(err::ACCESS_DENIED);
         }
         let p = &self.pipe;
-        p.readable.wait_until(None, || !p.buf.lock().is_empty() || p.writers.load(Ordering::Acquire) == 0);
+        // Interrupted by a signal or a kill: ERROR_INTERRUPT, not end of file.
+        if !p.readable.wait_until(None, || !p.buf.lock().is_empty() || p.writers.load(Ordering::Acquire) == 0) {
+            return Err(err::INTERRUPT);
+        }
         let mut b = p.buf.lock();
         let k = n.min(b.len());
         let v: Vec<u8> = b.drain(..k).collect();
@@ -89,7 +92,11 @@ impl PipeEnd {
             if p.readers.load(Ordering::Acquire) == 0 {
                 return Err(err::BROKEN_PIPE);
             }
-            p.writable.wait_until(None, || p.buf.lock().len() < p.cap || p.readers.load(Ordering::Acquire) == 0);
+            if !p.writable.wait_until(None, || p.buf.lock().len() < p.cap || p.readers.load(Ordering::Acquire) == 0) {
+                // A writer that is killed or signalled while the pipe is full
+                // gives up (it used to wait for a reader forever).
+                return if done > 0 { Ok(done) } else { Err(err::INTERRUPT) };
+            }
             let mut b = p.buf.lock();
             let room = p.cap - b.len();
             let k = room.min(data.len() - done);

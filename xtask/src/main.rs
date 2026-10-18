@@ -262,6 +262,7 @@ fn build(o: &Opts) -> Option<PathBuf> {
 const USER_PROGRAMS: &[(&str, &str)] =
     &[
         ("apitest", "RS2\\APITEST.EXE"),
+        ("stress", "RS2\\STRESS.EXE"),
         ("gpitest", "RS2\\GPITEST.EXE"),
         ("testdll", "RS2\\TESTDLL.DLL"),
         ("cmd", "OS2\\CMD.EXE"),

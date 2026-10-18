@@ -716,6 +716,17 @@ impl AddressSpace {
         Ok(tile_selector(tile))
     }
 
+    /// Change the limit of one tile's descriptor (huge segments).
+    pub fn set_tile_limit(&mut self, addr: u32, limit: u32) {
+        let Some(r) = self.region(addr) else { return };
+        let (kind, flags) = (r.seg, r.flags);
+        if kind == SegKind::None || addr >= TILED_TOP {
+            return;
+        }
+        let tile = addr & !(TILE - 1);
+        self.ldt[(tile >> 16) as usize] = seg_descriptor(tile, limit, kind, flags);
+    }
+
     /// Change a 16-bit segment's size (DosReallocSeg).
     pub fn set_seg_limit(&mut self, base: u32, limit: u32) {
         if let Some(r) = self.regions.get_mut(&base) {
