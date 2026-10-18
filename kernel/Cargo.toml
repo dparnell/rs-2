@@ -14,3 +14,4 @@ bench = false
 bootinfo = { path = "../crates/bootinfo" }
 os2-exe = { path = "../crates/os2-exe" }
 fat = { path = "../crates/fat" }
+hpfs = { path = "../crates/hpfs" }

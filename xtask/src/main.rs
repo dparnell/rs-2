@@ -4,11 +4,13 @@
 //! cargo xtask build [--release]            build loader + kernel, stage work/esp
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG] [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
+//! cargo xtask disk [--hpfs] [-o FILE]       test hard disk from work/disk.txt
 //! ```
 //!
 //! Extra files for `\RS2\MODULES` are listed in `work/modules.txt`, one path
 //! per line (relative to the repository root).
 
+mod hpfsimg;
 mod image;
 mod iso;
 mod png;
@@ -42,6 +44,8 @@ struct Opts {
     boot_hdd: bool,
     /// Build the distributable system (no development files).
     dist: bool,
+    /// `disk`: an HPFS partition instead of FAT.
+    hpfs: bool,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -59,6 +63,7 @@ fn parse(args: &[String]) -> Opts {
         system: false,
         boot_hdd: false,
         dist: false,
+        hpfs: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -76,6 +81,7 @@ fn parse(args: &[String]) -> Opts {
             "--system" => o.system = true,
             "--boot-hdd" => o.boot_hdd = true,
             "--dist" => o.dist = true,
+            "--hpfs" => o.hpfs = true,
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
@@ -136,7 +142,12 @@ fn main() -> ExitCode {
                 }
             }
             let out = o.output.clone().unwrap_or_else(|| root().join("work/disk.img"));
-            std::fs::write(&out, image::disk(&files, "RS2DISK", 64)).unwrap();
+            let img = if o.hpfs && !o.system {
+                hpfsimg::disk(&files, "RS2HPFS", 64)
+            } else {
+                image::disk(&files, "RS2DISK", 64)
+            };
+            std::fs::write(&out, img).unwrap();
             println!("wrote {}", out.display());
             true
         }

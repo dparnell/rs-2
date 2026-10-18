@@ -35,6 +35,23 @@ fn try_mount_fat(dev: Arc<dyn BlockDev>, what: &str) -> bool {
     }
 }
 
+/// Mount `dev` with the HPFS driver if it holds an HPFS volume.
+fn try_mount_hpfs(dev: Arc<dyn BlockDev>, what: &str) -> bool {
+    if !crate::fs::hpfsfs::probe(&dev) {
+        return false;
+    }
+    match crate::fs::hpfsfs::HpfsFs::mount(dev) {
+        Ok(fs) => {
+            if let Some(d) = next_letter() {
+                crate::println!("{what}");
+                crate::fs::mount(d, fs);
+            }
+        }
+        Err(e) => crate::println!("{what}: cannot mount ({e})"),
+    }
+    true
+}
+
 /// Find storage, scan partitions and assign drive letters: hard disk
 /// volumes first (primary partitions, then logical drives), then optical
 /// drives — the order OS/2 uses.
@@ -58,7 +75,9 @@ pub fn init() {
         let found = part::scan(disk);
         if found.is_empty() {
             // Unpartitioned ("superfloppy") volume.
-            try_mount_fat(disk.clone(), "disk: unpartitioned FAT volume");
+            if !try_mount_fat(disk.clone(), "disk: unpartitioned FAT volume") {
+                try_mount_hpfs(disk.clone(), "disk: unpartitioned HPFS volume");
+            }
         }
         parts.extend(found);
     }
@@ -84,8 +103,15 @@ pub fn init() {
             p.gpt_type == part::GPT_BASIC_DATA || p.gpt_type == part::GPT_EFI_SYSTEM
         };
         if !fat {
-            if matches!(p.mbr_type, 0x07 | 0x35) {
-                crate::println!("disk: partition type {:#x} (HPFS/JFS) not supported yet", p.mbr_type);
+            match p.mbr_type {
+                // 0x07 is shared by HPFS, NTFS and exFAT: check the superblock.
+                0x07 => {
+                    if !try_mount_hpfs(Arc::new(p), "disk: HPFS partition type 0x7") {
+                        crate::println!("disk: partition type 0x7 is not HPFS (NTFS/exFAT not supported)");
+                    }
+                }
+                0x35 => crate::println!("disk: partition type 0x35 (JFS) not supported yet"),
+                _ => {}
             }
             continue;
         }

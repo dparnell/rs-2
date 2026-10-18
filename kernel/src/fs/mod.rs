@@ -5,6 +5,7 @@
 
 pub mod block;
 pub mod fatfs;
+pub mod hpfsfs;
 pub mod iso9660;
 pub mod path;
 

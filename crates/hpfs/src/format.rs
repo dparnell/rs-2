@@ -181,7 +181,7 @@ pub fn format<D: BlockDevice>(dev: &D, p: &FormatParams) -> Result<()> {
     wr32(&mut sb, 0, SUPER_MAGIC.0);
     wr32(&mut sb, 4, SUPER_MAGIC.1);
     sb[sb::VERSION] = 2;
-    sb[sb::FUNC_VERSION] = 2;
+    sb[sb::FUNC_VERSION] = if total > 1 << 23 { 3 } else { 2 };
     wr32(&mut sb, sb::ROOT, root_fnode);
     wr32(&mut sb, sb::SECTORS, total);
     wr32(&mut sb, sb::BITMAPS, bitmap_list);

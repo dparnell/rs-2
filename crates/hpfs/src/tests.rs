@@ -538,6 +538,21 @@ fn readonly_mount() {
     assert_eq!(v.info().serial.to_string(), 0x1234_5678u32.to_string());
 }
 
+/// A disk built by `cargo xtask disk --hpfs` (and possibly written to by
+/// the kernel in QEMU): check its consistency if present.
+#[test]
+fn xtask_disk_image() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../work/hpfs.img");
+    let Ok(img) = std::fs::read(path) else { return };
+    let part = img[2048 * 512..].to_vec();
+    let mut v = Volume::mount(Mem(RefCell::new(part))).unwrap();
+    let mut c = Check::default();
+    let root = v.root;
+    c.dir(&mut v, root, true);
+    assert_eq!(v.band.count - v.free_dir_band_dnodes(), c.band);
+    std::println!("{path}: {} files, {} directories", c.files, c.dirs);
+}
+
 #[test]
 fn rejects_other_file_systems() {
     let dev = Mem(RefCell::new(std::vec![0u8; 1 << 20]));
