@@ -64,7 +64,8 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
             crate::console::write(&data);
             (0, len)
         }
-        Handle::Nul | Handle::Clock | Handle::Kbd => (0, len),
+        Handle::Nul | Handle::Clock | Handle::Kbd | Handle::DosDev => (0, len),
+        Handle::PhysDisk(_) => (err::ACCESS_DENIED, 0),
         Handle::File(f) => {
             if f.access() == mode::READONLY {
                 return (err::ACCESS_DENIED, 0);
@@ -92,7 +93,7 @@ pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
             let line = crate::kbd::read_line(len as usize);
             line
         }
-        Handle::Nul | Handle::Screen | Handle::Clock => Vec::new(),
+        Handle::Nul | Handle::Screen | Handle::Clock | Handle::DosDev | Handle::PhysDisk(_) => Vec::new(),
         Handle::File(f) => {
             if f.access() == mode::WRITEONLY {
                 return (err::ACCESS_DENIED, 0);
@@ -507,6 +508,8 @@ pub fn htype(c: &Ctx, hf: u32) -> Option<(u32, u32)> {
         Handle::Clock => (1, 0x8088),
         Handle::File(_) => (0, 0),
         Handle::Pipe(_) => (2, 0),
+        Handle::PhysDisk(_) => (1, 0x8000),
+        Handle::DosDev => (1, 0x8080),
     })
 }
 

@@ -19,6 +19,7 @@ mod irq;
 mod kbd;
 mod loader;
 mod pipe;
+mod power;
 mod log;
 mod mm;
 mod rtc;

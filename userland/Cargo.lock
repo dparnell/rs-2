@@ -17,6 +17,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "fat"
+version = "0.1.0"
+
+[[package]]
+name = "install"
+version = "0.1.0"
+dependencies = [
+ "fat",
+ "os2",
+]
+
+[[package]]
 name = "os2"
 version = "0.1.0"
 

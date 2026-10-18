@@ -12,6 +12,7 @@
 pub mod doscalls;
 pub mod exceptions;
 pub mod file;
+pub mod ioctl;
 pub mod kbdapi;
 pub mod module;
 pub mod msg;

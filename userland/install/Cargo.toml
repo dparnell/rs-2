@@ -1,0 +1,10 @@
+[package]
+name = "install"
+description = "rs2 installer: partitions, formats and populates a disk"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+fat = { path = "../../crates/fat" }

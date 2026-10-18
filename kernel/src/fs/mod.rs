@@ -146,6 +146,7 @@ pub enum Device {
     Kbd,
     Screen,
     Clock,
+    DosDev,
 }
 
 /// Recognise device names (`CON`, `NUL`, `\DEV\KBD$`, `CON.TXT`, ...).
@@ -158,6 +159,7 @@ pub fn device_name(path: &str) -> Option<Device> {
         "KBD$" => Device::Kbd,
         "SCREEN$" => Device::Screen,
         "CLOCK$" => Device::Clock,
+        "DOS$" => Device::DosDev,
         _ => return None,
     };
     // `\DEV\X` or a bare name (any directory).
@@ -260,6 +262,10 @@ pub enum Handle {
     Clock,
     File(Arc<OpenFile>),
     Pipe(Arc<crate::pipe::PipeEnd>),
+    /// DosPhysicalDisk IOCtl handle for disk n (0-based).
+    PhysDisk(u32),
+    /// The DOS$ device (reboot IOCtl).
+    DosDev,
 }
 
 impl Handle {
@@ -270,6 +276,7 @@ impl Handle {
             Device::Kbd => Handle::Kbd,
             Device::Screen => Handle::Screen,
             Device::Clock => Handle::Clock,
+            Device::DosDev => Handle::DosDev,
         }
     }
 }

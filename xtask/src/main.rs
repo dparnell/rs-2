@@ -182,6 +182,9 @@ fn build(o: &Opts) -> Option<PathBuf> {
     if let Ok(text) = std::fs::read_to_string(&list) {
         let mut files = image::manifest(&root(), &text);
         files.extend(userland);
+        // Boot files for the installer.
+        files.push((esp.join("EFI/BOOT/BOOTX64.EFI"), "RS2\\BOOT\\BOOTX64.EFI".to_string()));
+        files.push((esp.join("RS2/KERNEL"), "RS2\\BOOT\\KERNEL".to_string()));
         let img = image::build(&files, "RS2", 16, None);
         let out = esp.join("RS2/MODULES/C.IMG");
         std::fs::create_dir_all(out.parent().unwrap()).unwrap();
@@ -202,6 +205,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("attrib", "OS2\\ATTRIB.EXE"),
         ("tree", "OS2\\TREE.EXE"),
         ("xcopy", "OS2\\XCOPY.EXE"),
+        ("install", "RS2\\INSTALL.EXE"),
     ];
 
 /// Build the userland workspace and convert each program to LX.
