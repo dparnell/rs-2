@@ -147,6 +147,7 @@ aligned! {
     __a_WinQueryUpdateRegion => crate::gpiobj::WinQueryUpdateRegion, 2;
     __a_WinValidateRegion => crate::gpiobj::WinValidateRegion, 3;
     __a_WinExcludeUpdateRegion => crate::gpiobj::WinExcludeUpdateRegion, 2;
+    __a_WinScrollWindow => crate::gpiobj::WinScrollWindow, 8;
     __a_DevOpenDC => crate::gpiobj::DevOpenDC, 6;
     __a_DevCloseDC => crate::gpiobj::DevCloseDC, 1;
     __a_WinOpenWindowDC => crate::gpiobj::WinOpenWindowDC, 1;

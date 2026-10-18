@@ -161,7 +161,13 @@ pub fn refresh(s: &mut State, hps: u32) {
     if h == 0 || e.gpi.cached || e.gpi.painting || e.gpi.memory {
         return;
     }
-    let Some(w) = s.desk.get(h) else { return };
+    let Some(w) = s.desk.get(h) else {
+        // The window is gone: draw nowhere.
+        if let Some(e) = entry(s, hps) {
+            e.ps.set_vis(Point::new(0, 0), Vec::new());
+        }
+        return;
+    };
     let clip_children = w.style & pmwin::ws::CLIPCHILDREN != 0;
     let vis = s.desk.visible_region(h, clip_children).rects;
     let o = s.desk.origin(h);

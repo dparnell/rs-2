@@ -461,7 +461,11 @@ fn self_checks(hab: u32) {
         GpiQueryCharStringPos(m.hps, 0, 3, b"abc".as_ptr(), null(), cp.as_mut_ptr());
         check("GpiQueryCharStringPos", cp[0] == pt(10, 0) && cp[3] == pt(34, 0));
         let mut req = 0;
-        check("GpiQueryFonts", GpiQueryFonts(m.hps, 1, null(), &mut req, 228, null_mut()) == 1);
+        check("GpiQueryFonts", GpiQueryFonts(m.hps, 1, null(), &mut req, 228, null_mut()) == 7);
+        let mut fms = [0u8; 228 * 2];
+        req = 2;
+        let left = GpiQueryFonts(m.hps, 1, b"Helvetica Bold\0".as_ptr(), &mut req, 228, fms.as_mut_ptr());
+        check("GpiQueryFonts by face", left == 0 && req == 1 && &fms[32..46] == b"Helvetica Bold" && &fms[0..10] == b"Helvetica\0");
         let mut fat = [0u8; 56];
         fat[0] = 56;
         fat[54] = 4; // FATTR_FONTUSE_OUTLINE

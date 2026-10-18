@@ -255,9 +255,29 @@ pub extern "C" fn GpiQueryCp(hps: u32) -> u32 {
 
 // ---- Fonts ----
 
-const FACE: &[u8] = b"System VIO";
+/// The public fonts: the system font (an image font) and the standard
+/// outline faces, which are drawn by scaling the system font's glyphs to
+/// the character box.
+const FONTS: &[(&[u8], bool)] = &[
+    (b"System VIO", false),
+    (b"Helvetica", true),
+    (b"Helvetica Bold", true),
+    (b"Times New Roman", true),
+    (b"Times New Roman Bold", true),
+    (b"Courier", true),
+    (b"Courier Bold", true),
+];
 const FATTR_FONTUSE_OUTLINE: u16 = 4;
 const FATTR_SEL_OUTLINE: u16 = 8;
+
+fn trim(face: &[u8]) -> &[u8] {
+    &face[..face.iter().position(|&b| b == 0).unwrap_or(face.len())]
+}
+
+/// Index of a public font by face name or lMatch (index + 1).
+fn find_font(face: &[u8], lmatch: i32) -> Option<usize> {
+    FONTS.iter().position(|(n, _)| n.eq_ignore_ascii_case(trim(face))).or_else(|| (1..=FONTS.len() as i32).contains(&lmatch).then(|| lmatch as usize - 1))
+}
 
 /// GpiCreateLogFont(hps, pName, lLcid, pfatAttrs): FONT_MATCH 2,
 /// FONT_DEFAULT 1.
@@ -271,11 +291,17 @@ pub extern "C" fn GpiCreateLogFont(hps: u32, _name: *const u8, lcid: i32, fat: *
     let usef = unsafe { (fat.add(54) as *const u16).read_unaligned() };
     let mut face = [0u8; 32];
     unsafe { core::ptr::copy_nonoverlapping(fat.add(8), face.as_mut_ptr(), 32) };
-    let lf = LogFont { outline: usef & FATTR_FONTUSE_OUTLINE != 0 || sel & FATTR_SEL_OUTLINE != 0 };
+    let lmatch = unsafe { (fat.add(4) as *const i32).read_unaligned() };
+    let found = find_font(&face, lmatch);
+    let outline = usef & FATTR_FONTUSE_OUTLINE != 0 || sel & FATTR_SEL_OUTLINE != 0 || found.is_some_and(|i| FONTS[i].1);
+    let lf = LogFont { outline };
+    if let Some(i) = found {
+        face = [0; 32];
+        face[..FONTS[i].0.len()].copy_from_slice(FONTS[i].0);
+    }
     e.gpi.lcids.retain(|(l, _)| *l != lcid);
     e.gpi.lcids.push((lcid, Lcid::Font(lf, face)));
-    let n = face.iter().position(|&b| b == 0).unwrap_or(32);
-    if face[..n].eq_ignore_ascii_case(FACE) || lf.outline { 2 } else { 1 }
+    if found.is_some() || outline { 2 } else { 1 }
 }
 
 /// GpiSetCharSet(hps, llcid): 0 = the default font.
@@ -356,12 +382,14 @@ pub extern "C" fn GpiQueryLogicalFont(hps: u32, lcid: i32, name: *mut [u8; 8], f
 
 /// FONTMETRICS of the system font scaled by `scale` (device pels per
 /// font pel), converted to world units by `w`.
-fn metrics(outline: bool, scale: (f64, f64), w: &dyn Fn(f64, f64) -> (i32, i32)) -> [u8; 228] {
+fn metrics(font: usize, scale: (f64, f64), w: &dyn Fn(f64, f64) -> (i32, i32)) -> [u8; 228] {
     let f = gpi::font::system();
+    let (face, outline) = FONTS[font];
     let mut m = [0u8; 228];
-    let n = FACE.len();
-    m[0..n].copy_from_slice(FACE);
-    m[32..32 + n].copy_from_slice(FACE);
+    let n = face.len();
+    m[32..32 + n].copy_from_slice(face);
+    let family = face.strip_suffix(b" Bold").unwrap_or(face);
+    m[0..family.len()].copy_from_slice(family);
     let p16 = |m: &mut [u8; 228], o: usize, v: i32| m[o..o + 2].copy_from_slice(&(v as i16).to_le_bytes());
     let p32 = |m: &mut [u8; 228], o: usize, v: i32| m[o..o + 4].copy_from_slice(&v.to_le_bytes());
     let x = |v: i32| w(v as f64 * scale.0, 0.0).0;
@@ -378,7 +406,7 @@ fn metrics(outline: bool, scale: (f64, f64), w: &dyn Fn(f64, f64) -> (i32, i32))
     p32(&mut m, 104, x(f.width)); // lMaxCharInc
     p32(&mut m, 108, x(f.width)); // lEmInc
     p32(&mut m, 112, y(h)); // lMaxBaselineExt
-    p16(&mut m, 122, 5); // usWeightClass
+    p16(&mut m, 122, if face.ends_with(b"Bold") { 7 } else { 5 }); // usWeightClass
     p16(&mut m, 124, 5); // usWidthClass
     p16(&mut m, 126, 96); // sXDeviceRes
     p16(&mut m, 128, 96);
@@ -401,7 +429,7 @@ fn metrics(outline: bool, scale: (f64, f64), w: &dyn Fn(f64, f64) -> (i32, i32))
     p32(&mut m, 188, y(2)); // lUnderscorePosition
     p32(&mut m, 192, y(1).max(1)); // lStrikeoutSize
     p32(&mut m, 196, y(h / 3)); // lStrikeoutPosition
-    p32(&mut m, 204, if outline { -1 } else { 1 }); // lMatch
+    p32(&mut m, 204, font as i32 + 1); // lMatch
     m
 }
 
@@ -413,7 +441,12 @@ pub extern "C" fn GpiQueryFontMetrics(hps: u32, len: i32, out: *mut u8) -> u32 {
         return 0;
     }
     let ps = &e.ps;
-    let m = metrics(ps.logfont.outline, ps.font_scale(), &|x, y| ps.device_to_world_len(x, y));
+    let set = ps.attrs.char_set;
+    let font = e.gpi.lcids.iter().find_map(|(l, x)| match x {
+        Lcid::Font(lf, face) if *l == set => Some(find_font(face, 0).unwrap_or(lf.outline as usize)),
+        _ => None,
+    });
+    let m = metrics(font.unwrap_or(0), ps.font_scale(), &|x, y| ps.device_to_world_len(x, y));
     unsafe { core::ptr::copy_nonoverlapping(m.as_ptr(), out, (len as usize).min(m.len())) };
     1
 }
@@ -425,18 +458,15 @@ pub extern "C" fn GpiQueryFonts(hps: u32, _opts: u32, face: *const u8, req: *mut
     if entry(st(), hps).is_none() || req.is_null() {
         return -1;
     }
-    let matches = if face.is_null() {
-        true
-    } else {
-        let name: Vec<u8> = (0..).map(|i| unsafe { *face.add(i) }).take_while(|&b| b != 0).collect();
-        name.is_empty() || name.eq_ignore_ascii_case(FACE)
-    };
-    let total = matches as i32;
-    let want = unsafe { req.read_unaligned() };
-    let n = want.clamp(0, total);
-    if n > 0 && !out.is_null() && len > 0 {
-        let m = metrics(false, (1.0, 1.0), &|x, y| (gpi::math::round(x), gpi::math::round(y)));
-        unsafe { core::ptr::copy_nonoverlapping(m.as_ptr(), out, (len as usize).min(m.len())) };
+    let name: Vec<u8> = if face.is_null() { Vec::new() } else { (0..).map(|i| unsafe { *face.add(i) }).take_while(|&b| b != 0).collect() };
+    let list: Vec<usize> = (0..FONTS.len()).filter(|&i| name.is_empty() || FONTS[i].0.eq_ignore_ascii_case(&name)).collect();
+    let total = list.len() as i32;
+    let n = unsafe { req.read_unaligned() }.clamp(0, total);
+    if !out.is_null() && len > 0 {
+        for (k, &i) in list.iter().take(n as usize).enumerate() {
+            let m = metrics(i, (1.0, 1.0), &|x, y| (gpi::math::round(x), gpi::math::round(y)));
+            unsafe { core::ptr::copy_nonoverlapping(m.as_ptr(), out.add(k * len as usize), (len as usize).min(m.len())) };
+        }
     }
     unsafe { req.write_unaligned(n) };
     total - n

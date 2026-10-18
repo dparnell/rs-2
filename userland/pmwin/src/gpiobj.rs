@@ -332,6 +332,7 @@ pub extern "C" fn GpiOffsetClipRegion(hps: u32, p: *const PointL) -> i32 {
 /// coordinates.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiQueryClipBox(hps: u32, p: *mut RectL) -> i32 {
+    gpiapi::refresh(st(), hps);
     let Some(e) = entry(st(), hps) else { return RGN_ERROR };
     let g = if e.gpi.memory || e.hwnd != 0 || !e.ps.clip.is_empty() {
         e.ps.clip_device()
@@ -448,6 +449,76 @@ pub extern "C" fn WinExcludeUpdateRegion(hps: u32, h: u32) -> i32 {
     let c = g.complexity();
     e.ps.set_clip_region(Some(g));
     c
+}
+
+/// WinScrollWindow(hwnd, dx, dy, prclScroll, prclClip, hrgnUpdate,
+/// prclUpdate, rgfsw): move the window's visible pels and its pending
+/// update region; the uncovered area goes to hrgnUpdate/prclUpdate and,
+/// with SW_INVALIDATERGN (2), is invalidated (SW_SCROLLCHILDREN 1 also
+/// invalidates children).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinScrollWindow(h: u32, dx: i32, dy: i32, scroll: *const RectL, clip: *const RectL, hrgn: u32, upd: *mut RectL, fl: u32) -> i32 {
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return RGN_ERROR };
+    let wr = w.rect();
+    let clip_children = w.style & pmwin::ws::CLIPCHILDREN != 0;
+    let sr = read(scroll).map_or(wr, |r| r.rect().intersect(&wr));
+    let cr = read(clip).map_or(wr, |r| r.rect().intersect(&wr));
+    let o = s.desk.origin(h);
+    let mut vis = Region::from_rects(&s.desk.visible_region(h, clip_children).rects);
+    vis.offset(-o.x, -o.y);
+    let area = vis.intersect_rect(sr).intersect_rect(cr);
+    let mut moved = vis.intersect_rect(sr);
+    moved.offset(dx, dy);
+    let copy = area.combine(&moved, Op::And);
+    // Read every source pel first: the rectangles may overlap their sources.
+    let mut surf = s.surface;
+    pointer::hide(s);
+    let mut saved: Vec<(Rect, Vec<u32>)> = Vec::new();
+    for r in copy.rects() {
+        let src = r.offset(o.x - dx, o.y - dy);
+        let mut px = Vec::with_capacity((r.width() * r.height()) as usize);
+        for y in src.bottom..src.top {
+            for x in src.left..src.right {
+                px.push(surf.get(x, y).unwrap_or(0));
+            }
+        }
+        saved.push((r, px));
+    }
+    for (r, px) in saved {
+        let d = r.offset(o.x, o.y);
+        let mut i = 0;
+        for y in d.bottom..d.top {
+            for x in d.left..d.right {
+                surf.set(x, y, px[i]);
+                i += 1;
+            }
+        }
+    }
+    pointer::show(st());
+    let exposed = area.combine(&copy, Op::Diff);
+    // The pending update region moves with the contents.
+    if let Some(w) = st().desk.get_mut(h) {
+        let old = Region::from_rects(&w.update.rects);
+        let mut inside = old.intersect_rect(sr);
+        inside.offset(dx, dy);
+        let new = old.combine(&Region::from_rect(sr), Op::Diff).combine(&inside.intersect_rect(sr), Op::Or);
+        let mut u = pmwin::Region::new();
+        for r in new.rects() {
+            u.add(r);
+        }
+        w.update = u;
+    }
+    if fl & 2 != 0 {
+        for r in exposed.rects() {
+            st().desk.invalidate(h, Some(r), fl & 1 != 0);
+        }
+    }
+    if let Some(g) = region(hrgn) {
+        *g = exposed.clone();
+    }
+    write(upd, RectL::from(exposed.bounds()));
+    exposed.complexity()
 }
 
 // ---- Device contexts ----

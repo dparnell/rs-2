@@ -126,6 +126,7 @@ GpiPathToRegion=__a_GpiPathToRegion @4559
 WinQueryUpdateRegion=__a_WinQueryUpdateRegion @832
 WinValidateRegion=__a_WinValidateRegion @896
 WinExcludeUpdateRegion=__a_WinExcludeUpdateRegion @742
+WinScrollWindow=__a_WinScrollWindow @849
 DevOpenDC=__a_DevOpenDC @4610
 DevCloseDC=__a_DevCloseDC @4604
 WinOpenWindowDC=__a_WinOpenWindowDC @794
