@@ -6,7 +6,8 @@ Status markers: done, in progress, planned.
 
 - done: UEFI boot, 64-bit kernel, framebuffer text screen, memory management
 - done: OS/2 address space (arenas, tiled LDT), processes, threads,
-  scheduler, FPU/SSE state
+  scheduler (class and level priorities, MAXWAIT starvation boost,
+  PRIORITY=/MAXWAIT=/TIMESLICE=), FPU/SSE state
 - done: LX and NE loader, DLLs in the shared arena, DLL initialisation,
   API gate (16/32-bit conventions, DOSCALL1 aliases)
 - done: files (VFS, FAT, OS/2 paths and wildcards, share modes), pipes,

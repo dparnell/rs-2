@@ -44,8 +44,8 @@ pub struct PerCpu {
     pub held_locks: AtomicU32,
     pub need_resched: AtomicBool,
     pub slice_end: AtomicU64,
-    /// Class index of the running thread, for preemption decisions made on
-    /// other CPUs.
+    /// Run queue index (class * 32 + level) of the running thread, for
+    /// preemption decisions made on other CPUs.
     pub cur_class: AtomicU8,
     /// Only touched by this CPU with interrupts disabled.
     current: UnsafeCell<Option<Arc<Thread>>>,

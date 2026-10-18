@@ -25,6 +25,12 @@ pub struct Config {
     /// DEVINFO=KBD,layout[,file]: the keyboard layout id.
     pub keyboard: Option<String>,
     pub pause_on_error: bool,
+    /// PRIORITY=ABSOLUTE turns the starvation boost off.
+    pub priority_absolute: bool,
+    /// MAXWAIT=seconds before a starved thread is boosted.
+    pub maxwait: Option<u32>,
+    /// TIMESLICE=min[,max] in milliseconds (the minimum is used).
+    pub timeslice: Option<u32>,
     /// Driver statements we do not load (BASEDEV/DEVICE/IFS).
     pub drivers: Vec<String>,
 }
@@ -76,6 +82,9 @@ pub fn parse(text: &str) -> Config {
                 }
             }
             "PAUSEONERROR" => c.pause_on_error = val.eq_ignore_ascii_case("YES"),
+            "PRIORITY" => c.priority_absolute = val.eq_ignore_ascii_case("ABSOLUTE"),
+            "MAXWAIT" => c.maxwait = val.parse().ok().filter(|&v| (1..=255).contains(&v)),
+            "TIMESLICE" => c.timeslice = val.split(',').next().and_then(|v| v.trim().parse().ok()).filter(|&v: &u32| v >= 1),
             "BASEDEV" | "DEVICE" | "IFS" => c.drivers.push(alloc::format!("{key}={val}")),
             _ => {}
         }
@@ -92,6 +101,11 @@ pub fn apply_nls(c: &Config) {
         }
     }
     crate::nls::configure(c.country, &c.codepage);
+}
+
+/// Apply PRIORITY=, MAXWAIT= and TIMESLICE=.
+pub fn apply_sched(c: &Config) {
+    crate::task::sched::configure(!c.priority_absolute, c.maxwait.unwrap_or(3), c.timeslice.unwrap_or(32));
 }
 
 /// Read and parse CONFIG.SYS from drive C:, if present.

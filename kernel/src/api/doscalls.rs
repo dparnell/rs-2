@@ -956,7 +956,7 @@ fn sys_info_value(i: u32) -> u32 {
         23 => 255,             // QSV_MAX_COMP_LENGTH
         24 => 1,               // QSV_FOREGROUND_FS_SESSION
         25 => 1,               // QSV_FOREGROUND_PROCESS
-        26 => 1,               // QSV_NUMPROCESSORS
+        26 => crate::smp::online_count(), // QSV_NUMPROCESSORS
         27 => 0,               // QSV_MAXHPRMEM
         28 => 0,               // QSV_MAXHSHMEM
         29 => 1000,            // QSV_MAXPROCESSES

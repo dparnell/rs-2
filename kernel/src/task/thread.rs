@@ -83,6 +83,10 @@ pub struct Thread {
     pub on_cpu: AtomicBool,
     /// Holds the big kernel lock (smp.rs).
     pub holds_bkl: AtomicBool,
+    /// Tick at which the thread last became ready (starvation boost).
+    pub ready_since: AtomicU64,
+    /// Temporarily raised for having waited MAXWAIT seconds to run.
+    pub boosted: AtomicBool,
     /// Base of the user stack the kernel allocated for the thread
     /// (DosCreateThread), released when the thread ends; 0 = none.
     pub owned_stack: AtomicU32,
@@ -140,6 +144,8 @@ impl Thread {
             kname: "",
             on_cpu: AtomicBool::new(idle),
             holds_bkl: AtomicBool::new(false),
+            ready_since: AtomicU64::new(0),
+            boosted: AtomicBool::new(false),
             owned_stack: AtomicU32::new(0),
             tls: UnsafeCell::new([0; super::process::TLS_DWORDS]),
             must_complete: AtomicU32::new(0),

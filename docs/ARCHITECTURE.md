@@ -41,6 +41,19 @@ behaviour (Ghidra, the debug kernel's `.map` files) and to test
 compatibility by running original binaries. None of it is copied into the
 rs2 build or the install ISO.
 
+**Scheduling.** Threads run strictly by priority: four classes (idle,
+regular, foreground server, time-critical) times 32 levels, round robin
+within one level, with a time slice of TIMESLICE milliseconds (32 by
+default). A thread that becomes ready preempts a lower-priority one at
+once (on another CPU through an IPI); a thread hogging the CPU in user mode
+is switched out when its slice ends, because the timer interrupt brings
+it into the kernel. Kernel code itself is not preempted. With
+PRIORITY=DYNAMIC (the default) a regular-class thread that has been ready
+for MAXWAIT seconds (3) without running gets one time slice at
+time-critical level 0, above the regular and foreground-server classes;
+PRIORITY=ABSOLUTE turns that off. DosEnterCritSec stops the process's
+other threads on every CPU before it returns.
+
 **Multiprocessor.** All processors the ACPI MADT lists are started at
 boot (INIT/SIPI through a real-mode trampoline below 640 KB; `nosmp` on
 the kernel command line keeps the others parked). Each CPU has its own

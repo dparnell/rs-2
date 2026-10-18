@@ -10,13 +10,16 @@
 //!
 //! OS/2 priorities are a class (idle, regular, time-critical, foreground
 //! server) plus a level 0-31; threads run strictly by priority, round robin
-//! within one priority.
+//! within one priority. With PRIORITY=DYNAMIC (the default) a regular-class
+//! thread that has been ready for MAXWAIT seconds without running is
+//! boosted for one turn to time-critical level 0, above the regular and
+//! foreground-server classes, so it cannot starve forever.
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::arch::global_asm;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use super::thread::{State, Thread};
 use crate::arch::{self, gdt};
@@ -24,19 +27,28 @@ use crate::irq;
 use crate::smp;
 use crate::sync::SpinLock;
 
-/// Ticks per time slice.
-const SLICE: u64 = 32;
+/// Ticks per time slice (CONFIG.SYS TIMESLICE=).
+static SLICE: AtomicU64 = AtomicU64::new(32);
+/// Starvation boost enabled (PRIORITY=DYNAMIC) and its delay in ticks
+/// (MAXWAIT=, seconds).
+static DYNAMIC: AtomicBool = AtomicBool::new(true);
+static MAXWAIT: AtomicU64 = AtomicU64::new(3 * irq::HZ);
+
+/// Run queues: 4 classes x 32 levels, index 0 = lowest.
+const QUEUES: usize = 128;
+/// Where a starvation-boosted thread runs: time-critical, level 0.
+const BOOST_QUEUE: usize = 3 * 32;
 
 struct Sched {
     /// Ready threads by effective priority (index 0 = lowest).
-    ready: [VecDeque<Arc<Thread>>; 4],
+    ready: [VecDeque<Arc<Thread>>; QUEUES],
     sleepers: Vec<Arc<Thread>>,
     /// Threads that exited; freed once no CPU is on their stack.
     dead: Vec<Arc<Thread>>,
 }
 
 static SCHED: SpinLock<Sched> = SpinLock::new(Sched {
-    ready: [VecDeque::new(), VecDeque::new(), VecDeque::new(), VecDeque::new()],
+    ready: [const { VecDeque::new() }; QUEUES],
     sleepers: Vec::new(),
     dead: Vec::new(),
 });
@@ -111,6 +123,82 @@ fn class_index(t: &Thread) -> usize {
     }
 }
 
+/// Run queue of a thread: class and level, or the boost queue.
+fn queue_index(t: &Thread) -> usize {
+    if t.boosted.load(Ordering::Relaxed) {
+        return BOOST_QUEUE;
+    }
+    class_index(t) * 32 + (t.priority() & 0xff).min(31) as usize
+}
+
+/// Scheduler settings from CONFIG.SYS: PRIORITY=, MAXWAIT=, TIMESLICE=.
+pub fn configure(dynamic: bool, maxwait_s: u32, slice_ms: u32) {
+    DYNAMIC.store(dynamic, Ordering::Relaxed);
+    MAXWAIT.store(maxwait_s.clamp(1, 255) as u64 * irq::HZ, Ordering::Relaxed);
+    SLICE.store((slice_ms.max(1) as u64 * irq::HZ / 1000).max(1), Ordering::Relaxed);
+}
+
+fn slice() -> u64 {
+    SLICE.load(Ordering::Relaxed)
+}
+
+/// Put a ready thread on its queue.
+fn enqueue(s: &mut Sched, t: &Arc<Thread>) -> usize {
+    let i = queue_index(t);
+    t.ready_since.store(irq::ticks(), Ordering::Relaxed);
+    s.ready[i].push_back(t.clone());
+    i
+}
+
+/// Make another CPU (or this one) run a thread that became ready on queue
+/// `i`: an idle CPU takes it, else one running something lower.
+fn preempt_for(i: usize) {
+    let me = smp::this();
+    if me.cur_class.load(Ordering::Relaxed) == smp::IDLE_CLASS {
+        me.need_resched.store(true, Ordering::Relaxed);
+        return;
+    }
+    if let Some(c) = smp::online().find(|c| c.cur_class.load(Ordering::Relaxed) == smp::IDLE_CLASS) {
+        // Also ask it to reschedule: it may have just picked up a thread
+        // and not updated its class yet.
+        c.need_resched.store(true, Ordering::Relaxed);
+        smp::kick(c);
+        return;
+    }
+    // The CPU running the lowest-priority thread, if lower than `i`.
+    let lowest = smp::online().min_by_key(|c| c.cur_class.load(Ordering::Relaxed));
+    if let Some(c) = lowest {
+        if (c.cur_class.load(Ordering::Relaxed) as usize) < i {
+            c.need_resched.store(true, Ordering::Relaxed);
+            smp::kick(c);
+        }
+    }
+}
+
+/// A thread's priority changed (DosSetPriority): move it if it is queued.
+pub fn reprioritize(t: &Arc<Thread>) {
+    let i = {
+        let mut s = SCHED.lock();
+        if t.state() != State::Ready {
+            return;
+        }
+        let mut found = false;
+        for q in s.ready.iter_mut() {
+            let n = q.len();
+            q.retain(|x| !Arc::ptr_eq(x, t));
+            found |= q.len() != n;
+        }
+        if !found {
+            return;
+        }
+        let since = t.ready_since.load(Ordering::Relaxed);
+        let i = enqueue(&mut s, t);
+        t.ready_since.store(since, Ordering::Relaxed);
+        i
+    };
+    preempt_for(i);
+}
+
 /// Make a thread runnable.
 pub fn wake(t: &Arc<Thread>) {
     let i = {
@@ -120,28 +208,9 @@ pub fn wake(t: &Arc<Thread>) {
         }
         t.set_state(State::Ready);
         s.sleepers.retain(|x| !Arc::ptr_eq(x, t));
-        let i = class_index(t);
-        s.ready[i].push_back(t.clone());
-        i
+        enqueue(&mut s, t)
     };
-    // An idle CPU takes it; otherwise one running something of a lower
-    // class is preempted.
-    let me = smp::this();
-    if me.cur_class.load(Ordering::Relaxed) == smp::IDLE_CLASS {
-        me.need_resched.store(true, Ordering::Relaxed);
-        return;
-    }
-    if let Some(c) = smp::online().find(|c| c.cur_class.load(Ordering::Relaxed) == smp::IDLE_CLASS) {
-        smp::kick(c);
-        return;
-    }
-    for c in smp::online() {
-        if (c.cur_class.load(Ordering::Relaxed) as usize) < i {
-            c.need_resched.store(true, Ordering::Relaxed);
-            smp::kick(c);
-            return;
-        }
-    }
+    preempt_for(i);
 }
 
 /// Add a new thread to the run queue.
@@ -166,6 +235,7 @@ pub fn block(deadline: Option<u64>) {
             t.set_state(State::Running);
             return;
         }
+        t.boosted.store(false, Ordering::Relaxed);
         t.set_state(State::Blocked);
         if let Some(d) = deadline {
             t.set_wake_at(d);
@@ -199,8 +269,7 @@ pub fn yield_now() {
     if !t.is_idle() {
         let mut s = SCHED.lock();
         t.set_state(State::Ready);
-        let i = class_index(&t);
-        s.ready[i].push_back(t.clone());
+        enqueue(&mut s, &t);
     }
     schedule();
 }
@@ -237,6 +306,11 @@ pub fn tick() {
     let c = smp::this();
     if now >= c.slice_end.load(Ordering::Relaxed) {
         c.need_resched.store(true, Ordering::Relaxed);
+        // A starvation boost lasts until the time slice ends (or the
+        // thread blocks).
+        if let Some(t) = c.current().as_ref() {
+            t.boosted.store(false, Ordering::Relaxed);
+        }
     }
     // Sleepers are woken by the boot processor.
     if c.index() != 0 {
@@ -258,6 +332,36 @@ pub fn tick() {
         t.set_timed_out(true);
         wake(&t);
     }
+    if now % 100 == 0 && DYNAMIC.load(Ordering::Relaxed) {
+        boost_starved(now);
+    }
+}
+
+/// MAXWAIT: regular-class threads ready for that long without running are
+/// boosted for one turn.
+fn boost_starved(now: u64) {
+    let wait = MAXWAIT.load(Ordering::Relaxed);
+    let boosted = {
+        let mut s = SCHED.lock();
+        let mut moved = Vec::new();
+        for q in s.ready[32..64].iter_mut() {
+            q.retain(|t| {
+                let starved = now.saturating_sub(t.ready_since.load(Ordering::Relaxed)) >= wait;
+                if starved && t.state() == State::Ready {
+                    moved.push(t.clone());
+                }
+                !starved
+            });
+        }
+        for t in &moved {
+            t.boosted.store(true, Ordering::Relaxed);
+            s.ready[BOOST_QUEUE].push_back(t.clone());
+        }
+        !moved.is_empty()
+    };
+    if boosted {
+        preempt_for(BOOST_QUEUE);
+    }
 }
 
 pub fn need_resched() -> bool {
@@ -274,7 +378,7 @@ pub fn maybe_preempt() {
         if has_ready() {
             yield_now();
         } else {
-            smp::this().slice_end.store(irq::ticks() + SLICE, Ordering::Relaxed);
+            smp::this().slice_end.store(irq::ticks() + slice(), Ordering::Relaxed);
         }
     }
 }
@@ -337,23 +441,29 @@ pub fn schedule() {
     let me = c.current().clone().expect("no current thread");
     // Give up the kernel lock while others run; take it back on return.
     let had_bkl = smp::bkl_release_for(&me);
-    let next = {
+    let (next, tls_waiting) = {
         let mut s = SCHED.lock();
         // Only threads still marked ready (a thread that died or blocked
         // again must not run from a stale queue entry), and not one that
         // another CPU is still switching away from.
         let mut skipped = Vec::new();
+        // Highest queue of a thread held back by another CPU's claim on
+        // its process's thread-local memory page.
+        let mut tls_waiting: Option<usize> = None;
         let next = loop {
-            match (0..4).rev().find_map(|i| s.ready[i].pop_front()) {
+            match (0..QUEUES).rev().find_map(|i| s.ready[i].pop_front()) {
                 Some(t) if t.state() != State::Ready => continue,
                 Some(t) if t.on_cpu.load(Ordering::Acquire) && !Arc::ptr_eq(&t, &me) => skipped.push(t),
-                Some(t) if !claim_tls(&t, &me) => skipped.push(t),
+                Some(t) if !claim_tls(&t, &me) => {
+                    tls_waiting = tls_waiting.max(Some(queue_index(&t)));
+                    skipped.push(t)
+                }
                 Some(t) => break Some(t),
                 None => break None,
             }
         };
         for t in skipped.into_iter().rev() {
-            let i = class_index(&t);
+            let i = queue_index(&t);
             s.ready[i].push_front(t);
         }
         let next = match next {
@@ -366,11 +476,21 @@ pub fn schedule() {
         next.on_cpu.store(true, Ordering::Release);
         // Free threads that died earlier and are off every stack.
         s.dead.retain(|d| d.on_cpu.load(Ordering::Acquire) || Arc::ptr_eq(d, &me));
-        next
+        (next, tls_waiting)
     };
-    c.slice_end.store(irq::ticks() + SLICE, Ordering::Relaxed);
+    // A higher-priority thread waits for the page another CPU's thread
+    // holds: make CPUs running something lower give it up now.
+    if let Some(i) = tls_waiting {
+        for o in smp::online() {
+            if !core::ptr::eq(o, c) && (o.cur_class.load(Ordering::Relaxed) as usize) < i {
+                o.need_resched.store(true, Ordering::Relaxed);
+                smp::kick(o);
+            }
+        }
+    }
+    c.slice_end.store(irq::ticks() + slice(), Ordering::Relaxed);
     c.need_resched.store(false, Ordering::Relaxed);
-    c.cur_class.store(if next.is_idle() { smp::IDLE_CLASS } else { class_index(&next) as u8 }, Ordering::Relaxed);
+    c.cur_class.store(if next.is_idle() { smp::IDLE_CLASS } else { queue_index(&next) as u8 }, Ordering::Relaxed);
     if !me.kstack_intact() {
         panic!("kernel stack overflow in thread {} (tid {})", me.id, me.tid);
     }

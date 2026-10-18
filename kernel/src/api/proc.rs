@@ -445,14 +445,63 @@ pub fn dos_resume_thread(c: &mut Ctx) -> u32 {
     }
 }
 
+/// DosEnterCritSec: when it returns no other thread of the process runs
+/// user code until DosExitCritSec. Other threads are held on their way
+/// back to user mode (`hold_if_needed`); with several CPUs the ones
+/// running right now are interrupted and waited for.
 pub fn dos_enter_crit_sec(c: &mut Ctx) -> u32 {
-    let mut cs = c.process.critsec.lock();
-    if cs.0 == c.thread.tid || cs.0 == 0 {
-        cs.0 = c.thread.tid;
-        cs.1 += 1;
-        0
-    } else {
-        err::INVALID_FUNCTION
+    let me = c.thread.tid;
+    loop {
+        {
+            let mut cs = c.process.critsec.lock();
+            if cs.0 == me || cs.0 == 0 {
+                cs.0 = me;
+                cs.1 += 1;
+                if cs.1 > 1 {
+                    return 0;
+                }
+                break;
+            }
+        }
+        // Another thread is in its critical section (it got there while
+        // this one was running on another CPU): wait for it.
+        let p = c.process.clone();
+        p.thread_waiters.wait_until(None, || p.critsec.lock().0 == 0);
+        if c.thread.exit_requested() || c.thread.interrupted() {
+            return err::INTERRUPT;
+        }
+    }
+    stop_other_threads(c);
+    0
+}
+
+/// Wait until no other thread of the process is running user code on
+/// another CPU (they stop at their next return to user mode).
+fn stop_other_threads(c: &Ctx) {
+    if crate::smp::online_count() < 2 {
+        return;
+    }
+    let running = || {
+        c.process.threads.lock().iter().any(|t| {
+            t.tid != c.thread.tid && t.state() == State::Running && t.on_cpu.load(Ordering::Acquire)
+        })
+    };
+    if !running() {
+        return;
+    }
+    // Make every other CPU pass through the kernel, then wait without the
+    // kernel lock so they can reach the point where they are held.
+    let me = crate::smp::this().bit();
+    for cpu in crate::smp::online() {
+        if cpu.bit() != me {
+            crate::smp::kick(cpu);
+        }
+    }
+    for _ in 0..2000 {
+        if !running() {
+            return;
+        }
+        sched::sleep_ms(1);
     }
 }
 
@@ -472,7 +521,7 @@ pub fn dos_exit_crit_sec(c: &mut Ctx) -> u32 {
 
 // ---- Priorities ----
 
-fn apply_priority(t: &crate::task::thread::Thread, class: u32, delta: i32) -> u32 {
+fn apply_priority(t: &Arc<crate::task::thread::Thread>, class: u32, delta: i32) -> u32 {
     let cur = t.priority();
     let (mut cls, mut lvl) = (cur >> 8, (cur & 0xff) as i32);
     if class != 0 {
@@ -486,6 +535,12 @@ fn apply_priority(t: &crate::task::thread::Thread, class: u32, delta: i32) -> u3
     }
     lvl = (lvl + delta).clamp(0, 31);
     t.set_priority(cls << 8 | lvl as u32);
+    // A queued thread moves to its new queue; a running one is looked at
+    // again on its way back to user mode.
+    sched::reprioritize(t);
+    if t.state() == crate::task::thread::State::Running {
+        crate::smp::this().need_resched.store(true, Ordering::Relaxed);
+    }
     0
 }
 
