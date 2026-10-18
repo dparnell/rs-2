@@ -6,7 +6,7 @@ use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 
 use super::block::{BlockDev, FatDev};
-use super::{attr, FileInfo, FileSystem, FsFile, SetInfo, Stamp, VolumeInfo};
+use super::{attr, Ea, FileInfo, FileSystem, FsFile, SetInfo, Stamp, VolumeInfo};
 use crate::api::err;
 use crate::sync::{Mutex, SpinLock};
 
@@ -59,8 +59,16 @@ fn info_of(e: &fat::Entry, cluster_size: u32) -> FileInfo {
         created: Stamp { date: e.created.date, time: e.created.time },
         accessed: Stamp { date: e.accessed, time: 0 },
         modified: Stamp { date: e.modified.date, time: e.modified.time },
-        ea_size: 0,
+        ea_size: (e.ea_handle != 0 || e.nt_flags & fat::ea::FAT32_EA_MASK != 0) as u32,
     }
+}
+
+fn to_fat(eas: &[Ea]) -> Vec<fat::ea::Ea> {
+    eas.iter().map(|e| fat::ea::Ea { flags: e.flags, name: e.name.clone(), value: e.value.clone() }).collect()
+}
+
+fn from_fat(eas: Vec<fat::ea::Ea>) -> Vec<Ea> {
+    eas.into_iter().map(|e| Ea { flags: e.flags, name: e.name, value: e.value }).collect()
 }
 
 fn slot_key(e: &fat::Entry) -> Option<(u32, u32)> {
@@ -122,7 +130,14 @@ impl FileSystem for FatFs {
         }
         let d = if e.cluster == 0 { v.root_dir() } else { fat::Dir::Cluster(e.cluster) };
         let cs = v.cluster_size();
-        Ok(v.read_dir(d).map_err(map)?.iter().map(|e| info_of(e, cs)).collect())
+        // FAT32 keeps EAs in "NAME EA. SF" files, which OS/2 does not show.
+        let fat32 = v.fat_type == fat::FatType::Fat32;
+        Ok(v.read_dir(d)
+            .map_err(map)?
+            .iter()
+            .filter(|e| !(fat32 && fat::ea::is_ea_companion(&e.name)))
+            .map(|e| info_of(e, cs))
+            .collect())
     }
 
     fn open(&self, path: &str) -> Result<Arc<dyn FsFile>, u32> {
@@ -184,6 +199,18 @@ impl FileSystem for FatFs {
     fn device(&self) -> Option<Arc<dyn BlockDev>> {
         Some(self.inner.vol.lock().dev.0.clone())
     }
+
+    fn read_eas(&self, path: &str) -> Result<Vec<Ea>, u32> {
+        let v = self.inner.vol.lock();
+        let e = v.lookup(path).map_err(map)?;
+        v.read_eas(&e).map(from_fat).map_err(map)
+    }
+
+    fn write_eas(&self, path: &str, eas: &[Ea]) -> Result<(), u32> {
+        let mut v = self.inner.vol.lock();
+        let e = v.lookup(path).map_err(map)?;
+        v.write_eas(&e, &to_fat(eas), now()).map_err(map)
+    }
 }
 
 fn apply(e: &mut fat::Entry, info: &SetInfo) {
@@ -237,7 +264,20 @@ impl FsFile for FatFile {
 
     fn info(&self) -> FileInfo {
         let e = self.entry.lock().clone();
-        info_of(&e, self.fs.vol.lock().cluster_size())
+        let v = self.fs.vol.lock();
+        let mut i = info_of(&e, v.cluster_size());
+        i.ea_size = v.has_eas(&e).unwrap_or(false) as u32;
+        i
+    }
+
+    fn read_eas(&self) -> Result<Vec<Ea>, u32> {
+        let e = self.entry.lock().clone();
+        self.fs.vol.lock().read_eas(&e).map(from_fat).map_err(map)
+    }
+
+    fn write_eas(&self, eas: &[Ea]) -> Result<(), u32> {
+        let e = self.entry.lock().clone();
+        self.fs.vol.lock().write_eas(&e, &to_fat(eas), now()).map_err(map)
     }
 
     fn set_info(&self, info: &SetInfo) -> Result<(), u32> {

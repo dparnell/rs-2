@@ -5,7 +5,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 
 use super::{err, Ctx};
-use crate::fs::{self, attr, mode, path, Device, FileInfo, FullPath, Handle, OpenFile, SetInfo, Stamp};
+use crate::fs::{self, attr, ea, mode, path, Device, Ea, FileInfo, FullPath, Handle, OpenFile, SetInfo, Stamp};
 
 // ---- Handle table ----
 
@@ -301,8 +301,19 @@ pub fn dos_reset_buffer(c: &mut Ctx) -> u32 {
 
 // ---- Open ----
 
+/// EAs to give a file that DosOpen creates or replaces: the EAOP (0 for
+/// none), whether its pointers are 16:16 and its list a 16-bit FEALIST.
+#[derive(Clone, Copy)]
+struct OpenEas {
+    eaop: u32,
+    ptr16: bool,
+    list16: bool,
+}
+
+const NO_EAS: OpenEas = OpenEas { eaop: 0, ptr16: false, list16: false };
+
 /// Result of an open: the handle and the action taken.
-fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32) -> Result<(u32, u32), u32> {
+fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32, eas: OpenEas) -> Result<(u32, u32), u32> {
     if let Some(pn) = crate::npipe::pipe_name(name) {
         let end = crate::npipe::open(&pn)?;
         return Ok((add(c, Handle::NPipe(end))?, 1));
@@ -325,6 +336,7 @@ fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32) -> 
     if access > mode::READWRITE {
         return Err(err::INVALID_ACCESS);
     }
+    let new_eas = if eas.eaop != 0 { Some(eaop_changes(c, eas.eaop, eas.ptr16, eas.list16)?) } else { None };
     let (file, action) = match fsys.stat(&rel) {
         Ok(info) => {
             if info.is_dir() {
@@ -363,6 +375,21 @@ fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32) -> 
         },
         Err(e) => return Err(e),
     };
+    // A created or replaced file gets the EAs passed (replacing any it
+    // had); without a list a replaced file keeps its EAs.
+    if let Some(list) = new_eas.filter(|_| action != 1) {
+        let r = ea::merge(Vec::new(), &list).and_then(|set| match file.write_eas(&set) {
+            Err(e) if set.is_empty() && e == err::EAS_NOT_SUPPORTED => Ok(()),
+            r => r,
+        });
+        if let Err(e) = r {
+            if action == 2 {
+                drop(file);
+                let _ = fsys.delete(&rel);
+            }
+            return Err(e);
+        }
+    }
     let of = OpenFile::new(p, file, omode)?;
     let h = add(c, Handle::File(of))?;
     if omode & mode::NOINHERIT != 0 {
@@ -424,7 +451,8 @@ pub fn dos_open(c: &mut Ctx) -> u32 {
         Ok(n) => n,
         Err(e) => return e,
     };
-    match open(c, &name, c.arg(3) as u64, c.arg(4), c.arg(5), c.arg(6)) {
+    let eas = OpenEas { eaop: c.arg(7), ..NO_EAS };
+    match open(c, &name, c.arg(3) as u64, c.arg(4), c.arg(5), c.arg(6), eas) {
         Ok((h, act)) => {
             c.write_u32(c.arg(1), h);
             c.write_u32(c.arg(2), act);
@@ -441,7 +469,8 @@ pub fn dos_open_l(c: &mut Ctx) -> u32 {
         Err(e) => return e,
     };
     let size = c.arg(3) as u64 | (c.arg(4) as u64) << 32;
-    match open(c, &name, size, c.arg(5), c.arg(6), c.arg(7)) {
+    let eas = OpenEas { eaop: c.arg(8), ..NO_EAS };
+    match open(c, &name, size, c.arg(5), c.arg(6), c.arg(7), eas) {
         Ok((h, act)) => {
             c.write_u32(c.arg(1), h);
             c.write_u32(c.arg(2), act);
@@ -457,7 +486,7 @@ pub fn dos16_open(c: &mut Ctx) -> u32 {
         Ok(n) => n,
         Err(e) => return e,
     };
-    match open(c, &name, c.arg(3) as u64, c.arg(4), c.arg(5), c.arg(6)) {
+    match open(c, &name, c.arg(3) as u64, c.arg(4), c.arg(5), c.arg(6), NO_EAS) {
         Ok((h, act)) => {
             c.write_u16(c.ptr(1), h as u16);
             c.write_u16(c.ptr(2), act as u16);
@@ -475,7 +504,9 @@ pub fn dos16_open_l(c: &mut Ctx) -> u32 {
         Err(e) => return e,
     };
     let size = c.arg(3) as u64 | (c.arg(4) as u64) << 32;
-    match open(c, &name, size, c.arg(5), c.arg(6), c.arg(7)) {
+    // The EAOP2 is reached through 16:16 pointers.
+    let eas = OpenEas { eaop: c.ptr(8), ptr16: true, list16: false };
+    match open(c, &name, size, c.arg(5), c.arg(6), c.arg(7), eas) {
         Ok((h, act)) => {
             c.write_u16(c.ptr(1), h as u16);
             c.write_u16(c.ptr(2), act as u16);
@@ -511,7 +542,9 @@ pub fn dos16_open2(c: &mut Ctx) -> u32 {
         Ok(n) => n,
         Err(e) => return e,
     };
-    match open(c, &name, c.arg(3) as u64, c.arg(4), c.arg(5), c.arg(6)) {
+    // pEABuf: an OS/2 1.x EAOP with an FEALIST.
+    let eas = OpenEas { eaop: c.ptr(7), ptr16: true, list16: true };
+    match open(c, &name, c.arg(3) as u64, c.arg(4), c.arg(5), c.arg(6), eas) {
         Ok((h, act)) => {
             c.write_u16(c.ptr(1), h as u16);
             c.write_u16(c.ptr(2), act as u16);
@@ -719,8 +752,38 @@ pub fn dos_delete(c: &mut Ctx) -> u32 {
     })
 }
 
+/// Create a directory and give it the EAs of the EAOP at `eaop` (0: none).
+fn create_dir(c: &Ctx, eas: OpenEas) -> u32 {
+    let list = if eas.eaop != 0 {
+        match eaop_changes(c, eas.eaop, eas.ptr16, eas.list16).and_then(|l| ea::merge(Vec::new(), &l)) {
+            Ok(l) => l,
+            Err(e) => return e,
+        }
+    } else {
+        Vec::new()
+    };
+    path_op(c, 0, |f, p| {
+        f.mkdir(&p.rel())?;
+        if !list.is_empty() {
+            if let Err(e) = f.write_eas(&p.rel(), &list) {
+                let _ = f.rmdir(&p.rel());
+                return Err(e);
+            }
+        }
+        Ok(())
+    })
+}
+
+/// DosCreateDir(pszDirName, peaop2); 16-bit DosMkDir(psz, ulReserved).
 pub fn dos_create_dir(c: &mut Ctx) -> u32 {
-    path_op(c, 0, |f, p| f.mkdir(&p.rel()))
+    let eas = if c.is16 { NO_EAS } else { OpenEas { eaop: c.arg(1), ..NO_EAS } };
+    create_dir(c, eas)
+}
+
+/// DosMkDir2(pszDirName, pEABuf, ulReserved): EAs in an OS/2 1.x EAOP.
+pub fn dos16_mkdir2(c: &mut Ctx) -> u32 {
+    let eas = OpenEas { eaop: c.ptr(1), ptr16: true, list16: true };
+    create_dir(c, eas)
 }
 
 pub fn dos_delete_dir(c: &mut Ctx) -> u32 {
@@ -759,7 +822,7 @@ pub fn dos_move(c: &mut Ctx) -> u32 {
 /// FILESTATUS (16-bit, level 1) / FILESTATUS3 (32-bit, level 1), with
 /// cbList appended for level 2. Levels 11 and 12 are the large-file
 /// variants (FILESTATUS3L/4L) with 64-bit sizes and a 32-bit attribute.
-fn status_bytes(i: &FileInfo, is16: bool, level: u32) -> Vec<u8> {
+fn status_bytes(i: &FileInfo, is16: bool, level: u32, cb_list: u32) -> Vec<u8> {
     let mut b = Vec::with_capacity(40);
     for s in [i.created, i.accessed, i.modified] {
         b.extend_from_slice(&s.date.to_le_bytes());
@@ -779,31 +842,43 @@ fn status_bytes(i: &FileInfo, is16: bool, level: u32) -> Vec<u8> {
         b.extend_from_slice(&i.attr.to_le_bytes());
     }
     if level == 2 || level == 12 {
-        // cbList: size of an empty FEA2LIST.
-        b.extend_from_slice(&(if i.ea_size == 0 { 4u32 } else { i.ea_size }).to_le_bytes());
+        // cbList: the size of the EA list (FEA2LIST, or FEALIST for
+        // 16-bit callers); 4 when there are none.
+        b.extend_from_slice(&cb_list.to_le_bytes());
     }
     b
 }
 
-fn write_status(c: &Ctx, info: &FileInfo, level: u32, buf: u32, cb: u32) -> u32 {
+/// File information at `level` for DosQueryPathInfo/DosQueryFileInfo;
+/// `eas` reads the file's extended attributes when a level needs them.
+fn write_status(c: &Ctx, info: &FileInfo, level: u32, buf: u32, cb: u32, eas: impl FnOnce() -> Result<Vec<Ea>, u32>) -> u32 {
     match level {
         1 | 2 | 11 | 12 => {
-            let b = status_bytes(info, c.is16, level);
+            let cb_list = if matches!(level, 2 | 12) && info.ea_size != 0 {
+                match eas() {
+                    Ok(l) => ea::list_size(&l, c.is16),
+                    Err(e) => return e,
+                }
+            } else {
+                4
+            };
+            let b = status_bytes(info, c.is16, level, cb_list);
             if (cb as usize) < b.len() {
                 return err::BUFFER_OVERFLOW;
             }
             if c.write(buf, &b) { 0 } else { err::INVALID_ADDRESS }
         }
-        3 | 4 => {
-            // FIL_QUERYEASFROMLIST / FIL_QUERYALLEAS: EAOP2 -> report no
-            // EAs (empty FEA2LIST).
-            let eaop = buf;
-            let Some(fpfea2) = c.read_u32(eaop + 4) else { return err::INVALID_ADDRESS };
-            let p = if c.is16 { c.far16_to_flat(fpfea2) } else { fpfea2 };
-            if p != 0 {
-                c.write_u32(p, 4);
+        3 | 4 | 13 => {
+            // FIL_QUERYEASFROMLIST: the EAs named in the EAOP2's GEA2
+            // list; level 4: all of them.
+            if cb < 12 {
+                return err::BUFFER_OVERFLOW;
             }
-            0
+            let all = match eas() {
+                Ok(l) => l,
+                Err(e) => return e,
+            };
+            query_eas(c, &all, level == 4, buf)
         }
         _ => {
             if super::tracing() {
@@ -841,21 +916,25 @@ pub fn dos_query_path_info(c: &mut Ctx) -> u32 {
     if path::has_wildcards(&name) {
         return err::INVALID_NAME;
     }
-    let info = match fs::stat(&p) {
+    let fsys = match fs::fs_of(&p) {
+        Ok(f) => f,
+        Err(e) => return e,
+    };
+    let info = match fsys.stat(&p.rel()) {
         Ok(i) => i,
         Err(e) => return e,
     };
-    write_status(c, &info, level, buf, cb)
+    write_status(c, &info, level, buf, cb, || fsys.read_eas(&p.rel()))
 }
 
 pub fn dos_query_file_info(c: &mut Ctx) -> u32 {
     let (hf, level, buf, cb) = if c.is16 { (c.arg(0), c.arg(1), c.ptr(2), c.arg(3)) } else { (c.arg(0), c.arg(1), c.arg(2), c.arg(3)) };
-    let info = match get(c, hf) {
-        Some(Handle::File(f)) => f.file.info(),
-        Some(_) => FileInfo { attr: 0, ..Default::default() },
+    let (info, file) = match get(c, hf) {
+        Some(Handle::File(f)) => (f.file.info(), Some(f)),
+        Some(_) => (FileInfo { attr: 0, ..Default::default() }, None),
         None => return err::INVALID_HANDLE,
     };
-    write_status(c, &info, level, buf, cb)
+    write_status(c, &info, level, buf, cb, || file.map_or(Ok(Vec::new()), |f| f.file.read_eas()))
 }
 
 /// FILESTATUS (level 1) or FILESTATUS3L (level 11, 64-bit sizes: the
@@ -875,7 +954,22 @@ pub fn dos_set_path_info(c: &mut Ctx) -> u32 {
     // DosSetPathInfo(psz, level, pInfo, cbInfo, flOptions)
     let (level, buf, cb) = if c.is16 { (c.arg(1), c.ptr(2), c.arg(3)) } else { (c.arg(1), c.arg(2), c.arg(3)) };
     if level == 2 || level == 12 {
-        return 0; // EAs: accepted, not stored yet
+        // Set EAs from the EAOP2's FEA2 list.
+        if cb < 12 {
+            return err::INVALID_PARAMETER;
+        }
+        let changes = match eaop_changes(c, buf, c.is16, c.is16) {
+            Ok(l) => l,
+            Err(e) => return e,
+        };
+        return path_op(c, 0, |f, p| {
+            if path::has_wildcards(p.file_name()) {
+                return Err(err::INVALID_NAME);
+            }
+            let cur = f.read_eas(&p.rel())?;
+            let new = ea::merge(cur, &changes)?;
+            f.write_eas(&p.rel(), &new)
+        });
     }
     if level != 1 && level != 11 {
         return err::INVALID_LEVEL;
@@ -887,7 +981,23 @@ pub fn dos_set_path_info(c: &mut Ctx) -> u32 {
 pub fn dos_set_file_info(c: &mut Ctx) -> u32 {
     let (hf, level, buf, cb) = if c.is16 { (c.arg(0), c.arg(1), c.ptr(2), c.arg(3)) } else { (c.arg(0), c.arg(1), c.arg(2), c.arg(3)) };
     if level == 2 || level == 12 {
-        return 0;
+        if cb < 12 {
+            return err::INVALID_PARAMETER;
+        }
+        let f = match get(c, hf) {
+            Some(Handle::File(f)) => f,
+            Some(_) => return err::INVALID_HANDLE,
+            None => return err::INVALID_HANDLE,
+        };
+        if f.access() == mode::READONLY {
+            return err::ACCESS_DENIED;
+        }
+        let changes = match eaop_changes(c, buf, c.is16, c.is16) {
+            Ok(l) => l,
+            Err(e) => return e,
+        };
+        let r = f.file.read_eas().and_then(|cur| ea::merge(cur, &changes)).and_then(|new| f.file.write_eas(&new));
+        return r.err().unwrap_or(0);
     }
     if level != 1 && level != 11 {
         return err::INVALID_LEVEL;
@@ -1039,10 +1149,12 @@ pub struct Search {
     results: Vec<FileInfo>,
     next: usize,
     level: u32,
+    /// The directory searched (the entries' EAs are read through it).
+    dir: FullPath,
 }
 
 /// Collect directory entries matching `spec` and the attribute rules.
-fn search(c: &Ctx, spec: &str, attrib: u32) -> Result<Vec<FileInfo>, u32> {
+fn search(c: &Ctx, spec: &str, attrib: u32) -> Result<(Vec<FileInfo>, FullPath), u32> {
     if spec.is_empty() {
         return Err(err::NO_MORE_FILES);
     }
@@ -1064,7 +1176,7 @@ fn search(c: &Ctx, spec: &str, attrib: u32) -> Result<Vec<FileInfo>, u32> {
         if i.name.is_empty() {
             i.name = pattern;
         }
-        return if ok(&i) { Ok(alloc::vec![i]) } else { Err(err::NO_MORE_FILES) };
+        return if ok(&i) { Ok((alloc::vec![i], dir)) } else { Err(err::NO_MORE_FILES) };
     }
     let mut list = fsys.list(&dir.rel())?;
     // "." and ".." for subdirectories, as OS/2 reports them.
@@ -1083,40 +1195,82 @@ fn search(c: &Ctx, spec: &str, attrib: u32) -> Result<Vec<FileInfo>, u32> {
     if r.is_empty() {
         return Err(err::NO_MORE_FILES);
     }
-    Ok(r)
+    Ok((r, dir))
 }
 
-/// Encode entries into the caller's buffer; returns (bytes, count).
-fn fill(c: &Ctx, s: &mut Search, buf: u32, cb: u32, max: u32) -> Result<u32, u32> {
+/// The EAs of a search result ("." and ".." report none).
+fn entry_eas(s: &Search, i: &FileInfo) -> Vec<Ea> {
+    if i.ea_size == 0 || i.name == "." || i.name == ".." {
+        return Vec::new();
+    }
+    let p = child(&s.dir, &i.name);
+    fs::fs_of(&p).and_then(|f| f.read_eas(&p.rel())).unwrap_or_default()
+}
+
+/// Encode entries into the caller's buffer; returns (count, return code).
+/// Levels 3 and 13 (FIL_QUERYEASFROMLIST) start the buffer with the
+/// caller's EAOP2 naming the EAs to return with each entry.
+fn fill(c: &Ctx, s: &mut Search, buf: u32, cb: u32, max: u32) -> Result<(u32, u32), u32> {
+    let ea_level = matches!(s.level, 3 | 13);
+    let with_eas = ea_level || matches!(s.level, 2 | 12);
+    let names = if ea_level { eaop_names(c, buf)? } else { None };
+    let (base, room) = if ea_level {
+        if cb < 12 {
+            return Err(err::BUFFER_OVERFLOW);
+        }
+        (buf + 12, cb - 12)
+    } else {
+        (buf, cb)
+    };
+    let list16 = c.is16 && s.level < 11;
     let mut out: Vec<u8> = Vec::new();
     let mut n = 0u32;
+    let mut rc = 0;
     let mut last_off: Option<usize> = None;
     while (s.next < s.results.len()) && n < max {
         let i = &s.results[s.next];
         let name = i.name.as_bytes();
-        let mut e = Vec::new();
-        if c.is16 && s.level < 11 {
-            e.extend_from_slice(&status_bytes(i, true, s.level));
-            e.push(name.len() as u8);
-            e.extend_from_slice(name);
-            e.push(0);
+        let eas = if with_eas { entry_eas(s, i) } else { Vec::new() };
+        let cb_list = if eas.is_empty() { 4 } else { ea::list_size(&eas, list16) };
+        let list = if ea_level {
+            let sel = match &names {
+                Some(n) => ea::select(&eas, n),
+                None => eas.clone(),
+            };
+            ea::encode(&sel, list16)
         } else {
-            e.extend_from_slice(&0u32.to_le_bytes()); // oNextEntryOffset
-            e.extend_from_slice(&status_bytes(i, false, s.level));
+            Vec::new()
+        };
+        let entry = |list: &[u8]| {
+            let mut e = Vec::new();
+            if !list16 {
+                e.extend_from_slice(&0u32.to_le_bytes()); // oNextEntryOffset
+            }
+            e.extend_from_slice(&status_bytes(i, list16, s.level, cb_list));
+            e.extend_from_slice(list);
             e.push(name.len() as u8);
             e.extend_from_slice(name);
             e.push(0);
-            while e.len() % 4 != 0 {
+            while !list16 && e.len() % 4 != 0 {
                 e.push(0);
             }
-        }
-        if out.len() + e.len() > cb as usize {
-            if n == 0 {
+            e
+        };
+        let mut e = entry(&list);
+        if out.len() + e.len() > room as usize {
+            if n != 0 {
+                break;
+            }
+            // The first entry's EAs do not fit: return it with only the
+            // size its EA list needs.
+            let short = entry(&(list.len() as u32).to_le_bytes());
+            if !ea_level || short.len() > room as usize {
                 return Err(err::BUFFER_OVERFLOW);
             }
-            break;
+            e = short;
+            rc = err::EAS_DIDNT_FIT;
         }
-        if !c.is16 {
+        if !list16 {
             if let Some(lo) = last_off {
                 let delta = (out.len() - lo) as u32;
                 out[lo..lo + 4].copy_from_slice(&delta.to_le_bytes());
@@ -1126,15 +1280,18 @@ fn fill(c: &Ctx, s: &mut Search, buf: u32, cb: u32, max: u32) -> Result<u32, u32
         out.extend_from_slice(&e);
         s.next += 1;
         n += 1;
+        if rc != 0 {
+            break;
+        }
     }
-    if !c.write(buf, &out) {
+    if !c.write(base, &out) {
         return Err(err::INVALID_ADDRESS);
     }
-    Ok(n)
+    Ok((n, rc))
 }
 
 fn find_first(c: &mut Ctx, spec_addr: u32, phdir: u32, attrib: u32, buf: u32, cb: u32, pcount: u32, level: u32) -> u32 {
-    if !matches!(level, 1 | 2 | 11 | 12) {
+    if !matches!(level, 1 | 2 | 3 | 11 | 12 | 13) {
         crate::trace!("DosFindFirst: unsupported level {level}");
         return err::INVALID_LEVEL;
     }
@@ -1146,15 +1303,15 @@ fn find_first(c: &mut Ctx, spec_addr: u32, phdir: u32, attrib: u32, buf: u32, cb
     let Some(want) = want else { return err::INVALID_ADDRESS };
     let req = if c.is16 { c.read_u16(phdir).map(|v| if v == 0xffff { u32::MAX } else { v as u32 }) } else { c.read_u32(phdir) };
     let Some(req) = req else { return err::INVALID_ADDRESS };
-    let results = match search(c, &spec, attrib) {
+    let (results, dir) = match search(c, &spec, attrib) {
         Ok(r) => r,
         Err(e) => {
             if c.is16 { c.write_u16(pcount, 0) } else { c.write_u32(pcount, 0) };
             return e;
         }
     };
-    let mut s = Search { results, next: 0, level };
-    let n = match fill(c, &mut s, buf, cb, want.max(1)) {
+    let mut s = Search { results, next: 0, level, dir };
+    let (n, rc) = match fill(c, &mut s, buf, cb, want.max(1)) {
         Ok(n) => n,
         Err(e) => return e,
     };
@@ -1179,7 +1336,7 @@ fn find_first(c: &mut Ctx, spec_addr: u32, phdir: u32, attrib: u32, buf: u32, cb
         c.write_u32(phdir, h);
         c.write_u32(pcount, n);
     }
-    0
+    rc
 }
 
 pub fn dos_find_first(c: &mut Ctx) -> u32 {
@@ -1207,9 +1364,9 @@ fn find_next(c: &mut Ctx, h: u32, buf: u32, cb: u32, pcount: u32) -> u32 {
     let r = if s.next >= s.results.len() { Err(err::NO_MORE_FILES) } else { fill(c, &mut s, buf, cb, want.max(1)) };
     c.process.searches.lock().insert(h, s);
     match r {
-        Ok(n) => {
+        Ok((n, rc)) => {
             if c.is16 { c.write_u16(pcount, n as u16) } else { c.write_u32(pcount, n) };
-            0
+            rc
         }
         Err(e) => {
             if c.is16 { c.write_u16(pcount, 0) } else { c.write_u32(pcount, 0) };
@@ -1398,26 +1555,103 @@ pub fn dos_edit_name(c: &mut Ctx) -> u32 {
     if c.write(pt, &t) { 0 } else { err::INVALID_ADDRESS }
 }
 
+// ---- Extended attributes ----
+
+/// The GEA and FEA list addresses of an EAOP/EAOP2 at `eaop` (16:16
+/// pointers converted when `ptr16`).
+fn eaop_lists(c: &Ctx, eaop: u32, ptr16: bool) -> Result<(u32, u32), u32> {
+    let g = c.read_u32(eaop).ok_or(err::INVALID_ADDRESS)?;
+    let f = c.read_u32(eaop + 4).ok_or(err::INVALID_ADDRESS)?;
+    if ptr16 { Ok((c.far16_to_flat(g), c.far16_to_flat(f))) } else { Ok((g, f)) }
+}
+
+/// A caller's GEA/FEA list: cbList bytes.
+fn read_list(c: &Ctx, addr: u32) -> Result<Vec<u8>, u32> {
+    let cb = c.read_u32(addr).ok_or(err::INVALID_ADDRESS)?;
+    if cb < 4 {
+        return Err(err::EA_LIST_INCONSISTENT);
+    }
+    if cb > 0x2_0000 {
+        return Err(err::EA_LIST_TOO_LONG);
+    }
+    c.read_vec(addr, cb).ok_or(err::INVALID_ADDRESS)
+}
+
+/// The EAs to set from the FEA list of the EAOP at `eaop`. A malformed
+/// list stores the offset of the bad entry in oError.
+fn eaop_changes(c: &Ctx, eaop: u32, ptr16: bool, list16: bool) -> Result<Vec<Ea>, u32> {
+    let (_, pfea) = eaop_lists(c, eaop, ptr16)?;
+    if pfea == 0 {
+        return Ok(Vec::new());
+    }
+    let raw = read_list(c, pfea)?;
+    ea::parse(&raw, list16).map_err(|e| {
+        c.write_u32(eaop + 8, e.offset);
+        e.code
+    })
+}
+
+/// The names requested by the GEA list of the EAOP at `eaop` (None: all).
+fn eaop_names(c: &Ctx, eaop: u32) -> Result<Option<Vec<Vec<u8>>>, u32> {
+    let (pgea, _) = eaop_lists(c, eaop, c.is16)?;
+    if pgea == 0 {
+        return Ok(None);
+    }
+    let raw = read_list(c, pgea)?;
+    ea::parse_gea(&raw, c.is16).map(Some).map_err(|e| {
+        c.write_u32(eaop + 8, e.offset);
+        e.code
+    })
+}
+
+/// Answer an EA query (info level 3, or 4 for all EAs) into the FEA
+/// list of the EAOP at `eaop`, whose cbList says how much room it has.
+fn query_eas(c: &Ctx, eas: &[Ea], all: bool, eaop: u32) -> u32 {
+    let names = if all { None } else {
+        match eaop_names(c, eaop) {
+            Ok(n) => n,
+            Err(e) => return e,
+        }
+    };
+    let selected = match &names {
+        Some(n) => ea::select(eas, n),
+        None => eas.to_vec(),
+    };
+    let pfea = match eaop_lists(c, eaop, c.is16) {
+        Ok((_, f)) => f,
+        Err(e) => return e,
+    };
+    let Some(room) = c.read_u32(pfea) else { return err::INVALID_ADDRESS };
+    let out = ea::encode(&selected, c.is16);
+    if out.len() > room as usize {
+        return err::BUFFER_OVERFLOW;
+    }
+    if c.write(pfea, &out) { 0 } else { err::INVALID_ADDRESS }
+}
+
 /// DosEnumAttribute(ulRefType, pvFile, ulEntry, pvBuf, cbBuf, pulCount,
-/// ulInfoLevel): extended attributes are not stored yet, so every file
-/// has none (the count comes back 0).
+/// ulInfoLevel): the EAs of a file (by handle or path) from entry ulEntry
+/// (1-based) on, without their values: DENA2 records (DENA1 for 16-bit
+/// callers). *pulCount is the number wanted (-1: all) and returned.
 pub fn dos_enum_attribute(c: &mut Ctx) -> u32 {
-    let (reftype, pfile, pcount, level) = if c.is16 {
-        (c.arg(0), c.arg(1), c.ptr(5), c.arg(6))
+    let (reftype, pfile, entry, buf, cb, pcount, level) = if c.is16 {
+        (c.arg(0), c.arg(1), c.arg(2), c.ptr(3), c.arg(4), c.ptr(5), c.arg(6))
     } else {
-        (c.arg(0), c.arg(1), c.arg(5), c.arg(6))
+        (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4), c.arg(5), c.arg(6))
     };
     if level != 1 {
         return err::INVALID_LEVEL;
     }
-    match reftype {
+    let eas = match reftype {
         // ENUMEA_REFTYPE_FHANDLE: pvFile points at the handle.
         0 => {
             let p = if c.is16 { c.far16_to_flat(pfile) } else { pfile };
             let hf = if c.is16 { c.read_u16(p).map(u32::from) } else { c.read_u32(p) };
             let Some(hf) = hf else { return err::INVALID_ADDRESS };
-            if get(c, hf).is_none() {
-                return err::INVALID_HANDLE;
+            match get(c, hf) {
+                Some(Handle::File(f)) => f.file.read_eas(),
+                Some(_) => Ok(Vec::new()),
+                None => return err::INVALID_HANDLE,
             }
         }
         // ENUMEA_REFTYPE_PATH
@@ -1431,13 +1665,25 @@ pub fn dos_enum_attribute(c: &mut Ctx) -> u32 {
                 Ok(p) => p,
                 Err(e) => return e,
             };
-            if let Err(e) = fs::stat(&path) {
-                return e;
-            }
+            fs::fs_of(&path).and_then(|f| f.stat(&path.rel()).and_then(|_| f.read_eas(&path.rel())))
         }
         _ => return err::INVALID_PARAMETER,
+    };
+    let eas = match eas {
+        Ok(e) => e,
+        Err(e) => return e,
+    };
+    let Some(want) = c.read_u32(pcount) else { return err::INVALID_ADDRESS };
+    if entry == 0 {
+        return err::INVALID_PARAMETER;
     }
-    if !c.write_u32(pcount, 0) {
+    let from = (entry as usize - 1).min(eas.len());
+    let take = (want as usize).min(eas.len() - from);
+    let (out, n) = ea::encode_dena(&eas[from..from + take], c.is16, cb as usize);
+    if n == 0 && take > 0 {
+        return err::BUFFER_OVERFLOW;
+    }
+    if !c.write_u32(pcount, n as u32) || (!out.is_empty() && !c.write(buf, &out)) {
         return err::INVALID_ADDRESS;
     }
     0
@@ -1447,6 +1693,30 @@ pub fn dos_enum_attribute(c: &mut Ctx) -> u32 {
 
 const DCPY_EXISTING: u32 = 1;
 const DCPY_APPEND: u32 = 2;
+const DCPY_FAILEAS: u32 = 4;
+
+/// Copy the EAs of `src` to `dst` (replacing those it had). A target
+/// that cannot hold EAs is acceptable unless DCPY_FAILEAS is set or the
+/// source has critical (NEEDEA) EAs.
+fn copy_eas(sfs: &dyn fs::FileSystem, src: &FullPath, dfs: &dyn fs::FileSystem, dst: &FullPath, opt: u32) -> Result<(), u32> {
+    let eas = sfs.read_eas(&src.rel())?;
+    match dfs.write_eas(&dst.rel(), &eas) {
+        Ok(()) => Ok(()),
+        Err(e) if e == err::EAS_NOT_SUPPORTED => {
+            if eas.is_empty() {
+                Ok(())
+            } else if opt & DCPY_FAILEAS != 0 {
+                Err(e)
+            } else if eas.iter().any(|x| x.flags & ea::FEA_NEEDEA != 0) {
+                Err(err::NEED_EAS_FOUND)
+            } else {
+                Ok(())
+            }
+        }
+        Err(e) if eas.is_empty() && e == err::ACCESS_DENIED => Ok(()),
+        Err(e) => Err(e),
+    }
+}
 
 fn child(p: &FullPath, name: &str) -> FullPath {
     let mut c = p.clone();
@@ -1464,6 +1734,9 @@ pub fn copy_path(src: &FullPath, dst: &FullPath, opt: u32) -> Result<(), u32> {
             Ok(d) if d.is_dir() => {}
             Ok(_) => return Err(err::ACCESS_DENIED),
             Err(_) => dfs.mkdir(&dst.rel())?,
+        }
+        if !src.parts.is_empty() && !dst.parts.is_empty() {
+            copy_eas(sfs.as_ref(), src, dfs.as_ref(), dst, opt)?;
         }
         for e in sfs.list(&src.rel())? {
             if e.name == "." || e.name == ".." {
@@ -1505,6 +1778,9 @@ pub fn copy_path(src: &FullPath, dst: &FullPath, opt: u32) -> Result<(), u32> {
         to.write(at, &buf[..n])?;
         off += n as u64;
         at += n as u64;
+    }
+    if opt & DCPY_APPEND == 0 {
+        copy_eas(sfs.as_ref(), src, dfs.as_ref(), dst, opt)?;
     }
     let _ = to.set_info(&SetInfo {
         attr: Some(info.attr & 0x27),

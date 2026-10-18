@@ -543,6 +543,35 @@ unsafe extern "C" {
 
 pub const DCPY_EXISTING: u32 = 1;
 pub const DCPY_APPEND: u32 = 2;
+pub const DCPY_FAILEAS: u32 = 4;
+
+// Extended attributes (bsedos.h).
+pub const FIL_QUERYEASIZE: u32 = 2;
+pub const FIL_QUERYEASFROMLIST: u32 = 3;
+pub const FIL_QUERYALLEAS: u32 = 4;
+pub const ENUMEA_LEVEL_NO_VALUE: u32 = 1;
+pub const ENUMEA_REFTYPE_FHANDLE: u32 = 0;
+pub const ENUMEA_REFTYPE_PATH: u32 = 1;
+pub const FEA_NEEDEA: u8 = 0x80;
+pub const EAT_BINARY: u16 = 0xfffe;
+pub const EAT_ASCII: u16 = 0xfffd;
+pub const EAT_MVMT: u16 = 0xffdf;
+
+/// EAOP2: the GEA2 list to query, the FEA2 list to fill or set, and the
+/// offset of a bad entry.
+#[repr(C)]
+pub struct EaOp2 {
+    pub gea2: *mut u8,
+    pub fea2: *mut u8,
+    pub error: u32,
+}
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.218"]
+    pub fn DosSetFileInfo(hf: u32, level: u32, buf: *const u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.372"]
+    pub fn DosEnumAttribute(reftype: u32, file: *const u8, entry: u32, buf: *mut u8, cb: u32, count: *mut u32, level: u32) -> APIRET;
+}
 
 unsafe extern "C" {
     #[link_name = "DOSCALLS.258"]

@@ -4,6 +4,7 @@
 //! handed to them are relative to the volume root with `\` separators.
 
 pub mod block;
+pub mod ea;
 pub mod fatfs;
 pub mod hpfsfs;
 pub mod iso9660;
@@ -15,6 +16,7 @@ use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicU32, Ordering};
 
+pub use ea::Ea;
 pub use path::FullPath;
 
 use crate::api::err;
@@ -46,7 +48,8 @@ pub struct FileInfo {
     pub created: Stamp,
     pub accessed: Stamp,
     pub modified: Stamp,
-    /// Size of the extended attributes (FEA2LIST), 0 if none.
+    /// Non-zero if the file has extended attributes (their size as the
+    /// file system stores them; the API computes list sizes itself).
     pub ea_size: u32,
 }
 
@@ -100,6 +103,15 @@ pub trait FileSystem: Send + Sync {
     fn device(&self) -> Option<Arc<dyn block::BlockDev>> {
         None
     }
+    /// All extended attributes of a file or directory.
+    fn read_eas(&self, _path: &str) -> Result<Vec<Ea>, u32> {
+        Ok(Vec::new())
+    }
+    /// Replace all extended attributes of a file or directory (names
+    /// upper-cased, no empty values; an empty list removes them).
+    fn write_eas(&self, _path: &str, _eas: &[Ea]) -> Result<(), u32> {
+        Err(err::EAS_NOT_SUPPORTED)
+    }
 }
 
 pub trait FsFile: Send + Sync {
@@ -111,6 +123,12 @@ pub trait FsFile: Send + Sync {
     fn set_info(&self, info: &SetInfo) -> Result<(), u32>;
     fn flush(&self) -> Result<(), u32> {
         Ok(())
+    }
+    fn read_eas(&self) -> Result<Vec<Ea>, u32> {
+        Ok(Vec::new())
+    }
+    fn write_eas(&self, _eas: &[Ea]) -> Result<(), u32> {
+        Err(err::EAS_NOT_SUPPORTED)
     }
 }
 

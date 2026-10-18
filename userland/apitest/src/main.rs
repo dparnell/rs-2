@@ -10,6 +10,10 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use os2::*;
 
+extern crate alloc;
+
+mod eas;
+
 os2::entry!(main);
 
 static FAILS: AtomicU32 = AtomicU32::new(0);
@@ -29,6 +33,7 @@ fn main(s: &Startup) -> u32 {
     memory();
     suballoc();
     files();
+    eas::run();
     threads_and_sems();
     exceptions();
     pipes();

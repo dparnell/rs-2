@@ -247,7 +247,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 41) => dos16_get_huge_shift,
         (0, 210) => ok, // DosSetVerify
         (0, 110) | (0, 203) => file::dos_delete, // DosForceDelete (no DELDIR)
-        (0, 185) => file::dos_create_dir,       // DosMkDir2 (EAs ignored)
+        (0, 185) => file::dos16_mkdir2,
         (0, 201) | (0, 258) => file::dos_copy,
         (0, 417) => file::dos_replace_module,
         (0, 126) => dos16_size_seg,
