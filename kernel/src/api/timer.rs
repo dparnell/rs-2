@@ -11,8 +11,9 @@ use crate::sync::SpinLock;
 enum Action {
     /// Post a 32-bit event semaphore.
     PostEvent(u32),
-    /// Clear a 16-bit RAM semaphore at a physical address.
-    ClearRam(u64),
+    /// Clear a 16-bit RAM semaphore: process and linear address (looked up
+    /// when the timer fires: the memory may have been freed meanwhile).
+    ClearRam(u32, u32),
     /// Clear a 16-bit system semaphore handle.
     ClearSys(u32),
 }
@@ -72,8 +73,14 @@ pub fn tick() {
     for a in fire {
         match a {
             Action::PostEvent(h) => super::sem::post_event_handle(h),
-            Action::ClearRam(phys) => {
-                unsafe { (crate::mm::phys::phys_to_virt(phys) as *mut u32).write_volatile(0) };
+            Action::ClearRam(pid, lin) => {
+                if let Some(p) = crate::task::process::by_pid(pid) {
+                    let sp = p.space.lock();
+                    let present = sp.region(lin).is_some();
+                    if let (true, Some(phys)) = (present, crate::mm::paging::translate(sp.root, lin as u64)) {
+                        unsafe { (crate::mm::phys::phys_to_virt(phys) as *mut u32).write_volatile(0) };
+                    }
+                }
                 super::sem::wake_16bit();
             }
             Action::ClearSys(h) => super::sem::clear_sys16(h),
@@ -118,17 +125,11 @@ fn start16(c: &mut Ctx, repeat: bool) -> u32 {
         Action::ClearSys(hsem)
     } else {
         let lin = c.far16_to_flat(hsem);
-        let phys = {
-            let mut sp = c.space();
-            if !sp.check(lin, 4, true) {
-                return err::INVALID_HANDLE;
-            }
-            crate::mm::paging::translate(sp.root, lin as u64)
-        };
-        match phys {
-            Some(p) => Action::ClearRam(p),
-            None => return err::INVALID_HANDLE,
+        // Fault the page in now (the timer fires in interrupt context).
+        if !c.space().check(lin, 4, true) {
+            return err::INVALID_HANDLE;
         }
+        Action::ClearRam(c.process.pid, lin)
     };
     let h = add(c.process.pid, ms, repeat, action);
     c.write_u16(ph, h as u16);
