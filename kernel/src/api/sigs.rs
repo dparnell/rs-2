@@ -145,6 +145,10 @@ const DOSCALLS: &[(u16, &str)] = &[
     (208, "p"),        // DosFreeResource
     (214, "p"),        // DosMaxPathLen
     (215, "p"),        // DosPageSize
+    (690, "p"),        // DosSMSetTitle
+    (712, "p"),        // DosSMPMPresent
+    (998, "pd"),       // DosSetExtLIBPATH
+    (999, "pd"),       // DosQueryExtLIBPATH
 ];
 
 // VIOCALLS, KBDCALLS and MOUCALLS are generated from bsesub.h by
@@ -193,7 +197,7 @@ const VIOCALLS: &[(u16, &str)] = &[
     (51, "pw"), // VioSetState
     (52, "pwwww"), // VioWrtNCell
     (53, "pwwww"), // VioWrtNChar
-    (70, "ppddw"), // VioGlobalReg
+    (70, "ppddd"), // VioGlobalReg (RETF 20 in DOSCALL1)
     (75, "pwww"), // VioCheckCharType
 ];
 
@@ -249,6 +253,7 @@ const MOUCALLS: &[(u16, &str)] = &[
 ];
 
 const MSG: &[(u16, &str)] = &[
+    (7, "pwppp"),    // DosIQueryMessageCP
     (1, "wwp"),      // DosPutMessage
     (2, "pwpwwppp"), // DosTrueGetMessage
     (3, "pwpwpwp"),  // DosInsMessage
@@ -269,7 +274,7 @@ const SESMGR: &[(u16, &str)] = &[
 ];
 
 const QUECALLS: &[(u16, &str)] = &[
-    (1, "wppppwpd"), // DosReadQueue
+    (1, "wpppwwpd"), // DosReadQueue
     (2, "w"),        // DosPurgeQueue
     (3, "w"),        // DosCloseQueue
     (4, "wp"),       // DosQueryQueue
@@ -278,6 +283,16 @@ const QUECALLS: &[(u16, &str)] = &[
     (7, "ppp"),      // DosOpenQueue
     (8, "pwp"),      // DosCreateQueue
 ];
+
+/// Argument bytes popped by 16-bit entries of DOSCALL1, measured from the
+/// `RETF n` of each entry point (tools/ghidra/RetfScan.java). Used when no
+/// typed signature is known, so the gate can at least return correctly.
+pub fn retf_bytes(ordinal: u16) -> Option<u8> {
+    super::sigs_retf::RETF
+        .binary_search_by(|e| e.0.cmp(&ordinal))
+        .ok()
+        .map(|i| super::sigs_retf::RETF[i].1)
+}
 
 pub fn lookup(module: u8, ordinal: u16) -> Option<&'static [u8]> {
     let table = match module {

@@ -12,9 +12,14 @@
 pub mod doscalls;
 pub mod exceptions;
 pub mod file;
+pub mod kbdapi;
+pub mod msg;
+pub mod nls;
+pub mod vio;
 pub mod names;
 mod names_gen;
 mod sigs;
+mod sigs_retf;
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -326,10 +331,26 @@ pub fn dispatch(f: &mut TrapFrame) {
         let code = f.rax as u32;
         process.exit(0, code);
     }
+    let (raw_module, raw_ordinal) = (module, ordinal);
+    let (m8, o16) = names::canonical(module as u8, ordinal as u16);
+    let (module, ordinal) = (m8 as u32, o16 as u32);
 
     let is16 = names::is16(module as u8, ordinal as u16);
-    let sig: &'static [u8] = if is16 { sigs::lookup(module as u8, ordinal as u16).unwrap_or(&[]) } else { &[] };
-    if is16 && sigs::lookup(module as u8, ordinal as u16).is_none() {
+    const WORDS: &[u8] = b"wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww";
+    let sig: &'static [u8] = if is16 {
+        match sigs::lookup(module as u8, ordinal as u16) {
+            Some(s) => s,
+            // Untyped fallback: right size, so the return is correct.
+            None => match (raw_module, sigs::retf_bytes(raw_ordinal as u16)) {
+                (0, Some(n)) => &WORDS[..(n as usize / 2).min(WORDS.len())],
+                _ => &[],
+            },
+        }
+    } else {
+        &[]
+    };
+    let measured = raw_module == 0 && sigs::retf_bytes(raw_ordinal as u16).is_some();
+    if is16 && sigs::lookup(module as u8, ordinal as u16).is_none() && !measured {
         let name = names::display(module as u8, ordinal as u16);
         crate::println!(
             "SYS3175: {} called 16-bit {}.{} ({}) which has no known signature",

@@ -11,7 +11,81 @@ use crate::vm::{self, pag, SegKind};
 
 /// Implementation for a gate entry, if there is one.
 pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
+    use super::{kbdapi as k, msg, nls, vio as v};
     let h: Handler = match (module, ordinal) {
+        // ---- VIOCALLS ----
+        (1, 1) => v::ok,           // VioEndPopUp
+        (1, 3) => v::vio_get_ansi,
+        (1, 5) => v::vio_set_ansi,
+        (1, 6) => v::ok,           // VioDeRegister
+        (1, 7) => v::vio_scroll_up,
+        (1, 9) => v::vio_get_cur_pos,
+        (1, 10) => v::vio_wrt_cell_str,
+        (1, 11) => v::vio_pop_up,
+        (1, 12) => v::vio_scroll_rt,
+        (1, 13) => v::vio_wrt_char_str,
+        (1, 15) => v::vio_set_cur_pos,
+        (1, 18) => v::ok,          // VioScrUnLock
+        (1, 19) => v::vio_wrt_tty,
+        (1, 21) => v::vio_get_mode,
+        (1, 22) => v::vio_set_mode,
+        (1, 23) => v::vio_scr_lock,
+        (1, 24) => v::vio_read_cell_str,
+        (1, 25) => v::ok,          // VioSavRedrawWait
+        (1, 26) => v::vio_wrt_n_attr,
+        (1, 27) => v::vio_get_cur_type,
+        (1, 28) => v::ok,          // VioSavRedrawUndo
+        (1, 30) => v::vio_read_char_str,
+        (1, 31) => v::vio_get_buf,
+        (1, 32) => v::vio_set_cur_type,
+        (1, 35) => v::ok,          // VioModeUndo
+        (1, 37) => v::ok,          // VioModeWait
+        (1, 40) => v::vio_get_cp,
+        (1, 42) => v::vio_set_cp,
+        (1, 43) => v::vio_show_buf,
+        (1, 44) => v::vio_scroll_lf,
+        (1, 46) => v::vio_get_config,
+        (1, 47) => v::vio_scroll_dn,
+        (1, 48) => v::vio_wrt_char_str_att,
+        (1, 49) => v::vio_get_state,
+        (1, 51) => v::vio_set_state,
+        (1, 52) => v::vio_wrt_n_cell,
+        (1, 53) => v::vio_wrt_n_char,
+        // ---- KBDCALLS ----
+        (2, 3) => k::kbd_get_cp,
+        (2, 4) => k::kbd_char_in,
+        (2, 5) => k::ok,           // KbdSetCp
+        (2, 7) => k::ok,           // KbdSynch
+        (2, 9) => k::kbd_string_in,
+        (2, 10) => k::kbd_get_status,
+        (2, 11) => k::kbd_set_status,
+        (2, 12) => k::ok,          // KbdGetFocus
+        (2, 13) => k::kbd_flush_buffer,
+        (2, 17) => k::ok,          // KbdClose
+        (2, 18) => k::ok,          // KbdFreeFocus
+        (2, 21) => k::ok,          // KbdSetFgnd
+        (2, 22) => k::kbd_peek,
+        (2, 23) => k::kbd_open,
+        (2, 24) => k::kbd_get_hwid,
+        // ---- MSG ----
+        (4, 1) | (4, 5) => msg::dos_put_message,
+        (4, 2) | (4, 6) => msg::dos_true_get_message,
+        (4, 3) | (4, 4) => msg::dos_ins_message,
+        (4, 7) | (4, 8) => msg::dos_query_message_cp,
+        // ---- NLS ----
+        (5, 1) | (5, 7) => nls::dos_case_map,
+        (5, 2) | (5, 8) => nls::dos_get_collate,
+        (5, 3) | (5, 5) => nls::dos_get_ctry_info,
+        (5, 4) | (5, 6) => nls::dos_get_dbcs_env,
+        // ---- More DOSCALLS ----
+        (0, 13) => ok,  // DosHoldSignal
+        (0, 14) => dos16_set_sig_handler,
+        (0, 43) => dos16_create_cs_alias,
+        (0, 52) | (0, 231) => dos_dev_config,
+        (0, 130) => dos16_get_cp,
+        (0, 153) | (0, 164) | (0, 288) | (0, 289) => dos_set_cp,
+        (0, 690) => ok, // DosSMSetTitle
+        (0, 712) => dos16_sm_pm_present,
         // ---- 16-bit DOSCALLS ----
         (0, 5) => dos16_exit,
         (0, 8) => dos16_get_info_seg,
@@ -567,5 +641,91 @@ fn dos_set_rel_max_fh(c: &mut Ctx) -> u32 {
     // Report the current maximum.
     let n = c.process.handles.lock().len().max(20) as u32;
     c.write_u32(c.arg(1), n);
+    0
+}
+
+// ---- Code pages ----
+
+fn dos16_get_cp(c: &mut Ctx) -> u32 {
+    let (cb, p, pcb) = (c.arg(0), c.ptr(1), c.ptr(2));
+    let cps = [850u16, 850, 437];
+    let n = (cb as usize / 2).min(cps.len());
+    for (i, cp) in cps.iter().take(n).enumerate() {
+        c.write_u16(p + 2 * i as u32, *cp);
+    }
+    c.write_u16(pcb, (n * 2) as u16);
+    if n < cps.len() { err::BUFFER_OVERFLOW } else { 0 }
+}
+
+fn dos_set_cp(c: &mut Ctx) -> u32 {
+    match c.arg(0) {
+        437 | 850 => 0,
+        _ => 472, // ERROR_INVALID_CODE_PAGE
+    }
+}
+
+// ---- Signals (16-bit) ----
+
+fn dos16_set_sig_handler(c: &mut Ctx) -> u32 {
+    // DosSetSigHandler(pfnSigHandler, ppfnPrev, pfAction, fAction, usSigNum)
+    let (pfn, pprev, pact, action, sig) = (c.arg(0), c.ptr(1), c.ptr(2), c.arg(3), c.arg(4));
+    if !(1..=7).contains(&sig) {
+        return err::INVALID_SIGNAL_NUMBER;
+    }
+    let mut t = c.process.signals.lock();
+    let old = t[sig as usize];
+    if action != 4 {
+        // SIGA_ACKNOWLEDGE (4) only re-enables delivery.
+        t[sig as usize] = (pfn, action);
+    }
+    drop(t);
+    if pprev != 0 {
+        c.write_u32(pprev, old.0);
+    }
+    if pact != 0 {
+        c.write_u16(pact, old.1 as u16);
+    }
+    0
+}
+
+// ---- Misc ----
+
+fn dos16_create_cs_alias(c: &mut Ctx) -> u32 {
+    let sel = c.arg(0) as u16;
+    let r = {
+        let mut sp = c.space();
+        let d = sp.descriptor(sel);
+        if d & (1 << 47) == 0 {
+            Err(err::INVALID_ACCESS)
+        } else {
+            sp.alias(vm::desc_base(d), vm::desc_limit(d), SegKind::Code16).map_err(|e| e.code())
+        }
+    };
+    match r {
+        Ok(alias) => {
+            c.write_u16(c.ptr(1), alias);
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+fn dos_dev_config(c: &mut Ctx) -> u32 {
+    let (p, item) = if c.is16 { (c.ptr(0), c.arg(1)) } else { (c.arg(0), c.arg(1)) };
+    let v: u8 = match item {
+        0 => 0,    // DEVINFO_PRINTER
+        1 => 1,    // DEVINFO_RS232
+        2 => 1,    // DEVINFO_FLOPPY
+        3 => 1,    // DEVINFO_COPROCESSOR
+        4 => 0,    // DEVINFO_SUBMODEL
+        5 => 0xfc, // DEVINFO_MODEL (AT)
+        6 => 1,    // DEVINFO_ADAPTER (colour)
+        _ => return err::INVALID_PARAMETER,
+    };
+    if c.write_u8(p, v) { 0 } else { err::INVALID_ADDRESS }
+}
+
+fn dos16_sm_pm_present(c: &mut Ctx) -> u32 {
+    c.write_u16(c.ptr(0), 0);
     0
 }

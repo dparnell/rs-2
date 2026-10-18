@@ -56,6 +56,10 @@ pub struct Process {
     pub exit_waiters: WaitQueue,
     /// Modules loaded with DosLoadModule (with use counts).
     pub loaded: SpinLock<Vec<(Arc<Module>, u32)>>,
+    /// Logical video buffer (VioGetBuf), 0 if none.
+    pub lvb: SpinLock<u32>,
+    /// 16-bit signal handlers: (far handler, action) per signal number.
+    pub signals: SpinLock<[(u32, u32); 8]>,
     /// Open directory searches (DosFindFirst handles).
     pub searches: SpinLock<alloc::collections::BTreeMap<u32, crate::api::file::Search>>,
 }
@@ -188,6 +192,8 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         exit_waiters: WaitQueue::new(),
         loaded: SpinLock::new(Vec::new()),
         searches: SpinLock::new(alloc::collections::BTreeMap::new()),
+        lvb: SpinLock::new(0),
+        signals: SpinLock::new([(0, 0); 8]),
     });
     let stack_bottom = stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000));
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;

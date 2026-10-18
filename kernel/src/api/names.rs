@@ -1,14 +1,26 @@
 //! API names and conventions (from the generated table).
 
-use super::names_gen::{ALIASES, ENTRIES};
+use super::names_gen::{ALIASES, DOS_ALIASES, ENTRIES};
 
 fn find(module: u8, ordinal: u16) -> Option<&'static (u8, u16, bool, &'static str)> {
     ENTRIES.binary_search_by(|e| (e.0, e.1).cmp(&(module, ordinal))).ok().map(|i| &ENTRIES[i])
 }
 
+/// Map DOSCALLS ordinals that alias another module's API (implemented in
+/// DOSCALL1 under extra ordinals) to that API.
+pub fn canonical(module: u8, ordinal: u16) -> (u8, u16) {
+    if module == 0 {
+        if let Ok(i) = DOS_ALIASES.binary_search_by(|a| a.0.cmp(&ordinal)) {
+            return (DOS_ALIASES[i].1, DOS_ALIASES[i].2);
+        }
+    }
+    (module, ordinal)
+}
+
 /// Whether the entry uses the 16-bit far `_Pascal` convention. Unknown
 /// ordinals follow the module's general convention.
 pub fn is16(module: u8, ordinal: u16) -> bool {
+    let (module, ordinal) = canonical(module, ordinal);
     match find(module, ordinal) {
         Some(e) => e.2,
         None => module != 0 || ordinal < 200,

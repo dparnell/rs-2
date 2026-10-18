@@ -1,6 +1,12 @@
 """Generate kernel/src/api/names.rs from the OS/2 Toolkit import libraries.
 
-usage: python3 -I gen_api_names.py work/media/boot/toolkit/os2tk45/lib > kernel/src/api/names.rs
+usage: python3 -I gen_api_names.py TOOLKIT_LIB_DIR [DOSCALL1_ORDINALS_TSV] > kernel/src/api/names_gen.rs
+
+DOSCALL1_ORDINALS_TSV (ordinal, name, kind, obj:off, symbols) is produced by
+joining DOSCALL1.DLL's entry table with its .map file from the debug
+directory of the Warp CD. DOSCALL1 implements many 16-bit APIs (VIO, KBD,
+MSG, NLS, queues, sessions) under additional DOSCALLS ordinals; those become
+aliases of the canonical entries.
 
 For every module implemented behind the API gate it records each ordinal's
 display name, all import names (for import-by-name) and whether the entry
@@ -14,6 +20,7 @@ out = subprocess.run([sys.executable, '-I', os.path.join(here, 'omfimp.py')] + l
                      capture_output=True, text=True, check=True).stdout
 MODULES = ["DOSCALLS", "VIOCALLS", "KBDCALLS", "MOUCALLS", "MSG", "NLS", "SESMGR", "QUECALLS"]
 names = {}  # (mod, ord) -> set(names)
+forced16 = set()
 for line in out.splitlines():
     m, o, n = line.split('\t')
     m = m.upper()
@@ -22,6 +29,8 @@ for line in out.splitlines():
     names.setdefault((m, int(o)), set()).add(n)
 
 def is16(m, o, ns):
+    if m == 'DOSCALLS' and o in forced16:
+        return True
     up = [n.upper() for n in ns]
     if any(re.match(r'^[A-Z]+16', n) for n in up):
         return True
@@ -36,6 +45,34 @@ def display(ns):
     def score(n):
         return (n.isupper(), bool(re.match(r'^[A-Za-z]+(16|32)', n)), len(n), n)
     return sorted(ns, key=score)[0]
+
+# Extra DOSCALLS names and aliases from DOSCALL1.
+dos_alias = []  # (doscalls ordinal, target module index, target ordinal)
+if len(sys.argv) > 2:
+    by_name = {}
+    for (m, o), ns in names.items():
+        for n in ns:
+            by_name.setdefault(n.upper(), []).append((m, o))
+    for line in open(sys.argv[2]):
+        f = line.rstrip('\n').split('\t')
+        if len(f) < 5 or not f[4]:
+            continue
+        o = int(f[0])
+        kind = f[2]
+        syms = [x.lstrip('_').upper() for x in f[4].split(',')]
+        target = None
+        for sym in syms:
+            for (m, to) in by_name.get(sym, []):
+                if m != 'DOSCALLS':
+                    target = (MODULES.index(m), to)
+        if target and ('DOSCALLS', o) not in names:
+            dos_alias.append((o, target[0], target[1]))
+        if ('DOSCALLS', o) not in names:
+            # Record the name so the ordinal has a display name; mark the
+            # convention by the entry type.
+            names[('DOSCALLS', o)] = set(syms)
+            if kind == 'CallGate':
+                forced16.add(o)
 
 entries = []   # (mod_idx, ord, is16, display)
 aliases = []   # (MODULE, NAME_UPPER, ord)
@@ -52,6 +89,13 @@ print("/// (module index, ordinal, 16-bit convention, display name), sorted.")
 print("pub static ENTRIES: &[(u8, u16, bool, &str)] = &[")
 for e in entries:
     print(f'    ({e[0]}, {e[1]}, {"true" if e[2] else "false"}, "{e[3]}"),')
+print("];")
+print()
+print("/// DOSCALLS ordinals that alias an API of another module")
+print("/// (DOSCALLS ordinal, module index, ordinal), sorted.")
+print("pub static DOS_ALIASES: &[(u16, u8, u16)] = &[")
+for a in sorted(dos_alias):
+    print(f"    ({a[0]}, {a[1]}, {a[2]}),")
 print("];")
 print()
 print("/// (module, upper-case import name, ordinal), sorted.")

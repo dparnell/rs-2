@@ -89,8 +89,8 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
 fn start_init(program: &str, args: &str) {
     use alloc::string::ToString;
     let env = alloc::vec![
-        "PATH=C:\\;C:\\OS2".to_string(),
-        "DPATH=C:\\;C:\\OS2".to_string(),
+        "PATH=C:\\OS2;C:\\OS2\\SYSTEM;C:\\".to_string(),
+        "DPATH=C:\\OS2;C:\\OS2\\SYSTEM;C:\\".to_string(),
         "COMSPEC=C:\\CMD.EXE".to_string(),
         "OS2_SHELL=C:\\CMD.EXE".to_string(),
         "PROMPT=$i[$p]".to_string(),

@@ -657,6 +657,23 @@ impl AddressSpace {
         Some((n as u32 * PAGE, flags))
     }
 
+    /// Create an alias selector for `base` (DosCreateCSAlias and friends):
+    /// an otherwise unused tile whose LDT entry describes other memory.
+    pub fn alias(&mut self, base: u32, limit: u32, kind: SegKind) -> Result<u16, VmError> {
+        let tile = self.find_private(TILE).ok_or(VmError::NoMemory)?;
+        self.insert(Region {
+            base: tile,
+            size: PAGE,
+            flags: pag::READ | pag::EXECUTE,
+            pages: vec![PageState::Reserved; 1],
+            backing: Backing::Private,
+            seg: SegKind::None,
+            seg_limit: None,
+        });
+        self.ldt[(tile >> 16) as usize] = seg_descriptor(base, limit.min(0xffff), kind, pag::READ);
+        Ok(tile_selector(tile))
+    }
+
     /// Change a 16-bit segment's size (DosReallocSeg).
     pub fn set_seg_limit(&mut self, base: u32, limit: u32) {
         if let Some(r) = self.regions.get_mut(&base) {
