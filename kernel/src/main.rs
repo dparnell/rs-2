@@ -88,6 +88,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     if cmdline.split_whitespace().any(|w| w == "apitrace") {
         api::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
     }
+    drivers::hotplug::start();
     boot::start(cmdline);
     // This boot context is now the idle thread.
     loop {

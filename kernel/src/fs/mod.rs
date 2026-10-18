@@ -121,6 +121,14 @@ pub fn mount(drive: u8, fs: Arc<dyn FileSystem>) {
     DRIVES.lock()[drive as usize] = Some(fs);
 }
 
+/// Remove drive `d` (its medium went away). Open files keep the file
+/// system object; their I/O fails once the device is gone.
+pub fn unmount(drive: u8) {
+    if DRIVES.lock()[drive as usize].take().is_some() {
+        crate::println!("drive {}: removed", (b'A' + drive) as char);
+    }
+}
+
 pub fn drive(d: u8) -> Option<Arc<dyn FileSystem>> {
     if locked_by_other(d) {
         return None;

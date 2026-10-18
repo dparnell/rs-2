@@ -1,5 +1,6 @@
 //! Processes, threads and scheduling.
 
+pub mod kthread;
 pub mod process;
 pub mod sched;
 pub mod thread;

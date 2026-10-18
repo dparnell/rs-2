@@ -2,6 +2,7 @@
 
 pub mod ahci;
 pub mod hid;
+pub mod hotplug;
 pub mod hub;
 pub mod nvme;
 pub mod part;
@@ -24,7 +25,7 @@ fn is_fat_type(t: u8) -> bool {
     matches!(t, 0x01 | 0x04 | 0x06 | 0x0b | 0x0c | 0x0e | 0x14 | 0x16 | 0x1b | 0x1c | 0x1e | 0xef)
 }
 
-fn next_letter() -> Option<u8> {
+pub(crate) fn next_letter() -> Option<u8> {
     (2..26u8).find(|&d| crate::fs::drive(d).is_none())
 }
 
