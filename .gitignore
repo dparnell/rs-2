@@ -1,4 +1,4 @@
-/target
+target/
 /work
 .DS_Store
 /iso

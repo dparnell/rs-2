@@ -1,5 +1,0 @@
-cargo:rustc-link-arg=--defsym=__image_base=0x12000000
-cargo:rustc-link-arg=--undefined=TestAdd
-cargo:rustc-link-arg=--undefined=TestInitCount
-cargo:rustc-link-arg=--undefined=TestGreeting
-cargo:rerun-if-changed=exports.def
