@@ -2,41 +2,38 @@
 
 Status markers: done, in progress, planned.
 
-## Milestone 1: unmodified text-mode programs (in progress)
+## Milestone 1: unmodified text-mode programs (largely done)
 
 - done: UEFI boot, 64-bit kernel, framebuffer text screen, memory management
-- done: OS/2 address space (arenas, tiled LDT), processes, threads, scheduler
-- done: LX and NE loader, DLLs in the shared arena, API gate (16/32-bit)
-- done: first DOSCALLS; 16-bit NE (`MKSYSLVL.EXE`) and 32-bit LX (`MAPSYM.EXE`)
-  programs from the Warp CD run unmodified
-- in progress: VFS with drive letters, FAT, full file API (DosOpen family,
-  DosFind*, path info, attributes, extended attributes)
-- planned: semaphores (16-bit RAM/system, 32-bit event/mutex/muxwait),
-  DosCreateThread, critical sections, exit lists
-- planned: DosExecPgm / DosWaitChild / DosCWait, pipes, handle inheritance
-- planned: exception management (handler chains, DosRaiseException,
-  unwinding, guard pages, 16-bit DosSetVec), signals (Ctrl+C/Break)
-- planned: VIO (logical video buffers, popups), KBD, MOU, sessions
-- planned: MSG (message files) and NLS (country/code page data)
-- goal: the original CMD.EXE runs interactively; real DLL initialisation
+- done: OS/2 address space (arenas, tiled LDT), processes, threads,
+  scheduler, FPU/SSE state
+- done: LX and NE loader, DLLs in the shared arena, DLL initialisation,
+  API gate (16/32-bit conventions, DOSCALL1 aliases)
+- done: files (VFS, FAT, OS/2 paths and wildcards, share modes), pipes,
+  DosExecPgm/DosCWait, threads, 16- and 32-bit semaphores, exception
+  handling, exit lists, timers, queues, shared memory, resources,
+  Ctrl+C signals, module APIs, CONFIG.SYS processing
+- done: VIO, KBD, MSG (message files), NLS
+- done: the original CMD.EXE runs interactively; userland/apitest passes
+- planned: named pipes, sessions (DosStartSession, screen switching),
+  DosDevIOCtl coverage, bound message segments, DLL termination routines,
+  semaphore and memory corner cases found by running more programs
 
-## Milestone 2: storage and installed systems
+## Milestone 2: storage and installed systems (in progress)
 
-- PCI enumeration, ACPI (MADT, IOAPIC/LAPIC, power off), SMP
-- Disk drivers: AHCI, NVMe, virtio-blk, IDE/ATAPI; USB (xHCI, mass storage,
-  HID)
-- Partitioning: MBR, GPT, OS/2 LVM metadata
-- File systems: FAT12/16/32 (with OS/2 EAs), HPFS, JFS, ISO 9660/Joliet, UDF
-- Boot from an installed disk (UEFI and BIOS)
+- done: PCI, AHCI (SATA disks, ATAPI drives), MBR/GPT, FAT, ISO 9660
+- done: boot from an installed disk (UEFI)
+- planned: NVMe, virtio-blk, USB (xHCI, mass storage, HID)
+- planned: ACPI (MADT, IOAPIC/LAPIC, shutdown), SMP
+- planned: HPFS and JFS, extended attributes, OS/2 LVM metadata
 
-## Milestone 3: rs2 user space
+## Milestone 3: rs2 user space (in progress)
 
-- `rs2-link`: build genuine LX executables and DLLs from Rust (i686)
-- Own implementations of system DLLs that are user-mode in OS/2
-  (DOSCALL1 helpers, MSG/NLS data, REXX later)
-- Own CMD.EXE and the base utilities (DIR, COPY, XCOPY, ATTRIB, CHKDSK,
-  FORMAT, FDISK/LVM, ...)
-- Own message files and country data
+- done: `elf2lx` toolchain (Rust/i686 to LX executables and DLLs)
+- done: CMD.EXE (internal commands, batch files, pipes, redirection),
+  MORE, FIND, SORT, ATTRIB, TREE, XCOPY, INSTALL
+- planned: CHKDSK, FORMAT, FDISK/LVM, LABEL, MODE and the rest of the base
+  utilities; own message files (OSO001.MSG) and country data; REXX
 
 ## Milestone 4: Presentation Manager
 
@@ -45,10 +42,11 @@ Status markers: done, in progress, planned.
   PMSHAPI, help manager
 - SOM runtime and the Workplace Shell
 
-## Milestone 5: install media
+## Milestone 5: install media (first version done)
 
-- Hybrid ISO/USB image (El Torito EFI + GPT), live session
-- Installer: partitioning, formatting, file copy, CONFIG.SYS, boot manager
+- done: hybrid ISO/USB image (El Torito EFI + MBR ESP), live session
+- done: installer (GPT + EFI system partition, FAT32, copy, restart)
+- planned: choice of partitions and file systems, BIOS boot, boot manager
 
 ## Later
 

@@ -40,6 +40,8 @@ struct Opts {
     system: bool,
     /// `run`: boot from the --hdd disk only (no ESP directory).
     boot_hdd: bool,
+    /// Build the distributable system (no development files).
+    dist: bool,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -56,6 +58,7 @@ fn parse(args: &[String]) -> Opts {
         hdd: None,
         system: false,
         boot_hdd: false,
+        dist: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -72,6 +75,7 @@ fn parse(args: &[String]) -> Opts {
             }
             "--system" => o.system = true,
             "--boot-hdd" => o.boot_hdd = true,
+            "--dist" => o.dist = true,
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
@@ -172,13 +176,14 @@ fn build(o: &Opts) -> Option<PathBuf> {
     copy(&kernel.join("rs2-kernel"), &esp.join("RS2/KERNEL"));
     strip(&esp.join("RS2/KERNEL"));
     let cmdline = root().join("work/cmdline.txt");
-    if cmdline.exists() {
+    if cmdline.exists() && !o.dist {
         copy(&cmdline, &esp.join("RS2/CMDLINE"));
     }
     // rs2 user programs (Rust, i686) converted to LX.
     let userland = build_userland()?;
-    // Drive C: as a FAT image built from work/modules.txt.
-    let list = root().join("work/modules.txt");
+    // Drive C: as a FAT image built from work/modules.txt (development)
+    // or dist/manifest.txt (distribution: rs2's own files only).
+    let list = if o.dist { root().join("dist/manifest.txt") } else { root().join("work/modules.txt") };
     if let Ok(text) = std::fs::read_to_string(&list) {
         let mut files = image::manifest(&root(), &text);
         files.extend(userland);
@@ -198,14 +203,14 @@ const USER_PROGRAMS: &[(&str, &str)] =
     &[
         ("apitest", "RS2\\APITEST.EXE"),
         ("testdll", "RS2\\TESTDLL.DLL"),
-        ("cmd", "RS2\\CMD.EXE"),
+        ("cmd", "OS2\\CMD.EXE"),
         ("more", "OS2\\MORE.EXE"),
         ("find", "OS2\\FIND.EXE"),
         ("sort", "OS2\\SORT.EXE"),
         ("attrib", "OS2\\ATTRIB.EXE"),
         ("tree", "OS2\\TREE.EXE"),
         ("xcopy", "OS2\\XCOPY.EXE"),
-        ("install", "RS2\\INSTALL.EXE"),
+        ("install", "OS2\\INSTALL.EXE"),
     ];
 
 /// Build the userland workspace and convert each program to LX.

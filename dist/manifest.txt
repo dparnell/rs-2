@@ -1,0 +1,4 @@
+# Files of the rs2 boot volume (paths relative to the repository root).
+# Programs built from userland/ are added by xtask.
+dist/CONFIG.SYS -> CONFIG.SYS
+dist/README.TXT -> README.TXT
