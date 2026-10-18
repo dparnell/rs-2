@@ -37,7 +37,10 @@ Status markers: done, in progress, planned.
 - done: `elf2lx` toolchain (Rust/i686 to LX executables and DLLs)
 - done: CMD.EXE (internal commands, batch files, pipes, redirection),
   MORE, FIND, SORT, ATTRIB, TREE, XCOPY, INSTALL
-- planned: CHKDSK, FORMAT, FDISK/LVM, LABEL, MODE and the rest of the base
+- done: LABEL, CHKDSK (FAT check and /F repair; HPFS read-only scan),
+  FORMAT (FAT, HPFS) on DASD handles and the category 8 disk IOCtls, MODE
+  (screen mode through a 16-bit VIO thunk), HELP
+- planned: CHKDSK repair for HPFS, FDISK/LVM and the rest of the base
   utilities; own message files (OSO001.MSG) and country data; REXX
 
 ## Milestone 4: Presentation Manager
