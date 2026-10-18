@@ -14,6 +14,10 @@ programs unmodified, natively, on 64-bit PCs.
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 
+![The rs2 live system: the command interpreter running ver and dir](docs/images/rs2-shell.png)
+
+*The live ISO booted in QEMU.*
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and
 [docs/ROADMAP.md](docs/ROADMAP.md) for what is done and what is next.
 
