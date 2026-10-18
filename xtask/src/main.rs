@@ -7,7 +7,7 @@
 //!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
-//! cargo xtask disk [--hpfs] [-o FILE]       test hard disk from work/disk.txt
+//! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
 //! ```
 //!
 //! Extra files for `\RS2\MODULES` are listed in `work/modules.txt`, one path
@@ -62,6 +62,7 @@ struct Opts {
     dist: bool,
     /// `disk`: an HPFS partition instead of FAT.
     hpfs: bool,
+    fat32: bool,
     /// `run`: add an xHCI controller with a USB keyboard / mouse.
     usb_kbd: bool,
     usb_mouse: bool,
@@ -90,6 +91,7 @@ fn parse(args: &[String]) -> Opts {
         boot_hdd: false,
         dist: false,
         hpfs: false,
+        fat32: false,
         usb_kbd: false,
         usb_mouse: false,
         usb_disks: vec![],
@@ -112,6 +114,7 @@ fn parse(args: &[String]) -> Opts {
             "--boot-hdd" => o.boot_hdd = true,
             "--dist" => o.dist = true,
             "--hpfs" => o.hpfs = true,
+            "--fat32" => o.fat32 = true,
             "--usb-kbd" => o.usb_kbd = true,
             "--usb-mouse" => o.usb_mouse = true,
             "--usb-hub" => o.usb_hubs += 1,
@@ -194,7 +197,7 @@ fn main() -> ExitCode {
             let img = if o.hpfs && !o.system {
                 hpfsimg::disk(&files, "RS2HPFS", 64)
             } else {
-                image::disk(&files, "RS2DISK", 64)
+                image::disk(&files, "RS2DISK", 64, o.fat32.then_some(fat::FatType::Fat32))
             };
             std::fs::write(&out, img).unwrap();
             println!("wrote {}", out.display());

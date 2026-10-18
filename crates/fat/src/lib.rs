@@ -1602,6 +1602,34 @@ mod tests {
         assert!(v.read_eas(&v.lookup("OS2KRNL").unwrap()).unwrap().iter().any(|e| e.name == b".TYPE"));
     }
 
+    /// Test disks built by `cargo xtask disk` (and written by rs2 in QEMU):
+    /// check them, EAs included, if present.
+    #[test]
+    fn xtask_disk_images() {
+        for name in ["disk.img", "t16.img", "f32.img"] {
+            let path = std::format!("{}/../../work/{name}", env!("CARGO_MANIFEST_DIR"));
+            let Ok(img) = std::fs::read(&path) else { continue };
+            let mut v = Volume::mount(Mem(RefCell::new(img[2048 * 512..].to_vec()))).unwrap();
+            let (f, t) = scan(&mut v, false);
+            assert!(f.is_empty(), "{path}: {f:?}");
+            let mut with_eas = 0;
+            let mut stack = std::vec![v.root_dir()];
+            while let Some(d) = stack.pop() {
+                for e in v.read_dir(d).unwrap() {
+                    if e.is_dir() {
+                        stack.push(Dir::Cluster(e.cluster));
+                    }
+                    let eas = v.read_eas(&e).unwrap();
+                    if !eas.is_empty() {
+                        with_eas += 1;
+                        std::println!("{name}: {}: {:?}", e.name, eas.iter().map(|x| std::string::String::from_utf8_lossy(&x.name).into_owned()).collect::<Vec<_>>());
+                    }
+                }
+            }
+            std::println!("{path}: {:?}, {} files, {} with EAs, {} EA clusters", v.fat_type, t.files, with_eas, t.ea_clusters);
+        }
+    }
+
     #[test]
     fn os2_boot_floppy() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../work/media/client/bootimgs/disk_0_1.img");

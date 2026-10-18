@@ -97,13 +97,13 @@ pub fn manifest(root: &Path, text: &str) -> FileList {
 
 /// An MBR-partitioned disk image with one FAT partition (starting at
 /// sector 2048) holding `files`.
-pub fn disk(files: &FileList, label: &str, size_mb: u64) -> Vec<u8> {
+pub fn disk(files: &FileList, label: &str, size_mb: u64, fat_type: Option<fat::FatType>) -> Vec<u8> {
     let total = (size_mb << 20) as usize;
     let start = 2048usize;
     let part_bytes = total - start * 512;
     // Build the partition contents with the hidden-sector count set.
     let part = MemDisk(RefCell::new(vec![0u8; part_bytes]));
-    fat::format(&part, &fat::FormatParams { label, serial: 0x2026_1018, fat_type: None, hidden_sectors: start as u32 })
+    fat::format(&part, &fat::FormatParams { label, serial: 0x2026_1018, fat_type, hidden_sectors: start as u32 })
         .expect("format");
     let mut vol = fat::Volume::mount(part).expect("mount");
     let ts = now();

@@ -677,15 +677,29 @@ fn readonly_mount() {
 /// the kernel in QEMU): check its consistency if present.
 #[test]
 fn xtask_disk_image() {
-    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../work/hpfs.img");
-    let Ok(img) = std::fs::read(path) else { return };
-    let part = img[2048 * 512..].to_vec();
-    let mut v = Volume::mount(Mem(RefCell::new(part))).unwrap();
-    let mut c = Check::default();
-    let root = v.root;
-    c.dir(&mut v, root, true);
-    assert_eq!(v.band.count - v.free_dir_band_dnodes(), c.band);
-    std::println!("{path}: {} files, {} directories", c.files, c.dirs);
+    for name in ["hpfs.img", "h.img"] {
+        let path = format!("{}/../../work/{name}", env!("CARGO_MANIFEST_DIR"));
+        let Ok(img) = std::fs::read(&path) else { continue };
+        let part = img[2048 * 512..].to_vec();
+        let mut v = Volume::mount(Mem(RefCell::new(part))).unwrap();
+        let mut c = Check::default();
+        let root = v.root;
+        c.dir(&mut v, root, true);
+        assert_eq!(v.band.count - v.free_dir_band_dnodes(), c.band);
+        let mut with_eas = Vec::new();
+        let mut stack = std::vec![v.lookup("").unwrap()];
+        while let Some(d) = stack.pop() {
+            for e in v.read_dir(&d).unwrap() {
+                if !v.read_eas(&e).unwrap().is_empty() {
+                    with_eas.push(e.name.clone());
+                }
+                if e.is_dir() {
+                    stack.push(e);
+                }
+            }
+        }
+        std::println!("{path}: {} files, {} directories, EAs on {with_eas:?}", c.files, c.dirs);
+    }
 }
 
 #[test]
