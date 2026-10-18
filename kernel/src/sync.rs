@@ -6,6 +6,15 @@ use core::sync::atomic::{AtomicBool, Ordering};
 
 use crate::arch;
 
+/// Spin locks held right now (one CPU). A thread must never block with
+/// one held: the scheduler checks this (see [held_spin_locks]).
+static HELD: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Number of spin locks currently held.
+pub fn held_spin_locks() -> u32 {
+    HELD.load(Ordering::Relaxed)
+}
+
 /// A spin lock that also disables interrupts while held, so it can be
 /// shared between thread context and interrupt handlers.
 pub struct SpinLock<T> {
@@ -31,6 +40,7 @@ impl<T> SpinLock<T> {
         {
             core::hint::spin_loop();
         }
+        HELD.fetch_add(1, Ordering::Relaxed);
         SpinGuard { lock: self, irq }
     }
 
@@ -38,6 +48,7 @@ impl<T> SpinLock<T> {
         let irq = arch::interrupts_enabled();
         arch::disable_interrupts();
         if self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {
+            HELD.fetch_add(1, Ordering::Relaxed);
             Some(SpinGuard { lock: self, irq })
         } else {
             if irq {
@@ -73,6 +84,7 @@ impl<T> DerefMut for SpinGuard<'_, T> {
 
 impl<T> Drop for SpinGuard<'_, T> {
     fn drop(&mut self) {
+        HELD.fetch_sub(1, Ordering::Relaxed);
         self.lock.locked.store(false, Ordering::Release);
         if self.irq {
             arch::enable_interrupts();

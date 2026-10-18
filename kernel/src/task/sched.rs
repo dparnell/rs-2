@@ -43,6 +43,7 @@ static SCHED: SpinLock<Sched> = SpinLock::new(Sched {
 });
 
 static NEED_RESCHED: AtomicBool = AtomicBool::new(false);
+static LOCK_WARNED: AtomicBool = AtomicBool::new(false);
 
 global_asm!(
     r#"
@@ -253,6 +254,15 @@ pub fn maybe_preempt() {
 
 /// Pick the next thread and switch to it.
 pub fn schedule() {
+    // Switching away while holding a spin lock would leave it locked for
+    // the next thread, which then spins forever with interrupts off.
+    let held = crate::sync::held_spin_locks();
+    if held != 0 && !LOCK_WARNED.swap(true, Ordering::Relaxed) {
+        crate::println!("[scheduler: switching with {held} spin lock(s) held]");
+        let rbp: u64;
+        unsafe { core::arch::asm!("mov {}, rbp", out(reg) rbp) };
+        crate::backtrace(rbp);
+    }
     let was = arch::interrupts_enabled();
     arch::disable_interrupts();
     let (prev, next) = {
