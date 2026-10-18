@@ -25,6 +25,10 @@ impl BlockDev for Partition {
         self.dev.sector_size()
     }
 
+    fn usb_device(&self) -> Option<crate::drivers::xhci::Handle> {
+        self.dev.usb_device()
+    }
+
     fn sector_count(&self) -> u64 {
         self.count
     }

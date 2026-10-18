@@ -436,6 +436,10 @@ impl BlockDev for Lun {
         self.block
     }
 
+    fn usb_device(&self) -> Option<xhci::Handle> {
+        Some(self.bot.dev.handle)
+    }
+
     fn sector_count(&self) -> u64 {
         self.blocks
     }

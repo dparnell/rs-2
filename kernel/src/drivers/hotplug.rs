@@ -2,6 +2,9 @@
 //! are connected after boot, mounts their volumes on the next free drive
 //! letters and unmounts them again when the device is removed.
 //!
+//! Volumes of sticks that were already there at boot are unmounted on
+//! removal too.
+//!
 //! The xHCI driver notices connects and removals in its polling (timer
 //! interrupt) and posts them to `xhci::STORAGE_EVENTS`; setting up a device
 //! needs SCSI commands that wait for transfers, so it runs here in thread
@@ -92,7 +95,18 @@ fn removed(h: Handle) {
         let mut m = MOUNTED.lock();
         m.iter().position(|e| e.0 == h).map(|i| m.remove(i))
     };
-    let Some((_, letters, devs)) = entry else { return };
+    let Some((_, letters, devs)) = entry else {
+        // A stick that was there at boot: its volumes were mounted with
+        // the other disks.
+        for d in 0..26u8 {
+            let dev = crate::fs::drive(d).and_then(|fs| fs.device());
+            if dev.is_some_and(|x| x.usb_device() == Some(h)) {
+                crate::fs::unmount(d);
+            }
+        }
+        super::DISKS.lock().retain(|x| x.usb_device() != Some(h));
+        return;
+    };
     for d in letters {
         crate::fs::unmount(d);
     }
