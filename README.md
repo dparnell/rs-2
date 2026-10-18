@@ -9,7 +9,7 @@ programs unmodified, natively, on 64-bit PCs.
 - The OS/2 kernel API (DOSCALLS: files, memory, processes, threads,
   semaphores, exceptions, timers, queues, shared memory, pipes, modules,
   resources, signals) plus VIO, KBD, MSG and NLS.
-- UEFI boot from CD, USB stick or hard disk; AHCI, partitions (MBR/GPT),
+- UEFI boot from CD, USB stick or hard disk; AHCI, NVMe, partitions (MBR/GPT),
   FAT and ISO 9660.
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.

@@ -24,8 +24,10 @@ Status markers: done, in progress, planned.
 
 - done: PCI, AHCI (SATA disks, ATAPI drives), MBR/GPT, FAT, ISO 9660
 - done: boot from an installed disk (UEFI)
-- planned: NVMe, virtio-blk, USB (xHCI, mass storage, HID)
-- planned: ACPI (MADT, IOAPIC/LAPIC, shutdown), SMP
+- done: NVMe (polled)
+- planned: virtio-blk, USB (xHCI, mass storage, HID), NVMe interrupts
+- done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
+- planned: SMP, MSI/MSI-X
 - planned: HPFS and JFS, extended attributes, OS/2 LVM metadata
 
 ## Milestone 3: rs2 user space (in progress)
