@@ -77,6 +77,15 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (5, 2) | (5, 8) => nls::dos_get_collate,
         (5, 3) | (5, 5) => nls::dos_get_ctry_info,
         (5, 4) | (5, 6) => nls::dos_get_dbcs_env,
+        // ---- QUECALLS (16-bit 1-8, 32-bit 9-16) ----
+        (7, 1) | (7, 9) => super::queue::dos_read_queue,
+        (7, 2) | (7, 10) => super::queue::dos_purge_queue,
+        (7, 3) | (7, 11) => super::queue::dos_close_queue,
+        (7, 4) | (7, 12) => super::queue::dos_query_queue,
+        (7, 5) | (7, 13) => super::queue::dos_peek_queue,
+        (7, 6) | (7, 14) => super::queue::dos_write_queue,
+        (7, 7) | (7, 15) => super::queue::dos_open_queue,
+        (7, 8) | (7, 16) => super::queue::dos_create_queue,
         // ---- More DOSCALLS ----
         (0, 13) => ok,  // DosHoldSignal
         (0, 14) => dos16_set_sig_handler,
@@ -144,6 +153,21 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 163) | (0, 323) => super::module::dos_query_app_type,
         (0, 321) => super::module::dos_query_proc_addr,
         (0, 586) => super::module::dos_query_proc_type,
+        (0, 29) => super::timer::dos16_timer_async,
+        (0, 30) => super::timer::dos16_timer_start,
+        (0, 31) | (0, 290) => super::timer::dos_stop_timer,
+        (0, 350) => super::timer::dos_async_timer,
+        (0, 351) => super::timer::dos_start_timer,
+        (0, 362) => super::timer::dos_tmr_query_freq,
+        (0, 363) => super::timer::dos_tmr_query_time,
+        (0, 35) => super::shmem::dos16_alloc_shr_seg,
+        (0, 36) => super::shmem::dos16_get_shr_seg,
+        (0, 37) => super::shmem::dos16_give_seg,
+        (0, 121) => super::shmem::dos16_get_seg,
+        (0, 300) => super::shmem::dos_alloc_shared_mem,
+        (0, 301) => super::shmem::dos_get_named_shared_mem,
+        (0, 302) => super::shmem::dos_get_shared_mem,
+        (0, 303) => super::shmem::dos_give_shared_mem,
         (0, 690) => ok, // DosSMSetTitle
         (0, 712) => dos16_sm_pm_present,
         // ---- 16-bit DOSCALLS ----
@@ -443,6 +467,17 @@ fn dos16_alloc_seg(c: &mut Ctx) -> u32 {
         0 => 0x10000,
         n => n,
     };
+    let flags = c.arg(2);
+    if flags & 3 != 0 {
+        // SEG_GIVEABLE (1) / SEG_GETTABLE (2): shared memory.
+        return match super::shmem::alloc_shared_seg(c, size, flags & 1 != 0, flags & 2 != 0) {
+            Ok(sel) => {
+                c.write_u16(c.ptr(1), sel);
+                0
+            }
+            Err(e) => e,
+        };
+    }
     let r = c.space().alloc(size, pag::READ | pag::WRITE | pag::COMMIT, SegKind::Data, None);
     match r {
         Ok(base) => {

@@ -108,6 +108,7 @@ pub fn resolve_user_fault(addr: u64, error: u64) -> bool {
 
 pub fn timer_tick(_f: &mut TrapFrame) {
     sched::tick();
+    crate::api::timer::tick();
     if crate::irq::ticks() % 250 == 0 {
         crate::infoseg::update();
     }

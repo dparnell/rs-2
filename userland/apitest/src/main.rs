@@ -32,6 +32,9 @@ fn main(s: &Startup) -> u32 {
     exceptions();
     pipes();
     dlls();
+    timers();
+    shared_memory();
+    queues();
     exit_list();
     let f = FAILS.load(Ordering::Relaxed);
     println!("apitest done: {f} failure(s)");
@@ -282,5 +285,71 @@ fn dlls() {
         let rc = DosLoadModule(null_mut(), 0, b"NOSUCH\0".as_ptr(), &mut h2);
         check("DosLoadModule missing", rc == 2 || rc == 126);
         check("DosFreeModule", DosFreeModule(h) == 0);
+    }
+}
+
+fn timers() {
+    unsafe {
+        let mut hev = 0;
+        DosCreateEventSem(null(), &mut hev, 0, 0);
+        let mut f = 0;
+        DosTmrQueryFreq(&mut f);
+        let mut t0 = 0u64;
+        DosTmrQueryTime(&mut t0);
+        let mut ht = 0;
+        check("DosAsyncTimer", DosAsyncTimer(100, hev, &mut ht) == 0);
+        check("timer posts event", DosWaitEventSem(hev, 2000) == 0);
+        let mut t1 = 0u64;
+        DosTmrQueryTime(&mut t1);
+        let ms = (t1 - t0) * 1000 / f as u64;
+        check("about 100 ms elapsed", (80..1000).contains(&ms));
+        let mut posts = 0;
+        DosResetEventSem(hev, &mut posts);
+        check("DosStartTimer", DosStartTimer(30, hev, &mut ht) == 0);
+        DosSleep(200);
+        DosStopTimer(ht);
+        DosResetEventSem(hev, &mut posts);
+        check("periodic timer posted several times", posts >= 3);
+        DosCloseEventSem(hev);
+    }
+}
+
+fn shared_memory() {
+    unsafe {
+        let mut p = null_mut();
+        let rc = DosAllocSharedMem(&mut p, b"\\SHAREMEM\\APITEST\0".as_ptr(), 8192, PAG_READ | PAG_WRITE | PAG_COMMIT);
+        check("DosAllocSharedMem named", rc == 0 && !p.is_null());
+        *p = 0x5a;
+        let mut q = null_mut();
+        let rc = DosGetNamedSharedMem(&mut q, b"\\SHAREMEM\\APITEST\0".as_ptr(), PAG_READ);
+        check("DosGetNamedSharedMem same address", rc == 0 && q == p && *q == 0x5a);
+        check("shared memory above private arena", p as u32 >= 0x0400_0000);
+        check("DosFreeMem shared", DosFreeMem(p) == 0);
+    }
+}
+
+fn queues() {
+    unsafe {
+        let mut hq = 0;
+        let rc = DosCreateQueue(&mut hq, QUE_PRIORITY, b"\\QUEUES\\APITEST\0".as_ptr());
+        check("DosCreateQueue", rc == 0);
+        let mut owner = 0;
+        let mut hq2 = 0;
+        check("DosOpenQueue", DosOpenQueue(&mut owner, &mut hq2, b"\\QUEUES\\APITEST\0".as_ptr()) == 0);
+        DosWriteQueue(hq2, 1, 5, b"low!!".as_ptr(), 1);
+        DosWriteQueue(hq2, 2, 5, b"high!".as_ptr(), 9);
+        let mut n = 0;
+        DosQueryQueue(hq, &mut n);
+        check("two elements queued", n == 2);
+        let mut req = RequestData::default();
+        let mut cb = 0;
+        let mut pb: *const u8 = null();
+        let mut prio = 0u8;
+        let rc = DosReadQueue(hq, &mut req, &mut cb, &mut pb, 0, 0, &mut prio, 0);
+        check("priority order", rc == 0 && req.data == 2 && prio == 9 && *pb == b'h');
+        DosReadQueue(hq, &mut req, &mut cb, &mut pb, 0, 0, &mut prio, 0);
+        let rc = DosReadQueue(hq, &mut req, &mut cb, &mut pb, 0, 1, &mut prio, 0);
+        check("empty queue no-wait", rc == 342);
+        check("DosCloseQueue", DosCloseQueue(hq) == 0);
     }
 }

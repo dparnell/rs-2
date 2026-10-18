@@ -289,3 +289,44 @@ unsafe extern "C" {
     #[link_name = "DOSCALLS.319"]
     pub fn DosQueryModuleHandle(name: *const u8, phmod: *mut u32) -> APIRET;
 }
+
+pub const OBJ_GIVEABLE: u32 = 0x0200;
+pub const OBJ_GETTABLE: u32 = 0x0100;
+pub const QUE_FIFO: u32 = 0;
+pub const QUE_PRIORITY: u32 = 2;
+
+#[repr(C)]
+#[derive(Default)]
+pub struct RequestData {
+    pub pid: u32,
+    pub data: u32,
+}
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.350"]
+    pub fn DosAsyncTimer(ms: u32, hsem: u32, ph: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.351"]
+    pub fn DosStartTimer(ms: u32, hsem: u32, ph: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.290"]
+    pub fn DosStopTimer(h: u32) -> APIRET;
+    #[link_name = "DOSCALLS.362"]
+    pub fn DosTmrQueryFreq(freq: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.363"]
+    pub fn DosTmrQueryTime(t: *mut u64) -> APIRET;
+    #[link_name = "DOSCALLS.300"]
+    pub fn DosAllocSharedMem(ppb: *mut *mut u8, name: *const u8, cb: u32, flags: u32) -> APIRET;
+    #[link_name = "DOSCALLS.301"]
+    pub fn DosGetNamedSharedMem(ppb: *mut *mut u8, name: *const u8, flags: u32) -> APIRET;
+    #[link_name = "QUECALLS.16"]
+    pub fn DosCreateQueue(phq: *mut u32, order: u32, name: *const u8) -> APIRET;
+    #[link_name = "QUECALLS.15"]
+    pub fn DosOpenQueue(ppid: *mut u32, phq: *mut u32, name: *const u8) -> APIRET;
+    #[link_name = "QUECALLS.14"]
+    pub fn DosWriteQueue(hq: u32, req: u32, cb: u32, pb: *const u8, prio: u32) -> APIRET;
+    #[link_name = "QUECALLS.9"]
+    pub fn DosReadQueue(hq: u32, req: *mut RequestData, pcb: *mut u32, ppb: *mut *const u8, elem: u32, wait: u32, prio: *mut u8, hsem: u32) -> APIRET;
+    #[link_name = "QUECALLS.12"]
+    pub fn DosQueryQueue(hq: u32, count: *mut u32) -> APIRET;
+    #[link_name = "QUECALLS.11"]
+    pub fn DosCloseQueue(hq: u32) -> APIRET;
+}

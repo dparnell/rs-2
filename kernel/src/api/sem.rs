@@ -796,3 +796,36 @@ pub fn dos16_close_sem(c: &mut Ctx) -> u32 {
     0
 }
 
+
+// ---- Hooks for timers (no calling process) ----
+
+/// Post a 32-bit event semaphore by handle.
+pub fn post_event_handle(h: u32) {
+    let Some(s) = TABLE.lock().sems.get(&h).cloned() else { return };
+    if let Kind::Event { posts } = &mut *s.kind.lock() {
+        if *posts < 0xffff {
+            *posts += 1;
+        }
+    }
+    s.waiters.wake_all();
+    wake_muxwaits();
+}
+
+pub fn is_event_handle(c: &Ctx, h: u32) -> bool {
+    get(c, h).is_some_and(|s| matches!(&*s.kind.lock(), Kind::Event { .. }))
+}
+
+/// Wake waiters of 16-bit RAM semaphores (after a timer cleared one).
+pub fn wake_16bit() {
+    RAM16_WAIT.wake_all();
+}
+
+/// Clear a 16-bit system semaphore by handle.
+pub fn clear_sys16(h: u32) {
+    if let Some(s) = SYS16.lock().get_mut(&(h & 0xffff)) {
+        s.owner = None;
+        s.count = 0;
+        s.set = false;
+    }
+    RAM16_WAIT.wake_all();
+}

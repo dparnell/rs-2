@@ -386,6 +386,8 @@ impl Process {
         }
         self.threads.lock().clear();
         crate::api::sem::process_ended(self.pid);
+        crate::api::timer::process_ended(self.pid);
+        crate::api::queue::process_ended(self.pid);
         // Close handles (pipes see their writers disappear).
         let hs = core::mem::take(&mut *self.handles.lock());
         drop(hs);
