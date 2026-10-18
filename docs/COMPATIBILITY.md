@@ -22,7 +22,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | CMD.EXE (IBM) | works | Interactive use, internal commands, pipes, redirection, `SET`, batch files (`FOR`, `IF`, `IF ERRORLEVEL`, `GOTO`, `SETLOCAL`/`ENDLOCAL`, `DETACH`), `DATE`/`TIME` set the clock, REXX `.CMD` files. |
 | CMD.EXE (rs2) | works | Runs REXX `.CMD` files through REXX.DLL when it is installed, and the IBM utilities. |
 | REXX (REXX.DLL, REXXAPI.DLL, REXXINIT.DLL) | works | `.CMD` files starting with `/* */` run through CMD. Tested: arithmetic, procedures/recursion, `PARSE`, `PULL` from the keyboard, the external data queue (`QUEUE`/`PUSH`/`PULL`/`QUEUED`), stream I/O (`LINEOUT`, `LINEIN`, `LINES`, `STREAM`), commands sent to CMD (`'dir'`, `rc`), `INTERPRET`, `SIGNAL ON SYNTAX`, `TIME('E')`, `RANDOM`, `VALUE(..., 'OS2ENVIRONMENT')`, error reports (`REX0040: Error 40 running ...`). A file with bare LF line ends gives REX0013, which is REXX's own behaviour. |
-| REXXUTIL.DLL | partial | `SysLoadFuncs` works; tested `SysCls`, `SysCurPos`, `SysTextScreenRead`, `SysTextScreenSize`, `SysSleep`, `SysGetKey`, `SysFileTree`, `SysFileDelete`, `SysMkDir`, `SysRmDir`, `SysDriveMap`, `SysTempFileName`, `SysBootDrive`, `SysVersion`, `SysOS2Ver`, `SysSearchPath`. `SysIni` fails (needs PMSHAPI/PMWIN). EA functions see no EAs. |
+| REXXUTIL.DLL | partial | `SysLoadFuncs` works; tested `SysCls`, `SysCurPos`, `SysTextScreenRead`, `SysTextScreenSize`, `SysSleep`, `SysGetKey`, `SysFileTree`, `SysFileDelete`, `SysMkDir`, `SysRmDir`, `SysDriveMap`, `SysTempFileName`, `SysBootDrive`, `SysVersion`, `SysOS2Ver`, `SysSearchPath`, `SysPutEA`, `SysGetEA` (on FAT16, FAT32 and HPFS). `SysIni` fails (needs PMSHAPI/PMWIN). |
 | REXXTRY.CMD | works | With an expression on the command line and interactively. |
 | RXQUEUE.EXE | works | `dir \| rxqueue`, then the queue read from another REXX process. |
 | RXSUBCOM.EXE | works | Usage text only. |
@@ -40,7 +40,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | CACHE.EXE | partial | `DosFSCtl` is not implemented; reports the error and default values. |
 | COMP.COM | works | Including the Y/N prompts. |
 | DISKCOMP.COM | works | Reports that it cannot use a hard disk (no diskette drive). |
-| EAUTIL.EXE | works | Files have no EAs (EAs are not stored yet). |
+| EAUTIL.EXE | works | Splits a file's EAs into a hold file (`/S`) and joins them back (`/J`) on FAT16, FAT32 and HPFS (16-bit `DosEnumAttribute`, `DosQFileInfo` level 3, `DosSetFileInfo` level 2). |
 | EJECT.EXE | works | Usage text. |
 | EXECMODE.EXE | works | Usage text. |
 | FIND.EXE | works | |
@@ -83,6 +83,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | PACK.EXE, PACK2.EXE | partial | PACK.MSG is not on the media. |
 | WORMS.EXE (sample) | works | Mouse pointer and clicks through MOUCALLS (Exit by clicking). |
 | TIMER0.EXE (sample) | works | Reports that the TIMER0$ sample driver is missing. |
+| EAS.EXE (sample) | not tested | The EA editor sample is a Presentation Manager program. |
 
 ## Fixed while getting these to run
 
@@ -125,6 +126,15 @@ Status: **works** = the tested function behaves as on OS/2;
   `DosAllocHuge`, `DosGetHugeShift`, `DosReadAsync`, `DosWriteAsync`,
   `DosQueryPathInfo` levels 4 and 6, `DosSetFileInfo`/`DosSetPathInfo`
   level 11.
+- Extended attributes are stored: on FAT12/16 in `EA DATA. SF` as OS/2
+  does, on FAT32 in FAT32.IFS-style `NAME EA. SF` files, on HPFS in the
+  F-node or outside it (see [formats/fat-ea.md](formats/fat-ea.md) and
+  [formats/hpfs.md](formats/hpfs.md)). Query/set with EAOP2 (and the
+  16-bit EAOP) in `DosQueryPathInfo`/`DosQueryFileInfo` levels 2-4,
+  `DosSetPathInfo`/`DosSetFileInfo` level 2, EAs at creation in `DosOpen`,
+  `DosOpenL`, `DosOpen2`, `DosCreateDir`, `DosMkDir2`, `DosFindFirst`
+  levels 2 and 3, `DosEnumAttribute`; `DosCopy` copies EAs and `DosMove`
+  keeps them; CHKDSK checks EA references.
 
 ## Missing or incomplete
 
@@ -132,8 +142,13 @@ Status: **works** = the tested function behaves as on OS/2;
   `DosSysCtl`, `DosQueryRASInfo`, `DosDumpProcess`,
   `DosSystemService`.
 - SYSLEVEL lists nothing yet: re-test now that DASD drive opens exist.
-- Extended attributes are not stored: `DosEnumAttribute` reports none and
-  EA writes are accepted and dropped.
+- Extended attributes: `ERROR_NEED_EAS_FOUND` is only reported by
+  `DosCopy` (critical EAs to a target without EA support); `DosOpen` does
+  not refuse files with critical EAs to programs that are not EA-aware.
+  The 16:16 EAOP2 of `Dos16OpenL` is assumed to point at an FEA2LIST
+  (unverified). IBM's CHKDSK could not check rs2-written FAT volumes
+  (`UFAT.DLL` is not on the media); the FAT32 EA flag values follow
+  FAT32.IFS from memory and are unverified against a real disk.
 - Bound message segments (MSGBIND) are not read: programs fall back to the
   message files, so they need OSO001.MSG and friends on disk.
 - `DosQuerySysState` reports no semaphores or shared memory.

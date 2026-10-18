@@ -36,8 +36,11 @@ Status markers: done, in progress, planned.
 - planned: virtio-blk, NVMe/xHCI interrupts, USB storage hot-plug mounting
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - planned: SMP, MSI/MSI-X
-- done: HPFS (read/write/format; extended attributes read-only)
-- planned: JFS, writing extended attributes, HPFS boot volumes, OS/2 LVM metadata
+- done: HPFS (read/write/format)
+- done: extended attributes on FAT12/16 (`EA DATA. SF`), FAT32
+  (FAT32.IFS-style EA files) and HPFS, with the EA APIs, DosCopy/DosMove
+  and CHKDSK checks
+- planned: JFS, HPFS boot volumes, OS/2 LVM metadata
 
 ## Milestone 3: rs2 user space (in progress)
 

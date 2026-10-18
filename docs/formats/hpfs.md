@@ -249,7 +249,18 @@ outside the list: EA flag 0x01 means the 8-byte value holds the length and
 first sector of the real value, flag 0x02 that this sector is an ALSEC
 tree. The DIRENT records the total EA size.
 
-rs2 reads EAs (`Volume::read_eas`; the kernel uses them for the FEA2LIST
-size reported with file information) and frees all EA and ACL storage when
-a file or directory is deleted; it never writes EAs, and keeps F-node EA
-areas untouched when it rewrites an F-node.
+The DIRENT records the total EA size (internal + external list bytes),
+sets flag 0x10 when there are EAs and 0x80 when some are NEEDEA; the F-node
+counts the NEEDEA EAs at 0xA4. Directories (the root included) have EAs in
+their F-nodes like files.
+
+rs2 reads all of these forms (`Volume::read_eas`). When it writes EAs
+(`Volume::write_eas`, which replaces the whole set) it frees the old
+storage, then stores the FEA list in the F-node if it fits (between the EA
+offset and the end of the sector, leaving room for internal ACLs, which
+follow the internal EAs and are kept), otherwise entirely outside: in one
+contiguous run if one is free, else in several runs described by an ALSEC
+tree (a single leaf ALSEC for up to 40 runs, or a root ALSEC over leaf
+ALSECs; the root's parent is the F-node, flag 0x20). Values are never
+stored indirectly. All EA and ACL storage is freed when a file or
+directory is deleted. A file's EAs are limited to 64 KB, as on OS/2.
