@@ -367,11 +367,16 @@ fn main() -> ExitCode {
                 None => (line.to_string(), next_ord),
             };
             next_ord = ord + 1;
+            // "Name=symbol": export a symbol under another name.
+            let (n, symname) = match n.split_once('=') {
+                Some((a, b)) => (a.trim().to_string(), b.trim().to_string()),
+                None => (n.clone(), n),
+            };
             let sym = elf
                 .symbols
                 .iter()
-                .find(|s| s.name == n && s.shndx != 0 && s.bind != 0)
-                .unwrap_or_else(|| panic!("export {n} not found"));
+                .find(|s| s.name == symname && s.shndx != 0 && s.bind != 0)
+                .unwrap_or_else(|| panic!("export {symname} not found"));
             let oi = object_in(&objects, sym.value).expect("export outside objects");
             exports.push((n, ord, oi as u16 + 1, sym.value - objects[oi].base));
         }

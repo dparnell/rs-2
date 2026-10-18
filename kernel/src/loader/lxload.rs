@@ -55,7 +55,9 @@ pub fn load(
             };
             if o.base % TILE == 0 && fits(o.base) {
                 o.base
-            } else if fixups_stripped {
+            } else if fixups_stripped && o.flags & oflags::RESOURCE == 0 {
+                // Resource objects are never fixed up, so they may go
+                // anywhere (linkers give them base 0).
                 return Err(err::NOT_ENOUGH_MEMORY);
             } else {
                 let mut b = vm::ARENA_START;

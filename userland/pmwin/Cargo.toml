@@ -1,0 +1,15 @@
+[package]
+name = "pmwin-dll"
+description = "PMWIN.DLL: Presentation Manager windows, messages and input (and the GPI engine)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmwin"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2", features = ["heap"] }
+gpi = { path = "../../crates/gpi" }
+pmwin = { path = "../../crates/pmwin" }

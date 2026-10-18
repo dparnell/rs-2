@@ -21,6 +21,10 @@ name = "fat"
 version = "0.1.0"
 
 [[package]]
+name = "gpi"
+version = "0.1.0"
+
+[[package]]
 name = "install"
 version = "0.1.0"
 dependencies = [
@@ -31,6 +35,29 @@ dependencies = [
 [[package]]
 name = "os2"
 version = "0.1.0"
+
+[[package]]
+name = "pmgpi-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "pmwin"
+version = "0.1.0"
+dependencies = [
+ "gpi",
+]
+
+[[package]]
+name = "pmwin-dll"
+version = "0.1.0"
+dependencies = [
+ "gpi",
+ "os2",
+ "pmwin",
+]
 
 [[package]]
 name = "testdll"

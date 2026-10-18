@@ -18,6 +18,10 @@ programs unmodified, natively, on 64-bit PCs.
 
 *The live ISO booted in QEMU.*
 
+![The OS/2 Toolkit's PM hello sample running on rs2's own PMWIN.DLL](docs/images/rs2-pm-hello.png)
+
+*An unmodified Presentation Manager sample on rs2's own PMWIN/PMGPI.*
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design and
 [docs/ROADMAP.md](docs/ROADMAP.md) for what is done and what is next.
 

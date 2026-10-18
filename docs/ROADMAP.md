@@ -44,8 +44,11 @@ Status markers: done, in progress, planned.
 - planned: CHKDSK, FORMAT, FDISK/LVM, LABEL, MODE and the rest of the base
   utilities; own message files (OSO001.MSG) and country data; REXX
 
-## Milestone 4: Presentation Manager
+## Milestone 4: Presentation Manager (started)
 
+- done: design (docs/PM.md); kernel display/input services (RS2API) and a
+  PM session; `crates/gpi` and `crates/pmwin`; PMWIN.DLL/PMGPI.DLL run the
+  Toolkit's `hello.exe` (windows, painting, mouse moves, closing)
 - Display driver model (GRADD-style) on the framebuffer, mouse pointer
 - PMWIN (windows, messages, controls, dialogs), PMGPI (graphics, fonts),
   PMSHAPI, help manager

@@ -51,9 +51,23 @@ foreground and receives raw input instead of the text keyboard queue.
 Switching to a text session and back makes the kernel post an event
 semaphore so PMWIN repaints everything.
 
+## Status
+
+Milestone 1 works: the unmodified Toolkit `hello.exe` shows its window,
+which can be moved by its title bar and closed with the system-menu
+button, after which the system returns to the text session. State is
+still per process (one PM application at a time), there are no menus or
+controls yet, and the frame is drawn by the frame window itself rather
+than by separate title-bar and button windows.
+
+Calling conventions: OS/2 compilers keep the stack 4-byte aligned while
+Rust code assumes 16, so every PMWIN export goes through a generated
+trampoline that aligns the stack (`tools/scripts/gen_pm_exports.py`, which
+also writes `exports.def` with the Toolkit's ordinals).
+
 ## Milestones
 
-1. `hello.exe` from the Toolkit samples (WinInitialize, message queue,
+1. (done) `hello.exe` from the Toolkit samples (WinInitialize, message queue,
    WinRegisterClass, WinCreateStdWindow, WinGetMsg/WinDispatchMsg,
    WinBeginPaint, WinFillRect, GpiCharStringAt, WinMessageBox) shows its
    window on a desktop, can be moved with the mouse and closed.

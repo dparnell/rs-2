@@ -271,6 +271,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("tree", "OS2\\TREE.EXE"),
         ("xcopy", "OS2\\XCOPY.EXE"),
         ("install", "OS2\\INSTALL.EXE"),
+        ("pmwin", "OS2\\DLL\\PMWIN.DLL"),
+        ("pmgpi", "OS2\\DLL\\PMGPI.DLL"),
     ];
 
 /// Build the userland workspace and convert each program to LX.

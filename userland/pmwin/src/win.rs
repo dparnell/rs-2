@@ -1,0 +1,939 @@
+//! Windows: classes, creation and destruction, positions, text, painting
+//! and the frame window.
+
+#![allow(non_snake_case)]
+
+use alloc::vec::Vec;
+
+use gpi::{Point, Rect};
+use pmwin::{ws, HWND_DESKTOP};
+
+use crate::color::{self, resolve};
+use crate::gpiapi::{self, PointL, RectL};
+use crate::msg::{post, send};
+use crate::pointer;
+use crate::state::{st, Class, Frame};
+
+pub const WM_CREATE: u32 = 0x0001;
+pub const WM_DESTROY: u32 = 0x0002;
+pub const WM_SHOW: u32 = 0x0005;
+pub const WM_SIZE: u32 = 0x0007;
+pub const WM_ACTIVATE: u32 = 0x000d;
+pub const WM_SETFOCUS: u32 = 0x000f;
+pub const WM_SYSCOMMAND: u32 = 0x0021;
+pub const WM_PAINT: u32 = 0x0023;
+pub const WM_TIMER: u32 = 0x0024;
+pub const WM_CLOSE: u32 = 0x0029;
+pub const WM_QUIT: u32 = 0x002a;
+pub const WM_MOUSEMOVE: u32 = 0x0070;
+pub const WM_BUTTON1DOWN: u32 = 0x0071;
+pub const WM_BUTTON1UP: u32 = 0x0072;
+pub const WM_CHAR: u32 = 0x007a;
+pub const SC_CLOSE: u32 = 0x8004;
+
+const SWP_SIZE: u32 = 0x0001;
+const SWP_MOVE: u32 = 0x0002;
+const SWP_ZORDER: u32 = 0x0004;
+const SWP_SHOW: u32 = 0x0008;
+const SWP_HIDE: u32 = 0x0010;
+const SWP_ACTIVATE: u32 = 0x0080;
+const HWND_TOP: u32 = 3;
+
+const FCF_TITLEBAR: u32 = 0x0001;
+const FCF_SYSMENU: u32 = 0x0002;
+const FCF_SIZEBORDER: u32 = 0x0008;
+const FCF_DLGBORDER: u32 = 0x0100;
+const FCF_BORDER: u32 = 0x0200;
+const FCF_SHELLPOSITION: u32 = 0x0400;
+const FID_CLIENT: u32 = 0x8008;
+
+const QW_NEXT: i32 = 0;
+const QW_PREV: i32 = 1;
+const QW_TOP: i32 = 2;
+const QW_BOTTOM: i32 = 3;
+const QW_OWNER: i32 = 4;
+const QW_PARENT: i32 = 5;
+
+/// Height of a frame's title bar.
+pub const TITLE_H: i32 = 22;
+
+fn cstr(p: *const u8) -> Vec<u8> {
+    if p.is_null() {
+        return Vec::new();
+    }
+    let mut v = Vec::new();
+    let mut i = 0;
+    loop {
+        let b = unsafe { *p.add(i) };
+        if b == 0 {
+            break;
+        }
+        v.push(b);
+        i += 1;
+    }
+    v
+}
+
+/// Class name argument: a string, or WC_* (0xffff00nn).
+fn class_name(p: *const u8) -> Vec<u8> {
+    let v = p as u32;
+    if v >> 16 == 0xffff {
+        return alloc::format!("#{}", v & 0xffff).into_bytes();
+    }
+    cstr(p)
+}
+
+// ---- Classes ----
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinRegisterClass(_hab: u32, name: *const u8, proc_: u32, style: u32, words: u32) -> u32 {
+    let s = st();
+    let name = class_name(name);
+    if name.is_empty() {
+        return 0;
+    }
+    match s.classes.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&name)) {
+        Some(c) => {
+            c.proc_ = proc_;
+            c.style = style;
+            c.words = words;
+        }
+        None => s.classes.push(Class { name, proc_, style, words }),
+    }
+    1
+}
+
+/// Built-in classes (frame) registered on initialisation.
+pub fn register_builtin() {
+    let s = st();
+    s.classes.push(Class { name: b"#1".to_vec(), proc_: frame_proc as *const () as u32, style: 0x20, words: 0 });
+}
+
+// ---- Creation and destruction ----
+
+#[allow(clippy::too_many_arguments)]
+fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, owner: u32, id: u32, ctl: u32) -> u32 {
+    let s = st();
+    let Some(c) = s.class(class) else { return 0 };
+    let (proc_, cstyle, words) = (c.proc_, c.style, c.words);
+    let queue = s.my_queue();
+    // Class styles CS_CLIPCHILDREN etc. are window styles too.
+    let style = style | (cstyle & 0x3e00_0000);
+    let class_id = s.classes.iter().position(|x| x.name.eq_ignore_ascii_case(class)).unwrap_or(0) as u32;
+    let Some(h) = s.desk.create(parent, owner, class_id, style, pos, id, queue, proc_, words.div_ceil(4) as usize + 1) else {
+        return 0;
+    };
+    if let Some(w) = s.desk.get_mut(h) {
+        w.text = text.to_vec();
+    }
+    if send(h, WM_CREATE, ctl, 0) != 0 {
+        // A non-zero result from WM_CREATE fails the creation.
+        destroy(h);
+        return 0;
+    }
+    if style & ws::VISIBLE != 0 {
+        let r = st().desk.screen_rect(h);
+        st().desk.invalidate_screen(r);
+    }
+    h
+}
+
+fn destroy(h: u32) {
+    let s = st();
+    if !s.desk.exists(h) || h == HWND_DESKTOP {
+        return;
+    }
+    let mut all = Vec::new();
+    collect(h, &mut all);
+    for &w in &all {
+        send(w, WM_DESTROY, 0, 0);
+    }
+    let s = st();
+    let r = s.desk.screen_rect(h);
+    let showing = s.desk.is_showing(h);
+    let gone = s.desk.destroy(h);
+    for g in &gone {
+        s.frames.remove(g);
+        s.timers.retain(|t| t.hwnd != *g);
+        if s.focus == *g {
+            s.focus = 0;
+        }
+        if s.active == *g {
+            s.active = 0;
+        }
+        if s.capture == *g {
+            s.capture = 0;
+        }
+        if s.drag.as_ref().is_some_and(|d| d.hwnd == *g) {
+            s.drag = None;
+        }
+    }
+    if showing {
+        s.desk.invalidate_screen(r);
+    }
+}
+
+fn collect(h: u32, out: &mut Vec<u32>) {
+    out.push(h);
+    let kids = st().desk.get(h).map_or(Vec::new(), |w| w.children.clone());
+    for k in kids {
+        collect(k, out);
+    }
+}
+
+/// WinCreateWindow(hwndParent, pszClass, pszName, flStyle, x, y, cx, cy,
+/// hwndOwner, hwndInsertBehind, id, pCtlData, pPresParams)
+#[unsafe(no_mangle)]
+pub extern "C" fn WinCreateWindow(
+    parent: u32,
+    class: *const u8,
+    name: *const u8,
+    style: u32,
+    x: i32,
+    y: i32,
+    cx: i32,
+    cy: i32,
+    owner: u32,
+    _behind: u32,
+    id: u32,
+    ctl: u32,
+    _pres: u32,
+) -> u32 {
+    let class = class_name(class);
+    let h = create(parent, &class, &cstr(name), style, Rect::new(x, y, x + cx, y + cy), owner, id, ctl);
+    if h != 0 && class == b"#1" {
+        st().frames.insert(h, Frame { fcf: ctl, client: 0 });
+    }
+    h
+}
+
+/// WinCreateStdWindow(hwndParent, flStyle, pflCreateFlags, pszClientClass,
+/// pszTitle, flClientStyle, hmod, idResources, phwndClient)
+#[unsafe(no_mangle)]
+pub extern "C" fn WinCreateStdWindow(
+    parent: u32,
+    style: u32,
+    pfl: *mut u32,
+    client_class: *const u8,
+    title: *const u8,
+    client_style: u32,
+    _hmod: u32,
+    id: u32,
+    phwnd_client: *mut u32,
+) -> u32 {
+    let fcf = if pfl.is_null() { 0 } else { unsafe { pfl.read_unaligned() } };
+    let s = st();
+    let mut pos = Rect::default();
+    if fcf & FCF_SHELLPOSITION != 0 {
+        let (w, h) = (s.surface.width, s.surface.height);
+        let off = 32 + s.cascade * 24;
+        s.cascade = (s.cascade + 1) % 8;
+        pos = Rect::new(off, h / 3 - off / 2, off + w * 3 / 5, h / 3 - off / 2 + h * 3 / 5);
+    }
+    let frame_style = style & !ws::VISIBLE | ws::CLIPCHILDREN | ws::CLIPSIBLINGS;
+    let frame = create(parent, b"#1", &cstr(title), frame_style, pos, 0, id, fcf);
+    if frame == 0 {
+        return 0;
+    }
+    st().frames.insert(frame, Frame { fcf, client: 0 });
+    let class = class_name(client_class);
+    if !class.is_empty() {
+        let client = create(frame, &class, b"", client_style | ws::VISIBLE, Rect::default(), frame, FID_CLIENT, 0);
+        if client == 0 {
+            destroy(frame);
+            return 0;
+        }
+        if let Some(f) = st().frames.get_mut(&frame) {
+            f.client = client;
+        }
+        if !phwnd_client.is_null() {
+            unsafe { phwnd_client.write_unaligned(client) };
+        }
+        layout(frame);
+    }
+    if style & ws::VISIBLE != 0 {
+        show(frame, true);
+        activate(frame);
+    }
+    frame
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinDestroyWindow(h: u32) -> u32 {
+    if !st().desk.exists(h) {
+        return 0;
+    }
+    destroy(h);
+    1
+}
+
+// ---- Position, visibility, z-order, activation ----
+
+/// Frame border width.
+fn border(fcf: u32) -> i32 {
+    if fcf & FCF_SIZEBORDER != 0 {
+        4
+    } else if fcf & FCF_DLGBORDER != 0 {
+        3
+    } else if fcf & FCF_BORDER != 0 {
+        1
+    } else {
+        0
+    }
+}
+
+/// Client rectangle of a frame, in frame coordinates.
+pub fn client_rect(frame: u32) -> Rect {
+    let s = st();
+    let fcf = s.frames.get(&frame).map_or(0, |f| f.fcf);
+    let (cx, cy) = s.desk.get(frame).map_or((0, 0), |w| (w.cx, w.cy));
+    let b = border(fcf);
+    let t = if fcf & FCF_TITLEBAR != 0 { TITLE_H } else { 0 };
+    Rect::new(b, b, (cx - b).max(b), (cy - b - t).max(b))
+}
+
+/// Place the frame's client inside the frame controls.
+fn layout(frame: u32) {
+    let Some(client) = st().frames.get(&frame).map(|f| f.client).filter(|&c| c != 0) else { return };
+    let r = client_rect(frame);
+    let old = st().desk.get(client).map(|w| (w.cx, w.cy)).unwrap_or((0, 0));
+    st().desk.set_pos(client, r.left, r.bottom, r.width(), r.height());
+    if old != (r.width(), r.height()) {
+        let pack = |a: i32, b: i32| (a as u32 & 0xffff) | (b as u32) << 16;
+        send(client, WM_SIZE, pack(old.0, old.1), pack(r.width(), r.height()));
+    }
+}
+
+fn show(h: u32, on: bool) {
+    let was = st().desk.get(h).is_some_and(|w| w.visible_style());
+    if was != on {
+        st().desk.set_visible(h, on);
+        send(h, WM_SHOW, on as u32, 0);
+    }
+}
+
+/// The top-level window (child of the desktop) containing `h`.
+pub fn top_level(h: u32) -> u32 {
+    let s = st();
+    let mut cur = h;
+    while let Some(w) = s.desk.get(cur) {
+        if w.parent == HWND_DESKTOP || w.parent == 0 {
+            return cur;
+        }
+        cur = w.parent;
+    }
+    cur
+}
+
+/// Make a top-level window active: on top, focus on its client.
+pub fn activate(h: u32) {
+    let top = top_level(h);
+    if top == HWND_DESKTOP || top == 0 {
+        return;
+    }
+    let s = st();
+    let old = s.active;
+    s.desk.to_top(top);
+    s.active = top;
+    let client = s.frames.get(&top).map_or(top, |f| if f.client != 0 { f.client } else { top });
+    if old != top {
+        if old != 0 && s.desk.exists(old) {
+            s.desk.invalidate(old, None, false);
+            send(old, WM_ACTIVATE, 0, old);
+        }
+        st().desk.invalidate(top, None, false);
+        send(top, WM_ACTIVATE, 1, top);
+    }
+    set_focus(client);
+}
+
+fn set_focus(h: u32) {
+    let old = st().focus;
+    if old == h {
+        return;
+    }
+    st().focus = h;
+    if old != 0 && st().desk.exists(old) {
+        send(old, WM_SETFOCUS, h, 0);
+    }
+    if h != 0 {
+        send(h, WM_SETFOCUS, old, 1);
+    }
+}
+
+/// WinSetWindowPos(hwnd, hwndInsertBehind, x, y, cx, cy, fl)
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32 {
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return 0 };
+    let (ox, oy, ocx, ocy) = (w.x, w.y, w.cx, w.cy);
+    let (nx, ny) = if fl & SWP_MOVE != 0 { (x, y) } else { (ox, oy) };
+    let (ncx, ncy) = if fl & SWP_SIZE != 0 { (cx, cy) } else { (ocx, ocy) };
+    if (nx, ny, ncx, ncy) != (ox, oy, ocx, ocy) {
+        s.desk.set_pos(h, nx, ny, ncx, ncy);
+        if s.frames.contains_key(&h) {
+            layout(h);
+        } else if (ncx, ncy) != (ocx, ocy) {
+            let pack = |a: i32, b: i32| (a as u32 & 0xffff) | (b as u32) << 16;
+            send(h, WM_SIZE, pack(ocx, ocy), pack(ncx, ncy));
+        }
+    }
+    if fl & SWP_SHOW != 0 {
+        show(h, true);
+    }
+    if fl & SWP_HIDE != 0 {
+        show(h, false);
+    }
+    if fl & SWP_ZORDER != 0 && behind == HWND_TOP {
+        st().desk.to_top(h);
+    }
+    if fl & SWP_ACTIVATE != 0 {
+        activate(h);
+    }
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinShowWindow(h: u32, on: u32) -> u32 {
+    if !st().desk.exists(h) {
+        return 0;
+    }
+    show(h, on != 0);
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetActiveWindow(_desk: u32, h: u32) -> u32 {
+    activate(h);
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryActiveWindow(_desk: u32) -> u32 {
+    st().active
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetFocus(_desk: u32, h: u32) -> u32 {
+    let top = top_level(h);
+    if top != st().active {
+        activate(top);
+    }
+    set_focus(h);
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinFocusChange(_desk: u32, h: u32, _fl: u32) -> u32 {
+    WinSetFocus(0, h)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryFocus(_desk: u32) -> u32 {
+    st().focus
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryWindowRect(h: u32, prcl: *mut RectL) -> u32 {
+    let Some(w) = st().desk.get(h) else { return 0 };
+    if prcl.is_null() {
+        return 0;
+    }
+    unsafe { prcl.write_unaligned(RectL::from(w.rect())) };
+    1
+}
+
+/// SWP: fl, cy, cx, y, x, hwndInsertBehind, hwnd, ulReserved1, ulReserved2.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryWindowPos(h: u32, pswp: *mut u32) -> u32 {
+    let Some(w) = st().desk.get(h) else { return 0 };
+    if pswp.is_null() {
+        return 0;
+    }
+    let vals = [0u32, w.cy as u32, w.cx as u32, w.y as u32, w.x as u32, 0, h, 0, 0];
+    for (i, v) in vals.into_iter().enumerate() {
+        unsafe { pswp.add(i).write_unaligned(v) };
+    }
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinIsWindow(_hab: u32, h: u32) -> u32 {
+    st().desk.exists(h) as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinIsWindowVisible(h: u32) -> u32 {
+    st().desk.is_showing(h) as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinEnableWindow(h: u32, on: u32) -> u32 {
+    let Some(w) = st().desk.get_mut(h) else { return 0 };
+    if on != 0 {
+        w.style &= !ws::DISABLED;
+    } else {
+        w.style |= ws::DISABLED;
+    }
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinIsWindowEnabled(h: u32) -> u32 {
+    st().desk.get(h).is_some_and(|w| w.style & ws::DISABLED == 0) as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinIsChild(h: u32, parent: u32) -> u32 {
+    (h != parent && st().desk.is_ancestor(parent, h)) as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWindowFromID(parent: u32, id: u32) -> u32 {
+    let s = st();
+    let Some(p) = s.desk.get(parent) else { return 0 };
+    p.children.iter().copied().find(|&c| s.desk.get(c).is_some_and(|w| w.id == id)).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryWindow(h: u32, cmd: i32) -> u32 {
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return 0 };
+    let siblings = s.desk.get(w.parent).map_or(Vec::new(), |p| p.children.clone());
+    let at = siblings.iter().position(|&c| c == h);
+    match cmd {
+        // QW_NEXT is the window below in z-order, QW_PREV the one above.
+        QW_NEXT => at.and_then(|i| i.checked_sub(1)).map_or(0, |i| siblings[i]),
+        QW_PREV => at.and_then(|i| siblings.get(i + 1).copied()).unwrap_or(0),
+        QW_TOP => w.children.last().copied().unwrap_or(0),
+        QW_BOTTOM => w.children.first().copied().unwrap_or(0),
+        QW_OWNER => w.owner,
+        QW_PARENT => w.parent,
+        _ => 0,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryDesktopWindow(_hab: u32, _hdc: u32) -> u32 {
+    HWND_DESKTOP
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetParent(h: u32, _parent: u32, _redraw: u32) -> u32 {
+    st().desk.exists(h) as u32
+}
+
+/// WinMapWindowPoints(hwndFrom, hwndTo, aptl, cwpt)
+#[unsafe(no_mangle)]
+pub extern "C" fn WinMapWindowPoints(from: u32, to: u32, pts: *mut PointL, n: i32) -> u32 {
+    let s = st();
+    let a = if from == 0 { Point::new(0, 0) } else { s.desk.origin(from) };
+    let b = if to == 0 { Point::new(0, 0) } else { s.desk.origin(to) };
+    if pts.is_null() {
+        return 0;
+    }
+    for i in 0..n.max(0) as usize {
+        unsafe {
+            let p = pts.add(i);
+            let mut v = p.read_unaligned();
+            v.x += a.x - b.x;
+            v.y += a.y - b.y;
+            p.write_unaligned(v);
+        }
+    }
+    1
+}
+
+// ---- Window text and words ----
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetWindowText(h: u32, text: *const u8) -> u32 {
+    let t = cstr(text);
+    let s = st();
+    let Some(w) = s.desk.get_mut(h) else { return 0 };
+    w.text = t;
+    s.desk.invalidate(h, None, false);
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32 {
+    let Some(w) = st().desk.get(h) else { return 0 };
+    if buf.is_null() || cch <= 0 {
+        return 0;
+    }
+    let n = w.text.len().min(cch as usize - 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(w.text.as_ptr(), buf, n);
+        *buf.add(n) = 0;
+    }
+    n as i32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryWindowTextLength(h: u32) -> i32 {
+    st().desk.get(h).map_or(0, |w| w.text.len() as i32)
+}
+
+/// Window words: QWL_USER (0) and the class's extra bytes at byte offsets;
+/// QWL_STYLE (-2), QWS_ID (-1).
+fn word_get(h: u32, index: i32) -> Option<u32> {
+    let w = st().desk.get(h)?;
+    match index {
+        -2 => Some(w.style),
+        -1 => Some(w.id),
+        i if i >= 0 => {
+            let (wi, sh) = (i as usize / 4, (i % 4) * 8);
+            let lo = *w.words.get(wi)? as u64;
+            let hi = w.words.get(wi + 1).copied().unwrap_or(0) as u64;
+            Some(((lo | hi << 32) >> sh) as u32)
+        }
+        _ => None,
+    }
+}
+
+fn word_set(h: u32, index: i32, v: u32, bytes: u32) -> bool {
+    let Some(w) = st().desk.get_mut(h) else { return false };
+    match index {
+        -2 => w.style = v,
+        -1 => w.id = v,
+        i if i >= 0 => {
+            let (wi, sh) = (i as usize / 4, (i % 4) as u32 * 8);
+            if wi + 1 >= w.words.len() + 1 && wi >= w.words.len() {
+                return false;
+            }
+            let lo = w.words[wi] as u64;
+            let hi = w.words.get(wi + 1).copied().unwrap_or(0) as u64;
+            let mask = if bytes == 4 { 0xffff_ffffu64 } else { 0xffff } << sh;
+            let val = ((lo | hi << 32) & !mask) | ((v as u64) << sh) & mask;
+            w.words[wi] = val as u32;
+            if let Some(h2) = w.words.get_mut(wi + 1) {
+                *h2 = (val >> 32) as u32;
+            }
+        }
+        _ => return false,
+    }
+    true
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryWindowULong(h: u32, index: i32) -> u32 {
+    word_get(h, index).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetWindowULong(h: u32, index: i32, v: u32) -> u32 {
+    word_set(h, index, v, 4) as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryWindowPtr(h: u32, index: i32) -> u32 {
+    word_get(h, index).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetWindowPtr(h: u32, index: i32, v: u32) -> u32 {
+    word_set(h, index, v, 4) as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryWindowUShort(h: u32, index: i32) -> u16 {
+    word_get(h, index).unwrap_or(0) as u16
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetWindowUShort(h: u32, index: i32, v: u16) -> u32 {
+    word_set(h, index, v as u32, 2) as u32
+}
+
+// ---- Painting ----
+
+/// WinBeginPaint(hwnd, hps, prclPaint): a presentation space clipped to
+/// the window's update region, which becomes valid.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
+    let s = st();
+    let Some(w) = s.desk.get_mut(h) else { return 0 };
+    let update = core::mem::take(&mut w.update);
+    let clip_children = w.style & ws::CLIPCHILDREN != 0;
+    let bounds = update.bounds();
+    let o = s.desk.origin(h);
+    let mut vis = s.desk.visible_region(h, clip_children);
+    let mut dev = update.clone();
+    dev.offset(o.x, o.y);
+    vis.intersect(&dev.bounds());
+    let clip: Vec<Rect> = vis.rects.iter().flat_map(|v| dev.rects.iter().map(move |u| v.intersect(u))).filter(|r| !r.is_empty()).collect();
+    if !prcl.is_null() {
+        unsafe { prcl.write_unaligned(RectL::from(bounds)) };
+    }
+    pointer::hide(s);
+    if hps != 0 {
+        if let Some(e) = gpiapi::entry(s, hps) {
+            e.ps.clip = clip;
+            e.ps.origin = o;
+        }
+        return hps;
+    }
+    gpiapi::create(s, h, o, clip)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
+    let s = st();
+    gpiapi::destroy(s, hps);
+    pointer::show(s);
+    1
+}
+
+/// WinGetPS(hwnd): a presentation space clipped to the visible region.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetPS(h: u32) -> u32 {
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return 0 };
+    let clip_children = w.style & ws::CLIPCHILDREN != 0;
+    let vis = s.desk.visible_region(h, clip_children);
+    let o = s.desk.origin(h);
+    gpiapi::create(s, h, o, vis.rects)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinReleasePS(hps: u32) -> u32 {
+    gpiapi::destroy(st(), hps) as u32
+}
+
+/// WinFillRect(hps, prcl, lColor)
+#[unsafe(no_mangle)]
+pub extern "C" fn WinFillRect(hps: u32, prcl: *const RectL, c: i32) -> u32 {
+    if prcl.is_null() {
+        return 0;
+    }
+    let r = unsafe { prcl.read_unaligned() }.rect();
+    let s = st();
+    let mut surface = s.surface;
+    pointer::hide(s);
+    let ok = gpiapi::entry(s, hps).map(|e| {
+        let rgb = if e.rgb_mode && c >= 0 { c as u32 } else { resolve(c) };
+        e.ps.fill_rect(&mut surface, r, rgb);
+    });
+    pointer::show(s);
+    ok.is_some() as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinInvalidateRect(h: u32, prcl: *const RectL, children: u32) -> u32 {
+    let s = st();
+    let h = if h == 0 { HWND_DESKTOP } else { h };
+    if !s.desk.exists(h) {
+        return 0;
+    }
+    let r = (!prcl.is_null()).then(|| unsafe { prcl.read_unaligned() }.rect());
+    s.desk.invalidate(h, r, children != 0);
+    1
+}
+
+/// WinInvalidateRegion(hwnd, hrgn, fIncludeChildren): regions are not
+/// supported yet, so the whole window is invalidated.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinInvalidateRegion(h: u32, _hrgn: u32, children: u32) -> u32 {
+    WinInvalidateRect(h, core::ptr::null(), children)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinValidateRect(h: u32, prcl: *const RectL, _children: u32) -> u32 {
+    let Some(w) = st().desk.get_mut(h) else { return 0 };
+    match (!prcl.is_null()).then(|| unsafe { prcl.read_unaligned() }.rect()) {
+        Some(r) => w.update.subtract(&r),
+        None => w.update = pmwin::Region::new(),
+    }
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinUpdateWindow(h: u32) -> u32 {
+    let mut guard = 0;
+    while st().desk.get(h).is_some_and(|w| !w.update.is_empty()) && guard < 4 {
+        send(h, WM_PAINT, 0, 0);
+        guard += 1;
+    }
+    1
+}
+
+/// WinDrawText(hps, cchText, lpchText, prcl, clrFore, clrBack, flCmd)
+#[unsafe(no_mangle)]
+pub extern "C" fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut RectL, fore: i32, back: i32, fl: u32) -> i32 {
+    const DT_CENTER: u32 = 0x100;
+    const DT_RIGHT: u32 = 0x200;
+    const DT_VCENTER: u32 = 0x400;
+    const DT_BOTTOM: u32 = 0x800;
+    const DT_ERASERECT: u32 = 0x8000;
+    const DT_TEXTATTRS: u32 = 0x40;
+    if text.is_null() || prcl.is_null() {
+        return 0;
+    }
+    let t = if cch < 0 { cstr(text) } else { unsafe { core::slice::from_raw_parts(text, cch as usize) }.to_vec() };
+    let r = unsafe { prcl.read_unaligned() }.rect();
+    let s = st();
+    let mut surface = s.surface;
+    let font = gpi::font::system();
+    let w = font.text_width(&t);
+    let x = if fl & DT_CENTER != 0 {
+        r.left + (r.width() - w) / 2
+    } else if fl & DT_RIGHT != 0 {
+        r.right - w
+    } else {
+        r.left
+    };
+    let y = if fl & DT_VCENTER != 0 {
+        r.bottom + (r.height() - font.height) / 2 + font.descender
+    } else if fl & DT_BOTTOM != 0 {
+        r.bottom + font.descender
+    } else {
+        r.top - font.height + font.descender
+    };
+    pointer::hide(s);
+    if let Some(e) = gpiapi::entry(s, hps) {
+        if fl & DT_ERASERECT != 0 {
+            let bg = if fl & DT_TEXTATTRS != 0 { e.ps.back_color } else { resolve(back) };
+            e.ps.fill_rect(&mut surface, r, bg);
+        }
+        let saved = (e.ps.color, e.ps.back_mix);
+        if fl & DT_TEXTATTRS == 0 {
+            e.ps.color = resolve(fore);
+        }
+        e.ps.back_mix = gpi::Mix::LeaveAlone;
+        let clip = e.ps.clip.clone();
+        e.ps.clip = clip.iter().map(|c| c.intersect(&r.offset(e.ps.origin.x, e.ps.origin.y))).collect();
+        e.ps.char_string_at(&mut surface, Point::new(x, y), &t);
+        e.ps.clip = clip;
+        (e.ps.color, e.ps.back_mix) = saved;
+    }
+    pointer::show(s);
+    t.len() as i32
+}
+
+// ---- The desktop and the frame window ----
+
+/// Paint the desktop's update region.
+pub fn paint_desktop() {
+    let s = st();
+    let Some(w) = s.desk.get_mut(HWND_DESKTOP) else { return };
+    if w.update.is_empty() {
+        return;
+    }
+    let update = core::mem::take(&mut w.update);
+    let vis = s.desk.visible_region(HWND_DESKTOP, true);
+    pointer::hide(s);
+    let c = color::sys(color::SYSCLR_BACKGROUND);
+    for v in &vis.rects {
+        for u in &update.rects {
+            s.surface.fill(v.intersect(u), c);
+        }
+    }
+    pointer::show(s);
+}
+
+fn frame_paint(h: u32) {
+    let hps = WinBeginPaint(h, 0, core::ptr::null_mut());
+    let s = st();
+    let fcf = s.frames.get(&h).map_or(0, |f| f.fcf);
+    let active = s.active == h;
+    let Some(w) = s.desk.get(h) else { return };
+    let (cx, cy) = (w.cx, w.cy);
+    let title = w.text.clone();
+    let mut surface = s.surface;
+    if let Some(e) = gpiapi::entry(s, hps) {
+        let b = border(fcf);
+        let full = Rect::new(0, 0, cx, cy);
+        e.ps.fill_rect(&mut surface, full, color::sys(if active { color::SYSCLR_ACTIVEBORDER } else { color::SYSCLR_INACTIVEBORDER }));
+        // Outline.
+        e.ps.color = 0x000000;
+        e.ps.move_to(Point::new(0, 0));
+        e.ps.draw_box(&mut surface, Point::new(cx - 1, cy - 1), true, false);
+        if fcf & FCF_TITLEBAR != 0 {
+            let t = Rect::new(b, cy - b - TITLE_H, cx - b, cy - b);
+            let tc = if active { color::SYSCLR_ACTIVETITLE } else { color::SYSCLR_INACTIVETITLE };
+            e.ps.fill_rect(&mut surface, t, color::sys(tc));
+            let mut text_left = t.left;
+            if fcf & FCF_SYSMENU != 0 {
+                // System menu button: a square with a bar.
+                let m = Rect::new(t.left, t.bottom, t.left + TITLE_H, t.top);
+                e.ps.fill_rect(&mut surface, m, 0xcccccc);
+                e.ps.fill_rect(&mut surface, Rect::new(m.left + 5, m.bottom + 9, m.right - 5, m.bottom + 13), 0x000000);
+                text_left = m.right;
+            }
+            let font = e.ps.font;
+            let tw = font.text_width(&title);
+            let x = text_left + ((t.right - text_left) - tw).max(0) / 2;
+            e.ps.color = color::sys(if active { color::SYSCLR_ACTIVETITLETEXT } else { color::SYSCLR_INACTIVETITLETEXT });
+            e.ps.back_mix = gpi::Mix::LeaveAlone;
+            e.ps.char_string_at(&mut surface, Point::new(x, t.bottom + 3 + font.descender), &title);
+        }
+    }
+    WinEndPaint(hps);
+}
+
+/// Which part of a frame a point (frame coordinates) is in.
+enum FrameHit {
+    SysMenu,
+    Title,
+    Other,
+}
+
+fn frame_hit(h: u32, p: Point) -> FrameHit {
+    let s = st();
+    let fcf = s.frames.get(&h).map_or(0, |f| f.fcf);
+    let Some(w) = s.desk.get(h) else { return FrameHit::Other };
+    if fcf & FCF_TITLEBAR == 0 {
+        return FrameHit::Other;
+    }
+    let b = border(fcf);
+    let t = Rect::new(b, w.cy - b - TITLE_H, w.cx - b, w.cy - b);
+    if !t.contains(p) {
+        return FrameHit::Other;
+    }
+    if fcf & FCF_SYSMENU != 0 && p.x < t.left + TITLE_H {
+        return FrameHit::SysMenu;
+    }
+    FrameHit::Title
+}
+
+pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    match msg {
+        WM_PAINT => {
+            frame_paint(h);
+            0
+        }
+        WM_BUTTON1DOWN => {
+            let p = Point::new(mp1 as i16 as i32, (mp1 >> 16) as i16 as i32);
+            match frame_hit(h, p) {
+                FrameHit::SysMenu => {
+                    send(h, WM_SYSCOMMAND, SC_CLOSE, 0);
+                }
+                FrameHit::Title => {
+                    let s = st();
+                    let (wx, wy) = s.desk.get(h).map_or((0, 0), |w| (w.x, w.y));
+                    let ptr = s.pointer;
+                    s.drag = Some(crate::state::Drag { hwnd: h, dx: ptr.x - wx, dy: ptr.y - wy });
+                    s.capture = h;
+                }
+                FrameHit::Other => {}
+            }
+            1
+        }
+        WM_SYSCOMMAND if mp1 & 0xffff == SC_CLOSE => {
+            let client = st().frames.get(&h).map_or(0, |f| f.client);
+            post(if client != 0 { client } else { h }, WM_CLOSE, 0, 0);
+            0
+        }
+        WM_CLOSE => {
+            let client = st().frames.get(&h).map_or(0, |f| f.client);
+            if client != 0 {
+                post(client, WM_CLOSE, 0, 0);
+            } else {
+                crate::msg::WinDefWindowProc(h, msg, mp1, mp2);
+            }
+            0
+        }
+        _ => crate::msg::WinDefWindowProc(h, msg, mp1, mp2),
+    }
+}

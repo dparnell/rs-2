@@ -1,0 +1,22 @@
+; name @ordinal
+GpiAssociate @351
+GpiBox @356
+GpiCharString @358
+GpiCharStringAt @359
+GpiCreatePS @369
+GpiDestroyPS @379
+GpiErase @389
+GpiLine @398
+GpiMove @404
+GpiPolyLine @415
+GpiQueryBackColor @424
+GpiQueryColor @437
+GpiQueryCurrentPosition @441
+GpiQueryPel @476
+GpiSetBackColor @504
+GpiSetBackMix @505
+GpiSetColor @517
+GpiSetCurrentPosition @519
+GpiSetMix @537
+GpiSetPel @544
+GpiCreateLogColorTable @592

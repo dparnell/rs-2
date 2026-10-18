@@ -1,0 +1,13 @@
+[package]
+name = "pmgpi-dll"
+description = "PMGPI.DLL: forwards the GPI entry points to PMWIN, which implements them"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmgpi"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
