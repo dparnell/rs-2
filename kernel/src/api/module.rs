@@ -453,23 +453,27 @@ pub fn dos_set_ext_libpath(c: &mut Ctx) -> u32 {
     let Some(v) = c.read_str(p, 1024) else { return err::INVALID_ADDRESS };
     let mut x = c.process.ext_libpath.lock();
     match flags {
-        BEGIN_LIBPATH => x.0 = expand(&v, &x.0),
-        END_LIBPATH => x.1 = expand(&v, &x.1),
+        BEGIN_LIBPATH => x.0 = expand(&v, &x.0, &x.1),
+        END_LIBPATH => x.1 = expand(&v, &x.0, &x.1),
         LIBPATHSTRICT => x.2 = v.eq_ignore_ascii_case("T"),
         _ => return err::INVALID_PARAMETER,
     }
     0
 }
 
-/// Replace %BeginLIBPATH% / %EndLIBPATH% with the current value.
-fn expand(v: &str, cur: &str) -> alloc::string::String {
+/// Replace %BeginLIBPATH% and %EndLIBPATH% with their current values
+/// (either may appear in either setting).
+fn expand(v: &str, begin: &str, end: &str) -> alloc::string::String {
     let mut out = alloc::string::String::new();
     let up = v.to_ascii_uppercase();
     let mut i = 0;
     while i < v.len() {
-        if up[i..].starts_with("%BEGINLIBPATH%") || up[i..].starts_with("%ENDLIBPATH%") {
-            out.push_str(cur);
-            i += if up[i..].starts_with("%B") { 14 } else { 12 };
+        if up[i..].starts_with("%BEGINLIBPATH%") {
+            out.push_str(begin);
+            i += 14;
+        } else if up[i..].starts_with("%ENDLIBPATH%") {
+            out.push_str(end);
+            i += 12;
         } else {
             out.push(v.as_bytes()[i] as char);
             i += 1;

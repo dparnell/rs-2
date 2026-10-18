@@ -3,11 +3,12 @@
 //!
 //! rs2's file systems are built into the kernel: the generic functions
 //! (FSCTL_ERROR_INFO, FSCTL_MAX_EASIZE, FSCTL_GET_NEXT_ROUTE_NAME) are
-//! answered here. FSD-private functions (0x8000 and up: the HPFS cache
-//! controls of CACHE.EXE, the JFS functions of CACHEJFS, DEFRAGFS,
-//! EXTENDFS, CLRBBLKS) get ERROR_INVALID_FUNCTION, which is what an FSD
-//! without that function returns; the programs then report that the file
-//! system does not support the operation.
+//! answered here, and so are the HPFS cache controls of CACHE.EXE (lazy
+//! writing is reported off: rs2's HPFS writes through). There is no JFS:
+//! routing to it fails with ERROR_INVALID_FSD_NAME, so CACHEJFS,
+//! DEFRAGFS, EXTENDFS and CLRBBLKS report that no JFS drive is mounted.
+//! Other FSD-private functions (0x8000 and up) get ERROR_INVALID_FUNCTION,
+//! what an FSD without the function returns.
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -27,6 +28,15 @@ const FSCTL_ERROR_INFO: u32 = 1;
 const FSCTL_MAX_EASIZE: u32 = 2;
 const FSCTL_GET_NEXT_ROUTE_NAME: u32 = 3;
 const FSCTL_DAEMON_QUERY: u32 = 4;
+
+/// HPFS cache controls (CACHE.EXE): stop lazy writing, set and get the
+/// cache parameters (a 26-byte block).
+const HPFS_LAZY_STOP: u32 = 0x9001;
+const HPFS_CACHE_SET: u32 = 0x9002;
+const HPFS_CACHE_GET: u32 = 0x9003;
+
+/// DiskIdle, MaxAge, BufferIdle as last set (OS/2's defaults).
+static HPFS_TIMES: crate::sync::SpinLock<(u32, u32, u32)> = crate::sync::SpinLock::new((1000, 5000, 500));
 
 /// The file system names a request can be routed to (FSCTL_FSDNAME),
 /// as DosQueryFSAttach reports them.
@@ -131,8 +141,33 @@ fn fsctl(c: &Ctx, io: &Io, func: u32, method: u32, proute: u32, hfile: u32) -> u
             // No FSD daemon threads to start.
             io.reply(c, &[0, 0, 0, 0])
         }
+        HPFS_LAZY_STOP if fsd == "HPFS" => 0,
+        HPFS_CACHE_SET if fsd == "HPFS" => {
+            let Some(b) = c.read_vec(io.parm, io.cb_parm.min(26)) else { return err::INVALID_ADDRESS };
+            if b.len() < 12 {
+                return err::INVALID_PARAMETER;
+            }
+            let g = |o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
+            *HPFS_TIMES.lock() = (g(0), g(4), g(8));
+            0
+        }
+        HPFS_CACHE_GET if fsd == "HPFS" => {
+            // DiskIdle, MaxAge, BufferIdle (ms), WriteCache (bytes),
+            // DirtyMax, cache buffers (2 KB), lazy-write and read-ahead
+            // details, lazy writing on. rs2's HPFS writes through and has
+            // no buffer cache of its own: lazy writing is off.
+            let (idle, age, bidle) = *HPFS_TIMES.lock();
+            let mut b = Vec::new();
+            for v in [idle, age, bidle, 0] {
+                b.extend_from_slice(&v.to_le_bytes());
+            }
+            for v in [0u16, 0, 0, 0, 0] {
+                b.extend_from_slice(&v.to_le_bytes());
+            }
+            io.reply(c, &b)
+        }
         _ => {
-            log_once(c, &fsd, func);
+            log_once(c, &fsd, func, io);
             err::INVALID_FUNCTION
         }
     }
@@ -140,11 +175,15 @@ fn fsctl(c: &Ctx, io: &Io, func: u32, method: u32, proute: u32, hfile: u32) -> u
 
 static SEEN: crate::sync::SpinLock<Vec<(String, u32)>> = crate::sync::SpinLock::new(Vec::new());
 
-fn log_once(c: &Ctx, fsd: &str, func: u32) {
+fn log_once(c: &Ctx, fsd: &str, func: u32, io: &Io) {
     let mut s = SEEN.lock();
     if !s.iter().any(|(n, f)| n == fsd && *f == func) {
         s.push((String::from(fsd), func));
-        crate::println!("[DosFSCtl {:#x} for {} from {}: not supported]", func, fsd, c.process.exe.name);
+        let parm = c.read_vec(io.parm, io.cb_parm.min(16)).unwrap_or_default();
+        crate::println!(
+            "[DosFSCtl {:#x} for {} from {} (data {} bytes, parameters {:02x?}): not supported]",
+            func, fsd, c.process.exe.name, io.cb_data, parm
+        );
     }
 }
 

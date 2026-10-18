@@ -1,5 +1,6 @@
-//! DosQuerySysState: processes, threads, modules, semaphores and open files
-//! as used by PSTAT, PSFILES, PSSEMS and friends.
+//! DosQuerySysState: processes, threads, modules, semaphores (16- and
+//! 32-bit), shared memory and open files as used by PSTAT, PSFILES, PSSEMS
+//! and friends.
 //!
 //! Layout as in the Toolkit's bsedos.h (QSPTRREC first; each process record
 //! is followed by its arrays, then its thread records, then the next
@@ -173,6 +174,9 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
             o.u32(0); // blockid
             o.u16(s.handle as u16);
             o.u16(s.opens.len() as u16);
+            // PSSEMS finds the OpenQ entries a dword further on than the
+            // Toolkit's QSS32REC says.
+            o.u32(0);
             for (pid, n) in &s.opens {
                 o.u16(*pid as u16);
                 o.u16(*n as u16);
