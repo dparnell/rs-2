@@ -17,6 +17,7 @@ pub mod kbdapi;
 pub mod module;
 pub mod msg;
 pub mod nls;
+pub mod npipe;
 pub mod proc;
 pub mod queue;
 pub mod resource;

@@ -24,6 +24,7 @@ mod pipe;
 mod power;
 mod log;
 mod mm;
+mod npipe;
 mod rtc;
 mod screen;
 mod serial;

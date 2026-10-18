@@ -211,7 +211,9 @@ pub fn dos_create_thread(c: &mut Ctx) -> u32 {
         }
     }
     let top = base + size;
-    let sp = top - 8;
+    // Return address and parameter, with the parameter 16-byte aligned as
+    // compilers expect at a function entry (SSE spills).
+    let sp = ((top - 4) & !15) - 4;
     let exit_stub = loader::gate::slot_address(0, THREAD_EXIT_ORDINAL);
     {
         let mut b = Vec::new();

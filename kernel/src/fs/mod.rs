@@ -262,6 +262,8 @@ pub enum Handle {
     Clock,
     File(Arc<OpenFile>),
     Pipe(Arc<crate::pipe::PipeEnd>),
+    /// One end of a named pipe instance.
+    NPipe(Arc<crate::npipe::End>),
     /// DosPhysicalDisk IOCtl handle for disk n (0-based).
     PhysDisk(u32),
     /// The DOS$ device (reboot IOCtl).

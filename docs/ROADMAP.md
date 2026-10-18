@@ -15,7 +15,8 @@ Status markers: done, in progress, planned.
   Ctrl+C signals, module APIs, CONFIG.SYS processing
 - done: VIO, KBD, MSG (message files), NLS
 - done: the original CMD.EXE runs interactively; userland/apitest passes
-- planned: named pipes, sessions (DosStartSession, screen switching),
+- done: named pipes (byte and message mode, DosTransactNPipe, DosCallNPipe)
+- planned: sessions (DosStartSession, screen switching),
   DosDevIOCtl coverage, bound message segments, DLL termination routines,
   semaphore and memory corner cases found by running more programs
 

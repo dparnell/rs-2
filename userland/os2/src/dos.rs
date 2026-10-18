@@ -277,7 +277,32 @@ unsafe extern "C" {
     pub fn DosCreatePipe(hread: *mut u32, hwrite: *mut u32, size: u32) -> APIRET;
     #[link_name = "DOSCALLS.260"]
     pub fn DosDupHandle(old: u32, new: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.243"]
+    pub fn DosCreateNPipe(name: *const u8, ph: *mut u32, open_mode: u32, pipe_mode: u32, cb_out: u32, cb_in: u32, ms: u32) -> APIRET;
+    #[link_name = "DOSCALLS.241"]
+    pub fn DosConnectNPipe(h: u32) -> APIRET;
+    #[link_name = "DOSCALLS.242"]
+    pub fn DosDisConnectNPipe(h: u32) -> APIRET;
+    #[link_name = "DOSCALLS.244"]
+    pub fn DosPeekNPipe(h: u32, buf: *mut u8, cb: u32, actual: *mut u32, avail: *mut u16, state: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.245"]
+    pub fn DosQueryNPHState(h: u32, state: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.250"]
+    pub fn DosSetNPHState(h: u32, state: u32) -> APIRET;
+    #[link_name = "DOSCALLS.248"]
+    pub fn DosQueryNPipeInfo(h: u32, level: u32, buf: *mut u8, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.252"]
+    pub fn DosTransactNPipe(h: u32, out: *const u8, cb_out: u32, inb: *mut u8, cb_in: u32, read: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.253"]
+    pub fn DosWaitNPipe(name: *const u8, ms: u32) -> APIRET;
+    #[link_name = "DOSCALLS.240"]
+    pub fn DosCallNPipe(name: *const u8, inb: *const u8, cb_in: u32, out: *mut u8, cb_out: u32, actual: *mut u32, ms: u32) -> APIRET;
 }
+
+pub const NP_ACCESS_DUPLEX: u32 = 2;
+pub const NP_NOWAIT: u32 = 0x8000;
+pub const NP_TYPE_MESSAGE: u32 = 0x0400;
+pub const NP_READMODE_MESSAGE: u32 = 0x0100;
 
 unsafe extern "C" {
     #[link_name = "DOSCALLS.318"]

@@ -83,11 +83,16 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
             Ok(n) => (0, n as u32),
             Err(e) => (e, 0),
         },
+        Handle::NPipe(p) => match p.write(&data) {
+            Ok(n) => (0, n as u32),
+            Err(e) => (e, 0),
+        },
     }
 }
 
 pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
     let Some(h) = get(c, hf) else { return (err::INVALID_HANDLE, 0) };
+    let mut status = 0;
     let data: Vec<u8> = match h {
         Handle::Con | Handle::Kbd => {
             let line = crate::kbd::read_line(len as usize);
@@ -113,12 +118,19 @@ pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
             Ok(v) => v,
             Err(e) => return (e, 0),
         },
+        Handle::NPipe(p) => match p.read(len as usize) {
+            Ok((v, e)) => {
+                status = e;
+                v
+            }
+            Err(e) => return (e, 0),
+        },
     };
     let n = data.len().min(len as usize);
     if n > 0 && !c.write(buf, &data[..n]) {
         return (err::INVALID_ADDRESS, 0);
     }
-    (0, n as u32)
+    (status, n as u32)
 }
 
 pub fn dos16_write(c: &mut Ctx) -> u32 {
@@ -177,7 +189,7 @@ fn seek(c: &Ctx, hf: u32, off: i64, method: u32) -> Result<u64, u32> {
             *pos = np as u64;
             Ok(np as u64)
         }
-        Handle::Pipe(_) => Err(err::SEEK_ON_DEVICE),
+        Handle::Pipe(_) | Handle::NPipe(_) => Err(err::SEEK_ON_DEVICE),
         _ => Ok(0),
     }
 }
@@ -253,6 +265,10 @@ pub fn dos_reset_buffer(c: &mut Ctx) -> u32 {
 
 /// Result of an open: the handle and the action taken.
 fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32) -> Result<(u32, u32), u32> {
+    if let Some(pn) = crate::npipe::pipe_name(name) {
+        let end = crate::npipe::open(&pn)?;
+        return Ok((add(c, Handle::NPipe(end))?, 1));
+    }
     if let Some(d) = fs::device_name(name) {
         let h = add(c, Handle::device(d))?;
         return Ok((h, 1));
@@ -454,6 +470,7 @@ fn fh_state(c: &Ctx, hf: u32) -> Result<u32, u32> {
     let base = match get(c, hf).ok_or(err::INVALID_HANDLE)? {
         Handle::File(f) => f.mode.load(core::sync::atomic::Ordering::Relaxed) & 0x7fff,
         Handle::Pipe(p) => p.mode(),
+        Handle::NPipe(p) => p.open_mode() & 0x3 | mode::DENYNONE,
         _ => mode::READWRITE | mode::DENYNONE,
     };
     let ni = if c.process.noinherit.lock().contains(&hf) { mode::NOINHERIT } else { 0 };
@@ -507,7 +524,7 @@ pub fn htype(c: &Ctx, hf: u32) -> Option<(u32, u32)> {
         Handle::Nul => (1, 0x8084),
         Handle::Clock => (1, 0x8088),
         Handle::File(_) => (0, 0),
-        Handle::Pipe(_) => (2, 0),
+        Handle::Pipe(_) | Handle::NPipe(_) => (2, 0),
         Handle::PhysDisk(_) => (1, 0x8000),
         Handle::DosDev => (1, 0x8080),
     })

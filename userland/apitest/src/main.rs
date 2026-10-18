@@ -31,6 +31,7 @@ fn main(s: &Startup) -> u32 {
     threads_and_sems();
     exceptions();
     pipes();
+    named_pipes();
     dlls();
     timers();
     shared_memory();
@@ -247,6 +248,82 @@ fn pipes() {
         DosRead(r, buf.as_mut_ptr(), 8, &mut n);
         check("pipe EOF after close", n == 0);
         DosClose(r);
+    }
+}
+
+static HPIPE: AtomicU32 = AtomicU32::new(0);
+/// Bit 0: connected, 1: request read, 2: EOF after the client closed.
+static SERVER: AtomicU32 = AtomicU32::new(0);
+
+unsafe extern "C" fn pipe_server(_: u32) {
+    let h = HPIPE.load(Ordering::Relaxed);
+    let mut buf = [0u8; 16];
+    let mut n = 0;
+    unsafe {
+        if DosConnectNPipe(h) == 0 {
+            SERVER.fetch_or(1, Ordering::Relaxed);
+        }
+        if DosRead(h, buf.as_mut_ptr(), 16, &mut n) == 0 && &buf[..n as usize] == b"hello" {
+            SERVER.fetch_or(2, Ordering::Relaxed);
+        }
+        DosWrite(h, b"HELLO".as_ptr(), 5, &mut n);
+        DosWrite(h, b"ab".as_ptr(), 2, &mut n);
+        DosWrite(h, b"cd".as_ptr(), 2, &mut n);
+        if DosRead(h, buf.as_mut_ptr(), 16, &mut n) == 0 && n == 0 {
+            SERVER.fetch_or(4, Ordering::Relaxed);
+        }
+        DosDisConnectNPipe(h);
+    }
+}
+
+fn named_pipes() {
+    let name = b"\\PIPE\\RS2TEST\0".as_ptr();
+    unsafe {
+        let mut h = 0;
+        let rc = DosCreateNPipe(name, &mut h, NP_ACCESS_DUPLEX, NP_TYPE_MESSAGE | NP_READMODE_MESSAGE | 1, 512, 512, 0);
+        check("DosCreateNPipe", rc == 0);
+        HPIPE.store(h, Ordering::Relaxed);
+        let mut tid = 0;
+        DosCreateThread(&mut tid, pipe_server, 0, 0, 16384);
+        check("DosWaitNPipe", DosWaitNPipe(name, 1000) == 0);
+        let (mut hc, mut act) = (0, 0);
+        let rc = DosOpen(name, &mut hc, &mut act, 0, 0, 1, 0x42, null_mut());
+        check("DosOpen pipe", rc == 0);
+        let (mut h2, mut act2) = (0, 0);
+        check("second client busy", DosOpen(name, &mut h2, &mut act2, 0, 0, 1, 0x42, null_mut()) == 231);
+        check("DosSetNPHState", DosSetNPHState(hc, NP_READMODE_MESSAGE) == 0);
+        let mut st = 0;
+        DosQueryNPHState(hc, &mut st);
+        check("DosQueryNPHState", st & 0x4500 == 0x0500 && st & 0xff == 1);
+        let mut buf = [0u8; 16];
+        let mut n = 0;
+        let rc = DosTransactNPipe(hc, b"hello".as_ptr(), 5, buf.as_mut_ptr(), 16, &mut n);
+        check("DosTransactNPipe", rc == 0 && &buf[..n as usize] == b"HELLO");
+        // Wait for both messages to be queued.
+        let mut avail = [0u16; 2];
+        let mut state = 0;
+        for _ in 0..100 {
+            DosPeekNPipe(hc, buf.as_mut_ptr(), 16, &mut n, avail.as_mut_ptr(), &mut state);
+            if avail[0] == 4 {
+                break;
+            }
+            DosSleep(10);
+        }
+        check("DosPeekNPipe", avail == [4, 2] && n == 2 && &buf[..2] == b"ab" && state == 3);
+        let rc = DosRead(hc, buf.as_mut_ptr(), 1, &mut n);
+        check("message read ERROR_MORE_DATA", rc == 234 && n == 1 && buf[0] == b'a');
+        let rc = DosRead(hc, buf.as_mut_ptr(), 16, &mut n);
+        check("rest of message", rc == 0 && n == 1 && buf[0] == b'b');
+        let rc = DosRead(hc, buf.as_mut_ptr(), 16, &mut n);
+        check("next message", rc == 0 && &buf[..n as usize] == b"cd");
+        let mut info = [0u8; 32];
+        DosQueryNPipeInfo(hc, 1, info.as_mut_ptr(), 32);
+        check("DosQueryNPipeInfo", info[4] == 1 && &info[7..7 + info[6] as usize] == b"\\PIPE\\RS2TEST");
+        DosClose(hc);
+        DosWaitThread(&mut tid, DCWW_WAIT);
+        check("server side", SERVER.load(Ordering::Relaxed) == 7);
+        DosClose(h);
+        check("pipe gone", DosWaitNPipe(name, 10) == 2);
     }
 }
 
