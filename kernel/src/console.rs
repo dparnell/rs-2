@@ -11,14 +11,20 @@ struct Tty {
     attr: u8,
     /// Cursor position saved by ESC[s.
     saved: (usize, usize),
+    /// Output between ESC[s and ESC[u (status lines drawn elsewhere on the
+    /// screen) is not echoed to the serial port.
+    serial_hold: bool,
 }
 
 static TTY: crate::sync::SpinLock<Tty> =
-    crate::sync::SpinLock::new(Tty { esc: [0; 32], esc_len: 0, in_esc: false, attr: 0x07, saved: (0, 0) });
+    crate::sync::SpinLock::new(Tty { esc: [0; 32], esc_len: 0, in_esc: false, attr: 0x07, saved: (0, 0), serial_hold: false });
 
 /// Write bytes as TTY output (VioWrtTTY semantics).
 pub fn write(bytes: &[u8]) {
     let mut t = TTY.lock();
+    // The serial echo is a plain log of the text: escape sequences would
+    // move the cursor of the terminal on the other end.
+    let mut echo = alloc::vec::Vec::with_capacity(bytes.len());
     screen::with(|s| {
         for &b in bytes {
             if t.in_esc {
@@ -31,6 +37,11 @@ pub fn write(bytes: &[u8]) {
                     let seq = t.esc;
                     let n = t.esc_len;
                     ansi(&mut t, s, &seq[..n]);
+                    match b {
+                        b's' => t.serial_hold = true,
+                        b'u' => t.serial_hold = false,
+                        _ => {}
+                    }
                     t.in_esc = false;
                     t.esc_len = 0;
                 } else if t.esc_len == 1 && b != b'[' {
@@ -48,13 +59,17 @@ pub fn write(bytes: &[u8]) {
                 _ => {
                     s.attr = t.attr;
                     s.write_char(b);
+                    if !t.serial_hold {
+                        echo.push(b);
+                    }
                 }
             }
         }
         let (r, c) = (s.cur_row, s.cur_col.min(s.cols - 1));
         s.set_cursor(Some((r, c)));
     });
-    for &b in bytes {
+    drop(t);
+    for b in echo {
         crate::serial::write_byte(b);
     }
 }
