@@ -36,6 +36,53 @@ fn main() -> ExitCode {
                 println!("{:04x}: {}", i * 16, hex.join(" "));
             }
         }
+        "xref" => {
+            // lxdump xref FILE MODULE ORDINAL: fixup sites importing it.
+            let data = std::fs::read(&args[1]).unwrap();
+            let want_mod = args[2].to_ascii_uppercase();
+            let want_ord: u32 = args[3].parse().unwrap();
+            let Ok(Format::Lx { header }) = os2_exe::detect(&data) else { panic!("not LX") };
+            let m = lx::Module::parse(&data, header).unwrap();
+            for (oi, o) in m.objects().unwrap().iter().enumerate() {
+                for p in 0..o.page_count {
+                    for f in m.fixups(o.page_index + p).unwrap() {
+                        if let lx::Target::ImportOrdinal { module, ordinal } = f.target {
+                            if ordinal == want_ord && s(m.import_module(module).unwrap()).to_ascii_uppercase() == want_mod {
+                                for src in &f.sources {
+                                    println!("obj {} offset {:#x} {:?}", oi + 1, p as i64 * 4096 + *src as i64, f.kind);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        "fixups" => {
+            // lxdump fixups FILE OBJ: every fixup of an object.
+            let data = std::fs::read(&args[1]).unwrap();
+            let want: usize = args[2].parse().unwrap();
+            let Ok(Format::Lx { header }) = os2_exe::detect(&data) else { panic!("not LX") };
+            let m = lx::Module::parse(&data, header).unwrap();
+            let o = m.objects().unwrap()[want - 1];
+            for p in 0..o.page_count {
+                for f in m.fixups(o.page_index + p).unwrap() {
+                    let t = match f.target {
+                        lx::Target::ImportOrdinal { module, ordinal } => {
+                            format!("{}.{}", s(m.import_module(module).unwrap()), ordinal)
+                        }
+                        lx::Target::ImportName { module, name_offset } => format!(
+                            "{}.{}",
+                            s(m.import_module(module).unwrap()),
+                            s(m.import_proc_name(name_offset).unwrap())
+                        ),
+                        t => format!("{t:?}"),
+                    };
+                    for src in &f.sources {
+                        println!("{:#06x} {:?} {}", p as i64 * 4096 + *src as i64, f.kind, t);
+                    }
+                }
+            }
+        }
         "object" => {
             // lxdump object FILE N OUT: write the decoded image of object N.
             let data = std::fs::read(&args[1]).unwrap();

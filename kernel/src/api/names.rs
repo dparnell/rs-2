@@ -21,6 +21,11 @@ pub fn canonical(module: u8, ordinal: u16) -> (u8, u16) {
 /// ordinals follow the module's general convention.
 pub fn is16(module: u8, ordinal: u16) -> bool {
     let (module, ordinal) = canonical(module, ordinal);
+    // DOSCALLS.567 (Dos16OpenL) is a forwarder in DOSCALL1, absent from
+    // the generated table.
+    if module == 0 && ordinal == 567 {
+        return true;
+    }
     match find(module, ordinal) {
         Some(e) => e.2,
         None => module != 0 || ordinal < 200,

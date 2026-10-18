@@ -29,8 +29,12 @@ pub fn add(c: &Ctx, h: Handle) -> Result<u32, u32> {
     Ok(hs.len() as u32 - 1)
 }
 
-/// Resolve a path for the calling process.
+/// Resolve a path for the calling process. An empty name is not a path
+/// (OS/2 does not treat it as the current directory).
 pub fn resolve(c: &Ctx, p: &str) -> Result<FullPath, u32> {
+    if p.is_empty() {
+        return Err(err::FILE_NOT_FOUND);
+    }
     let cwd = c.process.cwd.lock();
     path::canonical(p, cwd.0, &cwd.1)
 }
@@ -357,6 +361,42 @@ pub fn dos16_open(c: &mut Ctx) -> u32 {
     }
 }
 
+pub fn dos16_open_l(c: &mut Ctx) -> u32 {
+    // Dos16OpenL(psz, phf, pusAction, LONGLONG cbFile, usAttr, fsOpenFlags,
+    //            ULONG fsOpenMode, peaop2, reserved)
+    let name = match read_path(c, c.ptr(0)) {
+        Ok(n) => n,
+        Err(e) => return e,
+    };
+    let size = (c.arg(3) as u64) << 32 | c.arg(4) as u64;
+    match open(c, &name, size, c.arg(5), c.arg(6), c.arg(7)) {
+        Ok((h, act)) => {
+            c.write_u16(c.ptr(1), h as u16);
+            c.write_u16(c.ptr(2), act as u16);
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+pub fn dos16_set_file_ptr_l(c: &mut Ctx) -> u32 {
+    // Dos16SetFilePtrL(hf, LONGLONG ib, ULONG method, PLONGLONG pibActual)
+    let off = ((c.arg(1) as u64) << 32 | c.arg(2) as u64) as i64;
+    match seek(c, c.arg(0), off, c.arg(3)) {
+        Ok(p) => {
+            let a = c.ptr(4);
+            c.write_u32(a, p as u32);
+            c.write_u32(a + 4, (p >> 32) as u32);
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+pub fn dos16_set_file_size_l(c: &mut Ctx) -> u32 {
+    set_size(c, c.arg(0), (c.arg(1) as u64) << 32 | c.arg(2) as u64)
+}
+
 pub fn dos16_open2(c: &mut Ctx) -> u32 {
     // DosOpen2(psz, phf, pusAction, ulFSize, usAttr, usOpenFlags, ulOpenMode, pEABuf, ulReserved)
     let name = match read_path(c, c.ptr(0)) {
@@ -590,21 +630,28 @@ pub fn dos_move(c: &mut Ctx) -> u32 {
 // ---- Information ----
 
 /// FILESTATUS (16-bit, level 1) / FILESTATUS3 (32-bit, level 1), with
-/// cbList appended for level 2.
+/// cbList appended for level 2. Levels 11 and 12 are the large-file
+/// variants (FILESTATUS3L/4L) with 64-bit sizes and a 32-bit attribute.
 fn status_bytes(i: &FileInfo, is16: bool, level: u32) -> Vec<u8> {
-    let mut b = Vec::with_capacity(32);
+    let mut b = Vec::with_capacity(40);
     for s in [i.created, i.accessed, i.modified] {
         b.extend_from_slice(&s.date.to_le_bytes());
         b.extend_from_slice(&s.time.to_le_bytes());
     }
-    b.extend_from_slice(&(i.size.min(u32::MAX as u64) as u32).to_le_bytes());
-    b.extend_from_slice(&(i.alloc.min(u32::MAX as u64) as u32).to_le_bytes());
-    if is16 {
+    let large = level >= 11;
+    if large {
+        b.extend_from_slice(&i.size.to_le_bytes());
+        b.extend_from_slice(&i.alloc.to_le_bytes());
+    } else {
+        b.extend_from_slice(&(i.size.min(u32::MAX as u64) as u32).to_le_bytes());
+        b.extend_from_slice(&(i.alloc.min(u32::MAX as u64) as u32).to_le_bytes());
+    }
+    if is16 && !large {
         b.extend_from_slice(&(i.attr as u16).to_le_bytes());
     } else {
         b.extend_from_slice(&i.attr.to_le_bytes());
     }
-    if level == 2 {
+    if level == 2 || level == 12 {
         // cbList: size of an empty FEA2LIST.
         b.extend_from_slice(&(if i.ea_size == 0 { 4u32 } else { i.ea_size }).to_le_bytes());
     }
@@ -613,7 +660,7 @@ fn status_bytes(i: &FileInfo, is16: bool, level: u32) -> Vec<u8> {
 
 fn write_status(c: &Ctx, info: &FileInfo, level: u32, buf: u32, cb: u32) -> u32 {
     match level {
-        1 | 2 => {
+        1 | 2 | 11 | 12 => {
             let b = status_bytes(info, c.is16, level);
             if (cb as usize) < b.len() {
                 return err::BUFFER_OVERFLOW;
@@ -768,14 +815,9 @@ pub fn dos_query_fs_info(c: &mut Ctx) -> u32 {
             b.extend_from_slice(&(v.bytes_per_sector as u16).to_le_bytes());
         }
         2 => {
-            // FSINFO: FDATE, FTIME (or ULONG serial), VOLUMELABEL {cch, szVolLabel[12]}
-            let t = fs::now();
-            if c.is16 {
-                b.extend_from_slice(&t.date.to_le_bytes());
-                b.extend_from_slice(&t.time.to_le_bytes());
-            } else {
-                b.extend_from_slice(&v.serial.to_le_bytes());
-            }
+            // FSINFO: ULONG serial number (the FDATE/FTIME of 1.x), then
+            // VOLUMELABEL {cch, szVolLabel[12]}.
+            b.extend_from_slice(&v.serial.to_le_bytes());
             b.push(v.label.len() as u8);
             let mut l = [0u8; 12];
             for (d, s) in l.iter_mut().zip(v.label.bytes()) {
@@ -852,6 +894,9 @@ pub struct Search {
 
 /// Collect directory entries matching `spec` and the attribute rules.
 fn search(c: &Ctx, spec: &str, attrib: u32) -> Result<Vec<FileInfo>, u32> {
+    if spec.is_empty() {
+        return Err(err::NO_MORE_FILES);
+    }
     let p = resolve(c, spec)?;
     let fsys = fs::fs_of(&p)?;
     let pattern = String::from(p.file_name());
@@ -901,7 +946,7 @@ fn fill(c: &Ctx, s: &mut Search, buf: u32, cb: u32, max: u32) -> Result<u32, u32
         let i = &s.results[s.next];
         let name = i.name.as_bytes();
         let mut e = Vec::new();
-        if c.is16 {
+        if c.is16 && s.level < 11 {
             e.extend_from_slice(&status_bytes(i, true, s.level));
             e.push(name.len() as u8);
             e.extend_from_slice(name);
@@ -940,7 +985,8 @@ fn fill(c: &Ctx, s: &mut Search, buf: u32, cb: u32, max: u32) -> Result<u32, u32
 }
 
 fn find_first(c: &mut Ctx, spec_addr: u32, phdir: u32, attrib: u32, buf: u32, cb: u32, pcount: u32, level: u32) -> u32 {
-    if level != 1 && level != 2 {
+    if !matches!(level, 1 | 2 | 11 | 12) {
+        crate::trace!("DosFindFirst: unsupported level {level}");
         return err::INVALID_LEVEL;
     }
     let spec = match read_path(c, spec_addr) {

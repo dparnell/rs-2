@@ -145,6 +145,9 @@ const DOSCALLS: &[(u16, &str)] = &[
     (208, "p"),        // DosFreeResource
     (214, "p"),        // DosMaxPathLen
     (215, "p"),        // DosPageSize
+    (567, "pppddwwdpp"), // Dos16OpenL (from CMD.EXE call sites)
+    (568, "wddcp"),    // Dos16SetFilePtrL (LONGLONG as two dwords)
+    (570, "wdd"),      // Dos16SetFileSizeL
     (690, "p"),        // DosSMSetTitle
     (712, "p"),        // DosSMPMPresent
     (998, "pd"),       // DosSetExtLIBPATH
@@ -313,3 +316,4 @@ pub fn lookup(module: u8, ordinal: u16) -> Option<&'static [u8]> {
 pub fn size(c: u8) -> u32 {
     if c == b'w' { 2 } else { 4 }
 }
+// `c` is a 32-bit count/flags value (same size as `d`).

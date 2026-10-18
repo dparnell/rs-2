@@ -28,6 +28,9 @@ struct Opts {
     screenshot: Option<PathBuf>,
     output: Option<PathBuf>,
     qemu_extra: Vec<String>,
+    /// Keystrokes to send (\n = Enter), and when (seconds after start).
+    typing: Option<String>,
+    type_at: Option<u64>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -38,6 +41,8 @@ fn parse(args: &[String]) -> Opts {
         screenshot: None,
         output: None,
         qemu_extra: vec![],
+        typing: None,
+        type_at: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -51,6 +56,14 @@ fn parse(args: &[String]) -> Opts {
             "--screenshot" => {
                 i += 1;
                 o.screenshot = Some(PathBuf::from(&args[i]));
+            }
+            "--type" => {
+                i += 1;
+                o.typing = Some(args[i].replace("\\n", "\n"));
+            }
+            "--type-at" => {
+                i += 1;
+                o.type_at = Some(args[i].parse().expect("--type-at seconds"));
             }
             "-o" => {
                 i += 1;
@@ -164,8 +177,18 @@ fn run(o: &Opts) -> bool {
     let Some(timeout) = o.timeout else {
         return child.wait().map(|s| s.success()).unwrap_or(false);
     };
-    let deadline = Instant::now() + Duration::from_secs(timeout);
+    let start = Instant::now();
+    let deadline = start + Duration::from_secs(timeout);
+    let mut typed = o.typing.is_none();
+    let type_at = o.type_at.unwrap_or(timeout.saturating_sub(8));
     while Instant::now() < deadline {
+        if !typed && start.elapsed() >= Duration::from_secs(type_at) {
+            typed = true;
+            for key in keys(o.typing.as_deref().unwrap()) {
+                monitor(&sock, &format!("sendkey {key}"));
+                std::thread::sleep(Duration::from_millis(60));
+            }
+        }
         if let Ok(Some(_)) = child.try_wait() {
             break;
         }
@@ -192,6 +215,44 @@ fn run(o: &Opts) -> bool {
         }
     }
     true
+}
+
+/// QEMU key names for a string.
+fn keys(s: &str) -> Vec<String> {
+    let mut v = Vec::new();
+    for ch in s.chars() {
+        let k = match ch {
+            'a'..='z' | '0'..='9' => ch.to_string(),
+            'A'..='Z' => format!("shift-{}", ch.to_ascii_lowercase()),
+            ' ' => "spc".into(),
+            '\n' => "ret".into(),
+            '\\' => "backslash".into(),
+            ':' => "shift-semicolon".into(),
+            ';' => "semicolon".into(),
+            '.' => "dot".into(),
+            ',' => "comma".into(),
+            '-' => "minus".into(),
+            '_' => "shift-minus".into(),
+            '=' => "equal".into(),
+            '+' => "shift-equal".into(),
+            '/' => "slash".into(),
+            '?' => "shift-slash".into(),
+            '*' => "shift-8".into(),
+            '>' => "shift-dot".into(),
+            '<' => "shift-comma".into(),
+            '|' => "shift-backslash".into(),
+            '"' => "shift-apostrophe".into(),
+            '\'' => "apostrophe".into(),
+            '%' => "shift-5".into(),
+            '!' => "shift-1".into(),
+            '&' => "shift-7".into(),
+            '[' => "bracket_left".into(),
+            ']' => "bracket_right".into(),
+            _ => continue,
+        };
+        v.push(k);
+    }
+    v
 }
 
 fn monitor(sock: &Path, cmd: &str) {

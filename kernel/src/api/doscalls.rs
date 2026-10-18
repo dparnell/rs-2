@@ -84,6 +84,9 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 52) | (0, 231) => dos_dev_config,
         (0, 130) => dos16_get_cp,
         (0, 153) | (0, 164) | (0, 288) | (0, 289) => dos_set_cp,
+        (0, 567) => file::dos16_open_l,
+        (0, 568) => file::dos16_set_file_ptr_l,
+        (0, 570) => file::dos16_set_file_size_l,
         (0, 690) => ok, // DosSMSetTitle
         (0, 712) => dos16_sm_pm_present,
         // ---- 16-bit DOSCALLS ----

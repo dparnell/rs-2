@@ -83,8 +83,13 @@ pub fn kbd_string_in(c: &mut Ctx) -> u32 {
             crate::console::write(b"\r");
         }
     }
+    // The turnaround character follows the text but is not counted.
+    let n = out.len();
+    if mask & BINARY == 0 && n < cb as usize {
+        out.push(turnaround as u8);
+    }
     c.write(p, &out);
-    c.write_u16(pin + 2, out.len() as u16);
+    c.write_u16(pin + 2, n as u16);
     0
 }
 
