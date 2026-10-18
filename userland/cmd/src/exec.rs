@@ -207,7 +207,7 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
     // that separated them from the name, as with the OS/2 CMD.EXE; some
     // programs (IBM LABEL) skip the first word otherwise.
     let mut block = Vec::new();
-    block.extend_from_slice(name.as_bytes());
+    block.extend_from_slice(&os2::text_bytes(&name));
     block.push(0);
     // IBM's CMD.EXE starts the argument string with the blank that
     // separated it from the program name; some IBM utilities (FIND, LABEL)
@@ -215,7 +215,7 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
     if !args.is_empty() && !args.starts_with([' ', '\t']) {
         block.push(b' ');
     }
-    block.extend_from_slice(args.as_bytes());
+    block.extend_from_slice(&os2::text_bytes(&args));
     block.push(0);
     block.push(0);
     let env = sh.env_block();

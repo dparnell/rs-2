@@ -367,9 +367,41 @@ fn dos_dev(_c: &Ctx, r: &Req) -> u32 {
     err::INVALID_FUNCTION
 }
 
-/// Category 4 (keyboard): a few query functions.
+/// Category 4 (keyboard): a few query functions, plus two rs2
+/// extensions used by KEYB to switch the national layout:
+///
+/// | function | parameters | data |
+/// |----------|------------|------|
+/// | 0x5F set layout   | char id[4] ("GR"), USHORT code page (0 = keep) | — |
+/// | 0x7C query layout | — | char id[4], USHORT code page |
 fn kbd(c: &Ctx, r: &Req) -> u32 {
+    use crate::kbd::layout;
     match r.function {
+        0x5f => {
+            let Some(p) = c.read_vec(r.params, 6) else { return err::INVALID_ADDRESS };
+            let id: alloc::string::String = p[..4].iter().take_while(|&&b| b != 0).map(|&b| b as char).collect();
+            let cp = u16::from_le_bytes([p[4], p[5]]);
+            if cp != 0 {
+                match crate::nls::keyboard_cp(cp) {
+                    Ok(cp) => layout::set_codepage(cp),
+                    Err(e) => return e,
+                }
+            }
+            if layout::set_layout(&id) { 0 } else { err::INVALID_PARAMETER }
+        }
+        0x7c => {
+            let mut b = [0u8; 6];
+            let id = layout::layout_id().as_bytes();
+            b[..id.len().min(4)].copy_from_slice(&id[..id.len().min(4)]);
+            b[4..].copy_from_slice(&layout::codepage().to_le_bytes());
+            if c.write(r.data, &b) { 0 } else { err::INVALID_ADDRESS }
+        }
+        // KBD_GETCODEPAGEID: CPID { idCodePage, Reserved }
+        0x78 => {
+            c.write_u16(r.data, layout::codepage());
+            c.write_u16(r.data + 2, 0);
+            0
+        }
         // KBD_GETSESMGRHOTKEY / KBD_GETINPUTMODE: report defaults.
         0x71 | 0x76 => {
             c.write_u8(r.data, 0);

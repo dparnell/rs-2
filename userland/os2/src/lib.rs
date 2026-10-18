@@ -11,6 +11,7 @@ extern crate alloc;
 pub mod dos;
 pub mod fmt;
 pub mod heap;
+pub mod msg;
 pub mod path;
 pub mod vio;
 
@@ -20,6 +21,7 @@ pub mod vio;
 static HEAP: heap::Os2Heap = heap::Os2Heap;
 
 pub use dos::*;
+pub use msg::*;
 
 /// Write bytes to standard output.
 pub fn write(b: &[u8]) {
@@ -27,8 +29,24 @@ pub fn write(b: &[u8]) {
     unsafe { DosWrite(1, b.as_ptr(), b.len() as u32, &mut n) };
 }
 
+/// The code page bytes of text held in a `str` one character per byte
+/// (as programs here build it from OS/2 data with `b as char`).
+pub fn text_bytes(s: &str) -> alloc::borrow::Cow<'_, [u8]> {
+    if s.is_ascii() {
+        return alloc::borrow::Cow::Borrowed(s.as_bytes());
+    }
+    alloc::borrow::Cow::Owned(s.chars().map(|c| if (c as u32) < 0x100 { c as u8 } else { b'?' }).collect())
+}
+
+/// Write text (see [`text_bytes`]) to a handle.
+pub fn write_text(hf: u32, s: &str) {
+    let b = text_bytes(s);
+    let mut n = 0;
+    unsafe { DosWrite(hf, b.as_ptr(), b.len() as u32, &mut n) };
+}
+
 pub fn print(s: &str) {
-    write(s.as_bytes());
+    write_text(1, s);
 }
 
 #[macro_export]

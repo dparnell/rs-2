@@ -1,58 +1,49 @@
-//! Code page to Unicode tables for the text screen.
+//! Code page to Unicode tables (generated into `nls_data.rs` by
+//! tools/scripts/gen_nls.py) for the text screen, the keyboard and NLS.
 
-/// Glyphs for control-code positions 0x00-0x1F and 0x7F, shared by the PC
-/// code pages when characters are displayed rather than interpreted.
-const LOW: &str = " ☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼";
+use crate::nls_data::CODEPAGES;
 
-const CP437_HIGH: &str = "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐\
-└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u{a0}";
-
-const CP850_HIGH: &str = "ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜø£Ø×ƒáíóúñÑªº¿®¬½¼¡«»░▒▓│┤ÁÂÀ©╣║╗╝¢¥┐\
-└┴┬├─┼ãÃ╚╔╩╦╠═╬¤ðÐÊËÈıÍÎÏ┘┌█▄¦Ì▀ÓßÔÒõÕµþÞÚÛÙýÝ¯´\u{ad}±‗¾¶§÷¸°¨·¹³²■\u{a0}";
-
+/// A single-byte code page with a Unicode table.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum CodePage {
-    Cp437,
-    Cp850,
-}
+pub struct CodePage(u8);
 
+#[allow(non_upper_case_globals)]
 impl CodePage {
+    pub const Cp437: CodePage = CodePage(0);
+    pub const Cp850: CodePage = CodePage(1);
+
     pub fn from_number(n: u16) -> Option<Self> {
-        match n {
-            437 => Some(Self::Cp437),
-            850 => Some(Self::Cp850),
-            _ => None,
-        }
+        CODEPAGES.iter().position(|e| e.0 == n).map(|i| CodePage(i as u8))
     }
 
     pub fn number(self) -> u16 {
-        match self {
-            Self::Cp437 => 437,
-            Self::Cp850 => 850,
-        }
+        CODEPAGES[self.0 as usize].0
     }
 
-    /// The character displayed for byte `b`.
+    /// The character displayed for byte `b` (control positions show the
+    /// PC graphic characters).
     pub fn glyph(self, b: u8) -> char {
-        match b {
-            0x00..=0x1f => LOW.chars().nth(b as usize).unwrap_or(' '),
-            0x7f => '⌂',
-            0x20..=0x7e => b as char,
-            _ => {
-                let t = match self {
-                    Self::Cp437 => CP437_HIGH,
-                    Self::Cp850 => CP850_HIGH,
-                };
-                t.chars().nth((b - 0x80) as usize).unwrap_or('?')
-            }
+        char::from_u32(CODEPAGES[self.0 as usize].1[b as usize] as u32).unwrap_or('?')
+    }
+
+    /// The character byte `b` stands for in text (control codes are
+    /// themselves).
+    pub fn to_char(self, b: u8) -> char {
+        if b < 0x20 || b == 0x7f {
+            return b as char;
         }
+        self.glyph(b)
     }
 
     /// Map a Unicode character back to this code page.
     pub fn from_char(self, c: char) -> Option<u8> {
-        if (' '..='~').contains(&c) {
+        if (' '..='~').contains(&c) && self.glyph(c as u8) == c {
             return Some(c as u8);
         }
-        (0..=255u8).find(|&b| self.glyph(b) == c)
+        if (c as u32) < 0x20 {
+            return Some(c as u8);
+        }
+        let t = &CODEPAGES[self.0 as usize].1;
+        (0x20..=255usize).chain(0..0x20).find(|&b| t[b] == c as u32 as u16).map(|b| b as u8)
     }
 }

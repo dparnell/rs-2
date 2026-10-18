@@ -113,10 +113,7 @@ pub fn run(sh: &mut Shell, s: &Simple) -> Option<u32> {
             }
             0
         }
-        "CHCP" => {
-            outln("Active code page: 850");
-            0
-        }
+        "CHCP" => chcp(s),
         "ANSI" => {
             outln("ANSI extended screen and keyboard control is on.");
             0
@@ -145,6 +142,32 @@ fn cd(s: &Simple) -> u32 {
         sys_error(if rc == 2 { 3 } else { rc });
     }
     rc
+}
+
+/// CHCP [codepage]: show the code pages, or switch the process, screen
+/// and keyboard to one of the prepared ones (DosSetCp).
+fn chcp(s: &Simple) -> u32 {
+    let words = s.words();
+    if let Some(w) = words.first() {
+        let Ok(cp) = w.parse::<u32>() else {
+            sys_error(87);
+            return 87;
+        };
+        let rc = unsafe { DosSetCp(cp) };
+        if rc != 0 {
+            outln(&alloc::format!("SYS1767: Code page {cp} is not prepared for system."));
+        }
+        return rc;
+    }
+    let mut cps = [0u32; 3];
+    let mut n = 0;
+    unsafe { DosQueryCp(12, cps.as_mut_ptr(), &mut n) };
+    outln(&alloc::format!("Active code page: {}", cps[0]));
+    let prepared: Vec<String> = cps[1..(n as usize / 4).max(1)].iter().map(|c| c.to_string()).collect();
+    if !prepared.is_empty() {
+        outln(&alloc::format!("Prepared system code pages: {}", prepared.join(" ")));
+    }
+    0
 }
 
 fn echo(sh: &mut Shell, s: &Simple) -> u32 {

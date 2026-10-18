@@ -3,7 +3,11 @@
 //! The PS/2 controller delivers set-1 scancodes on IRQ 1; USB keyboards
 //! (`drivers::hid`) translate their reports into the same scancodes and
 //! feed them through [`scancode`], so shift state and key translation live
-//! here only.
+//! here only. Character assignment follows the selected national layout
+//! ([`layout`]).
+
+pub mod layout;
+mod layouts;
 
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
@@ -44,12 +48,17 @@ struct State {
     queues: BTreeMap<u32, VecDeque<KeyInfo>>,
     shift: u16,
     e0: bool,
+    /// A second character produced by the last key (a dead key that did
+    /// not combine).
+    extra: Option<KeyInfo>,
 }
 
-static STATE: SpinLock<State> = SpinLock::new(State { queues: BTreeMap::new(), shift: 0, e0: false });
+static STATE: SpinLock<State> = SpinLock::new(State { queues: BTreeMap::new(), shift: 0, e0: false, extra: None });
 static WAITERS: WaitQueue = WaitQueue::new();
 
-// US layout, scancode set 1, unshifted and shifted.
+// Keys outside the layout tables (Esc, Backspace, Tab, Enter, keypad *,
+// Space): scancode set 1, unshifted and shifted. The rest is the US layout
+// used when a key is not in the layout.
 const NORMAL: &[u8; 0x3a] = b"\x00\x1b1234567890-=\x08\tqwertyuiop[]\r\x00asdfghjkl;'`\x00\\zxcvbnm,./\x00*\x00 ";
 const SHIFTED: &[u8; 0x3a] = b"\x00\x1b!@#$%^&*()_+\x08\tQWERTYUIOP{}\r\x00ASDFGHJKL:\"~\x00|ZXCVBNM<>?\x00*\x00 ";
 
@@ -70,41 +79,46 @@ fn irq(_f: &mut TrapFrame) {
 /// Process one set-1 scancode byte (0xE0 prefixes included). Safe to call
 /// from interrupt context (the PS/2 IRQ, the USB poll in the timer tick).
 pub fn scancode(sc: u8) {
-    let ev = {
+    let (ev, extra) = {
         let mut s = STATE.lock();
-        translate(&mut s, sc)
+        let ev = translate(&mut s, sc);
+        (ev, s.extra.take())
     };
-    if let Some(k) = ev {
-        let ctrl = k.shift & shift::CONTROL != 0;
-        let alt = k.shift & shift::ALT != 0;
-        // Session switching hot keys.
-        if k.scan == 0x01 && (ctrl || alt) {
-            if ctrl {
-                crate::session::toggle_list();
-            } else {
-                crate::session::select_next();
-            }
-            return;
-        }
-        if crate::session::list_key(&k) {
-            return;
-        }
-        if k.ch == 3 && ctrl {
-            crate::api::signal::keyboard(crate::api::signal::SIG_CTRLC);
-            return;
-        }
-        if ctrl && k.scan == 0x46 {
-            crate::api::signal::keyboard(crate::api::signal::SIG_CTRLBREAK);
-            return;
-        }
-        let fg = crate::session::foreground();
-        if fg == crate::session::pm_session() {
-            crate::display::key(&k, false);
-            return;
-        }
-        STATE.lock().queues.entry(fg).or_default().push_back(k);
-        WAITERS.wake_all();
+    for k in [ev, extra].into_iter().flatten() {
+        deliver(k);
     }
+}
+
+fn deliver(k: KeyInfo) {
+    let ctrl = k.shift & shift::CONTROL != 0;
+    let alt = k.shift & shift::ALT != 0;
+    // Session switching hot keys.
+    if k.scan == 0x01 && (ctrl || alt) {
+        if ctrl {
+            crate::session::toggle_list();
+        } else {
+            crate::session::select_next();
+        }
+        return;
+    }
+    if crate::session::list_key(&k) {
+        return;
+    }
+    if k.ch == 3 && ctrl {
+        crate::api::signal::keyboard(crate::api::signal::SIG_CTRLC);
+        return;
+    }
+    if ctrl && k.scan == 0x46 {
+        crate::api::signal::keyboard(crate::api::signal::SIG_CTRLBREAK);
+        return;
+    }
+    let fg = crate::session::foreground();
+    if fg == crate::session::pm_session() {
+        crate::display::key(&k, false);
+        return;
+    }
+    STATE.lock().queues.entry(fg).or_default().push_back(k);
+    WAITERS.wake_all();
 }
 
 fn translate(s: &mut State, sc: u8) -> Option<KeyInfo> {
@@ -172,6 +186,17 @@ fn translate(s: &mut State, sc: u8) -> Option<KeyInfo> {
         k.status |= 0x02;
         return Some(k);
     }
+    match layout::key(code, s.shift) {
+        layout::Key::Other => {}
+        layout::Key::Nothing => return None,
+        layout::Key::Chars(ch, second) => {
+            k.ch = ch;
+            if let Some(b) = second {
+                s.extra = Some(KeyInfo { ch: b, ..k });
+            }
+            return Some(k);
+        }
+    }
     if (code as usize) < NORMAL.len() {
         let mut c = if shifted { SHIFTED[code as usize] } else { NORMAL[code as usize] };
         if s.shift & CAPSLOCK_ON != 0 && c.is_ascii_alphabetic() {
@@ -190,7 +215,7 @@ fn translate(s: &mut State, sc: u8) -> Option<KeyInfo> {
     // Keypad with NumLock, function keys and the rest: scan code only.
     if (0x47..=0x53).contains(&code) && s.shift & NUMLOCK_ON != 0 && !shifted {
         const PAD: &[u8; 13] = b"789-456+1230.";
-        k.ch = PAD[(code - 0x47) as usize];
+        k.ch = if code == 0x53 { layout::keypad_decimal() } else { PAD[(code - 0x47) as usize] };
     }
     Some(k)
 }

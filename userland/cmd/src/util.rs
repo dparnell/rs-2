@@ -16,8 +16,7 @@ pub fn outln(s: &str) {
 }
 
 pub fn err_out(s: &str) {
-    let mut n = 0;
-    unsafe { DosWrite(2, s.as_ptr(), s.len() as u32, &mut n) };
+    os2::write_text(2, s);
 }
 
 /// Print an error the way the system reports it: "SYSnnnn: text".

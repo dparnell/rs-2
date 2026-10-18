@@ -285,6 +285,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("format", "OS2\\FORMAT.EXE"),
         ("mode", "OS2\\MODE.EXE"),
         ("help", "OS2\\HELP.EXE"),
+        ("keyb", "OS2\\KEYB.EXE"),
     ];
 
 /// Build the userland workspace and convert each program to LX.

@@ -511,17 +511,6 @@ unsafe extern "C" {
     pub fn DosSetFSInfo(disk: u32, level: u32, buf: *const u8, cb: u32) -> APIRET;
     #[link_name = "DOSCALLS.277"]
     pub fn DosQueryFSAttach(dev: *const u8, ordinal: u32, level: u32, buf: *mut u8, pcb: *mut u32) -> APIRET;
-    /// DosGetMessage (DosTrueGetMessage).
-    #[link_name = "MSG.6"]
-    pub fn DosGetMessage(
-        table: *const *const u8,
-        count: u32,
-        buf: *mut u8,
-        cb: u32,
-        msgnum: u32,
-        file: *const u8,
-        pcb: *mut u32,
-    ) -> APIRET;
 }
 
 // Memory suballocation.

@@ -43,6 +43,8 @@ fn main(s: &Startup) -> u32 {
     shared_memory();
     queues();
     sessions();
+    messages();
+    nls();
     exit_list();
     let f = FAILS.load(Ordering::Relaxed);
     println!("apitest done: {f} failure(s)");
@@ -534,5 +536,154 @@ fn queues() {
         let rc = DosReadQueue(hq, &mut req, &mut cb, &mut pb, 0, 1, &mut prio, 0);
         check("empty queue no-wait", rc == 342);
         check("DosCloseQueue", DosCloseQueue(hq) == 0);
+    }
+}
+
+/// A bound message segment like MSGBIND makes (version 2, one file
+/// TEST.MSG with code pages 850 and 437), at the start of a 64K object.
+unsafe fn build_msgseg(p: *mut u8) {
+    let put = |off: usize, b: &[u8]| unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), p.add(off), b.len()) };
+    let w = |off: usize, v: u16| put(off, &v.to_le_bytes());
+    put(0, b"\xffMSGSEG32\0");
+    put(0x0a, &[2, 0x80, 0, 0]);
+    put(0x0e, &0x30u32.to_le_bytes());
+    w(0x30, 1); // one file
+    w(0x32, 0x40); // its name
+    w(0x34, 0x100); // its component
+    put(0x40, b"TEST.MSG\0");
+    // Code page block after the name + 2: next, header, language 9/1, 850 437.
+    w(0x4b, 0);
+    w(0x4b + 5, 9);
+    w(0x4b + 7, 1);
+    w(0x4b + 9, 2);
+    w(0x4b + 11, 850);
+    w(0x4b + 13, 437);
+    put(0x100, b"TST");
+    w(0x103, 2);
+    w(0x105, 0x120);
+    w(0x107, 0x140);
+    let text = b"Hello %1.\r\n";
+    w(0x120, 1);
+    w(0x122, text.len() as u16 + 1);
+    put(0x124, b"E");
+    put(0x125, text);
+    w(0x140, 2);
+    w(0x142, 1);
+    put(0x144, b"?");
+}
+
+fn messages() {
+    unsafe {
+        // DosInsertMessage: %1..%9 up to the count; anything else is kept.
+        let a = b"a\0";
+        let b = b"bc\0";
+        let tbl = [a.as_ptr(), b.as_ptr()];
+        let msg = b"%1-%2-%3 %0 %%";
+        let mut out = [0u8; 64];
+        let mut n = 0;
+        let rc = DosInsertMessage(tbl.as_ptr(), 2, msg.as_ptr(), msg.len() as u32, out.as_mut_ptr(), 64, &mut n);
+        check("DosInsertMessage %1 %2, %3 %0 kept", rc == 0 && &out[..n as usize] == b"a-bc-%3 %0 %%");
+        let rc = DosInsertMessage(tbl.as_ptr(), 10, msg.as_ptr(), msg.len() as u32, out.as_mut_ptr(), 64, &mut n);
+        check("DosInsertMessage 10 insertions", rc == 320);
+        let long = b"abcdefghij";
+        let rc = DosInsertMessage(null(), 0, long.as_ptr(), long.len() as u32, out.as_mut_ptr(), 6, &mut n);
+        check("DosInsertMessage truncated ends CR LF", rc == 316 && n == 6 && &out[..6] == b"abcd\r\n");
+
+        // Bound messages are found before (missing) message files.
+        let mut seg = null_mut();
+        DosAllocMem(&mut seg, 0x10000, PAG_READ | PAG_WRITE | PAG_COMMIT);
+        build_msgseg(seg);
+        let world = b"world\0";
+        let ins = [world.as_ptr()];
+        let file = b"TEST.MSG\0";
+        let mut buf = [0u8; 128];
+        let rc = DosGetMessageSeg(ins.as_ptr(), 1, buf.as_mut_ptr(), 128, 1, file.as_ptr(), &mut n, seg);
+        check("DosGetMessage bound message", rc == 0 && &buf[..n as usize] == b"TST0001: Hello world.\r\n");
+        let rc = DosGetMessageSeg(null(), 0, buf.as_mut_ptr(), 128, 2, file.as_ptr(), &mut n, seg);
+        check("DosGetMessage unused (?) message", rc == 317 && buf[..n as usize].starts_with(b"SYS0317: "));
+        let rc = DosGetMessageSeg(null(), 0, buf.as_mut_ptr(), 128, 3, file.as_ptr(), &mut n, seg);
+        let want = b"SYS0318: Message file TEST.MSG cannot be found for message  0003.\r\n";
+        check("DosGetMessage missing file", rc == 2 && &buf[..n as usize] == want);
+        let rc = DosGetMessageSeg(ins.as_ptr(), 1, buf.as_mut_ptr(), 12, 1, file.as_ptr(), &mut n, seg);
+        check("DosGetMessage truncated", rc == 316 && n == 12 && &buf[..12] == b"TST0001: H\r\n");
+        let mut cps = [0u16; 8];
+        let rc = DosIQueryMessageCP(cps.as_mut_ptr().cast(), 16, file.as_ptr(), &mut n, seg);
+        check("DosQueryMessageCP bound", rc == 0 && n == 10 && cps[..5] == [2, 850, 437, 9, 1]);
+        DosFreeMem(seg);
+
+        // OSO001.MSG, when it is installed.
+        let oso = b"OSO001.MSG\0";
+        let rc = DosGetMessage(null(), 0, buf.as_mut_ptr(), 128, 2, oso.as_ptr(), &mut n);
+        if rc == 0 {
+            check("DosGetMessage SYS0002 from OSO001.MSG", buf[..n as usize].starts_with(b"SYS0002: "));
+            let rc = DosQueryMessageCP(cps.as_mut_ptr().cast(), 16, oso.as_ptr(), &mut n);
+            check("DosQueryMessageCP OSO001.MSG", rc == 0 && n >= 8 && cps[0] as u32 * 2 + 6 == n);
+        }
+
+        // DosPutMessage breaks lines at 80 columns between words.
+        let (mut r, mut w) = (0, 0);
+        DosCreatePipe(&mut r, &mut w, 4096);
+        let text = b"word word word word word word word word word word word word word word word word word word word word ";
+        let rc = DosPutMessage(w, text.len() as u32, text.as_ptr());
+        let mut got = [0u8; 256];
+        DosRead(r, got.as_mut_ptr(), 256, &mut n);
+        let ok = n as usize == text.len() + 2 && &got[..75] == &text[..75] && &got[75..77] == b"\r\n" && &got[77..n as usize] == &text[75..];
+        check("DosPutMessage wraps at 80 columns", rc == 0 && ok);
+        DosClose(r);
+        DosClose(w);
+    }
+}
+
+fn nls() {
+    unsafe {
+        let mut ci = CountryInfo::default();
+        let mut n = 0;
+        let de = CountryCode { country: 49, codepage: 850 };
+        let rc = DosQueryCtryInfo(44, &de, &mut ci, &mut n);
+        check(
+            "DosQueryCtryInfo Germany",
+            rc == 0 && n == 44 && ci.date_fmt == 1 && ci.decimal[0] == b',' && ci.thousands[0] == b'.' && &ci.currency[..3] == b"DM\0",
+        );
+        let us = CountryCode { country: 1, codepage: 437 };
+        let rc = DosQueryCtryInfo(44, &us, &mut ci, &mut n);
+        check("DosQueryCtryInfo US", rc == 0 && ci.country == 1 && ci.codepage == 437 && ci.date_fmt == 0 && ci.currency[0] == b'$');
+        let bad = CountryCode { country: 999, codepage: 0 };
+        check("DosQueryCtryInfo unknown country", DosQueryCtryInfo(44, &bad, &mut ci, &mut n) == 398);
+
+        let mut s = *b"abc\x84\x94\x81z";
+        let cc850 = CountryCode { country: 1, codepage: 850 };
+        let rc = DosMapCase(s.len() as u32, &cc850, s.as_mut_ptr());
+        check("DosMapCase 850", rc == 0 && &s == b"ABC\x8e\x99\x9aZ");
+        let mut e = *b"\x82";
+        let cc437 = CountryCode { country: 1, codepage: 437 };
+        DosMapCase(1, &cc437, e.as_mut_ptr());
+        check("DosMapCase 437 e-acute is E", e[0] == b'E');
+
+        let mut t = [0u8; 256];
+        let rc = DosQueryCollate(256, &cc850, t.as_mut_ptr(), &mut n);
+        check("DosQueryCollate 850", rc == 0 && n == 256 && t[b'a' as usize] == t[b'A' as usize] && t[0x8f] == t[b'A' as usize]);
+        let se = CountryCode { country: 46, codepage: 850 };
+        DosQueryCollate(256, &se, t.as_mut_ptr(), &mut n);
+        check("DosQueryCollate Sweden: A-ring after Z", t[0x8f] > t[b'Z' as usize] && t[0x86] == t[0x8f]);
+
+        let mut d = [0xffu8; 8];
+        let jp = CountryCode { country: 81, codepage: 932 };
+        let rc = DosQueryDBCSEnv(8, &jp, d.as_mut_ptr());
+        check("DosQueryDBCSEnv 932", rc == 0 && d[..6] == [0x81, 0x9f, 0xe0, 0xfc, 0, 0]);
+        let mut d = [0xffu8; 4];
+        let rc = DosQueryDBCSEnv(4, &cc850, d.as_mut_ptr());
+        check("DosQueryDBCSEnv 850 empty", rc == 0 && d[..2] == [0, 0]);
+
+        let mut cps = [0u32; 4];
+        let rc = DosQueryCp(16, cps.as_mut_ptr(), &mut n);
+        check("DosQueryCp", rc == 0 && n >= 8 && cps[0] == cps[1]);
+        let (cur, other) = (cps[0], cps[2]);
+        if n >= 12 && other != 0 {
+            let rc = DosSetProcessCp(other);
+            DosQueryCp(16, cps.as_mut_ptr(), &mut n);
+            check("DosSetProcessCp prepared", rc == 0 && cps[0] == other);
+            DosSetProcessCp(cur);
+        }
+        check("DosSetProcessCp not prepared", DosSetProcessCp(1125) == 472);
     }
 }
