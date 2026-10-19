@@ -26,7 +26,7 @@ The logic lives in host-testable crates; the DLLs are thin:
 | Crate / DLL | Contents |
 |-------------|----------|
 | `crates/gpi` | Rendering engine: presentation-space attributes, lines, boxes, arcs, areas, text with bitmap fonts, bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
-| `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping; the MLE's text engine (`mle.rs`: layout with word wrap and tabs, editing, undo, import/export formats, search) and the arithmetic of spin buttons, sliders and value sets (`controls.rs`). Plain data structures, unit-tested on the host. |
+| `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping; the MLE's text engine (`mle.rs`: layout with word wrap and tabs, editing, undo, import/export formats, search) and the arithmetic of spin buttons, sliders and value sets (`controls.rs`); the notebook's pages and geometry (`notebook.rs`). Plain data structures, unit-tested on the host. |
 | `userland/pmwin` → PMWIN.DLL | Exports (`Win*`, `Gpi*`), the shared state and its heap, locking, messaging, the built-in window classes, and the PM server's code (input routing, hung programs, window list). |
 | `crates/viocell` | Text cells on pixels: renders VGA text cells (font, palette, blink, cursor, marked block) to 24-bit bitmaps; Copy/Copy All text and Paste keystrokes. Host-tested; for VIO windows now, AVIO later. |
 | `userland/pmviowin` → `C:\OS2\PMVIOWIN.EXE` | The windows of windowed VIO sessions (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)). |
@@ -361,8 +361,8 @@ mouse and keyboard. What PMWIN has:
   `EN_*`), `WC_LISTBOX` (single and multiple selection, scrolling with a
   scroll-bar child, keyboard, `LM_*`, `LN_*`), `WC_SCROLLBAR` (arrows,
   paging, proportional slider tracking, `SBM_*`, `WM_VSCROLL`/
-  `WM_HSCROLL`), `WC_MLE`, `WC_COMBOBOX`, `WC_SPINBUTTON`, `WC_SLIDER`
-  and `WC_VALUESET` (see [Standard controls](#standard-controls)).
+  `WM_HSCROLL`), `WC_MLE`, `WC_COMBOBOX`, `WC_SPINBUTTON`, `WC_SLIDER`,
+  `WC_VALUESET` and `WC_NOTEBOOK` (see [Standard controls](#standard-controls)).
   `WM_QUERYDLGCODE` and `WM_MATCHMNEMONIC` tell the dialog manager
   about them; entry fields, MLEs, combo boxes and spin buttons use the
   clipboard (Shift+Del, Ctrl+Ins, Shift+Ins, `EM_CUT`/`COPY`/`PASTE`).
@@ -379,7 +379,7 @@ mouse and keyboard. What PMWIN has:
   `WinIntersectRect`, ...), `WinUpper` and the code page calls,
   `WinSetHook`/`WinReleaseHook` (hooks are recorded, not called).
 
-Not done for milestone 2: notebooks, containers, presentation
+Not done for milestone 2: containers, presentation
 parameters (accepted and ignored), owner-drawn items, icons and
 pointers from resources, menu bitmaps, minimizing, help windows, drag
 and drop.
@@ -489,6 +489,36 @@ what can be tested on the host is in `crates/pmwin`.
   or bitmap items (icons and bitmaps are drawn as framed squares), item
   borders, disabled items; keyboard and mouse selection; `VM_*` and
   `VN_*`.
+- `WC_NOTEBOOK`: pages in major sections (`BKA_MAJOR`) with minor
+  sections (`BKA_MINOR`; the minor tabs of the top page's section
+  show), back pages on any corner (`BKS_BACKPAGES*`), major tabs on any
+  side (`BKS_MAJORTAB*`; minor tabs on the other back-page side), tab
+  text alignment, square, rounded or polygon tabs (corners cut), a
+  spiral binding drawn as rings, the status line (`BKA_STATUSTEXTON`,
+  aligned by `BKS_STATUSTEXT*`) with the previous/next page buttons at
+  its right end, and the Warp 4 tabbed dialog (`BKS_TABBEDDIALOG`: tabs
+  on top, no back pages, `BKS_BUTTONAREA` and
+  `BKM_SETNOTEBOOKBUTTONS` push buttons under the page whose commands
+  go to the top page's window). Tabs are as wide as their text or
+  `BKM_SETDIMENSIONS`; when they do not fit, the strip scrolls to the
+  top page's tab. Page windows (`BKM_SETPAGEWINDOWHWND`, `BKM_SETPAGEINFO`
+  with a window, a dialog template or a dialog resource, loaded at once
+  or when first turned to) become the notebook's children; the top
+  page's window shows, sized to the page with `BKA_AUTOPAGESIZE`, and
+  the others are hidden. Clicks on tabs and page buttons, Alt+PgUp/PgDn
+  from anywhere in the notebook (a page dialog passes keys it does not
+  use to the notebook), and with the focus on the tabs PgUp/PgDn, the
+  arrows (from tab to tab), Home/End, the tab mnemonics (`~1`, also
+  through `WM_MATCHMNEMONIC` from the dialog), Tab into the page and
+  Shift+Tab out of it; F1 and `WM_HELP` send `BKN_HELP`. `BKM_*`
+  (insert, delete single/tab/all, turn, query page id/count/style/data/
+  window/info, tab and status texts, tab bitmaps (their pixels are
+  copied for painting), dimensions, `BKM_CALCPAGERECT` both ways,
+  notebook and tab colours) and `BKN_PAGESELECTEDPENDING` (clearing
+  `ulPageIdNew` refuses the turn), `BKN_PAGESELECTED`,
+  `BKN_NEWPAGESIZE`, `BKN_PAGEDELETED`, `BKN_HELP`. Everything it
+  paints lives in the shared state, so the PM server paints a hung
+  program's notebook with the same code.
 
 ## The clipboard
 
@@ -584,6 +614,12 @@ The export trampolines pass their index to the lock's entry
   registered format, also read and replaced by a second process: it
   runs itself with `CHILD`), printing PASS/FAIL and `ctltest done: N
   failure(s)`.
+- `RS2\NBTEST.EXE` (userland/nbtest): notebook self-checks (pages,
+  texts, page data and info, page windows and a page dialog from a
+  template, notifications, keys, clicks, sizes, deleting) printing
+  PASS/FAIL and `nbtest done: N failure(s)`, then a window with a
+  settings-style notebook and a tabbed dialog (`NBTEST QUIT` ends at
+  once, `NBTEST HANG` stops reading its queue for 30 s first).
 - `RS2\GPITEST.EXE` (userland/gpitest): GPI self-checks printing
   PASS/FAIL and `gpitest done: N failure(s)`, then a window with every
   kind of primitive for a screenshot check (it also draws
