@@ -476,19 +476,17 @@ fn template_for(fl: u32) -> Vec<u8> {
     v.push(item(WC_LISTBOX, b"", tab | WS_GROUP, (6, 30, 136, 98), DID_DIRECTORY_LB));
     v.push(item(WC_STATIC, b"File:", st | 0x0000_0001, (152, 130, 136, 8), DID_FILES_TXT));
     v.push(item(WC_LISTBOX, b"", tab | WS_GROUP, (152, 30, 136, 98), DID_FILES_LB));
-    // Push buttons: OK (BS_DEFAULT), Cancel, Apply, Help.
-    let mut x = 6;
-    v.push(item(WC_BUTTON, b"OK", tab | WS_GROUP | 0x0400, (x, 6, 50, 14), DID_OK as u16));
-    x += 56;
-    v.push(item(WC_BUTTON, b"Cancel", tab, (x, 6, 50, 14), DID_CANCEL as u16));
-    x += 56;
+    // Push buttons in the places of IBM's template (applications add
+    // their own between OK and Cancel, where Apply goes): OK
+    // (BS_DEFAULT), Apply, Cancel, Help.
+    v.push(item(WC_BUTTON, b"OK", tab | WS_GROUP | 0x0400, (7, 7, 50, 14), DID_OK as u16));
     if fl & FDS_APPLYBUTTON != 0 {
-        v.push(item(WC_BUTTON, b"~Apply", tab, (x, 6, 50, 14), DID_APPLY_PB));
-        x += 56;
+        v.push(item(WC_BUTTON, b"~Apply", tab, (63, 7, 50, 14), DID_APPLY_PB));
     }
+    v.push(item(WC_BUTTON, b"Cancel", tab, (119, 7, 50, 14), DID_CANCEL as u16));
     if fl & FDS_HELPBUTTON != 0 {
         // BS_HELP | BS_NOPOINTERFOCUS.
-        v.push(item(WC_BUTTON, b"Help", tab | 0x0100 | 0x0800, (x, 6, 50, 14), DID_HELP_PB));
+        v.push(item(WC_BUTTON, b"Help", tab | 0x0100 | 0x0800, (175, 7, 50, 14), DID_HELP_PB));
     }
     template(frame, v)
 }
