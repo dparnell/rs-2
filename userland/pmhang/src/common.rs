@@ -1,8 +1,9 @@
 //! A PM program that stops reading its message queue on purpose: its
 //! window procedure never returns from WM_BUTTON1DOWN (or the H key),
 //! either blocked in DosSleep or spinning without system calls; with
-//! button 2 it sleeps six seconds and then goes on. It tests that the rest
-//! of the desktop keeps working (docs/PM.md).
+//! button 2 it sleeps six seconds and then goes on; with X it ends while a
+//! second thread keeps calling PMWIN. It tests that the rest of the
+//! desktop keeps working (docs/PM.md).
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -61,8 +62,18 @@ unsafe extern "C" {
     fn WinQueryWindowRect(h: u32, r: *mut RectL) -> u32;
     #[link_name = "PMWIN.913"]
     fn WinDrawText(hps: u32, cch: i32, text: *const u8, r: *mut RectL, fore: i32, back: i32, fl: u32) -> i32;
+    #[link_name = "PMWIN.765"]
+    fn WinInvalidateRect(h: u32, r: *const RectL, children: u32) -> u32;
+    #[link_name = "PMWIN.877"]
+    fn WinSetWindowText(h: u32, text: *const u8) -> u32;
+    #[link_name = "PMWIN.834"]
+    fn WinQueryWindow(h: u32, cmd: i32) -> u32;
     #[link_name = "DOSCALLS.229"]
     fn DosSleep(ms: u32) -> u32;
+    #[link_name = "DOSCALLS.311"]
+    fn DosCreateThread(ptid: *mut u32, pfn: extern "C" fn(u32) -> u32, param: u32, flags: u32, cb: u32) -> u32;
+    #[link_name = "DOSCALLS.234"]
+    fn DosExit(action: u32, result: u32);
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -83,6 +94,22 @@ const WM_BUTTON2DOWN: u32 = 0x74;
 const WM_CHAR: u32 = 0x7a;
 const KC_KEYUP: u32 = 0x40;
 const KC_CHAR: u32 = 0x01;
+
+static FRAME: AtomicU32 = AtomicU32::new(0);
+
+extern "C" fn spam(h: u32) -> u32 {
+    let mut n = 0u32;
+    loop {
+        let mut r = RectL::default();
+        unsafe {
+            WinQueryWindowRect(h, &mut r);
+            WinInvalidateRect(h, core::ptr::null(), 1);
+            let t = if n % 2 == 0 { b"Ending...\0" } else { b"Ending.  \0" };
+            WinSetWindowText(WinQueryWindow(h, 5), t.as_ptr());
+        }
+        n = n.wrapping_add(1);
+    }
+}
 
 fn hang() -> ! {
     if MODE.load(Ordering::Relaxed) == 1 {
@@ -118,6 +145,16 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 1
             }
             WM_CHAR if mp1 & KC_KEYUP == 0 && mp1 & KC_CHAR != 0 && (mp2 & 0xff) as u8 | 0x20 == b'h' => hang(),
+            // X: a second thread calls PMWIN as fast as it can while the
+            // process ends (the PM lock must not stay with a dead thread).
+            WM_CHAR if mp1 & KC_KEYUP == 0 && mp1 & KC_CHAR != 0 && (mp2 & 0xff) as u8 | 0x20 == b'x' => {
+                FRAME.store(h, Ordering::Relaxed);
+                let mut tid = 0;
+                DosCreateThread(&mut tid, spam, h, 0, 65536);
+                DosSleep(1500);
+                DosExit(1, 0);
+                0
+            }
             _ => WinDefWindowProc(h, msg, mp1, mp2),
         }
     }
