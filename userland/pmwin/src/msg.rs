@@ -480,6 +480,13 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
                 let more = !queue.msgs.is_empty();
                 queue.msgs.retrieved(t, more);
                 if m.msg == WM_CHAR {
+                    // In menu mode the queue's keys go to the menu (also
+                    // keys typed ahead of a menu that opened since).
+                    if let Some(root) = crate::state::menu_mode().as_ref().map(|x| x.root) {
+                        if st().desk.exists(root) {
+                            m.hwnd = root;
+                        }
+                    }
                     accel::translate(&mut m);
                 }
             }

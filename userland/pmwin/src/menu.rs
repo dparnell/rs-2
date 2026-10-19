@@ -5,7 +5,8 @@
 //! Each submenu is its own hidden menu window, a child of the desktop,
 //! shown below or beside its item while the menu is in use. Menu mode
 //! (tracking) is driven by the menu messages: the root menu holds the
-//! mouse capture and the focus, sends WM_INITMENU and WM_MENUSELECT to its
+//! mouse capture and gets the queue's keys (the focus window keeps the
+//! focus, as in PM), sends WM_INITMENU and WM_MENUSELECT to its
 //! owner and posts WM_COMMAND (WM_SYSCOMMAND for MIS_SYSCOMMAND items,
 //! WM_HELP for MIS_HELP) when an item is chosen.
 
@@ -94,10 +95,9 @@ pub struct Menu {
     pub default_id: u32,
 }
 
-/// Menu tracking: the root menu and the window to give the focus back to.
+/// Menu tracking: the root menu.
 pub struct Mode {
     pub root: u32,
-    pub focus: u32,
 }
 
 /// MENUITEM: iPosition, afStyle, afAttribute, id, hwndSubMenu, hItem.
@@ -538,10 +538,10 @@ fn start(h: u32, sel: Option<usize>, drop: bool) {
         end(None, false);
     }
     let s = st();
-    let focus = s.focus;
-    *crate::state::menu_mode() = Some(Mode { root: h, focus });
+    *crate::state::menu_mode() = Some(Mode { root: h });
     s.capture = h;
-    win::set_focus(h);
+    // As in PM, the focus window keeps the focus (it gets no
+    // WM_SETFOCUS); the queue's keys go to the menu meanwhile.
     send(notify_target(h), WM_INITMENU, ctl::id(h), h);
     if let Some(i) = sel {
         select(h, i);
@@ -687,9 +687,6 @@ fn end(chosen: Option<(u32, usize)>, pointer: bool) {
     let s = st();
     if s.capture == r {
         s.capture = 0;
-    }
-    if s.desk.exists(mode.focus) {
-        win::set_focus(mode.focus);
     }
     let target = notify_target(r);
     send(target, WM_MENUEND, ctl::id(r), r);

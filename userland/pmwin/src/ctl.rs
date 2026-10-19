@@ -209,9 +209,29 @@ pub fn cstr(p: *const u8) -> Vec<u8> {
     (0..).map(|i| unsafe { *p.add(i) }).take_while(|&b| b != 0).collect()
 }
 
+/// The text of a control whose window text lives elsewhere (MLE, combo
+/// box, spin button).
+pub fn text_of(h: u32) -> Option<Vec<u8>> {
+    crate::mle::text(h).or_else(|| crate::combo::text(h)).or_else(|| crate::spin::text(h))
+}
+
+/// Set such a control's text; false if `h` is not one.
+pub fn set_text_of(h: u32, t: &[u8]) -> bool {
+    if crate::mle::is_mle(h) {
+        crate::mle::set_text(h, t);
+    } else if crate::combo::is_combo(h) {
+        crate::combo::set_text(h, t);
+    } else if crate::spin::is_spin(h) {
+        crate::spin::set_text(h, t);
+    } else {
+        return false;
+    }
+    true
+}
+
 /// Register the built-in classes (WC_FRAME etc., named "#n").
 pub fn register_builtin() {
-    let classes: [(u32, u32, u32); 9] = [
+    let classes: [(u32, u32, u32); 13] = [
         (1, crate::frame::frame_entry as *const () as u32, 0x20),
         (3, crate::button::button_entry as *const () as u32, 0),
         (4, crate::menu::menu_entry as *const () as u32, 0),
@@ -221,6 +241,10 @@ pub fn register_builtin() {
         (8, crate::scrollbar::scrollbar_entry as *const () as u32, 0),
         (9, crate::frame::titlebar_entry as *const () as u32, 0),
         (10, crate::mle::mle_entry as *const () as u32, 0x2000_0000),
+        (2, crate::combo::combo_entry as *const () as u32, 0x2000_0000),
+        (32, crate::spin::spin_entry as *const () as u32, 0x2000_0000),
+        (38, crate::slider::slider_entry as *const () as u32, 0),
+        (39, crate::valueset::valueset_entry as *const () as u32, 0),
     ];
     let s = st();
     for (n, proc_, style) in classes {

@@ -12,6 +12,7 @@ mod accel;
 mod bitmap;
 mod button;
 mod clip;
+mod combo;
 mod color;
 mod ctl;
 mod dlg;
@@ -35,8 +36,11 @@ mod res;
 mod scrollbar;
 mod server;
 mod shared;
+mod slider;
+mod spin;
 mod state;
 mod statics;
+mod valueset;
 mod win;
 
 /// A line on the serial port (RS2API.4), for debugging.

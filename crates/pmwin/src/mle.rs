@@ -759,10 +759,8 @@ impl Mle {
             e => return Err(e),
         }
         // The selection stays where it was (shifted if after `at`).
-        let shift = |p: usize| if p >= at { p + t.len() } else { p };
-        if at != sel.1 || at != sel.0 {
-            (self.anchor, self.cursor) = (shift(sel.0), shift(sel.1));
-        }
+        let shift = |p: usize| if p > at { p + t.len() } else { p };
+        (self.anchor, self.cursor) = (shift(sel.0), shift(sel.1));
         Ok((used, t.len()))
     }
 

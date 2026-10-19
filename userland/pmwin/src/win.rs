@@ -405,7 +405,18 @@ pub fn activate(h: u32) {
         notify(top, WM_ACTIVATE, 1, top);
         repaint_title(top);
     }
-    set_focus(client);
+    let f = st().focus;
+    if f != top && f != 0 && st().desk.is_ancestor(top, f) {
+        // The focus is in the window already.
+        return;
+    }
+    if st().frames.contains_key(&top) && client != top {
+        // A frame gets the focus and passes it on (to QWL_HWNDFOCUSSAVE
+        // or its client), which so hears that it came from the frame.
+        set_focus(top);
+    } else {
+        set_focus(client);
+    }
 }
 
 /// A frame's title bar shows whether it is active (also while its
@@ -424,7 +435,7 @@ pub fn set_focus(h: u32) {
     }
     st().focus = h;
     let top = top_level(h);
-    if let Some(f) = st().frames.get_mut(&top) {
+    if let Some(f) = st().frames.get_mut(&top).filter(|_| top != h) {
         f.focus_save = h;
     }
     if old != 0 && st().desk.exists(old) {
@@ -628,8 +639,7 @@ pub extern "C" fn WinSetWindowText(h: u32, text: *const u8) -> u32 {
 
 /// Set a window's text; a frame and its title bar share theirs.
 pub fn set_text(h: u32, t: &[u8]) -> u32 {
-    if crate::mle::is_mle(h) {
-        crate::mle::set_text(h, t);
+    if crate::ctl::set_text_of(h, t) {
         return 1;
     }
     let s = st();
@@ -654,7 +664,7 @@ pub fn set_text(h: u32, t: &[u8]) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32 {
-    if let Some(t) = crate::mle::text(h) {
+    if let Some(t) = crate::ctl::text_of(h) {
         return if cch <= 0 { 0 } else { crate::ctl::copy_out(&t, cch as usize, buf) as i32 };
     }
     let Some(w) = st().desk.get(h) else { return 0 };
@@ -671,7 +681,7 @@ pub extern "C" fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowTextLength(h: u32) -> i32 {
-    if let Some(t) = crate::mle::text(h) {
+    if let Some(t) = crate::ctl::text_of(h) {
         return t.len() as i32;
     }
     st().desk.get(h).map_or(0, |w| w.text.len() as i32)

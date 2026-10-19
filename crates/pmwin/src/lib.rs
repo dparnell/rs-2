@@ -7,6 +7,7 @@
 
 extern crate alloc;
 
+pub mod controls;
 pub mod mle;
 mod queue;
 mod region;
