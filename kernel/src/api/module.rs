@@ -244,10 +244,7 @@ fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
         crate::trace!("    load {name}");
     }
     let _ = loader::take_fail();
-    let r = {
-        let mut sp = c.space();
-        loader::load_dll(&name, &mut sp)
-    };
+    let r = loader::load_dll(&name, || c.space());
     let m = match r {
         Ok(m) => m,
         Err(e) => {

@@ -141,10 +141,7 @@ fn register(c: &mut Ctx, module: u8, name: u32, entry_name: u32, masks: [u32; 2]
     if REGS.lock().iter().any(|r| r.module == module && r.sid == sid) {
         return fail;
     }
-    let r = {
-        let mut sp = c.space();
-        crate::loader::load_dll(&m, &mut sp)
-    };
+    let r = crate::loader::load_dll(&m, || c.space());
     let Ok(module_obj) = r else { return fail };
     let Ok(t) = module_obj.resolve_name(&e, 0) else { return fail };
     // A 32-bit export is entered through the 16:16 alias of its object.

@@ -319,10 +319,12 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     Ok(m)
 }
 
-/// Load (or find) a DLL and attach it to `space`.
-pub fn load_dll(name: &str, space: &mut AddressSpace) -> Result<Arc<Module>, u32> {
+/// Load (or find) a DLL and attach it to the address space `space`
+/// locks. Loading reads files, which may wait for the disk, so the
+/// address space (a spin lock) is only locked for the attaching.
+pub fn load_dll<G: core::ops::DerefMut<Target = AddressSpace>>(name: &str, space: impl FnOnce() -> G) -> Result<Arc<Module>, u32> {
     let m = load_global(name)?;
-    attach(&m, space)?;
+    attach(&m, &mut space())?;
     Ok(m)
 }
 
