@@ -67,7 +67,13 @@ Status markers: done, in progress, planned.
   virtio-scsi (disks, CD-ROMs, unit attentions), virtio-input (keyboards,
   mice, tablets through an absolute pointer path for text mode and PM),
   virtio-rng (\DEV\RANDOM$), virtio-console port 0 (\DEV\VIOCON$)
-- planned: NVMe/xHCI/virtio interrupts (MSI-X), virtio-net, virtio-gpu,
+- done: virtio-gpu 2D (`virtio-vga`, `virtio-gpu-pci`): guest-RAM
+  framebuffer for the text screens and PM, `video=WxH` (any size),
+  changed rows flushed from the timer tick (whole screen under PM)
+- planned: virtio-gpu hardware cursor, PM dirty rectangles instead of
+  full-screen flushes, display hot-resize events (EDID), run-time mode
+  changes under PM
+- planned: NVMe/xHCI/virtio interrupts (MSI-X), virtio-net,
   virtio-scsi hot-plug events, virtio-console multiport
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - done: SMP: all processors started (INIT/SIPI), per-CPU GDT/TSS/LAPIC

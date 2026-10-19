@@ -17,8 +17,8 @@ programs unmodified, natively, on 64-bit PCs.
   [Virtual machines](#virtual-machines).
 - virtio devices for KVM/QEMU, Proxmox, UTM and cloud VMs: block and SCSI
   disks (and booting from them), SCSI CD-ROMs, keyboards, mice and tablets
-  (absolute pointer), entropy (`\DEV\RANDOM$`) and console
-  (`\DEV\VIOCON$`).
+  (absolute pointer), entropy (`\DEV\RANDOM$`), console
+  (`\DEV\VIOCON$`) and display (virtio-gpu, any `video=WxH`).
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 
@@ -57,7 +57,10 @@ rs2 boots in any VM with UEFI firmware and a GOP framebuffer. Storage:
 SATA (AHCI), NVMe, VMware PVSCSI, LSI Logic Parallel (53c1030) and LSI
 Logic SAS (SAS1068), USB sticks. `video=1280x1024` (or any WxH) in
 `\RS2\CMDLINE` picks the resolution: through the firmware if it offers
-that mode, otherwise through the VMware SVGA II driver.
+that mode, otherwise through the VMware SVGA II driver. With a virtio-gpu
+display the kernel's driver always takes over and sets any size: the
+`video=` one, else the firmware's mode, else the display's preferred
+size.
 
 - **VMware**: choose UEFI firmware. The VMware pointer (vmmouse) follows
   the host cursor without capturing it; the boot log shows "mouse: VMware
@@ -68,7 +71,12 @@ that mode, otherwise through the VMware SVGA II driver.
   Logic controllers use the same MPT interface and may work too). The
   mouse works in relative (captured) mode: VirtualBox's absolute pointer
   needs its VMMDev guest device, which rs2 does not drive yet.
-- **QEMU**: `-machine q35` with OVMF, as `cargo xtask run` does.
+- **QEMU**: `-machine q35` with OVMF, as `cargo xtask run` does. For
+  virtio-gpu use `-vga none -device virtio-vga` (`cargo xtask run
+  --virtio-gpu`): OVMF draws on its VGA side until the kernel takes over.
+  With `virtio-gpu-pci` (`--virtio-gpu-pci`) the firmware has no
+  framebuffer for the loader, so the screen only starts with the driver
+  (earlier boot messages are on the serial port).
 
 Network cards (e1000, vmxnet3, ...) are listed in the serial log but not
 used: rs2 has no network stack yet.

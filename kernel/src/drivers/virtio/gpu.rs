@@ -147,9 +147,12 @@ impl Gpu {
         self.put(SYNC_RESP, &[0]);
         let bufs = [Buf::out(self.mem.addr(SYNC_REQ), len), Buf::into(self.mem.addr(SYNC_RESP), resp_len)];
         // Make room if tick commands fill the queue.
-        while self.q.free_count() < 2 && self.pending > 0 {
+        for _ in 0..SYNC_POLLS {
+            if self.q.free_count() >= 2 || self.pending == 0 {
+                break;
+            }
             self.reap(None);
-            core::hint::spin_loop();
+            self.dev.status_reg().read8();
         }
         let Some(head) = self.q.add(&bufs) else { return 0 };
         self.q.kick();
