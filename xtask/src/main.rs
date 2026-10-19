@@ -7,7 +7,7 @@
 //!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
 //!                  [--virtio-disk IMG]... [--virtio-scsi IMG]... [--virtio-cd ISO]...
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
-//!                  [--virtio-rng] [--virtio-console OUT [--virtio-console-in IN]]
+//!                  [--virtio-rng] [--virtio-console PATH]
 //!                  [--virtio-legacy] [--boot-virtio]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
@@ -29,8 +29,8 @@
 //! CD-ROMs on one virtio-scsi controller, `--virtio-input` a keyboard, a
 //! mouse and a tablet (or one of them with `--virtio-kbd`,
 //! `--virtio-mouse`, `--virtio-tablet`), `--virtio-rng` an entropy source,
-//! `--virtio-console` a console whose output goes to a file (input from
-//! `--virtio-console-in`). `--virtio-legacy` makes the block, SCSI, entropy
+//! `--virtio-console PATH` a console whose output goes to file PATH, or,
+//! if the FIFOs PATH.in and PATH.out exist, connected to them. `--virtio-legacy` makes the block, SCSI, entropy
 //! and console devices legacy-only (virtio 0.9.5). `--boot-virtio` boots
 //! from the first virtio disk (no ESP directory).
 
@@ -95,7 +95,6 @@ struct Opts {
     virtio_tablet: bool,
     virtio_rng: bool,
     virtio_console: Option<PathBuf>,
-    virtio_console_in: Option<PathBuf>,
     virtio_legacy: bool,
     boot_virtio: bool,
 }
@@ -133,7 +132,6 @@ fn parse(args: &[String]) -> Opts {
         virtio_tablet: false,
         virtio_rng: false,
         virtio_console: None,
-        virtio_console_in: None,
         virtio_legacy: false,
         boot_virtio: false,
     };
@@ -182,10 +180,6 @@ fn parse(args: &[String]) -> Opts {
             "--virtio-console" => {
                 i += 1;
                 o.virtio_console = Some(PathBuf::from(&args[i]));
-            }
-            "--virtio-console-in" => {
-                i += 1;
-                o.virtio_console_in = Some(PathBuf::from(&args[i]));
             }
             "--virtio-legacy" => o.virtio_legacy = true,
             "--boot-virtio" => o.boot_virtio = true,
@@ -487,8 +481,9 @@ fn virtio_devices(o: &Opts, c: &mut Command) {
         c.arg("-device").arg(format!("virtio-rng-pci{legacy}"));
     }
     if let Some(out) = &o.virtio_console {
-        let input = o.virtio_console_in.as_ref().map(|i| format!(",input-path={}", i.display())).unwrap_or_default();
-        c.arg("-chardev").arg(format!("file,id=vcon,path={}{input}", out.display()));
+        let fifos = Path::new(&format!("{}.in", out.display())).exists();
+        let backend = if fifos { "pipe" } else { "file" };
+        c.arg("-chardev").arg(format!("{backend},id=vcon,path={}", out.display()));
         c.arg("-device").arg(format!("virtio-serial-pci{legacy}"));
         c.args(["-device", "virtconsole,chardev=vcon"]);
     }
