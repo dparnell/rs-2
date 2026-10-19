@@ -1,0 +1,9 @@
+[package]
+name = "ctltest"
+description = "Self-checks of PMWIN's standard controls (MLE, combo boxes, spin buttons, sliders, value sets) and the clipboard"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
