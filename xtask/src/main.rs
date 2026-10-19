@@ -422,6 +422,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("tcpip32", "OS2\\DLL\\TCPIP32.DLL"),
         ("tnls32", "OS2\\DLL\\TNLS32.DLL"),
         ("pmshapi", "OS2\\DLL\\PMSHAPI.DLL"),
+        ("so32dll", "OS2\\DLL\\SO32DLL.DLL"),
+        ("tcp32dll", "OS2\\DLL\\TCP32DLL.DLL"),
     ];
 
 /// Build the userland workspace and convert each program to LX.

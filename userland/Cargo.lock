@@ -99,10 +99,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "so32dll-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "tcpipcore",
+]
+
+[[package]]
 name = "stress"
 version = "0.1.0"
 dependencies = [
  "os2",
+]
+
+[[package]]
+name = "tcp32dll-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "tcpipcore",
 ]
 
 [[package]]

@@ -1,0 +1,3 @@
+; Data exports (added to exports.def by gen_pm_exports.py)
+h_errno=tcpipcore_h_errno @42
+_res=tcpipcore_ress @43

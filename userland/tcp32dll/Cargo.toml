@@ -1,0 +1,14 @@
+[package]
+name = "tcp32dll-dll"
+description = "TCP32DLL.DLL: the OS/2 TCP/IP 4.0 network database, resolver and address calls"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tcp32dll"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+tcpipcore = { path = "../tcpipcore" }
