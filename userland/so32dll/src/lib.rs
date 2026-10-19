@@ -134,10 +134,12 @@ pub extern "C" fn sock_init() -> i32 {
     sock::sock_init()
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn addsockettolist(_s: i32) {}
+pub extern "C" fn addsockettolist(s: i32) {
+    sock::addsockettolist(s)
+}
 #[unsafe(no_mangle)]
-pub extern "C" fn removesocketfromlist(_s: i32) -> i32 {
-    1
+pub extern "C" fn removesocketfromlist(s: i32) -> i32 {
+    sock::removesocketfromlist(s)
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn psock_errno(s: *const u8) {

@@ -86,8 +86,10 @@ Status markers: done, in progress, planned.
   Toolkit socket and RPC samples run; so_cancel and the socket list
   (RS2API 218/219); IFCONFIG, NETSTAT, HOSTNAME, HOST; the 16-bit
   TCPIPDLL and TNLS16 (thunk16: 16-bit entry points for Rust DLLs), IBM's
-  16-bit TFTP runs
-- planned: sockets shared between processes (INETD),
+  16-bit TFTP runs; system-wide socket numbers with owners
+  (addsockettolist/removesocketfromlist, RS2API 220/221): IBM's INETD
+  hands connections to the servers it starts
+- planned:
   route/arp and run-time configuration, INI files for PMSHAPI, NIC
   interrupts, vmxnet3/pcnet drivers, TCP keepalive/window
   scaling/SACK/urgent data

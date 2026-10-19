@@ -115,7 +115,8 @@ on the media, so rs2's own utilities take their place.
 | Toolkit echos/echoc (HPS) | fails | Need `sysctl()` memory-mapped I/O (OS2_MEMMAPIO), which rs2 does not have. |
 | SYSLOGD.EXE | works | Receives a UDP message (sent with RXSOCK to 127.0.0.1:514) and writes it to `%ETC%\\SYSLOG.MSG`. |
 | TFTP.EXE | works | 16-bit, on rs2's TCPIPDLL and TNLS16: `status`, `binary`, `get` of 300 KB and a text file from QEMU's TFTP server, byte-identical. Timeouts (`_alarm`) do not fire. |
-| INETD.EXE, TELNETD.EXE, LPD.EXE, BOOTP.EXE | not tried | 16-bit servers; INETD hands accepted sockets to other processes, which rs2's per-process sockets do not allow; TELNETD needs pseudo terminals. |
+| INETD.EXE | works | 16-bit; listens for the services of `%ETC%\INETD.LST` and starts the server with the accepted socket's number (tested with a REXX echo server on RXSOCK, reached from the host). |
+| TELNETD.EXE, LPD.EXE, BOOTP.EXE | not tried | TELNETD needs pseudo terminals. |
 
 ## Messages and national language support
 

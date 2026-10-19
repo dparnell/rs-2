@@ -132,6 +132,10 @@ unsafe extern "C" {
     pub fn Rs2SockCancel(s: u32) -> u32;
     #[link_name = "RS2API.219"]
     pub fn Rs2NetQuerySockets(info: *mut SockInfo, max: u32, count: *mut u32) -> u32;
+    #[link_name = "RS2API.220"]
+    pub fn Rs2SockTake(s: u32) -> u32;
+    #[link_name = "RS2API.221"]
+    pub fn Rs2SockRelease(s: u32) -> u32;
 }
 
 /// One socket of the stack (Rs2NetQuerySockets).

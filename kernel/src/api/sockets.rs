@@ -33,6 +33,8 @@
 //! | 217 | Rs2NetResolve(PSZ name, PULONG addrs, ULONG max, PULONG count) |
 //! | 218 | Rs2SockCancel(ULONG s) |
 //! | 219 | Rs2NetQuerySockets(PRS2SOCKINFO, ULONG max, PULONG count) |
+//! | 220 | Rs2SockTake(ULONG s) |
+//! | 221 | Rs2SockRelease(ULONG s) |
 //!
 //! Rs2SockSelect has OS/2's `select()` semantics: `socks` lists the read,
 //! write and exception sockets in that order, entries that are not ready
@@ -54,6 +56,13 @@
 //! TIME_WAIT; 0 none), `BYTE flags` (bit 0 listening, 1 closed by its
 //! owner), `BYTE laddr[4]`, `USHORT lport, rport` (host order), `BYTE
 //! raddr[4]`, `ULONG pid, socket` of the owner (0 if none) (24 bytes).
+//!
+//! Socket numbers are unique in the system and every process may use
+//! every socket (OS/2's model); a socket belongs to one process, which
+//! closes it by ending. Rs2SockTake makes the caller the owner
+//! (addsockettolist), Rs2SockRelease gives the caller's socket up so it
+//! survives the caller (removesocketfromlist; ENOTSOCK if the caller did
+//! not own it).
 
 use alloc::vec::Vec;
 
@@ -397,4 +406,14 @@ pub fn query_sockets(c: &mut Ctx) -> u32 {
         return EFAULT;
     }
     0
+}
+
+/// Rs2SockTake.
+pub fn take(c: &mut Ctx) -> u32 {
+    done(so::take(pid(c), c.arg(0)))
+}
+
+/// Rs2SockRelease.
+pub fn release(c: &mut Ctx) -> u32 {
+    done(so::release(pid(c), c.arg(0)))
 }

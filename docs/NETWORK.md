@@ -124,7 +124,9 @@ stack operation whenever the counter moves; this keeps select() trivial.
 Per-socket queues are an optimisation for later.
 
 **`net::socket`** is the kernel-internal socket API: per-process handle
-tables (handles from 3 up), each handle naming a stack socket plus
+tables (handles from 3 up, unique in the system: as on OS/2 any process
+may use any socket, the tables only say whose it is and so which
+process's end closes it), each handle naming a stack socket plus
 FIONBIO, SO_RCVTIMEO/SO_SNDTIMEO, SO_LINGER, SO_KEEPALIVE (accepted, not
 acted on), SO_OOBINLINE. Calls: `create`, `bind`, `listen`, `accept`,
 `connect` (EINPROGRESS for non-blocking sockets, then select for
@@ -157,6 +159,8 @@ is accepted as input.
 | 217 | Rs2NetResolve |
 | 218 | Rs2SockCancel (so_cancel: blocked calls of other threads end with EINTR) |
 | 219 | Rs2NetQuerySockets (every socket of the stack, with its owner: netstat) |
+| 220 | Rs2SockTake (addsockettolist: the caller owns the socket) |
+| 221 | Rs2SockRelease (removesocketfromlist: the socket outlives its owner) |
 
 ## Configuration
 
@@ -272,8 +276,12 @@ and result buffers are too.
   boot drive's `\MPTN\ETC` otherwise). rs2 ships HOSTS, SERVICES,
   PROTOCOL, NETWORKS and RPC (`dist/etc`). The host name is `%HOSTNAME%`,
   else `rs2`.
-* Sockets belong to the process that made them and close when it ends;
-  `addsockettolist`/`removesocketfromlist` have nothing to do.
+* Socket numbers are system-wide, as on OS/2: a socket belongs to the
+  process that made it and closes when that process ends, but any process
+  may use it; `addsockettolist` takes it over (Rs2SockTake),
+  `removesocketfromlist` lets it outlive its owner (Rs2SockRelease).
+  This is how INETD hands an accepted connection to the server it starts
+  (`%COMSPEC% /c program socket`).
 * **TNLS32** has no import library or headers: the entries are what
   IBM's applications are seen to use in their disassembly (`_Optlink`
   calls: arguments in EAX, EDX, ECX, then the stack). rs2 has no
@@ -328,6 +336,10 @@ reach the guest through a `hostfwd_add` sent to QEMU's monitor):
 * TFTP (16-bit, TCPIPDLL/TNLS16): `tftp 10.0.2.2`, `binary`, `get` of a
   300 KB file and a text file from QEMU's TFTP server (`xtask run
   --tftp DIR`), byte-identical.
+* INETD (16-bit): with `echo tcp C:\INETECHO.CMD` in `%ETC%\INETD.LST` it
+  listens on port 7; a host client (through `--hostfwd tcp::5507-:7`)
+  is served by the REXX script INETD starts with the socket number,
+  through RXSOCK/TCPIP32.
 * SYSLOGD: a datagram sent with RXSOCK to 127.0.0.1:514 lands in
   `%ETC%\SYSLOG.MSG`.
 * Toolkit samples: tcps/tcpc, selects (BSD select with TCP and UDP)
@@ -342,9 +354,6 @@ reach the guest through a `hostfwd_add` sent to QEMU's monitor):
   `_alarm`/`_xsignal` accept but never signal (TFTP's retransmission
   timer does not fire). Nothing on the media imports the 16-bit
   SOCKETS.DLL, which is not provided.
-* Sockets are per process: a socket number cannot be handed to another
-  process (INETD's and the r-daemons' way of passing connections), and
-  `addsockettolist` does nothing.
 * No urgent (out-of-band) data, no `sysctl()` (the Toolkit's HPS
   memory-mapped I/O samples need it), no ARP/interface statistics
   ioctls (SIOSTATAT, SIOSTATIF, SIOSTATTCP...), no setting of

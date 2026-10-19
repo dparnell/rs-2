@@ -4,7 +4,14 @@
 //!
 //! Every process has its own table of socket handles (small numbers from
 //! [`FIRST_HANDLE`]), each naming a socket of the stack plus per-handle
-//! options (non-blocking mode, timeouts). Calls return BSD error numbers
+//! options (non-blocking mode, timeouts). As on OS/2, socket numbers are
+//! unique in the system and any process may use any socket: a call looks
+//! in the caller's table first, then in the others. The tables say which
+//! process a socket belongs to (it is closed when that process ends);
+//! [`take`] moves a socket to the caller (addsockettolist), [`release`]
+//! detaches it from the caller so it outlives it (removesocketfromlist:
+//! INETD hands accepted connections to the servers it starts this way).
+//! Calls return BSD error numbers
 //! (`tcpip::Error::errno`; OS/2's SOCBASEERR offset is the DLL's
 //! business). Blocking calls retry the stack operation whenever
 //! [`super::EVENTS`] moves, sleeping on [`super::WAIT`] in between; they
@@ -81,27 +88,42 @@ static TABLES: SpinLock<BTreeMap<u32, Table>> = SpinLock::new(BTreeMap::new());
 
 pub type Result<T> = core::result::Result<T, u32>;
 
+/// Pseudo-process owning released sockets (removesocketfromlist).
+const UNOWNED: u32 = 0;
+
+/// The process whose table holds socket `s`: the caller's, else any.
+fn owner(g: &BTreeMap<u32, Table>, pid: u32, s: u32) -> Option<u32> {
+    if g.get(&pid).is_some_and(|t| t.map.contains_key(&s)) {
+        return Some(pid);
+    }
+    g.iter().find(|(_, t)| t.map.contains_key(&s)).map(|(&p, _)| p)
+}
+
 fn get(pid: u32, s: u32) -> Result<Handle> {
-    TABLES.lock().get(&pid).and_then(|t| t.map.get(&s).copied()).ok_or(ENOTSOCK)
+    let g = TABLES.lock();
+    let o = owner(&g, pid, s).ok_or(ENOTSOCK)?;
+    g.get(&o).and_then(|t| t.map.get(&s).copied()).ok_or(ENOTSOCK)
 }
 
 fn update(pid: u32, s: u32, f: impl FnOnce(&mut Handle)) -> Result<()> {
     let mut g = TABLES.lock();
-    let h = g.get_mut(&pid).and_then(|t| t.map.get_mut(&s)).ok_or(ENOTSOCK)?;
+    let o = owner(&g, pid, s).ok_or(ENOTSOCK)?;
+    let h = g.get_mut(&o).and_then(|t| t.map.get_mut(&s)).ok_or(ENOTSOCK)?;
     f(h);
     Ok(())
 }
 
 fn insert(pid: u32, id: usize, kind: Kind) -> Result<u32> {
     let mut g = TABLES.lock();
-    let t = g.entry(pid).or_default();
-    if t.map.len() >= MAX_SOCKETS {
+    if g.get(&pid).is_some_and(|t| t.map.len() >= MAX_SOCKETS) {
         return Err(EMFILE);
     }
+    // The lowest number no process uses.
     let mut n = FIRST_HANDLE;
-    while t.map.contains_key(&n) {
+    while g.values().any(|t| t.map.contains_key(&n)) {
         n += 1;
     }
+    let t = g.entry(pid).or_default();
     t.map.insert(
         n,
         Handle { id, kind, nonblock: false, rcv_timeout: None, snd_timeout: None, linger: None, keepalive: false, oobinline: false, cancel: 0 },
@@ -295,7 +317,8 @@ pub fn shutdown(pid: u32, s: u32, how: u32) -> Result<()> {
 pub fn close(pid: u32, s: u32) -> Result<()> {
     let h = {
         let mut g = TABLES.lock();
-        let t = g.get_mut(&pid).ok_or(ENOTSOCK)?;
+        let o = owner(&g, pid, s).ok_or(ENOTSOCK)?;
+        let t = g.get_mut(&o).ok_or(ENOTSOCK)?;
         t.map.remove(&s).ok_or(ENOTSOCK)?
     };
     stack(|st, now| if h.linger == Some(0) { st.abort(h.id, now) } else { st.close(h.id, now) })?.map_err(Error::errno)
@@ -487,6 +510,28 @@ pub fn resolve(name: &str) -> core::result::Result<Vec<Ipv4>, u32> {
             Err(2)
         }
     }
+}
+
+/// addsockettolist(): socket `s` (of any process, or released) now
+/// belongs to `pid`.
+pub fn take(pid: u32, s: u32) -> Result<()> {
+    let mut g = TABLES.lock();
+    let o = owner(&g, pid, s).ok_or(ENOTSOCK)?;
+    if o == pid {
+        return Ok(());
+    }
+    let h = g.get_mut(&o).and_then(|t| t.map.remove(&s)).ok_or(ENOTSOCK)?;
+    g.entry(pid).or_default().map.insert(s, h);
+    Ok(())
+}
+
+/// removesocketfromlist(): socket `s` no longer belongs to `pid` and is
+/// not closed when it ends. ENOTSOCK if `pid` did not have it.
+pub fn release(pid: u32, s: u32) -> Result<()> {
+    let mut g = TABLES.lock();
+    let h = g.get_mut(&pid).and_then(|t| t.map.remove(&s)).ok_or(ENOTSOCK)?;
+    g.entry(UNOWNED).or_default().map.insert(s, h);
+    Ok(())
 }
 
 /// The process ended: close its sockets.

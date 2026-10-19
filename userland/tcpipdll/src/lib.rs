@@ -270,7 +270,11 @@ extern "C" fn dispatch(ord: u32, args: *const u8) -> u32 {
     let r: i32 = unsafe {
         match ord {
             1 => with_len16(a.p(6), |l| sock::accept(ABI, s, a.p(2), l)),
-            2 | 6 => 0,
+            2 => {
+                sock::addsockettolist(s);
+                0
+            }
+            6 => 0,
             3 | 95 => 0,
             4 => sock::bind(s, a.p(2), a.i(6)),
             5 => return (a.w(0)).swap_bytes() as u32,
@@ -361,7 +365,7 @@ extern "C" fn dispatch(ord: u32, args: *const u8) -> u32 {
                 let (from, fromlen) = (a.p(10), a.p(14));
                 with_len16(fromlen, |l| sock::recvfrom(ABI, s, a.p(2), a.w(6) as i32, a.i(8), from, l))
             }
-            66 => 1,
+            66 => sock::removesocketfromlist(s),
             74 => {
                 let p = a.p(0);
                 let c = a.w(4) as u8;

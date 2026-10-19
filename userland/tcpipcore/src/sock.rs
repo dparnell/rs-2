@@ -210,6 +210,17 @@ pub fn soclose(s: i32) -> i32 {
     }
 }
 
+/// addsockettolist(s): the caller owns `s` (closed when it ends).
+pub fn addsockettolist(s: i32) {
+    unsafe { Rs2SockTake(s as u32) };
+}
+
+/// removesocketfromlist(s): 1 if the caller owned `s`, which now
+/// outlives it.
+pub fn removesocketfromlist(s: i32) -> i32 {
+    (unsafe { Rs2SockRelease(s as u32) } == 0) as i32
+}
+
 pub fn so_cancel(s: i32) -> i32 {
     match unsafe { Rs2SockCancel(s as u32) } {
         0 => 0,
