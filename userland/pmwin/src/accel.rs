@@ -30,10 +30,11 @@ const SYSTEM: [Accel; 4] = [
 ];
 
 fn table(h: u32) -> Option<&'static Vec<Accel>> {
-    st().accels.get((h as usize).checked_sub(1)?)?.as_ref()
+    st().accels.get((h as usize).checked_sub(1)?)?.as_ref().map(|t| &t.keys)
 }
 
-fn add(t: Vec<Accel>) -> u32 {
+fn add(keys: Vec<Accel>) -> u32 {
+    let t = crate::state::AccelTable { pid: crate::state::pid(), keys };
     let s = st();
     match s.accels.iter().position(|a| a.is_none()) {
         Some(i) => {
@@ -103,7 +104,7 @@ fn apply(t: &[Accel], target: u32, m: &mut QMsg) -> bool {
 /// Translate a WM_CHAR taken off the queue into a command, if it is an
 /// accelerator.
 pub fn translate(m: &mut QMsg) -> bool {
-    if m.msg != WM_CHAR || m.mp1 & ctl::KC_KEYUP != 0 || st().menu_mode.is_some() {
+    if m.msg != WM_CHAR || m.mp1 & ctl::KC_KEYUP != 0 || crate::state::menu_mode().is_some() {
         return false;
     }
     let mut cur = m.hwnd;
@@ -117,7 +118,8 @@ pub fn translate(m: &mut QMsg) -> bool {
         cur = ctl::parent(cur);
     }
     let top = win::top_level(m.hwnd);
-    if let Some(t) = table(st().queue_accel) {
+    let qa = st().my_queue_mut().map_or(0, |q| q.accel);
+    if let Some(t) = table(qa) {
         if apply(&t.clone(), top, m) {
             return true;
         }
@@ -163,8 +165,13 @@ pub extern "C" fn WinDestroyAccelTable(h: u32) -> u32 {
 pub extern "C" fn WinSetAccelTable(_hab: u32, h: u32, frame: u32) -> u32 {
     let s = st();
     if frame == 0 {
-        s.queue_accel = h;
-        return 1;
+        return match s.my_queue_mut() {
+            Some(q) => {
+                q.accel = h;
+                1
+            }
+            None => 0,
+        };
     }
     match s.frames.get_mut(&frame) {
         Some(f) => {
@@ -178,7 +185,7 @@ pub extern "C" fn WinSetAccelTable(_hab: u32, h: u32, frame: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryAccelTable(_hab: u32, frame: u32) -> u32 {
     let s = st();
-    if frame == 0 { s.queue_accel } else { s.frames.get(&frame).map_or(0, |f| f.accel) }
+    if frame == 0 { s.my_queue_mut().map_or(0, |q| q.accel) } else { s.frames.get(&frame).map_or(0, |f| f.accel) }
 }
 
 /// WinTranslateAccel(hab, hwnd, haccel, pqmsg)

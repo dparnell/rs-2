@@ -223,6 +223,6 @@ pub fn register_builtin() {
     ];
     let s = st();
     for (n, proc_, style) in classes {
-        s.classes.push(Class { name: alloc::format!("#{n}").into_bytes(), proc_, style, words: 0 });
+        s.classes.push(Class { name: alloc::format!("#{n}").into_bytes(), proc_, style, words: 0, pid: 0 });
     }
 }

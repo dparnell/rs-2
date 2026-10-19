@@ -290,12 +290,14 @@ aligned! {
     __a_WinStopTimer => crate::msg::WinStopTimer, 3;
     __a_WinGetMsg => crate::msg::WinGetMsg, 5;
     __a_WinPeekMsg => crate::msg::WinPeekMsg, 6;
+    __a_WinQueryQueueStatus => crate::msg::WinQueryQueueStatus, 1;
     __a_WinQueryPointerPos => crate::msg::WinQueryPointerPos, 2;
     __a_WinQueryMsgPos => crate::msg::WinQueryMsgPos, 2;
     __a_WinQueryMsgTime => crate::msg::WinQueryMsgTime, 1;
     __a_WinGetCurrentTime => crate::msg::WinGetCurrentTime, 1;
     __a_WinSetCapture => crate::msg::WinSetCapture, 2;
     __a_WinQueryCapture => crate::msg::WinQueryCapture, 1;
+    __a_Rs2PmServer => crate::server::Rs2PmServer, 0;
     __a_WinRegisterClass => crate::win::WinRegisterClass, 5;
     __a_WinCreateWindow => crate::win::WinCreateWindow, 13;
     __a_WinCreateStdWindow => crate::win::WinCreateStdWindow, 9;

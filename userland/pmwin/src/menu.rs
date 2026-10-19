@@ -319,7 +319,7 @@ fn selectable(it: &Item) -> bool {
 fn paint(h: u32) {
     let k = kind(h);
     let rs = rects(h);
-    let tracking = st().menu_mode.is_some();
+    let tracking = crate::state::menu_mode().is_some();
     let Some(m) = data(h) else { return };
     let sel = if tracking { m.sel } else { None };
     let items: Vec<(u16, u16, u16, Vec<u8>, bool)> = m.items.iter().map(|i| (i.style, i.attr, i.id, i.text.clone(), i.sub != 0)).collect();
@@ -512,7 +512,7 @@ fn insert(h: u32, p: *const MenuItem, text: *const u8) -> u32 {
 // ---- Menu mode ----
 
 fn root() -> u32 {
-    st().menu_mode.as_ref().map_or(0, |m| m.root)
+    crate::state::menu_mode().as_ref().map_or(0, |m| m.root)
 }
 
 /// The owner that gets the root menu's notifications.
@@ -539,7 +539,7 @@ fn start(h: u32, sel: Option<usize>, drop: bool) {
     }
     let s = st();
     let focus = s.focus;
-    s.menu_mode = Some(Mode { root: h, focus });
+    *crate::state::menu_mode() = Some(Mode { root: h, focus });
     s.capture = h;
     win::set_focus(h);
     send(notify_target(h), WM_INITMENU, ctl::id(h), h);
@@ -674,7 +674,7 @@ fn close_from(h: u32) {
 
 /// Leave menu mode; `chosen` is the item picked (menu, index).
 fn end(chosen: Option<(u32, usize)>, pointer: bool) {
-    let Some(mode) = st().menu_mode.take() else { return };
+    let Some(mode) = crate::state::menu_mode().take() else { return };
     let r = mode.root;
     close_from(r);
     if let Some(m) = data(r) {
@@ -875,8 +875,10 @@ fn key(mp1: u32, mp2: u32) -> bool {
 
 /// Windows destroyed: leave menu mode if its root went.
 pub fn forget(gone: &[u32]) {
-    if gone.contains(&root()) {
-        st().menu_mode = None;
+    for q in st().queues.values_mut() {
+        if q.menu_mode.as_ref().is_some_and(|m| gone.contains(&m.root)) {
+            q.menu_mode = None;
+        }
     }
 }
 

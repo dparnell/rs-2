@@ -4,12 +4,12 @@
 #![allow(non_snake_case)]
 
 use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
-use gpi::{Point, Rect, Surface};
+use gpi::Surface;
 
 use crate::color;
 use crate::res;
-use crate::pointer;
 use crate::state::{self, st};
 use crate::win;
 
@@ -23,21 +23,9 @@ struct DisplayInfo {
     flags: u32,
 }
 
-#[repr(C)]
-#[derive(Default)]
-struct Input {
-    kind: u16,
-    flags: u16,
-    a: u32,
-    b: u32,
-    time: u32,
-}
-
 unsafe extern "C" {
     #[link_name = "RS2API.1"]
     fn Rs2MapDisplay(info: *mut DisplayInfo) -> u32;
-    #[link_name = "RS2API.2"]
-    fn Rs2ReadInput(ev: *mut Input, ms: u32) -> u32;
     #[link_name = "DOSCALLS.329"]
     fn DosWaitEventSem(hev: u32, ms: u32) -> u32;
     #[link_name = "DOSCALLS.334"]
@@ -48,23 +36,32 @@ unsafe extern "C" {
 
 const HAB: u32 = 1;
 
-/// WinInitialize(flOptions): the anchor block. The first call maps the
-/// display and joins the Presentation Manager session.
+/// This process has mapped the display.
+static MAPPED: AtomicBool = AtomicBool::new(false);
+/// WinGetLastError's value (per process).
+pub static LAST_ERROR: AtomicU32 = AtomicU32::new(0);
+
+/// WinInitialize(flOptions): the anchor block. The first call in a
+/// process maps the display (a PM program joins the Presentation Manager
+/// session); the first one creates the shared state.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinInitialize(_fl: u32) -> u32 {
-    if state::get().is_some() {
-        return HAB;
+    if !MAPPED.load(Ordering::Relaxed) {
+        let mut info = DisplayInfo::default();
+        if unsafe { Rs2MapDisplay(&mut info) } != 0 {
+            return 0;
+        }
+        // Built before anything shared points at it.
+        gpi::font::system();
+        MAPPED.store(true, Ordering::Relaxed);
+        if state::get().is_none() {
+            let surface = unsafe {
+                Surface::new(info.address as *mut u32, info.width as i32, info.height as i32, info.stride as i32, info.flags & 1 != 0)
+            };
+            state::init(surface);
+            win::register_builtin();
+        }
     }
-    let mut info = DisplayInfo::default();
-    if unsafe { Rs2MapDisplay(&mut info) } != 0 {
-        return 0;
-    }
-    let surface = unsafe {
-        Surface::new(info.address as *mut u32, info.width as i32, info.height as i32, info.stride as i32, info.flags & 1 != 0)
-    };
-    state::init(surface);
-    win::register_builtin();
-    pointer::draw(st());
     HAB
 }
 
@@ -80,7 +77,7 @@ pub extern "C" fn WinQueryAnchorBlock(_h: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinGetLastError(_hab: u32) -> u32 {
-    state::get().map_or(0, |s| core::mem::take(&mut s.last_error))
+    LAST_ERROR.swap(0, Ordering::Relaxed)
 }
 
 /// No extended error information is kept.
@@ -221,69 +218,72 @@ fn cstr(p: *const u8) -> Vec<u8> {
 }
 
 /// WinMessageBox(hwndParent, hwndOwner, pszText, pszCaption, idWindow,
-/// flStyle): a modal box drawn over the desktop, answered with the mouse
-/// (its button) or Enter/Esc.
+/// flStyle): a modal dialog with the text and the buttons of the style
+/// (MB_OK .. MB_ENTERCANCEL); returns the MBID_* of the button pressed.
 #[unsafe(no_mangle)]
-pub extern "C" fn WinMessageBox(_parent: u32, _owner: u32, text: *const u8, title: *const u8, _id: u32, style: u32) -> u32 {
-    const MB_OKCANCEL: u32 = 1;
-    const MB_CANCEL: u32 = 6;
+pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title: *const u8, _id: u32, style: u32) -> u32 {
     const MBID_OK: u32 = 1;
     const MBID_CANCEL: u32 = 2;
-    let s = st();
+    const MBID_ABORT: u32 = 3;
+    const MBID_RETRY: u32 = 4;
+    const MBID_IGNORE: u32 = 5;
+    const MBID_YES: u32 = 6;
+    const MBID_NO: u32 = 7;
+    const MBID_ENTER: u32 = 9;
+    let buttons: &[(u32, &[u8])] = match style & 0xf {
+        1 => &[(MBID_OK, b"OK"), (MBID_CANCEL, b"Cancel")],
+        2 => &[(MBID_RETRY, b"~Retry"), (MBID_CANCEL, b"Cancel")],
+        3 => &[(MBID_ABORT, b"~Abort"), (MBID_RETRY, b"~Retry"), (MBID_IGNORE, b"~Ignore")],
+        4 => &[(MBID_YES, b"~Yes"), (MBID_NO, b"~No")],
+        5 => &[(MBID_YES, b"~Yes"), (MBID_NO, b"~No"), (MBID_CANCEL, b"Cancel")],
+        6 => &[(MBID_CANCEL, b"Cancel")],
+        7 => &[(MBID_ENTER, b"Enter")],
+        8 => &[(MBID_ENTER, b"Enter"), (MBID_CANCEL, b"Cancel")],
+        _ => &[(MBID_OK, b"OK")],
+    };
     let font = gpi::font::system();
     let text = cstr(text);
     let title = cstr(title);
-    let lines: Vec<&[u8]> = text.split(|&b| b == b'\n').collect();
-    let tw = lines.iter().map(|l| font.text_width(l)).max().unwrap_or(0).max(font.text_width(&title)).max(160);
-    let (w, h) = (tw + 40, lines.len() as i32 * font.height + 90);
-    let (sw, sh) = (s.surface.width, s.surface.height);
-    let r = Rect::new((sw - w) / 2, (sh - h) / 2, (sw + w) / 2, (sh + h) / 2);
-    let button = Rect::new(r.left + w / 2 - 40, r.bottom + 12, r.left + w / 2 + 40, r.bottom + 38);
-    let kind = style & 0xf;
-    let label: &[u8] = if kind == MB_CANCEL { b"Cancel" } else { b"OK" };
-    pointer::hide(s);
-    let mut ps = gpi::Ps::new(Point::new(0, 0), alloc::vec![r]);
-    let mut surf = s.surface;
-    ps.fill_rect(&mut surf, r, 0xcccccc);
-    ps.move_to(Point::new(r.left, r.bottom));
-    ps.draw_box(&mut surf, Point::new(r.right - 1, r.top - 1), true, false);
-    let tbar = Rect::new(r.left + 3, r.top - 3 - win::TITLE_H, r.right - 3, r.top - 3);
-    ps.fill_rect(&mut surf, tbar, color::sys(color::SYSCLR_ACTIVETITLE));
-    ps.color = 0xffffff;
-    ps.char_string_at(&mut surf, Point::new(tbar.left + (tbar.width() - font.text_width(&title)) / 2, tbar.bottom + 3 + font.descender), &title);
-    ps.color = 0x000000;
+    let lines: Vec<Vec<u8>> = text.split(|&b| b == b'\n').map(|l| l.iter().copied().filter(|&b| b != b'\r').collect()).collect();
+    let bw = 80;
+    let tw = lines.iter().map(|l| font.text_width(l)).max().unwrap_or(0).max(font.text_width(&title) + 40).max(buttons.len() as i32 * (bw + 10)).max(160);
+    // Template coordinates are dialog units (2x2 pixels).
+    let (w, h) = (tw + 40, lines.len() as i32 * font.height + 60);
+    let mut items = Vec::new();
     for (i, l) in lines.iter().enumerate() {
-        let y = tbar.bottom - 10 - (i as i32 + 1) * font.height + font.descender;
-        ps.char_string_at(&mut surf, Point::new(r.left + 20, y), l);
+        let y = h - 10 - (i as i32 + 1) * font.height;
+        // SS_TEXT | DT_LEFT, visible.
+        items.push(res::DlgItemT { class: b"#5".to_vec(), text: l.clone(), style: 0x8000_0001, x: 5, y: y / 2, cx: (w - 20) / 2, cy: font.height / 2, id: 0xffff, ctl: core::ptr::null(), children: Vec::new() });
     }
-    ps.fill_rect(&mut surf, button, 0xe0e0e0);
-    ps.move_to(Point::new(button.left, button.bottom));
-    ps.draw_box(&mut surf, Point::new(button.right - 1, button.top - 1), true, false);
-    ps.char_string_at(&mut surf, Point::new(button.left + (button.width() - font.text_width(label)) / 2, button.bottom + 5 + font.descender), label);
-    pointer::show(s);
-    let result = loop {
-        let mut ev = Input::default();
-        if unsafe { Rs2ReadInput(&mut ev, u32::MAX) } != 0 {
-            break MBID_CANCEL;
-        }
-        match ev.kind {
-            2 => {
-                let p = Point::new(ev.a as i32, ev.b as i32);
-                pointer::move_to(st(), p);
-                let down = ev.flags & 1 != 0 && st().buttons & 1 == 0;
-                st().buttons = ev.flags as u8;
-                if down && button.contains(p) {
-                    break if kind == MB_CANCEL { MBID_CANCEL } else { MBID_OK };
-                }
-            }
-            1 => match ev.a & 0xff {
-                0x0d => break if kind == MB_CANCEL { MBID_CANCEL } else { MBID_OK },
-                0x1b if kind == MB_OKCANCEL || kind == MB_CANCEL => break MBID_CANCEL,
-                _ => {}
-            },
-            _ => {}
-        }
+    let total = buttons.len() as i32 * (bw + 10) - 10;
+    for (i, (id, label)) in buttons.iter().enumerate() {
+        // BS_PUSHBUTTON (the first one BS_DEFAULT), WS_TABSTOP, the first
+        // one WS_GROUP, visible.
+        let bs = 0x8000_0000 | 0x0002_0000 | if i == 0 { 0x0001_0400 } else { 0 };
+        let x = (w - total) / 2 + i as i32 * (bw + 10);
+        items.push(res::DlgItemT { class: b"#3".to_vec(), text: label.to_vec(), style: bs, x: x / 2, y: 4, cx: bw / 2, cy: 12, id: *id, ctl: core::ptr::null(), children: Vec::new() });
+    }
+    // FCF_TITLEBAR (control data); FS_DLGBORDER | FS_SCREENALIGN.
+    let fcf: u32 = 0x0001;
+    let (sw, sh) = (st().surface.width, st().surface.height);
+    let t = res::DlgItemT {
+        class: b"#1".to_vec(),
+        text: title,
+        style: 0x0080 | 0x0200,
+        x: (sw - w) / 4,
+        y: (sh - h) / 4,
+        cx: w / 2,
+        cy: h / 2,
+        id: 0,
+        ctl: &fcf as *const u32 as *const u8,
+        children: items,
     };
-    st().desk.invalidate_screen(r);
-    result
+    let parent = if parent == 0 { pmwin::HWND_DESKTOP } else { parent };
+    let dlg = crate::dlg::create_from(parent, owner, 0, &t, 0);
+    if dlg == 0 {
+        return 0xffff;
+    }
+    let r = crate::dlg::WinProcessDlg(dlg);
+    win::WinDestroyWindow(dlg);
+    r
 }

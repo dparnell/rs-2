@@ -210,20 +210,23 @@ pub fn client_rect(frame: u32) -> Rect {
 fn paint(h: u32) {
     let f = fcf(h);
     let active = st().active == h;
-    draw::paint(h, |c: &mut Canvas| {
-        let r = c.rect();
-        c.fill(r, draw::dialog_bg());
-        let b = border(f);
-        if b > 0 {
-            c.frame(r, if active { draw::DARK } else { draw::SHADOW });
-        }
-        if b > 1 {
-            let i = Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1);
-            c.raised(i);
-            let k = Rect::new(r.left + b - 1, r.bottom + b - 1, r.right - b + 1, r.top - b + 1);
-            c.sunken(k);
-        }
-    });
+    draw::paint(h, |c: &mut Canvas| draw_frame(c, f, active));
+}
+
+/// The frame's background and border.
+pub fn draw_frame(c: &mut Canvas, f: u32, active: bool) {
+    let r = c.rect();
+    c.fill(r, draw::dialog_bg());
+    let b = border(f);
+    if b > 0 {
+        c.frame(r, if active { draw::DARK } else { draw::SHADOW });
+    }
+    if b > 1 {
+        let i = Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1);
+        c.raised(i);
+        let k = Rect::new(r.left + b - 1, r.bottom + b - 1, r.right - b + 1, r.top - b + 1);
+        c.sunken(k);
+    }
 }
 
 /// Maximize or restore a frame.
@@ -266,15 +269,33 @@ fn maximize(h: u32, on: bool) {
     WinSetWindowPos(h, 0, target.0, target.1, target.2, target.3, 0x0003);
 }
 
-/// Start moving (edges 0) or sizing a frame with the mouse.
+/// Start moving (edges 0) or sizing a frame with the mouse, from the
+/// position of the button press being processed. The PM server's input
+/// thread does the tracking.
 pub fn start_drag(h: u32, edges: u8) {
+    let s = st();
+    // Released already (the thread came late to the press).
+    if s.buttons & 1 == 0 {
+        return;
+    }
+    let ptr = s.pointer;
+    let p = s.my_queue_mut().map_or(ptr, |q| q.msg_pos);
+    start_drag_at(h, edges, p);
+}
+
+pub fn start_drag_at(h: u32, edges: u8, p: Point) {
     let s = st();
     let Some(w) = s.desk.get(h) else { return };
     if w.style & ws::MAXIMIZED != 0 {
         return;
     }
-    s.drag = Some(Drag { hwnd: h, start: s.pointer, orig: (w.x, w.y, w.cx, w.cy), edges });
+    s.drag = Some(Drag { hwnd: h, start: p, orig: (w.x, w.y, w.cx, w.cy), edges });
     s.capture = h;
+    // The tracking catches up with where the pointer is now.
+    let (now, buttons) = (s.pointer, s.buttons);
+    if now != p {
+        track(now, buttons);
+    }
 }
 
 /// Pointer motion during a move or size; ends when button 1 is up.
@@ -314,7 +335,7 @@ pub fn track(p: Point, buttons: u8) {
 }
 
 /// Which edges of a sizing border a point (frame coordinates) is on.
-fn edges_at(h: u32, p: Point) -> u8 {
+pub fn edges_at(h: u32, p: Point) -> u8 {
     let (cx, cy) = ctl::size(h);
     let k = border(fcf(h)) + 12;
     let mut e = 0;
@@ -408,21 +429,33 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 // ---- The title bar ----
 
 fn titlebar_paint(h: u32) {
-    let frame = ctl::parent(h);
-    let s = st();
-    let active = s.active == win::top_level(h) || ctl::data::<bool>(h).is_some_and(|b| *b);
+    let active = title_active(h);
     let title = ctl::text(h);
-    draw::paint(h, |c| {
-        let r = c.rect();
-        let (bg, fg) = if active {
-            (color::sys(color::SYSCLR_ACTIVETITLE), color::sys(color::SYSCLR_ACTIVETITLETEXT))
-        } else {
-            (color::sys(color::SYSCLR_INACTIVETITLE), color::sys(color::SYSCLR_INACTIVETITLETEXT))
-        };
-        c.fill(r, bg);
-        c.text_in(Rect::new(r.left + 2, r.bottom, r.right - 2, r.top), &title, fg, draw::DT_CENTER | draw::DT_VCENTER);
-    });
-    let _ = frame;
+    draw::paint(h, |c| draw_title(c, &title, active, false));
+}
+
+/// The title bar shows its frame as active.
+pub fn title_active(h: u32) -> bool {
+    st().active == win::top_level(h) || ctl::data::<bool>(h).is_some_and(|b| *b)
+}
+
+/// A title bar; one of a frame whose thread does not respond is grey
+/// and says so.
+pub fn draw_title(c: &mut Canvas, title: &[u8], active: bool, hung: bool) {
+    let r = c.rect();
+    let (bg, fg) = if hung {
+        (0xa0a0a0, 0xf0f0f0)
+    } else if active {
+        (color::sys(color::SYSCLR_ACTIVETITLE), color::sys(color::SYSCLR_ACTIVETITLETEXT))
+    } else {
+        (color::sys(color::SYSCLR_INACTIVETITLE), color::sys(color::SYSCLR_INACTIVETITLETEXT))
+    };
+    c.fill(r, bg);
+    let mut t = title.to_vec();
+    if hung {
+        t.extend_from_slice(b" (not responding)");
+    }
+    c.text_in(Rect::new(r.left + 2, r.bottom, r.right - 2, r.top), &t, fg, draw::DT_CENTER | draw::DT_VCENTER);
 }
 
 pub extern "C" fn titlebar_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {

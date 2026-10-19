@@ -91,6 +91,10 @@ impl Desktop {
         d
     }
 
+    pub fn wake_pending(&self) -> bool {
+        !self.wake.is_empty()
+    }
+
     /// Take the set of queues to wake (see `wake`).
     pub fn take_wake(&mut self) -> BTreeSet<u32> {
         core::mem::take(&mut self.wake)

@@ -58,10 +58,14 @@ fn with(h: u32, hps: u32, f: impl FnOnce(&mut Canvas)) {
     let s = st();
     let (w, hh) = s.desk.get(h).map_or((0, 0), |w| (w.cx, w.cy));
     let surface = s.surface;
+    // Built-in controls paint within one PMWIN call: the pointer is out
+    // of the way meanwhile.
+    crate::pointer::hide(s);
     if let Some(e) = gpiapi::entry(s, hps) {
         let mut c = Canvas { ps: &mut e.ps, surface, w, h: hh };
         f(&mut c);
     }
+    crate::pointer::show(st());
 }
 
 /// Text without the mnemonic marks, and the index of the marked byte.
@@ -94,6 +98,13 @@ pub fn mnemonic(t: &[u8]) -> Option<u8> {
 
 pub fn text_width(t: &[u8]) -> i32 {
     font().text_width(t)
+}
+
+impl<'a> Canvas<'a> {
+    /// A canvas drawing with `ps` on `surface` for a window of `w` x `h`.
+    pub fn new(ps: &'a mut Ps, surface: Surface, w: i32, h: i32) -> Canvas<'a> {
+        Canvas { ps, surface, w, h }
+    }
 }
 
 impl Canvas<'_> {

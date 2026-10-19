@@ -4,7 +4,7 @@ ENTRY(_start)
 SECTIONS {
     /* DLLs pass --defsym=__image_base=... to link in the shared arena. */
     . = DEFINED(__image_base) ? __image_base : 0x10000;
-    .text : { *(.text.start) *(.text .text.*) }
+    .text : { __text_start = .; *(.text.start) *(.text .text.*) __text_end = .; }
     .rodata : { *(.rodata .rodata.*) }
     . = ALIGN(0x10000);
     .data : { *(.data .data.*) *(.got) *(.got.plt) }

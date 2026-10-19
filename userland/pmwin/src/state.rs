@@ -1,17 +1,23 @@
-//! The PM state of this process: display, window tree, classes, message
-//! queues and presentation spaces.
+//! The PM state shared by every PM process: display, window tree,
+//! classes, message queues, focus and input state, presentation spaces.
 //!
-//! For now every PM process has its own state (one PM application at a
-//! time draws on the desktop); moving it into the DLL's shared data object
-//! with a shared heap is the next step towards several applications.
+//! It lives in the shared object of `shared.rs` (same address in every
+//! process) and is only touched with the PM lock held. Things that only
+//! make sense in one process (private window classes, presentation
+//! spaces, GPI objects, accelerator tables) carry that process's pid and
+//! go away with it; window procedures are only called on the thread that
+//! owns the window's queue.
 
 use alloc::boxed::Box;
-use alloc::collections::{BTreeMap, VecDeque};
-use core::any::Any;
+use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
 use alloc::vec::Vec;
+use core::any::Any;
 
 use gpi::{Point, Ps, Surface};
-use pmwin::Desktop;
+use pmwin::{Desktop, MsgQueue};
+
+pub use pmwin::QMsg;
+pub use crate::shared::{pid, tid};
 
 /// A window procedure: (hwnd, msg, mp1, mp2) -> result, `_System`.
 pub type WndProc = extern "C" fn(u32, u32, u32, u32) -> u32;
@@ -22,27 +28,27 @@ pub struct Class {
     pub style: u32,
     /// Extra window bytes.
     pub words: u32,
-}
-
-#[derive(Clone, Copy, Default)]
-#[repr(C)]
-pub struct QMsg {
-    pub hwnd: u32,
-    pub msg: u32,
-    pub mp1: u32,
-    pub mp2: u32,
-    pub time: u32,
-    pub x: i32,
-    pub y: i32,
-    pub reserved: u32,
+    /// Process that registered it (0: built in or public, usable by all).
+    pub pid: u32,
 }
 
 pub struct Queue {
-    pub msgs: VecDeque<QMsg>,
+    pub pid: u32,
     pub tid: u32,
-    /// Messages sent from other threads, and the replies to them.
+    /// Shared event semaphore the thread waits on.
+    pub sem: u32,
+    pub msgs: MsgQueue,
+    /// Messages sent from other threads, waiting to be processed.
     pub sent: VecDeque<Sent>,
-    pub replies: Vec<(u32, u32)>,
+    /// Menu tracking state (the queue's menu window has the capture).
+    pub menu_mode: Option<crate::menu::Mode>,
+    /// The queue's accelerator table.
+    pub accel: u32,
+    /// Position and time of the message last taken off the queue.
+    pub msg_pos: Point,
+    pub msg_time: u32,
+    /// Marked "not responding" by the PM server.
+    pub hung: bool,
 }
 
 pub struct PsEntry {
@@ -53,10 +59,14 @@ pub struct PsEntry {
     pub back_index: i32,
     pub rgb_mode: bool,
     pub gpi: crate::gpiapi::PsExtra,
+    /// Process that owns the PS.
+    pub pid: u32,
 }
 
 pub struct Timer {
     pub hwnd: u32,
+    /// Queue the WM_TIMER goes to.
+    pub queue: u32,
     pub id: u32,
     pub interval: u32,
     pub next: u32,
@@ -86,13 +96,23 @@ pub struct Drag {
     pub edges: u8,
 }
 
-/// A message sent to a window of another thread, waiting for its reply.
+/// A message sent to a window of another thread.
 pub struct Sent {
     pub id: u32,
     pub hwnd: u32,
     pub msg: u32,
     pub mp1: u32,
     pub mp2: u32,
+    /// Queue to wake with the reply (0: the sender has none and polls).
+    pub from: u32,
+    /// The sender waits for the result (a send from the PM server does
+    /// not: it never blocks on an application).
+    pub reply: bool,
+}
+
+pub struct AccelTable {
+    pub pid: u32,
+    pub keys: Vec<crate::res::Accel>,
 }
 
 pub struct State {
@@ -109,76 +129,83 @@ pub struct State {
     pub drag: Option<Drag>,
     pub pointer: Point,
     pub buttons: u8,
-    pub last_error: u32,
     /// Pointer image save-under: position and pixels, when drawn.
     pub ptr_saved: Option<(Point, Vec<u32>)>,
     pub ptr_hidden: u32,
+    /// The pointer is a hardware cursor (the kernel moves it).
+    pub ptr_hardware: bool,
     pub next_hmq: u32,
     /// Next position for FCF_SHELLPOSITION windows.
     pub cascade: i32,
     /// Data of the built-in control windows, by window.
     pub ctl: BTreeMap<u32, Box<dyn Any>>,
     /// Accelerator tables (handle = index + 1).
-    pub accels: Vec<Option<Vec<crate::res::Accel>>>,
-    /// The message queue's accelerator table.
-    pub queue_accel: u32,
-    /// Menu tracking state.
-    pub menu_mode: Option<crate::menu::Mode>,
+    pub accels: Vec<Option<AccelTable>>,
     /// Last button press (time, position, button) for double clicks.
     pub last_click: (u32, Point, u8),
     pub next_sent: u32,
+    /// Replies to sent messages: (id, result).
+    pub replies: Vec<(u32, u32)>,
+    /// Queues to wake when the lock is released.
+    pub wake: BTreeSet<u32>,
+    /// GPI objects (regions, bitmaps, DCs, palettes) of each process.
+    pub objects: BTreeMap<u32, crate::gpiobj::Objects>,
+    /// PM processes (pids) that have called WinInitialize.
+    pub procs: Vec<u32>,
+    /// The PM server process and its window thread's queue (0 while
+    /// there is none).
+    pub server_pid: u32,
+    pub server_queue: u32,
+    /// Milliseconds after which a queue that does not take its input is
+    /// "not responding" (PM_HANGTIME).
+    pub hang_ms: u32,
 }
 
-static mut STATE: Option<State> = None;
-
+/// The state, if PM has been initialised in the system.
 pub fn get() -> Option<&'static mut State> {
-    unsafe { (*core::ptr::addr_of_mut!(STATE)).as_mut() }
+    let h = crate::shared::header();
+    unsafe { ((*h).state as *mut State).as_mut() }
 }
 
 pub fn st() -> &'static mut State {
     get().expect("PM not initialised")
 }
 
+/// Create the state (the first PM process does).
 pub fn init(surface: Surface) {
     let desk = Desktop::new(surface.width, surface.height);
-    unsafe {
-        *core::ptr::addr_of_mut!(STATE) = Some(State {
-            surface,
-            desk,
-            classes: Vec::new(),
-            queues: BTreeMap::new(),
-            frames: BTreeMap::new(),
-            pss: Vec::new(),
-            timers: Vec::new(),
-            focus: 0,
-            active: 0,
-            capture: 0,
-            drag: None,
-            pointer: Point::new(surface.width / 2, surface.height / 2),
-            buttons: 0,
-            last_error: 0,
-            ptr_saved: None,
-            ptr_hidden: 0,
-            next_hmq: 1,
-            cascade: 0,
-            ctl: BTreeMap::new(),
-            accels: Vec::new(),
-            queue_accel: 0,
-            menu_mode: None,
-            last_click: (0, Point::new(-100, -100), 0),
-            next_sent: 1,
-        });
-    }
-}
-
-/// The calling thread's ID.
-pub fn tid() -> u32 {
-    let mut tib: *mut os2::Tib = core::ptr::null_mut();
-    let mut pib: *mut os2::Pib = core::ptr::null_mut();
-    unsafe {
-        os2::DosGetInfoBlocks(&mut tib, &mut pib);
-        (*(*tib).ptib2).tid
-    }
+    let s = Box::new(State {
+        surface,
+        desk,
+        classes: Vec::new(),
+        queues: BTreeMap::new(),
+        frames: BTreeMap::new(),
+        pss: Vec::new(),
+        timers: Vec::new(),
+        focus: 0,
+        active: 0,
+        capture: 0,
+        drag: None,
+        pointer: Point::new(surface.width / 2, surface.height / 2),
+        buttons: 0,
+        ptr_saved: None,
+        ptr_hidden: 0,
+        ptr_hardware: false,
+        next_hmq: 1,
+        cascade: 0,
+        ctl: BTreeMap::new(),
+        accels: Vec::new(),
+        last_click: (0, Point::new(-100, -100), 0),
+        next_sent: 1,
+        replies: Vec::new(),
+        wake: BTreeSet::new(),
+        objects: BTreeMap::new(),
+        procs: Vec::new(),
+        server_pid: 0,
+        server_queue: 0,
+        hang_ms: 2000,
+    });
+    unsafe { (*crate::shared::header()).state = Box::into_raw(s) as *mut u8 };
 }
 
 pub fn now() -> u32 {
@@ -190,17 +217,51 @@ pub fn now() -> u32 {
 impl State {
     /// The calling thread's message queue.
     pub fn my_queue(&self) -> u32 {
-        let t = tid();
-        self.queues.iter().find(|(_, q)| q.tid == t).map_or(0, |(&h, _)| h)
+        let (p, t) = (pid(), tid());
+        self.queues.iter().find(|(_, q)| q.tid == t && q.pid == p).map_or(0, |(&h, _)| h)
     }
 
-    /// The queue whose thread reads the kernel input (the first one
-    /// created): window procedures then run on their own threads.
-    pub fn input_queue(&self) -> u32 {
-        self.queues.keys().next().copied().unwrap_or(0)
-    }
-
+    /// A class by name: the calling process's own first, then the
+    /// built-in and public ones.
     pub fn class(&self, name: &[u8]) -> Option<&Class> {
-        self.classes.iter().find(|c| c.name.eq_ignore_ascii_case(name))
+        let p = pid();
+        self.classes
+            .iter()
+            .find(|c| c.pid == p && c.name.eq_ignore_ascii_case(name))
+            .or_else(|| self.classes.iter().find(|c| c.pid == 0 && c.name.eq_ignore_ascii_case(name)))
+    }
+
+    /// The queue of a window's thread.
+    pub fn queue_of(&self, h: u32) -> u32 {
+        self.desk.get(h).map_or(0, |w| w.queue)
+    }
+
+    /// The window's thread does not respond.
+    pub fn is_hung(&self, h: u32) -> bool {
+        self.queues.get(&self.queue_of(h)).is_some_and(|q| q.hung)
+    }
+
+    /// The calling thread's queue, if it has one.
+    pub fn my_queue_mut(&mut self) -> Option<&mut Queue> {
+        let q = self.my_queue();
+        self.queues.get_mut(&q)
+    }
+
+    /// The calling process is the PM server.
+    pub fn is_server(&self) -> bool {
+        self.server_pid != 0 && self.server_pid == pid()
+    }
+}
+
+/// The calling thread's menu mode (menus are tracked per queue).
+pub fn menu_mode() -> &'static mut Option<crate::menu::Mode> {
+    static mut NONE: Option<crate::menu::Mode> = None;
+    match st().my_queue_mut() {
+        Some(q) => &mut q.menu_mode,
+        None => unsafe {
+            let n = &mut *core::ptr::addr_of_mut!(NONE);
+            *n = None;
+            n
+        },
     }
 }

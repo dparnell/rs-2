@@ -1,39 +1,68 @@
-//! The PMWIN lock: one thread of a process at a time runs PMWIN code.
+//! The PM lock: one thread in the whole system at a time runs PMWIN code
+//! on the shared state.
 //!
-//! Every export takes it (the generated trampolines call `enter` and
-//! `leave`); it is recursive, so window procedures called from inside
-//! PMWIN may call back in. A thread gives it up completely while it waits
-//! for messages or semaphores (`unlocked`).
+//! It is a named mutex semaphore every PM process opens. Every export
+//! takes it (the generated trampolines call `enter` and `leave`); it is
+//! recursive per thread. It is never held while application code runs:
+//! window procedures are called through `unlocked`, and a thread gives it
+//! up completely while it waits for messages or semaphores. Holding it,
+//! a thread is in a must-complete section (DosEnterMustComplete), so a
+//! process being killed finishes its update of the shared state first;
+//! if a holder dies anyway (an exception in PMWIN), the next requester
+//! gets ERROR_SEM_OWNER_DIED and carries on.
+//!
+//! When a thread lets go of the lock it wakes the threads it gave work
+//! to: queues it posted to, and the owners of windows it invalidated.
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use crate::state::tid;
+use crate::shared::tid;
 
 unsafe extern "C" {
     #[link_name = "DOSCALLS.331"]
     fn DosCreateMutexSem(name: *const u8, phmtx: *mut u32, attr: u32, owned: u32) -> u32;
+    #[link_name = "DOSCALLS.332"]
+    fn DosOpenMutexSem(name: *const u8, phmtx: *mut u32) -> u32;
     #[link_name = "DOSCALLS.334"]
     fn DosRequestMutexSem(hmtx: u32, timeout: u32) -> u32;
     #[link_name = "DOSCALLS.335"]
     fn DosReleaseMutexSem(hmtx: u32) -> u32;
     #[link_name = "DOSCALLS.229"]
     fn DosSleep(ms: u32) -> u32;
+    #[link_name = "DOSCALLS.380"]
+    fn DosEnterMustComplete(pul: *mut u32) -> u32;
+    #[link_name = "DOSCALLS.381"]
+    fn DosExitMustComplete(pul: *mut u32) -> u32;
 }
 
+const LOCK_NAME: &[u8] = b"\\SEM32\\PMWIN\\LOCK\0";
 const CREATING: u32 = u32::MAX;
+const ERROR_SEM_OWNER_DIED: u32 = 105;
 
 static MUTEX: AtomicU32 = AtomicU32::new(0);
+/// Thread of this process that holds the lock (0: none here).
 static OWNER: AtomicU32 = AtomicU32::new(0);
 static DEPTH: AtomicU32 = AtomicU32::new(0);
+/// Times the lock was taken over from a thread that died holding it.
+pub static RECOVERED: AtomicU32 = AtomicU32::new(0);
 
-/// The mutex semaphore, created by the first caller.
+/// The mutex semaphore: opened by name, created by the first PM process.
 fn mutex() -> u32 {
     loop {
         match MUTEX.load(Ordering::Acquire) {
             0 => {
                 if MUTEX.compare_exchange(0, CREATING, Ordering::AcqRel, Ordering::Acquire).is_ok() {
                     let mut h = 0;
-                    unsafe { DosCreateMutexSem(core::ptr::null(), &mut h, 0, 0) };
+                    loop {
+                        if unsafe { DosOpenMutexSem(LOCK_NAME.as_ptr(), &mut h) } == 0 {
+                            break;
+                        }
+                        if unsafe { DosCreateMutexSem(LOCK_NAME.as_ptr(), &mut h, 0, 0) } == 0 {
+                            break;
+                        }
+                        // Created by another process meanwhile: open it.
+                        unsafe { DosSleep(1) };
+                    }
                     MUTEX.store(h, Ordering::Release);
                     return h;
                 }
@@ -47,12 +76,41 @@ fn mutex() -> u32 {
 }
 
 fn acquire(t: u32, depth: u32) {
-    unsafe { DosRequestMutexSem(mutex(), u32::MAX) };
+    let m = mutex();
+    let mut n = 0;
+    unsafe { DosEnterMustComplete(&mut n) };
+    loop {
+        match unsafe { DosRequestMutexSem(m, u32::MAX) } {
+            0 => break,
+            ERROR_SEM_OWNER_DIED => {
+                RECOVERED.fetch_add(1, Ordering::Relaxed);
+                break;
+            }
+            // Interrupted: the thread is being ended (it dies as it
+            // leaves the must-complete section).
+            _ => unsafe {
+                DosExitMustComplete(&mut n);
+                DosSleep(1);
+                DosEnterMustComplete(&mut n);
+            },
+        }
+    }
     OWNER.store(t, Ordering::Relaxed);
     DEPTH.store(depth, Ordering::Relaxed);
 }
 
-pub extern "C" fn enter() {
+fn release() {
+    OWNER.store(0, Ordering::Relaxed);
+    let mut n = 0;
+    unsafe {
+        DosReleaseMutexSem(mutex());
+        DosExitMustComplete(&mut n);
+    }
+}
+
+/// Take the lock (recursively) without the wake-ups on release: for the
+/// allocator.
+pub fn enter_quiet() {
     let t = tid();
     if OWNER.load(Ordering::Relaxed) == t {
         DEPTH.fetch_add(1, Ordering::Relaxed);
@@ -61,25 +119,40 @@ pub extern "C" fn enter() {
     acquire(t, 1);
 }
 
-pub extern "C" fn leave() {
+pub fn leave_quiet() {
     if OWNER.load(Ordering::Relaxed) != tid() {
         return;
     }
     if DEPTH.fetch_sub(1, Ordering::Relaxed) == 1 {
-        OWNER.store(0, Ordering::Relaxed);
-        unsafe { DosReleaseMutexSem(mutex()) };
+        release();
     }
 }
 
-/// Run `f` (a wait) with the lock released.
+pub extern "C" fn enter() {
+    enter_quiet();
+}
+
+pub extern "C" fn leave() {
+    if OWNER.load(Ordering::Relaxed) != tid() {
+        return;
+    }
+    if DEPTH.load(Ordering::Relaxed) == 1 {
+        crate::msg::wake_pending();
+    }
+    if DEPTH.fetch_sub(1, Ordering::Relaxed) == 1 {
+        release();
+    }
+}
+
+/// Run `f` (a wait, or application code) with the lock released.
 pub fn unlocked<R>(f: impl FnOnce() -> R) -> R {
     let t = tid();
     if OWNER.load(Ordering::Relaxed) != t {
         return f();
     }
+    crate::msg::wake_pending();
     let depth = DEPTH.swap(0, Ordering::Relaxed);
-    OWNER.store(0, Ordering::Relaxed);
-    unsafe { DosReleaseMutexSem(mutex()) };
+    release();
     let r = f();
     acquire(t, depth);
     r

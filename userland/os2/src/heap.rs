@@ -3,7 +3,7 @@
 
 use core::alloc::{GlobalAlloc, Layout};
 use core::ptr::{self, null_mut};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use crate::dos::*;
 
@@ -105,10 +105,29 @@ impl Heap {
     }
 }
 
+/// A replacement for the heap (PMWIN keeps all it allocates in the
+/// shared PM state).
+pub struct Allocator {
+    pub alloc: unsafe fn(Layout) -> *mut u8,
+    pub dealloc: unsafe fn(*mut u8, Layout),
+}
+
+static REPLACEMENT: AtomicPtr<Allocator> = AtomicPtr::new(null_mut());
+
+/// Send every allocation of this module (program or DLL) to `a`; call it
+/// before anything is allocated.
+pub fn set_allocator(a: &'static Allocator) {
+    REPLACEMENT.store(a as *const Allocator as *mut Allocator, Ordering::Release);
+}
+
 pub struct Os2Heap;
 
 unsafe impl GlobalAlloc for Os2Heap {
     unsafe fn alloc(&self, l: Layout) -> *mut u8 {
+        let r = REPLACEMENT.load(Ordering::Acquire);
+        if !r.is_null() {
+            return unsafe { ((*r).alloc)(l) };
+        }
         if l.size() >= LARGE && l.align() <= 4096 {
             let mut p: *mut u8 = null_mut();
             let rc = unsafe { DosAllocMem(&mut p, l.size() as u32, PAG_READ | PAG_WRITE | PAG_COMMIT) };
@@ -121,6 +140,10 @@ unsafe impl GlobalAlloc for Os2Heap {
     }
 
     unsafe fn dealloc(&self, p: *mut u8, l: Layout) {
+        let r = REPLACEMENT.load(Ordering::Acquire);
+        if !r.is_null() {
+            return unsafe { ((*r).dealloc)(p, l) };
+        }
         if l.size() >= LARGE && l.align() <= 4096 {
             unsafe { DosFreeMem(p) };
             return;

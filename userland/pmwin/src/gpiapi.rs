@@ -103,13 +103,15 @@ pub fn create(s: &mut State, hwnd: u32, origin: Point, clip: Vec<Rect>) -> u32 {
         back_index: gpi::color::CLR_BACKGROUND,
         rgb_mode: false,
         gpi: PsExtra { cached: true, ..PsExtra::default() },
+        pid: crate::state::pid(),
     };
     insert(s, e)
 }
 
 pub fn destroy(s: &mut State, hps: u32) -> bool {
+    let me = crate::state::pid();
     match s.pss.get_mut(hps.wrapping_sub(HPS_BASE) as usize) {
-        Some(slot @ Some(_)) => {
+        Some(slot @ Some(_)) if slot.as_ref().is_some_and(|e| e.pid == me) => {
             *slot = None;
             true
         }
@@ -117,8 +119,10 @@ pub fn destroy(s: &mut State, hps: u32) -> bool {
     }
 }
 
+/// A presentation space of the calling process.
 pub fn entry(s: &mut State, hps: u32) -> Option<&mut PsEntry> {
-    s.pss.get_mut(hps.wrapping_sub(HPS_BASE) as usize)?.as_mut()
+    let me = crate::state::pid();
+    s.pss.get_mut(hps.wrapping_sub(HPS_BASE) as usize)?.as_mut().filter(|e| e.pid == me)
 }
 
 /// WinBeginPaint with an application PS: draw into `hwnd`, clipped to
@@ -286,6 +290,7 @@ pub extern "C" fn GpiCreatePS(_hab: u32, hdc: u32, size: *const i32, opts: u32) 
         back_index: gpi::color::CLR_BACKGROUND,
         rgb_mode: false,
         gpi: PsExtra { options: opts, ..PsExtra::default() },
+        pid: crate::state::pid(),
     };
     let hps = insert(s, e);
     if opts & GPIA_ASSOC != 0 && hdc != 0 && !gpiobj::associate(hps, hdc) {

@@ -10,10 +10,10 @@ use pmwin::{ws, HWND_DESKTOP};
 
 use crate::color::{self, resolve};
 use crate::gpiapi::{self, PointL, RectL};
-use crate::msg::send;
+use crate::msg::{notify, send};
 use crate::pointer;
 use crate::frame::{self, FCF_SHELLPOSITION, FID_CLIENT};
-use crate::state::{st, Class};
+use crate::state::{pid, st, Class};
 
 pub const WM_CREATE: u32 = 0x0001;
 pub const WM_DESTROY: u32 = 0x0002;
@@ -84,13 +84,15 @@ pub extern "C" fn WinRegisterClass(_hab: u32, name: *const u8, proc_: u32, style
     if name.is_empty() {
         return 0;
     }
-    match s.classes.iter_mut().find(|c| c.name.eq_ignore_ascii_case(&name)) {
+    // Classes belong to the process that registers them.
+    let me = pid();
+    match s.classes.iter_mut().find(|c| c.pid == me && c.name.eq_ignore_ascii_case(&name)) {
         Some(c) => {
             c.proc_ = proc_;
             c.style = style;
             c.words = words;
         }
-        None => s.classes.push(Class { name, proc_, style, words }),
+        None => s.classes.push(Class { name, proc_, style, words, pid: me }),
     }
     1
 }
@@ -107,11 +109,11 @@ pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, own
     let s = st();
     let Some(c) = s.class(class) else { return 0 };
     let (proc_, cstyle, words) = (c.proc_, c.style, c.words);
+    let class_id = s.classes.iter().position(|x| core::ptr::eq(x, c)).unwrap_or(0) as u32;
     let queue = s.my_queue();
     // Class styles CS_CLIPCHILDREN etc. are window styles too.
     let style = style | (cstyle & 0x3e00_0000);
     let parent = if parent == 0 { HWND_DESKTOP } else { parent };
-    let class_id = s.classes.iter().position(|x| x.name.eq_ignore_ascii_case(class)).unwrap_or(0) as u32;
     let Some(h) = s.desk.create(parent, owner, class_id, style, pos, id, queue, proc_, words.div_ceil(4) as usize + 1) else {
         return 0;
     };
@@ -148,12 +150,24 @@ pub fn destroy(h: u32) {
     let mut all = Vec::new();
     collect(h, &mut all);
     for &w in &all {
-        send(w, WM_DESTROY, 0, 0);
+        // Windows of other threads are told, not waited for.
+        notify(w, WM_DESTROY, 0, 0);
     }
+    remove(h);
+}
+
+/// Take a window and its descendants out of the tree, with everything
+/// that refers to them (no messages: also for windows of a process that
+/// has ended).
+pub fn remove(h: u32) {
     let s = st();
+    if !s.desk.exists(h) || h == HWND_DESKTOP {
+        return;
+    }
     let r = s.desk.screen_rect(h);
     let showing = s.desk.is_showing(h);
     let gone = s.desk.destroy(h);
+    let was_active = gone.contains(&s.active);
     for g in &gone {
         s.frames.remove(g);
         s.ctl.remove(g);
@@ -171,10 +185,40 @@ pub fn destroy(h: u32) {
             s.drag = None;
         }
     }
+    for q in s.queues.values_mut() {
+        q.msgs.retain(|m| !gone.contains(&m.hwnd));
+        q.sent.retain(|m| !gone.contains(&m.hwnd) || m.reply);
+    }
     if showing {
         s.desk.invalidate_screen(r);
     }
     crate::menu::forget(&gone);
+    // The next window up becomes active when the active one went.
+    if was_active {
+        activate_next();
+    }
+}
+
+/// Activate the topmost visible frame (after the active window went away).
+pub fn activate_next() {
+    let s = st();
+    let kids = s.desk.get(HWND_DESKTOP).map_or(Vec::new(), |w| w.children.clone());
+    let next = kids.iter().rev().copied().find(|&c| s.desk.get(c).is_some_and(|w| w.visible_style() && w.style & ws::DISABLED == 0) && s.frames.contains_key(&c));
+    if let Some(n) = next {
+        activate(n);
+    }
+}
+
+/// Top-level windows (children of the desktop and of the object window)
+/// of a message queue, and windows of the queue whose parent belongs to
+/// another queue.
+pub fn top_windows_of(q: u32) -> Vec<u32> {
+    let s = st();
+    s.desk
+        .windows_of(q)
+        .into_iter()
+        .filter(|&h| s.desk.get(h).is_some_and(|w| w.parent == HWND_DESKTOP || w.parent == pmwin::HWND_OBJECT || s.queue_of(w.parent) != q))
+        .collect()
 }
 
 fn collect(h: u32, out: &mut Vec<u32>) {
@@ -286,7 +330,15 @@ pub fn show(h: u32, on: bool) {
     let was = st().desk.get(h).is_some_and(|w| w.visible_style());
     if was != on {
         st().desk.set_visible(h, on);
-        send(h, WM_SHOW, on as u32, 0);
+        notify(h, WM_SHOW, on as u32, 0);
+        // A hidden active window gives up the activation.
+        if !on && st().active == h {
+            st().active = 0;
+            if st().desk.is_ancestor(h, st().focus) {
+                st().focus = 0;
+            }
+            activate_next();
+        }
     }
 }
 
@@ -318,11 +370,22 @@ pub fn activate(h: u32) {
     let client = if saved != 0 && saved != top && s.desk.is_ancestor(top, saved) { saved } else { client };
     if old != top {
         if old != 0 && s.desk.exists(old) {
-            send(old, WM_ACTIVATE, 0, old);
+            notify(old, WM_ACTIVATE, 0, old);
+            repaint_title(old);
         }
-        send(top, WM_ACTIVATE, 1, top);
+        notify(top, WM_ACTIVATE, 1, top);
+        repaint_title(top);
     }
     set_focus(client);
+}
+
+/// A frame's title bar shows whether it is active (also while its
+/// thread does not respond).
+fn repaint_title(frame: u32) {
+    let t = WinWindowFromID(frame, frame::FID_TITLEBAR);
+    if t != 0 {
+        st().desk.invalidate(t, None, false);
+    }
 }
 
 pub fn set_focus(h: u32) {
@@ -336,10 +399,10 @@ pub fn set_focus(h: u32) {
         f.focus_save = h;
     }
     if old != 0 && st().desk.exists(old) {
-        send(old, WM_SETFOCUS, h, 0);
+        notify(old, WM_SETFOCUS, h, 0);
     }
     if h != 0 {
-        send(h, WM_SETFOCUS, old, 1);
+        notify(h, WM_SETFOCUS, old, 1);
     }
 }
 
@@ -666,7 +729,9 @@ pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
     if !prcl.is_null() {
         unsafe { prcl.write_unaligned(RectL::from(bounds)) };
     }
-    pointer::hide(s);
+    if let Some(w) = s.desk.get_mut(h) {
+        w.ghost = pmwin::Region::new();
+    }
     if hps != 0 {
         gpiapi::begin_paint(s, hps, h, o, clip);
         return hps;
@@ -678,7 +743,6 @@ pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
 pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
     let s = st();
     gpiapi::end_paint(s, hps);
-    pointer::show(s);
     1
 }
 

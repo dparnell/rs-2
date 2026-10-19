@@ -36,8 +36,15 @@ fn cells(p: Point) -> impl Iterator<Item = (i32, i32, usize, usize)> {
     (0..H).flat_map(move |j| (0..W).map(move |i| (p.x + i as i32, p.y - j as i32, i, j)))
 }
 
+/// The PM server takes the pointer over.
+pub fn init(s: &mut State) {
+    s.ptr_saved = None;
+    s.ptr_hidden = 0;
+    draw(s);
+}
+
 pub fn draw(s: &mut State) {
-    if s.ptr_hidden > 0 || s.ptr_saved.is_some() {
+    if s.ptr_hardware || s.ptr_hidden > 0 || s.ptr_saved.is_some() {
         return;
     }
     let p = s.pointer;
@@ -62,7 +69,8 @@ pub fn erase(s: &mut State) {
     }
 }
 
-/// Hide the pointer around drawing.
+/// Hide the pointer around drawing (only ever within one PMWIN call:
+/// never across application code).
 pub fn hide(s: &mut State) {
     erase(s);
     s.ptr_hidden += 1;

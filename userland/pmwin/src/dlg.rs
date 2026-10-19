@@ -74,7 +74,7 @@ fn data(h: u32) -> Option<&'static mut Dlg> {
 pub extern "C" fn WinLoadDlg(parent: u32, owner: u32, proc_: u32, hmod: u32, id: u32, params: u32) -> u32 {
     let Some(b) = res::load(hmod, res::RT_DIALOG, id) else { return 0 };
     let Some(t) = res::parse_dialog(b) else { return 0 };
-    create(parent, owner, proc_, &t, params)
+    create_from(parent, owner, proc_, &t, params)
 }
 
 /// WinCreateDlg(hwndParent, hwndOwner, pfnDlgProc, pdlgt, pCreateParams)
@@ -85,7 +85,7 @@ pub extern "C" fn WinCreateDlg(parent: u32, owner: u32, proc_: u32, pdlgt: *cons
     }
     let cb = unsafe { (pdlgt as *const u16).read_unaligned() } as usize;
     let Some(t) = res::parse_dialog(unsafe { core::slice::from_raw_parts(pdlgt, cb) }) else { return 0 };
-    create(parent, owner, proc_, &t, params)
+    create_from(parent, owner, proc_, &t, params)
 }
 
 /// The dialog's position on its parent: template coordinates are
@@ -113,7 +113,7 @@ fn place(parent: u32, owner: u32, t: &DlgItemT, fcf: u32) -> Rect {
     Rect::new(x - po.x, y - po.y, x - po.x + cx, y - po.y + cy)
 }
 
-fn create(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u32) -> u32 {
+pub fn create_from(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u32) -> u32 {
     let parent = if parent == 0 { HWND_DESKTOP } else { parent };
     let mut fcf = if t.ctl.is_null() { 0 } else { unsafe { (t.ctl as *const u32).read_unaligned() } };
     for (fs, f) in [(FS_DLGBORDER, FCF_DLGBORDER), (FS_BORDER, FCF_BORDER), (FS_SIZEBORDER, FCF_SIZEBORDER)] {

@@ -11,7 +11,9 @@ PMWIN's run also regenerates PMGPI.DLL's forwarders (the forward! list in
 ../pmgpi/src/lib.rs and ../pmgpi/exports.def). A DLL that has src/lock.rs
 takes its lock in every trampoline (crate::lock::enter/leave). Lines of
 DLLDIR/exports.extra (data exports, `NAME=symbol @ordinal`) are appended
-to exports.def as they are.
+to exports.def as they are. rs2-private functions that the Toolkit does
+not know get their ordinals from DLLDIR/exports.private (`NAME ordinal`
+lines).
 
 usage: python3 -I gen_pm_exports.py LIB.TSV DLLDIR MODULE
 """
@@ -23,6 +25,14 @@ for line in open(tsv_path):
     m, o, n = line.rstrip('\n').split('\t')[:3]
     if o.isdigit():
         ords.setdefault((m, n), int(o))
+
+private = {}
+priv_path = f'{dll_dir}/exports.private'
+if os.path.exists(priv_path):
+    for line in open(priv_path):
+        if line.strip() and not line.startswith(';'):
+            n, o = line.split()
+            private[n] = int(o)
 
 funcs = []
 for f in sorted(glob.glob(f'{dll_dir}/src/*.rs')):
@@ -81,6 +91,8 @@ for name, n, path in funcs:
         o = None if o is None else o + 4000
     else:
         o = ords.get((module, name))
+    if o is None:
+        o = private.get(name)
     if o is None:
         sys.exit(f'no ordinal for {name}')
     rs.append(f'    __a_{name} => {path}::{name}, {n};')

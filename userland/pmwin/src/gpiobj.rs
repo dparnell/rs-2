@@ -31,17 +31,16 @@ struct Bm {
 }
 
 #[derive(Default)]
-struct Objects {
+pub struct Objects {
     regions: Vec<Option<Region>>,
     bitmaps: Vec<Option<Bm>>,
     dcs: Vec<Option<DcKind>>,
     palettes: Vec<Option<Vec<u32>>>,
 }
 
-static mut OBJECTS: Option<Objects> = None;
-
+/// The calling process's GPI objects.
 fn objects() -> &'static mut Objects {
-    unsafe { (*core::ptr::addr_of_mut!(OBJECTS)).get_or_insert_with(Objects::default) }
+    st().objects.entry(crate::state::pid()).or_default()
 }
 
 const HRGN_BASE: u32 = 0x1000_0001;

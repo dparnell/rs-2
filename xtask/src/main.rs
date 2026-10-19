@@ -418,6 +418,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("install", "OS2\\INSTALL.EXE"),
         ("pmwin", "OS2\\DLL\\PMWIN.DLL"),
         ("pmgpi", "OS2\\DLL\\PMGPI.DLL"),
+        ("pmsrv", "OS2\\PMSRV.EXE"),
         ("pmctls", "OS2\\DLL\\PMCTLS.DLL"),
         ("helpmgr", "OS2\\DLL\\HELPMGR.DLL"),
         ("label", "OS2\\LABEL.EXE"),
@@ -440,6 +441,9 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("tnls16", "OS2\\DLL\\TNLS16.DLL"),
     ];
 
+/// Programs marked as PM applications (WINDOWAPI).
+const PM_PROGRAMS: &[&str] = &["pmsrv"];
+
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
     let ul = root().join("userland");
@@ -460,6 +464,9 @@ fn build_userland() -> Option<image::FileList> {
         let lx = out_dir.join(dest.rsplit('\\').next().unwrap());
         let mut cmd = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
         cmd.current_dir(root()).args(["run", "-q", "--release", "-p", "elf2lx", "--"]).arg(&elf).arg(&lx);
+        if PM_PROGRAMS.contains(bin) {
+            cmd.arg("--pm");
+        }
         if dest.ends_with(".DLL") {
             let defs = ul.join(bin).join("exports.def");
             cmd.arg("--dll").arg("--exports").arg(defs);
@@ -673,6 +680,18 @@ fn run(o: &Opts) -> bool {
                     std::thread::sleep(Duration::from_secs(1));
                     continue;
                 }
+                // {shot NAME}: a screenshot now, as work/NAME.png.
+                if let Some(name) = key.strip_prefix("shot ") {
+                    let ppm = work.join(format!("{name}.ppm"));
+                    monitor(&sock, &format!("screendump {}", ppm.display()));
+                    std::thread::sleep(Duration::from_millis(500));
+                    match std::fs::read(&ppm) {
+                        Ok(data) => png::ppm_to_png(&data, &work.join(format!("{name}.png"))),
+                        Err(e) => eprintln!("no screendump: {e}"),
+                    }
+                    let _ = std::fs::remove_file(&ppm);
+                    continue;
+                }
                 // Absolute pointer position: {mouse_abs x y}, 0..32767
                 // across the screen (tablets).
                 if let Some(xy) = key.strip_prefix("mouse_abs ") {
@@ -742,7 +761,8 @@ fn run(o: &Opts) -> bool {
 /// QEMU key names for a string. "^X" is Ctrl+X, "{name}" a QEMU key name
 /// as is (e.g. {ctrl-esc}, {alt-esc}, {down}), "{sleep}" a one second pause,
 /// "{mouse_move dx dy}" / "{mouse_button n}" QEMU mouse commands,
-/// "{mouse_abs x y}" an absolute pointer position (0..32767, via QMP).
+/// "{mouse_abs x y}" an absolute pointer position (0..32767, via QMP),
+/// "{shot NAME}" a screenshot as work/NAME.png.
 fn keys(s: &str) -> Vec<String> {
     let mut v = Vec::new();
     let mut ctrl = false;

@@ -1,0 +1,9 @@
+[package]
+name = "pmsrv"
+description = "PMSRV.EXE: the PM server (desktop, input thread, hung-application handling), started by PMWIN"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
