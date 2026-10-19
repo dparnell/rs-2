@@ -132,4 +132,10 @@ fn run() {
         .collect();
     crate::println!("bench: per CPU busy/ticks since boot {per:?}");
     crate::println!("bench: done");
+    // Interrupts per device vector, now and after a while (input typed
+    // meanwhile, network traffic).
+    for _ in 0..2 {
+        crate::println!("bench: interrupts by vector: {}", crate::msi::summary());
+        sleep_ms(30_000);
+    }
 }

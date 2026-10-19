@@ -48,6 +48,11 @@ pub trait Nic: Send + Sync {
     /// Frames are waiting. Called from the timer interrupt: must not
     /// block or take a lock it might find held (try_lock only).
     fn rx_pending(&self) -> bool;
+    /// The NIC interrupts on receive (and calls [`kick`]): the timer tick
+    /// need not poll it.
+    fn interrupt_driven(&self) -> bool {
+        false
+    }
 }
 
 /// Timer interval of the network thread.
@@ -161,11 +166,18 @@ pub fn tick() {
         return;
     }
     let Some(nics) = NICS.try_lock() else { return };
-    if nics.iter().any(|n| n.rx_pending()) {
+    if nics.iter().any(|n| !n.interrupt_driven() && n.rx_pending()) {
         drop(nics);
         KICK.store(true, Ordering::Release);
         THREAD_WAIT.wake_all();
     }
+}
+
+/// A NIC's interrupt (receive, link change): wake the network thread.
+/// Interrupt context.
+pub fn kick() {
+    KICK.store(true, Ordering::Release);
+    THREAD_WAIT.wake_all();
 }
 
 fn thread_main() {

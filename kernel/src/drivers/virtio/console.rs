@@ -46,7 +46,7 @@ pub fn attach(mut dev: Device) {
         return;
     }
     let (Some(mut rq), Some(tq), Some(rmem), Some(tmem)) =
-        (dev.queue(0, RX_BUFS as u16), dev.queue(1, 8), Dma::new(RX_BUFS * RX_BUF), Dma::new(TX_CHUNK))
+        (dev.queue_irq(0, RX_BUFS as u16), dev.queue_irq(1, 8), Dma::new(RX_BUFS * RX_BUF), Dma::new(TX_CHUNK))
     else {
         crate::println!("virtio-console {}: cannot set up port 0", dev.name());
         dev.fail();
@@ -55,6 +55,10 @@ pub fn attach(mut dev: Device) {
     let bufs = RX_BUFS.min(rq.size() as usize);
     for i in 0..bufs {
         let _ = rq.add(&[Buf::into(rmem.addr(i * RX_BUF), RX_BUF)]);
+    }
+    match rq.event() {
+        Some(e) => e.set_hook(poll),
+        None => super::needs_polling(),
     }
     dev.ready();
     rq.kick();
@@ -74,7 +78,10 @@ pub fn poll() {
         return;
     }
     let got = {
-        let Some(mut g) = RX.try_lock() else { return };
+        let Some(mut g) = RX.try_lock() else {
+            super::retry();
+            return;
+        };
         let Some(rx) = g.as_mut() else { return };
         let mut got = false;
         while let Some(u) = rx.q.pop() {

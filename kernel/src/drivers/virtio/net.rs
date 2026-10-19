@@ -8,7 +8,11 @@
 //! The receive queue is kept full of [`SLOT`]-byte buffers; transmit
 //! slots are recycled as the device returns them. Features: MAC (the
 //! address from the configuration space) and STATUS (link state);
-//! without MAC a locally administered address is made up.
+//! without MAC a locally administered address is made up. With MSI-X the
+//! receive queue and configuration changes (link state) interrupt and
+//! wake the network thread; transmit buffers are reclaimed on the next
+//! send, so that queue does not interrupt. Without MSI-X the timer tick
+//! polls the receive queue.
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -48,6 +52,8 @@ pub struct VirtioNet {
     mac: [u8; 6],
     hdr_len: usize,
     has_status: bool,
+    /// The receive queue interrupts.
+    irq: bool,
     q: SpinLock<Queues>,
     dev: Device,
 }
@@ -84,7 +90,7 @@ pub fn attach(mut dev: Device) {
         let t = crate::arch::rdtsc().to_le_bytes();
         [0x02, 0x52, t[0], t[1], t[2], t[3]]
     };
-    let (Some(rx), Some(tx)) = (dev.queue(RX, QUEUE), dev.queue(TX, QUEUE)) else {
+    let (Some(rx), Some(tx)) = (dev.queue_irq(RX, QUEUE), dev.queue(TX, QUEUE)) else {
         crate::println!("virtio-net {}: cannot set up the queues", dev.name());
         dev.fail();
         return;
@@ -95,6 +101,13 @@ pub fn attach(mut dev: Device) {
         dev.fail();
         return;
     };
+    let irq = rx.event().is_some();
+    if let Some(e) = rx.event() {
+        e.set_hook(crate::net::kick);
+        if dev.has(F_STATUS) {
+            dev.config_irq(crate::net::kick);
+        }
+    }
     let mut q = Queues { rx, rxmem, tx, txmem, tx_free: (0..tx_slots).rev().collect() };
     for s in 0..rx_slots {
         q.post_rx(s, hdr_len);
@@ -103,7 +116,7 @@ pub fn attach(mut dev: Device) {
     q.rx.kick();
     let name = alloc::format!("virtio-net {}", dev.name());
     let has_status = dev.has(F_STATUS);
-    let nic = VirtioNet { name, mac, hdr_len, has_status, q: SpinLock::new(q), dev };
+    let nic = VirtioNet { name, mac, hdr_len, has_status, irq, q: SpinLock::new(q), dev };
     crate::net::register(Arc::new(nic));
 }
 
@@ -164,5 +177,9 @@ impl Nic for VirtioNet {
 
     fn rx_pending(&self) -> bool {
         self.q.try_lock().is_some_and(|q| q.rx.has_used())
+    }
+
+    fn interrupt_driven(&self) -> bool {
+        self.irq
     }
 }

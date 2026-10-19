@@ -142,6 +142,19 @@ pub fn total() -> u64 {
     COUNT.iter().map(|c| c.load(Ordering::Relaxed)).sum()
 }
 
+/// "0x30 (CPU 0): 12, ...": interrupts taken per allocated vector.
+pub fn summary() -> alloc::string::String {
+    let ts = TARGETS.lock();
+    let mut s = alloc::string::String::new();
+    for t in ts.iter() {
+        if !s.is_empty() {
+            s.push_str(", ");
+        }
+        s.push_str(&alloc::format!("{:#x} (APIC {}): {}", t.vector, t.apic, count(t.vector)));
+    }
+    s
+}
+
 /// Completions that only a timed re-check found (lost interrupts).
 pub fn missed() -> u64 {
     MISSED.load(Ordering::Relaxed)

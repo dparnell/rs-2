@@ -24,7 +24,7 @@ pub fn attach(mut dev: Device) {
     if dev.negotiate(0).is_none() {
         return;
     }
-    let (Some(q), Some(mem)) = (dev.queue(0, 8), Dma::new(CHUNK)) else {
+    let (Some(q), Some(mem)) = (dev.queue_irq(0, 8), Dma::new(CHUNK)) else {
         crate::println!("virtio-rng {}: cannot set up the request queue", dev.name());
         dev.fail();
         return;
