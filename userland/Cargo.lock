@@ -76,7 +76,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "pmhang"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "pmshapi-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "pmsrv"
 version = "0.1.0"
 dependencies = [
  "os2",
