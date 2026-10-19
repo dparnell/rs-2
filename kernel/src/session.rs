@@ -256,6 +256,7 @@ pub fn select_next() {
 /// A process ended; if it led a session, the session ends.
 pub fn process_ended(pid: u32, code: u32) {
     let _ = end_popup_of(pid);
+    crate::display::process_ended(pid);
     crate::api::vio::process_ended(pid);
     crate::api::subsys::process_ended(pid);
     crate::api::harderr::process_ended(pid);

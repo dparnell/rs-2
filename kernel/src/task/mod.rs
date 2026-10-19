@@ -165,6 +165,11 @@ pub fn timer_tick(_f: &mut TrapFrame) {
 pub fn before_user_return(f: &mut TrapFrame) -> bool {
     sched::maybe_preempt();
     let t = sched::current();
+    // A thread inside DosEnterMustComplete (PMWIN updating its shared
+    // state) finishes that section first; it ends when it leaves it.
+    if t.exit_requested() && t.must_complete.load(core::sync::atomic::Ordering::Relaxed) > 0 {
+        return false;
+    }
     if t.exit_requested() {
         // 32-bit exception handlers see the termination first (and may run
         // user code for it); then the thread ends.

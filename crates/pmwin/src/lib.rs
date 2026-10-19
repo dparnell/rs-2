@@ -7,10 +7,12 @@
 
 extern crate alloc;
 
+mod queue;
 mod region;
 mod tree;
 
 pub use gpi::{Point, Rect};
+pub use queue::{MsgQueue, QMsg};
 pub use region::Region;
 pub use tree::{Desktop, Hwnd, Window, HWND_DESKTOP, HWND_OBJECT};
 

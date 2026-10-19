@@ -197,7 +197,10 @@ pub fn dos_kill_process(c: &mut Ctx) -> u32 {
     if p.exit_info().is_some() {
         return err::INVALID_PROCID;
     }
-    if p.pid != c.process.pid && p.ppid != c.process.pid {
+    // The PM window list (the PM server) ends PM programs that are not
+    // its children.
+    let pm = crate::display::is_pm(c.process.pid) && crate::display::is_pm(p.pid);
+    if p.pid != c.process.pid && p.ppid != c.process.pid && !pm {
         return err::NOT_DESCENDANT;
     }
     // DKP_PROCESSTREE (1): the descendants too, deepest first.

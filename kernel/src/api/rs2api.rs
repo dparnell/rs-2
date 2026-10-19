@@ -12,6 +12,7 @@ use crate::{display, session};
 pub fn rs2_map_display(c: &mut Ctx) -> u32 {
     let Some((obj, w, h, stride, red_low)) = display::display() else { return err::NOT_SUPPORTED };
     let offset = crate::screen::framebuffer().map_or(0, |f| (f.base & 0xfff) as u32);
+    display::add_pm(c.process.pid);
     {
         let mut sp = c.space();
         if !sp.regions.contains_key(&obj.base) {

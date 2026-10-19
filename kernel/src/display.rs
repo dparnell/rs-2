@@ -13,6 +13,9 @@ use crate::vm::{self, SharedMem, PAGE};
 pub const EV_KEY: u16 = 1;
 pub const EV_MOUSE: u16 = 2;
 pub const EV_REPAINT: u16 = 3;
+/// A process that had mapped the display ended (`a` = its pid): the PM
+/// server cleans up its windows.
+pub const EV_PROCEXIT: u16 = 4;
 
 /// One raw input event (INPUTEVENT, 16 bytes).
 #[derive(Clone, Copy, Default)]
@@ -31,6 +34,8 @@ pub struct Input {
 const QUEUE_MAX: usize = 256;
 
 static QUEUE: SpinLock<VecDeque<Input>> = SpinLock::new(VecDeque::new());
+/// Processes that mapped the display (PM programs).
+static PM_PIDS: SpinLock<alloc::vec::Vec<u32>> = SpinLock::new(alloc::vec::Vec::new());
 static WAITERS: WaitQueue = WaitQueue::new();
 static DISPLAY: Once<Arc<SharedMem>> = Once::new();
 /// Pointer position in pixels (PM coordinates, origin bottom-left).
@@ -42,7 +47,15 @@ fn push(e: Input) {
     {
         let mut q = QUEUE.lock();
         if q.len() >= QUEUE_MAX {
-            q.pop_front();
+            // Drop the oldest input event (never a process exit).
+            match q.iter().position(|e| e.kind != EV_PROCEXIT) {
+                Some(i) => {
+                    q.remove(i);
+                }
+                None => {
+                    q.pop_front();
+                }
+            }
         }
         q.push_back(e);
     }
@@ -51,6 +64,31 @@ fn push(e: Input) {
 
 pub fn post_repaint() {
     push(Input { kind: EV_REPAINT, time: crate::irq::uptime_ms() as u32, ..Default::default() });
+}
+
+/// A process mapped the display: it is a PM program.
+pub fn add_pm(pid: u32) {
+    let mut v = PM_PIDS.lock();
+    if !v.contains(&pid) {
+        v.push(pid);
+    }
+}
+
+pub fn is_pm(pid: u32) -> bool {
+    PM_PIDS.lock().contains(&pid)
+}
+
+/// A process ended: if it was a PM program, tell the PM server.
+pub fn process_ended(pid: u32) {
+    let was = {
+        let mut v = PM_PIDS.lock();
+        let n = v.len();
+        v.retain(|&p| p != pid);
+        v.len() != n
+    };
+    if was {
+        push(Input { kind: EV_PROCEXIT, a: pid, time: crate::irq::uptime_ms() as u32, ..Default::default() });
+    }
 }
 
 pub fn reset_input() {

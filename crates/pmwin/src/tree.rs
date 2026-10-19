@@ -1,6 +1,6 @@
 //! The window tree.
 
-use alloc::collections::BTreeMap;
+use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::vec::Vec;
 
 use gpi::{Point, Rect};
@@ -37,6 +37,9 @@ pub struct Window {
     pub proc_: u32,
     /// Window words (QWL_USER and the class's extra bytes, as u32s).
     pub words: Vec<u32>,
+    /// Part of the update region the PM server has already painted with
+    /// a placeholder while the window's thread does not respond.
+    pub ghost: Region,
 }
 
 impl Window {
@@ -52,12 +55,18 @@ impl Window {
 pub struct Desktop {
     windows: BTreeMap<Hwnd, Window>,
     next: Hwnd,
+    /// Queues with windows that got something to paint since the set was
+    /// last taken (their threads must be woken).
+    wake: BTreeSet<u32>,
+    /// Bumped whenever window positions, sizes, z-order or visibility
+    /// change (visible regions computed before are stale).
+    pub generation: u32,
 }
 
 impl Desktop {
     /// A desktop of `w` x `h` pixels with the desktop and object windows.
     pub fn new(w: i32, h: i32) -> Desktop {
-        let mut d = Desktop { windows: BTreeMap::new(), next: 3 };
+        let mut d = Desktop { windows: BTreeMap::new(), next: 3, wake: BTreeSet::new(), generation: 0 };
         for (hwnd, style, cx, cy) in [(HWND_DESKTOP, ws::VISIBLE | ws::CLIPCHILDREN, w, h), (HWND_OBJECT, 0, 0, 0)] {
             d.windows.insert(hwnd, Window {
                 hwnd,
@@ -76,9 +85,28 @@ impl Desktop {
                 queue: 0,
                 proc_: 0,
                 words: Vec::new(),
+                ghost: Region::new(),
             });
         }
         d
+    }
+
+    /// Take the set of queues to wake (see `wake`).
+    pub fn take_wake(&mut self) -> BTreeSet<u32> {
+        core::mem::take(&mut self.wake)
+    }
+
+    /// Note that a window got something to paint.
+    fn dirty(&mut self, h: Hwnd) {
+        if let Some(w) = self.windows.get(&h) {
+            if !w.update.is_empty() {
+                self.wake.insert(w.queue);
+            }
+        }
+    }
+
+    pub fn all_mut(&mut self) -> impl Iterator<Item = &mut Window> {
+        self.windows.values_mut()
     }
 
     pub fn get(&self, h: Hwnd) -> Option<&Window> {
@@ -122,8 +150,11 @@ impl Desktop {
             queue,
             proc_,
             words: alloc::vec![0; words],
+            ghost: Region::new(),
         });
         self.windows.get_mut(&parent)?.children.push(hwnd);
+        self.generation = self.generation.wrapping_add(1);
+        self.wake.insert(queue);
         Some(hwnd)
     }
 
@@ -139,6 +170,7 @@ impl Desktop {
         for c in &out {
             self.windows.remove(c);
         }
+        self.generation = self.generation.wrapping_add(1);
         out
     }
 
@@ -222,6 +254,8 @@ impl Desktop {
         let Some(w) = self.windows.get_mut(&h) else { return };
         let r = r.unwrap_or(w.rect()).intersect(&w.rect());
         w.update.add(r);
+        self.dirty(h);
+        let Some(w) = self.windows.get(&h) else { return };
         if children {
             let kids = w.children.clone();
             let (wx, wy) = (0, 0);
@@ -248,6 +282,7 @@ impl Desktop {
                 if let Some(w) = self.windows.get_mut(&h) {
                     w.update.add(local);
                 }
+                self.dirty(h);
             }
         }
     }
@@ -277,6 +312,7 @@ impl Desktop {
             w.cx = cx.max(0);
             w.cy = cy.max(0);
         }
+        self.generation = self.generation.wrapping_add(1);
         if showing {
             self.invalidate_screen(old);
             let new = self.screen_rect(h);
@@ -301,6 +337,7 @@ impl Desktop {
         if let Some(w) = self.windows.get_mut(&h) {
             w.parent = parent;
         }
+        self.generation = self.generation.wrapping_add(1);
         self.invalidate_screen(r);
         self.invalidate(h, None, true);
         true
@@ -316,9 +353,29 @@ impl Desktop {
             pw.children.retain(|&c| c != h);
             pw.children.push(h);
         }
-        let r = self.screen_rect(h);
+        self.generation = self.generation.wrapping_add(1);
         self.invalidate(h, None, true);
-        let _ = r;
+    }
+
+    /// Move a window to the bottom of its siblings; what it uncovers is
+    /// repainted.
+    pub fn to_bottom(&mut self, h: Hwnd) {
+        let Some(p) = self.get(h).map(|w| w.parent) else { return };
+        if let Some(pw) = self.windows.get_mut(&p) {
+            if pw.children.first() == Some(&h) {
+                return;
+            }
+            pw.children.retain(|&c| c != h);
+            pw.children.insert(0, h);
+        }
+        self.generation = self.generation.wrapping_add(1);
+        let r = self.screen_rect(h);
+        self.invalidate_screen(r);
+    }
+
+    /// The windows of a message queue.
+    pub fn windows_of(&self, queue: u32) -> Vec<Hwnd> {
+        self.windows.values().filter(|w| w.queue == queue).map(|w| w.hwnd).collect()
     }
 
     pub fn set_visible(&mut self, h: Hwnd, on: bool) {
@@ -330,6 +387,7 @@ impl Desktop {
                 w.style &= !ws::VISIBLE;
             }
         }
+        self.generation = self.generation.wrapping_add(1);
         self.invalidate_screen(r);
     }
 
@@ -396,6 +454,29 @@ mod tests {
         let destroyed = d.destroy(f);
         assert_eq!(destroyed, alloc::vec![c, f]);
         assert!(!d.exists(c));
+    }
+
+    #[test]
+    fn invalidation_wakes_the_owning_queue() {
+        let mut d = desk();
+        let a = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 50, 50), 1, 7, 0, 0).unwrap();
+        let b = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(100, 0, 150, 50), 2, 8, 0, 0).unwrap();
+        d.take_wake();
+        for h in [a, b] {
+            d.get_mut(h).unwrap().update = Region::new();
+        }
+        let g = d.generation;
+        // Moving b over a: both repaint, both queues are woken.
+        d.set_pos(b, 25, 0, 50, 50);
+        assert_ne!(d.generation, g);
+        let w = d.take_wake();
+        assert!(w.contains(&7) && w.contains(&8));
+        assert!(d.take_wake().is_empty());
+        d.invalidate(a, None, false);
+        assert_eq!(d.take_wake().into_iter().collect::<Vec<_>>(), alloc::vec![7]);
+        assert_eq!(d.windows_of(8), alloc::vec![b]);
+        d.to_bottom(b);
+        assert_eq!(d.window_at(Point::new(30, 10)), a);
     }
 
     #[test]

@@ -438,6 +438,11 @@ pub fn exit_unwind(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool
 
 /// No handler took the exception: what OS/2 does by default.
 pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32) {
+    // A fatal exception ends a must-complete section: the thread cannot
+    // go on with it.
+    if code != xcpt::SIGNAL {
+        t.must_complete.store(0, core::sync::atomic::Ordering::Relaxed);
+    }
     // A fault while the thread is ending (in a termination handler): just
     // let it die.
     if t.exit_requested() {

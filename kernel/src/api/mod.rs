@@ -531,7 +531,10 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
     // A thread told to end does not return from the call, unless it is
     // running its exception handlers for the termination.
     let unwinding = thread.exit_unwind.load(core::sync::atomic::Ordering::Relaxed) == 1;
-    if ctx.no_return || (thread.exit_requested() && !unwinding) {
+    // Inside a must-complete section the call returns: the thread ends
+    // when it leaves the section (DosExitMustComplete).
+    let must_complete = thread.must_complete.load(core::sync::atomic::Ordering::Relaxed) > 0;
+    if ctx.no_return || (thread.exit_requested() && !unwinding && !must_complete) {
         return;
     }
     let _ = ss_big;
