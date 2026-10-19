@@ -5,7 +5,8 @@
 //! `INITEST` runs everything (on C:, a second process included: it runs
 //! itself with CHILD). `INITEST WRITE` and `INITEST READ` check that a
 //! profile survives a reboot: WRITE writes `X:\PERSIST.INI` on the test
-//! disk (the drive labelled RS2DISK, from `cargo xtask disk`), READ, run
+//! disk (the drive labelled RS2DISK or RS2HPFS, from `cargo xtask disk
+//! [--hpfs]`), READ, run
 //! after booting again with the same disk, reads it back.
 
 #![no_std]
@@ -439,6 +440,38 @@ fn process_checks() {
     }
 }
 
+/// One of two processes writing to the same profiles at once.
+fn writer(who: &[u8]) -> u32 {
+    let who = core::str::from_utf8(who).unwrap_or("?");
+    let h = unsafe { PrfOpenProfile(0, b"C:\\INITEST.INI\0".as_ptr()) };
+    let mut bad = 0;
+    for i in 0..60 {
+        if !put(HINI_USER, "IniTest:Conc", &format!("{who}{i}"), "x") || !put(h, "Conc", &format!("{who}{i}"), "y") {
+            bad += 1;
+        }
+    }
+    unsafe { PrfCloseProfile(h) };
+    bad
+}
+
+fn concurrent_checks() {
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let mut fail = [0u8; 64];
+    let rc = unsafe { DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, EXEC_ASYNCRESULT, b"INITEST\0WRITER\0\0".as_ptr(), null(), &mut res, b"C:\\RS2\\INITEST.EXE\0".as_ptr()) };
+    let mine = writer(b"P");
+    let mut pid = 0;
+    let child = res.code_terminate;
+    let wrc = unsafe { DosWaitChild(DCWA_PROCESS, DCWW_WAIT, &mut res, &mut pid, child) };
+    check("two processes write at once", rc == 0 && wrc == 0 && mine == 0 && res.code_result == 0);
+    let user = names(HINI_USER, Some("IniTest:Conc")).map_or(0, |(v, _)| split(&v).len());
+    let h = unsafe { PrfOpenProfile(0, b"C:\\INITEST.INI\0".as_ptr()) };
+    let file = names(h, Some("Conc")).map_or(0, |(v, _)| split(&v).len());
+    unsafe { PrfCloseProfile(h) };
+    println!("  keys after both: {user} in OS2.INI, {file} in INITEST.INI");
+    check("no write of either process lost", user == 120 && file == 120);
+    unsafe { PrfWriteProfileString(HINI_USER, b"IniTest:Conc\0".as_ptr(), null(), null()) };
+}
+
 fn details(title: &[u8], exe: &[u8], params: &[u8], env: &[u8]) -> ProgDetails {
     ProgDetails {
         length: 72,
@@ -524,13 +557,13 @@ fn program_list_checks() {
     check("PrfDestroyGroup again fails", unsafe { PrfDestroyGroup(HINI_USER, g) } == 0);
 }
 
-/// The drive of the test disk (label RS2DISK).
+/// The drive of the test disk (label RS2DISK or RS2HPFS).
 fn test_drive() -> Option<char> {
     (b'D'..=b'Z').find_map(|d| {
         let mut fsi: FsInfo = unsafe { core::mem::zeroed() };
         let rc = unsafe { DosQueryFSInfo((d - b'A' + 1) as u32, FSIL_VOLSER, &mut fsi as *mut _ as *mut u8, 17) };
         let label = &fsi.label[..(fsi.cch_label as usize).min(11)];
-        (rc == 0 && label == b"RS2DISK").then_some(d as char)
+        (rc == 0 && (label == b"RS2DISK" || label == b"RS2HPFS")).then_some(d as char)
     })
 }
 
@@ -538,7 +571,7 @@ const PERSIST_BIN: [u8; 6] = [0, 1, 2, 0xfe, 0xff, 0];
 
 fn persist(write: bool) {
     let Some(d) = test_drive() else {
-        check("test disk (label RS2DISK) present", false);
+        check("test disk (label RS2DISK or RS2HPFS) present", false);
         return;
     };
     let file = format!("{d}:\\PERSIST.INI");
@@ -581,6 +614,7 @@ fn main(s: &Startup) -> u32 {
     let mode: Vec<u8> = args.iter().take_while(|&&c| c != b' ').map(|c| c.to_ascii_uppercase()).collect();
     let name = match mode.as_slice() {
         b"CHILD" => return child(),
+        b"WRITER" => return writer(b"C"),
         b"WRITE" => {
             persist(true);
             "initest write"
@@ -593,6 +627,7 @@ fn main(s: &Startup) -> u32 {
             basic_checks();
             system_checks();
             process_checks();
+            concurrent_checks();
             program_list_checks();
             "initest"
         }
