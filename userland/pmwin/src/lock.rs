@@ -128,8 +128,55 @@ pub fn leave_quiet() {
     }
 }
 
+/// Entry from the export trampolines: ecx = the export's index in
+/// `crate::exports::NAMES` (u32::MAX: none), ebp = the trampoline's frame
+/// (the arguments are at ebp + 8).
+#[unsafe(naked)]
 pub extern "C" fn enter() {
+    core::arch::naked_asm!(
+        "sub esp, 4", "push ebp", "push ecx",
+        "call {f}",
+        "add esp, 12", "ret",
+        f = sym enter_traced,
+    );
+}
+
+extern "C" fn enter_traced(idx: u32, ebp: u32) {
     enter_quiet();
+    if idx != u32::MAX && DEPTH.load(Ordering::Relaxed) == 1 && tracing() {
+        trace_call(idx, ebp + 8);
+    }
+}
+
+/// PMTRACE set in a process's environment: its PM API calls are
+/// logged on the serial port (0: not checked yet, 1: off, 2: on).
+static TRACE: AtomicU32 = AtomicU32::new(0);
+
+fn tracing() -> bool {
+    match TRACE.load(Ordering::Relaxed) {
+        0 => {
+            let mut v: *const u8 = core::ptr::null();
+            let on = unsafe { os2::DosScanEnv(b"PMTRACE\0".as_ptr(), &mut v) } == 0;
+            TRACE.store(if on { 2 } else { 1 }, Ordering::Relaxed);
+            on
+        }
+        v => v == 2,
+    }
+}
+
+fn trace_call(idx: u32, args: u32) {
+    let Some(&(name, n)) = crate::exports::NAMES.get(idx as usize) else { return };
+    let mut s = alloc::string::String::from(name);
+    s.push('(');
+    for i in 0..n as u32 {
+        let v = unsafe { ((args + i * 4) as *const u32).read_unaligned() };
+        if i > 0 {
+            s.push_str(", ");
+        }
+        let _ = core::fmt::Write::write_fmt(&mut s, format_args!("{v:x}"));
+    }
+    s.push(')');
+    crate::trace(format_args!("{} {s}", tid()));
 }
 
 pub extern "C" fn leave() {
@@ -172,7 +219,7 @@ macro_rules! wndproc {
         pub extern "C" fn $entry() {
             core::arch::naked_asm!(
                 "push ebp", "mov ebp, esp", "and esp, -16",
-                "call {enter}",
+                "mov ecx, -1", "call {enter}",
                 "sub esp, 16",
                 "push esi", "push edi", "push ecx",
                 "lea esi, [ebp + 8]", "lea edi, [esp + 12]", "mov ecx, 4", "rep movsd",

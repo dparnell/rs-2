@@ -385,6 +385,16 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             layout(h);
             0
         }
+        // A frame given the focus passes it on to the window that had it
+        // last (QWL_HWNDFOCUSSAVE), else to its client.
+        crate::win::WM_SETFOCUS if mp2 & 0xffff != 0 => {
+            let (save, client) = st().frames.get(&h).map_or((0, 0), |f| (f.focus_save, f.client));
+            let to = if save != 0 && save != h && st().desk.is_ancestor(h, save) { save } else { client };
+            if st().focus == h && to != 0 && st().desk.exists(to) {
+                crate::win::set_focus(to);
+            }
+            0
+        }
         WM_SYSCOMMAND => {
             match lo(mp1) {
                 SC_CLOSE => {

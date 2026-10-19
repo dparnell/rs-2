@@ -80,7 +80,7 @@ extern "C" fn term_aligned() {
     if !shared::attached() {
         return;
     }
-    lock::enter();
+    lock::enter_quiet();
     if state::get().is_some() {
         server::process_gone(state::pid());
     }

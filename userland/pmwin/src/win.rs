@@ -664,6 +664,9 @@ pub extern "C" fn WinQueryWindowTextLength(h: u32) -> i32 {
 /// Window words: QWL_USER (0) and the class's extra bytes at byte offsets;
 /// QWL_STYLE (-2), QWS_ID (-1).
 fn word_get(h: u32, index: i32) -> Option<u32> {
+    if let Some(v) = frame_word(h, index) {
+        return Some(v);
+    }
     let w = st().desk.get(h)?;
     match index {
         -2 => Some(w.style),
@@ -678,7 +681,25 @@ fn word_get(h: u32, index: i32) -> Option<u32> {
     }
 }
 
+/// QWL_HWNDFOCUSSAVE of a frame: the window that gets the focus when
+/// the frame is activated.
+const QWL_HWNDFOCUSSAVE: i32 = 0x18;
+
+fn frame_word(h: u32, index: i32) -> Option<u32> {
+    let f = st().frames.get(&h)?;
+    match index {
+        QWL_HWNDFOCUSSAVE => Some(f.focus_save),
+        _ => None,
+    }
+}
+
 fn word_set(h: u32, index: i32, v: u32, bytes: u32) -> bool {
+    if index == QWL_HWNDFOCUSSAVE && bytes == 4 {
+        if let Some(f) = st().frames.get_mut(&h) {
+            f.focus_save = v;
+            return true;
+        }
+    }
     let Some(w) = st().desk.get_mut(h) else { return false };
     match index {
         -2 => w.style = v,

@@ -184,7 +184,7 @@ extern "C" fn input_thread() -> u32 {
     loop {
         let mut ev = Input::default();
         let rc = unsafe { Rs2ReadInput(&mut ev, 100) };
-        lock::enter();
+        lock::enter_quiet();
         if rc == 0 {
             input::event(&ev);
             // Whatever else has arrived, without waiting.

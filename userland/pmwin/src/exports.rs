@@ -2,13 +2,13 @@
 //! points for the exports (see exports.def).
 
 macro_rules! aligned {
-    ($($tramp:ident => $target:path, $copy:literal;)*) => {$(
+    ($($tramp:ident => $target:path, $copy:literal, $idx:literal;)*) => {$(
         #[unsafe(naked)]
         #[unsafe(no_mangle)]
         pub extern "C" fn $tramp() {
             core::arch::naked_asm!(
                 "push ebp", "mov ebp, esp", "and esp, -16",
-                "call {enter}",
+                "mov ecx, {idx}", "call {enter}",
                 "sub esp, {pad}",
                 "push esi", "push edi", "push ecx",
                 "lea esi, [ebp + 8]", "lea edi, [esp + 12]", "mov ecx, {n}", "rep movsd",
@@ -19,379 +19,751 @@ macro_rules! aligned {
                 "mov eax, [esp]", "mov edx, [esp + 4]",
                 "mov esp, ebp", "pop ebp", "ret",
                 pad = const ($copy * 4 + 15) / 16 * 16, n = const $copy, f = sym $target,
-                enter = sym crate::lock::enter, leave = sym crate::lock::leave,
+                idx = const $idx, enter = sym crate::lock::enter, leave = sym crate::lock::leave,
             );
         }
     )*};
 }
 
 aligned! {
-    __a_WinLoadAccelTable => crate::accel::WinLoadAccelTable, 3;
-    __a_WinCreateAccelTable => crate::accel::WinCreateAccelTable, 2;
-    __a_WinDestroyAccelTable => crate::accel::WinDestroyAccelTable, 1;
-    __a_WinSetAccelTable => crate::accel::WinSetAccelTable, 3;
-    __a_WinQueryAccelTable => crate::accel::WinQueryAccelTable, 2;
-    __a_WinTranslateAccel => crate::accel::WinTranslateAccel, 4;
-    __a_WinCopyAccelTable => crate::accel::WinCopyAccelTable, 3;
-    __a_WinOpenClipbrd => crate::clip::WinOpenClipbrd, 1;
-    __a_WinCloseClipbrd => crate::clip::WinCloseClipbrd, 1;
-    __a_WinEmptyClipbrd => crate::clip::WinEmptyClipbrd, 1;
-    __a_WinSetClipbrdData => crate::clip::WinSetClipbrdData, 4;
-    __a_WinQueryClipbrdData => crate::clip::WinQueryClipbrdData, 2;
-    __a_WinQueryClipbrdFmtInfo => crate::clip::WinQueryClipbrdFmtInfo, 3;
-    __a_WinEnumClipbrdFmts => crate::clip::WinEnumClipbrdFmts, 2;
-    __a_WinSetClipbrdOwner => crate::clip::WinSetClipbrdOwner, 2;
-    __a_WinQueryClipbrdOwner => crate::clip::WinQueryClipbrdOwner, 1;
-    __a_WinSetClipbrdViewer => crate::clip::WinSetClipbrdViewer, 2;
-    __a_WinQueryClipbrdViewer => crate::clip::WinQueryClipbrdViewer, 1;
-    __a_WinQuerySystemAtomTable => crate::clip::WinQuerySystemAtomTable, 0;
-    __a_WinCreateAtomTable => crate::clip::WinCreateAtomTable, 2;
-    __a_WinDestroyAtomTable => crate::clip::WinDestroyAtomTable, 1;
-    __a_WinAddAtom => crate::clip::WinAddAtom, 2;
-    __a_WinFindAtom => crate::clip::WinFindAtom, 2;
-    __a_WinDeleteAtom => crate::clip::WinDeleteAtom, 2;
-    __a_WinQueryAtomName => crate::clip::WinQueryAtomName, 4;
-    __a_WinQueryAtomLength => crate::clip::WinQueryAtomLength, 2;
-    __a_WinQueryAtomUsage => crate::clip::WinQueryAtomUsage, 2;
-    __a_WinLoadDlg => crate::dlg::WinLoadDlg, 6;
-    __a_WinCreateDlg => crate::dlg::WinCreateDlg, 5;
-    __a_WinProcessDlg => crate::dlg::WinProcessDlg, 1;
-    __a_WinDismissDlg => crate::dlg::WinDismissDlg, 2;
-    __a_WinDlgBox => crate::dlg::WinDlgBox, 6;
-    __a_WinDefDlgProc => crate::dlg::WinDefDlgProc, 4;
-    __a_WinEnumDlgItem => crate::dlg::WinEnumDlgItem, 3;
-    __a_WinSendDlgItemMsg => crate::dlg::WinSendDlgItemMsg, 5;
-    __a_WinQueryDlgItemText => crate::dlg::WinQueryDlgItemText, 4;
-    __a_WinQueryDlgItemTextLength => crate::dlg::WinQueryDlgItemTextLength, 2;
-    __a_WinSetDlgItemText => crate::dlg::WinSetDlgItemText, 3;
-    __a_WinQueryDlgItemShort => crate::dlg::WinQueryDlgItemShort, 4;
-    __a_WinSetDlgItemShort => crate::dlg::WinSetDlgItemShort, 4;
-    __a_WinMapDlgPoints => crate::dlg::WinMapDlgPoints, 4;
-    __a_GpiCreatePS => crate::gpiapi::GpiCreatePS, 4;
-    __a_GpiDestroyPS => crate::gpiapi::GpiDestroyPS, 1;
-    __a_GpiAssociate => crate::gpiapi::GpiAssociate, 2;
-    __a_GpiQueryDevice => crate::gpiapi::GpiQueryDevice, 1;
-    __a_GpiResetPS => crate::gpiapi::GpiResetPS, 2;
-    __a_GpiSetPS => crate::gpiapi::GpiSetPS, 3;
-    __a_GpiQueryPS => crate::gpiapi::GpiQueryPS, 2;
-    __a_GpiSavePS => crate::gpiapi::GpiSavePS, 1;
-    __a_GpiRestorePS => crate::gpiapi::GpiRestorePS, 2;
-    __a_GpiSetDrawControl => crate::gpiapi::GpiSetDrawControl, 3;
-    __a_GpiQueryDrawControl => crate::gpiapi::GpiQueryDrawControl, 2;
-    __a_GpiResetBoundaryData => crate::gpiapi::GpiResetBoundaryData, 1;
-    __a_GpiQueryBoundaryData => crate::gpiapi::GpiQueryBoundaryData, 2;
-    __a_GpiSetStopDraw => crate::gpiapi::GpiSetStopDraw, 2;
-    __a_GpiQueryStopDraw => crate::gpiapi::GpiQueryStopDraw, 1;
-    __a_GpiSetDrawingMode => crate::gpiapi::GpiSetDrawingMode, 2;
-    __a_GpiQueryDrawingMode => crate::gpiapi::GpiQueryDrawingMode, 1;
-    __a_GpiLoadMetaFile => crate::gpiapi::GpiLoadMetaFile, 2;
-    __a_GpiDeleteMetaFile => crate::gpiapi::GpiDeleteMetaFile, 1;
-    __a_GpiPlayMetaFile => crate::gpiapi::GpiPlayMetaFile, 7;
-    __a_GpiSetColor => crate::gpiapi::GpiSetColor, 2;
-    __a_GpiQueryColor => crate::gpiapi::GpiQueryColor, 1;
-    __a_GpiSetBackColor => crate::gpiapi::GpiSetBackColor, 2;
-    __a_GpiQueryBackColor => crate::gpiapi::GpiQueryBackColor, 1;
-    __a_GpiSetMix => crate::gpiapi::GpiSetMix, 2;
-    __a_GpiQueryMix => crate::gpiapi::GpiQueryMix, 1;
-    __a_GpiSetBackMix => crate::gpiapi::GpiSetBackMix, 2;
-    __a_GpiQueryBackMix => crate::gpiapi::GpiQueryBackMix, 1;
-    __a_GpiSetAttrMode => crate::gpiapi::GpiSetAttrMode, 2;
-    __a_GpiQueryAttrMode => crate::gpiapi::GpiQueryAttrMode, 1;
-    __a_GpiPop => crate::gpiapi::GpiPop, 2;
-    __a_GpiSetAttrs => crate::gpiapi::GpiSetAttrs, 5;
-    __a_GpiQueryAttrs => crate::gpiapi::GpiQueryAttrs, 4;
-    __a_GpiSetLineType => crate::gpiapi::GpiSetLineType, 2;
-    __a_GpiQueryLineType => crate::gpiapi::GpiQueryLineType, 1;
-    __a_GpiSetLineWidth => crate::gpiapi::GpiSetLineWidth, 2;
-    __a_GpiQueryLineWidth => crate::gpiapi::GpiQueryLineWidth, 1;
-    __a_GpiSetLineWidthGeom => crate::gpiapi::GpiSetLineWidthGeom, 2;
-    __a_GpiQueryLineWidthGeom => crate::gpiapi::GpiQueryLineWidthGeom, 1;
-    __a_GpiSetLineEnd => crate::gpiapi::GpiSetLineEnd, 2;
-    __a_GpiQueryLineEnd => crate::gpiapi::GpiQueryLineEnd, 1;
-    __a_GpiSetLineJoin => crate::gpiapi::GpiSetLineJoin, 2;
-    __a_GpiQueryLineJoin => crate::gpiapi::GpiQueryLineJoin, 1;
-    __a_GpiSetPattern => crate::gpiapi::GpiSetPattern, 2;
-    __a_GpiQueryPattern => crate::gpiapi::GpiQueryPattern, 1;
-    __a_GpiSetPatternSet => crate::gpiapi::GpiSetPatternSet, 2;
-    __a_GpiQueryPatternSet => crate::gpiapi::GpiQueryPatternSet, 1;
-    __a_GpiSetPatternRefPoint => crate::gpiapi::GpiSetPatternRefPoint, 2;
-    __a_GpiQueryPatternRefPoint => crate::gpiapi::GpiQueryPatternRefPoint, 2;
-    __a_GpiSetMarker => crate::gpiapi::GpiSetMarker, 2;
-    __a_GpiQueryMarker => crate::gpiapi::GpiQueryMarker, 1;
-    __a_GpiSetMarkerBox => crate::gpiapi::GpiSetMarkerBox, 2;
-    __a_GpiQueryMarkerBox => crate::gpiapi::GpiQueryMarkerBox, 2;
-    __a_GpiSetMarkerSet => crate::gpiapi::GpiSetMarkerSet, 2;
-    __a_GpiQueryMarkerSet => crate::gpiapi::GpiQueryMarkerSet, 1;
-    __a_GpiSetArcParams => crate::gpiapi::GpiSetArcParams, 2;
-    __a_GpiQueryArcParams => crate::gpiapi::GpiQueryArcParams, 2;
-    __a_GpiSetDefArcParams => crate::gpiapi::GpiSetDefArcParams, 2;
-    __a_GpiQueryDefArcParams => crate::gpiapi::GpiQueryDefArcParams, 2;
-    __a_GpiMove => crate::gpiapi::GpiMove, 2;
-    __a_GpiSetCurrentPosition => crate::gpiapi::GpiSetCurrentPosition, 2;
-    __a_GpiQueryCurrentPosition => crate::gpiapi::GpiQueryCurrentPosition, 2;
-    __a_GpiLine => crate::gpiapi::GpiLine, 2;
-    __a_GpiPolyLine => crate::gpiapi::GpiPolyLine, 3;
-    __a_GpiPolyLineDisjoint => crate::gpiapi::GpiPolyLineDisjoint, 3;
-    __a_GpiBox => crate::gpiapi::GpiBox, 5;
-    __a_GpiFullArc => crate::gpiapi::GpiFullArc, 3;
-    __a_GpiPartialArc => crate::gpiapi::GpiPartialArc, 5;
-    __a_GpiPointArc => crate::gpiapi::GpiPointArc, 2;
-    __a_GpiPolySpline => crate::gpiapi::GpiPolySpline, 3;
-    __a_GpiPolyFillet => crate::gpiapi::GpiPolyFillet, 3;
-    __a_GpiPolyFilletSharp => crate::gpiapi::GpiPolyFilletSharp, 4;
-    __a_GpiMarker => crate::gpiapi::GpiMarker, 2;
-    __a_GpiPolyMarker => crate::gpiapi::GpiPolyMarker, 3;
-    __a_GpiErase => crate::gpiapi::GpiErase, 1;
-    __a_GpiSetPel => crate::gpiapi::GpiSetPel, 2;
-    __a_GpiQueryPel => crate::gpiapi::GpiQueryPel, 2;
-    __a_GpiBeginArea => crate::gpiapi::GpiBeginArea, 2;
-    __a_GpiEndArea => crate::gpiapi::GpiEndArea, 1;
-    __a_GpiBeginPath => crate::gpiapi::GpiBeginPath, 2;
-    __a_GpiEndPath => crate::gpiapi::GpiEndPath, 1;
-    __a_GpiCloseFigure => crate::gpiapi::GpiCloseFigure, 1;
-    __a_GpiAbortPath => crate::gpiapi::GpiAbortPath, 1;
-    __a_GpiFillPath => crate::gpiapi::GpiFillPath, 3;
-    __a_GpiStrokePath => crate::gpiapi::GpiStrokePath, 3;
-    __a_GpiOutlinePath => crate::gpiapi::GpiOutlinePath, 3;
-    __a_GpiModifyPath => crate::gpiapi::GpiModifyPath, 3;
-    __a_GpiSetClipPath => crate::gpiapi::GpiSetClipPath, 3;
-    __a_GpiSetModelTransformMatrix => crate::gpiapi::GpiSetModelTransformMatrix, 4;
-    __a_GpiQueryModelTransformMatrix => crate::gpiapi::GpiQueryModelTransformMatrix, 3;
-    __a_GpiSetDefaultViewMatrix => crate::gpiapi::GpiSetDefaultViewMatrix, 4;
-    __a_GpiQueryDefaultViewMatrix => crate::gpiapi::GpiQueryDefaultViewMatrix, 3;
-    __a_GpiSetSegmentTransformMatrix => crate::gpiapi::GpiSetSegmentTransformMatrix, 5;
-    __a_GpiQueryViewingTransformMatrix => crate::gpiapi::GpiQueryViewingTransformMatrix, 3;
-    __a_GpiSetPageViewport => crate::gpiapi::GpiSetPageViewport, 2;
-    __a_GpiQueryPageViewport => crate::gpiapi::GpiQueryPageViewport, 2;
-    __a_GpiConvert => crate::gpiapi::GpiConvert, 5;
-    __a_GpiConvertWithMatrix => crate::gpiapi::GpiConvertWithMatrix, 5;
-    __a_GpiTranslate => crate::gpiapi::GpiTranslate, 4;
-    __a_GpiScale => crate::gpiapi::GpiScale, 5;
-    __a_GpiRotate => crate::gpiapi::GpiRotate, 5;
-    __a_GpiCreateRegion => crate::gpiobj::GpiCreateRegion, 3;
-    __a_GpiCreateEllipticRegion => crate::gpiobj::GpiCreateEllipticRegion, 2;
-    __a_GpiCreateRoundRectRegion => crate::gpiobj::GpiCreateRoundRectRegion, 4;
-    __a_GpiDestroyRegion => crate::gpiobj::GpiDestroyRegion, 2;
-    __a_GpiSetRegion => crate::gpiobj::GpiSetRegion, 4;
-    __a_GpiCombineRegion => crate::gpiobj::GpiCombineRegion, 5;
-    __a_GpiEqualRegion => crate::gpiobj::GpiEqualRegion, 3;
-    __a_GpiOffsetRegion => crate::gpiobj::GpiOffsetRegion, 3;
-    __a_GpiPaintRegion => crate::gpiobj::GpiPaintRegion, 2;
-    __a_GpiFrameRegion => crate::gpiobj::GpiFrameRegion, 3;
-    __a_GpiQueryRegionBox => crate::gpiobj::GpiQueryRegionBox, 3;
-    __a_GpiQueryRegionRects => crate::gpiobj::GpiQueryRegionRects, 5;
-    __a_GpiPtInRegion => crate::gpiobj::GpiPtInRegion, 3;
-    __a_GpiRectInRegion => crate::gpiobj::GpiRectInRegion, 3;
-    __a_GpiSetClipRegion => crate::gpiobj::GpiSetClipRegion, 3;
-    __a_GpiQueryClipRegion => crate::gpiobj::GpiQueryClipRegion, 1;
-    __a_GpiOffsetClipRegion => crate::gpiobj::GpiOffsetClipRegion, 2;
-    __a_GpiQueryClipBox => crate::gpiobj::GpiQueryClipBox, 2;
-    __a_GpiIntersectClipRectangle => crate::gpiobj::GpiIntersectClipRectangle, 2;
-    __a_GpiExcludeClipRectangle => crate::gpiobj::GpiExcludeClipRectangle, 2;
-    __a_GpiPtVisible => crate::gpiobj::GpiPtVisible, 2;
-    __a_GpiRectVisible => crate::gpiobj::GpiRectVisible, 2;
-    __a_GpiPathToRegion => crate::gpiobj::GpiPathToRegion, 3;
-    __a_WinQueryUpdateRegion => crate::gpiobj::WinQueryUpdateRegion, 2;
-    __a_WinValidateRegion => crate::gpiobj::WinValidateRegion, 3;
-    __a_WinExcludeUpdateRegion => crate::gpiobj::WinExcludeUpdateRegion, 2;
-    __a_WinScrollWindow => crate::gpiobj::WinScrollWindow, 8;
-    __a_DevOpenDC => crate::gpiobj::DevOpenDC, 6;
-    __a_DevCloseDC => crate::gpiobj::DevCloseDC, 1;
-    __a_WinOpenWindowDC => crate::gpiobj::WinOpenWindowDC, 1;
-    __a_WinQueryWindowDC => crate::gpiobj::WinQueryWindowDC, 1;
-    __a_DevQueryCaps => crate::gpiobj::DevQueryCaps, 4;
-    __a_DevEscape => crate::gpiobj::DevEscape, 6;
-    __a_DevPostDeviceModes => crate::gpiobj::DevPostDeviceModes, 6;
-    __a_DevQueryDeviceNames => crate::gpiobj::DevQueryDeviceNames, 7;
-    __a_DevQueryHardcopyCaps => crate::gpiobj::DevQueryHardcopyCaps, 4;
-    __a_GpiCreateBitmap => crate::gpiobj::GpiCreateBitmap, 5;
-    __a_GpiDeleteBitmap => crate::gpiobj::GpiDeleteBitmap, 1;
-    __a_GpiSetBitmap => crate::gpiobj::GpiSetBitmap, 2;
-    __a_GpiSetBitmapId => crate::gpiobj::GpiSetBitmapId, 3;
-    __a_GpiQueryBitmapHandle => crate::gpiobj::GpiQueryBitmapHandle, 2;
-    __a_GpiQueryBitmapParameters => crate::gpiobj::GpiQueryBitmapParameters, 2;
-    __a_GpiQueryBitmapInfoHeader => crate::gpiobj::GpiQueryBitmapInfoHeader, 2;
-    __a_GpiSetBitmapBits => crate::gpiobj::GpiSetBitmapBits, 5;
-    __a_GpiQueryBitmapBits => crate::gpiobj::GpiQueryBitmapBits, 5;
-    __a_GpiQueryDeviceBitmapFormats => crate::gpiobj::GpiQueryDeviceBitmapFormats, 3;
-    __a_GpiLoadBitmap => crate::gpiobj::GpiLoadBitmap, 5;
-    __a_GpiBitBlt => crate::gpiobj::GpiBitBlt, 6;
-    __a_GpiWCBitBlt => crate::gpiobj::GpiWCBitBlt, 6;
-    __a_GpiDrawBits => crate::gpiobj::GpiDrawBits, 7;
-    __a_WinDrawBitmap => crate::gpiobj::WinDrawBitmap, 7;
-    __a_GpiCreateLogColorTable => crate::gpiobj::GpiCreateLogColorTable, 6;
-    __a_GpiQueryLogColorTable => crate::gpiobj::GpiQueryLogColorTable, 5;
-    __a_GpiQueryColorData => crate::gpiobj::GpiQueryColorData, 3;
-    __a_GpiQueryRGBColor => crate::gpiobj::GpiQueryRGBColor, 3;
-    __a_GpiQueryColorIndex => crate::gpiobj::GpiQueryColorIndex, 3;
-    __a_GpiQueryNearestColor => crate::gpiobj::GpiQueryNearestColor, 3;
-    __a_GpiQueryRealColors => crate::gpiobj::GpiQueryRealColors, 5;
-    __a_GpiCreatePalette => crate::gpiobj::GpiCreatePalette, 5;
-    __a_GpiDeletePalette => crate::gpiobj::GpiDeletePalette, 1;
-    __a_GpiSelectPalette => crate::gpiobj::GpiSelectPalette, 2;
-    __a_GpiQueryPalette => crate::gpiobj::GpiQueryPalette, 1;
-    __a_GpiAnimatePalette => crate::gpiobj::GpiAnimatePalette, 5;
-    __a_GpiSetPaletteEntries => crate::gpiobj::GpiSetPaletteEntries, 5;
-    __a_GpiQueryPaletteInfo => crate::gpiobj::GpiQueryPaletteInfo, 6;
-    __a_WinRealizePalette => crate::gpiobj::WinRealizePalette, 3;
-    __a_GpiCharStringAt => crate::gpitext::GpiCharStringAt, 4;
-    __a_GpiCharString => crate::gpitext::GpiCharString, 3;
-    __a_GpiCharStringPos => crate::gpitext::GpiCharStringPos, 6;
-    __a_GpiCharStringPosAt => crate::gpitext::GpiCharStringPosAt, 7;
-    __a_GpiQueryCharStringPos => crate::gpitext::GpiQueryCharStringPos, 6;
-    __a_GpiQueryCharStringPosAt => crate::gpitext::GpiQueryCharStringPosAt, 7;
-    __a_GpiQueryTextBox => crate::gpitext::GpiQueryTextBox, 5;
-    __a_GpiQueryWidthTable => crate::gpitext::GpiQueryWidthTable, 4;
-    __a_GpiSetCharBox => crate::gpitext::GpiSetCharBox, 2;
-    __a_GpiQueryCharBox => crate::gpitext::GpiQueryCharBox, 2;
-    __a_GpiQueryDefCharBox => crate::gpitext::GpiQueryDefCharBox, 2;
-    __a_GpiSetCharAngle => crate::gpitext::GpiSetCharAngle, 2;
-    __a_GpiQueryCharAngle => crate::gpitext::GpiQueryCharAngle, 2;
-    __a_GpiSetCharShear => crate::gpitext::GpiSetCharShear, 2;
-    __a_GpiQueryCharShear => crate::gpitext::GpiQueryCharShear, 2;
-    __a_GpiSetCharDirection => crate::gpitext::GpiSetCharDirection, 2;
-    __a_GpiQueryCharDirection => crate::gpitext::GpiQueryCharDirection, 1;
-    __a_GpiSetCharMode => crate::gpitext::GpiSetCharMode, 2;
-    __a_GpiQueryCharMode => crate::gpitext::GpiQueryCharMode, 1;
-    __a_GpiSetCharExtra => crate::gpitext::GpiSetCharExtra, 2;
-    __a_GpiQueryCharExtra => crate::gpitext::GpiQueryCharExtra, 2;
-    __a_GpiSetCharBreakExtra => crate::gpitext::GpiSetCharBreakExtra, 2;
-    __a_GpiQueryCharBreakExtra => crate::gpitext::GpiQueryCharBreakExtra, 2;
-    __a_GpiSetTextAlignment => crate::gpitext::GpiSetTextAlignment, 3;
-    __a_GpiQueryTextAlignment => crate::gpitext::GpiQueryTextAlignment, 3;
-    __a_GpiSetCp => crate::gpitext::GpiSetCp, 2;
-    __a_GpiQueryCp => crate::gpitext::GpiQueryCp, 1;
-    __a_GpiCreateLogFont => crate::gpitext::GpiCreateLogFont, 4;
-    __a_GpiSetCharSet => crate::gpitext::GpiSetCharSet, 2;
-    __a_GpiQueryCharSet => crate::gpitext::GpiQueryCharSet, 1;
-    __a_GpiDeleteSetId => crate::gpitext::GpiDeleteSetId, 2;
-    __a_GpiQueryNumberSetIds => crate::gpitext::GpiQueryNumberSetIds, 1;
-    __a_GpiQuerySetIds => crate::gpitext::GpiQuerySetIds, 5;
-    __a_GpiQueryLogicalFont => crate::gpitext::GpiQueryLogicalFont, 5;
-    __a_GpiQueryFontMetrics => crate::gpitext::GpiQueryFontMetrics, 3;
-    __a_GpiQueryFonts => crate::gpitext::GpiQueryFonts, 6;
-    __a_GpiLoadFonts => crate::gpitext::GpiLoadFonts, 2;
-    __a_GpiUnloadFonts => crate::gpitext::GpiUnloadFonts, 2;
-    __a_GpiLoadPublicFonts => crate::gpitext::GpiLoadPublicFonts, 2;
-    __a_GpiUnloadPublicFonts => crate::gpitext::GpiUnloadPublicFonts, 2;
-    __a_WinLoadMenu => crate::menu::WinLoadMenu, 3;
-    __a_WinCreateMenu => crate::menu::WinCreateMenu, 2;
-    __a_WinPopupMenu => crate::menu::WinPopupMenu, 7;
-    __a_WinInitialize => crate::misc::WinInitialize, 1;
-    __a_WinTerminate => crate::misc::WinTerminate, 1;
-    __a_WinQueryAnchorBlock => crate::misc::WinQueryAnchorBlock, 1;
-    __a_WinGetLastError => crate::misc::WinGetLastError, 1;
-    __a_WinGetErrorInfo => crate::misc::WinGetErrorInfo, 1;
-    __a_WinFreeErrorInfo => crate::misc::WinFreeErrorInfo, 1;
-    __a_WinAlarm => crate::misc::WinAlarm, 2;
-    __a_WinQuerySysValue => crate::misc::WinQuerySysValue, 2;
-    __a_WinQuerySysColor => crate::misc::WinQuerySysColor, 3;
-    __a_WinQuerySysPointer => crate::misc::WinQuerySysPointer, 3;
-    __a_WinSetPointer => crate::misc::WinSetPointer, 2;
-    __a_WinQueryClassInfo => crate::misc::WinQueryClassInfo, 3;
-    __a_WinSubclassWindow => crate::misc::WinSubclassWindow, 2;
-    __a_WinLoadString => crate::misc::WinLoadString, 5;
-    __a_WinLoadMessage => crate::misc::WinLoadMessage, 5;
-    __a_WinWaitEventSem => crate::misc::WinWaitEventSem, 2;
-    __a_WinRequestMutexSem => crate::misc::WinRequestMutexSem, 2;
-    __a_WinSetPresParam => crate::misc::WinSetPresParam, 4;
-    __a_WinQueryPresParam => crate::misc::WinQueryPresParam, 7;
-    __a_WinRemovePresParam => crate::misc::WinRemovePresParam, 2;
-    __a_WinMessageBox => crate::misc::WinMessageBox, 6;
-    __a_WinQueryVersion => crate::misc::WinQueryVersion, 1;
-    __a_WinQueryCp => crate::misc::WinQueryCp, 1;
-    __a_WinSetCp => crate::misc::WinSetCp, 2;
-    __a_WinQueryCpList => crate::misc::WinQueryCpList, 3;
-    __a_WinUpper => crate::misc::WinUpper, 4;
-    __a_WinUpperChar => crate::misc::WinUpperChar, 4;
-    __a_WinNextChar => crate::misc::WinNextChar, 4;
-    __a_WinPrevChar => crate::misc::WinPrevChar, 5;
-    __a_WinCompareStrings => crate::misc::WinCompareStrings, 6;
-    __a_WinCancelShutdown => crate::misc::WinCancelShutdown, 2;
-    __a_WinEnableWindowUpdate => crate::misc::WinEnableWindowUpdate, 2;
-    __a_WinLockWindowUpdate => crate::misc::WinLockWindowUpdate, 2;
-    __a_WinIsWindowShowing => crate::misc::WinIsWindowShowing, 1;
-    __a_WinSetOwner => crate::misc::WinSetOwner, 2;
-    __a_WinQueryUpdateRect => crate::misc::WinQueryUpdateRect, 2;
-    __a_WinInvertRect => crate::misc::WinInvertRect, 2;
-    __a_WinGetScreenPS => crate::misc::WinGetScreenPS, 1;
-    __a_WinLoadPointer => crate::misc::WinLoadPointer, 3;
-    __a_WinDestroyPointer => crate::misc::WinDestroyPointer, 1;
-    __a_WinTrackRect => crate::misc::WinTrackRect, 3;
-    __a_WinSetHook => crate::misc::WinSetHook, 5;
-    __a_WinReleaseHook => crate::misc::WinReleaseHook, 5;
-    __a_WinCreateMsgQueue => crate::msg::WinCreateMsgQueue, 2;
-    __a_WinDestroyMsgQueue => crate::msg::WinDestroyMsgQueue, 1;
-    __a_WinPostMsg => crate::msg::WinPostMsg, 4;
-    __a_WinPostQueueMsg => crate::msg::WinPostQueueMsg, 4;
-    __a_WinSendMsg => crate::msg::WinSendMsg, 4;
-    __a_WinBroadcastMsg => crate::msg::WinBroadcastMsg, 5;
-    __a_WinDispatchMsg => crate::msg::WinDispatchMsg, 2;
-    __a_WinDefWindowProc => crate::msg::WinDefWindowProc, 4;
-    __a_WinStartTimer => crate::msg::WinStartTimer, 4;
-    __a_WinStopTimer => crate::msg::WinStopTimer, 3;
-    __a_WinGetMsg => crate::msg::WinGetMsg, 5;
-    __a_WinPeekMsg => crate::msg::WinPeekMsg, 6;
-    __a_WinQueryQueueStatus => crate::msg::WinQueryQueueStatus, 1;
-    __a_WinQueryPointerPos => crate::msg::WinQueryPointerPos, 2;
-    __a_WinQueryMsgPos => crate::msg::WinQueryMsgPos, 2;
-    __a_WinQueryMsgTime => crate::msg::WinQueryMsgTime, 1;
-    __a_WinGetCurrentTime => crate::msg::WinGetCurrentTime, 1;
-    __a_WinSetCapture => crate::msg::WinSetCapture, 2;
-    __a_WinQueryCapture => crate::msg::WinQueryCapture, 1;
-    __a_WinShowPointer => crate::pointer::WinShowPointer, 2;
-    __a_WinSetRect => crate::rect::WinSetRect, 6;
-    __a_WinSetRectEmpty => crate::rect::WinSetRectEmpty, 2;
-    __a_WinCopyRect => crate::rect::WinCopyRect, 3;
-    __a_WinIsRectEmpty => crate::rect::WinIsRectEmpty, 2;
-    __a_WinEqualRect => crate::rect::WinEqualRect, 3;
-    __a_WinOffsetRect => crate::rect::WinOffsetRect, 4;
-    __a_WinInflateRect => crate::rect::WinInflateRect, 4;
-    __a_WinPtInRect => crate::rect::WinPtInRect, 3;
-    __a_WinIntersectRect => crate::rect::WinIntersectRect, 4;
-    __a_WinUnionRect => crate::rect::WinUnionRect, 4;
-    __a_WinSubtractRect => crate::rect::WinSubtractRect, 4;
-    __a_Rs2PmServer => crate::server::Rs2PmServer, 0;
-    __a_WinRegisterClass => crate::win::WinRegisterClass, 5;
-    __a_WinCreateWindow => crate::win::WinCreateWindow, 13;
-    __a_WinCreateStdWindow => crate::win::WinCreateStdWindow, 9;
-    __a_WinDestroyWindow => crate::win::WinDestroyWindow, 1;
-    __a_WinSetWindowPos => crate::win::WinSetWindowPos, 7;
-    __a_WinShowWindow => crate::win::WinShowWindow, 2;
-    __a_WinSetActiveWindow => crate::win::WinSetActiveWindow, 2;
-    __a_WinQueryActiveWindow => crate::win::WinQueryActiveWindow, 1;
-    __a_WinSetFocus => crate::win::WinSetFocus, 2;
-    __a_WinFocusChange => crate::win::WinFocusChange, 3;
-    __a_WinQueryFocus => crate::win::WinQueryFocus, 1;
-    __a_WinQueryWindowRect => crate::win::WinQueryWindowRect, 2;
-    __a_WinQueryWindowPos => crate::win::WinQueryWindowPos, 2;
-    __a_WinIsWindow => crate::win::WinIsWindow, 2;
-    __a_WinIsWindowVisible => crate::win::WinIsWindowVisible, 1;
-    __a_WinEnableWindow => crate::win::WinEnableWindow, 2;
-    __a_WinIsWindowEnabled => crate::win::WinIsWindowEnabled, 1;
-    __a_WinIsChild => crate::win::WinIsChild, 2;
-    __a_WinWindowFromID => crate::win::WinWindowFromID, 2;
-    __a_WinQueryWindow => crate::win::WinQueryWindow, 2;
-    __a_WinQueryDesktopWindow => crate::win::WinQueryDesktopWindow, 2;
-    __a_WinSetParent => crate::win::WinSetParent, 3;
-    __a_WinMapWindowPoints => crate::win::WinMapWindowPoints, 4;
-    __a_WinSetWindowText => crate::win::WinSetWindowText, 2;
-    __a_WinQueryWindowText => crate::win::WinQueryWindowText, 3;
-    __a_WinQueryWindowTextLength => crate::win::WinQueryWindowTextLength, 1;
-    __a_WinQueryWindowULong => crate::win::WinQueryWindowULong, 2;
-    __a_WinSetWindowULong => crate::win::WinSetWindowULong, 3;
-    __a_WinQueryWindowPtr => crate::win::WinQueryWindowPtr, 2;
-    __a_WinSetWindowPtr => crate::win::WinSetWindowPtr, 3;
-    __a_WinQueryWindowUShort => crate::win::WinQueryWindowUShort, 2;
-    __a_WinSetWindowUShort => crate::win::WinSetWindowUShort, 3;
-    __a_WinBeginPaint => crate::win::WinBeginPaint, 3;
-    __a_WinEndPaint => crate::win::WinEndPaint, 1;
-    __a_WinGetPS => crate::win::WinGetPS, 1;
-    __a_WinReleasePS => crate::win::WinReleasePS, 1;
-    __a_WinFillRect => crate::win::WinFillRect, 3;
-    __a_WinInvalidateRect => crate::win::WinInvalidateRect, 3;
-    __a_WinInvalidateRegion => crate::win::WinInvalidateRegion, 3;
-    __a_WinValidateRect => crate::win::WinValidateRect, 3;
-    __a_WinUpdateWindow => crate::win::WinUpdateWindow, 1;
-    __a_WinDrawText => crate::win::WinDrawText, 7;
+    __a_WinLoadAccelTable => crate::accel::WinLoadAccelTable, 3, 0;
+    __a_WinCreateAccelTable => crate::accel::WinCreateAccelTable, 2, 1;
+    __a_WinDestroyAccelTable => crate::accel::WinDestroyAccelTable, 1, 2;
+    __a_WinSetAccelTable => crate::accel::WinSetAccelTable, 3, 3;
+    __a_WinQueryAccelTable => crate::accel::WinQueryAccelTable, 2, 4;
+    __a_WinTranslateAccel => crate::accel::WinTranslateAccel, 4, 5;
+    __a_WinCopyAccelTable => crate::accel::WinCopyAccelTable, 3, 6;
+    __a_WinOpenClipbrd => crate::clip::WinOpenClipbrd, 1, 7;
+    __a_WinCloseClipbrd => crate::clip::WinCloseClipbrd, 1, 8;
+    __a_WinEmptyClipbrd => crate::clip::WinEmptyClipbrd, 1, 9;
+    __a_WinSetClipbrdData => crate::clip::WinSetClipbrdData, 4, 10;
+    __a_WinQueryClipbrdData => crate::clip::WinQueryClipbrdData, 2, 11;
+    __a_WinQueryClipbrdFmtInfo => crate::clip::WinQueryClipbrdFmtInfo, 3, 12;
+    __a_WinEnumClipbrdFmts => crate::clip::WinEnumClipbrdFmts, 2, 13;
+    __a_WinSetClipbrdOwner => crate::clip::WinSetClipbrdOwner, 2, 14;
+    __a_WinQueryClipbrdOwner => crate::clip::WinQueryClipbrdOwner, 1, 15;
+    __a_WinSetClipbrdViewer => crate::clip::WinSetClipbrdViewer, 2, 16;
+    __a_WinQueryClipbrdViewer => crate::clip::WinQueryClipbrdViewer, 1, 17;
+    __a_WinQuerySystemAtomTable => crate::clip::WinQuerySystemAtomTable, 0, 18;
+    __a_WinCreateAtomTable => crate::clip::WinCreateAtomTable, 2, 19;
+    __a_WinDestroyAtomTable => crate::clip::WinDestroyAtomTable, 1, 20;
+    __a_WinAddAtom => crate::clip::WinAddAtom, 2, 21;
+    __a_WinFindAtom => crate::clip::WinFindAtom, 2, 22;
+    __a_WinDeleteAtom => crate::clip::WinDeleteAtom, 2, 23;
+    __a_WinQueryAtomName => crate::clip::WinQueryAtomName, 4, 24;
+    __a_WinQueryAtomLength => crate::clip::WinQueryAtomLength, 2, 25;
+    __a_WinQueryAtomUsage => crate::clip::WinQueryAtomUsage, 2, 26;
+    __a_WinLoadDlg => crate::dlg::WinLoadDlg, 6, 27;
+    __a_WinCreateDlg => crate::dlg::WinCreateDlg, 5, 28;
+    __a_WinProcessDlg => crate::dlg::WinProcessDlg, 1, 29;
+    __a_WinDismissDlg => crate::dlg::WinDismissDlg, 2, 30;
+    __a_WinDlgBox => crate::dlg::WinDlgBox, 6, 31;
+    __a_WinDefDlgProc => crate::dlg::WinDefDlgProc, 4, 32;
+    __a_WinEnumDlgItem => crate::dlg::WinEnumDlgItem, 3, 33;
+    __a_WinSendDlgItemMsg => crate::dlg::WinSendDlgItemMsg, 5, 34;
+    __a_WinQueryDlgItemText => crate::dlg::WinQueryDlgItemText, 4, 35;
+    __a_WinQueryDlgItemTextLength => crate::dlg::WinQueryDlgItemTextLength, 2, 36;
+    __a_WinSetDlgItemText => crate::dlg::WinSetDlgItemText, 3, 37;
+    __a_WinQueryDlgItemShort => crate::dlg::WinQueryDlgItemShort, 4, 38;
+    __a_WinSetDlgItemShort => crate::dlg::WinSetDlgItemShort, 4, 39;
+    __a_WinMapDlgPoints => crate::dlg::WinMapDlgPoints, 4, 40;
+    __a_GpiCreatePS => crate::gpiapi::GpiCreatePS, 4, 41;
+    __a_GpiDestroyPS => crate::gpiapi::GpiDestroyPS, 1, 42;
+    __a_GpiAssociate => crate::gpiapi::GpiAssociate, 2, 43;
+    __a_GpiQueryDevice => crate::gpiapi::GpiQueryDevice, 1, 44;
+    __a_GpiResetPS => crate::gpiapi::GpiResetPS, 2, 45;
+    __a_GpiSetPS => crate::gpiapi::GpiSetPS, 3, 46;
+    __a_GpiQueryPS => crate::gpiapi::GpiQueryPS, 2, 47;
+    __a_GpiSavePS => crate::gpiapi::GpiSavePS, 1, 48;
+    __a_GpiRestorePS => crate::gpiapi::GpiRestorePS, 2, 49;
+    __a_GpiSetDrawControl => crate::gpiapi::GpiSetDrawControl, 3, 50;
+    __a_GpiQueryDrawControl => crate::gpiapi::GpiQueryDrawControl, 2, 51;
+    __a_GpiResetBoundaryData => crate::gpiapi::GpiResetBoundaryData, 1, 52;
+    __a_GpiQueryBoundaryData => crate::gpiapi::GpiQueryBoundaryData, 2, 53;
+    __a_GpiSetStopDraw => crate::gpiapi::GpiSetStopDraw, 2, 54;
+    __a_GpiQueryStopDraw => crate::gpiapi::GpiQueryStopDraw, 1, 55;
+    __a_GpiSetDrawingMode => crate::gpiapi::GpiSetDrawingMode, 2, 56;
+    __a_GpiQueryDrawingMode => crate::gpiapi::GpiQueryDrawingMode, 1, 57;
+    __a_GpiLoadMetaFile => crate::gpiapi::GpiLoadMetaFile, 2, 58;
+    __a_GpiDeleteMetaFile => crate::gpiapi::GpiDeleteMetaFile, 1, 59;
+    __a_GpiPlayMetaFile => crate::gpiapi::GpiPlayMetaFile, 7, 60;
+    __a_GpiSetColor => crate::gpiapi::GpiSetColor, 2, 61;
+    __a_GpiQueryColor => crate::gpiapi::GpiQueryColor, 1, 62;
+    __a_GpiSetBackColor => crate::gpiapi::GpiSetBackColor, 2, 63;
+    __a_GpiQueryBackColor => crate::gpiapi::GpiQueryBackColor, 1, 64;
+    __a_GpiSetMix => crate::gpiapi::GpiSetMix, 2, 65;
+    __a_GpiQueryMix => crate::gpiapi::GpiQueryMix, 1, 66;
+    __a_GpiSetBackMix => crate::gpiapi::GpiSetBackMix, 2, 67;
+    __a_GpiQueryBackMix => crate::gpiapi::GpiQueryBackMix, 1, 68;
+    __a_GpiSetAttrMode => crate::gpiapi::GpiSetAttrMode, 2, 69;
+    __a_GpiQueryAttrMode => crate::gpiapi::GpiQueryAttrMode, 1, 70;
+    __a_GpiPop => crate::gpiapi::GpiPop, 2, 71;
+    __a_GpiSetAttrs => crate::gpiapi::GpiSetAttrs, 5, 72;
+    __a_GpiQueryAttrs => crate::gpiapi::GpiQueryAttrs, 4, 73;
+    __a_GpiSetLineType => crate::gpiapi::GpiSetLineType, 2, 74;
+    __a_GpiQueryLineType => crate::gpiapi::GpiQueryLineType, 1, 75;
+    __a_GpiSetLineWidth => crate::gpiapi::GpiSetLineWidth, 2, 76;
+    __a_GpiQueryLineWidth => crate::gpiapi::GpiQueryLineWidth, 1, 77;
+    __a_GpiSetLineWidthGeom => crate::gpiapi::GpiSetLineWidthGeom, 2, 78;
+    __a_GpiQueryLineWidthGeom => crate::gpiapi::GpiQueryLineWidthGeom, 1, 79;
+    __a_GpiSetLineEnd => crate::gpiapi::GpiSetLineEnd, 2, 80;
+    __a_GpiQueryLineEnd => crate::gpiapi::GpiQueryLineEnd, 1, 81;
+    __a_GpiSetLineJoin => crate::gpiapi::GpiSetLineJoin, 2, 82;
+    __a_GpiQueryLineJoin => crate::gpiapi::GpiQueryLineJoin, 1, 83;
+    __a_GpiSetPattern => crate::gpiapi::GpiSetPattern, 2, 84;
+    __a_GpiQueryPattern => crate::gpiapi::GpiQueryPattern, 1, 85;
+    __a_GpiSetPatternSet => crate::gpiapi::GpiSetPatternSet, 2, 86;
+    __a_GpiQueryPatternSet => crate::gpiapi::GpiQueryPatternSet, 1, 87;
+    __a_GpiSetPatternRefPoint => crate::gpiapi::GpiSetPatternRefPoint, 2, 88;
+    __a_GpiQueryPatternRefPoint => crate::gpiapi::GpiQueryPatternRefPoint, 2, 89;
+    __a_GpiSetMarker => crate::gpiapi::GpiSetMarker, 2, 90;
+    __a_GpiQueryMarker => crate::gpiapi::GpiQueryMarker, 1, 91;
+    __a_GpiSetMarkerBox => crate::gpiapi::GpiSetMarkerBox, 2, 92;
+    __a_GpiQueryMarkerBox => crate::gpiapi::GpiQueryMarkerBox, 2, 93;
+    __a_GpiSetMarkerSet => crate::gpiapi::GpiSetMarkerSet, 2, 94;
+    __a_GpiQueryMarkerSet => crate::gpiapi::GpiQueryMarkerSet, 1, 95;
+    __a_GpiSetArcParams => crate::gpiapi::GpiSetArcParams, 2, 96;
+    __a_GpiQueryArcParams => crate::gpiapi::GpiQueryArcParams, 2, 97;
+    __a_GpiSetDefArcParams => crate::gpiapi::GpiSetDefArcParams, 2, 98;
+    __a_GpiQueryDefArcParams => crate::gpiapi::GpiQueryDefArcParams, 2, 99;
+    __a_GpiMove => crate::gpiapi::GpiMove, 2, 100;
+    __a_GpiSetCurrentPosition => crate::gpiapi::GpiSetCurrentPosition, 2, 101;
+    __a_GpiQueryCurrentPosition => crate::gpiapi::GpiQueryCurrentPosition, 2, 102;
+    __a_GpiLine => crate::gpiapi::GpiLine, 2, 103;
+    __a_GpiPolyLine => crate::gpiapi::GpiPolyLine, 3, 104;
+    __a_GpiPolyLineDisjoint => crate::gpiapi::GpiPolyLineDisjoint, 3, 105;
+    __a_GpiBox => crate::gpiapi::GpiBox, 5, 106;
+    __a_GpiFullArc => crate::gpiapi::GpiFullArc, 3, 107;
+    __a_GpiPartialArc => crate::gpiapi::GpiPartialArc, 5, 108;
+    __a_GpiPointArc => crate::gpiapi::GpiPointArc, 2, 109;
+    __a_GpiPolySpline => crate::gpiapi::GpiPolySpline, 3, 110;
+    __a_GpiPolyFillet => crate::gpiapi::GpiPolyFillet, 3, 111;
+    __a_GpiPolyFilletSharp => crate::gpiapi::GpiPolyFilletSharp, 4, 112;
+    __a_GpiMarker => crate::gpiapi::GpiMarker, 2, 113;
+    __a_GpiPolyMarker => crate::gpiapi::GpiPolyMarker, 3, 114;
+    __a_GpiErase => crate::gpiapi::GpiErase, 1, 115;
+    __a_GpiSetPel => crate::gpiapi::GpiSetPel, 2, 116;
+    __a_GpiQueryPel => crate::gpiapi::GpiQueryPel, 2, 117;
+    __a_GpiBeginArea => crate::gpiapi::GpiBeginArea, 2, 118;
+    __a_GpiEndArea => crate::gpiapi::GpiEndArea, 1, 119;
+    __a_GpiBeginPath => crate::gpiapi::GpiBeginPath, 2, 120;
+    __a_GpiEndPath => crate::gpiapi::GpiEndPath, 1, 121;
+    __a_GpiCloseFigure => crate::gpiapi::GpiCloseFigure, 1, 122;
+    __a_GpiAbortPath => crate::gpiapi::GpiAbortPath, 1, 123;
+    __a_GpiFillPath => crate::gpiapi::GpiFillPath, 3, 124;
+    __a_GpiStrokePath => crate::gpiapi::GpiStrokePath, 3, 125;
+    __a_GpiOutlinePath => crate::gpiapi::GpiOutlinePath, 3, 126;
+    __a_GpiModifyPath => crate::gpiapi::GpiModifyPath, 3, 127;
+    __a_GpiSetClipPath => crate::gpiapi::GpiSetClipPath, 3, 128;
+    __a_GpiSetModelTransformMatrix => crate::gpiapi::GpiSetModelTransformMatrix, 4, 129;
+    __a_GpiQueryModelTransformMatrix => crate::gpiapi::GpiQueryModelTransformMatrix, 3, 130;
+    __a_GpiSetDefaultViewMatrix => crate::gpiapi::GpiSetDefaultViewMatrix, 4, 131;
+    __a_GpiQueryDefaultViewMatrix => crate::gpiapi::GpiQueryDefaultViewMatrix, 3, 132;
+    __a_GpiSetSegmentTransformMatrix => crate::gpiapi::GpiSetSegmentTransformMatrix, 5, 133;
+    __a_GpiQueryViewingTransformMatrix => crate::gpiapi::GpiQueryViewingTransformMatrix, 3, 134;
+    __a_GpiSetPageViewport => crate::gpiapi::GpiSetPageViewport, 2, 135;
+    __a_GpiQueryPageViewport => crate::gpiapi::GpiQueryPageViewport, 2, 136;
+    __a_GpiConvert => crate::gpiapi::GpiConvert, 5, 137;
+    __a_GpiConvertWithMatrix => crate::gpiapi::GpiConvertWithMatrix, 5, 138;
+    __a_GpiTranslate => crate::gpiapi::GpiTranslate, 4, 139;
+    __a_GpiScale => crate::gpiapi::GpiScale, 5, 140;
+    __a_GpiRotate => crate::gpiapi::GpiRotate, 5, 141;
+    __a_GpiCreateRegion => crate::gpiobj::GpiCreateRegion, 3, 142;
+    __a_GpiCreateEllipticRegion => crate::gpiobj::GpiCreateEllipticRegion, 2, 143;
+    __a_GpiCreateRoundRectRegion => crate::gpiobj::GpiCreateRoundRectRegion, 4, 144;
+    __a_GpiDestroyRegion => crate::gpiobj::GpiDestroyRegion, 2, 145;
+    __a_GpiSetRegion => crate::gpiobj::GpiSetRegion, 4, 146;
+    __a_GpiCombineRegion => crate::gpiobj::GpiCombineRegion, 5, 147;
+    __a_GpiEqualRegion => crate::gpiobj::GpiEqualRegion, 3, 148;
+    __a_GpiOffsetRegion => crate::gpiobj::GpiOffsetRegion, 3, 149;
+    __a_GpiPaintRegion => crate::gpiobj::GpiPaintRegion, 2, 150;
+    __a_GpiFrameRegion => crate::gpiobj::GpiFrameRegion, 3, 151;
+    __a_GpiQueryRegionBox => crate::gpiobj::GpiQueryRegionBox, 3, 152;
+    __a_GpiQueryRegionRects => crate::gpiobj::GpiQueryRegionRects, 5, 153;
+    __a_GpiPtInRegion => crate::gpiobj::GpiPtInRegion, 3, 154;
+    __a_GpiRectInRegion => crate::gpiobj::GpiRectInRegion, 3, 155;
+    __a_GpiSetClipRegion => crate::gpiobj::GpiSetClipRegion, 3, 156;
+    __a_GpiQueryClipRegion => crate::gpiobj::GpiQueryClipRegion, 1, 157;
+    __a_GpiOffsetClipRegion => crate::gpiobj::GpiOffsetClipRegion, 2, 158;
+    __a_GpiQueryClipBox => crate::gpiobj::GpiQueryClipBox, 2, 159;
+    __a_GpiIntersectClipRectangle => crate::gpiobj::GpiIntersectClipRectangle, 2, 160;
+    __a_GpiExcludeClipRectangle => crate::gpiobj::GpiExcludeClipRectangle, 2, 161;
+    __a_GpiPtVisible => crate::gpiobj::GpiPtVisible, 2, 162;
+    __a_GpiRectVisible => crate::gpiobj::GpiRectVisible, 2, 163;
+    __a_GpiPathToRegion => crate::gpiobj::GpiPathToRegion, 3, 164;
+    __a_WinQueryUpdateRegion => crate::gpiobj::WinQueryUpdateRegion, 2, 165;
+    __a_WinValidateRegion => crate::gpiobj::WinValidateRegion, 3, 166;
+    __a_WinExcludeUpdateRegion => crate::gpiobj::WinExcludeUpdateRegion, 2, 167;
+    __a_WinScrollWindow => crate::gpiobj::WinScrollWindow, 8, 168;
+    __a_DevOpenDC => crate::gpiobj::DevOpenDC, 6, 169;
+    __a_DevCloseDC => crate::gpiobj::DevCloseDC, 1, 170;
+    __a_WinOpenWindowDC => crate::gpiobj::WinOpenWindowDC, 1, 171;
+    __a_WinQueryWindowDC => crate::gpiobj::WinQueryWindowDC, 1, 172;
+    __a_DevQueryCaps => crate::gpiobj::DevQueryCaps, 4, 173;
+    __a_DevEscape => crate::gpiobj::DevEscape, 6, 174;
+    __a_DevPostDeviceModes => crate::gpiobj::DevPostDeviceModes, 6, 175;
+    __a_DevQueryDeviceNames => crate::gpiobj::DevQueryDeviceNames, 7, 176;
+    __a_DevQueryHardcopyCaps => crate::gpiobj::DevQueryHardcopyCaps, 4, 177;
+    __a_GpiCreateBitmap => crate::gpiobj::GpiCreateBitmap, 5, 178;
+    __a_GpiDeleteBitmap => crate::gpiobj::GpiDeleteBitmap, 1, 179;
+    __a_GpiSetBitmap => crate::gpiobj::GpiSetBitmap, 2, 180;
+    __a_GpiSetBitmapId => crate::gpiobj::GpiSetBitmapId, 3, 181;
+    __a_GpiQueryBitmapHandle => crate::gpiobj::GpiQueryBitmapHandle, 2, 182;
+    __a_GpiQueryBitmapParameters => crate::gpiobj::GpiQueryBitmapParameters, 2, 183;
+    __a_GpiQueryBitmapInfoHeader => crate::gpiobj::GpiQueryBitmapInfoHeader, 2, 184;
+    __a_GpiSetBitmapBits => crate::gpiobj::GpiSetBitmapBits, 5, 185;
+    __a_GpiQueryBitmapBits => crate::gpiobj::GpiQueryBitmapBits, 5, 186;
+    __a_GpiQueryDeviceBitmapFormats => crate::gpiobj::GpiQueryDeviceBitmapFormats, 3, 187;
+    __a_GpiLoadBitmap => crate::gpiobj::GpiLoadBitmap, 5, 188;
+    __a_GpiBitBlt => crate::gpiobj::GpiBitBlt, 6, 189;
+    __a_GpiWCBitBlt => crate::gpiobj::GpiWCBitBlt, 6, 190;
+    __a_GpiDrawBits => crate::gpiobj::GpiDrawBits, 7, 191;
+    __a_WinDrawBitmap => crate::gpiobj::WinDrawBitmap, 7, 192;
+    __a_GpiCreateLogColorTable => crate::gpiobj::GpiCreateLogColorTable, 6, 193;
+    __a_GpiQueryLogColorTable => crate::gpiobj::GpiQueryLogColorTable, 5, 194;
+    __a_GpiQueryColorData => crate::gpiobj::GpiQueryColorData, 3, 195;
+    __a_GpiQueryRGBColor => crate::gpiobj::GpiQueryRGBColor, 3, 196;
+    __a_GpiQueryColorIndex => crate::gpiobj::GpiQueryColorIndex, 3, 197;
+    __a_GpiQueryNearestColor => crate::gpiobj::GpiQueryNearestColor, 3, 198;
+    __a_GpiQueryRealColors => crate::gpiobj::GpiQueryRealColors, 5, 199;
+    __a_GpiCreatePalette => crate::gpiobj::GpiCreatePalette, 5, 200;
+    __a_GpiDeletePalette => crate::gpiobj::GpiDeletePalette, 1, 201;
+    __a_GpiSelectPalette => crate::gpiobj::GpiSelectPalette, 2, 202;
+    __a_GpiQueryPalette => crate::gpiobj::GpiQueryPalette, 1, 203;
+    __a_GpiAnimatePalette => crate::gpiobj::GpiAnimatePalette, 5, 204;
+    __a_GpiSetPaletteEntries => crate::gpiobj::GpiSetPaletteEntries, 5, 205;
+    __a_GpiQueryPaletteInfo => crate::gpiobj::GpiQueryPaletteInfo, 6, 206;
+    __a_WinRealizePalette => crate::gpiobj::WinRealizePalette, 3, 207;
+    __a_GpiCharStringAt => crate::gpitext::GpiCharStringAt, 4, 208;
+    __a_GpiCharString => crate::gpitext::GpiCharString, 3, 209;
+    __a_GpiCharStringPos => crate::gpitext::GpiCharStringPos, 6, 210;
+    __a_GpiCharStringPosAt => crate::gpitext::GpiCharStringPosAt, 7, 211;
+    __a_GpiQueryCharStringPos => crate::gpitext::GpiQueryCharStringPos, 6, 212;
+    __a_GpiQueryCharStringPosAt => crate::gpitext::GpiQueryCharStringPosAt, 7, 213;
+    __a_GpiQueryTextBox => crate::gpitext::GpiQueryTextBox, 5, 214;
+    __a_GpiQueryWidthTable => crate::gpitext::GpiQueryWidthTable, 4, 215;
+    __a_GpiSetCharBox => crate::gpitext::GpiSetCharBox, 2, 216;
+    __a_GpiQueryCharBox => crate::gpitext::GpiQueryCharBox, 2, 217;
+    __a_GpiQueryDefCharBox => crate::gpitext::GpiQueryDefCharBox, 2, 218;
+    __a_GpiSetCharAngle => crate::gpitext::GpiSetCharAngle, 2, 219;
+    __a_GpiQueryCharAngle => crate::gpitext::GpiQueryCharAngle, 2, 220;
+    __a_GpiSetCharShear => crate::gpitext::GpiSetCharShear, 2, 221;
+    __a_GpiQueryCharShear => crate::gpitext::GpiQueryCharShear, 2, 222;
+    __a_GpiSetCharDirection => crate::gpitext::GpiSetCharDirection, 2, 223;
+    __a_GpiQueryCharDirection => crate::gpitext::GpiQueryCharDirection, 1, 224;
+    __a_GpiSetCharMode => crate::gpitext::GpiSetCharMode, 2, 225;
+    __a_GpiQueryCharMode => crate::gpitext::GpiQueryCharMode, 1, 226;
+    __a_GpiSetCharExtra => crate::gpitext::GpiSetCharExtra, 2, 227;
+    __a_GpiQueryCharExtra => crate::gpitext::GpiQueryCharExtra, 2, 228;
+    __a_GpiSetCharBreakExtra => crate::gpitext::GpiSetCharBreakExtra, 2, 229;
+    __a_GpiQueryCharBreakExtra => crate::gpitext::GpiQueryCharBreakExtra, 2, 230;
+    __a_GpiSetTextAlignment => crate::gpitext::GpiSetTextAlignment, 3, 231;
+    __a_GpiQueryTextAlignment => crate::gpitext::GpiQueryTextAlignment, 3, 232;
+    __a_GpiSetCp => crate::gpitext::GpiSetCp, 2, 233;
+    __a_GpiQueryCp => crate::gpitext::GpiQueryCp, 1, 234;
+    __a_GpiCreateLogFont => crate::gpitext::GpiCreateLogFont, 4, 235;
+    __a_GpiSetCharSet => crate::gpitext::GpiSetCharSet, 2, 236;
+    __a_GpiQueryCharSet => crate::gpitext::GpiQueryCharSet, 1, 237;
+    __a_GpiDeleteSetId => crate::gpitext::GpiDeleteSetId, 2, 238;
+    __a_GpiQueryNumberSetIds => crate::gpitext::GpiQueryNumberSetIds, 1, 239;
+    __a_GpiQuerySetIds => crate::gpitext::GpiQuerySetIds, 5, 240;
+    __a_GpiQueryLogicalFont => crate::gpitext::GpiQueryLogicalFont, 5, 241;
+    __a_GpiQueryFontMetrics => crate::gpitext::GpiQueryFontMetrics, 3, 242;
+    __a_GpiQueryFonts => crate::gpitext::GpiQueryFonts, 6, 243;
+    __a_GpiLoadFonts => crate::gpitext::GpiLoadFonts, 2, 244;
+    __a_GpiUnloadFonts => crate::gpitext::GpiUnloadFonts, 2, 245;
+    __a_GpiLoadPublicFonts => crate::gpitext::GpiLoadPublicFonts, 2, 246;
+    __a_GpiUnloadPublicFonts => crate::gpitext::GpiUnloadPublicFonts, 2, 247;
+    __a_WinLoadMenu => crate::menu::WinLoadMenu, 3, 248;
+    __a_WinCreateMenu => crate::menu::WinCreateMenu, 2, 249;
+    __a_WinPopupMenu => crate::menu::WinPopupMenu, 7, 250;
+    __a_WinInitialize => crate::misc::WinInitialize, 1, 251;
+    __a_WinTerminate => crate::misc::WinTerminate, 1, 252;
+    __a_WinQueryAnchorBlock => crate::misc::WinQueryAnchorBlock, 1, 253;
+    __a_WinGetLastError => crate::misc::WinGetLastError, 1, 254;
+    __a_WinGetErrorInfo => crate::misc::WinGetErrorInfo, 1, 255;
+    __a_WinFreeErrorInfo => crate::misc::WinFreeErrorInfo, 1, 256;
+    __a_WinAlarm => crate::misc::WinAlarm, 2, 257;
+    __a_WinQuerySysValue => crate::misc::WinQuerySysValue, 2, 258;
+    __a_WinQuerySysColor => crate::misc::WinQuerySysColor, 3, 259;
+    __a_WinQuerySysPointer => crate::misc::WinQuerySysPointer, 3, 260;
+    __a_WinSetPointer => crate::misc::WinSetPointer, 2, 261;
+    __a_WinQueryClassInfo => crate::misc::WinQueryClassInfo, 3, 262;
+    __a_WinSubclassWindow => crate::misc::WinSubclassWindow, 2, 263;
+    __a_WinLoadString => crate::misc::WinLoadString, 5, 264;
+    __a_WinLoadMessage => crate::misc::WinLoadMessage, 5, 265;
+    __a_WinWaitEventSem => crate::misc::WinWaitEventSem, 2, 266;
+    __a_WinRequestMutexSem => crate::misc::WinRequestMutexSem, 2, 267;
+    __a_WinSetPresParam => crate::misc::WinSetPresParam, 4, 268;
+    __a_WinQueryPresParam => crate::misc::WinQueryPresParam, 7, 269;
+    __a_WinRemovePresParam => crate::misc::WinRemovePresParam, 2, 270;
+    __a_WinMessageBox => crate::misc::WinMessageBox, 6, 271;
+    __a_WinQueryVersion => crate::misc::WinQueryVersion, 1, 272;
+    __a_WinQueryCp => crate::misc::WinQueryCp, 1, 273;
+    __a_WinSetCp => crate::misc::WinSetCp, 2, 274;
+    __a_WinQueryCpList => crate::misc::WinQueryCpList, 3, 275;
+    __a_WinUpper => crate::misc::WinUpper, 4, 276;
+    __a_WinUpperChar => crate::misc::WinUpperChar, 4, 277;
+    __a_WinNextChar => crate::misc::WinNextChar, 4, 278;
+    __a_WinPrevChar => crate::misc::WinPrevChar, 5, 279;
+    __a_WinCompareStrings => crate::misc::WinCompareStrings, 6, 280;
+    __a_WinCancelShutdown => crate::misc::WinCancelShutdown, 2, 281;
+    __a_WinEnableWindowUpdate => crate::misc::WinEnableWindowUpdate, 2, 282;
+    __a_WinLockWindowUpdate => crate::misc::WinLockWindowUpdate, 2, 283;
+    __a_WinIsWindowShowing => crate::misc::WinIsWindowShowing, 1, 284;
+    __a_WinSetOwner => crate::misc::WinSetOwner, 2, 285;
+    __a_WinQueryUpdateRect => crate::misc::WinQueryUpdateRect, 2, 286;
+    __a_WinInvertRect => crate::misc::WinInvertRect, 2, 287;
+    __a_WinGetScreenPS => crate::misc::WinGetScreenPS, 1, 288;
+    __a_WinLoadPointer => crate::misc::WinLoadPointer, 3, 289;
+    __a_WinDestroyPointer => crate::misc::WinDestroyPointer, 1, 290;
+    __a_WinTrackRect => crate::misc::WinTrackRect, 3, 291;
+    __a_WinSetHook => crate::misc::WinSetHook, 5, 292;
+    __a_WinReleaseHook => crate::misc::WinReleaseHook, 5, 293;
+    __a_WinCreateMsgQueue => crate::msg::WinCreateMsgQueue, 2, 294;
+    __a_WinDestroyMsgQueue => crate::msg::WinDestroyMsgQueue, 1, 295;
+    __a_WinPostMsg => crate::msg::WinPostMsg, 4, 296;
+    __a_WinPostQueueMsg => crate::msg::WinPostQueueMsg, 4, 297;
+    __a_WinSendMsg => crate::msg::WinSendMsg, 4, 298;
+    __a_WinBroadcastMsg => crate::msg::WinBroadcastMsg, 5, 299;
+    __a_WinDispatchMsg => crate::msg::WinDispatchMsg, 2, 300;
+    __a_WinDefWindowProc => crate::msg::WinDefWindowProc, 4, 301;
+    __a_WinStartTimer => crate::msg::WinStartTimer, 4, 302;
+    __a_WinStopTimer => crate::msg::WinStopTimer, 3, 303;
+    __a_WinGetMsg => crate::msg::WinGetMsg, 5, 304;
+    __a_WinPeekMsg => crate::msg::WinPeekMsg, 6, 305;
+    __a_WinQueryQueueStatus => crate::msg::WinQueryQueueStatus, 1, 306;
+    __a_WinQueryPointerPos => crate::msg::WinQueryPointerPos, 2, 307;
+    __a_WinQueryMsgPos => crate::msg::WinQueryMsgPos, 2, 308;
+    __a_WinQueryMsgTime => crate::msg::WinQueryMsgTime, 1, 309;
+    __a_WinGetCurrentTime => crate::msg::WinGetCurrentTime, 1, 310;
+    __a_WinSetCapture => crate::msg::WinSetCapture, 2, 311;
+    __a_WinQueryCapture => crate::msg::WinQueryCapture, 1, 312;
+    __a_WinShowPointer => crate::pointer::WinShowPointer, 2, 313;
+    __a_WinSetRect => crate::rect::WinSetRect, 6, 314;
+    __a_WinSetRectEmpty => crate::rect::WinSetRectEmpty, 2, 315;
+    __a_WinCopyRect => crate::rect::WinCopyRect, 3, 316;
+    __a_WinIsRectEmpty => crate::rect::WinIsRectEmpty, 2, 317;
+    __a_WinEqualRect => crate::rect::WinEqualRect, 3, 318;
+    __a_WinOffsetRect => crate::rect::WinOffsetRect, 4, 319;
+    __a_WinInflateRect => crate::rect::WinInflateRect, 4, 320;
+    __a_WinPtInRect => crate::rect::WinPtInRect, 3, 321;
+    __a_WinIntersectRect => crate::rect::WinIntersectRect, 4, 322;
+    __a_WinUnionRect => crate::rect::WinUnionRect, 4, 323;
+    __a_WinSubtractRect => crate::rect::WinSubtractRect, 4, 324;
+    __a_Rs2PmServer => crate::server::Rs2PmServer, 0, 325;
+    __a_WinRegisterClass => crate::win::WinRegisterClass, 5, 326;
+    __a_WinCreateWindow => crate::win::WinCreateWindow, 13, 327;
+    __a_WinCreateStdWindow => crate::win::WinCreateStdWindow, 9, 328;
+    __a_WinDestroyWindow => crate::win::WinDestroyWindow, 1, 329;
+    __a_WinSetWindowPos => crate::win::WinSetWindowPos, 7, 330;
+    __a_WinShowWindow => crate::win::WinShowWindow, 2, 331;
+    __a_WinSetActiveWindow => crate::win::WinSetActiveWindow, 2, 332;
+    __a_WinQueryActiveWindow => crate::win::WinQueryActiveWindow, 1, 333;
+    __a_WinSetFocus => crate::win::WinSetFocus, 2, 334;
+    __a_WinFocusChange => crate::win::WinFocusChange, 3, 335;
+    __a_WinQueryFocus => crate::win::WinQueryFocus, 1, 336;
+    __a_WinQueryWindowRect => crate::win::WinQueryWindowRect, 2, 337;
+    __a_WinQueryWindowPos => crate::win::WinQueryWindowPos, 2, 338;
+    __a_WinIsWindow => crate::win::WinIsWindow, 2, 339;
+    __a_WinIsWindowVisible => crate::win::WinIsWindowVisible, 1, 340;
+    __a_WinEnableWindow => crate::win::WinEnableWindow, 2, 341;
+    __a_WinIsWindowEnabled => crate::win::WinIsWindowEnabled, 1, 342;
+    __a_WinIsChild => crate::win::WinIsChild, 2, 343;
+    __a_WinWindowFromID => crate::win::WinWindowFromID, 2, 344;
+    __a_WinQueryWindow => crate::win::WinQueryWindow, 2, 345;
+    __a_WinQueryDesktopWindow => crate::win::WinQueryDesktopWindow, 2, 346;
+    __a_WinSetParent => crate::win::WinSetParent, 3, 347;
+    __a_WinMapWindowPoints => crate::win::WinMapWindowPoints, 4, 348;
+    __a_WinSetWindowText => crate::win::WinSetWindowText, 2, 349;
+    __a_WinQueryWindowText => crate::win::WinQueryWindowText, 3, 350;
+    __a_WinQueryWindowTextLength => crate::win::WinQueryWindowTextLength, 1, 351;
+    __a_WinQueryWindowULong => crate::win::WinQueryWindowULong, 2, 352;
+    __a_WinSetWindowULong => crate::win::WinSetWindowULong, 3, 353;
+    __a_WinQueryWindowPtr => crate::win::WinQueryWindowPtr, 2, 354;
+    __a_WinSetWindowPtr => crate::win::WinSetWindowPtr, 3, 355;
+    __a_WinQueryWindowUShort => crate::win::WinQueryWindowUShort, 2, 356;
+    __a_WinSetWindowUShort => crate::win::WinSetWindowUShort, 3, 357;
+    __a_WinBeginPaint => crate::win::WinBeginPaint, 3, 358;
+    __a_WinEndPaint => crate::win::WinEndPaint, 1, 359;
+    __a_WinGetPS => crate::win::WinGetPS, 1, 360;
+    __a_WinReleasePS => crate::win::WinReleasePS, 1, 361;
+    __a_WinFillRect => crate::win::WinFillRect, 3, 362;
+    __a_WinInvalidateRect => crate::win::WinInvalidateRect, 3, 363;
+    __a_WinInvalidateRegion => crate::win::WinInvalidateRegion, 3, 364;
+    __a_WinValidateRect => crate::win::WinValidateRect, 3, 365;
+    __a_WinUpdateWindow => crate::win::WinUpdateWindow, 1, 366;
+    __a_WinDrawText => crate::win::WinDrawText, 7, 367;
 }
+
+/// Export names and argument counts by trampoline index.
+pub static NAMES: [(&str, u8); 368] = [
+    ("WinLoadAccelTable", 3),
+    ("WinCreateAccelTable", 2),
+    ("WinDestroyAccelTable", 1),
+    ("WinSetAccelTable", 3),
+    ("WinQueryAccelTable", 2),
+    ("WinTranslateAccel", 4),
+    ("WinCopyAccelTable", 3),
+    ("WinOpenClipbrd", 1),
+    ("WinCloseClipbrd", 1),
+    ("WinEmptyClipbrd", 1),
+    ("WinSetClipbrdData", 4),
+    ("WinQueryClipbrdData", 2),
+    ("WinQueryClipbrdFmtInfo", 3),
+    ("WinEnumClipbrdFmts", 2),
+    ("WinSetClipbrdOwner", 2),
+    ("WinQueryClipbrdOwner", 1),
+    ("WinSetClipbrdViewer", 2),
+    ("WinQueryClipbrdViewer", 1),
+    ("WinQuerySystemAtomTable", 0),
+    ("WinCreateAtomTable", 2),
+    ("WinDestroyAtomTable", 1),
+    ("WinAddAtom", 2),
+    ("WinFindAtom", 2),
+    ("WinDeleteAtom", 2),
+    ("WinQueryAtomName", 4),
+    ("WinQueryAtomLength", 2),
+    ("WinQueryAtomUsage", 2),
+    ("WinLoadDlg", 6),
+    ("WinCreateDlg", 5),
+    ("WinProcessDlg", 1),
+    ("WinDismissDlg", 2),
+    ("WinDlgBox", 6),
+    ("WinDefDlgProc", 4),
+    ("WinEnumDlgItem", 3),
+    ("WinSendDlgItemMsg", 5),
+    ("WinQueryDlgItemText", 4),
+    ("WinQueryDlgItemTextLength", 2),
+    ("WinSetDlgItemText", 3),
+    ("WinQueryDlgItemShort", 4),
+    ("WinSetDlgItemShort", 4),
+    ("WinMapDlgPoints", 4),
+    ("GpiCreatePS", 4),
+    ("GpiDestroyPS", 1),
+    ("GpiAssociate", 2),
+    ("GpiQueryDevice", 1),
+    ("GpiResetPS", 2),
+    ("GpiSetPS", 3),
+    ("GpiQueryPS", 2),
+    ("GpiSavePS", 1),
+    ("GpiRestorePS", 2),
+    ("GpiSetDrawControl", 3),
+    ("GpiQueryDrawControl", 2),
+    ("GpiResetBoundaryData", 1),
+    ("GpiQueryBoundaryData", 2),
+    ("GpiSetStopDraw", 2),
+    ("GpiQueryStopDraw", 1),
+    ("GpiSetDrawingMode", 2),
+    ("GpiQueryDrawingMode", 1),
+    ("GpiLoadMetaFile", 2),
+    ("GpiDeleteMetaFile", 1),
+    ("GpiPlayMetaFile", 7),
+    ("GpiSetColor", 2),
+    ("GpiQueryColor", 1),
+    ("GpiSetBackColor", 2),
+    ("GpiQueryBackColor", 1),
+    ("GpiSetMix", 2),
+    ("GpiQueryMix", 1),
+    ("GpiSetBackMix", 2),
+    ("GpiQueryBackMix", 1),
+    ("GpiSetAttrMode", 2),
+    ("GpiQueryAttrMode", 1),
+    ("GpiPop", 2),
+    ("GpiSetAttrs", 5),
+    ("GpiQueryAttrs", 4),
+    ("GpiSetLineType", 2),
+    ("GpiQueryLineType", 1),
+    ("GpiSetLineWidth", 2),
+    ("GpiQueryLineWidth", 1),
+    ("GpiSetLineWidthGeom", 2),
+    ("GpiQueryLineWidthGeom", 1),
+    ("GpiSetLineEnd", 2),
+    ("GpiQueryLineEnd", 1),
+    ("GpiSetLineJoin", 2),
+    ("GpiQueryLineJoin", 1),
+    ("GpiSetPattern", 2),
+    ("GpiQueryPattern", 1),
+    ("GpiSetPatternSet", 2),
+    ("GpiQueryPatternSet", 1),
+    ("GpiSetPatternRefPoint", 2),
+    ("GpiQueryPatternRefPoint", 2),
+    ("GpiSetMarker", 2),
+    ("GpiQueryMarker", 1),
+    ("GpiSetMarkerBox", 2),
+    ("GpiQueryMarkerBox", 2),
+    ("GpiSetMarkerSet", 2),
+    ("GpiQueryMarkerSet", 1),
+    ("GpiSetArcParams", 2),
+    ("GpiQueryArcParams", 2),
+    ("GpiSetDefArcParams", 2),
+    ("GpiQueryDefArcParams", 2),
+    ("GpiMove", 2),
+    ("GpiSetCurrentPosition", 2),
+    ("GpiQueryCurrentPosition", 2),
+    ("GpiLine", 2),
+    ("GpiPolyLine", 3),
+    ("GpiPolyLineDisjoint", 3),
+    ("GpiBox", 5),
+    ("GpiFullArc", 3),
+    ("GpiPartialArc", 5),
+    ("GpiPointArc", 2),
+    ("GpiPolySpline", 3),
+    ("GpiPolyFillet", 3),
+    ("GpiPolyFilletSharp", 4),
+    ("GpiMarker", 2),
+    ("GpiPolyMarker", 3),
+    ("GpiErase", 1),
+    ("GpiSetPel", 2),
+    ("GpiQueryPel", 2),
+    ("GpiBeginArea", 2),
+    ("GpiEndArea", 1),
+    ("GpiBeginPath", 2),
+    ("GpiEndPath", 1),
+    ("GpiCloseFigure", 1),
+    ("GpiAbortPath", 1),
+    ("GpiFillPath", 3),
+    ("GpiStrokePath", 3),
+    ("GpiOutlinePath", 3),
+    ("GpiModifyPath", 3),
+    ("GpiSetClipPath", 3),
+    ("GpiSetModelTransformMatrix", 4),
+    ("GpiQueryModelTransformMatrix", 3),
+    ("GpiSetDefaultViewMatrix", 4),
+    ("GpiQueryDefaultViewMatrix", 3),
+    ("GpiSetSegmentTransformMatrix", 5),
+    ("GpiQueryViewingTransformMatrix", 3),
+    ("GpiSetPageViewport", 2),
+    ("GpiQueryPageViewport", 2),
+    ("GpiConvert", 5),
+    ("GpiConvertWithMatrix", 5),
+    ("GpiTranslate", 4),
+    ("GpiScale", 5),
+    ("GpiRotate", 5),
+    ("GpiCreateRegion", 3),
+    ("GpiCreateEllipticRegion", 2),
+    ("GpiCreateRoundRectRegion", 4),
+    ("GpiDestroyRegion", 2),
+    ("GpiSetRegion", 4),
+    ("GpiCombineRegion", 5),
+    ("GpiEqualRegion", 3),
+    ("GpiOffsetRegion", 3),
+    ("GpiPaintRegion", 2),
+    ("GpiFrameRegion", 3),
+    ("GpiQueryRegionBox", 3),
+    ("GpiQueryRegionRects", 5),
+    ("GpiPtInRegion", 3),
+    ("GpiRectInRegion", 3),
+    ("GpiSetClipRegion", 3),
+    ("GpiQueryClipRegion", 1),
+    ("GpiOffsetClipRegion", 2),
+    ("GpiQueryClipBox", 2),
+    ("GpiIntersectClipRectangle", 2),
+    ("GpiExcludeClipRectangle", 2),
+    ("GpiPtVisible", 2),
+    ("GpiRectVisible", 2),
+    ("GpiPathToRegion", 3),
+    ("WinQueryUpdateRegion", 2),
+    ("WinValidateRegion", 3),
+    ("WinExcludeUpdateRegion", 2),
+    ("WinScrollWindow", 8),
+    ("DevOpenDC", 6),
+    ("DevCloseDC", 1),
+    ("WinOpenWindowDC", 1),
+    ("WinQueryWindowDC", 1),
+    ("DevQueryCaps", 4),
+    ("DevEscape", 6),
+    ("DevPostDeviceModes", 6),
+    ("DevQueryDeviceNames", 7),
+    ("DevQueryHardcopyCaps", 4),
+    ("GpiCreateBitmap", 5),
+    ("GpiDeleteBitmap", 1),
+    ("GpiSetBitmap", 2),
+    ("GpiSetBitmapId", 3),
+    ("GpiQueryBitmapHandle", 2),
+    ("GpiQueryBitmapParameters", 2),
+    ("GpiQueryBitmapInfoHeader", 2),
+    ("GpiSetBitmapBits", 5),
+    ("GpiQueryBitmapBits", 5),
+    ("GpiQueryDeviceBitmapFormats", 3),
+    ("GpiLoadBitmap", 5),
+    ("GpiBitBlt", 6),
+    ("GpiWCBitBlt", 6),
+    ("GpiDrawBits", 7),
+    ("WinDrawBitmap", 7),
+    ("GpiCreateLogColorTable", 6),
+    ("GpiQueryLogColorTable", 5),
+    ("GpiQueryColorData", 3),
+    ("GpiQueryRGBColor", 3),
+    ("GpiQueryColorIndex", 3),
+    ("GpiQueryNearestColor", 3),
+    ("GpiQueryRealColors", 5),
+    ("GpiCreatePalette", 5),
+    ("GpiDeletePalette", 1),
+    ("GpiSelectPalette", 2),
+    ("GpiQueryPalette", 1),
+    ("GpiAnimatePalette", 5),
+    ("GpiSetPaletteEntries", 5),
+    ("GpiQueryPaletteInfo", 6),
+    ("WinRealizePalette", 3),
+    ("GpiCharStringAt", 4),
+    ("GpiCharString", 3),
+    ("GpiCharStringPos", 6),
+    ("GpiCharStringPosAt", 7),
+    ("GpiQueryCharStringPos", 6),
+    ("GpiQueryCharStringPosAt", 7),
+    ("GpiQueryTextBox", 5),
+    ("GpiQueryWidthTable", 4),
+    ("GpiSetCharBox", 2),
+    ("GpiQueryCharBox", 2),
+    ("GpiQueryDefCharBox", 2),
+    ("GpiSetCharAngle", 2),
+    ("GpiQueryCharAngle", 2),
+    ("GpiSetCharShear", 2),
+    ("GpiQueryCharShear", 2),
+    ("GpiSetCharDirection", 2),
+    ("GpiQueryCharDirection", 1),
+    ("GpiSetCharMode", 2),
+    ("GpiQueryCharMode", 1),
+    ("GpiSetCharExtra", 2),
+    ("GpiQueryCharExtra", 2),
+    ("GpiSetCharBreakExtra", 2),
+    ("GpiQueryCharBreakExtra", 2),
+    ("GpiSetTextAlignment", 3),
+    ("GpiQueryTextAlignment", 3),
+    ("GpiSetCp", 2),
+    ("GpiQueryCp", 1),
+    ("GpiCreateLogFont", 4),
+    ("GpiSetCharSet", 2),
+    ("GpiQueryCharSet", 1),
+    ("GpiDeleteSetId", 2),
+    ("GpiQueryNumberSetIds", 1),
+    ("GpiQuerySetIds", 5),
+    ("GpiQueryLogicalFont", 5),
+    ("GpiQueryFontMetrics", 3),
+    ("GpiQueryFonts", 6),
+    ("GpiLoadFonts", 2),
+    ("GpiUnloadFonts", 2),
+    ("GpiLoadPublicFonts", 2),
+    ("GpiUnloadPublicFonts", 2),
+    ("WinLoadMenu", 3),
+    ("WinCreateMenu", 2),
+    ("WinPopupMenu", 7),
+    ("WinInitialize", 1),
+    ("WinTerminate", 1),
+    ("WinQueryAnchorBlock", 1),
+    ("WinGetLastError", 1),
+    ("WinGetErrorInfo", 1),
+    ("WinFreeErrorInfo", 1),
+    ("WinAlarm", 2),
+    ("WinQuerySysValue", 2),
+    ("WinQuerySysColor", 3),
+    ("WinQuerySysPointer", 3),
+    ("WinSetPointer", 2),
+    ("WinQueryClassInfo", 3),
+    ("WinSubclassWindow", 2),
+    ("WinLoadString", 5),
+    ("WinLoadMessage", 5),
+    ("WinWaitEventSem", 2),
+    ("WinRequestMutexSem", 2),
+    ("WinSetPresParam", 4),
+    ("WinQueryPresParam", 7),
+    ("WinRemovePresParam", 2),
+    ("WinMessageBox", 6),
+    ("WinQueryVersion", 1),
+    ("WinQueryCp", 1),
+    ("WinSetCp", 2),
+    ("WinQueryCpList", 3),
+    ("WinUpper", 4),
+    ("WinUpperChar", 4),
+    ("WinNextChar", 4),
+    ("WinPrevChar", 5),
+    ("WinCompareStrings", 6),
+    ("WinCancelShutdown", 2),
+    ("WinEnableWindowUpdate", 2),
+    ("WinLockWindowUpdate", 2),
+    ("WinIsWindowShowing", 1),
+    ("WinSetOwner", 2),
+    ("WinQueryUpdateRect", 2),
+    ("WinInvertRect", 2),
+    ("WinGetScreenPS", 1),
+    ("WinLoadPointer", 3),
+    ("WinDestroyPointer", 1),
+    ("WinTrackRect", 3),
+    ("WinSetHook", 5),
+    ("WinReleaseHook", 5),
+    ("WinCreateMsgQueue", 2),
+    ("WinDestroyMsgQueue", 1),
+    ("WinPostMsg", 4),
+    ("WinPostQueueMsg", 4),
+    ("WinSendMsg", 4),
+    ("WinBroadcastMsg", 5),
+    ("WinDispatchMsg", 2),
+    ("WinDefWindowProc", 4),
+    ("WinStartTimer", 4),
+    ("WinStopTimer", 3),
+    ("WinGetMsg", 5),
+    ("WinPeekMsg", 6),
+    ("WinQueryQueueStatus", 1),
+    ("WinQueryPointerPos", 2),
+    ("WinQueryMsgPos", 2),
+    ("WinQueryMsgTime", 1),
+    ("WinGetCurrentTime", 1),
+    ("WinSetCapture", 2),
+    ("WinQueryCapture", 1),
+    ("WinShowPointer", 2),
+    ("WinSetRect", 6),
+    ("WinSetRectEmpty", 2),
+    ("WinCopyRect", 3),
+    ("WinIsRectEmpty", 2),
+    ("WinEqualRect", 3),
+    ("WinOffsetRect", 4),
+    ("WinInflateRect", 4),
+    ("WinPtInRect", 3),
+    ("WinIntersectRect", 4),
+    ("WinUnionRect", 4),
+    ("WinSubtractRect", 4),
+    ("Rs2PmServer", 0),
+    ("WinRegisterClass", 5),
+    ("WinCreateWindow", 13),
+    ("WinCreateStdWindow", 9),
+    ("WinDestroyWindow", 1),
+    ("WinSetWindowPos", 7),
+    ("WinShowWindow", 2),
+    ("WinSetActiveWindow", 2),
+    ("WinQueryActiveWindow", 1),
+    ("WinSetFocus", 2),
+    ("WinFocusChange", 3),
+    ("WinQueryFocus", 1),
+    ("WinQueryWindowRect", 2),
+    ("WinQueryWindowPos", 2),
+    ("WinIsWindow", 2),
+    ("WinIsWindowVisible", 1),
+    ("WinEnableWindow", 2),
+    ("WinIsWindowEnabled", 1),
+    ("WinIsChild", 2),
+    ("WinWindowFromID", 2),
+    ("WinQueryWindow", 2),
+    ("WinQueryDesktopWindow", 2),
+    ("WinSetParent", 3),
+    ("WinMapWindowPoints", 4),
+    ("WinSetWindowText", 2),
+    ("WinQueryWindowText", 3),
+    ("WinQueryWindowTextLength", 1),
+    ("WinQueryWindowULong", 2),
+    ("WinSetWindowULong", 3),
+    ("WinQueryWindowPtr", 2),
+    ("WinSetWindowPtr", 3),
+    ("WinQueryWindowUShort", 2),
+    ("WinSetWindowUShort", 3),
+    ("WinBeginPaint", 3),
+    ("WinEndPaint", 1),
+    ("WinGetPS", 1),
+    ("WinReleasePS", 1),
+    ("WinFillRect", 3),
+    ("WinInvalidateRect", 3),
+    ("WinInvalidateRegion", 3),
+    ("WinValidateRect", 3),
+    ("WinUpdateWindow", 1),
+    ("WinDrawText", 7),
+];
