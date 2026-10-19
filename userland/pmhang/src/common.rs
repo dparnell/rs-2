@@ -1,7 +1,8 @@
 //! A PM program that stops reading its message queue on purpose: its
 //! window procedure never returns from WM_BUTTON1DOWN (or the H key),
-//! either blocked in DosSleep or spinning without system calls. It tests
-//! that the rest of the desktop keeps working (docs/PM.md).
+//! either blocked in DosSleep or spinning without system calls; with
+//! button 2 it sleeps six seconds and then goes on. It tests that the rest
+//! of the desktop keeps working (docs/PM.md).
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -78,6 +79,7 @@ static SPIN: AtomicU32 = AtomicU32::new(0);
 
 const WM_PAINT: u32 = 0x23;
 const WM_BUTTON1DOWN: u32 = 0x71;
+const WM_BUTTON2DOWN: u32 = 0x74;
 const WM_CHAR: u32 = 0x7a;
 const KC_KEYUP: u32 = 0x40;
 const KC_CHAR: u32 = 0x01;
@@ -110,6 +112,11 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 0
             }
             WM_BUTTON1DOWN => hang(),
+            // Button 2: stop responding for six seconds, then carry on.
+            WM_BUTTON2DOWN => {
+                DosSleep(6000);
+                1
+            }
             WM_CHAR if mp1 & KC_KEYUP == 0 && mp1 & KC_CHAR != 0 && (mp2 & 0xff) as u8 | 0x20 == b'h' => hang(),
             _ => WinDefWindowProc(h, msg, mp1, mp2),
         }
