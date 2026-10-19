@@ -1,0 +1,6 @@
+[package]
+name = "tcpip"
+description = "no_std TCP/IP protocol stack: Ethernet, ARP, IPv4, ICMP, UDP, TCP, DHCP, DNS"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
