@@ -10,9 +10,13 @@
 //! (at 20, as MSI-X stays disabled). A transitional device with modern
 //! capabilities is driven as a modern one.
 //!
-//! INTx is masked through the PCI command register: the drivers poll.
-//! MSI-X would be enabled here (msix_config / queue_msix_vector, and the
-//! legacy device configuration moving to offset 24).
+//! INTx is masked through the PCI command register. Queues a driver
+//! asks interrupts for ([`Device::queue_irq`]) get an MSI-X table entry
+//! each (entry 0 is the configuration-change vector) and an [`Event`]
+//! the handler signals; the vector is set through queue_msix_vector
+//! (modern) or the legacy MSI-X header fields, which move the legacy
+//! device configuration from offset 20 to 24 as soon as MSI-X is on.
+//! Devices without MSI-X, and every queue with `nomsi`, are polled.
 
 use core::ptr::{read_volatile, write_volatile};
 
@@ -21,6 +25,7 @@ use super::{ACKNOWLEDGE, DRIVER, DRIVER_OK, FAILED, FEATURES_OK, F_VERSION_1};
 use crate::arch::{inb, inl, inw, outb, outl, outw};
 use crate::drivers::pci as bus;
 use crate::mm::mmio;
+use crate::msi::{Event, MsiX};
 
 // Capability types (cfg_type).
 const CAP_COMMON: u8 = 1;
@@ -33,11 +38,13 @@ const DEVICE_FEATURE_SELECT: usize = 0x00;
 const DEVICE_FEATURE: usize = 0x04;
 const DRIVER_FEATURE_SELECT: usize = 0x08;
 const DRIVER_FEATURE: usize = 0x0c;
+const MSIX_CONFIG: usize = 0x10;
 const NUM_QUEUES: usize = 0x12;
 const DEVICE_STATUS: usize = 0x14;
 const CONFIG_GENERATION: usize = 0x15;
 const QUEUE_SELECT: usize = 0x16;
 const QUEUE_SIZE: usize = 0x18;
+const QUEUE_MSIX_VECTOR: usize = 0x1a;
 const QUEUE_ENABLE: usize = 0x1c;
 const QUEUE_NOTIFY_OFF: usize = 0x1e;
 const QUEUE_DESC: usize = 0x20;
@@ -53,6 +60,12 @@ const L_QUEUE_SELECT: u16 = 14;
 const L_QUEUE_NOTIFY: u16 = 16;
 const L_STATUS: u16 = 18;
 const L_CONFIG: u16 = 20;
+// Legacy MSI-X header (present while MSI-X is enabled).
+const L_CONFIG_VECTOR: u16 = 20;
+const L_QUEUE_VECTOR: u16 = 22;
+const L_CONFIG_MSIX: u16 = 24;
+/// No MSI-X vector.
+const NO_VECTOR: u16 = 0xffff;
 
 /// Largest queue a driver asks for on a modern device.
 const MAX_QUEUE: u16 = 256;
@@ -68,6 +81,9 @@ pub struct Device {
     regs: Regs,
     /// Features accepted by [`Device::negotiate`].
     pub features: u64,
+    /// MSI-X table, once a queue asked for interrupts; next free entry.
+    msix: Option<MsiX>,
+    next_entry: u16,
 }
 
 unsafe impl Send for Device {}
@@ -126,12 +142,12 @@ impl Device {
             let notify = map_cap(d, n.1, n.2, n.3)?;
             let device = find(CAP_DEVICE).and_then(|x| map_cap(d, x.1, x.2, x.3)).unwrap_or(core::ptr::null_mut());
             let regs = Regs::Modern { common, notify, notify_mult: n.4, device };
-            return Some(Device { pci: *d, regs, features: 0 });
+            return Some(Device { pci: *d, regs, features: 0, msix: None, next_entry: 1 });
         }
         // Legacy interface: transitional IDs with an I/O BAR 0.
         let bar0 = d.read(0x10);
         if (0x1000..=0x103f).contains(&d.device) && bar0 & 1 != 0 && bar0 & !3 != 0 {
-            return Some(Device { pci: *d, regs: Regs::Legacy { io: (bar0 & 0xfffc) as u16 }, features: 0 });
+            return Some(Device { pci: *d, regs: Regs::Legacy { io: (bar0 & 0xfffc) as u16 }, features: 0, msix: None, next_entry: 1 });
         }
         None
     }
@@ -283,9 +299,103 @@ impl Device {
         }
     }
 
+    /// Legacy device configuration offset (moves while MSI-X is on).
+    fn l_config(&self) -> u16 {
+        if self.msix.is_some() { L_CONFIG_MSIX } else { L_CONFIG }
+    }
+
+    /// The MSI-X table, enabled on first use (None without MSI-X).
+    fn msix(&mut self) -> Option<()> {
+        if self.msix.is_none() {
+            let m = MsiX::find(&self.pci)?;
+            if m.size() < 2 {
+                return None;
+            }
+            m.enable();
+            self.msix = Some(m);
+            // Entry 0: configuration changes, unassigned until asked for.
+            self.set_config_vector(NO_VECTOR);
+        }
+        Some(())
+    }
+
+    fn set_config_vector(&self, entry: u16) -> u16 {
+        match self.regs {
+            Regs::Modern { .. } => {
+                self.w16(MSIX_CONFIG, entry);
+                self.c16(MSIX_CONFIG)
+            }
+            Regs::Legacy { io } => unsafe {
+                outw(io + L_CONFIG_VECTOR, entry);
+                inw(io + L_CONFIG_VECTOR)
+            },
+        }
+    }
+
+    /// Run `hook` in interrupt context when the device configuration
+    /// changes (link state, ...). False without MSI-X.
+    pub fn config_irq(&mut self, hook: fn()) -> bool {
+        if self.msix().is_none() {
+            return false;
+        }
+        let ev = Event::leak();
+        ev.set_hook(hook);
+        let Some(v) = ev.vector() else { return false };
+        self.msix.as_ref().unwrap().set(0, v);
+        self.set_config_vector(0) == 0
+    }
+
+    /// Point the selected queue at an MSI-X entry: the event its handler
+    /// signals, or None (the queue is then polled).
+    fn queue_vector(&mut self) -> Option<&'static Event> {
+        let entry = self.next_entry;
+        self.msix()?;
+        if entry >= self.msix.as_ref()?.size() {
+            return None;
+        }
+        let ev = Event::leak();
+        let v = ev.vector()?;
+        self.msix.as_ref()?.set(entry, v);
+        let got = match self.regs {
+            Regs::Modern { .. } => {
+                self.w16(QUEUE_MSIX_VECTOR, entry);
+                self.c16(QUEUE_MSIX_VECTOR)
+            }
+            Regs::Legacy { io } => unsafe {
+                outw(io + L_QUEUE_VECTOR, entry);
+                inw(io + L_QUEUE_VECTOR)
+            },
+        };
+        if got != entry {
+            // The device could not allocate it: poll this queue.
+            self.msix.as_ref()?.mask(entry, true);
+            return None;
+        }
+        self.next_entry += 1;
+        crate::println!("virtio: {}: queue {} on MSI-X vector {v:#x}", self.name(), self.queue_selected());
+        Some(ev)
+    }
+
+    fn queue_selected(&self) -> u16 {
+        match self.regs {
+            Regs::Modern { .. } => self.c16(QUEUE_SELECT),
+            Regs::Legacy { io } => unsafe { inw(io + L_QUEUE_SELECT) },
+        }
+    }
+
     /// Set up virtqueue `index` with up to `want` entries (legacy devices
-    /// dictate the size). None if the device has no such queue.
-    pub fn queue(&self, index: u16, want: u16) -> Option<Virtqueue> {
+    /// dictate the size), polled. None if the device has no such queue.
+    pub fn queue(&mut self, index: u16, want: u16) -> Option<Virtqueue> {
+        self.queue_with(index, want, false)
+    }
+
+    /// [`Device::queue`] with used-buffer interrupts through MSI-X when the
+    /// device has it (and `nomsi` is not given).
+    pub fn queue_irq(&mut self, index: u16, want: u16) -> Option<Virtqueue> {
+        self.queue_with(index, want, true)
+    }
+
+    fn queue_with(&mut self, index: u16, want: u16, irq: bool) -> Option<Virtqueue> {
         let pace = self.status_reg();
         match self.regs {
             Regs::Modern { notify, notify_mult, .. } => {
@@ -307,8 +417,9 @@ impl Device {
                 self.w64(QUEUE_DRIVER, q.avail_addr());
                 self.w64(QUEUE_DEVICE, q.used_addr());
                 let off = self.c16(QUEUE_NOTIFY_OFF) as usize * notify_mult as usize;
+                let ev = if irq { self.queue_vector() } else { None };
                 self.w16(QUEUE_ENABLE, 1);
-                Some(q.with_notify(Reg::Mmio(unsafe { notify.add(off) })))
+                Some(q.with_notify(Reg::Mmio(unsafe { notify.add(off) })).with_event(ev))
             }
             Regs::Legacy { io } => unsafe {
                 outw(io + L_QUEUE_SELECT, index);
@@ -321,7 +432,8 @@ impl Device {
                     return None;
                 }
                 outl(io + L_QUEUE_PFN, (q.desc_addr() >> 12) as u32);
-                Some(q)
+                let ev = if irq { self.queue_vector() } else { None };
+                Some(q.with_event(ev))
             },
         }
     }
@@ -361,7 +473,7 @@ impl Device {
             }
             Regs::Legacy { io } => {
                 for (i, x) in b.iter_mut().enumerate() {
-                    *x = unsafe { inb(io + L_CONFIG + (off + i) as u16) };
+                    *x = unsafe { inb(io + self.l_config() + (off + i) as u16) };
                 }
                 b
             }
@@ -398,7 +510,7 @@ impl Device {
                     unsafe { write_volatile(device.add(off), v) }
                 }
             }
-            Regs::Legacy { io } => unsafe { outb(io + L_CONFIG + off as u16, v) },
+            Regs::Legacy { io } => unsafe { outb(io + self.l_config() + off as u16, v) },
         }
     }
 }

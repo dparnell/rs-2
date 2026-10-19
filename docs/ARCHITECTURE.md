@@ -84,11 +84,37 @@ not preemptive: a thread runs until it blocks, yields or returns to user
 mode with its time slice used up, and SpinLocks disable interrupts, so a
 lock must never be held across a wait.
 
+**Interrupts.** The LAPIC timer drives the scheduler tick on every
+CPU; legacy ISA interrupts (keyboard, mouse, serial) go through the
+IOAPIC to vectors 0x20-0x2F; IPIs use 0xF0-0xF2. PCI INTx cannot be
+routed without ACPI's AML (_PRT), so PCI devices interrupt through MSI
+or MSI-X (`msi`): vectors 0x30-0xEF (except the API gate 0x99) are
+handed out with a handler and a context word, the message (address
+0xFEE00000 | APIC id << 12, data = vector, edge, fixed delivery) is
+written to the device's MSI capability or MSI-X table, and the trap
+dispatcher acknowledges the LAPIC and calls the handler. Messages stay
+off while the PCI bus is probed (the LAPIC is not set up yet) and are
+turned on, spread round robin over the online CPUs, once the other
+processors are running. Handlers run in interrupt context without the
+big kernel lock, use only spin locks (`try_lock` where a thread may hold
+the lock) and hand over through an `msi::Event` (a signal counter and a
+wait queue) or a kernel thread's inbox: a thread waiting for a disk
+request sleeps until the completion interrupt instead of polling and
+yielding, which also gives up the big kernel lock meanwhile. NVMe, AHCI,
+virtio (blk, scsi, input, console, rng, net), xHCI, e1000e (82574L),
+PVSCSI and LSI MPT use interrupts; the display queue of virtio-gpu and
+devices without MSI (the 8254x NICs) are polled, and so is everything
+with `nomsi` on the kernel command line or during boot, when drivers
+probe with interrupts still off. Idle CPUs halt and only look at the
+run queues when woken for a reason. `diskbench` on the kernel command
+line measures idle CPU time, the tick's own cost and disk throughput
+and latency.
+
 **Networking.** The TCP/IP stack is a host-tested `no_std` crate
 (`crates/tcpip`) that the kernel drives (`net`): NIC drivers implement a
-small `Nic` trait, the timer tick only checks for received frames and
-wakes the network kernel thread, which feeds the stack and runs its
-timers; socket calls run the stack in the calling thread and wait on one
+small `Nic` trait, a NIC's receive interrupt (or, for NICs without
+MSI, the timer tick) wakes the network kernel thread, which feeds the
+stack and runs its timers; socket calls run the stack in the calling thread and wait on one
 wait queue for stack events. rs2 programs use it through RS2API
 ordinals 200-219, OS/2 programs through rs2's TCPIP32/SO32DLL/TCP32DLL
 (user-mode DLLs over the same calls); see [NETWORK.md](NETWORK.md).

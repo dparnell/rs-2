@@ -40,6 +40,12 @@ impl WaitQueue {
         self.wait(None, false, ready);
     }
 
+    /// [`WaitQueue::wait_uninterruptible`] with a deadline (in ticks):
+    /// device I/O that a termination request must not abandon halfway.
+    pub fn wait_uninterruptible_until(&self, deadline: u64, ready: impl FnMut() -> bool) -> bool {
+        self.wait(Some(deadline), false, ready)
+    }
+
     fn wait(&self, deadline: Option<u64>, interruptible: bool, mut ready: impl FnMut() -> bool) -> bool {
         loop {
             let me = sched::current();

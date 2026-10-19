@@ -50,19 +50,19 @@ Status markers: done, in progress, planned.
 
 - done: PCI, AHCI (SATA disks, ATAPI drives), MBR/GPT, FAT, ISO 9660
 - done: boot from an installed disk (UEFI)
-- done: NVMe (polled)
-- done: USB: xHCI (polled), boot-protocol HID keyboard and mouse, hot-plug
+- done: NVMe (MSI-X/MSI completion interrupts, polled fallback)
+- done: USB: xHCI (MSI-X/MSI interrupter 0), boot-protocol HID keyboard and mouse, hot-plug
 - done: USB hubs (nested), USB mass storage (bulk-only), boot from a USB stick
 - done: USB storage hot-plug: a kernel thread mounts sticks connected after
   boot on the next free drive letters and unmounts them on removal
-- done: SCSI host adapters (polled): VMware PVSCSI, LSI Logic MPT Fusion
+- done: SCSI host adapters (MSI-X/MSI): VMware PVSCSI, LSI Logic MPT Fusion
   (53c1030, SAS1068); disks and CD/DVD drives
 - done: VMware guest support: backdoor (host time), absolute pointer
   (vmmouse) for PM and text-mode MOU, SVGA II mode setting (`video=WxH`,
   also through GOP); PCI device list in the boot log
 - planned: VirtualBox VMMDev (absolute pointer), SVGA run-time mode
   changes under PM and hardware cursor, testing on real VMware
-- done: virtio (polled): PCI transport, modern and legacy devices, split
+- done: virtio (MSI-X per queue): PCI transport, modern and legacy devices, split
   virtqueues; virtio-blk (read-only, block size, flush; booting from it),
   virtio-scsi (disks, CD-ROMs, unit attentions), virtio-input (keyboards,
   mice, tablets through an absolute pointer path for text mode and PM),
@@ -73,7 +73,8 @@ Status markers: done, in progress, planned.
 - planned: virtio-gpu hardware cursor, PM dirty rectangles instead of
   full-screen flushes, display hot-resize events (EDID), run-time mode
   changes under PM
-- done: networking (polled; docs/NETWORK.md): Intel e1000/e1000e
+- done: networking (docs/NETWORK.md; receive interrupts on e1000e and
+  virtio-net, the 8254x without MSI polled): Intel e1000/e1000e
   (8254x, 82574L) and virtio-net drivers; `crates/tcpip`, a host-tested
   stack (Ethernet, ARP, IPv4 with fragmentation and reassembly, ICMP,
   UDP, TCP with retransmission, congestion and window management, DHCP
@@ -90,14 +91,20 @@ Status markers: done, in progress, planned.
   (addsockettolist/removesocketfromlist, RS2API 220/221): IBM's INETD
   hands connections to the servers it starts
 - planned: route/arp and run-time configuration, INI files for
-  PMSHAPI, code page translation in TNLS32/TNLS16, NIC interrupts,
+  PMSHAPI, code page translation in TNLS32/TNLS16,
   vmxnet3/pcnet drivers, TCP keepalive/window scaling/SACK/urgent data
-- planned: NVMe/xHCI/virtio interrupts (MSI-X),
-  virtio-scsi hot-plug events, virtio-console multiport
+- planned: virtio-scsi hot-plug events, virtio-console multiport
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - done: SMP: all processors started (INIT/SIPI), per-CPU GDT/TSS/LAPIC
   timer, shared run queues, big kernel lock, IPI wake-ups and TLB shootdown
-- planned: MSI/MSI-X
+- done: MSI/MSI-X (`msi`): device vectors 0x30-0xEF spread over the
+  CPUs, per-vector masking, Event hand-off to sleeping threads; AHCI,
+  NVMe, virtio, xHCI, e1000e, PVSCSI and MPT converted; `nomsi` keeps
+  every driver polled; idle CPUs no longer take the run queue lock on
+  every tick
+- planned: several requests in flight per disk (the drivers still run
+  one command at a time), interrupt coalescing, per-CPU queues, INTx
+  routing through ACPI _PRT (AML) for devices without MSI
 - done: HPFS (read/write/format)
 - done: extended attributes on FAT12/16 (`EA DATA. SF`), FAT32
   (FAT32.IFS-style EA files) and HPFS, with the EA APIs, DosCopy/DosMove

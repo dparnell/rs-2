@@ -394,7 +394,7 @@ pub fn attach(mut dev: Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
         return out;
     }
     let name = alloc::format!("virtio-scsi {}", dev.name());
-    let Some(q) = dev.queue(REQUEST_QUEUE, 64) else {
+    let Some(q) = dev.queue_irq(REQUEST_QUEUE, 64) else {
         crate::println!("{name}: no request queue");
         dev.fail();
         return out;

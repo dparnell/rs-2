@@ -1,18 +1,23 @@
 //! AHCI (SATA) host controllers: ATA disks and ATAPI optical drives.
 //!
 //! One command at a time per port through slot 0; DMA goes through a
-//! physically contiguous bounce buffer. Completion is polled (yielding the
-//! CPU) until interrupts are routed through the IOAPIC.
+//! physically contiguous bounce buffer. With MSI the controller interrupts
+//! on command completion and errors: the handler clears and records each
+//! port's interrupt status and wakes the thread waiting on that port.
+//! Without MSI (or with `nomsi`, and during boot) completion is polled,
+//! yielding the CPU.
 
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ptr::{read_volatile, write_volatile};
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
 use super::pci;
 use crate::api::err;
 use crate::fs::block::BlockDev;
 use crate::mm::{mmio, phys};
+use crate::msi::{self, Event};
 use crate::sync::Mutex;
 
 const BOUNCE: usize = 64 * 1024;
@@ -31,6 +36,56 @@ struct PortState {
     fb: u64,
     ctba: u64,
     buf: u64,
+    /// Interrupt status and wake-up, with MSI.
+    irq: Option<&'static PortIrq>,
+}
+
+/// What the interrupt handler shares with a port.
+struct PortIrq {
+    regs: *mut u32,
+    /// PxIS bits the handler cleared since the command was issued.
+    status: AtomicU32,
+    event: Event,
+}
+
+/// The controller as the interrupt handler sees it.
+struct HbaIrq {
+    hba: *mut u32,
+    /// `&'static PortIrq` by port, 0 if none.
+    ports: [AtomicUsize; 32],
+}
+
+unsafe impl Sync for PortIrq {}
+unsafe impl Sync for HbaIrq {}
+
+/// Port interrupts handled: D2H register FIS, PIO setup, DMA setup, set
+/// device bits, descriptor processed, and the error causes (interface
+/// fatal and non-fatal, host bus data and fatal, task file error).
+const PXIE_MASK: u32 = 0xf | 1 << 5 | 1 << 26 | 0xf << 27;
+const TFES: u32 = 1 << 30;
+/// Longest wait for a command (spin-up, ATAPI media).
+const CMD_TIMEOUT_MS: u64 = 30_000;
+
+/// MSI handler: record and clear the interrupt status of every port that
+/// has some, wake its waiter, then acknowledge the controller.
+fn interrupt(ctx: usize) {
+    let h = unsafe { &*(ctx as *const HbaIrq) };
+    let is = rd(h.hba, 0x08 / 4);
+    for port in 0..32 {
+        if is & (1 << port) == 0 {
+            continue;
+        }
+        let p = h.ports[port].load(Ordering::Acquire);
+        if p == 0 {
+            continue;
+        }
+        let p = unsafe { &*(p as *const PortIrq) };
+        let s = rd(p.regs, PXIS);
+        wr(p.regs, PXIS, s);
+        p.status.fetch_or(s, Ordering::AcqRel);
+        p.event.signal();
+    }
+    wr(h.hba, 0x08 / 4, is);
 }
 
 unsafe impl Send for PortState {}
@@ -132,12 +187,18 @@ impl PortState {
             }
         }
         wr(p, PXIS, 0xffff_ffff);
+        if let Some(i) = self.irq {
+            i.status.store(0, Ordering::Release);
+        }
         if !spin_until(|| rd(p, PXTFD) & 0x88 == 0, 1_000_000) {
             return Err(err::NOT_READY);
         }
         wr(p, PXCI, 1);
-        let done = spin_until(|| rd(p, PXCI) & 1 == 0 || rd(p, PXIS) & (1 << 30) != 0, 50_000_000);
-        if !done || rd(p, PXIS) & (1 << 30) != 0 || rd(p, PXTFD) & 1 != 0 {
+        let done = match self.irq {
+            Some(i) => i.event.wait(CMD_TIMEOUT_MS, || {}, || rd(p, PXCI) & 1 == 0 || self.is() & TFES != 0),
+            None => spin_until(|| rd(p, PXCI) & 1 == 0 || rd(p, PXIS) & TFES != 0, 50_000_000),
+        };
+        if !done || self.is() & TFES != 0 || rd(p, PXTFD) & 1 != 0 {
             // Error: restart the port to clear it.
             self.stop();
             wr(p, PXSERR, 0xffff_ffff);
@@ -150,6 +211,11 @@ impl PortState {
 
     fn bounce(&self) -> *mut u8 {
         phys::phys_to_virt(self.buf)
+    }
+
+    /// Interrupt status: the register plus what the handler took.
+    fn is(&self) -> u32 {
+        rd(self.regs, PXIS) | self.irq.map_or(0, |i| i.status.load(Ordering::Acquire))
     }
 }
 
@@ -316,6 +382,16 @@ pub fn probe(dev: &pci::Device) -> Vec<Arc<Port>> {
     }
     wr(hba, 0x04 / 4, rd(hba, 0x04 / 4) | (1 << 31)); // GHC.AE
     let pi = rd(hba, 0x0c / 4);
+    // One MSI vector for all ports (INTx stays masked).
+    dev.set_intx_disabled(true);
+    let shared: &'static HbaIrq = alloc::boxed::Box::leak(alloc::boxed::Box::new(HbaIrq {
+        hba,
+        ports: [const { AtomicUsize::new(0) }; 32],
+    }));
+    let irq = msi::setup(dev, false, interrupt, shared as *const HbaIrq as usize);
+    if let Some((v, kind)) = irq {
+        crate::println!("ahci {}: {kind} vector {v:#x}", dev.bdf());
+    }
     for port in 0..32 {
         if pi & (1 << port) == 0 {
             continue;
@@ -333,7 +409,17 @@ pub fn probe(dev: &pci::Device) -> Vec<Arc<Port>> {
         // 1 KB list + 256 B FIS + 256 B table, then the bounce buffer.
         let pages = (4096 + BOUNCE) / 4096;
         let Some(mem) = phys::alloc_contig(pages as u64, 1 << 32) else { continue };
-        let st = PortState { regs, clb: mem, fb: mem + 1024, ctba: mem + 2048, buf: mem + 4096 };
+        let pirq = irq.map(|_| {
+            let p: &'static PortIrq = alloc::boxed::Box::leak(alloc::boxed::Box::new(PortIrq {
+                regs,
+                status: AtomicU32::new(0),
+                event: Event::new(),
+            }));
+            p.event.arm();
+            shared.ports[port].store(p as *const PortIrq as usize, Ordering::Release);
+            p
+        });
+        let st = PortState { regs, clb: mem, fb: mem + 1024, ctba: mem + 2048, buf: mem + 4096, irq: pirq };
         st.stop();
         wr(regs, PXCLB, st.clb as u32);
         wr(regs, PXCLBU, (st.clb >> 32) as u32);
@@ -341,7 +427,7 @@ pub fn probe(dev: &pci::Device) -> Vec<Arc<Port>> {
         wr(regs, PXFBU, (st.fb >> 32) as u32);
         wr(regs, PXSERR, 0xffff_ffff);
         wr(regs, PXIS, 0xffff_ffff);
-        wr(regs, PXIE, 0);
+        wr(regs, PXIE, if st.irq.is_some() { PXIE_MASK } else { 0 });
         st.start();
         let Some((model, sector_size, sectors)) = Port::identify(&st, kind) else { continue };
         crate::println!(
@@ -350,6 +436,10 @@ pub fn probe(dev: &pci::Device) -> Vec<Arc<Port>> {
             sectors * sector_size as u64 >> 20
         );
         out.push(Arc::new(Port { kind, model, sector_size, sectors, state: Mutex::new(st) }));
+    }
+    if irq.is_some() {
+        wr(hba, 0x08 / 4, 0xffff_ffff);
+        wr(hba, 0x04 / 4, rd(hba, 0x04 / 4) | 2); // GHC.IE
     }
     out
 }

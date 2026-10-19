@@ -68,6 +68,48 @@ impl Device {
         let cmd = self.read(0x04);
         self.write(0x04, (cmd & 0xffff) | 0x7);
     }
+
+    /// Mask or unmask the legacy INTx pin (command register bit 10).
+    pub fn set_intx_disabled(&self, off: bool) {
+        let cmd = self.read(0x04) & 0xffff;
+        self.write(0x04, if off { cmd | 1 << 10 } else { cmd & !(1 << 10) });
+    }
+
+    pub fn read16(&self, off: u8) -> u16 {
+        (self.read(off & !3) >> ((off & 2) * 8)) as u16
+    }
+
+    /// 16-bit configuration write (read-modify-write of the dword; the
+    /// other half must not have write-1-to-clear bits).
+    pub fn write16(&self, off: u8, v: u16) {
+        let shift = (off & 2) * 8;
+        let d = self.read(off & !3) & !(0xffff << shift);
+        self.write(off & !3, d | (v as u32) << shift);
+    }
+
+    /// Offset of capability `id` in configuration space, if present.
+    pub fn find_cap(&self, id: u8) -> Option<u8> {
+        if self.read(0x04) >> 16 & 0x10 == 0 {
+            return None;
+        }
+        let mut off = (self.read(0x34) & 0xfc) as u8;
+        for _ in 0..48 {
+            if off < 0x40 {
+                return None;
+            }
+            let v = self.read(off);
+            if v & 0xff == id as u32 {
+                return Some(off);
+            }
+            off = ((v >> 8) & 0xfc) as u8;
+        }
+        None
+    }
+
+    /// Bus:device.function, for messages.
+    pub fn bdf(&self) -> alloc::string::String {
+        alloc::format!("{:02x}:{:02x}.{}", self.bus, self.dev, self.func)
+    }
 }
 
 pub fn enumerate() -> Vec<Device> {

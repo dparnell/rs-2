@@ -10,10 +10,11 @@
 //! register makes the device look at new requests.
 //!
 //! One request is in flight at a time per controller; data goes through
-//! a physically contiguous bounce buffer, and completion is polled
-//! (yielding the CPU): rs2 does not route PCI interrupts yet. Targets
-//! 0-63 on bus 0 are scanned, LUN 0 of each; the units are handled by
-//! `scsi`.
+//! a physically contiguous bounce buffer. Completion interrupts through
+//! MSI-X entry 0 or MSI (completion ring causes enabled in INTR_MASK;
+//! the handler acknowledges INTR_STATUS and wakes the requester);
+//! without either it is polled, yielding the CPU. Targets 0-63 on bus 0
+//! are scanned, LUN 0 of each; the units are handled by `scsi`.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -24,6 +25,7 @@ use super::pci;
 use super::scsi::{self, Dir, Error, Hba};
 use crate::fs::block::BlockDev;
 use crate::mm::{mmio, phys};
+use crate::msi::{self, Event};
 use crate::sync::Mutex;
 
 const PAGE: usize = 4096;
@@ -39,9 +41,13 @@ const MAX_TARGETS: u8 = 64;
 const REG_COMMAND: usize = 0x0;
 const REG_COMMAND_DATA: usize = 0x4;
 const REG_COMMAND_STATUS: usize = 0x8;
+const REG_INTR_STATUS: usize = 0x100c;
 const REG_INTR_MASK: usize = 0x2010;
 const REG_KICK_NON_RW_IO: usize = 0x3014;
 const REG_KICK_RW_IO: usize = 0x4018;
+
+/// Completion ring interrupt causes (INTR_CMPL_0 | INTR_CMPL_1).
+const INTR_CMPL: u32 = 3;
 
 // Adapter commands.
 const CMD_ADAPTER_RESET: u32 = 1;
@@ -88,6 +94,24 @@ pub struct State {
     context: u64,
     /// A request timed out: the rings are out of step.
     failed: bool,
+    /// Signalled by the completion interrupt, if there is one.
+    irq: Option<&'static Irq>,
+}
+
+/// What the interrupt handler needs.
+struct Irq {
+    regs: *mut u8,
+    event: Event,
+}
+
+unsafe impl Sync for Irq {}
+
+/// Completion interrupt: acknowledge and wake the requester.
+fn interrupt(ctx: usize) {
+    let i = unsafe { &*(ctx as *const Irq) };
+    let s = rd32(i.regs, REG_INTR_STATUS);
+    wr32(i.regs, REG_INTR_STATUS, s);
+    i.event.signal();
 }
 
 unsafe impl Send for State {}
@@ -165,7 +189,12 @@ impl Hba for State {
         wr32(self.regs, if rw { REG_KICK_RW_IO } else { REG_KICK_NON_RW_IO }, 0);
         let (prod, cons) = (self.rs(RS_CMP_PROD), self.rs(RS_CMP_CONS));
         let cons_idx = unsafe { read_volatile(cons) };
-        if !scsi::wait(TIMEOUT_MS, || unsafe { read_volatile(prod) } != cons_idx) {
+        let done = || unsafe { read_volatile(prod) } != cons_idx;
+        let ok = match self.irq {
+            Some(i) => i.event.wait(TIMEOUT_MS, || {}, done),
+            None => scsi::wait(TIMEOUT_MS, done),
+        };
+        if !ok {
             crate::println!("pvscsi: command {:#x} to target {target} timed out", cdb[0]);
             self.failed = true;
             return Err(Error::Timeout);
@@ -226,8 +255,8 @@ pub(super) fn mem_bar(dev: &pci::Device) -> Option<u64> {
 pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     let mut out: Vec<(Arc<dyn BlockDev>, bool)> = Vec::new();
     dev.enable();
-    // Polled: mask legacy INTx.
-    dev.write(0x04, (dev.read(0x04) & 0xffff) | 1 << 10);
+    // Legacy INTx stays masked (MSI-X/MSI or polling).
+    dev.set_intx_disabled(true);
     let Some(bar) = mem_bar(dev) else {
         crate::println!("pvscsi: no register window");
         return out;
@@ -248,9 +277,16 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
         cmp_entries: (PAGE / CMP_SIZE) as u32,
         context: 0,
         failed: false,
+        irq: None,
     };
     st.adapter_command(CMD_ADAPTER_RESET, &[]);
     wr32(regs, REG_INTR_MASK, 0);
+    let irq: &'static Irq = alloc::boxed::Box::leak(alloc::boxed::Box::new(Irq { regs, event: Event::new() }));
+    if let Some((v, kind)) = msi::setup(dev, true, interrupt, irq as *const Irq as usize) {
+        irq.event.arm();
+        st.irq = Some(irq);
+        crate::println!("pvscsi {}: {kind} vector {v:#x}", dev.bdf());
+    }
     // SETUP_RINGS: page counts, rings state PPN, request and completion
     // ring PPNs (32 slots each).
     let mut d = Vec::with_capacity(4 + 4 * SETUP_RINGS_MAX_PAGES);
@@ -275,6 +311,10 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     }
     if (1..=7).contains(&cl) {
         st.cmp_entries = 1 << cl;
+    }
+    if st.irq.is_some() {
+        wr32(regs, REG_INTR_STATUS, u32::MAX);
+        wr32(regs, REG_INTR_MASK, INTR_CMPL);
     }
     let hba = Arc::new(Mutex::new(st));
     for target in 0..MAX_TARGETS {

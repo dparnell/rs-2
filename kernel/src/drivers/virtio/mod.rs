@@ -7,14 +7,16 @@
 //! host (`scsi`), input (`input`: keyboards, mice and tablets), entropy
 //! (`rng`), console (`console`), display (`gpu`, 2D) and network (`net`).
 //!
-//! There are no interrupts yet (no MSI-X, and PCI INTx cannot be routed
-//! without ACPI _PRT): INTx is masked, the used rings are polled. Block and
-//! SCSI requests are waited for by the requesting thread, yielding the
-//! CPU; input and console receive queues are polled from the timer tick
-//! ([`tick`]), which only uses spin locks with `try_lock`. Queues keep
-//! their interrupt suppressed (VIRTQ_AVAIL_F_NO_INTERRUPT); adding MSI-X
-//! means assigning vectors in `pci` and waking the waiters from the
-//! handler instead of polling.
+//! Interrupts come through MSI-X (PCI INTx cannot be routed without ACPI
+//! _PRT and stays masked): queues set up with `queue_irq` get a vector
+//! whose handler signals the queue's [`Event`](crate::msi::Event). Block,
+//! SCSI, entropy and console requests sleep on it; the input and console
+//! receive queues and the network receive queue run their consumer from
+//! the handler (a hook that only uses `try_lock`). Without MSI-X (or with
+//! `nomsi`) used rings are polled as before: requests by the requesting
+//! thread, yielding the CPU, receive queues from the timer tick
+//! ([`tick`]), which then also catches a hook that found its lock busy.
+//! The display (`gpu`) is always polled: it flushes from the timer tick.
 
 pub mod blk;
 pub mod console;
@@ -57,6 +59,24 @@ pub const TYPE_INPUT: u32 = 18;
 
 /// Polling interval of the input and console queues, in timer ticks.
 const POLL_TICKS: u64 = 4;
+/// With interrupts, a slow poll still starts the input devices and is
+/// the safety net.
+const SLOW_POLL_TICKS: u64 = 100;
+
+/// An input or console receive queue has no interrupt: poll it.
+static POLLED: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+/// An interrupt hook found its lock taken: poll at the next tick.
+static RETRY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// A receive queue without an interrupt was set up.
+pub(crate) fn needs_polling() {
+    POLLED.store(true, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// A hook could not get its lock: retry from the tick.
+pub(crate) fn retry() {
+    RETRY.store(true, core::sync::atomic::Ordering::Relaxed);
+}
 
 /// The device type of a virtio PCI function, if it is one: modern IDs are
 /// 0x1040 + type, transitional ones (0x1000-0x103f) carry the type in the
@@ -126,7 +146,9 @@ pub fn probe(devs: &[bus::Device]) -> Found {
 
 /// Periodic work from the timer interrupt: input events and console input.
 pub fn tick() {
-    if crate::irq::ticks() % POLL_TICKS != 0 {
+    use core::sync::atomic::Ordering::Relaxed;
+    let every = if POLLED.load(Relaxed) { POLL_TICKS } else { SLOW_POLL_TICKS };
+    if crate::irq::ticks() % every != 0 && !RETRY.swap(false, Relaxed) {
         return;
     }
     input::poll();
@@ -136,24 +158,6 @@ pub fn tick() {
 /// Poll `cond` for up to `ms` milliseconds, yielding the CPU. Before the
 /// timer runs (during boot) time is estimated from the polls, each of
 /// which includes `pace`, an uncached device register read.
-pub fn wait(ms: u64, mut pace: impl FnMut(), mut cond: impl FnMut() -> bool) -> bool {
-    let t0 = crate::irq::ticks();
-    let limit = ms * crate::irq::HZ / 1000;
-    let mut polls = 0u64;
-    loop {
-        if cond() {
-            return true;
-        }
-        pace();
-        polls += 1;
-        let now = crate::irq::ticks();
-        let expired = if now != t0 { now - t0 > limit } else { polls > ms * 1000 };
-        if expired {
-            return cond();
-        }
-        if polls > 100 {
-            crate::task::sched::yield_now();
-        }
-        core::hint::spin_loop();
-    }
+pub fn wait(ms: u64, pace: impl FnMut(), cond: impl FnMut() -> bool) -> bool {
+    crate::msi::poll(ms, pace, cond)
 }

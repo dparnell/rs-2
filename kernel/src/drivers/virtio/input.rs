@@ -1,8 +1,8 @@
 //! virtio-input: keyboards, mice and tablets (absolute pointing devices).
 //!
 //! The device sends Linux evdev events (type, code, value) on its event
-//! queue, which is kept full of 8-byte buffers and polled from the timer
-//! tick. Key events become set-1 scancodes for `kbd::scancode`, as USB
+//! queue, which is kept full of 8-byte buffers and drained from its
+//! MSI-X interrupt (polled from the timer tick without one). Key events become set-1 scancodes for `kbd::scancode`, as USB
 //! keyboards do; relative motion goes to `mouse::motion` and absolute
 //! positions (tablets: exact pointer placement in a VM, without grabbing
 //! the host mouse) to `mouse::motion_abs`, scaled by the axis ranges the
@@ -311,7 +311,7 @@ pub fn attach(mut dev: Device) {
         Kind::Other
     };
     let range = if kind == Kind::Tablet { [abs_range(&dev, ABS_X as u8), abs_range(&dev, ABS_Y as u8)] } else { [(0, 0x7fff); 2] };
-    let Some(mut q) = dev.queue(0, EVENTS) else {
+    let Some(mut q) = dev.queue_irq(0, EVENTS) else {
         crate::println!("virtio-input {}: no event queue", dev.name());
         dev.fail();
         return;
@@ -322,6 +322,10 @@ pub fn attach(mut dev: Device) {
     };
     for i in 0..q.size() as usize {
         let _ = q.add(&[Buf::into(mem.addr(i * 8), 8)]);
+    }
+    match q.event() {
+        Some(e) => e.set_hook(poll),
+        None => super::needs_polling(),
     }
     match kind {
         Kind::Tablet => crate::println!(
@@ -360,7 +364,10 @@ pub fn attach(mut dev: Device) {
 pub fn poll() {
     let mut acts = Actions { v: [Action::Scancode(0); 64], n: 0 };
     {
-        let Some(mut devs) = DEVS.try_lock() else { return };
+        let Some(mut devs) = DEVS.try_lock() else {
+            super::retry();
+            return;
+        };
         if devs.is_empty() {
             return;
         }

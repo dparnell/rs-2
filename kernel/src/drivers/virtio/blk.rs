@@ -171,7 +171,7 @@ pub fn attach(mut dev: Device) -> Vec<Arc<dyn BlockDev>> {
     if dev.negotiate(F_SIZE_MAX | F_SEG_MAX | F_RO | F_BLK_SIZE | F_FLUSH).is_none() {
         return out;
     }
-    let Some(q) = dev.queue(0, 64) else {
+    let Some(q) = dev.queue_irq(0, 64) else {
         crate::println!("virtio-blk {}: no request queue", dev.name());
         dev.fail();
         return out;

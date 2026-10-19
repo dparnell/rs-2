@@ -5,7 +5,9 @@
 //! layout (descriptors, available ring, then the used ring at the next
 //! 4 KB boundary), which suits both transports. Buffers are chained
 //! descriptors; neither indirect descriptors nor event indices are
-//! negotiated, and the device is asked not to interrupt.
+//! negotiated. A queue with an MSI-X vector ([`Virtqueue::with_event`])
+//! lets the device interrupt when it returns buffers; the others ask it
+//! not to (VIRTQ_AVAIL_F_NO_INTERRUPT) and are polled.
 
 use alloc::vec::Vec;
 use core::ptr::{read_volatile, write_volatile};
@@ -92,6 +94,8 @@ pub struct Virtqueue {
     notify: Reg,
     /// A register read between polls (see `virtio::wait`).
     pace: Reg,
+    /// Signalled by the queue's interrupt, if it has one.
+    event: Option<&'static crate::msi::Event>,
 }
 
 unsafe impl Send for Virtqueue {}
@@ -116,6 +120,7 @@ impl Virtqueue {
             last_used: 0,
             notify,
             pace,
+            event: None,
         };
         unsafe { write_volatile(q.ptr(avail_off) as *mut u16, AVAIL_NO_INTERRUPT) };
         Some(q)
@@ -124,6 +129,26 @@ impl Virtqueue {
     pub fn with_notify(mut self, notify: Reg) -> Virtqueue {
         self.notify = notify;
         self
+    }
+
+    /// Interrupt on used buffers through `event` (None: stay polled).
+    pub fn with_event(mut self, event: Option<&'static crate::msi::Event>) -> Virtqueue {
+        if event.is_some() {
+            self.event = event;
+            self.set_interrupts(true);
+        }
+        self
+    }
+
+    pub fn event(&self) -> Option<&'static crate::msi::Event> {
+        self.event
+    }
+
+    /// Ask the device for used-buffer interrupts or not (a queue that is
+    /// only reclaimed lazily, like transmit, does not need them).
+    pub fn set_interrupts(&mut self, on: bool) {
+        let v = if on && self.event.is_some() { 0 } else { AVAIL_NO_INTERRUPT };
+        unsafe { write_volatile(self.ptr(self.avail_off) as *mut u16, v) };
     }
 
     pub fn size(&self) -> u16 {
@@ -242,21 +267,23 @@ impl Virtqueue {
         let head = self.add(bufs)?;
         self.kick();
         let pace = self.pace;
+        let event = self.event;
         let mut got = None;
-        let done = super::wait(
-            ms,
-            || {
-                pace.read8();
-            },
-            || {
-                while let Some(u) = self.pop() {
-                    if u.head == head {
-                        got = Some(u.len);
-                    }
+        let pace = || {
+            pace.read8();
+        };
+        let mut cond = || {
+            while let Some(u) = self.pop() {
+                if u.head == head {
+                    got = Some(u.len);
                 }
-                got.is_some()
-            },
-        );
+            }
+            got.is_some()
+        };
+        let done = match event {
+            Some(e) => e.wait(ms, pace, &mut cond),
+            None => super::wait(ms, pace, &mut cond),
+        };
         if !done {
             return None;
         }
