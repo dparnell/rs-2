@@ -6,6 +6,10 @@
 //!                  [--hdd IMG] [--nvme IMG] [--usb-kbd] [--usb-mouse] [--usb-disk IMG]...
 //!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
 //!                  [--vmware] [--pvscsi IMG] [--pvscsi-cd ISO] [--scsi-hba MODEL]
+//!                  [--virtio-disk IMG]... [--virtio-scsi IMG]... [--virtio-cd ISO]...
+//!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
+//!                  [--virtio-rng] [--virtio-console PATH]
+//!                  [--virtio-legacy] [--boot-virtio]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
@@ -26,6 +30,15 @@
 //! `--pvscsi-cd` attach a disk image / CD image to a VMware PVSCSI
 //! controller (`--scsi-hba lsi53c895a|mptsas1068|megasas` picks another
 //! SCSI controller model instead).
+//! The virtio options attach paravirtual devices: `--virtio-disk` a
+//! virtio-blk disk (repeatable), `--virtio-scsi`/`--virtio-cd` disks and
+//! CD-ROMs on one virtio-scsi controller, `--virtio-input` a keyboard, a
+//! mouse and a tablet (or one of them with `--virtio-kbd`,
+//! `--virtio-mouse`, `--virtio-tablet`), `--virtio-rng` an entropy source,
+//! `--virtio-console PATH` a console whose output goes to file PATH, or,
+//! if the FIFOs PATH.in and PATH.out exist, connected to them. `--virtio-legacy` makes the block, SCSI, entropy
+//! and console devices legacy-only (virtio 0.9.5). `--boot-virtio` boots
+//! from the first virtio disk (no ESP directory).
 
 mod hpfsimg;
 mod image;
@@ -85,6 +98,17 @@ struct Opts {
     pvscsi: Option<PathBuf>,
     pvscsi_cd: Option<PathBuf>,
     scsi_hba: Option<String>,
+    /// `run`: virtio devices (see the module documentation).
+    virtio_disks: Vec<PathBuf>,
+    virtio_scsi: Vec<PathBuf>,
+    virtio_cds: Vec<PathBuf>,
+    virtio_kbd: bool,
+    virtio_mouse: bool,
+    virtio_tablet: bool,
+    virtio_rng: bool,
+    virtio_console: Option<PathBuf>,
+    virtio_legacy: bool,
+    boot_virtio: bool,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -116,6 +140,16 @@ fn parse(args: &[String]) -> Opts {
         pvscsi: None,
         pvscsi_cd: None,
         scsi_hba: None,
+        virtio_disks: vec![],
+        virtio_scsi: vec![],
+        virtio_cds: vec![],
+        virtio_kbd: false,
+        virtio_mouse: false,
+        virtio_tablet: false,
+        virtio_rng: false,
+        virtio_console: None,
+        virtio_legacy: false,
+        boot_virtio: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -155,6 +189,29 @@ fn parse(args: &[String]) -> Opts {
                 i += 1;
                 o.usb_disks.push(PathBuf::from(&args[i]));
             }
+            "--virtio-disk" => {
+                i += 1;
+                o.virtio_disks.push(PathBuf::from(&args[i]));
+            }
+            "--virtio-scsi" => {
+                i += 1;
+                o.virtio_scsi.push(PathBuf::from(&args[i]));
+            }
+            "--virtio-cd" => {
+                i += 1;
+                o.virtio_cds.push(PathBuf::from(&args[i]));
+            }
+            "--virtio-input" => (o.virtio_kbd, o.virtio_mouse, o.virtio_tablet) = (true, true, true),
+            "--virtio-kbd" => o.virtio_kbd = true,
+            "--virtio-mouse" => o.virtio_mouse = true,
+            "--virtio-tablet" => o.virtio_tablet = true,
+            "--virtio-rng" => o.virtio_rng = true,
+            "--virtio-console" => {
+                i += 1;
+                o.virtio_console = Some(PathBuf::from(&args[i]));
+            }
+            "--virtio-legacy" => o.virtio_legacy = true,
+            "--boot-virtio" => o.boot_virtio = true,
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
@@ -419,12 +476,55 @@ fn usb_devices(o: &Opts, c: &mut Command) {
     }
 }
 
+/// The virtio devices.
+fn virtio_devices(o: &Opts, c: &mut Command) {
+    // Legacy-only (0.9.5) devices for the transport's legacy path.
+    let legacy = if o.virtio_legacy { ",disable-modern=on,disable-legacy=off" } else { "" };
+    for (n, d) in o.virtio_disks.iter().enumerate() {
+        let boot = if n == 0 && o.boot_virtio { ",bootindex=0" } else { "" };
+        c.arg("-drive").arg(format!("file={},if=none,id=vd{n},format=raw", d.display()));
+        c.arg("-device").arg(format!("virtio-blk-pci,drive=vd{n},id=vblk{n}{boot}{legacy}"));
+    }
+    if !o.virtio_scsi.is_empty() || !o.virtio_cds.is_empty() {
+        c.arg("-device").arg(format!("virtio-scsi-pci,id=vscsi{legacy}"));
+        for (n, d) in o.virtio_scsi.iter().enumerate() {
+            c.arg("-drive").arg(format!("file={},if=none,id=vs{n},format=raw", d.display()));
+            c.arg("-device").arg(format!("scsi-hd,bus=vscsi.0,drive=vs{n},id=vsdisk{n}"));
+        }
+        for (n, d) in o.virtio_cds.iter().enumerate() {
+            c.arg("-drive").arg(format!("file={},if=none,id=vc{n},format=raw,media=cdrom,readonly=on", d.display()));
+            c.arg("-device").arg(format!("scsi-cd,bus=vscsi.0,drive=vc{n},id=vscd{n}"));
+        }
+    }
+    // The keyboard last, so QEMU's sendkey goes to it.
+    if o.virtio_mouse {
+        c.args(["-device", "virtio-mouse-pci,id=vmouse"]);
+    }
+    if o.virtio_tablet {
+        c.args(["-device", "virtio-tablet-pci,id=vtablet"]);
+    }
+    if o.virtio_kbd {
+        c.args(["-device", "virtio-keyboard-pci,id=vkbd"]);
+    }
+    if o.virtio_rng {
+        c.arg("-device").arg(format!("virtio-rng-pci{legacy}"));
+    }
+    if let Some(out) = &o.virtio_console {
+        let fifos = Path::new(&format!("{}.in", out.display())).exists();
+        let backend = if fifos { "pipe" } else { "file" };
+        c.arg("-chardev").arg(format!("{backend},id=vcon,path={}", out.display()));
+        c.arg("-device").arg(format!("virtio-serial-pci{legacy}"));
+        c.args(["-device", "virtconsole,chardev=vcon"]);
+    }
+}
+
 fn run(o: &Opts) -> bool {
     let (code, vars) = ovmf();
     let work = root().join("work");
     let serial = work.join("serial.log");
     let sock = work.join("qemu-monitor.sock");
     let _ = std::fs::remove_file(&sock);
+    // QMP, for input events HMP cannot send (absolute pointer positions).
     let qmp_sock = work.join("qemu-qmp.sock");
     let _ = std::fs::remove_file(&qmp_sock);
     let mut c = Command::new("qemu-system-x86_64");
@@ -435,7 +535,15 @@ fn run(o: &Opts) -> bool {
         .arg(format!("if=pflash,format=raw,file={}", vars.display()))
         .args(match &o.iso {
             Some(iso) => vec!["-cdrom".to_string(), iso.display().to_string()],
-            None if o.boot_hdd => vec![],
+            None if o.boot_hdd || o.boot_virtio => vec![],
+            // A bootable virtio CD would come first in the firmware's boot
+            // order: give the ESP directory boot index 0.
+            None if !o.virtio_cds.is_empty() => vec![
+                "-drive".to_string(),
+                format!("if=none,id=esp,format=raw,file=fat:rw:{}", work.join("esp").display()),
+                "-device".to_string(),
+                "ide-hd,drive=esp,bootindex=0".to_string(),
+            ],
             None => vec!["-drive".to_string(), format!("format=raw,file=fat:rw:{}", work.join("esp").display())],
         })
         .arg("-monitor")
@@ -456,6 +564,7 @@ fn run(o: &Opts) -> bool {
     }
     usb_devices(o, &mut c);
     vmware_devices(o, &mut c);
+    virtio_devices(o, &mut c);
     // Last, so extra devices can refer to the controllers above.
     c.args(&o.qemu_extra);
     let mut child = c.spawn().expect("start qemu");
@@ -475,17 +584,13 @@ fn run(o: &Opts) -> bool {
                     std::thread::sleep(Duration::from_secs(1));
                     continue;
                 }
-                // Absolute pointer: {mouse_abs x y}, 0..=32767 across
-                // and down the screen (QMP input-send-event).
+                // Absolute pointer position: {mouse_abs x y}, 0..32767
+                // across the screen (tablets).
                 if let Some(xy) = key.strip_prefix("mouse_abs ") {
                     let v: Vec<&str> = xy.split_whitespace().collect();
                     let ev = |axis: &str, val: &str| format!(r#"{{"type":"abs","data":{{"axis":"{axis}","value":{val}}}}}"#);
-                    let cmd = format!(
-                        r#"{{"execute":"input-send-event","arguments":{{"events":[{},{}]}}}}"#,
-                        ev("x", v[0]),
-                        ev("y", v[1])
-                    );
-                    qmp(&qmp_sock, &cmd);
+                    let events = format!("[{},{}]", ev("x", v[0]), ev("y", v[1]));
+                    qmp(&qmp_sock, &format!(r#"{{"execute":"input-send-event","arguments":{{"events":{events}}}}}"#));
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }
@@ -548,7 +653,7 @@ fn run(o: &Opts) -> bool {
 /// QEMU key names for a string. "^X" is Ctrl+X, "{name}" a QEMU key name
 /// as is (e.g. {ctrl-esc}, {alt-esc}, {down}), "{sleep}" a one second pause,
 /// "{mouse_move dx dy}" / "{mouse_button n}" QEMU mouse commands,
-/// "{mouse_abs x y}" an absolute pointer position (0..=32767).
+/// "{mouse_abs x y}" an absolute pointer position (0..32767, via QMP).
 fn keys(s: &str) -> Vec<String> {
     let mut v = Vec::new();
     let mut ctrl = false;
@@ -609,6 +714,27 @@ fn keys(s: &str) -> Vec<String> {
     v
 }
 
+/// Run one QMP command (after the capabilities handshake).
+fn qmp(sock: &Path, cmd: &str) {
+    match std::os::unix::net::UnixStream::connect(sock) {
+        Ok(mut s) => {
+            let _ = s.set_read_timeout(Some(Duration::from_millis(500)));
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf);
+            let _ = writeln!(s, r#"{{"execute":"qmp_capabilities"}}"#);
+            let _ = s.read(&mut buf);
+            let _ = writeln!(s, "{cmd}");
+            if let Ok(n) = s.read(&mut buf) {
+                let reply = String::from_utf8_lossy(&buf[..n]);
+                if reply.contains("error") {
+                    eprintln!("qmp {cmd}: {reply}");
+                }
+            }
+        }
+        Err(e) => eprintln!("qmp: {e}"),
+    }
+}
+
 fn monitor(sock: &Path, cmd: &str) {
     match std::os::unix::net::UnixStream::connect(sock) {
         Ok(mut s) => {
@@ -633,27 +759,6 @@ fn monitor(sock: &Path, cmd: &str) {
             }
         }
         Err(e) => eprintln!("monitor: {e}"),
-    }
-}
-
-/// Send one QMP command (after the capabilities handshake).
-fn qmp(sock: &Path, cmd: &str) {
-    match std::os::unix::net::UnixStream::connect(sock) {
-        Ok(mut s) => {
-            let _ = s.set_read_timeout(Some(Duration::from_millis(500)));
-            let mut buf = [0u8; 4096];
-            let _ = s.read(&mut buf);
-            let _ = writeln!(s, r#"{{"execute":"qmp_capabilities"}}"#);
-            let _ = s.read(&mut buf);
-            let _ = writeln!(s, "{cmd}");
-            if let Ok(n) = s.read(&mut buf) {
-                let reply = String::from_utf8_lossy(&buf[..n]);
-                if reply.contains("error") {
-                    eprintln!("qmp {cmd}: {reply}");
-                }
-            }
-        }
-        Err(e) => eprintln!("qmp: {e}"),
     }
 }
 

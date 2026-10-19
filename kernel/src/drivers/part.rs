@@ -29,6 +29,10 @@ impl BlockDev for Partition {
         self.dev.usb_device()
     }
 
+    fn flush(&self) -> Result<(), u32> {
+        self.dev.flush()
+    }
+
     fn sector_count(&self) -> u64 {
         self.count
     }

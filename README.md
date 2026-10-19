@@ -15,6 +15,10 @@ programs unmodified, natively, on 64-bit PCs.
   absolute pointer (no mouse capture), PVSCSI and LSI Logic (MPT Fusion)
   SCSI disks and CD-ROMs, SVGA II resolutions (`video=WxH`); see
   [Virtual machines](#virtual-machines).
+- virtio devices for KVM/QEMU, Proxmox, UTM and cloud VMs: block and SCSI
+  disks (and booting from them), SCSI CD-ROMs, keyboards, mice and tablets
+  (absolute pointer), entropy (`\DEV\RANDOM$`) and console
+  (`\DEV\VIOCON$`).
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 

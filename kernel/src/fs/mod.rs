@@ -289,7 +289,7 @@ impl FileSystem for Unformatted {
 pub struct Dasd {
     pub drive: u8,
     pub dev: Arc<dyn block::BlockDev>,
-    pub pos: SpinLock<u64>,
+    pub pos: crate::sync::Mutex<u64>,
     pub locked: core::sync::atomic::AtomicBool,
     pub written: core::sync::atomic::AtomicBool,
 }
@@ -299,7 +299,7 @@ impl Dasd {
         Arc::new(Dasd {
             drive,
             dev,
-            pos: SpinLock::new(0),
+            pos: crate::sync::Mutex::new(0),
             locked: core::sync::atomic::AtomicBool::new(false),
             written: core::sync::atomic::AtomicBool::new(false),
         })
@@ -351,6 +351,10 @@ pub enum CharDev {
     Lpt(u8),
     Mouse,
     Pointer,
+    /// RANDOM$: the entropy source (virtio-rng, else RDRAND).
+    Random,
+    /// VIOCON$: port 0 of a virtio console.
+    VioCon,
 }
 
 impl CharDev {
@@ -360,6 +364,8 @@ impl CharDev {
             CharDev::Lpt(n) => alloc::format!("\\DEV\\LPT{}", n + 1),
             CharDev::Mouse => String::from("\\DEV\\MOUSE$"),
             CharDev::Pointer => String::from("\\DEV\\POINTER$"),
+            CharDev::Random => String::from("\\DEV\\RANDOM$"),
+            CharDev::VioCon => String::from("\\DEV\\VIOCON$"),
         }
     }
 }
@@ -380,6 +386,8 @@ pub fn device_name(path: &str) -> Option<Device> {
         "PRN" => Device::Char(CharDev::Lpt(0)),
         "MOUSE$" => Device::Char(CharDev::Mouse),
         "POINTER$" => Device::Char(CharDev::Pointer),
+        "RANDOM$" => Device::Char(CharDev::Random),
+        "VIOCON$" => Device::Char(CharDev::VioCon),
         b => match (b.strip_prefix("COM"), b.strip_prefix("LPT")) {
             (Some(n), _) if matches!(n, "1" | "2" | "3" | "4") => Device::Char(CharDev::Com(n.as_bytes()[0] - b'1')),
             (_, Some(n)) if matches!(n, "1" | "2" | "3") => Device::Char(CharDev::Lpt(n.as_bytes()[0] - b'1')),
@@ -413,7 +421,7 @@ pub mod mode {
 pub struct OpenFile {
     pub path: FullPath,
     pub file: Arc<dyn FsFile>,
-    pub pos: SpinLock<u64>,
+    pub pos: crate::sync::Mutex<u64>,
     /// Open mode (access, sharing, flags). Mutable by DosSetFHState.
     pub mode: AtomicU32,
     share_key: String,
@@ -468,7 +476,7 @@ impl OpenFile {
             }
             v.push((access, share));
         }
-        Ok(Arc::new(OpenFile { path, file, pos: SpinLock::new(0), mode: AtomicU32::new(open_mode), share_key: key }))
+        Ok(Arc::new(OpenFile { path, file, pos: crate::sync::Mutex::new(0), mode: AtomicU32::new(open_mode), share_key: key }))
     }
 
     pub fn access(&self) -> u32 {
@@ -520,6 +528,14 @@ impl Handle {
             if !crate::mouse::present() {
                 return Err(err::FILE_NOT_FOUND);
             }
+        }
+        let missing = match d {
+            Device::Char(CharDev::Random) => !crate::chardev::random_present(),
+            Device::Char(CharDev::VioCon) => !crate::drivers::virtio::console::present(),
+            _ => false,
+        };
+        if missing {
+            return Err(err::FILE_NOT_FOUND);
         }
         Ok(Handle::device(d))
     }

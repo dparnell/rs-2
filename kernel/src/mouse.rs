@@ -1,4 +1,5 @@
-//! Mouse: the PS/2 auxiliary device and USB mice feed motion here; it is
+//! Mouse: the PS/2 auxiliary device, USB and virtio mice feed motion here,
+//! tablets and hypervisor pointers absolute positions (`motion_abs`); it is
 //! turned into OS/2 mouse events (MOUEVENTINFO) for the foreground
 //! session and moves the text-mode pointer.
 
@@ -85,7 +86,7 @@ pub fn with<R>(sid: u32, f: impl FnOnce(&mut Session) -> R) -> R {
 
 pub fn present() -> bool {
     let ps2 = STATE.lock().ps2;
-    ps2 || crate::drivers::hid::mouse_present()
+    ps2 || crate::drivers::hid::mouse_present() || crate::drivers::virtio::input::pointer_present()
 }
 
 pub fn drop_session(sid: u32) {

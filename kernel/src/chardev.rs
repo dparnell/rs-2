@@ -1,5 +1,6 @@
 //! Character devices: the serial ports COM1-COM4 (16550 UARTs), the
-//! printer ports LPT1-LPT3 and CLOCK$.
+//! printer ports LPT1-LPT3, CLOCK$ and RANDOM$ (entropy from virtio-rng
+//! or RDRAND).
 //!
 //! COM ports receive on their interrupt (IRQ 4 for COM1/COM3, IRQ 3 for
 //! COM2/COM4) into a buffer and transmit polled. COM1 is also the
@@ -480,6 +481,53 @@ pub fn clock_write(b: &[u8]) -> Result<(), u32> {
     Ok(())
 }
 
+// ---- RANDOM$ ----
+
+fn has_rdrand() -> bool {
+    crate::arch::cpuid(1, 0).2 & (1 << 30) != 0
+}
+
+/// One RDRAND value (retried a few times while the DRNG is exhausted).
+fn rdrand() -> Option<u64> {
+    for _ in 0..10 {
+        let (v, ok): (u64, u8);
+        unsafe { core::arch::asm!("rdrand {0}", "setc {1}", out(reg) v, out(reg_byte) ok, options(nomem, nostack)) };
+        if ok != 0 {
+            return Some(v);
+        }
+    }
+    None
+}
+
+/// Whether RANDOM$ has a source: virtio-rng, or the CPU's RDRAND.
+pub fn random_present() -> bool {
+    crate::drivers::virtio::rng::present() || has_rdrand()
+}
+
+/// Kernel entropy: `buf` filled from virtio-rng, the rest from RDRAND.
+/// Returns how many bytes could be produced.
+pub fn random_fill(buf: &mut [u8]) -> usize {
+    let mut n = crate::drivers::virtio::rng::fill(buf);
+    if n < buf.len() && has_rdrand() {
+        while n < buf.len() {
+            let Some(v) = rdrand() else { break };
+            let b = v.to_le_bytes();
+            let k = (buf.len() - n).min(8);
+            buf[n..n + k].copy_from_slice(&b[..k]);
+            n += k;
+        }
+    }
+    n
+}
+
+/// DosRead from RANDOM$.
+pub fn random_read(len: usize) -> Vec<u8> {
+    let mut v = alloc::vec![0u8; len.min(64 * 1024)];
+    let n = random_fill(&mut v);
+    v.truncate(n);
+    v
+}
+
 // ---- Dispatch for file handles ----
 
 use crate::fs::CharDev;
@@ -488,6 +536,8 @@ use crate::fs::CharDev;
 pub fn read(d: CharDev, len: usize) -> Vec<u8> {
     match d {
         CharDev::Com(n) => com_read(n as usize, len),
+        CharDev::Random => random_read(len),
+        CharDev::VioCon => crate::drivers::virtio::console::read(len),
         _ => Vec::new(),
     }
 }
@@ -497,6 +547,8 @@ pub fn write(d: CharDev, data: &[u8]) -> usize {
     match d {
         CharDev::Com(n) => com_write(n as usize, data),
         CharDev::Lpt(n) => lpt_write(n as usize, data),
+        CharDev::VioCon => crate::drivers::virtio::console::write(data),
+        CharDev::Random => 0,
         _ => data.len(),
     }
 }

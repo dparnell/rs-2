@@ -58,9 +58,14 @@ pub fn build(files: &FileList, label: &str, min_mb: u64, fat_type: Option<fat::F
         .expect("format");
     let mut vol = fat::Volume::mount(disk).expect("mount");
     let ts = now();
-    for (src, dest) in files {
-        let data = std::fs::read(src).unwrap_or_else(|e| panic!("{}: {e}", src.display()));
+    for (i, (src, dest)) in files.iter().enumerate() {
         let dest = dest.replace('/', "\\").to_ascii_uppercase();
+        // A later entry for the same path wins (manifests overriding the
+        // system's own files).
+        if files[i + 1..].iter().any(|(_, d)| d.replace('/', "\\").eq_ignore_ascii_case(&dest)) {
+            continue;
+        }
+        let data = std::fs::read(src).unwrap_or_else(|e| panic!("{}: {e}", src.display()));
         // Create parent directories.
         let parts: Vec<&str> = dest.split('\\').filter(|s| !s.is_empty()).collect();
         let mut p = String::new();
@@ -107,9 +112,14 @@ pub fn disk(files: &FileList, label: &str, size_mb: u64, fat_type: Option<fat::F
         .expect("format");
     let mut vol = fat::Volume::mount(part).expect("mount");
     let ts = now();
-    for (src, dest) in files {
-        let data = std::fs::read(src).unwrap_or_else(|e| panic!("{}: {e}", src.display()));
+    for (i, (src, dest)) in files.iter().enumerate() {
         let dest = dest.replace('/', "\\").to_ascii_uppercase();
+        // A later entry for the same path wins (manifests overriding the
+        // system's own files).
+        if files[i + 1..].iter().any(|(_, d)| d.replace('/', "\\").eq_ignore_ascii_case(&dest)) {
+            continue;
+        }
+        let data = std::fs::read(src).unwrap_or_else(|e| panic!("{}: {e}", src.display()));
         let parts: Vec<&str> = dest.split('\\').filter(|s| !s.is_empty()).collect();
         let mut p = String::new();
         for d in &parts[..parts.len() - 1] {

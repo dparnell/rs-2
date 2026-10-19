@@ -297,10 +297,16 @@ pub fn dos_set_file_size_l(c: &mut Ctx) -> u32 {
 pub fn dos_reset_buffer(c: &mut Ctx) -> u32 {
     let hf = c.arg(0);
     if hf == 0xffff || hf == 0xffff_ffff {
-        return 0; // flush all
+        // Flush all: the disks' write caches.
+        crate::drivers::flush_disks();
+        return 0;
     }
     match get(c, hf) {
-        Some(Handle::File(f)) => f.file.flush().err().unwrap_or(0),
+        Some(Handle::File(f)) => {
+            let r = f.file.flush().err().unwrap_or(0);
+            crate::drivers::flush_disks();
+            r
+        }
         Some(_) => 0,
         None => err::INVALID_HANDLE,
     }

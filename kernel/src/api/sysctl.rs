@@ -264,6 +264,7 @@ pub fn dos_shutdown(c: &mut Ctx) -> u32 {
             n += 1;
         }
     }
+    crate::drivers::flush_disks();
     if r == 0 {
         SHUT_DOWN.store(true, Ordering::Relaxed);
         crate::println!("[DosShutdown: {} open files flushed, file systems stopped]", n);
