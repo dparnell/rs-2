@@ -13,6 +13,7 @@ extern crate alloc;
 pub mod bitmap;
 pub mod color;
 pub mod font;
+pub mod icon;
 pub mod math;
 pub mod pattern;
 mod ps;

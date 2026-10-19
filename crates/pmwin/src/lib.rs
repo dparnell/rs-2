@@ -11,6 +11,7 @@ pub mod controls;
 pub mod mle;
 mod queue;
 mod region;
+pub mod sysptr;
 mod tree;
 
 pub use gpi::{Point, Rect};
