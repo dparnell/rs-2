@@ -7,8 +7,11 @@
 //! [`RX_DESCS`] 2 KB buffers kept owned by the hardware and a transmit
 //! ring of [`TX_DESCS`] buffers frames are copied into. The MAC address
 //! comes from the receive address registers the hardware loads from its
-//! EEPROM at reset, or from the EEPROM itself. Interrupts stay masked:
-//! the network thread polls the descriptors' DD bits (see `net`).
+//! EEPROM at reset, or from the EEPROM itself. Adapters with an MSI
+//! capability (the 82574L; QEMU's 82540EM/82545EM have none) interrupt
+//! on received frames, receive overruns and link changes: the handler
+//! acknowledges ICR and wakes the network thread. The others stay masked
+//! and the timer tick polls the descriptors' DD bits (see `net`).
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -26,6 +29,7 @@ const CTRL: usize = 0x0000;
 const STATUS: usize = 0x0008;
 const EERD: usize = 0x0014;
 const ICR: usize = 0x00c0;
+const IMS: usize = 0x00d0;
 const IMC: usize = 0x00d8;
 const RCTL: usize = 0x0100;
 const TCTL: usize = 0x0400;
@@ -58,6 +62,9 @@ const RCTL_SECRC: u32 = 1 << 26;
 const TCTL_EN: u32 = 1 << 1;
 const TCTL_PSP: u32 = 1 << 3;
 const RAH_AV: u32 = 1 << 31;
+/// Interrupt causes: link status change, receive descriptor minimum
+/// threshold, receiver overrun, receive timer (frame received).
+const INT_CAUSES: u32 = 1 << 2 | 1 << 4 | 1 << 6 | 1 << 7;
 
 // Descriptor bits.
 const TX_EOP: u8 = 1;
@@ -142,6 +149,17 @@ pub struct E1000 {
     mac: [u8; 6],
     regs: Regs,
     rings: SpinLock<Rings>,
+    /// Receive interrupts through MSI.
+    irq: bool,
+}
+
+/// MSI handler: acknowledge the causes and wake the network thread. The
+/// context is the register window.
+fn interrupt(regs: usize) {
+    let r = Regs(regs as *mut u8);
+    let icr = r.r(ICR);
+    r.w(ICR, icr);
+    crate::net::kick();
 }
 
 fn delay_ms(ms: u64) {
@@ -249,7 +267,16 @@ pub fn probe(d: &pci::Device) {
     regs.w(TDT, 0);
     regs.w(TCTL, TCTL_EN | TCTL_PSP | 0x10 << 4 | 0x40 << 12);
     regs.w(TIPG, 10 | 8 << 10 | 6 << 20);
-    let nic = E1000 { name, mac, regs, rings: SpinLock::new(Rings { rx, rxbuf, rx_next: 0, tx, txbuf, tx_next: 0 }) };
+    let irq = match crate::msi::setup(d, false, interrupt, regs.0 as usize) {
+        Some((v, kind)) => {
+            crate::println!("{name}: {kind} vector {v:#x}");
+            let _ = regs.r(ICR);
+            regs.w(IMS, INT_CAUSES);
+            true
+        }
+        None => false,
+    };
+    let nic = E1000 { name, mac, regs, irq, rings: SpinLock::new(Rings { rx, rxbuf, rx_next: 0, tx, txbuf, tx_next: 0 }) };
     crate::net::register(Arc::new(nic));
 }
 
@@ -327,5 +354,9 @@ impl Nic for E1000 {
 
     fn rx_pending(&self) -> bool {
         self.rings.try_lock().is_some_and(|r| r.rx_status(r.rx_next) & DD != 0)
+    }
+
+    fn interrupt_driven(&self) -> bool {
+        self.irq
     }
 }
