@@ -120,6 +120,36 @@ pub fn set_allocator(a: &'static Allocator) {
     REPLACEMENT.store(a as *const Allocator as *mut Allocator, Ordering::Release);
 }
 
+/// Memory from the process's own heap even when the module's allocations
+/// go elsewhere (PMWIN allocates container records, which belong to the
+/// application, with it).
+///
+/// # Safety
+/// Free it with [`free_private`] and the same size.
+pub unsafe fn alloc_private(size: usize) -> *mut u8 {
+    if size >= LARGE {
+        let mut p: *mut u8 = null_mut();
+        let rc = unsafe { DosAllocMem(&mut p, size as u32, PAG_READ | PAG_WRITE | PAG_COMMIT) };
+        return if rc == 0 { p } else { null_mut() };
+    }
+    lock();
+    let p = unsafe { (*ptr::addr_of_mut!(HEAP)).alloc(size, 16) };
+    unlock();
+    p
+}
+
+/// # Safety
+/// `p` and `size` as from [`alloc_private`].
+pub unsafe fn free_private(p: *mut u8, size: usize) {
+    if size >= LARGE {
+        unsafe { DosFreeMem(p) };
+        return;
+    }
+    lock();
+    unsafe { (*ptr::addr_of_mut!(HEAP)).insert(p as usize, size.max(MIN).next_multiple_of(MIN)) };
+    unlock();
+}
+
 pub struct Os2Heap;
 
 unsafe impl GlobalAlloc for Os2Heap {
