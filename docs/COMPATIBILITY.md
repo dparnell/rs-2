@@ -87,7 +87,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | RC.EXE, RC16.EXE, RCPP.EXE | works | Usage text only. |
 | GENCAT.EXE, RPCGEN.EXE, FWDSTAMP.EXE | works | Usage text only. |
 | PACK.EXE, PACK2.EXE | partial | PACK.MSG is not on the media. |
-| WORMS.EXE (sample) | works | Mouse pointer and clicks through MOUCALLS (Exit by clicking). |
+| WORMS.EXE (sample) | works | Mouse pointer and clicks through MOUCALLS (Exit by clicking), also in a PM window (clicks reach it as cell positions). |
 | TIMER0.EXE (sample) | works | Reports that the TIMER0$ sample driver is missing. |
 | EAS.EXE (sample) | not tested | The EA editor sample is a Presentation Manager program. |
 
