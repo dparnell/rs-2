@@ -441,6 +441,9 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("tcp32dll", "OS2\\DLL\\TCP32DLL.DLL"),
         ("tcpipdll", "OS2\\DLL\\TCPIPDLL.DLL"),
         ("tnls16", "OS2\\DLL\\TNLS16.DLL"),
+        ("pmdrag", "OS2\\DLL\\PMDRAG.DLL"),
+        ("pmmerge", "OS2\\DLL\\PMMERGE.DLL"),
+        ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
     ];
 
 /// Programs marked as PM applications (WINDOWAPI).

@@ -1,0 +1,13 @@
+[package]
+name = "pmmerge-dll"
+description = "PMMERGE.DLL: the PMMERGE-only entry points programs import directly"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmmerge"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

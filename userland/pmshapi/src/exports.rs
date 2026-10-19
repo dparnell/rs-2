@@ -30,4 +30,6 @@ aligned! {
     __a_PrfWriteProfileData => crate::PrfWriteProfileData, 5;
     __a_PrfQueryProfile => crate::PrfQueryProfile, 2;
     __a_PrfReset => crate::PrfReset, 2;
+    __a_WinQueryTaskSizePos => crate::WinQueryTaskSizePos, 3;
+    __a_WinQueryTaskTitle => crate::WinQueryTaskTitle, 3;
 }

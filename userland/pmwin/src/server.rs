@@ -363,6 +363,14 @@ pub fn process_gone(p: u32) {
             *slot = None;
         }
     }
+    s.hooks.retain(|h| h.pid != p);
+    for slot in s.atoms.iter_mut().skip(1) {
+        if slot.as_ref().is_some_and(|t| t.pid == p) {
+            *slot = None;
+        }
+    }
+    crate::clip::process_gone(p, &queues);
+    let s = st();
     if s.server_pid == p {
         s.server_pid = 0;
         s.server_queue = 0;

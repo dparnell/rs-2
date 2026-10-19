@@ -51,6 +51,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "libuni-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "nettest"
 version = "0.1.0"
 dependencies = [
@@ -69,6 +76,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pmdrag-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "pmgpi-dll"
 version = "0.1.0"
 dependencies = [
@@ -77,6 +91,13 @@ dependencies = [
 
 [[package]]
 name = "pmhang"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "pmmerge-dll"
 version = "0.1.0"
 dependencies = [
  "os2",

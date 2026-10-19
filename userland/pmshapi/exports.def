@@ -9,3 +9,5 @@ PrfWriteProfileString=__a_PrfWriteProfileString @116
 PrfWriteProfileData=__a_PrfWriteProfileData @118
 PrfQueryProfile=__a_PrfQueryProfile @107
 PrfReset=__a_PrfReset @108
+WinQueryTaskSizePos=__a_WinQueryTaskSizePos @127
+WinQueryTaskTitle=__a_WinQueryTaskTitle @128

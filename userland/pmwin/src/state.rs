@@ -161,6 +161,20 @@ pub struct State {
     /// Milliseconds after which a queue that does not take its input is
     /// "not responding" (PM_HANGTIME).
     pub hang_ms: u32,
+    pub clip: crate::clip::Clipboard,
+    pub atoms: Vec<Option<crate::clip::AtomTable>>,
+    /// Hooks (WinSetHook).
+    pub hooks: Vec<Hook>,
+}
+
+/// A hook set with WinSetHook: for one queue (or all, 0), of one kind
+/// (HK_*), in a process.
+pub struct Hook {
+    pub queue: u32,
+    pub kind: u32,
+    pub pfn: u32,
+    pub hmod: u32,
+    pub pid: u32,
 }
 
 /// The state, if PM has been initialised in the system.
@@ -207,6 +221,9 @@ pub fn init(surface: Surface) {
         server_pid: 0,
         server_queue: 0,
         hang_ms: 2000,
+        clip: Default::default(),
+        atoms: Vec::new(),
+        hooks: Vec::new(),
     });
     unsafe { (*crate::shared::header()).state = Box::into_raw(s) as *mut u8 };
 }

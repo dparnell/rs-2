@@ -256,3 +256,77 @@ pub extern "C" fn PrfQueryProfile(_hab: u32, _prf: *mut u8) -> u32 {
 pub extern "C" fn PrfReset(_hab: u32, _prf: *const u8) -> u32 {
     0
 }
+
+// ---- Task (session) information ----
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.320"]
+    fn DosQueryModuleName(hmod: u32, cb: u32, buf: *mut u8) -> u32;
+}
+
+/// Screen size from PMWIN when the process uses PM (PMSHAPI is also
+/// loaded by text programs, which must not pull PMWIN in).
+fn screen_size() -> (i32, i32) {
+    let mut hmod = 0;
+    if unsafe { os2::DosQueryModuleHandle(b"PMWIN\0".as_ptr(), &mut hmod) } != 0 {
+        return (1024, 768);
+    }
+    let mut pfn = 0usize;
+    // WinQuerySysValue (PMWIN.829).
+    if unsafe { os2::DosQueryProcAddr(hmod, 829, core::ptr::null(), &mut pfn) } != 0 || pfn == 0 {
+        return (1024, 768);
+    }
+    let f: extern "C" fn(u32, i32) -> i32 = unsafe { core::mem::transmute(pfn) };
+    // HWND_DESKTOP, SV_CXSCREEN / SV_CYSCREEN.
+    (f(1, 20), f(1, 21))
+}
+
+static NEXT_POS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// WinQueryTaskSizePos(hab, idProcess, pswp): where the shell would put
+/// the program's main window (SWP: fl, cy, cx, y, x, hwndInsertBehind,
+/// hwnd, ulReserved1, ulReserved2); NO_ERROR.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryTaskSizePos(_hab: u32, _pid: u32, pswp: *mut u32) -> u32 {
+    if pswp.is_null() {
+        return 87;
+    }
+    let (w, h) = screen_size();
+    let n = NEXT_POS.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % 8;
+    let off = 32 + n as i32 * 24;
+    let (cx, cy) = (w * 3 / 5, h * 3 / 5);
+    let (x, y) = (off, (h / 3 - off / 2).max(0));
+    // SWP_SIZE | SWP_MOVE.
+    let v = [3u32, cy as u32, cx as u32, y as u32, x as u32, 0, 0, 0, 0];
+    for (i, x) in v.into_iter().enumerate() {
+        unsafe { pswp.add(i).write_unaligned(x) };
+    }
+    0
+}
+
+/// WinQueryTaskTitle(ulSession, pszTitle, cbTitle): the title of the
+/// caller's session: its program name.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryTaskTitle(_session: u32, buf: *mut u8, cb: u32) -> u32 {
+    if buf.is_null() || cb == 0 {
+        return 87;
+    }
+    let mut tib = core::ptr::null_mut();
+    let mut pib: *mut os2::Pib = core::ptr::null_mut();
+    unsafe { os2::DosGetInfoBlocks(&mut tib, &mut pib) };
+    let mut name = [0u8; 260];
+    let mut n = 0;
+    let hmod = if pib.is_null() { 0 } else { unsafe { (*pib).hmte } };
+    if hmod != 0 && unsafe { DosQueryModuleName(hmod, name.len() as u32, name.as_mut_ptr()) } == 0 {
+        n = name.iter().position(|&b| b == 0).unwrap_or(0);
+    }
+    let full = &name[..n];
+    let base = &full[full.iter().rposition(|&b| b == b'\\').map_or(0, |i| i + 1)..];
+    let base = &base[..base.iter().position(|&b| b == b'.').unwrap_or(base.len())];
+    let k = base.len().min(cb as usize - 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(base.as_ptr(), buf, k);
+        *buf.add(k) = 0;
+    }
+    0
+}

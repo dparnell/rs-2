@@ -99,6 +99,24 @@ pub fn new_bitmap(b: Bitmap) -> u32 {
     add(&mut objects().bitmaps, Bm { bm: b, selected: false }, HBM_BASE)
 }
 
+/// Take a bitmap of the calling process out of its objects (it goes to
+/// the clipboard); a bitmap selected into a PS stays.
+pub fn take_bitmap(h: u32) -> Option<Bitmap> {
+    if bm(h)?.selected {
+        return None;
+    }
+    remove(&mut objects().bitmaps, h, HBM_BASE).map(|b| b.bm)
+}
+
+/// Delete a bitmap of process `p` (unless selected).
+pub fn delete_bitmap_of(p: u32, h: u32) {
+    if let Some(o) = st().objects.get_mut(&p) {
+        if get(&mut o.bitmaps, h, HBM_BASE).is_some_and(|b| !b.selected) {
+            remove(&mut o.bitmaps, h, HBM_BASE);
+        }
+    }
+}
+
 /// Associate a PS with a device context.
 pub fn associate(hps: u32, hdc: u32) -> bool {
     let kind = match get(&mut objects().dcs, hdc, HDC_BASE) {

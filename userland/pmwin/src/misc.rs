@@ -287,3 +287,227 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
     win::WinDestroyWindow(dlg);
     r
 }
+
+// ---- Version, code pages and strings ----
+
+/// WinQueryVersion: PM 20.45 (OS/2 Warp 4.5x): major version in the low
+/// byte, minor in the next.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryVersion(_hab: u32) -> u32 {
+    20 | 45 << 8
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryCp(_hmq: u32) -> u32 {
+    850
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetCp(_hmq: u32, cp: u32) -> u32 {
+    (cp == 850 || cp == 437) as u32
+}
+
+/// WinQueryCpList(hab, ccpMax, prgcp): the code pages PM can use.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryCpList(_hab: u32, max: u32, list: *mut u32) -> u32 {
+    let cps = [850u32, 437];
+    if !list.is_null() {
+        for (i, cp) in cps.iter().take(max as usize).enumerate() {
+            unsafe { list.add(i).write_unaligned(*cp) };
+        }
+    }
+    cps.len() as u32
+}
+
+/// Upper case in code page 850.
+pub fn upper850(c: u8) -> u8 {
+    const PAIRS: [(u8, u8); 31] = [
+        (0x87, 0x80), (0x81, 0x9a), (0x82, 0x90), (0x83, 0xb6), (0x84, 0x8e), (0x85, 0xb7), (0x86, 0x8f), (0x88, 0xd2),
+        (0x89, 0xd3), (0x8a, 0xd4), (0x8b, 0xd8), (0x8c, 0xd7), (0x8d, 0xde), (0x91, 0x92), (0x93, 0xe2), (0x94, 0x99),
+        (0x95, 0xe3), (0x96, 0xea), (0x97, 0xeb), (0x9b, 0x9d), (0xa0, 0xb5), (0xa1, 0xd6), (0xa2, 0xe0), (0xa3, 0xe9),
+        (0xa4, 0xa5), (0xc6, 0xc7), (0xd0, 0xd1), (0xe4, 0xe5), (0xe7, 0xe8), (0xec, 0xed), (0x9c, 0x9c),
+    ];
+    if c.is_ascii_lowercase() {
+        return c.to_ascii_uppercase();
+    }
+    PAIRS.iter().find(|p| p.0 == c).map_or(c, |p| p.1)
+}
+
+/// WinUpper(hab, idcp, idcc, psz): upper-cases the string in place;
+/// returns its length.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinUpper(_hab: u32, _cp: u32, _cc: u32, psz: *mut u8) -> u32 {
+    if psz.is_null() {
+        return 0;
+    }
+    let mut n = 0;
+    loop {
+        let p = unsafe { psz.add(n) };
+        let c = unsafe { *p };
+        if c == 0 {
+            return n as u32;
+        }
+        unsafe { *p = upper850(c) };
+        n += 1;
+    }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinUpperChar(_hab: u32, _cp: u32, _cc: u32, c: u32) -> u32 {
+    if c > 0xff { c } else { upper850(c as u8) as u32 }
+}
+
+/// WinNextChar(hab, idcp, idcc, psz): single-byte code pages only.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinNextChar(_hab: u32, _cp: u32, _cc: u32, psz: *const u8) -> u32 {
+    if psz.is_null() || unsafe { *psz } == 0 { psz as u32 } else { psz as u32 + 1 }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinPrevChar(_hab: u32, _cp: u32, _cc: u32, start: *const u8, psz: *const u8) -> u32 {
+    if psz as u32 <= start as u32 { start as u32 } else { psz as u32 - 1 }
+}
+
+/// WinCompareStrings(hab, idcp, idcc, psz1, psz2, reserved): WCS_EQ 1,
+/// WCS_LT 2, WCS_GT 3 (case-insensitive).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinCompareStrings(_hab: u32, _cp: u32, _cc: u32, a: *const u8, b: *const u8, _r: u32) -> u32 {
+    if a.is_null() || b.is_null() {
+        return 0;
+    }
+    let (a, b) = (cstr(a), cstr(b));
+    let ka: Vec<u8> = a.iter().map(|&c| upper850(c)).collect();
+    let kb: Vec<u8> = b.iter().map(|&c| upper850(c)).collect();
+    match ka.cmp(&kb) {
+        core::cmp::Ordering::Equal => 1,
+        core::cmp::Ordering::Less => 2,
+        core::cmp::Ordering::Greater => 3,
+    }
+}
+
+// ---- Shutdown, window updates, owners ----
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinCancelShutdown(_hmq: u32, _always: u32) -> u32 {
+    1
+}
+
+/// WinEnableWindowUpdate(hwnd, fEnable): drawing is not held back, so
+/// turning updates on again only repaints the window.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinEnableWindowUpdate(h: u32, on: u32) -> u32 {
+    if !st().desk.exists(h) {
+        return 0;
+    }
+    if on != 0 {
+        st().desk.invalidate(h, None, true);
+    }
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinLockWindowUpdate(_desk: u32, _h: u32) -> u32 {
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinIsWindowShowing(h: u32) -> u32 {
+    st().desk.is_showing(h) as u32
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetOwner(h: u32, owner: u32) -> u32 {
+    match st().desk.get_mut(h) {
+        Some(w) => {
+            w.owner = owner;
+            1
+        }
+        None => 0,
+    }
+}
+
+/// WinQueryUpdateRect(hwnd, prcl): the bounds of the update region;
+/// FALSE when nothing needs painting.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryUpdateRect(h: u32, prcl: *mut crate::gpiapi::RectL) -> u32 {
+    let Some(w) = st().desk.get(h) else { return 0 };
+    let b = w.update.bounds();
+    if !prcl.is_null() {
+        unsafe { prcl.write_unaligned(crate::gpiapi::RectL::from(b)) };
+    }
+    (!w.update.is_empty()) as u32
+}
+
+/// WinInvertRect(hps, prcl)
+#[unsafe(no_mangle)]
+pub extern "C" fn WinInvertRect(hps: u32, prcl: *const crate::gpiapi::RectL) -> u32 {
+    if prcl.is_null() {
+        return 0;
+    }
+    let r = unsafe { prcl.read_unaligned() }.rect();
+    let s = st();
+    crate::gpiapi::refresh(s, hps);
+    let mut surface = s.surface;
+    crate::pointer::hide(s);
+    // DSTINVERT.
+    let ok = crate::gpiapi::entry(s, hps).map(|e| e.ps.blit(&mut surface, r, None, 0x55, false, None)).is_some();
+    crate::pointer::show(s);
+    ok as u32
+}
+
+/// WinGetScreenPS(hwndDesktop): a presentation space on the whole screen.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetScreenPS(_desk: u32) -> u32 {
+    let s = st();
+    let r = gpi::Rect::new(0, 0, s.surface.width, s.surface.height);
+    crate::gpiapi::create(s, 0, gpi::Point::new(0, 0), alloc::vec![r])
+}
+
+/// Pointers from resources are not drawn yet (the arrow stays): a handle
+/// that WinSetPointer accepts.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinLoadPointer(_desk: u32, _hmod: u32, id: u32) -> u32 {
+    0x7000_0000 | (id & 0xffff)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinDestroyPointer(_hptr: u32) -> u32 {
+    1
+}
+
+/// WinTrackRect(hwnd, hps, ptrackinfo): interactive rectangle tracking
+/// is not available; reported as cancelled.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinTrackRect(_h: u32, _hps: u32, _ti: u32) -> u32 {
+    0
+}
+
+// ---- Hooks ----
+
+/// WinSetHook(hab, hmq, iHook, pfnHook, hmod): hooks are recorded (the
+/// help hook, HK_HELP, is how programs see help requests; the help
+/// manager does not show help yet, so it is never called).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetHook(_hab: u32, hmq: u32, kind: u32, pfn: u32, hmod: u32) -> u32 {
+    if pfn == 0 {
+        return 0;
+    }
+    let s = st();
+    // HMQ_CURRENT (1) is the caller's queue.
+    let queue = if hmq == 1 { s.my_queue() } else { hmq };
+    let me = state::pid();
+    s.hooks.insert(0, state::Hook { queue, kind, pfn, hmod, pid: me });
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinReleaseHook(_hab: u32, hmq: u32, kind: u32, pfn: u32, _hmod: u32) -> u32 {
+    let s = st();
+    let queue = if hmq == 1 { s.my_queue() } else { hmq };
+    let me = state::pid();
+    let n = s.hooks.len();
+    if let Some(i) = s.hooks.iter().position(|h| h.queue == queue && h.kind == kind && h.pfn == pfn && h.pid == me) {
+        s.hooks.remove(i);
+    }
+    (s.hooks.len() != n) as u32
+}
