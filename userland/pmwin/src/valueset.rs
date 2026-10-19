@@ -139,8 +139,11 @@ fn paint(h: u32) {
                 } else if it.attr & VIA_TEXT != 0 {
                     let col_t = if it.attr & VIA_DISABLED != 0 { draw::GRAY_TEXT } else { draw::TEXT };
                     c.text_in(inner, &it.text, col_t, draw::DT_CENTER | draw::DT_VCENTER);
+                } else if it.attr & VIA_ICON != 0 && crate::pointer::get(it.value).is_some() {
+                    let small = inner.width().min(inner.height()) < crate::pointer::ICON;
+                    crate::pointer::draw_in(c, inner, it.value, small, it.attr & VIA_DISABLED != 0);
                 } else if it.attr & (VIA_ICON | VIA_BITMAP) != 0 && it.value != 0 {
-                    // Icons and bitmaps are not drawn yet: a framed square.
+                    // Bitmaps are not drawn yet: a framed square.
                     let s = inner.width().min(inner.height()) - 4;
                     let (mx, my) = (inner.left + inner.width() / 2, inner.bottom + inner.height() / 2);
                     let ir = Rect::new(mx - s / 2, my - s / 2, mx - s / 2 + s, my - s / 2 + s);

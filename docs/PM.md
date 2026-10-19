@@ -25,14 +25,15 @@ The logic lives in host-testable crates; the DLLs are thin:
 
 | Crate / DLL | Contents |
 |-------------|----------|
-| `crates/gpi` | Rendering engine: presentation-space attributes, lines, boxes, arcs, areas, text with bitmap fonts, bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
-| `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping; the MLE's text engine (`mle.rs`: layout with word wrap and tabs, editing, undo, import/export formats, search) and the arithmetic of spin buttons, sliders and value sets (`controls.rs`); the notebook's pages and geometry (`notebook.rs`). Plain data structures, unit-tested on the host. |
+| `crates/gpi` | Rendering engine (and `icon.rs`: the OS/2 pointer and icon formats, choosing an image for the display, AND/XOR masks, drawing): presentation-space attributes, lines, boxes, arcs, areas, text with bitmap fonts, bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
+| `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping; the MLE's text engine (`mle.rs`: layout with word wrap and tabs, editing, undo, import/export formats, search) and the arithmetic of spin buttons, sliders and value sets (`controls.rs`); the notebook's pages and geometry (`notebook.rs`); the container's layout for each view, hit testing, keyboard navigation, icon arrangement and selection rules (`container.rs`); where minimized frames go (`minimize.rs`); rs2's own system pointers and icons (`sysptr.rs`). Plain data structures, unit-tested on the host. |
 | `userland/pmwin` → PMWIN.DLL | Exports (`Win*`, `Gpi*`), the shared state and its heap, locking, messaging, the built-in window classes, and the PM server's code (input routing, hung programs, window list). |
 | `crates/viocell` | Text cells on pixels: renders VGA text cells (font, palette, blink, cursor, marked block) to 24-bit bitmaps; Copy/Copy All text and Paste keystrokes. Host-tested; for VIO windows now, AVIO later. |
 | `userland/pmviowin` → `C:\OS2\PMVIOWIN.EXE` | The windows of windowed VIO sessions (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)). |
 | `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000; 9001, `Rs2ShellPosition`, gives PMSHAPI's `WinQueryTaskSizePos` the shell's next cascade position; 9002, `Rs2PmVioWindow`, registers a VIO window's client). |
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
 | `userland/pmctls` → PMCTLS.DLL | The standard file and font dialogs (`WinFileDlg`, `WinFontDlg`): ordinary PM dialogs, built from templates made in memory, run through PMWIN like an application's. |
+| `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006). |
 | `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), HELPMGR stubs, PMDRAG (no drag is ever in progress), PMMERGE (the entry points programs import from it directly), LIBUNI (locale objects). |
 
 ## Kernel services (module RS2API)
@@ -157,6 +158,17 @@ process) hides it around each drawing operation, within one PMWIN call
 under the lock, never across application code, so a stopped program
 cannot leave it hidden. A program that hides the pointer with
 WinShowPointer and then stops responding gets it shown again.
+
+The pointer's shape is a pointer object (see [Pointers and
+icons](#pointers-and-icons)): uploaded to the hardware cursor when it
+changes (inverted pixels become black there), or drawn in software. When
+the pointer comes to another window the input thread sets the arrow;
+the window's `WM_MOUSEMOVE` processing may set another (`WinDefWindowProc`
+sets the arrow, entry fields and MLEs the text pointer, sizing borders
+the size pointers), so a window whose program does not respond shows
+the arrow. Mouse messages carry `KC_SHIFT`, `KC_CTRL` and `KC_ALT` in
+mp2's high word: the kernel puts the keyboard's shift state into each
+mouse event (`Rs2ReadInput`'s flags, high byte).
 
 ## Windowed VIO sessions (OS/2 Window)
 
@@ -310,7 +322,7 @@ mouse and keyboard. What PMWIN has:
   client: title bar (`WC_TITLEBAR`, moves the frame), system menu
   (`FID_SYSMENU`: Restore/Move/Size/Minimize/Maximize/Hide/Close/Window
   list, enabled to match the frame; double click closes), min/max
-  buttons (maximize and restore work, minimize and hide are inert), menu
+  buttons (see [Minimizing](#minimizing)), menu
   bar (`FCF_MENU`), frame scroll bars; sizing borders resize the frame.
   The frame passes `WM_COMMAND`, `WM_CONTROL`, scroll and menu
   notifications to its client.
@@ -332,7 +344,8 @@ mouse and keyboard. What PMWIN has:
 - Accelerators: tables of frames and of the queue are applied to WM_CHAR
   as the message loop takes it (`WinLoadAccelTable`,
   `WinCreateAccelTable`, `WinSetAccelTable`, `WinTranslateAccel`, ...),
-  plus the system keys F10, Alt+F4, Alt+Space and Shift+Esc; commands of
+  plus the system keys F10, Alt+F4, Alt+Space, Shift+Esc, Alt+F5,
+  Alt+F9, Alt+F10 and Alt+F11; commands of
   disabled menu items are not sent.
 - Dialogs: `WinLoadDlg`, `WinCreateDlg`, `WinProcessDlg` (modal loop,
   owner disabled; clicks on it bring up the dialog), `WinDlgBox`,
@@ -379,10 +392,9 @@ mouse and keyboard. What PMWIN has:
   `WinIntersectRect`, ...), `WinUpper` and the code page calls,
   `WinSetHook`/`WinReleaseHook` (hooks are recorded, not called).
 
-Not done for milestone 2: containers, presentation
-parameters (accepted and ignored), owner-drawn items, icons and
-pointers from resources, menu bitmaps, minimizing, help windows, drag
-and drop.
+Not done for milestone 2: presentation
+parameters (accepted and ignored), owner-drawn items, menu bitmaps,
+help windows, drag and drop.
 
 The OS/2 System Editor (E.EXE) runs unmodified: see
 [COMPATIBILITY.md](COMPATIBILITY.md#presentation-manager-programs).
@@ -486,7 +498,7 @@ what can be tested on the host is in `crates/pmwin`.
   arm position in increments or pels, shaft and arm dimensions, tick
   positions) and `SLN_*`.
 - `WC_VALUESET`: rows x columns of colour (RGB or index), text and icon
-  or bitmap items (icons and bitmaps are drawn as framed squares), item
+  or bitmap items (bitmaps are drawn as framed squares), item
   borders, disabled items; keyboard and mouse selection; `VM_*` and
   `VN_*`.
 - `WC_NOTEBOOK`: pages in major sections (`BKA_MAJOR`) with minor
@@ -519,6 +531,124 @@ what can be tested on the host is in `crates/pmwin`.
   `BKN_NEWPAGESIZE`, `BKN_PAGEDELETED`, `BKN_HELP`. Everything it
   paints lives in the shared state, so the PM server paints a hung
   program's notebook with the same code.
+- `WC_CONTAINER`: records are application memory, as on OS/2:
+  `CM_ALLOCRECORD` (RECORDCORE, or MINIRECORDCORE with
+  `CCS_MINIRECORDCORE`, plus the application's bytes) and
+  `CM_ALLOCDETAILFIELDINFO` take them from the application process's
+  own heap, linked by `preccNextRecord`/`pNextFieldInfo`, and emphasis
+  lives in each record's `flRecordAttr`. The control keeps only their
+  addresses and order (roots, tree children, the icon view's z-order,
+  the detail columns) in the shared state and reads the records only on
+  its own thread, which is in the application's process; the PM server
+  paints a plain placeholder for a container whose program hangs.
+  Views: icon (`ptlIcon` positions, text centred below the icon, wrapped;
+  `CCS_AUTOPOSITION` and `CM_ARRANGE` arrange rows from the top left),
+  name and text (`CV_FLOW` fills columns), detail (`FIELDINFO` columns:
+  strings, ULONG, `CDATE`, `CTIME`, icons; widths from `cxWidth` or the
+  content; headings with `CA_DETAILSVIEWTITLES`; `CFA_SEPARATOR`,
+  `CFA_HORZSEPARATOR`, alignment; the split bar is drawn after
+  `pFieldInfoLast` but both sides scroll together) and tree (indent,
+  expand/collapse buttons, `CA_TREELINE`, text/name/icon variants);
+  `CV_MINI` for 16 x 16 icons; the container title with
+  `CA_CONTAINERTITLE`, separator and alignment. Emphasis: selected
+  (highlighted text, or row in the detail view), cursored (focus
+  rectangle), in-use (hatched), source and target (dotted frame),
+  disabled. Selection by the style: single, extended (click, Ctrl+click,
+  Shift+click and Shift+arrows) and multiple (clicks toggle); the
+  keyboard (arrows by geometry in every view, Home, End, PgUp, PgDn,
+  Space, Enter, Ctrl+/ and Ctrl+\, + and - and left/right in the tree,
+  Shift+F10, F1); scroll bars as needed (`CID_VSCROLL`/`CID_HSCROLL`).
+  A double click or Enter is `CN_ENTER`; button 2 is `CN_CONTEXTMENU`
+  (also `WM_CONTEXTMENU`), or, dragged over a record, `CN_INITDRAG`: if
+  the owner does not take the drag (returns 0) the icon view moves the
+  record, and the other selected ones, itself. Alt+click opens direct
+  editing (`CN_BEGINEDIT`, `CN_REALLOCPSZ`, `CN_ENDEDIT`; an entry
+  field with id `CID_MLE`, Enter keeps, Esc drops); `CM_OPENEDIT` and
+  `CM_CLOSEEDIT` too. Messages: `CM_ALLOCRECORD`, `CM_FREERECORD`,
+  `CM_INSERTRECORD`, `CM_INSERTRECORDARRAY` (order, parent, z-order),
+  `CM_REMOVERECORD` (`CMA_FREE`, `CMA_INVALIDATE`, all), `CM_QUERYRECORD`
+  (first, last, next, previous, parent, children; item or z-order),
+  `CM_QUERYRECORDEMPHASIS`, `CM_SETRECORDEMPHASIS`, `CM_SETCNRINFO`/
+  `CM_QUERYCNRINFO`, `CM_ARRANGE`, `CM_INVALIDATERECORD`,
+  `CM_ERASERECORD`, the FIELDINFO messages, `CM_SORTRECORD` (the
+  application's comparison runs without the PM lock; `pSortRecord` in
+  CNRINFO sorts too), `CM_QUERYRECORDRECT`, `CM_QUERYRECORDFROMRECT`,
+  `CM_QUERYVIEWPORTRECT`, `CM_SCROLLWINDOW`, `CM_SEARCHSTRING`,
+  `CM_EXPANDTREE`/`CM_COLLAPSETREE`, `CM_FILTER`; notifications
+  `CN_ENTER`, `CN_EMPHASIS` (for the user's changes), `CN_CONTEXTMENU`,
+  `CN_INITDRAG`, `CN_SETFOCUS`/`CN_KILLFOCUS`, `CN_SCROLL`,
+  `CN_EXPANDTREE`/`CN_COLLAPSETREE`, `CN_HELP` and the editing ones. Not
+  done: owner draw (`CA_OWNERDRAW`, `CRA_OWNERDRAW`), bitmaps instead of
+  icons (`CA_DRAWBITMAP`), separately scrolled split windows, the grid
+  (`CM_SETGRIDINFO` ...), `CM_MOVETREE`, drag and drop between
+  windows, rubber-band selection.
+
+## Pointers and icons
+
+Pointer and icon objects (`HPOINTER`) live in the shared state, so the
+PM server can draw any process's icons (a minimized frame of a program
+that hangs); a process's own go when it ends, system pointers belong to
+nobody. `WinLoadPointer` reads RT_POINTER resources and
+`WinLoadFileIcon` icon files and EAs in the OS/2 pointer format
+(`gpi::icon`): one image or a `BA` array of them, monochrome (`IC`,
+`PT`) or colour (`CI`, `CP`, an AND/XOR mask bitmap followed by the
+colour bitmap), 1.x or 2.x headers, any bit count the bitmap code reads.
+From an array PMWIN takes the 32 x 32 image (for `SV_CXICON` 32) with
+the most colours made for any display or this one, else the nearest
+larger one, scaled, and the 16 x 16 one for the mini icon (else the big
+one scaled down). `WinCreatePointer` (a mask bitmap) and
+`WinCreatePointerIndirect` (POINTERINFO) make pointers from the
+caller's bitmaps, `WinQueryPointerInfo` gives the caller new bitmaps
+back, `WinDestroyPointer`, `WinSetPointerOwner`. `WinDrawPointer`
+draws with `DP_NORMAL`, `DP_MINI`, `DP_HALFTONED` and `DP_INVERTED`.
+`WinQuerySysPointer` (with fLoad: a copy) returns rs2's own drawings
+(`pmwin::sysptr`, nothing copied from IBM's): the arrow, text, wait,
+move/size and the four sizing pointers, the application icon, the
+information, question, error and warning icons, illegal, file, folder,
+multiple files and program. `WinSetPointer`/`WinQueryPointer` set and
+query the mouse pointer's shape. `WinQuerySysPointerData` and
+`WinSetSysPointerData` are not supported.
+
+Statics with `SS_ICON` (a resource id) and `SS_SYSICON` (an `SPTR_*`) show
+their icon and take its size; `WinMessageBox` shows the system icon of
+`MB_ICONQUESTION`, `MB_ICONEXCLAMATION`, `MB_ICONASTERISK` and
+`MB_ICONHAND` left of its text; value sets draw `VIA_ICON` items. A
+frame loads its icon with `FCF_ICON` (the frame's resource id), takes
+another with `WM_SETICON` (`WM_QUERYICON` returns it) and shows the
+mini icon on its system menu button.
+
+**File icons** (PMWP.DLL): `WinLoadFileIcon` returns the file's `.ICON`
+extended attribute, else for an executable (`.EXE`, `.DLL`) its
+`RT_DEFAULTICON`, else `RT_POINTER` 1, else its first `RT_POINTER`
+resource (read from the file with `os2_exe::res`, without loading it),
+else rs2's folder, program or file icon; the file is read with the PM
+lock released. `WinSetFileIcon` writes the `.ICON` EA from an icon file
+(`ICON_FILE`), a resource (`ICON_RESOURCE`) or data (`ICON_DATA`), and
+`ICON_CLEAR` removes it; `WinFreeFileIcon`.
+
+## Minimizing
+
+Minimizing a frame (its minimize button, the system menu, Alt+F9,
+`WinSetWindowPos` with `SWP_MINIMIZE`) sends it
+`WM_MINMAXFRAME` with the new position, hides its controls and client
+and, as in classic PM, turns it into an icon with its title below at
+the bottom of the desktop, in the first free place of rows from the
+bottom left (or where it was last minimized; `pmwin::minimize`). The
+frame gets `WS_MINIMIZED` (`WinQueryWindowPos` reports `SWP_MINIMIZE`),
+goes to the bottom of the z-order and passes the activation on. The icon
+is the frame's icon or rs2's application icon; a click activates it,
+dragging moves it, a double click, Enter, Restore in the system menu,
+Alt+F5, `SWP_RESTORE` or Switch to in the window list restore it (with
+`WM_MINMAXFRAME`, maximized again if it was). Hide in the system menu
+hides the frame. For programs that do not respond the PM server does
+the same: their min button minimizes, a double click on the icon
+restores, the icon is painted from the shared state.
+
+A desktop shell can take minimized windows over: `Rs2SetMinimizeViewer
+(hwnd)` (PMWIN private ordinal 9003; 0 goes back to desktop icons,
+returns the previous viewer) makes minimizing hide the frame instead,
+and the viewer gets `WM_RS2_MINWINDOW` (0x0ff8; mp1 = the frame, mp2 = 1
+minimized, 0 restored); restoring works as before.
 
 ## The clipboard
 
@@ -614,6 +744,18 @@ The export trampolines pass their index to the lock's entry
   registered format, also read and replaced by a second process: it
   runs itself with `CHILD`), printing PASS/FAIL and `ctltest done: N
   failure(s)`.
+- `RS2\SHELLTST.EXE` (userland/shelltest): self-checks of what a desktop
+  shell needs: system pointers, pointer info and bitmaps, creating,
+  copying and destroying pointers, the pointer's shape, file icons
+  (programs, directories, the `.ICON` EA set and cleared with
+  `WinSetFileIcon`), frame icons, minimize and restore (`WM_MINMAXFRAME`,
+  positions, styles, the minimized window viewer) and the container
+  (allocating, inserting, querying, emphasis, notifications from keys,
+  sorting with an application comparison, searching, detail columns,
+  the tree, removing and freeing), printing PASS/FAIL and `shelltest
+  done: N failure(s)`, then a window with a container of icons and the
+  system icons drawn normal, mini and halftoned (`SHELLTST QUIT` ends
+  at once).
 - `RS2\NBTEST.EXE` (userland/nbtest): notebook self-checks (pages,
   texts, page data and info, page windows and a page dialog from a
   template, notifications, keys, clicks, sizes, deleting) printing

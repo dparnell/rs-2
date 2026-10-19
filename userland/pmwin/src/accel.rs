@@ -1,7 +1,8 @@
 //! Accelerator tables. The message loop translates WM_CHAR messages as it
 //! takes them off the queue: the tables of the frames containing the
 //! focus window, then the queue's table, then the system keys (F10 menu,
-//! Alt+F4 close, Alt+Space / Shift+Esc system menu).
+//! Alt+F4 close, Alt+Space / Shift+Esc system menu, Alt+F5/F9/F10/F11
+//! restore, minimize, maximize, hide).
 
 #![allow(non_snake_case)]
 
@@ -22,11 +23,16 @@ const AF_ALT: u16 = 0x0020;
 const AF_SYSCOMMAND: u16 = 0x0100;
 const AF_HELP: u16 = 0x0200;
 
-const SYSTEM: [Accel; 4] = [
+const SYSTEM: [Accel; 8] = [
     Accel { fs: AF_VIRTUALKEY | AF_SYSCOMMAND, key: ctl::VK_F10 as u16, cmd: SC_APPMENU as u16 },
     Accel { fs: AF_VIRTUALKEY | AF_ALT | AF_SYSCOMMAND, key: 0x23, cmd: SC_CLOSE as u16 },
     Accel { fs: AF_VIRTUALKEY | AF_ALT | AF_SYSCOMMAND, key: ctl::VK_SPACE as u16, cmd: SC_SYSMENU as u16 },
     Accel { fs: AF_VIRTUALKEY | AF_SHIFT | AF_SYSCOMMAND, key: ctl::VK_ESC as u16, cmd: SC_SYSMENU as u16 },
+    // Alt+F5 restore, Alt+F9 minimize, Alt+F10 maximize, Alt+F11 hide.
+    Accel { fs: AF_VIRTUALKEY | AF_ALT | AF_SYSCOMMAND, key: 0x24, cmd: frame::SC_RESTORE as u16 },
+    Accel { fs: AF_VIRTUALKEY | AF_ALT | AF_SYSCOMMAND, key: 0x28, cmd: frame::SC_MINIMIZE as u16 },
+    Accel { fs: AF_VIRTUALKEY | AF_ALT | AF_SYSCOMMAND, key: 0x29, cmd: frame::SC_MAXIMIZE as u16 },
+    Accel { fs: AF_VIRTUALKEY | AF_ALT | AF_SYSCOMMAND, key: 0x2a, cmd: frame::SC_HIDE as u16 },
 ];
 
 fn table(h: u32) -> Option<&'static Vec<Accel>> {
