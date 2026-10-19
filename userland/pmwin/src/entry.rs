@@ -84,8 +84,9 @@ fn reveal(h: u32) {
     let old = e.first;
     if e.cursor < e.first {
         e.first = e.cursor;
-    } else if e.cursor > e.first + cols - 1 {
-        e.first = e.cursor + 1 - cols;
+    } else if e.cursor > e.first + cols {
+        // The caret may sit just after the last column.
+        e.first = e.cursor - cols;
     }
     if e.first != old {
         ctl::notify(h, EN_SCROLL);
@@ -271,7 +272,7 @@ fn paint(h: u32) {
             }
         }
         if focus && cursor >= first {
-            let x = x0 + (cursor - first) as i32 * f.width;
+            let x = (x0 + (cursor - first) as i32 * f.width).min(area.right - 1);
             let cr = Rect::new(x, y - f.descender, x + 1, y - f.descender + f.height).intersect(&area);
             c.fill(cr, draw::TEXT);
         }

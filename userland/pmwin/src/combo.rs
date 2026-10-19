@@ -335,7 +335,9 @@ pub extern "C" fn combo_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             }
             0
         }
-        WM_QUERYDLGCODE => 0,
+        // Its entry field takes typing (the dialog selects its text when
+        // it gets the focus).
+        WM_QUERYDLGCODE => DLGC_ENTRYFIELD,
         WM_ENABLE => {
             ctl::invalidate(h);
             0

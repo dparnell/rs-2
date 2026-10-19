@@ -46,6 +46,9 @@ fn objects() -> &'static mut Objects {
 const HRGN_BASE: u32 = 0x1000_0001;
 const HBM_BASE: u32 = 0x2000_0001;
 const HDC_BASE: u32 = 0x3000_0001;
+/// The screen device of windows' cached presentation spaces
+/// (GpiQueryDevice of a WinGetPS PS): DevQueryCaps answers for it.
+pub const SCREEN_DC: u32 = 0x3000_0000;
 const HPAL_BASE: u32 = 0x4000_0001;
 
 fn add<T>(v: &mut Vec<Option<T>>, x: T, base: u32) -> u32 {
@@ -621,7 +624,7 @@ fn caps(i: i32) -> i32 {
 /// DevQueryCaps(hdc, lStart, lCount, alArray)
 #[unsafe(no_mangle)]
 pub extern "C" fn DevQueryCaps(hdc: u32, start: i32, n: i32, out: *mut i32) -> u32 {
-    if get(&mut objects().dcs, hdc, HDC_BASE).is_none() || out.is_null() || start < 0 || n < 0 {
+    if (hdc != SCREEN_DC && get(&mut objects().dcs, hdc, HDC_BASE).is_none()) || out.is_null() || start < 0 || n < 0 {
         return 0;
     }
     for i in 0..n {

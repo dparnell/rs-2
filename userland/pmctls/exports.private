@@ -1,0 +1,4 @@
+; rs2-private PMCTLS entry points (name ordinal)
+Rs2FontSampleProc 9000
+Rs2FileDlgProc 9001
+Rs2FontDlgProc 9002

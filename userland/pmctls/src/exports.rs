@@ -20,9 +20,12 @@ macro_rules! aligned {
 }
 
 aligned! {
-    __a_WinFileDlg => crate::WinFileDlg, 3;
-    __a_WinDefFileDlgProc => crate::WinDefFileDlgProc, 4;
-    __a_WinFreeFileDlgList => crate::WinFreeFileDlgList, 1;
-    __a_WinFontDlg => crate::WinFontDlg, 3;
-    __a_WinDefFontDlgProc => crate::WinDefFontDlgProc, 4;
+    __a_Rs2FileDlgProc => crate::filedlg::Rs2FileDlgProc, 4;
+    __a_WinDefFileDlgProc => crate::filedlg::WinDefFileDlgProc, 4;
+    __a_WinFileDlg => crate::filedlg::WinFileDlg, 3;
+    __a_WinFreeFileDlgList => crate::filedlg::WinFreeFileDlgList, 1;
+    __a_Rs2FontSampleProc => crate::fontdlg::Rs2FontSampleProc, 4;
+    __a_Rs2FontDlgProc => crate::fontdlg::Rs2FontDlgProc, 4;
+    __a_WinDefFontDlgProc => crate::fontdlg::WinDefFontDlgProc, 4;
+    __a_WinFontDlg => crate::fontdlg::WinFontDlg, 3;
 }
