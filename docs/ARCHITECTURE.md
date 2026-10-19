@@ -90,7 +90,8 @@ small `Nic` trait, the timer tick only checks for received frames and
 wakes the network kernel thread, which feeds the stack and runs its
 timers; socket calls run the stack in the calling thread and wait on one
 wait queue for stack events. rs2 programs use it through RS2API
-ordinals 200-217; see [NETWORK.md](NETWORK.md).
+ordinals 200-219, OS/2 programs through rs2's TCPIP32/SO32DLL/TCP32DLL
+(user-mode DLLs over the same calls); see [NETWORK.md](NETWORK.md).
 
 ## Boot
 

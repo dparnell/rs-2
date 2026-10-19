@@ -80,9 +80,16 @@ Status markers: done, in progress, planned.
   client, DNS resolver, loopback); kernel socket layer (per-process
   handles, blocking and non-blocking calls, select) exposed as RS2API
   200-217; NETTEST and PING; `net=`/NETWORK= configuration
-- planned: OS/2 socket DLLs on it (SO32DLL, TCP32DLL, TCPIP32, the
-  16-bit SOCKETS/TCPIPDLL), ifconfig/netstat/route, NIC interrupts,
-  vmxnet3/pcnet drivers, TCP keepalive/window scaling/SACK
+- done: OS/2 socket DLLs (TCPIP32, SO32DLL, TCP32DLL, with TNLS32 and
+  a profile-only PMSHAPI): sockets, select, ioctls, resolver (res_*,
+  PTR), network database from %ETC%; IBM FTP, TELNET, RXSOCK and the
+  Toolkit socket and RPC samples run; so_cancel and the socket list
+  (RS2API 218/219); IFCONFIG, NETSTAT, HOSTNAME, HOST
+- planned: the 16-bit TCPIPDLL (and a TNLS16 or PMWIN's 16-bit entries)
+  for TFTP/INETD/LPD/TELNETD, sockets shared between processes,
+  route/arp and run-time configuration, INI files for PMSHAPI, NIC
+  interrupts, vmxnet3/pcnet drivers, TCP keepalive/window
+  scaling/SACK/urgent data
 - planned: NVMe/xHCI/virtio interrupts (MSI-X),
   virtio-scsi hot-plug events, virtio-console multiport
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing

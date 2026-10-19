@@ -335,10 +335,12 @@ pub unsafe fn setsockopt(s: i32, level: i32, opt: i32, val: *const u8, len: i32)
     }
     match unsafe { Rs2SockSetOpt(s as u32, level as u32, opt as u32, val, len.clamp(0, 64) as u32) } {
         0 => 0,
-        // IP-level options the stack does not have (TTL, TOS,
-        // multicast) are accepted and ignored, as programs set them
-        // in passing.
-        e if e == ENOPROTOOPT && level == 0 => 0,
+        // Options the stack does not have but programs set in passing
+        // are accepted and ignored: IP-level ones (TTL, TOS, multicast),
+        // SO_DEBUG, SO_USELOOPBACK, SO_L_BROADCAST, TCP_MAXSEG.
+        e if e == ENOPROTOOPT && (level == 0 || level == 0xffff && matches!(opt, 0x1 | 0x40 | 0x200) || level == 6 && opt == 2) => 0,
+        // SO_REUSEPORT: the stack's SO_REUSEADDR.
+        e if e == ENOPROTOOPT && level == 0xffff && opt == 0x1000 => unsafe { setsockopt(s, level, 0x4, val, len) },
         e => fail(e),
     }
 }

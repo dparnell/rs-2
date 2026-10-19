@@ -2,7 +2,8 @@
 
 Text-mode (VIO) programs from OS/2 Warp 4.52 and the OS/2 Toolkit 4.5,
 run unmodified under rs2 in QEMU. Programs that need Presentation Manager
-DLLs (PMWIN, PMGPI, PMSHAPI, ...) are out of scope here.
+DLLs (PMWIN, PMGPI, PMSHAPI, ...) are out of scope here, except where a
+text-mode program only reads profiles (TELNET).
 
 The test setup is the development C: drive built from `work/modules.txt`:
 IBM `CMD.EXE` as the shell, the programs under `C:\IBM` and `C:\TK`, the
@@ -24,7 +25,7 @@ Status: **works** = the tested function behaves as on OS/2;
 | CMD.EXE (IBM) | works | Interactive use, internal commands, pipes, redirection, `SET`, batch files (`FOR`, `IF`, `IF ERRORLEVEL`, `GOTO`, `SETLOCAL`/`ENDLOCAL`, `DETACH`), `DATE`/`TIME` set the clock, REXX `.CMD` files. |
 | CMD.EXE (rs2) | works | Runs REXX `.CMD` files through REXX.DLL when it is installed, and the IBM utilities. |
 | REXX (REXX.DLL, REXXAPI.DLL, REXXINIT.DLL) | works | `.CMD` files starting with `/* */` run through CMD. Tested: arithmetic, procedures/recursion, `PARSE`, `PULL` from the keyboard, the external data queue (`QUEUE`/`PUSH`/`PULL`/`QUEUED`), stream I/O (`LINEOUT`, `LINEIN`, `LINES`, `STREAM`), commands sent to CMD (`'dir'`, `rc`), `INTERPRET`, `SIGNAL ON SYNTAX`, `TIME('E')`, `RANDOM`, `VALUE(..., 'OS2ENVIRONMENT')`, error reports (`REX0040: Error 40 running ...`). A file with bare LF line ends gives REX0013, which is REXX's own behaviour. |
-| REXXUTIL.DLL | partial | `SysLoadFuncs` works; tested `SysCls`, `SysCurPos`, `SysTextScreenRead`, `SysTextScreenSize`, `SysSleep`, `SysGetKey`, `SysFileTree`, `SysFileDelete`, `SysMkDir`, `SysRmDir`, `SysDriveMap`, `SysTempFileName`, `SysBootDrive`, `SysVersion`, `SysOS2Ver`, `SysSearchPath`, `SysPutEA`, `SysGetEA` (on FAT16, FAT32 and HPFS). `SysIni` fails (needs PMSHAPI/PMWIN). |
+| REXXUTIL.DLL | partial | `SysLoadFuncs` works; tested `SysCls`, `SysCurPos`, `SysTextScreenRead`, `SysTextScreenSize`, `SysSleep`, `SysGetKey`, `SysFileTree`, `SysFileDelete`, `SysMkDir`, `SysRmDir`, `SysDriveMap`, `SysTempFileName`, `SysBootDrive`, `SysVersion`, `SysOS2Ver`, `SysSearchPath`, `SysPutEA`, `SysGetEA` (on FAT16, FAT32 and HPFS). `SysIni` needs PMSHAPI's profiles, which rs2 keeps in memory only (no INI files). |
 | REXXTRY.CMD | works | With an expression on the command line and interactively. |
 | RXQUEUE.EXE | works | `dir \| rxqueue`, then the queue read from another REXX process. |
 | RXSUBCOM.EXE | works | Usage text only. |
@@ -88,6 +89,31 @@ Status: **works** = the tested function behaves as on OS/2;
 | WORMS.EXE (sample) | works | Mouse pointer and clicks through MOUCALLS (Exit by clicking). |
 | TIMER0.EXE (sample) | works | Reports that the TIMER0$ sample driver is missing. |
 | EAS.EXE (sample) | not tested | The EA editor sample is a Presentation Manager program. |
+
+## Network programs
+
+On rs2's TCPIP32/SO32DLL/TCP32DLL/TNLS32/PMSHAPI DLLs (see
+[NETWORK.md](NETWORK.md#the-os2-socket-api)), QEMU user networking
+(`--net` e1000 or `--virtio-net`, also `--smp 4`), the host at 10.0.2.2
+running a test FTP/line/echo server. The TCP/IP 4.x applications come
+from `cid/server/tcpapps/install/base` on the client CD; MPTN's own
+programs (IBM's PING, NETSTAT, IFCONFIG, HOST, the stack DLLs) are not
+on the media, so rs2's own utilities take their place.
+
+| Program | Status | Notes |
+|---------|--------|-------|
+| FTP.EXE | works | Login, `dir`, `get` (ASCII and binary, 300 KB), `put` (byte-identical on the host), `quit`; active-mode data connections (PORT, Raccept/Rbind/Rlisten). Sending runs at ~270 KB/s, receiving ~2-3 MB/s under TCG. |
+| TELNET.EXE | works | Connects, shows the remote side (TNLS32 16-bit character conversion into its VT emulator), sends typed lines, ends when the host closes. Needed KbdSetStatus to accept binary mode with echo when switching from ASCII, and PMSHAPI for its profile reads. |
+| FINGER.EXE | partial | Runs; names resolve through DNS (10.0.2.3); no finger server was reachable to test the exchange. |
+| RXSOCK.DLL (REXX) | works | SockInit, SockGetHostId, SockGetHostByName/ByAddr, SockSocket, SockConnect, SockSend/Recv (TCP echo through the host), SockGetPeerName, SockBind, SockSendTo/RecvFrom (UDP), SockSoClose. |
+| PORTMAP.EXE, RPCINFO.EXE (with RPC32DLL.DLL) | works | `rpcinfo -p localhost` lists the registered programs (SO32DLL/TCP32DLL). |
+| Toolkit tcps/tcpc, udpc, selects | works | TCP client/server, BSD `select()` server with TCP and UDP clients. |
+| Toolkit accept/recv | works | `accept_and_recv()`; the client connects to INADDR_ANY. |
+| Toolkit os2ioctl | works | SIOSTATCNTRT/SIOSTATRT routing table, SIOCSSYN. |
+| Toolkit rawex, geneserv/genesend | works | Sun RPC over UDP through the portmapper. |
+| Toolkit rgs/rgc (rpcgen) | fails | `svcudp_create - cannot getsockname` inside IBM's RPC32DLL; not investigated. |
+| Toolkit echos/echoc (HPS) | fails | Need `sysctl()` memory-mapped I/O (OS2_MEMMAPIO), which rs2 does not have. |
+| TFTP.EXE, INETD.EXE, LPD.EXE, TELNETD.EXE, BOOTP.EXE | fails | 16-bit: need TCPIPDLL.DLL (not written yet) and IBM's TNLS16.DLL, which imports PMWIN's 16-bit entry points. |
 
 ## Messages and national language support
 
@@ -178,6 +204,10 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   hardware ID). COM1 also carries the kernel log.
 
 ## Fixed while getting these to run
+
+- KbdSetStatus rejected binary mode with echo on in one call; OS/2
+  judges the echo bit by the mode the call starts from (IBM TELNET sets
+  binary, echo and shift reports together).
 
 - Loader: DLL objects whose preferred base is below the shared arena (the
   linker default 0x10000 of application DLLs) are relocated into the

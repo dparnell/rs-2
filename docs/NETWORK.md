@@ -1,14 +1,16 @@
 # rs2 networking
 
 rs2 has its own TCP/IP stack in the kernel, network drivers for the
-adapters virtual machines provide, and a kernel socket interface that
-rs2 programs use today and OS/2's socket DLLs will sit on.
+adapters virtual machines provide, a kernel socket interface, and its
+own versions of OS/2's socket DLLs on top, so unmodified OS/2 network
+programs (IBM FTP, TELNET, FINGER, RXSOCK, the Toolkit samples) run.
 
 ```
-  OS/2 programs ── SO32DLL / TCP32DLL / TCPIP32 (next step, user mode)
-  rs2 programs (NETTEST, PING) ──┐            │
-                                 ▼            ▼
-                    RS2API 200-217 gate (api/sockets.rs)
+  OS/2 programs ── TCPIP32 / SO32DLL / TCP32DLL (+ TNLS32, PMSHAPI)
+                          tcpipcore (user mode, per process)
+  rs2 programs (NETTEST, PING, IFCONFIG, NETSTAT) ──┐   │
+                                 ▼                     ▼
+                    RS2API 200-219 gate (api/sockets.rs)
                                  │
                     net::socket: per-process handles,
                     blocking / non-blocking, select, options
@@ -136,7 +138,7 @@ TCP_NODELAY), `name` (getsockname/getpeername) and `resolve`. Blocking
 calls end with EINTR when the thread is killed or signalled. A process's
 sockets are closed when it ends.
 
-## User interface: RS2API 200-217
+## User interface: RS2API 200-219
 
 Exposed through the rs2-private gate module RS2API (32-bit `_System`,
 return 0 or a BSD errno); the table and structure layouts are in
@@ -153,6 +155,8 @@ is accepted as input.
 | 210-213 | Rs2SockShutdown, Close, Select, Ioctl |
 | 214-216 | Rs2SockSetOpt, GetOpt, GetName |
 | 217 | Rs2NetResolve |
+| 218 | Rs2SockCancel (so_cancel: blocked calls of other threads end with EINTR) |
+| 219 | Rs2NetQuerySockets (every socket of the stack, with its owner: netstat) |
 
 ## Configuration
 
@@ -205,38 +209,121 @@ socket.
 * TCP: no keepalives, urgent data, window scaling, SACK, timestamps,
   Nagle or delayed ACK; out-of-order data is dropped.
 * One wait queue for all socket waiters (every event wakes every waiter).
-* No `ifconfig`/`route`/`netstat`/`arp` utilities yet, no hostname
-  configuration, no DHCP release at shutdown.
+* IFCONFIG and NETSTAT only show; there is no `route`/`arp`, no way to
+  change the configuration at run time, no DHCP release at shutdown.
 
-## Next: the OS/2 socket API
+## The OS/2 socket API
 
-OS/2 programs reach TCP/IP through DLLs: `SO32DLL` (32-bit BSD sockets,
-TCP/IP 4.0), `TCP32DLL` (resolver and helpers: gethostbyname, inet_addr,
-...), `TCPIP32` (4.1+: both, 4.4BSD structures) and the 16-bit `SOCKETS`
-and `TCPIPDLL`. The plan:
+OS/2 programs reach TCP/IP through DLLs. rs2 has its own, built from
+Rust like PMWIN (`userland/`, i686, packed by `elf2lx`, in `C:\OS2\DLL`):
 
-1. Build them as rs2 user-mode DLLs (Rust, i686, packed by `elf2lx` like
-   PMWIN) with `exports.def` files giving IBM's ordinals; the names and
-   ordinals come from the Toolkit import libraries
-   (`os2tk45/lib/so32dll.lib`, `tcp32dll.lib`, `tcpip32.lib`) and the
-   `.sym` files in `debug/symbols/mptn/dll`.
-2. Each export is a thin wrapper over RS2API 200-217: add SOCBASEERR
-   (10000) to errno values and keep them per thread for `sock_errno()`
-   and `psock_errno()`; `sock_init` checks that the stack runs; `soclose`,
-   `so_cancel` (needs a kernel call that interrupts a blocked socket call:
-   to add), `os2_select` maps directly, BSD `select()` with fd_sets is
-   built on it in the DLL; `ioctl`/`os2_ioctl` map FIONBIO/FIONREAD and
-   need SIOCGIFADDR/SIOCGIFCONF/SIOCGIFFLAGS (interface list from
-   Rs2NetQueryIface); `getsockopt`/`setsockopt` pass through.
-3. Structures: TCPIP32 uses 4.4BSD `sockaddr_in` (`sin_len`), SO32DLL the
-   4.3 layout; the DLL converts on output (the kernel already accepts
-   both). `hostent`/`servent`/`protoent` are built in DLL memory;
-   `gethostbyname`/`gethostbyaddr` use Rs2NetResolve (a PTR query and a
-   HOSTS file in `%ETC%` are additions), `getservbyname` reads
-   `%ETC%\SERVICES`.
-4. The 16-bit DLLs thunk to the 32-bit ones (as rs2's 16-bit VIO thunk
-   does) once 32-bit programs work.
-5. Socket handles may need to be inheritable and shareable between
-   processes (`addsockettolist`, `removesocketfromlist`), and IBM's tools
-   expect `ifconfig`/`route` IOCtls; test with the Toolkit's socket
-   samples and the original FTP/TELNET/PING from the media.
+| DLL | What | Exports |
+|-----|------|---------|
+| TCPIP32 | TCP/IP 4.1+ API: sockets, resolver, network database, 4.4BSD `sockaddr` (`sin_len`) | all 145 of the Toolkit's `tcpip32.lib` |
+| SO32DLL | TCP/IP 4.0 sockets: 4.3BSD `sockaddr`, `select()` in OS/2's form, `bsdselect()` with bit masks, 4-argument `ioctl()` | 32 of 61 (not the `_xxxMSC` variants) |
+| TCP32DLL | TCP/IP 4.0 network database and resolver, `h_errno` and `_res` variables | 56 of 101 (not the `MSC`/16-bit variants) |
+| TNLS32 | IBM's code page helper for its TCP/IP applications | the 15 ordinals FTP, TELNET, FINGER, TALK, REXEC, RSH use |
+| PMSHAPI | the `Prf*` profile calls (TELNET reads its options with them) | 10 |
+
+The work is in `userland/tcpipcore`, linked into each DLL; every export
+goes through a stack-aligning trampoline generated by
+`tools/scripts/gen_pm_exports.py` (`LIB.TSV DLLDIR MODULE`, with
+`exports.extra` for data exports), since OS/2 compilers keep the stack
+only 4-byte aligned. DLL data is per process, so sockets, errno tables
+and result buffers are too.
+
+* **Sockets** map onto RS2API 201-218. Errors are kept per thread
+  (indexed by the TID from the TIB) for `sock_errno()`/`psock_errno()`
+  as SOCBASEERR (10000) + the BSD errno. Addresses go out in the
+  caller's layout (4.4: `sin_len` 16; 4.0: USHORT family) and come in
+  either; a destination of INADDR_ANY means this host (loopback).
+  Message flags are translated (4.1's MSG_WAITALL 0x80/MSG_DONTWAIT
+  0x100, 4.0's MSG_FULLREAD; MSG_WAITALL loops in the DLL); there is no
+  urgent data, so `recv(MSG_OOB)` gives EINVAL. `os2_select()` is the
+  kernel's select; BSD `select()` is built on it (TCPIP32's fd_set is
+  {count, array}, SO32DLL's a bit mask). `readv`/`writev`/`sendmsg`/
+  `recvmsg` gather and scatter in the DLL; `socketpair()` connects two
+  loopback sockets; `accept_and_recv()` and `send_file()` are composed
+  of the basic calls. Raw sockets of protocol 0 (opened just for ioctls)
+  are IPPROTO_RAW. Options the stack lacks but programs set in passing
+  (IP TTL/TOS/multicast, SO_DEBUG, TCP_MAXSEG) are accepted and ignored.
+* **ioctl/os2_ioctl**: FIONBIO, FIONREAD, FIOASYNC, SIOCATMARK; the
+  interface queries SIOCGIFCONF, SIOCGIFADDR, SIOCGIFFLAGS,
+  SIOCGIFBRDADDR, SIOCGIFNETMASK, SIOCGIFDSTADDR, SIOCGIFMETRIC,
+  SIOCGIFMTU (4.0 `ioc(g,n)` and 4.4 `_IOWR` numbers alike); the
+  routing table SIOSTATCNTRT/SIOSTATRT; SIOCSSYN accepted. Interfaces
+  have OS/2's names: `lan0`, `lan1`, ... for the adapters, `lo`.
+* **Names**: `gethostbyname` looks at the HOSTS file, the host name and
+  then the kernel resolver (Rs2NetResolve, DNS servers from DHCP);
+  `gethostbyaddr` at HOSTS, the own addresses, then a PTR query. The
+  `res_*` calls (`res_init`, `res_mkquery`, `res_send`, `res_query`,
+  `res_search`, `res_querydomain`, `dn_expand`/`dn_comp`/`dn_skipname`)
+  are a small resolver in the DLL over a UDP socket, configured from
+  `RESOLV2`/`RESOLV` (`nameserver`, `domain`, `search`) or the
+  interfaces. Services, protocols, networks: SERVICES, PROTOCOL,
+  NETWORKS files, with built-in tables when they are missing. Results
+  are in per-thread buffers; `h_errno` per thread (TCPIP32's
+  `tcp_h_errno1()`, TCP32DLL's `h_errno` variable too).
+* **Files** come from `%ETC%` (`SET ETC=C:\MPTN\ETC` in CONFIG.SYS, the
+  boot drive's `\MPTN\ETC` otherwise). rs2 ships HOSTS, SERVICES,
+  PROTOCOL, NETWORKS and RPC (`dist/etc`). The host name is `%HOSTNAME%`,
+  else `rs2`.
+* Sockets belong to the process that made them and close when it ends;
+  `addsockettolist`/`removesocketfromlist` have nothing to do.
+* **TNLS32** has no import library or headers: the entries are what
+  IBM's applications are seen to use in their disassembly (`_Optlink`
+  calls: arguments in EAX, EDX, ECX, then the stack). rs2 has no
+  translation tables, so its init reports "no translation", converters
+  copy (ordinal 16 widens bytes to the USHORT characters TELNET's
+  terminal emulators take), the DBCS table is empty.
+* **PMSHAPI**: profiles are kept in memory for the life of the process
+  (no INI files yet).
+
+### Utilities
+
+`IFCONFIG [interface]` shows the interfaces (addresses, flags, MAC,
+DHCP state, DNS servers, counters); `NETSTAT` the TCP connections, `-a`
+all sockets with owning process and handle, `-r` routes, `-i`
+interfaces, `-s` counters; `HOSTNAME`; `HOST name|address` resolves
+through TCPIP32.DLL (names and PTR lookups); `PING` as before.
+
+### Testing with IBM's programs
+
+From the TCP/IP 4.x applications on the Warp 4.52 media
+(`cid/server/tcpapps/install/base`, added to `work/modules.txt` as
+`C:\TCPIP\BIN` and `C:\TCPIP\DLL`; MPTN's own programs and DLLs are not
+on the media) and the Toolkit (`samples/tcpiptk`), under QEMU user
+networking with a small host-side server (FTP on 2121 with PASV and
+PORT, a line server on 2323, TCP echo on 2007; PORT data connections
+reach the guest through a `hostfwd_add` sent to QEMU's monitor):
+
+* FTP: `ftp 10.0.2.2 2121`, login, `dir`, `get` text and 300 KB binary,
+  `put` back, identical on the host (e1000 and virtio-net, `--smp 4`).
+* TELNET: `telnet 10.0.2.2 2323`, the server's lines shown, typed lines
+  sent.
+* FINGER: resolves names through DNS (10.0.2.3), connects (port 79 is
+  not reachable on the test host).
+* RXSOCK.DLL from REXX: SockInit, SockGetHostId, SockGetHostByName,
+  SockGetHostByAddr, a TCP echo through the host, UDP to itself.
+* Toolkit samples: tcps/tcpc, selects (BSD select with TCP and UDP)
+  with tcpc and udpc, accept/recv (accept_and_recv), os2ioctl (routing
+  table); IBM's PORTMAP and RPCINFO and the RPC samples rawex and
+  geneserv/genesend on SO32DLL/TCP32DLL with IBM's RPC32DLL.
+
+## Gaps in the socket API
+
+* 16-bit programs (TFTP, INETD, LPD, TELNETD, BOOTP: TCPIPDLL.DLL and
+  IBM's TNLS16.DLL, which needs PMWIN's 16-bit entry points) do not run
+  yet; nothing on the media imports the 16-bit SOCKETS.DLL.
+* Sockets are per process: a socket number cannot be handed to another
+  process (INETD's and the r-daemons' way of passing connections), and
+  `addsockettolist` does nothing.
+* No urgent (out-of-band) data, no `sysctl()` (the Toolkit's HPS
+  memory-mapped I/O samples need it), no ARP/interface statistics
+  ioctls (SIOSTATAT, SIOSTATIF, SIOSTATTCP...), no setting of
+  interfaces or routes, `rexec()` is missing.
+* TNLS32 does no code page translation (FTP's and TELNET's `-x`
+  translation tables, DBCS countries); PMSHAPI does not read or write
+  INI files.
+* The Toolkit's rpcgen sample server (rgs) fails in IBM's RPC32DLL
+  (`svcudp_create - cannot getsockname`), not yet investigated.
