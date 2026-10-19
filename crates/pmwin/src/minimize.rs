@@ -6,7 +6,7 @@ use gpi::Rect;
 
 /// Size of a minimized frame: the icon with its title below.
 pub const ICON_W: i32 = 84;
-pub const ICON_H: i32 = 62;
+pub const ICON_H: i32 = 70;
 /// Gap between icons and to the screen edge.
 pub const GAP: i32 = 4;
 
