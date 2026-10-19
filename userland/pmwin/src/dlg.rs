@@ -245,6 +245,16 @@ pub extern "C" fn WinDlgBox(parent: u32, owner: u32, proc_: u32, hmod: u32, id: 
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinDefDlgProc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    // Not a dialog (a control subclassed with a procedure that passes
+    // what it does not handle to WinDefDlgProc, as the System Editor
+    // does with its MLE): the window's class procedure.
+    if ctl::data::<Dlg>(h).is_none() {
+        let p = win::class_proc(h);
+        if p != 0 && p != def_dlg_entry as *const () as u32 {
+            return crate::msg::call(p, h, msg, mp1, mp2);
+        }
+        return crate::msg::WinDefWindowProc(h, msg, mp1, mp2);
+    }
     match msg {
         WM_INITDLG | WM_CONTROL => 0,
         WM_COMMAND => {

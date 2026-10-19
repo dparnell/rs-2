@@ -173,6 +173,7 @@ pub struct Hook {
     pub queue: u32,
     pub kind: u32,
     pub pfn: u32,
+    #[allow(dead_code)]
     pub hmod: u32,
     pub pid: u32,
 }

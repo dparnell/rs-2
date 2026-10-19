@@ -296,8 +296,9 @@ pub extern "C" fn WinQueryTaskSizePos(_hab: u32, _pid: u32, pswp: *mut u32) -> u
     let off = 32 + n as i32 * 24;
     let (cx, cy) = (w * 3 / 5, h * 3 / 5);
     let (x, y) = (off, (h / 3 - off / 2).max(0));
-    // SWP_SIZE | SWP_MOVE.
-    let v = [3u32, cy as u32, cx as u32, y as u32, x as u32, 0, 0, 0, 0];
+    // SWP_SIZE | SWP_MOVE | SWP_ZORDER | SWP_SHOW | SWP_ACTIVATE, on top
+    // (HWND_TOP), as the shell starts programs.
+    let v = [0x8fu32, cy as u32, cx as u32, y as u32, x as u32, 3, 0, 0, 0];
     for (i, x) in v.into_iter().enumerate() {
         unsafe { pswp.add(i).write_unaligned(x) };
     }

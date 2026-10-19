@@ -351,7 +351,13 @@ pub fn process_gone(p: u32) {
     }
     let s = st();
     s.timers.retain(|t| !queues.contains(&t.queue));
-    s.classes.retain(|c| c.pid != p);
+    // Windows refer to their class by index: an ended process's classes
+    // stay as unnamed tombstones.
+    for c in s.classes.iter_mut().filter(|c| c.pid == p) {
+        c.name.clear();
+        c.proc_ = 0;
+        c.pid = u32::MAX;
+    }
     for slot in s.pss.iter_mut() {
         if slot.as_ref().is_some_and(|e| e.pid == p) {
             *slot = None;

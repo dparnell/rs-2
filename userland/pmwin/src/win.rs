@@ -97,6 +97,14 @@ pub extern "C" fn WinRegisterClass(_hab: u32, name: *const u8, proc_: u32, style
     1
 }
 
+/// The window procedure of a window's class (as registered, before any
+/// subclassing).
+pub fn class_proc(h: u32) -> u32 {
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return 0 };
+    s.classes.get(w.class as usize).map_or(0, |c| c.proc_)
+}
+
 /// Built-in classes registered on initialisation.
 pub fn register_builtin() {
     crate::ctl::register_builtin();
@@ -604,6 +612,10 @@ pub extern "C" fn WinSetWindowText(h: u32, text: *const u8) -> u32 {
 
 /// Set a window's text; a frame and its title bar share theirs.
 pub fn set_text(h: u32, t: &[u8]) -> u32 {
+    if crate::mle::is_mle(h) {
+        crate::mle::set_text(h, t);
+        return 1;
+    }
     let s = st();
     let Some(w) = s.desk.get_mut(h) else { return 0 };
     w.text = t.to_vec();
@@ -626,6 +638,9 @@ pub fn set_text(h: u32, t: &[u8]) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32 {
+    if let Some(t) = crate::mle::text(h) {
+        return if cch <= 0 { 0 } else { crate::ctl::copy_out(&t, cch as usize, buf) as i32 };
+    }
     let Some(w) = st().desk.get(h) else { return 0 };
     if buf.is_null() || cch <= 0 {
         return 0;
@@ -640,6 +655,9 @@ pub extern "C" fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowTextLength(h: u32) -> i32 {
+    if let Some(t) = crate::mle::text(h) {
+        return t.len() as i32;
+    }
     st().desk.get(h).map_or(0, |w| w.text.len() as i32)
 }
 
