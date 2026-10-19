@@ -390,6 +390,12 @@ pub extern "C" fn WinDefWindowProc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 
                 0
             }
         }
+        // The pointer over a window that does not set its own is the
+        // arrow.
+        WM_MOUSEMOVE => {
+            crate::pointer::set_system(pmwin::sysptr::SPTR_ARROW);
+            1
+        }
         // The default for WM_MENUSELECT lets the command be posted.
         ctl::WM_MENUSELECT => 1,
         _ => 0,

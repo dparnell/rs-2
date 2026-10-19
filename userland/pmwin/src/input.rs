@@ -68,6 +68,14 @@ pub fn mouse(p: Point, buttons: u8, time: u32) {
     if target == 0 {
         return;
     }
+    // A window the pointer comes to starts with the arrow (its
+    // WM_MOUSEMOVE processing may set another shape).
+    if st().ptr_window != target {
+        st().ptr_window = target;
+        if st().capture == 0 {
+            pointer::set_system(pmwin::sysptr::SPTR_ARROW);
+        }
+    }
     // Disabled windows (the owner of a modal dialog) get no input; a
     // click brings up the window that disabled it.
     if s.capture == 0 && !input_enabled(target) {
@@ -82,8 +90,13 @@ pub fn mouse(p: Point, buttons: u8, time: u32) {
         }
         return;
     }
-    if down & 1 != 0 && st().is_hung(target) && hung_click(target, p) {
-        return;
+    if down & 1 != 0 && st().is_hung(target) {
+        let (lt, lp, lb) = st().last_click;
+        let dbl = lb == 1 && time.wrapping_sub(lt) < 500 && (lp.x - p.x).abs() < 4 && (lp.y - p.y).abs() < 4;
+        if hung_click(target, p, dbl) {
+            st().last_click = if dbl { (0, Point::new(-100, -100), 0) } else { (time, p, 1) };
+            return;
+        }
     }
     let o = st().desk.origin(target);
     let mp1 = pack(p.x - o.x, p.y - o.y);
@@ -111,7 +124,7 @@ pub fn mouse(p: Point, buttons: u8, time: u32) {
 /// Button 1 pressed on a window whose thread does not respond: the
 /// server activates its frame and moves, sizes or hides it itself.
 /// Returns true if the click was used up here.
-fn hung_click(target: u32, p: Point) -> bool {
+fn hung_click(target: u32, p: Point, dbl: bool) -> bool {
     let top = win::top_level(target);
     if top != 0 && top != HWND_DESKTOP {
         win::activate(top);
@@ -126,7 +139,21 @@ fn hung_click(target: u32, p: Point) -> bool {
             true
         }
         FID_MINMAX if parent_is_frame => {
-            win::show(frame_h, false);
+            let o = s.desk.origin(target);
+            match menu::item_id_at(target, Point::new(p.x - o.x, p.y - o.y)) {
+                Some(frame::SC_MINIMIZE) => frame::minimize(frame_h),
+                Some(frame::SC_MAXIMIZE) => frame::maximize(frame_h, true),
+                Some(frame::SC_RESTORE) => frame::restore(frame_h),
+                _ => win::show(frame_h, false),
+            }
+            true
+        }
+        _ if frame::is_minimized(target) => {
+            if dbl {
+                frame::restore(target);
+            } else {
+                frame::start_drag_at(target, 0, p);
+            }
             true
         }
         FID_SYSMENU if parent_is_frame => true,

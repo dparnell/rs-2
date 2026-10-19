@@ -310,6 +310,12 @@ fn item_at(h: u32, p: Point) -> Option<usize> {
     rects(h).iter().position(|r| r.contains(p))
 }
 
+/// The id of the item at `p` (window coordinates) of a menu.
+pub fn item_id_at(h: u32, p: Point) -> Option<u32> {
+    let i = item_at(h, p)?;
+    data(h)?.items.get(i).map(|it| it.id as u32)
+}
+
 fn selectable(it: &Item) -> bool {
     it.style & (MIS_SEPARATOR | MIS_STATIC) == 0
 }
@@ -324,6 +330,7 @@ fn paint(h: u32) {
     let sel = if tracking { m.sel } else { None };
     let items: Vec<(u16, u16, u16, Vec<u8>, bool)> = m.items.iter().map(|i| (i.style, i.attr, i.id, i.text.clone(), i.sub != 0)).collect();
     let maximized = ctl::style(ctl::parent(h)) & ws::MAXIMIZED != 0;
+    let icon = if k == MS_TITLEBUTTON { frame::icon(ctl::parent(h)) } else { 0 };
     draw::paint(h, |c| {
         let full = c.rect();
         c.fill(full, draw::FACE);
@@ -334,7 +341,7 @@ fn paint(h: u32) {
         for (i, ((style, attr, id, text, has_sub), r)) in items.iter().zip(rs.iter()).enumerate() {
             let hilite = sel == Some(i) || attr & MIA_HILITED != 0;
             match k {
-                MS_TITLEBUTTON => title_button(c, *r, *id as u32, hilite, maximized),
+                MS_TITLEBUTTON => title_button(c, *r, *id as u32, hilite, maximized, icon),
                 _ if style & MIS_SEPARATOR != 0 => {
                     if k == 0 {
                         let y = r.bottom + r.height() / 2;
@@ -391,7 +398,7 @@ fn item(c: &mut Canvas, r: Rect, k: u32, attr: u16, text: &[u8], has_sub: bool, 
 }
 
 /// A title-bar button with its symbol.
-fn title_button(c: &mut Canvas, r: Rect, id: u32, down: bool, maximized: bool) {
+fn title_button(c: &mut Canvas, r: Rect, id: u32, down: bool, maximized: bool, icon: u32) {
     let r = Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1);
     c.fill(r, draw::FACE);
     if down {
@@ -402,6 +409,8 @@ fn title_button(c: &mut Canvas, r: Rect, id: u32, down: bool, maximized: bool) {
     let (cx, cy) = (r.left + r.width() / 2, r.bottom + r.height() / 2);
     let k = draw::TEXT;
     match id {
+        // The frame's mini icon, or a bar.
+        SC_SYSMENU if icon != 0 && crate::pointer::draw_in(c, r, icon, true, false) => {}
         SC_SYSMENU => c.fill(Rect::new(r.left + 4, cy - 2, r.right - 4, cy + 2), k),
         SC_MINIMIZE => c.fill(Rect::new(cx - 2, cy - 2, cx + 2, cy + 2), k),
         SC_HIDE => c.fill(Rect::new(cx - 5, cy - 5, cx + 5, cy - 2), k),

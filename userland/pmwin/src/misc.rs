@@ -140,16 +140,6 @@ pub extern "C" fn WinQuerySysColor(_desk: u32, clr: i32, _reserved: i32) -> u32 
     color::sys(clr)
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn WinQuerySysPointer(_desk: u32, _id: i32, _copy: u32) -> u32 {
-    1
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn WinSetPointer(_desk: u32, _hptr: u32) -> u32 {
-    1
-}
-
 /// CLASSINFO: flClassStyle, pfnWindowProc, cbWindowData.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryClassInfo(_hab: u32, name: *const u8, info: *mut u32) -> u32 {
@@ -266,12 +256,27 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
     let bw = 80;
     let tw = lines.iter().map(|l| font.text_width(l)).max().unwrap_or(0).max(font.text_width(&title) + 40).max(buttons.len() as i32 * (bw + 10)).max(160);
     // Template coordinates are dialog units (2x2 pixels).
-    let (w, h) = (tw + 40, lines.len() as i32 * font.height + 60);
+    // MB_ICONQUESTION, MB_ICONEXCLAMATION, MB_ICONASTERISK, MB_ICONHAND:
+    // a system icon left of the text.
+    let icon = match style & 0x70 {
+        0x10 => pmwin::sysptr::SPTR_ICONQUESTION,
+        0x20 => pmwin::sysptr::SPTR_ICONWARNING,
+        0x30 => pmwin::sysptr::SPTR_ICONINFORMATION,
+        0x40 => pmwin::sysptr::SPTR_ICONERROR,
+        _ => 0,
+    };
+    let ix = if icon != 0 { 48 } else { 0 };
+    let (w, h) = (tw + 40 + ix, (lines.len() as i32 * font.height).max(if icon != 0 { 40 } else { 0 }) + 60);
     let mut items = Vec::new();
+    if icon != 0 {
+        // SS_SYSICON, visible.
+        let t = alloc::format!("#{icon}").into_bytes();
+        items.push(res::DlgItemT { class: b"#5".to_vec(), text: t, style: 0x8000_000b, x: 8, y: (h - 50) / 2, cx: 16, cy: 16, id: 0xffff, ctl: core::ptr::null(), children: Vec::new() });
+    }
     for (i, l) in lines.iter().enumerate() {
         let y = h - 10 - (i as i32 + 1) * font.height;
         // SS_TEXT | DT_LEFT, visible.
-        items.push(res::DlgItemT { class: b"#5".to_vec(), text: l.clone(), style: 0x8000_0001, x: 5, y: y / 2, cx: (w - 20) / 2, cy: font.height / 2, id: 0xffff, ctl: core::ptr::null(), children: Vec::new() });
+        items.push(res::DlgItemT { class: b"#5".to_vec(), text: l.clone(), style: 0x8000_0001, x: (10 + ix) / 2, y: y / 2, cx: (w - 20 - ix) / 2, cy: font.height / 2, id: 0xffff, ctl: core::ptr::null(), children: Vec::new() });
     }
     let total = buttons.len() as i32 * (bw + 10) - 10;
     for (i, (id, label)) in buttons.iter().enumerate() {
@@ -479,18 +484,6 @@ pub extern "C" fn WinGetScreenPS(_desk: u32) -> u32 {
     let s = st();
     let r = gpi::Rect::new(0, 0, s.surface.width, s.surface.height);
     crate::gpiapi::create(s, 0, gpi::Point::new(0, 0), alloc::vec![r])
-}
-
-/// Pointers from resources are not drawn yet (the arrow stays): a handle
-/// that WinSetPointer accepts.
-#[unsafe(no_mangle)]
-pub extern "C" fn WinLoadPointer(_desk: u32, _hmod: u32, id: u32) -> u32 {
-    0x7000_0000 | (id & 0xffff)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn WinDestroyPointer(_hptr: u32) -> u32 {
-    1
 }
 
 /// Invert the outline of `r` (window coordinates) `b` pels wide.

@@ -358,7 +358,10 @@ fn ghost(h: u32) {
     }
     let mut ps = Ps::new(o, clip);
     let mut c = Canvas::new(&mut ps, s.surface, cx, cy);
-    if s.frames.contains_key(&h) {
+    if frame::is_minimized(h) {
+        let (icon, title) = (frame::icon(h), frame::title_of(h));
+        frame::draw_minimized(&mut c, icon, &title, s.active == h);
+    } else if s.frames.contains_key(&h) {
         let f = frame::fcf(h);
         frame::draw_frame(&mut c, f, s.active == h);
     } else {
@@ -400,6 +403,8 @@ pub fn process_gone(p: u32) {
         }
     }
     s.objects.remove(&p);
+    pointer::process_gone(p);
+    let s = st();
     for slot in s.accels.iter_mut() {
         if slot.as_ref().is_some_and(|a| a.pid == p) {
             *slot = None;
@@ -588,6 +593,9 @@ fn switch_to(e: Option<Entry>) {
     match e {
         Some(Entry::Frame(f)) => {
             win::show(f, true);
+            if frame::is_minimized(f) {
+                frame::restore(f);
+            }
             win::activate(f);
         }
         Some(Entry::Session(sid)) => {

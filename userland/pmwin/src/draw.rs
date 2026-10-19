@@ -213,6 +213,13 @@ impl Canvas<'_> {
         drawn
     }
 
+    /// An icon image with its bottom-left corner at (x, y) (window
+    /// coordinates).
+    pub fn icon(&mut self, x: i32, y: i32, img: &gpi::icon::Image, halftone: bool) {
+        let o = self.ps.origin;
+        gpi::icon::draw(&mut self.surface, &self.ps.clip, x + o.x, y + o.y, img, halftone);
+    }
+
     /// Dotted focus rectangle.
     pub fn focus_rect(&mut self, r: Rect) {
         for x in (r.left..r.right).step_by(2) {

@@ -83,6 +83,22 @@ pub struct Frame {
     pub focus_save: u32,
     /// Position before maximizing.
     pub restore: Option<(i32, i32, i32, i32)>,
+    /// The frame's icon (WM_SETICON, FCF_ICON).
+    pub icon: u32,
+    /// While minimized: what restoring brings back.
+    pub min: Option<Minimized>,
+    /// Where the frame was last shown minimized.
+    pub icon_pos: Option<(i32, i32)>,
+}
+
+/// A minimized frame's state before minimizing.
+pub struct Minimized {
+    pub pos: (i32, i32, i32, i32),
+    pub was_max: bool,
+    /// Frame controls and client that were visible.
+    pub hidden: Vec<u32>,
+    /// Hidden for a minimized window viewer instead of shown as an icon.
+    pub viewer: bool,
 }
 
 /// Frame being moved or sized with the mouse.
@@ -130,7 +146,18 @@ pub struct State {
     pub pointer: Point,
     pub buttons: u8,
     /// Pointer image save-under: position and pixels, when drawn.
-    pub ptr_saved: Option<(Point, Vec<u32>)>,
+    pub ptr_saved: Option<(Point, i32, i32, Vec<u32>)>,
+    /// Pointer and icon objects (HPOINTER, see pointer.rs).
+    pub ptrs: Vec<Option<crate::pointer::PtrObj>>,
+    /// Handles of the system pointers by SPTR_* id (0: not made yet).
+    pub sys_ptrs: Vec<u32>,
+    /// The mouse pointer's shape.
+    pub cur_ptr: u32,
+    /// A window that takes minimized frames over (Rs2SetMinimizeViewer):
+    /// they are hidden and it is told; 0: they become desktop icons.
+    pub min_viewer: u32,
+    /// The window the pointer was last over.
+    pub ptr_window: u32,
     pub ptr_hidden: u32,
     /// The pointer is a hardware cursor (the kernel moves it).
     pub ptr_hardware: bool,
@@ -213,6 +240,11 @@ pub fn init(surface: Surface) {
         pointer: Point::new(surface.width / 2, surface.height / 2),
         buttons: 0,
         ptr_saved: None,
+        ptrs: Vec::new(),
+        sys_ptrs: Vec::new(),
+        cur_ptr: 0,
+        ptr_window: 0,
+        min_viewer: 0,
         ptr_hidden: 0,
         ptr_hardware: false,
         ptr_level: 0,

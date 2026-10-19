@@ -77,13 +77,17 @@ pub fn decode(b: &[u8]) -> Option<Bmp> {
 /// The bitmap named by a static control's text: 0xFF and the resource id,
 /// or "#id".
 pub fn for_static(h: u32) -> Option<Bmp> {
+    decode(res::load(0, res::RT_BITMAP, static_id(h)?)?)
+}
+
+/// The resource id in a static control's text: 0xFF and the id, or "#id".
+pub fn static_id(h: u32) -> Option<u32> {
     let t = ctl::text(h);
-    let id = match t.first() {
-        Some(0xff) if t.len() >= 3 => t[1] as u32 | (t[2] as u32) << 8,
-        Some(b'#') => core::str::from_utf8(&t[1..]).ok()?.parse().ok()?,
-        _ => return None,
-    };
-    decode(res::load(0, res::RT_BITMAP, id)?)
+    match t.first() {
+        Some(0xff) if t.len() >= 3 => Some(t[1] as u32 | (t[2] as u32) << 8),
+        Some(b'#') => core::str::from_utf8(&t[1..]).ok()?.parse().ok(),
+        _ => None,
+    }
 }
 
 /// Draw a bitmap stretched to `w` x `h` pixels at the window origin.

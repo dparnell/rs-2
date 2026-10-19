@@ -328,6 +328,20 @@ fn shell_position() -> Rect {
     Rect::new(off, h / 3 - off / 2, off + w * 3 / 5, h / 3 - off / 2 + h * 3 / 5)
 }
 
+/// Rs2SetMinimizeViewer(hwnd) (rs2-private): from now on minimized
+/// frames are hidden instead of becoming desktop icons, and `hwnd` gets
+/// WM_RS2_MINWINDOW (0x0ff8: mp1 = the frame, mp2 = 1 minimized, 0
+/// restored) for each; 0 goes back to desktop icons. Returns the
+/// previous viewer. For a desktop shell's minimized window viewer.
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2SetMinimizeViewer(h: u32) -> u32 {
+    let s = st();
+    if h != 0 && !s.desk.exists(h) {
+        return 0;
+    }
+    core::mem::replace(&mut s.min_viewer, h)
+}
+
 /// Rs2ShellPosition(prcl) (rs2-private, for PMSHAPI's
 /// WinQueryTaskSizePos): the next cascade position.
 #[unsafe(no_mangle)]
@@ -410,7 +424,10 @@ pub fn activate(h: u32) {
         // The focus is in the window already.
         return;
     }
-    if st().frames.contains_key(&top) && client != top {
+    // A minimized frame keeps the focus itself (its client is hidden).
+    if frame::is_minimized(top) {
+        set_focus(top);
+    } else if st().frames.contains_key(&top) && client != top {
         // A frame gets the focus and passes it on (to QWL_HWNDFOCUSSAVE
         // or its client), which so hears that it came from the frame.
         set_focus(top);
@@ -449,6 +466,19 @@ pub fn set_focus(h: u32) {
 /// WinSetWindowPos(hwnd, hwndInsertBehind, x, y, cx, cy, fl)
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32 {
+    // Minimize, maximize and restore (frames): they size the window.
+    let fl = if st().frames.contains_key(&h) && fl & (frame::SWP_MINIMIZE | frame::SWP_MAXIMIZE | frame::SWP_RESTORE) != 0 {
+        if fl & frame::SWP_MINIMIZE != 0 {
+            frame::minimize(h);
+        } else if fl & frame::SWP_MAXIMIZE != 0 {
+            frame::maximize(h, true);
+        } else {
+            frame::restore(h);
+        }
+        fl & !(SWP_MOVE | SWP_SIZE)
+    } else {
+        fl
+    };
     let s = st();
     let Some(w) = s.desk.get(h) else { return 0 };
     let (ox, oy, ocx, ocy) = (w.x, w.y, w.cx, w.cy);
@@ -535,7 +565,15 @@ pub extern "C" fn WinQueryWindowPos(h: u32, pswp: *mut u32) -> u32 {
     if pswp.is_null() {
         return 0;
     }
-    let vals = [0u32, w.cy as u32, w.cx as u32, w.y as u32, w.x as u32, 0, h, 0, 0];
+    // fl reports the minimized/maximized state (SWP_MINIMIZE, SWP_MAXIMIZE).
+    let fl = if w.style & ws::MINIMIZED != 0 {
+        frame::SWP_MINIMIZE
+    } else if w.style & ws::MAXIMIZED != 0 {
+        frame::SWP_MAXIMIZE
+    } else {
+        0
+    };
+    let vals = [fl, w.cy as u32, w.cx as u32, w.y as u32, w.x as u32, 0, h, 0, 0];
     for (i, v) in vals.into_iter().enumerate() {
         unsafe { pswp.add(i).write_unaligned(v) };
     }

@@ -2,3 +2,4 @@
 Rs2PmServer 9000
 Rs2ShellPosition 9001
 Rs2PmVioWindow 9002
+Rs2SetMinimizeViewer 9003

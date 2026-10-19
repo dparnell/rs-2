@@ -10,6 +10,7 @@ extern crate alloc;
 pub mod controls;
 pub mod mle;
 mod queue;
+pub mod minimize;
 mod region;
 pub mod sysptr;
 mod tree;

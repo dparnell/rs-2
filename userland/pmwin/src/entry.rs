@@ -320,6 +320,7 @@ pub extern "C" fn entry_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             1
         }
         WM_MOUSEMOVE => {
+            crate::pointer::set_system(pmwin::sysptr::SPTR_TEXT);
             if data(h).is_some_and(|e| e.tracking) {
                 let i = index_at(h, ctl::mouse_pos(mp1).x);
                 move_cursor(h, i, true);

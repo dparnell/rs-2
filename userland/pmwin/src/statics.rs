@@ -36,6 +36,7 @@ fn paint(h: u32) {
     let text = ctl::text(h);
     let enabled = ctl::enabled(h);
     let bmp = if kind == SS_BITMAP { crate::bitmap::for_static(h) } else { None };
+    let icon = if matches!(kind, SS_ICON | SS_SYSICON) { ctl::data::<u32>(h).map_or(0, |v| *v) } else { 0 };
     draw::paint(h, |c| {
         let r = c.rect();
         let bg = draw::dialog_bg();
@@ -66,7 +67,13 @@ fn paint(h: u32) {
             SS_FGNDFRAME => c.frame(r, draw::TEXT),
             SS_HALFTONEFRAME => c.frame(r, draw::SHADOW),
             SS_BKGNDFRAME => c.frame(r, bg),
-            SS_ICON | SS_SYSICON | SS_BITMAP => {
+            SS_ICON | SS_SYSICON => {
+                c.fill(r, bg);
+                if icon != 0 {
+                    crate::pointer::draw_in(c, r, icon, false, !enabled);
+                }
+            }
+            SS_BITMAP => {
                 c.fill(r, bg);
                 if let Some(b) = &bmp {
                     // Stretched to the control (SS_AUTOSIZE sized the
@@ -86,6 +93,22 @@ pub extern "C" fn static_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_CREATE => {
+            // Icon statics show the icon named by their text (a resource
+            // id, or an SPTR_* for SS_SYSICON) and take its size.
+            let kind = ctl::style(h) & 0x7f;
+            if matches!(kind, SS_ICON | SS_SYSICON) {
+                if let Some(id) = crate::bitmap::static_id(h) {
+                    let hp = if kind == SS_SYSICON { crate::pointer::system(id) } else { crate::pointer::WinLoadPointer(1, 0, id) };
+                    if hp != 0 {
+                        ctl::set_data::<u32>(h, hp);
+                        if let Some(w) = crate::state::st().desk.get(h) {
+                            let n = crate::pointer::ICON;
+                            let (x, y) = (w.x + w.cx / 2 - n / 2, w.y + w.cy - n);
+                            crate::state::st().desk.set_pos(h, x, y, n, n);
+                        }
+                    }
+                }
+            }
             // SS_AUTOSIZE: a bitmap static takes the bitmap's size,
             // keeping its top edge and horizontal centre.
             if ctl::style(h) & 0x7f == SS_BITMAP && ctl::style(h) & SS_AUTOSIZE != 0 {

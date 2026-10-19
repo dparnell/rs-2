@@ -125,6 +125,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pmviowin"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "viocell",
+]
+
+[[package]]
 name = "pmwin"
 version = "0.1.0"
 dependencies = [
@@ -225,3 +233,7 @@ dependencies = [
  "hpfs",
  "os2",
 ]
+
+[[package]]
+name = "viocell"
+version = "0.1.0"

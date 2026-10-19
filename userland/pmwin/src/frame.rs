@@ -24,6 +24,7 @@ pub const FCF_HORZSCROLL: u32 = 0x0080;
 pub const FCF_DLGBORDER: u32 = 0x0100;
 pub const FCF_BORDER: u32 = 0x0200;
 pub const FCF_SHELLPOSITION: u32 = 0x0400;
+pub const FCF_ICON: u32 = 0x4000;
 pub const FCF_ACCELTABLE: u32 = 0x8000;
 pub const FCF_HIDEBUTTON: u32 = 0x0100_0000;
 
@@ -47,6 +48,16 @@ pub const SC_TASKMANAGER: u32 = 0x8011;
 pub const SC_HIDE: u32 = 0x802a;
 
 const WM_ACTIVATE: u32 = 0x000d;
+pub const WM_MINMAXFRAME: u32 = 0x0046;
+pub const WM_SETICON: u32 = 0x0047;
+pub const WM_QUERYICON: u32 = 0x0048;
+/// Posted to a minimized window viewer: mp1 = the frame, mp2 = 1 when
+/// it was minimized, 0 when restored (rs2-private).
+pub const WM_RS2_MINWINDOW: u32 = 0x0ff8;
+
+pub const SWP_MINIMIZE: u32 = 0x0400;
+pub const SWP_MAXIMIZE: u32 = 0x0800;
+pub const SWP_RESTORE: u32 = 0x1000;
 const TBM_SETHILITE: u32 = 0x01e3;
 const TBM_QUERYHILITE: u32 = 0x01e4;
 
@@ -91,7 +102,13 @@ pub fn create(parent: u32, style: u32, fcf: u32, title: &[u8], pos: Rect, owner:
     if frame == 0 {
         return 0;
     }
-    st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None });
+    st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None });
+    if fcf & FCF_ICON != 0 {
+        let i = crate::pointer::WinLoadPointer(1, hmod, id);
+        if let Some(f) = st().frames.get_mut(&frame) {
+            f.icon = i;
+        }
+    }
     create_controls(frame, fcf, title, hmod, id);
     layout(frame);
     frame
@@ -135,6 +152,9 @@ pub fn layout(frame: u32) {
     let s = st();
     let Some(f) = s.frames.get(&frame) else { return };
     let (fcf, client) = (f.fcf, f.client);
+    if f.min.is_some() {
+        return;
+    }
     let (cx, cy) = s.desk.get(frame).map_or((0, 0), |w| (w.cx, w.cy));
     let b = border(fcf);
     let (mut l, mut bot, mut r, mut top) = (b, b, cx - b, cy - b);
@@ -210,7 +230,169 @@ pub fn client_rect(frame: u32) -> Rect {
 fn paint(h: u32) {
     let f = fcf(h);
     let active = st().active == h;
+    if is_minimized(h) {
+        let (icon, title) = (icon(h), title_of(h));
+        draw::paint(h, |c: &mut Canvas| draw_minimized(c, icon, &title, active));
+        return;
+    }
     draw::paint(h, |c: &mut Canvas| draw_frame(c, f, active));
+}
+
+/// The frame's icon (0: none).
+pub fn icon(h: u32) -> u32 {
+    st().frames.get(&h).map_or(0, |f| f.icon)
+}
+
+/// The text a frame shows as its title.
+pub fn title_of(h: u32) -> alloc::vec::Vec<u8> {
+    let tb = WinWindowFromID(h, FID_TITLEBAR);
+    ctl::text(if tb != 0 { tb } else { h })
+}
+
+pub fn is_minimized(h: u32) -> bool {
+    ctl::style(h) & ws::MINIMIZED != 0
+}
+
+/// A minimized frame on the desktop: its icon (the application icon if
+/// it has none) with the title below, highlighted while active.
+pub fn draw_minimized(c: &mut Canvas, icon: u32, title: &[u8], active: bool) {
+    let r = c.rect();
+    c.fill(r, color::sys(color::SYSCLR_BACKGROUND));
+    let n = crate::pointer::ICON;
+    let ir = Rect::new(r.left, r.top - n - 2, r.right, r.top - 2);
+    let icon = if icon != 0 && crate::pointer::get(icon).is_some() { icon } else { crate::pointer::system(pmwin::sysptr::SPTR_APPICON) };
+    crate::pointer::draw_in(c, ir, icon, false, false);
+    let f = draw::font();
+    let cols = (r.width() / f.width).max(1) as usize;
+    let mut lines = draw::wrap(title, cols);
+    lines.truncate(2);
+    let tw = lines.iter().map(|l| draw::text_width(l)).max().unwrap_or(0);
+    let th = lines.len() as i32 * f.height;
+    let top = ir.bottom - 2;
+    let tr = Rect::new(r.left + (r.width() - tw) / 2 - 2, top - th, r.left + (r.width() + tw) / 2 + 2, top);
+    if active {
+        c.fill(tr, draw::HILITE);
+    }
+    let fg = if active { draw::HILITE_TEXT } else { 0xffffff };
+    c.text_in(Rect::new(r.left, top - th, r.right, top), &lines.join(&b'\n'), fg, draw::DT_CENTER);
+}
+
+/// Enable the system menu's items for the frame's state.
+fn sysmenu_state(h: u32) {
+    let st_ = ctl::style(h);
+    let (min, max) = (st_ & ws::MINIMIZED != 0, st_ & ws::MAXIMIZED != 0);
+    let f = fcf(h);
+    let sys = WinWindowFromID(h, FID_SYSMENU);
+    menu::enable_item(sys, SC_RESTORE, min || max);
+    menu::enable_item(sys, SC_MINIMIZE, !min && f & FCF_MINBUTTON != 0);
+    menu::enable_item(sys, SC_MAXIMIZE, !max && f & FCF_MAXBUTTON != 0);
+    menu::enable_item(sys, SC_MOVE, !max);
+    menu::enable_item(sys, SC_SIZE, !min && !max && f & FCF_SIZEBORDER != 0);
+}
+
+/// WM_MINMAXFRAME to the frame (mp1 = the frame, mp2 = an SWP with the
+/// new state); not from the PM server, which never waits for programs.
+fn minmax_frame(h: u32, fl: u32, pos: (i32, i32, i32, i32)) {
+    if st().is_server() {
+        return;
+    }
+    let swp: [u32; 9] = [fl, pos.3 as u32, pos.2 as u32, pos.1 as u32, pos.0 as u32, 0, h, 0, 0];
+    send(h, WM_MINMAXFRAME, h, swp.as_ptr() as u32);
+}
+
+/// Minimize a frame: its controls and client are hidden and it becomes
+/// an icon with its title at the bottom of the desktop, or, when a
+/// minimized window viewer is registered, it is hidden and the viewer
+/// is told.
+pub fn minimize(h: u32) {
+    let s = st();
+    if !s.frames.contains_key(&h) || is_minimized(h) {
+        return;
+    }
+    let Some(w) = s.desk.get(h) else { return };
+    let pos = (w.x, w.y, w.cx, w.cy);
+    let was_max = w.style & ws::MAXIMIZED != 0;
+    let kids: alloc::vec::Vec<u32> = w.children.iter().copied().filter(|&k| s.desk.get(k).is_some_and(|x| x.visible_style())).collect();
+    let viewer = s.min_viewer != 0 && s.desk.exists(s.min_viewer);
+    let (sw, sh) = (s.surface.width, s.surface.height);
+    // Where it goes: where it was last minimized, else the first free
+    // place along the bottom.
+    let taken: alloc::vec::Vec<Rect> = s
+        .frames
+        .iter()
+        .filter(|&(&f, x)| f != h && x.min.as_ref().is_some_and(|m| !m.viewer))
+        .filter_map(|(&f, _)| s.desk.get(f).map(|x| Rect::new(x.x, x.y, x.x + x.cx, x.y + x.cy)))
+        .collect();
+    let icon_pos = s.frames.get(&h).and_then(|f| f.icon_pos);
+    let slot = match icon_pos {
+        Some((x, y)) => Rect::new(x, y, x + pmwin::minimize::ICON_W, y + pmwin::minimize::ICON_H),
+        None => pmwin::minimize::free_slot(&taken, sw, sh),
+    };
+    minmax_frame(h, SWP_MINIMIZE, (slot.left, slot.bottom, slot.width(), slot.height()));
+    let s = st();
+    for &k in &kids {
+        s.desk.set_visible(k, false);
+    }
+    if let Some(f) = s.frames.get_mut(&h) {
+        f.min = Some(crate::state::Minimized { pos, was_max, hidden: kids, viewer });
+    }
+    if let Some(w) = s.desk.get_mut(h) {
+        w.style = (w.style & !ws::MAXIMIZED) | ws::MINIMIZED;
+    }
+    sysmenu_state(h);
+    if viewer {
+        win::show(h, false);
+        let v = st().min_viewer;
+        post(v, WM_RS2_MINWINDOW, h, 1);
+    } else {
+        st().desk.set_pos(h, slot.left, slot.bottom, slot.width(), slot.height());
+        st().desk.to_bottom(h);
+        st().desk.invalidate(h, None, false);
+        if st().active == h {
+            st().active = 0;
+            st().focus = 0;
+            win::activate_next();
+        }
+    }
+}
+
+/// Restore a minimized frame (or a maximized one).
+pub fn restore(h: u32) {
+    if !is_minimized(h) {
+        maximize(h, false);
+        return;
+    }
+    let Some(m) = st().frames.get_mut(&h).and_then(|f| f.min.take()) else { return };
+    if !m.viewer {
+        let cur = st().desk.get(h).map(|w| (w.x, w.y));
+        if let Some(f) = st().frames.get_mut(&h) {
+            f.icon_pos = cur;
+        }
+    }
+    minmax_frame(h, SWP_RESTORE, m.pos);
+    if let Some(w) = st().desk.get_mut(h) {
+        w.style &= !ws::MINIMIZED;
+        if m.was_max {
+            w.style |= ws::MAXIMIZED;
+        }
+    }
+    let s = st();
+    for &k in &m.hidden {
+        if s.desk.exists(k) {
+            s.desk.set_visible(k, true);
+        }
+    }
+    let (x, y, cx, cy) = m.pos;
+    s.desk.set_pos(h, x, y, cx, cy);
+    layout(h);
+    sysmenu_state(h);
+    win::show(h, true);
+    st().desk.invalidate(h, None, true);
+    win::activate(h);
+    if m.viewer {
+        let v = st().min_viewer;
+        post(v, WM_RS2_MINWINDOW, h, 0);
+    }
 }
 
 /// The frame's background and border.
@@ -230,7 +412,10 @@ pub fn draw_frame(c: &mut Canvas, f: u32, active: bool) {
 }
 
 /// Maximize or restore a frame.
-fn maximize(h: u32, on: bool) {
+pub fn maximize(h: u32, on: bool) {
+    if on && is_minimized(h) {
+        restore(h);
+    }
     let s = st();
     let Some(w) = s.desk.get(h) else { return };
     let cur = (w.x, w.y, w.cx, w.cy);
@@ -261,11 +446,7 @@ fn maximize(h: u32, on: bool) {
     } else {
         menu::replace_id(mm, SC_RESTORE, SC_MAXIMIZE);
     }
-    let sys = WinWindowFromID(h, FID_SYSMENU);
-    menu::enable_item(sys, SC_RESTORE, on);
-    menu::enable_item(sys, SC_MAXIMIZE, !on && fcf(h) & FCF_MAXBUTTON != 0);
-    menu::enable_item(sys, SC_MOVE, !on);
-    menu::enable_item(sys, SC_SIZE, !on && fcf(h) & FCF_SIZEBORDER != 0);
+    sysmenu_state(h);
     WinSetWindowPos(h, 0, target.0, target.1, target.2, target.3, 0x0003);
 }
 
@@ -365,6 +546,39 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             paint(h);
             0
         }
+        WM_BUTTON1DOWN if is_minimized(h) => {
+            // The icon moves.
+            win::activate(h);
+            start_drag(h, 0);
+            1
+        }
+        WM_BUTTON1DBLCLK if is_minimized(h) => {
+            restore(h);
+            1
+        }
+        WM_SETICON => {
+            if let Some(f) = st().frames.get_mut(&h) {
+                f.icon = mp1;
+            }
+            let sys = WinWindowFromID(h, FID_SYSMENU);
+            if sys != 0 {
+                ctl::invalidate(sys);
+            }
+            if is_minimized(h) {
+                ctl::invalidate(h);
+            }
+            1
+        }
+        WM_QUERYICON => icon(h),
+        WM_MINMAXFRAME => 0,
+        WM_CHAR if is_minimized(h) => {
+            let k = Key::from(mp1, mp2);
+            if !k.up() && matches!(k.vk, VK_NEWLINE | VK_ENTER) {
+                restore(h);
+                return 1;
+            }
+            WinDefWindowProc(h, msg, mp1, mp2)
+        }
         WM_BUTTON1DOWN => {
             if fcf(h) & FCF_SIZEBORDER != 0 {
                 let e = edges_at(h, ctl::mouse_pos(mp1));
@@ -372,6 +586,18 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     start_drag(h, e);
                 }
             }
+            1
+        }
+        crate::win::WM_MOUSEMOVE => {
+            use pmwin::sysptr::*;
+            let e = if fcf(h) & FCF_SIZEBORDER != 0 && ctl::style(h) & (ws::MAXIMIZED | ws::MINIMIZED) == 0 { edges_at(h, ctl::mouse_pos(mp1)) } else { 0 };
+            crate::pointer::set_system(match e {
+                0 => SPTR_ARROW,
+                1 | 2 => SPTR_SIZEWE,
+                4 | 8 => SPTR_SIZENS,
+                5 | 10 => SPTR_SIZENESW,
+                _ => SPTR_SIZENWSE,
+            });
             1
         }
         WM_ACTIVATE => {
@@ -402,7 +628,9 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     post(if client != 0 { client } else { h }, WM_CLOSE, 0, 0);
                 }
                 SC_MAXIMIZE => maximize(h, true),
-                SC_RESTORE => maximize(h, false),
+                SC_RESTORE => restore(h),
+                SC_MINIMIZE => minimize(h),
+                SC_HIDE => win::show(h, false),
                 SC_APPMENU => menu::start_bar(WinWindowFromID(h, FID_MENU)),
                 SC_SYSMENU => menu::start_bar(WinWindowFromID(h, FID_SYSMENU)),
                 _ => {}
