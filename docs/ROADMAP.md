@@ -89,10 +89,9 @@ Status markers: done, in progress, planned.
   16-bit TFTP runs; system-wide socket numbers with owners
   (addsockettolist/removesocketfromlist, RS2API 220/221): IBM's INETD
   hands connections to the servers it starts
-- planned:
-  route/arp and run-time configuration, INI files for PMSHAPI, NIC
-  interrupts, vmxnet3/pcnet drivers, TCP keepalive/window
-  scaling/SACK/urgent data
+- planned: route/arp and run-time configuration, INI files for
+  PMSHAPI, code page translation in TNLS32/TNLS16, NIC interrupts,
+  vmxnet3/pcnet drivers, TCP keepalive/window scaling/SACK/urgent data
 - planned: NVMe/xHCI/virtio interrupts (MSI-X),
   virtio-scsi hot-plug events, virtio-console multiport
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
