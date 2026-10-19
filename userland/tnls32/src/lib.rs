@@ -15,7 +15,8 @@
 //! |-----|-----|
 //! | 6 | data: DBCS lead-byte vector (256 bytes) |
 //! | 7, 34 | data: the code page used to open converters |
-//! | 16, 17 | convert(handle, dst, src, len): output length |
+//! | 16 | convert to characters(handle, USHORT *dst, src, len): characters out |
+//! | 17 | convert(handle, dst, src, len): bytes out |
 //! | 19, 20, 49 | data: translation state flags the applications reset |
 //! | 24 | init(app name, translation name): flags (bit 0 name unknown, 1 tables, 2 DBCS) |
 //! | 38 | close(handle) |
@@ -57,7 +58,7 @@ macro_rules! optlink {
 }
 
 optlink! {
-    tnls_cv16 => convert;
+    tnls_cv16 => widen;
     tnls_cv17 => convert;
     tnls_init24 => init;
     tnls_close38 => close;
@@ -74,6 +75,19 @@ extern "C" fn convert(_h: u32, dst: *mut u8, src: *const u8, len: i32) -> i32 {
     }
     if dst as *const u8 != src {
         unsafe { core::ptr::copy(src, dst, len as usize) };
+    }
+    len
+}
+
+/// Bytes to 16-bit characters (TELNET's terminal emulators take DBCS
+/// characters as USHORTs, single-byte ones with a zero high byte).
+extern "C" fn widen(_h: u32, dst: *mut u16, src: *const u8, len: i32) -> i32 {
+    if len <= 0 || dst.is_null() || src.is_null() {
+        return 0;
+    }
+    // Back to front, so a conversion in place does not overwrite input.
+    for i in (0..len as usize).rev() {
+        unsafe { dst.add(i).write_unaligned(*src.add(i) as u16) };
     }
     len
 }

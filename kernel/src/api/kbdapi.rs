@@ -159,6 +159,10 @@ pub fn kbd_set_status(c: &mut Ctx) -> u32 {
     };
     let echo = mask::ECHO_ON | mask::ECHO_OFF;
     let input = mask::BINARY | mask::ASCII;
+    // Echo cannot be turned on while the keyboard is in binary mode; a
+    // call that switches to binary mode is judged by the mode it starts
+    // from (IBM's TELNET sets binary, echo and shift reports at once).
+    let was_binary = i.mask & mask::BINARY != 0;
     if m & echo != 0 {
         i.mask = (i.mask & !echo) | (m & echo);
     }
@@ -168,7 +172,7 @@ pub fn kbd_set_status(c: &mut Ctx) -> u32 {
     } else if m & mask::SHIFT_REPORT != 0 {
         i.mask |= mask::SHIFT_REPORT;
     }
-    if i.mask & mask::BINARY != 0 && m & mask::ECHO_ON != 0 {
+    if was_binary && m & mask::ECHO_ON != 0 && m & mask::ASCII == 0 {
         return ERROR_KBD_INVALID_ECHO_MASK;
     }
     if m & mask::MODIFY_TURNAROUND != 0 {
