@@ -11,6 +11,8 @@
 //! * `dns`: resolve `-name` (default www.ibm.com) and localhost.
 //! * `connect`: TCP to `-host`:`-port` (default the gateway, 5556): send
 //!   a line, print the answer (a host-side `nc -l 5556`).
+//! * `bulk`: 1 MB to the host (`-port`+1, a sink) and 1 MB from it
+//!   (`-port`+2, a source of the pattern i % 251), checked.
 //! * `listen`: accept one connection on port `-listen` (default 23)
 //!   within `-wait` seconds (default 60), echo a line back (QEMU
 //!   `hostfwd=tcp::5555-:23` and a host-side `nc localhost 5555`).
@@ -304,6 +306,58 @@ fn connect(host: [u8; 4], port: u16) {
     close(s);
 }
 
+/// The bulk test pattern.
+fn pattern(i: usize) -> u8 {
+    (i % 251) as u8
+}
+
+/// 1 MB to the host (port+1, a host-side `nc -l` writing a file) and
+/// 1 MB from it (port+2, `nc -l` reading the same pattern).
+fn bulk(host: [u8; 4], port: u16) {
+    const SIZE: usize = 1 << 20;
+    let s = socket(SOCK_STREAM, 0).unwrap_or(0);
+    let rc = unsafe { Rs2SockConnect(s, &SockAddrIn::new(host, port + 1), 16) };
+    if check(&alloc::format!("bulk: connect to {}:{}", ip(host), port + 1), rc == 0) {
+        let data: Vec<u8> = (0..SIZE).map(pattern).collect();
+        let t0 = ms();
+        let r = send(s, &data);
+        let dt = ms().wrapping_sub(t0).max(1);
+        check("bulk: 1 MB sent", r == Ok(SIZE));
+        println!("  sent 1 MB in {dt} ms ({} KB/s)", 1024 * 1000 / dt);
+        unsafe { Rs2SockShutdown(s, 1) };
+        // The host closes when it has everything.
+        set_timeout(s, 20_000);
+        let mut b = [0u8; 64];
+        check("bulk: the host closed", recv(s, &mut b) == Ok(0));
+    }
+    close(s);
+    let s = socket(SOCK_STREAM, 0).unwrap_or(0);
+    let rc = unsafe { Rs2SockConnect(s, &SockAddrIn::new(host, port + 2), 16) };
+    if check(&alloc::format!("bulk: connect to {}:{}", ip(host), port + 2), rc == 0) {
+        set_timeout(s, 20_000);
+        let mut buf = alloc::vec![0u8; 32768];
+        let (mut n, mut good) = (0usize, true);
+        let t0 = ms();
+        loop {
+            match recv(s, &mut buf) {
+                Ok(0) => break,
+                Ok(k) => {
+                    good &= buf[..k].iter().enumerate().all(|(i, &b)| b == pattern(n + i));
+                    n += k;
+                }
+                Err(e) => {
+                    println!("  recv: {}", strerror(e));
+                    break;
+                }
+            }
+        }
+        let dt = ms().wrapping_sub(t0).max(1);
+        println!("  received {n} bytes in {dt} ms ({} KB/s)", n as u32 / dt * 1000 / 1024);
+        check("bulk: 1 MB received intact", n == SIZE && good);
+    }
+    close(s);
+}
+
 fn listen(port: u16, wait_s: u32) {
     let l = socket(SOCK_STREAM, 0).unwrap_or(0);
     set_int(l, SO_REUSEADDR, 1);
@@ -391,6 +445,12 @@ fn main(st: &os2::Startup) -> u32 {
         match o.host.or(gw) {
             Some(h) => connect(h, o.port),
             None => println!("  (no host to connect to)"),
+        }
+    }
+    if run("bulk") {
+        match o.host.or(gw) {
+            Some(h) => bulk(h, o.port),
+            None => println!("  (no host for the bulk transfer)"),
         }
     }
     if run("listen") {
