@@ -113,6 +113,7 @@ on the media, so rs2's own utilities take their place.
 | Toolkit rawex, geneserv/genesend | works | Sun RPC over UDP through the portmapper. |
 | Toolkit rgs/rgc (rpcgen) | fails | `svcudp_create - cannot getsockname` inside IBM's RPC32DLL; not investigated. |
 | Toolkit echos/echoc (HPS) | fails | Need `sysctl()` memory-mapped I/O (OS2_MEMMAPIO), which rs2 does not have. |
+| SYSLOGD.EXE | works | Receives a UDP message (sent with RXSOCK to 127.0.0.1:514) and writes it to `%ETC%\\SYSLOG.MSG`. |
 | TFTP.EXE, INETD.EXE, LPD.EXE, TELNETD.EXE, BOOTP.EXE | fails | 16-bit: need TCPIPDLL.DLL (not written yet) and IBM's TNLS16.DLL, which imports PMWIN's 16-bit entry points. |
 
 ## Messages and national language support

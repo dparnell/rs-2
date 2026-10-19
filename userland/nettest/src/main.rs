@@ -232,12 +232,42 @@ fn loopback() {
     let mut got = 0;
     let rc = unsafe { Rs2SockRecvFrom(u, buf.as_mut_ptr(), 64, 0, &mut from, &mut got) };
     check("loop: UDP datagram to self", rc == 0 && &buf[..got as usize] == b"datagram" && from.port() == 7001);
+    // The socket list shows it with its owner.
+    let me_pid = {
+        let (mut tib, mut pib) = (core::ptr::null_mut(), core::ptr::null_mut());
+        unsafe { os2::DosGetInfoBlocks(&mut tib, &mut pib) };
+        unsafe { (*pib).pid }
+    };
+    let listed = os2::net::sockets().iter().any(|i| i.kind == 2 && i.lport == 7001 && i.pid == me_pid && i.socket == u);
+    check("loop: socket list shows the UDP socket and its owner", listed);
+    // so_cancel: a receive blocked in another thread ends with EINTR.
+    unsafe {
+        CANCEL_SOCK = u;
+        CANCEL_RC = 0;
+        let mut tid = 0;
+        os2::DosCreateThread(&mut tid, cancel_waiter, 0, 0, 65536);
+        os2::DosSleep(300);
+        Rs2SockCancel(u);
+        let mut t = tid;
+        os2::DosWaitThread(&mut t, 0);
+    }
+    check("loop: so_cancel ends a blocked recvfrom with EINTR", unsafe { CANCEL_RC } == EINTR);
     close(u);
     // Nobody listens on 7002.
     let r = socket(SOCK_STREAM, 0).unwrap_or(0);
     let rc = unsafe { Rs2SockConnect(r, &SockAddrIn::new([127, 0, 0, 1], 7002), 16) };
     check("loop: connection refused", rc == ECONNREFUSED);
     close(r);
+}
+
+static mut CANCEL_SOCK: u32 = 0;
+static mut CANCEL_RC: u32 = 0;
+
+unsafe extern "C" fn cancel_waiter(_: u32) {
+    let mut buf = [0u8; 16];
+    let mut from = SockAddrIn::default();
+    let mut got = 0;
+    unsafe { CANCEL_RC = Rs2SockRecvFrom(CANCEL_SOCK, buf.as_mut_ptr(), 16, 0, &mut from, &mut got) };
 }
 
 fn ping(target: [u8; 4], what: &str) {

@@ -186,7 +186,9 @@ QEMU's user network: the guest is 10.0.2.15, the gateway (and the host)
 10.0.2.2, the DNS forwarder 10.0.2.3 (it asks the host's resolver).
 
 `RS2\NETTEST.EXE` checks: the interface configuration (DHCP), loopback
-TCP (non-blocking connect, select, 200 KB echoed) and UDP, a refused
+TCP (non-blocking connect, select, 200 KB echoed) and UDP, the socket
+list (Rs2NetQuerySockets), so_cancel of a receive blocked in another
+thread, a refused
 connection, ping of 127.0.0.1 and the gateway, DNS (`-name`, default
 www.ibm.com) and localhost, a TCP connection to the host (10.0.2.2:5556:
 send a line, read the answer), 1 MB to the host (port 5557) and 1 MB
