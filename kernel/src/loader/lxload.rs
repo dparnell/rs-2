@@ -155,7 +155,7 @@ pub fn load(
                     }
                     lx::Target::ImportOrdinal { module, ordinal } => {
                         let t = import_target(&imports, module, ImportBy::Ordinal(ordinal)).map_err(|e| {
-                            crate::println!(
+                            crate::trace!(
                                 "loader: {}: import {}.{} not found",
                                 path,
                                 import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"),
@@ -169,7 +169,7 @@ pub fn load(
                     lx::Target::ImportName { module, name_offset } => {
                         let name = m.import_proc_name(name_offset).map(s).map_err(|_| err::BAD_EXE_FORMAT)?;
                         let t = import_target(&imports, module, ImportBy::Name(&name)).map_err(|e| {
-                            crate::println!("loader: {}: import {} not found", path, name);
+                            crate::trace!("loader: {}: import {} not found", path, name);
                             super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
                             e
                         })?;

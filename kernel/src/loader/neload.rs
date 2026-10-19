@@ -117,7 +117,7 @@ pub fn load(
                 },
                 ne::Target::ImportOrdinal { module, ordinal } => {
                     import_target(&imports, module, ImportBy::Ordinal(ordinal as u32)).map_err(|e| {
-                        crate::println!(
+                        crate::trace!(
                             "loader: {}: import {}.{} not found",
                             path,
                             import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"),
@@ -130,7 +130,7 @@ pub fn load(
                 ne::Target::ImportName { module, name_offset } => {
                     let name = m.imported_name(name_offset).map(s).map_err(|_| err::BAD_EXE_FORMAT)?;
                     import_target(&imports, module, ImportBy::Name(&name)).map_err(|e| {
-                        crate::println!("loader: {}: import {} not found", path, name);
+                        crate::trace!("loader: {}: import {} not found", path, name);
                         super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
                         e
                     })?
