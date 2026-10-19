@@ -115,6 +115,16 @@ fn place(parent: u32, owner: u32, t: &DlgItemT, fcf: u32) -> Rect {
 
 pub fn create_from(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u32) -> u32 {
     let parent = if parent == 0 { HWND_DESKTOP } else { parent };
+    // The actual owner is the ancestor of hwndOwner that is a child of
+    // the dialog's parent (a client window's frame, for a dialog on the
+    // desktop).
+    let mut owner = owner;
+    while owner != 0 && st().desk.get(owner).is_some_and(|w| w.parent != parent && w.parent != 0) {
+        owner = ctl::parent(owner);
+    }
+    if !st().desk.exists(owner) {
+        owner = 0;
+    }
     let mut fcf = if t.ctl.is_null() { 0 } else { unsafe { (t.ctl as *const u32).read_unaligned() } };
     for (fs, f) in [(FS_DLGBORDER, FCF_DLGBORDER), (FS_BORDER, FCF_BORDER), (FS_SIZEBORDER, FCF_SIZEBORDER)] {
         if t.style & fs != 0 {

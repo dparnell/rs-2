@@ -220,7 +220,7 @@ pub fn register_builtin() {
         (7, crate::listbox::listbox_entry as *const () as u32, 0x2000_0000),
         (8, crate::scrollbar::scrollbar_entry as *const () as u32, 0),
         (9, crate::frame::titlebar_entry as *const () as u32, 0),
-        (10, crate::mle::mle_entry as *const () as u32, 0),
+        (10, crate::mle::mle_entry as *const () as u32, 0x2000_0000),
     ];
     let s = st();
     for (n, proc_, style) in classes {
