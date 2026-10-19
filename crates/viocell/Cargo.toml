@@ -1,0 +1,8 @@
+[package]
+name = "viocell"
+description = "no_std text-cell renderer and mark/copy/paste helpers for VIO windows (and later AVIO)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
