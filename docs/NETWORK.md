@@ -40,11 +40,14 @@ link state, MTU, `send(frame)`, `receive(callback)` and `rx_pending()`.
   frame as a two-descriptor chain (what legacy devices without
   ANY_LAYOUT need), the receive queue kept full.
 
-rs2 has no MSI/MSI-X and cannot route PCI INTx yet, so the NICs keep
-interrupts masked. The timer tick (interrupt context) calls
-`rx_pending()` on every NIC, which only peeks at a descriptor or the
-used ring under `try_lock`, and wakes the network thread when a frame is
-waiting. With interrupts, the handler would do the same.
+NICs with MSI (the 82574L) or MSI-X (virtio-net) interrupt on received
+frames and link changes: the handler acknowledges the device and calls
+`net::kick()`, which wakes the network thread (`Nic::interrupt_driven`).
+PCI INTx cannot be routed (no ACPI _PRT), so the others (8254x), and all
+of them with `nomsi`, keep interrupts masked: the timer tick (interrupt
+context) calls `rx_pending()` on them, which only peeks at a descriptor
+or the used ring under `try_lock`, and wakes the network thread when a
+frame is waiting.
 
 ## The stack: `crates/tcpip`
 
@@ -112,8 +115,8 @@ messages (link changes, DHCP leases) on the console.
 The stack lives behind a sleeping `Mutex`; API calls run it in the
 calling thread (`net::with_stack`) and transmit what it produced at
 once. Everything is thread context under the big kernel lock; only the
-tick runs in interrupt context and only takes driver spin locks with
-`try_lock`.
+tick and the NIC interrupt handlers run in interrupt context and only
+take driver spin locks with `try_lock`.
 
 **Waiting**: every change a socket waiter could care about (data, state
 changes, accept queue, DNS answers) bumps `net::EVENTS` and wakes
@@ -199,7 +202,7 @@ socket.
 
 ## Gaps
 
-* No interrupts (polling from the tick); no multicast/IGMP, no IPv6, no
+* NICs without MSI/MSI-X are polled from the tick; no multicast/IGMP, no IPv6, no
   IP forwarding, one address per interface, no routing table beyond the
   default gateway.
 * TCP: no keepalives, urgent data, window scaling, SACK, timestamps,

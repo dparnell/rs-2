@@ -3,8 +3,9 @@
 //! block device.
 //!
 //! Commands run in the thread doing the I/O: the CBW, data and CSW stages
-//! are bulk transfers that `xhci` queues and then polls for, yielding the
-//! CPU. BOT allows one command at a time per device, so a sleeping mutex
+//! are bulk transfers that `xhci` queues and then waits for (sleeping
+//! until the controller's interrupt, or polling and yielding the CPU
+//! without one). BOT allows one command at a time per device, so a sleeping mutex
 //! serialises the logical units, and it also owns the DMA buffers. Error
 //! handling follows the BOT specification: a stalled data stage clears
 //! the endpoint halt and still reads the CSW (retried once after a stall);
