@@ -21,8 +21,9 @@ programs unmodified, natively, on 64-bit PCs.
   (`\DEV\VIOCON$`) and display (virtio-gpu, any `video=WxH`).
 - Networking: a TCP/IP stack of its own (ARP, IPv4, ICMP, UDP, TCP, DHCP,
   DNS) on Intel e1000/e1000e and virtio-net adapters, a kernel socket API
-  and OS/2's socket DLLs (TCPIP32, SO32DLL, TCP32DLL) on it, so IBM's FTP,
-  TELNET and REXX RXSOCK run unmodified; `PING`, `IFCONFIG`, `NETSTAT`,
+  and OS/2's socket DLLs (TCPIP32, SO32DLL, TCP32DLL and the 16-bit
+  TCPIPDLL) on it, so IBM's FTP, TELNET, TFTP and REXX RXSOCK run
+  unmodified; `PING`, `IFCONFIG`, `NETSTAT`,
   `HOST`; see [docs/NETWORK.md](docs/NETWORK.md).
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.

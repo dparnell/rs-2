@@ -84,9 +84,10 @@ Status markers: done, in progress, planned.
   a profile-only PMSHAPI): sockets, select, ioctls, resolver (res_*,
   PTR), network database from %ETC%; IBM FTP, TELNET, RXSOCK and the
   Toolkit socket and RPC samples run; so_cancel and the socket list
-  (RS2API 218/219); IFCONFIG, NETSTAT, HOSTNAME, HOST
-- planned: the 16-bit TCPIPDLL (and a TNLS16 or PMWIN's 16-bit entries)
-  for TFTP/INETD/LPD/TELNETD, sockets shared between processes,
+  (RS2API 218/219); IFCONFIG, NETSTAT, HOSTNAME, HOST; the 16-bit
+  TCPIPDLL and TNLS16 (thunk16: 16-bit entry points for Rust DLLs), IBM's
+  16-bit TFTP runs
+- planned: sockets shared between processes (INETD),
   route/arp and run-time configuration, INI files for PMSHAPI, NIC
   interrupts, vmxnet3/pcnet drivers, TCP keepalive/window
   scaling/SACK/urgent data

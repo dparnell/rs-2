@@ -111,10 +111,11 @@ on the media, so rs2's own utilities take their place.
 | Toolkit accept/recv | works | `accept_and_recv()`; the client connects to INADDR_ANY. |
 | Toolkit os2ioctl | works | SIOSTATCNTRT/SIOSTATRT routing table, SIOCSSYN. |
 | Toolkit rawex, geneserv/genesend | works | Sun RPC over UDP through the portmapper. |
-| Toolkit rgs/rgc (rpcgen) | fails | `svcudp_create - cannot getsockname` inside IBM's RPC32DLL; not investigated. |
+| Toolkit rgs/rgc (rpcgen) | fails | The sample calls RPC32DLL's `_Optlink` `svcudp_create` with `_System` linkage (socket -1 pushed, EAX read): `svcudp_create - cannot getsockname`. |
 | Toolkit echos/echoc (HPS) | fails | Need `sysctl()` memory-mapped I/O (OS2_MEMMAPIO), which rs2 does not have. |
 | SYSLOGD.EXE | works | Receives a UDP message (sent with RXSOCK to 127.0.0.1:514) and writes it to `%ETC%\\SYSLOG.MSG`. |
-| TFTP.EXE, INETD.EXE, LPD.EXE, TELNETD.EXE, BOOTP.EXE | fails | 16-bit: need TCPIPDLL.DLL (not written yet) and IBM's TNLS16.DLL, which imports PMWIN's 16-bit entry points. |
+| TFTP.EXE | works | 16-bit, on rs2's TCPIPDLL and TNLS16: `status`, `binary`, `get` of 300 KB and a text file from QEMU's TFTP server, byte-identical. Timeouts (`_alarm`) do not fire. |
+| INETD.EXE, TELNETD.EXE, LPD.EXE, BOOTP.EXE | not tried | 16-bit servers; INETD hands accepted sockets to other processes, which rs2's per-process sockets do not allow; TELNETD needs pseudo terminals. |
 
 ## Messages and national language support
 
