@@ -50,6 +50,10 @@ name = "hpfs"
 version = "0.1.0"
 
 [[package]]
+name = "inifile"
+version = "0.1.0"
+
+[[package]]
 name = "install"
 version = "0.1.0"
 dependencies = [
@@ -114,6 +118,7 @@ dependencies = [
 name = "pmshapi-dll"
 version = "0.1.0"
 dependencies = [
+ "inifile",
  "os2",
 ]
 
@@ -122,6 +127,14 @@ name = "pmsrv"
 version = "0.1.0"
 dependencies = [
  "os2",
+]
+
+[[package]]
+name = "pmviowin"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "viocell",
 ]
 
 [[package]]
@@ -225,3 +238,7 @@ dependencies = [
  "hpfs",
  "os2",
 ]
+
+[[package]]
+name = "viocell"
+version = "0.1.0"
