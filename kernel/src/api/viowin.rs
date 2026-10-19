@@ -79,7 +79,10 @@ pub fn query_sessions(c: &mut Ctx) -> u32 {
     let pm = session::pm_session();
     let fg = session::foreground();
     let mut list: Vec<(u32, u32, alloc::string::String)> = Vec::new();
-    if all {
+    // The boot session, unless nothing runs there any more (a shell that
+    // went to PM).
+    let boot_used = super::signal::foreground_of(1).is_some_and(|p| !crate::display::is_pm(p.pid));
+    if all && boot_used {
         list.push((1, 0, alloc::string::String::from("OS/2 Full Screen")));
     }
     for (sid, title, windowable, windowed) in session::list_full() {
