@@ -55,7 +55,7 @@ unsafe extern "C" {
 }
 
 /// Private messages to the server's window thread.
-const WM_RS2_GHOSTS: u32 = 0x0ff0;
+pub const WM_RS2_GHOSTS: u32 = 0x0ff0;
 const WM_RS2_WINLIST: u32 = 0x0ff1;
 const TID_CHECK: u32 = 0x7f01;
 

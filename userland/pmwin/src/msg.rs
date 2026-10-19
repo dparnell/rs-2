@@ -90,7 +90,12 @@ pub fn wake_pending() {
     }
     // The server paints for queues that do not respond.
     if server {
-        if let Some(x) = s.queues.get(&s.server_queue) {
+        let p = s.pointer;
+        if let Some(x) = s.queues.get_mut(&s.server_queue) {
+            if !x.msgs.iter().any(|m| m.msg == crate::server::WM_RS2_GHOSTS) {
+                let m = QMsg { hwnd: HWND_DESKTOP, msg: crate::server::WM_RS2_GHOSTS, mp1: 0, mp2: 0, time: t, x: p.x, y: p.y, reserved: 0 };
+                x.msgs.post(m);
+            }
             wake_queue(x);
         }
     }
