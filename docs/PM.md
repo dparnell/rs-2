@@ -28,7 +28,9 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `crates/gpi` | Rendering engine: presentation-space attributes, lines, boxes, arcs, areas, text with bitmap fonts, bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
 | `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping; the MLE's text engine (`mle.rs`: layout with word wrap and tabs, editing, undo, import/export formats, search) and the arithmetic of spin buttons, sliders and value sets (`controls.rs`). Plain data structures, unit-tested on the host. |
 | `userland/pmwin` → PMWIN.DLL | Exports (`Win*`, `Gpi*`), the shared state and its heap, locking, messaging, the built-in window classes, and the PM server's code (input routing, hung programs, window list). |
-| `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000; 9001, `Rs2ShellPosition`, gives PMSHAPI's `WinQueryTaskSizePos` the shell's next cascade position). |
+| `crates/viocell` | Text cells on pixels: renders VGA text cells (font, palette, blink, cursor, marked block) to 24-bit bitmaps; Copy/Copy All text and Paste keystrokes. Host-tested; for VIO windows now, AVIO later. |
+| `userland/pmviowin` → `C:\OS2\PMVIOWIN.EXE` | The windows of windowed VIO sessions (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)). |
+| `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000; 9001, `Rs2ShellPosition`, gives PMSHAPI's `WinQueryTaskSizePos` the shell's next cascade position; 9002, `Rs2PmVioWindow`, registers a VIO window's client). |
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
 | `userland/pmctls` → PMCTLS.DLL | The standard file and font dialogs (`WinFileDlg`, `WinFontDlg`): ordinary PM dialogs, built from templates made in memory, run through PMWIN like an application's. |
 | `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), HELPMGR stubs, PMDRAG (no drag is ever in progress), PMMERGE (the entry points programs import from it directly), LIBUNI (locale objects). |
@@ -59,8 +61,9 @@ rs2's own DLLs (applications never import it):
   the foreground. ERROR_NOT_SUPPORTED without such a display.
 - `Rs2ShowPointer(fShow)` (6): shows or hides the hardware cursor.
 
-RS2API ordinals: 1-6 PM (above), 100 performance counters, 200-221
-sockets (docs/NETWORK.md).
+RS2API ordinals: 1-6 PM (above), 10-16 windowed VIO sessions (see
+[Windowed VIO sessions](#windowed-vio-sessions-os2-window)), 100
+performance counters, 200-221 sockets (docs/NETWORK.md).
 
 Two kernel rules matter for PM: a thread inside a must-complete section
 (DosEnterMustComplete) that is being killed finishes the section first
@@ -73,8 +76,15 @@ The session manager gains a PM session type: the first PM program starts
 (or joins) the PM session, which owns the framebuffer while it is in the
 foreground and receives raw input instead of the text keyboard queue.
 Switching to a text session and back makes the kernel queue a repaint
-event so the PM server repaints everything. In the PM session Ctrl+Esc
-goes to PM (its window list); Alt+Esc still switches sessions.
+event so the PM server repaints everything. Switching away (Alt+Esc, the
+text window list, Alt+Home on a VIO window, a pop-up) queues
+`EV_BACKGROUND` (kind 5) first: the server points PMWIN's drawing
+surface at a shadow buffer in the shared state until the repaint event
+points it back at the framebuffer, so nothing PM draws in the meantime
+lands on the text screen; for what PM drew in the moment before the
+server saw the event, the kernel redraws the text screen a few times
+during the first half second. In the PM session Ctrl+Esc goes to PM
+(its window list); Alt+Esc still switches sessions.
 
 ## Processes and input
 
@@ -131,7 +141,8 @@ desktop window (painting the background) and runs:
   classes, presentation spaces, GPI objects and accelerator tables go;
   threads waiting for a reply from it get 0; the next frame is activated
   and what comes to light repaints.
-- the window list (Ctrl+Esc).
+- the window list (Ctrl+Esc): frames, full-screen sessions and the
+  command prompt launchers.
 
 The server never waits for an application: what it sends to another
 thread's window is queued like a posted message and its result dropped.
@@ -146,6 +157,108 @@ process) hides it around each drawing operation, within one PMWIN call
 under the lock, never across application code, so a stopped program
 cannot leave it hidden. A program that hides the pointer with
 WinShowPointer and then stops responding gets it shown again.
+
+## Windowed VIO sessions (OS/2 Window)
+
+Text-mode (VIO) programs run in PM windows as on OS/2: `START /WIN CMD`,
+DosStartSession with `SSF_TYPE_WINDOWABLEVIO`, or with
+`SSF_TYPE_DEFAULT` for a program marked WINDOWCOMPAT started from PM or
+from another windowed session (as OS/2 resolves the default type;
+NOTWINDOWCOMPAT programs and programs started from a full-screen
+session get a full-screen session, PM programs join PM).
+
+**In the kernel** (`kernel/src/viowin.rs`, `kernel/src/api/viowin.rs`)
+such a session is an ordinary session: its own `Screen` (cells, cursor,
+mode, palette, blink, code page, font), keyboard queue with its input
+mode, line editor and monitors, mouse queue and Ctrl+C/Ctrl+Break
+target. Only the framebuffer is not its own: the screen is never drawn
+there while the session is windowed. Every change of a windowed screen
+bumps the screen's change counter and a global generation; the host
+waits for the generation in the kernel. VioGetPhysBuf, VioScrLock and
+VioScrUnLock, VioSavRedrawWait and VioModeWait fail in a windowed
+session with ERROR_VIO_EXTENDED_SG (494, "The VIO call issued by a VIO
+windowed program is not valid"), as on OS/2, where programs that need
+them are NOTWINDOWCOMPAT and run full screen; VioSetMode accepts the
+text modes (and refuses graphics modes, as it does everywhere in rs2).
+The PIB and local info segment report process type 2 (VIO window) for
+the text programs of a windowable session.
+
+RS2API services for the host (32-bit, `_System`):
+
+| Ordinal | Call |
+|---------|------|
+| 10 | `Rs2VioWait(PULONG pulGen, ULONG ulTimeout)`: wait until the generation differs from *pulGen (ms, -1 forever) and store it; registers the caller as the host |
+| 11 | `Rs2VioQuerySessions(PRS2VIOSESSION a, ULONG cMax, PULONG pcFound, ULONG fAll)`: the windowable sessions (fAll: every session but PM's) as {sid, flags, screen change counter, leader pid, title[64]}; flags: 1 windowed now, 2 activate its window (reported once), 4 windowable, 8 PM, 0x10 foreground |
+| 12 | `Rs2VioReadScreen(ULONG sid, PRS2VIOSTATE p, PUSHORT pCells, ULONG cb)`: state (change counter, columns, rows, cursor row/column, first/last cursor scan line, cell height, code page, flags: cursor shown, blink, windowed, mouse open, user font; font generation; 16 colours 0x00RRGGBB) and the cells |
+| 13 | `Rs2VioQueryFont(ULONG sid, ULONG cy, PBYTE p, ULONG cb)`: the 256 glyphs at height 8, 14 or 16 for the session's code page (or its VioSetFont font) |
+| 14 | `Rs2VioKey(ULONG sid, PINPUTEVENT p)`: a key as Rs2ReadInput reports it (character, scan code, extended flag, shift state, make/break): through the session's keyboard monitors, then its input mode (Ctrl+C, Ctrl+Break, Ctrl+S, PrtSc), to its queue; Alt+Home switches it to the full screen |
+| 15 | `Rs2VioMouse(ULONG sid, LONG row, LONG col, ULONG fsButtons)`: the pointer over a cell: events into the session's mouse queue (and monitors) if it opened the mouse |
+| 16 | `Rs2VioControl(ULONG sid, ULONG cmd, ULONG arg)`: 1 focus, 2 windowed (1) or full screen (0), 3 end the session (its processes are killed), 4 select any session, 5 register as the host |
+
+**The host**, `C:\OS2\PMVIOWIN.EXE` (`userland/pmviowin`), is an
+ordinary PM program. The kernel starts it (detached) when the first
+windowed session appears and there is none; it ends with the last
+windowed session unless started with `/SHELL`. It has one frame window
+per windowable session (title from the session's title) and never waits
+for a session:
+
+- a watcher thread waits in `Rs2VioWait` and posts one message to the
+  window thread, which reads the changed screens and invalidates the
+  cells that changed (at most about 50 updates a second); a program that
+  hangs or spins just stops changing its screen, and the window keeps
+  painting, moving, sizing and closing;
+- painting renders the cells with the kernel's own fonts (unscii 8x16,
+  8x14, 8x8 for the session's code page), the session's palette and
+  blink/intensity setting, the cursor shape (scaled to the font) blinking
+  while the window has the focus, blinking characters, and the marked
+  block inverted (crate `viocell`, host-tested, written so that AVIO can
+  use it later), and draws them with GpiDrawBits;
+- the window takes the size of the text mode (the session's cell height
+  unless a font size was chosen) and follows mode changes (`MODE
+  CO80,43`); when it is smaller than the screen, the scroll bars scroll it;
+- the system menu adds Mark, Copy, Copy All, Paste, Fullscreen (Alt+Home)
+  and Font 8 x 16 / 8 x 14 / 8 x 8. Dragging with mouse button 1 marks a
+  block (unless the program opened the mouse, which then gets the mouse
+  events); Mark marks with the arrow keys (Shift extends, Enter copies,
+  Esc cancels). Copy and Copy All put CF_TEXT on the clipboard (trailing
+  blanks dropped, CR LF line ends); Paste types CF_TEXT into the session
+  (line ends as Enter);
+- Close (Alt+F4, the system menu, End task in the window list) asks
+  whether to end the programs in the window and kills them; the window
+  goes when the session ends (also when its CMD runs EXIT).
+
+**Keys** do not go through the host. PMWIN's input thread knows the
+client windows (`Rs2PmVioWindow(hwnd, sid, fl)`, private ordinal 9002)
+and hands a key for the one with the focus straight to the kernel with
+`Rs2VioKey`, with the scan code, the extended-key flag, the full shift
+state and the release, in the order typed; Alt+Space and Alt+F4 stay
+with the frame, and an open menu or the host's mark mode gets keys as
+WM_CHAR. Shift keys alone are not reported to the session (PM's raw
+input has no events for them).
+
+**Alt+Home** in a window switches the session to the full screen (the
+window is hidden; the session is selected like any full-screen
+session); Alt+Home there brings it back into its window and PM to the
+front. Selecting a windowed session (DosSelectSession, the text window
+list) activates its window in PM; Alt+Esc skips windowed sessions.
+
+**The PM window list** (Ctrl+Esc) lists the frames (VIO windows among
+them), the full-screen text sessions (switching to one selects it, End
+task ends its processes) and two launchers: "Command prompt (window)"
+and "Command prompt (full screen)" (DosStartSession of `%COMSPEC%`).
+
+**Booting into PM with a command prompt window**: run the host as the
+shell. In CONFIG.SYS
+
+    SET COMSPEC=C:\OS2\CMD.EXE
+    PROTSHELL=C:\OS2\PMVIOWIN.EXE /SHELL
+
+(COMSPEC must name the command processor: it defaults to the shell). For
+a development run, put `init=OS2\PMVIOWIN.EXE -- /SHELL` in
+`work/cmdline.txt`. With `/SHELL` the host opens a command prompt window
+when there is none at start and keeps running when the last window
+closes (Ctrl+Esc offers new prompts). The default boot (`PROTSHELL=`
+CMD.EXE) is unchanged.
 
 ## Programs that stop responding
 
@@ -479,6 +592,17 @@ The export trampolines pass their index to the lock's entry
   mouse/keyboard input through `xtask run --type` (`{mouse_move dx dy}`,
   `{mouse_abs x y}`, `{mouse_button n}`, `{shot NAME}` for a screenshot
   as `work/NAME.png` at that point).
+- VIO windows (QEMU runs with screenshots): IBM CMD.EXE started with
+  `START /WIN CMD` from a full-screen CMD, from PM (the window list's
+  launcher) and as the boot shell (`init=OS2\PMVIOWIN.EXE -- /SHELL`):
+  DIR and scrolling output, typing, MODE CO80,43 and CO80,50 (the window
+  follows; with the 8 x 16 font 50 rows do not fit and the scroll bars
+  scroll), the font sizes, Ctrl+C, IBM TEDIT, `RS2\APITEST` inside a
+  window (its console checks expect ERROR_VIO_EXTENDED_SG for
+  VioGetPhysBuf and VioScrLock there), Alt+Home to the full screen and
+  back, two and three windows at once with a REXX loop spinning in one,
+  marking with the mouse and Copy, then Paste into E.EXE and back, Close
+  with its confirmation, EXIT closing the window.
 - `RS2\PMHANG.EXE` and `RS2\PMBUSY.EXE` (userland/pmhang): a window whose
   procedure never returns from a click (or the H key), blocked in
   DosSleep or spinning without system calls; button 2 stops it for six

@@ -132,6 +132,17 @@ services (display mapping, raw input, a hardware cursor it moves itself,
 a process-ended event) and by letting must-complete sections finish
 before a killed thread dies. See [PM.md](PM.md).
 
+**Windowed text sessions.** A VIO session shown in a PM window ("OS/2
+Window") stays a kernel session with its own virtual screen, keyboard
+and mouse queues; only the framebuffer belongs to PM. A PM program,
+`PMVIOWIN.EXE`, started by the kernel on demand, waits in the kernel
+for screen changes (a generation counter, no polling), reads the cells
+and draws them; PM's input thread hands keys for such a window straight
+to the session, so a busy host or a hung text program never delays the
+other. Alt+Home moves the session between its window and the full
+screen. While a text session has the screen, PM draws into a shadow
+buffer. See [PM.md](PM.md#windowed-vio-sessions-os2-window).
+
 ## Boot
 
 1. UEFI firmware loads `\EFI\BOOT\BOOTX64.EFI` (`boot/`, Rust, `x86_64-unknown-uefi`).

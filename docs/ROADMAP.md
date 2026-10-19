@@ -42,7 +42,14 @@ Status markers: done, in progress, planned.
   wake-up bugs it found; kernel object counters for leak checks
 - done: kernel threads (no OS/2 process) with a work queue; the scheduler
   reports a thread that blocks while holding a spin lock
-- planned: AVIO (VIO in PM windows), parallel port hardware,
+- done: windowed VIO sessions ("OS/2 Window"): SSF_TYPE_WINDOWABLEVIO
+  and the default type for WINDOWCOMPAT programs from PM, `START /WIN`,
+  the PMVIOWIN host (rendering, scroll bars, mode and font changes, Mark,
+  Copy, Copy All, Paste, Close), keys and mouse into the session,
+  Alt+Home between window and full screen, booting into PM with a
+  command prompt window (`PROTSHELL=C:\OS2\PMVIOWIN.EXE /SHELL`)
+- planned: AVIO (VioCreatePS & co. in PM windows, reusing
+  `crates/viocell`), parallel port hardware,
   DosDevIOCtl coverage, mandatory file locks, finer-grained kernel locking
   (in place of the big kernel lock)
 
@@ -147,6 +154,9 @@ Status markers: done, in progress, planned.
   rendering, owner and viewer); WinTrackRect; PMCTLS's file and font
   dialogs; PMDRAG, PMMERGE and LIBUNI as far as programs need them
   (`RS2\CTLTEST.EXE` checks the controls and the clipboard)
+- done: windowed VIO sessions (see milestone 1); the PM window list lists
+  full-screen sessions and starts command prompts; PM draws into a
+  shadow buffer while a text session has the screen
 - planned: per-process presentation-space limits, hooks that are called
   (WinSetHook only records them), DDE, notebooks and containers, icons
   and pointers from resources, owner-drawn items, presentation
