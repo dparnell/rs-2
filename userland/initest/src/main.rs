@@ -359,12 +359,12 @@ fn system_checks() {
     let mut p = PrfProfile { cch_user: 4, psz_user: small.as_mut_ptr(), cch_sys: 0, psz_sys: null_mut() };
     let ok = unsafe { PrfQueryProfile(0, &mut p) };
     check("PrfQueryProfile small buffer: FALSE, cut", ok == 0 && small[3] == 0 && p.cch_user as usize == user.len() + 1);
-    check("the profiles exist on disk", exists(&user) && exists(&system) && read_file(&user).is_some_and(|b| is_ini(&b)));
     let u = z(&user);
     check("PrfOpenProfile of the user profile fails", unsafe { PrfOpenProfile(0, u.as_ptr()) } == 0);
     // HINI_PROFILE: the user profile first, then the system profile;
     // writes go to the user profile.
     check("write user and system", put(HINI_SYSTEM, "IniTest", "Where", "system") && put(HINI_SYSTEM, "IniTest", "OnlySys", "s") && put(HINI_USER, "IniTest", "Where", "user"));
+    check("OS2.INI and OS2SYS.INI created on first use", exists(&user) && exists(&system) && read_file(&user).is_some_and(|b| is_ini(&b)));
     check("HINI_PROFILE reads the user profile first", string(HINI_PROFILE, "IniTest", "Where").as_deref() == Some("user"));
     check("HINI_PROFILE reads the system profile next", string(HINI_PROFILE, "IniTest", "OnlySys").as_deref() == Some("s"));
     check("HINI_PROFILE writes to the user profile", put(HINI_PROFILE, "IniTest", "Via", "p") && string(HINI_USER, "IniTest", "Via").as_deref() == Some("p") && string(HINI_SYSTEM, "IniTest", "Via").is_none());
