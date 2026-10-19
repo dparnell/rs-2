@@ -59,6 +59,7 @@ dependencies = [
  "fat",
  "hpfs",
  "os2-exe",
+ "tcpip",
 ]
 
 [[package]]
