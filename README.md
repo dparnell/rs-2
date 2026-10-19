@@ -25,6 +25,9 @@ programs unmodified, natively, on 64-bit PCs.
   TCPIPDLL) on it, so IBM's FTP, TELNET, TFTP and REXX RXSOCK run
   unmodified; `PING`, `IFCONFIG`, `NETSTAT`,
   `HOST`; see [docs/NETWORK.md](docs/NETWORK.md).
+- Presentation Manager on rs2's own PM DLLs, with text-mode programs
+  such as CMD.EXE in PM windows ("OS/2 Window": `START /WIN CMD`,
+  Alt+Home to full screen, Mark/Copy/Paste); see [docs/PM.md](docs/PM.md).
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 
