@@ -52,7 +52,43 @@ unsafe extern "C" {
     fn DosScanEnv(name: *const u8, value: *mut *const u8) -> u32;
     #[link_name = "DOSCALLS.235"]
     fn DosKillProcess(action: u32, pid: u32) -> u32;
+    #[link_name = "SESMGR.37"]
+    fn DosStartSession(sd: *const StartData, sid: *mut u32, pid: *mut u32) -> u32;
+    #[link_name = "RS2API.11"]
+    fn Rs2VioQuerySessions(entries: *mut VioSession, max: u32, found: *mut u32, all: u32) -> u32;
+    #[link_name = "RS2API.16"]
+    fn Rs2VioControl(sid: u32, cmd: u32, arg: u32) -> u32;
 }
+
+/// STARTDATA (the fields up to SessionType).
+#[repr(C, packed)]
+struct StartData {
+    length: u16,
+    related: u16,
+    fgbg: u16,
+    trace: u16,
+    title: *const u8,
+    name: *const u8,
+    inputs: *const u8,
+    termq: *const u8,
+    env: *const u8,
+    inherit: u16,
+    session_type: u16,
+}
+
+/// RS2VIOSESSION (RS2API 11).
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct VioSession {
+    sid: u32,
+    flags: u32,
+    changes: u32,
+    leader: u32,
+    title: [u8; 64],
+}
+
+const VS_WINDOWED: u32 = 0x01;
+const VS_PM: u32 = 0x08;
 
 /// Private messages to the server's window thread.
 pub const WM_RS2_GHOSTS: u32 = 0x0ff0;
@@ -376,6 +412,7 @@ pub fn process_gone(p: u32) {
         }
     }
     crate::clip::process_gone(p, &queues);
+    crate::viowin::process_gone(p);
     let s = st();
     if s.server_pid == p {
         s.server_pid = 0;
@@ -421,8 +458,18 @@ extern "C" fn desktop_proc(h: u32, m: u32, mp1: u32, _mp2: u32) -> u32 {
 
 // ---- The window list ----
 
-/// Frames listed in the window list (server process only).
-static mut LISTED: Vec<u32> = Vec::new();
+/// What a line of the window list stands for.
+#[derive(Clone, Copy)]
+enum Entry {
+    Frame(u32),
+    /// A text session on the full screen.
+    Session(u32),
+    /// Start a command prompt in a window (true) or full screen.
+    Prompt(bool),
+}
+
+/// The window list's lines (server process only).
+static mut LISTED: Vec<Entry> = Vec::new();
 static LIST_FRAME: AtomicU32 = AtomicU32::new(0);
 
 const ID_LIST: u32 = 1;
@@ -436,7 +483,7 @@ pub fn window_list() {
     post_queue(q, qmsg(HWND_DESKTOP, WM_RS2_WINLIST, 0, 0));
 }
 
-fn listed() -> &'static mut Vec<u32> {
+fn listed() -> &'static mut Vec<Entry> {
     unsafe { &mut *core::ptr::addr_of_mut!(LISTED) }
 }
 
@@ -458,6 +505,14 @@ fn open_window_list() {
         .filter(|&f| s.frames.contains_key(&f) && s.queues.get(&s.queue_of(f)).is_some_and(|q| q.pid != me))
         .filter(|&f| s.desk.get(f).is_some_and(|w| !w.text.is_empty() || WinWindowFromID(f, FID_TITLEBAR) != 0))
         .collect();
+    // A VIO session on the full screen is listed as a session, not as its
+    // hidden window.
+    let fullscreen = crate::viowin::fullscreen_frames();
+    let frames: Vec<u32> = frames.into_iter().filter(|f| !fullscreen.contains(f)).collect();
+    let mut sessions = [VioSession { sid: 0, flags: 0, changes: 0, leader: 0, title: [0; 64] }; 32];
+    let mut found = 0;
+    unsafe { Rs2VioQuerySessions(sessions.as_mut_ptr(), 32, &mut found, 1) };
+    let sessions: Vec<VioSession> = sessions.into_iter().take(found.min(32) as usize).filter(|v| v.flags & (VS_WINDOWED | VS_PM) == 0).collect();
     // FCF_TITLEBAR | FCF_SYSMENU | FCF_DLGBORDER.
     let mut fcf: u32 = 0x0001 | 0x0002 | 0x0100;
     let mut client = 0;
@@ -484,7 +539,18 @@ fn open_window_list() {
         }
         t.push(0);
         msg::send(lb, 0x0161, (-1i32) as u32, t.as_ptr() as u32);
-        l.push(f);
+        l.push(Entry::Frame(f));
+    }
+    for v in sessions {
+        let n = v.title.iter().position(|&b| b == 0).unwrap_or(64);
+        let mut t = v.title[..n].to_vec();
+        t.extend_from_slice(b" (full screen)\0");
+        msg::send(lb, 0x0161, (-1i32) as u32, t.as_ptr() as u32);
+        l.push(Entry::Session(v.sid));
+    }
+    for (t, win) in [(&b"Command prompt (window)\0"[..], true), (&b"Command prompt (full screen)\0"[..], false)] {
+        msg::send(lb, 0x0161, (-1i32) as u32, t.as_ptr() as u32);
+        l.push(Entry::Prompt(win));
     }
     if !l.is_empty() {
         msg::send(lb, 0x0164, 0, 1);
@@ -508,27 +574,60 @@ fn close_window_list() {
     }
 }
 
-/// The frame chosen in the list.
-fn chosen(client: u32) -> u32 {
+/// The line chosen in the list.
+fn chosen(client: u32) -> Option<Entry> {
     let lb = WinWindowFromID(client, ID_LIST);
     let i = msg::send(lb, 0x0165, 0xffff_ffff, 0);
-    listed().get(i as usize).copied().filter(|&f| st().desk.exists(f)).unwrap_or(0)
+    listed().get(i as usize).copied().filter(|e| !matches!(e, Entry::Frame(f) if !st().desk.exists(*f)))
 }
 
-fn switch_to(f: u32) {
-    if f == 0 {
-        return;
+fn switch_to(e: Option<Entry>) {
+    match e {
+        Some(Entry::Frame(f)) => {
+            win::show(f, true);
+            win::activate(f);
+        }
+        Some(Entry::Session(sid)) => {
+            lock::unlocked(|| unsafe { Rs2VioControl(sid, 4, 0) });
+        }
+        Some(Entry::Prompt(window)) => start_prompt(window),
+        None => {}
     }
-    win::show(f, true);
-    win::activate(f);
 }
 
-/// End the program of a frame: a close request to one that responds,
-/// the end of the process for one that does not.
-fn end_task(f: u32) {
-    if f == 0 {
-        return;
-    }
+/// A command prompt (%COMSPEC%) in a new session: in a window or full
+/// screen.
+fn start_prompt(window: bool) {
+    let title: &[u8] = if window { b"OS/2 Window\0" } else { b"OS/2 Full Screen\0" };
+    let sd = StartData {
+        length: core::mem::size_of::<StartData>() as u16,
+        related: 0,
+        fgbg: 0,
+        trace: 0,
+        title: title.as_ptr(),
+        name: core::ptr::null(),
+        inputs: b"\0".as_ptr(),
+        termq: core::ptr::null(),
+        env: core::ptr::null(),
+        inherit: 0,
+        session_type: if window { 2 } else { 1 },
+    };
+    let (mut sid, mut pid) = (0, 0);
+    lock::unlocked(|| unsafe { DosStartSession(&sd, &mut sid, &mut pid) });
+}
+
+/// End the program of a line: a close request to a frame that responds,
+/// the end of the process for one that does not; a full-screen session's
+/// processes end.
+fn end_task(e: Option<Entry>) {
+    let f = match e {
+        Some(Entry::Frame(f)) => f,
+        Some(Entry::Session(sid)) => {
+            lock::unlocked(|| unsafe { Rs2VioControl(sid, 3, 0) });
+            return;
+        }
+        _ => return,
+    };
     let s = st();
     let q = s.queue_of(f);
     let Some(x) = s.queues.get(&q) else { return };

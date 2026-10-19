@@ -325,6 +325,7 @@ WinIntersectRect=__a_WinIntersectRect @764
 WinUnionRect=__a_WinUnionRect @891
 WinSubtractRect=__a_WinSubtractRect @887
 Rs2PmServer=__a_Rs2PmServer @9000
+Rs2PmVioWindow=__a_Rs2PmVioWindow @9002
 WinRegisterClass=__a_WinRegisterClass @926
 WinCreateWindow=__a_WinCreateWindow @909
 WinCreateStdWindow=__a_WinCreateStdWindow @908

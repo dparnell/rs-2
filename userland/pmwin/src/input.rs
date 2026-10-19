@@ -204,6 +204,9 @@ pub fn key(ev: &Input) {
     }
     let s = st();
     let target = if s.focus != 0 { s.focus } else { s.active };
+    if target != 0 && input_enabled(target) && crate::viowin::key(target, ev) {
+        return;
+    }
     if target != 0 && input_enabled(target) {
         post_input(target, WM_CHAR, fs | 1 << 16 | scan << 24, (if fs & KC_CHAR != 0 { ch } else { 0 }) | vkey << 16, ev.time);
     }

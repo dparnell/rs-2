@@ -165,6 +165,9 @@ pub struct State {
     pub atoms: Vec<Option<crate::clip::AtomTable>>,
     /// Hooks (WinSetHook).
     pub hooks: Vec<Hook>,
+    /// Windows showing windowed VIO sessions: (hwnd, session, VW_* flags,
+    /// host pid).
+    pub vio: Vec<(u32, u32, u32, u32)>,
 }
 
 /// A hook set with WinSetHook: for one queue (or all, 0), of one kind
@@ -225,6 +228,7 @@ pub fn init(surface: Surface) {
         clip: Default::default(),
         atoms: Vec::new(),
         hooks: Vec::new(),
+        vio: Vec::new(),
     });
     unsafe { (*crate::shared::header()).state = Box::into_raw(s) as *mut u8 };
 }

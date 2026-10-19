@@ -41,6 +41,7 @@ mod spin;
 mod state;
 mod statics;
 mod valueset;
+mod viowin;
 mod win;
 
 /// A line on the serial port (RS2API.4), for debugging.
