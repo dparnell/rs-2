@@ -1,0 +1,4 @@
+; name @ordinal (ordinals of the Toolkit's os2386.lib)
+WinLoadFileIcon @209
+WinSetFileIcon @210
+WinFreeFileIcon @216

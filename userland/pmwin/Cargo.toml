@@ -13,3 +13,4 @@ path = "src/lib.rs"
 os2 = { path = "../os2", features = ["heap"] }
 gpi = { path = "../../crates/gpi" }
 pmwin = { path = "../../crates/pmwin" }
+os2-exe = { path = "../../crates/os2-exe" }

@@ -19,6 +19,7 @@ mod dlg;
 mod draw;
 mod entry;
 mod exports;
+mod fileicon;
 mod frame;
 mod gpiapi;
 mod gpiobj;

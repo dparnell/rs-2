@@ -13,6 +13,7 @@ extern crate alloc;
 
 pub mod lx;
 pub mod ne;
+pub mod res;
 mod read;
 
 pub use read::Error;

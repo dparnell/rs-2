@@ -445,6 +445,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("tnls16", "OS2\\DLL\\TNLS16.DLL"),
         ("pmdrag", "OS2\\DLL\\PMDRAG.DLL"),
         ("pmmerge", "OS2\\DLL\\PMMERGE.DLL"),
+        ("pmwp", "OS2\\DLL\\PMWP.DLL"),
         ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
     ];
 
