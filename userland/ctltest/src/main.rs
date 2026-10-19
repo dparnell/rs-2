@@ -486,7 +486,7 @@ fn main(s: &Startup) -> u32 {
     spin_slider_valueset_checks(client);
     atom_checks();
     helper_checks(hab);
-    let reg = clipboard_checks(hab);
+    clipboard_checks(hab);
     // The clipboard seen from another process.
     let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
     let mut fail = [0u8; 64];
@@ -502,7 +502,6 @@ fn main(s: &Startup) -> u32 {
         t
     };
     check("what another process put on the clipboard", back.as_deref() == Some(b"from the child"));
-    let _ = reg;
     unsafe {
         WinDestroyWindow(frame);
         WinDestroyMsgQueue(hmq);

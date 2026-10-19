@@ -47,7 +47,6 @@ const SMA_SHAFTDIMENSIONS: u32 = 0;
 const SMA_SHAFTPOSITION: u32 = 1;
 const SMA_SLIDERARMDIMENSIONS: u32 = 2;
 const SMA_SLIDERARMPOSITION: u32 = 3;
-const SMA_RANGEVALUE: u32 = 0;
 const SMA_INCREMENTVALUE: u32 = 1;
 const SMA_SETALLTICKS: u32 = 0xffff;
 
@@ -174,7 +173,7 @@ fn button_rects(h: u32) -> Option<(Rect, Rect)> {
     if buttons(h) == 0 {
         return None;
     }
-    let (len, across) = dims(h);
+    let (len, _) = dims(h);
     let (_, _, centre) = shaft(h);
     let first = if ctl::style(h) & SLS_BUTTONSBOTTOM != 0 { 2 } else { len - 2 - 2 * BUTTON };
     let mk = |a: i32| {
@@ -184,7 +183,6 @@ fn button_rects(h: u32) -> Option<(Rect, Rect)> {
             Rect::new(a, centre - BUTTON / 2, a + BUTTON, centre - BUTTON / 2 + BUTTON)
         }
     };
-    let _ = across;
     let (r1, r2) = (mk(first), mk(first + BUTTON));
     // Decrement towards home.
     Some(if home_far(h) { (r2, r1) } else { (r1, r2) })
@@ -415,7 +413,7 @@ pub extern "C" fn slider_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     if ty == SMA_INCREMENTVALUE {
                         data(h).map_or(0, |d| d.pos)
                     } else {
-                        let _ = SMA_RANGEVALUE;
+                        // SMA_RANGEVALUE: pels from home and the range.
                         mp(arm_at(h) as u32, l as u32)
                     }
                 }

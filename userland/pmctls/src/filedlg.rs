@@ -22,12 +22,9 @@ const F_IDRIVE: usize = 40;
 const F_FULLFILE: usize = 52;
 const F_FQFILENAME: usize = 312;
 const F_FQFCOUNT: usize = 316;
-const F_X: usize = 322;
-const F_Y: usize = 324;
 const F_EATYPE: usize = 326;
 const CCHMAXPATH: usize = 260;
 
-const FDS_CENTER: u32 = 0x0001;
 const FDS_HELPBUTTON: u32 = 0x0008;
 const FDS_APPLYBUTTON: u32 = 0x0010;
 const FDS_MODELESS: u32 = 0x0040;
@@ -510,9 +507,8 @@ pub extern "C" fn WinFileDlg(parent: u32, owner: u32, fild: *mut u8) -> u32 {
         wr32(fild, F_SRC, FDS_ERR_INVALID_DIALOG);
         return 0;
     }
-    // FDS_CENTER or not (FILEDLG x, y are ignored): in the middle of the
-    // screen.
-    let _ = (FDS_CENTER, F_X, F_Y);
+    // FDS_CENTER or not (FILEDLG x and y are ignored): in the middle of
+    // the screen.
     center(dlg);
     if fl & FDS_MODELESS != 0 {
         unsafe { WinShowWindow(dlg, 1) };

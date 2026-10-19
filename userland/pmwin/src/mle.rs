@@ -82,7 +82,6 @@ const MLN_SETFOCUS: u32 = 0x0008;
 const MLN_KILLFOCUS: u32 = 0x0009;
 const MLN_CLPBDFAIL: u32 = 0x000f;
 
-const MLFEFR_TEXT: u32 = 0x0008;
 const MLFETL_TEXTBYTES: u32 = 0x0020;
 const MLFFMTRECT_LIMITHORZ: u32 = 0x0001;
 const MLFFMTRECT_MATCHWINDOW: u32 = 0x0004;
@@ -97,7 +96,6 @@ const SCROLL_W: i32 = 16;
 /// Pels between the border and the text.
 const INSET: i32 = 2;
 
-const FATTR_SEL_ITALIC: u16 = 0x0001;
 const FATTR_SEL_UNDERSCORE: u16 = 0x0002;
 const FATTR_SEL_BOLD: u16 = 0x0020;
 const FATTR_FONTUSE_OUTLINE: u16 = 0x0004;
@@ -1155,7 +1153,6 @@ pub extern "C" fn mle_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             unsafe { core::ptr::copy_nonoverlapping(mp1 as *const u8, fa.as_mut_ptr(), 56) };
             let (cw, ch, bold, underline) = font_from(&fa);
             let Some(d) = data(h) else { return 0 };
-            let _ = FATTR_SEL_ITALIC;
             (d.fattrs, d.cw, d.ch, d.bold, d.underline) = (fa, cw, ch, bold, underline);
             layout(h);
             reveal(h);
@@ -1213,9 +1210,6 @@ pub extern "C" fn mle_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             1
         }
         MLM_SEARCH => search(h, mp1, mp2),
-        _ => {
-            let _ = MLFEFR_TEXT;
-            WinDefWindowProc(h, msg, mp1, mp2)
-        }
+        _ => WinDefWindowProc(h, msg, mp1, mp2),
     }
 }

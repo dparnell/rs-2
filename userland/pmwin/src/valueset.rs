@@ -118,7 +118,6 @@ fn paint(h: u32) {
         if b > 0 {
             c.sunken(r);
         }
-        let clip = c.rect();
         for row in 1..=rows {
             for col in 1..=cols {
                 let (l, bt, rt, tp) = g.cell(row, col);
@@ -147,8 +146,6 @@ fn paint(h: u32) {
                     let ir = Rect::new(mx - s / 2, my - s / 2, mx - s / 2 + s, my - s / 2 + s);
                     c.fill(ir, draw::WINDOW);
                     c.frame(ir, draw::TEXT);
-                } else if it.attr & VIA_OWNERDRAW != 0 {
-                    let _ = clip;
                 }
                 if focus && (row, col) == sel {
                     c.focus_rect(Rect::new(cell.left - 1, cell.bottom - 1, cell.right + 1, cell.top + 1));

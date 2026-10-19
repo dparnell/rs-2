@@ -10,7 +10,6 @@ use alloc::vec::Vec;
 use crate::pm::*;
 
 // FONTDLG offsets.
-const N_HPS: usize = 4;
 const N_TITLE: usize = 12;
 const N_PREVIEW: usize = 16;
 const N_DLGPROC: usize = 24;
@@ -35,7 +34,6 @@ const FNTS_RESETBUTTON: u32 = 0x0020;
 const FNTS_MODELESS: u32 = 0x0040;
 const FNTS_INITFROMFATTRS: u32 = 0x0080;
 
-const FATTR_SEL_ITALIC: u32 = 0x0001;
 const FATTR_SEL_UNDERSCORE: u32 = 0x0002;
 const FATTR_SEL_OUTLINE: u32 = 0x0008;
 const FATTR_SEL_STRIKEOUT: u32 = 0x0010;
@@ -257,7 +255,6 @@ fn store(fntd: *mut u8, c: &Choice) {
     if c.outline {
         style |= FATTR_SEL_OUTLINE;
     }
-    let _ = FATTR_SEL_ITALIC;
     wr32(fntd, N_STYLE, style);
     let h = pels(c.points);
     wr32(fntd, N_EMHEIGHT, h as u32);
@@ -356,7 +353,6 @@ pub extern "C" fn WinDefFontDlgProc(hwnd: u32, msg: u32, mp1: u32, mp2: u32) -> 
             }
             show(hwnd, &c);
             store(fntd, &c);
-            let _ = N_HPS;
             0
         }
         WM_CONTROL => {
