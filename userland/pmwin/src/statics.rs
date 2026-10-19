@@ -98,7 +98,7 @@ pub extern "C" fn static_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             let kind = ctl::style(h) & 0x7f;
             if matches!(kind, SS_ICON | SS_SYSICON) {
                 if let Some(id) = crate::bitmap::static_id(h) {
-                    let hp = if kind == SS_SYSICON { crate::pointer::system(id) } else { crate::pointer::WinLoadPointer(1, 0, id) };
+                    let hp = if kind == SS_SYSICON { crate::pointer::system(id) } else { crate::pointer::WinLoadPointer(1, crate::dlg::RES_HMOD.load(core::sync::atomic::Ordering::Relaxed), id) };
                     if hp != 0 {
                         ctl::set_data::<u32>(h, hp);
                         if let Some(w) = crate::state::st().desk.get(h) {

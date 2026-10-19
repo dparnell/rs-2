@@ -130,7 +130,11 @@ program that stops reading its queue holds up nobody else; the server
 handles such programs' frames itself. The kernel helps with RS2API
 services (display mapping, raw input, a hardware cursor it moves itself,
 a process-ended event) and by letting must-complete sections finish
-before a killed thread dies. See [PM.md](PM.md).
+before a killed thread dies. See [PM.md](PM.md). Objects that
+several processes may draw (pointers and icons, a notebook's tab texts)
+live in the shared state; container records stay application memory,
+as on OS/2, and are only read on the container's own thread, so the
+server paints a placeholder for a hung program's container instead.
 
 **Windowed text sessions.** A VIO session shown in a PM window ("OS/2
 Window") stays a kernel session with its own virtual screen, keyboard

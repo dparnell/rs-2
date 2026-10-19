@@ -161,10 +161,24 @@ Status markers: done, in progress, planned.
   pages, status line and page buttons, page windows and page dialogs,
   the Warp 4 tabbed dialog; pages and geometry host-tested in
   `crates/pmwin`; `RS2\NBTEST.EXE` checks them)
+- done: foundations for a desktop shell: pointers and icons (the OS/2
+  pointer/icon formats with multi-resolution arrays, RT_POINTER,
+  WinLoadPointer/WinCreatePointer[Indirect]/WinDrawPointer, rs2's own
+  system pointers and icons, the mouse pointer's shape in hardware or
+  software, SS_ICON/SS_SYSICON, message box icons, frame icons and the
+  mini icon on the system menu button, file icons from the .ICON EA and
+  executables through PMWP.DLL); minimize and restore (frames become
+  icons at the bottom of the desktop, also for programs that do not
+  respond; a minimized window viewer hook for a shell); WC_CONTAINER
+  (icon, name, text, detail and tree views, emphasis, selection styles,
+  keyboard, scrolling, sorting, direct editing, moving icons; layout and
+  selection host-tested); `RS2\SHELLTST.EXE` checks them
+- planned: the desktop shell itself (desktop icons, the program list
+  from the INI files, drives and file windows in containers, booting
+  into it)
 - planned: per-process presentation-space limits, hooks that are called
-  (WinSetHook only records them), DDE, containers, icons
-  and pointers from resources, owner-drawn items, presentation
-  parameters, drag and drop, a real PM shell
+  (WinSetHook only records them), DDE, owner-drawn items (also in
+  containers), presentation parameters, drag and drop
 - Display driver model (GRADD-style) on the framebuffer, mouse pointer
 - PMWIN (windows, messages, controls, dialogs), PMGPI (graphics, fonts),
   PMSHAPI, help manager

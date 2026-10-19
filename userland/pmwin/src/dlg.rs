@@ -74,8 +74,16 @@ fn data(h: u32) -> Option<&'static mut Dlg> {
 pub extern "C" fn WinLoadDlg(parent: u32, owner: u32, proc_: u32, hmod: u32, id: u32, params: u32) -> u32 {
     let Some(b) = res::load(hmod, res::RT_DIALOG, id) else { return 0 };
     let Some(t) = res::parse_dialog(b) else { return 0 };
-    create_from(parent, owner, proc_, &t, params)
+    // Icon and bitmap statics take their resources from the same module.
+    let prev = RES_HMOD.swap(hmod, core::sync::atomic::Ordering::Relaxed);
+    let h = create_from(parent, owner, proc_, &t, params);
+    RES_HMOD.store(prev, core::sync::atomic::Ordering::Relaxed);
+    h
 }
+
+/// The module of the dialog template being loaded (per process): its
+/// SS_ICON statics load their icons from it.
+pub static RES_HMOD: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
 
 /// WinCreateDlg(hwndParent, hwndOwner, pfnDlgProc, pdlgt, pCreateParams)
 #[unsafe(no_mangle)]
