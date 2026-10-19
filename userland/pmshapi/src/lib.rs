@@ -264,24 +264,26 @@ unsafe extern "C" {
     fn DosQueryModuleName(hmod: u32, cb: u32, buf: *mut u8) -> u32;
 }
 
-/// Screen size from PMWIN when the process uses PM (PMSHAPI is also
-/// loaded by text programs, which must not pull PMWIN in).
-fn screen_size() -> (i32, i32) {
+/// A PMWIN entry point when the process uses PM (PMSHAPI is also loaded
+/// by text programs, which must not pull PMWIN in).
+fn pmwin(ordinal: u32) -> Option<usize> {
     let mut hmod = 0;
     if unsafe { os2::DosQueryModuleHandle(b"PMWIN\0".as_ptr(), &mut hmod) } != 0 {
-        return (1024, 768);
+        return None;
     }
     let mut pfn = 0usize;
-    // WinQuerySysValue (PMWIN.829).
-    if unsafe { os2::DosQueryProcAddr(hmod, 829, core::ptr::null(), &mut pfn) } != 0 || pfn == 0 {
-        return (1024, 768);
-    }
-    let f: extern "C" fn(u32, i32) -> i32 = unsafe { core::mem::transmute(pfn) };
-    // HWND_DESKTOP, SV_CXSCREEN / SV_CYSCREEN.
-    (f(1, 20), f(1, 21))
+    (unsafe { os2::DosQueryProcAddr(hmod, ordinal, core::ptr::null(), &mut pfn) } == 0 && pfn != 0).then_some(pfn)
 }
 
-static NEXT_POS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// The next cascade position for a program's window (left, bottom,
+/// right, top), from PMWIN.
+fn shell_position() -> Option<[i32; 4]> {
+    // Rs2ShellPosition (PMWIN 9001).
+    let f = pmwin(9001)?;
+    let f: extern "C" fn(*mut [i32; 4]) -> u32 = unsafe { core::mem::transmute(f) };
+    let mut r = [0i32; 4];
+    (f(&mut r) != 0).then_some(r)
+}
 
 /// WinQueryTaskSizePos(hab, idProcess, pswp): where the shell would put
 /// the program's main window (SWP: fl, cy, cx, y, x, hwndInsertBehind,
@@ -291,11 +293,8 @@ pub extern "C" fn WinQueryTaskSizePos(_hab: u32, _pid: u32, pswp: *mut u32) -> u
     if pswp.is_null() {
         return 87;
     }
-    let (w, h) = screen_size();
-    let n = NEXT_POS.fetch_add(1, core::sync::atomic::Ordering::Relaxed) % 8;
-    let off = 32 + n as i32 * 24;
-    let (cx, cy) = (w * 3 / 5, h * 3 / 5);
-    let (x, y) = (off, (h / 3 - off / 2).max(0));
+    let [l, b, r, t] = shell_position().unwrap_or([32, 240, 646, 700]);
+    let (x, y, cx, cy) = (l, b, r - l, t - b);
     // SWP_SIZE | SWP_MOVE | SWP_ZORDER | SWP_SHOW | SWP_ACTIVATE, on top
     // (HWND_TOP), as the shell starts programs.
     let v = [0x8fu32, cy as u32, cx as u32, y as u32, x as u32, 3, 0, 0, 0];

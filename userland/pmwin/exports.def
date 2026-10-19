@@ -328,6 +328,7 @@ Rs2PmServer=__a_Rs2PmServer @9000
 WinRegisterClass=__a_WinRegisterClass @926
 WinCreateWindow=__a_WinCreateWindow @909
 WinCreateStdWindow=__a_WinCreateStdWindow @908
+Rs2ShellPosition=__a_Rs2ShellPosition @9001
 WinDestroyWindow=__a_WinDestroyWindow @728
 WinSetWindowPos=__a_WinSetWindowPos @875
 WinShowWindow=__a_WinShowWindow @883

@@ -151,10 +151,46 @@ fn index_at(h: u32, x: i32) -> usize {
     (first + col).min(ctl::text(h).len())
 }
 
+/// Copy the selection to the clipboard (not from ES_UNREADABLE fields).
+fn copy(h: u32) -> bool {
+    let Some(e) = data(h) else { return false };
+    let (a, b) = sel(e);
+    let text = ctl::text(h);
+    let b = b.min(text.len());
+    if a >= b || ctl::style(h) & ES_UNREADABLE != 0 {
+        return false;
+    }
+    crate::clip::set_text(&text[a..b])
+}
+
+/// Replace the selection with the clipboard's text (its first line).
+fn paste(h: u32) -> bool {
+    let Some(t) = crate::clip::text() else { return false };
+    let line: alloc::vec::Vec<u8> = t.iter().copied().take_while(|&c| c != b'\r' && c != b'\n').collect();
+    replace(h, &line)
+}
+
 fn key(h: u32, mp1: u32, mp2: u32) -> bool {
     let k = Key::from(mp1, mp2);
     if k.up() {
         return false;
+    }
+    match k.vk {
+        VK_INSERT if k.shift() && !k.ctrl() && !k.alt() => {
+            paste(h);
+            return true;
+        }
+        VK_INSERT if k.ctrl() && !k.shift() && !k.alt() => {
+            copy(h);
+            return true;
+        }
+        VK_DELETE if k.shift() && !k.ctrl() && !k.alt() => {
+            if copy(h) {
+                replace(h, b"");
+            }
+            return true;
+        }
+        _ => {}
     }
     let len = ctl::text(h).len();
     let Some(e) = data(h) else { return false };
@@ -335,8 +371,10 @@ pub extern "C" fn entry_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             }
             1
         }
-        EM_CLEAR | EM_CUT => replace(h, b"") as u32,
-        EM_COPY | EM_PASTE => 0,
+        EM_CLEAR => replace(h, b"") as u32,
+        EM_CUT => (copy(h) && replace(h, b"")) as u32,
+        EM_COPY => copy(h) as u32,
+        EM_PASTE => paste(h) as u32,
         EM_QUERYFIRSTCHAR => data(h).map_or(0, |e| e.first as u32),
         EM_SETFIRSTCHAR => {
             if let Some(e) = data(h) {

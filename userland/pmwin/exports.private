@@ -1,2 +1,3 @@
 ; rs2-private PMWIN entry points (name ordinal)
 Rs2PmServer 9000
+Rs2ShellPosition 9001

@@ -289,13 +289,9 @@ pub extern "C" fn WinCreateStdWindow(
     phwnd_client: *mut u32,
 ) -> u32 {
     let fcf = if pfl.is_null() { 0 } else { unsafe { pfl.read_unaligned() } };
-    let s = st();
     let mut pos = Rect::default();
     if fcf & FCF_SHELLPOSITION != 0 {
-        let (w, h) = (s.surface.width, s.surface.height);
-        let off = 32 + s.cascade * 24;
-        s.cascade = (s.cascade + 1) % 8;
-        pos = Rect::new(off, h / 3 - off / 2, off + w * 3 / 5, h / 3 - off / 2 + h * 3 / 5);
+        pos = shell_position();
     }
     let frame = frame::create(parent, style, fcf, &cstr(title), pos, 0, id, hmod);
     if frame == 0 {
@@ -321,6 +317,26 @@ pub extern "C" fn WinCreateStdWindow(
         activate(frame);
     }
     frame
+}
+
+/// Where the shell puts the next program's window: a cascade.
+fn shell_position() -> Rect {
+    let s = st();
+    let (w, h) = (s.surface.width, s.surface.height);
+    let off = 32 + s.cascade * 24;
+    s.cascade = (s.cascade + 1) % 8;
+    Rect::new(off, h / 3 - off / 2, off + w * 3 / 5, h / 3 - off / 2 + h * 3 / 5)
+}
+
+/// Rs2ShellPosition(prcl) (rs2-private, for PMSHAPI's
+/// WinQueryTaskSizePos): the next cascade position.
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2ShellPosition(prcl: *mut RectL) -> u32 {
+    if prcl.is_null() || crate::state::get().is_none() {
+        return 0;
+    }
+    unsafe { prcl.write_unaligned(RectL::from(shell_position())) };
+    1
 }
 
 #[unsafe(no_mangle)]
