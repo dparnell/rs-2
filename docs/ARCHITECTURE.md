@@ -119,6 +119,19 @@ wait queue for stack events. rs2 programs use it through RS2API
 ordinals 200-219, OS/2 programs through rs2's TCPIP32/SO32DLL/TCP32DLL
 (user-mode DLLs over the same calls); see [NETWORK.md](NETWORK.md).
 
+**Presentation Manager.** PM runs in the processes that use it, as on
+OS/2: PMWIN.DLL keeps the window tree, queues and input state in one
+named shared memory object (same address in every process) behind one
+named mutex semaphore that is never held while application code runs.
+A PM server process (PMSRV.EXE, started with the first PM program) owns
+the desktop and a time-critical input thread that posts every key and
+mouse event to the queue of the target window's thread at once, so a
+program that stops reading its queue holds up nobody else; the server
+handles such programs' frames itself. The kernel helps with RS2API
+services (display mapping, raw input, a hardware cursor it moves itself,
+a process-ended event) and by letting must-complete sections finish
+before a killed thread dies. See [PM.md](PM.md).
+
 ## Boot
 
 1. UEFI firmware loads `\EFI\BOOT\BOOTX64.EFI` (`boot/`, Rust, `x86_64-unknown-uefi`).

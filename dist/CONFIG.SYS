@@ -6,4 +6,6 @@ SET PROMPT=$i[$p]
 SET ETC=C:\MPTN\ETC
 SET COMSPEC=C:\OS2\CMD.EXE
 SET OS2_SHELL=C:\OS2\CMD.EXE
+REM PM: milliseconds before a program that does not take its input is "not responding"
+SET PM_HANGTIME=2000
 PROTSHELL=C:\OS2\CMD.EXE

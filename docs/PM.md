@@ -13,20 +13,22 @@ original module names and export ordinals, so unmodified PM programs load
 them through the normal loader.
 
 PM state that all processes share (the window tree, window classes, message
-queues, the input state) lives in a *shared data object* of PMWIN.DLL, the
-same way OS/2 keeps it in shared segments. A process draws straight into
-the framebuffer, clipped to its windows' visible regions. Cross-process
-operations (WinSendMsg to another process's window, input routing) go
-through the queues in shared memory and wake the receiving thread with an
-event semaphore.
+queues, the input state) lives in shared memory of PMWIN.DLL, the same way
+OS/2 keeps it in shared segments. A process draws straight into the
+framebuffer, clipped to its windows' visible regions (there is no
+compositor). Cross-process operations (WinSendMsg to another process's
+window, input routing) go through the queues in shared memory and wake the
+receiving thread with an event semaphore. A small PM server process owns
+the desktop and the input; see [Processes and input](#processes-and-input).
 
 The logic lives in host-testable crates; the DLLs are thin:
 
 | Crate / DLL | Contents |
 |-------------|----------|
 | `crates/gpi` | Rendering engine: presentation-space attributes, lines, boxes, arcs, areas, text with bitmap fonts, bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
-| `crates/pmwin` | Window system core: window tree, classes, z-order, visible-region computation, message queues, focus and activation, frame windows and their controls, standard window classes. Stores its state in a caller-provided arena so the same code works in the shared object and in host tests. |
-| `userland/pmwin` → PMWIN.DLL | Exports (`Win*`), the shared data object, locking, the input thread, glue to the kernel services. |
+| `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping. Plain data structures, unit-tested on the host. |
+| `userland/pmwin` → PMWIN.DLL | Exports (`Win*`, `Gpi*`), the shared state and its heap, locking, messaging, the built-in window classes, and the PM server's code (input routing, hung programs, window list). |
+| `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000). |
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
 | `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list, PMCTLS, HELPMGR stubs. |
 
@@ -35,28 +37,156 @@ The logic lives in host-testable crates; the DLLs are thin:
 A kernel gate module, `RS2API`, holds rs2-private 32-bit services used by
 rs2's own DLLs (applications never import it):
 
-- `Rs2MapDisplay(PDISPLAYINFO)`: maps the framebuffer into the calling
+- `Rs2MapDisplay(PDISPLAYINFO)` (1): maps the framebuffer into the calling
   process (same linear address in every process, in the shared arena) and
   returns its address, width, height, stride and pixel format.
-- `Rs2ReadInput(PINPUTEVENT, ulTimeout)`: raw input for the PM session:
+- `Rs2ReadInput(PINPUTEVENT, ulTimeout)` (2): raw input for the PM session:
   key events (scan code, character, shift state, make/break) and mouse
   events (absolute position in pixels, buttons, wheel).
-- `Rs2SetPointer(...)`: hardware-style pointer drawing is done by PMWIN in
-  software; this call only tells the kernel where it is, for a future
-  hardware cursor.
+  When a process that mapped the display ends, it reports an
+  `EV_PROCEXIT` event (kind 4, `a` = pid) so that the PM server cleans
+  up after it.
+- `Rs2QueryPointer(PPOINTL)` (3): the pointer position.
+- `Rs2DebugTrace(psz)` (4): a line on the serial port (debugging rs2's
+  DLLs).
+- `Rs2SetPointerShape(cx, cy, xHot, yHot, pulPixels)` (5): makes the mouse
+  pointer a hardware cursor (0xAARRGGBB pixels, up to 64x64): a cursor
+  resource on virtio-gpu's cursor queue, DEFINE_CURSOR on VMware SVGA II
+  (whose driver takes the adapter over at the current mode when PM
+  starts, for the FIFO). From then on the kernel's timer tick moves it to
+  the pointer position itself and hides it while the PM session is not in
+  the foreground. ERROR_NOT_SUPPORTED without such a display.
+- `Rs2ShowPointer(fShow)` (6): shows or hides the hardware cursor.
+
+RS2API ordinals: 1-6 PM (above), 100 performance counters, 200-221
+sockets (docs/NETWORK.md).
+
+Two kernel rules matter for PM: a thread inside a must-complete section
+(DosEnterMustComplete) that is being killed finishes the section first
+(it dies when it leaves it; a fatal exception still ends it at once), and
+a mutex semaphore whose owner died is handed to the next requester with
+ERROR_SEM_OWNER_DIED. DosKillProcess also lets a PM process end another PM
+process (the window list).
 
 The session manager gains a PM session type: the first PM program starts
 (or joins) the PM session, which owns the framebuffer while it is in the
 foreground and receives raw input instead of the text keyboard queue.
-Switching to a text session and back makes the kernel post an event
-semaphore so PMWIN repaints everything.
+Switching to a text session and back makes the kernel queue a repaint
+event so the PM server repaints everything. In the PM session Ctrl+Esc
+goes to PM (its window list); Alt+Esc still switches sessions.
+
+## Processes and input
+
+**Shared state.** PMWIN keeps everything in one named shared memory
+object (`\SHAREMEM\PMWIN\STATE`, 64 MB reserved, committed as used)
+mapped at the same address in every PM process; its heap is PMWIN's
+global allocator, so the window tree, queues, classes, presentation
+spaces and GPI objects are ordinary Rust collections that any process
+can read and free. What belongs to one process carries its pid: private
+window classes (and their procedure addresses), presentation spaces, GPI
+objects (regions, bitmaps, DCs, palettes), accelerator tables. Window
+procedures are only ever called on the thread that owns the window's
+queue; a message for a window of another thread, in any process, goes
+through that thread's queue.
+
+**Locking.** One named mutex semaphore (`\SEM32\PMWIN\LOCK`) protects the
+state; every export takes it (recursively) in its trampoline. It is never
+held while application code runs: an application's window procedure is
+called with the lock released (built-in procedures, which are PMWIN code,
+keep it), and so are waits. The lock's sections are short and run inside
+DosEnterMustComplete, so a process being ended (DosKillProcess, DosExit
+from another thread) finishes its update of the shared state before its
+thread dies; if a thread dies holding the lock anyway (an exception in
+PMWIN), the next requester gets it with ERROR_SEM_OWNER_DIED and carries
+on.
+
+**Queues and waiting.** Every message queue has a shared event semaphore.
+Posting to a queue, sending to it, or invalidating one of its windows
+records the queue; when a thread lets go of the lock it posts the
+semaphores of the queues it gave work to. WinGetMsg waits on its
+semaphore (with a timeout for the next timer) instead of polling.
+WinSendMsg to another thread queues the message and waits on the
+sender's own semaphore for the reply, answering messages sent to it
+meanwhile; if the receiver's process ends, the sender gets 0. Activation
+and focus notifications (WM_ACTIVATE, WM_SETFOCUS, WM_SHOW, WM_DESTROY of
+other threads' windows) are posted, never waited for.
+
+**The PM server.** The first message queue in the system starts
+`C:\OS2\PMSRV.EXE` (next to PMWIN's directory, detached). It owns the
+desktop window (painting the background) and runs:
+
+- an input thread at time-critical priority that reads raw input
+  (`Rs2ReadInput`), moves the pointer, hit-tests the shared window tree
+  and posts each event at once to the queue of the thread that owns the
+  target window (WM_MOUSEMOVE coalesced with one still waiting at the end
+  of that queue; WM_CHAR to the window that has the focus at that moment,
+  so type-ahead goes where the focus was when the key was pressed). Mouse
+  capture, the disabled owners of modal dialogs and activation on click
+  are handled here; frame moves and sizes started by a title bar or
+  sizing border are tracked here too (the thread that owns the frame only
+  starts them). Nothing in the input path waits for an application.
+- process clean-up: on `EV_PROCEXIT` (and from PMWIN's DLL termination in
+  a process that ends normally) the process's windows, queues, timers,
+  classes, presentation spaces, GPI objects and accelerator tables go;
+  threads waiting for a reply from it get 0; the next frame is activated
+  and what comes to light repaints.
+- the window list (Ctrl+Esc).
+
+The server never waits for an application: what it sends to another
+thread's window is queued like a posted message and its result dropped.
+When the last PM program has ended the server ends too, and with it the
+PM session (the system returns to the text session).
+
+**The pointer.** With virtio-gpu or VMware SVGA II the pointer is a
+hardware cursor that the kernel moves (`Rs2SetPointerShape`), so it keeps
+up even if every PM process stopped. Otherwise the server draws it in
+software with a save-under; PMWIN code that draws on the screen (in any
+process) hides it around each drawing operation, within one PMWIN call
+under the lock, never across application code, so a stopped program
+cannot leave it hidden. A program that hides the pointer with
+WinShowPointer and then stops responding gets it shown again.
+
+## Programs that stop responding
+
+A queue is *not responding* when something (a posted or sent message, or
+something to paint) has been waiting for it longer than the hang time
+without its thread coming for messages (WinGetMsg/WinPeekMsg); a thread
+blocked in WinGetMsg is never hung. The hang time is 2000 ms by default
+and set in CONFIG.SYS with
+
+    SET PM_HANGTIME=milliseconds
+
+(250 to 600000; the server reads it from its environment). For such a
+queue the server, every 250 ms or when woken:
+
+- marks it and repaints its frames' title bars grey with
+  "(not responding)";
+- paints a placeholder wherever its windows need painting: frames and
+  the built-in controls (title bar, menus, min/max buttons, scroll bars,
+  buttons...) through their own drawing code, application windows with a
+  plain dialog-background fill. The update regions stay, so when the
+  thread comes back it gets WM_PAINT for everything that was covered;
+- handles clicks on its windows: the frame is activated and raised (the
+  activation messages are posted to the program for later), the title bar
+  moves it, the sizing border sizes it, the min/max buttons hide it; a
+  click in a client window waits in the queue like any input. A capture
+  held by one of its windows is dropped;
+- lists it in the window list as "(not responding)", where End task ends
+  the process (DosKillProcess; a program that responds gets SC_CLOSE
+  instead) and Switch to shows and activates its frame.
+
+When the thread reads its queue again the mark goes, the title bars
+repaint, and the program catches up with its queued input and paints.
+Keys typed meanwhile went to the window that had the focus when they were
+typed, also if that was the stopped program's.
 
 ## Status
 
 Milestone 1 works: the unmodified Toolkit `hello.exe` shows its window,
 which can be moved by its title bar and closed, after which the system
-returns to the text session. State is still per process (one PM
-application at a time).
+returns to the text session. Several PM programs run at once (see
+[Processes and input](#processes-and-input)), with cross-process window
+order, activation and repainting.
 
 Milestone 2 works: the Toolkit samples `hello.exe` (menu bar,
 accelerators), `dialog.exe` and `template.exe` run unmodified, with
@@ -109,12 +239,9 @@ mouse and keyboard. What PMWIN has:
   dialog manager about them.
 - Double clicks (`WM_BUTTONnDBLCLK`), `WM_CREATE` with a CREATESTRUCT,
   `WinSetParent`, `WinWaitEventSem`.
-- Threads: a recursive PMWIN lock (`src/lock.rs`) is taken by every
-  export (in the generated trampolines) and released while a thread
-  waits for messages or semaphores; only the first message queue's
-  thread reads the kernel input; `WinSendMsg` to another thread's window
-  is queued to that thread and waits for the reply (`template.exe`
-  uses an object window on a second thread).
+- Threads and processes: see [Processes and input](#processes-and-input)
+  (`template.exe` uses an object window on a second thread).
+  `WinMessageBox` is a modal dialog built from a template.
 - `HELPMGR.DLL` (help instances are accepted, help shows nothing) and
   `PMCTLS.DLL` (`WinFileDlg`/`WinFontDlg` return as cancelled).
 
@@ -201,4 +328,14 @@ also writes `exports.def` with the Toolkit's ordinals).
   `C:\YOSEMITE.BMP` when present).
 - QEMU runs of the Toolkit PM samples, checked with screenshots and with
   mouse/keyboard input through `xtask run --type` (`{mouse_move dx dy}`,
-  `{mouse_button n}`).
+  `{mouse_abs x y}`, `{mouse_button n}`, `{shot NAME}` for a screenshot
+  as `work/NAME.png` at that point).
+- `RS2\PMHANG.EXE` and `RS2\PMBUSY.EXE` (userland/pmhang): a window whose
+  procedure never returns from a click (or the H key), blocked in
+  DosSleep or spinning without system calls; button 2 stops it for six
+  seconds only; X ends the process while a second thread keeps calling
+  PMWIN. Started next to another program (a CMD file with
+  `DETACH HELLO` and `DETACH PMHANG`), they check that the pointer keeps
+  moving, the other program keeps getting keys and clicks, the stopped
+  frame can be moved, sized, hidden and brought back, the window list
+  ends it, and a program that comes back repaints.

@@ -60,8 +60,9 @@ Status markers: done, in progress, planned.
 - done: VMware guest support: backdoor (host time), absolute pointer
   (vmmouse) for PM and text-mode MOU, SVGA II mode setting (`video=WxH`,
   also through GOP); PCI device list in the boot log
+- done: SVGA II hardware cursor for PM (DEFINE_CURSOR, cursor registers)
 - planned: VirtualBox VMMDev (absolute pointer), SVGA run-time mode
-  changes under PM and hardware cursor, testing on real VMware
+  changes under PM, testing on real VMware
 - done: virtio (MSI-X per queue): PCI transport, modern and legacy devices, split
   virtqueues; virtio-blk (read-only, block size, flush; booting from it),
   virtio-scsi (disks, CD-ROMs, unit attentions), virtio-input (keyboards,
@@ -70,7 +71,8 @@ Status markers: done, in progress, planned.
 - done: virtio-gpu 2D (`virtio-vga`, `virtio-gpu-pci`): guest-RAM
   framebuffer for the text screens and PM, `video=WxH` (any size),
   changed rows flushed from the timer tick (whole screen under PM)
-- planned: virtio-gpu hardware cursor, PM dirty rectangles instead of
+- done: virtio-gpu hardware cursor (cursor queue) for PM
+- planned: PM dirty rectangles instead of
   full-screen flushes, display hot-resize events (EDID), run-time mode
   changes under PM
 - done: networking (docs/NETWORK.md; receive interrupts on e1000e and
@@ -128,6 +130,15 @@ Status markers: done, in progress, planned.
 - done: design (docs/PM.md); kernel display/input services (RS2API) and a
   PM session; `crates/gpi` and `crates/pmwin`; PMWIN.DLL/PMGPI.DLL run the
   Toolkit's `hello.exe` (windows, painting, mouse moves, closing)
+- done: several PM programs at once: PM state shared by all processes,
+  the PM server (PMSRV.EXE) with a time-critical input thread routing
+  every event straight to the target thread's queue, hardware or
+  server-drawn pointer, not-responding programs handled by the server
+  (moved, sized, hidden, placeholders, "(not responding)" titles,
+  PM_HANGTIME), the Ctrl+Esc window list ending programs, clean-up when
+  a PM process ends
+- planned: per-process presentation-space limits, WinSetHook, the
+  clipboard and DDE across processes, a real PM shell
 - Display driver model (GRADD-style) on the framebuffer, mouse pointer
 - PMWIN (windows, messages, controls, dialogs), PMGPI (graphics, fonts),
   PMSHAPI, help manager
