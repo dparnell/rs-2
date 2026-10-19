@@ -407,6 +407,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("nettest", "RS2\\NETTEST.EXE"),
         ("gpitest", "RS2\\GPITEST.EXE"),
         ("ctltest", "RS2\\CTLTEST.EXE"),
+        ("nbtest", "RS2\\NBTEST.EXE"),
         ("testdll", "RS2\\TESTDLL.DLL"),
         ("cmd", "OS2\\CMD.EXE"),
         ("more", "OS2\\MORE.EXE"),
