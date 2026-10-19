@@ -39,6 +39,10 @@ programs unmodified, natively, on 64-bit PCs.
 
 *An unmodified Presentation Manager sample on rs2's own PMWIN/PMGPI.*
 
+![IBM CMD.EXE in an OS/2 window next to the OS/2 System Editor, both on rs2](docs/images/rs2-pm-cmd.png)
+
+*Booted straight into PM: IBM's CMD.EXE in an OS/2 window and the System Editor (E.EXE), both unmodified.*
+
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design,
 [docs/ROADMAP.md](docs/ROADMAP.md) for what is done and what is next, and
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the original OS/2
