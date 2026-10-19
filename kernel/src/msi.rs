@@ -475,7 +475,16 @@ impl Event {
             }
             let until = deadline.min(now + RECHECK_TICKS);
             let seen = self.signals();
-            let woke = self.wait.wait_uninterruptible_until(until, || self.signals() != seen || cond());
+            // `cond` may consume what it found (a FIFO read): a true result
+            // seen while going to sleep must not be checked again.
+            let mut met = false;
+            let woke = self.wait.wait_uninterruptible_until(until, || {
+                met = met || (self.signals() == seen && cond());
+                met || self.signals() != seen
+            });
+            if met {
+                return true;
+            }
             if !woke && cond() {
                 MISSED.fetch_add(1, Ordering::Relaxed);
                 return true;
