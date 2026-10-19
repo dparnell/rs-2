@@ -274,7 +274,7 @@ pub fn draw_minimized(c: &mut Canvas, icon: u32, title: &[u8], active: bool) {
         c.fill(tr, draw::HILITE);
     }
     let fg = if active { draw::HILITE_TEXT } else { 0xffffff };
-    c.text_in(Rect::new(r.left, top - th, r.right, top), &lines.join(&b'\n'), fg, draw::DT_CENTER);
+    c.text_in(Rect::new(r.left, top - th, r.right, top), &lines.join(&b'\n'), fg, draw::DT_CENTER | draw::DT_WORDBREAK);
 }
 
 /// Enable the system menu's items for the frame's state.

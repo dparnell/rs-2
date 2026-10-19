@@ -194,7 +194,7 @@ fn set_icon_ea(path: &[u8], data: &[u8]) -> bool {
         return false;
     }
     let value_len = if data.is_empty() { 0 } else { 4 + data.len() };
-    let cb = (4 + 4 + 6 + value_len + 3) & !3;
+    let cb = (4 + 8 + 6 + value_len + 3) & !3;
     let Some(mut m) = Mem::new(cb + 8) else { return false };
     let b = m.slice_mut();
     b[0..4].copy_from_slice(&(cb as u32).to_le_bytes());

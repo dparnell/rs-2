@@ -1,0 +1,9 @@
+[package]
+name = "shelltest"
+description = "Self-checks of pointers, icons, minimize/restore and the container control, and a window showing them"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
