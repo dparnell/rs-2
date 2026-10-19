@@ -11,6 +11,10 @@ programs unmodified, natively, on 64-bit PCs.
   resources, signals) plus VIO, KBD, MSG and NLS.
 - UEFI boot from CD, USB stick or hard disk; AHCI, NVMe, USB keyboard/mouse (xHCI),
   partitions (MBR/GPT), FAT, HPFS and ISO 9660.
+- Runs as a guest in VMware (and QEMU's VMware device models): VMware
+  absolute pointer (no mouse capture), PVSCSI and LSI Logic (MPT Fusion)
+  SCSI disks and CD-ROMs, SVGA II resolutions (`video=WxH`); see
+  [Virtual machines](#virtual-machines).
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 
@@ -42,6 +46,28 @@ cargo xtask run --iso rs2.iso                 # try it in QEMU
 The ISO boots into the live system; type `INSTALL` to install onto a hard
 disk. Development builds (`cargo xtask run`) take extra files for drive C:
 from `work/modules.txt`, which is how original OS/2 programs are tested.
+
+## Virtual machines
+
+rs2 boots in any VM with UEFI firmware and a GOP framebuffer. Storage:
+SATA (AHCI), NVMe, VMware PVSCSI, LSI Logic Parallel (53c1030) and LSI
+Logic SAS (SAS1068), USB sticks. `video=1280x1024` (or any WxH) in
+`\RS2\CMDLINE` picks the resolution: through the firmware if it offers
+that mode, otherwise through the VMware SVGA II driver.
+
+- **VMware**: choose UEFI firmware. The VMware pointer (vmmouse) follows
+  the host cursor without capturing it; the boot log shows "mouse: VMware
+  absolute pointer". Not tested on real VMware yet (only on QEMU's
+  VMware models: `cargo xtask run --vmware --pvscsi IMG --pvscsi-cd ISO`,
+  `--scsi-hba mptsas1068`).
+- **VirtualBox**: enable EFI; use SATA or NVMe disks (VirtualBox's LSI
+  Logic controllers use the same MPT interface and may work too). The
+  mouse works in relative (captured) mode: VirtualBox's absolute pointer
+  needs its VMMDev guest device, which rs2 does not drive yet.
+- **QEMU**: `-machine q35` with OVMF, as `cargo xtask run` does.
+
+Network cards (e1000, vmxnet3, ...) are listed in the serial log but not
+used: rs2 has no network stack yet.
 
 ## Repository
 

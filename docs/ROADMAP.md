@@ -56,6 +56,13 @@ Status markers: done, in progress, planned.
 - done: USB storage hot-plug: a kernel thread mounts sticks connected after
   boot on the next free drive letters and unmounts them on removal
 - planned: virtio-blk, NVMe/xHCI interrupts
+- done: SCSI host adapters (polled): VMware PVSCSI, LSI Logic MPT Fusion
+  (53c1030, SAS1068); disks and CD/DVD drives
+- done: VMware guest support: backdoor (host time), absolute pointer
+  (vmmouse) for PM and text-mode MOU, SVGA II mode setting (`video=WxH`,
+  also through GOP); PCI device list in the boot log
+- planned: VirtualBox VMMDev (absolute pointer), SVGA run-time mode
+  changes under PM and hardware cursor, testing on real VMware
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - done: SMP: all processors started (INIT/SIPI), per-CPU GDT/TSS/LAPIC
   timer, shared run queues, big kernel lock, IPI wake-ups and TLB shootdown
