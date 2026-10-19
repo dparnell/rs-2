@@ -54,6 +54,9 @@ static SCHED: SpinLock<Sched> = SpinLock::new(Sched {
 });
 
 static LOCK_WARNED: AtomicBool = AtomicBool::new(false);
+/// Bumped whenever a thread is queued (or left queued for another try):
+/// an idle CPU looks at the run queues only when it changed.
+static READY_GEN: AtomicU64 = AtomicU64::new(0);
 
 global_asm!(
     r#"
@@ -147,6 +150,7 @@ fn enqueue(s: &mut Sched, t: &Arc<Thread>) -> usize {
     let i = queue_index(t);
     t.ready_since.store(irq::ticks(), Ordering::Relaxed);
     s.ready[i].push_back(t.clone());
+    READY_GEN.fetch_add(1, Ordering::Release);
     i
 }
 
@@ -383,18 +387,24 @@ pub fn maybe_preempt() {
     }
 }
 
-/// The idle loop of every CPU.
+/// The idle loop of every CPU. After an interrupt it only goes through
+/// the scheduler if it was asked to (a wake-up for this CPU, the end of
+/// its time slice) or a thread was queued since it last looked, so idle
+/// CPUs do not take the run queue lock on every timer tick.
 pub fn idle_loop() -> ! {
     loop {
+        let seen = READY_GEN.load(Ordering::Acquire);
         schedule();
-        // Halt unless something became ready meanwhile; `sti; hlt` lets
-        // no interrupt slip in between.
-        arch::disable_interrupts();
-        if has_ready() || need_resched() {
-            arch::enable_interrupts();
-            continue;
+        loop {
+            // Halt unless something became ready meanwhile; `sti; hlt`
+            // lets no interrupt slip in between.
+            arch::disable_interrupts();
+            if need_resched() || READY_GEN.load(Ordering::Acquire) != seen {
+                arch::enable_interrupts();
+                break;
+            }
+            unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
         }
-        unsafe { core::arch::asm!("sti", "hlt", options(nomem, nostack)) };
     }
 }
 
@@ -438,6 +448,10 @@ pub fn schedule() {
                 None => break None,
             }
         };
+        if !skipped.is_empty() {
+            // Still another CPU's: idle CPUs try again later.
+            READY_GEN.fetch_add(1, Ordering::Release);
+        }
         for t in skipped.into_iter().rev() {
             let i = queue_index(&t);
             s.ready[i].push_front(t);
