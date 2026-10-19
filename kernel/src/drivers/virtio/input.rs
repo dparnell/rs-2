@@ -9,6 +9,11 @@
 //! device reports (ABS_INFO). Motion and buttons are collected until
 //! SYN_REPORT, so one report is one pointer event. The status queue (LEDs)
 //! is not used.
+//!
+//! A device is started (DRIVER_OK) on the first poll, after the PS/2
+//! devices are enabled: QEMU sends pointer events to the pointing device
+//! activated last, and only routes the host's absolute pointer to a
+//! tablet if that is the one.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -73,7 +78,9 @@ struct Dev {
     /// Ctrl keys held (bit 0 left, bit 1 right), for Ctrl+Pause.
     ctrl: u8,
     seen: bool,
-    _dev: Device,
+    /// DRIVER_OK has been set (on the first poll).
+    started: bool,
+    dev: Device,
 }
 
 static DEVS: SpinLock<Vec<Dev>> = SpinLock::new(Vec::new());
@@ -227,6 +234,12 @@ impl Dev {
 
     /// Take the events the device has delivered and give the buffers back.
     fn drain(&mut self, acts: &mut Actions) {
+        if !self.started {
+            self.started = true;
+            self.dev.ready();
+            self.q.kick();
+            return;
+        }
         let mut n = 0;
         while let Some(u) = self.q.pop() {
             let off = (u.addr - self.mem.addr(0)) as usize;
@@ -310,8 +323,6 @@ pub fn attach(mut dev: Device) {
     for i in 0..q.size() as usize {
         let _ = q.add(&[Buf::into(mem.addr(i * 8), 8)]);
     }
-    dev.ready();
-    q.kick();
     match kind {
         Kind::Tablet => crate::println!(
             "virtio-input {}: {name}, tablet (x {}..{}, y {}..{})",
@@ -339,7 +350,8 @@ pub fn attach(mut dev: Device) {
         buttons_changed: false,
         ctrl: 0,
         seen: false,
-        _dev: dev,
+        started: false,
+        dev,
     };
     DEVS.lock().push(d);
 }
