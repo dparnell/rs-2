@@ -30,6 +30,7 @@ mod menu;
 mod misc;
 mod mle;
 mod msg;
+mod notebook;
 mod pointer;
 mod rect;
 mod res;
