@@ -1,0 +1,16 @@
+; TNLS16: 16-bit entries (src/lib.rs entries16!) and data
+_xpg_sprintf=t16_xpg_sprintf @8
+_wnlDBCSCp=tnls16_dbcs_cp @11
+_catclose=t16_catclose @16
+_catopen=t16_catopen @17
+_wnlCv_close=t16_wnlcv_close @19
+_wnlDBCSVector=tnls16_dbcs_vector @21
+_wnlCv=t16_wnlcv @23
+_xpg_printf=t16_xpg_printf @24
+_catgets=t16_catgets @27
+_wnlCv_open=t16_wnlcv_open @30
+_wnlPrimaryCp=tnls16_primary_cp @32
+_wnlInitGlobal=t16_wnlinitglobal @35
+_wnlDBCSEnabling=tnls16_dbcs_enabling @37
+_wnlDefaultCode=tnls16_default_code @39
+_xpg_fprintf=t16_xpg_fprintf @40

@@ -25,6 +25,10 @@
 //! | 43 | open converter(from, to): handle |
 //! | 48 | per-process set-up, no arguments |
 //! | 50 | release(&name) |
+//!
+//! 16-bit programs (TFTP, LPD, TELNETDC) call three entries with 16:16
+//! pointers (`_cdecl far`, through thunk16): 9 init (as 24), 37 release
+//! (as 50), 51 query tables (as 39).
 
 #![no_std]
 #![no_main]
@@ -125,6 +129,26 @@ extern "C" fn setup() -> u32 {
 }
 
 extern "C" fn release(_p: *mut u32) -> u32 {
+    0
+}
+
+thunk16::entries16! {
+    dispatch = dispatch16;
+    tnls16_init9 = 9;
+    tnls16_release37 = 37;
+    tnls16_tables51 = 51;
+}
+
+extern "C" fn dispatch16(ord: u32, args: *const u8) -> u32 {
+    let a = thunk16::Args(args);
+    if ord == 51 {
+        for off in [0, 4] {
+            let p = a.p(off) as *mut u32;
+            if !p.is_null() {
+                unsafe { p.write_unaligned(0) };
+            }
+        }
+    }
     0
 }
 

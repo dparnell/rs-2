@@ -1,0 +1,14 @@
+[package]
+name = "tnls16-dll"
+description = "TNLS16.DLL: the 16-bit code page and message catalog helper of IBM TCP/IP applications"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tnls16"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+thunk16 = { path = "../thunk16" }

@@ -1,0 +1,15 @@
+[package]
+name = "tcpipdll-dll"
+description = "TCPIPDLL.DLL: the 16-bit OS/2 TCP/IP socket and network database calls"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tcpipdll"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+tcpipcore = { path = "../tcpipcore" }
+thunk16 = { path = "../thunk16" }

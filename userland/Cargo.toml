@@ -2,7 +2,7 @@
 # tools/elf2lx (cargo xtask builds them).
 [workspace]
 resolver = "3"
-members = ["os2", "apitest", "testdll", "cmd", "utils", "install", "pmwin", "pmgpi", "gpitest", "pmctls", "helpmgr", "stress", "nettest", "tcpipcore", "tcpip32", "tnls32", "pmshapi", "so32dll", "tcp32dll"]
+members = ["os2", "apitest", "testdll", "cmd", "utils", "install", "pmwin", "pmgpi", "gpitest", "pmctls", "helpmgr", "stress", "nettest", "tcpipcore", "tcpip32", "tnls32", "pmshapi", "so32dll", "tcp32dll", "thunk16", "tcpipdll", "tnls16"]
 
 [workspace.package]
 edition = "2024"

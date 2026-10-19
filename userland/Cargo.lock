@@ -137,6 +137,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tcpipdll-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "tcpipcore",
+ "thunk16",
+]
+
+[[package]]
 name = "testdll"
 version = "0.1.0"
 dependencies = [
@@ -144,10 +153,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "thunk16"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "tnls16-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "thunk16",
+]
+
+[[package]]
 name = "tnls32-dll"
 version = "0.1.0"
 dependencies = [
  "os2",
+ "thunk16",
 ]
 
 [[package]]

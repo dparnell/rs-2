@@ -10,7 +10,7 @@
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
 //!                  [--virtio-rng] [--virtio-console PATH] [--virtio-gpu|--virtio-gpu-pci]
 //!                  [--virtio-legacy] [--boot-virtio]
-//!                  [--net] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]...
+//!                  [--net] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--tftp DIR]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
@@ -51,7 +51,8 @@
 //! `e1000-82545em`, `virtio-net-pci`); `--virtio-net` is short for
 //! `--net --net-model virtio-net-pci`. Host port 5555 is forwarded to
 //! guest port 23 (when free), and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
-//! rule. Without these options the machine has no network adapter.
+//! rule; `--tftp DIR` has QEMU serve DIR by TFTP at 10.0.2.2. Without
+//! these options the machine has no network adapter.
 
 mod hpfsimg;
 mod image;
@@ -128,6 +129,8 @@ struct Opts {
     /// host forwarding rules.
     net: Option<String>,
     hostfwd: Vec<String>,
+    /// Directory QEMU's user network serves by TFTP (10.0.2.2).
+    tftp: Option<String>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -172,6 +175,7 @@ fn parse(args: &[String]) -> Opts {
         virtio_gpu: None,
         net: None,
         hostfwd: vec![],
+        tftp: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -243,6 +247,10 @@ fn parse(args: &[String]) -> Opts {
             "--net-model" => {
                 i += 1;
                 o.net = Some(args[i].clone());
+            }
+            "--tftp" => {
+                i += 1;
+                o.tftp = Some(args[i].clone());
             }
             "--hostfwd" => {
                 i += 1;
@@ -428,6 +436,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmshapi", "OS2\\DLL\\PMSHAPI.DLL"),
         ("so32dll", "OS2\\DLL\\SO32DLL.DLL"),
         ("tcp32dll", "OS2\\DLL\\TCP32DLL.DLL"),
+        ("tcpipdll", "OS2\\DLL\\TCPIPDLL.DLL"),
+        ("tnls16", "OS2\\DLL\\TNLS16.DLL"),
     ];
 
 /// Build the userland workspace and convert each program to LX.
@@ -586,6 +596,10 @@ fn net_devices(o: &Opts, c: &mut Command) {
     for r in &o.hostfwd {
         netdev.push_str(",hostfwd=");
         netdev.push_str(r);
+    }
+    if let Some(d) = &o.tftp {
+        netdev.push_str(",tftp=");
+        netdev.push_str(d);
     }
     c.arg("-netdev").arg(netdev);
     let legacy = if o.virtio_legacy && model.starts_with("virtio") { ",disable-modern=on,disable-legacy=off" } else { "" };

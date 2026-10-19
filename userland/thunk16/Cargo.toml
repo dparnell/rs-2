@@ -1,0 +1,9 @@
+[package]
+name = "thunk16"
+description = "16-bit entry points for rs2's Rust DLLs (16:16 callers thunked to 32-bit code)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
