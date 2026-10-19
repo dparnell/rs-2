@@ -29,6 +29,16 @@ const ERROR_VIO_RETURN: u32 = 423;
 const ERROR_VIO_ILLEGAL_DURING_POPUP: u32 = 430;
 const ERROR_VIO_FONT: u32 = 467;
 const ERROR_VIO_TRANSPARENT_POPUP: u32 = 483;
+/// "The VIO call issued by a VIO windowed program is not valid."
+const ERROR_VIO_EXTENDED_SG: u32 = 494;
+
+/// The caller's session is shown in a PM window: the calls that need the
+/// physical screen (VioGetPhysBuf, VioScrLock, the save/redraw and mode
+/// notifications) fail there with ERROR_VIO_EXTENDED_SG, as on OS/2;
+/// such programs are marked NOTWINDOWCOMPAT and run full screen.
+fn windowed() -> bool {
+    crate::session::is_windowed(sid())
+}
 
 fn rows_cols() -> (usize, usize) {
     screen::with(|s| (s.rows, s.cols)).unwrap_or((25, 80))
@@ -817,6 +827,9 @@ pub fn vio_get_phys_buf(c: &mut Ctx) -> u32 {
     if !(0xa0000..0xc0000).contains(&addr) || cb == 0 || addr as u64 + cb as u64 > 0xc0000 {
         return err::VIO_INVALID_PARMS;
     }
+    if windowed() {
+        return ERROR_VIO_EXTENDED_SG;
+    }
     let s = sid();
     let Some(obj) = screen::with_session(s, |sc| sc.phys_buf()).flatten() else { return err::NOT_ENOUGH_MEMORY };
     {
@@ -843,6 +856,9 @@ pub fn vio_scr_lock(c: &mut Ctx) -> u32 {
     if wait > 1 {
         return 366; // ERROR_VIO_WAIT_FLAG
     }
+    if windowed() {
+        return ERROR_VIO_EXTENDED_SG;
+    }
     let (s, pid) = (sid(), c.process.pid);
     loop {
         let got = with_sess(s, |v| match v.lock {
@@ -868,6 +884,9 @@ pub fn vio_scr_lock(c: &mut Ctx) -> u32 {
 }
 
 pub fn vio_scr_unlock(c: &mut Ctx) -> u32 {
+    if windowed() {
+        return ERROR_VIO_EXTENDED_SG;
+    }
     let (s, pid) = (sid(), c.process.pid);
     let ok = with_sess(s, |v| {
         if v.lock == Some(pid) {
@@ -890,6 +909,9 @@ fn pick(v: &mut VioSess, mode: bool) -> &mut Option<Waiter> {
 /// Wait for a notification in `slot` of the caller's session.
 fn wait_notify(c: &mut Ctx, mode: bool, redraw_only: bool, pnotify: u32) -> u32 {
     let (s, pid) = (crate::session::current(), c.process.pid);
+    if crate::session::is_windowed(s) {
+        return ERROR_VIO_EXTENDED_SG;
+    }
     let owned = with_sess(s, |v| match pick(v, mode) {
         Some(w) if w.pid != pid => true,
         Some(w) => {

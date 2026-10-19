@@ -44,6 +44,7 @@ mod sync;
 mod task;
 mod trap;
 mod vm;
+mod viowin;
 mod vmware;
 
 use bootinfo::BootInfo;
@@ -264,6 +265,11 @@ pub mod boot {
                 None => {}
             }
         }
+    }
+
+    /// The boot environment (CONFIG.SYS SET statements).
+    pub fn env() -> Vec<String> {
+        STATE.lock().as_ref().map(|b| b.env.clone()).unwrap_or_default()
     }
 
     /// A top-level process ended.

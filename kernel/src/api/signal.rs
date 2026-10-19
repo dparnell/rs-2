@@ -34,12 +34,17 @@ const SIGA_ERROR: u32 = 3;
 /// The process that receives keyboard signals: the most recently started
 /// live process in the (single) session.
 pub fn foreground() -> Option<Arc<Process>> {
+    foreground_of(crate::session::foreground())
+}
+
+/// The process of session `sid` that receives its keyboard signals.
+pub fn foreground_of(sid: u32) -> Option<Arc<Process>> {
     let all: Vec<Arc<Process>> = process::all();
     // A process that asked for the focus (DosSetSignalExceptionFocus)
     // comes before the most recently started one.
     all.into_iter()
         .filter(|p| p.exit_info().is_none() && (!p.detached.load(Ordering::Relaxed) || crate::session::is_leader(p.pid)))
-        .filter(|p| p.session.load(Ordering::Relaxed) == crate::session::foreground())
+        .filter(|p| p.session.load(Ordering::Relaxed) == sid)
         .max_by_key(|p| (p.sig_focus.load(Ordering::Relaxed) > 0, p.pid))
 }
 
@@ -74,8 +79,8 @@ pub fn release(p: &Arc<Process>) {
 }
 
 /// Keyboard hook: Ctrl+C or Ctrl+Break pressed.
-pub fn keyboard(sig: u32) {
-    if let Some(p) = foreground() {
+pub fn keyboard(sid: u32, sig: u32) {
+    if let Some(p) = foreground_of(sid) {
         post(&p, sig);
     }
 }

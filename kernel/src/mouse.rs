@@ -45,6 +45,9 @@ pub struct Session {
     pub shown: bool,
     /// Cell under the drawn pointer: position and original content.
     drawn: Option<(usize, usize, u16)>,
+    /// Buttons of the last event injected by the PM window of a windowed
+    /// session.
+    buttons: u8,
 }
 
 impl Session {
@@ -60,6 +63,7 @@ impl Session {
             acc: (0, 0),
             shown: false,
             drawn: None,
+            buttons: 0,
         }
     }
 }
@@ -148,6 +152,17 @@ fn deliver(buttons: u8, pm: impl FnOnce(), place: impl FnOnce(&mut Session, i32,
     if !moved && prev == buttons {
         return;
     }
+    queue_event(sid, m, prev, buttons, moved, time);
+    if moved && m.shown {
+        redraw(sid, m);
+    }
+    drop(s);
+    WAITERS.wake_all();
+}
+
+/// Queue the event for a pointer move and/or button change in session
+/// `sid` (through its mouse monitors).
+fn queue_event(sid: u32, m: &mut Session, prev: u8, buttons: u8, moved: bool, time: u32) {
     // OS/2 button 1 is the left button, 2 the right, 3 the middle.
     let mut fs = 0;
     let bits = [(1u8, ev::BN1, ev::MOTION_WITH_BN1), (2, ev::BN2, ev::MOTION_WITH_BN2), (4, ev::BN3, ev::MOTION_WITH_BN3)];
@@ -169,11 +184,36 @@ fn deliver(buttons: u8, pm: impl FnOnce(), place: impl FnOnce(&mut Session, i32,
             m.queue.push_back(e);
         }
     }
-    if moved && m.shown {
-        redraw(sid, m);
+}
+
+/// A mouse event for windowed session `sid` from the PM window that shows
+/// it (RS2API Rs2VioMouse): the pointer is over cell (`row`, `col`) with
+/// `buttons` (bit 0 left, 1 right, 2 middle) down. Ignored unless the
+/// session opened the mouse.
+pub fn inject(sid: u32, buttons: u8, row: i32, col: i32) {
+    let time = crate::irq::uptime_ms() as u32;
+    let (rows, cols) = crate::screen::with_session(sid, |sc| (sc.rows as i32, sc.cols as i32)).unwrap_or((25, 80));
+    let mut s = STATE.lock();
+    let Some(m) = s.sessions.get_mut(&sid) else { return };
+    if !m.open {
+        return;
     }
+    let (row, col) = (row.clamp(0, rows - 1), col.clamp(0, cols - 1));
+    let prev = core::mem::replace(&mut m.buttons, buttons);
+    let moved = (row, col) != (m.row, m.col);
+    if !moved && prev == buttons {
+        return;
+    }
+    (m.row, m.col) = (row, col);
+    m.acc = (0, 0);
+    queue_event(sid, m, prev, buttons, moved, time);
     drop(s);
     WAITERS.wake_all();
+}
+
+/// Whether session `sid` opened the mouse (MouOpen).
+pub fn is_open(sid: u32) -> bool {
+    STATE.lock().sessions.get(&sid).is_some_and(|m| m.open)
 }
 
 /// An event that went through the mouse monitors of session `sid`.
@@ -222,7 +262,8 @@ fn redraw(sid: u32, m: &mut Session) {
     }
     let (r, c) = (m.row as usize, m.col as usize);
     m.drawn = crate::screen::with_session(sid, |s| {
-        if r >= s.rows || c >= s.cols {
+        // In a PM window the PM pointer shows where the mouse is.
+        if r >= s.rows || c >= s.cols || s.windowed {
             return None;
         }
         let cell = s.cell(r, c);

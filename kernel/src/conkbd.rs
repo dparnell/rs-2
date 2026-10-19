@@ -389,6 +389,11 @@ pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
         if crate::session::list_key(k) {
             return;
         }
+        // Alt+Home: a windowable session on the full screen goes back
+        // into its window.
+        if is_alt_home(k) && !crate::session::popup_active() && crate::session::set_windowed(sid, true) {
+            return;
+        }
     }
     if sid == crate::session::pm_session() && sid != 0 {
         match &ev {
@@ -420,6 +425,35 @@ pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
     deliver_key(sid, k, flags);
 }
 
+fn is_alt_home(k: &KeyInfo) -> bool {
+    k.scan == 0x47 && k.shift & shift::ALT != 0 && k.shift & shift::CONTROL == 0
+}
+
+/// A key for windowed session `sid`, from the PM window that shows it
+/// (RS2API Rs2VioKey): `k` as the keyboard produced it, `up` for a
+/// release. It goes through the session's monitors and input mode like
+/// a key typed on its full screen; Alt+Home switches it to the full
+/// screen.
+pub fn inject_key(sid: u32, k: KeyInfo, up: bool) {
+    let ext = k.status & 0x02 != 0;
+    if !up && is_alt_home(&k) && crate::session::set_windowed(sid, false) {
+        return;
+    }
+    let mut k = k;
+    let mut flags = if ext { dd::SECONDARY } else { 0 };
+    if up {
+        flags |= dd::BREAK;
+        k.ch = 0;
+        k.status &= !0x40;
+    }
+    let raw = k.scan | if up { 0x80 } else { 0 };
+    let packet = crate::monitor::key_packet(raw, &k, flags);
+    if crate::monitor::input(crate::monitor::Dev::Kbd, sid, &packet) {
+        return;
+    }
+    deliver_key(sid, k, flags);
+}
+
 fn shift_held(bit: u16, release: bool) -> u16 {
     let cur = kbd::shift_state() & 0xf000;
     if release { cur & !bit } else { cur | bit }
@@ -445,7 +479,7 @@ pub fn deliver_key(sid: u32, k: KeyInfo, flags: u16) {
     let popup = sid == crate::session::POPUP_SID;
     if ctrl && k.scan == 0x46 && k.status & 0x02 != 0 {
         if !popup {
-            crate::api::signal::keyboard(crate::api::signal::SIG_CTRLBREAK);
+            crate::api::signal::keyboard(sid, crate::api::signal::SIG_CTRLBREAK);
         }
         with(sid, |s| s.cooked.clear());
         return;
@@ -457,7 +491,7 @@ pub fn deliver_key(sid: u32, k: KeyInfo, flags: u16) {
     }
     if !binary && !popup {
         if k.ch == 3 && ctrl {
-            crate::api::signal::keyboard(crate::api::signal::SIG_CTRLC);
+            crate::api::signal::keyboard(sid, crate::api::signal::SIG_CTRLC);
             with(sid, |s| s.cooked.clear());
             return;
         }

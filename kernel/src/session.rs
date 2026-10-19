@@ -24,6 +24,11 @@ pub struct Session {
     pub parent_pid: Option<u32>,
     /// Termination queue name (related sessions).
     pub termq: Option<String>,
+    /// A windowable VIO session (SSF_TYPE_WINDOWABLEVIO): shown in a PM
+    /// window or, after Alt+Home, on the full screen.
+    pub windowable: bool,
+    /// Shown in its PM window now (not on the framebuffer).
+    pub windowed: bool,
 }
 
 /// The Presentation Manager session, if one has been started.
@@ -175,8 +180,64 @@ fn end_popup_of(pid: u32) -> Result<(), u32> {
 pub fn create(title: String, parent_session: u32, parent_pid: Option<u32>, termq: Option<String>) -> u32 {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     crate::screen::create(id);
-    SESSIONS.lock().push(Session { id, title, leader: 0, parent_session, parent_pid, termq });
+    SESSIONS.lock().push(Session { id, title, leader: 0, parent_session, parent_pid, termq, windowable: false, windowed: false });
     id
+}
+
+/// Make `sid` a windowable VIO session, shown in its window.
+pub fn make_windowed(sid: u32) {
+    if let Some(s) = SESSIONS.lock().iter_mut().find(|s| s.id == sid) {
+        s.windowable = true;
+        s.windowed = true;
+    }
+    crate::screen::with_session(sid, |s| s.set_windowed(true, true));
+    crate::viowin::changed();
+}
+
+/// Whether `sid` is shown in a PM window now.
+pub fn is_windowed(sid: u32) -> bool {
+    sid != 1 && SESSIONS.lock().iter().any(|s| s.id == sid && s.windowed)
+}
+
+pub fn is_windowable(sid: u32) -> bool {
+    sid != 1 && SESSIONS.lock().iter().any(|s| s.id == sid && s.windowable)
+}
+
+/// Switch a windowable session between its window (`on`) and the full
+/// screen (Alt+Home). False if `sid` is not windowable.
+pub fn set_windowed(sid: u32, on: bool) -> bool {
+    {
+        let mut g = SESSIONS.lock();
+        let Some(s) = g.iter_mut().find(|s| s.id == sid && s.windowable) else { return false };
+        if s.windowed == on {
+            drop(g);
+            if on {
+                crate::viowin::activate(sid);
+            }
+            return true;
+        }
+        s.windowed = on;
+    }
+    crate::screen::with_session(sid, |s| s.set_windowed(true, on));
+    crate::viowin::changed();
+    if on {
+        // Back into the window: PM comes to the front with it.
+        crate::viowin::activate(sid);
+    } else {
+        select(sid);
+    }
+    true
+}
+
+/// Leader and title of a session.
+pub fn info(sid: u32) -> Option<(u32, String)> {
+    SESSIONS.lock().iter().find(|s| s.id == sid).map(|s| (s.leader, s.title.clone()))
+}
+
+/// (id, title, windowable, windowed) of the sessions other than the boot
+/// session.
+pub fn list_full() -> Vec<(u32, String, bool, bool)> {
+    SESSIONS.lock().iter().map(|s| (s.id, s.title.clone(), s.windowable, s.windowed)).collect()
 }
 
 pub fn set_leader(sid: u32, pid: u32) {
@@ -220,10 +281,16 @@ pub fn parent_pid(sid: u32) -> Option<u32> {
     SESSIONS.lock().iter().find(|s| s.id == sid).and_then(|s| s.parent_pid)
 }
 
-/// Bring session `sid` to the foreground.
+/// Bring session `sid` to the foreground. A windowed session's window
+/// comes to the front in PM.
 pub fn select(sid: u32) -> bool {
     if !exists(sid) {
         return false;
+    }
+    if is_windowed(sid) {
+        close_list();
+        crate::viowin::activate(sid);
+        return true;
     }
     close_list();
     let old = FOREGROUND.swap(sid, Ordering::Relaxed);
@@ -247,7 +314,8 @@ pub fn select_next() {
     if popup_active() {
         return;
     }
-    let ids: Vec<u32> = list().into_iter().map(|(i, _)| i).collect();
+    // Windowed sessions belong to PM's screen.
+    let ids: Vec<u32> = list().into_iter().map(|(i, _)| i).filter(|&i| !is_windowed(i)).collect();
     let fg = foreground();
     let at = ids.iter().position(|&i| i == fg).unwrap_or(0);
     select(ids[(at + 1) % ids.len()]);
@@ -261,6 +329,7 @@ pub fn process_ended(pid: u32, code: u32) {
     crate::api::subsys::process_ended(pid);
     crate::api::harderr::process_ended(pid);
     crate::monitor::process_ended(pid);
+    crate::viowin::process_ended(pid);
     // The PM session ends with its last process.
     let pm = pm_session();
     if pm != 0 && !crate::task::process::all().iter().any(|p| p.pid != pid && p.exit_info().is_none() && p.session.load(Ordering::Relaxed) == pm) {
@@ -298,6 +367,9 @@ pub fn process_ended(pid: u32, code: u32) {
     crate::mouse::drop_session(s.id);
     crate::conkbd::drop_session(s.id);
     crate::api::vio::drop_session(s.id);
+    if s.windowable {
+        crate::viowin::session_ended(s.id);
+    }
 }
 
 // ---- The window list (Ctrl+Esc) ----

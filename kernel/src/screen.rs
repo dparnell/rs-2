@@ -195,6 +195,14 @@ pub struct Screen {
     pub graphics: bool,
     /// Mapped VioGetPhysBuf buffer.
     pub phys: Option<PhysBuf>,
+    /// Bumped by every change of what the screen shows.
+    pub changes: u32,
+    /// Bumped when the glyphs change (code page, font).
+    pub font_gen: u32,
+    /// A windowable VIO session: changes are reported to the PM host.
+    pub watched: bool,
+    /// Shown in a PM window now (the text-mode mouse pointer is not drawn).
+    pub windowed: bool,
 }
 
 unsafe impl Send for Screen {}
@@ -261,6 +269,10 @@ impl Screen {
             core::ptr::addr_of_mut!((*s).visible).write(false);
             core::ptr::addr_of_mut!((*s).graphics).write(false);
             core::ptr::addr_of_mut!((*s).phys).write(None);
+            core::ptr::addr_of_mut!((*s).changes).write(0);
+            core::ptr::addr_of_mut!((*s).font_gen).write(0);
+            core::ptr::addr_of_mut!((*s).watched).write(false);
+            core::ptr::addr_of_mut!((*s).windowed).write(false);
         }
         let s = unsafe { &mut *s };
         for row in s.cells.iter_mut() {
@@ -279,15 +291,54 @@ impl Screen {
         self.codepage
     }
 
+    /// Note a change of what the screen shows (for the PM host of a
+    /// windowed session).
+    fn touch(&mut self) {
+        self.changes = self.changes.wrapping_add(1);
+        if self.watched {
+            crate::viowin::changed();
+        }
+    }
+
+    /// Mark the screen as one of a windowable session and whether it is
+    /// in its window now.
+    pub fn set_windowed(&mut self, watched: bool, windowed: bool) {
+        self.watched = watched;
+        self.windowed = windowed;
+        self.touch();
+    }
+
+    /// The cells of the text area, row by row.
+    pub fn cells_vec(&self) -> Vec<u16> {
+        let mut v = Vec::with_capacity(self.rows * self.cols);
+        for r in 0..self.rows {
+            v.extend_from_slice(&self.cells[r][..self.cols]);
+        }
+        v
+    }
+
+    /// The 16 attribute colours as 0x00RRGGBB.
+    pub fn palette_rgb(&self) -> [u32; 16] {
+        let mut out = [0; 16];
+        for (i, o) in out.iter_mut().enumerate() {
+            let (r, g, b) = self.dac[(self.palregs[i] & 0x3f) as usize];
+            let scale = |v: u8| ((v as u32 & 0x3f) * 255 + 31) / 63;
+            *o = scale(r) << 16 | scale(g) << 8 | scale(b);
+        }
+        out
+    }
+
     pub fn set_codepage(&mut self, cp: CodePage) {
         self.codepage = cp;
         self.user_font = false;
         self.load_font();
+        self.touch();
         self.redraw();
     }
 
     /// Glyphs of the code page from the built-in font of the cell height.
     fn load_font(&mut self) {
+        self.font_gen = self.font_gen.wrapping_add(1);
         let h = self.cell_h;
         for b in 0..256 {
             let c = self.codepage.glyph(b as u8);
@@ -317,6 +368,8 @@ impl Screen {
             self.glyphs[b][..h].copy_from_slice(&data[b * h..b * h + h]);
         }
         self.user_font = true;
+        self.font_gen = self.font_gen.wrapping_add(1);
+        self.touch();
         if h != self.cell_h {
             self.cell_h = h;
             self.layout();
@@ -335,6 +388,7 @@ impl Screen {
             let (r, g, b) = (scale(r), scale(g), scale(b));
             self.palette[i] = if self.fb.format == 0 { r | g << 8 | b << 16 } else { r << 16 | g << 8 | b };
         }
+        self.touch();
     }
 
     /// The largest built-in font height for `rows` rows, if any fits.
@@ -365,6 +419,7 @@ impl Screen {
         self.cur_row = self.cur_row.min(self.rows - 1);
         self.cur_col = 0;
         self.sync_phys();
+        self.touch();
         self.layout();
     }
 
@@ -400,6 +455,7 @@ impl Screen {
     /// Set the border colour.
     pub fn set_overscan(&mut self, c: u8) {
         self.overscan = c & 15;
+        self.touch();
         if self.visible && !self.graphics {
             self.clear_border();
         }
@@ -426,6 +482,7 @@ impl Screen {
         if let Some(p) = &self.phys {
             p.set(row * self.cols + col, cell);
         }
+        self.touch();
         self.draw(row, col);
     }
 
@@ -469,7 +526,7 @@ impl Screen {
 
     /// First and last scan line of the cursor. Negative values in
     /// VIOCURSORINFO are percentages of the cell height.
-    fn cursor_lines(&self) -> (usize, usize) {
+    pub fn cursor_lines(&self) -> (usize, usize) {
         let h = self.cell_h as i32;
         let line = |v: u16| -> usize {
             let v = v as i16 as i32;
@@ -495,6 +552,9 @@ impl Screen {
     pub fn set_cursor(&mut self, pos: Option<(usize, usize)>) {
         let old = self.cursor;
         self.cursor = pos;
+        if old != pos {
+            self.touch();
+        }
         if let Some((r, c)) = old {
             if r < self.rows && c < self.cols {
                 self.draw(r, c);
@@ -510,6 +570,7 @@ impl Screen {
     /// Change the cursor shape (VioSetCurType) and redraw it.
     pub fn set_cursor_type(&mut self, t: [u16; 4]) {
         self.cursor_type = t;
+        self.touch();
         if let Some((r, c)) = self.cursor {
             if r < self.rows && c < self.cols {
                 self.draw(r, c);
@@ -521,6 +582,7 @@ impl Screen {
     pub fn set_blink(&mut self, blink: bool) {
         if self.blink != blink {
             self.blink = blink;
+            self.touch();
             self.redraw();
         }
     }
@@ -532,6 +594,7 @@ impl Screen {
             return;
         }
         let n = n.min(bottom - top + 1);
+        self.touch();
         for r in top..=bottom {
             for c in 0..self.cols {
                 self.cells[r][c] = if r + n <= bottom { self.cells[r + n][c] } else { fill };
@@ -618,6 +681,9 @@ impl Screen {
                     changed.push((r, c, v));
                 }
             }
+        }
+        if !changed.is_empty() {
+            self.touch();
         }
         for (r, c, v) in changed {
             self.cells[r][c] = v;
@@ -706,6 +772,7 @@ impl Screen {
         self.cur_row = o.cur_row;
         self.cur_col = o.cur_col;
         self.cursor_type = o.cursor_type;
+        self.font_gen = self.font_gen.wrapping_add(1);
         self.update_palette();
         self.layout();
     }
@@ -807,6 +874,14 @@ pub fn tick(ticks: u64) {
         return;
     }
     let Some(mut g) = SCREEN.try_lock() else { return };
+    // Windowed sessions' physical buffers (mapped while on the full
+    // screen) are still picked up for their windows.
+    let vis = g.visible;
+    for (sid, s) in g.others.iter_mut() {
+        if s.windowed && s.phys.is_some() && *sid != vis {
+            s.refresh_phys();
+        }
+    }
     let v = g.visible;
     let Some(s) = g.get(v) else { return };
     if s.graphics {

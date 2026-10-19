@@ -19,6 +19,10 @@ const ERROR_SMG_INVALID_STOP_OPTION: u32 = 458;
 const ERROR_SMG_INVALID_DATA_LENGTH: u32 = 461;
 const ERROR_SMG_INVALID_PROGRAM_TYPE: u32 = 491;
 
+const SSF_TYPE_DEFAULT: u16 = 0;
+const SSF_TYPE_FULLSCREEN: u16 = 1;
+const SSF_TYPE_WINDOWABLEVIO: u16 = 2;
+const SSF_TYPE_PM: u16 = 3;
 const SSF_TYPE_VDM: u16 = 4;
 const SSF_TYPE_WINDOWEDVDM: u16 = 7;
 
@@ -31,6 +35,8 @@ struct StartData {
     inputs: String,
     termq: Option<String>,
     env: Option<Vec<String>>,
+    /// SessionType (SSF_TYPE_*).
+    session_type: u16,
 }
 
 /// Read STARTDATA (pointers are 16:16 for the 16-bit API).
@@ -61,6 +67,9 @@ fn read_start_data(c: &Ctx, at: u32) -> Result<StartData, u32> {
         // DOS sessions need V86 mode, which long mode does not have.
         return Err(ERROR_SMG_INVALID_PROGRAM_TYPE);
     }
+    if ty > SSF_TYPE_WINDOWEDVDM {
+        return Err(ERROR_SMG_INVALID_PROGRAM_TYPE);
+    }
     let env = match ptr_at(24) {
         0 => None,
         p => Some(super::proc::read_block(c, p, 4096).unwrap_or_default()),
@@ -73,7 +82,32 @@ fn read_start_data(c: &Ctx, at: u32) -> Result<StartData, u32> {
         inputs: str_at(16).unwrap_or_default(),
         termq: if related { str_at(20).filter(|s| !s.is_empty()) } else { None },
         env,
+        session_type: ty,
     })
+}
+
+/// Whether a session started by a process of `caller` with `ty` for a
+/// program of FAPPTYP `app` runs in a PM window. As on OS/2: type 2
+/// (windowable VIO) does, unless the program is not window compatible;
+/// type 0 (default) does for a window-compatible program started from
+/// PM or from a windowed session; full-screen (1) and PM (3) programs
+/// never do.
+fn wants_window(ty: u16, app: u32, caller: u32) -> bool {
+    let app = app & 7;
+    let from_pm = (caller != 0 && caller == session::pm_session()) || session::is_windowed(caller);
+    match ty {
+        SSF_TYPE_WINDOWABLEVIO => app != 1 && app != 3,
+        SSF_TYPE_DEFAULT => app == 2 && from_pm,
+        SSF_TYPE_FULLSCREEN | SSF_TYPE_PM => false,
+        _ => false,
+    }
+}
+
+/// The caller's session counts as the foreground one: it is, or it is a
+/// windowed session (or PM) while PM is in front.
+fn caller_in_front(caller: u32) -> bool {
+    let fg = session::foreground();
+    fg == caller || (fg != 0 && fg == session::pm_session() && (caller == fg || session::is_windowed(caller)))
 }
 
 fn env_value(env: &[String], key: &str) -> Option<String> {
@@ -134,7 +168,17 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
     let title = sd.title.clone().unwrap_or_else(|| program.clone());
     let caller_session = c.process.session.load(Ordering::Relaxed);
     let parent_pid = sd.related.then_some(c.process.pid);
+    let app = crate::fs::read_file(&path).map_or(0, |d| super::module::app_type(&d));
+    let mut windowed = wants_window(sd.session_type, app, caller_session);
+    // The window needs the PM host; without it the session runs full
+    // screen.
+    if windowed && !crate::viowin::ensure_host(env.clone()) {
+        windowed = false;
+    }
     let sid = session::create(title, caller_session, parent_pid, sd.termq.clone());
+    if windowed {
+        session::make_windowed(sid);
+    }
     let r = process::exec(process::ExecParams {
         path: &path,
         program: &program,
@@ -154,8 +198,11 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
     };
     session::set_leader(sid, child.pid);
     let mut rc = 0;
+    if windowed {
+        crate::viowin::changed();
+    }
     if !sd.background {
-        if session::foreground() == caller_session {
+        if caller_in_front(caller_session) {
             session::select(sid);
         } else {
             rc = ERROR_SMG_START_IN_BACKGROUND;

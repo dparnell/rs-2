@@ -196,7 +196,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         .map_err(|e| e.code())?;
     let pid = NEXT_PID.fetch_add(1, Ordering::Relaxed);
     let ppid = p.parent.as_ref().map_or(0, |q| q.pid);
-    let pib = [pid, ppid, exe.hmte as u32, env + cmd_off, env, 0, exe_type(&exe)];
+    let pib = [pid, ppid, exe.hmte as u32, env + cmd_off, env, 0, exe_type(&exe, p.session)];
     write_u32s(&mut space, info + info::PIB, &pib);
 
     // Stack.
@@ -307,11 +307,12 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
     Ok(proc)
 }
 
-fn exe_type(exe: &Module) -> u32 {
-    // PIB type: 0 full screen, 2 VIO window, 3 PM, 4 detached.
+fn exe_type(exe: &Module, session: u32) -> u32 {
+    // PIB type: 0 full screen, 2 VIO window, 3 PM, 4 detached. A text
+    // program's type is its session's.
     match exe.app_type {
         3 => 3,
-        2 => 2,
+        _ if crate::session::is_windowable(session) => 2,
         _ => 0,
     }
 }
@@ -344,7 +345,7 @@ fn write_linfoseg(
         b.extend_from_slice(&w.to_le_bytes());
     }
     // rfProcStatus, dummy1, fForeground (USHORT), typeProcess, dummy2.
-    b.extend_from_slice(&[0, 0, fg, 0, exe_type(exe) as u8, 0]);
+    b.extend_from_slice(&[0, 0, fg, 0, exe_type(exe, sg) as u8, 0]);
     // Align: selEnvironment at offset 16.
     while b.len() < 16 {
         b.push(0);
