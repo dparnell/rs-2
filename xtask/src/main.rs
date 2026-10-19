@@ -50,7 +50,7 @@
 //! (`e1000`) unless `--net-model` names another QEMU device (`e1000e`,
 //! `e1000-82545em`, `virtio-net-pci`); `--virtio-net` is short for
 //! `--net --net-model virtio-net-pci`. Host port 5555 is forwarded to
-//! guest port 23, and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
+//! guest port 23 (when free), and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
 //! rule. Without these options the machine has no network adapter.
 
 mod hpfsimg;
@@ -569,7 +569,14 @@ fn net_devices(o: &Opts, c: &mut Command) {
         c.args(["-nic", "none"]);
         return;
     };
-    let mut netdev = String::from("user,id=n0,hostfwd=tcp::5555-:23");
+    // Host port 5555 to guest port 23, unless another machine (a parallel
+    // run) has the port already.
+    let mut netdev = String::from("user,id=n0");
+    if std::net::TcpListener::bind("0.0.0.0:5555").is_ok() {
+        netdev.push_str(",hostfwd=tcp::5555-:23");
+    } else {
+        eprintln!("xtask: host port 5555 is in use; not forwarding it to guest port 23");
+    }
     for r in &o.hostfwd {
         netdev.push_str(",hostfwd=");
         netdev.push_str(r);
