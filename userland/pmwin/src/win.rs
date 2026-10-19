@@ -722,7 +722,20 @@ pub extern "C" fn WinSetWindowUShort(h: u32, index: i32, v: u16) -> u32 {
 pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
     let s = st();
     let Some(w) = s.desk.get_mut(h) else { return 0 };
-    let update = core::mem::take(&mut w.update);
+    // The PM server painting a placeholder for a thread that does not
+    // respond: the update region stays for the thread, only what has not
+    // been painted over yet is drawn.
+    let ghost = crate::server::ghost_painting();
+    let update = if ghost {
+        let mut u = w.update.clone();
+        for g in &w.ghost.rects {
+            u.subtract(g);
+        }
+        w.ghost = w.update.clone();
+        u
+    } else {
+        core::mem::take(&mut w.update)
+    };
     let clip_children = w.style & ws::CLIPCHILDREN != 0;
     let bounds = update.bounds();
     let o = s.desk.origin(h);
@@ -734,8 +747,10 @@ pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
     if !prcl.is_null() {
         unsafe { prcl.write_unaligned(RectL::from(bounds)) };
     }
-    if let Some(w) = s.desk.get_mut(h) {
-        w.ghost = pmwin::Region::new();
+    if !ghost {
+        if let Some(w) = s.desk.get_mut(h) {
+            w.ghost = pmwin::Region::new();
+        }
     }
     let hps = if hps != 0 {
         gpiapi::begin_paint(s, hps, h, o, clip);

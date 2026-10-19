@@ -431,7 +431,8 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 fn titlebar_paint(h: u32) {
     let active = title_active(h);
     let title = ctl::text(h);
-    draw::paint(h, |c| draw_title(c, &title, active, false));
+    let hung = st().is_hung(h);
+    draw::paint(h, |c| draw_title(c, &title, active, hung));
 }
 
 /// The title bar shows its frame as active.

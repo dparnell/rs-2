@@ -67,6 +67,13 @@ static IS_SERVER: AtomicBool = AtomicBool::new(false);
 pub static HMOD: AtomicU32 = AtomicU32::new(0);
 /// Time of the last not-responding check.
 static LAST_CHECK: AtomicU32 = AtomicU32::new(0);
+/// The server is painting a placeholder (WinBeginPaint keeps the update
+/// region).
+static GHOST: AtomicBool = AtomicBool::new(false);
+
+pub fn ghost_painting() -> bool {
+    GHOST.load(Ordering::Relaxed)
+}
 
 /// Start the PM server unless it runs (called with the lock held when a
 /// process creates its first message queue).
@@ -300,16 +307,24 @@ fn ghost(h: u32) {
     let mut dev = need.clone();
     dev.offset(o.x, o.y);
     let clip: Vec<Rect> = vis.rects.iter().flat_map(|v| dev.rects.iter().map(move |u| v.intersect(u))).filter(|r| !r.is_empty()).collect();
-    let id = w.id;
-    let parent = w.parent;
-    let text = w.text.clone();
+    let proc_ = w.proc_;
+    // Built-in controls (title bar, menus, scroll bars, buttons...) are
+    // PMWIN code that only draws: they paint themselves, here.
+    let builtin = s.classes.get(w.class as usize).is_some_and(|c| c.pid == 0 && c.proc_ == proc_);
+    if builtin && !s.frames.contains_key(&h) {
+        GHOST.store(true, Ordering::Relaxed);
+        msg::call(proc_, h, WM_PAINT, 0, 0);
+        GHOST.store(false, Ordering::Relaxed);
+        if let Some(w) = st().desk.get_mut(h) {
+            w.ghost = w.update.clone();
+        }
+        return;
+    }
     let mut ps = Ps::new(o, clip);
     let mut c = Canvas::new(&mut ps, s.surface, cx, cy);
     if s.frames.contains_key(&h) {
         let f = frame::fcf(h);
         frame::draw_frame(&mut c, f, s.active == h);
-    } else if id == FID_TITLEBAR && s.frames.contains_key(&parent) {
-        frame::draw_title(&mut c, &text, frame::title_active(h), true);
     } else {
         let r = c.rect();
         c.fill(r, color::sys(color::SYSCLR_DIALOGBACKGROUND));
