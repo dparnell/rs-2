@@ -1,0 +1,9 @@
+[package]
+name = "initest"
+description = "Self-checks of PMSHAPI's profile (INI file) and program list calls"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

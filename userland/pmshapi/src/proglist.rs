@@ -90,9 +90,10 @@ unsafe fn from_details(d: *const u8, group: u32) -> Entry {
     e
 }
 
-/// The bytes the strings of `e` take after the structure.
+/// The bytes the strings of `e` take after the structure (each with a
+/// NUL; for the environment that NUL ends the list).
 fn strings_size(e: &Entry) -> usize {
-    e.fields.iter().enumerate().map(|(i, f)| f.as_ref().map_or(0, |s| s.len() + 1 + (i == ENVIRONMENT) as usize)).sum()
+    e.fields.iter().map(|f| f.as_ref().map_or(0, |s| s.len() + 1)).sum()
 }
 
 /// PrfAddProgram(hini, pDetails, hprogGroup): a new program in a group;
@@ -166,10 +167,6 @@ pub extern "C" fn PrfQueryDefinition(hini: u32, hprog: u32, details: *mut u8, cb
             *dst.add(s.len()) = 0;
         }
         at += s.len() + 1;
-        if i == ENVIRONMENT {
-            unsafe { *details.add(at) = 0 };
-            at += 1;
-        }
         words[3 + i] = dst as u32;
     }
     for (i, w) in words.iter().enumerate() {
