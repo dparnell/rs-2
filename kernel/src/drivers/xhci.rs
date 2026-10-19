@@ -5,9 +5,15 @@
 //! Bring-up follows the xHCI specification: BIOS hand-off through the USB
 //! Legacy Support capability, halt and reset, scratchpad buffers, the
 //! device context base address array, a command ring and one event ring
-//! (interrupter 0, one segment). Interrupts stay off: the event ring and
-//! the port status registers are polled, at boot in a loop until the
-//! devices present are configured, afterwards from the timer tick.
+//! (interrupter 0, one segment). At boot the event ring and the port
+//! status registers are polled in a loop until the devices present are
+//! configured. Afterwards interrupter 0 interrupts through MSI-X (or
+//! MSI): the handler does what the tick would (events, port scan,
+//! timers, hubs) if it gets the controller lock, and wakes threads
+//! waiting for transfers. The timer tick then only polls while an
+//! enumeration is in progress and every SCAN_MS (hot-plug safety net,
+//! besides port status change events); without MSI it polls every
+//! POLL_TICKS as before.
 //!
 //! Enumeration is asynchronous and event driven so that the same code runs
 //! at boot and in the tick: every device (on a root port or behind a hub)
@@ -20,9 +26,10 @@
 //! Mass storage transfers are synchronous instead and run in the thread
 //! doing the I/O (`storage`): [`bulk`] and [`control`] queue the TRBs under
 //! the controller lock, then poll the event ring themselves, dropping the
-//! lock and yielding between polls. The tick only `try_lock`s, so it skips
-//! a round while a thread polls; whoever sees the completion event stores
-//! it in the device, where the waiting thread picks it up.
+//! lock and sleeping until the next interrupt between polls (yielding
+//! without one). The tick and the interrupt handler only `try_lock`, so
+//! they skip a round while a thread polls; whoever sees the completion
+//! event stores it in the device, where the waiting thread picks it up.
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -38,6 +45,7 @@ use super::usb::{self, speed, Setup};
 use super::hid;
 use crate::fs::block::BlockDev;
 use crate::mm::{mmio, phys};
+use crate::msi::{self, Event as IrqEvent};
 use crate::sync::SpinLock;
 
 const PAGE: usize = 4096;
@@ -92,6 +100,10 @@ const CMD_RUN: u32 = 1 << 0;
 const CMD_HCRST: u32 = 1 << 1;
 const STS_HCH: u32 = 1 << 0;
 const STS_HSE: u32 = 1 << 2;
+const STS_EINT: u32 = 1 << 3;
+const CMD_INTE: u32 = 1 << 2;
+const IMAN_IP: u32 = 1 << 0;
+const IMAN_IE: u32 = 1 << 1;
 const STS_CNR: u32 = 1 << 11;
 const STS_HCE: u32 = 1 << 12;
 
@@ -544,6 +556,34 @@ struct Ctrl {
     new_storage: Vec<usize>,
     /// Completion codes of thread-context commands, by TRB address.
     sync_cmds: Vec<(u64, u8)>,
+    /// Signalled by interrupter 0's interrupt, if it has one.
+    irq: Option<&'static IrqEvent>,
+    /// A port status change event arrived: scan the ports now.
+    port_event: bool,
+}
+
+/// What the interrupt handler needs without the controller lock.
+struct IrqCtx {
+    index: usize,
+    op: *mut u8,
+    rt: *mut u8,
+    event: IrqEvent,
+}
+
+unsafe impl Sync for IrqCtx {}
+
+/// Interrupter 0: acknowledge, process the event ring like the tick does
+/// (if no thread holds the controller), wake transfer waiters.
+fn interrupt(ctx: usize) {
+    let x = unsafe { &*(ctx as *const IrqCtx) };
+    wr32(x.op, USBSTS, STS_EINT);
+    wr32(x.rt, IMAN, IMAN_IE | IMAN_IP);
+    if let Some(mut cs) = CTRLS.try_lock() {
+        if let Some(c) = cs.get_mut(x.index) {
+            c.poll();
+        }
+    }
+    x.event.signal();
 }
 
 unsafe impl Send for Ctrl {}
@@ -618,6 +658,21 @@ fn alloc_pages(n: usize, limit: u64) -> Option<u64> {
 /// block devices, with whether each is an optical drive.
 pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     let Some(mut c) = start(dev) else { return Vec::new() };
+    // Interrupter 0 through MSI-X entry 0 or MSI; the messages flow once
+    // the kernel is up (msi::start), boot enumeration polls.
+    let ctx: &'static IrqCtx = alloc::boxed::Box::leak(alloc::boxed::Box::new(IrqCtx {
+        index: CTRLS.lock().len(),
+        op: c.op,
+        rt: c.rt,
+        event: IrqEvent::new(),
+    }));
+    if let Some((v, kind)) = msi::setup(dev, true, interrupt, ctx as *const IrqCtx as usize) {
+        ctx.event.arm();
+        c.irq = Some(&ctx.event);
+        wr32(c.rt, IMAN, IMAN_IE | IMAN_IP);
+        wr32(c.op, USBCMD, rd32(c.op, USBCMD) | CMD_INTE);
+        crate::println!("{}: {kind} vector {v:#x}", c.name);
+    }
     c.booting = true;
     c.boot_enumerate();
     c.booting = false;
@@ -750,6 +805,8 @@ fn start(dev: &pci::Device) -> Option<Ctrl> {
         new_storage: Vec::new(),
         sync_cmds: Vec::new(),
         index: 0,
+        irq: None,
+        port_event: false,
     };
     // Power the ports (when the controller switches port power).
     if hcc1 & (1 << 3) != 0 {
@@ -763,17 +820,23 @@ fn start(dev: &pci::Device) -> Option<Ctrl> {
     Some(c)
 }
 
-/// Poll every controller; called from the timer interrupt.
+/// Poll the controllers that need it; called from the timer interrupt.
+/// One with an interrupt only while something is being enumerated and
+/// every SCAN_MS.
 pub fn tick() {
-    if crate::irq::ticks() % POLL_TICKS != 0 {
+    let now = crate::irq::ticks();
+    if now % POLL_TICKS != 0 {
         return;
     }
     let Some(mut cs) = CTRLS.try_lock() else { return };
     if cs.is_empty() {
         return;
     }
+    let scan = now % (SCAN_MS * crate::irq::HZ / 1000) == 0;
     for c in cs.iter_mut() {
-        c.poll();
+        if c.irq.is_none() || scan || c.busy() {
+            c.poll();
+        }
     }
     drop(cs);
     hid::tick();
@@ -824,6 +887,16 @@ impl Ctrl {
         self.poll_once(false);
     }
 
+    /// Enumeration or a request in progress: time-driven steps need the
+    /// tick.
+    fn busy(&self) -> bool {
+        !self.cmds.is_empty()
+            || self.devs.iter().flatten().any(|d| {
+                let hub_busy = d.step == Step::Running && d.hub.as_ref().is_some_and(|h| !h.hub.settled());
+                hub_busy || d.ctl_busy || !matches!(d.step, Step::Running | Step::Unused | Step::Failed)
+            })
+    }
+
     fn poll_once(&mut self, booting: bool) {
         if self.dead {
             return;
@@ -840,6 +913,10 @@ impl Ctrl {
             self.scan_ports(now);
         }
         self.events();
+        if self.port_event {
+            self.port_event = false;
+            self.scan_ports(now);
+        }
         self.timers(now);
         self.hubs(now);
         self.leds();
@@ -1097,8 +1174,9 @@ impl Ctrl {
             any = true;
             self.event(ev);
         }
-        if any {
-            // Update the dequeue pointer, clearing Event Handler Busy.
+        if any || self.irq.is_some() {
+            // Update the dequeue pointer, clearing Event Handler Busy
+            // (which blocks further interrupts until cleared).
             wr64(self.rt, ERDP, self.ev_base + (self.ev_idx * 16) as u64 | 1 << 3);
         }
     }
@@ -1107,7 +1185,8 @@ impl Ctrl {
         match ev.kind() {
             EV_COMMAND => self.command_done(ev),
             EV_TRANSFER => self.transfer_done(ev),
-            EV_PORT => {} // the port registers are scanned
+            // The port registers are scanned (now, with interrupts).
+            EV_PORT => self.port_event = true,
             EV_HOST => crate::println!("{}: host controller event {}", self.name, ev.code()),
             _ => {}
         }
@@ -1781,14 +1860,16 @@ fn with_dev<T>(h: Handle, f: impl FnOnce(&mut Ctrl) -> T) -> Result<T, XferError
     Ok(f(c))
 }
 
-/// Poll the controller until `check` returns something, yielding the CPU
-/// between polls.
+/// Poll the controller until `check` returns something, sleeping until
+/// the next interrupt between polls (yielding the CPU without one).
 fn wait<T>(h: Handle, timeout_ms: u64, mut check: impl FnMut(&mut Ctrl) -> Option<T>) -> Result<T, XferError> {
     let mut deadline = None;
     loop {
-        {
+        let (irq, seen, left) = {
             let mut cs = CTRLS.lock();
             let c = cs.get_mut(h.ctrl).ok_or(XferError::Gone)?;
+            // Interrupts after this point are seen by the wait below.
+            let seen = c.irq.map_or(0, |e| e.signals());
             c.poll_once(false);
             if !c.alive(h) {
                 return Err(XferError::Gone);
@@ -1797,11 +1878,19 @@ fn wait<T>(h: Handle, timeout_ms: u64, mut check: impl FnMut(&mut Ctrl) -> Optio
                 return Ok(v);
             }
             let now = c.now();
-            if now >= *deadline.get_or_insert(now + timeout_ms) {
+            let end = *deadline.get_or_insert(now + timeout_ms);
+            if now >= end {
                 return Err(XferError::Timeout);
             }
+            (c.irq, seen, end - now)
+        };
+        match irq {
+            // Re-poll at least every 20 ms (a lost interrupt).
+            Some(e) => {
+                e.wait_signal(seen, left.min(20));
+            }
+            None => crate::task::sched::yield_now(),
         }
-        crate::task::sched::yield_now();
     }
 }
 
