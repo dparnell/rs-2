@@ -15,12 +15,18 @@
 //! A session can map a "physical" text buffer (VioGetPhysBuf): a shared
 //! object holding the cells in VGA layout that programs write directly;
 //! [`tick`] renders what changed.
+//!
+//! Display drivers that have to copy changes to the host (virtio-gpu) learn
+//! which framebuffer rows were drawn from [`take_dirty`]; while a graphics
+//! session (PM) is shown, all of them count as changed.
 
 use bootinfo::{Framebuffer, PHYS_MAP_BASE};
 
 use alloc::boxed::Box;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+
+use core::sync::atomic::{AtomicU32, Ordering};
 
 use crate::codepage::CodePage;
 use crate::sync::SpinLock;
@@ -31,6 +37,26 @@ pub const CELL_W: usize = 8;
 pub const CELL_H: usize = 16;
 pub const MAX_COLS: usize = 132;
 pub const MAX_ROWS: usize = 100;
+
+/// Framebuffer rows drawn since the last [`take_dirty`]: first, and one
+/// past the last (empty when first >= end).
+static DIRTY_TOP: AtomicU32 = AtomicU32::new(u32::MAX);
+static DIRTY_END: AtomicU32 = AtomicU32::new(0);
+
+/// Note that framebuffer rows `top..end` were drawn.
+pub fn mark_dirty(top: u32, end: u32) {
+    if top < end {
+        DIRTY_TOP.fetch_min(top, Ordering::Relaxed);
+        DIRTY_END.fetch_max(end, Ordering::Relaxed);
+    }
+}
+
+/// The framebuffer rows drawn since the last call, as `top..end`.
+pub fn take_dirty() -> Option<(u32, u32)> {
+    let end = DIRTY_END.swap(0, Ordering::Relaxed);
+    let top = DIRTY_TOP.swap(u32::MAX, Ordering::Relaxed);
+    (top < end).then_some((top, end))
+}
 
 /// Font heights, tallest first.
 pub const FONT_HEIGHTS: [usize; 3] = [16, 14, 8];
@@ -358,6 +384,7 @@ impl Screen {
         let c = self.palette[(self.overscan & 15) as usize];
         let (w, h, stride) = (self.fb.width as usize, self.fb.height as usize, self.fb.stride as usize);
         let (tx1, ty1) = (self.x0 + self.cols * CELL_W, self.y0 + self.rows * self.cell_h);
+        mark_dirty(0, h as u32);
         for y in 0..h {
             let line = unsafe { self.pixels.add(y * stride) };
             let inside = y >= self.y0 && y < ty1;
@@ -424,6 +451,7 @@ impl Screen {
         let px = self.x0 + col * CELL_W;
         let py = self.y0 + row * h;
         let glyph = &self.glyphs[ch];
+        mark_dirty(py as u32, (py + h) as u32);
         for y in 0..h {
             let mut bits = glyph[y];
             if let Some((a, b)) = cursor {
@@ -519,6 +547,7 @@ impl Screen {
         let row_px = self.cell_h * stride;
         let keep = bottom + 1 - top - n;
         if keep > 0 {
+            mark_dirty((self.y0 + top * self.cell_h) as u32, (self.y0 + (top + keep) * self.cell_h) as u32);
             unsafe {
                 let dst = self.pixels.add((self.y0 + top * self.cell_h) * stride);
                 let src = dst.add(n * row_px);
@@ -709,6 +738,11 @@ pub fn framebuffer() -> Option<Framebuffer> {
 /// text modes that still fit stay, others shrink to fit; the visible
 /// screen is redrawn.
 pub fn set_framebuffer(fb: Framebuffer) {
+    if framebuffer().is_none() {
+        // The first framebuffer (the firmware had none for the loader).
+        init(fb);
+        return;
+    }
     let mut g = SCREEN.lock();
     let Screens { boot, others, .. } = &mut *g;
     let all = boot.iter_mut().map(|b| &mut **b).chain(others.iter_mut().map(|(_, b)| &mut **b));
@@ -776,6 +810,8 @@ pub fn tick(ticks: u64) {
     let v = g.visible;
     let Some(s) = g.get(v) else { return };
     if s.graphics {
+        // PM draws without telling anyone.
+        mark_dirty(0, s.fb.height);
         return;
     }
     s.refresh_phys();

@@ -8,7 +8,7 @@
 //!                  [--vmware] [--pvscsi IMG] [--pvscsi-cd ISO] [--scsi-hba MODEL]
 //!                  [--virtio-disk IMG]... [--virtio-scsi IMG]... [--virtio-cd ISO]...
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
-//!                  [--virtio-rng] [--virtio-console PATH]
+//!                  [--virtio-rng] [--virtio-console PATH] [--virtio-gpu|--virtio-gpu-pci]
 //!                  [--virtio-legacy] [--boot-virtio]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
@@ -36,7 +36,11 @@
 //! mouse and a tablet (or one of them with `--virtio-kbd`,
 //! `--virtio-mouse`, `--virtio-tablet`), `--virtio-rng` an entropy source,
 //! `--virtio-console PATH` a console whose output goes to file PATH, or,
-//! if the FIFOs PATH.in and PATH.out exist, connected to them. `--virtio-legacy` makes the block, SCSI, entropy
+//! if the FIFOs PATH.in and PATH.out exist, connected to them.
+//! `--virtio-gpu` replaces the standard VGA with `virtio-vga` (the
+//! firmware draws on its VGA side until the kernel's virtio-gpu driver
+//! takes over), `--virtio-gpu-pci` with `virtio-gpu-pci` (no firmware
+//! framebuffer: the screen starts with the driver). `--virtio-legacy` makes the block, SCSI, entropy
 //! and console devices legacy-only (virtio 0.9.5). `--boot-virtio` boots
 //! from the first virtio disk (no ESP directory).
 
@@ -109,6 +113,8 @@ struct Opts {
     virtio_console: Option<PathBuf>,
     virtio_legacy: bool,
     boot_virtio: bool,
+    /// `run`: virtio-gpu display: "virtio-vga" or "virtio-gpu-pci".
+    virtio_gpu: Option<&'static str>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -150,6 +156,7 @@ fn parse(args: &[String]) -> Opts {
         virtio_console: None,
         virtio_legacy: false,
         boot_virtio: false,
+        virtio_gpu: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -211,6 +218,8 @@ fn parse(args: &[String]) -> Opts {
                 o.virtio_console = Some(PathBuf::from(&args[i]));
             }
             "--virtio-legacy" => o.virtio_legacy = true,
+            "--virtio-gpu" => o.virtio_gpu = Some("virtio-vga"),
+            "--virtio-gpu-pci" => o.virtio_gpu = Some("virtio-gpu-pci"),
             "--boot-virtio" => o.boot_virtio = true,
             "--hdd" => {
                 i += 1;
@@ -505,6 +514,9 @@ fn virtio_devices(o: &Opts, c: &mut Command) {
     }
     if o.virtio_kbd {
         c.args(["-device", "virtio-keyboard-pci,id=vkbd"]);
+    }
+    if let Some(model) = o.virtio_gpu {
+        c.args(["-vga", "none", "-device", model]);
     }
     if o.virtio_rng {
         c.arg("-device").arg(format!("virtio-rng-pci{legacy}"));

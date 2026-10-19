@@ -137,15 +137,18 @@ pub fn display() -> Option<(Arc<SharedMem>, u32, u32, u32, bool)> {
 }
 
 /// Change the screen resolution (`video=`, a display settings dialog);
-/// needs a display driver (VMware SVGA II) and is refused once PM has
-/// mapped the framebuffer.
+/// needs a display driver (virtio-gpu, VMware SVGA II) and is refused
+/// once PM has mapped the framebuffer.
 pub fn set_mode(width: u32, height: u32) -> bool {
-    DISPLAY.get().is_none() && crate::drivers::svga::set_mode(width, height)
+    use crate::drivers::{svga, virtio::gpu};
+    DISPLAY.get().is_none()
+        && if gpu::present() { gpu::set_mode(width, height) } else { svga::set_mode(width, height) }
 }
 
 /// Resolutions [`set_mode`] can switch to.
 pub fn modes() -> alloc::vec::Vec<(u32, u32)> {
-    crate::drivers::svga::modes()
+    use crate::drivers::{svga, virtio::gpu};
+    if gpu::present() { gpu::modes() } else { svga::modes() }
 }
 
 pub fn pointer() -> (i32, i32) {
