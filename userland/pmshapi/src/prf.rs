@@ -14,12 +14,13 @@
 //!   such as COPY) and re-read when either changed.
 //! * Every write goes to disk at once, under the mutex, so the next
 //!   reader in any process sees it and nothing is lost if a process dies.
-//!   The new contents go to a temporary file next to the profile (the
-//!   name with the extension `!!!`, as IBM's PMSHAPI names its
-//!   temporary files) which is flushed, then the profile is deleted and
-//!   the temporary file renamed (DosMove does not replace files). If the
-//!   profile is missing but the temporary file is there (a crash between
-//!   the two), the temporary file becomes the profile.
+//!   The file is replaced the way IBM's profile writer does it (seen in
+//!   MAKEINI, which carries its own copy): the new contents go to
+//!   `X.!!!` (flushed with DosResetBuffer), `X.INI` is renamed `X.###`,
+//!   `X.!!!` renamed `X.INI`, and `X.###` deleted; DosMove does not
+//!   replace files. If `X.INI` is missing (a crash between the renames),
+//!   `X.!!!` becomes the profile if it is a whole profile, else `X.###`
+//!   comes back. A read-only profile is not written.
 
 use alloc::vec::Vec;
 use core::cell::UnsafeCell;
@@ -49,6 +50,8 @@ const MAGIC: u32 = 0x3146_5250; // "PRF1"
 const PATH_MAX: usize = 260;
 const ERROR_FILE_NOT_FOUND: u32 = 2;
 const ERROR_OPEN_FAILED: u32 = 110;
+const ERROR_ACCESS_DENIED: u32 = 5;
+const ERROR_DISK_FULL: u32 = 112;
 const ERROR_SEM_OWNER_DIED: u32 = 105;
 
 /// The system-wide part (named shared memory).
@@ -179,13 +182,17 @@ fn stat(path: &[u8]) -> Option<(u16, u16, u32)> {
     (rc == 0).then_some((st.fdate_write, st.ftime_write, st.cb_file))
 }
 
-/// The temporary file of a profile: the extension replaced by `!!!`.
-fn tmp_name(path: &[u8]) -> Vec<u8> {
+/// A file next to a profile: the extension replaced by `ext` (IBM's
+/// names: `!!!` for the new contents, `###` for the old file while it is
+/// being replaced).
+fn sibling(path: &[u8], ext: &[u8; 3]) -> Vec<u8> {
     let p = cstr(path);
     let base = p.iter().rposition(|&c| c == b'\\' || c == b'/' || c == b':').map_or(0, |i| i + 1);
     let end = p[base..].iter().rposition(|&c| c == b'.').map_or(p.len(), |i| base + i);
     let mut v = p[..end].to_vec();
-    v.extend_from_slice(b".!!!\0");
+    v.push(b'.');
+    v.extend_from_slice(ext);
+    v.push(0);
     v
 }
 
@@ -223,13 +230,20 @@ fn read_file(path: &[u8]) -> Result<Vec<u8>, u32> {
     if rc != 0 { Err(rc) } else { Ok(v) }
 }
 
-/// Replace the file at `path` with `data` (see the module documentation).
+/// Replace the file at `path` with `data` (see the module documentation):
+/// write `X.!!!` and flush it, rename `X.INI` to `X.###`, `X.!!!` to
+/// `X.INI`, delete `X.###`, as IBM's profile writer does.
 fn write_file(path: &[u8], data: &[u8]) -> Result<(), u32> {
-    let tmp = tmp_name(path);
+    let (new, old) = (sibling(path, b"!!!"), sibling(path, b"###"));
+    let mut st = os2::FileStatus3::default();
+    let exists = unsafe { os2::DosQueryPathInfo(path.as_ptr(), os2::FIL_STANDARD, &mut st as *mut _ as *mut u8, core::mem::size_of::<os2::FileStatus3>() as u32) } == 0;
+    if exists && st.attr & os2::FILE_READONLY != 0 {
+        return Err(ERROR_ACCESS_DENIED);
+    }
     let (mut hf, mut action) = (0u32, 0u32);
     let rc = unsafe {
         os2::DosOpen(
-            tmp.as_ptr(),
+            new.as_ptr(),
             &mut hf,
             &mut action,
             data.len() as u32,
@@ -245,23 +259,48 @@ fn write_file(path: &[u8], data: &[u8]) -> Result<(), u32> {
     let mut n = 0;
     let mut rc = unsafe { os2::DosWrite(hf, data.as_ptr(), data.len() as u32, &mut n) };
     if rc == 0 && n as usize != data.len() {
-        rc = 112; // ERROR_DISK_FULL
+        rc = ERROR_DISK_FULL;
     }
     if rc == 0 {
         rc = unsafe { DosResetBuffer(hf) };
     }
     unsafe { os2::DosClose(hf) };
+    if rc == 0 && exists {
+        unsafe { os2::DosForceDelete(old.as_ptr()) };
+        rc = unsafe { os2::DosMove(path.as_ptr(), old.as_ptr()) };
+    }
     if rc == 0 {
-        rc = match unsafe { os2::DosDelete(path.as_ptr()) } {
-            0 | ERROR_FILE_NOT_FOUND => unsafe { os2::DosMove(tmp.as_ptr(), path.as_ptr()) },
-            e => e,
-        };
+        rc = unsafe { os2::DosMove(new.as_ptr(), path.as_ptr()) };
+        if rc != 0 && exists {
+            // Put the old file back.
+            unsafe { os2::DosMove(old.as_ptr(), path.as_ptr()) };
+        }
     }
     if rc != 0 {
-        unsafe { os2::DosDelete(tmp.as_ptr()) };
+        unsafe { os2::DosForceDelete(new.as_ptr()) };
         return Err(rc);
     }
+    if exists {
+        unsafe { os2::DosForceDelete(old.as_ptr()) };
+    }
     Ok(())
+}
+
+/// The profile is missing: a crash interrupted a replacement. The new
+/// contents (`X.!!!`, flushed before anything was renamed) win if they
+/// are a whole profile, else the old file (`X.###`) comes back.
+fn recover(path: &[u8]) {
+    let (new, old) = (sibling(path, b"!!!"), sibling(path, b"###"));
+    if let Ok(b) = read_file(&new) {
+        let p = inifile::parse(&b);
+        if !b.is_empty() && !p.foreign && !p.damaged && unsafe { os2::DosMove(new.as_ptr(), path.as_ptr()) } == 0 {
+            unsafe { os2::DosForceDelete(old.as_ptr()) };
+            return;
+        }
+    }
+    if unsafe { os2::DosMove(old.as_ptr(), path.as_ptr()) } == 0 {
+        unsafe { os2::DosForceDelete(new.as_ptr()) };
+    }
 }
 
 fn boot_drive() -> u8 {
@@ -350,12 +389,8 @@ impl State {
         }
         let mut r = read_file(&f.path);
         if matches!(r, Err(ERROR_FILE_NOT_FOUND | ERROR_OPEN_FAILED)) {
-            // A crash between deleting the profile and renaming its
-            // replacement: the replacement is complete.
-            let tmp = tmp_name(&f.path);
-            if unsafe { os2::DosMove(tmp.as_ptr(), f.path.as_ptr()) } == 0 {
-                r = read_file(&f.path);
-            }
+            recover(&f.path);
+            r = read_file(&f.path);
         }
         match r {
             Ok(b) => {

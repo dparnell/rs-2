@@ -290,7 +290,7 @@ fn basic_checks() {
     // On disk at once, as an INI file, no temporary file left.
     let disk = read_file(file);
     check("written through to the file", disk.as_ref().is_some_and(|b| is_ini(b) && b.windows(5).any(|w| w == b"App1\0") && !b.windows(4).any(|w| w == b"App2")));
-    check("no temporary file left", !exists("C:\\INITEST.!!!"));
+    check("no temporary file left", !exists("C:\\INITEST.!!!") && !exists("C:\\INITEST.###"));
     unsafe {
         check("PrfCloseProfile", PrfCloseProfile(h) != 0);
         check("PrfCloseProfile again fails", PrfCloseProfile(h) == 0);
@@ -323,7 +323,26 @@ fn basic_checks() {
     let h = unsafe { PrfOpenProfile(0, b"C:\\INITEST3.INI\0".as_ptr()) };
     check("a stale temporary file is ignored", h != 0 && data(h, "App1", "Bin").is_some() && put(h, "After", "k", "v") && !exists("C:\\INITEST3.!!!"));
     unsafe { PrfCloseProfile(h) };
+    // Missing, with a broken new version (X.!!!): the old file (X.###)
+    // comes back.
+    let before = read_file("C:\\INITEST3.INI").unwrap_or_default();
     delete("C:\\INITEST3.INI");
+    write_file("C:\\INITEST3.###", &before);
+    write_file("C:\\INITEST3.!!!", &before[..before.len() / 2]);
+    let h = unsafe { PrfOpenProfile(0, b"C:\\INITEST3.INI\0".as_ptr()) };
+    check("recovered from the old file", h != 0 && string(h, "After", "k").as_deref() == Some("v") && !exists("C:\\INITEST3.###") && !exists("C:\\INITEST3.!!!"));
+    unsafe { PrfCloseProfile(h) };
+    delete("C:\\INITEST3.INI");
+    // A read-only profile is read but not written.
+    write_file("C:\\INITEST5.INI", &before);
+    let st = FileStatus3 { attr: FILE_READONLY, ..FileStatus3::default() };
+    unsafe { DosSetPathInfo(b"C:\\INITEST5.INI\0".as_ptr(), FIL_STANDARD, &st as *const _ as *const u8, 24, 0) };
+    let h = unsafe { PrfOpenProfile(0, b"C:\\INITEST5.INI\0".as_ptr()) };
+    check("a read-only profile is read, not written", h != 0 && string(h, "After", "k").as_deref() == Some("v") && !put(h, "After", "k", "w") && read_file("C:\\INITEST5.INI").as_deref() == Some(&before[..]));
+    unsafe { PrfCloseProfile(h) };
+    let st = FileStatus3::default();
+    unsafe { DosSetPathInfo(b"C:\\INITEST5.INI\0".as_ptr(), FIL_STANDARD, &st as *const _ as *const u8, 24, 0) };
+    delete("C:\\INITEST5.INI");
     // Speed: many writes, each one written through.
     let h = unsafe { PrfOpenProfile(0, f.as_ptr()) };
     let t0 = ms();
