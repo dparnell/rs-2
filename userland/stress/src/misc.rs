@@ -42,6 +42,35 @@ fn rd16(b: &[u8], o: usize) -> u16 {
     u16::from_le_bytes([b[o], b[o + 1]])
 }
 
+static RUNNING: AtomicU32 = AtomicU32::new(0);
+static MAXRUN: AtomicU32 = AtomicU32::new(0);
+static PAR_OK: AtomicU32 = AtomicU32::new(0);
+
+/// Write and check this thread's own thread-local value while the others
+/// do the same, for 1.5 s.
+unsafe extern "C" fn tlm_racer(n: u32) {
+    let p = TLS.load(Ordering::Relaxed) as *mut u32;
+    let mut ok = true;
+    unsafe { p.write_volatile(n) };
+    let end = crate::ms() + 1500;
+    while crate::ms() < end {
+        let r = RUNNING.fetch_add(1, Ordering::SeqCst) + 1;
+        MAXRUN.fetch_max(r, Ordering::SeqCst);
+        for _ in 0..2000 {
+            unsafe {
+                if p.read_volatile() != n {
+                    ok = false;
+                }
+                p.write_volatile(n);
+            }
+        }
+        RUNNING.fetch_sub(1, Ordering::SeqCst);
+    }
+    if ok && unsafe { p.read_volatile() } == n {
+        PAR_OK.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
 pub fn run() {
     unsafe {
         // Thread-local memory.
@@ -60,6 +89,26 @@ pub fn run() {
         check("free twice fails", DosFreeThreadLocalMemory(p) != 0);
         let mut q: *mut u32 = null_mut();
         check("too much thread-local memory fails", DosAllocThreadLocalMemory(9, &mut q) != 0);
+
+        // Threads using thread-local memory run on all CPUs at once, each
+        // seeing only its own value.
+        let mut cpus = 1u32;
+        DosQuerySysInfo(26, 26, &mut cpus, 4);
+        let mut p2: *mut u32 = null_mut();
+        DosAllocThreadLocalMemory(1, &mut p2);
+        TLS.store(p2 as u32, Ordering::Relaxed);
+        RUNNING.store(0, Ordering::Relaxed);
+        MAXRUN.store(0, Ordering::Relaxed);
+        PAR_OK.store(0, Ordering::Relaxed);
+        let n = (cpus * 2).clamp(2, 16);
+        let ts: alloc::vec::Vec<u32> = (1..=n).map(|i| thread(tlm_racer, i)).collect();
+        for t in ts {
+            join(t);
+        }
+        let most = MAXRUN.load(Ordering::Relaxed);
+        crate::println!("  {n} threads on {cpus} CPU(s), at most {most} at once");
+        check("thread-local memory in parallel threads", PAR_OK.load(Ordering::Relaxed) == n && (cpus == 1 || most >= 2));
+        DosFreeThreadLocalMemory(p2);
 
         // Must-complete sections nest.
         let mut n = 0;

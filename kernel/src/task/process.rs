@@ -49,9 +49,8 @@ pub struct Process {
     pub cr3: u64,
     pub ldt_base: u64,
     pub cpus: Arc<AtomicU64>,
-    /// Thread whose thread-local memory is in the TLS page (0 = none):
-    /// threads of a process using it never run on two CPUs at once.
-    pub tls_owner: AtomicU32,
+    /// Per-CPU page tables for thread-local memory, once it is used.
+    pub tlm: crate::sync::Once<crate::mm::tlm::Tlm>,
     pub exe: Arc<Module>,
     pub threads: SpinLock<Vec<Arc<Thread>>>,
     next_tid: AtomicU32,
@@ -105,9 +104,7 @@ pub struct Process {
     pub sig_held: AtomicU32,
     /// DosSetSignalExceptionFocus nesting.
     pub sig_focus: AtomicU32,
-    /// Physical page holding the running thread's thread-local memory (0 =
-    /// none allocated yet) and the dwords in use (bit mask).
-    pub tls_phys: core::sync::atomic::AtomicU64,
+    /// Thread-local memory dwords in use (bit mask).
     pub tls_used: AtomicU32,
     /// File handle limit (DosSetMaxFH / DosSetRelMaxFH).
     pub max_fh: AtomicU32,
@@ -256,7 +253,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         cr3: space.root,
         ldt_base: space.ldt.as_ptr() as u64,
         cpus: space.cpus.clone(),
-        tls_owner: AtomicU32::new(0),
+        tlm: crate::sync::Once::new(),
         space: SpinLock::new(space),
         exe: exe.clone(),
         threads: SpinLock::new(Vec::new()),
@@ -290,7 +287,6 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         pending_signal: SpinLock::new(None),
         sig_held: AtomicU32::new(0),
         sig_focus: AtomicU32::new(0),
-        tls_phys: core::sync::atomic::AtomicU64::new(0),
         tls_used: AtomicU32::new(0),
         max_fh: AtomicU32::new(match &p.parent {
             Some(q) => q.max_fh.load(Ordering::Relaxed),

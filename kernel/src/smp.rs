@@ -47,6 +47,10 @@ pub struct PerCpu {
     /// Run queue index (class * 32 + level) of the running thread, for
     /// preemption decisions made on other CPUs.
     pub cur_class: AtomicU8,
+    /// Page-table root of the address space this CPU runs (the process's
+    /// own root even while CR3 holds this CPU's thread-local memory
+    /// copies), 0 for the kernel's.
+    pub space_root: AtomicU64,
     /// Only touched by this CPU with interrupts disabled.
     current: UnsafeCell<Option<Arc<Thread>>>,
     idle: UnsafeCell<Option<Arc<Thread>>>,
@@ -70,6 +74,7 @@ impl PerCpu {
             need_resched: AtomicBool::new(false),
             slice_end: AtomicU64::new(0),
             cur_class: AtomicU8::new(IDLE_CLASS),
+            space_root: AtomicU64::new(0),
             current: UnsafeCell::new(None),
             idle: UnsafeCell::new(None),
             switched_from: UnsafeCell::new(None),

@@ -96,6 +96,12 @@ pub fn user_exception(f: &mut TrapFrame) {
     let t = sched::current();
     let Some(p) = t.process() else { return };
     if f.vector == 14 {
+        // Thread-local memory: page tables this CPU's copies lack, or the
+        // first touch on a CPU still on the process's own tables.
+        let addr = crate::arch::read_cr2();
+        if crate::mm::tlm::sync_fault(addr) || crate::mm::tlm::activate_fault(addr) {
+            return;
+        }
         let addr = crate::arch::read_cr2();
         let write = f.error & 2 != 0;
         if addr < vm::TILED_TOP as u64 * 8 {
@@ -122,6 +128,9 @@ pub fn user_exception(f: &mut TrapFrame) {
 
 /// Resolve a page fault taken by the kernel while touching user memory.
 pub fn resolve_user_fault(addr: u64, error: u64) -> bool {
+    if crate::mm::tlm::sync_fault(addr) || crate::mm::tlm::activate_fault(addr) {
+        return true;
+    }
     let Some(t) = sched::current_opt() else { return false };
     let Some(p) = t.process() else { return false };
     let r = p.space.lock().fault_in(addr as u32, error & 2 != 0);

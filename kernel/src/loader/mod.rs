@@ -254,6 +254,8 @@ pub fn unregister_exe(m: &Arc<Module>) {
 
 pub fn init() {
     gate::init();
+    // Thread-local memory's range, kept free in every address space.
+    crate::vm::reserve_shared(crate::mm::tlm::TLM_SIZE, Some(crate::mm::tlm::TLM_BASE)).expect("thread-local memory range");
     for name in gate::MODULES {
         register(Arc::new(Module {
             hmte: alloc_hmte(),

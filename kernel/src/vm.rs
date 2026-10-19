@@ -243,10 +243,13 @@ pub struct AddressSpace {
 
 /// Load an address space on this CPU: page tables, LDT, and the CPU mask
 /// used for TLB shootdowns. Needs no lock (the context switch path).
-pub fn activate(root: u64, ldt: u64, cpus: &core::sync::atomic::AtomicU64) {
+/// `root` is the address space's own page-table root, `cr3` what to load
+/// (the same, or this CPU's thread-local memory copies of it).
+pub fn activate(root: u64, cr3: u64, ldt: u64, cpus: &core::sync::atomic::AtomicU64) {
     cpus.fetch_or(crate::smp::this().bit(), core::sync::atomic::Ordering::SeqCst);
-    if paging::current_root() != root {
-        unsafe { crate::arch::write_cr3(root) };
+    crate::smp::this().space_root.store(root, core::sync::atomic::Ordering::Relaxed);
+    if crate::arch::read_cr3() & paging::ADDR_MASK != cr3 {
+        unsafe { crate::arch::write_cr3(cr3) };
     }
     gdt::load_ldt(ldt, LDT_ENTRIES);
 }
@@ -296,7 +299,7 @@ impl AddressSpace {
 
     /// Make this address space current (CR3 and LDT).
     pub fn activate(&self) {
-        activate(self.root, self.ldt.as_ptr() as u64, &self.cpus);
+        activate(self.root, self.root, self.ldt.as_ptr() as u64, &self.cpus);
     }
 
     /// Region containing `addr`.
@@ -813,6 +816,7 @@ impl Drop for AddressSpace {
     fn drop(&mut self) {
         // Never free the tables we are running on.
         if paging::current_root() == self.root {
+            crate::smp::this().space_root.store(0, core::sync::atomic::Ordering::Relaxed);
             unsafe { crate::arch::write_cr3(paging::kernel_root()) };
         }
         let bases: Vec<u32> = self.regions.keys().copied().collect();

@@ -407,23 +407,6 @@ pub extern "C" fn finish_switch() {
     }
 }
 
-/// A process using thread-local memory swaps it through one page, so only
-/// one of its threads may be on a CPU at a time: claim the page for `t`.
-fn claim_tls(t: &Thread, me: &Thread) -> bool {
-    let Some(p) = t.process() else { return true };
-    if p.tls_phys.load(Ordering::Relaxed) == 0 {
-        return true;
-    }
-    let owner = p.tls_owner.load(Ordering::Acquire);
-    let mine = owner == me.id && me.process().is_some_and(|q| Arc::ptr_eq(&p, &q));
-    if owner == 0 || owner == t.id || mine {
-        p.tls_owner.store(t.id, Ordering::Release);
-        true
-    } else {
-        false
-    }
-}
-
 /// Pick the next thread and switch to it.
 pub fn schedule() {
     // Switching away while holding a spin lock would leave it locked for
@@ -441,23 +424,16 @@ pub fn schedule() {
     let me = c.current().clone().expect("no current thread");
     // Give up the kernel lock while others run; take it back on return.
     let had_bkl = smp::bkl_release_for(&me);
-    let (next, tls_waiting) = {
+    let next = {
         let mut s = SCHED.lock();
         // Only threads still marked ready (a thread that died or blocked
         // again must not run from a stale queue entry), and not one that
         // another CPU is still switching away from.
         let mut skipped = Vec::new();
-        // Highest queue of a thread held back by another CPU's claim on
-        // its process's thread-local memory page.
-        let mut tls_waiting: Option<usize> = None;
         let next = loop {
             match (0..QUEUES).rev().find_map(|i| s.ready[i].pop_front()) {
                 Some(t) if t.state() != State::Ready => continue,
                 Some(t) if t.on_cpu.load(Ordering::Acquire) && !Arc::ptr_eq(&t, &me) => skipped.push(t),
-                Some(t) if !claim_tls(&t, &me) => {
-                    tls_waiting = tls_waiting.max(Some(queue_index(&t)));
-                    skipped.push(t)
-                }
                 Some(t) => break Some(t),
                 None => break None,
             }
@@ -476,18 +452,8 @@ pub fn schedule() {
         next.on_cpu.store(true, Ordering::Release);
         // Free threads that died earlier and are off every stack.
         s.dead.retain(|d| d.on_cpu.load(Ordering::Acquire) || Arc::ptr_eq(d, &me));
-        (next, tls_waiting)
+        next
     };
-    // A higher-priority thread waits for the page another CPU's thread
-    // holds: make CPUs running something lower give it up now.
-    if let Some(i) = tls_waiting {
-        for o in smp::online() {
-            if !core::ptr::eq(o, c) && (o.cur_class.load(Ordering::Relaxed) as usize) < i {
-                o.need_resched.store(true, Ordering::Relaxed);
-                smp::kick(o);
-            }
-        }
-    }
     c.slice_end.store(irq::ticks() + slice(), Ordering::Relaxed);
     c.need_resched.store(false, Ordering::Relaxed);
     c.cur_class.store(if next.is_idle() { smp::IDLE_CLASS } else { queue_index(&next) as u8 }, Ordering::Relaxed);
@@ -527,14 +493,9 @@ pub fn schedule() {
 
 fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
     gdt::set_kernel_stack(next.kstack_top());
-    crate::api::xproc::switch_tls(prev, next);
     let (pp, np) = (prev.process(), next.process());
     let same = matches!((&pp, &np), (Some(a), Some(b)) if Arc::ptr_eq(a, b));
     if let Some(pp) = &pp {
-        // The thread-local memory page is free for other CPUs once saved.
-        if !same && pp.tls_owner.load(Ordering::Relaxed) == prev.id {
-            pp.tls_owner.store(0, Ordering::Release);
-        }
         if !same {
             // This CPU leaves the previous address space (TLB shootdowns).
             pp.cpus.fetch_and(!smp::this().bit(), Ordering::SeqCst);
@@ -542,8 +503,12 @@ fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
     }
     match np {
         Some(p) => {
-            if !same || prev.state() == State::Dead {
-                crate::vm::activate(p.cr3, p.ldt_base, &p.cpus);
+            // With thread-local memory this CPU runs on its own copies of
+            // the top page tables, mapping the next thread's page.
+            match crate::mm::tlm::switch_in(&p, next) {
+                Some(cr3) => crate::vm::activate(p.cr3, cr3, p.ldt_base, &p.cpus),
+                None if !same || prev.state() == State::Dead => crate::vm::activate(p.cr3, p.cr3, p.ldt_base, &p.cpus),
+                None => {}
             }
             gdt::set_tib_base(next.tib(), 0xfff);
         }
@@ -551,7 +516,8 @@ fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
             // Kernel threads run on the kernel page tables so a process's
             // tables can be freed while idle runs.
             let k = crate::mm::paging::kernel_root();
-            if crate::mm::paging::current_root() != k {
+            smp::this().space_root.store(0, Ordering::Relaxed);
+            if crate::arch::read_cr3() & crate::mm::paging::ADDR_MASK != k {
                 unsafe { crate::arch::write_cr3(k) };
             }
         }

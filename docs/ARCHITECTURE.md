@@ -66,9 +66,13 @@ thread drops whenever it blocks or returns to user mode, while interrupt
 handlers use only spin locks. Run queues are shared; a thread is never
 resumed on one CPU while another is still switching away from it.
 Unmapping or write-protecting pages flushes the TLBs of the other CPUs
-that have the address space loaded (IPI shootdown). Threads of a process
-that uses thread-local memory (swapped through one page) never run on two
-CPUs at once. Finer-grained locking can replace the big lock subsystem by
+that have the address space loaded (IPI shootdown). Thread-local memory
+(DosAllocThreadLocalMemory) is at one address in every thread but each
+thread has its own page there: a 2 MB range is reserved for it in every
+address space, and each CPU running a process that uses it gets private
+copies of the top page-table levels whose entry for that range maps the
+running thread's page (`mm::tlm`); everything else stays shared, and
+page tables the process adds later are copied in on the first fault. Finer-grained locking can replace the big lock subsystem by
 subsystem later.
 
 **Kernel threads.** Work that has to wait in thread context without

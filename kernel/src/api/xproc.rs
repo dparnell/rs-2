@@ -10,7 +10,7 @@ use core::sync::atomic::Ordering;
 use super::signal::{SIG_CTRLBREAK, SIG_CTRLC};
 use super::{err, Ctx};
 use crate::task::process::{self, info, TLS_DWORDS};
-use crate::task::thread::{State, Thread};
+use crate::task::thread::State;
 use crate::task::Process;
 
 const XCPT_SIGNAL_INTR: u32 = 1;
@@ -170,65 +170,43 @@ pub fn dos16_flag_process(c: &mut Ctx) -> u32 {
 
 // ---- Thread-local memory ----
 
-/// Save and restore the running thread's thread-local memory around a
-/// context switch (scheduler, interrupts off).
-pub fn switch_tls(prev: &Thread, next: &Thread) {
-    if let Some(p) = prev.process() {
-        let ph = p.tls_phys.load(Ordering::Relaxed);
-        if ph != 0 && prev.state() != State::Dead {
-            let src = crate::mm::phys::phys_to_virt(ph) as *const u32;
-            unsafe { core::ptr::copy_nonoverlapping(src, (*prev.tls.get()).as_mut_ptr(), TLS_DWORDS) };
-        }
-    }
-    if let Some(p) = next.process() {
-        let ph = p.tls_phys.load(Ordering::Relaxed);
-        if ph != 0 {
-            let dst = crate::mm::phys::phys_to_virt(ph) as *mut u32;
-            unsafe { core::ptr::copy_nonoverlapping((*next.tls.get()).as_ptr(), dst, TLS_DWORDS) };
-        }
-    }
-}
-
 /// DosAllocThreadLocalMemory(cb, ppul): cb dwords (1..8) at an address
-/// that is the same in every thread but holds each thread's own values.
+/// that is the same in every thread but holds each thread's own values
+/// (each thread has its own page there, see mm::tlm).
 pub fn dos_alloc_thread_local_memory(c: &mut Ctx) -> u32 {
+    use crate::mm::tlm;
     let (n, pp) = (c.arg(0), c.arg(1));
     if n == 0 || n > 8 {
         return err::INVALID_PARAMETER;
-    }
-    let page = c.process.info + info::TLS;
-    if c.process.tls_phys.load(Ordering::Relaxed) == 0 {
-        let phys = {
-            let mut sp = c.space();
-            if !sp.poke_bytes(page, &[0u8; TLS_DWORDS * 4]) {
-                return err::NOT_ENOUGH_MEMORY;
-            }
-            crate::mm::paging::translate(sp.root, page as u64)
-        };
-        let Some(phys) = phys else { return err::NOT_ENOUGH_MEMORY };
-        // The caller's values are in the page now (see sched::claim_tls).
-        c.process.tls_owner.store(c.thread.id, Ordering::Release);
-        c.process.tls_phys.store(phys, Ordering::Relaxed);
     }
     let used = c.process.tls_used.load(Ordering::Relaxed);
     let mask = (1u64 << n) - 1;
     let Some(first) = (0..=TLS_DWORDS as u32 - n).find(|&i| (used as u64 >> i) & mask == 0) else {
         return err::NOT_ENOUGH_MEMORY;
     };
-    c.process.tls_used.store(used | (mask << first) as u32, Ordering::Relaxed);
-    // Allocation sizes, so DosFreeThreadLocalMemory knows how much to free:
-    // kept in the dword bits above (one run per allocation start).
-    TLS_RUNS.lock().push((c.process.pid, first, n));
-    let addr = page + first * 4;
-    // Fresh memory reads as zero in every thread.
-    for t in c.process.threads.lock().iter() {
-        let tls = unsafe { &mut *t.tls.get() };
-        for d in &mut tls[first as usize..(first + n) as usize] {
-            *d = 0;
+    if c.process.tlm.get().is_none() {
+        tlm::enable(&c.process);
+        // The caller goes on using it on this CPU right away; threads on
+        // other CPUs move to their copies when they first touch it.
+        match tlm::switch_in(&c.process, &c.thread) {
+            Some(cr3) => crate::vm::activate(c.process.cr3, cr3, c.process.ldt_base, &c.process.cpus),
+            None => return err::NOT_ENOUGH_MEMORY,
         }
     }
-    c.write(addr, &alloc::vec![0u8; n as usize * 4]);
-    c.write_u32(pp, addr);
+    c.process.tls_used.store(used | (mask << first) as u32, Ordering::Relaxed);
+    // Allocation sizes, so DosFreeThreadLocalMemory knows how much to free.
+    TLS_RUNS.lock().push((c.process.pid, first, n));
+    // Fresh memory reads as zero in every thread.
+    for t in c.process.threads.lock().iter() {
+        let page = t.tlm_page.load(Ordering::Relaxed);
+        if page != 0 {
+            let p = crate::mm::phys::phys_to_virt(page) as *mut u32;
+            for i in first..first + n {
+                unsafe { p.add(i as usize).write_volatile(0) };
+            }
+        }
+    }
+    c.write_u32(pp, tlm::TLM_BASE + first * 4);
     0
 }
 
@@ -236,7 +214,7 @@ static TLS_RUNS: crate::sync::SpinLock<alloc::vec::Vec<(u32, u32, u32)>> = crate
 
 pub fn dos_free_thread_local_memory(c: &mut Ctx) -> u32 {
     let p = c.arg(0);
-    let page = c.process.info + info::TLS;
+    let page = crate::mm::tlm::TLM_BASE;
     if p < page || p >= page + TLS_DWORDS as u32 * 4 || p % 4 != 0 {
         return err::INVALID_PARAMETER;
     }

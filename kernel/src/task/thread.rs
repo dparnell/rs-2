@@ -90,9 +90,9 @@ pub struct Thread {
     /// Base of the user stack the kernel allocated for the thread
     /// (DosCreateThread), released when the thread ends; 0 = none.
     pub owned_stack: AtomicU32,
-    /// Thread-local memory (DosAllocThreadLocalMemory) while the thread is
-    /// switched out; the process's TLS page holds the running thread's.
-    pub tls: UnsafeCell<[u32; super::process::TLS_DWORDS]>,
+    /// The thread's own page for thread-local memory (mm::tlm), 0 until
+    /// first needed.
+    pub tlm_page: AtomicU64,
     /// DosEnterMustComplete nesting: signals wait while it is non-zero.
     pub must_complete: AtomicU32,
     /// Termination unwind (XCPT_[ASYNC_]PROCESS_TERMINATE to the exception
@@ -114,6 +114,10 @@ pub static LIVE: AtomicU32 = AtomicU32::new(0);
 impl Drop for Thread {
     fn drop(&mut self) {
         LIVE.fetch_sub(1, Ordering::Relaxed);
+        let p = self.tlm_page.load(Ordering::Relaxed);
+        if p != 0 {
+            crate::mm::phys::free(p);
+        }
     }
 }
 
@@ -147,7 +151,7 @@ impl Thread {
             ready_since: AtomicU64::new(0),
             boosted: AtomicBool::new(false),
             owned_stack: AtomicU32::new(0),
-            tls: UnsafeCell::new([0; super::process::TLS_DWORDS]),
+            tlm_page: AtomicU64::new(0),
             must_complete: AtomicU32::new(0),
             exit_unwind: AtomicU8::new(0),
             sync_exit: AtomicBool::new(false),

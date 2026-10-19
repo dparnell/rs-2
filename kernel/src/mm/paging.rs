@@ -100,8 +100,13 @@ pub fn translate(root: u64, va: u64) -> Option<u64> {
     (e & PRESENT != 0).then(|| (e & ADDR_MASK) | (va & 0xfff))
 }
 
+/// The address space this CPU runs: the process's own root even while CR3
+/// holds this CPU's copies for thread-local memory (mm::tlm).
 pub fn current_root() -> u64 {
-    arch::read_cr3() & ADDR_MASK
+    match crate::smp::this().space_root.load(core::sync::atomic::Ordering::Relaxed) {
+        0 => arch::read_cr3() & ADDR_MASK,
+        r => r,
+    }
 }
 
 static mut KERNEL_ROOT: u64 = 0;
@@ -113,7 +118,7 @@ pub fn kernel_root() -> u64 {
 /// Take over the loader's tables: drop the identity map and make sure every
 /// kernel-half PML4 slot exists, so address spaces can share them.
 pub fn init() {
-    let root = current_root();
+    let root = arch::read_cr3() & ADDR_MASK;
     unsafe { KERNEL_ROOT = root };
     let t = table(root);
     for e in t[..256].iter_mut() {
