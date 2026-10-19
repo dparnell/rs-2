@@ -1,0 +1,10 @@
+[package]
+name = "pmviowin"
+description = "PMVIOWIN.EXE: shows windowed VIO sessions (OS/2 Window) in PM windows"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+viocell = { path = "../../crates/viocell" }

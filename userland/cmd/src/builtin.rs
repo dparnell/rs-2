@@ -509,6 +509,8 @@ fn start_session(sh: &mut Shell, s: &Simple) -> u32 {
         rest = after.trim_start();
     }
     let (mut keep, mut direct, mut background) = (false, false, false);
+    // SSF_TYPE_DEFAULT; /FS full screen, /WIN windowable VIO, /PM.
+    let mut session_type = 0u16;
     while let Some(r) = rest.strip_prefix('/') {
         let (sw, after) = r.split_once(' ').unwrap_or((r, ""));
         match sw.to_ascii_uppercase().as_str() {
@@ -517,7 +519,10 @@ fn start_session(sh: &mut Shell, s: &Simple) -> u32 {
             "N" => direct = true,
             "B" => background = true,
             "F" => background = false,
-            "FS" | "WIN" | "PM" | "DOS" | "I" | "MAX" | "MIN" | "PGM" => {}
+            "FS" => session_type = 1,
+            "WIN" => session_type = 2,
+            "PM" => session_type = 3,
+            "DOS" | "I" | "MAX" | "MIN" | "PGM" => {}
             _ => {
                 sys_error(87);
                 return 87;
@@ -559,7 +564,7 @@ fn start_session(sh: &mut Shell, s: &Simple) -> u32 {
         termq: core::ptr::null(),
         env: env.as_ptr(),
         inherit: 0,
-        session_type: 0,
+        session_type,
     };
     let (mut sid, mut pid) = (0, 0);
     let rc = unsafe { DosStartSession(&sd, &mut sid, &mut pid) };
