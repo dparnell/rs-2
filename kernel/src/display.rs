@@ -4,7 +4,7 @@
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicI32, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 
 use crate::sync::{Once, SpinLock};
 use crate::task::WaitQueue;
@@ -34,6 +34,9 @@ pub struct Input {
 const QUEUE_MAX: usize = 256;
 
 static QUEUE: SpinLock<VecDeque<Input>> = SpinLock::new(VecDeque::new());
+/// A hardware cursor is defined and PM wants it shown.
+static CURSOR: AtomicBool = AtomicBool::new(false);
+static CURSOR_DEFINED: AtomicBool = AtomicBool::new(false);
 /// Processes that mapped the display (PM programs).
 static PM_PIDS: SpinLock<alloc::vec::Vec<u32>> = SpinLock::new(alloc::vec::Vec::new());
 static WAITERS: WaitQueue = WaitQueue::new();
@@ -161,6 +164,12 @@ pub fn read(ms: u32) -> Option<Input> {
 /// The framebuffer as a shared object (created on first use), with its
 /// geometry: (object, width, height, stride in pixels, red in low byte).
 pub fn display() -> Option<(Arc<SharedMem>, u32, u32, u32, bool)> {
+    if DISPLAY.get().is_none() {
+        // PM starts: the VMware adapter's driver takes over (the FIFO is
+        // needed for a hardware cursor). Done first: the framebuffer may
+        // move.
+        crate::drivers::svga::take_over();
+    }
     let fb = crate::screen::framebuffer()?;
     if DISPLAY.get().is_none() {
         let bytes = fb.stride as u64 * fb.height as u64 * 4;
@@ -191,4 +200,46 @@ pub fn modes() -> alloc::vec::Vec<(u32, u32)> {
 
 pub fn pointer() -> (i32, i32) {
     (PTR_X.load(Ordering::Relaxed), PTR_Y.load(Ordering::Relaxed))
+}
+
+/// Define the mouse pointer as a hardware cursor (virtio-gpu, VMware SVGA
+/// II): `pixels` 0xAARRGGBB, `w` x `h`, hot spot (`hx`, `hy`) from the
+/// top left. False if there is no hardware cursor (PM draws the pointer
+/// itself then).
+pub fn define_cursor(w: u32, h: u32, hx: u32, hy: u32, pixels: &[u32]) -> bool {
+    use crate::drivers::{svga, virtio::gpu};
+    let ok = if gpu::present() { gpu::define_cursor(w, h, hx, hy, pixels) } else { svga::define_cursor(w, h, hx, hy, pixels) };
+    if ok {
+        CURSOR_DEFINED.store(true, Ordering::Relaxed);
+        CURSOR.store(true, Ordering::Relaxed);
+    }
+    ok
+}
+
+/// Show or hide the hardware cursor.
+pub fn show_cursor(on: bool) {
+    CURSOR.store(on, Ordering::Relaxed);
+}
+
+/// Timer tick (boot processor): the hardware cursor follows the pointer,
+/// shown while the PM session is in the foreground. The kernel moves it
+/// itself, so it never waits for a PM process.
+pub fn tick() {
+    if !CURSOR_DEFINED.load(Ordering::Relaxed) || crate::smp::this().index() != 0 {
+        return;
+    }
+    let Some(fb) = crate::screen::framebuffer() else { return };
+    let pm = crate::session::pm_session();
+    let visible = CURSOR.load(Ordering::Relaxed) && pm != 0 && crate::session::foreground() == pm && !crate::session::popup_active();
+    let x = PTR_X.load(Ordering::Relaxed).clamp(0, fb.width as i32 - 1) as u32;
+    let y = (fb.height as i32 - 1 - PTR_Y.load(Ordering::Relaxed)).clamp(0, fb.height as i32 - 1) as u32;
+    crate::drivers::virtio::gpu::move_cursor(x, y, visible);
+    crate::drivers::svga::move_cursor(x, y, visible);
+}
+
+/// The PM session ended: no more hardware cursor until PM defines one.
+pub fn reset_cursor() {
+    CURSOR.store(false, Ordering::Relaxed);
+    tick();
+    CURSOR_DEFINED.store(false, Ordering::Relaxed);
 }

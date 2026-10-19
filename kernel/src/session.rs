@@ -271,6 +271,7 @@ pub fn process_ended(pid: u32, code: u32) {
         }
         discard(pm);
         crate::display::reset_input();
+        crate::display::reset_cursor();
     }
     let s = {
         let mut ss = SESSIONS.lock();

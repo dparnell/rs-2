@@ -134,6 +134,8 @@ pub struct State {
     pub ptr_hidden: u32,
     /// The pointer is a hardware cursor (the kernel moves it).
     pub ptr_hardware: bool,
+    /// WinShowPointer level (shown while >= 0).
+    pub ptr_level: i32,
     pub next_hmq: u32,
     /// Next position for FCF_SHELLPOSITION windows.
     pub cascade: i32,
@@ -191,6 +193,7 @@ pub fn init(surface: Surface) {
         ptr_saved: None,
         ptr_hidden: 0,
         ptr_hardware: false,
+        ptr_level: 0,
         next_hmq: 1,
         cascade: 0,
         ctl: BTreeMap::new(),

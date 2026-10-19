@@ -58,6 +58,30 @@ pub fn rs2_query_pointer(c: &mut Ctx) -> u32 {
     0
 }
 
+/// Rs2SetPointerShape(cx, cy, xHot, yHot, pulPixels): make the mouse
+/// pointer a hardware cursor with this image (0xAARRGGBB pixels, rows
+/// from the top, at most 64x64; hot spot from the top left). The kernel
+/// moves it with the mouse from then on. ERROR_NOT_SUPPORTED without a
+/// hardware cursor (virtio-gpu or VMware SVGA II).
+pub fn rs2_set_pointer_shape(c: &mut Ctx) -> u32 {
+    let (w, h, hx, hy, p) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4));
+    if w == 0 || h == 0 || w > 64 || h > 64 || hx >= w || hy >= h {
+        return err::INVALID_PARAMETER;
+    }
+    let mut px = alloc::vec::Vec::with_capacity((w * h) as usize);
+    for i in 0..w * h {
+        let Some(v) = c.read_u32(p + i * 4) else { return err::INVALID_ADDRESS };
+        px.push(v);
+    }
+    if display::define_cursor(w, h, hx, hy, &px) { 0 } else { err::NOT_SUPPORTED }
+}
+
+/// Rs2ShowPointer(fShow): show or hide the hardware cursor.
+pub fn rs2_show_pointer(c: &mut Ctx) -> u32 {
+    display::show_cursor(c.arg(0) != 0);
+    0
+}
+
 /// Rs2DebugTrace(psz): a line on the serial port (debugging aid for rs2's
 /// own DLLs).
 pub fn rs2_debug_trace(c: &mut Ctx) -> u32 {

@@ -28,6 +28,12 @@
 //! `yres`, 1280x800 by default). Any size works (no list of modes: the
 //! host scales the resource to its window); [`set_mode`] changes it until
 //! PM has mapped the framebuffer, as with VMware SVGA II.
+//!
+//! The mouse pointer can be a hardware cursor (the cursor queue): PM's
+//! server defines its image once ([`define_cursor`], a 64x64 B8G8R8A8
+//! resource) and the timer tick moves it to where the pointer is
+//! ([`move_cursor`]), so it follows the mouse whatever the applications
+//! do.
 
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
@@ -46,6 +52,12 @@ const CMD_SET_SCANOUT: u32 = 0x0103;
 const CMD_RESOURCE_FLUSH: u32 = 0x0104;
 const CMD_TRANSFER_TO_HOST_2D: u32 = 0x0105;
 const CMD_RESOURCE_ATTACH_BACKING: u32 = 0x0106;
+const CMD_UPDATE_CURSOR: u32 = 0x0300;
+const CMD_MOVE_CURSOR: u32 = 0x0301;
+/// VIRTIO_GPU_FORMAT_B8G8R8A8_UNORM (a cursor's pixels: 0xAARRGGBB).
+const FORMAT_B8G8R8A8: u32 = 1;
+/// Cursor resources are 64x64.
+pub const CURSOR_DIM: u32 = 64;
 const RESP_OK_NODATA: u32 = 0x1100;
 const RESP_OK_DISPLAY_INFO: u32 = 0x1101;
 
@@ -66,6 +78,9 @@ const XFER_REQ: usize = 0x800;
 const XFER_RESP: usize = 0x880;
 const FLUSH_REQ: usize = 0x900;
 const FLUSH_RESP: usize = 0x980;
+/// struct virtio_gpu_update_cursor on the cursor queue (no response).
+const CURSOR_REQ: usize = 0xa00;
+const CURSOR_LEN: usize = HDR + 32;
 
 /// Polls (each with an uncached register read) before a synchronous
 /// command is given up.
@@ -102,6 +117,13 @@ struct Gpu {
     next_id: u32,
     /// The display's preferred size.
     preferred: (u32, u32),
+    /// The cursor queue, the cursor resource and its backing, the
+    /// position and visibility last sent, a command on the queue.
+    cursorq: Option<Virtqueue>,
+    cursor: u32,
+    cursor_backing: Option<Dma>,
+    cursor_sent: Option<(u32, u32, bool)>,
+    cursor_busy: bool,
 }
 
 static GPU: SpinLock<Option<Gpu>> = SpinLock::new(None);
@@ -243,6 +265,31 @@ impl Gpu {
         true
     }
 
+    /// Queue a cursor command (UPDATE with a new image, or MOVE); false if
+    /// the previous one is still on the queue.
+    fn cursor_cmd(&mut self, cmd: u32, x: u32, y: u32, resource: u32, hot: (u32, u32)) -> bool {
+        let Some(q) = self.cursorq.as_mut() else { return false };
+        while q.pop().is_some() {
+            self.cursor_busy = false;
+        }
+        if self.cursor_busy {
+            return false;
+        }
+        // Header, cursor_pos (scanout, x, y, padding), resource, hot spot.
+        let words = [cmd, 0, 0, 0, 0, 0, 0, x, y, 0, resource, hot.0, hot.1, 0];
+        for (i, w) in words.iter().enumerate() {
+            unsafe { (self.mem.ptr(CURSOR_REQ + i * 4) as *mut u32).write_volatile(*w) };
+        }
+        let b = [Buf::out(self.mem.addr(CURSOR_REQ), CURSOR_LEN)];
+        let Some(q) = self.cursorq.as_mut() else { return false };
+        if q.add(&b).is_none() {
+            return false;
+        }
+        q.kick();
+        self.cursor_busy = true;
+        true
+    }
+
     fn framebuffer(&self) -> Option<Framebuffer> {
         let b = self.backing.as_ref()?;
         Some(Framebuffer {
@@ -265,9 +312,28 @@ pub fn attach(mut dev: Device) {
         dev.fail();
         return;
     };
+    // The cursor queue (for a hardware mouse pointer), set up before the
+    // device goes live.
+    let cursorq = dev.queue(1, 16);
     dev.ready();
     let scanouts = dev.cfg32(8);
-    let mut g = Gpu { dev, q, mem, pending: 0, resource: 0, backing: None, width: 0, height: 0, next_id: 1, preferred: (0, 0) };
+    let mut g = Gpu {
+        dev,
+        q,
+        mem,
+        pending: 0,
+        resource: 0,
+        backing: None,
+        width: 0,
+        height: 0,
+        next_id: 1,
+        preferred: (0, 0),
+        cursorq,
+        cursor: 0,
+        cursor_backing: None,
+        cursor_sent: None,
+        cursor_busy: false,
+    };
     let displays = g.display_info();
     g.preferred = displays.first().copied().unwrap_or((1024, 768));
     crate::println!(
@@ -364,5 +430,66 @@ pub fn tick(ticks: u64) {
         if !gpu.flush_rows(top, bottom) {
             crate::screen::mark_dirty(top, bottom);
         }
+    }
+}
+
+/// Define the hardware cursor: `pixels` (0xAARRGGBB, `w` x `h`, at most
+/// 64x64) with the hot spot at (`hx`, `hy`) from the top left. False
+/// without a virtio-gpu cursor queue.
+pub fn define_cursor(w: u32, h: u32, hx: u32, hy: u32, pixels: &[u32]) -> bool {
+    if w > CURSOR_DIM || h > CURSOR_DIM || pixels.len() < (w * h) as usize {
+        return false;
+    }
+    let Some(backing) = Dma::new((CURSOR_DIM * CURSOR_DIM * 4) as usize) else { return false };
+    for y in 0..h {
+        for x in 0..w {
+            let v = pixels[(y * w + x) as usize];
+            unsafe { (backing.ptr(((y * CURSOR_DIM + x) * 4) as usize) as *mut u32).write_volatile(v) };
+        }
+    }
+    let mut g = GPU.lock();
+    let Some(gpu) = g.as_mut() else { return false };
+    if gpu.cursorq.is_none() {
+        return false;
+    }
+    let id = gpu.next_id;
+    gpu.next_id += 1;
+    let (addr, len) = (backing.addr(0), CURSOR_DIM * CURSOR_DIM * 4);
+    if !gpu.ok(CMD_RESOURCE_CREATE_2D, &[id, FORMAT_B8G8R8A8, CURSOR_DIM, CURSOR_DIM])
+        || !gpu.ok(CMD_RESOURCE_ATTACH_BACKING, &[id, 1, addr as u32, (addr >> 32) as u32, len, 0])
+        || !gpu.ok(CMD_TRANSFER_TO_HOST_2D, &[0, 0, CURSOR_DIM, CURSOR_DIM, 0, 0, id, 0])
+    {
+        return false;
+    }
+    let old = core::mem::replace(&mut gpu.cursor, id);
+    gpu.cursor_backing = Some(backing);
+    gpu.cursor_sent = None;
+    // Wait for room on the cursor queue for the new image.
+    let mut sent = false;
+    for _ in 0..SYNC_POLLS {
+        if gpu.cursor_cmd(CMD_UPDATE_CURSOR, 0, 0, id, (hx, hy)) {
+            sent = true;
+            break;
+        }
+        gpu.dev.status_reg().read8();
+    }
+    if old != 0 {
+        gpu.ok(CMD_RESOURCE_UNREF, &[old, 0]);
+    }
+    crate::println!("virtio-gpu: hardware cursor {w}x{h}");
+    sent
+}
+
+/// Timer tick: put the cursor at (`x`, `y`) (pixels from the top left),
+/// or hide it.
+pub fn move_cursor(x: u32, y: u32, visible: bool) {
+    let Some(mut g) = GPU.try_lock() else { return };
+    let Some(gpu) = g.as_mut() else { return };
+    if gpu.cursor == 0 || gpu.cursor_sent == Some((x, y, visible)) {
+        return;
+    }
+    let id = if visible { gpu.cursor } else { 0 };
+    if gpu.cursor_cmd(CMD_MOVE_CURSOR, x, y, id, (0, 0)) {
+        gpu.cursor_sent = Some((x, y, visible));
     }
 }

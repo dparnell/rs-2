@@ -270,6 +270,7 @@ WinQueryMsgTime=__a_WinQueryMsgTime @819
 WinGetCurrentTime=__a_WinGetCurrentTime @750
 WinSetCapture=__a_WinSetCapture @852
 WinQueryCapture=__a_WinQueryCapture @804
+WinShowPointer=__a_WinShowPointer @881
 Rs2PmServer=__a_Rs2PmServer @9000
 WinRegisterClass=__a_WinRegisterClass @926
 WinCreateWindow=__a_WinCreateWindow @909

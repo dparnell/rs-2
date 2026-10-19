@@ -236,6 +236,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 2) => super::rs2api::rs2_read_input,
         (8, 3) => super::rs2api::rs2_query_pointer,
         (8, 4) => super::rs2api::rs2_debug_trace,
+        (8, 5) => super::rs2api::rs2_set_pointer_shape,
+        (8, 6) => super::rs2api::rs2_show_pointer,
         (8, 100) => super::sysctl::rs2_query_counters,
         (8, 200) => super::sockets::query_iface,
         (8, 201) => super::sockets::create,

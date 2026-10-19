@@ -239,6 +239,12 @@ fn check_hung() {
         any |= st().queues.get(&q).is_some_and(|x| x.hung);
     }
     if any {
+        // A program that hid the pointer and stopped does not keep it
+        // hidden for everyone.
+        if st().ptr_level < 0 {
+            st().ptr_level = -1;
+            pointer::WinShowPointer(HWND_DESKTOP, 1);
+        }
         let q = st().server_queue;
         post_queue(q, qmsg(HWND_DESKTOP, WM_RS2_GHOSTS, 0, 0));
     }

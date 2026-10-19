@@ -13,6 +13,12 @@
 //! gets UPDATE commands (QEMU does that; VMware usually traces writes to
 //! the framebuffer, which SVGA_REG_TRACES asks for explicitly), so the
 //! timer sends an UPDATE for the whole screen about 30 times a second.
+//!
+//! With the cursor capabilities the mouse pointer is a hardware cursor:
+//! PM's server defines it once (DEFINE_CURSOR, a 32x32 AND mask and
+//! 32-bit image) and the timer tick moves it through the cursor
+//! registers. The driver takes the adapter over (at the mode it has) when
+//! PM starts, so that the FIFO is there for it.
 
 use core::sync::atomic::{AtomicBool, Ordering};
 
@@ -46,8 +52,15 @@ const REG_CONFIG_DONE: u32 = 20;
 const REG_SYNC: u32 = 21;
 const REG_BUSY: u32 = 22;
 const REG_GUEST_ID: u32 = 23;
+const REG_CURSOR_ID: u32 = 24;
+const REG_CURSOR_X: u32 = 25;
+const REG_CURSOR_Y: u32 = 26;
+const REG_CURSOR_ON: u32 = 27;
 const REG_TRACES: u32 = 45;
 
+const CAP_CURSOR: u32 = 0x0000_0020;
+const CAP_CURSOR_BYPASS: u32 = 0x0000_0040;
+const CAP_CURSOR_BYPASS_2: u32 = 0x0000_0080;
 const CAP_EXTENDED_FIFO: u32 = 0x0000_8000;
 const CAP_TRACES: u32 = 0x0020_0000;
 
@@ -60,6 +73,9 @@ const FIFO_STOP: usize = 3;
 const FIFO_NUM_REGS: u32 = 291;
 
 const CMD_UPDATE: u32 = 1;
+const CMD_DEFINE_CURSOR: u32 = 19;
+/// Cursor images are 32x32 (one mask word per row).
+const CURSOR_DIM: u32 = 32;
 
 /// Guest OS identifier for SVGA_REG_GUEST_ID: OS/2 in VMware's list.
 const GUEST_OS2: u32 = 0x5009;
@@ -92,6 +108,9 @@ struct Svga {
     enabled: bool,
     width: u32,
     height: u32,
+    /// A cursor is defined; the position and visibility last set.
+    cursor: bool,
+    cursor_sent: Option<(u32, u32, bool)>,
 }
 
 unsafe impl Send for Svga {}
@@ -229,6 +248,8 @@ pub fn probe(dev: &pci::Device) {
         enabled: false,
         width: 0,
         height: 0,
+        cursor: false,
+        cursor_sent: None,
     };
     s.write(REG_ID, SVGA_ID_2);
     if io == 0 || s.read(REG_ID) != SVGA_ID_2 {
@@ -312,4 +333,74 @@ pub fn tick(ticks: u64) {
             s.update(false);
         }
     }
+}
+
+/// PM is starting: own the adapter (at the mode it has, if the firmware
+/// set it) so that the FIFO is available for a hardware cursor.
+pub fn take_over() {
+    let enabled = SVGA.lock().as_ref().map(|s| s.enabled);
+    if enabled != Some(false) {
+        return;
+    }
+    if let Some(fb) = crate::screen::framebuffer() {
+        set_mode(fb.width, fb.height);
+    }
+}
+
+/// Define the hardware cursor: `pixels` (0xAARRGGBB, `w` x `h`, at most
+/// 32x32; alpha 0 is transparent) with the hot spot at (`hx`, `hy`).
+/// False if the adapter has no cursor support.
+pub fn define_cursor(w: u32, h: u32, hx: u32, hy: u32, pixels: &[u32]) -> bool {
+    if w > CURSOR_DIM || h > CURSOR_DIM || pixels.len() < (w * h) as usize {
+        return false;
+    }
+    let mut g = SVGA.lock();
+    let Some(s) = g.as_mut() else { return false };
+    let need = CAP_CURSOR | CAP_CURSOR_BYPASS | CAP_CURSOR_BYPASS_2;
+    if !s.enabled || s.caps & need != need {
+        return false;
+    }
+    let n = CURSOR_DIM;
+    let mut words = alloc::vec![CMD_DEFINE_CURSOR, 0, hx, hy, n, n, 1, 32];
+    // AND mask: 1 bit per pixel, most significant bit first in each
+    // byte, a 32-bit word per row; set where the cursor is transparent.
+    for y in 0..n {
+        let mut bytes = [0xffu8; 4];
+        for x in 0..n {
+            let a = if x < w && y < h { pixels[(y * w + x) as usize] >> 24 } else { 0 };
+            if a >= 0x80 {
+                bytes[x as usize / 8] &= !(0x80 >> (x % 8));
+            }
+        }
+        words.push(u32::from_le_bytes(bytes));
+    }
+    for y in 0..n {
+        for x in 0..n {
+            let v = if x < w && y < h { pixels[(y * w + x) as usize] } else { 0 };
+            words.push(if v >> 24 >= 0x80 { v & 0x00ff_ffff } else { 0 });
+        }
+    }
+    if !s.fifo_cmd(&words, true) {
+        return false;
+    }
+    s.write(REG_CURSOR_ID, 0);
+    s.cursor = true;
+    s.cursor_sent = None;
+    crate::println!("svga: hardware cursor {w}x{h}");
+    true
+}
+
+/// Timer tick: put the cursor at (`x`, `y`) (pixels from the top left),
+/// or hide it.
+pub fn move_cursor(x: u32, y: u32, visible: bool) {
+    let Some(mut g) = SVGA.try_lock() else { return };
+    let Some(s) = g.as_mut() else { return };
+    if !s.cursor || s.cursor_sent == Some((x, y, visible)) {
+        return;
+    }
+    s.write(REG_CURSOR_ID, 0);
+    s.write(REG_CURSOR_X, x);
+    s.write(REG_CURSOR_Y, y);
+    s.write(REG_CURSOR_ON, visible as u32);
+    s.cursor_sent = Some((x, y, visible));
 }

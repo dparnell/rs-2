@@ -297,6 +297,7 @@ aligned! {
     __a_WinGetCurrentTime => crate::msg::WinGetCurrentTime, 1;
     __a_WinSetCapture => crate::msg::WinSetCapture, 2;
     __a_WinQueryCapture => crate::msg::WinQueryCapture, 1;
+    __a_WinShowPointer => crate::pointer::WinShowPointer, 2;
     __a_Rs2PmServer => crate::server::Rs2PmServer, 0;
     __a_WinRegisterClass => crate::win::WinRegisterClass, 5;
     __a_WinCreateWindow => crate::win::WinCreateWindow, 13;
