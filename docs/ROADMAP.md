@@ -157,8 +157,12 @@ Status markers: done, in progress, planned.
 - done: windowed VIO sessions (see milestone 1); the PM window list lists
   full-screen sessions and starts command prompts; PM draws into a
   shadow buffer while a text session has the screen
+- done: notebooks (WC_NOTEBOOK: major and minor tabs on any side, back
+  pages, status line and page buttons, page windows and page dialogs,
+  the Warp 4 tabbed dialog; pages and geometry host-tested in
+  `crates/pmwin`; `RS2\NBTEST.EXE` checks them)
 - planned: per-process presentation-space limits, hooks that are called
-  (WinSetHook only records them), DDE, notebooks and containers, icons
+  (WinSetHook only records them), DDE, containers, icons
   and pointers from resources, owner-drawn items, presentation
   parameters, drag and drop, a real PM shell
 - Display driver model (GRADD-style) on the framebuffer, mouse pointer

@@ -750,11 +750,16 @@ impl Mle {
 
     /// Import `data` (format `f`) at `at`, replacing nothing: returns the
     /// input bytes used and the characters inserted (0, 0 on overflow).
+    /// Read-only only keeps the user from editing: programs still import
+    /// (the Toolkit's style.exe fills a read-only MLE so).
     pub fn import(&mut self, at: usize, data: &[u8], f: Format) -> Result<(usize, usize), Edit> {
         let (t, used) = Self::from_format(f, data);
         let at = at.min(self.text.len());
         let sel = (self.anchor, self.cursor);
-        match self.replace(at, at, &t, 0x01c3) {
+        let ro = core::mem::replace(&mut self.readonly, false);
+        let r = self.replace(at, at, &t, 0x01c3);
+        self.readonly = ro;
+        match r {
             Edit::Done | Edit::Nothing => {}
             e => return Err(e),
         }
@@ -898,6 +903,9 @@ mod tests {
         assert_eq!(m.type_char(b'2'), Edit::Overflow(1));
         m.readonly = true;
         assert_eq!(m.delete_back(), Edit::ReadOnly);
+        m.limit = None;
+        assert_eq!(m.import(0, b"r/o ", Format::NoTrans), Ok((4, 4)), "programs import into a read-only MLE");
+        assert!(m.readonly);
     }
 
     #[test]

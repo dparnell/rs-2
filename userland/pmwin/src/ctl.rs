@@ -231,7 +231,7 @@ pub fn set_text_of(h: u32, t: &[u8]) -> bool {
 
 /// Register the built-in classes (WC_FRAME etc., named "#n").
 pub fn register_builtin() {
-    let classes: [(u32, u32, u32); 14] = [
+    let classes: [(u32, u32, u32); 15] = [
         (1, crate::frame::frame_entry as *const () as u32, 0x20),
         (3, crate::button::button_entry as *const () as u32, 0),
         (4, crate::menu::menu_entry as *const () as u32, 0),
@@ -246,6 +246,7 @@ pub fn register_builtin() {
         (38, crate::slider::slider_entry as *const () as u32, 0),
         (39, crate::valueset::valueset_entry as *const () as u32, 0),
         (37, crate::container::container_entry as *const () as u32, 0x2000_0000),
+        (40, crate::notebook::notebook_entry as *const () as u32, 0x2000_0000),
     ];
     let s = st();
     for (n, proc_, style) in classes {

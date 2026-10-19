@@ -280,7 +280,7 @@ pub extern "C" fn WinDefDlgProc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_CHAR => {
-            if key(h, mp1, mp2) {
+            if key(h, mp1, mp2) || crate::notebook::page_key(h, mp1, mp2) {
                 return 1;
             }
             frame::frame_proc(h, msg, mp1, mp2)

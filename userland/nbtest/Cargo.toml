@@ -1,0 +1,9 @@
+[package]
+name = "nbtest"
+description = "Self-checks of PMWIN's notebook control (BKM_* messages, BKN_* notifications, page windows) and a settings-style window showing notebooks"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
