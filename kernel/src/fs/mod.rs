@@ -289,7 +289,7 @@ impl FileSystem for Unformatted {
 pub struct Dasd {
     pub drive: u8,
     pub dev: Arc<dyn block::BlockDev>,
-    pub pos: SpinLock<u64>,
+    pub pos: crate::sync::Mutex<u64>,
     pub locked: core::sync::atomic::AtomicBool,
     pub written: core::sync::atomic::AtomicBool,
 }
@@ -299,7 +299,7 @@ impl Dasd {
         Arc::new(Dasd {
             drive,
             dev,
-            pos: SpinLock::new(0),
+            pos: crate::sync::Mutex::new(0),
             locked: core::sync::atomic::AtomicBool::new(false),
             written: core::sync::atomic::AtomicBool::new(false),
         })
@@ -421,7 +421,7 @@ pub mod mode {
 pub struct OpenFile {
     pub path: FullPath,
     pub file: Arc<dyn FsFile>,
-    pub pos: SpinLock<u64>,
+    pub pos: crate::sync::Mutex<u64>,
     /// Open mode (access, sharing, flags). Mutable by DosSetFHState.
     pub mode: AtomicU32,
     share_key: String,
@@ -476,7 +476,7 @@ impl OpenFile {
             }
             v.push((access, share));
         }
-        Ok(Arc::new(OpenFile { path, file, pos: SpinLock::new(0), mode: AtomicU32::new(open_mode), share_key: key }))
+        Ok(Arc::new(OpenFile { path, file, pos: crate::sync::Mutex::new(0), mode: AtomicU32::new(open_mode), share_key: key }))
     }
 
     pub fn access(&self) -> u32 {

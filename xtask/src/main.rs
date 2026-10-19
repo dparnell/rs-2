@@ -509,6 +509,14 @@ fn run(o: &Opts) -> bool {
         .args(match &o.iso {
             Some(iso) => vec!["-cdrom".to_string(), iso.display().to_string()],
             None if o.boot_hdd || o.boot_virtio => vec![],
+            // A bootable virtio CD would come first in the firmware's boot
+            // order: give the ESP directory boot index 0.
+            None if !o.virtio_cds.is_empty() => vec![
+                "-drive".to_string(),
+                format!("if=none,id=esp,format=raw,file=fat:rw:{}", work.join("esp").display()),
+                "-device".to_string(),
+                "ide-hd,drive=esp,bootindex=0".to_string(),
+            ],
             None => vec!["-drive".to_string(), format!("format=raw,file=fat:rw:{}", work.join("esp").display())],
         })
         .arg("-monitor")
