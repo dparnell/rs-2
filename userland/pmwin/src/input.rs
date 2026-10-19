@@ -33,6 +33,7 @@ pub const EV_KEY: u16 = 1;
 pub const EV_MOUSE: u16 = 2;
 pub const EV_REPAINT: u16 = 3;
 pub const EV_PROCEXIT: u16 = 4;
+pub const EV_BACKGROUND: u16 = 5;
 
 fn pack(x: i32, y: i32) -> u32 {
     (x as u32 & 0xffff) | (y as u32) << 16
@@ -243,7 +244,9 @@ pub fn event(ev: &Input) {
     match ev.kind {
         EV_MOUSE => mouse(Point::new(ev.a as i32, ev.b as i32), ev.flags as u8, ev.time),
         EV_KEY => key(ev),
+        EV_BACKGROUND => crate::state::to_shadow(),
         EV_REPAINT => {
+            crate::state::to_screen();
             let s = st();
             let all = s.desk.get(HWND_DESKTOP).map_or(gpi::Rect::default(), |w| w.rect());
             s.ptr_saved = None;

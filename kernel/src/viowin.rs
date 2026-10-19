@@ -24,6 +24,8 @@ static GEN: AtomicU32 = AtomicU32::new(1);
 static WAIT: WaitQueue = WaitQueue::new();
 /// The host process (0 = none running).
 static HOST: AtomicU32 = AtomicU32::new(0);
+/// The last host the kernel started (kept after it ends).
+static STARTED: AtomicU32 = AtomicU32::new(0);
 /// A session whose window the host should activate (0 = none).
 static ACTIVATE: AtomicU32 = AtomicU32::new(0);
 /// The windowed session whose window has the focus (0 = none).
@@ -47,6 +49,12 @@ pub fn generation() -> u32 {
 /// interruption.
 pub fn wait(seen: u32, deadline: Option<u64>) -> Option<u32> {
     if WAIT.wait_until(deadline, || GEN.load(Ordering::Relaxed) != seen) { Some(generation()) } else { None }
+}
+
+/// Whether the kernel started `pid` as the host (its end is not
+/// reported on the boot console).
+pub fn started_host(pid: u32) -> bool {
+    pid != 0 && STARTED.load(Ordering::Relaxed) == pid
 }
 
 pub fn host() -> u32 {
@@ -84,6 +92,7 @@ pub fn ensure_host(env: Vec<String>) -> bool {
     match r {
         Ok(p) => {
             HOST.store(p.pid, Ordering::Relaxed);
+            STARTED.store(p.pid, Ordering::Relaxed);
             true
         }
         Err(e) => {

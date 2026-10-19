@@ -58,6 +58,12 @@ pub fn take_dirty() -> Option<(u32, u32)> {
     (top < end).then_some((top, end))
 }
 
+/// After PM gave the screen to a text session: when to redraw the text
+/// screen again (PM may still have been drawing for a moment) and how
+/// many more times.
+static REDRAW_AT: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+static REDRAW_LEFT: AtomicU32 = AtomicU32::new(0);
+
 /// Font heights, tallest first.
 pub const FONT_HEIGHTS: [usize; 3] = [16, 14, 8];
 
@@ -852,12 +858,17 @@ pub fn show(sid: u32) {
     if let Some(s) = g.get(old) {
         s.visible = false;
     }
+    let from_graphics = g.get(old).is_some_and(|s| s.graphics);
     g.visible = sid;
     if let Some(s) = g.get(sid) {
         s.visible = true;
         if !s.graphics {
             s.pull_phys();
             s.layout();
+            if from_graphics {
+                REDRAW_AT.store(crate::irq::ticks() + 64, Ordering::Relaxed);
+                REDRAW_LEFT.store(3, Ordering::Relaxed);
+            }
         }
     }
 }
@@ -892,5 +903,11 @@ pub fn tick(ticks: u64) {
     s.refresh_phys();
     if ticks % 256 == 0 {
         s.blink_tick();
+    }
+    if REDRAW_LEFT.load(Ordering::Relaxed) > 0 && ticks >= REDRAW_AT.load(Ordering::Relaxed) {
+        REDRAW_LEFT.fetch_sub(1, Ordering::Relaxed);
+        REDRAW_AT.store(ticks + 128, Ordering::Relaxed);
+        s.clear_border();
+        s.redraw();
     }
 }

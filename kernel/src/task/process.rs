@@ -531,7 +531,7 @@ impl Process {
                 reap(q.pid);
             }
         }
-        if self.ppid == 0 {
+        if self.ppid == 0 && !crate::viowin::started_host(self.pid) {
             let code = self.exit_info().map_or(0, |e| e.code);
             crate::println!("[process {} ({}) ended, code {}]", self.pid, self.exe.name, code);
         }

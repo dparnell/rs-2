@@ -168,6 +168,10 @@ pub struct State {
     /// Windows showing windowed VIO sessions: (hwnd, session, VW_* flags,
     /// host pid).
     pub vio: Vec<(u32, u32, u32, u32)>,
+    /// The framebuffer, and the memory PM draws into while a text
+    /// session has the screen (so nothing PM draws then reaches it).
+    pub screen: usize,
+    pub shadow: Vec<u32>,
 }
 
 /// A hook set with WinSetHook: for one queue (or all, 0), of one kind
@@ -229,8 +233,31 @@ pub fn init(surface: Surface) {
         atoms: Vec::new(),
         hooks: Vec::new(),
         vio: Vec::new(),
+        screen: surface.pixels() as usize,
+        shadow: Vec::new(),
     });
     unsafe { (*crate::shared::header()).state = Box::into_raw(s) as *mut u8 };
+}
+
+/// PM left the screen to a text session: draw into the shadow buffer.
+pub fn to_shadow() {
+    let s = st();
+    if s.surface.pixels() as usize != s.screen {
+        return;
+    }
+    if s.shadow.is_empty() {
+        s.shadow = alloc::vec![0; (s.surface.stride * s.surface.height) as usize];
+    }
+    s.ptr_saved = None;
+    let p = s.shadow.as_mut_ptr();
+    unsafe { s.surface.set_pixels(p) };
+}
+
+/// PM has the screen again (everything is repainted).
+pub fn to_screen() {
+    let s = st();
+    let p = s.screen as *mut u32;
+    unsafe { s.surface.set_pixels(p) };
 }
 
 pub fn now() -> u32 {

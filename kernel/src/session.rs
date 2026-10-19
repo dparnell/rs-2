@@ -132,6 +132,9 @@ pub fn popup_begin(wait: bool, transparent: bool) -> Result<(), u32> {
     close_list();
     let fg = foreground();
     crate::api::vio::notify_popup(fg, true);
+    if fg == pm_session() && fg != 0 {
+        crate::display::post_background();
+    }
     crate::screen::create(POPUP_SID);
     if transparent {
         let mut g = crate::screen::SCREEN.lock();
@@ -299,6 +302,9 @@ pub fn select(sid: u32) -> bool {
     }
     if old != sid {
         crate::api::vio::notify_switch(old, sid);
+        if old == pm_session() && old != 0 {
+            crate::display::post_background();
+        }
     }
     let leader = if sid == 1 { 0 } else { SESSIONS.lock().iter().find(|s| s.id == sid).map_or(0, |s| s.leader) };
     crate::infoseg::set_foreground(sid, leader);

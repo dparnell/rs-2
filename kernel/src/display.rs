@@ -16,6 +16,9 @@ pub const EV_REPAINT: u16 = 3;
 /// A process that had mapped the display ended (`a` = its pid): the PM
 /// server cleans up its windows.
 pub const EV_PROCEXIT: u16 = 4;
+/// A text session (or a pop-up) took the screen from PM: PM draws into
+/// memory until the next EV_REPAINT.
+pub const EV_BACKGROUND: u16 = 5;
 
 /// One raw input event (INPUTEVENT, 16 bytes).
 #[derive(Clone, Copy, Default)]
@@ -63,6 +66,10 @@ fn push(e: Input) {
         q.push_back(e);
     }
     WAITERS.wake_all();
+}
+
+pub fn post_background() {
+    push(Input { kind: EV_BACKGROUND, time: crate::irq::uptime_ms() as u32, ..Default::default() });
 }
 
 pub fn post_repaint() {

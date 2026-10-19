@@ -25,6 +25,19 @@ impl Surface {
         Surface { pixels, width, height, stride, red_low }
     }
 
+    /// The pixel memory.
+    pub fn pixels(&self) -> *mut u32 {
+        self.pixels
+    }
+
+    /// Draw into other memory of the same geometry from now on.
+    ///
+    /// # Safety
+    /// As for [`Surface::new`].
+    pub unsafe fn set_pixels(&mut self, pixels: *mut u32) {
+        self.pixels = pixels;
+    }
+
     pub fn bounds(&self) -> Rect {
         Rect::new(0, 0, self.width, self.height)
     }
