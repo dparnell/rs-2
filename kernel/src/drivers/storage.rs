@@ -415,7 +415,7 @@ impl Lun {
 }
 
 /// READ/WRITE(10), or (16) beyond 32-bit block numbers.
-fn rw_cdb(write: bool, lba: u64, n: u32) -> Vec<u8> {
+pub(super) fn rw_cdb(write: bool, lba: u64, n: u32) -> Vec<u8> {
     if lba + n as u64 <= u32::MAX as u64 {
         let op = if write { WRITE_10 } else { READ_10 };
         let l = (lba as u32).to_be_bytes();

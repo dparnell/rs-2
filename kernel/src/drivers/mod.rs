@@ -7,6 +7,8 @@ pub mod hub;
 pub mod nvme;
 pub mod part;
 pub mod pci;
+pub mod pcilist;
+pub mod pvscsi;
 pub mod storage;
 pub mod usb;
 pub mod vmmouse;
@@ -110,6 +112,7 @@ fn holds_kernel(p: &part::Partition) -> bool {
 pub fn init() {
     let devs = pci::enumerate();
     crate::println!("pci: {} functions", devs.len());
+    pcilist::log(&devs);
     let mut disks: Vec<Arc<dyn BlockDev>> = Vec::new();
     let mut optical: Vec<Arc<dyn BlockDev>> = Vec::new();
     // USB storage comes after the built-in drives.
@@ -131,6 +134,11 @@ pub fn init() {
         if (d.class, d.subclass, d.progif) == (1, 8, 2) {
             for ns in nvme::probe(d) {
                 disks.push(ns);
+            }
+        }
+        if (d.vendor, d.device) == (0x15ad, 0x07c0) {
+            for (dev, is_optical) in pvscsi::probe(d) {
+                if is_optical { optical.push(dev) } else { disks.push(dev) }
             }
         }
     }
