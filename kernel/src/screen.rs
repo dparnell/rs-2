@@ -705,6 +705,26 @@ pub fn framebuffer() -> Option<Framebuffer> {
     SCREEN.lock().boot.as_ref().map(|b| b.fb)
 }
 
+/// Move every screen to a new framebuffer (after a display mode change):
+/// text modes that still fit stay, others shrink to fit; the visible
+/// screen is redrawn.
+pub fn set_framebuffer(fb: Framebuffer) {
+    let mut g = SCREEN.lock();
+    let Screens { boot, others, .. } = &mut *g;
+    let all = boot.iter_mut().map(|b| &mut **b).chain(others.iter_mut().map(|(_, b)| &mut **b));
+    for s in all {
+        s.fb = fb;
+        s.pixels = (PHYS_MAP_BASE + fb.base) as *mut u32;
+        s.update_palette();
+        if s.mode_fits(s.cols, s.rows) {
+            s.layout();
+        } else {
+            let (c, r) = (s.cols, s.rows);
+            s.set_mode(c, r);
+        }
+    }
+}
+
 /// Create the (hidden) screen of a new session.
 pub fn create(sid: u32) {
     let mut g = SCREEN.lock();

@@ -320,7 +320,10 @@ fn find_rsdp() -> u64 {
     find(ACPI20_GUID).or_else(|| find(ACPI10_GUID)).unwrap_or(0)
 }
 
-fn setup_framebuffer() -> Framebuffer {
+/// Set the GOP mode `want` (from `video=` on the command line) if the
+/// firmware offers it, else 1024x768, the classic OS/2 desktop
+/// resolution, if offered; otherwise keep the current mode.
+fn setup_framebuffer(want: Option<(u32, u32)>) -> Framebuffer {
     let mut gop: *mut c_void = ptr::null_mut();
     let mut fb = Framebuffer { base: 0, size: 0, width: 0, height: 0, stride: 0, format: 0 };
     if (bs().locate_protocol)(&GOP_GUID, ptr::null_mut(), &mut gop) != SUCCESS {
@@ -328,18 +331,19 @@ fn setup_framebuffer() -> Framebuffer {
     }
     let gop = gop as *mut Gop;
     unsafe {
-        // Prefer 1024x768, the classic OS/2 desktop resolution, if offered.
         let mode = &*(*gop).mode;
-        for m in 0..mode.max_mode {
-            let mut size = 0;
-            let mut info = ptr::null_mut();
-            if ((*gop).query_mode)(gop, m, &mut size, &mut info) == SUCCESS {
-                let i = &*info;
-                if i.width == 1024 && i.height == 768 && i.pixel_format < 2 {
-                    ((*gop).set_mode)(gop, m);
-                    break;
+        let find = |w: u32, h: u32| {
+            (0..mode.max_mode).find(|&m| {
+                let mut size = 0;
+                let mut info = ptr::null_mut();
+                ((*gop).query_mode)(gop, m, &mut size, &mut info) == SUCCESS && {
+                    let i = &*info;
+                    i.width == w && i.height == h && i.pixel_format < 2
                 }
-            }
+            })
+        };
+        if let Some(m) = want.and_then(|(w, h)| find(w, h)).or_else(|| find(1024, 768)) {
+            ((*gop).set_mode)(gop, m);
         }
         let mode = &*(*gop).mode;
         let info = &*mode.info;
@@ -398,7 +402,7 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
     info.rsdp = find_rsdp();
     info.boot_device = boot_dev;
     println!("  boot device kind {} partition {} start {}", boot_dev.kind, boot_dev.partition, boot_dev.start);
-    info.framebuffer = setup_framebuffer();
+    info.framebuffer = setup_framebuffer(bootinfo::video_mode(info.cmdline()));
 
     // Kernel stack: 256 KB, reached through the direct map.
     const STACK_PAGES: usize = 64;

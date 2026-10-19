@@ -120,3 +120,14 @@ impl BootInfo {
         core::str::from_utf8(&self.cmdline[..n]).unwrap_or("")
     }
 }
+
+/// The display resolution asked for on the kernel command line with
+/// `video=WIDTHxHEIGHT` (anything after the height, such as `-32` or
+/// `@60`, is ignored).
+pub fn video_mode(cmdline: &str) -> Option<(u32, u32)> {
+    let v = cmdline.split_whitespace().find_map(|w| w.strip_prefix("video="))?;
+    let (w, rest) = v.split_once(['x', 'X'])?;
+    let h: &str = rest.split(|c: char| !c.is_ascii_digit()).next()?;
+    let (w, h) = (w.parse().ok()?, h.parse().ok()?);
+    (w >= 640 && h >= 480).then_some((w, h))
+}

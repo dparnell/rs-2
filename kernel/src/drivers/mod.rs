@@ -10,6 +10,7 @@ pub mod pci;
 pub mod pcilist;
 pub mod pvscsi;
 pub mod storage;
+pub mod svga;
 pub mod usb;
 pub mod vmmouse;
 pub mod xhci;
@@ -135,6 +136,9 @@ pub fn init() {
             for ns in nvme::probe(d) {
                 disks.push(ns);
             }
+        }
+        if (d.vendor, d.device) == (0x15ad, 0x0405) {
+            svga::probe(d);
         }
         if (d.vendor, d.device) == (0x15ad, 0x07c0) {
             for (dev, is_optical) in pvscsi::probe(d) {
