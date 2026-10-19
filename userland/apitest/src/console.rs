@@ -179,6 +179,17 @@ fn key_in(b: &Buf, wait: bool) -> (u8, u8, u8) {
     if rc != 0 { (0, 0, 0) } else { (k[0], k[1], k[2]) }
 }
 
+/// The program runs in a PM window (a windowable VIO session): the
+/// calls that need the physical screen fail there, as on OS/2.
+fn windowed() -> bool {
+    let mut tib = null_mut();
+    let mut pib = null_mut();
+    unsafe { DosGetInfoBlocks(&mut tib, &mut pib) == 0 && !pib.is_null() && (*pib).ultype == 2 }
+}
+
+/// ERROR_VIO_EXTENDED_SG: not in a VIO window.
+const ERROR_VIO_EXTENDED_SG: u16 = 494;
+
 pub fn run() {
     let mut mem = null_mut();
     if unsafe { DosAllocMem(&mut mem, 0x10000, PAG_READ | PAG_WRITE | PAG_COMMIT) } != 0 {
@@ -316,6 +327,11 @@ fn state(b: &Buf) {
     check("VioSetAnsi off/on", off == 0 && w16(b, 0x620) == 1);
     // Screen lock.
     let l = b.p(0x630);
+    if windowed() {
+        check("VioScrLock in a window", call(VIOSCRLOCK, &[1, l[0], l[1], 0]) == ERROR_VIO_EXTENDED_SG);
+        check("VioScrUnLock in a window", call(VIOSCRUNLOCK, &[0]) == ERROR_VIO_EXTENDED_SG);
+        return;
+    }
     let rc = call(VIOSCRLOCK, &[1, l[0], l[1], 0]);
     let got = b.bytes(0x630, 1)[0];
     check("VioScrLock", rc == 0 && got == 0 && call(VIOSCRUNLOCK, &[0]) == 0);
@@ -344,6 +360,10 @@ fn physbuf(b: &Buf) {
     set32(b, 0x904, 4000);
     let p = b.p(0x900);
     let rc = call(VIOGETPHYSBUF, &[p[0], p[1], 0]);
+    if windowed() {
+        check("VioGetPhysBuf in a window", rc == ERROR_VIO_EXTENDED_SG);
+        return;
+    }
     let sel = w16(b, 0x908);
     if rc != 0 || sel == 0 {
         check("VioGetPhysBuf", false);
