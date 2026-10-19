@@ -1502,17 +1502,28 @@ impl Stack {
 
     /// All sockets (netstat).
     pub fn sockets(&self) -> Vec<SocketInfo> {
+        self.sockets_with_ids().into_iter().map(|(_, i)| i).collect()
+    }
+
+    /// All sockets with their ids.
+    pub fn sockets_with_ids(&self) -> Vec<(usize, SocketInfo)> {
         self.sockets
             .iter()
-            .flatten()
-            .filter(|s| !s.internal)
-            .map(|s| SocketInfo {
-                kind: s.kind,
-                local: s.tcb.as_ref().map_or(s.local, |t| t.local),
-                remote: s.tcb.as_ref().map(|t| t.remote).or(s.remote),
-                state: s.tcb.as_ref().map(|t| t.state),
-                listening: s.listen.is_some(),
-                user_closed: s.user_closed,
+            .enumerate()
+            .filter_map(|(id, s)| Some((id, s.as_ref()?)))
+            .filter(|(_, s)| !s.internal)
+            .map(|(id, s)| {
+                (
+                    id,
+                    SocketInfo {
+                        kind: s.kind,
+                        local: s.tcb.as_ref().map_or(s.local, |t| t.local),
+                        remote: s.tcb.as_ref().map(|t| t.remote).or(s.remote),
+                        state: s.tcb.as_ref().map(|t| t.state),
+                        listening: s.listen.is_some(),
+                        user_closed: s.user_closed,
+                    },
+                )
             })
             .collect()
     }

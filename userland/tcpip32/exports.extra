@@ -1,0 +1,4 @@
+; Data exports (added to exports.def by gen_pm_exports.py)
+_ress=tcpipcore_ress @143
+__p_class_syms=tcpip32_class_syms @211
+__p_type_syms=tcpip32_type_syms @212

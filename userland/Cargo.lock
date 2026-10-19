@@ -99,7 +99,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "tcpip32-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "tcpipcore",
+]
+
+[[package]]
+name = "tcpipcore"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "testdll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "tnls32-dll"
 version = "0.1.0"
 dependencies = [
  "os2",

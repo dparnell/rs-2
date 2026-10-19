@@ -1,0 +1,9 @@
+[package]
+name = "tcpipcore"
+description = "The implementation behind rs2's OS/2 TCP/IP DLLs (TCPIP32, SO32DLL, TCP32DLL)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

@@ -2,3 +2,7 @@
 # Programs built from userland/ are added by xtask.
 dist/CONFIG.SYS -> CONFIG.SYS
 dist/README.TXT -> README.TXT
+dist/etc/HOSTS -> MPTN\ETC\HOSTS
+dist/etc/SERVICES -> MPTN\ETC\SERVICES
+dist/etc/PROTOCOL -> MPTN\ETC\PROTOCOL
+dist/etc/NETWORKS -> MPTN\ETC\NETWORKS

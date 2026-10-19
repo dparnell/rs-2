@@ -1,0 +1,3 @@
+# Host names for the TCP/IP DLLs (looked up before DNS).
+# address        name             aliases
+127.0.0.1        localhost

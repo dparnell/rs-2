@@ -254,6 +254,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 215) => super::sockets::get_opt,
         (8, 216) => super::sockets::get_name,
         (8, 217) => super::sockets::resolve,
+        (8, 218) => super::sockets::cancel,
+        (8, 219) => super::sockets::query_sockets,
         // ---- MOUCALLS ----
         (3, 1) => super::mou::mou_get_ptr_shape,
         (3, 2) => super::mou::mou_set_ptr_shape,

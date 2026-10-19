@@ -100,8 +100,8 @@ fn main() -> ExitCode {
                 }
             }
         }
-        "fixups" => {
-            // lxdump fixups FILE OBJ: every fixup of an object.
+        "objfixups" => {
+            // lxdump objfixups FILE OBJ: every fixup of an object.
             let data = std::fs::read(&args[1]).unwrap();
             let want: usize = args[2].parse().unwrap();
             let Ok(Format::Lx { header }) = os2_exe::detect(&data) else { panic!("not LX") };

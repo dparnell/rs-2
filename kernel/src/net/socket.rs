@@ -68,6 +68,8 @@ struct Handle {
     linger: Option<u32>,
     keepalive: bool,
     oobinline: bool,
+    /// Bumped by so_cancel(): blocked calls on the handle end with EINTR.
+    cancel: u32,
 }
 
 #[derive(Default)]
@@ -102,7 +104,7 @@ fn insert(pid: u32, id: usize, kind: Kind) -> Result<u32> {
     }
     t.map.insert(
         n,
-        Handle { id, kind, nonblock: false, rcv_timeout: None, snd_timeout: None, linger: None, keepalive: false, oobinline: false },
+        Handle { id, kind, nonblock: false, rcv_timeout: None, snd_timeout: None, linger: None, keepalive: false, oobinline: false, cancel: 0 },
     );
     Ok(n)
 }
@@ -112,11 +114,23 @@ fn stack<R>(f: impl FnOnce(&mut Stack, u64) -> R) -> Result<R> {
 }
 
 /// Run `op` until it does not say WouldBlock (or at once when
-/// `nonblock`), waiting for stack events in between.
-fn blocking<T>(nonblock: bool, timeout_ms: Option<u64>, mut op: impl FnMut(&mut Stack, u64) -> core::result::Result<T, Error>) -> Result<T> {
+/// `nonblock`), waiting for stack events in between. `on` names the
+/// handle (process, socket, its cancel count at the start): so_cancel()
+/// or soclose() of it from another thread ends the wait with EINTR.
+fn blocking<T>(
+    nonblock: bool,
+    timeout_ms: Option<u64>,
+    on: Option<(u32, u32, u32)>,
+    mut op: impl FnMut(&mut Stack, u64) -> core::result::Result<T, Error>,
+) -> Result<T> {
     let deadline = timeout_ms.filter(|&t| t > 0).map(|t| crate::irq::ticks() + t * crate::irq::HZ / 1000);
     loop {
         let seen = super::EVENTS.load(Ordering::Acquire);
+        if let Some((pid, s, at_start)) = on {
+            if get(pid, s).map_or(true, |h| h.cancel != at_start) {
+                return Err(EINTR);
+            }
+        }
         match stack(&mut op)? {
             Ok(v) => return Ok(v),
             Err(Error::WouldBlock) if !nonblock => {
@@ -133,6 +147,14 @@ fn blocking<T>(nonblock: bool, timeout_ms: Option<u64>, mut op: impl FnMut(&mut 
             Err(e) => return Err(e.errno()),
         }
     }
+}
+
+/// so_cancel(): calls blocked on the socket (in any thread of the
+/// process) end with EINTR.
+pub fn cancel(pid: u32, s: u32) -> Result<()> {
+    update(pid, s, |h| h.cancel = h.cancel.wrapping_add(1))?;
+    super::notify();
+    Ok(())
 }
 
 /// socket(): a new socket for process `pid`.
@@ -175,7 +197,7 @@ pub fn accept(pid: u32, s: u32) -> Result<(u32, Endpoint)> {
     if h.kind != Kind::Tcp {
         return Err(EOPNOTSUPP);
     }
-    let (id, peer) = blocking(h.nonblock, h.rcv_timeout, |st, _| st.accept(h.id))?;
+    let (id, peer) = blocking(h.nonblock, h.rcv_timeout, Some((pid, s, h.cancel)), |st, _| st.accept(h.id))?;
     match insert(pid, id, Kind::Tcp) {
         Ok(n) => {
             let _ = update(pid, n, |x| x.keepalive = h.keepalive);
@@ -203,7 +225,7 @@ pub fn connect(pid: u32, s: u32, ep: Endpoint) -> Result<()> {
             Err(e) => Err(e.errno()),
         };
     }
-    blocking(false, None, |st, _| match st.connect_status(h.id) {
+    blocking(false, None, Some((pid, s, h.cancel)), |st, _| match st.connect_status(h.id) {
         Ok(true) => Ok(()),
         Ok(false) => Err(Error::WouldBlock),
         Err(e) => Err(e),
@@ -223,19 +245,19 @@ pub fn send(pid: u32, s: u32, data: &[u8], flags: u32, to: Option<Endpoint>) -> 
     }
     let nb = nonblock(&h, flags);
     if h.kind != Kind::Tcp {
-        return blocking(nb, h.snd_timeout, |st, now| match to {
+        return blocking(nb, h.snd_timeout, Some((pid, s, h.cancel)), |st, now| match to {
             Some(ep) => st.send_to(h.id, data, ep, now),
             None => st.send(h.id, data, now),
         });
     }
     let mut done = 0;
     loop {
-        let r = blocking(nb || done > 0, h.snd_timeout, |st, now| st.send(h.id, &data[done..], now));
+        let r = blocking(nb || done > 0, h.snd_timeout, Some((pid, s, h.cancel)), |st, now| st.send(h.id, &data[done..], now));
         match r {
             Ok(n) => done += n,
             Err(EWOULDBLOCK) if done > 0 && !nb => {
                 // Partly queued: wait for room for the rest.
-                let r = blocking(false, h.snd_timeout, |st, _| match st.ready(h.id) {
+                let r = blocking(false, h.snd_timeout, Some((pid, s, h.cancel)), |st, _| match st.ready(h.id) {
                     Ok(Ready { write: true, .. }) => Ok(()),
                     Ok(_) => Err(Error::WouldBlock),
                     Err(e) => Err(e),
@@ -258,7 +280,7 @@ pub fn recv(pid: u32, s: u32, len: usize, flags: u32) -> Result<(Vec<u8>, Endpoi
     let h = get(pid, s)?;
     let mut buf = alloc::vec![0u8; len];
     let peek = flags & MSG_PEEK != 0;
-    let (n, from) = blocking(nonblock(&h, flags), h.rcv_timeout, |st, now| st.recv_from(h.id, &mut buf, peek, now))?;
+    let (n, from) = blocking(nonblock(&h, flags), h.rcv_timeout, Some((pid, s, h.cancel)), |st, now| st.recv_from(h.id, &mut buf, peek, now))?;
     buf.truncate(n);
     Ok((buf, from))
 }
@@ -302,7 +324,7 @@ pub fn select(pid: u32, socks: &mut [u32], nread: usize, nwrite: usize, timeout_
         Ok(v)
     };
     let timeout = if timeout_ms < 0 { None } else { Some(timeout_ms as u64) };
-    let res = blocking(timeout == Some(0), timeout, |st, _| {
+    let res = blocking(timeout == Some(0), timeout, None, |st, _| {
         let v = check(st)?;
         if v.iter().any(|&b| b) || ids.is_empty() && timeout.is_none() {
             Ok(v)
@@ -453,7 +475,7 @@ pub fn name(pid: u32, s: u32, peer: bool) -> Result<Endpoint> {
 /// (1 HOST_NOT_FOUND, 2 TRY_AGAIN, 4 NO_DATA).
 pub fn resolve(name: &str) -> core::result::Result<Vec<Ipv4>, u32> {
     let q = stack(|st, now| st.resolve_start(name, now)).map_err(|_| 2u32)?.map_err(|e| e.h_errno())?;
-    let r = blocking(false, Some(RESOLVE_TIMEOUT_MS), |st, _| match st.resolve_result(q) {
+    let r = blocking(false, Some(RESOLVE_TIMEOUT_MS), None, |st, _| match st.resolve_result(q) {
         Some(r) => Ok(r),
         None => Err(Error::WouldBlock),
     });
@@ -475,6 +497,24 @@ pub fn process_ended(pid: u32) {
             let _ = st.close(h.id, now);
         }
     });
+}
+
+/// All sockets of the stack (netstat), with the owning process and
+/// handle where a process has one open.
+pub fn list() -> Vec<(tcpip::stack::SocketInfo, u32, u32)> {
+    let owners: Vec<(usize, u32, u32)> = TABLES
+        .lock()
+        .iter()
+        .flat_map(|(&pid, t)| t.map.iter().map(move |(&s, h)| (h.id, pid, s)))
+        .collect();
+    stack(|st, _| st.sockets_with_ids())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(id, info)| {
+            let o = owners.iter().find(|o| o.0 == id);
+            (info, o.map_or(0, |o| o.1), o.map_or(0, |o| o.2))
+        })
+        .collect()
 }
 
 /// Sockets a process has open.

@@ -128,6 +128,72 @@ unsafe extern "C" {
     pub fn Rs2SockGetName(s: u32, peer: u32, addr: *mut SockAddrIn) -> u32;
     #[link_name = "RS2API.217"]
     pub fn Rs2NetResolve(name: *const u8, addrs: *mut [u8; 4], max: u32, count: *mut u32) -> u32;
+    #[link_name = "RS2API.218"]
+    pub fn Rs2SockCancel(s: u32) -> u32;
+    #[link_name = "RS2API.219"]
+    pub fn Rs2NetQuerySockets(info: *mut SockInfo, max: u32, count: *mut u32) -> u32;
+}
+
+/// One socket of the stack (Rs2NetQuerySockets).
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct SockInfo {
+    /// 1 TCP, 2 UDP, 3 raw.
+    pub kind: u8,
+    pub protocol: u8,
+    /// TCP state, 1 (CLOSED) to 11 (TIME_WAIT); 0 for other sockets.
+    pub state: u8,
+    /// Bit 0 listening, 1 closed by its owner.
+    pub flags: u8,
+    pub laddr: [u8; 4],
+    pub lport: u16,
+    pub rport: u16,
+    pub raddr: [u8; 4],
+    pub pid: u32,
+    pub socket: u32,
+}
+
+/// Names of the TCP states of [`SockInfo::state`].
+pub fn tcp_state_name(s: u8) -> &'static str {
+    match s {
+        1 => "CLOSED",
+        2 => "LISTEN",
+        3 => "SYN_SENT",
+        4 => "SYN_RECEIVED",
+        5 => "ESTABLISHED",
+        6 => "FIN_WAIT_1",
+        7 => "FIN_WAIT_2",
+        8 => "CLOSE_WAIT",
+        9 => "CLOSING",
+        10 => "LAST_ACK",
+        11 => "TIME_WAIT",
+        _ => "",
+    }
+}
+
+/// Every interface (Rs2NetQueryIface from index 0 on).
+pub fn interfaces() -> alloc::vec::Vec<IfInfo> {
+    let mut v = alloc::vec::Vec::new();
+    loop {
+        let mut i = IfInfo::default();
+        if unsafe { Rs2NetQueryIface(v.len() as u32, &mut i, core::mem::size_of::<IfInfo>() as u32) } != 0 {
+            return v;
+        }
+        v.push(i);
+    }
+}
+
+/// Every socket of the stack.
+pub fn sockets() -> alloc::vec::Vec<SockInfo> {
+    let mut n = 0;
+    unsafe { Rs2NetQuerySockets(core::ptr::null_mut(), 0, &mut n) };
+    let mut v = alloc::vec![SockInfo::default(); n as usize + 16];
+    let mut got = 0;
+    if unsafe { Rs2NetQuerySockets(v.as_mut_ptr(), v.len() as u32, &mut got) } != 0 {
+        return alloc::vec::Vec::new();
+    }
+    v.truncate(got.min(v.len() as u32) as usize);
+    v
 }
 
 /// Dotted-quad text of an address.

@@ -1,0 +1,13 @@
+[package]
+name = "tnls32-dll"
+description = "TNLS32.DLL: the code page helper IBM's TCP/IP applications import"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "tnls32"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

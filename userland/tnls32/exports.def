@@ -1,0 +1,16 @@
+; TNLS32 ordinals (see src/lib.rs)
+tnls_dbcs_vector @6
+tnls_codepage @7
+tnls_cv16 @16
+tnls_cv17 @17
+tnls_flag19 @19
+tnls_flag20 @20
+tnls_init24 @24
+tnls_codepage2 @34
+tnls_close38 @38
+tnls_tables39 @39
+tnls_init40 @40
+tnls_open43 @43
+tnls_setup48 @48
+tnls_flag49 @49
+tnls_release50 @50

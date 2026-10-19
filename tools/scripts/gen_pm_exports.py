@@ -1,16 +1,19 @@
-"""Generate a PM DLL's export trampolines and exports.def.
+"""Generate a DLL's export trampolines and exports.def.
 
 Every `#[unsafe(no_mangle)] pub extern "C" fn` in the DLL's sources is
 exported under its own name through a trampoline that aligns the stack to
 16 bytes (OS/2 compilers only keep 4-byte alignment, Rust code assumes 16)
-and copies the arguments. Ordinals come from the Toolkit's os2386.lib
-(dumped with omfimp.py); Gpi* and Dev* functions of PMWIN get 4000 + the
-PMGPI ordinal, and PMWIN's run also regenerates PMGPI.DLL's forwarders
-(the forward! list in ../pmgpi/src/lib.rs and ../pmgpi/exports.def).
-A DLL that has src/lock.rs takes its lock in every trampoline
-(crate::lock::enter/leave).
+and copies the arguments (`_System`: the caller removes them). Ordinals
+come from a Toolkit import library dumped with omfimp.py (os2386.lib for
+the PM DLLs, tcpip32.lib, so32dll.lib, ...; MODULE as the library names
+it). Gpi* and Dev* functions of PMWIN get 4000 + the PMGPI ordinal, and
+PMWIN's run also regenerates PMGPI.DLL's forwarders (the forward! list in
+../pmgpi/src/lib.rs and ../pmgpi/exports.def). A DLL that has src/lock.rs
+takes its lock in every trampoline (crate::lock::enter/leave). Lines of
+DLLDIR/exports.extra (data exports, `NAME=symbol @ordinal`) are appended
+to exports.def as they are.
 
-usage: python3 -I gen_pm_exports.py OS2386.TSV DLLDIR MODULE
+usage: python3 -I gen_pm_exports.py LIB.TSV DLLDIR MODULE
 """
 import glob, os, re, sys
 
@@ -83,6 +86,9 @@ for name, n, path in funcs:
     rs.append(f'    __a_{name} => {path}::{name}, {n};')
     defs.append(f'{name}=__a_{name} @{o}')
 rs.append('}')
+extra = f'{dll_dir}/exports.extra'
+if os.path.exists(extra):
+    defs += [l.rstrip('\n') for l in open(extra) if l.strip() and not l.startswith(';')]
 open(f'{dll_dir}/src/exports.rs', 'w').write('\n'.join(rs) + '\n')
 open(f'{dll_dir}/exports.def', 'w').write('\n'.join(defs) + '\n')
 print(f'{len(funcs)} exports')

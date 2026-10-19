@@ -31,6 +31,8 @@
 //! | 215 | Rs2SockGetOpt(ULONG s, ULONG level, ULONG opt, PVOID val, PULONG cb) |
 //! | 216 | Rs2SockGetName(ULONG s, ULONG peer, PSOCKADDR_IN) |
 //! | 217 | Rs2NetResolve(PSZ name, PULONG addrs, ULONG max, PULONG count) |
+//! | 218 | Rs2SockCancel(ULONG s) |
+//! | 219 | Rs2NetQuerySockets(PRS2SOCKINFO, ULONG max, PULONG count) |
 //!
 //! Rs2SockSelect has OS/2's `select()` semantics: `socks` lists the read,
 //! write and exception sockets in that order, entries that are not ready
@@ -41,6 +43,17 @@
 //! ndns, mtu, flags` (bit 0 link, 1 up, 2 loopback, 3 DHCP, 4 lease
 //! bound), `ULONG rx_packets, tx_packets, rx_bytes, tx_bytes, rx_dropped`
 //! (84 bytes).
+//!
+//! Rs2SockCancel (so_cancel) ends the calls other threads of the process
+//! are blocked in on the socket with EINTR. Rs2NetQuerySockets lists every
+//! socket of the stack (netstat), `count` getting the total (entries
+//! beyond `max` are not written). RS2SOCKINFO is: `BYTE kind` (1 TCP, 2
+//! UDP, 3 raw), `BYTE protocol` (raw sockets), `BYTE state` (TCP: 1
+//! CLOSED, 2 LISTEN, 3 SYN_SENT, 4 SYN_RECEIVED, 5 ESTABLISHED, 6
+//! FIN_WAIT_1, 7 FIN_WAIT_2, 8 CLOSE_WAIT, 9 CLOSING, 10 LAST_ACK, 11
+//! TIME_WAIT; 0 none), `BYTE flags` (bit 0 listening, 1 closed by its
+//! owner), `BYTE laddr[4]`, `USHORT lport, rport` (host order), `BYTE
+//! raddr[4]`, `ULONG pid, socket` of the owner (0 if none) (24 bytes).
 
 use alloc::vec::Vec;
 
@@ -345,4 +358,43 @@ pub fn resolve(c: &mut Ctx) -> u32 {
         }
         Err(h) => h,
     }
+}
+
+/// Rs2SockCancel.
+pub fn cancel(c: &mut Ctx) -> u32 {
+    done(so::cancel(pid(c), c.arg(0)))
+}
+
+pub const SOCKINFO_SIZE: usize = 24;
+
+/// Rs2NetQuerySockets.
+pub fn query_sockets(c: &mut Ctx) -> u32 {
+    let (at, max, out) = (c.arg(0), c.arg(1), c.arg(2));
+    let list = so::list();
+    for (i, (info, owner, handle)) in list.iter().take(max.min(4096) as usize).enumerate() {
+        let mut b = [0u8; SOCKINFO_SIZE];
+        let (kind, proto) = match info.kind {
+            tcpip::stack::Kind::Tcp => (1, 6),
+            tcpip::stack::Kind::Udp => (2, 17),
+            tcpip::stack::Kind::Raw(p) => (3, p),
+        };
+        b[0] = kind;
+        b[1] = proto;
+        b[2] = info.state.map_or(0, |s| s as u8 + 1);
+        b[3] = info.listening as u8 | (info.user_closed as u8) << 1;
+        b[4..8].copy_from_slice(&info.local.addr.0);
+        b[8..10].copy_from_slice(&info.local.port.to_le_bytes());
+        let remote = info.remote.unwrap_or(Endpoint::new(Ipv4([0; 4]), 0));
+        b[10..12].copy_from_slice(&remote.port.to_le_bytes());
+        b[12..16].copy_from_slice(&remote.addr.0);
+        b[16..20].copy_from_slice(&owner.to_le_bytes());
+        b[20..24].copy_from_slice(&handle.to_le_bytes());
+        if !c.write(at + (i * SOCKINFO_SIZE) as u32, &b) {
+            return EFAULT;
+        }
+    }
+    if !c.write_u32(out, list.len() as u32) {
+        return EFAULT;
+    }
+    0
 }

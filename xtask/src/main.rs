@@ -419,6 +419,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("help", "OS2\\HELP.EXE"),
         ("keyb", "OS2\\KEYB.EXE"),
         ("ping", "OS2\\PING.EXE"),
+        ("tcpip32", "OS2\\DLL\\TCPIP32.DLL"),
+        ("tnls32", "OS2\\DLL\\TNLS32.DLL"),
     ];
 
 /// Build the userland workspace and convert each program to LX.
