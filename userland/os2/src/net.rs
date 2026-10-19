@@ -183,6 +183,78 @@ pub fn interfaces() -> alloc::vec::Vec<IfInfo> {
     }
 }
 
+/// Interfaces with the names OS/2's TCP/IP gives them ("lan0".. for the
+/// adapters, in order, then "lo" for loopback), as the socket DLLs and
+/// the network utilities show them.
+pub fn os2_interfaces() -> alloc::vec::Vec<(String, IfInfo)> {
+    let mut lan = 0;
+    let mut v: alloc::vec::Vec<(String, IfInfo)> = alloc::vec::Vec::new();
+    for i in interfaces() {
+        let name = if i.flags & IF_LOOPBACK != 0 {
+            String::from("lo")
+        } else {
+            lan += 1;
+            alloc::format!("lan{}", lan - 1)
+        };
+        v.push((name, i));
+    }
+    v.sort_by_key(|(_, i)| i.flags & IF_LOOPBACK != 0);
+    v
+}
+
+/// A route of [`routes`].
+pub struct Route {
+    pub dest: [u8; 4],
+    pub mask: [u8; 4],
+    pub gateway: [u8; 4],
+    /// RTF_UP 1, RTF_GATEWAY 2.
+    pub flags: u16,
+    pub iface: String,
+}
+
+/// The routing table as the stack routes: the default route through the
+/// first gateway, then a network route per configured interface (the
+/// interface's address as gateway).
+pub fn routes() -> alloc::vec::Vec<Route> {
+    let mut v = alloc::vec::Vec::new();
+    let ifs = os2_interfaces();
+    if let Some((name, i)) = ifs.iter().find(|(_, i)| i.gateway != [0; 4] && i.flags & IF_UP != 0) {
+        v.push(Route { dest: [0; 4], mask: [0; 4], gateway: i.gateway, flags: 3, iface: name.clone() });
+    }
+    for (name, i) in &ifs {
+        if i.addr == [0; 4] || i.flags & IF_UP == 0 {
+            continue;
+        }
+        let mut net = [0u8; 4];
+        for k in 0..4 {
+            net[k] = i.addr[k] & i.mask[k];
+        }
+        v.push(Route { dest: net, mask: i.mask, gateway: i.addr, flags: 1, iface: name.clone() });
+    }
+    v
+}
+
+/// The host name: %HOSTNAME%, else "rs2" (the name the kernel's resolver
+/// answers for).
+pub fn hostname() -> String {
+    let mut v: *const u8 = core::ptr::null();
+    if unsafe { crate::DosScanEnv(c"HOSTNAME".as_ptr() as *const u8, &mut v) } == 0 && !v.is_null() {
+        let mut s = String::new();
+        let mut p = v;
+        unsafe {
+            while *p != 0 {
+                s.push(*p as char);
+                p = p.add(1);
+            }
+        }
+        let t = s.trim();
+        if !t.is_empty() {
+            return String::from(t);
+        }
+    }
+    String::from("rs2")
+}
+
 /// Every socket of the stack.
 pub fn sockets() -> alloc::vec::Vec<SockInfo> {
     let mut n = 0;

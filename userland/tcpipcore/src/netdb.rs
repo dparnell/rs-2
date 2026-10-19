@@ -155,12 +155,9 @@ fn load(db: Db) -> Vec<Record> {
 
 // ---- hosts ----
 
-/// The host name: %HOSTNAME%, else "rs2" (the kernel resolver's name).
+/// The host name (%HOSTNAME%, else "rs2").
 pub fn hostname() -> Vec<u8> {
-    match files::env(c"HOSTNAME") {
-        Some(h) if !h.trim_ascii().is_empty() => h.trim_ascii().to_vec(),
-        _ => b"rs2".to_vec(),
-    }
+    os2::net::hostname().chars().map(|c| c as u8).collect()
 }
 
 /// The address of the first configured non-loopback interface.

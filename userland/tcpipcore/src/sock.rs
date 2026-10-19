@@ -377,23 +377,9 @@ pub const FIONBIO: u32 = 0x667e;
 pub const FIONREAD: u32 = 0x667f;
 pub const FIOASYNC: u32 = 0x667d;
 
-/// Interfaces as OS/2 names them: "lo" for loopback, "lan0".. for the
-/// others in order.
+/// Interfaces as OS/2 names them ("lan0".., "lo").
 pub fn os2_interfaces() -> Vec<(Vec<u8>, IfInfo)> {
-    let mut lan = 0;
-    let mut v: Vec<(Vec<u8>, IfInfo)> = Vec::new();
-    for i in os2::net::interfaces() {
-        let name = if i.flags & IF_LOOPBACK != 0 {
-            b"lo".to_vec()
-        } else {
-            lan += 1;
-            alloc::format!("lan{}", lan - 1).into_bytes()
-        };
-        v.push((name, i));
-    }
-    // OS/2 lists the LAN interfaces first.
-    v.sort_by_key(|(_, i)| i.flags & IF_LOOPBACK != 0);
-    v
+    os2::net::os2_interfaces().into_iter().map(|(n, i)| (n.into_bytes(), i)).collect()
 }
 
 fn find_iface(name: &[u8]) -> Option<IfInfo> {
@@ -435,27 +421,10 @@ fn broadcast(i: &IfInfo) -> [u8; 4] {
 /// number), which the 4.0 (`ioc(g,n)`) and 4.4 (`_IOWR(g,n,t)`) forms
 /// share; the 4.4 numbers of the interface queries (33-37) are accepted
 /// beside the old ones (13-21).
-/// The routing table as the stack routes: a network route per
-/// configured interface (gateway: its own address), the default route
-/// through the first gateway. (destination, gateway, mask, RTF_* flags,
-/// interface name)
+/// The routing table: (destination, gateway, mask, RTF_* flags,
+/// interface name).
 pub fn routes() -> Vec<([u8; 4], [u8; 4], [u8; 4], u16, Vec<u8>)> {
-    let mut v = Vec::new();
-    let ifs = os2_interfaces();
-    for (name, i) in &ifs {
-        if i.addr == [0; 4] || i.flags & IF_UP == 0 {
-            continue;
-        }
-        let mut net = [0u8; 4];
-        for k in 0..4 {
-            net[k] = i.addr[k] & i.mask[k];
-        }
-        v.push((net, i.addr, i.mask, 0x1, name.clone()));
-    }
-    if let Some((name, i)) = ifs.iter().find(|(_, i)| i.gateway != [0; 4] && i.flags & IF_UP != 0) {
-        v.insert(0, ([0; 4], i.gateway, [0; 4], 0x1 | 0x2, name.clone()));
-    }
-    v
+    os2::net::routes().into_iter().map(|r| (r.dest, r.gateway, r.mask, r.flags, r.iface.into_bytes())).collect()
 }
 
 /// SIOSTATRT: struct rtentries {short hostcount, netcount; then per
