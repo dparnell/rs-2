@@ -11,6 +11,10 @@ programs unmodified, natively, on 64-bit PCs.
   resources, signals) plus VIO, KBD, MSG and NLS.
 - UEFI boot from CD, USB stick or hard disk; AHCI, NVMe, USB keyboard/mouse (xHCI),
   partitions (MBR/GPT), FAT, HPFS and ISO 9660.
+- virtio devices for KVM/QEMU, Proxmox, UTM and cloud VMs: block and SCSI
+  disks (and booting from them), SCSI CD-ROMs, keyboards, mice and tablets
+  (absolute pointer), entropy (`\DEV\RANDOM$`) and console
+  (`\DEV\VIOCON$`).
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 

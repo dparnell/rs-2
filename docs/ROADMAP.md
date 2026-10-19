@@ -55,7 +55,13 @@ Status markers: done, in progress, planned.
 - done: USB hubs (nested), USB mass storage (bulk-only), boot from a USB stick
 - done: USB storage hot-plug: a kernel thread mounts sticks connected after
   boot on the next free drive letters and unmounts them on removal
-- planned: virtio-blk, NVMe/xHCI interrupts
+- done: virtio (polled): PCI transport, modern and legacy devices, split
+  virtqueues; virtio-blk (read-only, block size, flush; booting from it),
+  virtio-scsi (disks, CD-ROMs, unit attentions), virtio-input (keyboards,
+  mice, tablets through an absolute pointer path for text mode and PM),
+  virtio-rng (\DEV\RANDOM$), virtio-console port 0 (\DEV\VIOCON$)
+- planned: NVMe/xHCI/virtio interrupts (MSI-X), virtio-net, virtio-gpu,
+  virtio-scsi hot-plug events, virtio-console multiport
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - done: SMP: all processors started (INIT/SIPI), per-CPU GDT/TSS/LAPIC
   timer, shared run queues, big kernel lock, IPI wake-ups and TLB shootdown
