@@ -1,9 +1,9 @@
 # Compatibility with original OS/2 programs
 
 Text-mode (VIO) programs from OS/2 Warp 4.52 and the OS/2 Toolkit 4.5,
-run unmodified under rs2 in QEMU. Programs that need Presentation Manager
-DLLs (PMWIN, PMGPI, PMSHAPI, ...) are out of scope here, except where a
-text-mode program only reads profiles (TELNET).
+run unmodified under rs2 in QEMU. Presentation Manager programs run on
+rs2's own PM DLLs (docs/PM.md); those tested are listed under
+[Presentation Manager programs](#presentation-manager-programs).
 
 The test setup is the development C: drive built from `work/modules.txt`:
 IBM `CMD.EXE` as the shell, the programs under `C:\IBM` and `C:\TK`, the
@@ -89,6 +89,19 @@ Status: **works** = the tested function behaves as on OS/2;
 | WORMS.EXE (sample) | works | Mouse pointer and clicks through MOUCALLS (Exit by clicking). |
 | TIMER0.EXE (sample) | works | Reports that the TIMER0$ sample driver is missing. |
 | EAS.EXE (sample) | not tested | The EA editor sample is a Presentation Manager program. |
+
+## Presentation Manager programs
+
+On rs2's PMWIN, PMGPI, PMCTLS, PMSHAPI, PMDRAG, PMMERGE, LIBUNI and
+HELPMGR (help is not shown). Tested with keyboard and mouse input from
+`xtask run --type` and screenshots.
+
+| Program | Status | Notes |
+|---------|--------|-------|
+| E.EXE (System Editor) | works | Opens a file from the command line and with File > Open (the standard file dialog); typing, cursor and selection keys, mouse selection; Edit > Cut/Copy/Paste/Clear/Select all, Alt+Backspace undo; Find and Change (MLM_SEARCH); Options > Set font (the font dialog; the MLE redraws in the chosen face and size), Set colors, Word wrap on/off (horizontal scroll bar when off); File > Save with E's "no file type" and Type dialogs (the file written, checked with TYPE), Save as; Autosave (spin button); the "File Changed" prompt when closing with changes. Copy in one E and paste in a second E or in another program's entry field. Needs `EHXDLMRI.DLL` (its resources) in LIBPATH; Help shows nothing; the dialogs' SS_ICON statics draw no icon. |
+| Toolkit `hello.exe`, `dialog.exe`, `template.exe`, `palette.exe` | works | As before (menus, accelerators, dialogs, palette animation); `template.exe`'s File > Open/Save as now bring up the file dialog. |
+| Toolkit `controls/style.exe` | partial | Its MLE editor, the button, list box, combo box (simple, drop-down, drop-down list), entry field (MLE and entry field), static, slider, spin button (master and servant) and value set dialogs, message boxes. The notebook and container dialogs show placeholders (no WC_NOTEBOOK/WC_CONTAINER); icons are not drawn; presentation parameters are ignored. |
+| Toolkit `clipbrd.exe` | works | Selecting a rectangle with the mouse (WinTrackRect), Copy/Cut as CF_BITMAP and Paste stretched into another selection. |
 
 ## Network programs
 

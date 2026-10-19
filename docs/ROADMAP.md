@@ -137,8 +137,20 @@ Status markers: done, in progress, planned.
   (moved, sized, hidden, placeholders, "(not responding)" titles,
   PM_HANGTIME), the Ctrl+Esc window list ending programs, clean-up when
   a PM process ends
-- planned: per-process presentation-space limits, WinSetHook, the
-  clipboard and DDE across processes, a real PM shell
+- done: the OS/2 System Editor (E.EXE) runs unmodified: opening,
+  editing, finding, fonts, word wrap, saving (with its .TYPE dialogs),
+  the "save changes?" prompt, cut/copy/paste also between programs
+- done: the multi-line entry field (WC_MLE, its text engine host-tested
+  in `crates/pmwin`), combo boxes, spin buttons, sliders and value sets;
+  the clipboard and atom tables shared by all processes (CF_TEXT and
+  other pointer formats, CF_BITMAP, registered formats, delayed
+  rendering, owner and viewer); WinTrackRect; PMCTLS's file and font
+  dialogs; PMDRAG, PMMERGE and LIBUNI as far as programs need them
+  (`RS2\CTLTEST.EXE` checks the controls and the clipboard)
+- planned: per-process presentation-space limits, hooks that are called
+  (WinSetHook only records them), DDE, notebooks and containers, icons
+  and pointers from resources, owner-drawn items, presentation
+  parameters, drag and drop, a real PM shell
 - Display driver model (GRADD-style) on the framebuffer, mouse pointer
 - PMWIN (windows, messages, controls, dialogs), PMGPI (graphics, fonts),
   PMSHAPI, help manager

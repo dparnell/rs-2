@@ -26,11 +26,12 @@ The logic lives in host-testable crates; the DLLs are thin:
 | Crate / DLL | Contents |
 |-------------|----------|
 | `crates/gpi` | Rendering engine: presentation-space attributes, lines, boxes, arcs, areas, text with bitmap fonts, bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
-| `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping. Plain data structures, unit-tested on the host. |
+| `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping; the MLE's text engine (`mle.rs`: layout with word wrap and tabs, editing, undo, import/export formats, search) and the arithmetic of spin buttons, sliders and value sets (`controls.rs`). Plain data structures, unit-tested on the host. |
 | `userland/pmwin` → PMWIN.DLL | Exports (`Win*`, `Gpi*`), the shared state and its heap, locking, messaging, the built-in window classes, and the PM server's code (input routing, hung programs, window list). |
-| `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000). |
+| `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000; 9001, `Rs2ShellPosition`, gives PMSHAPI's `WinQueryTaskSizePos` the shell's next cascade position). |
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
-| `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list, PMCTLS, HELPMGR stubs. |
+| `userland/pmctls` → PMCTLS.DLL | The standard file and font dialogs (`WinFileDlg`, `WinFontDlg`): ordinary PM dialogs, built from templates made in memory, run through PMWIN like an application's. |
+| `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), HELPMGR stubs, PMDRAG (no drag is ever in progress), PMMERGE (the entry points programs import from it directly), LIBUNI (locale objects). |
 
 ## Kernel services (module RS2API)
 
@@ -211,7 +212,10 @@ mouse and keyboard. What PMWIN has:
   from items, check marks, disabled items, separators, accelerator text
   after a tab; the MM_* messages (insert, delete, remove, query/set item,
   attributes, text, positions, select, start/end menu mode, rects);
-  `WinLoadMenu`, `WinCreateMenu`, `WinPopupMenu`.
+  `WinLoadMenu`, `WinCreateMenu`, `WinPopupMenu`. As in PM, the focus
+  window keeps the focus during menu mode (it gets no `WM_SETFOCUS`);
+  the queue's keys go to the menu, also keys typed before the menu
+  opened.
 - Accelerators: tables of frames and of the queue are applied to WM_CHAR
   as the message loop takes it (`WinLoadAccelTable`,
   `WinCreateAccelTable`, `WinSetAccelTable`, `WinTranslateAccel`, ...),
@@ -225,7 +229,16 @@ mouse and keyboard. What PMWIN has:
   choice, `WinEnumDlgItem`, `WinSendDlgItemMsg`, `Win{Query,Set}DlgItem
   {Text,Short}`, `WinMapDlgPoints`. Template sizes are the area inside
   the frame controls; a dialog unit is 2x2 pixels (8x16 system font).
-  Unknown control classes become placeholder frames.
+  Unknown control classes become placeholder frames. The actual owner of
+  a dialog is the ancestor of `hwndOwner` that is a child of the
+  dialog's parent (a client window's frame). `WinDefDlgProc` for a
+  window that is not a dialog calls the window's class procedure (a
+  control subclassed with a procedure that passes the rest to
+  `WinDefDlgProc`, as the System Editor does).
+- Focus and activation: activating a frame gives it the focus, which it
+  passes on to `QWL_HWNDFOCUSSAVE` (the window that last had it, or one
+  the application set) or its client, so the client hears that the
+  focus came from the frame.
 - Controls, each a registered class with its own window procedure:
   `WC_BUTTON` (push, default, check box, radio, 3-state and their
   automatic kinds, `BM_*`, `BN_CLICKED`), `WC_STATIC` (text with DT_*
@@ -235,27 +248,36 @@ mouse and keyboard. What PMWIN has:
   `EN_*`), `WC_LISTBOX` (single and multiple selection, scrolling with a
   scroll-bar child, keyboard, `LM_*`, `LN_*`), `WC_SCROLLBAR` (arrows,
   paging, proportional slider tracking, `SBM_*`, `WM_VSCROLL`/
-  `WM_HSCROLL`). `WM_QUERYDLGCODE` and `WM_MATCHMNEMONIC` tell the
-  dialog manager about them.
+  `WM_HSCROLL`), `WC_MLE`, `WC_COMBOBOX`, `WC_SPINBUTTON`, `WC_SLIDER`
+  and `WC_VALUESET` (see [Standard controls](#standard-controls)).
+  `WM_QUERYDLGCODE` and `WM_MATCHMNEMONIC` tell the dialog manager
+  about them; entry fields, MLEs, combo boxes and spin buttons use the
+  clipboard (Shift+Del, Ctrl+Ins, Shift+Ins, `EM_CUT`/`COPY`/`PASTE`).
 - Double clicks (`WM_BUTTONnDBLCLK`), `WM_CREATE` with a CREATESTRUCT,
   `WinSetParent`, `WinWaitEventSem`.
 - Threads and processes: see [Processes and input](#processes-and-input)
   (`template.exe` uses an object window on a second thread).
   `WinMessageBox` is a modal dialog built from a template.
-- `HELPMGR.DLL` (help instances are accepted, help shows nothing) and
-  `PMCTLS.DLL` (`WinFileDlg`/`WinFontDlg` return as cancelled).
+- `HELPMGR.DLL` (help instances are accepted, help shows nothing), the
+  file and font dialogs of `PMCTLS.DLL` (see [Standard
+  dialogs](#standard-dialogs)), the clipboard and atom tables (see [The
+  clipboard](#the-clipboard)), `WinTrackRect` (rectangle tracking with
+  the mouse or the keyboard), rectangle helpers (`WinSetRect`,
+  `WinIntersectRect`, ...), `WinUpper` and the code page calls,
+  `WinSetHook`/`WinReleaseHook` (hooks are recorded, not called).
 
-Not done for milestone 2: `WC_MLE`, combo boxes, spin buttons, sliders,
-value sets, notebooks, containers, the clipboard, presentation
-parameters (accepted and ignored), owner-drawn items, menu bitmaps,
-minimizing; `controls/style.exe` needs the MLE, PMSHAPI and the
-clipboard.
+Not done for milestone 2: notebooks, containers, presentation
+parameters (accepted and ignored), owner-drawn items, icons and
+pointers from resources, menu bitmaps, minimizing, help windows, drag
+and drop.
+
+The OS/2 System Editor (E.EXE) runs unmodified: see
+[COMPATIBILITY.md](COMPATIBILITY.md#presentation-manager-programs).
 
 Milestone 3 (GPI breadth) works as far as the GPI is concerned: every
 PMGPI import of the Toolkit samples `graphic.exe`, `clipbrd.exe`,
-`jigsaw.exe` and `palette.exe` is implemented (they still need dialogs,
-menus, the clipboard and HELPMGR/PMCTLS/PMSHAPI to run end to end;
-`palette.exe` runs with stubs for those). `RS2\GPITEST.EXE` runs
+`jigsaw.exe` and `palette.exe` is implemented; `palette.exe` and
+`clipbrd.exe` run end to end. `RS2\GPITEST.EXE` runs
 self-checks on memory bitmaps and shows the primitives in a window.
 The GPI covers:
 
@@ -302,6 +324,124 @@ Rust code assumes 16, so every PMWIN export goes through a generated
 trampoline that aligns the stack (`tools/scripts/gen_pm_exports.py`, which
 also writes `exports.def` with the Toolkit's ordinals).
 
+## Standard controls
+
+All are built-in PMWIN classes with their own window procedures,
+reachable through `WinQueryClassInfo` and subclassing like the others;
+what can be tested on the host is in `crates/pmwin`.
+
+- `WC_MLE`, the multi-line entry field. The text keeps a line break as
+  one LF, so an insertion point is a byte offset and a break counts as
+  one character, as on OS/2; MLFIE_CFTEXT (CR LF), MLFIE_NOTRANS (LF)
+  and MLFIE_WINFMT (CR CR LF for soft breaks) on import and export.
+  Display lines are laid out per paragraph (word wrap at blanks, tab
+  stops in pels) and laid out again only where an edit touched them.
+  The font is the system font's glyphs scaled to the FATTRS cell
+  (`lMaxBaselineExt`, half as wide for outline faces), so every face is
+  monospaced. One level of undo (a typing run is one step; undoing
+  again redoes). Messages `MLM_SETTEXTLIMIT` .. `MLM_QUERYIMPORTEXPORT`
+  (import/export buffers, selection, insert and delete, line queries,
+  format lengths, undo, fonts, colours, first character, cut, copy,
+  paste and clear, refresh, search with select and replace-all, word
+  wrap, tab stops, read-only, the changed flag, the format rectangle);
+  notifications `MLN_CHANGE`, `MLN_SETFOCUS`/`MLN_KILLFOCUS`,
+  `MLN_VSCROLL`/`MLN_HSCROLL`, `MLN_OVERFLOW` (text limit),
+  `MLN_CLPBDFAIL`. Scroll bars are `WC_SCROLLBAR` children
+  (`MLS_VSCROLL`/`MLS_HSCROLL`); `MLS_BORDER`, `MLS_IGNORETAB`,
+  `MLS_DISABLEUNDO`, `MLS_READONLY`; mouse selection (drag, double
+  click for a word, Shift+click), the CUA keys, Insert toggles
+  overtype. `WinSetWindowText`/`WinQueryWindowText` work on the text
+  (as CF_TEXT).
+- `WC_COMBOBOX`: an entry field (`CBID_EDIT`) over a list box
+  (`CBID_LIST`). `CBS_SIMPLE` shows the list all the time;
+  `CBS_DROPDOWN` and `CBS_DROPDOWNLIST` (read-only entry) collapse the
+  window to the entry and grow it to its template height, on top of its
+  siblings, when the list drops down (the button, Alt+Down or F4; Up and
+  Down step through the items). `LM_*` go to the list, `EM_*` to the
+  entry; `CBM_SHOWLIST`, `CBM_HILITE`, `CBM_ISLISTSHOWING`; `CBN_*`
+  notifications.
+- `WC_SPINBUTTON`: a numeric range or an array of strings
+  (`SPBM_SETARRAY`), wrapping at either end; arrows (held ones repeat),
+  Up, Down, PgUp and PgDn, `SPBS_NUMERICONLY`, `SPBS_READONLY`,
+  `SPBS_PADWITHZEROS`, justification; a master's arrows spin the
+  servant (`SPBM_SETMASTER`) that last had the focus. `SPBM_*` and
+  `SPBN_*`.
+- `WC_SLIDER`: horizontal or vertical, home at either end, the
+  increments of `SLDCDATA`, ticks (`SLM_SETTICKSIZE`), scale text,
+  detents, arrow buttons, a ribbon strip, read-only, snapping; the arm
+  follows the mouse (`SLN_SLIDERTRACK`) and the keyboard; `SLM_*` (the
+  arm position in increments or pels, shaft and arm dimensions, tick
+  positions) and `SLN_*`.
+- `WC_VALUESET`: rows x columns of colour (RGB or index), text and icon
+  or bitmap items (icons and bitmaps are drawn as framed squares), item
+  borders, disabled items; keyboard and mouse selection; `VM_*` and
+  `VN_*`.
+
+## The clipboard
+
+The clipboard and the atom tables are part of the shared PM state, so
+every PM process sees the same ones. The clipboard is open for one
+message queue at a time (`WinOpenClipbrd` waits, answering messages sent
+to the caller meanwhile). Data handed to `WinSetClipbrdData` belongs to
+PM, as on OS/2:
+
+- `CFI_POINTER` formats (`CF_TEXT`, `CF_DSPTEXT`, registered formats):
+  the giveable shared memory the application allocated is copied into
+  the shared state (text up to its NUL, other formats the committed
+  size `DosQueryMem` reports) and freed; `WinQueryClipbrdData` gives
+  every process a pointer to that copy, which is mapped at the same
+  address everywhere.
+- `CF_BITMAP` (and `CF_DSPBITMAP`): the bitmap moves out of the
+  setter's GPI objects into the clipboard; each process that asks gets
+  its own bitmap handle with the picture, deleted when the clipboard is
+  emptied.
+- Other `CFI_HANDLE` data is kept as it is; data 0 is delayed
+  rendering: the owner gets `WM_RENDERFMT` when someone asks for it.
+
+`WinEmptyClipbrd` tells the owner (`WM_DESTROYCLIPBOARD`), closing
+after a change tells the viewer (`WM_DRAWCLIPBOARD`);
+`WinEnumClipbrdFmts`, `WinQueryClipbrdFmtInfo`,
+`WinSetClipbrdOwner`/`Viewer` and their queries. Registered formats
+come from the system atom table (`WinAddAtom` .. `WinQueryAtomUsage`,
+integer atoms `#n`, private tables with `WinCreateAtomTable`). What a
+process had open or owned is released when it ends.
+
+## Standard dialogs
+
+PMCTLS.DLL builds its dialogs as an application would: a dialog template
+made in memory, `WinCreateDlg` and `WinProcessDlg`. A wrapper procedure
+makes the FILEDLG/FONTDLG the `QWL_USER` window word before
+`WM_INITDLG` reaches the application's procedure (`pfnDlgProc`), which
+passes the rest to `WinDefFileDlgProc`/`WinDefFontDlgProc`.
+
+- `WinFileDlg`: Open and Save as (`FDS_OPEN_DIALOG`,
+  `FDS_SAVEAS_DIALOG`, `FDS_HELPBUTTON`, `FDS_APPLYBUTTON`,
+  `FDS_MODELESS`): a file name field, file type and drive drop-down
+  lists, the current directory's subdirectories (a double click enters
+  one, `..` goes up) and files (a click fills in the name, a double
+  click chooses it); names typed relative or absolute, a pattern
+  changes the file list, a directory changes the directory; Open
+  reports a missing file; `FDM_VALIDATE` lets the application refuse a
+  name; `szFullFile`, `lReturn`, `sEAType`. The push buttons are where
+  IBM's template has them, so applications that add one between OK and
+  Cancel fit. Multiple selection, filtering by EA type and `FDM_FILTER`
+  are not done.
+- `WinFontDlg`: the system font and the outline faces (Helvetica, Times
+  New Roman, Courier; normal and bold) in point sizes, outline,
+  underline and strikeout, a preview in the chosen font; OK, Cancel,
+  Apply, Reset, Help. The FONTDLG (`fAttrs`, `fxPointSize`, family
+  name, `flStyle`, weight, em height) follows the choice as it changes,
+  since applications' procedures read it when OK or Apply arrives.
+
+## Debugging
+
+With `PMTRACE` set in a program's environment (`SET PMTRACE=1` before
+starting it), PMWIN logs every PM call the program makes, with its
+arguments, on the serial port (`[pid] tid WinSendMsg(f, 1d4, 0, 0)`).
+Only the application's calls are logged, not PMWIN's own nested ones.
+The export trampolines pass their index to the lock's entry
+(`gen_pm_exports.py` writes the names table).
+
 ## Milestones
 
 1. (done) `hello.exe` from the Toolkit samples (WinInitialize, message queue,
@@ -313,8 +453,11 @@ also writes `exports.def` with the Toolkit's ordinals).
    text, menus, accelerators.
 3. (GPI done) GPI breadth (`graphic.exe`, `clipbrd.exe`, `jigsaw.exe`,
    `palette.exe`): paths, areas, bitmaps, fonts, transforms, regions,
-   palettes; the clipboard is still to do.
-4. A desktop shell: window list, program launcher (PMSHELL), then the
+   palettes, the clipboard.
+4. (done) The System Editor (E.EXE): the MLE, the clipboard across
+   processes, combo boxes, spin buttons, sliders, value sets, the file
+   and font dialogs.
+5. A desktop shell: window list, program launcher (PMSHELL), then the
    Workplace Shell (SOM) much later.
 
 ## Testing
@@ -322,6 +465,12 @@ also writes `exports.def` with the Toolkit's ordinals).
 - Host unit tests in `crates/gpi` (render into memory and compare pixels;
   the Toolkit's sample bitmaps when `work/media` is present) and
   `crates/pmwin` (window tree, region computation, message routing).
+- `RS2\CTLTEST.EXE` (userland/ctltest): self-checks of the MLE, entry
+  fields, combo boxes, spin buttons, sliders and value sets (messages
+  and notifications), atoms and the clipboard (CF_TEXT, CF_BITMAP and a
+  registered format, also read and replaced by a second process: it
+  runs itself with `CHILD`), printing PASS/FAIL and `ctltest done: N
+  failure(s)`.
 - `RS2\GPITEST.EXE` (userland/gpitest): GPI self-checks printing
   PASS/FAIL and `gpitest done: N failure(s)`, then a window with every
   kind of primitive for a screenshot check (it also draws
