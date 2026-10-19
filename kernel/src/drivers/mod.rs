@@ -4,11 +4,13 @@ pub mod ahci;
 pub mod hid;
 pub mod hotplug;
 pub mod hub;
+pub mod mpt;
 pub mod nvme;
 pub mod part;
 pub mod pci;
 pub mod pcilist;
 pub mod pvscsi;
+pub mod scsi;
 pub mod storage;
 pub mod svga;
 pub mod usb;
@@ -140,10 +142,14 @@ pub fn init() {
         if (d.vendor, d.device) == (0x15ad, 0x0405) {
             svga::probe(d);
         }
-        if (d.vendor, d.device) == (0x15ad, 0x07c0) {
-            for (dev, is_optical) in pvscsi::probe(d) {
-                if is_optical { optical.push(dev) } else { disks.push(dev) }
-            }
+        let units = match (d.vendor, d.device) {
+            (0x15ad, 0x07c0) => pvscsi::probe(d),
+            // LSI Logic 53c1030 and SAS1068 (MPT Fusion).
+            (0x1000, 0x0030 | 0x0054) => mpt::probe(d),
+            _ => Vec::new(),
+        };
+        for (dev, is_optical) in units {
+            if is_optical { optical.push(dev) } else { disks.push(dev) }
         }
     }
     disks.append(&mut usb_disks);
