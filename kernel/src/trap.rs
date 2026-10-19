@@ -37,6 +37,8 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
             smp::bkl_acquire();
             crate::api::dispatch(f);
         }
+        // Device interrupts (MSI/MSI-X): spin locks only, like IRQs.
+        v if (crate::msi::FIRST as u64..=crate::msi::LAST as u64).contains(&v) => crate::msi::dispatch(v as u8),
         v if (smp::IPI_RESCHEDULE as u64..=smp::IPI_HALT as u64).contains(&v) => smp::ipi(v as u8),
         v if v == crate::apic::SPURIOUS as u64 => {}
         v => crate::println!("spurious interrupt {v:#x}"),

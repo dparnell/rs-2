@@ -21,7 +21,8 @@ pub fn account() {
     let c = crate::smp::this();
     let i = c.index();
     TICKS[i].fetch_add(1, Ordering::Relaxed);
-    if c.cur_class.load(Ordering::Relaxed) != crate::smp::IDLE_CLASS {
+    // Interrupts are off: this CPU's current thread is stable.
+    if c.current().as_ref().is_some_and(|t| !t.is_idle()) {
         BUSY[i].fetch_add(1, Ordering::Relaxed);
     }
 }
@@ -78,6 +79,7 @@ fn run() {
         let chunk = 64 * 1024 / ss;
         let total = (16 * 1024 * 1024 / ss as u64).min(d.sector_count() / chunk as u64 * chunk as u64);
         let mut buf = vec![0u8; chunk * ss];
+        let (i0, m0) = (crate::msi::total(), crate::msi::missed());
         let (b0, t0, _) = sample();
         let s0 = crate::arch::rdtsc();
         let mut lba = 0;
@@ -118,10 +120,16 @@ fn run() {
         let us = (crate::arch::rdtsc() - c0) / tsc_per_us;
         let (b1, t1, _) = sample();
         crate::println!(
-            "bench: disk {n}: random 4 KB reads: {} us each, CPU busy {}%",
+            "bench: disk {n}: random 4 KB reads: {} us each, CPU busy {}%; {} device interrupts, {} missed",
             us / count,
-            (b1 - b0) * 100 / (t1 - t0).max(1)
+            (b1 - b0) * 100 / (t1 - t0).max(1),
+            crate::msi::total() - i0,
+            crate::msi::missed() - m0
         );
     }
+    let per: alloc::vec::Vec<(u64, u64)> = (0..crate::smp::online_count() as usize)
+        .map(|i| (BUSY[i].load(Ordering::Relaxed), TICKS[i].load(Ordering::Relaxed)))
+        .collect();
+    crate::println!("bench: per CPU busy/ticks since boot {per:?}");
     crate::println!("bench: done");
 }

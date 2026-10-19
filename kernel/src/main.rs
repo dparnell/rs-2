@@ -29,6 +29,7 @@ mod power;
 mod log;
 mod mm;
 mod monitor;
+mod msi;
 mod mouse;
 mod net;
 mod nls;
@@ -101,6 +102,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
         api::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
     }
     smp::start_aps();
+    msi::start();
     drivers::hotplug::start();
     bench::start(cmdline);
     boot::start(cmdline);
