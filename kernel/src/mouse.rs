@@ -1,4 +1,5 @@
-//! Mouse: the PS/2 auxiliary device and USB mice feed motion here; it is
+//! Mouse: the PS/2 auxiliary device, USB mice and virtio mice feed motion
+//! here, tablets absolute positions (`motion_abs`); it is
 //! turned into OS/2 mouse events (MOUEVENTINFO) for the foreground
 //! session and moves the text-mode pointer.
 
@@ -83,7 +84,7 @@ pub fn with<R>(sid: u32, f: impl FnOnce(&mut Session) -> R) -> R {
 
 pub fn present() -> bool {
     let ps2 = STATE.lock().ps2;
-    ps2 || crate::drivers::hid::mouse_present()
+    ps2 || crate::drivers::hid::mouse_present() || crate::drivers::virtio::input::pointer_present()
 }
 
 pub fn drop_session(sid: u32) {
@@ -98,6 +99,36 @@ pub fn motion(buttons: u8, dx: i32, dy: i32) {
         crate::display::mouse(buttons, dx, dy);
         return;
     }
+    update(sid, buttons, |m, rows, cols| {
+        m.acc.0 += dy;
+        m.acc.1 += dx;
+        let (rs, cs) = (m.scale.0.max(1) as i32, m.scale.1.max(1) as i32);
+        let (drow, dcol) = (m.acc.0 / rs, m.acc.1 / cs);
+        m.acc.0 -= drow * rs;
+        m.acc.1 -= dcol * cs;
+        ((m.row + drow).clamp(0, rows - 1), (m.col + dcol).clamp(0, cols - 1))
+    });
+}
+
+/// An absolute position from a device (tablets, hypervisor pointers):
+/// `x` in 0..=`max_x` from the left, `y` in 0..=`max_y` from the top. Text
+/// sessions get the cell under it, PM the pixel.
+pub fn motion_abs(buttons: u8, x: u32, y: u32, max_x: u32, max_y: u32) {
+    let sid = crate::session::foreground();
+    if sid == crate::session::pm_session() {
+        crate::display::mouse_abs(buttons, x, y, max_x, max_y);
+        return;
+    }
+    update(sid, buttons, |m, rows, cols| {
+        m.acc = (0, 0);
+        let cell = |v: u32, max: u32, n: i32| ((v.min(max) as u64 * n as u64 / (max as u64 + 1)) as i32).clamp(0, n - 1);
+        (cell(y, max_y, rows), cell(x, max_x, cols))
+    });
+}
+
+/// New buttons and pointer cell (`pos` gets the session state, rows and
+/// columns) for text session `sid`: queue the event, move the pointer.
+fn update(sid: u32, buttons: u8, pos: impl FnOnce(&mut Session, i32, i32) -> (i32, i32)) {
     let time = crate::irq::uptime_ms() as u32;
     let mut s = STATE.lock();
     let prev = core::mem::replace(&mut s.buttons, buttons);
@@ -106,15 +137,8 @@ pub fn motion(buttons: u8, dx: i32, dy: i32) {
         return;
     }
     let (rows, cols) = crate::screen::with_session(sid, |sc| (sc.rows as i32, sc.cols as i32)).unwrap_or((25, 80));
-    m.acc.0 += dy;
-    m.acc.1 += dx;
-    let (rs, cs) = (m.scale.0.max(1) as i32, m.scale.1.max(1) as i32);
-    let (drow, dcol) = (m.acc.0 / rs, m.acc.1 / cs);
-    m.acc.0 -= drow * rs;
-    m.acc.1 -= dcol * cs;
     let (orow, ocol) = (m.row, m.col);
-    m.row = (m.row + drow).clamp(0, rows - 1);
-    m.col = (m.col + dcol).clamp(0, cols - 1);
+    (m.row, m.col) = pos(m, rows, cols);
     let moved = (m.row, m.col) != (orow, ocol);
     if !moved && prev == buttons {
         return;

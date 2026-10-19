@@ -5,6 +5,10 @@
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG]
 //!                  [--hdd IMG] [--nvme IMG] [--usb-kbd] [--usb-mouse] [--usb-disk IMG]...
 //!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
+//!                  [--virtio-disk IMG]... [--virtio-scsi IMG]... [--virtio-cd ISO]...
+//!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
+//!                  [--virtio-rng] [--virtio-console OUT [--virtio-console-in IN]]
+//!                  [--virtio-legacy] [--boot-virtio]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
@@ -19,6 +23,16 @@
 //! the last (ids `usbkbd`, `usbmouse`, `usbdisk0`... for `--monitor`
 //! device_del). `--boot-hdd` leaves out the ESP directory, so the machine boots
 //! from the attached disks (e.g. the ISO as a USB stick).
+//!
+//! The virtio options attach paravirtual devices: `--virtio-disk` a
+//! virtio-blk disk (repeatable), `--virtio-scsi`/`--virtio-cd` disks and
+//! CD-ROMs on one virtio-scsi controller, `--virtio-input` a keyboard, a
+//! mouse and a tablet (or one of them with `--virtio-kbd`,
+//! `--virtio-mouse`, `--virtio-tablet`), `--virtio-rng` an entropy source,
+//! `--virtio-console` a console whose output goes to a file (input from
+//! `--virtio-console-in`). `--virtio-legacy` makes the block, SCSI, entropy
+//! and console devices legacy-only (virtio 0.9.5). `--boot-virtio` boots
+//! from the first virtio disk (no ESP directory).
 
 mod hpfsimg;
 mod image;
@@ -72,6 +86,18 @@ struct Opts {
     usb_disks: Vec<PathBuf>,
     /// `run`: tiers of USB hubs in front of the USB devices.
     usb_hubs: u32,
+    /// `run`: virtio devices (see the module documentation).
+    virtio_disks: Vec<PathBuf>,
+    virtio_scsi: Vec<PathBuf>,
+    virtio_cds: Vec<PathBuf>,
+    virtio_kbd: bool,
+    virtio_mouse: bool,
+    virtio_tablet: bool,
+    virtio_rng: bool,
+    virtio_console: Option<PathBuf>,
+    virtio_console_in: Option<PathBuf>,
+    virtio_legacy: bool,
+    boot_virtio: bool,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -99,6 +125,17 @@ fn parse(args: &[String]) -> Opts {
         usb_mouse: false,
         usb_disks: vec![],
         usb_hubs: 0,
+        virtio_disks: vec![],
+        virtio_scsi: vec![],
+        virtio_cds: vec![],
+        virtio_kbd: false,
+        virtio_mouse: false,
+        virtio_tablet: false,
+        virtio_rng: false,
+        virtio_console: None,
+        virtio_console_in: None,
+        virtio_legacy: false,
+        boot_virtio: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -125,6 +162,33 @@ fn parse(args: &[String]) -> Opts {
                 i += 1;
                 o.usb_disks.push(PathBuf::from(&args[i]));
             }
+            "--virtio-disk" => {
+                i += 1;
+                o.virtio_disks.push(PathBuf::from(&args[i]));
+            }
+            "--virtio-scsi" => {
+                i += 1;
+                o.virtio_scsi.push(PathBuf::from(&args[i]));
+            }
+            "--virtio-cd" => {
+                i += 1;
+                o.virtio_cds.push(PathBuf::from(&args[i]));
+            }
+            "--virtio-input" => (o.virtio_kbd, o.virtio_mouse, o.virtio_tablet) = (true, true, true),
+            "--virtio-kbd" => o.virtio_kbd = true,
+            "--virtio-mouse" => o.virtio_mouse = true,
+            "--virtio-tablet" => o.virtio_tablet = true,
+            "--virtio-rng" => o.virtio_rng = true,
+            "--virtio-console" => {
+                i += 1;
+                o.virtio_console = Some(PathBuf::from(&args[i]));
+            }
+            "--virtio-console-in" => {
+                i += 1;
+                o.virtio_console_in = Some(PathBuf::from(&args[i]));
+            }
+            "--virtio-legacy" => o.virtio_legacy = true,
+            "--boot-virtio" => o.boot_virtio = true,
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
@@ -389,6 +453,47 @@ fn usb_devices(o: &Opts, c: &mut Command) {
     }
 }
 
+/// The virtio devices.
+fn virtio_devices(o: &Opts, c: &mut Command) {
+    // Legacy-only (0.9.5) devices for the transport's legacy path.
+    let legacy = if o.virtio_legacy { ",disable-modern=on,disable-legacy=off" } else { "" };
+    for (n, d) in o.virtio_disks.iter().enumerate() {
+        let boot = if n == 0 && o.boot_virtio { ",bootindex=0" } else { "" };
+        c.arg("-drive").arg(format!("file={},if=none,id=vd{n},format=raw", d.display()));
+        c.arg("-device").arg(format!("virtio-blk-pci,drive=vd{n},id=vblk{n}{boot}{legacy}"));
+    }
+    if !o.virtio_scsi.is_empty() || !o.virtio_cds.is_empty() {
+        c.arg("-device").arg(format!("virtio-scsi-pci,id=vscsi{legacy}"));
+        for (n, d) in o.virtio_scsi.iter().enumerate() {
+            c.arg("-drive").arg(format!("file={},if=none,id=vs{n},format=raw", d.display()));
+            c.arg("-device").arg(format!("scsi-hd,bus=vscsi.0,drive=vs{n},id=vsdisk{n}"));
+        }
+        for (n, d) in o.virtio_cds.iter().enumerate() {
+            c.arg("-drive").arg(format!("file={},if=none,id=vc{n},format=raw,media=cdrom,readonly=on", d.display()));
+            c.arg("-device").arg(format!("scsi-cd,bus=vscsi.0,drive=vc{n},id=vscd{n}"));
+        }
+    }
+    // The keyboard last, so QEMU's sendkey goes to it.
+    if o.virtio_mouse {
+        c.args(["-device", "virtio-mouse-pci,id=vmouse"]);
+    }
+    if o.virtio_tablet {
+        c.args(["-device", "virtio-tablet-pci,id=vtablet"]);
+    }
+    if o.virtio_kbd {
+        c.args(["-device", "virtio-keyboard-pci,id=vkbd"]);
+    }
+    if o.virtio_rng {
+        c.arg("-device").arg(format!("virtio-rng-pci{legacy}"));
+    }
+    if let Some(out) = &o.virtio_console {
+        let input = o.virtio_console_in.as_ref().map(|i| format!(",input-path={}", i.display())).unwrap_or_default();
+        c.arg("-chardev").arg(format!("file,id=vcon,path={}{input}", out.display()));
+        c.arg("-device").arg(format!("virtio-serial-pci{legacy}"));
+        c.args(["-device", "virtconsole,chardev=vcon"]);
+    }
+}
+
 fn run(o: &Opts) -> bool {
     let (code, vars) = ovmf();
     let work = root().join("work");
@@ -403,7 +508,7 @@ fn run(o: &Opts) -> bool {
         .arg(format!("if=pflash,format=raw,file={}", vars.display()))
         .args(match &o.iso {
             Some(iso) => vec!["-cdrom".to_string(), iso.display().to_string()],
-            None if o.boot_hdd => vec![],
+            None if o.boot_hdd || o.boot_virtio => vec![],
             None => vec!["-drive".to_string(), format!("format=raw,file=fat:rw:{}", work.join("esp").display())],
         })
         .arg("-monitor")
@@ -421,6 +526,7 @@ fn run(o: &Opts) -> bool {
         c.args(["-device", "nvme,drive=nvm0,serial=rs2nvme"]);
     }
     usb_devices(o, &mut c);
+    virtio_devices(o, &mut c);
     // Last, so extra devices can refer to the controllers above.
     c.args(&o.qemu_extra);
     let mut child = c.spawn().expect("start qemu");

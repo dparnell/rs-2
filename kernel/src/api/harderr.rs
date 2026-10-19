@@ -220,6 +220,9 @@ impl BlockDev for HardErrDev {
     fn write(&self, lba: u64, buf: &[u8]) -> Result<(), u32> {
         retry(|| self.drive(), || self.0.write(lba, buf))
     }
+    fn flush(&self) -> Result<(), u32> {
+        self.0.flush()
+    }
 }
 
 impl Drop for HardErrDev {

@@ -9,6 +9,10 @@ pub trait BlockDev: Send + Sync {
     fn sector_count(&self) -> u64;
     fn read(&self, lba: u64, buf: &mut [u8]) -> Result<(), u32>;
     fn write(&self, lba: u64, buf: &[u8]) -> Result<(), u32>;
+    /// Commit the device's volatile write cache, if it has one.
+    fn flush(&self) -> Result<(), u32> {
+        Ok(())
+    }
     /// The USB device holding the medium, if it is on one (removal).
     fn usb_device(&self) -> Option<crate::drivers::xhci::Handle> {
         None

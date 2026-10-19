@@ -66,9 +66,32 @@ pub fn key(k: &crate::kbd::KeyInfo, up: bool) {
 /// Mouse motion while the PM session is in the foreground (y grows
 /// downwards, as devices report it).
 pub fn mouse(buttons: u8, dx: i32, dy: i32) {
+    let x = PTR_X.load(Ordering::Relaxed) + dx;
+    let y = PTR_Y.load(Ordering::Relaxed) - dy;
+    set_pointer(buttons, x, y);
+}
+
+/// An absolute pointer position (tablets, hypervisor pointers) while the
+/// PM session is in the foreground: `x` in 0..=`max_x` from the left, `y`
+/// in 0..=`max_y` from the top, scaled to the screen.
+pub fn mouse_abs(buttons: u8, x: u32, y: u32, max_x: u32, max_y: u32) {
     let Some(fb) = crate::screen::framebuffer() else { return };
-    let x = (PTR_X.load(Ordering::Relaxed) + dx).clamp(0, fb.width as i32 - 1);
-    let y = (PTR_Y.load(Ordering::Relaxed) - dy).clamp(0, fb.height as i32 - 1);
+    let px = scale(x, max_x, fb.width);
+    let py = fb.height as i32 - 1 - scale(y, max_y, fb.height);
+    set_pointer(buttons, px, py);
+}
+
+/// `v` of 0..=`max` as one of `n` positions.
+fn scale(v: u32, max: u32, n: u32) -> i32 {
+    (v.min(max) as u64 * n.saturating_sub(1) as u64 / max.max(1) as u64) as i32
+}
+
+/// Move the pointer to `x`, `y` (PM coordinates, clamped to the screen)
+/// and queue a mouse event if it moved or the buttons changed.
+fn set_pointer(buttons: u8, x: i32, y: i32) {
+    let Some(fb) = crate::screen::framebuffer() else { return };
+    let x = x.clamp(0, fb.width as i32 - 1);
+    let y = y.clamp(0, fb.height as i32 - 1);
     let moved = x != PTR_X.load(Ordering::Relaxed) || y != PTR_Y.load(Ordering::Relaxed);
     let changed = BUTTONS.swap(buttons as u32, Ordering::Relaxed) != buttons as u32;
     PTR_X.store(x, Ordering::Relaxed);

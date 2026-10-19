@@ -9,6 +9,7 @@ pub mod part;
 pub mod pci;
 pub mod storage;
 pub mod usb;
+pub mod virtio;
 pub mod xhci;
 
 use alloc::sync::Arc;
@@ -19,6 +20,14 @@ use crate::sync::SpinLock;
 
 /// Physical disks (for DosPhysicalDisk and the installer).
 pub static DISKS: SpinLock<Vec<Arc<dyn BlockDev>>> = SpinLock::new(Vec::new());
+
+/// Commit the write caches of all disks (DosResetBuffer, DosShutdown).
+pub fn flush_disks() {
+    let disks = DISKS.lock().clone();
+    for d in disks {
+        let _ = d.flush();
+    }
+}
 
 /// MBR partition types holding FAT file systems.
 fn is_fat_type(t: u8) -> bool {
@@ -133,6 +142,10 @@ pub fn init() {
             }
         }
     }
+    // Paravirtual (virtio) storage counts as built in.
+    let mut vio = virtio::probe(&devs);
+    disks.append(&mut vio.disks);
+    optical.append(&mut vio.optical);
     disks.append(&mut usb_disks);
     optical.append(&mut usb_optical);
     let mut parts: Vec<part::Partition> = Vec::new();

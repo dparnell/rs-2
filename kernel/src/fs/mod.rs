@@ -351,6 +351,10 @@ pub enum CharDev {
     Lpt(u8),
     Mouse,
     Pointer,
+    /// RANDOM$: the entropy source (virtio-rng, else RDRAND).
+    Random,
+    /// VIOCON$: port 0 of a virtio console.
+    VioCon,
 }
 
 impl CharDev {
@@ -360,6 +364,8 @@ impl CharDev {
             CharDev::Lpt(n) => alloc::format!("\\DEV\\LPT{}", n + 1),
             CharDev::Mouse => String::from("\\DEV\\MOUSE$"),
             CharDev::Pointer => String::from("\\DEV\\POINTER$"),
+            CharDev::Random => String::from("\\DEV\\RANDOM$"),
+            CharDev::VioCon => String::from("\\DEV\\VIOCON$"),
         }
     }
 }
@@ -380,6 +386,8 @@ pub fn device_name(path: &str) -> Option<Device> {
         "PRN" => Device::Char(CharDev::Lpt(0)),
         "MOUSE$" => Device::Char(CharDev::Mouse),
         "POINTER$" => Device::Char(CharDev::Pointer),
+        "RANDOM$" => Device::Char(CharDev::Random),
+        "VIOCON$" => Device::Char(CharDev::VioCon),
         b => match (b.strip_prefix("COM"), b.strip_prefix("LPT")) {
             (Some(n), _) if matches!(n, "1" | "2" | "3" | "4") => Device::Char(CharDev::Com(n.as_bytes()[0] - b'1')),
             (_, Some(n)) if matches!(n, "1" | "2" | "3") => Device::Char(CharDev::Lpt(n.as_bytes()[0] - b'1')),
@@ -520,6 +528,14 @@ impl Handle {
             if !crate::mouse::present() {
                 return Err(err::FILE_NOT_FOUND);
             }
+        }
+        let missing = match d {
+            Device::Char(CharDev::Random) => !crate::chardev::random_present(),
+            Device::Char(CharDev::VioCon) => !crate::drivers::virtio::console::present(),
+            _ => false,
+        };
+        if missing {
+            return Err(err::FILE_NOT_FOUND);
         }
         Ok(Handle::device(d))
     }

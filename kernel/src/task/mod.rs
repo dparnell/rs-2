@@ -142,6 +142,7 @@ pub fn timer_tick(_f: &mut TrapFrame) {
     crate::api::sysctl::tick(sched::current_opt().is_none_or(|t| t.is_idle()));
     crate::api::timer::tick();
     crate::drivers::xhci::tick();
+    crate::drivers::virtio::tick();
     crate::screen::tick(crate::irq::ticks());
     if crate::irq::ticks() % 250 == 0 {
         crate::infoseg::update();
