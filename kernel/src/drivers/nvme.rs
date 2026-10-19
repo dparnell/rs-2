@@ -3,8 +3,10 @@
 //! One admin queue pair and one I/O queue pair per controller, one command
 //! in flight at a time. DMA goes through a physically contiguous bounce
 //! buffer described by PRP1/PRP2 (with a PRP list beyond two pages).
-//! Completion is polled through the phase bit, yielding the CPU; MSI-X and
-//! interrupts are not used yet.
+//! Completions interrupt through MSI-X entry 0 (or MSI) for both queues;
+//! the requesting thread sleeps until the handler wakes it and then checks
+//! the phase bit. Without MSI/MSI-X (or before interrupts are delivered,
+//! during boot) the phase bit is polled, yielding the CPU.
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -16,6 +18,7 @@ use super::pci;
 use crate::api::err;
 use crate::fs::block::BlockDev;
 use crate::mm::{mmio, phys};
+use crate::msi::{self, Event};
 use crate::sync::Mutex;
 
 const PAGE: usize = 4096;
@@ -32,6 +35,7 @@ const MAX_NAMESPACES: u32 = 16;
 const CAP: usize = 0x00;
 const VS: usize = 0x08;
 const INTMS: usize = 0x0c;
+const INTMC: usize = 0x10;
 const CC: usize = 0x14;
 const CSTS: usize = 0x1c;
 const AQA: usize = 0x24;
@@ -84,6 +88,9 @@ struct Ctrl {
     max_xfer: usize,
     /// Set after a command timed out: the queues are out of step.
     failed: bool,
+    /// Signalled by the completion interrupt, if there is one.
+    event: Option<&'static Event>,
+    msix: bool,
 }
 
 unsafe impl Send for Ctrl {}
@@ -119,29 +126,10 @@ fn wr64(regs: *mut u8, off: usize, v: u64) {
     wr32(regs, off + 4, (v >> 32) as u32);
 }
 
-/// Poll `cond` for up to `ms` milliseconds, yielding the CPU. Before the
-/// timer runs (during boot) time is estimated from the polls, each of
-/// which includes an uncached register read of at least a microsecond.
-fn wait(regs: *mut u8, ms: u64, mut cond: impl FnMut() -> bool) -> bool {
-    let t0 = crate::irq::ticks();
-    let limit = ms * crate::irq::HZ / 1000;
-    let mut polls = 0u64;
-    loop {
-        if cond() {
-            return true;
-        }
-        let _ = rd32(regs, CSTS);
-        polls += 1;
-        let now = crate::irq::ticks();
-        let expired = if now != t0 { now - t0 > limit } else { polls > ms * 1000 };
-        if expired {
-            return cond();
-        }
-        if polls > 100 {
-            crate::task::sched::yield_now();
-        }
-        core::hint::spin_loop();
-    }
+/// Poll `cond` for up to `ms` milliseconds, yielding the CPU (a status
+/// register read paces the polls).
+fn wait(regs: *mut u8, ms: u64, cond: impl FnMut() -> bool) -> bool {
+    msi::poll(ms, || { let _ = rd32(regs, CSTS); }, cond)
 }
 
 /// A 64-byte submission queue entry.
@@ -202,10 +190,15 @@ impl Ctrl {
         wr32(regs, sq_db, q.tail as u32);
         let entry = unsafe { phys::phys_to_virt(q.cq).add(q.head as usize * 16) as *const u32 };
         let phase = q.phase;
-        let done = wait(regs, ms, || {
+        let cond = || {
             let dw3 = unsafe { read_volatile(entry.add(3)) };
             (dw3 >> 16 & 1 != 0) == phase || rd32(regs, CSTS) & CSTS_CFS != 0
-        });
+        };
+        let done = match self.event {
+            Some(e) => e.wait(ms, || { let _ = rd32(regs, CSTS); }, cond),
+            None => wait(regs, ms, cond),
+        };
+        let q = if io { &mut self.io } else { &mut self.admin };
         let dw3 = unsafe { read_volatile(entry.add(3)) };
         if !done || (dw3 >> 16 & 1 != 0) != phase {
             crate::println!("nvme: command {:#x} timed out", cmd[0] & 0xff);
@@ -236,8 +229,9 @@ impl Ctrl {
     fn create_io_queues(&mut self) -> Result<(), u32> {
         let size = (QUEUE_DEPTH as u32 - 1) << 16;
         let qid = self.io.qid as u32;
-        // Physically contiguous, interrupts off.
-        let cq = command(ADM_CREATE_CQ, 0, self.io.cq, 0, [size | qid, 1, 0, 0, 0, 0]);
+        // Physically contiguous; interrupts on vector 0 when there is one.
+        let ien = if self.event.is_some() { 2 } else { 0 };
+        let cq = command(ADM_CREATE_CQ, 0, self.io.cq, 0, [size | qid, ien | 1, 0, 0, 0, 0]);
         self.submit(false, cq)?;
         // Contiguous, bound to completion queue `qid`.
         let sq = command(ADM_CREATE_SQ, 0, self.io.sq, 0, [size | qid, qid << 16 | 1, 0, 0, 0, 0]);
@@ -342,7 +336,13 @@ fn reset(c: &Ctrl) -> bool {
         crate::println!("nvme: controller does not become ready (CSTS {:#x})", rd32(regs, CSTS));
         return false;
     }
-    wr32(regs, INTMS, 0xffff_ffff);
+    // INTMS/INTMC are for INTx and MSI only.
+    if !c.msix {
+        wr32(regs, INTMS, 0xffff_ffff);
+        if c.event.is_some() {
+            wr32(regs, INTMC, 1);
+        }
+    }
     true
 }
 
@@ -387,8 +387,8 @@ fn namespace_geometry(c: &mut Ctrl, nsid: u32) -> Option<(usize, u64)> {
 pub fn probe(dev: &pci::Device) -> Vec<Arc<Namespace>> {
     let mut out = Vec::new();
     dev.enable();
-    // Polled: mask legacy INTx.
-    dev.write(0x04, (dev.read(0x04) & 0xffff) | 1 << 10);
+    // Legacy INTx stays masked (MSI-X/MSI or polling).
+    dev.set_intx_disabled(true);
     let bar = dev.bar(0);
     if bar == 0 {
         return out;
@@ -424,7 +424,17 @@ pub fn probe(dev: &pci::Device) -> Vec<Arc<Namespace>> {
         buf: page(6),
         max_xfer: BOUNCE,
         failed: false,
+        event: None,
+        msix: false,
     };
+    // One vector for the admin and I/O completion queues.
+    let event = Event::leak();
+    if let Some((v, kind)) = msi::setup(dev, true, Event::handler, event as *const Event as usize) {
+        event.arm();
+        c.event = Some(event);
+        c.msix = kind == "MSI-X";
+        crate::println!("nvme {}: {kind} vector {v:#x}", dev.bdf());
+    }
     if !reset(&c) {
         return out;
     }
