@@ -691,7 +691,7 @@ fn add_menu_items(frame: u32) {
         unsafe { WinSendMsg(sub, MM_INSERTITEM, &item as *const MenuItem as u32, text.as_ptr() as u32) };
     };
     add(MIS_SEPARATOR, 0xffff, b"\0");
-    add(MIS_TEXT, IDM_MARK, b"~Mark\0");
+    add(MIS_TEXT, IDM_MARK, b"Mar~k\0");
     add(MIS_TEXT, IDM_COPY, b"Cop~y\0");
     add(MIS_TEXT, IDM_COPYALL, b"Copy ~All\0");
     add(MIS_TEXT, IDM_PASTE, b"~Paste\0");

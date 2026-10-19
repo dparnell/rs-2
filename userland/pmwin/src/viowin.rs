@@ -59,7 +59,10 @@ pub fn process_gone(pid: u32) {
 /// to the session the window shows.
 pub fn key(target: u32, ev: &Input) -> bool {
     let Some((sid, fl)) = session_of(target) else { return false };
-    if fl & VW_DIRECT == 0 {
+    // In menu mode (the system menu is open) keys belong to the menu.
+    let s = st();
+    let menu = s.queues.get(&s.queue_of(target)).is_some_and(|q| q.menu_mode.is_some());
+    if fl & VW_DIRECT == 0 || menu {
         return false;
     }
     let scan = (ev.a >> 8) & 0xff;

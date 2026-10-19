@@ -544,7 +544,10 @@ fn open_window_list() {
     for v in sessions {
         let n = v.title.iter().position(|&b| b == 0).unwrap_or(64);
         let mut t = v.title[..n].to_vec();
-        t.extend_from_slice(b" (full screen)\0");
+        if !t.windows(11).any(|w| w.eq_ignore_ascii_case(b"full screen")) {
+            t.extend_from_slice(b" (full screen)");
+        }
+        t.push(0);
         msg::send(lb, 0x0161, (-1i32) as u32, t.as_ptr() as u32);
         l.push(Entry::Session(v.sid));
     }

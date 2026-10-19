@@ -80,7 +80,7 @@ pub fn query_sessions(c: &mut Ctx) -> u32 {
     let fg = session::foreground();
     let mut list: Vec<(u32, u32, alloc::string::String)> = Vec::new();
     if all {
-        list.push((1, 0, alloc::string::String::from("OS/2 Window")));
+        list.push((1, 0, alloc::string::String::from("OS/2 Full Screen")));
     }
     for (sid, title, windowable, windowed) in session::list_full() {
         if !(windowable || all) || (sid == pm && sid != 0) {
