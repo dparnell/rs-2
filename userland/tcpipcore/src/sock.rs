@@ -77,6 +77,8 @@ pub unsafe fn put_addr(abi: Abi, a: &SockAddrIn, addr: *mut u8, len: *mut i32) {
 pub fn socket(d: i32, t: i32, p: i32) -> i32 {
     // AF_UNSPEC with SOCK_STREAM/DGRAM means the Internet.
     let d = if d == 0 { AF_INET as i32 } else { d };
+    // A raw socket of protocol 0 (used for ioctls) is IPPROTO_RAW.
+    let p = if t as u32 == SOCK_RAW && p == 0 { 255 } else { p };
     let mut s = 0;
     match unsafe { Rs2SockCreate(d as u32, t as u32, p as u32, &mut s) } {
         0 => s as i32,
@@ -94,11 +96,23 @@ pub unsafe fn bind(s: i32, addr: *const u8, len: i32) -> i32 {
     }
 }
 
+/// A destination address with INADDR_ANY (this host) replaced by the
+/// loopback address, as BSD stacks treat it.
+unsafe fn dest(addr: *const u8, len: i32) -> [u8; 16] {
+    let mut b = [0u8; 16];
+    unsafe { core::ptr::copy_nonoverlapping(addr, b.as_mut_ptr(), len.clamp(0, 16) as usize) };
+    if b[4..8] == [0; 4] {
+        b[4..8].copy_from_slice(&[127, 0, 0, 1]);
+    }
+    b
+}
+
 pub unsafe fn connect(s: i32, addr: *const u8, len: i32) -> i32 {
     if addr.is_null() {
         return fail(EFAULT);
     }
-    match unsafe { Rs2SockConnect(s as u32, addr as *const SockAddrIn, len.clamp(0, 16) as u32) } {
+    let a = unsafe { dest(addr, len) };
+    match unsafe { Rs2SockConnect(s as u32, a.as_ptr() as *const SockAddrIn, len.clamp(0, 16) as u32) } {
         0 => 0,
         e => fail(e),
     }
@@ -144,7 +158,8 @@ pub unsafe fn sendto(abi: Abi, s: i32, buf: *const u8, len: i32, flags: i32, to:
     }
     let (k, _) = kflags(abi, flags);
     let mut sent = 0;
-    match unsafe { Rs2SockSendTo(s as u32, buf, len as u32, k & !K_MSG_PEEK, to as *const SockAddrIn, &mut sent) } {
+    let a = unsafe { dest(to, tolen) };
+    match unsafe { Rs2SockSendTo(s as u32, buf, len as u32, k & !K_MSG_PEEK, a.as_ptr() as *const SockAddrIn, &mut sent) } {
         0 => sent as i32,
         e => fail(e),
     }
@@ -420,7 +435,63 @@ fn broadcast(i: &IfInfo) -> [u8; 4] {
 /// number), which the 4.0 (`ioc(g,n)`) and 4.4 (`_IOWR(g,n,t)`) forms
 /// share; the 4.4 numbers of the interface queries (33-37) are accepted
 /// beside the old ones (13-21).
+/// The routing table as the stack routes: a network route per
+/// configured interface (gateway: its own address), the default route
+/// through the first gateway. (destination, gateway, mask, RTF_* flags,
+/// interface name)
+pub fn routes() -> Vec<([u8; 4], [u8; 4], [u8; 4], u16, Vec<u8>)> {
+    let mut v = Vec::new();
+    let ifs = os2_interfaces();
+    for (name, i) in &ifs {
+        if i.addr == [0; 4] || i.flags & IF_UP == 0 {
+            continue;
+        }
+        let mut net = [0u8; 4];
+        for k in 0..4 {
+            net[k] = i.addr[k] & i.mask[k];
+        }
+        v.push((net, i.addr, i.mask, 0x1, name.clone()));
+    }
+    if let Some((name, i)) = ifs.iter().find(|(_, i)| i.gateway != [0; 4] && i.flags & IF_UP != 0) {
+        v.insert(0, ([0; 4], i.gateway, [0; 4], 0x1 | 0x2, name.clone()));
+    }
+    v
+}
+
+/// SIOSTATRT: struct rtentries {short hostcount, netcount; then per
+/// route a packed struct ortentry (64 bytes) and the interface name}.
+unsafe fn routing_table(abi: Abi, data: *mut u8, len: usize) -> i32 {
+    let rt = routes();
+    let mut out = vec![0u8; 4];
+    let mut n = 0u16;
+    for (dst, gw, _mask, flags, name) in &rt {
+        let mut e = [0u8; 64];
+        // rt_hash: 0 marks the default route.
+        let hash = if *dst == [0; 4] { 0u32 } else { u32::from_le_bytes(*dst) | 1 };
+        e[0..4].copy_from_slice(&hash.to_le_bytes());
+        e[4..20].copy_from_slice(&sockaddr(abi, *dst));
+        e[20..36].copy_from_slice(&sockaddr(abi, *gw));
+        e[36..38].copy_from_slice(&flags.to_le_bytes());
+        e[48..52].copy_from_slice(&1u32.to_le_bytes());
+        if out.len() + 64 + name.len() + 1 > len {
+            break;
+        }
+        out.extend_from_slice(&e);
+        out.extend_from_slice(name);
+        out.push(0);
+        n += 1;
+    }
+    out[2..4].copy_from_slice(&n.to_le_bytes());
+    unsafe { core::ptr::copy_nonoverlapping(out.as_ptr(), data, out.len()) };
+    0
+}
+
 pub unsafe fn ioctl(abi: Abi, s: i32, cmd: u32, data: *mut u8) -> i32 {
+    unsafe { ioctl_len(abi, s, cmd, data, -1) }
+}
+
+/// ioctl with the data length os2_ioctl() passes (-1: unknown).
+pub unsafe fn ioctl_len(abi: Abi, s: i32, cmd: u32, data: *mut u8, len: i32) -> i32 {
     let base = cmd & 0xffff;
     let (group, num) = ((base >> 8) as u8, (base & 0xff) as u8);
     match (group, num) {
@@ -496,6 +567,31 @@ pub unsafe fn ioctl(abi: Abi, s: i32, cmd: u32, data: *mut u8) -> i32 {
             };
             unsafe { core::ptr::copy_nonoverlapping(out.as_ptr(), data.add(16), 16) };
             0
+        }
+        (b'i', 57) => {
+            // SIOCGIFMTU: ifr_mtu (int) after the name.
+            if data.is_null() {
+                return fail(EFAULT);
+            }
+            let name = unsafe { crate::cstr::bytes(data) };
+            let Some(i) = find_iface(&name[..name.len().min(16)]) else { return fail(ENXIO) };
+            unsafe { (data.add(16) as *mut u32).write_unaligned(i.mtu) };
+            0
+        }
+        (b's', 14) => 0,
+        (b'n', 52) => {
+            // SIOSTATCNTRT: number of routes.
+            if data.is_null() {
+                return fail(EFAULT);
+            }
+            unsafe { (data as *mut u32).write_unaligned(routes().len() as u32) };
+            0
+        }
+        (b'n', 45) => {
+            if data.is_null() {
+                return fail(EFAULT);
+            }
+            unsafe { routing_table(abi, data, if len < 4 { 65535 } else { len as usize }) }
         }
         (b'i', _) | (b'r', _) => fail(errno::EPERM),
         _ => fail(EINVAL),

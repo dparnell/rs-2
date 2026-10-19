@@ -642,8 +642,8 @@ pub extern "C" fn Rgethostbyname(name: *const u8) -> *mut Hostent {
 // ---- OS/2 extras ----
 
 #[unsafe(no_mangle)]
-pub extern "C" fn os2_ioctl(s: i32, cmd: u32, data: *mut u8, _len: i32) -> i32 {
-    unsafe { sock::ioctl(ABI, s, cmd, data) }
+pub extern "C" fn os2_ioctl(s: i32, cmd: u32, data: *mut u8, len: i32) -> i32 {
+    unsafe { sock::ioctl_len(ABI, s, cmd, data, len) }
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn __TCPFDIsSet(fd: i32, set: *const u8) -> i32 {
