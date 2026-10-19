@@ -493,11 +493,171 @@ pub extern "C" fn WinDestroyPointer(_hptr: u32) -> u32 {
     1
 }
 
-/// WinTrackRect(hwnd, hps, ptrackinfo): interactive rectangle tracking
-/// is not available; reported as cancelled.
+/// Invert the outline of `r` (window coordinates) `b` pels wide.
+fn invert_frame(hps: u32, r: &crate::gpiapi::RectL, b: i32) {
+    use crate::gpiapi::RectL;
+    if r.right <= r.left || r.top <= r.bottom {
+        return;
+    }
+    let b = b.max(1);
+    let edges = [
+        RectL { left: r.left, bottom: r.bottom, right: r.right, top: (r.bottom + b).min(r.top) },
+        RectL { left: r.left, bottom: (r.top - b).max(r.bottom + b), right: r.right, top: r.top },
+        RectL { left: r.left, bottom: r.bottom + b, right: (r.left + b).min(r.right), top: r.top - b },
+        RectL { left: (r.right - b).max(r.left + b), bottom: r.bottom + b, right: r.right, top: r.top - b },
+    ];
+    for e in edges.iter().filter(|e| e.right > e.left && e.top > e.bottom) {
+        WinInvertRect(hps, e);
+    }
+}
+
+/// WinTrackRect(hwnd, hps, ptrackinfo): track a rectangle with the mouse
+/// (button 1 down; the TF_LEFT/TF_TOP/TF_RIGHT/TF_BOTTOM edges, or all
+/// of them for TF_MOVE, follow the pointer) or the keyboard (arrows,
+/// Enter, Esc), drawn as an inverted frame. TRACKINFO: cxBorder,
+/// cyBorder, cxGrid, cyGrid, cxKeyboard, cyKeyboard, rclTrack,
+/// rclBoundary, ptlMinTrackSize, ptlMaxTrackSize, fs. TRUE when it
+/// ended with the button released or Enter; rclTrack holds the result.
 #[unsafe(no_mangle)]
-pub extern "C" fn WinTrackRect(_h: u32, _hps: u32, _ti: u32) -> u32 {
-    0
+pub extern "C" fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32 {
+    use crate::gpiapi::RectL;
+    const TF_LEFT: i32 = 1;
+    const TF_TOP: i32 = 2;
+    const TF_RIGHT: i32 = 4;
+    const TF_BOTTOM: i32 = 8;
+    const TF_ALLINBOUNDARY: i32 = 0x0080;
+    const TF_PARTINBOUNDARY: i32 = 0x0200;
+    if pti.is_null() || !st().desk.exists(h) {
+        return 0;
+    }
+    let rd = |i: usize| unsafe { pti.add(i).read_unaligned() };
+    let border = rd(0).max(rd(1)).max(1);
+    let orig = RectL { left: rd(6), bottom: rd(7), right: rd(8), top: rd(9) };
+    let bound = RectL { left: rd(10), bottom: rd(11), right: rd(12), top: rd(13) };
+    let (min, max) = ((rd(14), rd(15)), (rd(16), rd(17)));
+    let fs = rd(18);
+    let edges = fs & 0xf;
+    let own_ps = hps == 0;
+    let hps = if own_ps { win::WinGetPS(h) } else { hps };
+    let start = st().pointer;
+    let o = st().desk.origin(h);
+    let (sx, sy) = (start.x - o.x, start.y - o.y);
+    // Keep the rectangle inside the boundary and within the sizes.
+    let fit = |mut r: RectL| -> RectL {
+        if edges == 0xf {
+            let (w, hh) = (r.right - r.left, r.top - r.bottom);
+            if fs & TF_ALLINBOUNDARY != 0 {
+                let dx = (bound.left - r.left).max(0) - (r.right - bound.right).max(0);
+                let dy = (bound.bottom - r.bottom).max(0) - (r.top - bound.top).max(0);
+                r = RectL { left: r.left + dx, bottom: r.bottom + dy, right: r.left + dx + w, top: r.bottom + dy + hh };
+            }
+            return r;
+        }
+        if fs & (TF_ALLINBOUNDARY | TF_PARTINBOUNDARY) != 0 {
+            r.left = r.left.clamp(bound.left, bound.right);
+            r.right = r.right.clamp(bound.left, bound.right);
+            r.bottom = r.bottom.clamp(bound.bottom, bound.top);
+            r.top = r.top.clamp(bound.bottom, bound.top);
+        }
+        let (w, hh) = ((r.right - r.left).clamp(min.0.min(max.0), max.0.max(min.0)), (r.top - r.bottom).clamp(min.1.min(max.1), max.1.max(min.1)));
+        if edges & TF_LEFT != 0 { r.left = r.right - w } else { r.right = r.left + w }
+        if edges & TF_BOTTOM != 0 { r.bottom = r.top - hh } else { r.top = r.bottom + hh }
+        r
+    };
+    // The rectangle for a pointer at (x, y) (window coordinates).
+    let at = |x: i32, y: i32| -> RectL {
+        let (dx, dy) = (x - sx, y - sy);
+        let mut r = orig;
+        if edges & TF_LEFT != 0 {
+            r.left = orig.left + dx;
+        }
+        if edges & TF_RIGHT != 0 {
+            r.right = orig.right + dx;
+        }
+        if edges & TF_BOTTOM != 0 {
+            r.bottom = orig.bottom + dy;
+        }
+        if edges & TF_TOP != 0 {
+            r.top = orig.top + dy;
+        }
+        // Dragging an edge past the opposite one turns the rectangle over.
+        let (l, rr) = (r.left.min(r.right), r.left.max(r.right));
+        let (b, t) = (r.bottom.min(r.top), r.bottom.max(r.top));
+        fit(RectL { left: l, bottom: b, right: rr, top: t })
+    };
+    let mut cur = orig;
+    invert_frame(hps, &cur, border);
+    let old_capture = st().capture;
+    st().capture = h;
+    let mouse = st().buttons & 1 != 0;
+    let mut ok = false;
+    let mut m = state::QMsg::default();
+    loop {
+        if crate::msg::WinGetMsg(1, &mut m, 0, 0, 0) == 0 {
+            crate::msg::WinPostQueueMsg(st().my_queue(), win::WM_QUIT, 0, 0);
+            break;
+        }
+        match m.msg {
+            win::WM_MOUSEMOVE if m.hwnd == h => {
+                let (x, y) = (m.mp1 as i16 as i32, (m.mp1 >> 16) as i16 as i32);
+                let r = at(x, y);
+                if (r.left, r.bottom, r.right, r.top) != (cur.left, cur.bottom, cur.right, cur.top) {
+                    invert_frame(hps, &cur, border);
+                    cur = r;
+                    invert_frame(hps, &cur, border);
+                }
+            }
+            win::WM_BUTTON1UP if mouse => {
+                ok = true;
+                break;
+            }
+            win::WM_BUTTON1DOWN | win::WM_BUTTON1UP => {}
+            win::WM_CHAR => {
+                let k = crate::ctl::Key::from(m.mp1, m.mp2);
+                if k.up() {
+                    continue;
+                }
+                let step = |d: i32| d * rd(4).max(1);
+                let (dx, dy) = match k.vk {
+                    crate::ctl::VK_LEFT => (step(-1), 0),
+                    crate::ctl::VK_RIGHT => (step(1), 0),
+                    crate::ctl::VK_UP => (0, step(1)),
+                    crate::ctl::VK_DOWN => (0, step(-1)),
+                    crate::ctl::VK_ENTER | crate::ctl::VK_NEWLINE => {
+                        ok = true;
+                        break;
+                    }
+                    crate::ctl::VK_ESC => break,
+                    _ => (0, 0),
+                };
+                if dx != 0 || dy != 0 {
+                    let mut r = cur;
+                    if edges & TF_LEFT != 0 || edges == 0xf { r.left += dx }
+                    if edges & TF_RIGHT != 0 || edges == 0xf { r.right += dx }
+                    if edges & TF_BOTTOM != 0 || edges == 0xf { r.bottom += dy }
+                    if edges & TF_TOP != 0 || edges == 0xf { r.top += dy }
+                    invert_frame(hps, &cur, border);
+                    cur = fit(r);
+                    invert_frame(hps, &cur, border);
+                }
+            }
+            _ => {
+                crate::msg::WinDispatchMsg(1, &m);
+            }
+        }
+    }
+    invert_frame(hps, &cur, border);
+    if st().capture == h {
+        st().capture = if old_capture == h { 0 } else { old_capture };
+    }
+    if own_ps {
+        win::WinReleasePS(hps);
+    }
+    let r = if ok { cur } else { orig };
+    for (i, v) in [r.left, r.bottom, r.right, r.top].into_iter().enumerate() {
+        unsafe { pti.add(6 + i).write_unaligned(v) };
+    }
+    ok as u32
 }
 
 // ---- Hooks ----
