@@ -382,6 +382,14 @@ impl Screen {
         self.cells[row][col]
     }
 
+    /// The cell (row, column) under framebuffer pixel (x, y), clamped to
+    /// the text area.
+    pub fn cell_at(&self, x: usize, y: usize) -> (usize, usize) {
+        let row = (y.saturating_sub(self.y0) / self.cell_h.max(1)).min(self.rows - 1);
+        let col = (x.saturating_sub(self.x0) / CELL_W).min(self.cols - 1);
+        (row, col)
+    }
+
     /// Store a (char | attr << 8) cell and draw it.
     pub fn put(&mut self, row: usize, col: usize, cell: u16) {
         if row >= self.rows || col >= self.cols {

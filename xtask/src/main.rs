@@ -5,6 +5,7 @@
 //! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG]
 //!                  [--hdd IMG] [--nvme IMG] [--usb-kbd] [--usb-mouse] [--usb-disk IMG]...
 //!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
+//!                  [--vmware] [--pvscsi IMG] [--pvscsi-cd ISO] [--scsi-hba MODEL]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
@@ -19,6 +20,12 @@
 //! the last (ids `usbkbd`, `usbmouse`, `usbdisk0`... for `--monitor`
 //! device_del). `--boot-hdd` leaves out the ESP directory, so the machine boots
 //! from the attached disks (e.g. the ISO as a USB stick).
+//!
+//! `--vmware` uses QEMU's VMware device models: the SVGA II display and
+//! the backdoor port with its absolute pointer (vmmouse). `--pvscsi` and
+//! `--pvscsi-cd` attach a disk image / CD image to a VMware PVSCSI
+//! controller (`--scsi-hba lsi53c895a|mptsas1068|megasas` picks another
+//! SCSI controller model instead).
 
 mod hpfsimg;
 mod image;
@@ -72,6 +79,12 @@ struct Opts {
     usb_disks: Vec<PathBuf>,
     /// `run`: tiers of USB hubs in front of the USB devices.
     usb_hubs: u32,
+    /// `run`: VMware SVGA II display and vmport (vmmouse).
+    vmware: bool,
+    /// `run`: images on a SCSI controller (PVSCSI unless `scsi_hba`).
+    pvscsi: Option<PathBuf>,
+    pvscsi_cd: Option<PathBuf>,
+    scsi_hba: Option<String>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -99,6 +112,10 @@ fn parse(args: &[String]) -> Opts {
         usb_mouse: false,
         usb_disks: vec![],
         usb_hubs: 0,
+        vmware: false,
+        pvscsi: None,
+        pvscsi_cd: None,
+        scsi_hba: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -121,6 +138,19 @@ fn parse(args: &[String]) -> Opts {
             "--usb-kbd" => o.usb_kbd = true,
             "--usb-mouse" => o.usb_mouse = true,
             "--usb-hub" => o.usb_hubs += 1,
+            "--vmware" => o.vmware = true,
+            "--pvscsi" => {
+                i += 1;
+                o.pvscsi = Some(PathBuf::from(&args[i]));
+            }
+            "--pvscsi-cd" => {
+                i += 1;
+                o.pvscsi_cd = Some(PathBuf::from(&args[i]));
+            }
+            "--scsi-hba" => {
+                i += 1;
+                o.scsi_hba = Some(args[i].clone());
+            }
             "--usb-disk" => {
                 i += 1;
                 o.usb_disks.push(PathBuf::from(&args[i]));
@@ -395,6 +425,8 @@ fn run(o: &Opts) -> bool {
     let serial = work.join("serial.log");
     let sock = work.join("qemu-monitor.sock");
     let _ = std::fs::remove_file(&sock);
+    let qmp_sock = work.join("qemu-qmp.sock");
+    let _ = std::fs::remove_file(&qmp_sock);
     let mut c = Command::new("qemu-system-x86_64");
     c.args(["-machine", "q35", "-cpu", "max", "-m", "512M", "-no-reboot", "-smp", &o.smp.to_string()])
         .arg("-drive")
@@ -407,7 +439,9 @@ fn run(o: &Opts) -> bool {
             None => vec!["-drive".to_string(), format!("format=raw,file=fat:rw:{}", work.join("esp").display())],
         })
         .arg("-monitor")
-        .arg(format!("unix:{},server,nowait", sock.display()));
+        .arg(format!("unix:{},server,nowait", sock.display()))
+        .arg("-qmp")
+        .arg(format!("unix:{},server,nowait", qmp_sock.display()));
     if o.headless {
         c.args(["-display", "none"]).arg("-serial").arg(format!("file:{}", serial.display()));
     } else {
@@ -421,6 +455,7 @@ fn run(o: &Opts) -> bool {
         c.args(["-device", "nvme,drive=nvm0,serial=rs2nvme"]);
     }
     usb_devices(o, &mut c);
+    vmware_devices(o, &mut c);
     // Last, so extra devices can refer to the controllers above.
     c.args(&o.qemu_extra);
     let mut child = c.spawn().expect("start qemu");
@@ -438,6 +473,20 @@ fn run(o: &Opts) -> bool {
             for key in keys(o.typing.as_deref().unwrap()) {
                 if key == "sleep" {
                     std::thread::sleep(Duration::from_secs(1));
+                    continue;
+                }
+                // Absolute pointer: {mouse_abs x y}, 0..=32767 across
+                // and down the screen (QMP input-send-event).
+                if let Some(xy) = key.strip_prefix("mouse_abs ") {
+                    let v: Vec<&str> = xy.split_whitespace().collect();
+                    let ev = |axis: &str, val: &str| format!(r#"{{"type":"abs","data":{{"axis":"{axis}","value":{val}}}}}"#);
+                    let cmd = format!(
+                        r#"{{"execute":"input-send-event","arguments":{{"events":[{},{}]}}}}"#,
+                        ev("x", v[0]),
+                        ev("y", v[1])
+                    );
+                    qmp(&qmp_sock, &cmd);
+                    std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }
                 // Mouse input: {mouse_move dx dy}, {mouse_button n}.
@@ -498,7 +547,8 @@ fn run(o: &Opts) -> bool {
 
 /// QEMU key names for a string. "^X" is Ctrl+X, "{name}" a QEMU key name
 /// as is (e.g. {ctrl-esc}, {alt-esc}, {down}), "{sleep}" a one second pause,
-/// "{mouse_move dx dy}" / "{mouse_button n}" QEMU mouse commands.
+/// "{mouse_move dx dy}" / "{mouse_button n}" QEMU mouse commands,
+/// "{mouse_abs x y}" an absolute pointer position (0..=32767).
 fn keys(s: &str) -> Vec<String> {
     let mut v = Vec::new();
     let mut ctrl = false;
@@ -583,6 +633,48 @@ fn monitor(sock: &Path, cmd: &str) {
             }
         }
         Err(e) => eprintln!("monitor: {e}"),
+    }
+}
+
+/// Send one QMP command (after the capabilities handshake).
+fn qmp(sock: &Path, cmd: &str) {
+    match std::os::unix::net::UnixStream::connect(sock) {
+        Ok(mut s) => {
+            let _ = s.set_read_timeout(Some(Duration::from_millis(500)));
+            let mut buf = [0u8; 4096];
+            let _ = s.read(&mut buf);
+            let _ = writeln!(s, r#"{{"execute":"qmp_capabilities"}}"#);
+            let _ = s.read(&mut buf);
+            let _ = writeln!(s, "{cmd}");
+            if let Ok(n) = s.read(&mut buf) {
+                let reply = String::from_utf8_lossy(&buf[..n]);
+                if reply.contains("error") {
+                    eprintln!("qmp {cmd}: {reply}");
+                }
+            }
+        }
+        Err(e) => eprintln!("qmp: {e}"),
+    }
+}
+
+/// VMware device models: SVGA II display, backdoor port (vmmouse) and
+/// SCSI controllers.
+fn vmware_devices(o: &Opts, c: &mut Command) {
+    if o.vmware {
+        c.args(["-vga", "none", "-device", "vmware-svga", "-machine", "vmport=on"]);
+    }
+    if o.pvscsi.is_none() && o.pvscsi_cd.is_none() {
+        return;
+    }
+    let hba = o.scsi_hba.as_deref().unwrap_or("pvscsi");
+    c.arg("-device").arg(format!("{hba},id=scsi0"));
+    if let Some(d) = &o.pvscsi {
+        c.arg("-drive").arg(format!("if=none,id=sd0,format=raw,file={}", d.display()));
+        c.args(["-device", "scsi-hd,bus=scsi0.0,drive=sd0,scsi-id=0"]);
+    }
+    if let Some(d) = &o.pvscsi_cd {
+        c.arg("-drive").arg(format!("if=none,id=scd0,media=cdrom,readonly=on,format=raw,file={}", d.display()));
+        c.args(["-device", "scsi-cd,bus=scsi0.0,drive=scd0,scsi-id=1"]);
     }
 }
 

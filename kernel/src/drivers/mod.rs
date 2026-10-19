@@ -9,6 +9,7 @@ pub mod part;
 pub mod pci;
 pub mod storage;
 pub mod usb;
+pub mod vmmouse;
 pub mod xhci;
 
 use alloc::sync::Arc;

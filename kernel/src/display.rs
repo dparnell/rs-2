@@ -78,6 +78,21 @@ pub fn mouse(buttons: u8, dx: i32, dy: i32) {
     }
 }
 
+/// An absolute pointer position (tablets, VMware's vmmouse, virtio
+/// input): `x` in 0..=max_x across, `y` in 0..=max_y down the screen.
+pub fn mouse_abs(buttons: u8, x: u32, y: u32, max_x: u32, max_y: u32) {
+    let Some(fb) = crate::screen::framebuffer() else { return };
+    let (px, py) = abs_to_pixels(&fb, x, y, max_x, max_y);
+    let (cx, cy) = (PTR_X.load(Ordering::Relaxed), fb.height as i32 - 1 - PTR_Y.load(Ordering::Relaxed));
+    mouse(buttons, px - cx, py - cy);
+}
+
+/// Framebuffer pixel (y down) of an absolute position.
+pub fn abs_to_pixels(fb: &bootinfo::Framebuffer, x: u32, y: u32, max_x: u32, max_y: u32) -> (i32, i32) {
+    let scale = |v: u32, max: u32, size: u32| (v.min(max) as u64 * (size as u64).saturating_sub(1) / max.max(1) as u64) as i32;
+    (scale(x, max_x, fb.width), scale(y, max_y, fb.height))
+}
+
 /// Next input event, waiting up to `ms` (u32::MAX = forever).
 pub fn read(ms: u32) -> Option<Input> {
     let deadline = (ms != u32::MAX).then(|| crate::irq::ticks() + ms as u64 * crate::irq::HZ / 1000);

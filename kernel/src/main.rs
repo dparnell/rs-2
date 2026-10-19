@@ -41,6 +41,7 @@ mod sync;
 mod task;
 mod trap;
 mod vm;
+mod vmware;
 
 use bootinfo::BootInfo;
 
@@ -80,6 +81,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     irq::init();
     task::sched::init();
     fs::init(info);
+    vmware::init();
     drivers::init();
     loader::init();
     infoseg::init();

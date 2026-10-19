@@ -70,9 +70,11 @@ struct State {
     packet: [u8; 3],
     have: usize,
     ps2: bool,
+    /// Absolute (vmmouse) data arrived during the PS/2 packet.
+    abs_seen: bool,
 }
 
-static STATE: SpinLock<State> = SpinLock::new(State { sessions: BTreeMap::new(), buttons: 0, packet: [0; 3], have: 0, ps2: false });
+static STATE: SpinLock<State> = SpinLock::new(State { sessions: BTreeMap::new(), buttons: 0, packet: [0; 3], have: 0, ps2: false, abs_seen: false });
 static WAITERS: WaitQueue = WaitQueue::new();
 
 /// Run `f` on the mouse state of session `sid`.
@@ -93,9 +95,42 @@ pub fn drop_session(sid: u32) {
 /// Motion from a device: button bits (0 left, 1 right, 2 middle) and
 /// movement with y growing downwards.
 pub fn motion(buttons: u8, dx: i32, dy: i32) {
+    deliver(buttons, || crate::display::mouse(buttons, dx, dy), |m, rows, cols| {
+        m.acc.0 += dy;
+        m.acc.1 += dx;
+        let (rs, cs) = (m.scale.0.max(1) as i32, m.scale.1.max(1) as i32);
+        let (drow, dcol) = (m.acc.0 / rs, m.acc.1 / cs);
+        m.acc.0 -= drow * rs;
+        m.acc.1 -= dcol * cs;
+        m.row = (m.row + drow).clamp(0, rows - 1);
+        m.col = (m.col + dcol).clamp(0, cols - 1);
+    });
+}
+
+/// An absolute position from a device (VMware's vmmouse, tablets): `x` in
+/// 0..=max_x across and `y` in 0..=max_y down the screen. In text mode
+/// the pointer goes to the cell under that point of the framebuffer.
+pub fn motion_abs(buttons: u8, x: u32, y: u32, max_x: u32, max_y: u32) {
+    let sid = crate::session::foreground();
+    let cell = crate::screen::framebuffer().and_then(|fb| {
+        let (px, py) = crate::display::abs_to_pixels(&fb, x, y, max_x, max_y);
+        crate::screen::with_session(sid, |sc| sc.cell_at(px as usize, py as usize))
+    });
+    deliver(buttons, || crate::display::mouse_abs(buttons, x, y, max_x, max_y), |m, _, _| {
+        if let Some((row, col)) = cell {
+            (m.row, m.col) = (row as i32, col as i32);
+            m.acc = (0, 0);
+        }
+    });
+}
+
+/// Move the pointer of the foreground session with `place` (given the
+/// screen's rows and columns) and queue the resulting event; the PM
+/// session gets `pm` instead.
+fn deliver(buttons: u8, pm: impl FnOnce(), place: impl FnOnce(&mut Session, i32, i32)) {
     let sid = crate::session::foreground();
     if sid == crate::session::pm_session() {
-        crate::display::mouse(buttons, dx, dy);
+        pm();
         return;
     }
     let time = crate::irq::uptime_ms() as u32;
@@ -106,15 +141,8 @@ pub fn motion(buttons: u8, dx: i32, dy: i32) {
         return;
     }
     let (rows, cols) = crate::screen::with_session(sid, |sc| (sc.rows as i32, sc.cols as i32)).unwrap_or((25, 80));
-    m.acc.0 += dy;
-    m.acc.1 += dx;
-    let (rs, cs) = (m.scale.0.max(1) as i32, m.scale.1.max(1) as i32);
-    let (drow, dcol) = (m.acc.0 / rs, m.acc.1 / cs);
-    m.acc.0 -= drow * rs;
-    m.acc.1 -= dcol * cs;
     let (orow, ocol) = (m.row, m.col);
-    m.row = (m.row + drow).clamp(0, rows - 1);
-    m.col = (m.col + dcol).clamp(0, cols - 1);
+    place(m, rows, cols);
     let moved = (m.row, m.col) != (orow, ocol);
     if !moved && prev == buttons {
         return;
@@ -275,12 +303,19 @@ pub fn init() {
     STATE.lock().ps2 = true;
     crate::irq::register(12, irq);
     crate::println!("mouse: PS/2");
+    crate::drivers::vmmouse::init();
 }
 
 fn irq(_f: &mut TrapFrame) {
     let b = unsafe { inb(0x60) };
-    let pkt = {
+    // With VMware's absolute pointer the PS/2 packets signal its data;
+    // a packet without any is ordinary relative motion (QEMU sends those
+    // for relative input devices).
+    let vm = crate::drivers::vmmouse::active();
+    let abs = vm && crate::drivers::vmmouse::poll();
+    let (pkt, abs) = {
         let mut s = STATE.lock();
+        s.abs_seen |= abs;
         // Byte 0 always has bit 3 set: resynchronise on it (skipping
         // stray acknowledgements, 0xFA, which look like overflow).
         if s.have == 0 && (b & 0x08 == 0 || b & 0xc0 != 0) {
@@ -293,8 +328,11 @@ fn irq(_f: &mut TrapFrame) {
             return;
         }
         s.have = 0;
-        s.packet
+        (s.packet, core::mem::take(&mut s.abs_seen))
     };
+    if abs {
+        return;
+    }
     let mut dx = pkt[1] as i32;
     let mut dy = pkt[2] as i32;
     if pkt[0] & 0x10 != 0 {
@@ -306,6 +344,8 @@ fn irq(_f: &mut TrapFrame) {
     if pkt[0] & 0xc0 != 0 {
         return; // overflow
     }
-    // PS/2 y grows upwards.
-    motion(pkt[0] & 7, dx, -dy);
+    // PS/2 y grows upwards. Buttons held on the absolute pointer stay
+    // held.
+    let held = if vm { crate::drivers::vmmouse::buttons() } else { 0 };
+    motion(pkt[0] & 7 | held, dx, -dy);
 }
