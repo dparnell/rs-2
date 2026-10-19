@@ -5,7 +5,9 @@
 //! notifications, keys and clicks. Each check prints PASS or FAIL; then
 //! "nbtest done: N failure(s)", and the window with a settings-style
 //! notebook and a tabbed-dialog notebook stays up until it is closed
-//! (`NBTEST QUIT` ends at once). The exit code is N.
+//! (`NBTEST QUIT` ends at once; `NBTEST HANG` stops reading its queue
+//! for 30 seconds first, to see the PM server paint it). The exit code
+//! is N.
 
 #![no_std]
 #![no_main]
@@ -616,7 +618,11 @@ fn main(s: &Startup) -> u32 {
     let hab = unsafe { WinInitialize(0) };
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
     check("WinInitialize/WinCreateMsgQueue", hab != 0 && hmq != 0);
-    let quit = s.args().iter().copied().skip_while(|&c| c == b' ').collect::<Vec<u8>>().starts_with(b"QUIT");
+    let args: Vec<u8> = s.args().iter().copied().skip_while(|&c| c == b' ').collect();
+    let quit = args.starts_with(b"QUIT");
+    // HANG: stop reading the queue for a while after the checks (the PM
+    // server paints the notebook meanwhile).
+    let hang = args.starts_with(b"HANG");
     unsafe {
         WinRegisterClass(hab, b"NbTest\0".as_ptr(), client_proc, 0, 0);
         WinRegisterClass(hab, b"NbPage\0".as_ptr(), page_proc, 0, 0);
@@ -635,6 +641,9 @@ fn main(s: &Startup) -> u32 {
     let nb = checks(hab, client);
     let f = FAILS.load(Ordering::Relaxed);
     println!("nbtest done: {f} failure(s)");
+    if hang {
+        unsafe { DosSleep(30_000) };
+    }
     if !quit {
         unsafe { WinSetFocus(1, nb) };
         let mut q = QMsg::default();
