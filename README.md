@@ -19,6 +19,9 @@ programs unmodified, natively, on 64-bit PCs.
   disks (and booting from them), SCSI CD-ROMs, keyboards, mice and tablets
   (absolute pointer), entropy (`\DEV\RANDOM$`) and console
   (`\DEV\VIOCON$`).
+- Networking: a TCP/IP stack of its own (ARP, IPv4, ICMP, UDP, TCP, DHCP,
+  DNS) on Intel e1000/e1000e and virtio-net adapters, with a kernel socket
+  API and `PING`; see [docs/NETWORK.md](docs/NETWORK.md).
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 
@@ -70,8 +73,12 @@ that mode, otherwise through the VMware SVGA II driver.
   needs its VMMDev guest device, which rs2 does not drive yet.
 - **QEMU**: `-machine q35` with OVMF, as `cargo xtask run` does.
 
-Network cards (e1000, vmxnet3, ...) are listed in the serial log but not
-used: rs2 has no network stack yet.
+Network: Intel e1000 (82540EM, 82545EM: QEMU, VirtualBox, VMware's
+`e1000`), e1000e (82574L) and virtio-net adapters are configured by DHCP
+at boot (`net=off` or `net=ADDR/PREFIX,GATEWAY,DNS` on the kernel command
+line, or NETWORK= in CONFIG.SYS, change that); `cargo xtask run --net` or
+`--virtio-net` attaches one on QEMU's user network. Other adapters
+(vmxnet3, pcnet, ...) are listed in the serial log but not used.
 
 ## Repository
 

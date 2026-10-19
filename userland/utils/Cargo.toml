@@ -1,6 +1,6 @@
 [package]
 name = "utils"
-description = "rs2 base utilities: MORE, FIND, SORT, ATTRIB, TREE, XCOPY, LABEL, CHKDSK, FORMAT, MODE, HELP"
+description = "rs2 base utilities: MORE, FIND, SORT, ATTRIB, TREE, XCOPY, LABEL, CHKDSK, FORMAT, MODE, HELP, PING"
 edition.workspace = true
 version.workspace = true
 license.workspace = true

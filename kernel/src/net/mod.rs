@@ -129,7 +129,9 @@ pub fn start(cfg: Config) {
                 Config::Dhcp => st.start_dhcp(i, now),
                 Config::Static { addr, mask, gateway, dns } if n == 0 => {
                     st.configure(i, *addr, *mask, *gateway, dns);
-                    crate::println!("net: eth0 {}/{} gateway {:?}", addr, mask.prefix_len(), gateway);
+                    let gw = gateway.map_or(String::from("none"), |g| alloc::format!("{g}"));
+                    let dns: Vec<String> = dns.iter().map(|d| alloc::format!("{d}")).collect();
+                    crate::println!("net: eth0 {}/{} gateway {gw} dns {} (static)", addr, mask.prefix_len(), dns.join(","));
                 }
                 Config::Static { .. } => st.iface_up(i, false),
             }

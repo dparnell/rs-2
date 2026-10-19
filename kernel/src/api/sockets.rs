@@ -61,8 +61,9 @@ fn read_addr(c: &Ctx, p: u32, len: u32) -> Result<Endpoint, u32> {
     if !c.read(p, &mut b) {
         return Err(EFAULT);
     }
-    // 4.3BSD: family 2 as a little-endian USHORT; 4.4BSD: len 16, family 2.
-    let family = if b[0] == 16 && b[1] == 2 { 2 } else { u16::from_le_bytes([b[0], b[1]]) };
+    // 4.3BSD: family 2 as a little-endian USHORT; 4.4BSD: sin_len (16,
+    // or 0 from programs that leave it unset), then family 2.
+    let family = if b[1] == 2 && b[0] != 2 { 2 } else { u16::from_le_bytes([b[0], b[1]]) };
     if family != 2 {
         return Err(47);
     }

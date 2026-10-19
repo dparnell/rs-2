@@ -67,7 +67,17 @@ Status markers: done, in progress, planned.
   virtio-scsi (disks, CD-ROMs, unit attentions), virtio-input (keyboards,
   mice, tablets through an absolute pointer path for text mode and PM),
   virtio-rng (\DEV\RANDOM$), virtio-console port 0 (\DEV\VIOCON$)
-- planned: NVMe/xHCI/virtio interrupts (MSI-X), virtio-net, virtio-gpu,
+- done: networking (polled; docs/NETWORK.md): Intel e1000/e1000e
+  (8254x, 82574L) and virtio-net drivers; `crates/tcpip`, a host-tested
+  stack (Ethernet, ARP, IPv4 with fragmentation and reassembly, ICMP,
+  UDP, TCP with retransmission, congestion and window management, DHCP
+  client, DNS resolver, loopback); kernel socket layer (per-process
+  handles, blocking and non-blocking calls, select) exposed as RS2API
+  200-217; NETTEST and PING; `net=`/NETWORK= configuration
+- planned: OS/2 socket DLLs on it (SO32DLL, TCP32DLL, TCPIP32, the
+  16-bit SOCKETS/TCPIPDLL), ifconfig/netstat/route, NIC interrupts,
+  vmxnet3/pcnet drivers, TCP keepalive/window scaling/SACK
+- planned: NVMe/xHCI/virtio interrupts (MSI-X), virtio-gpu,
   virtio-scsi hot-plug events, virtio-console multiport
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - done: SMP: all processors started (INIT/SIPI), per-CPU GDT/TSS/LAPIC
@@ -109,6 +119,6 @@ Status markers: done, in progress, planned.
 
 ## Later
 
-- TCP/IP stack and sockets (so32dll / tcp32dll APIs), NetBIOS
+- NetBIOS, NFS/SMB clients
 - MMPM/2 multimedia, audio drivers
 - DOS sessions (MVDM) through a CPU emulator, since long mode has no V86
