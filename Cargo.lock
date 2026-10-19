@@ -59,7 +59,12 @@ dependencies = [
  "fat",
  "hpfs",
  "os2-exe",
+ "tcpip",
 ]
+
+[[package]]
+name = "tcpip"
+version = "0.1.0"
 
 [[package]]
 name = "unpack"

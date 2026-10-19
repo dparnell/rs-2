@@ -10,6 +10,7 @@
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
 //!                  [--virtio-rng] [--virtio-console PATH] [--virtio-gpu|--virtio-gpu-pci]
 //!                  [--virtio-legacy] [--boot-virtio]
+//!                  [--net] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]...
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
@@ -43,6 +44,14 @@
 //! framebuffer: the screen starts with the driver). `--virtio-legacy` makes the block, SCSI, entropy
 //! and console devices legacy-only (virtio 0.9.5). `--boot-virtio` boots
 //! from the first virtio disk (no ESP directory).
+//!
+//! `--net` adds a network adapter on QEMU's user-mode network (guest
+//! 10.0.2.15, gateway/host 10.0.2.2, DNS 10.0.2.3): an Intel 82540EM
+//! (`e1000`) unless `--net-model` names another QEMU device (`e1000e`,
+//! `e1000-82545em`, `virtio-net-pci`); `--virtio-net` is short for
+//! `--net --net-model virtio-net-pci`. Host port 5555 is forwarded to
+//! guest port 23, and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
+//! rule. Without these options the machine has no network adapter.
 
 mod hpfsimg;
 mod image;
@@ -115,6 +124,10 @@ struct Opts {
     boot_virtio: bool,
     /// `run`: virtio-gpu display: "virtio-vga" or "virtio-gpu-pci".
     virtio_gpu: Option<&'static str>,
+    /// `run`: a NIC on QEMU user networking (device model), extra
+    /// host forwarding rules.
+    net: Option<String>,
+    hostfwd: Vec<String>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -157,6 +170,8 @@ fn parse(args: &[String]) -> Opts {
         virtio_legacy: false,
         boot_virtio: false,
         virtio_gpu: None,
+        net: None,
+        hostfwd: vec![],
     };
     let mut i = 0;
     while i < args.len() {
@@ -221,6 +236,18 @@ fn parse(args: &[String]) -> Opts {
             "--virtio-gpu" => o.virtio_gpu = Some("virtio-vga"),
             "--virtio-gpu-pci" => o.virtio_gpu = Some("virtio-gpu-pci"),
             "--boot-virtio" => o.boot_virtio = true,
+            "--net" => {
+                o.net.get_or_insert_with(|| "e1000".into());
+            }
+            "--virtio-net" => o.net = Some("virtio-net-pci".into()),
+            "--net-model" => {
+                i += 1;
+                o.net = Some(args[i].clone());
+            }
+            "--hostfwd" => {
+                i += 1;
+                o.hostfwd.push(args[i].clone());
+            }
             "--hdd" => {
                 i += 1;
                 o.hdd = Some(PathBuf::from(&args[i]));
@@ -369,6 +396,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
     &[
         ("apitest", "RS2\\APITEST.EXE"),
         ("stress", "RS2\\STRESS.EXE"),
+        ("nettest", "RS2\\NETTEST.EXE"),
         ("gpitest", "RS2\\GPITEST.EXE"),
         ("testdll", "RS2\\TESTDLL.DLL"),
         ("cmd", "OS2\\CMD.EXE"),
@@ -390,6 +418,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("mode", "OS2\\MODE.EXE"),
         ("help", "OS2\\HELP.EXE"),
         ("keyb", "OS2\\KEYB.EXE"),
+        ("ping", "OS2\\PING.EXE"),
     ];
 
 /// Build the userland workspace and convert each program to LX.
@@ -530,6 +559,23 @@ fn virtio_devices(o: &Opts, c: &mut Command) {
     }
 }
 
+/// A NIC on QEMU's user-mode network, or none at all (QEMU would add
+/// its default adapter otherwise).
+fn net_devices(o: &Opts, c: &mut Command) {
+    let Some(model) = &o.net else {
+        c.args(["-nic", "none"]);
+        return;
+    };
+    let mut netdev = String::from("user,id=n0,hostfwd=tcp::5555-:23");
+    for r in &o.hostfwd {
+        netdev.push_str(",hostfwd=");
+        netdev.push_str(r);
+    }
+    c.arg("-netdev").arg(netdev);
+    let legacy = if o.virtio_legacy && model.starts_with("virtio") { ",disable-modern=on,disable-legacy=off" } else { "" };
+    c.arg("-device").arg(format!("{model},netdev=n0{legacy}"));
+}
+
 fn run(o: &Opts) -> bool {
     let (code, vars) = ovmf();
     let work = root().join("work");
@@ -577,6 +623,7 @@ fn run(o: &Opts) -> bool {
     usb_devices(o, &mut c);
     vmware_devices(o, &mut c);
     virtio_devices(o, &mut c);
+    net_devices(o, &mut c);
     // Last, so extra devices can refer to the controllers above.
     c.args(&o.qemu_extra);
     let mut child = c.spawn().expect("start qemu");

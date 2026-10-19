@@ -29,6 +29,7 @@ mod log;
 mod mm;
 mod monitor;
 mod mouse;
+mod net;
 mod nls;
 mod nls_data;
 mod npipe;
@@ -161,6 +162,7 @@ pub mod boot {
         if let Some(lp) = &cfg.libpath {
             crate::fs::set_libpath(lp);
         }
+        start_network(cmdline, cfg.network.as_deref());
         let mut env = default_env();
         for e in &cfg.env {
             let key = e.split('=').next().unwrap_or("");
@@ -199,6 +201,17 @@ pub mod boot {
         let restart = init.is_none();
         *STATE.lock() = Some(Boot { env, queue, shell: (shell_path, shell.1), current: 0, restart });
         next();
+    }
+
+    /// Networking as `net=` on the command line, else NETWORK= in
+    /// CONFIG.SYS, else DHCP says.
+    fn start_network(cmdline: &str, config_sys: Option<&str>) {
+        let spec = cmdline.split_whitespace().find_map(|w| w.strip_prefix("net=")).or(config_sys).unwrap_or("dhcp");
+        let cfg = crate::net::Config::parse(spec).unwrap_or_else(|| {
+            crate::println!("net: cannot parse network configuration {spec:?}; using DHCP");
+            crate::net::Config::Dhcp
+        });
+        crate::net::start(cfg);
     }
 
     fn spawn(path: &str, args: &str, env: &[String], detached: bool) -> Option<u32> {

@@ -201,6 +201,11 @@ impl Virtqueue {
         }
     }
 
+    /// Whether the device has returned a chain (cheap: one memory read).
+    pub fn has_used(&self) -> bool {
+        unsafe { read_volatile(self.ptr(self.used_off + 2) as *const u16) != self.last_used }
+    }
+
     /// The next chain the device has returned, if any; its descriptors are
     /// free again.
     pub fn pop(&mut self) -> Option<Used> {

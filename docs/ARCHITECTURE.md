@@ -84,6 +84,14 @@ not preemptive: a thread runs until it blocks, yields or returns to user
 mode with its time slice used up, and SpinLocks disable interrupts, so a
 lock must never be held across a wait.
 
+**Networking.** The TCP/IP stack is a host-tested `no_std` crate
+(`crates/tcpip`) that the kernel drives (`net`): NIC drivers implement a
+small `Nic` trait, the timer tick only checks for received frames and
+wakes the network kernel thread, which feeds the stack and runs its
+timers; socket calls run the stack in the calling thread and wait on one
+wait queue for stack events. rs2 programs use it through RS2API
+ordinals 200-217; see [NETWORK.md](NETWORK.md).
+
 ## Boot
 
 1. UEFI firmware loads `\EFI\BOOT\BOOTX64.EFI` (`boot/`, Rust, `x86_64-unknown-uefi`).

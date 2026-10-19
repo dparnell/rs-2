@@ -51,6 +51,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nettest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "os2"
 version = "0.1.0"
 
