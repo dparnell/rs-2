@@ -12,7 +12,10 @@
 //! free FIFO (errors, short transfers).
 //!
 //! As with PVSCSI, one request is in flight at a time through a bounce
-//! buffer and completion is polled; units are handled by `scsi`.
+//! buffer. With MSI-X or MSI the reply interrupt is unmasked once the
+//! IOC is operational and wakes the requester, which then reads the
+//! reply FIFO (which also clears the interrupt); without either the FIFO
+//! is polled. Units are handled by `scsi`.
 
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -23,6 +26,7 @@ use super::pci;
 use super::scsi::{self, Dir, Error, Hba};
 use crate::fs::block::BlockDev;
 use crate::mm::{mmio, phys};
+use crate::msi::{self, Event};
 use crate::sync::Mutex;
 
 const PAGE: usize = 4096;
@@ -48,6 +52,8 @@ const DOORBELL_ACTIVE: u32 = 0x0800_0000;
 const HIS_DOORBELL: u32 = 0x0000_0001;
 const HIS_IOP_DOORBELL: u32 = 0x8000_0000;
 const HIM_ALL: u32 = 0x0000_0009;
+/// Doorbell interrupt masked, reply interrupt enabled.
+const HIM_DOORBELL: u32 = 0x0000_0001;
 
 // Functions.
 const FN_SCSI_IO: u8 = 0x00;
@@ -87,6 +93,8 @@ pub struct State {
     buf: u64,
     context: u32,
     failed: bool,
+    /// Signalled by the reply interrupt, if there is one.
+    event: Option<&'static Event>,
 }
 
 unsafe impl Send for State {}
@@ -238,10 +246,19 @@ impl Hba for State {
         fence(Ordering::SeqCst);
         self.wr(REQUEST_FIFO, self.req as u32);
         let mut v = u32::MAX;
-        if !scsi::wait(TIMEOUT_MS, || {
-            v = self.rd(REPLY_FIFO);
+        let regs = self.regs;
+        // Reading the FIFO pops it: keep the first reply.
+        let reply = || {
+            if v == u32::MAX {
+                v = unsafe { read_volatile(regs.add(REPLY_FIFO) as *const u32) };
+            }
             v != u32::MAX
-        }) {
+        };
+        let ok = match self.event {
+            Some(e) => e.wait(TIMEOUT_MS, || {}, reply),
+            None => scsi::wait(TIMEOUT_MS, reply),
+        };
+        if !ok {
             crate::println!("mpt: command {:#x} to target {target} timed out", cdb[0]);
             self.failed = true;
             return Err(Error::Timeout);
@@ -288,7 +305,7 @@ impl Hba for State {
 pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     let mut out: Vec<(Arc<dyn BlockDev>, bool)> = Vec::new();
     dev.enable();
-    dev.write(0x04, (dev.read(0x04) & 0xffff) | 1 << 10);
+    dev.set_intx_disabled(true);
     let Some(bar) = super::pvscsi::mem_bar(dev) else {
         crate::println!("mpt: no register window");
         return out;
@@ -297,7 +314,7 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     // Request frame + sense (page 0), reply frames (page 1), bounce.
     let pages = 2 + BOUNCE / PAGE;
     let Some(mem) = phys::alloc_contig(pages as u64, 1 << 32) else { return out };
-    let st = State { regs, req: mem, replies: mem + PAGE as u64, sense: mem + 2048, buf: mem + 2 * PAGE as u64, context: 0, failed: false };
+    let st = State { regs, req: mem, replies: mem + PAGE as u64, sense: mem + 2048, buf: mem + 2 * PAGE as u64, context: 0, failed: false, event: None };
     st.wr(HOST_INT_MASK, HIM_ALL);
     if !st.make_ready() {
         crate::println!("mpt: adapter not ready (doorbell {:#x})", st.rd(DOORBELL));
@@ -347,6 +364,16 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
         return out;
     }
     crate::trace!("mpt: MPI {msg_version:#x}, {ports} port(s), {max_devices} devices");
+    // The handler only wakes the requester: reading the reply FIFO
+    // acknowledges the interrupt.
+    let mut st = st;
+    let event = Event::leak();
+    if let Some((v, kind)) = msi::setup(dev, true, Event::handler, event as *const Event as usize) {
+        event.arm();
+        st.event = Some(event);
+        st.wr(HOST_INT_MASK, HIM_DOORBELL);
+        crate::println!("mpt {}: {kind} vector {v:#x}", dev.bdf());
+    }
     let hba = Arc::new(Mutex::new(st));
     for target in 0..MAX_TARGETS {
         if let Some((unit, optical)) = scsi::setup_unit(&hba, target, 0) {
