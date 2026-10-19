@@ -12,6 +12,7 @@ pub mod dos;
 pub mod fmt;
 pub mod heap;
 pub mod msg;
+pub mod net;
 pub mod path;
 pub mod vio;
 

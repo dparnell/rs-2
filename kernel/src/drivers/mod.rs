@@ -1,6 +1,7 @@
 //! Device drivers.
 
 pub mod ahci;
+pub mod e1000;
 pub mod hid;
 pub mod hotplug;
 pub mod hub;
@@ -147,6 +148,9 @@ pub fn init() {
             for ns in nvme::probe(d) {
                 disks.push(ns);
             }
+        }
+        if e1000::model(d).is_some() {
+            e1000::probe(d);
         }
         if (d.vendor, d.device) == (0x15ad, 0x0405) {
             svga::probe(d);

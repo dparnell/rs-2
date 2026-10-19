@@ -31,6 +31,8 @@ pub struct Config {
     pub maxwait: Option<u32>,
     /// TIMESLICE=min[,max] in milliseconds (the minimum is used).
     pub timeslice: Option<u32>,
+    /// NETWORK=off|dhcp|address/prefix[,gateway[,dns...]] (rs2).
+    pub network: Option<String>,
     /// Driver statements we do not load (BASEDEV/DEVICE/IFS).
     pub drivers: Vec<String>,
 }
@@ -85,6 +87,7 @@ pub fn parse(text: &str) -> Config {
             "PRIORITY" => c.priority_absolute = val.eq_ignore_ascii_case("ABSOLUTE"),
             "MAXWAIT" => c.maxwait = val.parse().ok().filter(|&v| (1..=255).contains(&v)),
             "TIMESLICE" => c.timeslice = val.split(',').next().and_then(|v| v.trim().parse().ok()).filter(|&v: &u32| v >= 1),
+            "NETWORK" => c.network = Some(val.to_string()),
             "BASEDEV" | "DEVICE" | "IFS" => c.drivers.push(alloc::format!("{key}={val}")),
             _ => {}
         }

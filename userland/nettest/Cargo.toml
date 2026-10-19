@@ -1,0 +1,9 @@
+[package]
+name = "nettest"
+description = "Network test: interface configuration, loopback TCP/UDP, ping, DNS, TCP to and from the host"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

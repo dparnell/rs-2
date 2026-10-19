@@ -1389,6 +1389,20 @@ impl Stack {
         Ok(())
     }
 
+    /// Close with a reset (SO_LINGER with a zero timeout).
+    pub fn abort(&mut self, id: usize, now: u64) -> Result<()> {
+        let s = self.sock(id)?;
+        if let Some(t) = &mut s.tcb {
+            let mut segs = Vec::new();
+            t.abort(&mut segs);
+            let (src, dst) = (t.local.addr, t.remote.addr);
+            for seg in segs {
+                self.tcp_send(src, dst, &seg, now);
+            }
+        }
+        self.close(id, now)
+    }
+
     /// Readiness for select().
     pub fn ready(&self, id: usize) -> Result<Ready> {
         let s = self.sock_ref(id)?;

@@ -29,6 +29,7 @@ pub mod queue;
 pub mod resource;
 pub mod rs2api;
 pub mod signal;
+pub mod sockets;
 pub mod sem;
 pub mod sesmgr;
 pub mod shmem;

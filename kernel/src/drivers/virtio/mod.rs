@@ -5,7 +5,7 @@
 //! capabilities, legacy 0.9.5 devices through I/O BAR 0), `queue` the
 //! split virtqueue; the device drivers sit on top: block (`blk`), SCSI
 //! host (`scsi`), input (`input`: keyboards, mice and tablets), entropy
-//! (`rng`) and console (`console`).
+//! (`rng`), console (`console`) and network (`net`).
 //!
 //! There are no interrupts yet (no MSI-X, and PCI INTx cannot be routed
 //! without ACPI _PRT): INTx is masked, the used rings are polled. Block and
@@ -19,6 +19,7 @@
 pub mod blk;
 pub mod console;
 pub mod input;
+pub mod net;
 pub mod pci;
 pub mod queue;
 pub mod rng;
@@ -114,6 +115,7 @@ pub fn probe(devs: &[bus::Device]) -> Found {
             TYPE_INPUT => input::attach(dev),
             TYPE_RNG => rng::attach(dev),
             TYPE_CONSOLE => console::attach(dev),
+            TYPE_NET => net::attach(dev),
             _ => crate::println!("virtio: {}: no driver", dev.name()),
         }
     }
