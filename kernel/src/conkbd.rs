@@ -376,7 +376,9 @@ pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
     if let Some(k) = &ev {
         let ctrl = k.shift & shift::CONTROL != 0;
         let alt = k.shift & shift::ALT != 0;
-        if k.scan == 0x01 && (ctrl || alt) && !crate::session::popup_active() {
+        // In the PM session Ctrl+Esc is PM's (its window list).
+        let pm_list = ctrl && sid == crate::session::pm_session() && sid != 0;
+        if k.scan == 0x01 && (ctrl || alt) && !crate::session::popup_active() && !pm_list {
             if ctrl {
                 crate::session::toggle_list();
             } else {

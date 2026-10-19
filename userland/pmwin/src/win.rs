@@ -373,6 +373,11 @@ pub fn activate(h: u32) {
             notify(old, WM_ACTIVATE, 0, old);
             repaint_title(old);
         }
+        // The border shows the activation too.
+        st().desk.invalidate(top, None, false);
+        if old != 0 {
+            st().desk.invalidate(old, None, false);
+        }
         notify(top, WM_ACTIVATE, 1, top);
         repaint_title(top);
     }
@@ -732,11 +737,14 @@ pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
     if let Some(w) = s.desk.get_mut(h) {
         w.ghost = pmwin::Region::new();
     }
-    if hps != 0 {
+    let hps = if hps != 0 {
         gpiapi::begin_paint(s, hps, h, o, clip);
-        return hps;
-    }
-    gpiapi::create(s, h, o, clip)
+        hps
+    } else {
+        gpiapi::create(s, h, o, clip)
+    };
+    gpiapi::track_window(st(), hps, Some(update));
+    hps
 }
 
 #[unsafe(no_mangle)]
@@ -754,7 +762,9 @@ pub extern "C" fn WinGetPS(h: u32) -> u32 {
     let clip_children = w.style & ws::CLIPCHILDREN != 0;
     let vis = s.desk.visible_region(h, clip_children);
     let o = s.desk.origin(h);
-    gpiapi::create(s, h, o, vis.rects)
+    let hps = gpiapi::create(s, h, o, vis.rects);
+    gpiapi::track_window(st(), hps, None);
+    hps
 }
 
 #[unsafe(no_mangle)]

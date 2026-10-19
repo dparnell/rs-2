@@ -258,6 +258,8 @@ impl Desktop {
         let Some(w) = self.windows.get_mut(&h) else { return };
         let r = r.unwrap_or(w.rect()).intersect(&w.rect());
         w.update.add(r);
+        // Drawn over since: a placeholder there is gone too.
+        w.ghost.subtract(&r);
         self.dirty(h);
         let Some(w) = self.windows.get(&h) else { return };
         if children {
@@ -285,6 +287,7 @@ impl Desktop {
                 let local = i.offset(-sr.left, -sr.bottom);
                 if let Some(w) = self.windows.get_mut(&h) {
                     w.update.add(local);
+                    w.ghost.subtract(&local);
                 }
                 self.dirty(h);
             }

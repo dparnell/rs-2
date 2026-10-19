@@ -69,6 +69,12 @@ pub struct PsExtra {
     pub lcids: Vec<(i32, Lcid)>,
     /// GpiCreatePS options.
     pub options: u32,
+    /// For a PS of WinBeginPaint or WinGetPS: the area it may paint
+    /// (window coordinates; None: all the window), and the desktop
+    /// generation its clip was computed for. Windows of other processes
+    /// may move meanwhile; the clip is brought up to date before drawing.
+    pub upd: Option<pmwin::Region>,
+    pub generation: u32,
 }
 
 const HPS_BASE: u32 = 0x100;
@@ -158,11 +164,43 @@ pub fn rgb(e: &PsEntry, c: i32) -> u32 {
     e.ps.colors.rgb(c)
 }
 
+/// Remember what a cached or painting PS was set up for.
+pub fn track_window(s: &mut State, hps: u32, upd: Option<pmwin::Region>) {
+    let g = s.desk.generation;
+    if let Some(e) = entry(s, hps) {
+        e.gpi.upd = upd;
+        e.gpi.generation = g;
+    }
+}
+
 /// Bring a window PS's visible region up to date (windows move).
 pub fn refresh(s: &mut State, hps: u32) {
+    let g = s.desk.generation;
     let Some(e) = entry(s, hps) else { return };
     let h = e.hwnd;
-    if h == 0 || e.gpi.cached || e.gpi.painting || e.gpi.memory {
+    if h == 0 || e.gpi.memory {
+        return;
+    }
+    if e.gpi.cached || e.gpi.painting {
+        // Only when windows have moved since it was set up.
+        if e.gpi.generation == g {
+            return;
+        }
+        e.gpi.generation = g;
+        let upd = e.gpi.upd.clone();
+        let Some(w) = s.desk.get(h) else { return };
+        let vis = s.desk.visible_region(h, w.style & pmwin::ws::CLIPCHILDREN != 0);
+        let o = s.desk.origin(h);
+        let clip: Vec<Rect> = match upd {
+            Some(mut u) => {
+                u.offset(o.x, o.y);
+                vis.rects.iter().flat_map(|v| u.rects.iter().map(move |r| v.intersect(r))).filter(|r| !r.is_empty()).collect()
+            }
+            None => vis.rects,
+        };
+        if let Some(e) = entry(s, hps) {
+            e.ps.set_vis(o, clip);
+        }
         return;
     }
     let Some(w) = s.desk.get(h) else {

@@ -57,3 +57,11 @@ pub fn rs2_query_pointer(c: &mut Ctx) -> u32 {
     c.write_u32(c.arg(0) + 4, y as u32);
     0
 }
+
+/// Rs2DebugTrace(psz): a line on the serial port (debugging aid for rs2's
+/// own DLLs).
+pub fn rs2_debug_trace(c: &mut Ctx) -> u32 {
+    let Some(t) = c.read_str(c.arg(0), 512) else { return err::INVALID_ADDRESS };
+    crate::trace!("[{}] {}", c.process.pid, t);
+    0
+}

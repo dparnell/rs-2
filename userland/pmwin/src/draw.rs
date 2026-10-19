@@ -57,6 +57,7 @@ pub fn paint(h: u32, f: impl FnOnce(&mut Canvas)) {
 fn with(h: u32, hps: u32, f: impl FnOnce(&mut Canvas)) {
     let s = st();
     let (w, hh) = s.desk.get(h).map_or((0, 0), |w| (w.cx, w.cy));
+    gpiapi::refresh(s, hps);
     let surface = s.surface;
     // Built-in controls paint within one PMWIN call: the pointer is out
     // of the way meanwhile.

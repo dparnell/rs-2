@@ -36,6 +36,18 @@ mod state;
 mod statics;
 mod win;
 
+/// A line on the serial port (RS2API.4), for debugging.
+#[allow(dead_code)]
+pub fn trace(args: core::fmt::Arguments) {
+    unsafe extern "C" {
+        #[link_name = "RS2API.4"]
+        fn Rs2DebugTrace(psz: *const u8) -> u32;
+    }
+    let mut s = alloc::format!("{}", args).into_bytes();
+    s.push(0);
+    unsafe { Rs2DebugTrace(s.as_ptr()) };
+}
+
 /// _DLL_InitTerm(hmod, flag): at the end of a process, what it had in
 /// PM goes (the PM server does the same when the kernel reports the
 /// process gone, also after a crash).
