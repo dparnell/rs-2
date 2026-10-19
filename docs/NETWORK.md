@@ -232,7 +232,7 @@ Rust like PMWIN (`userland/`, i686, packed by `elf2lx`, in `C:\OS2\DLL`):
 | SO32DLL | TCP/IP 4.0 sockets: 4.3BSD `sockaddr`, `select()` in OS/2's form, `bsdselect()` with bit masks, 4-argument `ioctl()` | 32 of 61 (not the `_xxxMSC` variants) |
 | TCP32DLL | TCP/IP 4.0 network database and resolver, `h_errno` and `_res` variables | 56 of 101 (not the `MSC`/16-bit variants) |
 | TNLS32 | IBM's code page helper for its TCP/IP applications | the 15 ordinals FTP, TELNET, FINGER, TALK, REXEC, RSH use |
-| PMSHAPI | the `Prf*` profile calls (TELNET reads its options with them) | 10 |
+| PMSHAPI | the `Prf*` profile calls (TELNET reads its options with them) | 20 |
 | TCPIPDLL | the 16-bit API (`_cdecl far`, 16-bit ints, far pointers) | 51 of 111, all 16-bit programs on the media import |
 | TNLS16 | the 16-bit code page and message catalog helper (replaces IBM's, which needs PMWIN's 16-bit API) | 15 |
 
@@ -291,8 +291,8 @@ result buffers are too.
   translation tables, so its init reports "no translation", converters
   copy (ordinal 16 widens bytes to the USHORT characters TELNET's
   terminal emulators take), the DBCS table is empty.
-* **PMSHAPI**: profiles are kept in memory for the life of the process
-  (no INI files yet).
+* **PMSHAPI**: profiles are real INI files shared by all processes
+  (see [PM.md](PM.md#profiles-ini-files)).
 * **16-bit programs** (`userland/thunk16`): `entries16!` puts 16-bit
   stubs (`mov ax, N; jmp common`) and a common thunk in a 4 KB-aligned
   piece of the DLL's code object, which elf2lx gives 16:16 code aliases;

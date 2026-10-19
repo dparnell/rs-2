@@ -99,8 +99,9 @@ Status markers: done, in progress, planned.
   16-bit TFTP runs; system-wide socket numbers with owners
   (addsockettolist/removesocketfromlist, RS2API 220/221): IBM's INETD
   hands connections to the servers it starts
-- planned: route/arp and run-time configuration, INI files for
-  PMSHAPI, code page translation in TNLS32/TNLS16,
+- done: INI files for PMSHAPI (see milestone 4)
+- planned: route/arp and run-time configuration,
+  code page translation in TNLS32/TNLS16,
   vmxnet3/pcnet drivers, TCP keepalive/window scaling/SACK/urgent data
 - planned: virtio-scsi hot-plug events, virtio-console multiport
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
@@ -157,6 +158,10 @@ Status markers: done, in progress, planned.
 - done: windowed VIO sessions (see milestone 1); the PM window list lists
   full-screen sessions and starts command prompts; PM draws into a
   shadow buffer while a text session has the screen
+- done: profiles on real INI files (`crates/inifile`, PMSHAPI): OS2.INI
+  and OS2SYS.INI from USER_INI/SYSTEM_INI, shared by all processes,
+  written through safely; the program list calls, kept in OS2.INI for
+  a later shell (docs/PM.md, Profiles); `RS2\INITEST.EXE`
 - planned: per-process presentation-space limits, hooks that are called
   (WinSetHook only records them), DDE, notebooks and containers, icons
   and pointers from resources, owner-drawn items, presentation
