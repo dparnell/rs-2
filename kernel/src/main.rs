@@ -11,6 +11,7 @@ mod acpi;
 mod api;
 mod apic;
 mod arch;
+mod bench;
 mod chardev;
 mod codepage;
 mod config;
@@ -101,6 +102,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     }
     smp::start_aps();
     drivers::hotplug::start();
+    bench::start(cmdline);
     boot::start(cmdline);
     // This boot context is now CPU 0's idle thread.
     task::sched::idle_loop();

@@ -78,9 +78,12 @@ pub fn handle(irq: u8, f: &mut TrapFrame) {
         // Every CPU's LAPIC timer arrives here; the boot processor keeps
         // the time and runs the periodic work, the others only account
         // their time slice.
+        crate::bench::account();
         if crate::smp::this().index() == 0 {
             TICKS.fetch_add(1, Ordering::Relaxed);
+            let t0 = crate::arch::rdtsc();
             crate::task::timer_tick(f);
+            crate::bench::add_tick_cycles(crate::arch::rdtsc().wrapping_sub(t0));
         } else {
             crate::task::sched::tick();
         }
