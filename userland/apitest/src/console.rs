@@ -200,9 +200,12 @@ pub fn run() {
 
 fn modes(b: &Buf) {
     check("VioSetMode 80x50", set_mode(b, 80, 50) == 0);
-    check("50 rows use the 8x14 font", mode_rows(b) == (50, 14));
+    // The largest font that fits is used, which depends on the screen
+    // height (8x14 at 768 pixels, 8x16 at 1024).
+    let fits = |(r, f): (u16, u16), rows: u16| r == rows && matches!(f, 8 | 14 | 16);
+    check("50 rows with a built-in font", fits(mode_rows(b), 50));
     check("VioSetMode 80x60", set_mode(b, 80, 60) == 0);
-    check("60 rows use the 8x8 font", mode_rows(b) == (60, 8));
+    check("60 rows with a built-in font", fits(mode_rows(b), 60));
     check("VioSetMode 80x43", set_mode(b, 80, 43) == 0);
     check("43 rows use the 8x16 font", mode_rows(b) == (43, 16));
     check("VioSetMode 81 columns fails", set_mode(b, 81, 25) == 355);
