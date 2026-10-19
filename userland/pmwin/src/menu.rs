@@ -227,12 +227,21 @@ pub extern "C" fn WinCreateMenu(parent: u32, pmt: *const u8) -> u32 {
 /// a pop-up menu at (x, y) of the parent and track it.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinPopupMenu(parent: u32, owner: u32, menu: u32, x: i32, y: i32, id: u32, fs: u32) -> u32 {
-    const PU_SELECTITEM: u32 = 0x0004;
+    const PU_SELECTITEM: u32 = 0x0020;
     if !is_menu(menu) {
         return 0;
     }
     end(None, false);
     let o = st().desk.origin(if parent == 0 { HWND_DESKTOP } else { parent });
+    // A menu loaded for a frame (WinLoadMenu with a dialog as the
+    // parent) became an action bar there: as a pop-up it is a vertical
+    // menu on the desktop.
+    if horizontal(menu) || ctl::parent(menu) != HWND_DESKTOP {
+        if let Some(w) = st().desk.get_mut(menu) {
+            w.style &= !(MS_ACTIONBAR | MS_TITLEBUTTON | ws::VISIBLE);
+        }
+        st().desk.set_parent(menu, HWND_DESKTOP);
+    }
     if let Some(w) = st().desk.get_mut(menu) {
         w.owner = owner;
     }

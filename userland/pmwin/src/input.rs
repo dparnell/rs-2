@@ -49,7 +49,10 @@ fn post_input(h: u32, msg: u32, mp1: u32, mp2: u32, time: u32) {
 }
 
 /// A mouse event: the pointer moved to `p` and/or the buttons changed.
-pub fn mouse(p: Point, buttons: u8, time: u32) {
+pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
+    // Mouse messages carry KC_SHIFT, KC_CTRL and KC_ALT in mp2's high word.
+    let kc = (if shift & 0x3 != 0 { 0x08 } else { 0 }) | (if shift & 0x4 != 0 { 0x10 } else { 0 }) | (if shift & 0x8 != 0 { 0x20 } else { 0 });
+    let mp2 = (kc as u32) << 16;
     let s = st();
     pointer::move_to(s, p);
     let prev = core::mem::replace(&mut s.buttons, buttons);
@@ -104,7 +107,7 @@ pub fn mouse(p: Point, buttons: u8, time: u32) {
         win::activate(target);
     }
     if down == 0 && up == 0 {
-        post_input(target, WM_MOUSEMOVE, mp1, 0, time);
+        post_input(target, WM_MOUSEMOVE, mp1, mp2, time);
     }
     // Button 1 left, 2 right, 3 middle: WM_BUTTONnDOWN = 0x71 + 3(n-1),
     // a second press nearby within half a second is WM_BUTTONnDBLCLK.
@@ -113,10 +116,10 @@ pub fn mouse(p: Point, buttons: u8, time: u32) {
             let (lt, lp, lb) = st().last_click;
             let dbl = lb == bit && time.wrapping_sub(lt) < 500 && (lp.x - p.x).abs() < 4 && (lp.y - p.y).abs() < 4;
             st().last_click = if dbl { (0, Point::new(-100, -100), 0) } else { (time, p, bit) };
-            post_input(target, if dbl { WM_BUTTON1DOWN + 2 } else { WM_BUTTON1DOWN } + 3 * n, mp1, 0, time);
+            post_input(target, if dbl { WM_BUTTON1DOWN + 2 } else { WM_BUTTON1DOWN } + 3 * n, mp1, mp2, time);
         }
         if up & bit != 0 {
-            post_input(target, WM_BUTTON1UP + 3 * n, mp1, 0, time);
+            post_input(target, WM_BUTTON1UP + 3 * n, mp1, mp2, time);
         }
     }
 }
@@ -269,7 +272,7 @@ fn virtual_key(scan: u32, ch: u32) -> u32 {
 /// Handle one raw event (with the PM lock held).
 pub fn event(ev: &Input) {
     match ev.kind {
-        EV_MOUSE => mouse(Point::new(ev.a as i32, ev.b as i32), ev.flags as u8, ev.time),
+        EV_MOUSE => mouse(Point::new(ev.a as i32, ev.b as i32), ev.flags as u8, (ev.flags >> 8) as u8, ev.time),
         EV_KEY => key(ev),
         EV_BACKGROUND => crate::state::to_shadow(),
         EV_REPAINT => {

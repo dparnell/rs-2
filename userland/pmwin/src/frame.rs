@@ -658,7 +658,13 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         m if forwarded(m) => {
             let client = st().frames.get(&h).map_or(0, |f| f.client);
-            if client != 0 { send(client, msg, mp1, mp2) } else { 0 }
+            if client != 0 {
+                send(client, msg, mp1, mp2)
+            } else {
+                // No client (a dialog): the default (WM_MENUSELECT lets
+                // the command through).
+                WinDefWindowProc(h, msg, mp1, mp2)
+            }
         }
         _ => WinDefWindowProc(h, msg, mp1, mp2),
     }

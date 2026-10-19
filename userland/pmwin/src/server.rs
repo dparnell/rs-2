@@ -347,7 +347,9 @@ fn ghost(h: u32) {
     // Built-in controls (title bar, menus, scroll bars, buttons...) are
     // PMWIN code that only draws: they paint themselves, here.
     let builtin = s.classes.get(w.class as usize).is_some_and(|c| c.pid == 0 && c.proc_ == proc_);
-    if builtin && !s.frames.contains_key(&h) {
+    // A container's records are its program's memory: a plain
+    // placeholder for it.
+    if builtin && !s.frames.contains_key(&h) && !crate::container::is_container(h) {
         GHOST.store(true, Ordering::Relaxed);
         msg::call(proc_, h, WM_PAINT, 0, 0);
         GHOST.store(false, Ordering::Relaxed);

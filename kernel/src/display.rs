@@ -145,7 +145,10 @@ fn set_pointer(buttons: u8, x: i32, y: i32) {
     PTR_X.store(x, Ordering::Relaxed);
     PTR_Y.store(y, Ordering::Relaxed);
     if moved || changed {
-        push(Input { kind: EV_MOUSE, flags: buttons as u16, a: x as u32, b: y as u32, time: crate::irq::uptime_ms() as u32 });
+        // flags: the buttons, and the keyboard's shift state (Shift,
+        // Ctrl, Alt: bits 0-3 as in key events) in the high byte.
+        let shift = (crate::kbd::shift_state_now() & 0x0f) << 8;
+        push(Input { kind: EV_MOUSE, flags: buttons as u16 | shift, a: x as u32, b: y as u32, time: crate::irq::uptime_ms() as u32 });
     }
 }
 

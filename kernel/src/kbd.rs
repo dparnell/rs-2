@@ -261,3 +261,9 @@ pub fn drop_queue(sid: u32) {
 pub fn shift_state() -> u16 {
     STATE.lock().shift
 }
+
+/// The shift state, or 0 if the keyboard state is busy (for interrupt
+/// handlers).
+pub fn shift_state_now() -> u16 {
+    STATE.try_lock().map_or(0, |s| s.shift)
+}

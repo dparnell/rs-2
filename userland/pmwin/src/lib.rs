@@ -13,6 +13,7 @@ mod bitmap;
 mod button;
 mod clip;
 mod combo;
+mod container;
 mod color;
 mod ctl;
 mod dlg;
