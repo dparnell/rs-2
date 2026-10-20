@@ -271,6 +271,12 @@ pub fn make_defaults() -> Groups {
         let p = Program { progc: PROG_PM, title: b"System Editor".to_vec(), exe: editor.clone(), ..Program::default() };
         add_program(programs, &p);
     }
+    // The installer (a text-mode program), on the live system and after.
+    let installer = sys_path(b"OS2\\INSTALL.EXE");
+    if exists(&installer) && !titles(programs).iter().any(|t| t.3 == b"Install rs2") {
+        let p = Program { progc: PROG_FULLSCREEN, title: b"Install rs2".to_vec(), exe: installer, ..Program::default() };
+        add_program(programs, &p);
+    }
     if have_editor {
         for ext in [&b"TXT"[..], b"DOC", b"LOG", b"ME", b"1ST", b"SYS", b"CFG", b"NFO", b"H", b"C", b"RS", b"MD"] {
             if query(APP_ASSOC, ext).is_none() {
