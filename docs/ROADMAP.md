@@ -211,3 +211,5 @@ Status markers: done, in progress, planned.
 - NetBIOS, NFS/SMB clients
 - MMPM/2 multimedia, audio drivers
 - DOS sessions (MVDM) through a CPU emulator, since long mode has no V86
+- self-hosting (building rs2 on rs2): 64-bit processes with a Linux
+  system-call layer for the Rust toolchain; see [SELF-HOSTING.md](SELF-HOSTING.md)
