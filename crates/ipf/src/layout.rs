@@ -38,6 +38,15 @@ pub trait Metrics {
     fn font(&mut self, font: u8, style: u8) -> FontMetrics;
     /// Width of `word` in that font.
     fn width(&mut self, font: u8, style: u8, word: &[u8]) -> i32;
+    /// The font number (16 and up) for a font of dynamic data by face
+    /// name and point size; 0: the default font.
+    fn face(&mut self, _face: &[u8], _width: u16, _height: u16) -> u8 {
+        0
+    }
+    /// Size of an application's bitmap (HBITMAP) of dynamic data.
+    fn image(&mut self, _handle: u32) -> (i32, i32) {
+        (0, 0)
+    }
 }
 
 /// What a run shows.
@@ -46,6 +55,9 @@ pub enum RunKind<'a> {
     Word(&'a [u8]),
     /// A bitmap; `fit`: stretched over the whole window.
     Bitmap { offset: u32, flags: u8, cx: i32, cy: i32, fit: bool },
+    /// An application's bitmap (HBITMAP) or metafile (HMF) of dynamic
+    /// data.
+    Image { handle: u32, metafile: bool, cx: i32, cy: i32, fit: bool },
 }
 
 /// A placed word or bitmap.
@@ -147,6 +159,13 @@ impl Page<'_> {
                         return Some(Hit::Link(l));
                     }
                 }
+                RunKind::Image { cx, cy, fit: false, .. } => {
+                    if let Some(l) = r.link {
+                        if x >= r.x && x < r.x + cx && y > r.y - cy && y <= r.y {
+                            return Some(Hit::Link(l));
+                        }
+                    }
+                }
                 _ => {}
             }
         }
@@ -160,7 +179,7 @@ impl Page<'_> {
         for r in self.runs.iter().filter(|r| r.link == Some(l)) {
             let (top, bottom) = match r.kind {
                 RunKind::Word(_) => (r.y - (r.height - r.descent), r.y + r.descent),
-                RunKind::Bitmap { cy, .. } => (r.y - cy, r.y),
+                RunKind::Bitmap { cy, .. } | RunKind::Image { cy, .. } => (r.y - cy, r.y),
             };
             match v.last_mut() {
                 Some(b) if b.3 == bottom && r.x >= b.0 => b.2 = b.2.max(r.x + r.width),
@@ -216,6 +235,9 @@ struct State {
     nowrap: usize,
     max_x: i32,
     hiding: bool,
+    /// In dynamic data (no autospacing), and the spacing before it.
+    ddf: bool,
+    ddf_spacing: bool,
 }
 
 fn key_listed(keys: &[u8], key: &[u8]) -> bool {
@@ -263,6 +285,8 @@ pub fn layout_items<'a>(doc: &Doc<'a>, cells: &[Vec<Item<'a>>], opts: &Options<'
         nowrap: 0,
         max_x: 0,
         hiding: false,
+        ddf: false,
+        ddf_spacing: true,
     };
     let mut page = Page::default();
     for items in cells {
@@ -286,8 +310,8 @@ pub fn layout_items<'a>(doc: &Doc<'a>, cells: &[Vec<Item<'a>>], opts: &Options<'
         .iter()
         .map(|r| match r.kind {
             RunKind::Word(_) => r.y + r.descent,
-            RunKind::Bitmap { fit: true, .. } => 0,
-            RunKind::Bitmap { .. } => r.y,
+            RunKind::Bitmap { fit: true, .. } | RunKind::Image { fit: true, .. } => 0,
+            RunKind::Bitmap { .. } | RunKind::Image { .. } => r.y,
         })
         .max()
         .unwrap_or(0);
@@ -443,13 +467,13 @@ fn step<'a>(
         Item::Para => {
             let n = if s.x > s.left { 2 } else { 1 };
             new_line(s, page, n);
-            s.spacing = true;
+            s.spacing = !s.ddf;
             s.realign = true;
             s.nowrap = 0;
         }
         Item::Break => {
             new_line(s, page, 1);
-            s.spacing = true;
+            s.spacing = !s.ddf;
             s.realign = true;
             s.nowrap = 0;
         }
@@ -490,6 +514,10 @@ fn step<'a>(
             s.x = s.left;
         }
         Item::MarginHere => s.left = s.x,
+        Item::MarginOrSpace(n) => {
+            s.left = margin(s, *n);
+            s.x = if s.left <= s.x + s.unit { s.x + s.unit } else { s.left };
+        }
         Item::LinesBegin(a) => {
             s.align = *a;
             let n = if s.x > s.left { 2 } else { 1 };
@@ -552,52 +580,7 @@ fn step<'a>(
         Item::Bitmap { flags, offset, areas } => {
             let Ok(info) = bitmap::info(doc.data(), doc.header.image_start, *offset) else { return };
             let (w, h) = (info.cx as i32, info.cy as i32);
-            let (slh, sdesc) = (s.sys.height.max(1), s.sys.descent);
-            let hh = h + sdesc;
-            let fit = flags & 0x08 != 0 && flags & 0x06 == 0;
-            let (x, y);
-            if fit {
-                (x, y) = (-1, -1);
-            } else if flags & 0x10 != 0 {
-                if s.x + w < s.right {
-                    x = s.x;
-                    let gap = s.y - s.prev.unwrap_or(-sdesc);
-                    if gap < hh {
-                        let ny = s.y + (hh / slh) * slh;
-                        for r in &mut page.runs[s.line_start..] {
-                            if r.y == s.y {
-                                r.y = ny;
-                            }
-                        }
-                        y = ny;
-                    } else {
-                        y = s.y;
-                    }
-                    s.x += w + s.fm.space;
-                } else {
-                    x = s.left;
-                    y = s.y + (hh / slh + 1) * slh;
-                    s.x = s.left + w + s.fm.space;
-                    s.line_start = page.runs.len();
-                }
-                s.y = y;
-            } else {
-                x = if flags & 0x02 != 0 {
-                    s.right - w
-                } else if flags & 0x04 != 0 {
-                    if s.right - s.left > w { (s.right - s.left - w) >> 1 } else { s.left }
-                } else {
-                    s.left
-                };
-                y = s.y + (hh / slh + 1) * slh;
-                s.prev = Some(y);
-                s.y = y + slh;
-                s.x = s.left;
-                s.line_start = page.runs.len() + 1;
-            }
-            if !fit {
-                s.max_x = s.max_x.max(x + w);
-            }
+            let (x, y, fit) = place_bitmap(s, page, w, h, *flags);
             page.runs.push(Run {
                 x,
                 y,
@@ -613,6 +596,44 @@ fn step<'a>(
             });
             s.art = if *areas { Some(page.runs.len() - 1) } else { None };
         }
+        Item::Image { handle, flags } => {
+            let (w, h) = m.image(*handle);
+            let (x, y, fit) = place_bitmap(s, page, w, h, *flags);
+            page.runs.push(Run {
+                x,
+                y,
+                width: w,
+                height: h,
+                descent: 0,
+                font: s.font,
+                style: s.style,
+                fg: s.fg,
+                bg: s.bg,
+                link: s.link,
+                kind: RunKind::Image { handle: *handle, metafile: false, cx: w, cy: h, fit },
+            });
+            s.art = None;
+        }
+        Item::Metafile { handle, rect } => {
+            // An empty rectangle: the whole window (IBM's DdfFormatCell).
+            let empty = rect[2] == 0 || rect[3] == 0;
+            let (w, h) = if empty { (s.width, 0) } else { (rect[2] - rect[0], rect[3] - rect[1]) };
+            let (x, y, fit) = place_bitmap(s, page, w, h, if empty { 0x08 } else { 0x10 });
+            page.runs.push(Run {
+                x,
+                y,
+                width: w,
+                height: h,
+                descent: 0,
+                font: s.font,
+                style: s.style,
+                fg: s.fg,
+                bg: s.bg,
+                link: s.link,
+                kind: RunKind::Image { handle: *handle, metafile: true, cx: w, cy: h, fit },
+            });
+            s.art = None;
+        }
         Item::Area(a) => {
             if let Some(run) = s.art {
                 if a.data.is_some_and(|d| d.auto()) {
@@ -627,6 +648,74 @@ fn step<'a>(
                 s.hiding = true;
             }
         }
+        Item::DdfBegin => {
+            s.ddf = true;
+            s.ddf_spacing = s.spacing;
+            s.spacing = false;
+        }
+        Item::DdfEnd => {
+            s.ddf = false;
+            s.spacing = s.ddf_spacing;
+        }
+        Item::FaceFont { face, width, height } => {
+            s.font = m.face(face, *width, *height);
+            s.style = 0;
+            s.auto_mono = false;
+            set_font(s, page, m);
+        }
         Item::HideEnd | Item::Ddf(_) | Item::Other(..) => {}
     }
+}
+
+/// Place a bitmap of `w` by `h` with alignment `flags` (IBM's
+/// ArtFormatBitmap; see the crate's notes): its x, bottom y and whether
+/// it is stretched over the window.
+fn place_bitmap(s: &mut State, page: &mut Page<'_>, w: i32, h: i32, flags: u8) -> (i32, i32, bool) {
+    let (slh, sdesc) = (s.sys.height.max(1), s.sys.descent);
+    let hh = h + sdesc;
+    let fit = flags & 0x08 != 0 && flags & 0x06 == 0;
+    let (x, y);
+    if fit {
+        (x, y) = (-1, -1);
+    } else if flags & 0x10 != 0 {
+        if s.x + w < s.right {
+            x = s.x;
+            let gap = s.y - s.prev.unwrap_or(-sdesc);
+            if gap < hh {
+                let ny = s.y + (hh / slh) * slh;
+                for r in &mut page.runs[s.line_start..] {
+                    if r.y == s.y {
+                        r.y = ny;
+                    }
+                }
+                y = ny;
+            } else {
+                y = s.y;
+            }
+            s.x += w + s.fm.space;
+        } else {
+            x = s.left;
+            y = s.y + (hh / slh + 1) * slh;
+            s.x = s.left + w + s.fm.space;
+            s.line_start = page.runs.len();
+        }
+        s.y = y;
+    } else {
+        x = if flags & 0x02 != 0 {
+            s.right - w
+        } else if flags & 0x04 != 0 {
+            if s.right - s.left > w { (s.right - s.left - w) >> 1 } else { s.left }
+        } else {
+            s.left
+        };
+        y = s.y + (hh / slh + 1) * slh;
+        s.prev = Some(y);
+        s.y = y + slh;
+        s.x = s.left;
+        s.line_start = page.runs.len() + 1;
+    }
+    if !fit {
+        s.max_x = s.max_x.max(x + w);
+    }
+    (x, y, fit)
 }

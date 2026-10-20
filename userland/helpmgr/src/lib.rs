@@ -18,6 +18,7 @@
 extern crate alloc;
 extern crate os2;
 
+mod ddf;
 mod exports;
 mod library;
 mod pm;
@@ -47,8 +48,11 @@ pub const HMERR_CONTENT_NOT_FOUND: u32 = 0x2002;
 pub const HMERR_OPEN_LIB_FILE: u32 = 0x2003;
 pub const HMERR_READ_LIB_FILE: u32 = 0x2004;
 pub const HMERR_LOAD_DLL_BAD_FORMAT: u32 = 0x2005;
-pub const HMERR_PANEL_NOT_FOUND: u32 = 0x3002;
-pub const HMERR_DATABASE_NOT_OPEN: u32 = 0x3003;
+pub const HMERR_PANEL_NOT_FOUND: u32 = 0x2010;
+pub const HMERR_DATABASE_NOT_OPEN: u32 = 0x2011;
+/// HM_ERROR when HM_QUERY_DDF_DATA did not return a DDF (IBM's
+/// PnlGethDDF; not in the Toolkit).
+pub const HMERR_DDF_INVALID: u32 = 0x2014;
 
 pub const HM_DISMISS_WINDOW: u32 = 0x221;
 pub const HM_DISPLAY_HELP: u32 = 0x222;
@@ -67,6 +71,9 @@ pub const HM_ERROR: u32 = 0x22e;
 pub const HM_HELPSUBITEM_NOT_FOUND: u32 = 0x22f;
 pub const HM_QUERY_KEYS_HELP: u32 = 0x230;
 pub const HM_EXT_HELP_UNDEFINED: u32 = 0x232;
+pub const HM_SET_OBJCOM_WINDOW: u32 = 0x238;
+pub const HM_QUERY_DDF_DATA: u32 = 0x23a;
+pub const HM_INVALIDATE_DDF_DATA: u32 = 0x23b;
 pub const HM_INFORM: u32 = 0x234;
 pub const HM_NOTIFY: u32 = 0x242;
 pub const HM_RESOURCEID: u32 = 0;
@@ -117,6 +124,11 @@ pub struct Instance {
     pub help_for_help: u16,
     /// HM_SET_ACTIVE_WINDOW, or the window the last request came from.
     pub active: u32,
+    /// HM_SET_OBJCOM_WINDOW: where HM_QUERY_DDF_DATA goes (0: the active
+    /// window).
+    pub objcom: u32,
+    /// The frame last associated with the instance.
+    pub assoc: u32,
     /// The help window's frame (0: not shown).
     pub frame: u32,
     /// The footnote window's frame (0: none).
@@ -160,12 +172,12 @@ pub fn trace(args: core::fmt::Arguments) {
     unsafe { Rs2DebugTrace(s.as_ptr()) };
 }
 
-fn set_error(e: u32) {
+pub fn set_error(e: u32) {
     let _ = e;
 }
 
 fn post_error(inst: &Instance, e: u32) {
-    let to = if inst.active != 0 { inst.active } else { 0 };
+    let to = inst.app_window();
     if to != 0 {
         post(to, HM_ERROR, e, 0);
     }
@@ -230,6 +242,8 @@ pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: 
         show_ids,
         help_for_help: 0,
         active: 0,
+        objcom: 0,
+        assoc: 0,
         frame: 0,
         footnote: 0,
         book,
@@ -350,6 +364,9 @@ pub extern "C" fn WinAssociateHelpInstance(help: u32, app: u32) -> u32 {
         return 0;
     }
     send(f, WM_SETHELPINFO, help, 0);
+    if let Some(i) = instance(help) {
+        i.assoc = f;
+    }
     1
 }
 
@@ -398,6 +415,13 @@ pub extern "C" fn Rs2ViewBook(hab: u32, names: *const u8, topic: *const u8, rc: 
 // ---- Panel lookup ----
 
 impl Instance {
+    /// Where messages to the application go (IBM's MscAppInterface): the
+    /// active window (HM_SET_ACTIVE_WINDOW, or where the last request
+    /// came from), else the frame associated last.
+    pub fn app_window(&self) -> u32 {
+        if self.active != 0 { self.active } else { self.assoc }
+    }
+
     /// The panel with resource id `res` in any library.
     pub fn panel_by_res(&self, res: u16) -> Option<PanelRef> {
         self.libs.iter().enumerate().find_map(|(lib, l)| l.doc().panel_by_res(res).map(|toc| PanelRef { lib, toc }))
@@ -674,6 +698,13 @@ extern "C" fn instance_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         HM_DISMISS_WINDOW => {
             window::close(inst);
+            0
+        }
+        HM_SET_OBJCOM_WINDOW => core::mem::replace(&mut inst.objcom, mp1),
+        // mp1: how many ids (0: all), mp2: the ids (u16 each).
+        HM_INVALIDATE_DDF_DATA => {
+            let ids: Vec<u16> = if mp1 == 0 || mp2 == 0 { Vec::new() } else { (0..mp1.min(4096) as usize).map(|i| read16(mp2, i * 2)).collect() };
+            window::invalidate_ddf(inst, &ids);
             0
         }
         WM_DESTROY => {

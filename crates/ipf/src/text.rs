@@ -38,6 +38,20 @@
 //! | 0x1F | db, n, id\[n\], link data | link into an external database |
 //! | 0x20 | u16 res | dynamic data (`:ddf.`) |
 //! | 0x21 | ... | application-controlled viewport |
+//! | 0x22 | n | left margin, or a space when past it (dynamic data lists) |
+//!
+//! Dynamic data (the help manager's Ddf* functions, [`decode_ddf`]) is
+//! the same text, its words written out (no dictionary) and no
+//! autospacing: a word is `FF len 66 chars`, 0xFE one space. Its own
+//! escapes:
+//!
+//! | Type | Data | Meaning |
+//! |------|------|---------|
+//! | 0x65 | name | link to a panel by name (`DdfHyperText` by id) |
+//! | 0x66 | chars | a word |
+//! | 0x67 | u16 width, u16 height, u8 n, face\[n\] | font by face and point size |
+//! | 0x68 | u32 HBITMAP, u8 alignment | the application's bitmap |
+//! | 0x69 | RECTL, u32 HMF | the application's metafile |
 //!
 //! Link data: `u16 flags`, then by flag 0x01 origin and 0x02 size (`u8
 //! units, u16, u16` each), 0x08 a window id, 0x400 a group (u16 each);
@@ -103,6 +117,8 @@ pub enum Target<'a> {
     /// A panel of external database `db` (header's database list) by
     /// resource id or name `id`.
     External { db: u8, id: &'a [u8] },
+    /// A panel of this file by name (dynamic data's hypertext).
+    Name(&'a [u8]),
 }
 
 /// A hypergraphic area of the last bitmap with link areas: `rect` (x, y
@@ -128,6 +144,7 @@ pub enum Item<'a> {
     MarginNewLine(u8),
     MarginIfPast(u8),
     MarginHere,
+    MarginOrSpace(u8),
     Style(u8),
     SpecialColor(u8),
     Foreground(u8),
@@ -146,6 +163,18 @@ pub enum Item<'a> {
     HideBegin(&'a [u8]),
     HideEnd,
     Ddf(u16),
+    /// Dynamic data starts (spacing as written) / ends: put around the
+    /// items of [`decode_ddf`] by [`expand_ddf`].
+    DdfBegin,
+    DdfEnd,
+    /// A font by face name and point size (dynamic data).
+    FaceFont { face: &'a [u8], width: u16, height: u16 },
+    /// An application's bitmap (HBITMAP) with its alignment (0x01 left,
+    /// 0x02 right, 0x04 centre, 0x10 in the text).
+    Image { handle: u32, flags: u8 },
+    /// An application's metafile (HMF) in a rectangle (xLeft, yBottom,
+    /// xRight, yTop; empty: the whole window).
+    Metafile { handle: u32, rect: [i32; 4] },
     /// Another escape (type, data), ignored when formatting.
     Other(u8, &'a [u8]),
 }
@@ -204,6 +233,7 @@ fn escape(e: &[u8]) -> Option<Item<'_>> {
             Item::Link { target: Target::External { db, id }, data: data_at(5 + n) }
         }
         0x20 => Item::Ddf(u16_at(e, 3)?),
+        0x22 => Item::MarginOrSpace(arg()?),
         _ => Item::Other(ty, &e[3..]),
     })
 }
@@ -249,7 +279,12 @@ fn art(e: &[u8]) -> Option<Item<'_>> {
 /// local dictionary) are left out.
 pub fn decode<'a>(doc: &Doc<'a>, cell: &Cell<'a>) -> Vec<Item<'a>> {
     let limit = doc.data().get(0x52).copied().unwrap_or(0xf5).min(0xfa);
-    let t = cell.text;
+    items(cell.text, false, |b| if b < limit { cell.word(b).map(|w| Item::Word(doc.word(w))) } else { None })
+}
+
+/// The items of text `t` (dynamic data if `ddf`): other bytes below 0xFA
+/// are decoded by `word`.
+fn items<'a>(t: &'a [u8], ddf: bool, word: impl Fn(u8) -> Option<Item<'a>>) -> Vec<Item<'a>> {
     let mut v = Vec::with_capacity(t.len());
     let mut p = 0;
     while p < t.len() {
@@ -261,26 +296,76 @@ pub fn decode<'a>(doc: &Doc<'a>, cell: &Cell<'a>) -> Vec<Item<'a>> {
             0xfd => v.push(Item::Break),
             0xfe => v.push(Item::Space),
             0xff => {
-                let n = t.get(p + 1).copied().unwrap_or(0) as usize;
+                let mut n = t.get(p + 1).copied().unwrap_or(0) as usize;
+                // DdfMetafile writes 0x14 for its 22 bytes.
+                if ddf && t.get(p + 2) == Some(&0x69) {
+                    n = 22;
+                }
                 let end = (p + 1 + n).min(t.len());
                 if n >= 2 {
-                    if let Some(i) = escape(&t[p..end]) {
+                    let e = &t[p..end];
+                    if let Some(i) = if ddf { ddf_escape(e) } else { escape(e) } {
                         v.push(i);
                     }
                 }
                 p = end.max(p + 1);
                 continue;
             }
-            _ if b < limit => {
-                if let Some(w) = cell.word(b) {
-                    v.push(Item::Word(doc.word(w)));
-                }
-            }
-            _ => {}
+            _ => v.extend(word(b)),
         }
         p += 1;
     }
     v
+}
+
+/// Escapes of dynamic data: those of cells and its own (0x65-0x69).
+fn ddf_escape(e: &[u8]) -> Option<Item<'_>> {
+    let ty = *e.get(2)?;
+    let i32_at = |o: usize| u32_at(e, o).map(|v| v as i32);
+    Some(match ty {
+        0x65 => {
+            let n = &e[3..];
+            Item::Link { target: Target::Name(&n[..n.iter().position(|&c| c == 0).unwrap_or(n.len())]), data: None }
+        }
+        0x66 => Item::Word(&e[3..]),
+        0x67 => {
+            let n = *e.get(7)? as usize;
+            Item::FaceFont { face: e.get(8..8 + n)?, width: u16_at(e, 3)?, height: u16_at(e, 5)? }
+        }
+        0x68 => Item::Image { handle: u32_at(e, 3)?, flags: *e.get(7)? },
+        0x69 => Item::Metafile { handle: u32_at(e, 19)?, rect: [i32_at(3)?, i32_at(7)?, i32_at(11)?, i32_at(15)?] },
+        _ => return escape(e),
+    })
+}
+
+/// The items of dynamic data (a DDF buffer the application built with
+/// the help manager's Ddf* functions).
+pub fn decode_ddf(buf: &[u8]) -> Vec<Item<'_>> {
+    items(buf, true, |_| None)
+}
+
+/// Put the dynamic data `ddf` gives for each `:ddf.` of `cells` in its
+/// place (between [`Item::DdfBegin`] and [`Item::DdfEnd`]).
+pub fn expand_ddf<'a>(cells: &mut [Vec<Item<'a>>], mut ddf: impl FnMut(u16) -> Option<&'a [u8]>) {
+    for c in cells.iter_mut() {
+        if !c.iter().any(|i| matches!(i, Item::Ddf(_))) {
+            continue;
+        }
+        let mut out = Vec::with_capacity(c.len());
+        for i in c.drain(..) {
+            match i {
+                Item::Ddf(res) => {
+                    out.push(Item::DdfBegin);
+                    if let Some(b) = ddf(res) {
+                        out.extend(decode_ddf(b));
+                    }
+                    out.push(Item::DdfEnd);
+                }
+                i => out.push(i),
+            }
+        }
+        *c = out;
+    }
 }
 
 /// The items of panel `toc`: its cells' items, each cell starting with

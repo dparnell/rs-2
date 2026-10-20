@@ -166,6 +166,20 @@ unsafe extern "C" {
     pub fn GpiDrawBits(hps: u32, bits: *const u8, bmi: *const u8, n: i32, p: *const PointL, rop: i32, opts: u32) -> i32;
     #[link_name = "PMGPI.514"]
     pub fn GpiSetCharShear(hps: u32, p: *const PointL) -> u32;
+    #[link_name = "PMGPI.573"]
+    pub fn GpiQueryBitmapParameters(hbm: u32, p: *mut u8) -> u32;
+    #[link_name = "PMGPI.411"]
+    pub fn GpiPlayMetaFile(hps: u32, hmf: u32, n1: i32, opts: *const i32, segs: *mut i32, n2: i32, desc: *mut u8) -> i32;
+    #[link_name = "PMGPI.368"]
+    pub fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *const u8) -> i32;
+    #[link_name = "PMGPI.510"]
+    pub fn GpiSetCharBox(hps: u32, p: *const i32) -> u32;
+    #[link_name = "PMGPI.513"]
+    pub fn GpiSetCharSet(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.378"]
+    pub fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMWIN.730"]
+    pub fn WinDrawBitmap(hps: u32, hbm: u32, src: *const RectL, dst: *const PointL, fore: i32, back: i32, fl: u32) -> u32;
 }
 
 unsafe extern "C" {
@@ -296,6 +310,8 @@ pub const BM_OVERPAINT: i32 = 2;
 pub const DRO_OUTLINE: i32 = 2;
 pub const DRO_FILL: i32 = 1;
 pub const ROP_SRCCOPY: i32 = 0xcc;
+pub const DBM_NORMAL: u32 = 0;
+pub const DBM_STRETCH: u32 = 4;
 
 pub const SPTR_ARROW: i32 = 1;
 pub const SPTR_WAIT: i32 = 3;

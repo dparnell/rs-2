@@ -53,6 +53,15 @@ impl Metrics for Gpi {
     fn width(&mut self, _font: u8, _style: u8, word: &[u8]) -> i32 {
         self.text_width(word)
     }
+
+    fn image(&mut self, hbm: u32) -> (i32, i32) {
+        let mut b = [0u8; 12];
+        b[0] = 12;
+        if unsafe { GpiQueryBitmapParameters(hbm, b.as_mut_ptr()) } == 0 {
+            return (0, 0);
+        }
+        (u16::from_le_bytes([b[4], b[5]]) as i32, u16::from_le_bytes([b[6], b[7]]) as i32)
+    }
 }
 
 /// PM colour for a help file colour index (0: `default`).
@@ -131,6 +140,26 @@ impl Draw<'_, '_> {
                             GpiMove(hps, &PointL { x: r.x, y: base - 1 });
                             GpiLine(hps, &PointL { x: r.x + r.width - 1, y: base - 1 });
                         }
+                    }
+                }
+                RunKind::Image { handle, metafile, cx, cy, fit } => {
+                    let (x0, y0, x1, y1) = if fit {
+                        (0, 0, self.w, self.h)
+                    } else {
+                        let b = self.wy(r.y);
+                        (r.x, b, r.x + cx, b + cy)
+                    };
+                    if y1 < 0 || y0 > self.h {
+                        continue;
+                    }
+                    if metafile {
+                        // GpiPlayMetaFile draws nothing yet in rs2.
+                        unsafe { GpiPlayMetaFile(hps, handle, 0, core::ptr::null(), core::ptr::null_mut(), 0, core::ptr::null_mut()) };
+                    } else if fit {
+                        let dst = RectL { l: x0, b: y0, r: x1, t: y1 };
+                        unsafe { WinDrawBitmap(hps, handle, core::ptr::null(), &dst as *const RectL as *const PointL, 0, 0, DBM_STRETCH) };
+                    } else {
+                        unsafe { WinDrawBitmap(hps, handle, core::ptr::null(), &PointL { x: x0, y: y0 }, 0, 0, DBM_NORMAL) };
                     }
                 }
                 RunKind::Bitmap { offset, cx, cy, fit, .. } => {

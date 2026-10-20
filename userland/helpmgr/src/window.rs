@@ -9,8 +9,8 @@ use crate::render::{Bitmaps, Draw, Gpi};
 use crate::{Instance, PanelRef, HM_INFORM};
 use alloc::vec;
 use alloc::vec::Vec;
-use ipf::layout::{layout, Hit, Options, Page};
-use ipf::text::Target;
+use ipf::layout::{layout_items, Hit, Options, Page};
+use ipf::text::{decode, expand_ddf, Item, Target};
 
 const CLIENT: &[u8] = b"HMHelpWindow\0";
 const PANEL: &[u8] = b"HMHelpPanel\0";
@@ -60,6 +60,9 @@ struct View {
     bitmaps: Bitmaps,
     /// A footnote window: one panel, no buttons.
     footnote: bool,
+    /// The dynamic data of the panel's `:ddf.`s: resource id, the text
+    /// (pages borrow it) and whether it is still valid.
+    ddf: Vec<(u16, alloc::boxed::Box<[u8]>, bool)>,
 }
 
 impl View {
@@ -176,6 +179,7 @@ fn make(inst: &mut Instance, footnote: bool) -> &'static mut View {
         rows: Vec::new(),
         bitmaps: Bitmaps::new(),
         footnote,
+        ddf: Vec::new(),
     }));
     unsafe { WinSetWindowULong(client, QWL_USER, v as u32) };
     let v = unsafe { &mut *v };
@@ -203,8 +207,8 @@ fn activate(v: &View) {
 }
 
 fn notify(inst: &Instance, code: u32) {
-    if inst.active != 0 && !inst.book {
-        send(inst.active, crate::HM_NOTIFY, code, inst.frame);
+    if inst.app_window() != 0 && !inst.book {
+        send(inst.app_window(), crate::HM_NOTIFY, code, inst.frame);
     }
 }
 
@@ -270,6 +274,7 @@ fn go(v: &mut View, mode: Mode, remember: bool) {
 fn enter(v: &mut View) {
     v.sel = None;
     v.page = None;
+    v.ddf.clear();
     match v.mode.clone() {
         Mode::Panel(_) => {
             relayout(v);
@@ -355,16 +360,73 @@ fn relayout(v: &mut View) {
     let inst = v.inst();
     let Some(lib) = inst.libs.get(p.lib) else { return };
     let w = window_rect(v.panel).r.max(64);
+    let doc = lib.doc();
+    let Ok(entry) = doc.toc(p.toc) else { return };
+    let mut cells: Vec<Vec<Item<'static>>> = entry.cells.iter().filter_map(|&c| doc.cell(c).ok()).map(|c| decode(doc, &c)).collect();
+    // The page (and the window's text) is laid out again before the
+    // dynamic data it borrows is replaced.
+    v.page = None;
+    let ddf = &mut v.ddf;
+    let (panel, objcom, active) = (v.panel, inst.objcom, inst.app_window());
+    expand_ddf(&mut cells, |res| {
+        let i = match ddf.iter().position(|d| d.0 == res) {
+            Some(i) if ddf[i].2 => i,
+            known => {
+                let data = query_ddf(panel, if objcom != 0 { objcom } else { active }, res);
+                match known {
+                    Some(i) => ddf[i] = (res, data, true),
+                    None => ddf.push((res, data, true)),
+                }
+                known.unwrap_or(ddf.len() - 1)
+            }
+        };
+        let b: &[u8] = &ddf[i].1;
+        Some(unsafe { core::slice::from_raw_parts(b.as_ptr(), b.len()) })
+    });
     let hps = unsafe { WinGetPS(v.panel) };
     let mut g = Gpi::new(hps);
     let keys = keys();
-    let page = layout(lib.doc(), p.toc, &Options { width: w, keys: &keys }, &mut g);
+    let page = layout_items(doc, &cells, &Options { width: w, keys: &keys }, &mut g);
     v.line = ipf::layout::Metrics::system(&mut g).height.max(8);
     unsafe { WinReleasePS(hps) };
     v.page = Some(page);
     v.page_width = w;
     clamp(v);
     set_scroll(v);
+}
+
+/// The dynamic data of `:ddf res=` for panel window `panel`, asked of
+/// the application (HM_QUERY_DDF_DATA; IBM's PnlGethDDF): its DDF's
+/// text, the handle freed.
+fn query_ddf(panel: u32, app: u32, res: u16) -> alloc::boxed::Box<[u8]> {
+    if app == 0 {
+        return alloc::boxed::Box::new([]);
+    }
+    let h = send(app, crate::HM_QUERY_DDF_DATA, panel, res as u32);
+    let Some(d) = crate::ddf::get(h) else {
+        post(app, crate::HM_ERROR, crate::HMERR_DDF_INVALID, 0);
+        return alloc::boxed::Box::new([]);
+    };
+    let data = core::mem::take(&mut d.buf).into_boxed_slice();
+    crate::ddf::free(h);
+    data
+}
+
+/// Dynamic data of the panel shown changed (HM_INVALIDATE_DDF_DATA):
+/// `ids` (empty: all) are asked for again.
+pub fn invalidate_ddf(inst: &mut Instance, ids: &[u16]) {
+    let Some(v) = view_of(inst) else { return };
+    let mut any = false;
+    for d in v.ddf.iter_mut() {
+        if ids.is_empty() || ids.contains(&d.0) {
+            d.2 = false;
+            any = true;
+        }
+    }
+    if any {
+        relayout(v);
+        unsafe { WinInvalidateRect(v.panel, core::ptr::null(), 0) };
+    }
 }
 
 /// IPF_KEYS, which `:hide.` text needs.
@@ -788,9 +850,15 @@ fn follow(v: &mut View, hit: Hit) {
                 open(v, p, false);
             }
         }
+        Target::Name(n) => {
+            let p = inst.libs[cur.lib].doc().panel_by_name(n).map(|toc| PanelRef { lib: cur.lib, toc }).or_else(|| inst.panel_by_name(n));
+            if let Some(p) = p {
+                open(v, p, false);
+            }
+        }
         Target::Inform(r) => {
-            if inst.active != 0 {
-                post(inst.active, HM_INFORM, r as u32, 0);
+            if inst.app_window() != 0 {
+                post(inst.app_window(), HM_INFORM, r as u32, 0);
             }
         }
         Target::Launch(cmd) => launch(cmd),

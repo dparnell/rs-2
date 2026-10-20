@@ -20,6 +20,21 @@ macro_rules! aligned {
 }
 
 aligned! {
+    __a_DdfInitialize => crate::ddf::DdfInitialize, 3;
+    __a_DdfPara => crate::ddf::DdfPara, 1;
+    __a_DdfSetFormat => crate::ddf::DdfSetFormat, 2;
+    __a_DdfSetTextAlign => crate::ddf::DdfSetTextAlign, 2;
+    __a_DdfSetColor => crate::ddf::DdfSetColor, 3;
+    __a_DdfInform => crate::ddf::DdfInform, 3;
+    __a_DdfSetFontStyle => crate::ddf::DdfSetFontStyle, 2;
+    __a_DdfHyperText => crate::ddf::DdfHyperText, 4;
+    __a_DdfBeginList => crate::ddf::DdfBeginList, 4;
+    __a_DdfListItem => crate::ddf::DdfListItem, 3;
+    __a_DdfEndList => crate::ddf::DdfEndList, 1;
+    __a_DdfText => crate::ddf::DdfText, 2;
+    __a_DdfMetafile => crate::ddf::DdfMetafile, 3;
+    __a_DdfSetFont => crate::ddf::DdfSetFont, 4;
+    __a_DdfBitmap => crate::ddf::DdfBitmap, 3;
     __a_WinCreateHelpInstance => crate::WinCreateHelpInstance, 2;
     __a_WinDestroyHelpInstance => crate::WinDestroyHelpInstance, 1;
     __a_WinQueryHelpInstance => crate::WinQueryHelpInstance, 1;

@@ -1,0 +1,13 @@
+[package]
+name = "hmtest"
+description = "HMTEST.EXE: exercises the help manager (dynamic data, panel windows, fonts, message box help) with HMTEST.HLP"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "hmtest"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

@@ -13,6 +13,8 @@
 //! - `:hp1.`-`:hp7.` / `:ehp1.`-`:ehp7.` (italic, bold, underlined and
 //!   their mixes; `:hp4.` is bold);
 //! - `:link reftype=hd res=N.` or `refid=ID.` ... `:elink.`;
+//! - `:font facename=F size=HxW.` (`facename=default`: the document's
+//!   font) and `:ddf res=N.` (the application's dynamic data);
 //! - symbols such as `&colon.`, `&amp.`, `&period.`.
 //!
 //! Text is in the file's code page (437); words are runs of letters and
@@ -100,6 +102,8 @@ struct Parser {
     margin: u8,
     /// The margin a `:note.` returns to.
     note: Option<u8>,
+    /// The font table after entry 0: face, point height and width.
+    fonts: Vec<(Vec<u8>, u16, u16)>,
 }
 
 fn err<T>(line: usize, msg: impl Into<String>) -> Result<T, CompileError> {
@@ -402,6 +406,35 @@ impl Parser {
                 self.push(Tok::Link(r, line))?;
             }
             b"elink" => self.push(Tok::Esc(esc(0x08, &[]), false))?,
+            b"ddf" => {
+                let Some(r) = get(b"res") else { return err(line, ":ddf. needs res=") };
+                let r = number(line, &r)?;
+                self.push(Tok::Esc(esc(0x20, &r.to_le_bytes()), true))?;
+            }
+            b"font" => {
+                let face = get(b"facename").unwrap_or_default();
+                let n = if face.is_empty() || face.eq_ignore_ascii_case(b"default") {
+                    0
+                } else {
+                    let size = get(b"size").unwrap_or_default();
+                    let mut hw = size.splitn(2, |&c| c == b'x' || c == b'X');
+                    let h = number(line, hw.next().unwrap_or(b"0"))?;
+                    let w = number(line, hw.next().unwrap_or(b"0"))?;
+                    let f = (face, h, w);
+                    let i = match self.fonts.iter().position(|x| *x == f) {
+                        Some(i) => i,
+                        None => {
+                            if self.fonts.len() == 15 {
+                                return err(line, "more than 15 fonts");
+                            }
+                            self.fonts.push(f);
+                            self.fonts.len() - 1
+                        }
+                    };
+                    i as u8 + 1
+                };
+                self.push(Tok::Esc(esc(0x19, &[n]), false))?;
+            }
             _ => return err(line, format!("unknown tag :{}.", crate::latin1(name))),
         }
         Ok(false)
@@ -526,7 +559,7 @@ fn nls(codepage: u16) -> Vec<u8> {
 /// Compile IPF source (code page 437 text) into a help library
 /// (`help`) or a book.
 pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
-    let mut ps = Parser { line: 0, title: Vec::new(), panels: Vec::new(), index: Vec::new(), lists: Vec::new(), margin: 1, note: None };
+    let mut ps = Parser { line: 0, title: Vec::new(), panels: Vec::new(), index: Vec::new(), lists: Vec::new(), margin: 1, note: None, fonts: Vec::new() };
     for (i, l) in src.split(|&c| c == b'\n').enumerate() {
         ps.line = i + 1;
         let l = l.strip_suffix(b"\r").unwrap_or(l);
@@ -565,6 +598,15 @@ pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
                 }
                 words.insert(dict_key(w));
             }
+        }
+    }
+    // Panel names (`id=`) are dictionary words too.
+    for p in &panels {
+        if let Some(id) = &p.id {
+            if id.len() > 254 {
+                return err(0, "panel name too long");
+            }
+            words.insert(dict_key(id));
         }
     }
     let dict: Vec<Vec<u8>> = words.into_iter().map(|(_, w)| w).collect();
@@ -715,12 +757,16 @@ pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
     // control data.
     let db_start = f.len();
     let font_start = f.len();
-    let mut face = [0u8; 33];
-    face[..19].copy_from_slice(b"System Proportional");
-    f.extend_from_slice(&face);
-    put16(&mut f, 0);
-    put16(&mut f, 0);
-    put16(&mut f, 437);
+    let fonts: Vec<(Vec<u8>, u16, u16)> = core::iter::once((b"System Proportional".to_vec(), 0, 0)).chain(ps.fonts.iter().cloned()).collect();
+    for (name, h, w) in &fonts {
+        let mut face = [0u8; 33];
+        let n = name.len().min(32);
+        face[..n].copy_from_slice(&name[..n]);
+        f.extend_from_slice(&face);
+        put16(&mut f, *h);
+        put16(&mut f, *w);
+        put16(&mut f, 437);
+    }
     let ctrl_start = f.len();
     f.extend_from_slice(&[0; 8]);
 
@@ -756,9 +802,18 @@ pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
         put32(&mut f, o);
     }
 
-    // No panel names.
+    // Panel names: their word numbers, sorted, then their panels.
+    let mut names: Vec<(u16, u16)> = panels.iter().enumerate().filter_map(|(i, p)| p.id.as_ref().map(|id| (word_no[id.as_slice()], i as u16))).collect();
+    names.sort();
+    set16(&mut f, 0x1c, names.len() as u16);
     let x = f.len() as u32;
     set32(&mut f, 0x1e, x);
+    for &(w, _) in &names {
+        put16(&mut f, w);
+    }
+    for &(_, i) in &names {
+        put16(&mut f, i);
+    }
 
     // Full-text search: for each word, the panels it is in.
     let records: Vec<Vec<u8>> = search
@@ -793,7 +848,7 @@ pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
     // The extended header.
     let ext = f.len();
     f.extend_from_slice(&[0; 0x40]);
-    set16(&mut f, ext, 1);
+    set16(&mut f, ext, fonts.len() as u16);
     set32(&mut f, ext + 2, font_start as u32);
     set32(&mut f, ext + 8, db_start as u32);
     set32(&mut f, ext + 0x28, ctrl_start as u32);

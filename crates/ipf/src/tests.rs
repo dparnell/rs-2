@@ -6,6 +6,7 @@ use crate::layout::{layout, FontMetrics, Metrics, Options, RunKind};
 use crate::text::{decode, Item, Target};
 use std::path::PathBuf;
 use std::string::String;
+use std::vec;
 use std::vec::Vec;
 
 fn media(rel: &str) -> Option<Vec<u8>> {
@@ -38,7 +39,7 @@ fn render(doc: &Doc<'_>, toc: u16, width: i32) -> Vec<String> {
     for r in &page.runs {
         let (y, text): (usize, &[u8]) = match r.kind {
             RunKind::Word(w) => (r.y as usize, w),
-            RunKind::Bitmap { .. } => (r.y as usize, b"[bitmap]"),
+            RunKind::Bitmap { .. } | RunKind::Image { .. } => (r.y as usize, b"[bitmap]"),
         };
         if rows.len() <= y {
             rows.resize(y + 1, Vec::new());
@@ -270,4 +271,73 @@ fn compile_errors() {
     let e = crate::compile::compile(b":h1.A\n:p.:link reftype=hd res=9.x:elink.\n", true).unwrap_err();
     assert_eq!(e.line, 2);
     assert!(crate::compile::compile(b":h1.A\n:frob.\n", true).is_err());
+}
+
+/// Dynamic data as the Ddf* functions write it: words as 0x66 escapes,
+/// one space per 0xFE, no autospacing; a link by name and a font.
+#[test]
+fn ddf_buffer() {
+    use crate::text::{decode_ddf, expand_ddf};
+    let word = |w: &[u8]| {
+        let mut v = vec![0xff, w.len() as u8 + 2, 0x66];
+        v.extend_from_slice(w);
+        v
+    };
+    let mut b = Vec::new();
+    b.extend(word(b"Hello"));
+    b.extend(word(b","));
+    b.push(0xfe);
+    b.extend(word(b"world"));
+    b.push(0xfa);
+    b.extend([0xff, 0x08, 0x65]);
+    b.extend_from_slice(b"there\0");
+    b.extend(word(b"link"));
+    b.extend([0xff, 0x02, 0x08]);
+    b.extend([0xff, 12, 0x67, 10, 0, 12, 0, 5]);
+    b.extend_from_slice(b"Times");
+    b.extend([0xff, 0x14, 0x69]);
+    b.extend([0u8; 16]);
+    b.extend(7u32.to_le_bytes());
+    b.extend(word(b"end"));
+    let items = decode_ddf(&b);
+    assert_eq!(items[0], Item::Word(b"Hello"));
+    assert_eq!(items[1], Item::Word(b","));
+    assert_eq!(items[2], Item::Space);
+    assert_eq!(items[4], Item::Para);
+    assert_eq!(items[5], Item::Link { target: Target::Name(b"there"), data: None });
+    assert_eq!(items[8], Item::FaceFont { face: b"Times", width: 10, height: 12 });
+    assert_eq!(items[9], Item::Metafile { handle: 7, rect: [0; 4] });
+    assert_eq!(items[10], Item::Word(b"end"));
+
+    // Laid out: no space after "Hello", one before "world".
+    let data = crate::compile::compile(b":userdoc.\n:h1 res=1.A\n:p.x\n:euserdoc.\n", true).unwrap();
+    let doc = Doc::parse(&data).unwrap();
+    let mut cells = vec![vec![Item::Word(b"Text"), Item::Ddf(5), Item::Word(b"after")]];
+    expand_ddf(&mut cells, |r| (r == 5).then_some(&b[..]));
+    let page = crate::layout::layout_items(&doc, &cells, &Options { width: 60, keys: b"" }, &mut Grid);
+    let words: Vec<(i32, &[u8])> = page
+        .runs
+        .iter()
+        .filter_map(|r| match r.kind {
+            RunKind::Word(w) => Some((r.x, w)),
+            _ => None,
+        })
+        .collect();
+    let x = |w: &[u8]| words.iter().find(|(_, t)| *t == w).unwrap().0;
+    assert_eq!(x(b","), x(b"Hello") + 5);
+    assert_eq!(x(b"world"), x(b",") + 2);
+    assert_eq!(page.links.len(), 1);
+}
+
+/// The compiler writes panel names (`id=`) and fonts (`:font.`).
+#[test]
+fn compile_names_and_fonts() {
+    let src = b":userdoc.\n:h1 res=1.A\n:p.:font facename=Helv size=14x10.x\n:h1 res=2 id=Second.B\n:p.y\n:euserdoc.\n";
+    let data = crate::compile::compile(src, true).unwrap();
+    let doc = Doc::parse(&data).unwrap();
+    assert_eq!(doc.panel_by_name(b"second"), Some(1));
+    assert_eq!(doc.panel_by_name(b"x"), None);
+    let f = doc.fonts();
+    assert_eq!(f.len(), 2);
+    assert_eq!((f[1].face.as_slice(), f[1].height, f[1].width), (&b"Helv"[..], 14, 10));
 }
