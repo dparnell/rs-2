@@ -1035,6 +1035,7 @@ pub extern "C" fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut Re
     const DT_BOTTOM: u32 = 0x800;
     const DT_ERASERECT: u32 = 0x8000;
     const DT_TEXTATTRS: u32 = 0x40;
+    const DT_QUERYEXTENT: u32 = 0x2;
     if text.is_null() || prcl.is_null() {
         return 0;
     }
@@ -1058,6 +1059,14 @@ pub extern "C" fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut Re
     } else {
         r.top - font.height + font.descender
     };
+    if fl & DT_QUERYEXTENT != 0 {
+        // Only the rectangle the text would take, aligned as asked (OS/2
+        // applets lay themselves out from the height of a line).
+        let bottom = y - font.descender;
+        let e = RectL { left: x, bottom, right: x + w, top: bottom + font.height };
+        unsafe { prcl.write_unaligned(e) };
+        return t.len() as i32;
+    }
     pointer::hide(s);
     if let Some(e) = gpiapi::entry(s, hps) {
         if fl & DT_ERASERECT != 0 {
