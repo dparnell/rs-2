@@ -1,0 +1,8 @@
+[package]
+name = "uls"
+description = "no_std Unicode locale support for LIBUNI and UCONV: rs2's locale tables, user locales (USER.LOC), strftime, character types, code page tables"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]

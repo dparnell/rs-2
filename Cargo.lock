@@ -75,6 +75,10 @@ name = "tcpip"
 version = "0.1.0"
 
 [[package]]
+name = "uls"
+version = "0.1.0"
+
+[[package]]
 name = "unpack"
 version = "0.1.0"
 dependencies = [
