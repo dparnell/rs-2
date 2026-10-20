@@ -22,6 +22,7 @@ mod entry;
 mod exports;
 mod fileicon;
 mod frame;
+mod help;
 mod gpiapi;
 mod gpiobj;
 mod gpitext;

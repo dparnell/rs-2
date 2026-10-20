@@ -11,7 +11,7 @@ use crate::lock::wndproc;
 use crate::msg::{post, send, WinDefWindowProc};
 use crate::state::{st, Drag, Frame};
 use crate::win::{self, WinSetWindowPos, WinWindowFromID, WM_BUTTON1DOWN, WM_CHAR, WM_CLOSE, WM_PAINT, WM_SYSCOMMAND};
-use crate::{accel, color, menu};
+use crate::{accel, color, help, menu};
 
 pub const FCF_TITLEBAR: u32 = 0x0001;
 pub const FCF_SYSMENU: u32 = 0x0002;
@@ -102,7 +102,7 @@ pub fn create(parent: u32, style: u32, fcf: u32, title: &[u8], pos: Rect, owner:
     if frame == 0 {
         return 0;
     }
-    st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None });
+    st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0 });
     if fcf & FCF_ICON != 0 {
         let i = crate::pointer::WinLoadPointer(1, hmod, id);
         if let Some(f) = st().frames.get_mut(&frame) {
@@ -537,7 +537,7 @@ pub fn edges_at(h: u32, p: Point) -> u8 {
 
 /// The frame forwards these from its controls to the client.
 fn forwarded(msg: u32) -> bool {
-    matches!(msg, WM_COMMAND | WM_HELP | WM_CONTROL | WM_VSCROLL | WM_HSCROLL | WM_INITMENU | WM_MENUSELECT | WM_MENUEND | WM_DRAWITEM | WM_MEASUREITEM)
+    matches!(msg, WM_COMMAND | WM_CONTROL | WM_VSCROLL | WM_HSCROLL | WM_INITMENU | WM_MENUSELECT | WM_MENUEND | WM_DRAWITEM | WM_MEASUREITEM)
 }
 
 pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
@@ -621,6 +621,22 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             }
             0
         }
+        // WM_HELP from the frame's controls, its client (by default) or
+        // F1 is help on the window with the focus.
+        WM_HELP => {
+            help::frame_help(h);
+            0
+        }
+        // WM_QUERYFRAMEINFO: FI_FRAME | FI_ACTIVATEOK.
+        0x0050 => 5,
+        help::WM_QUERYHELPINFO => st().frames.get(&h).map_or(0, |f| f.help),
+        help::WM_SETHELPINFO => {
+            if let Some(f) = st().frames.get_mut(&h) {
+                f.help = mp1;
+            }
+            1
+        }
+        WM_SYSCOMMAND if help::syscommand(h, lo(mp1), mp1, mp2) => 0,
         WM_SYSCOMMAND => {
             match lo(mp1) {
                 SC_CLOSE => {

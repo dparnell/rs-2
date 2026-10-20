@@ -4,6 +4,8 @@ SET PATH=C:\OS2;C:\OS2\SYSTEM;C:\RS2;C:\
 SET DPATH=C:\OS2;C:\OS2\SYSTEM;C:\RS2;C:\
 SET PROMPT=$i[$p]
 SET ETC=C:\MPTN\ETC
+SET HELP=C:\OS2\HELP
+SET BOOKSHELF=C:\OS2\BOOK
 SET COMSPEC=C:\OS2\CMD.EXE
 SET OS2_SHELL=C:\OS2\CMD.EXE
 REM PM: milliseconds before a program that does not take its input is "not responding"

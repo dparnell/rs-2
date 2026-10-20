@@ -396,6 +396,16 @@ pub extern "C" fn WinDefWindowProc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 
             crate::pointer::set_system(pmwin::sysptr::SPTR_ARROW);
             1
         }
+        // Help goes up to the parent (in the end a frame, which calls the
+        // help hook).
+        ctl::WM_HELP => {
+            let parent = ctl::parent(h);
+            if parent != HWND_DESKTOP && parent != pmwin::HWND_OBJECT && parent != 0 {
+                send(parent, msg, mp1, mp2)
+            } else {
+                0
+            }
+        }
         // The default for WM_MENUSELECT lets the command be posted.
         ctl::WM_MENUSELECT => 1,
         _ => 0,

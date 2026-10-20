@@ -5,3 +5,4 @@ WinQueryHelpInstance=__a_WinQueryHelpInstance @53
 WinAssociateHelpInstance=__a_WinAssociateHelpInstance @54
 WinLoadHelpTable=__a_WinLoadHelpTable @55
 WinCreateHelpTable=__a_WinCreateHelpTable @56
+Rs2ViewBook=__a_Rs2ViewBook @200

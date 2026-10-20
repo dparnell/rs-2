@@ -22,8 +22,10 @@ const AF_CONTROL: u16 = 0x0010;
 const AF_ALT: u16 = 0x0020;
 const AF_SYSCOMMAND: u16 = 0x0100;
 const AF_HELP: u16 = 0x0200;
+const VK_F1: u32 = 0x20;
 
-const SYSTEM: [Accel; 8] = [
+const SYSTEM: [Accel; 9] = [
+    Accel { fs: AF_VIRTUALKEY | AF_HELP, key: VK_F1 as u16, cmd: 0 },
     Accel { fs: AF_VIRTUALKEY | AF_SYSCOMMAND, key: ctl::VK_F10 as u16, cmd: SC_APPMENU as u16 },
     Accel { fs: AF_VIRTUALKEY | AF_ALT | AF_SYSCOMMAND, key: 0x23, cmd: SC_CLOSE as u16 },
     Accel { fs: AF_VIRTUALKEY | AF_ALT | AF_SYSCOMMAND, key: ctl::VK_SPACE as u16, cmd: SC_SYSMENU as u16 },

@@ -1,0 +1,13 @@
+[package]
+name = "view"
+description = "VIEW.EXE: shows OS/2 books (.INF) with the help manager's window"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "view"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

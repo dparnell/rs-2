@@ -1,0 +1,758 @@
+//! The help window: a frame whose client shows a panel (a page laid out
+//! by `ipf::layout`, scrolled, with its links reachable by mouse and Tab)
+//! or a list (contents, index, search results), with Previous, Search,
+//! Index and Contents push buttons below. Following a link or choosing a
+//! list entry remembers where the window was, for Previous (or Esc).
+
+use crate::pm::*;
+use crate::render::{Bitmaps, Draw, Gpi};
+use crate::{Instance, PanelRef, HM_INFORM};
+use alloc::vec;
+use alloc::vec::Vec;
+use ipf::layout::{layout, Hit, Options, Page};
+use ipf::text::Target;
+
+const CLIENT: &[u8] = b"HMHelpWindow\0";
+const PANEL: &[u8] = b"HMHelpPanel\0";
+const FID_CLIENT: u32 = 0x8008;
+
+const ID_PANEL: u32 = 10;
+const ID_SCROLL: u32 = 11;
+const ID_LIST: u32 = 12;
+const ID_ENTRY: u32 = 13;
+const ID_PREVIOUS: u32 = 1;
+const ID_SEARCH: u32 = 2;
+const ID_INDEX: u32 = 4;
+const ID_CONTENTS: u32 = 5;
+const BUTTONS: [(u32, &[u8]); 4] =
+    [(ID_PREVIOUS, b"~Previous\0"), (ID_SEARCH, b"~Search...\0"), (ID_INDEX, b"~Index\0"), (ID_CONTENTS, b"~Contents\0")];
+
+const BUTTON_ROW: i32 = 34;
+const ENTRY_ROW: i32 = 30;
+
+/// What the window shows.
+#[derive(Clone, PartialEq, Eq)]
+enum Mode {
+    Panel(PanelRef),
+    Contents,
+    Index,
+    Search(Vec<u8>),
+}
+
+struct View {
+    inst: *mut Instance,
+    frame: u32,
+    client: u32,
+    panel: u32,
+    scroll: u32,
+    list: u32,
+    entry: u32,
+    mode: Mode,
+    history: Vec<(Mode, i32)>,
+    page: Option<Page<'static>>,
+    /// Width the page was laid out for.
+    page_width: i32,
+    top: i32,
+    line: i32,
+    sel: Option<u16>,
+    /// The panels of the list's rows.
+    rows: Vec<PanelRef>,
+    bitmaps: Bitmaps,
+}
+
+impl View {
+    fn inst(&self) -> &'static mut Instance {
+        unsafe { &mut *self.inst }
+    }
+}
+
+fn view(h: u32) -> Option<&'static mut View> {
+    let p = unsafe { WinQueryWindowULong(h, QWL_USER) } as *mut View;
+    if p.is_null() { None } else { Some(unsafe { &mut *p }) }
+}
+
+fn view_of(inst: &Instance) -> Option<&'static mut View> {
+    if inst.frame == 0 {
+        return None;
+    }
+    view(unsafe { WinWindowFromID(inst.frame, FID_CLIENT) })
+}
+
+pub fn register(hab: u32) {
+    unsafe {
+        WinRegisterClass(hab, CLIENT.as_ptr(), client_proc, WS_CLIPCHILDREN, 4);
+        WinRegisterClass(hab, PANEL.as_ptr(), panel_proc, 0, 4);
+    }
+}
+
+/// Is `h` (or a window it is in) a help window?
+pub fn is_help_window(h: u32) -> bool {
+    crate::instances().iter().any(|&p| {
+        let f = unsafe { (*p).frame };
+        f != 0 && (f == h || is_inside(h, f))
+    })
+}
+
+fn is_inside(mut h: u32, f: u32) -> bool {
+    for _ in 0..32 {
+        if h == 0 || h == HWND_DESKTOP {
+            return false;
+        }
+        if h == f {
+            return true;
+        }
+        h = unsafe { WinQueryWindow(h, QW_PARENT) };
+    }
+    false
+}
+
+fn child(parent: u32, class: &[u8], text: &[u8], style: u32, id: u32) -> u32 {
+    let t = z(text);
+    unsafe {
+        WinCreateWindow(parent, class.as_ptr(), t.as_ptr(), style, 0, 0, 0, 0, parent, HWND_TOP, id, core::ptr::null(), core::ptr::null())
+    }
+}
+
+/// The help window of `inst`, made if there is none.
+fn ensure(inst: &mut Instance) -> &'static mut View {
+    if let Some(v) = view_of(inst) {
+        return v;
+    }
+    let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINBUTTON | FCF_MAXBUTTON | FCF_TASKLIST | FCF_NOBYTEALIGN;
+    let mut client = 0u32;
+    let frame = unsafe {
+        WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, CLIENT.as_ptr(), b"Help\0".as_ptr(), WS_CLIPCHILDREN, 0, 0, &mut client)
+    };
+    let v = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(View {
+        inst: inst as *mut Instance,
+        frame,
+        client,
+        panel: 0,
+        scroll: 0,
+        list: 0,
+        entry: 0,
+        mode: Mode::Contents,
+        history: Vec::new(),
+        page: None,
+        page_width: 0,
+        top: 0,
+        line: 16,
+        sel: None,
+        rows: Vec::new(),
+        bitmaps: Bitmaps::new(),
+    }));
+    unsafe { WinSetWindowULong(client, QWL_USER, v as u32) };
+    let v = unsafe { &mut *v };
+    v.panel = child(client, PANEL, b"", WS_VISIBLE | WS_TABSTOP, ID_PANEL);
+    unsafe { WinSetWindowULong(v.panel, QWL_USER, v as *mut View as u32) };
+    // Scroll bars and lists are #8 and #7, entry fields #6, buttons #3.
+    v.scroll = child(client, b"#8\0", b"", WS_VISIBLE | 1, ID_SCROLL);
+    v.list = child(client, b"#7\0", b"", WS_TABSTOP, ID_LIST);
+    v.entry = child(client, b"#6\0", b"", WS_TABSTOP | ES_AUTOSCROLL | ES_MARGIN, ID_ENTRY);
+    send(v.entry, EM_SETTEXTLIMIT, 128, 0);
+    for (id, text) in BUTTONS {
+        child(client, b"#3\0", &text[..text.len() - 1], WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON | BS_NOPOINTERFOCUS, id);
+    }
+    inst.frame = frame;
+    // On the right of the screen, as IBM's help windows come up.
+    let (sw, sh) = (sysval(SV_CXSCREEN), sysval(SV_CYSCREEN));
+    let cx = (sw * 11 / 20).clamp(320.min(sw), 680);
+    let cy = (sh * 3 / 4).clamp(240.min(sh), 640);
+    unsafe { WinSetWindowPos(frame, HWND_TOP, sw - cx - 16, sh - cy - 32, cx, cy, SWP_SIZE | SWP_MOVE) };
+    v
+}
+
+/// Show and activate the window.
+fn activate(v: &View) {
+    unsafe {
+        WinSetWindowPos(v.frame, HWND_TOP, 0, 0, 0, 0, SWP_SHOW | SWP_ZORDER | SWP_ACTIVATE);
+        WinSetFocus(HWND_DESKTOP, if matches!(v.mode, Mode::Panel(_)) { v.panel } else if matches!(v.mode, Mode::Search(_)) { v.entry } else { v.list });
+    }
+}
+
+fn notify(inst: &Instance, code: u32) {
+    if inst.active != 0 && !inst.book {
+        send(inst.active, crate::HM_NOTIFY, code, inst.frame);
+    }
+}
+
+// ---- Panels ----
+
+/// Show panel `p`, remembering the current view for Previous.
+pub fn show_panel(inst: &mut Instance, p: PanelRef, remember: bool) {
+    let v = ensure(inst);
+    go(v, Mode::Panel(p), remember);
+    notify(inst, crate::OPEN_PAGE);
+}
+
+pub fn show_contents(inst: &mut Instance) {
+    let v = ensure(inst);
+    go(v, Mode::Contents, true);
+    notify(inst, crate::OPEN_TOC);
+}
+
+pub fn show_index(inst: &mut Instance) {
+    let v = ensure(inst);
+    go(v, Mode::Index, true);
+    notify(inst, crate::OPEN_INDEX);
+}
+
+pub fn close(inst: &mut Instance) {
+    if inst.frame != 0 {
+        let f = inst.frame;
+        inst.frame = 0;
+        unsafe { WinDestroyWindow(f) };
+    }
+}
+
+fn go(v: &mut View, mode: Mode, remember: bool) {
+    let first = v.page.is_none() && v.rows.is_empty() && v.history.is_empty();
+    if remember && !first && v.mode != mode {
+        v.history.push((v.mode.clone(), v.top));
+    }
+    v.mode = mode;
+    v.top = 0;
+    enter(v);
+    activate(v);
+}
+
+/// Set the window up for its mode.
+fn enter(v: &mut View) {
+    v.sel = None;
+    v.page = None;
+    match v.mode.clone() {
+        Mode::Panel(_) => {
+            relayout(v);
+        }
+        Mode::Contents => fill_contents(v),
+        Mode::Index => fill_index(v),
+        Mode::Search(q) => fill_search(v, &q),
+    }
+    place(v);
+    set_title(v.inst());
+    unsafe { WinInvalidateRect(v.panel, core::ptr::null(), 0) };
+}
+
+fn back(v: &mut View) {
+    if let Some((m, top)) = v.history.pop() {
+        v.mode = m;
+        enter(v);
+        v.top = top;
+        clamp(v);
+        activate(v);
+    }
+}
+
+/// The help window's title: the instance's title and what is shown.
+pub fn set_title(inst: &mut Instance) {
+    let Some(v) = view_of(inst) else { return };
+    let mut t: Vec<u8> = Vec::new();
+    let what: Vec<u8> = match &v.mode {
+        Mode::Panel(p) => {
+            let mut s = inst.libs.get(p.lib).and_then(|l| l.doc().toc(p.toc).ok()).map(|e| e.title).unwrap_or_default();
+            if inst.show_ids {
+                if let Some(r) = inst.libs[p.lib].doc().res_of_panel(p.toc) {
+                    s.extend_from_slice(b" (");
+                    s.extend_from_slice(&dec(r as u32));
+                    s.push(b')');
+                }
+            }
+            s
+        }
+        Mode::Contents => b"Contents".to_vec(),
+        Mode::Index => b"Index".to_vec(),
+        Mode::Search(_) => b"Search".to_vec(),
+    };
+    let title = if inst.title.is_empty() { inst.libs.first().map(|l| l.doc().title().to_vec()).unwrap_or_default() } else { inst.title.clone() };
+    if !title.is_empty() {
+        t.extend_from_slice(&title);
+        if !what.is_empty() {
+            t.extend_from_slice(b" - ");
+        }
+    }
+    t.extend_from_slice(&what);
+    let t = z(&t);
+    unsafe { WinSetWindowText(v.frame, t.as_ptr()) };
+}
+
+fn dec(mut n: u32) -> Vec<u8> {
+    let mut v = Vec::new();
+    loop {
+        v.insert(0, b'0' + (n % 10) as u8);
+        n /= 10;
+        if n == 0 {
+            return v;
+        }
+    }
+}
+
+/// Lay the current panel out for the panel window's width.
+fn relayout(v: &mut View) {
+    let Mode::Panel(p) = v.mode else { return };
+    let inst = v.inst();
+    let Some(lib) = inst.libs.get(p.lib) else { return };
+    let w = window_rect(v.panel).r.max(64);
+    let hps = unsafe { WinGetPS(v.panel) };
+    let mut g = Gpi::new(hps);
+    let keys = keys();
+    let page = layout(lib.doc(), p.toc, &Options { width: w, keys: &keys }, &mut g);
+    v.line = ipf::layout::Metrics::system(&mut g).height.max(8);
+    unsafe { WinReleasePS(hps) };
+    v.page = Some(page);
+    v.page_width = w;
+    clamp(v);
+    set_scroll(v);
+}
+
+/// IPF_KEYS, which `:hide.` text needs.
+fn keys() -> Vec<u8> {
+    let mut p: *const u8 = core::ptr::null();
+    if unsafe { os2::dos::DosScanEnv(b"IPF_KEYS\0".as_ptr(), &mut p) } != 0 {
+        return Vec::new();
+    }
+    unsafe { cstr(p) }.to_vec()
+}
+
+fn visible_height(v: &View) -> i32 {
+    window_rect(v.panel).t
+}
+
+fn clamp(v: &mut View) {
+    let total = v.page.as_ref().map_or(0, |p| p.height + v.line);
+    let max = (total - visible_height(v)).max(0);
+    v.top = v.top.clamp(0, max);
+}
+
+fn set_scroll(v: &View) {
+    let total = v.page.as_ref().map_or(0, |p| p.height + v.line);
+    let vis = visible_height(v).max(1);
+    let line = v.line.max(1);
+    let max = ((total - vis).max(0) + line - 1) / line;
+    send(v.scroll, SBM_SETSCROLLBAR, (v.top / line) as u32, (max as u32) << 16);
+    send(v.scroll, SBM_SETTHUMBSIZE, ((vis / line) as u32) | (((total / line) as u32) << 16), 0);
+}
+
+fn scroll_to(v: &mut View, top: i32) {
+    let old = v.top;
+    v.top = top;
+    clamp(v);
+    if v.top != old {
+        set_scroll(v);
+        unsafe { WinInvalidateRect(v.panel, core::ptr::null(), 0) };
+    }
+}
+
+// ---- Lists ----
+
+fn list_add(v: &mut View, text: &[u8], p: PanelRef) {
+    let t = z(text);
+    send(v.list, LM_INSERTITEM, LIT_END, t.as_ptr() as u32);
+    v.rows.push(p);
+}
+
+fn list_start(v: &mut View) {
+    send(v.list, LM_DELETEALL, 0, 0);
+    v.rows.clear();
+}
+
+fn fill_contents(v: &mut View) {
+    list_start(v);
+    let inst = v.inst();
+    for (lib, l) in inst.libs.iter().enumerate() {
+        let d = l.doc();
+        for t in 0..d.header.toc_count {
+            let Ok(e) = d.toc(t) else { continue };
+            if e.hidden() || e.level() == 0 {
+                continue;
+            }
+            let mut row = vec![b' '; (e.level() as usize - 1) * 3];
+            row.extend_from_slice(&e.title);
+            list_add(v, &row, PanelRef { lib, toc: t });
+        }
+        // A help library's contents are its own; books go on.
+        if !inst.book {
+            break;
+        }
+    }
+    send(v.list, LM_SELECTITEM, 0, 1);
+}
+
+fn fill_index(v: &mut View) {
+    list_start(v);
+    let inst = v.inst();
+    for (lib, l) in inst.libs.iter().enumerate() {
+        for e in l.doc().index() {
+            let mut row = if e.level() == 2 { b"   ".to_vec() } else { Vec::new() };
+            row.extend_from_slice(&e.text);
+            list_add(v, &row, PanelRef { lib, toc: e.toc });
+        }
+    }
+    send(v.list, LM_SELECTITEM, 0, 1);
+}
+
+/// The panels holding every word of `q`.
+fn fill_search(v: &mut View, q: &[u8]) {
+    list_start(v);
+    let words: Vec<&[u8]> = q.split(|&c| c == b' ').filter(|w| !w.is_empty()).collect();
+    if words.is_empty() {
+        return;
+    }
+    let inst = v.inst();
+    for (lib, l) in inst.libs.iter().enumerate() {
+        let d = l.doc();
+        let mut hits: Option<Vec<u16>> = None;
+        for w in &words {
+            let found = d.find_word(w).and_then(|n| d.panels_with_word(n)).unwrap_or_default();
+            hits = Some(match hits {
+                None => found,
+                Some(h) => h.into_iter().filter(|t| found.contains(t)).collect(),
+            });
+        }
+        for t in hits.unwrap_or_default() {
+            let Ok(e) = d.toc(t) else { continue };
+            if e.level() == 0 || e.title.is_empty() {
+                continue;
+            }
+            list_add(v, &e.title, PanelRef { lib, toc: t });
+        }
+    }
+    if !v.rows.is_empty() {
+        send(v.list, LM_SELECTITEM, 0, 1);
+    }
+}
+
+fn open_selected(v: &mut View) {
+    let i = send(v.list, LM_QUERYSELECTION, LIT_FIRST, 0);
+    if let Some(&p) = v.rows.get(i as usize) {
+        go(v, Mode::Panel(p), true);
+    }
+}
+
+/// The panel whose title (else an index entry) matches `topic`.
+pub fn find_topic(inst: &Instance, topic: &[u8]) -> Option<PanelRef> {
+    let has = |t: &[u8]| t.len() >= topic.len() && t.windows(topic.len()).any(|w| w.eq_ignore_ascii_case(topic));
+    for (lib, l) in inst.libs.iter().enumerate() {
+        let d = l.doc();
+        for t in 0..d.header.toc_count {
+            if d.toc(t).is_ok_and(|e| e.level() > 0 && has(&e.title)) {
+                return Some(PanelRef { lib, toc: t });
+            }
+        }
+    }
+    for (lib, l) in inst.libs.iter().enumerate() {
+        if let Some(e) = l.doc().index().into_iter().find(|e| has(&e.text)) {
+            return Some(PanelRef { lib, toc: e.toc });
+        }
+    }
+    None
+}
+
+// ---- Layout of the client ----
+
+fn place(v: &View) {
+    let r = window_rect(v.client);
+    let (w, h) = (r.r, r.t);
+    let sb = sysval(SV_CXVSCROLL).max(12);
+    let top = (h - BUTTON_ROW).max(0);
+    let panel_mode = matches!(v.mode, Mode::Panel(_));
+    let search = matches!(v.mode, Mode::Search(_));
+    unsafe {
+        WinSetWindowPos(v.panel, 0, 0, BUTTON_ROW, (w - sb).max(0), top, SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.scroll, 0, w - sb, BUTTON_ROW, sb, top, SWP_MOVE | SWP_SIZE);
+        let ltop = if search { (top - ENTRY_ROW).max(0) } else { top };
+        WinSetWindowPos(v.list, 0, 0, BUTTON_ROW, w, ltop, SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.entry, 0, 6, BUTTON_ROW + ltop + 4, (w - 12).max(0), ENTRY_ROW - 8, SWP_MOVE | SWP_SIZE);
+        WinShowWindow(v.panel, panel_mode as u32);
+        WinShowWindow(v.scroll, panel_mode as u32);
+        WinShowWindow(v.list, (!panel_mode) as u32);
+        WinShowWindow(v.entry, search as u32);
+        let mut x = 6;
+        for (id, _) in BUTTONS {
+            WinSetWindowPos(WinWindowFromID(v.client, id), 0, x, 4, 100, BUTTON_ROW - 8, SWP_MOVE | SWP_SIZE);
+            x += 106;
+        }
+        WinEnableWindow(WinWindowFromID(v.client, ID_PREVIOUS), (!v.history.is_empty()) as u32);
+    }
+}
+
+extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    let Some(v) = view(h) else { return unsafe { WinDefWindowProc(h, msg, mp1, mp2) } };
+    match msg {
+        WM_SIZE => {
+            place(v);
+            if matches!(v.mode, Mode::Panel(_)) && window_rect(v.panel).r != v.page_width {
+                relayout(v);
+            } else {
+                clamp(v);
+                set_scroll(v);
+            }
+            0
+        }
+        WM_PAINT => {
+            let hps = unsafe { WinBeginPaint(h, 0, core::ptr::null_mut()) };
+            let r = window_rect(h);
+            unsafe {
+                WinFillRect(hps, &r, SYSCLR_HELPBACKGROUND);
+                WinEndPaint(hps);
+            }
+            0
+        }
+        WM_COMMAND => {
+            match lo(mp1) {
+                ID_PREVIOUS => back(v),
+                ID_SEARCH => {
+                    let q = match &v.mode {
+                        Mode::Search(q) => q.clone(),
+                        _ => Vec::new(),
+                    };
+                    go(v, Mode::Search(q), true);
+                }
+                ID_INDEX => go(v, Mode::Index, true),
+                ID_CONTENTS => go(v, Mode::Contents, true),
+                _ => {}
+            }
+            0
+        }
+        WM_CONTROL => {
+            if lo(mp1) == ID_LIST && hi(mp1) == LN_ENTER {
+                open_selected(v);
+            }
+            0
+        }
+        // Keys the list and entry field do not use.
+        WM_CHAR => {
+            if mp1 & KC_KEYUP != 0 || mp1 & KC_VIRTUALKEY == 0 {
+                return 0;
+            }
+            match hi(mp2) {
+                VK_ESC => back(v),
+                VK_NEWLINE | VK_ENTER => {
+                    if matches!(v.mode, Mode::Search(_)) && unsafe { WinQueryFocus(HWND_DESKTOP) } == v.entry {
+                        let mut buf = [0u8; 130];
+                        let n = unsafe { WinQueryWindowText(v.entry, 129, buf.as_mut_ptr()) };
+                        v.mode = Mode::Search(buf[..n.max(0) as usize].to_vec());
+                        enter(v);
+                        unsafe { WinSetFocus(HWND_DESKTOP, if v.rows.is_empty() { v.entry } else { v.list }) };
+                    } else if !matches!(v.mode, Mode::Panel(_)) {
+                        open_selected(v);
+                    }
+                }
+                _ => return 0,
+            }
+            1
+        }
+        WM_CLOSE => {
+            let inst = v.inst();
+            let book = inst.book;
+            close(inst);
+            if book {
+                post(inst.hwnd, WM_QUIT, 0, 0);
+            }
+            0
+        }
+        WM_DESTROY => {
+            unsafe {
+                WinSetWindowULong(h, QWL_USER, 0);
+                WinSetWindowULong(v.panel, QWL_USER, 0);
+                let inst = v.inst();
+                if inst.frame == v.frame {
+                    inst.frame = 0;
+                }
+                drop(alloc::boxed::Box::from_raw(v as *mut View));
+            }
+            0
+        }
+        _ => unsafe { WinDefWindowProc(h, msg, mp1, mp2) },
+    }
+}
+
+// ---- The panel window ----
+
+extern "C" fn panel_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    let Some(v) = view(h) else { return unsafe { WinDefWindowProc(h, msg, mp1, mp2) } };
+    match msg {
+        WM_PAINT => {
+            let hps = unsafe { WinBeginPaint(h, 0, core::ptr::null_mut()) };
+            let r = window_rect(h);
+            unsafe { WinFillRect(hps, &r, SYSCLR_HELPBACKGROUND) };
+            if let (Some(page), Mode::Panel(p)) = (&v.page, &v.mode) {
+                let lib = &v.inst().libs[p.lib];
+                let mut d = Draw {
+                    hps,
+                    page,
+                    top: v.top,
+                    w: r.r,
+                    h: r.t,
+                    sel: v.sel,
+                    data: lib.doc().data(),
+                    image_start: lib.doc().header.image_start,
+                    lib: p.lib,
+                    bitmaps: &mut v.bitmaps,
+                };
+                d.draw();
+            }
+            unsafe { WinEndPaint(hps) };
+            0
+        }
+        WM_VSCROLL => {
+            let line = v.line;
+            let page = (visible_height(v) - line).max(line);
+            let top = match hi(mp2) {
+                SB_LINEUP => v.top - line,
+                SB_LINEDOWN => v.top + line,
+                SB_PAGEUP => v.top - page,
+                SB_PAGEDOWN => v.top + page,
+                SB_SLIDERTRACK | SB_SLIDERPOSITION => lo(mp2) as i32 * line,
+                _ => return 0,
+            };
+            scroll_to(v, top);
+            0
+        }
+        WM_BUTTON1DOWN => {
+            unsafe { WinSetFocus(HWND_DESKTOP, h) };
+            let (x, y) = (lo(mp1) as i16 as i32, hi(mp1) as i16 as i32);
+            let py = visible_height(v) - y + v.top;
+            if let Some(hit) = v.page.as_ref().and_then(|p| p.hit(x, py)) {
+                follow(v, hit);
+            }
+            1
+        }
+        WM_CHAR => {
+            if mp1 & KC_KEYUP != 0 {
+                return 1;
+            }
+            if mp1 & KC_VIRTUALKEY == 0 {
+                return unsafe { WinDefWindowProc(h, msg, mp1, mp2) };
+            }
+            let line = v.line;
+            let page = (visible_height(v) - line).max(line);
+            match hi(mp2) {
+                VK_UP => scroll_to(v, v.top - line),
+                VK_DOWN => scroll_to(v, v.top + line),
+                VK_PAGEUP => scroll_to(v, v.top - page),
+                VK_PAGEDOWN => scroll_to(v, v.top + page),
+                VK_HOME => scroll_to(v, 0),
+                VK_END => scroll_to(v, i32::MAX / 2),
+                VK_TAB => select_link(v, 1),
+                VK_BACKTAB => select_link(v, -1),
+                VK_NEWLINE | VK_ENTER => {
+                    if let Some(l) = v.sel {
+                        follow(v, Hit::Link(l));
+                    }
+                }
+                VK_ESC | VK_BACKSPACE => back(v),
+                _ => return unsafe { WinDefWindowProc(h, msg, mp1, mp2) },
+            }
+            1
+        }
+        _ => unsafe { WinDefWindowProc(h, msg, mp1, mp2) },
+    }
+}
+
+/// Select the next (`d` 1) or previous (-1) link, scrolling it into view.
+fn select_link(v: &mut View, d: i32) {
+    let Some(page) = &v.page else { return };
+    // Links that show (words or bitmaps), in page order.
+    let mut order: Vec<u16> = Vec::new();
+    for r in &page.runs {
+        if let Some(l) = r.link {
+            if !order.contains(&l) {
+                order.push(l);
+            }
+        }
+    }
+    if order.is_empty() {
+        return;
+    }
+    let i = v.sel.and_then(|s| order.iter().position(|&l| l == s));
+    let n = order.len() as i32;
+    let next = match i {
+        None => if d > 0 { 0 } else { n - 1 },
+        Some(i) => (i as i32 + d).rem_euclid(n),
+    };
+    let l = order[next as usize];
+    v.sel = Some(l);
+    if let Some(&(_, t, _, b)) = page.link_boxes(l).first() {
+        let vis = visible_height(v);
+        if t < v.top {
+            scroll_to(v, t - v.line);
+        } else if b > v.top + vis {
+            scroll_to(v, b - vis + v.line);
+        }
+    }
+    unsafe { WinInvalidateRect(v.panel, core::ptr::null(), 0) };
+}
+
+/// Follow a link of the page.
+fn follow(v: &mut View, hit: Hit) {
+    let (Some(page), Mode::Panel(cur)) = (&v.page, v.mode.clone()) else { return };
+    let target = match hit {
+        Hit::Link(l) => page.links.get(l as usize).map(|l| l.target.clone()),
+        Hit::Area(a) => page.areas.get(a).map(|(_, a)| a.target.clone()),
+    };
+    let Some(target) = target else { return };
+    let inst = v.inst();
+    match target {
+        Target::Panel(t) | Target::Footnote(t) => go(v, Mode::Panel(PanelRef { lib: cur.lib, toc: t }), true),
+        Target::Res(r) => {
+            let p = inst.libs[cur.lib].doc().panel_by_res(r).map(|toc| PanelRef { lib: cur.lib, toc }).or_else(|| inst.panel_by_res(r));
+            if let Some(p) = p {
+                go(v, Mode::Panel(p), true);
+            }
+        }
+        Target::Inform(r) => {
+            if inst.active != 0 {
+                post(inst.active, HM_INFORM, r as u32, 0);
+            }
+        }
+        Target::Launch(cmd) => launch(cmd),
+        Target::External { db, id } => {
+            let dbs = inst.libs[cur.lib].doc().databases();
+            let Some(name) = dbs.get(db as usize) else { return };
+            let base = name.rsplit(|&c| c == b'\\' || c == b':').next().unwrap_or(name);
+            let Some(lib) = inst.libs.iter().position(|l| l.path.rsplit(|&c| c == b'\\').next().is_some_and(|p| p.eq_ignore_ascii_case(base))) else {
+                return;
+            };
+            let d = inst.libs[lib].doc();
+            let toc = if !id.is_empty() && id.iter().all(|c| c.is_ascii_digit()) {
+                let n = id.iter().fold(0u32, |a, &c| a * 10 + (c - b'0') as u32);
+                d.panel_by_res(n as u16)
+            } else {
+                d.panel_by_name(id)
+            };
+            if let Some(toc) = toc {
+                go(v, Mode::Panel(PanelRef { lib, toc }), true);
+            }
+        }
+    }
+}
+
+/// Start "program parameters" (`:link reftype=launch`).
+fn launch(cmd: &[u8]) {
+    let cmd = cmd.split(|&c| c == 0).next().unwrap_or(cmd);
+    let mut parts = cmd.splitn(2, |&c| c == b' ');
+    let prog = parts.next().unwrap_or(b"");
+    let args = parts.next().unwrap_or(b"");
+    if prog.is_empty() {
+        return;
+    }
+    let mut name = prog.to_vec();
+    if !name.contains(&b'.') {
+        name.extend_from_slice(b".EXE");
+    }
+    let mut full = [0u8; 260];
+    let n = z(&name);
+    let path = if unsafe { DosSearchPath(2 | 1, b"PATH\0".as_ptr(), n.as_ptr(), full.as_mut_ptr(), 260) } == 0 {
+        unsafe { cstr(full.as_ptr()) }.to_vec()
+    } else {
+        name.clone()
+    };
+    let mut a = path.clone();
+    a.push(0);
+    a.extend_from_slice(args);
+    a.extend_from_slice(b"\0\0");
+    let p = z(&path);
+    let mut res = os2::dos::ResultCodes { code_terminate: 0, code_result: 0 };
+    // EXEC_ASYNC.
+    unsafe { os2::dos::DosExecPgm(core::ptr::null_mut(), 0, 1, a.as_ptr(), core::ptr::null(), &mut res, p.as_ptr()) };
+}

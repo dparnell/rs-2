@@ -26,7 +26,13 @@ fn main() {
         0
     };
     let m = Module::parse(&data, lx_off).expect("LX module");
-    let objects = m.objects().expect("object table");
+    let mut objects = m.objects().expect("object table");
+    // Objects without a preferred base (resources) go after the others.
+    let mut next = objects.iter().map(|o| (o.base + o.virtual_size + 0xffff) & !0xffff).max().unwrap();
+    for o in objects.iter_mut().filter(|o| o.base == 0) {
+        o.base = next;
+        next = (next + o.virtual_size + 0xffff) & !0xffff;
+    }
     let page_size = m.header.page_size as usize;
 
     let lo = objects.iter().map(|o| o.base).min().unwrap();
@@ -134,6 +140,10 @@ fn main() {
         }
     }
 
+    for r in m.resources().unwrap_or_default() {
+        let base = objects.get((r.object as usize).wrapping_sub(1)).map_or(0, |o| o.base);
+        writeln!(info, "resource type {} id {} size {:#x} at {:#x} (object {})", r.type_id, r.name_id, r.size, base + r.offset, r.object).unwrap();
+    }
     let mut syms = String::new();
     for (name, ord) in m.exported_names().unwrap_or_default() {
         let a = entry_addr(ord);

@@ -716,9 +716,8 @@ pub extern "C" fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32 {
 
 // ---- Hooks ----
 
-/// WinSetHook(hab, hmq, iHook, pfnHook, hmod): hooks are recorded (the
-/// help hook, HK_HELP, is how programs see help requests; the help
-/// manager does not show help yet, so it is never called).
+/// WinSetHook(hab, hmq, iHook, pfnHook, hmod): hooks are recorded; of
+/// them only the help hook, HK_HELP, is called (see help.rs).
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetHook(_hab: u32, hmq: u32, kind: u32, pfn: u32, hmod: u32) -> u32 {
     if pfn == 0 {

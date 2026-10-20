@@ -89,6 +89,8 @@ pub struct Frame {
     pub min: Option<Minimized>,
     /// Where the frame was last shown minimized.
     pub icon_pos: Option<(i32, i32)>,
+    /// The help instance (WM_SETHELPINFO).
+    pub help: u32,
 }
 
 /// A minimized frame's state before minimizing.

@@ -18,7 +18,8 @@
 //! ```
 //!
 //! `--desktop` boots into the desktop shell (`init=OS2\RS2SHELL.EXE` in place
-//! of work/cmdline.txt's `init=`). `--type-file` reads the keys for `--type`
+//! of work/cmdline.txt's `init=`), `--init "PROGRAM ARGS"` into another
+//! program. `--type-file` reads the keys for `--type`
 //! from a file (its line ends are not typed).
 //!
 //! Extra files for `\RS2\MODULES` are listed in `work/modules.txt`, one path
@@ -139,6 +140,9 @@ struct Opts {
     /// Boot into the desktop shell (init=OS2\\RS2SHELL.EXE instead of
     /// work/cmdline.txt's init=).
     desktop: bool,
+    /// `--init "PROGRAM ARGS"`: boot program in place of work/cmdline.txt's
+    /// init= (its other options are kept).
+    init: Option<String>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -185,6 +189,7 @@ fn parse(args: &[String]) -> Opts {
         hostfwd: vec![],
         tftp: None,
         desktop: false,
+        init: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -292,6 +297,10 @@ fn parse(args: &[String]) -> Opts {
                 o.typing = Some(t.lines().collect::<String>().replace("\\n", "\n"));
             }
             "--desktop" => o.desktop = true,
+            "--init" => {
+                i += 1;
+                o.init = Some(args[i].clone());
+            }
             "--monitor" => {
                 i += 1;
                 o.monitor = Some(args[i].clone());
@@ -393,14 +402,21 @@ fn build(o: &Opts) -> Option<PathBuf> {
     copy(&kernel.join("rs2-kernel"), &esp.join("RS2/KERNEL"));
     strip(&esp.join("RS2/KERNEL"));
     let cmdline = root().join("work/cmdline.txt");
-    if o.desktop && !o.dist {
+    if (o.desktop || o.init.is_some()) && !o.dist {
         let old = std::fs::read_to_string(&cmdline).unwrap_or_default();
         let mut words: Vec<&str> = old.split_whitespace().filter(|w| !w.starts_with("init=")).collect();
         // The kernel takes the arguments after " -- " for init=.
         if let Some(i) = words.iter().position(|&w| w == "--") {
             words.truncate(i);
         }
-        words.push("init=OS2\\RS2SHELL.EXE");
+        let init = match &o.init {
+            Some(i) => match i.split_once(' ') {
+                Some((prog, args)) => format!("init={prog} -- {args}"),
+                None => format!("init={i}"),
+            },
+            None => "init=OS2\\RS2SHELL.EXE".into(),
+        };
+        words.push(&init);
         std::fs::create_dir_all(esp.join("RS2")).unwrap();
         std::fs::write(esp.join("RS2/CMDLINE"), words.join(" ")).unwrap();
     } else if cmdline.exists() && !o.dist {
@@ -457,6 +473,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("e", "OS2\\E.EXE"),
         ("pmctls", "OS2\\DLL\\PMCTLS.DLL"),
         ("helpmgr", "OS2\\DLL\\HELPMGR.DLL"),
+        ("view", "OS2\\VIEW.EXE"),
         ("label", "OS2\\LABEL.EXE"),
         ("chkdsk", "OS2\\CHKDSK.EXE"),
         ("format", "OS2\\FORMAT.EXE"),
@@ -482,7 +499,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
     ];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e"];
+const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {

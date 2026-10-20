@@ -1,5 +1,5 @@
 #!/bin/sh
-# lxdecomp.sh NAME FUNC|0xADDR|callers:FUNC ...   (after lxload.sh)
+# lxdecomp.sh NAME FUNC|0xADDR|callers:FUNC|dis:0xSTART:0xEND ...   (after lxload.sh)
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 proj=${GHIDRA_PROJ:-${TMPDIR:-/tmp}/rs2-ghidra}

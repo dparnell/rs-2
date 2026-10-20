@@ -16,6 +16,9 @@ pub const SYSCLR_DIALOGBACKGROUND: i32 = -34;
 pub const SYSCLR_BUTTONLIGHT: i32 = -41;
 pub const SYSCLR_BUTTONMIDDLE: i32 = -40;
 pub const SYSCLR_BUTTONDARK: i32 = -39;
+pub const SYSCLR_HELPBACKGROUND: i32 = -12;
+pub const SYSCLR_HELPTEXT: i32 = -11;
+pub const SYSCLR_HELPHILITE: i32 = -10;
 
 /// RGB of a system colour (the Warp 4 defaults).
 pub fn sys(i: i32) -> Rgb {
@@ -31,6 +34,9 @@ pub fn sys(i: i32) -> Rgb {
         SYSCLR_ACTIVEBORDER | SYSCLR_INACTIVEBORDER | SYSCLR_DIALOGBACKGROUND | SYSCLR_BUTTONMIDDLE => 0xcccccc,
         SYSCLR_BUTTONLIGHT => 0xffffff,
         SYSCLR_BUTTONDARK => 0x808080,
+        SYSCLR_HELPBACKGROUND => 0xffffff,
+        SYSCLR_HELPTEXT => 0x000000,
+        SYSCLR_HELPHILITE => 0x008080,
         _ => 0xcccccc,
     }
 }

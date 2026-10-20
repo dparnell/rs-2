@@ -819,6 +819,8 @@ fn mouse_move(h: u32, mp1: u32) {
     }
 }
 
+const VK_F1: u32 = 0x20;
+
 fn key(mp1: u32, mp2: u32) -> bool {
     let k = Key::from(mp1, mp2);
     if k.up() {
@@ -841,6 +843,17 @@ fn key(mp1: u32, mp2: u32) -> bool {
             }
         }
         VK_F10 => end(None, false),
+        // F1: help on the selected item, after menu mode ends.
+        VK_F1 => {
+            let id = sel.and_then(|i| item_ref(deep, i)).map_or(0xffff, |it| it.id as u32);
+            let mut rect = crate::help::screen_rect(deep);
+            if let Some(r) = sel.and_then(|i| rects(deep).get(i).copied()) {
+                let (x, y) = (rect.left, rect.bottom);
+                rect = crate::gpiapi::RectL { left: x + r.left, bottom: y + r.bottom, right: x + r.right, top: y + r.top };
+            }
+            end(None, false);
+            crate::help::menu_help(deep, id, rect);
+        }
         VK_UP | VK_DOWN => {
             if horizontal(deep) {
                 if let Some(i) = sel {

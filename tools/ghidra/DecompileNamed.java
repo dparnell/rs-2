@@ -1,5 +1,6 @@
 // Decompile functions of an analysed program by name or address, or list
-// the callers of one.  Script args: NAME|0xADDR|callers:NAME ...
+// the callers of one, or disassemble a range.
+// Script args: NAME|0xADDR|callers:NAME|dis:0xSTART:0xEND ...
 //@category rs2
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.*;
@@ -19,6 +20,20 @@ public class DecompileNamed extends GhidraScript {
         DecompInterface d = new DecompInterface();
         d.openProgram(currentProgram);
         for (String arg : getScriptArgs()) {
+            if (arg.startsWith("dis:")) {
+                String[] r = arg.split(":");
+                Address p = toAddr(r[1]), end = toAddr(r[2]);
+                println("==== " + arg);
+                while (p.compareTo(end) < 0) {
+                    ghidra.program.model.listing.Instruction i = getInstructionAt(p);
+                    if (i == null) { disassemble(p); i = getInstructionAt(p); }
+                    if (i == null) { println(p + ": db " + String.format("%02x", getByte(p) & 0xff)); p = p.add(1); continue; }
+                    Symbol l = getSymbolAt(p);
+                    println(p + ": " + (l != null ? l.getName() + ": " : "") + i);
+                    p = i.getMaxAddress().add(1);
+                }
+                continue;
+            }
             boolean callers = arg.startsWith("callers:");
             String n = callers ? arg.substring(8) : arg;
             Address a = resolve(n);

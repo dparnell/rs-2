@@ -27,6 +27,10 @@ name = "inifile"
 version = "0.1.0"
 
 [[package]]
+name = "ipf"
+version = "0.1.0"
+
+[[package]]
 name = "lxdump"
 version = "0.1.0"
 dependencies = [

@@ -26,4 +26,5 @@ aligned! {
     __a_WinAssociateHelpInstance => crate::WinAssociateHelpInstance, 2;
     __a_WinLoadHelpTable => crate::WinLoadHelpTable, 3;
     __a_WinCreateHelpTable => crate::WinCreateHelpTable, 2;
+    __a_Rs2ViewBook => crate::Rs2ViewBook, 4;
 }
