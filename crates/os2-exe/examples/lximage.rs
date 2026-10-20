@@ -141,6 +141,9 @@ fn main() {
     }
 
     for (i, e) in entries.iter().enumerate() {
+        if matches!(e, Entry::Entry32 { .. } | Entry::Entry16 { .. }) {
+            writeln!(info, "entry {} {:#010x}", i + 1, entry_addr(i as u16 + 1)).unwrap();
+        }
         if let Entry::Forwarder { module, by_ordinal, value } = *e {
             let md = String::from_utf8_lossy(modules.get(module as usize - 1).copied().unwrap_or(b"?")).into_owned();
             let target = if by_ordinal {

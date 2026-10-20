@@ -1,6 +1,8 @@
 //! PMMERGE.DLL: on OS/2 Warp 4 the merged PM DLL behind PMWIN, PMGPI
-//! and friends. rs2's PMWIN implements those APIs itself, so this DLL
-//! only has the PMMERGE entry points that programs import directly.
+//! and friends, which forward their entry points to it. rs2's PMWIN and
+//! PMSHAPI implement those APIs themselves; this DLL has PMMERGE's own
+//! ordinals for them, which some programs import directly (forward.rs),
+//! and the PMMERGE entry points without a public name.
 
 #![no_std]
 #![no_main]
@@ -9,6 +11,26 @@
 extern crate os2;
 
 mod exports;
+
+/// `name = "MODULE.ordinal";`: an entry that jumps to that import.
+macro_rules! forward {
+    ($($name:ident = $target:literal;)*) => {$(
+        #[allow(non_snake_case)]
+        mod $name {
+            unsafe extern "C" {
+                #[link_name = $target]
+                pub fn target();
+            }
+        }
+        #[unsafe(naked)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $name() {
+            core::arch::naked_asm!("jmp {}", sym $name::target);
+        }
+    )*};
+}
+
+mod forward;
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.start")]

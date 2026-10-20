@@ -8,7 +8,8 @@ come from a Toolkit import library dumped with omfimp.py (os2386.lib for
 the PM DLLs, tcpip32.lib, so32dll.lib, ...; MODULE as the library names
 it). Gpi* and Dev* functions of PMWIN get 4000 + the PMGPI ordinal, and
 PMWIN's run also regenerates PMGPI.DLL's forwarders (the forward! list in
-../pmgpi/src/lib.rs and ../pmgpi/exports.def). A DLL that has src/lock.rs
+../pmgpi/src/lib.rs and ../pmgpi/exports.def); PMWIN's and PMSHAPI's
+regenerate PMMERGE.DLL's (gen_pmmerge_forwards.py). A DLL that has src/lock.rs
 takes its lock in every trampoline (crate::lock::enter/leave). Lines of
 DLLDIR/exports.extra (data exports, `NAME=symbol @ordinal`) are appended
 to exports.def as they are. rs2-private functions that the Toolkit does
@@ -124,3 +125,9 @@ if module == 'PMWIN':
     open(lib, 'w').write(head + 'forward! {\n' + body + '}\n' + tail)
     open(os.path.join(gpi_dir, 'exports.def'), 'w').write('; name @ordinal\n' + ''.join(f'{n} @{o}\n' for o, n in fwd))
     print(f'{len(fwd)} PMGPI forwarders')
+
+if module in ('PMWIN', 'PMSHAPI'):
+    import subprocess
+    here = os.path.dirname(os.path.abspath(__file__))
+    subprocess.run([sys.executable, '-I', os.path.join(here, 'gen_pmmerge_forwards.py'),
+                    os.path.dirname(os.path.abspath(dll_dir.rstrip('/')))], check=True)
