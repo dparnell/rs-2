@@ -72,6 +72,10 @@ from `work/modules.txt`, which is how original OS/2 programs are tested.
 
 ## Using the desktop
 
+![The rs2 desktop: Drives, drive C: and its OS2 folder open](docs/images/rs2-desktop.png)
+
+*The live ISO's desktop (RS2SHELL) with Drives > C: > OS2 open.*
+
 The live system and installed systems start Presentation Manager with
 rs2's desktop shell (`C:\OS2\RS2SHELL.EXE`). Double click an object
 (or select it and press Enter) to open it: Command Prompts (an OS/2
