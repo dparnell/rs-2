@@ -27,7 +27,9 @@ programs unmodified, natively, on 64-bit PCs.
   `HOST`; see [docs/NETWORK.md](docs/NETWORK.md).
 - Presentation Manager on rs2's own PM DLLs, with text-mode programs
   such as CMD.EXE in PM windows ("OS/2 Window": `START /WIN CMD`,
-  Alt+Home to full screen, Mark/Copy/Paste); see [docs/PM.md](docs/PM.md).
+  Alt+Home to full screen, Mark/Copy/Paste), containers, notebooks,
+  icons and pointers, minimizing to desktop icons and profiles in real
+  OS/2 INI files; see [docs/PM.md](docs/PM.md).
 - Its own user space written in Rust and packed into genuine LX files:
   command interpreter, base utilities, installer.
 
