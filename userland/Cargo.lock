@@ -100,6 +100,7 @@ name = "libuni-dll"
 version = "0.1.0"
 dependencies = [
  "os2",
+ "uls",
 ]
 
 [[package]]
@@ -298,6 +299,18 @@ dependencies = [
  "os2",
  "thunk16",
 ]
+
+[[package]]
+name = "uconv-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "uls",
+]
+
+[[package]]
+name = "uls"
+version = "0.1.0"
 
 [[package]]
 name = "utils"

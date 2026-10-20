@@ -497,6 +497,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmmerge", "OS2\\DLL\\PMMERGE.DLL"),
         ("pmwp", "OS2\\DLL\\PMWP.DLL"),
         ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
+        ("uconv", "OS2\\DLL\\UCONV.DLL"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.

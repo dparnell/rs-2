@@ -1,6 +1,6 @@
 [package]
 name = "libuni-dll"
-description = "LIBUNI.DLL: Unicode locale objects (the en_US locale)"
+description = "LIBUNI.DLL: Unicode locales (rs2's own locale tables, user locales), character types and UCS-2 strings"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -11,3 +11,4 @@ path = "src/lib.rs"
 
 [dependencies]
 os2 = { path = "../os2" }
+uls = { path = "../../crates/uls" }
