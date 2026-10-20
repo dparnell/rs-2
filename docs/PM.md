@@ -33,11 +33,9 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000; 9001, `Rs2ShellPosition`, gives PMSHAPI's `WinQueryTaskSizePos` the shell's next cascade position; 9002, `Rs2PmVioWindow`, registers a VIO window's client). |
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
 | `userland/pmctls` → PMCTLS.DLL | The standard file and font dialogs (`WinFileDlg`, `WinFontDlg`): ordinary PM dialogs, built from templates made in memory, run through PMWIN like an application's. |
-<<<<<<< HEAD
 | `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006). |
-=======
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
->>>>>>> worktree-agent-a9ae6de3c07946690
+| `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
 | `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), HELPMGR stubs, PMDRAG (no drag is ever in progress), PMMERGE (the entry points programs import from it directly), LIBUNI (locale objects). |
 
 ## Kernel services (module RS2API)
@@ -65,8 +63,12 @@ rs2's own DLLs (applications never import it):
   the pointer position itself and hides it while the PM session is not in
   the foreground. ERROR_NOT_SUPPORTED without such a display.
 - `Rs2ShowPointer(fShow)` (6): shows or hides the hardware cursor.
+- `Rs2PowerOff(ulAction)` (7): the end of a shutdown (after
+  DosShutdown): commits the disks' write caches, then 0 turns the
+  machine off (ACPI S5, then QEMU's and Bochs' ports) and returns
+  ERROR_NOT_SUPPORTED if it is still running, 1 restarts it.
 
-RS2API ordinals: 1-6 PM (above), 10-16 windowed VIO sessions (see
+RS2API ordinals: 1-7 PM (above), 10-16 windowed VIO sessions (see
 [Windowed VIO sessions](#windowed-vio-sessions-os2-window)), 100
 performance counters, 200-221 sockets (docs/NETWORK.md).
 
@@ -654,6 +656,17 @@ returns the previous viewer) makes minimizing hide the frame instead,
 and the viewer gets `WM_RS2_MINWINDOW` (0x0ff8; mp1 = the frame, mp2 = 1
 minimized, 0 restored); restoring works as before.
 
+Other calls a shell uses: `Rs2SetDesktopWindow(hwnd)` (private ordinal
+9007) keeps a desktop window below all others (see [The desktop
+shell](#the-desktop-shell-rs2shell)); `WinSetWindowPos` with
+`SWP_ZORDER` and `HWND_BOTTOM` sends a window below its siblings;
+`WinWindowFromPoint` (the topmost showing child, or with fChildren the
+deepest descendant, under a point) and `WinQueryWindowProcess`;
+`WinSetPresParam`/`WinQueryPresParam`/`WinRemovePresParam` keep
+`PP_FOREGROUNDCOLOR` and `PP_BACKGROUNDCOLOR` (RGB) per window, which
+the container paints with (other presentation parameters are still
+accepted and ignored).
+
 ## The clipboard
 
 The clipboard and the atom tables are part of the shared PM state, so
@@ -865,6 +878,138 @@ a `PrfReset` is forgotten); the program list is rs2's own layout, not
 IBM's (Warp 4's Workplace Shell keeps its objects in `PM_Abstract:*`
 and `PM_Workplace:*` instead).
 
+## The desktop shell (RS2SHELL)
+
+`C:\OS2\RS2SHELL.EXE` (`userland/rs2shell`) is rs2's own desktop: an
+ordinary PM program, a stepping stone towards the Workplace Shell
+(there is no SOM). It is the protected shell of the distributed system
+(`PROTSHELL=C:\OS2\RS2SHELL.EXE` in CONFIG.SYS), so the kernel starts
+it after CONFIG.SYS and starts it again if it ends. Only one runs (a
+named mutex semaphore); without a graphics display it runs the
+text-mode command processor (`OS2_SHELL`) instead. `RS2SHELL /MAKEINI`
+only makes the default objects and ends.
+
+**The desktop** is a frame without border or title covering the screen,
+with a container (icon view) as its client's child. PMWIN keeps it
+below every other window: `Rs2SetDesktopWindow(hwnd)` (PMWIN private
+ordinal 9007; 0 ends it, returns the previous one) pins a top-level
+window at the bottom of the z-order, so activating it does not raise
+it and windows sent to the bottom (`HWND_BOTTOM`, minimized desktop
+icons) go just above it. The window list leaves it out (no title). Its
+colour is the container's `PP_BACKGROUNDCOLOR` presentation parameter
+(white text on dark colours, `PP_FOREGROUNDCOLOR`), from OS2.INI. It
+shows the visible program groups as folders (by default Command
+Prompts and Programs), Drives, the Minimized Window Viewer, the Window
+List (it opens PMWIN's window list, as Ctrl+Esc does), the program
+objects of the hidden group "Desktop" and Shutdown.
+
+**Folders** open in windows (title bar, sizing border, min/max buttons,
+a View menu: icon, details or tree view, Arrange, Refresh, Close); each
+remembers its place, size and view. Kinds:
+
+- a program group: its program objects (icons from the program's
+  `.ICON` EA or resources through `WinLoadFileIcon`; command prompts
+  have rs2's own);
+- Drives: one icon per drive (`DosQueryCurrentDisk`; CD icon for CDFS
+  drives, labels from `DosQueryFSInfo`);
+- a directory (a drive's root, then each subfolder in a new window):
+  folders first, then files, with `WinLoadFileIcon` icons and, in the
+  details view, size, date and time; directories are arranged, not
+  positioned;
+- the Minimized Window Viewer: the frames minimized meanwhile.
+
+**Objects** open with a double click or Enter: folders open, program
+objects start (`DosStartSession` in the object's working directory, or
+the program's, with its parameters and session type; `*` is the
+command processor), executables start (`.EXE`/`.COM` as their type
+says, `.CMD`/`.BAT` in a command prompt window with `/K`), other files
+open with the program associated with their extension (OS2.INI
+`RS2_Associations`: TXT, DOC, LOG, ME, SYS, CFG, ... with the System
+Editor when `C:\OS2\E.EXE` is installed; otherwise the shell offers the
+editor), minimized windows are restored. Mouse button 2 opens a pop-up
+menu: on objects Open, Settings (the program settings notebook) or
+Properties (a file's size, date, attributes), Open in editor, Rename
+(direct editing, also F2 or Alt+click), Delete (with confirmation, also
+the Del key; folders with their contents; Command Prompts and Programs
+cannot be deleted); on a folder's background View, Arrange, Refresh,
+Create program object, Create folder (a directory: a long name on HPFS,
+`NEWFOLDR` on FAT), Open parent, Close; on the desktop Arrange,
+Refresh, Create program object, Create folder (a program group), Window
+list, System setup and Shut down. F5 refreshes.
+
+**Dragging** with mouse button 2 (the container's `CN_INITDRAG`, then
+the shell tracks the pointer with the mouse captured): within a folder
+the icons move (positions are kept in OS2.INI at once); dropped on
+another folder window or on a folder, drive or group icon, files and
+directories move (`DosMove`, across drives copy and delete), program
+objects move to the other group, and a program file dropped on the
+desktop or a group becomes a program object.
+
+**Program objects** are the program list in OS2.INI (see
+[Profiles](#profiles-ini-files)), so programs using the `Prf*` program
+list calls see them and the shell sees theirs (any visible group
+appears on the desktop). The settings notebook (a `BKS_TABBEDDIALOG`
+notebook with three page dialogs) edits the path and file name (Find...
+opens the file dialog), parameters and working directory, the session
+type (as the program says, OS/2 window, OS/2 full screen, Presentation
+Manager) and the title, through `PrfAddProgram` or `PrfChangeProgram`.
+Renaming a group makes a new group with the programs (the program list
+has no call to rename one).
+
+**What the shell keeps in OS2.INI** besides the program list:
+
+| Application | Key | Value |
+|-------------|-----|-------|
+| `RS2_Desktop` | `Version` | `1` once the default objects have been made (the shell's MAKEINI step, rs2's own content, not IBM's INI.RC) |
+| | `DesktopGroup`, `PromptsGroup`, `ProgramsGroup` | the group handles (hex) |
+| | `Background` | desktop colour, `RRGGBB` |
+| | `MinimizeTo` | `VIEWER` (default) or `DESKTOP` |
+| `RS2_IconPos` | `FOLDER\|OBJECT` | `x y` (the container's `ptlIcon`); folders `DESKTOP`, `G` + group handle, `DRIVES`; objects `G`/`P` + handle, `DRIVES`, `DRIVE:C`, `SHUTDOWN`, ... |
+| `RS2_Windows` | folder (`DIR:C:\OS2\` for directories) | `x y cx cy view` |
+| `RS2_Associations` | extension (upper case) | the program |
+
+The first start makes the groups Desktop (hidden), Command Prompts
+(OS/2 Window, OS/2 Full Screen) and Programs (System Editor if E.EXE is
+installed, Install rs2), the associations and the colour; a missing
+piece is made again later.
+
+**Minimized windows** go to the Minimized Window Viewer: the shell is
+PMWIN's minimized window viewer (`Rs2SetMinimizeViewer`), so minimizing
+hides the frame and the shell lists it; a double click restores it, the
+pop-up menu also closes it. System setup can switch back to icons at
+the bottom of the desktop (above the pinned desktop window).
+
+**System setup** sets the desktop colour (six presets or `RRGGBB`) and
+where minimized windows go.
+
+**Shutting down** (the Shutdown object, the desktop's menu, or closing
+the desktop) asks whether to shut down or restart, then: the text
+sessions (full screen and windowed) end with their programs; every PM
+program's frame gets `WM_SAVEAPPLICATION` and `WM_CLOSE`, as OS/2's
+shutdown does, so a program may still ask about unsaved work (the
+System Editor does); a status window counts the programs left. When
+none is left (after 20 s the shell asks whether to end the rest with
+`DosKillProcess`), `DosShutdown(0)` flushes and stops the file systems
+(profiles are written through at once anyway) and `Rs2PowerOff` turns
+the machine off or restarts it. If the machine cannot turn itself off,
+a black screen says that it is safe to do so.
+
+**Booting into the desktop** is the default of the distributed system
+(dist/CONFIG.SYS) and of systems installed from it. Fallbacks to the
+text-mode command prompt: press T while the boot loader waits (one
+second; `bootwait=MS` on the kernel command line, `\RS2\CMDLINE`, sets
+the wait, 0 none), which adds `textmode` to the kernel command line;
+`textmode` there runs `OS2_SHELL` (CMD.EXE) instead of PROTSHELL; or
+`PROTSHELL=C:\OS2\CMD.EXE` in CONFIG.SYS. From the desktop, Ctrl+Esc
+offers command prompts in a window or full screen. For development,
+`cargo xtask run --desktop` boots into the shell (`init=OS2\RS2SHELL.EXE`
+in place of work/cmdline.txt's `init=`).
+
+**Not done**: drag and drop with other programs (`DrgDrag`), copying
+files (only moving), shadows, the tree view of a directory showing
+subfolders, a Startup folder, templates, object settings other than
+program objects', the lock-up, a real Workplace Shell object model.
+
 ## Debugging
 
 With `PMTRACE` set in a program's environment (`SET PMTRACE=1` before
@@ -889,8 +1034,9 @@ The export trampolines pass their index to the lock's entry
 4. (done) The System Editor (E.EXE): the MLE, the clipboard across
    processes, combo boxes, spin buttons, sliders, value sets, the file
    and font dialogs.
-5. A desktop shell: window list, program launcher (PMSHELL), then the
-   Workplace Shell (SOM) much later.
+5. (done) A desktop shell: rs2's own RS2SHELL (see [The desktop
+   shell](#the-desktop-shell-rs2shell)); the Workplace Shell (SOM) much
+   later.
 
 ## Testing
 
@@ -903,7 +1049,6 @@ The export trampolines pass their index to the lock's entry
   registered format, also read and replaced by a second process: it
   runs itself with `CHILD`), printing PASS/FAIL and `ctltest done: N
   failure(s)`.
-<<<<<<< HEAD
 - `RS2\SHELLTST.EXE` (userland/shelltest): self-checks of what a desktop
   shell needs: system pointers, pointer info and bitmaps, creating,
   copying and destroying pointers, the pointer's shape, file icons
@@ -922,7 +1067,6 @@ The export trampolines pass their index to the lock's entry
   PASS/FAIL and `nbtest done: N failure(s)`, then a window with a
   settings-style notebook and a tabbed dialog (`NBTEST QUIT` ends at
   once, `NBTEST HANG` stops reading its queue for 30 s first).
-=======
 - `cargo test -p inifile` (the INI format; IBM's files from
   `work/media` when present, or from `$RS2_WORK`) and
   `RS2\INITEST.EXE` (userland/initest): profile self-checks printing
@@ -934,7 +1078,25 @@ The export trampolines pass their index to the lock's entry
   program list. `INITEST WRITE` and, after another boot with the same
   `--hdd` image (`cargo xtask disk [--hpfs]`, found by its label),
   `INITEST READ` check that a profile survives a reboot.
->>>>>>> worktree-agent-a9ae6de3c07946690
+- `RS2\DESKTEST.EXE` (userland/desktest): self-checks of the desktop
+  shell: its default objects (it runs `RS2SHELL /MAKEINI` first), a
+  program object created, changed and removed through the program list
+  calls the way the settings notebook does it, icon positions in
+  `RS2_IconPos`, and PMWIN's `Rs2SetDesktopWindow` (z-order),
+  `WinWindowFromPoint`, `WinQueryWindowProcess` and presentation
+  parameter colours, printing PASS/FAIL and `desktest done: N
+  failure(s)`.
+- The desktop in QEMU with screenshots (`cargo xtask run --desktop`, or
+  the dist ISO), driven by `--type-file` scripts of `{mouse_abs}`
+  clicks: Drives > C: > OS2 in the icon and details views, an OS/2
+  Window and the System Editor started from their objects, README.TXT
+  opened in the editor by its association, a program object made with
+  the settings notebook, icons dragged, a folder created and renamed, a
+  file dragged into it and deleted, E.EXE minimized into the Minimized
+  Window Viewer, Shutdown with E asking about its changes, and a second
+  boot of the same disk (`cargo xtask disk --system`, `--hdd --boot-hdd`)
+  showing the new object and the icons where they were left; T at the
+  loader for the text-mode boot.
 - `RS2\GPITEST.EXE` (userland/gpitest): GPI self-checks printing
   PASS/FAIL and `gpitest done: N failure(s)`, then a window with every
   kind of primitive for a screenshot check (it also draws

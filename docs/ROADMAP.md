@@ -174,16 +174,27 @@ Status markers: done, in progress, planned.
   (icon, name, text, detail and tree views, emphasis, selection styles,
   keyboard, scrolling, sorting, direct editing, moving icons; layout and
   selection host-tested); `RS2\SHELLTST.EXE` checks them
-- planned: the desktop shell itself (desktop icons, the program list
-  from the INI files, drives and file windows in containers, booting
-  into it)
+- done: rs2's own desktop shell (RS2SHELL.EXE, not the Workplace
+  Shell): the desktop pinned below all windows, program groups as
+  folders, Drives and directory windows (file icons, details view,
+  subfolders), program objects in OS2.INI's program list with a
+  settings notebook, pop-up menus, renaming, deleting, moving files and
+  icons by dragging (positions kept), associations by extension, the
+  Minimized Window Viewer, shutdown (WM_SAVEAPPLICATION/WM_CLOSE,
+  DosShutdown, ACPI power off); the default boot of the distributed and
+  installed systems, with T at the loader or `textmode` for the
+  command prompt; `RS2\DESKTEST.EXE`
+- planned (shell): file copy, shadows, a Startup folder, a directory
+  tree view with subfolders, drag and drop with other programs
+  (DrgDrag), then the SOM-based Workplace Shell
 - done: profiles on real INI files (`crates/inifile`, PMSHAPI): OS2.INI
   and OS2SYS.INI from USER_INI/SYSTEM_INI, shared by all processes,
   written through safely; the program list calls, kept in OS2.INI for
   a later shell (docs/PM.md, Profiles); `RS2\INITEST.EXE`
 - planned: per-process presentation-space limits, hooks that are called
   (WinSetHook only records them), DDE, owner-drawn items (also in
-  containers), presentation parameters, drag and drop
+  containers), presentation parameters other than the colours, drag
+  and drop
 - Display driver model (GRADD-style) on the framebuffer, mouse pointer
 - PMWIN (windows, messages, controls, dialogs), PMGPI (graphics, fonts),
   PMSHAPI, help manager

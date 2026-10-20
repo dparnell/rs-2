@@ -145,6 +145,19 @@ IBM's replace-by-rename scheme, so profiles are shared between
 processes and survive crashes. See
 [PM.md](PM.md#profiles-ini-files).
 
+**The desktop.** rs2's own desktop shell, `RS2SHELL.EXE`, is an
+ordinary PM program and the protected shell (PROTSHELL) of the
+distributed system; the Workplace Shell's object model (SOM) is not
+reimplemented yet. Its objects are OS/2's program list in OS2.INI
+(PMSHAPI's `Prf*` program list calls) plus a few entries of its own
+(icon positions, window places, associations), so the profile stays
+the single source of truth across reboots and for other programs.
+PMWIN helps with rs2-private calls: a desktop window pinned below all
+others and a minimized window viewer hook. Shutdown ends with
+`DosShutdown` and an RS2API call that enters ACPI S5. The boot loader
+and kernel offer a text-mode fallback (T at the loader, `textmode`).
+See [PM.md](PM.md#the-desktop-shell-rs2shell).
+
 **Windowed text sessions.** A VIO session shown in a PM window ("OS/2
 Window") stays a kernel session with its own virtual screen, keyboard
 and mouse queues; only the framebuffer belongs to PM. A PM program,

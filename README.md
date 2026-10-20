@@ -25,6 +25,10 @@ programs unmodified, natively, on 64-bit PCs.
   TCPIPDLL) on it, so IBM's FTP, TELNET, TFTP and REXX RXSOCK run
   unmodified; `PING`, `IFCONFIG`, `NETSTAT`,
   `HOST`; see [docs/NETWORK.md](docs/NETWORK.md).
+- A desktop: rs2's own desktop shell on Presentation Manager (folders,
+  drives and file windows, program objects kept in OS2.INI, pop-up
+  menus, a settings notebook, shutdown with power off); see
+  [Using the desktop](#using-the-desktop).
 - Presentation Manager on rs2's own PM DLLs, with text-mode programs
   such as CMD.EXE in PM windows ("OS/2 Window": `START /WIN CMD`,
   Alt+Home to full screen, Mark/Copy/Paste), containers, notebooks,
@@ -62,9 +66,31 @@ cargo xtask iso --dist --release -o rs2.iso   # bootable install/live ISO
 cargo xtask run --iso rs2.iso                 # try it in QEMU
 ```
 
-The ISO boots into the live system; type `INSTALL` to install onto a hard
-disk. Development builds (`cargo xtask run`) take extra files for drive C:
+The ISO boots into the live system's desktop; open Programs > Install
+rs2 (or type `INSTALL` at a command prompt) to install onto a hard disk. Development builds (`cargo xtask run`) take extra files for drive C:
 from `work/modules.txt`, which is how original OS/2 programs are tested.
+
+## Using the desktop
+
+The live system and installed systems start Presentation Manager with
+rs2's desktop shell (`C:\OS2\RS2SHELL.EXE`). Double click an object
+(or select it and press Enter) to open it: Command Prompts (an OS/2
+window or full screen), Programs, Drives (a window per drive, then per
+folder; programs run, text files open in the System Editor when it is
+installed), the Minimized Window Viewer, the Window List and Shutdown.
+Mouse button 2 opens pop-up menus (Open, Settings, Rename, Delete;
+Create program object, System setup, Shut down on the desktop) and
+drags icons, whose places are kept; a file dragged onto a folder moves
+there. Ctrl+Esc shows the window list. Shutdown closes the programs
+(they may ask about unsaved work), flushes the disks and turns the
+machine off. Details: [docs/PM.md](docs/PM.md#the-desktop-shell-rs2shell).
+
+**The text-mode command prompt instead:** press T while the boot loader
+shows "Press T for a text-mode boot", or put `textmode` in
+`\RS2\CMDLINE`, or in CONFIG.SYS replace `PROTSHELL=C:\OS2\RS2SHELL.EXE`
+with `PROTSHELL=C:\OS2\CMD.EXE`. Development runs (`cargo xtask run`)
+use `work/cmdline.txt` as before; `cargo xtask run --desktop` boots into
+the desktop.
 
 ## Virtual machines
 

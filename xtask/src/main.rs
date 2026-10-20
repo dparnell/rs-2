@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! cargo xtask build [--release]            build loader + kernel, stage work/esp
-//! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG]
+//! cargo xtask run [--release] [--headless] [--timeout S] [--screenshot PNG] [--desktop]
+//!                  [--type KEYS | --type-file FILE] [--type-at S]
 //!                  [--hdd IMG] [--nvme IMG] [--usb-kbd] [--usb-mouse] [--usb-disk IMG]...
 //!                  [--usb-hub]... [--boot-hdd] [--monitor-at S --monitor 'CMD;CMD']
 //!                  [--vmware] [--pvscsi IMG] [--pvscsi-cd ISO] [--scsi-hba MODEL]
@@ -15,6 +16,10 @@
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
 //! ```
+//!
+//! `--desktop` boots into the desktop shell (`init=OS2\RS2SHELL.EXE` in place
+//! of work/cmdline.txt's `init=`). `--type-file` reads the keys for `--type`
+//! from a file (its line ends are not typed).
 //!
 //! Extra files for `\RS2\MODULES` are listed in `work/modules.txt`, one path
 //! per line (relative to the repository root).
