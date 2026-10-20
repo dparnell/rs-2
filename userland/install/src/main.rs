@@ -315,6 +315,17 @@ fn copy_tree(vol: &mut fat::Volume<Disk>, src: &str, dest: &str, files: &mut u32
 }
 
 fn main(_s: &Startup) -> u32 {
+    let rc = install();
+    // Started from the desktop the installer has a session of its own,
+    // which closes when it ends: keep any message on the screen.
+    if rc != 0 {
+        outln("");
+        let _ = ask("Press Enter to close. ");
+    }
+    rc
+}
+
+fn install() -> u32 {
     outln("");
     outln("rs2 Installation");
     outln("================");
