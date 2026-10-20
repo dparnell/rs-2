@@ -1,0 +1,8 @@
+[package]
+name = "ipf"
+description = "no_std reader of OS/2 Information Presentation Facility files (.INF books, .HLP help libraries): structures, panel text, bitmaps and layout"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
