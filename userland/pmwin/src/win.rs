@@ -666,10 +666,15 @@ pub extern "C" fn WinIsWindowVisible(h: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinEnableWindow(h: u32, on: u32) -> u32 {
     let Some(w) = st().desk.get_mut(h) else { return 0 };
+    let old = w.style;
     if on != 0 {
         w.style &= !ws::DISABLED;
     } else {
         w.style |= ws::DISABLED;
+    }
+    // Controls draw themselves enabled or greyed: repaint on a change.
+    if w.style != old {
+        st().desk.invalidate(h, None, true);
     }
     1
 }
