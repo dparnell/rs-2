@@ -105,6 +105,29 @@ HELPMGR. Tested with keyboard and mouse input from
 | Toolkit `controls/style.exe` | partial | Its MLE editor, the button, list box, combo box (simple, drop-down, drop-down list), entry field (MLE and entry field), static, slider, spin button (master and servant), value set (its icons drawn) and notebook dialogs (both pages, the tabs, the page buttons, Alt+PgUp/PgDn), the container dialog (its record in the icon, name, text and detail views, switched from the context menu that button 2 brings up), message boxes with their query, warning, information and action icons; the frame's icon (FCF_ICON) on the system menu button and when minimized, minimize and restore. Presentation parameters are ignored. |
 | Toolkit `clipbrd.exe` | works | Selecting a rectangle with the mouse (WinTrackRect), Copy/Cut as CF_BITMAP and Paste stretched into another selection. |
 
+### OS/2's PM applets (survey)
+
+The PM programs of OS/2 itself (from the client CD, with their DLLs,
+help files and data), booted one at a time (`xtask run --init`); what
+they import that rs2 lacks was listed with `crates/os2-exe`'s
+`lximports` example against rs2's export lists. None runs yet.
+
+| Program | Status | Notes |
+|---------|--------|-------|
+| KLONDIKE.EXE (Solitaire), OS2CHESS.EXE (Chess) | fails | Import PM by PMMERGE's own ordinals (5047-5414, about 95 each), which IBM's PMWIN, PMGPI, PMSHAPI and PMWP forward to; rs2's PMMERGE does not export them. Under their public names rs2 has 104 of the 110; missing: WinAddSwitchEntry, WinChangeSwitchEntry, WinRemoveSwitchEntry, WinCalcFrameRect, WinDrawBorder. |
+| MAHJONGG.EXE | fails | WinAddSwitchEntry, WinChangeSwitchEntry, WinRemoveSwitchEntry, WinCalcFrameRect, WinDrawBorder, WinCreateObject (PMWP). |
+| ICONEDIT.EXE | fails | The switch list calls, WinDrawBorder, WinGetKeyState, WinGetSysBitmap. |
+| PMFORMAT.EXE, AUTOUTL2.EXE | fails | WinAddSwitchEntry (AUTOUTL2 also WinRemoveSwitchEntry). |
+| PMREXX.EXE | fails | WinChangeSwitchEntry, WinQuerySwitchEntry, WinQuerySwitchHandle (PMREXXIO.DLL and IBM REXX load). |
+| ATAMNT2.EXE | fails | WinBeginEnumWindows, WinGetNextWindow, WinEndEnumWindows, WinQueryClassName. |
+| CLIPOS2.EXE (Clipboard Viewer) | fails | GpiCopyMetaFile, WinSetMultWindowPos. |
+| EPM.EXE (Enhanced Editor) | fails | PMSPL.DLL (the spooler, imported by ETKC603.DLL); cursors (WinCreateCursor, WinShowCursor, WinDestroyCursor), DDE (WinDdeInitiate, WinDdePostMsg, WinDdeRespond), the switch list, WinGetKeyState, WinGetSysBitmap, WinQueryClassName, WinSetMultWindowPos, WinSetWindowBits, WinQueryCpType, WinStoreWindowPos, WinRestoreWindowPos. |
+| PICVIEW.EXE (Picture Viewer) | fails | PMSPL.DLL (through PMPIC.DLL); GPI segments and metafiles (GpiOpenSegment, GpiCloseSegment, GpiDrawChain, GpiGetData, GpiPutData, GpiSetMetaFileBits, GpiQueryMetaFileBits/Length, GpiSaveMetaFile, GpiCopyMetaFile, GpiSetInitialSegmentAttrs, GpiSetViewingTransformMatrix, GpiSetDefViewingLimits, GpiSetDefAttrs), WinCpTranslateString, WinGetKeyState, WinSetErrorInfo. |
+| GLOCALE.EXE (Locale) | fails | LIBUNI's locale calls (24 ordinals), WinSetWindowBits. |
+| PMCHKDSK.EXE, PMSEEK.EXE (Seek and Scan) | fails | 16-bit PM programs: the 16-bit PMWIN, PMGPI, PMSHAPI and HELPMGR entry points (Win16*, Gpi16*, Prf16*), which rs2 does not have. |
+| MPCPUMON.EXE (Pulse) | fails | Loads, then DosConfigurePerf and DosAliasPerfCtrs (DOSCALLS 365, 364) are missing and it divides by the counters it did not get. |
+| SYSLOGPM, REGEDIT2, TEXTCON1, BDVIEWER, ARACONV, COMETRUN, PMSPOOL | not tried | Need system DLLs rs2 does not have: PMSPL, LFAPI/FFST, pmwinx, PMBIDI, THAILIB, CNVTRANS, PMGRE. |
+
 ## Network programs
 
 On rs2's TCPIP32/SO32DLL/TCP32DLL/TNLS32/PMSHAPI DLLs (see
