@@ -1,0 +1,13 @@
+[package]
+name = "e"
+description = "E.EXE: rs2's System Editor (a PM text editor on the MLE, like OS/2's E)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "e"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
