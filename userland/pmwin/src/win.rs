@@ -291,13 +291,16 @@ pub extern "C" fn WinCreateStdWindow(
     phwnd_client: *mut u32,
 ) -> u32 {
     let fcf = if pfl.is_null() { 0 } else { unsafe { pfl.read_unaligned() } };
-    let mut pos = Rect::default();
-    if fcf & FCF_SHELLPOSITION != 0 {
-        pos = shell_position();
-    }
-    let frame = frame::create(parent, style, fcf, &cstr(title), pos, 0, id, hmod);
+    // FCF_SHELLPOSITION: as on OS/2, the frame stays without a size (its
+    // client gets no WM_SIZE) until it is first shown.
+    let frame = frame::create(parent, style, fcf, &cstr(title), Rect::default(), 0, id, hmod);
     if frame == 0 {
         return 0;
+    }
+    if fcf & FCF_SHELLPOSITION != 0 {
+        if let Some(f) = st().frames.get_mut(&frame) {
+            f.shell_pos = true;
+        }
     }
     let class = class_name(client_class);
     if !class.is_empty() {
@@ -322,6 +325,22 @@ pub extern "C" fn WinCreateStdWindow(
 }
 
 /// Where the shell puts the next program's window: a cascade.
+/// A frame created with FCF_SHELLPOSITION is shown (or minimized or
+/// maximized) for the first time: if it still has no size, it gets the
+/// shell's position (IBM's PMWIN asks the shell when such a frame is
+/// first shown).
+pub fn apply_shell_position(h: u32) {
+    let Some(f) = st().frames.get_mut(&h) else { return };
+    if !core::mem::replace(&mut f.shell_pos, false) {
+        return;
+    }
+    if st().desk.get(h).is_some_and(|w| w.cx == 0 && w.cy == 0) {
+        let r = shell_position();
+        st().desk.set_pos(h, r.left, r.bottom, r.width(), r.height());
+        frame::layout(h);
+    }
+}
+
 fn shell_position() -> Rect {
     let s = st();
     let (w, h) = (s.surface.width, s.surface.height);
@@ -435,6 +454,9 @@ pub extern "C" fn WinDestroyWindow(h: u32) -> u32 {
 // ---- Position, visibility, z-order, activation ----
 
 pub fn show(h: u32, on: bool) {
+    if on {
+        apply_shell_position(h);
+    }
     let was = st().desk.get(h).is_some_and(|w| w.visible_style());
     if was != on {
         st().desk.set_visible(h, on);
@@ -536,6 +558,9 @@ pub fn set_focus(h: u32) {
 /// WinSetWindowPos(hwnd, hwndInsertBehind, x, y, cx, cy, fl)
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32 {
+    if fl & (SWP_SIZE | SWP_SHOW | frame::SWP_MINIMIZE | frame::SWP_MAXIMIZE) != 0 && !(fl & SWP_SIZE != 0 && cx > 0 && cy > 0) {
+        apply_shell_position(h);
+    }
     // Minimize, maximize and restore (frames): they size the window.
     let fl = if st().frames.contains_key(&h) && fl & (frame::SWP_MINIMIZE | frame::SWP_MAXIMIZE | frame::SWP_RESTORE) != 0 {
         if fl & frame::SWP_MINIMIZE != 0 {

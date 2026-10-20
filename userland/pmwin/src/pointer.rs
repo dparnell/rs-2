@@ -257,7 +257,6 @@ pub const DP_MINI: u32 = 0x0004;
 /// DP_INVERTED.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinDrawPointer(hps: u32, x: i32, y: i32, h: u32, fs: u32) -> u32 {
-    let s = st();
     let Some(p) = get(h) else { return 0 };
     let img: &Image = if fs & DP_MINI != 0 { &p.mini } else { &p.img };
     let inverted;
@@ -273,16 +272,14 @@ pub extern "C" fn WinDrawPointer(hps: u32, x: i32, y: i32, h: u32, fs: u32) -> u
     } else {
         img
     };
-    gpiapi::refresh(s, hps);
-    let mut surface = s.surface;
-    hide(s);
-    let ok = gpiapi::entry(s, hps).map(|e| {
+    // On the PS's target: the screen, or the bitmap of a memory PS (OS/2's
+    // Klondike draws its cards' pictures into bitmaps this way).
+    gpiapi::draw(hps, |e, surface| {
         let (dx, dy) = e.ps.world_to_device().apply(x as f64, y as f64);
         let o = e.ps.origin;
-        icon::draw(&mut surface, &e.ps.clip, dx as i32 + o.x, dy as i32 + o.y, img, fs & DP_HALFTONED != 0);
-    });
-    show(st());
-    ok.is_some() as u32
+        icon::draw(surface, &e.ps.clip, dx as i32 + o.x, dy as i32 + o.y, img, fs & DP_HALFTONED != 0);
+    })
+    .is_some() as u32
 }
 
 /// Draw an icon (mini when `mini`) centred in `r` of a canvas.

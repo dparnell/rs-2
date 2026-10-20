@@ -258,9 +258,11 @@ pub extern "C" fn GpiQueryCp(hps: u32) -> u32 {
 
 // ---- Fonts ----
 
-/// The public fonts: the system font (an image font) and the standard
+/// The public fonts: the system font (an image font), the standard
 /// outline faces, which are drawn by scaling the system font's glyphs to
-/// the character box.
+/// the character box, and OS/2's other image faces (Helv, Tms Rmn and
+/// the system fonts, which programs ask for by name), drawn with the
+/// system font's glyphs.
 const FONTS: &[(&[u8], bool)] = &[
     (b"System VIO", false),
     (b"Helvetica", true),
@@ -269,6 +271,10 @@ const FONTS: &[(&[u8], bool)] = &[
     (b"Times New Roman Bold", true),
     (b"Courier", true),
     (b"Courier Bold", true),
+    (b"Helv", false),
+    (b"Tms Rmn", false),
+    (b"System Proportional", false),
+    (b"System Monospaced", false),
 ];
 const FATTR_FONTUSE_OUTLINE: u16 = 4;
 const FATTR_SEL_OUTLINE: u16 = 8;

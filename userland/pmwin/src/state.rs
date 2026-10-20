@@ -91,6 +91,9 @@ pub struct Frame {
     pub icon_pos: Option<(i32, i32)>,
     /// The help instance (WM_SETHELPINFO).
     pub help: u32,
+    /// FCF_SHELLPOSITION and not shown yet: the first time it is shown
+    /// while it still has no size, the frame gets the shell's position.
+    pub shell_pos: bool,
 }
 
 /// A minimized frame's state before minimizing.

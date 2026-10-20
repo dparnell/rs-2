@@ -104,7 +104,7 @@ pub fn create(parent: u32, style: u32, fcf: u32, title: &[u8], pos: Rect, owner:
     if frame == 0 {
         return 0;
     }
-    st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0 });
+    st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0, shell_pos: false });
     if fcf & FCF_ICON != 0 {
         let i = crate::pointer::WinLoadPointer(1, hmod, id);
         if let Some(f) = st().frames.get_mut(&frame) {
