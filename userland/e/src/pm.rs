@@ -144,6 +144,26 @@ unsafe extern "C" {
     pub fn WinDestroyHelpInstance(h: u32) -> u32;
     #[link_name = "HELPMGR.54"]
     pub fn WinAssociateHelpInstance(help: u32, frame: u32) -> u32;
+    #[link_name = "PMWIN.705"]
+    pub fn WinCancelShutdown(hmq: u32, always: u32) -> u32;
+    #[link_name = "PMWIN.841"]
+    pub fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32;
+    #[link_name = "PMWIN.842"]
+    pub fn WinQueryWindowTextLength(h: u32) -> i32;
+    #[link_name = "PMCTLS.5"]
+    pub fn WinDefFileDlgProc(h: u32, m: u32, a: u32, b: u32) -> u32;
+    #[link_name = "PMCTLS.3"]
+    pub fn WinDefFontDlgProc(h: u32, m: u32, a: u32, b: u32) -> u32;
+    #[link_name = "PMSHAPI.114"]
+    pub fn PrfQueryProfileInt(hini: u32, app: *const u8, key: *const u8, default: i32) -> i32;
+    #[link_name = "PMSHAPI.116"]
+    pub fn PrfWriteProfileString(hini: u32, app: *const u8, key: *const u8, data: *const u8) -> u32;
+    #[link_name = "PMSHAPI.127"]
+    pub fn WinQueryTaskSizePos(hab: u32, pid: u32, swp: *mut Swp) -> u32;
+    #[link_name = "DOSCALLS.228"]
+    pub fn DosSearchPath(flags: u32, path: *const u8, name: *const u8, buf: *mut u8, cb: u32) -> u32;
+    #[link_name = "DOSCALLS.286"]
+    pub fn DosBeep(freq: u32, ms: u32) -> u32;
     #[link_name = "PMSHAPI.117"]
     pub fn PrfQueryProfileData(hini: u32, app: *const u8, key: *const u8, buf: *mut u8, len: *mut u32) -> u32;
     #[link_name = "PMSHAPI.118"]
@@ -174,6 +194,7 @@ pub const WM_CREATE: u32 = 0x0001;
 pub const WM_DESTROY: u32 = 0x0002;
 pub const WM_SIZE: u32 = 0x0007;
 pub const WM_SETFOCUS: u32 = 0x000f;
+pub const WM_ACTIVATE: u32 = 0x000d;
 pub const WM_COMMAND: u32 = 0x0020;
 pub const WM_HELP: u32 = 0x0022;
 pub const WM_PAINT: u32 = 0x0023;
@@ -236,6 +257,8 @@ pub const MB_ERROR: u32 = 0x0040;
 pub const MB_MOVEABLE: u32 = 0x4000;
 pub const MBID_OK: u32 = 1;
 pub const MBID_YES: u32 = 6;
+pub const MBID_RETRY: u32 = 4;
+pub const MB_RETRYCANCEL: u32 = 0x0002;
 
 // Menus.
 pub const MIS_TEXT: u16 = 0x0001;
@@ -244,11 +267,14 @@ pub const MIS_SEPARATOR: u16 = 0x0004;
 pub const MIA_CHECKED: u16 = 0x2000;
 pub const MIA_DISABLED: u16 = 0x4000;
 pub const MM_SETITEMATTR: u32 = 0x0192;
+pub const MM_SETITEMTEXT: u32 = 0x018e;
 
 // Accelerators.
 pub const AF_CHAR: u16 = 0x0001;
 pub const AF_VIRTUALKEY: u16 = 0x0002;
 pub const AF_CONTROL: u16 = 0x0010;
+pub const AF_SHIFT: u16 = 0x0008;
+pub const VK_F3: u16 = 0x22;
 
 // Dialogs and controls.
 pub const DID_OK: u32 = 1;
@@ -257,6 +283,9 @@ pub const BM_QUERYCHECK: u32 = 0x0124;
 pub const BM_SETCHECK: u32 = 0x0125;
 pub const BN_CLICKED: u32 = 1;
 pub const EM_SETTEXTLIMIT: u32 = 0x0143;
+pub const EM_SETSEL: u32 = 0x0142;
+pub const SPBN_CHANGE: u32 = 0x020d;
+pub const SPBM_SETTEXTLIMIT: u32 = 0x0202;
 pub const EN_CHANGE: u32 = 0x0004;
 pub const LM_INSERTITEM: u32 = 0x0161;
 pub const LM_SELECTITEM: u32 = 0x0164;
@@ -332,6 +361,8 @@ pub const MLM_ENABLEREFRESH: u32 = 0x01dc;
 pub const MLM_DISABLEREFRESH: u32 = 0x01dd;
 pub const MLM_SEARCH: u32 = 0x01de;
 pub const MLN_CHANGE: u32 = 0x0007;
+pub const MLN_OVERFLOW: u32 = 0x0001;
+pub const MLM_SETTABSTOP: u32 = 0x01b6;
 pub const MLFIE_CFTEXT: u32 = 0;
 pub const MLFSEARCH_CASESENSITIVE: u32 = 0x0001;
 pub const MLFSEARCH_SELECTMATCH: u32 = 0x0002;
@@ -364,6 +395,13 @@ pub fn z(t: &[u8]) -> Vec<u8> {
 /// Bytes up to a NUL.
 pub fn until_nul(b: &[u8]) -> &[u8] {
     &b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())]
+}
+
+pub fn window_text(h: u32) -> Vec<u8> {
+    let mut buf = alloc::vec![0u8; 300];
+    let n = unsafe { WinQueryWindowText(h, buf.len() as i32, buf.as_mut_ptr()) }.max(0) as usize;
+    buf.truncate(n.min(300));
+    buf
 }
 
 pub fn item_text(dlg: u32, id: u32) -> Vec<u8> {
@@ -491,10 +529,11 @@ pub fn label(text: &[u8], r: (i16, i16, i16, i16), extra: u32) -> Item {
     item(WC_STATIC, text, WS_VISIBLE | SS_TEXT | extra, r, 0xffff)
 }
 
-/// A dialog frame with a title bar and system menu.
-pub fn dialog_frame(title: &[u8], cx: i16, cy: i16) -> Item {
+/// A dialog frame with a title bar and system menu; `id` is the dialog's
+/// id (its help subtable).
+pub fn dialog_frame(title: &[u8], id: u16, cx: i16, cy: i16) -> Item {
     // WS_CLIPSIBLINGS | WS_SAVEBITS | FS_DLGBORDER | FS_NOBYTEALIGN.
-    let mut f = item(WC_FRAME, title, 0x1400_0000 | 0x0000_0080 | 0x0000_0010, (20, 20, cx, cy), 256);
+    let mut f = item(WC_FRAME, title, 0x1400_0000 | 0x0000_0080 | 0x0000_0010, (20, 20, cx, cy), id);
     f.ctl = (FCF_TITLEBAR | FCF_SYSMENU).to_le_bytes().to_vec();
     f
 }

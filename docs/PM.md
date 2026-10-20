@@ -1013,50 +1013,94 @@ program objects', the lock-up, a real Workplace Shell object model.
 
 ## The System Editor (E.EXE)
 
-`C:\OS2\E.EXE` is rs2's own System Editor (userland/e), written to
-behave like OS/2's E (IBM's runs as well, see
-[COMPATIBILITY.md](COMPATIBILITY.md#presentation-manager-programs)): a
-standard frame titled with the file's full name (or "Untitled") whose
-client holds a WC_MLE (System VIO 8 x 16, word wrap on, both scroll
-bars), and E's menus built in memory:
+`C:\OS2\E.EXE` is rs2's own System Editor (userland/e). Its behaviour
+follows OS/2's E, studied in IBM's binary with Ghidra (`e.sym` from the
+debug symbols) and in its resource DLL (EHXDLMRI.DLL); the code, texts
+and templates are rs2's own. IBM's E runs as well (see
+[COMPATIBILITY.md](COMPATIBILITY.md#presentation-manager-programs)).
 
-- **File**: New, Open (WinFileDlg), Save, Save as (WinFileDlg with the
-  file types Plain Text, OS/2 Command File, DOS Command File; the type
-  chosen is written as the .TYPE EA), Autosave (a spin button: save
-  after N changes). Save on a file without a .TYPE asks first, as E
-  does ("Save notification": Type... or Save as...; the Type dialog
-  sets the type and saves); a file's type is kept when it is rewritten.
-  `E FILE` opens a file; a file that does not exist opens empty under
-  its name. Text is read and written as CR LF (MLFIE_CFTEXT).
-- **Edit**: Undo, Cut, Copy, Paste, Clear (enabled from the selection,
-  MLM_QUERYUNDO and the clipboard at WM_INITMENU), Find (Ctrl+F, a
-  modeless dialog: Find, Change then find, Change, Change all, case
-  sensitive, wrap; MLM_SEARCH), Select all.
-- **Options**: Set font (WinFontDlg, MLM_SETFONT), Set colors (16 named
-  colours for text and background with a sample), Word wrap On/Off.
-  These and the autosave settings are kept in OS2.INI
-  (`SystemEditor`/`Settings`).
-- **Help**: Help index, General help, Using help, Keys help (HM_*
-  requests to the help instance) and Product information. The help
-  instance (WinCreateHelpInstance, library `E.HLP`, a help table
-  mapping the menu items to panels of the same numbers;
-  WinAssociateHelpInstance with the frame) answers HM_QUERY_KEYS_HELP;
-  the dialogs' Help buttons show their panels (HM_DISPLAY_HELP). There
-  is no E.HLP yet.
-
-Closing the window with unsaved changes asks "NAME has changed. Do you
-want to save it?" (Save, Save as, Discard, Cancel, Help).
-WM_SAVEAPPLICATION (sent by the shell at shutdown, before WM_CLOSE)
-saves the options and asks the same question; the WM_CLOSE that
-follows uses that answer instead of asking again (Cancel keeps the
-window, and the shutdown waits).
+- **Window**: a standard frame (class `EHXMAIN`, task list entry) titled
+  with the file's full name or "Untitled" (after the program's own title
+  and " - " when the frame has one); the client holds a WC_MLE (id
+  0x200, both scroll bars, no border). The window comes back where it
+  was (OS2.INI `WINDOWPOSITION`, written on exit), else where the shell
+  puts programs (WinQueryTaskSizePos).
+- **Menus** with E's ids (File 0x400: New 0x402, Open 0x401, Save 0x403,
+  Save as 0x404, Autosave 0x406; Edit 0x410: Undo 0x411, Cut 0x422, Copy
+  0x423, Paste 0x424, Clear 0x425, Find 0x426, Select all 0x427; Options
+  0x428: Set font 0x42a, Set colors 0x42b, Word wrap 0x42c with On 0x433
+  and Off 0x434; Help 0x42d: Help index 0x42f, General help 0x431, Using
+  help 0x42e, Keys help 0x430, Product information 0x408). WM_INITMENU
+  enables them: Autosave needs a file name; Cut/Copy/Clear a selection;
+  Paste text on the clipboard; Find and Select all some text; Undo names
+  what MLM_QUERYUNDO reports ("Undo typing", "Redo paste", ...). As in
+  E, a menu command ends the undo history (MLM_RESETUNDO). Ctrl+F (also
+  with Shift) is Find and F3 closes the window (command 0x409); the
+  editing keys are the MLE's own. A failed MLE edit command says so
+  ("Clipboard Error").
+- **Files**: `E [file]`, File > Open (WinFileDlg, Help shows panel
+  0x1043), New. A file that is not there opens empty under its name.
+  Text is CR LF (MLFIE_CFTEXT); E writes a Ctrl+Z end-of-file mark after
+  it and drops one when reading. NUL characters in a file are shown as
+  blanks after asking ("Continue loading file" / "Stop loading file").
+  Read and write errors offer Retry. Save with no changes says there is
+  nothing to save.
+- **File types (.TYPE EA)**, decided before a save as E does: on a file
+  system without EAs nothing; once a save in this session dealt with
+  the file's type, nothing more; **Save as** and a new file through it:
+  the default type (Plain Text, or what the Type dialog chose last,
+  OS2.INI `USDEFAULTTYPEEA`); a malformed .TYPE: replaced by the
+  default; a type the editor knows (Plain Text, OS/2 Command File, DOS
+  Command File; EAT_ASCII, EAT_MVST or EAT_MVMT): kept; **no type**:
+  "Save notification" (Type... opens the Type dialog, whose Set saves
+  with that type; Save as...; Cancel); **types it does not know**: a
+  question whether to add "Plain Text" (Yes keeps them and adds it, No
+  saves as they are, Save as..., Cancel). Saving for autosave titles
+  these "Autosave notification", and Cancel there turns autosave off.
+  Save as (WinFileDlg with the type list, a Type... button and Help
+  0x1072) asks before replacing a file.
+- **Closing**: WM_CLOSE (the close button, F3, the shell's shutdown,
+  which also sends WM_SAVEAPPLICATION first) with unsaved changes beeps
+  and asks "NAME has changed. Do you want to save it?" (Save, disabled
+  for Untitled, and Save as stay in the question until the file is
+  written; Discard empties the window; Cancel keeps it). A WM_QUIT from
+  outside asks the same after the message loop ends; Cancel then calls
+  WinCancelShutdown and the loop goes on.
+- **Autosave** (File > Autosave: a check box and a spin button, 1 to
+  9999 changes; Set only with a valid number): MLN_CHANGE counts
+  changes, and after N of them File > Save runs.
+- **Find** (Ctrl+F, modeless): Find (default once there is text),
+  Change, then find, Change and Change all (enabled after a match was
+  found), Case sensitive and Wrap (kept in OS2.INI); the texts stay for
+  the next time; nothing found says so ("Find Notification").
+- **Set font**: WinFontDlg with Apply (both OK and Apply set the font
+  and tab stops of 8 average character widths; `FONTATTRS`,
+  `FXPTSIZE`). **Set colors**: foreground and background from 16 named
+  colours and Default, samples of normal and selected text, Apply (then
+  Cancel is the default button) and Set (`ULFGNDCOLOR`,
+  `ULBGNDCOLOR`). **Word wrap** On/Off (`BWRAPSTYLE`).
+- **Settings** are OS/2's E's: OS2.INI application `EHXMAIN`, keys
+  `IAUTOSAVE`, `BAUTOSAVEON`, `ULFGNDCOLOR`, `ULBGNDCOLOR`, `BWRAPSTYLE`,
+  `BCASESENSEARCH`, `BWRAPSEARCH`, `USDEFAULTTYPEEA` (numbers as
+  strings), `FONTATTRS`, `FXPTSIZE`, `WINDOWPOSITION` (binary).
+- **Help**: E.HLP is looked for on the HELP path and in `\OS2\HELP` of
+  the boot drive (then OS/2's EHXHP.HLP, whose panels have the same
+  numbers). Found, it gets a help instance (WinCreateHelpInstance with
+  E's help table: the frame's subtable maps the menu items, and one per
+  dialog, by E's dialog ids, maps its controls to the dialog's panel;
+  WinAssociateHelpInstance with the frame). The Help menu sends
+  HM_HELP_INDEX, HM_EXT_HELP, HM_DISPLAY_HELP (Using help) and
+  HM_KEYS_HELP (E answers HM_QUERY_KEYS_HELP); dialogs' Help buttons
+  show their panel (HM_DISPLAY_HELP). Without a help file Help says it
+  is not available. There is no E.HLP yet.
 
 `E /SELFTEST` checks the file and editing logic on a hidden window and
 prints PASS/FAIL and `e selftest done: N failure(s)` (also on the
 serial port): see [Testing](#testing).
 
-**Not done**: drag and drop of files onto the window, the window's icon,
-printing (OS/2's E has none either), the help file itself.
+**Not done**: dragging files onto the window (E takes a dropped file),
+the window's icon, E.HLP, Undo restoring a font or colours (rs2's MLE
+does not undo those), the Set tabs dialog E has but does not offer.
 
 ## Debugging
 
@@ -1111,17 +1155,20 @@ The export trampolines pass their index to the lock's entry
   system icons drawn normal, mini and halftoned (`SHELLTST QUIT` ends
   at once).
 - `E /SELFTEST` (userland/e; `init=OS2\E.EXE -- /SELFTEST` in
-  work/cmdline.txt): the System Editor's checks on a hidden window:
-  a file opened into the MLE (LF inside, CR LF back out), edited,
-  saved with a .TYPE and saved again keeping it, Find selecting a
-  match, autosave after N changes, a 200 KB file's round trip, a
-  missing file opening empty and saved, New, and WM_SAVEAPPLICATION /
-  WM_CLOSE with and without a pending answer; printing PASS/FAIL and
-  `e selftest done: N failure(s)`. Its dialogs and menus were checked
-  against IBM's E with `--type` screenshots (`init=OS2\E.EXE --
-  C:\README.TXT`; IBM's is `C:\IBM\E.EXE` in a development image), and
-  from the `--dist --desktop` image: Programs > System Editor, and
-  Shutdown with unsaved text (the question, Discard, the power-off).
+  work/cmdline.txt): the System Editor's checks on a hidden window: a
+  file opened into the MLE (its Ctrl+Z dropped, LF inside, CR LF back
+  out), edited and saved (with the Ctrl+Z), the .TYPE rules (a known
+  type kept, Save as giving the default type, unknown types kept or
+  "Plain Text" added, malformed and single-ASCII values, no second
+  question after a save), Find (case, wrap), autosave after N changes,
+  a 200 KB file's round trip, a missing file opening empty, the EHXMAIN
+  settings, New, and closing (WM_CLOSE, F3) without changes; printing
+  PASS/FAIL and `e selftest done: N failure(s)`. Its menus and dialogs
+  were compared with IBM's E in `--type` screenshots (`init=OS2\E.EXE
+  -- C:\README.TXT`; IBM's is `C:\IBM\E.EXE` in a development image),
+  and checked from the `--dist --desktop` image: Programs > System
+  Editor, and Shutdown with unsaved text (the question, Cancel, the
+  shell's offer to end it).
 - `RS2\NBTEST.EXE` (userland/nbtest): notebook self-checks (pages,
   texts, page data and info, page windows and a page dialog from a
   template, notifications, keys, clicks, sizes, deleting) printing

@@ -1,9 +1,12 @@
 //! `E /SELFTEST`: checks of the editor's file and editing logic on a
-//! hidden window: opening a file into the MLE, editing, saving (CR LF
-//! text, the .TYPE EA set and kept), a missing file opening as a new
-//! one, a large file's round trip, Find, autosave, New, and closing
-//! (unchanged text closes without asking). Prints PASS/FAIL lines and
-//! "e selftest done: N failure(s)".
+//! hidden window: opening a file into the MLE (its Ctrl+Z end-of-file
+//! mark dropped), editing, saving (CR LF text and the mark written), the
+//! .TYPE rules (Save as and malformed types get the default type, known
+//! and unknown types are kept, "Plain Text" added to unknown ones), a
+//! missing file opening as a new one, a large file's round trip, Find,
+//! autosave, New, the settings in OS2.INI, and closing (unchanged text
+//! closes without asking). Prints PASS/FAIL lines and "e selftest done:
+//! N failure(s)".
 
 use alloc::vec::Vec;
 
@@ -26,10 +29,6 @@ unsafe extern "C" {
     fn WinPeekMsg(hab: u32, q: *mut QMsg, h: u32, a: u32, b: u32, fl: u32) -> u32;
 }
 
-fn changed() -> bool {
-    send(app().mle, MLM_QUERYCHANGED, 0, 0) != 0
-}
-
 fn insert_at(at: u32, t: &[u8]) {
     let mle = app().mle;
     send(mle, MLM_SETSEL, at, at);
@@ -42,57 +41,97 @@ fn delete(p: &[u8]) {
     unsafe { os2::DosDelete(s.as_ptr()) };
 }
 
+fn read(p: &[u8]) -> Vec<u8> {
+    file::read(p).unwrap_or_default()
+}
+
+fn quit_posted() -> bool {
+    let mut q = QMsg::default();
+    unsafe { WinPeekMsg(app().hab, &mut q, 0, WM_QUIT, WM_QUIT, 1) != 0 }
+}
+
+/// Save the current file as File > Save does when no question is due.
+fn save_quietly(path: &[u8]) -> bool {
+    match types_for(path, false) {
+        Some(t) => write_with(path, t),
+        None => false,
+    }
+}
+
 pub fn run() -> u32 {
     let a = app();
-    // Defaults, whatever OS2.INI says.
-    (a.wrap, a.autosave, a.autosave_every, a.fg, a.bg) = (true, false, 100, CLR_BLACK, CLR_WHITE);
-    a.fattrs = default_fattrs();
     check("window created", create_window() && a.mle != 0 && a.menu != 0);
     check("starts Untitled", a.path.is_none() && !changed());
 
     let path = file::full_name(b"C:\\ETEST.TXT");
     delete(&path);
-    let text = b"line one\r\nline two\r\n";
-    check("test file written", file::write(&path, text).is_ok());
+    check("test file written", file::write(&path, b"line one\r\nline two\r\n\x1a").is_ok());
     check("open", open_file(&path));
-    check("open: title is the full name", a.path.as_deref() == Some(&path[..]));
-    check("open: LF text in the MLE", send(a.mle, MLM_QUERYTEXTLENGTH, 0, 0) == 18);
-    check("open: unchanged", !changed() && a.changes == 0);
-    check("export gives the file back", get_text() == text);
-    check("no type yet", file::types(&path).is_empty());
+    check("open: title is the full name", a.path.as_deref() == Some(&path[..]) && window_text(a.frame) == path);
+    check("open: end-of-file mark dropped, LF text in the MLE", text_length() == 18);
+    check("open: unchanged", !changed());
+    check("export gives the text back", get_text() == b"line one\r\nline two\r\n");
 
+    // A file with a type the editor knows keeps it, written with the
+    // end-of-file mark.
+    check("type set", file::set_type(&path, TYPES[1]) == 0);
+    check("classified as known", file::classify(&path, &TYPES) == Ok(file::TypeEa::Known));
     insert_at(0, b"x");
-    check("edit: changed", changed() && a.changes == 1);
-    check("save with a type", save_to(&path, Some(TYPES[0])));
-    check("saved: unchanged", !changed() && a.changes == 0);
-    check("saved: the file", file::read(&path).ok().as_deref() == Some(&b"xline one\r\nline two\r\n"[..]));
-    check("saved: .TYPE Plain Text", file::types(&path) == [b"Plain Text".to_vec()]);
-    check("File > Save keeps a typed file's type", {
-        insert_at(1, b"y");
-        save() && file::types(&path) == [b"Plain Text".to_vec()]
-    });
-    check("rewritten", file::read(&path).ok().as_deref() == Some(&b"xyline one\r\nline two\r\n"[..]));
-    check("set_type replaces", file::set_type(&path, TYPES[1]) == 0 && file::types(&path) == [b"OS/2 Command File".to_vec()]);
+    check("edit: changed", changed());
+    check("save (known type)", save_quietly(&path));
+    check("saved: unchanged", !changed());
+    check("saved: text and Ctrl+Z", read(&path) == b"xline one\r\nline two\r\n\x1a");
+    check("saved: type kept", file::types(&path) == [TYPES[1].to_vec()]);
+
+    // Save as: the default type.
+    let other = file::full_name(b"C:\\ETEST2.TXT");
+    delete(&other);
+    a.type_checked = false;
+    a.default_type = 2;
+    check("save as gets the default type", types_for(&other, true).is_some_and(|t| write_with(&other, t)) && file::types(&other) == [TYPES[2].to_vec()]);
+    a.default_type = 0;
+
+    // Types the editor does not know: kept, or "Plain Text" added.
+    check("unknown types", file::set_types(&path, &[b"Bitmap", b"Icon"]) == 0);
+    check("classified as unknown", file::classify(&path, &TYPES) == Ok(file::TypeEa::Unknown(alloc::vec![b"Bitmap".to_vec(), b"Icon".to_vec()])));
+    a.type_checked = false;
+    insert_at(0, b"u");
+    check("save keeping unknown types", write_with(&path, NewTypes::Keep) && file::types(&path) == [b"Bitmap".to_vec(), b"Icon".to_vec()]);
+    let add = NewTypes::Set(alloc::vec![b"Bitmap".to_vec(), b"Icon".to_vec(), TYPES[0].to_vec()]);
+    check("save adding Plain Text", write_with(&path, add) && file::types(&path) == [b"Bitmap".to_vec(), b"Icon".to_vec(), b"Plain Text".to_vec()]);
+    check("now known", file::classify(&path, &TYPES) == Ok(file::TypeEa::Known));
+    check("a type value that is not ASCII is malformed", file::parse_types(&[0xfe, 0xff, 1, 0, 0]).is_none());
+    check("a single ASCII type", file::parse_types(&[0xfd, 0xff, 2, 0, b'h', b'i']) == Some(alloc::vec![b"hi".to_vec()]));
+
+    // Once a save dealt with the type, later saves do not ask again.
+    a.type_checked = true;
+    file::set_types(&path, &[]);
+    insert_at(0, b"v");
+    check("after a save: no question", save_quietly(&path));
 
     // Find (MLM_SEARCH as the Find dialog uses it).
-    let mut sd = [0u8; 28];
-    let find = b"two";
-    sd[0..2].copy_from_slice(&28u16.to_le_bytes());
-    sd[4..8].copy_from_slice(&(find.as_ptr() as u32).to_le_bytes());
-    sd[12..14].copy_from_slice(&3u16.to_le_bytes());
-    sd[16..20].copy_from_slice(&0i32.to_le_bytes());
-    sd[20..24].copy_from_slice(&(-1i32).to_le_bytes());
-    let found = send(a.mle, MLM_SEARCH, MLFSEARCH_SELECTMATCH | MLFSEARCH_CASESENSITIVE, sd.as_mut_ptr() as u32) != 0;
-    let at = u32::from_le_bytes([sd[16], sd[17], sd[18], sd[19]]);
-    check("find selects the match", found && at == 16 && send(a.mle, MLM_QUERYSEL, MLFQS_MINSEL, 0) == 16 && send(a.mle, MLM_QUERYSEL, MLFQS_MAXSEL, 0) == 19);
+    set_text(b"alpha beta\r\nBeta gamma\r\n");
+    a.find_text = b"beta".to_vec();
+    a.find_case = true;
+    a.find_wrap = false;
+    send(a.mle, MLM_SETSEL, 0, 0);
+    check("find: first match", dialogs::find_next() && send(a.mle, MLM_QUERYSEL, MLFQS_MINSEL, 0) == 6);
+    check("find: case sensitive, no wrap: no more", !dialogs::find_next());
+    a.find_case = false;
+    check("find: any case finds Beta", dialogs::find_next() && send(a.mle, MLM_QUERYSEL, MLFQS_MINSEL, 0) == 11);
+    a.find_wrap = true;
+    check("find: wrap starts over", dialogs::find_next() && send(a.mle, MLM_QUERYSEL, MLFQS_MINSEL, 0) == 6);
 
-    // Autosave after 3 changes.
+    // Autosave after 3 changes (the file has a known type: no question).
+    set_text(b"auto\r\n");
+    file::set_type(&path, TYPES[0]);
+    a.type_checked = false;
     (a.autosave, a.autosave_every) = (true, 3);
     insert_at(0, b"1");
     insert_at(0, b"2");
-    check("autosave: not yet", changed() && file::read(&path).ok().as_deref() == Some(&b"xyline one\r\nline two\r\n"[..]));
+    check("autosave: not yet", changed());
     insert_at(0, b"3");
-    check("autosave: saved", !changed() && file::read(&path).ok().as_deref() == Some(&b"321xyline one\r\nline two\r\n"[..]));
+    check("autosave: saved", !changed() && read(&path) == b"321auto\r\n\x1a" && a.changes == 0);
     a.autosave = false;
 
     // A large file.
@@ -106,24 +145,28 @@ pub fn run() -> u32 {
     // Missing file: a new document with that name.
     let missing = file::full_name(b"C:\\ENEW.TXT");
     delete(&missing);
-    check("missing file opens empty", open_file(&missing) && a.path.as_deref() == Some(&missing[..]) && send(a.mle, MLM_QUERYTEXTLENGTH, 0, 0) == 0);
-    insert_at(0, b"new\n");
-    check("new file saved", save_to(&missing, Some(TYPES[0])) && file::read(&missing).ok().as_deref() == Some(&b"new\r\n"[..]));
+    check("missing file opens empty", open_file(&missing) && a.path.as_deref() == Some(&missing[..]) && text_length() == 0);
+    check("missing file: no file yet", file::classify(&missing, &TYPES) == Ok(file::TypeEa::NoFile));
 
-    // New and close with no changes: no questions.
+    // Settings.
+    save_int(b"IAUTOSAVE\0", 42);
+    save_int(b"ULFGNDCOLOR\0", -1);
+    load_settings();
+    check("settings: EHXMAIN IAUTOSAVE, ULFGNDCOLOR", a.autosave_every == 42 && a.fg == -1);
+
+    // New and closing with no changes: no questions.
     send(a.client, WM_COMMAND, IDM_NEW as u32, 0);
-    check("New: Untitled, empty", a.path.is_none() && send(a.mle, MLM_QUERYTEXTLENGTH, 0, 0) == 0 && !changed());
-    send(a.client, WM_SAVEAPPLICATION, 0, 0);
-    check("WM_SAVEAPPLICATION unchanged: nothing pending", a.pending_close.is_none());
+    check("New: Untitled, empty", a.path.is_none() && text_length() == 0 && !changed() && window_text(a.frame) == UNTITLED);
+    check("unchanged: may close", process_save_quit());
     send(a.client, WM_CLOSE, 0, 0);
+    check("WM_CLOSE unchanged: quits", quit_posted());
+    send(a.client, WM_COMMAND, IDM_CLOSE as u32, 0);
     let mut q = QMsg::default();
-    check("WM_CLOSE unchanged: quits", unsafe { WinPeekMsg(a.hab, &mut q, 0, WM_QUIT, WM_QUIT, 1) } != 0);
-    // An answer given for WM_SAVEAPPLICATION is used by the WM_CLOSE.
-    a.pending_close = Some(false);
-    send(a.client, WM_CLOSE, 0, 0);
-    check("WM_CLOSE after a cancelled question: stays", unsafe { WinPeekMsg(a.hab, &mut q, 0, WM_QUIT, WM_QUIT, 1) } == 0 && a.pending_close.is_none());
+    let posted = unsafe { WinPeekMsg(a.hab, &mut q, a.client, WM_CLOSE, WM_CLOSE, 1) } != 0;
+    check("F3 (close command) posts WM_CLOSE", posted);
 
     delete(&path);
+    delete(&other);
     delete(&missing);
     unsafe { WinDestroyWindow(a.frame) };
     let fails = unsafe { FAILS };

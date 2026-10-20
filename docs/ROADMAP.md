@@ -149,10 +149,11 @@ Status markers: done, in progress, planned.
   editing, finding, fonts, word wrap, saving (with its .TYPE dialogs),
   the "save changes?" prompt, cut/copy/paste also between programs
 - done: rs2's own System Editor (userland/e, `C:\OS2\E.EXE`) in the
-  distribution: E's menus and dialogs (file and font dialogs, the .TYPE
-  prompts, File Changed, Autosave, Find/Change, Set colors), options in
-  OS2.INI, a help instance for E.HLP (the help file itself still to be
-  written), `E /SELFTEST`
+  distribution, behaving as OS/2's E (studied with Ghidra): E's menus,
+  ids, accelerators, dialogs and help table, its .TYPE rules, Ctrl+Z
+  end-of-file mark and OS2.INI settings (EHXMAIN), the close and
+  shutdown questions, `E /SELFTEST`; its help file (E.HLP) is still to
+  be written
 - done: the multi-line entry field (WC_MLE, its text engine host-tested
   in `crates/pmwin`), combo boxes, spin buttons, sliders and value sets;
   the clipboard and atom tables shared by all processes (CF_TEXT and
