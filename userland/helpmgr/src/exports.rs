@@ -42,4 +42,18 @@ aligned! {
     __a_WinLoadHelpTable => crate::WinLoadHelpTable, 3;
     __a_WinCreateHelpTable => crate::WinCreateHelpTable, 2;
     __a_Rs2ViewBook => crate::Rs2ViewBook, 4;
+    __a_HMSetHelpDatabase => crate::viewapi::HMSetHelpDatabase, 2;
+    __a_IOLoadAllTOC => crate::viewapi::IOLoadAllTOC, 1;
+    __a_IOLoadAllIndex => crate::viewapi::IOLoadAllIndex, 2;
+    __a_IOFreeAllTOC => crate::viewapi::IOFreeAllTOC, 1;
+    __a_IOFreeAllIndex => crate::viewapi::IOFreeAllIndex, 1;
+    __a_IOFreeIOInfoList => crate::viewapi::IOFreeIOInfoList, 1;
+    __a_MscStrniCmp => crate::viewapi::MscStrniCmp, 4;
+    __a_MscStriCmp => crate::viewapi::MscStriCmp, 3;
+    __a_FindPattern => crate::viewapi::FindPattern, 5;
+    __a_FindWildPattern => crate::viewapi::FindWildPattern, 5;
+    __a_GetStrToken => crate::viewapi::GetStrToken, 1;
+    __a_FindTokenPattern => crate::viewapi::FindTokenPattern, 3;
+    __a_MscAppendINF => crate::viewapi::MscAppendINF, 3;
+    __a_WinCreateBookInstance => crate::viewapi::WinCreateBookInstance, 2;
 }

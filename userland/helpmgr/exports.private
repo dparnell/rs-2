@@ -1,2 +1,16 @@
 ; rs2-private exports
 Rs2ViewBook 200
+WinCreateBookInstance 26
+IOLoadAllTOC 28
+IOLoadAllIndex 29
+IOFreeAllTOC 30
+IOFreeAllIndex 31
+IOFreeIOInfoList 32
+FindWildPattern 33
+FindPattern 34
+FindTokenPattern 35
+GetStrToken 36
+HMSetHelpDatabase 37
+MscAppendINF 45
+MscStriCmp 46
+MscStrniCmp 47

@@ -131,6 +131,7 @@ fn ensure(inst: &mut Instance) -> &'static mut View {
     }
     let v = make(inst, false, HWND_DESKTOP);
     inst.frame = v.frame;
+    inst.compat[0x26..0x2a].copy_from_slice(&v.frame.to_le_bytes());
     // On the right of the screen, as IBM's help windows come up.
     let (sw, sh) = (sysval(SV_CXSCREEN), sysval(SV_CYSCREEN));
     let cx = (sw * 11 / 20).clamp(320.min(sw), 680);
@@ -654,6 +655,10 @@ fn place(v: &View) {
 }
 
 extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    crate::stack::deep(|| client_proc_(h, msg, mp1, mp2))
+}
+
+fn client_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let Some(v) = view(h) else { return unsafe { WinDefWindowProc(h, msg, mp1, mp2) } };
     match msg {
         WM_SIZE => {
@@ -734,7 +739,9 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             }
             let book = inst.book;
             close(inst);
-            if book {
+            if inst.owner != 0 {
+                post(inst.owner, crate::HM_BOOK_CLOSED, inst.hwnd, 0);
+            } else if book {
                 post(inst.hwnd, WM_QUIT, 0, 0);
             }
             0
@@ -762,6 +769,10 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 // ---- The panel window ----
 
 extern "C" fn panel_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    crate::stack::deep(|| panel_proc_(h, msg, mp1, mp2))
+}
+
+fn panel_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let Some(v) = view(h) else { return unsafe { WinDefWindowProc(h, msg, mp1, mp2) } };
     match msg {
         // Help manager messages sent to a panel window (as application-

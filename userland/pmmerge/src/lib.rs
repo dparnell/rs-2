@@ -23,3 +23,12 @@ pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
 pub extern "C" fn PmMergeHelpHook(_mode: u32, _topic: u32, _subtopic: u32, _prcl: u32) -> u32 {
     0
 }
+
+/// WinQueryCpType(hmq) (ordinal 5480): the kind of the code page (of the
+/// queue, or the process's for 0), as IBM's PMMERGE classifies them: 2
+/// Arabic, 6 Hebrew (bidirectional; IBM's VIEWDOC then loads PMBIDI),
+/// otherwise 1 for rs2's code pages (437 and 850).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryCpType(_hmq: u32) -> u32 {
+    1
+}

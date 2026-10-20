@@ -23,6 +23,8 @@ mod exports;
 mod library;
 mod pm;
 mod render;
+mod stack;
+mod viewapi;
 mod window;
 
 use alloc::boxed::Box;
@@ -76,6 +78,11 @@ pub const HM_SET_OBJCOM_WINDOW: u32 = 0x238;
 pub const HM_QUERY_DDF_DATA: u32 = 0x23a;
 pub const HM_INVALIDATE_DDF_DATA: u32 = 0x23b;
 pub const HM_QUERY: u32 = 0x23c;
+/// IBM's private messages to an instance (VIEWDOC).
+const HM_SHOW_TOC: u32 = 0x235;
+const HM_RAISE: u32 = 0x236;
+const HM_SET_OWNER: u32 = 0x1000;
+pub const HM_BOOK_CLOSED: u32 = 0x1003;
 pub const HM_INFORM: u32 = 0x234;
 pub const HM_NOTIFY: u32 = 0x242;
 pub const HM_RESOURCEID: u32 = 0;
@@ -139,6 +146,12 @@ pub struct Instance {
     pub viewports: Vec<u32>,
     /// A book shown by VIEW: no application, the program ends with it.
     pub book: bool,
+    /// The window told 0x1003 (with the instance) when the book's window
+    /// closes (IBM's VIEWDOC sends it with message 0x1000).
+    pub owner: u32,
+    /// What window word 0 points at, as in IBM's instance structure:
+    /// the help window's frame at +0x26.
+    pub compat: Box<[u8; 0x40]>,
 }
 
 struct Registry(core::cell::UnsafeCell<Vec<*mut Instance>>);
@@ -252,7 +265,10 @@ pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: 
         footnote: 0,
         viewports: Vec::new(),
         book,
+        owner: 0,
+        compat: Box::new([0; 0x40]),
     }));
+    unsafe { WinSetWindowULong(h, QWL_USER, (*inst).compat.as_ptr() as u32) };
     let first = instances().is_empty();
     instances().push(inst);
     if first && !book {
@@ -267,6 +283,10 @@ pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: 
 /// pszHelpWindowTitle, fShowPanelId, pszHelpLibraryName.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinCreateHelpInstance(hab: u32, init: *mut u32) -> u32 {
+    crate::stack::deep(|| WinCreateHelpInstance_(hab, init))
+}
+
+fn WinCreateHelpInstance_(hab: u32, init: *mut u32) -> u32 {
     if init.is_null() {
         return 0;
     }
@@ -391,6 +411,10 @@ pub extern "C" fn WinCreateHelpTable(help: u32, table: u32) -> u32 {
 /// the error in `*rc`.
 #[unsafe(no_mangle)]
 pub extern "C" fn Rs2ViewBook(hab: u32, names: *const u8, topic: *const u8, rc: *mut u32) -> u32 {
+    crate::stack::deep(|| Rs2ViewBook_(hab, names, topic, rc))
+}
+
+fn Rs2ViewBook_(hab: u32, names: *const u8, topic: *const u8, rc: *mut u32) -> u32 {
     let names = unsafe { cstr(names) }.to_vec();
     let topic = unsafe { cstr(topic) }.to_vec();
     match create(hab, &names, b"", HelpTable::None, false, true) {
@@ -584,7 +608,11 @@ fn search_table(inst: &Instance, mode: u16, topic: u16, sub: u16, active: u32) -
 
 /// The help hook (HK_HELP), called by PMWIN when WM_HELP gets to a frame
 /// of this thread (IBM's HelpProcessor).
-pub extern "C" fn HelpProcessor(_hab: u32, mode: u32, topic: u32, sub: u32, _rect: *const RectL) -> u32 {
+pub extern "C" fn HelpProcessor(hab: u32, mode: u32, topic: u32, sub: u32, rect: *const RectL) -> u32 {
+    crate::stack::deep(|| HelpProcessor_(hab, mode, topic, sub, rect))
+}
+
+fn HelpProcessor_(_hab: u32, mode: u32, topic: u32, sub: u32, _rect: *const RectL) -> u32 {
     let active = unsafe { WinQueryActiveWindow(HWND_DESKTOP) };
     if active == 0 {
         return 0;
@@ -618,6 +646,10 @@ pub extern "C" fn HelpProcessor(_hab: u32, mode: u32, topic: u32, sub: u32, _rec
 // ---- The help instance window ----
 
 extern "C" fn instance_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    crate::stack::deep(|| instance_proc_(h, msg, mp1, mp2))
+}
+
+fn instance_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let Some(inst) = instance(h) else { return unsafe { WinDefWindowProc(h, msg, mp1, mp2) } };
     match msg {
         HM_DISPLAY_HELP => {
@@ -706,6 +738,30 @@ extern "C" fn instance_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         HM_SET_OBJCOM_WINDOW => core::mem::replace(&mut inst.objcom, mp1),
+        // IBM's private messages (VIEWDOC): show TOC entry mp1 of the
+        // instance's numbering; bring the window up; the window to tell
+        // when the book closes.
+        HM_SHOW_TOC => {
+            let n = mp1 & 0xffff;
+            let p = inst.libs.iter().enumerate().rev().find(|(_, l)| l.base <= n).map(|(lib, l)| PanelRef { lib, toc: (n - l.base) as u16 });
+            match p {
+                Some(p) if inst.libs[p.lib].doc().toc(p.toc).is_ok() => {
+                    window::show_panel(inst, p, true);
+                    0
+                }
+                _ => HMERR_PANEL_NOT_FOUND,
+            }
+        }
+        HM_RAISE => {
+            if inst.frame != 0 {
+                unsafe { WinSetWindowPos(inst.frame, HWND_TOP, 0, 0, 0, 0, SWP_SHOW | SWP_ZORDER | SWP_ACTIVATE | SWP_RESTORE) };
+            }
+            0
+        }
+        HM_SET_OWNER => {
+            inst.owner = mp1;
+            0
+        }
         // mp1: HMQW_* in the high word.
         HM_QUERY => window::query(inst, (mp1 >> 16) as u16, mp1 as u16, mp2),
         // mp1: how many ids (0: all), mp2: the ids (u16 each).
