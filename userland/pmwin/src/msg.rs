@@ -423,7 +423,10 @@ pub extern "C" fn WinStartTimer(_hab: u32, h: u32, id: u32, ms: u32) -> u32 {
     }
     s.timers.retain(|t| !(t.hwnd == h && t.id == id && t.queue == queue));
     let id = if id == 0 { 0x7fff - s.timers.len() as u32 } else { id };
-    s.timers.push(state::Timer { hwnd: h, queue, id, interval: ms.max(1), next: now().wrapping_add(ms.max(1)) });
+    // OS/2 timers run at most at the system clock rate (31 ms): PMREXX
+    // asks for 0 ms.
+    let ms = ms.max(31);
+    s.timers.push(state::Timer { hwnd: h, queue, id, interval: ms, next: now().wrapping_add(ms) });
     // The thread recomputes how long it may sleep.
     s.wake.insert(queue);
     id

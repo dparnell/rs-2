@@ -133,6 +133,30 @@ pub fn create_from(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u3
     if !st().desk.exists(owner) {
         owner = 0;
     }
+    // A template whose window is not a frame (PMREXXIO's input line is
+    // an entry field): that class, subclassed by the dialog procedure,
+    // which passes the rest to WinDefDlgProc and so to the class (the
+    // window keeps its class's control data, no dialog data).
+    if t.class != b"#1" && st().class(&t.class).is_some() {
+        let pos = Rect::new(t.x * DU_X, t.y * DU_Y, (t.x + t.cx) * DU_X, (t.y + t.cy) * DU_Y);
+        let h = win::create(parent, &t.class, &t.text, t.style & !ws::VISIBLE, pos, owner, t.id, t.ctl as u32);
+        if h == 0 {
+            return 0;
+        }
+        for c in &t.children {
+            create_item(h, h, c, 0);
+        }
+        if proc_ != 0 {
+            if let Some(w) = st().desk.get_mut(h) {
+                w.proc_ = proc_;
+            }
+        }
+        send(h, WM_INITDLG, 0, params);
+        if t.style & ws::VISIBLE != 0 && st().desk.exists(h) {
+            win::show(h, true);
+        }
+        return h;
+    }
     let mut fcf = if t.ctl.is_null() { 0 } else { unsafe { (t.ctl as *const u32).read_unaligned() } };
     for (fs, f) in [(FS_DLGBORDER, FCF_DLGBORDER), (FS_BORDER, FCF_BORDER), (FS_SIZEBORDER, FCF_SIZEBORDER)] {
         if t.style & fs != 0 {

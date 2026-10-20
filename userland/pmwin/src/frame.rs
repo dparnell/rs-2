@@ -661,8 +661,12 @@ pub fn edges_at(h: u32, p: Point) -> u8 {
 }
 
 /// The frame forwards these from its controls to the client.
+/// Messages the frame passes to its client. IBM's frame procedure sends
+/// every message it does not process itself there; rs2 does so for the
+/// controls' notifications and for application messages (WM_USER and
+/// up: PMREXXIO posts its "output waiting" message to the frame).
 fn forwarded(msg: u32) -> bool {
-    matches!(msg, WM_COMMAND | WM_CONTROL | WM_VSCROLL | WM_HSCROLL | WM_INITMENU | WM_MENUSELECT | WM_MENUEND | WM_DRAWITEM | WM_MEASUREITEM)
+    matches!(msg, WM_COMMAND | WM_CONTROL | WM_VSCROLL | WM_HSCROLL | WM_INITMENU | WM_MENUSELECT | WM_MENUEND | WM_DRAWITEM | WM_MEASUREITEM) || msg >= 0x1000
 }
 
 pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
