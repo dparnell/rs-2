@@ -13,6 +13,8 @@
 #![no_std]
 #![no_main]
 #![allow(non_snake_case, non_upper_case_globals, clippy::missing_safety_doc)]
+// The exports take pointers from OS/2 callers, as the API defines them.
+#![allow(clippy::not_unsafe_ptr_arg_deref)]
 
 extern crate alloc;
 extern crate os2;
