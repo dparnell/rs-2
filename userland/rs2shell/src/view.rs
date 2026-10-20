@@ -603,6 +603,8 @@ fn insert_records(v: usize) {
     // Places for the icons without one, before they are inserted (so
     // the container never sees them all at the origin).
     let fresh = used.is_empty();
+    // Icons placed now keep their places (new objects go to free ones).
+    let placed_keys: Vec<u32> = unplaced.iter().map(|&(_, r)| rd(r, R_KEY)).collect();
     for (i, r) in unplaced {
         let p = if fresh { slot(v, i as i32) } else { free_slot(v, &used) };
         wr(r, R_X, p.0 as u32);
@@ -614,6 +616,9 @@ fn insert_records(v: usize) {
     let ri: [u32; 6] = [24, CMA_END, 0, 1, 1, n];
     send(cnr, CM_INSERTRECORD, first, ri.as_ptr() as u32);
     reposition(v);
+    if keep && !placed_keys.is_empty() {
+        save_positions(v, Some(&placed_keys));
+    }
 }
 
 /// The container repaints and fits its scroll bars to the icons.
