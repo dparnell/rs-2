@@ -197,6 +197,11 @@ Status markers: done, in progress, planned.
   and OS2SYS.INI from USER_INI/SYSTEM_INI, shared by all processes,
   written through safely; the program list calls, kept in OS2.INI for
   a later shell (docs/PM.md, Profiles); `RS2\INITEST.EXE`
+- done: Unicode locales (LIBUNI.DLL on `crates/uls`: rs2's own system
+  locale tables, user locales in USER.LOC, locale objects, items,
+  UniStrftime, the `Locale` table export) and UCONV.DLL, as IBM's LIBUNI
+  and LOCALE.DLL (studied with Ghidra); OS/2's Locale applet
+  (GLOCALE.EXE) runs on them
 - done: the help manager (HELPMGR.DLL: help instances, help tables, the
   help hook IBM's way, HM_ messages, a help window with contents, index,
   search and footnotes, on `crates/ipf`, which reads, lays out and

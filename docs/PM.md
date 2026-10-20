@@ -36,7 +36,7 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
 | `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
-| `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), HELPMGR stubs, PMDRAG (no drag is ever in progress), PMMERGE (the entry points programs import from it directly), LIBUNI (locale objects). |
+| `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), HELPMGR stubs, PMDRAG (no drag is ever in progress), PMMERGE (the entry points programs import from it directly), LIBUNI and UCONV (locales and code page conversion, see [Locales](#locales-libuni-and-uconv)). |
 
 ## Kernel services (module RS2API)
 
@@ -1281,6 +1281,61 @@ have a title bar and a vertical scroll bar), HMQW_INDEX/TOC/SEARCH/
 VIEWPAGES/LIBRARY, and the panel placement of HM_DISPLAY_HELP and
 HM_HELP_CONTENTS by heading window data beyond the help window's own
 panel.
+
+## Locales (LIBUNI and UCONV)
+
+LIBUNI.DLL (userland/libuni) has OS/2's Unicode locale calls: locale
+objects, items and values (`UniQueryLocaleItem`/`Value`/`Info`),
+`UniStrftime`, locale lists, language and country names, user locales
+(`UniMakeUserLocale`, `UniSetUserLocaleItem`, `UniDeleteUserLocale`,
+`UniCompleteUserLocale`), character classification
+(`UniQueryCharType`, `UniQueryAlpha`...) and the `UniStr*` string
+functions. It follows IBM's LIBUNI and LOCALE.DLL, studied with Ghidra
+(`libuni.sym`, `locale.sym`); the data and logic are in `crates/uls`
+(no_std, host-tested with `cargo test -p uls`).
+
+- **System locales** (what IBM compiles into LOCALE.DLL) are rs2's own:
+  `tools/scripts/gen_locales.py` writes `crates/uls/src/data.rs`, 41
+  locales (`posix`, `univ` and 39 language/country pairs) with all 136
+  items (LOCI_*), as NUL-terminated UCS-2 in one pool. Country
+  conventions come from gen_nls.py's table (the same as rs2's
+  COUNTRY.SYS data); names of days, months, languages and countries are
+  written in the script. As in IBM's data, x items (`xLocaleToken`,
+  `xWinLocale`) are hex digits without `0x`.
+- **User locales** are new locales and overrides of system ones (an
+  override keeps the system locale's name). They live in
+  `<boot>:\LANGUAGE\LOCALE\USER.LOC` in IBM's text format:
+  `[codepage 850]`, then per locale `[locale NAME BASE]` and lines
+  `    itemName (padded to 19) = "value"`, only for items that differ from
+  the base; characters outside printable ASCII are code page 850 bytes
+  (Latin-1 letters) or `[hex]`, and `[` is `[[`. A process reads the file
+  when it first needs it and again when it creates a locale object or
+  lists locales with nothing unsaved; `UniCompleteUserLocale` writes it
+  (creating the directory). IBM keeps them in shared memory instead.
+- **Locale objects** hold a locale name per category; an empty spec
+  takes `LC_ALL`, `LC_category` or `LANG`, and without them the locale
+  of the system country (IBM's installation sets LANG; rs2's does not).
+  `UniQueryLocaleObject(LC_ALL)` gives the six names separated by
+  blanks, as IBM's does. Items of system locales are returned from the
+  static pool (`UniFreeMem` leaves them alone); others are allocated.
+- **Export 151, `Locale`**, is the table LOCALE.DLL's `locale_init`
+  returns and IBM's LIBUNI exports unchanged: the highest item number,
+  the pool's address range and functions taking their arguments in EAX
+  and EDX (`locale_name`, `locale_uniname`, `locale_token`,
+  `locale_item`, `locale_value`, `locale_data`, `locale_itemname`,
+  `locale_itemnum`, `locale_itemcategory`). GLOCALE.EXE calls them
+  directly (userland/libuni/src/table.rs).
+
+UCONV.DLL (userland/uconv) converts between UCS-2 and the single-byte
+code pages of rs2's NLS tables (`UniCreateUconvObject` with `IBM-nnn`,
+or the process code page for an empty name or one with only modifiers
+such as `@path=no`); `UniUconvToUcs`/`FromUcs`, `UniStrToUcs`/`FromUcs`,
+`UniMapCpToUcsCp`. Double-byte code pages are not converted.
+
+Not done: `UniStrfmon`, `UniStrptime`, `UniStrtod`, transform and
+attribute objects, collation beyond case folding (`UniStrcoll`,
+`UniStrxfrm`), language and country names in languages other than
+English and the language itself.
 
 ## Debugging
 

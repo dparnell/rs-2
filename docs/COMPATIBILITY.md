@@ -112,7 +112,7 @@ HELPMGR. Tested with keyboard and mouse input from
 The PM programs of OS/2 itself (from the client CD, with their DLLs,
 help files and data), booted one at a time (`xtask run --init`); what
 they import that rs2 lacks was listed with `crates/os2-exe`'s
-`lximports` example against rs2's export lists. None runs yet.
+`lximports` example against rs2's export lists. GLOCALE runs; the others do not yet.
 
 | Program | Status | Notes |
 |---------|--------|-------|
@@ -125,7 +125,7 @@ they import that rs2 lacks was listed with `crates/os2-exe`'s
 | CLIPOS2.EXE (Clipboard Viewer) | fails | GpiCopyMetaFile, WinSetMultWindowPos. |
 | EPM.EXE (Enhanced Editor) | fails | PMSPL.DLL (the spooler, imported by ETKC603.DLL); cursors (WinCreateCursor, WinShowCursor, WinDestroyCursor), DDE (WinDdeInitiate, WinDdePostMsg, WinDdeRespond), the switch list, WinGetKeyState, WinGetSysBitmap, WinQueryClassName, WinSetMultWindowPos, WinSetWindowBits, WinQueryCpType, WinStoreWindowPos, WinRestoreWindowPos. |
 | PICVIEW.EXE (Picture Viewer) | fails | PMSPL.DLL (through PMPIC.DLL); GPI segments and metafiles (GpiOpenSegment, GpiCloseSegment, GpiDrawChain, GpiGetData, GpiPutData, GpiSetMetaFileBits, GpiQueryMetaFileBits/Length, GpiSaveMetaFile, GpiCopyMetaFile, GpiSetInitialSegmentAttrs, GpiSetViewingTransformMatrix, GpiSetDefViewingLimits, GpiSetDefAttrs), WinCpTranslateString, WinGetKeyState, WinSetErrorInfo. |
-| GLOCALE.EXE (Locale) | fails | LIBUNI's locale calls (24 ordinals), WinSetWindowBits. |
+| GLOCALE.EXE (Locale) | works | On rs2's LIBUNI and UCONV ([PM.md](PM.md#locales-libuni-and-uconv)). Starts with its Country Palette; on the first start it makes the current locale (en_US) a user locale and writes `\LANGUAGE\LOCALE\USER.LOC`. Opening a locale shows its notebook: country/region (language, country, base locale, measurement, list separator), collation, numeric, monetary (`$1,000.11`, `($1,000.11)`), date and time formats with samples from UniStrftime. Create another (from the context menu) asks for a name and makes a new user locale; picking another base locale (de_DE) shows its values. Needs `GLOCMRI.DLL` (its resources) in LIBPATH; PMBIDI is not needed. The notebook shows two tabs at the window's default size and the Decimal digits spin button is empty (rs2's PM). |
 | PMCHKDSK.EXE, PMSEEK.EXE (Seek and Scan) | fails | 16-bit PM programs: the 16-bit PMWIN, PMGPI, PMSHAPI and HELPMGR entry points (Win16*, Gpi16*, Prf16*), which rs2 does not have. |
 | MPCPUMON.EXE (Pulse) | fails | Loads, then DosConfigurePerf and DosAliasPerfCtrs (DOSCALLS 365, 364) are missing and it divides by the counters it did not get. |
 | SYSLOGPM, REGEDIT2, TEXTCON1, BDVIEWER, ARACONV, COMETRUN, PMSPOOL | not tried | Need system DLLs rs2 does not have: PMSPL, LFAPI/FFST, pmwinx, PMBIDI, THAILIB, CNVTRANS, PMGRE. |
