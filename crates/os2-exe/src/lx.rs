@@ -181,6 +181,10 @@ pub struct Fixup {
     pub sources: Vec<i16>,
     pub target: Target,
     pub additive: u32,
+    /// An internal fixup chain (target flag 0x08, from Warp 4.5's linker):
+    /// `sources[0]` is the first location, the rest follow from the page
+    /// contents (see [`fixup_chain`]).
+    pub chained: bool,
 }
 
 /// An entry point exported through the entry table.
@@ -592,7 +596,33 @@ fn parse_fixup(r: &Reader<'_>, mut pos: usize) -> Result<(Fixup, usize), Error> 
         sources.push(r.u16(pos)? as i16);
         pos += 2;
     }
-    Ok((Fixup { kind, alias, sources, target, additive }, pos))
+    Ok((Fixup { kind, alias, sources, target, additive, chained: flags & 0x08 != 0 }, pos))
+}
+
+/// Walk an internal fixup chain in a page before it is patched: the
+/// record gives the first source and its target offset; every source dword
+/// holds the page offset of the next source in its top 12 bits (0xFFF ends
+/// the chain) and, after the first, its own target offset in the low 20
+/// bits. Returns `(source, target offset)` pairs.
+pub fn fixup_chain(page: &[u8], first: i16, first_target: u32) -> Vec<(i16, u32)> {
+    let mut out = Vec::new();
+    let (mut src, mut target) = (first, first_target);
+    while src >= 0 && (src as usize) + 4 <= page.len() && out.len() < page.len() / 4 {
+        let at = src as usize;
+        let raw = u32::from_le_bytes([page[at], page[at + 1], page[at + 2], page[at + 3]]);
+        out.push((src, target));
+        let next = raw >> 20;
+        if next == 0xfff {
+            break;
+        }
+        src = next as i16;
+        let at = src as usize;
+        if at + 4 > page.len() {
+            break;
+        }
+        target = u32::from_le_bytes([page[at], page[at + 1], page[at + 2], page[at + 3]]) & 0xf_ffff;
+    }
+    out
 }
 
 /// Expand an EXEPACK:1 ("iterated data") page.
@@ -702,4 +732,20 @@ pub fn expand_exepack2(src: &[u8], out: &mut [u8]) -> Result<usize, Error> {
         }
     }
     Ok(d.min(out.len()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fixup_chain;
+    use alloc::vec;
+
+    #[test]
+    fn chain_follows_links_in_the_page() {
+        // As in HELPMGR.DLL: a switch table at 0x550/0x55c behind a head at 0x54a.
+        let mut page = vec![0u8; 0x1000];
+        page[0x54a..0x54e].copy_from_slice(&0x55c0_0000u32.to_le_bytes());
+        page[0x55c..0x560].copy_from_slice(&0x5500_8570u32.to_le_bytes());
+        page[0x550..0x554].copy_from_slice(&0xfff0_8578u32.to_le_bytes());
+        assert_eq!(fixup_chain(&page, 0x54a, 0x8550), [(0x54a, 0x8550), (0x55c, 0x8570), (0x550, 0x8578)]);
+    }
 }

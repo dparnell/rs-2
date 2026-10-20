@@ -178,6 +178,18 @@ pub fn load(
                 };
                 let img = &mut images[oi];
                 let page_off = pi as isize * ps as isize;
+                if let (true, lx::Target::Internal { object, offset }) = (f.chained, f.target) {
+                    let start = page_off as usize;
+                    let page = &img[start.min(img.len())..(start + ps as usize).min(img.len())];
+                    let first = f.sources.first().copied().unwrap_or(-1);
+                    for (src, off) in lx::fixup_chain(page, first, offset) {
+                        let t = target_in(object as usize - 1, off.wrapping_add(f.additive));
+                        let at = page_off + src as isize;
+                        let src_flat = bases[oi].0 as i64 + at as i64;
+                        apply(img, at, f.kind, &t, src_flat as u32, f.alias);
+                    }
+                    continue;
+                }
                 for &src in &f.sources {
                     let at = page_off + src as isize;
                     let src_flat = bases[oi].0 as i64 + at as i64;

@@ -86,6 +86,17 @@ fn main() {
         for p in 0..o.page_count {
             let page_at = (o.base - lo) as i64 + p as i64 * page_size as i64;
             for f in m.fixups(o.page_index + p).unwrap_or_default() {
+                if let (true, Target::Internal { object, offset }) = (f.chained, f.target) {
+                    let start = page_at as usize;
+                    let page = image[start..(start + page_size).min(image.len())].to_vec();
+                    let base = objects[object as usize - 1].base;
+                    for (s, off) in os2_exe::lx::fixup_chain(&page, f.sources[0], offset) {
+                        let at = start + s as usize;
+                        let v = base.wrapping_add(off).wrapping_add(f.additive);
+                        image[at..at + 4].copy_from_slice(&v.to_le_bytes());
+                    }
+                    continue;
+                }
                 let value = match f.target {
                     Target::Internal { object, offset } => {
                         objects[object as usize - 1].base.wrapping_add(offset)
