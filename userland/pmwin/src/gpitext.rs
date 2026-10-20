@@ -4,6 +4,9 @@
 //! There is one font, the system font (8x16 pels). A logical font created
 //! with FATTR_FONTUSE_OUTLINE behaves like an outline font: it is scaled
 //! to the character box, and character strings in paths become figures.
+//! A logical font's italic, bold and underscore (fsSelection) are
+//! simulated: slanted, a pel wider, underlined; GpiSetCharShear slants
+//! outline fonts.
 
 #![allow(non_snake_case)]
 
@@ -294,7 +297,9 @@ pub extern "C" fn GpiCreateLogFont(hps: u32, _name: *const u8, lcid: i32, fat: *
     let lmatch = unsafe { (fat.add(4) as *const i32).read_unaligned() };
     let found = find_font(&face, lmatch);
     let outline = usef & FATTR_FONTUSE_OUTLINE != 0 || sel & FATTR_SEL_OUTLINE != 0 || found.is_some_and(|i| FONTS[i].1);
-    let lf = LogFont { outline };
+    // fsSelection: FATTR_SEL_ITALIC 1, FATTR_SEL_UNDERSCORE 2,
+    // FATTR_SEL_BOLD 0x20, simulated when the text is drawn.
+    let lf = LogFont { outline, italic: sel & 1 != 0, underscore: sel & 2 != 0, bold: sel & 0x20 != 0 };
     if let Some(i) = found {
         face = [0; 32];
         face[..FONTS[i].0.len()].copy_from_slice(FONTS[i].0);
@@ -369,6 +374,8 @@ pub extern "C" fn GpiQueryLogicalFont(hps: u32, lcid: i32, name: *mut [u8; 8], f
     write(name, [0; 8]);
     let mut v = [0u8; 56];
     v[0..2].copy_from_slice(&56u16.to_le_bytes());
+    let sel = lf.italic as u16 | (lf.underscore as u16) << 1 | (lf.bold as u16) << 5;
+    v[2..4].copy_from_slice(&sel.to_le_bytes());
     v[8..40].copy_from_slice(face);
     v[42..44].copy_from_slice(&850u16.to_le_bytes());
     if lf.outline {

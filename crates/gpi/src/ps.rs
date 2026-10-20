@@ -242,11 +242,19 @@ pub const CVTC_PAGE: i32 = 4;
 pub const CVTC_DEVICE: i32 = 5;
 
 /// Logical fonts: whether the selected font is scaled to the character
-/// box (outline fonts) or drawn at its pixel size (image fonts).
+/// box (outline fonts) or drawn at its pixel size (image fonts), and the
+/// simulated styles of its FATTRS fsSelection (italic slanted, bold one
+/// pel wider, underscored).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct LogFont {
     pub outline: bool,
+    pub italic: bool,
+    pub bold: bool,
+    pub underscore: bool,
 }
+
+/// The slant of simulated italics (x per y).
+const ITALIC_SLANT: f64 = 0.25;
 
 pub struct Ps {
     pub color: Rgb,
@@ -1175,6 +1183,17 @@ impl Ps {
         (sqrt(bx * bx + by * by) / self.font.width as f64, sqrt(cx * cx + cy * cy) / self.font.height as f64)
     }
 
+    /// Horizontal offset of glyph pels per pel above the baseline: the
+    /// character shear (outline fonts; GpiSetCharShear) and italics.
+    fn slant(&self) -> f64 {
+        let mut k = if self.logfont.italic { ITALIC_SLANT } else { 0.0 };
+        let (x, y) = self.attrs.char_shear;
+        if self.logfont.outline && x != 0 && y != 0 {
+            k += x as f64 / y as f64;
+        }
+        k
+    }
+
     /// Advance of `n` characters plus extra spacing, in device pels.
     fn advance(&self, text: &[u8], dx: Option<&[i32]>) -> Vec<f64> {
         let (sx, _) = self.text_scale();
@@ -1212,6 +1231,8 @@ impl Ps {
         let (fg, mix, bg, bmix) = self.resolve(&self.attrs.chr);
         let bottom = start.1 - f.descender as f64 * sy;
         let text_rect = Rect::new(round(start.0), round(bottom), round(start.0 + total), round(bottom + f.height as f64 * sy));
+        let slant = self.slant();
+        let lf = self.logfont;
         if self.building() {
             self.flush_fig();
             let mut x = start.0;
@@ -1220,7 +1241,8 @@ impl Ps {
                     let bits = f.row(b, row as usize);
                     for col in 0..f.width.min(8) {
                         if bits & (0x80 >> col) != 0 {
-                            let (x0, y0) = (x + col as f64 * sx, bottom + (f.height - 1 - row) as f64 * sy);
+                            let up = (f.height - 1 - row - f.descender) as f64 * sy;
+                            let (x0, y0) = (x + col as f64 * sx + up * slant, bottom + (f.height - 1 - row) as f64 * sy);
                             self.figs.push(Figure { pts: vec![(x0, y0), (x0 + sx, y0), (x0 + sx, y0 + sy), (x0, y0 + sy)], closed: true });
                         }
                     }
@@ -1237,12 +1259,14 @@ impl Ps {
                     });
                     self.fill_rect(s, r, bg);
                 }
-                if sx == 1.0 && sy == 1.0 && dx.is_none() && self.attrs.char_extra == 0 && self.attrs.char_break_extra == 0 {
+                let plain = slant == 0.0 && !lf.bold && !lf.underscore;
+                if plain && sx == 1.0 && sy == 1.0 && dx.is_none() && self.attrs.char_extra == 0 && self.attrs.char_break_extra == 0 {
                     let bm = if opaque { Mix::LeaveAlone } else { bmix };
                     self.glyphs_at(s, Point::new(round(start.0), round(start.1)), text, fg, mix, bg, bm);
                 } else {
                     let mut spans = crate::region::Spans::new();
                     let mut x = start.0;
+                    let wide = lf.bold as i32;
                     for (i, &b) in text.iter().enumerate() {
                         for row in 0..f.height {
                             let bits = f.row(b, row as usize);
@@ -1250,14 +1274,22 @@ impl Ps {
                             let y1 = round(bottom + (f.height - row) as f64 * sy);
                             for col in 0..f.width.min(8) {
                                 if bits & (0x80 >> col) != 0 {
-                                    let (x0, x1) = (round(x + col as f64 * sx), round(x + (col + 1) as f64 * sx));
+                                    let (x0, x1) = (x + col as f64 * sx, x + (col + 1) as f64 * sx);
                                     for y in y0..y1.max(y0 + 1) {
-                                        spans.add(y, x0, x1.max(x0 + 1));
+                                        let off = (y as f64 + 0.5 - start.1) * slant;
+                                        let (a, b) = (round(x0 + off), round(x1 + off));
+                                        spans.add(y, a, b.max(a + 1) + wide);
                                     }
                                 }
                             }
                         }
                         x += adv[i];
+                    }
+                    if lf.underscore {
+                        let y = round(start.1) - 1 - (sy as i32 - 1).max(0) / 2;
+                        for t in 0..round(sy).max(1) {
+                            spans.add(y - t, round(start.0), round(start.0 + total));
+                        }
                     }
                     let g = spans.into_region();
                     let b = Bundle { back_mix: 0, ..self.attrs.chr };

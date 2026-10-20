@@ -64,6 +64,8 @@ struct View {
     vp: Option<Viewport>,
     /// Frames of the page's application-controlled viewports.
     acvps: Vec<u32>,
+    /// The fonts of the page (font table and dynamic data).
+    fonts: Vec<crate::render::FontSpec>,
     /// The dynamic data of the panel's `:ddf.`s: resource id, the text
     /// (pages borrow it) and whether it is still valid.
     ddf: Vec<(u16, alloc::boxed::Box<[u8]>, bool)>,
@@ -188,6 +190,7 @@ fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
         footnote,
         vp: None,
         acvps: Vec::new(),
+        fonts: Vec::new(),
         ddf: Vec::new(),
     }));
     unsafe { WinSetWindowULong(client, QWL_USER, v as u32) };
@@ -413,10 +416,12 @@ fn relayout(v: &mut View) {
         Some(unsafe { core::slice::from_raw_parts(b.as_ptr(), b.len()) })
     });
     let hps = unsafe { WinGetPS(v.panel) };
-    let mut g = Gpi::new(hps);
+    let mut g = Gpi::new(hps, crate::render::doc_fonts(doc));
     let keys = keys();
     let page = layout_items(doc, &cells, &Options { width: w, keys: &keys }, &mut g);
     v.line = ipf::layout::Metrics::system(&mut g).height.max(8);
+    v.fonts = core::mem::take(&mut g.fonts);
+    drop(g);
     unsafe { WinReleasePS(hps) };
     v.page = Some(page);
     v.page_width = w;
@@ -770,6 +775,7 @@ extern "C" fn panel_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 let lib = &v.inst().libs[p.lib];
                 let mut d = Draw {
                     hps,
+                    g: Gpi::new(hps, v.fonts.clone()),
                     page,
                     top: v.top,
                     w: r.r,
