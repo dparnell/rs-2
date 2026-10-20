@@ -39,8 +39,8 @@ pub struct SysPointer {
     pub pointer: bool,
 }
 
-const BLACK: u32 = 0xff00_0000;
-const WHITE: u32 = 0xffff_ffff;
+pub(crate) const BLACK: u32 = 0xff00_0000;
+pub(crate) const WHITE: u32 = 0xffff_ffff;
 
 /// Size of system pointers and icons.
 pub const SIZE: i32 = 32;
@@ -194,19 +194,19 @@ fn strs(v: &[alloc::string::String]) -> Vec<&str> {
 
 // ---- Shapes for icons, drawn at any size (coordinates in 1/32 of it) ----
 
-struct Pen {
-    img: Image,
+pub(crate) struct Pen {
+    pub(crate) img: Image,
     /// Pixels per unit of the 32-unit design grid.
     k: f64,
 }
 
 impl Pen {
-    fn new(size: i32) -> Pen {
+    pub(crate) fn new(size: i32) -> Pen {
         Pen { img: Image::new(size, size), k: size as f64 / 32.0 }
     }
 
     /// Fill the design-grid rectangle [x0, x1) x [y0, y1) (y up).
-    fn rect(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, c: u32) {
+    pub(crate) fn rect(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, c: u32) {
         let k = self.k;
         let (a, b, cc, d) = ((x0 * k) as i32, (y0 * k) as i32, (x1 * k + 0.5) as i32, (y1 * k + 0.5) as i32);
         for y in b..d.max(b + 1) {
@@ -217,7 +217,7 @@ impl Pen {
     }
 
     /// One-pixel outline of a design-grid rectangle.
-    fn frame(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, c: u32) {
+    pub(crate) fn frame(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, c: u32) {
         let k = self.k;
         let (a, b, cc, d) = ((x0 * k) as i32, (y0 * k) as i32, ((x1 * k + 0.5) as i32 - 1), ((y1 * k + 0.5) as i32 - 1));
         for x in a..=cc {
@@ -231,7 +231,7 @@ impl Pen {
     }
 
     /// A filled disc with a one-pixel border.
-    fn disc(&mut self, cx: f64, cy: f64, r: f64, fill: u32, border: u32) {
+    pub(crate) fn disc(&mut self, cx: f64, cy: f64, r: f64, fill: u32, border: u32) {
         let n = self.img.w;
         for y in 0..n {
             for x in 0..n {
@@ -246,7 +246,7 @@ impl Pen {
     }
 
     /// A filled polygon (design grid, even-odd), then its outline.
-    fn polygon(&mut self, pts: &[(f64, f64)], fill: u32, border: u32) {
+    pub(crate) fn polygon(&mut self, pts: &[(f64, f64)], fill: u32, border: u32) {
         let n = self.img.w;
         let inside = |x: f64, y: f64| {
             let mut c = false;
@@ -279,7 +279,7 @@ impl Pen {
     }
 
     /// A thick line between design-grid points.
-    fn line(&mut self, a: (f64, f64), b: (f64, f64), width: f64, c: u32) {
+    pub(crate) fn line(&mut self, a: (f64, f64), b: (f64, f64), width: f64, c: u32) {
         let n = self.img.w;
         let (dx, dy) = (b.0 - a.0, b.1 - a.1);
         let len2 = dx * dx + dy * dy;
@@ -297,7 +297,7 @@ impl Pen {
 
     /// A character of the system font, its inked part scaled to `h`
     /// design units tall and centred on (cx, cy).
-    fn glyph(&mut self, ch: u8, cx: f64, cy: f64, h: f64, c: u32) {
+    pub(crate) fn glyph(&mut self, ch: u8, cx: f64, cy: f64, h: f64, c: u32) {
         let f = gpi::font::system();
         let rows: Vec<u8> = (0..16).map(|r| f.row(ch, r)).collect();
         let top = rows.iter().position(|&r| r != 0).unwrap_or(0);
@@ -325,12 +325,12 @@ impl Pen {
     }
 }
 
-const NAVY: u32 = 0xff00_0080;
-const GREY: u32 = 0xff80_8080;
-const FACE: u32 = 0xffcc_cccc;
-const DARK: u32 = 0xff40_4040;
+pub(crate) const NAVY: u32 = 0xff00_0080;
+pub(crate) const GREY: u32 = 0xff80_8080;
+pub(crate) const FACE: u32 = 0xffcc_cccc;
+pub(crate) const DARK: u32 = 0xff40_4040;
 
-fn icon(id: u32, size: i32) -> Option<Image> {
+pub(crate) fn icon(id: u32, size: i32) -> Option<Image> {
     let mut p = Pen::new(size);
     match id {
         SPTR_ICONINFORMATION => {

@@ -179,6 +179,7 @@ pub fn remove(h: u32) {
     for g in &gone {
         s.frames.remove(g);
         s.ctl.remove(g);
+        s.pres.remove(g);
         s.timers.retain(|t| t.hwnd != *g);
         if s.focus == *g {
             s.focus = 0;
@@ -340,6 +341,74 @@ pub extern "C" fn Rs2SetMinimizeViewer(h: u32) -> u32 {
         return 0;
     }
     core::mem::replace(&mut s.min_viewer, h)
+}
+
+/// Rs2SetDesktopWindow(hwnd) (rs2-private): keep a top-level window of
+/// a desktop shell below every other window (activating it does not
+/// raise it; windows sent to the bottom, such as minimized ones, go just
+/// above it); 0 ends that. Returns the previous one.
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2SetDesktopWindow(h: u32) -> u32 {
+    let s = st();
+    if h != 0 && s.desk.get(h).is_none_or(|w| w.parent != HWND_DESKTOP) {
+        return 0;
+    }
+    let r = s.desk.screen_rect(h);
+    let old = s.desk.pin_bottom(h);
+    if h != 0 {
+        s.desk.invalidate_screen(r);
+    }
+    old
+}
+
+/// WinWindowFromPoint(hwndParent, pptl, fChildren): the topmost showing
+/// child of the parent under the point (in the parent's coordinates);
+/// with fChildren the deepest descendant. The parent itself if no
+/// child is there, 0 if the point is outside the parent.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWindowFromPoint(parent: u32, pptl: *const PointL, children: u32) -> u32 {
+    let s = st();
+    let parent = if parent == 0 { HWND_DESKTOP } else { parent };
+    if pptl.is_null() || !s.desk.exists(parent) {
+        return 0;
+    }
+    let p = unsafe { pptl.read_unaligned() };
+    let o = s.desk.origin(parent);
+    let at = Point::new(o.x + p.x, o.y + p.y);
+    if !s.desk.screen_rect(parent).contains(at) {
+        return 0;
+    }
+    let mut cur = parent;
+    'down: loop {
+        let kids = s.desk.get(cur).map_or(Vec::new(), |w| w.children.clone());
+        for &c in kids.iter().rev() {
+            if s.desk.get(c).is_some_and(|x| x.visible_style()) && s.desk.screen_rect(c).contains(at) {
+                if children == 0 {
+                    return c;
+                }
+                cur = c;
+                continue 'down;
+            }
+        }
+        return cur;
+    }
+}
+
+/// WinQueryWindowProcess(hwnd, ppid, ptid): the process and thread that
+/// own a window.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryWindowProcess(h: u32, ppid: *mut u32, ptid: *mut u32) -> u32 {
+    let s = st();
+    let Some(q) = s.desk.get(h).and_then(|w| s.queues.get(&w.queue)) else { return 0 };
+    unsafe {
+        if !ppid.is_null() {
+            ppid.write_unaligned(q.pid);
+        }
+        if !ptid.is_null() {
+            ptid.write_unaligned(q.tid);
+        }
+    }
+    1
 }
 
 /// Rs2ShellPosition(prcl) (rs2-private, for PMSHAPI's

@@ -199,7 +199,13 @@ pub struct State {
     /// session has the screen (so nothing PM draws then reaches it).
     pub screen: usize,
     pub shadow: Vec<u32>,
+    /// Presentation parameter colours set on windows: (foreground,
+    /// background) as 0x00RRGGBB, NO_COLOR where not set.
+    pub pres: BTreeMap<u32, (u32, u32)>,
 }
+
+/// No presentation parameter colour.
+pub const NO_COLOR: u32 = u32::MAX;
 
 /// A hook set with WinSetHook: for one queue (or all, 0), of one kind
 /// (HK_*), in a process.
@@ -245,6 +251,7 @@ pub fn init(surface: Surface) {
         cur_ptr: 0,
         ptr_window: 0,
         min_viewer: 0,
+        pres: BTreeMap::new(),
         ptr_hidden: 0,
         ptr_hardware: false,
         ptr_level: 0,

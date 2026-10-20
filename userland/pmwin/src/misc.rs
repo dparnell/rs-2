@@ -201,21 +201,82 @@ pub extern "C" fn WinRequestMutexSem(hmtx: u32, ms: u32) -> u32 {
     crate::lock::unlocked(|| unsafe { DosRequestMutexSem(hmtx, ms) })
 }
 
-/// Presentation parameters are accepted and ignored (controls use the
-/// system colours and font).
+const PP_FOREGROUNDCOLOR: u32 = 1;
+const PP_BACKGROUNDCOLOR: u32 = 3;
+
+/// WinSetPresParam(hwnd, id, cbParam, pbParam): the foreground and
+/// background colours (PP_FOREGROUNDCOLOR, PP_BACKGROUNDCOLOR, RGB) are
+/// kept for the window (the container uses them); other presentation
+/// parameters are accepted and ignored (controls use the system colours
+/// and font).
 #[unsafe(no_mangle)]
-pub extern "C" fn WinSetPresParam(h: u32, _id: u32, _cb: u32, _pv: u32) -> u32 {
-    st().desk.exists(h) as u32
+pub extern "C" fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: u32) -> u32 {
+    let s = st();
+    if !s.desk.exists(h) {
+        return 0;
+    }
+    if (id == PP_FOREGROUNDCOLOR || id == PP_BACKGROUNDCOLOR) && cb >= 4 && pv != 0 {
+        let v = unsafe { (pv as *const u32).read_unaligned() } & 0xff_ffff;
+        let e = s.pres.entry(h).or_insert((crate::state::NO_COLOR, crate::state::NO_COLOR));
+        if id == PP_FOREGROUNDCOLOR {
+            e.0 = v;
+        } else {
+            e.1 = v;
+        }
+        s.desk.invalidate(h, None, true);
+    }
+    1
 }
 
+/// The colour of a presentation parameter set on the window (not
+/// inherited).
+pub fn pres_color(h: u32, background: bool) -> Option<u32> {
+    let (fg, bg) = *st().pres.get(&h)?;
+    let v = if background { bg } else { fg };
+    (v != crate::state::NO_COLOR).then_some(v)
+}
+
+/// WinQueryPresParam(hwnd, id1, id2, pulId, cbBuf, pbBuf, fs): the
+/// colours set with WinSetPresParam (the bytes copied, 0 if neither).
 #[unsafe(no_mangle)]
-pub extern "C" fn WinQueryPresParam(_h: u32, _id1: u32, _id2: u32, _pid: u32, _cb: u32, _pv: u32, _fs: u32) -> u32 {
+pub extern "C" fn WinQueryPresParam(h: u32, id1: u32, id2: u32, pid: u32, cb: u32, pv: u32, _fs: u32) -> u32 {
+    for id in [id1, id2] {
+        let v = match id {
+            PP_FOREGROUNDCOLOR => pres_color(h, false),
+            PP_BACKGROUNDCOLOR => pres_color(h, true),
+            _ => None,
+        };
+        if let Some(v) = v {
+            if cb < 4 || pv == 0 {
+                return 0;
+            }
+            unsafe {
+                (pv as *mut u32).write_unaligned(v);
+                if pid != 0 {
+                    (pid as *mut u32).write_unaligned(id);
+                }
+            }
+            return 4;
+        }
+    }
     0
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn WinRemovePresParam(h: u32, _id: u32) -> u32 {
-    st().desk.exists(h) as u32
+pub extern "C" fn WinRemovePresParam(h: u32, id: u32) -> u32 {
+    let s = st();
+    if !s.desk.exists(h) {
+        return 0;
+    }
+    if let Some(e) = s.pres.get_mut(&h) {
+        match id {
+            PP_FOREGROUNDCOLOR => e.0 = crate::state::NO_COLOR,
+            PP_BACKGROUNDCOLOR => e.1 = crate::state::NO_COLOR,
+            _ => return 1,
+        }
+        s.desk.invalidate(h, None, true);
+    }
+    1
 }
 
 fn cstr(p: *const u8) -> Vec<u8> {

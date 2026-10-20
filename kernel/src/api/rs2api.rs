@@ -89,3 +89,21 @@ pub fn rs2_debug_trace(c: &mut Ctx) -> u32 {
     crate::trace!("[{}] {}", c.process.pid, t);
     0
 }
+
+/// Rs2PowerOff(ulAction) (7): the end of a shutdown. 0 powers the
+/// machine off (ACPI S5) and returns ERROR_NOT_SUPPORTED if it is still
+/// running then; 1 restarts it. The disks' write caches are committed
+/// first; the caller has done DosShutdown.
+pub fn rs2_power_off(c: &mut Ctx) -> u32 {
+    let action = c.arg(0);
+    if action > 1 {
+        return err::INVALID_PARAMETER;
+    }
+    crate::drivers::flush_disks();
+    crate::println!("[Rs2PowerOff: {}]", if action == 1 { "restart" } else { "power off" });
+    if action == 1 {
+        crate::power::reboot();
+    }
+    crate::power::try_power_off();
+    err::NOT_SUPPORTED
+}

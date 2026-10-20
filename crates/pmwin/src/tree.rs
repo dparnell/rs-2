@@ -61,12 +61,16 @@ pub struct Desktop {
     /// Bumped whenever window positions, sizes, z-order or visibility
     /// change (visible regions computed before are stale).
     pub generation: u32,
+    /// A top-level window kept below all others (a desktop shell's
+    /// desktop; 0: none): it never comes to the top, and windows sent to
+    /// the bottom go just above it.
+    pub pinned: Hwnd,
 }
 
 impl Desktop {
     /// A desktop of `w` x `h` pixels with the desktop and object windows.
     pub fn new(w: i32, h: i32) -> Desktop {
-        let mut d = Desktop { windows: BTreeMap::new(), next: 3, wake: BTreeSet::new(), generation: 0 };
+        let mut d = Desktop { windows: BTreeMap::new(), next: 3, wake: BTreeSet::new(), generation: 0, pinned: 0 };
         for (hwnd, style, cx, cy) in [(HWND_DESKTOP, ws::VISIBLE | ws::CLIPCHILDREN, w, h), (HWND_OBJECT, 0, 0, 0)] {
             d.windows.insert(hwnd, Window {
                 hwnd,
@@ -173,6 +177,9 @@ impl Desktop {
         }
         for c in &out {
             self.windows.remove(c);
+        }
+        if out.contains(&self.pinned) {
+            self.pinned = 0;
         }
         self.generation = self.generation.wrapping_add(1);
         out
@@ -350,8 +357,11 @@ impl Desktop {
         true
     }
 
-    /// Bring a window to the top of its siblings.
+    /// Bring a window to the top of its siblings (not the pinned one).
     pub fn to_top(&mut self, h: Hwnd) {
+        if h == self.pinned && h != 0 {
+            return;
+        }
         let Some(p) = self.get(h).map(|w| w.parent) else { return };
         if let Some(pw) = self.windows.get_mut(&p) {
             if pw.children.last() == Some(&h) {
@@ -368,16 +378,30 @@ impl Desktop {
     /// repainted.
     pub fn to_bottom(&mut self, h: Hwnd) {
         let Some(p) = self.get(h).map(|w| w.parent) else { return };
+        let pinned = self.pinned;
         if let Some(pw) = self.windows.get_mut(&p) {
-            if pw.children.first() == Some(&h) {
+            // Above the pinned window, if it is a sibling.
+            let at = usize::from(pinned != h && pw.children.first() == Some(&pinned) && pinned != 0);
+            if pw.children.get(at) == Some(&h) {
                 return;
             }
             pw.children.retain(|&c| c != h);
-            pw.children.insert(0, h);
+            pw.children.insert(at, h);
         }
         self.generation = self.generation.wrapping_add(1);
         let r = self.screen_rect(h);
         self.invalidate_screen(r);
+    }
+
+    /// Keep a child of the desktop below all others (0: none any more).
+    /// Returns the previous one.
+    pub fn pin_bottom(&mut self, h: Hwnd) -> Hwnd {
+        let old = core::mem::replace(&mut self.pinned, 0);
+        if h != 0 && self.get(h).is_some_and(|w| w.parent == HWND_DESKTOP) {
+            self.to_bottom(h);
+            self.pinned = h;
+        }
+        old
     }
 
     /// The windows of a message queue.
@@ -484,6 +508,25 @@ mod tests {
         assert_eq!(d.windows_of(8), alloc::vec![b]);
         d.to_bottom(b);
         assert_eq!(d.window_at(Point::new(30, 10)), a);
+    }
+
+    #[test]
+    fn pinned_window_stays_at_the_bottom() {
+        let mut d = desk();
+        let a = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 50, 50), 1, 7, 0, 0).unwrap();
+        let desktop = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 640, 480), 2, 7, 0, 0).unwrap();
+        let b = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 50, 50), 3, 7, 0, 0).unwrap();
+        assert_eq!(d.pin_bottom(desktop), 0);
+        assert_eq!(d.get(HWND_DESKTOP).unwrap().children, alloc::vec![desktop, a, b]);
+        d.to_top(desktop);
+        assert_eq!(d.get(HWND_DESKTOP).unwrap().children[0], desktop);
+        d.to_bottom(b);
+        assert_eq!(d.get(HWND_DESKTOP).unwrap().children, alloc::vec![desktop, b, a]);
+        assert_eq!(d.window_at(Point::new(10, 10)), a);
+        assert_eq!(d.window_at(Point::new(300, 300)), desktop);
+        assert_eq!(d.pin_bottom(0), desktop);
+        d.to_top(desktop);
+        assert_eq!(d.window_at(Point::new(10, 10)), desktop);
     }
 
     #[test]

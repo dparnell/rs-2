@@ -697,10 +697,15 @@ fn paint(h: u32) {
     let scroll_x = c.scroll.0;
     let (widths, parts, v, mini_icons) = (l.widths, l.parts, l.view, l.m.icon <= crate::pointer::MINI);
     let f = draw::font();
+    // Presentation parameter colours (a desktop's background).
+    let bg = crate::misc::pres_color(h, true);
+    let text = crate::misc::pres_color(h, false).unwrap_or(draw::TEXT);
     draw::paint(h, |cv| {
         let all = cv.rect();
-        cv.fill(all, draw::WINDOW);
-        cv.frame(all, draw::SHADOW);
+        cv.fill(all, bg.unwrap_or(draw::WINDOW));
+        if bg.is_none() {
+            cv.frame(all, draw::SHADOW);
+        }
         // The title.
         if parts.title.height() > 0 {
             let fl = if tattr & CA_TITLECENTER != 0 {
@@ -711,7 +716,7 @@ fn paint(h: u32) {
                 0
             };
             let tr = Rect::new(parts.title.left + 4, parts.title.bottom + 2, parts.title.right - 4, parts.title.top - 2);
-            cv.text_in(tr, &title, draw::TEXT, fl);
+            cv.text_in(tr, &title, text, fl);
             if tattr & CA_TITLESEPARATOR != 0 {
                 cv.hline(parts.title.left, parts.title.right, parts.title.bottom, draw::SHADOW);
             }
@@ -741,7 +746,7 @@ fn paint(h: u32) {
             }
             let sel = row.attr & CRA_SELECTED != 0;
             let disabled = row.attr & CRA_DISABLED != 0 || !enabled;
-            let fg = if disabled { draw::GRAY_TEXT } else if sel { draw::HILITE_TEXT } else { draw::TEXT };
+            let fg = if disabled { draw::GRAY_TEXT } else if sel { draw::HILITE_TEXT } else { text };
             if v == View::Detail {
                 if sel {
                     cv.fill(row.rect, draw::HILITE);
@@ -783,7 +788,7 @@ fn paint(h: u32) {
             // Tree lines and the expand/collapse button.
             if v == View::Tree && !row.button.is_empty() {
                 let b = row.button;
-                cv.fill(b, draw::WINDOW);
+                cv.fill(b, bg.unwrap_or(draw::WINDOW));
                 cv.frame(b, draw::SHADOW);
                 let (mx, my) = (b.left + b.width() / 2, b.bottom + b.height() / 2);
                 cv.hline(b.left + 2, b.right - 2, my, draw::TEXT);

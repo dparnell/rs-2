@@ -238,6 +238,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 4) => super::rs2api::rs2_debug_trace,
         (8, 5) => super::rs2api::rs2_set_pointer_shape,
         (8, 6) => super::rs2api::rs2_show_pointer,
+        (8, 7) => super::rs2api::rs2_power_off,
         (8, 10) => super::viowin::wait,
         (8, 11) => super::viowin::query_sessions,
         (8, 12) => super::viowin::read_screen,
