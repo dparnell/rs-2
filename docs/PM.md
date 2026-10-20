@@ -404,6 +404,8 @@ help windows, drag and drop.
 
 The OS/2 System Editor (E.EXE) runs unmodified: see
 [COMPATIBILITY.md](COMPATIBILITY.md#presentation-manager-programs).
+rs2 ships its own E.EXE in its place (see [The System
+Editor](#the-system-editor-eexe)).
 
 Milestone 3 (GPI breadth) works as far as the GPI is concerned: every
 PMGPI import of the Toolkit samples `graphic.exe`, `clipbrd.exe`,
@@ -925,8 +927,7 @@ command processor), executables start (`.EXE`/`.COM` as their type
 says, `.CMD`/`.BAT` in a command prompt window with `/K`), other files
 open with the program associated with their extension (OS2.INI
 `RS2_Associations`: TXT, DOC, LOG, ME, SYS, CFG, ... with the System
-Editor when `C:\OS2\E.EXE` is installed; otherwise the shell offers the
-editor), minimized windows are restored. Mouse button 2 opens a pop-up
+Editor, `C:\OS2\E.EXE`), minimized windows are restored. Mouse button 2 opens a pop-up
 menu: on objects Open, Settings (the program settings notebook) or
 Properties (a file's size, date, attributes), Open in editor, Rename
 (direct editing, also F2 or Alt+click), Delete (with confirmation, also
@@ -1010,6 +1011,53 @@ files (only moving), shadows, the tree view of a directory showing
 subfolders, a Startup folder, templates, object settings other than
 program objects', the lock-up, a real Workplace Shell object model.
 
+## The System Editor (E.EXE)
+
+`C:\OS2\E.EXE` is rs2's own System Editor (userland/e), written to
+behave like OS/2's E (IBM's runs as well, see
+[COMPATIBILITY.md](COMPATIBILITY.md#presentation-manager-programs)): a
+standard frame titled with the file's full name (or "Untitled") whose
+client holds a WC_MLE (System VIO 8 x 16, word wrap on, both scroll
+bars), and E's menus built in memory:
+
+- **File**: New, Open (WinFileDlg), Save, Save as (WinFileDlg with the
+  file types Plain Text, OS/2 Command File, DOS Command File; the type
+  chosen is written as the .TYPE EA), Autosave (a spin button: save
+  after N changes). Save on a file without a .TYPE asks first, as E
+  does ("Save notification": Type... or Save as...; the Type dialog
+  sets the type and saves); a file's type is kept when it is rewritten.
+  `E FILE` opens a file; a file that does not exist opens empty under
+  its name. Text is read and written as CR LF (MLFIE_CFTEXT).
+- **Edit**: Undo, Cut, Copy, Paste, Clear (enabled from the selection,
+  MLM_QUERYUNDO and the clipboard at WM_INITMENU), Find (Ctrl+F, a
+  modeless dialog: Find, Change then find, Change, Change all, case
+  sensitive, wrap; MLM_SEARCH), Select all.
+- **Options**: Set font (WinFontDlg, MLM_SETFONT), Set colors (16 named
+  colours for text and background with a sample), Word wrap On/Off.
+  These and the autosave settings are kept in OS2.INI
+  (`SystemEditor`/`Settings`).
+- **Help**: Help index, General help, Using help, Keys help (HM_*
+  requests to the help instance) and Product information. The help
+  instance (WinCreateHelpInstance, library `E.HLP`, a help table
+  mapping the menu items to panels of the same numbers;
+  WinAssociateHelpInstance with the frame) answers HM_QUERY_KEYS_HELP;
+  the dialogs' Help buttons show their panels (HM_DISPLAY_HELP). There
+  is no E.HLP yet.
+
+Closing the window with unsaved changes asks "NAME has changed. Do you
+want to save it?" (Save, Save as, Discard, Cancel, Help).
+WM_SAVEAPPLICATION (sent by the shell at shutdown, before WM_CLOSE)
+saves the options and asks the same question; the WM_CLOSE that
+follows uses that answer instead of asking again (Cancel keeps the
+window, and the shutdown waits).
+
+`E /SELFTEST` checks the file and editing logic on a hidden window and
+prints PASS/FAIL and `e selftest done: N failure(s)` (also on the
+serial port): see [Testing](#testing).
+
+**Not done**: drag and drop of files onto the window, the window's icon,
+printing (OS/2's E has none either), the help file itself.
+
 ## Debugging
 
 With `PMTRACE` set in a program's environment (`SET PMTRACE=1` before
@@ -1033,7 +1081,8 @@ The export trampolines pass their index to the lock's entry
    palettes, the clipboard.
 4. (done) The System Editor (E.EXE): the MLE, the clipboard across
    processes, combo boxes, spin buttons, sliders, value sets, the file
-   and font dialogs.
+   and font dialogs; then rs2's own E.EXE (see [The System
+   Editor](#the-system-editor-eexe)).
 5. (done) A desktop shell: rs2's own RS2SHELL (see [The desktop
    shell](#the-desktop-shell-rs2shell)); the Workplace Shell (SOM) much
    later.
@@ -1061,6 +1110,18 @@ The export trampolines pass their index to the lock's entry
   done: N failure(s)`, then a window with a container of icons and the
   system icons drawn normal, mini and halftoned (`SHELLTST QUIT` ends
   at once).
+- `E /SELFTEST` (userland/e; `init=OS2\E.EXE -- /SELFTEST` in
+  work/cmdline.txt): the System Editor's checks on a hidden window:
+  a file opened into the MLE (LF inside, CR LF back out), edited,
+  saved with a .TYPE and saved again keeping it, Find selecting a
+  match, autosave after N changes, a 200 KB file's round trip, a
+  missing file opening empty and saved, New, and WM_SAVEAPPLICATION /
+  WM_CLOSE with and without a pending answer; printing PASS/FAIL and
+  `e selftest done: N failure(s)`. Its dialogs and menus were checked
+  against IBM's E with `--type` screenshots (`init=OS2\E.EXE --
+  C:\README.TXT`; IBM's is `C:\IBM\E.EXE` in a development image), and
+  from the `--dist --desktop` image: Programs > System Editor, and
+  Shutdown with unsaved text (the question, Discard, the power-off).
 - `RS2\NBTEST.EXE` (userland/nbtest): notebook self-checks (pages,
   texts, page data and info, page windows and a page dialog from a
   template, notifications, keys, clicks, sizes, deleting) printing
