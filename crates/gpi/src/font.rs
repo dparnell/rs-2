@@ -33,8 +33,14 @@ fn lookup(c: char) -> Option<[u8; 16]> {
     None
 }
 
+/// The graphic characters of code page 850's control positions
+/// (0x01-0x1F, as OS/2's fonts have them; Klondike draws its suits with
+/// them). BEL to CR stay blank: text passes tabs and line ends.
+const CP850_LOW: &str = "\u{263a}\u{263b}\u{2665}\u{2666}\u{2663}\u{2660}       \u{266b}\u{263c}\u{25ba}\u{25c4}\u{2195}\u{203c}\u{b6}\u{a7}\u{25ac}\u{21a8}\u{2191}\u{2193}\u{2192}\u{2190}\u{221f}\u{2194}\u{25b2}\u{25bc}";
+
 fn cp850(b: u8) -> char {
     match b {
+        0x01..=0x1f => CP850_LOW.chars().nth((b - 1) as usize).unwrap_or(' '),
         0x20..=0x7e => b as char,
         0x80..=0xff => CP850_HIGH.chars().nth((b - 0x80) as usize).unwrap_or('?'),
         _ => ' ',
