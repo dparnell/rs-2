@@ -593,28 +593,32 @@ fn insert_records(v: usize) {
                 wr(r, R_Y, y as u32);
                 used.push((x, y));
             }
-            None => unplaced.push(r),
+            None => unplaced.push((i, r)),
         }
         r = rd(r, R_NEXT);
         if r == 0 {
             break;
         }
     }
+    // Places for the icons without one, before they are inserted (so
+    // the container never sees them all at the origin).
+    let fresh = used.is_empty();
+    for (i, r) in unplaced {
+        let p = if fresh { slot(v, i as i32) } else { free_slot(v, &used) };
+        wr(r, R_X, p.0 as u32);
+        wr(r, R_Y, p.1 as u32);
+        used.push(p);
+    }
     // RECORDINSERT: cb, pRecordOrder, pRecordParent, fInvalidateRecord,
     // zOrder (CMA_TOP), cRecordsInsert.
     let ri: [u32; 6] = [24, CMA_END, 0, 1, 1, n];
     send(cnr, CM_INSERTRECORD, first, ri.as_ptr() as u32);
-    if !keep || used.is_empty() {
-        arrange(v, false);
-    } else {
-        for r in unplaced {
-            let p = free_slot(v, &used);
-            wr(r, R_X, p.0 as u32);
-            wr(r, R_Y, p.1 as u32);
-            used.push(p);
-        }
-        unsafe { WinInvalidateRect(cnr, core::ptr::null(), 1) };
-    }
+    reposition(v);
+}
+
+/// The container repaints and fits its scroll bars to the icons.
+pub fn reposition(v: usize) {
+    send(sh().views[v].cnr, CM_INVALIDATERECORD, 0, mp(0, CMA_REPOSITION));
 }
 
 /// Grid cells: the desktop fills columns from the top left, folders
@@ -626,7 +630,7 @@ fn cell(v: usize) -> (i32, i32) {
 fn area(v: usize) -> (i32, i32) {
     let mut r = RectL::default();
     unsafe { WinQueryWindowRect(sh().views[v].cnr, &mut r) };
-    (r.r.max(100), r.t.max(100))
+    (r.r.max(100), (r.t - 2).max(100))
 }
 
 /// The grid position of slot `i`.
@@ -658,16 +662,14 @@ fn free_slot(v: usize, used: &[(i32, i32)]) -> (i32, i32) {
 
 /// Arrange the icons on the grid (and keep the positions if `save`).
 pub fn arrange(v: usize, save: bool) {
-    let cnr = sh().views[v].cnr;
     let n = sh().views[v].items.len();
-    trace(&alloc::format!("arrange: area {:?}", area(v)));
     for i in 0..n {
         let p = slot(v, i as i32);
         let r = sh().views[v].items[i].rec;
         wr(r, R_X, p.0 as u32);
         wr(r, R_Y, p.1 as u32);
     }
-    unsafe { WinInvalidateRect(cnr, core::ptr::null(), 1) };
+    reposition(v);
     if save {
         save_positions(v, None);
     }
@@ -1293,7 +1295,7 @@ fn end_drag(drop: bool) {
                     wr(r, R_Y, (rd(r, R_Y) as i32 + dy).max(0) as u32);
                 }
             }
-            unsafe { WinInvalidateRect(sh().views[src].cnr, core::ptr::null(), 1) };
+            reposition(src);
             save_positions(src, Some(&d.keys));
         }
         None => {}
@@ -1461,7 +1463,9 @@ pub extern "C" fn client_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
             0
         }
         WM_SHELL_FOCUS => {
-            if let Some(v) = find_client(h) {
+            // Only if the focus is still here (not taken by a program
+            // started meanwhile).
+            if let Some(v) = find_client(h).filter(|_| unsafe { WinQueryFocus(HWND_DESKTOP) } == h) {
                 unsafe { WinSetFocus(HWND_DESKTOP, sh().views[v].cnr) };
             }
             0
