@@ -20,7 +20,7 @@ pub const APP_WINDOWS: &[u8] = b"RS2_Windows\0";
 pub const APP_ASSOC: &[u8] = b"RS2_Associations\0";
 
 /// Current layout of the default objects.
-pub const VERSION: &[u8] = b"1";
+pub const VERSION: &[u8] = b"2";
 
 pub fn query(app: &[u8], key: &[u8]) -> Option<Vec<u8>> {
     let k = z(key);
@@ -245,10 +245,35 @@ pub fn ensure_defaults() -> Groups {
     let get = |k: &[u8]| query_u32(APP_DESKTOP, k).filter(|&h| group_exists(h));
     if made {
         if let (Some(desktop), Some(prompts), Some(programs)) = (get(b"DesktopGroup"), get(b"PromptsGroup"), get(b"ProgramsGroup")) {
+            // A profile made by an older shell (version 1: before rs2 had
+            // its own System Editor) gets the editor's object and
+            // associations once.
+            if query(APP_DESKTOP, b"Version").as_deref() != Some(VERSION) {
+                add_editor(programs);
+                write(APP_DESKTOP, b"Version", Some(VERSION));
+            }
             return Groups { desktop, prompts, programs };
         }
     }
     make_defaults()
+}
+
+/// The System Editor's program object (unless there is one) and its
+/// associations (where a type has none), when E.EXE is installed.
+fn add_editor(programs: u32) {
+    let editor = sys_path(b"OS2\\E.EXE");
+    if !exists(&editor) {
+        return;
+    }
+    if !titles(programs).iter().any(|t| t.3 == b"System Editor") {
+        let p = Program { progc: PROG_PM, title: b"System Editor".to_vec(), exe: editor.clone(), ..Program::default() };
+        add_program(programs, &p);
+    }
+    for ext in [&b"TXT"[..], b"DOC", b"LOG", b"ME", b"1ST", b"SYS", b"CFG", b"NFO", b"H", b"C", b"RS", b"MD"] {
+        if query(APP_ASSOC, ext).is_none() {
+            write(APP_ASSOC, ext, Some(&editor));
+        }
+    }
 }
 
 /// Make (or complete) the default objects.
@@ -265,24 +290,12 @@ pub fn make_defaults() -> Groups {
             add_program(prompts, &p);
         }
     }
-    let editor = sys_path(b"OS2\\E.EXE");
-    let have_editor = exists(&editor);
-    if titles(programs).is_empty() && have_editor {
-        let p = Program { progc: PROG_PM, title: b"System Editor".to_vec(), exe: editor.clone(), ..Program::default() };
-        add_program(programs, &p);
-    }
+    add_editor(programs);
     // The installer (a text-mode program), on the live system and after.
     let installer = sys_path(b"OS2\\INSTALL.EXE");
     if exists(&installer) && !titles(programs).iter().any(|t| t.3 == b"Install rs2") {
         let p = Program { progc: PROG_FULLSCREEN, title: b"Install rs2".to_vec(), exe: installer, ..Program::default() };
         add_program(programs, &p);
-    }
-    if have_editor {
-        for ext in [&b"TXT"[..], b"DOC", b"LOG", b"ME", b"1ST", b"SYS", b"CFG", b"NFO", b"H", b"C", b"RS", b"MD"] {
-            if query(APP_ASSOC, ext).is_none() {
-                write(APP_ASSOC, ext, Some(&editor));
-            }
-        }
     }
     if query(APP_DESKTOP, b"Background").is_none() {
         write(APP_DESKTOP, b"Background", Some(b"2E6E8E"));

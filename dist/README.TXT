@@ -11,10 +11,11 @@ Double click an icon (or select it and press Enter) to open it:
 
   Command Prompts   OS/2 Window (a command prompt in a window) and
                     OS/2 Full Screen
-  Programs          installed programs (and "Install rs2")
+  Programs          installed programs: the System Editor and
+                    "Install rs2"
   Drives            one icon per drive; a drive opens its root folder,
                     folders open in new windows, programs run, text
-                    files open in the System Editor when it is installed
+                    files open in the System Editor
   Minimized Window Viewer   windows you minimized
   Window List       the running programs (also Ctrl+Esc)
   Shutdown          closes all programs and turns the computer off
@@ -24,6 +25,14 @@ objects; Arrange, Refresh, Create program object, System setup and
 Shut down on the desktop. Drag icons with mouse button 2; their places
 are kept. Drag a file onto a folder to move it there. F2 renames, Del
 deletes (after asking), F5 refreshes.
+
+The System Editor
+-----------------
+E.EXE edits text files: Programs > System Editor, a text file opened
+from a folder, or E FILENAME at a command prompt. File > Save asks for a
+file type the first time a file is saved; closing the window or shutting
+down asks about unsaved changes. Options > Set font, Set colors and Word
+wrap are remembered.
 
 The text-mode command prompt
 ----------------------------
