@@ -18,6 +18,7 @@ extern crate alloc;
 extern crate os2;
 
 mod exports;
+mod table;
 mod strings;
 
 use alloc::boxed::Box;
@@ -35,11 +36,6 @@ use uls::{
 pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
     1
 }
-
-/// Export 151 (`Locale`): the locale table header programs may read. Its
-/// first word is the highest item number (GLOCALE loops up to it).
-#[unsafe(no_mangle)]
-pub static Locale: [u32; 16] = [MAXITEM as u32, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
 // ---- process state ----------------------------------------------------------
 
@@ -410,7 +406,7 @@ pub extern "C" fn UniQueryLocaleValue(lo: u32, item: i32, out: *mut i32) -> i32 
     if lo != 0 && object(lo).is_none() {
         return ULS_BADOBJECT;
     }
-    match item_of(lo, item, |v, _| v.and_then(uls::item_value)) {
+    match item_of(lo, item, |v, _| v.and_then(|v| uls::item_value((item & 0x1fff) as usize, v))) {
         Some(v) => {
             unsafe { out.write_unaligned(v) };
             ULS_SUCCESS
@@ -451,7 +447,7 @@ pub extern "C" fn UniQueryLocaleInfo(lo: u32, out: *mut *mut u8) -> i32 {
     if p.is_null() {
         return ULS_NOMEMORY;
     }
-    let num = |n: usize| uls::item_value(&item_vec(lo, n)).unwrap_or(0);
+    let num = |n: usize| uls::item_value(n, &item_vec(lo, n)).unwrap_or(0);
     let mut ptrs = [core::ptr::null_mut::<u16>(); 14];
     let mut s = unsafe { p.add(head) } as *mut u16;
     for (k, v) in vals.iter().enumerate() {
@@ -508,14 +504,14 @@ pub extern "C" fn UniStrftime(lo: u32, buf: *mut u16, max: u32, fmt: *const u16,
 /// The token of a locale (its xLocaleToken item).
 fn token_of(name: &str) -> Option<u32> {
     with_users(false, |u| u.find(name).map(|l| u.item(l, 50, true).to_vec()))
-        .and_then(|v| uls::item_value(&v))
+        .and_then(|v| uls::item_value(50, &v))
         .map(|v| v as u32)
         .filter(|&t| t != 0)
 }
 
 fn token_name(token: u32) -> Option<&'static str> {
     (0..uls::system_count())
-        .find(|&i| uls::item_value(uls::system_item(i, 50)) == Some(token as i32))
+        .find(|&i| uls::item_value(50, uls::system_item(i, 50)) == Some(token as i32))
         .map(uls::system_name)
 }
 
@@ -676,13 +672,7 @@ pub extern "C" fn UniSetUserLocaleItem(locale: *const u16, item: i32, ty: i32, v
     let v: Vec<u16> = match ty {
         1 => {
             let n = unsafe { (value as *const i32).read_unaligned() };
-            let text = if uls::ITEM_NAMES[item as usize - 1].starts_with('x') {
-                let h = alloc::format!("{:08x}", n as u32);
-                let h = h.strip_prefix("0000").unwrap_or(&h);
-                alloc::format!("0x{h}")
-            } else {
-                alloc::format!("{n}")
-            };
+            let text = uls::value_string(item as usize, n);
             ucs(&text)
         }
         2 => {

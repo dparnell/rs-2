@@ -18,7 +18,7 @@ fn system_locales_have_every_item() {
             assert_eq!(z.last(), Some(&0));
         }
         assert_eq!(s(system_item(i, 100)), system_name(i));
-        assert_eq!(item_value(system_item(i, 54)), Some(MAXITEM as i32));
+        assert_eq!(item_value(54, system_item(i, 54)), Some(MAXITEM as i32));
     }
 }
 
@@ -43,11 +43,19 @@ fn conventions_follow_country_data() {
     assert_eq!(s(system_item(de, 2)), "%d.%m.%y");
     assert_eq!(s(system_item(de, 14)), "Montag");
     assert_eq!(s(system_item(de, 34)), "März");
-    assert_eq!(item_value(system_item(de, 108)), Some(49));
-    assert_eq!(item_value(system_item(de, 111)), Some(437));
+    assert_eq!(item_value(108, system_item(de, 108)), Some(49));
+    assert_eq!(item_value(111, system_item(de, 111)), Some(437));
     let us = en_us();
     assert_eq!(s(system_item(us, 2)), "%m/%d/%y");
-    assert_eq!(item_value(system_item(us, 51)), Some(0x409));
+    assert_eq!(s(system_item(us, 51)), "0409");
+    assert_eq!(item_value(51, system_item(us, 51)), Some(0x409));
+    assert_eq!(item_value(44, system_item(us, 44)), None);
+    assert_eq!(value_string(51, 0x409), "0409");
+    assert_eq!(value_string(51, 0xc0c), "0C0C");
+    assert_eq!(value_string(50, 0x1020000), "01020000");
+    assert_eq!(value_string(72, -3), "-3");
+    assert_eq!(ITEM_NAMES_Z[0], "sDateTime\0");
+    assert_eq!(item_category_digit(48), Some(3));
     assert_eq!(item_category(44), LC_NUMERIC);
     assert_eq!(item_category(48), LC_MONETARY);
     assert_eq!(item_category(1), LC_TIME);

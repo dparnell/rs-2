@@ -50,29 +50,39 @@ pub const LC_TIME: usize = 4;
 pub const LC_MESSAGES: usize = 5;
 pub const N_CATEGORIES: usize = 6;
 
-/// The names of items 1-136 as USER.LOC spells them (the LOCI_ names).
-pub static ITEM_NAMES: [&str; MAXITEM] = [
+macro_rules! item_names {
+    ($($n:literal,)*) => {
+        /// The names of items 1-136 as USER.LOC spells them (the LOCI_ names).
+        pub static ITEM_NAMES: [&str; MAXITEM] = [$($n,)*];
+        /// The same, NUL-terminated (LOCALE.DLL's locale_itemname).
+        pub static ITEM_NAMES_Z: [&str; MAXITEM] = [$(concat!($n, "\0"),)*];
+    };
+}
+
+item_names! {
     "sDateTime", "sShortDate", "sTimeFormat", "s1159", "s2359", "sAbbrevDayName7", "sAbbrevDayName1",
-    "sAbbrevDayName2", "sAbbrevDayName3", "sAbbrevDayName4", "sAbbrevDayName5", "sAbbrevDayName6", "sDayName7",
-    "sDayName1", "sDayName2", "sDayName3", "sDayName4", "sDayName5", "sDayName6", "sAbbrevMonthName1",
-    "sAbbrevMonthName2", "sAbbrevMonthName3", "sAbbrevMonthName4", "sAbbrevMonthName5", "sAbbrevMonthName6",
-    "sAbbrevMonthName7", "sAbbrevMonthName8", "sAbbrevMonthName9", "sAbbrevMonthName10", "sAbbrevMonthName11",
-    "sAbbrevMonthName12", "sMonthName1", "sMonthName2", "sMonthName3", "sMonthName4", "sMonthName5", "sMonthName6",
-    "sMonthName7", "sMonthName8", "sMonthName9", "sMonthName10", "sMonthName11", "sMonthName12", "sDecimal",
-    "sThousand", "sYesString", "sNoString", "sCurrency", "sCodeSet", "xLocaleToken", "xWinLocale", "iLocaleResnum",
-    "sNativeDigits", "iMaxItem", "sTimeMark", "sEra", "sAltShortDate", "sAltDateTime", "sAltTimeFormat",
-    "sAltDigits", "sYesExpr", "sNoExpr", "sDate", "sTime", "sList", "sMonDecimalSep", "sMonThousandSep",
-    "sGrouping", "sMonGrouping", "iMeasure", "iPaper", "iDigits", "iTime", "iDate", "iCurrency", "iCurrDigits",
-    "iLzero", "iNegNumber", "iLDate", "iCalendarType", "iFirstDayOfWeek", "iFirstWeekOfYear", "iNegCurr",
-    "iTLzero", "iTimePrefix", "iOptionalCalendar", "sIntlSymbol", "sAbbrevLangName", "sCollate", "iUpperType",
-    "iUpperMissing", "sPositiveSign", "sNegativeSign", "sLeftNegative", "sRightNegative", "sLongDate",
-    "sAltLongDate", "sMonthName13", "sAbbrevMonthName13", "sName", "sLanguageID", "sCountryID", "sEngLanguage",
-    "sLanguage", "sEngCountry", "sCountry", "sNativeCtryName", "iCountry", "sISOCodepage", "iAnsiCodepage",
-    "iCodepage", "iAltCodepage", "iMacCodepage", "iEbcdicCodepage", "sOtherCodepages", "sSetCodepage", "sKeyboard",
-    "sAltKeyboard", "sSetKeyboard", "sDebit", "sCredit", "sLatin1Locale", "wTimeFormat", "wShortDate", "wLongDate",
-    "jISO3CountryName", "jPercentPattern", "jPercentSign", "jExponent", "jFullTimeFormat", "jLongTimeFormat",
-    "jShortTimeFormat", "jFullDateFormat", "jMediumDateFormat", "jDateTimePattern", "jEraStrings",
-];
+    "sAbbrevDayName2", "sAbbrevDayName3", "sAbbrevDayName4", "sAbbrevDayName5", "sAbbrevDayName6",
+    "sDayName7", "sDayName1", "sDayName2", "sDayName3", "sDayName4", "sDayName5", "sDayName6",
+    "sAbbrevMonthName1", "sAbbrevMonthName2", "sAbbrevMonthName3", "sAbbrevMonthName4", "sAbbrevMonthName5",
+    "sAbbrevMonthName6", "sAbbrevMonthName7", "sAbbrevMonthName8", "sAbbrevMonthName9", "sAbbrevMonthName10",
+    "sAbbrevMonthName11", "sAbbrevMonthName12", "sMonthName1", "sMonthName2", "sMonthName3", "sMonthName4",
+    "sMonthName5", "sMonthName6", "sMonthName7", "sMonthName8", "sMonthName9", "sMonthName10", "sMonthName11",
+    "sMonthName12", "sDecimal", "sThousand", "sYesString", "sNoString", "sCurrency", "sCodeSet",
+    "xLocaleToken", "xWinLocale", "iLocaleResnum", "sNativeDigits", "iMaxItem", "sTimeMark", "sEra",
+    "sAltShortDate", "sAltDateTime", "sAltTimeFormat", "sAltDigits", "sYesExpr", "sNoExpr", "sDate", "sTime",
+    "sList", "sMonDecimalSep", "sMonThousandSep", "sGrouping", "sMonGrouping", "iMeasure", "iPaper",
+    "iDigits", "iTime", "iDate", "iCurrency", "iCurrDigits", "iLzero", "iNegNumber", "iLDate",
+    "iCalendarType", "iFirstDayOfWeek", "iFirstWeekOfYear", "iNegCurr", "iTLzero", "iTimePrefix",
+    "iOptionalCalendar", "sIntlSymbol", "sAbbrevLangName", "sCollate", "iUpperType", "iUpperMissing",
+    "sPositiveSign", "sNegativeSign", "sLeftNegative", "sRightNegative", "sLongDate", "sAltLongDate",
+    "sMonthName13", "sAbbrevMonthName13", "sName", "sLanguageID", "sCountryID", "sEngLanguage", "sLanguage",
+    "sEngCountry", "sCountry", "sNativeCtryName", "iCountry", "sISOCodepage", "iAnsiCodepage", "iCodepage",
+    "iAltCodepage", "iMacCodepage", "iEbcdicCodepage", "sOtherCodepages", "sSetCodepage", "sKeyboard",
+    "sAltKeyboard", "sSetKeyboard", "sDebit", "sCredit", "sLatin1Locale", "wTimeFormat", "wShortDate",
+    "wLongDate", "jISO3CountryName", "jPercentPattern", "jPercentSign", "jExponent", "jFullTimeFormat",
+    "jLongTimeFormat", "jShortTimeFormat", "jFullDateFormat", "jMediumDateFormat", "jDateTimePattern",
+    "jEraStrings",
+}
 
 /// The category of each item as ulsitem.h notes it (0 ctype, 1 time,
 /// 2 numeric, 3 monetary, 4 messages, 5 collate).
@@ -176,14 +186,37 @@ pub fn locale_for_country(code: u32) -> Option<usize> {
     (2..system_count()).find(|&i| system_item(i, 108) == text.as_slice())
 }
 
-/// Decimal value of an item string (`0x` hex for the x items).
-pub fn item_value(s: &[u16]) -> Option<i32> {
+/// The number an item's string holds: decimal, or hexadecimal digits for
+/// the x items (xLocaleToken, xWinLocale), as IBM's locale_value reads
+/// them. None if the string is not a number.
+pub fn item_value(item: usize, s: &[u16]) -> Option<i32> {
     let s = ascii(s)?;
-    let s = s.trim();
-    if let Some(h) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
-        return u32::from_str_radix(h, 16).ok().map(|v| v as i32);
+    if s.is_empty() {
+        return None;
+    }
+    if ITEM_NAMES.get(item.wrapping_sub(1)).is_some_and(|n| n.starts_with('x')) {
+        return u32::from_str_radix(&s, 16).ok().map(|v| v as i32);
     }
     s.parse::<i32>().ok()
+}
+
+/// The string UniSetUserLocaleItem stores for a number: decimal, or for
+/// the x items upper-case hex of 4 or 8 digits with a leading 0 before a
+/// letter.
+pub fn value_string(item: usize, v: i32) -> String {
+    if ITEM_NAMES.get(item.wrapping_sub(1)).is_some_and(|n| n.starts_with('x')) {
+        let h = alloc::format!("{:08X}", v as u32);
+        let h = h.strip_prefix("0000").unwrap_or(&h);
+        return if h.as_bytes()[0] > b'9' { alloc::format!("0{h}") } else { String::from(h) };
+    }
+    alloc::format!("{v}")
+}
+
+/// An item's category digit as ulsitem.h and LOCALE.DLL's
+/// locale_itemcategory give it (0 ctype, 1 time, 2 numeric, 3 monetary,
+/// 4 messages, 5 collate).
+pub fn item_category_digit(item: usize) -> Option<u8> {
+    ITEM_CATS.get(item.wrapping_sub(1)).map(|c| c - b'0')
 }
 
 // ---- user locales ---------------------------------------------------------

@@ -269,8 +269,8 @@ def items(loc, posix=False):
     i[46], i[47] = yes, no
     i[48] = cur
     i[49] = 'IBM-%d' % cp1
-    i[50] = '0x%08x' % ((LOCALES.index(loc) + 1) << 16)
-    i[51] = '0x%04x' % lcid
+    i[50] = '%08X' % ((LOCALES.index(loc) + 1) << 16)
+    i[51] = '%04X' % lcid
     i[52] = LOCALES.index(loc) + 1
     i[53] = '0123456789'
     i[54] = MAXITEM
@@ -337,7 +337,7 @@ def items(loc, posix=False):
     if posix:
         i.update({100: posix, 101: '', 102: '', 103: 'POSIX', 104: 'POSIX', 105: '', 106: '', 107: '',
                   1: '%a %b %e %H:%M:%S %Y', 2: '%m/%d/%y', 3: '%H:%M:%S', 45: '', 48: '', 66: '',
-                  67: '', 68: '', 69: '', 87: '', 50: '0x00000000', 52: 0, 81: 6, 108: 0, 122: posix})
+                  67: '', 68: '', 69: '', 87: '', 50: '00000000', 52: 0, 81: 6, 108: 0, 122: posix})
     assert sorted(i) == list(range(1, MAXITEM + 1)), sorted(set(range(1, MAXITEM + 1)) - set(i))
     return [str(i[k]) for k in range(1, MAXITEM + 1)]
 

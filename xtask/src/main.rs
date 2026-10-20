@@ -725,14 +725,26 @@ fn net_devices(o: &Opts, c: &mut Command) {
     c.arg("-device").arg(format!("{model},netdev=n0{legacy}"));
 }
 
+/// A QEMU socket in work/, or in the temporary directory (named after
+/// work/'s path) when that path is too long for a Unix socket (deep
+/// checkouts such as git worktrees).
+fn socket_path(work: &Path, name: &str) -> PathBuf {
+    let p = work.join(name);
+    if p.as_os_str().len() < 100 {
+        return p;
+    }
+    let hash = work.to_string_lossy().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+    std::env::temp_dir().join(format!("rs2-{hash:016x}-{name}"))
+}
+
 fn run(o: &Opts) -> bool {
     let (code, vars) = ovmf();
     let work = root().join("work");
     let serial = work.join("serial.log");
-    let sock = work.join("qemu-monitor.sock");
+    let sock = socket_path(&work, "qemu-monitor.sock");
     let _ = std::fs::remove_file(&sock);
     // QMP, for input events HMP cannot send (absolute pointer positions).
-    let qmp_sock = work.join("qemu-qmp.sock");
+    let qmp_sock = socket_path(&work, "qemu-qmp.sock");
     let _ = std::fs::remove_file(&qmp_sock);
     let mut c = Command::new("qemu-system-x86_64");
     c.args(["-machine", "q35", "-cpu", "max", "-m", "512M", "-no-reboot", "-smp", &o.smp.to_string()])

@@ -397,24 +397,25 @@ aligned! {
     __a_WinQueryWindowTextLength => crate::win::WinQueryWindowTextLength, 1, 368;
     __a_WinQueryWindowULong => crate::win::WinQueryWindowULong, 2, 369;
     __a_WinSetWindowULong => crate::win::WinSetWindowULong, 3, 370;
-    __a_WinQueryWindowPtr => crate::win::WinQueryWindowPtr, 2, 371;
-    __a_WinSetWindowPtr => crate::win::WinSetWindowPtr, 3, 372;
-    __a_WinQueryWindowUShort => crate::win::WinQueryWindowUShort, 2, 373;
-    __a_WinSetWindowUShort => crate::win::WinSetWindowUShort, 3, 374;
-    __a_WinBeginPaint => crate::win::WinBeginPaint, 3, 375;
-    __a_WinEndPaint => crate::win::WinEndPaint, 1, 376;
-    __a_WinGetPS => crate::win::WinGetPS, 1, 377;
-    __a_WinReleasePS => crate::win::WinReleasePS, 1, 378;
-    __a_WinFillRect => crate::win::WinFillRect, 3, 379;
-    __a_WinInvalidateRect => crate::win::WinInvalidateRect, 3, 380;
-    __a_WinInvalidateRegion => crate::win::WinInvalidateRegion, 3, 381;
-    __a_WinValidateRect => crate::win::WinValidateRect, 3, 382;
-    __a_WinUpdateWindow => crate::win::WinUpdateWindow, 1, 383;
-    __a_WinDrawText => crate::win::WinDrawText, 7, 384;
+    __a_WinSetWindowBits => crate::win::WinSetWindowBits, 4, 371;
+    __a_WinQueryWindowPtr => crate::win::WinQueryWindowPtr, 2, 372;
+    __a_WinSetWindowPtr => crate::win::WinSetWindowPtr, 3, 373;
+    __a_WinQueryWindowUShort => crate::win::WinQueryWindowUShort, 2, 374;
+    __a_WinSetWindowUShort => crate::win::WinSetWindowUShort, 3, 375;
+    __a_WinBeginPaint => crate::win::WinBeginPaint, 3, 376;
+    __a_WinEndPaint => crate::win::WinEndPaint, 1, 377;
+    __a_WinGetPS => crate::win::WinGetPS, 1, 378;
+    __a_WinReleasePS => crate::win::WinReleasePS, 1, 379;
+    __a_WinFillRect => crate::win::WinFillRect, 3, 380;
+    __a_WinInvalidateRect => crate::win::WinInvalidateRect, 3, 381;
+    __a_WinInvalidateRegion => crate::win::WinInvalidateRegion, 3, 382;
+    __a_WinValidateRect => crate::win::WinValidateRect, 3, 383;
+    __a_WinUpdateWindow => crate::win::WinUpdateWindow, 1, 384;
+    __a_WinDrawText => crate::win::WinDrawText, 7, 385;
 }
 
 /// Export names and argument counts by trampoline index.
-pub static NAMES: [(&str, u8); 385] = [
+pub static NAMES: [(&str, u8); 386] = [
     ("WinLoadAccelTable", 3),
     ("WinCreateAccelTable", 2),
     ("WinDestroyAccelTable", 1),
@@ -786,6 +787,7 @@ pub static NAMES: [(&str, u8); 385] = [
     ("WinQueryWindowTextLength", 1),
     ("WinQueryWindowULong", 2),
     ("WinSetWindowULong", 3),
+    ("WinSetWindowBits", 4),
     ("WinQueryWindowPtr", 2),
     ("WinSetWindowPtr", 3),
     ("WinQueryWindowUShort", 2),
