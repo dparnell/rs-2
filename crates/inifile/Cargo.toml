@@ -1,0 +1,8 @@
+[package]
+name = "inifile"
+description = "no_std reader and writer of OS/2 binary profiles (INI files, as PMSHAPI keeps OS2.INI)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]

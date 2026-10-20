@@ -50,6 +50,17 @@ name = "hpfs"
 version = "0.1.0"
 
 [[package]]
+name = "inifile"
+version = "0.1.0"
+
+[[package]]
+name = "initest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "install"
 version = "0.1.0"
 dependencies = [
@@ -114,6 +125,7 @@ dependencies = [
 name = "pmshapi-dll"
 version = "0.1.0"
 dependencies = [
+ "inifile",
  "os2",
 ]
 

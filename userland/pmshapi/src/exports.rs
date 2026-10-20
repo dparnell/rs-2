@@ -32,4 +32,12 @@ aligned! {
     __a_PrfReset => crate::PrfReset, 2;
     __a_WinQueryTaskSizePos => crate::WinQueryTaskSizePos, 3;
     __a_WinQueryTaskTitle => crate::WinQueryTaskTitle, 3;
+    __a_PrfAddProgram => crate::proglist::PrfAddProgram, 3;
+    __a_PrfChangeProgram => crate::proglist::PrfChangeProgram, 3;
+    __a_PrfQueryDefinition => crate::proglist::PrfQueryDefinition, 4;
+    __a_PrfRemoveProgram => crate::proglist::PrfRemoveProgram, 2;
+    __a_PrfQueryProgramTitles => crate::proglist::PrfQueryProgramTitles, 5;
+    __a_PrfCreateGroup => crate::proglist::PrfCreateGroup, 3;
+    __a_PrfDestroyGroup => crate::proglist::PrfDestroyGroup, 2;
+    __a_PrfQueryProgramHandle => crate::proglist::PrfQueryProgramHandle, 5;
 }

@@ -136,6 +136,15 @@ live in the shared state; container records stay application memory,
 as on OS/2, and are only read on the container's own thread, so the
 server paints a placeholder for a hung program's container instead.
 
+**Profiles.** OS2.INI, OS2SYS.INI and the INI files programs open are
+real OS/2 binary INI files (format in `crates/inifile`). PMSHAPI.DLL
+serialises access with one named mutex for the whole system, keeps a
+parsed copy per process that a generation counter in named shared
+memory invalidates, and writes every change through to disk at once by
+IBM's replace-by-rename scheme, so profiles are shared between
+processes and survive crashes. See
+[PM.md](PM.md#profiles-ini-files).
+
 **Windowed text sessions.** A VIO session shown in a PM window ("OS/2
 Window") stays a kernel session with its own virtual screen, keyboard
 and mouse queues; only the framebuffer belongs to PM. A PM program,

@@ -1,0 +1,4 @@
+; rs2-private PMSHAPI entry points (name ordinal): os2386.lib has no
+; 32-bit ordinals for these.
+PrfCreateGroup 9000
+PrfQueryProgramHandle 9001

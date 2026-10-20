@@ -33,7 +33,11 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000; 9001, `Rs2ShellPosition`, gives PMSHAPI's `WinQueryTaskSizePos` the shell's next cascade position; 9002, `Rs2PmVioWindow`, registers a VIO window's client). |
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
 | `userland/pmctls` → PMCTLS.DLL | The standard file and font dialogs (`WinFileDlg`, `WinFontDlg`): ordinary PM dialogs, built from templates made in memory, run through PMWIN like an application's. |
+<<<<<<< HEAD
 | `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006). |
+=======
+| `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
+>>>>>>> worktree-agent-a9ae6de3c07946690
 | `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), HELPMGR stubs, PMDRAG (no drag is ever in progress), PMMERGE (the entry points programs import from it directly), LIBUNI (locale objects). |
 
 ## Kernel services (module RS2API)
@@ -706,6 +710,161 @@ passes the rest to `WinDefFileDlgProc`/`WinDefFontDlgProc`.
   name, `flStyle`, weight, em height) follows the choice as it changes,
   since applications' procedures read it when OK or Apply arrives.
 
+## Profiles (INI files)
+
+PMSHAPI's `Prf*` calls work on OS/2 binary INI files, shared by every
+process in the system. The format logic is a host-tested `no_std`
+crate, `crates/inifile` (parse, serialise, the program list records;
+`cargo run -p inifile --example inidump FILE.INI` dumps a profile);
+the DLL (`userland/pmshapi`) does the files, the sharing and the API.
+PMSHAPI does not import PMWIN: text-mode programs load it too (REXXUTIL's
+`SysIni`, IBM TELNET).
+
+**Format.** Little-endian; offsets from the start of the file.
+
+| Record | Size | Fields |
+|--------|------|--------|
+| header | 20 | `FFFFFFFF`, offset of the first application (0x14), file size, two reserved words (0) |
+| application | 20 | offset of the next application (0: last), offset of its first key (0: none), reserved (0), name length with its NUL (u16), the same again (u16), offset of the name |
+| key | 24 | offset of the next key (0: last), reserved (0), name length with NUL (u16), again (u16), offset of the name, value length (u16), again (u16), offset of the value |
+
+IBM's writer puts each application record, then its name, then for
+each key the key record, the key name and the value, in list order; an
+empty profile is the header alone (first offset 0x14 = file size).
+`inifile` writes exactly that layout: the IBM files on the media
+written that way (`epw.ini`, `MMPMCONN.INI`, `MARKVIS\MODULES.INI`)
+and the 39 KB OS2.INI IBM's MAKEINI builds from `INI.RC` come out byte
+for byte the same after parsing and re-serialising; MAKEINI in turn
+updates files rs2's PMSHAPI wrote without losing anything. Files IBM's writer
+updated in place can hold stale records nothing links to (`vpd.ini`,
+which also has non-zero reserved header words): readers follow the
+links only. Values hold at most 65535 bytes. The reader checks every
+offset and length, cuts chains that leave the file or loop, and keeps
+what it could read; a file without the signature is "foreign" (not
+opened by `PrfOpenProfile`, never overwritten), an empty file is an
+empty profile.
+
+**Names are case-sensitive.** The PM Programming Reference says so for
+every Prf call ("There is no case-independent searching"; "This avoids
+any code-page dependency"), and IBM's own names mix case
+(`PM_Workplace:Location`, `PM_WorkPlace:Restart`); so `App`, `APP` and
+`app` are three applications. (The in-memory PMSHAPI before this
+compared case-insensitively.)
+
+**Order.** Applications and keys keep the order of the file; new keys
+and new applications are appended. IBM's writer behaves differently
+for applications, as seen in MAKEINI, which carries its own copy of
+the profile code: it prepends a new application and, reading a file,
+builds its list in reverse, so every load and save reverses the order
+of the applications (keys keep theirs and are appended). Application
+order therefore means nothing in IBM's files; rs2 keeps it stable.
+
+**Which files.** `HINI_USERPROFILE` and `HINI_SYSTEMPROFILE` are the
+files named by `USER_INI` and `SYSTEM_INI` (`SET USER_INI=` in
+CONFIG.SYS, as on OS/2) in the environment of the first process that
+uses PMSHAPI, else `\OS2\OS2.INI` and `\OS2\OS2SYS.INI` on the boot
+drive; they are created (empty) on first use. `HINI_PROFILE` (0)
+searches the user profile, then the system profile (enumerations list
+both, user entries first), and writes to the user profile.
+`PrfOpenProfile` resolves the name to a full path, creates a missing
+file, refuses the current user and system profiles and foreign files,
+and returns a handle valid in the calling process; the same file can
+be open under several handles. `PrfCloseProfile` fails for
+`HINI_USERPROFILE`/`HINI_SYSTEMPROFILE` and unknown handles.
+`PrfQueryProfile` returns both names (`cch` 0 asks for the length,
+which includes the NUL; FALSE when a name was cut). `PrfReset` makes
+another file the user profile for every process (created if missing);
+the system profile name must stay the same.
+
+**Calls.** As documented in the PM reference: `PrfQueryProfileData`
+copies as much as fits, sets `*pulBufferMax` to the bytes copied and
+returns FALSE if that was not all; `PrfQueryProfileString` copies the
+value (or the default; 0 without either) with a NUL in the buffer's
+last byte when it had to cut, and returns the bytes copied with the
+NUL; `PrfQueryProfileInt` returns the leading decimal number (0 if the
+value does not start with one, the default if the key is missing);
+`PrfQueryProfileSize` gives a value's size or the buffer an
+enumeration needs. With `pszApp` NULL the calls enumerate the
+applications, with `pszKey` NULL the keys of one application, as
+NUL-terminated names followed by a final NUL (the length reported
+leaves out that final NUL; too small a buffer gets a cut list and
+FALSE). Writing NULL data deletes a key, a NULL key deletes the
+application, NULL application, key and data empty the profile; an
+application whose last key is deleted goes too.
+
+**Sharing.** One named mutex semaphore (`\SEM32\PMSHAPI\PRF`)
+serialises all profile access in the system; every call holds it from
+start to end in a must-complete section (a process being killed
+finishes its update; if one dies holding it anyway, the next caller
+gets ERROR_SEM_OWNER_DIED and carries on). A named shared memory object
+(`\SHAREMEM\PMSHAPI\PRF`, 4 KB) holds the current user and system
+profile names and 256 generation counters, one per hash of a file's
+full path. Each process keeps the profiles it uses parsed in memory;
+before each use it compares the file's counter and its size and time
+stamp with what it saw and re-reads the file if either changed (the
+time stamp catches files replaced by other means, such as COPY). Every
+write goes to disk at once, still under the mutex, and bumps the
+counter, so the next call in any process sees it and a process that
+dies loses nothing. Writing through costs a whole-file rewrite per
+call: 200 writes to a small profile take about 0.5-0.8 s under QEMU
+(TCG); nothing is cached dirty, so there is nothing to flush at
+`PrfCloseProfile` or process end.
+
+**Safe replacement.** A profile `X.INI` is replaced the way IBM's
+writer does it (traced in MAKEINI): the new contents go to `X.!!!`,
+which is flushed (`DosResetBuffer`); then `X.INI` is renamed `X.###`,
+`X.!!!` renamed `X.INI`, and `X.###` deleted (`DosMove` never
+replaces a file; this works on FAT and HPFS). A crash leaves either
+`X.INI`, or `X.###` and a complete `X.!!!`: when `X.INI` is missing,
+`X.!!!` becomes the profile if it parses as a whole profile, else
+`X.###` is renamed back. A read-only profile is read but not written.
+
+**The program list.** `PrfCreateGroup`, `PrfAddProgram`,
+`PrfChangeProgram`, `PrfQueryDefinition`, `PrfQueryProgramTitles`,
+`PrfQueryProgramHandle`, `PrfRemoveProgram` and `PrfDestroyGroup` keep
+groups and programs in a profile (the user profile for `HINI_PROFILE`),
+so a desktop shell can read them from OS2.INI. The Toolkit's
+os2386.lib has no 32-bit ordinals for `PrfCreateGroup` and
+`PrfQueryProgramHandle`: they are at rs2-private ordinals 9000 and 9001
+(`userland/pmshapi/exports.private`). Everything is in the application
+`PM_RS2_ProgramList`:
+
+- key `NextHandle`: the next handle to give out (4 bytes,
+  little-endian), so a removed entry's handle is not reused;
+- one key per group or program, named by its handle as eight
+  upper-case hex digits (`0000000C`), in creation order (readers skip
+  keys that are not eight hex digits); the value:
+
+| Offset | Size | Contents |
+|--------|------|----------|
+| 0 | 4 | layout version, 1 |
+| 4 | 4 | the group the entry belongs to; `SGH_ROOT` (0xFFFFFFFF) for a group |
+| 8 | 4 | `PROGTYPE.progc` (`PROG_GROUP`, 5, for a group) |
+| 12 | 4 | `PROGTYPE.fbVisible` (`SHE_VISIBLE` 0, `SHE_INVISIBLE` 1, `SHE_PROTECTED` 2) |
+| 16 | 36 | `SWP swpInitial` (fl, cy, cx, y, x, hwndInsertBehind, hwnd, two reserved) as given |
+| 52 | ... | six fields: title, executable, parameters, startup directory, icon, environment; each a u16 length (0xFFFF: the pointer was NULL) and that many bytes, no NUL; the environment holds its strings each with its NUL, without the list's final NUL |
+
+`inifile::proglist` reads and writes these records. Queries put the
+strings after the structures in the caller's buffer
+(`PrfQueryDefinition`: PROGDETAILS, 72 bytes, then the strings, NULL
+pointers for absent ones; `PrfQueryProgramTitles`: the PROGTITLE
+array, 16 bytes each, then the titles; `SGH_ROOT` lists the groups);
+called with no buffer they return the size needed (and the count),
+with too small a buffer 0. `PrfCreateGroup` returns the existing group
+of the same title; `PrfAddProgram` needs an existing group;
+`PrfRemoveProgram` removes programs, `PrfDestroyGroup` a group with
+its programs; `PrfQueryProgramHandle` matches the executable
+case-insensitively, a name without a path in any directory.
+
+**Not done.** WinGetLastError codes (PMSHAPI does not call PMWIN), the
+`PL_ALTERED` broadcast after `PrfReset`, the 16-bit `Prf16*`/`Win16*`
+entry points, `PrfQueryProgramCategory`, `WinStartApp` and the switch
+list calls; the profile names in shared memory last while some process
+has PMSHAPI loaded (afterwards `USER_INI`/`SYSTEM_INI` apply again, so
+a `PrfReset` is forgotten); the program list is rs2's own layout, not
+IBM's (Warp 4's Workplace Shell keeps its objects in `PM_Abstract:*`
+and `PM_Workplace:*` instead).
+
 ## Debugging
 
 With `PMTRACE` set in a program's environment (`SET PMTRACE=1` before
@@ -744,6 +903,7 @@ The export trampolines pass their index to the lock's entry
   registered format, also read and replaced by a second process: it
   runs itself with `CHILD`), printing PASS/FAIL and `ctltest done: N
   failure(s)`.
+<<<<<<< HEAD
 - `RS2\SHELLTST.EXE` (userland/shelltest): self-checks of what a desktop
   shell needs: system pointers, pointer info and bitmaps, creating,
   copying and destroying pointers, the pointer's shape, file icons
@@ -762,6 +922,19 @@ The export trampolines pass their index to the lock's entry
   PASS/FAIL and `nbtest done: N failure(s)`, then a window with a
   settings-style notebook and a tabbed dialog (`NBTEST QUIT` ends at
   once, `NBTEST HANG` stops reading its queue for 30 s first).
+=======
+- `cargo test -p inifile` (the INI format; IBM's files from
+  `work/media` when present, or from `$RS2_WORK`) and
+  `RS2\INITEST.EXE` (userland/initest): profile self-checks printing
+  PASS/FAIL and `initest done: N failure(s)`: the Prf calls with small
+  buffers and defaults, enumerations, deletes, HINI_PROFILE's search
+  order, PrfQueryProfile/PrfReset, recovery from `X.!!!`/`X.###`,
+  read-only and foreign files, a second process reading and writing
+  the same profiles (`CHILD`) and two writing at once (`WRITER`), the
+  program list. `INITEST WRITE` and, after another boot with the same
+  `--hdd` image (`cargo xtask disk [--hpfs]`, found by its label),
+  `INITEST READ` check that a profile survives a reboot.
+>>>>>>> worktree-agent-a9ae6de3c07946690
 - `RS2\GPITEST.EXE` (userland/gpitest): GPI self-checks printing
   PASS/FAIL and `gpitest done: N failure(s)`, then a window with every
   kind of primitive for a screenshot check (it also draws
