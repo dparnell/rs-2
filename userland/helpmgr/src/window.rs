@@ -355,6 +355,16 @@ fn back(v: &mut View) {
     }
 }
 
+/// Esc: back to the previous panel; with nothing to go back to, the
+/// window closes.
+fn escape(v: &mut View) {
+    if v.history.is_empty() && v.vp.is_none() {
+        post(v.frame, WM_CLOSE, 0, 0);
+    } else {
+        back(v);
+    }
+}
+
 /// The help window's title: the instance's title and what is shown.
 pub fn set_title(inst: &mut Instance) {
     let Some(v) = view_of(inst) else { return };
@@ -726,7 +736,7 @@ fn client_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 return 0;
             }
             match hi(mp2) {
-                VK_ESC => back(v),
+                VK_ESC => escape(v),
                 VK_NEWLINE | VK_ENTER => {
                     if matches!(v.mode, Mode::Search(_)) && unsafe { WinQueryFocus(HWND_DESKTOP) } == v.entry {
                         let mut buf = [0u8; 130];
@@ -864,7 +874,8 @@ fn panel_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     }
                 }
                 VK_ESC | VK_BACKSPACE if v.footnote => close_footnote(v.inst()),
-                VK_ESC | VK_BACKSPACE => back(v),
+                VK_ESC => escape(v),
+                VK_BACKSPACE => back(v),
                 _ => return unsafe { WinDefWindowProc(h, msg, mp1, mp2) },
             }
             1
