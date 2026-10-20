@@ -112,12 +112,14 @@ size.
   Secure Boot off; with other guest types VMware's firmware reports "No
   compatible bootloader found". The VMware pointer (vmmouse) follows the
   host cursor without capturing it; the boot log shows "mouse: VMware
-  absolute pointer". The live ISO boots on VMware Workstation 17; QEMU's
+  absolute pointer". The live ISO boots and installs on VMware Workstation
+  17 (Windows 11 host), and the installed system boots from its disk; QEMU's
   VMware models (`cargo xtask run --vmware --pvscsi IMG --pvscsi-cd ISO`,
   `--scsi-hba mptsas1068`) are what the tests use.
 - **Proxmox**: BIOS OVMF (UEFI) with "Pre-Enroll keys" unticked (Secure
   Boot off); VirtIO SCSI, VirtIO Block or SATA disks; VirtIO or E1000
-  network. The live ISO and installed systems run there.
+  network. Installing from the live ISO and booting the installed disk
+  work there.
 - **VirtualBox**: enable EFI; use SATA or NVMe disks (VirtualBox's LSI
   Logic controllers use the same MPT interface and may work too). The
   mouse works in relative (captured) mode: VirtualBox's absolute pointer
