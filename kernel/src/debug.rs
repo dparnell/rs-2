@@ -57,7 +57,8 @@ pub fn dump_threads() {
             v.push_str(&alloc::format!(" {i:#x}:{n}"));
         }
     }
-    crate::trace!("msi counts:{v}; waits that timed out (missed): {}", crate::msi::missed());
+    let (slept, polled) = crate::msi::waits();
+    crate::trace!("msi counts:{v}; waits that timed out (missed): {}; waits slept {slept}, polled {polled}", crate::msi::missed());
     let Some(procs) = crate::task::process::try_all() else {
         crate::trace!("process list busy");
         crate::smp::dump_all();

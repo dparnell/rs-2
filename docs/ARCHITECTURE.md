@@ -99,8 +99,12 @@ processors are running. Handlers run in interrupt context without the
 big kernel lock, use only spin locks (`try_lock` where a thread may hold
 the lock) and hand over through an `msi::Event` (a signal counter and a
 wait queue) or a kernel thread's inbox: a thread waiting for a disk
-request sleeps until the completion interrupt instead of polling and
-yielding, which also gives up the big kernel lock meanwhile. NVMe, AHCI,
+request polls the device briefly (a fast device answers within a few
+register reads), then sleeps until the completion interrupt, which also
+gives up the big kernel lock meanwhile. API calls may sleep although
+they run with interrupts disabled (the gate is an interrupt gate; the
+switch restores the flag); what may not is code holding a spin lock or
+an interrupt handler (a per-CPU nesting count), and those poll. NVMe, AHCI,
 virtio (blk, scsi, input, console, rng, net), xHCI, e1000e (82574L),
 PVSCSI and LSI MPT use interrupts; the display queue of virtio-gpu and
 devices without MSI (the 8254x NICs) are polled, and so is everything

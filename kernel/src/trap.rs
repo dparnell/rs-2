@@ -29,19 +29,24 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
                 kernel_exception(f);
             }
         }
-        // Interrupt handlers only use spin locks.
-        v if (IRQ_BASE..IRQ_BASE + 16).contains(&v) => {
-            crate::irq::handle((v - IRQ_BASE) as u8, f);
-        }
         v if v == API_VECTOR as u64 => {
             smp::bkl_acquire();
             crate::api::dispatch(f);
         }
-        // Device interrupts (MSI/MSI-X): spin locks only, like IRQs.
-        v if (crate::msi::FIRST as u64..=crate::msi::LAST as u64).contains(&v) => crate::msi::dispatch(v as u8),
-        v if (smp::IPI_RESCHEDULE as u64..=smp::IPI_DUMP as u64).contains(&v) => smp::ipi(v as u8, f),
-        v if v == crate::apic::SPURIOUS as u64 => {}
-        v => crate::println!("spurious interrupt {v:#x}"),
+        // Interrupt handlers only use spin locks and never sleep.
+        v => {
+            let depth = &smp::this().irq_depth;
+            depth.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            match v {
+                v if (IRQ_BASE..IRQ_BASE + 16).contains(&v) => crate::irq::handle((v - IRQ_BASE) as u8, f),
+                // Device interrupts (MSI/MSI-X).
+                v if (crate::msi::FIRST as u64..=crate::msi::LAST as u64).contains(&v) => crate::msi::dispatch(v as u8),
+                v if (smp::IPI_RESCHEDULE as u64..=smp::IPI_DUMP as u64).contains(&v) => smp::ipi(v as u8, f),
+                v if v == crate::apic::SPURIOUS as u64 => {}
+                v => crate::println!("spurious interrupt {v:#x}"),
+            }
+            depth.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
+        }
     }
     if user {
         smp::bkl_acquire();

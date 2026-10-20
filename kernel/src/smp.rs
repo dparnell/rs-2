@@ -44,6 +44,10 @@ pub struct PerCpu {
     pub online: AtomicBool,
     /// Spin locks held on this CPU.
     pub held_locks: AtomicU32,
+    /// Interrupt handlers running on this CPU (nesting depth): code that
+    /// must not sleep, although kernel code under the API gate also runs
+    /// with interrupts disabled and may.
+    pub irq_depth: AtomicU32,
     pub need_resched: AtomicBool,
     pub slice_end: AtomicU64,
     /// Run queue index (class * 32 + level) of the running thread, for
@@ -73,6 +77,7 @@ impl PerCpu {
             apic_id: AtomicU32::new(0),
             online: AtomicBool::new(false),
             held_locks: AtomicU32::new(0),
+            irq_depth: AtomicU32::new(0),
             need_resched: AtomicBool::new(false),
             slice_end: AtomicU64::new(0),
             cur_class: AtomicU8::new(IDLE_CLASS),

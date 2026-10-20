@@ -79,7 +79,6 @@ fn run() {
         let chunk = 64 * 1024 / ss;
         let total = (16 * 1024 * 1024 / ss as u64).min(d.sector_count() / chunk as u64 * chunk as u64);
         let mut buf = vec![0u8; chunk * ss];
-        let (i0, m0) = (crate::msi::total(), crate::msi::missed());
         let (b0, t0, _) = sample();
         let s0 = crate::arch::rdtsc();
         let mut lba = 0;
@@ -102,30 +101,43 @@ fn run() {
             (b1 - b0) * 100 / (t1 - t0).max(1),
             if ok { "" } else { " (read error)" }
         );
-        // Random: 4 KB reads spread over the disk.
+        // Random: 4 KB reads spread over the disk, from this kernel
+        // thread and then with interrupts disabled, as API calls run
+        // (the gate is an interrupt gate).
         let per = (4096 / ss).max(1);
         let mut small = vec![0u8; per * ss];
         let span = d.sector_count().saturating_sub(per as u64).max(1);
-        let mut seed = 0x1234_5678u64;
-        let count = 500u64;
-        let (b0, t0, _) = sample();
-        let c0 = crate::arch::rdtsc();
-        for _ in 0..count {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            let at = (seed >> 33) % span;
-            if d.read(at, &mut small).is_err() {
-                break;
+        for api in [false, true] {
+            let mut seed = 0x1234_5678u64;
+            let count = 500u64;
+            let (i0, m0) = (crate::msi::total(), crate::msi::missed());
+            let (b0, t0, _) = sample();
+            let c0 = crate::arch::rdtsc();
+            let was = crate::arch::interrupts_enabled();
+            if api {
+                crate::arch::disable_interrupts();
             }
+            for _ in 0..count {
+                seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+                let at = (seed >> 33) % span;
+                if d.read(at, &mut small).is_err() {
+                    break;
+                }
+            }
+            if api && was {
+                crate::arch::enable_interrupts();
+            }
+            let us = (crate::arch::rdtsc() - c0) / tsc_per_us;
+            let (b1, t1, _) = sample();
+            crate::println!(
+                "bench: disk {n}: random 4 KB reads{}: {} us each, CPU busy {}%; {} device interrupts, {} missed",
+                if api { " (interrupts off)" } else { "" },
+                us / count,
+                (b1 - b0) * 100 / (t1 - t0).max(1),
+                crate::msi::total() - i0,
+                crate::msi::missed() - m0
+            );
         }
-        let us = (crate::arch::rdtsc() - c0) / tsc_per_us;
-        let (b1, t1, _) = sample();
-        crate::println!(
-            "bench: disk {n}: random 4 KB reads: {} us each, CPU busy {}%; {} device interrupts, {} missed",
-            us / count,
-            (b1 - b0) * 100 / (t1 - t0).max(1),
-            crate::msi::total() - i0,
-            crate::msi::missed() - m0
-        );
     }
     let per: alloc::vec::Vec<(u64, u64)> = (0..crate::smp::online_count() as usize)
         .map(|i| (BUSY[i].load(Ordering::Relaxed), TICKS[i].load(Ordering::Relaxed)))
@@ -135,7 +147,8 @@ fn run() {
     // Interrupts per device vector, now and after a while (input typed
     // meanwhile, network traffic).
     for _ in 0..2 {
-        crate::println!("bench: interrupts by vector: {}", crate::msi::summary());
+        let (slept, polled) = crate::msi::waits();
+        crate::println!("bench: interrupts by vector: {}; waits slept {slept}, polled {polled}", crate::msi::summary());
         sleep_ms(30_000);
     }
 }

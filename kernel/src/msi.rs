@@ -53,6 +53,9 @@ static NEXT: SpinLock<u8> = SpinLock::new(FIRST);
 static LIVE: AtomicBool = AtomicBool::new(false);
 /// Lost-interrupt safety net: completions found by a timed re-check.
 static MISSED: AtomicU64 = AtomicU64::new(0);
+/// Waits on armed events that slept, and that had to poll instead.
+static BLOCKED: AtomicU64 = AtomicU64::new(0);
+static POLLED: AtomicU64 = AtomicU64::new(0);
 /// Destination of new vectors until [`start`] spreads them.
 static BOOT_APIC: AtomicU32 = AtomicU32::new(u32::MAX);
 
@@ -158,6 +161,18 @@ pub fn summary() -> alloc::string::String {
 /// Completions that only a timed re-check found (lost interrupts).
 pub fn missed() -> u64 {
     MISSED.load(Ordering::Relaxed)
+}
+
+/// Waits on interrupt-driven events so far: (slept, polled because the
+/// caller could not sleep).
+pub fn waits() -> (u64, u64) {
+    (BLOCKED.load(Ordering::Relaxed), POLLED.load(Ordering::Relaxed))
+}
+
+fn count_wait(blocked: bool) {
+    if live() {
+        if blocked { &BLOCKED } else { &POLLED }.fetch_add(1, Ordering::Relaxed);
+    }
 }
 
 // ---- MSI ----
@@ -380,6 +395,9 @@ pub fn destination(vector: u8) -> Option<u32> {
 /// ticks: the safety net against a lost interrupt.
 const RECHECK_TICKS: u64 = 20;
 
+/// Polls (each with a device register read) before a wait goes to sleep.
+const SPIN_POLLS: u32 = 16;
+
 /// Something an interrupt handler signals and threads wait for: a
 /// counter of signals, a wait queue and an optional hook that runs in the
 /// handler (for consumers that are not waiting threads).
@@ -444,11 +462,14 @@ impl Event {
     }
 
     /// Whether a wait right now would block (interrupts are delivered and
-    /// the caller is a thread that may sleep).
+    /// the caller is a thread that may sleep). Interrupts being disabled
+    /// does not prevent it: API calls run that way (the gate is an
+    /// interrupt gate) and the switch restores the flag; interrupt
+    /// handlers and spin lock holders may not sleep.
     pub fn can_block(&self) -> bool {
         self.armed()
             && live()
-            && crate::arch::interrupts_enabled()
+            && crate::smp::this().irq_depth.load(Ordering::Relaxed) == 0
             && crate::sync::held_spin_locks() == 0
             && crate::task::sched::current_opt().is_some_and(|t| !t.is_idle())
     }
@@ -460,10 +481,22 @@ impl Event {
     /// which also estimates time while the timer is not running yet.
     /// `cond` runs with the wait queue locked: it may only read the
     /// device, never take a lock an interrupt handler holds.
-    pub fn wait(&self, ms: u64, pace: impl FnMut(), mut cond: impl FnMut() -> bool) -> bool {
+    pub fn wait(&self, ms: u64, mut pace: impl FnMut(), mut cond: impl FnMut() -> bool) -> bool {
         if !self.can_block() {
+            if self.armed() {
+                count_wait(false);
+            }
             return poll(ms, pace, cond);
         }
+        // A fast device answers within a few register reads: catching
+        // that saves the sleep and the wake-up (an interrupt, often an IPI).
+        for _ in 0..SPIN_POLLS {
+            if cond() {
+                return true;
+            }
+            pace();
+        }
+        count_wait(true);
         let deadline = crate::irq::ticks() + (ms * crate::irq::HZ / 1000).max(1);
         loop {
             if cond() {
@@ -497,9 +530,13 @@ impl Event {
     /// [`Event::signals`], check, then wait for the next signal.
     pub fn wait_signal(&self, seen: u64, ms: u64) -> bool {
         if !self.can_block() {
+            if self.armed() {
+                count_wait(false);
+            }
             crate::task::sched::yield_now();
             return true;
         }
+        count_wait(true);
         let deadline = crate::irq::ticks() + (ms * crate::irq::HZ / 1000).max(1);
         self.wait.wait_uninterruptible_until(deadline, || self.signals() != seen)
     }
