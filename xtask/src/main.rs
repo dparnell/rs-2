@@ -539,8 +539,22 @@ fn strip(file: &Path) {
     }
 }
 
+/// QEMU's UEFI firmware (edk2-x86_64-code.fd and edk2-i386-vars.fd):
+/// `$RS2_OVMF_DIR`, else Homebrew's or a Linux distribution's QEMU share
+/// directory.
 fn ovmf() -> (PathBuf, PathBuf) {
-    let share = PathBuf::from("/opt/homebrew/share/qemu");
+    let dirs = std::env::var_os("RS2_OVMF_DIR")
+        .map(PathBuf::from)
+        .into_iter()
+        .chain(["/opt/homebrew/share/qemu", "/usr/local/share/qemu", "/usr/share/qemu"].map(PathBuf::from));
+    let mut tried = Vec::new();
+    let share = dirs
+        .into_iter()
+        .find(|d| {
+            tried.push(d.display().to_string());
+            d.join("edk2-x86_64-code.fd").exists()
+        })
+        .unwrap_or_else(|| panic!("QEMU's UEFI firmware (edk2-x86_64-code.fd) not found in {}; set RS2_OVMF_DIR", tried.join(", ")));
     let code = share.join("edk2-x86_64-code.fd");
     // A fresh variable store every run, so stale boot entries from other
     // configurations never get in the way.

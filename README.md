@@ -56,19 +56,73 @@ programs tested so far.
 
 ## Building
 
-Requirements: a Rust toolchain (stable) with the `x86_64-unknown-uefi`,
-`x86_64-unknown-none` and `i686-unknown-linux-gnu` targets, and QEMU with
-OVMF for running it.
+### Requirements
 
+- **Rust**, stable, through [rustup](https://rustup.rs), with three
+  extra targets: the UEFI loader, the kernel and the 32-bit OS/2 programs
+  and DLLs:
+
+  ```bash
+  rustup target add x86_64-unknown-uefi x86_64-unknown-none i686-unknown-linux-gnu
+  ```
+
+- **QEMU** (`qemu-system-x86_64` with its UEFI firmware), only for
+  running rs2 here: `brew install qemu` on macOS, the `qemu-system-x86`
+  (plus `ovmf` on Debian/Ubuntu) package on Linux. `cargo xtask run`
+  looks for `edk2-x86_64-code.fd` in Homebrew's and the usual Linux
+  QEMU directories; set `RS2_OVMF_DIR` to the folder that has it if
+  yours is elsewhere.
+
+Nothing else: no C compiler, no ISO tools and no IBM files. The build
+writes the ISO itself, and the live ISO contains only rs2's own code.
+
+### Building the live ISO
+
+From the repository root:
+
+```bash
+cargo xtask iso --dist --release -o rs2.iso
 ```
-rustup target add x86_64-unknown-uefi x86_64-unknown-none i686-unknown-linux-gnu
-cargo xtask iso --dist --release -o rs2.iso   # bootable install/live ISO
-cargo xtask run --iso rs2.iso                 # try it in QEMU
+
+This builds everything in release mode (loader, kernel, the OS/2
+programs and DLLs listed in `dist/manifest.txt`) and writes `rs2.iso`,
+about 22 MB. Without `-o` it goes to `work/rs2.iso`. The first build
+takes a few minutes; later ones only rebuild what changed.
+
+The image is a hybrid: attach it to a virtual machine as a CD (see
+[Virtual machines](#virtual-machines) for settings), or write it to a
+USB stick for a real PC with UEFI firmware (Secure Boot off), e.g. on
+macOS `diskutil list` to find the stick, then `sudo dd if=rs2.iso
+of=/dev/rdiskN bs=4m`; on Linux `sudo dd if=rs2.iso of=/dev/sdX bs=4M
+status=progress`. `dd` overwrites the whole device: check its name.
+
+### Trying it in QEMU
+
+```bash
+cargo xtask run --iso rs2.iso
 ```
+
+boots it in a QEMU window (UEFI, q35, 2 CPUs). With a blank disk to
+install onto:
+
+```bash
+qemu-img create -f raw disk.img 1G
+```
+
+```bash
+cargo xtask run --iso rs2.iso --hdd disk.img
+```
+
+and afterwards `cargo xtask run --boot-hdd --hdd disk.img` boots the
+installed system. Other useful options: `--smp N`, `--vmware`,
+`--virtio-gpu`, `--virtio-scsi IMG`, `--net`, `--headless` (see the top
+of `xtask/src/main.rs` for all of them).
 
 The ISO boots into the live system's desktop; open Programs > Install
-rs2 (or type `INSTALL` at a command prompt) to install onto a hard disk. Development builds (`cargo xtask run`) take extra files for drive C:
-from `work/modules.txt`, which is how original OS/2 programs are tested.
+rs2 (or type `INSTALL` at a command prompt) to install onto a hard
+disk. Development builds (`cargo xtask run` without `--iso`) take extra
+files for drive C: from `work/modules.txt`, which is how original OS/2
+programs are tested.
 
 ## Using the desktop
 
