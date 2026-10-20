@@ -341,3 +341,50 @@ fn compile_names_and_fonts() {
     assert_eq!(f.len(), 2);
     assert_eq!((f[1].face.as_slice(), f[1].height, f[1].width), (&b"Helv"[..], 14, 10));
 }
+
+/// Window data of links and headings, compiled and read back.
+#[test]
+fn compile_window_data() {
+    let src = b":userdoc.\n:h1 res=1.A\n:p.:link reftype=hd res=2 vpx=right vpy=top vpcx=40% vpcy=50% group=3 dependent.w:elink.\n:h1 res=2 x=left y=bottom width=50% height=20c group=7.B\n:p.y\n:euserdoc.\n";
+    let data = crate::compile::compile(src, true).unwrap();
+    let doc = Doc::parse(&data).unwrap();
+    let items = crate::text::panel(&doc, 0);
+    let d = items.iter().find_map(|i| match i {
+        Some(Item::Link { data, .. }) => *data,
+        _ => None,
+    });
+    let d = d.unwrap();
+    assert_eq!(d.flags, 0x603);
+    assert_eq!(d.origin, Some((0x44, 2, 4)));
+    assert_eq!(d.size, Some((0x11, 40, 50)));
+    assert_eq!(d.group, Some(3));
+    let t = doc.toc(1).unwrap();
+    assert_eq!(t.ext, 0x403);
+    assert_eq!(t.origin, Some(WinCoord { units: 0x44, x: 1, y: 8 }));
+    assert_eq!(t.size, Some(WinCoord { units: 0x10, x: 50, y: 20 }));
+    assert_eq!(t.group, Some(7));
+    assert_eq!(t.title, b"B");
+}
+
+/// `:acviewport.` as IBM's compiler wrote it in the Toolkit's IPF sample,
+/// and as rs2's writes it.
+#[test]
+fn acviewport() {
+    let ibm = [0xff, 0x1f, 0x21, 0x00, 0x0d, 0x01, 0x00, 0x08, b'I', b'P', b'F', b'M', b'a', b'i', b'n', 0x04, b'i', b'p', b'f', 0x01, 0xc3, 0x00, 0x44, 0x02, 0x00, 0x04, 0x00, 0x11, 0x37, 0x00, 0x64, 0x00];
+    let items = crate::text::decode_ddf(&ibm);
+    let Some(Item::AcViewport(a)) = items.first() else { panic!("{items:?}") };
+    assert_eq!((a.objid, a.name, a.dll, a.info), (1, &b"IPFMain"[..], &b"ipf"[..], &b""[..]));
+    let d = a.data.unwrap();
+    assert_eq!((d.flags, d.origin, d.size), (0xc3, Some((0x44, 2, 4)), Some((0x11, 55, 100))));
+    let src = b":userdoc.\n:h1 res=1.A\n:acviewport dll='ipf' objectname='IPFMain' objectid=1 vpx=right vpy=top vpcx=55% vpcy=100%.\n:euserdoc.\n";
+    let data = crate::compile::compile(src, true).unwrap();
+    let doc = Doc::parse(&data).unwrap();
+    let items = crate::text::panel(&doc, 0);
+    let a = items.iter().find_map(|i| match i {
+        Some(Item::AcViewport(a)) => Some(a.clone()),
+        _ => None,
+    });
+    let a = a.unwrap();
+    assert_eq!((a.objid, a.name, a.dll), (1, &b"IPFMain"[..], &b"ipf"[..]));
+    assert_eq!(a.data.unwrap().size, Some((0x11, 55, 100)));
+}

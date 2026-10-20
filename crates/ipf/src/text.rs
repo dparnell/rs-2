@@ -54,8 +54,12 @@
 //! | 0x69 | RECTL, u32 HMF | the application's metafile |
 //!
 //! Link data: `u16 flags`, then by flag 0x01 origin and 0x02 size (`u8
-//! units, u16, u16` each), 0x08 a window id, 0x400 a group (u16 each);
-//! flag 0x40: open automatically.
+//! units, u16, u16` each), 0x08 a window style, 0x400 a group (u16
+//! each); flags 0x40 open automatically, 0x80 in a window of its own,
+//! 0x200 dependent (closed with the window it was opened from). Units:
+//! high nibble x (cx), low nibble y (cy): 0 characters, 1 percent of the
+//! window, 2 pixels, 3 points, 4 dynamic (1 left, 2 right, 4 top, 8
+//! bottom, 0x10 centre); a value 0xFFFF keeps the window's.
 
 use crate::{Cell, Doc};
 use alloc::vec::Vec;
@@ -66,7 +70,9 @@ pub struct LinkData {
     pub flags: u16,
     pub origin: Option<(u8, u16, u16)>,
     pub size: Option<(u8, u16, u16)>,
-    pub window: Option<u16>,
+    /// Window style (`titlebar=`, `scroll=`, `rules=`), as a TOC
+    /// entry's.
+    pub style: Option<u16>,
     pub group: Option<u16>,
 }
 
@@ -87,7 +93,7 @@ impl LinkData {
             p += 5;
         }
         if flags & 0x08 != 0 {
-            d.window = rd(p);
+            d.style = rd(p);
             p += 2;
         }
         if flags & 0x400 != 0 {
@@ -130,6 +136,18 @@ pub struct Area<'a> {
     pub data: Option<LinkData>,
 }
 
+/// An application-controlled viewport (`:acviewport.`): the window
+/// procedure `name` of DLL `dll` makes the window, given the object id
+/// and `info`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AcViewport<'a> {
+    pub objid: u16,
+    pub name: &'a [u8],
+    pub dll: &'a [u8],
+    pub info: &'a [u8],
+    pub data: Option<LinkData>,
+}
+
 /// One unit of cell text.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Item<'a> {
@@ -160,6 +178,7 @@ pub enum Item<'a> {
     /// in the text) and its offset; `areas`: it has link areas.
     Bitmap { flags: u8, offset: u32, areas: bool },
     Area(Area<'a>),
+    AcViewport(AcViewport<'a>),
     HideBegin(&'a [u8]),
     HideEnd,
     Ddf(u16),
@@ -234,6 +253,20 @@ fn escape(e: &[u8]) -> Option<Item<'_>> {
         }
         0x20 => Item::Ddf(u16_at(e, 3)?),
         0x22 => Item::MarginOrSpace(arg()?),
+        0x21 => {
+            // `?? n u16 objid` and three strings (u8 length counting
+            // itself, the characters): object name, DLL, object info;
+            // link data after the `n` bytes of the strings.
+            let n = *e.get(4)? as usize;
+            let mut p = 7;
+            let mut strs: [&[u8]; 3] = [&[]; 3];
+            for s in strs.iter_mut() {
+                let l = (*e.get(p)? as usize).max(1);
+                *s = e.get(p + 1..p + l)?;
+                p += l;
+            }
+            Item::AcViewport(AcViewport { objid: u16_at(e, 5)?, name: strs[0], dll: strs[1], info: strs[2], data: data_at(7 + n) })
+        }
         _ => Item::Other(ty, &e[3..]),
     })
 }

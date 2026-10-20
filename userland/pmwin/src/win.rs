@@ -804,13 +804,14 @@ pub extern "C" fn WinQueryWindowTextLength(h: u32) -> i32 {
 }
 
 /// Window words: QWL_USER (0) and the class's extra bytes at byte offsets;
-/// QWL_STYLE (-2), QWS_ID (-1).
+/// QWL_STYLE (-2), QWS_ID (-1), QWL_HMQ (-4).
 fn word_get(h: u32, index: i32) -> Option<u32> {
     if let Some(v) = frame_word(h, index) {
         return Some(v);
     }
     let w = st().desk.get(h)?;
     match index {
+        -4 => Some(w.queue),
         -2 => Some(w.style),
         -1 => Some(w.id),
         i if i >= 0 => {

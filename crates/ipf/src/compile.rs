@@ -12,7 +12,14 @@
 //!   `:dl.` (`tsize=`) with `:dt.`/`:dd.` and `:edl.`;
 //! - `:hp1.`-`:hp7.` / `:ehp1.`-`:ehp7.` (italic, bold, underlined and
 //!   their mixes; `:hp4.` is bold);
-//! - `:link reftype=hd res=N.` or `refid=ID.` ... `:elink.`;
+//! - `:link reftype=hd res=N.` or `refid=ID.` ... `:elink.`, with a
+//!   window of its own: `vpx=`/`vpy=` (left, center, right, top,
+//!   bottom, or a number with `%`, `c` characters, `x` pixels or `p`
+//!   points), `vpcx=`/`vpcy=`, `group=`, `auto`, `viewport`,
+//!   `dependent`; headings take `x=`, `y=`, `width=`, `height=` and
+//!   `group=` the same way;
+//! - `:acviewport dll= objectname= objectid= objectinfo=.` with
+//!   `vpx=` and so on;
 //! - `:font facename=F size=HxW.` (`facename=default`: the document's
 //!   font) and `:ddf res=N.` (the application's dynamic data);
 //! - symbols such as `&colon.`, `&amp.`, `&period.`.
@@ -67,7 +74,8 @@ enum Tok {
     Block(u8),
     /// An escape; `brk`: it ends a run of words (margins).
     Esc(Vec<u8>, bool),
-    Link(Ref, usize),
+    /// A link with its link data (empty: none).
+    Link(Ref, usize, Vec<u8>),
 }
 
 fn esc(ty: u8, data: &[u8]) -> Vec<u8> {
@@ -79,6 +87,8 @@ fn esc(ty: u8, data: &[u8]) -> Vec<u8> {
 struct Panel {
     level: u8,
     hidden: bool,
+    /// The TOC entry's extended block (flags, then its fields).
+    ext: Option<(u16, Vec<u8>)>,
     res: Option<u16>,
     id: Option<Vec<u8>>,
     title: Vec<u8>,
@@ -192,6 +202,63 @@ fn attrs(s: &[u8]) -> Vec<(Vec<u8>, Vec<u8>)> {
     v
 }
 
+/// A window coordinate: (units, value) as the help manager reads them
+/// (see `text::LinkData`).
+fn coord(line: usize, v: &[u8]) -> Result<(u8, u16), CompileError> {
+    let v = v.to_ascii_lowercase();
+    let dynamic = match v.as_slice() {
+        b"left" => Some(1),
+        b"right" => Some(2),
+        b"top" => Some(4),
+        b"bottom" => Some(8),
+        b"center" | b"centre" => Some(0x10),
+        _ => None,
+    };
+    if let Some(d) = dynamic {
+        return Ok((4, d));
+    }
+    let (num, units) = match v.last() {
+        Some(b'%') => (&v[..v.len() - 1], 1),
+        Some(b'c') => (&v[..v.len() - 1], 0),
+        Some(b'x') => (&v[..v.len() - 1], 2),
+        Some(b'p') => (&v[..v.len() - 1], 3),
+        _ => (&v[..], 0),
+    };
+    Ok((units, number(line, num)?))
+}
+
+/// The window fields of a link or heading, from attributes `names` (x,
+/// y, cx, cy) and `group=`: the flags (0x01 origin, 0x02 size, 0x400
+/// group) and the bytes after them, or None.
+fn window_data(line: usize, a: &[(Vec<u8>, Vec<u8>)], names: [&[u8]; 4]) -> Result<Option<(u16, Vec<u8>)>, CompileError> {
+    let get = |k: &[u8]| a.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
+    let mut flags = 0u16;
+    let mut d = Vec::new();
+    for (bit, (kx, ky)) in [(1u16, (names[0], names[1])), (2, (names[2], names[3]))] {
+        let (x, y) = (get(kx), get(ky));
+        if x.is_none() && y.is_none() {
+            continue;
+        }
+        let (ux, vx) = match x {
+            Some(v) => coord(line, &v)?,
+            None => (2, 0xffff),
+        };
+        let (uy, vy) = match y {
+            Some(v) => coord(line, &v)?,
+            None => (2, 0xffff),
+        };
+        flags |= bit;
+        d.push(ux << 4 | uy);
+        put16(&mut d, vx);
+        put16(&mut d, vy);
+    }
+    if let Some(g) = get(b"group") {
+        flags |= 0x400;
+        put16(&mut d, number(line, &g)?);
+    }
+    Ok((flags != 0).then_some((flags, d)))
+}
+
 fn number(line: usize, v: &[u8]) -> Result<u16, CompileError> {
     let s = core::str::from_utf8(v).unwrap_or("");
     let n = if let Some(h) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
@@ -276,9 +343,11 @@ impl Parser {
                         return err(line, format!("res={r} used twice"));
                     }
                 }
+                let ext = window_data(line, &a, [b"x", b"y", b"width", b"height"])?;
                 self.panels.push(Panel {
                     level: name[1] - b'0',
                     hidden: a.iter().any(|(n, _)| n == b"hide"),
+                    ext,
                     res,
                     id: get(b"id").map(|v| v.to_ascii_lowercase()),
                     title: rest.to_vec(),
@@ -403,9 +472,45 @@ impl Parser {
                     (None, Some(id)) => Ref::Id(id.to_ascii_lowercase()),
                     _ => return err(line, ":link. needs res= or refid="),
                 };
-                self.push(Tok::Link(r, line))?;
+                let data = window_data(line, &a, [b"vpx", b"vpy", b"vpcx", b"vpcy"])?;
+                let mut flags = data.as_ref().map_or(0, |d| d.0);
+                for (k, f) in [(&b"auto"[..], 0x40u16), (b"viewport", 0x80), (b"dependent", 0x200)] {
+                    if a.iter().any(|(n, _)| n == k) {
+                        flags |= f;
+                    }
+                }
+                let mut d = Vec::new();
+                if flags != 0 {
+                    put16(&mut d, flags);
+                    d.extend_from_slice(&data.map(|d| d.1).unwrap_or_default());
+                }
+                self.push(Tok::Link(r, line, d))?;
             }
             b"elink" => self.push(Tok::Esc(esc(0x08, &[]), false))?,
+            b"acviewport" => {
+                // `?? n u16 objid` (n: the bytes of the strings), the
+                // object name, DLL and object info, the link data.
+                let s = |k: &[u8]| get(k).unwrap_or_default();
+                let (name, dll, info) = (s(b"objectname"), s(b"dll"), s(b"objectinfo"));
+                if name.is_empty() {
+                    return err(line, ":acviewport. needs objectname=");
+                }
+                let objid = get(b"objectid").map(|v| number(line, &v)).transpose()?.unwrap_or(0);
+                let mut strs = Vec::new();
+                for t in [&name, &dll, &info] {
+                    let t = &t[..t.len().min(254)];
+                    strs.push(t.len() as u8 + 1);
+                    strs.extend_from_slice(t);
+                }
+                let mut d = vec![0, strs.len() as u8];
+                put16(&mut d, objid);
+                d.extend_from_slice(&strs);
+                if let Some((flags, w)) = window_data(line, &a, [b"vpx", b"vpy", b"vpcx", b"vpcy"])? {
+                    put16(&mut d, flags);
+                    d.extend_from_slice(&w);
+                }
+                self.push(Tok::Esc(esc(0x21, &d), true))?;
+            }
             b"ddf" => {
                 let Some(r) = get(b"res") else { return err(line, ":ddf. needs res=") };
                 let r = number(line, &r)?;
@@ -660,9 +765,16 @@ pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
                     spacing = true;
                 }
                 Tok::Esc(e, _) => cells.last_mut().unwrap().text.extend_from_slice(e),
-                Tok::Link(r, line) => {
+                Tok::Link(r, line, data) => {
                     let toc = find(r, *line)?;
-                    cells.last_mut().unwrap().text.extend_from_slice(&esc(0x06, &toc.to_le_bytes()));
+                    let e = if data.is_empty() {
+                        esc(0x06, &toc.to_le_bytes())
+                    } else {
+                        let mut d = toc.to_le_bytes().to_vec();
+                        d.extend_from_slice(data);
+                        esc(0x05, &d)
+                    };
+                    cells.last_mut().unwrap().text.extend_from_slice(&e);
                 }
             }
         }
@@ -710,10 +822,20 @@ pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
             flags |= 0x40;
         }
         let cl = &panel_cells[i];
-        let t = &p.title[..p.title.len().min(255 - 3 - cl.len() * 2)];
-        f.push((3 + cl.len() * 2 + t.len()) as u8);
+        let ext: Vec<u8> = match &p.ext {
+            Some((bits, data)) => {
+                flags |= 0x20;
+                let mut v = bits.to_le_bytes().to_vec();
+                v.extend_from_slice(data);
+                v
+            }
+            None => Vec::new(),
+        };
+        let t = &p.title[..p.title.len().min(255 - 3 - ext.len() - cl.len() * 2)];
+        f.push((3 + ext.len() + cl.len() * 2 + t.len()) as u8);
         f.push(flags);
         f.push(cl.len() as u8);
+        f.extend_from_slice(&ext);
         for &c in cl {
             put16(&mut f, c);
         }

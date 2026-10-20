@@ -197,6 +197,7 @@ pub const HWND_TOP: u32 = 3;
 
 pub const WS_VISIBLE: u32 = 0x8000_0000;
 pub const WS_CLIPCHILDREN: u32 = 0x2000_0000;
+pub const WS_CLIPSIBLINGS: u32 = 0x1000_0000;
 pub const WS_TABSTOP: u32 = 0x0002_0000;
 pub const WS_GROUP: u32 = 0x0001_0000;
 
@@ -220,6 +221,7 @@ pub const QW_PARENT: i32 = 5;
 pub const QW_OWNER: i32 = 4;
 pub const QWS_ID: i32 = -1;
 pub const QWL_USER: i32 = 0;
+pub const QWL_HMQ: i32 = -4;
 
 pub const SV_CXSCREEN: i32 = 20;
 pub const SV_CYSCREEN: i32 = 21;

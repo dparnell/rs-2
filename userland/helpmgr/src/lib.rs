@@ -50,6 +50,7 @@ pub const HMERR_READ_LIB_FILE: u32 = 0x2004;
 pub const HMERR_LOAD_DLL_BAD_FORMAT: u32 = 0x2005;
 pub const HMERR_PANEL_NOT_FOUND: u32 = 0x2010;
 pub const HMERR_DATABASE_NOT_OPEN: u32 = 0x2011;
+pub const HMERR_LOAD_DLL: u32 = 0x2013;
 /// HM_ERROR when HM_QUERY_DDF_DATA did not return a DDF (IBM's
 /// PnlGethDDF; not in the Toolkit).
 pub const HMERR_DDF_INVALID: u32 = 0x2014;
@@ -74,6 +75,7 @@ pub const HM_EXT_HELP_UNDEFINED: u32 = 0x232;
 pub const HM_SET_OBJCOM_WINDOW: u32 = 0x238;
 pub const HM_QUERY_DDF_DATA: u32 = 0x23a;
 pub const HM_INVALIDATE_DDF_DATA: u32 = 0x23b;
+pub const HM_QUERY: u32 = 0x23c;
 pub const HM_INFORM: u32 = 0x234;
 pub const HM_NOTIFY: u32 = 0x242;
 pub const HM_RESOURCEID: u32 = 0;
@@ -133,6 +135,8 @@ pub struct Instance {
     pub frame: u32,
     /// The footnote window's frame (0: none).
     pub footnote: u32,
+    /// The viewports' frames (panels in windows of their own).
+    pub viewports: Vec<u32>,
     /// A book shown by VIEW: no application, the program ends with it.
     pub book: bool,
 }
@@ -246,6 +250,7 @@ pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: 
         assoc: 0,
         frame: 0,
         footnote: 0,
+        viewports: Vec::new(),
         book,
     }));
     let first = instances().is_empty();
@@ -701,6 +706,8 @@ extern "C" fn instance_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         HM_SET_OBJCOM_WINDOW => core::mem::replace(&mut inst.objcom, mp1),
+        // mp1: HMQW_* in the high word.
+        HM_QUERY => window::query(inst, (mp1 >> 16) as u16, mp1 as u16, mp2),
         // mp1: how many ids (0: all), mp2: the ids (u16 each).
         HM_INVALIDATE_DDF_DATA => {
             let ids: Vec<u16> = if mp1 == 0 || mp2 == 0 { Vec::new() } else { (0..mp1.min(4096) as usize).map(|i| read16(mp2, i * 2)).collect() };

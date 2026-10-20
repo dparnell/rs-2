@@ -10,7 +10,7 @@ use crate::{Instance, PanelRef, HM_INFORM};
 use alloc::vec;
 use alloc::vec::Vec;
 use ipf::layout::{layout_items, Hit, Options, Page};
-use ipf::text::{decode, expand_ddf, Item, Target};
+use ipf::text::{decode, expand_ddf, Item, LinkData, Target};
 
 const CLIENT: &[u8] = b"HMHelpWindow\0";
 const PANEL: &[u8] = b"HMHelpPanel\0";
@@ -60,6 +60,10 @@ struct View {
     bitmaps: Bitmaps,
     /// A footnote window: one panel, no buttons.
     footnote: bool,
+    /// A window of its own in the help window (a viewport).
+    vp: Option<Viewport>,
+    /// Frames of the page's application-controlled viewports.
+    acvps: Vec<u32>,
     /// The dynamic data of the panel's `:ddf.`s: resource id, the text
     /// (pages borrow it) and whether it is still valid.
     ddf: Vec<(u16, alloc::boxed::Box<[u8]>, bool)>,
@@ -123,7 +127,7 @@ fn ensure(inst: &mut Instance) -> &'static mut View {
     if let Some(v) = view_of(inst) {
         return v;
     }
-    let v = make(inst, false);
+    let v = make(inst, false, HWND_DESKTOP);
     inst.frame = v.frame;
     // On the right of the screen, as IBM's help windows come up.
     let (sw, sh) = (sysval(SV_CXSCREEN), sysval(SV_CYSCREEN));
@@ -141,7 +145,7 @@ fn ensure_footnote(inst: &mut Instance) -> &'static mut View {
             return v;
         }
     }
-    let v = make(inst, true);
+    let v = make(inst, true, HWND_DESKTOP);
     inst.footnote = v.frame;
     let mut swp = Swp::default();
     unsafe { WinQueryWindowPos(inst.frame, &mut swp) };
@@ -150,16 +154,19 @@ fn ensure_footnote(inst: &mut Instance) -> &'static mut View {
     v
 }
 
-/// A help or footnote window.
-fn make(inst: &mut Instance, footnote: bool) -> &'static mut View {
+/// A help or footnote window, or (in `parent`, a help window's client) a
+/// viewport.
+fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
     let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_NOBYTEALIGN;
-    if !footnote {
+    if parent != HWND_DESKTOP {
+        fcf |= FCF_MAXBUTTON;
+    } else if !footnote {
         fcf |= FCF_MINBUTTON | FCF_MAXBUTTON | FCF_TASKLIST;
     }
     let mut client = 0u32;
     let title: &[u8] = if footnote { b"Footnote\0" } else { b"Help\0" };
     let frame = unsafe {
-        WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, CLIENT.as_ptr(), title.as_ptr(), WS_CLIPCHILDREN, 0, 0, &mut client)
+        WinCreateStdWindow(parent, WS_CLIPSIBLINGS, &mut fcf, CLIENT.as_ptr(), title.as_ptr(), WS_CLIPCHILDREN, 0, 0, &mut client)
     };
     let v = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(View {
         inst: inst as *mut Instance,
@@ -179,6 +186,8 @@ fn make(inst: &mut Instance, footnote: bool) -> &'static mut View {
         rows: Vec::new(),
         bitmaps: Bitmaps::new(),
         footnote,
+        vp: None,
+        acvps: Vec::new(),
         ddf: Vec::new(),
     }));
     unsafe { WinSetWindowULong(client, QWL_USER, v as u32) };
@@ -187,7 +196,7 @@ fn make(inst: &mut Instance, footnote: bool) -> &'static mut View {
     unsafe { WinSetWindowULong(v.panel, QWL_USER, v as *mut View as u32) };
     // Scroll bars and lists are #8 and #7, entry fields #6, buttons #3.
     v.scroll = child(client, b"#8\0", b"", WS_VISIBLE | 1, ID_SCROLL);
-    if !footnote {
+    if !footnote && parent == HWND_DESKTOP {
         v.list = child(client, b"#7\0", b"", WS_TABSTOP, ID_LIST);
         v.entry = child(client, b"#6\0", b"", WS_TABSTOP | ES_AUTOSCROLL | ES_MARGIN, ID_ENTRY);
         send(v.entry, EM_SETTEXTLIMIT, 128, 0);
@@ -268,6 +277,7 @@ fn go(v: &mut View, mode: Mode, remember: bool) {
     v.top = 0;
     enter(v);
     activate(v);
+    open_auto(v);
 }
 
 /// Set the window up for its mode.
@@ -275,6 +285,21 @@ fn enter(v: &mut View) {
     v.sel = None;
     v.page = None;
     v.ddf.clear();
+    // Another panel: the viewports it opened go (all of them for the
+    // help window's own panel, as IBM's PnlClearAllViewport; else the
+    // dependent ones, PnlClearDependentViewport).
+    if !v.footnote {
+        close_viewports(v.inst(), v.frame, v.vp.is_some());
+    }
+    for f in core::mem::take(&mut v.acvps) {
+        let inst = v.inst();
+        if inst.objcom == f {
+            inst.objcom = 0;
+        }
+        unsafe { WinDestroyWindow(f) };
+    }
+    // The panel's place first: it is laid out for its width.
+    place(v);
     match v.mode.clone() {
         Mode::Panel(_) => {
             relayout(v);
@@ -284,7 +309,7 @@ fn enter(v: &mut View) {
         Mode::Search(q) => fill_search(v, &q),
     }
     place(v);
-    if v.footnote {
+    if v.footnote || v.vp.is_some() {
         let t = z(&panel_title(v.inst(), &v.mode));
         let t = if t.len() > 1 { t } else { z(b"Footnote") };
         unsafe { WinSetWindowText(v.frame, t.as_ptr()) };
@@ -308,6 +333,10 @@ fn back(v: &mut View) {
         v.top = top;
         clamp(v);
         activate(v);
+        open_auto(v);
+    } else if v.vp.is_some() {
+        // A viewport with nothing to go back to closes.
+        unsafe { WinDestroyWindow(v.frame) };
     }
 }
 
@@ -549,7 +578,16 @@ fn fill_search(v: &mut View, q: &[u8]) {
 fn open_selected(v: &mut View) {
     let i = send(v.list, LM_QUERYSELECTION, LIT_FIRST, 0);
     if let Some(&p) = v.rows.get(i as usize) {
-        go(v, Mode::Panel(p), true);
+        // A panel whose heading gives it a window of its own opens in a
+        // viewport over the list.
+        let inst = v.inst();
+        let spec = Spec::of(inst, p, None);
+        if spec.own_window(inst) {
+            close_viewports(inst, v.frame, false);
+            open_viewport(inst, v.frame, p, spec, false);
+        } else {
+            go(v, Mode::Panel(p), true);
+        }
     }
 }
 
@@ -578,13 +616,22 @@ fn place(v: &View) {
     let r = window_rect(v.client);
     let (w, h) = (r.r, r.t);
     let sb = sysval(SV_CXVSCROLL).max(12);
-    let row = if v.footnote { 0 } else { BUTTON_ROW };
+    let row = if v.footnote || v.vp.is_some() { 0 } else { BUTTON_ROW };
     let top = (h - row).max(0);
     let panel_mode = matches!(v.mode, Mode::Panel(_));
     let search = matches!(v.mode, Mode::Search(_));
+    // The help window's own panel goes where its heading's window data
+    // puts it (IBM shows it in a viewport of the help window).
+    let (px, py, pw, ph) = match v.mode {
+        Mode::Panel(p) if v.vp.is_none() && !v.footnote => {
+            let spec = Spec::of(v.inst(), p, None);
+            if spec.size.is_some() { spec_rect(&spec, w, top) } else { (0, 0, w, top) }
+        }
+        _ => (0, 0, w, top),
+    };
     unsafe {
-        WinSetWindowPos(v.panel, 0, 0, row, (w - sb).max(0), top, SWP_MOVE | SWP_SIZE);
-        WinSetWindowPos(v.scroll, 0, w - sb, row, sb, top, SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.panel, 0, px, row + py, (pw - sb).max(0), ph, SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.scroll, 0, px + pw - sb, row + py, sb, ph, SWP_MOVE | SWP_SIZE);
         let ltop = if search { (top - ENTRY_ROW).max(0) } else { top };
         WinSetWindowPos(v.list, 0, 0, BUTTON_ROW, w, ltop, SWP_MOVE | SWP_SIZE);
         WinSetWindowPos(v.entry, 0, 6, BUTTON_ROW + ltop + 4, (w - 12).max(0), ENTRY_ROW - 8, SWP_MOVE | SWP_SIZE);
@@ -606,6 +653,9 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         WM_SIZE => {
             place(v);
+            if v.vp.is_none() && !v.footnote {
+                place_viewports(v.inst());
+            }
             if matches!(v.mode, Mode::Panel(_)) && window_rect(v.panel).r != v.page_width {
                 relayout(v);
             } else {
@@ -673,6 +723,10 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 close_footnote(inst);
                 return 0;
             }
+            if v.vp.is_some() {
+                unsafe { WinDestroyWindow(v.frame) };
+                return 0;
+            }
             let book = inst.book;
             close(inst);
             if book {
@@ -691,6 +745,7 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 if inst.footnote == v.frame {
                     inst.footnote = 0;
                 }
+                inst.viewports.retain(|&f| f != v.frame);
                 drop(alloc::boxed::Box::from_raw(v as *mut View));
             }
             0
@@ -704,6 +759,9 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 extern "C" fn panel_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let Some(v) = view(h) else { return unsafe { WinDefWindowProc(h, msg, mp1, mp2) } };
     match msg {
+        // Help manager messages sent to a panel window (as application-
+        // controlled viewports do) go to the help instance.
+        0x220..=0x24f => send(v.inst().hwnd, msg, mp1, mp2),
         WM_PAINT => {
             let hps = unsafe { WinBeginPaint(h, 0, core::ptr::null_mut()) };
             let r = window_rect(h);
@@ -818,12 +876,17 @@ fn select_link(v: &mut View, d: i32) {
 }
 
 /// Open a link's panel: footnotes (and panels without a contents entry)
-/// in the footnote window, others in the help window.
-fn open(v: &mut View, p: PanelRef, footnote: bool) {
+/// in the footnote window; panels with a window of their own (the link's
+/// data or the panel's TOC entry: origin, size, group) in a viewport;
+/// others in the window of the link.
+fn open(v: &mut View, p: PanelRef, footnote: bool, data: Option<LinkData>) {
     let inst = v.inst();
     let level0 = inst.libs.get(p.lib).and_then(|l| l.doc().toc(p.toc).ok()).is_some_and(|e| e.level() == 0);
+    let spec = Spec::of(inst, p, data);
     if footnote || level0 {
         show_footnote(inst, p);
+    } else if spec.own_window(inst) {
+        open_viewport(inst, v.frame, p, spec, false);
     } else if v.footnote {
         show_panel(inst, p, true);
         close_footnote(inst);
@@ -836,24 +899,24 @@ fn open(v: &mut View, p: PanelRef, footnote: bool) {
 fn follow(v: &mut View, hit: Hit) {
     let (Some(page), Mode::Panel(cur)) = (&v.page, v.mode.clone()) else { return };
     let target = match hit {
-        Hit::Link(l) => page.links.get(l as usize).map(|l| l.target.clone()),
-        Hit::Area(a) => page.areas.get(a).map(|(_, a)| a.target.clone()),
+        Hit::Link(l) => page.links.get(l as usize).map(|l| (l.target.clone(), l.data)),
+        Hit::Area(a) => page.areas.get(a).map(|(_, a)| (a.target.clone(), a.data)),
     };
-    let Some(target) = target else { return };
+    let Some((target, data)) = target else { return };
     let inst = v.inst();
     match target {
-        Target::Panel(t) => open(v, PanelRef { lib: cur.lib, toc: t }, false),
-        Target::Footnote(t) => open(v, PanelRef { lib: cur.lib, toc: t }, true),
+        Target::Panel(t) => open(v, PanelRef { lib: cur.lib, toc: t }, false, data),
+        Target::Footnote(t) => open(v, PanelRef { lib: cur.lib, toc: t }, true, None),
         Target::Res(r) => {
             let p = inst.libs[cur.lib].doc().panel_by_res(r).map(|toc| PanelRef { lib: cur.lib, toc }).or_else(|| inst.panel_by_res(r));
             if let Some(p) = p {
-                open(v, p, false);
+                open(v, p, false, data);
             }
         }
         Target::Name(n) => {
             let p = inst.libs[cur.lib].doc().panel_by_name(n).map(|toc| PanelRef { lib: cur.lib, toc }).or_else(|| inst.panel_by_name(n));
             if let Some(p) = p {
-                open(v, p, false);
+                open(v, p, false, data);
             }
         }
         Target::Inform(r) => {
@@ -877,7 +940,7 @@ fn follow(v: &mut View, hit: Hit) {
                 d.panel_by_name(id)
             };
             if let Some(toc) = toc {
-                open(v, PanelRef { lib, toc }, false);
+                open(v, PanelRef { lib, toc }, false, data);
             }
         }
     }
@@ -911,4 +974,265 @@ fn launch(cmd: &[u8]) {
     let mut res = os2::dos::ResultCodes { code_terminate: 0, code_result: 0 };
     // EXEC_ASYNC.
     unsafe { os2::dos::DosExecPgm(core::ptr::null_mut(), 0, 1, a.as_ptr(), core::ptr::null(), &mut res, p.as_ptr()) };
+}
+
+// ---- Viewports: panels in windows of their own ----
+
+/// Where a viewport goes and what it is: from the link's data, else the
+/// panel's TOC entry (`units, x, y` each; IBM's PnlGetExtLnkData).
+#[derive(Clone, Copy, Default)]
+struct Spec {
+    origin: Option<(u8, u16, u16)>,
+    size: Option<(u8, u16, u16)>,
+    group: Option<u16>,
+    /// The link asks for a window of its own (0x80) or is `auto`.
+    viewport: bool,
+    dependent: bool,
+}
+
+impl Spec {
+    fn of(inst: &Instance, p: PanelRef, data: Option<LinkData>) -> Spec {
+        let e = inst.libs.get(p.lib).and_then(|l| l.doc().toc(p.toc).ok()).unwrap_or_default();
+        let c = |w: ipf::WinCoord| (w.units, w.x, w.y);
+        let d = data.unwrap_or_default();
+        Spec {
+            origin: d.origin.or(e.origin.map(c)),
+            size: d.size.or(e.size.map(c)),
+            group: d.group.or(e.group),
+            viewport: d.flags & 0xc0 != 0,
+            dependent: d.flags & 0x200 != 0,
+        }
+    }
+
+    /// Does the panel open in a viewport? It has a size (a place alone
+    /// keeps the window's size: the whole help window), its group's
+    /// viewport is open, or the link asks for one.
+    fn own_window(&self, inst: &Instance) -> bool {
+        self.viewport || self.size.is_some_and(|s| s.1 != 0xffff || s.2 != 0xffff) || self.group.is_some_and(|g| find_group(inst, g).is_some())
+    }
+}
+
+/// One coordinate of a viewport in pixels (IBM's PnlConvertCord): `v` in
+/// `units`; `extent` the window's width or height, `size` the
+/// viewport's (for origins), `unit` the character size.
+fn coord(units: u8, v: u16, extent: i32, size: i32, unit: i32, is_size: bool) -> i32 {
+    let v = v as i32;
+    match units & 0xf {
+        0 => v * unit,
+        1 => (extent * v + 50) / 100,
+        2 => v,
+        // Points, at 96 dpi.
+        3 => v * 96 / 72,
+        4 if !is_size => match v {
+            2 | 4 => extent - size.min(extent),
+            0x10 => (extent - size.min(extent)) / 2,
+            _ => 0,
+        },
+        _ => extent,
+    }
+}
+
+/// The viewport's rectangle (x, y, cx, cy) in an area of `w` by `h`
+/// (IBM's PnlConvertUnit and PnlCalcViewPortSize; a missing or 0xFFFF
+/// value is the area's).
+fn spec_rect(spec: &Spec, w: i32, h: i32) -> (i32, i32, i32, i32) {
+    let font = crate::render::char_size();
+    let (cw, ch) = (font.0.max(1), font.1.max(1));
+    let size = spec.size.unwrap_or((2, 0xffff, 0xffff));
+    let origin = spec.origin.unwrap_or((2, 0xffff, 0xffff));
+    let cx = if size.1 == 0xffff { w } else { coord(size.0 >> 4, size.1, w, 0, cw, true) }.clamp(16, w.max(16));
+    let cy = if size.2 == 0xffff { h } else { coord(size.0, size.2, h, 0, ch, true) }.clamp(16, h.max(16));
+    let x = if origin.1 == 0xffff { 0 } else { coord(origin.0 >> 4, origin.1, w, cx, cw, false) };
+    let y = if origin.2 == 0xffff { 0 } else { coord(origin.0, origin.2, h, cy, ch, false) };
+    let x = if x + cx > w { (w - cx).max(0) } else { x.max(0) };
+    let y = if y + cy > h { (h - cy).max(0) } else { y.max(0) };
+    (x, y, cx, cy)
+}
+
+/// HM_QUERY: a window of the help manager (HMQW_*).
+pub fn query(inst: &Instance, what: u16, lo: u16, mp2: u32) -> u32 {
+    let _ = mp2;
+    match what {
+        1 | 3 => inst.frame,
+        5 | 7 => inst.viewports.iter().copied().find(|&f| {
+            vp_view(f).is_some_and(|v| matches!(v.mode, Mode::Panel(p) if inst.libs.get(p.lib).and_then(|l| l.doc().res_of_panel(p.toc)) == Some(lo)))
+        }).unwrap_or(0),
+        8 => inst.objcom,
+        9 => inst.hwnd,
+        10 => {
+            let f = unsafe { WinQueryFocus(HWND_DESKTOP) };
+            inst.viewports.iter().copied().find(|&v| is_inside(f, v)).unwrap_or(inst.frame)
+        }
+        0xf1 => find_group(inst, lo).unwrap_or(0),
+        _ => 0,
+    }
+}
+
+/// The viewport showing group `g`.
+fn find_group(inst: &Instance, g: u16) -> Option<u32> {
+    inst.viewports.iter().copied().find(|&f| vp_view(f).is_some_and(|v| v.vp.as_ref().is_some_and(|p| p.group == Some(g))))
+}
+
+fn vp_view(frame: u32) -> Option<&'static mut View> {
+    view(unsafe { WinWindowFromID(frame, FID_CLIENT) })
+}
+
+/// The help window's area for viewports (its client above the buttons).
+fn vp_area(inst: &Instance) -> (i32, i32) {
+    let Some(m) = view_of(inst) else { return (0, 0) };
+    let r = window_rect(m.client);
+    (r.r, (r.t - BUTTON_ROW).max(0))
+}
+
+/// Show panel `p` in a viewport of the help window: its group's, or a
+/// new one placed by `spec`; `from` is the frame it is opened from.
+fn open_viewport(inst: &mut Instance, from: u32, p: PanelRef, spec: Spec, auto: bool) {
+    let main = ensure(inst);
+    let parent = main.client;
+    let v = match spec.group.and_then(|g| find_group(inst, g)).and_then(vp_view) {
+        Some(v) => v,
+        None => {
+            let v = make(inst, false, parent);
+            inst.viewports.push(v.frame);
+            v
+        }
+    };
+    v.vp = Some(Viewport { group: spec.group, parent: from, dependent: spec.dependent || auto, spec });
+    let (w, h) = vp_area(inst);
+    let (x, y, cx, cy) = spec_rect(&spec, w, h);
+    unsafe { WinSetWindowPos(v.frame, HWND_TOP, x, y + BUTTON_ROW, cx, cy, SWP_SIZE | SWP_MOVE | SWP_SHOW | SWP_ZORDER) };
+    v.history.clear();
+    v.mode = Mode::Panel(p);
+    v.top = 0;
+    enter(v);
+    if !auto {
+        activate(v);
+    }
+    open_auto(v);
+}
+
+/// Viewports follow the help window's size (IBM's
+/// SetChildViewportPosition).
+fn place_viewports(inst: &mut Instance) {
+    let (w, h) = vp_area(inst);
+    for &f in inst.viewports.clone().iter() {
+        if let Some(v) = vp_view(f) {
+            let Some(vp) = &v.vp else { continue };
+            let (x, y, cx, cy) = spec_rect(&vp.spec, w, h);
+            unsafe { WinSetWindowPos(f, 0, x, y + BUTTON_ROW, cx, cy, SWP_SIZE | SWP_MOVE) };
+        }
+    }
+}
+
+/// Close the viewports opened from `frame` (only the dependent ones if
+/// `dependent`), and theirs.
+fn close_viewports(inst: &mut Instance, frame: u32, dependent: bool) {
+    let main = inst.frame == frame;
+    for f in inst.viewports.clone() {
+        let Some(v) = vp_view(f) else { continue };
+        let Some(vp) = &v.vp else { continue };
+        if (main || vp.parent == frame) && (!dependent || vp.dependent) {
+            unsafe { WinDestroyWindow(f) };
+        }
+    }
+}
+
+/// The page's automatic links (`auto`): panels open in viewports, inform
+/// links tell the application, launch links start their program (IBM's
+/// PnlOpenAutoViewports).
+fn open_auto(v: &mut View) {
+    start_acvps(v);
+    let (Some(page), Mode::Panel(cur)) = (&v.page, v.mode.clone()) else { return };
+    let autos: Vec<(Target<'static>, Option<LinkData>)> = page.auto.iter().map(|l| (l.target.clone(), l.data)).collect();
+    let inst = v.inst();
+    let from = v.frame;
+    for (t, data) in autos {
+        let p = match t {
+            Target::Panel(t) | Target::Footnote(t) => Some(PanelRef { lib: cur.lib, toc: t }),
+            Target::Res(r) => inst.libs[cur.lib].doc().panel_by_res(r).map(|toc| PanelRef { lib: cur.lib, toc }),
+            Target::Name(n) => inst.libs[cur.lib].doc().panel_by_name(n).map(|toc| PanelRef { lib: cur.lib, toc }),
+            Target::Inform(r) => {
+                if inst.app_window() != 0 {
+                    post(inst.app_window(), HM_INFORM, r as u32, from);
+                }
+                None
+            }
+            Target::Launch(cmd) => {
+                launch(cmd);
+                None
+            }
+            Target::External { .. } => None,
+        };
+        if let Some(p) = p {
+            let mut spec = Spec::of(inst, p, data);
+            spec.viewport = true;
+            open_viewport(inst, from, p, spec, true);
+        }
+    }
+}
+
+/// A viewport's settings.
+struct Viewport {
+    group: Option<u16>,
+    /// The frame it was opened from.
+    parent: u32,
+    dependent: bool,
+    spec: Spec,
+}
+
+/// ACVP: what an application-controlled viewport's procedure gets.
+#[repr(C)]
+struct Acvp {
+    cb: u32,
+    hab: u32,
+    hmq: u32,
+    objid: u32,
+    parent: u32,
+    owner: u32,
+    /// The procedure's frame window.
+    acvp: u32,
+}
+
+/// Start the page's application-controlled viewports (IBM's
+/// MscStartObject): load the DLL, call `name(PACVP, objectinfo)`, which
+/// makes a frame in the panel window, and place that frame.
+fn start_acvps(v: &mut View) {
+    let Some(page) = &v.page else { return };
+    let list: Vec<ipf::text::AcViewport<'static>> = page.acvps.clone();
+    let inst = v.inst();
+    for a in list {
+        let mut hmod = 0u32;
+        let dll = z(a.dll);
+        if a.dll.is_empty() || unsafe { os2::dos::DosLoadModule(core::ptr::null_mut(), 0, dll.as_ptr(), &mut hmod) } != 0 {
+            post(inst.app_window(), crate::HM_ERROR, crate::HMERR_LOAD_DLL, 0);
+            continue;
+        }
+        let name = z(a.name);
+        let mut pfn = 0usize;
+        if unsafe { os2::dos::DosQueryProcAddr(hmod, 0, name.as_ptr(), &mut pfn) } != 0 || pfn == 0 {
+            post(inst.app_window(), crate::HM_ERROR, crate::HMERR_LOAD_DLL, 0);
+            continue;
+        }
+        let mut acvp = Acvp {
+            cb: core::mem::size_of::<Acvp>() as u32,
+            hab: inst.hab,
+            hmq: unsafe { WinQueryWindowULong(v.frame, QWL_HMQ) },
+            objid: a.objid as u32,
+            parent: v.panel,
+            owner: v.panel,
+            acvp: 0,
+        };
+        let info = z(a.info);
+        let f: extern "C" fn(*mut Acvp, *const u8) -> u32 = unsafe { core::mem::transmute(pfn) };
+        f(&mut acvp, info.as_ptr());
+        if acvp.acvp == 0 {
+            continue;
+        }
+        let d = a.data.unwrap_or_default();
+        let spec = Spec { origin: d.origin, size: d.size, ..Spec::default() };
+        let r = window_rect(v.panel);
+        let (x, y, cx, cy) = spec_rect(&spec, r.r, r.t);
+        unsafe { WinSetWindowPos(acvp.acvp, HWND_TOP, x, y, cx, cy, SWP_SIZE | SWP_MOVE | SWP_SHOW | SWP_ZORDER) };
+        v.acvps.push(acvp.acvp);
+    }
 }

@@ -64,6 +64,15 @@ impl Metrics for Gpi {
     }
 }
 
+/// The system font's average character width and line height (the
+/// character unit of viewport sizes).
+pub fn char_size() -> (i32, i32) {
+    let hps = unsafe { WinGetPS(HWND_DESKTOP) };
+    let m = Gpi::new(hps).system();
+    unsafe { WinReleasePS(hps) };
+    (m.space, m.height)
+}
+
 /// PM colour for a help file colour index (0: `default`).
 pub fn colour(index: u8, default: i32) -> i32 {
     match index & 0x0f {

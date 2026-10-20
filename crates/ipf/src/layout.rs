@@ -16,7 +16,7 @@
 //! two spaces while autospacing, which is how sentences end.
 
 use crate::bitmap;
-use crate::text::{decode, Area, Item, LinkData, Target};
+use crate::text::{decode, AcViewport, Area, Item, LinkData, Target};
 use crate::Doc;
 use alloc::vec::Vec;
 
@@ -96,6 +96,8 @@ pub struct Page<'a> {
     pub areas: Vec<(usize, Area<'a>)>,
     /// Links that open by themselves (`auto`), in order.
     pub auto: Vec<Link<'a>>,
+    /// Application-controlled viewports (`:acviewport.`).
+    pub acvps: Vec<AcViewport<'a>>,
     /// Height of the text and widest x reached.
     pub height: i32,
     pub width: i32,
@@ -643,6 +645,7 @@ fn step<'a>(
                 }
             }
         }
+        Item::AcViewport(a) => page.acvps.push(a.clone()),
         Item::HideBegin(key) => {
             if !key_listed(opts.keys, key) {
                 s.hiding = true;
