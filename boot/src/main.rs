@@ -361,6 +361,43 @@ fn setup_framebuffer(want: Option<(u32, u32)>) -> Framebuffer {
     fb
 }
 
+/// Wait a moment for T (a text-mode boot: the command prompt instead of
+/// the desktop), which adds "textmode" to the kernel command line.
+/// "bootwait=MS" on the command line sets the wait (0: none).
+fn boot_key(info: &mut BootInfo) {
+    let cmd = info.cmdline();
+    let ms = cmd.split_whitespace().find_map(|w| w.strip_prefix("bootwait=")).and_then(|v| v.parse::<usize>().ok()).unwrap_or(1000);
+    if ms == 0 || cmd.split_whitespace().any(|w| w == "textmode") {
+        return;
+    }
+    let input = st().con_in;
+    if input.is_null() {
+        return;
+    }
+    println!("Press T for a text-mode boot (a command prompt instead of the desktop).");
+    let mut text = false;
+    for _ in 0..ms.div_ceil(20) {
+        let mut k = efi::InputKey::default();
+        while unsafe { ((*input).read_key_stroke)(input, &mut k) } == 0 {
+            if k.unicode_char == b't' as u16 || k.unicode_char == b'T' as u16 {
+                text = true;
+            }
+        }
+        if text {
+            break;
+        }
+        (bs().stall)(20_000);
+    }
+    if text {
+        println!("  text-mode boot");
+        let n = info.cmdline.iter().position(|&b| b == 0).unwrap_or(info.cmdline.len());
+        let add = if n == 0 { &b"textmode"[..] } else { b" textmode" };
+        if n + add.len() < info.cmdline.len() {
+            info.cmdline[n..n + add.len()].copy_from_slice(add);
+        }
+    }
+}
+
 #[unsafe(no_mangle)]
 pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -> Status {
     unsafe { ST = system_table };
@@ -398,6 +435,7 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
             *d = if s == b'\r' || s == b'\n' { b' ' } else { s };
         }
     }
+    boot_key(info);
     load_modules(&root, info);
     info.rsdp = find_rsdp();
     info.boot_device = boot_dev;

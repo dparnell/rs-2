@@ -1,0 +1,11 @@
+[package]
+name = "rs2shell"
+description = "RS2SHELL.EXE: rs2's desktop shell (desktop, folders, drives, program objects, shutdown)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+gpi = { path = "../../crates/gpi" }
+pmwin = { path = "../../crates/pmwin" }

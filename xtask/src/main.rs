@@ -131,6 +131,9 @@ struct Opts {
     hostfwd: Vec<String>,
     /// Directory QEMU's user network serves by TFTP (10.0.2.2).
     tftp: Option<String>,
+    /// Boot into the desktop shell (init=OS2\\RS2SHELL.EXE instead of
+    /// work/cmdline.txt's init=).
+    desktop: bool,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -176,6 +179,7 @@ fn parse(args: &[String]) -> Opts {
         net: None,
         hostfwd: vec![],
         tftp: None,
+        desktop: false,
     };
     let mut i = 0;
     while i < args.len() {
@@ -276,6 +280,13 @@ fn parse(args: &[String]) -> Opts {
                 i += 1;
                 o.typing = Some(args[i].replace("\\n", "\n"));
             }
+            // The keys from a file (line ends are not typed; "\n" is Enter).
+            "--type-file" => {
+                i += 1;
+                let t = std::fs::read_to_string(&args[i]).expect("--type-file");
+                o.typing = Some(t.lines().collect::<String>().replace("\\n", "\n"));
+            }
+            "--desktop" => o.desktop = true,
             "--monitor" => {
                 i += 1;
                 o.monitor = Some(args[i].clone());
@@ -377,7 +388,17 @@ fn build(o: &Opts) -> Option<PathBuf> {
     copy(&kernel.join("rs2-kernel"), &esp.join("RS2/KERNEL"));
     strip(&esp.join("RS2/KERNEL"));
     let cmdline = root().join("work/cmdline.txt");
-    if cmdline.exists() && !o.dist {
+    if o.desktop && !o.dist {
+        let old = std::fs::read_to_string(&cmdline).unwrap_or_default();
+        let mut words: Vec<&str> = old.split_whitespace().filter(|w| !w.starts_with("init=")).collect();
+        // The kernel takes the arguments after " -- " for init=.
+        if let Some(i) = words.iter().position(|&w| w == "--") {
+            words.truncate(i);
+        }
+        words.push("init=OS2\\RS2SHELL.EXE");
+        std::fs::create_dir_all(esp.join("RS2")).unwrap();
+        std::fs::write(esp.join("RS2/CMDLINE"), words.join(" ")).unwrap();
+    } else if cmdline.exists() && !o.dist {
         copy(&cmdline, &esp.join("RS2/CMDLINE"));
     }
     // rs2 user programs (Rust, i686) converted to LX.
@@ -426,6 +447,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmhang", "RS2\\PMHANG.EXE"),
         ("pmbusy", "RS2\\PMBUSY.EXE"),
         ("pmviowin", "OS2\\PMVIOWIN.EXE"),
+        ("rs2shell", "OS2\\RS2SHELL.EXE"),
         ("pmctls", "OS2\\DLL\\PMCTLS.DLL"),
         ("helpmgr", "OS2\\DLL\\HELPMGR.DLL"),
         ("label", "OS2\\LABEL.EXE"),
@@ -453,7 +475,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
     ];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin"];
+const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {

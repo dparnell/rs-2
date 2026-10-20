@@ -8,4 +8,9 @@ SET COMSPEC=C:\OS2\CMD.EXE
 SET OS2_SHELL=C:\OS2\CMD.EXE
 REM PM: milliseconds before a program that does not take its input is "not responding"
 SET PM_HANGTIME=2000
-PROTSHELL=C:\OS2\CMD.EXE
+REM The shell: the desktop (Presentation Manager with RS2SHELL). For the
+REM text-mode command prompt instead, put REM before the first PROTSHELL
+REM line and remove it from the second. Pressing T while the boot loader
+REM waits, or "textmode" in \RS2\CMDLINE, also boots to the command prompt.
+PROTSHELL=C:\OS2\RS2SHELL.EXE
+REM PROTSHELL=C:\OS2\CMD.EXE

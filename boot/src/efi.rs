@@ -46,7 +46,7 @@ pub struct SystemTable {
     pub firmware_vendor: *const u16,
     pub firmware_revision: u32,
     pub console_in_handle: Handle,
-    pub con_in: *mut c_void,
+    pub con_in: *mut TextInput,
     pub console_out_handle: Handle,
     pub con_out: *mut TextOutput,
     pub stderr_handle: Handle,
@@ -61,6 +61,20 @@ pub struct SystemTable {
 pub struct ConfigTable {
     pub guid: Guid,
     pub table: *const c_void,
+}
+
+/// EFI_SIMPLE_TEXT_INPUT_PROTOCOL
+#[repr(C)]
+pub struct TextInput {
+    pub reset: extern "efiapi" fn(*mut TextInput, bool) -> Status,
+    pub read_key_stroke: extern "efiapi" fn(*mut TextInput, *mut InputKey) -> Status,
+}
+
+#[repr(C)]
+#[derive(Default)]
+pub struct InputKey {
+    pub scan_code: u16,
+    pub unicode_char: u16,
 }
 
 #[repr(C)]

@@ -176,11 +176,18 @@ pub mod boot {
         }
         let init = cmdline.split_whitespace().find_map(|w| w.strip_prefix("init="));
         let args = cmdline.split_once(" -- ").map_or("", |(_, a)| a);
+        // "textmode" (the boot loader adds it when T is pressed) boots to
+        // the command prompt (OS2_SHELL) instead of PROTSHELL's desktop.
+        let textmode = cmdline.split_whitespace().any(|w| w.eq_ignore_ascii_case("textmode"));
+        let os2_shell = env.iter().find_map(|e| e.strip_prefix("OS2_SHELL=")).map(|s| s.to_string());
         let shell = match (init, &cfg.protshell) {
             (Some(i), _) => (i.to_string(), args.to_string()),
-            (None, Some(p)) => p.clone(),
-            (None, None) => ("CMD.EXE".to_string(), String::new()),
+            (None, Some(p)) if !textmode => p.clone(),
+            (None, _) => (os2_shell.unwrap_or_else(|| "CMD.EXE".to_string()), String::new()),
         };
+        if textmode {
+            crate::println!("boot: text mode (textmode): shell {}", shell.0);
+        }
         let shell_path = find_program(&shell.0);
         if !env.iter().any(|e| e.starts_with("COMSPEC=")) {
             env.push(alloc::format!("COMSPEC={shell_path}"));
