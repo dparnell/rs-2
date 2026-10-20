@@ -213,6 +213,17 @@ fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
 
 /// Show and activate the window.
 fn activate(v: &View) {
+    activate_now(v);
+    // Again once the current message is done: a request from an
+    // application's menu ends menu mode and reactivates its frame after
+    // the help manager has shown the window.
+    post(v.client, WM_ACTIVATE_LATER, 0, 0);
+}
+
+/// Posted by activate().
+const WM_ACTIVATE_LATER: u32 = 0x1000 + 0x31;
+
+fn activate_now(v: &View) {
     unsafe {
         WinSetWindowPos(v.frame, HWND_TOP, 0, 0, 0, 0, SWP_SHOW | SWP_ZORDER | SWP_ACTIVATE);
         WinSetFocus(HWND_DESKTOP, if matches!(v.mode, Mode::Panel(_)) { v.panel } else if matches!(v.mode, Mode::Search(_)) { v.entry } else { v.list });
@@ -681,6 +692,10 @@ fn client_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 WinFillRect(hps, &r, SYSCLR_HELPBACKGROUND);
                 WinEndPaint(hps);
             }
+            0
+        }
+        WM_ACTIVATE_LATER => {
+            activate_now(v);
             0
         }
         WM_COMMAND => {
