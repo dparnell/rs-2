@@ -980,6 +980,14 @@ pub extern "C" fn WinSetWindowULong(h: u32, index: i32, v: u32) -> u32 {
     word_set(h, index, v, 4) as u32
 }
 
+/// WinSetWindowBits(hwnd, index, data, mask): set the masked bits of a
+/// window word to those of `data`.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetWindowBits(h: u32, index: i32, data: u32, mask: u32) -> u32 {
+    let Some(old) = word_get(h, index) else { return 0 };
+    word_set(h, index, (old & !mask) | (data & mask), 4) as u32
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowPtr(h: u32, index: i32) -> u32 {
     word_get(h, index).unwrap_or(0)

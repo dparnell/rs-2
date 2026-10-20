@@ -1,0 +1,14 @@
+[package]
+name = "uconv-dll"
+description = "UCONV.DLL: conversion between code pages and UCS-2 (rs2's single-byte code page tables)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "uconv"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+uls = { path = "../../crates/uls" }

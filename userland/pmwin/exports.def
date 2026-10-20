@@ -385,6 +385,7 @@ WinQueryWindowText=__a_WinQueryWindowText @841
 WinQueryWindowTextLength=__a_WinQueryWindowTextLength @842
 WinQueryWindowULong=__a_WinQueryWindowULong @843
 WinSetWindowULong=__a_WinSetWindowULong @878
+WinSetWindowBits=__a_WinSetWindowBits @874
 WinQueryWindowPtr=__a_WinQueryWindowPtr @839
 WinSetWindowPtr=__a_WinSetWindowPtr @876
 WinQueryWindowUShort=__a_WinQueryWindowUShort @844

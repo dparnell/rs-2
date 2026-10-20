@@ -497,6 +497,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmmerge", "OS2\\DLL\\PMMERGE.DLL"),
         ("pmwp", "OS2\\DLL\\PMWP.DLL"),
         ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
+        ("uconv", "OS2\\DLL\\UCONV.DLL"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
@@ -724,15 +725,16 @@ fn net_devices(o: &Opts, c: &mut Command) {
     c.arg("-device").arg(format!("{model},netdev=n0{legacy}"));
 }
 
-/// work/NAME, or a socket in the temporary folder named after the work
-/// folder when that path is too long for a Unix socket (deep worktrees).
+/// A QEMU socket in work/, or in the temporary directory (named after
+/// work/'s path) when that path is too long for a Unix socket (deep
+/// checkouts such as git worktrees).
 fn socket_path(work: &Path, name: &str) -> PathBuf {
     let p = work.join(name);
     if p.as_os_str().len() < 100 {
         return p;
     }
-    let h = work.to_string_lossy().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
-    PathBuf::from("/tmp").join(format!("rs2-{h:016x}-{name}"))
+    let hash = work.to_string_lossy().bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3));
+    std::env::temp_dir().join(format!("rs2-{hash:016x}-{name}"))
 }
 
 fn run(o: &Opts) -> bool {
