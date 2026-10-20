@@ -107,11 +107,17 @@ display the kernel's driver always takes over and sets any size: the
 `video=` one, else the firmware's mode, else the display's preferred
 size.
 
-- **VMware**: choose UEFI firmware. The VMware pointer (vmmouse) follows
-  the host cursor without capturing it; the boot log shows "mouse: VMware
-  absolute pointer". Not tested on real VMware yet (only on QEMU's
-  VMware models: `cargo xtask run --vmware --pvscsi IMG --pvscsi-cd ISO`,
-  `--scsi-hba mptsas1068`).
+- **VMware** (Workstation/ESXi on x86; Fusion on Apple Silicon only runs
+  ARM guests): guest OS type **Other 64-bit** with UEFI firmware and
+  Secure Boot off; with other guest types VMware's firmware reports "No
+  compatible bootloader found". The VMware pointer (vmmouse) follows the
+  host cursor without capturing it; the boot log shows "mouse: VMware
+  absolute pointer". The live ISO boots on VMware Workstation 17; QEMU's
+  VMware models (`cargo xtask run --vmware --pvscsi IMG --pvscsi-cd ISO`,
+  `--scsi-hba mptsas1068`) are what the tests use.
+- **Proxmox**: BIOS OVMF (UEFI) with "Pre-Enroll keys" unticked (Secure
+  Boot off); VirtIO SCSI, VirtIO Block or SATA disks; VirtIO or E1000
+  network. The live ISO and installed systems run there.
 - **VirtualBox**: enable EFI; use SATA or NVMe disks (VirtualBox's LSI
   Logic controllers use the same MPT interface and may work too). The
   mouse works in relative (captured) mode: VirtualBox's absolute pointer

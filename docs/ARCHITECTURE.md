@@ -169,6 +169,15 @@ other. Alt+Home moves the session between its window and the full
 screen. While a text session has the screen, PM draws into a shadow
 buffer. See [PM.md](PM.md#windowed-vio-sessions-os2-window).
 
+**Debugging a wedged system.** Ctrl+Alt+F12 (QEMU: `--type '{ctrl-alt-f12}'`)
+prints to the serial port the device interrupt counts, every process's
+threads with their state, priority, last user-mode address and the
+kernel return addresses on their stacks, and then (through an IPI) where
+each CPU is. Symbolise the addresses against the kernel ELF
+(`target/x86_64-unknown-none/{debug,release}/rs2-kernel`, e.g. with
+`llvm-nm -n`). Locks are only tried, so the dump works when something
+holds them.
+
 ## Boot
 
 1. UEFI firmware loads `\EFI\BOOT\BOOTX64.EFI` (`boot/`, Rust, `x86_64-unknown-uefi`).
