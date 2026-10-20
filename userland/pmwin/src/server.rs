@@ -405,6 +405,7 @@ pub fn process_gone(p: u32) {
         }
     }
     s.objects.remove(&p);
+    s.switch.process_gone(p);
     pointer::process_gone(p);
     let s = st();
     for slot in s.accels.iter_mut() {
@@ -473,6 +474,8 @@ enum Entry {
     Session(u32),
     /// Start a command prompt in a window (true) or full screen.
     Prompt(bool),
+    /// A switch list entry without a frame of its own in the list.
+    Switch(u32),
 }
 
 /// The window list's lines (server process only).
@@ -538,15 +541,39 @@ fn open_window_list() {
     }
     let l = listed();
     l.clear();
-    for f in frames {
+    // Frames in z-order, by their switch entry's title if they have one
+    // (not those whose entry is SWL_INVISIBLE); then the other visible
+    // switch entries of programs.
+    for &f in &frames {
+        let entry = st().switch.of_window(f).map(crate::switch::current);
+        if entry.is_some_and(|c| c.visibility & crate::switch::SWL_INVISIBLE != 0) {
+            continue;
+        }
         let hung = st().is_hung(f);
-        let mut t = frame_title(f);
+        let mut t = match &entry {
+            Some(c) if !crate::switch::title(c).is_empty() => crate::switch::title(c).to_vec(),
+            _ => frame_title(f),
+        };
         if hung {
             t.extend_from_slice(b" (not responding)");
         }
         t.push(0);
         msg::send(lb, 0x0161, (-1i32) as u32, t.as_ptr() as u32);
         l.push(Entry::Frame(f));
+    }
+    let others: Vec<(u32, Vec<u8>)> = st()
+        .switch
+        .entries
+        .iter()
+        .map(|e| (e.handle, crate::switch::current(e)))
+        .filter(|(_, c)| c.visibility & crate::switch::SWL_INVISIBLE == 0 && c.pid != me && !frames.contains(&c.hwnd) && !fullscreen.contains(&c.hwnd))
+        .filter(|(_, c)| st().desk.exists(c.hwnd) && !crate::switch::title(c).is_empty())
+        .map(|(h, c)| (h, crate::switch::title(&c).to_vec()))
+        .collect();
+    for (h, mut t) in others {
+        t.push(0);
+        msg::send(lb, 0x0161, (-1i32) as u32, t.as_ptr() as u32);
+        l.push(Entry::Switch(h));
     }
     for v in sessions {
         let n = v.title.iter().position(|&b| b == 0).unwrap_or(64);
@@ -591,14 +618,30 @@ fn chosen(client: u32) -> Option<Entry> {
     listed().get(i as usize).copied().filter(|e| !matches!(e, Entry::Frame(f) if !st().desk.exists(*f)))
 }
 
+/// Bring a window (its frame) to the front: shown, restored, active.
+pub fn switch_to_window(h: u32) {
+    let mut f = h;
+    while f != 0 && !frame::is_frame(f) {
+        f = st().desk.get(f).map_or(0, |w| if w.parent != HWND_DESKTOP { w.parent } else { 0 });
+    }
+    let f = if f != 0 { f } else { h };
+    if !st().desk.exists(f) {
+        return;
+    }
+    win::show(f, true);
+    if frame::is_minimized(f) {
+        frame::restore(f);
+    }
+    win::activate(f);
+}
+
 fn switch_to(e: Option<Entry>) {
     match e {
-        Some(Entry::Frame(f)) => {
-            win::show(f, true);
-            if frame::is_minimized(f) {
-                frame::restore(f);
+        Some(Entry::Frame(f)) => switch_to_window(f),
+        Some(Entry::Switch(h)) => {
+            if let Some(w) = st().switch.get(h).map(|e| e.ctl.hwnd) {
+                switch_to_window(w);
             }
-            win::activate(f);
         }
         Some(Entry::Session(sid)) => {
             lock::unlocked(|| unsafe { Rs2VioControl(sid, 4, 0) });
@@ -635,6 +678,10 @@ fn start_prompt(window: bool) {
 fn end_task(e: Option<Entry>) {
     let f = match e {
         Some(Entry::Frame(f)) => f,
+        Some(Entry::Switch(h)) => match st().switch.get(h).map(|e| e.ctl.hwnd) {
+            Some(w) if st().desk.exists(w) => w,
+            _ => return,
+        },
         Some(Entry::Session(sid)) => {
             lock::unlocked(|| unsafe { Rs2VioControl(sid, 3, 0) });
             return;

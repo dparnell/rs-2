@@ -26,6 +26,7 @@ extern crate os2;
 mod exports;
 mod prf;
 mod proglist;
+mod switch;
 
 use alloc::vec::Vec;
 
@@ -306,7 +307,7 @@ unsafe extern "C" {
 
 /// A PMWIN entry point when the process uses PM (PMSHAPI is also loaded
 /// by text programs, which must not pull PMWIN in).
-fn pmwin(ordinal: u32) -> Option<usize> {
+pub(crate) fn pmwin(ordinal: u32) -> Option<usize> {
     let mut hmod = 0;
     if unsafe { os2::DosQueryModuleHandle(b"PMWIN\0".as_ptr(), &mut hmod) } != 0 {
         return None;

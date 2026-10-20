@@ -17,10 +17,14 @@ PrfReset @5091
 PrfWriteProfileData @5092
 PrfWriteProfileString @5093
 WinAddAtom @5111
+WinAddSwitchEntry @5112
 WinAlarm @5113
+WinBeginEnumWindows @5114
 WinBeginPaint @5115
 WinBroadcastMsg @5116
+WinCalcFrameRect @5118
 WinCancelShutdown @5121
+WinChangeSwitchEntry @5122
 WinCloseClipbrd @5124
 WinCompareStrings @5125
 WinCopyAccelTable @5126
@@ -33,6 +37,7 @@ WinCreateMsgQueue @5136
 WinCreatePointer @5137
 WinCreatePointerIndirect @5138
 WinCreateStdWindow @5139
+WinCreateSwitchEntry @5140
 WinCreateWindow @5141
 WinDefDlgProc @5146
 WinDefWindowProc @5147
@@ -46,11 +51,13 @@ WinDismissDlg @5157
 WinDispatchMsg @5158
 WinDlgBox @5159
 WinDrawBitmap @5160
+WinDrawBorder @5161
 WinDrawPointer @5162
 WinDrawText @5163
 WinEmptyClipbrd @5164
 WinEnableWindow @5166
 WinEnableWindowUpdate @5167
+WinEndEnumWindows @5168
 WinEndPaint @5169
 WinEnumClipbrdFmts @5171
 WinEnumDlgItem @5172
@@ -62,10 +69,13 @@ WinFocusChange @5179
 WinFreeErrorInfo @5180
 WinGetCurrentTime @5182
 WinGetErrorInfo @5185
+WinGetKeyState @5188
 WinGetLastError @5189
 WinGetMsg @5192
+WinGetNextWindow @5193
 WinGetPS @5195
 WinGetScreenPS @5196
+WinGetSysBitmap @5197
 WinInflateRect @5200
 WinInitialize @5201
 WinIntersectRect @5203
@@ -107,6 +117,7 @@ WinQueryAtomName @5254
 WinQueryAtomUsage @5255
 WinQueryCapture @5256
 WinQueryClassInfo @5257
+WinQueryClassName @5258
 WinQueryClipbrdData @5260
 WinQueryClipbrdFmtInfo @5261
 WinQueryClipbrdOwner @5262
@@ -125,6 +136,9 @@ WinQueryPointerInfo @5278
 WinQueryPointerPos @5279
 WinQueryPresParam @5280
 WinQueryQueueStatus @5283
+WinQuerySwitchEntry @5286
+WinQuerySwitchHandle @5287
+WinQuerySwitchList @5288
 WinQuerySysColor @5289
 WinQuerySysPointer @5291
 WinQuerySysPointerData @5292
@@ -150,6 +164,7 @@ WinRegisterClass @5315
 WinReleaseHook @5321
 WinReleasePS @5322
 WinRemovePresParam @5323
+WinRemoveSwitchEntry @5324
 WinRequestMutexSem @5326
 WinScrollWindow @5328
 WinSendDlgItemMsg @5333
@@ -184,6 +199,7 @@ WinStartTimer @5386
 WinStopTimer @5387
 WinSubclassWindow @5389
 WinSubtractRect @5391
+WinSwitchToProgram @5393
 WinTerminate @5396
 WinTrackRect @5399
 WinTranslateAccel @5401

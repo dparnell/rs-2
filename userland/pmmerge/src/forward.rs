@@ -21,10 +21,14 @@ forward! {
     PrfWriteProfileData = "PMSHAPI.118";
     PrfWriteProfileString = "PMSHAPI.116";
     WinAddAtom = "PMWIN.700";
+    WinAddSwitchEntry = "PMSHAPI.120";
     WinAlarm = "PMWIN.701";
+    WinBeginEnumWindows = "PMWIN.702";
     WinBeginPaint = "PMWIN.703";
     WinBroadcastMsg = "PMWIN.901";
+    WinCalcFrameRect = "PMWIN.704";
     WinCancelShutdown = "PMWIN.705";
+    WinChangeSwitchEntry = "PMSHAPI.123";
     WinCloseClipbrd = "PMWIN.707";
     WinCompareStrings = "PMWIN.708";
     WinCopyAccelTable = "PMWIN.709";
@@ -37,6 +41,7 @@ forward! {
     WinCreatePointer = "PMWIN.717";
     WinCreatePointerIndirect = "PMWIN.942";
     WinCreateStdWindow = "PMWIN.908";
+    WinCreateSwitchEntry = "PMSHAPI.121";
     WinCreateWindow = "PMWIN.909";
     WinDefDlgProc = "PMWIN.910";
     WinDefWindowProc = "PMWIN.911";
@@ -50,11 +55,13 @@ forward! {
     WinDispatchMsg = "PMWIN.912";
     WinDlgBox = "PMWIN.923";
     WinDrawBitmap = "PMWIN.730";
+    WinDrawBorder = "PMWIN.731";
     WinDrawPointer = "PMWIN.732";
     WinDrawText = "PMWIN.913";
     WinEmptyClipbrd = "PMWIN.733";
     WinEnableWindow = "PMWIN.735";
     WinEnableWindowUpdate = "PMWIN.736";
+    WinEndEnumWindows = "PMWIN.737";
     WinEndPaint = "PMWIN.738";
     WinEnumClipbrdFmts = "PMWIN.739";
     WinEnumDlgItem = "PMWIN.740";
@@ -66,10 +73,13 @@ forward! {
     WinFreeErrorInfo = "PMWIN.748";
     WinGetCurrentTime = "PMWIN.750";
     WinGetErrorInfo = "PMWIN.751";
+    WinGetKeyState = "PMWIN.752";
     WinGetLastError = "PMWIN.753";
     WinGetMsg = "PMWIN.915";
+    WinGetNextWindow = "PMWIN.756";
     WinGetPS = "PMWIN.757";
     WinGetScreenPS = "PMWIN.759";
+    WinGetSysBitmap = "PMWIN.760";
     WinInflateRect = "PMWIN.762";
     WinInitialize = "PMWIN.763";
     WinIntersectRect = "PMWIN.764";
@@ -111,6 +121,7 @@ forward! {
     WinQueryAtomUsage = "PMWIN.803";
     WinQueryCapture = "PMWIN.804";
     WinQueryClassInfo = "PMWIN.925";
+    WinQueryClassName = "PMWIN.805";
     WinQueryClipbrdData = "PMWIN.806";
     WinQueryClipbrdFmtInfo = "PMWIN.807";
     WinQueryClipbrdOwner = "PMWIN.808";
@@ -129,6 +140,9 @@ forward! {
     WinQueryPointerPos = "PMWIN.823";
     WinQueryPresParam = "PMWIN.939";
     WinQueryQueueStatus = "PMWIN.825";
+    WinQuerySwitchEntry = "PMSHAPI.124";
+    WinQuerySwitchHandle = "PMSHAPI.125";
+    WinQuerySwitchList = "PMSHAPI.126";
     WinQuerySysColor = "PMWIN.826";
     WinQuerySysPointer = "PMWIN.828";
     WinQuerySysPointerData = "PMWIN.1003";
@@ -154,6 +168,7 @@ forward! {
     WinReleaseHook = "PMWIN.927";
     WinReleasePS = "PMWIN.848";
     WinRemovePresParam = "PMWIN.940";
+    WinRemoveSwitchEntry = "PMSHAPI.129";
     WinRequestMutexSem = "PMWIN.979";
     WinScrollWindow = "PMWIN.849";
     WinSendDlgItemMsg = "PMWIN.903";
@@ -188,6 +203,7 @@ forward! {
     WinStopTimer = "PMWIN.885";
     WinSubclassWindow = "PMWIN.929";
     WinSubtractRect = "PMWIN.887";
+    WinSwitchToProgram = "PMSHAPI.131";
     WinTerminate = "PMWIN.888";
     WinTrackRect = "PMWIN.890";
     WinTranslateAccel = "PMWIN.904";

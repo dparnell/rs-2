@@ -1,0 +1,4 @@
+; PMWIN forwarders (see the forward! list in src/lib.rs)
+WinLoadFileIcon @209
+WinSetFileIcon @210
+WinFreeFileIcon @216

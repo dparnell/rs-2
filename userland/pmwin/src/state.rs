@@ -204,6 +204,11 @@ pub struct State {
     /// Presentation parameter colours set on windows: (foreground,
     /// background) as 0x00RRGGBB, NO_COLOR where not set.
     pub pres: BTreeMap<u32, (u32, u32)>,
+    /// Virtual key states by VK_* (0x80: down, 0x01: toggled), as the
+    /// input thread last saw them (WinGetKeyState).
+    pub keys: [u8; 256],
+    /// The switch list (WinAddSwitchEntry, see switch.rs).
+    pub switch: crate::switch::SwitchList,
 }
 
 /// No presentation parameter colour.
@@ -276,6 +281,8 @@ pub fn init(surface: Surface) {
         vio: Vec::new(),
         screen: surface.pixels() as usize,
         shadow: Vec::new(),
+        keys: [0; 256],
+        switch: Default::default(),
     });
     unsafe { (*crate::shared::header()).state = Box::into_raw(s) as *mut u8 };
 }

@@ -24,6 +24,7 @@ pub const FCF_HORZSCROLL: u32 = 0x0080;
 pub const FCF_DLGBORDER: u32 = 0x0100;
 pub const FCF_BORDER: u32 = 0x0200;
 pub const FCF_SHELLPOSITION: u32 = 0x0400;
+pub const FCF_TASKLIST: u32 = 0x0800;
 pub const FCF_ICON: u32 = 0x4000;
 pub const FCF_ACCELTABLE: u32 = 0x8000;
 pub const FCF_HIDEBUTTON: u32 = 0x0100_0000;
@@ -51,6 +52,7 @@ const WM_ACTIVATE: u32 = 0x000d;
 pub const WM_MINMAXFRAME: u32 = 0x0046;
 pub const WM_SETICON: u32 = 0x0047;
 pub const WM_QUERYICON: u32 = 0x0048;
+pub const WM_CALCFRAMERECT: u32 = 0x0053;
 /// Posted to a minimized window viewer: mp1 = the frame, mp2 = 1 when
 /// it was minimized, 0 when restored (rs2-private).
 pub const WM_RS2_MINWINDOW: u32 = 0x0ff8;
@@ -111,6 +113,9 @@ pub fn create(parent: u32, style: u32, fcf: u32, title: &[u8], pos: Rect, owner:
     }
     create_controls(frame, fcf, title, hmod, id);
     layout(frame);
+    if fcf & FCF_TASKLIST != 0 {
+        crate::switch::add_frame(frame);
+    }
     frame
 }
 
@@ -198,6 +203,55 @@ pub fn layout(frame: u32) {
     if client != 0 {
         place(client, Rect::new(l, bot, r.max(l), top.max(bot)));
     }
+}
+
+/// What the frame controls take from each side of a frame (left,
+/// bottom, right, top), as `layout` places them.
+pub fn insets(frame: u32) -> (i32, i32, i32, i32) {
+    let b = border(fcf(frame));
+    let (mut bot, mut r, mut top) = (b, b, b);
+    if [FID_SYSMENU, FID_TITLEBAR, FID_MINMAX].into_iter().any(|id| WinWindowFromID(frame, id) != 0) {
+        top += TITLE_H;
+    }
+    let m = WinWindowFromID(frame, FID_MENU);
+    if m != 0 && st().desk.get(m).is_some_and(|w| w.visible_style()) {
+        top += MENU_H;
+    }
+    if WinWindowFromID(frame, FID_HORZSCROLL) != 0 {
+        bot += SCROLL_W;
+    }
+    if WinWindowFromID(frame, FID_VERTSCROLL) != 0 {
+        r += SCROLL_W;
+    }
+    (b, bot, r, top)
+}
+
+/// WM_CALCFRAMERECT (mp1 = PRECTL, mp2 = fClient): the client rectangle
+/// for a frame rectangle (fClient TRUE), or the frame rectangle for a
+/// client rectangle; TRUE when the result is not empty.
+fn calc_frame_rect(frame: u32, prcl: *mut crate::gpiapi::RectL, client: bool) -> u32 {
+    if prcl.is_null() {
+        return 0;
+    }
+    let (l, b, r, t) = insets(frame);
+    let k = if client { 1 } else { -1 };
+    let mut rc = unsafe { prcl.read_unaligned() };
+    rc.left += k * l;
+    rc.bottom += k * b;
+    rc.right -= k * r;
+    rc.top -= k * t;
+    unsafe { prcl.write_unaligned(rc) };
+    (rc.right > rc.left && rc.top > rc.bottom) as u32
+}
+
+/// WinCalcFrameRect(hwndFrame, prcl, fClient): WM_CALCFRAMERECT to the
+/// frame (as IBM's PMWIN does, so subclassed frames answer themselves).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinCalcFrameRect(h: u32, prcl: *mut crate::gpiapi::RectL, client: u32) -> u32 {
+    if !st().desk.exists(h) {
+        return 0;
+    }
+    send(h, WM_CALCFRAMERECT, prcl as u32, client)
 }
 
 /// Move/size a frame control (WM_SIZE when the size changes).
@@ -629,6 +683,7 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         // WM_QUERYFRAMEINFO: FI_FRAME | FI_ACTIVATEOK.
         0x0050 => 5,
+        WM_CALCFRAMERECT => calc_frame_rect(h, mp1 as *mut crate::gpiapi::RectL, mp2 != 0),
         help::WM_QUERYHELPINFO => st().frames.get(&h).map_or(0, |f| f.help),
         help::WM_SETHELPINFO => {
             if let Some(f) = st().frames.get_mut(&h) {

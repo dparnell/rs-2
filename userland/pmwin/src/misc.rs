@@ -75,6 +75,11 @@ pub extern "C" fn WinQueryAnchorBlock(_h: u32) -> u32 {
     HAB
 }
 
+/// Record an error for WinGetLastError.
+pub fn set_error(e: u32) {
+    LAST_ERROR.store(e, Ordering::Relaxed);
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn WinGetLastError(_hab: u32) -> u32 {
     LAST_ERROR.swap(0, Ordering::Relaxed)

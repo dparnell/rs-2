@@ -1,6 +1,6 @@
 [package]
 name = "pmwp-dll"
-description = "PMWP.DLL: file icon calls, forwarded to PMWIN"
+description = "PMWP.DLL: file icon calls (forwarded to PMWIN) and WinCreateObject"
 edition.workspace = true
 version.workspace = true
 license.workspace = true

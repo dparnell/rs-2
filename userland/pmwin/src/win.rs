@@ -178,6 +178,7 @@ pub fn remove(h: u32) {
     let was_active = gone.contains(&s.active);
     for g in &gone {
         s.frames.remove(g);
+        s.switch.window_gone(*g);
         s.ctl.remove(g);
         s.pres.remove(g);
         s.timers.retain(|t| t.hwnd != *g);
@@ -712,6 +713,84 @@ pub extern "C" fn WinQueryWindow(h: u32, cmd: i32) -> u32 {
         QW_PARENT => w.parent,
         _ => 0,
     }
+}
+
+/// Enumerations of child windows (WinBeginEnumWindows) of this process:
+/// the children as they were, and the next index.
+static mut ENUMS: Vec<Option<(Vec<u32>, usize)>> = Vec::new();
+const HENUM_BASE: u32 = 0x4e00_0001;
+
+fn enums() -> &'static mut Vec<Option<(Vec<u32>, usize)>> {
+    unsafe { &mut *core::ptr::addr_of_mut!(ENUMS) }
+}
+
+/// WinBeginEnumWindows(hwnd): an enumeration of the window's children as
+/// they are now, top of the z-order first (HWND_DESKTOP and
+/// HWND_OBJECT, or 0 for the desktop, enumerate the top-level windows).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinBeginEnumWindows(h: u32) -> u32 {
+    let s = st();
+    let h = if h == 0 { HWND_DESKTOP } else { h };
+    let Some(w) = s.desk.get(h) else { return 0 };
+    let list: Vec<u32> = w.children.iter().rev().copied().collect();
+    let v = enums();
+    let i = match v.iter().position(|e| e.is_none()) {
+        Some(i) => {
+            v[i] = Some((list, 0));
+            i
+        }
+        None => {
+            v.push(Some((list, 0)));
+            v.len() - 1
+        }
+    };
+    HENUM_BASE + i as u32
+}
+
+/// WinGetNextWindow(henum): the next child that still exists; 0 at the
+/// end.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetNextWindow(henum: u32) -> u32 {
+    let s = st();
+    let Some(Some((list, next))) = enums().get_mut(henum.wrapping_sub(HENUM_BASE) as usize) else { return 0 };
+    while let Some(&h) = list.get(*next) {
+        *next += 1;
+        if s.desk.exists(h) {
+            return h;
+        }
+    }
+    0
+}
+
+/// WinEndEnumWindows(henum)
+#[unsafe(no_mangle)]
+pub extern "C" fn WinEndEnumWindows(henum: u32) -> u32 {
+    match enums().get_mut(henum.wrapping_sub(HENUM_BASE) as usize) {
+        Some(e @ Some(_)) => {
+            *e = None;
+            1
+        }
+        _ => 0,
+    }
+}
+
+/// WinQueryClassName(hwnd, cchMax, pch): the window's class name
+/// ("#3" for WC_BUTTON and so on), truncated to cchMax - 1 characters;
+/// returns the length copied.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryClassName(h: u32, cch: i32, buf: *mut u8) -> i32 {
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return 0 };
+    if buf.is_null() || cch <= 0 {
+        return 0;
+    }
+    let name = s.classes.get(w.class as usize).map_or(&[][..], |c| &c.name[..]);
+    let n = name.len().min(cch as usize - 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(name.as_ptr(), buf, n);
+        *buf.add(n) = 0;
+    }
+    n as i32
 }
 
 #[unsafe(no_mangle)]

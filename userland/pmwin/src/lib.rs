@@ -43,6 +43,8 @@ mod shared;
 mod slider;
 mod spin;
 mod state;
+mod switch;
+mod sysdraw;
 mod statics;
 mod valueset;
 mod viowin;

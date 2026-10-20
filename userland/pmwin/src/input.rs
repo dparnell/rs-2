@@ -56,6 +56,11 @@ pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
     let s = st();
     pointer::move_to(s, p);
     let prev = core::mem::replace(&mut s.buttons, buttons);
+    // VK_BUTTON1..3.
+    for i in 0..3 {
+        set_key(s, 1 + i, buttons >> i & 1 != 0);
+    }
+    note_shift(s, shift as u32);
     let down = buttons & !prev;
     let up = prev & !buttons;
     // Moving or sizing a frame.
@@ -234,12 +239,38 @@ pub fn key(ev: &Input) {
         fs |= KC_VIRTUALKEY;
     }
     let s = st();
+    note_shift(s, shift);
+    if vkey != 0 {
+        set_key(s, vkey as usize, !up);
+    }
     let target = if s.focus != 0 { s.focus } else { s.active };
     if target != 0 && input_enabled(target) && crate::viowin::key(target, ev) {
         return;
     }
     if target != 0 && input_enabled(target) {
         post_input(target, WM_CHAR, fs | 1 << 16 | scan << 24, (if fs & KC_CHAR != 0 { ch } else { 0 }) | vkey << 16, ev.time);
+    }
+}
+
+/// A virtual key went down or up: the toggle bit flips on each press.
+fn set_key(s: &mut crate::state::State, vk: usize, down: bool) {
+    let k = &mut s.keys[vk];
+    if down && *k & 0x80 == 0 {
+        *k ^= 0x01;
+    }
+    *k = (*k & 0x01) | if down { 0x80 } else { 0 };
+}
+
+/// The shift keys' states from a KBD shift state (shift, Ctrl, Alt down;
+/// Scroll, Num and Caps Lock on).
+fn note_shift(s: &mut crate::state::State, shift: u32) {
+    set_key(s, 0x09, shift & 0x3 != 0); // VK_SHIFT
+    set_key(s, 0x0a, shift & 0x4 != 0); // VK_CTRL
+    set_key(s, 0x0b, shift & 0x8 != 0); // VK_ALT
+    for (vk, bit) in [(0x1e, 0x10), (0x1d, 0x20), (0x0e, 0x40)] {
+        // VK_SCRLLOCK, VK_NUMLOCK, VK_CAPSLOCK.
+        let k = &mut s.keys[vk];
+        *k = (*k & 0x80) | (shift & bit != 0) as u8;
     }
 }
 
@@ -289,4 +320,14 @@ pub fn event(ev: &Input) {
         EV_PROCEXIT => crate::server::process_gone(ev.a),
         _ => {}
     }
+}
+
+/// WinGetKeyState(hwndDesktop, vkey): 0x8000 (sign-extended, as IBM's
+/// PMWIN returns it) while the virtual key is down, | 1 when it is
+/// toggled. rs2 keeps one state, the input thread's, where PM has a
+/// synchronous one per message.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetKeyState(_desk: u32, vk: i32) -> i32 {
+    let Some(&k) = st().keys.get(vk as usize) else { return 0 };
+    (if k & 0x80 != 0 { 0xffff_8000u32 as i32 } else { 0 }) | (k & 1) as i32
 }
