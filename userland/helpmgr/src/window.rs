@@ -58,6 +58,8 @@ struct View {
     /// The panels of the list's rows.
     rows: Vec<PanelRef>,
     bitmaps: Bitmaps,
+    /// A footnote window: one panel, no buttons.
+    footnote: bool,
 }
 
 impl View {
@@ -88,8 +90,8 @@ pub fn register(hab: u32) {
 /// Is `h` (or a window it is in) a help window?
 pub fn is_help_window(h: u32) -> bool {
     crate::instances().iter().any(|&p| {
-        let f = unsafe { (*p).frame };
-        f != 0 && (f == h || is_inside(h, f))
+        let (f, n) = unsafe { ((*p).frame, (*p).footnote) };
+        (f != 0 && is_inside(h, f)) || (n != 0 && is_inside(h, n))
     })
 }
 
@@ -118,10 +120,43 @@ fn ensure(inst: &mut Instance) -> &'static mut View {
     if let Some(v) = view_of(inst) {
         return v;
     }
-    let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINBUTTON | FCF_MAXBUTTON | FCF_TASKLIST | FCF_NOBYTEALIGN;
+    let v = make(inst, false);
+    inst.frame = v.frame;
+    // On the right of the screen, as IBM's help windows come up.
+    let (sw, sh) = (sysval(SV_CXSCREEN), sysval(SV_CYSCREEN));
+    let cx = (sw * 11 / 20).clamp(320.min(sw), 680);
+    let cy = (sh * 3 / 4).clamp(240.min(sh), 640);
+    unsafe { WinSetWindowPos(v.frame, HWND_TOP, sw - cx - 16, sh - cy - 32, cx, cy, SWP_SIZE | SWP_MOVE) };
+    v
+}
+
+/// The footnote window of `inst` (made if there is none), over the
+/// middle of the help window.
+fn ensure_footnote(inst: &mut Instance) -> &'static mut View {
+    if inst.footnote != 0 {
+        if let Some(v) = view(unsafe { WinWindowFromID(inst.footnote, FID_CLIENT) }) {
+            return v;
+        }
+    }
+    let v = make(inst, true);
+    inst.footnote = v.frame;
+    let mut swp = Swp::default();
+    unsafe { WinQueryWindowPos(inst.frame, &mut swp) };
+    let (cx, cy) = ((swp.cx * 3 / 4).max(240), (swp.cy * 2 / 5).max(120));
+    unsafe { WinSetWindowPos(v.frame, HWND_TOP, swp.x + (swp.cx - cx) / 2, swp.y + (swp.cy - cy) / 2, cx, cy, SWP_SIZE | SWP_MOVE) };
+    v
+}
+
+/// A help or footnote window.
+fn make(inst: &mut Instance, footnote: bool) -> &'static mut View {
+    let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_NOBYTEALIGN;
+    if !footnote {
+        fcf |= FCF_MINBUTTON | FCF_MAXBUTTON | FCF_TASKLIST;
+    }
     let mut client = 0u32;
+    let title: &[u8] = if footnote { b"Footnote\0" } else { b"Help\0" };
     let frame = unsafe {
-        WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, CLIENT.as_ptr(), b"Help\0".as_ptr(), WS_CLIPCHILDREN, 0, 0, &mut client)
+        WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, CLIENT.as_ptr(), title.as_ptr(), WS_CLIPCHILDREN, 0, 0, &mut client)
     };
     let v = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(View {
         inst: inst as *mut Instance,
@@ -140,6 +175,7 @@ fn ensure(inst: &mut Instance) -> &'static mut View {
         sel: None,
         rows: Vec::new(),
         bitmaps: Bitmaps::new(),
+        footnote,
     }));
     unsafe { WinSetWindowULong(client, QWL_USER, v as u32) };
     let v = unsafe { &mut *v };
@@ -147,18 +183,14 @@ fn ensure(inst: &mut Instance) -> &'static mut View {
     unsafe { WinSetWindowULong(v.panel, QWL_USER, v as *mut View as u32) };
     // Scroll bars and lists are #8 and #7, entry fields #6, buttons #3.
     v.scroll = child(client, b"#8\0", b"", WS_VISIBLE | 1, ID_SCROLL);
-    v.list = child(client, b"#7\0", b"", WS_TABSTOP, ID_LIST);
-    v.entry = child(client, b"#6\0", b"", WS_TABSTOP | ES_AUTOSCROLL | ES_MARGIN, ID_ENTRY);
-    send(v.entry, EM_SETTEXTLIMIT, 128, 0);
-    for (id, text) in BUTTONS {
-        child(client, b"#3\0", &text[..text.len() - 1], WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON | BS_NOPOINTERFOCUS, id);
+    if !footnote {
+        v.list = child(client, b"#7\0", b"", WS_TABSTOP, ID_LIST);
+        v.entry = child(client, b"#6\0", b"", WS_TABSTOP | ES_AUTOSCROLL | ES_MARGIN, ID_ENTRY);
+        send(v.entry, EM_SETTEXTLIMIT, 128, 0);
+        for (id, text) in BUTTONS {
+            child(client, b"#3\0", &text[..text.len() - 1], WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON | BS_NOPOINTERFOCUS, id);
+        }
     }
-    inst.frame = frame;
-    // On the right of the screen, as IBM's help windows come up.
-    let (sw, sh) = (sysval(SV_CXSCREEN), sysval(SV_CYSCREEN));
-    let cx = (sw * 11 / 20).clamp(320.min(sw), 680);
-    let cy = (sh * 3 / 4).clamp(240.min(sh), 640);
-    unsafe { WinSetWindowPos(frame, HWND_TOP, sw - cx - 16, sh - cy - 32, cx, cy, SWP_SIZE | SWP_MOVE) };
     v
 }
 
@@ -197,7 +229,25 @@ pub fn show_index(inst: &mut Instance) {
     notify(inst, crate::OPEN_INDEX);
 }
 
+/// Show footnote `p` in the footnote window.
+fn show_footnote(inst: &mut Instance, p: PanelRef) {
+    let v = ensure_footnote(inst);
+    v.mode = Mode::Panel(p);
+    v.top = 0;
+    enter(v);
+    activate(v);
+}
+
+fn close_footnote(inst: &mut Instance) {
+    if inst.footnote != 0 {
+        let f = inst.footnote;
+        inst.footnote = 0;
+        unsafe { WinDestroyWindow(f) };
+    }
+}
+
 pub fn close(inst: &mut Instance) {
+    close_footnote(inst);
     if inst.frame != 0 {
         let f = inst.frame;
         inst.frame = 0;
@@ -229,8 +279,21 @@ fn enter(v: &mut View) {
         Mode::Search(q) => fill_search(v, &q),
     }
     place(v);
-    set_title(v.inst());
+    if v.footnote {
+        let t = z(&panel_title(v.inst(), &v.mode));
+        let t = if t.len() > 1 { t } else { z(b"Footnote") };
+        unsafe { WinSetWindowText(v.frame, t.as_ptr()) };
+    } else {
+        set_title(v.inst());
+    }
     unsafe { WinInvalidateRect(v.panel, core::ptr::null(), 0) };
+}
+
+fn panel_title(inst: &Instance, m: &Mode) -> Vec<u8> {
+    match m {
+        Mode::Panel(p) => inst.libs.get(p.lib).and_then(|l| l.doc().toc(p.toc).ok()).map(|e| e.title).unwrap_or_default(),
+        _ => Vec::new(),
+    }
 }
 
 fn back(v: &mut View) {
@@ -453,12 +516,13 @@ fn place(v: &View) {
     let r = window_rect(v.client);
     let (w, h) = (r.r, r.t);
     let sb = sysval(SV_CXVSCROLL).max(12);
-    let top = (h - BUTTON_ROW).max(0);
+    let row = if v.footnote { 0 } else { BUTTON_ROW };
+    let top = (h - row).max(0);
     let panel_mode = matches!(v.mode, Mode::Panel(_));
     let search = matches!(v.mode, Mode::Search(_));
     unsafe {
-        WinSetWindowPos(v.panel, 0, 0, BUTTON_ROW, (w - sb).max(0), top, SWP_MOVE | SWP_SIZE);
-        WinSetWindowPos(v.scroll, 0, w - sb, BUTTON_ROW, sb, top, SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.panel, 0, 0, row, (w - sb).max(0), top, SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.scroll, 0, w - sb, row, sb, top, SWP_MOVE | SWP_SIZE);
         let ltop = if search { (top - ENTRY_ROW).max(0) } else { top };
         WinSetWindowPos(v.list, 0, 0, BUTTON_ROW, w, ltop, SWP_MOVE | SWP_SIZE);
         WinSetWindowPos(v.entry, 0, 6, BUTTON_ROW + ltop + 4, (w - 12).max(0), ENTRY_ROW - 8, SWP_MOVE | SWP_SIZE);
@@ -543,6 +607,10 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_CLOSE => {
             let inst = v.inst();
+            if v.footnote {
+                close_footnote(inst);
+                return 0;
+            }
             let book = inst.book;
             close(inst);
             if book {
@@ -557,6 +625,9 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 let inst = v.inst();
                 if inst.frame == v.frame {
                     inst.frame = 0;
+                }
+                if inst.footnote == v.frame {
+                    inst.footnote = 0;
                 }
                 drop(alloc::boxed::Box::from_raw(v as *mut View));
             }
@@ -640,6 +711,7 @@ extern "C" fn panel_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                         follow(v, Hit::Link(l));
                     }
                 }
+                VK_ESC | VK_BACKSPACE if v.footnote => close_footnote(v.inst()),
                 VK_ESC | VK_BACKSPACE => back(v),
                 _ => return unsafe { WinDefWindowProc(h, msg, mp1, mp2) },
             }
@@ -683,6 +755,21 @@ fn select_link(v: &mut View, d: i32) {
     unsafe { WinInvalidateRect(v.panel, core::ptr::null(), 0) };
 }
 
+/// Open a link's panel: footnotes (and panels without a contents entry)
+/// in the footnote window, others in the help window.
+fn open(v: &mut View, p: PanelRef, footnote: bool) {
+    let inst = v.inst();
+    let level0 = inst.libs.get(p.lib).and_then(|l| l.doc().toc(p.toc).ok()).is_some_and(|e| e.level() == 0);
+    if footnote || level0 {
+        show_footnote(inst, p);
+    } else if v.footnote {
+        show_panel(inst, p, true);
+        close_footnote(inst);
+    } else {
+        go(v, Mode::Panel(p), true);
+    }
+}
+
 /// Follow a link of the page.
 fn follow(v: &mut View, hit: Hit) {
     let (Some(page), Mode::Panel(cur)) = (&v.page, v.mode.clone()) else { return };
@@ -693,11 +780,12 @@ fn follow(v: &mut View, hit: Hit) {
     let Some(target) = target else { return };
     let inst = v.inst();
     match target {
-        Target::Panel(t) | Target::Footnote(t) => go(v, Mode::Panel(PanelRef { lib: cur.lib, toc: t }), true),
+        Target::Panel(t) => open(v, PanelRef { lib: cur.lib, toc: t }, false),
+        Target::Footnote(t) => open(v, PanelRef { lib: cur.lib, toc: t }, true),
         Target::Res(r) => {
             let p = inst.libs[cur.lib].doc().panel_by_res(r).map(|toc| PanelRef { lib: cur.lib, toc }).or_else(|| inst.panel_by_res(r));
             if let Some(p) = p {
-                go(v, Mode::Panel(p), true);
+                open(v, p, false);
             }
         }
         Target::Inform(r) => {
@@ -721,7 +809,7 @@ fn follow(v: &mut View, hit: Hit) {
                 d.panel_by_name(id)
             };
             if let Some(toc) = toc {
-                go(v, Mode::Panel(PanelRef { lib, toc }), true);
+                open(v, PanelRef { lib, toc }, false);
             }
         }
     }

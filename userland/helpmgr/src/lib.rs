@@ -119,6 +119,8 @@ pub struct Instance {
     pub active: u32,
     /// The help window's frame (0: not shown).
     pub frame: u32,
+    /// The footnote window's frame (0: none).
+    pub footnote: u32,
     /// A book shown by VIEW: no application, the program ends with it.
     pub book: bool,
 }
@@ -144,6 +146,18 @@ pub fn instance(h: u32) -> Option<&'static mut Instance> {
 #[unsafe(link_section = ".text.start")]
 pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
     1
+}
+
+/// A line on the serial port (RS2API.4), for debugging.
+#[allow(dead_code)]
+pub fn trace(args: core::fmt::Arguments) {
+    unsafe extern "C" {
+        #[link_name = "RS2API.4"]
+        fn Rs2DebugTrace(psz: *const u8) -> u32;
+    }
+    let mut s = alloc::format!("{}", args).into_bytes();
+    s.push(0);
+    unsafe { Rs2DebugTrace(s.as_ptr()) };
 }
 
 fn set_error(e: u32) {
@@ -217,6 +231,7 @@ pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: 
         help_for_help: 0,
         active: 0,
         frame: 0,
+        footnote: 0,
         book,
     }));
     let first = instances().is_empty();

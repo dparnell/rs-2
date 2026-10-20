@@ -39,23 +39,28 @@ const CBID_EDIT: u32 = 0x029b;
 type HelpHook = extern "C" fn(hab: u32, mode: u32, topic: u32, sub: u32, rect: *const RectL) -> u32;
 
 /// Call the help hooks of the calling thread's queue (then the system
-/// ones), newest first, until one returns TRUE.
+/// ones), newest first, until one returns TRUE. The chain is read again
+/// after each hook: a hook may set or release hooks (OS/2's E installs its
+/// own, which creates the help instance on the first request, releases
+/// itself and leaves the request to the help manager's hook).
 pub fn call_hook(mode: u32, topic: u32, sub: u32, rect: RectL) -> bool {
-    let s = st();
-    let (q, me) = (s.my_queue(), crate::shared::pid());
-    let hooks: alloc::vec::Vec<u32> = s
-        .hooks
-        .iter()
-        .filter(|h| h.kind == HK_HELP && h.pid == me && (h.queue == q || h.queue == 0))
-        .map(|h| h.pfn)
-        .collect();
-    for pfn in hooks {
+    let me = crate::shared::pid();
+    let mut called: alloc::vec::Vec<u32> = alloc::vec::Vec::new();
+    loop {
+        let s = st();
+        let q = s.my_queue();
+        let next = s
+            .hooks
+            .iter()
+            .find(|h| h.kind == HK_HELP && h.pid == me && (h.queue == q || h.queue == 0) && !called.contains(&h.pfn))
+            .map(|h| h.pfn);
+        let Some(pfn) = next else { return false };
+        called.push(pfn);
         let f: HelpHook = unsafe { core::mem::transmute(pfn as usize) };
         if lock::unlocked(|| f(0, mode, topic, sub, &rect)) != 0 {
             return true;
         }
     }
-    false
 }
 
 /// A window's rectangle in screen coordinates.
