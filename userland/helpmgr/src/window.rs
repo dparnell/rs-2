@@ -98,10 +98,15 @@ pub fn register(hab: u32) {
 
 /// Is `h` (or a window it is in) a help window?
 pub fn is_help_window(h: u32) -> bool {
-    crate::instances().iter().any(|&p| {
+    help_window_instance(h).is_some()
+}
+
+/// The instance whose help (or footnote) window `h` is in.
+pub fn help_window_instance(h: u32) -> Option<&'static mut Instance> {
+    crate::instances().iter().copied().find(|&p| {
         let (f, n) = unsafe { ((*p).frame, (*p).footnote) };
         (f != 0 && is_inside(h, f)) || (n != 0 && is_inside(h, n))
-    })
+    }).map(|p| unsafe { &mut *p })
 }
 
 fn is_inside(mut h: u32, f: u32) -> bool {
@@ -561,7 +566,7 @@ fn fill_contents(v: &mut View) {
 fn fill_index(v: &mut View) {
     list_start(v);
     let inst = v.inst();
-    for (lib, l) in inst.libs.iter().enumerate() {
+    for (lib, l) in inst.libs.iter().enumerate().filter(|(i, _)| Some(*i) != inst.hmhelp) {
         for e in l.doc().index() {
             let mut row = if e.level() == 2 { b"   ".to_vec() } else { Vec::new() };
             row.extend_from_slice(&e.text);
@@ -579,7 +584,7 @@ fn fill_search(v: &mut View, q: &[u8]) {
         return;
     }
     let inst = v.inst();
-    for (lib, l) in inst.libs.iter().enumerate() {
+    for (lib, l) in inst.libs.iter().enumerate().filter(|(i, _)| Some(*i) != inst.hmhelp) {
         let d = l.doc();
         let mut hits: Option<Vec<u16>> = None;
         for w in &words {

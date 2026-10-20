@@ -500,7 +500,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
-const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP")];
+const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP")];
 
 /// Programs marked as PM applications (WINDOWAPI).
 const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "hmtest"];

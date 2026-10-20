@@ -1163,8 +1163,11 @@ described in [formats/ipf-structures.md](formats/ipf-structures.md),
   HM_SET_SHOW_PANEL_ID, HM_REPLACE_HELP_FOR_HELP, HM_SET_HELP_LIBRARY_NAME
   and HM_DISMISS_WINDOW; HM_NOTIFY (OPEN_PAGE, OPEN_TOC, OPEN_INDEX) to
   the active window. HM_DISPLAY_HELP 0 ("Using help") shows the
-  replacement panel, else the contents: IBM's own help library
-  (HMHELP.HLP) is not shipped.
+  replacement panel (HM_REPLACE_HELP_FOR_HELP), else the first panel of
+  rs2's own help for help, OS2\HELP\HMHELP.HLP (userland/helpmgr/
+  HMHELP.IPF; IBM's HMHELP.HLP is not shipped), as does F1 in a help
+  window. The help window is activated again once the request's message
+  is done, so a request from an application's menu leaves it active.
 
 **The help window** is a frame on the right of the screen titled with the
 help window title and the panel's: the panel (laid out by `crates/ipf`
@@ -1176,7 +1179,8 @@ logical fonts' fsSelection (real italic, bold, underscore), colours of
 bitmaps are decompressed by `crates/ipf` and drawn with GpiDrawBits
 (stretched for `fit`). Up/Down/PgUp/PgDn/Home/End scroll; Tab and
 Shift+Tab move a box from link to link, Enter or a click follows it, Esc
-(or Backspace, or Previous) goes back. Links lead to panels of the file
+(or Backspace, or Previous) goes back; Esc with nothing to go back to
+closes the window. Links lead to panels of the file
 or, by resource id, any library; footnotes and panels without a
 contents entry open in a footnote window over the help window (Esc
 closes it); inform links send HM_INFORM to the application; launch links

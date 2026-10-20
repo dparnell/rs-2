@@ -142,6 +142,8 @@ pub struct Instance {
     pub frame: u32,
     /// The footnote window's frame (0: none).
     pub footnote: u32,
+    /// The library of rs2's help for using help (HMHELP.HLP) once loaded.
+    pub hmhelp: Option<usize>,
     /// The viewports' frames (panels in windows of their own).
     pub viewports: Vec<u32>,
     /// A book shown by VIEW: no application, the program ends with it.
@@ -264,6 +266,7 @@ pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: 
         frame: 0,
         footnote: 0,
         viewports: Vec::new(),
+        hmhelp: None,
         book,
         owner: 0,
         compat: Box::new([0; 0x40]),
@@ -452,12 +455,34 @@ impl Instance {
     }
 
     /// The panel with resource id `res` in any library.
+    /// "Using help" (HM_DISPLAY_HELP 0, 0): the application's
+    /// replacement (HM_REPLACE_HELP_FOR_HELP), else rs2's HMHELP.HLP
+    /// (found along HELP; IBM's help manager shows its own HMHELP.HLP),
+    /// else the contents.
+    pub fn help_for_help(&mut self) -> u32 {
+        if self.help_for_help != 0 {
+            return self.display(self.help_for_help as u32, HM_RESOURCEID);
+        }
+        if self.hmhelp.is_none() {
+            if let Ok(mut l) = library::open(b"HMHELP.HLP", false) {
+                l.base = self.libs.iter().map(|l| l.doc().header.toc_count as u32).sum();
+                self.libs.push(l);
+                self.hmhelp = Some(self.libs.len() - 1);
+            }
+        }
+        match self.hmhelp {
+            Some(lib) => window::show_panel(self, PanelRef { lib, toc: 0 }, true),
+            None => window::show_contents(self),
+        }
+        0
+    }
+
     pub fn panel_by_res(&self, res: u16) -> Option<PanelRef> {
         self.libs.iter().enumerate().find_map(|(lib, l)| l.doc().panel_by_res(res).map(|toc| PanelRef { lib, toc }))
     }
 
     pub fn panel_by_name(&self, name: &[u8]) -> Option<PanelRef> {
-        self.libs.iter().enumerate().find_map(|(lib, l)| l.doc().panel_by_name(name).map(|toc| PanelRef { lib, toc }))
+        self.libs.iter().enumerate().filter(|(i, _)| Some(*i) != self.hmhelp).find_map(|(lib, l)| l.doc().panel_by_name(name).map(|toc| PanelRef { lib, toc }))
     }
 
     /// Display panel `id` (a resource id or name) as HM_DISPLAY_HELP
@@ -622,8 +647,9 @@ fn HelpProcessor_(_hab: u32, mode: u32, topic: u32, sub: u32, _rect: *const Rect
     if pid != pm::pid() {
         return 0;
     }
-    // Help in a help window: nothing more to show.
-    if window::is_help_window(active) {
+    // Help in a help window: the help for using help.
+    if let Some(inst) = window::help_window_instance(active) {
+        inst.help_for_help();
         return 1;
     }
     let ih = find_instance(active);
@@ -654,14 +680,7 @@ fn instance_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         HM_DISPLAY_HELP => {
             if mp1 == 0 && mp2 == 0 {
-                // Help for help.
-                return match inst.help_for_help {
-                    0 => {
-                        window::show_contents(inst);
-                        0
-                    }
-                    p => inst.display(p as u32, HM_RESOURCEID),
-                };
+                return inst.help_for_help();
             }
             inst.display(mp1, mp2)
         }
@@ -727,6 +746,7 @@ fn instance_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 Ok(libs) => {
                     window::close(inst);
                     inst.libs = libs;
+                    inst.hmhelp = None;
                     inst.names = names;
                     0
                 }
