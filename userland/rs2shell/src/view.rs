@@ -505,8 +505,7 @@ fn minimized_items() -> Vec<Item> {
     list.into_iter()
         .filter(|&f| unsafe { WinIsWindow(sh().hab, f) } != 0)
         .map(|f| {
-            let tb = unsafe { WinWindowFromID(f, FID_TITLEBAR) };
-            let mut t = window_text(if tb != 0 { tb } else { f });
+            let mut t = frame_title(f);
             if t.is_empty() {
                 t = b"(untitled)".to_vec();
             }
@@ -983,16 +982,30 @@ fn new_group() {
 }
 
 fn new_folder(v: usize, dir: &[u8]) {
-    let mut n = 1;
-    let name = loop {
-        let t = if n == 1 { b"New Folder".to_vec() } else { alloc::format!("New Folder {n}").into_bytes() };
-        if !objects::exists(&join(dir, &t)) {
-            break t;
+    // A long name where the file system takes one (HPFS), else 8.3 (FAT).
+    let mut rc = 0;
+    let mut name = Vec::new();
+    for short in [false, true] {
+        let mut n = 1;
+        name = loop {
+            let t = match (short, n) {
+                (false, 1) => b"New Folder".to_vec(),
+                (false, _) => alloc::format!("New Folder {n}").into_bytes(),
+                (true, 1) => b"NEWFOLDR".to_vec(),
+                (true, _) => alloc::format!("NEWFOLD{n}").into_bytes(),
+            };
+            if !objects::exists(&join(dir, &t)) {
+                break t;
+            }
+            n += 1;
+        };
+        let p = z(&join(dir, &name));
+        rc = unsafe { os2::DosCreateDir(p.as_ptr(), core::ptr::null_mut()) };
+        // ERROR_FILENAME_EXCED_RANGE: try a short name.
+        if rc != 206 {
+            break;
         }
-        n += 1;
-    };
-    let p = z(&join(dir, &name));
-    let rc = unsafe { os2::DosCreateDir(p.as_ptr(), core::ptr::null_mut()) };
+    }
     if rc != 0 {
         error(&alloc::format!("Cannot create the folder (error {rc}).").into_bytes());
         return;

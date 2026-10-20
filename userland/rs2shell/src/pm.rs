@@ -479,7 +479,7 @@ pub const KC_VIRTUALKEY: u32 = 0x0002;
 pub const KC_KEYUP: u32 = 0x0040;
 pub const KC_ALT: u32 = 0x0020;
 pub const KC_CTRL: u32 = 0x0010;
-pub const VK_DELETE: u32 = 0x27;
+pub const VK_DELETE: u32 = 0x1b;
 pub const VK_F2: u32 = 0x21;
 pub const VK_F5: u32 = 0x24;
 pub const VK_NEWLINE: u32 = 0x08;
@@ -528,6 +528,16 @@ pub fn window_text(h: u32) -> Vec<u8> {
     let mut buf = [0u8; 260];
     let n = unsafe { WinQueryWindowText(h, buf.len() as i32, buf.as_mut_ptr()) }.max(0) as usize;
     buf[..n.min(buf.len())].to_vec()
+}
+
+/// A frame's title (its text, else its title bar's).
+pub fn frame_title(f: u32) -> Vec<u8> {
+    let t = window_text(f);
+    if !t.is_empty() {
+        return t;
+    }
+    let tb = unsafe { WinWindowFromID(f, FID_TITLEBAR) };
+    if tb != 0 { window_text(tb) } else { t }
 }
 
 pub fn item_text(dlg: u32, id: u32) -> Vec<u8> {

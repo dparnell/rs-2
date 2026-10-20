@@ -155,8 +155,7 @@ pub fn tick() {
             .iter()
             .take(5)
             .flat_map(|&f| {
-                let tb = unsafe { WinWindowFromID(f, FID_TITLEBAR) };
-                let mut t = window_text(if tb != 0 { tb } else { f });
+                let mut t = frame_title(f);
                 t.insert(0, b'\n');
                 t
             })
