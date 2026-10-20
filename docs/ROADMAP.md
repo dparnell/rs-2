@@ -152,8 +152,8 @@ Status markers: done, in progress, planned.
   distribution, behaving as OS/2's E (studied with Ghidra): E's menus,
   ids, accelerators, dialogs and help table, its .TYPE rules, Ctrl+Z
   end-of-file mark and OS2.INI settings (EHXMAIN), the close and
-  shutdown questions, `E /SELFTEST`; its help file (E.HLP) is still to
-  be written
+  shutdown questions, `E /SELFTEST`, and its own help file (E.HLP,
+  written in IPF and compiled by `crates/ipf`)
 - done: the multi-line entry field (WC_MLE, its text engine host-tested
   in `crates/pmwin`), combo boxes, spin buttons, sliders and value sets;
   the clipboard and atom tables shared by all processes (CF_TEXT and

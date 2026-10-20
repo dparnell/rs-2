@@ -1092,14 +1092,18 @@ and templates are rs2's own. IBM's E runs as well (see
   HM_HELP_INDEX, HM_EXT_HELP, HM_DISPLAY_HELP (Using help) and
   HM_KEYS_HELP (E answers HM_QUERY_KEYS_HELP); dialogs' Help buttons
   show their panel (HM_DISPLAY_HELP). Without a help file Help says it
-  is not available. There is no E.HLP yet.
+  is not available. rs2's own E.HLP is written in IPF in
+  `userland/e/E.IPF` (one panel per res= number of the help table, in
+  rs2's own words) and compiled by xtask with `crates/ipf`'s compiler
+  (`ipf::compile`; by hand: `cargo run -p ipf --example ipfc E.IPF
+  E.HLP`) into `OS2\HELP\E.HLP` of the development and dist images.
 
 `E /SELFTEST` checks the file and editing logic on a hidden window and
 prints PASS/FAIL and `e selftest done: N failure(s)` (also on the
 serial port): see [Testing](#testing).
 
 **Not done**: dragging files onto the window (E takes a dropped file),
-the window's icon, E.HLP, Undo restoring a font or colours (rs2's MLE
+the window's icon, Undo restoring a font or colours (rs2's MLE
 does not undo those), the Set tabs dialog E has but does not offer.
 
 ## Debugging
