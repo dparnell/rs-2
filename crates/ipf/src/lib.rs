@@ -74,6 +74,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod bitmap;
+pub mod compile;
 pub mod layout;
 pub mod text;
 

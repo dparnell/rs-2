@@ -238,3 +238,36 @@ fn whole_media() {
     }
     std::eprintln!("{files} files, {panels} panels, {bitmaps} bitmaps");
 }
+
+#[test]
+fn compile_round_trip() {
+    let src = b":userdoc.\n:title.Test Help\n.* a comment\n:h1 res=4144 id=main.Main panel\n:i1.Main things\n:p.Use :hp2.Save:ehp2., then quit&period.\n:ul.\n:li.One\n:li.Two :link reftype=hd refid=second.second:elink.\n:eul.\n:note.Careful.\n:h2 res=0x1360 id=second.Second\n:p.See :link reftype=hd res=4144.main:elink.&colon.\n:dl tsize=8.\n:dt.Key\n:dd.Does it\n:edl.\n:euserdoc.\n";
+    let f = crate::compile::compile(src, true).unwrap();
+    let doc = Doc::parse(&f).unwrap();
+    assert!(doc.is_help());
+    assert_eq!(doc.title(), b"Test Help");
+    assert_eq!(doc.panel_by_res(4144), Some(0));
+    assert_eq!(doc.panel_by_res(0x1360), Some(1));
+    let t = doc.toc(0).unwrap();
+    assert_eq!(t.title, b"Main panel");
+    assert!(t.has_children());
+    assert_eq!(doc.toc(1).unwrap().level(), 2);
+    let text = latin1(&crate::text::plain(&doc, 0));
+    assert!(text.contains("Use Save, then quit."), "{text:?}");
+    assert!(text.contains("\x07One"), "{text:?}");
+    let items = decode(&doc, &doc.cell(0).unwrap());
+    assert!(items.contains(&Item::Link { target: Target::Panel(1), data: None }));
+    assert_eq!(doc.index()[0].text, b"Main things");
+    let w = doc.find_word(b"careful").unwrap();
+    assert_eq!(doc.panels_with_word(w), Some(std::vec![0]));
+    let page = render(&doc, 1, 40);
+    assert!(page.iter().any(|l| l.trim_start().starts_with("Key     Does it")), "{page:?}");
+    assert!(page.iter().any(|l| l.contains("See main:")), "{page:?}");
+}
+
+#[test]
+fn compile_errors() {
+    let e = crate::compile::compile(b":h1.A\n:p.:link reftype=hd res=9.x:elink.\n", true).unwrap_err();
+    assert_eq!(e.line, 2);
+    assert!(crate::compile::compile(b":h1.A\n:frob.\n", true).is_err());
+}
