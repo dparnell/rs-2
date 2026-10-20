@@ -176,7 +176,13 @@ pub struct Volume<D: BlockDevice> {
     hint: u32,
     free_count: Option<u32>,
     readonly: bool,
+    /// Recently read FAT sectors (lba, contents), most recent last: chain
+    /// walks touch the same sector for many clusters in a row.
+    fat_cache: core::cell::RefCell<Vec<(u64, Vec<u8>)>>,
 }
+
+/// FAT sectors kept in [`Volume::fat_cache`].
+const FAT_CACHE: usize = 16;
 
 fn rd16(b: &[u8], o: usize) -> u16 {
     u16::from_le_bytes([b[o], b[o + 1]])
@@ -255,6 +261,7 @@ impl<D: BlockDevice> Volume<D> {
             hint: 2,
             free_count: None,
             readonly: false,
+            fat_cache: core::cell::RefCell::new(Vec::new()),
         };
         // The label proper is the root directory entry; the boot sector
         // holds a copy.
@@ -276,14 +283,48 @@ impl<D: BlockDevice> Volume<D> {
         (self.data_start + (c - 2) * self.spc) as u64
     }
 
+    fn in_fat(&self, lba: u64) -> bool {
+        (self.reserved as u64..(self.reserved + self.fats * self.fat_size) as u64).contains(&lba)
+    }
+
     fn read_sector(&self, lba: u64, buf: &mut [u8]) -> Result<()> {
-        self.dev.read(lba, buf)
+        if buf.len() != self.bps as usize || !self.in_fat(lba) {
+            return self.dev.read(lba, buf);
+        }
+        let mut cache = self.fat_cache.borrow_mut();
+        if let Some(i) = cache.iter().position(|(l, _)| *l == lba) {
+            let e = cache.remove(i);
+            buf.copy_from_slice(&e.1);
+            cache.push(e);
+            return Ok(());
+        }
+        self.dev.read(lba, buf)?;
+        if cache.len() >= FAT_CACHE {
+            cache.remove(0);
+        }
+        cache.push((lba, buf.to_vec()));
+        Ok(())
     }
 
     fn write_sector(&self, lba: u64, buf: &[u8]) -> Result<()> {
         if self.readonly {
             return Err(Error::ReadOnly);
         }
+        // Keep cached FAT sectors in step (whole-sector writes only reach
+        // the FAT; drop anything a larger write covers).
+        let n = (buf.len() / self.bps as usize).max(1) as u64;
+        let mut cache = self.fat_cache.borrow_mut();
+        cache.retain_mut(|(l, data)| {
+            if *l < lba || *l >= lba + n {
+                return true;
+            }
+            if buf.len() == data.len() {
+                data.copy_from_slice(buf);
+                return true;
+            }
+            false
+        });
+        drop(cache);
         self.dev.write(lba, buf)
     }
 
@@ -456,16 +497,53 @@ impl<D: BlockDevice> Volume<D> {
         Ok(())
     }
 
-    pub fn info(&mut self) -> Result<Info> {
-        let free = match self.free_count {
-            Some(f) => f,
-            None => {
+    /// Free clusters, from the first FAT read in large pieces (one request
+    /// per 64 KB rather than one per cluster).
+    fn count_free(&self) -> Result<u32> {
+        let width = match self.fat_type {
+            FatType::Fat12 => {
                 let mut f = 0;
                 for c in 2..self.clusters + 2 {
                     if self.fat_entry(c)? == 0 {
                         f += 1;
                     }
                 }
+                return Ok(f);
+            }
+            FatType::Fat16 => 2u64,
+            FatType::Fat32 => 4u64,
+        };
+        let bps = self.bps as u64;
+        let end = (self.clusters as u64 + 2) * width;
+        let per = (65536 / bps).max(1);
+        let mut buf = vec![0u8; (per * bps) as usize];
+        let mut f = 0;
+        let mut sector = 0u64;
+        while sector * bps < end {
+            let n = per.min((end - sector * bps).div_ceil(bps));
+            let chunk = &mut buf[..(n * bps) as usize];
+            self.read_sector(self.reserved as u64 + sector, chunk)?;
+            let first = sector * bps;
+            for (i, e) in chunk.chunks_exact(width as usize).enumerate() {
+                let off = first + i as u64 * width;
+                if off < 2 * width || off >= end {
+                    continue;
+                }
+                let v = if width == 2 { rd16(e, 0) as u32 } else { rd32(e, 0) & 0x0fff_ffff };
+                if v == 0 {
+                    f += 1;
+                }
+            }
+            sector += n;
+        }
+        Ok(f)
+    }
+
+    pub fn info(&mut self) -> Result<Info> {
+        let free = match self.free_count {
+            Some(f) => f,
+            None => {
+                let f = self.count_free()?;
                 self.free_count = Some(f);
                 f
             }
@@ -1395,6 +1473,17 @@ mod tests {
             let (f, t) = scan(&mut v, false);
             assert!(f.is_empty(), "{ty:?}: {f:?}");
             assert_eq!(t.lost_chains, 0);
+        }
+    }
+
+    /// The bulk free count agrees with counting entry by entry.
+    #[test]
+    fn free_count_in_chunks() {
+        for (ty, size) in [(FatType::Fat12, 1_474_560), (FatType::Fat16, 32 << 20), (FatType::Fat32, 80 << 20)] {
+            let v = sample(ty, size);
+            let slow = (2..v.clusters + 2).filter(|&c| v.fat_entry(c).unwrap() == 0).count() as u32;
+            assert_eq!(v.count_free().unwrap(), slow, "{ty:?}");
+            assert!(slow > 0 && slow < v.clusters);
         }
     }
 
