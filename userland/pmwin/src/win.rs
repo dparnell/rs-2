@@ -571,6 +571,10 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
     if fl & SWP_ZORDER != 0 && behind == HWND_TOP {
         st().desk.to_top(h);
     }
+    // HWND_BOTTOM: below its siblings (above a pinned desktop window).
+    if fl & SWP_ZORDER != 0 && behind == 4 {
+        st().desk.to_bottom(h);
+    }
     if fl & SWP_ACTIVATE != 0 {
         activate(h);
     }

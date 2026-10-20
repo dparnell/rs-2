@@ -1,0 +1,10 @@
+[package]
+name = "desktest"
+description = "Self-checks of the desktop shell's default objects, program objects through the program list API and PMWIN's desktop window calls"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+gpi = { path = "../../crates/gpi" }

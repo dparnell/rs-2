@@ -181,6 +181,8 @@ unsafe extern "C" {
     pub fn WinSubclassWindow(h: u32, p: WndProc) -> u32;
     #[link_name = "PMWIN.913"]
     pub fn WinDrawText(hps: u32, cch: i32, text: *const u8, r: *mut RectL, fg: i32, bg: i32, fl: u32) -> i32;
+    #[link_name = "PMWIN.939"]
+    pub fn WinQueryPresParam(h: u32, id1: u32, id2: u32, pid: *mut u32, cb: u32, pv: *mut u32, fs: u32) -> u32;
     #[link_name = "PMWIN.938"]
     pub fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: *const u32) -> u32;
     #[link_name = "PMWIN.701"]
@@ -316,7 +318,9 @@ pub const SWP_RESTORE: u32 = 0x1000;
 pub const QWL_STYLE: i32 = -2;
 pub const QWL_USER: i32 = 0;
 pub const QW_NEXT: i32 = 0;
-pub const QW_TOP: i32 = 3;
+pub const QW_PREV: i32 = 1;
+pub const QW_TOP: i32 = 2;
+pub const QW_BOTTOM: i32 = 3;
 
 pub const SV_CXSCREEN: i32 = 20;
 pub const SV_CYSCREEN: i32 = 21;
