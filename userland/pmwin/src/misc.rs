@@ -289,8 +289,11 @@ fn cstr(p: *const u8) -> Vec<u8> {
 /// WinMessageBox(hwndParent, hwndOwner, pszText, pszCaption, idWindow,
 /// flStyle): a modal dialog with the text and the buttons of the style
 /// (MB_OK .. MB_ENTERCANCEL); returns the MBID_* of the button pressed.
+/// The dialog has id idWindow; MB_HELP adds a Help button (MBID_HELP,
+/// BS_HELP | BS_NOPOINTERFOCUS, as IBM's MboxInit), which, like F1, asks
+/// the help hook for the help of the box (HLPM_WINDOW, idWindow).
 #[unsafe(no_mangle)]
-pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title: *const u8, _id: u32, style: u32) -> u32 {
+pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title: *const u8, id: u32, style: u32) -> u32 {
     const MBID_OK: u32 = 1;
     const MBID_CANCEL: u32 = 2;
     const MBID_ABORT: u32 = 3;
@@ -310,6 +313,12 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
         8 => &[(MBID_ENTER, b"Enter"), (MBID_CANCEL, b"Cancel")],
         _ => &[(MBID_OK, b"OK")],
     };
+    const MB_HELP: u32 = 0x2000;
+    const MBID_HELP: u32 = 8;
+    let mut buttons: Vec<(u32, &[u8])> = buttons.to_vec();
+    if style & MB_HELP != 0 {
+        buttons.push((MBID_HELP, b"Help"));
+    }
     let font = gpi::font::system();
     let text = cstr(text);
     let title = cstr(title);
@@ -343,7 +352,11 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
     for (i, (id, label)) in buttons.iter().enumerate() {
         // BS_PUSHBUTTON (the first one BS_DEFAULT), WS_TABSTOP, the first
         // one WS_GROUP, visible.
-        let bs = 0x8000_0000 | 0x0002_0000 | if i == 0 { 0x0001_0400 } else { 0 };
+        let mut bs = 0x8000_0000 | 0x0002_0000 | if i == 0 { 0x0001_0400 } else { 0 };
+        if *id == MBID_HELP {
+            // BS_HELP | BS_NOPOINTERFOCUS.
+            bs |= 0x0100 | 0x0800;
+        }
         let x = (w - total) / 2 + i as i32 * (bw + 10);
         items.push(res::DlgItemT { class: b"#3".to_vec(), text: label.to_vec(), style: bs, x: x / 2, y: 4, cx: bw / 2, cy: 12, id: *id, ctl: core::ptr::null(), children: Vec::new() });
     }
@@ -358,7 +371,7 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
         y: (sh - h) / 4,
         cx: w / 2,
         cy: h / 2,
-        id: 0,
+        id: id & 0xffff,
         ctl: &fcf as *const u32 as *const u8,
         children: items,
     };
