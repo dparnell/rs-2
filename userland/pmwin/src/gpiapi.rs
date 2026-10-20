@@ -127,6 +127,8 @@ pub fn destroy(s: &mut State, hps: u32) -> bool {
 
 /// A presentation space of the calling process.
 pub fn entry(s: &mut State, hps: u32) -> Option<&mut PsEntry> {
+    // `hdc | 1`: the DC's own presentation space.
+    let hps = if hps & 1 != 0 && hps >> 28 == 3 { gpiobj::dc_ps(hps & !1) } else { hps };
     let me = crate::state::pid();
     s.pss.get_mut(hps.wrapping_sub(HPS_BASE) as usize)?.as_mut().filter(|e| e.pid == me)
 }

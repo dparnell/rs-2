@@ -36,6 +36,9 @@ pub struct Objects {
     bitmaps: Vec<Option<Bm>>,
     dcs: Vec<Option<DcKind>>,
     palettes: Vec<Option<Vec<u32>>>,
+    /// The presentation spaces that stand for DCs used as `hdc | 1`
+    /// (hdc, hps).
+    dc_pss: Vec<(u32, u32)>,
 }
 
 /// The calling process's GPI objects.
@@ -45,7 +48,52 @@ fn objects() -> &'static mut Objects {
 
 const HRGN_BASE: u32 = 0x1000_0001;
 const HBM_BASE: u32 = 0x2000_0001;
-const HDC_BASE: u32 = 0x3000_0001;
+/// DC handles are even: OS/2's GPI takes `hdc | 1` for a presentation
+/// space that draws on the DC itself (OS/2's Icon Editor uses that).
+const HDC_BASE: u32 = 0x3000_0002;
+
+fn dc_index(h: u32) -> Option<usize> {
+    (h & 1 == 0 && h >= HDC_BASE).then(|| ((h - HDC_BASE) / 2) as usize)
+}
+
+fn dc_handle(i: usize) -> u32 {
+    HDC_BASE + 2 * i as u32
+}
+
+fn dc_get(h: u32) -> Option<&'static mut DcKind> {
+    objects().dcs.get_mut(dc_index(h)?)?.as_mut()
+}
+
+fn dc_add(k: DcKind) -> u32 {
+    let v = &mut objects().dcs;
+    match v.iter().position(|p| p.is_none()) {
+        Some(i) => {
+            v[i] = Some(k);
+            dc_handle(i)
+        }
+        None => {
+            v.push(Some(k));
+            dc_handle(v.len() - 1)
+        }
+    }
+}
+
+/// The presentation space for `hdc | 1`: one per DC, associated with it,
+/// made when first used. 0 if `hdc` is not a DC.
+pub fn dc_ps(hdc: u32) -> u32 {
+    if dc_get(hdc).is_none() {
+        return 0;
+    }
+    if let Some(&(_, hps)) = objects().dc_pss.iter().find(|(d, _)| *d == hdc) {
+        return hps;
+    }
+    // GPIA_ASSOC | PU_PELS.
+    let hps = crate::gpiapi::GpiCreatePS(1, hdc, core::ptr::null(), 0x4008);
+    if hps != 0 {
+        objects().dc_pss.push((hdc, hps));
+    }
+    hps
+}
 /// The screen device of windows' cached presentation spaces
 /// (GpiQueryDevice of a WinGetPS PS): DevQueryCaps answers for it.
 pub const SCREEN_DC: u32 = 0x3000_0000;
@@ -122,7 +170,7 @@ pub fn delete_bitmap_of(p: u32, h: u32) {
 
 /// Associate a PS with a device context.
 pub fn associate(hps: u32, hdc: u32) -> bool {
-    let kind = match get(&mut objects().dcs, hdc, HDC_BASE) {
+    let kind = match dc_get(hdc) {
         Some(DcKind::Window(h)) => DcKind::Window(*h),
         Some(DcKind::Memory) => DcKind::Memory,
         Some(DcKind::Info) => DcKind::Info,
@@ -556,13 +604,19 @@ pub extern "C" fn DevOpenDC(_hab: u32, ty: i32, _token: *const u8, _n: i32, _dop
         OD_INFO | OD_SCREEN => DcKind::Info,
         _ => return 0,
     };
-    add(&mut objects().dcs, k, HDC_BASE)
+    dc_add(k)
 }
 
 /// DevCloseDC(hdc): DEV_OK 1.
 #[unsafe(no_mangle)]
 pub extern "C" fn DevCloseDC(hdc: u32) -> u32 {
-    remove(&mut objects().dcs, hdc, HDC_BASE).is_some() as u32
+    let Some(i) = dc_index(hdc) else { return 0 };
+    let o = objects();
+    if let Some(at) = o.dc_pss.iter().position(|(d, _)| *d == hdc) {
+        let (_, hps) = o.dc_pss.remove(at);
+        crate::gpiapi::GpiDestroyPS(hps);
+    }
+    objects().dcs.get_mut(i).and_then(|d| d.take()).is_some() as u32
 }
 
 /// WinOpenWindowDC(hwnd): the window's device context (one per window).
@@ -573,15 +627,15 @@ pub extern "C" fn WinOpenWindowDC(h: u32) -> u32 {
     }
     let o = objects();
     if let Some(i) = o.dcs.iter().position(|d| matches!(d, Some(DcKind::Window(w)) if *w == h)) {
-        return HDC_BASE + i as u32;
+        return dc_handle(i);
     }
-    add(&mut o.dcs, DcKind::Window(h), HDC_BASE)
+    dc_add(DcKind::Window(h))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowDC(h: u32) -> u32 {
     let o = objects();
-    o.dcs.iter().position(|d| matches!(d, Some(DcKind::Window(w)) if *w == h)).map_or(0, |i| HDC_BASE + i as u32)
+    o.dcs.iter().position(|d| matches!(d, Some(DcKind::Window(w)) if *w == h)).map_or(0, dc_handle)
 }
 
 /// Device capabilities (CAPS_*) of the display.
@@ -621,10 +675,13 @@ fn caps(i: i32) -> i32 {
     }
 }
 
-/// DevQueryCaps(hdc, lStart, lCount, alArray)
+/// DevQueryCaps(hdc, lStart, lCount, alArray). IBM's GRE also takes a
+/// presentation space for the DC (OS/2's Icon Editor passes a WinGetPS
+/// one).
 #[unsafe(no_mangle)]
 pub extern "C" fn DevQueryCaps(hdc: u32, start: i32, n: i32, out: *mut i32) -> u32 {
-    if (hdc != SCREEN_DC && get(&mut objects().dcs, hdc, HDC_BASE).is_none()) || out.is_null() || start < 0 || n < 0 {
+    let known = hdc == SCREEN_DC || dc_get(hdc).is_some() || entry(st(), hdc).is_some();
+    if !known || out.is_null() || start < 0 || n < 0 {
         return 0;
     }
     for i in 0..n {

@@ -152,17 +152,33 @@ fn create_controls(frame: u32, fcf: u32, title: &[u8], hmod: u32, id: u32) {
     }
 }
 
-/// Place the frame controls and the client.
-pub fn layout(frame: u32) {
+pub const WM_FORMATFRAME: u32 = 0x0041;
+pub const WM_QUERYFRAMECTLCOUNT: u32 = 0x0059;
+
+/// SWP.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct Swp {
+    pub fl: u32,
+    pub cy: i32,
+    pub cx: i32,
+    pub y: i32,
+    pub x: i32,
+    pub behind: u32,
+    pub hwnd: u32,
+    pub reserved: [u32; 2],
+}
+
+/// Where the frame's standard controls and its client go (frame
+/// coordinates): the default WM_FORMATFRAME. The client last.
+fn format(frame: u32) -> (alloc::vec::Vec<(u32, Rect)>, Rect) {
     let s = st();
-    let Some(f) = s.frames.get(&frame) else { return };
+    let mut out = alloc::vec::Vec::new();
+    let Some(f) = s.frames.get(&frame) else { return (out, Rect::default()) };
     let (fcf, client) = (f.fcf, f.client);
-    if f.min.is_some() {
-        return;
-    }
     let (cx, cy) = s.desk.get(frame).map_or((0, 0), |w| (w.cx, w.cy));
     let b = border(fcf);
-    let (mut l, mut bot, mut r, mut top) = (b, b, cx - b, cy - b);
+    let (l, mut bot, mut r, mut top) = (b, b, cx - b, cy - b);
     let sys = WinWindowFromID(frame, FID_SYSMENU);
     let title = WinWindowFromID(frame, FID_TITLEBAR);
     let minmax = WinWindowFromID(frame, FID_MINMAX);
@@ -171,37 +187,92 @@ pub fn layout(frame: u32) {
         let mut tl = l;
         let mut tr = r;
         if sys != 0 {
-            place(sys, Rect::new(l, y, l + TITLE_H, top));
+            out.push((sys, Rect::new(l, y, l + TITLE_H, top)));
             tl += TITLE_H;
         }
         if minmax != 0 {
             let n = menu::item_count(minmax).max(1);
-            place(minmax, Rect::new(r - n * TITLE_H, y, r, top));
+            out.push((minmax, Rect::new(r - n * TITLE_H, y, r, top)));
             tr -= n * TITLE_H;
         }
         if title != 0 {
-            place(title, Rect::new(tl, y, tr, top));
+            out.push((title, Rect::new(tl, y, tr, top)));
         }
         top = y;
     }
     let m = WinWindowFromID(frame, FID_MENU);
     if m != 0 && st().desk.get(m).is_some_and(|w| w.visible_style()) {
-        place(m, Rect::new(l, top - MENU_H, r, top));
+        out.push((m, Rect::new(l, top - MENU_H, r, top)));
         top -= MENU_H;
     }
     let vs = WinWindowFromID(frame, FID_VERTSCROLL);
     let hs = WinWindowFromID(frame, FID_HORZSCROLL);
     if hs != 0 {
-        place(hs, Rect::new(l, bot, r - if vs != 0 { SCROLL_W } else { 0 }, bot + SCROLL_W));
+        out.push((hs, Rect::new(l, bot, r - if vs != 0 { SCROLL_W } else { 0 }, bot + SCROLL_W)));
         bot += SCROLL_W;
     }
     if vs != 0 {
-        place(vs, Rect::new(r - SCROLL_W, bot, r, top));
+        out.push((vs, Rect::new(r - SCROLL_W, bot, r, top)));
         r -= SCROLL_W;
     }
-    let _ = &mut l;
+    let rc = Rect::new(l, bot, r.max(l), top.max(bot));
     if client != 0 {
-        place(client, Rect::new(l, bot, r.max(l), top.max(bot)));
+        out.push((client, rc));
+    }
+    (out, rc)
+}
+
+/// WM_FORMATFRAME (mp1 = an SWP array, mp2 = PRECTL for the client
+/// rectangle or 0): the default fills one SWP per standard control and
+/// the client, and returns how many.
+fn format_frame(frame: u32, swps: *mut Swp, prcl: *mut crate::gpiapi::RectL) -> u32 {
+    let (v, rc) = format(frame);
+    if !prcl.is_null() {
+        unsafe { prcl.write_unaligned(crate::gpiapi::RectL::from(rc)) };
+    }
+    if swps.is_null() {
+        return 0;
+    }
+    for (i, (h, r)) in v.iter().enumerate() {
+        let swp = Swp { fl: 0x0003, cy: r.height(), cx: r.width(), y: r.bottom, x: r.left, behind: 3, hwnd: *h, reserved: [0; 2] };
+        unsafe { swps.add(i).write_unaligned(swp) };
+    }
+    v.len() as u32
+}
+
+/// Place the frame controls and the client. As on OS/2 the frame asks
+/// its window procedure (WM_QUERYFRAMECTLCOUNT, WM_FORMATFRAME), so a
+/// subclassed frame can add controls of its own and give the client
+/// less room; the frame's own procedure, and frames of other threads,
+/// are formatted directly.
+pub fn layout(frame: u32) {
+    let s = st();
+    let Some(f) = s.frames.get(&frame) else { return };
+    if f.min.is_some() {
+        return;
+    }
+    let own = s.desk.get(frame).is_some_and(|w| w.proc_ == frame_entry as *const () as u32);
+    let placed: alloc::vec::Vec<(u32, Rect, u32)> = if own || s.queue_of(frame) != s.my_queue() {
+        format(frame).0.into_iter().map(|(h, r)| (h, r, 0x0003)).collect()
+    } else {
+        let n = (send(frame, WM_QUERYFRAMECTLCOUNT, 0, 0) as usize).clamp(1, 64) + 1;
+        let mut swps = alloc::vec![Swp::default(); n];
+        let mut rc = crate::gpiapi::RectL { left: 0, bottom: 0, right: 0, top: 0 };
+        let got = send(frame, WM_FORMATFRAME, swps.as_mut_ptr() as u32, &mut rc as *mut _ as u32) as usize;
+        swps.iter()
+            .take(got.min(n))
+            .filter(|w| w.fl & 0x0003 != 0 && w.hwnd != 0)
+            .map(|w| (w.hwnd, Rect::new(w.x, w.y, w.x + w.cx.max(0), w.y + w.cy.max(0)), w.fl))
+            .collect()
+    };
+    for (h, r, fl) in placed {
+        if st().desk.get(h).is_some_and(|w| w.parent == frame) {
+            place(h, r);
+            // SWP_SHOW, SWP_HIDE.
+            if fl & 0x0018 != 0 {
+                win::show(h, fl & 0x0008 != 0);
+            }
+        }
     }
 }
 
@@ -684,6 +755,8 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         // WM_QUERYFRAMEINFO: FI_FRAME | FI_ACTIVATEOK.
         0x0050 => 5,
         WM_CALCFRAMERECT => calc_frame_rect(h, mp1 as *mut crate::gpiapi::RectL, mp2 != 0),
+        WM_QUERYFRAMECTLCOUNT => format(h).0.len() as u32,
+        WM_FORMATFRAME => format_frame(h, mp1 as *mut Swp, mp2 as *mut crate::gpiapi::RectL),
         help::WM_QUERYHELPINFO => st().frames.get(&h).map_or(0, |f| f.help),
         help::WM_SETHELPINFO => {
             if let Some(f) = st().frames.get_mut(&h) {

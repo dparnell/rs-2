@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use gpi::{Point, Rect};
 use pmwin::{ws, HWND_DESKTOP};
 
-use crate::color::{self, resolve};
+use crate::color;
 use crate::gpiapi::{self, PointL, RectL};
 use crate::msg::{notify, send};
 use crate::pointer;
@@ -1080,15 +1080,12 @@ pub extern "C" fn WinFillRect(hps: u32, prcl: *const RectL, c: i32) -> u32 {
         return 0;
     }
     let r = unsafe { prcl.read_unaligned() }.rect();
-    let s = st();
-    let mut surface = s.surface;
-    pointer::hide(s);
-    let ok = gpiapi::entry(s, hps).map(|e| {
+    // On the PS's target: the screen, or a memory PS's bitmap.
+    gpiapi::draw(hps, |e, surface| {
         let rgb = gpiapi::rgb(e, c);
-        e.ps.fill_rect(&mut surface, r, rgb);
-    });
-    pointer::show(s);
-    ok.is_some() as u32
+        e.ps.fill_rect(surface, r, rgb);
+    })
+    .is_some() as u32
 }
 
 #[unsafe(no_mangle)]
@@ -1130,24 +1127,57 @@ pub extern "C" fn WinUpdateWindow(h: u32) -> u32 {
     1
 }
 
-/// WinDrawText(hps, cchText, lpchText, prcl, clrFore, clrBack, flCmd)
+/// WinDrawText(hps, cchText, lpchText, prcl, clrFore, clrBack, flCmd):
+/// one line of text in the rectangle, aligned by DT_LEFT/CENTER/RIGHT
+/// and DT_TOP/VCENTER/BOTTOM, on the PS's target. DT_WORDBREAK draws
+/// the words that fit on the line (callers loop over the rest);
+/// DT_QUERYEXTENT only measures (the rectangle becomes the text's);
+/// DT_MNEMONIC underlines the character after `~`; DT_HALFTONE greys
+/// the text; DT_ERASERECT fills the rectangle first; DT_TEXTATTRS uses
+/// the PS's colours. Returns the number of characters processed.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut RectL, fore: i32, back: i32, fl: u32) -> i32 {
-    const DT_CENTER: u32 = 0x100;
-    const DT_RIGHT: u32 = 0x200;
-    const DT_VCENTER: u32 = 0x400;
-    const DT_BOTTOM: u32 = 0x800;
+    const DT_QUERYEXTENT: u32 = 0x0002;
+    const DT_TEXTATTRS: u32 = 0x0040;
+    const DT_CENTER: u32 = 0x0100;
+    const DT_RIGHT: u32 = 0x0200;
+    const DT_VCENTER: u32 = 0x0400;
+    const DT_BOTTOM: u32 = 0x0800;
+    const DT_HALFTONE: u32 = 0x1000;
+    const DT_MNEMONIC: u32 = 0x2000;
+    const DT_WORDBREAK: u32 = 0x4000;
     const DT_ERASERECT: u32 = 0x8000;
-    const DT_TEXTATTRS: u32 = 0x40;
-    const DT_QUERYEXTENT: u32 = 0x2;
     if text.is_null() || prcl.is_null() {
         return 0;
     }
-    let t = if cch < 0 { cstr(text) } else { unsafe { core::slice::from_raw_parts(text, cch as usize) }.to_vec() };
+    let all = if cch < 0 { cstr(text) } else { unsafe { core::slice::from_raw_parts(text, cch as usize) }.to_vec() };
     let r = unsafe { prcl.read_unaligned() }.rect();
-    let s = st();
-    let mut surface = s.surface;
-    let font = gpi::font::system();
+    let Some(e) = gpiapi::entry(st(), hps) else { return 0 };
+    let font = e.ps.font;
+    // The line: up to a line end; with DT_WORDBREAK, the words that fit.
+    let line_end = all.iter().position(|&c| c == b'\r' || c == b'\n').unwrap_or(all.len());
+    let mut n = line_end;
+    let width = |t: &[u8]| {
+        let t = if fl & DT_MNEMONIC != 0 { crate::draw::strip_mnemonic(t).0 } else { t.to_vec() };
+        font.text_width(&t)
+    };
+    if fl & DT_WORDBREAK != 0 && width(&all[..n]) > r.width() {
+        let mut fit = 0;
+        let mut i = 0;
+        while i <= line_end {
+            if i == line_end || all[i] == b' ' {
+                if width(&all[..i]) > r.width() {
+                    break;
+                }
+                fit = i;
+            }
+            i += 1;
+        }
+        // A word longer than the line is drawn cut off.
+        n = if fit == 0 { all[..line_end].iter().position(|&c| c == b' ').unwrap_or(line_end) } else { fit };
+    }
+    let shown = &all[..n];
+    let (t, mark) = if fl & DT_MNEMONIC != 0 { crate::draw::strip_mnemonic(shown) } else { (shown.to_vec(), None) };
     let w = font.text_width(&t);
     let x = if fl & DT_CENTER != 0 {
         r.left + (r.width() - w) / 2
@@ -1163,33 +1193,49 @@ pub extern "C" fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut Re
     } else {
         r.top - font.height + font.descender
     };
-    if fl & DT_QUERYEXTENT != 0 {
-        // Only the rectangle the text would take, aligned as asked (OS/2
-        // applets lay themselves out from the height of a line).
-        let bottom = y - font.descender;
-        let e = RectL { left: x, bottom, right: x + w, top: bottom + font.height };
-        unsafe { prcl.write_unaligned(e) };
-        return t.len() as i32;
+    // What was processed: the line, the blanks after it, a line end.
+    let mut used = n;
+    while used < all.len() && all[used] == b' ' {
+        used += 1;
     }
-    pointer::hide(s);
-    if let Some(e) = gpiapi::entry(s, hps) {
+    if used < all.len() && all[used] == b'\r' {
+        used += 1;
+    }
+    if used < all.len() && all[used] == b'\n' {
+        used += 1;
+    }
+    if fl & DT_QUERYEXTENT != 0 {
+        let base = y - font.descender;
+        let ext = RectL { left: x, bottom: base, right: x + w, top: base + font.height };
+        unsafe { prcl.write_unaligned(ext) };
+        return used as i32;
+    }
+    gpiapi::draw(hps, |e, surface| {
         if fl & DT_ERASERECT != 0 {
-            let bg = if fl & DT_TEXTATTRS != 0 { e.ps.back_color } else { resolve(back) };
-            e.ps.fill_rect(&mut surface, r, bg);
+            let bg = if fl & DT_TEXTATTRS != 0 { e.ps.back_color } else { gpiapi::rgb(e, back) };
+            e.ps.fill_rect(surface, r, bg);
         }
         let saved = (e.ps.color, e.ps.back_mix);
         if fl & DT_TEXTATTRS == 0 {
-            e.ps.color = resolve(fore);
+            e.ps.color = gpiapi::rgb(e, fore);
+        }
+        if fl & DT_HALFTONE != 0 {
+            e.ps.color = 0x808080;
         }
         e.ps.back_mix = gpi::Mix::LeaveAlone;
         let clip = e.ps.clip.clone();
         e.ps.clip = clip.iter().map(|c| c.intersect(&r.offset(e.ps.origin.x, e.ps.origin.y))).collect();
-        e.ps.char_string_at(&mut surface, Point::new(x, y), &t);
+        e.ps.char_string_at(surface, Point::new(x, y), &t);
+        if let Some(i) = mark {
+            let ux = x + font.text_width(&t[..i]);
+            let cw = font.text_width(&t[i..i + 1]);
+            let c = e.ps.color;
+            e.ps.fill_rect(surface, Rect::new(ux, y - 2, ux + cw, y - 1), c);
+        }
         e.ps.clip = clip;
         (e.ps.color, e.ps.back_mix) = saved;
-    }
-    pointer::show(s);
-    t.len() as i32
+    });
+    used as i32
 }
 
 // ---- The desktop and the frame window ----

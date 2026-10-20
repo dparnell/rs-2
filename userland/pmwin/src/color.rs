@@ -44,5 +44,5 @@ pub fn sys(i: i32) -> Rgb {
 /// RGB for a colour index as PM programs pass it: SYSCLR_* (-50..-4),
 /// CLR_* (-3..15).
 pub fn resolve(i: i32) -> Rgb {
-    if (-50..=-4).contains(&i) { sys(i) } else { color::index_to_rgb(i) }
+    if (-50..=-6).contains(&i) { sys(i) } else { color::index_to_rgb(i) }
 }
