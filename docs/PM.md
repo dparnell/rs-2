@@ -36,7 +36,7 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
 | `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
-| `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), HELPMGR stubs, PMDRAG (no drag is ever in progress), PMMERGE (the entry points programs import from it directly), LIBUNI (locale objects). |
+| `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), HELPMGR stubs, PMDRAG (no drag is ever in progress), PMMERGE (IBM PMMERGE's ordinals, see below), LIBUNI (locale objects). |
 
 ## Kernel services (module RS2API)
 
@@ -312,6 +312,34 @@ repaint, and the program catches up with its queued input and paints.
 Keys typed meanwhile went to the window that had the focus when they were
 typed, also if that was the stopped program's.
 
+## The switch list
+
+The switch list (`WinAddSwitchEntry`, `WinChangeSwitchEntry`,
+`WinQuerySwitchEntry`, `WinRemoveSwitchEntry`, `WinQuerySwitchHandle`,
+`WinQuerySwitchList`, `WinSwitchToProgram`) is PM state kept by PMWIN
+(rs2-private ordinals 9010-9016); PMSHAPI's entry points call them
+through the process's PMWIN (PMSHAPI does not import it: text-mode
+programs load PMSHAPI too). Entries are checked as IBM's PMWIN does
+(visibility flags, the caller's process when idProcess is 0, titles cut
+at 60 characters); a frame created with `FCF_TASKLIST` gets an entry
+whose title follows the frame's until the program sets one (an entry
+the program adds for the frame replaces it). Entries go when their
+process ends, a frame's own entry with the frame. The window list
+(Ctrl+Esc) shows frames by their entry's title, leaves out
+`SWL_INVISIBLE` entries and also lists entries without a frame of their
+own.
+
+## PMMERGE ordinals
+
+On OS/2 Warp 4, PMWIN, PMGPI and PMSHAPI forward most entry points to
+PMMERGE.DLL, and some programs (OS/2's Klondike and Chess) import
+PMMERGE's ordinals directly. rs2's PMMERGE exports, for every one of
+those that rs2 implements, IBM's PMMERGE ordinal as an entry that jumps
+to rs2's PMWIN or PMSHAPI export: `userland/pmmerge/ibm-forwards.txt`
+(IBM's map, from crates/os2-exe's `lximage` "forward" lines) and
+`tools/scripts/gen_pmmerge_forwards.py`, which `gen_pm_exports.py` runs
+after regenerating PMWIN's or PMSHAPI's exports.
+
 ## Status
 
 Milestone 1 works: the unmodified Toolkit `hello.exe` shows its window,
@@ -331,7 +359,18 @@ mouse and keyboard. What PMWIN has:
   buttons (see [Minimizing](#minimizing)), menu
   bar (`FCF_MENU`), frame scroll bars; sizing borders resize the frame.
   The frame passes `WM_COMMAND`, `WM_CONTROL`, scroll and menu
-  notifications to its client.
+  notifications and application messages (`WM_USER` and up; IBM's frame
+  passes everything it does not process) to its client. It lays out its
+  controls as IBM's does, by asking its window procedure:
+  `WM_QUERYFRAMECTLCOUNT`, then `WM_FORMATFRAME` with an SWP array (the
+  client last) that it applies with the SWPs' `SWP_SHOW`/`SWP_HIDE`, so
+  a subclassed frame adds controls of its own (OS/2's Icon Editor puts
+  its status line and palette there). `WM_CALCFRAMERECT`
+  (`WinCalcFrameRect`) converts between frame and client rectangles. A
+  frame created with `FCF_SHELLPOSITION` stays without a size (its
+  client gets no `WM_SIZE`) until it is first shown, as on OS/2;
+  `FCF_TASKLIST` gives it a switch entry (see [The switch
+  list](#the-switch-list)).
 - Resources through `DosGetResource`: menu templates (nested submenus),
   dialog templates, accelerator tables, string and message tables
   (`WinLoadString`, `WinLoadMessage`), bitmaps for `SS_BITMAP` statics.
@@ -366,7 +405,9 @@ mouse and keyboard. What PMWIN has:
   dialog's parent (a client window's frame). `WinDefDlgProc` for a
   window that is not a dialog calls the window's class procedure (a
   control subclassed with a procedure that passes the rest to
-  `WinDefDlgProc`, as the System Editor does).
+  `WinDefDlgProc`, as the System Editor does). A template whose window
+  is not a frame creates that class (PMREXXIO's input line is an entry
+  field), subclassed by the dialog procedure.
 - Focus and activation: activating a frame gives it the focus, which it
   passes on to `QWL_HWNDFOCUSSAVE` (the window that last had it, or one
   the application set) or its client, so the client hears that the
@@ -440,12 +481,35 @@ The GPI covers:
 - Colour: logical colour tables (`LCOLF_CONSECRGB`, `INDRGB`, `RGB`),
   RGB/index queries, palettes; on the true-colour display
   `GpiAnimatePalette` recolours what was drawn with the palette.
-- Text: one font, the system font (8x16, from unscii), reported as
-  System VIO; the standard outline faces (Helvetica, Times New Roman,
-  Courier) are offered by `GpiQueryFonts` and drawn by scaling its
-  glyphs to the character box, also as figures in paths (clip paths
-  from text). Font metrics, text boxes, character positions,
+- Text: the system font (8x16, from unscii, code page 850 with the
+  graphic characters at 0x01-0x1F), reported as System VIO; the
+  standard outline faces (Helvetica, Times New Roman, Courier) are
+  offered by `GpiQueryFonts` and drawn by scaling its glyphs to the
+  character box, also as figures in paths (clip paths from text);
+  OS/2's other image faces (Helv, Tms Rmn, System Proportional, System
+  Monospaced) draw with the system font. `GpiLoadFonts` loads the image
+  fonts of a font file (a resource DLL: `RT_FONTDIR`, `RT_FONT` in
+  OS/2's format) for the process; `GpiQueryFonts` offers them with
+  `QF_PRIVATE`, `GpiCreateLogFont` picks one by lMatch or by face and
+  size, and they draw with their own proportional glyphs (Klondike's
+  CARDSYM.FON). Font metrics, text boxes, character positions,
   `GpiCharStringPos` with increments, opaque and clipped rectangles.
+- `hdc | 1` used as a presentation space draws on that DC itself (as in
+  IBM's GPI, which hands such handles to the engine; DC handles are
+  even); `DevQueryCaps` also takes a presentation space. `WinFillRect`,
+  `WinDrawText`, `WinDrawBitmap`, `WinDrawPointer` and `WinDrawBorder`
+  draw on a memory PS's bitmap. `CLR_TRUE`/`CLR_FALSE` are white and
+  black.
+- `WinDrawText`: one line, `DT_QUERYEXTENT` (measures only),
+  `DT_WORDBREAK` (the words that fit; returns the characters processed,
+  for callers that loop), `DT_MNEMONIC`, `DT_HALFTONE`, `DT_ERASERECT`,
+  `DT_TEXTATTRS`. `WinDrawBorder` (the four bands as IBM's engine
+  splits them, `DB_INTERIOR`, `DB_AREAATTRS`, `DB_STANDARD`,
+  `DB_DLGBORDER`, Warp 4's raised/depressed/trough/fence/field
+  borders), `WinGetSysBitmap` (the `SBMP_*` images drawn as rs2's
+  controls look), `WinGetKeyState` (virtual keys as the input thread saw
+  them), `WinBeginEnumWindows`/`WinGetNextWindow`/`WinEndEnumWindows`,
+  `WinQueryClassName`. Timers run at most at the 31 ms clock rate.
 
 Not done: metafiles (`GpiLoadMetaFile` fails), retained segments,
 printing (no printer DCs), rotated or sheared text, real outline fonts,

@@ -112,20 +112,24 @@ HELPMGR. Tested with keyboard and mouse input from
 The PM programs of OS/2 itself (from the client CD, with their DLLs,
 help files and data), booted one at a time (`xtask run --init`); what
 they import that rs2 lacks was listed with `crates/os2-exe`'s
-`lximports` example against rs2's export lists. Pulse runs; the others
-do not yet.
+`lximports` example against rs2's export lists. Besides the program,
+each needs the files named in its row in `work/modules.txt` (`--init`
+starts programs in `C:\`, where IBM's program objects start them in
+their own directory).
 
 | Program | Status | Notes |
 |---------|--------|-------|
-| KLONDIKE.EXE (Solitaire), OS2CHESS.EXE (Chess) | fails | Import PM by PMMERGE's own ordinals (5047-5414, about 95 each), which IBM's PMWIN, PMGPI, PMSHAPI and PMWP forward to; rs2's PMMERGE does not export them. Under their public names rs2 has 104 of the 110; missing: WinAddSwitchEntry, WinChangeSwitchEntry, WinRemoveSwitchEntry, WinCalcFrameRect, WinDrawBorder. |
-| MAHJONGG.EXE | fails | WinAddSwitchEntry, WinChangeSwitchEntry, WinRemoveSwitchEntry, WinCalcFrameRect, WinDrawBorder, WinCreateObject (PMWP). |
-| ICONEDIT.EXE | fails | The switch list calls, WinDrawBorder, WinGetKeyState, WinGetSysBitmap. |
-| PMFORMAT.EXE, AUTOUTL2.EXE | fails | WinAddSwitchEntry (AUTOUTL2 also WinRemoveSwitchEntry). |
-| PMREXX.EXE | fails | WinChangeSwitchEntry, WinQuerySwitchEntry, WinQuerySwitchHandle (PMREXXIO.DLL and IBM REXX load). |
-| ATAMNT2.EXE | fails | WinBeginEnumWindows, WinGetNextWindow, WinEndEnumWindows, WinQueryClassName. |
+| KLONDIKE.EXE (Solitaire) | works | Deals, plays (stock, moves by dragging), menus, window list entry. Imports PM by PMMERGE's own ordinals (rs2's PMMERGE exports them). Needed: CARDSYM.FON on PATH (\OS2\APPS on OS/2), loaded with `GpiLoadFonts` (without it the program asks to continue with system fonts, and its pips use code page 850's suit characters); the frame sized only when first shown (it saves its position from `WM_SIZE`); `WinDrawPointer` into memory PSs; the Helv/Tms Rmn faces. MMPM sounds are off (no MDM.DLL). |
+| OS2CHESS.EXE (Chess) | works | Set Players dialog, the 3D board, human moves (validated, "Illegal move" otherwise) and computer moves (computer against computer plays a game). CHESSRES.DLL is not on the media and not needed. Network play not tried. |
+| MAHJONGG.EXE | works | Tiles (masks drawn with `CLR_TRUE`/`CLR_FALSE`), menus, help (MAHJONGG.HLP and DEFAULT.HLP, the layout's help file). Needed: TILEDEF.DLL (the tile set). `WinCreateObject` makes only WPProgram objects on the desktop; Mahjongg's shadow of a saved game in its folder fails quietly. |
+| ICONEDIT.EXE (Icon Editor) | works | Edit grid, status line and preview (frame controls added through `WM_FORMATFRAME`), palette, drawing with the mouse. Needed: `hdc \| 1` as a PS, `DevQueryCaps` with a PS, `WinDrawText` `DT_QUERYEXTENT`. Saving and loading icon files not tried. |
+| PMFORMAT.EXE | works | Needs a drive argument (`PMFORMAT A:`) and PMFORMAT.DLL (its resources; rs2's loader used to hand back the running EXE for that name). The Format dialog, the progress dialog (Stop) and help (WPHELP.HLP) work; formatting itself runs FORMAT.COM and was not tried on a real diskette. |
+| AUTOUTL2.EXE (Auto Configurator) | works | Main panel and help; needs \OS2\AUTODRV2.SYS (the driver it configures, as a file) and AUTOUTL2.HLP in the current directory. No PC card scripts were tried. |
+| PMREXX.EXE | works | Runs a REXX procedure (`PMREXX PROC`, which must start with a `/*` comment), shows its output and takes input for PULL. Needed: the frame passing PMREXXIO's messages (`WM_USER` and up) to its client, timers no faster than the clock (PMREXXIO asks for 0 ms), a dialog template whose window is an entry field. |
+| ATAMNT2.EXE | fails | Starts, then reports that PCMSSDIF.SYS (PC card socket services) is not loaded: rs2 has no PC card support. Its PM calls (window enumeration, `WinQueryClassName`) are there. |
 | CLIPOS2.EXE (Clipboard Viewer) | fails | GpiCopyMetaFile, WinSetMultWindowPos. |
-| EPM.EXE (Enhanced Editor) | fails | PMSPL.DLL (the spooler, imported by ETKC603.DLL); cursors (WinCreateCursor, WinShowCursor, WinDestroyCursor), DDE (WinDdeInitiate, WinDdePostMsg, WinDdeRespond), the switch list, WinGetKeyState, WinGetSysBitmap, WinQueryClassName, WinSetMultWindowPos, WinSetWindowBits, WinQueryCpType, WinStoreWindowPos, WinRestoreWindowPos. |
-| PICVIEW.EXE (Picture Viewer) | fails | PMSPL.DLL (through PMPIC.DLL); GPI segments and metafiles (GpiOpenSegment, GpiCloseSegment, GpiDrawChain, GpiGetData, GpiPutData, GpiSetMetaFileBits, GpiQueryMetaFileBits/Length, GpiSaveMetaFile, GpiCopyMetaFile, GpiSetInitialSegmentAttrs, GpiSetViewingTransformMatrix, GpiSetDefViewingLimits, GpiSetDefAttrs), WinCpTranslateString, WinGetKeyState, WinSetErrorInfo. |
+| EPM.EXE (Enhanced Editor) | fails | PMSPL.DLL (the spooler, imported by ETKC603.DLL); cursors (WinCreateCursor, WinShowCursor, WinDestroyCursor), DDE (WinDdeInitiate, WinDdePostMsg, WinDdeRespond), WinSetMultWindowPos, WinSetWindowBits, WinQueryCpType, WinStoreWindowPos, WinRestoreWindowPos. |
+| PICVIEW.EXE (Picture Viewer) | fails | PMSPL.DLL (through PMPIC.DLL); GPI segments and metafiles (GpiOpenSegment, GpiCloseSegment, GpiDrawChain, GpiGetData, GpiPutData, GpiSetMetaFileBits, GpiQueryMetaFileBits/Length, GpiSaveMetaFile, GpiCopyMetaFile, GpiSetInitialSegmentAttrs, GpiSetViewingTransformMatrix, GpiSetDefViewingLimits, GpiSetDefAttrs), WinCpTranslateString, WinSetErrorInfo. |
 | GLOCALE.EXE (Locale) | fails | LIBUNI's locale calls (24 ordinals), WinSetWindowBits. |
 | PMCHKDSK.EXE, PMSEEK.EXE (Seek and Scan) | fails | 16-bit PM programs: the 16-bit PMWIN, PMGPI, PMSHAPI and HELPMGR entry points (Win16*, Gpi16*, Prf16*), which rs2 does not have. |
 | MPCPUMON.EXE (Pulse) | works | A moving graph of every processor's load (`--smp 2`), the legend, the grid. It reads the per-processor performance counters through DosConfigurePerf and DosAliasPerfCtrs (DOSCALLS 365, 364; kernel/src/api/perf.rs) and lays itself out with WinDrawText's DT_QUERYEXTENT. Its pop-up menu and dialogs were not tried; processors cannot be taken offline (DosSetProcessorStatus). |
