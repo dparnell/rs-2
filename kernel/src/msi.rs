@@ -131,6 +131,7 @@ pub fn dispatch(vector: u8) {
         return;
     }
     COUNT[vector as usize].fetch_add(1, Ordering::Relaxed);
+    crate::api::perf::interrupt(crate::smp::this().index());
     let f: fn(usize) = unsafe { core::mem::transmute(h) };
     f(CONTEXT[vector as usize].load(Ordering::Relaxed));
 }

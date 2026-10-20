@@ -23,6 +23,7 @@ pub mod module;
 pub mod mou;
 pub mod msg;
 pub mod nls;
+pub mod perf;
 pub mod npipe;
 pub mod proc;
 pub mod queue;

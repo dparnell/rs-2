@@ -475,6 +475,7 @@ pub fn schedule() {
         panic!("kernel stack overflow in thread {} (tid {})", me.id, me.tid);
     }
     if !Arc::ptr_eq(&me, &next) {
+        crate::api::perf::switched(c.index(), me.is_idle(), next.is_idle());
         next.set_state(State::Running);
         prepare_switch(&me, &next);
         let save = me.rsp_slot();

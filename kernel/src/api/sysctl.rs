@@ -20,12 +20,8 @@ static TICK_TSC: AtomicU64 = AtomicU64::new(0);
 static TSC_PER_TICK: AtomicU64 = AtomicU64::new(0);
 static LAST_TMR: AtomicU64 = AtomicU64::new(0);
 
-/// CPU time accounting, in ticks.
-static IDLE_TICKS: AtomicU64 = AtomicU64::new(0);
-static BUSY_TICKS: AtomicU64 = AtomicU64::new(0);
-
 /// Called from the timer interrupt.
-pub fn tick(idle: bool) {
+pub fn tick() {
     let now = crate::arch::rdtsc();
     let last = TICK_TSC.swap(now, Ordering::Relaxed);
     if last != 0 && now > last {
@@ -34,11 +30,6 @@ pub fn tick(idle: bool) {
         // Ignore ticks that were delayed (interrupts off for a while).
         let new = if est == 0 { d } else if d < est * 2 { (est * 7 + d) / 8 } else { est };
         TSC_PER_TICK.store(new, Ordering::Relaxed);
-    }
-    if idle {
-        IDLE_TICKS.fetch_add(1, Ordering::Relaxed);
-    } else {
-        BUSY_TICKS.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -84,20 +75,21 @@ const CMD_SOFTTRACE_LOG: u32 = 0x14;
 
 /// DosPerfSysCall(ulCommand, ulParm1, ulParm2, ulParm3). CMD_KI_RDCNT
 /// fills one CPUUTIL per processor: total, idle, busy and interrupt time
-/// (64-bit counts at DosTmrQueryFreq's frequency).
+/// (64-bit counts at DosTmrQueryFreq's frequency, from the processors'
+/// performance counters, see perf.rs).
 pub fn dos_perf_sys_call(c: &mut Ctx) -> u32 {
     let (cmd, p1) = (c.arg(0), c.arg(1));
     match cmd {
         CMD_KI_ENABLE | CMD_KI_DISABLE | CMD_SOFTTRACE_LOG => 0,
         CMD_KI_RDCNT => {
-            let k = TMR_FREQ / irq::HZ;
             let total = tmr_now();
-            let idle = IDLE_TICKS.load(Ordering::Relaxed) * k;
-            let busy = total.saturating_sub(idle);
             let mut b = alloc::vec::Vec::new();
-            for v in [total, idle, busy, 0] {
-                b.extend_from_slice(&(v as u32).to_le_bytes());
-                b.extend_from_slice(&((v >> 32) as u32).to_le_bytes());
+            for cpu in 0..crate::smp::online_count() as usize {
+                let busy = super::perf::busy_time(cpu).min(total);
+                for v in [total, total - busy, busy, 0] {
+                    b.extend_from_slice(&(v as u32).to_le_bytes());
+                    b.extend_from_slice(&((v >> 32) as u32).to_le_bytes());
+                }
             }
             if c.write(p1, &b) { 0 } else { err::INVALID_ADDRESS }
         }
@@ -107,20 +99,23 @@ pub fn dos_perf_sys_call(c: &mut Ctx) -> u32 {
 
 // ---- Processors and spin locks ----
 
-/// DosGetProcessorStatus(procid, pulStatus): one processor, online.
-pub fn dos_get_processor_status(c: &mut Ctx) -> u32 {
-    if c.arg(0) != 1 {
-        return err::INVALID_PARAMETER;
-    }
-    c.write_u32(c.arg(1), 1); // PROC_ONLINE
-    0
+fn valid_processor(id: u32) -> bool {
+    (1..=crate::smp::online_count()).contains(&id)
 }
 
-/// DosSetProcessorStatus(procid, status): processor 1 cannot go offline.
+/// DosGetProcessorStatus(procid, pulStatus): processors 1..n, all online.
+pub fn dos_get_processor_status(c: &mut Ctx) -> u32 {
+    if !valid_processor(c.arg(0)) {
+        return err::INVALID_PARAMETER;
+    }
+    if c.write_u32(c.arg(1), 1) { 0 } else { err::INVALID_ADDRESS } // PROC_ONLINE
+}
+
+/// DosSetProcessorStatus(procid, status): processors stay online.
 pub fn dos_set_processor_status(c: &mut Ctx) -> u32 {
-    match (c.arg(0), c.arg(1)) {
-        (1, 1) => 0,
-        (1, _) => err::INVALID_FUNCTION,
+    match (valid_processor(c.arg(0)), c.arg(1)) {
+        (true, 1) => 0,
+        (true, _) => err::INVALID_FUNCTION,
         _ => err::INVALID_PARAMETER,
     }
 }

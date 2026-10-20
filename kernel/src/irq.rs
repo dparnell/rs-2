@@ -74,6 +74,7 @@ pub fn handle(irq: u8, f: &mut TrapFrame) {
         }
     }
     eoi(irq);
+    crate::api::perf::interrupt(crate::smp::this().index());
     if irq == 0 {
         // Every CPU's LAPIC timer arrives here; the boot processor keeps
         // the time and runs the periodic work, the others only account

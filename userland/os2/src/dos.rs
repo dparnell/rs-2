@@ -369,6 +369,12 @@ unsafe extern "C" {
     pub fn DosTmrQueryFreq(freq: *mut u32) -> APIRET;
     #[link_name = "DOSCALLS.363"]
     pub fn DosTmrQueryTime(t: *mut u64) -> APIRET;
+    #[link_name = "DOSCALLS.364"]
+    pub fn DosAliasPerfCtrs(flags: u32, handle: u32, ppb: *mut *mut u8, pcb: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.365"]
+    pub fn DosConfigurePerf(flags: u32, cmd: u32, a: u32, b: u32, c: *const u8, d: u32) -> APIRET;
+    #[link_name = "DOSCALLS.447"]
+    pub fn DosGetProcessorStatus(id: u32, status: *mut u32) -> APIRET;
     #[link_name = "DOSCALLS.300"]
     pub fn DosAllocSharedMem(ppb: *mut *mut u8, name: *const u8, cb: u32, flags: u32) -> APIRET;
     #[link_name = "DOSCALLS.301"]

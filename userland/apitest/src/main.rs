@@ -46,6 +46,7 @@ fn main(s: &Startup) -> u32 {
     named_pipes();
     dlls();
     timers();
+    perf_counters();
     shared_memory();
     queues();
     sessions();
@@ -503,6 +504,64 @@ fn timers() {
         DosResetEventSem(hev, &mut posts);
         check("periodic timer posted several times", posts >= 3);
         DosCloseEventSem(hev);
+    }
+}
+
+/// The performance counters OS/2's Pulse reads (DosConfigurePerf,
+/// DosAliasPerfCtrs): one block a processor, named "CPU", "CPU1"...,
+/// with the time it was not idle at 0x18.
+fn perf_counters() {
+    unsafe {
+        let rd = |p: *const u8, o: usize| (p.add(o) as *const u32).read_unaligned();
+        let mut n = 0;
+        DosQuerySysInfo(26, 26, &mut n, 4);
+        let mut st = 0;
+        check("DosGetProcessorStatus last processor", DosGetProcessorStatus(n, &mut st) == 0 && st == 1);
+        check("DosGetProcessorStatus beyond", DosGetProcessorStatus(n + 1, &mut st) == 87);
+        check("DosConfigurePerf deconfigure", DosConfigurePerf(0, 4, 0, 0, null(), 0) == 0);
+        let (mut p, mut cb) = (null_mut(), 0);
+        check("DosAliasPerfCtrs unconfigured", DosAliasPerfCtrs(0xb, 0, &mut p, &mut cb) == 259);
+        check("DosConfigurePerf configure", DosConfigurePerf(0x28, 0, 0, 0, b"CPU\0".as_ptr(), 0) == 0);
+        // Walk the blocks: text block of each, then its counters.
+        let mut handle = 0u32;
+        let mut cpus = 0;
+        let mut ok = true;
+        while DosAliasPerfCtrs(0xb, handle, &mut p, &mut cb) == 0 {
+            let id = rd(p, 4) >> 16;
+            let name = p.add(rd(p, 0x10) as usize);
+            let want = if cpus == 0 { alloc::string::String::from("CPU") } else { alloc::format!("CPU{cpus}") };
+            let got = core::slice::from_raw_parts(name, want.len() + 1);
+            ok &= rd(p, 8) & 0x50 == 0x50 && id == cpus + 1 && got[..want.len()] == *want.as_bytes() && got[want.len()] == 0;
+            ok &= rd(p, 0x28) == 4 && cb as usize > 0x60;
+            handle = id << 16;
+            let mut cb2 = 0;
+            ok &= DosAliasPerfCtrs(0x11, handle, &mut p, &mut cb2) == 0 && cb2 == 0x30 && rd(p, 0) == 0x30;
+            cpus += 1;
+        }
+        check("DosAliasPerfCtrs a block per processor", ok && cpus == n);
+        check("DosAliasPerfCtrs bad handle", DosAliasPerfCtrs(0x11, (n + 1) << 16, &mut p, &mut cb) == 539);
+        // This thread spins: processor time not idle grows by about as
+        // much as the elapsed time, summed over the processors.
+        let busy = || {
+            let mut sum = 0u64;
+            let mut now = 0u64;
+            DosTmrQueryTime(&mut now);
+            for i in 0..n {
+                let (mut d, mut c) = (null_mut(), 0);
+                DosAliasPerfCtrs(0x11, (i + 1) << 16, &mut d, &mut c);
+                let v = (d.add(0x18) as *const u64).read_volatile();
+                sum += if (v as i64) < 0 { v.wrapping_add(now) } else { v };
+            }
+            (sum, now)
+        };
+        let (b0, t0) = busy();
+        let mut t = t0;
+        while t - t0 < 119_318 {
+            DosTmrQueryTime(&mut t);
+        }
+        let (b1, t1) = busy();
+        let pct = (b1 - b0) * 100 / (t1 - t0).max(1);
+        check("processor not idle while spinning", (80..=100 * n as u64 + 5).contains(&pct));
     }
 }
 

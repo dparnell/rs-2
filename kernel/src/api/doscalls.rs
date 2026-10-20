@@ -186,6 +186,8 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 112) => super::sysctl::dos_query_ras_info,
         (0, 371) => super::sysctl::dos_query_abios_support,
         (0, 976) => super::sysctl::dos_perf_sys_call,
+        (0, 364) => super::perf::dos_alias_perf_ctrs,
+        (0, 365) => super::perf::dos_configure_perf,
         (0, 139) | (0, 211) => super::sysctl::dos_err_class,
         (0, 166) => super::sysctl::dos16_qsys_info,
         (0, 447) => super::sysctl::dos_get_processor_status,

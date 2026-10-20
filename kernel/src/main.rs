@@ -90,6 +90,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     drivers::init();
     loader::init();
     infoseg::init();
+    api::perf::init();
     kbd::init();
     mouse::init();
     chardev::init();

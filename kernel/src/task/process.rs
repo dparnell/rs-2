@@ -515,6 +515,7 @@ impl Process {
         crate::api::queue::process_ended(self.pid);
         crate::api::xproc::process_ended(self.pid);
         crate::api::sysctl::process_ended(self.pid);
+        crate::api::perf::process_ended(self.pid);
         crate::net::socket::process_ended(self.pid);
         // The program's module (and the file image it keeps).
         loader::unregister_exe(&self.exe);
