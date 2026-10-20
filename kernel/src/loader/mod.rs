@@ -303,10 +303,13 @@ pub fn take_fail() -> Option<String> {
     FAIL_NAME.lock().take()
 }
 
-/// Load (or find) a DLL system-wide without attaching it anywhere.
+/// Load (or find) a DLL system-wide without attaching it anywhere. A
+/// program of the same name is not it: OS/2's PMFORMAT.EXE loads
+/// PMFORMAT.DLL for its resources by that name.
 pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     let mname = module_name(name);
-    if let Some(m) = find_loaded(&mname) {
+    let found = REGISTRY.lock().modules.iter().find(|m| m.is_dll && m.name.eq_ignore_ascii_case(&mname)).cloned();
+    if let Some(m) = found {
         return Ok(m);
     }
     let (path, data) = crate::fs::find_module(name).ok_or_else(|| {
