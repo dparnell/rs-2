@@ -112,7 +112,8 @@ HELPMGR. Tested with keyboard and mouse input from
 The PM programs of OS/2 itself (from the client CD, with their DLLs,
 help files and data), booted one at a time (`xtask run --init`); what
 they import that rs2 lacks was listed with `crates/os2-exe`'s
-`lximports` example against rs2's export lists. None runs yet.
+`lximports` example against rs2's export lists. Pulse runs; the others
+do not yet.
 
 | Program | Status | Notes |
 |---------|--------|-------|
@@ -127,7 +128,7 @@ they import that rs2 lacks was listed with `crates/os2-exe`'s
 | PICVIEW.EXE (Picture Viewer) | fails | PMSPL.DLL (through PMPIC.DLL); GPI segments and metafiles (GpiOpenSegment, GpiCloseSegment, GpiDrawChain, GpiGetData, GpiPutData, GpiSetMetaFileBits, GpiQueryMetaFileBits/Length, GpiSaveMetaFile, GpiCopyMetaFile, GpiSetInitialSegmentAttrs, GpiSetViewingTransformMatrix, GpiSetDefViewingLimits, GpiSetDefAttrs), WinCpTranslateString, WinGetKeyState, WinSetErrorInfo. |
 | GLOCALE.EXE (Locale) | fails | LIBUNI's locale calls (24 ordinals), WinSetWindowBits. |
 | PMCHKDSK.EXE, PMSEEK.EXE (Seek and Scan) | fails | 16-bit PM programs: the 16-bit PMWIN, PMGPI, PMSHAPI and HELPMGR entry points (Win16*, Gpi16*, Prf16*), which rs2 does not have. |
-| MPCPUMON.EXE (Pulse) | fails | Loads, then DosConfigurePerf and DosAliasPerfCtrs (DOSCALLS 365, 364) are missing and it divides by the counters it did not get. |
+| MPCPUMON.EXE (Pulse) | works | A moving graph of every processor's load (`--smp 2`), the legend, the grid. It reads the per-processor performance counters through DosConfigurePerf and DosAliasPerfCtrs (DOSCALLS 365, 364; kernel/src/api/perf.rs) and lays itself out with WinDrawText's DT_QUERYEXTENT. Its pop-up menu and dialogs were not tried; processors cannot be taken offline (DosSetProcessorStatus). |
 | SYSLOGPM, REGEDIT2, TEXTCON1, BDVIEWER, ARACONV, COMETRUN, PMSPOOL | not tried | Need system DLLs rs2 does not have: PMSPL, LFAPI/FFST, pmwinx, PMBIDI, THAILIB, CNVTRANS, PMGRE. |
 
 ## Network programs

@@ -107,6 +107,13 @@ Status markers: done, in progress, planned.
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - done: SMP: all processors started (INIT/SIPI), per-CPU GDT/TSS/LAPIC
   timer, shared run queues, big kernel lock, IPI wake-ups and TLB shootdown
+- done: per-processor performance counters (time not idle, dispatches,
+  interrupts) kept at every switch to and from a processor's idle
+  thread: DosConfigurePerf/DosAliasPerfCtrs as OS/2's kernel lays them
+  out (OS/2's Pulse shows them), DosPerfSysCall CMD_KI_RDCNT per
+  processor
+- planned: the other kernel performance blocks (memory, file system,
+  threads, perfview's message queue), taking processors offline
 - done: MSI/MSI-X (`msi`): device vectors 0x30-0xEF spread over the
   CPUs, per-vector masking, Event hand-off to sleeping threads; AHCI,
   NVMe, virtio, xHCI, e1000e, PVSCSI and MPT converted; `nomsi` keeps
