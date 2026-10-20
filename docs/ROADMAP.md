@@ -197,13 +197,20 @@ Status markers: done, in progress, planned.
   and OS2SYS.INI from USER_INI/SYSTEM_INI, shared by all processes,
   written through safely; the program list calls, kept in OS2.INI for
   a later shell (docs/PM.md, Profiles); `RS2\INITEST.EXE`
-- planned: per-process presentation-space limits, hooks that are called
-  (WinSetHook only records them), DDE, owner-drawn items (also in
+- done: the help manager (HELPMGR.DLL: help instances, help tables, the
+  help hook IBM's way, HM_ messages, a help window with contents, index,
+  search and footnotes, on `crates/ipf`, which reads, lays out and
+  compiles INF/HLP files) and VIEW.EXE for books; IBM's E.EXE shows its
+  help
+- planned (help): DDF, application-controlled viewports and panels in
+  windows of their own, printing, IPF fonts, bookmarks, MB_HELP
+- planned: per-process presentation-space limits, hooks other than the
+  help hook (WinSetHook only records them), DDE, owner-drawn items (also in
   containers), presentation parameters other than the colours, drag
   and drop
 - Display driver model (GRADD-style) on the framebuffer, mouse pointer
 - PMWIN (windows, messages, controls, dialogs), PMGPI (graphics, fonts),
-  PMSHAPI, help manager
+  PMSHAPI
 - SOM runtime and the Workplace Shell
 
 ## Milestone 5: install media (first version done)

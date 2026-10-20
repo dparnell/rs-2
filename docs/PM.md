@@ -1106,6 +1106,101 @@ serial port): see [Testing](#testing).
 the window's icon, Undo restoring a font or colours (rs2's MLE
 does not undo those), the Set tabs dialog E has but does not offer.
 
+## The help manager (HELPMGR.DLL) and VIEW.EXE
+
+HELPMGR.DLL (userland/helpmgr) is rs2's help manager, VIEW.EXE
+(userland/view) its book viewer. Both follow IBM's, studied in
+HELPMGR.DLL, VIEW.EXE and PMMERGE.DLL with Ghidra (`helpmgr.sym`,
+`view.sym` and `pmmerge.sym` from the debug symbols name every function;
+`tools/ghidra/lxload.sh` and `lxdecomp.sh`). The help files are read by
+`crates/ipf` (format, text and layout rules from IBM's `IOLoad*`,
+`FormatCell` and bitmap code; tested on every INF/HLP file on the media;
+described in [formats/ipf-structures.md](formats/ipf-structures.md),
+[formats/ipf-text.md](formats/ipf-text.md) and
+[formats/ipf-bitmaps.md](formats/ipf-bitmaps.md)).
+
+**Requests from F1 to a panel**, as in IBM's PMWIN and HELPMGR:
+
+- The system accelerator table has F1 as WM_HELP (as PMMRGRES.DLL's
+  table 1 does). WM_HELP from controls, menus (MIS_HELP) and
+  accelerators goes to the owner; WinDefWindowProc sends it on to the
+  parent, so it ends at a frame.
+- A frame given WM_HELP (IBM's `FrameProcessHelp`) calls the help hooks
+  (HK_HELP) with the focus window's rectangle: HLPM_WINDOW (topic: its
+  owner's id) for controls of dialogs, else HLPM_FRAME (topic: the
+  frame's id), the subtopic being the focus window's id (a combination
+  box's entry field stands for the box). F1 in an open menu ends menu
+  mode and calls the hooks with HLPM_MENU, the pull-down's id and the
+  item's. The hooks of the thread's queue are called newest first until
+  one returns TRUE; the chain is read again after each, since OS/2's E
+  installs its own hook that creates the help instance on the first F1,
+  releases itself and leaves the request to the help manager's.
+- The help system commands go to the help instance of the frame (or of a
+  frame above it or, at the desktop, owning it): SC_HELPEXTENDED as
+  HM_EXT_HELP, SC_HELPINDEX as HM_HELP_INDEX, SC_HELPKEYS as HM_KEYS_HELP,
+  SC_SWITCHPANELIDS as HM_SET_SHOW_PANEL_ID; the client gets the command
+  when there is no help instance. Frames keep their help instance
+  (WM_SETHELPINFO, WM_QUERYHELPINFO) and say they are frames
+  (WM_QUERYFRAMEINFO).
+- WinCreateHelpInstance opens the help libraries of HELPINIT's
+  pszHelpLibraryName (blank-separated; along HELP, then BOOKSHELF) and
+  the external databases they name, and returns an object window (class
+  `HMHelpInstance`). The first instance of a process sets the help hook
+  on its queue (IBM's `HOOKProc`).
+- The hook (IBM's `HelpProcessor`) takes requests for the active window
+  of its own process: it finds the help instance up the frames
+  (HAPIFindWndWithHelp), the help table entry of the active window's id
+  (HELPTABLE in memory, or RT_HELPTABLE/RT_HELPSUBTABLE resources) and
+  the subtable entry of the subtopic (`HOOKSearchHelpTable`; FID_CLIENT
+  means the extended help panel). An unknown subtopic is sent to the
+  application as HM_HELPSUBITEM_NOT_FOUND, and the extended help panel
+  shows unless it returns TRUE; HM_EXT_HELP_UNDEFINED and HM_ERROR as
+  IBM's.
+- HM_DISPLAY_HELP (resource id or panel name, local then global names),
+  HM_EXT_HELP, HM_HELP_INDEX, HM_HELP_CONTENTS, HM_KEYS_HELP
+  (HM_QUERY_KEYS_HELP to the application), HM_SET_ACTIVE_WINDOW,
+  HM_LOAD_HELP_TABLE, HM_CREATE_HELP_TABLE, HM_SET_HELP_WINDOW_TITLE,
+  HM_SET_SHOW_PANEL_ID, HM_REPLACE_HELP_FOR_HELP, HM_SET_HELP_LIBRARY_NAME
+  and HM_DISMISS_WINDOW; HM_NOTIFY (OPEN_PAGE, OPEN_TOC, OPEN_INDEX) to
+  the active window. HM_DISPLAY_HELP 0 ("Using help") shows the
+  replacement panel, else the contents: IBM's own help library
+  (HMHELP.HLP) is not shipped.
+
+**The help window** is a frame on the right of the screen titled with the
+help window title and the panel's: the panel (laid out by `crates/ipf`
+for the window's width and laid out again when it changes), a vertical
+scroll bar, and Previous, Search..., Index and Contents push buttons.
+Panels draw in the system font (also for `:xmp.`), bold drawn twice,
+underlines, colours of `:hp4.`/`:color.` and links in SYSCLR_HELPHILITE;
+bitmaps are decompressed by `crates/ipf` and drawn with GpiDrawBits
+(stretched for `fit`). Up/Down/PgUp/PgDn/Home/End scroll; Tab and
+Shift+Tab move a box from link to link, Enter or a click follows it, Esc
+(or Backspace, or Previous) goes back. Links lead to panels of the file
+or, by resource id, any library; footnotes and panels without a
+contents entry open in a footnote window over the help window (Esc
+closes it); inform links send HM_INFORM to the application; launch links
+start the program (found along PATH); links into external databases
+open the panel there. Contents (the visible TOC entries, indented by
+level), Index (level-2 entries indented as IBM's) and Search (the panels
+having every word typed, from the file's search table) are lists in the
+same window; Enter or a double click opens the panel. `:hide.` text shows
+when IPF_KEYS has its key.
+
+**VIEW.EXE** `book[+book...] [topic]` opens the books (along BOOKSHELF,
+then HELP; `.INF` added when there is no extension) at the first panel
+whose title (else index entry) has the topic, else at the contents, and
+ends when the window is closed. IBM's VIEW is a launcher handing books
+to a VIEWDOC server through shared memory; rs2's calls the help
+manager's `Rs2ViewBook` (private ordinal 200) instead. IBM's VIEW.EXE
+does not run on rs2's HELPMGR: it imports HELPMGR's unpublished ordinals
+28-47 (file and search helpers of IBM's VIEWDOC).
+
+Not done: DDF (`:ddf.`, the Ddf* API), application-controlled viewports
+(`:acviewport.`) and windows placed by link data (`vpx=` and so on;
+panels open in the one window), the Print button, the help window's
+menu (Services, Options), IPF fonts other than the system font,
+bookmarks and the library list, the message box help (MB_HELP).
+
 ## Debugging
 
 With `PMTRACE` set in a program's environment (`SET PMTRACE=1` before
@@ -1213,6 +1308,14 @@ The export trampolines pass their index to the lock's entry
   PASS/FAIL and `gpitest done: N failure(s)`, then a window with every
   kind of primitive for a screenshot check (it also draws
   `C:\YOSEMITE.BMP` when present).
+- The help manager: `cargo test -p ipf` (the IBM files on the media:
+  structures, rendered text of the System Editor's help and REXX.INF,
+  every panel laid out and every bitmap decoded), and QEMU runs with
+  screenshots (`--init "OS2\VIEW.EXE CMDREF"`, `--init "IBM\E.EXE"`
+  with IBM's EHXHP.HLP, CMDREF.INF and REXX.INF in work/modules.txt):
+  the contents, a panel with lists, a syntax diagram bitmap and links,
+  Tab and Enter on a footnote link (the footnote window), Esc back,
+  Search, and E's F1 and Help menu.
 - QEMU runs of the Toolkit PM samples, checked with screenshots and with
   mouse/keyboard input through `xtask run --type` (`{mouse_move dx dy}`,
   `{mouse_abs x y}`, `{mouse_button n}`, `{shot NAME}` for a screenshot
