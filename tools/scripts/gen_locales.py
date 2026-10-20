@@ -191,8 +191,8 @@ LANG_SCRIPT = {'pl': 'latin2', 'cs': 'latin2', 'sk': 'latin2', 'hu': 'latin2', '
 # page, overrides {item: value}.
 LOCALES = [
     ('en_US', 'USA', 'United States', 'United States', 1, 0x0409, 'ENU', 'US', 'USD', 37,
-     {1: '%a %e %b %H:%M:%S %Y', 2: '%m/%d/%y', 63: '/', 124: 'M/d/yy', 96: '%A, %B %d, %Y', 125: 'dddd, MMMM dd, yyyy', 70: 2, 71: 1, 81: 6}),
-    ('en_GB', 'GBR', 'United Kingdom', 'United Kingdom', 44, 0x0809, 'ENG', 'UK', 'GBP', 285, {70: 1}),
+     {1: '%a %e %b %H:%M:%S %Y', 2: '%m/%d/%y', 63: '/', 124: 'M/d/yy', 96: '%A, %B %d, %Y', 125: 'dddd, MMMM dd, yyyy', 70: 1, 71: 1, 81: 6}),
+    ('en_GB', 'GBR', 'United Kingdom', 'United Kingdom', 44, 0x0809, 'ENG', 'UK', 'GBP', 285, {}),
     ('en_AU', 'AUS', 'Australia', 'Australia', 61, 0x0C09, 'ENA', 'US', 'AUD', 37, {}),
     ('en_CA', 'CAN', 'Canada', 'Canada', 1, 0x1009, 'ENC', 'US', 'CAD', 37,
      {2: '%d/%m/%y', 74: 1, 81: 6, 96: '%B %d, %Y'}),
@@ -282,7 +282,7 @@ def items(loc, posix=False):
     i[63], i[64], i[65] = ds, ts, ls
     i[66], i[67] = dec, th
     i[68] = i[69] = '3;0'
-    i[70] = 1
+    i[70] = 0  # iMeasure: 0 metric, 1 U.S. (GLOCALE's combo index)
     i[71] = 2
     i[72] = 2
     i[73] = clock
