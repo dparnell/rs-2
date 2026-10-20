@@ -498,6 +498,9 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
     ];
 
+/// Help files compiled from IPF source in userland/, with their names.
+const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP")];
+
 /// Programs marked as PM applications (WINDOWAPI).
 const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view"];
 
@@ -536,6 +539,20 @@ fn build_userland() -> Option<image::FileList> {
             return None;
         }
         files.push((lx, dest.to_string()));
+    }
+    for (src, dest) in HELP_FILES {
+        let path = ul.join(src);
+        let text = std::fs::read(&path).ok()?;
+        let help = match ipf::compile::compile(&text, true) {
+            Ok(h) => h,
+            Err(e) => {
+                eprintln!("{}: {e}", path.display());
+                return None;
+            }
+        };
+        let out = out_dir.join(dest.rsplit('\\').next().unwrap());
+        std::fs::write(&out, help).unwrap();
+        files.push((out, dest.to_string()));
     }
     Some(files)
 }

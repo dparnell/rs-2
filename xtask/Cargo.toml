@@ -8,4 +8,5 @@ publish = false
 
 [dependencies]
 fat = { path = "../crates/fat" }
+ipf = { path = "../crates/ipf" }
 hpfs = { path = "../crates/hpfs" }

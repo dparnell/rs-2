@@ -1,6 +1,7 @@
 # Files of the rs2 boot volume (paths relative to the repository root).
 # Programs built from userland/ are added by xtask (among them OS2\E.EXE,
-# the System Editor, from userland/e).
+# the System Editor, from userland/e, and its help OS2\HELP\E.HLP compiled
+# from userland/e/E.IPF).
 dist/CONFIG.SYS -> CONFIG.SYS
 dist/README.TXT -> README.TXT
 dist/etc/HOSTS -> MPTN\ETC\HOSTS
