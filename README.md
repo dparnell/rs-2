@@ -154,6 +154,9 @@ drags icons, whose places are kept; a file dragged onto a folder moves
 there. Ctrl+Esc shows the window list. Shutdown closes the programs
 (they may ask about unsaved work), flushes the disks and turns the
 machine off. Details: [docs/PM.md](docs/PM.md#the-desktop-shell-rs2shell).
+F1 shows help in PM programs that have it (rs2's help manager reads
+OS/2 `.HLP` files along HELP), and `VIEW book [topic]` shows OS/2 books
+(`.INF`, along BOOKSHELF): [docs/PM.md](docs/PM.md#the-help-manager-helpmgrdll-and-viewexe).
 
 **The text-mode command prompt instead:** press T while the boot loader
 shows "Press T for a text-mode boot", or put `textmode` in
