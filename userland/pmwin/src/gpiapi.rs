@@ -46,7 +46,9 @@ impl RectL {
 /// A logical font or bitmap tagged with a local identifier.
 #[derive(Clone)]
 pub enum Lcid {
-    Font(gpi::LogFont, [u8; 32]),
+    /// A logical font: the face, and a font loaded with GpiLoadFonts
+    /// (index + 1; 0: a public font).
+    Font(gpi::LogFont, [u8; 32], u32),
     Bitmap(u32),
 }
 

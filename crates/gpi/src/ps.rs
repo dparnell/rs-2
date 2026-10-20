@@ -425,19 +425,16 @@ impl Ps {
         }
         let mut x0 = p.x;
         for &b in text {
+            let w = f.char_width(b);
             for row in 0..f.height {
-                let bits = f.row(b, row as usize);
-                if bits == 0 {
-                    continue;
-                }
                 let y = bottom + f.height - 1 - row;
-                for col in 0..f.width.min(8) {
-                    if bits & (0x80 >> col) != 0 {
+                for col in 0..w {
+                    if f.pixel(b, row, col) {
                         self.plot(s, x0 + col, y, c, mix);
                     }
                 }
             }
-            x0 += f.width;
+            x0 += w;
         }
     }
 
@@ -671,6 +668,7 @@ impl Ps {
             self.path = None;
             self.pattern_bitmap = None;
             self.logfont = LogFont::default();
+            self.font = font::system();
             self.refresh_clip();
         }
         self.sync_simple();
@@ -1203,7 +1201,7 @@ impl Ps {
             .enumerate()
             .map(|(i, &c)| match dx.and_then(|d| d.get(i)) {
                 Some(&w) => self.dev_vec(w as f64, 0.0).0,
-                None => self.font.width as f64 * sx + ex + if c == b' ' { bx } else { 0.0 },
+                None => self.font.char_width(c) as f64 * sx + ex + if c == b' ' { bx } else { 0.0 },
             })
             .collect()
     }
@@ -1238,9 +1236,8 @@ impl Ps {
             let mut x = start.0;
             for (i, &b) in text.iter().enumerate() {
                 for row in 0..f.height {
-                    let bits = f.row(b, row as usize);
-                    for col in 0..f.width.min(8) {
-                        if bits & (0x80 >> col) != 0 {
+                    for col in 0..f.char_width(b) {
+                        if f.pixel(b, row, col) {
                             let up = (f.height - 1 - row - f.descender) as f64 * sy;
                             let (x0, y0) = (x + col as f64 * sx + up * slant, bottom + (f.height - 1 - row) as f64 * sy);
                             self.figs.push(Figure { pts: vec![(x0, y0), (x0 + sx, y0), (x0 + sx, y0 + sy), (x0, y0 + sy)], closed: true });
@@ -1269,11 +1266,10 @@ impl Ps {
                     let wide = lf.bold as i32;
                     for (i, &b) in text.iter().enumerate() {
                         for row in 0..f.height {
-                            let bits = f.row(b, row as usize);
                             let y0 = round(bottom + (f.height - 1 - row) as f64 * sy);
                             let y1 = round(bottom + (f.height - row) as f64 * sy);
-                            for col in 0..f.width.min(8) {
-                                if bits & (0x80 >> col) != 0 {
+                            for col in 0..f.char_width(b) {
+                                if f.pixel(b, row, col) {
                                     let (x0, x1) = (x + col as f64 * sx, x + (col + 1) as f64 * sx);
                                     for y in y0..y1.max(y0 + 1) {
                                         let off = (y as f64 + 0.5 - start.1) * slant;
