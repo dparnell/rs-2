@@ -4,6 +4,9 @@
 pub type Rgb = u32;
 
 // Colour indices of the default logical colour table (CLR_*).
+/// All bits 0 / all bits 1 (black and white on the display).
+pub const CLR_FALSE: i32 = -5;
+pub const CLR_TRUE: i32 = -4;
 pub const CLR_DEFAULT: i32 = -3;
 pub const CLR_WHITE: i32 = -2;
 pub const CLR_BLACK: i32 = -1;
@@ -34,8 +37,8 @@ const DEFAULT_TABLE: [Rgb; 16] = [
 /// black; CLR_BACKGROUND white).
 pub fn index_to_rgb(i: i32) -> Rgb {
     match i {
-        CLR_WHITE => 0xffffff,
-        CLR_BLACK | CLR_DEFAULT => 0x000000,
+        CLR_WHITE | CLR_TRUE => 0xffffff,
+        CLR_BLACK | CLR_DEFAULT | CLR_FALSE => 0x000000,
         0..=15 => DEFAULT_TABLE[i as usize],
         _ => 0x000000,
     }
@@ -104,7 +107,9 @@ impl ColorTable {
             CLR_WHITE => 0xffffff,
             CLR_BLACK => 0x000000,
             CLR_DEFAULT => self.rgb(CLR_NEUTRAL),
-            -50..=-4 => (self.sys)(c),
+            CLR_TRUE => 0xffffff,
+            CLR_FALSE => 0x000000,
+            -50..=-6 => (self.sys)(c),
             _ if c >= 0 && self.rgb_mode => c as u32 & 0xff_ffff,
             _ if c >= 0 => {
                 if let Some(p) = &self.palette {
