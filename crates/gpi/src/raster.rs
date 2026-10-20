@@ -68,25 +68,55 @@ pub fn scan(figs: &[Vec<Pf>], winding: bool, out: &mut Spans) {
 
 /// Bresenham line between integer points, both ends included.
 pub fn line(a: (i32, i32), b: (i32, i32), mut f: impl FnMut(i32, i32)) {
-    let (mut x0, mut y0) = a;
-    let (dx, dy) = ((b.0 - x0).abs(), -(b.1 - y0).abs());
-    let (sx, sy) = (if x0 < b.0 { 1 } else { -1 }, if y0 < b.1 { 1 } else { -1 });
-    let mut err = dx + dy;
-    loop {
-        f(x0, y0);
-        if x0 == b.0 && y0 == b.1 {
-            break;
+    line_clip(a, b, ALL, |_, x, y| f(x, y));
+}
+
+/// A window covering every i32 point.
+pub const ALL: [i64; 4] = [i32::MIN as i64, i32::MIN as i64, i32::MAX as i64, i32::MAX as i64];
+
+/// The pixels of `line(a, b)` inside the inclusive window `win`
+/// (x0, y0, x1, y1), each with its step index along the whole line;
+/// returns the number of pixels of the whole line. Only the steps in the
+/// window are visited, so a line between far-off points (an
+/// application's garbage coordinates) costs no more than the window.
+///
+/// Step `i` moves the major axis by `i` and the minor axis by
+/// round(i * minor / major) with halves away from the start, which is
+/// exactly where the error-term Bresenham lands.
+pub fn line_clip(a: (i32, i32), b: (i32, i32), win: [i64; 4], mut f: impl FnMut(u64, i32, i32)) -> u64 {
+    let (ax, ay, bx, by) = (a.0 as i64, a.1 as i64, b.0 as i64, b.1 as i64);
+    let (adx, ady) = ((bx - ax).abs(), (by - ay).abs());
+    let (sx, sy) = (if ax < bx { 1 } else { -1 }, if ay < by { 1 } else { -1 });
+    let xmaj = adx >= ady;
+    let (amaj, amin) = if xmaj { (adx, ady) } else { (ady, adx) };
+    // Major and minor axes: start, direction, window.
+    let (m0, ms, mlo, mhi, n0, ns, nlo, nhi) = if xmaj {
+        (ax, sx, win[0], win[2], ay, sy, win[1], win[3])
+    } else {
+        (ay, sy, win[1], win[3], ax, sx, win[0], win[2])
+    };
+    let steps = amaj as u64 + 1;
+    let (ilo, ihi) = if ms > 0 { (mlo - m0, mhi - m0) } else { (m0 - mhi, m0 - mlo) };
+    let (ilo, ihi) = (ilo.max(0), ihi.min(amaj));
+    if ilo > ihi {
+        return steps;
+    }
+    let den = 2 * amaj.max(1);
+    let num = 2 * ilo as i128 * amin as i128 + amaj as i128;
+    let (mut q, mut r) = ((num / den as i128) as i64, (num % den as i128) as i64);
+    for i in ilo..=ihi {
+        let (m, n) = (m0 + ms * i, n0 + ns * q);
+        if n >= nlo && n <= nhi {
+            let (x, y) = if xmaj { (m, n) } else { (n, m) };
+            f(i as u64, x as i32, y as i32);
         }
-        let e2 = 2 * err;
-        if e2 >= dy {
-            err += dy;
-            x0 += sx;
-        }
-        if e2 <= dx {
-            err += dx;
-            y0 += sy;
+        r += 2 * amin;
+        if r >= den {
+            r -= den;
+            q += 1;
         }
     }
+    steps
 }
 
 pub fn ipt(p: Pf) -> (i32, i32) {
@@ -247,6 +277,83 @@ mod tests {
     use super::*;
     use crate::rect::{Point, Rect};
     use alloc::vec;
+
+    /// The error-term Bresenham `line` used to be.
+    fn bresenham(a: (i32, i32), b: (i32, i32)) -> Vec<(i32, i32)> {
+        let mut out = Vec::new();
+        let (mut x0, mut y0) = a;
+        let (dx, dy) = ((b.0 - x0).abs(), -(b.1 - y0).abs());
+        let (sx, sy) = (if x0 < b.0 { 1 } else { -1 }, if y0 < b.1 { 1 } else { -1 });
+        let mut err = dx + dy;
+        loop {
+            out.push((x0, y0));
+            if x0 == b.0 && y0 == b.1 {
+                return out;
+            }
+            let e2 = 2 * err;
+            if e2 >= dy {
+                err += dy;
+                x0 += sx;
+            }
+            if e2 <= dx {
+                err += dx;
+                y0 += sy;
+            }
+        }
+    }
+
+    #[test]
+    fn line_matches_bresenham() {
+        for ax in -3..=3 {
+            for ay in -3..=3 {
+                for bx in -9..=9 {
+                    for by in -9..=9 {
+                        let mut got = Vec::new();
+                        let n = line_clip((ax, ay), (bx, by), ALL, |i, x, y| {
+                            assert_eq!(i as usize, got.len());
+                            got.push((x, y));
+                        });
+                        let want = bresenham((ax, ay), (bx, by));
+                        assert_eq!(got, want, "{:?} -> {:?}", (ax, ay), (bx, by));
+                        assert_eq!(n as usize, want.len());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn line_clip_keeps_step_indices() {
+        let win = [-2, -1, 4, 3];
+        let mut seen = 0;
+        for (a, b) in [((-20, -7), (30, 11)), ((15, 40), (-3, -35)), ((-50, 2), (50, 2)), ((1, -60), (1, 60))] {
+            let want: Vec<(u64, i32, i32)> = bresenham(a, b)
+                .into_iter()
+                .enumerate()
+                .filter(|&(_, (x, y))| (-2..=4).contains(&x) && (-1..=3).contains(&y))
+                .map(|(i, (x, y))| (i as u64, x, y))
+                .collect();
+            let mut got = Vec::new();
+            line_clip(a, b, win, |i, x, y| got.push((i, x, y)));
+            seen += want.len();
+            assert_eq!(got, want);
+        }
+        assert!(seen > 10);
+    }
+
+    #[test]
+    fn line_clip_huge() {
+        let mut got = Vec::new();
+        let n = line_clip((-2147482763, 916), (1879049159, 916), [0, 900, 9, 930], |i, x, y| got.push((i, x, y)));
+        assert_eq!(n, 1879049159u64 + 2147482763 + 1);
+        let want: Vec<_> = (0..10).map(|x| (2147482763u64 + x as u64, x, 916)).collect();
+        assert_eq!(got, want);
+        // Diagonal across the whole i32 range.
+        got.clear();
+        line_clip((i32::MIN, i32::MIN), (i32::MAX, i32::MAX), [0, 0, 3, 3], |i, x, y| got.push((i, x, y)));
+        let want: Vec<_> = (0..4).map(|k| (2147483648u64 + k as u64, k, k)).collect();
+        assert_eq!(got, want);
+    }
 
     #[test]
     fn square_fill() {

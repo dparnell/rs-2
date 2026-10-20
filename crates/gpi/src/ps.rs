@@ -378,7 +378,9 @@ impl Ps {
     /// becomes the current position.
     pub fn line_to(&mut self, s: &mut Surface, p: Point) {
         let (c, m) = (self.color, self.mix);
-        raster::line((self.pos.x, self.pos.y), (p.x, p.y), |x, y| self.plot(s, x, y, c, m));
+        if let Some(win) = self.stroke_window(1) {
+            raster::line_clip((self.pos.x, self.pos.y), (p.x, p.y), win, |_, x, y| self.plot(s, x, y, c, m));
+        }
         self.pos = p;
     }
 
@@ -748,18 +750,14 @@ impl Ps {
         };
         let n = pts.len();
         let segs = if closed && n > 2 { n } else { n.saturating_sub(1) };
-        let mut first = true;
-        let mut pos = self.style_pos;
-        let mut lo = (i32::MAX, i32::MAX);
-        let mut hi = (i32::MIN, i32::MIN);
-        let mut put = |ps: &Ps, s: &mut Surface, x: i32, y: i32| {
-            let on = pattern::dash_on(lt, pos);
-            pos += 1;
-            lo = (lo.0.min(x), lo.1.min(y));
-            hi = (hi.0.max(x), hi.1.max(y));
-            if !ps.display {
-                return;
-            }
+        // Steps are only visited inside the clip (widened by the pen), so
+        // far-off coordinates cost nothing; the dash position still
+        // advances over the whole line and the bounds cover it.
+        let win = if self.display { self.stroke_window(w) } else { None };
+        let mut pos = self.style_pos as u64;
+        let (mut lo, mut hi) = ((i32::MAX, i32::MAX), (i32::MIN, i32::MIN));
+        let put = |ps: &Ps, s: &mut Surface, pos: u64, x: i32, y: i32| {
+            let on = pattern::dash_on(lt, pos as u32);
             let (c, m) = if on { (fg, mix) } else { (bg, bmix) };
             if m == Mix::LeaveAlone {
                 return;
@@ -777,24 +775,51 @@ impl Ps {
         };
         if segs == 0 {
             let (x, y) = ipt(pts[0]);
-            put(self, s, x, y);
+            (lo, hi) = ((x, y), (x, y));
+            if let Some(win) = win {
+                raster::line_clip((x, y), (x, y), win, |_, x, y| put(self, s, pos, x, y));
+            }
+            pos += 1;
         }
         for i in 0..segs {
             let (a, b) = (ipt(pts[i]), ipt(pts[(i + 1) % n]));
-            let mut skip = !first;
-            raster::line(a, b, |x, y| {
-                if skip {
-                    skip = false;
-                    return;
-                }
-                put(self, s, x, y);
-            });
-            first = false;
+            for p in [a, b] {
+                lo = (lo.0.min(p.0), lo.1.min(p.1));
+                hi = (hi.0.max(p.0), hi.1.max(p.1));
+            }
+            // Later segments start on the previous one's last pixel.
+            let skip = (i > 0) as u64;
+            let steps = match win {
+                Some(win) => raster::line_clip(a, b, win, |k, x, y| {
+                    if k >= skip {
+                        put(self, s, pos + k - skip, x, y);
+                    }
+                }),
+                None => raster::line_clip(a, b, [0, 0, -1, -1], |_, _, _| {}),
+            };
+            pos += steps - skip;
         }
-        self.style_pos = pos;
+        self.style_pos = pos as u32;
         if lo.0 <= hi.0 {
-            self.note_bounds(Rect::new(lo.0, lo.1, hi.0 + 1, hi.1 + 1));
+            self.note_bounds(Rect::new(lo.0, lo.1, hi.0.saturating_add(1), hi.1.saturating_add(1)));
         }
+    }
+
+    /// The device-coordinate window (inclusive) a pen `w` pels wide can
+    /// touch, or None when the clip is empty.
+    fn stroke_window(&self, w: i32) -> Option<[i64; 4]> {
+        if self.clip.is_empty() {
+            return None;
+        }
+        let (mut x0, mut y0, mut x1, mut y1) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+        for r in &self.clip {
+            x0 = x0.min(r.left as i64);
+            y0 = y0.min(r.bottom as i64);
+            x1 = x1.max(r.right as i64 - 1);
+            y1 = y1.max(r.top as i64 - 1);
+        }
+        let (ox, oy, w) = (self.origin.x as i64, self.origin.y as i64, w as i64);
+        Some([x0 - ox - w, y0 - oy - w, x1 - ox + w, y1 - oy + w])
     }
 
     // ---- Figure collection (areas and paths) ----
@@ -1610,6 +1635,38 @@ mod tests {
         ps.gpi_move(Point::new(0, 5));
         ps.gpi_line(&mut s, Point::new(9, 5));
         assert_eq!(count(&s, 0), 22);
+    }
+
+    /// A line from far-off garbage coordinates (Pulse's bad layout) is
+    /// clipped before stepping: it finishes at once and draws what a short
+    /// line across the surface would, dashes in step, bounds unclipped.
+    #[test]
+    fn huge_line_is_clipped() {
+        let (a, b) = (Point::new(-2147482763, 5), Point::new(1879049159, 5));
+        for (lt, width) in [(0, 0), (1, 0), (0, 3 << 16)] {
+            let (mut buf, mut ps) = setup(40, 10);
+            let mut s = surface(&mut buf, 40, 10);
+            ps.attrs.line_type = lt;
+            ps.attrs.line_width = width;
+            ps.collect_bounds = true;
+            ps.gpi_move(a);
+            ps.gpi_polyline(&mut s, &[b, Point::new(b.x, -100000)]);
+            assert_eq!(ps.bounds, Some(Rect::new(a.x, -100000, b.x + 1, 6)));
+            // The same dash phase: -2147482763 = -2 (mod 3).
+            let (mut buf2, mut ps2) = setup(40, 10);
+            let mut s2 = surface(&mut buf2, 40, 10);
+            ps2.attrs.line_type = lt;
+            ps2.attrs.line_width = width;
+            ps2.gpi_move(Point::new(-2, 5));
+            ps2.gpi_line(&mut s2, Point::new(45, 5));
+            assert_eq!(buf, buf2, "line type {lt}, width {width}");
+            assert!(buf.iter().any(|&p| p == 0));
+        }
+        let (mut buf, mut ps) = setup(40, 10);
+        let mut s = surface(&mut buf, 40, 10);
+        ps.move_to(Point::new(i32::MIN, i32::MIN));
+        ps.line_to(&mut s, Point::new(i32::MAX, i32::MAX));
+        assert_eq!(s.get(7, 7), Some(0));
     }
 
     #[test]
