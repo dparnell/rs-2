@@ -202,8 +202,13 @@ Status markers: done, in progress, planned.
   search and footnotes, on `crates/ipf`, which reads, lays out and
   compiles INF/HLP files) and VIEW.EXE for books; IBM's E.EXE shows its
   help
-- planned (help): DDF, application-controlled viewports and panels in
-  windows of their own, printing, IPF fonts, bookmarks, MB_HELP
+- done (help): dynamic data (the Ddf* API, `:ddf.`), panels in windows
+  of their own (link and heading window data, groups, auto, dependent)
+  and `:acviewport.` (the Toolkit's IPF sample runs), IPF fonts and real
+  italic, MB_HELP, IBM's VIEW.EXE/VIEWDOC.EXE on rs2's HELPMGR
+  (ordinals 26, 28-37, 45-47); `RS2\HMTEST.EXE`
+- planned (help): printing, bookmarks and the library list, the help
+  window's menu, metafiles in dynamic data, viewport styles
 - planned: per-process presentation-space limits, hooks other than the
   help hook (WinSetHook only records them), DDE, owner-drawn items (also in
   containers), presentation parameters other than the colours, drag

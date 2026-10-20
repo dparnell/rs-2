@@ -206,12 +206,15 @@ until **0x08** inherits them.
 `u16 flags`, then the fields that are present, in this order:
 * `flags & 0x0001`: `u8 units, u16 x, u16 y` (origin)
 * `flags & 0x0002`: `u8 units, u16 cx, u16 cy` (size)
-* `flags & 0x0008`: `u16` (viewport/window id *(inferred)*)
+* `flags & 0x0008`: `u16` window style word (as a TOC entry's style; e.g. 0x2728)
 * `flags & 0x0400`: `u16 group`
 
-Bit 0x40 = auto. The other bits (seen: 0x04, 0x80, 0x200) are style or dependency flags passed
-to MscSetViewPort, and their meaning was not traced. The units bytes seen are 0x44 and 0x11; the
-encoding was not traced. Examples: EHXHP `05 01 00 | 00 04 6e 00` → flags 0x0400, group 110;
+Bit 0x40 = auto, 0x80 = viewport (a window of its own), 0x200 = dependent (closed when the
+panel it was opened from changes; PnlClearDependentViewport). Units (PnlConvertUnit/
+PnlConvertCord): each units byte has the x (cx) units in its high nibble and y (cy) in its low:
+0 characters (system font width/height), 1 percent of the parent window, 2 pixels, 3 points,
+4 dynamic: 1 left, 2 right, 4 top, 8 bottom, 0x10 centre (origins only). A value 0xFFFF keeps
+the parent's (PnlFillDefaultRect). TOC entries' origin and size use the same encoding. Examples: EHXHP `05 01 00 | 00 04 6e 00` → flags 0x0400, group 110;
 CMDREF `ext flags 0x0204`; ipf.inf acviewport ext `c3 00 | 44 02 00 04 00 | 11 37 00 64 00`.
 The parsed result is a 20-byte block `{flags, id, x, y, cx, cy, units, …, target@+0x10, group@+0x12}`.
 
@@ -259,7 +262,36 @@ the current font's):
 | **0x15** | `FF len 15 str[len−2]` | Copies `str` into an instance field (`inst+0x11E`) and sends message 0x1007 to `inst+0x2A`. Meaning unknown (possibly a title or status override); **never seen in 306 files**. | [code] |
 | **0x20** DDF (`:ddf res=`) | `FF 04 20 u16 res` | PnlProcessDDFData obtains the application's DDF. DdfFormatCell then lays it out with the same state, `attr | 0x1000000` (DDF records; font indexes +16 use DDF fonts). | [code] (not in survey) |
 | **0x21** `:acviewport.` | `FF len 21 ?? n u16 objid s1 s2 s3 [ext]`, where `n` = total bytes of the three strings, and each string is `len(incl. itself), chars`. ipf.inf: `objid=1`, `s1="IPFMain"` (objectname), `s2="ipf"` (dll), `s3=""` (objectinfo). Ext at `p+7+n` when `n+6 < len`. | MscGetACVPInfo builds a block that is queued as an auto viewport (type 0x21). Nothing is drawn inline. | [both] 1 (ipf.inf) |
-| **0x00, 0x01, 0x09, 0x0A, 0x22+** | | Not handled: skipped by length. | [code] (none seen) |
+| **0x22** | `FF 03 22 n` | Left margin `n` (as 0x02); `x = max(margin, x + U)`. Written by DdfListItem (HMBT_NONE). | [code] |
+| **0x00, 0x01, 0x09, 0x0A, 0x23+** | | Not handled in cells: skipped by length. | [code] (none seen) |
+
+### Dynamic data (DDF) buffers
+
+The Ddf* functions (bhddf.c) write cell text into the DDF's buffer, which
+DdfFormatCell lays out in place of the 0x20 escape with the formatter's
+state. Differences from cells: there is no dictionary and **no
+autospacing** (a word is followed by nothing; 0xFE is one space, 0xFD a
+line break; FB/FC never occur); formatting state (colours, fonts) is not
+reset after it. DdfText splits text into runs of letters and digits and
+single other characters, a blank is FE, a line end FD in text as it is
+(DdfSetFormat(FALSE)) and FE otherwise. Its own escapes:
+
+| Type | Layout | Written by |
+|---|---|---|
+| **0x65** | `FF len 65 name` | DdfHyperText REFERENCE_BY_ID: a link to the panel named `name` (`attr |= 0x120000`), text, then `FF 02 08`. REFERENCE_BY_RES writes `FF 04 1D u16 res` instead. |
+| **0x66** | `FF len 66 chars` | A word. |
+| **0x67** | `FF len 67 u16 width u16 height u8 n face[n]` | DdfSetFont (points; NULL or "" face is `default`, font 0). DdfAddFonts gives it a DDF font number 0-14 (font index + 16; style reset). |
+| **0x68** | `FF 07 68 u32 hbm u8 align` | DdfBitmap: placed by ArtFormatBitmap with `align` (ART_LEFT 1, RIGHT 2, CENTER 4, RUNIN 0x10). |
+| **0x69** | `FF 14 69 RECTL u32 hmf` | DdfMetafile; **the length byte says 0x14 but the escape is 23 bytes** (DdfFormatCell reads the HMF at +0x13). An empty rectangle (xRight or yTop 0) is the window's width, `fit`; else runin of the rectangle's size. |
+
+Other escapes they write: 0x04 style (DdfSetFontStyle: FATTR_SEL_ITALIC
+1 → 1, BOLD 0x20 → 2, UNDERSCORE 2 → 4), 0x13/0x14 (DdfSetColor:
+CLR_DEFAULT → 0, CLR_BLACK → 14, CLR_BROWN → 7), 0x16 inform, 0x1A
+alignment (left 1, right 2, centre 4 from TA_LEFT/RIGHT/CENTER)/0x1B,
+0x02/0x11/0x12/0x22 list margins (DdfListItem: the term at margin 1,
+then the description at 1 + ulWidthDT by HMBT_ALL 0x11, HMBT_FIT 0x12 or
+HMBT_NONE 0x22; FA before the first item and with HMLS_DOUBLELINE, FD
+otherwise), FA (DdfPara).
 
 ---
 

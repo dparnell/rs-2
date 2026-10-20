@@ -390,7 +390,7 @@ mouse and keyboard. What PMWIN has:
 - Threads and processes: see [Processes and input](#processes-and-input)
   (`template.exe` uses an object window on a second thread).
   `WinMessageBox` is a modal dialog built from a template.
-- `HELPMGR.DLL` (help instances are accepted, help shows nothing), the
+- `HELPMGR.DLL` (see [The help manager](#the-help-manager-helpmgrdll-and-viewexe)), the
   file and font dialogs of `PMCTLS.DLL` (see [Standard
   dialogs](#standard-dialogs)), the clipboard and atom tables (see [The
   clipboard](#the-clipboard)), `WinTrackRect` (rectangle tracking with
@@ -1170,8 +1170,9 @@ described in [formats/ipf-structures.md](formats/ipf-structures.md),
 help window title and the panel's: the panel (laid out by `crates/ipf`
 for the window's width and laid out again when it changes), a vertical
 scroll bar, and Previous, Search..., Index and Contents push buttons.
-Panels draw in the system font (also for `:xmp.`), bold drawn twice,
-underlines, colours of `:hp4.`/`:color.` and links in SYSCLR_HELPHILITE;
+Panels draw in the fonts of the file's font table (below), styles as
+logical fonts' fsSelection (real italic, bold, underscore), colours of
+`:hp4.`/`:color.` and links in SYSCLR_HELPHILITE;
 bitmaps are decompressed by `crates/ipf` and drawn with GpiDrawBits
 (stretched for `fit`). Up/Down/PgUp/PgDn/Home/End scroll; Tab and
 Shift+Tab move a box from link to link, Enter or a click follows it, Esc
@@ -1186,20 +1187,100 @@ having every word typed, from the file's search table) are lists in the
 same window; Enter or a double click opens the panel. `:hide.` text shows
 when IPF_KEYS has its key.
 
+**Fonts.** A `:font.` selects an entry of the file's font table (face,
+point height and width); dynamic data adds its own (`DdfSetFont`,
+numbers 16 and up, "default" being entry 0). IBM's help manager matches
+each to the nearest *image* font of the face at the display's resolution
+(FontFindFontMetrics: closest lMaxBaselineExt and average width). rs2
+takes the nearest of the point sizes IBM's image fonts come in (Helv and
+Tms Rmn 8-24, Courier 8-12), at least the system font's 16 pixels, drawn
+with rs2's scaled faces (Helvetica, Times New Roman, Courier:
+GpiCreateLogFont outline and GpiSetCharBox); System faces and entry 0
+are the system font. `:hp1.`-`:hp7.` are the font's logical fonts with
+fsSelection italic, bold and underscore, which GPI simulates (slanted,
+one pel wider, underlined; GpiSetCharShear slants outline fonts too).
+
+**Dynamic data (DDF).** The Ddf* functions (HELPMGR 74-88) build a
+buffer of cell text as IBM's (`bhddf.c`): words written out as escape
+0x66 with no autospacing (0xFE one space), links by panel name (0x65) or
+number (0x1D), inform links, styles, colours (DdfSetColor's mapping of
+PM colours), fonts (0x67), lists (DdfBeginList/DdfListItem with margin
+escapes 0x02/0x11/0x12/0x22), text as it is with an alignment
+(DdfSetFormat/DdfSetTextAlign: escapes 0x1A/0x1B), the application's
+bitmaps (0x68, placed as `:artwork.`) and metafiles (0x69, a box of the
+rectangle: GpiPlayMetaFile draws nothing yet). A handle is valid until
+the help manager has read it. When a panel with `:ddf res=N.` is laid
+out, the help manager sends HM_QUERY_DDF_DATA (mp1 the panel window, mp2
+N) to the HM_SET_OBJCOM_WINDOW window, else the application's (IBM's
+MscAppInterface: HM_SET_ACTIVE_WINDOW's, else the associated frame),
+lays out the text where the escape is and frees the handle; it keeps
+the text for the panel until HM_INVALIDATE_DDF_DATA (mp1 a count, 0
+all, mp2 the ids) asks for it again. A reply that is not a DDF posts
+HM_ERROR 0x2014. Frames send messages they do not process
+(0x213-0x406, WM_USER and up) to their client as IBM's frame procedure
+does, so applications get HM_ messages in their client.
+
+**Windows of their own (viewports).** A link's data (`vpx=`, `vpy=`,
+`vpcx=`, `vpcy=`, `group=`, `viewport`, `auto`, `dependent`) or the
+target heading's (`x=`, `y=`, `width=`, `height=`, `group=`) opens the
+panel in a viewport: a frame inside the help window, placed in the
+area above the buttons as IBM's PnlConvertUnit/PnlConvertCord compute
+it (characters, percent, pixels, points, or left/right/top/bottom/
+center; 0xFFFF keeps the window's value), following the help window's
+size. A panel with a size, a link asking for a viewport, or a group
+whose viewport is open goes to a viewport; a group's panels replace
+each other in one viewport. `auto` links open their panel when the
+panel holding them is shown (inform links tell the application, launch
+links start the program); viewports close when the panel they were
+opened from changes (all of them for the help window's own panel, the
+dependent ones for a viewport's) or with Esc. The help window's own
+panel is placed where its heading puts it. `:acviewport.` loads the
+DLL, calls the procedure with an ACVP (hab, hmq, object id, the panel
+window as parent and owner) and the object info, and places the frame
+it returns by the tag's window data (IBM's MscStartObject); HM_ messages
+sent to a panel window go to the help instance, and HM_QUERY answers
+HMQW_COVERPAGE, HMQW_VIEWPORT, HMQW_OBJCOM_WINDOW, HMQW_INSTANCE,
+HMQW_ACTIVEVIEWPORT and HMQW_GROUP_VIEWPORT.
+
+**Message boxes.** WinMessageBox's MB_HELP adds a Help button
+(MBID_HELP, BS_HELP | BS_NOPOINTERFOCUS, as IBM's MboxInit) and the box
+has idWindow as its id, so Help and F1 reach the help hook as HLPM_WINDOW
+help for that id.
+
 **VIEW.EXE** `book[+book...] [topic]` opens the books (along BOOKSHELF,
 then HELP; `.INF` added when there is no extension) at the first panel
 whose title (else index entry) has the topic, else at the contents, and
 ends when the window is closed. IBM's VIEW is a launcher handing books
 to a VIEWDOC server through shared memory; rs2's calls the help
-manager's `Rs2ViewBook` (private ordinal 200) instead. IBM's VIEW.EXE
-does not run on rs2's HELPMGR: it imports HELPMGR's unpublished ordinals
-28-47 (file and search helpers of IBM's VIEWDOC).
+manager's `Rs2ViewBook` (private ordinal 200) instead.
 
-Not done: DDF (`:ddf.`, the Ddf* API), application-controlled viewports
-(`:acviewport.`) and windows placed by link data (`vpx=` and so on;
-panels open in the one window), the Print button, the help window's
-menu (Services, Options), IPF fonts other than the system font,
-bookmarks and the library list, the message box help (MB_HELP).
+IBM's VIEW.EXE and VIEWDOC.EXE run on rs2's HELPMGR too. VIEW zeroes a
+0x164-byte block (IBM's instance structure) and calls HELPMGR's
+unpublished ordinals on it: HMSetHelpDatabase (37) opens the books,
+IOLoadAllTOC (28) and IOLoadAllIndex (29) put arrays of entries where
+VIEW reads them (+0x76/+0x78: `char *title, u8 level, u16 flags`, 0x800
+not in the contents; +0x68/+0x6A: `char *text`, TOC index at +8, flags
+at +10), it matches the topic with FindPattern, FindWildPattern,
+FindTokenPattern, MscStriCmp and MscStrniCmp (33-35, 46, 47; GetStrToken
+36), IOFree* (30-32) close them, MscAppendINF (45) expands its argument
+(an environment variable naming books, `.INF` added). VIEWDOC opens the
+books with WinCreateBookInstance (26) and sends the instance
+HM_HELP_CONTENTS, 0x235 (show TOC entry mp1), 0x236 (bring the window
+up) and 0x1000 (its window, which gets 0x1003 with the instance when
+the book's window closes); window word 0 of the instance points at a
+block with the help window's frame at +0x26, as VIEWDOC reads it. The
+help manager's window procedures and entry points switch to a stack of
+their own when less than 64 KB of the caller's is left (VIEWDOC's
+stack is 8 KB). HELPMGR's other unpublished ordinals (38-44: MscCleanUp
+and path helpers) are not there; nothing on the media imports them.
+
+Not done: the Print button, the help window's menu (Services,
+Options), bookmarks and the library list, metafiles of dynamic data,
+the viewport style word (title bar, scroll bars, rules: viewports always
+have a title bar and a vertical scroll bar), HMQW_INDEX/TOC/SEARCH/
+VIEWPAGES/LIBRARY, and the panel placement of HM_DISPLAY_HELP and
+HM_HELP_CONTENTS by heading window data beyond the help window's own
+panel.
 
 ## Debugging
 
@@ -1315,7 +1396,16 @@ The export trampolines pass their index to the lock's entry
   with IBM's EHXHP.HLP, CMDREF.INF and REXX.INF in work/modules.txt):
   the contents, a panel with lists, a syntax diagram bitmap and links,
   Tab and Enter on a footnote link (the footnote window), Esc back,
-  Search, and E's F1 and Help menu.
+  Search, and E's F1 and Help menu. `RS2\HMTEST.EXE` (userland/hmtest,
+  with HMTEST.HLP from HMTEST.IPF) checks the rest: `HMTEST 1` dynamic
+  data (Tab to the inform link and Enter: the data is asked for again),
+  `HMTEST 2` fonts and styles, `HMTEST 5` viewports (groups, dependent,
+  auto, heading-placed), `HMTEST /MB` a message box with MB_HELP (F1).
+  `--init "OS2\VIEW.EXE IPF IPF-Controlled"` shows the Toolkit's IPF
+  sample (samples/pm/ipf: IPF.INF to OS2\BOOK, IPF.DLL to OS2\DLL in
+  work/modules.txt) with IPF.DLL's application-controlled viewport;
+  `--init "IBM\VIEW.EXE CMDREF XCOPY"` IBM's VIEW and VIEWDOC (from
+  disk 2, in C:\IBM).
 - QEMU runs of the Toolkit PM samples, checked with screenshots and with
   mouse/keyboard input through `xtask run --type` (`{mouse_move dx dy}`,
   `{mouse_abs x y}`, `{mouse_button n}`, `{shot NAME}` for a screenshot
