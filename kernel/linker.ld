@@ -8,6 +8,7 @@ SECTIONS {
         *(.text.entry)
         *(.text .text.*)
     }
+    __text_end = .;
     .rodata : ALIGN(4K) {
         *(.rodata .rodata.*)
     }

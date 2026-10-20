@@ -17,6 +17,7 @@ mod codepage;
 mod config;
 mod conkbd;
 mod console;
+mod debug;
 mod display;
 mod drivers;
 mod fs;

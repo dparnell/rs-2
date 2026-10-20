@@ -26,6 +26,8 @@ pub const MAX_CPUS: usize = 32;
 pub const IPI_RESCHEDULE: u8 = 0xf0;
 pub const IPI_TLB_FLUSH: u8 = 0xf1;
 pub const IPI_HALT: u8 = 0xf2;
+/// Print where this CPU is (debug.rs thread dumps).
+pub const IPI_DUMP: u8 = 0xf3;
 
 const MSR_GS_BASE: u32 = 0xc000_0101;
 const MSR_KERNEL_GS_BASE: u32 = 0xc000_0102;
@@ -245,8 +247,9 @@ pub fn tlb_shootdown(mask: u64) {
 }
 
 /// IPI handlers (called from the trap dispatcher, no kernel lock).
-pub fn ipi(vector: u8) {
+pub fn ipi(vector: u8, f: &crate::arch::idt::TrapFrame) {
     match vector {
+        IPI_DUMP => crate::debug::dump_cpu(f),
         IPI_TLB_FLUSH => {
             unsafe { arch::write_cr3(arch::read_cr3()) };
             ACKS.fetch_add(1, Ordering::SeqCst);
@@ -258,6 +261,13 @@ pub fn ipi(vector: u8) {
         _ => {}
     }
     crate::apic::eoi();
+}
+
+/// Ask every CPU (this one too) to print where it is.
+pub fn dump_all() {
+    for c in online() {
+        send_ipi(c, IPI_DUMP);
+    }
 }
 
 /// Stop the other CPUs (panic).

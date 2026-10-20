@@ -24,6 +24,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "desktest"
+version = "0.1.0"
+dependencies = [
+ "gpi",
+ "os2",
+]
+
+[[package]]
 name = "fat"
 version = "0.1.0"
 
@@ -177,6 +185,15 @@ name = "pmwp-dll"
 version = "0.1.0"
 dependencies = [
  "os2",
+]
+
+[[package]]
+name = "rs2shell"
+version = "0.1.0"
+dependencies = [
+ "gpi",
+ "os2",
+ "pmwin",
 ]
 
 [[package]]

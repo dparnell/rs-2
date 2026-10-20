@@ -133,6 +133,11 @@ pub fn all() -> Vec<Arc<Process>> {
     PROCESSES.lock().clone()
 }
 
+/// The process list, unless another CPU holds it (debug dumps).
+pub fn try_all() -> Option<Vec<Arc<Process>>> {
+    PROCESSES.try_lock().map(|g| g.clone())
+}
+
 /// Build the environment block: `VAR=VALUE\0...\0` followed by the command
 /// line `program\0arguments\0\0`. Returns the block and the offset of the
 /// command line.
