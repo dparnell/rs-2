@@ -110,7 +110,8 @@ extern "C" fn type_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_CONTROL if mp1 & 0xffff == ID_TYPELIST && mp1 >> 16 == LN_ENTER => {
-            unsafe { WinDismissDlg(h, DID_OK) };
+            // Enter or a double click: Set.
+            post(h, WM_COMMAND, DID_OK, 0);
             0
         }
         WM_COMMAND => {
@@ -265,7 +266,10 @@ extern "C" fn autosave_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             }
             set_check(h, ID_AUTOON, a.autosave);
             enable_spin(h, a.autosave);
-            0
+            // The focus starts on the check box (the spin button may be
+            // disabled).
+            unsafe { WinSetFocus(HWND_DESKTOP, WinWindowFromID(h, ID_AUTOON)) };
+            1
         }
         WM_CONTROL if mp1 & 0xffff == ID_AUTOON && mp1 >> 16 == BN_CLICKED => {
             enable_spin(h, checked(h, ID_AUTOON));
@@ -466,9 +470,9 @@ pub fn find() {
     }
     let ef = |id: u32, y: i16| item(WC_ENTRYFIELD, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | ES_MARGIN | ES_AUTOSCROLL, (54, y, 136, 8), id as u16);
     let tpl = template(dialog_frame(b"Find", 196, 70), alloc::vec![
-        label(b"~Find:", (4, 56, 46, 8), 0),
+        label(b"~Find:", (4, 56, 46, 8), DT_MNEMONIC),
         ef(ID_FINDTEXT, 56),
-        label(b"C~hange to:", (4, 42, 46, 8), 0),
+        label(b"C~hange to:", (4, 42, 46, 8), DT_MNEMONIC),
         ef(ID_CHANGETEXT, 42),
         item(WC_BUTTON, b"Case ~sensitive", WS_VISIBLE | WS_TABSTOP | WS_GROUP | BS_AUTOCHECKBOX, (28, 30, 80, 10), ID_CASE as u16),
         item(WC_BUTTON, b"~Wrap", WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX, (130, 30, 50, 10), ID_WRAPSEARCH as u16),
@@ -577,6 +581,10 @@ extern "C" fn colors_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
                 WinRegisterClass(a.hab, SAMPLE_CLASS.as_ptr(), sample_proc, 0, 0);
                 WinCreateWindow(h, SAMPLE_CLASS.as_ptr() as u32, b"\0".as_ptr(), WS_VISIBLE, b.x + 8, b.y + 6, b.cx - 16, b.cy - 22, h, HWND_TOP, ID_SAMPLE, core::ptr::null(), core::ptr::null());
             }
+            0
+        }
+        WM_CONTROL if (mp1 & 0xffff == ID_FG || mp1 & 0xffff == ID_BG) && mp1 >> 16 == LN_ENTER => {
+            post(h, WM_COMMAND, DID_OK, 0);
             0
         }
         WM_CONTROL if (mp1 & 0xffff == ID_FG || mp1 & 0xffff == ID_BG) && mp1 >> 16 == LN_SELECT => {
