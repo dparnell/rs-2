@@ -76,6 +76,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "nbtest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "nettest"
 version = "0.1.0"
 dependencies = [
@@ -84,6 +91,10 @@ dependencies = [
 
 [[package]]
 name = "os2"
+version = "0.1.0"
+
+[[package]]
+name = "os2-exe"
 version = "0.1.0"
 
 [[package]]
@@ -157,7 +168,22 @@ version = "0.1.0"
 dependencies = [
  "gpi",
  "os2",
+ "os2-exe",
  "pmwin",
+]
+
+[[package]]
+name = "pmwp-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "shelltest"
+version = "0.1.0"
+dependencies = [
+ "os2",
 ]
 
 [[package]]
