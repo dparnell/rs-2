@@ -66,12 +66,24 @@ programs tested so far.
   rustup target add x86_64-unknown-uefi x86_64-unknown-none i686-unknown-linux-gnu
   ```
 
-- **QEMU** (`qemu-system-x86_64` with its UEFI firmware), only for
-  running rs2 here: `brew install qemu` on macOS, the `qemu-system-x86`
-  (plus `ovmf` on Debian/Ubuntu) package on Linux. `cargo xtask run`
-  looks for `edk2-x86_64-code.fd` in Homebrew's and the usual Linux
-  QEMU directories; set `RS2_OVMF_DIR` to the folder that has it if
-  yours is elsewhere.
+- **QEMU** (`qemu-system-x86_64`) and its **UEFI firmware** (OVMF, from
+  the EDK II project), only for running rs2 here:
+  - macOS: `brew install qemu` (the firmware comes with it).
+  - Debian/Ubuntu: `sudo apt install qemu-system-x86 ovmf`.
+  - Fedora: `sudo dnf install qemu-system-x86 edk2-ovmf`.
+  - Arch: `sudo pacman -S qemu-system-x86 edk2-ovmf`.
+
+  (`cargo xtask run` needs macOS or Linux; the ISO itself can be used
+  anywhere.)
+
+  `cargo xtask run` finds the firmware in those packages' usual folders
+  (QEMU's own `edk2-x86_64-code.fd` + `edk2-i386-vars.fd`, or the
+  distributions' `OVMF_CODE*.fd` + `OVMF_VARS*.fd`, never the Secure
+  Boot builds). If none is installed, the same two files are in every
+  QEMU source release (download.qemu.org, `qemu-*.tar.xz`, compressed
+  as `pc-bios/edk2-x86_64-code.fd.bz2` and `pc-bios/edk2-i386-vars.fd.bz2`:
+  unpack them with `bunzip2`); put them in a folder and point
+  `RS2_OVMF_DIR` at it. Any x86-64 OVMF build without Secure Boot works.
 
 Nothing else: no C compiler, no ISO tools and no IBM files. The build
 writes the ISO itself, and the live ISO contains only rs2's own code.

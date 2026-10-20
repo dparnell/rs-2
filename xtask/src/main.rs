@@ -539,27 +539,49 @@ fn strip(file: &Path) {
     }
 }
 
-/// QEMU's UEFI firmware (edk2-x86_64-code.fd and edk2-i386-vars.fd):
-/// `$RS2_OVMF_DIR`, else Homebrew's or a Linux distribution's QEMU share
-/// directory.
+/// QEMU's UEFI firmware (OVMF): a code image and a variable store, from
+/// `$RS2_OVMF_DIR` or the usual places: QEMU's own copies (Homebrew, most
+/// Linux QEMU packages, QEMU's source tree `pc-bios/`) or the
+/// distributions' OVMF packages (Debian/Ubuntu `ovmf`, Fedora and Arch
+/// `edk2-ovmf`). Only non-Secure-Boot builds are picked.
 fn ovmf() -> (PathBuf, PathBuf) {
-    let dirs = std::env::var_os("RS2_OVMF_DIR")
+    const PAIRS: [(&str, &str); 4] = [
+        ("edk2-x86_64-code.fd", "edk2-i386-vars.fd"),
+        ("OVMF_CODE_4M.fd", "OVMF_VARS_4M.fd"),
+        ("OVMF_CODE.4m.fd", "OVMF_VARS.4m.fd"),
+        ("OVMF_CODE.fd", "OVMF_VARS.fd"),
+    ];
+    let dirs: Vec<PathBuf> = std::env::var_os("RS2_OVMF_DIR")
         .map(PathBuf::from)
         .into_iter()
-        .chain(["/opt/homebrew/share/qemu", "/usr/local/share/qemu", "/usr/share/qemu"].map(PathBuf::from));
-    let mut tried = Vec::new();
-    let share = dirs
-        .into_iter()
-        .find(|d| {
-            tried.push(d.display().to_string());
-            d.join("edk2-x86_64-code.fd").exists()
-        })
-        .unwrap_or_else(|| panic!("QEMU's UEFI firmware (edk2-x86_64-code.fd) not found in {}; set RS2_OVMF_DIR", tried.join(", ")));
-    let code = share.join("edk2-x86_64-code.fd");
+        .chain(
+            [
+                "/opt/homebrew/share/qemu",
+                "/usr/local/share/qemu",
+                "/usr/share/qemu",
+                "/usr/share/OVMF",
+                "/usr/share/edk2/ovmf",
+                "/usr/share/edk2/x64",
+                "/usr/share/edk2-ovmf/x64",
+            ]
+            .map(PathBuf::from),
+        )
+        .collect();
+    let found = dirs.iter().find_map(|d| {
+        PAIRS.iter().find(|(c, v)| d.join(c).exists() && d.join(v).exists()).map(|(c, v)| (d.join(c), d.join(v)))
+    });
+    let Some((code, vars_src)) = found else {
+        let tried: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
+        panic!(
+            "QEMU's UEFI firmware (OVMF) not found in {}.\nInstall QEMU (brew install qemu) or your distribution's OVMF package, \
+             or set RS2_OVMF_DIR to a folder with edk2-x86_64-code.fd and edk2-i386-vars.fd (README, Requirements).",
+            tried.join(", ")
+        );
+    };
     // A fresh variable store every run, so stale boot entries from other
     // configurations never get in the way.
     let vars = root().join("work/ovmf-vars.fd");
-    copy(&share.join("edk2-i386-vars.fd"), &vars);
+    copy(&vars_src, &vars);
     (code, vars)
 }
 
