@@ -511,3 +511,72 @@ fn make_stress_image() {
     ok(&mut v);
     std::fs::write(path, v.unmount().unwrap().0.into_inner()).unwrap();
 }
+
+/// One change to a volume made elsewhere (JFS_IN, JFS_OUT, JFS_OP).
+#[test]
+#[ignore]
+fn foreign_op() {
+    let data = std::fs::read(std::env::var("JFS_IN").unwrap()).unwrap();
+    let mut v = Volume::mount(Mem(RefCell::new(data))).unwrap();
+    match std::env::var("JFS_OP").unwrap().as_str() {
+        "delbig" => v.delete("BIGDIR\\FILE0500.TXT").unwrap(),
+        "dellast" => v.delete("BIGDIR\\FILE2000.TXT").unwrap(),
+        "addA" => drop(v.create_file("A\\NEW.TXT", 0, NOW).unwrap()),
+        "addroot" => drop(v.create_file("NEW.TXT", 0, NOW).unwrap()),
+        "addbig" => drop(v.create_file("BIGDIR\\FILE0500X.TXT", 0, NOW).unwrap()),
+        o => panic!("{o}"),
+    }
+    assert!(v.check().unwrap().ok());
+    std::fs::write(std::env::var("JFS_OUT").unwrap(), v.unmount().unwrap().0.into_inner()).unwrap();
+}
+
+/// A volume with Linux's directory index tables (case-sensitive names).
+fn fresh_indexed(mb: usize) -> Volume<Mem> {
+    let dev = Mem(RefCell::new(std::vec![0u8; mb << 20]));
+    format(&dev, &FormatParams { label: "LNX", now: NOW, ..Default::default() }).unwrap();
+    {
+        let mut d = dev.0.borrow_mut();
+        for sbo in [0x8000usize, 0xf000] {
+            let f = (layout::flag::DIR_INDEX | layout::flag::LINUX | layout::flag::GROUPCOMMIT | layout::flag::INLINELOG).to_le_bytes();
+            d[sbo + layout::sb::FLAG..sbo + layout::sb::FLAG + 4].copy_from_slice(&f);
+        }
+    }
+    let mut v = Volume::mount(dev).unwrap();
+    let mut root = v.read_inode(layout::ROOT_I).unwrap();
+    layout::wr32(&mut root.b, layout::di::NEXT_INDEX, 2);
+    root.set_size(1);
+    v.write_inode(&root).unwrap();
+    v.flush().unwrap();
+    v
+}
+
+#[test]
+fn directory_index_tables() {
+    let mut v = fresh_indexed(64);
+    assert!(!v.ci);
+    v.mkdir("D", NOW).unwrap();
+    let mut r = Lcg(3);
+    let mut live = std::collections::BTreeSet::new();
+    for step in 0..5000 {
+        let k = r.next() % 1500;
+        let n = format!("D\\{}{k}", "Name ".repeat((k % 6) as usize));
+        if live.remove(&k) {
+            v.delete(&n).unwrap();
+        } else {
+            v.create_file(&n, 0, NOW).unwrap();
+            live.insert(k);
+        }
+        if step % 1000 == 999 {
+            ok(&mut v);
+        }
+    }
+    // Names in any case find the file (OS/2 semantics), so another case
+    // of an existing name cannot be created.
+    v.create_file("Case", 0, NOW).unwrap();
+    assert_eq!(v.create_file("CASE", 0, NOW).unwrap_err(), Error::Exists);
+    assert_eq!(v.lookup("case").unwrap().name, "Case");
+    let mut v = remount(v);
+    ok(&mut v);
+    let d = v.lookup("D").unwrap();
+    assert_eq!(v.read_dir(&d).unwrap().len(), live.len());
+}

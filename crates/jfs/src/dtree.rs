@@ -279,8 +279,9 @@ impl<D: BlockDevice> Volume<D> {
             h
         };
         if self.dir_index && n.leaf {
-            for (e, s) in n.ents.iter().zip(heads) {
-                self.index_set(dir, e.index, n.pxd.addr, s)?;
+            let _ = heads;
+            for (k, e) in n.ents.iter().enumerate() {
+                self.index_set(dir, e.index, n.pxd.addr, k)?;
             }
         }
         Ok(())
@@ -367,6 +368,10 @@ impl<D: BlockDevice> Volume<D> {
             }
         })?;
         Ok(v)
+    }
+
+    pub(crate) fn dt_root_node(&mut self, dir: &Inode) -> Result<Node> {
+        self.read_node(dir, Pxd::default())
     }
 
     // ---- Insertion ----
@@ -554,7 +559,17 @@ impl<D: BlockDevice> Volume<D> {
         };
         let e = leaf.ents.remove(k);
         if self.dir_index {
-            self.index_free(dir, e.index)?;
+            // A readdir positioned at the freed index resumes with the
+            // entry that followed it.
+            let next = match leaf.ents.get(k) {
+                Some(n) => n.index,
+                None if leaf.next != 0 => {
+                    let nb = (PSIZE >> self.l2bsize) as u32;
+                    self.read_node(dir, Pxd::new(leaf.next, nb))?.ents.first().map_or(u32::MAX, |n| n.index)
+                }
+                None => u32::MAX,
+            };
+            self.index_free(dir, e.index, next)?;
         }
         let mut node = leaf;
         loop {

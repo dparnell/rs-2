@@ -120,8 +120,20 @@ impl<D: BlockDevice> Volume<D> {
                             own.claim(p.addr, p.len as u64, &mut r, "directory page");
                             r.dir_blocks += p.len as u64;
                         }
-                        let blocks: u64 = pages.iter().map(|p| p.len as u64).sum::<u64>()
+                        let mut blocks: u64 = pages.iter().map(|p| p.len as u64).sum::<u64>()
                             + if ea.flag & dxd::EXTENT != 0 { ea.loc.len as u64 } else { 0 };
+                        if self.dir_index && rd32(&i.b, di::NEXT_INDEX) > MAX_INLINE_DIRTABLE_ENTRY + 1 {
+                            if let Ok((x, tp)) = self.xt_load_at(&i, di::DIRTABLE) {
+                                for e in &x {
+                                    own.claim(e.addr, e.len as u64, &mut r, "directory index");
+                                    blocks += e.len as u64;
+                                }
+                                for p in &tp {
+                                    own.claim(p.addr, p.len as u64, &mut r, "directory index xtree");
+                                    blocks += p.len as u64;
+                                }
+                            }
+                        }
                         if i.nblocks() != blocks {
                             r.problems.push(format!("directory {ino}: {} blocks recorded, {blocks} used", i.nblocks()));
                         }
@@ -135,6 +147,25 @@ impl<D: BlockDevice> Volume<D> {
                         continue;
                     }
                 };
+                if self.dir_index {
+                    let root = self.dt_root_node(&i)?;
+                    let mut leaves = alloc::vec::Vec::new();
+                    self.walk(&i, &root, 0, &mut |_, n| {
+                        if n.leaf {
+                            leaves.push((n.pxd.addr, n.ents.iter().map(|e| e.index).collect::<alloc::vec::Vec<u32>>()));
+                        }
+                    })?;
+                    let next = rd32(&i.b, di::NEXT_INDEX);
+                    'dirs: for (page, idx) in leaves {
+                        for (k, &x) in idx.iter().enumerate() {
+                            let ok = x >= 2 && x < next && self.index_get(&i, x)? == (true, k as u8, page);
+                            if !ok {
+                                r.problems.push(format!("directory {ino}: index table entry {x} wrong"));
+                                break 'dirs;
+                            }
+                        }
+                    }
+                }
                 for w in list.windows(2) {
                     if crate::name::compare(&w[0].0, &w[1].0, self.ci) != core::cmp::Ordering::Less {
                         r.problems.push(format!("directory {ino}: names out of order"));

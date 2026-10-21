@@ -167,7 +167,7 @@ impl<D: BlockDevice> Volume<D> {
             for p in self.dt_pages(i)? {
                 self.free_meta(p)?;
             }
-            if self.dir_index && rd32(&i.b, di::NEXT_INDEX) > MAX_INLINE_DIRTABLE_ENTRY {
+            if self.dir_index && rd32(&i.b, di::NEXT_INDEX) > MAX_INLINE_DIRTABLE_ENTRY + 1 {
                 let (x, pages) = self.xt_load_at(i, di::DIRTABLE)?;
                 for e in x {
                     self.free_meta(Pxd::new(e.addr, e.len))?;
