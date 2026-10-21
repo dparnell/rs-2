@@ -713,6 +713,9 @@ fn client_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             activate_now(v);
             0
         }
+        // The scroll bar's notifications go to its owner, the client:
+        // the panel window scrolls.
+        WM_VSCROLL => send(v.panel, msg, mp1, mp2),
         WM_COMMAND => {
             match lo(mp1) {
                 ID_PREVIOUS => back(v),
