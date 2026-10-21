@@ -229,6 +229,30 @@ pub fn short_order(code: u8) -> bool {
     (code ^ 0x80) & 0x88 == 0x88
 }
 
+/// The length of the order at the start of `d` (None: truncated).
+pub fn order_len(d: &[u8]) -> Option<usize> {
+    let n = match *d.first()? {
+        0x00 | 0xff => 1,
+        0xfe => 4 + ((*d.get(2)? as usize) << 8 | *d.get(3)? as usize),
+        c if short_order(c) => 2,
+        _ => 2 + *d.get(1)? as usize,
+    };
+    (n <= d.len()).then_some(n)
+}
+
+/// How many bytes of whole orders at the start of `d` fit in `max`
+/// (at least one order when `at_least_one`).
+pub fn whole_orders(d: &[u8], max: usize, at_least_one: bool) -> usize {
+    let mut p = 0;
+    while let Some(n) = order_len(&d[p..]) {
+        if p + n > max && (p > 0 || !at_least_one) {
+            break;
+        }
+        p += n;
+    }
+    p
+}
+
 // ---- Colours ----
 
 /// API colour from an order's flags and 3-byte value (GSICOL, GSIA):

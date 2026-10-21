@@ -214,6 +214,8 @@ pub struct State {
     pub switch: crate::switch::SwitchList,
     /// The text cursor (WinCreateCursor).
     pub cursor: pmwin::cursor::CursorState,
+    /// Metafiles (gpiseg.rs).
+    pub metafiles: Vec<Option<crate::gpiseg::Mf>>,
 }
 
 /// No presentation parameter colour.
@@ -289,6 +291,7 @@ pub fn init(surface: Surface) {
         keys: [0; 256],
         switch: Default::default(),
         cursor: Default::default(),
+        metafiles: Vec::new(),
     });
     unsafe { (*crate::shared::header()).state = Box::into_raw(s) as *mut u8 };
 }

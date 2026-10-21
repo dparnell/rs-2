@@ -7,6 +7,7 @@ GpiBox @356
 GpiCharString @358
 GpiCharStringAt @359
 GpiCloseFigure @360
+GpiCloseSegment @361
 GpiCombineRegion @362
 GpiConvert @364
 GpiCopyMetaFile @365
@@ -15,8 +16,13 @@ GpiCreatePS @369
 GpiCreateRegion @370
 GpiDeleteBitmap @371
 GpiDeleteMetaFile @375
+GpiDeleteSegment @376
+GpiDeleteSegments @377
 GpiDeleteSetId @378
 GpiDestroyPS @379
+GpiDrawChain @380
+GpiDrawFrom @382
+GpiDrawSegment @383
 GpiEndArea @385
 GpiEndPath @387
 GpiEqualRegion @388
@@ -24,6 +30,8 @@ GpiErase @389
 GpiExcludeClipRectangle @391
 GpiFillPath @392
 GpiFullArc @393
+GpiGetData @394
+GpiImage @395
 GpiIntersectClipRectangle @396
 GpiLine @398
 GpiLoadBitmap @399
@@ -34,6 +42,7 @@ GpiModifyPath @403
 GpiMove @404
 GpiOffsetClipRegion @405
 GpiOffsetRegion @407
+GpiOpenSegment @408
 GpiPaintRegion @409
 GpiPlayMetaFile @411
 GpiPointArc @412
@@ -45,6 +54,7 @@ GpiPolySpline @417
 GpiPop @418
 GpiPtInRegion @419
 GpiPtVisible @420
+GpiPutData @421
 GpiQueryArcParams @422
 GpiQueryAttrMode @423
 GpiQueryBackColor @424
@@ -71,6 +81,7 @@ GpiQueryDeviceBitmapFormats @445
 GpiQueryDrawControl @446
 GpiQueryDrawingMode @447
 GpiQueryFontMetrics @453
+GpiQueryInitialSegmentAttrs @455
 GpiQueryLineEnd @457
 GpiQueryLineJoin @458
 GpiQueryLineType @459
@@ -94,6 +105,9 @@ GpiQueryPel @476
 GpiQueryRGBColor @479
 GpiQueryRealColors @480
 GpiQueryRegionBox @481
+GpiQuerySegmentAttrs @482
+GpiQuerySegmentNames @483
+GpiQuerySegmentTransformMatrix @485
 GpiQuerySetIds @486
 GpiQueryStopDraw @487
 GpiQueryTextBox @489
@@ -126,6 +140,7 @@ GpiSetCurrentPosition @519
 GpiSetDefaultViewMatrix @520
 GpiSetDrawControl @521
 GpiSetDrawingMode @522
+GpiSetInitialSegmentAttrs @527
 GpiSetLineEnd @528
 GpiSetLineJoin @529
 GpiSetLineType @530
@@ -144,8 +159,10 @@ GpiSetPatternRefPoint @542
 GpiSetPatternSet @543
 GpiSetPel @544
 GpiSetRegion @546
+GpiSetSegmentAttrs @547
 GpiSetSegmentTransformMatrix @549
 GpiSetStopDraw @550
+GpiSetViewingTransformMatrix @553
 GpiStrokePath @554
 GpiUnloadFonts @555
 GpiWCBitBlt @557
@@ -156,7 +173,9 @@ GpiTranslate @564
 GpiScale @565
 GpiRotate @566
 GpiQueryDefArcParams @567
+GpiQueryDefViewingLimits @569
 GpiSetDefArcParams @570
+GpiSetDefViewingLimits @572
 GpiQueryBitmapParameters @573
 GpiQueryLogicalFont @574
 GpiDeletePalette @577
@@ -170,6 +189,8 @@ GpiQueryCharStringPosAt @585
 GpiQueryFonts @586
 GpiQueryRegionRects @587
 GpiSetAttrs @588
+GpiQueryDefAttrs @590
+GpiSetDefAttrs @591
 GpiCreateLogColorTable @592
 GpiQueryLogColorTable @593
 GpiCreatePalette @594

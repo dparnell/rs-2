@@ -33,6 +33,8 @@ forward! {
     WinCompareStrings = "PMWIN.708";
     WinCopyAccelTable = "PMWIN.709";
     WinCopyRect = "PMWIN.710";
+    WinCpTranslateChar = "PMWIN.711";
+    WinCpTranslateString = "PMWIN.712";
     WinCreateAccelTable = "PMWIN.713";
     WinCreateAtomTable = "PMWIN.714";
     WinCreateCursor = "PMWIN.715";

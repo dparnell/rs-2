@@ -29,6 +29,8 @@ WinCloseClipbrd @5124
 WinCompareStrings @5125
 WinCopyAccelTable @5126
 WinCopyRect @5127
+WinCpTranslateChar @5128
+WinCpTranslateString @5129
 WinCreateAccelTable @5130
 WinCreateAtomTable @5131
 WinCreateCursor @5132

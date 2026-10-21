@@ -274,7 +274,12 @@ pub struct Ps {
     pub attr_mode: i32,
     attr_stack: Vec<Attrs>,
     pub model: Matrix,
+    /// Viewing transform of the segment being drawn
+    /// (GpiSetViewingTransformMatrix), between model and default view.
+    pub viewing: Matrix,
     pub view: Matrix,
+    /// Default attribute values (GpiSetDefAttrs): what a reset restores.
+    pub defaults: Attrs,
     /// Page to device (page units / page viewport).
     pub page: Matrix,
     pub page_units: u32,
@@ -318,7 +323,9 @@ impl Ps {
             attr_mode: 1,
             attr_stack: Vec::new(),
             model: Matrix::IDENTITY,
+            viewing: Matrix::IDENTITY,
             view: Matrix::IDENTITY,
+            defaults: Attrs::default(),
             page: Matrix::IDENTITY,
             page_units: xform::PU_PELS,
             page_size: (0, 0),
@@ -496,7 +503,7 @@ impl Ps {
     // ---- Transforms ----
 
     fn update_xf(&mut self) {
-        self.xf = self.model.then(&self.view).then(&self.page);
+        self.xf = self.model.then(&self.viewing).then(&self.view).then(&self.page);
     }
 
     pub fn world_to_device(&self) -> Matrix {
@@ -510,6 +517,11 @@ impl Ps {
 
     pub fn set_view(&mut self, m: Matrix) {
         self.view = m;
+        self.update_xf();
+    }
+
+    pub fn set_viewing(&mut self, m: Matrix) {
+        self.viewing = m;
         self.update_xf();
     }
 
@@ -544,7 +556,7 @@ impl Ps {
         Some(match space {
             CVTC_WORLD => Matrix::IDENTITY,
             CVTC_MODEL => self.model,
-            CVTC_DEFAULTPAGE | CVTC_PAGE => self.model.then(&self.view),
+            CVTC_DEFAULTPAGE | CVTC_PAGE => self.model.then(&self.viewing).then(&self.view),
             CVTC_DEVICE => self.xf,
             _ => return None,
         })
@@ -652,14 +664,17 @@ impl Ps {
 
     /// GpiResetPS: attributes, transforms, clipping, colours.
     pub fn reset(&mut self, all: bool) {
-        self.attrs = Attrs::default();
+        self.attrs = self.defaults.clone();
         self.attr_stack.clear();
         self.pos = Point::default();
         if all {
             self.colors.reset();
             self.colors.palette = None;
             self.model = Matrix::IDENTITY;
+            self.viewing = Matrix::IDENTITY;
             self.view = Matrix::IDENTITY;
+            self.defaults = Attrs::default();
+            self.attrs = Attrs::default();
             let (u, sz) = (self.page_units, self.page_size);
             self.set_page(u, sz);
             self.clip_region = None;

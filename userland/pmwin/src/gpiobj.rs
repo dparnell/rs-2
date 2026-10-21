@@ -22,6 +22,7 @@ enum DcKind {
     Window(u32),
     Memory,
     Info,
+    Metafile(alloc::boxed::Box<crate::gpiseg::MetaRec>),
 }
 
 struct Bm {
@@ -75,6 +76,14 @@ fn dc_add(k: DcKind) -> u32 {
             v.push(Some(k));
             dc_handle(v.len() - 1)
         }
+    }
+}
+
+/// What a metafile DC has recorded.
+pub fn meta_rec(hdc: u32) -> Option<&'static mut crate::gpiseg::MetaRec> {
+    match dc_get(hdc)? {
+        DcKind::Metafile(m) => Some(m),
+        _ => None,
     }
 }
 
@@ -174,10 +183,20 @@ pub fn associate(hps: u32, hdc: u32) -> bool {
         Some(DcKind::Window(h)) => DcKind::Window(*h),
         Some(DcKind::Memory) => DcKind::Memory,
         Some(DcKind::Info) => DcKind::Info,
+        Some(DcKind::Metafile(_)) => {
+            let Some(e) = entry(st(), hps) else { return false };
+            e.gpi.hdc = hdc;
+            e.hwnd = 0;
+            e.gpi.memory = false;
+            e.ps.set_vis(Point::new(0, 0), Vec::new());
+            crate::gpiseg::set_meta_dc(hps, hdc);
+            return true;
+        }
         None => return false,
     };
     let Some(e) = entry(st(), hps) else { return false };
     e.gpi.hdc = hdc;
+    e.gpi.seg.meta_dc = 0;
     match kind {
         DcKind::Window(h) => {
             e.hwnd = h;
@@ -190,7 +209,7 @@ pub fn associate(hps: u32, hdc: u32) -> bool {
             e.gpi.memory = true;
             e.ps.set_vis(Point::new(0, 0), Vec::new());
         }
-        DcKind::Info => {
+        DcKind::Info | DcKind::Metafile(_) => {
             e.hwnd = 0;
             e.gpi.memory = false;
         }
@@ -417,6 +436,9 @@ pub extern "C" fn GpiQueryClipBox(hps: u32, p: *mut RectL) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiIntersectClipRectangle(hps: u32, p: *const RectL) -> i32 {
+    if let Some(r) = read(p) {
+        crate::gpiseg::rec_meta(hps, gpi::goca::ESC_INTERSECTCLIPRECT, || [r.left, r.bottom, r.right, r.top].iter().flat_map(|v| v.to_le_bytes()).collect());
+    }
     let (Some(e), Some(r)) = (entry(st(), hps), read(p)) else { return RGN_ERROR };
     e.ps.clip_rect(r.rect(), false);
     e.ps.clip_region.as_ref().map_or(gpi::region::RGN_NULL, |g| g.complexity())
@@ -424,6 +446,9 @@ pub extern "C" fn GpiIntersectClipRectangle(hps: u32, p: *const RectL) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiExcludeClipRectangle(hps: u32, p: *const RectL) -> i32 {
+    if let Some(r) = read(p) {
+        crate::gpiseg::rec_meta(hps, gpi::goca::ESC_EXCLUDECLIPRECT, || [r.left, r.bottom, r.right, r.top].iter().flat_map(|v| v.to_le_bytes()).collect());
+    }
     let (Some(e), Some(r)) = (entry(st(), hps), read(p)) else { return RGN_ERROR };
     e.ps.clip_rect(r.rect(), true);
     e.ps.clip_region.as_ref().map_or(gpi::region::RGN_NULL, |g| g.complexity())
@@ -594,22 +619,26 @@ pub extern "C" fn WinScrollWindow(h: u32, dx: i32, dy: i32, scroll: *const RectL
 // ---- Device contexts ----
 
 const OD_SCREEN: i32 = 0;
+const OD_METAFILE: i32 = 3;
 const OD_INFO: i32 = 6;
+const OD_METAFILE_NOQUERY: i32 = 7;
 const OD_MEMORY: i32 = 8;
 
-/// DevOpenDC(hab, lType, pszToken, lCount, pdopData, hdcComp): memory and
-/// information DCs; there are no printers or metafile DCs yet.
+/// DevOpenDC(hab, lType, pszToken, lCount, pdopData, hdcComp): memory,
+/// information and metafile DCs; there are no printers yet.
 #[unsafe(no_mangle)]
 pub extern "C" fn DevOpenDC(_hab: u32, ty: i32, _token: *const u8, _n: i32, _dop: *const u32, _comp: u32) -> u32 {
     let k = match ty {
         OD_MEMORY => DcKind::Memory,
         OD_INFO | OD_SCREEN => DcKind::Info,
+        OD_METAFILE | OD_METAFILE_NOQUERY => DcKind::Metafile(alloc::boxed::Box::new(crate::gpiseg::MetaRec::new())),
         _ => return 0,
     };
     dc_add(k)
 }
 
-/// DevCloseDC(hdc): DEV_OK 1.
+/// DevCloseDC(hdc): DEV_OK 1; for a metafile DC the metafile's handle
+/// (presentation spaces still associated with it lose it).
 #[unsafe(no_mangle)]
 pub extern "C" fn DevCloseDC(hdc: u32) -> u32 {
     let Some(i) = dc_index(hdc) else { return 0 };
@@ -618,7 +647,16 @@ pub extern "C" fn DevCloseDC(hdc: u32) -> u32 {
         let (_, hps) = o.dc_pss.remove(at);
         crate::gpiapi::GpiDestroyPS(hps);
     }
-    objects().dcs.get_mut(i).and_then(|d| d.take()).is_some() as u32
+    let me = crate::state::pid();
+    for e in st().pss.iter_mut().flatten().filter(|e| e.pid == me && e.gpi.hdc == hdc) {
+        e.gpi.hdc = 0;
+        e.gpi.seg.meta_dc = 0;
+    }
+    match objects().dcs.get_mut(i).and_then(|d| d.take()) {
+        Some(DcKind::Metafile(m)) => crate::gpiseg::new_mf(m.build()),
+        Some(_) => 1,
+        None => 0,
+    }
 }
 
 /// WinOpenWindowDC(hwnd): the window's device context (one per window).
@@ -1132,8 +1170,9 @@ pub extern "C" fn WinDrawBitmap(hps: u32, hbm: u32, src: *const RectL, dst: *con
 /// alTable)
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiCreateLogColorTable(hps: u32, opts: u32, format: i32, start: i32, n: i32, table: *const i32) -> u32 {
-    let Some(e) = entry(st(), hps) else { return 0 };
     let data: Vec<i32> = if table.is_null() || n <= 0 { Vec::new() } else { (0..n as usize).map(|i| unsafe { table.add(i).read_unaligned() }).collect() };
+    crate::gpiseg::rec_meta(hps, gpi::goca::ESC_CREATELOGCOLORTABLE, || [opts as i32, format, start, data.len() as i32].iter().chain(data.iter()).flat_map(|v| v.to_le_bytes()).collect());
+    let Some(e) = entry(st(), hps) else { return 0 };
     if !e.ps.colors.create(opts, format, start, &data) {
         return 0;
     }

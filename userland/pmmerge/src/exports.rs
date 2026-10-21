@@ -22,4 +22,6 @@ macro_rules! aligned {
 aligned! {
     __a_PmMergeHelpHook => crate::PmMergeHelpHook, 4;
     __a_WinQueryCpType => crate::WinQueryCpType, 1;
+    __a_AAB32GetReg => crate::AAB32GetReg, 1;
+    __a_AAB32SetReg => crate::AAB32SetReg, 2;
 }

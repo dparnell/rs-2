@@ -260,6 +260,7 @@ dependencies = [
  "os2-exe",
  "pmwin",
  "thunk16",
+ "uls",
 ]
 
 [[package]]

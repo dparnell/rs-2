@@ -219,6 +219,40 @@ unsafe extern "C" {
     fn DevOpenDC(hab: u32, ty: i32, tok: *const u8, n: i32, dop: *const u32, comp: u32) -> u32;
     #[link_name = "PMGPI.604"]
     fn DevCloseDC(hdc: u32) -> u32;
+    #[link_name = "PMGPI.411"]
+    fn GpiPlayMetaFile(hps: u32, hmf: u32, n1: i32, opts: *const i32, segs: *mut i32, n2: i32, desc: *mut u8) -> i32;
+    #[link_name = "PMGPI.466"]
+    fn GpiQueryMetaFileLength(hmf: u32) -> i32;
+    #[link_name = "PMGPI.465"]
+    fn GpiQueryMetaFileBits(hmf: u32, off: i32, n: i32, p: *mut u8) -> u32;
+    #[link_name = "PMGPI.536"]
+    fn GpiSetMetaFileBits(hmf: u32, off: i32, n: i32, p: *const u8) -> u32;
+    #[link_name = "PMGPI.365"]
+    fn GpiCopyMetaFile(hmf: u32) -> u32;
+    #[link_name = "PMGPI.375"]
+    fn GpiDeleteMetaFile(hmf: u32) -> u32;
+    #[link_name = "PMGPI.500"]
+    fn GpiSaveMetaFile(hmf: u32, name: *const u8) -> u32;
+    #[link_name = "PMGPI.401"]
+    fn GpiLoadMetaFile(hab: u32, name: *const u8) -> u32;
+    #[link_name = "PMGPI.522"]
+    fn GpiSetDrawingMode(hps: u32, mode: i32) -> u32;
+    #[link_name = "PMGPI.408"]
+    fn GpiOpenSegment(hps: u32, id: i32) -> u32;
+    #[link_name = "PMGPI.361"]
+    fn GpiCloseSegment(hps: u32) -> u32;
+    #[link_name = "PMGPI.380"]
+    fn GpiDrawChain(hps: u32) -> u32;
+    #[link_name = "PMGPI.394"]
+    fn GpiGetData(hps: u32, id: i32, off: *mut i32, format: i32, n: i32, buf: *mut u8) -> i32;
+    #[link_name = "PMGPI.421"]
+    fn GpiPutData(hps: u32, format: i32, n: *mut i32, buf: *const u8) -> i32;
+    #[link_name = "PMGPI.483"]
+    fn GpiQuerySegmentNames(hps: u32, first: i32, last: i32, max: i32, ids: *mut i32) -> i32;
+    #[link_name = "PMGPI.376"]
+    fn GpiDeleteSegment(hps: u32, id: i32) -> u32;
+    #[link_name = "PMWIN.712"]
+    fn WinCpTranslateString(hab: u32, from: u32, src: *const u8, to: u32, max: u32, dst: *mut u8) -> u32;
     #[link_name = "PMGPI.606"]
     fn DevQueryCaps(hdc: u32, start: i32, n: i32, out: *mut i32) -> u32;
 }
@@ -505,6 +539,146 @@ fn self_checks(hab: u32) {
         DevQueryCaps(hdc, 16, 1, caps.as_mut_ptr());
         check("DevQueryCaps CAPS_COLOR_BITCOUNT", caps[0] == 24);
         DevCloseDC(hdc);
+    }
+}
+
+// ---- Metafiles and retained segments ----
+
+const OD_METAFILE: i32 = 3;
+const DM_DRAW: i32 = 1;
+const DM_RETAIN: i32 = 2;
+const DM_DRAWANDRETAIN: i32 = 3;
+
+/// Draw the metafile test picture: a red filled box (2,2)-(9,9) and a
+/// blue line (20,20)-(30,20).
+unsafe fn picture(hps: u32) {
+    unsafe {
+        GpiSetColor(hps, CLR_RED);
+        GpiMove(hps, &pt(2, 2));
+        GpiBox(hps, DRO_FILL, &pt(9, 9), 0, 0);
+        GpiSetColor(hps, CLR_BLUE);
+        GpiMove(hps, &pt(20, 20));
+        GpiLine(hps, &pt(30, 20));
+    }
+}
+
+fn picture_ok(m: &Mem) -> bool {
+    pel(m, 5, 5) == 0xff0000 && pel(m, 25, 20) == 0x0000ff && pel(m, 15, 15) == 0xffffff
+}
+
+/// A metafile DC with an associated PS.
+fn meta_dc(hab: u32) -> (u32, u32) {
+    unsafe {
+        let hdc = DevOpenDC(hab, OD_METAFILE, b"*\0".as_ptr(), 0, null(), 0);
+        let size = pt(0, 0);
+        (hdc, GpiCreatePS(hab, hdc, &size, PU_PELS | GPIA_ASSOC))
+    }
+}
+
+/// Close a metafile DC (its PS disassociated first): the metafile.
+fn close_meta(hdc: u32, hps: u32) -> u32 {
+    unsafe {
+        GpiAssociate(hps, 0);
+        GpiDestroyPS(hps);
+        DevCloseDC(hdc)
+    }
+}
+
+/// A 32x32 memory bitmap cleared to white.
+fn white(hab: u32) -> Mem {
+    let m = mem(hab, 32, 32, PU_PELS);
+    unsafe { GpiErase(m.hps) };
+    m
+}
+
+fn meta_checks(hab: u32) {
+    unsafe {
+        let (hdc, hps) = meta_dc(hab);
+        check("DevOpenDC OD_METAFILE", hdc != 0 && hps != 0);
+        picture(hps);
+        let hmf = close_meta(hdc, hps);
+        check("DevCloseDC gives the metafile", hmf > 1);
+        let len = GpiQueryMetaFileLength(hmf);
+        let mut bits = alloc::vec![0u8; len.max(0) as usize];
+        let ok = len > 0 && GpiQueryMetaFileBits(hmf, 0, len, bits.as_mut_ptr()) != 0;
+        check("GpiQueryMetaFileBits: a Begin Document field", ok && bits[2..5] == [0xd3, 0xa8, 0xa8]);
+        let m = white(hab);
+        check("GpiPlayMetaFile", GpiPlayMetaFile(m.hps, hmf, 0, null(), null_mut(), 0, null_mut()) == 1);
+        check("played metafile draws the picture", picture_ok(&m));
+        free(m);
+
+        // An empty metafile filled with GpiSetMetaFileBits plays the same.
+        let empty = DevCloseDC(DevOpenDC(hab, OD_METAFILE, b"*\0".as_ptr(), 0, null(), 0));
+        let set = GpiSetMetaFileBits(empty, 0, len, bits.as_ptr()) != 0;
+        let m = white(hab);
+        GpiPlayMetaFile(m.hps, empty, 0, null(), null_mut(), 0, null_mut());
+        check("GpiSetMetaFileBits", set && GpiQueryMetaFileLength(empty) == len && picture_ok(&m));
+        free(m);
+        GpiDeleteMetaFile(empty);
+
+        // Copy, save (deletes the copy), load.
+        let copy = GpiCopyMetaFile(hmf);
+        let saved = GpiSaveMetaFile(copy, b"C:\\GPITEST.MET\0".as_ptr()) != 0;
+        check("GpiSaveMetaFile deletes the metafile", saved && GpiQueryMetaFileLength(copy) == -1);
+        let loaded = GpiLoadMetaFile(hab, b"C:\\GPITEST.MET\0".as_ptr());
+        let m = white(hab);
+        GpiPlayMetaFile(m.hps, loaded, 0, null(), null_mut(), 0, null_mut());
+        check("GpiLoadMetaFile", loaded != 0 && GpiQueryMetaFileLength(loaded) == len && picture_ok(&m));
+        free(m);
+        GpiDeleteMetaFile(loaded);
+        check("GpiDeleteMetaFile", GpiDeleteMetaFile(hmf) != 0 && GpiDeleteMetaFile(hmf) == 0);
+        check("GpiLoadMetaFile of a non-metafile fails", GpiLoadMetaFile(hab, b"C:\\CONFIG.SYS\0".as_ptr()) == 0);
+
+        // Retained segments: not drawn in DM_RETAIN, drawn by GpiDrawChain.
+        let m = white(hab);
+        GpiSetDrawingMode(m.hps, DM_RETAIN);
+        let opened = GpiOpenSegment(m.hps, 7) != 0;
+        picture(m.hps);
+        GpiCloseSegment(m.hps);
+        check("DM_RETAIN does not draw", opened && pel(&m, 5, 5) == 0xffffff);
+        let mut ids = [0i32; 4];
+        check("GpiQuerySegmentNames", GpiQuerySegmentNames(m.hps, 1, 100, 4, ids.as_mut_ptr()) == 1 && ids[0] == 7);
+        GpiDrawChain(m.hps);
+        check("GpiDrawChain", picture_ok(&m));
+        let mut buf = [0u8; 512];
+        let mut off = 0;
+        let n = GpiGetData(m.hps, 7, &mut off, 0, 512, buf.as_mut_ptr());
+        check("GpiGetData", n > 0 && off == n);
+        GpiDeleteSegment(m.hps, 7);
+        check("GpiDeleteSegment", GpiQuerySegmentNames(m.hps, 1, 100, 4, ids.as_mut_ptr()) == 0);
+        free(m);
+        let m = white(hab);
+        let mut cnt = n;
+        let put = GpiPutData(m.hps, 0, &mut cnt, buf.as_ptr());
+        check("GpiPutData draws the orders", put == 1 && cnt == n && picture_ok(&m));
+        free(m);
+        let m = white(hab);
+        GpiSetDrawingMode(m.hps, DM_DRAWANDRETAIN);
+        GpiOpenSegment(m.hps, 3);
+        picture(m.hps);
+        GpiCloseSegment(m.hps);
+        check("DM_DRAWANDRETAIN draws", picture_ok(&m));
+        GpiSetDrawingMode(m.hps, DM_DRAW);
+        free(m);
+
+        // Retained segments drawn onto a metafile (as OS/2's PMPIC does).
+        let (hdc, hps) = meta_dc(hab);
+        GpiSetDrawingMode(hps, DM_RETAIN);
+        GpiOpenSegment(hps, 1);
+        picture(hps);
+        GpiCloseSegment(hps);
+        GpiDrawChain(hps);
+        let hmf = close_meta(hdc, hps);
+        let m = white(hab);
+        GpiPlayMetaFile(m.hps, hmf, 0, null(), null_mut(), 0, null_mut());
+        check("GpiDrawChain onto a metafile", picture_ok(&m));
+        free(m);
+        GpiDeleteMetaFile(hmf);
+
+        // Code page 437's cent sign is 0xBD in code page 850.
+        let mut out = [0u8; 4];
+        let r = WinCpTranslateString(hab, 437, b"a\x9b\0".as_ptr(), 850, 4, out.as_mut_ptr());
+        check("WinCpTranslateString", r != 0 && out[..3] == [b'a', 0xbd, 0]);
     }
 }
 
@@ -821,6 +995,7 @@ fn main(_s: &Startup) -> u32 {
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
     check("WinInitialize/WinCreateMsgQueue", hab != 0 && hmq != 0);
     self_checks(hab);
+    meta_checks(hab);
     let pic = load_picture(b"C:\\YOSEMITE.BMP\0");
     if pic != 0 {
         check("GpiCreateBitmap from a bitmap file", true);

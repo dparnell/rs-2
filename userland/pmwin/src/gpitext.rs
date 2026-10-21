@@ -14,6 +14,7 @@
 
 use alloc::vec::Vec;
 
+use gpi::goca::{Attr, Order};
 use gpi::{LogFont, Point};
 
 use crate::gpiapi::{draw, entry, point, read, write, Lcid, PointL, RectL, GPI_ERROR, GPI_OK};
@@ -33,14 +34,24 @@ fn incs(p: *const i32, n: i32) -> Option<Vec<i32>> {
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiCharStringAt(hps: u32, p: *const PointL, n: i32, s: *const u8) -> i32 {
     let (Some(p), Some(t)) = (point(p), text(s, n)) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::CharString { at: Some(p), moving: false, text: t.to_vec() }) {
+        return GPI_OK;
+    }
+    text_at(hps, p, t)
+}
+
+fn text_at(hps: u32, p: Point, t: &[u8]) -> i32 {
     draw(hps, |e, surf| e.ps.gpi_text(surf, p, t, None, None, false, false)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiCharString(hps: u32, n: i32, s: *const u8) -> i32 {
     let Some(pos) = entry(st(), hps).map(|e| e.ps.pos) else { return GPI_ERROR };
-    let p = PointL { x: pos.x, y: pos.y };
-    GpiCharStringAt(hps, &p, n, s)
+    let Some(t) = text(s, n) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::CharString { at: None, moving: false, text: t.to_vec() }) {
+        return GPI_OK;
+    }
+    text_at(hps, pos, t)
 }
 
 const CHS_OPAQUE: u32 = 1;
@@ -52,6 +63,17 @@ fn string_pos(hps: u32, at: Option<Point>, prcl: *const RectL, opts: u32, n: i32
     let Some(t) = text(s, n) else { return GPI_ERROR };
     let dx = if opts & CHS_VECTOR != 0 { incs(adx, n) } else { None };
     let rect = read(prcl).map(|r| r.rect());
+    let r = rect.unwrap_or_default();
+    let draw_it = crate::gpiseg::rec(hps, || Order::CharStringExt {
+        at,
+        flags: crate::gpiseg::chs_flags(opts),
+        rect: [Point::new(r.left, r.bottom), Point::new(r.right, r.top)],
+        text: t.to_vec(),
+        dx: dx.clone().unwrap_or_default(),
+    });
+    if !draw_it {
+        return GPI_OK;
+    }
     draw(hps, |e, surf| {
         let start = at.unwrap_or(e.ps.pos);
         let before = e.ps.pos;
@@ -158,6 +180,7 @@ fn put_pair(hps: u32, p: *mut i32, f: impl FnOnce(&gpi::Attrs) -> (i32, i32)) ->
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetCharBox(hps: u32, p: *const i32) -> u32 {
     let Some(v) = pair(p) else { return 0 };
+    crate::gpiseg::rec_attr(hps, || Attr::CharBox(v.0, v.1));
     set_attr(hps, |a| a.char_box = v)
 }
 
@@ -176,6 +199,7 @@ pub extern "C" fn GpiQueryDefCharBox(hps: u32, p: *mut i32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetCharAngle(hps: u32, p: *const i32) -> u32 {
     let Some(v) = pair(p) else { return 0 };
+    crate::gpiseg::rec_attr(hps, || Attr::CharAngle(Point::new(v.0, v.1)));
     set_attr(hps, |a| a.char_angle = v)
 }
 
@@ -187,6 +211,7 @@ pub extern "C" fn GpiQueryCharAngle(hps: u32, p: *mut i32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetCharShear(hps: u32, p: *const i32) -> u32 {
     let Some(v) = pair(p) else { return 0 };
+    crate::gpiseg::rec_attr(hps, || Attr::CharShear(Point::new(v.0, v.1)));
     set_attr(hps, |a| a.char_shear = v)
 }
 
@@ -197,6 +222,7 @@ pub extern "C" fn GpiQueryCharShear(hps: u32, p: *mut i32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetCharDirection(hps: u32, v: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::CharDirection(v));
     set_attr(hps, |a| a.char_direction = v)
 }
 
@@ -207,6 +233,7 @@ pub extern "C" fn GpiQueryCharDirection(hps: u32) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetCharMode(hps: u32, v: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::CharMode(v));
     set_attr(hps, |a| a.char_mode = v)
 }
 
@@ -217,6 +244,7 @@ pub extern "C" fn GpiQueryCharMode(hps: u32) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetCharExtra(hps: u32, v: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::CharExtra(v));
     set_attr(hps, |a| a.char_extra = v)
 }
 
@@ -228,6 +256,7 @@ pub extern "C" fn GpiQueryCharExtra(hps: u32, p: *mut i32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetCharBreakExtra(hps: u32, v: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::CharBreakExtra(v));
     set_attr(hps, |a| a.char_break_extra = v)
 }
 
@@ -239,6 +268,7 @@ pub extern "C" fn GpiQueryCharBreakExtra(hps: u32, p: *mut i32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetTextAlignment(hps: u32, h: i32, v: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::TextAlign(h, v));
     set_attr(hps, |a| a.text_align = (h, v))
 }
 
@@ -250,7 +280,8 @@ pub extern "C" fn GpiQueryTextAlignment(hps: u32, h: *mut i32, v: *mut i32) -> u
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn GpiSetCp(hps: u32, _cp: u32) -> u32 {
+pub extern "C" fn GpiSetCp(hps: u32, cp: u32) -> u32 {
+    crate::gpiseg::rec_meta(hps, gpi::goca::ESC_SETCP, || cp.to_le_bytes().to_vec());
     entry(st(), hps).is_some() as u32
 }
 
@@ -294,9 +325,14 @@ fn find_font(face: &[u8], lmatch: i32) -> Option<usize> {
 /// GpiCreateLogFont(hps, pName, lLcid, pfatAttrs): FONT_MATCH 2,
 /// FONT_DEFAULT 1.
 #[unsafe(no_mangle)]
-pub extern "C" fn GpiCreateLogFont(hps: u32, _name: *const u8, lcid: i32, fat: *const u8) -> i32 {
+pub extern "C" fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *const u8) -> i32 {
     if fat.is_null() || !(1..=254).contains(&lcid) {
         return GPI_ERROR;
+    }
+    if entry(st(), hps).is_some_and(|e| e.gpi.seg.meta_dc != 0) {
+        let n = read(name as *const [u8; 8]).unwrap_or([0; 8]);
+        let f = read(fat as *const [u8; 56]).unwrap();
+        crate::gpiseg::meta_font(hps, n, lcid, &f);
     }
     let Some(e) = entry(st(), hps) else { return GPI_ERROR };
     let sel = unsafe { (fat.add(2) as *const u16).read_unaligned() };
@@ -330,6 +366,7 @@ pub extern "C" fn GpiCreateLogFont(hps: u32, _name: *const u8, lcid: i32, fat: *
 /// GpiSetCharSet(hps, llcid): 0 = the default font.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetCharSet(hps: u32, lcid: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::CharSet(lcid));
     let Some(e) = entry(st(), hps) else { return 0 };
     let (lf, loaded) = if lcid == 0 {
         (LogFont::default(), 0)
@@ -355,6 +392,7 @@ pub extern "C" fn GpiQueryCharSet(hps: u32) -> i32 {
 /// (-1) deletes all.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32 {
+    crate::gpiseg::rec_meta(hps, gpi::goca::ESC_DELETESETID, || lcid.to_le_bytes().to_vec());
     let Some(e) = entry(st(), hps) else { return 0 };
     let before = e.gpi.lcids.len();
     e.gpi.lcids.retain(|(l, _)| lcid != -1 && *l != lcid);

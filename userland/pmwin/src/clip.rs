@@ -8,7 +8,9 @@
 //! in all PM processes). A CF_BITMAP item moves out of the setter's GPI
 //! objects into the clipboard; each process that asks for it gets its
 //! own bitmap handle with the picture, freed when the clipboard is
-//! emptied. Other CFI_HANDLE items are kept as they are.
+//! emptied. A CF_METAFILE item's metafile becomes the system's (every
+//! process can play it) and is deleted when the clipboard is emptied.
+//! Other CFI_HANDLE items are kept as they are.
 //!
 //! The clipboard is open for one message queue at a time; WinOpenClipbrd
 //! waits for it. The owner gets WM_RENDERFMT for items set without data
@@ -28,6 +30,8 @@ pub const CF_TEXT: u32 = 1;
 pub const CF_BITMAP: u32 = 2;
 pub const CF_DSPTEXT: u32 = 3;
 pub const CF_DSPBITMAP: u32 = 4;
+pub const CF_METAFILE: u32 = 5;
+pub const CF_DSPMETAFILE: u32 = 6;
 const CFI_OWNERFREE: u32 = 0x0001;
 pub const CFI_HANDLE: u32 = 0x0200;
 pub const CFI_POINTER: u32 = 0x0400;
@@ -42,6 +46,7 @@ pub enum Data {
     Bytes(Vec<u8>),
     Bitmap(Bitmap),
     Handle(u32),
+    Metafile(u32),
 }
 
 pub struct Item {
@@ -98,6 +103,9 @@ fn release(item: Item) {
         for (p, h) in given {
             crate::gpiobj::delete_bitmap_of(p, h);
         }
+    }
+    if let Data::Metafile(h) = item.data {
+        crate::gpiseg::free(h);
     }
 }
 
@@ -267,6 +275,11 @@ pub extern "C" fn WinSetClipbrdData(_hab: u32, data: u32, fmt: u32, info: u32) -
             Some(b) => Data::Bitmap(b),
             None => return 0,
         }
+    } else if fmt == CF_METAFILE || fmt == CF_DSPMETAFILE {
+        if !crate::gpiseg::give_to_system(data) {
+            return 0;
+        }
+        Data::Metafile(data)
     } else {
         Data::Handle(data)
     };
@@ -290,7 +303,7 @@ pub extern "C" fn WinQueryClipbrdData(_hab: u32, fmt: u32) -> u32 {
     match &item.data {
         Data::Delayed => 0,
         Data::Bytes(v) => v.as_ptr() as u32,
-        Data::Handle(h) => *h,
+        Data::Handle(h) | Data::Metafile(h) => *h,
         Data::Bitmap(b) => {
             if let Some(&(_, h)) = clip().given.iter().find(|(p, h)| *p == me && crate::gpiobj::bitmap_size(*h).is_some()) {
                 return h;

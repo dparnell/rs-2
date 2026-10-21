@@ -418,6 +418,44 @@ pub extern "C" fn WinSetCp(_hmq: u32, cp: u32) -> u32 {
     (cp == 850 || cp == 437) as u32
 }
 
+fn cp_or_default(cp: u32) -> u16 {
+    if cp == 0 { 850 } else { cp as u16 }
+}
+
+/// A character of code page `from` in code page `to` (through Unicode,
+/// with rs2's NLS tables); '?' when `to` has no such character.
+fn translate(from: u16, to: u16, c: u8) -> u8 {
+    if from == to {
+        return c;
+    }
+    uls::ucs_to_cp(to, uls::cp_to_ucs(from, c)).unwrap_or(b'?')
+}
+
+/// WinCpTranslateChar(hab, cpSrc, chSrc, cpDst) (0: the PM code page).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinCpTranslateChar(_hab: u32, from: u32, c: u32, to: u32) -> u32 {
+    translate(cp_or_default(from), cp_or_default(to), c as u8) as u32
+}
+
+/// WinCpTranslateString(hab, cpSrc, pszSrc, cpDst, cchDestMax, pchDest):
+/// the string with its NUL, cut to fit.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinCpTranslateString(_hab: u32, from: u32, src: *const u8, to: u32, max: u32, dst: *mut u8) -> u32 {
+    if src.is_null() || dst.is_null() || max == 0 {
+        return 0;
+    }
+    let (f, t) = (cp_or_default(from), cp_or_default(to));
+    let mut i = 0usize;
+    unsafe {
+        while i + 1 < max as usize && *src.add(i) != 0 {
+            *dst.add(i) = translate(f, t, *src.add(i));
+            i += 1;
+        }
+        *dst.add(i) = 0;
+    }
+    1
+}
+
 /// WinQueryCpList(hab, ccpMax, prgcp): the code pages PM can use.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryCpList(_hab: u32, max: u32, list: *mut u32) -> u32 {

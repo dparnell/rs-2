@@ -28,6 +28,7 @@ mod frame;
 mod help;
 mod gpiapi;
 mod gpiobj;
+mod gpiseg;
 mod gpitext;
 mod input;
 mod listbox;

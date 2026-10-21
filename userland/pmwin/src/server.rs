@@ -405,6 +405,8 @@ pub fn process_gone(p: u32) {
         }
     }
     s.objects.remove(&p);
+    crate::gpiseg::process_gone(p);
+    let s = st();
     s.switch.process_gone(p);
     pointer::process_gone(p);
     let s = st();

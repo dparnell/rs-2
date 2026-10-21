@@ -1,3 +1,5 @@
 ; rs2 names for PMMERGE ordinals without a public name (name ordinal)
 PmMergeHelpHook 5119
 WinQueryCpType 5480
+AAB32GetReg 5000
+AAB32SetReg 5001

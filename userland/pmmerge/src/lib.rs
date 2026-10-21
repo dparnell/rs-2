@@ -54,3 +54,42 @@ pub extern "C" fn PmMergeHelpHook(_mode: u32, _topic: u32, _subtopic: u32, _prcl
 pub extern "C" fn WinQueryCpType(_hmq: u32) -> u32 {
     1
 }
+
+unsafe extern "C" {
+    #[link_name = "PMWIN.977"]
+    fn WinSetErrorInfo(e: u32, fs: u32) -> u32;
+}
+
+/// Per-thread blocks of AAB32GetReg register 3 (by thread id).
+static mut REGS: [[u16; 8]; 128] = [[0; 8]; 128];
+
+/// The thread ID (FS:[0x0C] is the TIB2, which starts with it).
+fn tid() -> usize {
+    let t: u32;
+    unsafe {
+        core::arch::asm!("mov {t}, fs:[0x0c]", "mov {t}, [{t}]", t = out(reg) t, options(nostack, readonly, preserves_flags));
+    }
+    t as usize
+}
+
+/// AAB32GetReg(lReg) (ordinal 5000, no public name): IBM's PM DLLs
+/// (PMGPI, PMPIC) take register 3, a block of the thread in which they
+/// note the error they raise and its severity, and then report it with
+/// AAB32SetReg(1, severity << 16 | code). Other registers read 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn AAB32GetReg(reg: u32) -> u32 {
+    if reg != 3 {
+        return 0;
+    }
+    unsafe { core::ptr::addr_of_mut!(REGS[tid() % 128]) as u32 }
+}
+
+/// AAB32SetReg(lReg, ulValue) (ordinal 5001): register 1 is the error
+/// WinGetLastError returns.
+#[unsafe(no_mangle)]
+pub extern "C" fn AAB32SetReg(reg: u32, v: u32) -> u32 {
+    if reg == 1 {
+        unsafe { WinSetErrorInfo(v, 0) };
+    }
+    1
+}

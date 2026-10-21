@@ -39,6 +39,7 @@ forward! {
     GpiCharString = 4358;
     GpiCharStringAt = 4359;
     GpiCloseFigure = 4360;
+    GpiCloseSegment = 4361;
     GpiCombineRegion = 4362;
     GpiConvert = 4364;
     GpiCopyMetaFile = 4365;
@@ -47,8 +48,13 @@ forward! {
     GpiCreateRegion = 4370;
     GpiDeleteBitmap = 4371;
     GpiDeleteMetaFile = 4375;
+    GpiDeleteSegment = 4376;
+    GpiDeleteSegments = 4377;
     GpiDeleteSetId = 4378;
     GpiDestroyPS = 4379;
+    GpiDrawChain = 4380;
+    GpiDrawFrom = 4382;
+    GpiDrawSegment = 4383;
     GpiEndArea = 4385;
     GpiEndPath = 4387;
     GpiEqualRegion = 4388;
@@ -56,6 +62,8 @@ forward! {
     GpiExcludeClipRectangle = 4391;
     GpiFillPath = 4392;
     GpiFullArc = 4393;
+    GpiGetData = 4394;
+    GpiImage = 4395;
     GpiIntersectClipRectangle = 4396;
     GpiLine = 4398;
     GpiLoadBitmap = 4399;
@@ -66,6 +74,7 @@ forward! {
     GpiMove = 4404;
     GpiOffsetClipRegion = 4405;
     GpiOffsetRegion = 4407;
+    GpiOpenSegment = 4408;
     GpiPaintRegion = 4409;
     GpiPlayMetaFile = 4411;
     GpiPointArc = 4412;
@@ -77,6 +86,7 @@ forward! {
     GpiPop = 4418;
     GpiPtInRegion = 4419;
     GpiPtVisible = 4420;
+    GpiPutData = 4421;
     GpiQueryArcParams = 4422;
     GpiQueryAttrMode = 4423;
     GpiQueryBackColor = 4424;
@@ -103,6 +113,7 @@ forward! {
     GpiQueryDrawControl = 4446;
     GpiQueryDrawingMode = 4447;
     GpiQueryFontMetrics = 4453;
+    GpiQueryInitialSegmentAttrs = 4455;
     GpiQueryLineEnd = 4457;
     GpiQueryLineJoin = 4458;
     GpiQueryLineType = 4459;
@@ -126,6 +137,9 @@ forward! {
     GpiQueryRGBColor = 4479;
     GpiQueryRealColors = 4480;
     GpiQueryRegionBox = 4481;
+    GpiQuerySegmentAttrs = 4482;
+    GpiQuerySegmentNames = 4483;
+    GpiQuerySegmentTransformMatrix = 4485;
     GpiQuerySetIds = 4486;
     GpiQueryStopDraw = 4487;
     GpiQueryTextBox = 4489;
@@ -158,6 +172,7 @@ forward! {
     GpiSetDefaultViewMatrix = 4520;
     GpiSetDrawControl = 4521;
     GpiSetDrawingMode = 4522;
+    GpiSetInitialSegmentAttrs = 4527;
     GpiSetLineEnd = 4528;
     GpiSetLineJoin = 4529;
     GpiSetLineType = 4530;
@@ -176,8 +191,10 @@ forward! {
     GpiSetPatternSet = 4543;
     GpiSetPel = 4544;
     GpiSetRegion = 4546;
+    GpiSetSegmentAttrs = 4547;
     GpiSetSegmentTransformMatrix = 4549;
     GpiSetStopDraw = 4550;
+    GpiSetViewingTransformMatrix = 4553;
     GpiStrokePath = 4554;
     GpiUnloadFonts = 4555;
     GpiWCBitBlt = 4557;
@@ -188,7 +205,9 @@ forward! {
     GpiScale = 4565;
     GpiRotate = 4566;
     GpiQueryDefArcParams = 4567;
+    GpiQueryDefViewingLimits = 4569;
     GpiSetDefArcParams = 4570;
+    GpiSetDefViewingLimits = 4572;
     GpiQueryBitmapParameters = 4573;
     GpiQueryLogicalFont = 4574;
     GpiDeletePalette = 4577;
@@ -202,6 +221,8 @@ forward! {
     GpiQueryFonts = 4586;
     GpiQueryRegionRects = 4587;
     GpiSetAttrs = 4588;
+    GpiQueryDefAttrs = 4590;
+    GpiSetDefAttrs = 4591;
     GpiCreateLogColorTable = 4592;
     GpiQueryLogColorTable = 4593;
     GpiCreatePalette = 4594;

@@ -395,24 +395,12 @@ pub fn build(m: &Metafile) -> Vec<u8> {
 }
 
 /// How much of an order stream fits in `max` bytes without splitting an
-/// order (at least one order).
+/// order (at least one order; a truncated tail goes whole).
 fn split_point(d: &[u8], max: usize) -> usize {
-    let mut p = 0;
-    while p < d.len() {
-        let code = d[p];
-        let len = match code {
-            0x00 | 0xff => 1,
-            0xfe if p + 4 <= d.len() => 4 + ((d[p + 2] as usize) << 8 | d[p + 3] as usize),
-            c if crate::goca::short_order(c) => 2,
-            _ if p + 2 <= d.len() => 2 + d[p + 1] as usize,
-            _ => d.len() - p,
-        };
-        if p + len > max && p > 0 {
-            break;
-        }
-        p += len;
+    match crate::goca::whole_orders(d, max, true) {
+        0 => d.len(),
+        n => n,
     }
-    p.min(d.len())
 }
 
 #[cfg(test)]
@@ -487,6 +475,7 @@ mod tests {
         for (f, units, page, segs) in [
             ("media/boot/toolkit/os2tk45/samples/pm/graphics/graphic.met", xform::PU_LOENGLISH, (984, 736), 9),
             ("unpacked/disk_12/OS2/BITMAP/AAAAA.MET", xform::PU_HIENGLISH, (12725, 9722), 1),
+            ("media/boot/toolkit/os2tk45/samples/pm/print/prtsamp.met", xform::PU_ARBITRARY, (11520, 7680), 102),
         ] {
             let Ok(b) = std::fs::read(std::format!("{root}{f}")) else { continue };
             let m = parse(&b).unwrap();

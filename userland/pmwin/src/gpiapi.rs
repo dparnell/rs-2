@@ -7,6 +7,7 @@
 
 use alloc::vec::Vec;
 
+use gpi::goca::{Attr, Order};
 use gpi::{Matrix, Mix, Point, Ps, Rect, Surface};
 
 use crate::color;
@@ -77,6 +78,8 @@ pub struct PsExtra {
     /// may move meanwhile; the clip is brought up to date before drawing.
     pub upd: Option<pmwin::Region>,
     pub generation: u32,
+    /// Retained segments and metafile recording.
+    pub seg: crate::gpiseg::SegState,
 }
 
 const HPS_BASE: u32 = 0x100;
@@ -368,6 +371,7 @@ pub extern "C" fn GpiAssociate(hps: u32, hdc: u32) -> u32 {
         e.gpi.hdc = 0;
         e.gpi.memory = false;
         e.gpi.bitmap = 0;
+        e.gpi.seg.meta_dc = 0;
         e.hwnd = 0;
         e.ps.set_vis(Point::new(0, 0), Vec::new());
         return 1;
@@ -385,6 +389,9 @@ pub extern "C" fn GpiQueryDevice(hps: u32) -> u32 {
 /// GpiResetPS(hps, flOptions): GRES_ATTRS 1, GRES_SEGMENTS 2, GRES_ALL 4.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiResetPS(hps: u32, opts: u32) -> u32 {
+    if opts & 6 != 0 {
+        crate::gpiseg::reset_segments(hps);
+    }
     let Some(e) = entry(st(), hps) else { return 0 };
     e.ps.reset(opts & 4 != 0);
     if opts & 4 != 0 {
@@ -433,7 +440,7 @@ pub extern "C" fn GpiRestorePS(hps: u32, _id: i32) -> u32 {
     entry(st(), hps).is_some() as u32
 }
 
-// ---- Drawing control, segments and metafiles (not supported) ----
+// ---- Drawing control (segments and metafiles: gpiseg.rs) ----
 
 /// GpiSetDrawControl(hps, lControl, lValue): DCTL_DISPLAY 2 and
 /// DCTL_BOUNDARY 3 are honoured.
@@ -492,79 +499,11 @@ pub extern "C" fn GpiQueryStopDraw(hps: u32) -> i32 {
     query(hps, |_| 0, -1)
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiSetDrawingMode(hps: u32, _mode: i32) -> u32 {
-    entry(st(), hps).is_some() as u32
-}
-
-/// DM_DRAW: segments are not retained.
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiQueryDrawingMode(hps: u32) -> i32 {
-    query(hps, |_| 1, 0)
-}
-
-/// Metafiles are not supported: loading fails.
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiLoadMetaFile(_hab: u32, _name: *const u8) -> u32 {
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiDeleteMetaFile(_hmf: u32) -> u32 {
-    crate::misc::set_error(PMERR_INV_HMF);
-    0
-}
-
-/// No metafile handle is ever valid (see GpiLoadMetaFile): the calls that
-/// take one fail with PMERR_INV_HMF, as OS/2's do for a bad handle.
-const PMERR_INV_HMF: u32 = 0x207e;
-
-/// GpiCopyMetaFile(hmf)
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiCopyMetaFile(_hmf: u32) -> u32 {
-    crate::misc::set_error(PMERR_INV_HMF);
-    0
-}
-
-/// GpiQueryMetaFileLength(hmf)
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiQueryMetaFileLength(_hmf: u32) -> i32 {
-    crate::misc::set_error(PMERR_INV_HMF);
-    GPI_ERROR
-}
-
-/// GpiQueryMetaFileBits(hmf, lOffset, lLength, pbData)
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiQueryMetaFileBits(_hmf: u32, _off: i32, _n: i32, _p: *mut u8) -> u32 {
-    crate::misc::set_error(PMERR_INV_HMF);
-    0
-}
-
-/// GpiSetMetaFileBits(hmf, lOffset, lLength, pbBuffer)
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiSetMetaFileBits(_hmf: u32, _off: i32, _n: i32, _p: *const u8) -> u32 {
-    crate::misc::set_error(PMERR_INV_HMF);
-    0
-}
-
-/// GpiSaveMetaFile(hmf, pszFilename)
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiSaveMetaFile(_hmf: u32, _name: *const u8) -> u32 {
-    crate::misc::set_error(PMERR_INV_HMF);
-    0
-}
-
-/// GpiPlayMetaFile(hps, hmf, lCount1, alOptarray, plSegCount, lCount2,
-/// pszDesc)
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiPlayMetaFile(_hps: u32, _hmf: u32, _n1: i32, _opts: *const i32, _segs: *mut i32, _n2: i32, _desc: *mut u8) -> i32 {
-    GPI_ERROR
-}
-
 // ---- Attributes ----
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetColor(hps: u32, c: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::Color(c));
     attrs(hps, |e| {
         e.color_index = c;
         e.ps.set_all(|b| b.color = c);
@@ -579,6 +518,7 @@ pub extern "C" fn GpiQueryColor(hps: u32) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetBackColor(hps: u32, c: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::BackColor(c));
     attrs(hps, |e| {
         e.back_index = c;
         e.ps.set_all(|b| b.back = c);
@@ -596,6 +536,7 @@ pub extern "C" fn GpiSetMix(hps: u32, m: i32) -> u32 {
     if Mix::from_fm(m).is_none() {
         return 0;
     }
+    crate::gpiseg::rec_attr(hps, || Attr::Mix(m));
     attrs(hps, |e| e.ps.set_all(|b| b.mix = m)).is_some() as u32
 }
 
@@ -609,6 +550,7 @@ pub extern "C" fn GpiSetBackMix(hps: u32, m: i32) -> u32 {
     if Mix::from_bm(m).is_none() {
         return 0;
     }
+    crate::gpiseg::rec_attr(hps, || Attr::BackMix(m));
     attrs(hps, |e| e.ps.set_all(|b| b.back_mix = m)).is_some() as u32
 }
 
@@ -637,6 +579,11 @@ pub extern "C" fn GpiQueryAttrMode(hps: u32) -> i32 {
 pub extern "C" fn GpiPop(hps: u32, n: i32) -> u32 {
     let Some(e) = entry(st(), hps) else { return 0 };
     let r = e.ps.pop_attrs(n);
+    if r {
+        for _ in 0..n {
+            crate::gpiseg::rec(hps, || gpi::goca::Order::Pop);
+        }
+    }
     e.color_index = e.ps.attrs.line.color;
     e.back_index = e.ps.attrs.line.back;
     r as u32
@@ -739,6 +686,9 @@ pub extern "C" fn GpiSetAttrs(hps: u32, prim: i32, mask: u32, defmask: u32, b: *
         }
         true
     });
+    if ok == Some(true) {
+        crate::gpiseg::rec_bundle(hps, prim, mask | defmask);
+    }
     ok.unwrap_or(false) as u32
 }
 
@@ -816,6 +766,7 @@ pub extern "C" fn GpiSetLineType(hps: u32, t: i32) -> u32 {
     if !(0..=9).contains(&t) {
         return 0;
     }
+    crate::gpiseg::rec_attr(hps, || Attr::LineType(t));
     attrs(hps, |e| e.ps.attrs.line_type = t).is_some() as u32
 }
 
@@ -831,6 +782,7 @@ pub extern "C" fn GpiSetLineWidth(hps: u32, w: i32) -> u32 {
     if w < 0 {
         return 0;
     }
+    crate::gpiseg::rec_attr(hps, || Attr::LineWidth(w));
     attrs(hps, |e| e.ps.attrs.line_width = w).is_some() as u32
 }
 
@@ -844,6 +796,7 @@ pub extern "C" fn GpiSetLineWidthGeom(hps: u32, w: i32) -> u32 {
     if w < 0 {
         return 0;
     }
+    crate::gpiseg::rec_attr(hps, || Attr::LineWidthGeom(Some(w)));
     attrs(hps, |e| e.ps.attrs.line_width_geom = w).is_some() as u32
 }
 
@@ -854,6 +807,7 @@ pub extern "C" fn GpiQueryLineWidthGeom(hps: u32) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetLineEnd(hps: u32, v: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::LineEnd(v));
     attrs(hps, |e| e.ps.attrs.line_end = v).is_some() as u32
 }
 
@@ -864,6 +818,7 @@ pub extern "C" fn GpiQueryLineEnd(hps: u32) -> i32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetLineJoin(hps: u32, v: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::LineJoin(v));
     attrs(hps, |e| e.ps.attrs.line_join = v).is_some() as u32
 }
 
@@ -878,6 +833,7 @@ pub extern "C" fn GpiSetPattern(hps: u32, sym: i32) -> u32 {
     if gpi::pattern::standard(sym).is_none() {
         return 0;
     }
+    crate::gpiseg::rec_attr(hps, || Attr::Pattern(sym));
     attrs(hps, |e| e.ps.attrs.pattern = sym).is_some() as u32
 }
 
@@ -890,6 +846,7 @@ pub extern "C" fn GpiQueryPattern(hps: u32) -> i32 {
 /// with GpiSetBitmapId uses that bitmap as the pattern.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetPatternSet(hps: u32, set: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::PatternSet(set));
     let Some(e) = entry(st(), hps) else { return 0 };
     if set == 0 {
         e.ps.will_change_attrs();
@@ -913,6 +870,7 @@ pub extern "C" fn GpiQueryPatternSet(hps: u32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetPatternRefPoint(hps: u32, p: *const PointL) -> u32 {
     let Some(p) = point(p) else { return 0 };
+    crate::gpiseg::rec_attr(hps, || Attr::PatternRef(Some(p)));
     attrs(hps, |e| e.ps.attrs.pattern_ref = p).is_some() as u32
 }
 
@@ -927,6 +885,7 @@ pub extern "C" fn GpiSetMarker(hps: u32, sym: i32) -> u32 {
     if gpi::pattern::marker(sym).is_none() {
         return 0;
     }
+    crate::gpiseg::rec_attr(hps, || Attr::Marker(sym));
     attrs(hps, |e| e.ps.attrs.marker_sym = sym).is_some() as u32
 }
 
@@ -941,6 +900,7 @@ pub extern "C" fn GpiSetMarkerBox(hps: u32, p: *const i32) -> u32 {
         return 0;
     }
     let v = unsafe { (p.read_unaligned(), p.add(1).read_unaligned()) };
+    crate::gpiseg::rec_attr(hps, || Attr::MarkerBox(v.0, v.1));
     attrs(hps, |e| e.ps.attrs.marker_box = v).is_some() as u32
 }
 
@@ -952,6 +912,7 @@ pub extern "C" fn GpiQueryMarkerBox(hps: u32, p: *mut i32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetMarkerSet(hps: u32, set: i32) -> u32 {
+    crate::gpiseg::rec_attr(hps, || Attr::MarkerSet(set));
     attrs(hps, |e| e.ps.attrs.marker_set = set).is_some() as u32
 }
 
@@ -964,6 +925,7 @@ pub extern "C" fn GpiQueryMarkerSet(hps: u32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetArcParams(hps: u32, p: *const [i32; 4]) -> u32 {
     let Some(v) = read(p) else { return 0 };
+    crate::gpiseg::rec_attr(hps, || Attr::ArcParams(v));
     attrs(hps, |e| e.ps.attrs.arc = v).is_some() as u32
 }
 
@@ -975,7 +937,9 @@ pub extern "C" fn GpiQueryArcParams(hps: u32, p: *mut [i32; 4]) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetDefArcParams(hps: u32, p: *const [i32; 4]) -> u32 {
-    GpiSetArcParams(hps, p)
+    let Some(v) = read(p) else { return 0 };
+    crate::gpiseg::rec_meta(hps, gpi::goca::ESC_SETDEFARCPARAMS, || v.iter().flat_map(|x| x.to_le_bytes()).collect());
+    crate::gpiseg::quiet_draw(hps, || GpiSetArcParams(hps, p))
 }
 
 #[unsafe(no_mangle)]
@@ -990,7 +954,9 @@ pub extern "C" fn GpiQueryDefArcParams(hps: u32, p: *mut [i32; 4]) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiMove(hps: u32, p: *const PointL) -> u32 {
-    let (Some(e), Some(p)) = (entry(st(), hps), point(p)) else { return 0 };
+    let Some(p) = point(p) else { return 0 };
+    crate::gpiseg::rec(hps, || Order::Set(Attr::Position(p)));
+    let Some(e) = entry(st(), hps) else { return 0 };
     e.ps.gpi_move(p);
     1
 }
@@ -1009,18 +975,31 @@ pub extern "C" fn GpiQueryCurrentPosition(hps: u32, p: *mut PointL) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiLine(hps: u32, p: *const PointL) -> i32 {
     let Some(p) = point(p) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::Line { at: None, pts: alloc::vec![p] }) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_line(s, p)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiPolyLine(hps: u32, n: i32, pts: *const PointL) -> i32 {
     let Some(pts) = points(pts, n) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::Line { at: None, pts: pts.clone() }) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_polyline(s, &pts)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiPolyLineDisjoint(hps: u32, n: i32, pts: *const PointL) -> i32 {
     let Some(pts) = points(pts, n) else { return GPI_ERROR };
+    let mut go = true;
+    for c in pts.chunks(2).filter(|c| c.len() == 2) {
+        go &= crate::gpiseg::rec(hps, || Order::Line { at: Some(c[0]), pts: alloc::vec![c[1]] });
+    }
+    if !go {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_polyline_disjoint(s, &pts)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
@@ -1029,12 +1008,29 @@ pub extern "C" fn GpiPolyLineDisjoint(hps: u32, n: i32, pts: *const PointL) -> i
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiBox(hps: u32, ctl: i32, p: *const PointL, h: i32, v: i32) -> i32 {
     let Some(p) = point(p) else { return GPI_ERROR };
+    let flags = match ctl & 3 {
+        3 => 0x60,
+        1 => 0x40,
+        _ => 0x20,
+    };
+    if !crate::gpiseg::rec(hps, || Order::Box { at: None, flags, corner: p, h, v }) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_box(s, ctl & 3, p, h, v)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 /// GpiFullArc(hps, lControl, fxMultiplier)
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiFullArc(hps: u32, ctl: i32, mult: i32) -> i32 {
+    let fill = ctl & 3 != 2;
+    let mut go = !fill || crate::gpiseg::rec(hps, || Order::BeginArea(if ctl & 3 == 3 { 0xc0 } else { 0x80 }));
+    go &= crate::gpiseg::rec(hps, || Order::FullArc { at: None, mult });
+    if fill {
+        go &= crate::gpiseg::rec(hps, || Order::EndArea);
+    }
+    if !go {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_full_arc(s, ctl & 3, mult)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
@@ -1043,6 +1039,9 @@ pub extern "C" fn GpiFullArc(hps: u32, ctl: i32, mult: i32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiPartialArc(hps: u32, c: *const PointL, mult: i32, start: i32, sweep: i32) -> i32 {
     let Some(c) = point(c) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::PartialArc { at: None, center: c, mult, start, sweep }) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_partial_arc(s, c, mult, start, sweep)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
@@ -1050,43 +1049,65 @@ pub extern "C" fn GpiPartialArc(hps: u32, c: *const PointL, mult: i32, start: i3
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiPointArc(hps: u32, p: *const PointL) -> i32 {
     let Some(pts) = points(p, 2) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::Arc { at: None, inter: pts[0], end: pts[1] }) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_point_arc(s, pts[0], pts[1])).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiPolySpline(hps: u32, n: i32, pts: *const PointL) -> i32 {
     let Some(pts) = points(pts, n) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::Bezier { at: None, pts: pts.clone() }) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_poly_spline(s, &pts)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiPolyFillet(hps: u32, n: i32, pts: *const PointL) -> i32 {
     let Some(pts) = points(pts, n) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::Fillet { at: None, pts: pts.clone() }) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_poly_fillet(s, &pts)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 /// GpiPolyFilletSharp(hps, lCount, aptlPoints, afxPoints): the sharpness
 /// values are ignored (drawn as ordinary fillets).
 #[unsafe(no_mangle)]
-pub extern "C" fn GpiPolyFilletSharp(hps: u32, n: i32, pts: *const PointL, _sharp: *const i32) -> i32 {
-    GpiPolyFillet(hps, n, pts)
+pub extern "C" fn GpiPolyFilletSharp(hps: u32, n: i32, pts: *const PointL, sharp: *const i32) -> i32 {
+    let Some(v) = points(pts, n) else { return GPI_ERROR };
+    let sh: Vec<i32> = if sharp.is_null() { Vec::new() } else { (0..v.len() / 2).map(|i| unsafe { sharp.add(i).read_unaligned() }).collect() };
+    let draw = crate::gpiseg::rec(hps, || Order::SharpFillet { at: None, pts: v.clone(), sharp: sh });
+    if !draw {
+        return GPI_OK;
+    }
+    crate::gpiseg::quiet_draw(hps, || GpiPolyFillet(hps, n, pts))
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiMarker(hps: u32, p: *const PointL) -> i32 {
     let Some(p) = point(p) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::Marker { at: Some(p), pts: Vec::new() }) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_markers(s, &[p])).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiPolyMarker(hps: u32, n: i32, pts: *const PointL) -> i32 {
     let Some(pts) = points(pts, n) else { return GPI_ERROR };
+    if !pts.is_empty() && !crate::gpiseg::rec(hps, || Order::Marker { at: Some(pts[0]), pts: pts[1..].to_vec() }) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_markers(s, &pts)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
 /// Clear the presentation space (window or bitmap) to the reset colour.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiErase(hps: u32) -> u32 {
+    crate::gpiseg::rec_meta(hps, gpi::goca::ESC_ERASE, Vec::new);
     let s = st();
     refresh(s, hps);
     let Some(e) = entry(s, hps) else { return 0 };
@@ -1104,6 +1125,9 @@ pub extern "C" fn GpiErase(hps: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetPel(hps: u32, p: *const PointL) -> i32 {
     let Some(p) = point(p) else { return GPI_ERROR };
+    if !crate::gpiseg::rec(hps, || Order::SetPel(p)) {
+        return GPI_OK;
+    }
     draw(hps, |e, s| e.ps.gpi_set_pel(s, p)).map_or(GPI_ERROR, |_| GPI_OK)
 }
 
@@ -1126,11 +1150,16 @@ pub extern "C" fn GpiQueryPel(hps: u32, p: *const PointL) -> i32 {
 /// GpiBeginArea(hps, flOptions): BA_BOUNDARY 1, BA_WINDING 2, BA_EXCL 8.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiBeginArea(hps: u32, opts: u32) -> u32 {
+    crate::gpiseg::rec(hps, || Order::BeginArea(0x80 | if opts & 1 != 0 { 0x40 } else { 0 } | if opts & 2 != 0 { 0x20 } else { 0 }));
     entry(st(), hps).is_some_and(|e| e.ps.begin_area(opts)) as u32
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiEndArea(hps: u32) -> i32 {
+    if !crate::gpiseg::rec(hps, || Order::EndArea) {
+        entry(st(), hps).map(|e| e.ps.end_area(&mut null_surface()));
+        return GPI_OK;
+    }
     draw(hps, |e, s| ok(e.ps.end_area(s))).unwrap_or(GPI_ERROR)
 }
 
@@ -1140,16 +1169,19 @@ pub extern "C" fn GpiBeginPath(hps: u32, id: i32) -> u32 {
     if id != 1 {
         return 0;
     }
+    crate::gpiseg::rec(hps, || Order::BeginPath(id));
     entry(st(), hps).is_some_and(|e| e.ps.begin_path()) as u32
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiEndPath(hps: u32) -> u32 {
+    crate::gpiseg::rec(hps, || Order::EndPath);
     entry(st(), hps).is_some_and(|e| e.ps.end_path()) as u32
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiCloseFigure(hps: u32) -> u32 {
+    crate::gpiseg::rec(hps, || Order::CloseFigure);
     entry(st(), hps).is_some_and(|e| e.ps.close_figure()) as u32
 }
 
@@ -1168,6 +1200,10 @@ pub extern "C" fn GpiFillPath(hps: u32, id: i32, opts: i32) -> i32 {
     if id != 1 {
         return GPI_ERROR;
     }
+    if !crate::gpiseg::rec(hps, || Order::FillPath { flags: if opts & 2 != 0 { 0x40 } else { 0 }, id }) {
+        entry(st(), hps).map(|e| e.ps.path_region(false, true));
+        return GPI_OK;
+    }
     draw(hps, |e, s| ok(e.ps.fill_path(s, opts))).unwrap_or(GPI_ERROR)
 }
 
@@ -1175,6 +1211,10 @@ pub extern "C" fn GpiFillPath(hps: u32, id: i32, opts: i32) -> i32 {
 pub extern "C" fn GpiStrokePath(hps: u32, id: i32, _opts: u32) -> i32 {
     if id != 1 {
         return GPI_ERROR;
+    }
+    if !crate::gpiseg::rec(hps, || Order::FillPath { flags: 0x60, id }) {
+        entry(st(), hps).map(|e| e.ps.path_region(false, true));
+        return GPI_OK;
     }
     draw(hps, |e, s| ok(e.ps.stroke_path(s))).unwrap_or(GPI_ERROR)
 }
@@ -1184,6 +1224,10 @@ pub extern "C" fn GpiOutlinePath(hps: u32, id: i32, _opts: i32) -> i32 {
     if id != 1 {
         return GPI_ERROR;
     }
+    if !crate::gpiseg::rec(hps, || Order::OutlinePath { flags: 0, id }) {
+        entry(st(), hps).map(|e| e.ps.path_region(false, true));
+        return GPI_OK;
+    }
     draw(hps, |e, s| ok(e.ps.outline_path(s))).unwrap_or(GPI_ERROR)
 }
 
@@ -1191,6 +1235,7 @@ pub extern "C" fn GpiOutlinePath(hps: u32, id: i32, _opts: i32) -> i32 {
 /// geometric line width; it is kept as is here.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiModifyPath(hps: u32, id: i32, _mode: i32) -> u32 {
+    crate::gpiseg::rec(hps, || Order::ModifyPath { mode: 6, id });
     (id == 1 && entry(st(), hps).is_some()) as u32
 }
 
@@ -1198,6 +1243,7 @@ pub extern "C" fn GpiModifyPath(hps: u32, id: i32, _mode: i32) -> u32 {
 /// SCP_EXCL 8; path 0 resets.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetClipPath(hps: u32, id: i32, opts: i32) -> u32 {
+    crate::gpiseg::rec(hps, || Order::SetClipPath { flags: if id != 0 { 0x20 } else { 0 } | if opts & 2 != 0 { 0x40 } else { 0 }, id });
     let Some(e) = entry(st(), hps) else { return 0 };
     e.ps.set_clip_path(id, opts) as u32
 }
@@ -1228,8 +1274,10 @@ fn write_matrix(p: *mut i32, n: i32, m: &Matrix) -> bool {
 pub extern "C" fn GpiSetModelTransformMatrix(hps: u32, n: i32, m: *const i32, opt: i32) -> u32 {
     let Some(e) = entry(st(), hps) else { return 0 };
     let new = if n == 0 { Some(Matrix::IDENTITY) } else { read_matrix(m, n) };
-    let Some(new) = new.and_then(|m| Matrix::combine(&e.ps.model, &m, opt)) else { return 0 };
+    let Some(given) = new else { return 0 };
+    let Some(new) = Matrix::combine(&e.ps.model, &given, opt) else { return 0 };
     e.ps.set_model(new);
+    crate::gpiseg::rec_attr(hps, || Attr::ModelTransform { flags: crate::gpiseg::gstm_flags(opt), m: crate::gpiseg::goca_matrix(&given) });
     1
 }
 
@@ -1246,6 +1294,7 @@ pub extern "C" fn GpiSetDefaultViewMatrix(hps: u32, n: i32, m: *const i32, opt: 
     let new = if n == 0 { Some(Matrix::IDENTITY) } else { read_matrix(m, n) };
     let Some(new) = new.and_then(|m| Matrix::combine(&e.ps.view, &m, opt)) else { return 0 };
     e.ps.set_view(new);
+    crate::gpiseg::rec_meta(hps, gpi::goca::ESC_SETDEFAULTVIEWMATRIX, || crate::gpiseg::goca_matrix(&new).iter().flat_map(|v| v.to_le_bytes()).collect());
     1
 }
 
@@ -1253,21 +1302,6 @@ pub extern "C" fn GpiSetDefaultViewMatrix(hps: u32, n: i32, m: *const i32, opt: 
 pub extern "C" fn GpiQueryDefaultViewMatrix(hps: u32, n: i32, m: *mut i32) -> u32 {
     let Some(e) = entry(st(), hps) else { return 0 };
     write_matrix(m, n, &e.ps.view) as u32
-}
-
-/// The segment and viewing transforms are identity (no retained
-/// segments); setting them succeeds without effect.
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiSetSegmentTransformMatrix(hps: u32, _seg: i32, _n: i32, _m: *const i32, _opt: i32) -> u32 {
-    entry(st(), hps).is_some() as u32
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiQueryViewingTransformMatrix(hps: u32, n: i32, m: *mut i32) -> u32 {
-    if entry(st(), hps).is_none() {
-        return 0;
-    }
-    write_matrix(m, n, &Matrix::IDENTITY) as u32
 }
 
 #[unsafe(no_mangle)]

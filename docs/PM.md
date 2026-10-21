@@ -474,10 +474,8 @@ mouse and keyboard. What PMWIN has:
   found" (`NERR_QNotFound` etc.), `SplQmOpen` fails. Programs that look
   for printers at start (EPM, the system log viewer, MarkVision, the
   printer utilities) load and say there are none.
-- Metafiles are not made: `GpiLoadMetaFile` fails and the calls that take
-  a metafile handle (`GpiCopyMetaFile`, `GpiQueryMetaFileBits`/`Length`,
-  `GpiSetMetaFileBits`, `GpiSaveMetaFile`, `GpiDeleteMetaFile`) report
-  `PMERR_INV_HMF`.
+- Metafiles and retained segments: see [Metafiles and
+  segments](#metafiles-and-segments).
 - `WinSetClipbrdViewer` sends the new viewer `WM_DRAWCLIPBOARD` at once
   (mp1 the clipboard owner), as `WinCloseClipbrd` does after a change.
 - Resources through `DosGetResource`: menu templates (nested submenus),
@@ -620,10 +618,81 @@ The GPI covers:
   them), `WinBeginEnumWindows`/`WinGetNextWindow`/`WinEndEnumWindows`,
   `WinQueryClassName`. Timers run at most at the 31 ms clock rate.
 
-Not done: metafiles (`GpiLoadMetaFile` fails), retained segments,
-printing (no printer DCs), rotated or sheared text, real outline fonts,
-line ends, joins and mitre limits, `GpiPolygons` and
+Not done: printing (no printer DCs), rotated or sheared text, real
+outline fonts, line ends, joins and mitre limits, `GpiPolygons` and
 `GpiCreatePolygonRegion`.
+
+### Metafiles and segments
+
+GPI calls can be kept as GOCA drawing orders (the format of the
+Toolkit's pmord.h): in retained segments and in metafiles.
+`crates/gpi` has the order codec (`goca.rs`: the 1-byte, 2-byte, long
+and very long orders, coordinates in the short or long format, laid out
+as IBM's PMGPI builds them) and the metafile format (`metafile.rs`),
+both tested on the host with the OS/2 metafiles on the CD
+(`graphic.met`, `prtsamp.met`, `AAAAA.MET`) when `work/` has them.
+PMWIN's `gpiseg.rs` does the rest:
+
+- Recording: each drawing and attribute call records its order (an
+  attribute set in `AM_PRESERVE` mode becomes "push and set", so
+  `GpiPop` plays back) into the open segment of a PS in `DM_RETAIN` or
+  `DM_DRAWANDRETAIN` mode (`GpiSetDrawingMode`, `GpiOpenSegment`,
+  `GpiCloseSegment`; `DM_RETAIN` does not draw), and onto the metafile
+  of a PS associated with a metafile DC (`DevOpenDC` `OD_METAFILE` or
+  `OD_METAFILE_NOQUERY`). Calls that are not drawing orders go to a
+  metafile as IBM's escape orders (0xFE 0xD5 with an identifier, the
+  data as IBM's `PlayEscape` reads it): `GpiCreateLogFont`,
+  `GpiCreateLogColorTable`, `GpiDeleteSetId`, `GpiSetCp`,
+  `GpiSetDefaultViewMatrix`, `GpiErase`, `GpiIntersectClipRectangle`,
+  `GpiExcludeClipRectangle`, `GpiSetDefAttrs`, `GpiSetDefArcParams`,
+  `GpiSetDefViewingLimits`. `GpiSetAttrs` records a bundle element
+  (type `0xFD00 | primitive`) of individual attribute orders.
+- Segments: `GpiDrawChain`, `GpiDrawSegment`, `GpiDrawFrom` (each segment
+  starts from the default attributes, current position (0,0) and its
+  segment transform), segment attributes (`GpiSetSegmentAttrs`,
+  `GpiSetInitialSegmentAttrs`: chained, visible, ...), names, deleting,
+  `GpiGetData` (whole orders from an offset, long format) and
+  `GpiPutData` (orders executed as GPI calls). The call segment order
+  draws another segment. A retained segment drawn on a metafile PS
+  becomes a segment of the metafile (OS/2's PMPIC.DLL builds metafiles
+  so). Correlation, pick, editing and dynamic segments are not done.
+- Metafiles: `DevCloseDC` of a metafile DC builds the metafile and
+  returns its handle. A metafile handle stands for the bytes of a .MET
+  file (`GpiQueryMetaFileLength`/`Bits`, `GpiSetMetaFileBits`, which
+  can grow it), loaded and saved as is (`GpiLoadMetaFile` checks that
+  it starts with Begin Document; `GpiSaveMetaFile` deletes the handle,
+  as IBM's does); `GpiCopyMetaFile`, `GpiDeleteMetaFile`. Metafiles
+  live in the shared PM state: one put on the clipboard as
+  `CF_METAFILE` becomes the system's (see [The
+  clipboard](#the-clipboard)).
+- The metafile layout is IBM's: Begin Document (a description triplet),
+  Begin Resource Group, the colour attribute table (entries or RGB
+  mode), Begin Graphics Object, its object environment group (Map
+  Colour Attribute Table, a Map Coded Font per logical font: name,
+  lcid, font descriptor, code page, face), the Graphics Data Descriptor
+  (picture descriptor with the page units and size, the coordinate
+  format, the default viewing transform) and the orders in Graphics
+  Data fields of at most 32 KB split at order boundaries, each segment
+  opened by a Begin Segment order.
+- `GpiPlayMetaFile` turns the orders back into GPI calls, so playing
+  draws, records into another metafile or into retained segments
+  (`DM_RETAIN`: the metafile's segments are kept, named from
+  `PMF_SEGBASE`) and collects boundary data like the calls themselves.
+  Options as IBM's: `RES_RESET` resets the PS to the metafile's page
+  units and size, `LT_ORIGINALVIEW` takes its default viewing
+  transform, `LC_LOADDISC` creates its logical fonts, `CTAB_REPLACE`
+  its colour table, `SUP_SUPPRESS` draws nothing; the description is
+  returned. Each segment starts with the default attributes. Images
+  (`GpiImage`, 1 bpp) play; bitmaps (`GpiBitBlt` into a metafile, the
+  bitmap resources of IBM's metafiles) are not recorded or played.
+- Also there now: `GpiSetViewingTransformMatrix` (a transform between
+  the model and default viewing transforms), `GpiSetDefAttrs` and
+  `GpiQueryDefAttrs` (what a reset gives), `GpiSetDefViewingLimits`
+  (kept, not applied), `GpiSetSegmentTransformMatrix`,
+  `WinCpTranslateString`/`Char` (rs2's code page tables) and PMMERGE's
+  `AAB32GetReg`/`AAB32SetReg` (ordinals 5000/5001, rs2's names: a
+  per-thread block in which IBM's DLLs note an error and its severity,
+  and the error `WinGetLastError` returns).
 
 Calling conventions: OS/2 compilers keep the stack 4-byte aligned while
 Rust code assumes 16, so every PMWIN export goes through a generated
@@ -860,6 +929,9 @@ PM, as on OS/2:
   setter's GPI objects into the clipboard; each process that asks gets
   its own bitmap handle with the picture, deleted when the clipboard is
   emptied.
+- `CF_METAFILE` (and `CF_DSPMETAFILE`): the metafile becomes the
+  system's, every process gets the same handle and can play it; it is
+  deleted when the clipboard is emptied.
 - Other `CFI_HANDLE` data is kept as it is; data 0 is delayed
   rendering: the owner gets `WM_RENDERFMT` when someone asks for it.
 
@@ -1666,9 +1738,14 @@ The export trampolines pass their index to the lock's entry
   showing the new object and the icons where they were left; T at the
   loader for the text-mode boot.
 - `RS2\GPITEST.EXE` (userland/gpitest): GPI self-checks printing
-  PASS/FAIL and `gpitest done: N failure(s)`, then a window with every
-  kind of primitive for a screenshot check (it also draws
-  `C:\YOSEMITE.BMP` when present).
+  PASS/FAIL and `gpitest done: N failure(s)` (among them metafiles made
+  on a metafile DC, played, copied, rebuilt with `GpiSetMetaFileBits`,
+  saved and loaded; retained segments in `DM_RETAIN` and
+  `DM_DRAWANDRETAIN`, drawn by `GpiDrawChain`, read with `GpiGetData`
+  and played with `GpiPutData`, drawn onto a metafile;
+  `WinCpTranslateString`), then a window with every kind of primitive
+  for a screenshot check (it also draws `C:\YOSEMITE.BMP` when
+  present).
 - The application installer: a dist system disk (`cargo xtask disk
   --system --dist` with dist/manifest.txt as work/modules.txt) booted
   with the OS/2 client CD (`--hdd IMG --boot-hdd --iso CD.ISO`): the
