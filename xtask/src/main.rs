@@ -522,6 +522,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("view", "OS2\\VIEW.EXE"),
         ("appinst", "OS2\\APPINST.EXE"),
         ("hmtest", "RS2\\HMTEST.EXE"),
+        ("mmiotest", "RS2\\MMIOTEST.EXE"),
         ("label", "OS2\\LABEL.EXE"),
         ("chkdsk", "OS2\\CHKDSK.EXE"),
         ("format", "OS2\\FORMAT.EXE"),

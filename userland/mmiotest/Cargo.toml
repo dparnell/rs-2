@@ -1,0 +1,9 @@
+[package]
+name = "mmiotest"
+description = "MMIOTEST.EXE: self-checks of MMIO.DLL (WAVE files, RIFF chunks, memory files, buffered I/O)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
