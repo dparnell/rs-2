@@ -269,13 +269,17 @@ impl Desktop {
         w.ghost.subtract(&r);
         self.dirty(h);
         let Some(w) = self.windows.get(&h) else { return };
-        if children {
+        // Children are included when asked, and also otherwise unless the
+        // window clips them (PM's WinInvalidateRect): a parent without
+        // WS_CLIPCHILDREN paints over them, so they must paint again.
+        if children || w.style & crate::ws::CLIPCHILDREN == 0 {
             let kids = w.children.clone();
-            let (wx, wy) = (0, 0);
             for c in kids {
                 let Some(cw) = self.get(c) else { continue };
-                let local = r.offset(wx - cw.x, wy - cw.y);
-                self.invalidate(c, Some(local), true);
+                let local = r.offset(-cw.x, -cw.y);
+                if !local.intersect(&cw.rect()).is_empty() {
+                    self.invalidate(c, Some(local), children);
+                }
             }
         }
     }
@@ -485,6 +489,29 @@ mod tests {
         let destroyed = d.destroy(f);
         assert_eq!(destroyed, alloc::vec![c, f]);
         assert!(!d.exists(c));
+    }
+
+    #[test]
+    fn invalidating_a_parent_includes_children_it_does_not_clip() {
+        let mut d = desk();
+        // A client without WS_CLIPCHILDREN and a card window in it (as
+        // OS/2's Solitaire has): repainting the client covers the card.
+        let p = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 200, 200), 1, 1, 0, 0).unwrap();
+        let c = d.create(p, p, 2, ws::VISIBLE, Rect::new(50, 50, 100, 100), 2, 1, 0, 0).unwrap();
+        let far = d.create(p, p, 2, ws::VISIBLE, Rect::new(150, 150, 190, 190), 3, 1, 0, 0).unwrap();
+        for h in [p, c, far] {
+            d.get_mut(h).unwrap().update = Region::new();
+        }
+        d.invalidate(p, Some(Rect::new(60, 60, 80, 80)), false);
+        assert_eq!(d.get(c).unwrap().update.bounds(), Rect::new(10, 10, 30, 30));
+        assert!(d.get(far).unwrap().update.is_empty());
+        // With WS_CLIPCHILDREN only fIncludeChildren includes them.
+        d.get_mut(c).unwrap().update = Region::new();
+        d.get_mut(p).unwrap().style |= ws::CLIPCHILDREN;
+        d.invalidate(p, Some(Rect::new(60, 60, 80, 80)), false);
+        assert!(d.get(c).unwrap().update.is_empty());
+        d.invalidate(p, Some(Rect::new(60, 60, 80, 80)), true);
+        assert!(!d.get(c).unwrap().update.is_empty());
     }
 
     #[test]

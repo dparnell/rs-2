@@ -1125,12 +1125,47 @@ pub extern "C" fn WinValidateRect(h: u32, prcl: *const RectL, _children: u32) ->
     1
 }
 
+/// WinUpdateWindow(hwnd): the window and its children with update
+/// regions get WM_PAINT now (posted instead for another thread's). As in
+/// PM, the window's update region is first taken out of a parent that
+/// does not clip its children, so the parent's later painting does not
+/// cover what the window draws now (OS/2's Solitaire shows each card this
+/// way while the table's first WM_PAINT is still pending).
 #[unsafe(no_mangle)]
 pub extern "C" fn WinUpdateWindow(h: u32) -> u32 {
-    let mut guard = 0;
-    while st().desk.get(h).is_some_and(|w| !w.update.is_empty()) && guard < 4 {
-        send(h, WM_PAINT, 0, 0);
-        guard += 1;
+    if !st().desk.exists(h) {
+        return 0;
+    }
+    let me = st().my_queue();
+    let mut stack = alloc::vec![h];
+    while let Some(w) = stack.pop() {
+        let s = st();
+        let Some(win) = s.desk.get(w) else { continue };
+        if !win.visible_style() {
+            continue;
+        }
+        stack.extend(win.children.iter().rev().copied());
+        if win.update.is_empty() {
+            continue;
+        }
+        let (parent, x, y) = (win.parent, win.x, win.y);
+        let mut mine = win.update.clone();
+        mine.offset(x, y);
+        if let Some(p) = s.desk.get_mut(parent) {
+            if p.style & ws::CLIPCHILDREN == 0 && !p.update.is_empty() && parent != HWND_DESKTOP {
+                for r in &mine.rects {
+                    p.update.subtract(r);
+                }
+            }
+        }
+        if s.queue_of(w) != me {
+            continue; // painted by its own thread
+        }
+        let mut guard = 0;
+        while st().desk.get(w).is_some_and(|x| !x.update.is_empty()) && guard < 4 {
+            send(w, WM_PAINT, 0, 0);
+            guard += 1;
+        }
     }
     1
 }
