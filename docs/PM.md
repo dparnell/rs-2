@@ -341,6 +341,73 @@ to rs2's PMWIN or PMSHAPI export: `userland/pmmerge/ibm-forwards.txt`
 `tools/scripts/gen_pmmerge_forwards.py`, which `gen_pm_exports.py` runs
 after regenerating PMWIN's or PMSHAPI's exports.
 
+## 16-bit PM programs (the OS/2 1.x API)
+
+16-bit PM programs (OS/2 1.x and early 2.x ones such as Seek and Scan and
+PMCHKDSK: 16-bit code, NE or LX) import PMWIN, PMGPI, PMSHAPI and HELPMGR
+ordinals below 700 (and some PMMERGE ones): `_pascal far` functions
+whose integers are 16-bit where the 32-bit API has 32-bit ones, whose
+pointers are 16:16, and whose structures (SWP, QMSG, CREATESTRUCT,
+WNDPARAMS, OWNERITEM, TRACKINFO, CLASSINFO, SWCNTRL, HELPINIT ...) have
+16-bit fields. IBM implements them in PMMERGE as 16-bit stubs into a
+common thunk; rs2's are:
+
+- **Entries.** PMWIN has them all (`src/win16.rs`): PMWIN ordinals as
+  IBM's, the 16-bit GPI at 4000 + the PMGPI ordinal (as the 32-bit GPI).
+  PMGPI and PMMERGE export LX forwarders to them (elf2lx writes
+  `NAME=MODULE.ordinal` export lines as forwarder entries). PMSHAPI
+  (`shapi16.rs`: Prf16*, the Win16 profile calls on HINI_PROFILE, the
+  switch list) and HELPMGR (`help16.rs`) have their own. The 16-bit
+  entries are exported under IBM's upper-case names (`WINCREATEWINDOW`,
+  the 32-bit one is `WinCreateWindow`): 16-bit programs look names up so
+  (Seek and Scan finds `WINCREATEHELPINSTANCE` with DosGetProcAddr) and
+  the loader matches case-sensitively first.
+- **Argument types.** `userland/pmwin/ibm-16bit.txt` lists every 16-bit
+  entry's arguments, read from the descriptor IBM's 16-bit stubs pass to
+  their thunk in EDX (low nibble the count, then 2 bits per argument from
+  the last: 32-bit, far pointer, unsigned or signed 16-bit).
+  `tools/scripts/gen_win16.py` makes `src/win16_table.rs` from it: the
+  ~350 entries whose arguments only need widening and flat pointers call
+  the 32-bit export through one table-driven thunk; about 40 have
+  handlers (messages, QMSG, SWP, procedures, clipboard selectors, hooks,
+  dialogs). Run it before `gen_pm_exports.py` (which appends each DLL's
+  `exports.extra`).
+- **Thunks** (`userland/thunk16`). `entries16_pascal!` makes the 16-bit
+  stubs (`mov ax, N; call common; retf SIZE`) and the common code: it
+  switches to a 32-bit stack of the thread, one per nesting depth (a
+  16-bit window procedure called from PMWIN may call PMWIN again), and
+  records the caller's SS:SP and DS in spare TIB fields (`fs:[0x30]`,
+  `fs:[0x38]`; rs2's TIB blocks are 0x40 apart and use 0x30), which every
+  DLL's thunks share. `call16` calls 16-bit code from 32-bit code below
+  that SS:SP, with that DS (a thread that never ran 16-bit code gets a
+  16-bit stack of its own).
+- **Window procedures and hooks** (`src/cb16.rs`). Inside PMWIN every
+  procedure is a 32-bit address: a 16-bit procedure becomes one of 256
+  32-bit stubs (per process) that converts the message and calls it on
+  the 16-bit stack; a 32-bit procedure handed to 16-bit code (the old
+  procedure from WinSubclassWindow, QWP_PFNWP, CLASSINFO) one of 128
+  16-bit stubs that calls it. Each turns back into the original when it
+  goes the other way, so subclassing and unsubclassing round-trip. `msg::call`
+  runs the 32-bit stubs as application code (without the PM lock). Help
+  hooks (HK_HELP) are called the same way; other hook kinds are recorded,
+  as for 32-bit programs.
+- **Messages.** As IBM's PMMERGE (a table by message number), the 32-bit
+  form is the canonical one: messages from 16-bit code (WinSendMsg,
+  WinPostMsg, WinDefWindowProc, WinDispatchMsg ...) are converted when
+  they come in and converted again for a 16-bit procedure: plain pointers
+  (list box and menu item texts, MLE buffers, RECTLs), and copies of SWP,
+  CREATESTRUCT, WNDPARAMS, OWNERITEM, TRACKINFO and QMSG structures,
+  copied back after the call. WM_INITDLG and WM_CONTROL parameters and
+  application messages pass as they are.
+
+**Not done.** The 16-bit heap (WinCreateHeap, WinAllocMem ...),
+WinCatch/WinThrow, DDE, WinCallMsgFilter, the 16-bit program list calls,
+16-bit GPI calls whose structures differ (bitmap headers are passed as
+they are), posted messages carrying converted structures, the class
+"thunk procedures" (WinSetClassThunkProc). WIN16BUILDPTRHANDLE (PMWIN
+310, which PMSHLTKT imports) returns 0. CTLTEST checks the entries, a
+16-bit window procedure and the conversions (`userland/ctltest/src/pm16.rs`).
+
 ## Status
 
 Milestone 1 works: the unmodified Toolkit `hello.exe` shows its window,
@@ -978,9 +1045,10 @@ its programs; `PrfQueryProgramHandle` matches the executable
 case-insensitively, a name without a path in any directory.
 
 **Not done.** WinGetLastError codes (PMSHAPI does not call PMWIN), the
-`PL_ALTERED` broadcast after `PrfReset`, the 16-bit `Prf16*`/`Win16*`
-entry points, `PrfQueryProgramCategory`, `WinStartApp` and the switch
-list calls; the profile names in shared memory last while some process
+`PL_ALTERED` broadcast after `PrfReset`, the 16-bit program list calls
+(`Prf16AddProgram` and the like; the 16-bit profile calls are there,
+see "16-bit PM programs"), `PrfQueryProgramCategory`, `WinStartApp`;
+the profile names in shared memory last while some process
 has PMSHAPI loaded (afterwards `USER_INI`/`SYSTEM_INI` apply again, so
 a `PrfReset` is forgotten); the program list is rs2's own layout, not
 IBM's (Warp 4's Workplace Shell keeps its objects in `PM_Abstract:*`
