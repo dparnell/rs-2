@@ -1,0 +1,8 @@
+[package]
+name = "mmfmt"
+description = "no_std multimedia file formats for rs2's MMIO.DLL and MDM.DLL: RIFF chunks, WAVE audio, Autodesk FLI/FLC animations"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
