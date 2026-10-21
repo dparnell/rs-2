@@ -113,6 +113,7 @@ pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
     }
     if down == 0 && up == 0 {
         post_input(target, WM_MOUSEMOVE, mp1, mp2, time);
+        ext_move(p, mp2, time);
     }
     // Button 1 left, 2 right, 3 middle: WM_BUTTONnDOWN = 0x71 + 3(n-1),
     // a second press nearby within half a second is WM_BUTTONnDBLCLK.
@@ -121,12 +122,152 @@ pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
             let (lt, lp, lb) = st().last_click;
             let dbl = lb == bit && time.wrapping_sub(lt) < 500 && (lp.x - p.x).abs() < 4 && (lp.y - p.y).abs() < 4;
             st().last_click = if dbl { (0, Point::new(-100, -100), 0) } else { (time, p, bit) };
-            post_input(target, if dbl { WM_BUTTON1DOWN + 2 } else { WM_BUTTON1DOWN } + 3 * n, mp1, mp2, time);
+            let msg = if dbl { WM_BUTTON1DOWN + 2 } else { WM_BUTTON1DOWN } + 3 * n;
+            post_input(target, msg, mp1, mp2, time);
+            ext_down(target, msg, p, time);
+            translate(target, msg, mp1, mp2, time);
         }
         if up & bit != 0 {
-            post_input(target, WM_BUTTON1UP + 3 * n, mp1, mp2, time);
+            let msg = WM_BUTTON1UP + 3 * n;
+            post_input(target, msg, mp1, mp2, time);
+            ext_up(target, msg, p, mp1, mp2, time);
+            translate(target, msg, mp1, mp2, time);
         }
     }
+}
+
+// ---- Extended mouse messages ----
+//
+// As IBM's PMWIN makes them (ProcessSQmsg, TranslateMouseMsg): after a
+// button goes up where it went down (within the double-click time, inside
+// an icon-sized box, on the same window) WM_BUTTONnCLICK; when the
+// pointer leaves the double-click box with the button down
+// WM_BUTTONnMOTIONSTART, and WM_BUTTONnMOTIONEND when it goes up. The
+// mouse mapping then turns these into WM_SINGLESELECT, WM_OPEN,
+// WM_CONTEXTMENU, WM_BEGINDRAG and so on. OS/2's Mahjongg selects tiles
+// on WM_BUTTON1CLICK.
+
+const WM_BUTTON1MOTIONSTART: u32 = 0x0411;
+const WM_BUTTON1CLICK: u32 = 0x0413;
+const WM_MOUSEENTER: u32 = 0x041e;
+const WM_MOUSELEAVE: u32 = 0x041f;
+
+/// IBM's default mouse mapping: (message, required KC_ flags in mp2's high
+/// word or -1 for any, what it becomes).
+const MOUSE_MAP: [(u32, i32, u32); 9] = [
+    (0x0414, -1, 0x0420),   // button 2 motion start: WM_BEGINDRAG
+    (0x0415, -1, 0x0421),   // button 2 motion end: WM_ENDDRAG
+    (0x0413, -1, 0x0422),   // button 1 click: WM_SINGLESELECT
+    (0x0073, -1, 0x0423),   // button 1 double click: WM_OPEN
+    (0x0416, 0, 0x0424),    // button 2 click: WM_CONTEXTMENU
+    (0x0074, 0x20, 0x0429), // Alt+button 2 down: WM_PICKUP
+    (0x0071, 0x20, 0x0426), // Alt+button 1 down: WM_TEXTEDIT
+    (0x0411, -1, 0x0427),   // button 1 motion start: WM_BEGINSELECT
+    (0x0412, -1, 0x0428),   // button 1 motion end: WM_ENDSELECT
+];
+
+struct Ext {
+    /// The press that may become a click: its message, window, deadline
+    /// and box.
+    click: Option<(u32, u32, u32, gpi::Rect)>,
+    /// The press that may become a motion: its message, window, box, and
+    /// whether MOTIONSTART went out.
+    motion: Option<(u32, u32, gpi::Rect, bool)>,
+    /// The window the pointer was last over (WM_MOUSEENTER/LEAVE).
+    over: u32,
+}
+
+static mut EXT: Ext = Ext { click: None, motion: None, over: 0 };
+
+fn ext() -> &'static mut Ext {
+    unsafe { &mut *core::ptr::addr_of_mut!(EXT) }
+}
+
+fn around(p: Point, cx: i32, cy: i32) -> gpi::Rect {
+    gpi::Rect::new(p.x - cx / 2, p.y - cy / 2, p.x + cx / 2 + 1, p.y + cy / 2 + 1)
+}
+
+/// The mouse mapping: post what a mouse message stands for.
+fn translate(h: u32, msg: u32, mp1: u32, mp2: u32, time: u32) {
+    for &(trigger, kc, out) in &MOUSE_MAP {
+        if trigger == msg && (kc < 0 || kc as u32 == mp2 >> 16) {
+            post_input(h, out, mp1, mp2, time);
+        }
+    }
+}
+
+fn ext_post(h: u32, msg: u32, mp1: u32, mp2: u32, time: u32) {
+    if st().desk.exists(h) {
+        post_input(h, msg, mp1, mp2, time);
+        translate(h, msg, mp1, mp2, time);
+    }
+}
+
+fn ext_down(h: u32, msg: u32, p: Point, time: u32) {
+    let e = ext();
+    let dbl = (msg - WM_BUTTON1DOWN) % 3 == 2;
+    if dbl {
+        // A double click ends the click (no WM_BUTTONnCLICK for its up).
+        e.click = None;
+        return;
+    }
+    let (cxi, cyi) = (st_sysval(SV_CXICON), st_sysval(SV_CYICON));
+    e.click = Some((msg, h, time.wrapping_add(500), around(p, cxi, cyi)));
+    if e.motion.is_none() {
+        e.motion = Some((msg, h, around(p, 4, 4), false));
+    }
+}
+
+fn ext_move(p: Point, mp2: u32, time: u32) {
+    let e = ext();
+    let target = if st().capture != 0 { st().capture } else { st().desk.window_at(p) };
+    if target != e.over {
+        if e.over != 0 && st().desk.exists(e.over) {
+            post_input(e.over, WM_MOUSELEAVE, e.over, target, time);
+        }
+        post_input(target, WM_MOUSEENTER, target, e.over, time);
+        e.over = target;
+    }
+    if let Some((msg, h, r, started)) = e.motion {
+        if !started && !r.contains(p) {
+            e.motion = Some((msg, h, r, true));
+            if st().desk.exists(h) {
+                // Where the motion started, in the window's coordinates.
+                let o = st().desk.origin(h);
+                let c = Point::new((r.left + r.right - 1) / 2, (r.bottom + r.top - 1) / 2);
+                let n = (msg - WM_BUTTON1DOWN) / 3;
+                ext_post(h, WM_BUTTON1MOTIONSTART + 3 * n, pack(c.x - o.x, c.y - o.y), mp2, time);
+            }
+        }
+    }
+}
+
+fn ext_up(h: u32, msg: u32, p: Point, mp1: u32, mp2: u32, time: u32) {
+    let e = ext();
+    let n = (msg - WM_BUTTON1UP) / 3;
+    if let Some((m, mh, _, started)) = e.motion {
+        if msg == m + 1 {
+            e.motion = None;
+            if started {
+                ext_post(mh, WM_BUTTON1MOTIONSTART + 1 + 3 * n, mp1, mp2, time);
+            }
+        }
+    }
+    if let Some((m, ch, deadline, r)) = e.click {
+        if msg == m + 1 {
+            e.click = None;
+            if ch == h && (time.wrapping_sub(deadline) as i32) <= 0 && r.contains(p) {
+                ext_post(h, WM_BUTTON1CLICK + 3 * n, mp1, mp2, time);
+            }
+        }
+    }
+}
+
+const SV_CXICON: i32 = 38;
+const SV_CYICON: i32 = 39;
+
+fn st_sysval(i: i32) -> i32 {
+    crate::misc::WinQuerySysValue(HWND_DESKTOP, i)
 }
 
 /// Button 1 pressed on a window whose thread does not respond: the

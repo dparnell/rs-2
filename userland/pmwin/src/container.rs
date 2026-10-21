@@ -33,7 +33,7 @@ const WM_CREATE: u32 = 0x0001;
 const WM_DESTROY: u32 = 0x0002;
 const WM_BUTTON2DOWN: u32 = 0x0074;
 const WM_BUTTON2UP: u32 = 0x0075;
-const WM_CONTEXTMENU: u32 = 0x0420;
+const WM_CONTEXTMENU: u32 = 0x0424;
 
 const CM_ALLOCDETAILFIELDINFO: u32 = 0x0330;
 const CM_ALLOCRECORD: u32 = 0x0331;
@@ -1225,21 +1225,16 @@ fn button1(h: u32, mp1: u32, mp2: u32, dbl: bool) {
     }
 }
 
-/// Button 2 released: a context menu, or the end of moving icons.
-fn button2_up(h: u32, mp1: u32) {
-    let Some((r, start, moved)) = data(h).and_then(|c| c.b2.take()) else { return };
-    if moved {
-        if st().capture == h {
-            st().capture = 0;
-        }
-        sync_scroll(h);
-        return;
-    }
+/// Button 2 released: the end of moving icons. A click (no move) comes
+/// back as WM_CONTEXTMENU, which PM makes of WM_BUTTON2CLICK.
+fn button2_up(h: u32) {
+    let Some((_, _, moved)) = data(h).and_then(|c| c.b2.take()) else { return };
     if st().capture == h {
         st().capture = 0;
     }
-    let _ = (mp1, start);
-    notify_rec(h, CN_CONTEXTMENU, r);
+    if moved {
+        sync_scroll(h);
+    }
 }
 
 fn button2_down(h: u32, mp1: u32) {
@@ -1720,7 +1715,7 @@ pub extern "C" fn container_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             1
         }
         WM_BUTTON2UP => {
-            button2_up(h, mp1);
+            button2_up(h);
             1
         }
         WM_MOUSEMOVE => {
@@ -1730,8 +1725,10 @@ pub extern "C" fn container_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             crate::pointer::set_system(pmwin::sysptr::SPTR_ARROW);
             1
         }
+        // From the pointer (button 2 clicked): the record under it, or the
+        // container itself over empty space.
         WM_CONTEXTMENU => {
-            let r = data(h).map_or(0, |c| c.cursor);
+            let r = record_at(h, ctl::mouse_pos(mp1)).filter(|x| !x.1).map_or(0, |x| x.0);
             notify_rec(h, CN_CONTEXTMENU, r);
             1
         }
