@@ -191,6 +191,7 @@ WinSetPointerPos @5362
 WinSetPresParam @5363
 WinSetRect @5364
 WinSetRectEmpty @5365
+WinSetWindowBits @5374
 WinSetWindowPos @5375
 WinSetWindowPtr @5376
 WinSetWindowText @5377

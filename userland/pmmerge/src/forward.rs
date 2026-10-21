@@ -192,6 +192,7 @@ forward! {
     WinSetPresParam = "PMWIN.938";
     WinSetRect = "PMWIN.868";
     WinSetRectEmpty = "PMWIN.869";
+    WinSetWindowBits = "PMWIN.874";
     WinSetWindowPos = "PMWIN.875";
     WinSetWindowPtr = "PMWIN.876";
     WinSetWindowText = "PMWIN.877";
