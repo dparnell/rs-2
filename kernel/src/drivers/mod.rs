@@ -215,7 +215,28 @@ pub fn init() {
     // disks with the same layout, \RS2\KERNEL on it; failing that, the
     // first FAT partition holding \RS2\KERNEL.
     let boot = crate::boot_info().boot_device;
-    if !crate::fs::has_boot_image(crate::boot_info()) {
+    // root=GUID (the installer writes it into the EFI system partition's
+    // \RS2\CMDLINE when the system is on its own partition, HPFS or
+    // JFS): that GPT partition is C:, whatever its file system.
+    let root = crate::boot_info().cmdline().split_whitespace().find_map(|w| w.strip_prefix("root=")).map(|g| g.to_ascii_lowercase());
+    let mut have_c = false;
+    if let Some(g) = root.filter(|_| !crate::fs::has_boot_image(crate::boot_info())) {
+        match parts.iter().position(|p| part::guid_text(&p.guid) == g) {
+            Some(i) => {
+                let p = parts.remove(i);
+                match crate::fs::probe_mount(Arc::new(p)) {
+                    Some((fs, name)) => {
+                        crate::println!("boot partition {g}: {name}");
+                        crate::fs::mount(2, fs);
+                        have_c = true;
+                    }
+                    None => crate::println!("boot partition {g}: no file system rs2 can mount"),
+                }
+            }
+            None => crate::println!("boot partition {g} not found"),
+        }
+    }
+    if !have_c && !crate::fs::has_boot_image(crate::boot_info()) {
         let same = |p: &part::Partition| boot.kind == 1 && p.start == boot.start && p.count == boot.size;
         let signed = |p: &part::Partition| same(p) && has_boot_signature(p, &boot);
         let find = |f: &dyn Fn(&part::Partition) -> bool| parts.iter().position(f);
@@ -235,11 +256,20 @@ pub fn init() {
     // Primary partitions, then logical drives.
     parts.sort_by_key(|p| !p.primary);
     for p in parts {
-        let fat = if p.mbr_type != 0 {
-            is_fat_type(p.mbr_type)
-        } else {
-            p.gpt_type == part::GPT_BASIC_DATA || p.gpt_type == part::GPT_EFI_SYSTEM
-        };
+        // GPT data partitions hold any file system: probe them.
+        if p.mbr_type == 0 && p.gpt_type == part::GPT_BASIC_DATA {
+            match crate::fs::probe_mount(Arc::new(p)) {
+                Some((fs, name)) => {
+                    if let Some(d) = next_letter() {
+                        crate::println!("disk: {name} partition (GPT)");
+                        crate::fs::mount(d, fs);
+                    }
+                }
+                None => crate::println!("disk: GPT data partition with no file system rs2 can mount"),
+            }
+            continue;
+        }
+        let fat = if p.mbr_type != 0 { is_fat_type(p.mbr_type) } else { p.gpt_type == part::GPT_EFI_SYSTEM };
         if !fat {
             match p.mbr_type {
                 // 0x07 is shared by HPFS, NTFS and exFAT: check the superblock.

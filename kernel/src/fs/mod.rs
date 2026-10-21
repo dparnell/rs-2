@@ -135,6 +135,22 @@ pub trait FsFile: Send + Sync {
 
 static DRIVES: SpinLock<[Option<Arc<dyn FileSystem>>; 26]> = SpinLock::new([const { None }; 26]);
 
+/// Mount whatever file system a volume holds: FAT, then HPFS (and the
+/// other installable file systems as they come). `dev` is wrapped for
+/// hard-error pop-ups here. The name of the file system found, or None.
+pub fn probe_mount(dev: Arc<dyn block::BlockDev>) -> Option<(Arc<dyn FileSystem>, &'static str)> {
+    let wrapped = crate::api::harderr::wrap(dev.clone());
+    if let Ok(fs) = fatfs::FatFs::mount(wrapped.clone()) {
+        return Some((fs, "FAT"));
+    }
+    if hpfsfs::probe(&dev) {
+        if let Ok(fs) = hpfsfs::HpfsFs::mount(wrapped.clone()) {
+            return Some((fs, "HPFS"));
+        }
+    }
+    None
+}
+
 pub fn mount(drive: u8, fs: Arc<dyn FileSystem>) {
     crate::println!("drive {}: {} file system", (b'A' + drive) as char, fs.name());
     // Hard-error pop-ups name the drive; record it now, while no file

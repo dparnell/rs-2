@@ -17,6 +17,8 @@ pub struct Partition {
     pub mbr_type: u8,
     /// GPT type GUID (zero for MBR partitions).
     pub gpt_type: [u8; 16],
+    /// GPT unique partition GUID (zero for MBR partitions).
+    pub guid: [u8; 16],
     pub primary: bool,
 }
 
@@ -96,7 +98,7 @@ pub fn scan(dev: &Arc<dyn BlockDev>) -> Vec<Partition> {
         if t == 0 || count == 0 || is_extended(t) {
             continue;
         }
-        out.push(Partition { dev: dev.clone(), start, count, mbr_type: t, gpt_type: [0; 16], primary: true });
+        out.push(Partition { dev: dev.clone(), start, count, mbr_type: t, gpt_type: [0; 16], guid: [0; 16], primary: true });
     }
     for &(t, ext_start, _) in &entries {
         if !is_extended(t) {
@@ -116,6 +118,7 @@ pub fn scan(dev: &Arc<dyn BlockDev>) -> Vec<Partition> {
                     count: lc,
                     mbr_type: lt,
                     gpt_type: [0; 16],
+                    guid: [0; 16],
                     primary: false,
                 });
             }
@@ -154,12 +157,23 @@ fn scan_gpt(dev: &Arc<dyn BlockDev>) -> Vec<Partition> {
         if ty == [0; 16] {
             continue;
         }
+        let mut guid = [0u8; 16];
+        guid.copy_from_slice(&e[16..32]);
         let s = le64(e, 32);
         let l = le64(e, 40);
         if l < s {
             continue;
         }
-        out.push(Partition { dev: dev.clone(), start: s, count: l - s + 1, mbr_type: 0, gpt_type: ty, primary: true });
+        out.push(Partition { dev: dev.clone(), start: s, count: l - s + 1, mbr_type: 0, gpt_type: ty, guid, primary: true });
     }
     out
+}
+
+/// A GUID as text ("0fc63daf-8483-4772-8e79-3d69d8477de4": the first three
+/// fields little-endian, as GPT stores them).
+pub fn guid_text(g: &[u8; 16]) -> alloc::string::String {
+    alloc::format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        g[3], g[2], g[1], g[0], g[5], g[4], g[7], g[6], g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]
+    )
 }
