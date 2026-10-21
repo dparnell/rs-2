@@ -1,0 +1,6 @@
+[package]
+name = "jfs"
+description = "no_std JFS (IBM Journaled File System, OS/2 layout): read, write and format"
+edition.workspace = true
+version.workspace = true
+license.workspace = true

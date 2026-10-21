@@ -31,6 +31,10 @@ name = "ipf"
 version = "0.1.0"
 
 [[package]]
+name = "jfs"
+version = "0.1.0"
+
+[[package]]
 name = "lxdump"
 version = "0.1.0"
 dependencies = [
