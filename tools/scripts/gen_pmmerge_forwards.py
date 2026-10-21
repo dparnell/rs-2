@@ -43,9 +43,9 @@ for l in open(os.path.join(pmm, 'ibm-forwards.txt')):
     elif dll == 'PMSHAPI' and o in shapi:
         fwd.append((po, shapi[o], f'PMSHAPI.{o}'))
 fwd.sort()
-# 16-bit entry points (Win16*, Gpi16*, Prf16*) become LX forwarders: a
-# 32-bit jump would run as 16-bit code.
-is16 = lambda n: re.match(r'(WIN|GPI|DEV|PRF)16', n) is not None
+# 16-bit entry points (exported under upper-case names, WINCREATEWINDOW)
+# become LX forwarders: a 32-bit jump would run as 16-bit code.
+is16 = lambda n: n == n.upper()
 lx = [(po, n, t) for po, n, t in fwd if is16(n)]
 fwd = [f for f in fwd if not is16(f[1])]
 
