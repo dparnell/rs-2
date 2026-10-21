@@ -115,7 +115,9 @@ they import that rs2 lacks was listed with `crates/os2-exe`'s
 `lximports` example against rs2's export lists. Besides the program,
 each needs the files named in its row in `work/modules.txt` (`--init`
 starts programs in `C:\`, where IBM's program objects start them in
-their own directory).
+their own directory). The table also has the CD's other programs that
+were tried, text-mode ones among them, including those of the optional
+features under `\OS2IMAGE\FI` (system management, printer utilities).
 
 | Program | Status | Notes |
 |---------|--------|-------|
@@ -127,13 +129,29 @@ their own directory).
 | AUTOUTL2.EXE (Auto Configurator) | works | Main panel and help; needs \OS2\AUTODRV2.SYS (the driver it configures, as a file) and AUTOUTL2.HLP in the current directory. No PC card scripts were tried. |
 | PMREXX.EXE | works | Runs a REXX procedure (`PMREXX PROC`, which must start with a `/*` comment), shows its output and takes input for PULL. Needed: the frame passing PMREXXIO's messages (`WM_USER` and up) to its client, timers no faster than the clock (PMREXXIO asks for 0 ms), a dialog template whose window is an entry field. |
 | ATAMNT2.EXE | fails | Starts, then reports that PCMSSDIF.SYS (PC card socket services) is not loaded: rs2 has no PC card support. Its PM calls (window enumeration, `WinQueryClassName`) are there. |
-| CLIPOS2.EXE (Clipboard Viewer) | fails | GpiCopyMetaFile, WinSetMultWindowPos. |
-| EPM.EXE (Enhanced Editor) | fails | PMSPL.DLL (the spooler, imported by ETKC603.DLL); cursors (WinCreateCursor, WinShowCursor, WinDestroyCursor), DDE (WinDdeInitiate, WinDdePostMsg, WinDdeRespond), WinSetMultWindowPos, WinSetWindowBits, WinQueryCpType, WinStoreWindowPos, WinRestoreWindowPos. |
-| PICVIEW.EXE (Picture Viewer) | fails | PMSPL.DLL (through PMPIC.DLL); GPI segments and metafiles (GpiOpenSegment, GpiCloseSegment, GpiDrawChain, GpiGetData, GpiPutData, GpiSetMetaFileBits, GpiQueryMetaFileBits/Length, GpiSaveMetaFile, GpiCopyMetaFile, GpiSetInitialSegmentAttrs, GpiSetViewingTransformMatrix, GpiSetDefViewingLimits, GpiSetDefAttrs), WinCpTranslateString, WinSetErrorInfo. |
+| CLIPOS2.EXE (Clipboard Viewer) | works | Shows the clipboard's text as it changes (tried with CTLTEST putting text there); the title names the format. Needed: WM_DRAWCLIPBOARD to a new viewer at once (WinSetClipbrdViewer), as IBM's PMWIN sends it; GpiCopyMetaFile (fails like any metafile call: rs2 makes no metafiles); its help is CLIPVIEW.HLP. |
+| EPM.EXE (Enhanced Editor) | works | Asks where to keep EPM.INI, then edits: opens a file from the command line, typing, the text cursor, menus, status and message lines, F2 saves ("Saved to C:\CONFIG.SYS"). Needs its DLLs (ETKE603, ETKR603, ETKC603, ETKUCMS, EPMMRI) in LIBPATH and its macros (`*.EX`) beside EPM.EXE. Needed: the text cursor (WinCreateCursor etc.), DDE, WinStoreWindowPos/WinRestoreWindowPos, PMSPL.DLL (rs2's: no printers), DosQueryProcAddr with `#n` names (its macros call DOSCALLS and PMWIN by ordinal), frames of a class derived from WC_FRAME with a client made by WinCreateWindow, per-character GpiQueryWidthTable, the cells' background for text drawn with increments. Spell checking needs LEXAM, which is not on the CD; printing does not work. |
+| PICVIEW.EXE (Picture Viewer) | fails | GPI segments and metafiles (GpiOpenSegment, GpiCloseSegment, GpiDrawChain, GpiGetData, GpiPutData, GpiSetInitialSegmentAttrs, GpiSetViewingTransformMatrix, GpiSetDefViewingLimits, GpiSetDefAttrs; rs2 makes no metafiles), WinCpTranslateString, PMMERGE's AAB32GetReg/AAB32SetReg. PMSPL.DLL (through PMPIC.DLL) is there now. |
 | GLOCALE.EXE (Locale) | works | On rs2's LIBUNI and UCONV ([PM.md](PM.md#locales-libuni-and-uconv)). Starts with its Country Palette; on the first start it makes the current locale (en_US) a user locale and writes `\LANGUAGE\LOCALE\USER.LOC`. Opening a locale shows its notebook: country/region (language, country, base locale, measurement, list separator), collation, numeric, monetary (`$1,000.11`, `($1,000.11)`), date and time formats with samples from UniStrftime. Create another (from the context menu) asks for a name and makes a new user locale; picking another base locale (de_DE) shows its values. Needs `GLOCMRI.DLL` (its resources) in LIBPATH; PMBIDI is not needed. The notebook shows two tabs at the window's default size and the Decimal digits spin button is empty (rs2's PM). |
 | PMCHKDSK.EXE, PMSEEK.EXE (Seek and Scan) | fails | 16-bit PM programs: the 16-bit PMWIN, PMGPI, PMSHAPI and HELPMGR entry points (Win16*, Gpi16*, Prf16*), which rs2 does not have. |
 | MPCPUMON.EXE (Pulse) | works | A moving graph of every processor's load (`--smp 2`), the legend, the grid. It reads the per-processor performance counters through DosConfigurePerf and DosAliasPerfCtrs (DOSCALLS 365, 364; kernel/src/api/perf.rs) and lays itself out with WinDrawText's DT_QUERYEXTENT. Its pop-up menu and dialogs were not tried; processors cannot be taken offline (DosSetProcessorStatus). |
-| SYSLOGPM, REGEDIT2, TEXTCON1, BDVIEWER, ARACONV, COMETRUN, PMSPOOL | not tried | Need system DLLs rs2 does not have: PMSPL, LFAPI/FFST, pmwinx, PMBIDI, THAILIB, CNVTRANS, PMGRE. |
+| REGEDIT2, TEXTCON1, BDVIEWER, ARACONV, COMETRUN, REGCONV | fails | Need system DLLs rs2 does not have: PMWINX and PMDDEML (REGEDIT2), PMBIDI (TEXTCON1, BDVIEWER), THAILIB (BDVIEWER), CNVTRANS (ARACONV), PMGRE (COMETRUN), an unnamed PMMERGE export (REGCONV). |
+| SYSLOGPM.EXE (system log viewer, `\FI\SYSMGT\OS2`) | works | Opens and reports "Cannot open input file" without a log (rs2 has no FFST logging daemon). Needs SYSLOGPM.DLL, LFAPI.DLL, FFST.DLL; UniStrptime (LIBUNI). The older SYSLOGPM.EXE on disk 22 also loads. |
+| DMIPM.EXE (DMI browser, `\FI\SYSMGT`) | works | Its window and toolbar; reports that the DMI service layer is not active (DMISL is not running). |
+| PMDF.EXE (PM Dump Facility, `\FI\SYSMGT\OS2\PDPSI\PMDF`) | works | Its window and menus; no dump was formatted. |
+| FFSTCONF.EXE, FFSTPCT.EXE (FFST configuration, `\FI\SYSMGT`) | fails | Need the FFST daemon's shared memory: FFSTCONF reports "Get shared memory error RC=123" (it asks for a name from an uninitialised buffer after creating `\SHAREMEM\FFSTMEM.DAT`), FFSTPCT that it cannot read the probe control table. |
+| MV.EXE (Lexmark MarkVision, `\FI\PRTUTILS\MARKVIS`) | works | Starts from its directory with its full path (it cuts its own path at the last backslash of argv[0]) and reports that the spooler is disabled: rs2 has no printers. Needed: resource-only DLLs whose fixups were removed placed anywhere by the loader. |
+| BACKPRN, CHGQUE, RESTPRN, RINSTPRN (printer utilities) | partial | Text-mode programs on PMSPL: BACKPRN `?` prints its syntax and "Can't get size of available queues"; there are no printer queues. |
+| LVM.EXE (Logical Volume Manager, text) | partial | Its full-screen panels and menus run; it reports the partition table of the QEMU disk as possibly corrupt and lists no volumes. FDISKPM.EXE says it was replaced by LVM.EXE and LVMGUI.CMD (Java). LVMALERT.EXE runs without a window. |
+| RMVIEW.EXE, SVDETECT.EXE | fails | RMINFO.DLL fails to initialise: it needs the resource manager driver (RESOURCE.SYS), which rs2 does not have. |
+| CALIBRAT.EXE (touch screen) | fails | FSGRAPH.DLL fails to initialise (touch support). |
+| TRACEFMT.EXE | fails | Calls 16-bit DOSCALLS.119, which rs2 does not know. |
+| QRYMMCD.EXE | works | Ends at once (it checks for the multimedia CD). |
+| STPM.EXE, MPPMNEW.EXE, MINSTALL.EXE (multimedia installation) | fails | WinRegisterCircularSlider (PMCTLS), MMPARTS.DLL (in two pieces on the CD) and PMWP's object calls. |
+| ATMCNTRL.EXE, FASTLOAD.EXE, PROMIX.EXE, AUDIOVER.EXE | fails | 16-bit PM programs (NE), like PMCHKDSK and PMSEEK. |
+| PMSPOOL.EXE, PMSHELL.EXE | fails | The spooler and the Workplace Shell themselves: rs2 has neither (SPL32QMINITIALIZE, PMWP's shell entry points). |
+| JAVA.EXE, JAVAPM.EXE (Java 1.1, `\FI\PACKAGE`) | not tried | |
+| CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | not supported | Windows 3.1 programs for WIN-OS/2, which rs2 does not have. |
 
 ## Network programs
 
@@ -260,6 +278,12 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
 - Loader: DLL objects whose preferred base is below the shared arena (the
   linker default 0x10000 of application DLLs) are relocated into the
   shared arena instead of colliding with the process's private memory.
+- Loader: resource objects of DLLs whose internal fixups were removed
+  go anywhere in the shared arena (resource-only DLLs have base 0;
+  MarkVision's failed with error 8).
+- `DosQueryProcAddr`/`DosQueryProcType` take `#n` as the name of
+  ordinal n, as OS/2's do (EPM's macros call DOSCALLS and PMWIN that
+  way).
 - Loader: a 16-bit selector fixup to a 32-bit object without the alias
   flag yields the flat selector; `THK32R3DS` (DOSCALLS.295) and
   `DOS32FLATDS` (370) are absolute exports. IBM's 16-to-32 thunks rely on

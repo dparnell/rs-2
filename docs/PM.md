@@ -33,7 +33,8 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000; 9001, `Rs2ShellPosition`, gives PMSHAPI's `WinQueryTaskSizePos` the shell's next cascade position; 9002, `Rs2PmVioWindow`, registers a VIO window's client). |
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
 | `userland/pmctls` → PMCTLS.DLL | The standard file and font dialogs (`WinFileDlg`, `WinFontDlg`): ordinary PM dialogs, built from templates made in memory, run through PMWIN like an application's. |
-| `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006). |
+| `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006); `WinStoreWindowPos`/`WinRestoreWindowPos`; `WinCreateObject` for program objects. |
+| `userland/pmspl` → PMSPL.DLL | The spooler API (`Spl*`) of a system without printers (see [Status](#status)). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
 | `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
 | `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), PMDRAG (no drag is ever in progress), PMMERGE (IBM PMMERGE's ordinals, see below), LIBUNI and UCONV (locales and code page conversion, see [Locales](#locales-libuni-and-uconv)). The help manager is HELPMGR.DLL (see [The help manager](#the-help-manager-helpmgrdll-and-viewexe)). |
@@ -370,7 +371,48 @@ mouse and keyboard. What PMWIN has:
   frame created with `FCF_SHELLPOSITION` stays without a size (its
   client gets no `WM_SIZE`) until it is first shown, as on OS/2;
   `FCF_TASKLIST` gives it a switch entry (see [The switch
-  list](#the-switch-list)).
+  list](#the-switch-list)). As in IBM's PMWIN, the frame's window
+  procedure makes a window a frame when it gets `WM_CREATE` with the
+  FRAMECDATA (`WinCreateStdWindow` and dialog frames pass one), so a
+  class an application registers with WC_FRAME's procedure (from
+  `WinQueryClassInfo`) and creates with `WinCreateWindow` gets its frame
+  controls too (EPM's edit frames); a child with id `FID_CLIENT` is the
+  client however it was made. The built-in classes have IBM's window
+  words (the frame 0xAC bytes, the controls 8); frames answer
+  `QWS_XRESTORE`..`QWS_CYRESTORE` and `QWS_XMINIMIZE`/`QWS_YMINIMIZE`.
+- The text cursor (`WinCreateCursor`, `WinShowCursor`,
+  `WinDestroyCursor`, `WinQueryCursorInfo`), with IBM's rules
+  (`crates/pmwin/src/cursor.rs`): one in the system, created hidden
+  (one `WinShowCursor(TRUE)` shows it), drawn by inverting its rectangle
+  in the window's visible region (solid, `CURSOR_FRAME` one border wide,
+  `CURSOR_HALFTONE` every other pixel; the cx or cy 0 means the border
+  width), `CURSOR_SETPOS` moves it, `CURSOR_FLASH` blinks it at
+  `SV_CURSORRATE` through `WM_TIMER` `TID_CURSOR` (0xFFFF), which
+  `WinDefWindowProc` handles; `WinBeginPaint` hides it while its window
+  paints and `WinEndPaint` shows it again; it goes with its window.
+- DDE: `WinDdeInitiate` sends `WM_DDE_INITIATE` to every top-level
+  window with a DDEINIT of its own, `WinDdeRespond` sends
+  `WM_DDE_INITIATEACK`, `WinDdePostMsg` posts a DDESTRUCT; the blocks are
+  giveable shared memory given to the receiving process
+  (`DosGiveSharedMem`), the sender's access dropped unless
+  `DDEPM_NOFREE`.
+- `WinStoreWindowPos`/`WinRestoreWindowPos` (PMWP.DLL) keep a window's
+  position, size, minimized/maximized state, restore and minimize
+  positions and sizing border in OS2.INI in the Workplace Shell's record
+  (`crates/pmwin/src/winpos.rs`), scaled when the screen size changed;
+  presentation parameters are not stored, and those of a record OS/2
+  wrote are skipped.
+- PMSPL.DLL is the spooler API of a system without printers: queue,
+  device, job, driver and port lists are empty, named ones are "not
+  found" (`NERR_QNotFound` etc.), `SplQmOpen` fails. Programs that look
+  for printers at start (EPM, the system log viewer, MarkVision, the
+  printer utilities) load and say there are none.
+- Metafiles are not made: `GpiLoadMetaFile` fails and the calls that take
+  a metafile handle (`GpiCopyMetaFile`, `GpiQueryMetaFileBits`/`Length`,
+  `GpiSetMetaFileBits`, `GpiSaveMetaFile`, `GpiDeleteMetaFile`) report
+  `PMERR_INV_HMF`.
+- `WinSetClipbrdViewer` sends the new viewer `WM_DRAWCLIPBOARD` at once
+  (mp1 the clipboard owner), as `WinCloseClipbrd` does after a change.
 - Resources through `DosGetResource`: menu templates (nested submenus),
   dialog templates, accelerator tables, string and message tables
   (`WinLoadString`, `WinLoadMessage`), bitmaps for `SS_BITMAP` statics.
@@ -1486,8 +1528,12 @@ The export trampolines pass their index to the lock's entry
   fields, combo boxes, spin buttons, sliders and value sets (messages
   and notifications), atoms and the clipboard (CF_TEXT, CF_BITMAP and a
   registered format, also read and replaced by a second process: it
-  runs itself with `CHILD`), printing PASS/FAIL and `ctltest done: N
-  failure(s)`.
+  runs itself with `CHILD`), the window manager calls in
+  `ctltest/src/wm.rs` (the text cursor, frames of a class derived from
+  WC_FRAME, `WinSetMultWindowPos`, `WinStoreWindowPos`/
+  `WinRestoreWindowPos`, DDE, a new clipboard viewer's
+  `WM_DRAWCLIPBOARD`, `WinQueryQueueInfo`, PMSPL), printing PASS/FAIL
+  and `ctltest done: N failure(s)`.
 - `RS2\SHELLTST.EXE` (userland/shelltest): self-checks of what a desktop
   shell needs: system pointers, pointer info and bitmaps, creating,
   copying and destroying pointers, the pointer's shape, file icons
