@@ -10,7 +10,7 @@ programs unmodified, natively, on 64-bit PCs.
   semaphores, exceptions, timers, queues, shared memory, pipes, modules,
   resources, signals) plus VIO, KBD, MSG and NLS.
 - UEFI boot from CD, USB stick or hard disk; IDE, AHCI, NVMe, USB keyboard/mouse (xHCI),
-  partitions (MBR/GPT), FAT, HPFS and ISO 9660.
+  partitions (MBR/GPT), FAT, HPFS, JFS and ISO 9660.
 - Runs as a guest in VMware (and QEMU's VMware device models): VMware
   absolute pointer (no mouse capture), PVSCSI and LSI Logic (MPT Fusion)
   SCSI disks and CD-ROMs, SVGA II resolutions (`video=WxH`); see
@@ -238,7 +238,7 @@ line, or NETWORK= in CONFIG.SYS, change that); `cargo xtask run --net` or
 |------|----------|
 | `kernel/` | the kernel |
 | `boot/` | UEFI loader |
-| `crates/` | shared libraries: executable formats, FAT, HPFS, installer unpacking, boot hand-off |
+| `crates/` | shared libraries: executable formats, FAT, HPFS, JFS, installer unpacking, boot hand-off |
 | `userland/` | OS/2 programs in Rust (CMD, utilities, installer, tests) |
 | `tools/` | `elf2lx`, `lxdump`, Ghidra scripts, analysis scripts |
 | `xtask/` | build tool: images, ISO, QEMU |

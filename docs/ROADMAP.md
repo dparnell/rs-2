@@ -180,15 +180,20 @@ Status markers: done, in progress, planned.
 - done: HPFS system volumes: the boot command line's `root=GUID` makes a
   GPT partition C: whatever its file system (`fs::probe_mount`); the
   installer can put the system on HPFS with a FAT32 EFI system partition
-- planned: JFS, OS/2 LVM metadata
+- done: JFS (read/write/format, `crates/jfs`, layout in
+  [formats/jfs.md](formats/jfs.md)): OS/2 volumes (case-insensitive) and
+  Linux ones (index tables), inline and extent EAs; MBR type 0x35, GPT and
+  `root=GUID` system volumes; checked with Linux jfs_fsck. No log replay:
+  volumes another system left with a busy log open read-only
+- planned: OS/2 LVM metadata, JFS log replay and CHKDSK /F for JFS
 
 ## Milestone 3: rs2 user space (in progress)
 
 - done: `elf2lx` toolchain (Rust/i686 to LX executables and DLLs)
 - done: CMD.EXE (internal commands, batch files, pipes, redirection),
   MORE, FIND, SORT, ATTRIB, TREE, XCOPY, INSTALL
-- done: LABEL, CHKDSK (FAT check and /F repair; HPFS read-only scan),
-  FORMAT (FAT, HPFS) on DASD handles and the category 8 disk IOCtls, MODE
+- done: LABEL, CHKDSK (FAT check and /F repair; HPFS read-only scan; JFS
+  read-only check), FORMAT (FAT, HPFS, JFS) on DASD handles and the category 8 disk IOCtls, MODE
   (screen mode through a 16-bit VIO thunk), HELP
 - planned: CHKDSK repair for HPFS, FDISK/LVM and the rest of the base
   utilities; own message files (OSO001.MSG); Cyrillic/Greek/Hebrew

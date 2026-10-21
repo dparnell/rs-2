@@ -331,8 +331,9 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   level 11.
 - Extended attributes are stored: on FAT12/16 in `EA DATA. SF` as OS/2
   does, on FAT32 in FAT32.IFS-style `NAME EA. SF` files, on HPFS in the
-  F-node or outside it (see [formats/fat-ea.md](formats/fat-ea.md) and
-  [formats/hpfs.md](formats/hpfs.md)). Query/set with EAOP2 (and the
+  F-node or outside it, on JFS in the inode or an extent (see
+  [formats/fat-ea.md](formats/fat-ea.md), [formats/hpfs.md](formats/hpfs.md)
+  and [formats/jfs.md](formats/jfs.md)). Query/set with EAOP2 (and the
   16-bit EAOP) in `DosQueryPathInfo`/`DosQueryFileInfo` levels 2-4,
   `DosSetPathInfo`/`DosSetFileInfo` level 2, EAs at creation in `DosOpen`,
   `DosOpenL`, `DosOpen2`, `DosCreateDir`, `DosMkDir2`, `DosFindFirst`
