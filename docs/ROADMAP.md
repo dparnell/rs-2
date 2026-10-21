@@ -242,6 +242,7 @@ Status markers: done, in progress, planned.
 
 - done: hybrid ISO/USB image (El Torito EFI + MBR ESP), live session
 - done: installer (GPT + EFI system partition, FAT32, copy, restart)
+- done: installer updates an existing installation in place (keeps CONFIG.SYS, INI files, MPTN\ETC; merges new CONFIG.SYS entries)
 - planned: choice of partitions and file systems, BIOS boot, boot manager
 
 ## Later

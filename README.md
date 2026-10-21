@@ -132,7 +132,13 @@ of `xtask/src/main.rs` for all of them).
 
 The ISO boots into the live system's desktop; open Programs > Install
 rs2 (or type `INSTALL` at a command prompt) to install onto a hard
-disk. Development builds (`cargo xtask run` without `--iso`) take extra
+disk. The installer lists each disk's installed rs2 version (from
+`\RS2\VERSION`, which builds stamp with the commit and date) and offers
+to update one in place: the system files are replaced, while
+`CONFIG.SYS`, the `.INI` files (desktop, settings), `\MPTN\ETC` and
+everything that is not part of rs2 are kept; new `SET` variables and
+new `PATH`/`LIBPATH`/`DPATH`/`HELP`/`BOOKSHELF` entries are merged into
+the existing `CONFIG.SYS`. Development builds (`cargo xtask run` without `--iso`) take extra
 files for drive C: from `work/modules.txt`, which is how original OS/2
 programs are tested.
 

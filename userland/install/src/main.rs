@@ -4,6 +4,14 @@
 //! system partition (FAT32) that holds the boot loader, the kernel and the
 //! system files. The partition is written directly through the physical
 //! disk IOCtls with the same FAT code the build tools use.
+//!
+//! A disk that already has rs2 (an EFI system partition with
+//! `RS2\KERNEL`) can be updated instead: the system files are replaced
+//! in place, without partitioning or formatting, and the user's settings
+//! are kept (CONFIG.SYS, the INI files, `MPTN\ETC`). CONFIG.SYS gets what
+//! the new version adds: `SET` variables it does not have, and entries of
+//! PATH, DPATH, LIBPATH, HELP and BOOKSHELF missing from its lines.
+//! `RS2\VERSION` (written by the build) names both versions.
 
 #![no_std]
 #![no_main]
@@ -55,6 +63,7 @@ unsafe extern "C" {
     ) -> APIRET;
 }
 
+#[derive(Clone, Copy)]
 struct Disk {
     handle: u32,
     sectors: u64,
@@ -95,6 +104,14 @@ impl Disk {
         let f = if write { 0xa1 } else { 0xa0 };
         let rc = unsafe { DosDevIOCtl(self.handle, 9, f, p.as_ptr(), 12, &mut pl, buf, bytes as u32, &mut dl) };
         if rc == 0 { Ok(()) } else { Err(rc) }
+    }
+
+    fn read_at(&self, lba: u64, bytes: usize) -> Result<Vec<u8>, u32> {
+        let ss = self.sector_size as usize;
+        let mut v = vec![0u8; bytes.div_ceil(ss) * ss];
+        self.io(lba, v.as_mut_ptr(), v.len(), false)?;
+        v.truncate(bytes);
+        Ok(v)
     }
 
     fn write_at(&self, lba: u64, data: &[u8]) -> Result<(), u32> {
@@ -206,6 +223,118 @@ fn partition(d: &Disk, seed: u32) -> Result<(u64, u64), u32> {
     Ok((start, end - start + 1))
 }
 
+// ---- An existing installation ----
+
+/// rs2 found on a disk: its partition and version.
+struct Found {
+    part: Disk,
+    version: String,
+}
+
+fn read_vol(vol: &fat::Volume<Disk>, path: &str) -> Option<Vec<u8>> {
+    let e = vol.lookup(path).ok()?;
+    let mut v = vec![0u8; e.size as usize];
+    let n = vol.read(&e, 0, &mut v).ok()?;
+    v.truncate(n);
+    Some(v)
+}
+
+fn version_of(text: Option<Vec<u8>>) -> String {
+    match text {
+        Some(t) => t.iter().map(|&b| b as char).collect::<String>().trim().to_string(),
+        None => String::from("an earlier rs2"),
+    }
+}
+
+/// The rs2 installation on disk `d`, if it has one: an EFI system
+/// partition of its GPT holding RS2\KERNEL.
+fn find_rs2(d: &Disk) -> Option<Found> {
+    let h = d.read_at(1, d.sector_size as usize).ok()?;
+    if &h[0..8] != b"EFI PART" {
+        return None;
+    }
+    let u64_at = |b: &[u8], o: usize| u64::from_le_bytes(b[o..o + 8].try_into().unwrap());
+    let u32_at = |b: &[u8], o: usize| u32::from_le_bytes(b[o..o + 4].try_into().unwrap());
+    let (lba, n, size) = (u64_at(&h, 72), u32_at(&h, 80).min(256) as usize, u32_at(&h, 84) as usize);
+    if size < 128 {
+        return None;
+    }
+    let ents = d.read_at(lba, n * size).ok()?;
+    for e in ents.chunks_exact(size) {
+        if e[0..16] != ESP_TYPE {
+            continue;
+        }
+        let (start, end) = (u64_at(e, 32), u64_at(e, 40));
+        if end < start || end >= d.sectors {
+            continue;
+        }
+        let part = Disk { offset: start, count: end - start + 1, ..*d };
+        let Ok(vol) = fat::Volume::mount(part) else { continue };
+        if vol.lookup("RS2\\KERNEL").is_ok() {
+            return Some(Found { part, version: version_of(read_vol(&vol, "RS2\\VERSION")) });
+        }
+    }
+    None
+}
+
+/// Files of an installation that are the user's: kept when updating.
+fn kept(dest: &str) -> bool {
+    let u = dest.to_ascii_uppercase();
+    u == "CONFIG.SYS" || u.ends_with(".INI") || u.starts_with("MPTN\\ETC\\")
+}
+
+/// CONFIG.SYS with what `new` adds to `old`: SET variables `old` does not
+/// set, and the entries of its path lists that `old`'s lines lack.
+/// Returns the text and what was added.
+fn merge_config(old: &[u8], new: &[u8]) -> (Vec<u8>, Vec<String>) {
+    let text = |b: &[u8]| -> Vec<String> { b.split(|&c| c == b'\n').map(|l| l.iter().map(|&c| c as char).collect::<String>().trim_end_matches('\r').to_string()).collect() };
+    let key = |l: &str| -> Option<String> {
+        let u = l.trim().to_ascii_uppercase();
+        if u.starts_with("REM") {
+            return None;
+        }
+        let k = u.split('=').next()?.trim().to_string();
+        (u.contains('=') && (k.starts_with("SET ") || k == "LIBPATH")).then_some(k)
+    };
+    const LISTS: [&str; 5] = ["SET PATH", "SET DPATH", "LIBPATH", "SET HELP", "SET BOOKSHELF"];
+    let mut lines = text(old);
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    let mut notes = Vec::new();
+    for nl in text(new) {
+        let Some(k) = key(&nl) else { continue };
+        let value = nl.split_once('=').map_or("", |x| x.1).trim().to_string();
+        match lines.iter().position(|l| key(l).as_deref() == Some(k.as_str())) {
+            None => {
+                notes.push(alloc::format!("added {}", nl.trim()));
+                lines.push(nl.trim().to_string());
+            }
+            Some(i) if LISTS.contains(&k.as_str()) => {
+                let mut l = lines[i].trim_end().to_string();
+                let have: Vec<String> = l.split_once('=').map_or("", |x| x.1).split(';').map(|e| e.trim().to_ascii_uppercase()).collect();
+                for entry in value.split(';').map(str::trim).filter(|e| !e.is_empty()) {
+                    if !have.contains(&entry.to_ascii_uppercase()) {
+                        if !l.ends_with(';') {
+                            l.push(';');
+                        }
+                        l.push_str(entry);
+                        notes.push(alloc::format!("{k}: added {entry}"));
+                    }
+                }
+                lines[i] = l;
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    for l in &lines {
+        out.extend(l.bytes());
+        out.extend_from_slice(b"\r\n");
+    }
+    (out, notes)
+}
+
 // ---- Copying ----
 
 fn now() -> fat::Timestamp {
@@ -292,8 +421,9 @@ fn put(vol: &mut fat::Volume<Disk>, dest: &str, data: &[u8]) -> Result<(), fat::
     Ok(())
 }
 
-/// Copy the tree `src` (e.g. "C:") into `dest` on the new volume.
-fn copy_tree(vol: &mut fat::Volume<Disk>, src: &str, dest: &str, files: &mut u32) -> Result<(), String> {
+/// Copy the tree `src` (e.g. "C:") into `dest` on the new volume; when
+/// updating, the user's files there (`kept`) stay as they are.
+fn copy_tree(vol: &mut fat::Volume<Disk>, src: &str, dest: &str, files: &mut u32, update: bool) -> Result<(), String> {
     for e in list(src) {
         let s = alloc::format!("{}\\{}", src.trim_end_matches('\\'), e.name);
         let d = if dest.is_empty() { e.name.clone() } else { alloc::format!("{dest}\\{}", e.name) };
@@ -301,8 +431,11 @@ fn copy_tree(vol: &mut fat::Volume<Disk>, src: &str, dest: &str, files: &mut u32
             if vol.lookup(&d).is_err() {
                 vol.mkdir(&d, now()).map_err(|x| alloc::format!("{d}: {x:?}"))?;
             }
-            copy_tree(vol, &s, &d, files)?;
+            copy_tree(vol, &s, &d, files, update)?;
         } else {
+            if update && kept(&d) && vol.lookup(&d).is_ok() {
+                continue;
+            }
             let data = read_file(&s).ok_or_else(|| alloc::format!("cannot read {s}"))?;
             put(vol, &d, &data).map_err(|x| alloc::format!("{d}: {x:?}"))?;
             *files += 1;
@@ -330,6 +463,9 @@ fn install() -> u32 {
     outln("rs2 Installation");
     outln("================");
     outln("");
+    let this = version_of(read_file("C:\\RS2\\VERSION"));
+    outln(&alloc::format!("This disc: {this}"));
+    outln("");
     let mut n = 0u16;
     unsafe { DosPhysicalDisk(1, &mut n as *mut u16 as *mut u8, 2, core::ptr::null(), 0) };
     if n == 0 {
@@ -340,8 +476,13 @@ fn install() -> u32 {
     let mut disks = Vec::new();
     for i in 1..=n as u32 {
         if let Some(d) = Disk::open(i) {
-            outln(&alloc::format!("  {i}. {} MB", d.sectors * d.sector_size as u64 >> 20));
-            disks.push((i, d));
+            let found = find_rs2(&d);
+            let what = match &found {
+                Some(f) => alloc::format!(" - {} installed", f.version),
+                None => String::new(),
+            };
+            outln(&alloc::format!("  {i}. {} MB{what}", d.sectors * d.sector_size as u64 >> 20));
+            disks.push((i, d, found));
         }
     }
     let pick = ask("\r\nInstall on which disk (number, or Enter to cancel)? ");
@@ -349,72 +490,41 @@ fn install() -> u32 {
         outln("Installation cancelled.");
         return 1;
     };
-    let Some((_, disk)) = disks.into_iter().find(|(i, _)| *i == choice) else {
+    let Some((_, disk, found)) = disks.into_iter().find(|(i, _, _)| *i == choice) else {
         outln("There is no such disk.");
         return 1;
     };
-    if disk.sectors * (disk.sector_size as u64) < (64 << 20) {
-        outln("The disk is too small (64 MB or more is needed).");
-        return 1;
-    }
-    outln("");
-    outln(&alloc::format!("ALL DATA ON DISK {choice} WILL BE ERASED."));
-    if !ask("Type YES to continue: ").eq_ignore_ascii_case("YES") {
-        outln("Installation cancelled.");
-        return 1;
-    }
-    let mut dt = DateTime::default();
-    unsafe { DosGetDateTime(&mut dt) };
-    let seed = (dt.hours as u32) << 24 | (dt.minutes as u32) << 16 | (dt.seconds as u32) << 8 | dt.hundredths as u32;
-
-    out("Partitioning... ");
-    let (start, count) = match partition(&disk, seed) {
-        Ok(v) => v,
-        Err(e) => {
-            outln(&alloc::format!("failed (error {e})"));
-            return 1;
-        }
-    };
-    outln("done");
-
-    out("Formatting... ");
-    let part = Disk { offset: start, count, ..disk };
-    let fat_type = if count * part.sector_size as u64 >= (256 << 20) { Some(fat::FatType::Fat32) } else { Some(fat::FatType::Fat16) };
-    if let Err(e) = fat::format(&part, &fat::FormatParams { label: "RS2", serial: seed, fat_type, hidden_sectors: start as u32 }) {
-        outln(&alloc::format!("failed ({e:?})"));
-        return 1;
-    }
-    let mut vol = match fat::Volume::mount(part) {
-        Ok(v) => v,
-        Err(e) => {
-            outln(&alloc::format!("failed ({e:?})"));
-            return 1;
-        }
-    };
-    outln("done");
-
-    out("Copying the system");
-    let mut files = 0;
-    if let Err(e) = copy_tree(&mut vol, "C:", "", &mut files) {
-        outln(&alloc::format!("\r\nCopying failed: {e}"));
-        return 1;
-    }
-    // Boot loader and kernel at the places the firmware and loader look.
-    for (src, dest) in [("C:\\RS2\\BOOT\\BOOTX64.EFI", "EFI\\BOOT\\BOOTX64.EFI"), ("C:\\RS2\\BOOT\\KERNEL", "RS2\\KERNEL")] {
-        match read_file(src) {
-            Some(d) => {
-                if let Err(e) = put(&mut vol, dest, &d) {
-                    outln(&alloc::format!("\r\nCannot write {dest}: {e:?}"));
+    let mut vol = match found {
+        Some(f) => {
+            outln("");
+            outln(&alloc::format!("Disk {choice} has {}.", f.version));
+            outln("  U  Update it: the system files are replaced; your settings, desktop,");
+            outln("     programs and files are kept.");
+            outln("  E  Erase the disk and install anew.");
+            match ask("Choose U or E (or Enter to cancel): ").to_ascii_uppercase().as_str() {
+                "U" => match update_volume(&f) {
+                    Some(v) => v,
+                    None => return 1,
+                },
+                "E" => match fresh(disk, choice) {
+                    Some(v) => v,
+                    None => return 1,
+                },
+                _ => {
+                    outln("Installation cancelled.");
                     return 1;
                 }
             }
-            None => {
-                outln(&alloc::format!("\r\nThe boot file {src} is missing."));
-                return 1;
-            }
         }
+        None => match fresh(disk, choice) {
+            Some(v) => v,
+            None => return 1,
+        },
+    };
+    if let Err(e) = boot_files(&mut vol) {
+        outln(&e);
+        return 1;
     }
-    outln(&alloc::format!(" {files} files copied."));
     outln("");
     outln("Installation is complete. Remove the installation disc and press Enter");
     out("to restart the computer.");
@@ -428,4 +538,98 @@ fn install() -> u32 {
         }
     }
     0
+}
+
+/// Partition and format the disk and copy the system onto it.
+fn fresh(disk: Disk, choice: u32) -> Option<fat::Volume<Disk>> {
+    if disk.sectors * (disk.sector_size as u64) < (64 << 20) {
+        outln("The disk is too small (64 MB or more is needed).");
+        return None;
+    }
+    outln("");
+    outln(&alloc::format!("ALL DATA ON DISK {choice} WILL BE ERASED."));
+    if !ask("Type YES to continue: ").eq_ignore_ascii_case("YES") {
+        outln("Installation cancelled.");
+        return None;
+    }
+    let mut dt = DateTime::default();
+    unsafe { DosGetDateTime(&mut dt) };
+    let seed = (dt.hours as u32) << 24 | (dt.minutes as u32) << 16 | (dt.seconds as u32) << 8 | dt.hundredths as u32;
+
+    out("Partitioning... ");
+    let (start, count) = match partition(&disk, seed) {
+        Ok(v) => v,
+        Err(e) => {
+            outln(&alloc::format!("failed (error {e})"));
+            return None;
+        }
+    };
+    outln("done");
+
+    out("Formatting... ");
+    let part = Disk { offset: start, count, ..disk };
+    let fat_type = if count * part.sector_size as u64 >= (256 << 20) { Some(fat::FatType::Fat32) } else { Some(fat::FatType::Fat16) };
+    if let Err(e) = fat::format(&part, &fat::FormatParams { label: "RS2", serial: seed, fat_type, hidden_sectors: start as u32 }) {
+        outln(&alloc::format!("failed ({e:?})"));
+        return None;
+    }
+    let mut vol = match fat::Volume::mount(part) {
+        Ok(v) => v,
+        Err(e) => {
+            outln(&alloc::format!("failed ({e:?})"));
+            return None;
+        }
+    };
+    outln("done");
+
+    out("Copying the system");
+    let mut files = 0;
+    if let Err(e) = copy_tree(&mut vol, "C:", "", &mut files, false) {
+        outln(&alloc::format!("\r\nCopying failed: {e}"));
+        return None;
+    }
+    outln(&alloc::format!(" {files} files copied."));
+    Some(vol)
+}
+
+/// Replace the system files of an installation, keeping the user's.
+fn update_volume(f: &Found) -> Option<fat::Volume<Disk>> {
+    let mut vol = match fat::Volume::mount(f.part) {
+        Ok(v) => v,
+        Err(e) => {
+            outln(&alloc::format!("The installation cannot be read ({e:?})."));
+            return None;
+        }
+    };
+    out("Updating the system");
+    let mut files = 0;
+    if let Err(e) = copy_tree(&mut vol, "C:", "", &mut files, true) {
+        outln(&alloc::format!("\r\nUpdating failed: {e}"));
+        return None;
+    }
+    outln(&alloc::format!(" {files} files updated."));
+    // CONFIG.SYS: the user's, with what the new version adds.
+    if let (Some(old), Some(new)) = (read_vol(&vol, "CONFIG.SYS"), read_file("C:\\CONFIG.SYS")) {
+        let (merged, notes) = merge_config(&old, &new);
+        if !notes.is_empty() {
+            if let Err(e) = put(&mut vol, "CONFIG.SYS", &merged) {
+                outln(&alloc::format!("CONFIG.SYS cannot be updated ({e:?})."));
+                return None;
+            }
+            outln("CONFIG.SYS:");
+            for n in notes {
+                outln(&alloc::format!("  {n}"));
+            }
+        }
+    }
+    Some(vol)
+}
+
+/// The boot loader and kernel where the firmware and the loader look.
+fn boot_files(vol: &mut fat::Volume<Disk>) -> Result<(), String> {
+    for (src, dest) in [("C:\\RS2\\BOOT\\BOOTX64.EFI", "EFI\\BOOT\\BOOTX64.EFI"), ("C:\\RS2\\BOOT\\KERNEL", "RS2\\KERNEL")] {
+        let d = read_file(src).ok_or_else(|| alloc::format!("The boot file {src} is missing."))?;
+        put(vol, dest, &d).map_err(|e| alloc::format!("Cannot write {dest}: {e:?}"))?;
+    }
+    Ok(())
 }

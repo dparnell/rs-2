@@ -430,6 +430,10 @@ fn build(o: &Opts) -> Option<PathBuf> {
     if let Ok(text) = std::fs::read_to_string(&list) {
         let mut files = image::manifest(&root(), &text);
         files.extend(userland);
+        // The version the installer shows (and an update compares).
+        let version = root().join("target/rs2-version.txt");
+        std::fs::write(&version, version_text()).unwrap();
+        files.push((version, "RS2\\VERSION".to_string()));
         // Boot files for the installer.
         files.push((esp.join("EFI/BOOT/BOOTX64.EFI"), "RS2\\BOOT\\BOOTX64.EFI".to_string()));
         files.push((esp.join("RS2/KERNEL"), "RS2\\BOOT\\KERNEL".to_string()));
@@ -439,6 +443,28 @@ fn build(o: &Opts) -> Option<PathBuf> {
         std::fs::write(&out, img).unwrap();
     }
     Some(esp)
+}
+
+/// `rs2 COMMIT[+] built YYYY-MM-DD`: the commit the build is from ("+" when
+/// the checkout had changes) and the build date (UTC).
+fn version_text() -> String {
+    let git = |args: &[&str]| {
+        Command::new("git").args(args).current_dir(root()).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+    };
+    let commit = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let dirty = git(&["status", "--porcelain", "--untracked-files=no"]).is_some_and(|s| !s.is_empty());
+    let days = (std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) / 86400) as i64;
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + (m <= 2) as i64;
+    format!("rs2 {commit}{} built {y:04}-{m:02}-{d:02}\r\n", if dirty { "+" } else { "" })
 }
 
 /// Programs in userland/ to package, with their LX names.
