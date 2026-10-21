@@ -184,3 +184,62 @@ fn make_boot_disk() {
     }
     std::fs::write(std::env::var("BOOT_IMG").unwrap(), d).unwrap();
 }
+
+/// A sparse file as a disk.
+struct FileDev(RefCell<std::fs::File>, u64);
+
+impl jfs::BlockDevice for &FileDev {
+    fn sector_size(&self) -> usize {
+        512
+    }
+    fn sector_count(&self) -> u64 {
+        self.1 / 512
+    }
+    fn read(&self, lba: u64, buf: &mut [u8]) -> jfs::Result<()> {
+        use std::io::{Read, Seek, SeekFrom};
+        let mut f = self.0.borrow_mut();
+        f.seek(SeekFrom::Start(lba * 512)).map_err(|_| jfs::Error::Io)?;
+        f.read_exact(buf).map_err(|_| jfs::Error::Io)
+    }
+    fn write(&self, lba: u64, buf: &[u8]) -> jfs::Result<()> {
+        use std::io::{Seek, SeekFrom, Write};
+        let mut f = self.0.borrow_mut();
+        f.seek(SeekFrom::Start(lba * 512)).map_err(|_| jfs::Error::Io)?;
+        f.write_all(buf).map_err(|_| jfs::Error::Io)
+    }
+}
+
+/// A big volume (two summary levels, large allocation groups):
+/// BIG_IMG=path BIG_GB=40 cargo test -p jfs --release --test bootdisk big_volume -- --ignored
+#[test]
+#[ignore]
+fn big_volume() {
+    let path = std::env::var("BIG_IMG").unwrap();
+    let gb: u64 = std::env::var("BIG_GB").ok().and_then(|s| s.parse().ok()).unwrap_or(40);
+    let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path).unwrap();
+    f.set_len(gb << 30).unwrap();
+    let dev = FileDev(RefCell::new(f), gb << 30);
+    let g = jfs::format(&&dev, &jfs::FormatParams { label: "BIG", now: 1_760_000_000, ..Default::default() }).unwrap();
+    eprintln!("{g:?}");
+    let mut v = jfs::Volume::mount(&dev).unwrap();
+    let now = 1_760_000_000;
+    // Files spread over the volume: a large one, then many small ones.
+    let chunk = vec![0x5au8; 8 << 20];
+    let mut e = v.create_file("BIG.BIN", 0, now).unwrap();
+    for k in 0..48u64 {
+        v.write(&mut e, k * chunk.len() as u64, &chunk, now).unwrap();
+    }
+    v.mkdir("MANY", now).unwrap();
+    for k in 0..3000 {
+        let mut f = v.create_file(&format!("MANY\\F{k}"), 0, now).unwrap();
+        v.write(&mut f, 0, &[k as u8; 5000], now).unwrap();
+    }
+    // Sparse growth far into the volume.
+    let mut s = v.create_file("FAR.BIN", 0, now).unwrap();
+    v.set_size(&mut s, 3 << 30, now).unwrap();
+    v.write(&mut s, (3 << 30) - 4, b"tail", now).unwrap();
+    let r = v.check().unwrap();
+    assert!(r.ok(), "{:?}", r.problems);
+    eprintln!("{} files, {} free blocks", r.files, r.free_blocks);
+    v.unmount().unwrap();
+}
