@@ -78,6 +78,7 @@ dependencies = [
  "bootinfo",
  "fat",
  "hpfs",
+ "jfs",
  "os2-exe",
  "tcpip",
 ]

@@ -369,10 +369,6 @@ impl<D: BlockDevice> Volume<D> {
         Ok(v)
     }
 
-    pub(crate) fn dt_root(&mut self, dir: &Inode) -> Result<Node> {
-        self.read_node(dir, Pxd::default())
-    }
-
     // ---- Insertion ----
 
     /// Add `name` -> `ino` to directory `dir` (written by the caller).

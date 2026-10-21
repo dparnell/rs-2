@@ -153,12 +153,13 @@ fn ascii(text: &[u8]) -> Vec<u8> {
 pub fn run() {
     let mut drives = vec![String::from("C:")];
     // And the test disks made by `cargo xtask disk` (labels RS2DISK and
-    // RS2HPFS; other drives, such as QEMU's virtual FAT, are left alone).
+    // RS2HPFS) and the JFS one of crates/jfs (RS2JFS); other drives, such
+    // as QEMU's virtual FAT, are left alone.
     for d in b'D'..=b'Z' {
         let mut fsi: FsInfo = unsafe { core::mem::zeroed() };
         let rc = unsafe { DosQueryFSInfo((d - b'A' + 1) as u32, FSIL_VOLSER, &mut fsi as *mut _ as *mut u8, 17) };
         let label = &fsi.label[..(fsi.cch_label as usize).min(11)];
-        if rc == 0 && (label == b"RS2DISK" || label == b"RS2HPFS") {
+        if rc == 0 && (label == b"RS2DISK" || label == b"RS2HPFS" || label == b"RS2JFS") {
             drives.push(format!("{}:", d as char));
         }
     }

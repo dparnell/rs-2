@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use crate::layout::*;
-use crate::{BlockDevice, Error, Result, Volume};
+use crate::{BlockDevice, Result, Volume};
 
 #[derive(Clone)]
 pub(crate) struct Inode {

@@ -259,6 +259,14 @@ pub fn dos_shutdown(c: &mut Ctx) -> u32 {
             n += 1;
         }
     }
+    if r == 0 {
+        // Mark journaled volumes clean.
+        for d in 0..26 {
+            if let Some(fs) = crate::fs::drive(d) {
+                fs.shutdown();
+            }
+        }
+    }
     crate::drivers::flush_disks();
     if r == 0 {
         SHUT_DOWN.store(true, Ordering::Relaxed);

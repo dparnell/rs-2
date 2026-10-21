@@ -9,6 +9,7 @@ pub mod ea;
 pub mod fatfs;
 pub mod hpfsfs;
 pub mod iso9660;
+pub mod jfsfs;
 pub mod path;
 
 use alloc::collections::BTreeMap;
@@ -100,6 +101,9 @@ pub trait FileSystem: Send + Sync {
     fn max_component(&self) -> usize {
         255
     }
+    /// The system is shutting down: write everything out and mark the
+    /// volume clean.
+    fn shutdown(&self) {}
     /// The volume's block device, for DASD access and remounting.
     fn device(&self) -> Option<Arc<dyn block::BlockDev>> {
         None
@@ -135,7 +139,7 @@ pub trait FsFile: Send + Sync {
 
 static DRIVES: SpinLock<[Option<Arc<dyn FileSystem>>; 26]> = SpinLock::new([const { None }; 26]);
 
-/// Mount whatever file system a volume holds: FAT, then HPFS (and the
+/// Mount whatever file system a volume holds: FAT, then HPFS, then JFS (and the
 /// other installable file systems as they come). `dev` is wrapped for
 /// hard-error pop-ups here. The name of the file system found, or None.
 pub fn probe_mount(dev: Arc<dyn block::BlockDev>) -> Option<(Arc<dyn FileSystem>, &'static str)> {
@@ -146,6 +150,11 @@ pub fn probe_mount(dev: Arc<dyn block::BlockDev>) -> Option<(Arc<dyn FileSystem>
     if hpfsfs::probe(&dev) {
         if let Ok(fs) = hpfsfs::HpfsFs::mount(wrapped.clone()) {
             return Some((fs, "HPFS"));
+        }
+    }
+    if jfsfs::probe(&dev) {
+        if let Ok(fs) = jfsfs::JfsFs::mount(wrapped.clone()) {
+            return Some((fs, "JFS"));
         }
     }
     None

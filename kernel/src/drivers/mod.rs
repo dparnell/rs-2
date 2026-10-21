@@ -204,8 +204,16 @@ pub fn init() {
         let found = part::scan(disk);
         if found.is_empty() {
             // Unpartitioned ("superfloppy") volume.
-            if !try_mount_fat(disk.clone(), "disk: unpartitioned FAT volume") {
-                try_mount_hpfs(disk.clone(), "disk: unpartitioned HPFS volume");
+            if !try_mount_fat(disk.clone(), "disk: unpartitioned FAT volume")
+                && !try_mount_hpfs(disk.clone(), "disk: unpartitioned HPFS volume")
+                && crate::fs::jfsfs::probe(disk)
+            {
+                if let Some((fs, _)) = crate::fs::probe_mount(disk.clone()) {
+                    if let Some(d) = next_letter() {
+                        crate::println!("disk: unpartitioned JFS volume");
+                        crate::fs::mount(d, fs);
+                    }
+                }
             }
         }
         parts.extend(found);
@@ -278,7 +286,16 @@ pub fn init() {
                         crate::println!("disk: partition type 0x7 is not HPFS (NTFS/exFAT not supported)");
                     }
                 }
-                0x35 => crate::println!("disk: partition type 0x35 (JFS) not supported yet"),
+                // OS/2 LVM: JFS volumes (others need LVM, not supported).
+                0x35 => match crate::fs::probe_mount(Arc::new(p)) {
+                    Some((fs, name)) => {
+                        if let Some(d) = next_letter() {
+                            crate::println!("disk: {name} partition type 0x35");
+                            crate::fs::mount(d, fs);
+                        }
+                    }
+                    None => crate::println!("disk: partition type 0x35 is not a JFS volume rs2 can mount"),
+                },
                 _ => {}
             }
             continue;

@@ -145,7 +145,10 @@ fn populated_is_consistent() {
 #[ignore]
 fn make_image() {
     let path = std::env::var("JFS_IMAGE").unwrap();
-    let mut v = fresh(64);
+    let dev = Mem(RefCell::new(std::vec![0u8; 64 << 20]));
+    let label = std::env::var("JFS_LABEL").unwrap_or("TEST".into());
+    format(&dev, &FormatParams { label: &label, serial: 0x1234_5678, now: NOW, ..Default::default() }).unwrap();
+    let mut v = Volume::mount(dev).unwrap();
     populate(&mut v);
     let dev = v.unmount().unwrap();
     std::fs::write(path, dev.0.into_inner()).unwrap();

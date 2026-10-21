@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 
 use crate::inode::Inode;
 use crate::layout::*;
-use crate::{BlockDevice, Error, Result, Volume};
+use crate::{BlockDevice, Result, Volume};
 
 /// Entries in a 4 KB xtree page.
 const PAGE_ENTRIES: usize = XTPAGEMAXSLOT as usize - XTENTRYSTART;
