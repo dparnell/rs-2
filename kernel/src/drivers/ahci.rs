@@ -363,6 +363,15 @@ impl BlockDev for Port {
         let mut tmp = buf.to_vec();
         self.transfer(lba, &mut tmp, true)
     }
+
+    /// FLUSH CACHE EXT: commit the drive's write cache.
+    fn flush(&self) -> Result<(), u32> {
+        if self.kind != Kind::Ata {
+            return Ok(());
+        }
+        let st = self.state.lock();
+        st.command(&h2d(0xea, 0, 0, 0), None, 0, false)
+    }
 }
 
 /// Bring up an AHCI controller and return its devices.

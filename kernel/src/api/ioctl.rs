@@ -402,9 +402,11 @@ fn rw(c: &Ctx, d: &Arc<dyn BlockDev>, lba: u64, count: u32, data: u32, write: bo
     0
 }
 
-/// Category 0xD5 on DOS$: function 0xAB reboots the machine.
+/// Category 0xD5 on DOS$: function 0xAB reboots the machine (after
+/// committing the disks' write caches, as the installer's restart needs).
 fn dos_dev(_c: &Ctx, r: &Req) -> u32 {
     if r.function == 0xab {
+        crate::drivers::flush_disks();
         crate::power::reboot();
     }
     err::INVALID_FUNCTION

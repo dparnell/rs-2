@@ -52,6 +52,7 @@ const ADM_CREATE_SQ: u8 = 0x01;
 const ADM_CREATE_CQ: u8 = 0x05;
 const ADM_IDENTIFY: u8 = 0x06;
 // NVM opcodes.
+const NVM_FLUSH: u8 = 0x00;
 const NVM_WRITE: u8 = 0x01;
 const NVM_READ: u8 = 0x02;
 
@@ -311,6 +312,13 @@ impl BlockDev for Namespace {
     fn write(&self, lba: u64, buf: &[u8]) -> Result<(), u32> {
         let mut tmp = buf.to_vec();
         self.transfer(lba, &mut tmp, true)
+    }
+
+    /// FLUSH: controllers with a volatile write cache (VMware's
+    /// emulated NVMe reports one) keep written data there until told.
+    fn flush(&self) -> Result<(), u32> {
+        let mut c = self.ctrl.lock();
+        c.submit(true, command(NVM_FLUSH, self.nsid, 0, 0, [0; 6])).map(|_| ())
     }
 }
 
