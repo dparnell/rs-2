@@ -71,7 +71,7 @@ struct Job {
     cd: u8,
     target: u8,
     /// (target path, CD file) of each file.
-    files: Vec<(&'static [u8], &'static [u8])>,
+    files: Vec<(&'static [u8], &'static [u8], &'static [u8])>,
     /// Whether `\OS2\APPS` must be on PATH and LIBPATH.
     apps_dir: bool,
     current: Vec<u8>,
@@ -307,7 +307,7 @@ fn start(a: &mut App) {
         message(&m, MB_ERROR);
         return;
     }
-    let mut files: Vec<(&'static [u8], &'static [u8])> = Vec::new();
+    let mut files: Vec<(&'static [u8], &'static [u8], &'static [u8])> = Vec::new();
     let mut apps_dir = false;
     for (c, cat) in a.cats.iter().enumerate() {
         for (i, ap) in cat.apps.iter().enumerate() {
@@ -315,8 +315,8 @@ fn start(a: &mut App) {
                 continue;
             }
             for f in &ap.files {
-                if !files.iter().any(|(t, _)| t.eq_ignore_ascii_case(f.target)) {
-                    files.push((f.target, f.source));
+                if !files.iter().any(|(t, _, _)| t.eq_ignore_ascii_case(f.target)) {
+                    files.push((f.target, f.source, if f.stored.is_empty() { f.target } else { f.stored }));
                 }
                 apps_dir |= f.target.len() > 10 && f.target[..10].eq_ignore_ascii_case(b"\\OS2\\APPS\\");
             }
@@ -341,10 +341,10 @@ unsafe extern "C" fn worker(_: u32) {
     let mut cd = media::Cd::new(j.cd);
     let total = j.files.len() as u32;
     for i in 0..j.files.len() {
-        let (target, source) = j.files[i];
+        let (target, source, stored) = j.files[i];
         j.current = target.to_vec();
         post(j.client, WM_PROGRESS, i as u32, total);
-        let res = cd.get(target, source).map_err(|e| e.as_bytes().to_vec()).and_then(|f| {
+        let res = cd.get(stored, source).map_err(|e| e.as_bytes().to_vec()).and_then(|f| {
             media::write(&media::on(j.target, target), &f).map_err(|rc| {
                 let mut s = b"cannot be written (error ".to_vec();
                 s.extend_from_slice(&tree::dec(rc));

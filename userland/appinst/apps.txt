@@ -5,24 +5,42 @@
 #   app ID | NAME | DESCRIPTION
 #   needs ID                                 another app installed with it
 #   object TITLE | PROGRAM | PARAMETERS | WORKING DIRECTORY
-#   file TARGET | CD FILE                    CD FILE: the packed file that
-#                                            holds TARGET, or TARGET itself
+#   file TARGET | CD FILE [| STORED]         CD FILE: the packed file that
+#                                            holds TARGET, or TARGET itself;
+#                                            STORED: its path in the packed
+#                                            file when not TARGET
 # Paths are from the root of the boot drive and of the CD.
 
 category Games | Games
 
-app klondike | Solitaire - Klondike | Klondike solitaire with OS/2's card faces. Needs C:\OS2\APPS on the PATH for its card font (CARDSYM.FON); the installer adds it to CONFIG.SYS.
+app klondike | Solitaire - Klondike | Klondike solitaire with OS/2's card faces, its opening movie and sounds. Needs C:\OS2\APPS on the PATH for its card font (CARDSYM.FON); the installer adds it to CONFIG.SYS.
 object Solitaire - Klondike | \OS2\APPS\KLONDIKE.EXE | | \OS2\APPS
 file \OS2\APPS\KLONDIKE.EXE | OS2IMAGE\DISK_17\KLONDIKE
 file \OS2\APPS\CARDSYM.FON | OS2IMAGE\DISK_17\KLONDIKE
 file \OS2\HELP\KLONDIKE.HLP | OS2IMAGE\DISK_17\KLONDIKE
+file \OS2\APPS\KLONDIKE.FLC | OS2IMAGE\DISK_12\BITMAP
+file \MMOS2\SOUNDS\DRUMROLL.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\DRUMROLL.WAV
+file \MMOS2\SOUNDS\DOINK.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\DOINK.WAV
+file \MMOS2\SOUNDS\TWIP.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\TWIP.WAV
+file \MMOS2\SOUNDS\EEERRUPP.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\EEERRUPP.WAV
+file \MMOS2\SOUNDS\BWEEEP.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\BWEEEP.WAV
+file \MMOS2\SOUNDS\BELLS.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\BELLS.WAV
+file \MMOS2\SOUNDS\WOOEEP.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\WOOEEP.WAV
+file \MMOS2\SOUNDS\APPLAUSE.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\APPLAUSE.WAV
 
-app chess | Chess | OS/2 Chess on a 3-D board: play against the computer or another person (network play is not supported). The animations need multimedia, which rs2 does not have.
+app chess | Chess | OS/2 Chess on a 3-D board: play against the computer or another person (network play is not supported), with its opening movie and sounds.
 object Chess | \OS2\APPS\OS2CHESS.EXE | | \OS2\APPS
 file \OS2\APPS\OS2CHESS.EXE | OS2IMAGE\DISK_22\CHESS
 file \OS2\HELP\OS2CHESS.HLP | OS2IMAGE\DISK_22\CHESS
+file \OS2\APPS\OS2CHESS.FLC | OS2IMAGE\DISK_12\BITMAP
+file \MMOS2\SOUNDS\APPLAUSE.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\APPLAUSE.WAV
+file \MMOS2\SOUNDS\BEEOONG.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\BEEOONG.WAV
+file \MMOS2\SOUNDS\BWAAANG.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\BWAAANG.WAV
+file \MMOS2\SOUNDS\CHARGE.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\CHARGE.WAV
+file \MMOS2\SOUNDS\DRUMROLL.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\DRUMROLL.WAV
+file \MMOS2\SOUNDS\WOOEEP.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\WOOEEP.WAV
 
-app mahjongg | Mahjongg | Mahjongg solitaire with eight tile layouts. Sounds need multimedia, which rs2 does not have.
+app mahjongg | Mahjongg | Mahjongg solitaire with eight tile layouts, its opening movie and sounds.
 object Mahjongg | \OS2\APPS\MAHJONGG.EXE | | \OS2\APPS
 file \OS2\APPS\MAHJONGG.EXE | OS2IMAGE\DISK_18\MAHJONGG
 file \OS2\APPS\TILEDEF.DLL | OS2IMAGE\DISK_18\MAHJONGG
@@ -38,6 +56,20 @@ file \OS2\APPS\GIZEH.MAH | OS2IMAGE\DISK_18\MAHJONGG
 file \OS2\APPS\TAJMAHAL.MAH | OS2IMAGE\DISK_18\MAHJONGG
 file \OS2\APPS\TOWERBRI.MAH | OS2IMAGE\DISK_18\MAHJONGG
 file \OS2\APPS\YINYANG.MAH | OS2IMAGE\DISK_18\MAHJONGG
+file \OS2\APPS\MAHJONGG.FLC | OS2IMAGE\DISK_16\BITMAP
+file \OS2\APPS\DRAGON.WAV | OS2IMAGE\DISK_18\MAHJONGG
+file \OS2\APPS\NOMOVES.WAV | OS2IMAGE\DISK_18\MAHJONGG
+file \OS2\APPS\REMOVE.WAV | OS2IMAGE\DISK_18\MAHJONGG
+file \OS2\APPS\REMOVEC.WAV | OS2IMAGE\DISK_18\MAHJONGG
+file \OS2\APPS\SELECT.WAV | OS2IMAGE\DISK_18\MAHJONGG
+file \OS2\APPS\SUCCESSC.WAV | OS2IMAGE\DISK_18\MAHJONGG
+file \OS2\APPS\WARNING.WAV | OS2IMAGE\DISK_18\MAHJONGG
+file \MMOS2\SOUNDS\APPLAUSE.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\APPLAUSE.WAV
+file \MMOS2\SOUNDS\BEEOONG.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\BEEOONG.WAV
+file \MMOS2\SOUNDS\BELLS.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\BELLS.WAV
+file \MMOS2\SOUNDS\BOO.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\BOO.WAV
+file \MMOS2\SOUNDS\EEEOOOP.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\EEEOOOP.WAV
+file \MMOS2\SOUNDS\POP.WAV | OS2IMAGE\DISK_21\PACK0 | \MMTEMP\POP.WAV
 file \OS2\HELP\MAHJONGG.HLP | OS2IMAGE\DISK_18\MAHJONGG
 file \OS2\HELP\DEFAULT.HLP | OS2IMAGE\DISK_18\MAHJONGG
 

@@ -19,6 +19,9 @@ pub struct File {
     /// Path from the root of the CD of the packed file holding it (or of
     /// the file itself).
     pub source: &'static [u8],
+    /// The path it has in the packed file, when not `target` (the
+    /// multimedia sounds are stored under \MMTEMP).
+    pub stored: &'static [u8],
 }
 
 pub struct App {
@@ -88,7 +91,7 @@ pub fn load() -> Vec<Category> {
                 match word {
                     b"needs" => a.needs.push(get(0)),
                     b"object" => a.objects.push(Object { title: get(0), program: get(1), params: get(2), dir: get(3) }),
-                    b"file" => a.files.push(File { target: get(0), source: get(1) }),
+                    b"file" => a.files.push(File { target: get(0), source: get(1), stored: get(2) }),
                     _ => {}
                 }
             }

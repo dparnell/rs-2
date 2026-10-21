@@ -6,6 +6,8 @@ SET PROMPT=$i[$p]
 SET ETC=C:\MPTN\ETC
 SET HELP=C:\OS2\HELP
 SET BOOKSHELF=C:\OS2\BOOK
+REM Multimedia (MMPM/2): sounds and other media files in %MMBASE%
+SET MMBASE=C:\MMOS2;
 SET COMSPEC=C:\OS2\CMD.EXE
 SET OS2_SHELL=C:\OS2\CMD.EXE
 REM PM: milliseconds before a program that does not take its input is "not responding"
