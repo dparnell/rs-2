@@ -4,3 +4,6 @@ description = "no_std JFS (IBM Journaled File System, OS/2 layout): read, write 
 edition.workspace = true
 version.workspace = true
 license.workspace = true
+
+[dev-dependencies]
+fat = { path = "../fat" }

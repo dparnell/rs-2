@@ -33,6 +33,9 @@ version = "0.1.0"
 [[package]]
 name = "jfs"
 version = "0.1.0"
+dependencies = [
+ "fat",
+]
 
 [[package]]
 name = "lxdump"
