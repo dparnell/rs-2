@@ -11,12 +11,27 @@
 //! Allocated sections become LX objects: one read/execute object for code
 //! and read-only data, one read/write object for data and bss (each starts on
 //! a 64 KB boundary in the link). Executables also get a stack object.
-//! The exports file lists `NAME [@ordinal]` per line (DLLs).
+//! The exports file lists `NAME [@ordinal]` per line (DLLs); `NAME=symbol`
+//! exports a symbol under another name, `NAME=MODULE.ordinal` forwards the
+//! entry to another module's ordinal (an LX forwarder entry).
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 const PAGE: u32 = 4096;
+
+struct Export {
+    name: String,
+    ord: u16,
+    to: ExportTo,
+}
+
+enum ExportTo {
+    /// An entry point in an object.
+    At { object: u16, offset: u32 },
+    /// Forwarded to an ordinal of an imported module.
+    Forward { module: u16, ordinal: u32 },
+}
 
 fn u16le(b: &[u8], o: usize) -> u16 {
     u16::from_le_bytes([b[o], b[o + 1]])
@@ -359,7 +374,7 @@ fn main() -> ExitCode {
     }
 
     // Exports.
-    let mut exports: Vec<(String, u16, u16, u32)> = Vec::new(); // name, ordinal, object, offset
+    let mut exports: Vec<Export> = Vec::new();
     if let Some(f) = exports_file {
         let text = std::fs::read_to_string(f).expect("exports file");
         let mut next_ord = 1u16;
@@ -374,16 +389,29 @@ fn main() -> ExitCode {
                 Some((a, b)) => (a.trim().to_string(), b.trim().to_string()),
                 None => (n.clone(), n),
             };
+            // "Name=MODULE.ordinal": a forwarder.
+            if let Some((m, o)) = symname.split_once('.').and_then(|(m, o)| Some((m, o.parse::<u32>().ok()?))) {
+                let m = m.to_ascii_uppercase();
+                let mi = match modules.iter().position(|x| *x == m) {
+                    Some(i) => i,
+                    None => {
+                        modules.push(m);
+                        modules.len() - 1
+                    }
+                };
+                exports.push(Export { name: n, ord, to: ExportTo::Forward { module: mi as u16 + 1, ordinal: o } });
+                continue;
+            }
             let sym = elf
                 .symbols
                 .iter()
                 .find(|s| s.name == symname && s.shndx != 0 && s.bind != 0)
                 .unwrap_or_else(|| panic!("export {symname} not found"));
             let oi = object_in(&objects, sym.value).expect("export outside objects");
-            exports.push((n, ord, oi as u16 + 1, sym.value - objects[oi].base));
+            exports.push(Export { name: n, ord, to: ExportTo::At { object: oi as u16 + 1, offset: sym.value - objects[oi].base } });
         }
     }
-    exports.sort_by_key(|e| e.1);
+    exports.sort_by_key(|e| e.ord);
 
     let lx = write_lx(&name, dll, pm, &elf, &objects, &fixups, &modules, &procs, &exports, esp_obj, esp);
     std::fs::write(&args[1], lx).expect("write output");
@@ -400,7 +428,7 @@ fn write_lx(
     fixups: &[Fixup],
     modules: &[String],
     procs: &[u8],
-    exports: &[(String, u16, u16, u32)],
+    exports: &[Export],
     esp_obj: u32,
     esp: u32,
 ) -> Vec<u8> {
@@ -505,16 +533,17 @@ fn write_lx(
     resnames.push(name.len() as u8);
     resnames.extend_from_slice(name.as_bytes());
     resnames.extend_from_slice(&0u16.to_le_bytes());
-    for (n, ord, _, _) in exports {
-        resnames.push(n.len() as u8);
-        resnames.extend_from_slice(n.as_bytes());
-        resnames.extend_from_slice(&ord.to_le_bytes());
+    for e in exports {
+        resnames.push(e.name.len() as u8);
+        resnames.extend_from_slice(e.name.as_bytes());
+        resnames.extend_from_slice(&e.ord.to_le_bytes());
     }
     resnames.push(0);
     let entry_table = resname + resnames.len();
     let mut entries = Vec::new();
     let mut ord = 1u16;
-    for (_, eord, obj, off) in exports {
+    for e in exports {
+        let eord = &e.ord;
         if *eord > ord {
             // Skip unused ordinals.
             let mut gap = eord - ord;
@@ -526,11 +555,23 @@ fn write_lx(
             }
             ord = *eord;
         }
-        entries.push(1);
-        entries.push(3); // 32-bit entry
-        entries.extend_from_slice(&obj.to_le_bytes());
-        entries.push(3); // exported, shared data
-        entries.extend_from_slice(&off.to_le_bytes());
+        match e.to {
+            ExportTo::At { object, offset } => {
+                entries.push(1);
+                entries.push(3); // 32-bit entry
+                entries.extend_from_slice(&object.to_le_bytes());
+                entries.push(3); // exported, shared data
+                entries.extend_from_slice(&offset.to_le_bytes());
+            }
+            ExportTo::Forward { module, ordinal } => {
+                entries.push(1);
+                entries.push(4); // forwarder
+                entries.extend_from_slice(&0u16.to_le_bytes());
+                entries.push(1); // by ordinal
+                entries.extend_from_slice(&module.to_le_bytes());
+                entries.extend_from_slice(&ordinal.to_le_bytes());
+            }
+        }
         ord += 1;
     }
     entries.push(0);

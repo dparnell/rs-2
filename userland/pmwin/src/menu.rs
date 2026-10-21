@@ -203,7 +203,9 @@ pub extern "C" fn WinLoadMenu(parent: u32, hmod: u32, id: u32) -> u32 {
     let bar = frame::is_frame(parent);
     let style = if bar { ws::VISIBLE | MS_ACTIONBAR } else { 0 };
     let p = if parent == pmwin::HWND_OBJECT || parent == 0 { HWND_DESKTOP } else { parent };
-    let h = create(p, parent, style, id, &items);
+    // The menu's ID is FID_MENU, whatever the resource's (as IBM's
+    // PMWIN): a frame finds it so on WM_UPDATEFRAME.
+    let h = create(p, parent, style, FID_MENU, &items);
     if bar {
         frame::layout(parent);
     }

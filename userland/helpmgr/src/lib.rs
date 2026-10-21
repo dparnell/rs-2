@@ -20,6 +20,7 @@ extern crate os2;
 
 mod ddf;
 mod exports;
+mod help16;
 mod library;
 mod pm;
 mod render;

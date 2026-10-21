@@ -152,7 +152,7 @@ extern "C" fn enter_traced(idx: u32, ebp: u32) {
 /// logged on the serial port (0: not checked yet, 1: off, 2: on).
 static TRACE: AtomicU32 = AtomicU32::new(0);
 
-fn tracing() -> bool {
+pub fn tracing() -> bool {
     match TRACE.load(Ordering::Relaxed) {
         0 => {
             let mut v: *const u8 = core::ptr::null();

@@ -26,6 +26,7 @@ extern crate os2;
 mod exports;
 mod prf;
 mod proglist;
+mod shapi16;
 mod switch;
 
 use alloc::vec::Vec;

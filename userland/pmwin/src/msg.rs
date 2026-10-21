@@ -143,7 +143,7 @@ fn pmwin_code(p: u32) -> bool {
 /// without the lock).
 pub fn call(p: u32, h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let f: WndProc = unsafe { core::mem::transmute(p as usize) };
-    if pmwin_code(p) {
+    if pmwin_code(p) && !crate::cb16::is_stub(p) {
         f(h, msg, mp1, mp2)
     } else {
         lock::unlocked(|| f(h, msg, mp1, mp2))

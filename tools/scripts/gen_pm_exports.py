@@ -8,7 +8,8 @@ come from a Toolkit import library dumped with omfimp.py (os2386.lib for
 the PM DLLs, tcpip32.lib, so32dll.lib, ...; MODULE as the library names
 it). Gpi* and Dev* functions of PMWIN get 4000 + the PMGPI ordinal, and
 PMWIN's run also regenerates PMGPI.DLL's forwarders (the forward! list in
-../pmgpi/src/lib.rs and ../pmgpi/exports.def); PMWIN's and PMSHAPI's
+../pmgpi/src/lib.rs and ../pmgpi/exports.def, plus ../pmgpi/exports.extra:
+its 16-bit entries, LX forwarders to PMWIN); PMWIN's and PMSHAPI's
 regenerate PMMERGE.DLL's (gen_pmmerge_forwards.py). A DLL that has src/lock.rs
 takes its lock in every trampoline (crate::lock::enter/leave). Lines of
 DLLDIR/exports.extra (data exports, `NAME=symbol @ordinal`) are appended
@@ -123,7 +124,9 @@ if module == 'PMWIN':
     tail = rest.split('\n}\n', 1)[1]
     body = ''.join(f'    {n} = {o + 4000};\n' for o, n in fwd)
     open(lib, 'w').write(head + 'forward! {\n' + body + '}\n' + tail)
-    open(os.path.join(gpi_dir, 'exports.def'), 'w').write('; name @ordinal\n' + ''.join(f'{n} @{o}\n' for o, n in fwd))
+    gpi_extra = os.path.join(gpi_dir, 'exports.extra')
+    gpi16 = [l for l in open(gpi_extra) if l.strip() and not l.startswith(';')] if os.path.exists(gpi_extra) else []
+    open(os.path.join(gpi_dir, 'exports.def'), 'w').write('; name @ordinal\n' + ''.join(f'{n} @{o}\n' for o, n in fwd) + ''.join(gpi16))
     print(f'{len(fwd)} PMGPI forwarders')
 
 if module in ('PMWIN', 'PMSHAPI'):

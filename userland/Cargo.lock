@@ -74,6 +74,7 @@ version = "0.1.0"
 dependencies = [
  "ipf",
  "os2",
+ "thunk16",
 ]
 
 [[package]]
@@ -217,6 +218,7 @@ version = "0.1.0"
 dependencies = [
  "inifile",
  "os2",
+ "thunk16",
 ]
 
 [[package]]
@@ -256,6 +258,7 @@ dependencies = [
  "os2",
  "os2-exe",
  "pmwin",
+ "thunk16",
 ]
 
 [[package]]

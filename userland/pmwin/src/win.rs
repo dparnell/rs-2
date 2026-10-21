@@ -989,6 +989,8 @@ fn word_get(h: u32, index: i32) -> Option<u32> {
     let w = st().desk.get(h)?;
     match index {
         -4 => Some(w.queue),
+        // QWP_PFNWP: the window procedure
+        -3 => Some(w.proc_),
         -2 => Some(w.style),
         -1 => Some(w.id),
         i if i >= 0 => {
@@ -1086,6 +1088,10 @@ fn word_set(h: u32, index: i32, v: u32, bytes: u32) -> bool {
         }
     }
     let Some(w) = st().desk.get_mut(h) else { return false };
+    if index == -3 && bytes == 4 {
+        w.proc_ = v;
+        return true;
+    }
     match index {
         -2 => w.style = v,
         -1 => w.id = v,

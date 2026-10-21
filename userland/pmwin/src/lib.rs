@@ -11,6 +11,7 @@ extern crate os2;
 mod accel;
 mod bitmap;
 mod button;
+mod cb16;
 mod clip;
 mod combo;
 mod container;
@@ -51,6 +52,7 @@ mod statics;
 mod valueset;
 mod viowin;
 mod win;
+mod win16;
 
 /// A line on the serial port (RS2API.4), for debugging.
 #[allow(dead_code)]
