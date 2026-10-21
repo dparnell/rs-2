@@ -1,9 +1,17 @@
-//! CHKDSK: check a disk and report its use. CHKDSK [drive:] [/F] [/V] [/C]
+//! CHKDSK: check a disk and report its use. CHKDSK [drive:] [/F] [/V] [/C] [/P]
 //!
 //! FAT volumes are read through DASD track IOCtls and checked with
 //! `fat::check`; /F repairs them (the drive is locked meanwhile, and the
 //! system remounts it when CHKDSK unlocks it). HPFS volumes get a
 //! read-only scan of the directory tree.
+//!
+//! /P reports to the Presentation Manager front end (IBM's PMCHKDSK, which
+//! runs `CHKDSK.COM drive /P` with its stdin and stdout on pipes): results
+//! and questions go out as `MSG_<number>,<param>,...` lines, the numbers
+//! being the OSO001.MSG messages CHKDSK would display. PMCHKDSK reads the
+//! lines, ignores every one without `MSG_`, fills its Results window and pie
+//! chart from 1507 (file system), 1361-1368/1819 (bytes) or 568-571/632/633
+//! (kilobytes), and answers prompts (1356) with a line starting Y or N.
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -12,7 +20,32 @@ use alloc::vec::Vec;
 use fat::check::{Checker, Finding};
 use utils::disk::{fs_name, Disk};
 use utils::*;
+use core::sync::atomic::{AtomicBool, Ordering};
 os2::entry!(main);
+
+static PM: AtomicBool = AtomicBool::new(false);
+
+fn pm() -> bool {
+    PM.load(Ordering::Relaxed)
+}
+
+/// /P: one message for PMCHKDSK.
+fn pm_msg(n: u32, params: &[u64]) {
+    let mut l = alloc::format!("MSG_{n}");
+    for p in params {
+        l.push_str(&alloc::format!(",{p}"));
+    }
+    outln(&l);
+}
+
+/// Text for the console, or the message number and parameters for /P.
+fn report(n: u32, params: &[u64], text: &str) {
+    if pm() {
+        pm_msg(n, params);
+    } else {
+        outln(text);
+    }
+}
 
 fn main(s: &os2::Startup) -> u32 {
     let (mut fix, mut verbose) = (false, false);
@@ -23,6 +56,7 @@ fn main(s: &os2::Startup) -> u32 {
             "/F" => fix = true,
             "/V" => verbose = true,
             "/C" => {}
+            "/P" => PM.store(true, Ordering::Relaxed),
             _ if u.starts_with("/F:") => fix = true,
             _ if u.starts_with('/') => {
                 eprint(&alloc::format!("SYS1330: The system cannot accept the {u} parameter.\r\n"));
@@ -39,7 +73,11 @@ fn main(s: &os2::Startup) -> u32 {
         error(15);
         return 15;
     };
-    outln(&alloc::format!("The type of file system for the disk is {fs}.\r\n"));
+    if pm() {
+        outln(&alloc::format!("MSG_1507,{fs}"));
+    } else {
+        outln(&alloc::format!("The type of file system for the disk is {fs}.\r\n"));
+    }
     match fs.as_str() {
         "FAT" => check_fat(d, fix, verbose),
         "HPFS" => check_hpfs(d, verbose),
@@ -51,6 +89,9 @@ fn main(s: &os2::Startup) -> u32 {
 }
 
 fn show_label(d: u8) {
+    if pm() {
+        return;
+    }
     if let Ok((label, ser)) = volume_label(d) {
         if !label.is_empty() {
             outln(&alloc::format!("The volume label is {label}."));
@@ -68,6 +109,11 @@ fn check_fat(d: u8, fix: bool, verbose: bool) -> u32 {
         }
     };
     if fix && disk.lock() != 0 {
+        if pm() {
+            // SYS0108: the disk is in use or locked by another process.
+            pm_msg(108, &[]);
+            return 108;
+        }
         outln("CHKDSK cannot lock the drive because files on it are in use.\r\nThe /F parameter cannot be used on this drive now.");
         return 108;
     }
@@ -118,12 +164,17 @@ fn check_fat(d: u8, fix: bool, verbose: bool) -> u32 {
     let mut convert = false;
     if lost > 0 {
         let chains = c.totals.lost_chains;
-        if fix {
+        if fix && pm() {
+            pm_msg(1356, &[lost as u64, chains as u64]);
+            convert = matches!(ask("").chars().next(), Some('Y' | 'y'));
+        } else if fix {
             convert = yes(&alloc::format!(
                 "\r\n{lost} lost clusters found in {chains} chains.\r\nConvert the lost chains to files (Y/N)? "
             ));
         } else {
-            outln(&alloc::format!("\r\n{lost} lost clusters found in {chains} chains."));
+            if !pm() {
+                outln(&alloc::format!("\r\n{lost} lost clusters found in {chains} chains."));
+            }
             convert = true;
         }
     }
@@ -150,6 +201,15 @@ fn check_fat(d: u8, fix: bool, verbose: bool) -> u32 {
         outln("\r\nErrors were found.  The /F parameter was not specified, so the\r\ncorrections were not written to the disk.");
     }
     let t = c.totals.clone();
+    if pm() {
+        pm_fat_totals(&t, cs, c.total_clusters(), c.free_clusters());
+        drop(c);
+        drop(vol);
+        if fix {
+            disk.unlock();
+        }
+        return if errors && !fix { 1 } else { 0 };
+    }
     let b = |n: u32| num(n as u64 * cs, 12);
     outln(&alloc::format!("\r\n{} bytes total disk space.", b(c.total_clusters())));
     if t.bad_clusters > 0 {
@@ -177,6 +237,43 @@ fn check_fat(d: u8, fix: bool, verbose: bool) -> u32 {
         disk.unlock();
     }
     if errors && !fix { 1 } else { 0 }
+}
+
+/// /P: the summary. PMCHKDSK keeps the values in 32-bit longs, so a volume
+/// of 2 GB or more is reported in kilobytes, as IBM's HPFS CHKDSK does.
+fn pm_fat_totals(t: &fat::check::Totals, cs: u64, total: u32, free: u32) {
+    let total_b = total as u64 * cs;
+    if total_b < 1 << 31 {
+        let b = |n: u32| n as u64 * cs;
+        pm_msg(1361, &[total_b]);
+        if t.bad_clusters > 0 {
+            pm_msg(1362, &[b(t.bad_clusters)]);
+        }
+        if t.hidden > 0 {
+            pm_msg(1363, &[b(t.hidden_clusters), t.hidden as u64]);
+        }
+        pm_msg(1364, &[b(t.dir_clusters), t.dirs as u64]);
+        if t.ea_clusters > 0 {
+            pm_msg(1819, &[b(t.ea_clusters)]);
+        }
+        pm_msg(1365, &[b(t.file_clusters), t.files as u64]);
+        // PMCHKDSK cuts this one's parameter at the next comma (and
+        // faults without one): send the allocation unit size after it.
+        pm_msg(1368, &[b(free), cs]);
+    } else {
+        let k = |n: u32| n as u64 * cs / 1024;
+        pm_msg(568, &[total_b / 1024]);
+        pm_msg(569, &[k(t.dir_clusters), t.dirs as u64]);
+        pm_msg(570, &[k(t.file_clusters), t.files as u64]);
+        if t.ea_clusters > 0 {
+            pm_msg(633, &[k(t.ea_clusters)]);
+        }
+        let other = k(t.bad_clusters) + k(t.hidden_clusters);
+        if other > 0 {
+            pm_msg(632, &[other]);
+        }
+        pm_msg(571, &[k(free)]);
+    }
 }
 
 /// /V: list every file.
@@ -212,11 +309,13 @@ fn check_hpfs(d: u8, verbose: bool) -> u32 {
     let mut vol = match hpfs::Volume::mount(&disk) {
         Ok(v) => v,
         Err(_) => {
-            outln("CHKDSK cannot read the HPFS structures of this volume.");
+            report(1373, &[], "CHKDSK cannot read the HPFS structures of this volume.");
             return 1;
         }
     };
-    outln("\r\nCHKDSK is checking the directory tree (read only: repairing HPFS\r\nvolumes is not available yet).");
+    if !pm() {
+        outln("\r\nCHKDSK is checking the directory tree (read only: repairing HPFS\r\nvolumes is not available yet).");
+    }
     let letter = (b'A' + d) as char;
     let (mut dirs, mut files, mut file_kb, mut bad) = (0u64, 0u64, 0u64, 0u32);
     let Ok(root) = vol.root_entry() else {
@@ -251,6 +350,19 @@ fn check_hpfs(d: u8, verbose: bool) -> u32 {
         }
     }
     let i = vol.info();
+    if pm() {
+        let k = |s: u32| s as u64 * i.sector_size as u64 / 1024;
+        let (total, free) = (k(i.total_sectors), k(i.free_sectors));
+        pm_msg(568, &[total]);
+        pm_msg(569, &[dirs * 2, dirs]);
+        pm_msg(570, &[file_kb, files]);
+        let used = dirs * 2 + file_kb + free;
+        if total > used {
+            pm_msg(632, &[total - used]);
+        }
+        pm_msg(571, &[free]);
+        return if bad > 0 { 1 } else { 0 };
+    }
     let kb = |s: u32| num(s as u64 * i.sector_size as u64 / 1024, 12);
     outln(&alloc::format!("\r\n{} kilobytes total disk space.", kb(i.total_sectors)));
     outln(&alloc::format!("{} kilobytes are in {dirs} directories.", num(dirs * 2, 12)));

@@ -133,6 +133,15 @@ fn main() {
                             put(&mut image, &value.wrapping_sub(next).to_le_bytes())
                         }
                         SourceKind::Offset16 => put(&mut image, &(value as u16).to_le_bytes()),
+                        // 16:16 as a real-mode style segment (Ghidra's 16-bit
+                        // x86 maps seg:off to seg * 16 + off).
+                        SourceKind::Selector16 => {
+                            put(&mut image, &((value >> 16 << 12) as u16).to_le_bytes())
+                        }
+                        SourceKind::Pointer1616 => {
+                            let far = (value & 0xffff) | (value >> 16 << 28);
+                            put(&mut image, &far.to_le_bytes())
+                        }
                         _ => {}
                     }
                 }

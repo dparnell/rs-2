@@ -542,6 +542,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("mmiotest", "RS2\\MMIOTEST.EXE"),
         ("label", "OS2\\LABEL.EXE"),
         ("chkdsk", "OS2\\CHKDSK.EXE"),
+        // IBM's name: PMCHKDSK runs `CHKDSK.COM drive /P`.
+        ("chkdsk", "OS2\\CHKDSK.COM"),
         ("format", "OS2\\FORMAT.EXE"),
         ("mode", "OS2\\MODE.EXE"),
         ("help", "OS2\\HELP.EXE"),
