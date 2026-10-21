@@ -16,6 +16,8 @@ in a host-tested crate:
 | `crates/mmfmt` | RIFF chunks, WAVE audio, Autodesk FLI/FLC animations. `no_std` + `alloc`, no OS dependencies; tested on the host against OS/2's own files. |
 | `userland/mmio` → MMIO.DLL | The multimedia I/O manager: buffered and memory files, RIFF chunk calls, the DOS, MEM and WAVE I/O procedures. |
 | `userland/mmiotest` → RS2\MMIOTEST.EXE | Self-checks of MMIO.DLL. |
+| `crates/mci` | The media control interface's string commands (words, keywords, WAIT/NOTIFY), device types and names, file extensions, MCIERR codes and texts, the memory playlist processor. Host-tested. |
+| `userland/mdm` → MDM.DLL | The media device manager: mciSendCommand, mciSendString, the wave audio and digital video devices. |
 
 IBM's files are only used for study and testing (under `work/`): the
 Toolkit headers (`os2me.h`, `mmioos2.h`, `meerror.h`) give the structures
@@ -117,3 +119,28 @@ MMIOTEST (`cargo xtask run --headless --timeout 60 --init "RS2\MMIOTEST.EXE"`)
 writes a WAVE file with the chunk calls, reads it back as the games do
 (also through DosLoadModule), descends through it, writes one with the
 WAVE procedure, and checks memory files, buffered I/O and error codes.
+
+## MDM.DLL
+
+mciSendCommand and mciSendString both become one request (`src/req.rs`)
+that the device carries out; a string command is split by `crates/mci`
+and its keywords set the message's flags and fields, as IBM's MDM does
+with its command tables. Devices belong to the process (IBM's are
+system-wide and can be shared); they are closed when it ends.
+
+| Device | rs2 |
+|--------|-----|
+| waveaudio (Waveaudio01) | A WAV file as the element (PCM, or µ-law/A-law/IMA ADPCM decoded by mmfmt) or a memory playlist (MCI_OPEN_PLAYLIST: DATA, BRANCH, LOOP, CALL/RETURN, MESSAGE, CUEPOINT, SEMWAIT/SEMPOST, EXIT). MCI_SET of the wave format (as the games set it before playing a playlist), time formats (MMTIME, milliseconds, bytes, samples), volume. PLAY (FROM/TO), STOP, PAUSE/RESUME, SEEK, STATUS (mode, length, position, the format). Played through the kernel's audio streams (RS2API 300-308, docs/ROADMAP.md); without sound hardware the device plays silently in real time, so PLAY WAIT and notifications behave the same. |
+| digitalvideo (Digitalvideo01) | FLI/FLC animations. Frames are drawn with GpiDrawBits into the application's window (WINDOW HANDLE, PUT DESTINATION) or into MDM's own video window (a frame window titled with the file name, run by a thread of MDM's with its own message queue). PLAY (FROM/TO, FAST), STOP, PAUSE/RESUME, SEEK, CUE, LOAD, WINDOW (HANDLE, DEFAULT, STATE, TEXT), PUT, WHERE, STATUS (length, position, extents, hwnd). No audio track. |
+
+Common to both: MM_MCINOTIFY (successful, superseded by a new command,
+aborted by STOP/SEEK/CLOSE), CAPABILITY/GETDEVCAPS, INFO, ACQUIRE/RELEASE
+(always granted), SYSINFO (one device of each type), mciGetErrorString's
+texts and mciGetDeviceID. A string command whose object is a file name
+opens the file's device for that command (`play KLONDIKE.FLC wait`) and
+closes it when the command, or the play it started, ends. Connections,
+groups, recording and saving are not supported.
+
+The games find their sounds in `%MMBASE%\SOUNDS` (rs2's CONFIG.SYS sets
+`MMBASE=C:\MMOS2;`) and their movies in their own directory; APPINST
+installs both from the OS/2 CD with the games.

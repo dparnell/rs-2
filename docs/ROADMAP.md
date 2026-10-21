@@ -279,7 +279,7 @@ Status markers: done, in progress, planned.
 ## Later
 
 - NetBIOS, NFS/SMB clients
-- MMPM/2 multimedia, audio drivers
+- MMPM/2: recording, MIDI (sequencer), CD audio, AVI/MPEG video
 - DOS sessions (MVDM) through a CPU emulator, since long mode has no V86
 - self-hosting (building rs2 on rs2): 64-bit processes with a Linux
   system-call layer for the Rust toolchain; see [SELF-HOSTING.md](SELF-HOSTING.md)
