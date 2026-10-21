@@ -467,7 +467,7 @@ fn finished(a: &mut App) {
         m.extend_from_slice(b"\n\nTheir objects are in folders on the desktop.");
     }
     if j.config_changed {
-        m.extend_from_slice(b"\n\nCONFIG.SYS now has \\OS2\\APPS on its PATH and LIBPATH: restart rs2 before using Solitaire and Mahjongg.");
+        m.extend_from_slice(b"\n\nCONFIG.SYS now has \\OS2\\APPS on its PATH and LIBPATH: restart rs2 before using the applications installed there.");
     }
     a.progress = (0, 0);
     unsafe { WinInvalidateRect(a.client, core::ptr::null(), 0) };
