@@ -1,0 +1,6 @@
+[package]
+name = "mci"
+description = "The media control interface's string commands, device types, error texts and memory playlists (for MDM.DLL)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
