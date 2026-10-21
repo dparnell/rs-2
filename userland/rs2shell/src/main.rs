@@ -112,6 +112,7 @@ fn main(s: &os2::Startup) -> u32 {
         os2::println!("RS2SHELL: Presentation Manager is not available; starting the command prompt");
         return text_shell();
     }
+    view::register_messages();
     let groups = objects::ensure_defaults();
     if args.starts_with(b"/MAKEINI") {
         unsafe {

@@ -20,7 +20,7 @@ pub const APP_WINDOWS: &[u8] = b"RS2_Windows\0";
 pub const APP_ASSOC: &[u8] = b"RS2_Associations\0";
 
 /// Current layout of the default objects.
-pub const VERSION: &[u8] = b"2";
+pub const VERSION: &[u8] = b"3";
 
 pub fn query(app: &[u8], key: &[u8]) -> Option<Vec<u8>> {
     let k = z(key);
@@ -246,10 +246,12 @@ pub fn ensure_defaults() -> Groups {
     if made {
         if let (Some(desktop), Some(prompts), Some(programs)) = (get(b"DesktopGroup"), get(b"PromptsGroup"), get(b"ProgramsGroup")) {
             // A profile made by an older shell (version 1: before rs2 had
-            // its own System Editor) gets the editor's object and
-            // associations once.
+            // its own System Editor; 2: before the application installer)
+            // gets the editor's object and associations and the
+            // installer's object once.
             if query(APP_DESKTOP, b"Version").as_deref() != Some(VERSION) {
                 add_editor(programs);
+                add_app_installer(programs);
                 write(APP_DESKTOP, b"Version", Some(VERSION));
             }
             return Groups { desktop, prompts, programs };
@@ -276,6 +278,15 @@ fn add_editor(programs: u32) {
     }
 }
 
+/// The object of the installer of OS/2's applications (APPINST.EXE).
+fn add_app_installer(programs: u32) {
+    let exe = sys_path(b"OS2\\APPINST.EXE");
+    if exists(&exe) && !titles(programs).iter().any(|t| t.3 == b"Install OS/2 Applications") {
+        let p = Program { progc: PROG_PM, title: b"Install OS/2 Applications".to_vec(), exe, ..Program::default() };
+        add_program(programs, &p);
+    }
+}
+
 /// Make (or complete) the default objects.
 pub fn make_defaults() -> Groups {
     let desktop = create_group(b"Desktop", SHE_INVISIBLE);
@@ -291,6 +302,7 @@ pub fn make_defaults() -> Groups {
         }
     }
     add_editor(programs);
+    add_app_installer(programs);
     // The installer (a text-mode program), on the live system and after.
     let installer = sys_path(b"OS2\\INSTALL.EXE");
     if exists(&installer) && !titles(programs).iter().any(|t| t.3 == b"Install rs2") {

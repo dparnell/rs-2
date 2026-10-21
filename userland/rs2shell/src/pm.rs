@@ -133,6 +133,10 @@ unsafe extern "C" {
     pub fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title: *const u8, id: u32, style: u32) -> u32;
     #[link_name = "PMWIN.735"]
     pub fn WinEnableWindow(h: u32, on: u32) -> u32;
+    #[link_name = "PMWIN.830"]
+    pub fn WinQuerySystemAtomTable() -> u32;
+    #[link_name = "PMWIN.700"]
+    pub fn WinAddAtom(table: u32, name: *const u8) -> u32;
     #[link_name = "PMWIN.828"]
     pub fn WinQuerySysPointer(desk: u32, id: i32, copy: u32) -> u32;
     #[link_name = "PMWIN.942"]

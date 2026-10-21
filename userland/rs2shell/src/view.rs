@@ -695,6 +695,24 @@ fn save_positions(v: usize, keys: Option<&[u32]>) {
     }
 }
 
+/// The registered message other programs (the application installer)
+/// post to the shell's frames when they changed the program list.
+pub static PROGRAM_LIST_CHANGED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+pub fn register_messages() {
+    let atom = unsafe { WinAddAtom(WinQuerySystemAtomTable(), b"RS2_ProgramListChanged\0".as_ptr()) };
+    PROGRAM_LIST_CHANGED.store(atom, core::sync::atomic::Ordering::Relaxed);
+}
+
+/// Refresh the desktop and the program group folders.
+pub fn refresh_programs() {
+    for v in 0..sh().views.len() {
+        if matches!(sh().views[v].kind, Kind::Desktop | Kind::Group(_)) {
+            fill(v);
+        }
+    }
+}
+
 /// Refresh every open folder showing a kind.
 pub fn refresh_kind(k: &Kind) {
     if let Some(v) = find_kind(k) {
@@ -1470,6 +1488,10 @@ extern "C" fn cnr_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
 
 pub extern "C" fn client_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
     match m {
+        m if m != 0 && m == PROGRAM_LIST_CHANGED.load(core::sync::atomic::Ordering::Relaxed) => {
+            refresh_programs();
+            0
+        }
         WM_SIZE => {
             if let Some(v) = find_client(h) {
                 resize(v);

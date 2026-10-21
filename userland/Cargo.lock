@@ -10,6 +10,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "appinst"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "os2-pack",
+]
+
+[[package]]
 name = "cmd"
 version = "0.1.0"
 dependencies = [
@@ -123,6 +131,10 @@ version = "0.1.0"
 
 [[package]]
 name = "os2-exe"
+version = "0.1.0"
+
+[[package]]
+name = "os2-pack"
 version = "0.1.0"
 
 [[package]]

@@ -219,6 +219,9 @@ Status markers: done, in progress, planned.
   and `:acviewport.` (the Toolkit's IPF sample runs), IPF fonts and real
   italic, MB_HELP, IBM's VIEW.EXE/VIEWDOC.EXE on rs2's HELPMGR
   (ordinals 26, 28-37, 45-47); `RS2\HMTEST.EXE`
+- done: APPINST.EXE installs the OS/2 applications rs2 runs from the
+  OS/2 Warp CD (a tree of categories and applications with check boxes,
+  unpacking with `crates/os2-pack`, desktop folders and objects)
 - planned (help): printing, bookmarks and the library list, the help
   window's menu, metafiles in dynamic data, viewport styles
 - planned: per-process presentation-space limits, hooks other than the

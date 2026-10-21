@@ -1,0 +1,14 @@
+[package]
+name = "appinst"
+description = "APPINST.EXE: installs the OS/2 applications rs2 runs from the OS/2 Warp CD"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "appinst"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+os2-pack = { path = "../../crates/os2-pack" }

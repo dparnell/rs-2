@@ -1170,6 +1170,49 @@ serial port): see [Testing](#testing).
 the window's icon, Undo restoring a font or colours (rs2's MLE
 does not undo those), the Set tabs dialog E has but does not offer.
 
+## Installing OS/2's applications (APPINST.EXE)
+
+`C:\OS2\APPINST.EXE` (userland/appinst; "Install OS/2 Applications" in
+the desktop's Programs folder) installs the OS/2 applications rs2 runs
+(see [COMPATIBILITY.md](COMPATIBILITY.md)) from the OS/2 Warp 4.52 client
+CD. rs2 ships none of IBM's files; this puts the user's own copies where
+OS/2 itself keeps them.
+
+- **The catalogue** is `userland/appinst/apps.txt`, built into the
+  program: categories (Games, Productivity, REXX, Command line tools,
+  Information) with their applications, each with its files (the target
+  path and the CD's packed file that holds it), the program objects to
+  make and what else it needs (PM REXX needs REXX; the command line
+  tools need OS/2's message files). An application is shown as installed
+  when all its files are on the boot drive.
+- **The window**: the source (the first drive with `\OS2IMAGE`, or
+  `APPINST X:`), Refresh, a tree of the categories with check boxes
+  (checking a category checks all its applications, a partly checked one
+  shows a filled box; each application can be checked by itself; mouse:
+  the arrow opens and closes a category, the box or a double click
+  checks; keys: arrows, PgUp/PgDn, Home/End, Space, +/-), a description
+  of the item with the cursor, a status line, a progress bar, Install
+  and Close.
+- **Installing** runs on a second thread: each file is unpacked from its
+  packed file on the CD with `crates/os2-pack` (files stored as they are,
+  like TEDIT.EXE, are copied), written with its date, time, attributes
+  and extended attributes (`DosSetPathInfo` levels 1 and 2), the
+  directories made as needed, each packed file read once. Then the
+  program objects go in a program group per category, made if missing
+  ("Games", "Productivity", "REXX", "Information"; objects already there
+  are updated), and the program broadcasts the registered message
+  `RS2_ProgramListChanged` to the top-level frames, on which RS2SHELL
+  refills its desktop and program group folders. When an application
+  lives in `\OS2\APPS` and CONFIG.SYS's `SET PATH` or `LIBPATH` lacks
+  `C:\OS2\APPS`, it is added (Solitaire finds its card font along the
+  PATH) and the message says to restart; rs2's own CONFIG.SYS has it.
+  A boot drive that cannot be written (rs2 running from the CD) is
+  reported before anything is done.
+
+The live image's FAT partition is only as large as its files, so
+applications are installed on an installed system (or a larger USB
+stick); a full disk shows as files that "cannot be written".
+
 ## The help manager (HELPMGR.DLL) and VIEW.EXE
 
 HELPMGR.DLL (userland/helpmgr) is rs2's help manager, VIEW.EXE
@@ -1512,6 +1555,13 @@ The export trampolines pass their index to the lock's entry
   PASS/FAIL and `gpitest done: N failure(s)`, then a window with every
   kind of primitive for a screenshot check (it also draws
   `C:\YOSEMITE.BMP` when present).
+- The application installer: a dist system disk (`cargo xtask disk
+  --system --dist` with dist/manifest.txt as work/modules.txt) booted
+  with the OS/2 client CD (`--hdd IMG --boot-hdd --iso CD.ISO`): the
+  installer from the Programs folder finds the CD on D:, the Games
+  category and PM REXX (bringing REXX) installed, the Games and REXX
+  folders appearing on the desktop, and after a restart Solitaire
+  started from the Games folder.
 - The help manager: `cargo test -p ipf` (the IBM files on the media:
   structures, rendered text of the System Editor's help and REXX.INF,
   every panel laid out and every bitmap decoded), and QEMU runs with

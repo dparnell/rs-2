@@ -157,6 +157,10 @@ machine off. Details: [docs/PM.md](docs/PM.md#the-desktop-shell-rs2shell).
 F1 shows help in PM programs that have it (rs2's help manager reads
 OS/2 `.HLP` files along HELP), and `VIEW book [topic]` shows OS/2 books
 (`.INF`, along BOOKSHELF): [docs/PM.md](docs/PM.md#the-help-manager-helpmgrdll-and-viewexe).
+"Install OS/2 Applications" in the Programs folder installs the OS/2
+applications rs2 runs (Solitaire, Chess, Mahjongg, Icon Editor, Pulse,
+Locale, REXX, command line tools, the books) from your OS/2 Warp 4.52 CD:
+[docs/PM.md](docs/PM.md#installing-os2s-applications-appinstexe).
 
 **The text-mode command prompt instead:** press T while the boot loader
 shows "Press T for a text-mode boot", or put `textmode` in
