@@ -331,10 +331,17 @@ fn place(h: u32, r: Rect) {
     if (w.x, w.y, w.cx, w.cy) == (r.left, r.bottom, r.width(), r.height()) {
         return;
     }
-    let old = (w.cx, w.cy);
+    let (old, at) = ((w.cx, w.cy), (w.x, w.y));
     st().desk.set_pos(h, r.left, r.bottom, r.width(), r.height());
     if old != (r.width(), r.height()) {
         send(h, win::WM_SIZE, mp(old.0 as u32, old.1 as u32), mp(r.width() as u32, r.height() as u32));
+    }
+    // WM_MOVE once the frame has been placed (not while WinCreateStdWindow
+    // builds it: OS/2's Solitaire asks where its frame is on WM_MOVE, by a
+    // handle it only has when WinCreateStdWindow returns).
+    let placed = ctl::parent(h);
+    if at != (r.left, r.bottom) && st().desk.get(placed).is_some_and(|f| f.cx > 0 || f.cy > 0) {
+        win::moved(h);
     }
 }
 
@@ -472,6 +479,9 @@ pub fn minimize(h: u32) {
     } else {
         st().desk.set_pos(h, slot.left, slot.bottom, slot.width(), slot.height());
         st().desk.to_bottom(h);
+        if (pos.0, pos.1) != (slot.left, slot.bottom) {
+            win::moved(h);
+        }
         st().desk.invalidate(h, None, false);
         if st().active == h {
             st().active = 0;
@@ -508,8 +518,12 @@ pub fn restore(h: u32) {
         }
     }
     let (x, y, cx, cy) = m.pos;
+    let at = s.desk.get(h).map(|w| (w.x, w.y));
     s.desk.set_pos(h, x, y, cx, cy);
     layout(h);
+    if at != Some((x, y)) {
+        win::moved(h);
+    }
     sysmenu_state(h);
     win::show(h, true);
     st().desk.invalidate(h, None, true);

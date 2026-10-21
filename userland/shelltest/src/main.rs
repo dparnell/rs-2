@@ -193,6 +193,7 @@ static VIEWER_MSGS: AtomicU32 = AtomicU32::new(0);
 static ENTERS: AtomicU32 = AtomicU32::new(0);
 static EMPHASIS: AtomicU32 = AtomicU32::new(0);
 static EXPANDS: AtomicU32 = AtomicU32::new(0);
+static MOVES: AtomicU32 = AtomicU32::new(0);
 
 fn check(name: &str, ok: bool) {
     if ok {
@@ -397,6 +398,43 @@ fn file_icons() {
     }
 }
 
+/// A client whose class has CS_MOVENOTIFY: counts its WM_MOVEs.
+extern "C" fn move_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
+    if m == 0x0006 {
+        MOVES.fetch_add(1, Ordering::Relaxed);
+        return 0;
+    }
+    unsafe { WinDefWindowProc(h, m, a, b) }
+}
+
+/// WM_MOVE, as PM sends it: from WinSetWindowPos (not while
+/// WinCreateStdWindow builds the frame), to a CS_MOVENOTIFY client when its
+/// frame moves; and WinQueryWindowPos's fl.
+fn moves(hab: u32) {
+    // CS_MOVENOTIFY
+    unsafe { WinRegisterClass(hab, b"ShMove\0".as_ptr(), move_proc, 1, 0) };
+    let mut fcf = 1u32 | 2 | 8;
+    let mut client = 0;
+    let f = unsafe { WinCreateStdWindow(1, 0, &mut fcf, b"ShMove\0".as_ptr(), b"Move me\0".as_ptr(), 0, 0, 3, &mut client) };
+    pump(hab);
+    check("WM_MOVE: none while WinCreateStdWindow builds the frame", MOVES.load(Ordering::Relaxed) == 0);
+    unsafe { WinSetWindowPos(f, 0, 100, 100, 200, 150, SWP_SIZE | SWP_MOVE | SWP_SHOW) };
+    pump(hab);
+    let n = MOVES.load(Ordering::Relaxed);
+    check("WM_MOVE: a CS_MOVENOTIFY client hears its frame placed", n > 0);
+    unsafe { WinSetWindowPos(f, 0, 120, 90, 0, 0, SWP_MOVE) };
+    pump(hab);
+    check("WM_MOVE: and moved", MOVES.load(Ordering::Relaxed) > n);
+    let n = MOVES.load(Ordering::Relaxed);
+    unsafe { WinSetWindowPos(f, 0, 0, 0, 220, 150, SWP_SIZE) };
+    pump(hab);
+    check("WM_MOVE: not when only sized", MOVES.load(Ordering::Relaxed) == n);
+    let (x, y, _, _, fl) = pos(f);
+    // SWP_SIZE | SWP_MOVE | SWP_ZORDER | SWP_SHOW | SWP_RESTORE
+    check("WinQueryWindowPos: fl of a shown frame", (x, y) == (120, 90) && fl == 0x100f);
+    unsafe { WinDestroyWindow(f) };
+}
+
 fn frames(hab: u32, viewer: u32) {
     // FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX
     let mut fcf = 1u32 | 2 | 8 | 0x30;
@@ -590,6 +628,7 @@ fn main(s: &Startup) -> u32 {
     pointers();
     file_icons();
     frames(hab, client);
+    moves(hab);
     let cnr = container(hab, client);
     let f = FAILS.load(Ordering::Relaxed);
     println!("shelltest done: {f} failure(s)");

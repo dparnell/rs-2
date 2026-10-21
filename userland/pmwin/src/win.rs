@@ -18,6 +18,7 @@ use crate::state::{pid, st, Class};
 pub const WM_CREATE: u32 = 0x0001;
 pub const WM_DESTROY: u32 = 0x0002;
 pub const WM_SHOW: u32 = 0x0005;
+pub const WM_MOVE: u32 = 0x0006;
 pub const WM_SIZE: u32 = 0x0007;
 pub const WM_ACTIVATE: u32 = 0x000d;
 pub const WM_SETFOCUS: u32 = 0x000f;
@@ -103,6 +104,31 @@ pub fn class_proc(h: u32) -> u32 {
     let s = st();
     let Some(w) = s.desk.get(h) else { return 0 };
     s.classes.get(w.class as usize).map_or(0, |c| c.proc_)
+}
+
+/// CS_MOVENOTIFY: the class's windows hear (WM_MOVE) when an ancestor
+/// moves them on the screen.
+pub const CS_MOVENOTIFY: u32 = 0x0001;
+
+/// A window moved relative to its parent: WM_MOVE to it and to the
+/// windows inside it whose class asks for it (CS_MOVENOTIFY), as
+/// WinSetWindowPos does. Programs keep their window positions this way
+/// (OS/2's Solitaire saves where its frame is on WM_MOVE).
+pub fn moved(h: u32) {
+    notify(h, WM_MOVE, 0, 0);
+    move_notify(h);
+}
+
+fn move_notify(h: u32) {
+    let kids = st().desk.get(h).map(|w| w.children.clone()).unwrap_or_default();
+    for c in kids {
+        let s = st();
+        let Some(w) = s.desk.get(c) else { continue };
+        if s.classes.get(w.class as usize).is_some_and(|k| k.style & CS_MOVENOTIFY != 0) {
+            notify(c, WM_MOVE, 0, 0);
+        }
+        move_notify(c);
+    }
 }
 
 /// Built-in classes registered on initialisation.
@@ -338,6 +364,7 @@ pub fn apply_shell_position(h: u32) {
         let r = shell_position();
         st().desk.set_pos(h, r.left, r.bottom, r.width(), r.height());
         frame::layout(h);
+        moved(h);
     }
 }
 
@@ -587,6 +614,9 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
             let pack = |a: i32, b: i32| (a as u32 & 0xffff) | (b as u32) << 16;
             send(h, WM_SIZE, pack(ocx, ocy), pack(ncx, ncy));
         }
+        if (nx, ny) != (ox, oy) {
+            moved(h);
+        }
     }
     if fl & SWP_SHOW != 0 {
         show(h, true);
@@ -658,21 +688,28 @@ pub extern "C" fn WinQueryWindowRect(h: u32, prcl: *mut RectL) -> u32 {
 }
 
 /// SWP: fl, cy, cx, y, x, hwndInsertBehind, hwnd, ulReserved1, ulReserved2.
+/// As IBM's: fl has SWP_SIZE, SWP_MOVE, SWP_ZORDER and SWP_SHOW or
+/// SWP_HIDE (and a frame's SWP_MINIMIZE, SWP_MAXIMIZE or SWP_RESTORE), and
+/// hwndInsertBehind is the sibling above it (HWND_TOP for the topmost).
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowPos(h: u32, pswp: *mut u32) -> u32 {
-    let Some(w) = st().desk.get(h) else { return 0 };
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return 0 };
     if pswp.is_null() {
         return 0;
     }
-    // fl reports the minimized/maximized state (SWP_MINIMIZE, SWP_MAXIMIZE).
-    let fl = if w.style & ws::MINIMIZED != 0 {
-        frame::SWP_MINIMIZE
-    } else if w.style & ws::MAXIMIZED != 0 {
-        frame::SWP_MAXIMIZE
-    } else {
-        0
-    };
-    let vals = [fl, w.cy as u32, w.cx as u32, w.y as u32, w.x as u32, 0, h, 0, 0];
+    let mut fl = SWP_SIZE | SWP_MOVE | SWP_ZORDER | if w.style & ws::VISIBLE != 0 { SWP_SHOW } else { SWP_HIDE };
+    if s.frames.contains_key(&h) {
+        fl |= if w.style & ws::MINIMIZED != 0 {
+            frame::SWP_MINIMIZE
+        } else if w.style & ws::MAXIMIZED != 0 {
+            frame::SWP_MAXIMIZE
+        } else {
+            frame::SWP_RESTORE
+        };
+    }
+    let above = s.desk.get(w.parent).and_then(|p| p.children.iter().position(|&c| c == h).and_then(|i| p.children.get(i + 1).copied()));
+    let vals = [fl, w.cy as u32, w.cx as u32, w.y as u32, w.x as u32, above.unwrap_or(HWND_TOP), h, 0, 0];
     for (i, v) in vals.into_iter().enumerate() {
         unsafe { pswp.add(i).write_unaligned(v) };
     }
