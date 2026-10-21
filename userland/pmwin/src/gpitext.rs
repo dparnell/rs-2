@@ -127,9 +127,10 @@ pub extern "C" fn GpiQueryWidthTable(hps: u32, first: i32, n: i32, out: *mut i32
     if out.is_null() || first < 0 || n < 0 {
         return 0;
     }
-    let w = e.ps.text_box(b"x")[4].x;
+    // Each character's own advance (proportional fonts differ).
     for i in 0..n as usize {
-        write(unsafe { out.add(i) }, w);
+        let c = (first as usize + i).min(255) as u8;
+        write(unsafe { out.add(i) }, e.ps.text_box(&[c])[4].x);
     }
     1
 }

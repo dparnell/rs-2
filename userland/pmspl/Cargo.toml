@@ -1,0 +1,13 @@
+[package]
+name = "pmspl-dll"
+description = "PMSPL.DLL: the spooler API of a system without printers"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmspl"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

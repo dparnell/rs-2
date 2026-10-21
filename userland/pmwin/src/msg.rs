@@ -379,6 +379,11 @@ pub extern "C" fn WinDefWindowProc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 
             WinEndPaint(hps);
             0
         }
+        // The cursor's blink timer.
+        WM_TIMER if mp1 & 0xffff == pmwin::cursor::TID_CURSOR => {
+            crate::cursor::blink(h);
+            0
+        }
         // Keys a window does not use go up to its parent (a frame
         // control's or a dialog item's frame).
         WM_CHAR => {
@@ -631,4 +636,20 @@ pub extern "C" fn WinSetCapture(_desk: u32, h: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryCapture(_desk: u32) -> u32 {
     st().capture
+}
+
+/// WinQueryQueueInfo(hmq, pmqi, cbCopy): MQINFO (cb, pid, tid, cmsgs,
+/// pReserved), as much as fits in cbCopy.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryQueueInfo(hmq: u32, p: *mut u8, cb: u32) -> u32 {
+    let s = st();
+    let Some(q) = s.queues.get(&hmq) else { return 0 };
+    if p.is_null() {
+        return 0;
+    }
+    let info = [20u32, q.pid, q.tid, q.msgs.iter().count() as u32, 0];
+    let bytes: alloc::vec::Vec<u8> = info.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let n = (cb as usize).min(bytes.len());
+    unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), p, n) };
+    1
 }

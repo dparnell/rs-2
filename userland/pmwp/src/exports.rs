@@ -21,4 +21,6 @@ macro_rules! aligned {
 
 aligned! {
     __a_WinCreateObject => crate::WinCreateObject, 5;
+    __a_WinStoreWindowPos => crate::winpos::WinStoreWindowPos, 3;
+    __a_WinRestoreWindowPos => crate::winpos::WinRestoreWindowPos, 3;
 }

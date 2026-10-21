@@ -197,6 +197,8 @@ unsafe extern "C" {
     fn GpiSetCharSet(hps: u32, lcid: i32) -> u32;
     #[link_name = "PMGPI.378"]
     fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.492"]
+    fn GpiQueryWidthTable(hps: u32, first: i32, n: i32, out: *mut i32) -> u32;
     #[link_name = "PMGPI.586"]
     fn GpiQueryFonts(hps: u32, opts: u32, face: *const u8, req: *mut i32, len: i32, out: *mut u8) -> i32;
     #[link_name = "PMGPI.520"]
@@ -479,6 +481,23 @@ fn self_checks(hab: u32) {
         check("outline font scales to the char box", tb[4] == pt(32, 0) && tb[0] == pt(0, 24));
         GpiSetCharSet(m.hps, 0);
         check("GpiDeleteSetId", GpiDeleteSetId(m.hps, 1) != 0);
+        // Each character's width is its own advance (fonts loaded with
+        // GpiLoadFonts are proportional; EPM places its text with
+        // GpiQueryWidthTable).
+        let mut fat = [0u8; 56];
+        fat[0] = 56;
+        fat[8..12].copy_from_slice(b"Helv");
+        GpiCreateLogFont(m.hps, null(), 2, fat.as_ptr());
+        GpiSetCharSet(m.hps, 2);
+        let mut w = [0i32; 3];
+        GpiQueryWidthTable(m.hps, b'i' as i32, 1, w.as_mut_ptr());
+        GpiQueryWidthTable(m.hps, b'V' as i32, 2, w[1..].as_mut_ptr());
+        let mut ti = [PointL::default(); 5];
+        GpiQueryTextBox(m.hps, 1, b"i".as_ptr(), 5, ti.as_mut_ptr());
+        GpiQueryTextBox(m.hps, 1, b"W".as_ptr(), 5, tb.as_mut_ptr());
+        check("GpiQueryWidthTable per character", w[0] > 0 && w[0] == ti[4].x && w[2] == tb[4].x);
+        GpiSetCharSet(m.hps, 0);
+        GpiDeleteSetId(m.hps, 2);
         free(m);
 
         let hdc = DevOpenDC(hab, OD_MEMORY, b"*\0".as_ptr(), 0, null(), 0);

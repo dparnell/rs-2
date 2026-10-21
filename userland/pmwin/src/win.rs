@@ -154,6 +154,13 @@ pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, own
     if let Some(w) = s.desk.get_mut(h) {
         w.text = text.to_vec();
     }
+    // A frame's client is its child FID_CLIENT, however it was made
+    // (EPM creates its frames' clients with WinCreateWindow).
+    if id == frame::FID_CLIENT {
+        if let Some(f) = s.frames.get_mut(&parent).filter(|f| f.client == 0) {
+            f.client = h;
+        }
+    }
     // WM_CREATE: mp1 = control data, mp2 = CREATESTRUCT (pCtlData,
     // pPresParams, id, hwndInsertBehind, hwndOwner, cy, cx, y, x,
     // flStyle, pszText, pszClass, hwndParent).
@@ -201,6 +208,12 @@ pub fn remove(h: u32) {
     let r = s.desk.screen_rect(h);
     let showing = s.desk.is_showing(h);
     let gone = s.desk.destroy(h);
+    crate::cursor::windows_gone(s, &gone);
+    for f in s.frames.values_mut() {
+        if gone.contains(&f.client) {
+            f.client = 0;
+        }
+    }
     let was_active = gone.contains(&s.active);
     for g in &gone {
         s.frames.remove(g);
@@ -285,7 +298,7 @@ pub extern "C" fn WinCreateWindow(
 ) -> u32 {
     let class = class_name(class);
     let pos = Rect::new(x, y, x + cx, y + cy);
-    if class == b"#1" {
+    if frame::is_frame_class(&class) {
         // FRAMECDATA: cb, flCreateFlags, hmodResources, idResources.
         let (fcf, hmod) = if ctl == 0 {
             (0, 0)
@@ -293,7 +306,7 @@ pub extern "C" fn WinCreateWindow(
             let p = ctl as *const u8;
             unsafe { ((p.add(2) as *const u32).read_unaligned(), (p.add(6) as *const u16).read_unaligned() as u32) }
         };
-        let h = frame::create(parent, style, fcf, &cstr(name), pos, owner, id, hmod);
+        let h = frame::create_class(&class, parent, style, fcf, &cstr(name), pos, owner, id, hmod, ctl);
         if h != 0 && style & ws::VISIBLE != 0 {
             show(h, true);
         }
@@ -590,10 +603,16 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
     }
     // Minimize, maximize and restore (frames): they size the window.
     let fl = if st().frames.contains_key(&h) && fl & (frame::SWP_MINIMIZE | frame::SWP_MAXIMIZE | frame::SWP_RESTORE) != 0 {
+        let normal = st().desk.get(h).is_some_and(|w| w.style & (ws::MINIMIZED | ws::MAXIMIZED) == 0);
         if fl & frame::SWP_MINIMIZE != 0 {
             frame::minimize(h);
         } else if fl & frame::SWP_MAXIMIZE != 0 {
             frame::maximize(h, true);
+        } else if normal {
+            // Restoring a frame that is neither minimized nor maximized
+            // leaves it where SWP_MOVE and SWP_SIZE put it
+            // (WinRestoreWindowPos does this).
+            return WinSetWindowPos(h, behind, x, y, cx, cy, fl & !frame::SWP_RESTORE);
         } else {
             frame::restore(h);
         }
@@ -714,6 +733,23 @@ pub extern "C" fn WinQueryWindowPos(h: u32, pswp: *mut u32) -> u32 {
         unsafe { pswp.add(i).write_unaligned(v) };
     }
     1
+}
+
+/// WinSetMultWindowPos(hab, pswp, cswp): each SWP (fl, cy, cx, y, x,
+/// hwndInsertBehind, hwnd, ...) applied in turn.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetMultWindowPos(_hab: u32, pswp: *const u32, n: u32) -> u32 {
+    if pswp.is_null() {
+        return 0;
+    }
+    let mut ok = 1;
+    for i in 0..n as usize {
+        let v: [u32; 7] = core::array::from_fn(|k| unsafe { pswp.add(i * 9 + k).read_unaligned() });
+        if WinSetWindowPos(v[6], v[5], v[4] as i32, v[3] as i32, v[2] as i32, v[1] as i32, v[0]) == 0 {
+            ok = 0;
+        }
+    }
+    ok
 }
 
 #[unsafe(no_mangle)]
@@ -969,15 +1005,80 @@ fn word_get(h: u32, index: i32) -> Option<u32> {
 /// the frame is activated.
 const QWL_HWNDFOCUSSAVE: i32 = 0x18;
 
+/// A frame's QWS_XRESTORE, QWS_YRESTORE, QWS_CXRESTORE, QWS_CYRESTORE
+/// (where restoring puts it) and QWS_XMINIMIZE, QWS_YMINIMIZE (where it
+/// goes when minimized).
+const QWS_XRESTORE: i32 = 0x0c;
+const QWS_CYRESTORE: i32 = 0x12;
+const QWS_XMINIMIZE: i32 = 0x14;
+const QWS_YMINIMIZE: i32 = 0x16;
+
+/// The position restoring a frame gives it: the position before it was
+/// minimized or maximized, its own while it is neither.
+fn restore_pos(h: u32) -> (i32, i32, i32, i32) {
+    let s = st();
+    let cur = s.desk.get(h).map_or((0, 0, 0, 0), |w| (w.x, w.y, w.cx, w.cy));
+    let Some(f) = s.frames.get(&h) else { return cur };
+    match &f.min {
+        Some(m) if !m.was_max => m.pos,
+        _ => f.restore.unwrap_or(cur),
+    }
+}
+
 fn frame_word(h: u32, index: i32) -> Option<u32> {
     let f = st().frames.get(&h)?;
     match index {
         QWL_HWNDFOCUSSAVE => Some(f.focus_save),
+        QWS_XRESTORE..=QWS_CYRESTORE if index % 2 == 0 => {
+            let p = restore_pos(h);
+            Some([p.0, p.1, p.2, p.3][(index - QWS_XRESTORE) as usize / 2] as u16 as u32)
+        }
+        QWS_XMINIMIZE | QWS_YMINIMIZE => {
+            let p = f.icon_pos.unwrap_or((0, 0));
+            Some(if index == QWS_XMINIMIZE { p.0 } else { p.1 } as u16 as u32)
+        }
         _ => None,
     }
 }
 
+/// Set a frame's restore or minimize position word.
+fn set_frame_word(h: u32, index: i32, v: u32) -> Option<bool> {
+    if !(QWS_XRESTORE..=QWS_YMINIMIZE).contains(&index) || index % 2 != 0 || !st().frames.contains_key(&h) {
+        return None;
+    }
+    let v = v as u16 as i16 as i32;
+    if index >= QWS_XMINIMIZE {
+        let f = st().frames.get_mut(&h)?;
+        let mut p = f.icon_pos.unwrap_or((0, 0));
+        if index == QWS_XMINIMIZE { p.0 = v } else { p.1 = v }
+        f.icon_pos = Some(p);
+        return Some(true);
+    }
+    let mut p = restore_pos(h);
+    match (index - QWS_XRESTORE) / 2 {
+        0 => p.0 = v,
+        1 => p.1 = v,
+        2 => p.2 = v,
+        _ => p.3 = v,
+    }
+    let maximized = st().desk.get(h).is_some_and(|w| w.style & ws::MAXIMIZED != 0);
+    let f = st().frames.get_mut(&h)?;
+    match &mut f.min {
+        Some(m) if !m.was_max => m.pos = p,
+        Some(_) => f.restore = Some(p),
+        None if maximized => f.restore = Some(p),
+        // A frame in its normal state is where restoring puts it.
+        None => {}
+    }
+    Some(true)
+}
+
 fn word_set(h: u32, index: i32, v: u32, bytes: u32) -> bool {
+    if bytes == 2 {
+        if let Some(r) = set_frame_word(h, index, v) {
+            return r;
+        }
+    }
     if index == QWL_HWNDFOCUSSAVE && bytes == 4 {
         if let Some(f) = st().frames.get_mut(&h) {
             f.focus_save = v;
@@ -1084,6 +1185,9 @@ pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
             w.ghost = pmwin::Region::new();
         }
     }
+    // The cursor is hidden while its window paints.
+    crate::cursor::paint(h, false);
+    let s = st();
     let hps = if hps != 0 {
         gpiapi::begin_paint(s, hps, h, o, clip);
         hps
@@ -1097,7 +1201,9 @@ pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
     let s = st();
+    let h = gpiapi::entry(s, hps).map_or(0, |e| e.hwnd);
     gpiapi::end_paint(s, hps);
+    crate::cursor::paint(h, true);
     1
 }
 

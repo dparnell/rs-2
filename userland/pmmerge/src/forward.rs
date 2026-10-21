@@ -35,6 +35,7 @@ forward! {
     WinCopyRect = "PMWIN.710";
     WinCreateAccelTable = "PMWIN.713";
     WinCreateAtomTable = "PMWIN.714";
+    WinCreateCursor = "PMWIN.715";
     WinCreateDlg = "PMWIN.922";
     WinCreateMenu = "PMWIN.907";
     WinCreateMsgQueue = "PMWIN.716";
@@ -43,11 +44,15 @@ forward! {
     WinCreateStdWindow = "PMWIN.908";
     WinCreateSwitchEntry = "PMSHAPI.121";
     WinCreateWindow = "PMWIN.909";
+    WinDdeInitiate = "PMWIN.718";
+    WinDdePostMsg = "PMWIN.719";
+    WinDdeRespond = "PMWIN.720";
     WinDefDlgProc = "PMWIN.910";
     WinDefWindowProc = "PMWIN.911";
     WinDeleteAtom = "PMWIN.721";
     WinDestroyAccelTable = "PMWIN.723";
     WinDestroyAtomTable = "PMWIN.724";
+    WinDestroyCursor = "PMWIN.725";
     WinDestroyMsgQueue = "PMWIN.726";
     WinDestroyPointer = "PMWIN.727";
     WinDestroyWindow = "PMWIN.728";
@@ -128,6 +133,7 @@ forward! {
     WinQueryClipbrdViewer = "PMWIN.809";
     WinQueryCp = "PMWIN.810";
     WinQueryCpList = "PMWIN.811";
+    WinQueryCursorInfo = "PMWIN.812";
     WinQueryDesktopWindow = "PMWIN.813";
     WinQueryDlgItemShort = "PMWIN.814";
     WinQueryDlgItemText = "PMWIN.815";
@@ -139,6 +145,7 @@ forward! {
     WinQueryPointerInfo = "PMWIN.822";
     WinQueryPointerPos = "PMWIN.823";
     WinQueryPresParam = "PMWIN.939";
+    WinQueryQueueInfo = "PMWIN.824";
     WinQueryQueueStatus = "PMWIN.825";
     WinQuerySwitchEntry = "PMSHAPI.124";
     WinQuerySwitchHandle = "PMSHAPI.125";
@@ -182,8 +189,10 @@ forward! {
     WinSetCp = "PMWIN.857";
     WinSetDlgItemShort = "PMWIN.858";
     WinSetDlgItemText = "PMWIN.859";
+    WinSetErrorInfo = "PMWIN.977";
     WinSetFocus = "PMWIN.860";
     WinSetHook = "PMWIN.928";
+    WinSetMultWindowPos = "PMWIN.863";
     WinSetOwner = "PMWIN.864";
     WinSetParent = "PMWIN.865";
     WinSetPointer = "PMWIN.866";
@@ -198,6 +207,7 @@ forward! {
     WinSetWindowText = "PMWIN.877";
     WinSetWindowULong = "PMWIN.878";
     WinSetWindowUShort = "PMWIN.879";
+    WinShowCursor = "PMWIN.880";
     WinShowPointer = "PMWIN.881";
     WinShowWindow = "PMWIN.883";
     WinStartTimer = "PMWIN.884";

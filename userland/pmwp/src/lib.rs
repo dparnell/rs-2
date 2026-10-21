@@ -12,6 +12,7 @@ extern crate alloc;
 extern crate os2;
 
 mod exports;
+mod winpos;
 
 use alloc::vec::Vec;
 

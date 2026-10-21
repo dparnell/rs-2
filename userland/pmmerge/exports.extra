@@ -31,6 +31,7 @@ WinCopyAccelTable @5126
 WinCopyRect @5127
 WinCreateAccelTable @5130
 WinCreateAtomTable @5131
+WinCreateCursor @5132
 WinCreateDlg @5133
 WinCreateMenu @5135
 WinCreateMsgQueue @5136
@@ -39,11 +40,15 @@ WinCreatePointerIndirect @5138
 WinCreateStdWindow @5139
 WinCreateSwitchEntry @5140
 WinCreateWindow @5141
+WinDdeInitiate @5142
+WinDdePostMsg @5143
+WinDdeRespond @5144
 WinDefDlgProc @5146
 WinDefWindowProc @5147
 WinDeleteAtom @5148
 WinDestroyAccelTable @5151
 WinDestroyAtomTable @5152
+WinDestroyCursor @5153
 WinDestroyMsgQueue @5154
 WinDestroyPointer @5155
 WinDestroyWindow @5156
@@ -124,6 +129,7 @@ WinQueryClipbrdOwner @5262
 WinQueryClipbrdViewer @5263
 WinQueryCp @5264
 WinQueryCpList @5265
+WinQueryCursorInfo @5266
 WinQueryDesktopWindow @5268
 WinQueryDlgItemShort @5269
 WinQueryDlgItemText @5270
@@ -135,6 +141,7 @@ WinQueryPointer @5277
 WinQueryPointerInfo @5278
 WinQueryPointerPos @5279
 WinQueryPresParam @5280
+WinQueryQueueInfo @5282
 WinQueryQueueStatus @5283
 WinQuerySwitchEntry @5286
 WinQuerySwitchHandle @5287
@@ -178,8 +185,10 @@ WinSetClipbrdViewer @5344
 WinSetCp @5345
 WinSetDlgItemShort @5347
 WinSetDlgItemText @5348
+WinSetErrorInfo @5349
 WinSetFocus @5350
 WinSetHook @5352
+WinSetMultWindowPos @5356
 WinSetOwner @5357
 WinSetParent @5359
 WinSetPointer @5360
@@ -194,6 +203,7 @@ WinSetWindowPtr @5376
 WinSetWindowText @5377
 WinSetWindowULong @5379
 WinSetWindowUShort @5380
+WinShowCursor @5381
 WinShowPointer @5382
 WinShowWindow @5384
 WinStartTimer @5386

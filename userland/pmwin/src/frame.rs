@@ -99,11 +99,53 @@ pub fn border(fcf: u32) -> i32 {
 /// Create a frame window with its controls (and no client).
 #[allow(clippy::too_many_arguments)]
 pub fn create(parent: u32, style: u32, fcf: u32, title: &[u8], pos: Rect, owner: u32, id: u32, hmod: u32) -> u32 {
+    create_class(b"#1", parent, style, fcf, title, pos, owner, id, hmod, 0)
+}
+
+/// Whether windows of a class are frames: WC_FRAME, or a class an
+/// application registered with the frame's window procedure (from
+/// WinQueryClassInfo; EPM's edit frames are such a class).
+pub fn is_frame_class(class: &[u8]) -> bool {
+    class == b"#1" || st().class(class).is_some_and(|c| c.proc_ == frame_entry as *const () as u32)
+}
+
+/// A frame of class `class` (see [`is_frame_class`]). As on OS/2, the
+/// frame's window procedure makes it a frame when it gets WM_CREATE with
+/// the FRAMECDATA (one is made here from `fcf` when `ctl` is 0), so a
+/// class whose procedure passes WM_CREATE on to the frame's gets one too.
+#[allow(clippy::too_many_arguments)]
+pub fn create_class(class: &[u8], parent: u32, style: u32, fcf: u32, title: &[u8], pos: Rect, owner: u32, id: u32, hmod: u32, ctl: u32) -> u32 {
     let style = style | ws::CLIPCHILDREN | ws::CLIPSIBLINGS;
-    let frame = win::create(parent, b"#1", title, style & !ws::VISIBLE, pos, owner, id, 0);
+    // FRAMECDATA: USHORT cb, ULONG flCreateFlags, USHORT hmodResources,
+    // USHORT idResources.
+    let mut fcd = [0u8; 12];
+    fcd[0..2].copy_from_slice(&12u16.to_le_bytes());
+    fcd[2..6].copy_from_slice(&fcf.to_le_bytes());
+    fcd[6..8].copy_from_slice(&(hmod as u16).to_le_bytes());
+    fcd[8..10].copy_from_slice(&(id as u16).to_le_bytes());
+    let ctl = if ctl == 0 { fcd.as_ptr() as u32 } else { ctl };
+    let frame = win::create(parent, class, title, style & !ws::VISIBLE, pos, owner, id, ctl);
     if frame == 0 {
         return 0;
     }
+    // A class whose procedure did not pass WM_CREATE on.
+    if !st().frames.contains_key(&frame) {
+        setup(frame, ctl);
+    }
+    frame
+}
+
+/// Make a window a frame (WM_CREATE in the frame's procedure): the
+/// controls FRAMECDATA asks for, its icon, its switch list entry.
+fn setup(frame: u32, fcd: u32) {
+    let (fcf, hmod, id) = if fcd == 0 {
+        (0, 0, 0)
+    } else {
+        let p = fcd as *const u8;
+        unsafe { ((p.add(2) as *const u32).read_unaligned(), (p.add(6) as *const u16).read_unaligned() as u32, (p.add(8) as *const u16).read_unaligned() as u32) }
+    };
+    let id = if id == 0 { st().desk.get(frame).map_or(0, |w| w.id) } else { id };
+    let title = st().desk.get(frame).map_or(alloc::vec::Vec::new(), |w| w.text.clone());
     st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0, shell_pos: false });
     if fcf & FCF_ICON != 0 {
         let i = crate::pointer::WinLoadPointer(1, hmod, id);
@@ -111,12 +153,11 @@ pub fn create(parent: u32, style: u32, fcf: u32, title: &[u8], pos: Rect, owner:
             f.icon = i;
         }
     }
-    create_controls(frame, fcf, title, hmod, id);
+    create_controls(frame, fcf, &title, hmod, id);
     layout(frame);
     if fcf & FCF_TASKLIST != 0 {
         crate::switch::add_frame(frame);
     }
-    frame
 }
 
 fn create_controls(frame: u32, fcf: u32, title: &[u8], hmod: u32, id: u32) {
@@ -685,6 +726,12 @@ fn forwarded(msg: u32) -> bool {
 
 pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
+        crate::win::WM_CREATE => {
+            if !st().frames.contains_key(&h) {
+                setup(h, mp1);
+            }
+            0
+        }
         WM_PAINT => {
             paint(h);
             0

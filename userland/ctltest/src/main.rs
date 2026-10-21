@@ -17,6 +17,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use os2::*;
 
+mod wm;
+
 os2::entry!(main);
 
 #[repr(C)]
@@ -486,6 +488,7 @@ fn main(s: &Startup) -> u32 {
     spin_slider_valueset_checks(client);
     atom_checks();
     helper_checks(hab);
+    wm::wm_checks(hab, hmq, client, frame);
     clipboard_checks(hab);
     // The clipboard seen from another process.
     let mut res = ResultCodes { code_terminate: 0, code_result: 0 };

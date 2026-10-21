@@ -212,6 +212,8 @@ pub struct State {
     pub keys: [u8; 256],
     /// The switch list (WinAddSwitchEntry, see switch.rs).
     pub switch: crate::switch::SwitchList,
+    /// The text cursor (WinCreateCursor).
+    pub cursor: pmwin::cursor::CursorState,
 }
 
 /// No presentation parameter colour.
@@ -286,6 +288,7 @@ pub fn init(surface: Surface) {
         shadow: Vec::new(),
         keys: [0; 256],
         switch: Default::default(),
+        cursor: Default::default(),
     });
     unsafe { (*crate::shared::header()).state = Box::into_raw(s) as *mut u8 };
 }

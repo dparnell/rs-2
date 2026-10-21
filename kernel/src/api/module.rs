@@ -317,6 +317,15 @@ fn module_by_handle(c: &Ctx, h: u32) -> Option<Arc<Module>> {
     loader::by_handle(h as u16)
 }
 
+/// A procedure by name; "#n" names ordinal n (EPM's macros look up
+/// DOSCALLS and PMWIN procedures this way).
+fn resolve_named(m: &loader::Module, name: &str) -> Result<loader::Target, u32> {
+    match name.strip_prefix('#').and_then(|n| n.parse::<u32>().ok()) {
+        Some(o) => m.resolve_ordinal(o, 0),
+        None => m.resolve_name(name, 0),
+    }
+}
+
 pub fn dos_query_proc_addr(c: &mut Ctx) -> u32 {
     // DosQueryProcAddr(hmod, ordinal, pszName, ppfn)
     let (h, ord, pname, ppfn) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
@@ -326,7 +335,7 @@ pub fn dos_query_proc_addr(c: &mut Ctx) -> u32 {
         if super::tracing() {
             crate::trace!("    proc {name} in {}", m.name);
         }
-        m.resolve_name(&name, 0)
+        resolve_named(&m, &name)
     } else {
         m.resolve_ordinal(ord, 0)
     };
@@ -373,7 +382,7 @@ pub fn dos_query_proc_type(c: &mut Ctx) -> u32 {
     let Some(m) = module_by_handle(c, h) else { return err::INVALID_HANDLE };
     let t = if pname != 0 && ord == 0 {
         let Some(name) = c.read_str(pname, 256) else { return err::INVALID_ADDRESS };
-        m.resolve_name(&name, 0)
+        resolve_named(&m, &name)
     } else {
         m.resolve_ordinal(ord, 0)
     };

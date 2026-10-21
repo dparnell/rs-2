@@ -231,6 +231,9 @@ pub fn set_text_of(h: u32, t: &[u8]) -> bool {
 
 /// Register the built-in classes (WC_FRAME etc., named "#n").
 pub fn register_builtin() {
+    // Window words as OS/2's classes have them (WinQueryClassInfo): the
+    // frame's 172 bytes start with QWL_USER, the controls have 8 for
+    // QWL_USER and the like.
     let classes: [(u32, u32, u32); 15] = [
         (1, crate::frame::frame_entry as *const () as u32, 0x20),
         (3, crate::button::button_entry as *const () as u32, 0),
@@ -250,6 +253,7 @@ pub fn register_builtin() {
     ];
     let s = st();
     for (n, proc_, style) in classes {
-        s.classes.push(Class { name: alloc::format!("#{n}").into_bytes(), proc_, style, words: 0, pid: 0 });
+        let words = if n == 1 { 0xac } else { 8 };
+        s.classes.push(Class { name: alloc::format!("#{n}").into_bytes(), proc_, style, words, pid: 0 });
     }
 }

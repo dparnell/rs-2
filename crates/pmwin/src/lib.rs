@@ -9,6 +9,7 @@ extern crate alloc;
 
 pub mod container;
 pub mod controls;
+pub mod cursor;
 pub mod mle;
 pub mod notebook;
 mod queue;
@@ -16,6 +17,7 @@ pub mod minimize;
 pub mod shellicons;
 mod region;
 pub mod sysptr;
+pub mod winpos;
 mod tree;
 
 pub use gpi::{Point, Rect};

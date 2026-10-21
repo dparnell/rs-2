@@ -1286,6 +1286,19 @@ impl Ps {
                     let bm = if opaque { Mix::LeaveAlone } else { bmix };
                     self.glyphs_at(s, Point::new(round(start.0), round(start.1)), text, fg, mix, bg, bm);
                 } else {
+                    // The character cells' background (BM_OVERPAINT etc.),
+                    // as for plain text.
+                    if !opaque && bmix != Mix::LeaveAlone {
+                        if bmix == Mix::Overpaint {
+                            self.fill_rect(s, text_rect, bg);
+                        } else {
+                            for y in text_rect.bottom..text_rect.top {
+                                for x in text_rect.left..text_rect.right {
+                                    self.plot(s, x, y, bg, bmix);
+                                }
+                            }
+                        }
+                    }
                     let mut spans = crate::region::Spans::new();
                     let mut x = start.0;
                     let wide = lf.bold as i32;
@@ -1771,6 +1784,22 @@ mod tests {
         let n = count(&s, 0x00ff00);
         assert!(n > 40, "{n}");
         assert_eq!(ps.pos, Point::new(16, 10));
+    }
+
+    #[test]
+    fn text_with_increments_paints_cell_background() {
+        // EPM's status line: GpiCharStringPosAt with CHS_VECTOR and
+        // BM_OVERPAINT must erase what was drawn there before.
+        let (mut buf, mut ps) = setup(64, 32);
+        let mut s = surface(&mut buf, 64, 32);
+        ps.fill_rect(&mut s, Rect::new(0, 0, 64, 32), 0x123456);
+        ps.attrs.chr.back_mix = 2;
+        ps.attrs.chr.back = -2;
+        let dx = [8, 8, 8];
+        ps.gpi_text(&mut s, Point::new(0, 10), b"   ", Some(&dx), None, false, false);
+        assert_eq!(s.get(2, 10), Some(0xffffff));
+        assert_eq!(s.get(23, 12), Some(0xffffff));
+        assert_eq!(s.get(30, 12), Some(0x123456));
     }
 
     #[test]

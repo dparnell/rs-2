@@ -85,6 +85,15 @@ pub extern "C" fn WinGetLastError(_hab: u32) -> u32 {
     LAST_ERROR.swap(0, Ordering::Relaxed)
 }
 
+/// WinSetErrorInfo(errorid, fsOptions, ...): sets the error
+/// WinGetLastError returns (the inserts of SEI_ARGCOUNT and friends are
+/// not kept: rs2 keeps no error information block).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetErrorInfo(e: u32, _fs: u32) -> u32 {
+    set_error(e);
+    e
+}
+
 /// No extended error information is kept.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinGetErrorInfo(_hab: u32) -> u32 {
