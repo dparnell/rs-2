@@ -3,7 +3,9 @@
 //! FAT volumes are read through DASD track IOCtls and checked with
 //! `fat::check`; /F repairs them (the drive is locked meanwhile, and the
 //! system remounts it when CHKDSK unlocks it). HPFS volumes get a
-//! read-only scan of the directory tree.
+//! read-only scan of the directory tree, JFS volumes a read-only check of
+//! all their metadata (`jfs::Volume::check`: trees, inode and block maps,
+//! link counts).
 //!
 //! /P reports to the Presentation Manager front end (IBM's PMCHKDSK, which
 //! runs `CHKDSK.COM drive /P` with its stdin and stdout on pipes): results
@@ -81,6 +83,7 @@ fn main(s: &os2::Startup) -> u32 {
     match fs.as_str() {
         "FAT" => check_fat(d, fix, verbose),
         "HPFS" => check_hpfs(d, verbose),
+        "JFS" => check_jfs(d, verbose),
         _ => {
             outln(&alloc::format!("CHKDSK does not support the {fs} file system."));
             1
@@ -369,4 +372,66 @@ fn check_hpfs(d: u8, verbose: bool) -> u32 {
     outln(&alloc::format!("{} kilobytes are in {files} user files.", num(file_kb, 12)));
     outln(&alloc::format!("{} kilobytes are available for use.", kb(i.free_sectors)));
     if bad > 0 { 1 } else { 0 }
+}
+
+fn check_jfs(d: u8, verbose: bool) -> u32 {
+    let disk = match Disk::open(d, false) {
+        Ok(x) => x,
+        Err(rc) => {
+            error(rc);
+            return rc;
+        }
+    };
+    show_label(d);
+    let mut vol = match jfs::Volume::mount(&disk) {
+        Ok(v) => v,
+        Err(_) => {
+            report(1373, &[], "CHKDSK cannot read the JFS structures of this volume.");
+            return 1;
+        }
+    };
+    vol.set_readonly(true);
+    if !pm() {
+        outln("\r\nCHKDSK is checking the file system (read only: repairing JFS\r\nvolumes is not available yet).");
+    }
+    let r = match vol.check() {
+        Ok(r) => r,
+        Err(_) => {
+            report(1373, &[], "CHKDSK cannot read the JFS structures of this volume.");
+            return 1;
+        }
+    };
+    if verbose || !r.ok() {
+        for p in &r.problems {
+            outln(&alloc::format!("  {p}"));
+        }
+    }
+    let i = vol.info();
+    let kb = |b: u64| b * i.block_size as u64 / 1024;
+    let total = kb(i.total_blocks);
+    let (dirk, filek, eak, freek) = (kb(r.dir_blocks), kb(r.file_blocks), kb(r.ea_blocks), kb(r.free_blocks));
+    let sys = total.saturating_sub(dirk + filek + eak + freek);
+    if pm() {
+        pm_msg(568, &[total]);
+        pm_msg(569, &[dirk, r.dirs]);
+        pm_msg(570, &[filek, r.files]);
+        if eak > 0 {
+            pm_msg(633, &[eak]);
+        }
+        pm_msg(632, &[sys]);
+        pm_msg(571, &[freek]);
+        return if r.ok() { 0 } else { 1 };
+    }
+    if r.ok() {
+        outln("\r\nThe file system is consistent.");
+    } else {
+        outln(&alloc::format!("\r\nCHKDSK found {} problem(s) in the file system.", r.problems.len()));
+    }
+    outln(&alloc::format!("\r\n{} kilobytes total disk space.", num(total, 12)));
+    outln(&alloc::format!("{} kilobytes are in {} directories.", num(dirk, 12), r.dirs));
+    outln(&alloc::format!("{} kilobytes are in {} user files.", num(filek, 12), r.files));
+    outln(&alloc::format!("{} kilobytes are in extended attributes.", num(eak, 12)));
+    outln(&alloc::format!("{} kilobytes are reserved for system use.", num(sys, 12)));
+    outln(&alloc::format!("{} kilobytes are available for use.", num(freek, 12)));
+    if r.ok() { 0 } else { 1 }
 }

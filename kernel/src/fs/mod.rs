@@ -239,7 +239,8 @@ pub fn probe_volume(dev: Arc<dyn block::BlockDev>) -> Arc<dyn FileSystem> {
     // Hard errors of the volume's device go through the pop-up.
     let dev = crate::api::harderr::wrap(dev);
     let mut bs = alloc::vec![0u8; dev.sector_size().max(512)];
-    let hpfs_boot = dev.read(0, &mut bs).is_ok() && &bs[54..58] == b"HPFS";
+    let ok = dev.read(0, &mut bs).is_ok();
+    let hpfs_boot = ok && (&bs[54..58] == b"HPFS" || &bs[54..57] == b"JFS");
     if !hpfs_boot {
         if let Ok(fs) = fatfs::FatFs::mount(dev.clone()) {
             return fs;
@@ -247,6 +248,11 @@ pub fn probe_volume(dev: Arc<dyn block::BlockDev>) -> Arc<dyn FileSystem> {
     }
     if hpfsfs::probe(&dev) {
         if let Ok(fs) = hpfsfs::HpfsFs::mount(dev.clone()) {
+            return fs;
+        }
+    }
+    if jfsfs::probe(&dev) {
+        if let Ok(fs) = jfsfs::JfsFs::mount(dev.clone()) {
             return fs;
         }
     }

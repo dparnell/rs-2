@@ -251,6 +251,21 @@ impl hpfs::BlockDevice for &Disk {
     }
 }
 
+impl jfs::BlockDevice for &Disk {
+    fn sector_size(&self) -> usize {
+        self.bps
+    }
+    fn sector_count(&self) -> u64 {
+        self.sectors
+    }
+    fn read(&self, lba: u64, buf: &mut [u8]) -> jfs::Result<()> {
+        Disk::read(self, lba, buf).map_err(|_| jfs::Error::Io)
+    }
+    fn write(&self, lba: u64, buf: &[u8]) -> jfs::Result<()> {
+        Disk::write(self, lba, buf).map_err(|_| jfs::Error::Io)
+    }
+}
+
 /// The file system name of a drive (DosQueryFSAttach), e.g. "FAT".
 pub fn fs_name(drive: u8) -> Option<alloc::string::String> {
     let name = [b'A' + drive, b':', 0];

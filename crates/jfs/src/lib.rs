@@ -61,7 +61,7 @@ use alloc::vec::Vec;
 
 pub use check::Report;
 pub use ea::{fea2_size, Ea};
-pub use format::{format, FormatParams};
+pub use format::{format, FormatParams, Geometry, MIN_BYTES};
 pub use name::{is_83, valid_name, CodePage, MAX_NAME};
 
 use inode::Inode;

@@ -1,4 +1,4 @@
-//! FORMAT: create a file system. FORMAT drive: [/FS:FAT|FAT32|HPFS]
+//! FORMAT: create a file system. FORMAT drive: [/FS:FAT|FAT32|HPFS|JFS]
 //! [/V[:label]] [/Q] [/ONCE]
 //!
 //! The volume is locked and written through DASD track IOCtls (the same
@@ -18,6 +18,7 @@ enum Fs {
     Fat,
     Fat32,
     Hpfs,
+    Jfs,
 }
 
 fn usage_error() -> u32 {
@@ -37,6 +38,7 @@ fn main(s: &os2::Startup) -> u32 {
                 "FAT" => Fs::Fat,
                 "FAT32" => Fs::Fat32,
                 "HPFS" => Fs::Hpfs,
+                "JFS" => Fs::Jfs,
                 _ => {
                     eprint(&alloc::format!("SYS1330: The system cannot accept the {u} parameter.\r\n"));
                     return 87;
@@ -86,7 +88,11 @@ fn main(s: &os2::Startup) -> u32 {
         }
     };
     let bytes = disk.sectors * disk.bps as u64;
-    let fs = fs.unwrap_or(if cur == "HPFS" { Fs::Hpfs } else { Fs::Fat });
+    let fs = fs.unwrap_or(match cur.as_str() {
+        "HPFS" => Fs::Hpfs,
+        "JFS" => Fs::Jfs,
+        _ => Fs::Fat,
+    });
     // Hard disks: confirm with the current label, then the warning.
     if let Ok((cur_label, _)) = volume_label(d) {
         if !cur_label.is_empty() {
@@ -143,6 +149,19 @@ fn main(s: &os2::Startup) -> u32 {
             let p = hpfs::FormatParams { label: lab, serial: ser, hidden_sectors: hidden, code_page: 850, now };
             hpfs::format(&&disk, &p).is_ok()
         }
+        Fs::Jfs => {
+            if bytes < jfs::MIN_BYTES {
+                disk.unlock();
+                eprint("SYS1295: The volume is too small for JFS (16 MB at least).\r\n");
+                return 1;
+            }
+            let now = hpfs::time::from_dos(
+                fat::Timestamp::new(dt.year, dt.month, dt.day, dt.hours, dt.minutes, dt.seconds).date,
+                fat::Timestamp::new(dt.year, dt.month, dt.day, dt.hours, dt.minutes, dt.seconds).time,
+            );
+            let p = jfs::FormatParams { label: lab, serial: ser, hidden_sectors: hidden, now, ..Default::default() };
+            jfs::format(&&disk, &p).is_ok()
+        }
     };
     // Mount the new file system (also after a failure: the old one is gone).
     disk.redetermine();
@@ -154,6 +173,7 @@ fn main(s: &os2::Startup) -> u32 {
     outln("\r\n\r\nFormat completed successfully.\r\n");
     let name = match fs {
         Fs::Hpfs => "HPFS",
+        Fs::Jfs => "JFS",
         _ => "FAT",
     };
     outln(&alloc::format!("The new type of file system is {name}.\r\n"));

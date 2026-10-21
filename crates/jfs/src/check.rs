@@ -19,6 +19,10 @@ pub struct Report {
     /// Blocks in use by files' data, trees and EAs.
     pub used_blocks: u64,
     pub free_blocks: u64,
+    /// Blocks of directory pages, of file data and xtree pages, of EAs.
+    pub dir_blocks: u64,
+    pub file_blocks: u64,
+    pub ea_blocks: u64,
     pub problems: Vec<String>,
 }
 
@@ -103,6 +107,7 @@ impl<D: BlockDevice> Volume<D> {
             let ea = i.ea();
             if ea.flag & dxd::EXTENT != 0 {
                 own.claim(ea.loc.addr, ea.loc.len as u64, &mut r, "EA");
+                r.ea_blocks += ea.loc.len as u64;
             }
             if i.is_dir() {
                 r.dirs += 1;
@@ -113,6 +118,7 @@ impl<D: BlockDevice> Volume<D> {
                     Ok(pages) => {
                         for p in &pages {
                             own.claim(p.addr, p.len as u64, &mut r, "directory page");
+                            r.dir_blocks += p.len as u64;
                         }
                         let blocks: u64 = pages.iter().map(|p| p.len as u64).sum::<u64>()
                             + if ea.flag & dxd::EXTENT != 0 { ea.loc.len as u64 } else { 0 };
@@ -160,6 +166,7 @@ impl<D: BlockDevice> Volume<D> {
                             own.claim(p.addr, p.len as u64, &mut r, "file xtree");
                             blocks += p.len as u64;
                         }
+                        r.file_blocks += blocks;
                         if ea.flag & dxd::EXTENT != 0 {
                             blocks += ea.loc.len as u64;
                         }
