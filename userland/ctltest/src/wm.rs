@@ -50,6 +50,8 @@ unsafe extern "C" {
     fn WinStoreWindowPos(app: *const u8, key: *const u8, h: u32) -> u32;
     #[link_name = "PMWP.208"]
     fn WinRestoreWindowPos(app: *const u8, key: *const u8, h: u32) -> u32;
+    #[link_name = "PMWIN.856"]
+    fn WinSetClipbrdViewer(hab: u32, h: u32) -> u32;
     #[link_name = "PMGPI.365"]
     fn GpiCopyMetaFile(hmf: u32) -> u32;
     #[link_name = "PMSPL.399"]
@@ -74,6 +76,7 @@ static FRAME_PROC: AtomicU32 = AtomicU32::new(0);
 /// application name or the DDESTRUCT pointer).
 static DDE: [AtomicU32; 3] = [AtomicU32::new(0), AtomicU32::new(0), AtomicU32::new(0)];
 static ACK: AtomicU32 = AtomicU32::new(0);
+static DRAWCLIP: AtomicU32 = AtomicU32::new(0);
 
 extern "C" fn derived_frame(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
@@ -90,6 +93,11 @@ extern "C" fn derived_frame(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 ACK.store(ok as u32 | mp1 << 1, Ordering::Relaxed);
             }
             return 1;
+        }
+        0x67 => {
+            // WM_DRAWCLIPBOARD
+            DRAWCLIP.fetch_add(1, Ordering::Relaxed);
+            return 0;
         }
         WM_DDE_DATA => {
             DDE[0].store(msg, Ordering::Relaxed);
@@ -187,6 +195,9 @@ pub fn wm_checks(hab: u32, hmq: u32, client: u32, other: u32) {
     let f = frame_checks(hab);
     dde_checks(hab, client, f);
     unsafe {
+        let ok = WinSetClipbrdViewer(hab, f) != 0;
+        check("a new clipboard viewer gets WM_DRAWCLIPBOARD at once", ok && DRAWCLIP.load(Ordering::Relaxed) == 1);
+        WinSetClipbrdViewer(hab, 0);
         WinDestroyWindow(f);
         let mut qi = [0u32; 5];
         check("WinQueryQueueInfo", WinQueryQueueInfo(hmq, qi.as_mut_ptr(), 20) != 0 && qi[0] == 20 && qi[2] == 1);

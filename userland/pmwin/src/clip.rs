@@ -216,7 +216,8 @@ pub extern "C" fn WinCloseClipbrd(_hab: u32) -> u32 {
     let (changed, viewer) = (c.changed, c.viewer);
     c.changed = false;
     if changed && viewer != 0 && st().desk.exists(viewer) {
-        crate::msg::notify(viewer, WM_DRAWCLIPBOARD, 0, 0);
+        let owner = st().clip.owner;
+        crate::msg::notify(viewer, WM_DRAWCLIPBOARD, owner, 0);
     }
     1
 }
@@ -343,6 +344,12 @@ pub extern "C" fn WinQueryClipbrdOwner(_hab: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetClipbrdViewer(_hab: u32, h: u32) -> u32 {
     clip().viewer = h;
+    // As on OS/2 the new viewer draws what is there at once
+    // (WM_DRAWCLIPBOARD, mp1 = the clipboard owner).
+    if h != 0 && st().desk.exists(h) {
+        let owner = st().clip.owner;
+        crate::msg::notify(h, WM_DRAWCLIPBOARD, owner, 0);
+    }
     1
 }
 
