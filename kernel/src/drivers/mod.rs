@@ -1,7 +1,9 @@
 //! Device drivers.
 
+pub mod ac97;
 pub mod ahci;
 pub mod e1000;
+pub mod es137x;
 pub mod hda;
 pub mod hid;
 pub mod hotplug;
@@ -159,8 +161,19 @@ pub fn init() {
                 disks.push(ns);
             }
         }
-        if (d.class, d.subclass) == (4, 3) && !crate::audio::present() {
-            if let Some(out) = hda::probe(d) {
+        // Sound: the first device that comes up is used.
+        if !crate::audio::present() {
+            use crate::audio::Output;
+            let out = if (d.class, d.subclass) == (4, 3) {
+                hda::probe(d).map(Output::Hda)
+            } else if ac97::is_ac97(d) {
+                ac97::probe(d).map(Output::Ac97)
+            } else if es137x::is_es137x(d) {
+                es137x::probe(d).map(Output::Es137x)
+            } else {
+                None
+            };
+            if let Some(out) = out {
                 crate::audio::attach(out);
             }
         }

@@ -1,11 +1,13 @@
 //! Sound output: the software mixer between the RS2API audio calls
-//! (`api::audio`) and the sound hardware (`drivers::hda`).
+//! (`api::audio`) and the sound hardware ([`Output`]: `drivers::hda`,
+//! `drivers::ac97` or `drivers::es137x`).
 //!
 //! Programs open streams with their own format (8000-48000 Hz and
 //! beyond, 8-bit unsigned or 16-bit signed, mono or stereo) and queue raw
-//! PCM. The timer tick keeps the hardware ring [`LEAD`] frames ahead of
+//! PCM. The timer tick keeps the hardware ring [`LEAD_MS`] ahead of
 //! the hardware's play position: each stream still playing is converted
-//! to 16-bit stereo, resampled to 48 kHz by linear interpolation, scaled
+//! to 16-bit stereo, resampled to the hardware's rate (48 kHz, 44.1 kHz
+//! on the ES1370) by linear interpolation, scaled
 //! by its volume and summed; the sum is scaled by the master volume and
 //! clipped. While nothing is open the ring is filled with silence, and
 //! the hardware stops after [`IDLE_STOP_MS`].
@@ -18,16 +20,16 @@ use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, Ordering};
 
-use crate::drivers::hda::{self, RING_FRAMES};
+use crate::drivers::{ac97, es137x, hda};
 use crate::sync::SpinLock;
 use crate::task::WaitQueue;
 
-/// Hardware rate.
-pub const RATE: u32 = 48000;
-/// How far ahead of the hardware the ring is filled, in frames (100 ms).
-const LEAD: u64 = 4800;
-/// Refill when at least this many frames are free (5 ms).
-const MIN_FILL: u64 = 240;
+/// Frames in every driver's output ring (stereo, 16-bit: 4 bytes each).
+pub const RING_FRAMES: usize = 16384;
+/// How far ahead of the hardware the ring is filled (100 ms).
+const LEAD_MS: u64 = 100;
+/// Refill when at least this much of the ring is free (5 ms).
+const MIN_FILL_MS: u64 = 5;
 /// Frames mixed per step (one mark each).
 const CHUNK: usize = 256;
 /// Stop the hardware after this long with no stream open.
@@ -159,8 +161,58 @@ impl Stream {
     }
 }
 
+/// A sound driver's output: a ring of [`RING_FRAMES`] 16-bit stereo
+/// frames the hardware plays in a loop at [`Output::rate`].
+pub enum Output {
+    Hda(hda::Output),
+    Ac97(ac97::Output),
+    Es137x(es137x::Output),
+}
+
+macro_rules! each {
+    ($s:expr, $o:ident => $e:expr) => {
+        match $s {
+            Output::Hda($o) => $e,
+            Output::Ac97($o) => $e,
+            Output::Es137x($o) => $e,
+        }
+    };
+}
+
+impl Output {
+    /// The ring of interleaved stereo samples.
+    pub fn ring(&mut self) -> &mut [i16] {
+        each!(self, o => o.ring())
+    }
+
+    /// The frame the hardware plays next.
+    pub fn position(&self) -> usize {
+        each!(self, o => o.position())
+    }
+
+    pub fn running(&self) -> bool {
+        each!(self, o => o.running())
+    }
+
+    /// Frames per second.
+    pub fn rate(&self) -> u32 {
+        each!(self, o => o.rate())
+    }
+
+    /// Start playing the ring from frame 0 (the caller has filled it).
+    pub fn start(&mut self) {
+        each!(self, o => o.start())
+    }
+
+    pub fn stop(&mut self) {
+        each!(self, o => o.stop())
+    }
+}
+
 pub struct Mixer {
-    out: Option<hda::Output>,
+    out: Option<Output>,
+    /// The hardware's rate.
+    rate: u32,
     pub streams: Vec<Stream>,
     pub master: u32,
     next_id: u32,
@@ -174,6 +226,7 @@ pub struct Mixer {
 
 pub static MIXER: SpinLock<Mixer> = SpinLock::new(Mixer {
     out: None,
+    rate: 48000,
     streams: Vec::new(),
     master: 100,
     next_id: 1,
@@ -194,9 +247,10 @@ pub fn present() -> bool {
 }
 
 /// The driver found an output: use it (the first one).
-pub fn attach(out: hda::Output) {
+pub fn attach(out: Output) {
     let mut m = MIXER.lock();
     if m.out.is_none() {
+        m.rate = out.rate();
         m.out = Some(out);
         PRESENT.store(true, Ordering::Release);
     }
@@ -227,7 +281,7 @@ impl Mixer {
             consumed: 0,
             played: 0,
             marks: VecDeque::new(),
-            step: ((((rate as u64) << 16) + RATE as u64 / 2) / RATE as u64) as u32,
+            step: ((((rate as u64) << 16) + self.rate as u64 / 2) / self.rate as u64) as u32,
             phase: 0,
             prev: [0; 2],
             primed: false,
@@ -240,6 +294,11 @@ impl Mixer {
         let n = self.streams.len();
         self.streams.retain(|s| !(s.id == id && s.pid == pid));
         self.streams.len() != n
+    }
+
+    /// How far ahead of the hardware the ring is filled, in frames.
+    fn lead(&self) -> u64 {
+        self.rate as u64 * LEAD_MS / 1000
     }
 
     /// Mix ring frames from `filled` up to `until`.
@@ -293,7 +352,7 @@ impl Mixer {
         self.last_pos = 0;
         let Some(out) = self.out.as_mut() else { return };
         out.ring().fill(0);
-        self.fill(LEAD);
+        self.fill(self.lead());
         if let Some(out) = self.out.as_mut() {
             out.start();
         }
@@ -329,8 +388,8 @@ impl Mixer {
                 s.played = s.consumed;
             }
         }
-        let until = self.hw + LEAD;
-        if until < self.filled + MIN_FILL {
+        let until = self.hw + self.lead();
+        if until < self.filled + self.rate as u64 * MIN_FILL_MS / 1000 {
             return false;
         }
         self.fill(until);

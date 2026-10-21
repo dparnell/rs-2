@@ -25,8 +25,8 @@ use crate::msi;
 
 const PAGE: usize = 4096;
 
-/// Frames in the output ring (stereo, 16-bit: 4 bytes each).
-pub const RING_FRAMES: usize = 16384;
+use crate::audio::RING_FRAMES;
+
 const RING_BYTES: usize = RING_FRAMES * 4;
 /// Buffer descriptor list entries the ring is split into.
 const BDL_ENTRIES: usize = 4;
@@ -421,6 +421,10 @@ impl Output {
 
     pub fn running(&self) -> bool {
         self.running
+    }
+
+    pub fn rate(&self) -> u32 {
+        48000
     }
 
     fn reset_stream(&self) {
