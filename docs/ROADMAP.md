@@ -137,7 +137,22 @@ Status markers: done, in progress, planned.
   `cargo xtask run --sound` adds the QEMU devices (CoreAudio in the
   window), `--sound-wav FILE` records to a WAV file; AUDTEST.EXE checks
   the calls and `tools/scripts/audcheck.py FILE` the recording
-- planned: other sound hardware (AC'97, VMware's ES1371), recording,
+- done: more sound hardware behind the same mixer (`audio::Output`, the
+  first device found is used; the mixer resamples to its rate):
+  - Intel ICH AC'97 (`drivers/ac97.rs`: ICH-ICH7, 440MX, AMD 768/8111,
+    nVidia nForce; QEMU `AC97`, VirtualBox, Proxmox, older VMware):
+    cold reset, primary codec at 0 dB unmuted, 48 kHz (set through VRA
+    when the codec has it), PCM out over all 32 buffer descriptors with
+    the last valid index kept behind the current one
+  - Ensoniq AudioPCI (`drivers/es137x.rs`): the ES1370 (QEMU `ES1370`;
+    AK4531 codec, DAC2 at 44100 Hz) and the ES1371/CT5880/EV1938
+    (VMware's "Sound Blaster" `es1371`; AC'97 warm reset, sample rate
+    converter set to 48 kHz on DAC2, codec at 0 dB), DAC2 looping a ring
+  - `cargo xtask run --sound ac97` / `--sound es1370` (`es1371` is the
+    same: QEMU has no ES1371). AUDTEST and audcheck pass on QEMU's HDA,
+    AC97 and ES1370, Solitaire's sounds play on AC97; the ES1371 path is
+    untested (reviewed against the register layout only)
+- planned: recording,
   jack sensing, codec volume controls, MMPM/2's audio device driver
   interface for IBM's own drivers
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
