@@ -472,15 +472,27 @@ unsafe extern "C" fn player(param: u32) {
         }
     }
     let _ = played;
-    // Let what is queued finish (unless stopped meanwhile).
+    // Let what is queued finish (unless stopped meanwhile). A stream
+    // whose position stands still for STUCK_MS while not paused is given
+    // up on: the play ends as if it had finished.
+    const STUCK_MS: u32 = 3000;
     if done && have_audio {
+        let (mut last, mut still_for) = (u32::MAX, 0);
         loop {
-            let still = with(id, |d| current(d, epoch)).unwrap_or(false);
+            let (still, paused) = with(id, |d| (current(d, epoch), d.mode == MCI_MODE_PAUSE)).unwrap_or((false, false));
             if !still {
                 stopped = true;
                 break;
             }
             if unsafe { Rs2AudioDrain(stream, 100) } == 0 {
+                break;
+            }
+            let mut pos = 0;
+            unsafe { Rs2AudioQueryPos(stream, &mut pos) };
+            still_for = if pos != last || paused { 0 } else { still_for + 100 };
+            last = pos;
+            if still_for >= STUCK_MS {
+                unsafe { Rs2AudioStop(stream) };
                 break;
             }
         }

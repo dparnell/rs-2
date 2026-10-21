@@ -462,6 +462,19 @@ impl Output {
         wr32(r, sd + SD_CTL, rd32(r, sd + SD_CTL) & 0xff_ffff & !SD_CTL_RUN);
         self.running = false;
     }
+
+    pub fn diag(&self) -> String {
+        let (r, sd) = (self.regs, self.sd);
+        alloc::format!(
+            "stream ctl {:#x} sts {:#x} lpib {} cbl {}, gctl {:#x} intsts {:#x}",
+            rd32(r, sd + SD_CTL),
+            rd8(r, sd + SD_STS),
+            rd32(r, sd + SD_LPIB),
+            rd32(r, sd + SD_CBL),
+            rd32(r, GCTL),
+            rd32(r, 0x24)
+        )
+    }
 }
 
 /// Bring up an HDA controller: the output stream if a codec has an

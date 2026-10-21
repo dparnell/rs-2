@@ -142,6 +142,22 @@ impl Output {
         unsafe { outb(self.bm + PO_CR, 0) };
         self.running = false;
     }
+
+    pub fn diag(&self) -> alloc::string::String {
+        let bm = self.bm;
+        unsafe {
+            alloc::format!(
+                "PCM out civ {} lvi {} sr {:#x} picb {} cr {:#x}, glob_cnt {:#x} glob_sta {:#x}",
+                inb(bm + PO_CIV),
+                inb(bm + PO_LVI),
+                inw(bm + PO_SR),
+                inw(bm + PO_PICB),
+                inb(bm + PO_CR),
+                inl(bm + GLOB_CNT),
+                inl(bm + GLOB_STA)
+            )
+        }
+    }
 }
 
 /// Quiet the controller: every DMA engine stopped and reset, interrupts

@@ -66,6 +66,7 @@ const SRC_DIS_R1: u32 = 1 << 19;
 const SRC_KEEP: u32 = SRC_DISABLE | SRC_DIS_P1 | SRC_DIS_P2 | SRC_DIS_R1;
 const SR_DAC1: u32 = 0x70;
 const SR_DAC2: u32 = 0x74;
+const SR_ADC: u32 = 0x78;
 const SR_VOL_ADC: u32 = 0x6c;
 const SR_VOL_DAC1: u32 = 0x7c;
 const SR_VOL_DAC2: u32 = 0x7e;
@@ -77,6 +78,8 @@ const SR_VFREQ_FRAC: u32 = 3;
 const CODEC_RDY: u32 = 1 << 31;
 const CODEC_WIP: u32 = 1 << 30;
 const CODEC_PIRD: u32 = 1 << 23;
+/// EV1938: set in every codec access.
+const CODEC_EV1938: u32 = 1 << 26;
 
 // AC'97 mixer registers.
 const AC_RESET: u32 = 0x00;
@@ -156,6 +159,23 @@ impl Output {
         }
         self.running = false;
     }
+
+    pub fn diag(&self) -> alloc::string::String {
+        let io = self.io;
+        unsafe {
+            outl(io + MEM_PAGE, PAGE_DAC);
+            alloc::format!(
+                "control {:#x}, status {:#x}, serial {:#x}, DAC2 frame {:#x} size {:#x} count {:#x}, src {:#x}",
+                inl(io + CONTROL),
+                inl(io + STATUS),
+                inl(io + SERIAL),
+                inl(io + DAC2_FRAME),
+                inl(io + DAC2_SIZE),
+                inl(io + DAC2_COUNT),
+                inl(io + SRC_1371)
+            )
+        }
+    }
 }
 
 /// DACs, ADC and interrupts off.
@@ -178,6 +198,8 @@ fn spin(mut cond: impl FnMut() -> bool) -> bool {
 /// The ES1371's sample rate converter and AC'97 codec.
 struct Es1371 {
     io: u16,
+    /// [`CODEC_EV1938`] on the EV1938, else 0.
+    magic: u32,
 }
 
 impl Es1371 {
@@ -212,7 +234,7 @@ impl Es1371 {
         let io = self.io;
         spin(|| unsafe { inl(io + CODEC_1371) } & CODEC_WIP == 0);
         let saved = self.codec_window();
-        unsafe { outl(io + CODEC_1371, (reg & 0x7f) << 16 | (v & 0xffff)) };
+        unsafe { outl(io + CODEC_1371, (reg & 0x7f) << 16 | (v & 0xffff) | self.magic) };
         self.src_ready();
         unsafe { outl(io + SRC_1371, saved) };
     }
@@ -222,7 +244,7 @@ impl Es1371 {
         for _ in 0..4 {
             spin(|| unsafe { inl(io + CODEC_1371) } & CODEC_WIP == 0);
             let saved = self.codec_window();
-            unsafe { outl(io + CODEC_1371, (reg & 0x7f) << 16 | CODEC_PIRD) };
+            unsafe { outl(io + CODEC_1371, (reg & 0x7f) << 16 | CODEC_PIRD | self.magic) };
             self.src_ready();
             unsafe { outl(io + SRC_1371, saved) };
             spin(|| unsafe { inl(io + CODEC_1371) } & CODEC_WIP == 0);
@@ -231,6 +253,13 @@ impl Es1371 {
                 v = unsafe { inl(io + CODEC_1371) };
                 v & CODEC_RDY != 0
             }) {
+                if self.magic != 0 {
+                    // The EV1938 shows the data a little after RDY.
+                    for _ in 0..100 {
+                        unsafe { inl(io + CONTROL) };
+                    }
+                    v = unsafe { inl(io + CODEC_1371) };
+                }
                 return Some(v as u16);
             }
         }
@@ -238,6 +267,9 @@ impl Es1371 {
     }
 
     /// Clear the converter's RAM and set unity volumes, then DAC2's rate.
+    /// Every channel is set up for 48000 Hz (N = 16, integer step 16),
+    /// the ADC too though it stays unused: the converter serves the
+    /// channels in turn.
     fn src_init(&self, rate: u32) {
         let io = self.io;
         self.src_ready();
@@ -245,7 +277,7 @@ impl Es1371 {
         for r in 0..0x80 {
             self.src_write(r, 0);
         }
-        for base in [SR_DAC1, SR_DAC2] {
+        for base in [SR_DAC1, SR_DAC2, SR_ADC] {
             self.src_write(base + SR_TRUNC_N, 16 << 4);
             self.src_write(base + SR_INT_REGS, 16 << 10);
         }
@@ -302,12 +334,13 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
         Chip::Es1371 => {
             let ctrl = 0;
             quiet(io, ctrl);
-            let c = Es1371 { io };
+            let c = Es1371 { io, magic: if dev.device == 0x8938 { CODEC_EV1938 } else { 0 } };
             unsafe {
                 outl(io + LEGACY_1371, 0);
             }
-            // Revisions whose codec needs the AC'97 reset line released.
-            if dev.device == 0x5880 || dev.vendor == 0x1102 || rev == 7 {
+            // Revisions whose codec needs the AC'97 reset line released:
+            // CT5880 C, D and E, ES1371 rev 7 and 8 (CT5880 A).
+            if matches!((dev.device, rev), (0x5880, 2..=4) | (0x1371, 7 | 8)) {
                 unsafe { outl(io + STATUS, AC97_RST_1371) };
                 msi::poll(20, || {}, || false);
             }

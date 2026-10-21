@@ -32,6 +32,9 @@ const LEAD_MS: u64 = 100;
 const MIN_FILL_MS: u64 = 5;
 /// Frames mixed per step (one mark each).
 const CHUNK: usize = 256;
+/// A running output whose position stands still this long is taken to
+/// be stuck: the mixer paces itself by the clock instead (silently).
+const STALL_MS: u64 = 1000;
 /// Stop the hardware after this long with no stream open.
 const IDLE_STOP_MS: u64 = 2000;
 /// Streams in the system.
@@ -207,6 +210,11 @@ impl Output {
     pub fn stop(&mut self) {
         each!(self, o => o.stop())
     }
+
+    /// The driver's registers, for the log.
+    pub fn diag(&self) -> alloc::string::String {
+        each!(self, o => o.diag())
+    }
 }
 
 pub struct Mixer {
@@ -222,6 +230,11 @@ pub struct Mixer {
     filled: u64,
     last_pos: usize,
     idle_since: u64,
+    /// When the hardware position last moved.
+    moved_at: u64,
+    /// Software pacing (tick and ring frame it started at), once the
+    /// hardware position has stood still for [`STALL_MS`] while running.
+    soft: Option<(u64, u64)>,
 }
 
 pub static MIXER: SpinLock<Mixer> = SpinLock::new(Mixer {
@@ -234,6 +247,8 @@ pub static MIXER: SpinLock<Mixer> = SpinLock::new(Mixer {
     filled: 0,
     last_pos: 0,
     idle_since: 0,
+    moved_at: 0,
+    soft: None,
 });
 
 static PRESENT: AtomicBool = AtomicBool::new(false);
@@ -328,12 +343,26 @@ impl Mixer {
     }
 
     /// Account for what the hardware has played.
-    fn advance(&mut self) {
+    fn advance(&mut self, now: u64) {
         let Some(out) = self.out.as_ref() else { return };
-        let pos = out.position();
-        let delta = (pos + RING_FRAMES - self.last_pos) % RING_FRAMES;
-        self.last_pos = pos;
-        self.hw += delta as u64;
+        let hz = crate::irq::HZ;
+        if let Some((t0, f0)) = self.soft {
+            self.hw = self.hw.max(f0 + (now - t0) * self.rate as u64 / hz);
+        } else {
+            let pos = out.position();
+            let delta = (pos + RING_FRAMES - self.last_pos) % RING_FRAMES;
+            self.last_pos = pos;
+            self.hw += delta as u64;
+            if delta != 0 {
+                self.moved_at = now;
+            } else if now - self.moved_at >= STALL_MS * hz / 1000 {
+                crate::println!(
+                    "audio: the output's position stays at {pos} ({}); pacing by the clock from now on, without sound",
+                    out.diag()
+                );
+                self.soft = Some((now, self.hw));
+            }
+        }
         let hw = self.hw;
         for s in self.streams.iter_mut() {
             while let Some(&(f, c)) = s.marks.front() {
@@ -346,10 +375,14 @@ impl Mixer {
         }
     }
 
-    fn start(&mut self) {
+    fn start(&mut self, now: u64) {
         self.hw = 0;
         self.filled = 0;
         self.last_pos = 0;
+        self.moved_at = now;
+        if self.soft.is_some() {
+            self.soft = Some((now, 0));
+        }
         let Some(out) = self.out.as_mut() else { return };
         out.ring().fill(0);
         self.fill(self.lead());
@@ -365,11 +398,11 @@ impl Mixer {
             if self.streams.is_empty() {
                 return false;
             }
-            self.start();
+            self.start(now);
             self.idle_since = now;
             return true;
         }
-        self.advance();
+        self.advance(now);
         if self.streams.is_empty() {
             if now - self.idle_since >= IDLE_STOP_MS * crate::irq::HZ / 1000 {
                 if let Some(o) = self.out.as_mut() {
