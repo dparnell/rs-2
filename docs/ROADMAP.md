@@ -56,6 +56,11 @@ Status markers: done, in progress, planned.
 ## Milestone 2: storage and installed systems (in progress)
 
 - done: PCI, AHCI (SATA disks, ATAPI drives), MBR/GPT, FAT, ISO 9660
+- done: PCI IDE (PIIX: ATA disks and ATAPI CD drives, PIO, legacy and
+  native channels; Proxmox's and VMware's IDE CD drives); CD drives keep
+  their letter without a disc and mount the one inserted or changed later;
+  disk write caches flushed (NVMe FLUSH, FLUSH CACHE) at restart and
+  shutdown
 - done: boot from an installed disk (UEFI)
 - done: NVMe (MSI-X/MSI completion interrupts, polled fallback)
 - done: USB: xHCI (MSI-X/MSI interrupter 0), boot-protocol HID keyboard and mouse, hot-plug

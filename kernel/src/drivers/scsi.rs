@@ -222,7 +222,9 @@ pub fn setup_unit<H: Hba>(hba: &Arc<Mutex<H>>, target: u8, lun: u8) -> Option<(U
 impl<H: Hba> Unit<H> {
     fn transfer(&self, lba: u64, buf: &mut [u8], write: bool) -> Result<(), u32> {
         let bs = self.block;
-        if buf.len() % bs != 0 || lba + (buf.len() / bs) as u64 > self.blocks {
+        // A CD drive's capacity at boot is 0 without a disc; one put in
+        // later is read all the same (the drive reports reads past its end).
+        if buf.len() % bs != 0 || (!self.optical && lba + (buf.len() / bs) as u64 > self.blocks) {
             return Err(err::INVALID_PARAMETER);
         }
         if write && self.optical {

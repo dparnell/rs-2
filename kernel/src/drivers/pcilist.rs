@@ -44,7 +44,7 @@ fn name(vendor: u16, device: u16) -> Option<&'static str> {
 
 /// Whether the kernel drives this function (storage controllers).
 fn has_storage_driver(d: &Device) -> bool {
-    matches!((d.class, d.subclass, d.progif), (1, 6, 1) | (1, 8, 2))
+    matches!((d.class, d.subclass, d.progif), (1, 6, 1) | (1, 8, 2)) || (d.class, d.subclass) == (1, 1)
         || matches!((d.vendor, d.device), (0x15ad, 0x07c0) | (0x1000, 0x0030 | 0x0054))
 }
 

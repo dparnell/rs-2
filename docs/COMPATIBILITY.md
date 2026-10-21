@@ -348,8 +348,6 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   FAT32.IFS from memory and are unverified against a real disk.
 - AVIO (VioCreatePS and the other Presentation Manager VIO calls) is not
   implemented.
-- Changing a CD for a different one is not detected (the old volume stays
-  mounted); re-inserting the same medium and choosing Retry works.
 - Writing to QEMU's virtual FAT drive (the ESP directory) can hang QEMU
   itself (seen with BACKUP; QEMU's monitor stops answering too); FAT disk
   images are fine.

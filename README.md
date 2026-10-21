@@ -9,7 +9,7 @@ programs unmodified, natively, on 64-bit PCs.
 - The OS/2 kernel API (DOSCALLS: files, memory, processes, threads,
   semaphores, exceptions, timers, queues, shared memory, pipes, modules,
   resources, signals) plus VIO, KBD, MSG and NLS.
-- UEFI boot from CD, USB stick or hard disk; AHCI, NVMe, USB keyboard/mouse (xHCI),
+- UEFI boot from CD, USB stick or hard disk; IDE, AHCI, NVMe, USB keyboard/mouse (xHCI),
   partitions (MBR/GPT), FAT, HPFS and ISO 9660.
 - Runs as a guest in VMware (and QEMU's VMware device models): VMware
   absolute pointer (no mouse capture), PVSCSI and LSI Logic (MPT Fusion)
@@ -172,8 +172,10 @@ the desktop.
 ## Virtual machines
 
 rs2 boots in any VM with UEFI firmware and a GOP framebuffer. Storage:
-SATA (AHCI), NVMe, VMware PVSCSI, LSI Logic Parallel (53c1030) and LSI
-Logic SAS (SAS1068), USB sticks. `video=1280x1024` (or any WxH) in
+IDE (PIIX: disks and CD drives), SATA (AHCI), NVMe, VMware PVSCSI, LSI
+Logic Parallel (53c1030) and LSI Logic SAS (SAS1068), USB sticks. CD
+drives have their letter with or without a disc, so one inserted or
+changed later is read. `video=1280x1024` (or any WxH) in
 `\RS2\CMDLINE` picks the resolution: through the firmware if it offers
 that mode, otherwise through the VMware SVGA II driver. With a virtio-gpu
 display the kernel's driver always takes over and sets any size: the

@@ -5,6 +5,7 @@ pub mod e1000;
 pub mod hid;
 pub mod hotplug;
 pub mod hub;
+pub mod ide;
 pub mod mpt;
 pub mod nvme;
 pub mod part;
@@ -139,6 +140,14 @@ pub fn init() {
                 }
             }
         }
+        if (d.class, d.subclass) == (1, 1) {
+            for dr in ide::probe(d) {
+                match dr.kind {
+                    ide::Kind::Ata => disks.push(dr),
+                    ide::Kind::Atapi => optical.push(dr),
+                }
+            }
+        }
         if (d.class, d.subclass, d.progif) == (0x0c, 3, 0x30) {
             for (dev, is_optical) in xhci::probe(d) {
                 if is_optical { usb_optical.push(dev) } else { usb_disks.push(dev) }
@@ -228,18 +237,13 @@ pub fn init() {
         let t = p.mbr_type;
         try_mount_fat(Arc::new(p), &alloc::format!("disk: FAT partition type {t:#x}"));
     }
+    // Every CD drive gets a letter, with or without a disc: the disc is
+    // mounted when it is used (fs/cdrom.rs). Hard errors (medium removed)
+    // go through the pop-up.
     for cd in optical {
-        if cd.sector_count() == 0 {
-            continue;
-        }
-        // Hard errors (medium removed) go through the pop-up.
-        match crate::fs::iso9660::Iso9660::mount(crate::api::harderr::wrap(cd.clone())) {
-            Ok(fs) => {
-                if let Some(d) = next_letter() {
-                    crate::fs::mount(d, fs);
-                }
-            }
-            Err(_) => crate::println!("cd: unrecognised medium"),
+        let has_disc = cd.sector_count() != 0;
+        if let Some(d) = next_letter() {
+            crate::fs::mount(d, crate::fs::cdrom::CdDrive::new(cd.clone(), has_disc));
         }
     }
     *DISKS.lock() = disks;
