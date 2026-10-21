@@ -8,6 +8,7 @@ UniQueryLocaleValue=__a_UniQueryLocaleValue @156
 UniQueryLocaleInfo=__a_UniQueryLocaleInfo @29
 UniFreeLocaleInfo=__a_UniFreeLocaleInfo @28
 UniStrftime=__a_UniStrftime @39
+UniStrptime=__a_UniStrptime @46
 UniLocaleStrToToken=__a_UniLocaleStrToToken @54
 UniLocaleTokenToStr=__a_UniLocaleTokenToStr @55
 UniMapCtryToLocale=__a_UniMapCtryToLocale @67

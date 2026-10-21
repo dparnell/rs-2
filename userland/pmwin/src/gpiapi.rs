@@ -511,6 +511,46 @@ pub extern "C" fn GpiLoadMetaFile(_hab: u32, _name: *const u8) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiDeleteMetaFile(_hmf: u32) -> u32 {
+    crate::misc::set_error(PMERR_INV_HMF);
+    0
+}
+
+/// No metafile handle is ever valid (see GpiLoadMetaFile): the calls that
+/// take one fail with PMERR_INV_HMF, as OS/2's do for a bad handle.
+const PMERR_INV_HMF: u32 = 0x207e;
+
+/// GpiCopyMetaFile(hmf)
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiCopyMetaFile(_hmf: u32) -> u32 {
+    crate::misc::set_error(PMERR_INV_HMF);
+    0
+}
+
+/// GpiQueryMetaFileLength(hmf)
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiQueryMetaFileLength(_hmf: u32) -> i32 {
+    crate::misc::set_error(PMERR_INV_HMF);
+    GPI_ERROR
+}
+
+/// GpiQueryMetaFileBits(hmf, lOffset, lLength, pbData)
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiQueryMetaFileBits(_hmf: u32, _off: i32, _n: i32, _p: *mut u8) -> u32 {
+    crate::misc::set_error(PMERR_INV_HMF);
+    0
+}
+
+/// GpiSetMetaFileBits(hmf, lOffset, lLength, pbBuffer)
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiSetMetaFileBits(_hmf: u32, _off: i32, _n: i32, _p: *const u8) -> u32 {
+    crate::misc::set_error(PMERR_INV_HMF);
+    0
+}
+
+/// GpiSaveMetaFile(hmf, pszFilename)
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiSaveMetaFile(_hmf: u32, _name: *const u8) -> u32 {
+    crate::misc::set_error(PMERR_INV_HMF);
     0
 }
 

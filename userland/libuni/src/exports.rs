@@ -29,6 +29,7 @@ aligned! {
     __a_UniQueryLocaleInfo => crate::UniQueryLocaleInfo, 2;
     __a_UniFreeLocaleInfo => crate::UniFreeLocaleInfo, 1;
     __a_UniStrftime => crate::UniStrftime, 5;
+    __a_UniStrptime => crate::UniStrptime, 4;
     __a_UniLocaleStrToToken => crate::UniLocaleStrToToken, 3;
     __a_UniLocaleTokenToStr => crate::UniLocaleTokenToStr, 3;
     __a_UniMapCtryToLocale => crate::UniMapCtryToLocale, 3;

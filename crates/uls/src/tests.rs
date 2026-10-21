@@ -234,3 +234,26 @@ fn code_pages() {
     assert_eq!(ucs_to_cp(850, 0x20ac), None);
     assert!(dbcs_ranges(932).is_some());
 }
+
+#[test]
+fn strptime_formats() {
+    let us = en_us();
+    let item = |n: usize| system_item(us, n);
+    let mut tm = Tm::default();
+    let buf = ucs("Wednesday, February 07, 2001 14:05:09");
+    let n = strptime(&item, &buf, &ucs("%A, %B %d, %Y %H:%M:%S"), &mut tm);
+    assert_eq!(n, Some(buf.len()));
+    assert_eq!((tm.wday, tm.mon, tm.mday, tm.year, tm.hour, tm.min, tm.sec), (3, 1, 7, 101, 14, 5, 9));
+    // Abbreviated names, no case, blanks for white space, 12-hour clock.
+    let mut tm = Tm::default();
+    let buf = ucs("feb  7   01 02:30 PM rest");
+    let n = strptime(&item, &buf, &ucs("%b %e %y %I:%M %p"), &mut tm).unwrap();
+    assert_eq!(&buf[n..], &ucs(" rest")[..]);
+    assert_eq!((tm.mon, tm.mday, tm.year, tm.hour, tm.min), (1, 7, 101, 14, 30));
+    // The locale's date format (%x) and a mismatch.
+    let mut tm = Tm::default();
+    let x = strftime(&item, &ucs("%x"), &Tm { mday: 7, mon: 1, year: 101, ..Default::default() });
+    assert!(strptime(&item, &x, &ucs("%x"), &mut tm).is_some());
+    assert_eq!((tm.mon, tm.mday, tm.year), (1, 7, 101));
+    assert_eq!(strptime(&item, &ucs("13/40/01"), &ucs("%m/%d/%y"), &mut Tm::default()), None);
+}

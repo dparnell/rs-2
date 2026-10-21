@@ -50,6 +50,8 @@ unsafe extern "C" {
     fn WinStoreWindowPos(app: *const u8, key: *const u8, h: u32) -> u32;
     #[link_name = "PMWP.208"]
     fn WinRestoreWindowPos(app: *const u8, key: *const u8, h: u32) -> u32;
+    #[link_name = "PMGPI.365"]
+    fn GpiCopyMetaFile(hmf: u32) -> u32;
     #[link_name = "PMSPL.399"]
     fn SplEnumQueue(comp: *const u8, level: u32, buf: *mut u8, cb: u32, ret: *mut u32, total: *mut u32, needed: *mut u32, r: u32) -> u32;
     #[link_name = "PMSPL.397"]
@@ -191,6 +193,8 @@ pub fn wm_checks(hab: u32, hmq: u32, client: u32, other: u32) {
         let (mut ret, mut total, mut need) = (9, 9, 9);
         let rc = SplEnumQueue(null(), 3, null_mut(), 0, &mut ret, &mut total, &mut need, 0);
         check("SplEnumQueue: no printer queues", rc == 0 && ret == 0 && total == 0 && need == 0);
+        WinGetLastError(hab);
+        check("GpiCopyMetaFile of a bad handle: PMERR_INV_HMF", GpiCopyMetaFile(0x1234) == 0 && WinGetLastError(hab) & 0xffff == 0x207e);
         check("SplQueryQueue: NERR_QNotFound", SplQueryQueue(null(), b"LPT1Q\0".as_ptr(), 3, null_mut(), 0, &mut need) == 2150);
     }
 }

@@ -711,6 +711,144 @@ fn strftime_into<'a>(item: &dyn Fn(usize) -> &'a [u16], fmt: &[u16], tm: &Tm, o:
     }
 }
 
+// ---- strptime --------------------------------------------------------------
+
+fn is_space(c: u16) -> bool {
+    matches!(c, 0x20 | 0x09..=0x0d)
+}
+
+fn eq_nocase(a: &[u16], b: &[u16]) -> bool {
+    let low = |c: u16| if (b'A' as u16..=b'Z' as u16).contains(&c) { c + 32 } else { c };
+    a.len() == b.len() && a.iter().zip(b).all(|(&x, &y)| low(x) == low(y))
+}
+
+/// UniStrptime: parse `buf` by `fmt` into `tm` with a locale's items
+/// (`item(n)`, as for [`strftime`]); the number of characters of `buf`
+/// used, None if it does not match. As in POSIX, white space in the
+/// format matches any amount of white space, names (%a, %b, %p) match
+/// without case, numbers may have leading blanks and fewer digits.
+pub fn strptime<'a>(item: &dyn Fn(usize) -> &'a [u16], buf: &[u16], fmt: &[u16], tm: &mut Tm) -> Option<usize> {
+    strptime_at(item, buf, 0, fmt, tm, 0)
+}
+
+fn strptime_at<'a>(item: &dyn Fn(usize) -> &'a [u16], buf: &[u16], mut at: usize, fmt: &[u16], tm: &mut Tm, depth: u32) -> Option<usize> {
+    let skip_space = |at: &mut usize| {
+        while *at < buf.len() && is_space(buf[*at]) {
+            *at += 1;
+        }
+    };
+    // A number of at most `width` digits in [lo, hi].
+    let num = |at: &mut usize, width: usize, lo: i32, hi: i32| -> Option<i32> {
+        while *at < buf.len() && is_space(buf[*at]) {
+            *at += 1;
+        }
+        let start = *at;
+        let mut v = 0i32;
+        while *at < buf.len() && *at - start < width && (b'0' as u16..=b'9' as u16).contains(&buf[*at]) {
+            v = v * 10 + (buf[*at] - b'0' as u16) as i32;
+            *at += 1;
+        }
+        (*at > start && (lo..=hi).contains(&v)).then_some(v)
+    };
+    // The longest of the items `first..first+n` that `buf` starts with.
+    let name = |at: &mut usize, first: usize, n: usize| -> Option<usize> {
+        let mut best: Option<(usize, usize)> = None;
+        for k in 0..n {
+            let s = item(first + k);
+            if !s.is_empty() && buf.len() >= *at + s.len() && eq_nocase(&buf[*at..*at + s.len()], s) && best.is_none_or(|b| s.len() > b.1) {
+                best = Some((k, s.len()));
+            }
+        }
+        let (k, l) = best?;
+        *at += l;
+        Some(k)
+    };
+    let mut pm: Option<bool> = None;
+    let mut hour12: Option<i32> = None;
+    let mut i = 0;
+    while i < fmt.len() {
+        let c = fmt[i];
+        i += 1;
+        if is_space(c) {
+            skip_space(&mut at);
+            continue;
+        }
+        if c != b'%' as u16 || i >= fmt.len() {
+            if buf.get(at) != Some(&c) {
+                return None;
+            }
+            at += 1;
+            continue;
+        }
+        let mut f = fmt[i];
+        i += 1;
+        if (f == b'E' as u16 || f == b'O' as u16) && i < fmt.len() {
+            f = fmt[i];
+            i += 1;
+        }
+        let sub = |s: &[u16], at: &mut usize, tm: &mut Tm| -> Option<()> {
+            if depth >= 4 {
+                return None;
+            }
+            *at = strptime_at(item, buf, *at, s, tm, depth + 1)?;
+            Some(())
+        };
+        match f as u8 {
+            b'a' | b'A' => {
+                // Full names first (they may start with the abbreviation).
+                let k = name(&mut at, 13, 7).or_else(|| name(&mut at, 6, 7))?;
+                tm.wday = k as i32;
+            }
+            b'b' | b'B' | b'h' => {
+                let k = name(&mut at, 32, 12).or_else(|| name(&mut at, 20, 12))?;
+                tm.mon = k as i32;
+            }
+            b'c' => sub(item(1), &mut at, tm)?,
+            b'C' => {
+                let v = num(&mut at, 2, 0, 99)?;
+                tm.year = v * 100 + tm.year.rem_euclid(100) - 1900;
+            }
+            b'd' | b'e' => tm.mday = num(&mut at, 2, 1, 31)?,
+            b'D' => sub(&ucs("%m/%d/%y"), &mut at, tm)?,
+            b'H' => tm.hour = num(&mut at, 2, 0, 23)?,
+            b'I' => hour12 = Some(num(&mut at, 2, 1, 12)?),
+            b'j' => tm.yday = num(&mut at, 3, 1, 366)? - 1,
+            b'm' => tm.mon = num(&mut at, 2, 1, 12)? - 1,
+            b'M' => tm.min = num(&mut at, 2, 0, 59)?,
+            b'n' | b't' => skip_space(&mut at),
+            b'p' => pm = Some(name(&mut at, 4, 2)? == 1),
+            b'r' => sub(item(55), &mut at, tm)?,
+            b'R' => sub(&ucs("%H:%M"), &mut at, tm)?,
+            b'S' => tm.sec = num(&mut at, 2, 0, 61)?,
+            b'T' => sub(&ucs("%H:%M:%S"), &mut at, tm)?,
+            b'U' | b'W' => {
+                num(&mut at, 2, 0, 53)?;
+            }
+            b'w' => tm.wday = num(&mut at, 1, 0, 6)?,
+            b'x' => sub(item(2), &mut at, tm)?,
+            b'X' => sub(item(3), &mut at, tm)?,
+            b'y' => {
+                let v = num(&mut at, 2, 0, 99)?;
+                tm.year = if v < 69 { v + 100 } else { v };
+            }
+            b'Y' => tm.year = num(&mut at, 4, 0, 9999)? - 1900,
+            b'%' => {
+                if buf.get(at) != Some(&(b'%' as u16)) {
+                    return None;
+                }
+                at += 1;
+            }
+            _ => return None,
+        }
+    }
+    if let Some(h) = hour12 {
+        tm.hour = h % 12 + if pm == Some(true) { 12 } else { 0 };
+    } else if let Some(p) = pm {
+        tm.hour = tm.hour % 12 + if p { 12 } else { 0 };
+    }
+    Some(at)
+}
+
 // ---- character types -------------------------------------------------------
 
 pub const CT_UPPER: u16 = 0x0001;

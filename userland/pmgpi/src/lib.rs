@@ -41,6 +41,7 @@ forward! {
     GpiCloseFigure = 4360;
     GpiCombineRegion = 4362;
     GpiConvert = 4364;
+    GpiCopyMetaFile = 4365;
     GpiCreateLogFont = 4368;
     GpiCreatePS = 4369;
     GpiCreateRegion = 4370;
@@ -110,6 +111,8 @@ forward! {
     GpiQueryMarker = 4462;
     GpiQueryMarkerBox = 4463;
     GpiQueryMarkerSet = 4464;
+    GpiQueryMetaFileBits = 4465;
+    GpiQueryMetaFileLength = 4466;
     GpiQueryMix = 4467;
     GpiQueryModelTransformMatrix = 4468;
     GpiQueryNearestColor = 4469;
@@ -133,6 +136,7 @@ forward! {
     GpiResetBoundaryData = 4497;
     GpiResetPS = 4498;
     GpiRestorePS = 4499;
+    GpiSaveMetaFile = 4500;
     GpiSavePS = 4501;
     GpiSetArcParams = 4502;
     GpiSetAttrMode = 4503;
@@ -162,6 +166,7 @@ forward! {
     GpiSetMarker = 4533;
     GpiSetMarkerBox = 4534;
     GpiSetMarkerSet = 4535;
+    GpiSetMetaFileBits = 4536;
     GpiSetMix = 4537;
     GpiSetModelTransformMatrix = 4538;
     GpiSetPS = 4539;

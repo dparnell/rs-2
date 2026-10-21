@@ -9,6 +9,7 @@ GpiCharStringAt @359
 GpiCloseFigure @360
 GpiCombineRegion @362
 GpiConvert @364
+GpiCopyMetaFile @365
 GpiCreateLogFont @368
 GpiCreatePS @369
 GpiCreateRegion @370
@@ -78,6 +79,8 @@ GpiQueryLineWidthGeom @461
 GpiQueryMarker @462
 GpiQueryMarkerBox @463
 GpiQueryMarkerSet @464
+GpiQueryMetaFileBits @465
+GpiQueryMetaFileLength @466
 GpiQueryMix @467
 GpiQueryModelTransformMatrix @468
 GpiQueryNearestColor @469
@@ -101,6 +104,7 @@ GpiRectVisible @495
 GpiResetBoundaryData @497
 GpiResetPS @498
 GpiRestorePS @499
+GpiSaveMetaFile @500
 GpiSavePS @501
 GpiSetArcParams @502
 GpiSetAttrMode @503
@@ -130,6 +134,7 @@ GpiSetLineWidthGeom @532
 GpiSetMarker @533
 GpiSetMarkerBox @534
 GpiSetMarkerSet @535
+GpiSetMetaFileBits @536
 GpiSetMix @537
 GpiSetModelTransformMatrix @538
 GpiSetPS @539

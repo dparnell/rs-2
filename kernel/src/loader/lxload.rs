@@ -43,7 +43,9 @@ pub fn load(
         let base = if dll {
             match vm::reserve_shared(size, Some(o.base)) {
                 Some(b) => b,
-                None if !fixups_stripped => vm::reserve_shared(size, None).ok_or(err::NOT_ENOUGH_MEMORY)?,
+                // Resource objects are never fixed up: they may go
+                // anywhere (resource-only DLLs have base 0 and no fixups).
+                None if !fixups_stripped || o.flags & oflags::RESOURCE != 0 => vm::reserve_shared(size, None).ok_or(err::NOT_ENOUGH_MEMORY)?,
                 None => return Err(err::NOT_ENOUGH_MEMORY),
             }
         } else {

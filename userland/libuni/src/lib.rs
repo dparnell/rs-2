@@ -501,6 +501,22 @@ pub extern "C" fn UniStrftime(lo: u32, buf: *mut u16, max: u32, fmt: *const u16,
     out.len() as u32
 }
 
+/// UniStrptime(object, buf, format, tm): parses `buf` by `format` into
+/// `tm`; a pointer to the first character not used, NULL if it does not
+/// match.
+#[unsafe(no_mangle)]
+pub extern "C" fn UniStrptime(lo: u32, buf: *const u16, fmt: *const u16, tm: *mut uls::Tm) -> *const u16 {
+    if buf.is_null() || fmt.is_null() || tm.is_null() {
+        return core::ptr::null();
+    }
+    let items: Vec<Vec<u16>> = (1..=MAXITEM).map(|n| item_vec(lo, n)).collect();
+    let get = |n: usize| items[n - 1].as_slice();
+    match uls::strptime(&get, unsafe { from_ptr(buf) }, unsafe { from_ptr(fmt) }, unsafe { &mut *tm }) {
+        Some(n) => unsafe { buf.add(n) },
+        None => core::ptr::null(),
+    }
+}
+
 // ---- locale names and tokens -----------------------------------------------------
 
 /// The token of a locale (its xLocaleToken item).
