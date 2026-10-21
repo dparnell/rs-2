@@ -359,13 +359,13 @@ pub fn format<D: BlockDevice>(dev: &D, p: &FormatParams) -> Result<Geometry> {
     let mut t = vec![0u8; INODE_EXTENT_SIZE];
     for k in 0..INOSPEREXT {
         let m = match k {
-            1 | 3 => special,
+            0 | 1 | 3 => special,
             ROOT_I => mode::IFDIR | mode::IFJOURNAL | mode::IDIRECTORY | 0o700,
             _ => 0,
         };
         let mut b = inode(stamp, FILESYSTEM_I, k, g.fsiext, m, now);
         match k {
-            1 | 3 => xtree(&mut b, &[], XTROOTMAXSLOT, bsize),
+            0 | 1 | 3 => xtree(&mut b, &[], XTROOTMAXSLOT, bsize),
             ROOT_I => {
                 wr32(&mut b, di::NLINK, 2);
                 let r = di::ROOT;

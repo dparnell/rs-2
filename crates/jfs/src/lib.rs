@@ -22,7 +22,19 @@
 
 #![no_std]
 
+#[cfg(test)]
+extern crate std;
+
 extern crate alloc;
+
+/// Error::Corrupt, telling where in test builds.
+macro_rules! corrupt {
+    () => {{
+        #[cfg(test)]
+        std::eprintln!("corrupt at {}:{}", file!(), line!());
+        $crate::Error::Corrupt
+    }};
+}
 
 mod bmap;
 mod check;
@@ -238,7 +250,7 @@ impl<D: BlockDevice> Volume<D> {
         v.read_label()?;
         let root = v.read_inode(ROOT_I)?;
         if !root.is_dir() {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         Ok(v)
     }

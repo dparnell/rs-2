@@ -92,6 +92,23 @@ pub(crate) fn build_tree(stree: &mut [u8], leafidx: usize, l2nleafs: u32, budmin
     stree[0] as i8
 }
 
+/// Undo the buddy combination in a summary page's leaves: a leaf above
+/// `budmin` stands for 2^(v - budmin) leaves of `budmin` (the most a child
+/// can hold), its partners stored as NOFREE.
+pub(crate) fn uncombine(leaves: &mut [u8], budmin: i8) {
+    let mut i = 0;
+    while i < leaves.len() {
+        let v = leaves[i] as i8;
+        if v > budmin {
+            let n = (1usize << (v - budmin) as u32).min(leaves.len() - i);
+            leaves[i..i + n].fill(budmin as u8);
+            i += n;
+        } else {
+            i += 1;
+        }
+    }
+}
+
 /// Recompute a dmap page's free count and tree from its working map.
 /// Returns the tree root.
 pub(crate) fn dmap_rebuild(p: &mut [u8]) -> i8 {
@@ -168,7 +185,7 @@ impl<D: BlockDevice> Volume<D> {
         let l2nbpp = rd32(&ctl, bm::L2NBPERPAGE);
         let numag = rd32(&ctl, bm::NUMAG);
         if mapsize == 0 || l2nbpp != log2(self.nbperpage as u64) || numag == 0 || numag as usize > MAXAG {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         self.bmap.mapsize = mapsize;
         self.bmap.nfree = rd64(&ctl, bm::NFREE);
@@ -177,7 +194,7 @@ impl<D: BlockDevice> Volume<D> {
         self.bmap.numag = numag;
         self.bmap.agfree = (0..MAXAG).map(|a| rd64(&ctl, bm::AGFREE + 8 * a)).collect();
         if self.bmap.maxlevel > 2 || self.bmap.agl2size > 40 {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         self.bmap.ctl = ctl;
         Ok(())
@@ -190,7 +207,7 @@ impl<D: BlockDevice> Volume<D> {
         let k = f.partition_point(|x| x.end() <= lb);
         match f.get(k) {
             Some(x) if x.off <= lb => Ok(x.addr + (lb - x.off)),
-            _ => Err(Error::Corrupt),
+            _ => Err(corrupt!()),
         }
     }
 
@@ -210,20 +227,25 @@ impl<D: BlockDevice> Volume<D> {
 
     /// Free-run summary of dmap `d` (its tree root) from the level 0 page.
     fn dmap_summary(&mut self, d: u64) -> Result<i8> {
-        let p = self.bmap_read_page(ctl_page(0, d >> L2LPERCTL))?;
-        Ok(p[tree::STREE + CTL_LEAFIDX + (d as usize & (LPERCTL - 1))] as i8)
+        let mut p = self.bmap_read_page(ctl_page(0, d >> L2LPERCTL))?;
+        let lo = tree::STREE + CTL_LEAFIDX;
+        uncombine(&mut p[lo..lo + LPERCTL], L2BPERDMAP as i8);
+        Ok(p[lo + (d as usize & (LPERCTL - 1))] as i8)
     }
 
     /// Store a changed summary value for child `n` at `level`, upwards.
     fn ctl_update(&mut self, level: u32, n: u64, value: i8) -> Result<()> {
         let pg = ctl_page(level, n >> L2LPERCTL);
         let mut p = self.bmap_read_page(pg)?;
-        let leaf = tree::STREE + CTL_LEAFIDX + (n as usize & (LPERCTL - 1));
-        if p[leaf] as i8 == value && rd32(&p, tree::NLEAFS) != 0 {
+        let lo = tree::STREE + CTL_LEAFIDX;
+        let budmin = (L2BPERDMAP + level * L2LPERCTL) as i8;
+        let before = p.clone();
+        uncombine(&mut p[lo..lo + LPERCTL], budmin);
+        p[lo + (n as usize & (LPERCTL - 1))] = value as u8;
+        let root = ctl_rebuild(&mut p, level);
+        if p == before {
             return Ok(());
         }
-        p[leaf] = value as u8;
-        let root = ctl_rebuild(&mut p, level);
         self.bmap_write_page(pg, &p)?;
         if level < self.bmap.maxlevel {
             self.ctl_update(level + 1, n >> L2LPERCTL, root)
@@ -240,7 +262,7 @@ impl<D: BlockDevice> Volume<D> {
             return Ok(());
         }
         if start + n > self.bmap.mapsize {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         let mut b = start;
         let end = start + n;
@@ -255,7 +277,7 @@ impl<D: BlockDevice> Volume<D> {
                 let off = dm::WMAP + 4 * w;
                 let word = rd32(&p, off);
                 if (word & bit != 0) == used {
-                    return Err(Error::Corrupt);
+                    return Err(corrupt!());
                 }
                 let word = if used { word | bit } else { word & !bit };
                 wr32(&mut p, off, word);

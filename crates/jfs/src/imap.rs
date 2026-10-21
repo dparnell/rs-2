@@ -31,7 +31,7 @@ impl<D: BlockDevice> Volume<D> {
         self.imap.ctl = self.imap_read_page(0)?;
         let next = rd32(&self.imap.ctl, im::NEXTIAG);
         if next == 0 || next > 1 << 20 {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         Ok(())
     }
@@ -42,7 +42,7 @@ impl<D: BlockDevice> Volume<D> {
         let k = f.partition_point(|x| x.end() <= lb);
         match f.get(k) {
             Some(x) if x.off <= lb => Ok(x.addr + (lb - x.off)),
-            _ => Err(Error::Corrupt),
+            _ => Err(corrupt!()),
         }
     }
 
@@ -53,7 +53,7 @@ impl<D: BlockDevice> Volume<D> {
 
     pub(crate) fn iag_read(&mut self, n: u32) -> Result<Vec<u8>> {
         if n >= self.iag_count() {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         self.imap_read_page(n as u64 + 1)
     }
@@ -73,7 +73,7 @@ impl<D: BlockDevice> Volume<D> {
         let ext = ((ino >> 5) & (EXTSPERIAG - 1)) as usize;
         let x = Pxd::read(&p, iag::INOEXT + 8 * ext);
         if x.addr == 0 {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         Ok((x.addr << self.l2bsize) + (ino & (INOSPEREXT - 1)) as u64 * DISIZE as u64)
     }
@@ -200,12 +200,12 @@ impl<D: BlockDevice> Volume<D> {
             self.add_agctl(ag, 12, -1);
             return Ok(n * INOSPERIAG + e as u32 * INOSPEREXT + bit);
         }
-        Err(Error::Corrupt)
+        Err(corrupt!())
     }
 
     /// Give IAG `n` a new inode extent; returns the updated page.
     fn new_extent(&mut self, n: u32, mut p: Vec<u8>) -> Result<Vec<u8>> {
-        let e = (0..EXTSPERIAG as usize).find(|&e| Pxd::read(&p, iag::INOEXT + 8 * e).addr == 0).ok_or(Error::Corrupt)?;
+        let e = (0..EXTSPERIAG as usize).find(|&e| Pxd::read(&p, iag::INOEXT + 8 * e).addr == 0).ok_or_else(|| corrupt!())?;
         let nb = (INODE_EXTENT_SIZE >> self.l2bsize) as u32;
         let empty = rd32(&p, iag::NFREEEXTS) == EXTSPERIAG;
         let mut ag = self.ag_of(rd64(&p, iag::AGSTART));
@@ -335,7 +335,7 @@ impl<D: BlockDevice> Volume<D> {
         let bit = 0x8000_0000u32 >> (ino & 31);
         let w = rd32(&p, iag::WMAP + 4 * e);
         if w & bit == 0 {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         wr32(&mut p, iag::WMAP + 4 * e, w & !bit);
         wr32(&mut p, iag::PMAP + 4 * e, w & !bit);

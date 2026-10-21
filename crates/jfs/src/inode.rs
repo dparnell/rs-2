@@ -123,7 +123,7 @@ impl<D: BlockDevice> Volume<D> {
         let off = self.inode_off(ino)?;
         let b = self.meta_read(off, DISIZE)?;
         if rd32(&b, di::NUMBER) != ino {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         Ok(Inode { ino, off, b })
     }

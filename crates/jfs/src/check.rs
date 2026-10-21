@@ -240,8 +240,10 @@ impl<D: BlockDevice> Volume<D> {
                 r.problems.push(format!("dmap {d}: tree or count wrong"));
             }
             nfree += rd32(&p, dm::NFREE) as u64;
-            let c = self.ctl_page_data(0, d >> L2LPERCTL)?;
-            if c[tree::STREE + CTL_LEAFIDX + (d as usize & (LPERCTL - 1))] as i8 != root {
+            let mut c = self.ctl_page_data(0, d >> L2LPERCTL)?;
+            let lo = tree::STREE + CTL_LEAFIDX;
+            crate::bmap::uncombine(&mut c[lo..lo + LPERCTL], L2BPERDMAP as i8);
+            if c[lo + (d as usize & (LPERCTL - 1))] as i8 != root {
                 r.problems.push(format!("dmap {d}: summary wrong"));
             }
         }

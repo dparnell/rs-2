@@ -115,7 +115,7 @@ impl<D: BlockDevice> Volume<D> {
         let flag = b[16];
         let leaf = flag & bt::LEAF != 0;
         if flag & (bt::LEAF | bt::INTERNAL) == 0 {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         let count = b[17] as usize;
         let (maxslot, stbl) = if root {
@@ -124,19 +124,19 @@ impl<D: BlockDevice> Volume<D> {
             let m = b[20] as usize;
             let si = b[21] as usize;
             if m == 0 || m * DTSLOTSIZE > b.len() || si == 0 || si >= m {
-                return Err(Error::Corrupt);
+                return Err(corrupt!());
             }
             (m, si * DTSLOTSIZE)
         };
         if count > maxslot || stbl + count > b.len() {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         let head = self.head_chars(leaf);
         let mut ents = Vec::with_capacity(count);
         for k in 0..count {
             let s = b[stbl + k] as usize;
             if s == 0 || s >= maxslot {
-                return Err(Error::Corrupt);
+                return Err(corrupt!());
             }
             let o = s * DTSLOTSIZE;
             let (namlen, mut next, name_at) =
@@ -148,15 +148,13 @@ impl<D: BlockDevice> Volume<D> {
             let mut guard = 0;
             while name.len() < namlen {
                 if next < 0 || next as usize >= maxslot || guard > maxslot {
-                    return Err(Error::Corrupt);
+                    return Err(corrupt!());
                 }
                 let t = next as usize * DTSLOTSIZE;
-                let cnt = (b[t + 1] as usize).min(DTSLOTDATALEN).min(namlen - name.len());
+                // (The slot's count byte is a segment count, 1.)
+                let cnt = DTSLOTDATALEN.min(namlen - name.len());
                 for c in 0..cnt {
                     name.push(rd16(b, t + 2 + 2 * c));
-                }
-                if cnt == 0 {
-                    return Err(Error::Corrupt);
                 }
                 next = b[t] as i8;
                 guard += 1;
@@ -221,7 +219,7 @@ impl<D: BlockDevice> Volume<D> {
                 b[prev_link] = t as u8;
                 let to = t * DTSLOTSIZE;
                 let cnt = rest.len().min(DTSLOTDATALEN);
-                b[to + 1] = cnt as u8;
+                b[to + 1] = 1;
                 for (c, &ch) in rest[..cnt].iter().enumerate() {
                     wr16(b, to + 2 + 2 * c, ch);
                 }
@@ -257,12 +255,12 @@ impl<D: BlockDevice> Volume<D> {
             return self.parse(&r, pxd);
         }
         if pxd.len == 0 || pxd.len as usize > PSIZE >> self.l2bsize || pxd.end() > self.bmap.mapsize {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         let b = self.read_blocks(pxd.addr, pxd.len)?;
         let n = self.parse(&b, pxd)?;
         if n.is_root() {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         Ok(n)
     }
@@ -302,7 +300,7 @@ impl<D: BlockDevice> Volume<D> {
                 return Ok((path, node, pos));
             }
             if node.ents.is_empty() || path.len() >= MAX_DEPTH {
-                return Err(Error::Corrupt);
+                return Err(corrupt!());
             }
             let k = node.ents.partition_point(|e| compare(&e.name, key, ci) != Ordering::Greater);
             let k = k.saturating_sub(1);
@@ -350,7 +348,7 @@ impl<D: BlockDevice> Volume<D> {
             return Ok(());
         }
         if depth >= MAX_DEPTH {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         for e in &n.ents {
             let c = self.read_node(dir, e.child)?;
@@ -397,7 +395,7 @@ impl<D: BlockDevice> Volume<D> {
                 return self.split_root(dir, node);
             }
             let (left, right, key) = self.split(dir, node, at)?;
-            let Some((mut parent, k)) = path.pop() else { return Err(Error::Corrupt) };
+            let Some((mut parent, k)) = path.pop() else { return Err(corrupt!()) };
             self.write_node(dir, &left)?;
             self.write_node(dir, &right)?;
             parent.ents.insert(k + 1, DEnt { name: key, ino: 0, child: right.pxd, index: 0 });
@@ -578,7 +576,7 @@ impl<D: BlockDevice> Volume<D> {
                 self.relink(dir, node.next, None, Some(node.prev))?;
             }
             self.drop_page(dir, node.pxd)?;
-            let Some((mut parent, k)) = path.pop() else { return Err(Error::Corrupt) };
+            let Some((mut parent, k)) = path.pop() else { return Err(corrupt!()) };
             parent.ents.remove(k);
             if k == 0 && !parent.ents.is_empty() && (parent.is_root() || parent.prev == 0) {
                 parent.ents[0].name.clear();

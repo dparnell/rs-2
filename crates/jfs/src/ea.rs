@@ -37,7 +37,7 @@ pub fn fea2_size(eas: &[Ea]) -> u32 {
 /// Parse a stored FEA list (with its cbList).
 pub(crate) fn parse(list: &[u8]) -> Result<Vec<Ea>> {
     if list.len() < 4 {
-        return Err(Error::Corrupt);
+        return Err(corrupt!());
     }
     let total = (rd32(list, 0) as usize).min(list.len());
     let mut v = Vec::new();
@@ -49,7 +49,7 @@ pub(crate) fn parse(list: &[u8]) -> Result<Vec<Ea>> {
         let name = i + 4;
         let value = name + nl + 1;
         if value + vl > total {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         v.push(Ea { flags, name: list[name..name + nl].to_vec(), value: list[value..value + vl].to_vec() });
         i = value + vl;
@@ -90,13 +90,13 @@ impl<D: BlockDevice> Volume<D> {
         }
         if d.flag & dxd::INLINE != 0 {
             if d.size as usize > di::INLINEEA_SIZE || i.is_dir() {
-                return Err(Error::Corrupt);
+                return Err(corrupt!());
             }
             return Ok(i.b[di::INLINEEA..di::INLINEEA + d.size as usize].to_vec());
         }
         if d.flag & dxd::EXTENT != 0 {
             if d.size > MAX_EA_DATA || (d.loc.len as u64) << self.l2bsize < d.size as u64 {
-                return Err(Error::Corrupt);
+                return Err(corrupt!());
             }
             let mut b = self.read_blocks(d.loc.addr, d.loc.len)?;
             b.truncate(d.size as usize);

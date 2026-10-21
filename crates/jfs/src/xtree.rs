@@ -46,30 +46,30 @@ impl<D: BlockDevice> Volume<D> {
         let next = rd16(node, 18);
         let maxentry = rd16(node, 20);
         if depth > 8 || next < XTENTRYSTART as u16 || next > maxentry || maxentry > max {
-            return Err(Error::Corrupt);
+            return Err(corrupt!());
         }
         for k in XTENTRYSTART..next as usize {
             let x = Xad::read(node, k * 16);
             if flag & bt::LEAF != 0 {
                 if let Some(l) = xads.last() {
                     if x.off < l.end() {
-                        return Err(Error::Corrupt);
+                        return Err(corrupt!());
                     }
                 }
                 if x.len == 0 || x.addr + x.len as u64 > self.bmap.mapsize + (1 << 30) {
-                    return Err(Error::Corrupt);
+                    return Err(corrupt!());
                 }
                 xads.push(x);
             } else if flag & bt::INTERNAL != 0 {
                 let p = Pxd::new(x.addr, x.len);
                 if p.len as usize != PSIZE >> self.l2bsize {
-                    return Err(Error::Corrupt);
+                    return Err(corrupt!());
                 }
                 pages.push(p);
                 let child = self.read_blocks(p.addr, p.len)?;
                 self.xt_walk(&child, XTPAGEMAXSLOT, depth + 1, xads, pages)?;
             } else {
-                return Err(Error::Corrupt);
+                return Err(corrupt!());
             }
         }
         Ok(())

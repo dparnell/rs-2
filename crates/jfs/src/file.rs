@@ -133,6 +133,28 @@ impl<D: BlockDevice> Volume<D> {
         Ok(())
     }
 
+    /// Free the blocks in `after` that `before` did not have (undoing a
+    /// failed allocation).
+    fn release_added(&mut self, before: &[Xad], after: &[Xad]) -> Result<()> {
+        for x in after {
+            let mut run: Option<(u64, u32)> = None;
+            for k in 0..x.len as u64 {
+                if map(before, x.off + k).is_none() {
+                    run = match run {
+                        Some((s, n)) => Some((s, n + 1)),
+                        None => Some((x.addr + k, 1)),
+                    };
+                } else if let Some((s, n)) = run.take() {
+                    self.free_blocks(Pxd::new(s, n))?;
+                }
+            }
+            if let Some((s, n)) = run {
+                self.free_blocks(Pxd::new(s, n))?;
+            }
+        }
+        Ok(())
+    }
+
     /// Store a changed extent list and the block count.
     fn store_extents(&mut self, i: &mut Inode, x: &[Xad], pages: &[Pxd]) -> Result<()> {
         let newpages = self.xt_store(i, x, pages)?;
@@ -170,11 +192,7 @@ impl<D: BlockDevice> Volume<D> {
         let to = end.div_ceil(bs);
         let alloc = self.alloc_range(&i, &mut x, from, to, (offset, end));
         if let Err(err) = alloc {
-            // Keep what was allocated: store it so the map stays right.
-            if x != before {
-                self.store_extents(&mut i, &x, &pages)?;
-                self.write_inode(&i)?;
-            }
+            self.release_added(&before, &x)?;
             return Err(err);
         }
         let mut done = 0usize;
@@ -183,7 +201,7 @@ impl<D: BlockDevice> Volume<D> {
             let pos = offset + done as u64;
             let fb = pos / bs;
             let o = (pos % bs) as usize;
-            let (pb, run, _) = map(&x, fb).ok_or(Error::Corrupt)?;
+            let (pb, run, _) = map(&x, fb).ok_or_else(|| corrupt!())?;
             if o == 0 && data.len() - done >= bs as usize {
                 let n = ((data.len() - done) / bs as usize).min(run as usize).min(CHUNK / bs as usize);
                 let bytes = n * bs as usize;
@@ -272,10 +290,7 @@ impl<D: BlockDevice> Volume<D> {
             let before = x.clone();
             let r = self.alloc_range(&i, &mut x, size / bs, keep, (0, 0));
             if r.is_err() {
-                if x != before {
-                    self.store_extents(&mut i, &x, &pages)?;
-                    self.write_inode(&i)?;
-                }
+                self.release_added(&before, &x)?;
                 return r;
             }
         }
