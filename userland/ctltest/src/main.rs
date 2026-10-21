@@ -1,7 +1,8 @@
 //! Self-checks of PMWIN's standard controls and clipboard: the MLE,
 //! entry fields, combo boxes, spin buttons, sliders, value sets, the
 //! clipboard (also from a second process: CTLTEST runs itself with
-//! CHILD), atoms and a few helpers. Each check prints PASS or FAIL;
+//! CHILD), atoms, a few helpers and the 16-bit PM API (pm16.rs). Each
+//! check prints PASS or FAIL;
 //! the last line is "ctltest done: N failure(s)" and the exit code N.
 //! The controls live in a hidden window.
 
@@ -17,6 +18,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use os2::*;
 
+mod pm16;
 mod wm;
 
 os2::entry!(main);
@@ -489,6 +491,7 @@ fn main(s: &Startup) -> u32 {
     atom_checks();
     helper_checks(hab);
     wm::wm_checks(hab, hmq, client, frame);
+    pm16::pm16_checks(hab, client);
     clipboard_checks(hab);
     // The clipboard seen from another process.
     let mut res = ResultCodes { code_terminate: 0, code_result: 0 };

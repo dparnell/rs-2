@@ -160,6 +160,9 @@ pub fn alloc16(n: usize) -> u32 {
     nv
 }
 
+/// A 16-bit stack for each thread that never came from 16-bit code.
+static FALLBACK: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+
 /// The thread's 16-bit stack (one is made for threads that never came
 /// from 16-bit code).
 fn stack16() -> u32 {
@@ -167,12 +170,17 @@ fn stack16() -> u32 {
     if v != 0 {
         return v;
     }
-    let mut p: *mut u8 = core::ptr::null_mut();
-    const OBJ_TILE: u32 = 0x40;
-    if unsafe { os2::DosAllocMem(&mut p, 0x10000, os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | OBJ_TILE) } != 0 {
-        return 0;
+    let slot = &FALLBACK[slot()];
+    let mut v = slot.load(Ordering::Acquire);
+    if v == 0 {
+        let mut p: *mut u8 = core::ptr::null_mut();
+        const OBJ_TILE: u32 = 0x40;
+        if unsafe { os2::DosAllocMem(&mut p, 0x10000, os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | OBJ_TILE) } != 0 {
+            return 0;
+        }
+        v = far(p) & 0xffff_0000 | 0xfff0;
+        slot.store(v, Ordering::Release);
     }
-    let v = far(p) & 0xffff_0000 | 0xfff0;
     set_sp16(v);
     v
 }
