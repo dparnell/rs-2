@@ -303,11 +303,24 @@ pub fn make_defaults() -> Groups {
     }
     add_editor(programs);
     add_app_installer(programs);
-    // The installer (a text-mode program), on the live system and after.
+    // The installer, on the live system and after: PMINSTAL.EXE (an
+    // object of an earlier version, for the text-mode INSTALL.EXE, is
+    // changed over), else INSTALL.EXE.
+    let pm_installer = sys_path(b"OS2\\PMINSTAL.EXE");
     let installer = sys_path(b"OS2\\INSTALL.EXE");
-    if exists(&installer) && !titles(programs).iter().any(|t| t.3 == b"Install rs2") {
-        let p = Program { progc: PROG_FULLSCREEN, title: b"Install rs2".to_vec(), exe: installer, ..Program::default() };
-        add_program(programs, &p);
+    let (exe, progc) = if exists(&pm_installer) { (pm_installer, PROG_PM) } else { (installer, PROG_FULLSCREEN) };
+    if exists(&exe) {
+        let p = Program { progc, title: b"Install rs2".to_vec(), exe, ..Program::default() };
+        match titles(programs).iter().find(|t| t.3 == b"Install rs2") {
+            Some(t) => {
+                if definition(t.0).is_some_and(|d| d.exe != p.exe) {
+                    change_program(t.0, &p);
+                }
+            }
+            None => {
+                add_program(programs, &p);
+            }
+        }
     }
     if query(APP_DESKTOP, b"Background").is_none() {
         write(APP_DESKTOP, b"Background", Some(b"2E6E8E"));

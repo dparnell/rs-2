@@ -1,0 +1,11 @@
+[package]
+name = "pminstal"
+description = "PMINSTAL.EXE: rs2's installer under Presentation Manager (the engine is INSTALL.EXE's)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+fat = { path = "../../crates/fat" }
+hpfs = { path = "../../crates/hpfs" }

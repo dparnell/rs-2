@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 os2 = { path = "../os2" }
 fat = { path = "../../crates/fat" }
+hpfs = { path = "../../crates/hpfs" }
