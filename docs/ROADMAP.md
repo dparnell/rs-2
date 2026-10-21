@@ -177,7 +177,10 @@ Status markers: done, in progress, planned.
 - done: extended attributes on FAT12/16 (`EA DATA. SF`), FAT32
   (FAT32.IFS-style EA files) and HPFS, with the EA APIs, DosCopy/DosMove
   and CHKDSK checks
-- planned: JFS, HPFS boot volumes, OS/2 LVM metadata
+- done: HPFS system volumes: the boot command line's `root=GUID` makes a
+  GPT partition C: whatever its file system (`fs::probe_mount`); the
+  installer can put the system on HPFS with a FAT32 EFI system partition
+- planned: JFS, OS/2 LVM metadata
 
 ## Milestone 3: rs2 user space (in progress)
 

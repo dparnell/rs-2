@@ -131,14 +131,27 @@ installed system. Other useful options: `--smp N`, `--vmware`,
 of `xtask/src/main.rs` for all of them).
 
 The ISO boots into the live system's desktop; open Programs > Install
-rs2 (or type `INSTALL` at a command prompt) to install onto a hard
-disk. The installer lists each disk's installed rs2 version (from
+rs2 (PMINSTAL.EXE) to install onto a hard disk, or run `INSTALL` at a
+command prompt. A new installation erases the disk and lays it out in
+one of two ways (GPT, booted by UEFI):
+
+- one FAT32 partition holding everything (the boot loader, the kernel and
+  the system, drive C:);
+- a 256 MB FAT32 boot partition (the EFI system partition, with the boot
+  loader, the kernel and `\RS2\CMDLINE`, whose `root=` names the system
+  partition) and the system on an HPFS partition of its own (at most
+  64 GB; the rest of a larger disk stays free), which becomes C:.
+
+The installer lists each disk's installed rs2 version (from
 `\RS2\VERSION`, which builds stamp with the commit and date) and offers
 to update one in place: the system files are replaced, while
-`CONFIG.SYS`, the `.INI` files (desktop, settings), `\MPTN\ETC` and
-everything that is not part of rs2 are kept; new `SET` variables and
-new `PATH`/`LIBPATH`/`DPATH`/`HELP`/`BOOKSHELF` entries are merged into
-the existing `CONFIG.SYS`. Development builds (`cargo xtask run` without `--iso`) take extra
+`CONFIG.SYS`, the `.INI` files (desktop, settings), `\MPTN\ETC`,
+`\RS2\CMDLINE` and everything that is not part of rs2 are kept; new
+`SET` variables and new `PATH`/`LIBPATH`/`DPATH`/`HELP`/`BOOKSHELF`
+entries are merged into the existing `CONFIG.SYS`. On the command line,
+`INSTALL /LIST` shows the disks, and `INSTALL /DISK:1 /NEW:HPFS /YES`
+or `INSTALL /DISK:1 /UPDATE /YES` (also `/NEW:FAT32`, `/NORESTART`)
+install without asking. Development builds (`cargo xtask run` without `--iso`) take extra
 files for drive C: from `work/modules.txt`, which is how original OS/2
 programs are tested.
 
