@@ -2,7 +2,7 @@
 //! same installer under Presentation Manager; both use `engine`).
 //!
 //! ```text
-//! INSTALL [/LIST] [/DISK:n] [/NEW[:FAT32|HPFS] | /UPDATE] [/YES] [/NORESTART]
+//! INSTALL [/LIST] [/DISK:n] [/NEW[:FAT32|HPFS|JFS] | /UPDATE] [/YES] [/NORESTART]
 //! ```
 //!
 //! Without options it asks: which disk, and for a disk that has rs2
@@ -92,7 +92,7 @@ fn parse(args: &str) -> Result<Opts, String> {
                     Some("FAT32" | "FAT") => Some(Fs::Fat),
                     Some("HPFS") => Some(Fs::Hpfs),
                     Some("JFS") => Some(Fs::Jfs),
-                    Some(x) => return Err(alloc::format!("Unknown layout {x}: FAT32 or HPFS.")),
+                    Some(x) => return Err(alloc::format!("Unknown layout {x}: FAT32, HPFS or JFS.")),
                 })
             }
             "UPDATE" => o.update = true,
@@ -111,12 +111,14 @@ fn parse(args: &str) -> Result<Opts, String> {
 fn usage() {
     outln("Installs rs2 from this disc onto a hard disk, or updates it there.");
     outln("");
-    outln("INSTALL [/LIST] [/DISK:n] [/NEW[:FAT32|HPFS] | /UPDATE] [/YES] [/NORESTART]");
+    outln("INSTALL [/LIST] [/DISK:n] [/NEW[:FAT32|HPFS|JFS] | /UPDATE] [/YES] [/NORESTART]");
     outln("");
     outln("  /LIST       list the hard disks and what is on them");
     outln("  /DISK:n     the disk to install on");
     outln("  /NEW:FAT32  erase the disk: one FAT32 partition for everything");
     outln("  /NEW:HPFS   erase the disk: a FAT32 boot partition and an HPFS");
+    outln("              system partition");
+    outln("  /NEW:JFS    erase the disk: a FAT32 boot partition and a JFS");
     outln("              system partition");
     outln("  /UPDATE     update the rs2 on the disk, keeping settings and files");
     outln("  /YES        do not ask for confirmation");
@@ -241,9 +243,12 @@ fn run(o: Opts) -> u32 {
                 outln("  1  One FAT32 partition for everything (the simplest).");
                 outln(&alloc::format!("  2  A FAT32 boot partition ({} MB) and the system on HPFS", engine::ESP_MB));
                 outln("     (long file names, extended attributes; at most 64 GB).");
-                match ask("Choose 1 or 2 (or Enter to cancel): ").as_str() {
+                outln(&alloc::format!("  3  A FAT32 boot partition ({} MB) and the system on JFS", engine::ESP_MB));
+                outln("     (journaled: quick to check after a crash; any size).");
+                match ask("Choose 1, 2 or 3 (or Enter to cancel): ").as_str() {
                     "1" => Fs::Fat,
                     "2" => Fs::Hpfs,
+                    "3" => Fs::Jfs,
                     _ => {
                         outln("Installation cancelled.");
                         return 1;

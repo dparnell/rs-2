@@ -106,11 +106,16 @@ version = "0.1.0"
 dependencies = [
  "fat",
  "hpfs",
+ "jfs",
  "os2",
 ]
 
 [[package]]
 name = "ipf"
+version = "0.1.0"
+
+[[package]]
+name = "jfs"
 version = "0.1.0"
 
 [[package]]
@@ -213,6 +218,7 @@ version = "0.1.0"
 dependencies = [
  "fat",
  "hpfs",
+ "jfs",
  "os2",
 ]
 
@@ -392,6 +398,7 @@ version = "0.1.0"
 dependencies = [
  "fat",
  "hpfs",
+ "jfs",
  "os2",
 ]
 

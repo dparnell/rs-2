@@ -139,8 +139,9 @@ one of two ways (GPT, booted by UEFI):
   the system, drive C:);
 - a 256 MB FAT32 boot partition (the EFI system partition, with the boot
   loader, the kernel and `\RS2\CMDLINE`, whose `root=` names the system
-  partition) and the system on an HPFS partition of its own (at most
-  64 GB; the rest of a larger disk stays free), which becomes C:.
+  partition) and the system on a partition of its own, which becomes
+  C:: HPFS (at most 64 GB; the rest of a larger disk stays free) or JFS
+  (journaled, any size).
 
 The installer lists each disk's installed rs2 version (from
 `\RS2\VERSION`, which builds stamp with the commit and date) and offers
@@ -149,7 +150,7 @@ to update one in place: the system files are replaced, while
 `\RS2\CMDLINE` and everything that is not part of rs2 are kept; new
 `SET` variables and new `PATH`/`LIBPATH`/`DPATH`/`HELP`/`BOOKSHELF`
 entries are merged into the existing `CONFIG.SYS`. On the command line,
-`INSTALL /LIST` shows the disks, and `INSTALL /DISK:1 /NEW:HPFS /YES`
+`INSTALL /LIST` shows the disks, and `INSTALL /DISK:1 /NEW:HPFS /YES` (or `/NEW:JFS`)
 or `INSTALL /DISK:1 /UPDATE /YES` (also `/NEW:FAT32`, `/NORESTART`)
 install without asking. Development builds (`cargo xtask run` without `--iso`) take extra
 files for drive C: from `work/modules.txt`, which is how original OS/2

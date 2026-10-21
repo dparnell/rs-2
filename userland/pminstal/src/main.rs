@@ -160,7 +160,7 @@ fn build(h: u32) {
     control(h, WC_STATIC, "New installation:", label, ID_LAYOUT_LABEL, 12, 178, 536, 20);
     control(h, WC_BUTTON, "One ~FAT32 partition for everything", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, ID_FAT, 28, 152, 520, 24);
     control(h, WC_BUTTON, "FAT32 boot partition, system on ~HPFS (at most 64 GB)", BS_AUTORADIOBUTTON, ID_HPFS, 28, 126, 520, 24);
-    control(h, WC_BUTTON, "FAT32 boot partition, system on ~JFS", BS_AUTORADIOBUTTON, ID_JFS, 28, 100, 520, 24);
+    control(h, WC_BUTTON, "FAT32 boot partition, system on ~JFS (journaled)", BS_AUTORADIOBUTTON, ID_JFS, 28, 100, 520, 24);
     control(h, WC_STATIC, "", SS_TEXT | DT_LEFT | DT_WORDBREAK, ID_STATUS, 12, 48, 536, 44);
     control(h, WC_BUTTON, "~Install", BS_PUSHBUTTON | WS_TABSTOP | WS_GROUP, ID_INSTALL, 344, 10, 98, 30);
     control(h, WC_BUTTON, "Close", BS_PUSHBUTTON | WS_TABSTOP, ID_CLOSE, 450, 10, 98, 30);

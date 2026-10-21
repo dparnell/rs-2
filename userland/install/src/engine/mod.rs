@@ -5,11 +5,11 @@
 //!
 //! - **FAT32**: one EFI system partition holding everything: the boot
 //!   loader, the kernel and the system (drive C:).
-//! - **HPFS** (and JFS, when rs2 has it): a small FAT32 EFI system
+//! - **HPFS** or **JFS**: a small FAT32 EFI system
 //!   partition with the boot loader, the kernel and `\RS2\CMDLINE`
 //!   (`root=GUID`), and the system on a partition of its own, which the
-//!   kernel mounts as C:. HPFS volumes hold at most 64 GB; the rest of a
-//!   larger disk stays free.
+//!   kernel mounts as C:. HPFS volumes hold at most 64 GB (the rest of a
+//!   larger disk stays free); JFS takes the whole disk.
 //!
 //! An existing installation (an EFI system partition holding
 //! `\RS2\KERNEL`, and the partition its root= names) can be updated: the
@@ -82,7 +82,7 @@ pub fn this_version() -> String {
 
 /// The file systems a new installation can use.
 pub fn layouts() -> &'static [Fs] {
-    &[Fs::Fat, Fs::Hpfs]
+    &[Fs::Fat, Fs::Hpfs, Fs::Jfs]
 }
 
 /// The hard disks and what is on them.
@@ -289,6 +289,12 @@ fn format_fat(part: Disk, label: &str, serial: u32) -> Result<Vol, String> {
     fat::Volume::mount(part).map(Vol::Fat).map_err(|e| alloc::format!("The new volume cannot be read ({e:?})."))
 }
 
+fn format_jfs(part: Disk, serial: u32) -> Result<Vol, String> {
+    jfs::format(&part, &jfs::FormatParams { label: "RS2", serial, hidden_sectors: part.offset as u32, now: vol::unix_now(), ..Default::default() })
+        .map_err(|e| alloc::format!("Formatting JFS failed ({e:?})."))?;
+    jfs::Volume::mount(part).map(Vol::Jfs).map_err(|e| alloc::format!("The new JFS volume cannot be read ({e:?})."))
+}
+
 fn format_hpfs(part: Disk, serial: u32) -> Result<Vol, String> {
     hpfs::format(&part, &hpfs::FormatParams { label: "RS2", serial, hidden_sectors: part.offset as u32, code_page: 850, now: vol::unix_now() })
         .map_err(|e| alloc::format!("Formatting HPFS failed ({e:?})."))?;
@@ -312,15 +318,13 @@ pub fn install_fresh(d: &Disk, fs: Fs, p: &mut dyn Progress) -> Result<(), Strin
         esp_part = NewPart { kind: ESP_TYPE, guid: guid(s), start: first, count: end - first, name: "rs2 system" };
         write_gpt(d, core::slice::from_ref(&esp_part), s).map_err(|e| alloc::format!("Partitioning failed (error {e})."))?;
     } else {
-        if fs == Fs::Jfs {
-            return Err(String::from("JFS is not available yet."));
-        }
         if d.mb() < ESP_MB + 128 {
             return Err(alloc::format!("The disk is too small for a separate system partition ({} MB or more is needed).", ESP_MB + 128));
         }
         esp_part = NewPart { kind: ESP_TYPE, guid: guid(s), start: first, count: mb(ESP_MB), name: "rs2 boot" };
         let sys_start = first + esp_part.count;
-        let sys_end = align(last + 1).min(sys_start + HPFS_MAX_SECTORS);
+        let cap = if fs == Fs::Hpfs { HPFS_MAX_SECTORS } else { u64::MAX / 2 };
+        let sys_end = align(last + 1).min(sys_start + cap);
         let sp = NewPart { kind: DATA_TYPE, guid: guid(s.wrapping_add(7)), start: sys_start, count: sys_end - sys_start, name: "rs2 system" };
         write_gpt(d, &[esp_part, sp], s).map_err(|e| alloc::format!("Partitioning failed (error {e})."))?;
         if align(last + 1) > sys_end {
@@ -331,6 +335,7 @@ pub fn install_fresh(d: &Disk, fs: Fs, p: &mut dyn Progress) -> Result<(), Strin
     p.step("Formatting");
     let mut esp = format_fat(d.part(esp_part.start, esp_part.count), if sys_part.is_some() { "RS2BOOT" } else { "RS2" }, s)?;
     let mut sys = match &sys_part {
+        Some(sp) if fs == Fs::Jfs => Some(format_jfs(d.part(sp.start, sp.count), s.wrapping_add(1))?),
         Some(sp) => Some(format_hpfs(d.part(sp.start, sp.count), s.wrapping_add(1))?),
         None => None,
     };
@@ -345,7 +350,10 @@ pub fn install_fresh(d: &Disk, fs: Fs, p: &mut dyn Progress) -> Result<(), Strin
             esp.put("RS2\\VERSION", &v)?;
         }
     }
-    Ok(())
+    if let Some(v) = sys {
+        v.close()?;
+    }
+    esp.close()
 }
 
 /// Update an installation in place.
@@ -376,5 +384,8 @@ pub fn update(f: &Found, p: &mut dyn Progress) -> Result<(), String> {
             esp.put("RS2\\VERSION", &v)?;
         }
     }
-    Ok(())
+    if let Some(v) = sys {
+        v.close()?;
+    }
+    esp.close()
 }

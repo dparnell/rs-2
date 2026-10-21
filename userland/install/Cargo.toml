@@ -9,3 +9,4 @@ license.workspace = true
 os2 = { path = "../os2" }
 fat = { path = "../../crates/fat" }
 hpfs = { path = "../../crates/hpfs" }
+jfs = { path = "../../crates/jfs" }

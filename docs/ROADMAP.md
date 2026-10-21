@@ -179,7 +179,8 @@ Status markers: done, in progress, planned.
   and CHKDSK checks
 - done: HPFS system volumes: the boot command line's `root=GUID` makes a
   GPT partition C: whatever its file system (`fs::probe_mount`); the
-  installer can put the system on HPFS with a FAT32 EFI system partition
+  installer can put the system on HPFS or JFS with a FAT32 EFI system
+  partition (PMINSTAL.EXE, or INSTALL.EXE /NEW:HPFS|JFS)
 - done: JFS (read/write/format, `crates/jfs`, layout in
   [formats/jfs.md](formats/jfs.md)): OS/2 volumes (case-insensitive) and
   Linux ones (index tables), inline and extent EAs; MBR type 0x35, GPT and

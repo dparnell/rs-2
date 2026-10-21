@@ -1,5 +1,5 @@
 //! The volumes the installer writes: FAT (the EFI system partition, or
-//! the whole system) and HPFS (a system partition of its own), behind one
+//! the whole system), HPFS and JFS (a system partition of its own), behind one
 //! interface.
 
 use alloc::string::String;
@@ -12,6 +12,7 @@ use os2::*;
 pub enum Vol {
     Fat(fat::Volume<Disk>),
     Hpfs(hpfs::Volume<Disk>),
+    Jfs(jfs::Volume<Disk>),
 }
 
 /// The system partition's file system.
@@ -60,13 +61,25 @@ impl Vol {
         if let Ok(v) = fat::Volume::mount(part) {
             return Some(Vol::Fat(v));
         }
-        hpfs::Volume::mount(part).ok().map(Vol::Hpfs)
+        if let Ok(v) = hpfs::Volume::mount(part) {
+            return Some(Vol::Hpfs(v));
+        }
+        jfs::Volume::mount(part).ok().map(Vol::Jfs)
+    }
+
+    /// Done with the volume (JFS: written out and marked clean).
+    pub fn close(self) -> Result<(), String> {
+        match self {
+            Vol::Jfs(v) => v.unmount().map(|_| ()).map_err(|e| alloc::format!("The JFS volume cannot be closed ({e:?}).")),
+            _ => Ok(()),
+        }
     }
 
     pub fn fs(&self) -> Fs {
         match self {
             Vol::Fat(_) => Fs::Fat,
             Vol::Hpfs(_) => Fs::Hpfs,
+            Vol::Jfs(_) => Fs::Jfs,
         }
     }
 
@@ -74,6 +87,7 @@ impl Vol {
         match self {
             Vol::Fat(v) => v.lookup(path).is_ok(),
             Vol::Hpfs(v) => v.lookup(path).is_ok(),
+            Vol::Jfs(v) => v.lookup(path).is_ok(),
         }
     }
 
@@ -93,6 +107,13 @@ impl Vol {
                 b.truncate(n);
                 Some(b)
             }
+            Vol::Jfs(v) => {
+                let e = v.lookup(path).ok()?;
+                let mut b = vec![0u8; e.size as usize];
+                let n = v.read(&e, 0, &mut b).ok()?;
+                b.truncate(n);
+                Some(b)
+            }
         }
     }
 
@@ -103,6 +124,7 @@ impl Vol {
         let r = match self {
             Vol::Fat(v) => v.mkdir(path, fat_now()).map(|_| ()).map_err(|e| alloc::format!("{e:?}")),
             Vol::Hpfs(v) => v.mkdir(path, unix_now()).map(|_| ()).map_err(|e| alloc::format!("{e:?}")),
+            Vol::Jfs(v) => v.mkdir(path, unix_now()).map(|_| ()).map_err(|e| alloc::format!("{e:?}")),
         };
         r.map_err(|e| alloc::format!("{path}: {e}"))
     }
@@ -140,6 +162,18 @@ impl Vol {
                     let mut e = v.create_file(path, 0, ts)?;
                     v.write(&mut e, 0, data, ts)?;
                     Ok::<(), hpfs::Error>(())
+                })()
+                .map_err(|e| alloc::format!("{e:?}"))
+            }
+            Vol::Jfs(v) => {
+                let ts = unix_now();
+                (|| {
+                    if v.lookup(path).is_ok() {
+                        v.delete(path)?;
+                    }
+                    let mut e = v.create_file(path, 0, ts)?;
+                    v.write(&mut e, 0, data, ts)?;
+                    Ok::<(), jfs::Error>(())
                 })()
                 .map_err(|e| alloc::format!("{e:?}"))
             }

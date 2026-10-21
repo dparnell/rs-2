@@ -117,6 +117,21 @@ impl hpfs::BlockDevice for Disk {
     }
 }
 
+impl jfs::BlockDevice for Disk {
+    fn sector_size(&self) -> usize {
+        self.sector_size as usize
+    }
+    fn sector_count(&self) -> u64 {
+        self.count
+    }
+    fn read(&self, lba: u64, buf: &mut [u8]) -> jfs::Result<()> {
+        self.io(lba, buf.as_mut_ptr(), buf.len(), false).map_err(|_| jfs::Error::Io)
+    }
+    fn write(&self, lba: u64, buf: &[u8]) -> jfs::Result<()> {
+        self.write_at(lba, buf).map_err(|_| jfs::Error::Io)
+    }
+}
+
 // ---- GPT ----
 
 fn crc32(data: &[u8]) -> u32 {
