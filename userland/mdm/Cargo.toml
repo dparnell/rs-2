@@ -1,0 +1,15 @@
+[package]
+name = "mdm-dll"
+description = "MDM.DLL: the media device manager (mciSendCommand, mciSendString): wave audio and digital video (FLC) devices"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mdm"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+mci = { path = "../../crates/mci" }
+mmfmt = { path = "../../crates/mmfmt" }

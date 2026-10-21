@@ -18,6 +18,7 @@ use alloc::vec::Vec;
 
 pub use errors::*;
 
+pub const MCIERR_SUCCESS: u32 = 0;
 pub const MCI_NOTIFY: u32 = 0x1;
 pub const MCI_WAIT: u32 = 0x2;
 

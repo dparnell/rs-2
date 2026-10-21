@@ -119,6 +119,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mci"
+version = "0.1.0"
+
+[[package]]
+name = "mdm-dll"
+version = "0.1.0"
+dependencies = [
+ "mci",
+ "mmfmt",
+ "os2",
+]
+
+[[package]]
 name = "mmfmt"
 version = "0.1.0"
 
