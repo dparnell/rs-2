@@ -109,6 +109,37 @@ Status markers: done, in progress, planned.
   code page translation in TNLS32/TNLS16,
   vmxnet3/pcnet drivers, TCP keepalive/window scaling/SACK/urgent data
 - planned: virtio-scsi hot-plug events, virtio-console multiport
+- done: sound output: Intel High Definition Audio (`drivers/hda.rs`, PCI
+  class 04.03: ICH6+/ICH9, QEMU `intel-hda`/`ich9-intel-hda`, Proxmox,
+  VMware "HD Audio"): controller reset, CORB/RIRB (immediate commands as
+  a fallback), codec widget walk from line-out/speaker/headphone pins to
+  a DAC, amplifiers unmuted at 0 dB, one 48 kHz 16-bit stereo output
+  stream; the boot log names the codec and path. A software mixer
+  (`audio.rs`) fills the stream's ring 0.1 s ahead of the hardware from
+  the timer tick: any number of streams, each 4000-96000 Hz, 8-bit
+  unsigned or 16-bit signed, mono or stereo, converted, resampled
+  (linear interpolation) and summed with per-stream and master volume.
+  RS2API 300-308 (`api/audio.rs`), for rs2's MDM.DLL; 32-bit `_System`,
+  OS/2 error codes, stream handles per process (closed when it ends):
+
+  | Ord | Call | |
+  |-----|------|-|
+  | 300 | Rs2AudioQuery(PULONG pulDevices) | 50 without sound hardware, else 1 device |
+  | 301 | Rs2AudioOpen(ULONG ulRate, ULONG ulChannels, ULONG ulBits, PULONG phStream) | 50 without hardware |
+  | 302 | Rs2AudioWrite(ULONG hStream, PVOID pData, ULONG cb) | queues; waits while more than 0.5 s is queued |
+  | 303 | Rs2AudioQueryPos(ULONG hStream, PULONG pulBytes) | input bytes played |
+  | 304 | Rs2AudioDrain(ULONG hStream, ULONG ulTimeoutMs) | waits until all has played; 640 on timeout |
+  | 305 | Rs2AudioStop(ULONG hStream) | discards the queue (blocked writers return) |
+  | 306 | Rs2AudioClose(ULONG hStream) | |
+  | 307 | Rs2AudioSetVolume(ULONG hStream, ULONG ulVolume) | 0-100; handle 0 = master |
+  | 308 | Rs2AudioPause(ULONG hStream, ULONG fPause) | |
+
+  `cargo xtask run --sound` adds the QEMU devices (CoreAudio in the
+  window), `--sound-wav FILE` records to a WAV file; AUDTEST.EXE checks
+  the calls and `tools/scripts/audcheck.py FILE` the recording
+- planned: other sound hardware (AC'97, VMware's ES1371), recording,
+  jack sensing, codec volume controls, MMPM/2's audio device driver
+  interface for IBM's own drivers
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - done: SMP: all processors started (INIT/SIPI), per-CPU GDT/TSS/LAPIC
   timer, shared run queues, big kernel lock, IPI wake-ups and TLB shootdown

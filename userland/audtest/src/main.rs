@@ -149,8 +149,9 @@ fn play(name: &str, freq: f64, rate: u32, channels: u32, bits: u32, secs: f64) {
     let want = (secs * 1000.0) as u32;
     // Write blocks only beyond half a second queued, so the whole tone
     // takes about its own length, plus the mixer's 0.1 s lead, less what
-    // an emulator's sound backend takes in at once when the stream starts.
-    let timed = took + 250 >= want && took <= want + 400;
+    // an emulator's sound backend takes in at once when the stream starts
+    // (QEMU's CoreAudio output: 0.3 s).
+    let timed = took * 2 >= want && took <= want + 400;
     if !timed || p != data.len() as u32 {
         println!("  write {w}, drain {d}, {took} ms for {want} ms, position {p} of {}", data.len());
     }

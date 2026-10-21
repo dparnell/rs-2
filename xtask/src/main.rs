@@ -62,8 +62,9 @@
 //! these options the machine has no network adapter.
 //!
 //! `--sound` adds an ICH9 HD Audio controller with a duplex codec
-//! (`ich9-intel-hda`, `hda-duplex`) playing through the host's sound
-//! output (CoreAudio on macOS; nothing when `--headless`);
+//! (`ich9-intel-hda`, `hda-duplex`; `hda-output` on CoreAudio, which
+//! cannot record) playing through the host's sound output (CoreAudio on
+//! macOS; nothing when `--headless`);
 //! `--sound-wav FILE` records what it plays to a WAV file instead.
 
 mod hpfsimg;
@@ -783,7 +784,7 @@ fn socket_path(work: &Path, name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("rs2-{hash:016x}-{name}"))
 }
 
-/// `--sound`: ICH9 HD Audio with a duplex codec, to the host's sound
+/// `--sound`: ICH9 HD Audio with a codec, to the host's sound
 /// output (none when headless) or to a WAV file.
 fn sound_devices(o: &Opts, c: &mut Command) {
     if !o.sound {
@@ -795,8 +796,10 @@ fn sound_devices(o: &Opts, c: &mut Command) {
         None if cfg!(target_os = "macos") => "coreaudio,id=snd0".to_string(),
         None => "pa,id=snd0".to_string(),
     };
+    // QEMU's CoreAudio driver cannot record: an output-only codec there.
+    let codec = if backend.starts_with("coreaudio") { "hda-output" } else { "hda-duplex" };
     c.arg("-audiodev").arg(backend);
-    c.args(["-device", "ich9-intel-hda", "-device", "hda-duplex,audiodev=snd0"]);
+    c.args(["-device", "ich9-intel-hda", "-device"]).arg(format!("{codec},audiodev=snd0"));
 }
 
 fn run(o: &Opts) -> bool {
