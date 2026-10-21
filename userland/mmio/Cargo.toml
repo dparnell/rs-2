@@ -1,0 +1,14 @@
+[package]
+name = "mmio-dll"
+description = "MMIO.DLL: MMPM/2 multimedia file I/O (buffered and memory files, RIFF chunks, the DOS, MEM and WAVE I/O procedures)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mmio"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+mmfmt = { path = "../../crates/mmfmt" }

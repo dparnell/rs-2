@@ -119,6 +119,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "mmfmt"
+version = "0.1.0"
+
+[[package]]
+name = "mmio-dll"
+version = "0.1.0"
+dependencies = [
+ "mmfmt",
+ "os2",
+]
+
+[[package]]
 name = "nbtest"
 version = "0.1.0"
 dependencies = [

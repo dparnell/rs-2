@@ -1,0 +1,3 @@
+; rs2-private MMIO entry points (name ordinal): IBM keeps the WAVE I/O
+; procedure in WAVEPROC.DLL; rs2 builds it into MMIO.
+WAVEIOProc 300
