@@ -1,0 +1,9 @@
+[package]
+name = "audtest"
+description = "Self-checks of the RS2API audio calls (kernel mixer and HD Audio driver)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

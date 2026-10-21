@@ -11,6 +11,7 @@ mod acpi;
 mod api;
 mod apic;
 mod arch;
+mod audio;
 mod bench;
 mod chardev;
 mod codepage;

@@ -18,6 +18,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "audtest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "cmd"
 version = "0.1.0"
 dependencies = [

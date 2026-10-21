@@ -2,6 +2,7 @@
 
 pub mod ahci;
 pub mod e1000;
+pub mod hda;
 pub mod hid;
 pub mod hotplug;
 pub mod hub;
@@ -156,6 +157,11 @@ pub fn init() {
         if (d.class, d.subclass, d.progif) == (1, 8, 2) {
             for ns in nvme::probe(d) {
                 disks.push(ns);
+            }
+        }
+        if (d.class, d.subclass) == (4, 3) && !crate::audio::present() {
+            if let Some(out) = hda::probe(d) {
+                crate::audio::attach(out);
             }
         }
         if e1000::model(d).is_some() {

@@ -9,6 +9,7 @@
 //! * 16-bit far `_Pascal`: arguments pushed left to right above the far
 //!   return address, callee pops them; result in AX.
 
+pub mod audio;
 pub mod doscalls;
 pub mod exceptions;
 pub mod file;

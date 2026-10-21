@@ -12,6 +12,7 @@
 //!                  [--virtio-rng] [--virtio-console PATH] [--virtio-gpu|--virtio-gpu-pci]
 //!                  [--virtio-legacy] [--boot-virtio]
 //!                  [--net] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--tftp DIR]
+//!                  [--sound] [--sound-wav FILE]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
@@ -59,6 +60,11 @@
 //! guest port 23 (when free), and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
 //! rule; `--tftp DIR` has QEMU serve DIR by TFTP at 10.0.2.2. Without
 //! these options the machine has no network adapter.
+//!
+//! `--sound` adds an ICH9 HD Audio controller with a duplex codec
+//! (`ich9-intel-hda`, `hda-duplex`) playing through the host's sound
+//! output (CoreAudio on macOS; nothing when `--headless`);
+//! `--sound-wav FILE` records what it plays to a WAV file instead.
 
 mod hpfsimg;
 mod image;
@@ -143,6 +149,10 @@ struct Opts {
     /// `--init "PROGRAM ARGS"`: boot program in place of work/cmdline.txt's
     /// init= (its other options are kept).
     init: Option<String>,
+    /// `run`: an HD Audio controller and codec (`--sound`), playing to
+    /// the host (or to this WAV file, `--sound-wav`).
+    sound: bool,
+    sound_wav: Option<PathBuf>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -190,12 +200,20 @@ fn parse(args: &[String]) -> Opts {
         tftp: None,
         desktop: false,
         init: None,
+        sound: false,
+        sound_wav: None,
     };
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
             "--release" => o.release = true,
             "--headless" => o.headless = true,
+            "--sound" => o.sound = true,
+            "--sound-wav" => {
+                i += 1;
+                o.sound = true;
+                o.sound_wav = Some(PathBuf::from(&args[i]));
+            }
             "--timeout" => {
                 i += 1;
                 o.timeout = Some(args[i].parse().expect("--timeout seconds"));
@@ -478,6 +496,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("nbtest", "RS2\\NBTEST.EXE"),
         ("shelltest", "RS2\\SHELLTST.EXE"),
         ("initest", "RS2\\INITEST.EXE"),
+        ("audtest", "RS2\\AUDTEST.EXE"),
         ("desktest", "RS2\\DESKTEST.EXE"),
         ("testdll", "RS2\\TESTDLL.DLL"),
         ("cmd", "OS2\\CMD.EXE"),
@@ -764,6 +783,22 @@ fn socket_path(work: &Path, name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("rs2-{hash:016x}-{name}"))
 }
 
+/// `--sound`: ICH9 HD Audio with a duplex codec, to the host's sound
+/// output (none when headless) or to a WAV file.
+fn sound_devices(o: &Opts, c: &mut Command) {
+    if !o.sound {
+        return;
+    }
+    let backend = match &o.sound_wav {
+        Some(f) => format!("wav,id=snd0,path={}", f.display()),
+        None if o.headless => "none,id=snd0".to_string(),
+        None if cfg!(target_os = "macos") => "coreaudio,id=snd0".to_string(),
+        None => "pa,id=snd0".to_string(),
+    };
+    c.arg("-audiodev").arg(backend);
+    c.args(["-device", "ich9-intel-hda", "-device", "hda-duplex,audiodev=snd0"]);
+}
+
 fn run(o: &Opts) -> bool {
     let (code, vars) = ovmf();
     let work = root().join("work");
@@ -812,6 +847,7 @@ fn run(o: &Opts) -> bool {
     vmware_devices(o, &mut c);
     virtio_devices(o, &mut c);
     net_devices(o, &mut c);
+    sound_devices(o, &mut c);
     // Last, so extra devices can refer to the controllers above.
     c.args(&o.qemu_extra);
     let mut child = c.spawn().expect("start qemu");
