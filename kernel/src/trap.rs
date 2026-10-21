@@ -79,9 +79,43 @@ pub fn dump(f: &TrapFrame) {
 }
 
 fn kernel_exception(f: &TrapFrame) -> ! {
+    // A copy first, then the other CPUs stopped: what is printed is the
+    // frame as it was (another CPU on a corrupted stack cannot change it
+    // under us), and one report comes out, not several interleaved.
+    let f = *f;
+    let cr2 = read_cr2();
+    crate::arch::disable_interrupts();
+    crate::smp::halt_others();
     let name = EXCEPTION_NAMES.get(f.vector as usize).copied().unwrap_or("?");
-    crate::log::print_unlocked(format_args!("\nKERNEL TRAP {:#x}: {name}\n", f.vector));
-    dump(f);
+    crate::log::print_unlocked(format_args!("\nKERNEL TRAP {:#x}: {name} (cr2 {cr2:#x})\n", f.vector));
+    let c = crate::smp::this();
+    match c.current().as_ref() {
+        Some(t) => crate::log::print_unlocked(format_args!(
+            "cpu {} thread {} (pid {} tid {}){}\n",
+            c.index(),
+            t.id,
+            t.process().map_or(0, |p| p.pid),
+            t.tid,
+            if t.is_idle() { " idle" } else { "" }
+        )),
+        None => crate::log::print_unlocked(format_args!("cpu {} (no thread)\n", c.index())),
+    }
+    dump(&f);
+    // The words on the stack (return addresses when the frame pointers are
+    // gone), when the stack pointer is in the thread's own kernel stack.
+    if let Some(t) = c.current().as_ref() {
+        let top = t.kstack_top();
+        let bottom = top - crate::task::thread::KSTACK_SIZE as u64;
+        if f.rsp >= bottom && f.rsp + 8 <= top {
+            let n = ((top - f.rsp) / 8).min(16);
+            crate::log::print_unlocked(format_args!("stack:"));
+            for i in 0..n {
+                let v = unsafe { ((f.rsp + i * 8) as *const u64).read_volatile() };
+                crate::log::print_unlocked(format_args!(" {v:x}"));
+            }
+            crate::log::print_unlocked(format_args!("\n"));
+        }
+    }
     crate::backtrace(f.rbp);
     crate::arch::halt_forever();
 }
