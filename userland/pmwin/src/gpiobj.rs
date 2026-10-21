@@ -497,9 +497,11 @@ pub extern "C" fn WinQueryUpdateRegion(h: u32, hrgn: u32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinValidateRegion(h: u32, hrgn: u32, _children: u32) -> u32 {
     let Some(g) = region(hrgn).cloned() else { return 0 };
-    let Some(w) = st().desk.get_mut(h) else { return 0 };
+    if !st().desk.exists(h) {
+        return 0;
+    }
     for r in g.rects() {
-        w.update.subtract(&r);
+        st().desk.validate(h, Some(r));
     }
     1
 }

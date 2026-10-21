@@ -40,6 +40,10 @@ pub struct Window {
     /// Part of the update region the PM server has already painted with
     /// a placeholder while the window's thread does not respond.
     pub ghost: Region,
+    /// Bumped whenever the window's own thread validates (WinBeginPaint,
+    /// WinValidateRect/Region): WinDispatchMsg can tell a window that
+    /// ignored WM_PAINT from one that painted while more was invalidated.
+    pub validated: u32,
 }
 
 impl Window {
@@ -90,6 +94,7 @@ impl Desktop {
                 proc_: 0,
                 words: Vec::new(),
                 ghost: Region::new(),
+                validated: 0,
             });
         }
         d
@@ -159,6 +164,7 @@ impl Desktop {
             proc_,
             words: alloc::vec![0; words],
             ghost: Region::new(),
+            validated: 0,
         });
         self.windows.get_mut(&parent)?.children.push(hwnd);
         self.generation = self.generation.wrapping_add(1);
@@ -257,6 +263,37 @@ impl Desktop {
             }
         }
         g
+    }
+
+    /// Take the window's update region (WinBeginPaint): it becomes valid.
+    pub fn take_update(&mut self, h: Hwnd) -> Region {
+        let Some(w) = self.windows.get_mut(&h) else { return Region::new() };
+        w.validated = w.validated.wrapping_add(1);
+        core::mem::take(&mut w.update)
+    }
+
+    /// Validate a window rectangle (window coordinates; None = all).
+    pub fn validate(&mut self, h: Hwnd, r: Option<Rect>) {
+        let Some(w) = self.windows.get_mut(&h) else { return };
+        w.validated = w.validated.wrapping_add(1);
+        match r {
+            Some(r) => w.update.subtract(&r),
+            None => w.update = Region::new(),
+        }
+    }
+
+    /// After a WM_PAINT was dispatched: a window that did not validate
+    /// anything since `before` (its `validated` then) ignored it, and its
+    /// update region goes so it does not get WM_PAINT forever. A window
+    /// that painted keeps what was invalidated meanwhile (by another
+    /// thread moving a window off it, say): that gets a WM_PAINT of its
+    /// own.
+    pub fn end_dispatch_paint(&mut self, h: Hwnd, before: u32) {
+        let Some(w) = self.windows.get_mut(&h) else { return };
+        if w.validated == before {
+            w.update = Region::new();
+            w.ghost = Region::new();
+        }
     }
 
     /// Mark a window rectangle (window coordinates; None = all) for
@@ -554,6 +591,43 @@ mod tests {
         assert_eq!(d.pin_bottom(0), desktop);
         d.to_top(desktop);
         assert_eq!(d.window_at(Point::new(10, 10)), desktop);
+    }
+
+    #[test]
+    fn invalidation_while_painting_survives_the_dispatch() {
+        let mut d = desk();
+        // Pulse under a window that the PM server's input thread drags
+        // off it while Pulse's thread paints.
+        let p = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(100, 100, 300, 300), 1, 7, 0, 0).unwrap();
+        let top = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(100, 100, 300, 300), 2, 8, 0, 0).unwrap();
+        d.get_mut(top).unwrap().update = Region::new();
+        assert!(d.visible_region(p, false).is_empty());
+        // WM_PAINT dispatched: WinBeginPaint takes the update region...
+        let before = d.get(p).unwrap().validated;
+        assert_eq!(d.take_update(p).area(), 200 * 200);
+        // ...the other window moves off half of it meanwhile...
+        d.set_pos(top, 200, 100, 200, 200);
+        // ...and after the window procedure returns, the uncovered half
+        // is still to paint.
+        d.end_dispatch_paint(p, before);
+        let u = d.get(p).unwrap().update.clone();
+        assert!(u.bounds().contains(Point::new(10, 10)));
+        assert_eq!(d.paint_pending(7), Some(p));
+        let mut vis = d.visible_region(p, false);
+        vis.offset(-100, -100);
+        for r in &vis.rects {
+            let mut left = Region::from_rect(*r);
+            for x in &u.rects {
+                left.subtract(x);
+            }
+            assert!(left.is_empty(), "uncovered {r:?} not in the update region {u:?}");
+        }
+        // A window that ignores WM_PAINT does not get it forever.
+        let before = d.get(top).unwrap().validated;
+        d.end_dispatch_paint(top, before);
+        assert!(d.get(top).unwrap().update.is_empty());
+        d.validate(p, None);
+        assert_eq!(d.paint_pending(7), None);
     }
 
     #[test]

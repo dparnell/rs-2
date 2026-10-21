@@ -1028,8 +1028,9 @@ pub extern "C" fn WinBeginPaint(h: u32, hps: u32, prcl: *mut RectL) -> u32 {
         w.ghost = w.update.clone();
         u
     } else {
-        core::mem::take(&mut w.update)
+        s.desk.take_update(h)
     };
+    let Some(w) = s.desk.get(h) else { return 0 };
     let clip_children = w.style & ws::CLIPCHILDREN != 0;
     let bounds = update.bounds();
     let o = s.desk.origin(h);
@@ -1117,11 +1118,11 @@ pub extern "C" fn WinInvalidateRegion(h: u32, hrgn: u32, children: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinValidateRect(h: u32, prcl: *const RectL, _children: u32) -> u32 {
-    let Some(w) = st().desk.get_mut(h) else { return 0 };
-    match (!prcl.is_null()).then(|| unsafe { prcl.read_unaligned() }.rect()) {
-        Some(r) => w.update.subtract(&r),
-        None => w.update = pmwin::Region::new(),
+    if !st().desk.exists(h) {
+        return 0;
     }
+    let r = (!prcl.is_null()).then(|| unsafe { prcl.read_unaligned() }.rect());
+    st().desk.validate(h, r);
     1
 }
 
@@ -1290,7 +1291,7 @@ pub fn paint_desktop() {
     if w.update.is_empty() {
         return;
     }
-    let update = core::mem::take(&mut w.update);
+    let update = s.desk.take_update(HWND_DESKTOP);
     let vis = s.desk.visible_region(HWND_DESKTOP, true);
     pointer::hide(s);
     let c = color::sys(color::SYSCLR_BACKGROUND);

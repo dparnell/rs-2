@@ -355,13 +355,12 @@ pub extern "C" fn WinDispatchMsg(_hab: u32, pq: *const QMsg) -> u32 {
     if m.msg == WM_TIMER && m.hwnd == 0 {
         return 0;
     }
+    let before = st().desk.get(m.hwnd).map_or(0, |w| w.validated);
     let r = send(m.hwnd, m.msg, m.mp1, m.mp2);
-    // A window that ignored WM_PAINT must not get it forever.
+    // A window that ignored WM_PAINT must not get it forever (one that
+    // painted keeps what was invalidated while it did).
     if m.msg == WM_PAINT {
-        if let Some(w) = st().desk.get_mut(m.hwnd) {
-            w.update = pmwin::Region::new();
-            w.ghost = pmwin::Region::new();
-        }
+        st().desk.end_dispatch_paint(m.hwnd, before);
     }
     r
 }
