@@ -7,7 +7,9 @@
 //! [`RX_DESCS`] 2 KB buffers kept owned by the hardware and a transmit
 //! ring of [`TX_DESCS`] buffers frames are copied into. The MAC address
 //! comes from the receive address registers the hardware loads from its
-//! EEPROM at reset, or from the EEPROM itself. Adapters with an MSI
+//! EEPROM at reset, or from the EEPROM itself (through EERD, or on the
+//! 82540-82546 by clocking its Microwire interface through EECD when
+//! EERD does not answer). Adapters with an MSI
 //! capability (the 82574L; QEMU's 82540EM/82545EM have none) interrupt
 //! on received frames, receive overruns and link changes: the handler
 //! acknowledges ICR and wakes the network thread. The others stay masked
@@ -27,6 +29,7 @@ use crate::sync::SpinLock;
 // Registers.
 const CTRL: usize = 0x0000;
 const STATUS: usize = 0x0008;
+const EECD: usize = 0x0010;
 const EERD: usize = 0x0014;
 const ICR: usize = 0x00c0;
 const IMS: usize = 0x00d0;
@@ -62,6 +65,15 @@ const RCTL_SECRC: u32 = 1 << 26;
 const TCTL_EN: u32 = 1 << 1;
 const TCTL_PSP: u32 = 1 << 3;
 const RAH_AV: u32 = 1 << 31;
+// EEPROM control (bit-banged Microwire interface).
+const EECD_SK: u32 = 1 << 0;
+const EECD_CS: u32 = 1 << 1;
+const EECD_DI: u32 = 1 << 2;
+const EECD_DO: u32 = 1 << 3;
+const EECD_REQ: u32 = 1 << 6;
+const EECD_GNT: u32 = 1 << 7;
+/// Microwire part with 256 words (8 address bits) rather than 64.
+const EECD_SIZE: u32 = 1 << 9;
 /// Interrupt causes: link status change, receive descriptor minimum
 /// threshold, receiver overrun, receive timer (frame received).
 const INT_CAUSES: u32 = 1 << 2 | 1 << 4 | 1 << 6 | 1 << 7;
@@ -166,8 +178,14 @@ fn delay_ms(ms: u64) {
     super::virtio::wait(ms, || {}, || false);
 }
 
-/// Read an EEPROM word through EERD.
+/// Read an EEPROM word: through EERD, or on the older parts (82540 to
+/// 82546) whose emulations may lack EERD, by clocking the Microwire
+/// interface through EECD.
 fn eeprom(regs: &Regs, word: u32, new_layout: bool) -> Option<u16> {
+    eerd(regs, word, new_layout).or_else(|| if new_layout { None } else { microwire(regs, word) })
+}
+
+fn eerd(regs: &Regs, word: u32, new_layout: bool) -> Option<u16> {
     let (start, shift, done) = if new_layout { (1, 2, 1 << 1) } else { (1, 8, 1 << 4) };
     regs.w(EERD, start | word << shift);
     for _ in 0..100_000 {
@@ -178,6 +196,62 @@ fn eeprom(regs: &Regs, word: u32, new_layout: bool) -> Option<u16> {
         core::hint::spin_loop();
     }
     None
+}
+
+fn eecd_set(regs: &Regs, v: u32) {
+    regs.w(EECD, v);
+    let _ = regs.r(STATUS);
+    for _ in 0..50 {
+        core::hint::spin_loop();
+    }
+}
+
+/// Clock `n` bits of `v` out to the EEPROM, most significant first.
+fn microwire_out(regs: &Regs, v: u32, n: u32) {
+    let mut e = regs.r(EECD) & !(EECD_DI | EECD_SK);
+    for b in (0..n).rev() {
+        e = if v >> b & 1 != 0 { e | EECD_DI } else { e & !EECD_DI };
+        eecd_set(regs, e);
+        eecd_set(regs, e | EECD_SK);
+        eecd_set(regs, e);
+    }
+    eecd_set(regs, e & !EECD_DI);
+}
+
+fn microwire(regs: &Regs, word: u32) -> Option<u16> {
+    let e = regs.r(EECD);
+    regs.w(EECD, e | EECD_REQ);
+    let mut granted = false;
+    for _ in 0..1000 {
+        if regs.r(EECD) & EECD_GNT != 0 {
+            granted = true;
+            break;
+        }
+        for _ in 0..100 {
+            core::hint::spin_loop();
+        }
+    }
+    if !granted {
+        regs.w(EECD, e & !EECD_REQ);
+        return None;
+    }
+    let addr_bits = if e & EECD_SIZE != 0 { 8 } else { 6 };
+    let e = (regs.r(EECD) | EECD_REQ) & !(EECD_DI | EECD_SK);
+    eecd_set(regs, e);
+    eecd_set(regs, e | EECD_CS);
+    // READ opcode (110), the address, then 16 data bits.
+    microwire_out(regs, 0b110, 3);
+    microwire_out(regs, word, addr_bits);
+    let mut v = 0u16;
+    let e = regs.r(EECD) & !(EECD_DI | EECD_SK);
+    for _ in 0..16 {
+        eecd_set(regs, e | EECD_SK);
+        v = v << 1 | (regs.r(EECD) & EECD_DO != 0) as u16;
+        eecd_set(regs, e);
+    }
+    eecd_set(regs, e & !(EECD_CS | EECD_SK));
+    eecd_set(regs, e & !(EECD_CS | EECD_SK | EECD_REQ));
+    Some(v)
 }
 
 fn read_mac(regs: &Regs, new_layout: bool) -> Option<[u8; 6]> {
