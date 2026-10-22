@@ -740,6 +740,8 @@ pub enum Menu<'a> {
     Check(u16, &'a [u8], bool),
     Sep,
     Sub(&'a [u8], Vec<Menu<'a>>),
+    /// A submenu with an id of its own (the Workplace Shell's Open is 1).
+    SubId(u16, &'a [u8], Vec<Menu<'a>>),
 }
 
 /// A pop-up menu window (on the desktop, hidden) from items.
@@ -764,6 +766,7 @@ pub fn menu_template(items: &[Menu]) -> Vec<u8> {
             Menu::Check(id, t, on) => (MIS_TEXT, if *on { MIA_CHECKED } else { 0 }, *id, t, None),
             Menu::Sep => (MIS_SEPARATOR, 0, 0xffff, b"", None),
             Menu::Sub(t, s) => (MIS_TEXT | MIS_SUBMENU, 0, 0xfff0, t, Some(s)),
+            Menu::SubId(id, t, s) => (MIS_TEXT | MIS_SUBMENU, 0, *id, t, Some(s)),
         };
         out.extend_from_slice(&style.to_le_bytes());
         out.extend_from_slice(&attr.to_le_bytes());

@@ -12,3 +12,4 @@ path = "src/lib.rs"
 [dependencies]
 os2 = { path = "../os2" }
 pmwin = { path = "../../crates/pmwin" }
+gpi = { path = "../../crates/gpi" }

@@ -16,13 +16,20 @@ extern crate os2;
 
 mod abs;
 mod api;
+mod book;
 pub mod classdata_gen;
 pub mod classes_gen;
 mod clsmgr;
+mod dnd;
 mod exports;
 mod fs;
 mod launch;
+mod menu;
 mod obj;
+/// rs2's shell's PM bindings (shared).
+#[path = "../../rs2shell/src/pm.rs"]
+#[allow(dead_code, unused_imports, clippy::all)]
+mod pm;
 pub mod som;
 mod util;
 mod view;

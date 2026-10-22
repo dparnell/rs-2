@@ -276,6 +276,7 @@ extern "C" fn somUninit(obj: usize) {
 extern "C" fn wpSetTitle(obj: usize, title: *const u8) -> u32 {
     d(obj).title = str_new(cstr(title));
     changed(obj);
+    crate::view::changed(obj);
     1
 }
 
@@ -296,6 +297,7 @@ extern "C" fn wpQueryStyle(obj: usize) -> u32 {
 
 extern "C" fn wpSetIcon(obj: usize, icon: u32) -> u32 {
     d(obj).icon = icon;
+    crate::view::changed(obj);
     1
 }
 
@@ -490,12 +492,22 @@ extern "C" fn wpIsLocked(obj: usize) -> u32 {
     (d(obj).locks > 0) as u32
 }
 
-extern "C" fn wpOpen(_obj: usize, _hwnd_cnr: u32, _view: u32, _param: u32) -> u32 {
+/// WPObject's views: its settings notebook.
+extern "C" fn wpOpen(obj: usize, _hwnd_cnr: u32, view: u32, _param: u32) -> u32 {
+    if view == OPEN_SETTINGS {
+        return crate::view::open_settings(obj);
+    }
     0
 }
 
+/// A view that is open comes to the front; otherwise wpOpen opens it.
 extern "C" fn wpViewObject(obj: usize, hwnd_cnr: u32, view: u32, param: u32) -> u32 {
     let view = if view == OPEN_DEFAULT { call(m::WPObject::wpQueryDefaultView, &[obj]) as u32 } else { view };
+    let f = crate::view::frame_of(obj, if view == OPEN_DEFAULT { OPEN_CONTENTS } else { view });
+    if f != 0 {
+        crate::view::activate(f);
+        return f;
+    }
     call(m::WPObject::wpOpen, &[obj, hwnd_cnr as usize, view as usize, param as usize]) as u32
 }
 
@@ -517,6 +529,7 @@ extern "C" fn wpFree(obj: usize) -> u32 {
         }
     }
     d(obj).flags |= F_DELETED;
+    crate::view::removed(0, obj);
     som::so_call(som::so::SOM_FREE, &[obj]);
     1
 }
@@ -799,6 +812,14 @@ methods! {
 }
 
 pub fn impl_object() -> Impl {
+    let mut i = impl_object_own();
+    i.methods.extend(crate::menu::methods());
+    i.methods.extend(crate::book::object_methods());
+    i.methods.extend(crate::dnd::object_methods());
+    i
+}
+
+fn impl_object_own() -> Impl {
     Impl {
         data: core::mem::size_of::<Data>() as u32,
         methods: alloc::vec![

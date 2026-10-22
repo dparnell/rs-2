@@ -409,11 +409,13 @@ extern "C" fn wpAddToContent(obj: usize, o: usize) -> u32 {
             c.push(o);
         }
     }
+    crate::view::added(obj, o);
     1
 }
 
 extern "C" fn wpDeleteFromContent(obj: usize, o: usize) -> u32 {
     content(obj).retain(|&x| x != o);
+    crate::view::removed(obj, o);
     1
 }
 
@@ -436,6 +438,10 @@ extern "C" fn folder_query_default_view(obj: usize) -> u32 {
 }
 
 extern "C" fn folder_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
+    if view == obj::OPEN_SETTINGS {
+        return som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpOpen, &[obj, cnr as usize, view as usize, param as usize])
+            as u32;
+    }
     crate::view::open_folder(obj, cnr, view, param)
 }
 
@@ -544,7 +550,7 @@ pub fn impl_program_file() -> Impl {
     Impl {
         data: 0,
         methods: alloc::vec![("wpQueryProgDetails", __m_pf_query_prog_details as usize)],
-        overrides: alloc::vec![("wpOpen", __m_pf_open as usize)],
+        overrides: [("wpOpen", __m_pf_open as usize)].into_iter().chain(crate::dnd::overrides("WPProgramFile")).collect(),
     }
 }
 
@@ -560,7 +566,10 @@ pub fn impl_folder() -> Impl {
             ("wpQueryFldrFlags", __m_wpQueryFldrFlags as usize),
             ("wpQueryDefaultView", __m_folder_query_default_view as usize),
         ],
-        overrides: alloc::vec![("wpUnInitData", __m_folder_uninit as usize), ("wpOpen", __m_folder_open as usize)],
+        overrides: [("wpUnInitData", __m_folder_uninit as usize), ("wpOpen", __m_folder_open as usize)]
+            .into_iter()
+            .chain(crate::dnd::overrides("WPFolder"))
+            .collect(),
     }
 }
 

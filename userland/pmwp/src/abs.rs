@@ -347,14 +347,21 @@ pub fn impl_program() -> Impl {
         methods: alloc::vec![
             ("wpQueryProgDetails", __m_wpQueryProgDetails as usize),
             ("wpSetProgDetails", __m_wpSetProgDetails as usize),
-        ],
+        ]
+        .into_iter()
+        .chain(crate::book::program_methods())
+        .collect(),
         overrides: alloc::vec![
             ("wpSetup", __m_prog_setup as usize),
             ("wpSaveState", __m_prog_save_state as usize),
             ("wpRestoreState", __m_prog_restore_state as usize),
             ("wpUnInitData", __m_prog_uninit as usize),
             ("wpOpen", __m_prog_open as usize),
-        ],
+        ]
+        .into_iter()
+        .chain(crate::book::program_overrides())
+        .chain(crate::dnd::overrides("WPProgram"))
+        .collect(),
     }
 }
 
@@ -372,7 +379,10 @@ pub fn impl_shadow() -> Impl {
             ("wpQueryTitle", __m_shadow_title as usize),
             ("wpQueryIcon", __m_shadow_icon as usize),
             ("wpOpen", __m_shadow_open as usize),
-        ],
+        ]
+        .into_iter()
+        .chain(crate::dnd::overrides("WPShadow"))
+        .collect(),
     }
 }
 
@@ -388,7 +398,10 @@ pub fn impl_disk() -> Impl {
             ("wpSaveState", __m_disk_save_state as usize),
             ("wpRestoreState", __m_disk_restore_state as usize),
             ("wpOpen", __m_disk_open as usize),
-        ],
+        ]
+        .into_iter()
+        .chain(crate::dnd::overrides("WPDisk"))
+        .collect(),
     }
 }
 

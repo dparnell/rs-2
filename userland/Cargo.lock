@@ -304,6 +304,7 @@ dependencies = [
 name = "pmwp-dll"
 version = "0.1.0"
 dependencies = [
+ "gpi",
  "os2",
  "pmwin",
 ]
@@ -447,6 +448,13 @@ dependencies = [
 [[package]]
 name = "viocell"
 version = "0.1.0"
+
+[[package]]
+name = "wpshell"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
 
 [[package]]
 name = "wpstest"

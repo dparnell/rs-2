@@ -1,0 +1,9 @@
+[package]
+name = "wpshell"
+description = "RS2\\WPSHELL.EXE: runs the Workplace Shell classes' desktop (a test shell until the real shell process)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
