@@ -349,7 +349,14 @@ Status markers: done, in progress, planned.
   method/data tokens, somBuildClass, initializer controls, class
   manager; `RS2\SOMTEST.EXE`, also run against IBM's SOM.DLL; IBM's
   SOMU and SOMIR classes load on it); docs/WPS.md
-- planned: the Workplace Shell on it (docs/WPS.md, phases 2-4)
+- done: the Workplace Shell's object model in PMWP.DLL (58 classes with
+  IBM's class data and ordinals; WPObject, WPProgram, WPShadow,
+  WPFileSystem, WPDataFile, WPFolder, WPDrives/WPDisk, the desktop,
+  WPClassManager; OS2.INI and .CLASSINFO/.LONGNAME persistence; the
+  object and class API; the Toolkit's sample class DLLs work on it;
+  `RS2\WPSTEST.EXE`)
+- planned: its views, menus, settings notebooks and drag and drop, then
+  the shell process (docs/WPS.md, phases 2-4)
 
 ## Milestone 5: install media (first version done)
 

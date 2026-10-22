@@ -224,14 +224,12 @@ NLS), so IBM's SOM can be checked against rs2's.
 The work is in phases; each phase is usable on its own:
 
 1. **SOM runtime** (done; see "rs2's SOM.DLL" below).
-2. **Core classes in rs2's PMWP.DLL**: WPObject, WPAbstract,
-   WPFileSystem, WPDataFile, WPFolder, WPProgram, WPShadow, WPDesktop,
-   WPDrives, WPDisk, WPRootFolder, WPTransient and WPClassManager. They
-   need ClassData exported in IDL release order, persistence in OS2.INI
-   and `.CLASSINFO` EAs, object IDs, setup strings, WinCreateObject,
-   WinSetObjectData and WinOpenObject, views on WC_CONTAINER, pop-up
-   menus, settings notebooks, and drag and drop. RS2SHELL's code
-   (copying, shadows, the tree view, DrgDrag) carries over.
+2. **Core classes in rs2's PMWP.DLL**: the object model is done (see
+   "rs2's Workplace Shell classes" below). Still to do: views (folder
+   windows on WC_CONTAINER, the icon/tree/details views), pop-up menus,
+   settings notebooks, drag and drop, a lazy writer, and the API from
+   other processes. RS2SHELL's code (copying, shadows, the tree view,
+   DrgDrag) carries over.
 3. **The shell process**: a PMSHELL-compatible start-up building the
    desktop from INI.RC/MAKEINI on the first boot, the Startup folder,
    shutdown. RS2SHELL stays the default until this works; the switch is
@@ -319,3 +317,62 @@ manager and makes an instance. IBM's SOMU.DLL classes (SOMUTStringId,
 SOMMBeforeAfter, SOMMSingleInstance, SOMMTraced, SOMBuf) and SOMIR.DLL's
 interface repository classes load and work on rs2's SOM. Freeing an
 uninitialized repository object faults on both SOMs alike.
+
+
+## rs2's Workplace Shell classes
+
+`userland/pmwp` (PMWP.DLL) provides the 58 classes IBM's PMWP exports.
+
+**Class tables.** `tools/scripts/gen_wps_classes.py` reads the Toolkit's
+IDL. It writes `src/classes_gen.rs` (each class's parents, metaclass,
+version and methods in release order, plus index constants). It also
+writes `src/classdata_gen.rs`: the exported `<Class>ClassData` and
+`<Class>CClassData` variables and the `<Class>NewClass` functions, with
+IBM's ordinals from `ordinals.txt`. WPImageFile is not in the Toolkit,
+so WPBitmap derives from WPDataFile.
+
+**Building.** `wps.rs` builds each class as SOM compiler output does:
+somBuildClass with a layout-4 `somStaticClassInfo`, one static method
+per release-order entry. Methods without an implementation return 0.
+The rest comes from the class modules:
+
+| Module | Classes |
+|--------|---------|
+| `obj.rs` | WPObject (title, style, icon, folder, default view, handle, object ID, setup strings, save/restore, delete, copy, move, shadow) and M_WPObject (wpclsNew, class titles, icons and views, objects from handles and locations; somClassReady calls wpclsInitData) |
+| `abs.rs` | WPAbstract, WPProgram (EXENAME, PARAMETERS, STARTUPDIR, PROGTYPE; wpQuery/SetProgDetails; opening starts the program), WPShadow (SHADOWID; shows and opens its object), WPDisk (a drive and its root folder) |
+| `fs.rs` | WPFileSystem (real name, renaming, file icons, moving and copying files), WPDataFile (opened with the PMWP_ASSOC_FILTER program, else the System Editor), WPProgramFile, WPFolder (content: the directory and the abstract objects in it), WPDrives (a WPDisk per drive), the desktop |
+| `clsmgr.rs` | WPClassManager (merged in as SOM's class manager; finds classes in the DLLs registered in OS2SYS.INI's PM_Objects ClassTable) |
+| `api.rs` | WinCreateObject, WinQueryObject, WinSetObjectData, WinDestroyObject, WinOpenObject, WinSaveObject, WinMove/CopyObject, WinCreateShadow, WinQueryObjectPath, WinRegister/Deregister/Enum/ReplaceObjectClass |
+
+**Persistence** follows IBM's layout of OS2.INI:
+- Abstract objects are under `PM_Abstract:Objects`, and the folders they
+  are in under `PM_Abstract:FldrContent`.
+- File-system handles are under `PM_Workplace:Handles`, and object IDs
+  under `PM_Workplace:Location`.
+- File-system objects keep their state in the `.CLASSINFO` EA.
+- On a file system without long names (FAT) the file gets a short real
+  name, and the title goes in the `.LONGNAME` EA, also when only the
+  case differs.
+
+The values in the state record are rs2's own format (wps.rs).
+
+**Where objects live.** The objects run in the process that calls
+`Rs2WpsStart` (PMWP.9100), which will be the shell. In such a process
+WinCreateObject makes real objects. Elsewhere it still adds program
+objects to RS2SHELL's program list, as before.
+
+**Tests.** `RS2\WPSTEST.EXE` makes a folder on the desktop, a program,
+a data file, a subfolder and a shadow. It changes, moves and copies
+them and checks OS2.INI. `WPSTEST CHECK` then runs as a new process:
+it wakes the objects from OS2.INI and their EAs, checks them, and
+deletes them.
+
+`WPSTEST CLASS dll class` registers a class DLL and makes an object of
+it. The Toolkit's samples, compiled for IBM's PMWP, work as subclasses
+of rs2's classes:
+- Car (WPDataFile): its methods and instance data, and its metaclass's
+  class title loaded in wpclsInitData;
+- TextFolder (WPFolder);
+- WPSTutorial (WPDataFile, which overrides about a hundred methods).
+
+Set `PMWPDEBUG` to trace object creation.
