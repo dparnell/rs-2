@@ -355,8 +355,13 @@ Status markers: done, in progress, planned.
   WPClassManager; OS2.INI and .CLASSINFO/.LONGNAME persistence; the
   object and class API; the Toolkit's sample class DLLs work on it;
   `RS2\WPSTEST.EXE`)
-- planned: its views, menus, settings notebooks and drag and drop, then
-  the shell process (docs/WPS.md, phases 2-4)
+- done: its views: folder windows (icon, details, tree), the desktop,
+  settings notebooks, pop-up menus, direct editing, drag and drop, all
+  through the classes' methods (class DLLs add menu items and settings
+  pages); `RS2\WPSHELL.EXE` runs them
+- planned: the shell process (PMSHELL, the desktop from INI.RC, startup,
+  shutdown, the API from other processes), then the remaining classes
+  (docs/WPS.md, phases 3-4)
 
 ## Milestone 5: install media (first version done)
 

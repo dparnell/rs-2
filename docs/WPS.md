@@ -224,12 +224,16 @@ NLS), so IBM's SOM can be checked against rs2's.
 The work is in phases; each phase is usable on its own:
 
 1. **SOM runtime** (done; see "rs2's SOM.DLL" below).
-2. **Core classes in rs2's PMWP.DLL**: the object model is done (see
-   "rs2's Workplace Shell classes" below). Still to do: views (folder
-   windows on WC_CONTAINER, the icon/tree/details views), pop-up menus,
-   settings notebooks, drag and drop, a lazy writer, and the API from
-   other processes. RS2SHELL's code (copying, shadows, the tree view,
-   DrgDrag) carries over.
+2. **Core classes in rs2's PMWP.DLL**: done, with the object model and
+   its views (see "rs2's Workplace Shell classes" below). Still to do:
+   - shadows drawn in the shadow colour;
+   - icon positions kept (.ICONPOS);
+   - expandable tree views;
+   - the folder settings pages (view, include, sort, background);
+   - copy and move dialogs, and keyboard commands;
+   - Find and templates;
+   - a lazy writer;
+   - the API from other processes.
 3. **The shell process**: a PMSHELL-compatible start-up building the
    desktop from INI.RC/MAKEINI on the first boot, the Startup folder,
    shutdown. RS2SHELL stays the default until this works; the switch is
@@ -376,3 +380,42 @@ of rs2's classes:
 - WPSTutorial (WPDataFile, which overrides about a hundred methods).
 
 Set `PMWPDEBUG` to trace object creation.
+
+**Views** (`view.rs`, `menu.rs`, `book.rs`, `dnd.rs`) run in the
+shell's process, on its PM thread.
+- **Folder windows** are a frame with a WC_CONTAINER in icon, details
+  or tree view. Each record keeps its object. WPDesktop's view covers
+  the screen below every other window.
+- **Settings notebooks** are a WC_NOTEBOOK that `wpAddSettingsPages`
+  fills through `wpInsertSettingsPage`. A PAGEINFO names either a dialog
+  in a class DLL or a ready window. rs2's own pages are General (the
+  title) and WPProgram's Program page.
+- **Pop-up menus** follow IBM's sequence with IBM's menu ids:
+  `wpDisplayMenu` → `wpFilterPopupMenu` → `wpModifyPopupMenu` (classes
+  add items from their DLLs with `wpInsertPopupMenuItems`, also into the
+  Open submenu) → `wpMenuItemSelected`.
+- **Direct editing** of a title calls `wpSetTitle`.
+- **Drag and drop** goes through `wpFormatDragItem`, `wpDragOver` and
+  `wpDrop`:
+  - Folders move, copy or link (shadow) objects, and take other
+    programs' DRM_OS2FILE files.
+  - Programs start with the dropped files.
+  - Shadows and drives pass drops on to their objects.
+  - Icons dragged within their own view move.
+- Open views follow changes: `wpAddToContent` and `wpDeleteFromContent`
+  add and remove records, and `wpSetTitle` and `wpSetIcon` update them.
+
+`RS2\WPSHELL.EXE` starts PM and the shell's objects, opens the desktop
+and runs the message loop. It is a test shell until the shell process
+(phase 3) exists:
+- `WPSHELL DEMO` makes a folder with a program, a file and a shadow, and
+  opens its views and the program's settings.
+- `WPSHELL OPEN` opens only the folder.
+- `WPSHELL CAR` puts the Toolkit's Car sample on the desktop. Its menu
+  items ("Beep horn", "Open car" in Open) and its Dashboard and Horn
+  Beep pages come from CAR.DLL.
+
+Checked in QEMU with screenshots and pointer input
+(`--type "{mouse_abs x y}{mouse_button n}{shot NAME}"`): menus, a file
+dragged from a folder to the desktop, and a double-click starting a
+program.
