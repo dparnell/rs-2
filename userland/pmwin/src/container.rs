@@ -71,6 +71,10 @@ const CM_INSERTRECORDARRAY: u32 = 0x0351;
 const CM_MOVETREE: u32 = 0x0352;
 const CM_SETTEXTVISIBILITY: u32 = 0x0353;
 
+const CN_DRAGLEAVE: u32 = 102;
+const CN_DRAGOVER: u32 = 103;
+const CN_DROP: u32 = 104;
+const CN_DROPHELP: u32 = 105;
 const CN_ENTER: u32 = 106;
 const CN_INITDRAG: u32 = 107;
 const CN_EMPHASIS: u32 = 108;
@@ -96,6 +100,13 @@ const CA_TITLECENTER: u32 = 0x2000;
 const CA_DETAILSVIEWTITLES: u32 = 0x8000;
 const CA_TITLEREADONLY: u32 = 0x0008_0000;
 const CA_TREELINE: u32 = 0x0040_0000;
+const CA_OWNERDRAW: u32 = 0x4000;
+
+const WM_DRAWITEM: u32 = 0x0036;
+const DM_DROP: u32 = 0x032f;
+const DM_DRAGOVER: u32 = 0x032e;
+const DM_DRAGLEAVE: u32 = 0x032d;
+const DM_DROPHELP: u32 = 0x032c;
 
 const CRA_SELECTED: u32 = layout::CRA_SELECTED;
 const CRA_TARGET: u32 = layout::CRA_TARGET;
@@ -231,6 +242,8 @@ struct Cnr {
     b2: Option<(u32, Point, bool)>,
     /// Direct editing: the MLE, the record and field.
     edit: (u32, u32, u32),
+    /// The record with target emphasis while something is dragged over.
+    drop_on: u32,
 }
 
 fn data(h: u32) -> Option<&'static mut Cnr> {
@@ -673,7 +686,17 @@ fn paint(h: u32) {
         cells: Vec<(Vec<u8>, u32, u32)>,
     }
     let mut rows = Vec::with_capacity(l.placed.len());
+    // CA_OWNERDRAW: the owner may draw the records' text over the
+    // container's (those wholly in the item area).
+    let mut owner_rows: Vec<(u32, Rect, u32)> = Vec::new();
     for p in &l.placed {
+        if c.attr & CA_OWNERDRAW != 0 && l.view != View::Detail {
+            let t = to_window(c, l.parts.area, l.view, p.text);
+            if !t.is_empty() && t.intersect(&l.parts.area) == t {
+                let r = l.recs[p.index];
+                owner_rows.push((r, t, attr(r)));
+            }
+        }
         let r = l.recs[p.index];
         let cells = if l.view == View::Detail {
             l.cols.iter().map(|&f| (cell_text(r, f), rd(f, F_DATA), if rd(f, F_DATA) & CFA_BITMAPORICON != 0 { rd(r + rd(f, F_OFF), 0) } else { 0 })).collect()
@@ -828,6 +851,75 @@ fn paint(h: u32) {
         }
         cv.ps.clip = saved;
     });
+    owner_draw(h, owner_rows);
+}
+
+/// WM_DRAWITEM to the owner for each record's text (OWNERITEM: hwnd,
+/// hps, fsState, fsAttribute, fsStateOld, fsAttributeOld, rclItem,
+/// idItem CMA_TEXT, hItem the CNRDRAWITEMINFO: pRecord, pFieldInfo).
+/// The container drew the text already; an owner that draws returns
+/// TRUE and paints over it.
+fn owner_draw(h: u32, rows: Vec<(u32, Rect, u32)>) {
+    if rows.is_empty() {
+        return;
+    }
+    let (owner, id) = (ctl::owner(h), ctl::id(h));
+    let hps = win::WinGetPS(h);
+    for (r, t, a) in rows {
+        let info: [u32; 2] = [r, 0];
+        let oi: [u32; 12] = [h, hps, a, a, a, a, t.left as u32, t.bottom as u32, t.right as u32, t.top as u32, CMA_TEXT, info.as_ptr() as u32];
+        send(owner, WM_DRAWITEM, id, oi.as_ptr() as u32);
+    }
+    win::WinReleasePS(hps);
+}
+
+// ---- Direct manipulation ----
+
+/// What is dragged over the container goes to the owner, as IBM's
+/// container does it: DM_DRAGOVER as CN_DRAGOVER (CNRDRAGINFO: the
+/// DRAGINFO and the record under the pointer, or none, over empty
+/// space; the owner's answer is the container's), DM_DRAGLEAVE as
+/// CN_DRAGLEAVE, DM_DROP as CN_DROP (the record at the drop position),
+/// DM_DROPHELP as CN_DROPHELP. The record under the pointer has target
+/// emphasis while it is.
+fn drag_msg(h: u32, msg: u32, pdinfo: u32, mp2: u32) -> u32 {
+    // The DRAGINFO is shared memory the owner's process may not have yet
+    // (what DrgAccessDraginfo does).
+    if pdinfo > 0x2c {
+        unsafe { DosGetSharedMem((pdinfo - 0x2c) as *mut u8, 3) };
+    }
+    let rec = if msg == DM_DRAGLEAVE || pdinfo == 0 {
+        0
+    } else {
+        let pos = if msg == DM_DRAGOVER { mp2 } else { rd(pdinfo, 12) };
+        let o = st().desk.origin(h);
+        let p = Point { x: pos as i16 as i32 - o.x, y: (pos >> 16) as i16 as i32 - o.y };
+        record_at(h, p).filter(|x| !x.1).map_or(0, |x| x.0)
+    };
+    let new = if msg == DM_DRAGOVER { rec } else { 0 };
+    let old = data(h).map_or(0, |c| core::mem::replace(&mut c.drop_on, new));
+    if old != new {
+        if old != 0 && data(h).is_some_and(|c| contains(c, old)) {
+            emphasize(h, old, CRA_TARGET, false, false);
+        }
+        if new != 0 {
+            emphasize(h, new, CRA_TARGET, true, false);
+        }
+    }
+    let code = match msg {
+        DM_DRAGOVER => CN_DRAGOVER,
+        DM_DRAGLEAVE => CN_DRAGLEAVE,
+        DM_DROP => CN_DROP,
+        _ => CN_DROPHELP,
+    };
+    let cdi: [u32; 2] = [pdinfo, rec];
+    let r = send(ctl::owner(h), WM_CONTROL, mp(ctl::id(h), code), cdi.as_ptr() as u32);
+    if msg == DM_DRAGOVER { r } else { 0 }
+}
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.302"]
+    fn DosGetSharedMem(pb: *mut u8, flags: u32) -> u32;
 }
 
 // ---- Notifications ----
@@ -1672,6 +1764,7 @@ pub extern "C" fn container_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 hs,
                 b2: None,
                 edit: (0, 0, 0),
+                drop_on: 0,
             });
             sync_scroll(h);
             0
@@ -1725,6 +1818,7 @@ pub extern "C" fn container_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             crate::pointer::set_system(pmwin::sysptr::SPTR_ARROW);
             1
         }
+        DM_DRAGOVER | DM_DRAGLEAVE | DM_DROP | DM_DROPHELP => drag_msg(h, msg, mp1, mp2),
         // From the pointer (button 2 clicked): the record under it, or the
         // container itself over empty space.
         WM_CONTEXTMENU => {

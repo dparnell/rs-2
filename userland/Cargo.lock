@@ -196,6 +196,7 @@ name = "pmdrag-dll"
 version = "0.1.0"
 dependencies = [
  "os2",
+ "pmwin",
 ]
 
 [[package]]

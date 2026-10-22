@@ -1,13 +1,17 @@
 //! Folder windows and the desktop: a container of objects each, filled
 //! from the program list, the drives, a directory or the minimized
-//! windows; opening, pop-up menus, renaming, deleting and dragging.
+//! windows, with the folder's shadows; the tree view of drives and
+//! directories; opening, pop-up menus, renaming, copying, moving,
+//! deleting (dragging and dropping is in dnd.rs).
 
 use alloc::vec::Vec;
 
 use pmwin::shellicons as si;
 
+use crate::fileops;
 use crate::objects::{self, icon_pos, set_icon_pos};
 use crate::pm::*;
+use crate::shadows::{self, Target};
 use crate::{icon, sh, sys_icon};
 
 /// What a folder window shows.
@@ -31,10 +35,15 @@ pub enum Obj {
     Shutdown,
     Minimized,
     WindowList,
-    /// A file or directory of a directory view (its name is the item's).
+    /// A file or directory of a directory view or a tree (the item's
+    /// path is where it is).
     File { dir: bool },
     /// A minimized frame.
     Window(u32),
+    /// A shadow (its id in RS2_Shadows).
+    Shadow(u32),
+    /// The child of a tree record not expanded yet (it has children).
+    Placeholder,
 }
 
 pub struct Item {
@@ -49,6 +58,12 @@ pub struct Item {
     pub size: u32,
     pub date: u32,
     pub time: u32,
+    /// Files: the full path.
+    pub path: Vec<u8>,
+    /// Tree view: the parent's key (0: a root).
+    pub parent: u32,
+    /// A shadow whose object is gone.
+    pub broken: bool,
 }
 
 impl Item {
@@ -66,14 +81,6 @@ pub struct View {
     /// CV_ICON, CV_DETAIL or CV_TREE.
     pub view: u32,
     pub fields: bool,
-}
-
-/// An object being dragged with button 2.
-pub struct Drag {
-    pub client: u32,
-    pub keys: Vec<u32>,
-    pub start: PointL,
-    pub pointer: u32,
 }
 
 const ID_CNR: u32 = 100;
@@ -101,6 +108,10 @@ pub const CMD_NEWFOLDER: u32 = 19;
 pub const CMD_CLOSE: u32 = 20;
 pub const CMD_PARENT: u32 = 21;
 pub const CMD_NEWGROUP: u32 = 22;
+pub const CMD_COPY: u32 = 23;
+pub const CMD_MOVE: u32 = 24;
+pub const CMD_SHADOW: u32 = 25;
+pub const CMD_LOCATE: u32 = 26;
 
 // ---- Folder ids (keys in OS2.INI) ----
 
@@ -114,7 +125,7 @@ pub fn folder_id(k: &Kind) -> Vec<u8> {
     }
 }
 
-fn object_id(it: &Item) -> Vec<u8> {
+pub fn object_id(it: &Item) -> Vec<u8> {
     match it.obj {
         Obj::Group(h) => [&b"G"[..], &objects::hex(h)].concat(),
         Obj::Program(h) => [&b"P"[..], &objects::hex(h)].concat(),
@@ -125,7 +136,25 @@ fn object_id(it: &Item) -> Vec<u8> {
         Obj::WindowList => b"WINLIST".to_vec(),
         Obj::File { .. } => it.name().to_vec(),
         Obj::Window(f) => objects::hex(f),
+        Obj::Shadow(id) => shadows::key(id),
+        Obj::Placeholder => Vec::new(),
     }
+}
+
+/// What a shadow of an item points at.
+pub fn target_of(it: &Item) -> Option<Target> {
+    Some(match it.obj {
+        Obj::Group(h) => Target::Group(h),
+        Obj::Program(h) => Target::Program(h),
+        Obj::Drives => Target::Drives,
+        Obj::Drive(c) => Target::Drive(c),
+        Obj::Shutdown => Target::Shutdown,
+        Obj::Minimized => Target::Minimized,
+        Obj::WindowList => Target::WindowList,
+        Obj::File { .. } => Target::Path(it.path.clone()),
+        Obj::Shadow(id) => shadows::get(id)?.target,
+        Obj::Window(_) | Obj::Placeholder => return None,
+    })
 }
 
 fn title_of(k: &Kind) -> Vec<u8> {
@@ -143,7 +172,7 @@ fn title_of(k: &Kind) -> Vec<u8> {
 
 /// Positions of icons are kept for these folders (directories are
 /// arranged).
-fn keeps_positions(k: &Kind) -> bool {
+pub fn keeps_positions(k: &Kind) -> bool {
     !matches!(k, Kind::Dir(_) | Kind::Minimized)
 }
 
@@ -169,7 +198,7 @@ pub fn find_cnr_of(mut h: u32) -> Option<usize> {
     None
 }
 
-fn item_by_key(v: usize, key: u32) -> Option<usize> {
+pub fn item_by_key(v: usize, key: u32) -> Option<usize> {
     sh().views.get(v)?.items.iter().position(|i| i.key == key)
 }
 
@@ -239,6 +268,7 @@ pub fn open(kind: Kind) -> usize {
 fn folder_icon(k: &Kind) -> u32 {
     match k {
         Kind::Group(h) if *h == sh().groups.prompts => icon(si::PROMPTS),
+        Kind::Dir(_) => sys_icon(SPTR_FOLDER),
         Kind::Drives => icon(si::DRIVES),
         Kind::Minimized => icon(si::MINIMIZED),
         _ => sys_icon(SPTR_FOLDER),
@@ -314,10 +344,13 @@ fn set_view(v: usize, mode: u32) {
     if mode == CV_DETAIL && !sh().views[v].fields {
         add_fields(v);
     }
+    // The tree shows other records (folders, nested).
+    let refill = (mode == CV_TREE) != (sh().views[v].view == CV_TREE) && tree_kind(&sh().views[v].kind);
     sh().views[v].view = mode;
-    let attr = match mode {
+    // The shell draws shadows' names itself (CA_OWNERDRAW).
+    let attr = CA_OWNERDRAW | match mode {
         CV_DETAIL => CV_DETAIL | CV_MINI | CA_DETAILSVIEWTITLES,
-        CV_TREE => CV_TREE | CV_ICON | CA_TREELINE,
+        CV_TREE => CV_TREE | CV_ICON | CV_MINI | CA_TREELINE,
         _ => CV_ICON,
     };
     let mut ci = [0u32; 23];
@@ -325,6 +358,14 @@ fn set_view(v: usize, mode: u32) {
     ci[5] = attr;
     send(cnr, CM_SETCNRINFO, ci.as_ptr() as u32, CMA_FLWINDOWATTR);
     save_window(v);
+    if refill {
+        fill(v);
+    }
+}
+
+/// Folders whose tree view is a tree of directories.
+fn tree_kind(k: &Kind) -> bool {
+    matches!(k, Kind::Dir(_) | Kind::Drives)
 }
 
 /// Detail view columns: icon, name, size, date, time.
@@ -365,7 +406,7 @@ fn add_fields(v: usize) {
 fn new_item(obj: Obj, name: &[u8], icon: u32, file_icon: bool) -> Item {
     let key = sh().next_key;
     sh().next_key += 1;
-    Item { obj, name: z(name), icon, file_icon, rec: 0, key, size: 0, date: 0, time: 0 }
+    Item { obj, name: z(name), icon, file_icon, rec: 0, key, size: 0, date: 0, time: 0, path: Vec::new(), parent: 0, broken: false }
 }
 
 /// Icon of a program object.
@@ -437,14 +478,7 @@ fn drive_items() -> Vec<Item> {
         .collect()
 }
 
-pub fn join(dir: &[u8], name: &[u8]) -> Vec<u8> {
-    let mut p = dir.to_vec();
-    if !p.ends_with(b"\\") {
-        p.push(b'\\');
-    }
-    p.extend_from_slice(name);
-    p
-}
+pub use fileops::join;
 
 fn dir_items(dir: &[u8]) -> Vec<Item> {
     let spec = z(&join(dir, b"*"));
@@ -486,6 +520,7 @@ fn dir_items(dir: &[u8]) -> Vec<Item> {
         let h = unsafe { WinLoadFileIcon(path.as_ptr(), 0) };
         let (ic, own) = if h != 0 { (h, true) } else { (sys_icon(if isdir { SPTR_FOLDER } else { SPTR_FILE }), false) };
         let mut it = new_item(Obj::File { dir: isdir }, &name, ic, own);
+        it.path = join(dir, &name);
         if !isdir {
             it.size = size;
         }
@@ -544,15 +579,244 @@ pub fn fill(v: usize) {
             unsafe { WinFreeFileIcon(it.icon) };
         }
     }
-    let items = match &kind {
+    let tree = sh().views[v].view == CV_TREE && tree_kind(&kind);
+    let mut items = match &kind {
+        _ if tree => tree_items(&kind),
         Kind::Desktop => desktop_items(),
         Kind::Group(h) => group_items(*h),
         Kind::Drives => drive_items(),
         Kind::Dir(p) => dir_items(p),
         Kind::Minimized => minimized_items(),
     };
+    if !tree && !matches!(kind, Kind::Drives | Kind::Minimized) {
+        items.extend(shadow_items(&folder_id(&kind)));
+    }
     sh().views[v].items = items;
-    insert_records(v);
+    if tree {
+        insert_tree(v);
+    } else {
+        insert_records(v);
+    }
+}
+
+// ---- Shadows ----
+
+/// The icon of an object a shadow stands for (and whether it is a file
+/// icon to free).
+fn target_icon(t: &Target) -> (u32, bool) {
+    match t {
+        Target::Path(p) => {
+            let c = z(p);
+            let h = unsafe { WinLoadFileIcon(c.as_ptr(), 0) };
+            if h != 0 { (h, true) } else { (sys_icon(if fileops::is_dir(p) { SPTR_FOLDER } else { SPTR_FILE }), false) }
+        }
+        Target::Program(h) => objects::definition(*h).map_or((sys_icon(SPTR_PROGRAM), false), |p| program_icon(&p)),
+        Target::Group(h) => (if *h == sh().groups.prompts { icon(si::PROMPTS) } else { sys_icon(SPTR_FOLDER) }, false),
+        Target::Drives => (icon(si::DRIVES), false),
+        Target::Drive(_) => (icon(si::HARD_DISK), false),
+        Target::Minimized => (icon(si::MINIMIZED), false),
+        Target::WindowList => (icon(si::WINDOW_LIST), false),
+        Target::Shutdown => (icon(si::SHUTDOWN), false),
+    }
+}
+
+fn shadow_items(folder: &[u8]) -> Vec<Item> {
+    shadows::in_folder(folder)
+        .into_iter()
+        .map(|s| {
+            let ok = s.target.exists();
+            let (ic, own) = if ok { target_icon(&s.target) } else { (sys_icon(SPTR_FILE), false) };
+            let mut it = new_item(Obj::Shadow(s.id), &s.target.title(), ic, own);
+            it.broken = !ok;
+            if let Target::Path(p) = &s.target {
+                it.path = p.clone();
+            }
+            it
+        })
+        .collect()
+}
+
+/// Refill the folders that may show shadows (their objects changed).
+pub fn refresh_shadows() {
+    for v in 0..sh().views.len() {
+        if !matches!(sh().views[v].kind, Kind::Drives | Kind::Minimized) && sh().views[v].items.iter().any(|i| matches!(i.obj, Obj::Shadow(_))) {
+            fill(v);
+        }
+    }
+}
+
+/// Open what a shadow stands for.
+pub fn open_target(t: &Target) {
+    match t {
+        Target::Path(p) => {
+            if fileops::is_dir(p) {
+                let mut d = p.clone();
+                if !d.ends_with(b"\\") {
+                    d.push(b'\\');
+                }
+                open(Kind::Dir(d));
+            } else {
+                crate::launch::open_file(p);
+            }
+        }
+        Target::Program(h) => {
+            if let Some(p) = objects::definition(*h) {
+                crate::launch::start_program(&p);
+            }
+        }
+        Target::Group(h) => {
+            open(Kind::Group(*h));
+        }
+        Target::Drives => {
+            open(Kind::Drives);
+        }
+        Target::Drive(c) => {
+            open(Kind::Dir(alloc::vec![*c, b':', b'\\']));
+        }
+        Target::Minimized => {
+            open(Kind::Minimized);
+        }
+        Target::WindowList => {
+            post(HWND_DESKTOP, WM_RS2_WINLIST, 0, 0);
+        }
+        Target::Shutdown => crate::shutdown::ask(),
+    }
+}
+
+/// The folder an object is in (Locate).
+fn locate(t: &Target) {
+    match t {
+        Target::Path(p) => {
+            let d = fileops::parent(p);
+            let v = open(if d.is_empty() { Kind::Drives } else { Kind::Dir(d) });
+            let name = fileops::name_of(p).to_vec();
+            if let Some(i) = sh().views[v].items.iter().position(|it| it.name().eq_ignore_ascii_case(&name)) {
+                let (cnr, rec) = (sh().views[v].cnr, sh().views[v].items[i].rec);
+                send(cnr, CM_SETRECORDEMPHASIS, rec, mp(1, CRA_SELECTED | CRA_CURSORED));
+            }
+        }
+        Target::Program(h) => {
+            if let Some(g) = objects::titles(SGH_ROOT).into_iter().map(|g| g.0).find(|&g| objects::titles(g).iter().any(|x| x.0 == *h)) {
+                if g == sh().groups.desktop {
+                    open(Kind::Desktop);
+                } else {
+                    open(Kind::Group(g));
+                }
+            }
+        }
+        Target::Drive(_) => {
+            open(Kind::Drives);
+        }
+        _ => {
+            open(Kind::Desktop);
+        }
+    }
+}
+
+// ---- The tree view ----
+
+/// The tree of a directory (itself, expanded, with its subfolders) or of
+/// the drives (collapsed). Records with subfolders get a placeholder child
+/// until they are expanded.
+fn tree_items(k: &Kind) -> Vec<Item> {
+    let mut out = Vec::new();
+    match k {
+        Kind::Dir(p) => {
+            let mut root = new_item(Obj::File { dir: true }, &title_of(k), sys_icon(SPTR_FOLDER), false);
+            root.path = fileops::strip(p).to_vec();
+            let key = root.key;
+            out.push(root);
+            out.extend(subfolders(p, key));
+        }
+        Kind::Drives => {
+            for mut d in drive_items() {
+                let Obj::Drive(c) = d.obj else { continue };
+                d.path = alloc::vec![c, b':', b'\\'];
+                let key = d.key;
+                out.push(d);
+                let mut ph = new_item(Obj::Placeholder, b"", 0, false);
+                ph.parent = key;
+                out.push(ph);
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
+/// A directory's subfolders as tree records under `parent` (each with a
+/// placeholder if it has subfolders).
+fn subfolders(dir: &[u8], parent: u32) -> Vec<Item> {
+    let mut names: Vec<Vec<u8>> = fileops::listing(dir).into_iter().filter(|e| e.1).map(|e| e.0).collect();
+    names.sort_by_key(|a| a.to_ascii_uppercase());
+    let mut out = Vec::new();
+    for n in names {
+        let path = join(dir, &n);
+        let mut it = new_item(Obj::File { dir: true }, &n, sys_icon(SPTR_FOLDER), false);
+        it.parent = parent;
+        let key = it.key;
+        let more = fileops::has_subdirs(&path);
+        it.path = path;
+        out.push(it);
+        if more {
+            let mut ph = new_item(Obj::Placeholder, b"", 0, false);
+            ph.parent = key;
+            out.push(ph);
+        }
+    }
+    out
+}
+
+/// Insert the records of items `from..` (parents before children).
+fn insert_tree_from(v: usize, from: usize) {
+    let cnr = sh().views[v].cnr;
+    let n = sh().views[v].items.len();
+    for i in from..n {
+        let first = send(cnr, CM_ALLOCRECORD, R_EXTRA, 1);
+        if first == 0 {
+            return;
+        }
+        let it = &mut sh().views[v].items[i];
+        it.rec = first;
+        let name = it.name.as_ptr() as u32;
+        for off in [R_PSZICON, R_PSZTEXT, R_PSZNAME, R_PSZTREE] {
+            wr(first, off, name);
+        }
+        wr(first, R_HPTR, it.icon);
+        wr(first, R_HPTRMINI, it.icon);
+        wr(first, R_KEY, it.key);
+        // The directory's own record is open.
+        if i == 0 && from == 0 && matches!(sh().views[v].kind, Kind::Dir(_)) {
+            wr(first, R_ATTR, rd(first, R_ATTR) | CRA_EXPANDED);
+        }
+        let parent = it.parent;
+        let prec = if parent == 0 { 0 } else { item_by_key(v, parent).map_or(0, |p| sh().views[v].items[p].rec) };
+        let ri: [u32; 6] = [24, CMA_END, prec, 0, 1, 1];
+        send(cnr, CM_INSERTRECORD, first, ri.as_ptr() as u32);
+    }
+    unsafe { WinInvalidateRect(cnr, core::ptr::null(), 1) };
+}
+
+fn insert_tree(v: usize) {
+    insert_tree_from(v, 0);
+}
+
+/// CN_EXPANDTREE: a record opened for the first time gets its subfolders
+/// in place of its placeholder.
+fn expand(v: usize, rec: u32) {
+    let Some(i) = sh().views[v].items.iter().position(|it| it.rec == rec) else { return };
+    let key = sh().views[v].items[i].key;
+    let Some(ph) = sh().views[v].items.iter().position(|it| it.parent == key && it.obj == Obj::Placeholder) else { return };
+    let cnr = sh().views[v].cnr;
+    let prec = sh().views[v].items[ph].rec;
+    let arr = [prec];
+    send(cnr, CM_REMOVERECORD, arr.as_ptr() as u32, mp(1, CMA_FREE));
+    sh().views[v].items.remove(ph);
+    let path = sh().views[v].items.iter().find(|it| it.key == key).map(|it| it.path.clone()).unwrap_or_default();
+    let from = sh().views[v].items.len();
+    let kids = subfolders(&path, key);
+    sh().views[v].items.extend(kids);
+    insert_tree_from(v, from);
 }
 
 fn insert_records(v: usize) {
@@ -680,7 +944,7 @@ pub fn arrange(v: usize, save: bool) {
 }
 
 /// Keep the icon positions of a folder (all items, or some keys).
-fn save_positions(v: usize, keys: Option<&[u32]>) {
+pub fn save_positions(v: usize, keys: Option<&[u32]>) {
     let kind = sh().views[v].kind.clone();
     if !keeps_positions(&kind) {
         return;
@@ -775,17 +1039,31 @@ pub fn open_item(v: usize, i: usize) {
             post(HWND_DESKTOP, WM_RS2_WINLIST, 0, 0);
         }
         Obj::File { dir } => {
-            let Kind::Dir(d) = sh().views[v].kind.clone() else { return };
-            let path = join(&d, &name);
+            let path = sh().views[v].items[i].path.clone();
             if dir {
                 let mut p = path;
-                p.push(b'\\');
+                if !p.ends_with(b"\\") {
+                    p.push(b'\\');
+                }
                 open(Kind::Dir(p));
             } else {
                 crate::launch::open_file(&path);
             }
         }
         Obj::Window(f) => restore_window(f),
+        Obj::Shadow(id) => match shadows::get(id) {
+            Some(s) if s.target.exists() => open_target(&s.target),
+            _ => {
+                let mut t = b"The object \"".to_vec();
+                t.extend(name.iter().map(|&c| if c == b'\n' { b' ' } else { c }));
+                t.extend_from_slice(b"\" that this shadow stands for cannot be found. Delete the shadow?");
+                if message(sh().views[v].frame, &t, b"Broken Shadow", MB_YESNO | MB_WARNING) == MBID_YES {
+                    shadows::remove(id);
+                    fill(v);
+                }
+            }
+        },
+        Obj::Placeholder => {}
     }
 }
 
@@ -795,7 +1073,7 @@ fn restore_window(f: u32) {
 
 /// The selected items of a view (or the one the menu was opened on, if
 /// it is not selected).
-fn selected(v: usize, on: u32) -> Vec<usize> {
+pub fn selected(v: usize, on: u32) -> Vec<usize> {
     let items = &sh().views[v].items;
     let sel: Vec<usize> = (0..items.len()).filter(|&i| rd(items[i].rec, R_ATTR) & CRA_SELECTED != 0).collect();
     match item_by_key(v, on) {
@@ -820,16 +1098,24 @@ fn context_menu(v: usize, rec: u32) {
             };
             items.push(Menu::Item(CMD_OPEN as u16, open_text, true));
             let builtin_group = matches!(obj, Obj::Group(h) if h == sh().groups.prompts || h == sh().groups.programs);
+            let copy_move = |items: &mut Vec<Menu>| {
+                items.push(Menu::Item(CMD_COPY as u16, b"~Copy...", true));
+                items.push(Menu::Item(CMD_MOVE as u16, b"~Move...", true));
+            };
+            let shadow = Menu::Item(CMD_SHADOW as u16, b"Create s~hadow...", true);
             match obj {
                 Obj::Program(_) => {
                     items.push(Menu::Item(CMD_SETTINGS as u16, b"~Settings...", true));
                     items.push(Menu::Item(CMD_RENAME as u16, b"Re~name\tF2", true));
                     items.push(Menu::Sep);
+                    copy_move(&mut items);
+                    items.push(shadow);
                     items.push(Menu::Item(CMD_DELETE as u16, b"~Delete...\tDel", true));
                 }
                 Obj::Group(_) => {
                     items.push(Menu::Item(CMD_RENAME as u16, b"Re~name\tF2", true));
                     items.push(Menu::Sep);
+                    items.push(shadow);
                     items.push(Menu::Item(CMD_DELETE as u16, b"~Delete...\tDel", !builtin_group));
                 }
                 Obj::File { dir } => {
@@ -839,12 +1125,24 @@ fn context_menu(v: usize, rec: u32) {
                     items.push(Menu::Item(CMD_SETTINGS as u16, b"~Properties...", true));
                     items.push(Menu::Item(CMD_RENAME as u16, b"Re~name\tF2", true));
                     items.push(Menu::Sep);
+                    copy_move(&mut items);
+                    items.push(shadow);
                     items.push(Menu::Item(CMD_DELETE as u16, b"~Delete...\tDel", true));
+                }
+                Obj::Shadow(_) => {
+                    items.push(Menu::Item(CMD_LOCATE as u16, b"Original: ~Locate", true));
+                    items.push(Menu::Sep);
+                    copy_move(&mut items);
+                    items.push(Menu::Item(CMD_DELETE as u16, b"~Delete shadow...\tDel", true));
                 }
                 Obj::Window(_) => {
                     items.push(Menu::Item(CMD_CLOSEWIN as u16, b"~Close", true));
                 }
-                _ => {}
+                Obj::Drives | Obj::Drive(_) | Obj::Minimized | Obj::WindowList | Obj::Shutdown => {
+                    items.push(Menu::Sep);
+                    items.push(shadow);
+                }
+                Obj::Placeholder => {}
             }
         }
         None => {
@@ -909,26 +1207,32 @@ fn command(v: usize, cmd: u32, key: u32) {
                 match sh().views[v].items[i].obj {
                     Obj::Program(h) => crate::dialogs::program_settings(Some(h), group_of(&kind).unwrap_or(sh().groups.desktop)),
                     Obj::File { .. } => {
-                        if let Kind::Dir(d) = &kind {
-                            let p = join(d, sh().views[v].items[i].name());
-                            crate::dialogs::properties(&p);
-                        }
+                        let p = sh().views[v].items[i].path.clone();
+                        crate::dialogs::properties(&p);
                     }
                     _ => {}
                 }
             }
         }
         CMD_DELETE => delete(v, selected(v, key)),
+        CMD_COPY | CMD_MOVE | CMD_SHADOW => copy_command(v, cmd, selected(v, key)),
+        CMD_LOCATE => {
+            if let Some(Obj::Shadow(id)) = item_by_key(v, key).map(|i| sh().views[v].items[i].obj) {
+                if let Some(s) = shadows::get(id) {
+                    locate(&s.target);
+                }
+            }
+        }
         CMD_RENAME => {
             if let Some(i) = item_by_key(v, key) {
                 rename(v, i);
             }
         }
         CMD_EDIT => {
-            if let (Some(i), Kind::Dir(d)) = (item_by_key(v, key), &kind) {
-                let p = join(d, sh().views[v].items[i].name());
+            if let Some(i) = item_by_key(v, key) {
+                let p = sh().views[v].items[i].path.clone();
                 if let Some(e) = crate::launch::editor() {
-                    crate::launch::start(&e, &p, d, b"", PROG_PM);
+                    crate::launch::start(&e, &p, &fileops::parent(&p), b"", PROG_PM);
                 }
             }
         }
@@ -1046,6 +1350,10 @@ fn rename(v: usize, i: usize) {
         Obj::Program(_) | Obj::Group(_) | Obj::File { .. } => {}
         _ => return,
     }
+    // A tree's own folder is the window's.
+    if sh().views[v].view == CV_TREE && sh().views[v].items[i].parent == 0 && matches!(sh().views[v].kind, Kind::Dir(_)) {
+        return;
+    }
     // CNREDITDATA: cb, hwndCnr, pRecord, pFieldInfo, ppszText, cbText, id.
     let ed: [u32; 7] = [28, cnr, rec, 0, rec + R_PSZICON as u32, 0, 0x7ff0];
     send(cnr, CM_OPENEDIT, ed.as_ptr() as u32, 0);
@@ -1081,17 +1389,26 @@ fn end_edit(v: usize, ed: u32) {
             }),
             Obj::Group(h) => rename_group(h, &new),
             Obj::File { .. } => {
-                let Kind::Dir(d) = sh().views[v].kind.clone() else { return };
-                let (a, b) = (z(&join(&d, &old)), z(&join(&d, &new)));
+                let from = sh().views[v].items[i].path.clone();
+                let to = join(&fileops::parent(&from), &new);
+                let (a, b) = (z(&from), z(&to));
                 let rc = unsafe { os2::DosMove(a.as_ptr(), b.as_ptr()) };
                 if rc != 0 {
                     error(&alloc::format!("Cannot rename the file (error {rc}).").into_bytes());
+                } else {
+                    sh().views[v].items[i].path = to.clone();
+                    if shadows::path_moved(&from, &to) > 0 {
+                        post(sh().views[0].client, WM_USER + 3, 0, 0);
+                    }
                 }
                 rc == 0
             }
             _ => false,
         }
     };
+    if ok && matches!(sh().views[v].items[i].obj, Obj::Program(_)) && shadows::all().iter().any(|s| matches!(s.target, Target::Program(_))) {
+        post(sh().views[0].client, WM_USER + 3, 0, 0);
+    }
     let it = &mut sh().views[v].items[i];
     if ok {
         it.name = z(&new);
@@ -1131,14 +1448,16 @@ fn rename_group(h: u32, title: &[u8]) -> bool {
         }
     }
     objects::destroy_group(h);
+    shadows::group_renamed(h, g2);
     let gs = &mut sh().groups;
-    for x in [&mut gs.prompts, &mut gs.programs] {
+    for x in [&mut gs.prompts, &mut gs.programs, &mut gs.startup] {
         if *x == h {
             *x = g2;
         }
     }
     objects::write(objects::APP_DESKTOP, b"PromptsGroup", Some(&objects::hex(sh().groups.prompts)));
     objects::write(objects::APP_DESKTOP, b"ProgramsGroup", Some(&objects::hex(sh().groups.programs)));
+    objects::write(objects::APP_DESKTOP, b"StartupGroup", Some(&objects::hex(sh().groups.startup)));
     // The icon keeps its place on the desktop.
     let fid = folder_id(&Kind::Desktop);
     let (o, n) = ([&b"G"[..], &objects::hex(h)].concat(), [&b"G"[..], &objects::hex(g2)].concat());
@@ -1157,20 +1476,21 @@ fn rename_group(h: u32, title: &[u8]) -> bool {
 
 fn delete(v: usize, list: Vec<usize>) {
     let kind = sh().views[v].kind.clone();
-    let objs: Vec<(Obj, Vec<u8>)> = list.iter().map(|&i| (sh().views[v].items[i].obj, sh().views[v].items[i].name().to_vec())).filter(|(o, _)| match o {
-        Obj::Program(_) | Obj::File { .. } => true,
-        Obj::Group(h) => *h != sh().groups.prompts && *h != sh().groups.programs,
+    let objs: Vec<(Obj, Vec<u8>, Vec<u8>)> = list.iter().map(|&i| (sh().views[v].items[i].obj, sh().views[v].items[i].name().to_vec(), sh().views[v].items[i].path.clone())).filter(|(o, _, _)| match o {
+        Obj::Program(_) | Obj::File { .. } | Obj::Shadow(_) => true,
+        Obj::Group(h) => *h != sh().groups.prompts && *h != sh().groups.programs && *h != sh().groups.startup,
         _ => false,
     }).collect();
     if objs.is_empty() {
         return;
     }
     let what = if objs.len() == 1 {
-        let (o, n) = &objs[0];
+        let (o, n, _) = &objs[0];
         let kind_name: &[u8] = match o {
             Obj::Program(_) => b"the program object",
             Obj::Group(_) => b"the folder and its program objects",
             Obj::File { dir: true } => b"the folder and everything in it",
+            Obj::Shadow(_) => b"the shadow (not its object)",
             _ => b"the file",
         };
         let mut t = b"Delete ".to_vec();
@@ -1186,11 +1506,13 @@ fn delete(v: usize, list: Vec<usize>) {
         return;
     }
     let fid = folder_id(&kind);
-    for (o, name) in objs {
+    let mut shadows_changed = 0;
+    for (o, name, path) in objs {
         match o {
             Obj::Program(h) => {
                 objects::remove_program(h);
                 set_icon_pos(&fid, &[&b"P"[..], &objects::hex(h)].concat(), None);
+                shadows_changed += shadows::target_deleted(&Target::Program(h));
             }
             Obj::Group(h) => {
                 if let Some(g) = find_kind(&Kind::Group(h)) {
@@ -1198,16 +1520,20 @@ fn delete(v: usize, list: Vec<usize>) {
                 }
                 objects::destroy_group(h);
                 set_icon_pos(&fid, &[&b"G"[..], &objects::hex(h)].concat(), None);
+                shadows_changed += shadows::target_deleted(&Target::Group(h));
             }
-            Obj::File { dir } => {
-                if let Kind::Dir(d) = &kind {
-                    let p = join(d, &name);
-                    let rc = if dir { delete_tree(&p) } else { delete_file(&p) };
-                    if rc != 0 {
-                        error(&alloc::format!("Cannot delete {} (error {rc}).", os2::path::from_bytes(&name)).into_bytes());
-                        break;
-                    }
+            Obj::File { .. } => {
+                let rc = fileops::delete_path(&path);
+                if rc != 0 {
+                    error(&alloc::format!("Cannot delete {} (error {rc}).", os2::path::from_bytes(&name)).into_bytes());
+                    break;
                 }
+                shadows_changed += shadows::target_deleted(&Target::Path(path.clone()));
+                refresh_dir(&fileops::parent(&path));
+            }
+            Obj::Shadow(id) => {
+                shadows::remove(id);
+                set_icon_pos(&fid, &shadows::key(id), None);
             }
             _ => {}
         }
@@ -1215,222 +1541,136 @@ fn delete(v: usize, list: Vec<usize>) {
     if let Some(v) = find_kind(&kind) {
         fill(v);
     }
+    if shadows_changed > 0 {
+        refresh_shadows();
+    }
 }
 
-fn delete_file(p: &[u8]) -> u32 {
-    let c = z(p);
-    unsafe { os2::DosDelete(c.as_ptr()) }
-}
+// ---- Copy, Move, Create shadow ----
 
-/// Delete a directory with everything in it.
-pub fn delete_tree(dir: &[u8]) -> u32 {
-    for it in dir_listing(dir) {
-        let p = join(dir, &it.0);
-        let rc = if it.1 { delete_tree(&p) } else { delete_file(&p) };
-        if rc != 0 {
-            return rc;
-        }
-    }
-    let c = z(dir);
-    unsafe { os2::DosDeleteDir(c.as_ptr()) }
-}
-
-/// (name, is a directory) of a directory's entries.
-pub fn dir_listing(dir: &[u8]) -> Vec<(Vec<u8>, bool)> {
-    let spec = z(&join(dir, b"*"));
-    let mut buf = alloc::vec![0u8; 4096];
-    let mut hdir = 0xffff_ffffu32;
-    let mut count = 32u32;
-    let mut out = Vec::new();
-    let mut rc = unsafe { os2::DosFindFirst(spec.as_ptr(), &mut hdir, 0x37, buf.as_mut_ptr(), buf.len() as u32, &mut count, 1) };
-    while rc == 0 && count > 0 {
-        let mut at = 0usize;
-        for _ in 0..count {
-            let next = u32::from_le_bytes([buf[at], buf[at + 1], buf[at + 2], buf[at + 3]]);
-            let attr = u32::from_le_bytes([buf[at + 24], buf[at + 25], buf[at + 26], buf[at + 27]]);
-            let n = buf[at + 28] as usize;
-            let name = buf[at + 29..at + 29 + n].to_vec();
-            if name != b"." && name != b".." {
-                out.push((name, attr & 0x10 != 0));
-            }
-            if next == 0 {
-                break;
-            }
-            at += next as usize;
-        }
-        count = 32;
-        rc = unsafe { os2::DosFindNext(hdir, buf.as_mut_ptr(), buf.len() as u32, &mut count) };
-    }
-    unsafe { os2::DosFindClose(hdir) };
-    out
-}
-
-// ---- Dragging ----
-
-/// CN_INITDRAG: the shell drags the object (and the other selected
-/// ones) itself.
-fn init_drag(v: usize, di: u32) -> u32 {
-    let rec = rd(di, 4);
-    if rec == 0 {
-        return 0;
-    }
-    let key = rd(rec, R_KEY);
-    let list: Vec<u32> = selected(v, key).into_iter().map(|i| sh().views[v].items[i].key).collect();
-    if list.is_empty() {
-        return 0;
-    }
-    let pointer = if list.len() > 1 { sys_icon(SPTR_MULTFILE) } else { item_by_key(v, key).map_or(sys_icon(SPTR_FILE), |i| sh().views[v].items[i].icon) };
-    let client = sh().views[v].client;
-    sh().drag = Some(Drag { client, keys: list, start: PointL { x: rd(di, 8) as i32, y: rd(di, 12) as i32 }, pointer });
-    unsafe {
-        WinSetCapture(HWND_DESKTOP, client);
-        WinSetPointer(HWND_DESKTOP, pointer);
-    }
-    1
-}
-
-fn end_drag(drop: bool) {
-    let Some(d) = sh().drag.take() else { return };
-    unsafe {
-        WinSetCapture(HWND_DESKTOP, 0);
-        WinSetPointer(HWND_DESKTOP, sys_icon(SPTR_ARROW));
-    }
-    if !drop {
+/// The target folder dialog for the selected objects, then the copy,
+/// move or shadows.
+fn copy_command(v: usize, cmd: u32, list: Vec<usize>) {
+    let items: Vec<&Item> = list.iter().map(|&i| &sh().views[v].items[i]).filter(|it| !matches!(it.obj, Obj::Placeholder | Obj::Window(_))).collect();
+    if items.is_empty() {
         return;
     }
-    let Some(src) = find_client(d.client) else { return };
-    let end = pointer_pos();
-    let under = unsafe { WinWindowFromPoint(HWND_DESKTOP, &end, 1) };
-    let Some(dst) = find_cnr_of(under) else { return };
-    // An object under the pointer in the target folder.
-    let target = record_at(dst, end).filter(|t| !(dst == src && d.keys.contains(&sh().views[dst].items[*t].key)));
-    let into: Option<Kind> = match target.map(|t| (sh().views[dst].items[t].obj, t)) {
-        Some((Obj::Group(h), _)) => Some(Kind::Group(h)),
-        Some((Obj::Drive(c), _)) => Some(Kind::Dir(alloc::vec![c, b':', b'\\'])),
-        Some((Obj::File { dir: true }, t)) => match &sh().views[dst].kind {
-            Kind::Dir(p) => {
-                let mut q = join(p, sh().views[dst].items[t].name());
-                q.push(b'\\');
-                Some(Kind::Dir(q))
-            }
-            _ => None,
-        },
-        Some(_) => None,
-        None if dst != src => Some(sh().views[dst].kind.clone()),
-        None => None,
+    let files = items.iter().all(|it| matches!(it.obj, Obj::File { .. } | Obj::Shadow(_)));
+    let progs = items.iter().all(|it| matches!(it.obj, Obj::Program(_) | Obj::Shadow(_)));
+    let shadow = cmd == CMD_SHADOW;
+    if !shadow && !files && !progs {
+        error(b"Files and program objects cannot be copied or moved together.");
+        return;
+    }
+    let (title, button): (&[u8], &[u8]) = match cmd {
+        CMD_COPY => (b"Copy", b"~Copy"),
+        CMD_MOVE => (b"Move", b"~Move"),
+        _ => (b"Create Shadow", b"C~reate"),
     };
-    match into {
-        Some(k) if k != sh().views[src].kind => drop_into(src, &d.keys, &k),
-        Some(_) => {}
-        None if dst == src && target.is_none() && sh().views[src].view == CV_ICON => {
-            let (dx, dy) = (end.x - d.start.x, end.y - d.start.y);
-            for &k in &d.keys {
-                if let Some(i) = item_by_key(src, k) {
-                    let r = sh().views[src].items[i].rec;
-                    wr(r, R_X, (rd(r, R_X) as i32 + dx).max(0) as u32);
-                    wr(r, R_Y, (rd(r, R_Y) as i32 + dy).max(0) as u32);
-                }
-            }
-            reposition(src);
-            save_positions(src, Some(&d.keys));
-        }
-        None => {}
-    }
+    let one = items.len() == 1 && !shadow && !matches!(items[0].obj, Obj::Shadow(_));
+    let name = one.then(|| items[0].name().to_vec());
+    let start = match &sh().views[v].kind {
+        Kind::Dir(d) => Some(d.clone()),
+        _ => None,
+    };
+    let all_shadows = items.iter().all(|it| matches!(it.obj, Obj::Shadow(_)));
+    let (dirs, groups) = if shadow || all_shadows { (true, true) } else { (files, progs) };
+    let Some((to, new_name)) = crate::copy::pick_folder(title, button, dirs, groups, name.as_deref(), start.as_deref()) else { return };
+    let ops: Vec<(Obj, Vec<u8>, Vec<u8>, Option<Target>)> = items.iter().map(|it| (it.obj, it.name().to_vec(), it.path.clone(), target_of(it))).collect();
+    let from = sh().views[v].kind.clone();
+    let op = match cmd {
+        CMD_COPY => DO_COPY,
+        CMD_MOVE => DO_MOVE,
+        _ => DO_LINK,
+    };
+    let rename = if one && !new_name.is_empty() { Some(new_name) } else { None };
+    perform(&from, ops, &to, op, rename, None);
 }
 
-/// The item whose icon or text is under a desktop point.
-fn record_at(v: usize, p: PointL) -> Option<usize> {
-    let cnr = sh().views[v].cnr;
-    let mut pt = [p];
-    unsafe { WinMapWindowPoints(HWND_DESKTOP, cnr, pt.as_mut_ptr(), 1) };
-    let p = pt[0];
-    for (i, it) in sh().views[v].items.iter().enumerate() {
-        let mut r = RectL::default();
-        // QUERYRECORDRECT: cb, pRecord, fRightSplitWindow, fsExtent
-        // (CMA_ICON | CMA_TEXT).
-        let q: [u32; 4] = [16, it.rec, 0, 0x0800 | 0x1000];
-        if send(cnr, CM_QUERYRECORDRECT, &mut r as *mut RectL as u32, q.as_ptr() as u32) != 0 && p.x >= r.l && p.x < r.r && p.y >= r.b && p.y < r.t {
-            return Some(i);
-        }
-    }
-    None
-}
-
-/// Objects dropped on another folder: files move, program objects move
-/// to the other group, programs dropped on a group get a program object.
-fn drop_into(src: usize, keys: &[u32], to: &Kind) {
-    let src_kind = sh().views[src].kind.clone();
-    let mut changed_groups = Vec::new();
-    let mut changed_dirs = Vec::new();
-    for &k in keys {
-        let Some(i) = item_by_key(src, k) else { continue };
-        let (obj, name) = (sh().views[src].items[i].obj, sh().views[src].items[i].name().to_vec());
-        match (obj, &src_kind, to) {
-            (Obj::File { .. }, Kind::Dir(from), Kind::Dir(dest)) => {
-                let (a, b) = (join(from, &name), join(dest, &name));
-                let rc = move_path(&a, &b);
-                if rc != 0 {
-                    error(&alloc::format!("Cannot move {} (error {rc}).", os2::path::from_bytes(&name)).into_bytes());
-                    break;
-                }
-                changed_dirs.push(from.clone());
-                changed_dirs.push(dest.clone());
+/// Copy, move or link (make shadows of) objects into a folder: files go
+/// to the copy job, the rest happens now. `at` places new icons there
+/// (the drop point, in the folder's container).
+pub fn perform(from: &Kind, ops: Vec<(Obj, Vec<u8>, Vec<u8>, Option<Target>)>, to: &Kind, op: u32, rename: Option<Vec<u8>>, at: Option<(i32, i32)>) {
+    let fid = folder_id(to);
+    let mut files = Vec::new();
+    let mut placed: Vec<Vec<u8>> = Vec::new();
+    let mut groups = Vec::new();
+    for (obj, name, path, target) in ops {
+        if op == DO_LINK {
+            if let Some(t) = target {
+                let id = shadows::create(&fid, t);
+                placed.push(shadows::key(id));
             }
-            (Obj::File { dir: false }, Kind::Dir(from), _) => {
-                // A program file dropped on a group: a program object.
+            continue;
+        }
+        match (obj, to) {
+            (Obj::File { .. }, Kind::Dir(d)) => {
+                let n = rename.clone().unwrap_or_else(|| fileops::name_of(&path).to_vec());
+                files.push((path, d.clone(), n));
+            }
+            (Obj::File { dir: false }, _) if op == DO_CREATEPROGRAMOBJECT => {
+                // A program file on a group: a program object.
                 let Some(g) = group_of(to) else { continue };
-                let up = name.to_ascii_uppercase();
-                if [&b".EXE"[..], b".COM", b".CMD", b".BAT"].iter().any(|e| up.ends_with(e)) {
-                    let title = name[..name.iter().rposition(|&c| c == b'.').unwrap_or(name.len())].to_vec();
-                    let p = objects::Program { progc: PROG_DEFAULT, title, exe: join(from, &name), dir: from.clone(), ..Default::default() };
-                    objects::add_program(g, &p);
-                    changed_groups.push(g);
+                let title = name[..name.iter().rposition(|&c| c == b'.').unwrap_or(name.len())].to_vec();
+                let p = objects::Program { progc: PROG_DEFAULT, title, exe: path.clone(), dir: fileops::parent(&path), ..Default::default() };
+                let h = objects::add_program(g, &p);
+                if h != 0 {
+                    placed.push([&b"P"[..], &objects::hex(h)].concat());
                 }
+                groups.push(g);
             }
-            (Obj::Program(h), _, _) => {
-                let (Some(from), Some(g)) = (group_of(&src_kind), group_of(to)) else { continue };
-                if from == g {
+            (Obj::Program(h), _) => {
+                let (Some(g), Some(src)) = (group_of(to), group_of(from)) else { continue };
+                let Some(mut p) = objects::definition(h) else { continue };
+                if let Some(t) = &rename {
+                    p.title = t.clone();
+                }
+                if op == DO_MOVE && src == g {
                     continue;
                 }
-                if let Some(p) = objects::definition(h) {
-                    if objects::add_program(g, &p) != 0 {
+                let n = objects::add_program(g, &p);
+                if n != 0 {
+                    placed.push([&b"P"[..], &objects::hex(n)].concat());
+                    if op == DO_MOVE {
                         objects::remove_program(h);
+                        shadows::program_moved(h, n);
                     }
                 }
-                changed_groups.push(from);
-                changed_groups.push(g);
+                groups.push(g);
+                groups.push(src);
+            }
+            (Obj::Shadow(id), _) => {
+                if op == DO_MOVE {
+                    shadows::set_folder(id, &fid);
+                    placed.push(shadows::key(id));
+                } else if let Some(t) = target {
+                    let n = shadows::create(&fid, t);
+                    placed.push(shadows::key(n));
+                }
             }
             _ => {}
         }
     }
-    changed_groups.dedup();
-    for g in changed_groups {
+    // New icons where they were dropped.
+    if let Some((x, y)) = at.filter(|_| keeps_positions(to)) {
+        for (k, id) in placed.iter().enumerate() {
+            set_icon_pos(&fid, id, Some((x - 16 + 12 * k as i32, y - 16 - 12 * k as i32)));
+        }
+    }
+    if !files.is_empty() {
+        crate::copy::start(if op == DO_MOVE { crate::copy::Op::Move } else { crate::copy::Op::Copy }, files);
+    }
+    groups.sort();
+    groups.dedup();
+    for g in groups {
         refresh_group(g);
     }
-    changed_dirs.dedup();
-    for d in changed_dirs {
-        refresh_dir(&d);
+    refresh_kind(to);
+    refresh_kind(from);
+    if matches!(to, Kind::Desktop) || matches!(from, Kind::Desktop) {
+        refresh_kind(&Kind::Desktop);
     }
-}
-
-/// Move a file or directory; across drives copy, then delete.
-fn move_path(a: &[u8], b: &[u8]) -> u32 {
-    let (ca, cb) = (z(a), z(b));
-    let rc = unsafe { os2::DosMove(ca.as_ptr(), cb.as_ptr()) };
-    if rc != 17 {
-        return rc;
-    }
-    // ERROR_NOT_SAME_DEVICE
-    let rc = unsafe { os2::DosCopy(ca.as_ptr(), cb.as_ptr(), 0) };
-    if rc != 0 {
-        return rc;
-    }
-    let isdir = {
-        let mut st = os2::FileStatus3::default();
-        unsafe { os2::DosQueryPathInfo(ca.as_ptr(), 1, &mut st as *mut _ as *mut u8, core::mem::size_of::<os2::FileStatus3>() as u32) };
-        st.attr & 0x10 != 0
-    };
-    if isdir { delete_tree(a) } else { delete_file(a) }
+    refresh_shadows();
 }
 
 // ---- The minimized window viewer ----
@@ -1486,6 +1726,62 @@ extern "C" fn cnr_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
     old(h, m, a, b)
 }
 
+/// WM_DRAWITEM from a container (CA_OWNERDRAW): shadows' names in the
+/// shadow colour (blue, light blue on dark backgrounds; grey if broken),
+/// as the Workplace Shell shows them. Other records keep the container's.
+fn draw_item(v: usize, oi: u32) -> u32 {
+    // OWNERITEM: hwnd, hps, fsState, fsAttribute, .., rclItem, idItem,
+    // hItem (CNRDRAWITEMINFO: pRecord, pFieldInfo).
+    let (hps, attr) = (rd(oi, 4), rd(oi, 12));
+    let rect = RectL { l: rd(oi, 24) as i32, b: rd(oi, 28) as i32, r: rd(oi, 32) as i32, t: rd(oi, 36) as i32 };
+    let info = rd(oi, 44);
+    if info == 0 || rd(oi, 40) != CMA_TEXT || attr & CRA_SELECTED != 0 {
+        return 0;
+    }
+    let rec = rd(info, 0);
+    let Some(it) = sh().views[v].items.iter().find(|it| it.rec == rec) else { return 0 };
+    if !matches!(it.obj, Obj::Shadow(_)) {
+        return 0;
+    }
+    let bg = background(v);
+    let (r, g, b) = ((bg >> 16) & 0xff, (bg >> 8) & 0xff, bg & 0xff);
+    let dark = r * 3 + g * 6 + b < 1280;
+    let fg: u32 = match (it.broken, dark) {
+        (true, true) => 0xa0a0a0,
+        (true, false) => 0x808080,
+        (false, true) => 0x9cd8ff,
+        (false, false) => 0x0000c0,
+    };
+    let lines: Vec<&[u8]> = it.name().split(|&c| c == b'\n').collect();
+    let icon_view = sh().views[v].view == CV_ICON;
+    unsafe {
+        // LCOLF_RGB
+        GpiCreateLogColorTable(hps, 0, 3, 0, 0, core::ptr::null());
+        WinFillRect(hps, &rect, bg as i32);
+        let lh = (rect.t - rect.b) / lines.len().max(1) as i32;
+        for (k, ln) in lines.iter().enumerate() {
+            let mut lr = RectL { l: rect.l, r: rect.r, t: rect.t - lh * k as i32, b: rect.t - lh * (k as i32 + 1) };
+            if !icon_view {
+                lr.l += 2;
+            }
+            // DT_VCENTER, DT_CENTER
+            WinDrawText(hps, ln.len() as i32, ln.as_ptr(), &mut lr, fg as i32, bg as i32, 0x0400 | if icon_view { 0x0100 } else { 0 });
+        }
+    }
+    1
+}
+
+/// A folder's background colour (RGB).
+fn background(v: usize) -> u32 {
+    let cnr = sh().views[v].cnr;
+    let mut c = 0u32;
+    let mut id = 0u32;
+    if unsafe { WinQueryPresParam(cnr, 3, 0, &mut id, 4, &mut c, 0) } == 4 {
+        return c;
+    }
+    0xffffff
+}
+
 pub extern "C" fn client_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
     match m {
         m if m != 0 && m == PROGRAM_LIST_CHANGED.load(core::sync::atomic::Ordering::Relaxed) => {
@@ -1527,7 +1823,17 @@ pub extern "C" fn client_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
                     context_menu(v, b);
                     0
                 }
-                CN_INITDRAG => init_drag(v, b),
+                CN_INITDRAG => crate::dnd::begin(v, b),
+                CN_DRAGOVER => crate::dnd::drag_over(v, b),
+                CN_DROP => {
+                    crate::dnd::drop(v, b);
+                    0
+                }
+                CN_DRAGLEAVE | CN_DROPHELP => 0,
+                CN_EXPANDTREE => {
+                    expand(v, b);
+                    0
+                }
                 CN_BEGINEDIT => 0,
                 CN_REALLOCPSZ => realloc_psz(b),
                 CN_ENDEDIT => {
@@ -1545,23 +1851,14 @@ pub extern "C" fn client_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
             command(v, a & 0xffff, key);
             0
         }
-        WM_MOUSEMOVE if sh().drag.is_some() => {
-            let p = sh().drag.as_ref().map_or(0, |d| d.pointer);
-            unsafe { WinSetPointer(HWND_DESKTOP, p) };
-            1
+        WM_DRAWITEM if a & 0xffff == ID_CNR => find_client(h).map_or(0, |v| draw_item(v, b)),
+        DM_RENDER => crate::dnd::render(h, a),
+        DM_RENDERPREPARE => 1,
+        DM_ENDCONVERSATION => {
+            crate::dnd::end_conversation(h, a, b);
+            0
         }
-        WM_BUTTON2UP if sh().drag.is_some() => {
-            end_drag(true);
-            1
-        }
-        WM_BUTTON1DOWN if sh().drag.is_some() => {
-            end_drag(false);
-            1
-        }
-        WM_CHAR if sh().drag.is_some() => {
-            end_drag(false);
-            1
-        }
+        DM_DRAGOVERNOTIFY => 0,
         WM_RS2_MINWINDOW => {
             minimized(a, b != 0);
             0
@@ -1576,6 +1873,10 @@ pub extern "C" fn client_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
         }
         m if m == WM_USER + 2 => {
             refresh_kind(&Kind::Desktop);
+            0
+        }
+        m if m == WM_USER + 3 => {
+            refresh_shadows();
             0
         }
         WM_CLOSE => {

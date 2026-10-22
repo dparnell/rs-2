@@ -191,12 +191,26 @@ unsafe extern "C" {
     pub fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: *const u32) -> u32;
     #[link_name = "PMWIN.701"]
     pub fn WinAlarm(desk: u32, kind: u32) -> u32;
+    #[link_name = "PMWIN.744"]
+    pub fn WinFindAtom(table: u32, name: *const u8) -> u32;
+    #[link_name = "PMWIN.721"]
+    pub fn WinDeleteAtom(table: u32, atom: u32) -> u32;
+    #[link_name = "PMWIN.752"]
+    pub fn WinGetKeyState(desk: u32, vk: i32) -> i32;
+    #[link_name = "PMWIN.867"]
+    pub fn WinSetPointerPos(desk: u32, x: i32, y: i32) -> u32;
+    #[link_name = "PMWIN.757"]
+    pub fn WinGetPS(h: u32) -> u32;
+    #[link_name = "PMWIN.848"]
+    pub fn WinReleasePS(hps: u32) -> u32;
     #[link_name = "PMWIN.9003"]
     pub fn Rs2SetMinimizeViewer(h: u32) -> u32;
     #[link_name = "PMWIN.9007"]
     pub fn Rs2SetDesktopWindow(h: u32) -> u32;
     #[link_name = "PMGPI.598"]
     pub fn GpiCreateBitmap(hps: u32, hdr: *const u8, opts: u32, bits: *const u8, info: *const u8) -> u32;
+    #[link_name = "PMGPI.592"]
+    pub fn GpiCreateLogColorTable(hps: u32, opts: u32, fmt: u32, start: i32, count: i32, table: *const u32) -> u32;
     #[link_name = "PMGPI.371"]
     pub fn GpiDeleteBitmap(h: u32) -> u32;
     #[link_name = "PMWP.209"]
@@ -233,6 +247,121 @@ unsafe extern "C" {
     pub fn Rs2VioQuerySessions(p: *mut VioSession, max: u32, found: *mut u32, all: u32) -> u32;
     #[link_name = "RS2API.16"]
     pub fn Rs2VioControl(sid: u32, cmd: u32, arg: u32) -> u32;
+}
+
+// Direct manipulation (PMDRAG).
+unsafe extern "C" {
+    #[link_name = "PMDRAG.33"]
+    pub fn DrgAddStrHandle(psz: *const u8) -> u32;
+    #[link_name = "PMDRAG.37"]
+    pub fn DrgDeleteStrHandle(h: u32) -> u32;
+    #[link_name = "PMDRAG.49"]
+    pub fn DrgQueryStrName(h: u32, cb: u32, buf: *mut u8) -> u32;
+    #[link_name = "PMDRAG.50"]
+    pub fn DrgQueryStrNameLen(h: u32) -> u32;
+    #[link_name = "PMDRAG.32"]
+    pub fn DrgAccessDraginfo(pdinfo: u32) -> u32;
+    #[link_name = "PMDRAG.34"]
+    pub fn DrgAllocDraginfo(n: u32) -> u32;
+    #[link_name = "PMDRAG.39"]
+    pub fn DrgFreeDraginfo(pdinfo: u32) -> u32;
+    #[link_name = "PMDRAG.36"]
+    pub fn DrgDeleteDraginfoStrHandles(pdinfo: u32) -> u32;
+    #[link_name = "PMDRAG.38"]
+    pub fn DrgDrag(src: u32, pdinfo: u32, pdimg: *const u8, n: u32, vk: u32, rsvd: u32) -> u32;
+    #[link_name = "PMDRAG.57"]
+    pub fn DrgSetDragitem(pdinfo: u32, item: *const u8, cb: u32, i: u32) -> u32;
+    #[link_name = "PMDRAG.46"]
+    pub fn DrgQueryDragitemPtr(pdinfo: u32, i: u32) -> u32;
+    #[link_name = "PMDRAG.45"]
+    pub fn DrgQueryDragitemCount(pdinfo: u32) -> u32;
+    #[link_name = "PMDRAG.59"]
+    pub fn DrgVerifyRMF(pditem: u32, mech: *const u8, fmt: *const u8) -> u32;
+    #[link_name = "PMDRAG.61"]
+    pub fn DrgVerifyType(pditem: u32, ty: *const u8) -> u32;
+    #[link_name = "PMDRAG.35"]
+    pub fn DrgAllocDragtransfer(n: u32) -> u32;
+    #[link_name = "PMDRAG.40"]
+    pub fn DrgFreeDragtransfer(p: u32) -> u32;
+    #[link_name = "PMDRAG.54"]
+    pub fn DrgSendTransferMsg(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32;
+    #[link_name = "PMDRAG.42"]
+    pub fn DrgPostTransferMsg(h: u32, msg: u32, pdxfer: u32, fl: u32, rsvd: u32, retry: u32) -> u32;
+    #[link_name = "PMDRAG.43"]
+    pub fn DrgPushDraginfo(pdinfo: u32, dest: u32) -> u32;
+}
+
+pub const DM_DROP: u32 = 0x032f;
+pub const DM_DRAGOVER: u32 = 0x032e;
+pub const DM_DRAGLEAVE: u32 = 0x032d;
+pub const DM_DROPHELP: u32 = 0x032c;
+pub const DM_ENDCONVERSATION: u32 = 0x032b;
+pub const DM_RENDER: u32 = 0x0329;
+pub const DM_RENDERCOMPLETE: u32 = 0x0328;
+pub const DM_RENDERPREPARE: u32 = 0x0327;
+pub const DM_DRAGOVERNOTIFY: u32 = 0x0321;
+pub const DOR_NODROP: u32 = 0;
+pub const DOR_DROP: u32 = 1;
+pub const DOR_NODROPOP: u32 = 2;
+pub const DOR_NEVERDROP: u32 = 3;
+pub const DO_COPYABLE: u16 = 1;
+pub const DO_MOVEABLE: u16 = 2;
+pub const DO_LINKABLE: u16 = 4;
+pub const DC_CONTAINER: u16 = 8;
+pub const DO_DEFAULT: u32 = 0xbffe;
+pub const DO_UNKNOWN: u32 = 0xbfff;
+pub const DO_COPY: u32 = 0x10;
+pub const DO_MOVE: u32 = 0x20;
+pub const DO_LINK: u32 = 0x18;
+pub const DO_CREATEPROGRAMOBJECT: u32 = 0x80;
+pub const DMFL_TARGETSUCCESSFUL: u32 = 1;
+pub const DMFL_TARGETFAIL: u32 = 2;
+pub const DMFL_RENDEROK: u32 = 0x10;
+pub const DMFL_RENDERFAIL: u32 = 0x20;
+pub const DRG_ICON: u32 = 1;
+pub const VK_ENDDRAG: u32 = 0x38;
+pub const CN_DRAGLEAVE: u32 = 102;
+pub const CN_DRAGOVER: u32 = 103;
+pub const CN_DROP: u32 = 104;
+pub const CN_DROPHELP: u32 = 105;
+pub const CA_OWNERDRAW: u32 = 0x4000;
+pub const WM_DRAWITEM: u32 = 0x0036;
+pub const CRA_TARGET: u32 = 0x0002;
+pub const CRA_DISABLED: u32 = 0x1000;
+pub const CRA_EXPANDED: u32 = 0x0080;
+pub const CRA_COLLAPSED: u32 = 0x0100;
+pub const CMA_TEXT: u32 = 0x1000;
+
+// DRAGITEM offsets.
+pub const DI_HWND: usize = 0;
+pub const DI_ID: usize = 4;
+pub const DI_TYPE: usize = 8;
+pub const DI_RMF: usize = 12;
+pub const DI_CONTAINER: usize = 16;
+pub const DI_SOURCE: usize = 20;
+pub const DI_TARGET: usize = 24;
+pub const DI_CONTROL: usize = 32;
+pub const DI_OPS: usize = 34;
+pub const DRAGITEM_SIZE: u32 = 36;
+
+/// A string handle's text.
+pub fn str_handle(h: u32) -> Vec<u8> {
+    if h == 0 {
+        return Vec::new();
+    }
+    let n = unsafe { DrgQueryStrNameLen(h) } as usize;
+    let mut buf = alloc::vec![0u8; n + 1];
+    let got = unsafe { DrgQueryStrName(h, buf.len() as u32, buf.as_mut_ptr()) } as usize;
+    buf.truncate(got);
+    buf
+}
+
+pub fn add_str(s: &[u8]) -> u32 {
+    if s.is_empty() {
+        return 0;
+    }
+    let c = z(s);
+    unsafe { DrgAddStrHandle(c.as_ptr()) }
 }
 
 /// RS2VIOSESSION
@@ -491,6 +620,21 @@ pub const VK_DELETE: u32 = 0x1b;
 pub const VK_F2: u32 = 0x21;
 pub const VK_F5: u32 = 0x24;
 pub const VK_NEWLINE: u32 = 0x08;
+pub const VK_SHIFT: i32 = 9;
+pub const VK_CTRL: i32 = 10;
+
+// List boxes.
+pub const WC_LISTBOX: u16 = 7;
+pub const LM_INSERTITEM: u32 = 0x0161;
+pub const LM_SELECTITEM: u32 = 0x0164;
+pub const LM_QUERYSELECTION: u32 = 0x0165;
+pub const LM_QUERYITEMTEXT: u32 = 0x0168;
+pub const LM_DELETEALL: u32 = 0x016e;
+pub const LM_QUERYITEMCOUNT: u32 = 0x0160;
+pub const LN_SELECT: u32 = 1;
+pub const LN_ENTER: u32 = 4;
+pub const LIT_END: u32 = 0xffff;
+pub const LIT_NONE: u32 = 0xffff;
 
 pub fn mp(lo: u32, hi: u32) -> u32 {
     (lo & 0xffff) | hi << 16

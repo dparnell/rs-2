@@ -5,7 +5,9 @@
 //! - `RS2_Desktop`: `Version` (written when the default objects have been
 //!   made), `DesktopGroup` (handle of the hidden group whose programs sit
 //!   on the desktop), `Background` (desktop colour, `RRGGBB` hex),
-//!   `PromptsGroup`, `ProgramsGroup`.
+//!   `PromptsGroup`, `ProgramsGroup`, `StartupGroup` (the Startup folder,
+//!   whose objects start once after each boot), `NextShadow`.
+//! - `RS2_Shadows`: shadows (see shadows.rs).
 //! - `RS2_IconPos`: `FOLDER|OBJECT` -> `x y` (icon positions).
 //! - `RS2_Windows`: `FOLDER` -> `x y cx cy view` (folder windows).
 //! - `RS2_Associations`: extension (upper case, no dot) -> program.
@@ -20,7 +22,7 @@ pub const APP_WINDOWS: &[u8] = b"RS2_Windows\0";
 pub const APP_ASSOC: &[u8] = b"RS2_Associations\0";
 
 /// Current layout of the default objects.
-pub const VERSION: &[u8] = b"3";
+pub const VERSION: &[u8] = b"4";
 
 pub fn query(app: &[u8], key: &[u8]) -> Option<Vec<u8>> {
     let k = z(key);
@@ -39,6 +41,21 @@ pub fn query(app: &[u8], key: &[u8]) -> Option<Vec<u8>> {
         buf.pop();
     }
     Some(buf)
+}
+
+/// The keys of an application.
+pub fn keys(app: &[u8]) -> Vec<Vec<u8>> {
+    let mut size = 0u32;
+    if unsafe { PrfQueryProfileSize(HINI_USERPROFILE, app.as_ptr(), core::ptr::null(), &mut size) } == 0 || size == 0 {
+        return Vec::new();
+    }
+    let mut buf = alloc::vec![0u8; size as usize + 1];
+    let mut n = size;
+    if unsafe { PrfQueryProfileData(HINI_USERPROFILE, app.as_ptr(), core::ptr::null(), buf.as_mut_ptr(), &mut n) } == 0 {
+        return Vec::new();
+    }
+    buf.truncate(n as usize);
+    buf.split(|&c| c == 0).filter(|k| !k.is_empty()).map(|k| k.to_vec()).collect()
 }
 
 pub fn write(app: &[u8], key: &[u8], value: Option<&[u8]>) -> bool {
@@ -236,6 +253,7 @@ pub struct Groups {
     pub desktop: u32,
     pub prompts: u32,
     pub programs: u32,
+    pub startup: u32,
 }
 
 /// The groups, creating the default objects if this profile has none
@@ -249,15 +267,27 @@ pub fn ensure_defaults() -> Groups {
             // its own System Editor; 2: before the application installer)
             // gets the editor's object and associations and the
             // installer's object once.
+            // ... and 3, before the Startup folder: the folder.
+            let startup = match get(b"StartupGroup") {
+                Some(s) => s,
+                None => make_startup(),
+            };
             if query(APP_DESKTOP, b"Version").as_deref() != Some(VERSION) {
                 add_editor(programs);
                 add_app_installer(programs);
                 write(APP_DESKTOP, b"Version", Some(VERSION));
             }
-            return Groups { desktop, prompts, programs };
+            return Groups { desktop, prompts, programs, startup };
         }
     }
     make_defaults()
+}
+
+/// The Startup folder (a visible program group).
+fn make_startup() -> u32 {
+    let g = create_group(b"Startup", SHE_VISIBLE);
+    write(APP_DESKTOP, b"StartupGroup", Some(&hex(g)));
+    g
 }
 
 /// The System Editor's program object (unless there is one) and its
@@ -325,6 +355,7 @@ pub fn make_defaults() -> Groups {
     if query(APP_DESKTOP, b"Background").is_none() {
         write(APP_DESKTOP, b"Background", Some(b"2E6E8E"));
     }
+    let startup = query_u32(APP_DESKTOP, b"StartupGroup").filter(|&h| group_exists(h)).unwrap_or_else(make_startup);
     write(APP_DESKTOP, b"Version", Some(VERSION));
-    Groups { desktop, prompts, programs }
+    Groups { desktop, prompts, programs, startup }
 }

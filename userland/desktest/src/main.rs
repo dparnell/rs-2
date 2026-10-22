@@ -1,10 +1,17 @@
 //! Self-checks of what the desktop shell (RS2SHELL.EXE) relies on: its
 //! default objects in OS2.INI (made by `RS2SHELL /MAKEINI` if missing),
 //! program objects created, changed and removed through the program list
-//! API as the shell does it, and PMWIN's desktop window pinning
+//! API as the shell does it, PMWIN's desktop window pinning
 //! (Rs2SetDesktopWindow), WinWindowFromPoint, WinQueryWindowProcess and
-//! presentation parameter colours. Each check prints PASS or FAIL, then
-//! "desktest done: N failure(s)"; the exit code is N.
+//! presentation parameter colours; the Startup folder (`RS2SHELL
+//! /STARTUP` starts its objects once per session); shadows in OS2.INI
+//! following their objects; copying and moving trees with their EAs (the
+//! shell's fileops.rs); and direct manipulation through PMDRAG: string
+//! handles, DRAGINFOs, RMF and type checks, and a drag with DrgDrag onto
+//! a container in a second process (`DESKTEST DROPTARGET`, which answers
+//! DM_DRAGOVER, takes the drop, asks for one item to be rendered with
+//! DM_RENDER and ends each item's conversation). Each check prints PASS
+//! or FAIL, then "desktest done: N failure(s)"; the exit code is N.
 
 #![no_std]
 #![no_main]
@@ -13,10 +20,16 @@
 
 extern crate alloc;
 
+#[path = "../../rs2shell/src/fileops.rs"]
+mod fileops;
 #[path = "../../rs2shell/src/objects.rs"]
 mod objects;
 #[path = "../../rs2shell/src/pm.rs"]
 mod pm;
+#[path = "../../rs2shell/src/shadows.rs"]
+mod shadows;
+mod drag;
+mod files;
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -150,13 +163,99 @@ fn pmwin(hab: u32) {
     }
 }
 
-fn main(_s: &os2::Startup) -> u32 {
+/// The Startup folder: its group, and RS2SHELL /STARTUP starting its
+/// program object once (the second time in a session it does not).
+fn startup() {
+    let g = objects::query_u32(objects::APP_DESKTOP, b"StartupGroup").filter(|&h| objects::group_exists(h));
+    check("the Startup folder exists (RS2_Desktop StartupGroup)", g.is_some());
+    let Some(g) = g else { return };
+    check("the Startup folder is a visible group named Startup", objects::titles(SGH_ROOT).iter().any(|x| x.0 == g && x.2 == SHE_VISIBLE && x.3 == b"Startup"));
+    let marker = b"C:\\DTSTART.TMP";
+    fileops::delete_file(marker);
+    let me = objects::sys_path(b"RS2\\DESKTEST.EXE");
+    let p = Program { progc: PROG_DEFAULT, title: b"DeskTest Startup".to_vec(), exe: me, params: [&b"MARK "[..], marker].concat(), ..Program::default() };
+    let h = objects::add_program(g, &p);
+    check("a program object in the Startup folder", h != 0);
+    let run = || {
+        let prog = objects::sys_path(b"OS2\\RS2SHELL.EXE");
+        let mut args = prog.clone();
+        args.push(0);
+        args.extend_from_slice(b"/STARTUP\0\0");
+        let pz = z(&prog);
+        let mut fail = [0u8; 64];
+        let mut res = os2::ResultCodes { code_terminate: 0, code_result: 0 };
+        unsafe { os2::DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, 0, args.as_ptr(), core::ptr::null(), &mut res, pz.as_ptr()) }
+    };
+    let wait = |ms: u32| {
+        for _ in 0..ms / 100 {
+            if fileops::exists(marker) {
+                return true;
+            }
+            unsafe { os2::DosSleep(100) };
+        }
+        fileops::exists(marker)
+    };
+    check("RS2SHELL /STARTUP", run() == 0);
+    check("the Startup folder's object started", wait(15000));
+    fileops::delete_file(marker);
+    check("RS2SHELL /STARTUP again", run() == 0);
+    check("... starts nothing the second time in a session", !wait(3000));
+    objects::remove_program(h);
+}
+
+/// Shadows: made, listed by folder, following a rename and a move of
+/// their object (and of the directory they are kept in), broken when the
+/// object is gone, removed with it.
+fn shadow_checks() {
+    use shadows::Target;
+    let dir = b"C:\\DTSHADOW";
+    fileops::delete_path(dir);
+    let dz = z(dir);
+    unsafe { os2::DosCreateDir(dz.as_ptr(), core::ptr::null_mut()) };
+    let file = b"C:\\DTSHADOW\\ORIGINAL.TXT";
+    files::write(file, b"the original");
+    let before = shadows::all().len();
+    let a = shadows::create(b"DESKTOP", Target::Path(file.to_vec()));
+    let b = shadows::create(b"DIR:C:\\DTSHADOW\\", Target::Program(0x1234));
+    check("shadows made", a != 0 && b != 0 && a != b && shadows::all().len() == before + 2);
+    check("listed in their folder", shadows::in_folder(b"DESKTOP").iter().any(|s| s.id == a) && shadows::in_folder(b"DIR:C:\\DTSHADOW\\").iter().any(|s| s.id == b));
+    check("a shadow of a file shows the file's name", shadows::get(a).is_some_and(|s| s.target.title() == b"ORIGINAL.TXT" && s.target.exists()));
+    check("a shadow of a missing program object is broken", shadows::get(b).is_some_and(|s| !s.target.exists()));
+    let renamed = b"C:\\DTSHADOW\\RENAMED.TXT";
+    let (o, n) = (z(file), z(renamed));
+    unsafe { os2::DosMove(o.as_ptr(), n.as_ptr()) };
+    check("a rename: the shadow follows", shadows::path_moved(file, renamed) == 1 && shadows::get(a).is_some_and(|s| s.target == Target::Path(renamed.to_vec())));
+    let (o, n) = (z(dir), z(b"C:\\DTSHADW2"));
+    unsafe { os2::DosMove(o.as_ptr(), n.as_ptr()) };
+    let moved = shadows::path_moved(dir, b"C:\\DTSHADW2");
+    check("a directory moved: shadows of what is in it and kept in it follow", moved == 2 && shadows::get(a).is_some_and(|s| s.target == Target::Path(b"C:\\DTSHADW2\\RENAMED.TXT".to_vec())) && shadows::get(b).is_some_and(|s| s.folder == b"DIR:C:\\DTSHADW2\\"));
+    check("Target ids parse back", Target::parse(&Target::Program(0xabc).id()) == Target::Program(0xabc) && Target::parse(b"DRIVE:D") == Target::Drive(b'D') && Target::parse(b"G0000ABCD") == Target::Group(0xabcd));
+    fileops::delete_path(b"C:\\DTSHADW2");
+    check("the object gone: the shadow is broken", shadows::get(a).is_some_and(|s| !s.target.exists()));
+    check("deleted through the shell: its shadows go", shadows::target_deleted(&Target::Path(b"C:\\DTSHADW2".to_vec())) == 2 && shadows::get(a).is_none() && shadows::get(b).is_none());
+    check("shadows cleaned up", shadows::all().len() == before);
+}
+
+fn main(s: &os2::Startup) -> u32 {
+    let args: alloc::vec::Vec<u8> = s.args().iter().copied().skip_while(|&c| c == b' ').collect();
+    // DESKTEST MARK FILE: write FILE (a Startup folder object).
+    if let Some(f) = args.strip_prefix(b"MARK ") {
+        files::write(f, b"started");
+        return 0;
+    }
     let hab = unsafe { WinInitialize(0) };
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
+    if args.starts_with(b"DROPTARGET") {
+        return drag::target(hab);
+    }
     check("WinInitialize/WinCreateMsgQueue", hab != 0 && hmq != 0);
     defaults();
     program_objects();
     pmwin(hab);
+    startup();
+    shadow_checks();
+    files::checks();
+    drag::checks(hab);
     let f = FAILS.load(Ordering::Relaxed);
     os2::println!("desktest done: {f} failure(s)");
     unsafe {

@@ -11,8 +11,14 @@
 //!   date), the minimized windows;
 //! - pop-up menus (button 2), a settings notebook for program objects,
 //!   direct editing of names (Alt+click, F2), deleting with
-//!   confirmation, dragging icons with button 2 (positions are kept in
-//!   OS2.INI; a file dropped on another folder moves there);
+//!   confirmation, copying and moving files (a worker thread with a
+//!   progress window, the name collision dialog) and objects, shadows,
+//!   the tree view of drives and directories;
+//! - drag and drop through PMDRAG (DrgDrag), with other programs too:
+//!   icons move (positions are kept in OS2.INI), files move or copy
+//!   (Ctrl copies, Shift moves, Ctrl+Shift makes shadows), files dropped
+//!   on programs start them;
+//! - the Startup folder, whose objects start once after each boot;
 //! - the shutdown sequence (WM_SAVEAPPLICATION and WM_CLOSE to every
 //!   program, DosShutdown, ACPI power off).
 //!
@@ -21,8 +27,9 @@
 //! the shell's own profile entries. The first start makes the default
 //! objects (rs2's own MAKEINI step).
 //!
-//! Usage: `RS2SHELL [/MAKEINI]`: /MAKEINI only makes the default objects
-//! (if missing) and ends.
+//! Usage: `RS2SHELL [/MAKEINI | /STARTUP]`: /MAKEINI only makes the
+//! default objects (if missing) and ends; /STARTUP only starts the
+//! Startup folder's objects (if not done in this session yet) and ends.
 
 #![no_std]
 #![no_main]
@@ -30,11 +37,16 @@
 
 extern crate alloc;
 
+mod copy;
 mod dialogs;
+mod dnd;
+mod fileops;
 mod launch;
 mod objects;
 mod pm;
+mod shadows;
 mod shutdown;
+mod startup;
 mod view;
 
 use alloc::vec::Vec;
@@ -53,7 +65,6 @@ pub struct Shell {
     pub icons: Vec<u32>,
     /// Frames hidden by minimizing (the minimized window viewer's).
     pub minimized: Vec<u32>,
-    pub drag: Option<view::Drag>,
     pub next_key: u32,
     /// The pop-up menu on show, and what it was opened on: (client of
     /// the view, item key; 0 = the folder itself).
@@ -114,6 +125,19 @@ fn main(s: &os2::Startup) -> u32 {
     }
     view::register_messages();
     let groups = objects::ensure_defaults();
+    if args.starts_with(b"/STARTUP") {
+        let n = startup::run(groups.startup, |t| {
+            if let shadows::Target::Path(p) = t {
+                launch::open_file(p);
+            }
+        });
+        os2::println!("RS2SHELL: {n} startup object(s) started");
+        unsafe {
+            WinDestroyMsgQueue(hmq);
+            WinTerminate(hab);
+        }
+        return 0;
+    }
     if args.starts_with(b"/MAKEINI") {
         unsafe {
             WinDestroyMsgQueue(hmq);
@@ -148,7 +172,6 @@ fn main(s: &os2::Startup) -> u32 {
             views: Vec::new(),
             icons,
             minimized: Vec::new(),
-            drag: None,
             next_key: 1,
             popup: 0,
             popup_on: (0, 0),
@@ -158,8 +181,11 @@ fn main(s: &os2::Startup) -> u32 {
         WinRegisterClass(hab, CLASS.as_ptr(), view::client_proc, 0, 4);
     }
     dialogs::register(hab);
+    copy::register(hab);
     view::open(view::Kind::Desktop);
     apply_minimize_setting();
+    let startup_group = sh().groups.startup;
+    startup::run(startup_group, view::open_target);
     let mut q = QMsg::default();
     while unsafe { WinGetMsg(hab, &mut q, 0, 0, 0) } != 0 {
         unsafe { WinDispatchMsg(hab, &q) };
