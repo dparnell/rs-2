@@ -1,7 +1,9 @@
 //! A drawing target: 32-bit pixels, top row first in memory, addressed in
-//! device coordinates (bottom row is y = 0).
+//! device coordinates (bottom row is y = 0). A surface can note what it
+//! draws in a [`Damage`] list (the screen does, for the display driver).
 
 use crate::color::Rgb;
+use crate::damage::Damage;
 use crate::rect::Rect;
 
 #[derive(Clone, Copy, Debug)]
@@ -13,6 +15,8 @@ pub struct Surface {
     pub stride: i32,
     /// Red in the low byte (UEFI RGBX) instead of 0x00RRGGBB (BGRX).
     pub red_low: bool,
+    /// Where drawing is noted (null: nowhere).
+    damage: *mut Damage,
 }
 
 unsafe impl Send for Surface {}
@@ -22,7 +26,22 @@ impl Surface {
     /// `pixels` must point to `stride * height` writable pixels that stay
     /// valid while the surface is used.
     pub unsafe fn new(pixels: *mut u32, width: i32, height: i32, stride: i32, red_low: bool) -> Self {
-        Surface { pixels, width, height, stride, red_low }
+        Surface { pixels, width, height, stride, red_low, damage: core::ptr::null_mut() }
+    }
+
+    /// Note what is drawn from now on in `d` (null: nowhere).
+    ///
+    /// # Safety
+    /// `d` must stay valid while the surface (or a copy) draws, and only
+    /// one thread may draw at a time.
+    pub unsafe fn set_damage(&mut self, d: *mut Damage) {
+        self.damage = d;
+    }
+
+    fn note(&self, r: Rect) {
+        if let Some(d) = unsafe { self.damage.as_mut() } {
+            d.add(r);
+        }
     }
 
     /// The pixel memory.
@@ -63,6 +82,9 @@ impl Surface {
         if self.bounds().contains(crate::Point::new(x, y)) {
             let v = self.encode(c);
             unsafe { *self.pixels.add(self.index(x, y)) = v };
+            if let Some(d) = unsafe { self.damage.as_mut() } {
+                d.add_point(x, y);
+            }
         }
     }
 
@@ -72,6 +94,7 @@ impl Surface {
         if r.is_empty() {
             return;
         }
+        self.note(r);
         let v = self.encode(c);
         for y in r.bottom..r.top {
             let row = self.index(r.left, y);
@@ -84,6 +107,9 @@ impl Surface {
     /// Apply `f` to every pixel of `r` (clipped), for raster operations.
     pub fn map(&mut self, r: Rect, mut f: impl FnMut(i32, i32, Rgb) -> Rgb) {
         let r = r.intersect(&self.bounds());
+        if !r.is_empty() {
+            self.note(r);
+        }
         for y in r.bottom..r.top {
             for x in r.left..r.right {
                 let i = self.index(x, y);

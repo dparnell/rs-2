@@ -12,6 +12,7 @@ extern crate alloc;
 
 pub mod bitmap;
 pub mod color;
+pub mod damage;
 pub mod font;
 pub mod goca;
 pub mod icon;
@@ -26,6 +27,7 @@ mod surface;
 pub mod xform;
 
 pub use bitmap::Bitmap;
+pub use damage::Damage;
 pub use ps::*;
 pub use rect::{Point, Rect};
 pub use region::Region;

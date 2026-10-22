@@ -44,9 +44,10 @@ The logic lives in host-testable crates; the DLLs are thin:
 A kernel gate module, `RS2API`, holds rs2-private 32-bit services used by
 rs2's own DLLs (applications never import it):
 
-- `Rs2MapDisplay(PDISPLAYINFO)` (1): maps the framebuffer into the calling
-  process (same linear address in every process, in the shared arena) and
-  returns its address, width, height, stride and pixel format.
+- `Rs2MapDisplay(PDISPLAYINFO)` (1): maps the framebuffer (on a plain
+  firmware framebuffer a RAM back buffer) into the calling process (same
+  linear address in every process, in the shared arena) and returns its
+  address, width, height, stride and pixel format.
 - `Rs2ReadInput(PINPUTEVENT, ulTimeout)` (2): raw input for the PM session:
   key events (scan code, character, shift state, make/break) and mouse
   events (absolute position in pixels, buttons, wheel).
@@ -69,8 +70,19 @@ rs2's own DLLs (applications never import it):
   machine off (ACPI S5, then QEMU's and Bochs' ports) and returns
   ERROR_NOT_SUPPORTED if it is still running, 1 restarts it.
 
-RS2API ordinals: 1-7 PM (above), 10-16 windowed VIO sessions (see
-[Windowed VIO sessions](#windowed-vio-sessions-os2-window)), 100
+- `Rs2UpdateDisplay(pul, c)` (20): PM drew in `c` rectangles (left,
+  top, right, bottom in framebuffer pixels, rows from the top); see
+  [The screen](#the-screen-damage-and-display-modes).
+- `Rs2QueryDisplay(PDISPLAYINFO)` (21): the display as `Rs2MapDisplay`
+  describes it, plus a sixth ULONG, the number of mode changes so far.
+- `Rs2QueryDisplayModes(pul, cMax, pcModes)` (22): the resolutions the
+  driver can switch to, as (width, height) pairs.
+- `Rs2SetDisplayMode(cx, cy)` (23): switch the resolution under PM
+  ((0, 0): the display's preferred size); ERROR_NOT_SUPPORTED without a
+  driver that can.
+
+RS2API ordinals: 1-7 and 20-23 PM (above), 10-16 windowed VIO sessions
+(see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)), 100
 performance counters, 200-221 sockets (docs/NETWORK.md).
 
 Two kernel rules matter for PM: a thread inside a must-complete section
@@ -93,6 +105,53 @@ lands on the text screen; for what PM drew in the moment before the
 server saw the event, the kernel redraws the text screen a few times
 during the first half second. In the PM session Ctrl+Esc goes to PM
 (its window list); Alt+Esc still switches sessions.
+
+## The screen: damage and display modes
+
+PM processes draw straight into memory the kernel maps for them
+(`Rs2MapDisplay`): the framebuffer of VMware SVGA II (VRAM) or virtio-gpu
+(its guest-RAM backing), each sized for the largest mode the driver
+offers, or, on a plain firmware (GOP) framebuffer, a back buffer in RAM.
+
+**Damage.** The screen surface (gpi's `Surface`) notes every pixel it
+writes in a damage list in the shared state (`gpi::Damage`: at most 16
+rectangles; a new one joins the one it adds least area to when that is
+little or the list is full). When a thread lets go of the PM lock,
+PMWIN hands the list to the kernel (`Rs2UpdateDisplay`) unless it is
+drawing into the shadow buffer of a background PM session. The kernel
+adds it to its own list (`display::damage`, also fed with the rows the
+text screens draw), and about 60 times a second the driver copies only
+those areas: an UPDATE per rectangle on SVGA II, a TRANSFER_TO_HOST_2D
+and a RESOURCE_FLUSH on virtio-gpu, and from the back buffer to the
+screen on a plain framebuffer (only while PM is shown; when it comes
+back the whole buffer is copied). Measured in QEMU at 1024x768 with
+`dispstat` on the kernel command line (pixels sent per second, logged
+every 5 s): an idle desktop went from 24.5 million (the whole screen 31
+times a second) to 0; dragging a folder window around sends 1-3
+million.
+
+**Changing the resolution.** `Rs2SetDisplayMode` switches the driver
+(virtio-gpu makes a new resource on the same backing; SVGA II programs
+the mode in the same VRAM) and queues `EV_MODE` (6). The server's
+input thread takes the new geometry (`Rs2QueryDisplay`; it also
+compares the mode generation on every pass, in case the event was
+missed), points the surface at it, sizes the desktop window, gives the
+pinned desktop window (the shell's) and windows that covered the old
+screen the new one, re-maximizes maximized frames, brings frames that
+ended up off the screen back, posts `WM_SIZE` to the desktop window and
+repaints everything; the pointer is kept on the screen. When the host
+changes a virtio-gpu display (`VIRTIO_GPU_EVENT_DISPLAY`) the kernel
+queues `EV_HOSTSIZE` (7) and the server asks for the display's new
+preferred size.
+
+**Display settings.** `C:\OS2\DISPLAY.EXE` lists the modes
+(`Rs2QueryDisplayModes`); Apply switches, and the new mode stays only if
+Keep is pressed within 15 seconds (Revert, closing the window or the
+time running out bring the old one back). A kept mode is saved as
+`VIDEO=WxH` in the boot drive's CONFIG.SYS; the kernel applies it after
+reading CONFIG.SYS at boot (it wins over the loader's `video=`, which
+picks among the firmware's modes). `DISPLAY WxH` switches and saves
+without asking. A plain firmware framebuffer cannot change modes.
 
 ## Processes and input
 

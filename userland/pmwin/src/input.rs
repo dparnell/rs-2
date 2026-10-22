@@ -34,6 +34,8 @@ pub const EV_MOUSE: u16 = 2;
 pub const EV_REPAINT: u16 = 3;
 pub const EV_PROCEXIT: u16 = 4;
 pub const EV_BACKGROUND: u16 = 5;
+pub const EV_MODE: u16 = 6;
+pub const EV_HOSTSIZE: u16 = 7;
 
 fn pack(x: i32, y: i32) -> u32 {
     (x as u32 & 0xffff) | (y as u32) << 16
@@ -459,6 +461,8 @@ pub fn event(ev: &Input) {
             pointer::draw(s);
         }
         EV_PROCEXIT => crate::server::process_gone(ev.a),
+        EV_MODE => crate::display::mode_changed(),
+        EV_HOSTSIZE => crate::display::host_size(),
         _ => {}
     }
 }

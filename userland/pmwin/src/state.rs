@@ -204,6 +204,9 @@ pub struct State {
     /// session has the screen (so nothing PM draws then reaches it).
     pub screen: usize,
     pub shadow: Vec<u32>,
+    /// What was drawn on the screen since the kernel was last told
+    /// (`display::flush_damage`).
+    pub damage: gpi::Damage,
     /// Presentation parameter colours set on windows: (foreground,
     /// background) as 0x00RRGGBB, NO_COLOR where not set.
     pub pres: BTreeMap<u32, (u32, u32)>,
@@ -288,12 +291,17 @@ pub fn init(surface: Surface) {
         vio: Vec::new(),
         screen: surface.pixels() as usize,
         shadow: Vec::new(),
+        damage: gpi::Damage::new(),
         keys: [0; 256],
         switch: Default::default(),
         cursor: Default::default(),
         metafiles: Vec::new(),
     });
-    unsafe { (*crate::shared::header()).state = Box::into_raw(s) as *mut u8 };
+    let p = Box::into_raw(s);
+    unsafe {
+        (*p).surface.set_damage(&mut (*p).damage);
+        (*crate::shared::header()).state = p as *mut u8;
+    }
 }
 
 /// PM left the screen to a text session: draw into the shadow buffer.

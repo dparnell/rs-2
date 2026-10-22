@@ -16,9 +16,9 @@
 //! object holding the cells in VGA layout that programs write directly;
 //! [`tick`] renders what changed.
 //!
-//! Display drivers that have to copy changes to the host (virtio-gpu) learn
-//! which framebuffer rows were drawn from [`take_dirty`]; while a graphics
-//! session (PM) is shown, all of them count as changed.
+//! The rows drawn are noted as damage for display drivers that copy
+//! changes to the display ([`crate::display::take_damage`]); while PM is
+//! shown, PM reports what it draws itself.
 
 use bootinfo::{Framebuffer, PHYS_MAP_BASE};
 
@@ -38,24 +38,12 @@ pub const CELL_H: usize = 16;
 pub const MAX_COLS: usize = 132;
 pub const MAX_ROWS: usize = 100;
 
-/// Framebuffer rows drawn since the last [`take_dirty`]: first, and one
-/// past the last (empty when first >= end).
-static DIRTY_TOP: AtomicU32 = AtomicU32::new(u32::MAX);
-static DIRTY_END: AtomicU32 = AtomicU32::new(0);
-
-/// Note that framebuffer rows `top..end` were drawn.
+/// Note that framebuffer rows `top..end` were drawn (whole rows: the
+/// width is clipped when the damage is taken).
 pub fn mark_dirty(top: u32, end: u32) {
     if top < end {
-        DIRTY_TOP.fetch_min(top, Ordering::Relaxed);
-        DIRTY_END.fetch_max(end, Ordering::Relaxed);
+        crate::display::damage(0, top, u32::MAX, end);
     }
-}
-
-/// The framebuffer rows drawn since the last call, as `top..end`.
-pub fn take_dirty() -> Option<(u32, u32)> {
-    let end = DIRTY_END.swap(0, Ordering::Relaxed);
-    let top = DIRTY_TOP.swap(u32::MAX, Ordering::Relaxed);
-    (top < end).then_some((top, end))
 }
 
 /// After PM gave the screen to a text session: when to redraw the text
@@ -862,7 +850,11 @@ pub fn show(sid: u32) {
     g.visible = sid;
     if let Some(s) = g.get(sid) {
         s.visible = true;
-        if !s.graphics {
+        if s.graphics {
+            // PM's picture (drawn before it was hidden, or repainted
+            // now) replaces the text screen.
+            mark_dirty(0, s.fb.height);
+        } else {
             s.pull_phys();
             s.layout();
             if from_graphics {
@@ -896,8 +888,7 @@ pub fn tick(ticks: u64) {
     let v = g.visible;
     let Some(s) = g.get(v) else { return };
     if s.graphics {
-        // PM draws without telling anyone.
-        mark_dirty(0, s.fb.height);
+        // PM reports what it draws (Rs2UpdateDisplay).
         return;
     }
     s.refresh_phys();

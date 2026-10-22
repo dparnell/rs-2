@@ -81,12 +81,26 @@ Status markers: done, in progress, planned.
   mice, tablets through an absolute pointer path for text mode and PM),
   virtio-rng (\DEV\RANDOM$), virtio-console port 0 (\DEV\VIOCON$)
 - done: virtio-gpu 2D (`virtio-vga`, `virtio-gpu-pci`): guest-RAM
-  framebuffer for the text screens and PM, `video=WxH` (any size),
-  changed rows flushed from the timer tick (whole screen under PM)
+  framebuffer for the text screens and PM, `video=WxH` (any size)
 - done: virtio-gpu hardware cursor (cursor queue) for PM
-- planned: PM dirty rectangles instead of
-  full-screen flushes, display hot-resize events (EDID), run-time mode
-  changes under PM
+- done: damage-based display updates: PMWIN notes what it draws on the
+  screen (gpi's surface keeps up to 16 merged rectangles) and hands it to
+  the kernel when it lets go of its lock (`Rs2UpdateDisplay`); the text
+  screens add the rows they draw; about 60 times a second VMware SVGA II
+  sends an UPDATE and virtio-gpu a TRANSFER_TO_HOST_2D and
+  RESOURCE_FLUSH per rectangle, and on a plain firmware framebuffer PM
+  draws into a RAM back buffer whose damaged rectangles the tick copies
+  to the screen (idle desktop at 1024x768: 24.5 Mpx/s before, 0 now;
+  dragging a window: 1-3 Mpx/s)
+- done: resolution changes under PM (SVGA II, virtio-gpu): PM maps
+  memory for the largest mode, gets EV_MODE and resizes the desktop,
+  the shell's desktop window and maximized frames; `C:\OS2\DISPLAY.EXE`
+  (list of modes, Apply, keep or revert within 15 s) saves `VIDEO=WxH`
+  in CONFIG.SYS, applied at boot; virtio-gpu display-change events
+  switch to the host's new preferred size
+- planned: VMware "fit guest" resizing (needs the tools RPC channel,
+  `Resolution_Set`), write-combining (PAT) mappings of framebuffers on
+  real hardware
 - done: networking (docs/NETWORK.md; receive interrupts on e1000e,
   vmxnet3 and virtio-net, the 8254x without MSI polled): Intel
   e1000/e1000e (8254x, 82574L), VMware vmxnet3 and virtio-net drivers

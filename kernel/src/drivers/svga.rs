@@ -12,7 +12,9 @@
 //! Once the FIFO is enabled the host may only refresh the screen when it
 //! gets UPDATE commands (QEMU does that; VMware usually traces writes to
 //! the framebuffer, which SVGA_REG_TRACES asks for explicitly), so the
-//! timer sends an UPDATE for the whole screen about 30 times a second.
+//! timer sends an UPDATE for each damaged rectangle
+//! ([`crate::display::take_damage`]: what the text screens and PM drew)
+//! about 60 times a second.
 //!
 //! With the cursor capabilities the mouse pointer is a hardware cursor:
 //! PM's server defines it once (DEFINE_CURSOR, a 32x32 AND mask and
@@ -194,7 +196,15 @@ impl Svga {
     }
 
     fn update(&self, wait: bool) -> bool {
-        self.fifo_cmd(&[CMD_UPDATE, 0, 0, self.width, self.height], wait)
+        self.update_rect(0, 0, self.width, self.height, wait)
+    }
+
+    fn update_rect(&self, x: u32, y: u32, w: u32, h: u32, wait: bool) -> bool {
+        let ok = self.fifo_cmd(&[CMD_UPDATE, x, y, w, h], wait);
+        if ok {
+            crate::display::count_update(w, h);
+        }
+        ok
     }
 
     /// Program a mode; returns the new framebuffer.
@@ -315,22 +325,28 @@ pub fn set_mode(w: u32, h: u32) -> bool {
     }
     crate::screen::set_framebuffer(fb);
     crate::println!("svga: mode {w}x{h}");
-    if let Some(s) = SVGA.lock().as_ref() {
+    if let Some(s) = SVGA.lock().as_mut() {
         s.update(true);
+        s.cursor_sent = None;
     }
     ACTIVE.store(true, Ordering::Relaxed);
     true
 }
 
-/// Timer tick: refresh the whole screen about 30 times a second while
-/// the driver owns the adapter.
+/// Timer tick: refresh what changed about 60 times a second while the
+/// driver owns the adapter.
 pub fn tick(ticks: u64) {
-    if ticks % 32 != 16 || !ACTIVE.load(Ordering::Relaxed) {
+    if ticks % 16 != 8 || !ACTIVE.load(Ordering::Relaxed) || crate::smp::this().index() != 0 {
         return;
     }
-    if let Some(g) = SVGA.try_lock() {
-        if let Some(s) = g.as_ref() {
-            s.update(false);
+    let Some(g) = SVGA.try_lock() else { return };
+    let Some(s) = g.as_ref() else { return };
+    let d = crate::display::take_damage(s.width, s.height);
+    for (i, &(x0, y0, x1, y1)) in d.rects().iter().enumerate() {
+        if !s.update_rect(x0, y0, x1 - x0, y1 - y0, false) {
+            // The FIFO is full: the rest next time.
+            crate::display::requeue_damage(&d.rects()[i..]);
+            break;
         }
     }
 }
@@ -346,6 +362,20 @@ pub fn take_over() {
         set_mode(fb.width, fb.height);
     }
 }
+
+/// The memory PM maps (taking the adapter over first): VRAM from its
+/// start, as much as the largest mode needs (at most what a 3840x2160
+/// screen takes), so that a mode change under PM stays inside.
+pub fn pm_area() -> Option<(u64, u64)> {
+    take_over();
+    let g = SVGA.lock();
+    let s = g.as_ref().filter(|s| s.enabled)?;
+    let need = (s.max.0 as u64 * s.max.1 as u64 * 4).min(PM_AREA_MAX);
+    Some((s.vram, s.vram_size.min(need)))
+}
+
+/// Largest VRAM area mapped into PM processes.
+const PM_AREA_MAX: u64 = 3840 * 2160 * 4;
 
 /// Define the hardware cursor: `pixels` (0xAARRGGBB, `w` x `h`, at most
 /// 32x32; alpha 0 is transparent) with the hot spot at (`hx`, `hy`).

@@ -1,0 +1,9 @@
+[package]
+name = "display"
+description = "DISPLAY.EXE: the display settings (screen resolution)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

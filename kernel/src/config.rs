@@ -33,6 +33,9 @@ pub struct Config {
     pub timeslice: Option<u32>,
     /// NETWORK=off|dhcp|address/prefix[,gateway[,dns...]] (rs2).
     pub network: Option<String>,
+    /// VIDEO=WxH (rs2): the screen resolution, set when the display
+    /// driver can (written by the Display settings, DISPLAY.EXE).
+    pub video: Option<(u32, u32)>,
     /// Driver statements we do not load (BASEDEV/DEVICE/IFS).
     pub drivers: Vec<String>,
 }
@@ -88,11 +91,22 @@ pub fn parse(text: &str) -> Config {
             "MAXWAIT" => c.maxwait = val.parse().ok().filter(|&v| (1..=255).contains(&v)),
             "TIMESLICE" => c.timeslice = val.split(',').next().and_then(|v| v.trim().parse().ok()).filter(|&v: &u32| v >= 1),
             "NETWORK" => c.network = Some(val.to_string()),
+            "VIDEO" => c.video = bootinfo::video_mode(&alloc::format!("video={val}")),
             "BASEDEV" | "DEVICE" | "IFS" => c.drivers.push(alloc::format!("{key}={val}")),
             _ => {}
         }
     }
     c
+}
+
+/// VIDEO=WxH: switch the display (it wins over the loader's `video=`,
+/// which picks among the firmware's modes).
+pub fn apply_video(c: &Config) {
+    if let Some((w, h)) = c.video {
+        if !crate::display::set_mode(w, h) {
+            crate::println!("CONFIG.SYS: VIDEO={w}x{h}: the display cannot switch to that");
+        }
+    }
 }
 
 /// Apply the national language statements: COUNTRY, CODEPAGE and the

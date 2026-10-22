@@ -167,6 +167,7 @@ pub mod boot {
         let cfg = crate::config::load().unwrap_or_default();
         crate::config::apply_nls(&cfg);
         crate::config::apply_sched(&cfg);
+        crate::config::apply_video(&cfg);
         if let Some(lp) = &cfg.libpath {
             crate::fs::set_libpath(lp);
         }

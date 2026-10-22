@@ -10,13 +10,13 @@
 //! copies over: TRANSFER_TO_HOST_2D moves a rectangle from the backing
 //! into the resource and RESOURCE_FLUSH puts it on the display.
 //!
-//! Nobody tells the driver when pixels change, so the timer tick flushes
-//! about 30 times a second: the rows `screen` reports as drawn
-//! ([`crate::screen::take_dirty`]) while a text session is shown, the
-//! whole screen while PM (which draws straight into the framebuffer) is in
-//! the foreground. Tick commands are queued without waiting and reaped on
-//! the next tick; commands from thread context (setting a mode) busy-wait
-//! for the device under the driver's spin lock.
+//! The timer tick copies what changed about 60 times a second: the
+//! damaged rectangles ([`crate::display::take_damage`]: rows the text
+//! screens drew, areas PM reports with `Rs2UpdateDisplay`), each with a
+//! TRANSFER_TO_HOST_2D and a RESOURCE_FLUSH. Tick commands are queued
+//! without waiting (from a page of command slots) and reaped on the next
+//! tick; commands from thread context (setting a mode) busy-wait for the
+//! device under the driver's spin lock.
 //!
 //! The device is reset when the driver attaches, which ends whatever the
 //! firmware showed (OVMF's GOP draws on `virtio-vga` through its VGA
@@ -25,9 +25,14 @@
 //! driver sets is `video=WxH` from the kernel command line if given, else
 //! the size of the firmware's framebuffer (what the loader picked), else
 //! the display's preferred size from GET_DISPLAY_INFO (QEMU: its `xres` x
-//! `yres`, 1280x800 by default). Any size works (no list of modes: the
-//! host scales the resource to its window); [`set_mode`] changes it until
-//! PM has mapped the framebuffer, as with VMware SVGA II.
+//! `yres`, 1280x800 by default). Any size works (the host scales the
+//! resource to its window); [`set_mode`] changes it. When PM maps the
+//! framebuffer ([`pm_area`]) the backing grows to what the largest of
+//! [`modes`] needs, and from then on every mode uses that memory (a new
+//! resource on the same backing), so PM's mapping stays valid. When the
+//! host's display configuration changes (its window resized, with
+//! QEMU's `zoom-to-fit` off) PM is told and switches to the new
+//! preferred size.
 //!
 //! The mouse pointer can be a hardware cursor (the cursor queue): PM's
 //! server defines its image once ([`define_cursor`], a 64x64 B8G8R8A8
@@ -70,14 +75,17 @@ const FB_BGRX: u32 = 1;
 const HDR: usize = 24;
 const MAX_SCANOUTS: usize = 16;
 
-// Offsets in the command page: synchronous request and response, then
-// the two commands of a tick flush and their responses.
+// Offsets in the command page: synchronous request and response.
 const SYNC_REQ: usize = 0;
 const SYNC_RESP: usize = 0x400;
-const XFER_REQ: usize = 0x800;
-const XFER_RESP: usize = 0x880;
-const FLUSH_REQ: usize = 0x900;
-const FLUSH_RESP: usize = 0x980;
+/// Tick commands: slots in a page of their own (request, then the
+/// response at +RESP_AT), two per rectangle.
+const SLOT: usize = 0x80;
+const RESP_AT: usize = 0x40;
+/// Rectangles copied per tick at most (the rest wait for the next).
+const TICK_RECTS: usize = 12;
+/// Control queue size (two descriptors per command).
+const QUEUE_SIZE: u16 = 64;
 /// struct virtio_gpu_update_cursor on the cursor queue (no response).
 const CURSOR_REQ: usize = 0xa00;
 const CURSOR_LEN: usize = HDR + 32;
@@ -85,6 +93,10 @@ const CURSOR_LEN: usize = HDR + 32;
 /// Polls (each with an uncached register read) before a synchronous
 /// command is given up.
 const SYNC_POLLS: u32 = 5_000_000;
+/// Configuration: events_read, events_clear; the display event.
+const CFG_EVENTS_READ: usize = 0;
+const CFG_EVENTS_CLEAR: usize = 4;
+const EVENT_DISPLAY: u32 = 1;
 /// Largest width or height accepted.
 const MAX_DIM: u32 = 8192;
 
@@ -107,11 +119,16 @@ struct Gpu {
     q: Virtqueue,
     /// Command and response buffers.
     mem: Dma,
+    /// Command slots of tick flushes.
+    tick_mem: Dma,
     /// Tick commands on the queue, not yet returned.
     pending: u32,
-    /// The resource on scanout 0 and its backing (the framebuffer).
+    /// The resource on scanout 0 and its backing (the framebuffer), and
+    /// the backing's size (it may be larger than the mode, once PM has
+    /// mapped it: every mode then uses it).
     resource: u32,
     backing: Option<Dma>,
+    backing_size: usize,
     width: u32,
     height: u32,
     next_id: u32,
@@ -213,24 +230,31 @@ impl Gpu {
         v
     }
 
-    /// Create a resource backed by `backing`, show it on scanout 0 and
-    /// copy it over. Returns the previous resource and backing.
-    fn show(&mut self, w: u32, h: u32, backing: Dma) -> Result<(u32, Option<Dma>), Dma> {
+    /// Create a resource backed by `backing` (`size` bytes; None: the
+    /// current backing), show it on scanout 0 and copy it over. Returns
+    /// the previous resource and backing (None if it stays).
+    fn show(&mut self, w: u32, h: u32, backing: Option<(Dma, usize)>) -> Result<(u32, Option<Dma>), Option<Dma>> {
         let id = self.next_id;
         self.next_id += 1;
+        let Some(addr) = backing.as_ref().map(|b| b.0.addr(0)).or(self.backing.as_ref().map(|b| b.addr(0))) else {
+            return Err(backing.map(|b| b.0));
+        };
         if !self.ok(CMD_RESOURCE_CREATE_2D, &[id, FORMAT_B8G8R8X8, w, h]) {
-            return Err(backing);
+            return Err(backing.map(|b| b.0));
         }
-        let (addr, len) = (backing.addr(0), w * h * 4);
+        let len = w * h * 4;
         if !self.ok(CMD_RESOURCE_ATTACH_BACKING, &[id, 1, addr as u32, (addr >> 32) as u32, len, 0])
             || !self.ok(CMD_SET_SCANOUT, &[0, 0, w, h, 0, id])
         {
             self.ok(CMD_RESOURCE_UNREF, &[id, 0]);
-            return Err(backing);
+            return Err(backing.map(|b| b.0));
         }
-        let old = (self.resource, self.backing.take());
+        let mut old = (self.resource, None);
+        if let Some((b, size)) = backing {
+            old.1 = self.backing.replace(b);
+            self.backing_size = size;
+        }
         self.resource = id;
-        self.backing = Some(backing);
         self.width = w;
         self.height = h;
         self.ok(CMD_TRANSFER_TO_HOST_2D, &[0, 0, w, h, 0, 0, id, 0]);
@@ -238,31 +262,50 @@ impl Gpu {
         Ok(old)
     }
 
-    /// Queue a transfer and flush of rows `top..bottom` without waiting.
-    fn flush_rows(&mut self, top: u32, bottom: u32) -> bool {
+    /// Queue a transfer and a flush of each rectangle (left, top, right,
+    /// bottom) without waiting; returns how many were queued.
+    fn flush_rects(&mut self, rects: &[(u32, u32, u32, u32)]) -> usize {
         let (w, id) = (self.width, self.resource);
-        let bottom = bottom.min(self.height);
-        if top >= bottom || id == 0 {
-            return true;
+        if id == 0 {
+            return rects.len();
         }
-        if self.q.free_count() < 4 {
-            return false;
-        }
-        let off = top as u64 * w as u64 * 4;
-        let rect = [0, top, w, bottom - top];
-        let xl = self.request(XFER_REQ, CMD_TRANSFER_TO_HOST_2D, &[rect[0], rect[1], rect[2], rect[3], off as u32, (off >> 32) as u32, id, 0]);
-        let fl = self.request(FLUSH_REQ, CMD_RESOURCE_FLUSH, &[rect[0], rect[1], rect[2], rect[3], id, 0]);
-        let x = [Buf::out(self.mem.addr(XFER_REQ), xl), Buf::into(self.mem.addr(XFER_RESP), HDR)];
-        let f = [Buf::out(self.mem.addr(FLUSH_REQ), fl), Buf::into(self.mem.addr(FLUSH_RESP), HDR)];
-        if self.q.add(&x).is_none() {
-            return false;
-        }
-        self.pending += 1;
-        if self.q.add(&f).is_some() {
+        let mut done = 0;
+        for (i, &(x0, y0, x1, y1)) in rects.iter().take(TICK_RECTS).enumerate() {
+            let (x1, y1) = (x1.min(w), y1.min(self.height));
+            if x0 >= x1 || y0 >= y1 {
+                done += 1;
+                continue;
+            }
+            if self.q.free_count() < 4 {
+                break;
+            }
+            let rect = [x0, y0, x1 - x0, y1 - y0];
+            let off = (y0 as u64 * w as u64 + x0 as u64) * 4;
+            let (xs, fs) = (2 * i * SLOT, (2 * i + 1) * SLOT);
+            let t = &self.tick_mem;
+            let put = |at: usize, words: &[u32]| {
+                for (k, v) in words.iter().enumerate() {
+                    unsafe { (t.ptr(at + k * 4) as *mut u32).write_volatile(*v) };
+                }
+            };
+            put(xs, &[CMD_TRANSFER_TO_HOST_2D, 0, 0, 0, 0, 0, rect[0], rect[1], rect[2], rect[3], off as u32, (off >> 32) as u32, id, 0]);
+            put(fs, &[CMD_RESOURCE_FLUSH, 0, 0, 0, 0, 0, rect[0], rect[1], rect[2], rect[3], id, 0]);
+            let x = [Buf::out(t.addr(xs), HDR + 32), Buf::into(t.addr(xs + RESP_AT), HDR)];
+            let f = [Buf::out(t.addr(fs), HDR + 24), Buf::into(t.addr(fs + RESP_AT), HDR)];
+            if self.q.add(&x).is_none() {
+                break;
+            }
             self.pending += 1;
+            if self.q.add(&f).is_some() {
+                self.pending += 1;
+            }
+            crate::display::count_update(rect[2], rect[3]);
+            done += 1;
         }
-        self.q.kick();
-        true
+        if done > 0 {
+            self.q.kick();
+        }
+        done
     }
 
     /// Queue a cursor command (UPDATE with a new image, or MOVE); false if
@@ -307,7 +350,7 @@ pub fn attach(mut dev: Device) {
     if dev.negotiate(0).is_none() {
         return;
     }
-    let (Some(q), Some(mem)) = (dev.queue(0, 16), Dma::new(4096)) else {
+    let (Some(q), Some(mem), Some(tick_mem)) = (dev.queue(0, QUEUE_SIZE), Dma::new(4096), Dma::new(4096)) else {
         crate::println!("virtio-gpu {}: cannot set up the control queue", dev.name());
         dev.fail();
         return;
@@ -321,9 +364,11 @@ pub fn attach(mut dev: Device) {
         dev,
         q,
         mem,
+        tick_mem,
         pending: 0,
         resource: 0,
         backing: None,
+        backing_size: 0,
         width: 0,
         height: 0,
         next_id: 1,
@@ -381,15 +426,33 @@ pub fn modes() -> Vec<(u32, u32)> {
 }
 
 /// Switch to `w` x `h` (32 bits per pixel, BGRX) and move the screens to
-/// the new framebuffer.
+/// the new framebuffer. Once PM has mapped the framebuffer, every mode
+/// uses the backing PM mapped ([`pm_area`]).
 pub fn set_mode(w: u32, h: u32) -> bool {
-    if GPU.lock().is_none() || !fits(w, h) {
+    let reuse = crate::display::pm_mapped();
+    match GPU.lock().as_ref() {
+        Some(g) if reuse && (w as usize * h as usize * 4 > g.backing_size || w == 0 || h == 0 || w > MAX_DIM || h > MAX_DIM) => return false,
+        Some(_) => {}
+        None => return false,
+    }
+    if !reuse && !fits(w, h) {
         return false;
     }
-    // Allocate (and zero) the backing without holding the spin lock.
-    let Some(backing) = Dma::new(w as usize * h as usize * 4) else {
-        crate::println!("virtio-gpu: no memory for a {w}x{h} framebuffer");
-        return false;
+    switch(w, h, (!reuse).then(|| w as usize * h as usize * 4))
+}
+
+/// Show a `w` x `h` mode, with a new backing of `size` bytes (allocated
+/// and zeroed without holding the spin lock) or the current one.
+fn switch(w: u32, h: u32, size: Option<usize>) -> bool {
+    let backing = match size {
+        Some(n) => match Dma::new(n) {
+            Some(b) => Some((b, n)),
+            None => {
+                crate::println!("virtio-gpu: no memory for a {w}x{h} framebuffer");
+                return false;
+            }
+        },
+        None => None,
     };
     let (fb, old) = {
         let mut g = GPU.lock();
@@ -409,27 +472,62 @@ pub fn set_mode(w: u32, h: u32) -> bool {
             gpu.ok(CMD_RESOURCE_UNREF, &[old.0, 0]);
         }
         drop(old.1);
-        gpu.flush_rows(0, h);
+        gpu.cursor_sent = None;
+        gpu.flush_rects(&[(0, 0, w, h)]);
     }
     true
 }
 
-/// Timer tick: copy what changed to the host about 30 times a second.
+/// The memory PM maps: the backing, made large enough for every mode in
+/// [`modes`] first (the current mode is shown again from a new one), so
+/// that the mode can change under PM. None if there is not enough
+/// memory for that (PM then maps the current framebuffer).
+pub fn pm_area() -> Option<(u64, u64)> {
+    let (w, h, have) = {
+        let g = GPU.lock();
+        let gpu = g.as_ref()?;
+        (gpu.width, gpu.height, gpu.backing_size)
+    };
+    let need = modes().iter().chain([(w, h)].iter()).map(|&(a, b)| a as usize * b as usize * 4).max().unwrap_or(0);
+    if need > have && !switch(w, h, Some(need)) {
+        return None;
+    }
+    let g = GPU.lock();
+    let gpu = g.as_ref()?;
+    Some((gpu.backing.as_ref()?.addr(0), gpu.backing_size as u64))
+}
+
+/// The display's preferred size, asked now (GET_DISPLAY_INFO).
+pub fn preferred() -> Option<(u32, u32)> {
+    let mut g = GPU.lock();
+    let gpu = g.as_mut()?;
+    let p = gpu.display_info().first().copied()?;
+    gpu.preferred = p;
+    Some(p)
+}
+
+/// Timer tick: copy what changed to the host about 60 times a second;
+/// about twice a second, look whether the host changed the display
+/// configuration (VIRTIO_GPU_EVENT_DISPLAY: its window was resized).
 pub fn tick(ticks: u64) {
-    if ticks % 32 != 16 || !ACTIVE.load(Ordering::Relaxed) {
+    if ticks % 16 != 8 || !ACTIVE.load(Ordering::Relaxed) || crate::smp::this().index() != 0 {
         return;
     }
     let Some(mut g) = GPU.try_lock() else { return };
     let Some(gpu) = g.as_mut() else { return };
+    if ticks % 512 == 8 && gpu.dev.cfg32(CFG_EVENTS_READ) & EVENT_DISPLAY != 0 {
+        gpu.dev.cfg_write8(CFG_EVENTS_CLEAR, EVENT_DISPLAY as u8);
+        crate::display::host_size_changed();
+    }
     gpu.reap(None);
     if gpu.pending > 0 {
         // The previous flush is still on its way; try again next time.
         return;
     }
-    if let Some((top, bottom)) = crate::screen::take_dirty() {
-        if !gpu.flush_rows(top, bottom) {
-            crate::screen::mark_dirty(top, bottom);
-        }
+    let d = crate::display::take_damage(gpu.width, gpu.height);
+    let done = gpu.flush_rects(d.rects());
+    if done < d.n {
+        crate::display::requeue_damage(&d.rects()[done..]);
     }
 }
 

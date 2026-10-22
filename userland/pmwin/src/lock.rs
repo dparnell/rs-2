@@ -11,8 +11,9 @@
 //! if a holder dies anyway (an exception in PMWIN), the next requester
 //! gets ERROR_SEM_OWNER_DIED and carries on.
 //!
-//! When a thread lets go of the lock it wakes the threads it gave work
-//! to: queues it posted to, and the owners of windows it invalidated.
+//! When a thread lets go of the lock it tells the kernel what it drew on
+//! the screen and wakes the threads it gave work to: queues it posted
+//! to, and the owners of windows it invalidated.
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -184,6 +185,7 @@ pub extern "C" fn leave() {
         return;
     }
     if DEPTH.load(Ordering::Relaxed) == 1 {
+        crate::display::flush_damage();
         crate::msg::wake_pending();
     }
     if DEPTH.fetch_sub(1, Ordering::Relaxed) == 1 {
@@ -197,6 +199,7 @@ pub fn unlocked<R>(f: impl FnOnce() -> R) -> R {
     if OWNER.load(Ordering::Relaxed) != t {
         return f();
     }
+    crate::display::flush_damage();
     crate::msg::wake_pending();
     let depth = DEPTH.swap(0, Ordering::Relaxed);
     release();

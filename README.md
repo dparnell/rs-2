@@ -200,7 +200,9 @@ changed later is read. `video=1280x1024` (or any WxH) in
 that mode, otherwise through the VMware SVGA II driver. With a virtio-gpu
 display the kernel's driver always takes over and sets any size: the
 `video=` one, else the firmware's mode, else the display's preferred
-size.
+size. On both, the Display settings (`C:\OS2\DISPLAY.EXE`) change the
+resolution while the desktop runs and save it as `VIDEO=WxH` in
+CONFIG.SYS for the next start.
 
 - **VMware** (Workstation/ESXi on x86; Fusion on Apple Silicon only runs
   ARM guests): guest OS type **Other 64-bit** with UEFI firmware and

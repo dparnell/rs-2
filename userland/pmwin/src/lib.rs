@@ -19,6 +19,7 @@ mod color;
 mod ctl;
 mod cursor;
 mod dde;
+mod display;
 mod dlg;
 mod draw;
 mod entry;

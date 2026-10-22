@@ -231,6 +231,7 @@ extern "C" fn input_thread() -> u32 {
             }
         }
         check_hung();
+        crate::display::check_mode();
         let me = pid();
         let quit = st().procs.iter().all(|&p| p == me);
         if quit {
