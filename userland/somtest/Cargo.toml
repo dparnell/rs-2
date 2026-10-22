@@ -1,0 +1,9 @@
+[package]
+name = "somtest"
+description = "Self-checks of SOM.DLL: classes built from static class information as the SOM compiler emits it"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
