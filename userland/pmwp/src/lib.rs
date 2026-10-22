@@ -23,6 +23,10 @@ mod clsmgr;
 mod dnd;
 mod exports;
 mod fs;
+mod install;
+mod ipc;
+mod shell;
+mod shutdown;
 mod launch;
 mod menu;
 mod obj;
@@ -116,6 +120,10 @@ pub extern "C" fn WinCreateObject(class: *const u8, title: *const u8, setup: *co
     let (class, setup, location) = (cstr(class), cstr(setup), cstr(location));
     if wps::active() {
         return api::create_object(&class, &cstr(title), &setup, &location, flags);
+    }
+    let t = cstr(title);
+    if let Some(r) = ipc::call(ipc::OP_CREATE, &[flags], &[&class, &t, &setup, &location]) {
+        return r;
     }
     if !class.eq_ignore_ascii_case(b"WPProgram") || !location.eq_ignore_ascii_case(b"<WP_DESKTOP>") {
         return 0;

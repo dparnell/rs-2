@@ -1,0 +1,9 @@
+[package]
+name = "pmshell"
+description = "PMSHELL.EXE: the Workplace Shell's process (PM, then PMWP's ShlStartWorkplace and the message loop)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

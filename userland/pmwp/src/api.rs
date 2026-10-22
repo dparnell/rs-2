@@ -9,14 +9,24 @@
 //! process (Rs2WpsStart; the shell process calls it). Without one,
 //! WinCreateObject keeps adding WPProgram objects to RS2SHELL's desktop
 //! (see lib.rs), WinQueryObject reads OS2.INI, and the class calls edit
-//! the class table.
+//! the class table. With a shell in another process, the calls go to it
+//! (ipc.rs).
 
 use alloc::vec::Vec;
 
 use crate::classes_gen::m;
 use crate::som;
 use crate::util::*;
-use crate::{clsmgr, obj, wps};
+use crate::{clsmgr, ipc, obj, wps};
+
+/// A call for the shell in another process (None: no shell there, or
+/// the shell is this process).
+fn remote(op: u32, nums: &[u32], strs: &[&[u8]]) -> Option<u32> {
+    if wps::active() {
+        return None;
+    }
+    ipc::call(op, nums, strs)
+}
 
 const CO_FAILIFEXISTS: u32 = 0;
 const CO_REPLACEIFEXISTS: u32 = 1;
@@ -73,6 +83,9 @@ pub fn create_object(class: &[u8], title: &[u8], setup: &[u8], location: &[u8], 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryObject(id: *const u8) -> u32 {
     let id = cstr(id);
+    if let Some(r) = remote(ipc::OP_QUERY, &[], &[id]) {
+        return r;
+    }
     if wps::active() {
         let o = wps::object_from_location(id);
         return if o == 0 { 0 } else { obj::handle(o) };
@@ -95,6 +108,9 @@ fn object(h: u32) -> usize {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetObjectData(h: u32, setup: *const u8) -> u32 {
+    if let Some(r) = remote(ipc::OP_SETDATA, &[h], &[cstr(setup)]) {
+        return r;
+    }
     let o = object(h);
     if o == 0 {
         return 0;
@@ -106,6 +122,9 @@ pub extern "C" fn WinSetObjectData(h: u32, setup: *const u8) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinDestroyObject(h: u32) -> u32 {
+    if let Some(r) = remote(ipc::OP_DESTROY, &[h], &[]) {
+        return r;
+    }
     let o = object(h);
     if o == 0 {
         return 0;
@@ -115,6 +134,9 @@ pub extern "C" fn WinDestroyObject(h: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinOpenObject(h: u32, view: u32, _flag: u32) -> u32 {
+    if let Some(r) = remote(ipc::OP_OPEN, &[h, view, _flag], &[]) {
+        return r;
+    }
     let o = object(h);
     if o == 0 {
         return 0;
@@ -125,6 +147,9 @@ pub extern "C" fn WinOpenObject(h: u32, view: u32, _flag: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSaveObject(h: u32, _async: u32) -> u32 {
+    if let Some(r) = remote(ipc::OP_SAVE, &[h, _async], &[]) {
+        return r;
+    }
     let o = object(h);
     if o == 0 {
         return 0;
@@ -134,6 +159,9 @@ pub extern "C" fn WinSaveObject(h: u32, _async: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinMoveObject(h: u32, dest: u32, _flags: u32) -> u32 {
+    if let Some(r) = remote(ipc::OP_MOVE, &[h, dest, _flags], &[]) {
+        return r;
+    }
     let (o, f) = (object(h), object(dest));
     if o == 0 || f == 0 || obj::call(m::WPObject::wpMoveObject, &[o, f]) == 0 {
         return 0;
@@ -143,6 +171,9 @@ pub extern "C" fn WinMoveObject(h: u32, dest: u32, _flags: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinCopyObject(h: u32, dest: u32, _flags: u32) -> u32 {
+    if let Some(r) = remote(ipc::OP_COPY, &[h, dest, _flags], &[]) {
+        return r;
+    }
     let (o, f) = (object(h), object(dest));
     if o == 0 || f == 0 {
         return 0;
@@ -153,6 +184,9 @@ pub extern "C" fn WinCopyObject(h: u32, dest: u32, _flags: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinCreateShadow(h: u32, dest: u32, _flags: u32) -> u32 {
+    if let Some(r) = remote(ipc::OP_SHADOW, &[h, dest, _flags], &[]) {
+        return r;
+    }
     let (o, f) = (object(h), object(dest));
     if o == 0 || f == 0 {
         return 0;
@@ -182,6 +216,9 @@ pub extern "C" fn WinQueryObjectPath(h: u32, buf: *mut u8, cb: u32) -> u32 {
 /// WinRegisterObjectClass: the class must load from the DLL.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinRegisterObjectClass(class: *const u8, module: *const u8) -> u32 {
+    if let Some(r) = remote(ipc::OP_REGISTER, &[], &[cstr(class), cstr(module)]) {
+        return r;
+    }
     let (c, mname) = (cstr(class).to_vec(), cstr(module).to_vec());
     if c.is_empty() || mname.is_empty() {
         return 0;
@@ -202,6 +239,9 @@ pub extern "C" fn WinRegisterObjectClass(class: *const u8, module: *const u8) ->
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinDeregisterObjectClass(class: *const u8) -> u32 {
+    if let Some(r) = remote(ipc::OP_DEREGISTER, &[], &[cstr(class)]) {
+        return r;
+    }
     let c = cstr(class);
     let mut t = clsmgr::table();
     let n = t.len();

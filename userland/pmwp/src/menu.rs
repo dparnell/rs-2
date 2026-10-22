@@ -47,6 +47,8 @@ pub const WPMENUID_DETAILS: u32 = 304;
 pub const WPMENUID_ARRANGE: u32 = 309;
 pub const WPMENUID_CREATESHADOW: u32 = 316;
 pub const WPMENUID_REFRESH: u32 = 503;
+pub const WPMENUID_SHUTDOWN: u32 = 704;
+pub const WPMENUID_WINDOWLIST: u32 = 728;
 /// rs2's own: rename in place (handled by the view).
 pub const MENUID_RENAME: u32 = 0x6400;
 
@@ -164,6 +166,11 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
         if flags & CTXT_ARRANGE != 0 {
             items.push(Menu::Item(WPMENUID_ARRANGE as u16, b"~Arrange", true));
         }
+        if is(o, "WPDesktop") {
+            items.push(Menu::Sep);
+            items.push(Menu::Item(WPMENUID_WINDOWLIST as u16, b"~Window list", true));
+            items.push(Menu::Item(WPMENUID_SHUTDOWN as u16, b"Shut ~down...", true));
+        }
     } else {
         items.push(Menu::Sep);
         items.push(Menu::Item(MENUID_RENAME as u16, b"Re~name", obj::call(m::WPObject::wpQueryStyle, &[o]) as u32 & obj::OBJSTYLE_NORENAME == 0));
@@ -207,6 +214,10 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
         WPMENUID_DETAILS => view_of(o, OPEN_DETAILS),
         WPMENUID_PROGRAM => view_of(o, OPEN_RUNNING),
         WPMENUID_REFRESH => view::refresh(o),
+        WPMENUID_SHUTDOWN => crate::shutdown::ask(),
+        WPMENUID_WINDOWLIST => {
+            post(HWND_DESKTOP, WM_RS2_WINLIST, 0, 0);
+        }
         WPMENUID_ARRANGE => {
             for w in 0..view::wins().len() {
                 if view::wins()[w].obj == o {

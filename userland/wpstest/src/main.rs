@@ -9,6 +9,8 @@
 //! from OS2.INI and their extended attributes, checks them and deletes
 //! them. `WPSTEST CLASS dll class` registers a class DLL (one of the
 //! Toolkit's samples, built for IBM's PMWP) and makes an object of it.
+//! `WPSTEST REMOTE`, with PMSHELL running, makes and changes an object
+//! on its desktop from this process.
 
 #![no_std]
 #![no_main]
@@ -309,9 +311,25 @@ fn class_dll(args: &[u8]) {
     unsafe { WinDeregisterObjectClass(c.as_ptr()) };
 }
 
+/// With the shell in another process (PMSHELL): the calls go there.
+fn remote() {
+    let h = create(b"WPProgram", b"Remote Test", b"EXENAME=C:\\OS2\\E.EXE;OBJECTID=<RS2_REMOTE>", b"<WP_DESKTOP>");
+    check("WinCreateObject in the shell", h >> 16 == 2);
+    check("WinQueryObject from the shell", query(b"<RS2_REMOTE>") == h);
+    let t = z(b"TITLE=Made Remotely");
+    check("WinSetObjectData in the shell", unsafe { WinSetObjectData(h, t.as_ptr()) } != 0);
+    check("WinQueryObject <WP_DESKTOP>", query(b"<WP_DESKTOP>") >> 16 == 3);
+}
+
 fn main(st: &Startup) -> u32 {
     let args = st.args();
     let word = args.split(|&c| c == b' ').find(|w| !w.is_empty()).unwrap_or(b"");
+    if word.eq_ignore_ascii_case(b"REMOTE") {
+        remote();
+        let n = unsafe { FAILS };
+        println!("wpstest done: {} failure(s)", n);
+        return n;
+    }
     check("Rs2WpsStart", unsafe { Rs2WpsStart() } != 0);
     if word.eq_ignore_ascii_case(b"CHECK") {
         verify();

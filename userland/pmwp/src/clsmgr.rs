@@ -38,6 +38,12 @@ pub fn module_of(class: &[u8]) -> Option<Vec<u8>> {
 /// somLocateClassFile: the DLL registered for the class.
 extern "C" fn locate(mgr: usize, cid: SomId, major: i32, minor: i32) -> *const u8 {
     let name = cstr(unsafe { som::somStringFromId(cid) });
+    // PMWP.DLL's own classes are built when first asked for.
+    if let Ok(n) = core::str::from_utf8(name) {
+        if wps::index_of(n).is_some() && wps::class(n) != 0 {
+            return b"PMWP\0".as_ptr();
+        }
+    }
     if let Some(d) = module_of(name) {
         return alloc::boxed::Box::leak(z(&d).into_boxed_slice()).as_ptr();
     }

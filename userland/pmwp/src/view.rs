@@ -533,6 +533,10 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             }
             0
         }
+        WM_TIMER if a == crate::shutdown::TID_SHUTDOWN => {
+            crate::shutdown::tick();
+            0
+        }
         DM_RENDERPREPARE => 1,
         DM_ENDCONVERSATION => 0,
         DM_DRAGOVERNOTIFY => 0,

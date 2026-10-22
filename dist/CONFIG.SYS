@@ -18,3 +18,5 @@ REM line and remove it from the second. Pressing T while the boot loader
 REM waits, or "textmode" in \RS2\CMDLINE, also boots to the command prompt.
 PROTSHELL=C:\OS2\RS2SHELL.EXE
 REM PROTSHELL=C:\OS2\CMD.EXE
+REM The Workplace Shell (rs2's own, being made) instead of RS2SHELL:
+REM PROTSHELL=C:\OS2\PMSHELL.EXE

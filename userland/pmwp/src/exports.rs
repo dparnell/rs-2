@@ -93,6 +93,8 @@ aligned! {
     __a_WPTemplatesNewClass => crate::classdata_gen::WPTemplatesNewClass, 2;
     __a_WPTransientNewClass => crate::classdata_gen::WPTransientNewClass, 2;
     __a_WinCreateObject => crate::WinCreateObject, 5;
+    __a_ShlStartWorkplace => crate::shell::ShlStartWorkplace, 2;
+    __a_WinShutdownSystem => crate::shell::WinShutdownSystem, 2;
     __a_WinStoreWindowPos => crate::winpos::WinStoreWindowPos, 3;
     __a_WinRestoreWindowPos => crate::winpos::WinRestoreWindowPos, 3;
 }

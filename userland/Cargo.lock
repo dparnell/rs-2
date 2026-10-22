@@ -260,6 +260,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pmshell"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "pmspl-dll"
 version = "0.1.0"
 dependencies = [

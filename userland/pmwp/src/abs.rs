@@ -50,6 +50,25 @@ extern "C" fn prog_setup(obj: usize, setup: *const u8) -> u32 {
             b"PARAMETERS" => p.params = str_new(&v),
             b"STARTUPDIR" => p.dir = str_new(&v),
             b"PROGTYPE" => p.progc = progtype(&v),
+            b"ASSOCFILTER" => {
+                // PMWP_ASSOC_FILTER: a pattern's programs (handles in
+                // decimal, NUL separated), as IBM's shell keeps them.
+                let h = alloc::format!("{}", obj::handle(obj)).into_bytes();
+                for pat in v.split(|&c| c == b',').map(|f| f.trim_ascii()).filter(|f| !f.is_empty()) {
+                    let pat = pat.to_ascii_uppercase();
+                    let old = prf_read(HINI_USER, b"PMWP_ASSOC_FILTER", &pat).unwrap_or_default();
+                    let mut list: Vec<Vec<u8>> = old.split(|&c| c == 0).filter(|x| !x.is_empty()).map(|x| x.to_vec()).collect();
+                    if !list.contains(&h) {
+                        list.push(h.clone());
+                    }
+                    let mut val = Vec::new();
+                    for x in list {
+                        val.extend_from_slice(&x);
+                        val.push(0);
+                    }
+                    prf_write(HINI_USER, b"PMWP_ASSOC_FILTER", &pat, Some(&val));
+                }
+            }
             _ => {}
         }
     }

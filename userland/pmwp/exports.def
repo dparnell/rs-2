@@ -72,6 +72,8 @@ WPStartupNewClass=__a_WPStartupNewClass @39
 WPTemplatesNewClass=__a_WPTemplatesNewClass @30
 WPTransientNewClass=__a_WPTransientNewClass @42
 WinCreateObject=__a_WinCreateObject @281
+ShlStartWorkplace=__a_ShlStartWorkplace @211
+WinShutdownSystem=__a_WinShutdownSystem @149
 WinStoreWindowPos=__a_WinStoreWindowPos @207
 WinRestoreWindowPos=__a_WinRestoreWindowPos @208
 WinLoadFileIcon @209
