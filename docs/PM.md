@@ -1356,7 +1356,7 @@ has no call to rename one).
 
 | Application | Key | Value |
 |-------------|-----|-------|
-| `RS2_Desktop` | `Version` | `4` once the default objects have been made (the shell's MAKEINI step, rs2's own content, not IBM's INI.RC; older versions get what is new) |
+| `RS2_Desktop` | `Version` | `5` once the default objects have been made (the shell's MAKEINI step, rs2's own content, not IBM's INI.RC; older versions get what is new) |
 | | `DesktopGroup`, `PromptsGroup`, `ProgramsGroup`, `StartupGroup` | the group handles (hex) |
 | | `NextShadow` | the next shadow id (hex) |
 | | `Background` | desktop colour, `RRGGBB` |
