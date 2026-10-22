@@ -121,7 +121,14 @@ pub fn begin(v: usize, di: u32) -> u32 {
                 (file_type(p, dir), b"<DRM_OS2FILE,DRF_UNKNOWN>", fileops::parent(p), fileops::name_of(p).to_vec(), DO_COPYABLE | DO_MOVEABLE | DO_LINKABLE, if dir { DC_CONTAINER } else { 0 })
             }
             Obj::Program(_) => (b"Unknown", b"<DRM_OBJECT,DRF_OBJECT>", view::folder_id(&sh().views[v].kind), view::object_id(it), DO_COPYABLE | DO_MOVEABLE | DO_LINKABLE, 0),
-            Obj::Shadow(_) => (b"Unknown", b"<DRM_OBJECT,DRF_OBJECT>", view::folder_id(&sh().views[v].kind), view::object_id(it), DO_COPYABLE | DO_MOVEABLE | DO_LINKABLE, 0),
+            // A shadow of a file is dragged as its file.
+            Obj::Shadow(_) => match view::target_of(it) {
+                Some(Target::Path(p)) => {
+                    let dir = fileops::is_dir(&p);
+                    (file_type(&p, dir), b"<DRM_OS2FILE,DRF_UNKNOWN>", fileops::parent(&p), fileops::name_of(&p).to_vec(), DO_COPYABLE | DO_MOVEABLE | DO_LINKABLE, if dir { DC_CONTAINER } else { 0 })
+                }
+                _ => (b"Unknown", b"<DRM_OBJECT,DRF_OBJECT>", view::folder_id(&sh().views[v].kind), view::object_id(it), DO_COPYABLE | DO_MOVEABLE | DO_LINKABLE, 0),
+            },
             _ => (b"Unknown", b"<DRM_OBJECT,DRF_OBJECT>", view::folder_id(&sh().views[v].kind), view::object_id(it), DO_MOVEABLE | DO_LINKABLE, DC_CONTAINER),
         };
         w32(&mut d, DI_TYPE, add_str(ty));

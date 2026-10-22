@@ -37,7 +37,7 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmspl` → PMSPL.DLL | The spooler API (`Spl*`) of a system without printers (see [Status](#status)). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
 | `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
-| `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), PMDRAG (no drag is ever in progress), PMMERGE (IBM PMMERGE's ordinals, see below), LIBUNI and UCONV (locales and code page conversion, see [Locales](#locales-libuni-and-uconv)). The help manager is HELPMGR.DLL (see [The help manager](#the-help-manager-helpmgrdll-and-viewexe)). |
+| `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), PMDRAG (direct manipulation: see [Drag and drop](#drag-and-drop-pmdrag)), PMMERGE (IBM PMMERGE's ordinals, see below), LIBUNI and UCONV (locales and code page conversion, see [Locales](#locales-libuni-and-uconv)). The help manager is HELPMGR.DLL (see [The help manager](#the-help-manager-helpmgrdll-and-viewexe)). |
 
 ## Kernel services (module RS2API)
 
@@ -886,11 +886,22 @@ what can be tested on the host is in `crates/pmwin`.
   `CM_EXPANDTREE`/`CM_COLLAPSETREE`, `CM_FILTER`; notifications
   `CN_ENTER`, `CN_EMPHASIS` (for the user's changes), `CN_CONTEXTMENU`,
   `CN_INITDRAG`, `CN_SETFOCUS`/`CN_KILLFOCUS`, `CN_SCROLL`,
-  `CN_EXPANDTREE`/`CN_COLLAPSETREE`, `CN_HELP` and the editing ones. Not
-  done: owner draw (`CA_OWNERDRAW`, `CRA_OWNERDRAW`), bitmaps instead of
-  icons (`CA_DRAWBITMAP`), separately scrolled split windows, the grid
-  (`CM_SETGRIDINFO` ...), `CM_MOVETREE`, drag and drop between
-  windows, rubber-band selection.
+  `CN_EXPANDTREE`/`CN_COLLAPSETREE`, `CN_HELP` and the editing ones.
+  Direct manipulation as IBM's container does it: `DM_DRAGOVER` becomes
+  `CN_DRAGOVER` to the owner (CNRDRAGINFO: the DRAGINFO and the record
+  under the pointer, or none over empty space; the owner's answer is
+  the container's), with target emphasis on that record meanwhile;
+  `DM_DRAGLEAVE`, `DM_DROP` (the record at the drop position) and
+  `DM_DROPHELP` become `CN_DRAGLEAVE`, `CN_DROP` and `CN_DROPHELP`.
+  `CA_OWNERDRAW`: after drawing a record's text (icon, name, text and
+  tree views) the container sends the owner `WM_DRAWITEM` (OWNERITEM
+  with `idItem` `CMA_TEXT`, hItem a CNRDRAWITEMINFO), which may paint
+  over it. Not done: owner draw of icons and detail cells
+  (`CRA_OWNERDRAW`), bitmaps instead of icons (`CA_DRAWBITMAP`),
+  separately scrolled split windows, the grid (`CM_SETGRIDINFO` ...),
+  `CM_MOVETREE`, `CN_DRAGAFTER` (ordered views), emphasis of the whole
+  container as a target, lazy drag (`CN_PICKUP`), rubber-band
+  selection.
 
 ## Pointers and icons
 
@@ -1223,7 +1234,21 @@ remembers its place, size and view. Kinds:
   folders first, then files, with `WinLoadFileIcon` icons and, in the
   details view, size, date and time; directories are arranged, not
   positioned;
-- the Minimized Window Viewer: the frames minimized meanwhile.
+- the Minimized Window Viewer: the frames minimized meanwhile;
+- the Startup folder (a program group): see below.
+
+Besides their own objects, the desktop, groups and directories show
+the shadows kept in them (see Shadows below).
+
+**The tree view** (View > Tree view) of Drives and directory windows
+is the container's tree (`CV_TREE`, mini icons, tree lines) of folders
+only: Drives shows the drives, a directory shows itself, open, with
+its subfolders. A record whose folder has subfolders gets a placeholder
+child, so it has its + button; expanding it (`CN_EXPANDTREE`) replaces
+the placeholder with the subfolders, each checked for subfolders of
+its own (`MUST_HAVE_DIRECTORY` search) — so a tree reads one level
+ahead, on demand. Enter or a double click opens a folder in its own
+window; folders in the tree take drops.
 
 **Objects** open with a double click or Enter: folders open, program
 objects start (`DosStartSession` in the object's working directory, or
@@ -1235,21 +1260,86 @@ open with the program associated with their extension (OS2.INI
 Editor, `C:\OS2\E.EXE`), minimized windows are restored. Mouse button 2 opens a pop-up
 menu: on objects Open, Settings (the program settings notebook) or
 Properties (a file's size, date, attributes), Open in editor, Rename
-(direct editing, also F2 or Alt+click), Delete (with confirmation, also
-the Del key; folders with their contents; Command Prompts and Programs
-cannot be deleted); on a folder's background View, Arrange, Refresh,
+(direct editing, also F2 or Alt+click), Copy..., Move..., Create
+shadow... (files, folders and program objects; shadows of every kind
+of object), Delete (with confirmation, also the Del key; folders with
+their contents; Command Prompts, Programs and Startup cannot be
+deleted); on shadows Original: Locate (opens the folder of the object,
+selecting it), Copy, Move and Delete shadow; on a folder's background View, Arrange, Refresh,
 Create program object, Create folder (a directory: a long name on HPFS,
 `NEWFOLDR` on FAT), Open parent, Close; on the desktop Arrange,
 Refresh, Create program object, Create folder (a program group), Window
 list, System setup and Shut down. F5 refreshes.
 
-**Dragging** with mouse button 2 (the container's `CN_INITDRAG`, then
-the shell tracks the pointer with the mouse captured): within a folder
-the icons move (positions are kept in OS2.INI at once); dropped on
-another folder window or on a folder, drive or group icon, files and
-directories move (`DosMove`, across drives copy and delete), program
-objects move to the other group, and a program file dropped on the
-desktop or a group becomes a program object.
+**Copying and moving** (the Copy... and Move... menu items, or
+dragging): the target folder dialog lists the desktop and the program
+groups (for program objects and shadows) or the drives and, folder by
+folder, the directories (for files; `[..]` goes up; a path can be
+typed), with the new name for one object. Files and folders are copied
+and moved on a worker thread (with its own message queue, posting to
+the window thread): each file with `DosCopy`, so its EAs, attributes
+and dates come along; directories are made one by one with their EAs
+(`DosEnumAttribute`, `FIL_QUERYEASFROMLIST`, `DosSetPathInfo`) so each
+file is reported; a move within a drive is `DosMove`, across drives a
+copy and a delete. A progress window (shown when the job takes longer
+than half a second) names the file and the target and shows files and
+megabytes done of the total, with a bar; Cancel stops after the
+current file. When the target has an object of that name (also when
+copying into the same folder) the **name collision dialog** asks, as
+the Workplace Shell's does: Rename (a free name is offered: `NAME
+(2).EXT` on file systems with long names, `NAME~2.EXT` on FAT),
+Replace (for a folder: the one there with everything in it), Skip or
+Cancel. Errors ask whether to go on. The shell's own code for this is
+`fileops.rs` (no windows; DESKTEST includes it) and `copy.rs`.
+Program objects are copied (`PrfAddProgram`) or moved (added, then
+removed) between the desktop and groups.
+
+**Shadows** (Create shadow..., Ctrl+Shift+drag, or a file dropped on
+the desktop or a group) stand for a file or folder, a program object,
+a group, a drive, Drives, the Minimized Window Viewer, the Window List
+or Shutdown; they live in OS2.INI (`RS2_Shadows`, below) by the folder
+they are in and their object's path or object id. A shadow shows its
+object's title and icon with the title in the shadow colour (the
+container's `CA_OWNERDRAW`: blue, light blue on dark backgrounds),
+opens its object, and is broken (grey title, a plain icon; opening it
+offers to delete it) when the object is gone. The shell keeps shadows
+with their objects when it renames or moves files and folders (also
+for shadows kept in a moved directory), moves program objects or
+renames groups, and deletes them with their objects.
+
+**The Startup folder** (a visible program group, made on first start
+or by the profile update) starts its program objects, and opens the
+objects of its shadows, when the desktop starts for the first time
+after the system starts, as the Workplace Shell's does. A shell
+started again in the same session does not (the system atom
+`RS2SHELL_STARTUP`, which lives as long as PM's shared state, marks
+it done); `SET RESTARTOBJECTS=NO` turns it off. `RS2SHELL /STARTUP`
+does only this and ends (DESKTEST uses it).
+
+**Dragging** with mouse button 2 goes through PMDRAG as the Workplace
+Shell's does (see [Drag and drop](#drag-and-drop-pmdrag)): the
+container's `CN_INITDRAG` makes a DRAGINFO with an item per selected
+object and calls `DrgDrag` (until button 2 goes up; Esc cancels); the
+dragged records have source emphasis. Files and folders are
+`<DRM_OS2FILE,DRF_UNKNOWN>` items with their directory and name
+(`hstrContainerName`, `hstrSourceName`) and a type by extension (Plain
+Text, Executable, ...), so any program that takes files can use them;
+a target that asks for a file to be rendered (`DM_RENDER` with
+`hstrRenderToName`) gets a copy there and `DM_RENDERCOMPLETE`. The
+shell's other objects are `<DRM_OBJECT,DRF_OBJECT>` items with their
+object id. As a target (the containers' `CN_DRAGOVER` and `CN_DROP`)
+the shell takes files from any program (`DRM_OS2FILE` with a directory
+and a name) and its own objects, with the operation the user holds
+down (Ctrl copies, Shift moves, Ctrl+Shift makes shadows) or the
+Workplace Shell's default: files move within a drive and are copied to
+another; icons dropped in their own folder move there (positions are
+kept in OS2.INI at once); program objects move between the desktop
+and groups; a program file dropped on the desktop or a group becomes a
+program object and other files become shadows there (at the drop
+point); files dropped on a program object, or on a program file,
+start it with their names as parameters; folders, drives and groups
+(their icons, shadows of them, the folders of a tree) take drops into
+them. Every item's source gets `DM_ENDCONVERSATION`.
 
 **Program objects** are the program list in OS2.INI (see
 [Profiles](#profiles-ini-files)), so programs using the `Prf*` program
@@ -1266,18 +1356,20 @@ has no call to rename one).
 
 | Application | Key | Value |
 |-------------|-----|-------|
-| `RS2_Desktop` | `Version` | `1` once the default objects have been made (the shell's MAKEINI step, rs2's own content, not IBM's INI.RC) |
-| | `DesktopGroup`, `PromptsGroup`, `ProgramsGroup` | the group handles (hex) |
+| `RS2_Desktop` | `Version` | `4` once the default objects have been made (the shell's MAKEINI step, rs2's own content, not IBM's INI.RC; older versions get what is new) |
+| | `DesktopGroup`, `PromptsGroup`, `ProgramsGroup`, `StartupGroup` | the group handles (hex) |
+| | `NextShadow` | the next shadow id (hex) |
 | | `Background` | desktop colour, `RRGGBB` |
 | | `MinimizeTo` | `VIEWER` (default) or `DESKTOP` |
 | `RS2_IconPos` | `FOLDER\|OBJECT` | `x y` (the container's `ptlIcon`); folders `DESKTOP`, `G` + group handle, `DRIVES`; objects `G`/`P` + handle, `DRIVES`, `DRIVE:C`, `SHUTDOWN`, ... |
 | `RS2_Windows` | folder (`DIR:C:\OS2\` for directories) | `x y cx cy view` |
 | `RS2_Associations` | extension (upper case) | the program |
+| `RS2_Shadows` | `S` + id (8 hex digits) | the folder (`DESKTOP`, `G` + group handle, `DIR:` + directory), a tab, the object: a full path or an object id (`P`/`G` + handle, `DRIVES`, `DRIVE:C`, `MINIMIZED`, `WINLIST`, `SHUTDOWN`) |
 
 The first start makes the groups Desktop (hidden), Command Prompts
-(OS/2 Window, OS/2 Full Screen) and Programs (System Editor if E.EXE is
-installed, Install rs2), the associations and the colour; a missing
-piece is made again later.
+(OS/2 Window, OS/2 Full Screen), Programs (System Editor if E.EXE is
+installed, Install rs2) and Startup (empty), the associations and the
+colour; a missing piece is made again later.
 
 **Minimized windows** go to the Minimized Window Viewer: the shell is
 PMWIN's minimized window viewer (`Rs2SetMinimizeViewer`), so minimizing
@@ -1311,10 +1403,77 @@ offers command prompts in a window or full screen. For development,
 `cargo xtask run --desktop` boots into the shell (`init=OS2\RS2SHELL.EXE`
 in place of work/cmdline.txt's `init=`).
 
-**Not done**: drag and drop with other programs (`DrgDrag`), copying
-files (only moving), shadows, the tree view of a directory showing
-subfolders, a Startup folder, templates, object settings other than
-program objects', the lock-up, a real Workplace Shell object model.
+### Drag and drop (PMDRAG)
+
+PMDRAG.DLL (`userland/pmdrag`) does direct manipulation as IBM's does
+(its code is in IBM's PMCTLS.DLL; studied in Ghidra with the debug
+symbols):
+
+- String handles are atoms of the system atom table (a string starting
+  with `!` or `#` gets a 0xFF byte in front so it is not an integer
+  atom), so every process sees them: `DrgAddStrHandle`,
+  `DrgQueryStrName[Len]`, `DrgDeleteStrHandle`,
+  `DrgDeleteDraginfoStrHandles` (each of the items' handles once).
+- A DRAGINFO is giveable and gettable shared memory (the same address
+  in every process): a 0x2C-byte header (magic 0xF00E0E0F, the items'
+  address) in front of the DRAGINFO and its DRAGITEMs.
+  `DrgAllocDraginfo`/`DrgReallocDraginfo`; a target gets at it with
+  `DrgAccessDraginfo` (`DosGetSharedMem`) and lets go with
+  `DrgFreeDraginfo` (`DosFreeMem`; it goes away when the last process
+  has), which fails for the source while its drag runs
+  (PMERR_SOURCE_SAME_AS_TARGET), so a source that is its own target
+  frees it once, after `DrgDrag`; `DrgPushDraginfo` gives it to a
+  window's process. DRAGTRANSFERs are the same behind a header with
+  magic 0xE0E00F0F; `DrgSendTransferMsg` (`DM_RENDER`,
+  `DM_RENDERPREPARE`) and `DrgPostTransferMsg` (retrying while the
+  queue is full) give them to the receiver first.
+- `DrgDrag(hwndSource, pdinfo, pdimg, cdimg, vkTerminate, pRsvd)` is
+  modal: it captures the mouse for the source window and reads the
+  thread's messages itself (dispatching the others) until the
+  terminating button goes up (`VK_ENDDRAG`: `WM_ENDDRAG`, or button 2
+  up) or Esc. Over each window under the pointer (`WinWindowFromPoint`
+  with children) it sends `DM_DRAGOVER` (the DRAGINFO and the pointer
+  position) and the source `DM_DRAGOVERNOTIFY` with the answer; a
+  window that answered `DOR_NEVERDROP` gets no more until the pointer
+  leaves it; leaving a window sends `DM_DRAGLEAVE`; F1 posts
+  `DM_DROPHELP` and ends the drag. The operation (`usOperation`) is
+  `DO_DEFAULT`, or `DO_COPY`, `DO_MOVE`, `DO_LINK` with Ctrl, Shift,
+  Ctrl+Shift held down (at the start and as the keys change; another
+  key held, `DO_UNKNOWN`); with the default the target must name an
+  operation (copy, move, link or create a program object) or one of its
+  own above `DO_UNKNOWN`. At the end a window that answered `DOR_DROP`
+  gets `DM_DROP` (sent), with `usOperation` set to the operation it
+  named if the user chose none, and `DrgDrag` returns it; else 0.
+  `WM_QUIT` during a drag ends it and is posted again.
+- The pointer shows the first drag image's icon (`DRG_ICON`) over
+  windows that take the drop, `SPTR_ILLEGAL` elsewhere;
+  `DrgSetDragPointer` replaces it while the pointer is over the same
+  window, `DrgSetDragImage` changes the icon. (IBM's draws the images,
+  bitmaps and polygons too, on the screen beside the pointer.)
+- RMF strings and types (`crates/pmwin/src/drag.rs`, host-tested):
+  `<mechanism,format>` pairs and `(m1,m2)x(f1,f2)` cross products,
+  blanks ignored, the first pair native; type lists with the first the
+  true type: `DrgVerifyRMF` (NULL matches any), `DrgVerifyNativeRMF`,
+  `DrgQueryNativeRMF[Len]`, `DrgVerifyType`, `DrgVerifyTrueType`,
+  `DrgVerifyTypeSet`, `DrgQueryTrueType[Len]`.
+- `DrgQueryDragStatus`, `DrgQueryDraginfoPtr`,
+  `DrgQueryDraginfoPtrFromHwnd`, `DrgQueryDraginfoPtrFromDragitem`
+  (the header in front of the item), `DrgGetPS`/`DrgReleasePS`.
+
+The System Editor takes a file dropped on its window (see below); the
+desktop shell drags and takes drops as described above.
+
+**Not done** (PMDRAG): lazy drag (`DrgLazyDrag`, `DrgLazyDrop`,
+`DrgCancelLazyDrag` fail), `DrgDragFiles` and `DrgAcceptDroppedFiles`
+(they fail), drag images drawn beside the pointer.
+
+**Not done** (shell): templates, object settings other than program
+objects' (and a file's properties), the lock-up, a real Workplace
+Shell object model (the desktop is not a directory: files dropped on
+it become shadows, not moved there), shadows kept in a directory
+folder are rs2's (in OS2.INI, not abstract objects in the directory),
+undoing a move, deleting into a trash can (there is no shredder or
+trash can), drag and drop with the keyboard (Shift+F10 menus do it).
 
 ## The System Editor (E.EXE)
 
@@ -1407,8 +1566,14 @@ and templates are rs2's own. IBM's E runs as well (see
 prints PASS/FAIL and `e selftest done: N failure(s)` (also on the
 serial port): see [Testing](#testing).
 
-**Not done**: dragging files onto the window (E takes a dropped file),
-the window's icon, Undo restoring a font or colours (rs2's MLE
+**A file dropped on the window** (one item, a `DRM_OS2FILE` file with
+its directory and name, dropped with the default operation or Ctrl)
+opens in it, after asking about unsaved changes as File > Open does;
+the MLE is subclassed for `DM_DRAGOVER` and `DM_DROP`, the opening
+happens after the drop (posted), and the source hears
+`DM_ENDCONVERSATION` (`drop.rs`).
+
+**Not done**: the window's icon, Undo restoring a font or colours (rs2's MLE
 does not undo those), the Set tabs dialog E has but does not offer.
 
 ## Installing OS/2's applications (APPINST.EXE)
@@ -1781,9 +1946,21 @@ The export trampolines pass their index to the lock's entry
   shell: its default objects (it runs `RS2SHELL /MAKEINI` first), a
   program object created, changed and removed through the program list
   calls the way the settings notebook does it, icon positions in
-  `RS2_IconPos`, and PMWIN's `Rs2SetDesktopWindow` (z-order),
+  `RS2_IconPos`, PMWIN's `Rs2SetDesktopWindow` (z-order),
   `WinWindowFromPoint`, `WinQueryWindowProcess` and presentation
-  parameter colours, printing PASS/FAIL and `desktest done: N
+  parameter colours; the Startup folder (an object started by
+  `RS2SHELL /STARTUP`, and not again in the same session); shadows
+  (made, listed, following a rename and a moved directory, broken,
+  removed with their object); the shell's file operations (a tree with
+  EAs on a file and a directory copied with each file reported,
+  replaced, refused inside itself, stopped, moved, deleted; free names);
+  PMDRAG (string handles, DRAGINFO and DRAGITEM calls, the RMF and type
+  checks, and a `DrgDrag` from its window onto a container in a second
+  process, `DESKTEST DROPTARGET`: `CN_DRAGOVER` with `DOR_DROP`/
+  `DO_COPY` seen in `DM_DRAGOVERNOTIFY`, the drop, one item read from
+  its directory and name, one rendered by the source through
+  `DM_RENDER`/`DM_RENDERCOMPLETE`, `DM_ENDCONVERSATION` for both, a drag
+  cancelled with Esc), printing PASS/FAIL and `desktest done: N
   failure(s)`.
 - The desktop in QEMU with screenshots (`cargo xtask run --desktop`, or
   the dist ISO), driven by `--type-file` scripts of `{mouse_abs}`

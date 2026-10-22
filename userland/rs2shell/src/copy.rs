@@ -199,7 +199,16 @@ extern "C" fn worker(param: u32) {
         }
         if rc != 0 {
             let what = if job.op == Op::Copy { "copy" } else { "move" };
-            let text = alloc::format!("Cannot {what} {} (error {rc}).", os2::path::from_bytes(fileops::name_of(src)));
+            let why = match rc {
+                5 => "Access was denied",
+                16 => "A folder cannot go into itself",
+                32 | 33 => "A file is in use",
+                39 | 112 => "The disk is full",
+                19 => "The disk is write protected",
+                206 => "A name is too long for the target's file system",
+                _ => "An error occurred",
+            };
+            let text = alloc::format!("Cannot {what} {}. {why} (error {rc}). Go on with the rest?", os2::path::from_bytes(fileops::name_of(src)));
             if matches!(ask(job, Question::Error(text.into_bytes())), Answer::Cancel) {
                 break;
             }

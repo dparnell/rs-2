@@ -18,7 +18,8 @@
 //! one last chosen in the Type dialog). Closing the window with changes
 //! beeps and asks (Save, Save as, Discard, Cancel); so does WM_QUIT from
 //! outside (shutdown), with WinCancelShutdown when the answer is Cancel.
-//! Autosave saves after N changes.
+//! Autosave saves after N changes. A file dropped on the window opens
+//! (drop.rs).
 //!
 //! `E /SELFTEST` runs self-checks of the file and editing logic and
 //! prints PASS/FAIL lines and "e selftest done: N failure(s)".
@@ -30,6 +31,7 @@
 extern crate alloc;
 
 mod dialogs;
+mod drop;
 mod file;
 mod pm;
 mod selftest;
@@ -554,6 +556,10 @@ extern "C" fn client_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             unsafe { WinSetFocus(HWND_DESKTOP, a.mle) };
             0
         }
+        drop::WM_OPEN_DROPPED => {
+            drop::open_dropped();
+            0
+        }
         WM_PAINT => {
             let mut r = RectL::default();
             unsafe {
@@ -601,6 +607,7 @@ fn create_mle(client: u32) {
     let a = app();
     let style = WS_VISIBLE | MLS_VSCROLL | MLS_HSCROLL;
     a.mle = unsafe { WinCreateWindow(client, WC_MLE, b"\0".as_ptr(), style, 0, 0, 0, 0, client, 3 /* HWND_TOP */, MLE_ID, core::ptr::null(), core::ptr::null()) };
+    drop::subclass(a.mle);
     send(a.mle, MLM_SETTEXTLIMIT, u32::MAX, 0);
     send(a.mle, MLM_FORMAT, MLFIE_CFTEXT, 0);
     send(a.mle, MLM_SETBACKCOLOR, a.bg as u32, 0);

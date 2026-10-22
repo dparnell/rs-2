@@ -273,9 +273,23 @@ Status markers: done, in progress, planned.
   DosShutdown, ACPI power off); the default boot of the distributed and
   installed systems, with T at the loader or `textmode` for the
   command prompt; `RS2\DESKTEST.EXE`
-- planned (shell): file copy, shadows, a Startup folder, a directory
-  tree view with subfolders, drag and drop with other programs
-  (DrgDrag), then the SOM-based Workplace Shell
+- done (shell): copying and moving files and folders (Copy/Move menu
+  items with a target folder dialog, Ctrl+drag; a worker thread with a
+  progress window; EAs through DosCopy and for directories; the name
+  collision dialog: rename, replace, skip), program objects copied and
+  moved between groups; shadows (Create shadow, Ctrl+Shift+drag; kept
+  in OS2.INI, in the shadow colour through the container's owner draw,
+  following their objects, broken when they are gone); the Startup
+  folder (its objects start once after each boot); the tree view of
+  drives and directories (expanding on demand); drag and drop through
+  PMDRAG's DrgDrag protocol (DM_DRAGOVER, DM_DROP, DRAGINFO in shared
+  memory, string handles as atoms, DM_RENDER, DM_ENDCONVERSATION; the
+  container's CN_DRAGOVER/CN_DROP), with other programs: files dropped
+  on programs start them, the System Editor opens a dropped file;
+  `RS2\DESKTEST.EXE` checks them with a drag between two processes
+- planned (shell): lazy drag, DrgDragFiles/DrgAcceptDroppedFiles, drag
+  images beside the pointer, templates, then the SOM-based Workplace
+  Shell
 - done: profiles on real INI files (`crates/inifile`, PMSHAPI): OS2.INI
   and OS2SYS.INI from USER_INI/SYSTEM_INI, shared by all processes,
   written through safely; the program list calls, kept in OS2.INI for
