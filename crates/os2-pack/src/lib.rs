@@ -160,9 +160,14 @@ impl Entry<'_> {
     }
 
     /// Decompress the file data, checking it against the recorded size.
+    /// Output past the recorded size (the last block of some files on the
+    /// OS/2 CD, PMVIOP.DLL in BUNDLE among them, decodes 2 bytes more) is
+    /// cut off, as IBM's UNPACK writes only the recorded size; too little
+    /// is an error.
     pub fn decompress(&self, dec: &mut Decompressor) -> Result<Vec<u8>, Error> {
         self.check_algorithm()?;
-        let out = dec.stream(self.data, self.size as usize)?;
+        let mut out = dec.stream(self.data, self.size as usize)?;
+        out.truncate(self.size as usize);
         if out.len() != self.size as usize {
             return Err(Error::SizeMismatch {
                 expected: self.size,
@@ -241,6 +246,14 @@ mod tests {
         let mut d = Decompressor::new();
         assert_eq!(e[0].decompress(&mut d).unwrap(), b"abc");
         assert_eq!(e[0].decompress_ea(&mut d).unwrap(), None);
+    }
+
+    #[test]
+    fn longer_output_is_cut_to_the_recorded_size() {
+        let mut f = sample();
+        f[0x10] = 2;
+        let e = entries(&f).unwrap();
+        assert_eq!(e[0].decompress(&mut Decompressor::new()).unwrap(), b"ab");
     }
 
     #[test]
