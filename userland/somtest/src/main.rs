@@ -204,7 +204,9 @@ fn build(s: &Spec) -> usize {
     sci[25] = u32::MAX; // numDirectInitClasses: the parents
     sci[33] = s.methods.len() as u32; // numClassDataEntries
     let sci = Box::leak(sci.into_boxed_slice());
-    unsafe { somBuildClass(1, sci.as_ptr(), 1, 2) }
+    // inherit_vars: implementation (data and methods) from every parent.
+    let inherit = (1i32 << s.parents.len()) - 1;
+    unsafe { somBuildClass(inherit, sci.as_ptr(), 1, 2) }
 }
 
 fn cd(n: usize) -> *mut usize {
