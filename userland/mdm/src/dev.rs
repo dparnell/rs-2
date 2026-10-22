@@ -18,6 +18,7 @@ pub const MCI_MODE_NOT_READY: u32 = 1;
 pub const MCI_MODE_PAUSE: u32 = 2;
 pub const MCI_MODE_PLAY: u32 = 3;
 pub const MCI_MODE_STOP: u32 = 4;
+pub const MCI_MODE_RECORD: u32 = 5;
 
 /// A notification to send when an asynchronous command ends.
 #[derive(Clone, Copy)]
@@ -51,6 +52,9 @@ pub struct Device {
     /// Bumped by every PLAY, STOP, SEEK and CLOSE: a player thread whose
     /// generation is no longer the device's has been stopped.
     pub epoch: u32,
+    /// The alias CONNECTION ... ALIAS gave the device's connection (the
+    /// wave stream's amp-mixer): it names the device itself.
+    pub conn_alias: Option<String>,
     pub kind: Kind,
 }
 
@@ -75,7 +79,7 @@ pub fn with<R>(id: u16, f: impl FnOnce(&mut Device) -> R) -> Option<R> {
 pub fn find(name: &str) -> Option<u16> {
     let _g = LOCK.hold();
     let t = table();
-    if let Some(d) = t.iter().find(|d| d.alias.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(name))) {
+    if let Some(d) = t.iter().find(|d| [&d.alias, &d.conn_alias].iter().any(|a| a.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(name)))) {
         return Some(d.id);
     }
     if let Some(d) = t.iter().find(|d| d.alias.is_none() && d.element.as_deref().is_some_and(|e| e.eq_ignore_ascii_case(name))) {
@@ -150,6 +154,7 @@ pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u1
         mode: MCI_MODE_STOP,
         pending: None,
         epoch: 0,
+        conn_alias: None,
         kind,
     }));
     Ok(id)
@@ -157,7 +162,7 @@ pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u1
 
 fn table_has_alias(a: &str) -> bool {
     let _g = LOCK.hold();
-    table().iter().any(|d| d.alias.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(a)))
+    table().iter().any(|d| [&d.alias, &d.conn_alias].iter().any(|x| x.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(a))))
 }
 
 /// MCI_CLOSE: stop the device and forget it.
@@ -230,8 +235,9 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
         }
         _ => specific(id, typ, r),
     };
-    // Commands that end at once notify at once; PLAY notifies when it ends.
-    if res.is_ok() && r.flags & MCI_NOTIFY != 0 && r.msg != MCI_PLAY && r.msg != MCI_CLOSE {
+    // Commands that end at once notify at once; PLAY and RECORD notify
+    // when they end.
+    if res.is_ok() && r.flags & MCI_NOTIFY != 0 && r.msg != MCI_PLAY && r.msg != MCI_RECORD && r.msg != MCI_CLOSE {
         post(Notify { hwnd: r.callback, user: r.user, msg: r.msg as u16 }, MCI_NOTIFY_SUCCESSFUL, id);
     }
     if res.is_ok() && r.msg == MCI_CLOSE && r.flags & MCI_NOTIFY != 0 {
@@ -252,7 +258,9 @@ fn specific(id: u16, typ: u16, r: &Req) -> Result<Reply, u32> {
 /// GETDEVCAPS MESSAGE: whether the device understands a message.
 fn supports(typ: u16, msg: u32) -> bool {
     let common = [MCI_OPEN, MCI_CLOSE, MCI_PLAY, MCI_SEEK, MCI_STOP, MCI_PAUSE, MCI_RESUME, MCI_INFO, MCI_GETDEVCAPS, MCI_STATUS, MCI_SET, MCI_ACQUIREDEVICE, MCI_RELEASEDEVICE, MCI_LOAD, MCI_CUE];
-    common.contains(&msg) || (typ == DEVTYPE_DIGITAL_VIDEO && [MCI_PUT, MCI_WHERE, MCI_WINDOW].contains(&msg))
+    common.contains(&msg)
+        || (typ == DEVTYPE_DIGITAL_VIDEO && [MCI_PUT, MCI_WHERE, MCI_WINDOW].contains(&msg))
+        || (typ == DEVTYPE_WAVEFORM_AUDIO && [MCI_RECORD, MCI_SAVE, MCI_DELETE, MCI_CONNECTOR, MCI_CONNECTION].contains(&msg))
 }
 
 /// GETDEVCAPS items every device answers.
@@ -260,9 +268,8 @@ fn common_caps(typ: u16, item: u32) -> Option<Reply> {
     let video = typ == DEVTYPE_DIGITAL_VIDEO;
     Some(match item {
         MCI_GETDEVCAPS_CAN_PLAY | MCI_GETDEVCAPS_USES_FILES | MCI_GETDEVCAPS_CAN_STREAM => Reply::Bool(true),
-        MCI_GETDEVCAPS_CAN_EJECT | MCI_GETDEVCAPS_CAN_LOCKEJECT | MCI_GETDEVCAPS_CAN_RECORD | MCI_GETDEVCAPS_CAN_RECORD_INSERT | MCI_GETDEVCAPS_CAN_SAVE | MCI_GETDEVCAPS_HAS_IMAGE => {
-            Reply::Bool(false)
-        }
+        MCI_GETDEVCAPS_CAN_RECORD | MCI_GETDEVCAPS_CAN_RECORD_INSERT | MCI_GETDEVCAPS_CAN_SAVE => Reply::Bool(typ == DEVTYPE_WAVEFORM_AUDIO),
+        MCI_GETDEVCAPS_CAN_EJECT | MCI_GETDEVCAPS_CAN_LOCKEJECT | MCI_GETDEVCAPS_HAS_IMAGE => Reply::Bool(false),
         MCI_GETDEVCAPS_CAN_PROCESS_INTERNAL => Reply::Bool(false),
         MCI_GETDEVCAPS_CAN_SETVOLUME | MCI_GETDEVCAPS_HAS_AUDIO => Reply::Bool(!video),
         MCI_GETDEVCAPS_HAS_VIDEO => Reply::Bool(video),

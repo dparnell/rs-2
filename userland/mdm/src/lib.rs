@@ -62,7 +62,7 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
     if flags & MCI_WAIT != 0 && flags & MCI_NOTIFY != 0 {
         return Err(MCIERR_FLAGS_NOT_COMPATIBLE);
     }
-    if p == 0 && (flags & MCI_NOTIFY != 0 || matches!(msg, MCI_OPEN | MCI_STATUS | MCI_SYSINFO | MCI_GETDEVCAPS | MCI_INFO | MCI_SET | MCI_LOAD | MCI_PUT | MCI_WHERE | MCI_WINDOW)) {
+    if p == 0 && (flags & MCI_NOTIFY != 0 || matches!(msg, MCI_OPEN | MCI_STATUS | MCI_SYSINFO | MCI_GETDEVCAPS | MCI_INFO | MCI_SET | MCI_LOAD | MCI_PUT | MCI_WHERE | MCI_WINDOW | MCI_CONNECTOR | MCI_CONNECTION) || (msg == MCI_SAVE && flags & MCI_SAVE_FILE != 0) || (matches!(msg, MCI_RECORD | MCI_DELETE) && flags & (MCI_FROM | MCI_TO) != 0)) {
         return Err(MCIERR_MISSING_PARAMETER);
     }
     let mut r = base_req(msg, flags, p, user);
@@ -95,7 +95,30 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
             r.value = rd(p, 16);
             r.wave = [rd16(p, 40) as u32, rd16(p, 44) as u32, rd(p, 48), rd(p, 52), rd16(p, 56) as u32, rd16(p, 60) as u32];
         }
-        MCI_LOAD => r.element = Some(cstr(rd(p, 4) as *const u8)),
+        MCI_LOAD => r.element = (rd(p, 4) != 0).then(|| cstr(rd(p, 4) as *const u8)),
+        // MCI_RECORD_PARMS; MCI_EDIT_PARMS (hwndCallback, ulStructLen,
+        // ulFrom, ulTo, ...).
+        MCI_RECORD => {
+            r.from = rd(p, 4);
+            r.to = rd(p, 8);
+        }
+        MCI_DELETE => {
+            r.from = rd(p, 8);
+            r.to = rd(p, 12);
+        }
+        MCI_SAVE if flags & MCI_SAVE_FILE != 0 => r.element = Some(cstr(rd(p, 4) as *const u8)),
+        // MCI_CONNECTOR_PARMS (hwndCallback, ulReturn, ulConnectorType,
+        // ulConnectorIndex); MCI_CONNECTION_PARMS (hwndCallback,
+        // ulConnectorType, ulConnectorIndex, pszAlias, usToDeviceID, ...).
+        MCI_CONNECTOR => {
+            r.item = rd(p, 8);
+            r.value = rd(p, 12);
+        }
+        MCI_CONNECTION => {
+            r.item = rd(p, 4);
+            r.value = rd(p, 8);
+            r.text = (flags & MCI_CONNECTOR_ALIAS != 0 && rd(p, 12) != 0).then(|| cstr(rd(p, 12) as *const u8));
+        }
         MCI_WINDOW => {
             r.hwnd = rd(p, 4);
             r.value = rd16(p, 8) as u32;
@@ -106,7 +129,8 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
     }
     let reply = dev::command(id, &r)?;
     match msg {
-        MCI_STATUS | MCI_GETDEVCAPS => wr(p, 4, reply.num()),
+        MCI_STATUS | MCI_GETDEVCAPS | MCI_CONNECTOR => wr(p, 4, reply.num()),
+        MCI_CONNECTION => wr16(p, 16, reply.num() as u16),
         MCI_INFO => write_text(&reply.text(), rd(p, 4), rd(p, 8))?,
         MCI_WHERE => {
             if let Reply::Rect(rc) = reply {
@@ -275,6 +299,33 @@ fn string_open(object: &str, a: &mut Args, r: &mut Req) -> Result<u16, u32> {
     Ok(id)
 }
 
+/// TYPE connector_type of CONNECTOR and CONNECTION.
+fn connector_type(a: &mut Args) -> Option<u32> {
+    const TYPES: &[(&str, u32)] = &[
+        ("midi stream", 1),
+        ("cd stream", 2),
+        ("wave stream", 3),
+        ("amp stream", 4),
+        ("xa stream", 5),
+        ("headphones", 6),
+        ("speakers", 7),
+        ("microphone", 8),
+        ("line in", 9),
+        ("line out", 10),
+        ("video in", 11),
+        ("video out", 12),
+        ("phone set", 13),
+        ("phone line", 14),
+        ("audio in", 15),
+        ("audio out", 16),
+        ("universal", 17),
+        ("internal audio", 18),
+        ("midi in", 19),
+        ("midi out", 20),
+    ];
+    TYPES.iter().find(|(k, _)| a.flag(&alloc::format!("type {k}"))).map(|t| t.1)
+}
+
 /// A time after a keyword: a number or colon-separated values (TMSF
 /// "2:01:30:00", MSF "1:30:00").
 fn time_value(a: &mut Args, k: &str) -> Result<Option<u32>, u32> {
@@ -310,6 +361,11 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
         "info" => MCI_INFO,
         "load" => MCI_LOAD,
         "cue" => MCI_CUE,
+        "record" => MCI_RECORD,
+        "save" => MCI_SAVE,
+        "delete" => MCI_DELETE,
+        "connector" => MCI_CONNECTOR,
+        "connection" => MCI_CONNECTION,
         "acquire" => MCI_ACQUIREDEVICE,
         "release" => MCI_RELEASEDEVICE,
         "window" => MCI_WINDOW,
@@ -369,12 +425,15 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
                 ("horizontal video extent", MCI_VID_STATUS_VIDEO_X_EXTENT),
                 ("vertical video extent", MCI_VID_STATUS_VIDEO_Y_EXTENT),
                 ("normal rate", MCI_VID_STATUS_NORMAL_RATE),
-                ("samplespersec", 0x4004),
-                ("bitspersample", 0x4007),
-                ("channels", 0x4003),
-                ("format tag", 0x4002),
-                ("bytespersec", 0x4005),
-                ("alignment", 0x4006),
+                // MCI_WAVE_STATUS_*.
+                ("level", 0x6000),
+                ("samplespersec", 0x6001),
+                ("bytespersec", 0x6002),
+                ("alignment", 0x6003),
+                ("format tag", 0x6004),
+                ("channels", 0x6005),
+                ("bitspersample", 0x6006),
+                ("monitor", 0x0c),
             ]
             .iter()
             .find(|(k, _)| a.flag(k))
@@ -411,6 +470,12 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
             if let Some(t) = a.value("format tag")? {
                 r.flags |= MCI_WAVE_SET_FORMATTAG;
                 r.wave[0] = if t.eq_ignore_ascii_case("pcm") { 1 } else { parse_number(&t).ok_or(MCIERR_BAD_INTEGER)? };
+            }
+            for (k, f) in [("monitor on", MCI_SET_ON), ("monitor off", MCI_SET_OFF)] {
+                if a.flag(k) {
+                    r.flags |= MCI_SET_ITEM | f;
+                    r.item = MCI_SET_MONITOR_AUDIO;
+                }
             }
             for (k, f) in [("door open", cdaudio::MCI_SET_DOOR_OPEN), ("door closed", cdaudio::MCI_SET_DOOR_CLOSED), ("door locked", cdaudio::MCI_SET_DOOR_LOCK), ("door unlocked", cdaudio::MCI_SET_DOOR_UNLOCK)] {
                 if a.flag(k) {
@@ -461,8 +526,59 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
         }
         MCI_LOAD => {
             let _ = a.flag("readonly");
-            let _ = a.flag("new");
-            r.element = Some(a.next().ok_or(MCIERR_MISSING_PARAMETER)?);
+            // NEW: an untitled element.
+            let new = a.flag("new");
+            r.element = a.next();
+            if r.element.is_none() && !new {
+                return Err(MCIERR_MISSING_PARAMETER);
+            }
+        }
+        MCI_RECORD | MCI_DELETE => {
+            if let Some(v) = a.number("from")? {
+                r.flags |= MCI_FROM;
+                r.from = v;
+            }
+            if let Some(v) = a.number("to")? {
+                r.flags |= MCI_TO;
+                r.to = v;
+            }
+            if r.msg == MCI_RECORD {
+                if a.flag("insert") {
+                    r.flags |= MCI_RECORD_INSERT;
+                }
+                if a.flag("overwrite") {
+                    r.flags |= MCI_RECORD_OVERWRITE;
+                }
+            }
+        }
+        MCI_SAVE => {
+            if let Some(f) = a.next() {
+                r.flags |= MCI_SAVE_FILE;
+                r.element = Some(f);
+            }
+        }
+        MCI_CONNECTOR | MCI_CONNECTION => {
+            if r.msg == MCI_CONNECTION {
+                r.text = a.value("alias")?;
+                if r.text.is_some() {
+                    r.flags |= MCI_CONNECTOR_ALIAS;
+                }
+            }
+            if let Some(n) = a.number("number")? {
+                r.flags |= MCI_CONNECTOR_INDEX;
+                r.value = n;
+            }
+            if let Some(t) = connector_type(a) {
+                r.flags |= MCI_CONNECTOR_TYPE;
+                r.item = t;
+            } else if a.flag("type") {
+                return Err(MCIERR_INVALID_CONNECTOR_TYPE);
+            }
+            for (k, f) in [("enable", MCI_ENABLE_CONNECTOR), ("disable", MCI_DISABLE_CONNECTOR), ("query", if r.msg == MCI_CONNECTOR { MCI_QUERY_CONNECTOR_STATUS } else { MCI_QUERY_CONNECTION })] {
+                if a.flag(k) {
+                    r.flags |= f;
+                }
+            }
         }
         MCI_CUE => {
             if a.flag("output") {

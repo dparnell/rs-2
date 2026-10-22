@@ -130,7 +130,7 @@ system-wide and can be shared); they are closed when it ends.
 
 | Device | rs2 |
 |--------|-----|
-| waveaudio (Waveaudio01) | A WAV file as the element (PCM, or µ-law/A-law/IMA ADPCM decoded by mmfmt) or a memory playlist (MCI_OPEN_PLAYLIST: DATA, BRANCH, LOOP, CALL/RETURN, MESSAGE, CUEPOINT, SEMWAIT/SEMPOST, EXIT). MCI_SET of the wave format (as the games set it before playing a playlist), time formats (MMTIME, milliseconds, bytes, samples), volume. PLAY (FROM/TO), STOP, PAUSE/RESUME, SEEK, STATUS (mode, length, position, the format). Played through the kernel's audio streams (RS2API 300-308, docs/ROADMAP.md); without sound hardware the device plays silently in real time, so PLAY WAIT and notifications behave the same. |
+| waveaudio (Waveaudio01) | A WAV file as the element (PCM, or µ-law/A-law/IMA ADPCM decoded by mmfmt) or a memory playlist (MCI_OPEN_PLAYLIST: DATA, BRANCH, LOOP, CALL/RETURN, MESSAGE, CUEPOINT, SEMWAIT/SEMPOST, EXIT). MCI_SET of the wave format (as the games set it before playing a playlist), time formats (MMTIME, milliseconds, bytes, samples), volume. PLAY (FROM/TO), STOP, PAUSE/RESUME, SEEK, STATUS (mode, length, position, the format, LEVEL, MONITOR). Played through the kernel's audio streams (RS2API 300-308, docs/ROADMAP.md); without sound hardware the device plays silently in real time, so PLAY WAIT and notifications behave the same. Recording (see below): RECORD, SAVE, DELETE, CUE INPUT, CONNECTOR, CONNECTION, SET MONITOR, LOAD NEW. |
 | digitalvideo (Digitalvideo01) | FLI/FLC animations. Frames are drawn with GpiDrawBits into the application's window (WINDOW HANDLE, PUT DESTINATION) or into MDM's own video window (a frame window titled with the file name, run by a thread of MDM's with its own message queue). PLAY (FROM/TO, FAST), STOP, PAUSE/RESUME, SEEK, CUE, LOAD, WINDOW (HANDLE, DEFAULT, STATE, TEXT), PUT, WHERE, STATUS (length, position, extents, hwnd). No audio track. |
 
 Common to both: MM_MCINOTIFY (successful, superseded by a new command,
@@ -138,8 +138,46 @@ aborted by STOP/SEEK/CLOSE), CAPABILITY/GETDEVCAPS, INFO, ACQUIRE/RELEASE
 (always granted), SYSINFO (one device of each type), mciGetErrorString's
 texts and mciGetDeviceID. A string command whose object is a file name
 opens the file's device for that command (`play KLONDIKE.FLC wait`) and
-closes it when the command, or the play it started, ends. Connections,
-groups, recording and saving are not supported.
+closes it when the command, or the play it started, ends. Groups and
+the amp-mixer device are not supported.
+
+### Recording
+
+The wave audio device records through the kernel's capture stream
+(RS2API 309-312) in its format (MCI_SET of the rate, channels and bits
+before RECORD; PCM only):
+
+- RECORD [FROM pos] [TO pos] [INSERT | OVERWRITE]: from the position (or
+  FROM) until TO, STOP or PAUSE (RESUME goes on); OVERWRITE is the
+  default, as in IBM's waveaudio. A new file (`open NEW.WAV type
+  waveaudio`, a name that does not exist), `open new type waveaudio` /
+  `load ... new`, or a device opened without an element records into an
+  empty element. With a memory playlist the recording fills its DATA
+  buffers in order (operand 3: the bytes recorded), with MESSAGE,
+  CUEPOINT and the semaphores as in playing. A RECORD NOTIFY is answered
+  when TO is reached (successful), superseded by another RECORD or PLAY,
+  or aborted by STOP. Without input hardware the device records silence
+  in real time.
+- SAVE [file]: the element as a 44-byte-header WAV file, under its name
+  or the one given (which becomes the element's name).
+- DELETE [FROM pos] [TO pos]: cuts a range out of the element.
+- CUE INPUT opens the capture stream ahead of RECORD; STATUS LEVEL is then
+  the input's recent peak, left and right as percentages in the low and
+  high words (0 when nothing is cued or recording).
+- CONNECTOR ENABLE TYPE MICROPHONE | LINE IN chooses the input source
+  (Rs2AudioSetInput; the other one when the hardware lacks it), QUERY
+  tells which is on; the wave stream and the outputs are always on.
+- SET MONITOR ON plays what is recorded as it comes, about 0.4 s late.
+- CONNECTION QUERY TYPE WAVE STREAM [ALIAS name] answers with the
+  device's own ID: rs2 has no amp-mixer device, so the alias names the
+  wave device, and the commands IBM's RECORD.CMD sends to it (SET MONITOR
+  OFF, CONNECTOR ENABLE TYPE MICROPHONE) reach the wave device.
+
+IBM's RECORD.CMD (MMTEMP on the CD) runs: `RECORD C:\FILE.WAV`, Enter to
+stop. Tests: `cargo xtask run --headless --timeout 60 --sound-in tone:440
+--init "RS2\AUDTEST.EXE MCI"` (the command interface: playlist and file
+recording, SAVE, CONNECTOR, CONNECTION), `AUDTEST RECORD` for the
+kernel calls; `--sound ac97` and `--sound es1370` for the other cards.
 
 The games find their sounds in `%MMBASE%\SOUNDS` (rs2's CONFIG.SYS sets
 `MMBASE=C:\MMOS2;`) and their movies in their own directory; APPINST

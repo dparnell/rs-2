@@ -2,6 +2,19 @@
 //! of PCM buffers, played through RS2API's audio streams. Without sound
 //! hardware it plays silently in real time, so that programs waiting for
 //! a sound (PLAY WAIT) or its notification behave the same.
+//!
+//! Recording (RECORD FROM/TO, INSERT or OVERWRITE, the default) reads
+//! the kernel's capture stream (RS2API 309-312) in the device's format
+//! into the element at the position, or into a playlist's DATA buffers;
+//! without input hardware it records silence in real time. SAVE writes
+//! the element as a WAV file, DELETE cuts a range out of it. CUE INPUT
+//! opens the capture stream ahead of a RECORD, so STATUS LEVEL shows the
+//! input's level. CONNECTOR ENABLE TYPE MICROPHONE or LINE IN selects the
+//! source; SET MONITOR ON plays what is recorded as it comes. CONNECTION
+//! QUERY TYPE WAVE STREAM ALIAS name names the device's amp-mixer
+//! connection: rs2 has no amp-mixer device, so that alias reaches the
+//! wave device itself (as IBM's RECORD.CMD uses it, for SET MONITOR and
+//! CONNECTOR).
 
 use alloc::vec::Vec;
 
@@ -13,6 +26,33 @@ use mci::*;
 
 /// Bytes handed to the audio stream at a time.
 const CHUNK: usize = 8192;
+
+// MCI_WAVE_STATUS_* items.
+pub const MCI_WAVE_STATUS_LEVEL: u32 = 0x6000;
+pub const MCI_WAVE_STATUS_SAMPLESPERSEC: u32 = 0x6001;
+pub const MCI_WAVE_STATUS_AVGBYTESPERSEC: u32 = 0x6002;
+pub const MCI_WAVE_STATUS_BLOCKALIGN: u32 = 0x6003;
+pub const MCI_WAVE_STATUS_FORMATTAG: u32 = 0x6004;
+pub const MCI_WAVE_STATUS_CHANNELS: u32 = 0x6005;
+pub const MCI_WAVE_STATUS_BITSPERSAMPLE: u32 = 0x6006;
+const MCI_STATUS_MONITOR: u32 = 0x0c;
+
+// Connector types (MCI_CONNECTOR, MCI_CONNECTION).
+pub const MCI_WAVE_STREAM_CONNECTOR: u32 = 3;
+pub const MCI_AMP_STREAM_CONNECTOR: u32 = 4;
+pub const MCI_HEADPHONES_CONNECTOR: u32 = 6;
+pub const MCI_SPEAKERS_CONNECTOR: u32 = 7;
+pub const MCI_MICROPHONE_CONNECTOR: u32 = 8;
+pub const MCI_LINE_IN_CONNECTOR: u32 = 9;
+pub const MCI_LINE_OUT_CONNECTOR: u32 = 10;
+
+/// RS2API's input sources.
+const SOURCE_LINE: u32 = 1;
+const SOURCE_MIC: u32 = 2;
+
+/// Milliseconds of sound read from the capture stream at a time.
+const REC_MS: u32 = 100;
+const ERROR_BUSY: u32 = 170;
 
 #[derive(Clone, Copy, Debug)]
 pub struct Fmt {
@@ -50,6 +90,18 @@ pub struct Wave {
     pub base_played: u32,
     pub volume: u32,
     pub paused: bool,
+    /// The capture stream (CUE INPUT or RECORD), and whether a recorder
+    /// thread has it.
+    pub input: u32,
+    pub recording: bool,
+    /// RECORD INSERT (else overwrite).
+    insert: bool,
+    /// SET MONITOR: play what is recorded.
+    pub monitor: bool,
+    /// The input source (connector) chosen.
+    source: u32,
+    /// Recorded since the last SAVE (or the load).
+    pub dirty: bool,
 }
 
 impl Wave {
@@ -65,9 +117,19 @@ impl Wave {
             base_played: 0,
             volume: 100,
             paused: false,
+            input: 0,
+            recording: false,
+            insert: false,
+            monitor: false,
+            source: SOURCE_LINE,
+            dirty: false,
         };
         if let Some(e) = element {
-            w.load(e)?;
+            match w.load(e) {
+                // A new file: an empty element, written by SAVE.
+                Err(MCIERR_FILE_NOT_FOUND) => w.data = Some(Vec::new()),
+                r => r?,
+            }
         }
         Ok(w)
     }
@@ -100,6 +162,81 @@ impl Wave {
         if self.stream != 0 {
             unsafe { Rs2AudioStop(self.stream) };
         }
+        if self.input != 0 {
+            if self.recording {
+                // Wakes the recorder, which closes the stream.
+                unsafe { Rs2AudioStop(self.input) };
+            } else {
+                unsafe { Rs2AudioClose(self.input) };
+            }
+            self.input = 0;
+        }
+        self.recording = false;
+    }
+
+    /// Open the capture stream in the device's format (for CUE INPUT and
+    /// RECORD); false without input hardware.
+    fn open_input(&mut self) -> bool {
+        if self.input != 0 {
+            return true;
+        }
+        let mut h = 0;
+        unsafe { Rs2AudioSetInput(self.source, core::ptr::null_mut()) };
+        // A recorder just stopped may still hold the capture stream.
+        let mut rc = 0;
+        for _ in 0..50 {
+            rc = unsafe { Rs2AudioOpenInput(self.fmt.rate, self.fmt.channels, self.fmt.bits, &mut h) };
+            if rc != ERROR_BUSY {
+                break;
+            }
+            unsafe { DosSleep(10) };
+        }
+        if rc != 0 {
+            return false;
+        }
+        unsafe { Rs2AudioSetVolume(h, 100) };
+        self.input = h;
+        true
+    }
+
+    /// Recorded bytes into the element at the position (inserted or over
+    /// what is there), stopping at `end`; how many went in.
+    fn put(&mut self, mut bytes: &[u8]) -> u32 {
+        let pos = self.pos as usize;
+        if self.end != u32::MAX {
+            let room = (self.end as usize).saturating_sub(pos);
+            bytes = &bytes[..bytes.len().min(room)];
+        }
+        let data = self.data.get_or_insert_with(Vec::new);
+        let pos = pos.min(data.len());
+        if self.insert {
+            data.splice(pos..pos, bytes.iter().copied());
+        } else {
+            let over = (data.len() - pos).min(bytes.len());
+            data[pos..pos + over].copy_from_slice(&bytes[..over]);
+            data.extend_from_slice(&bytes[over..]);
+        }
+        self.pos = (pos + bytes.len()) as u32;
+        self.dirty = true;
+        bytes.len() as u32
+    }
+
+    /// The element as a WAV file.
+    fn wav(&self) -> Vec<u8> {
+        let f = &self.fmt;
+        let wf = mmfmt::wav::WaveFormat { tag: 1, channels: f.channels as u16, rate: f.rate, bits: f.bits as u16, block_align: f.block as u16, avg_bytes: f.avg };
+        mmfmt::wav::build(&wf, self.data.as_deref().unwrap_or(&[]))
+    }
+
+    /// The input's level: left and right, 0-100 each (low and high word).
+    fn level(&self) -> u32 {
+        if self.input == 0 {
+            return 0;
+        }
+        let mut v = 0;
+        unsafe { Rs2AudioQueryLevel(self.input, &mut v) };
+        let pct = |x: u32| (x & 0xffff) * 100 / 32767;
+        pct(v) | pct(v >> 16) << 16
     }
 
     /// Bytes to the device's time format and back.
@@ -129,7 +266,7 @@ impl Wave {
 
     /// Where playing has got to, in bytes.
     fn position(&self, playing: bool) -> u32 {
-        if playing && self.stream != 0 {
+        if playing && self.stream != 0 && !self.recording {
             let mut n = 0;
             unsafe { Rs2AudioQueryPos(self.stream, &mut n) };
             return (self.base_played + n.saturating_sub(self.base_played)).min(self.end).max(self.pos.min(self.base_played));
@@ -148,13 +285,61 @@ fn wave(d: &mut Device) -> &mut Wave {
 pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
     match r.msg {
         MCI_PLAY => play(id, r),
+        MCI_RECORD => record(id, r),
+        MCI_SAVE => save(id, r),
+        MCI_DELETE => {
+            stop(id, true);
+            with(id, |d| {
+                let tf = d.time_format;
+                let w = wave(d);
+                let len = w.length();
+                let from = if r.flags & MCI_FROM != 0 { w.from_time(r.from, tf) } else { w.pos.min(len) };
+                let to = if r.flags & MCI_TO != 0 { w.from_time(r.to, tf) } else { len };
+                if w.playlist.is_some() {
+                    return Err(MCIERR_UNSUPPORTED_FUNCTION);
+                }
+                if from > len || to > len || from > to {
+                    return Err(MCIERR_OUTOFRANGE);
+                }
+                if let Some(data) = w.data.as_mut() {
+                    data.drain(from as usize..to as usize);
+                }
+                w.pos = from;
+                w.dirty = true;
+                Ok(Reply::None)
+            })
+            .unwrap()
+        }
+        MCI_CONNECTOR => with(id, |d| connector(wave(d), r)).unwrap(),
+        MCI_CONNECTION => {
+            // The wave stream's connection is the amp-mixer, here the
+            // device itself: its alias reaches this device.
+            if r.flags & MCI_QUERY_CONNECTION == 0 {
+                return Err(MCIERR_UNSUPPORTED_FLAG);
+            }
+            if r.flags & MCI_CONNECTOR_TYPE != 0 && !matches!(r.item, MCI_WAVE_STREAM_CONNECTOR | MCI_AMP_STREAM_CONNECTOR) {
+                return Err(MCIERR_INVALID_CONNECTOR_TYPE);
+            }
+            if let Some(a) = &r.text {
+                if dev::find(a).is_some_and(|other| other != id) {
+                    return Err(MCIERR_DUPLICATE_ALIAS);
+                }
+            }
+            with(id, |d| {
+                if r.text.is_some() {
+                    d.conn_alias = r.text.clone();
+                }
+                Ok(Reply::Named(d.id as u32, "Ampmix01"))
+            })
+            .unwrap()
+        }
         MCI_STOP => {
             stop(id, true);
             Ok(Reply::None)
         }
         MCI_PAUSE | MCI_RESUME => with(id, |d| {
             let pause = r.msg == MCI_PAUSE;
-            if d.mode != MCI_MODE_PLAY && d.mode != MCI_MODE_PAUSE {
+            if !matches!(d.mode, MCI_MODE_PLAY | MCI_MODE_PAUSE | MCI_MODE_RECORD) {
                 return Ok(Reply::None);
             }
             let w = wave(d);
@@ -162,7 +347,11 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
             if w.stream != 0 {
                 unsafe { Rs2AudioPause(w.stream, pause as u32) };
             }
-            d.mode = if pause { MCI_MODE_PAUSE } else { MCI_MODE_PLAY };
+            if w.recording && w.input != 0 {
+                unsafe { Rs2AudioPause(w.input, pause as u32) };
+            }
+            let active = if w.recording { MCI_MODE_RECORD } else { MCI_MODE_PLAY };
+            d.mode = if pause { MCI_MODE_PAUSE } else { active };
             Ok(Reply::None)
         })
         .unwrap(),
@@ -191,17 +380,36 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
         }
         MCI_LOAD => {
             stop(id, true);
-            let name = r.element.clone().ok_or(MCIERR_MISSING_PARAMETER)?;
-            let mut nw = Wave::new(Some(&name), None)?;
+            // No name: a new, untitled element.
+            let name = r.element.clone();
+            let mut nw = Wave::new(name.as_deref(), None)?;
+            if name.is_none() {
+                nw.data = Some(Vec::new());
+            }
             with(id, |d| {
                 let w = wave(d);
                 nw.volume = w.volume;
+                nw.monitor = w.monitor;
+                nw.source = w.source;
+                nw.fmt = if name.is_none() { w.fmt } else { nw.fmt };
                 *w = nw;
-                d.element = Some(name);
+                d.element = name;
             });
             Ok(Reply::None)
         }
-        MCI_CUE => Ok(Reply::None),
+        MCI_CUE => with(id, |d| {
+            let idle = !matches!(d.mode, MCI_MODE_PLAY | MCI_MODE_PAUSE | MCI_MODE_RECORD);
+            let w = wave(d);
+            if r.flags & MCI_CUE_INPUT != 0 {
+                // Without input hardware there is nothing to prepare.
+                w.open_input();
+            } else if idle && !w.recording && w.input != 0 {
+                unsafe { Rs2AudioClose(w.input) };
+                w.input = 0;
+            }
+            Ok(Reply::None)
+        })
+        .unwrap(),
         MCI_SET => with(id, |d| set(wave(d), r)).unwrap(),
         MCI_STATUS => with(id, |d| {
             let tf = d.time_format;
@@ -211,15 +419,14 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
                 MCI_STATUS_LENGTH => Reply::Num(w.to_time(w.length(), tf)),
                 MCI_STATUS_POSITION => Reply::Num(w.to_time(w.position(playing), tf)),
                 MCI_STATUS_VOLUME => Reply::Num(w.volume | w.volume << 16),
-                // MCI_WAVE_STATUS_*: level, format tag, channels, rate,
-                // average bytes, block align, bits per sample.
-                0x4001 => Reply::Num(0),
-                0x4002 => Reply::Num(w.fmt.tag),
-                0x4003 => Reply::Num(w.fmt.channels),
-                0x4004 => Reply::Num(w.fmt.rate),
-                0x4005 => Reply::Num(w.fmt.avg),
-                0x4006 => Reply::Num(w.fmt.block),
-                0x4007 => Reply::Num(w.fmt.bits),
+                MCI_STATUS_MONITOR => Reply::Bool(w.monitor),
+                MCI_WAVE_STATUS_LEVEL => Reply::Num(w.level()),
+                MCI_WAVE_STATUS_FORMATTAG => Reply::Num(w.fmt.tag),
+                MCI_WAVE_STATUS_CHANNELS => Reply::Num(w.fmt.channels),
+                MCI_WAVE_STATUS_SAMPLESPERSEC => Reply::Num(w.fmt.rate),
+                MCI_WAVE_STATUS_AVGBYTESPERSEC => Reply::Num(w.fmt.avg),
+                MCI_WAVE_STATUS_BLOCKALIGN => Reply::Num(w.fmt.block),
+                MCI_WAVE_STATUS_BITSPERSAMPLE => Reply::Num(w.fmt.bits),
                 _ => return Err(MCIERR_INVALID_ITEM_FLAG),
             })
         })
@@ -231,6 +438,17 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
 
 fn set(w: &mut Wave, r: &Req) -> Result<Reply, u32> {
     let f = r.flags;
+    // The format of an element with sound in it stays.
+    let fmt_flags = MCI_WAVE_SET_FORMATTAG | MCI_WAVE_SET_CHANNELS | MCI_WAVE_SET_SAMPLESPERSEC | MCI_WAVE_SET_BITSPERSAMPLE;
+    if f & fmt_flags != 0 && w.recording {
+        return Err(MCIERR_INVALID_MODE);
+    }
+    if f & MCI_SET_ITEM != 0 && matches!(r.item, MCI_SET_MONITOR | MCI_SET_MONITOR_AUDIO) {
+        if f & (MCI_SET_ON | MCI_SET_OFF) == 0 {
+            return Err(MCIERR_MISSING_PARAMETER);
+        }
+        w.monitor = f & MCI_SET_ON != 0;
+    }
     if f & (MCI_WAVE_SET_FORMATTAG | MCI_WAVE_SET_CHANNELS | MCI_WAVE_SET_SAMPLESPERSEC | MCI_WAVE_SET_BITSPERSAMPLE | MCI_WAVE_SET_AVGBYTESPERSEC | MCI_WAVE_SET_BLOCKALIGN) != 0 {
         let [tag, ch, rate, _avg, _block, bits] = r.wave;
         if f & MCI_WAVE_SET_FORMATTAG != 0 {
@@ -258,6 +476,11 @@ fn set(w: &mut Wave, r: &Req) -> Result<Reply, u32> {
             w.fmt.bits = bits;
         }
         w.fmt.fix();
+        // A capture stream opened in the old format goes.
+        if w.input != 0 && !w.recording {
+            unsafe { Rs2AudioClose(w.input) };
+            w.input = 0;
+        }
     }
     if f & MCI_SET_AUDIO != 0 && f & MCI_SET_VOLUME != 0 {
         w.volume = r.value.min(100);
@@ -266,6 +489,321 @@ fn set(w: &mut Wave, r: &Req) -> Result<Reply, u32> {
         }
     }
     Ok(Reply::None)
+}
+
+/// MCI_CONNECTOR: the wave stream is always on; the microphone and line
+/// in are the input's sources (one of them enabled); the outputs are on.
+fn connector(w: &mut Wave, r: &Req) -> Result<Reply, u32> {
+    let typ = if r.flags & MCI_CONNECTOR_TYPE != 0 { r.item } else { MCI_WAVE_STREAM_CONNECTOR };
+    if r.flags & MCI_CONNECTOR_INDEX != 0 && r.value > 1 {
+        return Err(MCIERR_INVALID_CONNECTOR_INDEX);
+    }
+    let source = match typ {
+        MCI_MICROPHONE_CONNECTOR => Some(SOURCE_MIC),
+        MCI_LINE_IN_CONNECTOR => Some(SOURCE_LINE),
+        MCI_WAVE_STREAM_CONNECTOR | MCI_AMP_STREAM_CONNECTOR | MCI_SPEAKERS_CONNECTOR | MCI_HEADPHONES_CONNECTOR | MCI_LINE_OUT_CONNECTOR => None,
+        _ => return Err(MCIERR_INVALID_CONNECTOR_TYPE),
+    };
+    if r.flags & MCI_ENABLE_CONNECTOR != 0 {
+        if let Some(src) = source {
+            w.source = src;
+            let mut taken = 0;
+            unsafe { Rs2AudioSetInput(src, &mut taken) };
+        }
+        return Ok(Reply::None);
+    }
+    if r.flags & MCI_DISABLE_CONNECTOR != 0 {
+        // The wave stream cannot be turned off; nor can every source.
+        return match source {
+            Some(src) if src != w.source => Ok(Reply::None),
+            _ => Err(MCIERR_CANNOT_MODIFY_CONNECTOR),
+        };
+    }
+    if r.flags & MCI_QUERY_CONNECTOR_STATUS != 0 {
+        return Ok(Reply::Bool(source.is_none_or(|s| s == w.source)));
+    }
+    Err(MCIERR_MISSING_FLAG)
+}
+
+/// MCI_SAVE: the element (or the playlist's sound so far: not saved) as
+/// a WAV file, under the element's name or the one given.
+fn save(id: u16, r: &Req) -> Result<Reply, u32> {
+    let (name, file) = with(id, |d| {
+        if matches!(d.mode, MCI_MODE_PLAY | MCI_MODE_PAUSE | MCI_MODE_RECORD) {
+            return Err(MCIERR_INVALID_MODE);
+        }
+        let name = r.element.clone().or_else(|| d.element.clone()).ok_or(MCIERR_MISSING_PARAMETER)?;
+        let w = wave(d);
+        if w.data.is_none() {
+            return Err(MCIERR_UNSUPPORTED_FUNCTION);
+        }
+        Ok((name, w.wav()))
+    })
+    .ok_or(MCIERR_INVALID_DEVICE_ID)??;
+    if !write_file(&name, &file) {
+        return Err(MCIERR_TARGET_DEVICE_FULL);
+    }
+    with(id, |d| {
+        d.element = Some(name);
+        wave(d).dirty = false;
+    });
+    Ok(Reply::None)
+}
+
+fn record(id: u16, r: &Req) -> Result<Reply, u32> {
+    if r.flags & MCI_RECORD_INSERT != 0 && r.flags & MCI_RECORD_OVERWRITE != 0 {
+        return Err(MCIERR_FLAGS_NOT_COMPATIBLE);
+    }
+    // A RECORD or PLAY in progress stops (its notification superseded).
+    stop(id, false);
+    let epoch = with(id, |d| -> Result<u32, u32> {
+        let tf = d.time_format;
+        d.epoch = d.epoch.wrapping_add(1);
+        d.finish(MCI_NOTIFY_SUPERSEDED);
+        let w = wave(d);
+        if w.data.is_none() && w.playlist.is_none() {
+            w.data = Some(Vec::new());
+        }
+        if r.flags & MCI_FROM != 0 {
+            let p = w.from_time(r.from, tf);
+            if w.data.is_some() && p > w.length() {
+                return Err(MCIERR_OUTOFRANGE);
+            }
+            w.pos = p;
+            if w.playlist.is_some() && r.from == 0 {
+                w.proc_.rewind();
+            }
+        }
+        w.pos = w.pos.min(if w.data.is_some() { w.length() } else { u32::MAX });
+        w.end = if r.flags & MCI_TO != 0 { w.from_time(r.to, tf) } else { u32::MAX };
+        if w.end != u32::MAX && w.end <= w.pos {
+            return Err(MCIERR_OUTOFRANGE);
+        }
+        w.insert = r.flags & MCI_RECORD_INSERT != 0;
+        w.paused = false;
+        w.recording = true;
+        if !w.open_input() {
+            trace(format_args!("mdm: no sound input; recording silence"));
+        }
+        if w.input != 0 {
+            // What was cued before now goes.
+            unsafe { Rs2AudioStop(w.input) };
+        }
+        d.mode = MCI_MODE_RECORD;
+        d.take_notify(r);
+        Ok(d.epoch)
+    })
+    .ok_or(MCIERR_INVALID_DEVICE_ID)??;
+    let param = id as u32 | (epoch & 0xffff) << 16;
+    if r.flags & MCI_WAIT != 0 {
+        unsafe { recorder(param) };
+    } else {
+        let mut tid = 0;
+        if unsafe { DosCreateThread(&mut tid, recorder, param, 0, 65536) } != 0 {
+            with(id, |d| {
+                d.mode = MCI_MODE_STOP;
+                wave(d).recording = false;
+            });
+            return Err(MCIERR_OUT_OF_MEMORY);
+        }
+    }
+    Ok(Reply::None)
+}
+
+enum RecNext {
+    /// Record into the element (up to this many bytes).
+    Element(u32),
+    /// Record into a playlist DATA buffer: address, room, operand 3.
+    Buffer(u32, u32, u32),
+    Wait,
+    Sem(u32, u32, bool),
+    End,
+    Stopped,
+}
+
+unsafe extern "C" fn recorder(param: u32) {
+    let id = param as u16;
+    let epoch = param >> 16;
+    let Some((fmt, input, monitor)) = with(id, |d| {
+        let w = wave(d);
+        (w.fmt, w.input, w.monitor)
+    }) else {
+        return;
+    };
+    let piece = (fmt.avg * REC_MS / 1000).max(fmt.block) / fmt.block * fmt.block;
+    let mut buf = alloc::vec![0u8; piece as usize];
+    let mut mon = 0;
+    if monitor && unsafe { Rs2AudioOpen(fmt.rate, fmt.channels, fmt.bits, &mut mon) } != 0 {
+        mon = 0;
+    }
+    // Silence ahead of the first piece (and after a pause) on the
+    // monitor: the mixer takes 0.1 s at once, and each piece must arrive
+    // before the output runs dry.
+    let lead = alloc::vec![if fmt.bits == 8 { 0x80u8 } else { 0 }; (piece * 3) as usize];
+    let mut relead = true;
+    // The playlist DATA buffer being filled: (address, room left,
+    // operand 3's address).
+    let mut pl: Option<(u32, u32, u32)> = None;
+    let mut done = false;
+    let mut stopped = false;
+    while !done && !stopped {
+        let next = with(id, |d| {
+            if !current(d, epoch) {
+                return RecNext::Stopped;
+            }
+            let notify_hwnd = d.pending.map_or(0, |n| n.hwnd);
+            let did = d.id;
+            let w = wave(d);
+            if w.paused {
+                return RecNext::Wait;
+            }
+            if w.end != u32::MAX && w.pos >= w.end {
+                return RecNext::End;
+            }
+            let left = if w.end == u32::MAX { u32::MAX } else { w.end - w.pos };
+            if w.playlist.is_none() {
+                return RecNext::Element(left);
+            }
+            loop {
+                if let Some((a, room, at)) = pl {
+                    if room > 0 {
+                        return RecNext::Buffer(a, room.min(left), at);
+                    }
+                    pl = None;
+                }
+                match w.proc_.next(&mut AppMem) {
+                    Step::Data { addr, len, pos_at } => {
+                        wr(pos_at, 0, 0);
+                        pl = Some((addr, len, pos_at));
+                    }
+                    Step::Message(v) => {
+                        let ins = w.proc_.position().wrapping_sub(1);
+                        if notify_hwnd != 0 {
+                            unsafe { WinPostMsg(notify_hwnd, MM_MCIPLAYLISTMESSAGE, mp(ins, did as u32), v) };
+                        }
+                    }
+                    Step::Cuepoint { user, offset } => {
+                        if notify_hwnd != 0 {
+                            unsafe { WinPostMsg(notify_hwnd, MM_MCICUEPOINT, mp(user, did as u32), offset) };
+                        }
+                    }
+                    Step::SemPost(s) => unsafe {
+                        DosPostEventSem(s);
+                    },
+                    Step::SemWait { sem, timeout, reset } => return RecNext::Sem(sem, timeout, reset),
+                    Step::Exit => return RecNext::End,
+                }
+            }
+        })
+        .unwrap_or(RecNext::Stopped);
+        let want = match next {
+            RecNext::Stopped => {
+                stopped = true;
+                continue;
+            }
+            RecNext::End => {
+                done = true;
+                continue;
+            }
+            RecNext::Wait => {
+                relead = true;
+                unsafe { DosSleep(30) };
+                continue;
+            }
+            RecNext::Sem(sem, timeout, reset) => {
+                unsafe {
+                    if reset {
+                        let mut n = 0;
+                        DosResetEventSem(sem, &mut n);
+                    }
+                    DosWaitEventSem(sem, timeout);
+                }
+                continue;
+            }
+            RecNext::Element(left) => left,
+            RecNext::Buffer(_, room, _) => room,
+        };
+        let want = (want.min(piece) / fmt.block * fmt.block).max(fmt.block.min(want)) as usize;
+        let mut n = 0u32;
+        if input != 0 {
+            unsafe { Rs2AudioRead(input, buf.as_mut_ptr(), want as u32, REC_MS * 5, &mut n) };
+        } else {
+            // Silence in real time.
+            unsafe { DosSleep((want as u64 * 1000 / fmt.avg.max(1) as u64) as u32) };
+            buf[..want].fill(if fmt.bits == 8 { 0x80 } else { 0 });
+            n = want as u32;
+        }
+        if n == 0 {
+            continue;
+        }
+        let got = &buf[..n as usize];
+        let kept = with(id, |d| {
+            if !current(d, epoch) {
+                return None;
+            }
+            let w = wave(d);
+            if w.paused {
+                return Some(0);
+            }
+            Some(match next {
+                RecNext::Buffer(a, room, at) => {
+                    let k = n.min(room);
+                    unsafe { core::ptr::copy_nonoverlapping(got.as_ptr(), a as *mut u8, k as usize) };
+                    wr(at, 0, rd(at, 0) + k);
+                    if let Some((pa, proom, pat)) = pl {
+                        pl = Some((pa + k, proom - k, pat));
+                    }
+                    w.pos += k;
+                    k
+                }
+                _ => w.put(got),
+            })
+        })
+        .flatten();
+        match kept {
+            None => stopped = true,
+            Some(k) if mon != 0 && k > 0 => unsafe {
+                if relead {
+                    relead = false;
+                    Rs2AudioWrite(mon, lead.as_ptr(), lead.len() as u32);
+                }
+                Rs2AudioWrite(mon, got.as_ptr(), k);
+            },
+            _ => {}
+        }
+    }
+    let auto_close = with(id, |d| {
+        let mine = current(d, epoch);
+        let w = wave(d);
+        if w.input == input {
+            w.input = 0;
+            w.recording = false;
+        }
+        if mine && !stopped {
+            d.mode = MCI_MODE_STOP;
+            d.finish(MCI_NOTIFY_SUCCESSFUL);
+            return d.auto_close;
+        }
+        false
+    })
+    .unwrap_or(false);
+    if input != 0 {
+        unsafe { Rs2AudioClose(input) };
+    }
+    if mon != 0 {
+        unsafe {
+            // A STOP silences the monitor at once.
+            if stopped {
+                Rs2AudioStop(mon);
+            } else {
+                Rs2AudioDrain(mon, 1000);
+            }
+            Rs2AudioClose(mon);
+        }
+    }
+    if auto_close {
+        let _ = dev::close(id);
+    }
 }
 
 /// Stop playing; `abort` settles a pending PLAY notification as aborted.
@@ -277,7 +815,7 @@ pub fn stop(id: u16, abort: bool) {
         }
         let playing = d.mode == MCI_MODE_PLAY || d.mode == MCI_MODE_PAUSE;
         let w = wave(d);
-        if playing {
+        if playing && !w.recording {
             w.pos = w.position(true);
         }
         w.stop();
@@ -294,8 +832,10 @@ fn play(id: u16, r: &Req) -> Result<Reply, u32> {
         d.finish(MCI_NOTIFY_SUPERSEDED);
         let playing = d.mode == MCI_MODE_PLAY || d.mode == MCI_MODE_PAUSE;
         let w = wave(d);
-        if playing {
+        if playing && !w.recording {
             w.pos = w.position(true);
+        }
+        if playing || w.recording || w.input != 0 {
             w.stop();
         }
         if w.data.is_none() && w.playlist.is_none() {

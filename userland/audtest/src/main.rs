@@ -25,7 +25,9 @@
 //! --sound-in tone:440` (with `--sound ac97` or `es1370` for the other
 //! cards). Each format records a second, which must take about a second (QEMU hands over the first part at once)
 //! and hold the tone; then the level, pause, stop, volume, source and
-//! error answers.
+//! error answers. `AUDTEST MCI [HZ]` records through MDM.DLL's
+//! mciSendCommand (the same `--sound-in`): into a memory playlist's DATA
+//! buffers, and into a new file element that it saves.
 
 #![no_std]
 #![no_main]
@@ -67,6 +69,8 @@ unsafe extern "C" {
     fn Rs2AudioQueryLevel(h: u32, level: *mut u32) -> u32;
     #[link_name = "RS2API.312"]
     fn Rs2AudioSetInput(source: u32, taken: *mut u32) -> u32;
+    #[link_name = "MDM.1"]
+    fn mciSendCommand(dev: u32, msg: u32, flags: u32, p: *mut u32, user: u32) -> u32;
 }
 
 const BUSY: u32 = 170;
@@ -462,10 +466,145 @@ fn record_tests(hz: f64) {
     check("closed input", unsafe { Rs2AudioQueryLevel(h, &mut n) } == INVALID_HANDLE);
 }
 
+// mciSendCommand messages and flags.
+const MCI_WAIT: u32 = 2;
+const MCI_FROM: u32 = 4;
+const MCI_TO: u32 = 8;
+const MCI_OPEN: u32 = 1;
+const MCI_CLOSE: u32 = 2;
+const MCI_GETDEVCAPS: u32 = 9;
+const MCI_STATUS: u32 = 10;
+const MCI_SET: u32 = 12;
+const MCI_RECORD: u32 = 14;
+const MCI_SAVE: u32 = 16;
+const MCI_CONNECTOR: u32 = 28;
+const MCI_CONNECTION: u32 = 33;
+
+/// mciSendCommand with a parameter block of 16 ULONGs.
+fn mci(dev: u32, msg: u32, flags: u32, p: &mut [u32; 16]) -> u32 {
+    unsafe { mciSendCommand(dev, msg, flags | MCI_WAIT, p.as_mut_ptr(), 0) }
+}
+
+fn mci_open(flags: u32, element: u32) -> Option<u32> {
+    let mut p = [0u32; 16];
+    // MCI_OPEN_TYPE_ID: waveaudio (7), ordinal 0.
+    p[2] = 7;
+    p[3] = element;
+    let rc = mci(0, MCI_OPEN, 0x1000 | flags, &mut p);
+    if rc != 0 {
+        println!("  MCI_OPEN = {rc}");
+        return None;
+    }
+    Some(p[1] & 0xffff)
+}
+
+/// MCI_SET of the wave format (MCI_WAVE_SET_PARMS).
+fn mci_format(dev: u32, rate: u32, channels: u32, bits: u32) -> u32 {
+    let mut p = [0u32; 16];
+    p[11] = channels;
+    p[12] = rate;
+    p[15] = bits;
+    mci(dev, MCI_SET, 0x0100_0000 | 0x1000_0000 | 0x8000_0000, &mut p)
+}
+
+fn mci_status(dev: u32, item: u32) -> u32 {
+    let mut p = [0u32; 16];
+    p[2] = item;
+    let rc = mci(dev, MCI_STATUS, 0x100, &mut p);
+    if rc != 0 { u32::MAX } else { p[1] }
+}
+
+fn mci_tests(hz: f64) {
+    // A playlist of two DATA buffers of half a second each (22050 Hz
+    // 16-bit mono), then EXIT.
+    let mut a = alloc::vec![0u8; 22050];
+    let mut b = alloc::vec![0u8; 22050];
+    let mut pl = [[0u32; 4]; 3];
+    pl[0] = [0, a.as_mut_ptr() as u32, a.len() as u32, 0];
+    pl[1] = [0, b.as_mut_ptr() as u32, b.len() as u32, 0];
+    pl[2] = [5, 0, 0, 0];
+    // MCI_OPEN_PLAYLIST.
+    let Some(d) = mci_open(0x800, pl.as_ptr() as u32) else {
+        check("MCI_OPEN playlist", false);
+        return;
+    };
+    let mut p = [0u32; 16];
+    p[2] = 5;
+    check("MCI_GETDEVCAPS CAN_RECORD", mci(d, MCI_GETDEVCAPS, 0x200, &mut p) == 0 && p[1] == 1);
+    check("MCI_SET format", mci_format(d, 22050, 1, 16) == 0);
+    let t0 = ms();
+    let rc = mci(d, MCI_RECORD, 0, &mut [0; 16]);
+    let took = ms().wrapping_sub(t0);
+    let pl3 = unsafe { core::ptr::read_volatile(&pl) };
+    let (fa, pa) = analyse(&samples(&a, 1, 16)[1000..], 22050);
+    let (fb, pb) = analyse(&samples(&b, 1, 16), 22050);
+    println!("  playlist: {took} ms, buffers {} and {} bytes, {fa:.1} Hz peak {pa}, {fb:.1} Hz peak {pb}", pl3[0][3], pl3[1][3]);
+    check("MCI_RECORD playlist", rc == 0 && pl3[0][3] == 22050 && pl3[1][3] == 22050 && (fa - hz).abs() < hz * 0.03 && (fb - hz).abs() < hz * 0.03 && pb > 4000);
+    check("MCI_CLOSE", mci(d, MCI_CLOSE, 0, &mut [0; 16]) == 0);
+    // A new file element: 0.4 s at 11025 Hz 8-bit stereo, saved.
+    let name = b"C:\\CMDREC.WAV\0";
+    let Some(d) = mci_open(0x100, name.as_ptr() as u32) else {
+        check("MCI_OPEN new element", false);
+        return;
+    };
+    check("MCI_SET format 2", mci_format(d, 11025, 2, 8) == 0);
+    // MCI_SET_TIME_FORMAT milliseconds.
+    let mut p = [0u32; 16];
+    p[1] = 1;
+    mci(d, MCI_SET, 0x0001_0000, &mut p);
+    // MCI_CONNECTOR: enable the microphone, query it.
+    let mut p = [0u32; 16];
+    p[2] = 8;
+    let en = mci(d, MCI_CONNECTOR, 0x100 | 0x800, &mut p);
+    let mut p = [0u32; 16];
+    p[2] = 8;
+    let q = mci(d, MCI_CONNECTOR, 0x400 | 0x800, &mut p);
+    check("MCI_CONNECTOR microphone", en == 0 && q == 0 && p[1] == 1);
+    // MCI_CONNECTION: the wave stream's connection is the device.
+    let mut p = [0u32; 16];
+    p[1] = 3;
+    let rc = mci(d, MCI_CONNECTION, 0x8000 | 0x800, &mut p);
+    check("MCI_CONNECTION", rc == 0 && p[4] & 0xffff == d);
+    let mut p = [0u32; 16];
+    p[1] = 0;
+    p[2] = 400;
+    let rc = mci(d, MCI_RECORD, MCI_FROM | MCI_TO, &mut p);
+    let len = mci_status(d, 2);
+    println!("  element: record {rc}, length {len} ms");
+    check("MCI_RECORD element", rc == 0 && len == 400);
+    let mut p = [0u32; 16];
+    p[1] = name.as_ptr() as u32;
+    check("MCI_SAVE", mci(d, MCI_SAVE, 0x100, &mut p) == 0);
+    check("MCI_CLOSE", mci(d, MCI_CLOSE, 0, &mut [0; 16]) == 0);
+    // Opened again: the saved file.
+    match mci_open(0x100, name.as_ptr() as u32) {
+        Some(d) => {
+            let (rate, ch, bits, bytes) = (mci_status(d, 0x6001), mci_status(d, 0x6005), mci_status(d, 0x6006), {
+                let mut p = [0u32; 16];
+                p[1] = 11;
+                mci(d, MCI_SET, 0x0001_0000, &mut p);
+                mci_status(d, 2)
+            });
+            println!("  saved: {rate} Hz, {ch} channels, {bits} bits, {bytes} bytes");
+            check("saved element", rate == 11025 && ch == 2 && bits == 8 && bytes == 8820);
+            mci(d, MCI_CLOSE, 0, &mut [0; 16]);
+        }
+        None => check("saved element", false),
+    }
+}
+
 fn main(s: &Startup) -> u32 {
     let args = core::str::from_utf8(s.args()).unwrap_or("").trim();
     let mut words = args.split_whitespace();
-    if words.next().is_some_and(|w| w.eq_ignore_ascii_case("record")) {
+    let mode = words.next().unwrap_or("");
+    if mode.eq_ignore_ascii_case("mci") {
+        let hz = words.next().and_then(|w| w.parse::<f64>().ok()).unwrap_or(440.0);
+        mci_tests(hz);
+        let f = FAILS.load(Ordering::Relaxed);
+        println!("audtest done: {f} failure(s)");
+        return f;
+    }
+    if mode.eq_ignore_ascii_case("record") {
         let hz = words.next().and_then(|w| w.parse::<f64>().ok()).unwrap_or(440.0);
         let mut taken = 0;
         if unsafe { Rs2AudioSetInput(0, &mut taken) } == NOT_SUPPORTED {

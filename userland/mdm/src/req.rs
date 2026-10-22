@@ -15,6 +15,8 @@ pub const MCI_PAUSE: u32 = 7;
 pub const MCI_INFO: u32 = 8;
 pub const MCI_GETDEVCAPS: u32 = 9;
 pub const MCI_STATUS: u32 = 10;
+pub const MCI_RECORD: u32 = 14;
+pub const MCI_SAVE: u32 = 16;
 pub const MCI_SET: u32 = 12;
 pub const MCI_SYSINFO: u32 = 15;
 pub const MCI_CUE: u32 = 17;
@@ -22,10 +24,13 @@ pub const MCI_LOAD: u32 = 22;
 pub const MCI_ACQUIREDEVICE: u32 = 23;
 pub const MCI_RELEASEDEVICE: u32 = 24;
 pub const MCI_MASTERAUDIO: u32 = 25;
+pub const MCI_CONNECTOR: u32 = 28;
 pub const MCI_RESUME: u32 = 29;
+pub const MCI_CONNECTION: u32 = 33;
 pub const MCI_PUT: u32 = 44;
 pub const MCI_WHERE: u32 = 51;
 pub const MCI_WINDOW: u32 = 52;
+pub const MCI_DELETE: u32 = 53;
 
 pub use mci::{MCI_NOTIFY, MCI_WAIT};
 pub const MCI_FROM: u32 = 0x4;
@@ -56,6 +61,7 @@ pub const MCI_STATUS_TIME_FORMAT: u32 = 10;
 pub const MCI_STATUS_SPEED_FORMAT: u32 = 11;
 pub const MCI_STATUS_AUDIO: u32 = 13;
 
+pub const MCI_SET_ITEM: u32 = 0x100;
 pub const MCI_SET_ON: u32 = 0x200;
 pub const MCI_SET_OFF: u32 = 0x400;
 pub const MCI_SET_VIDEO: u32 = 0x800;
@@ -70,6 +76,22 @@ pub const MCI_WAVE_SET_BLOCKALIGN: u32 = 0x0400_0000;
 pub const MCI_WAVE_SET_FORMATTAG: u32 = 0x0800_0000;
 pub const MCI_WAVE_SET_CHANNELS: u32 = 0x1000_0000;
 pub const MCI_WAVE_SET_BITSPERSAMPLE: u32 = 0x8000_0000;
+
+/// MCI_SET_ITEM items.
+pub const MCI_SET_MONITOR: u32 = 1;
+pub const MCI_SET_MONITOR_AUDIO: u32 = 2;
+
+pub const MCI_RECORD_INSERT: u32 = 0x100;
+pub const MCI_RECORD_OVERWRITE: u32 = 0x200;
+pub const MCI_SAVE_FILE: u32 = 0x100;
+
+pub const MCI_ENABLE_CONNECTOR: u32 = 0x100;
+pub const MCI_DISABLE_CONNECTOR: u32 = 0x200;
+pub const MCI_QUERY_CONNECTOR_STATUS: u32 = 0x400;
+pub const MCI_CONNECTOR_TYPE: u32 = 0x800;
+pub const MCI_CONNECTOR_INDEX: u32 = 0x1000;
+pub const MCI_QUERY_CONNECTION: u32 = 0x8000;
+pub const MCI_CONNECTOR_ALIAS: u32 = 0x0020_0000;
 
 pub const MCI_FORMAT_MILLISECONDS: u32 = 1;
 pub const MCI_FORMAT_MMTIME: u32 = 2;
@@ -150,10 +172,12 @@ pub struct Req {
     pub flags: u32,
     pub callback: u32,
     pub user: u16,
-    /// MCI_FROM / MCI_TO, MCI_SEEK's position, in the time format.
+    /// MCI_FROM / MCI_TO (also RECORD's and DELETE's), MCI_SEEK's
+    /// position, in the time format.
     pub from: u32,
     pub to: u32,
-    /// STATUS, GETDEVCAPS, SYSINFO item; SET's time format.
+    /// STATUS, GETDEVCAPS, SYSINFO item; SET's time format or item;
+    /// CONNECTOR's and CONNECTION's connector type (`value`: its index).
     pub item: u32,
     pub value: u32,
     pub element: Option<String>,

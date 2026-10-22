@@ -109,6 +109,14 @@ unsafe extern "C" {
     pub fn Rs2AudioSetVolume(h: u32, vol: u32) -> u32;
     #[link_name = "RS2API.308"]
     pub fn Rs2AudioPause(h: u32, pause: u32) -> u32;
+    #[link_name = "RS2API.309"]
+    pub fn Rs2AudioOpenInput(rate: u32, channels: u32, bits: u32, h: *mut u32) -> u32;
+    #[link_name = "RS2API.310"]
+    pub fn Rs2AudioRead(h: u32, buf: *mut u8, cb: u32, timeout: u32, read: *mut u32) -> u32;
+    #[link_name = "RS2API.311"]
+    pub fn Rs2AudioQueryLevel(h: u32, level: *mut u32) -> u32;
+    #[link_name = "RS2API.312"]
+    pub fn Rs2AudioSetInput(source: u32, taken: *mut u32) -> u32;
 }
 
 pub const HWND_DESKTOP: u32 = 1;
@@ -246,4 +254,26 @@ pub fn read_file(name: &str) -> Option<alloc::vec::Vec<u8>> {
     }
     unsafe { DosClose(h) };
     Some(out)
+}
+
+/// Write a whole file (created or replaced) with DosOpen/DosWrite.
+pub fn write_file(name: &str, data: &[u8]) -> bool {
+    let mut z: alloc::vec::Vec<u8> = name.chars().map(|c| c as u32 as u8).collect();
+    z.push(0);
+    let (mut h, mut act) = (0u32, 0u32);
+    // OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS,
+    // OPEN_SHARE_DENYWRITE | OPEN_ACCESS_WRITEONLY.
+    if unsafe { DosOpen(z.as_ptr(), &mut h, &mut act, data.len() as u32, 0, 0x12, 0x21, core::ptr::null_mut()) } != 0 {
+        return false;
+    }
+    let mut ok = true;
+    for piece in data.chunks(32768) {
+        let mut n = 0;
+        if unsafe { DosWrite(h, piece.as_ptr(), piece.len() as u32, &mut n) } != 0 || n as usize != piece.len() {
+            ok = false;
+            break;
+        }
+    }
+    unsafe { DosClose(h) };
+    ok
 }
