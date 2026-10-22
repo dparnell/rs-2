@@ -73,6 +73,8 @@ pub const MCI_WAVE_SET_BITSPERSAMPLE: u32 = 0x8000_0000;
 
 pub const MCI_FORMAT_MILLISECONDS: u32 = 1;
 pub const MCI_FORMAT_MMTIME: u32 = 2;
+pub const MCI_FORMAT_MSF: u32 = 5;
+pub const MCI_FORMAT_TMSF: u32 = 6;
 pub const MCI_FORMAT_FRAMES: u32 = 8;
 pub const MCI_FORMAT_BYTES: u32 = 11;
 pub const MCI_FORMAT_SAMPLES: u32 = 12;
@@ -203,6 +205,8 @@ pub fn time_format_name(f: u32) -> &'static str {
     match f {
         MCI_FORMAT_MILLISECONDS => "milliseconds",
         MCI_FORMAT_MMTIME => "mmtime",
+        MCI_FORMAT_MSF => "msf",
+        MCI_FORMAT_TMSF => "tmsf",
         MCI_FORMAT_FRAMES => "frames",
         MCI_FORMAT_BYTES => "bytes",
         MCI_FORMAT_SAMPLES => "samples",

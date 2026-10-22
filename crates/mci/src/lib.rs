@@ -10,6 +10,7 @@
 
 extern crate alloc;
 
+pub mod cd;
 pub mod errors;
 pub mod playlist;
 
@@ -45,6 +46,7 @@ pub const DEVTYPES: &[(u16, &str)] = &[
     (19, "texttospeech"),
 ];
 
+pub const DEVTYPE_CD_AUDIO: u16 = 3;
 pub const DEVTYPE_WAVEFORM_AUDIO: u16 = 7;
 pub const DEVTYPE_SEQUENCER: u16 = 8;
 pub const DEVTYPE_DIGITAL_VIDEO: u16 = 12;

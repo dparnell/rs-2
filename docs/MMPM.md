@@ -172,3 +172,42 @@ MCIAPI.DLL (`userland/mciapi`) is MMPM/2's REXX interface:
 RexxRegisterFunctionDll when first needed. `mciPlayFile` plays any media
 file to the end (asynchronously with MCI_ASYNC). IBM's PLAY.CMD (from the
 multimedia pack) works: `PLAY FILE=FURELISE.MID`.
+
+## CD audio
+
+MDM's cdaudio device (`userland/mdm/src/cdaudio.rs`, Cdaudio01 for the
+first CD drive, Cdaudio02 for the second...) plays audio CDs digitally:
+it opens the drive as a volume (`DosOpen("E:", OPEN_FLAGS_DASD)`), reads
+the table of contents with OS/2's CD-ROM IOCtls (category 0x81: disc and
+track information; category 0x80: device status for the disc) and the
+audio with READ LONG (0x80/0x72, raw 2352-byte frames), and streams them
+as 44.1 kHz 16-bit stereo through the RS2API audio calls like the wave
+audio device. Playing through the drive's analog output (PLAYAUDIO) is
+not used. Commands: OPEN/CLOSE; PLAY FROM/TO; STOP, PAUSE/RESUME, SEEK
+(TO START/END/position); SET time format (MMTIME, milliseconds, MSF,
+TMSF), audio volume, door open/closed/locked/unlocked; STATUS media
+present, ready, mode (not ready without a disc), number of tracks,
+length (of the disc or a TRACK), position (current, START, of a TRACK),
+current track, position in track, track type/copy permitted/channels/
+pre-emphasis; CAPABILITY; INFO product, ID, UPC. Data tracks are not
+played. String commands take TMSF times as `t:mm:ss:ff` and MSF as
+`mm:ss:ff` (and answer in that form); positions in MMTIME, milliseconds
+and MSF are disc addresses (the first track starts at 00:02:00), lengths
+are durations. The time logic is `crates/mci/src/cd.rs` (host tests).
+
+The kernel side (`kernel/src/fs/cdaudio.rs`, `kernel/src/api/cdioctl.rs`):
+CD drives take MMC commands through `BlockDev::packet` (IDE and AHCI
+ATAPI, PVSCSI/MPT SCSI, virtio-scsi; not USB), and the IOCtls follow
+IBM's OS2CDROM.DMD packets (studied in Ghidra): category 0x80 reset,
+eject/close tray, lock, seek, device status, driver ID, sector size, head
+location, READ LONG, volume size, UPC; category 0x81 channel control,
+PLAYAUDIO/STOP/RESUME, channel info, disc info, track info, Q channel
+(BCD track and index), audio status.
+
+Tested in QEMU: READ CD on PIIX IDE and AHCI (data frames of an ISO);
+QEMU's SCSI CD (virtio-scsi, PVSCSI, MPT) rejects READ CD, and only ISO
+data tracks exist there, so `cdsim` on the kernel command line adds a
+drive with a simulated audio disc (tracks of 440 Hz and 660 Hz tones and
+a data track) for testing MDM end to end; the played audio was checked in
+a `--sound-wav` recording. Not yet tried with a real audio CD, on real
+drives, or on VMware.

@@ -17,6 +17,7 @@
 extern crate alloc;
 extern crate os2;
 
+mod cdaudio;
 mod dev;
 mod exports;
 mod req;
@@ -84,7 +85,10 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
             r.to = rd(p, 8);
         }
         MCI_SEEK => r.to = rd(p, 4),
-        MCI_STATUS => r.item = rd(p, 8),
+        MCI_STATUS => {
+            r.item = rd(p, 8);
+            r.value = rd(p, 12);
+        }
         MCI_GETDEVCAPS => r.item = if flags & MCI_GETDEVCAPS_MESSAGE != 0 { rd16(p, 12) as u32 } else { rd(p, 8) },
         MCI_SET => {
             r.item = rd(p, 4);
@@ -220,14 +224,14 @@ fn send_string(s: &str, hwnd: u32, user: u16) -> Result<String, u32> {
         Some(id) => (id, false),
         None => {
             let mut o = Req { callback: hwnd, user, ..Default::default() };
-            let typ = match devtype_for_file(&c.object) {
+            let (typ, ord) = match devtype_for_file(&c.object) {
                 Some(t) => {
                     o.element = Some(c.object.clone());
-                    t
+                    (t, 0)
                 }
-                None => parse_device_name(&c.object).ok_or(MCIERR_INVALID_DEVICE_NAME)?.0,
+                None => parse_device_name(&c.object).ok_or(MCIERR_INVALID_DEVICE_NAME)?,
             };
-            (dev::open(typ, 0, &o, None)?, true)
+            (dev::open(typ, ord, &o, None)?, true)
         }
     };
     let res = string_command(id, &c.verb, &mut a, &mut r);
@@ -271,6 +275,12 @@ fn string_open(object: &str, a: &mut Args, r: &mut Req) -> Result<u16, u32> {
     Ok(id)
 }
 
+/// A time after a keyword: a number or colon-separated values (TMSF
+/// "2:01:30:00", MSF "1:30:00").
+fn time_value(a: &mut Args, k: &str) -> Result<Option<u32>, u32> {
+    a.value(k)?.map(|v| mci::cd::parse_time(&v).ok_or(MCIERR_BAD_INTEGER)).transpose()
+}
+
 fn time_format(name: &str) -> Option<u32> {
     Some(match name.to_ascii_lowercase().as_str() {
         "milliseconds" | "ms" => MCI_FORMAT_MILLISECONDS,
@@ -278,6 +288,8 @@ fn time_format(name: &str) -> Option<u32> {
         "frames" => MCI_FORMAT_FRAMES,
         "bytes" => MCI_FORMAT_BYTES,
         "samples" => MCI_FORMAT_SAMPLES,
+        "msf" => MCI_FORMAT_MSF,
+        "tmsf" => MCI_FORMAT_TMSF,
         _ => return None,
     })
 }
@@ -307,11 +319,11 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
     };
     match r.msg {
         MCI_PLAY => {
-            if let Some(v) = a.number("from")? {
+            if let Some(v) = time_value(a, "from")? {
                 r.flags |= MCI_FROM;
                 r.from = v;
             }
-            if let Some(v) = a.number("to")? {
+            if let Some(v) = time_value(a, "to")? {
                 r.flags |= MCI_TO;
                 r.to = v;
             }
@@ -330,7 +342,7 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
                 r.flags |= MCI_TO_START;
             } else if a.flag("to end") {
                 r.flags |= MCI_TO_END;
-            } else if let Some(v) = a.number("to")? {
+            } else if let Some(v) = time_value(a, "to")? {
                 r.flags |= MCI_TO;
                 r.to = v;
             } else {
@@ -340,6 +352,11 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
         MCI_STATUS => {
             r.flags |= MCI_STATUS_ITEM;
             r.item = [
+                ("current track", cdaudio::MCI_STATUS_CURRENT_TRACK),
+                ("position in track", cdaudio::MCI_STATUS_POSITION_IN_TRACK),
+                ("type", cdaudio::MCI_CD_STATUS_TRACK_TYPE),
+                ("copypermitted", cdaudio::MCI_CD_STATUS_TRACK_COPYPERMITTED),
+                ("preemphasis", cdaudio::MCI_CD_STATUS_TRACK_PREEMPHASIS),
                 ("mode", MCI_STATUS_MODE),
                 ("length", MCI_STATUS_LENGTH),
                 ("position", MCI_STATUS_POSITION),
@@ -363,6 +380,18 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
             .find(|(k, _)| a.flag(k))
             .map(|x| x.1)
             .ok_or(MCIERR_MISSING_PARAMETER)?;
+            if r.item == 0x4003 && a.flag("track") {
+                // CD audio: "channels track n".
+                r.item = cdaudio::MCI_CD_STATUS_TRACK_CHANNELS;
+                r.flags |= cdaudio::MCI_TRACK;
+                r.value = a.next().as_deref().and_then(parse_number).ok_or(MCIERR_MISSING_PARAMETER)?;
+            } else if let Some(n) = a.number("track")? {
+                r.flags |= cdaudio::MCI_TRACK;
+                r.value = n;
+            }
+            if a.flag("start") {
+                r.flags |= cdaudio::MCI_STATUS_START;
+            }
         }
         MCI_SET => {
             if let Some(f) = a.value("time format")? {
@@ -382,6 +411,11 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
             if let Some(t) = a.value("format tag")? {
                 r.flags |= MCI_WAVE_SET_FORMATTAG;
                 r.wave[0] = if t.eq_ignore_ascii_case("pcm") { 1 } else { parse_number(&t).ok_or(MCIERR_BAD_INTEGER)? };
+            }
+            for (k, f) in [("door open", cdaudio::MCI_SET_DOOR_OPEN), ("door closed", cdaudio::MCI_SET_DOOR_CLOSED), ("door locked", cdaudio::MCI_SET_DOOR_LOCK), ("door unlocked", cdaudio::MCI_SET_DOOR_UNLOCK)] {
+                if a.flag(k) {
+                    r.flags |= f;
+                }
             }
             // Video and audio on/off: accepted, nothing to do.
             for k in ["video on", "video off", "audio all on", "audio all off", "audio on", "audio off"] {
@@ -415,6 +449,10 @@ fn string_command(id: u16, verb: &str, a: &mut Args, r: &mut Req) -> Result<Stri
         MCI_INFO => {
             if a.flag("product") {
                 r.flags |= MCI_INFO_PRODUCT;
+            } else if a.flag("id") {
+                r.flags |= cdaudio::MCI_CD_INFO_ID;
+            } else if a.flag("upc") {
+                r.flags |= cdaudio::MCI_CD_INFO_UPC;
             } else if a.flag("file") {
                 r.flags |= MCI_INFO_FILE;
             } else {

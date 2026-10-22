@@ -89,6 +89,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     fs::init(info);
     vmware::init();
     drivers::init();
+    fs::cdaudio::simulate();
     loader::init();
     infoseg::init();
     api::perf::init();

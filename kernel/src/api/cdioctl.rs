@@ -112,9 +112,13 @@ pub(super) fn ioctl(c: &Ctx, dev: &Arc<dyn BlockDev>, r: &Req) -> u32 {
             if !state(dev).locked {
                 st |= 0x2;
             }
+            // Only a drive told to play (PLAY AUDIO) is asked whether it
+            // still does: not every drive knows READ SUB-CHANNEL, and
+            // QEMU's PVSCSI never completes a command its CD rejects.
+            let s = state(dev);
             if !cd::ready(d) {
                 st |= 0x801;
-            } else if playing(d) {
+            } else if s.end != 0 && !s.paused && playing(d) {
                 st |= 0x1000;
             }
             Ok(st.to_le_bytes().to_vec())
@@ -186,7 +190,7 @@ pub(super) fn ioctl(c: &Ctx, dev: &Arc<dyn BlockDev>, r: &Req) -> u32 {
         }
         // Stop: pause, keeping the place for RESUME.
         (0x81, 0x51) => {
-            if !playing(d) {
+            if state(dev).end == 0 || !playing(d) {
                 Ok(Vec::new())
             } else {
                 cd::pause(d, true).map(|_| {

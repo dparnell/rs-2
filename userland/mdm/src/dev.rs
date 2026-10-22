@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use crate::req::*;
 use crate::sys::*;
-use crate::{sequencer, video, wave};
+use crate::{cdaudio, sequencer, video, wave};
 use mci::*;
 
 pub const MCI_NOTIFY_SUCCESSFUL: u32 = 0;
@@ -31,6 +31,7 @@ pub enum Kind {
     Wave(wave::Wave),
     Video(video::Video),
     Seq(sequencer::Seq),
+    Cd(cdaudio::Cd),
 }
 
 pub struct Device {
@@ -110,14 +111,15 @@ impl Device {
 /// The devices MDM has: one wave audio device (even without sound
 /// hardware, which plays silently in real time) and one digital video
 /// device (FLI/FLC animations).
-pub const INSTALLED: &[u16] = &[DEVTYPE_WAVEFORM_AUDIO, DEVTYPE_SEQUENCER, DEVTYPE_DIGITAL_VIDEO];
+pub const INSTALLED: &[u16] = &[DEVTYPE_WAVEFORM_AUDIO, DEVTYPE_SEQUENCER, DEVTYPE_CD_AUDIO, DEVTYPE_DIGITAL_VIDEO];
 
 /// MCI_OPEN: a new device of `typ` (and the element, if any).
 pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u16, u32> {
     if !INSTALLED.contains(&typ) {
         return Err(MCIERR_DEVICE_NOT_FOUND);
     }
-    if ordinal > 1 {
+    // CD audio: one device per CD drive.
+    if ordinal > 1 && typ != DEVTYPE_CD_AUDIO {
         return Err(MCIERR_INVALID_DEVICE_ORDINAL);
     }
     if r.text.as_deref().is_some_and(table_has_alias) {
@@ -126,6 +128,7 @@ pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u1
     let kind = match typ {
         DEVTYPE_WAVEFORM_AUDIO => Kind::Wave(wave::Wave::new(r.element.as_deref(), playlist)?),
         DEVTYPE_SEQUENCER => Kind::Seq(sequencer::Seq::new(r.element.as_deref())?),
+        DEVTYPE_CD_AUDIO => Kind::Cd(cdaudio::Cd::new(ordinal)?),
         _ => Kind::Video(video::Video::new(r.element.as_deref(), r.hwnd)?),
     };
     let _g = LOCK.hold();
@@ -138,7 +141,7 @@ pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u1
     table().push(Box::new(Device {
         id,
         typ,
-        ordinal: 1,
+        ordinal: ordinal.max(1),
         alias: r.text.clone(),
         element: if playlist.is_some() { None } else { r.element.clone() },
         auto_close: false,
@@ -172,6 +175,7 @@ pub fn close(id: u16) -> Result<(), u32> {
         Kind::Wave(mut w) => w.stop(),
         Kind::Video(mut v) => v.close(),
         Kind::Seq(mut q) => q.stop(),
+        Kind::Cd(mut c) => c.close(),
     }
     Ok(())
 }
@@ -194,14 +198,18 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
         MCI_CLOSE => close(id).map(|_| Reply::None),
         MCI_ACQUIREDEVICE | MCI_RELEASEDEVICE => Ok(Reply::None),
         MCI_GETDEVCAPS if r.flags & MCI_GETDEVCAPS_MESSAGE != 0 => Ok(Reply::Bool(supports(typ, r.item))),
+        MCI_GETDEVCAPS if r.flags & MCI_GETDEVCAPS_ITEM != 0 && typ == DEVTYPE_CD_AUDIO => specific(id, typ, r),
         MCI_GETDEVCAPS if r.flags & MCI_GETDEVCAPS_ITEM != 0 => common_caps(typ, r.item).map_or_else(|| specific(id, typ, r), Ok),
         MCI_INFO if r.flags & MCI_INFO_PRODUCT != 0 => Ok(Reply::Text(String::from(match typ {
             DEVTYPE_WAVEFORM_AUDIO => "rs2 Wave Audio",
             DEVTYPE_SEQUENCER => "rs2 MIDI Sequencer",
+            DEVTYPE_CD_AUDIO => "rs2 CD Audio",
             _ => "rs2 Digital Video",
         }))),
         MCI_INFO if r.flags & MCI_INFO_FILE != 0 => Ok(Reply::Text(with(id, |d| d.element.clone().unwrap_or_default()).unwrap_or_default())),
         MCI_STATUS if r.flags & MCI_STATUS_ITEM == 0 => Err(MCIERR_MISSING_FLAG),
+        // The disc decides these.
+        MCI_STATUS if typ == DEVTYPE_CD_AUDIO && r.item != MCI_STATUS_TIME_FORMAT => specific(id, typ, r),
         MCI_STATUS if r.item == MCI_STATUS_MODE => Ok(with(id, |d| Reply::Named(d.mode, mode_name(d.mode))).unwrap()),
         MCI_STATUS if r.item == MCI_STATUS_READY => Ok(Reply::Bool(true)),
         MCI_STATUS if r.item == MCI_STATUS_TIME_FORMAT => Ok(with(id, |d| Reply::Named(d.time_format, time_format_name(d.time_format))).unwrap()),
@@ -211,6 +219,7 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
             let ok = match typ {
                 DEVTYPE_WAVEFORM_AUDIO => matches!(r.item, MCI_FORMAT_MILLISECONDS | MCI_FORMAT_MMTIME | MCI_FORMAT_BYTES | MCI_FORMAT_SAMPLES),
                 DEVTYPE_SEQUENCER => matches!(r.item, MCI_FORMAT_MILLISECONDS | MCI_FORMAT_MMTIME),
+                DEVTYPE_CD_AUDIO => matches!(r.item, MCI_FORMAT_MILLISECONDS | MCI_FORMAT_MMTIME | MCI_FORMAT_MSF | MCI_FORMAT_TMSF),
                 _ => matches!(r.item, MCI_FORMAT_MILLISECONDS | MCI_FORMAT_MMTIME | MCI_FORMAT_FRAMES),
             };
             if !ok {
@@ -235,6 +244,7 @@ fn specific(id: u16, typ: u16, r: &Req) -> Result<Reply, u32> {
     match typ {
         DEVTYPE_WAVEFORM_AUDIO => wave::command(id, r),
         DEVTYPE_SEQUENCER => sequencer::command(id, r),
+        DEVTYPE_CD_AUDIO => cdaudio::command(id, r),
         _ => video::command(id, r),
     }
 }
