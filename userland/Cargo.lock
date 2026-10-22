@@ -447,3 +447,10 @@ dependencies = [
 [[package]]
 name = "viocell"
 version = "0.1.0"
+
+[[package]]
+name = "wpstest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]

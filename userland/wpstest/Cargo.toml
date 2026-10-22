@@ -1,0 +1,9 @@
+[package]
+name = "wpstest"
+description = "Self-checks of the Workplace Shell classes in PMWP.DLL (objects, persistence, the object API, class DLLs)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

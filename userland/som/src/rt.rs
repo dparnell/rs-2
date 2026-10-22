@@ -730,6 +730,15 @@ pub unsafe fn add_static(c: *mut Class, mid: SomId, desc: SomId, proc_: usize, r
         }
         return cr.methods[i].token;
     }
+    // Reintroduced (an ancestor has the method): the ancestor's token,
+    // with this implementation.
+    if let Some(&(x, xb)) = cr.blocks.iter().find(|b| b.0 != c && unsafe { (*b.0).methods.iter().any(|m| m.key == key) }) {
+        let m = unsafe { (*x).methods.iter().find(|m| m.key == key).unwrap() };
+        if proc_ != 0 {
+            unsafe { cr.mt().set(xb + m.slot, proc_) };
+        }
+        return m.token;
+    }
     let (mut aggregate, mut va_size, mut call_type) = (false, 0, 0);
     let (mut rd, mut ap) = (rd, ap);
     if rd == usize::MAX {

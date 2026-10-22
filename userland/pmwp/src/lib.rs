@@ -1,18 +1,33 @@
-//! PMWP.DLL: the Workplace Shell's entry points that programs use
-//! without the Workplace Shell itself: the file icon calls, which PMWIN
-//! implements (rs2-private ordinals 9004-9006; these entries jump there),
-//! and WinCreateObject for program objects (rs2's shell keeps them in the
-//! program list).
+//! PMWP.DLL: the Workplace Shell. Its classes (WPObject and the rest,
+//! with IBM's class data layouts and ordinals, built on SOM.DLL: wps.rs,
+//! obj.rs, abs.rs, fs.rs, clsmgr.rs), the object API (api.rs), and the
+//! entry points programs use without the shell: the file icon calls,
+//! which PMWIN implements (rs2-private ordinals 9004-9006; these entries
+//! jump there), WinStoreWindowPos/WinRestoreWindowPos, and
+//! WinCreateObject, which without a Workplace Shell in the process adds
+//! program objects to rs2's shell's program list.
 
 #![no_std]
 #![no_main]
-#![allow(non_snake_case)]
+#![allow(non_snake_case, function_casts_as_integer, unused_unsafe)]
 
 extern crate alloc;
 extern crate os2;
 
+mod abs;
+mod api;
+pub mod classdata_gen;
+pub mod classes_gen;
+mod clsmgr;
 mod exports;
+mod fs;
+mod launch;
+mod obj;
+pub mod som;
+mod util;
+mod view;
 mod winpos;
+mod wps;
 
 use alloc::vec::Vec;
 
@@ -90,8 +105,11 @@ fn desktop_group() -> Option<u32> {
 /// setup string), the handle is the program handle. Other classes and
 /// locations fail (NULLHANDLE).
 #[unsafe(no_mangle)]
-pub extern "C" fn WinCreateObject(class: *const u8, title: *const u8, setup: *const u8, location: *const u8, _flags: u32) -> u32 {
+pub extern "C" fn WinCreateObject(class: *const u8, title: *const u8, setup: *const u8, location: *const u8, flags: u32) -> u32 {
     let (class, setup, location) = (cstr(class), cstr(setup), cstr(location));
+    if wps::active() {
+        return api::create_object(&class, &cstr(title), &setup, &location, flags);
+    }
     if !class.eq_ignore_ascii_case(b"WPProgram") || !location.eq_ignore_ascii_case(b"<WP_DESKTOP>") {
         return 0;
     }
