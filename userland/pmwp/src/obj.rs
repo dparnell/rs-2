@@ -671,6 +671,14 @@ extern "C" fn wpclsQueryDefaultView(cls: usize) -> u32 {
 }
 
 extern "C" fn wpclsInitData(_cls: usize) {}
+
+/// A class is ready: SOMClass's somClassReady, then wpclsInitData (as
+/// IBM's M_WPObject does it), which classes override to set themselves
+/// up.
+extern "C" fn cls_som_class_ready(cls: usize) {
+    som::call_parent(wps::ccd("M_WPObject"), unsafe { &raw const som::SOMClassClassData } as *const usize, 3, &[cls]);
+    wps::call("M_WPObject", m::M_WPObject::wpclsInitData, &[cls]);
+}
 extern "C" fn wpclsUnInitData(_cls: usize) {}
 
 /// wpclsNew: a new object of the class in a folder, set up and saved.
@@ -782,6 +790,7 @@ methods! {
     __m_wpclsQueryStyle => wpclsQueryStyle, 1;
     __m_wpclsQueryDefaultView => wpclsQueryDefaultView, 1;
     __m_wpclsInitData => wpclsInitData, 1;
+    __m_cls_som_class_ready => cls_som_class_ready, 1;
     __m_wpclsUnInitData => wpclsUnInitData, 1;
     __m_wpclsNew => wpclsNew, 5;
     __m_wpclsMakeAwake => wpclsMakeAwake, 7;
@@ -853,6 +862,6 @@ pub fn impl_m_object() -> Impl {
             ("wpclsQueryObject", __m_wpclsObjectFromHandle as usize),
             ("wpclsQueryFolder", __m_wpclsQueryFolder as usize),
         ],
-        overrides: Vec::new(),
+        overrides: alloc::vec![("somClassReady", __m_cls_som_class_ready as usize)],
     }
 }

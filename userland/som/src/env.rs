@@ -387,6 +387,13 @@ pub unsafe fn build_class(inherit_vars: i32, sci: *const Sci, major: i32, minor:
     let s = unsafe { &*sci };
     let v = s.layout_version;
     let name = id::name_bytes(s.class_id);
+    crate::warn(b"somBuildClass %s: layout %d, %d static, %d overrides, %d general\n\0", &[
+        id::name_of(s.class_id) as u32,
+        v,
+        s.num_static_methods,
+        s.num_static_overrides,
+        if v >= 3 { s.num_methods } else { 0 },
+    ]);
     if (major != 0 && s.major as i32 != major) || (minor != 0 && (s.minor as i32) < minor) {
         crate::warn(b"class %s: version %d.%d requested\n\0", &[id::name_of(s.class_id) as u32, major as u32, minor as u32]);
         crate::error(20079, b"SOM.C\0", 1);
@@ -512,6 +519,7 @@ pub unsafe fn build_class(inherit_vars: i32, sci: *const Sci, major: i32, minor:
             for i in 0..s.num_methods as usize {
                 let e = &*s.mt.add(i);
                 let action = e[0] & 0xff;
+                crate::warn(b"  method action %d %s\n\0", &[action as u32, if e[2] == 0 { 0 } else { id::name_of(*(e[2] as *const SomId)) as u32 }]);
                 let cd = e[1] as *mut usize;
                 let mid = if e[2] == 0 { core::ptr::null_mut() } else { *(e[2] as *const SomId) };
                 let desc = if e[3] == 0 { core::ptr::null_mut() } else { *(e[3] as *const SomId) };

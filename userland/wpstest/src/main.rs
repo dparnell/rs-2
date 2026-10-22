@@ -291,7 +291,15 @@ fn class_dll(args: &[u8]) {
         let cls = call(o, b"somGetClass", &[]);
         let ct = cstr(call(cls, b"wpclsQueryTitle", &[]) as *const u8);
         println!("  class title {}", s(&ct));
-        check("class title from the DLL's override", !ct.is_empty() && ct != b"Data File" && ct != b"Folder");
+        println!("  metaclass {}", s(&cstr(call(cls, b"somGetClassName", &[]) as *const u8)));
+        let want: &[u8] = match class {
+            b"Car" => b"Car",
+            // The compiled sample installs the override that returns its
+            // parent's title (the one returning "Text Folder" is unused).
+            b"TextFolder" => b"Folder",
+            _ => b"Data File",
+        };
+        check("class title (the DLL's wpclsQueryTitle)", ct == want);
         if class == b"Car" {
             call(o, b"SetSpeed", &[42]);
             check("Car speed", call(o, b"QuerySpeed", &[]) == 42);
