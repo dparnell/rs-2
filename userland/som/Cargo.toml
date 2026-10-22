@@ -1,0 +1,13 @@
+[package]
+name = "som-dll"
+description = "SOM.DLL: the System Object Model runtime (SOM 2.1) the Workplace Shell is built on"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "som"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

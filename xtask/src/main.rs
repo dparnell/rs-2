@@ -594,6 +594,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("mdm", "OS2\\DLL\\MDM.DLL"),
         ("mciapi", "OS2\\DLL\\MCIAPI.DLL"),
         ("pmspl", "OS2\\DLL\\PMSPL.DLL"),
+        ("som", "OS2\\DLL\\SOM.DLL"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
