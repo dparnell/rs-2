@@ -36,10 +36,12 @@ pub extern "C" fn Rs2WpsStart() -> u32 {
 pub fn create_object(class: &[u8], title: &[u8], setup: &[u8], location: &[u8], flags: u32) -> u32 {
     let cls = som::find_class(class);
     if cls == 0 {
+        debug(&alloc::format!("WinCreateObject: no class {:?}", core::str::from_utf8(class)));
         return 0;
     }
     let folder = wps::object_from_location(location);
     if folder == 0 || !wps::is(folder, "WPFolder") {
+        debug(&alloc::format!("WinCreateObject: no folder {:?} ({:x})", core::str::from_utf8(location), folder));
         return 0;
     }
     if let Some(id) = setup_object_id(setup) {
@@ -64,6 +66,7 @@ pub fn create_object(class: &[u8], title: &[u8], setup: &[u8], location: &[u8], 
     }
     let (t, s) = (z(title), z(setup));
     let o = wps::call("M_WPObject", m::M_WPObject::wpclsNew, &[cls, t.as_ptr() as usize, s.as_ptr() as usize, folder, 0]);
+    debug(&alloc::format!("WinCreateObject: class {:x} folder {:x} -> {:x}", cls, folder, o));
     if o == 0 { 0 } else { obj::handle(o) }
 }
 

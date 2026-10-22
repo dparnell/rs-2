@@ -176,6 +176,15 @@ fn contents(folder: usize) -> Vec<usize> {
     v
 }
 
+fn show(what: &str, t: &[Vec<u8>]) {
+    let mut line = alloc::string::String::new();
+    for x in t {
+        line.push_str(s(x));
+        line.push_str(" | ");
+    }
+    println!("  {}: {}", what, line);
+}
+
 fn titles(objs: &[usize]) -> Vec<Vec<u8>> {
     objs.iter().map(|&o| title(o)).collect()
 }
@@ -186,7 +195,8 @@ fn make() {
     check("desktop path", path(desk) == b"C:\\DESKTOP");
     let f = create(b"WPFolder", b"Test Folder", b"OBJECTID=<RS2_TESTFLDR>", b"<WP_DESKTOP>");
     check("folder made", f >> 16 == 3);
-    check("folder directory", exists(b"C:\\DESKTOP\\Test Folder"));
+    let fp = path(f);
+    check("folder directory", !fp.is_empty() && exists(&fp));
     check("folder by ID", query(b"<RS2_TESTFLDR>") == f);
     let p = create(b"WPProgram", b"Editor", b"EXENAME=C:\\OS2\\E.EXE;PARAMETERS=README;OBJECTID=<RS2_TESTPGM>", b"<RS2_TESTFLDR>");
     check("program made (abstract handle)", p >> 16 == 2);
@@ -204,7 +214,7 @@ fn make() {
     let t = z(b"TITLE=Edit 2;NODELETE=NO");
     check("WinSetObjectData", unsafe { WinSetObjectData(p, t.as_ptr()) } != 0 && title(po) == b"Edit 2");
     let d = create(b"WPDataFile", b"notes.txt", b"", b"<RS2_TESTFLDR>");
-    check("data file made", d >> 16 == 3 && exists(b"C:\\DESKTOP\\Test Folder\\notes.txt"));
+    check("data file made", d >> 16 == 3 && exists(&path(d)));
     let fo = object(f);
     let c = titles(&contents(fo));
     check("folder content", c.iter().any(|t| t == b"Edit 2") && c.iter().any(|t| t == b"notes.txt"));
@@ -216,7 +226,7 @@ fn make() {
     let cp = unsafe { WinCopyObject(d, desk, 0) };
     check("data file copied", cp >> 16 == 3 && exists(b"C:\\DESKTOP\\notes.txt"));
     let sub = create(b"WPFolder", b"Sub", b"", b"<RS2_TESTFLDR>");
-    check("subfolder", sub != 0 && exists(b"C:\\DESKTOP\\Test Folder\\Sub"));
+    check("subfolder", sub != 0 && exists(&path(sub)));
     let cls = unsafe { WPObjectNewClass(1, 2) };
     check("WPObjectNewClass", cls != 0 && cls == unsafe { WPObjectClassData[0] });
     let title_tok = unsafe { WPObjectClassData[1] };
@@ -242,10 +252,13 @@ fn verify() {
     let desk = query(b"<WP_DESKTOP>");
     let dobj = object(desk);
     let dc = titles(&contents(dobj));
+    show("desktop", &dc);
     check("desktop has the program, its shadow and the copy", dc.iter().filter(|t| t.as_slice() == b"Edit 2").count() == 2 && dc.iter().any(|t| t == b"notes.txt"));
     let f = query(b"<RS2_TESTFLDR>");
     let fo = object(f);
     let fc = titles(&contents(fo));
+    show("folder", &fc);
+    let fp = path(f);
     check("folder has the data file and the subfolder", fc.iter().any(|t| t == b"notes.txt") && fc.iter().any(|t| t == b"Sub"));
     // Clean up: the copies, the shadow, the program, the folder.
     for o in contents(dobj) {
@@ -258,7 +271,7 @@ fn verify() {
         call(o, b"wpFree", &[]);
     }
     call(fo, b"wpFree", &[]);
-    check("cleaned up", !exists(b"C:\\DESKTOP\\Test Folder") && query(b"<RS2_TESTPGM>") == 0 && !exists(b"C:\\DESKTOP\\notes.txt"));
+    check("cleaned up", !exists(&fp) && query(b"<RS2_TESTPGM>") == 0 && !exists(b"C:\\DESKTOP\\NOTES.TXT"));
 }
 
 fn class_dll(args: &[u8]) {

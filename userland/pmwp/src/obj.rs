@@ -676,6 +676,14 @@ extern "C" fn wpclsUnInitData(_cls: usize) {}
 /// wpclsNew: a new object of the class in a folder, set up and saved.
 extern "C" fn wpclsNew(cls: usize, title: *const u8, setup: *const u8, folder: usize, _lock: u32) -> usize {
     let o = som::sc_call(som::sc::SOM_NEW, &[cls]);
+    debug(&alloc::format!(
+        "wpclsNew: class {:x} -> object {:x}, title {:?}, fs {} transient {}",
+        cls,
+        o,
+        core::str::from_utf8(cstr(title)),
+        wps::is(o, "WPFileSystem"),
+        wps::is(o, "WPTransient")
+    ));
     if o == 0 {
         return 0;
     }
@@ -693,6 +701,7 @@ extern "C" fn wpclsNew(cls: usize, title: *const u8, setup: *const u8, folder: u
         true
     };
     if !ok {
+        debug("wpclsNew: the object could not be made");
         som::so_call(som::so::SOM_FREE, &[o]);
         return 0;
     }

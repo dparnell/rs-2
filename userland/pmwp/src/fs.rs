@@ -45,18 +45,55 @@ fn title_for(path: &[u8]) -> Vec<u8> {
     split_path(path).1
 }
 
-/// Set the path (and the title from it) without touching the file.
+/// Set the path (and the title from it: its .LONGNAME if it has one)
+/// without touching the file.
 pub fn set_real_name_raw(obj: usize, p: &[u8]) {
     let p = normalize(p);
     fd(obj).real = str_new(&p);
-    obj::d(obj).title = str_new(&title_for(&p));
+    let title = match ea_read(&p, b".LONGNAME") {
+        Some((EAT_ASCII, t)) if !t.is_empty() => t,
+        _ => title_for(&p),
+    };
+    obj::d(obj).title = str_new(&title);
     wps::register(obj, 0, &p);
+}
+
+/// An 8.3 name for a long one, not yet used in the directory.
+fn short_name(dir: &[u8], name: &[u8]) -> Vec<u8> {
+    let keep = |c: &u8| c.is_ascii_alphanumeric() || b"_-$#!@%&".contains(c);
+    let (base, ext) = match name.iter().rposition(|&c| c == b'.') {
+        Some(i) if i > 0 => (&name[..i], &name[i + 1..]),
+        _ => (name, &b""[..]),
+    };
+    let base: Vec<u8> = base.iter().filter(|c| keep(c)).map(|c| c.to_ascii_uppercase()).collect();
+    let ext: Vec<u8> = ext.iter().filter(|c| keep(c)).map(|c| c.to_ascii_uppercase()).take(3).collect();
+    let base = if base.is_empty() { b"OBJECT".to_vec() } else { base };
+    for n in 0..1000u32 {
+        let mut b = base.clone();
+        if n > 0 {
+            let suffix = alloc::format!("{}", n).into_bytes();
+            b.truncate(8 - suffix.len());
+            b.extend_from_slice(&suffix);
+        } else {
+            b.truncate(8);
+        }
+        if !ext.is_empty() {
+            b.push(b'.');
+            b.extend_from_slice(&ext);
+        }
+        if !file_exists(&join(dir, &b)) {
+            return b;
+        }
+    }
+    base
 }
 
 /// Make the file or directory of a new object (wpclsNew) named after
 /// its title in its folder.
 pub fn create(obj: usize, folder: usize, title: &[u8]) -> bool {
+    debug(&alloc::format!("create: {:x} in {:x} fs {} path {:?}", obj, folder, wps::is(folder, "WPFileSystem"), core::str::from_utf8(&path(folder))));
     if folder == 0 || !wps::is(folder, "WPFileSystem") {
+        debug(&alloc::format!("create: folder {:x} is not a file system object", folder));
         return false;
     }
     let name: Vec<u8> = title
@@ -66,15 +103,32 @@ pub fn create(obj: usize, folder: usize, title: &[u8]) -> bool {
     if name.is_empty() {
         return false;
     }
-    let p = join(&path(folder), &name);
-    let ok = if wps::is(obj, "WPFolder") {
-        is_dir(&p) || create_dir(&p)
-    } else {
-        file_exists(&p) || create_file(&p)
-    };
+    let dir = path(folder);
+    let is_folder = wps::is(obj, "WPFolder");
+    let make = |p: &[u8]| if is_folder { is_dir(p) || create_dir(p) } else { file_exists(p) || create_file(p) };
+    let mut p = join(&dir, &name);
+    let mut ok = make(&p);
+    let mut long = false;
+    if !ok {
+        // A file system that only takes short names (FAT): a short name,
+        // and the title in the .LONGNAME extended attribute (as IBM's
+        // shell does it).
+        p = join(&dir, &short_name(&dir, &name));
+        ok = make(&p);
+        long = ok;
+    }
+    if ok && !long {
+        // The name as the file system keeps it (FAT: upper case).
+        let stored = list_dir(&dir).into_iter().map(|e| e.0).find(|n| eq_nocase(n, &name));
+        long = stored.is_some_and(|n| n != name);
+    }
     if ok {
+        if long {
+            ea_write(&p, b".LONGNAME", Some((EAT_ASCII, &name)));
+        }
         set_real_name_raw(obj, &p);
     }
+    debug(&alloc::format!("create: {:?} {}", core::str::from_utf8(&p), ok));
     ok
 }
 
@@ -90,6 +144,7 @@ extern "C" fn wpSetRealName(obj: usize, name: *const u8) -> u32 {
             return 0;
         }
     }
+    ea_write(&new, b".LONGNAME", None);
     set_real_name_raw(obj, &new);
     1
 }
@@ -115,9 +170,17 @@ extern "C" fn wpQueryRealName(obj: usize, buf: *mut u8, cb: *mut u32, qualified:
 /// Renaming the object renames its file.
 extern "C" fn fs_set_title(obj: usize, title: *const u8) -> u32 {
     let t = cstr(title);
-    if !obj::restoring(obj) && !path(obj).is_empty() && path(obj).len() > 3 && t != title_for(&path(obj)).as_slice() {
+    let p = path(obj);
+    if !obj::restoring(obj) && p.len() > 3 && t != str_bytes(&obj::d(obj).title) {
         let n = z(t);
-        return wpSetRealName(obj, n.as_ptr());
+        if wpSetRealName(obj, n.as_ptr()) != 0 {
+            return 1;
+        }
+        // A name the file system does not take: the title is kept in
+        // .LONGNAME.
+        if !ea_write(&p, b".LONGNAME", Some((EAT_ASCII, t))) {
+            return 0;
+        }
     }
     som::call_parent(wps::ccd("WPFileSystem"), wps::cd("WPObject"), m::WPObject::wpSetTitle, &[obj, title as usize]) as u32
 }

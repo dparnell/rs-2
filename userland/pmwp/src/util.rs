@@ -150,6 +150,7 @@ const FIL_STANDARD: u32 = 1;
 const FIL_QUERYEASIZE: u32 = 2;
 const FIL_QUERYEASFROMLIST: u32 = 3;
 pub const EAT_BINARY: u16 = 0xfffe;
+pub const EAT_ASCII: u16 = 0xfffd;
 
 /// A file's EA value (type word and data), if it has one.
 pub fn ea_read(path: &[u8], name: &[u8]) -> Option<(u16, Vec<u8>)> {
@@ -332,5 +333,21 @@ pub fn extension(name: &[u8]) -> Vec<u8> {
     match name.iter().rposition(|&c| c == b'.') {
         Some(i) => name[i + 1..].to_ascii_uppercase(),
         None => Vec::new(),
+    }
+}
+
+static mut DEBUG: u8 = 2;
+
+/// Trace output (when PMWPDEBUG is in the environment).
+pub fn debug(s: &str) {
+    unsafe {
+        if DEBUG == 2 {
+            let mut v: *const u8 = core::ptr::null();
+            DEBUG = (os2::DosScanEnv(b"PMWPDEBUG\0".as_ptr(), &mut v) == 0) as u8;
+        }
+        if DEBUG == 1 {
+            os2::write(s.as_bytes());
+            os2::write(b"\r\n");
+        }
     }
 }
