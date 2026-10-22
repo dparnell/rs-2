@@ -277,6 +277,17 @@ impl BlockDev for Unit {
         let mut tmp = buf.to_vec();
         self.transfer(lba, &mut tmp, true)
     }
+
+    fn packet(&self, cdb: &[u8], buf: &mut [u8]) -> Result<usize, u32> {
+        if buf.len() > MAX_XFER {
+            return Err(err::NOT_SUPPORTED);
+        }
+        let mut c = self.ctrl.lock();
+        let data = if buf.is_empty() { Data::None } else { Data::In(buf.len()) };
+        let n = c.command(self.target, self.lun, cdb, data).map_err(Error::code)?.min(buf.len());
+        buf[..n].copy_from_slice(c.mem.bytes(DATA, n));
+        Ok(n)
+    }
 }
 
 fn be32(b: &[u8]) -> u32 {

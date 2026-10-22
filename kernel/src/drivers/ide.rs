@@ -9,7 +9,8 @@
 //! bits 0 and 2), when BARs 0-3 give them. Disks: READ/WRITE SECTORS (EXT
 //! for LBA48), FLUSH CACHE (EXT); CD drives: PACKET commands with READ(10),
 //! READ CAPACITY and REQUEST SENSE after a failure (a unit attention after
-//! a disc change is cleared that way).
+//! a disc change is cleared that way); any other PACKET command with data
+//! in for CD audio (`BlockDev::packet`).
 
 use alloc::string::String;
 use alloc::sync::Arc;
@@ -319,6 +320,23 @@ impl BlockDev for Drive {
         }
         let c = self.chan.lock();
         c.ata_nodata(self.slave, if self.flush_ext { 0xea } else { 0xe7 })
+    }
+
+    fn packet(&self, cdb: &[u8], buf: &mut [u8]) -> Result<usize, u32> {
+        if self.kind != Kind::Atapi || cdb.len() > 12 {
+            return Err(err::NOT_SUPPORTED);
+        }
+        let mut pk = [0u8; 12];
+        pk[..cdb.len()].copy_from_slice(cdb);
+        let c = self.chan.lock();
+        c.packet(self.slave, &pk, buf).inspect_err(|_| {
+            // Clear the sense (a unit attention after a disc change).
+            let mut rs = [0u8; 12];
+            rs[0] = 0x03;
+            rs[4] = 18;
+            let mut sense = [0u8; 18];
+            let _ = c.packet(self.slave, &rs, &mut sense);
+        })
     }
 }
 

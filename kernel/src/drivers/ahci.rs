@@ -213,6 +213,33 @@ impl PortState {
         phys::phys_to_virt(self.buf)
     }
 
+    /// An ATAPI PACKET command (DMA) with `len` bytes in through the
+    /// bounce buffer: Ok(bytes received).
+    fn packet(&self, pk: &[u8; 12], len: usize) -> Result<usize, u32> {
+        let mut fis = h2d(0xa0, 0, 0, 1);
+        fis[5] = (len & 0xff) as u8;
+        fis[6] = (len >> 8) as u8;
+        match self.command(&fis, Some(pk), len, false) {
+            Ok(()) => Ok(self.transferred().min(len)),
+            Err(e) => {
+                // REQUEST SENSE clears a unit attention (medium changed),
+                // so that a retry can succeed.
+                let mut rs = [0u8; 12];
+                rs[0] = 0x03;
+                rs[4] = 18;
+                let mut f2 = h2d(0xa0, 0, 0, 1);
+                f2[5] = 18;
+                let _ = self.command(&f2, Some(&rs), 18, false);
+                Err(e)
+            }
+        }
+    }
+
+    /// Bytes the last command moved (PRDBC of command slot 0).
+    fn transferred(&self) -> usize {
+        unsafe { core::ptr::read_volatile((phys::phys_to_virt(self.clb) as *const u32).add(1)) as usize }
+    }
+
     /// Interrupt status: the register plus what the handler took.
     fn is(&self) -> u32 {
         rd(self.regs, PXIS) | self.irq.map_or(0, |i| i.status.load(Ordering::Acquire))
@@ -321,20 +348,7 @@ impl Port {
                     pk[0] = 0x28; // READ(10)
                     pk[2..6].copy_from_slice(&(at as u32).to_be_bytes());
                     pk[7..9].copy_from_slice(&(n as u16).to_be_bytes());
-                    let mut fis = h2d(0xa0, 0, 0, 1);
-                    fis[5] = (bytes & 0xff) as u8;
-                    fis[6] = (bytes >> 8) as u8;
-                    if let Err(e) = st.command(&fis, Some(&pk), bytes, false) {
-                        // REQUEST SENSE clears a unit attention (medium
-                        // changed), so that a retry can succeed.
-                        let mut rs = [0u8; 12];
-                        rs[0] = 0x03;
-                        rs[4] = 18;
-                        let mut f2 = h2d(0xa0, 0, 0, 1);
-                        f2[5] = 18;
-                        let _ = st.command(&f2, Some(&rs), 18, false);
-                        return Err(e);
-                    }
+                    st.packet(&pk, bytes)?;
                 }
             }
             if !write {
@@ -371,6 +385,18 @@ impl BlockDev for Port {
         }
         let st = self.state.lock();
         st.command(&h2d(0xea, 0, 0, 0), None, 0, false)
+    }
+
+    fn packet(&self, cdb: &[u8], buf: &mut [u8]) -> Result<usize, u32> {
+        if self.kind != Kind::Atapi || cdb.len() > 12 || buf.len() > BOUNCE {
+            return Err(err::NOT_SUPPORTED);
+        }
+        let mut pk = [0u8; 12];
+        pk[..cdb.len()].copy_from_slice(cdb);
+        let st = self.state.lock();
+        let n = st.packet(&pk, buf.len())?;
+        unsafe { core::ptr::copy_nonoverlapping(st.bounce(), buf.as_mut_ptr(), n) };
+        Ok(n)
     }
 }
 

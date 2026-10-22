@@ -17,6 +17,12 @@ pub trait BlockDev: Send + Sync {
     fn usb_device(&self) -> Option<crate::drivers::xhci::Handle> {
         None
     }
+    /// A SCSI/MMC command (CDB of 6 to 12 bytes) on a CD drive, with data
+    /// in (`buf` empty: none): Ok(bytes received). For the table of
+    /// contents, digital audio (READ CD) and audio play (fs/cdaudio.rs).
+    fn packet(&self, _cdb: &[u8], _buf: &mut [u8]) -> Result<usize, u32> {
+        Err(err::NOT_SUPPORTED)
+    }
 }
 
 /// A disk image in memory (handed over by the boot loader).

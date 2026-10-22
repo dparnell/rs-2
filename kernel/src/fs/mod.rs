@@ -4,6 +4,7 @@
 //! handed to them are relative to the volume root with `\` separators.
 
 pub mod block;
+pub mod cdaudio;
 pub mod cdrom;
 pub mod ea;
 pub mod fatfs;

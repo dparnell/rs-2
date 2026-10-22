@@ -278,4 +278,15 @@ impl<H: Hba> BlockDev for Unit<H> {
         let mut tmp = buf.to_vec();
         self.transfer(lba, &mut tmp, true)
     }
+
+    fn packet(&self, cdb: &[u8], buf: &mut [u8]) -> Result<usize, u32> {
+        let mut h = self.hba.lock();
+        if !self.optical || buf.len() > h.bounce_size() {
+            return Err(err::NOT_SUPPORTED);
+        }
+        let dir = if buf.is_empty() { Dir::None } else { Dir::In(buf.len()) };
+        let n = command(&mut *h, self.target, self.lun, cdb, dir).map_err(Error::code)?.min(buf.len());
+        unsafe { core::ptr::copy_nonoverlapping(h.bounce(), buf.as_mut_ptr(), n) };
+        Ok(n)
+    }
 }

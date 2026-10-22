@@ -22,14 +22,14 @@ const HEADS: u64 = 255;
 const SPT: u64 = 63;
 
 /// Arguments common to the 16- and 32-bit forms.
-struct Req {
+pub(super) struct Req {
     handle: u32,
-    category: u32,
-    function: u32,
-    params: u32,
+    pub category: u32,
+    pub function: u32,
+    pub params: u32,
     params_len: u32,
-    data: u32,
-    data_len: u32,
+    pub data: u32,
+    pub data_len: u32,
     /// 32-bit form: where to store the used lengths.
     pcb_params: u32,
     pcb_data: u32,
@@ -141,6 +141,7 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
     match (h, r.category) {
         (Handle::PhysDisk(n), 9) => phys(c, n, r),
         (Handle::Drive(d), 8) => logical(c, &d, r),
+        (Handle::Drive(d), 0x80 | 0x81) => super::cdioctl::ioctl(c, &d.dev, r),
         (_, 0xd5) => dos_dev(c, r),
         (Handle::Kbd | Handle::Con, 4) => kbd(c, r),
         (Handle::Kbd | Handle::Con, 0xb) => general_kbd(c, r),
@@ -179,7 +180,7 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
 
 /// Copy IOCtl result data to the caller (ERROR_BUFFER_OVERFLOW if it does
 /// not fit) and report the lengths used.
-fn put_data(c: &Ctx, r: &Req, plen: u32, d: &[u8]) -> u32 {
+pub(super) fn put_data(c: &Ctx, r: &Req, plen: u32, d: &[u8]) -> u32 {
     if d.len() as u32 > r.data_len {
         return err::BUFFER_OVERFLOW;
     }
@@ -190,7 +191,7 @@ fn put_data(c: &Ctx, r: &Req, plen: u32, d: &[u8]) -> u32 {
     0
 }
 
-fn set_lens(c: &Ctx, r: &Req, p: u32, d: u32) {
+pub(super) fn set_lens(c: &Ctx, r: &Req, p: u32, d: u32) {
     if r.pcb_params != 0 {
         c.write_u32(r.pcb_params, p);
     }

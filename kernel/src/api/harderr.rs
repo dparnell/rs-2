@@ -223,6 +223,9 @@ impl BlockDev for HardErrDev {
     fn flush(&self) -> Result<(), u32> {
         self.0.flush()
     }
+    fn packet(&self, cdb: &[u8], buf: &mut [u8]) -> Result<usize, u32> {
+        self.0.packet(cdb, buf)
+    }
 }
 
 impl Drop for HardErrDev {

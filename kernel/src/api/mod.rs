@@ -16,6 +16,7 @@ pub mod file;
 pub mod filelock;
 pub mod fsctl;
 pub mod ioctl;
+pub mod cdioctl;
 pub mod harderr;
 pub mod kbdapi;
 pub mod moncalls;
