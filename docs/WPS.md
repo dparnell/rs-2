@@ -223,13 +223,7 @@ NLS), so IBM's SOM can be checked against rs2's.
 **Option B (recommended): rs2's own SOM and WPS, binary compatible.**
 The work is in phases; each phase is usable on its own:
 
-1. **SOM runtime** (`userland/som` → SOM.DLL, IBM ordinals): SOMObject,
-   SOMClass, SOMClassMgr, `somBuildClass` with the full
-   `somStaticClassInfo`, mtabs, method and data thunks,
-   `somParentNumResolve`, ids, `somResolveByName`, `somApply` and the
-   environment. Test on the host where possible, then on rs2 against
-   IBM's SOM.DLL, running the same small class DLLs built with the
-   Toolkit's `sc.exe`.
+1. **SOM runtime** (done; see "rs2's SOM.DLL" below).
 2. **Core classes in rs2's PMWP.DLL**: WPObject, WPAbstract,
    WPFileSystem, WPDataFile, WPFolder, WPProgram, WPShadow, WPDesktop,
    WPDrives, WPDisk, WPRootFolder, WPTransient and WPClassManager. They
@@ -247,6 +241,81 @@ The work is in phases; each phase is usable on its own:
    Shredder, Minimized Window Viewer, Network); then rs2 versions of
    WPCONFIG and WPPRINT (System Setup and printers).
 
-Phase 1 is self-contained and can run in parallel with preparatory
-phase 2 work: generating the ClassData layouts and method lists from the
-IDL files.
+Phase 2 can start with generating the ClassData layouts and method lists
+from the IDL files.
+
+## rs2's SOM.DLL
+
+`userland/som` builds SOM.DLL with IBM's 98 ordinals, variables and
+class data structures. It imports only DOSCALLS.
+
+| File | Contents |
+|------|----------|
+| `rt.rs` | Class records, method table layout, token and data thunks, resolution, the initializer/destructor/assignment controls |
+| `env.rs` | Bootstrapping SOMObject, SOMClass, SOMClassMgr (and SOMParentDerivedMetaclass); `somBuildClass` for `somStaticClassInfo` layouts 1-4; derived metaclasses |
+| `object.rs`, `class.rs`, `mgr.rs` | The three classes' methods (release order as in somobj/somcls/somcm.idl) |
+| `id.rs` | Registered ids |
+| `lib.rs` | Exported variables and functions; `fmt.rs` is somPrintf's formatter |
+
+How it matches IBM's runtime (all checked in IBM's SOM.DLL with Ghidra
+and pmwp.sym/som.sym):
+
+- **Tokens are code.** A method token's thunk loads the object's method
+  table and compares the word at the introducing class's usual block
+  position with the class marker. When they match it jumps through the
+  slot; otherwise it calls a resolver, which finds the block (this is
+  the multiple-inheritance case). Methods returning structures take the
+  object at `[esp+8]`. Data tokens work the same way and return the
+  address of the class's data. The word before a token points to its
+  description (IBM keeps a locator there too).
+- **Method tables** start with `somMethodTab`'s nine public words. Each
+  class has a block: a marker, then its methods in release order. The
+  blocks of a class's leftmost ancestors keep their positions in every
+  subclass.
+- **Initialization** follows SOM 2.1's protocol. `somNew` calls the
+  object's `somDefaultInit` with a copy of the class's `somInitCtrl`
+  (the mask, `somInitInfo` entries of 0x1c bytes, the info size).
+  Emitted initializers (PMWP's `obj_somDefaultInit`, ...) advance it and
+  call their parents' initializers when their mask bytes say so.
+  A class that does not define somDefaultInit, somDestruct, or the
+  copy/assign operators gets SOMObject's generic walkers.
+  Overrides of `somInit`/`somUninit` become the class's legacy
+  initializer/uninitializer, which the generic walkers call; they are
+  not put in the method table, as in IBM's SOM.
+- **Initialization order:** depth first, parents left to right, each
+  class at its first occurrence. **Destruction** mirrors it: parents
+  right to left, a shared ancestor destroyed last.
+- **Ids** are `char **`. Registering rewrites `*id` to point to
+  `{0, name, ...}`; names compare without case, and a leading `::` is
+  ignored.
+- **Metaclasses:** when the explicit metaclass and the parents'
+  metaclasses do not form a single chain, a derived metaclass with all
+  of them as parents is made.
+- **The class manager** loads class DLLs through `SOMLoadModule`
+  (`SOMInitModule`, or `<Class>NewClass`). Its methods are called
+  through tokens, so a subclass such as the WPS's WPClassManager can
+  override them. `somMergeInto` moves the registry and makes the target
+  `SOMClassMgrObject`; the old manager forwards to it.
+
+Not done: `inherit_vars` without a bit for a parent (abstract
+inheritance) is treated as inheriting everything. Class unloading
+(`somUnloadClassFile`) only unregisters. `somCastObj`/`somResetObj`
+return FALSE, and somCreateDynamicClass returns NULL.
+
+**Tests.** `RS2\SOMTEST.EXE` builds classes from layout-4 static class
+information as compiler output does. It covers:
+- emitted initializers and destructors, and legacy somInit;
+- parent calls, data tokens, and a metaclass with class methods and data;
+- multiple inheritance with a shared base, and a derived metaclass;
+- ids, dispatch by name, and the class manager.
+
+It passes on both rs2's and IBM's SOM.DLL. Run it from a directory that
+holds IBM's DLL; LIBPATH starts with `.`. IBM's SOM showed the
+destruction order, and that it requires method descriptors and an
+`inherit_vars` bit per parent.
+
+`SOMTEST LOAD dll class` loads a class library through the class
+manager and makes an instance. IBM's SOMU.DLL classes (SOMUTStringId,
+SOMMBeforeAfter, SOMMSingleInstance, SOMMTraced, SOMBuf) and SOMIR.DLL's
+interface repository classes load and work on rs2's SOM. Freeing an
+uninitialized repository object faults on both SOMs alike.

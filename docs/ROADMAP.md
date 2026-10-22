@@ -345,7 +345,11 @@ Status markers: done, in progress, planned.
 - Display driver model (GRADD-style) on the framebuffer, mouse pointer
 - PMWIN (windows, messages, controls, dialogs), PMGPI (graphics, fonts),
   PMSHAPI
-- SOM runtime and the Workplace Shell
+- done: SOM runtime (SOM.DLL, binary compatible with IBM's: class data,
+  method/data tokens, somBuildClass, initializer controls, class
+  manager; `RS2\SOMTEST.EXE`, also run against IBM's SOM.DLL; IBM's
+  SOMU and SOMIR classes load on it); docs/WPS.md
+- planned: the Workplace Shell on it (docs/WPS.md, phases 2-4)
 
 ## Milestone 5: install media (first version done)
 
