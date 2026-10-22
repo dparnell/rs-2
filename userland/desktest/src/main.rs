@@ -87,6 +87,11 @@ fn defaults() {
     } else {
         os2::println!("(no E.EXE: System Editor checks skipped)");
     }
+    let display = objects::sys_path(b"OS2\\DISPLAY.EXE");
+    if objects::exists(&display) {
+        let e = programs.map(objects::titles).unwrap_or_default();
+        check("Programs: Display (the screen resolution)", e.iter().any(|x| x.3 == b"Display" && objects::definition(x.0).is_some_and(|d| d.exe == display && d.progc == PROG_PM)));
+    }
     check("desktop background colour", objects::query(objects::APP_DESKTOP, b"Background").and_then(|t| objects::parse_hex(&t)).is_some());
 }
 

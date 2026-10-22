@@ -22,7 +22,7 @@ pub const APP_WINDOWS: &[u8] = b"RS2_Windows\0";
 pub const APP_ASSOC: &[u8] = b"RS2_Associations\0";
 
 /// Current layout of the default objects.
-pub const VERSION: &[u8] = b"4";
+pub const VERSION: &[u8] = b"5";
 
 pub fn query(app: &[u8], key: &[u8]) -> Option<Vec<u8>> {
     let k = z(key);
@@ -275,6 +275,7 @@ pub fn ensure_defaults() -> Groups {
             if query(APP_DESKTOP, b"Version").as_deref() != Some(VERSION) {
                 add_editor(programs);
                 add_app_installer(programs);
+                add_display(programs);
                 write(APP_DESKTOP, b"Version", Some(VERSION));
             }
             return Groups { desktop, prompts, programs, startup };
@@ -317,6 +318,16 @@ fn add_app_installer(programs: u32) {
     }
 }
 
+/// The Display settings' object (DISPLAY.EXE: the screen resolution);
+/// version 4 profiles get it once.
+fn add_display(programs: u32) {
+    let exe = sys_path(b"OS2\\DISPLAY.EXE");
+    if exists(&exe) && !titles(programs).iter().any(|t| t.3 == b"Display") {
+        let p = Program { progc: PROG_PM, title: b"Display".to_vec(), exe, ..Program::default() };
+        add_program(programs, &p);
+    }
+}
+
 /// Make (or complete) the default objects.
 pub fn make_defaults() -> Groups {
     let desktop = create_group(b"Desktop", SHE_INVISIBLE);
@@ -333,6 +344,7 @@ pub fn make_defaults() -> Groups {
     }
     add_editor(programs);
     add_app_installer(programs);
+    add_display(programs);
     // The installer, on the live system and after: PMINSTAL.EXE (an
     // object of an earlier version, for the text-mode INSTALL.EXE, is
     // changed over), else INSTALL.EXE.
