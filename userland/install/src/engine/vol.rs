@@ -129,6 +129,25 @@ impl Vol {
         r.map_err(|e| alloc::format!("{path}: {e}"))
     }
 
+    /// Give `path` the extended attributes `eas` (flags, name, value).
+    pub fn set_eas(&mut self, path: &str, eas: &[(u8, Vec<u8>, Vec<u8>)]) -> Result<(), String> {
+        let r = match self {
+            Vol::Fat(v) => {
+                let l: Vec<fat::ea::Ea> = eas.iter().map(|(f, n, d)| fat::ea::Ea { flags: *f, name: n.clone(), value: d.clone() }).collect();
+                v.lookup(path).and_then(|e| v.write_eas(&e, &l, fat_now())).map_err(|e| alloc::format!("{e:?}"))
+            }
+            Vol::Hpfs(v) => {
+                let l: Vec<hpfs::Ea> = eas.iter().map(|(f, n, d)| hpfs::Ea { flags: *f, name: n.clone(), value: d.clone() }).collect();
+                v.lookup(path).and_then(|e| v.write_eas(&e, &l)).map_err(|e| alloc::format!("{e:?}"))
+            }
+            Vol::Jfs(v) => {
+                let l: Vec<jfs::Ea> = eas.iter().map(|(f, n, d)| jfs::Ea { flags: *f, name: n.clone(), value: d.clone() }).collect();
+                v.lookup(path).and_then(|e| v.write_eas(&e, &l)).map_err(|e| alloc::format!("{e:?}"))
+            }
+        };
+        r.map_err(|e| alloc::format!("{path}: {e}"))
+    }
+
     /// Write file `path` (replacing it), making its directories.
     pub fn put(&mut self, path: &str, data: &[u8]) -> Result<(), String> {
         let parts: Vec<&str> = path.split('\\').filter(|s| !s.is_empty()).collect();

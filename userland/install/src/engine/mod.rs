@@ -246,14 +246,62 @@ fn list(dir: &str) -> Vec<Entry> {
     v
 }
 
+/// The extended attributes of `path` (flags, name, value).
+fn read_eas(path: &str) -> Vec<(u8, Vec<u8>, Vec<u8>)> {
+    let c = cstr(path);
+    let mut out = vec![0u8; 0x10000 + 16];
+    let n = out.len() as u32;
+    out[0..4].copy_from_slice(&n.to_le_bytes());
+    let mut op = EaOp2 { gea2: core::ptr::null_mut(), fea2: out.as_mut_ptr(), error: 0 };
+    if unsafe { DosQueryPathInfo(c.as_ptr(), FIL_QUERYALLEAS, &mut op as *mut _ as *mut u8, 12) } != 0 {
+        return Vec::new();
+    }
+    // FEA2LIST: cbList, then FEA2s (oNextEntryOffset, fEA, cbName,
+    // cbValue, the name and its NUL, the value).
+    let end = (u32::from_le_bytes([out[0], out[1], out[2], out[3]]) as usize).min(out.len());
+    let mut v = Vec::new();
+    let mut off = 4;
+    while off + 8 <= end {
+        let next = u32::from_le_bytes([out[off], out[off + 1], out[off + 2], out[off + 3]]) as usize;
+        let (flags, cn, cv) = (out[off + 4], out[off + 5] as usize, u16::from_le_bytes([out[off + 6], out[off + 7]]) as usize);
+        let name = off + 8;
+        if name + cn + 1 + cv > end {
+            break;
+        }
+        v.push((flags, out[name..name + cn].to_vec(), out[name + cn + 1..name + cn + 1 + cv].to_vec()));
+        if next == 0 {
+            break;
+        }
+        off += next;
+    }
+    v
+}
+
+/// The files that hold a volume's own data (FAT's extended attributes,
+/// the Workplace Shell's root): they are not copied as files.
+fn system_file(name: &str) -> bool {
+    name.eq_ignore_ascii_case("EA DATA. SF") || name.eq_ignore_ascii_case("WP ROOT. SF")
+}
+
+/// Copy `src`'s extended attributes (the Workplace Shell's .CLASSINFO,
+/// .LONGNAME and others) to `dest`.
+fn copy_eas(vol: &mut Vol, src: &str, dest: &str) -> Result<(), String> {
+    let eas = read_eas(src);
+    if eas.is_empty() { Ok(()) } else { vol.set_eas(dest, &eas) }
+}
+
 /// Copy the tree `src` (e.g. "C:") into `dest` on `vol`; when updating,
 /// the user's files there (`kept`) stay as they are.
 fn copy_tree(vol: &mut Vol, src: &str, dest: &str, files: &mut u32, update: bool, p: &mut dyn Progress) -> Result<(), String> {
     for e in list(src) {
+        if dest.is_empty() && system_file(&e.name) {
+            continue;
+        }
         let s = alloc::format!("{}\\{}", src.trim_end_matches('\\'), e.name);
         let d = if dest.is_empty() { e.name.clone() } else { alloc::format!("{dest}\\{}", e.name) };
         if e.dir {
             vol.mkdir(&d)?;
+            copy_eas(vol, &s, &d)?;
             copy_tree(vol, &s, &d, files, update, p)?;
         } else {
             if update && kept(&d) && vol.exists(&d) {
@@ -261,6 +309,7 @@ fn copy_tree(vol: &mut Vol, src: &str, dest: &str, files: &mut u32, update: bool
             }
             let data = read_file(&s).ok_or_else(|| alloc::format!("cannot read {s}"))?;
             vol.put(&d, &data)?;
+            copy_eas(vol, &s, &d)?;
             *files += 1;
             p.file(*files, &d);
         }
