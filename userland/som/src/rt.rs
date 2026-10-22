@@ -914,8 +914,10 @@ pub unsafe fn build_ctrls(c: *mut Class) {
     pm.init_ctrl = Ctrl { mask: mask_init, info: leak_vec(init) as usize, info_size: 0x1c, ctrl_info: n };
     pm.assign_ctrl = Ctrl { mask: leak_vec(mask), info: leak_vec(assign) as usize, info_size: 0x1c, ctrl_info: n };
 
-    // Destruction: depth first, each class at its last occurrence (after
-    // every class that has it as an ancestor).
+    // Destruction: the mirror of initialization (as IBM's SOM does it):
+    // depth first with the parents right to left, each class at its last
+    // occurrence (after every class that has it as an ancestor). The mask
+    // has a byte per parent in the order they are visited.
     fn size(x: *mut Class) -> usize {
         1 + unsafe { (*x).parents.iter().map(|&p| size(p)).sum::<usize>() }
     }
@@ -925,7 +927,7 @@ pub unsafe fn build_ctrls(c: *mut Class) {
             None => out.push((x, pos)),
         }
         let mut q = pos + 1;
-        for &p in unsafe { &(*x).parents } {
+        for &p in unsafe { (*x).parents.iter().rev() } {
             last(p, q, out);
             q += size(p);
         }
@@ -935,7 +937,7 @@ pub unsafe fn build_ctrls(c: *mut Class) {
     let mut dorder: Vec<*mut Class> = vec![c];
     let mut dmask: Vec<u8> = Vec::new();
     fn visit_last(x: *mut Class, pos: usize, lasts: &[(*mut Class, usize)], order: &mut Vec<*mut Class>, mask: &mut Vec<u8>) {
-        let parents = unsafe { (*x).parents.clone() };
+        let parents: Vec<*mut Class> = unsafe { (*x).parents.iter().rev().copied().collect() };
         let start = mask.len();
         mask.resize(start + parents.len(), 0);
         let mut q = pos + 1;
