@@ -24,13 +24,16 @@
 //! _PRT), so its interrupt stays disabled (CSR0 IENA clear): the timer
 //! tick looks at the next receive descriptor's OWN bit and wakes the
 //! network thread, which also looks every 20 ms. Link state comes from
-//! the link LED (BCR4) on the Am79C970A; later parts are assumed up.
+//! the link LED (BCR4 LEDOUT) once that LED has been seen lit; until then
+//! the link counts as up, since emulations without a link indicator
+//! (VMware's vlance reads BCR4 as 0xc0 throughout) would otherwise never
+//! transmit.
 
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use core::ptr::{read_volatile, write_volatile};
-use core::sync::atomic::{fence, Ordering};
+use core::sync::atomic::{fence, AtomicBool, Ordering};
 
 use super::pci;
 use super::virtio::queue::Dma;
@@ -57,6 +60,9 @@ const BCNT_ONES: u32 = 0xf000;
 
 /// CSR4: pad short transmit frames to 64 bytes.
 const CSR4_APAD_XMT: u32 = 1 << 11;
+/// BCR4: LED0 programmed for link status, and its output.
+const LED_LNKSTE: u32 = 1 << 6;
+const LED_OUT: u32 = 1 << 15;
 /// BCR20 software style 2: 32-bit descriptors and initialisation block.
 const SWSTYLE_PCNET_PCI: u32 = 2;
 
@@ -207,8 +213,10 @@ pub struct Pcnet {
     name: String,
     mac: [u8; 6],
     io: SpinLock<Io>,
-    /// The chip shows link state on LED0 (BCR4).
+    /// LED0 shows link status (BCR4 LNKSTE).
     link_led: bool,
+    /// LED0 has been seen lit: from then on it tells the link state.
+    led_seen: AtomicBool,
     rings: SpinLock<Rings>,
     /// Initialisation block (kept for the chip's lifetime).
     _init: Dma,
@@ -324,8 +332,18 @@ pub fn probe(d: &pci::Device) {
     }
     // Start, interrupts left disabled (no IENA): polled.
     io.set_csr(0, IDON | STRT);
-    let link_led = chip == "Am79C970A";
-    let nic = Pcnet { name, mac, io: SpinLock::new(io), link_led, rings: SpinLock::new(rings), _init: init };
+    let bcr4 = io.bcr(4);
+    let link_led = bcr4 & LED_LNKSTE != 0;
+    crate::println!("{name}: {} I/O {base:#x}, chip id {id:#010x}, CSR0 {:#06x}, BCR4 {bcr4:#06x}", if io.dwio { "32-bit" } else { "16-bit" }, io.csr(0));
+    let nic = Pcnet {
+        name,
+        mac,
+        io: SpinLock::new(io),
+        link_led,
+        led_seen: AtomicBool::new(link_led && bcr4 & LED_OUT != 0),
+        rings: SpinLock::new(rings),
+        _init: init,
+    };
     crate::net::register(Arc::new(nic));
 }
 
@@ -339,8 +357,14 @@ impl Nic for Pcnet {
     }
 
     fn link_up(&self) -> bool {
-        // LED0 shows link status by default; it reads 0xc0 without link.
-        !self.link_led || self.io.lock().bcr(4) != 0xc0
+        if !self.link_led {
+            return true;
+        }
+        let lit = self.io.lock().bcr(4) & LED_OUT != 0;
+        if lit {
+            self.led_seen.store(true, Ordering::Relaxed);
+        }
+        lit || !self.led_seen.load(Ordering::Relaxed)
     }
 
     fn send(&self, frame: &[u8]) -> bool {

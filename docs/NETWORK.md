@@ -61,7 +61,8 @@ link state, MTU, `send(frame)`, `receive(callback)` and `rx_pending()`.
   CSR12-14), an initialisation block with an empty multicast filter, a
   128-descriptor receive ring and a 64-descriptor transmit ring with
   2 KB buffers handed over by OWN bits, CSR0 TDMD to transmit at once.
-  Link state from LED0 (BCR4) on the Am79C970A. No MSI and no INTx
+  Link state from LED0 (BCR4) once it has been seen lit; until then the
+  link counts as up (VMware's vlance never lights it). No MSI and no INTx
   routing: the interrupt stays disabled (IENA clear) and it is polled.
 * **virtio-net** (`drivers/virtio/net.rs`) on the existing virtio PCI
   transport (modern and legacy): features MAC and STATUS, the 12-byte
