@@ -144,3 +144,31 @@ groups, recording and saving are not supported.
 The games find their sounds in `%MMBASE%\SOUNDS` (rs2's CONFIG.SYS sets
 `MMBASE=C:\MMOS2;`) and their movies in their own directory; APPINST
 installs both from the OS/2 CD with the games.
+
+## The MIDI sequencer and MCIAPI.DLL
+
+`crates/midi` reads Standard MIDI files (formats 0-2, running status,
+the tempo map, RIFF RMID) and has a small General MIDI software
+synthesizer: two-operator FM timbres, one per GM program family, with
+envelopes; synthesized drums on channel 10; volume, expression, pan,
+sustain, pitch bend (with its RPN range) and program changes; a soft
+limiter at the output. `Player` renders a song from any position (a seek
+replays the controllers and programs set before it).
+`cargo run -p midi --example midi2wav IN.MID OUT.WAV [seconds]` renders a
+song on the host.
+
+MDM's sequencer device (`userland/mdm/src/sequencer.rs`, Sequencer01)
+plays a .MID element through it at 32 kHz, streamed through the RS2API
+audio calls like the wave audio device (clock-paced without sound
+hardware): PLAY (FROM/TO), STOP, PAUSE/RESUME, SEEK, LOAD, STATUS
+(length, position, tempo, volume), SET volume and time format (MMTIME or
+milliseconds). MIDI output to external ports and the port mapper are
+not supported.
+
+MCIAPI.DLL (`userland/mciapi`) is MMPM/2's REXX interface:
+`RXFUNCADD('mciRxInit', 'MCIAPI', 'mciRxInit')`, then
+`mciRxSendString(cmd, 'var', hwnd, user)`, `mciRxGetErrorString`,
+`mciRxGetDeviceID` and `mciRxExit`; it finds REXX's RexxVariablePool and
+RexxRegisterFunctionDll when first needed. `mciPlayFile` plays any media
+file to the end (asynchronously with MCI_ASYNC). IBM's PLAY.CMD (from the
+multimedia pack) works: `PLAY FILE=FURELISE.MID`.

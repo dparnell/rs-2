@@ -45,6 +45,7 @@ version = "0.1.0"
 dependencies = [
  "gpi",
  "os2",
+ "pmwin",
 ]
 
 [[package]]
@@ -138,13 +139,25 @@ name = "mci"
 version = "0.1.0"
 
 [[package]]
+name = "mciapi-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "mdm-dll"
 version = "0.1.0"
 dependencies = [
  "mci",
+ "midi",
  "mmfmt",
  "os2",
 ]
+
+[[package]]
+name = "midi"
+version = "0.1.0"
 
 [[package]]
 name = "mmfmt"

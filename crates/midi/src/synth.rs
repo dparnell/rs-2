@@ -164,7 +164,7 @@ pub struct Synth {
 
 impl Synth {
     pub fn new(rate: u32) -> Synth {
-        Synth { rate: rate as f32, sine: sine_table(), voices: Vec::new(), channels: [Channel::default(); 16], master: 1.0 }
+        Synth { rate: rate as f32, sine: sine_table(), voices: Vec::new(), channels: [Channel::default(); 16], master: 2.0 }
     }
 
     pub fn rate(&self) -> u32 {
@@ -359,9 +359,15 @@ impl Synth {
         }
         self.voices.retain(|v| v.stage != Stage::Off);
         let m = self.master * 32767.0;
+        // A soft limiter above about 3/4 of full scale, so loud passages
+        // round off instead of clipping.
+        const KNEE: f32 = 24000.0;
+        const ROOM: f32 = 32767.0 - KNEE;
         for (o, s) in out.iter_mut().zip(mix) {
             let x = *o as f32 + s * m;
-            *o = x.clamp(-32768.0, 32767.0) as i16;
+            let a = if x < 0.0 { -x } else { x };
+            let y = if a <= KNEE { a } else { KNEE + (a - KNEE) / (1.0 + (a - KNEE) / ROOM) };
+            *o = (if x < 0.0 { -y } else { y }) as i16;
         }
     }
 }

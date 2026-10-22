@@ -580,6 +580,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("uconv", "OS2\\DLL\\UCONV.DLL"),
         ("mmio", "OS2\\DLL\\MMIO.DLL"),
         ("mdm", "OS2\\DLL\\MDM.DLL"),
+        ("mciapi", "OS2\\DLL\\MCIAPI.DLL"),
         ("pmspl", "OS2\\DLL\\PMSPL.DLL"),
     ];
 

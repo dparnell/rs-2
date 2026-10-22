@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use crate::req::*;
 use crate::sys::*;
-use crate::{video, wave};
+use crate::{sequencer, video, wave};
 use mci::*;
 
 pub const MCI_NOTIFY_SUCCESSFUL: u32 = 0;
@@ -30,6 +30,7 @@ pub struct Notify {
 pub enum Kind {
     Wave(wave::Wave),
     Video(video::Video),
+    Seq(sequencer::Seq),
 }
 
 pub struct Device {
@@ -109,7 +110,7 @@ impl Device {
 /// The devices MDM has: one wave audio device (even without sound
 /// hardware, which plays silently in real time) and one digital video
 /// device (FLI/FLC animations).
-pub const INSTALLED: &[u16] = &[DEVTYPE_WAVEFORM_AUDIO, DEVTYPE_DIGITAL_VIDEO];
+pub const INSTALLED: &[u16] = &[DEVTYPE_WAVEFORM_AUDIO, DEVTYPE_SEQUENCER, DEVTYPE_DIGITAL_VIDEO];
 
 /// MCI_OPEN: a new device of `typ` (and the element, if any).
 pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u16, u32> {
@@ -124,6 +125,7 @@ pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u1
     }
     let kind = match typ {
         DEVTYPE_WAVEFORM_AUDIO => Kind::Wave(wave::Wave::new(r.element.as_deref(), playlist)?),
+        DEVTYPE_SEQUENCER => Kind::Seq(sequencer::Seq::new(r.element.as_deref())?),
         _ => Kind::Video(video::Video::new(r.element.as_deref(), r.hwnd)?),
     };
     let _g = LOCK.hold();
@@ -169,6 +171,7 @@ pub fn close(id: u16) -> Result<(), u32> {
     match d.kind {
         Kind::Wave(mut w) => w.stop(),
         Kind::Video(mut v) => v.close(),
+        Kind::Seq(mut q) => q.stop(),
     }
     Ok(())
 }
@@ -194,6 +197,7 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
         MCI_GETDEVCAPS if r.flags & MCI_GETDEVCAPS_ITEM != 0 => common_caps(typ, r.item).map_or_else(|| specific(id, typ, r), Ok),
         MCI_INFO if r.flags & MCI_INFO_PRODUCT != 0 => Ok(Reply::Text(String::from(match typ {
             DEVTYPE_WAVEFORM_AUDIO => "rs2 Wave Audio",
+            DEVTYPE_SEQUENCER => "rs2 MIDI Sequencer",
             _ => "rs2 Digital Video",
         }))),
         MCI_INFO if r.flags & MCI_INFO_FILE != 0 => Ok(Reply::Text(with(id, |d| d.element.clone().unwrap_or_default()).unwrap_or_default())),
@@ -206,6 +210,7 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
         MCI_SET if r.flags & MCI_SET_TIME_FORMAT != 0 => {
             let ok = match typ {
                 DEVTYPE_WAVEFORM_AUDIO => matches!(r.item, MCI_FORMAT_MILLISECONDS | MCI_FORMAT_MMTIME | MCI_FORMAT_BYTES | MCI_FORMAT_SAMPLES),
+                DEVTYPE_SEQUENCER => matches!(r.item, MCI_FORMAT_MILLISECONDS | MCI_FORMAT_MMTIME),
                 _ => matches!(r.item, MCI_FORMAT_MILLISECONDS | MCI_FORMAT_MMTIME | MCI_FORMAT_FRAMES),
             };
             if !ok {
@@ -229,6 +234,7 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
 fn specific(id: u16, typ: u16, r: &Req) -> Result<Reply, u32> {
     match typ {
         DEVTYPE_WAVEFORM_AUDIO => wave::command(id, r),
+        DEVTYPE_SEQUENCER => sequencer::command(id, r),
         _ => video::command(id, r),
     }
 }

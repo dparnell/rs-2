@@ -20,6 +20,7 @@ extern crate os2;
 mod dev;
 mod exports;
 mod req;
+mod sequencer;
 mod sys;
 mod video;
 mod wave;

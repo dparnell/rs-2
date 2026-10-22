@@ -1,0 +1,13 @@
+[package]
+name = "mciapi-dll"
+description = "MCIAPI.DLL: MMPM/2's REXX functions (mciRxSendString and friends) and mciPlayFile"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mciapi"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
