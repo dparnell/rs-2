@@ -21,6 +21,7 @@ pub mod svga;
 pub mod usb;
 pub mod vmmouse;
 pub mod virtio;
+pub mod vmxnet3;
 pub mod xhci;
 
 use alloc::sync::Arc;
@@ -179,6 +180,9 @@ pub fn init() {
         }
         if e1000::model(d).is_some() {
             e1000::probe(d);
+        }
+        if vmxnet3::is_vmxnet3(d) {
+            vmxnet3::probe(d);
         }
         if (d.vendor, d.device) == (0x15ad, 0x0405) {
             svga::probe(d);

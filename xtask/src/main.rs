@@ -11,7 +11,7 @@
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
 //!                  [--virtio-rng] [--virtio-console PATH] [--virtio-gpu|--virtio-gpu-pci]
 //!                  [--virtio-legacy] [--boot-virtio]
-//!                  [--net] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--tftp DIR]
+//!                  [--net [MODEL]] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--tftp DIR]
 //!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
@@ -54,9 +54,10 @@
 //!
 //! `--net` adds a network adapter on QEMU's user-mode network (guest
 //! 10.0.2.15, gateway/host 10.0.2.2, DNS 10.0.2.3): an Intel 82540EM
-//! (`e1000`) unless `--net-model` names another QEMU device (`e1000e`,
-//! `e1000-82545em`, `virtio-net-pci`); `--virtio-net` is short for
-//! `--net --net-model virtio-net-pci`. Host port 5555 is forwarded to
+//! (`e1000`) unless a model follows (`--net vmxnet3|e1000|82545em|e1000e|virtio`:
+//! VMware's paravirtual NIC, the 82540EM, the 82545EM of VMware's
+//! "e1000", the 82574L of its "e1000e", virtio-net) or `--net-model`
+//! names any QEMU device; `--virtio-net` is short for `--net virtio`. Host port 5555 is forwarded to
 //! guest port 23 (when free), and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
 //! rule; `--tftp DIR` has QEMU serve DIR by TFTP at 10.0.2.2. Without
 //! these options the machine has no network adapter.
@@ -291,12 +292,21 @@ fn parse(args: &[String]) -> Opts {
             "--virtio-gpu-pci" => o.virtio_gpu = Some("virtio-gpu-pci"),
             "--boot-virtio" => o.boot_virtio = true,
             "--net" => {
-                o.net.get_or_insert_with(|| "e1000".into());
+                // An optional model: `--net vmxnet3`.
+                match args.get(i + 1).and_then(|m| nic_model(m)) {
+                    Some(m) => {
+                        i += 1;
+                        o.net = Some(m.into());
+                    }
+                    None => {
+                        o.net.get_or_insert_with(|| "e1000".into());
+                    }
+                }
             }
             "--virtio-net" => o.net = Some("virtio-net-pci".into()),
             "--net-model" => {
                 i += 1;
-                o.net = Some(args[i].clone());
+                o.net = Some(nic_model(&args[i]).map_or_else(|| args[i].clone(), String::from));
             }
             "--tftp" => {
                 i += 1;
@@ -766,6 +776,18 @@ fn virtio_devices(o: &Opts, c: &mut Command) {
         c.arg("-device").arg(format!("virtio-serial-pci{legacy}"));
         c.args(["-device", "virtconsole,chardev=vcon"]);
     }
+}
+
+/// QEMU's device for a `--net` model name.
+fn nic_model(m: &str) -> Option<&'static str> {
+    Some(match m {
+        "e1000" | "82540em" => "e1000",
+        "82545em" | "e1000-82545em" => "e1000-82545em",
+        "e1000e" | "82574l" => "e1000e",
+        "vmxnet3" => "vmxnet3",
+        "virtio" | "virtio-net" | "virtio-net-pci" => "virtio-net-pci",
+        _ => return None,
+    })
 }
 
 /// A NIC on QEMU's user-mode network, or none at all (QEMU would add
