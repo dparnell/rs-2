@@ -1361,7 +1361,7 @@ has no call to rename one).
 | | `NextShadow` | the next shadow id (hex) |
 | | `Background` | desktop colour, `RRGGBB` |
 | | `MinimizeTo` | `VIEWER` (default) or `DESKTOP` |
-| `RS2_IconPos` | `FOLDER\|OBJECT` | `x y` (the container's `ptlIcon`); folders `DESKTOP`, `G` + group handle, `DRIVES`; objects `G`/`P` + handle, `DRIVES`, `DRIVE:C`, `SHUTDOWN`, ... |
+| `RS2_IconPos` | `FOLDER\|OBJECT` | `x y` (the container's `ptlIcon`); folders `DESKTOP`, `G` + group handle, `DRIVES`; objects `G`/`P` + handle, `DRIVES`, `DRIVE:C`, `SHUTDOWN`, `S` + shadow id, ...; `FOLDER\|@HEIGHT` the height they are from (icons keep their distance from the top when a folder or the screen changes height) |
 | `RS2_Windows` | folder (`DIR:C:\OS2\` for directories) | `x y cx cy view` |
 | `RS2_Associations` | extension (upper case) | the program |
 | `RS2_Shadows` | `S` + id (8 hex digits) | the folder (`DESKTOP`, `G` + group handle, `DIR:` + directory), a tab, the object: a full path or an object id (`P`/`G` + handle, `DRIVES`, `DRIVE:C`, `MINIMIZED`, `WINLIST`, `SHUTDOWN`) |
