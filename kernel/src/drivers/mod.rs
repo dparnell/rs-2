@@ -165,18 +165,18 @@ pub fn init() {
         }
         // Sound: the first device that comes up is used.
         if !crate::audio::present() {
-            use crate::audio::Output;
-            let out = if (d.class, d.subclass) == (4, 3) {
-                hda::probe(d).map(Output::Hda)
+            use crate::audio::{Input, Output};
+            let found = if (d.class, d.subclass) == (4, 3) {
+                hda::probe(d).map(|(o, i)| (Output::Hda(o), i.map(Input::Hda)))
             } else if ac97::is_ac97(d) {
-                ac97::probe(d).map(Output::Ac97)
+                ac97::probe(d).map(|(o, i)| (Output::Ac97(o), i.map(Input::Ac97)))
             } else if es137x::is_es137x(d) {
-                es137x::probe(d).map(Output::Es137x)
+                es137x::probe(d).map(|(o, i)| (Output::Es137x(o), i.map(Input::Es137x)))
             } else {
                 None
             };
-            if let Some(out) = out {
-                crate::audio::attach(out);
+            if let Some((out, inp)) = found {
+                crate::audio::attach(out, inp);
             }
         }
         if e1000::model(d).is_some() {

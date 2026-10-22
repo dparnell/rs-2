@@ -12,7 +12,7 @@
 //!                  [--virtio-rng] [--virtio-console PATH] [--virtio-gpu|--virtio-gpu-pci]
 //!                  [--virtio-legacy] [--boot-virtio]
 //!                  [--net [MODEL]] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--tftp DIR]
-//!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE]
+//!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE] [--sound-in FILE|tone:HZ]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
@@ -70,6 +70,10 @@
 //! controller (`AC97`) and `--sound es1370` (or `es1371`) an Ensoniq
 //! AudioPCI ES1370 (`ES1370`: QEMU has no ES1371) in its place;
 //! `--sound-wav FILE` records what it plays to a WAV file instead.
+//! `--sound-in FILE` gives the card's input a WAV file (looped) or
+//! `tone:HZ`, a sine: QEMU's D-Bus audio backend and display, fed by
+//! tools/scripts/soundin.py through the QMP socket (no window; with
+//! `--sound-wav` the script writes what is played).
 
 mod hpfsimg;
 mod image;
@@ -160,6 +164,8 @@ struct Opts {
     /// The sound card: hda, ac97 or es1370 (`--sound CARD`).
     sound_card: &'static str,
     sound_wav: Option<PathBuf>,
+    /// What the sound card records (`--sound-in`).
+    sound_in: Option<String>,
 }
 
 fn parse(args: &[String]) -> Opts {
@@ -210,6 +216,7 @@ fn parse(args: &[String]) -> Opts {
         sound: false,
         sound_card: "hda",
         sound_wav: None,
+        sound_in: None,
     };
     let mut i = 0;
     while i < args.len() {
@@ -233,6 +240,11 @@ fn parse(args: &[String]) -> Opts {
                 i += 1;
                 o.sound = true;
                 o.sound_wav = Some(PathBuf::from(&args[i]));
+            }
+            "--sound-in" => {
+                i += 1;
+                o.sound = true;
+                o.sound_in = Some(args[i].clone());
             }
             "--timeout" => {
                 i += 1;
@@ -841,6 +853,7 @@ fn sound_devices(o: &Opts, c: &mut Command) {
         return;
     }
     let backend = match &o.sound_wav {
+        _ if o.sound_in.is_some() => "dbus,id=snd0,in.frequency=48000,in.channels=2".to_string(),
         Some(f) => format!("wav,id=snd0,path={}", f.display()),
         None if o.headless => "none,id=snd0".to_string(),
         None if cfg!(target_os = "macos") => "coreaudio,id=snd0".to_string(),
@@ -895,8 +908,15 @@ fn run(o: &Opts) -> bool {
         .arg(format!("unix:{},server,nowait", sock.display()))
         .arg("-qmp")
         .arg(format!("unix:{},server,nowait", qmp_sock.display()));
+    if o.sound_in.is_some() {
+        // The D-Bus audio backend needs the D-Bus display.
+        c.args(["-display", "dbus,p2p=yes,audiodev=snd0"]);
+    }
     if o.headless {
-        c.args(["-display", "none"]).arg("-serial").arg(format!("file:{}", serial.display()));
+        if o.sound_in.is_none() {
+            c.args(["-display", "none"]);
+        }
+        c.arg("-serial").arg(format!("file:{}", serial.display()));
     } else {
         c.args(["-serial", "stdio"]);
     }
@@ -915,8 +935,20 @@ fn run(o: &Opts) -> bool {
     // Last, so extra devices can refer to the controllers above.
     c.args(&o.qemu_extra);
     let mut child = c.spawn().expect("start qemu");
+    let mut feeder = o.sound_in.as_ref().map(|spec| {
+        let mut f = Command::new("python3");
+        f.arg("-I").arg(root().join("tools/scripts/soundin.py")).arg(&qmp_sock).arg(spec);
+        if let Some(w) = &o.sound_wav {
+            f.arg(w);
+        }
+        f.spawn().expect("start tools/scripts/soundin.py")
+    });
     let Some(timeout) = o.timeout else {
-        return child.wait().map(|s| s.success()).unwrap_or(false);
+        let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        if let Some(f) = feeder.as_mut() {
+            let _ = f.kill();
+        }
+        return ok;
     };
     let start = Instant::now();
     let deadline = start + Duration::from_secs(timeout);
@@ -1000,6 +1032,10 @@ fn run(o: &Opts) -> bool {
         let _ = child.kill();
     }
     let _ = child.wait();
+    if let Some(f) = feeder.as_mut() {
+        let _ = f.kill();
+        let _ = f.wait();
+    }
     if o.headless {
         // Programs print code page 850 text: not necessarily UTF-8.
         if let Ok(log) = std::fs::read(&serial) {

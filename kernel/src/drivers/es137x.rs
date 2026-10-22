@@ -2,12 +2,17 @@
 //! its successors, Creative's CT5880 and Ectiva's EV1938 (VMware's
 //! "Sound Blaster" / `es1371` sound card).
 //!
-//! Output only, through DAC2 (the "voice" DAC; DAC1 is the synthesiser
+//! Output goes through DAC2 (the "voice" DAC; DAC1 is the synthesiser
 //! channel). DAC2 plays a ring of [`RING_FRAMES`] 16-bit stereo frames
 //! from memory page 0xc's frame registers and loops over it by itself;
 //! its current count (in longwords, one frame each) is the position. The
 //! serial interface's interrupts stay off: the mixer fills the ring from
-//! the timer tick.
+//! the timer tick. The ADC records the same way into a ring of its own
+//! (memory page 0xd), at DAC2's rate: from the AK4531's input mixer
+//! (line in or the microphone) on the ES1370, from the AC'97 codec's
+//! record select on the ES1371, whose converter runs the ADC at 48 kHz.
+//! DAC2 and the ADC share the control and serial registers, which each
+//! changes bit by bit.
 //!
 //! The ES1370 has an AK4531 mixer codec (write only) and makes DAC2's
 //! rate by dividing 1411200 Hz: 44100 Hz exactly. The ES1371 has an
@@ -32,13 +37,19 @@ const CODEC_1371: u16 = 0x14;
 const LEGACY_1371: u16 = 0x18;
 const SERIAL: u16 = 0x20;
 const DAC2_COUNT: u16 = 0x28;
+const ADC_COUNT: u16 = 0x2c;
 // Memory page 0xc (DAC frames).
 const PAGE_DAC: u32 = 0xc;
 const DAC2_FRAME: u16 = 0x38;
 const DAC2_SIZE: u16 = 0x3c;
+// Memory page 0xd (ADC frames).
+const PAGE_ADC: u32 = 0xd;
+const ADC_FRAME: u16 = 0x30;
+const ADC_SIZE: u16 = 0x34;
 
 // CONTROL.
 const DAC2_EN: u32 = 1 << 5;
+const ADC_EN: u32 = 1 << 4;
 const CDC_EN_1370: u32 = 1 << 1;
 const SERR_DIS_1370: u32 = 1 << 0;
 const fn pclkdiv_1370(rate: u32) -> u32 {
@@ -55,6 +66,10 @@ const AC97_RST_1371: u32 = 1 << 29;
 const P2_MODE_16_STEREO: u32 = 3 << 2;
 const P2_END_INC: u32 = 2 << 19;
 const P2_PAUSE: u32 = 1 << 12;
+/// SERIAL bits of the ADC (record channel 1): 16-bit stereo, interrupt,
+/// loop select.
+const R1_MODE_16_STEREO: u32 = 3 << 4;
+const R1_BITS: u32 = 1 << 15 | 1 << 10 | 3 << 4;
 
 // ES1371 sample rate converter.
 const SRC_WE: u32 = 1 << 24;
@@ -85,7 +100,11 @@ const CODEC_EV1938: u32 = 1 << 26;
 const AC_RESET: u32 = 0x00;
 const AC_MASTER: u32 = 0x02;
 const AC_HEADPHONE: u32 = 0x04;
+const AC_MIC: u32 = 0x0e;
+const AC_LINE_IN: u32 = 0x10;
 const AC_PCM_OUT: u32 = 0x18;
+const AC_REC_SELECT: u32 = 0x1a;
+const AC_REC_GAIN: u32 = 0x1c;
 const AC_POWERDOWN: u32 = 0x26;
 const AC_VENDOR1: u32 = 0x7c;
 const AC_VENDOR2: u32 = 0x7e;
@@ -139,23 +158,24 @@ impl Output {
     pub fn start(&mut self) {
         let io = self.io;
         unsafe {
-            outl(io + CONTROL, self.ctrl);
+            outl(io + CONTROL, (inl(io + CONTROL) | self.ctrl) & !DAC2_EN);
             outl(io + MEM_PAGE, PAGE_DAC);
             outl(io + DAC2_FRAME, self.ring as u32);
             // Size in longwords, less one; the current count from 0.
             outl(io + DAC2_SIZE, RING_BYTES as u32 / 4 - 1);
-            outl(io + SERIAL, P2_MODE_16_STEREO | P2_END_INC);
+            outl(io + SERIAL, inl(io + SERIAL) & R1_BITS | P2_MODE_16_STEREO | P2_END_INC);
             // Sample frames between (unused) interrupts, less one.
             outl(io + DAC2_COUNT, RING_FRAMES as u32 / 4 - 1);
-            outl(io + CONTROL, self.ctrl | DAC2_EN);
+            outl(io + CONTROL, inl(io + CONTROL) | DAC2_EN);
         }
         self.running = true;
     }
 
     pub fn stop(&mut self) {
+        let io = self.io;
         unsafe {
-            outl(self.io + SERIAL, P2_PAUSE);
-            outl(self.io + CONTROL, self.ctrl);
+            outl(io + SERIAL, inl(io + SERIAL) & R1_BITS | P2_PAUSE);
+            outl(io + CONTROL, inl(io + CONTROL) & !DAC2_EN);
         }
         self.running = false;
     }
@@ -176,6 +196,106 @@ impl Output {
             )
         }
     }
+}
+
+/// The ADC: the ring it records into.
+pub struct Input {
+    io: u16,
+    ctrl: u32,
+    ring: u64,
+    rate: u32,
+    running: bool,
+    /// The ES1371's codec ([`CODEC_EV1938`] or 0); `None` on the ES1370.
+    ac97: Option<u32>,
+    source: u32,
+}
+
+impl Input {
+    pub fn ring(&self) -> &[i16] {
+        unsafe { core::slice::from_raw_parts(phys::phys_to_virt(self.ring) as *const i16, RING_FRAMES * 2) }
+    }
+
+    pub fn rate(&self) -> u32 {
+        self.rate
+    }
+
+    /// The frame the ADC records next: its current count, in longwords.
+    pub fn position(&self) -> usize {
+        unsafe {
+            outl(self.io + MEM_PAGE, PAGE_ADC);
+            (inl(self.io + ADC_SIZE) >> 16) as usize % RING_FRAMES
+        }
+    }
+
+    pub fn running(&self) -> bool {
+        self.running
+    }
+
+    pub fn start(&mut self) {
+        let io = self.io;
+        unsafe {
+            core::ptr::write_bytes(phys::phys_to_virt(self.ring) as *mut u8, 0, RING_BYTES);
+            outl(io + CONTROL, (inl(io + CONTROL) | self.ctrl) & !ADC_EN);
+            outl(io + MEM_PAGE, PAGE_ADC);
+            outl(io + ADC_FRAME, self.ring as u32);
+            outl(io + ADC_SIZE, RING_BYTES as u32 / 4 - 1);
+            outl(io + SERIAL, inl(io + SERIAL) & !R1_BITS | R1_MODE_16_STEREO);
+            outl(io + ADC_COUNT, RING_FRAMES as u32 / 4 - 1);
+            outl(io + CONTROL, inl(io + CONTROL) | ADC_EN);
+        }
+        self.running = true;
+    }
+
+    pub fn stop(&mut self) {
+        unsafe { outl(self.io + CONTROL, inl(self.io + CONTROL) & !ADC_EN) };
+        self.running = false;
+    }
+
+    pub fn sources(&self) -> u32 {
+        crate::audio::SOURCE_LINE | crate::audio::SOURCE_MIC
+    }
+
+    pub fn set_source(&mut self, source: u32) -> u32 {
+        let source = if source == 0 { self.source } else { source };
+        let mic = source == crate::audio::SOURCE_MIC;
+        match self.ac97 {
+            Some(magic) => {
+                let c = Es1371 { io: self.io, magic };
+                c.codec_write(AC_REC_SELECT, if mic { 0x0000 } else { 0x0404 });
+            }
+            None => {
+                // AK4531 input mixer switches: line left (bit 4) and right
+                // (bit 3), or the microphone (bit 0) to both.
+                let (l, r) = if mic { (0x01, 0x01) } else { (0x10, 0x08) };
+                ak4531(self.io, 0x12, l);
+                ak4531(self.io, 0x13, r);
+            }
+        }
+        self.source = source;
+        source
+    }
+
+    pub fn diag(&self) -> alloc::string::String {
+        let io = self.io;
+        unsafe {
+            outl(io + MEM_PAGE, PAGE_ADC);
+            alloc::format!(
+                "control {:#x}, status {:#x}, serial {:#x}, ADC frame {:#x} size {:#x} count {:#x}",
+                inl(io + CONTROL),
+                inl(io + STATUS),
+                inl(io + SERIAL),
+                inl(io + ADC_FRAME),
+                inl(io + ADC_SIZE),
+                inl(io + ADC_COUNT)
+            )
+        }
+    }
+}
+
+/// Write an AK4531 register (ES1370).
+fn ak4531(io: u16, r: u16, v: u16) {
+    spin(|| unsafe { inl(io + STATUS) } & CSTAT_1370 == 0);
+    unsafe { outw(io + CODEC_1370, r << 8 | v) };
 }
 
 /// DACs, ADC and interrupts off.
@@ -298,8 +418,9 @@ impl Es1371 {
     }
 }
 
-/// Bring up an AudioPCI chip: DAC2 at its rate, the codec unmuted.
-pub fn probe(dev: &pci::Device) -> Option<Output> {
+/// Bring up an AudioPCI chip: DAC2 at its rate, the codec unmuted, and
+/// the ADC.
+pub fn probe(dev: &pci::Device) -> Option<(Output, Option<Input>)> {
     dev.enable();
     dev.set_intx_disabled(true);
     let chip = if (dev.vendor, dev.device) == (0x1274, 0x5000) { Chip::Es1370 } else { Chip::Es1371 };
@@ -317,16 +438,14 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
             let rate = 44100;
             let ctrl = CDC_EN_1370 | SERR_DIS_1370 | pclkdiv_1370(rate);
             quiet(io, ctrl);
-            let w = |r: u16, v: u16| {
-                spin(|| unsafe { inl(io + STATUS) } & CSTAT_1370 == 0);
-                unsafe { outw(io + CODEC_1370, r << 8 | v) };
-            };
+            let w = |r: u16, v: u16| ak4531(io, r, v);
             // AK4531: out of reset, clocks from the chip; master 0 dB,
-            // voice (DAC2) 0 dB, both unmuted; voice and the usual
-            // sources to the output mixer.
+            // voice (DAC2) 0 dB, both unmuted; voice and CD to the output
+            // mixer. Line in and the microphone at 0 dB (0 dB microphone
+            // amplifier) for the input mixer, which feeds the ADC.
             w(0x16, 0x03);
             w(0x17, 0x00);
-            for (r, v) in [(0x00, 0x00), (0x01, 0x00), (0x02, 0x06), (0x03, 0x06), (0x10, 0x1f), (0x11, 0x0f)] {
+            for (r, v) in [(0x00, 0x00), (0x01, 0x00), (0x02, 0x06), (0x03, 0x06), (0x08, 0x06), (0x09, 0x06), (0x0e, 0x06), (0x10, 0x06), (0x11, 0x0f), (0x14, 0x00), (0x15, 0x00), (0x18, 0x00), (0x19, 0x00)] {
                 w(r, v);
             }
             (ctrl, rate, alloc::string::String::from("AK4531"))
@@ -363,6 +482,11 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
             c.codec_write(AC_MASTER, 0x0000);
             c.codec_write(AC_HEADPHONE, 0x0000);
             c.codec_write(AC_PCM_OUT, 0x0808);
+            // Recording: line in and the microphone off the analog
+            // output, record gain 0 dB.
+            c.codec_write(AC_MIC, 0x8008);
+            c.codec_write(AC_LINE_IN, 0x8808);
+            c.codec_write(AC_REC_GAIN, 0x0000);
             (ctrl, rate, alloc::format!("AC'97 codec {v1:04x}:{v2:04x}{}", if ready { "" } else { " (not ready)" }))
         }
     };
@@ -371,6 +495,12 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
         quiet(io, ctrl);
         return None;
     };
-    crate::println!("{name}: {codec}, DAC2 {rate} Hz, 16-bit stereo");
-    Some(Output { io, ctrl, ring, rate, running: false })
+    let inp = phys::alloc_contig((RING_BYTES / 4096) as u64, 0xffff_ffff).map(|ring| {
+        let ac97 = (chip == Chip::Es1371).then_some(if dev.device == 0x8938 { CODEC_EV1938 } else { 0 });
+        let mut i = Input { io, ctrl, ring, rate, running: false, ac97, source: crate::audio::SOURCE_LINE };
+        i.set_source(crate::audio::SOURCE_LINE);
+        i
+    });
+    crate::println!("{name}: {codec}, DAC2 {rate} Hz, 16-bit stereo{}", if inp.is_some() { ", ADC" } else { "" });
+    Some((Output { io, ctrl, ring, rate, running: false }, inp))
 }

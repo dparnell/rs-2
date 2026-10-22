@@ -284,6 +284,10 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 306) => super::audio::close,
         (8, 307) => super::audio::set_volume,
         (8, 308) => super::audio::pause,
+        (8, 309) => super::audio::open_input,
+        (8, 310) => super::audio::read,
+        (8, 311) => super::audio::query_level,
+        (8, 312) => super::audio::set_input,
         // ---- MOUCALLS ----
         (3, 1) => super::mou::mou_get_ptr_shape,
         (3, 2) => super::mou::mou_set_ptr_shape,

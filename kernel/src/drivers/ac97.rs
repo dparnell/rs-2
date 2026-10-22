@@ -2,9 +2,9 @@
 //! chipsets with the same interface): QEMU's `AC97`, VirtualBox's
 //! default sound card, Proxmox's `ac97`, older VMware.
 //!
-//! Output only. The native audio mixer registers (NAMBAR, I/O BAR 0)
-//! reach the primary codec; the bus master registers (NABMBAR, I/O BAR
-//! 1) hold the PCM out DMA engine. The link is cold reset, the codec
+//! The native audio mixer registers (NAMBAR, I/O BAR 0) reach the
+//! primary codec; the bus master registers (NABMBAR, I/O BAR 1) hold the
+//! PCM out and PCM in DMA engines. The link is cold reset, the codec
 //! waits for its DAC to be ready, master and PCM out volumes are set to
 //! 0 dB unmuted and the front DAC runs at 48 kHz (set through variable
 //! rate audio when the codec has it, else its fixed rate). PCM out plays
@@ -12,6 +12,11 @@
 //! buffer descriptors; the last valid index is kept one behind the
 //! current one, so the engine never runs dry. As with HD Audio, the
 //! mixer fills the ring from the timer tick: no interrupts.
+//!
+//! PCM in records the codec's record select source (line in or the
+//! microphone, at 0 dB record gain; their paths to the analog output
+//! muted) at the output's rate into a ring of its own, described and
+//! followed the same way.
 
 use core::ptr::write_volatile;
 use core::sync::atomic::{fence, Ordering};
@@ -32,22 +37,31 @@ const ENTRY_FRAMES: usize = RING_FRAMES / BDL_ENTRIES;
 const RESET: u16 = 0x00;
 const MASTER: u16 = 0x02;
 const HEADPHONE: u16 = 0x04;
+const MIC: u16 = 0x0e;
+const LINE_IN: u16 = 0x10;
 const PCM_OUT: u16 = 0x18;
+const REC_SELECT: u16 = 0x1a;
+const REC_GAIN: u16 = 0x1c;
 const POWERDOWN: u16 = 0x26;
 const EXT_ID: u16 = 0x28;
 const EXT_CTRL: u16 = 0x2a;
 const FRONT_RATE: u16 = 0x2c;
+const ADC_RATE: u16 = 0x32;
 const VENDOR1: u16 = 0x7c;
 const VENDOR2: u16 = 0x7e;
 
-// Bus master registers (NABMBAR): PCM out box and global registers.
-const PO_BDBAR: u16 = 0x10;
-const PO_CIV: u16 = 0x14;
-const PO_LVI: u16 = 0x15;
-const PO_SR: u16 = 0x16;
-const PO_PICB: u16 = 0x18;
-const PO_CR: u16 = 0x1b;
-const PI_CR: u16 = 0x0b;
+// Bus master registers (NABMBAR): the PCM in and PCM out boxes (each
+// with the registers below at its offset) and global registers.
+const PI: u16 = 0x00;
+const PO: u16 = 0x10;
+const BDBAR: u16 = 0x00;
+const CIV: u16 = 0x04;
+const LVI: u16 = 0x05;
+const SR: u16 = 0x06;
+const PICB: u16 = 0x08;
+const CR: u16 = 0x0b;
+const PO_CR: u16 = PO + CR;
+const PI_CR: u16 = PI + CR;
 const MC_CR: u16 = 0x2b;
 const GLOB_CNT: u16 = 0x2c;
 const GLOB_STA: u16 = 0x30;
@@ -74,89 +88,170 @@ pub fn is_ac97(dev: &pci::Device) -> bool {
     )
 }
 
-/// The PCM out engine: the ring the mixer fills.
-pub struct Output {
+/// A DMA engine (PCM in or out) over a ring of [`RING_FRAMES`] frames
+/// in [`BDL_ENTRIES`] descriptors.
+struct Engine {
+    /// The box's registers (NABMBAR plus [`PI`] or [`PO`]).
+    reg: u16,
     bm: u16,
     bdl: u64,
     ring: u64,
-    rate: u32,
     running: bool,
+}
+
+impl Engine {
+    /// The frame the engine moves next: the current descriptor and the
+    /// samples left in it. Also moves the last valid index along.
+    fn position(&self) -> usize {
+        let r = self.reg;
+        let (civ, picb) = loop {
+            let civ = unsafe { inb(r + CIV) } as usize & 31;
+            let picb = unsafe { inw(r + PICB) } as usize;
+            if unsafe { inb(r + CIV) } as usize & 31 == civ {
+                break (civ, picb);
+            }
+        };
+        if self.running {
+            unsafe { outb(r + LVI, ((civ + BDL_ENTRIES - 1) % BDL_ENTRIES) as u8) };
+        }
+        let left = (picb / 2).min(ENTRY_FRAMES);
+        (civ * ENTRY_FRAMES + ENTRY_FRAMES - left) % RING_FRAMES
+    }
+
+    fn reset(&self) {
+        let r = self.reg;
+        unsafe {
+            outb(r + CR, 0);
+            outb(r + CR, CR_RR);
+        }
+        msi::poll(10, || {}, || unsafe { inb(r + CR) } & CR_RR == 0);
+        unsafe { outw(r + SR, 0x1c) };
+    }
+
+    fn start(&mut self) {
+        self.reset();
+        let r = self.reg;
+        unsafe {
+            outl(r + BDBAR, self.bdl as u32);
+            outb(r + LVI, BDL_ENTRIES as u8 - 1);
+            fence(Ordering::SeqCst);
+            // No interrupts (IOCE, FEIE, LVBIE clear).
+            outb(r + CR, CR_RPBM);
+        }
+        self.running = true;
+    }
+
+    fn stop(&mut self) {
+        unsafe { outb(self.reg + CR, 0) };
+        self.running = false;
+    }
+
+    fn diag(&self, what: &str) -> alloc::string::String {
+        let (r, bm) = (self.reg, self.bm);
+        unsafe {
+            alloc::format!(
+                "{what} civ {} lvi {} sr {:#x} picb {} cr {:#x}, glob_cnt {:#x} glob_sta {:#x}",
+                inb(r + CIV),
+                inb(r + LVI),
+                inw(r + SR),
+                inw(r + PICB),
+                inb(r + CR),
+                inl(bm + GLOB_CNT),
+                inl(bm + GLOB_STA)
+            )
+        }
+    }
+}
+
+/// The PCM out engine: the ring the mixer fills.
+pub struct Output {
+    e: Engine,
+    rate: u32,
 }
 
 impl Output {
     pub fn ring(&mut self) -> &mut [i16] {
-        unsafe { core::slice::from_raw_parts_mut(phys::phys_to_virt(self.ring) as *mut i16, RING_FRAMES * 2) }
+        unsafe { core::slice::from_raw_parts_mut(phys::phys_to_virt(self.e.ring) as *mut i16, RING_FRAMES * 2) }
     }
 
     pub fn rate(&self) -> u32 {
         self.rate
     }
 
-    /// The frame the hardware plays next: the current descriptor and the
-    /// samples left in it. Also moves the last valid index along.
+    /// The frame the hardware plays next.
     pub fn position(&self) -> usize {
-        let bm = self.bm;
-        let (civ, picb) = loop {
-            let civ = unsafe { inb(bm + PO_CIV) } as usize & 31;
-            let picb = unsafe { inw(bm + PO_PICB) } as usize;
-            if unsafe { inb(bm + PO_CIV) } as usize & 31 == civ {
-                break (civ, picb);
-            }
-        };
-        if self.running {
-            unsafe { outb(bm + PO_LVI, ((civ + BDL_ENTRIES - 1) % BDL_ENTRIES) as u8) };
-        }
-        let left = (picb / 2).min(ENTRY_FRAMES);
-        (civ * ENTRY_FRAMES + ENTRY_FRAMES - left) % RING_FRAMES
+        self.e.position()
     }
 
     pub fn running(&self) -> bool {
-        self.running
-    }
-
-    fn reset_engine(&self) {
-        let bm = self.bm;
-        unsafe {
-            outb(bm + PO_CR, 0);
-            outb(bm + PO_CR, CR_RR);
-        }
-        msi::poll(10, || {}, || unsafe { inb(bm + PO_CR) } & CR_RR == 0);
-        unsafe { outw(bm + PO_SR, 0x1c) };
+        self.e.running
     }
 
     /// Start playing the ring from frame 0 (the caller has filled it).
     pub fn start(&mut self) {
-        self.reset_engine();
-        let bm = self.bm;
-        unsafe {
-            outl(bm + PO_BDBAR, self.bdl as u32);
-            outb(bm + PO_LVI, BDL_ENTRIES as u8 - 1);
-            fence(Ordering::SeqCst);
-            // No interrupts (IOCE, FEIE, LVBIE clear).
-            outb(bm + PO_CR, CR_RPBM);
-        }
-        self.running = true;
+        self.e.start();
     }
 
     pub fn stop(&mut self) {
-        unsafe { outb(self.bm + PO_CR, 0) };
-        self.running = false;
+        self.e.stop();
     }
 
     pub fn diag(&self) -> alloc::string::String {
-        let bm = self.bm;
-        unsafe {
-            alloc::format!(
-                "PCM out civ {} lvi {} sr {:#x} picb {} cr {:#x}, glob_cnt {:#x} glob_sta {:#x}",
-                inb(bm + PO_CIV),
-                inb(bm + PO_LVI),
-                inw(bm + PO_SR),
-                inw(bm + PO_PICB),
-                inb(bm + PO_CR),
-                inl(bm + GLOB_CNT),
-                inl(bm + GLOB_STA)
-            )
-        }
+        self.e.diag("PCM out")
+    }
+}
+
+/// The PCM in engine: the ring the codec's ADC records into.
+pub struct Input {
+    e: Engine,
+    mix: u16,
+    rate: u32,
+    source: u32,
+}
+
+impl Input {
+    pub fn ring(&self) -> &[i16] {
+        unsafe { core::slice::from_raw_parts(phys::phys_to_virt(self.e.ring) as *const i16, RING_FRAMES * 2) }
+    }
+
+    pub fn rate(&self) -> u32 {
+        self.rate
+    }
+
+    /// The frame the ADC records next.
+    pub fn position(&self) -> usize {
+        self.e.position()
+    }
+
+    pub fn running(&self) -> bool {
+        self.e.running
+    }
+
+    pub fn start(&mut self) {
+        unsafe { core::ptr::write_bytes(phys::phys_to_virt(self.e.ring) as *mut u8, 0, RING_BYTES) };
+        self.e.start();
+    }
+
+    pub fn stop(&mut self) {
+        self.e.stop();
+    }
+
+    pub fn sources(&self) -> u32 {
+        crate::audio::SOURCE_LINE | crate::audio::SOURCE_MIC
+    }
+
+    /// The record select register: both channels from line in or the
+    /// microphone.
+    pub fn set_source(&mut self, source: u32) -> u32 {
+        let source = if source == 0 { self.source } else { source };
+        let c = Codec { mix: self.mix, bm: self.e.bm };
+        c.write(REC_SELECT, if source == crate::audio::SOURCE_MIC { 0x0000 } else { 0x0404 });
+        self.source = source;
+        source
+    }
+
+    pub fn diag(&self) -> alloc::string::String {
+        self.e.diag("PCM in")
     }
 }
 
@@ -196,8 +291,9 @@ impl Codec {
     }
 }
 
-/// Bring up an AC'97 controller and its primary codec.
-pub fn probe(dev: &pci::Device) -> Option<Output> {
+/// Bring up an AC'97 controller and its primary codec: PCM out, and PCM
+/// in at the same rate if the codec takes it.
+pub fn probe(dev: &pci::Device) -> Option<(Output, Option<Input>)> {
     dev.enable();
     dev.set_intx_disabled(true);
     let (b0, b1) = (dev.read(0x10), dev.read(0x14));
@@ -245,6 +341,18 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
             rate = r;
         }
     }
+    // Recording: line in and the microphone off the analog output, the
+    // record gain at 0 dB; the ADC at the DAC's rate.
+    c.write(MIC, 0x8008);
+    c.write(LINE_IN, 0x8808);
+    c.write(REC_GAIN, 0x0000);
+    let mut in_ok = true;
+    if vra {
+        c.write(ADC_RATE, rate as u16);
+        in_ok = c.read(ADC_RATE) as u32 == rate;
+    } else if rate != 48000 {
+        in_ok = false;
+    }
     // 16-bit stereo PCM: the channel and sample size fields of GLOB_CNT
     // left at 0.
     let cnt = unsafe { inl(bm + GLOB_CNT) } & !(3 << 20 | 3 << 22);
@@ -255,6 +363,33 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
         return None;
     };
     let (bdl, ring) = (mem, mem + 4096);
+    fill_bdl(bdl, ring);
+    let inp = in_ok
+        .then(|| phys::alloc_contig(1 + (RING_BYTES / 4096) as u64, 0xffff_ffff))
+        .flatten()
+        .map(|mem| {
+            fill_bdl(mem, mem + 4096);
+            let e = Engine { reg: bm + PI, bm, bdl: mem, ring: mem + 4096, running: false };
+            e.reset();
+            let mut i = Input { e, mix, rate, source: crate::audio::SOURCE_LINE };
+            i.set_source(crate::audio::SOURCE_LINE);
+            i
+        });
+    crate::println!(
+        "{name}: codec {:04x}:{:04x}{}, {} Hz, 16-bit stereo{}",
+        id >> 16,
+        id & 0xffff,
+        if vra { ", variable rate" } else { "" },
+        rate,
+        if inp.is_some() { ", PCM in" } else { "" }
+    );
+    let e = Engine { reg: bm + PO, bm, bdl, ring, running: false };
+    e.reset();
+    Some((Output { e, rate }, inp))
+}
+
+/// A ring's descriptors: [`ENTRY_FRAMES`] frames each.
+fn fill_bdl(bdl: u64, ring: u64) {
     let b = phys::phys_to_virt(bdl) as *mut u32;
     for i in 0..BDL_ENTRIES {
         let a = ring + (i * ENTRY_FRAMES * 4) as u64;
@@ -264,8 +399,4 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
             write_volatile(b.add(i * 2 + 1), (ENTRY_FRAMES * 2) as u32);
         }
     }
-    crate::println!("{name}: codec {:04x}:{:04x}{}, {} Hz, 16-bit stereo", id >> 16, id & 0xffff, if vra { ", variable rate" } else { "" }, rate);
-    let o = Output { bm, bdl, ring, rate, running: false };
-    o.reset_engine();
-    Some(o)
 }

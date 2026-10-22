@@ -2,17 +2,25 @@
 //! later chipsets, QEMU's `intel-hda`/`ich9-intel-hda`, VMware's "HD
 //! Audio" and Proxmox's ich9-intel-hda.
 //!
-//! Output only. The controller is reset, codec verbs go through the CORB
-//! and RIRB rings (or the immediate command registers when the rings do
-//! not answer), and each codec's audio function group is walked for an
-//! output pin (line out, speaker, headphone) and the path from it back to
-//! a DAC through mixers and selectors. Every such pin is enabled, the
+//! The controller is reset, codec verbs go through the CORB and RIRB
+//! rings (or the immediate command registers when the rings do not
+//! answer), and each codec's audio function group is walked for an output
+//! pin (line out, speaker, headphone) and the path from it back to a DAC
+//! through mixers and selectors. Every such pin is enabled, the
 //! amplifiers on its path are unmuted at 0 dB and the DACs are bound to
 //! one output stream: 48 kHz, 16-bit stereo, played from a ring of
 //! [`RING_FRAMES`] frames described by a buffer descriptor list of four
 //! entries. The software mixer (`crate::audio`) fills the ring ahead of
 //! the hardware's link position (LPIB) from the timer tick, so the stream
 //! raises no interrupts.
+//!
+//! Input: the first codec with an ADC that reaches an input pin (line
+//! in, microphone, aux) through selectors and mixers records into the
+//! first input stream, 48 kHz 16-bit stereo, a ring like the output's.
+//! The path of the selected source is set up when it is chosen: the pin
+//! enabled for input (with an 80 % microphone bias voltage where the pin
+//! offers it), the connections selected and the amplifiers on the way at
+//! 0 dB.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -32,6 +40,8 @@ const RING_BYTES: usize = RING_FRAMES * 4;
 const BDL_ENTRIES: usize = 4;
 /// Stream tag of the output stream (1-15).
 const TAG: u32 = 1;
+/// Stream tag of the input stream.
+const TAG_IN: u32 = 2;
 /// 48 kHz, 16 bits, 2 channels (stream format and converter format).
 const FORMAT: u16 = 0x0011;
 
@@ -99,6 +109,7 @@ const P_OUT_AMP: u32 = 0x12;
 
 // Widget types (capabilities bits 23:20).
 const W_OUTPUT: u32 = 0;
+const W_INPUT: u32 = 1;
 const W_MIXER: u32 = 2;
 const W_SELECTOR: u32 = 3;
 const W_PIN: u32 = 4;
@@ -247,6 +258,60 @@ impl Group {
             out.pop();
         }
         false
+    }
+}
+
+/// The source an input pin is (its default device), if it is one.
+fn pin_source(w: &Widget) -> Option<u32> {
+    if w.kind() != W_PIN || w.pin_caps & 1 << 5 == 0 || w.config >> 30 == 1 {
+        return None;
+    }
+    match w.config >> 20 & 0xf {
+        // Line in, aux.
+        0x8 | 0x9 => Some(crate::audio::SOURCE_LINE),
+        0xa => Some(crate::audio::SOURCE_MIC),
+        _ => None,
+    }
+}
+
+impl Group {
+    /// The path from an ADC `nid` to an input pin of `source`: nodes from
+    /// the ADC to the pin, each with the connection index taken.
+    fn in_path(&self, nid: u32, source: u32, depth: usize, out: &mut Vec<(u32, usize)>) -> bool {
+        let Some(w) = self.widget(nid) else { return false };
+        if pin_source(w) == Some(source) {
+            out.push((nid, 0));
+            return true;
+        }
+        if depth == 0 || !matches!(w.kind(), W_INPUT | W_MIXER | W_SELECTOR) {
+            return false;
+        }
+        for (i, &c) in w.conns.iter().enumerate() {
+            out.push((nid, i));
+            if self.in_path(c, source, depth - 1, out) {
+                return true;
+            }
+            out.pop();
+        }
+        false
+    }
+
+    /// An ADC and its paths to each source it reaches.
+    fn input_routes(&self) -> Option<(u32, Vec<(u32, Vec<(u32, usize)>)>)> {
+        let mut best: Option<(u32, Vec<(u32, Vec<(u32, usize)>)>)> = None;
+        for adc in self.widgets.iter().filter(|w| w.kind() == W_INPUT) {
+            let mut routes = Vec::new();
+            for src in [crate::audio::SOURCE_LINE, crate::audio::SOURCE_MIC] {
+                let mut path = Vec::new();
+                if self.in_path(adc.nid, src, 6, &mut path) {
+                    routes.push((src, path));
+                }
+            }
+            if routes.len() > best.as_ref().map_or(0, |b| b.1.len()) {
+                best = Some((adc.nid, routes));
+            }
+        }
+        best
     }
 }
 
@@ -428,58 +493,190 @@ impl Output {
     }
 
     fn reset_stream(&self) {
-        let (r, sd) = (self.regs, self.sd);
-        let ctl = rd32(r, sd + SD_CTL);
-        wr32(r, sd + SD_CTL, ctl & !SD_CTL_RUN);
-        wait(r, 10, || rd32(r, sd + SD_CTL) & SD_CTL_RUN == 0);
-        wr32(r, sd + SD_CTL, (rd32(r, sd + SD_CTL) & 0xff_ffff) | SD_CTL_SRST);
-        wait(r, 10, || rd32(r, sd + SD_CTL) & SD_CTL_SRST != 0);
-        wr32(r, sd + SD_CTL, rd32(r, sd + SD_CTL) & 0xff_ffff & !SD_CTL_SRST);
-        wait(r, 10, || rd32(r, sd + SD_CTL) & SD_CTL_SRST == 0);
-        // Clear the status bits (write 1 to clear).
-        wr8(r, sd + SD_STS, 0x1c);
+        sd_reset(self.regs, self.sd);
     }
 
     /// Start playing the ring from frame 0 (the caller has filled it).
     pub fn start(&mut self) {
-        self.reset_stream();
-        let (r, sd) = (self.regs, self.sd);
-        wr32(r, sd + SD_BDPL, self.bdl as u32);
-        wr32(r, sd + SD_BDPU, (self.bdl >> 32) as u32);
-        wr32(r, sd + SD_CBL, RING_BYTES as u32);
-        wr16(r, sd + SD_LVI, BDL_ENTRIES as u16 - 1);
-        wr16(r, sd + SD_FMT, FORMAT);
-        // Stream number in bits 23:20, no interrupts.
-        let ctl = rd32(r, sd + SD_CTL) & 0xff_ffff & !(0xf << 20 | 0x1c);
-        wr32(r, sd + SD_CTL, ctl | TAG << 20);
-        fence(Ordering::SeqCst);
-        wr32(r, sd + SD_CTL, rd32(r, sd + SD_CTL) & 0xff_ffff | SD_CTL_RUN);
+        sd_start(self.regs, self.sd, self.bdl, TAG);
         self.running = true;
     }
 
     pub fn stop(&mut self) {
-        let (r, sd) = (self.regs, self.sd);
-        wr32(r, sd + SD_CTL, rd32(r, sd + SD_CTL) & 0xff_ffff & !SD_CTL_RUN);
+        sd_stop(self.regs, self.sd);
         self.running = false;
     }
 
     pub fn diag(&self) -> String {
-        let (r, sd) = (self.regs, self.sd);
-        alloc::format!(
-            "stream ctl {:#x} sts {:#x} lpib {} cbl {}, gctl {:#x} intsts {:#x}",
-            rd32(r, sd + SD_CTL),
-            rd8(r, sd + SD_STS),
-            rd32(r, sd + SD_LPIB),
-            rd32(r, sd + SD_CBL),
-            rd32(r, GCTL),
-            rd32(r, 0x24)
-        )
+        sd_diag(self.regs, self.sd)
+    }
+}
+
+fn sd_reset(r: *mut u8, sd: usize) {
+    let ctl = rd32(r, sd + SD_CTL);
+    wr32(r, sd + SD_CTL, ctl & !SD_CTL_RUN);
+    wait(r, 10, || rd32(r, sd + SD_CTL) & SD_CTL_RUN == 0);
+    wr32(r, sd + SD_CTL, (rd32(r, sd + SD_CTL) & 0xff_ffff) | SD_CTL_SRST);
+    wait(r, 10, || rd32(r, sd + SD_CTL) & SD_CTL_SRST != 0);
+    wr32(r, sd + SD_CTL, rd32(r, sd + SD_CTL) & 0xff_ffff & !SD_CTL_SRST);
+    wait(r, 10, || rd32(r, sd + SD_CTL) & SD_CTL_SRST == 0);
+    // Clear the status bits (write 1 to clear).
+    wr8(r, sd + SD_STS, 0x1c);
+}
+
+/// Run stream descriptor `sd` over the ring its BDL describes, from the
+/// start.
+fn sd_start(r: *mut u8, sd: usize, bdl: u64, tag: u32) {
+    sd_reset(r, sd);
+    wr32(r, sd + SD_BDPL, bdl as u32);
+    wr32(r, sd + SD_BDPU, (bdl >> 32) as u32);
+    wr32(r, sd + SD_CBL, RING_BYTES as u32);
+    wr16(r, sd + SD_LVI, BDL_ENTRIES as u16 - 1);
+    wr16(r, sd + SD_FMT, FORMAT);
+    // Stream number in bits 23:20, no interrupts.
+    let ctl = rd32(r, sd + SD_CTL) & 0xff_ffff & !(0xf << 20 | 0x1c);
+    wr32(r, sd + SD_CTL, ctl | tag << 20);
+    fence(Ordering::SeqCst);
+    wr32(r, sd + SD_CTL, rd32(r, sd + SD_CTL) & 0xff_ffff | SD_CTL_RUN);
+}
+
+fn sd_stop(r: *mut u8, sd: usize) {
+    wr32(r, sd + SD_CTL, rd32(r, sd + SD_CTL) & 0xff_ffff & !SD_CTL_RUN);
+}
+
+fn sd_diag(r: *mut u8, sd: usize) -> String {
+    alloc::format!(
+        "stream ctl {:#x} sts {:#x} lpib {} cbl {}, gctl {:#x} intsts {:#x}",
+        rd32(r, sd + SD_CTL),
+        rd8(r, sd + SD_STS),
+        rd32(r, sd + SD_LPIB),
+        rd32(r, sd + SD_CBL),
+        rd32(r, GCTL),
+        rd32(r, 0x24)
+    )
+}
+
+/// The ring's buffer descriptor list: the ring in equal parts.
+fn fill_bdl(bdl: u64, ring: u64) {
+    let part = RING_BYTES / BDL_ENTRIES;
+    let b = phys::phys_to_virt(bdl) as *mut u32;
+    for i in 0..BDL_ENTRIES {
+        let a = ring + (i * part) as u64;
+        unsafe {
+            write_volatile(b.add(i * 4), a as u32);
+            write_volatile(b.add(i * 4 + 1), (a >> 32) as u32);
+            write_volatile(b.add(i * 4 + 2), part as u32);
+            write_volatile(b.add(i * 4 + 3), 0);
+        }
+    }
+}
+
+/// The input stream: the ring the ADC records into.
+pub struct Input {
+    regs: *mut u8,
+    sd: usize,
+    bdl: u64,
+    ring: u64,
+    running: bool,
+    link: Link,
+    group: Group,
+    adc: u32,
+    /// The path from the ADC to each source's pin.
+    routes: Vec<(u32, Vec<(u32, usize)>)>,
+    source: u32,
+}
+
+unsafe impl Send for Input {}
+
+impl Input {
+    pub fn ring(&self) -> &[i16] {
+        unsafe { core::slice::from_raw_parts(phys::phys_to_virt(self.ring) as *const i16, RING_FRAMES * 2) }
+    }
+
+    /// The frame the ADC records next.
+    pub fn position(&self) -> usize {
+        (rd32(self.regs, self.sd + SD_LPIB) as usize % RING_BYTES) / 4
+    }
+
+    pub fn running(&self) -> bool {
+        self.running
+    }
+
+    pub fn rate(&self) -> u32 {
+        48000
+    }
+
+    pub fn start(&mut self) {
+        unsafe { core::ptr::write_bytes(phys::phys_to_virt(self.ring) as *mut u8, 0, RING_BYTES) };
+        sd_start(self.regs, self.sd, self.bdl, TAG_IN);
+        self.running = true;
+    }
+
+    pub fn stop(&mut self) {
+        sd_stop(self.regs, self.sd);
+        self.running = false;
+    }
+
+    pub fn sources(&self) -> u32 {
+        self.routes.iter().fold(0, |a, r| a | r.0)
+    }
+
+    /// Route the ADC to the pin of `source`, or of the other source when
+    /// the codec lacks it.
+    pub fn set_source(&mut self, source: u32) -> u32 {
+        let source = if source == 0 { self.source } else { source };
+        let Some(i) = self.routes.iter().position(|r| r.0 == source).or(if self.routes.is_empty() { None } else { Some(0) }) else {
+            return 0;
+        };
+        let (src, path) = (self.routes[i].0, self.routes[i].1.clone());
+        let (l, g) = (&mut self.link, &self.group);
+        for &(nid, idx) in &path {
+            let Some(w) = g.widget(nid) else { continue };
+            if w.caps & 1 << 10 != 0 {
+                l.cmd(g.cad, nid, SET_POWER << 8);
+            }
+            match w.kind() {
+                W_INPUT => {
+                    if w.conns.len() > 1 {
+                        l.cmd(g.cad, nid, SET_CONN_SELECT << 8 | idx as u32);
+                    }
+                    l.cmd(g.cad, nid, SET_FORMAT << 16 | FORMAT as u32);
+                    l.cmd(g.cad, nid, SET_STREAM << 8 | TAG_IN << 4);
+                    unmute(l, g, w, false, idx);
+                    if idx != 0 {
+                        unmute(l, g, w, false, 0);
+                    }
+                }
+                W_SELECTOR => {
+                    l.cmd(g.cad, nid, SET_CONN_SELECT << 8 | idx as u32);
+                    unmute(l, g, w, false, idx);
+                    unmute(l, g, w, true, 0);
+                }
+                W_MIXER => {
+                    unmute(l, g, w, false, idx);
+                    unmute(l, g, w, true, 0);
+                }
+                W_PIN => {
+                    // Input enabled; a microphone gets 80 % bias.
+                    let vref = if src == crate::audio::SOURCE_MIC && w.pin_caps & 1 << 12 != 0 { 4 } else { 0 };
+                    l.cmd(g.cad, nid, SET_PIN_CTL << 8 | 0x20 | vref);
+                    unmute(l, g, w, false, 0);
+                }
+                _ => {}
+            }
+        }
+        self.source = src;
+        src
+    }
+
+    pub fn diag(&self) -> String {
+        alloc::format!("ADC {:#x}, source {}, {}", self.adc, self.source, sd_diag(self.regs, self.sd))
     }
 }
 
 /// Bring up an HDA controller: the output stream if a codec has an
-/// output path.
-pub fn probe(dev: &pci::Device) -> Option<Output> {
+/// output path, and the input stream if one has an input path.
+pub fn probe(dev: &pci::Device) -> Option<(Output, Option<Input>)> {
     dev.enable();
     dev.set_intx_disabled(true);
     let bar = dev.bar(0);
@@ -535,6 +732,7 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
     let (corb, rirb, bdl, ring) = (mem, mem + 1024, mem + PAGE as u64, mem + 2 * PAGE as u64);
     let mut link = Link { regs, rings: setup_rings(regs, corb, rirb), rirb_rp: 0 };
     let mut out = None;
+    let mut input: Option<(Group, u32, Vec<(u32, Vec<(u32, usize)>)>)> = None;
     for cad in 0..15u32 {
         if codecs & 1 << cad == 0 {
             continue;
@@ -548,8 +746,21 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
             continue;
         };
         let paths = route(&mut link, &g);
+        let ins = if iss > 0 && input.is_none() { g.input_routes() } else { None };
+        let in_text = match &ins {
+            Some((adc, routes)) => routes
+                .iter()
+                .map(|(src, p)| {
+                    let chain: Vec<String> = p.iter().map(|&(n, _)| alloc::format!("{n:#x}")).collect();
+                    alloc::format!("{} {}", if *src == crate::audio::SOURCE_MIC { "mic in" } else { "line in" }, chain.join(" -> "))
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+                + &alloc::format!(" (ADC {adc:#x})"),
+            None => String::from("no input path"),
+        };
         crate::println!(
-            "{name}: codec {cad} {:04x}:{:04x}, function group {:#x}, {} widgets: {}",
+            "{name}: codec {cad} {:04x}:{:04x}, function group {:#x}, {} widgets: {}; {in_text}",
             id >> 16,
             id & 0xffff,
             g.afg,
@@ -559,24 +770,26 @@ pub fn probe(dev: &pci::Device) -> Option<Output> {
         if !paths.is_empty() && out.is_none() {
             out = Some(());
         }
-    }
-    out?;
-    // The buffer descriptor list: the ring in equal parts.
-    let part = RING_BYTES / BDL_ENTRIES;
-    let b = phys::phys_to_virt(bdl) as *mut u32;
-    for i in 0..BDL_ENTRIES {
-        let a = ring + (i * part) as u64;
-        unsafe {
-            write_volatile(b.add(i * 4), a as u32);
-            write_volatile(b.add(i * 4 + 1), (a >> 32) as u32);
-            write_volatile(b.add(i * 4 + 2), part as u32);
-            write_volatile(b.add(i * 4 + 3), 0);
+        if let Some((adc, routes)) = ins {
+            input = Some((g, adc, routes));
         }
     }
+    out?;
+    fill_bdl(bdl, ring);
     let sd = SD_BASE + iss * 0x20;
     let o = Output { regs, sd, bdl, ring, running: false };
     o.reset_stream();
-    Some(o)
+    // The input: its BDL page and ring.
+    let inp = input.and_then(|(group, adc, routes)| {
+        let mem = phys::alloc_contig(1 + (RING_BYTES / PAGE) as u64, limit)?;
+        let (bdl, ring) = (mem, mem + PAGE as u64);
+        fill_bdl(bdl, ring);
+        let mut i = Input { regs, sd: SD_BASE, bdl, ring, running: false, link, group, adc, routes, source: crate::audio::SOURCE_LINE };
+        sd_reset(regs, SD_BASE);
+        i.set_source(crate::audio::SOURCE_LINE);
+        Some(i)
+    });
+    Some((o, inp))
 }
 
 /// Program and start the CORB and RIRB; `None` if they cannot be set up

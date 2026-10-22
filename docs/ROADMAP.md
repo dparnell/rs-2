@@ -169,9 +169,32 @@ Status markers: done, in progress, planned.
     same: QEMU has no ES1371). AUDTEST and audcheck pass on QEMU's HDA,
     AC97 and ES1370, Solitaire's sounds play on AC97; the ES1371 path is
     untested (reviewed against the register layout only)
-- planned: recording,
-  jack sensing, codec volume controls, MMPM/2's audio device driver
-  interface for IBM's own drivers
+- done: recording, one capture stream at a time (`audio::Input`,
+  `audio::Capture`): HDA's first input stream from an ADC routed to a
+  line-in or microphone pin (selectors, mixers, pin bias, amplifiers at
+  0 dB), AC'97 PCM in (record select, record gain 0 dB, line in and
+  microphone off the analog output), the AudioPCI's ADC (AK4531 input
+  mixer on the ES1370, AC'97 record select on the ES1371). The tick takes
+  what the hardware recorded, scales it by the stream's volume, resamples
+  and converts it into a queue of at most 2 s; a stuck input becomes
+  silence by the clock. RS2API 309-312, and 303/305-308 on a capture
+  handle:
+
+  | Ord | Call | |
+  |-----|------|-|
+  | 309 | Rs2AudioOpenInput(ULONG ulRate, ULONG ulChannels, ULONG ulBits, PULONG phStream) | 50 without input hardware, 170 while another capture is open |
+  | 310 | Rs2AudioRead(ULONG hStream, PVOID pBuf, ULONG cb, ULONG ulTimeoutMs, PULONG pcbRead) | waits for `cb` bytes (at most 1 s's worth) or the timeout, then copies what there is |
+  | 311 | Rs2AudioQueryLevel(ULONG hStream, PULONG pulLevel) | recent peak, left low word, right high word, 0-32767 |
+  | 312 | Rs2AudioSetInput(ULONG ulSource, PULONG pulSource) | 1 line in, 2 microphone, 0 keeps; the source taken |
+
+  QueryPos gives the bytes recorded, Stop discards the queue (waiting
+  readers return), SetVolume is the recording level, Pause drops what
+  comes meanwhile. `cargo xtask run --sound-in FILE|tone:HZ` feeds QEMU's
+  input through its D-Bus audio backend (tools/scripts/soundin.py);
+  `AUDTEST RECORD` checks the calls: it passes on QEMU's HDA, AC97 and
+  ES1370. Recording on VMware (ES1371, HD Audio) is untested
+- planned: jack sensing, codec volume controls, MMPM/2's audio device
+  driver interface for IBM's own drivers
 - done: ACPI (MADT, FADT reset and S5), LAPIC timer, IOAPIC routing
 - done: SMP: all processors started (INIT/SIPI), per-CPU GDT/TSS/LAPIC
   timer, shared run queues, big kernel lock, IPI wake-ups and TLB shootdown

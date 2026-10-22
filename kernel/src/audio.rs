@@ -15,6 +15,16 @@
 //! A stream's play position comes from marks the mixer leaves as it
 //! mixes (ring frame, input bytes consumed so far): a mark counts once
 //! the hardware has passed its frame.
+//!
+//! Sound input is one [`Capture`] stream at a time. The driver's
+//! [`Input`] records 16-bit stereo into a ring of [`RING_FRAMES`] frames
+//! at its own rate (48 kHz, 44.1 kHz on the ES1370); the tick takes what
+//! the hardware has written since the last tick, scales it by the
+//! stream's volume (the recording level), resamples it to the stream's
+//! rate and converts it to its format, and queues it for Rs2AudioRead
+//! (at most [`CAPTURE_SECS`]; the oldest goes when a reader falls
+//! behind). An input whose position stands still for [`STALL_MS`] is
+//! replaced by silence at the clock's pace, as for output.
 
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
@@ -39,6 +49,15 @@ const STALL_MS: u64 = 1000;
 const IDLE_STOP_MS: u64 = 2000;
 /// Streams in the system.
 const MAX_STREAMS: usize = 64;
+/// Most a capture stream holds for its reader (seconds).
+const CAPTURE_SECS: usize = 2;
+/// Input frames left in the ring until the next tick: the hardware's
+/// position may run a little ahead of what its DMA has stored.
+const IN_GUARD: usize = 16;
+
+/// Input sources ([`Input::set_source`]).
+pub const SOURCE_LINE: u32 = 1;
+pub const SOURCE_MIC: u32 = 2;
 
 pub struct Stream {
     pub id: u32,
@@ -217,8 +236,193 @@ impl Output {
     }
 }
 
+/// A sound driver's input: a ring of [`RING_FRAMES`] 16-bit stereo
+/// frames the hardware records into in a loop at [`Input::rate`].
+pub enum Input {
+    Hda(hda::Input),
+    Ac97(ac97::Input),
+    Es137x(es137x::Input),
+}
+
+macro_rules! each_in {
+    ($s:expr, $o:ident => $e:expr) => {
+        match $s {
+            Input::Hda($o) => $e,
+            Input::Ac97($o) => $e,
+            Input::Es137x($o) => $e,
+        }
+    };
+}
+
+impl Input {
+    /// The ring of interleaved stereo samples.
+    pub fn ring(&self) -> &[i16] {
+        each_in!(self, o => o.ring())
+    }
+
+    /// The frame the hardware records next.
+    pub fn position(&self) -> usize {
+        each_in!(self, o => o.position())
+    }
+
+    pub fn running(&self) -> bool {
+        each_in!(self, o => o.running())
+    }
+
+    pub fn rate(&self) -> u32 {
+        each_in!(self, o => o.rate())
+    }
+
+    /// Start recording into the ring from frame 0.
+    pub fn start(&mut self) {
+        each_in!(self, o => o.start())
+    }
+
+    pub fn stop(&mut self) {
+        each_in!(self, o => o.stop())
+    }
+
+    /// The [`SOURCE_LINE`] and [`SOURCE_MIC`] bits the hardware has.
+    pub fn sources(&self) -> u32 {
+        each_in!(self, o => o.sources())
+    }
+
+    /// Record from `source` (or the closest it has); the source taken.
+    pub fn set_source(&mut self, source: u32) -> u32 {
+        each_in!(self, o => o.set_source(source))
+    }
+
+    pub fn diag(&self) -> alloc::string::String {
+        each_in!(self, o => o.diag())
+    }
+}
+
+/// The capture stream: what the input recorded, in its reader's format.
+pub struct Capture {
+    pub id: u32,
+    pub pid: u32,
+    pub rate: u32,
+    channels: u32,
+    bits: u32,
+    queue: VecDeque<u8>,
+    /// Bytes recorded since the stream opened (read, queued or dropped).
+    pub captured: u64,
+    /// The recording level, 0-100 (linear).
+    pub volume: u32,
+    /// Paused: what the input records is dropped.
+    pub paused: bool,
+    /// Bumped by Stop: readers waiting give up.
+    pub generation: u32,
+    /// Resampler: output frames per input frame inverted (input frames
+    /// per output frame, 16.16) and the position between `prev` and the
+    /// newest input frame.
+    step: u32,
+    phase: u32,
+    prev: [i32; 2],
+    primed: bool,
+    /// Peak sample values, decaying (left, right).
+    pub level: [i32; 2],
+    level_frames: u32,
+}
+
+impl Capture {
+    pub fn frame_bytes(&self) -> usize {
+        (self.channels * self.bits / 8) as usize
+    }
+
+    /// Bytes waiting for the reader.
+    pub fn queued(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// The most the queue holds.
+    pub fn limit(&self) -> usize {
+        self.rate as usize * self.frame_bytes() * CAPTURE_SECS
+    }
+
+    /// Take up to `n` bytes (whole frames).
+    pub fn take(&mut self, n: usize) -> Vec<u8> {
+        let fb = self.frame_bytes();
+        let n = n.min(self.queue.len());
+        self.queue.drain(..n - n % fb).collect()
+    }
+
+    /// Stop: what is queued goes, waiting readers return.
+    pub fn discard(&mut self) {
+        self.queue.clear();
+        self.primed = false;
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    fn emit(&mut self, f: [i32; 2]) {
+        let s = if self.channels == 1 { [(f[0] + f[1]) / 2, 0] } else { f };
+        for &v in &s[..self.channels as usize] {
+            if self.bits == 8 {
+                self.queue.push_back(((v >> 8) + 128) as u8);
+            } else {
+                self.queue.extend((v as i16).to_le_bytes());
+            }
+        }
+        self.captured += self.frame_bytes() as u64;
+    }
+
+    /// One input frame (16-bit stereo at the input's rate).
+    fn feed(&mut self, f: [i16; 2]) {
+        let vol = self.volume as i32;
+        let f = [f[0] as i32 * vol / 100, f[1] as i32 * vol / 100];
+        for ch in 0..2 {
+            self.level[ch] = self.level[ch].max(f[ch].abs());
+        }
+        // About every 10 ms (at 48 kHz) the level falls by a fifth.
+        self.level_frames += 1;
+        if self.level_frames >= 480 {
+            self.level_frames = 0;
+            self.level = [self.level[0] * 4 / 5, self.level[1] * 4 / 5];
+        }
+        if self.paused {
+            self.primed = false;
+            return;
+        }
+        if !self.primed {
+            self.prev = f;
+            self.phase = 0;
+            self.primed = true;
+        }
+        while self.phase < 1 << 16 {
+            let p = self.phase as i64;
+            let mut o = [0i32; 2];
+            for ch in 0..2 {
+                let a = self.prev[ch] as i64;
+                o[ch] = (a + ((f[ch] as i64 - a) * p >> 16)) as i32;
+            }
+            self.emit(o);
+            self.phase += self.step;
+        }
+        self.phase -= 1 << 16;
+        self.prev = f;
+    }
+
+    /// Drop the oldest beyond [`Capture::limit`].
+    fn trim(&mut self) {
+        let (limit, fb) = (self.limit(), self.frame_bytes());
+        if self.queue.len() > limit {
+            let over = self.queue.len() - limit;
+            self.queue.drain(..over.div_ceil(fb) * fb);
+        }
+    }
+}
+
 pub struct Mixer {
     out: Option<Output>,
+    inp: Option<Input>,
+    pub cap: Option<Capture>,
+    /// The ring frame the input writes next as of the last tick, when it
+    /// last moved, and the clock pacing that replaces a stuck input.
+    in_last: usize,
+    in_moved: u64,
+    in_soft: Option<(u64, u64)>,
+    /// Input frames taken since the capture began.
+    in_frames: u64,
     /// The hardware's rate.
     rate: u32,
     pub streams: Vec<Stream>,
@@ -239,6 +443,12 @@ pub struct Mixer {
 
 pub static MIXER: SpinLock<Mixer> = SpinLock::new(Mixer {
     out: None,
+    inp: None,
+    cap: None,
+    in_last: 0,
+    in_moved: 0,
+    in_soft: None,
+    in_frames: 0,
     rate: 48000,
     streams: Vec::new(),
     master: 100,
@@ -252,6 +462,7 @@ pub static MIXER: SpinLock<Mixer> = SpinLock::new(Mixer {
 });
 
 static PRESENT: AtomicBool = AtomicBool::new(false);
+static INPUT: AtomicBool = AtomicBool::new(false);
 
 /// Writers and drainers waiting for the mixer to make progress.
 pub static WAITERS: WaitQueue = WaitQueue::new();
@@ -261,13 +472,23 @@ pub fn present() -> bool {
     PRESENT.load(Ordering::Acquire)
 }
 
-/// The driver found an output: use it (the first one).
-pub fn attach(out: Output) {
+/// Whether the sound hardware records.
+pub fn has_input() -> bool {
+    INPUT.load(Ordering::Acquire)
+}
+
+/// The driver found an output (and maybe an input): use it (the first
+/// one).
+pub fn attach(out: Output, inp: Option<Input>) {
     let mut m = MIXER.lock();
     if m.out.is_none() {
         m.rate = out.rate();
         m.out = Some(out);
         PRESENT.store(true, Ordering::Release);
+        if inp.is_some() {
+            m.inp = inp;
+            INPUT.store(true, Ordering::Release);
+        }
     }
 }
 
@@ -308,7 +529,120 @@ impl Mixer {
     pub fn close(&mut self, id: u32, pid: u32) -> bool {
         let n = self.streams.len();
         self.streams.retain(|s| !(s.id == id && s.pid == pid));
-        self.streams.len() != n
+        if self.streams.len() != n {
+            return true;
+        }
+        if self.capture(id, pid).is_some() {
+            self.close_input();
+            return true;
+        }
+        false
+    }
+
+    /// The capture stream `id` of process `pid`.
+    pub fn capture(&mut self, id: u32, pid: u32) -> Option<&mut Capture> {
+        self.cap.as_mut().filter(|c| c.id == id && c.pid == pid)
+    }
+
+    /// Open the capture stream and start the input. `Err(true)` when
+    /// another capture is open, `Err(false)` without input hardware.
+    pub fn open_input(&mut self, pid: u32, rate: u32, channels: u32, bits: u32) -> Result<u32, bool> {
+        if self.cap.is_some() {
+            return Err(true);
+        }
+        let Some(inp) = self.inp.as_mut() else { return Err(false) };
+        let in_rate = inp.rate();
+        inp.start();
+        let now = crate::irq::ticks();
+        self.in_last = 0;
+        self.in_moved = now;
+        self.in_soft = None;
+        self.in_frames = 0;
+        let id = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1).max(1);
+        self.cap = Some(Capture {
+            id,
+            pid,
+            rate,
+            channels,
+            bits,
+            queue: VecDeque::new(),
+            captured: 0,
+            volume: 100,
+            paused: false,
+            generation: 0,
+            step: ((((in_rate as u64) << 16) + rate as u64 / 2) / rate as u64) as u32,
+            phase: 0,
+            prev: [0; 2],
+            primed: false,
+            level: [0; 2],
+            level_frames: 0,
+        });
+        Ok(id)
+    }
+
+    fn close_input(&mut self) {
+        self.cap = None;
+        if let Some(inp) = self.inp.as_mut() {
+            inp.stop();
+        }
+    }
+
+    /// Select the input source; the one taken (0 without input).
+    pub fn set_source(&mut self, source: u32) -> u32 {
+        self.inp.as_mut().map_or(0, |i| i.set_source(source))
+    }
+
+    /// The sources the input has.
+    pub fn sources(&self) -> u32 {
+        self.inp.as_ref().map_or(0, |i| i.sources())
+    }
+
+    /// Take what the input has recorded since the last tick; whether
+    /// anything came.
+    fn capture_tick(&mut self, now: u64) -> bool {
+        let (Some(inp), Some(cap)) = (self.inp.as_ref(), self.cap.as_mut()) else { return false };
+        if !inp.running() {
+            return false;
+        }
+        let hz = crate::irq::HZ;
+        let rate = inp.rate() as u64;
+        if let Some((t0, f0)) = self.in_soft {
+            let due = f0 + (now - t0) * rate / hz;
+            let n = due.saturating_sub(self.in_frames);
+            for _ in 0..n {
+                cap.feed([0, 0]);
+            }
+            self.in_frames += n;
+            cap.trim();
+            return n != 0;
+        }
+        let pos = inp.position();
+        let avail = (pos + RING_FRAMES - self.in_last) % RING_FRAMES;
+        if avail == 0 {
+            if now - self.in_moved >= STALL_MS * hz / 1000 {
+                crate::println!(
+                    "audio: the input's position stays at {pos} ({}); recording silence by the clock from now on",
+                    inp.diag()
+                );
+                self.in_soft = Some((now, self.in_frames));
+            }
+            return false;
+        }
+        self.in_moved = now;
+        let n = avail.saturating_sub(IN_GUARD);
+        if n == 0 {
+            return false;
+        }
+        let ring = inp.ring();
+        for k in 0..n {
+            let i = (self.in_last + k) % RING_FRAMES;
+            cap.feed([ring[i * 2], ring[i * 2 + 1]]);
+        }
+        self.in_last = (self.in_last + n) % RING_FRAMES;
+        self.in_frames += n as u64;
+        cap.trim();
+        true
     }
 
     /// How far ahead of the hardware the ring is filled, in frames.
@@ -393,6 +727,11 @@ impl Mixer {
 
     /// Returns whether waiters should look again.
     fn tick(&mut self, now: u64) -> bool {
+        let took = self.capture_tick(now);
+        self.output_tick(now) || took
+    }
+
+    fn output_tick(&mut self, now: u64) -> bool {
         let Some(out) = self.out.as_ref() else { return false };
         if !out.running() {
             if self.streams.is_empty() {
@@ -450,6 +789,11 @@ pub fn process_ended(pid: u32) {
     if !present() {
         return;
     }
-    MIXER.lock().streams.retain(|s| s.pid != pid);
+    let mut m = MIXER.lock();
+    m.streams.retain(|s| s.pid != pid);
+    if m.cap.as_ref().is_some_and(|c| c.pid == pid) {
+        m.close_input();
+    }
+    drop(m);
     WAITERS.wake_all();
 }

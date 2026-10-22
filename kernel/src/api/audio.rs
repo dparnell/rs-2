@@ -13,6 +13,10 @@
 //! | 306 | Rs2AudioClose(ULONG hStream) |
 //! | 307 | Rs2AudioSetVolume(ULONG hStream, ULONG ulVolume) |
 //! | 308 | Rs2AudioPause(ULONG hStream, ULONG fPause) |
+//! | 309 | Rs2AudioOpenInput(ULONG ulRate, ULONG ulChannels, ULONG ulBits, PULONG phStream) |
+//! | 310 | Rs2AudioRead(ULONG hStream, PVOID pBuf, ULONG cb, ULONG ulTimeoutMs, PULONG pcbRead) |
+//! | 311 | Rs2AudioQueryLevel(ULONG hStream, PULONG pulLevel) |
+//! | 312 | Rs2AudioSetInput(ULONG ulSource, PULONG pulSource) |
 //!
 //! Rs2AudioQuery fails with ERROR_NOT_SUPPORTED (50) without sound
 //! hardware (and so does Rs2AudioOpen); otherwise `*pulDevices` is 1. A
@@ -30,6 +34,23 @@
 //! handles belong to the process that opened them and are closed when
 //! it ends. Calls that wait return ERROR_INTERRUPT (95) when the thread
 //! is told to end.
+//!
+//! Recording: Rs2AudioOpenInput opens the one capture stream (in the
+//! formats of Rs2AudioOpen) and starts the input; ERROR_NOT_SUPPORTED
+//! without input hardware, ERROR_BUSY (170) while another capture stream
+//! is open. Rs2AudioRead waits until `cb` bytes (at most a second's
+//! worth) have been recorded or `ulTimeoutMs` has passed (0: no wait,
+//! 0xFFFFFFFF: forever), then copies what there is, in whole frames, up
+//! to `cb`, and stores the count; a stream holds at most 2 s, the oldest
+//! going first. Rs2AudioQueryLevel gives the recent peak of the input
+//! (after the stream's volume), left in the low word and right in the
+//! high one, 0-32767. Rs2AudioSetInput selects the source of the input
+//! (1 line in, 2 microphone, 0 keeps it) and stores the one taken, which
+//! is another when the hardware lacks it; the choice lasts for later
+//! captures. A capture handle works with Rs2AudioQueryPos (bytes
+//! recorded since it opened), Stop (discards what is queued), Close (ends
+//! the capture), SetVolume (the recording level, 0-100) and Pause (what
+//! is recorded meanwhile is dropped).
 
 use alloc::vec;
 
@@ -37,6 +58,7 @@ use super::{err, Ctx};
 use crate::audio::{self, MIXER, WAITERS};
 
 const ERROR_TIMEOUT: u32 = 640;
+const ERROR_BUSY: u32 = 170;
 /// Most bytes copied in at a time by Rs2AudioWrite.
 const PIECE: usize = 32 * 1024;
 
@@ -106,9 +128,15 @@ pub fn write(c: &mut Ctx) -> u32 {
 /// Rs2AudioQueryPos.
 pub fn query_pos(c: &mut Ctx) -> u32 {
     let (h, p) = (c.arg(0), c.arg(1));
-    let played = match MIXER.lock().stream(h, c.process.pid) {
-        Some(s) => s.played,
-        None => return err::INVALID_HANDLE,
+    let played = {
+        let mut m = MIXER.lock();
+        match m.stream(h, c.process.pid) {
+            Some(s) => s.played,
+            None => match m.capture(h, c.process.pid) {
+                Some(cap) => cap.captured,
+                None => return err::INVALID_HANDLE,
+            },
+        }
     };
     if !c.write_u32(p, played as u32) {
         return err::INVALID_PARAMETER;
@@ -134,12 +162,15 @@ pub fn drain(c: &mut Ctx) -> u32 {
 /// Rs2AudioStop.
 pub fn stop(c: &mut Ctx) -> u32 {
     let h = c.arg(0);
-    let found = match MIXER.lock().stream(h, c.process.pid) {
-        Some(s) => {
-            s.discard();
-            true
+    let found = {
+        let mut m = MIXER.lock();
+        match m.stream(h, c.process.pid) {
+            Some(s) => {
+                s.discard();
+                true
+            }
+            None => m.capture(h, c.process.pid).map(|cap| cap.discard()).is_some(),
         }
-        None => false,
     };
     if !found {
         return err::INVALID_HANDLE;
@@ -173,9 +204,14 @@ pub fn set_volume(c: &mut Ctx) -> u32 {
         m.master = v;
         return 0;
     }
-    match m.stream(h, c.process.pid) {
-        Some(s) => {
-            s.volume = v;
+    let pid = c.process.pid;
+    if let Some(s) = m.stream(h, pid) {
+        s.volume = v;
+        return 0;
+    }
+    match m.capture(h, pid) {
+        Some(cap) => {
+            cap.volume = v;
             0
         }
         None => err::INVALID_HANDLE,
@@ -185,11 +221,97 @@ pub fn set_volume(c: &mut Ctx) -> u32 {
 /// Rs2AudioPause.
 pub fn pause(c: &mut Ctx) -> u32 {
     let (h, f) = (c.arg(0), c.arg(1));
-    match MIXER.lock().stream(h, c.process.pid) {
-        Some(s) => {
-            s.paused = f != 0;
+    let mut m = MIXER.lock();
+    let pid = c.process.pid;
+    if let Some(s) = m.stream(h, pid) {
+        s.paused = f != 0;
+        return 0;
+    }
+    match m.capture(h, pid) {
+        Some(cap) => {
+            cap.paused = f != 0;
             0
         }
         None => err::INVALID_HANDLE,
     }
+}
+
+/// Rs2AudioOpenInput.
+pub fn open_input(c: &mut Ctx) -> u32 {
+    let (rate, channels, bits, ph) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
+    if !audio::has_input() {
+        return err::NOT_SUPPORTED;
+    }
+    if !(4000..=96000).contains(&rate) || !(1..=2).contains(&channels) || !matches!(bits, 8 | 16) || ph == 0 {
+        return err::INVALID_PARAMETER;
+    }
+    let pid = c.process.pid;
+    let h = match MIXER.lock().open_input(pid, rate, channels, bits) {
+        Ok(h) => h,
+        Err(true) => return ERROR_BUSY,
+        Err(false) => return err::NOT_SUPPORTED,
+    };
+    if !c.write_u32(ph, h) {
+        MIXER.lock().close(h, pid);
+        return err::INVALID_PARAMETER;
+    }
+    0
+}
+
+/// Rs2AudioRead.
+pub fn read(c: &mut Ctx) -> u32 {
+    let (h, buf, cb, ms, pn) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4));
+    let pid = c.process.pid;
+    let (generation, want) = match MIXER.lock().capture(h, pid) {
+        Some(cap) => (cap.generation, (cb as usize).min(cap.rate as usize * cap.frame_bytes()).max(cap.frame_bytes())),
+        None => return err::INVALID_HANDLE,
+    };
+    if pn == 0 {
+        return err::INVALID_PARAMETER;
+    }
+    let deadline = (ms != u32::MAX).then(|| crate::irq::ticks() + (ms as u64 * crate::irq::HZ).div_ceil(1000));
+    let ready = || {
+        let mut m = MIXER.lock();
+        m.capture(h, pid).is_none_or(|cap| cap.generation != generation || cap.queued() >= want)
+    };
+    if !WAITERS.wait_until(deadline, ready) && (c.thread.exit_requested() || c.thread.interrupted()) {
+        return err::INTERRUPT;
+    }
+    let data = match MIXER.lock().capture(h, pid) {
+        Some(cap) => cap.take(cb as usize),
+        None => return err::INVALID_HANDLE,
+    };
+    if !c.write(buf, &data) || !c.write_u32(pn, data.len() as u32) {
+        return err::INVALID_PARAMETER;
+    }
+    0
+}
+
+/// Rs2AudioQueryLevel.
+pub fn query_level(c: &mut Ctx) -> u32 {
+    let (h, p) = (c.arg(0), c.arg(1));
+    let level = match MIXER.lock().capture(h, c.process.pid) {
+        Some(cap) => cap.level.map(|v| v.min(32767) as u32),
+        None => return err::INVALID_HANDLE,
+    };
+    if !c.write_u32(p, level[0] | level[1] << 16) {
+        return err::INVALID_PARAMETER;
+    }
+    0
+}
+
+/// Rs2AudioSetInput.
+pub fn set_input(c: &mut Ctx) -> u32 {
+    let (source, p) = (c.arg(0), c.arg(1));
+    if !audio::has_input() {
+        return err::NOT_SUPPORTED;
+    }
+    if source > audio::SOURCE_MIC {
+        return err::INVALID_PARAMETER;
+    }
+    let taken = MIXER.lock().set_source(source);
+    if p != 0 && !c.write_u32(p, taken) {
+        return err::INVALID_PARAMETER;
+    }
+    0
 }

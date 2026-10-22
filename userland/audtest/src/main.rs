@@ -18,6 +18,14 @@
 //! | 500 Hz | 48000 Hz, 16-bit mono, stopped after 0.3 s | 2.0 s written |
 //! | 750 Hz | 32000 Hz, 16-bit mono, paused 0.4 s halfway | 0.6 s |
 //! | 600 Hz | 24000 Hz, 16-bit mono, stopped after a 0.1 s drain timeout | 1.0 s written |
+//!
+//! `AUDTEST RECORD [HZ]` checks the recording calls (309-312) instead,
+//! with the host feeding the input a sine of HZ (default 440): `cargo
+//! xtask run --headless --timeout 60 --init "RS2\AUDTEST.EXE RECORD"
+//! --sound-in tone:440` (with `--sound ac97` or `es1370` for the other
+//! cards). Each format records a second, which must take about a second (QEMU hands over the first part at once)
+//! and hold the tone; then the level, pause, stop, volume, source and
+//! error answers.
 
 #![no_std]
 #![no_main]
@@ -51,7 +59,17 @@ unsafe extern "C" {
     fn Rs2AudioSetVolume(h: u32, volume: u32) -> u32;
     #[link_name = "RS2API.308"]
     fn Rs2AudioPause(h: u32, pause: u32) -> u32;
+    #[link_name = "RS2API.309"]
+    fn Rs2AudioOpenInput(rate: u32, channels: u32, bits: u32, h: *mut u32) -> u32;
+    #[link_name = "RS2API.310"]
+    fn Rs2AudioRead(h: u32, buf: *mut u8, cb: u32, ms: u32, read: *mut u32) -> u32;
+    #[link_name = "RS2API.311"]
+    fn Rs2AudioQueryLevel(h: u32, level: *mut u32) -> u32;
+    #[link_name = "RS2API.312"]
+    fn Rs2AudioSetInput(source: u32, taken: *mut u32) -> u32;
 }
+
+const BUSY: u32 = 170;
 
 const NOT_SUPPORTED: u32 = 50;
 const INVALID_HANDLE: u32 = 6;
@@ -297,7 +315,170 @@ fn drain_timeout() {
     unsafe { DosSleep(250) };
 }
 
-fn main(_s: &Startup) -> u32 {
+/// Read `want` bytes in pieces; the bytes and the milliseconds it took.
+fn record(h: u32, want: usize) -> (Vec<u8>, u32) {
+    let mut out = alloc::vec![0u8; want];
+    let mut got = 0;
+    let t0 = ms();
+    while got < want {
+        let mut n = 0;
+        let piece = (want - got).min(4096);
+        let rc = unsafe { Rs2AudioRead(h, out[got..].as_mut_ptr(), piece as u32, 2000, &mut n) };
+        if rc != 0 || n == 0 {
+            println!("  Rs2AudioRead = {rc}, {n} bytes, after {got} of {want}");
+            break;
+        }
+        got += n as usize;
+    }
+    out.truncate(got);
+    (out, ms().wrapping_sub(t0))
+}
+
+/// Channel 0's samples as 16-bit values.
+fn samples(data: &[u8], channels: u32, bits: u32) -> Vec<i32> {
+    let fb = (channels * bits / 8) as usize;
+    data.chunks_exact(fb).map(|f| if bits == 8 { (f[0] as i32 - 128) << 8 } else { i16::from_le_bytes([f[0], f[1]]) as i32 }).collect()
+}
+
+/// Frequency (rising zero crossings) and peak of samples.
+fn analyse(s: &[i32], rate: u32) -> (f64, i32) {
+    let crossings = s.windows(2).filter(|w| w[0] < 0 && w[1] >= 0).count();
+    let peak = s.iter().map(|v| v.abs()).max().unwrap_or(0);
+    (crossings as f64 * rate as f64 / s.len().max(1) as f64, peak)
+}
+
+fn open_input(rate: u32, channels: u32, bits: u32) -> Option<u32> {
+    let mut h = 0;
+    let rc = unsafe { Rs2AudioOpenInput(rate, channels, bits, &mut h) };
+    if rc != 0 {
+        println!("  Rs2AudioOpenInput({rate}, {channels}, {bits}) = {rc}");
+        return None;
+    }
+    Some(h)
+}
+
+fn record_format(hz: f64, rate: u32, channels: u32, bits: u32) {
+    let name = alloc::format!("record {rate}/{bits}/{}", if channels == 2 { "stereo" } else { "mono" });
+    let Some(h) = open_input(rate, channels, bits) else {
+        check(&name, false);
+        return;
+    };
+    let fb = (channels * bits / 8) as usize;
+    let want = rate as usize * fb;
+    let (data, took) = record(h, want);
+    let mut level = 0;
+    let lrc = unsafe { Rs2AudioQueryLevel(h, &mut level) };
+    let mut pos = 0;
+    unsafe { Rs2AudioQueryPos(h, &mut pos) };
+    let s = samples(&data, channels, bits);
+    // The second half: the input may start with a little silence.
+    let (f, peak) = analyse(&s[s.len() / 2..], rate);
+    let stereo_ok = channels == 1 || data.chunks_exact(fb).skip(data.len() / fb / 2).all(|c| c[..fb / 2] == c[fb / 2..]);
+    println!("  {} bytes in {took} ms, {f:.1} Hz, peak {peak}, level {level:#x}, position {pos}", data.len());
+    check(&name, data.len() == want && (600..=1600).contains(&took) && (f - hz).abs() < hz * 0.03 && peak > 4000 && stereo_ok);
+    check(&alloc::format!("{name} level and position"), lrc == 0 && level & 0xffff > 2000 && pos as usize >= want);
+    check("Rs2AudioClose input", unsafe { Rs2AudioClose(h) } == 0);
+}
+
+static RD_RC: AtomicU32 = AtomicU32::new(u32::MAX);
+static RD_N: AtomicU32 = AtomicU32::new(0);
+
+unsafe extern "C" fn reader(h: u32) {
+    let mut buf = alloc::vec![0u8; 65536];
+    let mut n = 0;
+    let rc = unsafe { Rs2AudioRead(h, buf.as_mut_ptr(), buf.len() as u32, u32::MAX, &mut n) };
+    RD_N.store(n, Ordering::Release);
+    RD_RC.store(rc, Ordering::Release);
+}
+
+fn record_tests(hz: f64) {
+    let mut h = 0;
+    check("Rs2AudioOpenInput bad rate", unsafe { Rs2AudioOpenInput(100, 1, 16, &mut h) } == INVALID_PARAMETER);
+    check("Rs2AudioOpenInput bad bits", unsafe { Rs2AudioOpenInput(22050, 1, 12, &mut h) } == INVALID_PARAMETER);
+    let mut n = 0;
+    check("Rs2AudioRead bad handle", unsafe { Rs2AudioRead(12345, core::ptr::null_mut(), 0, 0, &mut n) } == INVALID_HANDLE);
+    check("Rs2AudioQueryLevel bad handle", unsafe { Rs2AudioQueryLevel(12345, &mut n) } == INVALID_HANDLE);
+    check("Rs2AudioSetInput bad source", unsafe { Rs2AudioSetInput(9, &mut n) } == INVALID_PARAMETER);
+    let mut taken = 0;
+    let rc = unsafe { Rs2AudioSetInput(2, &mut taken) };
+    println!("  microphone: source {taken}");
+    check("Rs2AudioSetInput microphone", rc == 0 && (taken == 1 || taken == 2));
+    let rc = unsafe { Rs2AudioSetInput(1, &mut taken) };
+    check("Rs2AudioSetInput line in", rc == 0 && taken == 1);
+    for (rate, ch, bits) in [(48000, 2, 16), (22050, 1, 16), (11025, 1, 8), (44100, 2, 16), (8000, 2, 8)] {
+        record_format(hz, rate, ch, bits);
+    }
+    let Some(h) = open_input(22050, 1, 16) else {
+        check("record checks", false);
+        return;
+    };
+    check("Rs2AudioOpenInput busy", unsafe { Rs2AudioOpenInput(22050, 1, 16, &mut n) } == BUSY);
+    // Nothing waits with a timeout of 0.
+    let mut buf = alloc::vec![0u8; 22050 * 2];
+    let t0 = ms();
+    let rc = unsafe { Rs2AudioRead(h, buf.as_mut_ptr(), buf.len() as u32, 0, &mut n) };
+    check("Rs2AudioRead no wait", rc == 0 && ms().wrapping_sub(t0) < 50 && (n as usize) < buf.len());
+    // Pause: what comes meanwhile is dropped.
+    unsafe { DosSleep(200) };
+    let (mut p1, mut p2) = (0, 0);
+    unsafe {
+        Rs2AudioPause(h, 1);
+        Rs2AudioQueryPos(h, &mut p1);
+        DosSleep(300);
+        Rs2AudioQueryPos(h, &mut p2);
+        Rs2AudioPause(h, 0);
+    }
+    println!("  paused at {p1}, {p2} after 0.3 s");
+    check("Rs2AudioPause input", p2 - p1 < 2000);
+    // Volume 0: silence.
+    unsafe {
+        Rs2AudioStop(h);
+        Rs2AudioSetVolume(h, 0);
+        DosSleep(100);
+        Rs2AudioStop(h);
+    }
+    let (data, _) = record(h, 11025 * 2);
+    let (_, peak) = analyse(&samples(&data, 1, 16), 22050);
+    check("Rs2AudioSetVolume input 0", data.len() == 22050 && peak == 0);
+    unsafe { Rs2AudioSetVolume(h, 50) };
+    unsafe { Rs2AudioStop(h) };
+    let (data, _) = record(h, 22050);
+    let (_, peak) = analyse(&samples(&data, 1, 16)[2000..], 22050);
+    println!("  volume 50: peak {peak}");
+    check("Rs2AudioSetVolume input 50", (4000..7000).contains(&peak));
+    // Stop wakes a reader waiting for more than will come for a while.
+    RD_RC.store(u32::MAX, Ordering::Release);
+    let mut tid = 0;
+    unsafe { DosCreateThread(&mut tid, reader, h, 0, 65536) };
+    unsafe { DosSleep(300) };
+    let t0 = ms();
+    check("Rs2AudioStop input", unsafe { Rs2AudioStop(h) } == 0);
+    join(tid);
+    let took = ms().wrapping_sub(t0);
+    let (rc, got) = (RD_RC.load(Ordering::Acquire), RD_N.load(Ordering::Acquire));
+    println!("  reader returned {rc} with {got} bytes {took} ms after the stop");
+    check("Rs2AudioStop wakes the reader", rc == 0 && took < 200 && got < 65536);
+    check("Rs2AudioClose input", unsafe { Rs2AudioClose(h) } == 0);
+    check("closed input", unsafe { Rs2AudioQueryLevel(h, &mut n) } == INVALID_HANDLE);
+}
+
+fn main(s: &Startup) -> u32 {
+    let args = core::str::from_utf8(s.args()).unwrap_or("").trim();
+    let mut words = args.split_whitespace();
+    if words.next().is_some_and(|w| w.eq_ignore_ascii_case("record")) {
+        let hz = words.next().and_then(|w| w.parse::<f64>().ok()).unwrap_or(440.0);
+        let mut taken = 0;
+        if unsafe { Rs2AudioSetInput(0, &mut taken) } == NOT_SUPPORTED {
+            println!("no sound input");
+            let mut h = 0;
+            check("Rs2AudioOpenInput without hardware", unsafe { Rs2AudioOpenInput(22050, 1, 16, &mut h) } == NOT_SUPPORTED);
+        } else {
+            record_tests(hz);
+        }
+        let f = FAILS.load(Ordering::Relaxed);
+        println!("audtest done: {f} failure(s)");
+        return f;
+    }
     let mut n = 0u32;
     let rc = unsafe { Rs2AudioQuery(&mut n) };
     if rc == NOT_SUPPORTED {
