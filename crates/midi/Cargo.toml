@@ -1,0 +1,6 @@
+[package]
+name = "midi"
+description = "Standard MIDI files and a small General MIDI software synthesizer (for MDM.DLL's sequencer device)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true

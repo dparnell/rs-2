@@ -49,6 +49,10 @@ name = "mci"
 version = "0.1.0"
 
 [[package]]
+name = "midi"
+version = "0.1.0"
+
+[[package]]
 name = "mmfmt"
 version = "0.1.0"
 
