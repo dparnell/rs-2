@@ -226,6 +226,8 @@ fn cd(n: usize) -> *mut usize {
 // Mixy(Dog; metaclass M_Mixin): a metaclass derived from M_Mixin and
 //   M_Animal.
 
+static mut THING: *mut usize = core::ptr::null_mut();
+static mut THING_C: *mut usize = core::ptr::null_mut();
 static mut ANIMAL: *mut usize = core::ptr::null_mut();
 static mut ANIMAL_C: *mut usize = core::ptr::null_mut();
 static mut DOG: *mut usize = core::ptr::null_mut();
@@ -333,6 +335,12 @@ extern "C" fn dog_init(obj: usize) {
 extern "C" fn dog_uninit(_obj: usize) {
     log(b'd');
 }
+extern "C" fn thing_init(_obj: usize) {
+    log(b'T');
+}
+extern "C" fn thing_uninit(_obj: usize) {
+    log(b't');
+}
 extern "C" fn pet_tag(obj: usize) -> i32 {
     1000 + unsafe { *data(PET_C, obj) }
 }
@@ -361,6 +369,8 @@ aligned! {
     __t_dog_bark => dog_bark, 1;
     __t_dog_init => dog_init, 1;
     __t_dog_uninit => dog_uninit, 1;
+    __t_thing_init => thing_init, 1;
+    __t_thing_uninit => thing_uninit, 1;
     __t_pet_tag => pet_tag, 1;
     __t_pet_init => pet_init, 1;
     __t_pet_uninit => pet_uninit, 1;
@@ -383,11 +393,22 @@ fn build_all() {
             cd: M_ANIMAL,
             ccd: M_ANIMAL_C,
         });
+        (THING, THING_C) = (cd(0), cd(8));
+        build(&Spec {
+            name: b"Thing",
+            meta: None,
+            parents: &[b"SOMObject"],
+            data: 4,
+            methods: &[],
+            overrides: &[(b"somInit", __t_thing_init as usize), (b"somUninit", __t_thing_uninit as usize)],
+            cd: THING,
+            ccd: THING_C,
+        });
         (ANIMAL, ANIMAL_C) = (cd(3), cd(8));
         build(&Spec {
             name: b"Animal",
             meta: Some(b"M_Animal"),
-            parents: &[b"SOMObject"],
+            parents: &[b"Thing"],
             data: 4,
             methods: &[
                 (b"setLegs", __t_animal_set_legs as usize),
@@ -417,7 +438,7 @@ fn build_all() {
         build(&Spec {
             name: b"Pet",
             meta: None,
-            parents: &[b"SOMObject"],
+            parents: &[b"Thing"],
             data: 4,
             methods: &[(b"petTag", __t_pet_tag as usize)],
             overrides: &[(b"somInit", __t_pet_init as usize), (b"somUninit", __t_pet_uninit as usize)],
@@ -520,7 +541,7 @@ fn run() {
         let a = m1(M_ANIMAL, 0, animal);
         check("Animal made by M_Animal::makeOne", a != 0 && somIsObj(a) != 0);
         check_eq("M_Animal data (instances made)", *data(M_ANIMAL_C, animal) as i64, 1);
-        check_eq("Animal init log", take_log().first().copied().unwrap_or(0) as i64, b'A' as i64);
+        check_log("Animal init order", b"TA");
         check_eq("Animal legs after somDefaultInit", m1(ANIMAL, 1, a) as i64, 4);
         m2(ANIMAL, 0, a, 6);
         check_eq("setLegs/getLegs", m1(ANIMAL, 1, a) as i64, 6);
@@ -531,7 +552,7 @@ fn run() {
         // A subclass: inherited data and methods, an override with a
         // parent call, a legacy somInit after Animal's initializer.
         let d = m1(sc(), SOM_NEW, dog);
-        check_log("Dog init order", b"AD");
+        check_log("Dog init order", b"TAD");
         check_eq("Dog legs (inherited initializer)", m1(ANIMAL, 1, d) as i64, 4);
         check_eq("Dog bark (legacy somInit)", m1(DOG, 0, d) as i64, 7);
         check_eq("Dog speak (override + parent call)", m1(ANIMAL, 2, d) as i64, 101);
@@ -539,7 +560,7 @@ fn run() {
         check("Animal is not a Dog", m2(so(0), SOM_IS_A, a, dog) & 0xff == 0);
         check("Dog isInstanceOf Dog", m2(so(0), SOM_IS_INSTANCE_OF, d, dog) & 0xff != 0);
         check("Dog descended from Animal", m2(sc(), SOM_DESCENDED_FROM, dog, animal) & 0xff != 0);
-        check_eq("Dog size", m1(so(0), SOM_GET_SIZE, d) as i64, 12);
+        check_eq("Dog size", m1(so(0), SOM_GET_SIZE, d) as i64, 16);
         check_eq("Dog instance part size", m1(sc(), SOM_GET_INSTANCE_PART_SIZE, dog) as i64, 4);
         check_eq("Dog's metaclass is M_Animal", (m1(so(0), SOM_GET_CLASS, dog) == m_animal) as i64, 1);
         check("somResolve", somResolve(d, tok(ANIMAL, 2)) == __t_dog_speak as usize);
@@ -570,7 +591,7 @@ fn run() {
         // paths, both parents' initializers once, SOMObject's last when
         // destroying.
         let pd = m1(sc(), SOM_NEW, petdog);
-        check_log("PetDog init order", b"ADP");
+        check_log("PetDog init order", b"TADP");
         check_eq("PetDog petTag (second parent)", m1(PET, 0, pd) as i64, 1005);
         check_eq("PetDog speak (first parent)", m1(ANIMAL, 2, pd) as i64, 101);
         check_eq("PetDog Pet data via somDataResolve", *(somDataResolve(pd, *PET_C.add(1)) as *const i32) as i64, 5);
@@ -588,9 +609,9 @@ fn run() {
             seq.len == 2 && *seq.buf == dog && *seq.buf.add(1) == pet,
         );
         m1(so(0), SOM_FREE, pd);
-        check_log("PetDog destruct order", b"dap");
+        check_log("PetDog destruct order", b"pdat");
         m1(so(0), SOM_FREE, d);
-        check_log("Dog destruct order", b"da");
+        check_log("Dog destruct order", b"dat");
 
         // A derived metaclass: Mixy's class responds to both metaclasses.
         let meta = m1(so(0), SOM_GET_CLASS, mixy);
