@@ -164,7 +164,19 @@ fn build(s: &Spec) -> usize {
     let mut smt: Vec<[usize; 6]> = Vec::new();
     for (i, &(n, p)) in s.methods.iter().enumerate() {
         let id: SomId = sid(n);
-        smt.push([s.cd as usize + 4 * (i + 1), Box::leak(Box::new(id)) as *mut SomId as usize, 0, p, usize::MAX, 0]);
+        // The descriptor ("Class::method"): IBM's SOM requires one.
+        let mut d = s.name.to_vec();
+        d.extend_from_slice(b"::");
+        d.extend_from_slice(n);
+        let desc: SomId = sid(&d);
+        smt.push([
+            s.cd as usize + 4 * (i + 1),
+            Box::leak(Box::new(id)) as *mut SomId as usize,
+            Box::leak(Box::new(desc)) as *mut SomId as usize,
+            p,
+            usize::MAX,
+            0,
+        ]);
     }
     let mut omt: Vec<[usize; 2]> = Vec::new();
     for &(n, p) in s.overrides {
