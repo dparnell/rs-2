@@ -491,6 +491,16 @@ fn cstr(p: *const u8) -> &'static [u8] {
     unsafe { core::slice::from_raw_parts(p, n) }
 }
 
+fn check_log(name: &str, want: &[u8]) {
+    let got = take_log();
+    if got == want {
+        println!("PASS {} {}", name, core::str::from_utf8(&got).unwrap_or("?"));
+    } else {
+        println!("FAIL {}: {} (expected {})", name, core::str::from_utf8(&got).unwrap_or("?"), core::str::from_utf8(want).unwrap_or("?"));
+        unsafe { FAILS += 1 };
+    }
+}
+
 fn take_log() -> Vec<u8> {
     unsafe { core::mem::take(&mut LOG) }
 }
@@ -519,7 +529,7 @@ fn run() {
         // A subclass: inherited data and methods, an override with a
         // parent call, a legacy somInit after Animal's initializer.
         let d = m1(sc(), SOM_NEW, dog);
-        check("Dog init order", take_log() == b"AD");
+        check_log("Dog init order", b"AD");
         check_eq("Dog legs (inherited initializer)", m1(ANIMAL, 1, d) as i64, 4);
         check_eq("Dog bark (legacy somInit)", m1(DOG, 0, d) as i64, 7);
         check_eq("Dog speak (override + parent call)", m1(ANIMAL, 2, d) as i64, 101);
@@ -558,7 +568,7 @@ fn run() {
         // paths, both parents' initializers once, SOMObject's last when
         // destroying.
         let pd = m1(sc(), SOM_NEW, petdog);
-        check("PetDog init order", take_log() == b"ADP");
+        check_log("PetDog init order", b"ADP");
         check_eq("PetDog petTag (second parent)", m1(PET, 0, pd) as i64, 1005);
         check_eq("PetDog speak (first parent)", m1(ANIMAL, 2, pd) as i64, 101);
         check_eq("PetDog Pet data via somDataResolve", *(somDataResolve(pd, *PET_C.add(1)) as *const i32) as i64, 5);
@@ -576,9 +586,9 @@ fn run() {
             seq.len == 2 && *seq.buf == dog && *seq.buf.add(1) == pet,
         );
         m1(so(0), SOM_FREE, pd);
-        check("PetDog destruct order", take_log() == b"dap");
+        check_log("PetDog destruct order", b"dap");
         m1(so(0), SOM_FREE, d);
-        check("Dog destruct order", take_log() == b"da");
+        check_log("Dog destruct order", b"da");
 
         // A derived metaclass: Mixy's class responds to both metaclasses.
         let meta = m1(so(0), SOM_GET_CLASS, mixy);
