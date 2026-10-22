@@ -81,6 +81,9 @@ pub struct View {
     /// CV_ICON, CV_DETAIL or CV_TREE.
     pub view: u32,
     pub fields: bool,
+    /// The container's height (icon positions are from its bottom; they
+    /// keep their distance from the top when it changes).
+    pub height: i32,
 }
 
 const ID_CNR: u32 = 100;
@@ -230,7 +233,7 @@ pub fn open(kind: Kind) -> usize {
     let style = WS_VISIBLE | CCS_EXTENDSEL;
     let cnr = unsafe { WinCreateWindow(client, WC_CONTAINER, b"\0".as_ptr(), style, 0, 0, 10, 10, client, HWND_TOP, ID_CNR, core::ptr::null(), core::ptr::null()) };
     unsafe { OLD_CNR = WinSubclassWindow(cnr, cnr_proc) as usize };
-    sh().views.push(View { kind: kind.clone(), frame, client, cnr, items: Vec::new(), view: view_mode, fields: false });
+    sh().views.push(View { kind: kind.clone(), frame, client, cnr, items: Vec::new(), view: view_mode, fields: false, height: 0 });
     let v = sh().views.len() - 1;
     if desktop {
         let bg = objects::query(objects::APP_DESKTOP, b"Background").and_then(|t| objects::parse_hex(&t)).unwrap_or(0x2e6e8e);
@@ -308,7 +311,26 @@ fn resize(v: usize) {
         WinQueryWindowRect(client, &mut r);
         WinSetWindowPos(cnr, 0, 0, 0, r.r, r.t, SWP_SIZE | SWP_MOVE);
     }
+    // A taller or shorter window (a folder resized, the desktop at
+    // another screen resolution): the icons stay where they were from
+    // the top, as the Workplace Shell's do.
+    let (old, new) = (sh().views[v].height, area(v).1);
+    sh().views[v].height = new;
+    if old != 0 && old != new && keeps_positions(&sh().views[v].kind) && sh().views[v].view == CV_ICON {
+        let dy = new - old;
+        for it in sh().views[v].items.iter() {
+            if it.rec != 0 {
+                wr(it.rec, R_Y, (rd(it.rec, R_Y) as i32 + dy) as u32);
+            }
+        }
+        reposition(v);
+        save_positions(v, None);
+    }
 }
+
+/// The key under which a folder's positions record the height they are
+/// from.
+const HEIGHT_KEY: &[u8] = b"@HEIGHT";
 
 /// Remember a folder window's place and view.
 fn save_window(v: usize) {
@@ -833,6 +855,9 @@ fn insert_records(v: usize) {
     let kind = sh().views[v].kind.clone();
     let fid = folder_id(&kind);
     let keep = keeps_positions(&kind);
+    // Positions kept at another height (another screen resolution) keep
+    // their distance from the top.
+    let dy = if keep { icon_pos(&fid, HEIGHT_KEY).map_or(0, |(h, _)| area(v).1 - h) } else { 0 };
     let mut r = first;
     let mut unplaced = Vec::new();
     let mut used = Vec::new();
@@ -852,6 +877,7 @@ fn insert_records(v: usize) {
         let id = object_id(it);
         match if keep { icon_pos(&fid, &id) } else { None } {
             Some((x, y)) => {
+                let y = y + dy;
                 wr(r, R_X, x as u32);
                 wr(r, R_Y, y as u32);
                 used.push((x, y));
@@ -879,8 +905,8 @@ fn insert_records(v: usize) {
     let ri: [u32; 6] = [24, CMA_END, 0, 1, 1, n];
     send(cnr, CM_INSERTRECORD, first, ri.as_ptr() as u32);
     reposition(v);
-    if keep && !placed_keys.is_empty() {
-        save_positions(v, Some(&placed_keys));
+    if keep && (!placed_keys.is_empty() || dy != 0) {
+        save_positions(v, if dy != 0 { None } else { Some(&placed_keys) });
     }
 }
 
@@ -950,6 +976,7 @@ pub fn save_positions(v: usize, keys: Option<&[u32]>) {
         return;
     }
     let fid = folder_id(&kind);
+    set_icon_pos(&fid, HEIGHT_KEY, Some((area(v).1, 0)));
     for it in sh().views[v].items.iter() {
         if keys.is_some_and(|k| !k.contains(&it.key)) {
             continue;
