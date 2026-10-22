@@ -234,10 +234,10 @@ The work is in phases; each phase is usable on its own:
    - Find and templates;
    - a lazy writer;
    - the API from other processes.
-3. **The shell process**: a PMSHELL-compatible start-up building the
-   desktop from INI.RC/MAKEINI on the first boot, the Startup folder,
-   shutdown. RS2SHELL stays the default until this works; the switch is
-   `RUNWORKPLACE`.
+3. **The shell process**: done (see "The shell process" below).
+   RS2SHELL stays the default desktop for now.
+   `PROTSHELL=C:\OS2\PMSHELL.EXE` in CONFIG.SYS (or
+   `--init OS2\PMSHELL.EXE` with `xtask run`) boots the Workplace Shell.
 4. **Compatibility**: wpstutor.dll registered with WinRegisterObjectClass
    and working; then the remaining classes (Templates, Find, Launchpad,
    Shredder, Minimized Window Viewer, Network); then rs2 versions of
@@ -419,3 +419,61 @@ Checked in QEMU with screenshots and pointer input
 (`--type "{mouse_abs x y}{mouse_button n}{shot NAME}"`): menus, a file
 dragged from a folder to the desktop, and a double-click starting a
 program.
+
+## The shell process
+
+`OS2\PMSHELL.EXE` (`userland/pmshell`) does what IBM's PMSHELL does:
+it starts PM, calls PMWP's `ShlStartWorkplace(hab, hmq)` (ordinal 211)
+and runs the message loop. Without PM it starts the command prompt.
+If a Workplace Shell is already running, it ends.
+
+`ShlStartWorkplace` (`shell.rs`) does the following:
+- **Builds the classes.** PMWP's classes are also built whenever the
+  class manager is asked for one.
+- **Makes the first start's objects** (`install.rs`). These are OS2.INI's
+  `PM_InstallClass` and `PM_InstallObject` entries, as MAKEINI writes
+  them from INI.RC; they are removed once done:
+  - The key is `title;class;location;flags` and the value is the setup
+    string. `?:` stands for the boot drive.
+  - The flags are PRESERVEOLD, UPDATE, REPLACE, UPDATEONLY and DELETE,
+    applied against an existing object with the same OBJECTID.
+  - Objects whose folder is made later wait for it.
+  - The very first time, rs2's own entries come first: the desktop,
+    Drives, Command Prompts (OS/2 Window, OS/2 Full Screen), Programs
+    (the System Editor with its ASSOCFILTER, the application installer,
+    Display, Install rs2, where their files exist) and Startup.
+    `PM_Workplace` `Rs2Desktop` records that this was done.
+- **Starts the server** for other processes' object calls (`ipc.rs`):
+  - A caller takes the mutex `\SEM32\RS2WPS\CALL` and writes its
+    request into `\SHAREMEM\RS2WPS.MEM`.
+  - It posts `WM_WPS_CALL` to the shell's object window. Posting needs
+    no message queue, so text-mode programs can call too.
+  - It waits on the event `\SEM32\RS2WPS\DONE`, which the shell posts
+    when the call has run on its PM thread.
+  - WinCreateObject, WinQueryObject, WinSetObjectData,
+    WinDestroyObject, WinOpenObject, WinSaveObject, WinMove/CopyObject,
+    WinCreateShadow and WinRegister/DeregisterObjectClass go this way.
+  - Without a shell running, WinCreateObject still adds programs to
+    RS2SHELL's program list.
+- **Opens the desktop.**
+- **Opens the Startup folder's objects** (`<WP_START>`, a WPStartup),
+  once per PM session (the system atom `WPS_STARTUP`).
+  `SET RESTARTOBJECTS=NO` turns this off.
+
+The desktop's pop-up menu adds **Window list** and **Shut down**.
+Shutting down (`shutdown.rs`, RS2SHELL's sequence) asks first, then:
+- ends the text sessions;
+- sends every program WM_SAVEAPPLICATION and WM_CLOSE, and waits,
+  offering after 20 s to end those still running;
+- runs DosShutdown, then powers off (ACPI S5) or restarts.
+
+`WinShutdownSystem` (ordinal 149) does the same without asking.
+
+**Checked in QEMU** with screenshots and pointer input:
+- the first start's desktop;
+- an OS/2 Window opened from Command Prompts running `WPSTEST REMOTE`,
+  whose object calls ran in the shell and whose object appeared on the
+  desktop;
+- shutdown through the desktop menu, as far as the power-off;
+- the Startup folder (`WPSTEST STARTUP`, then PMSHELL in the same boot:
+  the System Editor started).

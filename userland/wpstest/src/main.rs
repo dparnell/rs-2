@@ -9,7 +9,8 @@
 //! from OS2.INI and their extended attributes, checks them and deletes
 //! them. `WPSTEST CLASS dll class` registers a class DLL (one of the
 //! Toolkit's samples, built for IBM's PMWP) and makes an object of it.
-//! `WPSTEST REMOTE`, with PMSHELL running, makes and changes an object
+//! `WPSTEST STARTUP` puts the System Editor in a Startup folder (for
+//! PMSHELL to start). `WPSTEST REMOTE`, with PMSHELL running, makes and changes an object
 //! on its desktop from this process.
 
 #![no_std]
@@ -331,7 +332,13 @@ fn main(st: &Startup) -> u32 {
         return n;
     }
     check("Rs2WpsStart", unsafe { Rs2WpsStart() } != 0);
-    if word.eq_ignore_ascii_case(b"CHECK") {
+    if word.eq_ignore_ascii_case(b"STARTUP") {
+        // A Startup folder with the System Editor in it (PMSHELL opens it).
+        let f = create(b"WPStartup", b"Startup", b"OBJECTID=<WP_START>", b"<WP_DESKTOP>");
+        check("Startup folder", f != 0);
+        let p = create(b"WPProgram", b"Editor at Startup", b"EXENAME=C:\\OS2\\E.EXE;PROGTYPE=PM", b"<WP_START>");
+        check("program in the Startup folder", p != 0);
+    } else if word.eq_ignore_ascii_case(b"CHECK") {
         verify();
     } else if word.eq_ignore_ascii_case(b"CLASS") {
         class_dll(args);

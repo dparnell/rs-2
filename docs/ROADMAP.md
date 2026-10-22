@@ -359,9 +359,12 @@ Status markers: done, in progress, planned.
   settings notebooks, pop-up menus, direct editing, drag and drop, all
   through the classes' methods (class DLLs add menu items and settings
   pages); `RS2\WPSHELL.EXE` runs them
-- planned: the shell process (PMSHELL, the desktop from INI.RC, startup,
-  shutdown, the API from other processes), then the remaining classes
-  (docs/WPS.md, phases 3-4)
+- done: the shell process: OS2\PMSHELL.EXE with PMWP's ShlStartWorkplace
+  (the desktop from OS2.INI's PM_InstallObject/PM_InstallClass entries
+  and rs2's own the first time, the Startup folder, shutdown, the
+  object API from other processes); `PROTSHELL=C:\OS2\PMSHELL.EXE`
+  boots it (RS2SHELL stays the default for now)
+- planned: the remaining classes and phase 2's gaps (docs/WPS.md)
 
 ## Milestone 5: install media (first version done)
 
