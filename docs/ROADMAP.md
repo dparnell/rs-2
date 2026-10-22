@@ -87,9 +87,11 @@ Status markers: done, in progress, planned.
 - planned: PM dirty rectangles instead of
   full-screen flushes, display hot-resize events (EDID), run-time mode
   changes under PM
-- done: networking (docs/NETWORK.md; receive interrupts on e1000e and
-  virtio-net, the 8254x without MSI polled): Intel e1000/e1000e
-  (8254x, 82574L) and virtio-net drivers; `crates/tcpip`, a host-tested
+- done: networking (docs/NETWORK.md; receive interrupts on e1000e,
+  vmxnet3 and virtio-net, the 8254x without MSI polled): Intel
+  e1000/e1000e (8254x, 82574L), VMware vmxnet3 and virtio-net drivers
+  (QEMU's e1000, e1000-82545em, e1000e, vmxnet3 and virtio-net tested;
+  `xtask run --net MODEL`); `crates/tcpip`, a host-tested
   stack (Ethernet, ARP, IPv4 with fragmentation and reassembly, ICMP,
   UDP, TCP with retransmission, congestion and window management, DHCP
   client, DNS resolver, loopback); kernel socket layer (per-process
@@ -107,7 +109,7 @@ Status markers: done, in progress, planned.
 - done: INI files for PMSHAPI (see milestone 4)
 - planned: route/arp and run-time configuration,
   code page translation in TNLS32/TNLS16,
-  vmxnet3/pcnet drivers, TCP keepalive/window scaling/SACK/urgent data
+  AMD PCnet driver (VMware's vlance), TCP keepalive/window scaling/SACK/urgent data
 - planned: virtio-scsi hot-plug events, virtio-console multiport
 - done: sound output: Intel High Definition Audio (`drivers/hda.rs`, PCI
   class 04.03: ICH6+/ICH9, QEMU `intel-hda`/`ich9-intel-hda`, Proxmox,

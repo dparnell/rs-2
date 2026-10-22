@@ -19,37 +19,62 @@ programs (IBM FTP, TELNET, FINGER, RXSOCK, the Toolkit samples) run.
           │      crates/tcpip: Ethernet ARP IPv4 ICMP UDP TCP DHCP DNS │
           └───────────────┬────────────────────────────┬───────────────┘
                      Nic trait                     loopback
-              ┌───────────┴────────────┐
-       drivers/e1000.rs       drivers/virtio/net.rs
+         ┌────────────────┼───────────────────┐
+  drivers/e1000.rs  drivers/vmxnet3.rs  drivers/virtio/net.rs
 ```
 
 ## Drivers
 
-Both implement `net::Nic` (`kernel/src/net/mod.rs`): name, MAC address,
+All implement `net::Nic` (`kernel/src/net/mod.rs`): name, MAC address,
 link state, MTU, `send(frame)`, `receive(callback)` and `rx_pending()`.
 
 * **Intel e1000/e1000e** (`drivers/e1000.rs`): 82540EM (QEMU's `e1000`,
   VirtualBox's default), 82545EM (VMware's `e1000`, VirtualBox "MT
   Server"), 82543GC, 82544, 82541/82547, 82546 and 82574L (QEMU's
   `e1000e`, the q35 default). Reset, link up (CTRL.SLU), MAC address from
-  RAL0/RAH0 or the EEPROM (EERD, both register layouts), multicast table
+  RAL0/RAH0 or the EEPROM (EERD, both register layouts; on the
+  82540-82546 the Microwire interface clocked through EECD when EERD
+  does not answer), multicast table
   cleared, legacy descriptors: 128 receive buffers of 2 KB kept owned by
   the hardware, 64 transmit buffers frames are copied into. CRC stripped,
   short frames padded by the hardware.
+* **VMware vmxnet3** (`drivers/vmxnet3.rs`, 15ad:07b0; QEMU's
+  `vmxnet3`): device and UPT revision 1 selected through BAR 1's
+  VRRS/UVRS, MAC address from MACL/MACH (or the GET_PERM_MAC commands),
+  the "driver shared" area (magic, MTU 1500, no offloads, unicast and
+  broadcast receive filter, VLAN 0 allowed, one interrupt) with a queue
+  descriptor table of one transmit and one receive queue, then
+  ACTIVATE_DEV. Rings hand descriptors over by generation bits: 64
+  transmit descriptors with 2 KB copy buffers and their completion
+  ring (plus the 128-byte data ring revision 1 expects), 256 receive
+  "head" buffers of 2 KB on ring 1 with ring 2 (body buffers) left
+  empty, and the receive completion ring; producer indexes go to BAR 0
+  (TXPROD, RXPROD). Events (link change, queue errors) are read from the
+  shared area, acknowledged through ECR, and the link state is asked
+  for with GET_LINK. The boot log line names the model and PCI address.
 * **virtio-net** (`drivers/virtio/net.rs`) on the existing virtio PCI
   transport (modern and legacy): features MAC and STATUS, the 12-byte
   (1.x) or 10-byte (legacy) `virtio_net_hdr` without offloads, header and
   frame as a two-descriptor chain (what legacy devices without
   ANY_LAYOUT need), the receive queue kept full.
 
-NICs with MSI (the 82574L) or MSI-X (virtio-net) interrupt on received
+NICs with MSI (the 82574L) or MSI-X (virtio-net, vmxnet3) interrupt on received
 frames and link changes: the handler acknowledges the device and calls
 `net::kick()`, which wakes the network thread (`Nic::interrupt_driven`).
 PCI INTx cannot be routed (no ACPI _PRT), so the others (8254x), and all
 of them with `nomsi`, keep interrupts masked: the timer tick (interrupt
 context) calls `rx_pending()` on them, which only peeks at a descriptor
 or the used ring under `try_lock`, and wakes the network thread when a
-frame is waiting.
+frame is waiting. (vmxnet3 without MSI-X/MSI sets IC_DISABLE_ALL and
+keeps its interrupt masked.) The network thread also looks at every NIC
+each 20 ms, so a NIC whose interrupts never arrive still works.
+
+Virtual machines: QEMU's `e1000`, `e1000-82545em`, `e1000e`, `vmxnet3`
+and `virtio-net-pci`; VirtualBox's Intel adapters and virtio-net;
+VMware's `e1000` (82545EM), `e1000e` (82574L) and `vmxnet3`
+(`ethernet0.virtualDev` in the .vmx). VMware's `vlance` / "Flexible"
+(AMD PCnet, 1022:2000), the default for some guest types, has no driver
+yet.
 
 ## The stack: `crates/tcpip`
 
@@ -184,7 +209,8 @@ The static form configures the first interface; others stay down.
 ```
 cargo test -p tcpip                                    # protocol unit tests
 cargo xtask run --net ...                              # e1000 (82540EM) on QEMU user networking
-cargo xtask run --net --net-model e1000e ...           # 82574L (also e1000-82545em, ...)
+cargo xtask run --net vmxnet3 ...                      # also 82545em, e1000e, virtio
+cargo xtask run --net-model DEVICE ...                 # any QEMU NIC device
 cargo xtask run --virtio-net [--virtio-legacy] ...     # virtio-net
 cargo xtask run --net --hostfwd tcp::8080-:80 ...      # more port forwards (5555 -> 23 is always there)
 ```
@@ -204,7 +230,8 @@ from it (5558), and a listener on port 23 the host reaches through
 listeners and a client that retries until the guest listens (a `nc -l
 5556` and `nc localhost 5555` do for the first and last). Verified with
 e1000 (82540EM), e1000e (82574L), e1000-82545em, virtio-net (1.x and
-legacy) with `--smp 4`: all checks pass, about 5-7 MB/s each way under
+legacy) with `--smp 4`, and vmxnet3 (MSI-X, and polled with `nomsi`;
+IBM FTP's `get`/`put` of 300 KB byte-identical on each model too): all checks pass, about 5-7 MB/s each way under
 TCG; apitest and stress still pass with a NIC present.
 
 `PING [-c count] [-s size] [-w ms] host` (`OS2\PING.EXE`) uses a raw ICMP
