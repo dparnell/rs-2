@@ -8,6 +8,8 @@
 //! and the program's settings; `WPSHELL OPEN` makes them and opens only
 //! the folder. `WPSHELL CAR` puts the Toolkit's Car sample (registered
 //! from C:\SAMPLES\CAR.DLL) on the desktop and opens its settings.
+//! `WPSHELL GAPS` opens the folder, the desktop's tree view and the
+//! folder's settings.
 
 #![no_std]
 #![no_main]
@@ -44,6 +46,7 @@ unsafe extern "C" {
 const OPEN_CONTENTS: u32 = 1;
 const OPEN_SETTINGS: u32 = 2;
 const OPEN_DETAILS: u32 = 102;
+const OPEN_TREE: u32 = 101;
 
 fn demo(all: bool) {
     unsafe {
@@ -94,6 +97,16 @@ fn main(s: &Startup) -> u32 {
             WinRegisterObjectClass(b"Car\0".as_ptr(), b"C:\\SAMPLES\\CAR.DLL\0".as_ptr());
             let c = WinCreateObject(b"Car\0".as_ptr(), b"My Car\0".as_ptr(), b"OBJECTID=<RS2_CAR>\0".as_ptr(), b"<WP_DESKTOP>\0".as_ptr(), 2);
             WinOpenObject(c, OPEN_SETTINGS, 1);
+        }
+    }
+    if a.eq_ignore_ascii_case(b"GAPS") {
+        // The folder (with its shadow), the desktop's tree view and the
+        // folder's settings.
+        demo(false);
+        unsafe {
+            WinOpenObject(desk, OPEN_TREE, 1);
+            let f = WinQueryObject(b"<RS2_DEMO>\0".as_ptr());
+            WinOpenObject(f, OPEN_SETTINGS, 1);
         }
     }
     if a.eq_ignore_ascii_case(b"DEMO") || a.eq_ignore_ascii_case(b"OPEN") {

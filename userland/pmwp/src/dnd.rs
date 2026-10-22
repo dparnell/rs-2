@@ -192,6 +192,7 @@ pub fn drop(w: usize, cdi: u32) {
             }
         }
         send(wins()[w].child, CM_INVALIDATERECORD, 0, mp(0, CMA_REPOSITION));
+        view::save_positions(w);
     } else {
         let over = obj::call(m::WPObject::wpDragOver, &[to, wins()[w].child as usize, pdinfo as usize]) as u32;
         ok = over & 0xffff == DOR_DROP;

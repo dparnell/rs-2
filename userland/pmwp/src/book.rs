@@ -27,6 +27,21 @@ const ID_TITLE: u16 = 501;
 const ID_EXE: u16 = 511;
 const ID_PARAMS: u16 = 512;
 const ID_DIR: u16 = 513;
+const ID_ICON: u16 = 521;
+const ID_DETAILS: u16 = 522;
+const ID_TREE: u16 = 523;
+const ID_COLOR: u16 = 531;
+const ID_DEFAULTCOLOR: u16 = 532;
+const ID_PRESET: u16 = 540;
+
+const PRESETS: [(&[u8], u32); 6] = [
+    (b"~Teal", 0x2e6e8e),
+    (b"~Blue", 0x3a6ea5),
+    (b"~Green", 0x2f6f4f),
+    (b"G~rey", 0xc0c0c0),
+    (b"~White", 0xffffff),
+    (b"~Sand", 0xd8ccb0),
+];
 
 /// wpInsertSettingsPage(hwndNotebook, PAGEINFO): the page's id.
 extern "C" fn wpInsertSettingsPage(_o: usize, nb: u32, pi: *const u8) -> u32 {
@@ -199,6 +214,145 @@ extern "C" fn program_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPProgram"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
     wps::call("WPProgram", m::WPProgram::wpAddProgramPage, &[o, nb as usize]);
     1
+}
+
+// ---- Folders: View and Background ----
+
+extern "C" fn view_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            unsafe { WinSetWindowULong(h, QWL_USER, b) };
+            let v = obj::call(m::WPObject::wpQueryDefaultView, &[b as usize]) as u32;
+            let id = match v {
+                obj::OPEN_DETAILS => ID_DETAILS,
+                obj::OPEN_TREE => ID_TREE,
+                _ => ID_ICON,
+            };
+            unsafe { WinSendDlgItemMsg(h, id as u32, BM_SETCHECK, 1, 0) };
+            0
+        }
+        WM_CONTROL if (a >> 16) == 1 => {
+            // BN_CLICKED on a radio button: the default view.
+            let o = unsafe { WinQueryWindowULong(h, QWL_USER) } as usize;
+            let v = match (a & 0xffff) as u16 {
+                ID_DETAILS => obj::OPEN_DETAILS,
+                ID_TREE => obj::OPEN_TREE,
+                _ => obj::OPEN_CONTENTS,
+            };
+            if o != 0 {
+                obj::call(m::WPObject::wpSetDefaultView, &[o, v as usize]);
+            }
+            0
+        }
+        WM_COMMAND => 0,
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+extern "C" fn wpAddFolderView1Page(o: usize, nb: u32) -> u32 {
+    // BS_AUTORADIOBUTTON
+    let radio = |t: &[u8], y: i16, id: u16, first: bool| item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | if first { WS_GROUP } else { 0 } | 0x0004, (10, y, 200, 10), id);
+    let tpl = template(page_frame(), alloc::vec![
+        label(b"Open the folder in:", (6, 104, 200)),
+        radio(b"~Icon view", 88, ID_ICON, true),
+        radio(b"~Details view", 74, ID_DETAILS, false),
+        radio(b"~Tree view", 60, ID_TREE, false),
+    ]);
+    let page = make_page(nb, view_page_proc, &tpl, o);
+    if page == 0 {
+        return 0;
+    }
+    insert(o, nb, page, b"~View\0")
+}
+
+fn show_color(h: u32, rgb: u32) {
+    set_item_text(h, ID_COLOR as u32, alloc::format!("{:06X}", rgb).as_bytes());
+}
+
+extern "C" fn background_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            unsafe { WinSetWindowULong(h, QWL_USER, b) };
+            let o = b as usize;
+            let cur = crate::fs::folder_background(o);
+            let desktop = wps::is(o, "WPDesktop");
+            show_color(h, cur.unwrap_or(if desktop { crate::view::DESKTOP_BG } else { 0xffffff }));
+            unsafe { WinSendDlgItemMsg(h, ID_COLOR as u32, EM_SETTEXTLIMIT, 6, 0) };
+            0
+        }
+        WM_COMMAND => {
+            let o = unsafe { WinQueryWindowULong(h, QWL_USER) } as usize;
+            let id = (a & 0xffff) as u16;
+            if (ID_PRESET..ID_PRESET + PRESETS.len() as u16).contains(&id) && o != 0 {
+                let c = PRESETS[(id - ID_PRESET) as usize].1;
+                show_color(h, c);
+                crate::fs::set_folder_background(o, Some(c));
+            } else if id == ID_DEFAULTCOLOR && o != 0 {
+                crate::fs::set_folder_background(o, None);
+                let desktop = wps::is(o, "WPDesktop");
+                show_color(h, if desktop { crate::view::DESKTOP_BG } else { 0xffffff });
+            }
+            0
+        }
+        WM_DESTROY => {
+            // A colour typed in (hex RGB).
+            let o = unsafe { WinQueryWindowULong(h, QWL_USER) } as usize;
+            if let Some(c) = crate::util::parse_hex(&item_text(h, ID_COLOR as u32)) {
+                if o != 0 && crate::fs::folder_background(o) != Some(c) {
+                    let desktop = wps::is(o, "WPDesktop");
+                    let default = if desktop { crate::view::DESKTOP_BG } else { 0xffffff };
+                    if crate::fs::folder_background(o).is_some() || c != default {
+                        crate::fs::set_folder_background(o, Some(c));
+                    }
+                }
+            }
+            unsafe { WinDefDlgProc(h, msg, a, b) }
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+extern "C" fn wpAddFolderBackgroundPage(o: usize, nb: u32) -> u32 {
+    let mut items = alloc::vec![
+        label(b"Colour (red, green, blue in hex):", (6, 104, 200)),
+        entry(b"", (8, 92, 60), ID_COLOR),
+        item(WC_BUTTON, b"~Default", WS_VISIBLE | WS_TABSTOP | WS_GROUP, (80, 89, 50, 13), ID_DEFAULTCOLOR),
+        label(b"Or one of these:", (6, 72, 200)),
+    ];
+    for (i, (name, _)) in PRESETS.iter().enumerate() {
+        let (col, row) = (i as i16 % 3, i as i16 / 3);
+        items.push(item(WC_BUTTON, name, WS_VISIBLE | WS_TABSTOP | if i == 0 { WS_GROUP } else { 0 }, (8 + col * 56, 54 - row * 18, 50, 13), ID_PRESET + i as u16));
+    }
+    let tpl = template(page_frame(), items);
+    let page = make_page(nb, background_page_proc, &tpl, o);
+    if page == 0 {
+        return 0;
+    }
+    insert(o, nb, page, b"~Background\0")
+}
+
+extern "C" fn folder_add_pages(o: usize, nb: u32) -> u32 {
+    som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
+    wps::call("WPFolder", m::WPFolder::wpAddFolderBackgroundPage, &[o, nb as usize]);
+    wps::call("WPFolder", m::WPFolder::wpAddFolderView1Page, &[o, nb as usize]);
+    1
+}
+
+methods! {
+    __m_wpAddFolderView1Page => wpAddFolderView1Page, 2;
+    __m_wpAddFolderBackgroundPage => wpAddFolderBackgroundPage, 2;
+    __m_folder_add_pages => folder_add_pages, 2;
+}
+
+pub fn folder_methods() -> Vec<(&'static str, usize)> {
+    alloc::vec![
+        ("wpAddFolderView1Page", __m_wpAddFolderView1Page as usize),
+        ("wpAddFolderBackgroundPage", __m_wpAddFolderBackgroundPage as usize),
+    ]
+}
+
+pub fn folder_overrides() -> Vec<(&'static str, usize)> {
+    alloc::vec![("wpAddSettingsPages", __m_folder_add_pages as usize)]
 }
 
 methods! {

@@ -226,14 +226,10 @@ The work is in phases; each phase is usable on its own:
 1. **SOM runtime** (done; see "rs2's SOM.DLL" below).
 2. **Core classes in rs2's PMWP.DLL**: done, with the object model and
    its views (see "rs2's Workplace Shell classes" below). Still to do:
-   - shadows drawn in the shadow colour;
-   - icon positions kept (.ICONPOS);
-   - expandable tree views;
-   - the folder settings pages (view, include, sort, background);
-   - copy and move dialogs, and keyboard commands;
+   - the remaining folder pages (sort, include, the other view pages);
+   - copy and move dialogs;
    - Find and templates;
-   - a lazy writer;
-   - the API from other processes.
+   - a lazy writer.
 3. **The shell process**: done (see "The shell process" below).
    RS2SHELL stays the default desktop for now.
    `PROTSHELL=C:\OS2\PMSHELL.EXE` in CONFIG.SYS (or
@@ -404,6 +400,23 @@ shell's process, on its PM thread.
   - Icons dragged within their own view move.
 - Open views follow changes: `wpAddToContent` and `wpDeleteFromContent`
   add and remove records, and `wpSetTitle` and `wpSetIcon` update them.
+- **Icon positions** are kept in the folder's `.ICONPOS` EA (rs2's
+  records: x, y and a name, the file's name or `#` with an abstract
+  object's handle). An `@` record holds the height the positions were
+  measured at, so icons keep their distance from the top when the
+  window changes size. New objects go to free grid places; Arrange
+  lays out every icon again and keeps the result.
+- **Tree views** show the folder's folders (and drives' root folders,
+  and the folders shadows point to). Each folder opens on demand, in
+  place of a placeholder record.
+- **Shadows' titles** are owner-drawn in the shadow colour: blue, light
+  blue on dark backgrounds, grey when the original is gone.
+- **Folder settings** add a View page (open in icon, details or tree
+  view) and a Background page (a colour with presets).
+  `wpAddFolderView1Page` and `wpAddFolderBackgroundPage` provide them.
+  The colour is the folder's own state and applies to its open views.
+- **Keyboard:** Delete deletes (after asking), F2 renames, F5 refreshes,
+  and Shift+F10 shows the menu.
 
 `RS2\WPSHELL.EXE` starts PM and the shell's objects, opens the desktop
 and runs the message loop. It is a test shell until the shell process

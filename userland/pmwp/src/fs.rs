@@ -343,6 +343,43 @@ pub struct FolderData {
     pub content: Option<alloc::boxed::Box<Vec<usize>>>,
     pub populated: u32,
     pub flags: u32,
+    /// The background colour (RGB), if the folder has its own.
+    pub bg: u32,
+    pub has_bg: u32,
+}
+
+pub fn folder_background(obj: usize) -> Option<u32> {
+    if obj == 0 || !wps::is(obj, "WPFolder") {
+        return None;
+    }
+    let f = fo(obj);
+    (f.has_bg != 0).then_some(f.bg)
+}
+
+/// Set (or with None drop) a folder's own background colour.
+pub fn set_folder_background(obj: usize, rgb: Option<u32>) {
+    let f = fo(obj);
+    f.has_bg = rgb.is_some() as u32;
+    f.bg = rgb.unwrap_or(0);
+    obj::call(m::WPObject::wpSaveDeferred, &[obj]);
+    crate::view::background_changed(obj);
+}
+
+extern "C" fn folder_save_state(obj: usize) -> u32 {
+    som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpSaveState, &[obj]);
+    if fo(obj).has_bg != 0 {
+        obj::wpSaveLong(obj, b"WPFolder\0".as_ptr(), 1, fo(obj).bg);
+    }
+    1
+}
+
+extern "C" fn folder_restore_state(obj: usize, r: u32) -> u32 {
+    som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpRestoreState, &[obj, r as usize]);
+    if let Some(v) = obj::restored_long(obj, b"WPFolder", 1) {
+        fo(obj).bg = v;
+        fo(obj).has_bg = 1;
+    }
+    1
 }
 
 fn fo<'a>(obj: usize) -> &'a mut FolderData {
@@ -489,6 +526,7 @@ pub fn desktop() -> usize {
     }
     if ea_read(&p, b".CLASSINFO").is_none() {
         ea_write(&p, b".CLASSINFO", Some((EAT_BINARY, &wps::encode(b"WPDesktop", 0, &[]))));
+        ea_write(&p, b".LONGNAME", Some((EAT_ASCII, b"Desktop")));
     }
     let o = wps::object_from_path(&p);
     if o != 0 {
@@ -521,6 +559,8 @@ methods! {
     __m_folder_query_default_view => folder_query_default_view, 1;
     __m_folder_open => folder_open, 4;
     __m_drives_populate => drives_populate, 4;
+    __m_folder_save_state => folder_save_state, 1;
+    __m_folder_restore_state => folder_restore_state, 2;
 }
 
 pub fn impl_file_system() -> Impl {
@@ -565,11 +605,20 @@ pub fn impl_folder() -> Impl {
             ("wpSetFldrFlags", __m_wpSetFldrFlags as usize),
             ("wpQueryFldrFlags", __m_wpQueryFldrFlags as usize),
             ("wpQueryDefaultView", __m_folder_query_default_view as usize),
-        ],
-        overrides: [("wpUnInitData", __m_folder_uninit as usize), ("wpOpen", __m_folder_open as usize)]
-            .into_iter()
-            .chain(crate::dnd::overrides("WPFolder"))
-            .collect(),
+        ]
+        .into_iter()
+        .chain(crate::book::folder_methods())
+        .collect(),
+        overrides: [
+            ("wpUnInitData", __m_folder_uninit as usize),
+            ("wpOpen", __m_folder_open as usize),
+            ("wpSaveState", __m_folder_save_state as usize),
+            ("wpRestoreState", __m_folder_restore_state as usize),
+        ]
+        .into_iter()
+        .chain(crate::dnd::overrides("WPFolder"))
+        .chain(crate::book::folder_overrides())
+        .collect(),
     }
 }
 
