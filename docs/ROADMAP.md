@@ -103,8 +103,9 @@ Status markers: done, in progress, planned.
   real hardware
 - done: networking (docs/NETWORK.md; receive interrupts on e1000e,
   vmxnet3 and virtio-net, the 8254x without MSI polled): Intel
-  e1000/e1000e (8254x, 82574L), VMware vmxnet3 and virtio-net drivers
-  (QEMU's e1000, e1000-82545em, e1000e, vmxnet3 and virtio-net tested;
+  e1000/e1000e (8254x, 82574L), VMware vmxnet3, AMD PCnet (VMware's
+  vlance) and virtio-net drivers (QEMU's e1000, e1000-82545em, e1000e,
+  vmxnet3, pcnet and virtio-net tested;
   `xtask run --net MODEL`); `crates/tcpip`, a host-tested
   stack (Ethernet, ARP, IPv4 with fragmentation and reassembly, ICMP,
   UDP, TCP with retransmission, congestion and window management, DHCP
@@ -123,7 +124,7 @@ Status markers: done, in progress, planned.
 - done: INI files for PMSHAPI (see milestone 4)
 - planned: route/arp and run-time configuration,
   code page translation in TNLS32/TNLS16,
-  AMD PCnet driver (VMware's vlance), TCP keepalive/window scaling/SACK/urgent data
+  PCI INTx routing (ACPI _PRT) for the 8254x and PCnet, TCP keepalive/window scaling/SACK/urgent data
 - planned: virtio-scsi hot-plug events, virtio-console multiport
 - done: sound output: Intel High Definition Audio (`drivers/hda.rs`, PCI
   class 04.03: ICH6+/ICH9, QEMU `intel-hda`/`ich9-intel-hda`, Proxmox,

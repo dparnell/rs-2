@@ -13,6 +13,7 @@ pub mod mpt;
 pub mod nvme;
 pub mod part;
 pub mod pci;
+pub mod pcnet;
 pub mod pcilist;
 pub mod pvscsi;
 pub mod scsi;
@@ -183,6 +184,9 @@ pub fn init() {
         }
         if vmxnet3::is_vmxnet3(d) {
             vmxnet3::probe(d);
+        }
+        if pcnet::is_pcnet(d) {
+            pcnet::probe(d);
         }
         if (d.vendor, d.device) == (0x15ad, 0x0405) {
             svga::probe(d);

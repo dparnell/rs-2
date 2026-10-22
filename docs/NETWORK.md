@@ -19,8 +19,8 @@ programs (IBM FTP, TELNET, FINGER, RXSOCK, the Toolkit samples) run.
           │      crates/tcpip: Ethernet ARP IPv4 ICMP UDP TCP DHCP DNS │
           └───────────────┬────────────────────────────┬───────────────┘
                      Nic trait                     loopback
-         ┌────────────────┼───────────────────┐
-  drivers/e1000.rs  drivers/vmxnet3.rs  drivers/virtio/net.rs
+         ┌────────────────┴──┬───────────────┬───────────────┐
+  drivers/e1000.rs  drivers/vmxnet3.rs  drivers/pcnet.rs  drivers/virtio/net.rs
 ```
 
 ## Drivers
@@ -52,6 +52,17 @@ link state, MTU, `send(frame)`, `receive(callback)` and `rx_pending()`.
   (TXPROD, RXPROD). Events (link change, queue errors) are read from the
   shared area, acknowledged through ECR, and the link state is asked
   for with GET_LINK. The boot log line names the model and PCI address.
+* **AMD PCnet** (`drivers/pcnet.rs`, 1022:2000: Am79C970A and the
+  later PCnet-PCI/FAST parts; VMware's `vlance`/"Flexible", QEMU's
+  `pcnet`): I/O ports in 16-bit mode (the mode IBM's PCNTND.OS2 uses),
+  or 32-bit mode when the chip was left in it; reset, software style 2
+  (32-bit descriptors and initialisation block) through BCR20, transmit
+  padding (CSR4 APAD_XMT), MAC address from the address PROM (else
+  CSR12-14), an initialisation block with an empty multicast filter, a
+  128-descriptor receive ring and a 64-descriptor transmit ring with
+  2 KB buffers handed over by OWN bits, CSR0 TDMD to transmit at once.
+  Link state from LED0 (BCR4) on the Am79C970A. No MSI and no INTx
+  routing: the interrupt stays disabled (IENA clear) and it is polled.
 * **virtio-net** (`drivers/virtio/net.rs`) on the existing virtio PCI
   transport (modern and legacy): features MAC and STATUS, the 12-byte
   (1.x) or 10-byte (legacy) `virtio_net_hdr` without offloads, header and
@@ -61,7 +72,7 @@ link state, MTU, `send(frame)`, `receive(callback)` and `rx_pending()`.
 NICs with MSI (the 82574L) or MSI-X (virtio-net, vmxnet3) interrupt on received
 frames and link changes: the handler acknowledges the device and calls
 `net::kick()`, which wakes the network thread (`Nic::interrupt_driven`).
-PCI INTx cannot be routed (no ACPI _PRT), so the others (8254x), and all
+PCI INTx cannot be routed (no ACPI _PRT), so the others (8254x, PCnet), and all
 of them with `nomsi`, keep interrupts masked: the timer tick (interrupt
 context) calls `rx_pending()` on them, which only peeks at a descriptor
 or the used ring under `try_lock`, and wakes the network thread when a
@@ -72,9 +83,9 @@ each 20 ms, so a NIC whose interrupts never arrive still works.
 Virtual machines: QEMU's `e1000`, `e1000-82545em`, `e1000e`, `vmxnet3`
 and `virtio-net-pci`; VirtualBox's Intel adapters and virtio-net;
 VMware's `e1000` (82545EM), `e1000e` (82574L) and `vmxnet3`
-(`ethernet0.virtualDev` in the .vmx). VMware's `vlance` / "Flexible"
-(AMD PCnet, 1022:2000), the default for some guest types, has no driver
-yet.
+(`ethernet0.virtualDev` in the .vmx), and `vlance` / "Flexible" (AMD
+PCnet, the default for the OS/2 guest type, behind a PCI bridge at
+02:00.0).
 
 ## The stack: `crates/tcpip`
 
@@ -230,7 +241,8 @@ from it (5558), and a listener on port 23 the host reaches through
 listeners and a client that retries until the guest listens (a `nc -l
 5556` and `nc localhost 5555` do for the first and last). Verified with
 e1000 (82540EM), e1000e (82574L), e1000-82545em, virtio-net (1.x and
-legacy) with `--smp 4`, and vmxnet3 (MSI-X, and polled with `nomsi`;
+legacy) with `--smp 4`, vmxnet3 (MSI-X, and polled with `nomsi`), and
+pcnet (also behind a PCI bridge, and with its registers in 32-bit mode;
 IBM FTP's `get`/`put` of 300 KB byte-identical on each model too): all checks pass, about 5-7 MB/s each way under
 TCG; apitest and stress still pass with a NIC present.
 

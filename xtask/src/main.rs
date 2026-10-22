@@ -54,9 +54,10 @@
 //!
 //! `--net` adds a network adapter on QEMU's user-mode network (guest
 //! 10.0.2.15, gateway/host 10.0.2.2, DNS 10.0.2.3): an Intel 82540EM
-//! (`e1000`) unless a model follows (`--net vmxnet3|e1000|82545em|e1000e|virtio`:
+//! (`e1000`) unless a model follows (`--net vmxnet3|e1000|82545em|e1000e|pcnet|virtio`:
 //! VMware's paravirtual NIC, the 82540EM, the 82545EM of VMware's
-//! "e1000", the 82574L of its "e1000e", virtio-net) or `--net-model`
+//! "e1000", the 82574L of its "e1000e", the AMD PCnet of its "vlance",
+//! virtio-net) or `--net-model`
 //! names any QEMU device; `--virtio-net` is short for `--net virtio`. Host port 5555 is forwarded to
 //! guest port 23 (when free), and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
 //! rule; `--tftp DIR` has QEMU serve DIR by TFTP at 10.0.2.2. Without
@@ -786,6 +787,7 @@ fn nic_model(m: &str) -> Option<&'static str> {
         "82545em" | "e1000-82545em" => "e1000-82545em",
         "e1000e" | "82574l" => "e1000e",
         "vmxnet3" => "vmxnet3",
+        "pcnet" | "vlance" => "pcnet",
         "virtio" | "virtio-net" | "virtio-net-pci" => "virtio-net-pci",
         _ => return None,
     })
