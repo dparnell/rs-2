@@ -31,6 +31,7 @@ mod install;
 mod ipc;
 mod shell;
 mod shutdown;
+mod templates;
 mod launch;
 mod menu;
 mod minwin;

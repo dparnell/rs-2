@@ -24,6 +24,7 @@ const BKA_AUTOPAGESIZE: u16 = 0x0100;
 const BKA_STATUSTEXTON: u16 = 0x0001;
 
 const ID_TITLE: u16 = 501;
+const ID_TEMPLATE: u16 = 509;
 const ID_EXE: u16 = 511;
 const ID_PARAMS: u16 = 512;
 const ID_DIR: u16 = 513;
@@ -123,6 +124,19 @@ extern "C" fn general_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             unsafe { WinSendDlgItemMsg(h, ID_TITLE as u32, EM_SETTEXTLIMIT, 259, 0) };
             let t: Vec<u8> = obj::title(b as usize).into_iter().map(|c| if c == b'\n' { b'^' } else { c }).collect();
             set_item_text(h, ID_TITLE as u32, &t);
+            let tpl = obj::call(m::WPObject::wpQueryStyle, &[b as usize]) as u32 & obj::OBJSTYLE_TEMPLATE != 0;
+            unsafe { WinSendDlgItemMsg(h, ID_TEMPLATE as u32, BM_SETCHECK, tpl as u32, 0) };
+            0
+        }
+        WM_CONTROL if a & 0xffff == ID_TEMPLATE as u32 && (a >> 16) == 1 => {
+            // BN_CLICKED: the Template check box.
+            let o = unsafe { WinQueryWindowULong(h, QWL_USER) } as usize;
+            if o != 0 {
+                let on = unsafe { WinSendDlgItemMsg(h, ID_TEMPLATE as u32, BM_QUERYCHECK, 0, 0) } != 0;
+                let s = obj::call(m::WPObject::wpQueryStyle, &[o]) as u32;
+                let s = if on { s | obj::OBJSTYLE_TEMPLATE } else { s & !obj::OBJSTYLE_TEMPLATE };
+                obj::call(m::WPObject::wpSetStyle, &[o, s as usize]);
+            }
             0
         }
         WM_DESTROY => {
@@ -140,7 +154,12 @@ extern "C" fn general_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 }
 
 extern "C" fn wpAddObjectGeneralPage(o: usize, nb: u32) -> u32 {
-    let tpl = template(page_frame(), alloc::vec![label(b"Title (^ starts a new line):", (6, 104, 220)), entry(b"", (8, 92, 216), ID_TITLE)]);
+    // BS_AUTOCHECKBOX
+    let tpl = template(page_frame(), alloc::vec![
+        label(b"Title (^ starts a new line):", (6, 104, 220)),
+        entry(b"", (8, 92, 216), ID_TITLE),
+        item(WC_BUTTON, b"~Template (opening or dragging it makes a new object)", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (8, 70, 220, 10), ID_TEMPLATE),
+    ]);
     let page = make_page(nb, general_proc, &tpl, o);
     if page == 0 {
         return 0;

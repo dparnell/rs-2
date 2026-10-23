@@ -502,6 +502,11 @@ extern "C" fn wpOpen(obj: usize, _hwnd_cnr: u32, view: u32, _param: u32) -> u32 
 
 /// A view that is open comes to the front; otherwise wpOpen opens it.
 extern "C" fn wpViewObject(obj: usize, hwnd_cnr: u32, view: u32, param: u32) -> u32 {
+    // Opening a template makes a new object beside it.
+    if view == OPEN_DEFAULT && crate::templates::is_template(obj) {
+        crate::templates::create_from(obj, d(obj).folder, None);
+        return 0;
+    }
     let view = if view == OPEN_DEFAULT { call(m::WPObject::wpQueryDefaultView, &[obj]) as u32 } else { view };
     let f = crate::view::frame_of(obj, if view == OPEN_DEFAULT { OPEN_CONTENTS } else { view });
     if f != 0 {

@@ -281,6 +281,8 @@ extern "C" fn folder_drag_over(f: usize, _cnr: u32, pdinfo: u32) -> u32 {
             return mp(DOR_NODROP, 0);
         }
         let o = if user == DO_DEFAULT { default_op(src, f) } else { user };
+        // A template dropped makes a new object (a copy).
+        let o = if crate::templates::is_template(src) && o != DO_LINK { DO_COPY } else { o };
         // Moving an object to where it is does nothing.
         if o == DO_MOVE && obj::folder_of(src) == f {
             return mp(DOR_NODROP, 0);
@@ -319,6 +321,10 @@ extern "C" fn folder_drop(f: usize, _cnr: u32, pdinfo: u32, it: u32) -> u32 {
     }
     let user = user_op(pdinfo);
     let op = if user == DO_DEFAULT { default_op(src, f) } else { user };
+    if crate::templates::is_template(src) && op != DO_LINK {
+        crate::templates::create_from(src, f, None);
+        return 1;
+    }
     #[allow(static_mut_refs)]
     if let (Some(b), DO_MOVE | DO_COPY) = (unsafe { BATCH.as_mut() }, op) {
         if wps::is(src, "WPFileSystem") && wps::is(f, "WPFileSystem") {

@@ -267,6 +267,7 @@ fn finish(job: &Job) {
                 }
             }
             Op::Copy => {
+                wps::drop_copied_id(&dst);
                 let o = wps::object_from_path(&dst);
                 if o != 0 && it.folder != 0 {
                     crate::obj::d(o).folder = it.folder;

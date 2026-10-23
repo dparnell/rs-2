@@ -60,7 +60,7 @@ pub fn set_real_name_raw(obj: usize, p: &[u8]) {
 }
 
 /// An 8.3 name for a long one, not yet used in the directory.
-fn short_name(dir: &[u8], name: &[u8]) -> Vec<u8> {
+pub fn short_name(dir: &[u8], name: &[u8]) -> Vec<u8> {
     let keep = |c: &u8| c.is_ascii_alphanumeric() || b"_-$#!@%&".contains(c);
     let (base, ext) = match name.iter().rposition(|&c| c == b'.') {
         Some(i) if i > 0 => (&name[..i], &name[i + 1..]),
@@ -290,6 +290,7 @@ extern "C" fn fs_copy(obj: usize, folder: usize, _lock: u32) -> usize {
     if unsafe { os2::DosCopy(f.as_ptr(), t.as_ptr(), 0) } != 0 {
         return 0;
     }
+    wps::drop_copied_id(&new);
     let o = wps::object_from_path(&new);
     if o != 0 {
         wps::call("WPFolder", m::WPFolder::wpAddToContent, &[folder, o]);

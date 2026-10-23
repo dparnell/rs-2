@@ -372,6 +372,18 @@ pub fn encode(class: &[u8], folder: u32, recs: &[Rec]) -> Vec<u8> {
     b
 }
 
+/// A copied file or directory is a new object: its .CLASSINFO loses the
+/// original's object ID (WPObject's key 4) before it wakes.
+pub fn drop_copied_id(path: &[u8]) {
+    let Some((_, b)) = ea_read(path, b".CLASSINFO") else { return };
+    let Some((cls, folder, mut recs)) = decode(&b) else { return };
+    let n = recs.len();
+    recs.retain(|r| !(r.key == 4 && eq_nocase(&r.class, b"WPObject")));
+    if recs.len() != n {
+        ea_write(path, b".CLASSINFO", Some((EAT_BINARY, &encode(&cls, folder, &recs))));
+    }
+}
+
 pub fn decode(b: &[u8]) -> Option<(Vec<u8>, u32, Vec<Rec>)> {
     if b.len() < 6 || &b[..4] != b"RS2O" {
         return None;

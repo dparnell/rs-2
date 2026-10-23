@@ -23,7 +23,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"2";
+const DESKTOP_VERSION: &[u8] = b"3";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -59,6 +59,10 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"System Setup;WPFolder;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_CONFIG>"),
         (b"System;RS2System;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<RS2_SYSTEM>"),
         (b"Shut Down;RS2Shutdown;<WP_DESKTOP>;PRESERVEOLD", b"NOCOPY=YES;OBJECTID=<RS2_SHUTDOWN>"),
+        (b"Templates;WPTemplates;<WP_DESKTOP>;PRESERVEOLD", b"NODELETE=YES;OBJECTID=<WP_TEMPS>"),
+        (b"Data File;WPDataFile;<WP_TEMPS>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<RS2_TEMPDATAFILE>"),
+        (b"Folder;WPFolder;<WP_TEMPS>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<RS2_TEMPFOLDER>"),
+        (b"Program;WPProgram;<WP_TEMPS>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<RS2_TEMPPROGRAM>"),
         (b"OS/2 Window;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=WINDOWABLEVIO;OBJECTID=<WP_OS2WIN>"),
         (b"OS/2 Full Screen;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=FULLSCREEN;OBJECTID=<WP_OS2FS>"),
     ];
@@ -147,8 +151,8 @@ pub fn run() {
     }
     let mut pending: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     // Version 2 added the Minimized Window Viewer, Window List, System
-    // Setup (System, Display) and Shut Down; PRESERVEOLD leaves what an
-    // earlier version made.
+    // Setup (System, Display) and Shut Down, version 3 Templates;
+    // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         pending.extend(defaults());
         let mut v = DESKTOP_VERSION.to_vec();

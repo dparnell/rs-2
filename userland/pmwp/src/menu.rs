@@ -23,6 +23,7 @@ unsafe extern "C" {
 pub const MENU_OBJECTPOPUP: u32 = 1;
 pub const MENU_OPENVIEWPOPUP: u32 = 2;
 
+pub const CTXT_NEW: u32 = 0x0001;
 pub const CTXT_OPEN: u32 = 0x0002;
 pub const CTXT_SETTINGS: u32 = 0x0010;
 pub const CTXT_HELP: u32 = 0x0040;
@@ -40,6 +41,7 @@ pub const CTXT_REFRESH: u32 = 0x400000;
 
 pub const WPMENUID_OPEN: u32 = 1;
 pub const WPMENUID_SORT: u32 = 5;
+pub const WPMENUID_CREATEANOTHER: u32 = 101;
 pub const WPMENUID_MOVE: u32 = 107;
 pub const WPMENUID_COPY: u32 = 108;
 pub const WPMENUID_DELETE: u32 = 109;
@@ -137,7 +139,7 @@ fn is(o: usize, c: &str) -> bool {
 /// wpDisplayMenu(hwndOwner, hwndClient, pptl, ulMenuType, ulReserved).
 extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const PointL, kind: u32, _res: u32) -> u32 {
     let all = CTXT_OPEN | CTXT_SETTINGS | CTXT_HELP | CTXT_DELETE | CTXT_COPY | CTXT_MOVE | CTXT_SHADOW | CTXT_PROGRAM | CTXT_ICON | CTXT_TREE
-        | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH | CTXT_SORT;
+        | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH | CTXT_SORT | CTXT_NEW;
     let flags = obj::call(m::WPObject::wpFilterPopupMenu, &[o, all as usize, 0, 0]) as u32;
     let folder = is(o, "WPFolder");
     // A drive's views are its root folder's.
@@ -203,6 +205,9 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
         if flags & CTXT_MOVE != 0 {
             items.push(Menu::Item(WPMENUID_MOVE as u16, b"~Move...", style & obj::OBJSTYLE_NOMOVE == 0));
         }
+        if flags & CTXT_NEW != 0 && !is(o, "WPDisk") && !is(o, "WPMinWindow") {
+            items.push(Menu::Item(WPMENUID_CREATEANOTHER as u16, b"Create ~another...", style & obj::OBJSTYLE_NOCOPY == 0));
+        }
         if flags & CTXT_SHADOW != 0 {
             items.push(Menu::Item(WPMENUID_CREATESHADOW as u16, b"Create s~hadow...", style & obj::OBJSTYLE_NOLINK == 0));
         }
@@ -247,6 +252,18 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
                 if view::wins()[w].obj == o {
                     view::arrange(w);
                 }
+            }
+        }
+        WPMENUID_CREATEANOTHER => {
+            let start = wps::path_of(obj::folder_of(o)).map(|mut p| {
+                if !p.ends_with(b"\\") {
+                    p.push(b'\\');
+                }
+                p
+            });
+            let t = obj::title(o);
+            if let Some((f, n)) = crate::filejob::pick_folder(b"Create Another", b"C~reate", Some(&t), start.as_deref()) {
+                crate::templates::create_from(o, f, Some(&n));
             }
         }
         WPMENUID_COPY | WPMENUID_MOVE | WPMENUID_CREATESHADOW => {
