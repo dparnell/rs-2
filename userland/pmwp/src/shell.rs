@@ -71,6 +71,7 @@ pub extern "C" fn WinShutdownSystem(_hab: u32, _hmq: u32) -> u32 {
     1
 }
 
-/// Before turning off: what is not saved yet (objects save as they
-/// change; nothing waits).
-pub fn save_all() {}
+/// Before turning off: what the lazy writer has not saved yet.
+pub fn save_all() {
+    crate::obj::flush_dirty();
+}

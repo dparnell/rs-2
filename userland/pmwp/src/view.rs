@@ -1000,6 +1000,10 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             crate::minwin::changed(a, b != 0);
             0
         }
+        WM_TIMER if a == crate::obj::TID_LAZY => {
+            crate::obj::flush_dirty();
+            0
+        }
         WM_TIMER if a == crate::minwin::TID_MINWATCH => {
             crate::minwin::check();
             0

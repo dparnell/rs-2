@@ -242,9 +242,61 @@ extern "C" fn wpSaveImmediate(obj: usize) -> u32 {
     ok as u32
 }
 
+// ---- The lazy writer ----
+//
+// As in IBM's shell, wpSaveDeferred only notes that an object changed;
+// the lazy writer saves it a moment later (the desktop's timer, on the
+// shell's thread, where the objects are), so a burst of changes is
+// written once. Shutting down saves what is left. Without a desktop (a
+// process that is not the shell) objects are saved at once.
+
+pub const TID_LAZY: u32 = 0x5703;
+const LAZY_MS: u32 = 1000;
+
+static mut DIRTY: Vec<usize> = Vec::new();
+
+#[allow(static_mut_refs)]
+fn dirty() -> &'static mut Vec<usize> {
+    unsafe { &mut DIRTY }
+}
+
+unsafe extern "C" {
+    #[link_name = "PMWIN.800"]
+    fn WinQueryAnchorBlock(h: u32) -> u32;
+}
+use crate::pm::{WinStartTimer, WinStopTimer};
+
 extern "C" fn wpSaveDeferred(obj: usize) -> u32 {
-    // No lazy writer yet: saved at once.
-    call(m::WPObject::wpSaveImmediate, &[obj]) as u32
+    let client = crate::view::desktop_client();
+    if client == 0 {
+        return call(m::WPObject::wpSaveImmediate, &[obj]) as u32;
+    }
+    let first = dirty().is_empty();
+    if !dirty().contains(&obj) {
+        dirty().push(obj);
+    }
+    if first {
+        unsafe { WinStartTimer(WinQueryAnchorBlock(crate::pm::HWND_DESKTOP), client, TID_LAZY, LAZY_MS) };
+    }
+    1
+}
+
+/// The lazy writer's turn (and shutdown): save the changed objects.
+pub fn flush_dirty() {
+    let client = crate::view::desktop_client();
+    if client != 0 {
+        unsafe { WinStopTimer(WinQueryAnchorBlock(crate::pm::HWND_DESKTOP), client, TID_LAZY) };
+    }
+    let list = core::mem::take(dirty());
+    debug(&alloc::format!("lazy: saving {} object(s)", list.len()));
+    for o in list {
+        call(m::WPObject::wpSaveImmediate, &[o]);
+    }
+}
+
+/// An object that goes leaves the lazy writer's list.
+fn undirty(obj: usize) {
+    dirty().retain(|&o| o != obj);
 }
 
 fn changed(obj: usize) {
@@ -256,6 +308,7 @@ fn changed(obj: usize) {
 extern "C" fn wpInitData(_obj: usize) {}
 
 extern "C" fn wpUnInitData(obj: usize) {
+    undirty(obj);
     let dd = d(obj);
     dd.title = None;
     dd.object_id = None;
@@ -539,6 +592,7 @@ extern "C" fn wpFree(obj: usize) -> u32 {
         }
     }
     d(obj).flags |= F_DELETED;
+    undirty(obj);
     crate::view::removed(0, obj);
     som::so_call(som::so::SOM_FREE, &[obj]);
     1
