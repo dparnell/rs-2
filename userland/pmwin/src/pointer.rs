@@ -236,6 +236,59 @@ fn make(img: Image, mini: Option<Image>, pointer: bool, hot: Point, mono: bool) 
     add(PtrObj { pid: pid(), hot, pointer, img: img.scaled(ICON, ICON), mini, mono })
 }
 
+/// A template's look of an icon image `n` pixels square (IBM's shell
+/// shows templates as their icon on a notepad): a white pad with a blue
+/// binding along its top, the icon shrunk onto it.
+fn template_image(src: &Image, n: i32) -> Image {
+    const WHITE: u32 = 0xffff_ffff;
+    const EDGE: u32 = 0xff60_6060;
+    const BINDING: u32 = 0xff30_50a0;
+    const RING: u32 = 0xff20_2020;
+    let mut out = Image::new(n, n);
+    let (l, r, b, t) = (n / 8, n - 1, 0, n - 1 - n / 16);
+    for y in b..=t {
+        for x in l..=r {
+            let edge = x == l || x == r || y == b || y == t;
+            out.set(x, y, if edge { EDGE } else { WHITE });
+        }
+    }
+    // The binding: a band along the top with rings.
+    let band = (n / 8).max(2);
+    for y in t - band + 1..=t {
+        for x in l..=r {
+            out.set(x, y, BINDING);
+        }
+    }
+    let mut x = l + 2;
+    while x < r - 1 {
+        out.set(x, t, RING);
+        out.set(x, t - band, RING);
+        x += (n / 8).max(2);
+    }
+    // The icon, three quarters of its size, on the pad.
+    let k = n * 3 / 4;
+    let small = src.scaled(k, k);
+    let (ox, oy) = (l + (r - l + 1 - k) / 2, b + 1);
+    for y in 0..k {
+        for x in 0..k {
+            let v = small.at(x, y);
+            if v != icon::TRANSPARENT {
+                out.set(ox + x, oy + y, v);
+            }
+        }
+    }
+    out
+}
+
+/// Rs2TemplateIcon(hptr): a new icon (the caller's) showing `hptr` as a
+/// template; 0 if `hptr` is not an icon.
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2TemplateIcon(h: u32) -> u32 {
+    let Some(p) = get(h) else { return 0 };
+    let (img, mini) = (template_image(&p.img, ICON), template_image(&p.mini, MINI));
+    add(PtrObj { pid: pid(), hot: Point::new(0, 0), pointer: false, img, mini, mono: false })
+}
+
 /// WinCreatePointerIndirect(hwndDesktop, pptri): from POINTERINFO.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinCreatePointerIndirect(_desk: u32, pi: *const PointerInfo) -> u32 {

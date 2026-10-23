@@ -1,7 +1,8 @@
 //! Find (a folder's, a drive's or the desktop's Find... menu item): the
 //! objects whose names match a pattern (wildcards `*` and `?`), in the
 //! folder and, if asked, in all its subfolders. A worker thread walks
-//! the directories and matches real names; the shell's thread then wakes
+//! the directories and matches real names and the titles of `.LONGNAME`;
+//! the shell's thread then wakes
 //! the objects found, adds the abstract ones (programs, shadows) of the
 //! folders searched that are awake and match by title, and shows them
 //! in a Find Results window, where they open, show their menus and drag
@@ -121,7 +122,10 @@ extern "C" fn worker(param: u32) {
                 continue;
             }
             let p = join(&dir, &name);
-            if wildcard(&job.pattern, &name) {
+            // The real name, or the title a FAT name stands for
+            // (.LONGNAME).
+            let long = || crate::util::ea_read(&p, b".LONGNAME").is_some_and(|(_, t)| wildcard(&job.pattern, &t));
+            if wildcard(&job.pattern, &name) || long() {
                 job.found.push(p.clone());
             }
             if is_dir && job.subfolders {

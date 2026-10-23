@@ -388,7 +388,7 @@ fn insert_recs(w: usize, list: &[(usize, u32)]) -> Vec<u32> {
             break;
         }
         let rec = Rec { obj: o, rec: r, title: if o == 0 { alloc::vec![0] } else { title_bytes(o) }, parent };
-        let icon = if o == 0 { 0 } else { obj::call(m::WPObject::wpQueryIcon, &[o]) as u32 };
+        let icon = if o == 0 { 0 } else { crate::templates::view_icon(o) };
         set_rec(r, &rec, icon);
         wins()[w].recs.push(rec);
         made.push(r);
@@ -692,7 +692,7 @@ fn parent_obj(w: usize, parent: u32) -> usize {
 pub fn changed(o: usize) {
     for w in 0..wins().len() {
         let cnr = wins()[w].child;
-        let icon = obj::call(m::WPObject::wpQueryIcon, &[o]) as u32;
+        let icon = crate::templates::view_icon(o);
         for i in 0..wins()[w].recs.len() {
             if wins()[w].recs[i].obj != o {
                 continue;

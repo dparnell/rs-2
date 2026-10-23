@@ -285,8 +285,13 @@ extern "C" fn wpQueryTitle(obj: usize) -> *const u8 {
 }
 
 extern "C" fn wpSetStyle(obj: usize, style: u32) -> u32 {
+    let template = (d(obj).style ^ style) & OBJSTYLE_TEMPLATE != 0;
     d(obj).style = style;
     changed(obj);
+    // A template looks different in its views.
+    if template {
+        crate::view::changed(obj);
+    }
     1
 }
 

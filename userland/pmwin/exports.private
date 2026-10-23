@@ -7,6 +7,7 @@ Rs2LoadFileIcon 9004
 Rs2FreeFileIcon 9005
 Rs2SetFileIcon 9006
 Rs2SetDesktopWindow 9007
+Rs2TemplateIcon 9008
 WinAddSwitchEntry 9010
 WinChangeSwitchEntry 9011
 WinQuerySwitchEntry 9012

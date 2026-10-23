@@ -356,6 +356,7 @@ WinDestroyPointer=__a_WinDestroyPointer @727
 WinSetPointerOwner=__a_WinSetPointerOwner @971
 WinQueryPointerInfo=__a_WinQueryPointerInfo @822
 WinCreatePointer=__a_WinCreatePointer @717
+Rs2TemplateIcon=__a_Rs2TemplateIcon @9008
 WinCreatePointerIndirect=__a_WinCreatePointerIndirect @942
 WinDrawPointer=__a_WinDrawPointer @732
 WinQueryPointer=__a_WinQueryPointer @821

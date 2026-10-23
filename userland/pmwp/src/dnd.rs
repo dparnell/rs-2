@@ -90,7 +90,7 @@ pub fn begin(w: usize, cdi: u32) -> u32 {
     let icon = if list.len() > 1 {
         unsafe { WinQuerySysPointer(HWND_DESKTOP, SPTR_MULTFILE, 0) }
     } else {
-        obj::call(m::WPObject::wpQueryIcon, &[list[0]]) as u32
+        crate::templates::view_icon(list[0])
     };
     let mut img = [0u8; 24];
     img[0..2].copy_from_slice(&24u16.to_le_bytes());
