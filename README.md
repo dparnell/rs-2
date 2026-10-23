@@ -158,7 +158,7 @@ programs are tested.
 
 ## Using the desktop
 
-![The rs2 desktop: Drives, drive C: and its OS2 folder open](docs/images/rs2-desktop.png)
+![The rs2 desktop (the Workplace Shell): Drives and Drive C open](docs/images/rs2-desktop.png)
 
 *The live ISO's desktop (the Workplace Shell) with Drives and Drive C open.*
 
