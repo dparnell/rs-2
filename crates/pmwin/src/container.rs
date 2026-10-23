@@ -122,7 +122,8 @@ pub struct Placed {
 
 /// Width of icon view text before it wraps.
 pub fn icon_text_width(m: &Metrics) -> i32 {
-    (m.cw * 10).max(m.icon + 8)
+    // At least SV_CXICONTEXTWIDTH (75), whatever the font.
+    (m.cw * 10).max(75).max(m.icon + 8)
 }
 
 /// Lines of a text: split at line ends, each wrapped at blanks to at most

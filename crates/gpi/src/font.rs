@@ -113,6 +113,7 @@ struct Glyph {
 }
 
 /// What a loaded OS/2 font says about itself (FOCAMETRICS).
+#[derive(Clone)]
 pub struct Os2FontInfo {
     pub family: Vec<u8>,
     pub face: Vec<u8>,

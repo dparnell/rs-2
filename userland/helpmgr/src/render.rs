@@ -105,7 +105,7 @@ impl Gpi {
             let mut fat = [0u8; 56];
             fat[0..2].copy_from_slice(&56u16.to_le_bytes());
             fat[2..4].copy_from_slice(&selection(style).to_le_bytes());
-            let name: &[u8] = if face.is_empty() { b"System VIO" } else { face };
+            let name: &[u8] = if face.is_empty() { b"System Proportional" } else { face };
             fat[8..8 + name.len()].copy_from_slice(name);
             fat[42..44].copy_from_slice(&850u16.to_le_bytes());
             if px != 0 {
@@ -116,9 +116,8 @@ impl Gpi {
         }
         unsafe { GpiSetCharSet(self.hps, lcid) };
         if px != 0 {
-            // FIXED character box: half as wide as high, as the faces'
-            // glyph cells.
-            let b = [(px / 2) << 16, px << 16];
+            // FIXED character box: the em square.
+            let b = [px << 16, px << 16];
             unsafe { GpiSetCharBox(self.hps, b.as_ptr()) };
         }
     }

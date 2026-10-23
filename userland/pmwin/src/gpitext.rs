@@ -309,6 +309,7 @@ const FONTS: &[(&[u8], bool)] = &[
     (b"Tms Rmn", false),
     (b"System Proportional", false),
     (b"System Monospaced", false),
+    (b"WarpSans", false),
 ];
 const FATTR_FONTUSE_OUTLINE: u16 = 4;
 const FATTR_SEL_OUTLINE: u16 = 8;
@@ -344,7 +345,11 @@ pub extern "C" fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *c
     // nearest size (lMaxBaselineExt, lAveCharWidth).
     let maxbe = unsafe { (fat.add(44) as *const i32).read_unaligned() };
     let avew = unsafe { (fat.add(48) as *const i32).read_unaligned() };
-    if let Some(i) = find_loaded(&face, lmatch, maxbe, avew) {
+    // An outline request goes to the outline faces (unless lMatch names
+    // a loaded font).
+    let wants_outline = usef & FATTR_FONTUSE_OUTLINE != 0 || sel & FATTR_SEL_OUTLINE != 0;
+    let by_match = lmatch >= LOADED_MATCH;
+    if let Some(i) = find_loaded(&face, lmatch, maxbe, avew).filter(|_| !wants_outline || by_match) {
         e.gpi.lcids.retain(|(l, _)| *l != lcid);
         e.gpi.lcids.push((lcid, Lcid::Font(LogFont { outline: false, italic: sel & 1 != 0, underscore: sel & 2 != 0, bold: sel & 0x20 != 0 }, face, i as u32 + 1)));
         return 2;
@@ -466,10 +471,14 @@ pub extern "C" fn GpiQueryLogicalFont(hps: u32, lcid: i32, name: *mut [u8; 8], f
     1
 }
 
-/// FONTMETRICS of the system font scaled by `scale` (device pels per
+/// The font a face of FONTS draws with (for listing).
+fn face_font(i: usize) -> &'static gpi::font::Font {
+    crate::fonts::face_index(FONTS[i].0).and_then(|k| crate::fonts::face(k, if FONTS[i].1 { OUTLINE_EM } else { crate::fonts::SYSTEM_EM })).unwrap_or_else(gpi::font::system)
+}
+
+/// FONTMETRICS of a font scaled by `scale` (device pels per
 /// font pel), converted to world units by `w`.
-fn metrics(font: usize, scale: (f64, f64), w: &dyn Fn(f64, f64) -> (i32, i32)) -> [u8; 228] {
-    let f = gpi::font::system();
+fn metrics(font: usize, f: &gpi::font::Font, scale: (f64, f64), w: &dyn Fn(f64, f64) -> (i32, i32)) -> [u8; 228] {
     let (face, outline) = FONTS[font];
     let mut m = [0u8; 228];
     let n = face.len();
@@ -481,15 +490,17 @@ fn metrics(font: usize, scale: (f64, f64), w: &dyn Fn(f64, f64) -> (i32, i32)) -
     let x = |v: i32| w(v as f64 * scale.0, 0.0).0;
     let y = |v: i32| w(0.0, v as f64 * scale.1).1;
     let (h, d) = (f.height, f.descender);
+    let fixed = f.char_width(b'i') == f.char_width(b'm');
+    let maxw = (1..=255u8).map(|b| f.char_width(b)).max().unwrap_or(f.width);
     p16(&mut m, 66, 850); // usCodePage
-    p32(&mut m, 68, y(h)); // lEmHeight
+    p32(&mut m, 68, y(if f.em > 0 { f.em } else { h })); // lEmHeight
     p32(&mut m, 72, y(h / 2)); // lXHeight
     p32(&mut m, 76, y(h - d)); // lMaxAscender
     p32(&mut m, 80, y(d)); // lMaxDescender
     p32(&mut m, 84, y(h - d - 2)); // lLowerCaseAscent
     p32(&mut m, 88, y(d)); // lLowerCaseDescent
     p32(&mut m, 100, x(f.width)); // lAveCharWidth
-    p32(&mut m, 104, x(f.width)); // lMaxCharInc
+    p32(&mut m, 104, x(maxw)); // lMaxCharInc
     p32(&mut m, 108, x(f.width)); // lEmInc
     p32(&mut m, 112, y(h)); // lMaxBaselineExt
     p16(&mut m, 122, if face.ends_with(b"Bold") { 7 } else { 5 }); // usWeightClass
@@ -503,7 +514,7 @@ fn metrics(font: usize, scale: (f64, f64), w: &dyn Fn(f64, f64) -> (i32, i32)) -
     p16(&mut m, 138, 120); // sNominalPointSize (decipoints)
     p16(&mut m, 140, if outline { 10 } else { 120 });
     p16(&mut m, 142, if outline { 7200 } else { 120 });
-    p16(&mut m, 144, 1); // fsType: FM_TYPE_FIXED
+    p16(&mut m, 144, fixed as i32); // fsType: FM_TYPE_FIXED
     p16(&mut m, 146, outline as i32); // fsDefn: FM_DEFN_OUTLINE
     p32(&mut m, 152, x(f.width / 2)); // subscript x size
     p32(&mut m, 156, y(h / 2));
@@ -529,7 +540,7 @@ pub extern "C" fn GpiQueryFontMetrics(hps: u32, len: i32, out: *mut u8) -> u32 {
     let ps = &e.ps;
     let set = ps.attrs.char_set;
     let loaded = e.gpi.lcids.iter().find_map(|(l, x)| match x {
-        Lcid::Font(_, _, n) if *l == set && *n != 0 => Some(*n as usize - 1),
+        Lcid::Font(_, _, n) if *l == set && *n != 0 && *n & FACE_FONT == 0 => Some(*n as usize - 1),
         _ => None,
     });
     if let Some(m) = loaded.and_then(|i| loaded_metrics(i, &|x, y| ps.device_to_world_len(x, y))) {
@@ -540,7 +551,10 @@ pub extern "C" fn GpiQueryFontMetrics(hps: u32, len: i32, out: *mut u8) -> u32 {
         Lcid::Font(lf, face, _) if *l == set => Some(find_font(face, 0).unwrap_or(lf.outline as usize)),
         _ => None,
     });
-    let m = metrics(font.unwrap_or(0), ps.font_scale(), &|x, y| ps.device_to_world_len(x, y));
+    let (f, sx, sy) = ps.text_font();
+    // The default font: the system font's face.
+    let font = font.unwrap_or_else(|| find_font(gpi::font::system().name.as_bytes(), 0).unwrap_or(0));
+    let m = metrics(font, f, (sx, sy), &|x, y| ps.device_to_world_len(x, y));
     unsafe { core::ptr::copy_nonoverlapping(m.as_ptr(), out, (len as usize).min(m.len())) };
     1
 }
@@ -558,7 +572,7 @@ pub extern "C" fn GpiQueryFonts(hps: u32, opts: u32, face: *const u8, req: *mut 
     let round = |x: f64, y: f64| (gpi::math::round(x), gpi::math::round(y));
     let mut list: Vec<[u8; 228]> = Vec::new();
     if opts & QF_PUBLIC != 0 || opts & (QF_PUBLIC | QF_PRIVATE) == 0 {
-        list.extend((0..FONTS.len()).filter(|&i| name.is_empty() || FONTS[i].0.eq_ignore_ascii_case(&name)).map(|i| metrics(i, (1.0, 1.0), &round)));
+        list.extend((0..FONTS.len()).filter(|&i| name.is_empty() || FONTS[i].0.eq_ignore_ascii_case(&name)).map(|i| metrics(i, face_font(i), (1.0, 1.0), &round)));
     }
     if opts & QF_PRIVATE != 0 {
         for (i, l) in loaded().iter().enumerate() {
@@ -685,34 +699,53 @@ pub extern "C" fn GpiLoadFonts(_hab: u32, file: *const u8) -> u32 {
     if loaded().iter().flatten().any(|l| l.file == key) {
         return 1;
     }
-    let mut z = name.clone();
+    let fonts = module_fonts(&name);
+    let any = !fonts.is_empty();
+    for (font, info) in fonts {
+        add_loaded(&key, info, alloc::boxed::Box::leak(alloc::boxed::Box::new(font)));
+    }
+    any as u32
+}
+
+const RT_DISPLAY_FONT: u32 = 1000;
+
+/// The image fonts of a font file (a resource DLL: RT_FONTDIR lists
+/// its RT_FONT resources).
+pub(crate) fn module_fonts(name: &[u8]) -> Vec<(gpi::font::Font, gpi::font::Os2FontInfo)> {
+    let mut out = Vec::new();
+    let mut z = name.to_vec();
     z.push(0);
     let mut fail = [0u8; 16];
     let mut hmod = 0;
     let rc = crate::lock::unlocked(|| unsafe { DosLoadModule(fail.as_mut_ptr(), 16, z.as_ptr(), &mut hmod) });
     if rc != 0 {
-        return 0;
+        return out;
     }
     let Some(dir) = crate::res::load(hmod, RT_FONTDIR, 1).map(|d| d.to_vec()) else {
         unsafe { DosFreeModule(hmod) };
-        return 0;
+        return out;
     };
     // FONTDIRECTORY: cbHeader, cFonts, cbEntry, then entries that start
     // with the resource id.
     let u16_at = crate::res::u16_at;
     let (hdr, n, size) = (u16_at(&dir, 0) as usize, u16_at(&dir, 2) as usize, u16_at(&dir, 4) as usize);
-    let mut any = false;
     for k in 0..n {
         let id = u16_at(&dir, hdr + k * size) as u32;
-        let Some(data) = crate::res::load(hmod, RT_FONT, id) else { continue };
-        if let Some((font, info)) = gpi::font::Font::from_os2(data) {
-            let font: &'static gpi::font::Font = alloc::boxed::Box::leak(alloc::boxed::Box::new(font));
-            loaded().push(Some(Loaded { file: key.clone(), info, font }));
-            any = true;
+        // Display drivers' resource DLLs (DSPRES.DLL) keep their fonts as
+        // resource type 1000.
+        let Some(data) = crate::res::load(hmod, RT_FONT, id).or_else(|| crate::res::load(hmod, RT_DISPLAY_FONT, id)) else { continue };
+        if let Some(f) = gpi::font::Font::from_os2(data) {
+            out.push(f);
         }
     }
     unsafe { DosFreeModule(hmod) };
-    any as u32
+    out
+}
+
+/// Offer a font to this process as if loaded with GpiLoadFonts from
+/// `file` (upper case).
+pub(crate) fn add_loaded(file: &[u8], info: gpi::font::Os2FontInfo, font: &'static gpi::font::Font) {
+    loaded().push(Some(Loaded { file: file.to_vec(), info, font }));
 }
 
 /// GpiUnloadFonts(hab, pszFilename): the file's fonts are no longer

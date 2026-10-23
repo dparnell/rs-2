@@ -490,18 +490,21 @@ fn self_checks(hab: u32) {
         let mut fm = [0u8; 228];
         check("GpiQueryFontMetrics", GpiQueryFontMetrics(m.hps, 228, fm.as_mut_ptr()) != 0);
         let l = |o: usize| i32::from_le_bytes([fm[o], fm[o + 1], fm[o + 2], fm[o + 3]]);
-        check("font metrics values", l(112) == 16 && l(100) == 8 && l(76) == 12 && &fm[32..42] == b"System VIO");
+        // The system font, whichever it is: its cell is its ascender and
+        // descender, and it has a face name.
+        let (asc, desc) = (l(76), l(80));
+        check("font metrics values", l(112) == asc + desc && l(100) > 0 && asc > desc && fm[32] != 0);
         free(m);
         let m = mem(hab, 8, 8, PU_PELS);
         let mut tb = [PointL::default(); 5];
         GpiQueryTextBox(m.hps, 3, b"abc".as_ptr(), 5, tb.as_mut_ptr());
-        check("GpiQueryTextBox", tb[4] == pt(24, 0) && tb[0] == pt(0, 12) && tb[1] == pt(0, -4));
+        check("GpiQueryTextBox", tb[4].x > 0 && tb[4].y == 0 && tb[0] == pt(0, asc) && tb[1] == pt(0, -desc));
         let mut cp = [PointL::default(); 4];
         GpiMove(m.hps, &pt(10, 0));
         GpiQueryCharStringPos(m.hps, 0, 3, b"abc".as_ptr(), null(), cp.as_mut_ptr());
-        check("GpiQueryCharStringPos", cp[0] == pt(10, 0) && cp[3] == pt(34, 0));
+        check("GpiQueryCharStringPos", cp[0] == pt(10, 0) && cp[3] == pt(10 + tb[4].x, 0) && cp[1].x > 10 && cp[2].x > cp[1].x);
         let mut req = 0;
-        check("GpiQueryFonts", GpiQueryFonts(m.hps, 1, null(), &mut req, 228, null_mut()) == 11);
+        check("GpiQueryFonts", GpiQueryFonts(m.hps, 1, null(), &mut req, 228, null_mut()) == 12);
         let mut fms = [0u8; 228 * 2];
         req = 2;
         let left = GpiQueryFonts(m.hps, 1, b"Helvetica Bold\0".as_ptr(), &mut req, 228, fms.as_mut_ptr());
@@ -510,9 +513,15 @@ fn self_checks(hab: u32) {
         fat[0] = 56;
         fat[54] = 4; // FATTR_FONTUSE_OUTLINE
         check("GpiCreateLogFont", GpiCreateLogFont(m.hps, null(), 1, fat.as_ptr()) == 2 && GpiSetCharSet(m.hps, 1) != 0);
-        GpiSetCharBox(m.hps, &[16 * MAKEFIXED, 32 * MAKEFIXED]);
+        GpiSetCharBox(m.hps, &[16 * MAKEFIXED, 16 * MAKEFIXED]);
         GpiQueryTextBox(m.hps, 2, b"ab".as_ptr(), 5, tb.as_mut_ptr());
-        check("outline font scales to the char box", tb[4] == pt(32, 0) && tb[0] == pt(0, 24));
+        let small = (tb[4].x, tb[0].y);
+        GpiSetCharBox(m.hps, &[32 * MAKEFIXED, 32 * MAKEFIXED]);
+        GpiQueryTextBox(m.hps, 2, b"ab".as_ptr(), 5, tb.as_mut_ptr());
+        // Twice the box: about twice the text (small sizes snap their
+        // x-height to whole pels), and an ascender within the em.
+        let near = |a: i32, b: i32| (a - b).abs() * 100 <= b * 15;
+        check("outline font scales to the char box", near(tb[4].x, 2 * small.0) && near(tb[0].y, 2 * small.1) && tb[0].y > 16 && tb[0].y <= 32);
         GpiSetCharSet(m.hps, 0);
         check("GpiDeleteSetId", GpiDeleteSetId(m.hps, 1) != 0);
         // Each character's width is its own advance (fonts loaded with

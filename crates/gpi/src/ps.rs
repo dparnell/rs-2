@@ -1245,15 +1245,24 @@ impl Ps {
     /// The font text draws with and its scale: for an outline font with
     /// outlines, the face made at the character box's size (scale 1),
     /// else the current font scaled.
-    fn text_font(&self) -> (&'static Font, f64, f64) {
+    pub fn text_font(&self) -> (&'static Font, f64, f64) {
         let (sx, sy) = self.text_scale();
         if self.logfont.outline
             && let Some(src) = self.font.source
-            && sy > 0.0
-            && abs(sx / sy - 1.0) < 0.05
-            && let Some(f) = src.at(round(sy * self.font.em as f64))
         {
-            return (f, 1.0, 1.0);
+            // The character box is the em (as wide as it is high for
+            // the face's own proportions); the default box is the font
+            // as it is.
+            let (bw, _) = self.dev_vec(fx(self.attrs.char_box.0), 0.0);
+            let (_, bh) = self.dev_vec(0.0, fx(self.attrs.char_box.1));
+            let (bw, bh) = (abs(bw), abs(bh));
+            let default = self.attrs.char_box == (self.font.width << 16, self.font.height << 16);
+            let px = if default { self.font.em } else { round(bh) };
+            if (default || (bh > 0.0 && abs(bw / bh - 1.0) < 0.1))
+                && let Some(f) = src.at(px)
+            {
+                return (f, 1.0, 1.0);
+            }
         }
         (self.font, sx, sy)
     }
@@ -1333,10 +1342,19 @@ impl Ps {
                     });
                     self.fill_rect(s, r, bg);
                 }
-                let plain = slant == 0.0 && !lf.bold && !lf.underscore;
+                let plain = slant == 0.0;
                 if plain && sx == 1.0 && sy == 1.0 && dx.is_none() && self.attrs.char_extra == 0 && self.attrs.char_break_extra == 0 {
                     let bm = if opaque { Mix::LeaveAlone } else { bmix };
-                    self.glyphs_at(s, f, Point::new(round(start.0), round(start.1)), text, fg, mix, bg, bm);
+                    let at = Point::new(round(start.0), round(start.1));
+                    self.glyphs_at(s, f, at, text, fg, mix, bg, bm);
+                    // Simulated bold: the glyphs again a pel to the right.
+                    if lf.bold {
+                        self.glyphs_at(s, f, Point::new(at.x + 1, at.y), text, fg, mix, bg, Mix::LeaveAlone);
+                    }
+                    if lf.underscore {
+                        let w = f.text_width(text) + lf.bold as i32;
+                        self.fill_rect(s, Rect::new(at.x, at.y - 2, at.x + w, at.y - 1), fg);
+                    }
                 } else {
                     // The character cells' background (BM_OVERPAINT etc.),
                     // as for plain text.

@@ -1293,6 +1293,15 @@ fn cstr(p: *const u8) -> Option<Vec<u8>> {
     Some(v)
 }
 
+/// The size of a file, if it is there.
+pub(crate) fn read_size(name: &[u8]) -> Option<u32> {
+    let mut z = name.to_vec();
+    z.push(0);
+    // FILESTATUS3: cbFile at 12.
+    let mut fs = [0u8; 24];
+    (unsafe { os2::DosQueryPathInfo(z.as_ptr(), 1, fs.as_mut_ptr(), 24) } == 0).then(|| u32::from_le_bytes([fs[12], fs[13], fs[14], fs[15]]))
+}
+
 pub(crate) fn read_file(name: &[u8]) -> Option<Vec<u8>> {
     let mut z = name.to_vec();
     z.push(0);
