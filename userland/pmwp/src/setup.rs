@@ -749,8 +749,8 @@ fn font_sample(hps: u32, i: usize, c: RectL) {
         Some(f) => (f, true),
         None => (face, false),
     };
-    // Shown at no more than 14 points, to fit the cell.
-    let px = (pt.min(14) * 96 + 36) / 72;
+    // Shown at no more than 12 points, to fit the cell.
+    let px = (pt.min(12) * 96 + 36) / 72;
     // FATTRS: fsSelection (FATTR_SEL_BOLD), szFacename, usCodePage,
     // lMaxBaselineExt; image faces at that size, the others as outlines
     // (FATTR_FONTUSE_OUTLINE) with an em-square character box.
