@@ -328,7 +328,12 @@ extern "C" fn disk_restore_state(obj: usize, r: u32) -> u32 {
     1
 }
 
+/// A drive's settings are its own; its other views are its root
+/// folder's (icon, tree or details view).
 extern "C" fn disk_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
+    if view == obj::OPEN_SETTINGS {
+        return som::call_parent(wps::ccd("WPDisk"), wps::cd("WPObject"), m::WPObject::wpOpen, &[obj, cnr as usize, view as usize, param as usize]) as u32;
+    }
     let root = root_of(obj);
     if root == 0 {
         return 0;
@@ -336,7 +341,36 @@ extern "C" fn disk_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
     obj::call(m::WPObject::wpViewObject, &[root, cnr as usize, view as usize, param as usize]) as u32
 }
 
+/// A CD drive shows a CD.
+extern "C" fn disk_icon(obj: usize) -> u32 {
+    if obj::d(obj).icon == 0 && crate::icons::is_cd(dd(obj).drive) {
+        return crate::icons::shell(crate::icons::CD_ROM);
+    }
+    som::call_parent(wps::ccd("WPDisk"), wps::cd("WPObject"), m::WPObject::wpQueryIcon, &[obj]) as u32
+}
+
+/// A program's icon: one set up for it, a command prompt's (EXENAME=*),
+/// or its program file's.
+extern "C" fn prog_icon(obj: usize) -> u32 {
+    if obj::d(obj).icon == 0 {
+        let p = pd(obj);
+        let exe = str_bytes(&p.exe).to_vec();
+        let h = if exe.is_empty() || exe == b"*" {
+            crate::icons::shell(if p.progc == launch::PROG_FULLSCREEN { crate::icons::PROMPT_FULL_SCREEN } else { crate::icons::PROMPT_WINDOW })
+        } else {
+            let f = z(&exe);
+            unsafe { crate::fs::Rs2LoadFileIcon(f.as_ptr(), 0) }
+        };
+        if h != 0 {
+            obj::d(obj).icon = h;
+        }
+    }
+    som::call_parent(wps::ccd("WPProgram"), wps::cd("WPObject"), m::WPObject::wpQueryIcon, &[obj]) as u32
+}
+
 methods! {
+    __m_disk_icon => disk_icon, 1;
+    __m_prog_icon => prog_icon, 1;
     __m_prog_setup => prog_setup, 2;
     __m_prog_save_state => prog_save_state, 1;
     __m_prog_restore_state => prog_restore_state, 2;
@@ -376,6 +410,7 @@ pub fn impl_program() -> Impl {
             ("wpRestoreState", __m_prog_restore_state as usize),
             ("wpUnInitData", __m_prog_uninit as usize),
             ("wpOpen", __m_prog_open as usize),
+            ("wpQueryIcon", __m_prog_icon as usize),
         ]
         .into_iter()
         .chain(crate::book::program_overrides())
@@ -417,6 +452,7 @@ pub fn impl_disk() -> Impl {
             ("wpSaveState", __m_disk_save_state as usize),
             ("wpRestoreState", __m_disk_restore_state as usize),
             ("wpOpen", __m_disk_open as usize),
+            ("wpQueryIcon", __m_disk_icon as usize),
         ]
         .into_iter()
         .chain(crate::dnd::overrides("WPDisk"))

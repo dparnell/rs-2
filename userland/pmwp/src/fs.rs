@@ -16,7 +16,7 @@ use crate::wps::{self, Impl};
 
 unsafe extern "C" {
     #[link_name = "PMWIN.9004"]
-    fn Rs2LoadFileIcon(path: *const u8, private: u32) -> u32;
+    pub fn Rs2LoadFileIcon(path: *const u8, private: u32) -> u32;
 }
 
 // ---- WPFileSystem ----
@@ -199,6 +199,15 @@ extern "C" fn fs_query_handle(obj: usize) -> u32 {
 
 extern "C" fn fs_query_icon(obj: usize) -> u32 {
     let od = obj::d(obj);
+    // A folder has its own icon only through its .ICON EA (or one set up
+    // for it); otherwise the one for its object ID or its class's.
+    if od.icon == 0 && wps::is(obj, "WPFolder") && ea_read(&path(obj), b".ICON").is_none() {
+        let i = crate::icons::of_object_id(&obj::object_id(obj));
+        if i != 0 {
+            return i;
+        }
+        return som::call_parent(wps::ccd("WPFileSystem"), wps::cd("WPObject"), m::WPObject::wpQueryIcon, &[obj]) as u32;
+    }
     if od.icon == 0 {
         let p = z(&path(obj));
         od.icon = unsafe { Rs2LoadFileIcon(p.as_ptr(), 0) };
@@ -398,6 +407,11 @@ extern "C" fn wpPopulate(obj: usize, _reserved: u32, _path: *const u8, folders_o
     if !p.is_empty() {
         for (name, attr) in list_dir(&p) {
             if folders_only != 0 && attr & FILE_DIRECTORY == 0 {
+                continue;
+            }
+            // Hidden files (FAT's EA DATA. SF among them) are not shown,
+            // as in IBM's folders by default.
+            if attr & 0x02 != 0 {
                 continue;
             }
             let o = wps::object_from_path(&join(&p, &name));

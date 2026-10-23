@@ -23,6 +23,7 @@ mod clsmgr;
 mod dnd;
 mod exports;
 mod fs;
+mod icons;
 mod install;
 mod ipc;
 mod shell;

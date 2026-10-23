@@ -373,7 +373,10 @@ pub fn fill(w: usize) {
         fill_tree(w);
         return;
     }
-    let objs = visible_content(wins()[w].obj);
+    let mut objs = visible_content(wins()[w].obj);
+    // Objects made while the folder populated (the Drives folder's
+    // drives) are in the view already.
+    objs.retain(|&o| !wins()[w].recs.iter().any(|r| r.obj == o && r.parent == 0));
     insert(w, &objs);
 }
 

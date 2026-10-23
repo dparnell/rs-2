@@ -136,12 +136,14 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
         | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH;
     let flags = obj::call(m::WPObject::wpFilterPopupMenu, &[o, all as usize, 0, 0]) as u32;
     let folder = is(o, "WPFolder");
+    // A drive's views are its root folder's.
+    let views = folder || is(o, "WPDisk");
     let program = is(o, "WPProgram") || is(o, "WPProgramFile");
     let mut open: Vec<Menu> = Vec::new();
     if flags & CTXT_SETTINGS != 0 {
         open.push(Menu::Item(WPMENUID_PROPERTIES as u16, b"~Settings", true));
     }
-    if folder {
+    if views {
         if flags & CTXT_ICON != 0 {
             open.push(Menu::Item(WPMENUID_ICON as u16, b"~Icon view", true));
         }

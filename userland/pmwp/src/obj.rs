@@ -657,6 +657,16 @@ const SPTR_PROGRAM: i32 = 22;
 extern "C" fn wpclsQueryIcon(cls: usize) -> u32 {
     let mut id = SPTR_APPICON;
     for c in ancestors_of(cls) {
+        // rs2's own icons for the classes that have one (icons.rs).
+        let own = match som::class_name(c) {
+            b"WPDrives" => crate::icons::DRIVES,
+            b"WPDesktop" => crate::icons::DESKTOP,
+            b"WPDisk" => crate::icons::HARD_DISK,
+            _ => 0,
+        };
+        if own != 0 {
+            return crate::icons::shell(own);
+        }
         match som::class_name(c) {
             b"WPFolder" => id = SPTR_FOLDER,
             b"WPProgram" | b"WPProgramFile" => id = SPTR_PROGRAM,
@@ -675,7 +685,8 @@ extern "C" fn wpclsQueryStyle(_cls: usize) -> u32 {
 extern "C" fn wpclsQueryDefaultView(cls: usize) -> u32 {
     for c in ancestors_of(cls) {
         match som::class_name(c) {
-            b"WPFolder" => return OPEN_CONTENTS,
+            // A drive opens its root folder.
+            b"WPFolder" | b"WPDisk" => return OPEN_CONTENTS,
             b"WPProgram" | b"WPProgramFile" | b"WPDataFile" => return OPEN_RUNNING,
             _ => {}
         }

@@ -339,8 +339,9 @@ The rest comes from the class modules:
 | Module | Classes |
 |--------|---------|
 | `obj.rs` | WPObject (title, style, icon, folder, default view, handle, object ID, setup strings, save/restore, delete, copy, move, shadow) and M_WPObject (wpclsNew, class titles, icons and views, objects from handles and locations; somClassReady calls wpclsInitData) |
-| `abs.rs` | WPAbstract, WPProgram (EXENAME, PARAMETERS, STARTUPDIR, PROGTYPE; wpQuery/SetProgDetails; opening starts the program), WPShadow (SHADOWID; shows and opens its object), WPDisk (a drive and its root folder) |
-| `fs.rs` | WPFileSystem (real name, renaming, file icons, moving and copying files), WPDataFile (opened with the PMWP_ASSOC_FILTER program, else the System Editor), WPProgramFile, WPFolder (content: the directory and the abstract objects in it), WPDrives (a WPDisk per drive), the desktop |
+| `abs.rs` | WPAbstract, WPProgram (EXENAME, PARAMETERS, STARTUPDIR, PROGTYPE; wpQuery/SetProgDetails; opening starts the program), WPShadow (SHADOWID; shows and opens its object), WPDisk (a drive: its settings are its own, its other views and its default view are its root folder's) |
+| `fs.rs` | WPFileSystem (real name, renaming, file icons, moving and copying files), WPDataFile (opened with the PMWP_ASSOC_FILTER program, else the System Editor), WPProgramFile, WPFolder (content: the directory, without hidden files, and the abstract objects in it), WPDrives (a WPDisk per drive), the desktop |
+| `icons.rs` | rs2's own icons (pmwin::shellicons, as RS2SHELL shows them) for WPDrives, WPDisk (hard disk or CD-ROM), WPDesktop, command prompts and the Command Prompts folder (by its object ID, where IBM's INI.RC sets an icon resource); a folder's .ICON EA still comes first |
 | `clsmgr.rs` | WPClassManager (merged in as SOM's class manager; finds classes in the DLLs registered in OS2SYS.INI's PM_Objects ClassTable) |
 | `api.rs` | WinCreateObject, WinQueryObject, WinSetObjectData, WinDestroyObject, WinOpenObject, WinSaveObject, WinMove/CopyObject, WinCreateShadow, WinQueryObjectPath, WinRegister/Deregister/Enum/ReplaceObjectClass |
 
