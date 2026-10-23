@@ -180,7 +180,10 @@ top of these.
   which abstract objects).
 - **File-system objects** are files and directories. Their state is in
   EAs: `.CLASSINFO` holds the class and saved instance data, plus
-  `.LONGNAME`, `.TYPE`, `.ICON` and `.ICONPOS` for folders.
+  `.LONGNAME`, `.TYPE`, `.ICON` and `.ICONPOS` for folders. A drive's
+  root has no directory entry to hold EAs: as in IBM's shell, they are
+  on the hidden file `WP ROOT. SF` in it (rs2's FAT takes spaces inside
+  8.3 names, as OS/2's does).
 - **Object handles**: `PM_Workplace:Handles0/1` and
   `PM_Workplace:ActiveHandles` (the "HFS nodes": a path→handle table
   restored by `RestoreHFSNodes`).
@@ -225,10 +228,10 @@ The work is in phases; each phase is usable on its own:
 
 1. **SOM runtime** (done; see "rs2's SOM.DLL" below).
 2. **Core classes in rs2's PMWP.DLL**: done, with the object model and
-   its views (see "rs2's Workplace Shell classes" below). Still to do:
-   - the remaining folder pages (sort, include, the other view pages);
-   - copy and move dialogs;
-   - Find and templates;
+   its views (see "rs2's Workplace Shell classes" below), with copying
+   and moving (progress, name collisions), Sort and Include, templates
+   and Find. Still to do:
+   - the other view pages (fonts, icon arrangement, details columns);
    - a lazy writer.
 3. **The shell process**: done (see "The shell process" below). It is
    the default desktop (`PROTSHELL=C:\OS2\PMSHELL.EXE`; `xtask run
@@ -236,8 +239,8 @@ The work is in phases; each phase is usable on its own:
    Viewer, the Window List, System Setup and Shut Down.
    `PROTSHELL=C:\OS2\RS2SHELL.EXE` still starts RS2SHELL.
 4. **Compatibility**: wpstutor.dll registered with WinRegisterObjectClass
-   and working; then the remaining classes (Templates, Find, Launchpad,
-   Shredder, Minimized Window Viewer, Network); then rs2 versions of
+   and working; then the remaining classes (Launchpad, Shredder,
+   Network); then rs2 versions of
    WPCONFIG and WPPRINT (System Setup and printers).
 
 Phase 2 can start with generating the ClassData layouts and method lists
@@ -351,6 +354,10 @@ The rest comes from the class modules:
 | `icons.rs` | rs2's own icons (pmwin::shellicons, as RS2SHELL shows them) for WPDrives, WPDisk (hard disk or CD-ROM), WPDesktop, command prompts and the Command Prompts folder (by its object ID, where IBM's INI.RC sets an icon resource); a folder's .ICON EA still comes first |
 | `minwin.rs` | WPMinWinViewer (`<WP_VIEWER>`; its content is the minimized windows) and WPMinWindow (transient, one per window PMWIN minimizes to the viewer: WM_RS2_MINWINDOW to the window set with Rs2SetMinimizeViewer, the desktop's; opening one restores its window). `RS2_Desktop` `MinimizeTo` (as for RS2SHELL) says whether windows go to the viewer or the desktop |
 | `rs2obj.rs` | rs2's own abstract classes for what IBM's shell keeps on the LaunchPad and in WPCONFIG: RS2Shutdown (opening it shuts down), RS2WindowList (the window list), RS2System (a Window page: where minimized windows go) |
+| `filejob.rs` | Copying and moving file system objects as the user asks (drops, Copy..., Move...): a worker thread with a progress window and the name collision dialog (Rename with a free name, Replace, Skip, Cancel), ported from RS2SHELL; the target folder dialog of Copy..., Move..., Create shadow... and Create another...; the objects follow on the shell's thread when a job ends (paths, handles, folders; a moved or renamed folder's objects too; copies lose the original's object ID) |
+| `sortinc.rs` | Folders' Sort page (name, type, real name, size, last write date, or as placed; always maintain sort order, setup ALWAYSSORT) and Include page (patterns matched against titles and real names; folders always shown), the view's Sort menu |
+| `templates.rs` | Templates (TEMPLATE style, the General page's check box): opening one makes a new object beside it, dragging one makes it at the drop, Create another... makes one where the user says; the new object's title is edited in place |
+| `find.rs` | Find... on folders, drives and the desktop: a name pattern, all subfolders; a worker thread walks the directories, and a Find Results window shows the objects (and the matching abstract objects of awake folders) |
 | `clsmgr.rs` | WPClassManager (merged in as SOM's class manager; finds classes in the DLLs registered in OS2SYS.INI's PM_Objects ClassTable) |
 | `api.rs` | WinCreateObject, WinQueryObject, WinSetObjectData, WinDestroyObject, WinOpenObject, WinSaveObject, WinMove/CopyObject, WinCreateShadow, WinQueryObjectPath, WinRegister/Deregister/Enum/ReplaceObjectClass |
 
@@ -466,8 +473,9 @@ If a Workplace Shell is already running, it ends.
     (the System Editor with its ASSOCFILTER, the application installer,
     Install rs2, where their files exist), Startup, the Minimized Window
     Viewer, Window List, System Setup (`<WP_CONFIG>`: System, and
-    Display where it exists) and Shut Down. `PM_Workplace` `Rs2Desktop`
-    holds the version made (2); a desktop of an earlier version gets
+    Display where it exists), Shut Down and Templates (Data File,
+    Folder, Program). `PM_Workplace` `Rs2Desktop` holds the version made
+    (3); a desktop of an earlier version gets
     the entries again, and PRESERVEOLD keeps what it has. Titles break
     lines at `^`, as in INI.RC.
 - **Starts the server** for other processes' object calls (`ipc.rs`):

@@ -365,7 +365,10 @@ Status markers: done, in progress, planned.
   object API from other processes); the default desktop since it
   has RS2SHELL's objects (Minimized Window Viewer, Window List, System
   Setup, Shut Down; drives open their root folders)
-- planned: the remaining classes and phase 2's gaps (docs/WPS.md)
+- done: folder features: copying and moving with progress and name
+  collisions (Copy..., Move..., Create shadow..., Create another...),
+  Sort and Include pages, templates (the Templates folder), Find
+- planned: the remaining classes and view pages (docs/WPS.md)
 
 ## Milestone 5: install media (first version done)
 

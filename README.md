@@ -171,12 +171,16 @@ open in the System Editor when it is installed), Command Prompts (an
 OS/2 window or full screen), Programs, Startup (its objects open at
 each boot), the Minimized Window Viewer (minimized windows go there),
 System Setup (Display, and System: where minimized windows go), the
-Window List and Shut Down. Mouse button 2 opens pop-up menus (Open as
-icon, tree or details view, Settings, Rename, Create shadow, Delete;
-Window list and Shut down on the desktop); settings notebooks set
-titles, programs, folder views and backgrounds; icons drag (Ctrl
-copies, Ctrl+Shift makes a shadow) and keep their places; F2 renames,
-F5 refreshes, Delete deletes. Ctrl+Esc shows the window list. Shut
+Window List, Shut Down and Templates (drag a template where you want a
+new data file, folder or program object). Mouse button 2 opens pop-up
+menus (Open as icon, tree or details view, Settings, Find..., Sort,
+Rename, Copy..., Move..., Create shadow..., Create another...,
+Delete; Window list and Shut down on the desktop); settings notebooks
+set titles, programs, folder views, sort order, what a folder
+includes and backgrounds; icons drag (Ctrl copies, Ctrl+Shift makes a
+shadow) and keep their places; copies and moves show their progress
+and ask when a name is taken; F2 renames, F5 refreshes, Delete
+deletes. Ctrl+Esc shows the window list. Shut
 Down closes the programs (they may ask about unsaved work), flushes
 the disks and turns the machine off. Details: [docs/WPS.md](docs/WPS.md).
 RS2SHELL (`C:\OS2\RS2SHELL.EXE`), rs2's earlier desktop, is still there:
