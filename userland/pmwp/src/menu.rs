@@ -35,11 +35,13 @@ pub const CTXT_PROGRAM: u32 = 0x0800;
 pub const CTXT_ICON: u32 = 0x1000;
 pub const CTXT_TREE: u32 = 0x2000;
 pub const CTXT_DETAILS: u32 = 0x4000;
+pub const CTXT_FIND: u32 = 0x008000;
 pub const CTXT_ARRANGE: u32 = 0x020000;
 pub const CTXT_SORT: u32 = 0x040000;
 pub const CTXT_REFRESH: u32 = 0x400000;
 
 pub const WPMENUID_OPEN: u32 = 1;
+pub const WPMENUID_FIND: u32 = 8;
 pub const WPMENUID_SORT: u32 = 5;
 pub const WPMENUID_CREATEANOTHER: u32 = 101;
 pub const WPMENUID_MOVE: u32 = 107;
@@ -139,7 +141,7 @@ fn is(o: usize, c: &str) -> bool {
 /// wpDisplayMenu(hwndOwner, hwndClient, pptl, ulMenuType, ulReserved).
 extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const PointL, kind: u32, _res: u32) -> u32 {
     let all = CTXT_OPEN | CTXT_SETTINGS | CTXT_HELP | CTXT_DELETE | CTXT_COPY | CTXT_MOVE | CTXT_SHADOW | CTXT_PROGRAM | CTXT_ICON | CTXT_TREE
-        | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH | CTXT_SORT | CTXT_NEW;
+        | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH | CTXT_SORT | CTXT_NEW | CTXT_FIND;
     let flags = obj::call(m::WPObject::wpFilterPopupMenu, &[o, all as usize, 0, 0]) as u32;
     let folder = is(o, "WPFolder");
     // A drive's views are its root folder's.
@@ -179,6 +181,9 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
     let mut items: Vec<Menu> = Vec::new();
     if flags & CTXT_OPEN != 0 && !open.is_empty() {
         items.push(Menu::SubId(WPMENUID_OPEN as u16, b"~Open", open));
+    }
+    if views && flags & CTXT_FIND != 0 && !is(o, "WPMinWinViewer") {
+        items.push(Menu::Item(WPMENUID_FIND as u16, b"~Find...", true));
     }
     if folder && flags & CTXT_REFRESH != 0 {
         items.push(Menu::Item(WPMENUID_REFRESH as u16, b"Refresh ~now", true));
@@ -252,6 +257,13 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
                 if view::wins()[w].obj == o {
                     view::arrange(w);
                 }
+            }
+        }
+        WPMENUID_FIND => {
+            // A drive searches its root folder.
+            let f = if is(o, "WPDisk") { crate::abs::root_of(o) } else { o };
+            if f != 0 {
+                crate::find::ask(f);
             }
         }
         WPMENUID_CREATEANOTHER => {

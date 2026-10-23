@@ -57,6 +57,9 @@ pub struct Win {
     pub fields: bool,
     /// The container's height (icon positions are from its bottom).
     pub height: i32,
+    /// A Find Results window (obj 0): the objects found, which it shows
+    /// in place of a folder's content.
+    pub found: Option<Vec<usize>>,
 }
 
 static mut WINS: Vec<Win> = Vec::new();
@@ -225,7 +228,32 @@ pub fn open_folder(folder: usize, _cnr: u32, view: u32, _param: u32) -> u32 {
     if !desktop {
         title.extend_from_slice(view_suffix(view));
     }
-    let (frame, client) = new_frame(&title, desktop);
+    make_view(folder, view, &title, desktop, None)
+}
+
+/// A Find Results window: the objects found, shown as a folder's are.
+pub fn open_results(title: &[u8], found: Vec<usize>) -> usize {
+    let mut t = title.to_vec();
+    t.extend_from_slice(view_suffix(OPEN_CONTENTS));
+    make_view(0, OPEN_CONTENTS, &t, false, Some(found));
+    wins().len() - 1
+}
+
+/// A Find Results window's objects (the search is done).
+pub fn set_results(w: usize, title: &[u8], found: Vec<usize>) {
+    wins()[w].found = Some(found);
+    let mut t = title.to_vec();
+    t.extend_from_slice(view_suffix(wins()[w].view));
+    let t = z(&t);
+    unsafe { WinSetWindowText(wins()[w].frame, t.as_ptr()) };
+    fill(w);
+    arrange(w);
+}
+
+/// A view window (a frame with a container) of a folder or of found
+/// objects.
+fn make_view(folder: usize, view: u32, title: &[u8], desktop: bool, found: Option<Vec<usize>>) -> u32 {
+    let (frame, client) = new_frame(title, desktop);
     if frame == 0 {
         return 0;
     }
@@ -233,7 +261,7 @@ pub fn open_folder(folder: usize, _cnr: u32, view: u32, _param: u32) -> u32 {
         WinCreateWindow(client, WC_CONTAINER, b"\0".as_ptr(), WS_VISIBLE | CCS_EXTENDSEL, 0, 0, 10, 10, client, HWND_TOP, ID_CHILD, core::ptr::null(), core::ptr::null())
     };
     unsafe { OLD_CNR = WinSubclassWindow(cnr, cnr_proc) as usize };
-    wins().push(Win { obj: folder, view, frame, client, child: cnr, recs: Vec::new(), desktop, fields: false, height: 0 });
+    wins().push(Win { obj: folder, view, frame, client, child: cnr, recs: Vec::new(), desktop, fields: false, height: 0, found });
     let w = wins().len() - 1;
     let mut ci = [0u32; 23];
     ci[0] = 92;
@@ -256,7 +284,9 @@ pub fn open_folder(folder: usize, _cnr: u32, view: u32, _param: u32) -> u32 {
             Rs2SetDesktopWindow(frame);
         }
     } else {
-        unsafe { send(frame, 0x0047, obj::call(m::WPObject::wpQueryIcon, &[folder]) as u32, 0) };
+        if folder != 0 {
+            unsafe { send(frame, 0x0047, obj::call(m::WPObject::wpQueryIcon, &[folder]) as u32, 0) };
+        }
         place(frame, wins().len() as i32, sw * 11 / 20, sh / 2);
     }
     size_child(w);
@@ -391,7 +421,10 @@ pub fn fill(w: usize) {
         fill_tree(w);
         return;
     }
-    let mut objs = visible_content(wins()[w].obj);
+    let mut objs = match &wins()[w].found {
+        Some(f) => f.clone(),
+        None => visible_content(wins()[w].obj),
+    };
     // Objects made while the folder populated (the Drives folder's
     // drives) are in the view already.
     objs.retain(|&o| !wins()[w].recs.iter().any(|r| r.obj == o && r.parent == 0));
@@ -614,7 +647,13 @@ pub fn removed(folder: usize, o: usize) {
             continue;
         }
         let tree = wins()[w].view == OPEN_TREE;
-        if !(folder == 0 || wins()[w].obj == folder || tree) {
+        if let Some(f) = wins()[w].found.as_mut() {
+            // Find Results: the object goes when it goes.
+            if folder != 0 && wps::path_of(o).is_some() && obj::folder_of(o) == folder {
+                continue;
+            }
+            f.retain(|&x| x != o);
+        } else if !(folder == 0 || wins()[w].obj == folder || tree) {
             continue;
         }
         // The object's records (in a tree, with what is under them).
@@ -728,7 +767,7 @@ pub fn open_settings(o: usize) -> u32 {
     let nb = unsafe {
         WinCreateWindow(client, WC_NOTEBOOK, b"\0".as_ptr(), WS_VISIBLE | 0x0001 | 0x0010, 0, 0, 10, 10, client, HWND_TOP, ID_CHILD, core::ptr::null(), core::ptr::null())
     };
-    wins().push(Win { obj: o, view: OPEN_SETTINGS, frame, client, child: nb, recs: Vec::new(), desktop: false, fields: false, height: 0 });
+    wins().push(Win { obj: o, view: OPEN_SETTINGS, frame, client, child: nb, recs: Vec::new(), desktop: false, fields: false, height: 0, found: None });
     let w = wins().len() - 1;
     let (sw, sh) = screen();
     unsafe { send(frame, 0x0047, obj::call(m::WPObject::wpQueryIcon, &[o]) as u32, 0) };
@@ -831,10 +870,14 @@ extern "C" fn cnr_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                 }
                 VK_F5 => {
                     let f = wins()[w].obj;
-                    refresh(f);
+                    if f != 0 {
+                        refresh(f);
+                    } else {
+                        fill(w);
+                    }
                     return 1;
                 }
-                VK_F10 if a & KC_SHIFT != 0 => {
+                VK_F10 if a & KC_SHIFT != 0 && (o != 0 || wins()[w].obj != 0) => {
                     let (target, kind) = if o != 0 { (o, crate::menu::MENU_OBJECTPOPUP) } else { (wins()[w].obj, crate::menu::MENU_OPENVIEWPOPUP) };
                     let mut p = [PointL { x: 40, y: 40 }];
                     if cur != 0 && cur != 0xffff_ffff {
@@ -884,6 +927,9 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                 }
                 CN_CONTEXTMENU => {
                     let o = obj_of_rec(w, b);
+                    if o == 0 && wins()[w].obj == 0 {
+                        return 0;
+                    }
                     let (target, kind) = if o != 0 { (o, crate::menu::MENU_OBJECTPOPUP) } else { (wins()[w].obj, crate::menu::MENU_OPENVIEWPOPUP) };
                     let p = pointer_pos();
                     obj::call(m::WPObject::wpDisplayMenu, &[target, wins()[w].frame as usize, h as usize, &p as *const PointL as usize, kind as usize, 0]);
@@ -942,6 +988,10 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                 let frame = w.map_or(0, |w| wins()[w].frame);
                 obj::call(m::WPObject::wpMenuItemSelected, &[o, frame as usize, (a & 0xffff) as usize]);
             }
+            0
+        }
+        crate::find::WM_FIND_DONE => {
+            crate::find::done(h, a);
             0
         }
         WM_RS2_MINWINDOW => {

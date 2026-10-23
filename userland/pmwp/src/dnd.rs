@@ -165,6 +165,9 @@ pub fn drag_over(w: usize, cdi: u32) -> u32 {
     let to = target(w, rec);
     let r = if repositioning(w, pdinfo, to) {
         mp(DOR_DROP, DO_MOVE)
+    } else if to == 0 {
+        // Find Results' background takes nothing.
+        mp(DOR_NEVERDROP, 0)
     } else {
         obj::call(m::WPObject::wpDragOver, &[to, wins()[w].child as usize, pdinfo as usize]) as u32
     };

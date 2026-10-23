@@ -25,6 +25,7 @@ mod exports;
 mod filejob;
 #[path = "../../rs2shell/src/fileops.rs"]
 mod fileops;
+mod find;
 mod fs;
 mod icons;
 mod install;
