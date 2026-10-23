@@ -368,7 +368,13 @@ Status markers: done, in progress, planned.
 - done: folder features: copying and moving with progress and name
   collisions (Copy..., Move..., Create shadow..., Create another...),
   Sort and Include pages, templates (the Templates folder), Find
-- planned: the remaining classes and view pages (docs/WPS.md)
+- done: the LaunchPad, the View tab's three pages (icon format and
+  size, tree view, details columns), the lazy writer, the Help Index's
+  letter tabs, System Setup's Keyboard, Mouse, Sound, Color Palette
+  and Scheme Palette (PMWIN's WinSetSysValue and WinSetSysColors)
+- planned: the remaining classes and view pages (docs/WPS.md), the Font
+  Palette and folder fonts (PMWIN draws with the system font only),
+  printing (no printer support yet)
 
 ## Milestone 5: install media (first version done)
 

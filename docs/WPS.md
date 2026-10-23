@@ -328,8 +328,9 @@ uninitialized repository object faults on both SOMs alike.
 `userland/pmwp` (PMWP.DLL) provides the 58 classes IBM's PMWP exports
 that the Toolkit describes, M_WPMinWinViewer, IBM's WPMinWindow (which
 the Toolkit does not describe), classes IBM keeps in other DLLs (WPUrl
-and WPUrlFolder from WPINET.DLL, Mindex from MINXOBJ.DLL) and rs2's own
-RS2Shutdown, RS2WindowList and RS2System.
+and WPUrlFolder from WPINET.DLL, Mindex from MINXOBJ.DLL, and WPCONFIG.DLL's
+WPMouse, WPKeyboard, WPSound, WPPalette, WPColorPalette and
+WPSchemePalette) and rs2's own RS2Shutdown, RS2WindowList and RS2System.
 
 **Class tables.** `tools/scripts/gen_wps_classes.py` reads the Toolkit's
 IDL. It writes `src/classes_gen.rs` (each class's parents, metaclass,
@@ -337,9 +338,12 @@ version and methods in release order, plus index constants). It also
 writes `src/classdata_gen.rs`: the exported `<Class>ClassData` and
 `<Class>CClassData` variables and the `<Class>NewClass` functions, with
 IBM's ordinals from `ordinals.txt`. WPImageFile is not in the Toolkit,
-so WPBitmap derives from WPDataFile. The script's `EXTRA` list adds the
-classes the IDL does not describe (WPMinWindow and rs2's own, with no
-methods of their own), and metaclasses the IDL describes come along with
+so WPBitmap derives from WPDataFile. The IDL's conditionals are read as
+SOM's compiler for Intel reads them (`__SOMIDL__` defined, `_PPC_` not).
+The script's `EXTRA` list adds the classes of IBM's other DLLs that
+PMWP.DLL provides and the classes the IDL does not describe
+(WPMinWindow and rs2's own, with no methods of their own), and
+metaclasses the IDL describes come along with
 their classes even where IBM exports no class data for them.
 
 **Building.** `wps.rs` builds each class as SOM compiler output does:
@@ -349,17 +353,20 @@ The rest comes from the class modules:
 
 | Module | Classes |
 |--------|---------|
-| `obj.rs` | WPObject (title, style, icon, folder, default view, handle, object ID, setup strings, save/restore, delete, copy, move, shadow) and M_WPObject (wpclsNew, class titles, icons and views, objects from handles and locations; somClassReady calls wpclsInitData) |
+| `obj.rs` | WPObject (title, style, icon, folder, default view, handle, object ID, setup strings, save/restore, delete, copy, move, shadow; the lazy writer: wpSaveDeferred queues the object and the desktop's timer saves the queue a second later, shutdown saves what is left, and without a desktop objects save at once) and M_WPObject (wpclsNew, class titles, icons and views, objects from handles and locations; somClassReady calls wpclsInitData) |
 | `abs.rs` | WPAbstract, WPProgram (EXENAME, PARAMETERS, STARTUPDIR, PROGTYPE; wpQuery/SetProgDetails; opening starts the program), WPShadow (SHADOWID; shows and opens its object), WPDisk (a drive: its settings are its own, its other views and its default view are its root folder's) |
 | `fs.rs` | WPFileSystem (real name, renaming, file icons, moving and copying files), WPDataFile (opened with the PMWP_ASSOC_FILTER program, else the System Editor), WPProgramFile, WPFolder (content: the directory, without hidden files, and the abstract objects in it), WPDrives (a WPDisk per drive), the desktop |
 | `icons.rs` | rs2's own icons (pmwin::shellicons, as RS2SHELL shows them) for WPDrives, WPDisk (hard disk or CD-ROM), WPDesktop, command prompts and the Command Prompts folder (by its object ID, where IBM's INI.RC sets an icon resource); a folder's .ICON EA still comes first |
 | `minwin.rs` | WPMinWinViewer (`<WP_VIEWER>`; its content is the minimized windows) and WPMinWindow (transient, one per window PMWIN minimizes to the viewer: WM_RS2_MINWINDOW to the window set with Rs2SetMinimizeViewer, the desktop's; opening one restores its window). `RS2_Desktop` `MinimizeTo` (as for RS2SHELL) says whether windows go to the viewer or the desktop |
 | `rs2obj.rs` | rs2's own abstract classes for what IBM's shell keeps on the LaunchPad and in WPCONFIG: RS2Shutdown (opening it shuts down), RS2WindowList (the window list), RS2System (a Window page: where minimized windows go) |
+| `launchpad.rs` | WPLaunchPad (IBM's setup strings FPOBJECTS, DRAWEROBJECTS, LPCLOSEDRAWER, LPACTIONSTYLE, LPVERTICAL, LPTEXT, LPDRAWERTEXT, LPSMALLICONS, LPHIDECTLS, LPFLOAT, and its query/set methods): the action buttons (Window list, Find, Shut down; as text, small or normal icons, or none), object buttons with drawers above them, objects that open on a click, drops that add objects to the bar or a drawer, Remove from LaunchPad, moving by dragging; the Options and Buttons pages |
+| `setup.rs` | WPCONFIG's settings objects: WPMouse (Timing: the double-click time; Setup: right- or left-handed), WPKeyboard (Timing: the repeat rate and delay through KBD$'s KBD_SETTYPAMATICRATE, the cursor blink rate), WPSound (Warning beep), WPColorPalette (colours dragged onto a folder become its background, with Shift its text; onto other windows PP_BACKGROUNDCOLOR or PP_FOREGROUNDCOLOR) and WPSchemePalette (a scheme dropped on any window becomes the system's colours, WinSetSysColors). The settings are kept in OS2.INI as IBM's PM keeps them (`PM_ControlPanel` DoubleClickSpeed, SwapMouseButton, CursorBlinkRate, KeyRepeatRate, KeyRepeatDelay, Beep; `PM_Colors` "R G B" by colour name) and applied when the shell starts |
+| `viewset.rs` | A folder's View tab, IBM's three pages: wpAddFolderView1Page (the view it opens in, the icon view's format: as placed, flowed, non-flowed; icon size: normal, small, invisible), wpAddFolderView2Page (tree view lines and icon size), wpAddFolderView3Page (the details view's columns: Icon, Title, Object class, Real name, Size, Last write date and time) |
 | `filejob.rs` | Copying and moving file system objects as the user asks (drops, Copy..., Move...): a worker thread with a progress window and the name collision dialog (Rename with a free name, Replace, Skip, Cancel), ported from RS2SHELL; the target folder dialog of Copy..., Move..., Create shadow... and Create another...; the objects follow on the shell's thread when a job ends (paths, handles, folders; a moved or renamed folder's objects too; copies lose the original's object ID) |
 | `sortinc.rs` | Folders' Sort page (name, type, real name, size, last write date, or as placed; always maintain sort order, setup ALWAYSSORT) and Include page (patterns matched against titles and real names; folders always shown), the view's Sort menu; SHOWALLINTREEVIEW=YES (a folder's tree view shows every object, not only folders) is kept with them in fs.rs |
 | `templates.rs` | Templates (TEMPLATE style, the General page's check box): opening one makes a new object beside it, dragging one makes it at the drop, Create another... makes one where the user says; the new object's title is edited in place |
 | `find.rs` | Find... on folders, drives and the desktop: a name pattern, all subfolders; a worker thread walks the directories, and a Find Results window shows the objects (and the matching abstract objects of awake folders) |
-| `mindex.rs` | Mindex (IBM's MINXOBJ.DLL, studied with Ghidra): the Help Index and Glossary. INDEX= names an environment variable (HELP, GLOSSARY) whose directories hold the help files (`*.HLP` starting "HS"), or the files themselves separated by `+`; opening merges their indexes (sorted, an entry several panels share followed by the panel's title, as MindexAppendDupIndexTitle does) into a window with a search field; choosing an entry shows its panel through a help instance and HM_SHOW_TOC |
+| `mindex.rs` | Mindex (IBM's MINXOBJ.DLL, studied with Ghidra): the Help Index and Glossary. INDEX= names an environment variable (HELP, GLOSSARY) whose directories hold the help files (`*.HLP` starting "HS"), or the files themselves separated by `+`; opening merges their indexes (sorted, an entry several panels share followed by the panel's title, as MindexAppendDupIndexTitle does) into a window with a search field; choosing an entry shows its panel through a help instance and HM_SHOW_TOC; letter tabs down the right jump to the entries starting with that letter, and second-level entries are indented under theirs |
 | `url.rs` | WPUrl (IBM's WPINET.DLL): a data file whose content is the URL (URL=, the URL page; `*.URL` files); opening starts the browser OS2.INI's WPURLDEFAULTSETTINGS names (DefaultBrowserExe, DefaultParameters, DefaultWorkingDir), else says none is set up; a globe icon |
 | `clsmgr.rs` | WPClassManager (merged in as SOM's class manager; finds classes in the DLLs registered in OS2SYS.INI's PM_Objects ClassTable) |
 | `api.rs` | WinCreateObject, WinQueryObject, WinSetObjectData, WinDestroyObject, WinOpenObject, WinSaveObject, WinMove/CopyObject, WinCreateShadow, WinQueryObjectPath, WinRegister/Deregister/Enum/ReplaceObjectClass |
@@ -431,10 +438,12 @@ shell's process, on its PM thread.
   place of a placeholder record.
 - **Shadows' titles** are owner-drawn in the shadow colour: blue, light
   blue on dark backgrounds, grey when the original is gone.
-- **Folder settings** add a View page (open in icon, details or tree
-  view) and a Background page (a colour with presets).
-  `wpAddFolderView1Page` and `wpAddFolderBackgroundPage` provide them.
-  The colour is the folder's own state and applies to its open views.
+- **Folder settings** add the View tab's three pages (`viewset.rs`)
+  and a Background page (a colour with presets,
+  `wpAddFolderBackgroundPage`). The colour is the folder's own state
+  and applies to its open views; without one a folder shows the colour
+  scheme's window colour and the desktop rs2's teal or the scheme's
+  background.
 - **Keyboard:** Delete deletes (after asking), F2 renames, F5 refreshes,
   and Shift+F10 shows the menu.
 
@@ -476,16 +485,19 @@ If a Workplace Shell is already running, it ends.
     (the System Editor with its ASSOCFILTER, the application installer,
     Install rs2, where their files exist; the installer's program is on
     the live media only, so an installed system drops its object), Startup, the Minimized Window
-    Viewer, Window List, System Setup (`<WP_CONFIG>`: System, and
-    Display where it exists), Shut Down, Templates (Data File,
+    Viewer, Window List, System Setup (`<WP_CONFIG>`: System, Keyboard,
+    Mouse, Sound, the Color and Scheme Palettes, and Display where it
+    exists), Shut Down, Templates (Data File,
     Folder, Program) and the Assistance Center as IBM's INI.RC lays it
     out (`<WP_ASSISTANCE>`: Information, a tree view showing all its
     objects, with Reference and Commands, Tasks and Read Me, which holds
     a shadow of `README.TXT`; Troubleshooting), where APPINST puts the
     books, the Help Index (`<WP_MINDEX>`), Online Information Overview
     with the Glossary (`<WP_GLOSS>`), and "rs2 on the Internet" (a WPUrl
-    to the project's page). `PM_Workplace` `Rs2Desktop` holds the
-    version made (5); a desktop of an earlier version gets
+    to the project's page), then the LaunchPad (`<WP_LAUNCHPAD>`: Drives,
+    OS/2 Window with OS/2 Full Screen in its drawer, the System Editor,
+    the Assistance Center) with its shadow in Startup. `PM_Workplace`
+    `Rs2Desktop` holds the version made (7); a desktop of an earlier version gets
     the entries again, and PRESERVEOLD keeps what it has. Titles break
     lines at `^`, as in INI.RC.
 - **Starts the server** for other processes' object calls (`ipc.rs`):

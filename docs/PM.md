@@ -981,6 +981,19 @@ deepest descendant, under a point) and `WinQueryWindowProcess`;
 the container paints with (other presentation parameters are still
 accepted and ignored).
 
+**System values and colours.** `WinSetSysValue` sets the values a user
+changes: SV_SWAPBUTTON (the right button becomes button 1), SV_DBLCLKTIME
+(how close two clicks must be to make a double-click), SV_ALARM (whether
+`WinAlarm` sounds), SV_CURSORRATE, the scroll rates and the beeps'
+frequencies and durations. `WinSetSysColors` (LCOLF_INDRGB or
+LCOLF_CONSECRGB, LCOL_RESET) sets system colours; every window is
+redrawn, and the controls (buttons, entry fields, list boxes, menus,
+notebooks, containers and the rest) draw with the system colours
+(SYSCLR_DIALOGBACKGROUND, BUTTONLIGHT, BUTTONDARK, WINDOW, WINDOWTEXT,
+HILITEBACKGROUND, HILITEFOREGROUND). Both live in the shared PM state;
+the Workplace Shell's Mouse, Keyboard, Sound and Scheme Palette objects
+set them and keep them in OS2.INI (docs/WPS.md).
+
 ## The clipboard
 
 The clipboard and the atom tables are part of the shared PM state, so

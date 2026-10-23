@@ -172,16 +172,23 @@ it: Drives (a drive opens its root folder; programs run, text files
 open in the System Editor when it is installed), Command Prompts (an
 OS/2 window or full screen), Programs, Startup (its objects open at
 each boot), the Minimized Window Viewer (minimized windows go there),
-System Setup (Display, and System: where minimized windows go), the
+System Setup (Display; System: where minimized windows go; Keyboard:
+repeat rate and delay, cursor blink rate; Mouse: double-click time,
+left-handed; Sound: the warning beep; the Color Palette: drag a colour
+onto a folder; the Scheme Palette: drag a colour scheme onto a window
+to change every window's colours), the
 Window List, Shut Down, Templates (drag a template where you want a
 new data file, folder or program object) and the Assistance Center
 (Information and Troubleshooting, where the OS/2 books go, the Help
 Index and Glossary, which merge the indexes of the help files on HELP
-and GLOSSARY, and an Internet object). Mouse button 2 opens pop-up
+and GLOSSARY, and an Internet object). The LaunchPad, at the bottom
+of the screen, opens objects with one click, has drawers above its
+buttons and takes objects dropped on it. Mouse button 2 opens pop-up
 menus (Open as icon, tree or details view, Settings, Find..., Sort,
 Rename, Copy..., Move..., Create shadow..., Create another...,
 Delete; Window list and Shut down on the desktop); settings notebooks
-set titles, programs, folder views, sort order, what a folder
+set titles, programs, folder views (icon format and size, tree
+lines, details columns), sort order, what a folder
 includes and backgrounds; icons drag (Ctrl copies, Ctrl+Shift makes a
 shadow) and keep their places; copies and moves show their progress
 and ask when a name is taken; F2 renames, F5 refreshes, Delete
