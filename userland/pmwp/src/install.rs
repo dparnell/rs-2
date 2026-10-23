@@ -23,7 +23,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"3";
+const DESKTOP_VERSION: &[u8] = b"4";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -63,6 +63,15 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"Data File;WPDataFile;<WP_TEMPS>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<RS2_TEMPDATAFILE>"),
         (b"Folder;WPFolder;<WP_TEMPS>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<RS2_TEMPFOLDER>"),
         (b"Program;WPProgram;<WP_TEMPS>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<RS2_TEMPPROGRAM>"),
+        // The Assistance Center, as IBM's INI.RC lays it out (the books
+        // APPINST installs go in its folders).
+        (b"Assistance Center;WPFolder;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_ASSISTANCE>"),
+        (b"Information;WPFolder;<WP_ASSISTANCE>;PRESERVEOLD", b"DEFAULTVIEW=TREE;OBJECTID=<WP_INFO>;SHOWALLINTREEVIEW=YES"),
+        (b"Reference and Commands;WPFolder;<WP_INFO>;PRESERVEOLD", b"DEFAULTVIEW=ICON;OBJECTID=<WP_REFCMDFOLDER>;SHOWALLINTREEVIEW=YES"),
+        (b"Tasks;WPFolder;<WP_INFO>;PRESERVEOLD", b"DEFAULTVIEW=ICON;OBJECTID=<WP_TASKSINFO>;SHOWALLINTREEVIEW=YES"),
+        (b"Read Me;WPFolder;<WP_INFO>;PRESERVEOLD", b"DEFAULTVIEW=ICON;OBJECTID=<WP_READMEFOLDER>;SHOWALLINTREEVIEW=YES"),
+        (b"ReadMe;WPShadow;<WP_READMEFOLDER>;PRESERVEOLD", b"SHADOWID=?:\\README.TXT;OBJECTID=<WP_RDME>"),
+        (b"Troubleshooting;WPFolder;<WP_ASSISTANCE>;PRESERVEOLD", b"DEFAULTVIEW=ICON;OBJECTID=<WP_TROUBLEINFO>"),
         (b"OS/2 Window;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=WINDOWABLEVIO;OBJECTID=<WP_OS2WIN>"),
         (b"OS/2 Full Screen;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=FULLSCREEN;OBJECTID=<WP_OS2FS>"),
     ];
@@ -158,7 +167,8 @@ pub fn run() {
     }
     let mut pending: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
     // Version 2 added the Minimized Window Viewer, Window List, System
-    // Setup (System, Display) and Shut Down, version 3 Templates;
+    // Setup (System, Display) and Shut Down, version 3 Templates,
+    // version 4 the Assistance Center;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         pending.extend(defaults());

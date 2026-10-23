@@ -13,6 +13,8 @@ pub struct Object {
     pub dir: &'static [u8],
     /// The Workplace Shell object ID.
     pub id: &'static [u8],
+    /// The folder (its ID) when not the category's.
+    pub folder: &'static [u8],
 }
 
 pub struct File {
@@ -41,6 +43,8 @@ pub struct Category {
     pub folder: Option<&'static [u8]>,
     /// The folder's Workplace Shell object ID.
     pub folder_id: &'static [u8],
+    /// Where the folder goes (its ID) when not in Programs.
+    pub folder_in: &'static [u8],
     pub apps: Vec<App>,
 }
 
@@ -77,6 +81,7 @@ pub fn load() -> Vec<Category> {
                 title: get(0),
                 folder: if get(1) == b"-" || get(1).is_empty() { None } else { Some(get(1)) },
                 folder_id: get(2),
+                folder_in: get(3),
                 apps: Vec::new(),
             }),
             b"app" => {
@@ -95,7 +100,7 @@ pub fn load() -> Vec<Category> {
                 let Some(a) = cats.last_mut().and_then(|c| c.apps.last_mut()) else { continue };
                 match word {
                     b"needs" => a.needs.push(get(0)),
-                    b"object" => a.objects.push(Object { title: get(0), program: get(1), params: get(2), dir: get(3), id: get(4) }),
+                    b"object" => a.objects.push(Object { title: get(0), program: get(1), params: get(2), dir: get(3), id: get(4), folder: get(5) }),
                     b"file" => a.files.push(File { target: get(0), source: get(1), stored: get(2) }),
                     _ => {}
                 }

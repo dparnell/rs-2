@@ -355,7 +355,7 @@ The rest comes from the class modules:
 | `minwin.rs` | WPMinWinViewer (`<WP_VIEWER>`; its content is the minimized windows) and WPMinWindow (transient, one per window PMWIN minimizes to the viewer: WM_RS2_MINWINDOW to the window set with Rs2SetMinimizeViewer, the desktop's; opening one restores its window). `RS2_Desktop` `MinimizeTo` (as for RS2SHELL) says whether windows go to the viewer or the desktop |
 | `rs2obj.rs` | rs2's own abstract classes for what IBM's shell keeps on the LaunchPad and in WPCONFIG: RS2Shutdown (opening it shuts down), RS2WindowList (the window list), RS2System (a Window page: where minimized windows go) |
 | `filejob.rs` | Copying and moving file system objects as the user asks (drops, Copy..., Move...): a worker thread with a progress window and the name collision dialog (Rename with a free name, Replace, Skip, Cancel), ported from RS2SHELL; the target folder dialog of Copy..., Move..., Create shadow... and Create another...; the objects follow on the shell's thread when a job ends (paths, handles, folders; a moved or renamed folder's objects too; copies lose the original's object ID) |
-| `sortinc.rs` | Folders' Sort page (name, type, real name, size, last write date, or as placed; always maintain sort order, setup ALWAYSSORT) and Include page (patterns matched against titles and real names; folders always shown), the view's Sort menu |
+| `sortinc.rs` | Folders' Sort page (name, type, real name, size, last write date, or as placed; always maintain sort order, setup ALWAYSSORT) and Include page (patterns matched against titles and real names; folders always shown), the view's Sort menu; SHOWALLINTREEVIEW=YES (a folder's tree view shows every object, not only folders) is kept with them in fs.rs |
 | `templates.rs` | Templates (TEMPLATE style, the General page's check box): opening one makes a new object beside it, dragging one makes it at the drop, Create another... makes one where the user says; the new object's title is edited in place |
 | `find.rs` | Find... on folders, drives and the desktop: a name pattern, all subfolders; a worker thread walks the directories, and a Find Results window shows the objects (and the matching abstract objects of awake folders) |
 | `clsmgr.rs` | WPClassManager (merged in as SOM's class manager; finds classes in the DLLs registered in OS2SYS.INI's PM_Objects ClassTable) |
@@ -474,9 +474,13 @@ If a Workplace Shell is already running, it ends.
     Install rs2, where their files exist; the installer's program is on
     the live media only, so an installed system drops its object), Startup, the Minimized Window
     Viewer, Window List, System Setup (`<WP_CONFIG>`: System, and
-    Display where it exists), Shut Down and Templates (Data File,
-    Folder, Program). `PM_Workplace` `Rs2Desktop` holds the version made
-    (3); a desktop of an earlier version gets
+    Display where it exists), Shut Down, Templates (Data File,
+    Folder, Program) and the Assistance Center as IBM's INI.RC lays it
+    out (`<WP_ASSISTANCE>`: Information, a tree view showing all its
+    objects, with Reference and Commands, Tasks and Read Me, which holds
+    a shadow of `README.TXT`; Troubleshooting), where APPINST puts the
+    books. `PM_Workplace` `Rs2Desktop` holds the version made
+    (4); a desktop of an earlier version gets
     the entries again, and PRESERVEOLD keeps what it has. Titles break
     lines at `^`, as in INI.RC.
 - **Starts the server** for other processes' object calls (`ipc.rs`):

@@ -1,14 +1,18 @@
 # The OS/2 applications rs2 runs (docs/COMPATIBILITY.md), as the OS/2
 # Warp 4.52 client CD holds them. Built into APPINST.EXE.
 #
-#   category TITLE | FOLDER | FOLDER ID      folder "-": no program objects;
+#   category TITLE | FOLDER | FOLDER ID [| IN]
+#                                            folder "-": no program objects;
 #                                            the folder (and its Workplace
-#                                            Shell object ID) in Programs
+#                                            Shell object ID) in Programs,
+#                                            or in the folder with ID IN
 #   app ID | NAME | DESCRIPTION
 #   needs ID                                 another app installed with it
-#   object TITLE | PROGRAM | PARAMETERS | WORKING DIRECTORY | OBJECT ID
+#   object TITLE | PROGRAM | PARAMETERS | WORKING DIRECTORY | OBJECT ID [| IN]
 #                                            (IBM's INI.RC IDs where it has
-#                                            the object)
+#                                            the object); IN: the folder
+#                                            (its ID) when not the
+#                                            category's, as in INI.RC
 #   file TARGET | CD FILE [| STORED]         CD FILE: the packed file that
 #                                            holds TARGET, or TARGET itself;
 #                                            STORED: its path in the packed
@@ -224,32 +228,32 @@ app makeini | MAKEINI | Builds or updates an INI file from a profile source (.RC
 needs messages
 file \OS2\MAKEINI.EXE | OS2IMAGE\DISK_0\BUNDLE
 
-category Information | Information | <WP_INFO>
+category Information | Information | <WP_INFO> | <WP_ASSISTANCE>
 
 app cmdref | Command Reference | The OS/2 commands: what each does, its syntax and examples.
-object Command Reference | \OS2\VIEW.EXE | CMDREF | \OS2\BOOK | <WP_CMDREF>
+object Command Reference | \OS2\VIEW.EXE | CMDREF | \OS2\BOOK | <WP_CMDREF> | <WP_REFCMDFOLDER>
 file \OS2\BOOK\CMDREF.INF | OS2IMAGE\DISK_18\CMDREF
 
 app rexxbook | REXX Information | The REXX language and its functions.
-object REXX Information | \OS2\VIEW.EXE | REXX | \OS2\BOOK | <WP_REXREF>
+object REXX Information | \OS2\VIEW.EXE | REXX | \OS2\BOOK | <WP_REXREF> | <WP_REFCMDFOLDER>
 file \OS2\BOOK\REXX.INF | OS2IMAGE\DISK_17\REXXPUBS
 
 app orexxbook | Object REXX Reference | Object REXX (the book only; Object REXX itself does not run on rs2).
-object Object REXX Reference | \OS2\VIEW.EXE | OREXX | \OS2\BOOK | <RS2_OREXXREF>
+object Object REXX Reference | \OS2\VIEW.EXE | OREXX | \OS2\BOOK | <RS2_OREXXREF> | <WP_REFCMDFOLDER>
 file \OS2\BOOK\OREXX.INF | OS2IMAGE\DISK_17\REXXPUBS
 
 app trouble | Troubleshooting | OS/2's troubleshooting guide.
-object Troubleshooting | \OS2\VIEW.EXE | TROUBLE | \OS2\BOOK | <WP_TRBLSHT>
+object Troubleshooting | \OS2\VIEW.EXE | TROUBLE | \OS2\BOOK | <WP_TRBLSHT> | <WP_TROUBLEINFO>
 file \OS2\BOOK\TROUBLE.INF | OS2IMAGE\DISK_3\BUNDLE
 
 app os2ug | OS/2 User's Guide | The user's guide to OS/2 Warp.
-object OS/2 User's Guide | \OS2\VIEW.EXE | OS2UG | \OS2\BOOK | <WP_OS2UGBK>
+object OS/2 User's Guide | \OS2\VIEW.EXE | OS2UG | \OS2\BOOK | <WP_OS2UGBK> | <WP_TASKSINFO>
 file \OS2\BOOK\OS2UG.INF | OS2IMAGE\DISK_4\BUNDLE
 
 app tracebook | OS/2 Trace | The system trace facility.
-object OS/2 Trace | \OS2\VIEW.EXE | OS2TRACE | \OS2\BOOK | <WP_TRBLTRA>
+object OS/2 Trace | \OS2\VIEW.EXE | OS2TRACE | \OS2\BOOK | <WP_TRBLTRA> | <WP_TROUBLEINFO>
 file \OS2\BOOK\OS2TRACE.INF | OS2IMAGE\DISK_1\BUNDLE
 
 app lvmbook | Using LVM | The Logical Volume Manager.
-object Using LVM | \OS2\VIEW.EXE | USINGLVM | \OS2\BOOK | <WP_USINGLVM>
+object Using LVM | \OS2\VIEW.EXE | USINGLVM | \OS2\BOOK | <WP_USINGLVM> | <WP_TASKSINFO>
 file \OS2\BOOK\USINGLVM.INF | OS2IMAGE\DISK_1\BUNDLE

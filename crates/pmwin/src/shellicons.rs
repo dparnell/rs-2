@@ -18,8 +18,12 @@ pub const PROMPTS: u32 = 7;
 pub const MINIMIZED: u32 = 8;
 pub const WINDOW_LIST: u32 = 9;
 pub const DESKTOP: u32 = 10;
+/// The Assistance Center folder (a lifebuoy).
+pub const ASSISTANCE: u32 = 11;
+/// The Information folder (a folder with an "i").
+pub const INFO_FOLDER: u32 = 12;
 /// Highest icon id.
-pub const LAST: u32 = 10;
+pub const LAST: u32 = 12;
 
 const SILVER: u32 = 0xffe0_e0e8;
 
@@ -112,6 +116,21 @@ fn draw(id: u32, size: i32) -> Option<Image> {
                 let y = 7.0 + k as f64 * 4.0;
                 p.rect(5.0, y, 24.0, y + 1.5, GREY);
             }
+        }
+        ASSISTANCE => {
+            // A lifebuoy: red with four white bands, a "?" in its middle.
+            let red = rgb(0xd03828);
+            p.disc(16.0, 16.0, 14.5, red, DARK);
+            for (dx, dy) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
+                p.line((16.0 + dx * 6.0, 16.0 + dy * 6.0), (16.0 + dx * 10.5, 16.0 + dy * 10.5), 5.0, WHITE);
+            }
+            p.disc(16.0, 16.0, 7.0, rgb(0x2050c0), DARK);
+            p.glyph(b'?', 16.0, 16.0, 9.0, WHITE);
+        }
+        INFO_FOLDER => {
+            folder(&mut p);
+            p.disc(16.0, 12.5, 7.0, rgb(0x2050c0), DARK);
+            p.glyph(b'i', 16.0, 12.5, 9.0, WHITE);
         }
         DESKTOP => {
             p.rect(2.0, 5.0, 30.0, 27.0, rgb(0x2e6e8e));

@@ -461,11 +461,13 @@ fn fill_tree(w: usize) {
 }
 
 fn add_subfolders(w: usize, folder: usize, parent: u32) {
-    let kids: Vec<usize> = visible_content(folder).into_iter().filter(|&o| tree_folder(o) != 0).collect();
+    // A tree whose folder says SHOWALLINTREEVIEW=YES shows every object.
+    let all = crate::fs::shows_all_in_tree(wins()[w].obj);
+    let kids: Vec<usize> = visible_content(folder).into_iter().filter(|&o| all || tree_folder(o) != 0).collect();
     let list: Vec<(usize, u32)> = kids.iter().map(|&o| (o, parent)).collect();
     let made = insert_recs(w, &list);
-    // A placeholder under each: it may have folders of its own.
-    let ph: Vec<(usize, u32)> = made.iter().map(|&r| (0, r)).collect();
+    // A placeholder under each folder: it may have objects of its own.
+    let ph: Vec<(usize, u32)> = kids.iter().zip(made.iter()).filter(|(o, _)| tree_folder(**o) != 0).map(|(_, &r)| (0, r)).collect();
     insert_recs(w, &ph);
 }
 

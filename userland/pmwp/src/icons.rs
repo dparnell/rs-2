@@ -1,6 +1,7 @@
 //! rs2's own icons for the Workplace Shell's objects (pmwin::shellicons,
 //! the ones RS2SHELL shows): the Drives folder, drives (hard disk or
-//! CD-ROM), the desktop, the Command Prompts folder and command prompts.
+//! CD-ROM), the desktop, the Command Prompts, Assistance Center and
+//! Information folders and command prompts.
 //! IBM's shell takes its class icons from PMWP.DLL's resources and sets
 //! the Command Prompts folder's with INI.RC's ICONRESOURCE; rs2's PMWP has
 //! no resources, so the icons are drawn here and the folders that INI.RC
@@ -8,7 +9,7 @@
 
 use pmwin::shellicons as si;
 
-pub use si::{CD_ROM, DESKTOP, DRIVES, HARD_DISK, MINIMIZED, PROMPTS, PROMPT_FULL_SCREEN, PROMPT_WINDOW, SHUTDOWN, WINDOW_LIST};
+pub use si::{ASSISTANCE, CD_ROM, DESKTOP, DRIVES, INFO_FOLDER, HARD_DISK, MINIMIZED, PROMPTS, PROMPT_FULL_SCREEN, PROMPT_WINDOW, SHUTDOWN, WINDOW_LIST};
 
 static mut CACHE: [u32; si::LAST as usize + 1] = [0; si::LAST as usize + 1];
 
@@ -30,6 +31,8 @@ pub fn of_object_id(id: &[u8]) -> u32 {
         b"<WP_PROMPTS>" => shell(PROMPTS),
         b"<WP_DRIVES>" => shell(DRIVES),
         b"<WP_VIEWER>" => shell(MINIMIZED),
+        b"<WP_ASSISTANCE>" => shell(ASSISTANCE),
+        b"<WP_INFO>" => shell(INFO_FOLDER),
         _ => 0,
     }
 }

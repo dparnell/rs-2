@@ -1609,9 +1609,11 @@ OS/2 itself keeps them.
   "Productivity", "REXX", "Information"; objects already there are
   updated). With the Workplace Shell running they are Workplace Shell
   objects (WinCreateObject, which goes to the shell's process): the
-  folders in the Programs folder, with IBM's INI.RC object IDs where it
-  has them (`<WP_GAMES>`, `<WP_TOOLS>`, `<WP_INFO>`; `<WP_KLDK>`,
-  `<WP_CHESS>`, `<WP_EPM>`...; apps.txt's last fields). With RS2SHELL
+  folders in the Programs folder, the books in the Assistance Center's
+  folders (Reference and Commands, Tasks, Troubleshooting), with IBM's
+  INI.RC object IDs and places where it has them (`<WP_GAMES>`,
+  `<WP_TOOLS>`, `<WP_INFO>`; `<WP_KLDK>`, `<WP_CHESS>`, `<WP_EPM>`,
+  `<WP_CMDREF>`...; apps.txt's last fields). With RS2SHELL
   they are program groups, and the program broadcasts the registered
   message `RS2_ProgramListChanged` to the top-level frames, on which
   RS2SHELL refills its desktop and program group folders. When an application

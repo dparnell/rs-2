@@ -227,7 +227,7 @@ fn update(a: &mut App) {
             if let Some(f) = cat.folder {
                 s.extend_from_slice(b" Their objects go in the ");
                 s.extend_from_slice(f);
-                s.extend_from_slice(b" folder (in Programs).");
+                s.extend_from_slice(b" folder.");
             }
             s
         }
@@ -430,12 +430,16 @@ fn create_object(class: &[u8], title: &[u8], setup: &[u8], location: &[u8]) -> u
     unsafe { WinCreateObject(c.as_ptr(), t.as_ptr(), s.as_ptr(), l.as_ptr(), CO_UPDATEIFEXISTS) }
 }
 
-/// A category's folder in the Workplace Shell's Programs folder (or on
-/// the desktop); 0 without a Workplace Shell running (RS2SHELL).
-fn wps_folder(title: &[u8], id: &[u8]) -> u32 {
+/// A category's folder in the Workplace Shell's Programs folder (or
+/// where the catalogue says; else on the desktop); 0 without a Workplace
+/// Shell running (RS2SHELL).
+fn wps_folder(title: &[u8], id: &[u8], within: &[u8]) -> u32 {
     let mut setup = b"OBJECTID=".to_vec();
     setup.extend_from_slice(id);
-    for location in [&b"<WP_PROGRAMSFOLDER>"[..], b"<WP_DESKTOP>"] {
+    for location in [within, b"<WP_PROGRAMSFOLDER>", b"<WP_DESKTOP>"] {
+        if location.is_empty() {
+            continue;
+        }
         let h = create_object(b"WPFolder", title, &setup, location);
         if h != 0 {
             return h;
@@ -461,7 +465,9 @@ fn wps_object(folder: &[u8], o: &catalog::Object, d: u8) -> bool {
         s.extend_from_slice(b";OBJECTID=");
         s.extend_from_slice(o.id);
     }
-    create_object(b"WPProgram", o.title, &s, folder) != 0
+    // Its own folder (IBM's place for it) if there is one, else the
+    // category's.
+    (!o.folder.is_empty() && create_object(b"WPProgram", o.title, &s, o.folder) != 0) || create_object(b"WPProgram", o.title, &s, folder) != 0
 }
 
 fn finished(a: &mut App) {
@@ -470,6 +476,8 @@ fn finished(a: &mut App) {
     // With the Workplace Shell running, its objects: a folder per
     // category in Programs (IBM's IDs where its INI.RC has them).
     let mut wps = None;
+    // The folders that got objects (for the message).
+    let mut used: Vec<&[u8]> = Vec::new();
     for (c, cat) in a.cats.iter().enumerate() {
         let Some(folder) = cat.folder else { continue };
         if !(0..cat.apps.len()).any(|i| a.tree.checked[c][i] && !cat.apps[i].objects.is_empty()) {
@@ -478,7 +486,7 @@ fn finished(a: &mut App) {
         if wps == Some(false) {
             break;
         }
-        let ok = wps_folder(folder, cat.folder_id) != 0;
+        let ok = wps_folder(folder, cat.folder_id, cat.folder_in) != 0;
         wps = Some(ok);
         if !ok {
             break;
@@ -487,6 +495,9 @@ fn finished(a: &mut App) {
             for o in &cat.apps[i].objects {
                 if wps_object(cat.folder_id, o, a.target) {
                     made += 1;
+                    if !used.contains(&folder) {
+                        used.push(folder);
+                    }
                 }
             }
         }
@@ -506,6 +517,9 @@ fn finished(a: &mut App) {
             for o in &cat.apps[i].objects {
                 object(g, o, a.target);
                 made += 1;
+            }
+            if !used.contains(&folder) {
+                used.push(folder);
             }
         }
     }
@@ -537,7 +551,15 @@ fn finished(a: &mut App) {
         set_text(ID_STATUS, b"Installed with errors.");
     }
     if made > 0 {
-        m.extend_from_slice(if wps == Some(true) { b"\n\nTheir objects are in folders in the Programs folder." } else { b"\n\nTheir objects are in folders on the desktop." });
+        // "Their objects are in the Games and Information folders."
+        m.extend_from_slice(b"\n\nTheir objects are in the ");
+        for (k, f) in used.iter().enumerate() {
+            if k > 0 {
+                m.extend_from_slice(if k + 1 == used.len() { b" and " } else { b", " });
+            }
+            m.extend_from_slice(f);
+        }
+        m.extend_from_slice(if used.len() == 1 { b" folder." } else { b" folders." });
     }
     if j.config_changed {
         m.extend_from_slice(b"\n\nCONFIG.SYS now has \\OS2\\APPS on its PATH and LIBPATH: restart rs2 before using the applications installed there.");

@@ -398,6 +398,13 @@ pub struct FolderData {
     pub always_sort: u32,
     /// The Include page's patterns (empty: everything).
     pub include: Option<alloc::boxed::Box<Vec<u8>>>,
+    /// SHOWALLINTREEVIEW: its tree view shows every object, not only
+    /// folders.
+    pub show_all: u32,
+}
+
+pub fn shows_all_in_tree(obj: usize) -> bool {
+    obj != 0 && wps::is(obj, "WPFolder") && fo(obj).show_all != 0
 }
 
 /// (sort attribute, always maintain sort order).
@@ -430,6 +437,9 @@ pub fn set_include(obj: usize, pats: &[u8]) {
 extern "C" fn folder_setup(obj: usize, setup: *const u8) -> u32 {
     som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpSetup, &[obj, setup as usize]);
     for (k, v) in setup_pairs(cstr(setup)) {
+        if k == b"SHOWALLINTREEVIEW" {
+            fo(obj).show_all = v.eq_ignore_ascii_case(b"YES") as u32;
+        }
         if k == b"ALWAYSSORT" {
             let on = v.eq_ignore_ascii_case(b"YES");
             let f = fo(obj);
@@ -468,6 +478,9 @@ extern "C" fn folder_save_state(obj: usize) -> u32 {
     if f.sort_by != 0 || f.always_sort != 0 {
         obj::wpSaveLong(obj, b"WPFolder\0".as_ptr(), 2, f.sort_by | f.always_sort << 16);
     }
+    if f.show_all != 0 {
+        obj::wpSaveLong(obj, b"WPFolder\0".as_ptr(), 4, 1);
+    }
     if let Some(p) = &f.include {
         let s = z(p);
         obj::wpSaveString(obj, b"WPFolder\0".as_ptr(), 3, s.as_ptr());
@@ -484,6 +497,9 @@ extern "C" fn folder_restore_state(obj: usize, r: u32) -> u32 {
     if let Some(v) = obj::restored_long(obj, b"WPFolder", 2) {
         fo(obj).sort_by = v & 0xffff;
         fo(obj).always_sort = v >> 16;
+    }
+    if let Some(v) = obj::restored_long(obj, b"WPFolder", 4) {
+        fo(obj).show_all = v;
     }
     if let Some(p) = obj::restored_string(obj, b"WPFolder", 3) {
         let p = p.strip_suffix(&[0]).unwrap_or(&p).to_vec();
