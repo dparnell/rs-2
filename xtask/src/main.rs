@@ -18,7 +18,7 @@
 //! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
 //! ```
 //!
-//! `--desktop` boots into the desktop shell (`init=OS2\RS2SHELL.EXE` in place
+//! `--desktop` boots into the Workplace Shell (`init=OS2\PMSHELL.EXE` in place
 //! of work/cmdline.txt's `init=`), `--init "PROGRAM ARGS"` into another
 //! program. `--type-file` reads the keys for `--type`
 //! from a file (its line ends are not typed).
@@ -152,7 +152,7 @@ struct Opts {
     hostfwd: Vec<String>,
     /// Directory QEMU's user network serves by TFTP (10.0.2.2).
     tftp: Option<String>,
-    /// Boot into the desktop shell (init=OS2\\RS2SHELL.EXE instead of
+    /// Boot into the Workplace Shell (init=OS2\\PMSHELL.EXE instead of
     /// work/cmdline.txt's init=).
     desktop: bool,
     /// `--init "PROGRAM ARGS"`: boot program in place of work/cmdline.txt's
@@ -473,7 +473,7 @@ fn build(o: &Opts) -> Option<PathBuf> {
                 Some((prog, args)) => format!("init={prog} -- {args}"),
                 None => format!("init={i}"),
             },
-            None => "init=OS2\\RS2SHELL.EXE".into(),
+            None => "init=OS2\\PMSHELL.EXE".into(),
         };
         words.push(&init);
         std::fs::create_dir_all(esp.join("RS2")).unwrap();

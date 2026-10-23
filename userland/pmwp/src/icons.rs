@@ -8,7 +8,7 @@
 
 use pmwin::shellicons as si;
 
-pub use si::{CD_ROM, DESKTOP, DRIVES, HARD_DISK, PROMPTS, PROMPT_FULL_SCREEN, PROMPT_WINDOW};
+pub use si::{CD_ROM, DESKTOP, DRIVES, HARD_DISK, MINIMIZED, PROMPTS, PROMPT_FULL_SCREEN, PROMPT_WINDOW, SHUTDOWN, WINDOW_LIST};
 
 static mut CACHE: [u32; si::LAST as usize + 1] = [0; si::LAST as usize + 1];
 
@@ -29,6 +29,7 @@ pub fn of_object_id(id: &[u8]) -> u32 {
     match id {
         b"<WP_PROMPTS>" => shell(PROMPTS),
         b"<WP_DRIVES>" => shell(DRIVES),
+        b"<WP_VIEWER>" => shell(MINIMIZED),
         _ => 0,
     }
 }

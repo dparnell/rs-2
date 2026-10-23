@@ -57,6 +57,7 @@ pub extern "C" fn ShlStartWorkplace(hab: u32, _hmq: u32) -> u32 {
     if desk != 0 {
         obj::call(m::WPObject::wpViewObject, &[desk, 0, OPEN_DEFAULT as usize, 0]);
     }
+    crate::minwin::apply();
     if startup_wanted() {
         run_startup();
     }

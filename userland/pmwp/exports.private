@@ -1,4 +1,5 @@
 Rs2WpsStart 9100
+ShlStartWorkplace 211
 M_WPObjectNewClass 324
 M_WPAbstractNewClass 327
 M_WPBitmapNewClass 369
@@ -13,6 +14,7 @@ M_WPDrivesNewClass 342
 M_WPIconNewClass 363
 M_WPLaunchPadNewClass 472
 M_WPMetNewClass 408
+M_WPMinWinViewerNewClass 459
 M_WPShadowNewClass 330
 M_WPNetLinkNewClass 402
 M_WPNetgrpNewClass 393
@@ -43,6 +45,8 @@ WPIconNewClass 63
 WPLaunchPadNewClass 469
 WPMetNewClass 96
 WPMinWinViewerNewClass 458
+WPTransientNewClass 42
+WPMinWindowNewClass 436
 WPShadowNewClass 33
 WPNetLinkNewClass 420
 WPNetgrpNewClass 423
@@ -56,5 +60,3 @@ WPSharedDirNewClass 414
 WPShredderNewClass 54
 WPStartupNewClass 39
 WPTemplatesNewClass 30
-WPTransientNewClass 42
-ShlStartWorkplace 211

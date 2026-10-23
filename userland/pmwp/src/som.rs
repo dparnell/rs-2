@@ -86,6 +86,12 @@ pub fn call(cd: *const usize, i: usize, args: &[usize]) -> usize {
             6 => core::mem::transmute::<usize, extern "C" fn(usize, usize, usize, usize, usize, usize) -> usize>(tok)(
                 args[0], args[1], args[2], args[3], args[4], args[5],
             ),
+            7 => core::mem::transmute::<usize, extern "C" fn(usize, usize, usize, usize, usize, usize, usize) -> usize>(tok)(
+                args[0], args[1], args[2], args[3], args[4], args[5], args[6],
+            ),
+            8 => core::mem::transmute::<usize, extern "C" fn(usize, usize, usize, usize, usize, usize, usize, usize) -> usize>(tok)(
+                args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7],
+            ),
             _ => 0,
         }
     }

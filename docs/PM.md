@@ -1400,8 +1400,9 @@ the wait, 0 none), which adds `textmode` to the kernel command line;
 `textmode` there runs `OS2_SHELL` (CMD.EXE) instead of PROTSHELL; or
 `PROTSHELL=C:\OS2\CMD.EXE` in CONFIG.SYS. From the desktop, Ctrl+Esc
 offers command prompts in a window or full screen. For development,
-`cargo xtask run --desktop` boots into the shell (`init=OS2\RS2SHELL.EXE`
-in place of work/cmdline.txt's `init=`).
+`cargo xtask run --desktop` boots into the Workplace Shell
+(`init=OS2\PMSHELL.EXE` in place of work/cmdline.txt's `init=`;
+`--init OS2\RS2SHELL.EXE` boots RS2SHELL, the earlier desktop).
 
 ### Drag and drop (PMDRAG)
 

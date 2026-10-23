@@ -10,7 +10,8 @@
 //!
 //! rs2 has no INI.RC from IBM: the first start writes rs2's own entries
 //! (the desktop, drives, the Startup, Programs and Command Prompts
-//! folders, the programs rs2 has) unless OS2.INI says the desktop was
+//! folders, the Minimized Window Viewer, Window List, System Setup with
+//! System and Display, Shut Down, the programs rs2 has) unless OS2.INI says the desktop was
 //! made (`PM_Workplace` `Rs2Desktop`).
 
 use alloc::vec::Vec;
@@ -21,6 +22,8 @@ use crate::{clsmgr, obj, wps};
 
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
+/// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
+const DESKTOP_VERSION: &[u8] = b"2";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -51,23 +54,31 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"Command Prompts;WPFolder;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_PROMPTS>"),
         (b"Programs;WPFolder;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_PROGRAMSFOLDER>"),
         (b"Startup;WPStartup;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_START>"),
+        (b"Minimized^Window Viewer;WPMinWinViewer;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_VIEWER>"),
+        (b"Window List;RS2WindowList;<WP_DESKTOP>;PRESERVEOLD", b"NOCOPY=YES;OBJECTID=<RS2_WINLIST>"),
+        (b"System Setup;WPFolder;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_CONFIG>"),
+        (b"System;RS2System;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<RS2_SYSTEM>"),
+        (b"Shut Down;RS2Shutdown;<WP_DESKTOP>;PRESERVEOLD", b"NOCOPY=YES;OBJECTID=<RS2_SHUTDOWN>"),
         (b"OS/2 Window;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=WINDOWABLEVIO;OBJECTID=<WP_OS2WIN>"),
         (b"OS/2 Full Screen;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=FULLSCREEN;OBJECTID=<WP_OS2FS>"),
     ];
-    let programs: [(&[u8], &[u8], &[u8], &[u8]); 4] = [
-        (b"OS2\\E.EXE", b"System Editor", b"<WP_SYSED>", b"ASSOCFILTER=*.TXT,*.DOC,*.LOG,*.ME,*.CFG,*.SYS,*.INI,*.CMD;"),
-        (b"OS2\\APPINST.EXE", b"Install OS/2 Applications", b"<RS2_APPINST>", b""),
-        (b"OS2\\DISPLAY.EXE", b"Display", b"<RS2_DISPLAY>", b""),
-        (b"OS2\\PMINSTAL.EXE", b"Install rs2", b"<RS2_INSTALL>", b""),
+    // (file, title, object ID, folder, more setup)
+    let programs: [(&[u8], &[u8], &[u8], &[u8], &[u8]); 4] = [
+        (b"OS2\\E.EXE", b"System Editor", b"<WP_SYSED>", b"<WP_PROGRAMSFOLDER>", b"ASSOCFILTER=*.TXT,*.DOC,*.LOG,*.ME,*.CFG,*.SYS,*.INI,*.CMD;"),
+        (b"OS2\\APPINST.EXE", b"Install OS/2 Applications", b"<RS2_APPINST>", b"<WP_PROGRAMSFOLDER>", b""),
+        (b"OS2\\DISPLAY.EXE", b"Display", b"<RS2_DISPLAY>", b"<WP_CONFIG>", b""),
+        (b"OS2\\PMINSTAL.EXE", b"Install rs2", b"<RS2_INSTALL>", b"<WP_PROGRAMSFOLDER>", b""),
     ];
     let mut out: Vec<(Vec<u8>, Vec<u8>)> = v.drain(..).map(|(k, s)| (k.to_vec(), s.to_vec())).collect();
-    for (file, title, id, extra) in programs {
+    for (file, title, id, folder, extra) in programs {
         let path = [&b"?:\\"[..], file].concat();
         if !file_exists(&boot(&path)) {
             continue;
         }
         let mut k = title.to_vec();
-        k.extend_from_slice(b";WPProgram;<WP_PROGRAMSFOLDER>;PRESERVEOLD");
+        k.extend_from_slice(b";WPProgram;");
+        k.extend_from_slice(folder);
+        k.extend_from_slice(b";PRESERVEOLD");
         let mut s = b"EXENAME=".to_vec();
         s.extend_from_slice(&path);
         s.extend_from_slice(b";PROGTYPE=PM;");
@@ -113,7 +124,9 @@ fn install_object(key: &[u8], setup: &[u8]) -> bool {
     if folder == 0 {
         return false;
     }
-    crate::api::create_object(class, &boot(title), &setup, &loc, 1) != 0 || {
+    // INI.RC's titles break lines with ^.
+    let title: Vec<u8> = boot(title).into_iter().map(|c| if c == b'^' { b'\n' } else { c }).collect();
+    crate::api::create_object(class, &title, &setup, &loc, 1) != 0 || {
         debug(&alloc::format!("install: {:?} was not made", core::str::from_utf8(key)));
         true
     }
@@ -133,9 +146,14 @@ pub fn run() {
         prf_write(HINI_USER, APP_CLASSES, &k, None);
     }
     let mut pending: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
-    if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none() {
+    // Version 2 added the Minimized Window Viewer, Window List, System
+    // Setup (System, Display) and Shut Down; PRESERVEOLD leaves what an
+    // earlier version made.
+    if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         pending.extend(defaults());
-        prf_write(HINI_USER, b"PM_Workplace", b"Rs2Desktop", Some(b"1\0"));
+        let mut v = DESKTOP_VERSION.to_vec();
+        v.push(0);
+        prf_write(HINI_USER, b"PM_Workplace", b"Rs2Desktop", Some(&v));
     }
     for k in prf_keys(HINI_USER, APP_OBJECTS) {
         let v = prf_read(HINI_USER, APP_OBJECTS, &k).unwrap_or_default();

@@ -37,10 +37,11 @@ pub fn path(obj: usize) -> Vec<u8> {
     str_bytes(&fd(obj).real).to_vec()
 }
 
-/// The title a path gives an object ("C:" for a root).
+/// The title a path gives an object ("Drive C" for a root, as IBM's
+/// root folders are called).
 fn title_for(path: &[u8]) -> Vec<u8> {
     if path.len() == 3 {
-        return path[..2].to_vec();
+        return [&b"Drive "[..], &path[..1]].concat();
     }
     split_path(path).1
 }

@@ -87,7 +87,7 @@ extern "C" fn wpInsertSettingsPage(_o: usize, nb: u32, pi: *const u8) -> u32 {
 }
 
 /// A PAGEINFO for one of rs2's own pages (a window already made).
-fn insert(o: usize, nb: u32, page: u32, name: &'static [u8]) -> u32 {
+pub fn insert(o: usize, nb: u32, page: u32, name: &'static [u8]) -> u32 {
     let mut pi = [0u32; 13];
     pi[0] = 52;
     pi[1] = page;
@@ -102,15 +102,15 @@ fn entry(text: &[u8], (x, y, cx): (i16, i16, i16), id: u16) -> Item {
     item(WC_ENTRYFIELD, text, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0004 | 0x0008, (x, y, cx, 8), id)
 }
 
-fn label(text: &[u8], (x, y, cx): (i16, i16, i16)) -> Item {
+pub fn label(text: &[u8], (x, y, cx): (i16, i16, i16)) -> Item {
     item(WC_STATIC, text, WS_VISIBLE | 0x0001, (x, y, cx, 8), 0xffff)
 }
 
-fn page_frame() -> Item {
+pub fn page_frame() -> Item {
     item(WC_FRAME, b"", 0, (0, 0, 236, 120), 300)
 }
 
-fn make_page(nb: u32, proc_: extern "C" fn(u32, u32, u32, u32) -> u32, tpl: &[u8], o: usize) -> u32 {
+pub fn make_page(nb: u32, proc_: extern "C" fn(u32, u32, u32, u32) -> u32, tpl: &[u8], o: usize) -> u32 {
     unsafe { WinCreateDlg(nb, nb, proc_ as *const () as u32, tpl.as_ptr(), o as u32) }
 }
 

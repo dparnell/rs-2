@@ -362,8 +362,9 @@ Status markers: done, in progress, planned.
 - done: the shell process: OS2\PMSHELL.EXE with PMWP's ShlStartWorkplace
   (the desktop from OS2.INI's PM_InstallObject/PM_InstallClass entries
   and rs2's own the first time, the Startup folder, shutdown, the
-  object API from other processes); `PROTSHELL=C:\OS2\PMSHELL.EXE`
-  boots it (RS2SHELL stays the default for now)
+  object API from other processes); the default desktop since it
+  has RS2SHELL's objects (Minimized Window Viewer, Window List, System
+  Setup, Shut Down; drives open their root folders)
 - planned: the remaining classes and phase 2's gaps (docs/WPS.md)
 
 ## Milestone 5: install media (first version done)

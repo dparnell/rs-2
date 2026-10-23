@@ -230,10 +230,11 @@ The work is in phases; each phase is usable on its own:
    - copy and move dialogs;
    - Find and templates;
    - a lazy writer.
-3. **The shell process**: done (see "The shell process" below).
-   RS2SHELL stays the default desktop for now.
-   `PROTSHELL=C:\OS2\PMSHELL.EXE` in CONFIG.SYS (or
-   `--init OS2\PMSHELL.EXE` with `xtask run`) boots the Workplace Shell.
+3. **The shell process**: done (see "The shell process" below). It is
+   the default desktop (`PROTSHELL=C:\OS2\PMSHELL.EXE`; `xtask run
+   --desktop`), with what RS2SHELL's desktop had: the Minimized Window
+   Viewer, the Window List, System Setup and Shut Down.
+   `PROTSHELL=C:\OS2\RS2SHELL.EXE` still starts RS2SHELL.
 4. **Compatibility**: wpstutor.dll registered with WinRegisterObjectClass
    and working; then the remaining classes (Templates, Find, Launchpad,
    Shredder, Minimized Window Viewer, Network); then rs2 versions of
@@ -321,7 +322,10 @@ uninitialized repository object faults on both SOMs alike.
 
 ## rs2's Workplace Shell classes
 
-`userland/pmwp` (PMWP.DLL) provides the 58 classes IBM's PMWP exports.
+`userland/pmwp` (PMWP.DLL) provides the 58 classes IBM's PMWP exports
+that the Toolkit describes, M_WPMinWinViewer, IBM's WPMinWindow (which
+the Toolkit does not describe) and rs2's own RS2Shutdown, RS2WindowList
+and RS2System.
 
 **Class tables.** `tools/scripts/gen_wps_classes.py` reads the Toolkit's
 IDL. It writes `src/classes_gen.rs` (each class's parents, metaclass,
@@ -329,7 +333,10 @@ version and methods in release order, plus index constants). It also
 writes `src/classdata_gen.rs`: the exported `<Class>ClassData` and
 `<Class>CClassData` variables and the `<Class>NewClass` functions, with
 IBM's ordinals from `ordinals.txt`. WPImageFile is not in the Toolkit,
-so WPBitmap derives from WPDataFile.
+so WPBitmap derives from WPDataFile. The script's `EXTRA` list adds the
+classes the IDL does not describe (WPMinWindow and rs2's own, with no
+methods of their own), and metaclasses the IDL describes come along with
+their classes even where IBM exports no class data for them.
 
 **Building.** `wps.rs` builds each class as SOM compiler output does:
 somBuildClass with a layout-4 `somStaticClassInfo`, one static method
@@ -342,6 +349,8 @@ The rest comes from the class modules:
 | `abs.rs` | WPAbstract, WPProgram (EXENAME, PARAMETERS, STARTUPDIR, PROGTYPE; wpQuery/SetProgDetails; opening starts the program), WPShadow (SHADOWID; shows and opens its object), WPDisk (a drive: its settings are its own, its other views and its default view are its root folder's) |
 | `fs.rs` | WPFileSystem (real name, renaming, file icons, moving and copying files), WPDataFile (opened with the PMWP_ASSOC_FILTER program, else the System Editor), WPProgramFile, WPFolder (content: the directory, without hidden files, and the abstract objects in it), WPDrives (a WPDisk per drive), the desktop |
 | `icons.rs` | rs2's own icons (pmwin::shellicons, as RS2SHELL shows them) for WPDrives, WPDisk (hard disk or CD-ROM), WPDesktop, command prompts and the Command Prompts folder (by its object ID, where IBM's INI.RC sets an icon resource); a folder's .ICON EA still comes first |
+| `minwin.rs` | WPMinWinViewer (`<WP_VIEWER>`; its content is the minimized windows) and WPMinWindow (transient, one per window PMWIN minimizes to the viewer: WM_RS2_MINWINDOW to the window set with Rs2SetMinimizeViewer, the desktop's; opening one restores its window). `RS2_Desktop` `MinimizeTo` (as for RS2SHELL) says whether windows go to the viewer or the desktop |
+| `rs2obj.rs` | rs2's own abstract classes for what IBM's shell keeps on the LaunchPad and in WPCONFIG: RS2Shutdown (opening it shuts down), RS2WindowList (the window list), RS2System (a Window page: where minimized windows go) |
 | `clsmgr.rs` | WPClassManager (merged in as SOM's class manager; finds classes in the DLLs registered in OS2SYS.INI's PM_Objects ClassTable) |
 | `api.rs` | WinCreateObject, WinQueryObject, WinSetObjectData, WinDestroyObject, WinOpenObject, WinSaveObject, WinMove/CopyObject, WinCreateShadow, WinQueryObjectPath, WinRegister/Deregister/Enum/ReplaceObjectClass |
 
@@ -455,8 +464,12 @@ If a Workplace Shell is already running, it ends.
   - The very first time, rs2's own entries come first: the desktop,
     Drives, Command Prompts (OS/2 Window, OS/2 Full Screen), Programs
     (the System Editor with its ASSOCFILTER, the application installer,
-    Display, Install rs2, where their files exist) and Startup.
-    `PM_Workplace` `Rs2Desktop` records that this was done.
+    Install rs2, where their files exist), Startup, the Minimized Window
+    Viewer, Window List, System Setup (`<WP_CONFIG>`: System, and
+    Display where it exists) and Shut Down. `PM_Workplace` `Rs2Desktop`
+    holds the version made (2); a desktop of an earlier version gets
+    the entries again, and PRESERVEOLD keeps what it has. Titles break
+    lines at `^`, as in INI.RC.
 - **Starts the server** for other processes' object calls (`ipc.rs`):
   - A caller takes the mutex `\SEM32\RS2WPS\CALL` and writes its
     request into `\SHAREMEM\RS2WPS.MEM`.

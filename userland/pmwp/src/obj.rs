@@ -626,6 +626,12 @@ fn class_title(name: &[u8]) -> Option<&'static [u8]> {
         b"WPBitmap" => b"Bitmap\0",
         b"WPMet" => b"Metafile\0",
         b"WPPif" => b"Picture\0",
+        b"WPStartup" => b"Startup\0",
+        b"WPMinWinViewer" => b"Minimized Window Viewer\0",
+        b"WPMinWindow" => b"Minimized Window\0",
+        b"RS2Shutdown" => b"Shut Down\0",
+        b"RS2WindowList" => b"Window List\0",
+        b"RS2System" => b"System\0",
         _ => return None,
     })
 }
@@ -662,6 +668,9 @@ extern "C" fn wpclsQueryIcon(cls: usize) -> u32 {
             b"WPDrives" => crate::icons::DRIVES,
             b"WPDesktop" => crate::icons::DESKTOP,
             b"WPDisk" => crate::icons::HARD_DISK,
+            b"WPMinWinViewer" => crate::icons::MINIMIZED,
+            b"RS2Shutdown" => crate::icons::SHUTDOWN,
+            b"RS2WindowList" => crate::icons::WINDOW_LIST,
             _ => 0,
         };
         if own != 0 {
@@ -687,6 +696,9 @@ extern "C" fn wpclsQueryDefaultView(cls: usize) -> u32 {
         match som::class_name(c) {
             // A drive opens its root folder.
             b"WPFolder" | b"WPDisk" => return OPEN_CONTENTS,
+            // Opening them acts (shuts down, shows the window list,
+            // restores the window).
+            b"RS2Shutdown" | b"RS2WindowList" | b"WPMinWindow" => return OPEN_RUNNING,
             b"WPProgram" | b"WPProgramFile" | b"WPDataFile" => return OPEN_RUNNING,
             _ => {}
         }

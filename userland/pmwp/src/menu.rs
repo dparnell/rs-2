@@ -157,6 +157,19 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
     if program && flags & CTXT_PROGRAM != 0 {
         open.push(Menu::Item(WPMENUID_PROGRAM as u16, b"~Program", true));
     }
+    // Objects whose opening acts (rs2obj.rs, minwin.rs).
+    let action: Option<&[u8]> = if is(o, "RS2Shutdown") {
+        Some(b"~Shut down")
+    } else if is(o, "RS2WindowList") {
+        Some(b"~Window list")
+    } else if is(o, "WPMinWindow") {
+        Some(b"~Restore")
+    } else {
+        None
+    };
+    if let Some(t) = action {
+        open.push(Menu::Item(WPMENUID_PROGRAM as u16, t, true));
+    }
     let mut items: Vec<Menu> = Vec::new();
     if flags & CTXT_OPEN != 0 && !open.is_empty() {
         items.push(Menu::SubId(WPMENUID_OPEN as u16, b"~Open", open));

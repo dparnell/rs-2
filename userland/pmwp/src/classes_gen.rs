@@ -142,6 +142,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (407, 406, 408),
     },
     ClassDef {
+        name: "M_WPMinWinViewer",
+        parents: &["M_WPFolder"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 459),
+    },
+    ClassDef {
         name: "M_WPShadow",
         parents: &["M_WPAbstract"],
         meta: None,
@@ -286,6 +295,33 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (26, 25, 27),
     },
     ClassDef {
+        name: "RS2Shutdown",
+        parents: &["WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "RS2System",
+        parents: &["WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "RS2WindowList",
+        parents: &["WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPBitmap",
         parents: &["WPImageFile"],
         meta: Some("M_WPBitmap"),
@@ -412,6 +448,24 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (457, 456, 458),
     },
     ClassDef {
+        name: "WPTransient",
+        parents: &["WPObject"],
+        meta: Some("M_WPTransient"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (41, 40, 42),
+    },
+    ClassDef {
+        name: "WPMinWindow",
+        parents: &["WPTransient"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (434, 433, 436),
+    },
+    ClassDef {
         name: "WPShadow",
         parents: &["WPAbstract"],
         meta: Some("M_WPShadow"),
@@ -528,15 +582,6 @@ pub static CLASSES: &[ClassDef] = &[
         methods: &[],
         ords: (29, 28, 30),
     },
-    ClassDef {
-        name: "WPTransient",
-        parents: &["WPObject"],
-        meta: Some("M_WPTransient"),
-        major: 1,
-        minor: 2,
-        methods: &[],
-        ords: (41, 40, 42),
-    },
 ];
 
 /// Method indexes in <Class>ClassData (after the class object).
@@ -636,6 +681,8 @@ pub mod m {
     pub mod M_WPLaunchPad {
     }
     pub mod M_WPMet {
+    }
+    pub mod M_WPMinWinViewer {
     }
     pub mod M_WPShadow {
     }
@@ -835,6 +882,12 @@ pub mod m {
         pub const wpObjectPrivate33: usize = 164;
     }
     pub mod WPAbstract {
+    }
+    pub mod RS2Shutdown {
+    }
+    pub mod RS2System {
+    }
+    pub mod RS2WindowList {
     }
     pub mod WPBitmap {
     }
@@ -1131,6 +1184,10 @@ pub mod m {
     pub mod WPMinWinViewer {
         pub const wpFindMinWindow: usize = 0;
     }
+    pub mod WPTransient {
+    }
+    pub mod WPMinWindow {
+    }
     pub mod WPShadow {
         pub const wpSetLinkToObject: usize = 0;
         pub const withdrawn: usize = 1;
@@ -1211,7 +1268,5 @@ pub mod m {
     pub mod WPStartup {
     }
     pub mod WPTemplates {
-    }
-    pub mod WPTransient {
     }
 }

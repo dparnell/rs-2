@@ -30,11 +30,13 @@ mod shell;
 mod shutdown;
 mod launch;
 mod menu;
+mod minwin;
 mod obj;
 /// rs2's shell's PM bindings (shared).
 #[path = "../../rs2shell/src/pm.rs"]
 #[allow(dead_code, unused_imports, clippy::all)]
 mod pm;
+mod rs2obj;
 pub mod som;
 mod util;
 mod view;

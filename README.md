@@ -160,20 +160,28 @@ programs are tested.
 
 ![The rs2 desktop: Drives, drive C: and its OS2 folder open](docs/images/rs2-desktop.png)
 
-*The live ISO's desktop (RS2SHELL) with Drives > C: > OS2 open.*
+*The live ISO's desktop (the Workplace Shell) with Drives and Drive C open.*
 
 The live system and installed systems start Presentation Manager with
-rs2's desktop shell (`C:\OS2\RS2SHELL.EXE`). Double click an object
-(or select it and press Enter) to open it: Command Prompts (an OS/2
-window or full screen), Programs, Drives (a window per drive, then per
-folder; programs run, text files open in the System Editor when it is
-installed), the Minimized Window Viewer, the Window List and Shutdown.
-Mouse button 2 opens pop-up menus (Open, Settings, Rename, Delete;
-Create program object, System setup, Shut down on the desktop) and
-drags icons, whose places are kept; a file dragged onto a folder moves
-there. Ctrl+Esc shows the window list. Shutdown closes the programs
-(they may ask about unsaved work), flushes the disks and turns the
-machine off. Details: [docs/PM.md](docs/PM.md#the-desktop-shell-rs2shell).
+rs2's Workplace Shell (`C:\OS2\PMSHELL.EXE` with rs2's SOM.DLL and
+PMWP.DLL, binary compatible with IBM's, so Workplace Shell class DLLs
+work). Double click an object (or select it and press Enter) to open
+it: Drives (a drive opens its root folder; programs run, text files
+open in the System Editor when it is installed), Command Prompts (an
+OS/2 window or full screen), Programs, Startup (its objects open at
+each boot), the Minimized Window Viewer (minimized windows go there),
+System Setup (Display, and System: where minimized windows go), the
+Window List and Shut Down. Mouse button 2 opens pop-up menus (Open as
+icon, tree or details view, Settings, Rename, Create shadow, Delete;
+Window list and Shut down on the desktop); settings notebooks set
+titles, programs, folder views and backgrounds; icons drag (Ctrl
+copies, Ctrl+Shift makes a shadow) and keep their places; F2 renames,
+F5 refreshes, Delete deletes. Ctrl+Esc shows the window list. Shut
+Down closes the programs (they may ask about unsaved work), flushes
+the disks and turns the machine off. Details: [docs/WPS.md](docs/WPS.md).
+RS2SHELL (`C:\OS2\RS2SHELL.EXE`), rs2's earlier desktop, is still there:
+`PROTSHELL=C:\OS2\RS2SHELL.EXE` in CONFIG.SYS starts it instead
+([docs/PM.md](docs/PM.md#the-desktop-shell-rs2shell)).
 F1 shows help in PM programs that have it (rs2's help manager reads
 OS/2 `.HLP` files along HELP), and `VIEW book [topic]` shows OS/2 books
 (`.INF`, along BOOKSHELF): [docs/PM.md](docs/PM.md#the-help-manager-helpmgrdll-and-viewexe).
@@ -184,10 +192,10 @@ Locale, REXX, command line tools, the books) from your OS/2 Warp 4.52 CD:
 
 **The text-mode command prompt instead:** press T while the boot loader
 shows "Press T for a text-mode boot", or put `textmode` in
-`\RS2\CMDLINE`, or in CONFIG.SYS replace `PROTSHELL=C:\OS2\RS2SHELL.EXE`
+`\RS2\CMDLINE`, or in CONFIG.SYS replace `PROTSHELL=C:\OS2\PMSHELL.EXE`
 with `PROTSHELL=C:\OS2\CMD.EXE`. Development runs (`cargo xtask run`)
 use `work/cmdline.txt` as before; `cargo xtask run --desktop` boots into
-the desktop.
+the Workplace Shell.
 
 ## Virtual machines
 

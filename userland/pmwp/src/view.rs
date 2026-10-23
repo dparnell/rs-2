@@ -203,6 +203,11 @@ pub fn background_changed(folder: usize) {
 // ---- Folder windows ----
 
 /// Open a folder's view (or bring it to the front); returns its frame.
+/// The desktop's client window (0 without a desktop).
+pub fn desktop_client() -> u32 {
+    wins().iter().find(|w| w.desktop).map_or(0, |w| w.client)
+}
+
 pub fn open_folder(folder: usize, _cnr: u32, view: u32, _param: u32) -> u32 {
     let view = match view {
         OPEN_DETAILS | OPEN_TREE => view,
@@ -913,6 +918,14 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                 let frame = w.map_or(0, |w| wins()[w].frame);
                 obj::call(m::WPObject::wpMenuItemSelected, &[o, frame as usize, (a & 0xffff) as usize]);
             }
+            0
+        }
+        WM_RS2_MINWINDOW => {
+            crate::minwin::changed(a, b != 0);
+            0
+        }
+        WM_TIMER if a == crate::minwin::TID_MINWATCH => {
+            crate::minwin::check();
             0
         }
         WM_TIMER if a == crate::shutdown::TID_SHUTDOWN => {
