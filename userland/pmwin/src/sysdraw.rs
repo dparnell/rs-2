@@ -224,7 +224,7 @@ pub extern "C" fn WinGetSysBitmap(_desk: u32, ibm: u32) -> u32 {
 fn paint_sys_bitmap(c: &mut Canvas, ibm: u32, w: i32, h: i32) {
     let all = Rect::new(0, 0, w, h);
     let button = |c: &mut Canvas, down: bool| {
-        c.fill(all, draw::FACE);
+        c.fill(all, draw::face());
         if down { c.sunken(all) } else { c.raised(all) }
     };
     let (mx, my) = (w / 2, h / 2);
@@ -237,7 +237,7 @@ fn paint_sys_bitmap(c: &mut Canvas, ibm: u32, w: i32, h: i32) {
                 _ => ([0, 1, 2, 3][((ibm - SBMP_SBUPARROW) % 4) as usize], (ibm - SBMP_SBUPARROW) / 4),
             };
             button(c, kind == 1);
-            let col = if kind == 2 { draw::SHADOW } else { draw::TEXT };
+            let col = if kind == 2 { draw::shadow() } else { draw::text() };
             for i in 0..4 {
                 let r = match dir {
                     0 => Rect::new(mx - i, my + 2 - i, mx + i + 1, my + 3 - i),
@@ -258,7 +258,7 @@ fn paint_sys_bitmap(c: &mut Canvas, ibm: u32, w: i32, h: i32) {
                 _ => ([1, 2, 3, 4][(ibm - SBMP_OLD_MINBUTTON) as usize], false),
             };
             button(c, down);
-            let k = draw::TEXT;
+            let k = draw::text();
             match kind {
                 0 | 4 => c.fill(Rect::new(4, my - 1, w - 4, my + 2), k),
                 1 | 5 => c.fill(Rect::new(mx - 2, my - 2, mx + 3, my + 3), k),
@@ -277,71 +277,71 @@ fn paint_sys_bitmap(c: &mut Canvas, ibm: u32, w: i32, h: i32) {
         }
         SBMP_MENUCHECK => {
             for i in 0..3 {
-                c.fill(Rect::new(2 + i, 5 - i, 3 + i, 8 - i), draw::TEXT);
+                c.fill(Rect::new(2 + i, 5 - i, 3 + i, 8 - i), draw::text());
             }
             for i in 0..5 {
-                c.fill(Rect::new(5 + i, 3 + i, 6 + i, 6 + i), draw::TEXT);
+                c.fill(Rect::new(5 + i, 3 + i, 6 + i, 6 + i), draw::text());
             }
         }
         SBMP_MENUATTACHED => {
             for i in 0..4 {
-                c.fill(Rect::new(4 + i, my - 3 + i, 5 + i, my + 4 - i), draw::TEXT);
+                c.fill(Rect::new(4 + i, my - 3 + i, 5 + i, my + 4 - i), draw::text());
             }
         }
         SBMP_TREEPLUS | SBMP_TREEMINUS => {
-            c.fill(all, draw::WINDOW);
-            c.frame(all, draw::SHADOW);
-            c.fill(Rect::new(2, my, w - 2, my + 1), draw::TEXT);
+            c.fill(all, draw::window());
+            c.frame(all, draw::shadow());
+            c.fill(Rect::new(2, my, w - 2, my + 1), draw::text());
             if ibm == SBMP_TREEPLUS {
-                c.fill(Rect::new(mx, 2, mx + 1, h - 2), draw::TEXT);
+                c.fill(Rect::new(mx, 2, mx + 1, h - 2), draw::text());
             }
         }
         SBMP_OLD_CHECKBOXES | SBMP_CHECKBOXES => {
-            c.fill(all, draw::FACE);
+            c.fill(all, draw::face());
             for row in 0..3 {
                 for col in 0..4 {
                     let b = Rect::new(col * 13, (2 - row) * 13, col * 13 + 13, (2 - row) * 13 + 13);
-                    c.fill(b, if row == 1 { draw::FACE } else { draw::WINDOW });
+                    c.fill(b, if row == 1 { draw::face() } else { draw::window() });
                     c.sunken(b);
                     if col == 1 {
                         for i in 0..3 {
-                            c.fill(Rect::new(b.left + 3 + i, b.bottom + 6 - i, b.left + 4 + i, b.bottom + 9 - i), draw::TEXT);
+                            c.fill(Rect::new(b.left + 3 + i, b.bottom + 6 - i, b.left + 4 + i, b.bottom + 9 - i), draw::text());
                         }
                         for i in 0..5 {
-                            c.fill(Rect::new(b.left + 6 + i, b.bottom + 4 + i, b.left + 7 + i, b.bottom + 7 + i), draw::TEXT);
+                            c.fill(Rect::new(b.left + 6 + i, b.bottom + 4 + i, b.left + 7 + i, b.bottom + 7 + i), draw::text());
                         }
                     } else if col == 2 {
-                        c.fill(Rect::new(b.left + 3, b.bottom + 3, b.right - 3, b.top - 3), draw::SHADOW);
+                        c.fill(Rect::new(b.left + 3, b.bottom + 3, b.right - 3, b.top - 3), draw::shadow());
                     }
                 }
             }
         }
         SBMP_SIZEBOX => {
-            c.fill(all, draw::FACE);
+            c.fill(all, draw::face());
             for i in (2..w).step_by(4) {
                 for j in 0..2 {
-                    c.fill(Rect::new(i + j, 1, i + j + 1, 1 + w - i - j), if j == 0 { draw::LIGHT } else { draw::SHADOW });
+                    c.fill(Rect::new(i + j, 1, i + j + 1, 1 + w - i - j), if j == 0 { draw::light() } else { draw::shadow() });
                 }
             }
         }
         SBMP_FILE | SBMP_PROGRAM => {
-            c.fill(all, draw::FACE);
-            c.fill(Rect::new(3, 1, 13, 15), draw::WINDOW);
-            c.frame(Rect::new(3, 1, 13, 15), draw::TEXT);
+            c.fill(all, draw::face());
+            c.fill(Rect::new(3, 1, 13, 15), draw::window());
+            c.frame(Rect::new(3, 1, 13, 15), draw::text());
             if ibm == SBMP_PROGRAM {
-                c.fill(Rect::new(3, 12, 13, 15), draw::HILITE);
+                c.fill(Rect::new(3, 12, 13, 15), draw::hilite());
             }
         }
         SBMP_FOLDER => {
-            c.fill(all, draw::FACE);
+            c.fill(all, draw::face());
             c.fill(Rect::new(1, 2, 15, 12), 0xffff80);
             c.fill(Rect::new(1, 12, 7, 14), 0xffff80);
-            c.frame(Rect::new(1, 2, 15, 12), draw::TEXT);
+            c.frame(Rect::new(1, 2, 15, 12), draw::text());
         }
         SBMP_DRIVE => {
-            c.fill(all, draw::FACE);
+            c.fill(all, draw::face());
             c.fill(Rect::new(1, 4, 15, 11), 0xc0c0c0);
-            c.frame(Rect::new(1, 4, 15, 11), draw::TEXT);
+            c.frame(Rect::new(1, 4, 15, 11), draw::text());
             c.fill(Rect::new(11, 6, 13, 8), 0x00c000);
         }
         _ => button(c, false),

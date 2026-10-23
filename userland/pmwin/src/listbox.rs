@@ -206,9 +206,9 @@ fn paint(h: u32) {
     let rows: Vec<(Vec<u8>, bool, bool)> = l.items.iter().enumerate().skip(l.top).take(rows(h) + 1).map(|(i, it)| (it.text.clone(), it.selected, i == l.cursor)).collect();
     draw::paint(h, |c| {
         let r = c.rect();
-        c.fill(r, draw::WINDOW);
+        c.fill(r, draw::window());
         c.sunken(r);
-        c.bevel(Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1), draw::DARK, draw::FACE);
+        c.bevel(Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1), draw::DARK, draw::face());
         let f = draw::font();
         for (k, (text, sel, cur)) in rows.iter().enumerate() {
             let top = a.top - k as i32 * ih;
@@ -217,10 +217,10 @@ fn paint(h: u32) {
                 break;
             }
             let fg = if *sel {
-                c.fill(ir, draw::HILITE);
-                draw::HILITE_TEXT
+                c.fill(ir, draw::hilite());
+                draw::hilite_text()
             } else {
-                draw::TEXT
+                draw::text()
             };
             let y = top - ih + (ih - f.height) / 2 + f.descender;
             c.text(ir.left + 3, y, text, fg, ir);

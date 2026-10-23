@@ -530,7 +530,8 @@ fn paint(h: u32) {
         GpiCreateLogColorTable(hps, 0, 3, 0, 0, core::ptr::null());
         let mut all = RectL::default();
         WinQueryWindowRect(h, &mut all);
-        WinFillRect(hps, &all, 0xcccccc);
+        // SYSCLR_DIALOGBACKGROUND
+        WinFillRect(hps, &all, crate::setup::sys_color(-34) as i32);
         let lw = &wins()[w];
         let o = lw.obj;
         let small = ld(o).flags & F_SMALL != 0;
@@ -539,7 +540,9 @@ fn paint(h: u32) {
         let style = ld(o).style;
         for &(r, hit) in &lw.items {
             let pressed = lw.pressed == Some(hit);
-            let (light, dark) = if pressed { (0x808080, 0xffffff) } else { (0xffffff, 0x808080) };
+            // SYSCLR_BUTTONLIGHT, SYSCLR_BUTTONDARK
+            let (hi, lo) = (crate::setup::sys_color(-41), crate::setup::sys_color(-39));
+            let (light, dark) = if pressed { (lo, hi) } else { (hi, lo) };
             let edge = |x0: i32, y0: i32, x1: i32, y1: i32, c: u32| WinFillRect(hps, &rect(x0, y0, x1, y1), c as i32);
             edge(r.l, r.t - 1, r.r, r.t, light);
             edge(r.l, r.b, r.l + 1, r.t, light);

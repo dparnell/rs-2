@@ -148,18 +148,18 @@ fn paint(h: u32) {
     let held = data(h).map_or(0, |d| d.held);
     draw::paint(h, |c: &mut Canvas| {
         let r = c.rect();
-        c.fill(r, draw::WINDOW);
+        c.fill(r, draw::window());
         if b > 0 {
             let er = Rect::new(0, 0, cx - aw, cy);
             c.sunken(er);
-            c.bevel(Rect::new(1, 1, cx - aw - 1, cy - 1), draw::DARK, draw::FACE);
+            c.bevel(Rect::new(1, 1, cx - aw - 1, cy - 1), draw::DARK, draw::face());
         }
         if aw > 0 {
-            let col = if enabled { draw::TEXT } else { draw::SHADOW };
+            let col = if enabled { draw::text() } else { draw::shadow() };
             let up = Rect::new(cx - aw, cy / 2, cx, cy);
             let down = Rect::new(cx - aw, 0, cx - 0, cy / 2);
             for (rr, dir) in [(up, 1), (down, -1)] {
-                c.fill(rr, draw::FACE);
+                c.fill(rr, draw::face());
                 if held == dir { c.sunken(rr) } else { c.raised(rr) }
                 let (mx, my) = (rr.left + rr.width() / 2, rr.bottom + rr.height() / 2);
                 for i in 0..3 {

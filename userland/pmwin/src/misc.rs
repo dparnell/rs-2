@@ -106,8 +106,59 @@ pub extern "C" fn WinFreeErrorInfo(_p: u32) -> u32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn WinAlarm(_desk: u32, _style: u32) -> u32 {
-    unsafe { DosBeep(880, 80) };
+pub extern "C" fn WinAlarm(_desk: u32, style: u32) -> u32 {
+    // SV_ALARM off: no sound.
+    if WinQuerySysValue(1, 6) == 0 {
+        return 1;
+    }
+    // WA_WARNING, WA_NOTE, WA_ERROR: SV_WARNINGFREQ.. and their durations.
+    let (f, d) = match style {
+        0..=2 => (WinQuerySysValue(1, 13 + style as i32), WinQuerySysValue(1, 16 + style as i32)),
+        _ => (880, 80),
+    };
+    unsafe { DosBeep(f as u32, d as u32) };
+    1
+}
+
+/// WinSetSysValue(hwndDesktop, iSysValue, lValue): the values a user
+/// sets (the mouse, keyboard and sound objects): double-click time,
+/// swapped buttons, the alarm, the cursor rate, scrolling, beeps.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetSysValue(_desk: u32, i: i32, v: i32) -> u32 {
+    // SV_SWAPBUTTON, SV_DBLCLKTIME, SV_CX/CYDBLCLK, SV_ALARM,
+    // SV_CURSORRATE, SV_FIRST/SCROLLRATE, SV_*FREQ, SV_*DURATION.
+    if !matches!(i, 0..=3 | 6 | 9..=11 | 13..=18) {
+        set_error(0x1303); // PMERR_INVALID_PARM
+        return 0;
+    }
+    st().sysvals.insert(i, v);
+    1
+}
+
+/// WinSetSysColors(hwndDesktop, flOptions, flFormat, clrFirst, cclr,
+/// pclr): LCOLF_CONSECRGB (the colours of clrFirst on) or LCOLF_INDRGB
+/// (index, colour pairs); LCOL_RESET first restores the defaults. Every
+/// window is redrawn.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetSysColors(_desk: u32, options: u32, format: u32, first: i32, n: u32, p: *const u32) -> u32 {
+    let s = st();
+    if options & 0x0001 != 0 {
+        s.syscolors.clear();
+    }
+    if !p.is_null() {
+        let at = |k: u32| unsafe { p.add(k as usize).read_unaligned() };
+        match format {
+            // LCOLF_INDRGB
+            1 => (0..n / 2).for_each(|k| _ = s.syscolors.insert(at(2 * k) as i32, at(2 * k + 1) & 0xff_ffff)),
+            // LCOLF_CONSECRGB
+            2 => (0..n).for_each(|k| _ = s.syscolors.insert(first + k as i32, at(k) & 0xff_ffff)),
+            _ => {
+                set_error(0x1303); // PMERR_INVALID_PARM
+                return 0;
+            }
+        }
+    }
+    s.desk.invalidate(1, None, true); // HWND_DESKTOP
     1
 }
 
@@ -115,7 +166,13 @@ pub extern "C" fn WinAlarm(_desk: u32, _style: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQuerySysValue(_desk: u32, i: i32) -> i32 {
     let s = st();
+    if let Some(&v) = s.sysvals.get(&i) {
+        return v;
+    }
     match i {
+        6 => 1,                      // SV_ALARM
+        13 => 1000, 14 => 2000, 15 => 440, // SV_WARNING/NOTE/ERRORFREQ
+        16..=18 => 80,               // SV_*DURATION
         1 => 500,                    // SV_DBLCLKTIME
         2 | 3 => 4,                  // SV_CX/CYDBLCLK
         20 | 36 => s.surface.width,  // SV_CXSCREEN, SV_CXFULLSCREEN

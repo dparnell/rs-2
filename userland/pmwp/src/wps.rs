@@ -65,6 +65,11 @@ fn implementation(name: &str) -> Impl {
         "RS2Shutdown" => crate::rs2obj::impl_shutdown(),
         "RS2WindowList" => crate::rs2obj::impl_window_list(),
         "RS2System" => crate::rs2obj::impl_system(),
+        "WPMouse" => crate::setup::impl_mouse(),
+        "WPKeyboard" => crate::setup::impl_keyboard(),
+        "WPSound" => crate::setup::impl_sound(),
+        "WPColorPalette" => crate::setup::impl_color_palette(),
+        "WPSchemePalette" => crate::setup::impl_scheme_palette(),
         _ => Impl::none(),
     }
 }

@@ -535,11 +535,11 @@ fn paint(h: u32) {
         c.fill(r, bg);
         if style & MLS_BORDER != 0 {
             c.sunken(r);
-            c.bevel(Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1), draw::DARK, draw::FACE);
+            c.bevel(Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1), draw::DARK, draw::face());
         }
         if vs && hs {
             let b = if style & MLS_BORDER != 0 { 2 } else { 0 };
-            c.fill(Rect::new(r.right - b - SCROLL_W, b, r.right - b, b + SCROLL_W), draw::FACE);
+            c.fill(Rect::new(r.right - b - SCROLL_W, b, r.right - b, b + SCROLL_W), draw::face());
         }
         let clip = Rect::new(area.left - INSET, area.bottom, area.right + INSET, area.top);
         for (i, (l, cells)) in lines.iter().enumerate() {
@@ -583,10 +583,10 @@ fn paint(h: u32) {
             if let Some((a, e)) = sel_run.or(brk.then_some((lw, lw))) {
                 let e = if brk { e.max(lw) + cw / 2 } else { e };
                 let sr = Rect::new(x0 + a, bottom, x0 + e, top).intersect(&clip);
-                c.fill(sr, draw::HILITE);
+                c.fill(sr, draw::hilite());
                 let sel_text: Vec<(usize, i32)> = cells.iter().filter(|&&(i2, _, _)| focus_sel(i2, sa, sb) && text[i2] != b'\t').map(|&(i2, x, _)| (i2, x)).collect();
                 for (i2, x) in sel_text {
-                    cells_text(c, x0 + x, bottom, &text[i2..i2 + 1], draw::HILITE_TEXT, sr, cw, ch, bold);
+                    cells_text(c, x0 + x, bottom, &text[i2..i2 + 1], draw::hilite_text(), sr, cw, ch, bold);
                 }
             }
         }

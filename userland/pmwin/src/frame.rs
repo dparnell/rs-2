@@ -444,9 +444,9 @@ pub fn draw_minimized(c: &mut Canvas, icon: u32, title: &[u8], active: bool) {
     let top = ir.bottom - 2;
     let tr = Rect::new(r.left + (r.width() - tw) / 2 - 2, top - th, r.left + (r.width() + tw) / 2 + 2, top);
     if active {
-        c.fill(tr, draw::HILITE);
+        c.fill(tr, draw::hilite());
     }
-    let fg = if active { draw::HILITE_TEXT } else { 0xffffff };
+    let fg = if active { draw::hilite_text() } else { 0xffffff };
     c.text_in(Rect::new(r.left, top - th, r.right, top), &lines.join(&b'\n'), fg, draw::DT_CENTER | draw::DT_WORDBREAK);
 }
 
@@ -581,7 +581,7 @@ pub fn draw_frame(c: &mut Canvas, f: u32, active: bool) {
     c.fill(r, draw::dialog_bg());
     let b = border(f);
     if b > 0 {
-        c.frame(r, if active { draw::DARK } else { draw::SHADOW });
+        c.frame(r, if active { draw::DARK } else { draw::shadow() });
     }
     if b > 1 {
         let i = Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1);

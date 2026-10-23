@@ -56,6 +56,8 @@ pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
     let kc = (if shift & 0x3 != 0 { 0x08 } else { 0 }) | (if shift & 0x4 != 0 { 0x10 } else { 0 }) | (if shift & 0x8 != 0 { 0x20 } else { 0 });
     let mp2 = (kc as u32) << 16;
     let s = st();
+    // SV_SWAPBUTTON: the right button is button 1 (left-handed).
+    let buttons = if s.sysvals.get(&0).is_some_and(|&v| v != 0) { (buttons & !3) | (buttons & 1) << 1 | (buttons >> 1 & 1) } else { buttons };
     pointer::move_to(s, p);
     let prev = core::mem::replace(&mut s.buttons, buttons);
     // VK_BUTTON1..3.
@@ -102,7 +104,7 @@ pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
     }
     if down & 1 != 0 && st().is_hung(target) {
         let (lt, lp, lb) = st().last_click;
-        let dbl = lb == 1 && time.wrapping_sub(lt) < 500 && (lp.x - p.x).abs() < 4 && (lp.y - p.y).abs() < 4;
+        let dbl = lb == 1 && time.wrapping_sub(lt) < dbl_time() && (lp.x - p.x).abs() < 4 && (lp.y - p.y).abs() < 4;
         if hung_click(target, p, dbl) {
             st().last_click = if dbl { (0, Point::new(-100, -100), 0) } else { (time, p, 1) };
             return;
@@ -118,11 +120,11 @@ pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
         ext_move(p, mp2, time);
     }
     // Button 1 left, 2 right, 3 middle: WM_BUTTONnDOWN = 0x71 + 3(n-1),
-    // a second press nearby within half a second is WM_BUTTONnDBLCLK.
+    // a second press nearby within SV_DBLCLKTIME is WM_BUTTONnDBLCLK.
     for (bit, n) in [(1u8, 0u32), (2, 1), (4, 2)] {
         if down & bit != 0 {
             let (lt, lp, lb) = st().last_click;
-            let dbl = lb == bit && time.wrapping_sub(lt) < 500 && (lp.x - p.x).abs() < 4 && (lp.y - p.y).abs() < 4;
+            let dbl = lb == bit && time.wrapping_sub(lt) < dbl_time() && (lp.x - p.x).abs() < 4 && (lp.y - p.y).abs() < 4;
             st().last_click = if dbl { (0, Point::new(-100, -100), 0) } else { (time, p, bit) };
             let msg = if dbl { WM_BUTTON1DOWN + 2 } else { WM_BUTTON1DOWN } + 3 * n;
             post_input(target, msg, mp1, mp2, time);
@@ -475,4 +477,9 @@ pub fn event(ev: &Input) {
 pub extern "C" fn WinGetKeyState(_desk: u32, vk: i32) -> i32 {
     let Some(&k) = st().keys.get(vk as usize) else { return 0 };
     (if k & 0x80 != 0 { 0xffff_8000u32 as i32 } else { 0 }) | (k & 1) as i32
+}
+
+/// SV_DBLCLKTIME in milliseconds.
+fn dbl_time() -> u32 {
+    crate::misc::WinQuerySysValue(1, 1) as u32
 }

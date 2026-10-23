@@ -168,15 +168,15 @@ fn paint(h: u32) {
     let enabled = ctl::enabled(h);
     draw::paint(h, |c: &mut Canvas| {
         let er = Rect::new(0, cy - eh, cx - bw, cy);
-        c.fill(er, if hilite { draw::HILITE } else { draw::WINDOW });
+        c.fill(er, if hilite { draw::hilite() } else { draw::window() });
         c.sunken(er);
-        c.bevel(Rect::new(er.left + 1, er.bottom + 1, er.right - 1, er.top - 1), draw::DARK, draw::FACE);
+        c.bevel(Rect::new(er.left + 1, er.bottom + 1, er.right - 1, er.top - 1), draw::DARK, draw::face());
         if bw > 0 {
             let br = Rect::new(cx - bw, cy - eh, cx, cy);
-            c.fill(br, draw::FACE);
+            c.fill(br, draw::face());
             if showing { c.sunken(br) } else { c.raised(br) }
             // A down arrow.
-            let col = if enabled { draw::TEXT } else { draw::SHADOW };
+            let col = if enabled { draw::text() } else { draw::shadow() };
             let (mx, my) = (br.left + br.width() / 2, br.bottom + br.height() / 2);
             for i in 0..4 {
                 c.fill(Rect::new(mx - 3 + i, my + 1 - i, mx + 4 - i, my + 2 - i), col);

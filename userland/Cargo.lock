@@ -312,6 +312,7 @@ name = "pmwp-dll"
 version = "0.1.0"
 dependencies = [
  "gpi",
+ "ipf",
  "os2",
  "pmwin",
 ]

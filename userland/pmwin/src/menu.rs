@@ -344,7 +344,7 @@ fn paint(h: u32) {
     let icon = if k == MS_TITLEBUTTON { frame::icon(ctl::parent(h)) } else { 0 };
     draw::paint(h, |c| {
         let full = c.rect();
-        c.fill(full, draw::FACE);
+        c.fill(full, draw::face());
         if k == 0 {
             c.frame(full, draw::DARK);
             c.raised(Rect::new(1, 1, full.right - 1, full.top - 1));
@@ -356,8 +356,8 @@ fn paint(h: u32) {
                 _ if style & MIS_SEPARATOR != 0 => {
                     if k == 0 {
                         let y = r.bottom + r.height() / 2;
-                        c.hline(r.left + 2, r.right - 2, y, draw::SHADOW);
-                        c.hline(r.left + 2, r.right - 2, y - 1, draw::LIGHT);
+                        c.hline(r.left + 2, r.right - 2, y, draw::shadow());
+                        c.hline(r.left + 2, r.right - 2, y - 1, draw::light());
                     }
                 }
                 _ => item(c, *r, k, *attr, text, *has_sub, hilite),
@@ -371,12 +371,12 @@ fn item(c: &mut Canvas, r: Rect, k: u32, attr: u16, text: &[u8], has_sub: bool, 
     let fg = if disabled {
         draw::GRAY_TEXT
     } else if hilite {
-        draw::HILITE_TEXT
+        draw::hilite_text()
     } else {
-        draw::TEXT
+        draw::text()
     };
     if hilite {
-        c.fill(r, draw::HILITE);
+        c.fill(r, draw::hilite());
     }
     let f = draw::font();
     let y = r.bottom + (r.height() - f.height) / 2 + f.descender;
@@ -411,14 +411,14 @@ fn item(c: &mut Canvas, r: Rect, k: u32, attr: u16, text: &[u8], has_sub: bool, 
 /// A title-bar button with its symbol.
 fn title_button(c: &mut Canvas, r: Rect, id: u32, down: bool, maximized: bool, icon: u32) {
     let r = Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1);
-    c.fill(r, draw::FACE);
+    c.fill(r, draw::face());
     if down {
         c.sunken(r);
     } else {
         c.raised(r);
     }
     let (cx, cy) = (r.left + r.width() / 2, r.bottom + r.height() / 2);
-    let k = draw::TEXT;
+    let k = draw::text();
     match id {
         // The frame's mini icon, or a bar.
         SC_SYSMENU if icon != 0 && crate::pointer::draw_in(c, r, icon, true, false) => {}

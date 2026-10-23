@@ -657,12 +657,12 @@ fn hatch(cv: &mut Canvas, r: Rect, col: u32) {
 
 fn dashed(cv: &mut Canvas, r: Rect) {
     for x in (r.left..r.right).step_by(3) {
-        cv.fill(Rect::new(x, r.bottom, x + 2, r.bottom + 1), draw::TEXT);
-        cv.fill(Rect::new(x, r.top - 1, x + 2, r.top), draw::TEXT);
+        cv.fill(Rect::new(x, r.bottom, x + 2, r.bottom + 1), draw::text());
+        cv.fill(Rect::new(x, r.top - 1, x + 2, r.top), draw::text());
     }
     for y in (r.bottom..r.top).step_by(3) {
-        cv.fill(Rect::new(r.left, y, r.left + 1, y + 2), draw::TEXT);
-        cv.fill(Rect::new(r.right - 1, y, r.right, y + 2), draw::TEXT);
+        cv.fill(Rect::new(r.left, y, r.left + 1, y + 2), draw::text());
+        cv.fill(Rect::new(r.right - 1, y, r.right, y + 2), draw::text());
     }
 }
 
@@ -722,12 +722,12 @@ fn paint(h: u32) {
     let f = draw::font();
     // Presentation parameter colours (a desktop's background).
     let bg = crate::misc::pres_color(h, true);
-    let text = crate::misc::pres_color(h, false).unwrap_or(draw::TEXT);
+    let text = crate::misc::pres_color(h, false).unwrap_or(draw::text());
     draw::paint(h, |cv| {
         let all = cv.rect();
-        cv.fill(all, bg.unwrap_or(draw::WINDOW));
+        cv.fill(all, bg.unwrap_or(draw::window()));
         if bg.is_none() {
-            cv.frame(all, draw::SHADOW);
+            cv.frame(all, draw::shadow());
         }
         // The title.
         if parts.title.height() > 0 {
@@ -741,22 +741,22 @@ fn paint(h: u32) {
             let tr = Rect::new(parts.title.left + 4, parts.title.bottom + 2, parts.title.right - 4, parts.title.top - 2);
             cv.text_in(tr, &title, text, fl);
             if tattr & CA_TITLESEPARATOR != 0 {
-                cv.hline(parts.title.left, parts.title.right, parts.title.bottom, draw::SHADOW);
+                cv.hline(parts.title.left, parts.title.right, parts.title.bottom, draw::shadow());
             }
         }
         // Detail view headings.
         if parts.heads.height() > 0 {
-            cv.fill(parts.heads, draw::FACE);
+            cv.fill(parts.heads, draw::face());
             let mut x = parts.heads.left - scroll_x;
             for (k, (t, fl)) in heads.iter().enumerate() {
                 let w = widths.get(k).copied().unwrap_or(0);
                 let r = Rect::new(x, parts.heads.bottom, x + w, parts.heads.top);
                 let al = if fl & CFA_RIGHT != 0 { draw::DT_RIGHT } else if fl & CFA_CENTER != 0 { draw::DT_CENTER } else { 0 };
-                cv.text_in(Rect::new(r.left + 4, r.bottom, r.right - 4, r.top).intersect(&parts.heads), t, draw::TEXT, al | draw::DT_VCENTER);
-                cv.vline(r.right - 1, r.bottom, r.top, draw::SHADOW);
+                cv.text_in(Rect::new(r.left + 4, r.bottom, r.right - 4, r.top).intersect(&parts.heads), t, draw::text(), al | draw::DT_VCENTER);
+                cv.vline(r.right - 1, r.bottom, r.top, draw::shadow());
                 x += w;
             }
-            cv.hline(parts.heads.left, parts.heads.right, parts.heads.bottom, draw::SHADOW);
+            cv.hline(parts.heads.left, parts.heads.right, parts.heads.bottom, draw::shadow());
         }
         let area = parts.area;
         let saved = cv.ps.clip.clone();
@@ -769,13 +769,13 @@ fn paint(h: u32) {
             }
             let sel = row.attr & CRA_SELECTED != 0;
             let disabled = row.attr & CRA_DISABLED != 0 || !enabled;
-            let fg = if disabled { draw::GRAY_TEXT } else if sel { draw::HILITE_TEXT } else { text };
+            let fg = if disabled { draw::GRAY_TEXT } else if sel { draw::hilite_text() } else { text };
             if v == View::Detail {
                 if sel {
-                    cv.fill(row.rect, draw::HILITE);
+                    cv.fill(row.rect, draw::hilite());
                 }
                 if row.attr & CRA_INUSE != 0 {
-                    hatch(cv, row.rect, draw::SHADOW);
+                    hatch(cv, row.rect, draw::shadow());
                 }
                 let mut x = row.rect.left;
                 for (k, (t, fl, hp)) in row.cells.iter().enumerate() {
@@ -790,10 +790,10 @@ fn paint(h: u32) {
                         cv.text_in(Rect::new(r.left + 4, r.bottom, r.right - 4, r.top), t, fg, al | draw::DT_VCENTER);
                     }
                     if fl & CFA_SEPARATOR != 0 {
-                        cv.vline(r.right - 1, r.bottom, r.top, draw::SHADOW);
+                        cv.vline(r.right - 1, r.bottom, r.top, draw::shadow());
                     }
                     if fl & CFA_HORZSEPARATOR != 0 {
-                        cv.hline(r.left, r.right, r.bottom, draw::SHADOW);
+                        cv.hline(r.left, r.right, r.bottom, draw::shadow());
                     }
                     if split_after == Some(k) {
                         cv.fill(Rect::new(r.right - 2, r.bottom, r.right + 1, r.top), draw::DARK);
@@ -811,28 +811,28 @@ fn paint(h: u32) {
             // Tree lines and the expand/collapse button.
             if v == View::Tree && !row.button.is_empty() {
                 let b = row.button;
-                cv.fill(b, bg.unwrap_or(draw::WINDOW));
-                cv.frame(b, draw::SHADOW);
+                cv.fill(b, bg.unwrap_or(draw::window()));
+                cv.frame(b, draw::shadow());
                 let (mx, my) = (b.left + b.width() / 2, b.bottom + b.height() / 2);
-                cv.hline(b.left + 2, b.right - 2, my, draw::TEXT);
+                cv.hline(b.left + 2, b.right - 2, my, draw::text());
                 if !row.expanded {
-                    cv.vline(mx, b.bottom + 2, b.top - 2, draw::TEXT);
+                    cv.vline(mx, b.bottom + 2, b.top - 2, draw::text());
                 }
             }
             if v == View::Tree && tattr & CA_TREELINE != 0 && row.button.is_empty() {
                 let y = row.rect.bottom + row.rect.height() / 2;
                 let x = row.icon_r.left.min(row.text_r.left) - 9;
-                cv.hline(x, x + 7, y, draw::SHADOW);
+                cv.hline(x, x + 7, y, draw::shadow());
             }
             if row.attr & CRA_INUSE != 0 {
                 let r = if row.icon_r.is_empty() { row.text_r } else { row.icon_r };
-                hatch(cv, r, draw::SHADOW);
+                hatch(cv, r, draw::shadow());
             }
             if row.icon != 0 && !row.icon_r.is_empty() {
                 crate::pointer::draw_in(cv, row.icon_r, row.icon, mini_icons, disabled);
             }
             if sel {
-                cv.fill(row.text_r, draw::HILITE);
+                cv.fill(row.text_r, draw::hilite());
             }
             let mut y = row.text_r.top;
             for ln in &row.lines {

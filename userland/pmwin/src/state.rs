@@ -210,6 +210,10 @@ pub struct State {
     /// Presentation parameter colours set on windows: (foreground,
     /// background) as 0x00RRGGBB, NO_COLOR where not set.
     pub pres: BTreeMap<u32, (u32, u32)>,
+    /// System values and colours set with WinSetSysValue and WinSetSysColors
+    /// (the rest are the defaults).
+    pub sysvals: BTreeMap<i32, i32>,
+    pub syscolors: BTreeMap<i32, u32>,
     /// Virtual key states by VK_* (0x80: down, 0x01: toggled), as the
     /// input thread last saw them (WinGetKeyState).
     pub keys: [u8; 256],
@@ -269,6 +273,8 @@ pub fn init(surface: Surface) {
         ptr_window: 0,
         min_viewer: 0,
         pres: BTreeMap::new(),
+        sysvals: BTreeMap::new(),
+        syscolors: BTreeMap::new(),
         ptr_hidden: 0,
         ptr_hardware: false,
         ptr_level: 0,

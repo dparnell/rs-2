@@ -22,8 +22,16 @@ pub const SYSCLR_HELPHILITE: i32 = -10;
 pub const SYSCLR_HILITEBACKGROUND: i32 = -32;
 pub const SYSCLR_HILITEFOREGROUND: i32 = -33;
 
-/// RGB of a system colour (the Warp 4 defaults).
+/// RGB of a system colour (as set with WinSetSysColors, or the default).
 pub fn sys(i: i32) -> Rgb {
+    if let Some(&c) = crate::state::st().syscolors.get(&i) {
+        return c;
+    }
+    default(i)
+}
+
+/// A system colour as rs2 starts (Warp 4's).
+pub fn default(i: i32) -> Rgb {
     match i {
         SYSCLR_WINDOW => 0xffffff,
         SYSCLR_WINDOWTEXT => 0x000000,

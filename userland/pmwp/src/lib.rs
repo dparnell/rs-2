@@ -45,6 +45,7 @@ mod obj;
 #[allow(dead_code, unused_imports, clippy::all)]
 mod pm;
 mod rs2obj;
+mod setup;
 pub mod som;
 mod sortinc;
 mod util;

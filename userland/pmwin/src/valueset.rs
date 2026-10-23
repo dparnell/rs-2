@@ -124,7 +124,7 @@ fn paint(h: u32) {
                 let cell = Rect::new(l + b, bt + b, rt + b, tp + b);
                 let it = &items[(row as usize - 1) * cols as usize + col as usize - 1];
                 if (row, col) == sel {
-                    c.fill(Rect::new(cell.left - 2, cell.bottom - 2, cell.right + 2, cell.top + 2), draw::HILITE);
+                    c.fill(Rect::new(cell.left - 2, cell.bottom - 2, cell.right + 2, cell.top + 2), draw::hilite());
                 }
                 let inner = if style & VS_ITEMBORDER != 0 {
                     c.sunken(cell);
@@ -137,7 +137,7 @@ fn paint(h: u32) {
                 } else if it.attr & VIA_COLORINDEX != 0 {
                     c.fill(inner, crate::color::resolve(it.value as i32));
                 } else if it.attr & VIA_TEXT != 0 {
-                    let col_t = if it.attr & VIA_DISABLED != 0 { draw::GRAY_TEXT } else { draw::TEXT };
+                    let col_t = if it.attr & VIA_DISABLED != 0 { draw::GRAY_TEXT } else { draw::text() };
                     c.text_in(inner, &it.text, col_t, draw::DT_CENTER | draw::DT_VCENTER);
                 } else if it.attr & VIA_ICON != 0 && crate::pointer::get(it.value).is_some() {
                     let small = inner.width().min(inner.height()) < crate::pointer::ICON;
@@ -147,8 +147,8 @@ fn paint(h: u32) {
                     let s = inner.width().min(inner.height()) - 4;
                     let (mx, my) = (inner.left + inner.width() / 2, inner.bottom + inner.height() / 2);
                     let ir = Rect::new(mx - s / 2, my - s / 2, mx - s / 2 + s, my - s / 2 + s);
-                    c.fill(ir, draw::WINDOW);
-                    c.frame(ir, draw::TEXT);
+                    c.fill(ir, draw::window());
+                    c.frame(ir, draw::text());
                 }
                 if focus && (row, col) == sel {
                     c.focus_rect(Rect::new(cell.left - 1, cell.bottom - 1, cell.right + 1, cell.top + 1));

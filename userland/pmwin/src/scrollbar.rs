@@ -97,9 +97,9 @@ fn notify(h: u32, cmd: u32, pos: i32) {
 }
 
 fn arrow(c: &mut Canvas, r: Rect, dir: u8, enabled: bool) {
-    c.fill(r, draw::FACE);
+    c.fill(r, draw::face());
     c.raised(r);
-    let col = if enabled { draw::TEXT } else { draw::SHADOW };
+    let col = if enabled { draw::text() } else { draw::shadow() };
     let (cx, cy) = (r.left + r.width() / 2, r.bottom + r.height() / 2);
     for i in 0..4 {
         let rr = match dir {
@@ -125,7 +125,7 @@ fn paint(h: u32) {
         arrow(c, r1, if v { 0 } else { 2 }, enabled);
         arrow(c, r2, if v { 1 } else { 3 }, enabled);
         if enabled {
-            c.fill(rs, draw::FACE);
+            c.fill(rs, draw::face());
             c.raised(rs);
         }
     });

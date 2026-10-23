@@ -43,6 +43,24 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (368, 367, 369),
     },
     ClassDef {
+        name: "M_WPPalette",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &["wpclsQueryEditString"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPColorPalette",
+        parents: &["M_WPPalette"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPFileSystem",
         parents: &["M_WPObject"],
         meta: None,
@@ -124,6 +142,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (362, 361, 363),
     },
     ClassDef {
+        name: "M_WPKeyboard",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPLaunchPad",
         parents: &["M_WPAbstract"],
         meta: None,
@@ -149,6 +176,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (0, 0, 459),
+    },
+    ClassDef {
+        name: "M_WPMouse",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "M_WPShadow",
@@ -223,6 +259,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (359, 358, 360),
     },
     ClassDef {
+        name: "M_WPSchemePalette",
+        parents: &["M_WPPalette"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPServer",
         parents: &["M_WPFolder"],
         meta: None,
@@ -248,6 +293,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (350, 349, 351),
+    },
+    ClassDef {
+        name: "M_WPSound",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "M_WPStartup",
@@ -358,6 +412,24 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (89, 88, 90),
     },
     ClassDef {
+        name: "WPPalette",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPPalette"),
+        major: 1,
+        minor: 2,
+        methods: &["wpPaintCell", "wpSelectCell", "wpSetupCell", "wpQueryPaletteInfo", "wpSetPaletteInfo", "wpEditCell", "wpDragCell", "withdrawn", "wpInitCellStructs", "wpRedrawCell", "wpPaintPalette", "wpPalettePrivate1", "wpQueryPaletteHelp", "wpPalettePrivate2", "wpSaveCellData", "wpRestoreCellData", "wpFreeCellData"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPColorPalette",
+        parents: &["WPPalette"],
+        meta: Some("M_WPColorPalette"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPFileSystem",
         parents: &["WPObject"],
         meta: Some("M_WPFileSystem"),
@@ -439,6 +511,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (62, 61, 63),
     },
     ClassDef {
+        name: "WPKeyboard",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPKeyboard"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddKeyboardMappingsPage", "wpAddKeyboardTimingPage", "wpAddKeyboardSpecialNeedsPage", "wpAddKeyboardLayoutPage"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPLaunchPad",
         parents: &["WPAbstract"],
         meta: Some("M_WPLaunchPad"),
@@ -482,6 +563,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 1,
         methods: &[],
         ords: (434, 433, 436),
+    },
+    ClassDef {
+        name: "WPMouse",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPMouse"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddMouseMappingsPage", "wpAddMouseTimingPage", "wpAddMouseTypePage", "wpAddMousePtrPage", "wpAddMouseCometPage"],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "WPShadow",
@@ -556,6 +646,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (59, 58, 60),
     },
     ClassDef {
+        name: "WPSchemePalette",
+        parents: &["WPPalette"],
+        meta: Some("M_WPSchemePalette"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPServer",
         parents: &["WPFolder"],
         meta: Some("M_WPServer"),
@@ -581,6 +680,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (53, 52, 54),
+    },
+    ClassDef {
+        name: "WPSound",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPSound"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddSoundWarningBeepPage", "wpAddSoundSchemePage"],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "WPStartup",
@@ -679,6 +787,11 @@ pub mod m {
     }
     pub mod M_WPBitmap {
     }
+    pub mod M_WPPalette {
+        pub const wpclsQueryEditString: usize = 0;
+    }
+    pub mod M_WPColorPalette {
+    }
     pub mod M_WPFileSystem {
         pub const wpclsQueryInstanceType: usize = 0;
         pub const wpclsQueryInstanceFilter: usize = 1;
@@ -714,11 +827,15 @@ pub mod m {
     }
     pub mod M_WPIcon {
     }
+    pub mod M_WPKeyboard {
+    }
     pub mod M_WPLaunchPad {
     }
     pub mod M_WPMet {
     }
     pub mod M_WPMinWinViewer {
+    }
+    pub mod M_WPMouse {
     }
     pub mod M_WPShadow {
     }
@@ -736,11 +853,15 @@ pub mod m {
     }
     pub mod M_WPRootFolder {
     }
+    pub mod M_WPSchemePalette {
+    }
     pub mod M_WPServer {
     }
     pub mod M_WPSharedDir {
     }
     pub mod M_WPShredder {
+    }
+    pub mod M_WPSound {
     }
     pub mod M_WPStartup {
     }
@@ -936,6 +1057,27 @@ pub mod m {
         pub const wpGetTrueClassName: usize = 1;
         pub const wpReplacementIsInEffect: usize = 2;
         pub const wpModuleForClass: usize = 3;
+    }
+    pub mod WPPalette {
+        pub const wpPaintCell: usize = 0;
+        pub const wpSelectCell: usize = 1;
+        pub const wpSetupCell: usize = 2;
+        pub const wpQueryPaletteInfo: usize = 3;
+        pub const wpSetPaletteInfo: usize = 4;
+        pub const wpEditCell: usize = 5;
+        pub const wpDragCell: usize = 6;
+        pub const withdrawn: usize = 7;
+        pub const wpInitCellStructs: usize = 8;
+        pub const wpRedrawCell: usize = 9;
+        pub const wpPaintPalette: usize = 10;
+        pub const wpPalettePrivate1: usize = 11;
+        pub const wpQueryPaletteHelp: usize = 12;
+        pub const wpPalettePrivate2: usize = 13;
+        pub const wpSaveCellData: usize = 14;
+        pub const wpRestoreCellData: usize = 15;
+        pub const wpFreeCellData: usize = 16;
+    }
+    pub mod WPColorPalette {
     }
     pub mod WPFileSystem {
         pub const wpSetRealName: usize = 0;
@@ -1191,6 +1333,12 @@ pub mod m {
     }
     pub mod WPIcon {
     }
+    pub mod WPKeyboard {
+        pub const wpAddKeyboardMappingsPage: usize = 0;
+        pub const wpAddKeyboardTimingPage: usize = 1;
+        pub const wpAddKeyboardSpecialNeedsPage: usize = 2;
+        pub const wpAddKeyboardLayoutPage: usize = 3;
+    }
     pub mod WPLaunchPad {
         pub const wpAddLaunchPadPage1: usize = 0;
         pub const wpQueryCloseDrawer: usize = 1;
@@ -1227,6 +1375,13 @@ pub mod m {
     pub mod WPTransient {
     }
     pub mod WPMinWindow {
+    }
+    pub mod WPMouse {
+        pub const wpAddMouseMappingsPage: usize = 0;
+        pub const wpAddMouseTimingPage: usize = 1;
+        pub const wpAddMouseTypePage: usize = 2;
+        pub const wpAddMousePtrPage: usize = 3;
+        pub const wpAddMouseCometPage: usize = 4;
     }
     pub mod WPShadow {
         pub const wpSetLinkToObject: usize = 0;
@@ -1296,6 +1451,8 @@ pub mod m {
         pub const wpRootFolderPrivate1: usize = 0;
         pub const wpRefresh: usize = 1;
     }
+    pub mod WPSchemePalette {
+    }
     pub mod WPServer {
         pub const wpAddServerPage: usize = 0;
         pub const wpQuerySrvrIdentity: usize = 1;
@@ -1304,6 +1461,10 @@ pub mod m {
         pub const wpAddResourcePage: usize = 0;
     }
     pub mod WPShredder {
+    }
+    pub mod WPSound {
+        pub const wpAddSoundWarningBeepPage: usize = 0;
+        pub const wpAddSoundSchemePage: usize = 1;
     }
     pub mod WPStartup {
     }

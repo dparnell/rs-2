@@ -133,7 +133,7 @@ fn paint(h: u32) {
     let k = kind(h);
     draw::paint(h, |c| {
         let r = c.rect();
-        let fg = if enabled { draw::TEXT } else { draw::GRAY_TEXT };
+        let fg = if enabled { draw::text() } else { draw::GRAY_TEXT };
         match k {
             BS_PUSHBUTTON | BS_USERBUTTON => push(c, r, style, &text, fg, hilite, focus),
             BS_RADIOBUTTON | BS_AUTORADIOBUTTON => {
@@ -151,18 +151,18 @@ fn paint(h: u32) {
 }
 
 fn push(c: &mut Canvas, r: Rect, style: u32, text: &[u8], fg: u32, down: bool, focus: bool) {
-    c.fill(r, draw::FACE);
+    c.fill(r, draw::face());
     let mut b = r;
     if style & BS_NOBORDER == 0 {
         if style & BS_DEFAULT != 0 {
-            c.frame(b, draw::TEXT);
+            c.frame(b, draw::text());
             b = Rect::new(b.left + 1, b.bottom + 1, b.right - 1, b.top - 1);
         }
         if down {
-            c.frame(b, draw::SHADOW);
+            c.frame(b, draw::shadow());
         } else {
-            c.bevel(b, draw::LIGHT, draw::DARK);
-            c.bevel(Rect::new(b.left + 1, b.bottom + 1, b.right - 1, b.top - 1), draw::LIGHT, draw::SHADOW);
+            c.bevel(b, draw::light(), draw::DARK);
+            c.bevel(Rect::new(b.left + 1, b.bottom + 1, b.right - 1, b.top - 1), draw::light(), draw::shadow());
         }
     }
     let off = down as i32;
@@ -187,16 +187,16 @@ fn box_rect(r: Rect) -> Rect {
 
 fn check_box(c: &mut Canvas, r: Rect, check: u32, down: bool) {
     let b = box_rect(r);
-    c.fill(b, if check == 2 || down { draw::FACE } else { draw::WINDOW });
+    c.fill(b, if check == 2 || down { draw::face() } else { draw::window() });
     c.sunken(b);
     c.sunken(Rect::new(b.left + 1, b.bottom + 1, b.right - 1, b.top - 1));
     if check == 1 {
         let (x, y) = (b.left + 3, b.bottom + 5);
         for i in 0..3 {
-            c.fill(Rect::new(x + i, y - i + 1, x + i + 1, y - i + 4), draw::TEXT);
+            c.fill(Rect::new(x + i, y - i + 1, x + i + 1, y - i + 4), draw::text());
         }
         for i in 0..5 {
-            c.fill(Rect::new(x + 3 + i, y - 2 + i, x + 4 + i, y + i + 1), draw::TEXT);
+            c.fill(Rect::new(x + 3 + i, y - 2 + i, x + 4 + i, y + i + 1), draw::text());
         }
     }
 }
@@ -207,17 +207,17 @@ fn radio(c: &mut Canvas, r: Rect, on: bool, down: bool) {
     // Filled disc, then the 3D ring, row by row.
     for dy in -6i32..=6 {
         let w = isqrt(36 - dy * dy);
-        c.fill(Rect::new(cx - w, cy + dy, cx + w + 1, cy + dy + 1), if down { draw::FACE } else { draw::WINDOW });
-        let col = if dy > 0 { draw::SHADOW } else { draw::LIGHT };
-        c.fill(Rect::new(cx - w, cy + dy, cx - w + 1, cy + dy + 1), if dy >= 0 { draw::SHADOW } else { col });
-        c.fill(Rect::new(cx + w, cy + dy, cx + w + 1, cy + dy + 1), if dy > 0 { draw::SHADOW } else { draw::LIGHT });
+        c.fill(Rect::new(cx - w, cy + dy, cx + w + 1, cy + dy + 1), if down { draw::face() } else { draw::window() });
+        let col = if dy > 0 { draw::shadow() } else { draw::light() };
+        c.fill(Rect::new(cx - w, cy + dy, cx - w + 1, cy + dy + 1), if dy >= 0 { draw::shadow() } else { col });
+        c.fill(Rect::new(cx + w, cy + dy, cx + w + 1, cy + dy + 1), if dy > 0 { draw::shadow() } else { draw::light() });
     }
-    c.hline(cx - 2, cx + 3, cy + 6, draw::SHADOW);
-    c.hline(cx - 2, cx + 3, cy - 6, draw::LIGHT);
+    c.hline(cx - 2, cx + 3, cy + 6, draw::shadow());
+    c.hline(cx - 2, cx + 3, cy - 6, draw::light());
     if on {
         for dy in -2i32..=2 {
             let w = isqrt(6 - dy * dy);
-            c.fill(Rect::new(cx - w, cy + dy, cx + w + 1, cy + dy + 1), draw::TEXT);
+            c.fill(Rect::new(cx - w, cy + dy, cx + w + 1, cy + dy + 1), draw::text());
         }
     }
 }

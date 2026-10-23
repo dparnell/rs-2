@@ -30,8 +30,20 @@ pub const INTERNET: u32 = 14;
 pub const FIND: u32 = 15;
 /// The LaunchPad (a bar of buttons).
 pub const LAUNCHPAD: u32 = 16;
+/// The Keyboard object (a keyboard).
+pub const KEYBOARD: u32 = 17;
+/// The Mouse object (a mouse).
+pub const MOUSE: u32 = 18;
+/// The Sound object (a loudspeaker).
+pub const SOUND: u32 = 19;
+/// The Color Palette (a painter's palette).
+pub const COLOR_PALETTE: u32 = 20;
+/// The Scheme Palette (windows in different colours).
+pub const SCHEME_PALETTE: u32 = 21;
+/// The System object (a computer).
+pub const SYSTEM: u32 = 22;
 /// Highest icon id.
-pub const LAST: u32 = 16;
+pub const LAST: u32 = 22;
 
 const SILVER: u32 = 0xffe0_e0e8;
 
@@ -181,6 +193,69 @@ fn draw(id: u32, size: i32) -> Option<Image> {
             p.frame(12.5, 17.0, 21.5, 28.0, DARK);
             p.rect(14.5, 23.0, 19.5, 26.0, rgb(0xc03028));
             p.rect(14.5, 19.0, 19.5, 22.0, rgb(0x2050c0));
+        }
+        KEYBOARD => {
+            p.rect(1.0, 8.0, 31.0, 22.0, FACE);
+            p.frame(1.0, 8.0, 31.0, 22.0, DARK);
+            for row in 0..3 {
+                let y = 17.5 - row as f64 * 3.5;
+                for k in 0..8 {
+                    let x = 3.5 + k as f64 * 3.2 + if row == 1 { 1.0 } else { 0.0 };
+                    p.rect(x, y, x + 2.4, y + 2.4, WHITE);
+                }
+            }
+            p.rect(9.0, 10.0, 23.0, 12.0, WHITE);
+            p.line((16.0, 22.0), (16.0, 29.0), 1.2, DARK);
+        }
+        MOUSE => {
+            p.disc(16.0, 13.0, 9.0, WHITE, DARK);
+            p.rect(7.5, 13.0, 24.5, 21.0, WHITE);
+            p.disc(16.0, 20.0, 8.5, WHITE, DARK);
+            p.rect(8.0, 13.0, 24.0, 20.0, WHITE);
+            p.line((7.5, 13.0), (7.5, 20.0), 1.0, DARK);
+            p.line((24.5, 13.0), (24.5, 20.0), 1.0, DARK);
+            p.line((8.0, 18.0), (24.0, 18.0), 1.0, DARK);
+            p.line((16.0, 18.0), (16.0, 28.0), 1.0, DARK);
+            p.line((16.0, 28.0), (20.0, 31.0), 1.0, DARK);
+        }
+        SOUND => {
+            p.rect(4.0, 12.0, 10.0, 20.0, GREY);
+            p.frame(4.0, 12.0, 10.0, 20.0, DARK);
+            for i in 0..8 {
+                let t = i as f64;
+                p.line((10.0 + t, 12.0 - t), (10.0 + t, 20.0 + t), 1.2, GREY);
+            }
+            p.line((10.0, 12.0), (17.0, 5.0), 1.0, DARK);
+            p.line((10.0, 20.0), (17.0, 27.0), 1.0, DARK);
+            p.line((17.0, 5.0), (17.0, 27.0), 1.0, DARK);
+            for (r, x) in [(4.0, 21.0), (7.0, 25.0)] {
+                p.line((x, 16.0 - r), (x + 2.0, 16.0), 1.2, NAVY);
+                p.line((x + 2.0, 16.0), (x, 16.0 + r), 1.2, NAVY);
+            }
+        }
+        COLOR_PALETTE => {
+            p.disc(16.0, 16.0, 14.0, rgb(0xd8b070), DARK);
+            p.disc(21.0, 10.0, 3.5, rgb(0xa0a0a0), rgb(0xa0a0a0));
+            for (x, y, c) in [(9.0, 17.0, 0xd03828), (12.0, 24.0, 0xe0c020), (19.0, 25.0, 0x20a060), (24.0, 19.0, 0x2050c0), (10.0, 10.0, 0x8040a0)] {
+                p.disc(x, y, 3.0, rgb(c), DARK);
+            }
+        }
+        SCHEME_PALETTE => {
+            for (i, (title, body)) in [(0x000080u32, 0xffffffu32), (0x6e3c64, 0xfaf5f0), (0x00ffff, 0x000000)].into_iter().enumerate() {
+                let o = i as f64 * 5.0;
+                let (l, b, r, t) = (2.0 + o, 2.0 + o, 20.0 + o, 18.0 + o);
+                p.rect(l, b, r, t, rgb(body));
+                p.rect(l, t - 4.0, r, t, rgb(title));
+                p.frame(l, b, r, t, DARK);
+            }
+        }
+        SYSTEM => {
+            // A computer: a screen on a box.
+            p.rect(3.0, 3.0, 29.0, 9.0, FACE);
+            p.frame(3.0, 3.0, 29.0, 9.0, DARK);
+            p.rect(20.0, 5.0, 26.0, 6.5, DARK);
+            p.rect(13.0, 9.0, 19.0, 11.0, GREY);
+            window(&mut p, 5.0, 11.0, 27.0, 29.0, rgb(0x2e6e8e));
         }
         DESKTOP => {
             p.rect(2.0, 5.0, 30.0, 27.0, rgb(0x2e6e8e));

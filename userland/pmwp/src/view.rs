@@ -91,6 +91,11 @@ const KC_SHIFT: u32 = 0x0008;
 /// The desktop's background unless set otherwise.
 pub const DESKTOP_BG: u32 = 0x2e6e8e;
 
+/// A folder's background unless it has its own (the colour scheme's).
+pub fn default_background(desktop: bool) -> u32 {
+    if desktop { crate::setup::desktop_background() } else { crate::setup::folder_background() }
+}
+
 #[allow(static_mut_refs)]
 pub fn wins() -> &'static mut Vec<Win> {
     unsafe { &mut WINS }
@@ -184,7 +189,7 @@ fn size_child(w: usize) {
 /// A folder view's background (RGB): the folder's own, else the
 /// desktop's teal or white.
 fn background_of(w: usize) -> u32 {
-    crate::fs::folder_background(wins()[w].obj).unwrap_or(if wins()[w].desktop { DESKTOP_BG } else { 0xffffff })
+    crate::fs::folder_background(wins()[w].obj).unwrap_or_else(|| crate::view::default_background(wins()[w].desktop))
 }
 
 fn dark(bg: u32) -> bool {

@@ -397,9 +397,9 @@ struct TabPaint {
 }
 
 fn arrow(c: &mut Canvas, r: Rect, left: bool, enabled: bool) {
-    c.fill(r, draw::FACE);
+    c.fill(r, draw::face());
     c.raised(r);
-    let col = if enabled { draw::TEXT } else { draw::SHADOW };
+    let col = if enabled { draw::text() } else { draw::shadow() };
     let (cx, cy) = (r.left + r.width() / 2, r.bottom + r.height() / 2);
     for i in 0..5 {
         let x = if left { cx - 2 + i } else { cx + 2 - i };
@@ -439,7 +439,7 @@ fn paint(h: u32) {
             let selected = if minor_tab { cur == Some(i) } else { sel_major == Some(i) };
             let base = if minor_tab { d.minor_bg } else { d.major_bg };
             let tab_bg = p.tab_color.or(base).unwrap_or(if selected { page_bg } else { 0xb8b8b8 });
-            let fg = if minor_tab { d.minor_fg } else { d.major_fg }.unwrap_or(draw::TEXT);
+            let fg = if minor_tab { d.minor_fg } else { d.major_fg }.unwrap_or(draw::text());
             let bits = (!p.bits.is_empty()).then(|| crate::bitmap::Bmp { w: p.bits_size.0, h: p.bits_size.1, pixels: p.bits.clone() });
             let focused = if minor_tab { selected } else { selected && !minor.iter().any(|&(j, _)| Some(j) == cur) };
             tabs.push(TabPaint { r: if selected { l.selected(minor_tab, r) } else { r }, text: p.tab.clone(), bits, bg: tab_bg, fg, selected, focused, minor: minor_tab });
@@ -456,7 +456,7 @@ fn paint(h: u32) {
         c.fill(all, bg);
         for r in &l.backs {
             c.fill(*r, page_bg);
-            c.frame(*r, draw::SHADOW);
+            c.frame(*r, draw::shadow());
         }
         // The top page.
         c.fill(l.book, page_bg);
@@ -565,7 +565,7 @@ fn paint(h: u32) {
         }
         // The status line and the page buttons.
         let s = l.status;
-        c.hline(s.left + 2, s.right - 2, s.top, draw::SHADOW);
+        c.hline(s.left + 2, s.right - 2, s.top, draw::shadow());
         let tr = Rect::new(s.left + 4, s.bottom, l.prev.left - 4, s.top);
         let align = if style & BKS_STATUSTEXTCENTER != 0 {
             draw::DT_CENTER
@@ -575,7 +575,7 @@ fn paint(h: u32) {
             0
         };
         if !status.is_empty() {
-            c.text_in(tr, &status, if enabled { draw::TEXT } else { draw::GRAY_TEXT }, align | draw::DT_VCENTER);
+            c.text_in(tr, &status, if enabled { draw::text() } else { draw::GRAY_TEXT }, align | draw::DT_VCENTER);
         }
         arrow(c, l.prev, true, enabled && has_prev);
         arrow(c, l.next, false, enabled && has_next);

@@ -23,7 +23,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"6";
+const DESKTOP_VERSION: &[u8] = b"7";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -58,6 +58,11 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"Window List;RS2WindowList;<WP_DESKTOP>;PRESERVEOLD", b"NOCOPY=YES;OBJECTID=<RS2_WINLIST>"),
         (b"System Setup;WPFolder;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_CONFIG>"),
         (b"System;RS2System;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<RS2_SYSTEM>"),
+        (b"Keyboard;WPKeyboard;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_KEYB>"),
+        (b"Mouse;WPMouse;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_MOUSE>"),
+        (b"Sound;WPSound;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_SOUND>"),
+        (b"Color Palette;WPColorPalette;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_HIRESCLRPAL>"),
+        (b"Scheme Palette;WPSchemePalette;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_SCHPAL96>"),
         (b"Shut Down;RS2Shutdown;<WP_DESKTOP>;PRESERVEOLD", b"NOCOPY=YES;OBJECTID=<RS2_SHUTDOWN>"),
         (b"Templates;WPTemplates;<WP_DESKTOP>;PRESERVEOLD", b"NODELETE=YES;OBJECTID=<WP_TEMPS>"),
         (b"Data File;WPDataFile;<WP_TEMPS>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<RS2_TEMPDATAFILE>"),

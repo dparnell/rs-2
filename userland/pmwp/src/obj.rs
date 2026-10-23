@@ -696,6 +696,12 @@ fn class_title(name: &[u8]) -> Option<&'static [u8]> {
         b"RS2Shutdown" => b"Shut Down\0",
         b"RS2WindowList" => b"Window List\0",
         b"RS2System" => b"System\0",
+        b"WPMouse" => b"Mouse\0",
+        b"WPKeyboard" => b"Keyboard\0",
+        b"WPSound" => b"Sound\0",
+        b"WPPalette" => b"Palette\0",
+        b"WPColorPalette" => b"Color Palette\0",
+        b"WPSchemePalette" => b"Scheme Palette\0",
         b"Mindex" => b"Index\0",
         b"WPLaunchPad" => b"LaunchPad\0",
         b"WPUrl" => b"URL\0",
@@ -740,6 +746,12 @@ extern "C" fn wpclsQueryIcon(cls: usize) -> u32 {
             b"RS2Shutdown" => crate::icons::SHUTDOWN,
             b"Mindex" => crate::icons::INDEX,
             b"WPLaunchPad" => crate::icons::LAUNCHPAD,
+            b"WPKeyboard" => crate::icons::KEYBOARD,
+            b"WPMouse" => crate::icons::MOUSE,
+            b"WPSound" => crate::icons::SOUND,
+            b"WPColorPalette" => crate::icons::COLOR_PALETTE,
+            b"WPSchemePalette" => crate::icons::SCHEME_PALETTE,
+            b"RS2System" => crate::icons::SYSTEM,
             b"RS2WindowList" => crate::icons::WINDOW_LIST,
             _ => 0,
         };
@@ -768,7 +780,7 @@ extern "C" fn wpclsQueryDefaultView(cls: usize) -> u32 {
             b"WPFolder" | b"WPDisk" => return OPEN_CONTENTS,
             // Opening them acts (shuts down, shows the window list,
             // restores the window).
-            b"RS2Shutdown" | b"RS2WindowList" | b"WPMinWindow" | b"Mindex" | b"WPLaunchPad" => return OPEN_RUNNING,
+            b"RS2Shutdown" | b"RS2WindowList" | b"WPMinWindow" | b"Mindex" | b"WPLaunchPad" | b"WPPalette" => return OPEN_RUNNING,
             b"WPProgram" | b"WPProgramFile" | b"WPDataFile" => return OPEN_RUNNING,
             _ => {}
         }

@@ -238,29 +238,29 @@ fn paint(h: u32) {
     draw::paint(h, |c: &mut Canvas| {
         let r = c.rect();
         c.fill(r, draw::dialog_bg());
-        c.fill(shaft_r, if enabled { 0xa0a0a0 } else { draw::FACE });
+        c.fill(shaft_r, if enabled { 0xa0a0a0 } else { draw::face() });
         c.sunken(shaft_r);
         if let Some(rr) = ribbon {
-            c.fill(rr, draw::HILITE);
+            c.fill(rr, draw::hilite());
         }
         for t in &tick_rects {
-            c.fill(*t, draw::TEXT);
+            c.fill(*t, draw::text());
         }
         for d in &detent_rects {
-            c.fill(*d, draw::TEXT);
+            c.fill(*d, draw::text());
         }
         let clip = c.rect();
         for (x, y, t) in &labels {
-            c.text(*x, *y + f.descender, t, draw::TEXT, clip);
+            c.text(*x, *y + f.descender, t, draw::text(), clip);
         }
-        c.fill(arm_r, draw::FACE);
+        c.fill(arm_r, draw::face());
         c.raised(arm_r);
         if let Some((a, b)) = btns {
             for (br, dec) in [(a, true), (b, false)] {
-                c.fill(br, draw::FACE);
+                c.fill(br, draw::face());
                 c.raised(br);
                 let (mx, my) = (br.left + br.width() / 2, br.bottom + br.height() / 2);
-                let col = if enabled { draw::TEXT } else { draw::SHADOW };
+                let col = if enabled { draw::text() } else { draw::shadow() };
                 let toward_low = dec != home_far(h);
                 for i in 0..4 {
                     let rr = if vertical(h) {

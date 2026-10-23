@@ -12,15 +12,31 @@ use crate::gpiapi;
 use crate::state::st;
 use crate::win::{WinBeginPaint, WinEndPaint};
 
-pub const TEXT: u32 = 0x000000;
+// The controls' colours: the system colours (WinSetSysColors, the Scheme
+// Palette).
+pub fn text() -> u32 {
+    color::sys(color::SYSCLR_WINDOWTEXT)
+}
+pub fn face() -> u32 {
+    color::sys(color::SYSCLR_DIALOGBACKGROUND)
+}
+pub fn light() -> u32 {
+    color::sys(color::SYSCLR_BUTTONLIGHT)
+}
+pub fn shadow() -> u32 {
+    color::sys(color::SYSCLR_BUTTONDARK)
+}
+pub fn window() -> u32 {
+    color::sys(color::SYSCLR_WINDOW)
+}
+pub fn hilite() -> u32 {
+    color::sys(color::SYSCLR_HILITEBACKGROUND)
+}
+pub fn hilite_text() -> u32 {
+    color::sys(color::SYSCLR_HILITEFOREGROUND)
+}
 pub const GRAY_TEXT: u32 = 0x808080;
-pub const FACE: u32 = 0xcccccc;
-pub const LIGHT: u32 = 0xffffff;
-pub const SHADOW: u32 = 0x808080;
 pub const DARK: u32 = 0x404040;
-pub const WINDOW: u32 = 0xffffff;
-pub const HILITE: u32 = 0x000080;
-pub const HILITE_TEXT: u32 = 0xffffff;
 
 pub const DT_CENTER: u32 = 0x0100;
 pub const DT_RIGHT: u32 = 0x0200;
@@ -143,11 +159,11 @@ impl Canvas<'_> {
     }
 
     pub fn raised(&mut self, r: Rect) {
-        self.bevel(r, LIGHT, SHADOW);
+        self.bevel(r, light(), shadow());
     }
 
     pub fn sunken(&mut self, r: Rect) {
-        self.bevel(r, SHADOW, LIGHT);
+        self.bevel(r, shadow(), light());
     }
 
     /// Text with its baseline at (x, y), clipped to `clip`.
@@ -223,12 +239,12 @@ impl Canvas<'_> {
     /// Dotted focus rectangle.
     pub fn focus_rect(&mut self, r: Rect) {
         for x in (r.left..r.right).step_by(2) {
-            self.fill(Rect::new(x, r.bottom, x + 1, r.bottom + 1), TEXT);
-            self.fill(Rect::new(x, r.top - 1, x + 1, r.top), TEXT);
+            self.fill(Rect::new(x, r.bottom, x + 1, r.bottom + 1), text());
+            self.fill(Rect::new(x, r.top - 1, x + 1, r.top), text());
         }
         for y in (r.bottom..r.top).step_by(2) {
-            self.fill(Rect::new(r.left, y, r.left + 1, y + 1), TEXT);
-            self.fill(Rect::new(r.right - 1, y, r.right, y + 1), TEXT);
+            self.fill(Rect::new(r.left, y, r.left + 1, y + 1), text());
+            self.fill(Rect::new(r.right - 1, y, r.right, y + 1), text());
         }
     }
 }

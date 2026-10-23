@@ -258,7 +258,7 @@ extern "C" fn background_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             let o = b as usize;
             let cur = crate::fs::folder_background(o);
             let desktop = wps::is(o, "WPDesktop");
-            show_color(h, cur.unwrap_or(if desktop { crate::view::DESKTOP_BG } else { 0xffffff }));
+            show_color(h, cur.unwrap_or(crate::view::default_background(desktop)));
             unsafe { WinSendDlgItemMsg(h, ID_COLOR as u32, EM_SETTEXTLIMIT, 6, 0) };
             0
         }
@@ -272,7 +272,7 @@ extern "C" fn background_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             } else if id == ID_DEFAULTCOLOR && o != 0 {
                 crate::fs::set_folder_background(o, None);
                 let desktop = wps::is(o, "WPDesktop");
-                show_color(h, if desktop { crate::view::DESKTOP_BG } else { 0xffffff });
+                show_color(h, crate::view::default_background(desktop));
             }
             0
         }
@@ -282,7 +282,7 @@ extern "C" fn background_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             if let Some(c) = crate::util::parse_hex(&item_text(h, ID_COLOR as u32)) {
                 if o != 0 && crate::fs::folder_background(o) != Some(c) {
                     let desktop = wps::is(o, "WPDesktop");
-                    let default = if desktop { crate::view::DESKTOP_BG } else { 0xffffff };
+                    let default = crate::view::default_background(desktop);
                     if crate::fs::folder_background(o).is_some() || c != default {
                         crate::fs::set_folder_background(o, Some(c));
                     }

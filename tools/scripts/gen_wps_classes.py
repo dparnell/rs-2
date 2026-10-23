@@ -19,9 +19,26 @@ for line in open(os.path.join(repo, 'userland/pmwp/ordinals.txt')):
         o, n = line.split()
         ords[n] = int(o)
 
+def preprocess(src):
+    """The IDL's conditionals as SOM's compiler for Intel sees them
+    (__SOMIDL__ defined; _PPC_ and the rest not)."""
+    out, stack = [], []
+    for line in src.split('\n'):
+        t = line.strip()
+        if t.startswith('#ifdef') or t.startswith('#ifndef'):
+            on = t.split()[1] in ('__SOMIDL__',) if len(t.split()) > 1 else False
+            stack.append(on if t.startswith('#ifdef') else not on)
+        elif t.startswith('#else') and stack:
+            stack[-1] = not stack[-1]
+        elif t.startswith('#endif') and stack:
+            stack.pop()
+        elif all(stack):
+            out.append(line)
+    return '\n'.join(out)
+
 classes = {}
 for path in sorted(glob.glob(os.path.join(idl_dir, 'wp*.idl'))):
-    src = open(path, errors='replace').read().replace('\r', '')
+    src = preprocess(open(path, errors='replace').read().replace('\r', ''))
     src = re.sub(r'//[^\n]*', '', src)
     src = re.sub(r'/\*.*?\*/', '', src, flags=re.S)
     for m in re.finditer(r'\binterface\s+(\w+)\s*:\s*([\w, ]+?)\s*\{', src):
@@ -63,6 +80,13 @@ EXTRA = {
     'RS2Shutdown': ['WPAbstract'],
     'RS2WindowList': ['WPAbstract'],
     'RS2System': ['WPAbstract'],
+    # WPCONFIG.DLL's settings objects (the IDL describes them).
+    'WPMouse': ['WPAbstract'],
+    'WPKeyboard': ['WPAbstract'],
+    'WPSound': ['WPAbstract'],
+    'WPPalette': ['WPAbstract'],
+    'WPColorPalette': ['WPPalette'],
+    'WPSchemePalette': ['WPPalette'],
 }
 for n, parents in EXTRA.items():
     classes.setdefault(n, dict(parents=parents, methods=[], meta=None, major=1, minor=1, overrides=[], dll='pmwp', file=''))
