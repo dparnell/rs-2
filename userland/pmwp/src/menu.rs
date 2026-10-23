@@ -172,6 +172,10 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
         Some(b"~Window list")
     } else if is(o, "WPMinWindow") {
         Some(b"~Restore")
+    } else if is(o, "Mindex") {
+        Some(b"~Index")
+    } else if is(o, "WPUrl") {
+        Some(b"~Browser")
     } else {
         None
     };

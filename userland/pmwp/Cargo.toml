@@ -13,3 +13,4 @@ path = "src/lib.rs"
 os2 = { path = "../os2" }
 pmwin = { path = "../../crates/pmwin" }
 gpi = { path = "../../crates/gpi" }
+ipf = { path = "../../crates/ipf" }

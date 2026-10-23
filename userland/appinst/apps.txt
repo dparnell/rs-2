@@ -254,6 +254,12 @@ app tracebook | OS/2 Trace | The system trace facility.
 object OS/2 Trace | \OS2\VIEW.EXE | OS2TRACE | \OS2\BOOK | <WP_TRBLTRA> | <WP_TROUBLEINFO>
 file \OS2\BOOK\OS2TRACE.INF | OS2IMAGE\DISK_1\BUNDLE
 
+app wphelp | Workplace Shell help | OS/2's help for the desktop and its objects: what the Help Index (Information) shows.
+file \OS2\HELP\WPHELP.HLP | OS2IMAGE\DISK_9\BUNDLE
+
+app glossary | Glossary | OS/2's glossary of terms, for the Glossary object (Information > Online Information Overview).
+file \OS2\HELP\GLOSS\WPGLOSS.HLP | OS2IMAGE\DISK_7\BUNDLE
+
 app lvmbook | Using LVM | The Logical Volume Manager.
 object Using LVM | \OS2\VIEW.EXE | USINGLVM | \OS2\BOOK | <WP_USINGLVM> | <WP_TASKSINFO>
 file \OS2\BOOK\USINGLVM.INF | OS2IMAGE\DISK_1\BUNDLE

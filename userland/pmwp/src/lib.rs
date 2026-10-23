@@ -33,8 +33,10 @@ mod ipc;
 mod shell;
 mod shutdown;
 mod templates;
+mod url;
 mod launch;
 mod menu;
+mod mindex;
 mod minwin;
 mod obj;
 /// rs2's shell's PM bindings (shared).

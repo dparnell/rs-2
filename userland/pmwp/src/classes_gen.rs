@@ -277,6 +277,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (338, 337, 339),
     },
     ClassDef {
+        name: "M_WPUrl",
+        parents: &["M_WPDataFile"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPObject",
         parents: &["SOMObject"],
         meta: Some("M_WPObject"),
@@ -293,6 +302,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (26, 25, 27),
+    },
+    ClassDef {
+        name: "Mindex",
+        parents: &["WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "RS2Shutdown",
@@ -582,6 +600,24 @@ pub static CLASSES: &[ClassDef] = &[
         methods: &[],
         ords: (29, 28, 30),
     },
+    ClassDef {
+        name: "WPUrl",
+        parents: &["WPDataFile"],
+        meta: Some("M_WPUrl"),
+        major: 1,
+        minor: 2,
+        methods: &["WPUrlPrivate1", "WPUrlPrivate2", "WPUrlPrivate3", "WPUrlPrivate4", "WPUrlPrivate5"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPUrlFolder",
+        parents: &["WPFolder"],
+        meta: Some("M_WPUrlFolder"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
 ];
 
 /// Method indexes in <Class>ClassData (after the class object).
@@ -713,6 +749,8 @@ pub mod m {
     pub mod M_WPTransient {
         pub const wpclsTransientPrivate1: usize = 0;
         pub const wpclsTransientPrivate2: usize = 1;
+    }
+    pub mod M_WPUrl {
     }
     pub mod WPObject {
         pub const wpSetTitle: usize = 0;
@@ -882,6 +920,8 @@ pub mod m {
         pub const wpObjectPrivate33: usize = 164;
     }
     pub mod WPAbstract {
+    }
+    pub mod Mindex {
     }
     pub mod RS2Shutdown {
     }
@@ -1268,5 +1308,14 @@ pub mod m {
     pub mod WPStartup {
     }
     pub mod WPTemplates {
+    }
+    pub mod WPUrl {
+        pub const WPUrlPrivate1: usize = 0;
+        pub const WPUrlPrivate2: usize = 1;
+        pub const WPUrlPrivate3: usize = 2;
+        pub const WPUrlPrivate4: usize = 3;
+        pub const WPUrlPrivate5: usize = 4;
+    }
+    pub mod WPUrlFolder {
     }
 }

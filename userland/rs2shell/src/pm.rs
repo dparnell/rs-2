@@ -632,7 +632,7 @@ pub const LM_QUERYITEMTEXT: u32 = 0x0168;
 pub const LM_DELETEALL: u32 = 0x016e;
 pub const LM_QUERYITEMCOUNT: u32 = 0x0160;
 pub const LN_SELECT: u32 = 1;
-pub const LN_ENTER: u32 = 4;
+pub const LN_ENTER: u32 = 5;
 pub const LIT_END: u32 = 0xffff;
 pub const LIT_NONE: u32 = 0xffff;
 

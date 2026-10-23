@@ -47,11 +47,18 @@ for path in sorted(glob.glob(os.path.join(idl_dir, 'wp*.idl'))):
                              major=int(major.group(1)) if major else 1, minor=int(minor.group(1)) if minor else 1,
                              overrides=overrides, dll=(dll.group(1).lower() if dll else ''), file=os.path.basename(path))
 
-# Classes the Toolkit does not describe: IBM's WPMinWindow (the
-# Minimized Window Viewer's objects), and rs2's own abstract objects for
-# what RS2SHELL's desktop had (in IBM's shell LaunchPad buttons and
-# WPCONFIG's System object). They introduce no methods.
+# Classes IBM keeps in other DLLs that rs2's PMWP provides: WPUrl and
+# WPUrlFolder (IBM's WPINET.DLL; the Toolkit describes them), Mindex
+# (IBM's MINXOBJ.DLL, the Help Index and Glossary objects; not described,
+# no methods of its own); the classes the Toolkit does not describe:
+# IBM's WPMinWindow (the Minimized Window Viewer's objects), and rs2's own
+# abstract objects for what RS2SHELL's desktop had (in IBM's shell
+# LaunchPad buttons and WPCONFIG's System object). The undescribed ones
+# introduce no methods.
 EXTRA = {
+    'WPUrl': ['WPDataFile'],
+    'WPUrlFolder': ['WPFolder'],
+    'Mindex': ['WPAbstract'],
     'WPMinWindow': ['WPTransient'],
     'RS2Shutdown': ['WPAbstract'],
     'RS2WindowList': ['WPAbstract'],

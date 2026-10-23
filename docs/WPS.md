@@ -327,8 +327,9 @@ uninitialized repository object faults on both SOMs alike.
 
 `userland/pmwp` (PMWP.DLL) provides the 58 classes IBM's PMWP exports
 that the Toolkit describes, M_WPMinWinViewer, IBM's WPMinWindow (which
-the Toolkit does not describe) and rs2's own RS2Shutdown, RS2WindowList
-and RS2System.
+the Toolkit does not describe), classes IBM keeps in other DLLs (WPUrl
+and WPUrlFolder from WPINET.DLL, Mindex from MINXOBJ.DLL) and rs2's own
+RS2Shutdown, RS2WindowList and RS2System.
 
 **Class tables.** `tools/scripts/gen_wps_classes.py` reads the Toolkit's
 IDL. It writes `src/classes_gen.rs` (each class's parents, metaclass,
@@ -358,6 +359,8 @@ The rest comes from the class modules:
 | `sortinc.rs` | Folders' Sort page (name, type, real name, size, last write date, or as placed; always maintain sort order, setup ALWAYSSORT) and Include page (patterns matched against titles and real names; folders always shown), the view's Sort menu; SHOWALLINTREEVIEW=YES (a folder's tree view shows every object, not only folders) is kept with them in fs.rs |
 | `templates.rs` | Templates (TEMPLATE style, the General page's check box): opening one makes a new object beside it, dragging one makes it at the drop, Create another... makes one where the user says; the new object's title is edited in place |
 | `find.rs` | Find... on folders, drives and the desktop: a name pattern, all subfolders; a worker thread walks the directories, and a Find Results window shows the objects (and the matching abstract objects of awake folders) |
+| `mindex.rs` | Mindex (IBM's MINXOBJ.DLL, studied with Ghidra): the Help Index and Glossary. INDEX= names an environment variable (HELP, GLOSSARY) whose directories hold the help files (`*.HLP` starting "HS"), or the files themselves separated by `+`; opening merges their indexes (sorted, an entry several panels share followed by the panel's title, as MindexAppendDupIndexTitle does) into a window with a search field; choosing an entry shows its panel through a help instance and HM_SHOW_TOC |
+| `url.rs` | WPUrl (IBM's WPINET.DLL): a data file whose content is the URL (URL=, the URL page; `*.URL` files); opening starts the browser OS2.INI's WPURLDEFAULTSETTINGS names (DefaultBrowserExe, DefaultParameters, DefaultWorkingDir), else says none is set up; a globe icon |
 | `clsmgr.rs` | WPClassManager (merged in as SOM's class manager; finds classes in the DLLs registered in OS2SYS.INI's PM_Objects ClassTable) |
 | `api.rs` | WinCreateObject, WinQueryObject, WinSetObjectData, WinDestroyObject, WinOpenObject, WinSaveObject, WinMove/CopyObject, WinCreateShadow, WinQueryObjectPath, WinRegister/Deregister/Enum/ReplaceObjectClass |
 
@@ -479,8 +482,10 @@ If a Workplace Shell is already running, it ends.
     out (`<WP_ASSISTANCE>`: Information, a tree view showing all its
     objects, with Reference and Commands, Tasks and Read Me, which holds
     a shadow of `README.TXT`; Troubleshooting), where APPINST puts the
-    books. `PM_Workplace` `Rs2Desktop` holds the version made
-    (4); a desktop of an earlier version gets
+    books, the Help Index (`<WP_MINDEX>`), Online Information Overview
+    with the Glossary (`<WP_GLOSS>`), and "rs2 on the Internet" (a WPUrl
+    to the project's page). `PM_Workplace` `Rs2Desktop` holds the
+    version made (5); a desktop of an earlier version gets
     the entries again, and PRESERVEOLD keeps what it has. Titles break
     lines at `^`, as in INI.RC.
 - **Starts the server** for other processes' object calls (`ipc.rs`):

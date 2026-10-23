@@ -637,6 +637,9 @@ fn class_title(name: &[u8]) -> Option<&'static [u8]> {
         b"RS2Shutdown" => b"Shut Down\0",
         b"RS2WindowList" => b"Window List\0",
         b"RS2System" => b"System\0",
+        b"Mindex" => b"Index\0",
+        b"WPUrl" => b"URL\0",
+        b"WPUrlFolder" => b"URL Folder\0",
         _ => return None,
     })
 }
@@ -675,6 +678,7 @@ extern "C" fn wpclsQueryIcon(cls: usize) -> u32 {
             b"WPDisk" => crate::icons::HARD_DISK,
             b"WPMinWinViewer" => crate::icons::MINIMIZED,
             b"RS2Shutdown" => crate::icons::SHUTDOWN,
+            b"Mindex" => crate::icons::INDEX,
             b"RS2WindowList" => crate::icons::WINDOW_LIST,
             _ => 0,
         };
@@ -703,7 +707,7 @@ extern "C" fn wpclsQueryDefaultView(cls: usize) -> u32 {
             b"WPFolder" | b"WPDisk" => return OPEN_CONTENTS,
             // Opening them acts (shuts down, shows the window list,
             // restores the window).
-            b"RS2Shutdown" | b"RS2WindowList" | b"WPMinWindow" => return OPEN_RUNNING,
+            b"RS2Shutdown" | b"RS2WindowList" | b"WPMinWindow" | b"Mindex" => return OPEN_RUNNING,
             b"WPProgram" | b"WPProgramFile" | b"WPDataFile" => return OPEN_RUNNING,
             _ => {}
         }

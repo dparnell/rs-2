@@ -22,8 +22,12 @@ pub const DESKTOP: u32 = 10;
 pub const ASSISTANCE: u32 = 11;
 /// The Information folder (a folder with an "i").
 pub const INFO_FOLDER: u32 = 12;
+/// The Help Index and Glossary (a help book).
+pub const INDEX: u32 = 13;
+/// Internet objects (a globe).
+pub const INTERNET: u32 = 14;
 /// Highest icon id.
-pub const LAST: u32 = 12;
+pub const LAST: u32 = 14;
 
 const SILVER: u32 = 0xffe0_e0e8;
 
@@ -131,6 +135,28 @@ fn draw(id: u32, size: i32) -> Option<Image> {
             folder(&mut p);
             p.disc(16.0, 12.5, 7.0, rgb(0x2050c0), DARK);
             p.glyph(b'i', 16.0, 12.5, 9.0, WHITE);
+        }
+        INDEX => {
+            // A closed book (blue cover, white pages) with a "?".
+            p.rect(7.0, 3.0, 26.0, 7.0, WHITE);
+            p.frame(7.0, 3.0, 26.0, 7.0, DARK);
+            p.rect(5.0, 5.0, 24.0, 29.0, rgb(0x2050c0));
+            p.frame(5.0, 5.0, 24.0, 29.0, DARK);
+            p.rect(7.0, 5.0, 8.0, 29.0, rgb(0x103080));
+            p.glyph(b'?', 16.0, 17.0, 12.0, WHITE);
+        }
+        INTERNET => {
+            // A globe: blue sea, green land, meridians and parallels.
+            let sea = rgb(0x3070d0);
+            p.disc(16.0, 16.0, 14.0, sea, DARK);
+            let land = rgb(0x40a040);
+            p.disc(11.0, 19.0, 5.0, land, land);
+            p.disc(20.0, 10.0, 4.5, land, land);
+            p.disc(22.0, 22.0, 3.0, land, land);
+            for y in [9.0, 16.0, 23.0] {
+                p.line((4.0, y), (28.0, y), 0.8, rgb(0xd0e0f0));
+            }
+            p.line((16.0, 2.5), (16.0, 29.5), 0.8, rgb(0xd0e0f0));
         }
         DESKTOP => {
             p.rect(2.0, 5.0, 30.0, 27.0, rgb(0x2e6e8e));

@@ -58,6 +58,8 @@ fn implementation(name: &str) -> Impl {
         "WPDrives" => crate::fs::impl_drives(),
         "WPClassManager" => crate::clsmgr::impl_class_manager(),
         "WPMinWindow" => crate::minwin::impl_min_window(),
+        "WPUrl" => crate::url::impl_url(),
+        "Mindex" => crate::mindex::impl_mindex(),
         "WPMinWinViewer" => crate::minwin::impl_viewer(),
         "RS2Shutdown" => crate::rs2obj::impl_shutdown(),
         "RS2WindowList" => crate::rs2obj::impl_window_list(),
@@ -523,6 +525,7 @@ fn class_for_path(path: &[u8], dir: bool) -> &'static str {
         b"BMP" => "WPBitmap",
         b"MET" => "WPMet",
         b"PIF" => "WPPif",
+        b"URL" => "WPUrl",
         _ => "WPDataFile",
     }
 }

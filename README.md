@@ -175,7 +175,9 @@ each boot), the Minimized Window Viewer (minimized windows go there),
 System Setup (Display, and System: where minimized windows go), the
 Window List, Shut Down, Templates (drag a template where you want a
 new data file, folder or program object) and the Assistance Center
-(Information and Troubleshooting, where the OS/2 books go). Mouse button 2 opens pop-up
+(Information and Troubleshooting, where the OS/2 books go, the Help
+Index and Glossary, which merge the indexes of the help files on HELP
+and GLOSSARY, and an Internet object). Mouse button 2 opens pop-up
 menus (Open as icon, tree or details view, Settings, Find..., Sort,
 Rename, Copy..., Move..., Create shadow..., Create another...,
 Delete; Window list and Shut down on the desktop); settings notebooks
