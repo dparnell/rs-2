@@ -272,6 +272,7 @@ pub fn ensure_defaults() -> Groups {
                 Some(s) => s,
                 None => make_startup(),
             };
+            drop_missing_installer(programs);
             if query(APP_DESKTOP, b"Version").as_deref() != Some(VERSION) {
                 add_editor(programs);
                 add_app_installer(programs);
@@ -325,6 +326,17 @@ fn add_display(programs: u32) {
     if exists(&exe) && !titles(programs).iter().any(|t| t.3 == b"Display") {
         let p = Program { progc: PROG_PM, title: b"Display".to_vec(), exe, ..Program::default() };
         add_program(programs, &p);
+    }
+}
+
+/// The installer belongs to the live media (an installed system has
+/// none): its object goes where its program is not.
+fn drop_missing_installer(programs: u32) {
+    if exists(&sys_path(b"OS2\\PMINSTAL.EXE")) || exists(&sys_path(b"OS2\\INSTALL.EXE")) {
+        return;
+    }
+    if let Some(t) = titles(programs).into_iter().find(|t| t.3 == b"Install rs2") {
+        remove_program(t.0);
     }
 }
 

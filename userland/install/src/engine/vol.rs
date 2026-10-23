@@ -148,6 +148,16 @@ impl Vol {
         r.map_err(|e| alloc::format!("{path}: {e}"))
     }
 
+    /// Delete file `path`.
+    pub fn delete(&mut self, path: &str) -> Result<(), String> {
+        let r = match self {
+            Vol::Fat(v) => v.delete(path).map_err(|e| alloc::format!("{e:?}")),
+            Vol::Hpfs(v) => v.delete(path).map_err(|e| alloc::format!("{e:?}")),
+            Vol::Jfs(v) => v.delete(path).map_err(|e| alloc::format!("{e:?}")),
+        };
+        r.map_err(|e| alloc::format!("{path}: {e}"))
+    }
+
     /// Write file `path` (replacing it), making its directories.
     pub fn put(&mut self, path: &str, data: &[u8]) -> Result<(), String> {
         let parts: Vec<&str> = path.split('\\').filter(|s| !s.is_empty()).collect();

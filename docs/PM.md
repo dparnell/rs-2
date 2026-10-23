@@ -1605,11 +1605,16 @@ OS/2 itself keeps them.
   like TEDIT.EXE, are copied), written with its date, time, attributes
   and extended attributes (`DosSetPathInfo` levels 1 and 2), the
   directories made as needed, each packed file read once. Then the
-  program objects go in a program group per category, made if missing
-  ("Games", "Productivity", "REXX", "Information"; objects already there
-  are updated), and the program broadcasts the registered message
-  `RS2_ProgramListChanged` to the top-level frames, on which RS2SHELL
-  refills its desktop and program group folders. When an application
+  program objects are made, a folder per category ("Games",
+  "Productivity", "REXX", "Information"; objects already there are
+  updated). With the Workplace Shell running they are Workplace Shell
+  objects (WinCreateObject, which goes to the shell's process): the
+  folders in the Programs folder, with IBM's INI.RC object IDs where it
+  has them (`<WP_GAMES>`, `<WP_TOOLS>`, `<WP_INFO>`; `<WP_KLDK>`,
+  `<WP_CHESS>`, `<WP_EPM>`...; apps.txt's last fields). With RS2SHELL
+  they are program groups, and the program broadcasts the registered
+  message `RS2_ProgramListChanged` to the top-level frames, on which
+  RS2SHELL refills its desktop and program group folders. When an application
   lives in `\OS2\APPS` and CONFIG.SYS's `SET PATH` or `LIBPATH` lacks
   `C:\OS2\APPS`, it is added (Solitaire finds its card font along the
   PATH) and the message says to restart; rs2's own CONFIG.SYS has it.

@@ -277,6 +277,15 @@ fn read_eas(path: &str) -> Vec<(u8, Vec<u8>, Vec<u8>)> {
     v
 }
 
+/// The installer itself belongs to the live media: an installed system
+/// gets no copy (an update removes an earlier one), and so no
+/// "Install rs2" object (the shells drop it where its program is not).
+const LIVE_ONLY: [&str; 2] = ["OS2\\PMINSTAL.EXE", "OS2\\INSTALL.EXE"];
+
+fn live_only(dest: &str) -> bool {
+    LIVE_ONLY.iter().any(|f| dest.eq_ignore_ascii_case(f))
+}
+
 /// The file that holds a FAT volume's own data (its extended
 /// attributes): it is not copied as a file. (`WP ROOT. SF`, where the
 /// Workplace Shell keeps the root folder's EAs, is copied with them.)
@@ -305,6 +314,12 @@ fn copy_tree(vol: &mut Vol, src: &str, dest: &str, files: &mut u32, update: bool
             copy_eas(vol, &s, &d)?;
             copy_tree(vol, &s, &d, files, update, p)?;
         } else {
+            if live_only(&d) {
+                if update && vol.exists(&d) {
+                    vol.delete(&d)?;
+                }
+                continue;
+            }
             if update && kept(&d) && vol.exists(&d) {
                 continue;
             }

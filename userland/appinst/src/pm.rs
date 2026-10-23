@@ -388,6 +388,8 @@ unsafe extern "C" {
     pub fn WinAddAtom(table: u32, name: *const u8) -> u32;
     #[link_name = "PMWIN.901"]
     pub fn WinBroadcastMsg(parent: u32, msg: u32, mp1: u32, mp2: u32, fl: u32) -> u32;
+    #[link_name = "PMWP.281"]
+    pub fn WinCreateObject(class: *const u8, title: *const u8, setup: *const u8, location: *const u8, flags: u32) -> u32;
     #[link_name = "PMWIN.904"]
     pub fn WinTranslateAccel(hab: u32, h: u32, haccel: u32, q: *mut QMsg) -> u32;
     #[link_name = "PMWIN.852"]

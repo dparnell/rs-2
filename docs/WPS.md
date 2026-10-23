@@ -471,7 +471,8 @@ If a Workplace Shell is already running, it ends.
   - The very first time, rs2's own entries come first: the desktop,
     Drives, Command Prompts (OS/2 Window, OS/2 Full Screen), Programs
     (the System Editor with its ASSOCFILTER, the application installer,
-    Install rs2, where their files exist), Startup, the Minimized Window
+    Install rs2, where their files exist; the installer's program is on
+    the live media only, so an installed system drops its object), Startup, the Minimized Window
     Viewer, Window List, System Setup (`<WP_CONFIG>`: System, and
     Display where it exists), Shut Down and Templates (Data File,
     Folder, Program). `PM_Workplace` `Rs2Desktop` holds the version made

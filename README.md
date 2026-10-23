@@ -132,8 +132,10 @@ of `xtask/src/main.rs` for all of them).
 
 The ISO boots into the live system's desktop; open Programs > Install
 rs2 (PMINSTAL.EXE) to install onto a hard disk, or run `INSTALL` at a
-command prompt. A new installation erases the disk and lays it out in
-one of two ways (GPT, booted by UEFI):
+command prompt. The installer stays on the live media: an installed
+system gets no copy of it (an update removes an earlier one) and no
+"Install rs2" object. A new installation erases the disk and lays it
+out in one of two ways (GPT, booted by UEFI):
 
 - one FAT32 partition holding everything (the boot loader, the kernel and
   the system, drive C:);

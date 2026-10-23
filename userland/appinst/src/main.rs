@@ -7,9 +7,12 @@
 //! Install unpacks their files from the CD's packed files to where OS/2
 //! keeps them (`\OS2\APPS\KLONDIKE.EXE` ...), with their dates and
 //! extended attributes, on a second thread with a progress bar; then it
-//! makes their program objects in a desktop folder per category (program
-//! groups, which rs2's desktop shows as folders; it is told to refresh
-//! with the registered message `RS2_ProgramListChanged`), and adds
+//! makes their program objects: with the Workplace Shell running, a
+//! folder per category in the Programs folder (WinCreateObject, with
+//! IBM's INI.RC object IDs where it has them: <WP_GAMES>, <WP_KLDK>...);
+//! with RS2SHELL, program groups, which it shows as folders on the
+//! desktop (it is told to refresh with the registered message
+//! `RS2_ProgramListChanged`). Then it adds
 //! `C:\OS2\APPS` to CONFIG.SYS's PATH and LIBPATH when an application
 //! there needs it (restart to use).
 //!
@@ -224,7 +227,7 @@ fn update(a: &mut App) {
             if let Some(f) = cat.folder {
                 s.extend_from_slice(b" Their objects go in the ");
                 s.extend_from_slice(f);
-                s.extend_from_slice(b" folder on the desktop.");
+                s.extend_from_slice(b" folder (in Programs).");
             }
             s
         }
@@ -419,10 +422,80 @@ fn object(group: u32, o: &catalog::Object, d: u8) {
     }
 }
 
+/// CO_UPDATEIFEXISTS: an object with the ID is set up again.
+const CO_UPDATEIFEXISTS: u32 = 2;
+
+fn create_object(class: &[u8], title: &[u8], setup: &[u8], location: &[u8]) -> u32 {
+    let (c, t, s, l) = (z(class), z(title), z(setup), z(location));
+    unsafe { WinCreateObject(c.as_ptr(), t.as_ptr(), s.as_ptr(), l.as_ptr(), CO_UPDATEIFEXISTS) }
+}
+
+/// A category's folder in the Workplace Shell's Programs folder (or on
+/// the desktop); 0 without a Workplace Shell running (RS2SHELL).
+fn wps_folder(title: &[u8], id: &[u8]) -> u32 {
+    let mut setup = b"OBJECTID=".to_vec();
+    setup.extend_from_slice(id);
+    for location in [&b"<WP_PROGRAMSFOLDER>"[..], b"<WP_DESKTOP>"] {
+        let h = create_object(b"WPFolder", title, &setup, location);
+        if h != 0 {
+            return h;
+        }
+    }
+    0
+}
+
+/// A program's Workplace Shell object (in the folder with ID `folder`).
+fn wps_object(folder: &[u8], o: &catalog::Object, d: u8) -> bool {
+    let mut s = b"EXENAME=".to_vec();
+    s.extend_from_slice(&media::on(d, o.program));
+    s.extend_from_slice(b";PROGTYPE=PM");
+    if !o.params.is_empty() {
+        s.extend_from_slice(b";PARAMETERS=");
+        s.extend_from_slice(o.params);
+    }
+    if !o.dir.is_empty() {
+        s.extend_from_slice(b";STARTUPDIR=");
+        s.extend_from_slice(&media::on(d, o.dir));
+    }
+    if !o.id.is_empty() {
+        s.extend_from_slice(b";OBJECTID=");
+        s.extend_from_slice(o.id);
+    }
+    create_object(b"WPProgram", o.title, &s, folder) != 0
+}
+
 fn finished(a: &mut App) {
     let j = job();
     let mut made = 0;
+    // With the Workplace Shell running, its objects: a folder per
+    // category in Programs (IBM's IDs where its INI.RC has them).
+    let mut wps = None;
     for (c, cat) in a.cats.iter().enumerate() {
+        let Some(folder) = cat.folder else { continue };
+        if !(0..cat.apps.len()).any(|i| a.tree.checked[c][i] && !cat.apps[i].objects.is_empty()) {
+            continue;
+        }
+        if wps == Some(false) {
+            break;
+        }
+        let ok = wps_folder(folder, cat.folder_id) != 0;
+        wps = Some(ok);
+        if !ok {
+            break;
+        }
+        for i in (0..cat.apps.len()).filter(|&i| a.tree.checked[c][i]) {
+            for o in &cat.apps[i].objects {
+                if wps_object(cat.folder_id, o, a.target) {
+                    made += 1;
+                }
+            }
+        }
+    }
+    // Else RS2SHELL's program groups.
+    for (c, cat) in a.cats.iter().enumerate() {
+        if wps == Some(true) {
+            break;
+        }
         let Some(folder) = cat.folder else { continue };
         let chosen: Vec<usize> = (0..cat.apps.len()).filter(|&i| a.tree.checked[c][i] && !cat.apps[i].objects.is_empty()).collect();
         if chosen.is_empty() {
@@ -464,7 +537,7 @@ fn finished(a: &mut App) {
         set_text(ID_STATUS, b"Installed with errors.");
     }
     if made > 0 {
-        m.extend_from_slice(b"\n\nTheir objects are in folders on the desktop.");
+        m.extend_from_slice(if wps == Some(true) { b"\n\nTheir objects are in folders in the Programs folder." } else { b"\n\nTheir objects are in folders on the desktop." });
     }
     if j.config_changed {
         m.extend_from_slice(b"\n\nCONFIG.SYS now has \\OS2\\APPS on its PATH and LIBPATH: restart rs2 before using the applications installed there.");

@@ -11,6 +11,8 @@ pub struct Object {
     pub program: &'static [u8],
     pub params: &'static [u8],
     pub dir: &'static [u8],
+    /// The Workplace Shell object ID.
+    pub id: &'static [u8],
 }
 
 pub struct File {
@@ -37,6 +39,8 @@ pub struct Category {
     pub title: &'static [u8],
     /// Desktop folder (program group) for its objects; None: no objects.
     pub folder: Option<&'static [u8]>,
+    /// The folder's Workplace Shell object ID.
+    pub folder_id: &'static [u8],
     pub apps: Vec<App>,
 }
 
@@ -72,6 +76,7 @@ pub fn load() -> Vec<Category> {
             b"category" => cats.push(Category {
                 title: get(0),
                 folder: if get(1) == b"-" || get(1).is_empty() { None } else { Some(get(1)) },
+                folder_id: get(2),
                 apps: Vec::new(),
             }),
             b"app" => {
@@ -90,7 +95,7 @@ pub fn load() -> Vec<Category> {
                 let Some(a) = cats.last_mut().and_then(|c| c.apps.last_mut()) else { continue };
                 match word {
                     b"needs" => a.needs.push(get(0)),
-                    b"object" => a.objects.push(Object { title: get(0), program: get(1), params: get(2), dir: get(3) }),
+                    b"object" => a.objects.push(Object { title: get(0), program: get(1), params: get(2), dir: get(3), id: get(4) }),
                     b"file" => a.files.push(File { target: get(0), source: get(1), stored: get(2) }),
                     _ => {}
                 }

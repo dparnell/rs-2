@@ -138,6 +138,13 @@ fn install_object(key: &[u8], setup: &[u8]) -> bool {
 
 /// Make what OS2.INI asks for (and, the first time, rs2's desktop).
 pub fn run() {
+    // The installer belongs to the live media: an installed system (which
+    // has no PMINSTAL.EXE) drops the object its OS2.INI came with.
+    if !file_exists(&boot(b"?:\\OS2\\PMINSTAL.EXE")) {
+        if let Some(o) = wps::handle_of_id(b"<RS2_INSTALL>").map(wps::object_from_handle).filter(|&o| o != 0) {
+            obj::call(m::WPObject::wpFree, &[o]);
+        }
+    }
     for k in prf_keys(HINI_USER, APP_CLASSES) {
         if let Some(v) = prf_read(HINI_USER, APP_CLASSES, &k) {
             let dll = v.strip_suffix(&[0]).unwrap_or(&v).to_vec();
