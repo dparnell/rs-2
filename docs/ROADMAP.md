@@ -372,9 +372,13 @@ Status markers: done, in progress, planned.
   size, tree view, details columns), the lazy writer, the Help Index's
   letter tabs, System Setup's Keyboard, Mouse, Sound, Color Palette
   and Scheme Palette (PMWIN's WinSetSysValue and WinSetSysColors)
+- done: anti-aliased fonts: rs2's TrueType and Type 1 rasteriser, the
+  Liberation fonts as the system font and the outline faces, IBM's
+  fonts (WarpSans, Helvetica, Times New Roman, Courier) when installed
+  from the CD (docs/PM.md, Fonts)
 - planned: the remaining classes and view pages (docs/WPS.md), the Font
-  Palette and folder fonts (PMWIN draws with the system font only),
-  printing (no printer support yet)
+  Palette and folder fonts (PP_FONTNAMESIZE), printing (no printer
+  support yet)
 
 ## Milestone 5: install media (first version done)
 

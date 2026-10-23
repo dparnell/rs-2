@@ -164,7 +164,11 @@ programs are tested.
 
 *The live ISO's desktop (the Workplace Shell) with Drives and Drive C open.*
 
-The live system and installed systems start Presentation Manager with
+Text is drawn anti-aliased in the Liberation fonts (rs2 has its own
+TrueType and Type 1 renderer); installing "OS/2 fonts" with APPINST
+from the OS/2 CD switches to IBM's WarpSans, Helvetica, Times New Roman
+and Courier. The live system and installed systems start Presentation
+Manager with
 rs2's Workplace Shell (`C:\OS2\PMSHELL.EXE` with rs2's SOM.DLL and
 PMWP.DLL, binary compatible with IBM's, so Workplace Shell class DLLs
 work). Double click an object (or select it and press Enter) to open

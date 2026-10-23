@@ -25,7 +25,7 @@ The logic lives in host-testable crates; the DLLs are thin:
 
 | Crate / DLL | Contents |
 |-------------|----------|
-| `crates/gpi` | Rendering engine (and `icon.rs`: the OS/2 pointer and icon formats, choosing an image for the display, AND/XOR masks, drawing): presentation-space attributes, lines, boxes, arcs, areas, text with bitmap fonts, bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
+| `crates/gpi` | Rendering engine (and `icon.rs`: the OS/2 pointer and icon formats, choosing an image for the display, AND/XOR masks, drawing): presentation-space attributes, lines, boxes, arcs, areas, text with bitmap and outline fonts (TrueType and Type 1, anti-aliased), bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
 | `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping; the MLE's text engine (`mle.rs`: layout with word wrap and tabs, editing, undo, import/export formats, search) and the arithmetic of spin buttons, sliders and value sets (`controls.rs`); the notebook's pages and geometry (`notebook.rs`); the container's layout for each view, hit testing, keyboard navigation, icon arrangement and selection rules (`container.rs`); where minimized frames go (`minimize.rs`); rs2's own system pointers and icons (`sysptr.rs`). Plain data structures, unit-tested on the host. |
 | `userland/pmwin` → PMWIN.DLL | Exports (`Win*`, `Gpi*`), the shared state and its heap, locking, messaging, the built-in window classes, and the PM server's code (input routing, hung programs, window list). |
 | `crates/viocell` | Text cells on pixels: renders VGA text cells (font, palette, blink, cursor, marked block) to 24-bit bitmaps; Copy/Copy All text and Paste keystrokes. Host-tested; for VIO windows now, AVIO later. |
@@ -647,13 +647,15 @@ The GPI covers:
 - Colour: logical colour tables (`LCOLF_CONSECRGB`, `INDRGB`, `RGB`),
   RGB/index queries, palettes; on the true-colour display
   `GpiAnimatePalette` recolours what was drawn with the palette.
-- Text: the system font (8x16, from unscii, code page 850 with the
-  graphic characters at 0x01-0x1F), reported as System VIO; the
-  standard outline faces (Helvetica, Times New Roman, Courier) are
-  offered by `GpiQueryFonts` and drawn by scaling its glyphs to the
-  character box, also as figures in paths (clip paths from text);
-  OS/2's other image faces (Helv, Tms Rmn, System Proportional, System
-  Monospaced) draw with the system font. `GpiLoadFonts` loads the image
+- Text: the system font and the faces of [Fonts](#fonts); outline
+  faces (Helvetica, Times New Roman, Courier, their bold and italic)
+  are rendered at the character box's size (the box is the em square;
+  other proportions, shear and paths scale the glyphs instead, also as
+  figures in paths: clip paths from text); the image faces (Helv,
+  Tms Rmn, System Proportional, WarpSans, System Monospaced) at
+  lMaxBaselineExt from the same outlines, or IBM's bitmaps where
+  installed; a face's own bold and italic are used, others simulated.
+  `GpiLoadFonts` loads the image
   fonts of a font file (a resource DLL: `RT_FONTDIR`, `RT_FONT` in
   OS/2's format) for the process; `GpiQueryFonts` offers them with
   `QF_PRIVATE`, `GpiCreateLogFont` picks one by lMatch or by face and
@@ -770,9 +772,9 @@ what can be tested on the host is in `crates/pmwin`.
   and MLFIE_WINFMT (CR CR LF for soft breaks) on import and export.
   Display lines are laid out per paragraph (word wrap at blanks, tab
   stops in pels) and laid out again only where an edit touched them.
-  The font is the system font's glyphs scaled to the FATTRS cell
-  (`lMaxBaselineExt`, half as wide for outline faces), so every face is
-  monospaced. One level of undo (a typing run is one step; undoing
+  The font is the monospaced font's glyphs (Liberation Mono) drawn at
+  its own size, or scaled to the FATTRS cell (`lMaxBaselineExt`, half
+  as wide for outline faces), so every face is monospaced. One level of undo (a typing run is one step; undoing
   again redoes). Messages `MLM_SETTEXTLIMIT` .. `MLM_QUERYIMPORTEXPORT`
   (import/export buffers, selection, insert and delete, line queries,
   format lengths, undo, fonts, colours, first character, cut, copy,
@@ -1052,6 +1054,42 @@ passes the rest to `WinDefFileDlgProc`/`WinDefFontDlgProc`.
   Apply, Reset, Help. The FONTDLG (`fAttrs`, `fxPointSize`, family
   name, `flStyle`, weight, em height) follows the choice as it changes,
   since applications' procedures read it when OK or Apply arrives.
+
+## Fonts
+
+PM draws text anti-aliased from outline fonts, rendered by rs2's own
+code in `crates/gpi`: `ttf.rs` reads TrueType (head, maxp, hhea, hmtx,
+loca, glyf with composite glyphs, cmap formats 4 and 12, OS/2, name)
+and holds the rasteriser (each edge's signed area accumulated per pel,
+as font-rs does; a 0.8 gamma so thin stems keep their weight);
+`type1.rs` reads Type 1 (.PFB: eexec, Subrs, CharStrings; the
+charstring operators with seac accents, flex and hint replacement).
+There is no hinting: the scale is nudged so the x-height is whole pels
+and the baseline sits on a pel boundary. A face (`font::Source`) keeps
+the sizes made from it (up to 32), each a `Font` whose glyphs are
+coverage maps for code page 850; text blends them over what is there
+(other mixes take pels at half coverage).
+
+`userland/pmwin/src/fonts.rs` chooses the files, the first time a PM
+process starts (the fonts live in the shared state, so every process
+uses the same rendered glyphs):
+
+| Use | IBM's, if installed | Otherwise (shipped with rs2) |
+|-----|----------------------|------------------------------|
+| System font (controls, menus, titles) | WarpSans 9 pt for 96 dpi (`OS2\DLL\DSPRES.DLL`, resource type 1000) | Liberation Sans at 13 pels |
+| Monospaced (MLEs) | | Liberation Mono at 13 pels |
+| Helvetica, Times New Roman, Courier (and Bold, Italic, Bold Italic) | `PSFONTS\HELV*.PFB`, `TNR*.PFB`, `COUR*.PFB` | `PSFONTS\LIBSANS*.TTF`, `LIBSERIF*`/`LIBSERF*`/`LIBSRFBI`, `LIBMONO*`/`LIBMONBI` |
+| Image faces | `DSPRES.DLL`, `HELV.FON`, `TIMES.FON`, `COURIER.FON`, `COURIERI.FON`, `SYSMONO.FON`, offered to every process as if loaded with `GpiLoadFonts` | drawn from the outline faces |
+
+The Liberation fonts are under the SIL Open Font License 1.1
+(`PSFONTS\LIBERATN.TXT`). IBM's come from the OS/2 CD through APPINST
+("OS/2 fonts"); rs2 never ships them. VIO windows keep the kernel's
+unscii cells, and the pointer and icon glyphs unscii (`font::vio`).
+
+Controls measure text in pels: entry fields (scrolling, the cursor,
+selection, hit testing), wrapping (`draw::wrap`), mnemonic underlines,
+container icon titles (at least 75 pels, SV_CXICONTEXTWIDTH) and
+details columns. Dialog units stay 2x2 pels whatever the font.
 
 ## Profiles (INI files)
 
