@@ -423,7 +423,7 @@ const FONTS: [&[u8]; 12] = [
 const PAL_CLASS: &[u8] = b"WPS_Palette\0";
 const COLOR_CELL: (i32, i32, i32) = (28, 22, 6);
 const SCHEME_CELL: (i32, i32, i32) = (108, 74, 3);
-const FONT_CELL: (i32, i32, i32) = (196, 30, 2);
+const FONT_CELL: (i32, i32, i32) = (224, 30, 2);
 
 /// What a palette holds.
 #[derive(Clone, Copy, PartialEq, Eq)]
