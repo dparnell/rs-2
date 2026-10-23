@@ -22,6 +22,9 @@ pub mod classes_gen;
 mod clsmgr;
 mod dnd;
 mod exports;
+mod filejob;
+#[path = "../../rs2shell/src/fileops.rs"]
+mod fileops;
 mod fs;
 mod icons;
 mod install;

@@ -38,6 +38,8 @@ pub const CTXT_ARRANGE: u32 = 0x020000;
 pub const CTXT_REFRESH: u32 = 0x400000;
 
 pub const WPMENUID_OPEN: u32 = 1;
+pub const WPMENUID_MOVE: u32 = 107;
+pub const WPMENUID_COPY: u32 = 108;
 pub const WPMENUID_DELETE: u32 = 109;
 pub const WPMENUID_PROPERTIES: u32 = 112;
 pub const WPMENUID_TREE: u32 = 123;
@@ -188,9 +190,16 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
         }
     } else {
         items.push(Menu::Sep);
-        items.push(Menu::Item(MENUID_RENAME as u16, b"Re~name", obj::call(m::WPObject::wpQueryStyle, &[o]) as u32 & obj::OBJSTYLE_NORENAME == 0));
+        let style = obj::call(m::WPObject::wpQueryStyle, &[o]) as u32;
+        items.push(Menu::Item(MENUID_RENAME as u16, b"Re~name", style & obj::OBJSTYLE_NORENAME == 0));
+        if flags & CTXT_COPY != 0 {
+            items.push(Menu::Item(WPMENUID_COPY as u16, b"~Copy...", style & obj::OBJSTYLE_NOCOPY == 0));
+        }
+        if flags & CTXT_MOVE != 0 {
+            items.push(Menu::Item(WPMENUID_MOVE as u16, b"~Move...", style & obj::OBJSTYLE_NOMOVE == 0));
+        }
         if flags & CTXT_SHADOW != 0 {
-            items.push(Menu::Item(WPMENUID_CREATESHADOW as u16, b"Create s~hadow", true));
+            items.push(Menu::Item(WPMENUID_CREATESHADOW as u16, b"Create s~hadow...", style & obj::OBJSTYLE_NOLINK == 0));
         }
         if flags & CTXT_DELETE != 0 {
             items.push(Menu::Item(WPMENUID_DELETE as u16, b"~Delete...", true));
@@ -215,11 +224,6 @@ fn view_of(o: usize, view: u32) {
     obj::call(m::WPObject::wpViewObject, &[o, 0, view as usize, 0]);
 }
 
-/// The desktop folder object.
-fn desktop() -> usize {
-    wps::object_from_location(b"<WP_DESKTOP>")
-}
-
 extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
     match id {
         0 | WPMENUID_OPEN => view_of(o, OPEN_DEFAULT),
@@ -240,10 +244,33 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
                 }
             }
         }
-        WPMENUID_CREATESHADOW => {
-            let d = desktop();
-            if d != 0 {
-                obj::call(m::WPObject::wpCreateShadowObject, &[o, d, 0]);
+        WPMENUID_COPY | WPMENUID_MOVE | WPMENUID_CREATESHADOW => {
+            // The selected objects of the view the menu came from (or
+            // the object alone).
+            let objs = view::wins().iter().position(|w| w.frame == frame).map_or(alloc::vec![o], |w| view::selected(w, o));
+            let start = wps::path_of(obj::folder_of(o)).map(|mut p| {
+                if !p.ends_with(b"\\") {
+                    p.push(b'\\');
+                }
+                p
+            });
+            let (title, button): (&[u8], &[u8]) = match id {
+                WPMENUID_COPY => (b"Copy", b"~Copy"),
+                WPMENUID_MOVE => (b"Move", b"~Move"),
+                _ => (b"Create Shadow", b"C~reate"),
+            };
+            // One object copied can get a new name on the way.
+            let name = (id == WPMENUID_COPY && objs.len() == 1).then(|| wps::path_of(o).map(|p| crate::fileops::name_of(&p).to_vec()).unwrap_or_else(|| obj::title(o)));
+            if let Some((f, n)) = crate::filejob::pick_folder(title, button, name.as_deref(), start.as_deref()) {
+                match id {
+                    WPMENUID_COPY => crate::filejob::transfer(crate::filejob::Op::Copy, &objs, f, Some(&n)),
+                    WPMENUID_MOVE => crate::filejob::transfer(crate::filejob::Op::Move, &objs, f, None),
+                    _ => {
+                        for &x in &objs {
+                            obj::call(m::WPObject::wpCreateShadowObject, &[x, f, 0]);
+                        }
+                    }
+                }
             }
         }
         WPMENUID_DELETE => {

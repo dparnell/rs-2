@@ -147,6 +147,10 @@ extern "C" fn wpSetRealName(obj: usize, name: *const u8) -> u32 {
     }
     ea_write(&new, b".LONGNAME", None);
     set_real_name_raw(obj, &new);
+    if obj::d(obj).handle != 0 {
+        wps::move_fs_handle(obj::d(obj).handle, &new);
+    }
+    subtree_moved(&old, &new);
     1
 }
 
@@ -230,18 +234,50 @@ extern "C" fn fs_move(obj: usize, folder: usize) -> u32 {
     if !rename_path(&old, &new) {
         return 0;
     }
+    moved(obj, folder, &new);
+    1
+}
+
+/// An object whose file has moved to `new` (into `folder`): its path,
+/// handle and folder follow, and so do the objects in it (a directory).
+pub fn moved(obj: usize, folder: usize, new: &[u8]) {
+    let old = path(obj);
+    // An object that was at the target (replaced) is gone.
+    if let Some(o) = wps::by_path(&normalize(new)) {
+        if o != obj {
+            let f = obj::d(o).folder;
+            if f != 0 {
+                wps::call("WPFolder", m::WPFolder::wpDeleteFromContent, &[f, o]);
+            }
+            wps::unregister(o);
+        }
+    }
     let from = obj::d(obj).folder;
     if from != 0 {
         wps::call("WPFolder", m::WPFolder::wpDeleteFromContent, &[from, obj]);
     }
-    set_real_name_raw(obj, &new);
+    set_real_name_raw(obj, new);
     if obj::d(obj).handle != 0 {
-        // The handle follows the file.
-        wps::move_fs_handle(obj::d(obj).handle, &new);
+        wps::move_fs_handle(obj::d(obj).handle, new);
     }
+    subtree_moved(&old, new);
     obj::d(obj).folder = folder;
-    wps::call("WPFolder", m::WPFolder::wpAddToContent, &[folder, obj]);
-    1
+    if folder != 0 {
+        wps::call("WPFolder", m::WPFolder::wpAddToContent, &[folder, obj]);
+    }
+}
+
+/// The objects in a directory that moved: their paths and handles follow.
+pub fn subtree_moved(old: &[u8], new: &[u8]) {
+    let mut pre = normalize(old);
+    pre.push(b'\\');
+    let list: Vec<(usize, Vec<u8>)> =
+        wps::awake().iter().filter(|e| e.path.len() > pre.len() && eq_nocase(&e.path[..pre.len()], &pre)).map(|e| (e.obj, e.path.clone())).collect();
+    for (o, p) in list {
+        let np = join(new, &p[pre.len()..]);
+        set_real_name_raw(o, &np);
+    }
+    wps::fs_handles_moved(old, new);
 }
 
 extern "C" fn fs_copy(obj: usize, folder: usize, _lock: u32) -> usize {

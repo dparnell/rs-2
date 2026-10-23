@@ -572,6 +572,23 @@ pub fn active() -> bool {
     unsafe { ACTIVE }
 }
 
+/// A directory moved: the handles of what is in it follow (awake or
+/// not).
+pub fn fs_handles_moved(old: &[u8], new: &[u8]) {
+    let mut pre = normalize(old);
+    pre.push(b'\\');
+    for k in prf_keys(HINI_USER, APP_HANDLES) {
+        let Some(v) = prf_read(HINI_USER, APP_HANDLES, &k) else { continue };
+        let p = v.strip_suffix(&[0]).unwrap_or(&v);
+        if p.len() > pre.len() && eq_nocase(&p[..pre.len()], &pre) {
+            let mut np = normalize(new);
+            np.push(b'\\');
+            np.extend_from_slice(&p[pre.len()..]);
+            prf_write(HINI_USER, APP_HANDLES, &k, Some(&z(&np)));
+        }
+    }
+}
+
 /// A file system handle now stands for a new path (its file moved).
 pub fn move_fs_handle(h: u32, new: &[u8]) {
     if h >> 16 == 3 {

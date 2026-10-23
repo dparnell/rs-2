@@ -197,9 +197,14 @@ pub fn drop(w: usize, cdi: u32) {
         let over = obj::call(m::WPObject::wpDragOver, &[to, wins()[w].child as usize, pdinfo as usize]) as u32;
         ok = over & 0xffff == DOR_DROP;
         if ok {
+            // Folders' copies and moves of file system objects gather
+            // into one job (progress, name collisions).
+            unsafe { BATCH = Some(Vec::new()) };
             for &it in &list {
                 obj::call(m::WPObject::wpDrop, &[to, wins()[w].child as usize, pdinfo as usize, it as usize]);
             }
+            let batch = unsafe { (*&raw mut BATCH).take() }.unwrap_or_default();
+            run_batch(batch);
         }
     }
     for &it in &list {
@@ -290,6 +295,23 @@ extern "C" fn folder_drag_over(f: usize, _cnr: u32, pdinfo: u32) -> u32 {
     mp(DOR_DROP, op)
 }
 
+/// Drops gathered while a drop is handled: (operation, object, folder).
+static mut BATCH: Option<Vec<(u32, usize, usize)>> = None;
+
+fn run_batch(batch: Vec<(u32, usize, usize)>) {
+    let mut groups: Vec<(u32, usize, Vec<usize>)> = Vec::new();
+    for (op, o, f) in batch {
+        match groups.iter_mut().find(|g| g.0 == op && g.1 == f) {
+            Some(g) => g.2.push(o),
+            None => groups.push((op, f, alloc::vec![o])),
+        }
+    }
+    for (op, f, objs) in groups {
+        let op = if op == DO_COPY { crate::filejob::Op::Copy } else { crate::filejob::Op::Move };
+        crate::filejob::transfer(op, &objs, f, None);
+    }
+}
+
 extern "C" fn folder_drop(f: usize, _cnr: u32, pdinfo: u32, it: u32) -> u32 {
     let src = item_object(it);
     if src == 0 {
@@ -297,6 +319,13 @@ extern "C" fn folder_drop(f: usize, _cnr: u32, pdinfo: u32, it: u32) -> u32 {
     }
     let user = user_op(pdinfo);
     let op = if user == DO_DEFAULT { default_op(src, f) } else { user };
+    #[allow(static_mut_refs)]
+    if let (Some(b), DO_MOVE | DO_COPY) = (unsafe { BATCH.as_mut() }, op) {
+        if wps::is(src, "WPFileSystem") && wps::is(f, "WPFileSystem") {
+            b.push((op, src, f));
+            return 1;
+        }
+    }
     match op {
         DO_MOVE => obj::call(m::WPObject::wpMoveObject, &[src, f]),
         DO_COPY => obj::call(m::WPObject::wpCopyObject, &[src, f, 0]),
