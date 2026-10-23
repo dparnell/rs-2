@@ -271,6 +271,15 @@ extern "C" fn shadow_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
     obj::call(m::WPObject::wpViewObject, &[l, cnr as usize, view as usize, param as usize]) as u32
 }
 
+/// A shadow opens as its original does (the original's default view).
+extern "C" fn shadow_default_view(obj: usize) -> u32 {
+    let l = linked(obj);
+    if l == 0 {
+        return obj::OPEN_SETTINGS;
+    }
+    obj::call(m::WPObject::wpQueryDefaultView, &[l]) as u32
+}
+
 // ---- WPDisk ----
 
 #[repr(C)]
@@ -386,6 +395,7 @@ methods! {
     __m_shadow_title => shadow_title, 1;
     __m_shadow_icon => shadow_icon, 1;
     __m_shadow_open => shadow_open, 4;
+    __m_shadow_default_view => shadow_default_view, 1;
     __m_wpQueryLogicalDrive => wpQueryLogicalDrive, 1;
     __m_wpQueryRootFolder => wpQueryRootFolder, 1;
     __m_disk_setup => disk_setup, 2;
@@ -433,6 +443,7 @@ pub fn impl_shadow() -> Impl {
             ("wpQueryTitle", __m_shadow_title as usize),
             ("wpQueryIcon", __m_shadow_icon as usize),
             ("wpOpen", __m_shadow_open as usize),
+            ("wpQueryDefaultView", __m_shadow_default_view as usize),
         ]
         .into_iter()
         .chain(crate::dnd::overrides("WPShadow"))

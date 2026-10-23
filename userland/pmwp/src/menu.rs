@@ -176,6 +176,8 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
         Some(b"~Index")
     } else if is(o, "WPUrl") {
         Some(b"~Browser")
+    } else if is(o, "WPLaunchPad") {
+        Some(b"~LaunchPad")
     } else {
         None
     };

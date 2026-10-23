@@ -59,6 +59,7 @@ fn implementation(name: &str) -> Impl {
         "WPClassManager" => crate::clsmgr::impl_class_manager(),
         "WPMinWindow" => crate::minwin::impl_min_window(),
         "WPUrl" => crate::url::impl_url(),
+        "WPLaunchPad" => crate::launchpad::impl_launchpad(),
         "Mindex" => crate::mindex::impl_mindex(),
         "WPMinWinViewer" => crate::minwin::impl_viewer(),
         "RS2Shutdown" => crate::rs2obj::impl_shutdown(),

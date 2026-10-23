@@ -35,6 +35,7 @@ mod shutdown;
 mod templates;
 mod url;
 mod launch;
+mod launchpad;
 mod menu;
 mod mindex;
 mod minwin;

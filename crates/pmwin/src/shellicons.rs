@@ -26,8 +26,12 @@ pub const INFO_FOLDER: u32 = 12;
 pub const INDEX: u32 = 13;
 /// Internet objects (a globe).
 pub const INTERNET: u32 = 14;
+/// Find (a magnifying glass).
+pub const FIND: u32 = 15;
+/// The LaunchPad (a bar of buttons).
+pub const LAUNCHPAD: u32 = 16;
 /// Highest icon id.
-pub const LAST: u32 = 14;
+pub const LAST: u32 = 16;
 
 const SILVER: u32 = 0xffe0_e0e8;
 
@@ -157,6 +161,26 @@ fn draw(id: u32, size: i32) -> Option<Image> {
                 p.line((4.0, y), (28.0, y), 0.8, rgb(0xd0e0f0));
             }
             p.line((16.0, 2.5), (16.0, 29.5), 0.8, rgb(0xd0e0f0));
+        }
+        FIND => {
+            p.line((19.0, 13.0), (28.0, 4.0), 4.0, rgb(0x806020));
+            p.disc(13.0, 19.0, 9.5, rgb(0x404040), DARK);
+            p.disc(13.0, 19.0, 7.0, rgb(0xc8e0f8), rgb(0xa0c0e0));
+            p.line((9.0, 22.0), (12.0, 25.0), 1.5, WHITE);
+        }
+        LAUNCHPAD => {
+            // A bar of buttons with a drawer open above one.
+            p.rect(2.0, 6.0, 30.0, 16.0, FACE);
+            p.frame(2.0, 6.0, 30.0, 16.0, DARK);
+            for (i, c) in [rgb(0x2050c0), rgb(0x20a060), rgb(0xd09020)].into_iter().enumerate() {
+                let x = 5.0 + i as f64 * 8.5;
+                p.rect(x, 8.5, x + 6.0, 13.5, c);
+                p.frame(x, 8.5, x + 6.0, 13.5, DARK);
+            }
+            p.rect(12.5, 17.0, 21.5, 28.0, WHITE);
+            p.frame(12.5, 17.0, 21.5, 28.0, DARK);
+            p.rect(14.5, 23.0, 19.5, 26.0, rgb(0xc03028));
+            p.rect(14.5, 19.0, 19.5, 22.0, rgb(0x2050c0));
         }
         DESKTOP => {
             p.rect(2.0, 5.0, 30.0, 27.0, rgb(0x2e6e8e));

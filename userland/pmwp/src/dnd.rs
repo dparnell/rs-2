@@ -132,7 +132,7 @@ pub fn item_object(it: u32) -> usize {
     0
 }
 
-fn items(pdinfo: u32) -> Vec<u32> {
+pub fn items(pdinfo: u32) -> Vec<u32> {
     let n = unsafe { DrgQueryDragitemCount(pdinfo) };
     (0..n).map(|i| unsafe { DrgQueryDragitemPtr(pdinfo, i) }).filter(|&p| p != 0).collect()
 }
@@ -210,7 +210,12 @@ pub fn drop(w: usize, cdi: u32) {
             run_batch(batch);
         }
     }
-    for &it in &list {
+    finish_drop(pdinfo, &list, ok);
+}
+
+/// A drop is over: the sources hear how it went, the draginfo goes.
+pub fn finish_drop(pdinfo: u32, list: &[u32], ok: bool) {
+    for &it in list {
         post(rd(it, DI_HWND), DM_ENDCONVERSATION, rd(it, DI_ID), if ok { DMFL_TARGETSUCCESSFUL } else { DMFL_TARGETFAIL });
     }
     unsafe {

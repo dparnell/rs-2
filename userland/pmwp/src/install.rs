@@ -23,7 +23,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"5";
+const DESKTOP_VERSION: &[u8] = b"6";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -104,6 +104,10 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         s.extend_from_slice(id);
         out.push((k, s));
     }
+    // The LaunchPad, after the objects it shows (open at each start: its
+    // shadow is in Startup).
+    out.push((b"LaunchPad;WPLaunchPad;<WP_DESKTOP>;PRESERVEOLD".to_vec(), b"FPOBJECTS=<WP_DRIVES>,<WP_OS2WIN>,<WP_SYSED>,<WP_ASSISTANCE>;DRAWEROBJECTS=2,<WP_OS2FS>;OBJECTID=<WP_LAUNCHPAD>".to_vec()));
+    out.push((b"LaunchPad;WPShadow;<WP_START>;PRESERVEOLD".to_vec(), b"SHADOWID=<WP_LAUNCHPAD>;OBJECTID=<RS2_LAUNCHPADSTART>".to_vec()));
     out
 }
 
@@ -173,7 +177,7 @@ pub fn run() {
     // Version 2 added the Minimized Window Viewer, Window List, System
     // Setup (System, Display) and Shut Down, version 3 Templates,
     // version 4 the Assistance Center, version 5 its Help Index,
-    // Glossary and Internet object;
+    // Glossary and Internet object, version 6 the LaunchPad;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         pending.extend(defaults());
