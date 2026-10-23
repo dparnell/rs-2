@@ -9,7 +9,9 @@
 //! that several panels share gets the panel's title after it (IBM's
 //! MindexAppendDupIndexTitle). Choosing an entry shows its panel in a
 //! help window (a help instance for its file and HM_SHOW_TOC, IBM's
-//! private message for a TOC entry).
+//! private message for a TOC entry). Second-level entries show indented
+//! under theirs; letter tabs down the right (as on IBM's notebook) jump
+//! to the first entry with that letter.
 
 use alloc::vec::Vec;
 
@@ -41,6 +43,11 @@ const WC_LISTBOX_W: u32 = 0xffff_0007;
 const LM_SETTOPINDEX: u32 = 0x0162;
 const EN_CHANGE: u32 = 4;
 const HM_SHOW_TOC: u32 = 0x235;
+/// The letter tabs ("#": the top) and their width.
+const LETTERS: &[u8] = b"#ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const ID_TAB: u32 = 100;
+const TAB_W: i32 = 22;
+const WC_BUTTON_W: u32 = 0xffff_0003;
 
 unsafe extern "C" {
     #[link_name = "HELPMGR.51"]
@@ -54,6 +61,8 @@ struct Entry {
     text: Vec<u8>,
     file: usize,
     toc: u16,
+    /// A second-level entry (shown indented under the one before it).
+    sub: bool,
 }
 
 struct IndexWin {
@@ -121,9 +130,10 @@ fn index_files(index: &[u8]) -> Vec<Vec<u8>> {
 
 /// The merged index of the files (help files only: "HS"), sorted; an
 /// entry that several panels share (in any of the files) gets the
-/// panel's title after it.
+/// panel's title after it; second-level entries stay under theirs.
 fn merged(files: &mut Vec<Vec<u8>>) -> Vec<Entry> {
-    let mut entries: Vec<(Entry, Vec<u8>)> = Vec::new();
+    // (entry, its panel's title, its second-level entries)
+    let mut tops: Vec<(Entry, Vec<u8>, Vec<Entry>)> = Vec::new();
     let mut kept = Vec::new();
     for path in files.iter() {
         let Some(data) = read_all(path) else { continue };
@@ -133,27 +143,42 @@ fn merged(files: &mut Vec<Vec<u8>>) -> Vec<Entry> {
         let Ok(doc) = ipf::Doc::parse(&data) else { continue };
         let f = kept.len();
         kept.push(path.clone());
-        for e in doc.index().into_iter().filter(|e| e.level() == 1) {
-            let title = doc.toc(e.toc).map(|t| t.title).unwrap_or_default();
-            entries.push((Entry { text: e.text, file: f, toc: e.toc }, title));
+        let mut have_top = false;
+        for e in doc.index() {
+            if e.level() == 1 {
+                let title = doc.toc(e.toc).map(|t| t.title).unwrap_or_default();
+                tops.push((Entry { text: e.text, file: f, toc: e.toc, sub: false }, title, Vec::new()));
+                have_top = true;
+            } else if have_top {
+                if let Some(t) = tops.last_mut() {
+                    t.2.push(Entry { text: e.text, file: f, toc: e.toc, sub: true });
+                }
+            }
         }
     }
     *files = kept;
-    entries.sort_by(|a, b| a.0.text.to_ascii_uppercase().cmp(&b.0.text.to_ascii_uppercase()));
-    let n = entries.len();
+    tops.sort_by(|a, b| a.0.text.to_ascii_uppercase().cmp(&b.0.text.to_ascii_uppercase()));
+    let n = tops.len();
     let same = |a: &Entry, b: &Entry| a.text.eq_ignore_ascii_case(&b.text);
-    let dup: Vec<bool> = (0..n).map(|i| (i > 0 && same(&entries[i - 1].0, &entries[i].0)) || (i + 1 < n && same(&entries[i + 1].0, &entries[i].0))).collect();
-    entries
-        .into_iter()
-        .zip(dup)
-        .map(|((mut e, title), d)| {
-            if d && !title.is_empty() {
-                e.text.extend_from_slice(b" - ");
-                e.text.extend_from_slice(&title);
-            }
-            e
-        })
-        .collect()
+    let dup: Vec<bool> = (0..n).map(|i| (i > 0 && same(&tops[i - 1].0, &tops[i].0)) || (i + 1 < n && same(&tops[i + 1].0, &tops[i].0))).collect();
+    let mut out = Vec::new();
+    for ((mut e, title, subs), d) in tops.into_iter().zip(dup) {
+        if d && !title.is_empty() {
+            e.text.extend_from_slice(b" - ");
+            e.text.extend_from_slice(&title);
+        }
+        out.push(e);
+        out.extend(subs);
+    }
+    out
+}
+
+/// The first top entry at or after `t` (upper case) in the sorted list.
+fn first_from(entries: &[Entry], t: &[u8], exact: bool) -> Option<usize> {
+    entries.iter().position(|e| {
+        let u = e.text.to_ascii_uppercase();
+        !e.sub && if exact { u.starts_with(t) } else { u.as_slice() >= t }
+    })
 }
 
 /// Show an entry's panel.
@@ -189,17 +214,38 @@ extern "C" fn index_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             unsafe {
                 WinSetWindowPos(WinWindowFromID(h, ID_LABEL), 0, 6, cy - 26, 60, 18, SWP_SIZE | SWP_MOVE);
                 WinSetWindowPos(WinWindowFromID(h, ID_SEARCH), 0, 70, cy - 26, (cx - 78).max(10), 18, SWP_SIZE | SWP_MOVE);
-                WinSetWindowPos(WinWindowFromID(h, ID_LIST), 0, 4, 4, (cx - 8).max(10), (cy - 36).max(10), SWP_SIZE | SWP_MOVE);
+                WinSetWindowPos(WinWindowFromID(h, ID_LIST), 0, 4, 4, (cx - 8 - TAB_W).max(10), (cy - 36).max(10), SWP_SIZE | SWP_MOVE);
+                // The letter tabs down the right, as on IBM's notebook.
+                let th = ((cy - 36) / LETTERS.len() as i32).max(8);
+                for i in 0..LETTERS.len() {
+                    let y = cy - 32 - th * (i as i32 + 1);
+                    WinSetWindowPos(WinWindowFromID(h, ID_TAB + i as u32), 0, cx - TAB_W - 2, y, TAB_W, th, SWP_SIZE | SWP_MOVE);
+                }
             }
             0
         }
+        WM_COMMAND if (ID_TAB..ID_TAB + LETTERS.len() as u32).contains(&(a & 0xffff)) => {
+            // A letter tab: the first entry from that letter on.
+            if let Some(w) = find_win(h) {
+                let c = LETTERS[((a & 0xffff) - ID_TAB) as usize];
+                let at = if c == b'#' { Some(0) } else { first_from(&wins()[w].entries, &[c], false) };
+                if let Some(i) = at {
+                    unsafe {
+                        WinSendDlgItemMsg(h, ID_LIST, LM_SELECTITEM, i as u32, 1);
+                        WinSendDlgItemMsg(h, ID_LIST, LM_SETTOPINDEX, i as u32, 0);
+                    }
+                }
+            }
+            0
+        }
+        WM_COMMAND => 0,
         WM_CONTROL => {
             let (id, code) = (a & 0xffff, a >> 16);
             let Some(w) = find_win(h) else { return 0 };
             if id == ID_SEARCH && code == EN_CHANGE {
                 // The first entry that starts with what is typed.
                 let t = item_text(h, ID_SEARCH).to_ascii_uppercase();
-                if let Some(i) = wins()[w].entries.iter().position(|e| e.text.to_ascii_uppercase().starts_with(&t)) {
+                if let Some(i) = first_from(&wins()[w].entries, &t, true) {
                     unsafe {
                         WinSendDlgItemMsg(h, ID_LIST, LM_SELECTITEM, i as u32, 1);
                         WinSendDlgItemMsg(h, ID_LIST, LM_SETTOPINDEX, i as u32, 0);
@@ -293,8 +339,14 @@ fn open_index(o: usize) -> u32 {
         let t = z(b"(No help files with an index were found.)");
         unsafe { WinSendDlgItemMsg(client, ID_LIST, LM_INSERTITEM, LIT_END, t.as_ptr() as u32) };
     }
+    for (i, &c) in LETTERS.iter().enumerate() {
+        let t = [c, 0];
+        unsafe { WinCreateWindow(client, WC_BUTTON_W, t.as_ptr(), WS_VISIBLE, 0, 0, 10, 10, client, HWND_TOP, ID_TAB + i as u32, core::ptr::null(), core::ptr::null()) };
+    }
     for e in &entries {
-        let t = z(&e.text);
+        let mut text = if e.sub { b"     ".to_vec() } else { Vec::new() };
+        text.extend_from_slice(&e.text);
+        let t = z(&text);
         unsafe { WinSendDlgItemMsg(client, ID_LIST, LM_INSERTITEM, LIT_END, t.as_ptr() as u32) };
     }
     let n = files.len();
