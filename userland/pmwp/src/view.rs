@@ -26,7 +26,7 @@ use alloc::vec::Vec;
 use crate::classes_gen::m;
 use crate::obj::{self, OPEN_CONTENTS, OPEN_DEFAULT, OPEN_DETAILS, OPEN_SETTINGS, OPEN_TREE};
 use crate::pm::*;
-use crate::{abs, util, wps};
+use crate::{abs, som, util, wps};
 
 unsafe extern "C" {
     #[link_name = "PMWIN.800"]
@@ -41,7 +41,16 @@ pub struct Rec {
     pub title: Vec<u8>,
     /// Tree view: the parent record (0: a root).
     pub parent: u32,
+    /// Details view: the object's class title and real name (with NULs).
+    pub class: Vec<u8>,
+    pub real: Vec<u8>,
 }
+
+/// Details view's own record fields (after rs2shell's R_KEY .. R_TIME):
+/// the class title and the real name.
+const R_CLASS: usize = 72;
+const R_REAL: usize = 76;
+const REC_EXTRA: u32 = 24;
 
 pub struct Win {
     /// The folder (or, for a notebook, the object).
@@ -265,13 +274,9 @@ fn make_view(folder: usize, view: u32, title: &[u8], desktop: bool, found: Optio
     let w = wins().len() - 1;
     let mut ci = [0u32; 23];
     ci[0] = 92;
-    // Owner drawing: shadows' titles (see draw_item).
-    ci[5] = CA_OWNERDRAW
-        | match view {
-            OPEN_DETAILS => CV_DETAIL | CV_MINI | CA_DETAILSVIEWTITLES,
-            OPEN_TREE => CV_TREE | CV_ICON | CV_MINI | CA_TREELINE,
-            _ => CV_ICON,
-        };
+    // Owner drawing: shadows' titles (see draw_item); the rest as the
+    // folder's View settings say.
+    ci[5] = CA_OWNERDRAW | crate::viewset::attr(folder, view, desktop);
     send(cnr, CM_SETCNRINFO, ci.as_ptr() as u32, CMA_FLWINDOWATTR);
     if view == OPEN_DETAILS {
         add_fields(w);
@@ -310,26 +315,59 @@ fn view_suffix(view: u32) -> &'static [u8] {
 /// Details view columns: icon and title.
 fn add_fields(w: usize) {
     let cnr = wins()[w].child;
-    let first = send(cnr, CM_ALLOCDETAILFIELDINFO, 2, 0);
+    let cols = crate::viewset::COLUMNS;
+    let first = send(cnr, CM_ALLOCDETAILFIELDINFO, cols.len() as u32, 0);
     if first == 0 {
         return;
     }
-    let cols: [(u32, &'static [u8], usize); 2] =
-        [(CFA_BITMAPORICON | CFA_VCENTER, b"Icon\0", R_HPTR), (CFA_STRING | CFA_VCENTER | CFA_SEPARATOR | CFA_FIREADONLY, b"Title\0", R_PSZNAME)];
+    let hidden = crate::viewset::hidden_columns(crate::fs::view_flags(wins()[w].obj));
+    // CFA_INVISIBLE, CFA_FIREADONLY on all; the data's type and offset.
+    const CFA_INVISIBLE: u32 = 0x0040;
+    let kinds: [(u32, usize); 7] = [
+        (CFA_BITMAPORICON, R_HPTR),
+        (CFA_STRING | CFA_SEPARATOR, R_PSZNAME),
+        (CFA_STRING | CFA_SEPARATOR | CFA_FIREADONLY, R_CLASS),
+        (CFA_STRING | CFA_SEPARATOR | CFA_FIREADONLY, R_REAL),
+        (CFA_ULONG | CFA_RIGHT | CFA_SEPARATOR | CFA_FIREADONLY, R_SIZE),
+        (CFA_DATE | CFA_SEPARATOR | CFA_FIREADONLY, R_DATE),
+        (CFA_TIME | CFA_SEPARATOR | CFA_FIREADONLY, R_TIME),
+    ];
     let mut f = first;
-    for c in cols {
-        wr(f, 4, c.0);
+    for (i, &(kind, off)) in kinds.iter().enumerate() {
+        let inv = if hidden & (1 << i) != 0 { CFA_INVISIBLE } else { 0 };
+        wr(f, 4, kind | CFA_VCENTER | inv);
         wr(f, 8, CFA_LEFT | CFA_VCENTER);
-        wr(f, 12, c.1.as_ptr() as u32);
-        wr(f, 16, c.2 as u32);
+        wr(f, 12, cols[i].as_ptr() as u32);
+        wr(f, 16, off as u32);
         f = rd(f, 24);
         if f == 0 {
             break;
         }
     }
-    let fi: [u32; 4] = [16, CMA_END, 1, 2];
+    let fi: [u32; 4] = [16, CMA_END, 1, cols.len() as u32];
     send(cnr, CM_INSERTDETAILFIELDINFO, first, fi.as_ptr() as u32);
     wins()[w].fields = true;
+}
+
+/// A folder's View settings changed: its open views take them.
+pub fn restyle(folder: usize) {
+    const CM_REMOVEDETAILFIELDINFO: u32 = 0x0345;
+    for w in 0..wins().len() {
+        let win = &wins()[w];
+        if win.obj != folder || win.view == OPEN_SETTINGS || win.desktop {
+            continue;
+        }
+        let cnr = win.child;
+        let mut ci = [0u32; 23];
+        ci[0] = 92;
+        ci[5] = CA_OWNERDRAW | crate::viewset::attr(folder, win.view, false);
+        send(cnr, CM_SETCNRINFO, ci.as_ptr() as u32, CMA_FLWINDOWATTR);
+        if win.view == OPEN_DETAILS {
+            send(cnr, CM_REMOVEDETAILFIELDINFO, 0, mp(0, CMA_FREE | CMA_INVALIDATE));
+            add_fields(w);
+        }
+        fill(w);
+    }
 }
 
 fn visible(o: usize) -> bool {
@@ -376,6 +414,35 @@ fn set_rec(r: u32, rec: &Rec, icon: u32) {
     wr(r, R_HPTR, icon);
     wr(r, R_HPTRMINI, icon);
     wr(r, R_KEY, rec.obj as u32);
+    if !rec.class.is_empty() {
+        wr(r, R_CLASS, rec.class.as_ptr() as u32);
+    }
+    if !rec.real.is_empty() {
+        wr(r, R_REAL, rec.real.as_ptr() as u32);
+    }
+}
+
+/// Details view's data of an object: class title, real name, and for a
+/// file its size and last write date and time (CDATE, CTIME).
+fn details_of(o: usize) -> (Vec<u8>, Vec<u8>, u32, u32, u32) {
+    let cls = som::class_of(o);
+    let t = wps::call("M_WPObject", m::M_WPObject::wpclsQueryTitle, &[cls]) as *const u8;
+    let mut class = if t.is_null() { Vec::new() } else { util::cstr(t).to_vec() };
+    class.push(0);
+    let Some(p) = wps::path_of(o) else { return (class, Vec::new(), 0, 0, 0) };
+    let mut real = util::split_path(&p).1;
+    real.push(0);
+    let c = util::z(&p);
+    let mut st = os2::FileStatus3::default();
+    if unsafe { os2::DosQueryPathInfo(c.as_ptr(), 1, &mut st as *mut _ as *mut u8, core::mem::size_of::<os2::FileStatus3>() as u32) } != 0 {
+        return (class, real, 0, 0, 0);
+    }
+    // FDATE: day 0-4, month 5-8, year-1980 9-15; FTIME: seconds/2 0-4,
+    // minutes 5-10, hours 11-15.
+    let (d, t) = (st.fdate_write as u32, st.ftime_write as u32);
+    let date = (d & 0x1f) | ((d >> 5) & 0xf) << 8 | (1980 + (d >> 9)) << 16;
+    let time = (t >> 11) | ((t >> 5) & 0x3f) << 8 | ((t & 0x1f) * 2) << 16;
+    (class, real, st.cb_file, date, time)
 }
 
 /// Insert records (each under its parent, or at the top level).
@@ -383,11 +450,19 @@ fn insert_recs(w: usize, list: &[(usize, u32)]) -> Vec<u32> {
     let cnr = wins()[w].child;
     let mut made = Vec::new();
     for &(o, parent) in list {
-        let r = send(cnr, CM_ALLOCRECORD, R_EXTRA, 1);
+        let r = send(cnr, CM_ALLOCRECORD, REC_EXTRA, 1);
         if r == 0 {
             break;
         }
-        let rec = Rec { obj: o, rec: r, title: if o == 0 { alloc::vec![0] } else { title_bytes(o) }, parent };
+        let mut rec = Rec { obj: o, rec: r, title: if o == 0 { alloc::vec![0] } else { title_bytes(o) }, parent, class: Vec::new(), real: Vec::new() };
+        if o != 0 && wins()[w].view == OPEN_DETAILS {
+            let (class, real, size, date, time) = details_of(o);
+            rec.class = class;
+            rec.real = real;
+            wr(r, R_SIZE, size);
+            wr(r, R_DATE, date);
+            wr(r, R_TIME, time);
+        }
         let icon = if o == 0 { 0 } else { crate::templates::view_icon(o) };
         set_rec(r, &rec, icon);
         wins()[w].recs.push(rec);

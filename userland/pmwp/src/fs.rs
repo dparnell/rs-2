@@ -401,6 +401,20 @@ pub struct FolderData {
     /// SHOWALLINTREEVIEW: its tree view shows every object, not only
     /// folders.
     pub show_all: u32,
+    /// The View tab's settings (viewset.rs).
+    pub view_flags: u32,
+}
+
+pub fn view_flags(obj: usize) -> u32 {
+    if obj == 0 || !wps::is(obj, "WPFolder") {
+        return 0;
+    }
+    fo(obj).view_flags
+}
+
+pub fn set_view_flags(obj: usize, f: u32) {
+    fo(obj).view_flags = f;
+    obj::call(m::WPObject::wpSaveDeferred, &[obj]);
 }
 
 pub fn shows_all_in_tree(obj: usize) -> bool {
@@ -481,6 +495,9 @@ extern "C" fn folder_save_state(obj: usize) -> u32 {
     if f.show_all != 0 {
         obj::wpSaveLong(obj, b"WPFolder\0".as_ptr(), 4, 1);
     }
+    if f.view_flags != 0 {
+        obj::wpSaveLong(obj, b"WPFolder\0".as_ptr(), 5, f.view_flags);
+    }
     if let Some(p) = &f.include {
         let s = z(p);
         obj::wpSaveString(obj, b"WPFolder\0".as_ptr(), 3, s.as_ptr());
@@ -500,6 +517,9 @@ extern "C" fn folder_restore_state(obj: usize, r: u32) -> u32 {
     }
     if let Some(v) = obj::restored_long(obj, b"WPFolder", 4) {
         fo(obj).show_all = v;
+    }
+    if let Some(v) = obj::restored_long(obj, b"WPFolder", 5) {
+        fo(obj).view_flags = v;
     }
     if let Some(p) = obj::restored_string(obj, b"WPFolder", 3) {
         let p = p.strip_suffix(&[0]).unwrap_or(&p).to_vec();
@@ -742,6 +762,7 @@ pub fn impl_folder() -> Impl {
         .into_iter()
         .chain(crate::book::folder_methods())
         .chain(crate::sortinc::folder_methods())
+        .chain(crate::viewset::folder_methods())
         .collect(),
         overrides: [
             ("wpUnInitData", __m_folder_uninit as usize),

@@ -28,9 +28,6 @@ const ID_TEMPLATE: u16 = 509;
 const ID_EXE: u16 = 511;
 const ID_PARAMS: u16 = 512;
 const ID_DIR: u16 = 513;
-const ID_ICON: u16 = 521;
-const ID_DETAILS: u16 = 522;
-const ID_TREE: u16 = 523;
 const ID_COLOR: u16 = 531;
 const ID_DEFAULTCOLOR: u16 = 532;
 const ID_PRESET: u16 = 540;
@@ -85,6 +82,17 @@ extern "C" fn wpInsertSettingsPage(_o: usize, nb: u32, pi: *const u8) -> u32 {
         send(nb, BKM_SETSTATUSLINETEXT, id, t.as_ptr() as u32);
     }
     id
+}
+
+/// A page that follows the one before it under its tab (no tab of its
+/// own; its status line says `name`).
+pub fn insert_more(o: usize, nb: u32, page: u32, name: &'static [u8]) -> u32 {
+    let mut pi = [0u32; 13];
+    pi[0] = 52;
+    pi[1] = page;
+    pi[5] = (BKA_STATUSTEXTON as u32) << 16;
+    pi[7] = name.as_ptr() as u32;
+    obj::call(m::WPObject::wpInsertSettingsPage, &[o, nb as usize, pi.as_ptr() as usize]) as u32
 }
 
 /// A PAGEINFO for one of rs2's own pages (a window already made).
@@ -154,12 +162,13 @@ extern "C" fn general_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 }
 
 extern "C" fn wpAddObjectGeneralPage(o: usize, nb: u32) -> u32 {
-    // BS_AUTOCHECKBOX
-    let tpl = template(page_frame(), alloc::vec![
-        label(b"Title (^ starts a new line):", (6, 104, 220)),
-        entry(b"", (8, 92, 216), ID_TITLE),
-        item(WC_BUTTON, b"~Template (opening or dragging it makes a new object)", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (8, 70, 220, 10), ID_TEMPLATE),
-    ]);
+    let mut items = alloc::vec![label(b"Title (^ starts a new line):", (6, 104, 220)), entry(b"", (8, 92, 216), ID_TITLE)];
+    // An object that cannot be copied (a drive) cannot be a template.
+    if obj::call(m::WPObject::wpQueryStyle, &[o]) as u32 & obj::OBJSTYLE_NOCOPY == 0 {
+        // BS_AUTOCHECKBOX
+        items.push(item(WC_BUTTON, b"~Template (opening or dragging it makes a new object)", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (8, 70, 220, 10), ID_TEMPLATE));
+    }
+    let tpl = template(page_frame(), items);
     let page = make_page(nb, general_proc, &tpl, o);
     if page == 0 {
         return 0;
@@ -237,52 +246,6 @@ extern "C" fn program_add_pages(o: usize, nb: u32) -> u32 {
 
 // ---- Folders: View and Background ----
 
-extern "C" fn view_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
-    match msg {
-        WM_INITDLG => {
-            unsafe { WinSetWindowULong(h, QWL_USER, b) };
-            let v = obj::call(m::WPObject::wpQueryDefaultView, &[b as usize]) as u32;
-            let id = match v {
-                obj::OPEN_DETAILS => ID_DETAILS,
-                obj::OPEN_TREE => ID_TREE,
-                _ => ID_ICON,
-            };
-            unsafe { WinSendDlgItemMsg(h, id as u32, BM_SETCHECK, 1, 0) };
-            0
-        }
-        WM_CONTROL if (a >> 16) == 1 => {
-            // BN_CLICKED on a radio button: the default view.
-            let o = unsafe { WinQueryWindowULong(h, QWL_USER) } as usize;
-            let v = match (a & 0xffff) as u16 {
-                ID_DETAILS => obj::OPEN_DETAILS,
-                ID_TREE => obj::OPEN_TREE,
-                _ => obj::OPEN_CONTENTS,
-            };
-            if o != 0 {
-                obj::call(m::WPObject::wpSetDefaultView, &[o, v as usize]);
-            }
-            0
-        }
-        WM_COMMAND => 0,
-        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
-    }
-}
-
-extern "C" fn wpAddFolderView1Page(o: usize, nb: u32) -> u32 {
-    // BS_AUTORADIOBUTTON
-    let radio = |t: &[u8], y: i16, id: u16, first: bool| item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | if first { WS_GROUP } else { 0 } | 0x0004, (10, y, 200, 10), id);
-    let tpl = template(page_frame(), alloc::vec![
-        label(b"Open the folder in:", (6, 104, 200)),
-        radio(b"~Icon view", 88, ID_ICON, true),
-        radio(b"~Details view", 74, ID_DETAILS, false),
-        radio(b"~Tree view", 60, ID_TREE, false),
-    ]);
-    let page = make_page(nb, view_page_proc, &tpl, o);
-    if page == 0 {
-        return 0;
-    }
-    insert(o, nb, page, b"~View\0")
-}
 
 fn show_color(h: u32, rgb: u32) {
     set_item_text(h, ID_COLOR as u32, alloc::format!("{:06X}", rgb).as_bytes());
@@ -355,19 +318,20 @@ extern "C" fn folder_add_pages(o: usize, nb: u32) -> u32 {
     wps::call("WPFolder", m::WPFolder::wpAddFolderBackgroundPage, &[o, nb as usize]);
     wps::call("WPFolder", m::WPFolder::wpAddFolderIncludePage, &[o, nb as usize]);
     wps::call("WPFolder", m::WPFolder::wpAddFolderSortPage, &[o, nb as usize]);
+    // The View tab's pages: inserted last first (each goes in front).
+    wps::call("WPFolder", m::WPFolder::wpAddFolderView3Page, &[o, nb as usize]);
+    wps::call("WPFolder", m::WPFolder::wpAddFolderView2Page, &[o, nb as usize]);
     wps::call("WPFolder", m::WPFolder::wpAddFolderView1Page, &[o, nb as usize]);
     1
 }
 
 methods! {
-    __m_wpAddFolderView1Page => wpAddFolderView1Page, 2;
     __m_wpAddFolderBackgroundPage => wpAddFolderBackgroundPage, 2;
     __m_folder_add_pages => folder_add_pages, 2;
 }
 
 pub fn folder_methods() -> Vec<(&'static str, usize)> {
     alloc::vec![
-        ("wpAddFolderView1Page", __m_wpAddFolderView1Page as usize),
         ("wpAddFolderBackgroundPage", __m_wpAddFolderBackgroundPage as usize),
     ]
 }
