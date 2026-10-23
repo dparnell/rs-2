@@ -71,22 +71,48 @@ fn inset(h: u32) -> i32 {
     if ctl::style(h) & ES_MARGIN != 0 { MARGIN } else { 1 }
 }
 
-/// Characters that fit in the field.
-fn columns(h: u32) -> usize {
+/// The text as shown (asterisks in an ES_UNREADABLE field).
+fn shown(h: u32) -> Vec<u8> {
+    let t = ctl::text(h);
+    if ctl::style(h) & ES_UNREADABLE != 0 { alloc::vec![b'*'; t.len()] } else { t }
+}
+
+/// The width text may take in the field.
+fn room(h: u32) -> i32 {
     let (cx, _) = ctl::size(h);
-    ((cx - 2 * inset(h)) / draw::font().width).max(1) as usize
+    (cx - 2 * inset(h)).max(1)
+}
+
+/// Characters from `first` that fit in the field (at least one).
+fn columns(h: u32, first: usize) -> usize {
+    let t = shown(h);
+    let (f, w) = (draw::font(), room(h));
+    let mut x = 0;
+    let mut n = 0;
+    for &b in t.iter().skip(first) {
+        x += f.char_width(b);
+        if x > w {
+            break;
+        }
+        n += 1;
+    }
+    n.max(1)
 }
 
 /// Scroll so the cursor is visible.
 fn reveal(h: u32) {
-    let cols = columns(h);
+    let t = shown(h);
+    let w = room(h);
     let Some(e) = data(h) else { return };
     let old = e.first;
     if e.cursor < e.first {
         e.first = e.cursor;
-    } else if e.cursor > e.first + cols {
-        // The caret may sit just after the last column.
-        e.first = e.cursor - cols;
+    } else {
+        // The caret may sit just after the last character shown.
+        let c = e.cursor.min(t.len());
+        while e.first < c && draw::text_width(&t[e.first..c]) >= w {
+            e.first += 1;
+        }
     }
     if e.first != old {
         ctl::notify(h, EN_SCROLL);
@@ -147,9 +173,19 @@ fn move_cursor(h: u32, to: usize, extend: bool) {
 /// Character index at a window x position.
 fn index_at(h: u32, x: i32) -> usize {
     let first = data(h).map_or(0, |e| e.first);
+    let t = shown(h);
     let f = draw::font();
-    let col = ((x - inset(h) + f.width / 2) / f.width).max(0) as usize;
-    (first + col).min(ctl::text(h).len())
+    let mut at = inset(h);
+    let mut i = first;
+    while i < t.len() {
+        let cw = f.char_width(t[i]);
+        if x < at + cw / 2 {
+            break;
+        }
+        at += cw;
+        i += 1;
+    }
+    i.min(t.len())
 }
 
 /// Copy the selection to the clipboard (not from ES_UNREADABLE fields).
@@ -238,7 +274,7 @@ fn paint(h: u32) {
     let Some(e) = data(h) else { return };
     let (first, cursor, (sa, sb)) = (e.first, e.cursor, sel(e));
     let m = inset(h);
-    let cols = columns(h);
+    let cols = columns(h, first);
     draw::paint(h, |c| {
         let r = c.rect();
         c.fill(r, draw::window());
@@ -266,13 +302,14 @@ fn paint(h: u32) {
             let a = sa.max(first) - first;
             let b = sb.min(first + cols).max(first) - first;
             if a < b {
-                let sr = Rect::new(x0 + a as i32 * f.width, y - f.descender, x0 + b as i32 * f.width, y - f.descender + f.height).intersect(&area);
+                let (xa, xb) = (x0 + f.text_width(&vis[..a.min(vis.len())]), x0 + f.text_width(&vis[..b.min(vis.len())]));
+                let sr = Rect::new(xa, y - f.descender, xb, y - f.descender + f.height).intersect(&area);
                 c.fill(sr, draw::hilite());
-                c.text(x0 + a as i32 * f.width, y, &vis[a..b.min(vis.len())], draw::hilite_text(), area);
+                c.text(xa, y, &vis[a.min(vis.len())..b.min(vis.len())], draw::hilite_text(), area);
             }
         }
         if focus && cursor >= first {
-            let x = (x0 + (cursor - first) as i32 * f.width).min(area.right - 1);
+            let x = (x0 + f.text_width(&shown[first.min(shown.len())..cursor.min(shown.len())])).min(area.right - 1);
             let cr = Rect::new(x, y - f.descender, x + 1, y - f.descender + f.height).intersect(&area);
             c.fill(cr, draw::text());
         }

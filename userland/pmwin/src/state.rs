@@ -214,6 +214,8 @@ pub struct State {
     /// (the rest are the defaults).
     pub sysvals: BTreeMap<i32, i32>,
     pub syscolors: BTreeMap<i32, u32>,
+    /// The fonts (fonts.rs).
+    pub fonts: crate::fonts::Fonts,
     /// Virtual key states by VK_* (0x80: down, 0x01: toggled), as the
     /// input thread last saw them (WinGetKeyState).
     pub keys: [u8; 256],
@@ -275,6 +277,7 @@ pub fn init(surface: Surface) {
         pres: BTreeMap::new(),
         sysvals: BTreeMap::new(),
         syscolors: BTreeMap::new(),
+        fonts: Default::default(),
         ptr_hidden: 0,
         ptr_hardware: false,
         ptr_level: 0,

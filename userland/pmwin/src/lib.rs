@@ -25,6 +25,7 @@ mod draw;
 mod entry;
 mod exports;
 mod fileicon;
+mod fonts;
 mod frame;
 mod help;
 mod gpiapi;

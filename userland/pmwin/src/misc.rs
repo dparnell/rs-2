@@ -61,6 +61,7 @@ pub extern "C" fn WinInitialize(_fl: u32) -> u32 {
             state::init(surface);
             win::register_builtin();
         }
+        crate::fonts::init();
     }
     HAB
 }

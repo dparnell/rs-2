@@ -298,7 +298,7 @@ impl Pen {
     /// A character of the system font, its inked part scaled to `h`
     /// design units tall and centred on (cx, cy).
     pub(crate) fn glyph(&mut self, ch: u8, cx: f64, cy: f64, h: f64, c: u32) {
-        let f = gpi::font::system();
+        let f = gpi::font::vio();
         let rows: Vec<u8> = (0..16).map(|r| f.row(ch, r)).collect();
         let top = rows.iter().position(|&r| r != 0).unwrap_or(0);
         let bot = rows.iter().rposition(|&r| r != 0).unwrap_or(15);

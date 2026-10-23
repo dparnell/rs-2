@@ -143,7 +143,7 @@ fn color_rgb(v: i32) -> u32 {
 }
 
 fn system_fattrs() -> [u8; 56] {
-    let f = draw::font();
+    let f = crate::fonts::mono();
     let mut v = [0u8; 56];
     v[0..2].copy_from_slice(&56u16.to_le_bytes());
     v[4..8].copy_from_slice(&1i32.to_le_bytes());
@@ -163,7 +163,7 @@ fn font_from(fa: &[u8; 56]) -> (i32, i32, bool, bool) {
     let face = &face[..face.iter().position(|&b| b == 0).unwrap_or(32)];
     let h = i32::from_le_bytes([fa[44], fa[45], fa[46], fa[47]]);
     let w = i32::from_le_bytes([fa[48], fa[49], fa[50], fa[51]]);
-    let f = draw::font();
+    let f = crate::fonts::mono();
     let outline = use_ & FATTR_FONTUSE_OUTLINE != 0 || !face.starts_with(b"System");
     let ch = if h > 0 { h.clamp(6, 96) } else { f.height };
     let cw = if w > 0 && !outline { w.clamp(3, 64) } else if outline { (ch / 2).max(3) } else { f.width };
@@ -461,11 +461,11 @@ fn ipt_at(h: u32, x: i32, y: i32) -> usize {
 /// Draw `t` with the glyphs scaled to cells of cw x ch, the baseline
 /// cell bottom at y.
 fn cells_text(c: &mut Canvas, x: i32, bottom: i32, t: &[u8], col: u32, clip: Rect, cw: i32, ch: i32, bold: bool) {
-    let f = draw::font();
+    let f = crate::fonts::mono();
     if cw == f.width && ch == f.height {
-        c.text(x, bottom + f.descender, t, col, clip);
+        c.text_font(f, x, bottom + f.descender, t, col, clip);
         if bold {
-            c.text(x + 1, bottom + f.descender, t, col, clip);
+            c.text_font(f, x + 1, bottom + f.descender, t, col, clip);
         }
         return;
     }
@@ -709,7 +709,7 @@ fn create(h: u32, ctl_data: u32) {
             fmt_width = Some(cx);
         }
     }
-    let f = draw::font();
+    let f = crate::fonts::mono();
     let text = ctl::text(h);
     let mut vscroll = 0;
     let mut hscroll = 0;

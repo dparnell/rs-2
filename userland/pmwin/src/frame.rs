@@ -436,8 +436,7 @@ pub fn draw_minimized(c: &mut Canvas, icon: u32, title: &[u8], active: bool) {
     let icon = if icon != 0 && crate::pointer::get(icon).is_some() { icon } else { crate::pointer::system(pmwin::sysptr::SPTR_APPICON) };
     crate::pointer::draw_in(c, ir, icon, false, false);
     let f = draw::font();
-    let cols = (r.width() / f.width).max(1) as usize;
-    let mut lines = draw::wrap(title, cols);
+    let mut lines = draw::wrap(title, r.width());
     lines.truncate(2);
     let tw = lines.iter().map(|l| draw::text_width(l)).max().unwrap_or(0);
     let th = lines.len() as i32 * f.height;

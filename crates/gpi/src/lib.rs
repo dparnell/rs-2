@@ -21,6 +21,7 @@ pub mod metafile;
 pub mod pattern;
 mod ps;
 pub mod raster;
+pub mod ttf;
 mod rect;
 pub mod region;
 mod surface;

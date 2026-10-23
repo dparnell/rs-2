@@ -64,6 +64,18 @@ pub struct Metrics {
     pub area_h: i32,
     /// CV_FLOW: the name and text views fill columns.
     pub flow: bool,
+    /// The width of a text in pels (a proportional font), else
+    /// characters times `cw`.
+    pub measure: Option<fn(&[u8]) -> i32>,
+}
+
+impl Metrics {
+    pub fn text_width(&self, t: &[u8]) -> i32 {
+        match self.measure {
+            Some(f) => f(t),
+            None => t.len() as i32 * self.cw,
+        }
+    }
 }
 
 /// What the layout needs to know about a record.
@@ -142,8 +154,34 @@ pub fn lines(t: &[u8], cols: usize) -> Vec<Vec<u8>> {
     out
 }
 
-fn text_w(l: &[Vec<u8>], cw: i32) -> i32 {
-    l.iter().map(|x| x.len() as i32 * cw).max().unwrap_or(0)
+fn text_w(l: &[Vec<u8>], m: &Metrics) -> i32 {
+    l.iter().map(|x| m.text_width(x)).max().unwrap_or(0)
+}
+
+/// Lines of a text: split at line ends, each wrapped at blanks to at most
+/// `width` pels as `m` measures them.
+pub fn lines_in(t: &[u8], width: i32, m: &Metrics) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    for raw in t.split(|&c| c == b'\n') {
+        let mut rest = raw.strip_suffix(b"\r").unwrap_or(raw);
+        while rest.len() > 1 && m.text_width(rest) > width {
+            // The longest start that fits (at least one character).
+            let mut fit = 1;
+            while fit < rest.len() && m.text_width(&rest[..fit + 1]) <= width {
+                fit += 1;
+            }
+            let cut = rest[..=fit.min(rest.len() - 1)].iter().rposition(|&c| c == b' ').filter(|&i| i > 0 && i <= fit).unwrap_or(fit);
+            out.push(rest[..cut].to_vec());
+            rest = &rest[cut..];
+            while rest.first() == Some(&b' ') {
+                rest = &rest[1..];
+            }
+        }
+        if !rest.is_empty() || out.is_empty() {
+            out.push(rest.to_vec());
+        }
+    }
+    out
 }
 
 /// The icon view item for `it` at its position.
@@ -151,8 +189,8 @@ pub fn icon_item(index: usize, it: &Item, m: &Metrics) -> Placed {
     let (x, y) = it.pos;
     let n = m.icon;
     let icon = if n > 0 { Rect::new(x, y, x + n, y + n) } else { Rect::new(x, y, x, y) };
-    let ls = lines(&it.text, (icon_text_width(m) / m.cw).max(1) as usize);
-    let tw = text_w(&ls, m.cw) + 4;
+    let ls = lines_in(&it.text, icon_text_width(m), m);
+    let tw = text_w(&ls, m) + 4;
     let th = ls.len() as i32 * m.ch;
     let cx = x + n / 2;
     let top = if n > 0 { y - 1 } else { y + th };
@@ -224,7 +262,7 @@ pub fn layout(view: View, items: &[Item], m: &Metrics, cols: &[Column]) -> (Vec<
                 };
                 let ls = lines(&it.text, 0);
                 let first: Vec<Vec<u8>> = ls.into_iter().take(1).collect();
-                let tw = text_w(&first, m.cw) + 4;
+                let tw = text_w(&first, m) + 4;
                 let ty = top - 1 - (rh - m.spacing - 2 + m.ch) / 2;
                 let text = Rect::new(x, ty, x + tw, ty + m.ch);
                 let rect = Rect::new(col_x, top - rh, x + tw, top);
@@ -268,9 +306,9 @@ pub fn column_widths(items: &[Item], m: &Metrics, cols: &[Column]) -> Vec<i32> {
             let content = if col.icon {
                 m.icon.max(16)
             } else {
-                items.iter().map(|it| it.cells.get(c).map_or(0, |t| t.len() as i32 * m.cw)).max().unwrap_or(0)
+                items.iter().map(|it| it.cells.get(c).map_or(0, |t| m.text_width(t))).max().unwrap_or(0)
             };
-            content.max(col.title.len() as i32 * m.cw) + 12
+            content.max(m.text_width(&col.title)) + 12
         })
         .collect()
 }
@@ -328,7 +366,7 @@ pub fn neighbour(placed: &[Placed], from: usize, d: Dir) -> Option<usize> {
 /// from the top-left of the area, left to right.
 pub fn arrange(items: &[Item], m: &Metrics) -> Vec<(i32, i32)> {
     let cell_w = icon_text_width(m) + 8;
-    let max_lines = items.iter().map(|it| lines(&it.text, (icon_text_width(m) / m.cw).max(1) as usize).len()).max().unwrap_or(1).min(3) as i32;
+    let max_lines = items.iter().map(|it| lines_in(&it.text, icon_text_width(m), m).len()).max().unwrap_or(1).min(3) as i32;
     let cell_h = m.icon + 4 + max_lines * m.ch + 8;
     let per_row = ((m.area_w - 4) / cell_w).max(1) as usize;
     (0..items.len())
@@ -438,7 +476,7 @@ mod tests {
     use alloc::vec;
 
     fn m() -> Metrics {
-        Metrics { cw: 8, ch: 16, icon: 32, spacing: 0, indent: 16, area_w: 400, area_h: 200, flow: false }
+        Metrics { cw: 8, ch: 16, icon: 32, spacing: 0, indent: 16, area_w: 400, area_h: 200, flow: false, measure: None }
     }
 
     fn item(t: &str, pos: (i32, i32)) -> Item {

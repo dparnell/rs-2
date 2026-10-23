@@ -412,13 +412,25 @@ impl Ps {
     /// Draw `text` with the baseline starting at `p` (device coordinates);
     /// the current position moves to the end of the string.
     pub fn char_string_at(&mut self, s: &mut Surface, p: Point, text: &[u8]) {
-        self.glyphs_at(s, p, text, self.color, self.mix, self.back_color, self.back_mix);
+        self.glyphs_at(s, self.font, p, text, self.color, self.mix, self.back_color, self.back_mix);
         self.pos = Point::new(p.x + self.font.text_width(text), p.y);
     }
 
+    /// One pel of an anti-aliased glyph: colour `c` over what is there,
+    /// by coverage `a`.
+    fn blend(&self, s: &mut Surface, x: i32, y: i32, c: Rgb, a: u8) {
+        let (dx, dy) = (x + self.origin.x, y + self.origin.y);
+        if !self.clip.iter().any(|r| r.contains(Point::new(dx, dy))) {
+            return;
+        }
+        let Some(old) = s.get(dx, dy) else { return };
+        let (a, na) = (a as u32, 255 - a as u32);
+        let ch = |sh: u32| (((c >> sh) & 0xff) * a + ((old >> sh) & 0xff) * na + 127) / 255;
+        s.set(dx, dy, ch(16) << 16 | ch(8) << 8 | ch(0));
+    }
+
     #[allow(clippy::too_many_arguments)]
-    fn glyphs_at(&self, s: &mut Surface, p: Point, text: &[u8], c: Rgb, mix: Mix, back: Rgb, back_mix: Mix) {
-        let f = self.font;
+    fn glyphs_at(&self, s: &mut Surface, f: &Font, p: Point, text: &[u8], c: Rgb, mix: Mix, back: Rgb, back_mix: Mix) {
         let bottom = p.y - f.descender;
         if back_mix != Mix::LeaveAlone {
             let r = Rect::new(p.x, bottom, p.x + f.text_width(text), bottom + f.height);
@@ -433,17 +445,26 @@ impl Ps {
             }
         }
         let mut x0 = p.x;
+        let smooth = f.smooth();
         for &b in text {
-            let w = f.char_width(b);
+            let (l, n) = f.ink(b);
             for row in 0..f.height {
                 let y = bottom + f.height - 1 - row;
-                for col in 0..w {
-                    if f.pixel(b, row, col) {
+                for col in l..l + n {
+                    if smooth {
+                        match f.coverage(b, row, col) {
+                            0 => {}
+                            255 => self.plot(s, x0 + col, y, c, mix),
+                            a if mix == Mix::Overpaint => self.blend(s, x0 + col, y, c, a),
+                            a if a >= 128 => self.plot(s, x0 + col, y, c, mix),
+                            _ => {}
+                        }
+                    } else if f.pixel(b, row, col) {
                         self.plot(s, x0 + col, y, c, mix);
                     }
                 }
             }
-            x0 += w;
+            x0 += f.char_width(b);
         }
     }
 
@@ -1221,6 +1242,22 @@ impl Ps {
         (sqrt(bx * bx + by * by) / self.font.width as f64, sqrt(cx * cx + cy * cy) / self.font.height as f64)
     }
 
+    /// The font text draws with and its scale: for an outline font with
+    /// outlines, the face made at the character box's size (scale 1),
+    /// else the current font scaled.
+    fn text_font(&self) -> (&'static Font, f64, f64) {
+        let (sx, sy) = self.text_scale();
+        if self.logfont.outline
+            && let Some(src) = self.font.source
+            && sy > 0.0
+            && abs(sx / sy - 1.0) < 0.05
+            && let Some(f) = src.at(round(sy * self.font.em as f64))
+        {
+            return (f, 1.0, 1.0);
+        }
+        (self.font, sx, sy)
+    }
+
     /// Horizontal offset of glyph pels per pel above the baseline: the
     /// character shear (outline fonts; GpiSetCharShear) and italics.
     fn slant(&self) -> f64 {
@@ -1234,14 +1271,14 @@ impl Ps {
 
     /// Advance of `n` characters plus extra spacing, in device pels.
     fn advance(&self, text: &[u8], dx: Option<&[i32]>) -> Vec<f64> {
-        let (sx, _) = self.text_scale();
+        let (f, sx, _) = self.text_font();
         let (ex, _) = self.dev_vec(fx(self.attrs.char_extra), 0.0);
         let (bx, _) = self.dev_vec(fx(self.attrs.char_break_extra), 0.0);
         text.iter()
             .enumerate()
             .map(|(i, &c)| match dx.and_then(|d| d.get(i)) {
                 Some(&w) => self.dev_vec(w as f64, 0.0).0,
-                None => self.font.char_width(c) as f64 * sx + ex + if c == b' ' { bx } else { 0.0 },
+                None => f.char_width(c) as f64 * sx + ex + if c == b' ' { bx } else { 0.0 },
             })
             .collect()
     }
@@ -1255,8 +1292,7 @@ impl Ps {
         let start = self.dev(p);
         let adv = self.advance(text, dx);
         let total: f64 = adv.iter().sum();
-        let (sx, sy) = self.text_scale();
-        let f = self.font;
+        let (f, sx, sy) = self.text_font();
         let saved_clip = if clip_to && let Some(r) = rect {
             let saved = self.clip.clone();
             let d = self.world_rect_to_device(r);
@@ -1275,8 +1311,9 @@ impl Ps {
             self.flush_fig();
             let mut x = start.0;
             for (i, &b) in text.iter().enumerate() {
+                let (l, n) = f.ink(b);
                 for row in 0..f.height {
-                    for col in 0..f.char_width(b) {
+                    for col in l..l + n {
                         if f.pixel(b, row, col) {
                             let up = (f.height - 1 - row - f.descender) as f64 * sy;
                             let (x0, y0) = (x + col as f64 * sx + up * slant, bottom + (f.height - 1 - row) as f64 * sy);
@@ -1299,7 +1336,7 @@ impl Ps {
                 let plain = slant == 0.0 && !lf.bold && !lf.underscore;
                 if plain && sx == 1.0 && sy == 1.0 && dx.is_none() && self.attrs.char_extra == 0 && self.attrs.char_break_extra == 0 {
                     let bm = if opaque { Mix::LeaveAlone } else { bmix };
-                    self.glyphs_at(s, Point::new(round(start.0), round(start.1)), text, fg, mix, bg, bm);
+                    self.glyphs_at(s, f, Point::new(round(start.0), round(start.1)), text, fg, mix, bg, bm);
                 } else {
                     // The character cells' background (BM_OVERPAINT etc.),
                     // as for plain text.
@@ -1318,10 +1355,11 @@ impl Ps {
                     let mut x = start.0;
                     let wide = lf.bold as i32;
                     for (i, &b) in text.iter().enumerate() {
+                        let (l, n) = f.ink(b);
                         for row in 0..f.height {
                             let y0 = round(bottom + (f.height - 1 - row) as f64 * sy);
                             let y1 = round(bottom + (f.height - row) as f64 * sy);
-                            for col in 0..f.char_width(b) {
+                            for col in l..l + n {
                                 if f.pixel(b, row, col) {
                                     let (x0, x1) = (x + col as f64 * sx, x + (col + 1) as f64 * sx);
                                     for y in y0..y1.max(y0 + 1) {
@@ -1355,9 +1393,8 @@ impl Ps {
     /// GpiQueryTextBox: corners relative to the start point (world):
     /// top-left, bottom-left, top-right, bottom-right, concatenation point.
     pub fn text_box(&self, text: &[u8]) -> [Point; 5] {
-        let (_, sy) = self.text_scale();
+        let (f, _, sy) = self.text_font();
         let total: f64 = self.advance(text, None).iter().sum();
-        let f = self.font;
         let asc = (f.height - f.descender) as f64 * sy;
         let desc = f.descender as f64 * sy;
         let inv = self.xf.invert().unwrap_or(Matrix::IDENTITY);

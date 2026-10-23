@@ -352,14 +352,35 @@ pub extern "C" fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *c
     let found = find_font(&face, lmatch);
     let outline = usef & FATTR_FONTUSE_OUTLINE != 0 || sel & FATTR_SEL_OUTLINE != 0 || found.is_some_and(|i| FONTS[i].1);
     // fsSelection: FATTR_SEL_ITALIC 1, FATTR_SEL_UNDERSCORE 2,
-    // FATTR_SEL_BOLD 0x20, simulated when the text is drawn.
-    let lf = LogFont { outline, italic: sel & 1 != 0, underscore: sel & 2 != 0, bold: sel & 0x20 != 0 };
+    // FATTR_SEL_BOLD 0x20, simulated when the text is drawn (unless the
+    // face has a bold or italic of its own).
+    let mut lf = LogFont { outline, italic: sel & 1 != 0, underscore: sel & 2 != 0, bold: sel & 0x20 != 0 };
     if let Some(i) = found {
         face = [0; 32];
         face[..FONTS[i].0.len()].copy_from_slice(FONTS[i].0);
     }
+    // A face with outlines (fonts.rs): its own bold and italic; an image
+    // face's size from lMaxBaselineExt.
+    let mut n = 0;
+    if let Some(i) = crate::fonts::face_index(trim(&face)) {
+        let j = crate::fonts::styled(i, lf.bold, lf.italic);
+        let has = |w: &[u8]| crate::fonts::face_name(j).windows(w.len()).any(|x| x == w);
+        // The face draws them: no simulation.
+        lf.bold &= !has(b"Bold");
+        lf.italic &= !has(b"Italic");
+        let px = if outline {
+            OUTLINE_EM
+        } else if maxbe > 0 {
+            (maxbe * 8 / 9).max(6)
+        } else {
+            crate::fonts::SYSTEM_EM
+        };
+        if crate::fonts::face(j, px).is_some() {
+            n = FACE_FONT | (j as u32) << 16 | px as u32;
+        }
+    }
     e.gpi.lcids.retain(|(l, _)| *l != lcid);
-    e.gpi.lcids.push((lcid, Lcid::Font(lf, face, 0)));
+    e.gpi.lcids.push((lcid, Lcid::Font(lf, face, n)));
     if found.is_some() || outline { 2 } else { 1 }
 }
 
@@ -579,8 +600,18 @@ fn loaded() -> &'static mut Vec<Option<Loaded>> {
 }
 
 fn loaded_font(n: u32) -> Option<&'static gpi::font::Font> {
+    if n & FACE_FONT != 0 {
+        return crate::fonts::face(((n >> 16) & 0x7fff) as usize, (n & 0xffff) as i32);
+    }
     loaded().get((n as usize).checked_sub(1)?)?.as_ref().map(|l| l.font)
 }
+
+/// A logical font's font number for a face of fonts.rs: this bit, the
+/// face index (bits 16-30) and the em in pels.
+const FACE_FONT: u32 = 0x8000_0000;
+/// The em outline faces are made at before the character box scales
+/// them (text then uses the face made at the box's size).
+const OUTLINE_EM: i32 = 16;
 
 /// The loaded font for a FATTRS: by lMatch, else by face at the nearest
 /// size.

@@ -1293,7 +1293,7 @@ fn cstr(p: *const u8) -> Option<Vec<u8>> {
     Some(v)
 }
 
-fn read_file(name: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn read_file(name: &[u8]) -> Option<Vec<u8>> {
     let mut z = name.to_vec();
     z.push(0);
     let (mut hf, mut action) = (0u32, 0u32);

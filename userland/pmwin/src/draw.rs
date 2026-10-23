@@ -181,14 +181,22 @@ impl Canvas<'_> {
         self.ps.clip = saved;
     }
 
+    /// Text in font `f` (not the system font) with its baseline at
+    /// (x, y), clipped to `clip`.
+    pub fn text_font(&mut self, f: &'static gpi::font::Font, x: i32, y: i32, t: &[u8], c: u32, clip: Rect) {
+        let saved = core::mem::replace(&mut self.ps.font, f);
+        self.text(x, y, t, c, clip);
+        self.ps.font = saved;
+    }
+
     /// Text with mnemonic marks at baseline (x, y).
     pub fn mnemonic_text(&mut self, x: i32, y: i32, t: &[u8], c: u32, clip: Rect) {
         let (s, m) = strip_mnemonic(t);
         self.text(x, y, &s, c, clip);
         if let Some(i) = m {
             let f = font();
-            let ux = x + i as i32 * f.width;
-            let r = Rect::new(ux, y - 2, ux + f.width, y - 1).intersect(&clip);
+            let ux = x + f.text_width(&s[..i]);
+            let r = Rect::new(ux, y - 2, ux + s.get(i).map_or(f.width, |&b| f.char_width(b)), y - 1).intersect(&clip);
             self.fill(r, c);
         }
     }
@@ -197,7 +205,7 @@ impl Canvas<'_> {
     /// at spaces. Returns the number of bytes drawn.
     pub fn text_in(&mut self, r: Rect, t: &[u8], c: u32, fl: u32) -> usize {
         let f = font();
-        let lines: Vec<&[u8]> = if fl & DT_WORDBREAK != 0 { wrap(t, (r.width() / f.width).max(1) as usize) } else { alloc::vec![t] };
+        let lines: Vec<&[u8]> = if fl & DT_WORDBREAK != 0 { wrap(t, r.width()) } else { alloc::vec![t] };
         let total = lines.len() as i32 * f.height;
         let mut top = if fl & DT_VCENTER != 0 {
             r.top - (r.height() - total) / 2
@@ -208,8 +216,7 @@ impl Canvas<'_> {
         };
         let mut drawn = 0;
         for l in lines {
-            let shown = if fl & DT_MNEMONIC != 0 { strip_mnemonic(l).0.len() } else { l.len() };
-            let w = shown as i32 * f.width;
+            let w = if fl & DT_MNEMONIC != 0 { f.text_width(&strip_mnemonic(l).0) } else { f.text_width(l) };
             let x = if fl & DT_CENTER != 0 {
                 r.left + (r.width() - w) / 2
             } else if fl & DT_RIGHT != 0 {
@@ -249,17 +256,23 @@ impl Canvas<'_> {
     }
 }
 
-/// Split text into lines of at most `cols` characters at spaces.
-pub fn wrap(t: &[u8], cols: usize) -> Vec<&[u8]> {
+/// Split text into lines at most `width` pels wide (the system font)
+/// at spaces.
+pub fn wrap(t: &[u8], width: i32) -> Vec<&[u8]> {
+    let f = font();
     let mut out = Vec::new();
     for para in t.split(|&c| c == b'\n') {
         let mut rest = para;
         loop {
-            if rest.len() <= cols {
+            if f.text_width(rest) <= width || rest.len() <= 1 {
                 out.push(rest);
                 break;
             }
-            let cut = rest[..=cols].iter().rposition(|&c| c == b' ').unwrap_or(cols);
+            let mut cols = 1;
+            while cols < rest.len() && f.text_width(&rest[..cols + 1]) <= width {
+                cols += 1;
+            }
+            let cut = rest[..=cols.min(rest.len() - 1)].iter().rposition(|&c| c == b' ').filter(|&i| i > 0 && i <= cols).unwrap_or(cols);
             out.push(&rest[..cut]);
             rest = &rest[cut..];
             while rest.first() == Some(&b' ') {

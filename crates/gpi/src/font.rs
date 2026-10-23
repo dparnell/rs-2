@@ -1,6 +1,10 @@
-//! Bitmap fonts. The built-in font is unscii-16 (8x16, public domain) laid
-//! out in code page 850, the system's default. OS/2 image fonts (the
-//! RT_FONT resources of .FON files) load with `Font::from_os2`.
+//! Fonts. The built-in font is unscii-16 (8x16, public domain) laid out
+//! in code page 850, the system's default; OS/2 image fonts (the RT_FONT
+//! resources of .FON files) load with `Font::from_os2`; outline fonts
+//! (TrueType, `ttf.rs`; Type 1, `type1.rs`) are rendered at a size with
+//! `Font::from_outline`, anti-aliased: each glyph a coverage map.
+//! PMWIN installs the system font (`set_system`); until then it is
+//! unscii.
 
 use alloc::vec::Vec;
 
@@ -21,6 +25,83 @@ pub struct Font {
     pub descender: i32,
     glyphs: [[u8; 16]; 256],
     loaded: Option<Vec<Glyph>>,
+    /// An outline font's glyphs at this size (coverage maps).
+    rendered: Option<Vec<crate::ttf::Rendered>>,
+    /// The outlines it was rendered from (other sizes come from them).
+    pub source: Option<&'static Source>,
+    /// Pels to the em (for outline fonts, the size it was made at).
+    pub em: i32,
+}
+
+/// What an outline font file offers: TrueType or Type 1.
+pub trait Outlines: Sync {
+    /// Pels per font unit for an em of `px` pels.
+    fn scale_for(&self, px: f64) -> f64;
+    /// A character's glyph at `scale`, emboldened by `bold` pels.
+    fn render(&self, ch: char, scale: f64, bold: f64) -> crate::ttf::Rendered;
+    /// (ascender, descender, average width) in font units.
+    fn metrics(&self) -> (i32, i32, i32);
+}
+
+impl Outlines for crate::ttf::Ttf {
+    fn scale_for(&self, px: f64) -> f64 {
+        crate::ttf::Ttf::scale_for(self, px)
+    }
+    fn render(&self, ch: char, scale: f64, bold: f64) -> crate::ttf::Rendered {
+        crate::ttf::Ttf::render(self, ch, scale, bold)
+    }
+    fn metrics(&self) -> (i32, i32, i32) {
+        (self.ascender, self.descender, self.avg_width)
+    }
+}
+
+/// An outline face as fonts are made from it: the outlines, simulated
+/// bold (a fraction of the em), and the sizes made so far (shared by the
+/// processes that use them; touched only with PM's lock held).
+pub struct Source {
+    pub name: &'static str,
+    pub outlines: &'static dyn Outlines,
+    pub bold: f64,
+    sizes: core::cell::UnsafeCell<Vec<(i32, &'static Font)>>,
+}
+
+unsafe impl Sync for Source {}
+
+/// At most this many sizes of a face are kept; others are scaled.
+const MAX_SIZES: usize = 32;
+
+impl Source {
+    pub fn new(name: &'static str, outlines: &'static dyn Outlines, bold: f64) -> Source {
+        Source { name, outlines, bold, sizes: core::cell::UnsafeCell::new(Vec::new()) }
+    }
+
+    /// The face at an em of `px` pels (made once, then kept).
+    pub fn at(&'static self, px: i32) -> Option<&'static Font> {
+        if !(4..=400).contains(&px) {
+            return None;
+        }
+        let sizes = unsafe { &mut *self.sizes.get() };
+        if let Some(&(_, f)) = sizes.iter().find(|(p, _)| *p == px) {
+            return Some(f);
+        }
+        if sizes.len() >= MAX_SIZES {
+            return None;
+        }
+        let f: &'static Font = alloc::boxed::Box::leak(alloc::boxed::Box::new(self.make(px)));
+        sizes.push((px, f));
+        Some(f)
+    }
+
+    fn make(&'static self, px: i32) -> Font {
+        let s = self.outlines.scale_for(px as f64);
+        let (a, d, w) = self.outlines.metrics();
+        let up = |v: i32| crate::math::ceil(v as f64 * s) as i32;
+        let bold = self.bold * px as f64;
+        let mut f = Font::from_outline(self.name, up(a), up(d), crate::math::round(w as f64 * s + bold), &|c| self.outlines.render(c, s, bold));
+        f.source = Some(self);
+        f.em = px;
+        f
+    }
 }
 
 /// A loaded font's glyph: its width (also its advance) and rows of
@@ -75,7 +156,7 @@ impl Font {
         for (b, g) in glyphs.iter_mut().enumerate() {
             *g = lookup(cp850(b as u8)).or_else(|| lookup('?')).unwrap_or([0; 16]);
         }
-        Font { name: "System VIO", width: 8, height: 16, descender: 4, glyphs, loaded: None }
+        Font { name: "System VIO", width: 8, height: 16, descender: 4, glyphs, loaded: None, rendered: None, source: None, em: 16 }
     }
 
     /// An OS/2 image font resource (FONTSIGNATURE "OS/2 FONT",
@@ -142,13 +223,71 @@ impl Font {
         }
         let avg = if fields[10] > 0 { fields[10] as i32 } else { cw.max(1) };
         let name: &'static str = alloc::boxed::Box::leak(alloc::string::String::from_utf8_lossy(&face).into_owned().into_boxed_str());
-        let font = Font { name, width: avg, height: ch, descender: (ch - base).max(0), glyphs: [[0; 16]; 256], loaded: Some(glyphs) };
+        let font = Font { name, width: avg, height: ch, descender: (ch - base).max(0), glyphs: [[0; 16]; 256], loaded: Some(glyphs), rendered: None, source: None, em: ch };
         Some((font, Os2FontInfo { family, face, fields }))
+    }
+
+    /// An outline font at `px` pels to the em: the characters of code
+    /// page 850 rendered by `render` (character, scale) at the scale
+    /// `scale`; `ascender` and `descender` (positive) in pels give the
+    /// cell; `avg` is the average character width in pels.
+    pub fn from_outline(name: &'static str, ascender: i32, descender: i32, avg: i32, render: &dyn Fn(char) -> crate::ttf::Rendered) -> Font {
+        let mut v = Vec::with_capacity(256);
+        for b in 0..=255u8 {
+            let mut r = if b == 0 { crate::ttf::Rendered::default() } else { render(cp850(b)) };
+            // Line ends and tabs have no ink.
+            if matches!(b, 0x07..=0x0d) {
+                r = crate::ttf::Rendered { advance: r.advance, ..Default::default() };
+            }
+            v.push(r);
+        }
+        Font { name, width: avg.max(1), height: ascender + descender, descender, glyphs: [[0; 16]; 256], loaded: None, rendered: Some(v), source: None, em: 0 }
+    }
+
+    /// Whether glyphs have partial coverage (draw with `coverage`).
+    pub fn smooth(&self) -> bool {
+        self.rendered.is_some()
+    }
+
+    /// The columns (relative to the pen) a glyph may ink: (first, count).
+    pub fn ink(&self, b: u8) -> (i32, i32) {
+        match &self.rendered {
+            Some(g) => (g[b as usize].left, g[b as usize].w),
+            None => (0, self.char_width(b)),
+        }
+    }
+
+    /// Coverage 0..=255 of pel (`col`, `r`) of character `b` (`col`
+    /// relative to the pen, `r` from the top of the cell).
+    pub fn coverage(&self, b: u8, r: i32, col: i32) -> u8 {
+        match &self.rendered {
+            Some(g) => {
+                let g = &g[b as usize];
+                // The glyph's top row in cell rows.
+                let x = col - g.left;
+                let y = r - (self.height - self.descender - g.top);
+                if x < 0 || y < 0 || x >= g.w || y >= g.h {
+                    0
+                } else {
+                    g.cov[(y * g.w + x) as usize]
+                }
+            }
+            None => {
+                if self.pixel(b, r, col) {
+                    255
+                } else {
+                    0
+                }
+            }
+        }
     }
 
     /// Row `r` (0 = top) of the glyph for byte `b`; bit 7 is the leftmost
     /// pixel (the first 8 columns of a loaded font's glyph).
     pub fn row(&self, b: u8, r: usize) -> u8 {
+        if self.rendered.is_some() {
+            return (0..8).fold(0, |a, c| a | if self.pixel(b, r as i32, c) { 0x80 >> c } else { 0 });
+        }
         match &self.loaded {
             Some(g) => g[b as usize].rows.get(r * ((g[b as usize].width + 7) / 8) as usize).copied().unwrap_or(0),
             None => self.glyphs[b as usize][r],
@@ -157,6 +296,9 @@ impl Font {
 
     /// Width (and advance) of character `b`.
     pub fn char_width(&self, b: u8) -> i32 {
+        if let Some(g) = &self.rendered {
+            return g[b as usize].advance;
+        }
         match &self.loaded {
             Some(g) => g[b as usize].width,
             None => self.width,
@@ -166,7 +308,13 @@ impl Font {
     /// Whether pel (`col`, `r`) of character `b`'s glyph is set (0, 0 is
     /// its top left).
     pub fn pixel(&self, b: u8, r: i32, col: i32) -> bool {
-        if r < 0 || col < 0 || r >= self.height {
+        if r < 0 || r >= self.height {
+            return false;
+        }
+        if self.rendered.is_some() {
+            return self.coverage(b, r, col) >= 128;
+        }
+        if col < 0 {
             return false;
         }
         match &self.loaded {
@@ -180,22 +328,36 @@ impl Font {
     }
 
     pub fn text_width(&self, s: &[u8]) -> i32 {
-        match &self.loaded {
-            Some(_) => s.iter().map(|&b| self.char_width(b)).sum(),
-            None => self.width * s.len() as i32,
+        if self.loaded.is_some() || self.rendered.is_some() {
+            s.iter().map(|&b| self.char_width(b)).sum()
+        } else {
+            self.width * s.len() as i32
         }
     }
 }
 
-static mut SYSTEM: Option<Font> = None;
+static mut VIO: Option<Font> = None;
+static SYSTEM: core::sync::atomic::AtomicPtr<Font> = core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
 
-/// The default font (built on first use; not thread safe on the very first
-/// call, which PMGPI makes during initialisation).
-pub fn system() -> &'static Font {
+/// The built-in monospaced font, unscii (built on first use; not thread
+/// safe on the very first call, which PMGPI makes during
+/// initialisation).
+pub fn vio() -> &'static Font {
     unsafe {
-        let slot = &mut *core::ptr::addr_of_mut!(SYSTEM);
+        let slot = &mut *core::ptr::addr_of_mut!(VIO);
         slot.get_or_insert_with(Font::build)
     }
+}
+
+/// The system font: the one installed with `set_system`, else unscii.
+pub fn system() -> &'static Font {
+    let p = SYSTEM.load(core::sync::atomic::Ordering::Acquire);
+    if p.is_null() { vio() } else { unsafe { &*p } }
+}
+
+/// Make `f` the system font (fonts already handed out stay valid).
+pub fn set_system(f: &'static Font) {
+    SYSTEM.store(f as *const Font as *mut Font, core::sync::atomic::Ordering::Release);
 }
 
 #[cfg(test)]

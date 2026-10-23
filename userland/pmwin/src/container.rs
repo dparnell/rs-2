@@ -469,6 +469,7 @@ fn metrics(h: u32, c: &Cnr, area: Rect) -> Metrics {
         area_w: area.width(),
         area_h: area.height(),
         flow: c.attr & layout::CV_FLOW != 0,
+        measure: Some(draw::text_width),
     }
 }
 
@@ -836,7 +837,7 @@ fn paint(h: u32) {
             }
             let mut y = row.text_r.top;
             for ln in &row.lines {
-                let tw = ln.len() as i32 * f.width;
+                let tw = f.text_width(ln);
                 let x = if v == View::Icon { row.text_r.left + (row.text_r.width() - tw) / 2 } else { row.text_r.left + 2 };
                 cv.text(x, y - f.height + f.descender, ln, fg, row.text_r);
                 y -= f.height;
