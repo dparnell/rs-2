@@ -334,6 +334,8 @@ extern "C" fn wpAddFolderBackgroundPage(o: usize, nb: u32) -> u32 {
 extern "C" fn folder_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
     wps::call("WPFolder", m::WPFolder::wpAddFolderBackgroundPage, &[o, nb as usize]);
+    wps::call("WPFolder", m::WPFolder::wpAddFolderIncludePage, &[o, nb as usize]);
+    wps::call("WPFolder", m::WPFolder::wpAddFolderSortPage, &[o, nb as usize]);
     wps::call("WPFolder", m::WPFolder::wpAddFolderView1Page, &[o, nb as usize]);
     1
 }

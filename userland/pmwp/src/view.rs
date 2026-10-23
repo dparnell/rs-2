@@ -306,17 +306,30 @@ fn visible(o: usize) -> bool {
     obj::call(m::WPObject::wpQueryStyle, &[o]) as u32 & obj::OBJSTYLE_NOTVISIBLE == 0
 }
 
-/// The objects a folder view shows (not the invisible ones).
+/// The objects a folder view shows (not the invisible ones, only those
+/// its Include page lets in), in its sort order.
 fn visible_content(folder: usize) -> Vec<usize> {
     let mut v = Vec::new();
     let mut o = wps::call("WPFolder", m::WPFolder::wpQueryContent, &[folder, 0, 0]);
     while o != 0 && v.len() < 10000 {
-        if visible(o) {
+        if visible(o) && crate::sortinc::included(folder, o) {
             v.push(o);
         }
         o = wps::call("WPFolder", m::WPFolder::wpQueryContent, &[folder, o, 1]);
     }
+    crate::sortinc::order(crate::fs::sort_of(folder).0, &mut v);
     v
+}
+
+/// A folder's sort order changed: its views sort again (icons laid out
+/// in the new order).
+pub fn sorted(folder: usize) {
+    for w in 0..wins().len() {
+        if wins()[w].obj == folder && wins()[w].view != OPEN_SETTINGS {
+            fill(w);
+            arrange(w);
+        }
+    }
 }
 
 fn title_bytes(o: usize) -> Vec<u8> {
@@ -383,6 +396,10 @@ pub fn fill(w: usize) {
     // drives) are in the view already.
     objs.retain(|&o| !wins()[w].recs.iter().any(|r| r.obj == o && r.parent == 0));
     insert(w, &objs);
+    // "Always maintain sort order": icons in that order.
+    if crate::fs::sort_of(wins()[w].obj).1 {
+        arrange(w);
+    }
 }
 
 // ---- Tree views ----
@@ -568,6 +585,13 @@ pub fn added(folder: usize, o: usize) {
             continue;
         }
         if wins()[w].obj == folder && wins()[w].view != OPEN_TREE {
+            if !crate::sortinc::included(folder, o) {
+                continue;
+            }
+            if crate::fs::sort_of(folder).1 {
+                fill(w);
+                continue;
+            }
             insert(w, &[o]);
         } else if wins()[w].view == OPEN_TREE && tree_folder(o) != 0 {
             // Under the folder's record, if it is open.

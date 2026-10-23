@@ -28,7 +28,11 @@ pub fn to_83(name: &str) -> Option<String> {
     if base.is_empty() || base.len() > 8 || ext.len() > 3 {
         return None;
     }
-    if !base.bytes().all(valid_char) || !ext.bytes().all(valid_char) {
+    // OS/2 takes spaces inside FAT names (`EA DATA. SF`, `WP ROOT. SF`),
+    // not at the start, nor at the end of a part (they would not come
+    // back from the padded directory form).
+    let ok = |p: &str| p.bytes().all(|c| valid_char(c) || c == b' ') && !p.ends_with(' ');
+    if !ok(base) || !ok(ext) || base.starts_with(' ') {
         return None;
     }
     let mut s = String::with_capacity(12);

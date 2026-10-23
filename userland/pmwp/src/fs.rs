@@ -392,6 +392,53 @@ pub struct FolderData {
     /// The background colour (RGB), if the folder has its own.
     pub bg: u32,
     pub has_bg: u32,
+    /// The sort attribute (sortinc.rs) and "always maintain sort order".
+    pub sort_by: u32,
+    pub always_sort: u32,
+    /// The Include page's patterns (empty: everything).
+    pub include: Option<alloc::boxed::Box<Vec<u8>>>,
+}
+
+/// (sort attribute, always maintain sort order).
+pub fn sort_of(obj: usize) -> (u32, bool) {
+    if obj == 0 || !wps::is(obj, "WPFolder") {
+        return (0, false);
+    }
+    (fo(obj).sort_by, fo(obj).always_sort != 0)
+}
+
+pub fn set_sort(obj: usize, by: u32, always: bool) {
+    fo(obj).sort_by = by;
+    fo(obj).always_sort = always as u32;
+    obj::call(m::WPObject::wpSaveDeferred, &[obj]);
+}
+
+pub fn include_of(obj: usize) -> Vec<u8> {
+    if obj == 0 || !wps::is(obj, "WPFolder") {
+        return Vec::new();
+    }
+    fo(obj).include.as_ref().map(|b| (**b).clone()).unwrap_or_default()
+}
+
+pub fn set_include(obj: usize, pats: &[u8]) {
+    fo(obj).include = (!pats.is_empty()).then(|| alloc::boxed::Box::new(pats.to_vec()));
+    obj::call(m::WPObject::wpSaveDeferred, &[obj]);
+}
+
+/// A folder's setup: ALWAYSSORT=YES|NO (as INI.RC uses it).
+extern "C" fn folder_setup(obj: usize, setup: *const u8) -> u32 {
+    som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpSetup, &[obj, setup as usize]);
+    for (k, v) in setup_pairs(cstr(setup)) {
+        if k == b"ALWAYSSORT" {
+            let on = v.eq_ignore_ascii_case(b"YES");
+            let f = fo(obj);
+            f.always_sort = on as u32;
+            if on && f.sort_by == 0 {
+                f.sort_by = crate::sortinc::SORT_NAME;
+            }
+        }
+    }
+    1
 }
 
 pub fn folder_background(obj: usize) -> Option<u32> {
@@ -416,6 +463,14 @@ extern "C" fn folder_save_state(obj: usize) -> u32 {
     if fo(obj).has_bg != 0 {
         obj::wpSaveLong(obj, b"WPFolder\0".as_ptr(), 1, fo(obj).bg);
     }
+    let f = fo(obj);
+    if f.sort_by != 0 || f.always_sort != 0 {
+        obj::wpSaveLong(obj, b"WPFolder\0".as_ptr(), 2, f.sort_by | f.always_sort << 16);
+    }
+    if let Some(p) = &f.include {
+        let s = z(p);
+        obj::wpSaveString(obj, b"WPFolder\0".as_ptr(), 3, s.as_ptr());
+    }
     1
 }
 
@@ -424,6 +479,14 @@ extern "C" fn folder_restore_state(obj: usize, r: u32) -> u32 {
     if let Some(v) = obj::restored_long(obj, b"WPFolder", 1) {
         fo(obj).bg = v;
         fo(obj).has_bg = 1;
+    }
+    if let Some(v) = obj::restored_long(obj, b"WPFolder", 2) {
+        fo(obj).sort_by = v & 0xffff;
+        fo(obj).always_sort = v >> 16;
+    }
+    if let Some(p) = obj::restored_string(obj, b"WPFolder", 3) {
+        let p = p.strip_suffix(&[0]).unwrap_or(&p).to_vec();
+        fo(obj).include = (!p.is_empty()).then(|| alloc::boxed::Box::new(p));
     }
     1
 }
@@ -518,6 +581,7 @@ extern "C" fn wpQueryFldrFlags(obj: usize) -> u32 {
 
 extern "C" fn folder_uninit(obj: usize) {
     fo(obj).content = None;
+    fo(obj).include = None;
     som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpUnInitData, &[obj]);
 }
 
@@ -611,6 +675,7 @@ methods! {
     __m_folder_open => folder_open, 4;
     __m_drives_populate => drives_populate, 4;
     __m_folder_save_state => folder_save_state, 1;
+    __m_folder_setup => folder_setup, 2;
     __m_folder_restore_state => folder_restore_state, 2;
 }
 
@@ -659,12 +724,14 @@ pub fn impl_folder() -> Impl {
         ]
         .into_iter()
         .chain(crate::book::folder_methods())
+        .chain(crate::sortinc::folder_methods())
         .collect(),
         overrides: [
             ("wpUnInitData", __m_folder_uninit as usize),
             ("wpOpen", __m_folder_open as usize),
             ("wpSaveState", __m_folder_save_state as usize),
             ("wpRestoreState", __m_folder_restore_state as usize),
+            ("wpSetup", __m_folder_setup as usize),
         ]
         .into_iter()
         .chain(crate::dnd::overrides("WPFolder"))

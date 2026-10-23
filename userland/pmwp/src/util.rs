@@ -153,7 +153,37 @@ pub const EAT_BINARY: u16 = 0xfffe;
 pub const EAT_ASCII: u16 = 0xfffd;
 
 /// A file's EA value (type word and data), if it has one.
+/// Where a path's EAs are: a drive's root has no directory entry to
+/// hold them, so, as in IBM's shell, they are on the hidden file
+/// `WP ROOT. SF` in it.
+fn ea_holder(path: &[u8]) -> Vec<u8> {
+    let p = normalize(path);
+    if p.len() <= 3 && p.get(1) == Some(&b':') {
+        let mut r = p[..2].to_vec();
+        r.extend_from_slice(b"\\WP ROOT. SF");
+        r
+    } else {
+        p
+    }
+}
+
+/// `WP ROOT. SF` (hidden, system) for a root's EAs, made when missing.
+fn ensure_holder(holder: &[u8]) -> bool {
+    if attributes(holder).is_some() {
+        return true;
+    }
+    let p = z(holder);
+    let (mut hf, mut act) = (0u32, 0u32);
+    // FILE_HIDDEN | FILE_SYSTEM; create if new; read/write, deny none.
+    if unsafe { os2::DosOpen(p.as_ptr(), &mut hf, &mut act, 0, 0x06, 0x11, 0x42, core::ptr::null_mut()) } != 0 {
+        return false;
+    }
+    unsafe { os2::DosClose(hf) };
+    true
+}
+
 pub fn ea_read(path: &[u8], name: &[u8]) -> Option<(u16, Vec<u8>)> {
+    let path = &ea_holder(path);
     let gl = (4 + 5 + name.len() + 1 + 3) & !3;
     let mut gea = alloc::vec![0u8; gl];
     gea[0..4].copy_from_slice(&(gl as u32).to_le_bytes());
@@ -180,6 +210,12 @@ pub fn ea_read(path: &[u8], name: &[u8]) -> Option<(u16, Vec<u8>)> {
 
 /// Write an EA (typed: type word, length word, data); `None` removes it.
 pub fn ea_write(path: &[u8], name: &[u8], value: Option<(u16, &[u8])>) -> bool {
+    let holder = ea_holder(path);
+    if !eq_nocase(&holder, &normalize(path)) && (value.is_none() && attributes(&holder).is_none() || !ensure_holder(&holder)) {
+        debug(&alloc::format!("ea_write: no {:?}", core::str::from_utf8(&holder)));
+        return value.is_none();
+    }
+    let path = &holder;
     let data_len = value.map_or(0, |(_, d)| d.len());
     if data_len > 0xfff0 {
         return false;

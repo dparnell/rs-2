@@ -41,6 +41,7 @@ mod obj;
 mod pm;
 mod rs2obj;
 pub mod som;
+mod sortinc;
 mod util;
 mod view;
 mod winpos;

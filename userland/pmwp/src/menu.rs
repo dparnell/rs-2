@@ -35,9 +35,11 @@ pub const CTXT_ICON: u32 = 0x1000;
 pub const CTXT_TREE: u32 = 0x2000;
 pub const CTXT_DETAILS: u32 = 0x4000;
 pub const CTXT_ARRANGE: u32 = 0x020000;
+pub const CTXT_SORT: u32 = 0x040000;
 pub const CTXT_REFRESH: u32 = 0x400000;
 
 pub const WPMENUID_OPEN: u32 = 1;
+pub const WPMENUID_SORT: u32 = 5;
 pub const WPMENUID_MOVE: u32 = 107;
 pub const WPMENUID_COPY: u32 = 108;
 pub const WPMENUID_DELETE: u32 = 109;
@@ -135,7 +137,7 @@ fn is(o: usize, c: &str) -> bool {
 /// wpDisplayMenu(hwndOwner, hwndClient, pptl, ulMenuType, ulReserved).
 extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const PointL, kind: u32, _res: u32) -> u32 {
     let all = CTXT_OPEN | CTXT_SETTINGS | CTXT_HELP | CTXT_DELETE | CTXT_COPY | CTXT_MOVE | CTXT_SHADOW | CTXT_PROGRAM | CTXT_ICON | CTXT_TREE
-        | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH;
+        | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH | CTXT_SORT;
     let flags = obj::call(m::WPObject::wpFilterPopupMenu, &[o, all as usize, 0, 0]) as u32;
     let folder = is(o, "WPFolder");
     // A drive's views are its root folder's.
@@ -180,6 +182,9 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
         items.push(Menu::Item(WPMENUID_REFRESH as u16, b"Refresh ~now", true));
     }
     if kind == MENU_OPENVIEWPOPUP {
+        if folder && flags & CTXT_SORT != 0 {
+            items.push(crate::sortinc::menu(o));
+        }
         if flags & CTXT_ARRANGE != 0 {
             items.push(Menu::Item(WPMENUID_ARRANGE as u16, b"~Arrange", true));
         }
@@ -281,6 +286,7 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
                 obj::call(m::WPObject::wpDelete, &[o, 0]);
             }
         }
+        _ if crate::sortinc::menu_selected(o, id) => {}
         _ => return 0,
     }
     1

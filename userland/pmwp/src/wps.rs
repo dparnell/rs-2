@@ -413,7 +413,11 @@ pub fn persist(obj: usize, recs: &[Rec]) -> bool {
     if is(obj, "WPFileSystem") {
         let Some(p) = path_of(obj) else { return false };
         let blob = encode(cls, 0, recs);
-        return ea_write(&p, b".CLASSINFO", Some((EAT_BINARY, &blob)));
+        let ok = ea_write(&p, b".CLASSINFO", Some((EAT_BINARY, &blob)));
+        if !ok {
+            debug(&alloc::format!("persist: {:?} not saved", core::str::from_utf8(&p)));
+        }
+        return ok;
     }
     let h = crate::obj::handle(obj);
     if h == 0 {

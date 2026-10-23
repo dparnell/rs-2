@@ -277,10 +277,11 @@ fn read_eas(path: &str) -> Vec<(u8, Vec<u8>, Vec<u8>)> {
     v
 }
 
-/// The files that hold a volume's own data (FAT's extended attributes,
-/// the Workplace Shell's root): they are not copied as files.
+/// The file that holds a FAT volume's own data (its extended
+/// attributes): it is not copied as a file. (`WP ROOT. SF`, where the
+/// Workplace Shell keeps the root folder's EAs, is copied with them.)
 fn system_file(name: &str) -> bool {
-    name.eq_ignore_ascii_case("EA DATA. SF") || name.eq_ignore_ascii_case("WP ROOT. SF")
+    name.eq_ignore_ascii_case("EA DATA. SF")
 }
 
 /// Copy `src`'s extended attributes (the Workplace Shell's .CLASSINFO,
