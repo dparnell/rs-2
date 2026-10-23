@@ -50,6 +50,12 @@ pub fn font() -> &'static Font {
     gpi::font::system()
 }
 
+/// The font window `h` draws in: its PP_FONTNAMESIZE (or a parent's),
+/// else the system font.
+pub fn font_of(h: u32) -> &'static Font {
+    crate::misc::pres_font_name(h).and_then(|n| crate::fonts::by_name(&n)).unwrap_or_else(font)
+}
+
 /// Dialog background colour.
 pub fn dialog_bg() -> u32 {
     color::sys(color::SYSCLR_DIALOGBACKGROUND)
@@ -78,9 +84,13 @@ fn with(h: u32, hps: u32, f: impl FnOnce(&mut Canvas)) {
     // Built-in controls paint within one PMWIN call: the pointer is out
     // of the way meanwhile.
     crate::pointer::hide(s);
+    let wf = font_of(h);
     if let Some(e) = gpiapi::entry(s, hps) {
+        // The window's font while it paints.
+        let saved = core::mem::replace(&mut e.ps.font, wf);
         let mut c = Canvas { ps: &mut e.ps, surface, w, h: hh };
         f(&mut c);
+        c.ps.font = saved;
     }
     crate::pointer::show(st());
 }
@@ -125,6 +135,11 @@ impl<'a> Canvas<'a> {
 }
 
 impl Canvas<'_> {
+    /// The font the canvas draws text in (the window's).
+    pub fn font(&self) -> &'static Font {
+        self.ps.font
+    }
+
     pub fn rect(&self) -> Rect {
         Rect::new(0, 0, self.w, self.h)
     }
@@ -194,7 +209,7 @@ impl Canvas<'_> {
         let (s, m) = strip_mnemonic(t);
         self.text(x, y, &s, c, clip);
         if let Some(i) = m {
-            let f = font();
+            let f = self.ps.font;
             let ux = x + f.text_width(&s[..i]);
             let r = Rect::new(ux, y - 2, ux + s.get(i).map_or(f.width, |&b| f.char_width(b)), y - 1).intersect(&clip);
             self.fill(r, c);
@@ -204,8 +219,8 @@ impl Canvas<'_> {
     /// Text laid out in `r` with DT_* alignment flags; DT_WORDBREAK wraps
     /// at spaces. Returns the number of bytes drawn.
     pub fn text_in(&mut self, r: Rect, t: &[u8], c: u32, fl: u32) -> usize {
-        let f = font();
-        let lines: Vec<&[u8]> = if fl & DT_WORDBREAK != 0 { wrap(t, r.width()) } else { alloc::vec![t] };
+        let f = self.ps.font;
+        let lines: Vec<&[u8]> = if fl & DT_WORDBREAK != 0 { wrap_in(f, t, r.width()) } else { alloc::vec![t] };
         let total = lines.len() as i32 * f.height;
         let mut top = if fl & DT_VCENTER != 0 {
             r.top - (r.height() - total) / 2
@@ -259,7 +274,11 @@ impl Canvas<'_> {
 /// Split text into lines at most `width` pels wide (the system font)
 /// at spaces.
 pub fn wrap(t: &[u8], width: i32) -> Vec<&[u8]> {
-    let f = font();
+    wrap_in(font(), t, width)
+}
+
+/// Split text into lines at most `width` pels wide in font `f`.
+pub fn wrap_in<'t>(f: &Font, t: &'t [u8], width: i32) -> Vec<&'t [u8]> {
     let mut out = Vec::new();
     for para in t.split(|&c| c == b'\n') {
         let mut rest = para;

@@ -220,6 +220,7 @@ pub fn remove(h: u32) {
         s.switch.window_gone(*g);
         s.ctl.remove(g);
         s.pres.remove(g);
+        s.pres_font.remove(g);
         s.timers.retain(|t| t.hwnd != *g);
         if s.focus == *g {
             s.focus = 0;
@@ -1346,7 +1347,11 @@ pub extern "C" fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut Re
     let all = if cch < 0 { cstr(text) } else { unsafe { core::slice::from_raw_parts(text, cch as usize) }.to_vec() };
     let r = unsafe { prcl.read_unaligned() }.rect();
     let Some(e) = gpiapi::entry(st(), hps) else { return 0 };
-    let font = e.ps.font;
+    // An outline font at the character box's size; others as they are.
+    let font = match e.ps.text_font() {
+        (f, sx, sy) if sx == 1.0 && sy == 1.0 => f,
+        _ => e.ps.font,
+    };
     // The line: up to a line end; with DT_WORDBREAK, the words that fit.
     let line_end = all.iter().position(|&c| c == b'\r' || c == b'\n').unwrap_or(all.len());
     let mut n = line_end;
@@ -1418,7 +1423,9 @@ pub extern "C" fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut Re
         e.ps.back_mix = gpi::Mix::LeaveAlone;
         let clip = e.ps.clip.clone();
         e.ps.clip = clip.iter().map(|c| c.intersect(&r.offset(e.ps.origin.x, e.ps.origin.y))).collect();
+        let base = core::mem::replace(&mut e.ps.font, font);
         e.ps.char_string_at(surface, Point::new(x, y), &t);
+        e.ps.font = base;
         if let Some(i) = mark {
             let ux = x + font.text_width(&t[..i]);
             let cw = font.text_width(&t[i..i + 1]);

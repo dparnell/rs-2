@@ -275,17 +275,30 @@ pub extern "C" fn WinRequestMutexSem(hmtx: u32, ms: u32) -> u32 {
 
 const PP_FOREGROUNDCOLOR: u32 = 1;
 const PP_BACKGROUNDCOLOR: u32 = 3;
+const PP_FONTNAMESIZE: u32 = 15;
+const WM_PRESPARAMCHANGED: u32 = 0x001e;
 
 /// WinSetPresParam(hwnd, id, cbParam, pbParam): the foreground and
 /// background colours (PP_FOREGROUNDCOLOR, PP_BACKGROUNDCOLOR, RGB) are
-/// kept for the window (the container uses them); other presentation
-/// parameters are accepted and ignored (controls use the system colours
-/// and font).
+/// kept for the window (the container uses them), and the font
+/// (PP_FONTNAMESIZE, "10.Helv": the window and its children draw in
+/// it); other presentation parameters are accepted and ignored.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: u32) -> u32 {
     let s = st();
     if !s.desk.exists(h) {
         return 0;
+    }
+    if id == PP_FONTNAMESIZE && pv != 0 {
+        let b = unsafe { core::slice::from_raw_parts(pv as *const u8, cb as usize) };
+        let name = b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())].to_vec();
+        if crate::fonts::by_name(&name).is_none() {
+            return 0;
+        }
+        s.pres_font.insert(h, name);
+        s.desk.invalidate(h, None, true);
+        crate::msg::send(h, WM_PRESPARAMCHANGED, id, 0);
+        return 1;
     }
     if (id == PP_FOREGROUNDCOLOR || id == PP_BACKGROUNDCOLOR) && cb >= 4 && pv != 0 {
         let v = unsafe { (pv as *const u32).read_unaligned() } & 0xff_ffff;
@@ -300,6 +313,22 @@ pub extern "C" fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: u32) -> u32 {
     1
 }
 
+/// PP_FONTNAMESIZE of the window or the nearest parent that has one.
+pub fn pres_font_name(h: u32) -> Option<Vec<u8>> {
+    let s = st();
+    let mut w = h;
+    for _ in 0..64 {
+        if let Some(n) = s.pres_font.get(&w) {
+            return Some(n.clone());
+        }
+        w = s.desk.get(w)?.parent;
+        if w == 0 {
+            break;
+        }
+    }
+    None
+}
+
 /// The colour of a presentation parameter set on the window (not
 /// inherited).
 pub fn pres_color(h: u32, background: bool) -> Option<u32> {
@@ -311,8 +340,26 @@ pub fn pres_color(h: u32, background: bool) -> Option<u32> {
 /// WinQueryPresParam(hwnd, id1, id2, pulId, cbBuf, pbBuf, fs): the
 /// colours set with WinSetPresParam (the bytes copied, 0 if neither).
 #[unsafe(no_mangle)]
-pub extern "C" fn WinQueryPresParam(h: u32, id1: u32, id2: u32, pid: u32, cb: u32, pv: u32, _fs: u32) -> u32 {
+pub extern "C" fn WinQueryPresParam(h: u32, id1: u32, id2: u32, pid: u32, cb: u32, pv: u32, fs: u32) -> u32 {
     for id in [id1, id2] {
+        // The font, inherited from the parents unless QPF_NOINHERIT.
+        if id == PP_FONTNAMESIZE {
+            let name = if fs & 1 != 0 { st().pres_font.get(&h).cloned() } else { pres_font_name(h) };
+            if let Some(n) = name {
+                if pv == 0 || (cb as usize) < n.len() + 1 {
+                    return 0;
+                }
+                unsafe {
+                    core::ptr::copy_nonoverlapping(n.as_ptr(), pv as *mut u8, n.len());
+                    *(pv as *mut u8).add(n.len()) = 0;
+                    if pid != 0 {
+                        (pid as *mut u32).write_unaligned(id);
+                    }
+                }
+                return n.len() as u32 + 1;
+            }
+            continue;
+        }
         let v = match id {
             PP_FOREGROUNDCOLOR => pres_color(h, false),
             PP_BACKGROUNDCOLOR => pres_color(h, true),
@@ -339,6 +386,13 @@ pub extern "C" fn WinRemovePresParam(h: u32, id: u32) -> u32 {
     let s = st();
     if !s.desk.exists(h) {
         return 0;
+    }
+    if id == PP_FONTNAMESIZE {
+        if s.pres_font.remove(&h).is_some() {
+            s.desk.invalidate(h, None, true);
+            crate::msg::send(h, WM_PRESPARAMCHANGED, id, 0);
+        }
+        return 1;
     }
     if let Some(e) = s.pres.get_mut(&h) {
         match id {

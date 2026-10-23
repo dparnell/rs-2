@@ -376,9 +376,9 @@ Status markers: done, in progress, planned.
   Liberation fonts as the system font and the outline faces, IBM's
   fonts (WarpSans, Helvetica, Times New Roman, Courier) when installed
   from the CD (docs/PM.md, Fonts)
-- planned: the remaining classes and view pages (docs/WPS.md), the Font
-  Palette and folder fonts (PP_FONTNAMESIZE), printing (no printer
-  support yet)
+- done: the Font Palette and folder fonts (PP_FONTNAMESIZE)
+- planned: the remaining classes and view pages (docs/WPS.md), printing
+  (no printer support yet)
 
 ## Milestone 5: install media (first version done)
 

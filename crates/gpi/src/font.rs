@@ -419,3 +419,9 @@ mod tests {
         assert!(Font::from_os2(b"not a font").is_none());
     }
 }
+
+impl core::fmt::Debug for Font {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "Font({} {}x{})", self.name, self.width, self.height)
+    }
+}

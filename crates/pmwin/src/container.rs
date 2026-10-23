@@ -64,15 +64,15 @@ pub struct Metrics {
     pub area_h: i32,
     /// CV_FLOW: the name and text views fill columns.
     pub flow: bool,
-    /// The width of a text in pels (a proportional font), else
+    /// The font text is measured in (a proportional font), else
     /// characters times `cw`.
-    pub measure: Option<fn(&[u8]) -> i32>,
+    pub measure: Option<&'static gpi::font::Font>,
 }
 
 impl Metrics {
     pub fn text_width(&self, t: &[u8]) -> i32 {
         match self.measure {
-            Some(f) => f(t),
+            Some(f) => f.text_width(t),
             None => t.len() as i32 * self.cw,
         }
     }

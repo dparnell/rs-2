@@ -86,7 +86,7 @@ fn room(h: u32) -> i32 {
 /// Characters from `first` that fit in the field (at least one).
 fn columns(h: u32, first: usize) -> usize {
     let t = shown(h);
-    let (f, w) = (draw::font(), room(h));
+    let (f, w) = (draw::font_of(h), room(h));
     let mut x = 0;
     let mut n = 0;
     for &b in t.iter().skip(first) {
@@ -110,7 +110,7 @@ fn reveal(h: u32) {
     } else {
         // The caret may sit just after the last character shown.
         let c = e.cursor.min(t.len());
-        while e.first < c && draw::text_width(&t[e.first..c]) >= w {
+        while e.first < c && draw::font_of(h).text_width(&t[e.first..c]) >= w {
             e.first += 1;
         }
     }
@@ -174,7 +174,7 @@ fn move_cursor(h: u32, to: usize, extend: bool) {
 fn index_at(h: u32, x: i32) -> usize {
     let first = data(h).map_or(0, |e| e.first);
     let t = shown(h);
-    let f = draw::font();
+    let f = draw::font_of(h);
     let mut at = inset(h);
     let mut i = first;
     while i < t.len() {
@@ -283,10 +283,10 @@ fn paint(h: u32) {
             c.bevel(Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1), draw::DARK, draw::face());
         }
         let area = Rect::new(r.left + m, r.bottom + m, r.right - m, r.top - m);
-        let f = draw::font();
+        let f = draw::font_of(h);
         let shown: Vec<u8> = if style & ES_UNREADABLE != 0 { alloc::vec![b'*'; text.len()] } else { text.clone() };
         let vis = &shown[first.min(shown.len())..(first + cols).min(shown.len())];
-        let w = draw::text_width(vis);
+        let w = draw::font_of(h).text_width(vis);
         let x0 = if first == 0 && style & ES_CENTER != 0 {
             area.left + (area.width() - w) / 2
         } else if first == 0 && style & ES_RIGHT != 0 {

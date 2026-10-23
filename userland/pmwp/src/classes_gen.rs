@@ -133,6 +133,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (341, 340, 342),
     },
     ClassDef {
+        name: "M_WPFontPalette",
+        parents: &["M_WPPalette"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPIcon",
         parents: &["M_WPDataFile"],
         meta: None,
@@ -502,6 +511,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (44, 43, 45),
     },
     ClassDef {
+        name: "WPFontPalette",
+        parents: &["WPPalette"],
+        meta: Some("M_WPFontPalette"),
+        major: 1,
+        minor: 2,
+        methods: &["wpGetFattrsFromPsz"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPIcon",
         parents: &["WPDataFile"],
         meta: Some("M_WPIcon"),
@@ -824,6 +842,8 @@ pub mod m {
     pub mod M_WPDisk {
     }
     pub mod M_WPDrives {
+    }
+    pub mod M_WPFontPalette {
     }
     pub mod M_WPIcon {
     }
@@ -1330,6 +1350,9 @@ pub mod m {
     }
     pub mod WPDrives {
         pub const wpAddReserveDriveLetterPage: usize = 0;
+    }
+    pub mod WPFontPalette {
+        pub const wpGetFattrsFromPsz: usize = 0;
     }
     pub mod WPIcon {
     }

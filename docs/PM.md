@@ -980,8 +980,11 @@ shell](#the-desktop-shell-rs2shell)); `WinSetWindowPos` with
 deepest descendant, under a point) and `WinQueryWindowProcess`;
 `WinSetPresParam`/`WinQueryPresParam`/`WinRemovePresParam` keep
 `PP_FOREGROUNDCOLOR` and `PP_BACKGROUNDCOLOR` (RGB) per window, which
-the container paints with (other presentation parameters are still
-accepted and ignored).
+the container paints with, and `PP_FONTNAMESIZE` ("10.Helv",
+"12.Times New Roman.Bold"; inherited from the parents unless
+QPF_NOINHERIT): the window and its children paint and measure their
+text in it (`draw::font_of`), and get `WM_PRESPARAMCHANGED`. Other
+presentation parameters are still accepted and ignored.
 
 **System values and colours.** `WinSetSysValue` sets the values a user
 changes: SV_SWAPBUTTON (the right button becomes button 1), SV_DBLCLKTIME
@@ -1086,7 +1089,9 @@ The Liberation fonts are under the SIL Open Font License 1.1
 ("OS/2 fonts"); rs2 never ships them. VIO windows keep the kernel's
 unscii cells, and the pointer and icon glyphs unscii (`font::vio`).
 
-Controls measure text in pels: entry fields (scrolling, the cursor,
+A font name ("points.face[.Bold][.Italic]", `fonts::by_name`) is IBM's
+bitmap of that point size for 96 dpi where installed, else the outline
+face at points x 96 / 72 pels. Controls measure text in pels: entry fields (scrolling, the cursor,
 selection, hit testing), wrapping (`draw::wrap`), mnemonic underlines,
 container icon titles (at least 75 pels, SV_CXICONTEXTWIDTH) and
 details columns. Dialog units stay 2x2 pels whatever the font.

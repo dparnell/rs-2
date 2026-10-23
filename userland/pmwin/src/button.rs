@@ -170,8 +170,8 @@ fn push(c: &mut Canvas, r: Rect, style: u32, text: &[u8], fg: u32, down: bool, f
     c.text_in(t, text, fg, draw::DT_CENTER | draw::DT_VCENTER | draw::DT_MNEMONIC);
     if focus {
         let (s, _) = draw::strip_mnemonic(text);
-        let w = draw::text_width(&s).min(r.width() - 8);
-        let f = draw::font();
+        let f = c.font();
+        let w = f.text_width(&s).min(r.width() - 8);
         let x = r.left + (r.width() - w) / 2 - 2;
         let y = r.bottom + (r.height() - f.height) / 2 - 1;
         c.focus_rect(Rect::new(x, y, x + w + 4, y + f.height + 2));
@@ -234,8 +234,8 @@ fn label(c: &mut Canvas, r: Rect, text: &[u8], fg: u32, focus: bool) {
     let t = Rect::new(r.left + BOX + 6, r.bottom, r.right, r.top);
     c.text_in(t, text, fg, draw::DT_VCENTER | draw::DT_MNEMONIC);
     if focus {
-        let w = draw::text_width(&draw::strip_mnemonic(text).0).min(t.width());
-        let f = draw::font();
+        let f = c.font();
+        let w = f.text_width(&draw::strip_mnemonic(text).0).min(t.width());
         let y = r.bottom + (r.height() - f.height) / 2 - 1;
         c.focus_rect(Rect::new(t.left - 2, y.max(r.bottom), t.left + w + 2, (y + f.height + 2).min(r.top)));
     }

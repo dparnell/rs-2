@@ -197,3 +197,29 @@ pub fn init() {
         gpi::font::set_system(f);
     }
 }
+
+/// A font by its presentation parameter name, "points.face[.Bold]
+/// [.Italic]" ("10.Helv", "12.Times New Roman.Bold"): IBM's bitmap at
+/// that size for 96 dpi where installed, else the outline face at
+/// points * 96 / 72 pels.
+pub fn by_name(name: &[u8]) -> Option<&'static Font> {
+    let dot = name.iter().position(|&c| c == b'.')?;
+    let pt: i32 = core::str::from_utf8(&name[..dot]).ok()?.trim().parse().ok()?;
+    if !(1..=144).contains(&pt) {
+        return None;
+    }
+    let mut parts = name[dot + 1..].split(|&c| c == b'.');
+    let fname = parts.next()?.trim_ascii();
+    let (mut bold, mut italic) = (false, false);
+    for a in parts {
+        bold |= a.eq_ignore_ascii_case(b"Bold");
+        italic |= a.eq_ignore_ascii_case(b"Italic");
+    }
+    if !bold && !italic
+        && let Some(&(_, _, f)) = st().fonts.public.iter().find(|(_, i, _)| i.face.eq_ignore_ascii_case(fname) && i.fields[25] as i32 == pt * 10 && i.fields[19] == 96)
+    {
+        return Some(f);
+    }
+    let i = face_index(fname)?;
+    face(styled(i, bold, italic), (pt * 96 + 36) / 72)
+}

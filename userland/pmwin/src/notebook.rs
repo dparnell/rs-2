@@ -114,19 +114,19 @@ pub fn is_notebook(h: u32) -> bool {
     data(h).is_some()
 }
 
-fn tab_text_width(t: &[u8]) -> i32 {
-    draw::text_width(&draw::strip_mnemonic(t).0)
+fn tab_text_width(h: u32, t: &[u8]) -> i32 {
+    draw::font_of(h).text_width(&draw::strip_mnemonic(t).0)
 }
 
 fn geometry_for(h: u32, w: i32, hh: i32) -> Option<Geometry> {
     let d = data(h)?;
-    let f = draw::font();
+    let f = draw::font_of(h);
     let widest = |minor: bool| {
         d.book
             .pages
             .iter()
             .filter(|p| if minor { p.minor() } else { p.major() })
-            .map(|p| if p.bits.is_empty() { tab_text_width(&p.tab) } else { p.bits_size.0 })
+            .map(|p| if p.bits.is_empty() { tab_text_width(h, &p.tab) } else { p.bits_size.0 })
             .max()
             .unwrap_or(0)
     };
@@ -158,7 +158,7 @@ fn layout(h: u32) -> Option<Layout> {
 fn shown(h: u32) -> Option<(Layout, Vec<(usize, Rect)>, Vec<(usize, Rect)>)> {
     let l = layout(h)?;
     let d = data(h)?;
-    let len = |p: &Page| if p.bits.is_empty() { tab_text_width(&p.tab) + 20 } else { p.bits_size.0 + 12 }.max(40);
+    let len = |p: &Page| if p.bits.is_empty() { tab_text_width(h, &p.tab) + 20 } else { p.bits_size.0 + 12 }.max(40);
     let cur = d.book.current_tab();
     let top = d.book.top_index();
     let run = |minor: bool, first: &mut usize| -> Vec<(usize, Rect)> {
@@ -349,7 +349,7 @@ fn layout_buttons(h: u32, l: &Layout) {
         if !st().desk.exists(b) {
             continue;
         }
-        let w = (tab_text_width(&ctl::text(b)) + 24).max(64);
+        let w = (tab_text_width(h, &ctl::text(b)) + 24).max(64);
         let y = l.button_area.bottom + (l.button_area.height() - 26) / 2;
         st().desk.set_pos(b, x, y, w, 26);
         x += w + 8;

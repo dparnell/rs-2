@@ -10,7 +10,10 @@
 //!   with Shift its text) or onto any window (PP_BACKGROUNDCOLOR /
 //!   PP_FOREGROUNDCOLOR);
 //! - WPSchemePalette: colour schemes to drag onto a window: the scheme
-//!   becomes the system's colours (WinSetSysColors) for every window.
+//!   becomes the system's colours (WinSetSysColors) for every window;
+//! - WPFontPalette: fonts to drag onto a folder (its font, kept with it)
+//!   or onto any window (PP_FONTNAMESIZE: it and its children draw in
+//!   it).
 //!
 //! What is set is kept where IBM's PM keeps it, in OS2.INI:
 //! `PM_ControlPanel` (DoubleClickSpeed, SwapMouseButton, CursorBlinkRate,
@@ -29,6 +32,14 @@ use crate::util::{parse_dec, prf_read, prf_write, z, HINI_USER};
 use crate::wps::{self, Impl};
 
 unsafe extern "C" {
+    #[link_name = "PMGPI.368"]
+    fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *const u8) -> i32;
+    #[link_name = "PMGPI.513"]
+    fn GpiSetCharSet(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.510"]
+    fn GpiSetCharBox(hps: u32, p: *const [i32; 2]) -> u32;
+    #[link_name = "PMGPI.378"]
+    fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32;
     #[link_name = "PMWIN.800"]
     fn WinQueryAnchorBlock(h: u32) -> u32;
     #[link_name = "PMWIN.826"]
@@ -403,15 +414,30 @@ const SCHEMES: [(&[u8], [u32; 16]); 6] = [
     (b"Monochrome", [0x808080, 0x000000, 0xa0a0a0, 0xffffff, 0x000000, 0xffffff, 0xffffff, 0xffffff, 0x000000, 0xffffff, 0x000000, 0x000000, 0xffffff, 0x000000, 0xffffff, 0xffffff]),
 ];
 
+/// The font palette's fonts (PP_FONTNAMESIZE names).
+const FONTS: [&[u8]; 12] = [
+    b"8.Helv", b"10.Helv", b"12.Helv", b"10.Helvetica Bold", b"14.Helvetica", b"18.Helvetica Bold",
+    b"10.Times New Roman", b"12.Times New Roman", b"14.Times New Roman Bold", b"10.Courier", b"12.Courier", b"9.WarpSans",
+];
+
 const PAL_CLASS: &[u8] = b"WPS_Palette\0";
 const COLOR_CELL: (i32, i32, i32) = (28, 22, 6);
 const SCHEME_CELL: (i32, i32, i32) = (108, 74, 3);
+const FONT_CELL: (i32, i32, i32) = (196, 30, 2);
+
+/// What a palette holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Colors,
+    Schemes,
+    Fonts,
+}
 
 struct Pal {
     obj: usize,
     frame: u32,
     client: u32,
-    schemes: bool,
+    kind: Kind,
     /// The cell being dragged.
     dragging: Option<usize>,
 }
@@ -427,23 +453,31 @@ fn hab() -> u32 {
     unsafe { WinQueryAnchorBlock(HWND_DESKTOP) }
 }
 
-fn cells(schemes: bool) -> usize {
-    if schemes { SCHEMES.len() } else { PALETTE.len() }
+fn cells(kind: Kind) -> usize {
+    match kind {
+        Kind::Colors => PALETTE.len(),
+        Kind::Schemes => SCHEMES.len(),
+        Kind::Fonts => FONTS.len(),
+    }
 }
 
 /// (cell width, height, columns).
-fn cell_size(schemes: bool) -> (i32, i32, i32) {
-    if schemes { SCHEME_CELL } else { COLOR_CELL }
+fn cell_size(kind: Kind) -> (i32, i32, i32) {
+    match kind {
+        Kind::Colors => COLOR_CELL,
+        Kind::Schemes => SCHEME_CELL,
+        Kind::Fonts => FONT_CELL,
+    }
 }
 
-fn client_size(schemes: bool) -> (i32, i32) {
-    let (w, h, cols) = cell_size(schemes);
-    let rows = (cells(schemes) as i32 + cols - 1) / cols;
+fn client_size(kind: Kind) -> (i32, i32) {
+    let (w, h, cols) = cell_size(kind);
+    let rows = (cells(kind) as i32 + cols - 1) / cols;
     (cols * (w + 6) + 6, rows * (h + 6) + 6)
 }
 
-fn cell_rect(schemes: bool, height: i32, i: usize) -> RectL {
-    let (w, h, cols) = cell_size(schemes);
+fn cell_rect(kind: Kind, height: i32, i: usize) -> RectL {
+    let (w, h, cols) = cell_size(kind);
     let (c, r) = (i as i32 % cols, i as i32 / cols);
     let x = 6 + c * (w + 6);
     let t = height - 6 - r * (h + 6);
@@ -453,9 +487,9 @@ fn cell_rect(schemes: bool, height: i32, i: usize) -> RectL {
 fn hit(p: usize, x: i32, y: i32) -> Option<usize> {
     let mut all = RectL::default();
     unsafe { WinQueryWindowRect(pals()[p].client, &mut all) };
-    let schemes = pals()[p].schemes;
-    (0..cells(schemes)).find(|&i| {
-        let r = cell_rect(schemes, all.t, i);
+    let kind = pals()[p].kind;
+    (0..cells(kind)).find(|&i| {
+        let r = cell_rect(kind, all.t, i);
         x >= r.l && x < r.r && y >= r.b && y < r.t
     })
 }
@@ -466,7 +500,7 @@ fn fill(hps: u32, l: i32, b: i32, r: i32, t: i32, c: u32) {
 
 fn paint(h: u32) {
     let Some(p) = pals().iter().position(|p| p.client == h) else { return };
-    let schemes = pals()[p].schemes;
+    let kind = pals()[p].kind;
     unsafe {
         let mut r = RectL::default();
         let hps = WinBeginPaint(h, 0, &mut r);
@@ -475,11 +509,16 @@ fn paint(h: u32) {
         let mut all = RectL::default();
         WinQueryWindowRect(h, &mut all);
         fill(hps, all.l, all.b, all.r, all.t, WinQuerySysColor(HWND_DESKTOP, -34, 0));
-        for i in 0..cells(schemes) {
-            let c = cell_rect(schemes, all.t, i);
+        for i in 0..cells(kind) {
+            let c = cell_rect(kind, all.t, i);
             fill(hps, c.l - 1, c.b - 1, c.r + 1, c.t + 1, 0x000000);
-            if !schemes {
+            if kind == Kind::Colors {
                 fill(hps, c.l, c.b, c.r, c.t, PALETTE[i]);
+                continue;
+            }
+            if kind == Kind::Fonts {
+                fill(hps, c.l, c.b, c.r, c.t, 0xffffff);
+                font_sample(hps, i, c);
                 continue;
             }
             // A small picture of the scheme: the desktop, a window with
@@ -522,7 +561,20 @@ fn drop_cell(p: usize, i: usize, shift: bool) {
     if target == 0 || pals().iter().any(|q| q.client == target || q.frame == target) {
         return;
     }
-    if pals()[p].schemes {
+    if pals()[p].kind == Kind::Fonts {
+        let name = FONTS[i];
+        match view {
+            // A folder: its font (kept with the folder).
+            Some(w) => crate::fs::set_folder_font(crate::view::wins()[w].obj, Some(name)),
+            // PP_FONTNAMESIZE
+            None => {
+                let z = z(name);
+                unsafe { WinSetPresParam(target, 15, z.len() as u32, z.as_ptr() as *const u32) };
+            }
+        }
+        return;
+    }
+    if pals()[p].kind == Kind::Schemes {
         let s = &SCHEMES[i].1;
         let pairs: Vec<(i32, u32)> = COLORS.iter().zip(s.iter()).map(|(&(_, id), &c)| (id, c)).collect();
         set_colors(&pairs);
@@ -586,7 +638,7 @@ extern "C" fn pal_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     }
 }
 
-fn open_palette(o: usize, schemes: bool) -> u32 {
+fn open_palette(o: usize, kind: Kind) -> u32 {
     if let Some(p) = pals().iter().find(|p| p.obj == o) {
         unsafe { WinSetWindowPos(p.frame, HWND_TOP, 0, 0, 0, 0, SWP_SHOW | SWP_ZORDER | SWP_ACTIVATE) };
         return p.frame;
@@ -605,33 +657,37 @@ fn open_palette(o: usize, schemes: bool) -> u32 {
     if frame == 0 {
         return 0;
     }
-    pals().push(Pal { obj: o, frame, client, schemes, dragging: None });
+    pals().push(Pal { obj: o, frame, client, kind, dragging: None });
     let (mut fr, mut cr) = (RectL::default(), RectL::default());
     unsafe {
         WinSetWindowPos(frame, 0, 0, 0, 200, 200, SWP_SIZE);
         WinQueryWindowRect(frame, &mut fr);
         WinQueryWindowRect(client, &mut cr);
     }
-    let (cw, ch) = client_size(schemes);
+    let (cw, ch) = client_size(kind);
     let (fw, fh) = (cw + (fr.r - fr.l) - (cr.r - cr.l), ch + (fr.t - fr.b) - (cr.t - cr.b));
     let (sw, sh) = (unsafe { WinQuerySysValue(HWND_DESKTOP, 20) }, unsafe { WinQuerySysValue(HWND_DESKTOP, 21) });
     unsafe { WinSetWindowPos(frame, HWND_TOP, (sw - fw) / 2, (sh - fh) / 2, fw, fh, SWP_SIZE | SWP_MOVE | SWP_SHOW | SWP_ZORDER | SWP_ACTIVATE) };
     frame
 }
 
-fn palette_open(class: &str, schemes: bool, o: usize, cnr: u32, view: u32, param: u32) -> u32 {
+fn palette_open(class: &str, kind: Kind, o: usize, cnr: u32, view: u32, param: u32) -> u32 {
     if view == OPEN_SETTINGS {
         return som::call_parent(wps::ccd(class), wps::cd("WPObject"), m::WPObject::wpOpen, &[o, cnr as usize, view as usize, param as usize]) as u32;
     }
-    open_palette(o, schemes)
+    open_palette(o, kind)
 }
 
 extern "C" fn color_open(o: usize, cnr: u32, view: u32, param: u32) -> u32 {
-    palette_open("WPColorPalette", false, o, cnr, view, param)
+    palette_open("WPColorPalette", Kind::Colors, o, cnr, view, param)
 }
 
 extern "C" fn scheme_open(o: usize, cnr: u32, view: u32, param: u32) -> u32 {
-    palette_open("WPSchemePalette", true, o, cnr, view, param)
+    palette_open("WPSchemePalette", Kind::Schemes, o, cnr, view, param)
+}
+
+extern "C" fn font_open(o: usize, cnr: u32, view: u32, param: u32) -> u32 {
+    palette_open("WPFontPalette", Kind::Fonts, o, cnr, view, param)
 }
 
 methods! {
@@ -644,6 +700,7 @@ methods! {
     __m_sound_add_pages => sound_add_pages, 2;
     __m_color_open => color_open, 4;
     __m_scheme_open => scheme_open, 4;
+    __m_font_open => font_open, 4;
 }
 
 pub fn impl_mouse() -> Impl {
@@ -676,4 +733,47 @@ pub fn impl_color_palette() -> Impl {
 
 pub fn impl_scheme_palette() -> Impl {
     Impl { data: 0, methods: Vec::new(), overrides: alloc::vec![("wpOpen", __m_scheme_open as usize)] }
+}
+
+pub fn impl_font_palette() -> Impl {
+    Impl { data: 0, methods: Vec::new(), overrides: alloc::vec![("wpOpen", __m_font_open as usize)] }
+}
+
+/// A font palette cell: the font's name in that font, centred.
+fn font_sample(hps: u32, i: usize, c: RectL) {
+    let name = FONTS[i];
+    let Some(dot) = name.iter().position(|&b| b == b'.') else { return };
+    let pt: i32 = core::str::from_utf8(&name[..dot]).ok().and_then(|t| t.parse().ok()).unwrap_or(10);
+    let face = &name[dot + 1..];
+    let (face, bold) = match face.strip_suffix(b" Bold") {
+        Some(f) => (f, true),
+        None => (face, false),
+    };
+    // Shown at no more than 14 points, to fit the cell.
+    let px = (pt.min(14) * 96 + 36) / 72;
+    // FATTRS: fsSelection (FATTR_SEL_BOLD), szFacename, usCodePage,
+    // lMaxBaselineExt; image faces at that size, the others as outlines
+    // (FATTR_FONTUSE_OUTLINE) with an em-square character box.
+    let image = matches!(face, b"Helv" | b"Tms Rmn" | b"WarpSans" | b"System Proportional");
+    let mut fat = [0u8; 56];
+    fat[0..2].copy_from_slice(&56u16.to_le_bytes());
+    fat[2..4].copy_from_slice(&(if bold { 0x20u16 } else { 0 }).to_le_bytes());
+    fat[8..8 + face.len().min(31)].copy_from_slice(&face[..face.len().min(31)]);
+    fat[42..44].copy_from_slice(&850u16.to_le_bytes());
+    fat[44..48].copy_from_slice(&(px * 9 / 8).to_le_bytes());
+    if !image {
+        fat[54..56].copy_from_slice(&4u16.to_le_bytes());
+    }
+    unsafe {
+        GpiCreateLogFont(hps, core::ptr::null(), 1, fat.as_ptr());
+        GpiSetCharSet(hps, 1);
+        if !image {
+            GpiSetCharBox(hps, &[px << 16, px << 16]);
+        }
+        let mut tr = RectL { l: c.l + 2, b: c.b, r: c.r - 2, t: c.t };
+        // DT_CENTER | DT_VCENTER
+        WinDrawText(hps, name.len() as i32, name.as_ptr(), &mut tr, 0, 0xffffff, 0x0100 | 0x0400);
+        GpiSetCharSet(hps, 0);
+        GpiDeleteSetId(hps, 1);
+    }
 }

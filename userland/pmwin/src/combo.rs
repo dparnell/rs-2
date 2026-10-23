@@ -78,18 +78,18 @@ fn simple(h: u32) -> bool {
 }
 
 /// Height of the entry part.
-fn entry_h() -> i32 {
-    draw::font().height + 8
+fn entry_h(h: u32) -> i32 {
+    draw::font_of(h).height + 8
 }
 
 fn button_w(h: u32) -> i32 {
-    if simple(h) { 0 } else { entry_h() }
+    if simple(h) { 0 } else { entry_h(h) }
 }
 
 /// Place the children for the current window size.
 fn layout(h: u32) {
     let (cx, cy) = ctl::size(h);
-    let eh = entry_h();
+    let eh = entry_h(h);
     let bw = button_w(h);
     let Some(d) = data(h) else { return };
     let (e, l) = (d.entry, d.list);
@@ -113,7 +113,7 @@ fn show_list(h: u32, on: bool) {
     let full = d.full;
     let Some(w) = st().desk.get(h) else { return };
     let (x, y, cx, cy) = (w.x, w.y, w.cx, w.cy);
-    let eh = entry_h();
+    let eh = entry_h(h);
     let top = y + cy;
     let new_cy = if on { full.max(eh) } else { eh };
     st().desk.set_pos(h, x, top - new_cy, cx, new_cy);
@@ -161,7 +161,7 @@ fn step(h: u32, delta: i32) {
 
 fn paint(h: u32) {
     let (cx, cy) = ctl::size(h);
-    let eh = entry_h();
+    let eh = entry_h(h);
     let bw = button_w(h);
     let showing = data(h).is_some_and(|d| d.showing);
     let hilite = data(h).is_some_and(|d| d.hilite);
@@ -216,7 +216,7 @@ pub extern "C" fn combo_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 // below it.
                 if let Some(w) = st().desk.get(h) {
                     let (x, y, cx, cy) = (w.x, w.y, w.cx, w.cy);
-                    let eh = entry_h();
+                    let eh = entry_h(h);
                     st().desk.set_pos(h, x, y + cy - eh, cx, eh);
                 }
             }
@@ -230,11 +230,11 @@ pub extern "C" fn combo_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 let (_, cy) = ctl::size(h);
                 if simple(h) || d.showing {
                     d.full = cy;
-                } else if cy > entry_h() {
+                } else if cy > entry_h(h) {
                     d.full = cy;
                     if let Some(w) = st().desk.get(h) {
                         let (x, y, cx, cy) = (w.x, w.y, w.cx, w.cy);
-                        let eh = entry_h();
+                        let eh = entry_h(h);
                         st().desk.set_pos(h, x, y + cy - eh, cx, eh);
                     }
                 }
@@ -252,7 +252,7 @@ pub extern "C" fn combo_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             }
             let p = ctl::mouse_pos(mp1);
             let (cx, cy) = ctl::size(h);
-            let eh = entry_h();
+            let eh = entry_h(h);
             let entry = data(h).map_or(0, |d| d.entry);
             if p.y >= cy - eh && (p.x >= cx - button_w(h) || ctl::style(h) & CBS_DROPDOWNLIST != 0) {
                 let on = !data(h).is_some_and(|d| d.showing);

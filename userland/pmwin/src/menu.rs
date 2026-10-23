@@ -278,8 +278,8 @@ fn popup_size(h: u32) -> (i32, i32) {
             continue;
         }
         let (l, r) = label(&it.text);
-        wl = wl.max(draw::text_width(&draw::strip_mnemonic(l).0));
-        wr = wr.max(draw::text_width(r));
+        wl = wl.max(draw::font_of(h).text_width(&draw::strip_mnemonic(l).0));
+        wr = wr.max(draw::font_of(h).text_width(r));
         hh += ITEM_H;
     }
     (6 + 22 + wl + if wr > 0 { 24 + wr } else { 0 } + 22, hh)
@@ -299,7 +299,7 @@ fn rects(h: u32) -> Vec<Rect> {
         MS_ACTIONBAR => {
             let mut x = 2;
             for it in &m.items {
-                let w = if it.style & MIS_SEPARATOR != 0 { 8 } else { draw::text_width(&draw::strip_mnemonic(&it.text).0) + 16 };
+                let w = if it.style & MIS_SEPARATOR != 0 { 8 } else { draw::font_of(h).text_width(&draw::strip_mnemonic(&it.text).0) + 16 };
                 v.push(Rect::new(x, 0, x + w, cy));
                 x += w;
             }
@@ -378,7 +378,7 @@ fn item(c: &mut Canvas, r: Rect, k: u32, attr: u16, text: &[u8], has_sub: bool, 
     if hilite {
         c.fill(r, draw::hilite());
     }
-    let f = draw::font();
+    let f = c.font();
     let y = r.bottom + (r.height() - f.height) / 2 + f.descender;
     let (l, rt) = label(text);
     if k == MS_ACTIONBAR {
@@ -387,7 +387,7 @@ fn item(c: &mut Canvas, r: Rect, k: u32, attr: u16, text: &[u8], has_sub: bool, 
     }
     c.mnemonic_text(r.left + 20, y, l, fg, r);
     if !rt.is_empty() {
-        c.text(r.right - 20 - draw::text_width(rt), y, rt, fg, r);
+        c.text(r.right - 20 - f.text_width(rt), y, rt, fg, r);
     }
     if attr & MIA_CHECKED != 0 {
         // A check mark.

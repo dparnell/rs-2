@@ -70,6 +70,7 @@ fn implementation(name: &str) -> Impl {
         "WPSound" => crate::setup::impl_sound(),
         "WPColorPalette" => crate::setup::impl_color_palette(),
         "WPSchemePalette" => crate::setup::impl_scheme_palette(),
+        "WPFontPalette" => crate::setup::impl_font_palette(),
         _ => Impl::none(),
     }
 }

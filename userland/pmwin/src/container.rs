@@ -422,10 +422,10 @@ struct Parts {
     area: Rect,
 }
 
-fn title_h(c: &Cnr) -> i32 {
+fn title_h(h: u32, c: &Cnr) -> i32 {
     if c.attr & CA_CONTAINERTITLE != 0 && c.title != 0 {
         let n = text_at(c.title).split(|&b| b == b'\n').count().max(1) as i32;
-        n * draw::font().height + 4 + if c.attr & CA_TITLESEPARATOR != 0 { 2 } else { 0 }
+        n * draw::font_of(h).height + 4 + if c.attr & CA_TITLESEPARATOR != 0 { 2 } else { 0 }
     } else {
         0
     }
@@ -437,16 +437,16 @@ fn parts(h: u32) -> Parts {
     let vs = c.vs != 0 && st().desk.get(c.vs).is_some_and(|w| w.visible_style());
     let hs = c.hs != 0 && st().desk.get(c.hs).is_some_and(|w| w.visible_style());
     let (l, b, r, t) = (1, 1 + if hs { SCROLL_W } else { 0 }, cx - 1 - if vs { SCROLL_W } else { 0 }, cy - 1);
-    let th = title_h(c);
+    let th = title_h(h, c);
     let title = Rect::new(l, t - th, r, t);
-    let hh = if view(c) == View::Detail && c.attr & CA_DETAILSVIEWTITLES != 0 { draw::font().height + 6 } else { 0 };
+    let hh = if view(c) == View::Detail && c.attr & CA_DETAILSVIEWTITLES != 0 { draw::font_of(h).height + 6 } else { 0 };
     let heads = Rect::new(l, t - th - hh, r, t - th);
     let area = Rect::new(l, b, r.max(l), (t - th - hh).max(b));
     Parts { title, heads, area }
 }
 
 fn metrics(h: u32, c: &Cnr, area: Rect) -> Metrics {
-    let f = draw::font();
+    let f = draw::font_of(h);
     let v = view(c);
     let icon = if v == View::Text || (v == View::Tree && c.attr & layout::CV_TEXT != 0) {
         0
@@ -469,7 +469,7 @@ fn metrics(h: u32, c: &Cnr, area: Rect) -> Metrics {
         area_w: area.width(),
         area_h: area.height(),
         flow: c.attr & layout::CV_FLOW != 0,
-        measure: Some(draw::text_width),
+        measure: Some(draw::font_of(h)),
     }
 }
 
@@ -720,7 +720,7 @@ fn paint(h: u32) {
     let split_after = l.cols.iter().position(|&f| f == field_last);
     let scroll_x = c.scroll.0;
     let (widths, parts, v, mini_icons) = (l.widths, l.parts, l.view, l.m.icon <= crate::pointer::MINI);
-    let f = draw::font();
+    let f = draw::font_of(h);
     // Presentation parameter colours (a desktop's background).
     let bg = crate::misc::pres_color(h, true);
     let text = crate::misc::pres_color(h, false).unwrap_or(draw::text());

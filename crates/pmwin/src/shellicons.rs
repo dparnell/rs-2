@@ -42,8 +42,10 @@ pub const COLOR_PALETTE: u32 = 20;
 pub const SCHEME_PALETTE: u32 = 21;
 /// The System object (a computer).
 pub const SYSTEM: u32 = 22;
+/// The Font Palette (letters on a page).
+pub const FONT_PALETTE: u32 = 23;
 /// Highest icon id.
-pub const LAST: u32 = 22;
+pub const LAST: u32 = 23;
 
 const SILVER: u32 = 0xffe0_e0e8;
 
@@ -247,6 +249,17 @@ fn draw(id: u32, size: i32) -> Option<Image> {
                 p.rect(l, b, r, t, rgb(body));
                 p.rect(l, t - 4.0, r, t, rgb(title));
                 p.frame(l, b, r, t, DARK);
+            }
+        }
+        FONT_PALETTE => {
+            // A page with large and small letters.
+            p.rect(5.0, 2.0, 27.0, 30.0, WHITE);
+            p.frame(5.0, 2.0, 27.0, 30.0, DARK);
+            p.glyph(b'A', 12.0, 21.0, 13.0, NAVY);
+            p.glyph(b'a', 21.0, 22.0, 9.0, rgb(0xc03028));
+            for k in 0..3 {
+                let y = 6.0 + k as f64 * 3.0;
+                p.rect(8.0, y, 24.0, y + 1.2, GREY);
             }
         }
         SYSTEM => {

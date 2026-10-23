@@ -209,7 +209,7 @@ fn paint(h: u32) {
         c.fill(r, draw::window());
         c.sunken(r);
         c.bevel(Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1), draw::DARK, draw::face());
-        let f = draw::font();
+        let f = draw::font_of(h);
         for (k, (text, sel, cur)) in rows.iter().enumerate() {
             let top = a.top - k as i32 * ih;
             let ir = Rect::new(a.left, top - ih, a.right, top).intersect(&a);
@@ -286,7 +286,7 @@ fn key(h: u32, mp1: u32, mp2: u32) -> bool {
 pub extern "C" fn listbox_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         WM_CREATE => {
-            let f = draw::font();
+            let f = draw::font_of(h);
             ctl::set_data(h, List { items: Vec::new(), top: 0, cursor: 0, item_h: f.height + 2, scroll: 0 });
             let sb = win::create(h, b"#8", b"", pmwin::ws::VISIBLE | 1, Rect::default(), h, 0, 0);
             if let Some(l) = data(h) {

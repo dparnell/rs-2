@@ -189,6 +189,8 @@ unsafe extern "C" {
     pub fn WinQueryPresParam(h: u32, id1: u32, id2: u32, pid: *mut u32, cb: u32, pv: *mut u32, fs: u32) -> u32;
     #[link_name = "PMWIN.938"]
     pub fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: *const u32) -> u32;
+    #[link_name = "PMWIN.940"]
+    pub fn WinRemovePresParam(h: u32, id: u32) -> u32;
     #[link_name = "PMWIN.701"]
     pub fn WinAlarm(desk: u32, kind: u32) -> u32;
     #[link_name = "PMWIN.744"]

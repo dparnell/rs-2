@@ -329,8 +329,8 @@ uninitialized repository object faults on both SOMs alike.
 that the Toolkit describes, M_WPMinWinViewer, IBM's WPMinWindow (which
 the Toolkit does not describe), classes IBM keeps in other DLLs (WPUrl
 and WPUrlFolder from WPINET.DLL, Mindex from MINXOBJ.DLL, and WPCONFIG.DLL's
-WPMouse, WPKeyboard, WPSound, WPPalette, WPColorPalette and
-WPSchemePalette) and rs2's own RS2Shutdown, RS2WindowList and RS2System.
+WPMouse, WPKeyboard, WPSound, WPPalette, WPColorPalette,
+WPSchemePalette and WPFontPalette) and rs2's own RS2Shutdown, RS2WindowList and RS2System.
 
 **Class tables.** `tools/scripts/gen_wps_classes.py` reads the Toolkit's
 IDL. It writes `src/classes_gen.rs` (each class's parents, metaclass,
@@ -360,7 +360,7 @@ The rest comes from the class modules:
 | `minwin.rs` | WPMinWinViewer (`<WP_VIEWER>`; its content is the minimized windows) and WPMinWindow (transient, one per window PMWIN minimizes to the viewer: WM_RS2_MINWINDOW to the window set with Rs2SetMinimizeViewer, the desktop's; opening one restores its window). `RS2_Desktop` `MinimizeTo` (as for RS2SHELL) says whether windows go to the viewer or the desktop |
 | `rs2obj.rs` | rs2's own abstract classes for what IBM's shell keeps on the LaunchPad and in WPCONFIG: RS2Shutdown (opening it shuts down), RS2WindowList (the window list), RS2System (a Window page: where minimized windows go) |
 | `launchpad.rs` | WPLaunchPad (IBM's setup strings FPOBJECTS, DRAWEROBJECTS, LPCLOSEDRAWER, LPACTIONSTYLE, LPVERTICAL, LPTEXT, LPDRAWERTEXT, LPSMALLICONS, LPHIDECTLS, LPFLOAT, and its query/set methods): the action buttons (Window list, Find, Shut down; as text, small or normal icons, or none), object buttons with drawers above them, objects that open on a click, drops that add objects to the bar or a drawer, Remove from LaunchPad, moving by dragging; the Options and Buttons pages |
-| `setup.rs` | WPCONFIG's settings objects: WPMouse (Timing: the double-click time; Setup: right- or left-handed), WPKeyboard (Timing: the repeat rate and delay through KBD$'s KBD_SETTYPAMATICRATE, the cursor blink rate), WPSound (Warning beep), WPColorPalette (colours dragged onto a folder become its background, with Shift its text; onto other windows PP_BACKGROUNDCOLOR or PP_FOREGROUNDCOLOR) and WPSchemePalette (a scheme dropped on any window becomes the system's colours, WinSetSysColors). The settings are kept in OS2.INI as IBM's PM keeps them (`PM_ControlPanel` DoubleClickSpeed, SwapMouseButton, CursorBlinkRate, KeyRepeatRate, KeyRepeatDelay, Beep; `PM_Colors` "R G B" by colour name) and applied when the shell starts |
+| `setup.rs` | WPCONFIG's settings objects: WPMouse (Timing: the double-click time; Setup: right- or left-handed), WPKeyboard (Timing: the repeat rate and delay through KBD$'s KBD_SETTYPAMATICRATE, the cursor blink rate), WPSound (Warning beep), WPColorPalette (colours dragged onto a folder become its background, with Shift its text; onto other windows PP_BACKGROUNDCOLOR or PP_FOREGROUNDCOLOR) WPSchemePalette (a scheme dropped on any window becomes the system's colours, WinSetSysColors) and WPFontPalette (a font dropped on a folder becomes its font, kept as WPFolder key 6 and set on its views as PP_FONTNAMESIZE; on another window, that window's PP_FONTNAMESIZE). The settings are kept in OS2.INI as IBM's PM keeps them (`PM_ControlPanel` DoubleClickSpeed, SwapMouseButton, CursorBlinkRate, KeyRepeatRate, KeyRepeatDelay, Beep; `PM_Colors` "R G B" by colour name) and applied when the shell starts |
 | `viewset.rs` | A folder's View tab, IBM's three pages: wpAddFolderView1Page (the view it opens in, the icon view's format: as placed, flowed, non-flowed; icon size: normal, small, invisible), wpAddFolderView2Page (tree view lines and icon size), wpAddFolderView3Page (the details view's columns: Icon, Title, Object class, Real name, Size, Last write date and time) |
 | `filejob.rs` | Copying and moving file system objects as the user asks (drops, Copy..., Move...): a worker thread with a progress window and the name collision dialog (Rename with a free name, Replace, Skip, Cancel), ported from RS2SHELL; the target folder dialog of Copy..., Move..., Create shadow... and Create another...; the objects follow on the shell's thread when a job ends (paths, handles, folders; a moved or renamed folder's objects too; copies lose the original's object ID) |
 | `sortinc.rs` | Folders' Sort page (name, type, real name, size, last write date, or as placed; always maintain sort order, setup ALWAYSSORT) and Include page (patterns matched against titles and real names; folders always shown), the view's Sort menu; SHOWALLINTREEVIEW=YES (a folder's tree view shows every object, not only folders) is kept with them in fs.rs |
@@ -486,7 +486,7 @@ If a Workplace Shell is already running, it ends.
     Install rs2, where their files exist; the installer's program is on
     the live media only, so an installed system drops its object), Startup, the Minimized Window
     Viewer, Window List, System Setup (`<WP_CONFIG>`: System, Keyboard,
-    Mouse, Sound, the Color and Scheme Palettes, and Display where it
+    Mouse, Sound, the Color, Scheme and Font Palettes, and Display where it
     exists), Shut Down, Templates (Data File,
     Folder, Program) and the Assistance Center as IBM's INI.RC lays it
     out (`<WP_ASSISTANCE>`: Information, a tree view showing all its
@@ -497,7 +497,7 @@ If a Workplace Shell is already running, it ends.
     to the project's page), then the LaunchPad (`<WP_LAUNCHPAD>`: Drives,
     OS/2 Window with OS/2 Full Screen in its drawer, the System Editor,
     the Assistance Center) with its shadow in Startup. `PM_Workplace`
-    `Rs2Desktop` holds the version made (7); a desktop of an earlier version gets
+    `Rs2Desktop` holds the version made (8); a desktop of an earlier version gets
     the entries again, and PRESERVEOLD keeps what it has. Titles break
     lines at `^`, as in INI.RC.
 - **Starts the server** for other processes' object calls (`ipc.rs`):

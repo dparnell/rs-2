@@ -403,6 +403,9 @@ pub struct FolderData {
     pub show_all: u32,
     /// The View tab's settings (viewset.rs).
     pub view_flags: u32,
+    /// The folder's own font (PP_FONTNAMESIZE, "10.Helv"; the Font
+    /// Palette).
+    pub font: Option<alloc::boxed::Box<Vec<u8>>>,
 }
 
 pub fn view_flags(obj: usize) -> u32 {
@@ -474,6 +477,21 @@ pub fn folder_background(obj: usize) -> Option<u32> {
     (f.has_bg != 0).then_some(f.bg)
 }
 
+/// A folder's own font, if it has one.
+pub fn folder_font(obj: usize) -> Option<Vec<u8>> {
+    if obj == 0 || !wps::is(obj, "WPFolder") {
+        return None;
+    }
+    fo(obj).font.as_ref().map(|b| (**b).clone())
+}
+
+/// Set (or with None drop) a folder's own font: its views show it.
+pub fn set_folder_font(obj: usize, name: Option<&[u8]>) {
+    fo(obj).font = name.filter(|n| !n.is_empty()).map(|n| alloc::boxed::Box::new(n.to_vec()));
+    obj::call(m::WPObject::wpSaveDeferred, &[obj]);
+    crate::view::background_changed(obj);
+}
+
 /// Set (or with None drop) a folder's own background colour.
 pub fn set_folder_background(obj: usize, rgb: Option<u32>) {
     let f = fo(obj);
@@ -502,6 +520,10 @@ extern "C" fn folder_save_state(obj: usize) -> u32 {
         let s = z(p);
         obj::wpSaveString(obj, b"WPFolder\0".as_ptr(), 3, s.as_ptr());
     }
+    if let Some(n) = &f.font {
+        let s = z(n);
+        obj::wpSaveString(obj, b"WPFolder\0".as_ptr(), 6, s.as_ptr());
+    }
     1
 }
 
@@ -524,6 +546,10 @@ extern "C" fn folder_restore_state(obj: usize, r: u32) -> u32 {
     if let Some(p) = obj::restored_string(obj, b"WPFolder", 3) {
         let p = p.strip_suffix(&[0]).unwrap_or(&p).to_vec();
         fo(obj).include = (!p.is_empty()).then(|| alloc::boxed::Box::new(p));
+    }
+    if let Some(n) = obj::restored_string(obj, b"WPFolder", 6) {
+        let n = n.strip_suffix(&[0]).unwrap_or(&n).to_vec();
+        fo(obj).font = (!n.is_empty()).then(|| alloc::boxed::Box::new(n));
     }
     1
 }
@@ -619,6 +645,7 @@ extern "C" fn wpQueryFldrFlags(obj: usize) -> u32 {
 extern "C" fn folder_uninit(obj: usize) {
     fo(obj).content = None;
     fo(obj).include = None;
+    fo(obj).font = None;
     som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpUnInitData, &[obj]);
 }
 

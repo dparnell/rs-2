@@ -210,6 +210,8 @@ pub struct State {
     /// Presentation parameter colours set on windows: (foreground,
     /// background) as 0x00RRGGBB, NO_COLOR where not set.
     pub pres: BTreeMap<u32, (u32, u32)>,
+    /// PP_FONTNAMESIZE set on windows ("10.Helv").
+    pub pres_font: BTreeMap<u32, Vec<u8>>,
     /// System values and colours set with WinSetSysValue and WinSetSysColors
     /// (the rest are the defaults).
     pub sysvals: BTreeMap<i32, i32>,
@@ -275,6 +277,7 @@ pub fn init(surface: Surface) {
         ptr_window: 0,
         min_viewer: 0,
         pres: BTreeMap::new(),
+        pres_font: BTreeMap::new(),
         sysvals: BTreeMap::new(),
         syscolors: BTreeMap::new(),
         fonts: Default::default(),

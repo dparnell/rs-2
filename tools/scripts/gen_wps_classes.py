@@ -87,6 +87,7 @@ EXTRA = {
     'WPPalette': ['WPAbstract'],
     'WPColorPalette': ['WPPalette'],
     'WPSchemePalette': ['WPPalette'],
+    'WPFontPalette': ['WPPalette'],
 }
 for n, parents in EXTRA.items():
     classes.setdefault(n, dict(parents=parents, methods=[], meta=None, major=1, minor=1, overrides=[], dll='pmwp', file=''))

@@ -205,6 +205,16 @@ fn set_colors(w: usize) {
         WinSetPresParam(cnr, 3, 4, &bg);
         WinSetPresParam(cnr, 1, 4, &fg);
     }
+    // PP_FONTNAMESIZE: the folder's font (the Font Palette).
+    match crate::fs::folder_font(wins()[w].obj) {
+        Some(n) => {
+            let z = crate::util::z(&n);
+            unsafe { WinSetPresParam(cnr, 15, z.len() as u32, z.as_ptr() as *const u32) };
+        }
+        None => unsafe {
+            WinRemovePresParam(cnr, 15);
+        },
+    }
 }
 
 /// A folder's background changed: its views show it.

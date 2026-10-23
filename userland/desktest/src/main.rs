@@ -162,6 +162,15 @@ fn pmwin(hab: u32) {
     let n = unsafe { WinQueryPresParam(cb, 3, 0, &mut id, 4, &mut got, 0) };
     check("PP_BACKGROUNDCOLOR set and queried", ok && n == 4 && got == c && id == 3);
     check("PP_FOREGROUNDCOLOR not set", unsafe { WinQueryPresParam(cb, 1, 0, &mut id, 4, &mut got, 0) } == 0);
+    // PP_FONTNAMESIZE: set on the frame, inherited by its client.
+    let ok = unsafe { WinSetPresParam(b, 15, 8, b"12.Helv\0".as_ptr() as *const u32) } != 0;
+    let mut name = [0u32; 8];
+    let n = unsafe { WinQueryPresParam(cb, 15, 0, &mut id, 32, name.as_mut_ptr(), 0) };
+    let text = unsafe { core::slice::from_raw_parts(name.as_ptr() as *const u8, 8) };
+    check("PP_FONTNAMESIZE set and inherited", ok && n == 8 && &text[..8] == b"12.Helv\0" && id == 15);
+    // QPF_NOINHERIT
+    check("PP_FONTNAMESIZE not the client's own", unsafe { WinQueryPresParam(cb, 15, 0, &mut id, 32, name.as_mut_ptr(), 1) } == 0);
+    check("PP_FONTNAMESIZE of an unknown face refused", unsafe { WinSetPresParam(b, 15, 13, b"10.NoSuchFace\0".as_ptr() as *const u32) } == 0);
     unsafe {
         WinDestroyWindow(a);
         WinDestroyWindow(b);

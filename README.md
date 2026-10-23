@@ -180,7 +180,8 @@ System Setup (Display; System: where minimized windows go; Keyboard:
 repeat rate and delay, cursor blink rate; Mouse: double-click time,
 left-handed; Sound: the warning beep; the Color Palette: drag a colour
 onto a folder; the Scheme Palette: drag a colour scheme onto a window
-to change every window's colours), the
+to change every window's colours; the Font Palette: drag a font onto a
+folder or a window), the
 Window List, Shut Down, Templates (drag a template where you want a
 new data file, folder or program object) and the Assistance Center
 (Information and Troubleshooting, where the OS/2 books go, the Help

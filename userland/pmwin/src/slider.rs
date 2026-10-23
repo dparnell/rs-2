@@ -217,7 +217,7 @@ fn paint(h: u32) {
     };
     let mut tick_rects = Vec::new();
     let mut labels = Vec::new();
-    let f = draw::font();
+    let f = draw::font_of(h);
     for i in 0..sc.increments {
         let t = ticks.get(i as usize).copied().unwrap_or(0) as i32;
         let along = sc.pos(i);
@@ -227,7 +227,7 @@ fn paint(h: u32) {
         }
         if let Some(txt) = texts.get(i as usize).filter(|t| !t.is_empty()) {
             let c = point(h, along, centre + ARM_ACROSS / 2 + 2);
-            let w = draw::text_width(txt);
+            let w = draw::font_of(h).text_width(txt);
             let (x, y) = if vertical(h) { (c.x + 2, c.y - f.height / 2) } else { (c.x - w / 2, c.y) };
             labels.push((x, y, txt.clone()));
         }

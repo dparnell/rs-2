@@ -49,13 +49,13 @@ fn paint(h: u32) {
             }
             SS_GROUPBOX => {
                 c.fill(r, bg);
-                let f = draw::font();
+                let f = draw::font_of(h);
                 let top = r.top - f.height / 2;
                 let b = Rect::new(r.left, r.bottom, r.right, top);
                 c.frame(Rect::new(b.left + 1, b.bottom, b.right, b.top - 1), draw::light());
                 c.frame(Rect::new(b.left, b.bottom + 1, b.right - 1, b.top), draw::shadow());
                 if !text.is_empty() {
-                    let w = draw::text_width(&draw::strip_mnemonic(&text).0);
+                    let w = draw::font_of(h).text_width(&draw::strip_mnemonic(&text).0);
                     let t = Rect::new(r.left + 6, r.top - f.height, (r.left + 10 + w).min(r.right), r.top);
                     c.fill(t, bg);
                     c.text_in(Rect::new(t.left + 2, t.bottom, t.right, t.top), &text, if enabled { draw::text() } else { draw::GRAY_TEXT }, draw::DT_MNEMONIC);
