@@ -362,7 +362,7 @@ impl Machine {
             0x09 => {
                 self.mouse_hide_cursor();
                 self.mouse.hot = (self.cpu.bx() as i16 as i32, self.cpu.cx() as i16 as i32);
-                let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.dx());
+                let a = self.seg_lin(ES, self.cpu.dx());
                 for i in 0..32 {
                     self.mouse.shape[i] = self.hw.rd16(a + i as u32 * 2);
                 }

@@ -364,7 +364,7 @@ impl Machine {
             Ok(Name::Dev(_)) => return self.fail(err::FILE_NOT_FOUND),
             Err(e) => return self.fail(e),
         };
-        let pb = Machine::lin(self.cpu.seg[ES].sel, self.cpu.bx());
+        let pb = self.seg_lin(ES, self.cpu.bx());
         match al {
             0x00 | 0x01 => {
                 let env = self.hw.rd16(pb);

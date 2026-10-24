@@ -224,7 +224,7 @@ impl Machine {
                 }
             }
             0x0b => {
-                let a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.si());
+                let a = self.seg_lin(DS, self.cpu.si());
                 let len = self.hw.rd32(a);
                 let sh = self.hw.rd16(a + 4);
                 let so = self.hw.rd32(a + 6);

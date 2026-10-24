@@ -39,6 +39,7 @@ const CB_RMCBRET: u16 = 0x304;
 const CB_RAW_TO_PM: u16 = 0x305;
 const CB_RAW_TO_RM: u16 = 0x306;
 const CB_IRQRET: u16 = 0x307;
+const CB_EXTAPI: u16 = 0x308;
 const CB_RMIRQ: u16 = 0x510;
 const CB_DEFEXC: u16 = 0x380;
 const CB_DEFINT: u16 = 0x400;
@@ -67,6 +68,7 @@ const H_RMCBRET: u32 = 0x2008;
 const H_RAW: u32 = 0x2010;
 const H_SAVE: u32 = 0x2018;
 const H_IRQRET: u32 = 0x2020;
+const H_EXTAPI: u32 = 0x2028;
 const H_DEFEXC: u32 = 0x2100;
 const H_STACK0: u32 = 0x7000;
 const H_LOCKED: u32 = 0x8000;
@@ -142,6 +144,14 @@ pub struct Client {
     rm_irq_prev: [Option<(u16, u16)>; 16],
     /// Real-mode states interrupted by such an IRQ.
     rm_saved: Vec<RmState>,
+    /// Selectors 0002h gave out: (segment, selector).
+    seg_sels: Vec<(u16, u16)>,
+    /// The client asked for the "MS-DOS" (or "WINOS2") extensions
+    /// through INT 2Fh AX=168Ah: the host translates the DOS API in
+    /// protected mode (OS/2's DPMI_DOS_API=AUTO).
+    pub dos_api: bool,
+    /// The LDT alias selector the extension API gave out.
+    ldt_alias: u16,
 }
 
 /// A real-mode CPU state put aside while a client's protected-mode
@@ -171,6 +181,9 @@ fn vector_irq(v: u8) -> Option<usize> {
 #[derive(Default)]
 pub struct Dpmi {
     pub client: Option<Client>,
+    /// A DOS call served in protected mode waits (for input): run the
+    /// callback again.
+    retry: bool,
 }
 
 impl Client {
@@ -277,19 +290,38 @@ impl Machine {
             return Cb::Done;
         }
         match n {
-            CB_VEC..=0x2ff => self.dpmi_vector(host, (n - CB_VEC) as u8),
+            CB_VEC..=0x2ff => {
+                self.dpmi_vector(host, (n - CB_VEC) as u8);
+                if core::mem::take(&mut self.dpmi.retry) {
+                    return Cb::Retry;
+                }
+            }
             CB_RMRET | CB_SIMRET => self.dpmi_back_to_pm(),
             CB_EXCRET => self.dpmi_exception_return(),
             CB_RMCBRET => self.dpmi_rmcb_return(),
             CB_RAW_TO_PM => self.dpmi_raw_to_pm(),
             CB_RAW_TO_RM => self.dpmi_raw_to_rm(),
             CB_IRQRET => self.dpmi_rm_irq_return(),
+            CB_EXTAPI => self.dpmi_ext_api(),
             0x510..=0x51f => self.dpmi_rm_irq((n - CB_RMIRQ) as usize),
             0x380..=0x39f => {
                 let v = (n - CB_DEFEXC) as u8;
                 self.dpmi_unhandled(host, v);
             }
-            0x400..=0x4ff => self.dpmi_reflect((n - CB_DEFINT) as u8, false),
+            0x400..=0x4ff => {
+                // The default handler (a client chaining to it): the
+                // caller's IRET frame is on the client's stack.
+                let v = (n - CB_DEFINT) as u8;
+                if v == 0x21 {
+                    let sz = if self.client().bits32 { 4 } else { 2 };
+                    let sp = if self.cpu.seg[SS].big() { self.cpu.regs[ESP] } else { self.cpu.regs[ESP] & 0xffff };
+                    let at = self.cpu.seg[SS].base.wrapping_add(sp + 2 * sz);
+                    if self.dpmi_dos21(host, at) {
+                        return if core::mem::take(&mut self.dpmi.retry) { Cb::Retry } else { Cb::Done };
+                    }
+                }
+                self.dpmi_reflect(v, false)
+            }
             0x500..=0x50f => self.dpmi_rmcb_enter((n - CB_RMCB) as usize),
             _ => {}
         }
@@ -368,6 +400,8 @@ impl Machine {
         stub(self, H_RMCBRET, CB_RMCBRET);
         stub(self, H_RAW, CB_RAW_TO_RM);
         stub(self, H_IRQRET, CB_IRQRET);
+        stub(self, H_EXTAPI, CB_EXTAPI);
+        self.hw.wr(area + H_EXTAPI + 4, 0xcb);
         self.hw.wr(area + H_SAVE, 0xcb);
         // TSS: the ring-0 stack.
         self.hw.wr32(area + H_TSS + 4, area + H_STACK0);
@@ -388,6 +422,9 @@ impl Machine {
             env_seg: 0,
             rm_irq_prev: [None; 16],
             rm_saved: Vec::new(),
+            seg_sels: Vec::new(),
+            dos_api: false,
+            ldt_alias: 0,
         };
         // The client's first selectors: CS, DS, SS, ES (PSP), environment.
         let (rds, rss) = (self.cpu.seg[DS].sel, self.cpu.seg[SS].sel);
@@ -488,6 +525,17 @@ impl Machine {
             }
             // From the client (ring 3): its handler, or the default.
             let from3 = self.hw.rd32(f + 4) & 3 == 3;
+            if self.cfg.trace {
+                let (eip, cs) = (self.frame_get(f, 0), self.frame_get(f, 1));
+                let sr = |m: &Machine, r: usize| { let s = m.cpu.seg[r]; alloc::format!("{:04x}[{:x}+{:x}]", s.sel, s.base, s.limit) };
+                host.log(&alloc::format!(
+                    "dpmi: exception {v:#x} code {code:#x} at {cs:#06x}:{eip:#x} ds={} es={} edi={:x} esi={:x}",
+                    sr(self, DS),
+                    sr(self, ES),
+                    self.cpu.regs[EDI],
+                    self.cpu.regs[ESI]
+                ));
+            }
             if from3 {
                 if let Some(h) = self.client().exc_handlers[v as usize] {
                     self.dpmi_call_exception(v, code, has_code, h);
@@ -533,6 +581,9 @@ impl Machine {
             self.cpu.set_ax(0);
             return;
         }
+        if v == 0x2f && !hw && self.cpu.ax() == 0x168a && self.dpmi_vendor_api() {
+            return;
+        }
         if let Some((sel, off)) = self.client().pm_vectors[v as usize] {
             // To the client's handler at ring 3, with an IRET frame on its
             // stack.
@@ -560,7 +611,229 @@ impl Machine {
                 return;
             }
         }
+        if v == 0x21 && !hw && self.dpmi_dos21(host, f + 8) {
+            return;
+        }
+        if matches!(v, 0x10..=0x12 | 0x15 | 0x16 | 0x1a) && !hw && self.dpmi_bios(host, v, f + 8) {
+            return;
+        }
         self.dpmi_reflect(v, true);
+    }
+
+    // ---- The DOS API in protected mode ----
+
+    /// INT 21h from a client that turned on the DOS API translation
+    /// (16-bit clients: Windows' KERNEL). rs2's DOS reaches memory
+    /// through the segment registers' bases, so it serves most calls
+    /// directly on the client's selectors; calls that take or return
+    /// segments get selectors instead, as OS/2's VDPX.SYS and Windows'
+    /// DOSX give them. `flags_at` is where the caller's flags are.
+    /// False: reflect the call to real mode as it is.
+    fn dpmi_dos21<H: Host>(&mut self, host: &mut H, flags_at: u32) -> bool {
+        let c = self.client();
+        if !c.dos_api || c.bits32 {
+            return false;
+        }
+        // A real-mode program hooked INT 21h: it has to see the call.
+        if self.vector(0x21) != (bios::ROM, bios::STUBS + 0x21 * 8) {
+            return false;
+        }
+        let ah = self.cpu.ah();
+        match ah {
+            // Ending a program, starting one: in real mode.
+            0x00 | 0x31 | 0x4b | 0x4c => return false,
+            0x26 | 0x55 => {
+                // DX = the new PSP's selector.
+                let dx = self.cpu.dx();
+                let seg = (self.dpmi_lin(dx, 0) >> 4) as u16;
+                self.cpu.set_dx(seg);
+                self.dpmi_serve(host, 0x21, flags_at);
+                self.cpu.set_dx(dx);
+                return true;
+            }
+            0x25 | 0x35 => {
+                // Protected-mode vectors, as 0204h/0205h.
+                let (cx, dx) = (self.cpu.regs[ECX], self.cpu.regs[EDX]);
+                let bl = self.cpu.bl();
+                self.cpu.set_bl(self.cpu.al());
+                if ah == 0x25 {
+                    let ds = self.cpu.seg[DS].sel;
+                    self.cpu.set_cx(ds);
+                    let _ = self.int31_fn(host, 0, 0x0205);
+                } else {
+                    let _ = self.int31_fn(host, 0, 0x0204);
+                    let (sel, off) = (self.cpu.cx(), self.cpu.dx());
+                    let _ = self.cpu.load_seg(&mut self.hw, ES, sel);
+                    self.cpu.set_bx(off);
+                }
+                self.cpu.regs[ECX] = cx;
+                self.cpu.regs[EDX] = dx;
+                if ah == 0x25 {
+                    self.cpu.set_bl(bl);
+                }
+                return true;
+            }
+            0x48 | 0x49 | 0x4a => {
+                // DOS memory with a selector (0100h-0102h).
+                let dx = self.cpu.regs[EDX];
+                let es = self.cpu.seg[ES].sel;
+                self.cpu.set_dx(es);
+                let f = [0x0100, 0x0101, 0x0102][(ah - 0x48) as usize];
+                let r = self.int31_fn(host, 0, f);
+                if ah == 0x48 && r.is_ok() {
+                    let sel = self.cpu.dx();
+                    self.cpu.set_ax(sel);
+                }
+                self.cpu.regs[EDX] = dx;
+                self.pm_ret_cf(flags_at, r.map_err(|e| match e {
+                    0x8013 | 0x8014 => 8,
+                    0x8022 | 0x8023 => 9,
+                    _ => 7,
+                }));
+                return true;
+            }
+            0x1a => {
+                let (sel, off) = (self.cpu.seg[DS].sel, self.cpu.dx());
+                let a = self.seg_lin(DS, off);
+                self.dos.pm_dta = Some((sel, off, a));
+                return true;
+            }
+            0x2f => {
+                let (sel, off) = match self.dos.pm_dta {
+                    Some((sel, off, _)) => (sel, off),
+                    None => {
+                        let (s, o) = self.dta();
+                        (self.dpmi_seg_sel(s).unwrap_or(0), o)
+                    }
+                };
+                let _ = self.cpu.load_seg(&mut self.hw, ES, sel);
+                self.cpu.set_bx(off);
+                return true;
+            }
+            0x50 => {
+                // BX = the PSP's selector.
+                let sel = self.cpu.bx();
+                let seg = (self.dpmi_lin(sel, 0) >> 4) as u16;
+                self.set_psp(seg);
+                return true;
+            }
+            _ => {}
+        }
+        self.dpmi_serve(host, 0x21, flags_at);
+        if matches!(ah, 0x51 | 0x62) {
+            let seg = self.cpu.bx();
+            let sel = self.dpmi_seg_sel(seg).unwrap_or(0);
+            self.cpu.set_bx(sel);
+        }
+        true
+    }
+
+    /// Run the machine's own handler of interrupt `v` on the client's
+    /// registers in protected mode; segments it returns (pointers to its
+    /// tables) become selectors.
+    fn dpmi_serve<H: Host>(&mut self, host: &mut H, v: u8, flags_at: u32) {
+        let segs = [self.cpu.seg[DS], self.cpu.seg[ES]];
+        self.pm_flags_at = Some(flags_at);
+        let r = self.interrupt(host, v);
+        self.pm_flags_at = None;
+        if r == Cb::Retry {
+            self.dpmi.retry = true;
+            return;
+        }
+        if let Some(n) = self.chain_int.take() {
+            host.log(&alloc::format!("dpmi: INT {v:#x} AX={:#06x} in protected mode wants INT {n:#x} (ignored)", self.cpu.ax()));
+        }
+        for (i, r) in [DS, ES].into_iter().enumerate() {
+            let s = self.cpu.seg[r];
+            if s.sel != segs[i].sel || s.base != segs[i].base {
+                let sel = self.dpmi_seg_sel(s.sel).unwrap_or(0);
+                let _ = self.cpu.load_seg(&mut self.hw, r, sel);
+            }
+        }
+    }
+
+    /// A BIOS interrupt from a client with the DOS API translation on
+    /// (as VDPX.SYS translates INT 10h and 15h): served directly when
+    /// its real-mode vector is still the BIOS's.
+    fn dpmi_bios<H: Host>(&mut self, host: &mut H, v: u8, flags_at: u32) -> bool {
+        let c = self.client();
+        if !c.dos_api || c.bits32 || self.vector(v) != (bios::ROM, bios::STUBS + v as u16 * 8) {
+            return false;
+        }
+        self.dpmi_serve(host, v, flags_at);
+        true
+    }
+
+    /// Carry clear, or set with AX = error, in the flags at `at`.
+    fn pm_ret_cf(&mut self, at: u32, r: Result<(), u16>) {
+        let mut v = self.hw.rd16(at);
+        match r {
+            Ok(()) => v &= !(CF as u16),
+            Err(e) => {
+                v |= CF as u16;
+                self.cpu.set_ax(e);
+            }
+        }
+        self.hw.wr16(at, v);
+    }
+
+    /// INT 2Fh AX=168Ah in protected mode, DS:(E)SI = a vendor name:
+    /// the "MS-DOS" extensions (as Windows' DOSX and OS/2's VDPX.SYS give
+    /// them, VDPX also under the name "WINOS2") turn on the DOS API
+    /// translation and return the entry point of the extension API in
+    /// ES:(E)DI.
+    fn dpmi_vendor_api(&mut self) -> bool {
+        let bits32 = self.client().bits32;
+        let si = if bits32 { self.cpu.regs[ESI] } else { self.cpu.regs[ESI] & 0xffff };
+        let a = self.cpu.seg[DS].base.wrapping_add(si);
+        let mut name = [0u8; 7];
+        for (i, b) in name.iter_mut().enumerate() {
+            *b = self.hw.rd(a + i as u32);
+        }
+        if &name != b"MS-DOS\0" && &name != b"WINOS2\0" {
+            return false;
+        }
+        self.client().dos_api = true;
+        let sel = if bits32 { SEL_CODE3 } else { SEL_CODE3_16 };
+        let _ = self.cpu.load_seg(&mut self.hw, ES, sel);
+        if bits32 {
+            self.cpu.regs[EDI] = H_EXTAPI;
+        } else {
+            self.cpu.set_di(H_EXTAPI as u16);
+        }
+        self.cpu.set_al(0);
+        true
+    }
+
+    /// The extension API (a far call): AX=0000h the version (0100h),
+    /// 0100h (and VDPX's 0101h) the LDT alias selector, a data
+    /// selector for the LDT that the client may write descriptors
+    /// through (Windows' KERNEL does).
+    fn dpmi_ext_api(&mut self) {
+        match self.cpu.ax() {
+            0x0000 => {
+                self.cpu.set_ax(0x0100);
+                self.cpu.flags &= !CF;
+            }
+            0x0100 | 0x0101 => {
+                if self.client().ldt_alias == 0 {
+                    if let Some(s) = self.client().alloc_sel(1) {
+                        let area = self.client().area;
+                        let a = self.client().desc_addr(s);
+                        self.dpmi_ww64(a, desc(area + H_LDT, (LDT_ENTRIES * 8 - 1) as u32, 0xf3, 0));
+                        self.client().ldt_alias = s;
+                    }
+                }
+                let s = self.client().ldt_alias;
+                self.cpu.set_ax(s);
+                if s != 0 {
+                    self.cpu.flags &= !CF;
+                } else {
+                    self.cpu.flags |= CF;
+                }
+            }
+            _ => self.cpu.flags |= CF,
+        }
     }
 
     fn dpmi_seg_big(&mut self, sel: u16) -> bool {
@@ -1054,11 +1327,35 @@ impl Machine {
                 }
             }
             0x0002 => {
+                // The same selector for the same segment each time (the
+                // client must not change or free it).
                 let seg = self.cpu.bx();
-                let s = self.client().alloc_sel(1).ok_or(0x8011u16)?;
-                let a = self.client().desc_addr(s);
-                self.dpmi_ww64(a, desc((seg as u32) << 4, 0xffff, 0xf3, 0));
+                let s = self.dpmi_seg_sel(seg).ok_or(0x8011u16)?;
                 self.cpu.set_ax(s);
+            }
+            0x0010 => {
+                // OS/2's VDPMI: allocate at least BX, at most CX
+                // contiguous selectors; AX = the first, DX = how many.
+                let (min, max) = (self.cpu.bx().max(1) as usize, self.cpu.cx() as usize);
+                if max < min {
+                    return Err(0x8021);
+                }
+                let mut n = max.min(LDT_ENTRIES - 16);
+                let s = loop {
+                    if let Some(s) = self.client().alloc_sel(n) {
+                        break s;
+                    }
+                    if n == min {
+                        return Err(0x8011);
+                    }
+                    n = (n / 2).max(min);
+                };
+                for i in 0..n as u16 {
+                    let a = self.client().desc_addr(s + i * 8);
+                    self.dpmi_ww64(a, desc(0, 0, 0xf3, if bits32 { 0x4 } else { 0 }));
+                }
+                self.cpu.set_ax(s);
+                self.cpu.set_dx(n as u16);
             }
             0x0003 => self.cpu.set_ax(8),
             0x0004 | 0x0005 => {}
@@ -1394,6 +1691,19 @@ impl Machine {
     }
 
     /// A segment register holding `s` takes its new descriptor.
+    /// A data selector for real-mode segment `seg` (64 KB), one per
+    /// segment.
+    fn dpmi_seg_sel(&mut self, seg: u16) -> Option<u16> {
+        if let Some(&(_, s)) = self.client().seg_sels.iter().find(|(g, _)| *g == seg) {
+            return Some(s);
+        }
+        let s = self.client().alloc_sel(1)?;
+        let a = self.client().desc_addr(s);
+        self.dpmi_ww64(a, desc((seg as u32) << 4, 0xffff, 0xf3, 0));
+        self.client().seg_sels.push((seg, s));
+        Some(s)
+    }
+
     fn dpmi_reload(&mut self, s: u16) {
         for r in [DS, ES, FS, GS, SS] {
             if self.cpu.seg[r].sel & !3 == s & !3 && self.cpu.seg[r].attr & attr::UNUSABLE == 0 {

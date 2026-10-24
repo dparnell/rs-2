@@ -113,6 +113,9 @@ pub struct LineEdit {
 
 pub struct Dos {
     pub psp: u16,
+    /// A DTA a DPMI client set in protected mode: selector, offset,
+    /// linear address.
+    pub pm_dta: Option<(u16, u16, u32)>,
     pub drive: u8,
     pub cwd: [String; 26],
     pub sft: Vec<Option<Sft>>,
@@ -150,6 +153,7 @@ impl Dos {
     pub fn new() -> Dos {
         Dos {
             psp: SYS_PSP,
+            pm_dta: None,
             drive: 2,
             cwd: Default::default(),
             sft: Vec::new(),
@@ -325,12 +329,22 @@ impl Machine {
         self.hw.wr16(Machine::lin(DOSSEG, SDA + 0x10), psp);
     }
 
+    /// The DTA as a linear address (set from real or protected mode).
+    pub fn dta_lin(&mut self) -> u32 {
+        if let Some((_, _, a)) = self.dos.pm_dta {
+            return a;
+        }
+        let (s, o) = self.dta();
+        Machine::lin(s, o)
+    }
+
     pub fn dta(&mut self) -> (u16, u16) {
         let a = Machine::lin(DOSSEG, SDA + 0x0c);
         (self.hw.rd16(a + 2), self.hw.rd16(a))
     }
 
     pub fn set_dta(&mut self, seg: u16, off: u16) {
+        self.dos.pm_dta = None;
         let a = Machine::lin(DOSSEG, SDA + 0x0c);
         self.hw.wr16(a, off);
         self.hw.wr16(a + 2, seg);
@@ -362,11 +376,11 @@ impl Machine {
 
     /// DS:DX as a linear address.
     pub fn ds_dx(&self) -> u32 {
-        Machine::lin(self.cpu.seg[DS].sel, self.cpu.dx())
+        self.seg_lin(DS, self.cpu.dx())
     }
 
     pub fn es_di(&self) -> u32 {
-        Machine::lin(self.cpu.seg[ES].sel, self.cpu.di())
+        self.seg_lin(ES, self.cpu.di())
     }
 
     pub(crate) fn dos_interrupt<H: Host>(&mut self, host: &mut H, v: u8) -> Cb {

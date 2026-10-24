@@ -77,8 +77,7 @@ impl Machine {
         let Some(i) = self.fcb_sft(a) else { return (if write { 1 } else { 1 }, 0) };
         let h = self.dos.sft[i].as_ref().unwrap().host;
         let size = self.rec_size(a);
-        let (dseg, doff) = self.dta();
-        let dta = Machine::lin(dseg, doff);
+        let dta = self.dta_lin();
         if host.seek(h, (rec as u64 * size as u64) as i64, 0).is_err() {
             return (1, 0);
         }
@@ -129,8 +128,7 @@ impl Machine {
 
     /// Fill the DTA with a found entry as an (extended) FCB.
     fn fcb_found(&mut self, ext: Option<u8>, drive: u8, e: &crate::DirEntry) {
-        let (dseg, doff) = self.dta();
-        let mut d = Machine::lin(dseg, doff);
+        let mut d = self.dta_lin();
         if let Some(attr) = ext {
             self.hw.wr(d, 0xff);
             for i in 1..6 {
@@ -338,8 +336,8 @@ impl Machine {
     /// 29h: parse a file name at DS:SI into the FCB at ES:DI.
     fn parse_name(&mut self) {
         let flags = self.cpu.al();
-        let mut a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.si());
-        let f = Machine::lin(self.cpu.seg[ES].sel, self.cpu.di());
+        let mut a = self.seg_lin(DS, self.cpu.si());
+        let f = self.seg_lin(ES, self.cpu.di());
         let start = a;
         let seps = b":.;,=+ \t";
         if flags & 1 != 0 {

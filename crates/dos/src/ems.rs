@@ -173,7 +173,7 @@ impl Machine {
                 None => st = 0x83,
             },
             0x4d => {
-                let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.di());
+                let a = self.seg_lin(ES, self.cpu.di());
                 let mut n = 0;
                 for (i, h) in self.ems.handles.iter().enumerate() {
                     if let Some(p) = h {
@@ -188,13 +188,13 @@ impl Machine {
                 // Get/set the whole mapping: 16 bytes.
                 let al = self.cpu.al();
                 if al == 0 || al == 2 {
-                    let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.di());
+                    let a = self.seg_lin(ES, self.cpu.di());
                     for (w, m) in self.hw.ems_map.clone().iter().enumerate() {
                         self.hw.wr32(a + w as u32 * 4, m.map_or(0xffff_ffff, |g| g as u32));
                     }
                 }
                 if al == 1 || al == 2 {
-                    let a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.si());
+                    let a = self.seg_lin(DS, self.cpu.si());
                     for w in 0..4 {
                         let v = self.hw.rd32(a + w * 4);
                         self.hw.ems_map[w as usize] = if v == 0xffff_ffff || v >= self.ems.total as u32 { None } else { Some(v as u16) };
@@ -207,7 +207,7 @@ impl Machine {
             }
             0x50 => {
                 let al = self.cpu.al();
-                let a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.si());
+                let a = self.seg_lin(DS, self.cpu.si());
                 let h = self.cpu.dx();
                 for i in 0..self.cpu.cx() as u32 {
                     let l = self.hw.rd16(a + i * 4);
@@ -249,11 +249,11 @@ impl Machine {
                 if h >= self.ems.names.len() || self.ems.handles[h].is_none() {
                     st = 0x83;
                 } else if self.cpu.al() == 0 {
-                    let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.di());
+                    let a = self.seg_lin(ES, self.cpu.di());
                     let n = self.ems.names[h];
                     self.hw.write_bytes(a, &n);
                 } else {
-                    let a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.si());
+                    let a = self.seg_lin(DS, self.cpu.si());
                     let mut n = [0u8; 8];
                     self.hw.read_bytes(a, &mut n);
                     self.ems.names[h] = n;
@@ -261,7 +261,7 @@ impl Machine {
             }
             0x54 => match self.cpu.al() {
                 0 => {
-                    let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.di());
+                    let a = self.seg_lin(ES, self.cpu.di());
                     let mut n = 0u32;
                     for i in 0..self.ems.handles.len() {
                         if self.ems.handles[i].is_some() {
@@ -274,7 +274,7 @@ impl Machine {
                     self.cpu.set_al(n as u8);
                 }
                 1 => {
-                    let a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.si());
+                    let a = self.seg_lin(DS, self.cpu.si());
                     let mut want = [0u8; 8];
                     self.hw.read_bytes(a, &mut want);
                     match self.ems.names.iter().position(|n| *n == want && want != [0; 8]) {
@@ -287,7 +287,7 @@ impl Machine {
             0x57 => st = self.ems_move(),
             0x58 => {
                 if self.cpu.al() == 0 {
-                    let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.di());
+                    let a = self.seg_lin(ES, self.cpu.di());
                     for p in 0..4u32 {
                         self.hw.wr16(a + p * 4, EMS_FRAME as u16 + p as u16 * 0x400);
                         self.hw.wr16(a + p * 4 + 2, p as u16);
@@ -313,7 +313,7 @@ impl Machine {
     /// 57h: move or exchange a region between conventional and expanded
     /// memory.
     fn ems_move(&mut self) -> u8 {
-        let a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.si());
+        let a = self.seg_lin(DS, self.cpu.si());
         let len = self.hw.rd32(a);
         let addr = |m: &mut Machine, at: u32| -> Option<(bool, u32)> {
             let kind = m.hw.rd(at);

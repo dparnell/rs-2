@@ -128,6 +128,9 @@ fn civil(secs: u64) -> DateTime {
 
 impl Host for Run {
     fn open(&mut self, path: &str, mode: OpenMode) -> Result<u32, u16> {
+        if self.trace {
+            eprintln!("open {path}");
+        }
         let p = self.path(path)?;
         if p.is_dir() {
             return Err(5);
