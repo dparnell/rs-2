@@ -14,6 +14,8 @@ pub const STUBS: u16 = 0xe000;
 /// Special code (INT 8, system callbacks).
 pub const SPECIAL: u16 = 0xe800;
 pub const CONFIG_TABLE: u16 = 0xe6f5;
+/// The video BIOS's static functionality table (INT 10h AH=1Bh).
+pub const VIDEO_STATIC: u16 = 0xe700;
 /// The video ROM segment (fonts).
 pub const VROM: u16 = 0xc000;
 
@@ -147,6 +149,9 @@ impl Machine {
         put(self, 0xefc7, &[0xdf, 0x02, 0x25, 0x02, 0x12, 0x1b, 0xff, 0x6c, 0xf6, 0x0f, 0x08]);
         // The configuration table (INT 15h C0h), model AT.
         put(self, CONFIG_TABLE, &[0x08, 0x00, 0xfc, 0x00, 0x01, 0x74, 0x40, 0x00, 0x00, 0x00]);
+        // Modes 0-7, 0Dh-13h; 200/350/400 lines; 8 font blocks, 2 active;
+        // every palette, font and cursor function; state save.
+        put(self, VIDEO_STATIC, &[0xff, 0xe0, 0x0f, 0, 0, 0, 0, 0x07, 0x08, 0x02, 0xff, 0x0e, 0, 0, 0x3f, 0]);
         put(self, 0xfff0, &[0xea, 0x5b, 0xe0, 0x00, 0xf0]);
         put(self, 0xfff5, b"01/01/92");
         put(self, 0xfffe, &[0xfc, 0x00]);
@@ -1161,8 +1166,8 @@ impl Machine {
                 for i in 0..64 {
                     self.hw.wr(a + i, 0);
                 }
-                self.hw.wr16(a, 0x0010);
-                self.hw.wr16(a + 2, 0xf000);
+                self.hw.wr16(a, VIDEO_STATIC);
+                self.hw.wr16(a + 2, ROM);
                 let m = self.bda_mode();
                 let cols = self.bda_cols();
                 self.hw.wr(a + 4, m);
