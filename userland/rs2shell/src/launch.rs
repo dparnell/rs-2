@@ -58,6 +58,12 @@ fn change_dir(dir: &[u8]) {
 /// the PROG_* session type (PROG_DEFAULT lets the program's own type
 /// decide). Returns the error, 0 if it started.
 pub fn start(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) -> u32 {
+    start_env(exe, params, dir, title, progc, &[])
+}
+
+/// `start` with the object's environment strings added to the shell's
+/// own (DOS settings for a DOS program).
+pub fn start_env(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32, extra_env: &[u8]) -> u32 {
     let up = exe.to_ascii_uppercase();
     let dos_batch = up.ends_with(b".BAT");
     let progc = if dos_batch && !matches!(progc, PROG_VDM | PROG_WINDOWEDVDM) { PROG_WINDOWEDVDM } else { progc };
@@ -111,6 +117,27 @@ pub fn start(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) ->
     };
     change_dir(&wd);
     let (t, i) = (z(&title), z(&inputs));
+    // The environment: the shell's, then the object's strings.
+    let env_block: Option<Vec<u8>> = (!extra_env.is_empty()).then(|| {
+        let mut b = Vec::new();
+        unsafe {
+            let mut tib = core::ptr::null_mut();
+            let mut pib: *mut os2::Pib = core::ptr::null_mut();
+            os2::DosGetInfoBlocks(&mut tib, &mut pib);
+            let mut q = (*pib).pchenv;
+            while !q.is_null() && *q != 0 {
+                while *q != 0 {
+                    b.push(*q);
+                    q = q.add(1);
+                }
+                b.push(0);
+                q = q.add(1);
+            }
+        }
+        b.extend_from_slice(extra_env.strip_suffix(&[0]).unwrap_or(extra_env));
+        b.extend_from_slice(&[0, 0]);
+        b
+    });
     let sd = os2::StartData {
         length: core::mem::size_of::<os2::StartData>() as u16,
         related: 0,
@@ -120,7 +147,7 @@ pub fn start(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) ->
         name: name.as_ref().map_or(core::ptr::null(), |n| n.as_ptr()),
         inputs: i.as_ptr(),
         termq: core::ptr::null(),
-        env: core::ptr::null(),
+        env: env_block.as_ref().map_or(core::ptr::null(), |b| b.as_ptr()),
         inherit: 0,
         session_type,
     };
@@ -138,7 +165,7 @@ pub fn start(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) ->
 }
 
 pub fn start_program(p: &objects::Program) -> u32 {
-    start(&p.exe, &p.params, &p.dir, &p.title, p.progc)
+    start_env(&p.exe, &p.params, &p.dir, &p.title, p.progc, &p.env)
 }
 
 /// Open a file: run a program, else open it with the program associated

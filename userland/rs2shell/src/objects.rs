@@ -115,7 +115,7 @@ pub fn set_icon_pos(folder: &[u8], obj: &[u8], p: Option<(i32, i32)>) {
 
 // ---- The program list ----
 
-/// A program object (PROGDETAILS without the environment and SWP).
+/// A program object (PROGDETAILS without the SWP).
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
 pub struct Program {
     pub progc: u32,
@@ -125,6 +125,32 @@ pub struct Program {
     pub params: Vec<u8>,
     pub dir: Vec<u8>,
     pub icon: Vec<u8>,
+    /// Environment strings (`NAME=value`; for DOS programs their DOS
+    /// settings, as OS/2 keeps them), each NUL-terminated.
+    pub env: Vec<u8>,
+}
+
+/// A NUL-separated string list ending with an empty string.
+fn cstr_list(p: *const u8) -> Vec<u8> {
+    let mut v = Vec::new();
+    if p.is_null() {
+        return v;
+    }
+    let mut q = p;
+    unsafe {
+        loop {
+            if *q == 0 {
+                break;
+            }
+            while *q != 0 {
+                v.push(*q);
+                q = q.add(1);
+            }
+            v.push(0);
+            q = q.add(1);
+        }
+    }
+    v
 }
 
 /// The entries of a group (SGH_ROOT: the groups) as (handle, progc,
@@ -160,11 +186,12 @@ pub fn definition(h: u32) -> Option<Program> {
     }
     let p = buf.as_ptr() as u32;
     let s = |off: usize| cstr(rd(p, off) as *const u8);
-    Some(Program { progc: rd(p, 4), visible: rd(p, 8), title: s(12), exe: s(16), params: s(20), dir: s(24), icon: s(28) })
+    let env = cstr_list(rd(p, 32) as *const u8);
+    Some(Program { progc: rd(p, 4), visible: rd(p, 8), title: s(12), exe: s(16), params: s(20), dir: s(24), icon: s(28), env })
 }
 
 /// PROGDETAILS for a program (the strings must outlive the call).
-fn details(p: &Program, strs: &[Vec<u8>; 5]) -> [u32; 18] {
+fn details(p: &Program, strs: &[Vec<u8>; 6]) -> [u32; 18] {
     let mut d = [0u32; 18];
     d[0] = 72;
     d[1] = p.progc;
@@ -177,8 +204,10 @@ fn details(p: &Program, strs: &[Vec<u8>; 5]) -> [u32; 18] {
     d
 }
 
-fn strings(p: &Program) -> [Vec<u8>; 5] {
-    [z(&p.title), z(&p.exe), z(&p.params), z(&p.dir), z(&p.icon)]
+fn strings(p: &Program) -> [Vec<u8>; 6] {
+    let mut env = p.env.clone();
+    env.extend_from_slice(&[0, 0]);
+    [z(&p.title), z(&p.exe), z(&p.params), z(&p.dir), z(&p.icon), env]
 }
 
 pub fn add_program(group: u32, p: &Program) -> u32 {
