@@ -10,7 +10,7 @@ mod mem;
 mod proc;
 mod country;
 
-pub use file::{fcb_form, matches, Name};
+pub use file::{fcb_form, is_short as file_is_short, matches, Name};
 pub use proc::pack_dt;
 
 use alloc::collections::BTreeMap;
@@ -494,6 +494,9 @@ impl Machine {
 
     /// Ctrl+C: through the program's INT 23h if it has one, else end it.
     pub(crate) fn ctrl_c<H: Host>(&mut self, host: &mut H) -> Cb {
+        if self.shell_break() {
+            return Cb::Done;
+        }
         let (seg, off) = self.vector(0x23);
         if seg == crate::bios::ROM {
             self.dos_exit(host, 0, 1);

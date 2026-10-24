@@ -507,7 +507,12 @@ fn main() {
         std::process::exit(2);
     };
     let tail = args[1..].join(" ");
-    cfg.env = vec!["COMSPEC=C:\\COMMAND.COM".into(), "PATH=C:\\".into(), "PROMPT=$P$G".into()];
+    // Drive Z: holds rs2's COMMAND.COM.
+    let z = std::env::temp_dir().join(format!("dosrun-z-{}", std::process::id()));
+    fs::create_dir_all(&z).unwrap();
+    fs::write(z.join("COMMAND.COM"), dos::shell::command_com()).unwrap();
+    drives[25] = Some(z.clone());
+    cfg.env = vec!["COMSPEC=Z:\\COMMAND.COM".into(), "PATH=Z:\\;C:\\".into(), "PROMPT=$P$G".into()];
     let trace = cfg.trace;
     let mut host = Run {
         drives,
@@ -523,7 +528,13 @@ fn main() {
     };
     let mut m = Machine::new(&mut host, cfg);
     m.dos.cwd[2] = cwd.to_ascii_uppercase();
-    let path = if prog.contains(':') { prog.clone() } else { format!("C:{}", prog) };
+    let path = if prog.contains(':') {
+        prog.clone()
+    } else if prog.eq_ignore_ascii_case("COMMAND.COM") && !host.drives[2].as_ref().unwrap().join(&prog).exists() {
+        String::from("Z:\\COMMAND.COM")
+    } else {
+        format!("C:{}", prog)
+    };
     if let Err(e) = m.start(&mut host, &path, &tail) {
         eprintln!("dosrun: cannot start {prog}: DOS error {e}");
         std::process::exit(2);
@@ -541,6 +552,7 @@ fn main() {
         }
     };
     m.present(&mut host);
+    let _ = fs::remove_dir_all(&z);
     if let (Some(p), Some((w, h, px, pal))) = (&png_out, &host.last_gfx) {
         write_png(Path::new(p), *w, *h, px, pal);
     }
