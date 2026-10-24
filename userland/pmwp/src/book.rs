@@ -151,6 +151,7 @@ extern "C" fn general_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             let o = unsafe { WinQueryWindowULong(h, QWL_USER) } as usize;
             let t: Vec<u8> = item_text(h, ID_TITLE as u32).into_iter().map(|c| if c == b'^' { b'\n' } else { c }).collect();
             if o != 0 && !t.is_empty() && t != obj::title(o) {
+                let t = crate::delete::confirm_rename(o, &t);
                 let zt = z(&t);
                 obj::call(m::WPObject::wpSetTitle, &[o, zt.as_ptr() as usize]);
             }

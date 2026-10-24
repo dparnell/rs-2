@@ -230,18 +230,23 @@ The work is in phases; each phase is usable on its own:
 2. **Core classes in rs2's PMWP.DLL**: done, with the object model and
    its views (see "rs2's Workplace Shell classes" below), with copying
    and moving (progress, name collisions), Sort and Include, templates
-   and Find. Still to do:
-   - the other view pages (fonts, icon arrangement, details columns);
-   - a lazy writer.
+   and Find, IBM's settings pages (View with the folder's font, icon
+   arrangement and details columns; File, Type, Window, Association,
+   Session, Details), deleting with IBM's confirmations and the lazy
+   writer.
 3. **The shell process**: done (see "The shell process" below). It is
    the default desktop (`PROTSHELL=C:\OS2\PMSHELL.EXE`; `xtask run
    --desktop`), with what RS2SHELL's desktop had: the Minimized Window
    Viewer, the Window List, System Setup and Shut Down.
    `PROTSHELL=C:\OS2\RS2SHELL.EXE` still starts RS2SHELL.
-4. **Compatibility**: wpstutor.dll registered with WinRegisterObjectClass
-   and working; then the remaining classes (Launchpad, Shredder,
-   Network); then rs2 versions of
-   WPCONFIG and WPPRINT (System Setup and printers).
+4. **Compatibility**: done as far as rs2 has what the classes stand
+   for. The Toolkit's wpstutor.dll is registered in the running shell
+   with WinRegisterObjectClass and works (its menu item, its own view,
+   its settings, SHOWDESC.EXE showing the methods it is called through).
+   The LaunchPad, Shredder and Network folder are there, and rs2's
+   versions of WPCONFIG's System, System Clock, Mouse, Keyboard, Sound
+   and palettes, and of WPPRINT's printer objects (see "What is not
+   there" below for the rest).
 
 Phase 2 can start with generating the ClassData layouts and method lists
 from the IDL files.
@@ -328,9 +333,12 @@ uninitialized repository object faults on both SOMs alike.
 `userland/pmwp` (PMWP.DLL) provides the 58 classes IBM's PMWP exports
 that the Toolkit describes, M_WPMinWinViewer, IBM's WPMinWindow (which
 the Toolkit does not describe), classes IBM keeps in other DLLs (WPUrl
-and WPUrlFolder from WPINET.DLL, Mindex from MINXOBJ.DLL, and WPCONFIG.DLL's
+and WPUrlFolder from WPINET.DLL, Mindex from MINXOBJ.DLL, WPCONFIG.DLL's
 WPMouse, WPKeyboard, WPSound, WPPalette, WPColorPalette,
-WPSchemePalette and WPFontPalette) and rs2's own RS2Shutdown, RS2WindowList and RS2System.
+WPSchemePalette, WPFontPalette, WPSystem and WPClock, and WPPRINT.DLL's
+WPPrinter) and rs2's own RS2Shutdown and RS2WindowList (and RS2System,
+the System object of rs2's desktops before version 9, kept so that it
+can wake to be replaced).
 
 **Class tables.** `tools/scripts/gen_wps_classes.py` reads the Toolkit's
 IDL. It writes `src/classes_gen.rs` (each class's parents, metaclass,
@@ -344,7 +352,9 @@ The script's `EXTRA` list adds the classes of IBM's other DLLs that
 PMWP.DLL provides and the classes the IDL does not describe
 (WPMinWindow and rs2's own, with no methods of their own), and
 metaclasses the IDL describes come along with
-their classes even where IBM exports no class data for them.
+their classes even where IBM exports no class data for them. An OIDL
+metaclass without parents in the IDL (M_WPPrinter) gets its class's
+parent's metaclass.
 
 **Building.** `wps.rs` builds each class as SOM compiler output does:
 somBuildClass with a layout-4 `somStaticClassInfo`, one static method
@@ -353,15 +363,19 @@ The rest comes from the class modules:
 
 | Module | Classes |
 |--------|---------|
-| `obj.rs` | WPObject (title, style, icon, folder, default view, handle, object ID, setup strings, save/restore, delete, copy, move, shadow; the lazy writer: wpSaveDeferred queues the object and the desktop's timer saves the queue a second later, shutdown saves what is left, and without a desktop objects save at once) and M_WPObject (wpclsNew, class titles, icons and views, objects from handles and locations; somClassReady calls wpclsInitData) |
+| `obj.rs` | WPObject (title, style, icon, folder, default view, handle, object ID, setup strings, save/restore, copy, move, shadow; the lazy writer: wpSaveDeferred queues the object and the desktop's timer saves the queue a second later, shutdown saves what is left, and without a desktop objects save at once; the use list as IBM's: USEITEMs added with wpAddToObjUseList and found with wpFindUseItem, wpAllocMem's blocks, open views that wpSwitchTo and wpViewObject find; wpRegisterView gives a class's own view the object's title, icon and a window list entry; the open behavior, CCVIEW= and wpQuery/SetConcurrentView, else the System object's) and M_WPObject (wpclsNew, class titles, icons and views, objects from handles and locations; somClassReady calls wpclsInitData) |
+| `delete.rs` | Deleting as IBM's PMWP does (studied with Ghidra): wpQueryConfirmations reads `PM_ControlPanel` ConfirmDelete, ConfirmSubDelete, ConfirmRenameFilesWithExt, ConfirmKeepAssoc, ConfirmCopyMoveEtc, DisplayProgressInd, AllowForceDelete and ConfirmForceDelete (all on when missing but ConfirmCopyMoveEtc); the Delete menu item, the Delete key and drops on the Shredder show the Delete Object(s) dialog (location, objects, Confirm on folder delete, Confirm on object delete), then call each object's wpDelete, whose wpConfirmDelete asks with IBM's texts (an object; a folder "and all of its contents"; a shadow, and what it is a shadow of) with Yes, Yes to all (with more objects to come), No (the default) and Cancel; a folder deletes its contents (wpDeleteContents, each asked about) before itself. The other confirmations: a data file renamed to another extension asks whether to keep it (IBM's texts for data and program files), a drop asks before copying or moving, and the copy and move progress window shows only with "Display progress indication dialog". WPShredder (`<WP_SHRED>`): objects dragged onto it are deleted that way once the drop is answered; other programs' items that offer DRM_DISCARD get DM_DISCARDOBJECT (DRR_ABORT stops the asking), as IBM's ShredderThread does; its only view is its settings, without a Window page |
+| `system.rs` | WPCONFIG's WPSystem (`<WP_SYSTEM>`: the Window page, where the minimize button puts windows and whether opening an object shows its window or makes a new one, `PM_ControlPanel` ConcurrentView; the Confirmations page, IBM's five check boxes) and WPClock (`<WP_CLOCK>`: a clock window, analog with hour and minute marks and a second hand, or digital, with the time, the date or both; its View page, kept with the object, and its Date/Time page, which sets the computer's clock with DosSetDateTime) |
+| `connections.rs` | WPNetwork (`<WP_NETWORK>`, a folder: rs2 has no LAN requester to fill it with network groups; its Network page says so) and WPPrinter (QUEUENAME=, wpQuery/SetPrinterName, saved with the object; its job view is always empty and says printing is not available, files dropped on it are refused with that message, its Printer page shows the queue). Printing itself needs a spooler and printer drivers, which rs2 does not have yet; the objects are there so that the desktop's Printers folder and programs' printer object calls have something to work on |
+| `pages.rs` | IBM's settings pages that the other modules do not add: Window (WPObject: the object open behavior; WPCONFIG's objects, the Shredder, Shut Down and Window List leave it out, SETTINGS_PAGE_REMOVED), the three File pages of WPFileSystem (the subject in `.SUBJECT` and the physical name; dates, flags changed at once, sizes, a folder's objects; comments, key phrases and history in multi-valued `.COMMENTS`, `.KEYPHRASES`, `.HISTORY`), WPDataFile's Type page (`.TYPE`, wpQuery/SetType; IBM's standard types and those OS2.INI associates), the Association page of programs and program files (`PMWP_ASSOC_TYPE` and `PMWP_ASSOC_FILTER`, ASSOCTYPE= and ASSOCFILTER=, wpQuery/SetAssociationType and -Filter; data files open with their types' programs, then their names'), WPProgram's Session page (OS/2 or DOS, full screen or window) and a drive's Details page (file system, label, serial number, allocation units and bytes, from DosQueryFSInfo) |
 | `abs.rs` | WPAbstract, WPProgram (EXENAME, PARAMETERS, STARTUPDIR, PROGTYPE; wpQuery/SetProgDetails; opening starts the program), WPShadow (SHADOWID; shows and opens its object), WPDisk (a drive: its settings are its own, its other views and its default view are its root folder's) |
 | `fs.rs` | WPFileSystem (real name, renaming, file icons, moving and copying files), WPDataFile (opened with the PMWP_ASSOC_FILTER program, else the System Editor), WPProgramFile, WPFolder (content: the directory, without hidden files, and the abstract objects in it), WPDrives (a WPDisk per drive), the desktop |
 | `icons.rs` | rs2's own icons (pmwin::shellicons, as RS2SHELL shows them) for WPDrives, WPDisk (hard disk or CD-ROM), WPDesktop, command prompts and the Command Prompts folder (by its object ID, where IBM's INI.RC sets an icon resource); a folder's .ICON EA still comes first |
 | `minwin.rs` | WPMinWinViewer (`<WP_VIEWER>`; its content is the minimized windows) and WPMinWindow (transient, one per window PMWIN minimizes to the viewer: WM_RS2_MINWINDOW to the window set with Rs2SetMinimizeViewer, the desktop's; opening one restores its window). `RS2_Desktop` `MinimizeTo` (as for RS2SHELL) says whether windows go to the viewer or the desktop |
-| `rs2obj.rs` | rs2's own abstract classes for what IBM's shell keeps on the LaunchPad and in WPCONFIG: RS2Shutdown (opening it shuts down), RS2WindowList (the window list), RS2System (a Window page: where minimized windows go) |
+| `rs2obj.rs` | rs2's own abstract classes for what IBM's shell keeps on the LaunchPad: RS2Shutdown (opening it shuts down), RS2WindowList (the window list) |
 | `launchpad.rs` | WPLaunchPad (IBM's setup strings FPOBJECTS, DRAWEROBJECTS, LPCLOSEDRAWER, LPACTIONSTYLE, LPVERTICAL, LPTEXT, LPDRAWERTEXT, LPSMALLICONS, LPHIDECTLS, LPFLOAT, and its query/set methods): the action buttons (Window list, Find, Shut down; as text, small or normal icons, or none), object buttons with drawers above them, objects that open on a click, drops that add objects to the bar or a drawer, Remove from LaunchPad, moving by dragging; the Options and Buttons pages |
 | `setup.rs` | WPCONFIG's settings objects: WPMouse (Timing: the double-click time; Setup: right- or left-handed), WPKeyboard (Timing: the repeat rate and delay through KBD$'s KBD_SETTYPAMATICRATE, the cursor blink rate), WPSound (Warning beep), WPColorPalette (colours dragged onto a folder become its background, with Shift its text; onto other windows PP_BACKGROUNDCOLOR or PP_FOREGROUNDCOLOR) WPSchemePalette (a scheme dropped on any window becomes the system's colours, WinSetSysColors) and WPFontPalette (a font dropped on a folder becomes its font, kept as WPFolder key 6 and set on its views as PP_FONTNAMESIZE; on another window, that window's PP_FONTNAMESIZE). The settings are kept in OS2.INI as IBM's PM keeps them (`PM_ControlPanel` DoubleClickSpeed, SwapMouseButton, CursorBlinkRate, KeyRepeatRate, KeyRepeatDelay, Beep; `PM_Colors` "R G B" by colour name) and applied when the shell starts |
-| `viewset.rs` | A folder's View tab, IBM's three pages: wpAddFolderView1Page (the view it opens in, the icon view's format: as placed, flowed, non-flowed; icon size: normal, small, invisible), wpAddFolderView2Page (tree view lines and icon size), wpAddFolderView3Page (the details view's columns: Icon, Title, Object class, Real name, Size, Last write date and time) |
+| `viewset.rs` | A folder's View tab, IBM's three pages: wpAddFolderView1Page (the view it opens in, the icon view's format: as placed, flowed, non-flowed; icon size: normal, small, invisible; the folder's font: Font... opens the Font Palette, whose fonts dropped on the folder set it, as on IBM's page, and System font drops it), wpAddFolderView2Page (tree view lines and icon size), wpAddFolderView3Page (the details view's columns: Icon, Title, Object class, Real name, Size, Last write date and time) |
 | `filejob.rs` | Copying and moving file system objects as the user asks (drops, Copy..., Move...): a worker thread with a progress window and the name collision dialog (Rename with a free name, Replace, Skip, Cancel), ported from RS2SHELL; the target folder dialog of Copy..., Move..., Create shadow... and Create another...; the objects follow on the shell's thread when a job ends (paths, handles, folders; a moved or renamed folder's objects too; copies lose the original's object ID) |
 | `sortinc.rs` | Folders' Sort page (name, type, real name, size, last write date, or as placed; always maintain sort order, setup ALWAYSSORT) and Include page (patterns matched against titles and real names; folders always shown), the view's Sort menu; SHOWALLINTREEVIEW=YES (a folder's tree view shows every object, not only folders) is kept with them in fs.rs |
 | `templates.rs` | Templates (TEMPLATE style, the General page's check box): opening one makes a new object beside it, dragging one makes it at the drop, Create another... makes one where the user says; the new object's title is edited in place |
@@ -394,6 +408,14 @@ them and checks OS2.INI. `WPSTEST CHECK` then runs as a new process:
 it wakes the objects from OS2.INI and their EAs, checks them, and
 deletes them.
 
+`WPSTEST` also checks the classes and methods added for phases 2 and
+4: the confirmations' defaults, a folder deleted with its contents
+(wpDelete), the Shredder, System, System Clock and Network classes, a
+printer's queue name (saved, and woken again by `WPSTEST CHECK`), the
+use list (wpAllocMem, wpFreeMem, wpAddToObjUseList, wpFindUseItem,
+wpDeleteFromObjUseList), CCVIEW=, types (wpSetType, wpQueryType) and
+associations (wpSet/QueryAssociationType and -Filter).
+
 `WPSTEST CLASS dll class` registers a class DLL and makes an object of
 it. The Toolkit's samples, compiled for IBM's PMWP, work as subclasses
 of rs2's classes:
@@ -401,6 +423,20 @@ of rs2's classes:
   class title loaded in wpclsInitData;
 - TextFolder (WPFolder);
 - WPSTutorial (WPDataFile, which overrides about a hundred methods).
+
+`WPSTEST REGISTER dll class`, with PMSHELL running, registers the DLL
+in the shell (WinRegisterObjectClass through ipc.rs) and puts an object
+of the class on the desktop, as the samples' INSTALL.CMD does. With
+WPSTUTOR.DLL in `C:\OS2\DLL` and the sample's SHOWDESC.EXE in the
+shell's current directory (`C:\`; the tutorial starts it with DosExecPgm
+and writes method ids to it over the named pipe
+`\PIPE\SHOWDESC\NAME.QUE`): SHOWDESC shows the methods as the shell
+calls them, the object's menu has the sample's Open tutorial item,
+double-clicking opens its view (the default view its metaclass names),
+a second double-click brings the same view to the front (wpSwitchTo
+through the use list), and its settings show IBM's pages. That needed
+the use list, wpRegisterView, and PMWIN placing a frame made by
+WinCreateWindow with FCF_SHELLPOSITION in its frame data.
 
 Set `PMWPDEBUG` to trace object creation.
 
@@ -444,8 +480,13 @@ shell's process, on its PM thread.
   and applies to its open views; without one a folder shows the colour
   scheme's window colour and the desktop rs2's teal or the scheme's
   background.
-- **Keyboard:** Delete deletes (after asking), F2 renames, F5 refreshes,
-  and Shift+F10 shows the menu.
+- **Keyboard:** Delete deletes (as the Delete menu item: delete.rs), F2
+  renames, F5 refreshes, and Shift+F10 shows the menu.
+- **Settings notebooks** have IBM's tabs in IBM's order: a folder's
+  View, Sort, Include, Background, File (three pages), Window and
+  General; a data file's Type, File, Window, General; a program's
+  Program, Session, Association, Window, General; a drive's Details,
+  Window, General.
 
 `RS2\WPSHELL.EXE` starts PM and the shell's objects, opens the desktop
 and runs the message loop. It is a test shell until the shell process
@@ -485,9 +526,13 @@ If a Workplace Shell is already running, it ends.
     (the System Editor with its ASSOCFILTER, the application installer,
     Install rs2, where their files exist; the installer's program is on
     the live media only, so an installed system drops its object), Startup, the Minimized Window
-    Viewer, Window List, System Setup (`<WP_CONFIG>`: System, Keyboard,
-    Mouse, Sound, the Color, Scheme and Font Palettes, and Display where it
-    exists), Shut Down, Templates (Data File,
+    Viewer, Window List, System Setup (`<WP_CONFIG>`: System
+    (`<WP_SYSTEM>`), System Clock (`<WP_CLOCK>`), Keyboard, Mouse, Sound,
+    the Color, Scheme and Font Palettes, and Display where it exists),
+    Shut Down, the Shredder (`<WP_SHRED>`, LOCKEDINPLACE), Connections
+    (`<WP_CONNECTIONSFOLDER>`: Network, `<WP_NETWORK>`, and Printers,
+    `<WP_PRINTERSFOLDER>`, with a printer template, `<WP_NEWPRINTER>`, as
+    in IBM's INI.RC; Drives stays on the desktop), Templates (Data File,
     Folder, Program) and the Assistance Center as IBM's INI.RC lays it
     out (`<WP_ASSISTANCE>`: Information, a tree view showing all its
     objects, with Reference and Commands, Tasks and Read Me, which holds
@@ -497,9 +542,12 @@ If a Workplace Shell is already running, it ends.
     to the project's page), then the LaunchPad (`<WP_LAUNCHPAD>`: Drives,
     OS/2 Window with OS/2 Full Screen in its drawer, the System Editor,
     the Assistance Center) with its shadow in Startup. `PM_Workplace`
-    `Rs2Desktop` holds the version made (8); a desktop of an earlier version gets
-    the entries again, and PRESERVEOLD keeps what it has. Titles break
-    lines at `^`, as in INI.RC.
+    `Rs2Desktop` holds the version made (9); a desktop of an earlier
+    version gets the entries again, and PRESERVEOLD keeps what it has
+    (objects are matched by their OBJECTID, so none is made twice).
+    Version 9 also deletes rs2's earlier System object (`<RS2_SYSTEM>`,
+    RS2System) for IBM's class: DELETE removes an object even when it was
+    made non-deleteable. Titles break lines at `^`, as in INI.RC.
 - **Starts the server** for other processes' object calls (`ipc.rs`):
   - A caller takes the mutex `\SEM32\RS2WPS\CALL` and writes its
     request into `\SHAREMEM\RS2WPS.MEM`.
@@ -534,3 +582,24 @@ Shutting down (`shutdown.rs`, RS2SHELL's sequence) asks first, then:
 - shutdown through the desktop menu, as far as the power-off;
 - the Startup folder (`WPSTEST STARTUP`, then PMSHELL in the same boot:
   the System Editor started).
+
+## What is not there
+
+Compared with IBM's System Setup (INI.RC's `<WP_CONFIG>`) and its other
+WPCONFIG and WPPRINT objects, rs2 leaves out, for now:
+- the System object's Logo, Print Screen, Title (name clashes), Screen
+  and display type pages, and the Window page's button appearance (hide
+  or minimize) and animation, which PMWIN does not offer;
+- Country (WPCountry, which Warp 4 replaced by the Locale program; IBM's
+  GLOCALE runs on rs2: COMPATIBILITY.md), Power (WPPower: rs2 turns off
+  through ACPI without APM's settings), WIN-OS/2 Setup (WPWinConfig: no
+  WIN-OS/2), Touch, Hardware Manager, Selective Install and the Spooler
+  (WPSpool: no spooler, so nothing to set up);
+- printing: WPPrinter is there with an empty queue; the job objects
+  (WPJob, WPQdr, WPPdr, WPPort), remote printers (WPRPrinter) and the
+  Install Printer program need a spooler and printer drivers;
+- the desktop's Lockup, Archive and Startup pages, the Menu pages
+  (wpAddFileMenuPage, wpAddFolderMenu2Page) and a folder's Self-close
+  page;
+- network groups and servers (WPNetgrp, WPServer, WPSharedDir), which
+  need a LAN requester.

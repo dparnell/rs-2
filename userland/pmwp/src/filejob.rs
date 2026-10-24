@@ -312,7 +312,10 @@ fn progress_window(job: &Job) -> u32 {
     unsafe {
         WinShowWindow(ph, 0);
         WinCreateWindow(dlg, BAR_CLASS.as_ptr() as u32, b"\0".as_ptr(), WS_VISIBLE, s.x, s.y, s.cx, s.cy.max(10), dlg, HWND_TOP, 600, core::ptr::null(), core::ptr::null());
-        WinStartTimer(hab(), dlg, TID_SHOW, 500);
+        // The System object's "Display progress indication dialog".
+        if crate::delete::confirmations() & crate::delete::CONFIRM_PROGRESS != 0 {
+            WinStartTimer(hab(), dlg, TID_SHOW, 500);
+        }
     }
     center(dlg);
     dlg

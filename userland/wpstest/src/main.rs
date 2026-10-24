@@ -13,6 +13,9 @@
 //! PMSHELL to start). `WPSTEST REMOTE`, with PMSHELL running, makes and changes an object
 //! on its desktop from this process; `WPSTEST REGISTER dll class` registers
 //! a class DLL in the running shell and puts an object of it on the desktop.
+//! `WPSTEST OLDDESKTOP` marks the desktop as rs2's version 8 and `WPSTEST
+//! DUPES`, after the shell has started again, checks that the upgrade made
+//! nothing twice.
 
 #![no_std]
 #![no_main]
@@ -61,6 +64,8 @@ unsafe extern "C" {
     fn somResolveByName(obj: usize, name: *const u8) -> usize;
     #[link_name = "SOM.82"]
     fn somGetClassFromMToken(token: usize) -> usize;
+    #[link_name = "PMSHAPI.118"]
+    fn PrfWriteProfileData(hini: u32, app: *const u8, key: *const u8, buf: *const u8, len: u32) -> u32;
     #[link_name = "PMSHAPI.117"]
     fn PrfQueryProfileData(hini: u32, app: *const u8, key: *const u8, buf: *mut u8, len: *mut u32) -> u32;
 }
@@ -240,10 +245,90 @@ fn make() {
     let mut eb = alloc::vec![0u8; size as usize];
     check("WinEnumObjectClasses", unsafe { WinEnumObjectClasses(eb.as_mut_ptr(), &mut size) } != 0);
     let _ = unsafe { M_WPObjectClassData[0] };
+    new_classes();
+}
+
+fn class_title(o: usize) -> Vec<u8> {
+    let cls = call(o, b"somGetClass", &[]);
+    cstr(call(cls, b"wpclsQueryTitle", &[]) as *const u8)
+}
+
+/// The Shredder, System, System Clock, Network and Printer classes, the
+/// confirmations, deleting folders with their contents, use lists, open
+/// behavior, types and associations.
+fn new_classes() {
+    let c = call(object(query(b"<WP_DESKTOP>")), b"wpQueryConfirmations", &[]);
+    check("wpQueryConfirmations: delete and folder delete on, copy/move off (IBM's defaults)", c & 0x13 == 0x03);
+
+    // A folder with a file and a program in it goes as a whole
+    // (wpDelete without confirmations: wpDeleteContents, then itself).
+    let df = create(b"WPFolder", b"Delete Test", b"", b"<WP_DESKTOP>");
+    let dfp = path(df);
+    create(b"WPDataFile", b"inside.txt", b"", &dfp);
+    let dp = create(b"WPProgram", b"Inside", b"EXENAME=C:\\OS2\\E.EXE", &dfp);
+    check("folder with contents made", df != 0 && dp >> 16 == 2 && exists(&[&dfp[..], b"\\inside.txt"].concat()));
+    check("wpDelete(folder) deletes it and its contents", call(object(df), b"wpDelete", &[0]) == 1);
+    check("... its directory and its program are gone", !exists(&dfp) && !ini_has(b"PM_Abstract:Objects", &hex(dp & 0xffff)));
+
+    let sh = create(b"WPShredder", b"Test Shredder", b"OBJECTID=<RS2_TESTSHRED>", b"<WP_DESKTOP>");
+    let so = object(sh);
+    check("WPShredder object", sh >> 16 == 2 && so != 0 && class_title(so) == b"Shredder");
+    check("the Shredder opens its settings", call(so, b"wpQueryDefaultView", &[]) == 2);
+    check("WPShredder deleted", unsafe { WinDestroyObject(sh) } != 0);
+
+    for (class, t) in [(&b"WPClock"[..], &b"System Clock"[..]), (b"WPSystem", b"System")] {
+        let h = create(class, b"Test", b"", b"<WP_DESKTOP>");
+        let o = object(h);
+        check(&alloc::format!("{} object ({})", s(class), s(t)), h != 0 && o != 0 && class_title(o) == t);
+        unsafe { WinDestroyObject(h) };
+    }
+
+    let n = create(b"WPNetwork", b"Test Network", b"", b"<RS2_TESTFLDR>");
+    check("WPNetwork: a folder", n >> 16 == 3 && exists(&path(n)) && class_title(object(n)) == b"Network");
+    unsafe { WinDestroyObject(n) };
+
+    let pr = create(b"WPPrinter", b"Test Printer", b"QUEUENAME=TESTQ;OBJECTID=<RS2_TESTPRN>", b"<WP_DESKTOP>");
+    let mut q = [0u8; 64];
+    check("WPPrinter object with its queue name", pr >> 16 == 2 && call(object(pr), b"wpQueryPrinterName", &[q.as_mut_ptr() as usize]) != 0 && cstr(q.as_ptr()) == b"TESTQ");
+
+    // Use lists: wpAllocMem's blocks are USAGE_MEMORY items.
+    let po = object(query(b"<RS2_TESTPGM>"));
+    let mem = call(po, b"wpAllocMem", &[100, 0]);
+    check("wpAllocMem", mem != 0);
+    check("wpFindUseItem finds its USAGE_MEMORY item", call(po, b"wpFindUseItem", &[1, 0]) == mem - 12);
+    check("wpFreeMem", call(po, b"wpFreeMem", &[mem]) == 1 && call(po, b"wpFindUseItem", &[1, 0]) == 0);
+    let mut item = [5u32, 0, 0x6500, 0x1234, 0, 0, 0];
+    check("wpAddToObjUseList (an open view)", call(po, b"wpAddToObjUseList", &[item.as_mut_ptr() as usize]) == 1 && call(po, b"wpFindUseItem", &[5, 0]) == item.as_ptr() as usize);
+    check("wpDeleteFromObjUseList", call(po, b"wpDeleteFromObjUseList", &[item.as_mut_ptr() as usize]) == 1 && call(po, b"wpFindUseItem", &[5, 0]) == 0);
+
+    let cc = z(b"CCVIEW=YES");
+    check("CCVIEW=YES: wpQueryConcurrentView is CCVIEW_ON", unsafe { WinSetObjectData(query(b"<RS2_TESTPGM>"), cc.as_ptr()) } != 0 && call(po, b"wpQueryConcurrentView", &[]) == 1);
+
+    // Types (.TYPE) and associations (PMWP_ASSOC_TYPE, PMWP_ASSOC_FILTER).
+    let f = query(b"<RS2_TESTFLDR>");
+    let d = create(b"WPDataFile", b"typed.c", b"", &path(f));
+    let dobj = object(d);
+    let tz = z(b"Plain Text\nC Code");
+    check("wpSetType", call(dobj, b"wpSetType", &[tz.as_ptr() as usize, 0]) != 0);
+    check("wpQueryType", cstr(call(dobj, b"wpQueryType", &[]) as *const u8) == b"Plain Text\nC Code");
+    let at = z(b"C Code");
+    let af = z(b"*.XYZ");
+    check("wpSetAssociationType/Filter", call(po, b"wpSetAssociationType", &[at.as_ptr() as usize]) != 0 && call(po, b"wpSetAssociationFilter", &[af.as_ptr() as usize]) != 0);
+    check("wpQueryAssociationType", cstr(call(po, b"wpQueryAssociationType", &[]) as *const u8) == b"C Code");
+    check("wpQueryAssociationFilter", cstr(call(po, b"wpQueryAssociationFilter", &[]) as *const u8) == b"*.XYZ");
+    let none = z(b"");
+    call(po, b"wpSetAssociationType", &[none.as_ptr() as usize]);
+    call(po, b"wpSetAssociationFilter", &[none.as_ptr() as usize]);
+    check("associations removed", call(po, b"wpQueryAssociationType", &[]) == 0 && !ini_has(b"PMWP_ASSOC_FILTER", b"*.XYZ"));
+    unsafe { WinDestroyObject(d) };
 }
 
 /// A new process: the objects are woken from what was stored.
 fn verify() {
+    let pr = query(b"<RS2_TESTPRN>");
+    let mut q = [0u8; 64];
+    check("printer woken with its queue name", pr >> 16 == 2 && call(object(pr), b"wpQueryPrinterName", &[q.as_mut_ptr() as usize]) != 0 && cstr(q.as_ptr()) == b"TESTQ");
+    check("printer deleted", unsafe { WinDestroyObject(pr) } != 0);
     let p = query(b"<RS2_TESTPGM>");
     check("program found by ID", p >> 16 == 2);
     let po = object(p);
@@ -332,6 +417,43 @@ fn register_remote(args: &[u8]) {
     check("object of the class on the shell's desktop", h != 0);
 }
 
+/// The names in a directory (FILEFINDBUF3: name length at 26, name at 27).
+fn dir_names(dir: &[u8]) -> Vec<Vec<u8>> {
+    let spec = z(&[dir, b"\\*"].concat());
+    let (mut hdir, mut n) = (0xffff_ffffu32, 1u32);
+    let mut buf = [0u8; 300];
+    let mut out = Vec::new();
+    // Directories, hidden and system files too.
+    let mut rc = unsafe { os2::DosFindFirst(spec.as_ptr(), &mut hdir, 0x17, buf.as_mut_ptr(), buf.len() as u32, &mut n, 1) };
+    while rc == 0 && n == 1 {
+        let len = buf[26] as usize;
+        out.push(buf[27..27 + len].to_vec());
+        rc = unsafe { os2::DosFindNext(hdir, buf.as_mut_ptr(), buf.len() as u32, &mut n) };
+    }
+    unsafe { os2::DosFindClose(hdir) };
+    out
+}
+
+/// `WPSTEST OLDDESKTOP`: OS2.INI says the desktop is rs2's version 8, so
+/// the next start of the shell makes version 9's objects (the upgrade).
+fn old_desktop() {
+    let (a, k) = (z(b"PM_Workplace"), z(b"Rs2Desktop"));
+    check("Rs2Desktop set to 8", unsafe { PrfWriteProfileData(HINI_USER, a.as_ptr(), k.as_ptr(), b"8\0".as_ptr(), 2) } != 0);
+}
+
+/// `WPSTEST DUPES`: after an upgrade, each of the desktop's folders is
+/// there once (no "Connections:1" or second Assistance Center).
+fn dupes() {
+    let names = dir_names(b"C:\\DESKTOP");
+    for f in [&b"Connections"[..], b"Assistance Center", b"System Setup", b"Templates", b"Programs", b"Command Prompts", b"Startup"] {
+        let n = names.iter().filter(|x| x.len() >= f.len() && x[..f.len()].eq_ignore_ascii_case(f)).count();
+        check(&alloc::format!("{} once on the desktop ({} found)", s(f), n), n == 1);
+    }
+    let shred = query(b"<WP_SHRED>");
+    check("the Shredder made once (by its object ID)", shred >> 16 == 2);
+    check("IBM's System object replaced RS2System", query(b"<WP_SYSTEM>") >> 16 == 2 && query(b"<RS2_SYSTEM>") == 0);
+}
+
 /// With the shell in another process (PMSHELL): the calls go there.
 fn remote() {
     let h = create(b"WPProgram", b"Remote Test", b"EXENAME=C:\\OS2\\E.EXE;OBJECTID=<RS2_REMOTE>", b"<WP_DESKTOP>");
@@ -345,11 +467,12 @@ fn remote() {
 fn main(st: &Startup) -> u32 {
     let args = st.args();
     let word = args.split(|&c| c == b' ').find(|w| !w.is_empty()).unwrap_or(b"");
-    if word.eq_ignore_ascii_case(b"REMOTE") || word.eq_ignore_ascii_case(b"REGISTER") {
-        if word.eq_ignore_ascii_case(b"REMOTE") {
-            remote();
-        } else {
-            register_remote(args);
+    if [&b"REMOTE"[..], b"REGISTER", b"OLDDESKTOP", b"DUPES"].iter().any(|w| word.eq_ignore_ascii_case(w)) {
+        match word.to_ascii_uppercase().as_slice() {
+            b"REMOTE" => remote(),
+            b"REGISTER" => register_remote(args),
+            b"OLDDESKTOP" => old_desktop(),
+            _ => dupes(),
         }
         let n = unsafe { FAILS };
         println!("wpstest done: {} failure(s)", n);

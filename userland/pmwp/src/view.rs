@@ -1054,6 +1054,7 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                         let t = cstr(rd(pp, 0) as *const u8);
                         let t: Vec<u8> = t.into_iter().filter(|&c| c != b'\r').collect();
                         if !t.is_empty() && t != obj::title(o) {
+                            let t = crate::delete::confirm_rename(o, &t);
                             let zt = z(&t);
                             obj::call(m::WPObject::wpSetTitle, &[o, zt.as_ptr() as usize]);
                         }

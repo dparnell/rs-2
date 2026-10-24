@@ -182,6 +182,44 @@ fn class_title(o: usize) -> Vec<u8> {
     cstr(wps::call("M_WPObject", m::M_WPObject::wpclsQueryTitle, &[cls]) as *const u8).to_vec()
 }
 
+// ---- Renaming and dropping (the other confirmations) ----
+
+/// A data file renamed by the user to a name with another extension:
+/// with "Confirm on rename of files with extensions" IBM's shell asks
+/// whether to keep the extension (Yes adds it back).
+pub fn confirm_rename(o: usize, new: &[u8]) -> Vec<u8> {
+    if confirmations() & CONFIRM_RENAMEFILESWITHEXT == 0 || !wps::is(o, "WPDataFile") {
+        return new.to_vec();
+    }
+    let Some(p) = wps::path_of(o) else { return new.to_vec() };
+    let old = crate::util::extension(&crate::util::split_path(&p).1);
+    if old.is_empty() || crate::util::extension(new).eq_ignore_ascii_case(&old) {
+        return new.to_vec();
+    }
+    let text: &[u8] = if wps::is(o, "WPProgramFile") {
+        b"Renaming this program without keeping its current extension may prevent this program from running.  Do you want to keep the extension?"
+    } else {
+        b"Renaming this data file without keeping its current extension may prevent this file from being recognized by the program required to run it.  Do you want to keep the extension?"
+    };
+    if message(HWND_DESKTOP, text, b"Rename", MB_YESNO | MB_WARNING) != MBID_YES {
+        return new.to_vec();
+    }
+    let mut n = new.to_vec();
+    n.push(b'.');
+    n.extend(old.iter().map(|c| c.to_ascii_lowercase()));
+    n
+}
+
+/// "Confirm on copy, move, create shadow": a drop asks first.
+pub fn confirm_action(op_copy: bool, o: usize, folder: usize) -> bool {
+    if confirmations() & CONFIRM_ACTION == 0 {
+        return true;
+    }
+    let (t, f) = (obj::title(o), obj::title(folder));
+    let text = if op_copy { sub(b"Are you sure you want to copy %0 to %1?", &[&t, &f]) } else { sub(b"Are you sure you want to move %0 to %1?", &[&t, &f]) };
+    message(HWND_DESKTOP, &text, if op_copy { b"Copy" } else { b"Move" }, MB_YESNO | MB_ICONQUESTION) == MBID_YES
+}
+
 // ---- The methods ----
 
 /// WPObject's: "Are you sure you want to delete %0?".
@@ -497,6 +535,13 @@ extern "C" fn shredder_drop(_o: usize, cnr: u32, pdinfo: u32, _it: u32) -> u32 {
     RC_DROP_DROPCOMPLETE
 }
 
+/// IBM's shr_wpFilterMenu: no Create another, Close, Print, Delete or
+/// Copy on the Shredder's menu.
+extern "C" fn shredder_filter_menu(o: usize, flags: u32, cnr: u32, multi: u32) -> u32 {
+    let f = som::call_parent(wps::ccd("WPShredder"), wps::cd("WPObject"), m::WPObject::wpFilterPopupMenu, &[o, flags as usize, cnr as usize, multi as usize]) as u32;
+    f & 0xffff_fe56
+}
+
 extern "C" fn shredder_open(o: usize, cnr: u32, _view: u32, param: u32) -> u32 {
     // The Shredder has only its settings.
     som::call_parent(wps::ccd("WPShredder"), wps::cd("WPObject"), m::WPObject::wpOpen, &[o, cnr as usize, obj::OPEN_SETTINGS as usize, param as usize]) as u32
@@ -517,6 +562,7 @@ methods! {
     __m_shredder_drag_over => shredder_drag_over, 3;
     __m_shredder_drop => shredder_drop, 4;
     __m_shredder_open => shredder_open, 4;
+    __m_shredder_filter_menu => shredder_filter_menu, 4;
     __m_shredder_cls_view => shredder_cls_view, 1;
 }
 
@@ -544,6 +590,7 @@ pub fn impl_shredder() -> Impl {
             ("wpDragOver", __m_shredder_drag_over as usize),
             ("wpDrop", __m_shredder_drop as usize),
             ("wpOpen", __m_shredder_open as usize),
+            ("wpFilterPopupMenu", __m_shredder_filter_menu as usize),
             crate::pages::no_window_page_override(),
         ],
     }

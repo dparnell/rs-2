@@ -149,10 +149,21 @@ features under `\OS2IMAGE\FI` (system management, printer utilities).
 | TRACEFMT.EXE | fails | Calls 16-bit DOSCALLS.119, which rs2 does not know. |
 | QRYMMCD.EXE | works | Ends at once (it checks for the multimedia CD). |
 | STPM.EXE, MPPMNEW.EXE, MINSTALL.EXE (multimedia installation) | fails | WinRegisterCircularSlider (PMCTLS), MMPARTS.DLL (in two pieces on the CD) and PMWP's object calls. |
-| PMSPOOL.EXE, PMSHELL.EXE | fails | The spooler and the Workplace Shell themselves: rs2 has neither (SPL32QMINITIALIZE, PMWP's shell entry points). |
+| PMSPOOL.EXE, PMSHELL.EXE | fails | IBM's spooler and Workplace Shell themselves: rs2 has no spooler (SPL32QMINITIALIZE), and IBM's PMSHELL needs IBM's PMWP; rs2 has its own PMSHELL and PMWP ([WPS.md](WPS.md)). |
 | JAVA.EXE, JAVAPM.EXE (Java 1.1, `\FI\PACKAGE`) | not tried | |
 | CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | not supported | Windows 3.1 programs for WIN-OS/2, which rs2 does not have. |
 | ATMCNTRL.EXE, FASTLOAD.EXE (disk 21), PROMIX.EXE, AUDIOVER.EXE | not supported | Also Windows 3.1 programs (NE modules for Windows, importing KERNEL, USER and GDI), not 16-bit PM ones: WIN-OS/2's Adobe Type Manager control panel, its fast loader and multimedia driver utilities. |
+
+## Workplace Shell classes
+
+Class DLLs built for IBM's Workplace Shell, on rs2's SOM.DLL and
+PMWP.DLL ([WPS.md](WPS.md#rs2s-workplace-shell-classes)).
+
+| Class DLL | Status | Notes |
+|-----------|--------|-------|
+| WPSTUTOR.DLL with SHOWDESC.EXE (Toolkit sample, WPSTutorial) | works | Registered in the running shell with WinRegisterObjectClass (`WPSTEST REGISTER WPSTUTOR WPSTutorial`, as its INSTALL.CMD does with REXXUTIL) and an object made on the desktop. SHOWDESC.EXE (started by the class with DosExecPgm, in the shell's current directory) shows each method the shell calls, read from the class over a named pipe. The menu's Open tutorial, the tutorial view (its default view; opened again it comes to the front through wpSwitchTo), the settings pages. Needed: objects' use lists (wpAllocMem, wpAddToObjUseList, wpFindUseItem), wpSwitchTo, wpRegisterView, PMWIN placing frames made by WinCreateWindow with FCF_SHELLPOSITION. |
+| CAR.DLL (Toolkit sample, Car) | works | Its methods and instance data, its menu items and its Dashboard and Horn Beep pages (`WPSHELL CAR`, `WPSTEST CLASS CAR Car`). |
+| TEXTFLDR.DLL (Toolkit sample, TextFolder) | works | A WPFolder subclass (`WPSTEST CLASS`). |
 
 ## Network programs
 

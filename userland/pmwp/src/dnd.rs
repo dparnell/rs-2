@@ -336,6 +336,9 @@ extern "C" fn folder_drop(f: usize, _cnr: u32, pdinfo: u32, it: u32) -> u32 {
         crate::templates::create_from(src, f, None);
         return 1;
     }
+    if (op == DO_MOVE || op == DO_COPY) && !crate::delete::confirm_action(op == DO_COPY, src, f) {
+        return 1;
+    }
     #[allow(static_mut_refs)]
     if let (Some(b), DO_MOVE | DO_COPY) = (unsafe { BATCH.as_mut() }, op) {
         if wps::is(src, "WPFileSystem") && wps::is(f, "WPFileSystem") {

@@ -171,7 +171,20 @@ fn pmwin(hab: u32) {
     // QPF_NOINHERIT
     check("PP_FONTNAMESIZE not the client's own", unsafe { WinQueryPresParam(cb, 15, 0, &mut id, 32, name.as_mut_ptr(), 1) } == 0);
     check("PP_FONTNAMESIZE of an unknown face refused", unsafe { WinSetPresParam(b, 15, 13, b"10.NoSuchFace\0".as_ptr() as *const u32) } == 0);
+    // A frame made with WinCreateWindow and FCF_SHELLPOSITION in its
+    // FRAMECDATA (as the Toolkit's WPSTutorial makes its view) gets the
+    // shell's position when it is first shown.
+    let mut fcd = [0u8; 12];
+    fcd[0..2].copy_from_slice(&12u16.to_le_bytes());
+    fcd[2..6].copy_from_slice(&(FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_SHELLPOSITION).to_le_bytes());
+    // WC_FRAME as a class atom: 0xffff0001.
+    let f = unsafe { WinCreateWindow(HWND_DESKTOP, 0xffff_0001, b"Shell Position\0".as_ptr(), 0, 0, 0, 0, 0, 0, HWND_TOP, 9, fcd.as_ptr(), core::ptr::null()) };
+    let before = window_pos(f);
+    unsafe { WinShowWindow(f, 1) };
+    let after = window_pos(f);
+    check("WinCreateWindow frame with FCF_SHELLPOSITION: sized when shown", f != 0 && before.cx == 0 && after.cx > 0 && after.cy > 0);
     unsafe {
+        WinDestroyWindow(f);
         WinDestroyWindow(a);
         WinDestroyWindow(b);
     }
