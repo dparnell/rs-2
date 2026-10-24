@@ -33,6 +33,9 @@ pub struct Mouse {
     pub presses: [(u16, i32, i32); 3],
     pub releases: [(u16, i32, i32); 3],
     pub handler: Option<(u16, u16, u16)>,
+    /// The handler is a DPMI client's protected-mode procedure (set
+    /// from protected mode, as Win-OS/2's MOUSE.DRV does).
+    handler_pm: bool,
     /// Events not yet delivered to the handler.
     pending: u16,
     in_handler: bool,
@@ -73,6 +76,7 @@ impl Default for Mouse {
             presses: [(0, 0, 0); 3],
             releases: [(0, 0, 0); 3],
             handler: None,
+            handler_pm: false,
             pending: 0,
             in_handler: false,
             saved: Saved::default(),
@@ -194,6 +198,13 @@ impl Machine {
         let (mx, my) = self.mouse.mickeys;
         self.cpu.set_si(mx as u16);
         self.cpu.set_di(my as u16);
+        if self.mouse.handler_pm {
+            // In protected mode; mouse_handler_done follows its return.
+            let _ = self.cpu.pop(&mut self.hw, 2);
+            let _ = self.cpu.pop(&mut self.hw, 2);
+            self.dpmi_call_pm(seg, off as u32);
+            return;
+        }
         self.cpu.seg[CS] = Seg::real_code(seg);
         self.cpu.eip = off as u32;
     }
@@ -379,14 +390,20 @@ impl Machine {
                 self.cpu.set_dx(y as u16);
             }
             0x0c | 0x14 => {
-                let old = self.mouse.handler;
+                let (old, old_pm) = (self.mouse.handler, self.mouse.handler_pm);
                 let (cx, es, dx) = (self.cpu.cx(), self.cpu.seg[ES].sel, self.cpu.dx());
                 self.mouse.handler = if cx == 0 { None } else { Some((cx, es, dx)) };
+                self.mouse.handler_pm = self.cpu.pm();
                 self.mouse.owner = self.dos.psp;
                 if ax == 0x14 {
                     let (m, s, o) = old.unwrap_or((0, 0, 0));
                     self.cpu.set_cx(m);
-                    self.cpu.seg[ES] = Seg::real(s);
+                    if self.cpu.pm() {
+                        let s = if old_pm { s } else { 0 };
+                        let _ = self.cpu.load_seg(&mut self.hw, ES, s);
+                    } else {
+                        self.cpu.seg[ES] = Seg::real(s);
+                    }
                     self.cpu.set_dx(o);
                 }
             }

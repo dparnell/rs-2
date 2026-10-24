@@ -40,6 +40,7 @@ const CB_RAW_TO_PM: u16 = 0x305;
 const CB_RAW_TO_RM: u16 = 0x306;
 const CB_IRQRET: u16 = 0x307;
 const CB_EXTAPI: u16 = 0x308;
+const CB_PMCALLRET: u16 = 0x309;
 const CB_RMIRQ: u16 = 0x510;
 const CB_DEFEXC: u16 = 0x380;
 const CB_DEFINT: u16 = 0x400;
@@ -69,6 +70,7 @@ const H_RAW: u32 = 0x2010;
 const H_SAVE: u32 = 0x2018;
 const H_IRQRET: u32 = 0x2020;
 const H_EXTAPI: u32 = 0x2028;
+const H_PMCALLRET: u32 = 0x2030;
 const H_DEFEXC: u32 = 0x2100;
 const H_STACK0: u32 = 0x7000;
 const H_LOCKED: u32 = 0x8000;
@@ -303,6 +305,10 @@ impl Machine {
             CB_RAW_TO_RM => self.dpmi_raw_to_rm(),
             CB_IRQRET => self.dpmi_rm_irq_return(),
             CB_EXTAPI => self.dpmi_ext_api(),
+            CB_PMCALLRET => {
+                self.dpmi_rm_irq_return();
+                self.mouse_handler_done();
+            }
             0x510..=0x51f => self.dpmi_rm_irq((n - CB_RMIRQ) as usize),
             0x380..=0x39f => {
                 let v = (n - CB_DEFEXC) as u8;
@@ -401,6 +407,7 @@ impl Machine {
         stub(self, H_RAW, CB_RAW_TO_RM);
         stub(self, H_IRQRET, CB_IRQRET);
         stub(self, H_EXTAPI, CB_EXTAPI);
+        stub(self, H_PMCALLRET, CB_PMCALLRET);
         self.hw.wr(area + H_EXTAPI + 4, 0xcb);
         self.hw.wr(area + H_SAVE, 0xcb);
         // TSS: the ring-0 stack.
@@ -624,7 +631,7 @@ impl Machine {
         if v == 0x21 && !hw && self.dpmi_dos21(host, f + 8) {
             return;
         }
-        if matches!(v, 0x10..=0x12 | 0x15 | 0x16 | 0x1a) && !hw && self.dpmi_bios(host, v, f + 8) {
+        if matches!(v, 0x10..=0x12 | 0x15 | 0x16 | 0x1a | 0x33) && !hw && self.dpmi_bios(host, v, f + 8) {
             return;
         }
         if matches!(v, 0x25 | 0x26) && !hw && self.frame_get(f, 1) & 3 == 3 {
@@ -775,7 +782,10 @@ impl Machine {
         }
         for (i, r) in [DS, ES].into_iter().enumerate() {
             let s = self.cpu.seg[r];
-            if s.sel != segs[i].sel || s.base != segs[i].base {
+            // A real-mode segment the handler returned (not a selector it
+            // loaded, as the mouse driver does for a handler set from
+            // protected mode).
+            if (s.sel != segs[i].sel || s.base != segs[i].base) && s.base == (s.sel as u32) << 4 {
                 let sel = self.dpmi_seg_sel(s.sel).unwrap_or(0);
                 let _ = self.cpu.load_seg(&mut self.hw, r, sel);
             }
@@ -1269,6 +1279,49 @@ impl Machine {
         }
         let _ = self.cpu.jump_far(&mut self.hw, sel, off);
         self.cpu.flags = fl;
+    }
+
+    /// From real mode, far-call the client's protected-mode procedure
+    /// `sel:off` with the general registers as they are (the mouse event
+    /// handler a client set from protected mode); its RETF comes back to
+    /// CB_PMCALLRET.
+    pub(crate) fn dpmi_call_pm(&mut self, sel: u16, off: u32) {
+        if self.dpmi.client.is_none() {
+            return;
+        }
+        let locked_top = self.client().locked_top;
+        let st = RmState { regs: self.cpu.regs, seg: self.cpu.seg, eip: self.cpu.eip, flags: self.cpu.flags, locked_top };
+        self.client().rm_saved.push(st);
+        let area = self.client().area;
+        let bits32 = self.client().bits32;
+        self.cpu.cr0 |= 1;
+        self.cpu.cpl = 3;
+        self.cpu.idtr = Dtr { base: area + H_IDT, limit: 256 * 8 - 1 };
+        self.hw.irq_remap = Some(HW_BASE);
+        let sz = if bits32 { 4 } else { 2 };
+        let frame = [H_PMCALLRET, if bits32 { SEL_CODE3 as u32 } else { SEL_CODE3_16 as u32 }];
+        let base = locked_top - sz * 2;
+        for (i, x) in frame.iter().enumerate() {
+            let a = area + base + i as u32 * sz;
+            if sz == 4 {
+                self.hw.wr32(a, *x);
+            } else {
+                self.hw.wr16(a, *x as u16);
+            }
+        }
+        self.client().locked_top = base;
+        if bits32 {
+            let _ = self.cpu.load_seg(&mut self.hw, SS, SEL_FLAT3);
+            self.cpu.regs[ESP] = area + base;
+        } else {
+            let _ = self.cpu.load_seg(&mut self.hw, SS, SEL_STACK3_16);
+            self.cpu.regs[ESP] = base - H_LOCKED;
+        }
+        for s in [DS, ES, FS, GS] {
+            let _ = self.cpu.load_seg(&mut self.hw, s, 0);
+        }
+        let _ = self.cpu.jump_far(&mut self.hw, sel, off);
+        self.cpu.flags &= !(IF | TF);
     }
 
     /// The client's handler returned (IRET to the host): back to the
