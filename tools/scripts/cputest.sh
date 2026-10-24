@@ -10,15 +10,16 @@ objcopy=$(ls ~/.rustup/toolchains/*/lib/rustlib/*/bin/llvm-objcopy 2>/dev/null |
 tmp=${TMPDIR:-/tmp}/rs2-cputest.$$
 mkdir -p "$tmp"
 asm() {
+    base=${2:-0}
     clang -target i386-unknown-none-elf -c "$here/$1.S" -o "$tmp/$1.o"
-    ld.lld -m elf_i386 --image-base=0 -Ttext=0 -e _start "$tmp/$1.o" -o "$tmp/$1.elf" 2>/dev/null ||
-        "$(dirname "$objcopy")/rust-lld" -flavor gnu -m elf_i386 --image-base=0 -Ttext=0 -e _start "$tmp/$1.o" -o "$tmp/$1.elf"
+    ld.lld -m elf_i386 --image-base=$base -Ttext=$base -e _start "$tmp/$1.o" -o "$tmp/$1.elf" 2>/dev/null ||
+        "$(dirname "$objcopy")/rust-lld" -flavor gnu -m elf_i386 --image-base=$base -Ttext=$base -e _start "$tmp/$1.o" -o "$tmp/$1.elf"
     "$objcopy" -O binary "$tmp/$1.elf" "$here/$1.bin"
 }
 asm boot
 for t in alu pm; do
     [ -f "$here/$t.S" ] || continue
-    asm $t
+    case $t in pm) asm $t 0x10000 ;; *) asm $t ;; esac
     if [ "$1" = "--oracle" ]; then
         cat "$here/boot.bin" "$here/$t.bin" > "$tmp/$t.img"
         # Pad to whole sectors (and beyond what the boot sector reads).

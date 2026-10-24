@@ -96,3 +96,17 @@ fn alu() {
     }
     panic!("{} bytes vs {} expected; first differences:\n{}", got.len(), want.len(), errors.join("\n"));
 }
+
+#[test]
+fn protected_mode() {
+    let got = run(include_bytes!("asm/pm.bin"));
+    let want = include_bytes!("asm/pm.expected");
+    if got != want {
+        let at = got.iter().zip(want.iter()).position(|(a, b)| a != b).unwrap_or(got.len().min(want.len()));
+        panic!(
+            "differs at byte {at:#x} (tags are ASCII letters):\n got  {:02x?}\n want {:02x?}",
+            &got[at.saturating_sub(8)..(at + 24).min(got.len())],
+            &want[at.saturating_sub(8)..(at + 24).min(want.len())]
+        );
+    }
+}

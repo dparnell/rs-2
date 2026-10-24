@@ -1492,7 +1492,7 @@ impl Cpu {
                 return None;
             }
         }
-        Some(if lsl { d.limit() } else { (d.raw >> 32) as u32 & 0x00ff_ff00 })
+        Some(if lsl { d.limit() } else { (d.raw >> 32) as u32 & 0x00f0_ff00 })
     }
 
     /// Coprocessor escapes (D8-DF).
