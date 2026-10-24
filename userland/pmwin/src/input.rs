@@ -41,13 +41,20 @@ fn pack(x: i32, y: i32) -> u32 {
     (x as u32 & 0xffff) | (y as u32) << 16
 }
 
+/// Input played back by a journal playback hook (not recorded again).
+pub static PLAYBACK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 /// Post an input message to the window's queue, stamped with the
-/// pointer position and time of the event.
-fn post_input(h: u32, msg: u32, mp1: u32, mp2: u32, time: u32) {
+/// pointer position and time of the event. The system queue's messages
+/// as IBM's PM has them (mouse moves, buttons, WM_CHAR) are marked for
+/// the journal record hook.
+pub fn post_input(h: u32, msg: u32, mp1: u32, mp2: u32, time: u32) {
     let s = st();
     let q = s.queue_of(h);
     let p = s.pointer;
-    post_queue(q, QMsg { hwnd: h, msg, mp1, mp2, time, x: p.x, y: p.y, reserved: 0 });
+    let raw = (WM_MOUSEMOVE..=WM_CHAR).contains(&msg) && !PLAYBACK.load(core::sync::atomic::Ordering::Relaxed);
+    let reserved = if raw { crate::hooks::QMSG_INPUT } else { 0 };
+    post_queue(q, QMsg { hwnd: h, msg, mp1, mp2, time, x: p.x, y: p.y, reserved });
 }
 
 /// A mouse event: the pointer moved to `p` and/or the buttons changed.

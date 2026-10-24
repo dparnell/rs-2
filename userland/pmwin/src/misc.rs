@@ -506,7 +506,7 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
     if dlg == 0 {
         return 0xffff;
     }
-    let r = crate::dlg::WinProcessDlg(dlg);
+    let r = crate::dlg::process(dlg, crate::hooks::MSGF_MESSAGEBOX);
     win::WinDestroyWindow(dlg);
     r
 }
@@ -520,14 +520,29 @@ pub extern "C" fn WinQueryVersion(_hab: u32) -> u32 {
     20 | 45 << 8
 }
 
+/// WinQueryCp(hmq): the queue's code page (HMQ_CURRENT: the caller's).
 #[unsafe(no_mangle)]
-pub extern "C" fn WinQueryCp(_hmq: u32) -> u32 {
-    850
+pub extern "C" fn WinQueryCp(hmq: u32) -> u32 {
+    let s = st();
+    let q = if hmq == 1 || hmq == 0 { s.my_queue() } else { hmq };
+    s.queues.get(&q).map_or(850, |x| x.cp)
 }
 
+/// WinSetCp(hmq, idCodePage): one of the system's code pages; the code
+/// page changed hooks are told.
 #[unsafe(no_mangle)]
-pub extern "C" fn WinSetCp(_hmq: u32, cp: u32) -> u32 {
-    (cp == 850 || cp == 437) as u32
+pub extern "C" fn WinSetCp(hmq: u32, cp: u32) -> u32 {
+    if cp != 850 && cp != 437 {
+        return 0;
+    }
+    let s = st();
+    let q = if hmq == 1 || hmq == 0 { s.my_queue() } else { hmq };
+    let Some(x) = s.queues.get_mut(&q) else { return 0 };
+    let old = core::mem::replace(&mut x.cp, cp);
+    if old != cp {
+        crate::hooks::codepage_changed(q, old, cp);
+    }
+    1
 }
 
 fn cp_or_default(cp: u32) -> u16 {
@@ -829,6 +844,9 @@ pub extern "C" fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32 {
             crate::msg::WinPostQueueMsg(st().my_queue(), win::WM_QUIT, 0, 0);
             break;
         }
+        if crate::hooks::msg_filter(&mut m, crate::hooks::MSGF_TRACK) {
+            continue;
+        }
         match m.msg {
             win::WM_MOUSEMOVE if m.hwnd == h => {
                 let (x, y) = (m.mp1 as i16 as i32, (m.mp1 >> 16) as i16 as i32);
@@ -891,33 +909,4 @@ pub extern "C" fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32 {
         unsafe { pti.add(6 + i).write_unaligned(v) };
     }
     ok as u32
-}
-
-// ---- Hooks ----
-
-/// WinSetHook(hab, hmq, iHook, pfnHook, hmod): hooks are recorded; of
-/// them only the help hook, HK_HELP, is called (see help.rs).
-#[unsafe(no_mangle)]
-pub extern "C" fn WinSetHook(_hab: u32, hmq: u32, kind: u32, pfn: u32, hmod: u32) -> u32 {
-    if pfn == 0 {
-        return 0;
-    }
-    let s = st();
-    // HMQ_CURRENT (1) is the caller's queue.
-    let queue = if hmq == 1 { s.my_queue() } else { hmq };
-    let me = state::pid();
-    s.hooks.insert(0, state::Hook { queue, kind, pfn, hmod, pid: me });
-    1
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn WinReleaseHook(_hab: u32, hmq: u32, kind: u32, pfn: u32, _hmod: u32) -> u32 {
-    let s = st();
-    let queue = if hmq == 1 { s.my_queue() } else { hmq };
-    let me = state::pid();
-    let n = s.hooks.len();
-    if let Some(i) = s.hooks.iter().position(|h| h.queue == queue && h.kind == kind && h.pfn == pfn && h.pid == me) {
-        s.hooks.remove(i);
-    }
-    (s.hooks.len() != n) as u32
 }

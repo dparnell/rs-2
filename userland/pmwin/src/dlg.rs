@@ -218,6 +218,13 @@ fn create_item(parent: u32, dlg: u32, t: &DlgItemT, off: i32) {
 /// WinProcessDlg(hwndDlg): run the dialog modally until dismissed.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinProcessDlg(h: u32) -> u32 {
+    process(h, crate::hooks::MSGF_DIALOGBOX)
+}
+
+/// The modal loop of a dialog (WinProcessDlg) or message box: what the
+/// message filter hooks (MSGF_DIALOGBOX, MSGF_MESSAGEBOX) process is not
+/// dispatched.
+pub fn process(h: u32, msgf: u32) -> u32 {
     if data(h).is_none() {
         return DID_ERROR;
     }
@@ -243,6 +250,9 @@ pub extern "C" fn WinProcessDlg(h: u32) -> u32 {
                 d.result = DID_ERROR;
             }
             break;
+        }
+        if crate::hooks::msg_filter(&mut m, msgf) {
+            continue;
         }
         msg::WinDispatchMsg(1, &m);
     }

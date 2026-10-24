@@ -318,6 +318,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pmxhook"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "pmxtest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "rescue"
 version = "0.1.0"
 dependencies = [

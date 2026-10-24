@@ -23,6 +23,7 @@ WinBeginEnumWindows @5114
 WinBeginPaint @5115
 WinBroadcastMsg @5116
 WinCalcFrameRect @5118
+WinCallMsgFilter @5120
 WinCancelShutdown @5121
 WinChangeSwitchEntry @5122
 WinCloseClipbrd @5124
@@ -48,6 +49,8 @@ WinDdeRespond @5144
 WinDefDlgProc @5146
 WinDefWindowProc @5147
 WinDeleteAtom @5148
+WinDeleteLibrary @5149
+WinDeleteProcedure @5150
 WinDestroyAccelTable @5151
 WinDestroyAtomTable @5152
 WinDestroyCursor @5153
@@ -97,9 +100,11 @@ WinIsWindowShowing @5213
 WinIsWindowVisible @5214
 WinLoadAccelTable @5216
 WinLoadDlg @5218
+WinLoadLibrary @5219
 WinLoadMenu @5220
 WinLoadMessage @5221
 WinLoadPointer @5222
+WinLoadProcedure @5223
 WinLoadString @5224
 WinLockWindowUpdate @5228
 WinMapDlgPoints @5231
@@ -170,6 +175,8 @@ WinQueryWindowULong @5311
 WinQueryWindowUShort @5312
 WinRealizePalette @5314
 WinRegisterClass @5315
+WinRegisterUserDatatype @5318
+WinRegisterUserMsg @5319
 WinReleaseHook @5321
 WinReleasePS @5322
 WinRemovePresParam @5323

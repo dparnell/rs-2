@@ -54,6 +54,8 @@ pub struct Queue {
     pub modal: Vec<(&'static str, u32)>,
     /// The reply the thread waits for: (window, message) it sent.
     pub awaiting: Option<(u32, u32)>,
+    /// The queue's code page (WinSetCp).
+    pub cp: u32,
 }
 
 pub struct PsEntry {
@@ -249,9 +251,12 @@ pub struct Hook {
     pub queue: u32,
     pub kind: u32,
     pub pfn: u32,
-    #[allow(dead_code)]
     pub hmod: u32,
     pub pid: u32,
+    /// The installer's anchor block (the hook's first argument).
+    pub hab: u32,
+    /// The name of hmod's module (loaded where a system hook is called).
+    pub module: Vec<u8>,
 }
 
 /// The state, if PM has been initialised in the system.

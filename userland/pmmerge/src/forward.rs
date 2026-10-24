@@ -27,6 +27,7 @@ forward! {
     WinBeginPaint = "PMWIN.703";
     WinBroadcastMsg = "PMWIN.901";
     WinCalcFrameRect = "PMWIN.704";
+    WinCallMsgFilter = "PMWIN.905";
     WinCancelShutdown = "PMWIN.705";
     WinChangeSwitchEntry = "PMSHAPI.123";
     WinCloseClipbrd = "PMWIN.707";
@@ -52,6 +53,8 @@ forward! {
     WinDefDlgProc = "PMWIN.910";
     WinDefWindowProc = "PMWIN.911";
     WinDeleteAtom = "PMWIN.721";
+    WinDeleteLibrary = "PMWIN.722";
+    WinDeleteProcedure = "PMWIN.987";
     WinDestroyAccelTable = "PMWIN.723";
     WinDestroyAtomTable = "PMWIN.724";
     WinDestroyCursor = "PMWIN.725";
@@ -101,9 +104,11 @@ forward! {
     WinIsWindowVisible = "PMWIN.775";
     WinLoadAccelTable = "PMWIN.776";
     WinLoadDlg = "PMWIN.924";
+    WinLoadLibrary = "PMWIN.777";
     WinLoadMenu = "PMWIN.778";
     WinLoadMessage = "PMWIN.779";
     WinLoadPointer = "PMWIN.780";
+    WinLoadProcedure = "PMWIN.986";
     WinLoadString = "PMWIN.781";
     WinLockWindowUpdate = "PMWIN.784";
     WinMapDlgPoints = "PMWIN.787";
@@ -174,6 +179,8 @@ forward! {
     WinQueryWindowUShort = "PMWIN.844";
     WinRealizePalette = "PMWIN.941";
     WinRegisterClass = "PMWIN.926";
+    WinRegisterUserDatatype = "PMWIN.845";
+    WinRegisterUserMsg = "PMWIN.846";
     WinReleaseHook = "PMWIN.927";
     WinReleasePS = "PMWIN.848";
     WinRemovePresParam = "PMWIN.940";

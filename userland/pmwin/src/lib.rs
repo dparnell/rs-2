@@ -28,6 +28,7 @@ mod fileicon;
 mod fonts;
 mod frame;
 mod help;
+mod hooks;
 mod gpiapi;
 mod gpiobj;
 mod gpiseg;

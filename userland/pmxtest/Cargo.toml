@@ -1,0 +1,9 @@
+[package]
+name = "pmxtest"
+description = "Self-checks of PM features beyond the basics: hooks, DDE, owner drawing, presentation parameters, AVIO, PMWINX and PMBIDI"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2", features = ["heap"] }
