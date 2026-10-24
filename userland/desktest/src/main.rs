@@ -111,6 +111,11 @@ fn program_objects() {
     q.params.clear();
     check("PrfChangeProgram", objects::change_program(h, &q));
     check("the change is there", objects::definition(h).is_some_and(|d| d.title == b"Renamed" && d.progc == PROG_WINDOWABLEVIO && d.params.is_empty()));
+    // A DOS program object with DOS settings in its environment.
+    let mut dosp = q.clone();
+    dosp.progc = PROG_WINDOWEDVDM;
+    dosp.env = b"DOS_HIGH=0\0EMS_MEMORY_LIMIT=0\0".to_vec();
+    check("a DOS object's settings (pszEnvironment) are kept", objects::change_program(h, &dosp) && objects::definition(h).is_some_and(|d| d.progc == PROG_WINDOWEDVDM && d.env == dosp.env));
     objects::set_icon_pos(b"DESKTOP", b"PTEST", Some((123, -4)));
     check("icon positions in RS2_IconPos", objects::icon_pos(b"DESKTOP", b"PTEST") == Some((123, -4)));
     objects::set_icon_pos(b"DESKTOP", b"PTEST", None);
