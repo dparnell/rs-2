@@ -188,6 +188,10 @@ const VS_ACTIVATE: u32 = 0x02;
 const ST_CURSOR: u32 = 0x01;
 const ST_BLINK: u32 = 0x02;
 const ST_MOUSE: u32 = 0x08;
+/// A DOS session in a graphics mode (Rs2VioReadPixels).
+const ST_PIXELS: u32 = 0x20;
+/// A DOS session: the mouse goes to it as positions (Rs2VdmMouse).
+const ST_DOS: u32 = 0x40;
 
 const CTL_FOCUS: u32 = 1;
 const CTL_WINDOWED: u32 = 2;
@@ -207,6 +211,10 @@ unsafe extern "C" {
     fn Rs2VioKey(sid: u32, ev: *const Input) -> u32;
     #[link_name = "RS2API.15"]
     fn Rs2VioMouse(sid: u32, row: i32, col: i32, buttons: u32) -> u32;
+    #[link_name = "RS2API.404"]
+    fn Rs2VioReadPixels(sid: u32, info: *mut u32, pixels: *mut u8, cb: u32, pal: *mut u32) -> u32;
+    #[link_name = "RS2API.405"]
+    fn Rs2VdmMouse(sid: u32, x: u32, y: u32, buttons: u32) -> u32;
     #[link_name = "RS2API.16"]
     fn Rs2VioControl(sid: u32, cmd: u32, arg: u32) -> u32;
 }
@@ -322,6 +330,9 @@ struct Win {
     windowed: bool,
     focus: bool,
     buttons: u32,
+    /// A DOS session's graphics picture: width, height, pixels, palette.
+    pix: Option<(usize, usize, Vec<u8>, [u32; 256])>,
+    pix_dims: (usize, usize),
 }
 
 static mut WINS: Vec<Win> = Vec::new();
@@ -346,12 +357,23 @@ fn by_sid(sid: u32) -> Option<usize> {
     wins().iter().position(|w| w.sid == sid)
 }
 
+/// How big a DOS graphics picture is shown: doubled across below 400
+/// pixels, 200-line modes double scanned (as a VGA shows them).
+fn pix_size(w: usize, h: usize) -> (i32, i32) {
+    let sx = if w < 400 { 2 } else { 1 };
+    let sy = if h <= 240 { 2 } else { 1 };
+    ((w * sx) as i32, (h * sy) as i32)
+}
+
 impl Win {
     fn grid(&self) -> Grid<'_> {
         Grid { cells: &self.cells, cols: self.cols, rows: self.rows }
     }
 
     fn content_size(&self) -> (i32, i32) {
+        if let Some((w, h, ..)) = &self.pix {
+            return pix_size(*w, *h);
+        }
         ((self.cols * viocell::CELL_W) as i32, (self.rows * self.font_h) as i32)
     }
 
@@ -413,6 +435,33 @@ fn refresh(i: usize) {
     if unsafe { Rs2VioReadScreen(w.sid, st.as_mut_ptr(), cells.as_mut_ptr(), (MAX_CELLS * 2) as u32) } != 0 {
         return;
     }
+    if st[9] & ST_PIXELS != 0 {
+        // A DOS session in a graphics mode: the picture instead of cells.
+        let mut info = [0u32; 4];
+        let mut pal = [0u32; 256];
+        // The previous picture's buffer, unless the size changed.
+        let mut px: Vec<u8> = match w.pix.take() {
+            Some((.., d, _)) => d,
+            None => Vec::new(),
+        };
+        px.resize(1600 * 1200, 0);
+        if unsafe { Rs2VioReadPixels(w.sid, info.as_mut_ptr(), px.as_mut_ptr(), px.len() as u32, pal.as_mut_ptr()) } == 0 {
+            let (pw, ph) = (info[0] as usize, info[1] as usize);
+            px.truncate(pw * ph);
+            let resized = (pw, ph) != w.pix_dims;
+            w.pix_dims = (pw, ph);
+            w.pix = Some((pw, ph, px, pal));
+            w.changes = st[0];
+            w.flags = st[9];
+            if resized {
+                fit_window(i);
+            } else {
+                wins()[i].invalidate_all();
+            }
+            return;
+        }
+    }
+    let had_pix = w.pix.take().is_some() || core::mem::take(&mut w.pix_dims) != (0, 0);
     let (cols, rows) = (st[1] as usize, st[2] as usize);
     cells.truncate(cols * rows);
     let cur = (st[9] & ST_CURSOR != 0).then_some((st[3] as usize, st[4] as usize));
@@ -421,7 +470,7 @@ fn refresh(i: usize) {
     palette.copy_from_slice(&st[11..27]);
     w.changes = st[0];
     let mode_changed = cols != w.cols || rows != w.rows || cell_h != w.cell_h;
-    let mut all = mode_changed || palette != w.palette || (st[9] ^ w.flags) & ST_BLINK != 0 || st[10] != w.font_gen || st[8] != w.codepage;
+    let mut all = mode_changed || had_pix || palette != w.palette || (st[9] ^ w.flags) & ST_BLINK != 0 || st[10] != w.font_gen || st[8] != w.codepage;
     let old_cur = w.cur;
     w.cols = cols;
     w.rows = rows;
@@ -457,7 +506,7 @@ fn refresh(i: usize) {
             }
         }
     }
-    if mode_changed {
+    if mode_changed || had_pix {
         fit_window(i);
     } else if all {
         wins()[i].invalidate_all();
@@ -660,6 +709,8 @@ fn create_window(s: &VioSession) -> Option<usize> {
         windowed: s.flags & VS_WINDOWED != 0,
         focus: false,
         buttons: 0,
+        pix: None,
+        pix_dims: (0, 0),
     });
     HAD_WINDOWS.store(1, Ordering::Relaxed);
     let i = wins().len() - 1;
@@ -725,6 +776,41 @@ fn paint(i: usize) {
     let w = &wins()[i];
     let mut r = RectL::default();
     let hps = unsafe { WinBeginPaint(w.client, 0, &mut r) };
+    if let Some((pw, ph, px, pal)) = &w.pix {
+        // The whole picture as a bottom-up 24-bit bitmap, stretched to
+        // its shown size.
+        let (cw, ch) = w.client_size();
+        let (dw, dh) = pix_size(*pw, *ph);
+        let stride = viocell::bgr24_stride(*pw);
+        let mut buf = alloc::vec![0u8; stride * ph];
+        for y in 0..*ph {
+            let row = &px[y * pw..y * pw + pw];
+            let out = &mut buf[(ph - 1 - y) * stride..];
+            for (x, &c) in row.iter().enumerate() {
+                let v = pal[c as usize];
+                out[x * 3] = v as u8;
+                out[x * 3 + 1] = (v >> 8) as u8;
+                out[x * 3 + 2] = (v >> 16) as u8;
+            }
+        }
+        let mut bmi = [0u8; 12];
+        bmi[0] = 12;
+        bmi[4..6].copy_from_slice(&(*pw as u16).to_le_bytes());
+        bmi[6..8].copy_from_slice(&(*ph as u16).to_le_bytes());
+        bmi[8] = 1;
+        bmi[10] = 24;
+        let top = ch;
+        let pts = [PointL { x: 0, y: top - dh }, PointL { x: dw - 1, y: top - 1 }, PointL { x: 0, y: 0 }, PointL { x: *pw as i32, y: *ph as i32 }];
+        unsafe { GpiDrawBits(hps, buf.as_ptr(), bmi.as_ptr(), 4, pts.as_ptr(), 0xcc, 2) };
+        if cw > dw {
+            unsafe { WinFillRect(hps, &RectL { l: dw, b: 0, r: cw, t: ch }, CLR_BLACK) };
+        }
+        if ch > dh {
+            unsafe { WinFillRect(hps, &RectL { l: 0, b: 0, r: dw.min(cw), t: ch - dh }, CLR_BLACK) };
+        }
+        unsafe { WinEndPaint(hps) };
+        return;
+    }
     let (cw, ch) = w.client_size();
     let (pw, ph) = w.content_size();
     // Outside the text: black.
@@ -969,6 +1055,32 @@ fn mouse(i: usize, msg: u32, mp1: u32) -> bool {
         let w = &wins()[i];
         (w.cell_at(x, y), w.sid, w.flags & ST_MOUSE != 0 && !w.mark_mode, w.anchor.is_some())
     };
+    // DOS sessions get the pointer's position over the picture or text.
+    if wins()[i].flags & ST_DOS != 0 && !wins()[i].mark_mode {
+        let w = &mut wins()[i];
+        match msg {
+            WM_BUTTON1DOWN => w.buttons |= 1,
+            WM_BUTTON1UP => w.buttons &= !1,
+            WM_BUTTON2DOWN => w.buttons |= 2,
+            WM_BUTTON2UP => w.buttons &= !2,
+            WM_BUTTON3DOWN => w.buttons |= 4,
+            WM_BUTTON3UP => w.buttons &= !4,
+            _ => {}
+        }
+        let (_, ch) = w.client_size();
+        let (pw, ph) = w.content_size();
+        let fx = (x.clamp(0, pw.max(1) - 1) as u32 * 65536 / pw.max(1) as u32).min(65535);
+        let fy = ((ch - 1 - y).clamp(0, ph.max(1) - 1) as u32 * 65536 / ph.max(1) as u32).min(65535);
+        let (client, b) = (w.client, w.buttons);
+        unsafe {
+            if msg == WM_BUTTON1DOWN {
+                WinSetFocus(HWND_DESKTOP, client);
+            }
+            WinSetCapture(HWND_DESKTOP, if b != 0 { client } else { 0 });
+            Rs2VdmMouse(sid, fx, fy, b);
+        }
+        return msg != WM_MOUSEMOVE;
+    }
     if uses_mouse {
         let w = &mut wins()[i];
         match msg {

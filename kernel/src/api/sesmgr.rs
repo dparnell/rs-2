@@ -150,6 +150,13 @@ pub fn is_dos_program(path: &str, data: &[u8]) -> bool {
     up.ends_with(".COM") || up.ends_with(".BAT") || (data.len() >= 2 && super::module::app_type(data) == 0x20)
 }
 
+/// Start a DOS session for DosExecPgm of a DOS program: unrelated, in
+/// the foreground, windowed as the caller is.
+pub fn start_dos_session(c: &Ctx, path: &str, inputs: &str, env: Vec<String>) -> Result<(u32, u32, u32), u32> {
+    let sd = StartData { related: false, background: false, title: None, name: None, inputs: String::new(), termq: None, env: None, session_type: SSF_TYPE_DEFAULT };
+    start_dos(c, &sd, Some(path.to_string()), inputs, env)
+}
+
 /// Start a DOS session: VDM.EXE leads it, running `path` (a .COM, .EXE
 /// or .BAT; none: COMMAND.COM) with `inputs`.
 fn start_dos(c: &Ctx, sd: &StartData, path: Option<String>, inputs: &str, env: Vec<String>) -> Result<(u32, u32, u32), u32> {
@@ -162,8 +169,8 @@ fn start_dos(c: &Ctx, sd: &StartData, path: Option<String>, inputs: &str, env: V
     let caller_session = c.process.session.load(Ordering::Relaxed);
     let from_pm = (caller_session != 0 && caller_session == session::pm_session()) || session::is_windowed(caller_session);
     let mut windowed = match sd.session_type {
-        SSF_TYPE_WINDOWEDVDM => true,
-        SSF_TYPE_VDM => false,
+        SSF_TYPE_WINDOWEDVDM | SSF_TYPE_WINDOWABLEVIO => true,
+        SSF_TYPE_VDM | SSF_TYPE_FULLSCREEN => false,
         _ => from_pm,
     };
     if windowed && !crate::viowin::ensure_host(env.clone()) {
