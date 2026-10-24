@@ -258,6 +258,43 @@ in_pm:
     cmp si, 0x55aa
 9:  RESULT
 
+    // IRQ 0 hooked in protected mode, coming while in real mode (a
+    // 300 ms BIOS wait through 0300h): the handler counts, then chains.
+    PRINT s_irq
+    mov ax, 0x0204
+    mov bl, 8
+    int 0x31
+    mov [prev8], edx
+    mov [prev8 + 4], cx
+    mov ax, 0x0205
+    mov bl, 8
+    mov cx, cs
+    mov edx, offset irq0_handler
+    int 0x31
+    mov word ptr [tick_count], 0
+    mov byte ptr [rm_regs + 29], 0x86
+    mov dword ptr [rm_regs + 24], 0x0004
+    mov dword ptr [rm_regs + 20], 0x93e0
+    mov word ptr [rm_regs + 32], 0x0200
+    mov word ptr [rm_regs + 46], 0
+    mov word ptr [rm_regs + 48], 0
+    push ds
+    pop es
+    mov edi, offset rm_regs
+    mov ax, 0x0300
+    mov bx, 0x0015
+    xor cx, cx
+    int 0x31
+    mov ax, 0x0205
+    mov bl, 8
+    mov cx, [prev8 + 4]
+    mov edx, [prev8]
+    int 0x31
+    cmp word ptr [tick_count], 3
+    setae al
+    cmp al, 1
+    RESULT
+
     PRINT s_done
     mov al, [failures]
     mov ah, 0x4c
@@ -303,6 +340,15 @@ de_handler:
     add dword ptr ss:[esp + 12], 2
     .byte 0x66, 0xcb
 
+irq0_handler:
+    push ds
+    mov ds, cs:[cs_data_sel]
+    inc word ptr [tick_count]
+    pop ds
+    // jmp fword cs:[prev8]
+    .byte 0x2e, 0x66, 0xff, 0x2e
+    .word prev8
+
 int60:
     push ds
     mov ds, cs:[cs_data_sel]
@@ -347,6 +393,7 @@ s_rmcb: .ascii "Real-mode callback: $"
 s_dosmem: .ascii "DOS memory block: $"
 s_ok: .ascii "ok\r\n$"
 s_failed: .ascii "FAILED\r\n$"
+s_irq: .ascii "IRQ 0 in real mode to the protected-mode handler: $"
 s_done: .ascii "DPMI test done.\r\n$"
 .balign 4
 entry: .long 0
@@ -365,5 +412,8 @@ exc_seen: .byte 0
 rmcb_seen: .byte 0
 .balign 2
 int_count: .word 0
+tick_count: .word 0
+prev8: .long 0
+    .word 0
 rm_regs: .fill 50, 1, 0
 cb_regs: .fill 50, 1, 0

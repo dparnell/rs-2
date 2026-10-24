@@ -240,7 +240,10 @@ mapping for the video memory), the virtual interrupt flag (0900h-0902h),
 debug registers (0B00h-0B03h, stubs). Software interrupts the client does
 not hook are reflected to real mode (INT 21h with pointer translation is
 the extender's job, as DPMI specifies); hardware interrupts go to the
-client's protected-mode handler first, then to real mode. Programs bound to
+client's protected-mode handler first, then to real mode; an IRQ the
+client hooked that arrives while the CPU runs real-mode code (a
+reflected DOS call) reaches its protected-mode handler too, through a
+real-mode stub the host puts in the IVT meanwhile. Programs bound to
 DOS/4GW, PMODE/W, DOS/32A or CWSDPMI-style extenders run on it.
 
 ## Starting DOS sessions

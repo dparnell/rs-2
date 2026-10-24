@@ -27,7 +27,7 @@ use crate::xms::{Block, Owner};
 use crate::{bios, Cb, Host, Machine};
 
 pub const CB_FIRST: u16 = 0x200;
-pub const CB_LAST: u16 = 0x50f;
+pub const CB_LAST: u16 = 0x51f;
 
 /// Callbacks.
 const CB_VEC: u16 = 0x200;
@@ -38,6 +38,8 @@ const CB_EXCRET: u16 = 0x303;
 const CB_RMCBRET: u16 = 0x304;
 const CB_RAW_TO_PM: u16 = 0x305;
 const CB_RAW_TO_RM: u16 = 0x306;
+const CB_IRQRET: u16 = 0x307;
+const CB_RMIRQ: u16 = 0x510;
 const CB_DEFEXC: u16 = 0x380;
 const CB_DEFINT: u16 = 0x400;
 const CB_RMCB: u16 = 0x500;
@@ -50,6 +52,8 @@ const RM_SIMRET: u16 = bios::DPMI_CODE + 0x10;
 const RM_RAW: u16 = bios::DPMI_CODE + 0x18;
 const RM_SAVE: u16 = bios::DPMI_CODE + 0x20;
 const RM_RMCB: u16 = bios::DPMI_CODE + 0x40;
+/// Real-mode IRQ stubs (callback; IRET), 16 of them.
+const RM_IRQ: u16 = bios::DPMI_CODE + 0xc0;
 
 /// The host area: offsets.
 const AREA_SIZE: u32 = 0x20000;
@@ -62,6 +66,7 @@ const H_EXCRET: u32 = 0x2000;
 const H_RMCBRET: u32 = 0x2008;
 const H_RAW: u32 = 0x2010;
 const H_SAVE: u32 = 0x2018;
+const H_IRQRET: u32 = 0x2020;
 const H_DEFEXC: u32 = 0x2100;
 const H_STACK0: u32 = 0x7000;
 const H_LOCKED: u32 = 0x8000;
@@ -132,6 +137,35 @@ pub struct Client {
     locked_top: u32,
     /// The PSP's environment segment (restored at the end).
     env_seg: u16,
+    /// Real-mode vectors of IRQs the client hooked in protected mode
+    /// (the IVT points to the host's stubs meanwhile).
+    rm_irq_prev: [Option<(u16, u16)>; 16],
+    /// Real-mode states interrupted by such an IRQ.
+    rm_saved: Vec<RmState>,
+}
+
+/// A real-mode CPU state put aside while a client's protected-mode
+/// handler serves an IRQ that came in real mode.
+#[derive(Clone)]
+struct RmState {
+    regs: [u32; 8],
+    seg: [Seg; 6],
+    eip: u32,
+    flags: u32,
+    locked_top: u32,
+}
+
+/// The vector of IRQ `k` (BIOS numbering).
+fn irq_vector(k: usize) -> u8 {
+    if k < 8 { 8 + k as u8 } else { 0x70 + k as u8 - 8 }
+}
+
+fn vector_irq(v: u8) -> Option<usize> {
+    match v {
+        8..=15 => Some(v as usize - 8),
+        0x70..=0x77 => Some(v as usize - 0x70 + 8),
+        _ => None,
+    }
 }
 
 #[derive(Default)]
@@ -208,6 +242,10 @@ impl Machine {
         for k in 0..RMCBS as u16 {
             put(self, RM_RMCB + k * 8, &cb(CB_RMCB + k));
         }
+        for k in 0..16u16 {
+            let c = cb(CB_RMIRQ + k);
+            put(self, RM_IRQ + k * 8, &[c[0], c[1], c[2], c[3], 0xcf]);
+        }
     }
 
     /// INT 2Fh AX=1687h: the host is there.
@@ -245,6 +283,8 @@ impl Machine {
             CB_RMCBRET => self.dpmi_rmcb_return(),
             CB_RAW_TO_PM => self.dpmi_raw_to_pm(),
             CB_RAW_TO_RM => self.dpmi_raw_to_rm(),
+            CB_IRQRET => self.dpmi_rm_irq_return(),
+            0x510..=0x51f => self.dpmi_rm_irq((n - CB_RMIRQ) as usize),
             0x380..=0x39f => {
                 let v = (n - CB_DEFEXC) as u8;
                 self.dpmi_unhandled(host, v);
@@ -327,6 +367,7 @@ impl Machine {
         stub(self, H_EXCRET, CB_EXCRET);
         stub(self, H_RMCBRET, CB_RMCBRET);
         stub(self, H_RAW, CB_RAW_TO_RM);
+        stub(self, H_IRQRET, CB_IRQRET);
         self.hw.wr(area + H_SAVE, 0xcb);
         // TSS: the ring-0 stack.
         self.hw.wr32(area + H_TSS + 4, area + H_STACK0);
@@ -345,6 +386,8 @@ impl Machine {
             rmcbs: [Rmcb::default(); RMCBS],
             locked_top: H_LOCKED_TOP,
             env_seg: 0,
+            rm_irq_prev: [None; 16],
+            rm_saved: Vec::new(),
         };
         // The client's first selectors: CS, DS, SS, ES (PSP), environment.
         let (rds, rss) = (self.cpu.seg[DS].sel, self.cpu.seg[SS].sel);
@@ -531,7 +574,8 @@ impl Machine {
     /// result flags go to the ring-0 frame of a vector stub).
     fn dpmi_reflect(&mut self, v: u8, ring0: bool) {
         self.dpmi_save(Reflect::Interrupt { ring0 });
-        let (seg, off) = self.vector(v);
+        let hooked = vector_irq(v).and_then(|k| self.client().rm_irq_prev[k]);
+        let (seg, off) = hooked.unwrap_or_else(|| self.vector(v));
         let fl = self.cpu.flags;
         self.dpmi_to_real();
         let rm = self.client().rm_stack;
@@ -737,6 +781,11 @@ impl Machine {
         if c.env_seg != 0 {
             self.hw.wr16(Machine::lin(psp, 0x2c), c.env_seg);
         }
+        for (k, prev) in c.rm_irq_prev.iter().enumerate() {
+            if let Some((s, o)) = prev {
+                self.set_vector(irq_vector(k), *s, *o);
+            }
+        }
         self.cpu.idtr = Dtr { base: 0, limit: 0x3ff };
         self.cpu.cpl = 0;
     }
@@ -861,6 +910,74 @@ impl Machine {
         self.cpu.set16(ESP, sp);
         self.cpu.seg[CS] = Seg::real_code(cs);
         self.cpu.eip = ip as u32;
+    }
+
+    // ---- IRQs that come in real mode ----
+
+    /// The real-mode stub of hooked IRQ `k` ran: the client's
+    /// protected-mode handler, on the locked stack, returning to the host.
+    fn dpmi_rm_irq(&mut self, k: usize) {
+        let v = irq_vector(k);
+        let Some((sel, off)) = self.client().pm_vectors[v as usize] else {
+            // Unhooked meanwhile: the previous real-mode handler.
+            if let Some((s, o)) = self.client().rm_irq_prev[k] {
+                let ip = self.cpu.eip as u16;
+                let cs = self.cpu.seg[CS].sel;
+                let fl = self.cpu.flags;
+                let _ = self.cpu.push(&mut self.hw, fl & 0xffff, 2);
+                let _ = self.cpu.push(&mut self.hw, cs as u32, 2);
+                let _ = self.cpu.push(&mut self.hw, ip as u32, 2);
+                self.cpu.seg[CS] = Seg::real_code(s);
+                self.cpu.eip = o as u32;
+            }
+            return;
+        };
+        let locked_top = self.client().locked_top;
+        let st = RmState { regs: self.cpu.regs, seg: self.cpu.seg, eip: self.cpu.eip, flags: self.cpu.flags, locked_top };
+        self.client().rm_saved.push(st);
+        let area = self.client().area;
+        let bits32 = self.client().bits32;
+        self.cpu.cr0 |= 1;
+        self.cpu.cpl = 3;
+        self.cpu.idtr = Dtr { base: area + H_IDT, limit: 256 * 8 - 1 };
+        self.hw.irq_remap = Some(HW_BASE);
+        let sz = if bits32 { 4 } else { 2 };
+        let fl = self.cpu.flags & !(IF | TF);
+        let frame = [H_IRQRET, if bits32 { SEL_CODE3 as u32 } else { SEL_CODE3_16 as u32 }, fl];
+        let base = locked_top - sz * 3;
+        for (i, x) in frame.iter().enumerate() {
+            let a = area + base + i as u32 * sz;
+            if sz == 4 {
+                self.hw.wr32(a, *x);
+            } else {
+                self.hw.wr16(a, *x as u16);
+            }
+        }
+        self.client().locked_top = base;
+        if bits32 {
+            let _ = self.cpu.load_seg(&mut self.hw, SS, SEL_FLAT3);
+            self.cpu.regs[ESP] = area + base;
+        } else {
+            let _ = self.cpu.load_seg(&mut self.hw, SS, SEL_STACK3_16);
+            self.cpu.regs[ESP] = base - H_LOCKED;
+        }
+        for s in [DS, ES, FS, GS] {
+            let _ = self.cpu.load_seg(&mut self.hw, s, 0);
+        }
+        let _ = self.cpu.jump_far(&mut self.hw, sel, off);
+        self.cpu.flags = fl;
+    }
+
+    /// The client's handler returned (IRET to the host): back to the
+    /// interrupted real-mode code (its stub's IRET follows).
+    fn dpmi_rm_irq_return(&mut self) {
+        let Some(st) = self.client().rm_saved.pop() else { return };
+        self.dpmi_to_real();
+        self.cpu.regs = st.regs;
+        self.cpu.seg = st.seg;
+        self.cpu.eip = st.eip;
+        self.cpu.flags = st.flags;
+        self.client().locked_top = st.locked_top;
     }
 
     // ---- Raw mode switches ----
@@ -1127,6 +1244,22 @@ impl Machine {
                     c.exc_handlers[v] = if host_code { None } else { Some((sel, off)) };
                 } else {
                     c.pm_vectors[v] = if host_code { None } else { Some((sel, off)) };
+                    // An IRQ hooked in protected mode reaches the handler
+                    // when it comes in real mode too.
+                    if let Some(k) = vector_irq(v as u8) {
+                        match (host_code, self.client().rm_irq_prev[k]) {
+                            (false, None) => {
+                                let prev = self.vector(v as u8);
+                                self.client().rm_irq_prev[k] = Some(prev);
+                                self.set_vector(v as u8, bios::ROM, RM_IRQ + k as u16 * 8);
+                            }
+                            (true, Some((s, o))) => {
+                                self.client().rm_irq_prev[k] = None;
+                                self.set_vector(v as u8, s, o);
+                            }
+                            _ => {}
+                        }
+                    }
                 }
             }
             0x0300..=0x0302 => return self.dpmi_simulate(ax),
