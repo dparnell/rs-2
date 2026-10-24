@@ -444,8 +444,15 @@ fn refresh(i: usize) {
             Some((.., d, _)) => d,
             None => Vec::new(),
         };
-        px.resize(1600 * 1200, 0);
-        if unsafe { Rs2VioReadPixels(w.sid, info.as_mut_ptr(), px.as_mut_ptr(), px.len() as u32, pal.as_mut_ptr()) } == 0 {
+        let guess = (w.pix_dims.0 * w.pix_dims.1).max(320 * 200);
+        px.resize(guess, 0);
+        let mut rc = unsafe { Rs2VioReadPixels(w.sid, info.as_mut_ptr(), px.as_mut_ptr(), px.len() as u32, pal.as_mut_ptr()) };
+        if rc == 0 && (info[0] * info[1]) as usize > px.len() {
+            // A bigger mode than last time: again with room for it.
+            px.resize((info[0] * info[1]) as usize, 0);
+            rc = unsafe { Rs2VioReadPixels(w.sid, info.as_mut_ptr(), px.as_mut_ptr(), px.len() as u32, pal.as_mut_ptr()) };
+        }
+        if rc == 0 {
             let (pw, ph) = (info[0] as usize, info[1] as usize);
             px.truncate(pw * ph);
             let resized = (pw, ph) != w.pix_dims;
