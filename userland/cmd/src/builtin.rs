@@ -66,7 +66,7 @@ pub fn run(sh: &mut Shell, s: &Simple) -> Option<u32> {
             code
         }
         "MD" | "MKDIR" => dir_op(s, true),
-        "RD" | "RMDIR" => dir_op(s, false),
+        "RD" | "RMDIR" => rd(s),
         "PATH" | "DPATH" => path_cmd(sh, &up, s),
         "PROMPT" => {
             sh.set("PROMPT", s.args.trim());
@@ -202,6 +202,78 @@ fn dir_op(s: &Simple, make: bool) -> u32 {
         }
     }
     rc
+}
+
+/// RD [/S [/Q]] dir...: /S removes the directory with all its files and
+/// subdirectories (after asking, unless /Q).
+fn rd(s: &Simple) -> u32 {
+    let words = s.words();
+    let switch = |c: &str| words.iter().any(|w| w.eq_ignore_ascii_case(c));
+    if !switch("/S") {
+        return dir_op(s, false);
+    }
+    let dirs: Vec<&String> = words.iter().filter(|w| !w.starts_with('/')).collect();
+    if dirs.is_empty() {
+        sys_error(87);
+        return 87;
+    }
+    let mut rc = 0;
+    for d in dirs {
+        let d = d.trim_end_matches('\\');
+        if !is_dir(d) {
+            sys_error(3);
+            rc = 3;
+            continue;
+        }
+        if !switch("/Q") {
+            out(&alloc::format!("{d}, Are you sure (Y/N)? "));
+            let ans = read_line().unwrap_or_default();
+            if !ans.trim().eq_ignore_ascii_case("y") {
+                continue;
+            }
+        }
+        if let Err(e) = remove_tree(d) {
+            sys_error(e);
+            rc = e;
+        }
+    }
+    rc
+}
+
+/// Delete directory `d` and everything in it (read-only, hidden and
+/// system files too).
+fn remove_tree(d: &str) -> Result<(), u32> {
+    // Hidden, system and directories.
+    let all = FILE_HIDDEN | FILE_SYSTEM | FILE_DIRECTORY | FILE_READONLY | FILE_ARCHIVED;
+    for f in find(&alloc::format!("{d}\\*"), all).unwrap_or_default() {
+        if f.name == "." || f.name == ".." {
+            continue;
+        }
+        let p = alloc::format!("{d}\\{}", f.name);
+        if f.attr & FILE_DIRECTORY != 0 {
+            remove_tree(&p)?;
+            continue;
+        }
+        let c = cstr(&p);
+        let mut r = unsafe { DosDelete(c.as_ptr()) };
+        if r == 5 && f.attr & (FILE_READONLY | FILE_HIDDEN | FILE_SYSTEM) != 0 {
+            // FILESTATUS3 with the attributes cleared.
+            let mut fs = [0u8; 24];
+            if unsafe { DosQueryPathInfo(c.as_ptr(), 1, fs.as_mut_ptr(), 24) } == 0 {
+                fs[20..24].copy_from_slice(&0u32.to_le_bytes());
+                unsafe { DosSetPathInfo(c.as_ptr(), 1, fs.as_ptr(), 24, 0) };
+            }
+            r = unsafe { DosDelete(c.as_ptr()) };
+        }
+        if r != 0 {
+            return Err(r);
+        }
+    }
+    let c = cstr(d);
+    match unsafe { DosDeleteDir(c.as_ptr()) } {
+        0 => Ok(()),
+        r => Err(r),
+    }
 }
 
 fn path_cmd(sh: &mut Shell, var: &str, s: &Simple) -> u32 {
