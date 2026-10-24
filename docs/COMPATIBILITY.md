@@ -310,6 +310,7 @@ desktop program objects. "dosrun" = on the host with `tools/dosrun`
 | GRAFTABL.COM (IBM) | works | dosrun: loads code page 437's graphics characters. |
 | BASICA.COM, BASIC.COM (IBM) | fails | dosrun: loops setting the cursor (INT 10h 02h, row FFh); not in APPINST. |
 | SUBST.EXE, JOIN.EXE (IBM) | fails | "Incorrect function" (they need DOS internals rs2's DOS does not have); not in APPINST. |
+| Win-OS/2 (IBM's Windows 3.1 for OS/2: WINOS2.COM, OS2K386.EXE) | partial | Full screen, 640x480x16 (docs/WINOS2.md). QEMU: Program Manager from CMD in a full-screen DOS session (about 2 minutes under TCG), keys, mouse clicks (the pointer does not yet follow QEMU's absolute pointer exactly). dosrun: Program Manager, Clock, Notepad, Calculator, Write, Paintbrush, File Manager, Control Panel; `WINOS2 PROGRAM.EXE`. Not yet: WINSHELD (IBM's default `useos2shield=1`: needs VWIN.SYS's INT 66h), seamless and windowed Win-OS/2, clipboard/DDE with OS/2, sound, printing. |
 | tests/dos BEEP.COM | partial | dosrun and QEMU: the PIT channel 2 / port 61h tones are seen by VDM.EXE and played as a square wave through rs2's audio mixer when there is sound hardware (`--sound`); not yet listened to. |
 
 APPINST's **DOS Programs** category copies IBM's QBasic (QBASIC.EXE,
@@ -319,9 +320,14 @@ QBasic Full Screen and DOS Editor objects (WPProgram, PROGTYPE=WINDOWEDVDM
 or VDM) in a DOS Programs folder in Programs. OS/2 Warp 4 has no EDIT
 command; DOS Editor is QBasic's editor mode.
 
+APPINST's **Win-OS/2** category copies IBM's Win-OS/2 from the CD into
+`C:\OS2\MDOS\WINOS2`, sets SYSTEM.INI for VGA without the OS/2 shield,
+and makes WIN-OS/2 Full Screen in Command Prompts and a Win-OS/2 folder
+with the accessories (docs/WINOS2.md).
+
 Not yet: Sound Blaster 16 (16-bit/stereo), the OPL2/OPL3 FM synthesizer
 (AdLib), VESA modes with more than 8 bits per pixel, direct disk access
-(INT 13h, 25h/26h), the DOS settings page in the Workplace Shell's
+(INT 13h, 25h/26h: they fail, with 25h/26h's flags left on the stack as DOS leaves them), the DOS settings page in the Workplace Shell's
 program notebook (RS2SHELL has it).
 
 ## Fixed while getting these to run

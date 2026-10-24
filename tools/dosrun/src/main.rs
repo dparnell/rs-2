@@ -128,6 +128,9 @@ fn civil(secs: u64) -> DateTime {
 
 impl Host for Run {
     fn open(&mut self, path: &str, mode: OpenMode) -> Result<u32, u16> {
+        if self.trace {
+            eprintln!("open {path}");
+        }
         let p = self.path(path)?;
         if p.is_dir() {
             return Err(5);
@@ -486,6 +489,7 @@ fn main() {
     let mut png_out = None;
     let mut cfg = Config::default();
     let mut cwd = String::new();
+    let mut watch = u32::MAX;
     let mut stats = false;
     let mut wav_out: Option<String> = None;
     while let Some(a) = args.first().cloned() {
@@ -510,6 +514,7 @@ fn main() {
             "--nofpu" => cfg.fpu = false,
             "--noems" => cfg.ems_kb = 0,
             "--stats" => stats = true,
+            "--watch" => watch = u32::from_str_radix(val().trim_start_matches("0x"), 16).unwrap(),
             "--wav" => wav_out = Some(val()),
             _ => panic!("unknown option {a}"),
         }
@@ -541,6 +546,7 @@ fn main() {
     };
     let mut m = Machine::new(&mut host, cfg);
     m.dos.cwd[2] = cwd.to_ascii_uppercase();
+    m.hw.watch = watch;
     let path = if prog.contains(':') {
         prog.clone()
     } else if prog.eq_ignore_ascii_case("COMMAND.COM") && !host.drives[2].as_ref().unwrap().join(&prog).exists() {

@@ -30,6 +30,16 @@ pub struct File {
     pub stored: &'static [u8],
 }
 
+/// A setting in a Windows-style .INI file the install writes (Win-OS/2's
+/// SYSTEM.INI, as IBM's installer sets it for the display).
+pub struct Ini {
+    /// Path from the root of the boot drive.
+    pub file: &'static [u8],
+    pub section: &'static [u8],
+    pub key: &'static [u8],
+    pub value: &'static [u8],
+}
+
 pub struct App {
     pub id: &'static [u8],
     pub name: &'static [u8],
@@ -37,6 +47,7 @@ pub struct App {
     pub needs: Vec<&'static [u8]>,
     pub objects: Vec<Object>,
     pub files: Vec<File>,
+    pub inis: Vec<Ini>,
 }
 
 pub struct Category {
@@ -95,6 +106,7 @@ pub fn load() -> Vec<Category> {
                         needs: Vec::new(),
                         objects: Vec::new(),
                         files: Vec::new(),
+                        inis: Vec::new(),
                     });
                 }
             }
@@ -104,6 +116,7 @@ pub fn load() -> Vec<Category> {
                     b"needs" => a.needs.push(get(0)),
                     b"object" => a.objects.push(Object { title: get(0), program: get(1), params: get(2), dir: get(3), id: get(4), folder: get(5), progtype: get(6) }),
                     b"file" => a.files.push(File { target: get(0), source: get(1), stored: get(2) }),
+                    b"ini" => a.inis.push(Ini { file: get(0), section: get(1), key: get(2), value: get(3) }),
                     _ => {}
                 }
             }

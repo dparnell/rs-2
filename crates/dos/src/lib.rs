@@ -104,6 +104,9 @@ pub struct Machine {
     pub chain_int: Option<u8>,
     /// Waiting for input (a service returned Retry, or HLT).
     pub waiting: bool,
+    /// While DOS serves a call from protected mode: the linear address
+    /// of the flags word the call returns with.
+    pub(crate) pm_flags_at: Option<u32>,
     /// When the screen was last presented (microseconds).
     last_present: u64,
     /// Host time at the start (microseconds) and the PIT tick then.
@@ -134,6 +137,7 @@ impl Machine {
             exited: None,
             chain_int: None,
             waiting: false,
+            pm_flags_at: None,
             last_present: 0,
             t0: 0,
             events: Vec::new(),
@@ -166,6 +170,14 @@ impl Machine {
     #[inline]
     pub fn lin(seg: u16, off: u16) -> u32 {
         ((seg as u32) << 4) + off as u32
+    }
+
+    /// Linear address of segment register `s` : `off`, through the
+    /// register's base (a real-mode segment, or a protected-mode selector
+    /// when DOS serves a DPMI client directly).
+    #[inline]
+    pub fn seg_lin(&self, s: usize, off: u16) -> u32 {
+        self.cpu.seg[s].base.wrapping_add(off as u32)
     }
 
     /// Update the clocks from the host.
@@ -269,8 +281,14 @@ impl Machine {
             self.waiting = false;
             return;
         }
+        let budget = if self.hw.watch == u32::MAX { 2000 } else { 1 };
         for _ in 0..64 {
-            let e = self.cpu.run(&mut self.hw, 2000);
+            let e = self.cpu.run(&mut self.hw, budget);
+            if !self.hw.watch_hits.is_empty() {
+                for (a, v) in core::mem::take(&mut self.hw.watch_hits) {
+                    host.log(&alloc::format!("watch: {a:#x} <- {v:#x} at {:04x}:{:x} cpl {} esp {:x}", self.cpu.seg[CS].sel, self.cpu.eip, self.cpu.cpl, self.cpu.regs[x86emu::ESP]));
+                }
+            }
             match e {
                 Exit::Budget => {}
                 Exit::Halt => {
@@ -356,7 +374,7 @@ impl Machine {
     }
 
     /// A software or hardware interrupt the machine serves.
-    fn interrupt<H: Host>(&mut self, host: &mut H, v: u8) -> Cb {
+    pub(crate) fn interrupt<H: Host>(&mut self, host: &mut H, v: u8) -> Cb {
         match v {
             0x00 => self.fatal_exception(host, "Divide overflow"),
             0x06 => self.fatal_exception(host, "Invalid instruction"),
@@ -465,7 +483,7 @@ impl Machine {
 
     /// Set or clear a flag in the flags the callback's IRET restores.
     pub fn set_ret_flag(&mut self, f: u32, on: bool) {
-        let a = self.cpu.lin(SS, self.cpu.stack_ptr().wrapping_add(4));
+        let a = self.pm_flags_at.unwrap_or_else(|| self.cpu.lin(SS, self.cpu.stack_ptr().wrapping_add(4)));
         let mut v = self.hw.rd16(a);
         if on {
             v |= f as u16;
@@ -489,7 +507,7 @@ impl Machine {
 
     /// The flags the callback's IRET restores.
     pub fn ret_flags(&mut self) -> u16 {
-        let a = self.cpu.lin(SS, self.cpu.stack_ptr().wrapping_add(4));
+        let a = self.pm_flags_at.unwrap_or_else(|| self.cpu.lin(SS, self.cpu.stack_ptr().wrapping_add(4)));
         self.hw.rd16(a)
     }
 

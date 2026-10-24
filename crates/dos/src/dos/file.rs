@@ -554,7 +554,7 @@ impl Machine {
                     if d >= 26 || !self.dos.present[d as usize] {
                         return Err(err::INVALID_DRIVE);
                     }
-                    let a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.si());
+                    let a = self.seg_lin(DS, self.cpu.si());
                     let cwd = self.dos.cwd[d as usize].clone();
                     self.hw.write_bytes(a, cwd.as_bytes());
                     self.hw.wr(a + cwd.len() as u32, 0);
@@ -631,7 +631,7 @@ impl Machine {
                 }
                 0x5c => Ok(()),
                 0x60 => {
-                    let raw = self.hw.cstr(Machine::lin(self.cpu.seg[DS].sel, self.cpu.si()), 128);
+                    let raw = self.hw.cstr(self.seg_lin(DS, self.cpu.si()), 128);
                     let s = match self.resolve(&raw)? {
                         Name::File(f) => f,
                         Name::Dev(d) => alloc::format!("{}:/{:?}", (b'A' + self.dos.drive) as char, d).to_ascii_uppercase(),
@@ -647,7 +647,7 @@ impl Machine {
                     Ok(())
                 }
                 0x6c => {
-                    let raw = self.hw.cstr(Machine::lin(self.cpu.seg[DS].sel, self.cpu.si()), 128);
+                    let raw = self.hw.cstr(self.seg_lin(DS, self.cpu.si()), 128);
                     let n = self.resolve(&raw)?;
                     let mode = self.cpu.bx() as u8;
                     let attr = self.cpu.cx() as u8;
@@ -860,8 +860,7 @@ impl Machine {
 
     /// Put the search's next entry into the DTA.
     fn find_fill(&mut self, id: u32, attr: u8, pattern: &[u8; 11]) -> Result<(), u16> {
-        let (seg, off) = self.dta();
-        let a = Machine::lin(seg, off);
+        let a = self.dta_lin();
         let Some(s) = self.dos.searches.get_mut(&id) else { return Err(err::NO_MORE_FILES) };
         let Some(e) = s.entries.get(s.pos).cloned() else {
             self.dos.searches.remove(&id);
@@ -886,8 +885,7 @@ impl Machine {
     }
 
     fn find_next(&mut self) -> Result<(), u16> {
-        let (seg, off) = self.dta();
-        let a = Machine::lin(seg, off);
+        let a = self.dta_lin();
         if self.hw.rd32(a + 0x11) != 0x5253_3244 {
             return Err(err::NO_MORE_FILES);
         }

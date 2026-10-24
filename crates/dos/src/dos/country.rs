@@ -136,7 +136,7 @@ impl Machine {
                         self.ok();
                     }
                     0x21 | 0xa1 => {
-                        let a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.dx());
+                        let a = self.seg_lin(DS, self.cpu.dx());
                         for i in 0..self.cpu.cx() as u32 {
                             let c = self.hw.rd(a + i);
                             let u = self.upcase(c);
@@ -145,7 +145,7 @@ impl Machine {
                         self.ok();
                     }
                     0x22 | 0xa2 => {
-                        let a = Machine::lin(self.cpu.seg[DS].sel, self.cpu.dx());
+                        let a = self.seg_lin(DS, self.cpu.dx());
                         for i in 0..65535u32 {
                             let c = self.hw.rd(a + i);
                             if c == 0 {

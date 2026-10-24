@@ -18,6 +18,10 @@ pub const EMS_FRAME: u32 = 0xe000;
 
 pub struct Hw {
     pub ram: Vec<u8>,
+    /// A linear address whose writes are recorded (debugging; u32::MAX:
+    /// none), and the writes: (address, value).
+    pub watch: u32,
+    pub watch_hits: Vec<(u32, u32)>,
     /// Memory above 1 MB + 64 KB, grown as XMS and DPMI hand it out.
     pub ext: Vec<u8>,
     pub a20: bool,
@@ -54,6 +58,8 @@ pub struct Hw {
 impl Hw {
     pub fn new() -> Hw {
         Hw {
+            watch: u32::MAX,
+            watch_hits: Vec::new(),
             ram: vec![0; LOW_RAM],
             ext: Vec::new(),
             a20: false,
@@ -129,6 +135,9 @@ impl Hw {
 
     #[inline]
     pub fn wr(&mut self, a: u32, v: u8) {
+        if a & !3 == self.watch {
+            self.watch_hits.push((a, v as u32));
+        }
         if a < 0xa0000 {
             self.ram[a as usize] = v;
             return;
@@ -370,6 +379,9 @@ impl x86emu::Bus for Hw {
     }
     #[inline]
     fn write16(&mut self, a: u32, v: u16) {
+        if a.wrapping_sub(self.watch).wrapping_add(1) < 5 {
+            self.watch_hits.push((a, v as u32));
+        }
         if a < 0x9ffff {
             let i = a as usize;
             self.ram[i..i + 2].copy_from_slice(&v.to_le_bytes());
@@ -380,6 +392,9 @@ impl x86emu::Bus for Hw {
     }
     #[inline]
     fn write32(&mut self, a: u32, v: u32) {
+        if a.wrapping_sub(self.watch).wrapping_add(3) < 7 {
+            self.watch_hits.push((a, v));
+        }
         if a < 0x9fffd {
             let i = a as usize;
             self.ram[i..i + 4].copy_from_slice(&v.to_le_bytes());

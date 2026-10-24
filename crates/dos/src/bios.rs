@@ -601,7 +601,7 @@ impl Machine {
             }
             0x87 => {
                 // Block move: CX words between the descriptors at ES:SI.
-                let gdt = Machine::lin(self.cpu.seg[ES].sel, self.cpu.si());
+                let gdt = self.seg_lin(ES, self.cpu.si());
                 let base = |m: &mut Machine, d: u32| {
                     let a = gdt + d;
                     m.hw.rd16(a + 2) as u32 | (m.hw.rd(a + 4) as u32) << 16 | (m.hw.rd(a + 7) as u32) << 24
@@ -1143,7 +1143,7 @@ impl Machine {
                 let (orow, ocol) = self.cursor(p);
                 let (r, c) = (self.cpu.dh(), self.cpu.dl());
                 self.set_cursor(p, r, c);
-                let mut a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.bp());
+                let mut a = self.seg_lin(ES, self.cpu.bp());
                 let mut attr = self.cpu.bl();
                 for _ in 0..self.cpu.cx() {
                     let ch = self.hw.rd(a);
@@ -1176,7 +1176,7 @@ impl Machine {
             }
             0x1b => {
                 // Functionality/state information.
-                let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.di());
+                let a = self.seg_lin(ES, self.cpu.di());
                 for i in 0..64 {
                     self.hw.wr(a + i, 0);
                 }
@@ -1218,7 +1218,7 @@ impl Machine {
     fn vbe(&mut self) {
         use crate::video::{Vbe, LFB_BASE, VBE_MEM, VBE_MODES};
         let al = self.cpu.al();
-        let es_di = Machine::lin(self.cpu.seg[ES].sel, self.cpu.di());
+        let es_di = self.seg_lin(ES, self.cpu.di());
         let ok = |m: &mut Machine| m.cpu.set_ax(0x004f);
         match al {
             0x00 => {
@@ -1414,7 +1414,7 @@ impl Machine {
             }
             0x01 => self.hw.vga.attr[0x11] = self.cpu.bh(),
             0x02 => {
-                let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.dx());
+                let a = self.seg_lin(ES, self.cpu.dx());
                 for i in 0..16 {
                     let b = self.hw.rd(a + i);
                     self.hw.vga.attr[i as usize] = b;
@@ -1437,7 +1437,7 @@ impl Machine {
                 self.cpu.set_bh(v);
             }
             0x09 => {
-                let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.dx());
+                let a = self.seg_lin(ES, self.cpu.dx());
                 for i in 0..16 {
                     let v = self.hw.vga.attr[i as usize];
                     self.hw.wr(a + i, v);
@@ -1450,7 +1450,7 @@ impl Machine {
                 self.hw.vga.dac[i] = [self.cpu.dh() & 0x3f, self.cpu.ch() & 0x3f, self.cpu.cl() & 0x3f];
             }
             0x12 => {
-                let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.dx());
+                let a = self.seg_lin(ES, self.cpu.dx());
                 let start = self.cpu.bx() as usize;
                 for i in 0..self.cpu.cx() as usize {
                     let at = a + i as u32 * 3;
@@ -1475,7 +1475,7 @@ impl Machine {
                 self.cpu.set_cl(b);
             }
             0x17 => {
-                let a = Machine::lin(self.cpu.seg[ES].sel, self.cpu.dx());
+                let a = self.seg_lin(ES, self.cpu.dx());
                 let start = self.cpu.bx() as usize;
                 for i in 0..self.cpu.cx() as usize {
                     let c = self.hw.vga.dac[(start + i) & 0xff];
