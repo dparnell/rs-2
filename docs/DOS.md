@@ -282,15 +282,34 @@ EXIT, LH/LOADHIGH, TRUENAME, and batch files with IF (ERRORLEVEL,
 EXIST, ==, NOT), GOTO, FOR, CALL, SHIFT, PAUSE, REM, `@`; redirection
 `<`, `>`, `>>` and pipes `|` (through temporary files, as DOS does).
 
-## Phases
+## Status
 
-1. This document.
-2. `crates/x86emu`: real mode 8086-80386, host tests per instruction
-   group; then protected mode.
-3. `crates/dos`: loader, PSP, environment, INT 21h, memory, BIOS,
-   devices, `dosrun`; COMMAND.COM.
-4. `VDM.EXE` and the kernel side: sessions full screen and windowed,
-   graphics, keyboard, mouse, speaker; CMD and the desktop.
-5. DPMI 0.9 and an extender test; CPU performance if needed.
+Done (first version): the CPU (real and protected mode, x87), the
+machine (devices, VGA with VESA 2.0 8-bit modes, BIOS, DOS, XMS, EMS,
+mouse, PC speaker, Sound Blaster 2.0), rs2's COMMAND.COM, the DPMI 0.9
+host, DOS sessions full screen and windowed from CMD, DosStartSession and
+desktop objects, DOS settings on the program objects' DOS page.
+
+Not yet: an FM synthesizer (AdLib/OPL), Sound Blaster 16, VESA modes
+above 8 bits per pixel, DPMI 1.0, paging and V86 mode in the CPU (a
+program that sets CR0.PG or uses VCPI gets no paging), task switches,
+direct disk access, a faster CPU core (a decode or block cache; the
+interpreter does about 100 MIPS on a current host).
+
+## Testing
+
+- `cargo test -p x86emu`: the CPU against results recorded on QEMU
+  (`tools/scripts/cputest.sh --oracle` re-records them; QEMU's TCG does
+  not check segment limits or access rights, so tests/pm.rs checks those
+  against the SDM instead).
+- `tests/dos/run.sh`: builds the DOS test programs (tests/dos/*.S, clang)
+  and runs each on the host with `tools/dosrun`: HELLO (DOS and BIOS
+  output, files), GFX (modes 13h and 12h), DPMITEST (a 32-bit DPMI
+  client), VESA, SBTEST (Sound Blaster DMA and IRQ), BEEP, COMMAND.COM.
+  `dosrun --keys`, `--png`, `--wav`, `--trace` and `--stats` help with
+  other programs.
+- In QEMU: xtask puts the test programs in `C:\DOS` on development
+  images; `DESKTEST DOS W` (or `F`) starts GFX and DPMITEST as desktop
+  objects in DOS windows (full screen).
 
 Test results are kept in [COMPATIBILITY.md](COMPATIBILITY.md#dos-sessions).
