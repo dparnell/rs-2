@@ -434,7 +434,7 @@ fn new_item(obj: Obj, name: &[u8], icon: u32, file_icon: bool) -> Item {
 /// Icon of a program object.
 fn program_icon(p: &objects::Program) -> (u32, bool) {
     if p.exe == b"*" || p.exe.is_empty() {
-        return (icon(if p.progc == PROG_FULLSCREEN { si::PROMPT_FULL_SCREEN } else { si::PROMPT_WINDOW }), false);
+        return (icon(if matches!(p.progc, PROG_FULLSCREEN | PROG_VDM) { si::PROMPT_FULL_SCREEN } else { si::PROMPT_WINDOW }), false);
     }
     let src = if p.icon.is_empty() { &p.exe } else { &p.icon };
     let f = z(src);

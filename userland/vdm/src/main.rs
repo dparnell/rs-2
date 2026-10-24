@@ -408,6 +408,14 @@ fn main(s: &os2::Startup) -> u32 {
         None => (args, ""),
     };
     let prog = if prog.is_empty() { "C:\\OS2\\MDOS\\COMMAND.COM" } else { prog };
+    // A batch file runs under COMMAND.COM.
+    let batch_tail;
+    let (prog, tail) = if prog.to_ascii_uppercase().ends_with(".BAT") {
+        batch_tail = alloc::format!(" /C {prog}{tail}");
+        ("C:\\OS2\\MDOS\\COMMAND.COM", batch_tail.as_str())
+    } else {
+        (prog, tail)
+    };
     // DOS settings and the environment.
     let mut cfg = Config::default();
     let mut env: Vec<String> = Vec::new();

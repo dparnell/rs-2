@@ -354,6 +354,16 @@ pub fn make_defaults() -> Groups {
             add_program(prompts, &p);
         }
     }
+    // DOS prompts (added to groups made before DOS sessions existed).
+    if exists(&sys_path(b"OS2\\MDOS\\VDM.EXE")) {
+        let have = titles(prompts);
+        for (title, progc) in [(&b"DOS Window"[..], PROG_WINDOWEDVDM), (&b"DOS Full Screen"[..], PROG_VDM)] {
+            if !have.iter().any(|t| t.3 == title) {
+                let p = Program { progc, title: title.to_vec(), exe: b"*".to_vec(), ..Program::default() };
+                add_program(prompts, &p);
+            }
+        }
+    }
     add_editor(programs);
     add_app_installer(programs);
     add_display(programs);

@@ -25,6 +25,8 @@ const ID_DEFAULT: u16 = 211;
 const ID_WINDOW: u16 = 212;
 const ID_FULL: u16 = 213;
 const ID_PM: u16 = 214;
+const ID_DOSWIN: u16 = 215;
+const ID_DOSFULL: u16 = 216;
 const ID_TITLE: u16 = 221;
 
 /// The notebook being edited: (program handle or 0 for a new one, its
@@ -70,6 +72,8 @@ fn session_page() -> Vec<u8> {
         radio(b"In an OS/2 ~window", 74, ID_WINDOW, false),
         radio(b"OS/2 ~full screen", 60, ID_FULL, false),
         radio(b"Presentation ~Manager", 46, ID_PM, false),
+        radio(b"In a ~DOS window", 32, ID_DOSWIN, false),
+        radio(b"DOS full ~screen", 18, ID_DOSFULL, false),
     ])
 }
 
@@ -144,6 +148,8 @@ extern "C" fn settings_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
                 PROG_WINDOWABLEVIO => ID_WINDOW,
                 PROG_FULLSCREEN => ID_FULL,
                 PROG_PM => ID_PM,
+                PROG_WINDOWEDVDM => ID_DOSWIN,
+                PROG_VDM => ID_DOSFULL,
                 _ => ID_DEFAULT,
             };
             unsafe { WinSendDlgItemMsg(pages[1], radio as u32, BM_SETCHECK, 1, 0) };
@@ -184,7 +190,7 @@ fn save_settings(dlg: u32) -> bool {
         let name = crate::launch::file_name(&p.exe);
         p.title = name[..name.iter().rposition(|&c| c == b'.').unwrap_or(name.len())].to_vec();
     }
-    p.progc = [(ID_WINDOW, PROG_WINDOWABLEVIO), (ID_FULL, PROG_FULLSCREEN), (ID_PM, PROG_PM)]
+    p.progc = [(ID_WINDOW, PROG_WINDOWABLEVIO), (ID_FULL, PROG_FULLSCREEN), (ID_PM, PROG_PM), (ID_DOSWIN, PROG_WINDOWEDVDM), (ID_DOSFULL, PROG_VDM)]
         .into_iter()
         .find(|(id, _)| unsafe { WinSendDlgItemMsg(pages[1], *id as u32, BM_QUERYCHECK, 0, 0) } != 0)
         .map_or(PROG_DEFAULT, |x| x.1);
