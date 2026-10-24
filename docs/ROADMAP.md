@@ -377,8 +377,15 @@ Status markers: done, in progress, planned.
   fonts (WarpSans, Helvetica, Times New Roman, Courier) when installed
   from the CD (docs/PM.md, Fonts)
 - done: the Font Palette and folder fonts (PP_FONTNAMESIZE)
-- planned: the remaining classes and view pages (docs/WPS.md), printing
-  (no printer support yet)
+- done: deleting with IBM's confirmations and the Shredder, IBM's
+  settings pages (File, Type, Window, Association, Session, Details, the
+  View page's font), the System object and System Clock, Connections
+  (Network folder, Printers with shell-side printer objects), objects'
+  use lists; the Toolkit's wpstutor.dll registered in the running shell
+  and working (docs/WPS.md)
+- planned: printing (a spooler and printer drivers), network groups (a
+  LAN requester), the rest of WPCONFIG (docs/WPS.md, "What is not
+  there")
 
 ## Milestone 5: install media (first version done)
 
