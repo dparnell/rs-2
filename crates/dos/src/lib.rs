@@ -115,6 +115,8 @@ pub struct Machine {
     speaker_on: Option<u32>,
     /// The user closed the session.
     pub close_requested: bool,
+    /// A BEL sounds until then (microseconds).
+    pub beep_until: u64,
 }
 
 impl Machine {
@@ -138,6 +140,7 @@ impl Machine {
             polls: 0,
             speaker_on: None,
             close_requested: false,
+            beep_until: 0,
             cfg,
         };
         if m.cfg.fpu {
@@ -243,7 +246,7 @@ impl Machine {
         self.tick(host);
         self.take_events(host);
         self.devices();
-        let spk = self.hw.speaker();
+        let spk = self.hw.speaker().or((self.hw.us_now < self.beep_until).then_some(896));
         if spk != self.speaker_on {
             self.speaker_on = spk;
             host.speaker(spk);

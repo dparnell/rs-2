@@ -288,10 +288,10 @@ desktop program objects. "dosrun" = on the host with `tools/dosrun`
 | EDLIN.COM (IBM) | works | dosrun: listing, editing a line, saving (E). |
 | QBASIC.EXE (IBM) | works | dosrun: the full-screen editor, typing a program, F5: a SCREEN 13 program (LINE, CIRCLE, text in graphics). |
 | COMMAND.COM (IBM, OS/2's DOS) | works | dosrun: DIR, MEM (EXEC), `ECHO > file`, TYPE, EXIT. Not shipped; a test of the DOS kernel's internals. |
-| DOSKEY.COM (IBM) | fails | Hangs when it installs (it expects OS/2's VDM internals). |
+| DOSKEY.COM (IBM) | works | dosrun, with rs2's COMMAND.COM (which reads its lines through DOSKEY's INT 2Fh 4810h when DOSKEY answers 4800h): installs resident, Up recalls commands. Under IBM's COMMAND.COM the next command hangs (that COMMAND.COM loops over DOS's data). |
+| tests/dos BEEP.COM | partial | dosrun and QEMU: the PIT channel 2 / port 61h tones are seen by VDM.EXE and played as a square wave through rs2's audio mixer when there is sound hardware (`--sound`); not yet listened to. |
 
-Not yet: sound (the PC speaker is emulated but not played; no Sound
-Blaster), VESA modes, DOS settings in the program object notebook (the
+Not yet: Sound Blaster, VESA modes, DOS settings in the program object notebook (the
 VDM reads them from the environment: `DOS_HIGH`, `DOS_UMB`,
 `EMS_MEMORY_LIMIT`, `XMS_MEMORY_LIMIT`, `DPMI_MEMORY_LIMIT`), direct
 disk access (INT 13h, 25h/26h), hardware interrupts in real mode reaching

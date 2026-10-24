@@ -45,14 +45,16 @@ pub fn command_com() -> Vec<u8> {
     while v.len() < 0x20 {
         v.push(0);
     }
-    // loop: callback; int 21h; jmp loop
-    v.extend_from_slice(&[0xfe, 0x38, CB_SHELL as u8, (CB_SHELL >> 8) as u8, 0xcd, 0x21, 0xeb, 0xf8]);
+    // loop: callback; INT 21h (or INT 2Fh when BP = 1); jmp loop
+    v.extend_from_slice(&[0xfe, 0x38, CB_SHELL as u8, (CB_SHELL >> 8) as u8, 0x83, 0xfd, 0x01, 0x74, 0x04, 0xcd, 0x21, 0xeb, 0xf3, 0xcd, 0x2f, 0xeb, 0xef]);
     v
 }
 
 #[derive(Clone, Debug)]
 enum Pending {
     Init,
+    /// INT 2Fh AX=4800h: is DOSKEY there (it then reads the line)?
+    CheckDoskey,
     ReadLine,
     Exec,
     /// A key for PAUSE.
@@ -168,8 +170,26 @@ impl Machine {
             }
         };
         let pending = core::mem::replace(&mut self.shells[i].pending, Pending::Idle);
+        self.cpu.regs[x86emu::EBP] = 0;
         match pending {
             Pending::Init => self.shell_init(host, i),
+            Pending::CheckDoskey => {
+                // DOSKEY answers with AL non-zero; it then edits the line (4810h).
+                let psp = self.shells[i].psp;
+                let a = Machine::lin(psp, LINE_BUF);
+                self.hw.wr(a, 128);
+                self.hw.wr(a + 1, 0);
+                self.cpu.seg[DS] = Seg::real(psp);
+                self.cpu.set_dx(LINE_BUF);
+                if self.cpu.al() != 0 {
+                    self.cpu.set_ax(0x4810);
+                    self.cpu.regs[x86emu::EBP] = 1;
+                } else {
+                    self.cpu.set_ah(0x0a);
+                }
+                self.shells[i].pending = Pending::ReadLine;
+                return Cb::Done;
+            }
             Pending::ReadLine => {
                 let a = Machine::lin(psp, LINE_BUF);
                 let n = self.hw.rd(a + 1) as usize;
@@ -429,14 +449,9 @@ impl Machine {
                 self.out(host, b"\r\n");
             }
             self.prompt(host);
-            let psp = self.shells[i].psp;
-            let a = Machine::lin(psp, LINE_BUF);
-            self.hw.wr(a, 128);
-            self.hw.wr(a + 1, 0);
-            self.cpu.set_ah(0x0a);
-            self.cpu.seg[DS] = Seg::real(psp);
-            self.cpu.set_dx(LINE_BUF);
-            self.shells[i].pending = Pending::ReadLine;
+            self.cpu.set_ax(0x4800);
+            self.cpu.regs[x86emu::EBP] = 1;
+            self.shells[i].pending = Pending::CheckDoskey;
             return Cb::Done;
         }
     }

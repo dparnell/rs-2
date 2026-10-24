@@ -772,7 +772,7 @@ impl Machine {
             b'\r' => col = 0,
             b'\n' => row += 1,
             8 => col = col.saturating_sub(1),
-            7 => {}
+            7 => self.beep_until = self.hw.us_now + 150_000,
             _ => {
                 if self.text_mode() {
                     let a = self.cell_addr(page, row, col);

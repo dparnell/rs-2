@@ -478,6 +478,7 @@ fn main() {
     let mut png_out = None;
     let mut cfg = Config::default();
     let mut cwd = String::new();
+    let mut stats = false;
     while let Some(a) = args.first().cloned() {
         if !a.starts_with("--") {
             break;
@@ -499,6 +500,7 @@ fn main() {
             "--cwd" => cwd = val(),
             "--nofpu" => cfg.fpu = false,
             "--noems" => cfg.ems_kb = 0,
+            "--stats" => stats = true,
             _ => panic!("unknown option {a}"),
         }
     }
@@ -552,6 +554,10 @@ fn main() {
         }
     };
     m.present(&mut host);
+    if stats {
+        let secs = t0.elapsed().as_secs_f64();
+        eprintln!("dosrun: {} instructions in {:.2} s: {:.1} MIPS", m.cpu.icount, secs, m.cpu.icount as f64 / secs / 1e6);
+    }
     let _ = fs::remove_dir_all(&z);
     if let (Some(p), Some((w, h, px, pal))) = (&png_out, &host.last_gfx) {
         write_png(Path::new(p), *w, *h, px, pal);

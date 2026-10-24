@@ -40,6 +40,65 @@ unsafe extern "C" {
     fn Rs2VdmSetText(t: *const VdmText, cells: *const u16) -> u32;
     #[link_name = "RS2API.403"]
     fn Rs2VdmSetPixels(cx: u32, cy: u32, y0: u32, rows: u32, data: *const u8, pal: *const u32) -> u32;
+    #[link_name = "RS2API.301"]
+    fn Rs2AudioOpen(rate: u32, channels: u32, bits: u32, h: *mut u32) -> u32;
+    #[link_name = "RS2API.302"]
+    fn Rs2AudioWrite(h: u32, data: *const u8, cb: u32) -> u32;
+    #[link_name = "RS2API.303"]
+    fn Rs2AudioQueryPos(h: u32, bytes: *mut u32) -> u32;
+}
+
+// ---- The PC speaker ----
+
+/// The speaker's frequency (0 = silent), set by the machine's thread.
+static SPEAKER_HZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+/// 0 not started, 1 playing, 2 no audio.
+static SPEAKER_STATE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+const RATE: u32 = 22050;
+
+/// The speaker thread: a square wave at the current frequency, kept
+/// about 60 ms ahead of what has been played.
+unsafe extern "C" fn speaker_thread(h: u32) {
+    use core::sync::atomic::Ordering;
+    let mut phase = 0u32;
+    let mut written = 0u32;
+    let mut buf = [0x80u8; 441];
+    loop {
+        let mut played = 0;
+        unsafe { Rs2AudioQueryPos(h, &mut played) };
+        if written.wrapping_sub(played) > RATE * 60 / 1000 {
+            unsafe { DosSleep(10) };
+            continue;
+        }
+        let hz = SPEAKER_HZ.load(Ordering::Relaxed);
+        for b in buf.iter_mut() {
+            *b = if hz == 0 {
+                0x80
+            } else {
+                phase = phase.wrapping_add(hz * 2);
+                if (phase / RATE) % 2 == 0 { 0xa0 } else { 0x60 }
+            };
+        }
+        if unsafe { Rs2AudioWrite(h, buf.as_ptr(), buf.len() as u32) } != 0 {
+            return;
+        }
+        written = written.wrapping_add(buf.len() as u32);
+    }
+}
+
+fn speaker(hz: Option<u32>) {
+    use core::sync::atomic::Ordering;
+    SPEAKER_HZ.store(hz.unwrap_or(0), Ordering::Relaxed);
+    if hz.is_some() && SPEAKER_STATE.load(Ordering::Relaxed) == 0 {
+        let mut h = 0;
+        if unsafe { Rs2AudioOpen(RATE, 1, 8, &mut h) } != 0 {
+            SPEAKER_STATE.store(2, Ordering::Relaxed);
+            return;
+        }
+        let mut tid = 0;
+        unsafe { DosCreateThread(&mut tid, speaker_thread, h, 0, 16384) };
+        SPEAKER_STATE.store(1, Ordering::Relaxed);
+    }
 }
 
 #[repr(C)]
@@ -387,6 +446,9 @@ impl Host for Os2Host {
     fn log(&mut self, msg: &str) {
         trace(msg);
     }
+    fn speaker(&mut self, hz: Option<u32>) {
+        speaker(hz);
+    }
     fn font(&mut self, height: u8) -> Option<Vec<u8>> {
         let mut f = vec![0u8; 256 * height as usize];
         let rc = unsafe { Rs2VioQueryFont(0, height as u32, f.as_mut_ptr(), f.len() as u32) };
@@ -467,7 +529,9 @@ fn main(s: &os2::Startup) -> u32 {
         unsafe { DosSleep(3000) };
         return 1;
     }
+    let t0 = host.micros();
     let code = m.run(&mut host);
-    trace(&alloc::format!("vdm: {prog} ended with {code}"));
+    let us = host.micros().saturating_sub(t0).max(1);
+    trace(&alloc::format!("vdm: {prog} ended with {code}: {} instructions in {} ms ({} MIPS)", m.cpu.icount, us / 1000, m.cpu.icount / us));
     code as u32
 }
