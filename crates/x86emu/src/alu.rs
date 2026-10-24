@@ -32,25 +32,29 @@ pub(crate) const fn sext(v: u32, sz: u8) -> u32 {
     }
 }
 
-#[inline]
-fn parity(v: u32) -> bool {
-    (v as u8).count_ones() & 1 == 0
+/// PF for each byte value (i686 has no POPCNT to count bits fast).
+static PARITY: [u8; 256] = {
+    let mut t = [0u8; 256];
+    let mut i = 0;
+    while i < 256 {
+        t[i] = if (i as u8).count_ones() & 1 == 0 { PF as u8 } else { 0 };
+        i += 1;
+    }
+    t
+};
+
+/// SF, ZF and PF of result `r` of size `sz`.
+#[inline(always)]
+fn szp(r: u32, sz: u8) -> u32 {
+    let bits = sz as u32 * 8;
+    let sf = (r >> (bits - 1)) & 1;
+    PARITY[(r & 0xff) as usize] as u32 | ((r & mask(sz) == 0) as u32) << 6 | sf << 7
 }
 
 impl Cpu {
-    #[inline]
+    #[inline(always)]
     pub(crate) fn set_szp(&mut self, r: u32, sz: u8) {
-        let mut f = self.flags & !(ZF | SF | PF);
-        if r & mask(sz) == 0 {
-            f |= ZF;
-        }
-        if r & sign(sz) != 0 {
-            f |= SF;
-        }
-        if parity(r) {
-            f |= PF;
-        }
-        self.flags = f;
+        self.flags = (self.flags & !(ZF | SF | PF)) | szp(r, sz);
     }
 
     #[inline]
@@ -63,9 +67,11 @@ impl Cpu {
         let m = mask(sz);
         let wide = a as u64 + b as u64 + c as u64;
         let r = wide as u32 & m;
-        self.set_szp(r, sz);
-        self.set_cf_of(wide > m as u64, (a ^ r) & (b ^ r) & sign(sz) != 0);
-        self.set_flag(AF, (a ^ b ^ r) & 0x10 != 0);
+        let bits = sz as u32 * 8;
+        let cf = (wide > m as u64) as u32;
+        let of = (((a ^ r) & (b ^ r)) >> (bits - 1)) & 1;
+        let af = (a ^ b ^ r) & AF;
+        self.flags = (self.flags & !ARITH) | szp(r, sz) | cf | af | of << 11;
         r
     }
 
@@ -73,17 +79,18 @@ impl Cpu {
     pub(crate) fn sub(&mut self, a: u32, b: u32, c: u32, sz: u8) -> u32 {
         let m = mask(sz);
         let r = a.wrapping_sub(b).wrapping_sub(c) & m;
-        self.set_szp(r, sz);
-        self.set_cf_of((b as u64 + c as u64) > a as u64, (a ^ b) & (a ^ r) & sign(sz) != 0);
-        self.set_flag(AF, (a ^ b ^ r) & 0x10 != 0);
+        let bits = sz as u32 * 8;
+        let cf = ((b as u64 + c as u64) > a as u64) as u32;
+        let of = (((a ^ b) & (a ^ r)) >> (bits - 1)) & 1;
+        let af = (a ^ b ^ r) & AF;
+        self.flags = (self.flags & !ARITH) | szp(r, sz) | cf | af | of << 11;
         r
     }
 
     #[inline]
     pub(crate) fn logic(&mut self, r: u32, sz: u8) -> u32 {
         let r = r & mask(sz);
-        self.set_szp(r, sz);
-        self.flags &= !(CF | OF | AF);
+        self.flags = (self.flags & !ARITH) | szp(r, sz);
         r
     }
 
