@@ -16,6 +16,9 @@
 use alloc::collections::{BTreeMap, VecDeque};
 use alloc::vec::Vec;
 
+/// The event semaphore RESCUE.EXE waits on for Ctrl+Alt+W.
+const RESCUE_SEM: &str = "\\SEM32\\RS2\\RESCUE";
+
 use crate::arch::{inb, outb};
 use crate::kbd::{self, shift, KeyInfo};
 use crate::sync::SpinLock;
@@ -379,6 +382,11 @@ pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
         // Ctrl+Alt+F12: thread dump on the serial port (debug.rs).
         if k.scan == 0x58 && ctrl && alt {
             crate::debug::dump_threads();
+            return;
+        }
+        // Ctrl+Alt+W: the rescue screen (OS2\RESCUE.EXE waits on its
+        // semaphore), whatever the foreground is doing.
+        if k.scan == 0x11 && ctrl && alt && crate::api::sem::post_named(RESCUE_SEM) {
             return;
         }
         // In the PM session Ctrl+Esc is PM's (its window list).

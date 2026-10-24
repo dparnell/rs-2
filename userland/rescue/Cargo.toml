@@ -1,0 +1,13 @@
+[package]
+name = "rescue"
+description = "OS2\\RESCUE.EXE: Ctrl+Alt+W shows the running processes on a text screen, whatever PM is doing, to end the one that hangs or save a report"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rescue"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

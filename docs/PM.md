@@ -80,8 +80,11 @@ rs2's own DLLs (applications never import it):
 - `Rs2SetDisplayMode(cx, cy)` (23): switch the resolution under PM
   ((0, 0): the display's preferred size); ERROR_NOT_SUPPORTED without a
   driver that can.
+- `Rs2QueryProcesses(pBuf, cb)` (24), `Rs2QueryThreadReport(pBuf, cb)`
+  (25), `Rs2KillProcess(pid)` (26): for the rescue screen (see
+  [Programs that stop responding](#programs-that-stop-responding)).
 
-RS2API ordinals: 1-7 and 20-23 PM (above), 10-16 windowed VIO sessions
+RS2API ordinals: 1-7 and 20-26 PM (above), 10-16 windowed VIO sessions
 (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)), 100
 performance counters, 200-221 sockets (docs/NETWORK.md).
 
@@ -371,6 +374,27 @@ When the thread reads its queue again the mark goes, the title bars
 repaint, and the program catches up with its queued input and paints.
 Keys typed meanwhile went to the window that had the focus when they were
 typed, also if that was the stopped program's.
+
+**The rescue screen (Ctrl+Alt+W).** For when the window list cannot help
+(the desktop itself stuck, or PM's lock held so nothing in PM moves), in
+the spirit of OS/2's WatchCat. `OS2\RESCUE.EXE` (userland/rescue), started
+detached by `RUN=` in CONFIG.SYS, waits on the event semaphore
+`\SEM32\RS2\RESCUE`; the kernel posts it when Ctrl+Alt+W is pressed,
+before the key would go to PM. It shows a text pop-up (VioPopUp) over
+whatever is on the screen:
+
+- the processes (`Rs2QueryProcesses`: pid, parent, threads, P for PM
+  programs, L for the holder of `\SEM32\PMWIN\LOCK`); a process that
+  keeps PM's lock all through half a second is named at the top, since
+  everything in PM waits for it;
+- E ends the chosen process after Y (`Rs2KillProcess`: any process, not
+  only a descendant). Ending PMSHELL restarts the desktop (the kernel
+  starts PROTSHELL again); ending the lock's holder frees PM (the next
+  thread gets ERROR_SEM_OWNER_DIED and carries on);
+- S appends a report to `RS2HANG.TXT` on the boot drive: the processes
+  and every thread's state and kernel stack (`Rs2QueryThreadReport`, what
+  Ctrl+Alt+F12 writes on the serial port);
+- F5 refreshes, Esc ends the pop-up and PM repaints.
 
 ## The switch list
 

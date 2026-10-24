@@ -136,7 +136,8 @@ fn kept(dest: &str) -> bool {
 }
 
 /// CONFIG.SYS with what `new` adds to `old`: SET variables `old` does not
-/// set, and the entries of its path lists that `old`'s lines lack.
+/// set, the entries of its path lists that `old`'s lines lack, and RUN=
+/// programs `old` does not start.
 /// Returns the text and what was added.
 pub fn merge_config(old: &[u8], new: &[u8]) -> (Vec<u8>, Vec<String>) {
     let text = |b: &[u8]| -> Vec<String> { b.split(|&c| c == b'\n').map(|l| l.iter().map(|&c| c as char).collect::<String>().trim_end_matches('\r').to_string()).collect() };
@@ -154,7 +155,20 @@ pub fn merge_config(old: &[u8], new: &[u8]) -> (Vec<u8>, Vec<String>) {
         lines.pop();
     }
     let mut notes = Vec::new();
+    // RUN= programs (the rescue screen's RESCUE.EXE) the old file lacks.
+    let run = |l: &str| -> Option<String> {
+        let u = l.trim().to_ascii_uppercase();
+        let v = u.strip_prefix("RUN")?.trim_start().strip_prefix('=')?;
+        Some(v.split_whitespace().next()?.to_string())
+    };
     for nl in text(new) {
+        if let Some(prog) = run(&nl) {
+            if !lines.iter().any(|l| run(l).as_deref() == Some(prog.as_str())) {
+                notes.push(alloc::format!("added {}", nl.trim()));
+                lines.push(nl.trim().to_string());
+            }
+            continue;
+        }
         let Some(k) = key(&nl) else { continue };
         let value = nl.split_once('=').map_or("", |x| x.1).trim().to_string();
         match lines.iter().position(|l| key(l).as_deref() == Some(k.as_str())) {

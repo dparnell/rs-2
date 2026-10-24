@@ -197,7 +197,9 @@ lines, details columns), sort order, what a folder
 includes and backgrounds; icons drag (Ctrl copies, Ctrl+Shift makes a
 shadow) and keep their places; copies and moves show their progress
 and ask when a name is taken; F2 renames, F5 refreshes, Delete
-deletes. Ctrl+Esc shows the window list. Shut
+deletes. Ctrl+Esc shows the window list; if the desktop stops
+responding, Ctrl+Alt+W shows the rescue screen, which ends the stuck
+program (or restarts the desktop) and saves a report to C:\RS2HANG.TXT. Shut
 Down closes the programs (they may ask about unsaved work), flushes
 the disks and turns the machine off. Details: [docs/WPS.md](docs/WPS.md).
 RS2SHELL (`C:\OS2\RS2SHELL.EXE`), rs2's earlier desktop, is still there:

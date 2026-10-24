@@ -907,6 +907,22 @@ pub fn dos16_close_sem(c: &mut Ctx) -> u32 {
 // ---- Hooks for timers (no calling process) ----
 
 /// Post a 32-bit event semaphore by handle.
+/// Post the named event semaphore `name` (upper case) if it exists.
+pub fn post_named(name: &str) -> bool {
+    let Some((h, _)) = find_named(name) else { return false };
+    post_event_handle(h);
+    true
+}
+
+/// The owner (pid, tid) of the named mutex semaphore `name`, if owned.
+pub fn mutex_owner(name: &str) -> Option<(u32, u32)> {
+    let (_, s) = find_named(name)?;
+    match &*s.kind.lock() {
+        Kind::Mutex { owner, .. } => *owner,
+        _ => None,
+    }
+}
+
 pub fn post_event_handle(h: u32) {
     let Some(s) = TABLE.lock().sems.get(&h).cloned() else { return };
     if let Kind::Event { posts } = &mut *s.kind.lock() {

@@ -13,6 +13,8 @@ SET COMSPEC=C:\OS2\CMD.EXE
 SET OS2_SHELL=C:\OS2\CMD.EXE
 REM PM: milliseconds before a program that does not take its input is "not responding"
 SET PM_HANGTIME=2000
+REM Ctrl+Alt+W: the rescue screen (end a process that hangs, save a report).
+RUN=C:\OS2\RESCUE.EXE
 REM The shell: the desktop (Presentation Manager with the Workplace Shell).
 REM For the text-mode command prompt instead, put REM before the first
 REM PROTSHELL line and remove it from the second. Pressing T while the boot

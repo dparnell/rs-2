@@ -48,8 +48,25 @@ pub fn dump_cpu(f: &crate::arch::idt::TrapFrame) {
 
 /// Print all threads (from the keyboard interrupt); every CPU, this one
 /// included, then reports where it was through an IPI.
+/// Ctrl+Alt+F12: the thread report on the serial port.
 pub fn dump_threads() {
-    crate::trace!("---- threads (Ctrl+Alt+F12) ----");
+    thread_report();
+}
+
+/// Every thread's state, priority and where it is (kernel return
+/// addresses for those not running), on the serial port and as text
+/// (Rs2QueryThreadReport, the rescue screen's report).
+pub fn thread_report() -> alloc::string::String {
+    let mut out = alloc::string::String::new();
+    macro_rules! emit {
+        ($($a:tt)*) => {{
+            let s = alloc::format!($($a)*);
+            crate::trace!("{}", s);
+            out.push_str(&s);
+            out.push('\n');
+        }};
+    }
+    emit!("---- threads (Ctrl+Alt+F12) ----");
     let mut v = alloc::string::String::new();
     for i in crate::msi::FIRST..=crate::msi::LAST {
         let n = crate::msi::count(i);
@@ -58,21 +75,21 @@ pub fn dump_threads() {
         }
     }
     let (slept, polled) = crate::msi::waits();
-    crate::trace!("msi counts:{v}; waits that timed out (missed): {}; waits slept {slept}, polled {polled}", crate::msi::missed());
+    emit!("msi counts:{v}; waits that timed out (missed): {}; waits slept {slept}, polled {polled}", crate::msi::missed());
     let Some(procs) = crate::task::process::try_all() else {
-        crate::trace!("process list busy");
+        emit!("process list busy");
         crate::smp::dump_all();
-        return;
+        return out;
     };
     for p in procs {
         let Some(threads) = p.threads.try_lock().map(|g| g.clone()) else {
-            crate::trace!("pid {}: thread list busy", p.pid);
+            emit!("pid {}: thread list busy", p.pid);
             continue;
         };
         for t in threads {
             let state = t.state();
             let f = t.user_frame();
-            crate::trace!(
+            emit!(
                 "pid {} tid {} id {} {:?} prio {:#x} on_cpu {} user {:04x}:{:08x}",
                 p.pid,
                 t.tid,
@@ -93,9 +110,10 @@ pub fn dump_threads() {
             if !(top - 0x10_0000..top).contains(&sp) {
                 continue;
             }
-            crate::trace!("    kernel:{}", stack_line(sp, top));
+            emit!("    kernel:{}", stack_line(sp, top));
         }
     }
-    crate::trace!("---- CPUs ----");
+    emit!("---- CPUs ----");
     crate::smp::dump_all();
+    out
 }

@@ -140,6 +140,53 @@ pub fn rs2_update_display(c: &mut Ctx) -> u32 {
     0
 }
 
+/// Rs2QueryProcesses(pBuf, cbBuf) (24): the processes as text, a line
+/// each: "pid ppid threads flags name", flags P (a PM program) and L
+/// (holds PM's lock); the bytes written (the whole list if it fits,
+/// else as many whole lines as fit).
+pub fn rs2_query_processes(c: &mut Ctx) -> u32 {
+    let (buf, cb) = (c.arg(0), c.arg(1) as usize);
+    let lock = super::sem::mutex_owner("\\SEM32\\PMWIN\\LOCK").map(|(p, _)| p);
+    let mut out = alloc::string::String::new();
+    for p in crate::task::process::all() {
+        let n = p.threads.lock().len();
+        let flags = alloc::format!("{}{}", if crate::display::is_pm(p.pid) { "P" } else { "-" }, if lock == Some(p.pid) { "L" } else { "-" });
+        let line = alloc::format!("{} {} {} {} {}\n", p.pid, p.ppid, n, flags, p.exe.name);
+        if out.len() + line.len() > cb {
+            break;
+        }
+        out.push_str(&line);
+    }
+    if !c.write(buf, out.as_bytes()) {
+        return 0;
+    }
+    out.len() as u32
+}
+
+/// Rs2KillProcess(pid) (26): end any process (not only a descendant,
+/// as DosKillProcess): the rescue screen's way out of a hang.
+pub fn rs2_kill_process(c: &mut Ctx) -> u32 {
+    let Some(p) = crate::task::process::by_pid(c.arg(0)) else { return err::INVALID_PROCID };
+    if p.exit_info().is_some() || p.pid == c.process.pid {
+        return err::INVALID_PROCID;
+    }
+    crate::trace!("rescue: process {} ({}) ended by process {}", p.pid, p.exe.name, c.process.pid);
+    p.exit(3, 0); // TC_KILLPROCESS
+    0
+}
+
+/// Rs2QueryThreadReport(pBuf, cbBuf) (25): what Ctrl+Alt+F12 writes on
+/// the serial port, as text (cut at `cbBuf`); the bytes written.
+pub fn rs2_query_thread_report(c: &mut Ctx) -> u32 {
+    let (buf, cb) = (c.arg(0), c.arg(1) as usize);
+    let r = crate::debug::thread_report();
+    let n = r.len().min(cb);
+    if !c.write(buf, &r.as_bytes()[..n]) {
+        return 0;
+    }
+    n as u32
+}
+
 /// Rs2DebugTrace(psz): a line on the serial port (debugging aid for rs2's
 /// own DLLs).
 pub fn rs2_debug_trace(c: &mut Ctx) -> u32 {

@@ -562,6 +562,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmviowin", "OS2\\PMVIOWIN.EXE"),
         ("rs2shell", "OS2\\RS2SHELL.EXE"),
         ("pmshell", "OS2\\PMSHELL.EXE"),
+        ("rescue", "OS2\\RESCUE.EXE"),
         ("e", "OS2\\E.EXE"),
         ("pmctls", "OS2\\DLL\\PMCTLS.DLL"),
         ("helpmgr", "OS2\\DLL\\HELPMGR.DLL"),
