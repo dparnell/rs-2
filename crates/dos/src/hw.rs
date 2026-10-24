@@ -44,6 +44,9 @@ pub struct Hw {
     pub speaker_changed: bool,
     /// Ports 3F8h etc.: reads give "no UART".
     pub com_present: bool,
+    /// In DPMI protected mode: hardware interrupts come as vectors from
+    /// this base (IRQ 0-15), not the PIC's real-mode ones.
+    pub irq_remap: Option<u8>,
 }
 
 impl Hw {
@@ -67,6 +70,7 @@ impl Hw {
             unknown_ports: Vec::new(),
             speaker_changed: false,
             com_present: false,
+            irq_remap: None,
         }
     }
 
@@ -360,6 +364,15 @@ impl x86emu::Bus for Hw {
         self.pic.pending()
     }
     fn irq_ack(&mut self) -> Option<u8> {
-        self.pic.ack()
+        let v = self.pic.ack()?;
+        let Some(base) = self.irq_remap else { return Some(v) };
+        let (mb, sb) = (self.pic.m.base, self.pic.s.base);
+        Some(if (mb..mb + 8).contains(&v) {
+            base + (v - mb)
+        } else if (sb..sb + 8).contains(&v) {
+            base + 8 + (v - sb)
+        } else {
+            v
+        })
     }
 }

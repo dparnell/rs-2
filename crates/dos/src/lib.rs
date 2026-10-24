@@ -150,6 +150,7 @@ impl Machine {
         m.dos_init(host);
         m.xms_init();
         m.ems_init();
+        m.dpmi_rom_init();
         m
     }
 
