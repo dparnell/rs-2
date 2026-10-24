@@ -1,0 +1,9 @@
+[package]
+name = "x86emu"
+description = "no_std x86 CPU emulator: 8086-80486 real and protected mode, for DOS sessions"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+libm = "0.2"
