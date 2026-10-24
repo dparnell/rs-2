@@ -2027,9 +2027,10 @@ described in [formats/ipf-structures.md](formats/ipf-structures.md),
   is done, so a request from an application's menu leaves it active.
 
 **The help window** is a frame on the right of the screen titled with the
-help window title and the panel's: the panel (laid out by `crates/ipf`
-for the window's width and laid out again when it changes), a vertical
-scroll bar, and Previous, Search..., Index and Contents push buttons.
+help window title and the panel's: IBM's menu bar, the panel (laid out
+by `crates/ipf` for the window's width and laid out again when it
+changes), a vertical scroll bar, and Previous, Search..., Index and
+Contents push buttons.
 Panels draw in the fonts of the file's font table (below), styles as
 logical fonts' fsSelection (real italic, bold, underscore), colours of
 `:hp4.`/`:color.` and links in SYSCLR_HELPHILITE;
@@ -2047,6 +2048,30 @@ level), Index (level-2 entries indented as IBM's) and Search (the panels
 having every word typed, from the file's search table) are lists in the
 same window; Enter or a double click opens the panel. `:hide.` text shows
 when IPF_KEYS has its key.
+
+**The menu bar** is IBM's (HPMGRMRI.DLL's menu 101 for help windows, 102
+for books, with their keys; `userland/helpmgr/src/services.rs`):
+Services has Search, Print (disabled: no printers), Bookmark (books),
+New window (the panel in a window of its own), Copy (the panel's text
+to the clipboard, words placed by columns as IBM's LoadMarkedText),
+Copy to file and Append to file (`text.tmp` in the current directory,
+IBM's WriteToFile) and Exit (books, F3); Options expands and collapses
+the contents (entries with entries under them show `+` or `-`), and
+has Contents, Index (books), Viewed pages (the last 50 panels, the last
+first, as IBM's AddToHistory), Libraries and Previous; Help has Help
+index, General help (HM_EXT_HELP), Using help, Keys help (HM_KEYS_HELP)
+and, for books, Product information. **Libraries** lists the
+directories of HELP (help) or BOOKSHELF (books) as IBM's
+BuildLibraryListItem; the ones marked (multiple selection) are searched
+too: Search opens their `.HLP` (books: `.INF`) files and lists the
+panels there with the rest. **Bookmarks** (books, Ctrl+B) are IBM's
+Bookmark dialog (dialog 20001: Place with a name, the panel's title to
+start with; View, Remove, Remove all with a confirmation); they are
+kept beside the book in `NAME.cp` (in the first directory of BOOKMARK
+when it is set), in IBM's format (IOSaveCPBookMark: a 14-byte header with
+the list's offset and count, then each mark's TOC index, the length and
+the name), read when the book is opened and the file deleted when the
+last mark goes.
 
 **Fonts.** A `:font.` selects an entry of the file's font table (face,
 point height and width); dynamic data adds its own (`DdfSetFont`,
@@ -2135,8 +2160,9 @@ their own when less than 64 KB of the caller's is left (VIEWDOC's
 stack is 8 KB). HELPMGR's other unpublished ordinals (38-44: MscCleanUp
 and path helpers) are not there; nothing on the media imports them.
 
-Not done: the Print button, the help window's menu (Services,
-Options), bookmarks and the library list, metafiles of dynamic data,
+Not done: printing, the Search dialog's scopes (rs2 searches every
+section of the open libraries and of the marked ones), metafiles of
+dynamic data,
 the viewport style word (title bar, scroll bars, rules: viewports always
 have a title bar and a vertical scroll bar), HMQW_INDEX/TOC/SEARCH/
 VIEWPAGES/LIBRARY, and the panel placement of HM_DISPLAY_HELP and

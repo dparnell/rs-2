@@ -24,6 +24,7 @@ mod help16;
 mod library;
 mod pm;
 mod render;
+mod services;
 mod stack;
 mod viewapi;
 mod window;
@@ -155,6 +156,8 @@ pub struct Instance {
     /// What window word 0 points at, as in IBM's instance structure:
     /// the help window's frame at +0x26.
     pub compat: Box<[u8; 0x40]>,
+    /// A book's bookmarks (the library each is in).
+    pub marks: Vec<(usize, services::Mark)>,
 }
 
 struct Registry(core::cell::UnsafeCell<Vec<*mut Instance>>);
@@ -274,7 +277,14 @@ pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: 
         book,
         owner: 0,
         compat: Box::new([0; 0x40]),
+        marks: Vec::new(),
     }));
+    if book {
+        let inst = unsafe { &mut *inst };
+        for (i, l) in inst.libs.iter().enumerate() {
+            inst.marks.extend(services::load_marks(&l.path).into_iter().map(|m| (i, m)));
+        }
+    }
     unsafe { WinSetWindowULong(h, QWL_USER, (*inst).compat.as_ptr() as u32) };
     let first = instances().is_empty();
     instances().push(inst);

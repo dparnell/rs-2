@@ -16,6 +16,9 @@ pub struct Library {
     pub path: Vec<u8>,
     /// First TOC index of this file in the instance's numbering.
     pub base: u32,
+    /// Opened for a search of the library list (Libraries), not one of
+    /// the instance's own.
+    pub extra: bool,
 }
 
 impl Library {
@@ -104,7 +107,7 @@ pub fn open(name: &[u8], book: bool) -> Result<Library, u32> {
         let raw = data as *mut [u8];
         match ipf::Doc::parse(data) {
             Ok(doc) if book || doc.is_help() || doc.header.kind == ipf::KIND_BOOK => {
-                return Ok(Library { doc: ManuallyDrop::new(doc), data: raw, path, base: 0 });
+                return Ok(Library { doc: ManuallyDrop::new(doc), data: raw, path, base: 0, extra: false });
             }
             _ => {
                 unsafe { drop(Box::from_raw(raw)) };
