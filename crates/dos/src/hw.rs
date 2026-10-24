@@ -90,6 +90,9 @@ impl Hw {
 
     #[inline]
     pub fn rd(&mut self, a: u32) -> u8 {
+        if a < 0xa0000 {
+            return self.ram[a as usize];
+        }
         let a = self.wrap(a);
         if a < 0xa0000 {
             return self.ram[a as usize];
@@ -113,6 +116,10 @@ impl Hw {
 
     #[inline]
     pub fn wr(&mut self, a: u32, v: u8) {
+        if a < 0xa0000 {
+            self.ram[a as usize] = v;
+            return;
+        }
         let a = self.wrap(a);
         if a < 0xa0000 {
             self.ram[a as usize] = v;

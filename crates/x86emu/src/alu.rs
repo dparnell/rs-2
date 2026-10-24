@@ -58,6 +58,7 @@ impl Cpu {
         self.flags = (self.flags & !(CF | OF)) | if cf { CF } else { 0 } | if of { OF } else { 0 };
     }
 
+    #[inline]
     pub(crate) fn add(&mut self, a: u32, b: u32, c: u32, sz: u8) -> u32 {
         let m = mask(sz);
         let wide = a as u64 + b as u64 + c as u64;
@@ -68,6 +69,7 @@ impl Cpu {
         r
     }
 
+    #[inline]
     pub(crate) fn sub(&mut self, a: u32, b: u32, c: u32, sz: u8) -> u32 {
         let m = mask(sz);
         let r = a.wrapping_sub(b).wrapping_sub(c) & m;
@@ -77,6 +79,7 @@ impl Cpu {
         r
     }
 
+    #[inline]
     pub(crate) fn logic(&mut self, r: u32, sz: u8) -> u32 {
         let r = r & mask(sz);
         self.set_szp(r, sz);
@@ -86,6 +89,7 @@ impl Cpu {
 
     /// ALU operation 0-7 (ADD OR ADC SBB AND SUB XOR CMP); CMP returns
     /// `a` unchanged.
+    #[inline]
     pub(crate) fn alu(&mut self, op: u8, a: u32, b: u32, sz: u8) -> u32 {
         match op {
             0 => self.add(a, b, 0, sz),

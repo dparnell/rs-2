@@ -118,7 +118,11 @@ impl Pic {
         }
     }
 
+    #[inline]
     pub fn pending(&self) -> bool {
+        if self.m.irr & !self.m.imr == 0 {
+            return false;
+        }
         match self.m.pending() {
             Some(2) => self.s.pending().is_some(),
             Some(_) => true,

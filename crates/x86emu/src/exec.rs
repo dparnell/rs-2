@@ -31,7 +31,7 @@ pub(crate) enum Rm {
 impl Cpu {
     // ---- Fetching ----
 
-    #[inline]
+    #[inline(always)]
     fn f8<B: Bus>(&mut self, b: &mut B) -> R<u8> {
         let cs = &self.seg[CS];
         if self.eip > cs.limit {
@@ -42,7 +42,7 @@ impl Cpu {
         Ok(v)
     }
 
-    #[inline]
+    #[inline(always)]
     fn f16<B: Bus>(&mut self, b: &mut B) -> R<u16> {
         let cs = &self.seg[CS];
         if self.eip.wrapping_add(1) > cs.limit || self.eip == u32::MAX {
@@ -53,7 +53,7 @@ impl Cpu {
         Ok(v)
     }
 
-    #[inline]
+    #[inline(always)]
     fn f32<B: Bus>(&mut self, b: &mut B) -> R<u32> {
         let cs = &self.seg[CS];
         if self.eip.wrapping_add(3) > cs.limit || self.eip > u32::MAX - 3 {
@@ -65,7 +65,7 @@ impl Cpu {
     }
 
     /// An immediate of size `sz`.
-    #[inline]
+    #[inline(always)]
     fn imm<B: Bus>(&mut self, b: &mut B, sz: u8) -> R<u32> {
         match sz {
             1 => self.f8(b).map(|v| v as u32),
@@ -143,7 +143,7 @@ impl Cpu {
 
     // ---- Operands ----
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn getr(&self, r: u8, sz: u8) -> u32 {
         match sz {
             1 => {
@@ -158,7 +158,7 @@ impl Cpu {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     pub(crate) fn setr(&mut self, r: u8, sz: u8, v: u32) {
         match sz {
             1 => {
@@ -178,7 +178,7 @@ impl Cpu {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn get<B: Bus>(&mut self, b: &mut B, rm: Rm, sz: u8) -> R<u32> {
         match rm {
             Rm::Reg(r) => Ok(self.getr(r, sz)),
@@ -186,7 +186,7 @@ impl Cpu {
         }
     }
 
-    #[inline]
+    #[inline(always)]
     fn set<B: Bus>(&mut self, b: &mut B, rm: Rm, sz: u8, v: u32) -> R<()> {
         match rm {
             Rm::Reg(r) => {
@@ -199,7 +199,7 @@ impl Cpu {
 
     /// Check a read-modify-write memory operand is writable before the
     /// read (so a fault leaves nothing half done).
-    #[inline]
+    #[inline(always)]
     fn check_w(&self, rm: Rm, sz: u8) -> R<()> {
         if let Rm::Mem(s, o) = rm {
             self.addr(s, o, sz as u32, true)?;
