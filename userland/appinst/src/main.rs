@@ -77,6 +77,8 @@ struct Job {
     files: Vec<(&'static [u8], &'static [u8], &'static [u8])>,
     /// Whether `\OS2\APPS` must be on PATH and LIBPATH.
     apps_dir: bool,
+    /// .INI settings to write afterwards (file, section, key, value).
+    inis: Vec<(&'static [u8], &'static [u8], &'static [u8], &'static [u8])>,
     current: Vec<u8>,
     errors: Vec<Vec<u8>>,
     config_changed: bool,
@@ -312,6 +314,7 @@ fn start(a: &mut App) {
     }
     let mut files: Vec<(&'static [u8], &'static [u8], &'static [u8])> = Vec::new();
     let mut apps_dir = false;
+    let mut inis = Vec::new();
     for (c, cat) in a.cats.iter().enumerate() {
         for (i, ap) in cat.apps.iter().enumerate() {
             if !a.tree.checked[c][i] {
@@ -323,6 +326,7 @@ fn start(a: &mut App) {
                 }
                 apps_dir |= f.target.len() > 10 && f.target[..10].eq_ignore_ascii_case(b"\\OS2\\APPS\\");
             }
+            inis.extend(ap.inis.iter().map(|i| (i.file, i.section, i.key, i.value)));
         }
     }
     // One packed file after the other: each is read once.
@@ -330,7 +334,7 @@ fn start(a: &mut App) {
     let total = files.len() as u32;
     unsafe {
         *core::ptr::addr_of_mut!(JOB) =
-            Some(Job { client: a.client, cd, target: a.target, files, apps_dir, current: Vec::new(), errors: Vec::new(), config_changed: false });
+            Some(Job { client: a.client, cd, target: a.target, files, apps_dir, inis, current: Vec::new(), errors: Vec::new(), config_changed: false });
     }
     a.busy = true;
     a.progress = (0, total);
@@ -359,6 +363,13 @@ unsafe extern "C" fn worker(_: u32) {
             let mut s = target.to_vec();
             s.push(b' ');
             s.extend_from_slice(&e);
+            j.errors.push(s);
+        }
+    }
+    for &(file, section, key, value) in &j.inis {
+        if !media::set_ini(&media::on(j.target, file), section, key, value) {
+            let mut s = file.to_vec();
+            s.extend_from_slice(b" could not be updated");
             j.errors.push(s);
         }
     }

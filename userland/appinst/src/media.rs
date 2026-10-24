@@ -208,3 +208,55 @@ pub fn add_to_paths(d: u8, dir: &[u8]) -> bool {
     }
     false
 }
+
+/// Set `key=value` in section `[section]` of the Windows-style .INI file
+/// `path` (keys and sections compare case-insensitively; a missing key
+/// goes at the end of its section, a missing section at the end of the
+/// file). False when the file cannot be read or written.
+pub fn set_ini(path: &[u8], section: &[u8], key: &[u8], value: &[u8]) -> bool {
+    let Some(text) = read_file(path) else { return false };
+    let mut lines: Vec<Vec<u8>> = text.split(|&c| c == b'\n').map(|l| l.strip_suffix(b"\r").unwrap_or(l).to_vec()).collect();
+    if lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    let mut entry = key.to_vec();
+    entry.push(b'=');
+    entry.extend_from_slice(value);
+    let header = |l: &[u8]| l.first() == Some(&b'[');
+    let start = lines.iter().position(|l| l.len() > section.len() + 1 && header(l) && l[1..=section.len()].eq_ignore_ascii_case(section) && l[section.len() + 1] == b']');
+    match start {
+        None => {
+            let mut h = b"[".to_vec();
+            h.extend_from_slice(section);
+            h.push(b']');
+            lines.push(Vec::new());
+            lines.push(h);
+            lines.push(entry);
+        }
+        Some(s) => {
+            let end = lines[s + 1..].iter().position(|l| header(l)).map_or(lines.len(), |i| s + 1 + i);
+            let found = lines[s + 1..end].iter().position(|l| {
+                let k = l.split(|&c| c == b'=').next().unwrap_or(b"");
+                l.contains(&b'=') && k.trim_ascii().eq_ignore_ascii_case(key)
+            });
+            match found {
+                Some(i) => lines[s + 1 + i] = entry,
+                None => {
+                    // After the section's last non-empty line.
+                    let mut at = end;
+                    while at > s + 1 && lines[at - 1].is_empty() {
+                        at -= 1;
+                    }
+                    lines.insert(at, entry);
+                }
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(text.len() + 64);
+    for l in &lines {
+        out.extend_from_slice(l);
+        out.extend_from_slice(b"\r\n");
+    }
+    let f = Unpacked { data: out, date: 0, time: 0, attributes: 0, eas: None };
+    write(path, &f).is_ok()
+}
