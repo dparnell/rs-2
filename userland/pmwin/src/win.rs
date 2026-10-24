@@ -308,6 +308,13 @@ pub extern "C" fn WinCreateWindow(
             unsafe { ((p.add(2) as *const u32).read_unaligned(), (p.add(6) as *const u16).read_unaligned() as u32) }
         };
         let h = frame::create_class(&class, parent, style, fcf, &cstr(name), pos, owner, id, hmod, ctl);
+        // FCF_SHELLPOSITION in the frame data, as from WinCreateStdWindow:
+        // a frame made without a size gets the shell's position when shown.
+        if h != 0 && fcf & FCF_SHELLPOSITION != 0 && cx == 0 && cy == 0 {
+            if let Some(f) = st().frames.get_mut(&h) {
+                f.shell_pos = true;
+            }
+        }
         if h != 0 && style & ws::VISIBLE != 0 {
             show(h, true);
         }

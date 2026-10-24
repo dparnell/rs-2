@@ -14,6 +14,8 @@ use crate::util::*;
 use crate::wps::{self, Impl, Rec};
 
 unsafe extern "C" {
+    #[link_name = "PMSHAPI.120"]
+    fn WinAddSwitchEntry(sw: *const u8) -> u32;
     #[link_name = "PMWIN.828"]
     fn WinQuerySysPointer(desk: u32, id: i32, copy: u32) -> u32;
     #[link_name = "PMWIN.780"]
@@ -61,6 +63,8 @@ pub struct Data {
     pub help_panel: u32,
     /// CCVIEW_DEFAULT (the System object's choice), CCVIEW_ON, CCVIEW_OFF.
     pub ccview: u32,
+    /// The object's use list (IBM's USEITEMs: memory, open views).
+    pub use_list: usize,
 }
 
 pub const CCVIEW_DEFAULT: u32 = 0;
@@ -247,6 +251,150 @@ extern "C" fn wpQueryConcurrentView(obj: usize) -> u32 {
 extern "C" fn wpSetConcurrentView(obj: usize, v: u32) -> u32 {
     d(obj).ccview = v;
     changed(obj);
+    1
+}
+
+// ---- The use list ----
+//
+// IBM's USEITEM chain: each item (type, next) is followed by its data:
+// MEMORYITEM (the size) for wpAllocMem's blocks, VIEWITEM (view, frame,
+// state, ...) for open views, which classes add with wpAddToObjUseList
+// and wpSwitchTo finds.
+
+pub const USAGE_MEMORY: u32 = 1;
+pub const USAGE_OPENVIEW: u32 = 5;
+
+fn use_items(obj: usize) -> Vec<usize> {
+    let mut v = Vec::new();
+    let mut p = d(obj).use_list;
+    while p != 0 && v.len() < 4096 {
+        v.push(p);
+        p = unsafe { *((p + 4) as *const usize) };
+    }
+    v
+}
+
+extern "C" fn wpAddToObjUseList(obj: usize, item: usize) -> u32 {
+    if item == 0 {
+        return 0;
+    }
+    // At the end, so items come back in the order added.
+    unsafe { *((item + 4) as *mut usize) = 0 };
+    match use_items(obj).last() {
+        Some(&l) => unsafe { *((l + 4) as *mut usize) = item },
+        None => d(obj).use_list = item,
+    }
+    1
+}
+
+extern "C" fn wpDeleteFromObjUseList(obj: usize, item: usize) -> u32 {
+    let next = |p: usize| unsafe { *((p + 4) as *const usize) };
+    if d(obj).use_list == item {
+        d(obj).use_list = next(item);
+        return 1;
+    }
+    for p in use_items(obj) {
+        if next(p) == item {
+            unsafe { *((p + 4) as *mut usize) = next(item) };
+            return 1;
+        }
+    }
+    0
+}
+
+/// wpFindUseItem: the first item of a type, or the next after `current`.
+extern "C" fn wpFindUseItem(obj: usize, ty: u32, current: usize) -> usize {
+    let items = use_items(obj);
+    let start = if current == 0 { 0 } else { items.iter().position(|&p| p == current).map_or(items.len(), |i| i + 1) };
+    items[start..].iter().copied().find(|&p| unsafe { *(p as *const u32) } == ty).unwrap_or(0)
+}
+
+const MEM_HEADER: usize = 12;
+
+/// wpAllocMem: memory that belongs to the object (a USAGE_MEMORY item).
+extern "C" fn wpAllocMem(obj: usize, cb: u32, prc: *mut u32) -> usize {
+    let Ok(layout) = core::alloc::Layout::from_size_align(MEM_HEADER + cb as usize, 4) else { return 0 };
+    let p = unsafe { alloc::alloc::alloc_zeroed(layout) } as usize;
+    if !prc.is_null() {
+        unsafe { *prc = if p == 0 { 8 } else { 0 } };
+    }
+    if p == 0 {
+        return 0;
+    }
+    unsafe {
+        *(p as *mut u32) = USAGE_MEMORY;
+        *((p + 8) as *mut u32) = cb;
+    }
+    wpAddToObjUseList(obj, p);
+    p + MEM_HEADER
+}
+
+extern "C" fn wpFreeMem(obj: usize, mem: usize) -> u32 {
+    if mem == 0 {
+        return 0;
+    }
+    let p = mem - MEM_HEADER;
+    if !use_items(obj).contains(&p) {
+        return 0;
+    }
+    wpDeleteFromObjUseList(obj, p);
+    let cb = unsafe { *((p + 8) as *const u32) } as usize;
+    if let Ok(layout) = core::alloc::Layout::from_size_align(MEM_HEADER + cb, 4) {
+        unsafe { alloc::alloc::dealloc(p as *mut u8, layout) };
+    }
+    1
+}
+
+/// An open view a class registered in the use list (its frame).
+pub fn use_list_view(obj: usize, view: u32) -> u32 {
+    let mut it = wpFindUseItem(obj, USAGE_OPENVIEW, 0);
+    while it != 0 {
+        // VIEWITEM after the USEITEM: view, handle.
+        let (v, frame) = unsafe { (*((it + 8) as *const u32), *((it + 12) as *const u32)) };
+        if v == view && frame != 0 {
+            return frame;
+        }
+        it = wpFindUseItem(obj, USAGE_OPENVIEW, it);
+    }
+    0
+}
+
+/// wpSwitchTo: an open view comes to the front.
+extern "C" fn wpSwitchTo(obj: usize, view: u32) -> u32 {
+    let f = match crate::view::frame_of(obj, view) {
+        0 => use_list_view(obj, view),
+        f => f,
+    };
+    if f == 0 {
+        return 0;
+    }
+    crate::view::activate(f);
+    1
+}
+
+/// wpRegisterView (as IBM's): a class's own view shows the object's title
+/// and icon and is in the window list under the title.
+extern "C" fn wpRegisterView(obj: usize, frame: u32, _view_title: *const u8) -> u32 {
+    if frame == 0 {
+        return 0;
+    }
+    let t: Vec<u8> = title(obj).into_iter().map(|c| if c == b'\n' { b' ' } else { c }).collect();
+    let zt = z(&t);
+    unsafe { crate::pm::WinSetWindowText(frame, zt.as_ptr()) };
+    crate::pm::send(frame, 0x0047, call(m::WPObject::wpQueryIcon, &[obj]) as u32, 1);
+    // SWCNTRL: hwnd, hwndIcon, hprog, idProcess, idSession, uchVisibility,
+    // fbJump, szSwtitle[64], bProgType.
+    let mut sw = [0u8; 96];
+    sw[0..4].copy_from_slice(&frame.to_le_bytes());
+    let (mut pid, mut tid) = (0u32, 0u32);
+    unsafe { crate::pm::WinQueryWindowProcess(frame, &mut pid, &mut tid) };
+    sw[12..16].copy_from_slice(&pid.to_le_bytes());
+    sw[20..24].copy_from_slice(&4u32.to_le_bytes());
+    sw[24..28].copy_from_slice(&2u32.to_le_bytes());
+    let n = t.len().min(63);
+    sw[28..28 + n].copy_from_slice(&t[..n]);
+    sw[92..96].copy_from_slice(&3u32.to_le_bytes());
+    unsafe { WinAddSwitchEntry(sw.as_ptr()) };
     1
 }
 
@@ -607,7 +755,14 @@ extern "C" fn wpViewObject(obj: usize, hwnd_cnr: u32, view: u32, param: u32) -> 
     let view = if view == OPEN_DEFAULT { call(m::WPObject::wpQueryDefaultView, &[obj]) as u32 } else { view };
     // CCVIEW (or the System object's "Create new window") opens another
     // view; settings notebooks are never doubled.
-    let f = if view != OPEN_SETTINGS && concurrent(obj) { 0 } else { crate::view::frame_of(obj, if view == OPEN_DEFAULT { OPEN_CONTENTS } else { view }) };
+    let f = if view != OPEN_SETTINGS && concurrent(obj) {
+        0
+    } else {
+        match crate::view::frame_of(obj, if view == OPEN_DEFAULT { OPEN_CONTENTS } else { view }) {
+            0 => use_list_view(obj, view),
+            f => f,
+        }
+    };
     if f != 0 {
         crate::view::activate(f);
         return f;
@@ -952,6 +1107,13 @@ methods! {
     __m_wpMoveObject => wpMoveObject, 2;
     __m_wpQueryConfirmations => wpQueryConfirmations, 1;
     __m_wpQueryConcurrentView => wpQueryConcurrentView, 1;
+    __m_wpAddToObjUseList => wpAddToObjUseList, 2;
+    __m_wpDeleteFromObjUseList => wpDeleteFromObjUseList, 2;
+    __m_wpFindUseItem => wpFindUseItem, 3;
+    __m_wpAllocMem => wpAllocMem, 3;
+    __m_wpFreeMem => wpFreeMem, 2;
+    __m_wpSwitchTo => wpSwitchTo, 2;
+    __m_wpRegisterView => wpRegisterView, 3;
     __m_wpSetConcurrentView => wpSetConcurrentView, 2;
     __m_wpclsQueryTitle => wpclsQueryTitle, 1;
     __m_wpclsQueryIcon => wpclsQueryIcon, 1;
@@ -1019,6 +1181,13 @@ fn impl_object_own() -> Impl {
             ("wpMoveObject", __m_wpMoveObject as usize),
             ("wpQueryConfirmations", __m_wpQueryConfirmations as usize),
             ("wpQueryConcurrentView", __m_wpQueryConcurrentView as usize),
+            ("wpAddToObjUseList", __m_wpAddToObjUseList as usize),
+            ("wpDeleteFromObjUseList", __m_wpDeleteFromObjUseList as usize),
+            ("wpFindUseItem", __m_wpFindUseItem as usize),
+            ("wpAllocMem", __m_wpAllocMem as usize),
+            ("wpFreeMem", __m_wpFreeMem as usize),
+            ("wpSwitchTo", __m_wpSwitchTo as usize),
+            ("wpRegisterView", __m_wpRegisterView as usize),
             ("wpSetConcurrentView", __m_wpSetConcurrentView as usize),
         ],
         overrides: alloc::vec![("somInit", __m_somInit as usize), ("somUninit", __m_somUninit as usize)],

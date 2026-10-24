@@ -11,7 +11,8 @@
 //! Toolkit's samples, built for IBM's PMWP) and makes an object of it.
 //! `WPSTEST STARTUP` puts the System Editor in a Startup folder (for
 //! PMSHELL to start). `WPSTEST REMOTE`, with PMSHELL running, makes and changes an object
-//! on its desktop from this process.
+//! on its desktop from this process; `WPSTEST REGISTER dll class` registers
+//! a class DLL in the running shell and puts an object of it on the desktop.
 
 #![no_std]
 #![no_main]
@@ -312,6 +313,25 @@ fn class_dll(args: &[u8]) {
     unsafe { WinDeregisterObjectClass(c.as_ptr()) };
 }
 
+/// `WPSTEST REGISTER dll class`, with PMSHELL running: the class is
+/// registered in the shell and an object of it made on its desktop
+/// (OBJECTID=<RS2_<CLASS>>), as the Toolkit samples' INSTALL.CMD does.
+fn register_remote(args: &[u8]) {
+    let mut it = args.split(|&c| c == b' ').filter(|w| !w.is_empty());
+    let _ = it.next();
+    let (Some(dll), Some(class)) = (it.next(), it.next()) else {
+        println!("usage: WPSTEST REGISTER dll class");
+        return;
+    };
+    let (c, d) = (z(class), z(dll));
+    check("WinRegisterObjectClass in the shell", unsafe { WinRegisterObjectClass(c.as_ptr(), d.as_ptr()) } != 0);
+    let mut id = b"OBJECTID=<RS2_".to_vec();
+    id.extend(class.iter().map(|c| c.to_ascii_uppercase()));
+    id.push(b'>');
+    let h = create(class, class, &id, b"<WP_DESKTOP>");
+    check("object of the class on the shell's desktop", h != 0);
+}
+
 /// With the shell in another process (PMSHELL): the calls go there.
 fn remote() {
     let h = create(b"WPProgram", b"Remote Test", b"EXENAME=C:\\OS2\\E.EXE;OBJECTID=<RS2_REMOTE>", b"<WP_DESKTOP>");
@@ -325,8 +345,12 @@ fn remote() {
 fn main(st: &Startup) -> u32 {
     let args = st.args();
     let word = args.split(|&c| c == b' ').find(|w| !w.is_empty()).unwrap_or(b"");
-    if word.eq_ignore_ascii_case(b"REMOTE") {
-        remote();
+    if word.eq_ignore_ascii_case(b"REMOTE") || word.eq_ignore_ascii_case(b"REGISTER") {
+        if word.eq_ignore_ascii_case(b"REMOTE") {
+            remote();
+        } else {
+            register_remote(args);
+        }
         let n = unsafe { FAILS };
         println!("wpstest done: {} failure(s)", n);
         return n;
