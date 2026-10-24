@@ -146,9 +146,10 @@ fn paint(h: u32) {
     let b = border(h);
     let enabled = ctl::enabled(h);
     let held = data(h).map_or(0, |d| d.held);
+    let bg = crate::pp::text_colors(h).bg;
     draw::paint(h, |c: &mut Canvas| {
         let r = c.rect();
-        c.fill(r, draw::window());
+        c.fill(r, bg);
         if b > 0 {
             let er = Rect::new(0, 0, cx - aw, cy);
             c.sunken(er);

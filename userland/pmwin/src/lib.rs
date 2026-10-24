@@ -42,6 +42,7 @@ mod mle;
 mod msg;
 mod notebook;
 mod pointer;
+mod pp;
 mod rect;
 mod report;
 mod res;

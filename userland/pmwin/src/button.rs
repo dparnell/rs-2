@@ -35,6 +35,12 @@ const BM_SETCHECK: u32 = 0x0125;
 const BM_SETDEFAULT: u32 = 0x0126;
 
 const BN_CLICKED: u32 = 1;
+const BN_PAINT: u32 = 3;
+
+/// USERBUTTON states.
+const BDS_HILITED: u32 = 0x0100;
+const BDS_DISABLED: u32 = 0x0200;
+const BDS_DEFAULT: u32 = 0x0400;
 
 wndproc! {
     button_entry => button_proc;
@@ -45,6 +51,8 @@ struct Button {
     check: u32,
     hilite: bool,
     tracking: bool,
+    /// BS_USERBUTTON: the state the owner last painted.
+    state_old: u32,
 }
 
 fn data(h: u32) -> &'static mut Button {
@@ -124,25 +132,48 @@ pub fn is_default(h: u32) -> bool {
 
 // ---- Painting ----
 
+/// A BS_USERBUTTON is the owner's to paint (IBM's ButtonPaint):
+/// WM_CONTROL (id, BN_PAINT) with a USERBUTTON (hwnd, hps, fsState,
+/// fsStateOld: BDS_HILITED, BDS_DISABLED, BDS_DEFAULT).
+fn paint_user(h: u32) {
+    let mut st_ = if data(h).hilite { BDS_HILITED } else { 0 };
+    if !ctl::enabled(h) {
+        st_ |= BDS_DISABLED;
+    }
+    if ctl::style(h) & BS_DEFAULT != 0 {
+        st_ |= BDS_DEFAULT;
+    }
+    let hps = crate::win::WinBeginPaint(h, 0, core::ptr::null_mut());
+    let ub: [u32; 4] = [h, hps, st_, data(h).state_old];
+    crate::msg::send(ctl::owner(h), WM_CONTROL, mp(ctl::id(h), BN_PAINT), ub.as_ptr() as u32);
+    data(h).state_old = st_;
+    crate::win::WinEndPaint(hps);
+}
+
 fn paint(h: u32) {
+    if kind(h) == BS_USERBUTTON {
+        paint_user(h);
+        return;
+    }
     let style = ctl::style(h);
     let text = ctl::text(h);
     let focus = ctl::has_focus(h);
     let enabled = ctl::enabled(h);
     let (check, hilite) = (data(h).check, data(h).hilite);
     let k = kind(h);
+    let col = Colors::of(h, k);
     draw::paint(h, |c| {
         let r = c.rect();
-        let fg = if enabled { draw::text() } else { draw::GRAY_TEXT };
+        let fg = if enabled { col.fg } else { col.disabled };
         match k {
-            BS_PUSHBUTTON | BS_USERBUTTON => push(c, r, style, &text, fg, hilite, focus),
+            BS_PUSHBUTTON => push(c, r, style, &text, fg, hilite, focus, &col),
             BS_RADIOBUTTON | BS_AUTORADIOBUTTON => {
-                c.fill(r, draw::dialog_bg());
+                c.fill(r, col.bg);
                 radio(c, r, check != 0, hilite);
                 label(c, r, &text, fg, focus);
             }
             _ => {
-                c.fill(r, draw::dialog_bg());
+                c.fill(r, col.bg);
                 check_box(c, r, check, hilite);
                 label(c, r, &text, fg, focus);
             }
@@ -150,19 +181,52 @@ fn paint(h: u32) {
     });
 }
 
-fn push(c: &mut Canvas, r: Rect, style: u32, text: &[u8], fg: u32, down: bool, focus: bool) {
-    c.fill(r, draw::face());
+/// A button's colours: its presentation parameters as IBM's
+/// GetButtonPresParams asks for them, or the system's.
+struct Colors {
+    bg: u32,
+    fg: u32,
+    disabled: u32,
+    light: u32,
+    dark: u32,
+    default: u32,
+}
+
+impl Colors {
+    fn of(h: u32, k: u32) -> Colors {
+        use crate::pp::{self, *};
+        let push = k == BS_PUSHBUTTON;
+        let disabled = !ctl::enabled(h);
+        let bg = if disabled {
+            pp::color_set(h, PP_DISABLEDBACKGROUNDCOLOR).or_else(|| pp::color_set(h, PP_BACKGROUNDCOLOR))
+        } else {
+            pp::color_set(h, PP_BACKGROUNDCOLOR)
+        };
+        Colors {
+            bg: bg.unwrap_or(if push { draw::face() } else { draw::dialog_bg() }),
+            fg: pp::or(h, PP_FOREGROUNDCOLOR, draw::text()),
+            disabled: pp::or(h, PP_DISABLEDFOREGROUNDCOLOR, draw::GRAY_TEXT),
+            light: pp::or(h, PP_BORDERLIGHTCOLOR, draw::light()),
+            dark: pp::or(h, PP_BORDERDARKCOLOR, draw::shadow()),
+            default: pp::or(h, PP_BORDERDEFAULTCOLOR, draw::text()),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push(c: &mut Canvas, r: Rect, style: u32, text: &[u8], fg: u32, down: bool, focus: bool, col: &Colors) {
+    c.fill(r, col.bg);
     let mut b = r;
     if style & BS_NOBORDER == 0 {
         if style & BS_DEFAULT != 0 {
-            c.frame(b, draw::text());
+            c.frame(b, col.default);
             b = Rect::new(b.left + 1, b.bottom + 1, b.right - 1, b.top - 1);
         }
         if down {
-            c.frame(b, draw::shadow());
+            c.frame(b, col.dark);
         } else {
-            c.bevel(b, draw::light(), draw::DARK);
-            c.bevel(Rect::new(b.left + 1, b.bottom + 1, b.right - 1, b.top - 1), draw::light(), draw::shadow());
+            c.bevel(b, col.light, draw::DARK);
+            c.bevel(Rect::new(b.left + 1, b.bottom + 1, b.right - 1, b.top - 1), col.light, col.dark);
         }
     }
     let off = down as i32;

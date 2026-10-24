@@ -349,65 +349,65 @@ aligned! {
     __a_WinLoadMessage => crate::misc::WinLoadMessage, 5, 320;
     __a_WinWaitEventSem => crate::misc::WinWaitEventSem, 2, 321;
     __a_WinRequestMutexSem => crate::misc::WinRequestMutexSem, 2, 322;
-    __a_WinSetPresParam => crate::misc::WinSetPresParam, 4, 323;
-    __a_WinQueryPresParam => crate::misc::WinQueryPresParam, 7, 324;
-    __a_WinRemovePresParam => crate::misc::WinRemovePresParam, 2, 325;
-    __a_WinMessageBox => crate::misc::WinMessageBox, 6, 326;
-    __a_WinQueryVersion => crate::misc::WinQueryVersion, 1, 327;
-    __a_WinQueryObjectWindow => crate::misc::WinQueryObjectWindow, 1, 328;
-    __a_WinQueryCp => crate::misc::WinQueryCp, 1, 329;
-    __a_WinSetCp => crate::misc::WinSetCp, 2, 330;
-    __a_WinCpTranslateChar => crate::misc::WinCpTranslateChar, 4, 331;
-    __a_WinCpTranslateString => crate::misc::WinCpTranslateString, 6, 332;
-    __a_WinQueryCpList => crate::misc::WinQueryCpList, 3, 333;
-    __a_WinUpper => crate::misc::WinUpper, 4, 334;
-    __a_WinUpperChar => crate::misc::WinUpperChar, 4, 335;
-    __a_WinNextChar => crate::misc::WinNextChar, 4, 336;
-    __a_WinPrevChar => crate::misc::WinPrevChar, 5, 337;
-    __a_WinCompareStrings => crate::misc::WinCompareStrings, 6, 338;
-    __a_WinCancelShutdown => crate::misc::WinCancelShutdown, 2, 339;
-    __a_WinEnableWindowUpdate => crate::misc::WinEnableWindowUpdate, 2, 340;
-    __a_WinLockWindowUpdate => crate::misc::WinLockWindowUpdate, 2, 341;
-    __a_WinIsWindowShowing => crate::misc::WinIsWindowShowing, 1, 342;
-    __a_WinSetOwner => crate::misc::WinSetOwner, 2, 343;
-    __a_WinQueryUpdateRect => crate::misc::WinQueryUpdateRect, 2, 344;
-    __a_WinInvertRect => crate::misc::WinInvertRect, 2, 345;
-    __a_WinGetScreenPS => crate::misc::WinGetScreenPS, 1, 346;
-    __a_WinTrackRect => crate::misc::WinTrackRect, 3, 347;
-    __a_WinCreateMsgQueue => crate::msg::WinCreateMsgQueue, 2, 348;
-    __a_WinDestroyMsgQueue => crate::msg::WinDestroyMsgQueue, 1, 349;
-    __a_WinPostMsg => crate::msg::WinPostMsg, 4, 350;
-    __a_WinPostQueueMsg => crate::msg::WinPostQueueMsg, 4, 351;
-    __a_WinSendMsg => crate::msg::WinSendMsg, 4, 352;
-    __a_WinBroadcastMsg => crate::msg::WinBroadcastMsg, 5, 353;
-    __a_WinDispatchMsg => crate::msg::WinDispatchMsg, 2, 354;
-    __a_WinDefWindowProc => crate::msg::WinDefWindowProc, 4, 355;
-    __a_WinStartTimer => crate::msg::WinStartTimer, 4, 356;
-    __a_WinStopTimer => crate::msg::WinStopTimer, 3, 357;
-    __a_WinGetMsg => crate::msg::WinGetMsg, 5, 358;
-    __a_WinPeekMsg => crate::msg::WinPeekMsg, 6, 359;
-    __a_WinQueryQueueStatus => crate::msg::WinQueryQueueStatus, 1, 360;
-    __a_WinQueryPointerPos => crate::msg::WinQueryPointerPos, 2, 361;
-    __a_WinQueryMsgPos => crate::msg::WinQueryMsgPos, 2, 362;
-    __a_WinQueryMsgTime => crate::msg::WinQueryMsgTime, 1, 363;
-    __a_WinGetCurrentTime => crate::msg::WinGetCurrentTime, 1, 364;
-    __a_WinSetCapture => crate::msg::WinSetCapture, 2, 365;
-    __a_WinQueryCapture => crate::msg::WinQueryCapture, 1, 366;
-    __a_WinQueryQueueInfo => crate::msg::WinQueryQueueInfo, 3, 367;
-    __a_WinLoadPointer => crate::pointer::WinLoadPointer, 3, 368;
-    __a_WinQuerySysPointer => crate::pointer::WinQuerySysPointer, 3, 369;
-    __a_WinDestroyPointer => crate::pointer::WinDestroyPointer, 1, 370;
-    __a_WinSetPointerOwner => crate::pointer::WinSetPointerOwner, 3, 371;
-    __a_WinQueryPointerInfo => crate::pointer::WinQueryPointerInfo, 2, 372;
-    __a_WinCreatePointer => crate::pointer::WinCreatePointer, 5, 373;
-    __a_Rs2TemplateIcon => crate::pointer::Rs2TemplateIcon, 1, 374;
-    __a_WinCreatePointerIndirect => crate::pointer::WinCreatePointerIndirect, 2, 375;
-    __a_WinDrawPointer => crate::pointer::WinDrawPointer, 5, 376;
-    __a_WinQueryPointer => crate::pointer::WinQueryPointer, 1, 377;
-    __a_WinSetPointer => crate::pointer::WinSetPointer, 2, 378;
-    __a_WinSetPointerPos => crate::pointer::WinSetPointerPos, 3, 379;
-    __a_WinQuerySysPointerData => crate::pointer::WinQuerySysPointerData, 3, 380;
-    __a_WinShowPointer => crate::pointer::WinShowPointer, 2, 381;
+    __a_WinMessageBox => crate::misc::WinMessageBox, 6, 323;
+    __a_WinQueryVersion => crate::misc::WinQueryVersion, 1, 324;
+    __a_WinQueryObjectWindow => crate::misc::WinQueryObjectWindow, 1, 325;
+    __a_WinQueryCp => crate::misc::WinQueryCp, 1, 326;
+    __a_WinSetCp => crate::misc::WinSetCp, 2, 327;
+    __a_WinCpTranslateChar => crate::misc::WinCpTranslateChar, 4, 328;
+    __a_WinCpTranslateString => crate::misc::WinCpTranslateString, 6, 329;
+    __a_WinQueryCpList => crate::misc::WinQueryCpList, 3, 330;
+    __a_WinUpper => crate::misc::WinUpper, 4, 331;
+    __a_WinUpperChar => crate::misc::WinUpperChar, 4, 332;
+    __a_WinNextChar => crate::misc::WinNextChar, 4, 333;
+    __a_WinPrevChar => crate::misc::WinPrevChar, 5, 334;
+    __a_WinCompareStrings => crate::misc::WinCompareStrings, 6, 335;
+    __a_WinCancelShutdown => crate::misc::WinCancelShutdown, 2, 336;
+    __a_WinEnableWindowUpdate => crate::misc::WinEnableWindowUpdate, 2, 337;
+    __a_WinLockWindowUpdate => crate::misc::WinLockWindowUpdate, 2, 338;
+    __a_WinIsWindowShowing => crate::misc::WinIsWindowShowing, 1, 339;
+    __a_WinSetOwner => crate::misc::WinSetOwner, 2, 340;
+    __a_WinQueryUpdateRect => crate::misc::WinQueryUpdateRect, 2, 341;
+    __a_WinInvertRect => crate::misc::WinInvertRect, 2, 342;
+    __a_WinGetScreenPS => crate::misc::WinGetScreenPS, 1, 343;
+    __a_WinTrackRect => crate::misc::WinTrackRect, 3, 344;
+    __a_WinCreateMsgQueue => crate::msg::WinCreateMsgQueue, 2, 345;
+    __a_WinDestroyMsgQueue => crate::msg::WinDestroyMsgQueue, 1, 346;
+    __a_WinPostMsg => crate::msg::WinPostMsg, 4, 347;
+    __a_WinPostQueueMsg => crate::msg::WinPostQueueMsg, 4, 348;
+    __a_WinSendMsg => crate::msg::WinSendMsg, 4, 349;
+    __a_WinBroadcastMsg => crate::msg::WinBroadcastMsg, 5, 350;
+    __a_WinDispatchMsg => crate::msg::WinDispatchMsg, 2, 351;
+    __a_WinDefWindowProc => crate::msg::WinDefWindowProc, 4, 352;
+    __a_WinStartTimer => crate::msg::WinStartTimer, 4, 353;
+    __a_WinStopTimer => crate::msg::WinStopTimer, 3, 354;
+    __a_WinGetMsg => crate::msg::WinGetMsg, 5, 355;
+    __a_WinPeekMsg => crate::msg::WinPeekMsg, 6, 356;
+    __a_WinQueryQueueStatus => crate::msg::WinQueryQueueStatus, 1, 357;
+    __a_WinQueryPointerPos => crate::msg::WinQueryPointerPos, 2, 358;
+    __a_WinQueryMsgPos => crate::msg::WinQueryMsgPos, 2, 359;
+    __a_WinQueryMsgTime => crate::msg::WinQueryMsgTime, 1, 360;
+    __a_WinGetCurrentTime => crate::msg::WinGetCurrentTime, 1, 361;
+    __a_WinSetCapture => crate::msg::WinSetCapture, 2, 362;
+    __a_WinQueryCapture => crate::msg::WinQueryCapture, 1, 363;
+    __a_WinQueryQueueInfo => crate::msg::WinQueryQueueInfo, 3, 364;
+    __a_WinLoadPointer => crate::pointer::WinLoadPointer, 3, 365;
+    __a_WinQuerySysPointer => crate::pointer::WinQuerySysPointer, 3, 366;
+    __a_WinDestroyPointer => crate::pointer::WinDestroyPointer, 1, 367;
+    __a_WinSetPointerOwner => crate::pointer::WinSetPointerOwner, 3, 368;
+    __a_WinQueryPointerInfo => crate::pointer::WinQueryPointerInfo, 2, 369;
+    __a_WinCreatePointer => crate::pointer::WinCreatePointer, 5, 370;
+    __a_Rs2TemplateIcon => crate::pointer::Rs2TemplateIcon, 1, 371;
+    __a_WinCreatePointerIndirect => crate::pointer::WinCreatePointerIndirect, 2, 372;
+    __a_WinDrawPointer => crate::pointer::WinDrawPointer, 5, 373;
+    __a_WinQueryPointer => crate::pointer::WinQueryPointer, 1, 374;
+    __a_WinSetPointer => crate::pointer::WinSetPointer, 2, 375;
+    __a_WinSetPointerPos => crate::pointer::WinSetPointerPos, 3, 376;
+    __a_WinQuerySysPointerData => crate::pointer::WinQuerySysPointerData, 3, 377;
+    __a_WinShowPointer => crate::pointer::WinShowPointer, 2, 378;
+    __a_WinSetPresParam => crate::pp::WinSetPresParam, 4, 379;
+    __a_WinQueryPresParam => crate::pp::WinQueryPresParam, 7, 380;
+    __a_WinRemovePresParam => crate::pp::WinRemovePresParam, 2, 381;
     __a_WinSetRect => crate::rect::WinSetRect, 6, 382;
     __a_WinSetRectEmpty => crate::rect::WinSetRectEmpty, 2, 383;
     __a_WinCopyRect => crate::rect::WinCopyRect, 3, 384;
@@ -810,9 +810,6 @@ pub static NAMES: [(&str, u8); 457] = [
     ("WinLoadMessage", 5),
     ("WinWaitEventSem", 2),
     ("WinRequestMutexSem", 2),
-    ("WinSetPresParam", 4),
-    ("WinQueryPresParam", 7),
-    ("WinRemovePresParam", 2),
     ("WinMessageBox", 6),
     ("WinQueryVersion", 1),
     ("WinQueryObjectWindow", 1),
@@ -869,6 +866,9 @@ pub static NAMES: [(&str, u8); 457] = [
     ("WinSetPointerPos", 3),
     ("WinQuerySysPointerData", 3),
     ("WinShowPointer", 2),
+    ("WinSetPresParam", 4),
+    ("WinQueryPresParam", 7),
+    ("WinRemovePresParam", 2),
     ("WinSetRect", 6),
     ("WinSetRectEmpty", 2),
     ("WinCopyRect", 3),

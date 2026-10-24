@@ -275,138 +275,6 @@ pub extern "C" fn WinRequestMutexSem(hmtx: u32, ms: u32) -> u32 {
     crate::lock::wait(|| unsafe { DosRequestMutexSem(hmtx, ms) })
 }
 
-const PP_FOREGROUNDCOLOR: u32 = 1;
-const PP_BACKGROUNDCOLOR: u32 = 3;
-const PP_FONTNAMESIZE: u32 = 15;
-const WM_PRESPARAMCHANGED: u32 = 0x001e;
-
-/// WinSetPresParam(hwnd, id, cbParam, pbParam): the foreground and
-/// background colours (PP_FOREGROUNDCOLOR, PP_BACKGROUNDCOLOR, RGB) are
-/// kept for the window (the container uses them), and the font
-/// (PP_FONTNAMESIZE, "10.Helv": the window and its children draw in
-/// it); other presentation parameters are accepted and ignored.
-#[unsafe(no_mangle)]
-pub extern "C" fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: u32) -> u32 {
-    let s = st();
-    if !s.desk.exists(h) {
-        return 0;
-    }
-    if id == PP_FONTNAMESIZE && pv != 0 {
-        let b = unsafe { core::slice::from_raw_parts(pv as *const u8, cb as usize) };
-        let name = b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())].to_vec();
-        if crate::fonts::by_name(&name).is_none() {
-            return 0;
-        }
-        s.pres_font.insert(h, name);
-        s.desk.invalidate(h, None, true);
-        crate::msg::send(h, WM_PRESPARAMCHANGED, id, 0);
-        return 1;
-    }
-    if (id == PP_FOREGROUNDCOLOR || id == PP_BACKGROUNDCOLOR) && cb >= 4 && pv != 0 {
-        let v = unsafe { (pv as *const u32).read_unaligned() } & 0xff_ffff;
-        let e = s.pres.entry(h).or_insert((crate::state::NO_COLOR, crate::state::NO_COLOR));
-        if id == PP_FOREGROUNDCOLOR {
-            e.0 = v;
-        } else {
-            e.1 = v;
-        }
-        s.desk.invalidate(h, None, true);
-    }
-    1
-}
-
-/// PP_FONTNAMESIZE of the window or the nearest parent that has one.
-pub fn pres_font_name(h: u32) -> Option<Vec<u8>> {
-    let s = st();
-    let mut w = h;
-    for _ in 0..64 {
-        if let Some(n) = s.pres_font.get(&w) {
-            return Some(n.clone());
-        }
-        w = s.desk.get(w)?.parent;
-        if w == 0 {
-            break;
-        }
-    }
-    None
-}
-
-/// The colour of a presentation parameter set on the window (not
-/// inherited).
-pub fn pres_color(h: u32, background: bool) -> Option<u32> {
-    let (fg, bg) = *st().pres.get(&h)?;
-    let v = if background { bg } else { fg };
-    (v != crate::state::NO_COLOR).then_some(v)
-}
-
-/// WinQueryPresParam(hwnd, id1, id2, pulId, cbBuf, pbBuf, fs): the
-/// colours set with WinSetPresParam (the bytes copied, 0 if neither).
-#[unsafe(no_mangle)]
-pub extern "C" fn WinQueryPresParam(h: u32, id1: u32, id2: u32, pid: u32, cb: u32, pv: u32, fs: u32) -> u32 {
-    for id in [id1, id2] {
-        // The font, inherited from the parents unless QPF_NOINHERIT.
-        if id == PP_FONTNAMESIZE {
-            let name = if fs & 1 != 0 { st().pres_font.get(&h).cloned() } else { pres_font_name(h) };
-            if let Some(n) = name {
-                if pv == 0 || (cb as usize) < n.len() + 1 {
-                    return 0;
-                }
-                unsafe {
-                    core::ptr::copy_nonoverlapping(n.as_ptr(), pv as *mut u8, n.len());
-                    *(pv as *mut u8).add(n.len()) = 0;
-                    if pid != 0 {
-                        (pid as *mut u32).write_unaligned(id);
-                    }
-                }
-                return n.len() as u32 + 1;
-            }
-            continue;
-        }
-        let v = match id {
-            PP_FOREGROUNDCOLOR => pres_color(h, false),
-            PP_BACKGROUNDCOLOR => pres_color(h, true),
-            _ => None,
-        };
-        if let Some(v) = v {
-            if cb < 4 || pv == 0 {
-                return 0;
-            }
-            unsafe {
-                (pv as *mut u32).write_unaligned(v);
-                if pid != 0 {
-                    (pid as *mut u32).write_unaligned(id);
-                }
-            }
-            return 4;
-        }
-    }
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn WinRemovePresParam(h: u32, id: u32) -> u32 {
-    let s = st();
-    if !s.desk.exists(h) {
-        return 0;
-    }
-    if id == PP_FONTNAMESIZE {
-        if s.pres_font.remove(&h).is_some() {
-            s.desk.invalidate(h, None, true);
-            crate::msg::send(h, WM_PRESPARAMCHANGED, id, 0);
-        }
-        return 1;
-    }
-    if let Some(e) = s.pres.get_mut(&h) {
-        match id {
-            PP_FOREGROUNDCOLOR => e.0 = crate::state::NO_COLOR,
-            PP_BACKGROUNDCOLOR => e.1 = crate::state::NO_COLOR,
-            _ => return 1,
-        }
-        s.desk.invalidate(h, None, true);
-    }
-    1
-}
-
 fn cstr(p: *const u8) -> Vec<u8> {
     if p.is_null() {
         return Vec::new();
@@ -469,12 +337,12 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
     if icon != 0 {
         // SS_SYSICON, visible.
         let t = alloc::format!("#{icon}").into_bytes();
-        items.push(res::DlgItemT { class: b"#5".to_vec(), text: t, style: 0x8000_000b, x: 8, y: (h - 50) / 2, cx: 16, cy: 16, id: 0xffff, ctl: core::ptr::null(), children: Vec::new() });
+        items.push(res::DlgItemT { class: b"#5".to_vec(), text: t, style: 0x8000_000b, x: 8, y: (h - 50) / 2, cx: 16, cy: 16, id: 0xffff, ctl: core::ptr::null(), pres: core::ptr::null(), children: Vec::new() });
     }
     for (i, l) in lines.iter().enumerate() {
         let y = h - 10 - (i as i32 + 1) * font.height;
         // SS_TEXT | DT_LEFT, visible.
-        items.push(res::DlgItemT { class: b"#5".to_vec(), text: l.clone(), style: 0x8000_0001, x: (10 + ix) / 2, y: y / 2, cx: (w - 20 - ix) / 2, cy: font.height / 2, id: 0xffff, ctl: core::ptr::null(), children: Vec::new() });
+        items.push(res::DlgItemT { class: b"#5".to_vec(), text: l.clone(), style: 0x8000_0001, x: (10 + ix) / 2, y: y / 2, cx: (w - 20 - ix) / 2, cy: font.height / 2, id: 0xffff, ctl: core::ptr::null(), pres: core::ptr::null(), children: Vec::new() });
     }
     let total = buttons.len() as i32 * (bw + 10) - 10;
     for (i, (id, label)) in buttons.iter().enumerate() {
@@ -486,7 +354,7 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
             bs |= 0x0100 | 0x0800;
         }
         let x = (w - total) / 2 + i as i32 * (bw + 10);
-        items.push(res::DlgItemT { class: b"#3".to_vec(), text: label.to_vec(), style: bs, x: x / 2, y: 4, cx: bw / 2, cy: 12, id: *id, ctl: core::ptr::null(), children: Vec::new() });
+        items.push(res::DlgItemT { class: b"#3".to_vec(), text: label.to_vec(), style: bs, x: x / 2, y: 4, cx: bw / 2, cy: 12, id: *id, ctl: core::ptr::null(), pres: core::ptr::null(), children: Vec::new() });
     }
     // FCF_TITLEBAR (control data); FS_DLGBORDER | FS_SCREENALIGN.
     let fcf: u32 = 0x0001;
@@ -501,6 +369,7 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
         cy: h / 2,
         id: id & 0xffff,
         ctl: &fcf as *const u32 as *const u8,
+        pres: core::ptr::null(),
         children: items,
     };
     let parent = if parent == 0 { pmwin::HWND_DESKTOP } else { parent };

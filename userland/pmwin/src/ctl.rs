@@ -25,6 +25,51 @@ pub const WM_MATCHMNEMONIC: u32 = 0x003d;
 pub const WM_UPDATEFRAME: u32 = 0x0042;
 pub const WM_BUTTON1DBLCLK: u32 = 0x0073;
 
+/// OWNERITEM, what WM_DRAWITEM (and a menu's WM_MEASUREITEM) points to.
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct OwnerItem {
+    pub hwnd: u32,
+    pub hps: u32,
+    pub fs_state: u32,
+    pub fs_attribute: u32,
+    pub fs_state_old: u32,
+    pub fs_attribute_old: u32,
+    pub rcl: crate::gpiapi::RectL,
+    pub id_item: i32,
+    pub h_item: u32,
+}
+
+/// Ask `to` (the owner of control `h`) to draw an item (WM_DRAWITEM,
+/// mp1 the control's id) on `oi.hps`, clipped to `clip` (window
+/// coordinates) and in RGB mode with `fg`/`bg` as its colours, as IBM's
+/// controls set the presentation space up; TRUE if it did. The PS is
+/// as it was afterwards.
+pub fn draw_item_to(to: u32, h: u32, oi: &mut OwnerItem, clip: Option<gpi::Rect>, fg: u32, bg: u32) -> bool {
+    let hps = oi.hps;
+    let saved = crate::gpiapi::entry(st(), hps).map(|e| {
+        let old = (e.ps.clip.clone(), e.rgb_mode, e.ps.color, e.ps.back_color);
+        if let Some(c) = clip {
+            let c = c.offset(e.ps.origin.x, e.ps.origin.y);
+            e.ps.clip = old.0.iter().map(|x| x.intersect(&c)).filter(|x| !x.is_empty()).collect();
+        }
+        e.rgb_mode = true;
+        e.ps.color = fg;
+        e.ps.back_color = bg;
+        old
+    });
+    let r = send(to, WM_DRAWITEM, id(h), oi as *mut OwnerItem as u32) != 0;
+    if let (Some(e), Some(old)) = (crate::gpiapi::entry(st(), hps), saved) {
+        (e.ps.clip, e.rgb_mode, e.ps.color, e.ps.back_color) = old;
+    }
+    r
+}
+
+/// `draw_item_to` the control's owner.
+pub fn draw_item(h: u32, oi: &mut OwnerItem, clip: Option<gpi::Rect>, fg: u32, bg: u32) -> bool {
+    draw_item_to(owner(h), h, oi, clip, fg, bg)
+}
+
 pub const CMDSRC_PUSHBUTTON: u32 = 1;
 pub const CMDSRC_MENU: u32 = 2;
 pub const CMDSRC_ACCELERATOR: u32 = 3;

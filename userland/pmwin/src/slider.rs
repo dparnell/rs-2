@@ -23,7 +23,14 @@ const SLS_TOP: u32 = 0x0004;
 const SLS_SNAPTOINCREMENT: u32 = 0x0008;
 const SLS_BUTTONSBOTTOM: u32 = 0x0010;
 const SLS_BUTTONSTOP: u32 = 0x0020;
+const SLS_OWNERDRAW: u32 = 0x0040;
 const SLS_READONLY: u32 = 0x0080;
+
+/// What WM_DRAWITEM asks the owner of an SLS_OWNERDRAW slider to draw.
+const SDA_RIBBONSTRIP: u32 = 0x0001;
+const SDA_SLIDERSHAFT: u32 = 0x0002;
+const SDA_BACKGROUND: u32 = 0x0003;
+const SDA_SLIDERARM: u32 = 0x0004;
 const SLS_RIBBONSTRIP: u32 = 0x0100;
 const SLS_HOMETOP: u32 = 0x0200;
 
@@ -235,14 +242,35 @@ fn paint(h: u32) {
     let detent_rects: Vec<Rect> = detents.iter().map(|&(_, a)| rect_at(h, a, centre + ARM_ACROSS / 2 + 1, 3, 3)).collect();
     let arm_r = rect_at(h, arm, centre, ARM_ALONG, ARM_ACROSS);
     let btns = button_rects(h);
-    draw::paint(h, |c: &mut Canvas| {
+    let hps = crate::win::WinBeginPaint(h, 0, core::ptr::null_mut());
+    // SLS_OWNERDRAW: the owner may draw the background, the shaft, the
+    // ribbon strip and the arm (WM_DRAWITEM, idItem SDA_*, fsState the
+    // style, RGB mode, clipped to rclItem), as IBM's slider asks; what it
+    // does not draw is drawn as usual.
+    let owner = style & SLS_OWNERDRAW != 0;
+    let part = |sda: u32, r: Rect, f: &mut dyn FnMut(&mut Canvas)| {
+        let drawn = owner && {
+            let mut oi = ctl::OwnerItem { hwnd: h, hps, fs_state: style & 0xffff, rcl: r.into(), id_item: sda as i32, ..Default::default() };
+            ctl::draw_item(h, &mut oi, Some(r), draw::text(), draw::dialog_bg())
+        };
+        if !drawn {
+            draw::with(h, hps, |c| f(c));
+        }
+    };
+    let (cx, cy) = ctl::size(h);
+    let bg = crate::pp::or(h, crate::pp::PP_BACKGROUNDCOLOR, draw::dialog_bg());
+    part(SDA_BACKGROUND, Rect::new(0, 0, cx, cy), &mut |c| {
         let r = c.rect();
-        c.fill(r, draw::dialog_bg());
+        c.fill(r, bg);
+    });
+    part(SDA_SLIDERSHAFT, shaft_r, &mut |c| {
         c.fill(shaft_r, if enabled { 0xa0a0a0 } else { draw::face() });
         c.sunken(shaft_r);
-        if let Some(rr) = ribbon {
-            c.fill(rr, draw::hilite());
-        }
+    });
+    if let Some(rr) = ribbon {
+        part(SDA_RIBBONSTRIP, rr, &mut |c| c.fill(rr, draw::hilite()));
+    }
+    draw::with(h, hps, |c: &mut Canvas| {
         for t in &tick_rects {
             c.fill(*t, draw::text());
         }
@@ -253,8 +281,6 @@ fn paint(h: u32) {
         for (x, y, t) in &labels {
             c.text(*x, *y + f.descender, t, draw::text(), clip);
         }
-        c.fill(arm_r, draw::face());
-        c.raised(arm_r);
         if let Some((a, b)) = btns {
             for (br, dec) in [(a, true), (b, false)] {
                 c.fill(br, draw::face());
@@ -274,10 +300,18 @@ fn paint(h: u32) {
                 }
             }
         }
-        if focus {
-            c.focus_rect(Rect::new(r.left, r.bottom, r.right, r.top));
-        }
     });
+    part(SDA_SLIDERARM, arm_r, &mut |c| {
+        c.fill(arm_r, draw::face());
+        c.raised(arm_r);
+    });
+    if focus {
+        draw::with(h, hps, |c| {
+            let r = c.rect();
+            c.focus_rect(Rect::new(r.left, r.bottom, r.right, r.top));
+        });
+    }
+    crate::win::WinEndPaint(hps);
 }
 
 pub extern "C" fn slider_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {

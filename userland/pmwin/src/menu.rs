@@ -35,6 +35,7 @@ pub const MS_TITLEBUTTON: u32 = 0x0002;
 const MIS_TEXT: u16 = 0x0001;
 const MIS_BITMAP: u16 = 0x0002;
 const MIS_SEPARATOR: u16 = 0x0004;
+const MIS_OWNERDRAW: u16 = 0x0008;
 const MIS_SUBMENU: u16 = 0x0010;
 const MIS_SYSCOMMAND: u16 = 0x0040;
 const MIS_HELP: u16 = 0x0080;
@@ -83,6 +84,8 @@ pub struct Item {
     pub text: Vec<u8>,
     pub sub: u32,
     pub handle: u32,
+    /// MIS_OWNERDRAW: the size the owner gave (WM_MEASUREITEM).
+    pub size: Option<(i32, i32)>,
 }
 
 #[derive(Default)]
@@ -151,7 +154,7 @@ fn fill(h: u32, items: &[MenuItemT]) {
             Some(s) => create(HWND_DESKTOP, h, 0, it.id as u32, s),
             None => 0,
         };
-        v.push(Item { style: it.style, attr: it.attr, id: it.id, text: it.text.clone(), sub, handle: 0 });
+        v.push(Item { style: it.style, attr: it.attr, id: it.id, text: it.text.clone(), sub, handle: 0, size: None });
     }
     if let Some(m) = data(h) {
         m.items = v;
@@ -270,11 +273,17 @@ fn label(t: &[u8]) -> (&[u8], &[u8]) {
 
 /// Size of a pop-up menu window for its items.
 fn popup_size(h: u32) -> (i32, i32) {
+    measure(h);
     let Some(m) = data(h) else { return (0, 0) };
-    let (mut wl, mut wr, mut hh) = (0, 0, 6);
+    let (mut wl, mut wr, mut hh, mut wo) = (0, 0, 6, 0);
     for it in &m.items {
         if it.style & MIS_SEPARATOR != 0 {
             hh += SEP_H;
+            continue;
+        }
+        if let Some((w, ih)) = it.size.filter(|_| it.style & MIS_OWNERDRAW != 0) {
+            wo = wo.max(w);
+            hh += ih;
             continue;
         }
         let (l, r) = label(&it.text);
@@ -282,7 +291,57 @@ fn popup_size(h: u32) -> (i32, i32) {
         wr = wr.max(draw::font_of(h).text_width(r));
         hh += ITEM_H;
     }
-    (6 + 22 + wl + if wr > 0 { 24 + wr } else { 0 } + 22, hh)
+    let text_w = if wl > 0 || wr > 0 { 6 + 22 + wl + if wr > 0 { 24 + wr } else { 0 } + 22 } else { 0 };
+    (text_w.max(wo + 6), hh)
+}
+
+/// Where a menu's owner-draw notifications go: the first owner up the
+/// chain of menus that is not a menu (IBM's menus pass them up).
+fn draw_target(h: u32) -> u32 {
+    let mut o = ctl::owner(h);
+    for _ in 0..16 {
+        if !is_menu(o) {
+            break;
+        }
+        o = ctl::owner(o);
+    }
+    o
+}
+
+/// MIS_OWNERDRAW items not measured yet: WM_MEASUREITEM to the owner
+/// (mp1 the menu's id, mp2 an OWNERITEM: fsState/fsStateOld the item's
+/// style, fsAttribute/fsAttributeOld its attributes, idItem, hItem; the
+/// owner sets rclItem's xRight and yTop to the item's width and
+/// height), as IBM's MenuCalcMenuItemSize does. Only on the menu's own
+/// thread (never the input thread).
+fn measure(h: u32) {
+    let Some(m) = data(h) else { return };
+    let todo: Vec<(usize, u16, u16, u16, u32)> =
+        m.items.iter().enumerate().filter(|(_, it)| it.style & MIS_OWNERDRAW != 0 && it.size.is_none()).map(|(i, it)| (i, it.style, it.attr, it.id, it.handle)).collect();
+    if todo.is_empty() || st().queue_of(h) != st().my_queue() {
+        return;
+    }
+    let target = draw_target(h);
+    let hps = win::WinGetPS(h);
+    for (i, style, attr, id, handle) in todo {
+        let mut oi = ctl::OwnerItem {
+            hwnd: h,
+            hps,
+            fs_state: style as u32,
+            fs_attribute: attr as u32,
+            fs_state_old: style as u32,
+            fs_attribute_old: attr as u32,
+            id_item: id as i32,
+            h_item: handle,
+            ..Default::default()
+        };
+        send(target, ctl::WM_MEASUREITEM, ctl::id(h), &mut oi as *mut ctl::OwnerItem as u32);
+        let size = ((oi.rcl.right - oi.rcl.left).max(1), (oi.rcl.top - oi.rcl.bottom).max(1));
+        if let Some(it) = data(h).and_then(|m| m.items.get_mut(i)) {
+            it.size = Some(size);
+        }
+    }
+    win::WinReleasePS(hps);
 }
 
 /// Item rectangles in window coordinates.
@@ -299,7 +358,13 @@ fn rects(h: u32) -> Vec<Rect> {
         MS_ACTIONBAR => {
             let mut x = 2;
             for it in &m.items {
-                let w = if it.style & MIS_SEPARATOR != 0 { 8 } else { draw::font_of(h).text_width(&draw::strip_mnemonic(&it.text).0) + 16 };
+                let w = if it.style & MIS_SEPARATOR != 0 {
+                    8
+                } else if let Some((w, _)) = it.size.filter(|_| it.style & MIS_OWNERDRAW != 0) {
+                    w
+                } else {
+                    draw::font_of(h).text_width(&draw::strip_mnemonic(&it.text).0) + 16
+                };
                 v.push(Rect::new(x, 0, x + w, cy));
                 x += w;
             }
@@ -307,7 +372,13 @@ fn rects(h: u32) -> Vec<Rect> {
         _ => {
             let mut top = cy - 3;
             for it in &m.items {
-                let ih = if it.style & MIS_SEPARATOR != 0 { SEP_H } else { ITEM_H };
+                let ih = if it.style & MIS_SEPARATOR != 0 {
+                    SEP_H
+                } else if let Some((_, ih)) = it.size.filter(|_| it.style & MIS_OWNERDRAW != 0) {
+                    ih
+                } else {
+                    ITEM_H
+                };
                 v.push(Rect::new(3, top - ih, cx - 3, top));
                 top -= ih;
             }
@@ -333,23 +404,33 @@ fn selectable(it: &Item) -> bool {
 
 // ---- Painting ----
 
+/// Paint a menu. MIS_OWNERDRAW items are the owner's (IBM's
+/// MenuDrawMiOwner): WM_DRAWITEM with an OWNERITEM (fsState and
+/// fsStateOld the item's style, fsAttribute and fsAttributeOld its
+/// attributes, MIA_HILITED while it is highlighted) and a presentation
+/// space in RGB mode; an item the owner leaves MIA_HILITED in is
+/// inverted.
 fn paint(h: u32) {
     let k = kind(h);
+    measure(h);
     let rs = rects(h);
     let tracking = crate::state::menu_mode().is_some();
     let Some(m) = data(h) else { return };
     let sel = if tracking { m.sel } else { None };
-    let items: Vec<(u16, u16, u16, Vec<u8>, bool)> = m.items.iter().map(|i| (i.style, i.attr, i.id, i.text.clone(), i.sub != 0)).collect();
+    let items: Vec<(u16, u16, u16, Vec<u8>, bool, u32)> = m.items.iter().map(|i| (i.style, i.attr, i.id, i.text.clone(), i.sub != 0, i.handle)).collect();
     let maximized = ctl::style(ctl::parent(h)) & ws::MAXIMIZED != 0;
     let icon = if k == MS_TITLEBUTTON { frame::icon(ctl::parent(h)) } else { 0 };
-    draw::paint(h, |c| {
+    let hps = win::WinBeginPaint(h, 0, core::ptr::null_mut());
+    let mut owner: Vec<(Rect, u16, u16, u16, u32)> = Vec::new();
+    let col = MenuColors::of(h);
+    draw::with(h, hps, |c| {
         let full = c.rect();
-        c.fill(full, draw::face());
+        c.fill(full, col.bg);
         if k == 0 {
             c.frame(full, draw::DARK);
             c.raised(Rect::new(1, 1, full.right - 1, full.top - 1));
         }
-        for (i, ((style, attr, id, text, has_sub), r)) in items.iter().zip(rs.iter()).enumerate() {
+        for (i, ((style, attr, id, text, has_sub, handle), r)) in items.iter().zip(rs.iter()).enumerate() {
             let hilite = sel == Some(i) || attr & MIA_HILITED != 0;
             match k {
                 MS_TITLEBUTTON => title_button(c, *r, *id as u32, hilite, maximized, icon),
@@ -360,23 +441,71 @@ fn paint(h: u32) {
                         c.hline(r.left + 2, r.right - 2, y - 1, draw::light());
                     }
                 }
-                _ => item(c, *r, k, *attr, text, *has_sub, hilite),
+                _ if style & MIS_OWNERDRAW != 0 => {
+                    owner.push((*r, *style, if hilite { attr | MIA_HILITED } else { *attr }, *id, *handle));
+                }
+                _ => item(c, *r, k, *attr, text, *has_sub, hilite, &col),
             }
         }
     });
+    if !owner.is_empty() {
+        let target = draw_target(h);
+        for (r, style, attr, id, handle) in owner {
+            let mut oi = ctl::OwnerItem {
+                hwnd: h,
+                hps,
+                fs_state: style as u32,
+                fs_attribute: attr as u32,
+                fs_state_old: style as u32,
+                fs_attribute_old: attr as u32,
+                rcl: crate::gpiapi::RectL { left: r.left, bottom: r.bottom, right: r.right, top: r.top },
+                id_item: id as i32,
+                h_item: handle,
+            };
+            ctl::draw_item_to(target, h, &mut oi, None, col.fg, col.bg);
+            if (oi.fs_attribute | oi.fs_attribute_old) & MIA_HILITED as u32 != 0 {
+                draw::with(h, hps, |c| c.invert(r));
+            }
+        }
+    }
+    win::WinEndPaint(hps);
 }
 
-fn item(c: &mut Canvas, r: Rect, k: u32, attr: u16, text: &[u8], has_sub: bool, hilite: bool) {
+/// A menu's colours: the PP_MENU* presentation parameters (IBM's
+/// MenuQueryPresParams), or the system's.
+struct MenuColors {
+    bg: u32,
+    fg: u32,
+    disabled: u32,
+    hilite_bg: u32,
+    hilite_fg: u32,
+}
+
+impl MenuColors {
+    fn of(h: u32) -> MenuColors {
+        use crate::pp::{self, *};
+        MenuColors {
+            bg: pp::or(h, PP_MENUBACKGROUNDCOLOR, draw::face()),
+            fg: pp::or(h, PP_MENUFOREGROUNDCOLOR, draw::text()),
+            disabled: pp::or(h, PP_MENUDISABLEDFGNDCOLOR, draw::GRAY_TEXT),
+            hilite_bg: pp::or(h, PP_MENUHILITEBGNDCOLOR, draw::hilite()),
+            hilite_fg: pp::or(h, PP_MENUHILITEFGNDCOLOR, draw::hilite_text()),
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn item(c: &mut Canvas, r: Rect, k: u32, attr: u16, text: &[u8], has_sub: bool, hilite: bool, col: &MenuColors) {
     let disabled = attr & MIA_DISABLED != 0;
     let fg = if disabled {
-        draw::GRAY_TEXT
+        col.disabled
     } else if hilite {
-        draw::hilite_text()
+        col.hilite_fg
     } else {
-        draw::text()
+        col.fg
     };
     if hilite {
-        c.fill(r, draw::hilite());
+        c.fill(r, col.hilite_bg);
     }
     let f = c.font();
     let y = r.bottom + (r.height() - f.height) / 2 + f.descender;
@@ -519,7 +648,7 @@ fn insert(h: u32, p: *const MenuItem, text: *const u8) -> u32 {
     let t = if mi.style & (MIS_TEXT | MIS_BITMAP) != 0 && mi.style & MIS_BITMAP == 0 { ctl::cstr(text) } else { Vec::new() };
     let Some(m) = data(h) else { return MIT_NONE };
     let at = if mi.pos == MIT_END || mi.pos < 0 { m.items.len() } else { (mi.pos as usize).min(m.items.len()) };
-    m.items.insert(at, Item { style: mi.style, attr: mi.attr, id: mi.id, text: t, sub: mi.sub, handle: mi.handle });
+    m.items.insert(at, Item { style: mi.style, attr: mi.attr, id: mi.id, text: t, sub: mi.sub, handle: mi.handle, size: None });
     if mi.sub != 0 {
         if let Some(w) = st().desk.get_mut(mi.sub) {
             w.owner = h;
@@ -978,6 +1107,7 @@ pub extern "C" fn menu_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             let Some((m, i)) = find(h, mi.id, hi(mp1) != 0) else { return 0 };
             if let Some(it) = item_ref(m, i) {
                 (it.style, it.attr, it.sub, it.handle) = (mi.style, mi.attr, mi.sub, mi.handle);
+                it.size = None;
             }
             ctl::invalidate(m);
             1
@@ -1012,6 +1142,7 @@ pub extern "C" fn menu_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         MM_SETITEMHANDLE => {
             let Some(it) = find(h, lo(mp1) as u16, true).and_then(|(m, i)| item_ref(m, i)) else { return 0 };
             it.handle = mp2;
+            it.size = None;
             1
         }
         MM_QUERYITEMRECT => {

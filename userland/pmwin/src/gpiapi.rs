@@ -34,13 +34,15 @@ pub struct RectL {
     pub top: i32,
 }
 
+impl From<Rect> for RectL {
+    fn from(r: Rect) -> RectL {
+        RectL { left: r.left, bottom: r.bottom, right: r.right, top: r.top }
+    }
+}
+
 impl RectL {
     pub fn rect(&self) -> Rect {
         Rect::new(self.left, self.bottom, self.right, self.top)
-    }
-
-    pub fn from(r: Rect) -> RectL {
-        RectL { left: r.left, bottom: r.bottom, right: r.right, top: r.top }
     }
 }
 

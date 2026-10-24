@@ -511,8 +511,17 @@ fn paint(h: u32) {
     let (vs, hs) = (style & MLS_VSCROLL != 0, style & MLS_HSCROLL != 0);
     let Some(d) = data(h) else { return };
     let (cw, ch, bold, underline) = (d.cw, d.ch, d.bold, d.underline);
-    let fg = if enabled { color_rgb(d.fg_val) } else { draw::GRAY_TEXT };
-    let bg = color_rgb(d.bg_val);
+    // MLM_SETTEXTCOLOR/MLM_SETBACKCOLOR, or the presentation parameters
+    // when the colours are the default ones.
+    use crate::pp::{self, PP_BACKGROUNDCOLOR, PP_DISABLEDFOREGROUNDCOLOR, PP_FOREGROUNDCOLOR};
+    let fg = if !enabled {
+        pp::or(h, PP_DISABLEDFOREGROUNDCOLOR, draw::GRAY_TEXT)
+    } else if d.fg_val == crate::color::SYSCLR_WINDOWTEXT {
+        pp::or(h, PP_FOREGROUNDCOLOR, color_rgb(d.fg_val))
+    } else {
+        color_rgb(d.fg_val)
+    };
+    let bg = if d.bg_val == crate::color::SYSCLR_WINDOW { pp::or(h, PP_BACKGROUNDCOLOR, color_rgb(d.bg_val)) } else { color_rgb(d.bg_val) };
     let m = &d.m;
     let rows = (area.height() + ch - 1) / ch;
     let (sa, sb) = m.selection();

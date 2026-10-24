@@ -994,7 +994,15 @@ fn titlebar_paint(h: u32) {
     let active = title_active(h);
     let title = ctl::text(h);
     let hung = st().is_hung(h);
-    draw::paint(h, |c| draw_title(c, &title, active, hung));
+    // PP_ACTIVECOLOR/PP_INACTIVECOLOR and their text colours (IBM's
+    // TitleBarQueryPresParams; a title bar takes its frame's).
+    use crate::pp::{self, *};
+    let colors = if active {
+        (pp::or(h, PP_ACTIVECOLOR, color::sys(color::SYSCLR_ACTIVETITLE)), pp::or(h, PP_ACTIVETEXTFGNDCOLOR, color::sys(color::SYSCLR_ACTIVETITLETEXT)))
+    } else {
+        (pp::or(h, PP_INACTIVECOLOR, color::sys(color::SYSCLR_INACTIVETITLE)), pp::or(h, PP_INACTIVETEXTFGNDCOLOR, color::sys(color::SYSCLR_INACTIVETITLETEXT)))
+    };
+    draw::paint(h, |c| draw_title_in(c, &title, colors, hung));
 }
 
 /// The title bar shows its frame as active.
@@ -1004,15 +1012,10 @@ pub fn title_active(h: u32) -> bool {
 
 /// A title bar; one of a frame whose thread does not respond is grey
 /// and says so.
-pub fn draw_title(c: &mut Canvas, title: &[u8], active: bool, hung: bool) {
+/// A title bar in (background, text) colours.
+pub fn draw_title_in(c: &mut Canvas, title: &[u8], colors: (u32, u32), hung: bool) {
     let r = c.rect();
-    let (bg, fg) = if hung {
-        (0xa0a0a0, 0xf0f0f0)
-    } else if active {
-        (color::sys(color::SYSCLR_ACTIVETITLE), color::sys(color::SYSCLR_ACTIVETITLETEXT))
-    } else {
-        (color::sys(color::SYSCLR_INACTIVETITLE), color::sys(color::SYSCLR_INACTIVETITLETEXT))
-    };
+    let (bg, fg) = if hung { (0xa0a0a0, 0xf0f0f0) } else { colors };
     c.fill(r, bg);
     let mut t = title.to_vec();
     if hung {

@@ -221,10 +221,8 @@ pub struct State {
     /// what they draw may be half done (`display::flush_damage`).
     pub drawing: Vec<(u32, u32, u32)>,
     /// Presentation parameter colours set on windows: (foreground,
-    /// background) as 0x00RRGGBB, NO_COLOR where not set.
-    pub pres: BTreeMap<u32, (u32, u32)>,
-    /// PP_FONTNAMESIZE set on windows ("10.Helv").
-    pub pres_font: BTreeMap<u32, Vec<u8>>,
+    /// Presentation parameters of windows (pp.rs).
+    pub pp: BTreeMap<u32, Vec<(u32, Vec<u8>)>>,
     /// System values and colours set with WinSetSysValue and WinSetSysColors
     /// (the rest are the defaults).
     pub sysvals: BTreeMap<i32, i32>,
@@ -292,8 +290,7 @@ pub fn init(surface: Surface) {
         cur_ptr: 0,
         ptr_window: 0,
         min_viewer: 0,
-        pres: BTreeMap::new(),
-        pres_font: BTreeMap::new(),
+        pp: BTreeMap::new(),
         sysvals: BTreeMap::new(),
         syscolors: BTreeMap::new(),
         fonts: Default::default(),

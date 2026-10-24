@@ -37,14 +37,19 @@ fn paint(h: u32) {
     let enabled = ctl::enabled(h);
     let bmp = if kind == SS_BITMAP { crate::bitmap::for_static(h) } else { None };
     let icon = if matches!(kind, SS_ICON | SS_SYSICON) { ctl::data::<u32>(h).map_or(0, |v| *v) } else { 0 };
+    // Presentation parameters (IBM's GetStaticPresParams): the
+    // background and foreground, the disabled text colour.
+    use crate::pp::{self, PP_BACKGROUNDCOLOR, PP_DISABLEDFOREGROUNDCOLOR, PP_FOREGROUNDCOLOR};
+    let bg = pp::or(h, PP_BACKGROUNDCOLOR, draw::dialog_bg());
+    let fgc = pp::or(h, PP_FOREGROUNDCOLOR, draw::text());
+    let gray = pp::or(h, PP_DISABLEDFOREGROUNDCOLOR, draw::GRAY_TEXT);
     draw::paint(h, |c| {
         let r = c.rect();
-        let bg = draw::dialog_bg();
         match kind {
             SS_TEXT => {
                 c.fill(r, bg);
                 let fl = style & 0xff00;
-                let fg = if !enabled || fl & draw::DT_HALFTONE != 0 { draw::GRAY_TEXT } else { draw::text() };
+                let fg = if !enabled || fl & draw::DT_HALFTONE != 0 { gray } else { fgc };
                 c.text_in(r, &text, fg, fl);
             }
             SS_GROUPBOX => {
@@ -58,13 +63,13 @@ fn paint(h: u32) {
                     let w = draw::font_of(h).text_width(&draw::strip_mnemonic(&text).0);
                     let t = Rect::new(r.left + 6, r.top - f.height, (r.left + 10 + w).min(r.right), r.top);
                     c.fill(t, bg);
-                    c.text_in(Rect::new(t.left + 2, t.bottom, t.right, t.top), &text, if enabled { draw::text() } else { draw::GRAY_TEXT }, draw::DT_MNEMONIC);
+                    c.text_in(Rect::new(t.left + 2, t.bottom, t.right, t.top), &text, if enabled { fgc } else { gray }, draw::DT_MNEMONIC);
                 }
             }
-            SS_FGNDRECT => c.fill(r, draw::text()),
+            SS_FGNDRECT => c.fill(r, fgc),
             SS_HALFTONERECT => c.fill(r, draw::shadow()),
             SS_BKGNDRECT => c.fill(r, bg),
-            SS_FGNDFRAME => c.frame(r, draw::text()),
+            SS_FGNDFRAME => c.frame(r, fgc),
             SS_HALFTONEFRAME => c.frame(r, draw::shadow()),
             SS_BKGNDFRAME => c.frame(r, bg),
             SS_ICON | SS_SYSICON => {

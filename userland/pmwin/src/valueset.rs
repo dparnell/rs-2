@@ -30,6 +30,9 @@ const VIA_TEXT: u32 = 0x0004;
 const VIA_RGB: u32 = 0x0008;
 const VIA_COLORINDEX: u32 = 0x0010;
 const VIA_OWNERDRAW: u32 = 0x0020;
+const VS_OWNERDRAW: u32 = 0x0200;
+const VDA_ITEM: u32 = 0x0001;
+const VDA_BACKGROUND: u32 = 0x0004;
 const VIA_DISABLED: u32 = 0x0040;
 
 const VM_QUERYITEM: u32 = 0x0375;
@@ -104,6 +107,13 @@ fn select(h: u32, row: u16, col: u16, notify: bool) -> bool {
     true
 }
 
+/// Paint the value set. Owner drawing is IBM's (VSSendOwnerdraw):
+/// WM_DRAWITEM with an OWNERITEM whose idItem says what to draw, in RGB
+/// mode and clipped to rclItem: VS_OWNERDRAW gives the owner the
+/// background (VDA_BACKGROUND, fsState the style), VIA_OWNERDRAW items
+/// their cell (VDA_ITEM, fsAttribute the item's attributes, hItem its
+/// row and column, 1-based). What the owner does not draw is drawn as
+/// usual.
 fn paint(h: u32) {
     let g = grid(h);
     let b = border(h);
@@ -112,9 +122,19 @@ fn paint(h: u32) {
     let Some(d) = data(h) else { return };
     let items = d.items.clone();
     let (rows, cols, sel) = (d.rows, d.cols, d.sel);
-    draw::paint(h, |c: &mut Canvas| {
+    let hps = crate::win::WinBeginPaint(h, 0, core::ptr::null_mut());
+    let (cx, cy) = ctl::size(h);
+    let whole = Rect::new(0, 0, cx, cy);
+    let bg_drawn = style & VS_OWNERDRAW != 0 && {
+        let mut oi = ctl::OwnerItem { hwnd: h, hps, fs_state: style, rcl: whole.into(), id_item: VDA_BACKGROUND as i32, ..Default::default() };
+        ctl::draw_item(h, &mut oi, Some(whole), draw::text(), draw::dialog_bg())
+    };
+    let mut owner: Vec<(u16, u16, u32, Rect)> = Vec::new();
+    draw::with(h, hps, |c: &mut Canvas| {
         let r = c.rect();
-        c.fill(r, draw::dialog_bg());
+        if !bg_drawn {
+            c.fill(r, crate::pp::or(h, crate::pp::PP_BACKGROUNDCOLOR, draw::dialog_bg()));
+        }
         if b > 0 {
             c.sunken(r);
         }
@@ -132,30 +152,58 @@ fn paint(h: u32) {
                 } else {
                     cell
                 };
-                if it.attr & VIA_RGB != 0 {
-                    c.fill(inner, it.value & 0xff_ffff);
-                } else if it.attr & VIA_COLORINDEX != 0 {
-                    c.fill(inner, crate::color::resolve(it.value as i32));
-                } else if it.attr & VIA_TEXT != 0 {
-                    let col_t = if it.attr & VIA_DISABLED != 0 { draw::GRAY_TEXT } else { draw::text() };
-                    c.text_in(inner, &it.text, col_t, draw::DT_CENTER | draw::DT_VCENTER);
-                } else if it.attr & VIA_ICON != 0 && crate::pointer::get(it.value).is_some() {
-                    let small = inner.width().min(inner.height()) < crate::pointer::ICON;
-                    crate::pointer::draw_in(c, inner, it.value, small, it.attr & VIA_DISABLED != 0);
-                } else if it.attr & (VIA_ICON | VIA_BITMAP) != 0 && it.value != 0 {
-                    // Bitmaps are not drawn yet: a framed square.
-                    let s = inner.width().min(inner.height()) - 4;
-                    let (mx, my) = (inner.left + inner.width() / 2, inner.bottom + inner.height() / 2);
-                    let ir = Rect::new(mx - s / 2, my - s / 2, mx - s / 2 + s, my - s / 2 + s);
-                    c.fill(ir, draw::window());
-                    c.frame(ir, draw::text());
-                }
-                if focus && (row, col) == sel {
-                    c.focus_rect(Rect::new(cell.left - 1, cell.bottom - 1, cell.right + 1, cell.top + 1));
+                if it.attr & VIA_OWNERDRAW != 0 {
+                    owner.push((row, col, it.attr, inner));
+                } else {
+                    draw_item(c, it, inner);
                 }
             }
         }
     });
+    for (row, col, attr, inner) in owner {
+        let mut oi = ctl::OwnerItem {
+            hwnd: h,
+            hps,
+            fs_state: style,
+            fs_attribute: attr & 0x1ff,
+            rcl: inner.into(),
+            id_item: VDA_ITEM as i32,
+            h_item: row as u32 | (col as u32) << 16,
+            ..Default::default()
+        };
+        if !ctl::draw_item(h, &mut oi, Some(inner), draw::text(), draw::dialog_bg()) {
+            let it = &items[(row as usize - 1) * cols as usize + col as usize - 1];
+            draw::with(h, hps, |c| draw_item(c, it, inner));
+        }
+    }
+    if focus {
+        let (l, bt, rt, tp) = g.cell(sel.0, sel.1);
+        let cell = Rect::new(l + b, bt + b, rt + b, tp + b);
+        draw::with(h, hps, |c| c.focus_rect(Rect::new(cell.left - 1, cell.bottom - 1, cell.right + 1, cell.top + 1)));
+    }
+    crate::win::WinEndPaint(hps);
+}
+
+/// An item's contents (colour, text, icon or bitmap) in `inner`.
+fn draw_item(c: &mut Canvas, it: &Item, inner: Rect) {
+    if it.attr & VIA_RGB != 0 {
+        c.fill(inner, it.value & 0xff_ffff);
+    } else if it.attr & VIA_COLORINDEX != 0 {
+        c.fill(inner, crate::color::resolve(it.value as i32));
+    } else if it.attr & VIA_TEXT != 0 {
+        let col_t = if it.attr & VIA_DISABLED != 0 { draw::GRAY_TEXT } else { draw::text() };
+        c.text_in(inner, &it.text, col_t, draw::DT_CENTER | draw::DT_VCENTER);
+    } else if it.attr & VIA_ICON != 0 && crate::pointer::get(it.value).is_some() {
+        let small = inner.width().min(inner.height()) < crate::pointer::ICON;
+        crate::pointer::draw_in(c, inner, it.value, small, it.attr & VIA_DISABLED != 0);
+    } else if it.attr & (VIA_ICON | VIA_BITMAP) != 0 && it.value != 0 {
+        // Bitmaps are not drawn yet: a framed square.
+        let s = inner.width().min(inner.height()) - 4;
+        let (mx, my) = (inner.left + inner.width() / 2, inner.bottom + inner.height() / 2);
+        let ir = Rect::new(mx - s / 2, my - s / 2, mx - s / 2 + s, my - s / 2 + s);
+        c.fill(ir, draw::window());
+        c.frame(ir, draw::text());
+    }
 }
 
 pub extern "C" fn valueset_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {

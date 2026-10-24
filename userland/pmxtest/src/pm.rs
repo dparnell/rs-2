@@ -115,6 +115,8 @@ unsafe extern "C" {
     pub fn WinQueryWindowUShort(h: u32, i: i32) -> u32;
     #[link_name = "PMWIN.843"]
     pub fn WinQueryWindowULong(h: u32, i: i32) -> u32;
+    #[link_name = "PMWIN.864"]
+    pub fn WinSetOwner(h: u32, owner: u32) -> u32;
     #[link_name = "PMWIN.875"]
     pub fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32;
 }

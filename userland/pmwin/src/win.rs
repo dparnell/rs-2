@@ -154,6 +154,7 @@ pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, own
     if let Some(w) = s.desk.get_mut(h) {
         w.text = text.to_vec();
     }
+    crate::pp::take_pending(h);
     // A frame's client is its child FID_CLIENT, however it was made
     // (EPM creates its frames' clients with WinCreateWindow).
     if id == frame::FID_CLIENT {
@@ -220,8 +221,7 @@ pub fn remove(h: u32) {
         s.frames.remove(g);
         s.switch.window_gone(*g);
         s.ctl.remove(g);
-        s.pres.remove(g);
-        s.pres_font.remove(g);
+        crate::pp::forget(*g);
         s.timers.retain(|t| t.hwnd != *g);
         if s.focus == *g {
             s.focus = 0;
@@ -296,9 +296,11 @@ pub extern "C" fn WinCreateWindow(
     _behind: u32,
     id: u32,
     ctl: u32,
-    _pres: u32,
+    pres: u32,
 ) -> u32 {
     let class = class_name(class);
+    // The window gets its PRESPARAMS before WM_CREATE.
+    crate::pp::set_pending(pres);
     let pos = Rect::new(x, y, x + cx, y + cy);
     if frame::is_frame_class(&class) {
         // FRAMECDATA: cb, flCreateFlags, hmodResources, idResources.
