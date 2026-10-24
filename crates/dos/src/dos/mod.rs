@@ -280,6 +280,12 @@ impl Machine {
             self.set_vector(v, crate::bios::ROM, stub);
         }
         self.set_vector(0x28, crate::bios::ROM, crate::bios::IRET_CODE);
+        // INT 25h/26h return with RETF, leaving the flags on the stack (the
+        // caller pops them).
+        for v in [0x25u32, 0x26] {
+            let a = ((crate::bios::ROM as u32) << 4) + crate::bios::STUBS as u32 + v * 8 + 4;
+            self.hw.ram[a as usize] = 0xcb;
+        }
         // The system PSP owns DOS's own allocations.
         self.dos.psp = SYS_PSP;
         self.init_psp(SYS_PSP, 0xa000, SYS_PSP, 0);

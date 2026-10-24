@@ -627,6 +627,26 @@ impl Machine {
         if matches!(v, 0x10..=0x12 | 0x15 | 0x16 | 0x1a) && !hw && self.dpmi_bios(host, v, f + 8) {
             return;
         }
+        if matches!(v, 0x25 | 0x26) && !hw && self.frame_get(f, 1) & 3 == 3 {
+            // Absolute disk read/write: served here; like DOS, they leave
+            // the caller's flags on its stack.
+            self.pm_flags_at = Some(f + 8);
+            let _ = self.interrupt(host, v);
+            self.pm_flags_at = None;
+            let (fl, esp, ss) = (self.frame_get(f, 2), self.frame_get(f, 3), self.frame_get(f, 4) as u16);
+            let bits32 = self.client().bits32;
+            let big = self.dpmi_seg_big(ss);
+            let sz = if bits32 { 4 } else { 2 };
+            let sp = (if big { esp } else { esp & 0xffff }).wrapping_sub(sz);
+            let a = self.dpmi_lin(ss, if big { sp } else { sp & 0xffff });
+            if bits32 {
+                self.hw.wr32(a, fl);
+            } else {
+                self.hw.wr16(a, fl as u16);
+            }
+            self.frame_set(f, 3, if big { sp } else { (esp & 0xffff_0000) | (sp & 0xffff) });
+            return;
+        }
         self.dpmi_reflect(v, true);
     }
 
