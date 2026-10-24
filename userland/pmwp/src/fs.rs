@@ -334,7 +334,9 @@ fn associations(name: &[u8]) -> Vec<u32> {
 extern "C" fn df_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
     if view == OPEN_RUNNING || view == OPEN_DEFAULT {
         let p = path(obj);
-        for h in associations(&split_path(&p).1) {
+        // The programs for its types first, then those for its name.
+        let by_type = crate::pages::types_of(obj).iter().flat_map(|t| crate::pages::programs_for_type(t)).collect::<Vec<u32>>();
+        for h in by_type.into_iter().chain(associations(&split_path(&p).1)) {
             let prog = wps::object_from_handle(h);
             if prog != 0 && wps::is(prog, "WPProgram") {
                 let mut buf = alloc::vec![0u8; 1024];
@@ -746,15 +748,21 @@ methods! {
 pub fn impl_file_system() -> Impl {
     Impl {
         data: core::mem::size_of::<FsData>() as u32,
-        methods: alloc::vec![("wpSetRealName", __m_wpSetRealName as usize), ("wpQueryRealName", __m_wpQueryRealName as usize)],
-        overrides: alloc::vec![
+        methods: [("wpSetRealName", __m_wpSetRealName as usize), ("wpQueryRealName", __m_wpQueryRealName as usize)]
+            .into_iter()
+            .chain(crate::pages::file_system_methods())
+            .collect(),
+        overrides: [
             ("wpSetTitle", __m_fs_set_title as usize),
             ("wpQueryHandle", __m_fs_query_handle as usize),
             ("wpQueryIcon", __m_fs_query_icon as usize),
             ("wpMoveObject", __m_fs_move as usize),
             ("wpCopyObject", __m_fs_copy as usize),
             ("wpUnInitData", __m_fs_uninit as usize),
-        ],
+        ]
+        .into_iter()
+        .chain(crate::pages::file_system_overrides())
+        .collect(),
     }
 }
 
@@ -763,14 +771,22 @@ pub fn impl_m_file_system() -> Impl {
 }
 
 pub fn impl_data_file() -> Impl {
-    Impl { data: 0, methods: Vec::new(), overrides: alloc::vec![("wpOpen", __m_df_open as usize)] }
+    Impl {
+        data: 0,
+        methods: crate::pages::data_file_methods(),
+        overrides: [("wpOpen", __m_df_open as usize)].into_iter().chain(crate::pages::data_file_overrides()).collect(),
+    }
 }
 
 pub fn impl_program_file() -> Impl {
     Impl {
         data: 0,
-        methods: alloc::vec![("wpQueryProgDetails", __m_pf_query_prog_details as usize)],
-        overrides: [("wpOpen", __m_pf_open as usize)].into_iter().chain(crate::dnd::overrides("WPProgramFile")).collect(),
+        methods: [("wpQueryProgDetails", __m_pf_query_prog_details as usize)].into_iter().chain(crate::pages::program_methods(false)).collect(),
+        overrides: [("wpOpen", __m_pf_open as usize)]
+            .into_iter()
+            .chain(crate::dnd::overrides("WPProgramFile"))
+            .chain(crate::pages::program_file_overrides())
+            .collect(),
     }
 }
 

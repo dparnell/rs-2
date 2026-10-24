@@ -502,11 +502,6 @@ extern "C" fn shredder_open(o: usize, cnr: u32, _view: u32, param: u32) -> u32 {
     som::call_parent(wps::ccd("WPShredder"), wps::cd("WPObject"), m::WPObject::wpOpen, &[o, cnr as usize, obj::OPEN_SETTINGS as usize, param as usize]) as u32
 }
 
-/// IBM's wpAddObjectWindowPage answer for the Shredder: no Window page.
-extern "C" fn shredder_window_page(_o: usize, _nb: u32) -> u32 {
-    0xffff_ffff
-}
-
 extern "C" fn shredder_cls_view(_cls: usize) -> u32 {
     obj::OPEN_SETTINGS
 }
@@ -522,7 +517,6 @@ methods! {
     __m_shredder_drag_over => shredder_drag_over, 3;
     __m_shredder_drop => shredder_drop, 4;
     __m_shredder_open => shredder_open, 4;
-    __m_shredder_window_page => shredder_window_page, 2;
     __m_shredder_cls_view => shredder_cls_view, 1;
 }
 
@@ -550,7 +544,7 @@ pub fn impl_shredder() -> Impl {
             ("wpDragOver", __m_shredder_drag_over as usize),
             ("wpDrop", __m_shredder_drop as usize),
             ("wpOpen", __m_shredder_open as usize),
-            ("wpAddObjectWindowPage", __m_shredder_window_page as usize),
+            crate::pages::no_window_page_override(),
         ],
     }
 }

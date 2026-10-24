@@ -176,8 +176,11 @@ extern "C" fn wpAddObjectGeneralPage(o: usize, nb: u32) -> u32 {
     insert(o, nb, page, b"~General\0")
 }
 
+/// WPObject's pages: Window, then General (pages go in front: the
+/// last added shows first).
 extern "C" fn wpAddSettingsPages(o: usize, nb: u32) -> u32 {
     obj::call(m::WPObject::wpAddObjectGeneralPage, &[o, nb as usize]);
+    obj::call(m::WPObject::wpAddObjectWindowPage, &[o, nb as usize]);
     1
 }
 
@@ -240,6 +243,8 @@ extern "C" fn wpAddProgramPage(o: usize, nb: u32) -> u32 {
 
 extern "C" fn program_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPProgram"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
+    wps::call("WPProgram", m::WPProgram::wpAddProgramAssociationPage, &[o, nb as usize]);
+    wps::call("WPProgram", m::WPProgram::wpAddProgramSessionPage, &[o, nb as usize]);
     wps::call("WPProgram", m::WPProgram::wpAddProgramPage, &[o, nb as usize]);
     1
 }
@@ -357,7 +362,7 @@ pub fn object_methods() -> Vec<(&'static str, usize)> {
 }
 
 pub fn program_methods() -> Vec<(&'static str, usize)> {
-    alloc::vec![("wpAddProgramPage", __m_wpAddProgramPage as usize)]
+    [("wpAddProgramPage", __m_wpAddProgramPage as usize)].into_iter().chain(crate::pages::program_methods(true)).collect()
 }
 
 pub fn program_overrides() -> Vec<(&'static str, usize)> {

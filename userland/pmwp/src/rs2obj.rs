@@ -45,10 +45,10 @@ methods! {
 }
 
 pub fn impl_shutdown() -> Impl {
-    Impl { data: 0, methods: Vec::new(), overrides: alloc::vec![("wpOpen", __m_shutdown_open as usize)] }
+    Impl { data: 0, methods: Vec::new(), overrides: alloc::vec![("wpOpen", __m_shutdown_open as usize), crate::pages::no_window_page_override()] }
 }
 
 pub fn impl_window_list() -> Impl {
-    Impl { data: 0, methods: Vec::new(), overrides: alloc::vec![("wpOpen", __m_winlist_open as usize)] }
+    Impl { data: 0, methods: Vec::new(), overrides: alloc::vec![("wpOpen", __m_winlist_open as usize), crate::pages::no_window_page_override()] }
 }
 

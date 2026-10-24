@@ -707,7 +707,7 @@ pub fn impl_mouse() -> Impl {
     Impl {
         data: 0,
         methods: alloc::vec![("wpAddMouseTimingPage", __m_wpAddMouseTimingPage as usize), ("wpAddMouseTypePage", __m_wpAddMouseTypePage as usize)],
-        overrides: alloc::vec![("wpAddSettingsPages", __m_mouse_add_pages as usize)],
+        overrides: alloc::vec![("wpAddSettingsPages", __m_mouse_add_pages as usize), crate::pages::no_window_page_override()],
     }
 }
 
@@ -715,7 +715,7 @@ pub fn impl_keyboard() -> Impl {
     Impl {
         data: 0,
         methods: alloc::vec![("wpAddKeyboardTimingPage", __m_wpAddKeyboardTimingPage as usize)],
-        overrides: alloc::vec![("wpAddSettingsPages", __m_kbd_add_pages as usize)],
+        overrides: alloc::vec![("wpAddSettingsPages", __m_kbd_add_pages as usize), crate::pages::no_window_page_override()],
     }
 }
 
@@ -723,7 +723,7 @@ pub fn impl_sound() -> Impl {
     Impl {
         data: 0,
         methods: alloc::vec![("wpAddSoundWarningBeepPage", __m_wpAddSoundWarningBeepPage as usize)],
-        overrides: alloc::vec![("wpAddSettingsPages", __m_sound_add_pages as usize)],
+        overrides: alloc::vec![("wpAddSettingsPages", __m_sound_add_pages as usize), crate::pages::no_window_page_override()],
     }
 }
 

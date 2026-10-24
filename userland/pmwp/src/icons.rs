@@ -41,19 +41,24 @@ pub fn of_object_id(id: &[u8]) -> u32 {
 
 /// Whether drive `d` (1 = A:) holds a CD file system.
 pub fn is_cd(d: u32) -> bool {
+    fs_name(d).is_some_and(|fs| [&b"CDFS"[..], b"ISO9660", b"UDF"].iter().any(|n| fs.eq_ignore_ascii_case(n)))
+}
+
+/// The name of drive `d`'s file system (1 = A:).
+pub fn fs_name(d: u32) -> Option<alloc::vec::Vec<u8>> {
     if d == 0 || d > 26 {
-        return false;
+        return None;
     }
     let dev = [b'A' + d as u8 - 1, b':', 0];
     let mut buf = [0u8; 64];
     let mut cb = buf.len() as u32;
     if unsafe { os2::DosQueryFSAttach(dev.as_ptr(), 0, 1, buf.as_mut_ptr(), &mut cb) } != 0 {
-        return false;
+        return None;
     }
     // FSQBUFFER2: type, cbName, cbFSDName, cbFSAData, the name and its
     // NUL, then the file system's name.
     let cb_name = u16::from_le_bytes([buf[2], buf[3]]) as usize;
     let at = 8 + cb_name + 1;
     let fs = buf.get(at..).map_or(&[][..], |b| &b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())]);
-    [&b"CDFS"[..], b"ISO9660", b"UDF"].iter().any(|n| fs.eq_ignore_ascii_case(n))
+    Some(fs.to_vec())
 }

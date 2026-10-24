@@ -183,6 +183,17 @@ fn ensure_holder(holder: &[u8]) -> bool {
 }
 
 pub fn ea_read(path: &[u8], name: &[u8]) -> Option<(u16, Vec<u8>)> {
+    let v = ea_read_raw(path, name)?;
+    if v.len() < 4 {
+        return None;
+    }
+    let ty = u16::from_le_bytes([v[0], v[1]]);
+    let n = (u16::from_le_bytes([v[2], v[3]]) as usize).min(v.len() - 4);
+    Some((ty, v[4..4 + n].to_vec()))
+}
+
+/// An EA's whole value (from its type word on), as for EAT_MVMT values.
+pub fn ea_read_raw(path: &[u8], name: &[u8]) -> Option<Vec<u8>> {
     let path = &ea_holder(path);
     let gl = (4 + 5 + name.len() + 1 + 3) & !3;
     let mut gea = alloc::vec![0u8; gl];
@@ -200,27 +211,32 @@ pub fn ea_read(path: &[u8], name: &[u8]) -> Option<(u16, Vec<u8>)> {
     let cb_name = fea[9] as usize;
     let cb_value = u16::from_le_bytes([fea[10], fea[11]]) as usize;
     let v = fea.get(12 + cb_name + 1..12 + cb_name + 1 + cb_value)?;
-    if v.len() < 4 {
-        return None;
-    }
-    let ty = u16::from_le_bytes([v[0], v[1]]);
-    let n = (u16::from_le_bytes([v[2], v[3]]) as usize).min(v.len() - 4);
-    Some((ty, v[4..4 + n].to_vec()))
+    (!v.is_empty()).then(|| v.to_vec())
 }
 
 /// Write an EA (typed: type word, length word, data); `None` removes it.
 pub fn ea_write(path: &[u8], name: &[u8], value: Option<(u16, &[u8])>) -> bool {
+    let v = value.map(|(ty, d)| {
+        let mut v = ty.to_le_bytes().to_vec();
+        v.extend_from_slice(&(d.len() as u16).to_le_bytes());
+        v.extend_from_slice(d);
+        v
+    });
+    ea_write_raw(path, name, v.as_deref())
+}
+
+/// Write an EA's whole value (from its type word on); `None` removes it.
+pub fn ea_write_raw(path: &[u8], name: &[u8], value: Option<&[u8]>) -> bool {
     let holder = ea_holder(path);
     if !eq_nocase(&holder, &normalize(path)) && (value.is_none() && attributes(&holder).is_none() || !ensure_holder(&holder)) {
         debug(&alloc::format!("ea_write: no {:?}", core::str::from_utf8(&holder)));
         return value.is_none();
     }
     let path = &holder;
-    let data_len = value.map_or(0, |(_, d)| d.len());
-    if data_len > 0xfff0 {
+    let value_len = value.map_or(0, |d| d.len());
+    if value_len > 0xfff4 {
         return false;
     }
-    let value_len = if value.is_some() { 4 + data_len } else { 0 };
     let cb = (4 + 8 + name.len() + 1 + value_len + 3) & !3;
     let mut b = alloc::vec![0u8; cb + 8];
     b[0..4].copy_from_slice(&(cb as u32).to_le_bytes());
@@ -228,10 +244,8 @@ pub fn ea_write(path: &[u8], name: &[u8], value: Option<(u16, &[u8])>) -> bool {
     b[10..12].copy_from_slice(&(value_len as u16).to_le_bytes());
     b[12..12 + name.len()].copy_from_slice(name);
     let v = 12 + name.len() + 1;
-    if let Some((ty, d)) = value {
-        b[v..v + 2].copy_from_slice(&ty.to_le_bytes());
-        b[v + 2..v + 4].copy_from_slice(&(d.len() as u16).to_le_bytes());
-        b[v + 4..v + 4 + d.len()].copy_from_slice(d);
+    if let Some(d) = value {
+        b[v..v + d.len()].copy_from_slice(d);
     }
     let eaop: [u32; 3] = [0, b.as_mut_ptr() as u32, 0];
     let p = z(path);

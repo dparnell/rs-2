@@ -50,6 +50,7 @@ extern "C" fn prog_setup(obj: usize, setup: *const u8) -> u32 {
             b"PARAMETERS" => p.params = str_new(&v),
             b"STARTUPDIR" => p.dir = str_new(&v),
             b"PROGTYPE" => p.progc = progtype(&v),
+            b"ASSOCTYPE" => crate::pages::associate_types(obj, &v),
             b"ASSOCFILTER" => {
                 // PMWP_ASSOC_FILTER: a pattern's programs (handles in
                 // decimal, NUL separated), as IBM's shell keeps them.
@@ -458,7 +459,10 @@ pub fn impl_disk() -> Impl {
         methods: alloc::vec![
             ("wpQueryLogicalDrive", __m_wpQueryLogicalDrive as usize),
             ("wpQueryRootFolder", __m_wpQueryRootFolder as usize),
-        ],
+        ]
+        .into_iter()
+        .chain(crate::pages::disk_methods())
+        .collect(),
         overrides: alloc::vec![
             ("wpSetup", __m_disk_setup as usize),
             ("wpSaveState", __m_disk_save_state as usize),
@@ -468,6 +472,7 @@ pub fn impl_disk() -> Impl {
         ]
         .into_iter()
         .chain(crate::dnd::overrides("WPDisk"))
+        .chain(crate::pages::disk_overrides())
         .collect(),
     }
 }

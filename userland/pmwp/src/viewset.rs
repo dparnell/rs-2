@@ -18,7 +18,7 @@ use alloc::vec::Vec;
 use crate::book;
 use crate::classes_gen::m;
 use crate::methods;
-use crate::obj::{self, OPEN_CONTENTS, OPEN_DETAILS, OPEN_TREE};
+use crate::obj::{self, OPEN_CONTENTS, OPEN_DEFAULT, OPEN_DETAILS, OPEN_TREE};
 use crate::pm::*;
 
 
@@ -99,6 +99,14 @@ fn owner(h: u32) -> usize {
 const ID_OPEN: u16 = 521; // .. 523: icon, details, tree
 const ID_FORMAT: u16 = 530; // .. 532
 const ID_SIZE: u16 = 533; // .. 535
+const ID_FONTNAME: u16 = 536;
+const ID_FONT: u16 = 537;
+const ID_NOFONT: u16 = 538;
+
+fn show_font(h: u32, o: usize) {
+    let f = crate::fs::folder_font(o).unwrap_or_else(|| b"System font".to_vec());
+    set_item_text(h, ID_FONTNAME as u32, &f);
+}
 
 extern "C" fn view1_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     match msg {
@@ -110,7 +118,30 @@ extern "C" fn view1_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             let f = crate::fs::view_flags(o);
             check(h, ID_FORMAT + icon_format(f).min(2) as u16, true);
             check(h, ID_SIZE + icon_size(f).min(2) as u16, true);
+            show_font(h, o);
             0
+        }
+        // The folder's font: the Font Palette's fonts dropped on the
+        // folder set it (Font... opens the palette, as IBM's page does).
+        WM_COMMAND if (a & 0xffff) as u16 == ID_FONT => {
+            let pal = crate::wps::handle_of_id(b"<WP_FNTPAL>").map_or(0, crate::wps::object_from_handle);
+            if pal != 0 {
+                obj::call(m::WPObject::wpViewObject, &[pal, 0, OPEN_DEFAULT as usize, 0]);
+            }
+            0
+        }
+        WM_COMMAND if (a & 0xffff) as u16 == ID_NOFONT => {
+            let o = owner(h);
+            if o != 0 {
+                crate::fs::set_folder_font(o, None);
+                show_font(h, o);
+            }
+            0
+        }
+        // Back to the page (shown again): the font may have changed.
+        WM_SHOW if a != 0 => {
+            show_font(h, owner(h));
+            unsafe { WinDefDlgProc(h, msg, a, b) }
         }
         WM_CONTROL if (a >> 16) == 1 => {
             let o = owner(h);
@@ -147,6 +178,10 @@ extern "C" fn wpAddFolderView1Page(o: usize, nb: u32) -> u32 {
         radio(b"~Normal size", (10, 38, 70), ID_SIZE, true),
         radio(b"~Small size", (84, 38, 70), ID_SIZE + 1, false),
         radio(b"In~visible", (158, 38, 70), ID_SIZE + 2, false),
+        book::label(b"Font:", (6, 18, 30)),
+        item(WC_STATIC, b"", WS_VISIBLE | 0x0001, (36, 18, 90, 8), ID_FONTNAME),
+        item(WC_BUTTON, b"~Font...", WS_VISIBLE | WS_TABSTOP | WS_GROUP, (128, 15, 46, 12), ID_FONT),
+        item(WC_BUTTON, b"~System font", WS_VISIBLE | WS_TABSTOP, (178, 15, 52, 12), ID_NOFONT),
     ]);
     let page = book::make_page(nb, view1_proc, &tpl, o);
     if page == 0 {

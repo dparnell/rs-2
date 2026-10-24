@@ -59,7 +59,13 @@ pub struct Data {
     pub flags: u32,
     pub state: Option<Box<Vec<Rec>>>,
     pub help_panel: u32,
+    /// CCVIEW_DEFAULT (the System object's choice), CCVIEW_ON, CCVIEW_OFF.
+    pub ccview: u32,
 }
+
+pub const CCVIEW_DEFAULT: u32 = 0;
+pub const CCVIEW_ON: u32 = 1;
+pub const CCVIEW_OFF: u32 = 2;
 
 pub fn d<'a>(obj: usize) -> &'a mut Data {
     som::data(wps::ccd("WPObject"), obj)
@@ -206,6 +212,9 @@ extern "C" fn wpSaveState(obj: usize) -> u32 {
     if d(obj).help_panel != 0 {
         wpSaveLong(obj, c, 5, d(obj).help_panel);
     }
+    if d(obj).ccview != CCVIEW_DEFAULT {
+        wpSaveLong(obj, c, 6, d(obj).ccview);
+    }
     1
 }
 
@@ -225,7 +234,29 @@ extern "C" fn wpRestoreState(obj: usize, _reserved: u32) -> u32 {
     if let Some(v) = restored_long(obj, b"WPObject", 5) {
         d(obj).help_panel = v;
     }
+    if let Some(v) = restored_long(obj, b"WPObject", 6) {
+        d(obj).ccview = v;
+    }
     1
+}
+
+extern "C" fn wpQueryConcurrentView(obj: usize) -> u32 {
+    d(obj).ccview
+}
+
+extern "C" fn wpSetConcurrentView(obj: usize, v: u32) -> u32 {
+    d(obj).ccview = v;
+    changed(obj);
+    1
+}
+
+/// Whether opening the object makes a new view even with one open.
+pub fn concurrent(obj: usize) -> bool {
+    match call(m::WPObject::wpQueryConcurrentView, &[obj]) as u32 {
+        CCVIEW_ON => true,
+        CCVIEW_OFF => false,
+        _ => crate::system::concurrent_view(),
+    }
 }
 
 /// Save now: every class's wpSaveState, then the values written where
@@ -503,6 +534,14 @@ extern "C" fn wpSetup(obj: usize, setup: *const u8) -> u32 {
                 }
             }
             b"HELPPANEL" => d(obj).help_panel = parse_dec(&v).unwrap_or(0),
+            b"CCVIEW" => {
+                let cc = match v.to_ascii_uppercase().as_slice() {
+                    b"YES" => CCVIEW_ON,
+                    b"NO" => CCVIEW_OFF,
+                    _ => CCVIEW_DEFAULT,
+                };
+                call(m::WPObject::wpSetConcurrentView, &[obj, cc as usize]);
+            }
             b"ICONFILE" => {
                 let p = z(&v);
                 let h = unsafe { Rs2LoadFileIcon(p.as_ptr(), 0) };
@@ -566,9 +605,9 @@ extern "C" fn wpViewObject(obj: usize, hwnd_cnr: u32, view: u32, param: u32) -> 
         return 0;
     }
     let view = if view == OPEN_DEFAULT { call(m::WPObject::wpQueryDefaultView, &[obj]) as u32 } else { view };
-    // The System object's "Create new window" (ConcurrentView) opens
-    // another view; settings notebooks are never doubled.
-    let f = if view != OPEN_SETTINGS && crate::system::concurrent_view() { 0 } else { crate::view::frame_of(obj, if view == OPEN_DEFAULT { OPEN_CONTENTS } else { view }) };
+    // CCVIEW (or the System object's "Create new window") opens another
+    // view; settings notebooks are never doubled.
+    let f = if view != OPEN_SETTINGS && concurrent(obj) { 0 } else { crate::view::frame_of(obj, if view == OPEN_DEFAULT { OPEN_CONTENTS } else { view }) };
     if f != 0 {
         crate::view::activate(f);
         return f;
@@ -912,6 +951,8 @@ methods! {
     __m_wpCopyObject => wpCopyObject, 3;
     __m_wpMoveObject => wpMoveObject, 2;
     __m_wpQueryConfirmations => wpQueryConfirmations, 1;
+    __m_wpQueryConcurrentView => wpQueryConcurrentView, 1;
+    __m_wpSetConcurrentView => wpSetConcurrentView, 2;
     __m_wpclsQueryTitle => wpclsQueryTitle, 1;
     __m_wpclsQueryIcon => wpclsQueryIcon, 1;
     __m_wpclsQueryStyle => wpclsQueryStyle, 1;
@@ -931,6 +972,7 @@ pub fn impl_object() -> Impl {
     i.methods.extend(crate::book::object_methods());
     i.methods.extend(crate::dnd::object_methods());
     i.methods.extend(crate::delete::object_methods());
+    i.methods.extend(crate::pages::object_methods());
     i
 }
 
@@ -976,6 +1018,8 @@ fn impl_object_own() -> Impl {
             ("wpCopyObject", __m_wpCopyObject as usize),
             ("wpMoveObject", __m_wpMoveObject as usize),
             ("wpQueryConfirmations", __m_wpQueryConfirmations as usize),
+            ("wpQueryConcurrentView", __m_wpQueryConcurrentView as usize),
+            ("wpSetConcurrentView", __m_wpSetConcurrentView as usize),
         ],
         overrides: alloc::vec![("somInit", __m_somInit as usize), ("somUninit", __m_somUninit as usize)],
     }

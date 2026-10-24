@@ -539,12 +539,12 @@ pub fn impl_system() -> Impl {
             ("wpAddSystemWindowPage", __m_wpAddSystemWindowPage as usize),
             ("wpAddSystemConfirmationPage", __m_wpAddSystemConfirmationPage as usize),
         ],
-        overrides: alloc::vec![("wpAddSettingsPages", __m_system_add_pages as usize)],
+        overrides: alloc::vec![("wpAddSettingsPages", __m_system_add_pages as usize), crate::pages::no_window_page_override()],
     }
 }
 
 pub fn impl_rs2_system() -> Impl {
-    Impl { data: 0, methods: Vec::new(), overrides: alloc::vec![("wpAddSettingsPages", __m_rs2_system_add_pages as usize)] }
+    Impl { data: 0, methods: Vec::new(), overrides: alloc::vec![("wpAddSettingsPages", __m_rs2_system_add_pages as usize), crate::pages::no_window_page_override()] }
 }
 
 pub fn impl_clock() -> Impl {
@@ -560,6 +560,7 @@ pub fn impl_clock() -> Impl {
             ("wpInitData", __m_clock_init as usize),
             ("wpSaveState", __m_clock_save_state as usize),
             ("wpRestoreState", __m_clock_restore_state as usize),
+            crate::pages::no_window_page_override(),
         ],
     }
 }
