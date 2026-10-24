@@ -207,6 +207,9 @@ pub struct State {
     /// What was drawn on the screen since the kernel was last told
     /// (`display::flush_damage`).
     pub damage: gpi::Damage,
+    /// Since when (ms) `damage` has been held back for windows that still
+    /// paint (`display::flush_damage`).
+    pub damage_held: Option<u32>,
     /// Presentation parameter colours set on windows: (foreground,
     /// background) as 0x00RRGGBB, NO_COLOR where not set.
     pub pres: BTreeMap<u32, (u32, u32)>,
@@ -304,6 +307,7 @@ pub fn init(surface: Surface) {
         screen: surface.pixels() as usize,
         shadow: Vec::new(),
         damage: gpi::Damage::new(),
+        damage_held: None,
         keys: [0; 256],
         switch: Default::default(),
         cursor: Default::default(),

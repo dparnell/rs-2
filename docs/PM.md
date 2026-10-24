@@ -111,10 +111,13 @@ during the first half second. In the PM session Ctrl+Esc goes to PM
 
 ## The screen: damage and display modes
 
-PM processes draw straight into memory the kernel maps for them
-(`Rs2MapDisplay`): the framebuffer of VMware SVGA II (VRAM) or virtio-gpu
-(its guest-RAM backing), each sized for the largest mode the driver
-offers, or, on a plain firmware (GOP) framebuffer, a back buffer in RAM.
+PM processes draw into memory the kernel maps for them
+(`Rs2MapDisplay`): a back buffer in RAM, sized for the largest mode the
+display driver offers (VMware SVGA II, virtio-gpu) or for the screen (a
+plain firmware framebuffer). Without the memory for one (the back
+buffer may take an eighth of the free memory) they draw straight into
+the framebuffer: VMware SVGA II's VRAM or virtio-gpu's guest-RAM
+backing.
 
 **Damage.** The screen surface (gpi's `Surface`) notes every pixel it
 writes in a damage list in the shared state (`gpi::Damage`: at most 16
@@ -122,12 +125,20 @@ rectangles; a new one joins the one it adds least area to when that is
 little or the list is full). When a thread lets go of the PM lock,
 PMWIN hands the list to the kernel (`Rs2UpdateDisplay`) unless it is
 drawing into the shadow buffer of a background PM session. The kernel
-adds it to its own list (`display::damage`, also fed with the rows the
-text screens draw), and about 60 times a second the driver copies only
-those areas: an UPDATE per rectangle on SVGA II, a TRANSFER_TO_HOST_2D
-and a RESOURCE_FLUSH on virtio-gpu, and from the back buffer to the
-screen on a plain framebuffer (only while PM is shown; when it comes
-back the whole buffer is copied). Measured in QEMU at 1024x768 with
+copies those areas from the back buffer to the framebuffer then, while
+the thread still holds the lock, so the screen only shows what PM
+finished drawing (VMware shows what is written to its framebuffer as it
+happens: drawing there directly, every window flickered as it was
+erased and painted). While windows still have to paint (a shown window
+with an update region whose thread is not hung, or a WinBeginPaint not
+yet ended) PMWIN holds the list back, for at most 30 ms: a window
+moved, opened or brought to the top appears with everything under and
+in it painted. When PM gets the screen back from a text session the
+kernel copies all of the back buffer. The kernel also adds the list to
+its own (`display::damage`, also fed with the rows the text screens
+draw), and about 60 times a second the driver sends only those areas to
+the display: an UPDATE per rectangle on SVGA II, a TRANSFER_TO_HOST_2D
+and a RESOURCE_FLUSH on virtio-gpu. Measured in QEMU at 1024x768 with
 `dispstat` on the kernel command line (pixels sent per second, logged
 every 5 s): an idle desktop went from 24.5 million (the whole screen 31
 times a second) to 0; dragging a folder window around sends 1-3

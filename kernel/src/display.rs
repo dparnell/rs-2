@@ -2,13 +2,18 @@
 //! (gate module RS2API): the framebuffer mapped into PM processes, and a
 //! queue of key, mouse and repaint events for the PM session.
 //!
+//! PM draws into a back buffer in RAM (when there is memory for one):
+//! what it drew is copied to the framebuffer when PMWIN lets go of its
+//! lock (`Rs2UpdateDisplay`, [`present`]), so the screen only ever shows
+//! what PM finished drawing, never a window erased and not yet painted
+//! (VMware shows writes to its framebuffer as they happen).
+//!
 //! What changed on the screen is kept as a short list of damaged
 //! rectangles ([`damage`], [`take_damage`]): the text screens add the
-//! rows they draw, PM (PMWIN, when it lets go of its lock) the areas it
-//! drew (`Rs2UpdateDisplay`). Display drivers that copy changes to the
-//! display (VMware SVGA II's UPDATE, virtio-gpu's TRANSFER_TO_HOST_2D and
-//! RESOURCE_FLUSH) take the list on the timer tick and copy only those
-//! areas.
+//! rows they draw, PM the areas it drew. Display drivers that copy
+//! changes to the display (VMware SVGA II's UPDATE, virtio-gpu's
+//! TRANSFER_TO_HOST_2D and RESOURCE_FLUSH) take the list on the timer
+//! tick and copy only those areas.
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -59,10 +64,10 @@ static PM_PIDS: SpinLock<alloc::vec::Vec<u32>> = SpinLock::new(alloc::vec::Vec::
 static WAITERS: WaitQueue = WaitQueue::new();
 static DISPLAY: Once<Mapped> = Once::new();
 
-/// The memory PM processes draw into: the display's framebuffer (VMware
-/// SVGA II's VRAM, virtio-gpu's backing), large enough for every mode the
-/// driver can switch to, or, on a plain firmware framebuffer, a back
-/// buffer in RAM that the timer tick copies to the screen.
+/// The memory PM processes draw into: a back buffer in RAM, large
+/// enough for every mode the display driver can switch to, or (without
+/// the memory for one) the display's framebuffer itself (VMware SVGA
+/// II's VRAM, virtio-gpu's backing).
 struct Mapped {
     obj: Arc<SharedMem>,
     /// Physical address of its first byte, and its size.
@@ -70,7 +75,14 @@ struct Mapped {
     size: u64,
     /// A back buffer (else the framebuffer itself).
     back: bool,
+    /// A display driver can change modes (else a plain firmware
+    /// framebuffer).
+    driver: bool,
 }
+
+/// PM came back to the screen: copy all of the back buffer (on the next
+/// tick).
+static PRESENT_ALL: AtomicBool = AtomicBool::new(false);
 
 /// Display mode changes under PM so far (`Rs2QueryDisplay` reports it,
 /// so that PM notices a change even if it missed the EV_MODE event).
@@ -271,6 +283,7 @@ pub fn post_background() {
 }
 
 pub fn post_repaint() {
+    PRESENT_ALL.store(true, Ordering::Relaxed);
     push(Input { kind: EV_REPAINT, time: crate::irq::uptime_ms() as u32, ..Default::default() });
 }
 
@@ -379,8 +392,17 @@ pub fn display() -> Option<Info> {
         use crate::drivers::{svga, virtio::gpu};
         let area = if gpu::present() { gpu::pm_area() } else { svga::pm_area() };
         let fb = crate::screen::framebuffer()?;
+        // At most an eighth of the free memory.
+        let back_buffer = |n: u64| {
+            let pages = n.next_multiple_of(PAGE as u64) / PAGE as u64;
+            (pages <= crate::mm::phys::free_count() / 8).then(|| crate::mm::phys::alloc_contig(pages, u64::MAX)).flatten()
+        };
+        let driver = area.is_some() || gpu::present();
         let (phys, size, back) = match area {
-            Some((p, n)) => (p, n, false),
+            Some((p, n)) => match back_buffer(n) {
+                Some(b) => (b, n, true),
+                None => (p, n, false),
+            },
             // virtio-gpu without room for more: its current framebuffer.
             None if gpu::present() => (fb.base & !(PAGE as u64 - 1), (fb.base & (PAGE as u64 - 1)) + fb.stride as u64 * fb.height as u64 * 4, false),
             None => {
@@ -394,7 +416,7 @@ pub fn display() -> Option<Info> {
         let size = size.next_multiple_of(PAGE as u64);
         let base = vm::reserve_shared(size as u32, None)?;
         let obj = SharedMem::new_device(base, size as u32, vm::pag::READ | vm::pag::WRITE, phys);
-        DISPLAY.set(Mapped { obj, phys, size, back });
+        DISPLAY.set(Mapped { obj, phys, size, back, driver });
         if back {
             crate::println!("display: PM draws into a back buffer ({} KB)", size / 1024);
         }
@@ -471,7 +493,7 @@ pub fn modes() -> alloc::vec::Vec<(u32, u32)> {
     use crate::drivers::{svga, virtio::gpu};
     let mut v = if gpu::present() { gpu::modes() } else { svga::modes() };
     if let Some(m) = DISPLAY.get() {
-        if m.back {
+        if !m.driver {
             v.clear();
         }
         v.retain(|&(w, h)| w as u64 * h as u64 * 4 <= m.size);
@@ -479,28 +501,60 @@ pub fn modes() -> alloc::vec::Vec<(u32, u32)> {
     v
 }
 
-/// Timer tick (boot processor, about 60 times a second): with a back
-/// buffer, copy what PM drew to the screen while PM is shown.
-fn copy_back(ticks: u64) {
-    let Some(m) = DISPLAY.get().filter(|m| m.back) else { return };
-    if ticks % 16 != 8 {
-        return;
-    }
-    let Some(fb) = crate::screen::framebuffer() else { return };
-    let d = take_damage(fb.width, fb.height);
+/// Whether what PM draws belongs on the screen now (the PM session in
+/// the foreground, no pop-up over it).
+fn pm_shown() -> bool {
     let pm = crate::session::pm_session();
-    if pm == 0 || crate::session::foreground() != pm || crate::session::popup_active() {
+    pm != 0 && crate::session::foreground() == pm && !crate::session::popup_active()
+}
+
+/// PM finished drawing in `rects` (framebuffer pixels, rows from the
+/// top): with a back buffer, copy them to the framebuffer while PM is
+/// shown; the display driver sends them to the display.
+pub fn present(rects: &[R]) {
+    let Some(fb) = crate::screen::framebuffer() else { return };
+    let m = DISPLAY.get().filter(|m| m.back);
+    let shown = pm_shown();
+    for &r in rects {
+        let (x0, y0, x1, y1) = (r.0.min(fb.width), r.1.min(fb.height), r.2.min(fb.width), r.3.min(fb.height));
+        if x0 >= x1 || y0 >= y1 {
+            continue;
+        }
+        if let Some(m) = m {
+            if !shown {
+                continue;
+            }
+            copy_back(m, &fb, (x0, y0, x1, y1));
+        }
+        damage(x0, y0, x1, y1);
+    }
+}
+
+fn copy_back(m: &Mapped, fb: &bootinfo::Framebuffer, (x0, y0, x1, y1): R) {
+    if (fb.stride as u64 * fb.height as u64 * 4) > m.size {
         return;
     }
     let src = crate::mm::phys::phys_to_virt(m.phys) as *const u32;
     let dst = (bootinfo::PHYS_MAP_BASE + fb.base) as *mut u32;
-    for &(x0, y0, x1, y1) in d.rects() {
-        for y in y0..y1 {
-            let at = (y * fb.stride + x0) as usize;
-            unsafe { core::ptr::copy_nonoverlapping(src.add(at), dst.add(at), (x1 - x0) as usize) };
-        }
+    for y in y0..y1 {
+        let at = (y * fb.stride + x0) as usize;
+        unsafe { core::ptr::copy_nonoverlapping(src.add(at), dst.add(at), (x1 - x0) as usize) };
+    }
+    if !m.driver {
         count_update(x1 - x0, y1 - y0);
     }
+}
+
+/// Timer tick (boot processor): when PM came back to the screen, copy
+/// all of its back buffer.
+fn present_all() {
+    if !PRESENT_ALL.load(Ordering::Relaxed) || !pm_shown() {
+        return;
+    }
+    PRESENT_ALL.store(false, Ordering::Relaxed);
+    let (Some(m), Some(fb)) = (DISPLAY.get().filter(|m| m.back), crate::screen::framebuffer()) else { return };
+    copy_back(m, &fb, (0, 0, fb.width, fb.height));
+    damage(0, 0, fb.width, fb.height);
 }
 
 pub fn pointer() -> (i32, i32) {
@@ -532,7 +586,7 @@ pub fn show_cursor(on: bool) {
 pub fn tick() {
     if crate::smp::this().index() == 0 {
         log_stats();
-        copy_back(crate::irq::ticks());
+        present_all();
     }
     if !CURSOR_DEFINED.load(Ordering::Relaxed) || crate::smp::this().index() != 0 {
         return;

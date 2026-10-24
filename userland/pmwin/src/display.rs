@@ -3,8 +3,12 @@
 //!
 //! Everything drawn on the screen surface is noted in `State::damage`
 //! (gpi's surface does it); when a thread lets go of the PM lock the list
-//! goes to the kernel (`Rs2UpdateDisplay`), whose display driver copies
-//! only those areas to the display.
+//! goes to the kernel (`Rs2UpdateDisplay`), which copies those areas from
+//! the back buffer PM draws into to the screen. While windows still have
+//! to paint (an update region, or between WinBeginPaint and WinEndPaint)
+//! the list is held back, for at most `HOLD_MS`: the screen then shows a
+//! window moved, opened or brought to the top once everything under and
+//! in it is painted, not erased first and painted window by window.
 //!
 //! When the mode changes (the Display settings program calls
 //! `Rs2SetDisplayMode`; the host resizes a virtio-gpu display) the kernel
@@ -44,15 +48,43 @@ unsafe extern "C" {
     fn Rs2SetDisplayMode(cx: u32, cy: u32) -> u32;
 }
 
+/// The longest PM holds back what it drew while windows paint (ms).
+const HOLD_MS: u32 = 30;
+
+/// Whether a window still has to paint: one shown on the screen with an
+/// update region (its thread not hung), or a WinBeginPaint not ended.
+fn painting(s: &crate::state::State) -> bool {
+    let hung = |q: u32| s.queues.get(&q).is_some_and(|q| q.hung);
+    let shown = |mut h: u32| loop {
+        let Some(w) = s.desk.get(h) else { return false };
+        if !w.visible_style() {
+            return false;
+        }
+        if h == HWND_DESKTOP {
+            return true;
+        }
+        h = w.parent;
+    };
+    s.desk.all().any(|w| !w.update.is_empty() && !hung(w.queue) && shown(w.hwnd))
+        || s.pss.iter().flatten().any(|e| e.gpi.upd.is_some() && (e.gpi.cached || e.gpi.painting))
+}
+
 /// Tell the kernel what was drawn on the screen (when the PM lock is
-/// let go). Drawing into the shadow buffer is not reported (everything
-/// is repainted when PM gets the screen back).
+/// let go), unless windows still paint (for at most `HOLD_MS`). Drawing
+/// into the shadow buffer is not reported (everything is repainted when
+/// PM gets the screen back).
 pub fn flush_damage() {
     let Some(s) = get() else { return };
     if s.damage.is_empty() {
+        s.damage_held = None;
         return;
     }
     if s.surface.pixels() as usize == s.screen {
+        let now = crate::state::now();
+        let since = *s.damage_held.get_or_insert(now);
+        if now.wrapping_sub(since) < HOLD_MS && painting(s) {
+            return;
+        }
         let h = s.surface.height;
         let mut v = [0u32; 4 * gpi::damage::MAX];
         let rects = s.damage.rects();
@@ -63,6 +95,7 @@ pub fn flush_damage() {
         unsafe { Rs2UpdateDisplay(v.as_ptr(), rects.len() as u32) };
     }
     s.damage.clear();
+    s.damage_held = None;
 }
 
 /// EV_HOSTSIZE: the host wants another size; the kernel picks the

@@ -123,20 +123,24 @@ pub fn rs2_show_pointer(c: &mut Ctx) -> u32 {
 /// Rs2UpdateDisplay(pul, c) (20): PM drew on the screen in `c`
 /// rectangles at `pul` (four ULONGs each: left, top, right, bottom in
 /// framebuffer pixels, rows from the top; right and bottom exclusive).
-/// Display drivers that copy changes to the display copy those areas.
+/// They go from PM's back buffer to the framebuffer now (the caller
+/// holds PM's lock, so they are as PM finished them), and display drivers
+/// that copy changes to the display copy those areas.
 pub fn rs2_update_display(c: &mut Ctx) -> u32 {
     let (p, n) = (c.arg(0), c.arg(1));
     if n > 64 {
         return err::INVALID_PARAMETER;
     }
+    let mut rects = alloc::vec::Vec::with_capacity(n as usize);
     for i in 0..n {
         let mut v = [0u32; 4];
         for (k, x) in v.iter_mut().enumerate() {
             let Some(r) = c.read_u32(p + (i * 4 + k as u32) * 4) else { return err::INVALID_ADDRESS };
             *x = r;
         }
-        display::damage(v[0], v[1], v[2], v[3]);
+        rects.push((v[0], v[1], v[2], v[3]));
     }
+    display::present(&rects);
     0
 }
 
