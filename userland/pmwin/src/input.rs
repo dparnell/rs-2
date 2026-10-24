@@ -486,6 +486,25 @@ pub extern "C" fn WinGetKeyState(_desk: u32, vk: i32) -> i32 {
     (if k & 0x80 != 0 { 0xffff_8000u32 as i32 } else { 0 }) | (k & 1) as i32
 }
 
+/// WinSetKeyboardStateTable(hwndDesktop, pKeyStateTable, fSet): the 256
+/// virtual key states (0x80 down, 0x01 toggled) set from the table or
+/// copied into it.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetKeyboardStateTable(_desk: u32, table: *mut u8, set: u32) -> u32 {
+    if table.is_null() {
+        return 0;
+    }
+    let keys = &mut st().keys;
+    unsafe {
+        if set != 0 {
+            core::ptr::copy_nonoverlapping(table, keys.as_mut_ptr(), 256);
+        } else {
+            core::ptr::copy_nonoverlapping(keys.as_ptr(), table, 256);
+        }
+    }
+    1
+}
+
 /// SV_DBLCLKTIME in milliseconds.
 fn dbl_time() -> u32 {
     crate::misc::WinQuerySysValue(1, 1) as u32

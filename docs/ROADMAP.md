@@ -312,9 +312,9 @@ Status markers: done, in progress, planned.
   container's CN_DRAGOVER/CN_DROP), with other programs: files dropped
   on programs start them, the System Editor opens a dropped file;
   `RS2\DESKTEST.EXE` checks them with a drag between two processes
-- planned (shell): lazy drag, DrgDragFiles/DrgAcceptDroppedFiles, drag
-  images beside the pointer, templates, then the SOM-based Workplace
-  Shell
+- done: PMDRAG's lazy drag, DrgDragFiles/DrgAcceptDroppedFiles, drag
+  images with the pointer
+- planned (shell): templates, then the SOM-based Workplace Shell
 - done: profiles on real INI files (`crates/inifile`, PMSHAPI): OS2.INI
   and OS2SYS.INI from USER_INI/SYSTEM_INI, shared by all processes,
   written through safely; the program list calls, kept in OS2.INI for

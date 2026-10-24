@@ -20,14 +20,16 @@
 //!   and DrgDrag returns it. Ctrl, Shift and Ctrl+Shift held down make
 //!   the operation DO_COPY, DO_MOVE and DO_LINK (at the start, and as
 //!   they change).
-//! - The pointer shows the first drag image's icon over windows that
-//!   take the drop, the "illegal" pointer elsewhere (IBM draws the images
-//!   on the screen beside the pointer); DrgSetDragPointer replaces it
-//!   while the pointer stays over the same window.
-//!
-//! Not done: lazy drag (DrgLazyDrag and friends fail),
-//! DrgDragFiles/DrgAcceptDroppedFiles (they fail), drag images drawn
-//! beside the pointer (bitmaps and polygons, stretching).
+//! - The drag images (icons, bitmaps, polygons; stretched, transparent;
+//!   halftoned for DO_COPY) go with the pointer: PMWIN makes them and the
+//!   pointer one shape (`Rs2DragPointer`, at most 64 pixels square; IBM
+//!   draws the images on the screen next to the pointer) and holds it
+//!   while the drag runs (`Rs2HoldPointer`). The pointer in it is the
+//!   arrow over windows that take the drop, the "illegal" pointer
+//!   elsewhere; DrgSetDragPointer replaces it while the pointer stays over
+//!   the same window.
+//! - Lazy drag (pick up and drop) and DrgDragFiles/DrgAcceptDroppedFiles:
+//!   lazy.rs and files.rs.
 
 #![no_std]
 #![no_main]
@@ -37,6 +39,11 @@ extern crate alloc;
 extern crate os2;
 
 mod exports;
+mod files;
+mod lazy;
+
+pub use files::{DrgAcceptDroppedFiles, DrgDragFiles};
+pub use lazy::{DrgCancelLazyDrag, DrgLazyDrag, DrgLazyDrop};
 
 use alloc::vec::Vec;
 use pmwin::drag as rmf;
@@ -74,8 +81,6 @@ unsafe extern "C" {
     fn WinWindowFromPoint(parent: u32, p: *const [i32; 2], children: u32) -> u32;
     #[link_name = "PMWIN.852"]
     fn WinSetCapture(desk: u32, h: u32) -> u32;
-    #[link_name = "PMWIN.866"]
-    fn WinSetPointer(desk: u32, h: u32) -> u32;
     #[link_name = "PMWIN.828"]
     fn WinQuerySysPointer(desk: u32, id: i32, copy: u32) -> u32;
     #[link_name = "PMWIN.752"]
@@ -90,6 +95,12 @@ unsafe extern "C" {
     fn WinSetErrorInfo(e: u32, fs: u32) -> u32;
     #[link_name = "DOSCALLS.302"]
     fn DosGetSharedMem(pb: *mut u8, flags: u32) -> u32;
+    #[link_name = "PMWIN.9009"]
+    fn Rs2DragPointer(base: u32, pdimg: *const u8, n: u32, fl: u32) -> u32;
+    #[link_name = "PMWIN.9017"]
+    fn Rs2HoldPointer(h: u32) -> u32;
+    #[link_name = "PMWIN.727"]
+    fn WinDestroyPointer(h: u32) -> u32;
     #[link_name = "DOSCALLS.303"]
     fn DosGiveSharedMem(pb: *mut u8, pid: u32, flags: u32) -> u32;
 }
@@ -109,7 +120,8 @@ struct QMsg {
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.start")]
-pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
+pub extern "C" fn _start(hmod: u32, flag: u32) -> u32 {
+    lazy::init_term(hmod, flag);
     1
 }
 
@@ -442,7 +454,7 @@ pub extern "C" fn DrgFreeDraginfo(p: u32) -> u32 {
         error(PMERR_INVALID_PARAMETER);
         return 0;
     }
-    if drag().is_some() && pid_of(rd(p, DI_SOURCE)) == my_pid() {
+    if (drag().is_some() || lazy::draginfo() == p) && pid_of(rd(p, DI_SOURCE)) == my_pid() {
         error(PMERR_SOURCE_SAME_AS_TARGET);
         return 0;
     }
@@ -752,10 +764,65 @@ struct Drag {
     /// The target never takes one (DOR_NEVERDROP; or not this default
     /// operation): no more DM_DRAGOVER until the pointer leaves it.
     never: bool,
-    /// The image's icon, and a pointer the target set.
-    icon: u32,
+    /// The drag images (DRAGIMAGEs), a pointer the target set, and the
+    /// shape shown (with what it was made of).
+    images: Vec<u8>,
     pointer: u32,
+    shape: Shape,
     done: bool,
+}
+
+/// The pointer and the images shown together (a PMWIN pointer).
+#[derive(Default)]
+struct Shape {
+    hptr: u32,
+    made_of: (u32, bool, u32),
+    generation: u32,
+}
+
+const DRAGIMAGE: usize = 0x18;
+
+fn copy_images(pdimg: u32, n: u32) -> Vec<u8> {
+    if pdimg == 0 {
+        return Vec::new();
+    }
+    let n = n.min(256) as usize;
+    unsafe { core::slice::from_raw_parts(pdimg as *const u8, n * DRAGIMAGE) }.to_vec()
+}
+
+impl Shape {
+    /// Show `base` with `images` (halftoned for a copy), made again only
+    /// when something changed.
+    fn show(&mut self, base: u32, images: &[u8], halftone: bool) {
+        let key = (base, halftone, self.generation);
+        if self.hptr != 0 && self.made_of == key {
+            return;
+        }
+        let old = self.hptr;
+        self.hptr = unsafe { Rs2DragPointer(base, images.as_ptr(), (images.len() / DRAGIMAGE) as u32, halftone as u32) };
+        self.made_of = key;
+        unsafe { Rs2HoldPointer(if self.hptr != 0 { self.hptr } else { base }) };
+        if old != 0 {
+            unsafe { WinDestroyPointer(old) };
+        }
+    }
+
+    fn changed(&mut self) {
+        self.generation += 1;
+    }
+
+    fn end(&mut self) {
+        unsafe { Rs2HoldPointer(0) };
+        if self.hptr != 0 {
+            unsafe { WinDestroyPointer(self.hptr) };
+        }
+        self.hptr = 0;
+    }
+}
+
+/// The images are drawn halftoned for a copy (IBM's vfDrawHalftone).
+fn halftone(op: u16, reply_op: u16) -> bool {
+    op == rmf::DO_COPY || (op == rmf::DO_DEFAULT && reply_op == rmf::DO_COPY)
 }
 
 static mut DRAG: Option<Drag> = None;
@@ -814,14 +881,13 @@ fn send_dragover() {
 
 fn show_pointer() {
     let Some(d) = drag() else { return };
-    let p = if d.pointer != 0 {
+    let base = if d.pointer != 0 {
         d.pointer
-    } else if d.droppable && d.icon != 0 {
-        d.icon
     } else {
-        unsafe { WinQuerySysPointer(HWND_DESKTOP, SPTR_ILLEGAL, 0) }
+        unsafe { WinQuerySysPointer(HWND_DESKTOP, if d.droppable { SPTR_ARROW } else { SPTR_ILLEGAL }, 0) }
     };
-    unsafe { WinSetPointer(HWND_DESKTOP, p) };
+    let ht = halftone(rd16(d.pdinfo, DI_OP), d.reply_op);
+    d.shape.show(base, &d.images, ht);
 }
 
 fn mouse_move() {
@@ -899,7 +965,7 @@ pub extern "C" fn DrgDrag(src: u32, pdinfo: u32, pdimg: u32, cdimg: u32, vk: u32
         error(PMERR_INVALID_PARAMETER);
         return 0;
     }
-    if drag().is_some() {
+    if drag().is_some() || lazy::active() {
         error(PMERR_DRAG_IN_PROGRESS);
         return 0;
     }
@@ -912,15 +978,14 @@ pub extern "C" fn DrgDrag(src: u32, pdinfo: u32, pdimg: u32, cdimg: u32, vk: u32
         }
         wr(pdinfo, DI_SOURCE, src);
     }
-    // The first image's icon stands for what is dragged.
-    let icon = if pdimg != 0 && cdimg > 0 && rd(pdimg, 16) & DRG_ICON != 0 { rd(pdimg, 4) } else { 0 };
+    let images = copy_images(pdimg, cdimg);
     let p = pointer_pos();
     wr16(pdinfo, DI_X, p[0] as u16);
     wr16(pdinfo, DI_Y, p[1] as u16);
     wr16(pdinfo, DI_OP, keys_operation(None));
     let target = unsafe { WinWindowFromPoint(HWND_DESKTOP, &p, 1) };
     unsafe {
-        DRAG = Some(Drag { pdinfo, target, term: vk, droppable: false, reply_op: 0, never: false, icon, pointer: 0, done: false });
+        DRAG = Some(Drag { pdinfo, target, term: vk, droppable: false, reply_op: 0, never: false, images, pointer: 0, shape: Shape::default(), done: false });
         WinSetCapture(HWND_DESKTOP, src);
     }
     send_dragover();
@@ -949,11 +1014,9 @@ pub extern "C" fn DrgDrag(src: u32, pdinfo: u32, pdimg: u32, cdimg: u32, vk: u32
             }
         }
     }
-    unsafe {
-        WinSetCapture(HWND_DESKTOP, 0);
-        WinSetPointer(HWND_DESKTOP, WinQuerySysPointer(HWND_DESKTOP, SPTR_ARROW, 0));
-    }
+    unsafe { WinSetCapture(HWND_DESKTOP, 0) };
     let d = drag().unwrap();
+    d.shape.end();
     let (target, droppable, reply_op) = (d.target, d.droppable && quit.is_none(), d.reply_op);
     let result = if droppable && target != 0 {
         let op = rd16(pdinfo, DI_OP);
@@ -992,54 +1055,40 @@ pub extern "C" fn DrgSetDragPointer(pdinfo: u32, hptr: u32) -> u32 {
 pub extern "C" fn DrgSetDragImage(pdinfo: u32, pdimg: u32, cdimg: u32, _rsvd: u32) -> u32 {
     match drag() {
         Some(d) if d.pdinfo == pdinfo && pdimg != 0 && cdimg > 0 => {
-            if rd(pdimg, 16) & DRG_ICON != 0 {
-                d.icon = rd(pdimg, 4);
-            }
+            d.images = copy_images(pdimg, cdimg);
+            d.shape.changed();
+            show_pointer();
             1
         }
-        _ => 0,
+        _ => lazy::set_images(pdinfo, pdimg, cdimg) as u32,
     }
 }
 
-/// DrgQueryDragStatus: DGS_DRAGINPROGRESS while this process drags.
+/// DrgQueryDragStatus: DGS_DRAGINPROGRESS while this process drags,
+/// DGS_LAZYDRAGINPROGRESS while a lazy drag runs (in any process).
 #[unsafe(no_mangle)]
 pub extern "C" fn DrgQueryDragStatus() -> u32 {
-    drag().is_some() as u32
+    if drag().is_some() {
+        1
+    } else if lazy::active() {
+        2
+    } else {
+        0
+    }
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn DrgQueryDraginfoPtr(_rsvd: u32) -> u32 {
-    drag().map_or(0, |d| d.pdinfo)
+    drag().map_or_else(lazy::draginfo, |d| d.pdinfo)
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn DrgQueryDraginfoPtrFromHwnd(h: u32) -> u32 {
-    drag().filter(|d| rd(d.pdinfo, DI_SOURCE) == h).map_or(0, |d| d.pdinfo)
+    match drag() {
+        Some(d) if rd(d.pdinfo, DI_SOURCE) == h => d.pdinfo,
+        _ => Some(lazy::draginfo()).filter(|&p| p != 0 && rd(p, DI_SOURCE) == h).unwrap_or(0),
+    }
 }
 
 // ---- Not done ----
 
-#[unsafe(no_mangle)]
-pub extern "C" fn DrgDragFiles(_h: u32, _files: u32, _types: u32, _targets: u32, _n: u32, _ptr: u32, _vk: u32, _render: u32, _rsvd: u32) -> u32 {
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn DrgAcceptDroppedFiles(_h: u32, _path: u32, _types: u32, _op: u32, _rsvd: u32) -> u32 {
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn DrgLazyDrag(_src: u32, _pdinfo: u32, _pdimg: u32, _n: u32, _rsvd: u32) -> u32 {
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn DrgCancelLazyDrag() -> u32 {
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn DrgLazyDrop(_target: u32, _op: u32, _ptl: u32) -> u32 {
-    0
-}

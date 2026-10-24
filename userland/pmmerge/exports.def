@@ -213,6 +213,7 @@ WinSetDlgItemText @5348
 WinSetErrorInfo @5349
 WinSetFocus @5350
 WinSetHook @5352
+WinSetKeyboardStateTable @5353
 WinSetMultWindowPos @5356
 WinSetOwner @5357
 WinSetParent @5359

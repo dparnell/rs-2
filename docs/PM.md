@@ -1747,11 +1747,46 @@ symbols):
   gets `DM_DROP` (sent), with `usOperation` set to the operation it
   named if the user chose none, and `DrgDrag` returns it; else 0.
   `WM_QUIT` during a drag ends it and is posted again.
-- The pointer shows the first drag image's icon (`DRG_ICON`) over
-  windows that take the drop, `SPTR_ILLEGAL` elsewhere;
-  `DrgSetDragPointer` replaces it while the pointer is over the same
-  window, `DrgSetDragImage` changes the icon. (IBM's draws the images,
-  bitmaps and polygons too, on the screen beside the pointer.)
+- The drag images go with the pointer: icons (`DRG_ICON`, the mini
+  icon with `DRG_MINIBITMAP`), bitmaps (`DRG_BITMAP`, `DRG_TRANSPARENT`:
+  the bottom-left pel's colour is not drawn), polygons (`DRG_POLYGON`,
+  `DRG_CLOSED`), stretched to `sizlStretch` (`DRG_STRETCH`), at their
+  offsets, halftoned for `DO_COPY` (as IBM's `vfDrawHalftone`). IBM
+  draws them on the screen next to the pointer; rs2's PMWIN makes them
+  and the pointer one pointer (`Rs2DragPointer`, PMWIN 9009, at most 64
+  pixels square, a hardware cursor's size) and holds it while the drag
+  runs (`Rs2HoldPointer`, 9017: what windows set meanwhile is not
+  shown). The pointer in it is the arrow over windows that take the drop
+  and `SPTR_ILLEGAL` elsewhere; `DrgSetDragPointer` replaces it while
+  the pointer is over the same window, `DrgSetDragImage` changes the
+  images.
+- Lazy drag (pick up and drop), as IBM's DRGLAZY: `DrgLazyDrag` returns
+  at once and sets a system input hook that passes the drag button
+  (`SV_BEGINDRAG`) going down and up, and, while it is down, mouse
+  moves and Ctrl/Shift, to an object window in the source's process.
+  Held down with Ctrl (`DO_COPY`), Shift (`DO_MOVE`) or both (`DO_LINK`)
+  the drag button drops: `DM_DRAGOVER` as the pointer moves, `DM_DROP`
+  when it goes up over a window that answered `DOR_DROP`. Without those
+  keys the click is the window's (a target's pop-up menu offers Drop
+  and calls `DrgLazyDrop`); `DrgCancelLazyDrag` puts the objects down.
+  The source gets `DM_DROPNOTIFY` (mp2 the target or 0) at the end.
+  `DrgQueryDragStatus` gives `DGS_LAZYDRAGINPROGRESS` and
+  `DrgQueryDraginfoPtr` the DRAGINFO in every process (the state is in
+  named shared memory); `DrgDrag` fails meanwhile.
+- `DrgDragFiles` and `DrgAcceptDroppedFiles` as IBM's DRGFILES: the
+  source's files are `<DRM_OS2FILE,DRF_UNKNOWN>` items of an object
+  window (the type given, or the file's `.TYPE` EA, or `Unknown`) that
+  answers `DM_RENDERPREPARE`/`DM_RENDER` with a thread that copies or
+  moves the file (`DM_DRAGERROR` to the owner on failure: abort, skip,
+  replace, retry or a new name) or, with `fSourceRender`, lets the owner
+  do it (`DM_RENDERFILE`, then `DM_FILERENDERED`), and tells the owner
+  `DM_DRAGFILECOMPLETE` (`DF_SOURCE`) as each conversation ends. A
+  window `DrgAcceptDroppedFiles` subclasses takes `DO_COPY` and
+  `DO_MOVE` (the default its own) of files of its types into its
+  directory (the current one by default), asks for `DM_EMPHASIZETARGET`,
+  renders the items one after another and gets `DM_DRAGFILECOMPLETE`
+  for each file done. (IBM's PMCTLS sends the target's to the item's
+  window; rs2 to the target, as documented.)
 - RMF strings and types (`crates/pmwin/src/drag.rs`, host-tested):
   `<mechanism,format>` pairs and `(m1,m2)x(f1,f2)` cross products,
   blanks ignored, the first pair native; type lists with the first the
@@ -1765,9 +1800,9 @@ symbols):
 The System Editor takes a file dropped on its window (see below); the
 desktop shell drags and takes drops as described above.
 
-**Not done** (PMDRAG): lazy drag (`DrgLazyDrag`, `DrgLazyDrop`,
-`DrgCancelLazyDrag` fail), `DrgDragFiles` and `DrgAcceptDroppedFiles`
-(they fail), drag images drawn beside the pointer.
+**Not done** (PMDRAG): the line IBM draws from the start for a link
+(`DO_LINK`) during a lazy drag; drag images larger than 64 pixels are
+cut.
 
 **Not done** (shell): templates, object settings other than program
 objects' (and a file's properties), the lock-up, a real Workplace
@@ -2215,7 +2250,9 @@ The export trampolines pass their index to the lock's entry
   conversation with a server in another process (`PMXTEST DDESERVER`),
   the registry through PMWINX, owner drawing (list box, menu, user
   button, value set, slider, notebook tab), presentation parameters,
-  PMBIDI and AVIO (a VIO presentation space in a window), printing PASS/FAIL and
+  PMBIDI, AVIO (a VIO presentation space in a window), lazy drag (the
+  input hook, `DrgLazyDrop`, cancelling, the held drag pointer) and
+  `DrgDragFiles` onto a `DrgAcceptDroppedFiles` window, printing PASS/FAIL and
   `pmxtest done: N failure(s)`. `PMXTEST WINS [PROGRAM]` (starting
   PROGRAM first) lists the window tree on the serial port (class, id,
   text, position, style), to see what another program made.

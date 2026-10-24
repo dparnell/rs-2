@@ -165,6 +165,9 @@ pub struct State {
     pub sys_ptrs: Vec<u32>,
     /// The mouse pointer's shape.
     pub cur_ptr: u32,
+    /// A drag holds the pointer's shape (Rs2HoldPointer): what windows
+    /// set meanwhile is not shown.
+    pub held_ptr: u32,
     /// A window that takes minimized frames over (Rs2SetMinimizeViewer):
     /// they are hidden and it is told; 0: they become desktop icons.
     pub min_viewer: u32,
@@ -288,6 +291,7 @@ pub fn init(surface: Surface) {
         ptrs: Vec::new(),
         sys_ptrs: Vec::new(),
         cur_ptr: 0,
+        held_ptr: 0,
         ptr_window: 0,
         min_viewer: 0,
         pp: BTreeMap::new(),

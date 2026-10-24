@@ -206,6 +206,7 @@ forward! {
     WinSetErrorInfo = "PMWIN.977";
     WinSetFocus = "PMWIN.860";
     WinSetHook = "PMWIN.928";
+    WinSetKeyboardStateTable = "PMWIN.921";
     WinSetMultWindowPos = "PMWIN.863";
     WinSetOwner = "PMWIN.864";
     WinSetParent = "PMWIN.865";
