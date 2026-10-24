@@ -130,9 +130,19 @@ pub fn find_rs2(d: &Disk) -> Option<Found> {
 }
 
 /// Files of an installation that are the user's: kept when updating.
+/// (`WP ROOT. SF` holds the root folder's Workplace Shell data.)
 fn kept(dest: &str) -> bool {
     let u = dest.to_ascii_uppercase();
-    u == "CONFIG.SYS" || u.ends_with(".INI") || u.starts_with("MPTN\\ETC\\") || u == "RS2\\CMDLINE"
+    u == "CONFIG.SYS" || u.ends_with(".INI") || u.starts_with("MPTN\\ETC\\") || u == "RS2\\CMDLINE" || u == "WP ROOT. SF"
+}
+
+/// Directories of an installation that are the user's: an update leaves
+/// them as they are. The desktop goes with OS2.INI, which keeps its
+/// objects' handles and IDs: the live system's own desktop, copied over
+/// it, gave it a second Assistance Center (and the rest) under other
+/// names, which OS2.INI knew nothing of.
+fn kept_dir(dest: &str) -> bool {
+    dest.eq_ignore_ascii_case("DESKTOP")
 }
 
 /// CONFIG.SYS with what `new` adds to `old`: SET variables `old` does not
@@ -324,6 +334,9 @@ fn copy_tree(vol: &mut Vol, src: &str, dest: &str, files: &mut u32, update: bool
         let s = alloc::format!("{}\\{}", src.trim_end_matches('\\'), e.name);
         let d = if dest.is_empty() { e.name.clone() } else { alloc::format!("{dest}\\{}", e.name) };
         if e.dir {
+            if update && kept_dir(&d) && vol.exists(&d) {
+                continue;
+            }
             vol.mkdir(&d)?;
             copy_eas(vol, &s, &d)?;
             copy_tree(vol, &s, &d, files, update, p)?;
