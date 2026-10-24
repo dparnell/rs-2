@@ -270,6 +270,33 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   flags, shift state, typematic rate, read/peek, code page, translate,
   hardware ID). COM1 also carries the kernel log.
 
+## DOS sessions
+
+DOS programs run in DOS sessions (docs/DOS.md): full screen or in a PM
+window, started from CMD (IBM's and rs2's), by DosStartSession, or from
+desktop program objects. "dosrun" = on the host with `tools/dosrun`
+(the same DOS machine); "QEMU" = in a DOS session of rs2.
+
+| Program | Status | Notes |
+|---------|--------|-------|
+| rs2 COMMAND.COM | works | QEMU and dosrun: VER, DIR (/W /B /A), CD, MD, RD, COPY (wildcards, `+`), DEL, REN, TYPE, SET, PATH, PROMPT, ECHO, batch files (`%0`-`%9`, `%VAR%`, IF ERRORLEVEL/EXIST/==, FOR, GOTO, CALL, SHIFT, PAUSE), redirection and pipes, /C /K /P. As the "DOS Window" and "DOS Full Screen" desktop objects. |
+| tests/dos HELLO.COM | works | QEMU: DOS and BIOS output, the command tail, file create/write/read/delete, the exit code. |
+| tests/dos GFX.COM | works | QEMU: mode 13h (256 colours) and mode 12h (VGA write mode 2) full screen (scaled to the framebuffer) and in a window (resized to the mode), keys between them, Alt+Home both ways. |
+| tests/dos DPMITEST.COM | works | QEMU, full screen and windowed, and dosrun: a 32-bit DPMI client (INT 31h 0300h output, LDT descriptors, a flat 4 GB selector, 1 MB block, 32-bit code segment, #DE exception handler, protected-mode INT hook, real-mode callback via 0301h, DOS memory). |
+| MEM.EXE (IBM, OS/2's DOS) | works | dosrun: MEM and MEM /C (MCB chain, UMBs, EMS, XMS, HMA). |
+| DEBUG.EXE (IBM) | works | dosrun: register dump, D, U, A (assembling), G with INT 3. |
+| EDLIN.COM (IBM) | works | dosrun: listing, editing a line, saving (E). |
+| QBASIC.EXE (IBM) | works | dosrun: the full-screen editor, typing a program, F5: a SCREEN 13 program (LINE, CIRCLE, text in graphics). |
+| COMMAND.COM (IBM, OS/2's DOS) | works | dosrun: DIR, MEM (EXEC), `ECHO > file`, TYPE, EXIT. Not shipped; a test of the DOS kernel's internals. |
+| DOSKEY.COM (IBM) | fails | Hangs when it installs (it expects OS/2's VDM internals). |
+
+Not yet: sound (the PC speaker is emulated but not played; no Sound
+Blaster), VESA modes, DOS settings in the program object notebook (the
+VDM reads them from the environment: `DOS_HIGH`, `DOS_UMB`,
+`EMS_MEMORY_LIMIT`, `XMS_MEMORY_LIMIT`, `DPMI_MEMORY_LIMIT`), direct
+disk access (INT 13h, 25h/26h), hardware interrupts in real mode reaching
+a DPMI client's protected-mode handlers.
+
 ## Fixed while getting these to run
 
 - KbdSetStatus rejected binary mode with echo on in one call; OS/2

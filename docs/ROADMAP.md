@@ -380,6 +380,24 @@ Status markers: done, in progress, planned.
 - planned: the remaining classes and view pages (docs/WPS.md), printing
   (no printer support yet)
 
+## DOS sessions (done: first version)
+
+- done: design (docs/DOS.md): VDM.EXE, a user process leading the
+  session, runs rs2's DOS machine on an x86 emulator (long mode has no
+  V86)
+- done: `crates/x86emu`: 80486SX-class real and protected mode (16/32-bit
+  segments, LDT/GDT/IDT, gates, privilege levels, TSS stack switch,
+  exceptions), x87 FPU; ALU and protected-mode tests recorded on QEMU
+- done: `crates/dos`: PIC, PIT, 8042, CMOS, VGA (text, CGA, EGA/VGA
+  planar, mode 13h, mode X), BIOS, DOS kernel (files on rs2's file
+  systems, FCBs, memory with UMBs, EXEC, TSRs), XMS, EMS, mouse driver,
+  rs2's COMMAND.COM, DPMI 0.9 host; `tools/dosrun` runs it on the host
+- done: DOS sessions full screen and in PM windows (PMVIOWIN shows text
+  and graphics modes), raw keyboard and mouse, Alt+Home, from CMD
+  (DosExecPgm of a DOS program), DosStartSession types 4/7, desktop
+  objects (DOS Window, DOS Full Screen, PROG_VDM/PROG_WINDOWEDVDM)
+- planned: PC speaker and Sound Blaster sound, VESA, DOS settings, speed
+
 ## Milestone 5: install media (first version done)
 
 - done: hybrid ISO/USB image (El Torito EFI + MBR ESP), live session
@@ -391,6 +409,7 @@ Status markers: done, in progress, planned.
 
 - NetBIOS, NFS/SMB clients
 - MMPM/2: recording, MIDI (sequencer), CD audio, AVI/MPEG video
-- DOS sessions (MVDM) through a CPU emulator, since long mode has no V86
+- DOS sessions: Sound Blaster, VESA modes, DOS settings in the program
+  object notebook, CPU speed (a block cache), DPMI 1.0
 - self-hosting (building rs2 on rs2): 64-bit processes with a Linux
   system-call layer for the Rust toolchain; see [SELF-HOSTING.md](SELF-HOSTING.md)
