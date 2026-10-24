@@ -16,3 +16,4 @@ pmwin = { path = "../../crates/pmwin" }
 os2-exe = { path = "../../crates/os2-exe" }
 thunk16 = { path = "../thunk16" }
 uls = { path = "../../crates/uls" }
+viocell = { path = "../../crates/viocell" }

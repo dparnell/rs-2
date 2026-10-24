@@ -48,8 +48,9 @@ Status markers: done, in progress, planned.
   Copy, Copy All, Paste, Close), keys and mouse into the session,
   Alt+Home between window and full screen, booting into PM with a
   command prompt window (`PROTSHELL=C:\OS2\PMVIOWIN.EXE /SHELL`)
-- planned: AVIO (VioCreatePS & co. in PM windows, reusing
-  `crates/viocell`), parallel port hardware,
+- done: AVIO (VioCreatePS & co. in PM windows, drawn with
+  `crates/viocell`)
+- planned: parallel port hardware,
   DosDevIOCtl coverage, mandatory file locks, finer-grained kernel locking
   (in place of the big kernel lock)
 

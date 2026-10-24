@@ -375,8 +375,8 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   (unverified). IBM's CHKDSK could not check rs2-written FAT volumes
   (`UFAT.DLL` is not on the media); the FAT32 EA flag values follow
   FAT32.IFS from memory and are unverified against a real disk.
-- AVIO (VioCreatePS and the other Presentation Manager VIO calls) is not
-  implemented.
+- AVIO (VIO presentation spaces in PM windows) has no `WinDefAVioWindowProc`
+  (PMVIOP.DLL), and cells are always drawn in the 8-pixel-wide VIO fonts.
 - Writing to QEMU's virtual FAT drive (the ESP directory) can hang QEMU
   itself (seen with BACKUP; QEMU's monitor stops answering too); FAT disk
   images are fine.

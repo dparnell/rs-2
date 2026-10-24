@@ -28,7 +28,7 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `crates/gpi` | Rendering engine (and `icon.rs`: the OS/2 pointer and icon formats, choosing an image for the display, AND/XOR masks, drawing): presentation-space attributes, lines, boxes, arcs, areas, text with bitmap and outline fonts (TrueType and Type 1, anti-aliased), bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
 | `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping; the MLE's text engine (`mle.rs`: layout with word wrap and tabs, editing, undo, import/export formats, search) and the arithmetic of spin buttons, sliders and value sets (`controls.rs`); the notebook's pages and geometry (`notebook.rs`); the container's layout for each view, hit testing, keyboard navigation, icon arrangement and selection rules (`container.rs`); where minimized frames go (`minimize.rs`); rs2's own system pointers and icons (`sysptr.rs`). Plain data structures, unit-tested on the host. |
 | `userland/pmwin` → PMWIN.DLL | Exports (`Win*`, `Gpi*`), the shared state and its heap, locking, messaging, the built-in window classes, and the PM server's code (input routing, hung programs, window list). |
-| `crates/viocell` | Text cells on pixels: renders VGA text cells (font, palette, blink, cursor, marked block) to 24-bit bitmaps; Copy/Copy All text and Paste keystrokes. Host-tested; for VIO windows now, AVIO later. |
+| `crates/viocell` | Text cells on pixels: renders VGA text cells (font, palette, blink, cursor, marked block) to 24-bit bitmaps; Copy/Copy All text and Paste keystrokes. Host-tested; for VIO windows and AVIO. |
 | `userland/pmviowin` → `C:\OS2\PMVIOWIN.EXE` | The windows of windowed VIO sessions (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)). |
 | `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000; 9001, `Rs2ShellPosition`, gives PMSHAPI's `WinQueryTaskSizePos` the shell's next cascade position; 9002, `Rs2PmVioWindow`, registers a VIO window's client). |
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
@@ -88,7 +88,8 @@ rs2's own DLLs (applications never import it):
 
 RS2API ordinals: 1-7 and 20-26 PM (above), 10-16 windowed VIO sessions
 (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)), 100
-performance counters, 200-221 sockets (docs/NETWORK.md).
+performance counters, 200-221 sockets (docs/NETWORK.md), 500-501 AVIO
+(see [AVIO](#avio-vio-presentation-spaces-in-windows)).
 
 Two kernel rules matter for PM: a thread inside a must-complete section
 (DosEnterMustComplete) that is being killed finishes the section first
@@ -359,6 +360,36 @@ a development run, put `init=OS2\PMVIOWIN.EXE -- /SHELL` in
 when there is none at start and keeps running when the last window
 closes (Ctrl+Esc offers new prompts). The default boot (`PROTSHELL=`
 CMD.EXE) is unchanged.
+
+## AVIO: VIO presentation spaces in windows
+
+A PM program can draw text cells in a window with the VIO calls (IBM's
+"advanced VIO"): `VioCreatePS` makes a presentation space of cells
+(rows, columns, two or four bytes a cell), `VioAssociate` ties it to a
+window's device context (`WinOpenWindowDC`), and the ordinary VIO calls
+with the PS's handle as their last argument (`VioWrtCharStr`,
+`VioWrtCellStr`, `VioWrtNCell`/`NChar`/`NAttr`, `VioWrtCharStrAtt`,
+`VioReadCellStr`/`CharStr`, the four `VioScroll*`, `VioWrtTTY`,
+`VioGet`/`SetCurPos`, `VioGet`/`SetCurType`, `VioGetMode`, `VioGetBuf`,
+`VioShowBuf`) work on its cells instead of the session's screen.
+`VioShowPS`, `VioSetOrg`/`VioGetOrg` (the cell at the window's top left),
+`VioGet`/`SetDeviceCellSize` (8 by 8, 14 or 16, rs2's VIO fonts),
+`VioCreateLogFont`/`VioDeleteSetId`/`VioQuerySetIds` (kept; cells are
+drawn in the VIO font), `VioQueryFonts` (none) and `VioDestroyPS` complete
+the set (VIOCALLS 55-66).
+
+The kernel keeps the presentation spaces (`kernel/src/api/avio.rs`): the
+cells live in the program's memory (what `VioGetBuf` returns), and each
+call records the cells it changed. PMWIN draws them
+(`userland/pmwin/src/avio.rs`): as the program goes back to its message
+loop and as it ends a paint, it asks the kernel for presentation spaces
+of the process with changes (`Rs2AvioQuery`, RS2API 500; the font comes
+from `Rs2AvioFont`, 501) and renders the changed cells with crate
+`viocell` into the window (attribute bit 7 brightens the background; the
+cursor shows while the window has the focus). A program repaints on
+`WM_PAINT` with `VioShowPS`, as on OS/2. `WinDefAVioWindowProc`
+(PMVIOP.DLL) is not there: no program on the CD uses AVIO. PMXTEST checks
+the calls and what the window shows.
 
 ## Programs that stop responding
 
@@ -2182,8 +2213,9 @@ The export trampolines pass their index to the lock's entry
   `PMXTEST CHILD`, and journal playback in the PM server; `PMXTEST
   RECORD` with keys from `--type` checks journal recording), a DDE
   conversation with a server in another process (`PMXTEST DDESERVER`),
-  the registry through PMWINX, and owner drawing (list box, menu, user
-  button, value set, slider, notebook tab), printing PASS/FAIL and
+  the registry through PMWINX, owner drawing (list box, menu, user
+  button, value set, slider, notebook tab), presentation parameters,
+  PMBIDI and AVIO (a VIO presentation space in a window), printing PASS/FAIL and
   `pmxtest done: N failure(s)`. `PMXTEST WINS [PROGRAM]` (starting
   PROGRAM first) lists the window tree on the serial port (class, id,
   text, position, style), to see what another program made.

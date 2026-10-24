@@ -669,7 +669,16 @@ pub extern "C" fn WinOpenWindowDC(h: u32) -> u32 {
     if let Some(i) = o.dcs.iter().position(|d| matches!(d, Some(DcKind::Window(w)) if *w == h)) {
         return dc_handle(i);
     }
+    crate::avio::dc_opened();
     dc_add(DcKind::Window(h))
+}
+
+/// The window of a window DC of the caller.
+pub fn window_of_dc(hdc: u32) -> Option<u32> {
+    match objects().dcs.get(dc_index(hdc)?)? {
+        Some(DcKind::Window(w)) => Some(*w),
+        _ => None,
+    }
 }
 
 #[unsafe(no_mangle)]

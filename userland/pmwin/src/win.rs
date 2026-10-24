@@ -1216,6 +1216,7 @@ pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
     let s = st();
     let h = gpiapi::entry(s, hps).map_or(0, |e| e.hwnd);
     gpiapi::end_paint(s, hps);
+    crate::avio::poll();
     crate::cursor::paint(h, true);
     1
 }

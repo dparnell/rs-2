@@ -9,6 +9,7 @@ extern crate alloc;
 extern crate os2;
 
 mod accel;
+mod avio;
 mod bitmap;
 mod button;
 mod cb16;

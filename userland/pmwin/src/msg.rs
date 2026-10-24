@@ -513,6 +513,7 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
         if q == 0 {
             return None;
         }
+        crate::avio::poll();
         let wait_ms = run_timers(q);
         let hooked = !st().hooks.is_empty();
         if hooked {

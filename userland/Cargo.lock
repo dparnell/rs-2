@@ -312,6 +312,7 @@ dependencies = [
  "pmwin",
  "thunk16",
  "uls",
+ "viocell",
 ]
 
 [[package]]
