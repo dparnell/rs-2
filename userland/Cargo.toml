@@ -2,7 +2,7 @@
 # tools/elf2lx (cargo xtask builds them).
 [workspace]
 resolver = "3"
-members = ["os2", "rs2shell", "desktest", "apitest", "testdll", "cmd", "utils", "install", "pmwin", "pmgpi", "pmsrv", "pmhang", "gpitest", "pmctls", "helpmgr", "stress", "nettest", "tcpipcore", "tcpip32", "tnls32", "pmshapi", "so32dll", "tcp32dll", "thunk16", "tcpipdll", "tnls16", "pmdrag", "pmmerge", "libuni", "uconv", "ctltest", "pmviowin", "pmwp", "nbtest", "shelltest", "initest", "e", "view", "appinst", "hmtest", "pminstal", "display", "audtest", "mmio", "mmiotest", "mdm", "mciapi", "pmspl", "som", "somtest", "wpstest", "wpshell", "pmshell", "rescue"]
+members = ["os2", "rs2shell", "desktest", "apitest", "testdll", "cmd", "utils", "install", "pmwin", "pmgpi", "pmsrv", "pmhang", "gpitest", "pmctls", "helpmgr", "stress", "nettest", "tcpipcore", "tcpip32", "tnls32", "pmshapi", "so32dll", "tcp32dll", "thunk16", "tcpipdll", "tnls16", "pmdrag", "pmmerge", "libuni", "uconv", "ctltest", "pmviowin", "pmwp", "nbtest", "shelltest", "initest", "e", "view", "appinst", "hmtest", "pminstal", "display", "audtest", "mmio", "mmiotest", "mdm", "mciapi", "pmspl", "som", "somtest", "wpstest", "wpshell", "pmshell", "rescue", "vdm"]
 
 [workspace.package]
 edition = "2024"
@@ -16,3 +16,11 @@ opt-level = 1
 [profile.release]
 panic = "abort"
 opt-level = "s"
+
+# The DOS session's CPU emulator is the hot loop of a DOS session.
+[profile.release.package.vdm]
+opt-level = 3
+[profile.release.package.dos]
+opt-level = 3
+[profile.release.package.x86emu]
+opt-level = 3

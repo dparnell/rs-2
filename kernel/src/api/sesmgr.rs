@@ -63,11 +63,7 @@ fn read_start_data(c: &Ctx, at: u32) -> Result<StartData, u32> {
         _ => return Err(ERROR_SMG_INVALID_RELATED_OPT),
     };
     let ty = u16_at(30);
-    if ty == SSF_TYPE_VDM || ty == SSF_TYPE_WINDOWEDVDM {
-        // DOS sessions need V86 mode, which long mode does not have.
-        return Err(ERROR_SMG_INVALID_PROGRAM_TYPE);
-    }
-    if ty > SSF_TYPE_WINDOWEDVDM {
+    if ty > SSF_TYPE_WINDOWEDVDM || ty == 5 || ty == 6 {
         return Err(ERROR_SMG_INVALID_PROGRAM_TYPE);
     }
     let env = match ptr_at(24) {
@@ -117,7 +113,7 @@ fn env_value(env: &[String], key: &str) -> Option<String> {
     })
 }
 
-/// Find a program: as given, with .EXE added, then along PATH.
+/// Find a program: as given, with .EXE (or .COM) added, then along PATH.
 fn find_program(c: &Ctx, name: &str, env: &[String]) -> Option<String> {
     let exists = |p: &str| super::file::resolve(c, p).ok().filter(|f| crate::fs::stat(f).is_ok()).map(|f| f.display());
     let has_ext = name.rsplit(['\\', '/']).next().is_some_and(|b| b.contains('.'));
@@ -125,6 +121,7 @@ fn find_program(c: &Ctx, name: &str, env: &[String]) -> Option<String> {
         let mut v = alloc::vec![base.to_string()];
         if !has_ext {
             v.push(alloc::format!("{base}.EXE"));
+            v.push(alloc::format!("{base}.COM"));
         }
         v
     };
@@ -147,16 +144,92 @@ fn find_program(c: &Ctx, name: &str, env: &[String]) -> Option<String> {
     None
 }
 
+/// Whether the program at `path` (its contents `data`) is a DOS program.
+pub fn is_dos_program(path: &str, data: &[u8]) -> bool {
+    let up = path.to_ascii_uppercase();
+    up.ends_with(".COM") || up.ends_with(".BAT") || (data.len() >= 2 && super::module::app_type(data) == 0x20)
+}
+
+/// Start a DOS session: VDM.EXE leads it, running `path` (a .COM, .EXE
+/// or .BAT; none: COMMAND.COM) with `inputs`.
+fn start_dos(c: &Ctx, sd: &StartData, path: Option<String>, inputs: &str, env: Vec<String>) -> Result<(u32, u32, u32), u32> {
+    if crate::fs::read_file(crate::vdm::VDM_PATH).is_none() {
+        return Err(ERROR_SMG_INVALID_PROGRAM_TYPE);
+    }
+    let prog = path.unwrap_or_else(|| String::from(crate::vdm::COMMAND_PATH));
+    let base = prog.rsplit('\\').next().unwrap_or(&prog).to_string();
+    let title = sd.title.clone().unwrap_or_else(|| base.clone());
+    let caller_session = c.process.session.load(Ordering::Relaxed);
+    let from_pm = (caller_session != 0 && caller_session == session::pm_session()) || session::is_windowed(caller_session);
+    let mut windowed = match sd.session_type {
+        SSF_TYPE_WINDOWEDVDM => true,
+        SSF_TYPE_VDM => false,
+        _ => from_pm,
+    };
+    if windowed && !crate::viowin::ensure_host(env.clone()) {
+        windowed = false;
+    }
+    let parent_pid = sd.related.then_some(c.process.pid);
+    let sid = session::create(title, caller_session, parent_pid, sd.termq.clone());
+    session::make_windowable(sid, windowed);
+    crate::vdm::register(sid);
+    let args = if inputs.is_empty() { prog.clone() } else { alloc::format!("{prog} {inputs}") };
+    let r = process::exec(process::ExecParams {
+        path: crate::vdm::VDM_PATH,
+        program: "VDM.EXE",
+        args: &args,
+        env,
+        parent: Some(c.process.clone()),
+        handles: super::file::console_handles(),
+        detached: true,
+        session: sid,
+    });
+    let child = match r {
+        Ok(p) => p,
+        Err(e) => {
+            session::discard(sid);
+            crate::vdm::drop_session(sid);
+            return Err(e);
+        }
+    };
+    session::set_leader(sid, child.pid);
+    let mut rc = 0;
+    if windowed {
+        crate::viowin::changed();
+    }
+    if !sd.background {
+        if caller_in_front(caller_session) {
+            session::select(sid);
+        } else {
+            rc = ERROR_SMG_START_IN_BACKGROUND;
+        }
+    }
+    Ok((sid, child.pid, rc))
+}
+
 /// Start a session; returns (session id, pid, return code).
 fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
     let env = sd.env.clone().unwrap_or_else(|| super::proc::parent_env(c));
     let comspec = env_value(&env, "COMSPEC").unwrap_or_else(|| String::from("C:\\OS2\\CMD.EXE"));
-    // No program: a command processor. Batch files run under one too.
+    let dos_type = sd.session_type == SSF_TYPE_VDM || sd.session_type == SSF_TYPE_WINDOWEDVDM;
+    if dos_type {
+        let path = match &sd.name {
+            None => None,
+            Some(n) => Some(find_program(c, n, &env).ok_or(err::FILE_NOT_FOUND)?),
+        };
+        return start_dos(c, &sd, path, &sd.inputs, env);
+    }
+    // No program: a command processor. Batch files run under one too
+    // (.BAT ones under COMMAND.COM in a DOS session).
     let (name, inputs) = match &sd.name {
         None => (comspec.clone(), sd.inputs.clone()),
         Some(n) => {
             let upper = n.to_ascii_uppercase();
-            if upper.ends_with(".CMD") || upper.ends_with(".BAT") {
+            if upper.ends_with(".BAT") {
+                let path = find_program(c, n, &env).ok_or(err::FILE_NOT_FOUND)?;
+                return start_dos(c, &sd, Some(path), &sd.inputs, env);
+            }
+            if upper.ends_with(".CMD") {
                 (comspec.clone(), alloc::format!("/C {} {}", n, sd.inputs))
             } else {
                 (n.clone(), sd.inputs.clone())
@@ -164,11 +237,15 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
         }
     };
     let path = find_program(c, &name, &env).ok_or(err::FILE_NOT_FOUND)?;
+    let data = crate::fs::read_file(&path).unwrap_or_default();
+    if is_dos_program(&path, &data) {
+        return start_dos(c, &sd, Some(path), &inputs, env);
+    }
     let program = path.rsplit('\\').next().unwrap_or(&path).to_string();
     let title = sd.title.clone().unwrap_or_else(|| program.clone());
     let caller_session = c.process.session.load(Ordering::Relaxed);
     let parent_pid = sd.related.then_some(c.process.pid);
-    let app = crate::fs::read_file(&path).map_or(0, |d| super::module::app_type(&d));
+    let app = super::module::app_type(&data);
     let mut windowed = wants_window(sd.session_type, app, caller_session);
     // The window needs the PM host; without it the session runs full
     // screen.

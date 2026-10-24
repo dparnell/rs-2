@@ -7,6 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
+dos = { path = "../crates/dos" }
 fat = { path = "../crates/fat" }
 ipf = { path = "../crates/ipf" }
 hpfs = { path = "../crates/hpfs" }

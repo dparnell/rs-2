@@ -43,6 +43,7 @@ pub mod sysstate;
 pub mod thunk;
 pub mod timer;
 pub mod vio;
+pub mod vdm;
 pub mod viowin;
 pub mod xproc;
 pub mod names;

@@ -160,9 +160,9 @@ pub fn run_simple(sh: &mut Shell, s: &Simple, async_: bool) -> Option<u32> {
 }
 
 /// Locate a program: an explicit path, else the current directory and
-/// the PATH, trying .COM, .EXE and .CMD.
+/// the PATH, trying .COM, .EXE, .CMD and .BAT.
 pub fn find_program(sh: &Shell, name: &str) -> Option<String> {
-    let exts: &[&str] = if name.contains('.') && !name.ends_with('.') { &[""] } else { &[".COM", ".EXE", ".CMD"] };
+    let exts: &[&str] = if name.contains('.') && !name.ends_with('.') { &[""] } else { &[".COM", ".EXE", ".CMD", ".BAT"] };
     let try_dir = |dir: &str| -> Option<String> {
         for e in exts {
             let cand = if dir.is_empty() { alloc::format!("{name}{e}") } else { alloc::format!("{}\\{name}{e}", dir.trim_end_matches('\\')) };
@@ -200,6 +200,36 @@ fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<O
     if path.to_ascii_uppercase().ends_with(".CMD") {
         if !crate::rexx::run(sh, &path, args) {
             crate::batch::start(sh, &path, args);
+        }
+        return Ok(None);
+    }
+    // DOS programs (and .BAT files) run in a DOS session of their own,
+    // full screen or in a window as this session is.
+    let upper = path.to_ascii_uppercase();
+    let mut ty = 0u32;
+    let cp = cstr(&path);
+    if upper.ends_with(".BAT") || (unsafe { DosQueryAppType(cp.as_ptr(), &mut ty) } == 0 && ty & 0x20 != 0) {
+        let title = cstr(&name.rsplit(['\\', ':']).next().unwrap_or(name).to_ascii_uppercase());
+        let cinputs = cstr(args.trim_start());
+        let env = sh.env_block();
+        let sd = StartData {
+            length: core::mem::size_of::<StartData>() as u16,
+            related: 0,
+            fgbg: 0,
+            trace: 0,
+            title: title.as_ptr(),
+            name: cp.as_ptr(),
+            inputs: cinputs.as_ptr(),
+            termq: core::ptr::null(),
+            env: env.as_ptr(),
+            inherit: 0,
+            session_type: 0,
+        };
+        let (mut sid, mut pid) = (0, 0);
+        let rc = unsafe { DosStartSession(&sd, &mut sid, &mut pid) };
+        if rc != 0 && rc != 457 {
+            sys_error(rc);
+            return Err(rc);
         }
         return Ok(None);
     }
