@@ -238,7 +238,7 @@ extern "C" fn input_thread() -> u32 {
             let q = st().server_queue;
             post_queue(q, qmsg(0, WM_QUIT, 0, 0));
         }
-        lock::leave();
+        lock::leave_idle();
         if quit {
             return 0;
         }

@@ -4,11 +4,15 @@
 //! Everything drawn on the screen surface is noted in `State::damage`
 //! (gpi's surface does it); when a thread lets go of the PM lock the list
 //! goes to the kernel (`Rs2UpdateDisplay`), which copies those areas from
-//! the back buffer PM draws into to the screen. While windows still have
-//! to paint (an update region, or between WinBeginPaint and WinEndPaint)
-//! the list is held back, for at most `HOLD_MS`: the screen then shows a
-//! window moved, opened or brought to the top once everything under and
-//! in it is painted, not erased first and painted window by window.
+//! the back buffer PM draws into to the screen. While drawing is going on
+//! the list is held back, for at most `HOLD_MS`: while windows still have
+//! to paint (an update region, or between WinBeginPaint and WinEndPaint),
+//! and while a thread that drew has not waited since (for messages, a
+//! semaphore, a sleep). The screen then shows a window moved, opened or
+//! brought to the top once everything under and in it is painted, not
+//! erased first and painted window by window, and what a program draws
+//! in steps (Klondike hides a card, lets the table paint over it, then
+//! draws the card it drags there) once it is done.
 //!
 //! When the mode changes (the Display settings program calls
 //! `Rs2SetDisplayMode`; the host resizes a virtio-gpu display) the kernel
@@ -51,9 +55,37 @@ unsafe extern "C" {
 /// The longest PM holds back what it drew while windows paint (ms).
 const HOLD_MS: u32 = 30;
 
-/// Whether a window still has to paint: one shown on the screen with an
-/// update region (its thread not hung), or a WinBeginPaint not ended.
-fn painting(s: &crate::state::State) -> bool {
+/// The calling thread let go of the lock: if something was drawn, it is
+/// drawing until it waits.
+pub fn drew() {
+    let Some(s) = get() else { return };
+    if s.damage.is_empty() {
+        return;
+    }
+    let (p, t, now) = (crate::state::pid(), crate::shared::tid(), crate::state::now());
+    match s.drawing.iter_mut().find(|d| d.0 == p && d.1 == t) {
+        Some(d) => d.2 = now,
+        None => s.drawing.push((p, t, now)),
+    }
+}
+
+/// The calling thread is done drawing for now (it waits).
+pub fn idle() {
+    let Some(s) = get() else { return };
+    let (p, t) = (crate::state::pid(), crate::shared::tid());
+    s.drawing.retain(|d| !(d.0 == p && d.1 == t));
+}
+
+/// Whether drawing is going on: a thread that drew and has not waited
+/// since (in the last `HOLD_MS`; one that draws without waiting through
+/// PMWIN, or died, counts no longer), or a window that still has to
+/// paint: one shown on the screen with an update region (its thread not
+/// hung), or a WinBeginPaint not ended.
+fn painting(s: &mut crate::state::State, now: u32) -> bool {
+    s.drawing.retain(|d| now.wrapping_sub(d.2) < HOLD_MS);
+    if !s.drawing.is_empty() {
+        return true;
+    }
     let hung = |q: u32| s.queues.get(&q).is_some_and(|q| q.hung);
     let shown = |mut h: u32| loop {
         let Some(w) = s.desk.get(h) else { return false };
@@ -82,7 +114,7 @@ pub fn flush_damage() {
     if s.surface.pixels() as usize == s.screen {
         let now = crate::state::now();
         let since = *s.damage_held.get_or_insert(now);
-        if now.wrapping_sub(since) < HOLD_MS && painting(s) {
+        if now.wrapping_sub(since) < HOLD_MS && painting(s, now) {
             return;
         }
         let h = s.surface.height;

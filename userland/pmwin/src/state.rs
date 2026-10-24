@@ -210,6 +210,9 @@ pub struct State {
     /// Since when (ms) `damage` has been held back for windows that still
     /// paint (`display::flush_damage`).
     pub damage_held: Option<u32>,
+    /// Threads that drew and have not waited since (pid, tid, when):
+    /// what they draw may be half done (`display::flush_damage`).
+    pub drawing: Vec<(u32, u32, u32)>,
     /// Presentation parameter colours set on windows: (foreground,
     /// background) as 0x00RRGGBB, NO_COLOR where not set.
     pub pres: BTreeMap<u32, (u32, u32)>,
@@ -308,6 +311,7 @@ pub fn init(surface: Surface) {
         shadow: Vec::new(),
         damage: gpi::Damage::new(),
         damage_held: None,
+        drawing: Vec::new(),
         keys: [0; 256],
         switch: Default::default(),
         cursor: Default::default(),

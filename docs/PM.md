@@ -130,11 +130,16 @@ copies those areas from the back buffer to the framebuffer then, while
 the thread still holds the lock, so the screen only shows what PM
 finished drawing (VMware shows what is written to its framebuffer as it
 happens: drawing there directly, every window flickered as it was
-erased and painted). While windows still have to paint (a shown window
-with an update region whose thread is not hung, or a WinBeginPaint not
-yet ended) PMWIN holds the list back, for at most 30 ms: a window
+erased and painted). While drawing is going on PMWIN holds the list
+back, for at most 30 ms: while windows still have to paint (a shown
+window with an update region whose thread is not hung, or a
+WinBeginPaint not yet ended), and while a thread that drew has not
+waited since (in WinGetMsg, WinWaitEventSem and the like). A window
 moved, opened or brought to the top appears with everything under and
-in it painted. When PM gets the screen back from a text session the
+in it painted, and what a program draws in steps appears when it is
+done (Klondike, picking up a card, hides the card's window, lets the
+table paint over it and draws the card it drags in its place: the table
+showed through for a moment). When PM gets the screen back from a text session the
 kernel copies all of the back buffer. The kernel also adds the list to
 its own (`display::damage`, also fed with the rows the text screens
 draw), and about 60 times a second the driver sends only those areas to

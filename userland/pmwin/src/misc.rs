@@ -264,13 +264,13 @@ fn load_string(ty: u32, hmod: u32, id: u32, cch: i32, buf: *mut u8) -> i32 {
 /// WinWaitEventSem(hev, ulTimeout): waits without holding PMWIN.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinWaitEventSem(hev: u32, ms: u32) -> u32 {
-    crate::lock::unlocked(|| unsafe { DosWaitEventSem(hev, ms) })
+    crate::lock::wait(|| unsafe { DosWaitEventSem(hev, ms) })
 }
 
 /// WinRequestMutexSem(hmtx, ulTimeout)
 #[unsafe(no_mangle)]
 pub extern "C" fn WinRequestMutexSem(hmtx: u32, ms: u32) -> u32 {
-    crate::lock::unlocked(|| unsafe { DosRequestMutexSem(hmtx, ms) })
+    crate::lock::wait(|| unsafe { DosRequestMutexSem(hmtx, ms) })
 }
 
 const PP_FOREGROUNDCOLOR: u32 = 1;

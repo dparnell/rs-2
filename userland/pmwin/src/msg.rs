@@ -532,7 +532,7 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
         let mut n = 0;
         unsafe { DosResetEventSem(sem, &mut n) };
         queue.msgs.set_waiting(true);
-        lock::unlocked(|| unsafe { DosWaitEventSem(sem, wait_ms) });
+        lock::wait(|| unsafe { DosWaitEventSem(sem, wait_ms) });
         if let Some(x) = st().queues.get_mut(&q) {
             x.msgs.set_waiting(false);
         }

@@ -12,8 +12,10 @@
 //! gets ERROR_SEM_OWNER_DIED and carries on.
 //!
 //! When a thread lets go of the lock it tells the kernel what it drew on
-//! the screen and wakes the threads it gave work to: queues it posted
-//! to, and the owners of windows it invalidated.
+//! the screen (unless drawing is still going on: `display::flush_damage`)
+//! and wakes the threads it gave work to: queues it posted to, and the
+//! owners of windows it invalidated. A thread that drew is busy drawing
+//! until it waits ([`wait`]: for messages, a semaphore, a sleep).
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -185,6 +187,23 @@ pub extern "C" fn leave() {
         return;
     }
     if DEPTH.load(Ordering::Relaxed) == 1 {
+        crate::display::drew();
+        crate::display::flush_damage();
+        crate::msg::wake_pending();
+    }
+    if DEPTH.fetch_sub(1, Ordering::Relaxed) == 1 {
+        release();
+    }
+}
+
+/// `leave` for a thread whose drawing is complete when it lets go (the
+/// PM server's input thread, after each batch of input).
+pub fn leave_idle() {
+    if OWNER.load(Ordering::Relaxed) != tid() {
+        return;
+    }
+    if DEPTH.load(Ordering::Relaxed) == 1 {
+        crate::display::idle();
         crate::display::flush_damage();
         crate::msg::wake_pending();
     }
@@ -208,9 +227,19 @@ pub fn unlocked<R>(f: impl FnOnce() -> R) -> R {
     r
 }
 
+/// Wait (`f`: for messages, a semaphore, a sleep) with the lock
+/// released: the thread is done drawing for now, so what it drew can be
+/// shown.
+pub fn wait<R>(f: impl FnOnce() -> R) -> R {
+    if OWNER.load(Ordering::Relaxed) == tid() {
+        crate::display::idle();
+    }
+    unlocked(f)
+}
+
 /// Sleep without the lock.
 pub fn sleep(ms: u32) {
-    unlocked(|| unsafe { DosSleep(ms) });
+    wait(|| unsafe { DosSleep(ms) });
 }
 
 /// An entry point for a built-in window procedure `$f`: applications may
