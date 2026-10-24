@@ -34,6 +34,9 @@ pub struct Event {
 
 struct Vdm {
     events: VecDeque<Event>,
+    /// Shift, Ctrl and Alt as the session last saw them pressed (keys
+    /// from its window).
+    held: u8,
 }
 
 const QUEUE_MAX: usize = 512;
@@ -45,7 +48,7 @@ static ANY: AtomicBool = AtomicBool::new(false);
 
 /// Make `sid` a DOS session.
 pub fn register(sid: u32) {
-    VDMS.lock().entry(sid).or_insert_with(|| Vdm { events: VecDeque::new() });
+    VDMS.lock().entry(sid).or_insert_with(|| Vdm { events: VecDeque::new(), held: 0 });
     ANY.store(true, Ordering::Relaxed);
 }
 
@@ -83,6 +86,35 @@ pub fn key(sid: u32, code: u8, ext: bool, ch: u8) -> bool {
         push(sid, Event { kind: EV_KEY, flags: 0, a: 0xe0, b: 0 });
     }
     push(sid, Event { kind: EV_KEY, flags: ch as u16, a: code as i32, b: 0 })
+}
+
+/// The modifiers' scan codes (left Shift, Ctrl, Alt) and their bits in
+/// `Vdm::held` and in the keyboard's shift state.
+const MODIFIERS: [(u8, u8, u16); 3] = [(0x2a, 1, 0x0003), (0x1d, 2, 0x0004), (0x38, 4, 0x0008)];
+
+/// A key from the PM window showing DOS session `sid`, with the shift
+/// state it was typed in. PM does not pass on Shift, Ctrl and Alt by
+/// themselves, so their presses and releases are made up from the
+/// shift state when it differs from what the session saw.
+pub fn key_window(sid: u32, code: u8, ext: bool, ch: u8, shift: u16) -> bool {
+    if !is_dos(sid) {
+        return false;
+    }
+    let is_mod = matches!(code & 0x7f, 0x2a | 0x36 | 0x1d | 0x38);
+    let mut g = VDMS.lock();
+    let Some(v) = g.get_mut(&sid) else { return false };
+    for (sc, bit, mask) in MODIFIERS {
+        let want = shift & mask != 0;
+        let had = v.held & bit != 0;
+        if is_mod && (code & 0x7f == sc || (sc == 0x2a && code & 0x7f == 0x36)) {
+            v.held = if code & 0x80 == 0 { v.held | bit } else { v.held & !bit };
+        } else if want != had && v.events.len() < QUEUE_MAX {
+            v.events.push_back(Event { kind: EV_KEY, flags: 0, a: (sc | if want { 0 } else { 0x80 }) as i32, b: 0 });
+            v.held ^= bit;
+        }
+    }
+    drop(g);
+    key(sid, code, ext, ch)
 }
 
 /// Mouse motion while DOS session `sid` has the screen.

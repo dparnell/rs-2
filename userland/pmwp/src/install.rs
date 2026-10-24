@@ -23,7 +23,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"8";
+const DESKTOP_VERSION: &[u8] = b"9";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -84,6 +84,9 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"rs2 on^the Internet;WPUrl;<WP_ASSISTANCE>;PRESERVEOLD", b"URL=https://github.com/dparnell/rs-2;OBJECTID=<RS2_URL>"),
         (b"OS/2 Window;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=WINDOWABLEVIO;OBJECTID=<WP_OS2WIN>"),
         (b"OS/2 Full Screen;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=FULLSCREEN;OBJECTID=<WP_OS2FS>"),
+        // DOS sessions' prompts (version 9), as IBM's INI.RC has them.
+        (b"DOS Window;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=WINDOWEDVDM;OBJECTID=<WP_DOSWIN>"),
+        (b"DOS Full Screen;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=VDM;OBJECTID=<WP_DOSFS>"),
     ];
     // (file, title, object ID, folder, more setup)
     let programs: [(&[u8], &[u8], &[u8], &[u8], &[u8]); 4] = [

@@ -456,7 +456,7 @@ pub fn inject_key(sid: u32, k: KeyInfo, up: bool) {
     if !up && is_alt_home(&k) && crate::session::set_windowed(sid, false) {
         return;
     }
-    if crate::vdm::key(sid, k.scan & 0x7f | if up { 0x80 } else { 0 }, ext, if up { 0 } else { k.ch }) {
+    if crate::vdm::key_window(sid, k.scan & 0x7f | if up { 0x80 } else { 0 }, ext, if up { 0 } else { k.ch }, k.shift) {
         return;
     }
     let mut k = k;
