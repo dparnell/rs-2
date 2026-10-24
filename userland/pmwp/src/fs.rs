@@ -790,6 +790,7 @@ pub fn impl_folder() -> Impl {
         .chain(crate::book::folder_methods())
         .chain(crate::sortinc::folder_methods())
         .chain(crate::viewset::folder_methods())
+        .chain(crate::delete::folder_methods())
         .collect(),
         overrides: [
             ("wpUnInitData", __m_folder_uninit as usize),
@@ -801,6 +802,7 @@ pub fn impl_folder() -> Impl {
         .into_iter()
         .chain(crate::dnd::overrides("WPFolder"))
         .chain(crate::book::folder_overrides())
+        .chain(crate::delete::folder_overrides())
         .collect(),
     }
 }

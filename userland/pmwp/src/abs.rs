@@ -447,6 +447,7 @@ pub fn impl_shadow() -> Impl {
         ]
         .into_iter()
         .chain(crate::dnd::overrides("WPShadow"))
+        .chain(crate::delete::shadow_overrides())
         .collect(),
     }
 }

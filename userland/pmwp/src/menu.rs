@@ -314,12 +314,9 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
             }
         }
         WPMENUID_DELETE => {
-            let mut text = b"Delete \"".to_vec();
-            text.extend_from_slice(&obj::title(o));
-            text.extend_from_slice(b"\"?");
-            if message(frame, &text, b"Delete", MB_YESNO | MB_ICONQUESTION | MB_MOVEABLE) == MBID_YES {
-                obj::call(m::WPObject::wpDelete, &[o, 0]);
-            }
+            // The selected objects of the view the menu came from.
+            let objs = view::wins().iter().position(|w| w.frame == frame).map_or(alloc::vec![o], |w| view::selected(w, o));
+            crate::delete::delete_objects(frame, &objs);
         }
         _ if crate::sortinc::menu_selected(o, id) => {}
         _ => return 0,

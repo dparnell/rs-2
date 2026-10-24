@@ -204,7 +204,10 @@ pub fn drop(w: usize, cdi: u32) {
             // into one job (progress, name collisions).
             unsafe { BATCH = Some(Vec::new()) };
             for &it in &list {
-                obj::call(m::WPObject::wpDrop, &[to, wins()[w].child as usize, pdinfo as usize, it as usize]);
+                // RC_DROP_DROPCOMPLETE: the object took the whole drop.
+                if obj::call(m::WPObject::wpDrop, &[to, wins()[w].child as usize, pdinfo as usize, it as usize]) as u32 == crate::delete::RC_DROP_DROPCOMPLETE {
+                    break;
+                }
             }
             let batch = unsafe { (*&raw mut BATCH).take() }.unwrap_or_default();
             run_batch(batch);

@@ -951,9 +951,8 @@ extern "C" fn cnr_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             let frame = wins()[w].frame;
             match vk {
                 VK_DELETE if o != 0 => {
-                    for x in selected(w, o) {
-                        obj::call(m::WPObject::wpMenuItemSelected, &[x, frame as usize, crate::menu::WPMENUID_DELETE as usize]);
-                    }
+                    let objs: alloc::vec::Vec<usize> = selected(w, o).into_iter().filter(|&x| obj::call(m::WPObject::wpIsDeleteable, &[x]) != 0).collect();
+                    crate::delete::delete_objects(frame, &objs);
                     return 1;
                 }
                 VK_F2 if o != 0 => {
@@ -1088,6 +1087,10 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
         }
         WM_RS2_MINWINDOW => {
             crate::minwin::changed(a, b != 0);
+            0
+        }
+        crate::delete::WM_DELETE_PENDING => {
+            crate::delete::run_pending();
             0
         }
         WM_TIMER if a == crate::obj::TID_LAZY => {

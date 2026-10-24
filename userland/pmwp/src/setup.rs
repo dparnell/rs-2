@@ -179,11 +179,11 @@ pub fn apply_saved() {
 
 // ---- Settings pages ----
 
-fn check(h: u32, id: u16, on: bool) {
+pub(crate) fn check(h: u32, id: u16, on: bool) {
     unsafe { WinSendDlgItemMsg(h, id as u32, BM_SETCHECK, on as u32, 0) };
 }
 
-fn checked(h: u32, id: u16) -> bool {
+pub(crate) fn checked(h: u32, id: u16) -> bool {
     unsafe { WinSendDlgItemMsg(h, id as u32, BM_QUERYCHECK, 0, 0) != 0 }
 }
 
@@ -196,29 +196,29 @@ const SPBM_SETCURRENTVALUE: u32 = 0x208;
 const SPBN_CHANGE: u32 = 0x20d;
 
 /// A numeric spin button (SPBS_MASTER | SPBS_NUMERICONLY).
-fn spin((x, y, cx): (i16, i16, i16), id: u16) -> Item {
+pub(crate) fn spin((x, y, cx): (i16, i16, i16), id: u16) -> Item {
     item(WC_SPINBUTTON, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0011, (x, y, cx, 12), id)
 }
 
-fn spin_init(h: u32, id: u16, lo: i32, hi: i32, v: i32) {
+pub(crate) fn spin_init(h: u32, id: u16, lo: i32, hi: i32, v: i32) {
     unsafe {
         WinSendDlgItemMsg(h, id as u32, SPBM_SETLIMITS, hi as u32, lo as u32);
         WinSendDlgItemMsg(h, id as u32, SPBM_SETCURRENTVALUE, v as u32, 0);
     }
 }
 
-fn spin_value(h: u32, id: u16) -> Option<i32> {
+pub(crate) fn spin_value(h: u32, id: u16) -> Option<i32> {
     let mut v = 0i32;
     // SPBQ_DONOTUPDATE
     (unsafe { WinSendDlgItemMsg(h, id as u32, SPBM_QUERYVALUE, &mut v as *mut i32 as u32, 3 << 16) } != 0).then_some(v)
 }
 
-fn radio(t: &[u8], (x, y, cx): (i16, i16, i16), id: u16, first: bool) -> Item {
+pub(crate) fn radio(t: &[u8], (x, y, cx): (i16, i16, i16), id: u16, first: bool) -> Item {
     // BS_AUTORADIOBUTTON
     item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | if first { WS_GROUP } else { 0 } | 0x0004, (x, y, cx, 10), id)
 }
 
-fn add_page(o: usize, nb: u32, proc_: extern "C" fn(u32, u32, u32, u32) -> u32, items: Vec<Item>, tab: &'static [u8]) -> u32 {
+pub(crate) fn add_page(o: usize, nb: u32, proc_: extern "C" fn(u32, u32, u32, u32) -> u32, items: Vec<Item>, tab: &'static [u8]) -> u32 {
     let tpl = template(book::page_frame(), items);
     let page = book::make_page(nb, proc_, &tpl, o);
     if page == 0 {

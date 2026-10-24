@@ -43,6 +43,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (368, 367, 369),
     },
     ClassDef {
+        name: "M_WPClock",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPPalette",
         parents: &["M_WPAbstract"],
         meta: None,
@@ -250,6 +259,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (365, 364, 366),
     },
     ClassDef {
+        name: "M_WPPrinter",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPProgram",
         parents: &["M_WPAbstract"],
         meta: None,
@@ -322,6 +340,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (335, 334, 336),
     },
     ClassDef {
+        name: "M_WPSystem",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPTemplates",
         parents: &["M_WPFolder"],
         meta: None,
@@ -342,6 +369,15 @@ pub static CLASSES: &[ClassDef] = &[
     ClassDef {
         name: "M_WPUrl",
         parents: &["M_WPDataFile"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPUrlFolder",
+        parents: &["M_WPFolder"],
         meta: None,
         major: 1,
         minor: 2,
@@ -419,6 +455,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &["wpClassManagerPrivate1", "wpGetTrueClassName", "wpReplacementIsInEffect", "wpModuleForClass"],
         ords: (89, 88, 90),
+    },
+    ClassDef {
+        name: "WPClock",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPClock"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddClockView1Page", "wpAddClockView2Page", "wpAddClockDateTimePage", "wpAddClockAlarmPage"],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "WPPalette",
@@ -646,6 +691,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (65, 64, 66),
     },
     ClassDef {
+        name: "WPPrinter",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPPrinter"),
+        major: 1,
+        minor: 1,
+        methods: &["pdvNew", "pdvOpen", "pdvPrintDestType", "pdvQueueName", "pdvComputerName", "pdvSetViewStatus", "pdvSetDialogPrintFlag", "pdvIsDialogPrintOn", "pdvGetJobFolderhWnd", "pdvSetPrintDestType", "pdvSetQueueName", "pdvSetComputerName", "pdvSetTitle", "pdvHoldQueue", "pdvReleaseQueue", "pdvChangeQueue", "pdvAddJob", "pdvDeleteJob", "pdvDeleteAllJob", "pdvHoldJob", "pdvReleaseJob", "pdvChangeJob", "pdvHasThisPort", "pdvHasThisPDriver", "pdvHasThisQDriver", "pdvGetQueueObject", "pdvGetCountryData", "pdvSetCountryData", "pdvGetJobDetailTable", "pdvGetJobFieldInfo", "pdvPrintPD", "pdvFreePrintDest", "pdvNewRemote", "pdvCopyRemote", "pdvCapabilities", "pdvSetCapabilities", "pdvLogonName", "pdvSetLogonName", "pdvLocalPrintDriverOnly", "pdvSetLocalPrintDriverOnly", "pdvRemotePDriverList", "pdvSetRemotePDriverList", "pdvPrintSpecificFormat", "pdvSetPrintSpecificFormat", "pdvRemoteAdminCopy", "pdvRemoteAdminCreate", "pdvRemoteAdminDelete", "pdvAddJobViewer", "pdvDelJobViewer", "pdvTimerTicks", "pdvSetTimerTicks", "wpDeleteAllJobs", "wpHoldPrinter", "wpReleasePrinter", "wpQueryComputerName", "wpQueryPrinterName", "wpSetComputerName", "wpSetPrinterName", "wpSetDefaultPrinter", "pdvSetLSAlias", "pdvLSAlias", "pdvLocalAlias", "pdvSetLocalAlias", "pdvRemoteJobView", "pdvSetRemoteData", "pdvCopy", "pdvSetJobDetailTable", "pdvGetQueueStatusLine", "pdvSetQueueStatusLine", "pdvGetNewDlg", "pdvSetNewDlg", "pdvGetLastRefreshTime", "pdvSetLastRefreshTime", "wpSetQueueOptions", "wpQueryQueueOptions", "wpSetRemoteOptions", "wpQueryRemoteOptions", "wpJobAdded", "wpJobChanged", "wpJobDeleted", "pdvSetPrinterStatusLine", "pdvGetPrinterStatusLine", "pdvQueryXSplitBarDetail", "pdvSetXSplitBarDetail", "wpSetJobProperties", "pdvSetDetailsColumnVisibility", "pdvIsDetailsColumnVisible", "pdvResetTimer", "pdvSetErrorIcon"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPProgram",
         parents: &["WPAbstract"],
         meta: Some("M_WPProgram"),
@@ -716,6 +770,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (38, 37, 39),
+    },
+    ClassDef {
+        name: "WPSystem",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPSystem"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddSystemWindowPage", "wpAddSystemLogoPage", "wpAddSystemPrintScreenPage", "wpAddSystemConfirmationPage", "wpAddTitleConfirmationPage", "wpAddSystemScreenPage", "wpAddDMQSDisplayTypePage", "wpAddSysFdrSelfClosePage", "wpAddSysFdrDefViewPage", "wpAddSystemInputPage", "wpAddSysFdrMenuPage", "wpAddSystem256ColorPage", "wpAddSystemFontSettingPages"],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "WPTemplates",
@@ -805,6 +868,8 @@ pub mod m {
     }
     pub mod M_WPBitmap {
     }
+    pub mod M_WPClock {
+    }
     pub mod M_WPPalette {
         pub const wpclsQueryEditString: usize = 0;
     }
@@ -869,6 +934,8 @@ pub mod m {
     }
     pub mod M_WPPointer {
     }
+    pub mod M_WPPrinter {
+    }
     pub mod M_WPProgram {
     }
     pub mod M_WPRootFolder {
@@ -885,6 +952,8 @@ pub mod m {
     }
     pub mod M_WPStartup {
     }
+    pub mod M_WPSystem {
+    }
     pub mod M_WPTemplates {
     }
     pub mod M_WPTransient {
@@ -892,6 +961,8 @@ pub mod m {
         pub const wpclsTransientPrivate2: usize = 1;
     }
     pub mod M_WPUrl {
+    }
+    pub mod M_WPUrlFolder {
     }
     pub mod WPObject {
         pub const wpSetTitle: usize = 0;
@@ -1077,6 +1148,12 @@ pub mod m {
         pub const wpGetTrueClassName: usize = 1;
         pub const wpReplacementIsInEffect: usize = 2;
         pub const wpModuleForClass: usize = 3;
+    }
+    pub mod WPClock {
+        pub const wpAddClockView1Page: usize = 0;
+        pub const wpAddClockView2Page: usize = 1;
+        pub const wpAddClockDateTimePage: usize = 2;
+        pub const wpAddClockAlarmPage: usize = 3;
     }
     pub mod WPPalette {
         pub const wpPaintCell: usize = 0;
@@ -1427,6 +1504,97 @@ pub mod m {
     }
     pub mod WPPointer {
     }
+    pub mod WPPrinter {
+        pub const pdvNew: usize = 0;
+        pub const pdvOpen: usize = 1;
+        pub const pdvPrintDestType: usize = 2;
+        pub const pdvQueueName: usize = 3;
+        pub const pdvComputerName: usize = 4;
+        pub const pdvSetViewStatus: usize = 5;
+        pub const pdvSetDialogPrintFlag: usize = 6;
+        pub const pdvIsDialogPrintOn: usize = 7;
+        pub const pdvGetJobFolderhWnd: usize = 8;
+        pub const pdvSetPrintDestType: usize = 9;
+        pub const pdvSetQueueName: usize = 10;
+        pub const pdvSetComputerName: usize = 11;
+        pub const pdvSetTitle: usize = 12;
+        pub const pdvHoldQueue: usize = 13;
+        pub const pdvReleaseQueue: usize = 14;
+        pub const pdvChangeQueue: usize = 15;
+        pub const pdvAddJob: usize = 16;
+        pub const pdvDeleteJob: usize = 17;
+        pub const pdvDeleteAllJob: usize = 18;
+        pub const pdvHoldJob: usize = 19;
+        pub const pdvReleaseJob: usize = 20;
+        pub const pdvChangeJob: usize = 21;
+        pub const pdvHasThisPort: usize = 22;
+        pub const pdvHasThisPDriver: usize = 23;
+        pub const pdvHasThisQDriver: usize = 24;
+        pub const pdvGetQueueObject: usize = 25;
+        pub const pdvGetCountryData: usize = 26;
+        pub const pdvSetCountryData: usize = 27;
+        pub const pdvGetJobDetailTable: usize = 28;
+        pub const pdvGetJobFieldInfo: usize = 29;
+        pub const pdvPrintPD: usize = 30;
+        pub const pdvFreePrintDest: usize = 31;
+        pub const pdvNewRemote: usize = 32;
+        pub const pdvCopyRemote: usize = 33;
+        pub const pdvCapabilities: usize = 34;
+        pub const pdvSetCapabilities: usize = 35;
+        pub const pdvLogonName: usize = 36;
+        pub const pdvSetLogonName: usize = 37;
+        pub const pdvLocalPrintDriverOnly: usize = 38;
+        pub const pdvSetLocalPrintDriverOnly: usize = 39;
+        pub const pdvRemotePDriverList: usize = 40;
+        pub const pdvSetRemotePDriverList: usize = 41;
+        pub const pdvPrintSpecificFormat: usize = 42;
+        pub const pdvSetPrintSpecificFormat: usize = 43;
+        pub const pdvRemoteAdminCopy: usize = 44;
+        pub const pdvRemoteAdminCreate: usize = 45;
+        pub const pdvRemoteAdminDelete: usize = 46;
+        pub const pdvAddJobViewer: usize = 47;
+        pub const pdvDelJobViewer: usize = 48;
+        pub const pdvTimerTicks: usize = 49;
+        pub const pdvSetTimerTicks: usize = 50;
+        pub const wpDeleteAllJobs: usize = 51;
+        pub const wpHoldPrinter: usize = 52;
+        pub const wpReleasePrinter: usize = 53;
+        pub const wpQueryComputerName: usize = 54;
+        pub const wpQueryPrinterName: usize = 55;
+        pub const wpSetComputerName: usize = 56;
+        pub const wpSetPrinterName: usize = 57;
+        pub const wpSetDefaultPrinter: usize = 58;
+        pub const pdvSetLSAlias: usize = 59;
+        pub const pdvLSAlias: usize = 60;
+        pub const pdvLocalAlias: usize = 61;
+        pub const pdvSetLocalAlias: usize = 62;
+        pub const pdvRemoteJobView: usize = 63;
+        pub const pdvSetRemoteData: usize = 64;
+        pub const pdvCopy: usize = 65;
+        pub const pdvSetJobDetailTable: usize = 66;
+        pub const pdvGetQueueStatusLine: usize = 67;
+        pub const pdvSetQueueStatusLine: usize = 68;
+        pub const pdvGetNewDlg: usize = 69;
+        pub const pdvSetNewDlg: usize = 70;
+        pub const pdvGetLastRefreshTime: usize = 71;
+        pub const pdvSetLastRefreshTime: usize = 72;
+        pub const wpSetQueueOptions: usize = 73;
+        pub const wpQueryQueueOptions: usize = 74;
+        pub const wpSetRemoteOptions: usize = 75;
+        pub const wpQueryRemoteOptions: usize = 76;
+        pub const wpJobAdded: usize = 77;
+        pub const wpJobChanged: usize = 78;
+        pub const wpJobDeleted: usize = 79;
+        pub const pdvSetPrinterStatusLine: usize = 80;
+        pub const pdvGetPrinterStatusLine: usize = 81;
+        pub const pdvQueryXSplitBarDetail: usize = 82;
+        pub const pdvSetXSplitBarDetail: usize = 83;
+        pub const wpSetJobProperties: usize = 84;
+        pub const pdvSetDetailsColumnVisibility: usize = 85;
+        pub const pdvIsDetailsColumnVisible: usize = 86;
+        pub const pdvResetTimer: usize = 87;
+        pub const pdvSetErrorIcon: usize = 88;
+    }
     pub mod WPProgram {
         pub const wpAddProgramPage: usize = 0;
         pub const wpAddProgramSessionPage: usize = 1;
@@ -1490,6 +1658,21 @@ pub mod m {
         pub const wpAddSoundSchemePage: usize = 1;
     }
     pub mod WPStartup {
+    }
+    pub mod WPSystem {
+        pub const wpAddSystemWindowPage: usize = 0;
+        pub const wpAddSystemLogoPage: usize = 1;
+        pub const wpAddSystemPrintScreenPage: usize = 2;
+        pub const wpAddSystemConfirmationPage: usize = 3;
+        pub const wpAddTitleConfirmationPage: usize = 4;
+        pub const wpAddSystemScreenPage: usize = 5;
+        pub const wpAddDMQSDisplayTypePage: usize = 6;
+        pub const wpAddSysFdrSelfClosePage: usize = 7;
+        pub const wpAddSysFdrDefViewPage: usize = 8;
+        pub const wpAddSystemInputPage: usize = 9;
+        pub const wpAddSysFdrMenuPage: usize = 10;
+        pub const wpAddSystem256ColorPage: usize = 11;
+        pub const wpAddSystemFontSettingPages: usize = 12;
     }
     pub mod WPTemplates {
     }

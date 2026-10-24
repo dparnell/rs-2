@@ -44,8 +44,20 @@ pub const SCHEME_PALETTE: u32 = 21;
 pub const SYSTEM: u32 = 22;
 /// The Font Palette (letters on a page).
 pub const FONT_PALETTE: u32 = 23;
+/// The Shredder (a shredder with strips coming out).
+pub const SHREDDER: u32 = 24;
+/// The Network folder (computers on a cable).
+pub const NETWORK: u32 = 25;
+/// A printer.
+pub const PRINTER: u32 = 26;
+/// The System Clock.
+pub const CLOCK: u32 = 27;
+/// The Connections folder (a folder with a plug).
+pub const CONNECTIONS: u32 = 28;
+/// The Printers folder (a folder with a printer).
+pub const PRINTERS: u32 = 29;
 /// Highest icon id.
-pub const LAST: u32 = 23;
+pub const LAST: u32 = 29;
 
 const SILVER: u32 = 0xffe0_e0e8;
 
@@ -75,6 +87,28 @@ fn window(p: &mut Pen, x0: f64, y0: f64, x1: f64, y1: f64, client: u32) {
     let t = (y1 - y0) / 6.0;
     p.rect(x0 + 1.0, y1 - t - 1.0, x1 - 1.0, y1 - 1.0, NAVY);
     p.rect(x0 + 2.0, y0 + 2.0, x1 - 2.0, y1 - t - 2.0, client);
+}
+
+fn printer(p: &mut Pen, dx: f64, dy: f64, s: f64) {
+    let r = |x: f64, y: f64| (dx + x * s, dy + y * s);
+    let (a, b) = (r(8.0, 16.0), r(24.0, 28.0));
+    p.rect(a.0, a.1, b.0, b.1, WHITE);
+    p.frame(a.0, a.1, b.0, b.1, DARK);
+    let (c, d) = (r(2.0, 6.0), r(30.0, 18.0));
+    p.rect(c.0, c.1, d.0, d.1, FACE);
+    p.frame(c.0, c.1, d.0, d.1, DARK);
+    let (e, f) = (r(7.0, 3.0), r(25.0, 9.0));
+    p.rect(e.0, e.1, f.0, f.1, WHITE);
+    p.frame(e.0, e.1, f.0, f.1, DARK);
+    let led = r(26.0, 14.0);
+    p.disc(led.0, led.1, 1.3 * s.max(0.6), rgb(0x30d040), rgb(0x107020));
+}
+
+fn computer(p: &mut Pen, x: f64, y: f64) {
+    p.rect(x, y, x + 11.0, y + 9.0, FACE);
+    p.frame(x, y, x + 11.0, y + 9.0, DARK);
+    p.rect(x + 1.5, y + 2.0, x + 9.5, y + 7.5, rgb(0x2e6e8e));
+    p.rect(x + 3.0, y - 2.0, x + 8.0, y, GREY);
 }
 
 fn prompt_text(p: &mut Pen, cx: f64, cy: f64, h: f64) {
@@ -269,6 +303,59 @@ fn draw(id: u32, size: i32) -> Option<Image> {
             p.rect(20.0, 5.0, 26.0, 6.5, DARK);
             p.rect(13.0, 9.0, 19.0, 11.0, GREY);
             window(&mut p, 5.0, 11.0, 27.0, 29.0, rgb(0x2e6e8e));
+        }
+        SHREDDER => {
+            // Paper going into a shredder, strips falling out below.
+            p.rect(9.0, 18.0, 23.0, 30.0, WHITE);
+            p.frame(9.0, 18.0, 23.0, 30.0, DARK);
+            for k in 0..3 {
+                let y = 21.0 + k as f64 * 3.0;
+                p.rect(11.0, y, 21.0, y + 1.0, GREY);
+            }
+            p.rect(3.0, 12.0, 29.0, 20.0, rgb(0x505860));
+            p.frame(3.0, 12.0, 29.0, 20.0, DARK);
+            p.rect(7.0, 17.0, 25.0, 18.0, BLACK);
+            for k in 0..5 {
+                let x = 9.0 + k as f64 * 3.2;
+                p.rect(x, 2.0 + (k % 2) as f64 * 2.0, x + 1.8, 12.0, WHITE);
+                p.frame(x, 2.0 + (k % 2) as f64 * 2.0, x + 1.8, 12.0, GREY);
+            }
+        }
+        NETWORK => {
+            p.line((4.0, 6.0), (28.0, 6.0), 1.5, DARK);
+            for (x, y) in [(2.0, 18.0), (19.0, 18.0)] {
+                p.line((x + 5.5, y - 2.0), (x + 5.5, 6.0), 1.2, DARK);
+                computer(&mut p, x, y);
+            }
+            p.line((16.0, 10.0), (16.0, 6.0), 1.2, DARK);
+            computer(&mut p, 10.5, 8.5);
+        }
+        PRINTER => printer(&mut p, 0.0, 0.0, 1.0),
+        CLOCK => {
+            p.disc(16.0, 16.0, 14.5, rgb(0x2050c0), DARK);
+            p.disc(16.0, 16.0, 12.0, WHITE, rgb(0x103080));
+            // sin of 0, 30, ..., 330 degrees.
+            const SIN: [f64; 12] = [0.0, 0.5, 0.866, 1.0, 0.866, 0.5, 0.0, -0.5, -0.866, -1.0, -0.866, -0.5];
+            for k in 0..12 {
+                let (s, c) = (SIN[k], SIN[(k + 3) % 12]);
+                p.line((16.0 + s * 9.5, 16.0 + c * 9.5), (16.0 + s * 11.0, 16.0 + c * 11.0), 1.2, DARK);
+            }
+            p.line((16.0, 16.0), (16.0, 25.0), 1.6, DARK);
+            p.line((16.0, 16.0), (22.0, 13.0), 2.0, DARK);
+            p.disc(16.0, 16.0, 1.3, rgb(0xc03028), rgb(0xc03028));
+        }
+        CONNECTIONS => {
+            folder(&mut p);
+            // A plug with its cable.
+            p.rect(11.0, 9.0, 21.0, 17.0, FACE);
+            p.frame(11.0, 9.0, 21.0, 17.0, DARK);
+            p.rect(13.0, 17.0, 14.5, 21.0, SILVER);
+            p.rect(17.5, 17.0, 19.0, 21.0, SILVER);
+            p.line((16.0, 9.0), (16.0, 5.0), 1.6, DARK);
+        }
+        PRINTERS => {
+            folder(&mut p);
+            printer(&mut p, 7.0, 3.0, 0.6);
         }
         DESKTOP => {
             p.rect(2.0, 5.0, 30.0, 27.0, rgb(0x2e6e8e));

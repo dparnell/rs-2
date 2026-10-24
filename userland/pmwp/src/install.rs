@@ -11,7 +11,8 @@
 //! rs2 has no INI.RC from IBM: the first start writes rs2's own entries
 //! (the desktop, drives, the Startup, Programs and Command Prompts
 //! folders, the Minimized Window Viewer, Window List, System Setup with
-//! System and Display, Shut Down, the programs rs2 has) unless OS2.INI says the desktop was
+//! System, System Clock and Display, Shut Down, the Shredder, Connections
+//! with Network and Printers, the programs rs2 has) unless OS2.INI says the desktop was
 //! made (`PM_Workplace` `Rs2Desktop`).
 
 use alloc::vec::Vec;
@@ -23,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"8";
+const DESKTOP_VERSION: &[u8] = b"9";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -57,7 +58,10 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"Minimized^Window Viewer;WPMinWinViewer;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_VIEWER>"),
         (b"Window List;RS2WindowList;<WP_DESKTOP>;PRESERVEOLD", b"NOCOPY=YES;OBJECTID=<RS2_WINLIST>"),
         (b"System Setup;WPFolder;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_CONFIG>"),
-        (b"System;RS2System;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<RS2_SYSTEM>"),
+        // rs2's earlier System object gives way to IBM's class.
+        (b"System;RS2System;<WP_CONFIG>;DELETE", b"OBJECTID=<RS2_SYSTEM>"),
+        (b"System;WPSystem;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_SYSTEM>"),
+        (b"System Clock;WPClock;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_CLOCK>"),
         (b"Keyboard;WPKeyboard;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_KEYB>"),
         (b"Mouse;WPMouse;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_MOUSE>"),
         (b"Sound;WPSound;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_SOUND>"),
@@ -65,6 +69,14 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"Scheme Palette;WPSchemePalette;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_SCHPAL96>"),
         (b"Font Palette;WPFontPalette;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_FNTPAL>"),
         (b"Shut Down;RS2Shutdown;<WP_DESKTOP>;PRESERVEOLD", b"NOCOPY=YES;OBJECTID=<RS2_SHUTDOWN>"),
+        (b"Shredder;WPShredder;<WP_DESKTOP>;PRESERVEOLD", b"NOCOPY=YES;OBJECTID=<WP_SHRED>;LOCKEDINPLACE=YES"),
+        // Connections, as IBM's INI.RC has it (Drives stays on the
+        // desktop): the Network folder and the Printers folder with a
+        // printer template.
+        (b"Connections;WPFolder;<WP_DESKTOP>;PRESERVEOLD", b"OBJECTID=<WP_CONNECTIONSFOLDER>"),
+        (b"Network;WPNetwork;<WP_CONNECTIONSFOLDER>;PRESERVEOLD", b"NODELETE=YES;DEFAULTVIEW=ICON;OBJECTID=<WP_NETWORK>"),
+        (b"Printers;WPFolder;<WP_CONNECTIONSFOLDER>;PRESERVEOLD", b"DEFAULTVIEW=ICON;OBJECTID=<WP_PRINTERSFOLDER>"),
+        (b"Printer;WPPrinter;<WP_PRINTERSFOLDER>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<WP_NEWPRINTER>"),
         (b"Templates;WPTemplates;<WP_DESKTOP>;PRESERVEOLD", b"NODELETE=YES;OBJECTID=<WP_TEMPS>"),
         (b"Data File;WPDataFile;<WP_TEMPS>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<RS2_TEMPDATAFILE>"),
         (b"Folder;WPFolder;<WP_TEMPS>;PRESERVEOLD", b"TEMPLATE=YES;OBJECTID=<RS2_TEMPFOLDER>"),
@@ -127,7 +139,10 @@ fn install_object(key: &[u8], setup: &[u8]) -> bool {
     let existing = id.as_ref().and_then(|i| wps::handle_of_id(i)).map(wps::object_from_handle).filter(|&o| o != 0);
     match flags.as_slice() {
         b"DELETE" => {
+            // Even an object made non-deleteable goes.
             if let Some(o) = existing {
+                let s = obj::call(m::WPObject::wpQueryStyle, &[o]) & !(obj::OBJSTYLE_NODELETE as usize);
+                obj::call(m::WPObject::wpSetStyle, &[o, s]);
                 obj::call(m::WPObject::wpFree, &[o]);
             }
             return true;
@@ -183,7 +198,9 @@ pub fn run() {
     // Version 2 added the Minimized Window Viewer, Window List, System
     // Setup (System, Display) and Shut Down, version 3 Templates,
     // version 4 the Assistance Center, version 5 its Help Index,
-    // Glossary and Internet object, version 6 the LaunchPad;
+    // Glossary and Internet object, version 6 the LaunchPad, version 9
+    // the Shredder, Connections (Network, Printers), the System Clock and
+    // IBM's System class in place of RS2System;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         pending.extend(defaults());

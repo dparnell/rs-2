@@ -41,8 +41,8 @@ for path in sorted(glob.glob(os.path.join(idl_dir, 'wp*.idl'))):
     src = preprocess(open(path, errors='replace').read().replace('\r', ''))
     src = re.sub(r'//[^\n]*', '', src)
     src = re.sub(r'/\*.*?\*/', '', src, flags=re.S)
-    for m in re.finditer(r'\binterface\s+(\w+)\s*:\s*([\w, ]+?)\s*\{', src):
-        name, parents = m.group(1), [p.strip() for p in m.group(2).split(',')]
+    for m in re.finditer(r'\binterface\s+(\w+)\s*(?::\s*([\w, ]+?))?\s*\{', src):
+        name, parents = m.group(1), [p.strip() for p in m.group(2).split(',')] if m.group(2) else None
         # The interface body: to the matching brace.
         i, depth = m.end(), 1
         while depth and i < len(src):
@@ -63,6 +63,14 @@ for path in sorted(glob.glob(os.path.join(idl_dir, 'wp*.idl'))):
         classes[name] = dict(parents=parents, methods=methods, meta=meta.group(1) if meta else None,
                              major=int(major.group(1)) if major else 1, minor=int(minor.group(1)) if minor else 1,
                              overrides=overrides, dll=(dll.group(1).lower() if dll else ''), file=os.path.basename(path))
+
+# OIDL metaclasses without parents (M_WPPrinter): their class's parent's
+# metaclass.
+for n, c in classes.items():
+    if c['parents'] is None:
+        owner = next((k for k, v in classes.items() if v['meta'] == n), None)
+        pm = classes.get(classes[owner]['parents'][0], {}).get('meta') if owner else None
+        c['parents'] = [pm or 'M_WPObject']
 
 # Classes IBM keeps in other DLLs that rs2's PMWP provides: WPUrl and
 # WPUrlFolder (IBM's WPINET.DLL; the Toolkit describes them), Mindex
@@ -88,6 +96,10 @@ EXTRA = {
     'WPColorPalette': ['WPPalette'],
     'WPSchemePalette': ['WPPalette'],
     'WPFontPalette': ['WPPalette'],
+    'WPSystem': ['WPAbstract'],
+    'WPClock': ['WPAbstract'],
+    # WPPRINT.DLL's print destination (the IDL describes it).
+    'WPPrinter': ['WPAbstract'],
 }
 for n, parents in EXTRA.items():
     classes.setdefault(n, dict(parents=parents, methods=[], meta=None, major=1, minor=1, overrides=[], dll='pmwp', file=''))

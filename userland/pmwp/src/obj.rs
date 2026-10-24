@@ -566,7 +566,9 @@ extern "C" fn wpViewObject(obj: usize, hwnd_cnr: u32, view: u32, param: u32) -> 
         return 0;
     }
     let view = if view == OPEN_DEFAULT { call(m::WPObject::wpQueryDefaultView, &[obj]) as u32 } else { view };
-    let f = crate::view::frame_of(obj, if view == OPEN_DEFAULT { OPEN_CONTENTS } else { view });
+    // The System object's "Create new window" (ConcurrentView) opens
+    // another view; settings notebooks are never doubled.
+    let f = if view != OPEN_SETTINGS && crate::system::concurrent_view() { 0 } else { crate::view::frame_of(obj, if view == OPEN_DEFAULT { OPEN_CONTENTS } else { view }) };
     if f != 0 {
         crate::view::activate(f);
         return f;
@@ -596,11 +598,6 @@ extern "C" fn wpFree(obj: usize) -> u32 {
     crate::view::removed(0, obj);
     som::so_call(som::so::SOM_FREE, &[obj]);
     1
-}
-
-extern "C" fn wpDelete(obj: usize, _confirm: u32) -> u32 {
-    // OK_DELETE (1) when it went.
-    call(m::WPObject::wpFree, &[obj]) as u32
 }
 
 /// A shadow of the object in a folder.
@@ -661,8 +658,9 @@ extern "C" fn wpMoveObject(obj: usize, folder: usize) -> u32 {
     0
 }
 
+/// The System object's confirmations (delete.rs).
 extern "C" fn wpQueryConfirmations(_obj: usize) -> u32 {
-    0
+    crate::delete::confirmations()
 }
 
 // ---- M_WPObject ----
@@ -707,6 +705,11 @@ fn class_title(name: &[u8]) -> Option<&'static [u8]> {
         b"WPLaunchPad" => b"LaunchPad\0",
         b"WPUrl" => b"URL\0",
         b"WPUrlFolder" => b"URL Folder\0",
+        b"WPShredder" => b"Shredder\0",
+        b"WPNetwork" => b"Network\0",
+        b"WPPrinter" => b"Printer\0",
+        b"WPSystem" => b"System\0",
+        b"WPClock" => b"System Clock\0",
         _ => return None,
     })
 }
@@ -755,6 +758,11 @@ extern "C" fn wpclsQueryIcon(cls: usize) -> u32 {
             b"WPFontPalette" => crate::icons::FONT_PALETTE,
             b"RS2System" => crate::icons::SYSTEM,
             b"RS2WindowList" => crate::icons::WINDOW_LIST,
+            b"WPShredder" => crate::icons::SHREDDER,
+            b"WPNetwork" => crate::icons::NETWORK,
+            b"WPPrinter" => crate::icons::PRINTER,
+            b"WPSystem" => crate::icons::SYSTEM,
+            b"WPClock" => crate::icons::CLOCK,
             _ => 0,
         };
         if own != 0 {
@@ -782,7 +790,7 @@ extern "C" fn wpclsQueryDefaultView(cls: usize) -> u32 {
             b"WPFolder" | b"WPDisk" => return OPEN_CONTENTS,
             // Opening them acts (shuts down, shows the window list,
             // restores the window).
-            b"RS2Shutdown" | b"RS2WindowList" | b"WPMinWindow" | b"Mindex" | b"WPLaunchPad" | b"WPPalette" => return OPEN_RUNNING,
+            b"RS2Shutdown" | b"RS2WindowList" | b"WPMinWindow" | b"Mindex" | b"WPLaunchPad" | b"WPPalette" | b"WPClock" => return OPEN_RUNNING,
             b"WPProgram" | b"WPProgramFile" | b"WPDataFile" => return OPEN_RUNNING,
             _ => {}
         }
@@ -900,7 +908,6 @@ methods! {
     __m_wpOpen => wpOpen, 4;
     __m_wpViewObject => wpViewObject, 4;
     __m_wpFree => wpFree, 1;
-    __m_wpDelete => wpDelete, 2;
     __m_wpCreateShadowObject => wpCreateShadowObject, 3;
     __m_wpCopyObject => wpCopyObject, 3;
     __m_wpMoveObject => wpMoveObject, 2;
@@ -923,6 +930,7 @@ pub fn impl_object() -> Impl {
     i.methods.extend(crate::menu::methods());
     i.methods.extend(crate::book::object_methods());
     i.methods.extend(crate::dnd::object_methods());
+    i.methods.extend(crate::delete::object_methods());
     i
 }
 
@@ -964,7 +972,6 @@ fn impl_object_own() -> Impl {
             ("wpOpen", __m_wpOpen as usize),
             ("wpViewObject", __m_wpViewObject as usize),
             ("wpFree", __m_wpFree as usize),
-            ("wpDelete", __m_wpDelete as usize),
             ("wpCreateShadowObject", __m_wpCreateShadowObject as usize),
             ("wpCopyObject", __m_wpCopyObject as usize),
             ("wpMoveObject", __m_wpMoveObject as usize),
