@@ -417,7 +417,7 @@ fn register_remote(args: &[u8]) {
     check("object of the class on the shell's desktop", h != 0);
 }
 
-/// The names in a directory (FILEFINDBUF3: name length at 26, name at 27).
+/// The names in a directory (FILEFINDBUF3: name length at 28, name at 29).
 fn dir_names(dir: &[u8]) -> Vec<Vec<u8>> {
     let spec = z(&[dir, b"\\*"].concat());
     let (mut hdir, mut n) = (0xffff_ffffu32, 1u32);
@@ -426,12 +426,35 @@ fn dir_names(dir: &[u8]) -> Vec<Vec<u8>> {
     // Directories, hidden and system files too.
     let mut rc = unsafe { os2::DosFindFirst(spec.as_ptr(), &mut hdir, 0x17, buf.as_mut_ptr(), buf.len() as u32, &mut n, 1) };
     while rc == 0 && n == 1 {
-        let len = buf[26] as usize;
-        out.push(buf[27..27 + len].to_vec());
+        let len = buf[28] as usize;
+        out.push(buf[29..29 + len].to_vec());
         rc = unsafe { os2::DosFindNext(hdir, buf.as_mut_ptr(), buf.len() as u32, &mut n) };
     }
     unsafe { os2::DosFindClose(hdir) };
     out
+}
+
+/// A file's title: its .LONGNAME EA (EAT_ASCII), else its name.
+fn long_name(dir: &[u8], name: &[u8]) -> Vec<u8> {
+    let path = z(&[dir, b"\\", name].concat());
+    let ea = b".LONGNAME";
+    let mut gea = [0u8; 20];
+    gea[0..4].copy_from_slice(&20u32.to_le_bytes());
+    gea[8] = ea.len() as u8;
+    gea[9..9 + ea.len()].copy_from_slice(ea);
+    let mut fea = alloc::vec![0u8; 1024];
+    fea[0..4].copy_from_slice(&1024u32.to_le_bytes());
+    let eaop: [u32; 3] = [gea.as_ptr() as u32, fea.as_mut_ptr() as u32, 0];
+    // FIL_QUERYEASFROMLIST
+    if unsafe { DosQueryPathInfo(path.as_ptr(), 3, eaop.as_ptr() as *mut u8, 12) } == 0 {
+        let (cb_name, cb_value) = (fea[9] as usize, u16::from_le_bytes([fea[10], fea[11]]) as usize);
+        let v = &fea[13 + cb_name..13 + cb_name + cb_value];
+        if v.len() > 4 && v[0..2] == [0xfd, 0xff] {
+            let n = u16::from_le_bytes([v[2], v[3]]) as usize;
+            return v[4..4 + n.min(v.len() - 4)].to_vec();
+        }
+    }
+    name.to_vec()
 }
 
 /// `WPSTEST OLDDESKTOP`: OS2.INI says the desktop is rs2's version 8, so
@@ -439,12 +462,15 @@ fn dir_names(dir: &[u8]) -> Vec<Vec<u8>> {
 fn old_desktop() {
     let (a, k) = (z(b"PM_Workplace"), z(b"Rs2Desktop"));
     check("Rs2Desktop set to 8", unsafe { PrfWriteProfileData(HINI_USER, a.as_ptr(), k.as_ptr(), b"8\0".as_ptr(), 2) } != 0);
+    // Version 8's System object, which version 9 replaces.
+    let h = create(b"RS2System", b"System", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<RS2_SYSTEM>", b"<WP_CONFIG>");
+    check("an old RS2System object", h >> 16 == 2);
 }
 
 /// `WPSTEST DUPES`: after an upgrade, each of the desktop's folders is
 /// there once (no "Connections:1" or second Assistance Center).
 fn dupes() {
-    let names = dir_names(b"C:\\DESKTOP");
+    let names: Vec<Vec<u8>> = dir_names(b"C:\\DESKTOP").iter().map(|n| long_name(b"C:\\DESKTOP", n)).collect();
     for f in [&b"Connections"[..], b"Assistance Center", b"System Setup", b"Templates", b"Programs", b"Command Prompts", b"Startup"] {
         let n = names.iter().filter(|x| x.len() >= f.len() && x[..f.len()].eq_ignore_ascii_case(f)).count();
         check(&alloc::format!("{} once on the desktop ({} found)", s(f), n), n == 1);

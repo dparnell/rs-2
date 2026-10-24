@@ -548,6 +548,10 @@ If a Workplace Shell is already running, it ends.
     Version 9 also deletes rs2's earlier System object (`<RS2_SYSTEM>`,
     RS2System) for IBM's class: DELETE removes an object even when it was
     made non-deleteable. Titles break lines at `^`, as in INI.RC.
+    Checked in QEMU: `WPSTEST OLDDESKTOP` (OS2.INI says version 8, an
+    old RS2System object made), PMSHELL ended from the rescue screen and
+    started again, then `WPSTEST DUPES` (each desktop folder there once,
+    by its title; the Shredder made once; RS2System replaced).
 - **Starts the server** for other processes' object calls (`ipc.rs`):
   - A caller takes the mutex `\SEM32\RS2WPS\CALL` and writes its
     request into `\SHAREMEM\RS2WPS.MEM`.
