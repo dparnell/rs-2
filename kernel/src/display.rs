@@ -392,15 +392,18 @@ pub fn display() -> Option<Info> {
         use crate::drivers::{svga, virtio::gpu};
         let area = if gpu::present() { gpu::pm_area() } else { svga::pm_area() };
         let fb = crate::screen::framebuffer()?;
-        // At most an eighth of the free memory.
+        // At most a quarter of the free memory.
         let back_buffer = |n: u64| {
             let pages = n.next_multiple_of(PAGE as u64) / PAGE as u64;
-            (pages <= crate::mm::phys::free_count() / 8).then(|| crate::mm::phys::alloc_contig(pages, u64::MAX)).flatten()
+            (pages <= crate::mm::phys::free_count() / 4).then(|| crate::mm::phys::alloc_contig(pages, u64::MAX)).flatten()
         };
         let driver = area.is_some() || gpu::present();
+        let screen = fb.stride as u64 * fb.height as u64 * 4;
         let (phys, size, back) = match area {
-            Some((p, n)) => match back_buffer(n) {
-                Some(b) => (b, n, true),
+            // For the largest mode, else for this one (then only modes
+            // that fit in it can be switched to).
+            Some((p, n)) => match back_buffer(n).map(|b| (b, n)).or_else(|| back_buffer(screen).map(|b| (b, screen))) {
+                Some((b, n)) => (b, n, true),
                 None => (p, n, false),
             },
             // virtio-gpu without room for more: its current framebuffer.
@@ -419,6 +422,8 @@ pub fn display() -> Option<Info> {
         DISPLAY.set(Mapped { obj, phys, size, back, driver });
         if back {
             crate::println!("display: PM draws into a back buffer ({} KB)", size / 1024);
+        } else {
+            crate::println!("display: no memory for a back buffer, PM draws on the screen");
         }
         PTR_X.store(fb.width as i32 / 2, Ordering::Relaxed);
         PTR_Y.store(fb.height as i32 / 2, Ordering::Relaxed);

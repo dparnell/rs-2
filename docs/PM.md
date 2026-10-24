@@ -114,8 +114,9 @@ during the first half second. In the PM session Ctrl+Esc goes to PM
 PM processes draw into memory the kernel maps for them
 (`Rs2MapDisplay`): a back buffer in RAM, sized for the largest mode the
 display driver offers (VMware SVGA II, virtio-gpu) or for the screen (a
-plain firmware framebuffer). Without the memory for one (the back
-buffer may take an eighth of the free memory) they draw straight into
+plain firmware framebuffer); when that is more than a quarter of the
+free memory, for the current mode (then PM can only switch to modes that
+fit in it). Without the memory for one they draw straight into
 the framebuffer: VMware SVGA II's VRAM or virtio-gpu's guest-RAM
 backing.
 

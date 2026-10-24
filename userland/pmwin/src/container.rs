@@ -948,9 +948,30 @@ fn emphasize(h: u32, r: u32, bits: u32, on: bool, user: bool) {
         return;
     }
     set_attr(r, n);
-    ctl::invalidate(h);
+    invalidate_record(h, r);
     if user {
         notify_emphasis(h, r, (a ^ n) & (CRA_SELECTED | CRA_CURSORED | CRA_INUSE | CRA_SOURCE));
+    }
+}
+
+/// Repaint record `r` (its emphasis changed): only what it covers,
+/// outside the details view (a click on the desktop repaints two icons,
+/// not the screen).
+fn invalidate_record(h: u32, r: u32) {
+    let area = compute(h).and_then(|l| {
+        if l.view == View::Detail {
+            return None;
+        }
+        let c = data(h)?;
+        let p = l.placed.iter().find(|p| l.recs[p.index] == r)?;
+        // With the dashed cursor frame around it.
+        let w = to_window(c, l.parts.area, l.view, p.rect);
+        Some(Rect::new(w.left - 2, w.bottom - 2, w.right + 2, w.top + 2).intersect(&l.parts.area))
+    });
+    match area {
+        Some(a) if a.is_empty() => {}
+        Some(a) => st().desk.invalidate(h, Some(a), false),
+        None => ctl::invalidate(h),
     }
 }
 
