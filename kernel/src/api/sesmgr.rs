@@ -150,6 +150,34 @@ pub fn is_dos_program(path: &str, data: &[u8]) -> bool {
     up.ends_with(".COM") || up.ends_with(".BAT") || (data.len() >= 2 && super::module::app_type(data) == 0x20)
 }
 
+/// Whether the file at `path` is a DOS program, from its headers only: a
+/// .COM or .BAT, or an MZ executable with no NE/LE/LX/PE header behind it.
+pub fn is_dos_file(path: &str) -> bool {
+    let up = path.to_ascii_uppercase();
+    if up.ends_with(".COM") || up.ends_with(".BAT") {
+        return crate::fs::read_range(path, 0, 2).is_some_and(|h| h.len() < 2 || &h[..2] != b"MZ" || is_mz_only(path));
+    }
+    up.ends_with(".EXE") && is_mz_only(path)
+}
+
+fn is_mz_only(path: &str) -> bool {
+    let Some(h) = crate::fs::read_range(path, 0, 0x40) else { return false };
+    if h.len() < 0x40 || &h[..2] != b"MZ" && &h[..2] != b"ZM" {
+        return false;
+    }
+    // A new header needs a relocation table offset of 40h and its signature.
+    let reloc = u16::from_le_bytes([h[0x18], h[0x19]]);
+    let lfanew = u32::from_le_bytes([h[0x3c], h[0x3d], h[0x3e], h[0x3f]]);
+    if reloc >= 0x40 && lfanew >= 0x40 {
+        if let Some(sig) = crate::fs::read_range(path, lfanew as u64, 2) {
+            if matches!(&sig[..], b"NE" | b"LE" | b"LX" | b"PE") {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Start a DOS session for DosExecPgm of a DOS program: unrelated, in
 /// the foreground, windowed as the caller is.
 pub fn start_dos_session(c: &Ctx, path: &str, inputs: &str, env: Vec<String>) -> Result<(u32, u32, u32), u32> {
@@ -244,10 +272,10 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
         }
     };
     let path = find_program(c, &name, &env).ok_or(err::FILE_NOT_FOUND)?;
-    let data = crate::fs::read_file(&path).unwrap_or_default();
-    if is_dos_program(&path, &data) {
+    if is_dos_file(&path) {
         return start_dos(c, &sd, Some(path), &inputs, env);
     }
+    let data = crate::fs::read_file(&path).unwrap_or_default();
     let program = path.rsplit('\\').next().unwrap_or(&path).to_string();
     let title = sd.title.clone().unwrap_or_else(|| program.clone());
     let caller_session = c.process.session.load(Ordering::Relaxed);

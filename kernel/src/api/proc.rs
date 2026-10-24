@@ -101,18 +101,14 @@ fn exec(c: &mut Ctx) -> u32 {
     // A DOS program runs in a DOS session of its own (in a window when
     // the caller is in one); the call returns at once.
     let full = path.display();
-    let up = full.to_ascii_uppercase();
-    if up.ends_with(".COM") || up.ends_with(".BAT") || up.ends_with(".EXE") {
-        if let Some(data) = crate::fs::read_file(&full).filter(|d| super::sesmgr::is_dos_program(&full, d)) {
-            drop(data);
-            return match super::sesmgr::start_dos_session(c, &full, args.trim_start(), env) {
-                Ok((_, pid, _)) => {
-                    write_result(c, pres, if mode == EXEC_SYNC { 0 } else { pid }, 0);
-                    0
-                }
-                Err(e) => e,
-            };
-        }
+    if super::sesmgr::is_dos_file(&full) {
+        return match super::sesmgr::start_dos_session(c, &full, args.trim_start(), env) {
+            Ok((_, pid, _)) => {
+                write_result(c, pres, if mode == EXEC_SYNC { 0 } else { pid }, 0);
+                0
+            }
+            Err(e) => e,
+        };
     }
     let _ = crate::loader::take_fail();
     let r = process::exec(process::ExecParams {
