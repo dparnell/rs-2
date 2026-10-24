@@ -20,7 +20,7 @@ fn s(b: &[u8]) -> String {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = args.first() else {
-        eprintln!("usage: lxdump info|imports|verify|page FILE...");
+        eprintln!("usage: lxdump info|imports|verify|page|res|reslist FILE...");
         return ExitCode::FAILURE;
     };
     let mut status = ExitCode::SUCCESS;
@@ -35,6 +35,15 @@ fn main() -> ExitCode {
             for (i, c) in buf.chunks(16).enumerate() {
                 let hex: Vec<String> = c.iter().map(|b| format!("{b:02x}")).collect();
                 println!("{:04x}: {}", i * 16, hex.join(" "));
+            }
+        }
+        "reslist" => {
+            // lxdump reslist FILE: the resources (type, id, size).
+            let data = std::fs::read(&args[1]).unwrap();
+            let Ok(Format::Lx { header }) = os2_exe::detect(&data) else { panic!("not LX") };
+            let m = lx::Module::parse(&data, header).unwrap();
+            for r in m.resources().unwrap() {
+                println!("{} {} {}", r.type_id, r.name_id, r.size);
             }
         }
         "res" => {

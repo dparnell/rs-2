@@ -41,13 +41,20 @@ fn pack(x: i32, y: i32) -> u32 {
     (x as u32 & 0xffff) | (y as u32) << 16
 }
 
+/// Input played back by a journal playback hook (not recorded again).
+pub static PLAYBACK: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 /// Post an input message to the window's queue, stamped with the
-/// pointer position and time of the event.
-fn post_input(h: u32, msg: u32, mp1: u32, mp2: u32, time: u32) {
+/// pointer position and time of the event. The system queue's messages
+/// as IBM's PM has them (mouse moves, buttons, WM_CHAR) are marked for
+/// the journal record hook.
+pub fn post_input(h: u32, msg: u32, mp1: u32, mp2: u32, time: u32) {
     let s = st();
     let q = s.queue_of(h);
     let p = s.pointer;
-    post_queue(q, QMsg { hwnd: h, msg, mp1, mp2, time, x: p.x, y: p.y, reserved: 0 });
+    let raw = (WM_MOUSEMOVE..=WM_CHAR).contains(&msg) && !PLAYBACK.load(core::sync::atomic::Ordering::Relaxed);
+    let reserved = if raw { crate::hooks::QMSG_INPUT } else { 0 };
+    post_queue(q, QMsg { hwnd: h, msg, mp1, mp2, time, x: p.x, y: p.y, reserved });
 }
 
 /// A mouse event: the pointer moved to `p` and/or the buttons changed.
@@ -477,6 +484,25 @@ pub fn event(ev: &Input) {
 pub extern "C" fn WinGetKeyState(_desk: u32, vk: i32) -> i32 {
     let Some(&k) = st().keys.get(vk as usize) else { return 0 };
     (if k & 0x80 != 0 { 0xffff_8000u32 as i32 } else { 0 }) | (k & 1) as i32
+}
+
+/// WinSetKeyboardStateTable(hwndDesktop, pKeyStateTable, fSet): the 256
+/// virtual key states (0x80 down, 0x01 toggled) set from the table or
+/// copied into it.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetKeyboardStateTable(_desk: u32, table: *mut u8, set: u32) -> u32 {
+    if table.is_null() {
+        return 0;
+    }
+    let keys = &mut st().keys;
+    unsafe {
+        if set != 0 {
+            core::ptr::copy_nonoverlapping(table, keys.as_mut_ptr(), 256);
+        } else {
+            core::ptr::copy_nonoverlapping(keys.as_ptr(), table, 256);
+        }
+    }
+    1
 }
 
 /// SV_DBLCLKTIME in milliseconds.

@@ -134,6 +134,8 @@ forward! {
     GpiQueryPatternRefPoint = 4474;
     GpiQueryPatternSet = 4475;
     GpiQueryPel = 4476;
+    GpiQueryPickAperturePosition = 4477;
+    GpiQueryPickApertureSize = 4478;
     GpiQueryRGBColor = 4479;
     GpiQueryRealColors = 4480;
     GpiQueryRegionBox = 4481;
@@ -190,6 +192,7 @@ forward! {
     GpiSetPatternRefPoint = 4542;
     GpiSetPatternSet = 4543;
     GpiSetPel = 4544;
+    GpiSetPickAperturePosition = 4545;
     GpiSetRegion = 4546;
     GpiSetSegmentAttrs = 4547;
     GpiSetSegmentTransformMatrix = 4549;
@@ -221,6 +224,7 @@ forward! {
     GpiQueryFonts = 4586;
     GpiQueryRegionRects = 4587;
     GpiSetAttrs = 4588;
+    GpiSetPickApertureSize = 4589;
     GpiQueryDefAttrs = 4590;
     GpiSetDefAttrs = 4591;
     GpiCreateLogColorTable = 4592;

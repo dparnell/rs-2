@@ -1,0 +1,6 @@
+; name [@ordinal]
+PmxInputHook @1
+PmxSendMsgHook @2
+PmxRecordHook @3
+PmxPlaybackHook @4
+PmxCounts @5

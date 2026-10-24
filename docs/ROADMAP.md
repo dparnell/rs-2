@@ -48,8 +48,9 @@ Status markers: done, in progress, planned.
   Copy, Copy All, Paste, Close), keys and mouse into the session,
   Alt+Home between window and full screen, booting into PM with a
   command prompt window (`PROTSHELL=C:\OS2\PMVIOWIN.EXE /SHELL`)
-- planned: AVIO (VioCreatePS & co. in PM windows, reusing
-  `crates/viocell`), parallel port hardware,
+- done: AVIO (VioCreatePS & co. in PM windows, drawn with
+  `crates/viocell`)
+- planned: parallel port hardware,
   DosDevIOCtl coverage, mandatory file locks, finer-grained kernel locking
   (in place of the big kernel lock)
 
@@ -311,9 +312,9 @@ Status markers: done, in progress, planned.
   container's CN_DRAGOVER/CN_DROP), with other programs: files dropped
   on programs start them, the System Editor opens a dropped file;
   `RS2\DESKTEST.EXE` checks them with a drag between two processes
-- planned (shell): lazy drag, DrgDragFiles/DrgAcceptDroppedFiles, drag
-  images beside the pointer, templates, then the SOM-based Workplace
-  Shell
+- done: PMDRAG's lazy drag, DrgDragFiles/DrgAcceptDroppedFiles, drag
+  images with the pointer
+- planned (shell): templates, then the SOM-based Workplace Shell
 - done: profiles on real INI files (`crates/inifile`, PMSHAPI): OS2.INI
   and OS2SYS.INI from USER_INI/SYSTEM_INI, shared by all processes,
   written through safely; the program list calls, kept in OS2.INI for
@@ -336,12 +337,22 @@ Status markers: done, in progress, planned.
 - done: APPINST.EXE installs the OS/2 applications rs2 runs from the
   OS/2 Warp CD (a tree of categories and applications with check boxes,
   unpacking with `crates/os2-pack`, desktop folders and objects)
-- planned (help): printing, bookmarks and the library list, the help
-  window's menu, metafiles in dynamic data, viewport styles
-- planned: per-process presentation-space limits, hooks other than the
-  help hook (WinSetHook only records them), DDE, owner-drawn items (also in
-  containers), presentation parameters other than the colours, drag
-  and drop
+- done (help): IBM's help window menu bar (copying a panel, viewed
+  pages, expanding and collapsing the contents), the library list
+  (marked libraries searched), bookmarks for books (kept in `NAME.cp`)
+- planned (help): printing, metafiles in dynamic data, viewport styles
+- done: PMWIN hooks as IBM's PMWIN calls them (send, input, message
+  filter, journal record and playback, loader, the rest; system hooks
+  in every process), DDE (WinDdeInitiate/PostMsg/Respond with another
+  process), owner-drawn items (list boxes, menus, user buttons, value
+  sets, sliders, notebook tabs, container text), presentation
+  parameters as IBM's PMWIN keeps them (any id, inherited along the
+  owner chain, WM_PRESPARAMCHANGED; the controls draw in their
+  colours), PMDRAG's lazy drag, DrgDragFiles/DrgAcceptDroppedFiles and
+  drag images with the pointer, PMWINX/REGISTRY (REGEDIT2) and PMBIDI
+  (TEXTCON1); `RS2\PMXTEST.EXE`
+- planned: per-process presentation-space limits, PMDDEML (nothing on
+  the CD uses it)
 - Display driver model (GRADD-style) on the framebuffer, mouse pointer
 - PMWIN (windows, messages, controls, dialogs), PMGPI (graphics, fonts),
   PMSHAPI

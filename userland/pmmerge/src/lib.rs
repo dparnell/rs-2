@@ -8,8 +8,10 @@
 #![no_main]
 #![allow(non_snake_case)]
 
+extern crate alloc;
 extern crate os2;
 
+mod bidi;
 mod exports;
 
 /// `name = "MODULE.ordinal";`: an entry that jumps to that import.

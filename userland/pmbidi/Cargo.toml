@@ -1,0 +1,13 @@
+[package]
+name = "pmbidi-dll"
+description = "PMBIDI.DLL: the bidirectional language support calls (layout objects, language and keyboard layer information) of a system without bidirectional code pages"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmbidi"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

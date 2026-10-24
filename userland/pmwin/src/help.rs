@@ -7,13 +7,11 @@
 
 use crate::ctl;
 use crate::gpiapi::{PointL, RectL};
-use crate::lock;
 use crate::msg::send;
 use crate::state::st;
 use crate::win::{WinMapWindowPoints, WM_SYSCOMMAND};
 use pmwin::HWND_DESKTOP;
 
-pub const HK_HELP: u32 = 5;
 pub const HLPM_FRAME: u32 = -1i32 as u32;
 pub const HLPM_WINDOW: u32 = -2i32 as u32;
 pub const HLPM_MENU: u32 = -3i32 as u32;
@@ -36,31 +34,13 @@ const FID_CLIENT: u32 = 0x8008;
 const CBID_LIST: u32 = 0x029a;
 const CBID_EDIT: u32 = 0x029b;
 
-type HelpHook = extern "C" fn(hab: u32, mode: u32, topic: u32, sub: u32, rect: *const RectL) -> u32;
-
 /// Call the help hooks of the calling thread's queue (then the system
 /// ones), newest first, until one returns TRUE. The chain is read again
 /// after each hook: a hook may set or release hooks (OS/2's E installs its
 /// own, which creates the help instance on the first request, releases
 /// itself and leaves the request to the help manager's hook).
 pub fn call_hook(mode: u32, topic: u32, sub: u32, rect: RectL) -> bool {
-    let me = crate::shared::pid();
-    let mut called: alloc::vec::Vec<u32> = alloc::vec::Vec::new();
-    loop {
-        let s = st();
-        let q = s.my_queue();
-        let next = s
-            .hooks
-            .iter()
-            .find(|h| h.kind == HK_HELP && h.pid == me && (h.queue == q || h.queue == 0) && !called.contains(&h.pfn))
-            .map(|h| h.pfn);
-        let Some(pfn) = next else { return false };
-        called.push(pfn);
-        let f: HelpHook = unsafe { core::mem::transmute(pfn as usize) };
-        if lock::unlocked(|| f(0, mode, topic, sub, &rect)) != 0 {
-            return true;
-        }
-    }
+    crate::hooks::help(mode, topic, sub, &rect)
 }
 
 /// A window's rectangle in screen coordinates.

@@ -131,6 +131,8 @@ unsafe extern "C" {
     pub fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32;
     #[link_name = "PMWIN.800"]
     pub fn WinQueryAnchorBlock(h: u32) -> u32;
+    #[link_name = "PMWIN.773"]
+    pub fn WinIsWindowEnabled(h: u32) -> u32;
     #[link_name = "PMWIN.763"]
     pub fn WinInitialize(fl: u32) -> u32;
     #[link_name = "PMWIN.716"]
@@ -257,6 +259,11 @@ pub const SB_SLIDERTRACK: u32 = 5;
 pub const SB_SLIDERPOSITION: u32 = 6;
 
 pub const LM_INSERTITEM: u32 = 0x0161;
+pub const LM_DELETEITEM: u32 = 0x0163;
+pub const LS_MULTIPLESEL: u32 = 0x0001;
+pub const LN_SELECT: u32 = 1;
+pub const WM_UPDATEFRAME: u32 = 0x0042;
+pub const FCF_MENU: u32 = 0x0004;
 pub const LM_DELETEALL: u32 = 0x016e;
 pub const LM_QUERYSELECTION: u32 = 0x0165;
 pub const LM_SELECTITEM: u32 = 0x0164;

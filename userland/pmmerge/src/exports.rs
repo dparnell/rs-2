@@ -20,6 +20,12 @@ macro_rules! aligned {
 }
 
 aligned! {
+    __a_WinSetLangInfo => crate::bidi::WinSetLangInfo, 5;
+    __a_WinQueryLangInfo => crate::bidi::WinQueryLangInfo, 3;
+    __a_WinSetKbdLayer => crate::bidi::WinSetKbdLayer, 3;
+    __a_WinQueryKbdLayer => crate::bidi::WinQueryKbdLayer, 1;
+    __a_WinSetLangViewer => crate::bidi::WinSetLangViewer, 2;
+    __a_WinQueryLangViewer => crate::bidi::WinQueryLangViewer, 2;
     __a_PmMergeHelpHook => crate::PmMergeHelpHook, 4;
     __a_WinQueryCpType => crate::WinQueryCpType, 1;
     __a_AAB32GetReg => crate::AAB32GetReg, 1;

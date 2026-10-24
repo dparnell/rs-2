@@ -394,6 +394,8 @@ struct TabPaint {
     /// Shows the focus (the current tab: minor if shown, else major).
     focused: bool,
     minor: bool,
+    /// The page's ID.
+    page: u32,
 }
 
 fn arrow(c: &mut Canvas, r: Rect, left: bool, enabled: bool) {
@@ -427,8 +429,13 @@ fn paint(h: u32) {
     let focus = ctl::has_focus(h);
     let Some((l, major, minor)) = shown(h) else { return };
     let Some(d) = data(h) else { return };
-    let bg = draw::dialog_bg();
-    let page_bg = d.page_bg.unwrap_or(bg);
+    // BKM_SETNOTEBOOKCOLORS, else the presentation parameters (PP_PAGE*,
+    // PP_MAJORTAB*, PP_MINORTAB*, PP_BACKGROUNDCOLOR).
+    use crate::pp::{self, *};
+    let bg = pp::or(h, PP_BACKGROUNDCOLOR, draw::dialog_bg());
+    let page_bg = d.page_bg.or_else(|| pp::color_set(h, PP_PAGEBACKGROUNDCOLOR)).unwrap_or(bg);
+    let (major_bg, minor_bg) = (d.major_bg.or_else(|| pp::color_set(h, PP_MAJORTABBACKGROUNDCOLOR)), d.minor_bg.or_else(|| pp::color_set(h, PP_MINORTABBACKGROUNDCOLOR)));
+    let (major_fg, minor_fg) = (d.major_fg.or_else(|| pp::color_set(h, PP_MAJORTABFOREGROUNDCOLOR)), d.minor_fg.or_else(|| pp::color_set(h, PP_MINORTABFOREGROUNDCOLOR)));
     let top = d.book.top_index();
     let cur = d.book.current_tab();
     let sel_major = top.and_then(|t| d.book.major_of(t));
@@ -437,12 +444,12 @@ fn paint(h: u32) {
         for &(i, r) in list.iter() {
             let p = &d.book.pages[i];
             let selected = if minor_tab { cur == Some(i) } else { sel_major == Some(i) };
-            let base = if minor_tab { d.minor_bg } else { d.major_bg };
+            let base = if minor_tab { minor_bg } else { major_bg };
             let tab_bg = p.tab_color.or(base).unwrap_or(if selected { page_bg } else { 0xb8b8b8 });
-            let fg = if minor_tab { d.minor_fg } else { d.major_fg }.unwrap_or(draw::text());
+            let fg = if minor_tab { minor_fg } else { major_fg }.unwrap_or(draw::text());
             let bits = (!p.bits.is_empty()).then(|| crate::bitmap::Bmp { w: p.bits_size.0, h: p.bits_size.1, pixels: p.bits.clone() });
             let focused = if minor_tab { selected } else { selected && !minor.iter().any(|&(j, _)| Some(j) == cur) };
-            tabs.push(TabPaint { r: if selected { l.selected(minor_tab, r) } else { r }, text: p.tab.clone(), bits, bg: tab_bg, fg, selected, focused, minor: minor_tab });
+            tabs.push(TabPaint { r: if selected { l.selected(minor_tab, r) } else { r }, text: p.tab.clone(), bits, bg: tab_bg, fg, selected, focused, minor: minor_tab, page: p.id });
         }
     }
     // Unselected tabs first: the selected ones overlap the back pages.
@@ -451,7 +458,10 @@ fn paint(h: u32) {
     let status = tp.filter(|p| p.style & BKA_STATUSTEXTON != 0).map_or(Vec::new(), |p| p.status.clone());
     let (has_prev, has_next) = (d.book.step(-1).is_some(), d.book.step(1).is_some());
     let enabled = ctl::enabled(h);
-    draw::paint(h, |c: &mut Canvas| {
+    let hps = win::WinBeginPaint(h, 0, core::ptr::null_mut());
+    // Tabs with neither text nor a bitmap are the owner's to draw.
+    let mut owner_tabs: Vec<(Rect, u32, bool, u32)> = Vec::new();
+    draw::with(h, hps, |c: &mut Canvas| {
         let all = c.rect();
         c.fill(all, bg);
         for r in &l.backs {
@@ -548,6 +558,8 @@ fn paint(h: u32) {
                 c.ps.origin = Point::new(o.x + x, o.y + y);
                 crate::bitmap::blit(c, b, w, hh);
                 c.ps.origin = o;
+            } else if t.text.is_empty() {
+                owner_tabs.push((inner, t.page, t.minor, t.bg));
             } else {
                 let align = if style & BKS_TABTEXTCENTER != 0 {
                     draw::DT_CENTER
@@ -580,6 +592,23 @@ fn paint(h: u32) {
         arrow(c, l.prev, true, enabled && has_prev);
         arrow(c, l.next, false, enabled && has_next);
     });
+    // IBM's DrawTab: WM_DRAWITEM with an OWNERITEM, idItem BKA_TAB, hItem
+    // the page ID, fsAttribute BKA_MAJOR or BKA_MINOR, fsState the style,
+    // clipped to the tab, in RGB mode.
+    for (r, page, minor_tab, tab_bg) in owner_tabs {
+        let mut oi = ctl::OwnerItem {
+            hwnd: h,
+            hps,
+            fs_state: style & 0xffff,
+            fs_attribute: if minor_tab { BKA_MINOR } else { BKA_MAJOR } as u32,
+            rcl: r.into(),
+            id_item: BKA_TAB as i32,
+            h_item: page,
+            ..Default::default()
+        };
+        ctl::draw_item(h, &mut oi, Some(r), draw::text(), tab_bg);
+    }
+    win::WinEndPaint(hps);
 }
 
 // ---- Input ----

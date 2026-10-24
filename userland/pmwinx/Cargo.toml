@@ -1,0 +1,13 @@
+[package]
+name = "pmwinx-dll"
+description = "PMWINX.DLL: Open32's registry calls (forwarded to REGISTRY.DLL, as in IBM's PMWINX)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmwinx"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

@@ -1,11 +1,13 @@
 //! The help window: a frame whose client shows a panel (a page laid out
 //! by `ipf::layout`, scrolled, with its links reachable by mouse and Tab)
 //! or a list (contents, index, search results), with Previous, Search,
-//! Index and Contents push buttons below. Following a link or choosing a
-//! list entry remembers where the window was, for Previous (or Esc).
+//! Index and Contents push buttons below, and IBM's menu bar (see
+//! services.rs). Following a link or choosing a list entry remembers
+//! where the window was, for Previous (or Esc).
 
 use crate::pm::*;
 use crate::render::{Bitmaps, Draw, Gpi};
+use crate::services::{self as sv};
 use crate::{Instance, PanelRef, HM_INFORM};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -20,6 +22,7 @@ const ID_PANEL: u32 = 10;
 const ID_SCROLL: u32 = 11;
 const ID_LIST: u32 = 12;
 const ID_ENTRY: u32 = 13;
+const ID_LIBS: u32 = 14;
 const ID_PREVIOUS: u32 = 1;
 const ID_SEARCH: u32 = 2;
 const ID_INDEX: u32 = 4;
@@ -37,7 +40,15 @@ enum Mode {
     Contents,
     Index,
     Search(Vec<u8>),
+    /// The panels viewed, the last first (IBM's history window).
+    Viewed,
+    /// The directories of HELP or BOOKSHELF; the ones marked are searched
+    /// too (IBM's library list window).
+    Libraries,
 }
+
+/// The most viewed pages kept (IBM's AddToHistory).
+const VIEWED_MAX: usize = 50;
 
 struct View {
     inst: *mut Instance,
@@ -69,6 +80,14 @@ struct View {
     /// The dynamic data of the panel's `:ddf.`s: resource id, the text
     /// (pages borrow it) and whether it is still valid.
     ddf: Vec<(u16, alloc::boxed::Box<[u8]>, bool)>,
+    /// The panels viewed, the last first.
+    viewed: Vec<PanelRef>,
+    /// The contents entries whose children show (None: all of them).
+    expanded: Option<Vec<PanelRef>>,
+    /// The library list and the directories marked in it.
+    libs: u32,
+    lib_dirs: Vec<Vec<u8>>,
+    marked: Vec<Vec<u8>>,
 }
 
 impl View {
@@ -198,6 +217,11 @@ fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
         acvps: Vec::new(),
         fonts: Vec::new(),
         ddf: Vec::new(),
+        viewed: Vec::new(),
+        expanded: None,
+        libs: 0,
+        lib_dirs: Vec::new(),
+        marked: Vec::new(),
     }));
     unsafe { WinSetWindowULong(client, QWL_USER, v as u32) };
     let v = unsafe { &mut *v };
@@ -212,6 +236,8 @@ fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
         for (id, text) in BUTTONS {
             child(client, b"#3\0", &text[..text.len() - 1], WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON | BS_NOPOINTERFOCUS, id);
         }
+        v.libs = child(client, b"#7\0", b"", WS_TABSTOP | LS_MULTIPLESEL, ID_LIBS);
+        sv::attach_menu(inst.hab, frame, inst.book);
     }
     v
 }
@@ -231,7 +257,12 @@ const WM_ACTIVATE_LATER: u32 = 0x1000 + 0x31;
 fn activate_now(v: &View) {
     unsafe {
         WinSetWindowPos(v.frame, HWND_TOP, 0, 0, 0, 0, SWP_SHOW | SWP_ZORDER | SWP_ACTIVATE);
-        WinSetFocus(HWND_DESKTOP, if matches!(v.mode, Mode::Panel(_)) { v.panel } else if matches!(v.mode, Mode::Search(_)) { v.entry } else { v.list });
+        WinSetFocus(HWND_DESKTOP, match v.mode {
+            Mode::Panel(_) => v.panel,
+            Mode::Search(_) => v.entry,
+            Mode::Libraries => v.libs,
+            _ => v.list,
+        });
     }
 }
 
@@ -293,11 +324,24 @@ fn go(v: &mut View, mode: Mode, remember: bool) {
     if remember && !first && v.mode != mode {
         v.history.push((v.mode.clone(), v.top));
     }
+    if let Mode::Panel(p) = mode {
+        viewed(v, p);
+    }
     v.mode = mode;
     v.top = 0;
     enter(v);
     activate(v);
     open_auto(v);
+}
+
+/// A panel shown goes first in the viewed pages (once, as IBM's
+/// AddToHistory).
+fn viewed(v: &mut View, p: PanelRef) {
+    if v.viewed.first() == Some(&p) {
+        return;
+    }
+    v.viewed.insert(0, p);
+    v.viewed.truncate(VIEWED_MAX);
 }
 
 /// Set the window up for its mode.
@@ -327,6 +371,8 @@ fn enter(v: &mut View) {
         Mode::Contents => fill_contents(v),
         Mode::Index => fill_index(v),
         Mode::Search(q) => fill_search(v, &q),
+        Mode::Viewed => fill_viewed(v),
+        Mode::Libraries => fill_libraries(v),
     }
     place(v);
     if v.footnote || v.vp.is_some() {
@@ -389,6 +435,8 @@ pub fn set_title(inst: &mut Instance) {
         Mode::Contents => b"Contents".to_vec(),
         Mode::Index => b"Index".to_vec(),
         Mode::Search(_) => b"Search".to_vec(),
+        Mode::Viewed => b"Viewed Pages".to_vec(),
+        Mode::Libraries => b"Libraries".to_vec(),
     };
     let title = if inst.title.is_empty() { inst.libs.first().map(|l| l.doc().title().to_vec()).unwrap_or_default() } else { inst.title.clone() };
     if !title.is_empty() {
@@ -541,32 +589,146 @@ fn list_start(v: &mut View) {
     v.rows.clear();
 }
 
-fn fill_contents(v: &mut View) {
-    list_start(v);
-    let inst = v.inst();
-    for (lib, l) in inst.libs.iter().enumerate() {
+/// The contents entries in order: panel and level.
+fn contents_entries(inst: &Instance) -> Vec<(PanelRef, u8, Vec<u8>)> {
+    let mut out = Vec::new();
+    for (lib, l) in inst.libs.iter().enumerate().filter(|(_, l)| !l.extra) {
         let d = l.doc();
         for t in 0..d.header.toc_count {
             let Ok(e) = d.toc(t) else { continue };
             if e.hidden() || e.level() == 0 {
                 continue;
             }
-            let mut row = vec![b' '; (e.level() as usize - 1) * 3];
-            row.extend_from_slice(&e.title);
-            list_add(v, &row, PanelRef { lib, toc: t });
+            out.push((PanelRef { lib, toc: t }, e.level(), e.title));
         }
         // A help library's contents are its own; books go on.
         if !inst.book {
             break;
         }
     }
+    out
+}
+
+/// The contents: entries under collapsed ones are left out; an entry with
+/// entries under it shows "+" (collapsed) or "-" (as IBM's bitmaps).
+fn fill_contents(v: &mut View) {
+    list_start(v);
+    let all = contents_entries(v.inst());
+    let mut hide_below: Option<u8> = None;
+    for (i, (p, level, title)) in all.iter().enumerate() {
+        if let Some(l) = hide_below {
+            if *level > l {
+                continue;
+            }
+            hide_below = None;
+        }
+        let parent = all.get(i + 1).is_some_and(|n| n.1 > *level);
+        let open = v.expanded.as_ref().is_none_or(|e| e.contains(p));
+        let mut row = vec![b' '; (*level as usize - 1) * 3];
+        row.extend_from_slice(if !parent { b"  " } else if open { b"- " } else { b"+ " });
+        row.extend_from_slice(title);
+        list_add(v, &row, *p);
+        if parent && !open {
+            hide_below = Some(*level);
+        }
+    }
     send(v.list, LM_SELECTITEM, 0, 1);
+}
+
+/// Expand or collapse the contents at the selected entry (IBM's
+/// TOCExpand1Level, TOCExpandBranch, TOCExpandAll, and the collapses).
+fn expand(v: &mut View, cmd: u16) {
+    if v.mode != Mode::Contents {
+        go(v, Mode::Contents, true);
+    }
+    let all = contents_entries(v.inst());
+    let sel = send(v.list, LM_QUERYSELECTION, LIT_FIRST, 0) as i16;
+    let cur = v.rows.get(sel.max(0) as usize).copied();
+    let at = cur.and_then(|c| all.iter().position(|e| e.0 == c));
+    // The entry and those under it.
+    let branch: Vec<PanelRef> = at.map_or_else(Vec::new, |i| {
+        let l = all[i].1;
+        core::iter::once(all[i].0).chain(all[i + 1..].iter().take_while(|e| e.1 > l).map(|e| e.0)).collect()
+    });
+    match cmd {
+        sv::IDM_EXPANDALL => v.expanded = None,
+        sv::IDM_COLLAPSEALL => v.expanded = Some(Vec::new()),
+        sv::IDM_EXPAND1 | sv::IDM_EXPANDBRANCH => {
+            if let Some(e) = v.expanded.as_mut() {
+                let add = if cmd == sv::IDM_EXPAND1 { &branch[..branch.len().min(1)] } else { &branch[..] };
+                e.extend(add.iter().filter(|p| !e.contains(p)).copied().collect::<Vec<_>>());
+            }
+        }
+        _ => {
+            let e = v.expanded.get_or_insert_with(|| all.iter().map(|e| e.0).collect());
+            e.retain(|p| !branch.contains(p));
+        }
+    }
+    fill_contents(v);
+    if let Some(i) = cur.and_then(|c| v.rows.iter().position(|&r| r == c)) {
+        send(v.list, LM_SELECTITEM, i as u32, 1);
+    }
+}
+
+fn fill_viewed(v: &mut View) {
+    list_start(v);
+    let inst = v.inst();
+    for p in v.viewed.clone() {
+        let title = inst.libs.get(p.lib).and_then(|l| l.doc().toc(p.toc).ok()).map(|e| e.title).unwrap_or_default();
+        list_add(v, &title, p);
+    }
+    send(v.list, LM_SELECTITEM, 0, 1);
+}
+
+fn fill_libraries(v: &mut View) {
+    send(v.libs, LM_DELETEALL, 0, 0);
+    v.lib_dirs = sv::library_dirs(v.inst().book);
+    for (i, d) in v.lib_dirs.iter().enumerate() {
+        let t = z(d);
+        send(v.libs, LM_INSERTITEM, LIT_END, t.as_ptr() as u32);
+        if v.marked.contains(d) {
+            send(v.libs, LM_SELECTITEM, i as u32, 1);
+        }
+    }
+}
+
+/// The directories selected in the library list.
+fn marked_from_list(v: &mut View) {
+    let mut out = Vec::new();
+    let mut i = LIT_FIRST;
+    loop {
+        let n = send(v.libs, LM_QUERYSELECTION, i, 0) as i16;
+        if n < 0 {
+            break;
+        }
+        if let Some(d) = v.lib_dirs.get(n as usize) {
+            out.push(d.clone());
+        }
+        i = n as u32;
+    }
+    v.marked = out;
+}
+
+/// The help files of the marked directories, opened to be searched.
+fn open_marked(v: &mut View) {
+    let inst = v.inst();
+    for d in v.marked.clone() {
+        for f in sv::library_files(&d, inst.book) {
+            if inst.libs.iter().any(|l| l.path.eq_ignore_ascii_case(&f)) {
+                continue;
+            }
+            if let Ok(mut l) = crate::library::open(&f, inst.book) {
+                l.extra = true;
+                inst.libs.push(l);
+            }
+        }
+    }
 }
 
 fn fill_index(v: &mut View) {
     list_start(v);
     let inst = v.inst();
-    for (lib, l) in inst.libs.iter().enumerate().filter(|(i, _)| Some(*i) != inst.hmhelp) {
+    for (lib, l) in inst.libs.iter().enumerate().filter(|(i, l)| Some(*i) != inst.hmhelp && !l.extra) {
         for e in l.doc().index() {
             let mut row = if e.level() == 2 { b"   ".to_vec() } else { Vec::new() };
             row.extend_from_slice(&e.text);
@@ -583,6 +745,8 @@ fn fill_search(v: &mut View, q: &[u8]) {
     if words.is_empty() {
         return;
     }
+    // The marked libraries are searched too (IBM's "Marked libraries").
+    open_marked(v);
     let inst = v.inst();
     for (lib, l) in inst.libs.iter().enumerate().filter(|(i, _)| Some(*i) != inst.hmhelp) {
         let d = l.doc();
@@ -652,6 +816,7 @@ fn place(v: &View) {
     let top = (h - row).max(0);
     let panel_mode = matches!(v.mode, Mode::Panel(_));
     let search = matches!(v.mode, Mode::Search(_));
+    let libraries = v.mode == Mode::Libraries;
     // The help window's own panel goes where its heading's window data
     // puts it (IBM shows it in a viewport of the help window).
     let (px, py, pw, ph) = match v.mode {
@@ -666,10 +831,12 @@ fn place(v: &View) {
         WinSetWindowPos(v.scroll, 0, px + pw - sb, row + py, sb, ph, SWP_MOVE | SWP_SIZE);
         let ltop = if search { (top - ENTRY_ROW).max(0) } else { top };
         WinSetWindowPos(v.list, 0, 0, BUTTON_ROW, w, ltop, SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.libs, 0, 0, BUTTON_ROW, w, top, SWP_MOVE | SWP_SIZE);
+        WinShowWindow(v.libs, libraries as u32);
         WinSetWindowPos(v.entry, 0, 6, BUTTON_ROW + ltop + 4, (w - 12).max(0), ENTRY_ROW - 8, SWP_MOVE | SWP_SIZE);
         WinShowWindow(v.panel, panel_mode as u32);
         WinShowWindow(v.scroll, panel_mode as u32);
-        WinShowWindow(v.list, (!panel_mode) as u32);
+        WinShowWindow(v.list, (!panel_mode && !libraries) as u32);
         WinShowWindow(v.entry, search as u32);
         let mut x = 6;
         for (id, _) in BUTTONS {
@@ -728,13 +895,15 @@ fn client_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 }
                 ID_INDEX => go(v, Mode::Index, true),
                 ID_CONTENTS => go(v, Mode::Contents, true),
-                _ => {}
+                id => menu_command(v, id as u16),
             }
             0
         }
         WM_CONTROL => {
             if lo(mp1) == ID_LIST && hi(mp1) == LN_ENTER {
                 open_selected(v);
+            } else if lo(mp1) == ID_LIBS && hi(mp1) == LN_SELECT {
+                marked_from_list(v);
             }
             0
         }
@@ -796,6 +965,77 @@ fn client_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         _ => unsafe { WinDefWindowProc(h, msg, mp1, mp2) },
+    }
+}
+
+/// A command of the menu bar (IBM's ids, services.rs).
+fn menu_command(v: &mut View, id: u16) {
+    let inst = v.inst();
+    match id {
+        sv::IDM_SEARCH => {
+            let q = match &v.mode {
+                Mode::Search(q) => q.clone(),
+                _ => Vec::new(),
+            };
+            go(v, Mode::Search(q), true);
+        }
+        sv::IDM_BOOKMARK if inst.book => bookmarks(v),
+        sv::IDM_EXIT => {
+            post(v.frame, WM_CLOSE, 0, 0);
+        }
+        sv::IDM_NEWWINDOW => {
+            if let Mode::Panel(p) = v.mode {
+                open_viewport(inst, v.frame, p, Spec { viewport: true, ..Spec::default() }, false);
+            }
+        }
+        sv::IDM_COPY | sv::IDM_COPYFILE | sv::IDM_APPENDFILE => {
+            let Some(page) = &v.page else { return };
+            let text = sv::page_text(page, crate::render::char_size().0);
+            match id {
+                sv::IDM_COPY => sv::copy_to_clipboard(inst.hab, &text),
+                _ => sv::copy_to_file(&text, id == sv::IDM_APPENDFILE),
+            };
+        }
+        sv::IDM_EXPAND1 | sv::IDM_EXPANDBRANCH | sv::IDM_EXPANDALL | sv::IDM_COLLAPSEBRANCH | sv::IDM_COLLAPSEALL => expand(v, id),
+        sv::IDM_CONTENTS => go(v, Mode::Contents, true),
+        sv::IDM_INDEX => go(v, Mode::Index, true),
+        sv::IDM_VIEWED => go(v, Mode::Viewed, true),
+        sv::IDM_LIBRARIES => go(v, Mode::Libraries, true),
+        sv::IDM_PREVIOUS => back(v),
+        sv::IDM_USINGHELP => {
+            inst.help_for_help();
+        }
+        sv::IDM_GENERALHELP => {
+            send(inst.hwnd, crate::HM_EXT_HELP, 0, 0);
+        }
+        sv::IDM_KEYSHELP | sv::IDM_BOOKKEYSHELP => {
+            send(inst.hwnd, crate::HM_KEYS_HELP, 0, 0);
+        }
+        sv::IDM_HELPINDEX => go(v, Mode::Index, true),
+        sv::IDM_PRODUCTINFO => unsafe {
+            WinMessageBox(HWND_DESKTOP, v.frame, b"Information Presentation Facility\n\nrs2's help manager and book viewer.\0".as_ptr(), b"Product Information\0".as_ptr(), 0, 0x4000);
+        },
+        _ => {}
+    }
+}
+
+/// Services' Bookmark (books): the dialog, then the panel it asks for;
+/// the marks are kept with the books.
+fn bookmarks(v: &mut View) {
+    let inst = v.inst();
+    let current = match v.mode {
+        Mode::Panel(p) => Some((p.lib, p.toc, panel_title(inst, &v.mode))),
+        _ => None,
+    };
+    let mut d = sv::BookmarkDlg::new(&mut inst.marks, current);
+    sv::bookmark_dialog(v.frame, &mut d);
+    let view = d.view;
+    for (i, l) in inst.libs.iter().enumerate().filter(|(_, l)| !l.extra) {
+        let mine: Vec<sv::Mark> = inst.marks.iter().filter(|m| m.0 == i).map(|m| m.1.clone()).collect();
+        sv::save_marks(&l.path, &mine);
+    }
+    if let Some((lib, toc)) = view {
+        go(v, Mode::Panel(PanelRef { lib, toc }), true);
     }
 }
 

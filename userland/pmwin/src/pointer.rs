@@ -151,6 +151,9 @@ pub extern "C" fn WinDestroyPointer(h: u32) -> u32 {
     let i = h.wrapping_sub(BASE) as usize;
     match s.ptrs.get(i) {
         Some(Some(p)) if p.pid != 0 => {
+            if s.held_ptr == h {
+                s.held_ptr = 0;
+            }
             if s.cur_ptr == h {
                 set_shape(system(sysptr::SPTR_ARROW));
             }
@@ -376,6 +379,171 @@ pub extern "C" fn WinQuerySysPointerData(_desk: u32, _id: u32, _pi: *mut u8) -> 
     0
 }
 
+// ---- Drag images (PMDRAG) ----
+
+/// DRAGIMAGE.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct DragImage {
+    cb: u16,
+    cptl: u16,
+    h_image: u32,
+    stretch: (i32, i32),
+    fl: u32,
+    cx_offset: i16,
+    cy_offset: i16,
+}
+
+const DRG_ICON: u32 = 0x01;
+const DRG_BITMAP: u32 = 0x02;
+const DRG_POLYGON: u32 = 0x04;
+const DRG_STRETCH: u32 = 0x08;
+const DRG_TRANSPARENT: u32 = 0x10;
+const DRG_CLOSED: u32 = 0x20;
+const DRG_MINIBITMAP: u32 = 0x40;
+/// Rs2DragPointer: draw the images halftoned (a copy).
+const DRAG_HALFTONE: u32 = 1;
+/// The largest pointer (a hardware cursor's).
+const DRAG_MAX: i32 = 64;
+
+/// One drag image as pixels, its bottom-left corner relative to the hot
+/// spot.
+fn drag_image(d: &DragImage) -> Option<(Point, Image)> {
+    let at = Point::new(d.cx_offset as i32, d.cy_offset as i32);
+    let mut img = if d.fl & DRG_ICON != 0 {
+        let p = get(d.h_image)?;
+        if d.fl & DRG_MINIBITMAP != 0 { p.mini.clone() } else { p.img.clone() }
+    } else if d.fl & DRG_BITMAP != 0 {
+        let mut img = crate::gpiobj::with_bitmap(d.h_image, |b| {
+            let mut img = Image::new(b.width, b.height);
+            for y in 0..b.height {
+                for x in 0..b.width {
+                    let v = b.pixels.get(((b.height - 1 - y) * b.width + x) as usize).copied().unwrap_or(0);
+                    img.set(x, y, icon::OPAQUE | v & 0xff_ffff);
+                }
+            }
+            img
+        })?;
+        // The colour of the bottom-left pel shows what is behind.
+        if d.fl & DRG_TRANSPARENT != 0 {
+            let bg = img.at(0, 0);
+            for p in img.px.iter_mut().filter(|p| **p == bg) {
+                *p = icon::TRANSPARENT;
+            }
+        }
+        img
+    } else if d.fl & DRG_POLYGON != 0 {
+        // hImage: the caller's POINTLs (relative to the offset).
+        let n = d.cptl as usize;
+        if d.h_image == 0 || n == 0 {
+            return None;
+        }
+        let pts: Vec<Point> = (0..n).map(|i| unsafe { *((d.h_image as *const i32).add(2 * i)) }).zip((0..n).map(|i| unsafe { *((d.h_image as *const i32).add(2 * i + 1)) })).map(|(x, y)| Point::new(x, y)).collect();
+        let (x0, y0) = (pts.iter().map(|p| p.x).min()?, pts.iter().map(|p| p.y).min()?);
+        let (x1, y1) = (pts.iter().map(|p| p.x).max()?, pts.iter().map(|p| p.y).max()?);
+        let mut img = Image::new((x1 - x0 + 1).min(DRAG_MAX * 2), (y1 - y0 + 1).min(DRAG_MAX * 2));
+        let mut segs: Vec<(Point, Point)> = pts.windows(2).map(|w| (w[0], w[1])).collect();
+        if d.fl & DRG_CLOSED != 0 && n > 2 {
+            segs.push((pts[n - 1], pts[0]));
+        }
+        for (a, b) in segs {
+            let steps = (b.x - a.x).abs().max((b.y - a.y).abs()).max(1);
+            for i in 0..=steps {
+                let x = a.x + (b.x - a.x) * i / steps - x0;
+                let y = a.y + (b.y - a.y) * i / steps - y0;
+                img.set(x, y, icon::INVERT);
+            }
+        }
+        return Some((Point::new(at.x + x0, at.y + y0), img));
+    } else {
+        return None;
+    };
+    if d.fl & DRG_STRETCH != 0 && d.stretch.0 > 0 && d.stretch.1 > 0 {
+        img = img.scaled(d.stretch.0.min(DRAG_MAX * 2), d.stretch.1.min(DRAG_MAX * 2));
+    }
+    Some((at, img))
+}
+
+/// Rs2DragPointer(hptrBase, pdimg, cdimg, fl) (private, for PMDRAG): a
+/// pointer of the caller showing the drag images beside pointer
+/// `hptrBase` (IBM draws them on the screen next to the pointer), at most
+/// 64 pixels square (a hardware cursor's size), halftoned with
+/// DRAG_HALFTONE.
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2DragPointer(base: u32, pdimg: *const DragImage, n: u32, fl: u32) -> u32 {
+    let mut parts: Vec<(Point, Image)> = Vec::new();
+    for i in 0..n.min(64) as usize {
+        if pdimg.is_null() {
+            break;
+        }
+        let d = unsafe { pdimg.add(i).read_unaligned() };
+        if let Some((at, mut img)) = drag_image(&d) {
+            if fl & DRAG_HALFTONE != 0 {
+                for y in 0..img.h {
+                    for x in 0..img.w {
+                        if (x + y) % 2 == 1 {
+                            img.set(x, y, icon::TRANSPARENT);
+                        }
+                    }
+                }
+            }
+            parts.push((at, img));
+        }
+    }
+    let (hot, arrow) = match get(base) {
+        Some(p) => (p.hot, Some(p.img.clone())),
+        None => (Point::new(0, 0), None),
+    };
+    // The bounding box around the hot spot (0, 0), within the limit and
+    // keeping the base pointer whole.
+    let mut l = -hot.x;
+    let mut b = -hot.y;
+    let (mut r, mut t) = (arrow.as_ref().map_or(1, |a| a.w) - hot.x, arrow.as_ref().map_or(1, |a| a.h) - hot.y);
+    for (at, img) in &parts {
+        l = l.min(at.x);
+        b = b.min(at.y);
+        r = r.max(at.x + img.w);
+        t = t.max(at.y + img.h);
+    }
+    l = l.max(r.min(-hot.x + DRAG_MAX) - DRAG_MAX).max(-DRAG_MAX + 1);
+    b = b.max(t.min(-hot.y + DRAG_MAX) - DRAG_MAX).max(-DRAG_MAX + 1);
+    let (w, h) = ((r - l).min(DRAG_MAX), (t - b).min(DRAG_MAX));
+    let mut out = Image::new(w, h);
+    let mut put = |at: Point, img: &Image| {
+        for y in 0..img.h {
+            for x in 0..img.w {
+                let v = img.at(x, y);
+                if v != icon::TRANSPARENT {
+                    out.set(at.x + x - l, at.y + y - b, v);
+                }
+            }
+        }
+    };
+    // The images under the pointer.
+    for (at, img) in &parts {
+        put(*at, img);
+    }
+    if let Some(a) = &arrow {
+        put(Point::new(-hot.x, -hot.y), a);
+    }
+    add(PtrObj { pid: pid(), hot: Point::new(-l, -b), pointer: true, mini: out.scaled(MINI, MINI), img: out, mono: false })
+}
+
+/// Rs2HoldPointer(hptr) (private, for PMDRAG): show `hptr` as the
+/// mouse pointer and keep it while a drag runs, whatever windows set
+/// (WM_CONTROLPOINTER); 0 lets go (the arrow, until a window sets its
+/// own).
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2HoldPointer(h: u32) -> u32 {
+    if h != 0 && get(h).is_none() {
+        return 0;
+    }
+    let s = st();
+    s.held_ptr = h;
+    set_shape(if h != 0 { h } else { system(sysptr::SPTR_ARROW) });
+    1
+}
+
 // ---- The mouse pointer ----
 
 /// Show system pointer `id`.
@@ -386,6 +554,15 @@ pub fn set_system(id: u32) {
 /// Change the pointer's shape (0: no pointer).
 pub fn set_shape(h: u32) {
     let s = st();
+    if s.held_ptr != 0 {
+        if get(s.held_ptr).is_some() {
+            if h != s.held_ptr {
+                return;
+            }
+        } else {
+            s.held_ptr = 0;
+        }
+    }
     if s.cur_ptr == h && s.cur_ptr != 0 {
         return;
     }

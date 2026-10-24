@@ -19,7 +19,7 @@ use crate::ctl;
 use crate::gpiapi::PointL;
 use crate::state::{self, now, pid, st, QMsg, Queue, Sent, WndProc};
 use crate::win::*;
-use crate::{accel, lock};
+use crate::{accel, hooks, lock};
 
 unsafe extern "C" {
     #[link_name = "DOSCALLS.324"]
@@ -152,7 +152,17 @@ pub fn call(p: u32, h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 
 /// Send a message: a window of the calling thread gets it at once, one of
 /// another thread through its queue while the caller waits for the reply.
+/// The send message hooks see it first, in the sender.
 pub fn send(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    let (mut h, mut msg, mut mp1, mut mp2) = (h, msg, mp1, mp2);
+    if !st().hooks.is_empty() {
+        crate::hooks::send_msg(&mut h, &mut msg, &mut mp1, &mut mp2);
+    }
+    deliver(h, msg, mp1, mp2)
+}
+
+/// `send` past the hooks.
+fn deliver(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let s = st();
     let Some((p, q)) = s.desk.get(h).map(|w| (w.proc_, w.queue)).filter(|&(p, _)| p != 0) else { return 0 };
     let other = s.queues.get(&q).is_some_and(|x| x.pid != pid() || x.tid != state::tid());
@@ -225,7 +235,7 @@ pub fn answer_sent() {
         let s = st();
         let q = s.my_queue();
         let Some(m) = s.queues.get_mut(&q).and_then(|x| x.sent.pop_front()) else { return };
-        let r = if st().desk.exists(m.hwnd) { send(m.hwnd, m.msg, m.mp1, m.mp2) } else { 0 };
+        let r = if st().desk.exists(m.hwnd) { deliver(m.hwnd, m.msg, m.mp1, m.mp2) } else { 0 };
         if m.reply {
             let s = st();
             s.replies.push((m.id, r));
@@ -277,6 +287,7 @@ pub extern "C" fn WinCreateMsgQueue(_hab: u32, _cmsg: i32) -> u32 {
         hung: false,
         modal: alloc::vec::Vec::new(),
         awaiting: None,
+        cp: 850,
     };
     s.queues.insert(h, q);
     // A PM program: the PM server runs while there are any.
@@ -489,26 +500,56 @@ fn run_timers(q: u32) -> u32 {
 // ---- The message loop ----
 
 /// Next message for the calling thread; `remove` takes it off the queue.
+/// The hooks come in as in IBM's PMWIN: a message input hook may supply
+/// input first, a check message filter hook decides which messages the
+/// filter takes, the input hooks see every message retrieved (and may
+/// take it), the journal record hooks the keyboard and mouse messages
+/// removed.
 fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) -> Option<QMsg> {
+    let fl = remove as u32;
     loop {
         answer_sent();
         let q = st().my_queue();
         if q == 0 {
             return None;
         }
+        crate::avio::poll();
         let wait_ms = run_timers(q);
+        let hooked = !st().hooks.is_empty();
+        if hooked {
+            if let Some(mut m) = hooks::msg_input(false) {
+                if remove {
+                    hooks::msg_input(true);
+                }
+                if hooks::input(&mut m, remove) {
+                    continue;
+                }
+                return Some(m);
+            }
+        }
         let s = st();
         let t = now();
         let queue = s.queues.get_mut(&q)?;
         if !queue.sent.is_empty() {
             continue;
         }
-        if let Some(mut m) = queue.msgs.take(filter, first, last, remove) {
+        let found = if hooked && hooks::any(hooks::HK_CHECKMSGFILTER) {
+            take_checked(q, filter, first, last, remove, fl)
+        } else {
+            queue.msgs.take(filter, first, last, remove)
+        };
+        if let Some(mut m) = found {
+            let input = m.reserved & hooks::QMSG_INPUT != 0;
+            m.reserved &= !hooks::QMSG_INPUT;
             if remove {
+                let Some(queue) = st().queues.get_mut(&q) else { return None };
                 queue.msg_pos = gpi::Point::new(m.x, m.y);
                 queue.msg_time = m.time;
                 let more = !queue.msgs.is_empty();
                 queue.msgs.retrieved(t, more);
+                if input && hooked {
+                    hooks::journal_record(&m);
+                }
                 if m.msg == WM_CHAR {
                     // In menu mode the queue's keys go to the menu (also
                     // keys typed ahead of a menu that opened since).
@@ -520,15 +561,34 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
                     accel::translate(&mut m);
                 }
             }
+            if hooked && hooks::input(&mut m, remove) {
+                // The hook took it: off the queue.
+                if !remove {
+                    if let Some(x) = st().queues.get_mut(&q) {
+                        let mut orig = m;
+                        orig.reserved |= if input { hooks::QMSG_INPUT } else { 0 };
+                        x.msgs.take_msg(&orig, true);
+                    }
+                }
+                continue;
+            }
             return Some(m);
         }
+        let s = st();
         let paint_ok = (first == 0 && last == 0) || (first..=last).contains(&WM_PAINT);
         if let Some(h) = s.desk.paint_pending(q).filter(|&h| paint_ok && (filter == 0 || filter == h)) {
             if let Some(x) = s.queues.get_mut(&q) {
                 x.msgs.retrieved(t, false);
             }
             let p = s.pointer;
-            return Some(QMsg { hwnd: h, msg: WM_PAINT, mp1: 0, mp2: 0, time: t, x: p.x, y: p.y, reserved: 0 });
+            let mut m = QMsg { hwnd: h, msg: WM_PAINT, mp1: 0, mp2: 0, time: t, x: p.x, y: p.y, reserved: 0 };
+            if hooked && hooks::input(&mut m, remove) {
+                // Taken by the hook: as if the window ignored it.
+                let before = st().desk.get(h).map_or(0, |w| w.validated);
+                st().desk.end_dispatch_paint(h, before);
+                continue;
+            }
+            return Some(m);
         }
         let queue = s.queues.get_mut(&q)?;
         queue.msgs.retrieved(t, false);
@@ -544,6 +604,23 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
             x.msgs.set_waiting(false);
         }
     }
+}
+
+/// The first message for `filter` that the check message filter hooks
+/// let through (they decide instead of the range `first..=last`).
+fn take_checked(q: u32, filter: u32, first: u32, last: u32, remove: bool, fl: u32) -> Option<QMsg> {
+    let cands: alloc::vec::Vec<QMsg> = st().queues.get(&q)?.msgs.for_window(filter).copied().collect();
+    for c in cands {
+        let mut shown = c;
+        shown.reserved &= !hooks::QMSG_INPUT;
+        let skip = hooks::check_filter(&shown, first, last, fl).unwrap_or(false);
+        if !skip {
+            if let Some(m) = st().queues.get_mut(&q)?.msgs.take_msg(&c, remove) {
+                return Some(m);
+            }
+        }
+    }
+    None
 }
 
 /// WinGetMsg(hab, pqmsg, hwndFilter, msgFirst, msgLast): FALSE for WM_QUIT.
@@ -650,6 +727,9 @@ pub extern "C" fn WinQueryCapture(_desk: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryQueueInfo(hmq: u32, p: *mut u8, cb: u32) -> u32 {
     let s = st();
+    // HMQ_CURRENT: the caller's queue (the Open Class library asks so
+    // whether the thread has one).
+    let hmq = if hmq == 1 { s.my_queue() } else { hmq };
     let Some(q) = s.queues.get(&hmq) else { return 0 };
     if p.is_null() {
         return 0;

@@ -53,7 +53,7 @@ pub fn font() -> &'static Font {
 /// The font window `h` draws in: its PP_FONTNAMESIZE (or a parent's),
 /// else the system font.
 pub fn font_of(h: u32) -> &'static Font {
-    crate::misc::pres_font_name(h).and_then(|n| crate::fonts::by_name(&n)).unwrap_or_else(font)
+    crate::pp::font_name(h).and_then(|n| crate::fonts::by_name(&n)).unwrap_or_else(font)
 }
 
 /// Dialog background colour.
@@ -76,7 +76,8 @@ pub fn paint(h: u32, f: impl FnOnce(&mut Canvas)) {
     WinEndPaint(hps);
 }
 
-fn with(h: u32, hps: u32, f: impl FnOnce(&mut Canvas)) {
+/// Draw on a presentation space of window `h` (one of its paint).
+pub fn with(h: u32, hps: u32, f: impl FnOnce(&mut Canvas)) {
     let s = st();
     let (w, hh) = s.desk.get(h).map_or((0, 0), |w| (w.cx, w.cy));
     gpiapi::refresh(s, hps);
@@ -146,6 +147,11 @@ impl Canvas<'_> {
 
     pub fn fill(&mut self, r: Rect, c: u32) {
         self.ps.fill_rect(&mut self.surface, r, c);
+    }
+
+    /// Invert `r` (DSTINVERT).
+    pub fn invert(&mut self, r: Rect) {
+        self.ps.blit(&mut self.surface, r, None, 0x55, false, None);
     }
 
     pub fn hline(&mut self, x0: i32, x1: i32, y: i32, c: u32) {

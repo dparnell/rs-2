@@ -42,6 +42,7 @@ pub mod sysctl;
 pub mod sysstate;
 pub mod thunk;
 pub mod timer;
+pub mod avio;
 pub mod vio;
 pub mod vdm;
 pub mod viowin;

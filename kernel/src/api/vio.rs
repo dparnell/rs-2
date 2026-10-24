@@ -3,7 +3,8 @@
 //! VIO calls draw on the screen of the caller's session (or of the pop-up
 //! its process owns). Every entry is 16-bit `_Pascal`; 32-bit programs
 //! reach them through thunks. The last argument, the VIO handle, is 0
-//! outside Presentation Manager AVIO and is not checked.
+//! but for a presentation space of Presentation Manager AVIO: the calls
+//! that work on cells then go to it (avio.rs).
 //!
 //! * The logical video buffer (VioGetBuf) is a per-process copy of the
 //!   screen that VioShowBuf transfers to it.
@@ -141,6 +142,9 @@ pub fn drop_session(sid: u32) {
 // ---- Output ----
 
 pub fn vio_wrt_tty(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 2) {
+        return super::avio::wrt_tty(c, h);
+    }
     let (p, n) = (c.ptr(0), c.arg(1));
     let Some(data) = c.read_vec(p, n) else { return err::INVALID_ADDRESS };
     crate::console::write(&data);
@@ -151,6 +155,9 @@ pub fn vio_wrt_tty(c: &mut Ctx) -> u32 {
 }
 
 pub fn vio_get_cur_pos(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 2) {
+        return super::avio::get_cur_pos(c, h);
+    }
     let (r, col) = screen::with(|s| (s.cur_row, s.cur_col.min(s.cols - 1))).unwrap_or((0, 0));
     c.write_u16(c.ptr(0), r as u16);
     c.write_u16(c.ptr(1), col as u16);
@@ -158,6 +165,9 @@ pub fn vio_get_cur_pos(c: &mut Ctx) -> u32 {
 }
 
 pub fn vio_set_cur_pos(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 2) {
+        return super::avio::set_cur_pos(c, h);
+    }
     let (r, col) = (c.arg(0) as usize, c.arg(1) as usize);
     let (rows, cols) = rows_cols();
     if r >= rows {
@@ -175,6 +185,9 @@ pub fn vio_set_cur_pos(c: &mut Ctx) -> u32 {
 }
 
 pub fn vio_get_cur_type(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 1) {
+        return super::avio::get_cur_type(c, h);
+    }
     let shape = screen::with(|s| s.cursor_type).unwrap_or([14, 15, 1, 0]);
     let mut b = Vec::new();
     for w in shape {
@@ -186,6 +199,9 @@ pub fn vio_get_cur_type(c: &mut Ctx) -> u32 {
 /// VioSetCurType(VIOCURSORINFO): yStart and cEnd are scan lines, or
 /// percentages of the cell height when negative; attr -1 hides it.
 pub fn vio_set_cur_type(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 1) {
+        return super::avio::set_cur_type(c, h);
+    }
     let Some(raw) = c.read_vec(c.ptr(0), 8) else { return err::INVALID_ADDRESS };
     let w = |i: usize| u16::from_le_bytes([raw[i * 2], raw[i * 2 + 1]]);
     let t = [w(0), w(1), w(2), w(3)];
@@ -235,6 +251,9 @@ fn mode_bytes() -> Vec<u8> {
 }
 
 pub fn vio_get_mode(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 1) {
+        return super::avio::get_mode(c, h);
+    }
     let p = c.ptr(0);
     let Some(cb) = c.read_u16(p) else { return err::INVALID_ADDRESS };
     if cb < 3 {
@@ -350,18 +369,30 @@ fn scroll(c: &mut Ctx, dir: u8) -> u32 {
 }
 
 pub fn vio_scroll_up(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 6) {
+        return super::avio::scroll(c, h, 0);
+    }
     scroll(c, 0)
 }
 
 pub fn vio_scroll_dn(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 6) {
+        return super::avio::scroll(c, h, 1);
+    }
     scroll(c, 1)
 }
 
 pub fn vio_scroll_lf(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 6) {
+        return super::avio::scroll(c, h, 2);
+    }
     scroll(c, 2)
 }
 
 pub fn vio_scroll_rt(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 6) {
+        return super::avio::scroll(c, h, 3);
+    }
     scroll(c, 3)
 }
 
@@ -401,6 +432,9 @@ fn modify_run(n: usize, row: usize, col: usize, mut f: impl FnMut(usize, u16) ->
 }
 
 pub fn vio_wrt_char_str(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 4) {
+        return super::avio::wrt_char_str(c, h);
+    }
     let (p, n, row, col) = (c.ptr(0), c.arg(1), c.arg(2) as usize, c.arg(3) as usize);
     let Some(data) = c.read_vec(p, n) else { return err::INVALID_ADDRESS };
     // Characters keep the existing attributes.
@@ -408,6 +442,9 @@ pub fn vio_wrt_char_str(c: &mut Ctx) -> u32 {
 }
 
 pub fn vio_wrt_char_str_att(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 5) {
+        return super::avio::wrt_char_str_att(c, h);
+    }
     let (p, n, row, col, pa) = (c.ptr(0), c.arg(1), c.arg(2) as usize, c.arg(3) as usize, c.ptr(4));
     let Some(data) = c.read_vec(p, n) else { return err::INVALID_ADDRESS };
     let Some(attr) = c.read_u8(pa) else { return err::INVALID_ADDRESS };
@@ -415,24 +452,36 @@ pub fn vio_wrt_char_str_att(c: &mut Ctx) -> u32 {
 }
 
 pub fn vio_wrt_cell_str(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 4) {
+        return super::avio::wrt_cell_str(c, h);
+    }
     let (p, n, row, col) = (c.ptr(0), c.arg(1), c.arg(2) as usize, c.arg(3) as usize);
     let Some(data) = c.read_vec(p, n & !1) else { return err::INVALID_ADDRESS };
     modify_run(data.len() / 2, row, col, |i, _| data[i * 2] as u16 | (data[i * 2 + 1] as u16) << 8)
 }
 
 pub fn vio_wrt_n_cell(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 4) {
+        return super::avio::wrt_n_cell(c, h);
+    }
     let (p, n, row, col) = (c.ptr(0), c.arg(1) as usize, c.arg(2) as usize, c.arg(3) as usize);
     let Some(cell) = fill_cell(c, p) else { return err::INVALID_ADDRESS };
     modify_run(n, row, col, |_, _| cell)
 }
 
 pub fn vio_wrt_n_char(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 4) {
+        return super::avio::wrt_n_char(c, h);
+    }
     let (p, n, row, col) = (c.ptr(0), c.arg(1) as usize, c.arg(2) as usize, c.arg(3) as usize);
     let Some(ch) = c.read_u8(p) else { return err::INVALID_ADDRESS };
     modify_run(n, row, col, |_, old| (old & 0xff00) | ch as u16)
 }
 
 pub fn vio_wrt_n_attr(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 4) {
+        return super::avio::wrt_n_attr(c, h);
+    }
     let (p, n, row, col) = (c.ptr(0), c.arg(1) as usize, c.arg(2) as usize, c.arg(3) as usize);
     let Some(a) = c.read_u8(p) else { return err::INVALID_ADDRESS };
     modify_run(n, row, col, |_, old| (old & 0x00ff) | (a as u16) << 8)
@@ -475,10 +524,16 @@ fn read_run(c: &mut Ctx, cells: bool) -> u32 {
 }
 
 pub fn vio_read_cell_str(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 4) {
+        return super::avio::read_run(c, h, true);
+    }
     read_run(c, true)
 }
 
 pub fn vio_read_char_str(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 4) {
+        return super::avio::read_run(c, h, false);
+    }
     read_run(c, false)
 }
 
@@ -749,6 +804,9 @@ pub fn vio_set_font(c: &mut Ctx) -> u32 {
 // ---- Buffers ----
 
 pub fn vio_get_buf(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 2) {
+        return super::avio::get_buf(c, h);
+    }
     let (rows, cols) = rows_cols();
     let len = (rows * cols * 2) as u32;
     let base = match lvb(c) {
@@ -789,6 +847,9 @@ fn lvb(c: &Ctx) -> Result<u32, u32> {
 }
 
 pub fn vio_show_buf(c: &mut Ctx) -> u32 {
+    if let Some(h) = super::avio::is_ps(c, 2) {
+        return super::avio::show_buf(c, h);
+    }
     let (off, len) = (c.arg(0), c.arg(1));
     let base = *c.process.lvb.lock();
     if base == 0 {

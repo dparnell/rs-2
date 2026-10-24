@@ -85,6 +85,18 @@ impl MsgQueue {
         if remove { self.msgs.remove(i) } else { Some(self.msgs[i]) }
     }
 
+    /// The messages for `filter` (as `take` matches windows), oldest
+    /// first: the candidates a message filter hook looks at.
+    pub fn for_window(&self, filter: u32) -> impl Iterator<Item = &QMsg> {
+        self.msgs.iter().filter(move |m| filter == 0 || m.hwnd == filter || m.hwnd == 0)
+    }
+
+    /// The first message equal to `m`, removed when `remove`.
+    pub fn take_msg(&mut self, m: &QMsg, remove: bool) -> Option<QMsg> {
+        let i = self.msgs.iter().position(|x| x == m)?;
+        if remove { self.msgs.remove(i) } else { Some(self.msgs[i]) }
+    }
+
     /// Remove the messages `keep` rejects (a window was destroyed).
     pub fn retain(&mut self, keep: impl FnMut(&QMsg) -> bool) {
         self.msgs.retain(keep);

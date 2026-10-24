@@ -275,9 +275,10 @@ fn paint(h: u32) {
     let (first, cursor, (sa, sb)) = (e.first, e.cursor, sel(e));
     let m = inset(h);
     let cols = columns(h, first);
+    let col = crate::pp::text_colors(h);
     draw::paint(h, |c| {
         let r = c.rect();
-        c.fill(r, draw::window());
+        c.fill(r, col.bg);
         if style & ES_MARGIN != 0 {
             c.sunken(r);
             c.bevel(Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1), draw::DARK, draw::face());
@@ -295,8 +296,8 @@ fn paint(h: u32) {
             area.left
         };
         let y = area.bottom + (area.height() - f.height) / 2 + f.descender;
-        let fg = if enabled { draw::text() } else { draw::GRAY_TEXT };
-        c.text(x0, y, vis, fg, area);
+        let _ = enabled;
+        c.text(x0, y, vis, col.fg, area);
         // The selection, drawn inverted.
         if focus && sa < sb {
             let a = sa.max(first) - first;
@@ -304,14 +305,14 @@ fn paint(h: u32) {
             if a < b {
                 let (xa, xb) = (x0 + f.text_width(&vis[..a.min(vis.len())]), x0 + f.text_width(&vis[..b.min(vis.len())]));
                 let sr = Rect::new(xa, y - f.descender, xb, y - f.descender + f.height).intersect(&area);
-                c.fill(sr, draw::hilite());
-                c.text(xa, y, &vis[a.min(vis.len())..b.min(vis.len())], draw::hilite_text(), area);
+                c.fill(sr, col.hilite_bg);
+                c.text(xa, y, &vis[a.min(vis.len())..b.min(vis.len())], col.hilite_fg, area);
             }
         }
         if focus && cursor >= first {
             let x = (x0 + f.text_width(&shown[first.min(shown.len())..cursor.min(shown.len())])).min(area.right - 1);
             let cr = Rect::new(x, y - f.descender, x + 1, y - f.descender + f.height).intersect(&area);
-            c.fill(cr, draw::text());
+            c.fill(cr, col.fg);
         }
     });
 }

@@ -122,6 +122,8 @@ pub struct DlgItemT {
     pub id: u32,
     /// Control data (null when there is none).
     pub ctl: *const u8,
+    /// Presentation parameters (PRESPARAMS; null when there are none).
+    pub pres: *const u8,
     pub children: Vec<DlgItemT>,
 }
 
@@ -150,6 +152,8 @@ fn item(b: &[u8], at: &mut usize) -> Option<DlgItemT> {
     let text = if text.first() == Some(&0xff) { text } else { text[..text.iter().position(|&c| c == 0).unwrap_or(text.len())].to_vec() };
     let octl = u16_at(b, p + 28) as usize;
     let ctl = if octl == 0xffff || octl >= b.len() { core::ptr::null() } else { b[octl..].as_ptr() };
+    let opres = u16_at(b, p + 26) as usize;
+    let pres = if opres == 0xffff || opres == 0 || opres >= b.len() { core::ptr::null() } else { b[opres..].as_ptr() };
     let mut d = DlgItemT {
         class,
         text,
@@ -160,6 +164,7 @@ fn item(b: &[u8], at: &mut usize) -> Option<DlgItemT> {
         cy: u16_at(b, p + 22) as i16 as i32,
         id: u16_at(b, p + 24) as u32,
         ctl,
+        pres,
         children: Vec::new(),
     };
     for _ in 0..children {

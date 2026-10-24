@@ -722,8 +722,8 @@ fn paint(h: u32) {
     let (widths, parts, v, mini_icons) = (l.widths, l.parts, l.view, l.m.icon <= crate::pointer::MINI);
     let f = draw::font_of(h);
     // Presentation parameter colours (a desktop's background).
-    let bg = crate::misc::pres_color(h, true);
-    let text = crate::misc::pres_color(h, false).unwrap_or(draw::text());
+    let bg = crate::pp::color_set(h, crate::pp::PP_BACKGROUNDCOLOR);
+    let text = crate::pp::color_set(h, crate::pp::PP_FOREGROUNDCOLOR).unwrap_or(draw::text());
     draw::paint(h, |cv| {
         let all = cv.rect();
         cv.fill(all, bg.unwrap_or(draw::window()));

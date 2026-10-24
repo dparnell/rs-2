@@ -139,6 +139,7 @@ pub fn create_from(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u3
     // window keeps its class's control data, no dialog data).
     if t.class != b"#1" && st().class(&t.class).is_some() {
         let pos = Rect::new(t.x * DU_X, t.y * DU_Y, (t.x + t.cx) * DU_X, (t.y + t.cy) * DU_Y);
+        crate::pp::set_pending(t.pres as u32);
         let h = win::create(parent, &t.class, &t.text, t.style & !ws::VISIBLE, pos, owner, t.id, t.ctl as u32);
         if h == 0 {
             return 0;
@@ -164,6 +165,7 @@ pub fn create_from(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u3
         }
     }
     let pos = place(parent, owner, t, fcf);
+    crate::pp::set_pending(t.pres as u32);
     let h = frame::create(parent, t.style & !ws::VISIBLE, fcf, &t.text, pos, owner, t.id, 0);
     if h == 0 {
         return 0;
@@ -205,6 +207,7 @@ fn create_item(parent: u32, dlg: u32, t: &DlgItemT, off: i32) {
         style = (style & 0xffff_0000) | 0x09;
     }
     let pos = Rect::new(t.x * DU_X, t.y * DU_Y, (t.x + t.cx) * DU_X, (t.y + t.cy) * DU_Y).offset(off, off);
+    crate::pp::set_pending(t.pres as u32);
     let h = win::create(parent, &class, &t.text, style, pos, dlg, t.id, t.ctl as u32);
     for c in &t.children {
         if h != 0 {
@@ -218,6 +221,13 @@ fn create_item(parent: u32, dlg: u32, t: &DlgItemT, off: i32) {
 /// WinProcessDlg(hwndDlg): run the dialog modally until dismissed.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinProcessDlg(h: u32) -> u32 {
+    process(h, crate::hooks::MSGF_DIALOGBOX)
+}
+
+/// The modal loop of a dialog (WinProcessDlg) or message box: what the
+/// message filter hooks (MSGF_DIALOGBOX, MSGF_MESSAGEBOX) process is not
+/// dispatched.
+pub fn process(h: u32, msgf: u32) -> u32 {
     if data(h).is_none() {
         return DID_ERROR;
     }
@@ -243,6 +253,9 @@ pub extern "C" fn WinProcessDlg(h: u32) -> u32 {
                 d.result = DID_ERROR;
             }
             break;
+        }
+        if crate::hooks::msg_filter(&mut m, msgf) {
+            continue;
         }
         msg::WinDispatchMsg(1, &m);
     }

@@ -166,9 +166,10 @@ fn paint(h: u32) {
     let showing = data(h).is_some_and(|d| d.showing);
     let hilite = data(h).is_some_and(|d| d.hilite);
     let enabled = ctl::enabled(h);
+    let col = crate::pp::text_colors(h);
     draw::paint(h, |c: &mut Canvas| {
         let er = Rect::new(0, cy - eh, cx - bw, cy);
-        c.fill(er, if hilite { draw::hilite() } else { draw::window() });
+        c.fill(er, if hilite { col.hilite_bg } else { col.bg });
         c.sunken(er);
         c.bevel(Rect::new(er.left + 1, er.bottom + 1, er.right - 1, er.top - 1), draw::DARK, draw::face());
         if bw > 0 {

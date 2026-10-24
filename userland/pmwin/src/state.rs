@@ -54,6 +54,8 @@ pub struct Queue {
     pub modal: Vec<(&'static str, u32)>,
     /// The reply the thread waits for: (window, message) it sent.
     pub awaiting: Option<(u32, u32)>,
+    /// The queue's code page (WinSetCp).
+    pub cp: u32,
 }
 
 pub struct PsEntry {
@@ -163,6 +165,9 @@ pub struct State {
     pub sys_ptrs: Vec<u32>,
     /// The mouse pointer's shape.
     pub cur_ptr: u32,
+    /// A drag holds the pointer's shape (Rs2HoldPointer): what windows
+    /// set meanwhile is not shown.
+    pub held_ptr: u32,
     /// A window that takes minimized frames over (Rs2SetMinimizeViewer):
     /// they are hidden and it is told; 0: they become desktop icons.
     pub min_viewer: u32,
@@ -219,10 +224,8 @@ pub struct State {
     /// what they draw may be half done (`display::flush_damage`).
     pub drawing: Vec<(u32, u32, u32)>,
     /// Presentation parameter colours set on windows: (foreground,
-    /// background) as 0x00RRGGBB, NO_COLOR where not set.
-    pub pres: BTreeMap<u32, (u32, u32)>,
-    /// PP_FONTNAMESIZE set on windows ("10.Helv").
-    pub pres_font: BTreeMap<u32, Vec<u8>>,
+    /// Presentation parameters of windows (pp.rs).
+    pub pp: BTreeMap<u32, Vec<(u32, Vec<u8>)>>,
     /// System values and colours set with WinSetSysValue and WinSetSysColors
     /// (the rest are the defaults).
     pub sysvals: BTreeMap<i32, i32>,
@@ -249,9 +252,12 @@ pub struct Hook {
     pub queue: u32,
     pub kind: u32,
     pub pfn: u32,
-    #[allow(dead_code)]
     pub hmod: u32,
     pub pid: u32,
+    /// The installer's anchor block (the hook's first argument).
+    pub hab: u32,
+    /// The name of hmod's module (loaded where a system hook is called).
+    pub module: Vec<u8>,
 }
 
 /// The state, if PM has been initialised in the system.
@@ -285,17 +291,18 @@ pub fn init(surface: Surface) {
         ptrs: Vec::new(),
         sys_ptrs: Vec::new(),
         cur_ptr: 0,
+        held_ptr: 0,
         ptr_window: 0,
         min_viewer: 0,
-        pres: BTreeMap::new(),
-        pres_font: BTreeMap::new(),
+        pp: BTreeMap::new(),
         sysvals: BTreeMap::new(),
         syscolors: BTreeMap::new(),
         fonts: Default::default(),
         ptr_hidden: 0,
         ptr_hardware: false,
         ptr_level: 0,
-        next_hmq: 1,
+        // 1 is HMQ_CURRENT.
+        next_hmq: 2,
         cascade: 0,
         ctl: BTreeMap::new(),
         accels: Vec::new(),

@@ -93,6 +93,9 @@ const VS_PM: u32 = 0x08;
 /// Private messages to the server's window thread.
 pub const WM_RS2_GHOSTS: u32 = 0x0ff0;
 const WM_RS2_WINLIST: u32 = 0x0ff1;
+/// A journal playback hook was set or released (WinSetHook in any
+/// process).
+const WM_RS2_JOURNAL: u32 = 0x0ff2;
 const TID_CHECK: u32 = 0x7f01;
 
 const EXEC_BACKGROUND: u32 = 4;
@@ -222,12 +225,17 @@ extern "C" fn input_thread() -> u32 {
         let rc = unsafe { Rs2ReadInput(&mut ev, 100) };
         lock::enter_quiet();
         if rc == 0 {
-            input::event(&ev);
+            hardware(&ev);
             // Whatever else has arrived, without waiting.
             let mut n = 0;
             while n < 64 && unsafe { Rs2ReadInput(&mut ev, 0) } == 0 {
-                input::event(&ev);
+                hardware(&ev);
                 n += 1;
+            }
+        }
+        if !PLAYING.load(Ordering::Relaxed) {
+            for ev in core::mem::take(held()) {
+                input::event(&ev);
             }
         }
         check_hung();
@@ -244,6 +252,129 @@ extern "C" fn input_thread() -> u32 {
             return 0;
         }
     }
+}
+
+/// An event from the hardware: while a journal playback hook plays input
+/// back, keys and mouse events wait (as in IBM's system queue).
+fn hardware(ev: &Input) {
+    if PLAYING.load(Ordering::Relaxed) && (ev.kind == input::EV_KEY || ev.kind == input::EV_MOUSE) {
+        if held().len() < 1024 {
+            held().push(*ev);
+        }
+        return;
+    }
+    input::event(ev);
+}
+
+// ---- Journal playback ----
+
+/// A journal playback hook plays input (server process only).
+static PLAYING: AtomicBool = AtomicBool::new(false);
+static JOURNAL_THREAD: AtomicBool = AtomicBool::new(false);
+/// Hardware input held back during playback (input thread only).
+static mut HELD: Vec<Input> = Vec::new();
+
+fn held() -> &'static mut Vec<Input> {
+    unsafe { &mut *(&raw mut HELD) }
+}
+
+/// A playback hook was set or released: the server looks.
+pub fn journal_changed() {
+    let q = st().server_queue;
+    if q != 0 {
+        post_queue(q, qmsg(HWND_DESKTOP, WM_RS2_JOURNAL, 0, 0));
+    }
+}
+
+fn start_journal() {
+    if crate::hooks::playback_hook().is_some() && !JOURNAL_THREAD.swap(true, Ordering::Relaxed) {
+        let mut tid = 0;
+        if unsafe { DosCreateThread(&mut tid, journal_thread_entry, 0, 2, 64 * 1024) } != 0 {
+            JOURNAL_THREAD.store(false, Ordering::Relaxed);
+        }
+    }
+}
+
+#[unsafe(naked)]
+extern "C" fn journal_thread_entry(_arg: u32) -> u32 {
+    core::arch::naked_asm!(
+        "push ebp", "mov ebp, esp", "and esp, -16",
+        "call {f}",
+        "mov esp, ebp", "pop ebp", "ret",
+        f = sym journal_thread,
+    );
+}
+
+/// The PM server's playback thread (IBM's GetAndProcessJrnMsg): asks the
+/// playback hook for the next message (JournalPlaybackHook(hab, FALSE,
+/// pqmsg) returns how long to wait before it is due), processes it as
+/// input from the hardware, then lets the hook skip to the next one
+/// (fSkip TRUE). The hook runs on this thread, not the input thread, so
+/// input routing never waits for it.
+extern "C" fn journal_thread() -> u32 {
+    let mut buttons = 0u8;
+    loop {
+        lock::enter_quiet();
+        let hook = crate::hooks::playback_hook();
+        PLAYING.store(hook.is_some(), Ordering::Relaxed);
+        lock::leave();
+        let Some((pfn, hab)) = hook else { break };
+        let mut m = state::QMsg::default();
+        let wait = crate::hooks::playback(pfn, hab, false, &mut m);
+        if wait != 0 {
+            unsafe { os2::DosSleep(wait.min(5000)) };
+            continue;
+        }
+        lock::enter_quiet();
+        // The hook may have gone while it ran.
+        if crate::hooks::playback_hook().is_some_and(|h| h.0 == pfn) {
+            play(&m, &mut buttons);
+        }
+        lock::leave();
+        crate::hooks::playback(pfn, hab, true, core::ptr::null_mut());
+    }
+    JOURNAL_THREAD.store(false, Ordering::Relaxed);
+    // A hook set again while this thread was ending.
+    lock::enter_quiet();
+    if crate::hooks::playback_hook().is_some() {
+        journal_changed();
+    }
+    lock::leave();
+    0
+}
+
+/// Process a played-back message as input: keys go to the focus, mouse
+/// messages move the pointer to the message's position and press or
+/// release the buttons there.
+fn play(m: &state::QMsg, buttons: &mut u8) {
+    input::PLAYBACK.store(true, Ordering::Relaxed);
+    let t = now();
+    match m.msg {
+        WM_CHAR => {
+            let f = st().focus;
+            if f != 0 {
+                input::post_input(f, WM_CHAR, m.mp1, m.mp2, t);
+            }
+        }
+        WM_MOUSEMOVE..=0x0079 => {
+            // WM_BUTTONnDOWN/UP/DBLCLK: 0x71 + 3(n-1) + 0/1/2.
+            if m.msg != WM_MOUSEMOVE {
+                let k = m.msg - 0x71;
+                let bit = 1u8 << (k / 3);
+                if k % 3 == 1 { *buttons &= !bit } else { *buttons |= bit }
+            }
+            let kc = (m.mp2 >> 16) as u8;
+            let shift = (if kc & 0x08 != 0 { 1 } else { 0 }) | (if kc & 0x10 != 0 { 4 } else { 0 }) | (if kc & 0x20 != 0 { 8 } else { 0 });
+            input::mouse(gpi::Point::new(m.x, m.y), *buttons, shift, t);
+        }
+        _ => {
+            let f = st().focus;
+            if f != 0 {
+                input::post_input(f, m.msg, m.mp1, m.mp2, t);
+            }
+        }
+    }
+    input::PLAYBACK.store(false, Ordering::Relaxed);
 }
 
 // ---- Not responding ----
@@ -417,7 +548,7 @@ pub fn process_gone(p: u32) {
             *slot = None;
         }
     }
-    s.hooks.retain(|h| h.pid != p);
+    crate::hooks::process_gone(p);
     for slot in s.atoms.iter_mut().skip(1) {
         if slot.as_ref().is_some_and(|t| t.pid == p) {
             *slot = None;
@@ -459,6 +590,10 @@ extern "C" fn desktop_proc(h: u32, m: u32, mp1: u32, _mp2: u32) -> u32 {
         }
         WM_RS2_WINLIST => {
             open_window_list();
+            0
+        }
+        WM_RS2_JOURNAL => {
+            start_journal();
             0
         }
         _ => {

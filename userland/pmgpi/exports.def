@@ -102,6 +102,8 @@ GpiQueryPattern @473
 GpiQueryPatternRefPoint @474
 GpiQueryPatternSet @475
 GpiQueryPel @476
+GpiQueryPickAperturePosition @477
+GpiQueryPickApertureSize @478
 GpiQueryRGBColor @479
 GpiQueryRealColors @480
 GpiQueryRegionBox @481
@@ -158,6 +160,7 @@ GpiSetPattern @541
 GpiSetPatternRefPoint @542
 GpiSetPatternSet @543
 GpiSetPel @544
+GpiSetPickAperturePosition @545
 GpiSetRegion @546
 GpiSetSegmentAttrs @547
 GpiSetSegmentTransformMatrix @549
@@ -189,6 +192,7 @@ GpiQueryCharStringPosAt @585
 GpiQueryFonts @586
 GpiQueryRegionRects @587
 GpiSetAttrs @588
+GpiSetPickApertureSize @589
 GpiQueryDefAttrs @590
 GpiSetDefAttrs @591
 GpiCreateLogColorTable @592

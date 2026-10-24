@@ -1,0 +1,13 @@
+[package]
+name = "pmxhook"
+description = "A DLL of system hooks for PMXTEST (input, send message, journal record and playback)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmxhook"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

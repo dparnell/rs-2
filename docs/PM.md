@@ -28,13 +28,15 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `crates/gpi` | Rendering engine (and `icon.rs`: the OS/2 pointer and icon formats, choosing an image for the display, AND/XOR masks, drawing): presentation-space attributes, lines, boxes, arcs, areas, text with bitmap and outline fonts (TrueType and Type 1, anti-aliased), bitmaps and raster operations, clipping to rectangle lists. Draws into a `Surface` (32-bit pixels). No OS dependencies; unit-tested on the host. |
 | `crates/pmwin` | Window system core: window tree, z-order, visible and update regions, hit testing, the queues of threads to wake after invalidation; message queues with mouse-move coalescing and the not-responding bookkeeping; the MLE's text engine (`mle.rs`: layout with word wrap and tabs, editing, undo, import/export formats, search) and the arithmetic of spin buttons, sliders and value sets (`controls.rs`); the notebook's pages and geometry (`notebook.rs`); the container's layout for each view, hit testing, keyboard navigation, icon arrangement and selection rules (`container.rs`); where minimized frames go (`minimize.rs`); rs2's own system pointers and icons (`sysptr.rs`). Plain data structures, unit-tested on the host. |
 | `userland/pmwin` → PMWIN.DLL | Exports (`Win*`, `Gpi*`), the shared state and its heap, locking, messaging, the built-in window classes, and the PM server's code (input routing, hung programs, window list). |
-| `crates/viocell` | Text cells on pixels: renders VGA text cells (font, palette, blink, cursor, marked block) to 24-bit bitmaps; Copy/Copy All text and Paste keystrokes. Host-tested; for VIO windows now, AVIO later. |
+| `crates/viocell` | Text cells on pixels: renders VGA text cells (font, palette, blink, cursor, marked block) to 24-bit bitmaps; Copy/Copy All text and Paste keystrokes. Host-tested; for VIO windows and AVIO. |
 | `userland/pmviowin` → `C:\OS2\PMVIOWIN.EXE` | The windows of windowed VIO sessions (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)). |
 | `userland/pmsrv` → `C:\OS2\PMSRV.EXE` | The PM server process: only calls PMWIN's `Rs2PmServer` (private ordinal 9000; 9001, `Rs2ShellPosition`, gives PMSHAPI's `WinQueryTaskSizePos` the shell's next cascade position; 9002, `Rs2PmVioWindow`, registers a VIO window's client). |
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
 | `userland/pmctls` → PMCTLS.DLL | The standard file and font dialogs (`WinFileDlg`, `WinFontDlg`): ordinary PM dialogs, built from templates made in memory, run through PMWIN like an application's. |
 | `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006); `WinStoreWindowPos`/`WinRestoreWindowPos`; `WinCreateObject` for program objects. |
 | `userland/pmspl` → PMSPL.DLL | The spooler API (`Spl*`) of a system without printers (see [Status](#status)). |
+| `userland/registry` → REGISTRY.DLL, `userland/pmwinx` → PMWINX.DLL | The registry (Win32 registry calls) and Open32's forwarders to it (see [Open32 and the registry](#open32-and-the-registry-pmwinx-registry)). |
+| `userland/pmbidi` → PMBIDI.DLL, `userland/thailib` → THAILIB.DLL | Bidirectional language support of a system without bidirectional code pages (see [Bidirectional languages](#bidirectional-languages-pmbidi)). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
 | `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
 | `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), PMDRAG (direct manipulation: see [Drag and drop](#drag-and-drop-pmdrag)), PMMERGE (IBM PMMERGE's ordinals, see below), LIBUNI and UCONV (locales and code page conversion, see [Locales](#locales-libuni-and-uconv)). The help manager is HELPMGR.DLL (see [The help manager](#the-help-manager-helpmgrdll-and-viewexe)). |
@@ -86,7 +88,8 @@ rs2's own DLLs (applications never import it):
 
 RS2API ordinals: 1-7 and 20-26 PM (above), 10-16 windowed VIO sessions
 (see [Windowed VIO sessions](#windowed-vio-sessions-os2-window)), 100
-performance counters, 200-221 sockets (docs/NETWORK.md).
+performance counters, 200-221 sockets (docs/NETWORK.md), 500-501 AVIO
+(see [AVIO](#avio-vio-presentation-spaces-in-windows)).
 
 Two kernel rules matter for PM: a thread inside a must-complete section
 (DosEnterMustComplete) that is being killed finishes the section first
@@ -358,6 +361,36 @@ when there is none at start and keeps running when the last window
 closes (Ctrl+Esc offers new prompts). The default boot (`PROTSHELL=`
 CMD.EXE) is unchanged.
 
+## AVIO: VIO presentation spaces in windows
+
+A PM program can draw text cells in a window with the VIO calls (IBM's
+"advanced VIO"): `VioCreatePS` makes a presentation space of cells
+(rows, columns, two or four bytes a cell), `VioAssociate` ties it to a
+window's device context (`WinOpenWindowDC`), and the ordinary VIO calls
+with the PS's handle as their last argument (`VioWrtCharStr`,
+`VioWrtCellStr`, `VioWrtNCell`/`NChar`/`NAttr`, `VioWrtCharStrAtt`,
+`VioReadCellStr`/`CharStr`, the four `VioScroll*`, `VioWrtTTY`,
+`VioGet`/`SetCurPos`, `VioGet`/`SetCurType`, `VioGetMode`, `VioGetBuf`,
+`VioShowBuf`) work on its cells instead of the session's screen.
+`VioShowPS`, `VioSetOrg`/`VioGetOrg` (the cell at the window's top left),
+`VioGet`/`SetDeviceCellSize` (8 by 8, 14 or 16, rs2's VIO fonts),
+`VioCreateLogFont`/`VioDeleteSetId`/`VioQuerySetIds` (kept; cells are
+drawn in the VIO font), `VioQueryFonts` (none) and `VioDestroyPS` complete
+the set (VIOCALLS 55-66).
+
+The kernel keeps the presentation spaces (`kernel/src/api/avio.rs`): the
+cells live in the program's memory (what `VioGetBuf` returns), and each
+call records the cells it changed. PMWIN draws them
+(`userland/pmwin/src/avio.rs`): as the program goes back to its message
+loop and as it ends a paint, it asks the kernel for presentation spaces
+of the process with changes (`Rs2AvioQuery`, RS2API 500; the font comes
+from `Rs2AvioFont`, 501) and renders the changed cells with crate
+`viocell` into the window (attribute bit 7 brightens the background; the
+cursor shows while the window has the focus). A program repaints on
+`WM_PAINT` with `VioShowPS`, as on OS/2. `WinDefAVioWindowProc`
+(PMVIOP.DLL) is not there: no program on the CD uses AVIO. PMXTEST checks
+the calls and what the window shows.
+
 ## Programs that stop responding
 
 A queue is *not responding* when something (a posted or sent message, or
@@ -497,9 +530,9 @@ common thunk; rs2's are:
   procedure from WinSubclassWindow, QWP_PFNWP, CLASSINFO) one of 128
   16-bit stubs that calls it. Each turns back into the original when it
   goes the other way, so subclassing and unsubclassing round-trip. `msg::call`
-  runs the 32-bit stubs as application code (without the PM lock). Help
-  hooks (HK_HELP) are called the same way; other hook kinds are recorded,
-  as for 32-bit programs.
+  runs the 32-bit stubs as application code (without the PM lock). Hooks
+  are called the same way (see [Hooks](#hooks)); their structures are
+  passed as they are, except the help hook's.
 - **Messages.** As IBM's PMMERGE (a table by message number), the 32-bit
   form is the canonical one: messages from 16-bit code (WinSendMsg,
   WinPostMsg, WinDefWindowProc, WinDispatchMsg ...) are converted when
@@ -566,12 +599,7 @@ mouse and keyboard. What PMWIN has:
   `SV_CURSORRATE` through `WM_TIMER` `TID_CURSOR` (0xFFFF), which
   `WinDefWindowProc` handles; `WinBeginPaint` hides it while its window
   paints and `WinEndPaint` shows it again; it goes with its window.
-- DDE: `WinDdeInitiate` sends `WM_DDE_INITIATE` to every top-level
-  window with a DDEINIT of its own, `WinDdeRespond` sends
-  `WM_DDE_INITIATEACK`, `WinDdePostMsg` posts a DDESTRUCT; the blocks are
-  giveable shared memory given to the receiving process
-  (`DosGiveSharedMem`), the sender's access dropped unless
-  `DDEPM_NOFREE`.
+- DDE: see [Dynamic data exchange](#dynamic-data-exchange-dde).
 - `WinStoreWindowPos`/`WinRestoreWindowPos` (PMWP.DLL) keep a window's
   position, size, minimized/maximized state, restore and minimize
   positions and sizing border in OS2.INI in the Workplace Shell's record
@@ -652,12 +680,10 @@ mouse and keyboard. What PMWIN has:
   dialogs](#standard-dialogs)), the clipboard and atom tables (see [The
   clipboard](#the-clipboard)), `WinTrackRect` (rectangle tracking with
   the mouse or the keyboard), rectangle helpers (`WinSetRect`,
-  `WinIntersectRect`, ...), `WinUpper` and the code page calls,
-  `WinSetHook`/`WinReleaseHook` (hooks are recorded, not called).
-
-Not done for milestone 2: presentation
-parameters (accepted and ignored), owner-drawn items, menu bitmaps,
-help windows, drag and drop.
+  `WinIntersectRect`, ...), `WinUpper` and the code page calls (per
+  queue: `WinSetCp`), hooks (see [Hooks](#hooks)), owner drawing (see
+  [Owner drawing](#owner-drawing)), `WinFlashWindow`,
+  `WinGetMaxPosition`/`WinGetMinPosition`, `WinQueryObjectWindow`.
 
 The OS/2 System Editor (E.EXE) runs unmodified: see
 [COMPATIBILITY.md](COMPATIBILITY.md#presentation-manager-programs).
@@ -1028,13 +1054,8 @@ shell](#the-desktop-shell-rs2shell)); `WinSetWindowPos` with
 `SWP_ZORDER` and `HWND_BOTTOM` sends a window below its siblings;
 `WinWindowFromPoint` (the topmost showing child, or with fChildren the
 deepest descendant, under a point) and `WinQueryWindowProcess`;
-`WinSetPresParam`/`WinQueryPresParam`/`WinRemovePresParam` keep
-`PP_FOREGROUNDCOLOR` and `PP_BACKGROUNDCOLOR` (RGB) per window, which
-the container paints with, and `PP_FONTNAMESIZE` ("10.Helv",
-"12.Times New Roman.Bold"; inherited from the parents unless
-QPF_NOINHERIT): the window and its children paint and measure their
-text in it (`draw::font_of`), and get `WM_PRESPARAMCHANGED`. Other
-presentation parameters are still accepted and ignored.
+presentation parameters (see [Presentation
+parameters](#presentation-parameters)).
 
 **System values and colours.** `WinSetSysValue` sets the values a user
 changes: SV_SWAPBUTTON (the right button becomes button 1), SV_DBLCLKTIME
@@ -1048,6 +1069,180 @@ notebooks, containers and the rest) draw with the system colours
 HILITEBACKGROUND, HILITEFOREGROUND). Both live in the shared PM state;
 the Workplace Shell's Mouse, Keyboard, Sound and Scheme Palette objects
 set them and keep them in OS2.INI (docs/WPS.md).
+
+## Presentation parameters
+
+Presentation parameters are kept as IBM's PMWIN keeps them
+(`userland/pmwin/src/pp.rs`; PMMERGE's `GetpPresParam`,
+`QueryPresParam`, `XSetPresParam`, `XNotifyPresParamChanged`): each window
+has a list of parameters of any id (the `PP_*` colours and fonts,
+`PP_USER` and up for applications), from `WinSetPresParam`,
+`WinCreateWindow`'s PRESPARAMS and the PRESPARAMS of dialog template
+items. A window without a parameter takes its owner's, up the owner chain
+(`QPF_NOINHERIT` asks the window alone); `WinQueryPresParam` returns the
+first of its two ids found, with `QPF_ID1COLORINDEX`/`QPF_ID2COLORINDEX`
+turning a colour index into RGB. An RGB colour and its index form
+(`PP_FOREGROUNDCOLOR`/`PP_FOREGROUNDCOLORINDEX` ...) replace each other.
+Setting or removing a parameter sends `WM_PRESPARAMCHANGED` to the window
+and to the windows that take it from there (owned windows without their
+own) and repaints them. `PP_FONTNAMESIZE` ("10.Helv", "12.Times New
+Roman.Bold") is the font the window and those below it paint and measure
+their text in (`draw::font_of`).
+
+The built-in controls draw in the colours IBM's controls ask for (their
+`*QueryPresParams` functions, `CtlQueryColor`): an RGB parameter, its
+index form, or the system colour.
+
+| Control | Parameters |
+|---------|------------|
+| Static texts, group boxes, rectangles | `PP_FOREGROUNDCOLOR`, `PP_BACKGROUNDCOLOR`, `PP_DISABLEDFOREGROUNDCOLOR` |
+| Buttons | `PP_FOREGROUNDCOLOR`, `PP_BACKGROUNDCOLOR`, `PP_DISABLEDFOREGROUNDCOLOR`, `PP_DISABLEDBACKGROUNDCOLOR`, `PP_BORDERLIGHTCOLOR`, `PP_BORDERDARKCOLOR`, `PP_BORDERDEFAULTCOLOR` |
+| Entry fields, list boxes, combination boxes, spin buttons | `PP_FOREGROUNDCOLOR`, `PP_BACKGROUNDCOLOR`, the disabled pair, `PP_HILITEFOREGROUNDCOLOR`, `PP_HILITEBACKGROUNDCOLOR` (the selection) |
+| MLEs | `PP_FOREGROUNDCOLOR`, `PP_BACKGROUNDCOLOR` (unless `MLM_SETTEXTCOLOR`/`MLM_SETBACKCOLOR` set others), `PP_DISABLEDFOREGROUNDCOLOR` |
+| Menus | `PP_MENUFOREGROUNDCOLOR`, `PP_MENUBACKGROUNDCOLOR`, `PP_MENUHILITEFGNDCOLOR`, `PP_MENUHILITEBGNDCOLOR`, `PP_MENUDISABLEDFGNDCOLOR` |
+| Title bars (a frame's) | `PP_ACTIVECOLOR`, `PP_ACTIVETEXTFGNDCOLOR`, `PP_INACTIVECOLOR`, `PP_INACTIVETEXTFGNDCOLOR` |
+| Notebooks | `PP_BACKGROUNDCOLOR`, `PP_PAGEBACKGROUNDCOLOR`, `PP_MAJORTAB*`, `PP_MINORTAB*` (`BKM_SETNOTEBOOKCOLORS` first) |
+| Containers | `PP_FOREGROUNDCOLOR`, `PP_BACKGROUNDCOLOR` |
+| Value sets, sliders | `PP_BACKGROUNDCOLOR` |
+
+Not done: the frame border's colours, scroll bars, the container's other
+colours, the BIDI parameters (`PP_BIDI_*`), `PP_FONTHANDLE`.
+
+## Bidirectional languages (PMBIDI)
+
+OS/2's Arabic and Hebrew support is PMBIDI.DLL (calls for the
+bidirectional attributes of processes, windows and presentation spaces,
+the keyboard's national layer, and X/Open's layout objects, done by
+BDCALL32 in the bidirectional editions) and PMMERGE's language calls
+(`WinSetLangInfo`, `WinQueryLangInfo`, `WinSetKbdLayer`,
+`WinQueryKbdLayer`, `WinSetLangViewer`, `WinQueryLangViewer`, ordinals
+3500-3505; PMBIDI's Win32 entries forward there). rs2's code pages are not
+bidirectional (`WinQueryCpType` says so), so rs2's PMBIDI
+(`userland/pmbidi`) transforms text into the same text, as IBM's does for
+text without bidirectional characters (`layout_object_transform` and
+`layout_object_editshape` copy, with identity index maps and level 0;
+`setvalues`/`getvalues` keep the values), and the attribute calls keep
+what they are given: per window (`LI_BD_WND_ATTR`, `LI_BD_CLIP_ATTR`; the
+window is asked first with IBM's messages 0xBD0-0xBD3), per process, per
+presentation space (`Gpi32SetBidiAttr`, which the WarpCenter calls). The
+keyboard has no national layer; `WinSetKbdLayer` keeps the layer and
+tells the language viewer. THAILIB.DLL (`userland/thailib`) has the two
+Thai keyboard layer calls BDVIEWER uses. PMXTEST checks them; TEXTCON1
+runs on them.
+
+## Hooks
+
+`WinSetHook`/`WinReleaseHook` and the calls of the hooks follow IBM's
+PMWIN (studied in PMMERGE: `WSetHook`, `GetHookToCall` and the
+`Call*Hook` functions; `userland/pmwin/src/hooks.rs`). Each kind has one
+chain: the hooks of message queues (newest first), then the system hooks
+(hmq NULLHANDLE, newest first), which need the module that holds the hook
+procedure. A hook is called on the thread whose work it hooks, so a
+system hook runs in every PM process: its module is loaded into a process
+the first time one of its hooks is called there (DLL code has the same
+address everywhere). The chain is read again after each hook (a hook may
+set or release hooks). Hooks run without the PM lock; the PM server calls
+none but the journal playback hook. Where they are called:
+
+| Hook | Called |
+|------|--------|
+| `HK_SENDMSG` | in the sender, before a sent message goes anywhere (SMHSTRUCT, `fInterTask`); it may change the message |
+| `HK_INPUT` | for every message `WinGetMsg`/`WinPeekMsg` retrieves (posted, input, timer, paint), with `PM_REMOVE` or `PM_NOREMOVE`; TRUE takes the message |
+| `HK_MSGFILTER` | `WinCallMsgFilter`, and the modal loops: `WinProcessDlg` (`MSGF_DIALOGBOX`), `WinMessageBox` (`MSGF_MESSAGEBOX`), `WinTrackRect` (`MSGF_TRACK`); TRUE: the message is not dispatched |
+| `HK_JOURNALRECORD` | as a keyboard or mouse message (the system queue's: mouse moves, buttons, `WM_CHAR`) is taken off a queue; played-back input is not recorded |
+| `HK_JOURNALPLAYBACK` | by the PM server on a thread of its own (IBM's `GetAndProcessJrnMsg`): the hook gives the next message and how long to wait, the message is processed as hardware input (keys to the focus, mouse messages at their position), then the hook skips to the next; hardware input waits meanwhile |
+| `HK_HELP` | `WM_HELP` at a frame, F1 in a menu, PMWIN 288 (see [The help manager](#the-help-manager-helpmgrdll-and-viewexe)) |
+| `HK_LOADER` | `WinLoadLibrary`, `WinDeleteLibrary`, `WinLoadProcedure`, `WinDeleteProcedure` (`LHK_*`); TRUE: the hook's result |
+| `HK_REGISTERUSERMSG` | `WinRegisterUserMsg`, `WinRegisterUserDatatype` |
+| `HK_FINDWORD` | `WinDrawText` with `DT_WORDBREAK`: where the word that does not fit begins (IBM's `CchLineBreak`) |
+| `HK_CODEPAGECHANGED` | `WinSetCp` changing a queue's code page |
+| `HK_WINDOWDC` | `WinGetPS` and `WinReleasePS` |
+| `HK_DESTROYWINDOW` | each window `WinDestroyWindow` destroys, before its `WM_DESTROY` |
+| `HK_CHECKMSGFILTER` | which queued messages a filter takes (in place of the message range) |
+| `HK_MSGINPUT` | before the queue: a source of input messages (pen) |
+
+`HK_MSGCONTROL`, the program list hooks, `HK_LOCKUP` and `HK_FLUSHBUF`
+are recorded only (IBM's PMWIN does not call the first; rs2 has no
+lockup or program list hooks to call). `RS2\PMXTEST.EXE` checks them all,
+the system hooks with `PMXHOOK.DLL` in a second process and in the PM
+server.
+
+## Dynamic data exchange (DDE)
+
+`WinDdeInitiate` sends `WM_DDE_INITIATE` to every top-level frame but
+the client's (IBM's `BuildPwndList` with only frames), each with a
+DDEINIT of its own; frames pass it, and the other DDE messages, to their
+client (IBM's frame procedure passes messages 0x7B-0xBA but
+`WM_QUERYCONVERTPOS`). `WinDdeRespond` sends `WM_DDE_INITIATEACK`,
+`WinDdePostMsg` posts a DDESTRUCT. The DDEINIT and DDESTRUCT blocks are
+giveable shared memory given to the receiving process
+(`DosGiveSharedMem`); the sender's access is dropped unless
+`DDEPM_NOFREE`, and the receiver frees the block or sends it on.
+rs2's queues do not fill up, so `DDEPM_RETRY` never waits. PMXTEST holds
+a conversation with a server in another process (`PMXTEST DDESERVER`):
+initiate, request, poke, execute, terminate. PMDDEML (the DDE management
+library) is not there: no program on the OS/2 CD uses it but IBM's
+PMWINX, which rs2 replaces.
+
+## Owner drawing
+
+The controls ask their owner to draw as IBM's do (PMMERGE's
+`LboxDrawItems`, `MenuDrawMiOwner`, `ButtonPaint`; PMCTLS's
+`VSSendOwnerdraw`, `DrawSliderArm`, `DrawTab`): `WM_DRAWITEM` (mp1 the
+control's id, mp2 an OWNERITEM: hwnd, hps, fsState, fsAttribute,
+fsStateOld, fsAttributeOld, rclItem, idItem, hItem) on a presentation
+space clipped to the item and in RGB mode; what the owner does not draw
+(it returns FALSE) is drawn as usual.
+
+- List boxes (`LS_OWNERDRAW`): `WM_MEASUREITEM` when the list box is
+  made gives the items' height; each item on view is the owner's
+  (fsState and fsStateOld the selection, idItem the index, hItem the item
+  handle); an item the owner draws but leaves either state set in is
+  inverted.
+- Menus (`MIS_OWNERDRAW`): `WM_MEASUREITEM` (mp2 an OWNERITEM; the owner
+  sets rclItem's xRight and yTop to the item's size) before the menu is
+  laid out, `WM_DRAWITEM` with the item's style as fsState and its
+  attributes (`MIA_HILITED` while highlighted) as fsAttribute; an item
+  left `MIA_HILITED` is inverted. The notifications go up the chain of
+  menus to the first owner that is not a menu.
+- Buttons (`BS_USERBUTTON`): `WM_CONTROL` (id, `BN_PAINT`) with a
+  USERBUTTON (hwnd, hps, fsState, fsStateOld: `BDS_HILITED`,
+  `BDS_DISABLED`, `BDS_DEFAULT`); the button draws nothing itself.
+- Value sets: `VS_OWNERDRAW` gives the owner the background
+  (`VDA_BACKGROUND`), `VIA_OWNERDRAW` items their cell (`VDA_ITEM`,
+  hItem the row and column).
+- Sliders (`SLS_OWNERDRAW`): the background, the shaft, the ribbon strip
+  and the arm (`SDA_*`); the arm's rclItem is in the slider's
+  coordinates (IBM draws the arm into a bitmap of its own).
+- Notebooks: a tab with neither text nor a bitmap (idItem `BKA_TAB`,
+  hItem the page ID, fsAttribute `BKA_MAJOR` or `BKA_MINOR`).
+- Containers (`CA_OWNERDRAW`): the records' text (see [Standard
+  controls](#standard-controls)).
+
+## Open32 and the registry (PMWINX, REGISTRY)
+
+IBM's Open32 (PMWINX.DLL, the Win32 API on OS/2) is installed with the
+Feature Installer (the CD's `FI\DAX`); programs on the CD use only its
+registry calls, which IBM's PMWINX forwards to REGISTRY.DLL (ordinals
+541-555). rs2's PMWINX holds just those forwarders, and rs2's
+REGISTRY.DLL has the Win32 registry calls (the A forms) at IBM's
+ordinals. IBM's REGISTRY keeps its keys in `\OS2\SYSTEM\SYSTEM.DAT` and
+`USER.DAT`, binary files mapped into shared memory with a server
+process; rs2 keeps them in two profiles (OS/2 INI files through PMSHAPI,
+shared by all processes and written through): `\OS2\SYSTEM\REGSYS.INI`
+for `HKEY_LOCAL_MACHINE` (and `HKEY_DYN_DATA`) and `REGUSER.INI` for
+`HKEY_USERS`. A key is a profile application named by its path ("HKLM\
+SOFTWARE\IBM", upper case: names are case-insensitive) with a key `K`
+holding the name as given; a value is a key `V` + its name in upper case
+holding the type, the name as given and the data. The predefined keys are
+Open32's handles (`HKEY_LOCAL_MACHINE` 0xFFFFFFEF ... `HKEY_CLASSES_ROOT`
+0xFFFFFFEC; the Win32 values are taken too) and map as in IBM's
+REGISTRY: `HKEY_CLASSES_ROOT` is `HKEY_LOCAL_MACHINE\SOFTWARE\Classes`,
+`HKEY_CURRENT_USER` is `HKEY_USERS\.default`, `HKEY_CURRENT_CONFIG` is
+`HKEY_LOCAL_MACHINE\CONFIG\0001`. Keys are deleted with their subkeys.
+Not there: the W calls, IBM's keys that map values to INI files
+(`OS2_INI_FILE_NAME`), security and notification. PMXTEST checks the calls
+through PMWINX; the Registry Editor (REGEDIT2.EXE) runs on them.
 
 ## The clipboard
 
@@ -1552,11 +1747,46 @@ symbols):
   gets `DM_DROP` (sent), with `usOperation` set to the operation it
   named if the user chose none, and `DrgDrag` returns it; else 0.
   `WM_QUIT` during a drag ends it and is posted again.
-- The pointer shows the first drag image's icon (`DRG_ICON`) over
-  windows that take the drop, `SPTR_ILLEGAL` elsewhere;
-  `DrgSetDragPointer` replaces it while the pointer is over the same
-  window, `DrgSetDragImage` changes the icon. (IBM's draws the images,
-  bitmaps and polygons too, on the screen beside the pointer.)
+- The drag images go with the pointer: icons (`DRG_ICON`, the mini
+  icon with `DRG_MINIBITMAP`), bitmaps (`DRG_BITMAP`, `DRG_TRANSPARENT`:
+  the bottom-left pel's colour is not drawn), polygons (`DRG_POLYGON`,
+  `DRG_CLOSED`), stretched to `sizlStretch` (`DRG_STRETCH`), at their
+  offsets, halftoned for `DO_COPY` (as IBM's `vfDrawHalftone`). IBM
+  draws them on the screen next to the pointer; rs2's PMWIN makes them
+  and the pointer one pointer (`Rs2DragPointer`, PMWIN 9009, at most 64
+  pixels square, a hardware cursor's size) and holds it while the drag
+  runs (`Rs2HoldPointer`, 9017: what windows set meanwhile is not
+  shown). The pointer in it is the arrow over windows that take the drop
+  and `SPTR_ILLEGAL` elsewhere; `DrgSetDragPointer` replaces it while
+  the pointer is over the same window, `DrgSetDragImage` changes the
+  images.
+- Lazy drag (pick up and drop), as IBM's DRGLAZY: `DrgLazyDrag` returns
+  at once and sets a system input hook that passes the drag button
+  (`SV_BEGINDRAG`) going down and up, and, while it is down, mouse
+  moves and Ctrl/Shift, to an object window in the source's process.
+  Held down with Ctrl (`DO_COPY`), Shift (`DO_MOVE`) or both (`DO_LINK`)
+  the drag button drops: `DM_DRAGOVER` as the pointer moves, `DM_DROP`
+  when it goes up over a window that answered `DOR_DROP`. Without those
+  keys the click is the window's (a target's pop-up menu offers Drop
+  and calls `DrgLazyDrop`); `DrgCancelLazyDrag` puts the objects down.
+  The source gets `DM_DROPNOTIFY` (mp2 the target or 0) at the end.
+  `DrgQueryDragStatus` gives `DGS_LAZYDRAGINPROGRESS` and
+  `DrgQueryDraginfoPtr` the DRAGINFO in every process (the state is in
+  named shared memory); `DrgDrag` fails meanwhile.
+- `DrgDragFiles` and `DrgAcceptDroppedFiles` as IBM's DRGFILES: the
+  source's files are `<DRM_OS2FILE,DRF_UNKNOWN>` items of an object
+  window (the type given, or the file's `.TYPE` EA, or `Unknown`) that
+  answers `DM_RENDERPREPARE`/`DM_RENDER` with a thread that copies or
+  moves the file (`DM_DRAGERROR` to the owner on failure: abort, skip,
+  replace, retry or a new name) or, with `fSourceRender`, lets the owner
+  do it (`DM_RENDERFILE`, then `DM_FILERENDERED`), and tells the owner
+  `DM_DRAGFILECOMPLETE` (`DF_SOURCE`) as each conversation ends. A
+  window `DrgAcceptDroppedFiles` subclasses takes `DO_COPY` and
+  `DO_MOVE` (the default its own) of files of its types into its
+  directory (the current one by default), asks for `DM_EMPHASIZETARGET`,
+  renders the items one after another and gets `DM_DRAGFILECOMPLETE`
+  for each file done. (IBM's PMCTLS sends the target's to the item's
+  window; rs2 to the target, as documented.)
 - RMF strings and types (`crates/pmwin/src/drag.rs`, host-tested):
   `<mechanism,format>` pairs and `(m1,m2)x(f1,f2)` cross products,
   blanks ignored, the first pair native; type lists with the first the
@@ -1570,9 +1800,9 @@ symbols):
 The System Editor takes a file dropped on its window (see below); the
 desktop shell drags and takes drops as described above.
 
-**Not done** (PMDRAG): lazy drag (`DrgLazyDrag`, `DrgLazyDrop`,
-`DrgCancelLazyDrag` fail), `DrgDragFiles` and `DrgAcceptDroppedFiles`
-(they fail), drag images drawn beside the pointer.
+**Not done** (PMDRAG): the line IBM draws from the start for a link
+(`DO_LINK`) during a lazy drag; drag images larger than 64 pixels are
+cut.
 
 **Not done** (shell): templates, object settings other than program
 objects' (and a file's properties), the lock-up, a real Workplace
@@ -1797,9 +2027,10 @@ described in [formats/ipf-structures.md](formats/ipf-structures.md),
   is done, so a request from an application's menu leaves it active.
 
 **The help window** is a frame on the right of the screen titled with the
-help window title and the panel's: the panel (laid out by `crates/ipf`
-for the window's width and laid out again when it changes), a vertical
-scroll bar, and Previous, Search..., Index and Contents push buttons.
+help window title and the panel's: IBM's menu bar, the panel (laid out
+by `crates/ipf` for the window's width and laid out again when it
+changes), a vertical scroll bar, and Previous, Search..., Index and
+Contents push buttons.
 Panels draw in the fonts of the file's font table (below), styles as
 logical fonts' fsSelection (real italic, bold, underscore), colours of
 `:hp4.`/`:color.` and links in SYSCLR_HELPHILITE;
@@ -1817,6 +2048,30 @@ level), Index (level-2 entries indented as IBM's) and Search (the panels
 having every word typed, from the file's search table) are lists in the
 same window; Enter or a double click opens the panel. `:hide.` text shows
 when IPF_KEYS has its key.
+
+**The menu bar** is IBM's (HPMGRMRI.DLL's menu 101 for help windows, 102
+for books, with their keys; `userland/helpmgr/src/services.rs`):
+Services has Search, Print (disabled: no printers), Bookmark (books),
+New window (the panel in a window of its own), Copy (the panel's text
+to the clipboard, words placed by columns as IBM's LoadMarkedText),
+Copy to file and Append to file (`text.tmp` in the current directory,
+IBM's WriteToFile) and Exit (books, F3); Options expands and collapses
+the contents (entries with entries under them show `+` or `-`), and
+has Contents, Index (books), Viewed pages (the last 50 panels, the last
+first, as IBM's AddToHistory), Libraries and Previous; Help has Help
+index, General help (HM_EXT_HELP), Using help, Keys help (HM_KEYS_HELP)
+and, for books, Product information. **Libraries** lists the
+directories of HELP (help) or BOOKSHELF (books) as IBM's
+BuildLibraryListItem; the ones marked (multiple selection) are searched
+too: Search opens their `.HLP` (books: `.INF`) files and lists the
+panels there with the rest. **Bookmarks** (books, Ctrl+B) are IBM's
+Bookmark dialog (dialog 20001: Place with a name, the panel's title to
+start with; View, Remove, Remove all with a confirmation); they are
+kept beside the book in `NAME.cp` (in the first directory of BOOKMARK
+when it is set), in IBM's format (IOSaveCPBookMark: a 14-byte header with
+the list's offset and count, then each mark's TOC index, the length and
+the name), read when the book is opened and the file deleted when the
+last mark goes.
 
 **Fonts.** A `:font.` selects an entry of the file's font table (face,
 point height and width); dynamic data adds its own (`DdfSetFont`,
@@ -1905,8 +2160,9 @@ their own when less than 64 KB of the caller's is left (VIEWDOC's
 stack is 8 KB). HELPMGR's other unpublished ordinals (38-44: MscCleanUp
 and path helpers) are not there; nothing on the media imports them.
 
-Not done: the Print button, the help window's menu (Services,
-Options), bookmarks and the library list, metafiles of dynamic data,
+Not done: printing, the Search dialog's scopes (rs2 searches every
+section of the open libraries and of the marked ones), metafiles of
+dynamic data,
 the viewport style word (title bar, scroll bars, rules: viewports always
 have a title bar and a vertical scroll bar), HMQW_INDEX/TOC/SEARCH/
 VIEWPAGES/LIBRARY, and the panel placement of HM_DISPLAY_HELP and
@@ -2012,6 +2268,20 @@ The export trampolines pass their index to the lock's entry
   `WinRestoreWindowPos`, DDE, a new clipboard viewer's
   `WM_DRAWCLIPBOARD`, `WinQueryQueueInfo`, PMSPL), printing PASS/FAIL
   and `ctltest done: N failure(s)`.
+- `RS2\PMXTEST.EXE` (userland/pmxtest, with `RS2\PMXHOOK.DLL` from
+  userland/pmxhook): self-checks of hooks of every kind PMWIN calls (queue
+  hooks, and system hooks in PMXHOOK.DLL called in a second process,
+  `PMXTEST CHILD`, and journal playback in the PM server; `PMXTEST
+  RECORD` with keys from `--type` checks journal recording), a DDE
+  conversation with a server in another process (`PMXTEST DDESERVER`),
+  the registry through PMWINX, owner drawing (list box, menu, user
+  button, value set, slider, notebook tab), presentation parameters,
+  PMBIDI, AVIO (a VIO presentation space in a window), lazy drag (the
+  input hook, `DrgLazyDrop`, cancelling, the held drag pointer) and
+  `DrgDragFiles` onto a `DrgAcceptDroppedFiles` window, printing PASS/FAIL and
+  `pmxtest done: N failure(s)`. `PMXTEST WINS [PROGRAM]` (starting
+  PROGRAM first) lists the window tree on the serial port (class, id,
+  text, position, style), to see what another program made.
 - `RS2\SHELLTST.EXE` (userland/shelltest): self-checks of what a desktop
   shell needs: system pointers, pointer info and bitmaps, creating,
   copying and destroying pointers, the pointer's shape, file icons

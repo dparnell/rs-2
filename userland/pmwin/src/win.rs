@@ -154,6 +154,7 @@ pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, own
     if let Some(w) = s.desk.get_mut(h) {
         w.text = text.to_vec();
     }
+    crate::pp::take_pending(h);
     // A frame's client is its child FID_CLIENT, however it was made
     // (EPM creates its frames' clients with WinCreateWindow).
     if id == frame::FID_CLIENT {
@@ -191,6 +192,7 @@ pub fn destroy(h: u32) {
     let mut all = Vec::new();
     collect(h, &mut all);
     for &w in &all {
+        crate::hooks::destroy_window(w);
         // Windows of other threads are told, not waited for.
         notify(w, WM_DESTROY, 0, 0);
     }
@@ -219,8 +221,7 @@ pub fn remove(h: u32) {
         s.frames.remove(g);
         s.switch.window_gone(*g);
         s.ctl.remove(g);
-        s.pres.remove(g);
-        s.pres_font.remove(g);
+        crate::pp::forget(*g);
         s.timers.retain(|t| t.hwnd != *g);
         if s.focus == *g {
             s.focus = 0;
@@ -295,9 +296,11 @@ pub extern "C" fn WinCreateWindow(
     _behind: u32,
     id: u32,
     ctl: u32,
-    _pres: u32,
+    pres: u32,
 ) -> u32 {
     let class = class_name(class);
+    // The window gets its PRESPARAMS before WM_CREATE.
+    crate::pp::set_pending(pres);
     let pos = Rect::new(x, y, x + cx, y + cy);
     if frame::is_frame_class(&class) {
         // FRAMECDATA: cb, flCreateFlags, hmodResources, idResources.
@@ -467,7 +470,10 @@ pub extern "C" fn WinWindowFromPoint(parent: u32, pptl: *const PointL, children:
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowProcess(h: u32, ppid: *mut u32, ptid: *mut u32) -> u32 {
     let s = st();
-    let Some(q) = s.desk.get(h).and_then(|w| s.queues.get(&w.queue)) else { return 0 };
+    // The object window (and windows no queue owns) belong to PM: the
+    // PM server.
+    let queue = s.desk.get(h).map(|w| if w.queue == 0 { s.server_queue } else { w.queue });
+    let Some(q) = queue.and_then(|q| s.queues.get(&q)) else { return 0 };
     unsafe {
         if !ppid.is_null() {
             ppid.write_unaligned(q.pid);
@@ -1217,6 +1223,7 @@ pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
     let s = st();
     let h = gpiapi::entry(s, hps).map_or(0, |e| e.hwnd);
     gpiapi::end_paint(s, hps);
+    crate::avio::poll();
     crate::cursor::paint(h, true);
     1
 }
@@ -1231,11 +1238,16 @@ pub extern "C" fn WinGetPS(h: u32) -> u32 {
     let o = s.desk.origin(h);
     let hps = gpiapi::create(s, h, o, vis.rects);
     gpiapi::track_window(st(), hps, None);
+    crate::hooks::window_dc(hps, h, true);
     hps
 }
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinReleasePS(hps: u32) -> u32 {
+    if crate::hooks::any(crate::hooks::HK_WINDOWDC) {
+        let h = gpiapi::entry(st(), hps).map_or(0, |e| e.hwnd);
+        crate::hooks::window_dc(hps, h, false);
+    }
     gpiapi::destroy(st(), hps) as u32
 }
 
@@ -1380,6 +1392,20 @@ pub extern "C" fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut Re
         }
         // A word longer than the line is drawn cut off.
         n = if fit == 0 { all[..line_end].iter().position(|&c| c == b' ').unwrap_or(line_end) } else { fit };
+        // A find word hook says where words begin and end (IBM's
+        // CchLineBreak): the line ends before the word that does not fit.
+        if crate::hooks::any(crate::hooks::HK_FINDWORD) {
+            let over = (1..=line_end).find(|&i| width(&all[..i]) > r.width()).map_or(line_end, |i| i - 1);
+            let cp = crate::misc::WinQueryCp(1);
+            if let Some((start, end, _)) = crate::hooks::find_word(cp, &all[..line_end], over as u32) {
+                let (start, end) = (start as usize, end as usize);
+                n = if start > 0 && start <= line_end { start } else { end.clamp(1, line_end) };
+            }
+        }
+    }
+    // (A hook ran without the lock: the PS may be gone.)
+    if gpiapi::entry(st(), hps).is_none() {
+        return 0;
     }
     let shown = &all[..n];
     let (t, mark) = if fl & DT_MNEMONIC != 0 { crate::draw::strip_mnemonic(shown) } else { (shown.to_vec(), None) };

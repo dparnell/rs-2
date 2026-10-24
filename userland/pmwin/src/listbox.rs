@@ -16,6 +16,7 @@ use crate::win::{self, WM_BUTTON1DOWN, WM_CHAR, WM_PAINT, WM_SETFOCUS, WM_SIZE};
 const WM_CREATE: u32 = 0x0001;
 
 const LS_MULTIPLESEL: u32 = 0x0001;
+const LS_OWNERDRAW: u32 = 0x0002;
 const LS_EXTENDEDSEL: u32 = 0x0010;
 
 const LN_SELECT: u32 = 1;
@@ -198,37 +199,95 @@ fn search(h: u32, cmd: u32, start: i32, key: &[u8]) -> u32 {
     LIT_NONE
 }
 
-fn paint(h: u32) {
+/// The items on view: (index, text, selected, cursor, handle, rectangle).
+fn visible(h: u32) -> Vec<(usize, Vec<u8>, bool, bool, u32, Rect)> {
     let a = area(h);
-    let focus = ctl::has_focus(h);
-    let Some(l) = data(h) else { return };
+    let n = rows(h) + 1;
+    let Some(l) = data(h) else { return Vec::new() };
     let ih = l.item_h;
-    let rows: Vec<(Vec<u8>, bool, bool)> = l.items.iter().enumerate().skip(l.top).take(rows(h) + 1).map(|(i, it)| (it.text.clone(), it.selected, i == l.cursor)).collect();
-    draw::paint(h, |c| {
+    l.items
+        .iter()
+        .enumerate()
+        .skip(l.top)
+        .take(n)
+        .enumerate()
+        .map(|(k, (i, it))| {
+            let top = a.top - k as i32 * ih;
+            (i, it.text.clone(), it.selected, i == l.cursor, it.handle, Rect::new(a.left, top - ih, a.right, top).intersect(&a))
+        })
+        .filter(|v| !v.5.is_empty())
+        .collect()
+}
+
+fn draw_text_item(c: &mut draw::Canvas, h: u32, ir: Rect, text: &[u8], sel: bool) {
+    let f = draw::font_of(h);
+    let col = crate::pp::text_colors(h);
+    let fg = if sel {
+        c.fill(ir, col.hilite_bg);
+        col.hilite_fg
+    } else {
+        col.fg
+    };
+    let y = ir.bottom + (ir.height() - f.height) / 2 + f.descender;
+    c.text(ir.left + 3, y, text, fg, ir);
+}
+
+/// Paint the list. With LS_OWNERDRAW each item on view goes to the owner
+/// first (IBM's LboxDrawItems): WM_DRAWITEM with an OWNERITEM (fsState
+/// and fsStateOld both the selection, idItem the index, hItem the item
+/// handle) and a presentation space in RGB mode with the list's colours;
+/// an item the owner does not draw is drawn as text, one it draws is
+/// inverted if it leaves either state set.
+fn paint(h: u32) {
+    let focus = ctl::has_focus(h);
+    let owner = ctl::style(h) & LS_OWNERDRAW != 0;
+    let items = visible(h);
+    let hps = win::WinBeginPaint(h, 0, core::ptr::null_mut());
+    let col = crate::pp::text_colors(h);
+    draw::with(h, hps, |c| {
         let r = c.rect();
-        c.fill(r, draw::window());
+        c.fill(r, col.bg);
         c.sunken(r);
         c.bevel(Rect::new(r.left + 1, r.bottom + 1, r.right - 1, r.top - 1), draw::DARK, draw::face());
-        let f = draw::font_of(h);
-        for (k, (text, sel, cur)) in rows.iter().enumerate() {
-            let top = a.top - k as i32 * ih;
-            let ir = Rect::new(a.left, top - ih, a.right, top).intersect(&a);
-            if ir.is_empty() {
-                break;
-            }
-            let fg = if *sel {
-                c.fill(ir, draw::hilite());
-                draw::hilite_text()
-            } else {
-                draw::text()
-            };
-            let y = top - ih + (ih - f.height) / 2 + f.descender;
-            c.text(ir.left + 3, y, text, fg, ir);
-            if focus && *cur {
-                c.focus_rect(ir);
+        if !owner {
+            for (_, text, sel, cur, _, ir) in &items {
+                draw_text_item(c, h, *ir, text, *sel);
+                if focus && *cur {
+                    c.focus_rect(*ir);
+                }
             }
         }
     });
+    if owner {
+        let clip = area(h);
+        for (i, text, sel, cur, handle, ir) in &items {
+            let mut oi = ctl::OwnerItem {
+                hwnd: h,
+                hps,
+                fs_state: *sel as u32,
+                fs_state_old: *sel as u32,
+                rcl: crate::gpiapi::RectL { left: ir.left, bottom: ir.bottom, right: ir.right, top: ir.top },
+                id_item: *i as i32,
+                h_item: *handle,
+                ..Default::default()
+            };
+            let drawn = ctl::draw_item(h, &mut oi, Some(clip), col.fg, col.bg);
+            draw::with(h, hps, |c| {
+                let saved = core::mem::replace(&mut c.ps.clip, alloc::vec::Vec::new());
+                c.ps.clip = saved.iter().map(|x| x.intersect(&clip.offset(c.ps.origin.x, c.ps.origin.y))).collect();
+                if !drawn {
+                    draw_text_item(c, h, *ir, text, *sel);
+                } else if oi.fs_state != 0 || oi.fs_state_old != 0 {
+                    c.invert(*ir);
+                }
+                if focus && *cur {
+                    c.focus_rect(*ir);
+                }
+                c.ps.clip = saved;
+            });
+        }
+    }
+    win::WinEndPaint(hps);
 }
 
 fn key(h: u32, mp1: u32, mp2: u32) -> bool {
@@ -287,7 +346,15 @@ pub extern "C" fn listbox_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         WM_CREATE => {
             let f = draw::font_of(h);
-            ctl::set_data(h, List { items: Vec::new(), top: 0, cursor: 0, item_h: f.height + 2, scroll: 0 });
+            // LS_OWNERDRAW: the owner says how high the items are
+            // (WM_MEASUREITEM, mp1 the id, mp2 0: the height in the low
+            // word), as IBM's LboxCreate asks.
+            let item_h = if ctl::style(h) & LS_OWNERDRAW != 0 {
+                (send(ctl::owner(h), ctl::WM_MEASUREITEM, ctl::id(h), 0) & 0xffff).max(1) as i32
+            } else {
+                f.height + 2
+            };
+            ctl::set_data(h, List { items: Vec::new(), top: 0, cursor: 0, item_h, scroll: 0 });
             let sb = win::create(h, b"#8", b"", pmwin::ws::VISIBLE | 1, Rect::default(), h, 0, 0);
             if let Some(l) = data(h) {
                 l.scroll = sb;

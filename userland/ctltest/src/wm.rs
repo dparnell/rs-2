@@ -64,7 +64,7 @@ unsafe extern "C" {
 
 const WM_FORMATFRAME: u32 = 0x41;
 const WM_DDE_INITIATE: u32 = 0xa0;
-const WM_DDE_DATA: u32 = 0xa5;
+const WM_DDE_DATA: u32 = 0xa3;
 const WM_DDE_INITIATEACK: u32 = 0xa9;
 const FID_TITLEBAR: u32 = 0x8003;
 const FID_CLIENT: u32 = 0x8008;

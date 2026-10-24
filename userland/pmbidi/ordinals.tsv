@@ -1,0 +1,13 @@
+PMBIDI	1	PMBIDI_Initialize
+PMBIDI	30	Win32SetProcessLangInfo
+PMBIDI	31	Win32QueryProcessLangInfo
+PMBIDI	50	Gpi32SetBidiAttr
+PMBIDI	51	Gpi32QueryBidiAttr
+PMBIDI	101	PMBIDI_Get_StdDlgLang_Setting
+PMBIDI	113	PMBIDI_Get_HelpBidi_Setting
+PMBIDI	306	layout_object_create
+PMBIDI	307	layout_object_destroy
+PMBIDI	308	layout_object_transform
+PMBIDI	309	layout_object_editshape
+PMBIDI	310	layout_object_setvalues
+PMBIDI	311	layout_object_getvalues

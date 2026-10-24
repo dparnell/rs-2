@@ -202,6 +202,18 @@ const VIOCALLS: &[(u16, &str)] = &[
     (51, "pw"), // VioSetState
     (52, "pwwww"), // VioWrtNCell
     (53, "pwwww"), // VioWrtNChar
+    (55, "dw"), // VioAssociate
+    (56, "pwwwww"), // VioCreatePS
+    (57, "dw"), // VioDeleteSetId
+    (58, "ppw"), // VioGetDeviceCellSize
+    (59, "ppw"), // VioGetOrg
+    (60, "pdpw"), // VioCreateLogFont
+    (61, "w"), // VioDestroyPS
+    (62, "pppdw"), // VioQuerySetIds
+    (63, "www"), // VioSetOrg
+    (64, "ppdppdw"), // VioQueryFonts
+    (65, "www"), // VioSetDeviceCellSize
+    (66, "wwww"), // VioShowPS
     (70, "ppddd"), // VioGlobalReg (RETF 20 in DOSCALL1)
     (75, "pwww"), // VioCheckCharType
 ];

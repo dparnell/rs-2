@@ -1,0 +1,13 @@
+[package]
+name = "registry-dll"
+description = "REGISTRY.DLL: the OS/2 registry (Win32 registry calls, for Open32's PMWINX and REGEDIT2), kept in two profiles"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "registry"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

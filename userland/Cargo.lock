@@ -218,6 +218,13 @@ name = "os2-pack"
 version = "0.1.0"
 
 [[package]]
+name = "pmbidi-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "pmctls-dll"
 version = "0.1.0"
 dependencies = [
@@ -318,6 +325,14 @@ dependencies = [
  "pmwin",
  "thunk16",
  "uls",
+ "viocell",
+]
+
+[[package]]
+name = "pmwinx-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
 ]
 
 [[package]]
@@ -328,6 +343,27 @@ dependencies = [
  "ipf",
  "os2",
  "pmwin",
+]
+
+[[package]]
+name = "pmxhook"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "pmxtest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "registry-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
 ]
 
 [[package]]
@@ -416,6 +452,13 @@ dependencies = [
 
 [[package]]
 name = "testdll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "thailib-dll"
 version = "0.1.0"
 dependencies = [
  "os2",

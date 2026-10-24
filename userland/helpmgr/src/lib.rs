@@ -24,6 +24,7 @@ mod help16;
 mod library;
 mod pm;
 mod render;
+mod services;
 mod stack;
 mod viewapi;
 mod window;
@@ -155,6 +156,8 @@ pub struct Instance {
     /// What window word 0 points at, as in IBM's instance structure:
     /// the help window's frame at +0x26.
     pub compat: Box<[u8; 0x40]>,
+    /// A book's bookmarks (the library each is in).
+    pub marks: Vec<(usize, services::Mark)>,
 }
 
 struct Registry(core::cell::UnsafeCell<Vec<*mut Instance>>);
@@ -245,7 +248,10 @@ fn open_libraries(names: &[u8], book: bool) -> Result<Vec<Library>, u32> {
 /// Create a help instance (also for VIEW's books).
 pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: bool, book: bool) -> Result<u32, u32> {
     register(hab);
-    let libs = open_libraries(names, book)?;
+    // A help instance may start without libraries (IBM's HMSetHelpVariables
+    // leaves the library out when HELPINIT has none; the Open Class
+    // library names them later with HM_SET_HELP_LIBRARY_NAME).
+    let libs = if names.iter().all(|&c| c == b' ') && !book { Vec::new() } else { open_libraries(names, book)? };
     let h = unsafe {
         WinCreateWindow(HWND_OBJECT, CLASS.as_ptr(), b"\0".as_ptr(), 0, 0, 0, 0, 0, 0, HWND_TOP, 0, core::ptr::null(), core::ptr::null())
     };
@@ -271,7 +277,14 @@ pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: 
         book,
         owner: 0,
         compat: Box::new([0; 0x40]),
+        marks: Vec::new(),
     }));
+    if book {
+        let inst = unsafe { &mut *inst };
+        for (i, l) in inst.libs.iter().enumerate() {
+            inst.marks.extend(services::load_marks(&l.path).into_iter().map(|m| (i, m)));
+        }
+    }
     unsafe { WinSetWindowULong(h, QWL_USER, (*inst).compat.as_ptr() as u32) };
     let first = instances().is_empty();
     instances().push(inst);
@@ -424,7 +437,7 @@ fn Rs2ViewBook_(hab: u32, names: *const u8, topic: *const u8, rc: *mut u32) -> u
     match create(hab, &names, b"", HelpTable::None, false, true) {
         Ok(h) => {
             let inst = instance(h).unwrap();
-            let title = inst.libs[0].doc().title().to_vec();
+            let title = inst.libs.first().map(|l| l.doc().title().to_vec()).unwrap_or_default();
             inst.title = title;
             let found = if topic.is_empty() { None } else { window::find_topic(inst, &topic) };
             match found {

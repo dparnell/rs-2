@@ -71,9 +71,11 @@ pub extern "C" fn WinTerminate(_hab: u32) -> u32 {
     1
 }
 
+/// WinQueryAnchorBlock(hwnd): NULLHANDLE for a window that does not
+/// exist (the Open Class library tells valid windows from it).
 #[unsafe(no_mangle)]
-pub extern "C" fn WinQueryAnchorBlock(_h: u32) -> u32 {
-    HAB
+pub extern "C" fn WinQueryAnchorBlock(h: u32) -> u32 {
+    if st().desk.exists(h) || h == pmwin::HWND_DESKTOP || h == pmwin::HWND_OBJECT { HAB } else { 0 }
 }
 
 /// Record an error for WinGetLastError.
@@ -273,138 +275,6 @@ pub extern "C" fn WinRequestMutexSem(hmtx: u32, ms: u32) -> u32 {
     crate::lock::wait(|| unsafe { DosRequestMutexSem(hmtx, ms) })
 }
 
-const PP_FOREGROUNDCOLOR: u32 = 1;
-const PP_BACKGROUNDCOLOR: u32 = 3;
-const PP_FONTNAMESIZE: u32 = 15;
-const WM_PRESPARAMCHANGED: u32 = 0x001e;
-
-/// WinSetPresParam(hwnd, id, cbParam, pbParam): the foreground and
-/// background colours (PP_FOREGROUNDCOLOR, PP_BACKGROUNDCOLOR, RGB) are
-/// kept for the window (the container uses them), and the font
-/// (PP_FONTNAMESIZE, "10.Helv": the window and its children draw in
-/// it); other presentation parameters are accepted and ignored.
-#[unsafe(no_mangle)]
-pub extern "C" fn WinSetPresParam(h: u32, id: u32, cb: u32, pv: u32) -> u32 {
-    let s = st();
-    if !s.desk.exists(h) {
-        return 0;
-    }
-    if id == PP_FONTNAMESIZE && pv != 0 {
-        let b = unsafe { core::slice::from_raw_parts(pv as *const u8, cb as usize) };
-        let name = b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())].to_vec();
-        if crate::fonts::by_name(&name).is_none() {
-            return 0;
-        }
-        s.pres_font.insert(h, name);
-        s.desk.invalidate(h, None, true);
-        crate::msg::send(h, WM_PRESPARAMCHANGED, id, 0);
-        return 1;
-    }
-    if (id == PP_FOREGROUNDCOLOR || id == PP_BACKGROUNDCOLOR) && cb >= 4 && pv != 0 {
-        let v = unsafe { (pv as *const u32).read_unaligned() } & 0xff_ffff;
-        let e = s.pres.entry(h).or_insert((crate::state::NO_COLOR, crate::state::NO_COLOR));
-        if id == PP_FOREGROUNDCOLOR {
-            e.0 = v;
-        } else {
-            e.1 = v;
-        }
-        s.desk.invalidate(h, None, true);
-    }
-    1
-}
-
-/// PP_FONTNAMESIZE of the window or the nearest parent that has one.
-pub fn pres_font_name(h: u32) -> Option<Vec<u8>> {
-    let s = st();
-    let mut w = h;
-    for _ in 0..64 {
-        if let Some(n) = s.pres_font.get(&w) {
-            return Some(n.clone());
-        }
-        w = s.desk.get(w)?.parent;
-        if w == 0 {
-            break;
-        }
-    }
-    None
-}
-
-/// The colour of a presentation parameter set on the window (not
-/// inherited).
-pub fn pres_color(h: u32, background: bool) -> Option<u32> {
-    let (fg, bg) = *st().pres.get(&h)?;
-    let v = if background { bg } else { fg };
-    (v != crate::state::NO_COLOR).then_some(v)
-}
-
-/// WinQueryPresParam(hwnd, id1, id2, pulId, cbBuf, pbBuf, fs): the
-/// colours set with WinSetPresParam (the bytes copied, 0 if neither).
-#[unsafe(no_mangle)]
-pub extern "C" fn WinQueryPresParam(h: u32, id1: u32, id2: u32, pid: u32, cb: u32, pv: u32, fs: u32) -> u32 {
-    for id in [id1, id2] {
-        // The font, inherited from the parents unless QPF_NOINHERIT.
-        if id == PP_FONTNAMESIZE {
-            let name = if fs & 1 != 0 { st().pres_font.get(&h).cloned() } else { pres_font_name(h) };
-            if let Some(n) = name {
-                if pv == 0 || (cb as usize) < n.len() + 1 {
-                    return 0;
-                }
-                unsafe {
-                    core::ptr::copy_nonoverlapping(n.as_ptr(), pv as *mut u8, n.len());
-                    *(pv as *mut u8).add(n.len()) = 0;
-                    if pid != 0 {
-                        (pid as *mut u32).write_unaligned(id);
-                    }
-                }
-                return n.len() as u32 + 1;
-            }
-            continue;
-        }
-        let v = match id {
-            PP_FOREGROUNDCOLOR => pres_color(h, false),
-            PP_BACKGROUNDCOLOR => pres_color(h, true),
-            _ => None,
-        };
-        if let Some(v) = v {
-            if cb < 4 || pv == 0 {
-                return 0;
-            }
-            unsafe {
-                (pv as *mut u32).write_unaligned(v);
-                if pid != 0 {
-                    (pid as *mut u32).write_unaligned(id);
-                }
-            }
-            return 4;
-        }
-    }
-    0
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn WinRemovePresParam(h: u32, id: u32) -> u32 {
-    let s = st();
-    if !s.desk.exists(h) {
-        return 0;
-    }
-    if id == PP_FONTNAMESIZE {
-        if s.pres_font.remove(&h).is_some() {
-            s.desk.invalidate(h, None, true);
-            crate::msg::send(h, WM_PRESPARAMCHANGED, id, 0);
-        }
-        return 1;
-    }
-    if let Some(e) = s.pres.get_mut(&h) {
-        match id {
-            PP_FOREGROUNDCOLOR => e.0 = crate::state::NO_COLOR,
-            PP_BACKGROUNDCOLOR => e.1 = crate::state::NO_COLOR,
-            _ => return 1,
-        }
-        s.desk.invalidate(h, None, true);
-    }
-    1
-}
-
 fn cstr(p: *const u8) -> Vec<u8> {
     if p.is_null() {
         return Vec::new();
@@ -467,12 +337,12 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
     if icon != 0 {
         // SS_SYSICON, visible.
         let t = alloc::format!("#{icon}").into_bytes();
-        items.push(res::DlgItemT { class: b"#5".to_vec(), text: t, style: 0x8000_000b, x: 8, y: (h - 50) / 2, cx: 16, cy: 16, id: 0xffff, ctl: core::ptr::null(), children: Vec::new() });
+        items.push(res::DlgItemT { class: b"#5".to_vec(), text: t, style: 0x8000_000b, x: 8, y: (h - 50) / 2, cx: 16, cy: 16, id: 0xffff, ctl: core::ptr::null(), pres: core::ptr::null(), children: Vec::new() });
     }
     for (i, l) in lines.iter().enumerate() {
         let y = h - 10 - (i as i32 + 1) * font.height;
         // SS_TEXT | DT_LEFT, visible.
-        items.push(res::DlgItemT { class: b"#5".to_vec(), text: l.clone(), style: 0x8000_0001, x: (10 + ix) / 2, y: y / 2, cx: (w - 20 - ix) / 2, cy: font.height / 2, id: 0xffff, ctl: core::ptr::null(), children: Vec::new() });
+        items.push(res::DlgItemT { class: b"#5".to_vec(), text: l.clone(), style: 0x8000_0001, x: (10 + ix) / 2, y: y / 2, cx: (w - 20 - ix) / 2, cy: font.height / 2, id: 0xffff, ctl: core::ptr::null(), pres: core::ptr::null(), children: Vec::new() });
     }
     let total = buttons.len() as i32 * (bw + 10) - 10;
     for (i, (id, label)) in buttons.iter().enumerate() {
@@ -484,7 +354,7 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
             bs |= 0x0100 | 0x0800;
         }
         let x = (w - total) / 2 + i as i32 * (bw + 10);
-        items.push(res::DlgItemT { class: b"#3".to_vec(), text: label.to_vec(), style: bs, x: x / 2, y: 4, cx: bw / 2, cy: 12, id: *id, ctl: core::ptr::null(), children: Vec::new() });
+        items.push(res::DlgItemT { class: b"#3".to_vec(), text: label.to_vec(), style: bs, x: x / 2, y: 4, cx: bw / 2, cy: 12, id: *id, ctl: core::ptr::null(), pres: core::ptr::null(), children: Vec::new() });
     }
     // FCF_TITLEBAR (control data); FS_DLGBORDER | FS_SCREENALIGN.
     let fcf: u32 = 0x0001;
@@ -499,6 +369,7 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
         cy: h / 2,
         id: id & 0xffff,
         ctl: &fcf as *const u32 as *const u8,
+        pres: core::ptr::null(),
         children: items,
     };
     let parent = if parent == 0 { pmwin::HWND_DESKTOP } else { parent };
@@ -506,7 +377,7 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
     if dlg == 0 {
         return 0xffff;
     }
-    let r = crate::dlg::WinProcessDlg(dlg);
+    let r = crate::dlg::process(dlg, crate::hooks::MSGF_MESSAGEBOX);
     win::WinDestroyWindow(dlg);
     r
 }
@@ -520,14 +391,35 @@ pub extern "C" fn WinQueryVersion(_hab: u32) -> u32 {
     20 | 45 << 8
 }
 
+/// WinQueryObjectWindow(hwndDesktop): the root of the object windows.
 #[unsafe(no_mangle)]
-pub extern "C" fn WinQueryCp(_hmq: u32) -> u32 {
-    850
+pub extern "C" fn WinQueryObjectWindow(_desk: u32) -> u32 {
+    pmwin::HWND_OBJECT
 }
 
+/// WinQueryCp(hmq): the queue's code page (HMQ_CURRENT: the caller's).
 #[unsafe(no_mangle)]
-pub extern "C" fn WinSetCp(_hmq: u32, cp: u32) -> u32 {
-    (cp == 850 || cp == 437) as u32
+pub extern "C" fn WinQueryCp(hmq: u32) -> u32 {
+    let s = st();
+    let q = if hmq == 1 || hmq == 0 { s.my_queue() } else { hmq };
+    s.queues.get(&q).map_or(850, |x| x.cp)
+}
+
+/// WinSetCp(hmq, idCodePage): one of the system's code pages; the code
+/// page changed hooks are told.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetCp(hmq: u32, cp: u32) -> u32 {
+    if cp != 850 && cp != 437 {
+        return 0;
+    }
+    let s = st();
+    let q = if hmq == 1 || hmq == 0 { s.my_queue() } else { hmq };
+    let Some(x) = s.queues.get_mut(&q) else { return 0 };
+    let old = core::mem::replace(&mut x.cp, cp);
+    if old != cp {
+        crate::hooks::codepage_changed(q, old, cp);
+    }
+    1
 }
 
 fn cp_or_default(cp: u32) -> u16 {
@@ -829,6 +721,9 @@ pub extern "C" fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32 {
             crate::msg::WinPostQueueMsg(st().my_queue(), win::WM_QUIT, 0, 0);
             break;
         }
+        if crate::hooks::msg_filter(&mut m, crate::hooks::MSGF_TRACK) {
+            continue;
+        }
         match m.msg {
             win::WM_MOUSEMOVE if m.hwnd == h => {
                 let (x, y) = (m.mp1 as i16 as i32, (m.mp1 >> 16) as i16 as i32);
@@ -891,33 +786,4 @@ pub extern "C" fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32 {
         unsafe { pti.add(6 + i).write_unaligned(v) };
     }
     ok as u32
-}
-
-// ---- Hooks ----
-
-/// WinSetHook(hab, hmq, iHook, pfnHook, hmod): hooks are recorded; of
-/// them only the help hook, HK_HELP, is called (see help.rs).
-#[unsafe(no_mangle)]
-pub extern "C" fn WinSetHook(_hab: u32, hmq: u32, kind: u32, pfn: u32, hmod: u32) -> u32 {
-    if pfn == 0 {
-        return 0;
-    }
-    let s = st();
-    // HMQ_CURRENT (1) is the caller's queue.
-    let queue = if hmq == 1 { s.my_queue() } else { hmq };
-    let me = state::pid();
-    s.hooks.insert(0, state::Hook { queue, kind, pfn, hmod, pid: me });
-    1
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn WinReleaseHook(_hab: u32, hmq: u32, kind: u32, pfn: u32, _hmod: u32) -> u32 {
-    let s = st();
-    let queue = if hmq == 1 { s.my_queue() } else { hmq };
-    let me = state::pid();
-    let n = s.hooks.len();
-    if let Some(i) = s.hooks.iter().position(|h| h.queue == queue && h.kind == kind && h.pfn == pfn && h.pid == me) {
-        s.hooks.remove(i);
-    }
-    (s.hooks.len() != n) as u32
 }
