@@ -465,7 +465,8 @@ impl Machine {
         // IOPL 3: the client reaches the virtual devices' ports.
         self.cpu.flags = (flags & !(CF | 0x3000)) | 0x3000;
         self.hw.irq_remap = Some(HW_BASE);
-        host.log(&alloc::format!("dpmi: {} client entered protected mode (cs={cs:#x})", if bits32 { "32-bit" } else { "16-bit" }));
+        let top = self.hw.rd16(Machine::lin(psp, 2));
+        host.log(&alloc::format!("dpmi: {} client entered protected mode (cs={cs:#x}, psp {psp:#x}, top {top:#x}, host area {area:#x})", if bits32 { "32-bit" } else { "16-bit" }));
     }
 
     // ---- Frames ----
@@ -527,14 +528,23 @@ impl Machine {
             let from3 = self.hw.rd32(f + 4) & 3 == 3;
             if self.cfg.trace {
                 let (eip, cs) = (self.frame_get(f, 0), self.frame_get(f, 1));
+                let (fss, fesp) = (self.frame_get(f, 4), self.frame_get(f, 3));
                 let sr = |m: &Machine, r: usize| { let s = m.cpu.seg[r]; alloc::format!("{:04x}[{:x}+{:x}]", s.sel, s.base, s.limit) };
                 host.log(&alloc::format!(
-                    "dpmi: exception {v:#x} code {code:#x} at {cs:#06x}:{eip:#x} ds={} es={} edi={:x} esi={:x}",
+                    "dpmi: exception {v:#x} code {code:#x} at {cs:#06x}:{eip:#x} ds={} es={} edi={:x} esi={:x} ss:esp={:04x}:{:x}",
                     sr(self, DS),
                     sr(self, ES),
                     self.cpu.regs[EDI],
-                    self.cpu.regs[ESI]
+                    self.cpu.regs[ESI],
+                    fss,
+                    fesp
                 ));
+                let sb = self.dpmi_lin(fss as u16, 0);
+                let mut st = [0u16; 12];
+                for (i, w) in st.iter_mut().enumerate() {
+                    *w = self.hw.rd16(sb + ((fesp & 0xffff) + i as u32 * 2 - 4));
+                }
+                host.log(&alloc::format!("dpmi: stack from sp-4: {st:04x?} (ss base {sb:#x})"));
             }
             if from3 {
                 if let Some(h) = self.client().exc_handlers[v as usize] {
@@ -1288,6 +1298,18 @@ impl Machine {
     fn int31<H: Host>(&mut self, host: &mut H, f: u32) {
         let ax = self.cpu.ax();
         let r = self.int31_fn(host, f, ax);
+        if self.cfg.trace && !matches!(ax, 0x0300..=0x0302) {
+            host.log(&alloc::format!(
+                "  int31 {ax:04x} -> {:?} ax={:04x} bx={:04x} cx={:04x} dx={:04x} si={:04x} di={:04x}",
+                r,
+                self.cpu.ax(),
+                self.cpu.bx(),
+                self.cpu.cx(),
+                self.cpu.dx(),
+                self.cpu.si(),
+                self.cpu.di()
+            ));
+        }
         if !matches!(ax, 0x0300..=0x0302) || r.is_err() {
             self.dpmi_ret(f, r);
         }

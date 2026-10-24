@@ -196,8 +196,12 @@ impl Machine {
         };
         let is_exe = image.len() >= 0x1c && (image[0..2] == *b"MZ" || image[0..2] == *b"ZM");
         let env = self.make_env(host, &vars, path, parent)?;
-        // The program gets the largest block (EXE: bounded by its header).
+        // The program gets the largest block (EXE: bounded by its header;
+        // with no minimum and no maximum allocation it is loaded high: it
+        // owns the whole block and its image sits at the block's top, as
+        // Windows' and Win-OS/2's KERNEL expect).
         let largest = self.largest_free();
+        let load_high = is_exe && image[0x0a..0x0e] == [0, 0, 0, 0];
         let (need, want) = if is_exe {
             let h = |o: usize| u16::from_le_bytes([image[o], image[o + 1]]) as u32;
             let pages = h(4);
@@ -208,7 +212,7 @@ impl Machine {
             let min = h(0x0a);
             let max = h(0x0c);
             let need = (load.div_ceil(16) + 0x10 + min) as u16;
-            let want = if max == 0 { need } else { (load.div_ceil(16) + 0x10).saturating_add(max).min(0xffff) as u16 };
+            let want = if load_high { 0xffff } else if max == 0 { need } else { (load.div_ceil(16) + 0x10).saturating_add(max).min(0xffff) as u16 };
             (need, want.max(need))
         } else {
             (((image.len() as u32 + 0x100 + 0x100).div_ceil(16)).min(0x1000) as u16, 0xffff)
@@ -250,7 +254,8 @@ impl Machine {
             let last = h(2) as usize;
             let size = if last == 0 { pages * 512 } else { (pages - 1) * 512 + last };
             let end = size.min(image.len());
-            let load = psp + 0x10;
+            let paras = size.saturating_sub(hdr).div_ceil(16) as u16;
+            let load = if load_high { self.hw.rd16(Machine::lin(psp, 2)) - paras } else { psp + 0x10 };
             let body = &image[hdr.min(end)..end];
             self.hw.write_bytes(Machine::lin(load, 0), body);
             let nrel = h(6) as usize;

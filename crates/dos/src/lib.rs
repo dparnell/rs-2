@@ -281,8 +281,14 @@ impl Machine {
             self.waiting = false;
             return;
         }
+        let budget = if self.hw.watch == u32::MAX { 2000 } else { 1 };
         for _ in 0..64 {
-            let e = self.cpu.run(&mut self.hw, 2000);
+            let e = self.cpu.run(&mut self.hw, budget);
+            if !self.hw.watch_hits.is_empty() {
+                for (a, v) in core::mem::take(&mut self.hw.watch_hits) {
+                    host.log(&alloc::format!("watch: {a:#x} <- {v:#x} at {:04x}:{:x} cpl {} esp {:x}", self.cpu.seg[CS].sel, self.cpu.eip, self.cpu.cpl, self.cpu.regs[x86emu::ESP]));
+                }
+            }
             match e {
                 Exit::Budget => {}
                 Exit::Halt => {
