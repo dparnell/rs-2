@@ -28,12 +28,27 @@ const ID_PM: u16 = 214;
 const ID_DOSWIN: u16 = 215;
 const ID_DOSFULL: u16 = 216;
 const ID_TITLE: u16 = 221;
+const ID_DOS_HIGH: u16 = 231;
+const ID_DOS_UMB: u16 = 232;
+const ID_EMS: u16 = 233;
+const ID_XMS: u16 = 234;
+const ID_DPMI: u16 = 235;
+
+/// DOS settings on the DOS page: (environment name, entry or check box,
+/// default as the DOS session has it).
+const DOS_SETTINGS: [(&[u8], u16, &[u8]); 5] = [
+    (b"DOS_HIGH", ID_DOS_HIGH, b"1"),
+    (b"DOS_UMB", ID_DOS_UMB, b"1"),
+    (b"EMS_MEMORY_LIMIT", ID_EMS, b"2048"),
+    (b"XMS_MEMORY_LIMIT", ID_XMS, b"3072"),
+    (b"DPMI_MEMORY_LIMIT", ID_DPMI, b"3"),
+];
 
 /// The notebook being edited: (program handle or 0 for a new one, its
 /// group, the page dialogs).
-static mut EDIT: (u32, u32, [u32; 3]) = (0, 0, [0; 3]);
+static mut EDIT: (u32, u32, [u32; 4]) = (0, 0, [0; 4]);
 
-fn edit() -> &'static mut (u32, u32, [u32; 3]) {
+fn edit() -> &'static mut (u32, u32, [u32; 4]) {
     unsafe { &mut *core::ptr::addr_of_mut!(EDIT) }
 }
 
@@ -75,6 +90,30 @@ fn session_page() -> Vec<u8> {
         radio(b"In a ~DOS window", 32, ID_DOSWIN, false),
         radio(b"DOS full ~screen", 18, ID_DOSFULL, false),
     ])
+}
+
+fn dos_page() -> Vec<u8> {
+    // BS_AUTOCHECKBOX
+    let check = |t: &[u8], y: i16, id: u16| item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0003, (8, y, 220, 10), id);
+    template(page_frame(), alloc::vec![
+        label(b"Settings of DOS programs (DOS sessions):", (6, 104, 220)),
+        check(b"DOS in the ~high memory area", 90, ID_DOS_HIGH),
+        check(b"~Upper memory blocks for DOS", 78, ID_DOS_UMB),
+        label(b"EMS memory (KB):", (6, 62, 110)),
+        entry(b"", (120, 62, 60), ID_EMS),
+        label(b"XMS memory (KB):", (6, 46, 110)),
+        entry(b"", (120, 46, 60), ID_XMS),
+        label(b"DPMI memory (MB):", (6, 30, 110)),
+        entry(b"", (120, 30, 60), ID_DPMI),
+    ])
+}
+
+/// The value of `name` in a NUL-separated environment list.
+fn env_value<'a>(env: &'a [u8], name: &[u8]) -> Option<&'a [u8]> {
+    env.split(|&c| c == 0).find_map(|v| {
+        let i = v.iter().position(|&c| c == b'=')?;
+        v[..i].eq_ignore_ascii_case(name).then(|| &v[i + 1..])
+    })
 }
 
 fn general_page() -> Vec<u8> {
@@ -126,8 +165,8 @@ extern "C" fn settings_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
     match m {
         WM_INITDLG => {
             let nb = unsafe { WinWindowFromID(h, ID_NOTEBOOK as u32) };
-            let tpls = [program_page(), session_page(), general_page()];
-            let tabs: [&[u8]; 3] = [b"~Program\0", b"~Session\0", b"~General\0"];
+            let tpls = [program_page(), session_page(), general_page(), dos_page()];
+            let tabs: [&[u8]; 4] = [b"~Program\0", b"~Session\0", b"~General\0", b"~DOS\0"];
             for (i, t) in tpls.iter().enumerate() {
                 let page = unsafe { WinCreateDlg(nb, h, page_proc as *const () as u32, t.as_ptr(), 0) };
                 edit().2[i] = page;
@@ -153,6 +192,15 @@ extern "C" fn settings_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
                 _ => ID_DEFAULT,
             };
             unsafe { WinSendDlgItemMsg(pages[1], radio as u32, BM_SETCHECK, 1, 0) };
+            for (name, id, def) in DOS_SETTINGS {
+                let v = env_value(&p.env, name).unwrap_or(def);
+                if id == ID_DOS_HIGH || id == ID_DOS_UMB {
+                    let on = matches!(v, b"1" | b"ON" | b"on" | b"YES" | b"yes");
+                    unsafe { WinSendDlgItemMsg(pages[3], id as u32, BM_SETCHECK, on as u32, 0) };
+                } else {
+                    set_item_text(pages[3], id as u32, v);
+                }
+            }
             center(h);
             unsafe { WinSetFocus(HWND_DESKTOP, WinWindowFromID(pages[0], ID_PATH as u32)) };
             1
@@ -190,6 +238,31 @@ fn save_settings(dlg: u32) -> bool {
         let name = crate::launch::file_name(&p.exe);
         p.title = name[..name.iter().rposition(|&c| c == b'.').unwrap_or(name.len())].to_vec();
     }
+    // DOS settings into the environment (the defaults left out), the
+    // object's other strings kept.
+    let mut env: Vec<u8> = Vec::new();
+    for v in p.env.split(|&c| c == 0).filter(|v| !v.is_empty()) {
+        let name = &v[..v.iter().position(|&c| c == b'=').unwrap_or(v.len())];
+        if !DOS_SETTINGS.iter().any(|(n, ..)| n.eq_ignore_ascii_case(name)) {
+            env.extend_from_slice(v);
+            env.push(0);
+        }
+    }
+    for (name, id, def) in DOS_SETTINGS {
+        let v: Vec<u8> = if id == ID_DOS_HIGH || id == ID_DOS_UMB {
+            let on = unsafe { WinSendDlgItemMsg(pages[3], id as u32, BM_QUERYCHECK, 0, 0) } != 0;
+            (if on { b"1" } else { b"0" }).to_vec()
+        } else {
+            item_text(pages[3], id as u32)
+        };
+        if !v.is_empty() && v != def {
+            env.extend_from_slice(name);
+            env.push(b'=');
+            env.extend_from_slice(&v);
+            env.push(0);
+        }
+    }
+    p.env = env;
     p.progc = [(ID_WINDOW, PROG_WINDOWABLEVIO), (ID_FULL, PROG_FULLSCREEN), (ID_PM, PROG_PM), (ID_DOSWIN, PROG_WINDOWEDVDM), (ID_DOSFULL, PROG_VDM)]
         .into_iter()
         .find(|(id, _)| unsafe { WinSendDlgItemMsg(pages[1], *id as u32, BM_QUERYCHECK, 0, 0) } != 0)
@@ -205,7 +278,7 @@ fn save_settings(dlg: u32) -> bool {
 /// The settings notebook of a program object (`h` 0: a new one in
 /// `group`).
 pub fn program_settings(h: Option<u32>, group: u32) {
-    *edit() = (h.unwrap_or(0), group, [0; 3]);
+    *edit() = (h.unwrap_or(0), group, [0; 4]);
     let title: &[u8] = if h.is_some() { b"Program Settings" } else { b"Create Program Object" };
     // A tabbed notebook over OK and Cancel.
     let tpl = template(dialog_frame(title, 252, 170), alloc::vec![
