@@ -16,6 +16,9 @@ pub const SPECIAL: u16 = 0xe800;
 pub const CONFIG_TABLE: u16 = 0xe6f5;
 /// The video BIOS's static functionality table (INT 10h AH=1Bh).
 pub const VIDEO_STATIC: u16 = 0xe700;
+/// VESA tables: OEM string (+0), mode list (+20h), vendor (+30h), the
+/// window function (+40h: INT 10h AX=4F05h then RETF).
+pub const VBE_TABLES: u16 = 0xe710;
 /// The video ROM segment (fonts).
 pub const VROM: u16 = 0xc000;
 
@@ -152,6 +155,16 @@ impl Machine {
         // Modes 0-7, 0Dh-13h; 200/350/400 lines; 8 font blocks, 2 active;
         // every palette, font and cursor function; state save.
         put(self, VIDEO_STATIC, &[0xff, 0xe0, 0x0f, 0, 0, 0, 0, 0x07, 0x08, 0x02, 0xff, 0x0e, 0, 0, 0x3f, 0]);
+        put(self, VBE_TABLES, b"rs2 DOS session VGA\0");
+        let mut list = alloc::vec::Vec::new();
+        for (m, _, _) in crate::video::VBE_MODES {
+            list.extend_from_slice(&m.to_le_bytes());
+        }
+        list.extend_from_slice(&0xffffu16.to_le_bytes());
+        put(self, VBE_TABLES + 0x20, &list);
+        put(self, VBE_TABLES + 0x30, b"rs2\0");
+        // mov ax,4F05h / int 10h / retf
+        put(self, VBE_TABLES + 0x40, &[0xb8, 0x05, 0x4f, 0xcd, 0x10, 0xcb]);
         put(self, 0xfff0, &[0xea, 0x5b, 0xe0, 0x00, 0xf0]);
         put(self, 0xfff5, b"01/01/92");
         put(self, 0xfffe, &[0xfc, 0x00]);
@@ -682,6 +695,7 @@ impl Machine {
 
     /// INT 10h AH=00h.
     pub fn set_mode(&mut self, mode: u8, keep: bool) {
+        self.hw.vga.vbe = None;
         let mode = mode & 0x7f;
         let m = match mode {
             0..=7 | 0x0d..=0x13 => mode,
@@ -1194,11 +1208,180 @@ impl Machine {
                 self.hw.wr(a + 0x31, 3);
                 self.cpu.set_al(0x1b);
             }
-            0x4f => {
-                // VESA BIOS extensions: not provided.
-                self.cpu.set_ax(0x0100);
-            }
+            0x4f => self.vbe(),
             _ => {}
+        }
+    }
+
+    /// INT 10h AH=4Fh: VESA BIOS extensions 2.0 (8-bit modes, a banked
+    /// window at A000h and a linear framebuffer).
+    fn vbe(&mut self) {
+        use crate::video::{Vbe, LFB_BASE, VBE_MEM, VBE_MODES};
+        let al = self.cpu.al();
+        let es_di = Machine::lin(self.cpu.seg[ES].sel, self.cpu.di());
+        let ok = |m: &mut Machine| m.cpu.set_ax(0x004f);
+        match al {
+            0x00 => {
+                let vbe2 = self.hw.rd32(es_di) == u32::from_le_bytes(*b"VBE2");
+                for i in 0..if vbe2 { 512 } else { 256 } {
+                    self.hw.wr(es_di + i, 0);
+                }
+                self.hw.write_bytes(es_di, b"VESA");
+                self.hw.wr16(es_di + 4, 0x0200);
+                // OEM string and the mode list in ROM.
+                self.hw.wr16(es_di + 6, VBE_TABLES);
+                self.hw.wr16(es_di + 8, ROM);
+                self.hw.wr32(es_di + 10, 0);
+                self.hw.wr16(es_di + 14, VBE_TABLES + 0x20);
+                self.hw.wr16(es_di + 16, ROM);
+                self.hw.wr16(es_di + 18, (VBE_MEM / 65536) as u16);
+                if vbe2 {
+                    self.hw.wr16(es_di + 20, 0x0100);
+                    for (o, t) in [(22u32, 0u16), (26, 0x30), (30, 0x30)] {
+                        self.hw.wr16(es_di + o, VBE_TABLES + t);
+                        self.hw.wr16(es_di + o + 2, ROM);
+                    }
+                }
+                ok(self);
+            }
+            0x01 => {
+                let cx = self.cpu.cx() & 0x1ff;
+                let Some(&(_, w, h)) = VBE_MODES.iter().find(|m| m.0 == cx) else {
+                    self.cpu.set_ax(0x014f);
+                    return;
+                };
+                for i in 0..256 {
+                    self.hw.wr(es_di + i, 0);
+                }
+                // Supported, colour graphics, linear framebuffer too.
+                self.hw.wr16(es_di, 0x009b);
+                self.hw.wr(es_di + 2, 7);
+                self.hw.wr16(es_di + 4, 64);
+                self.hw.wr16(es_di + 6, 64);
+                self.hw.wr16(es_di + 8, 0xa000);
+                self.hw.wr16(es_di + 0x0c, VBE_TABLES + 0x40);
+                self.hw.wr16(es_di + 0x0e, ROM);
+                self.hw.wr16(es_di + 0x10, w);
+                self.hw.wr16(es_di + 0x12, w);
+                self.hw.wr16(es_di + 0x14, h);
+                self.hw.wr(es_di + 0x16, 8);
+                self.hw.wr(es_di + 0x17, 16);
+                self.hw.wr(es_di + 0x18, 1);
+                self.hw.wr(es_di + 0x19, 8);
+                self.hw.wr(es_di + 0x1a, 1);
+                self.hw.wr(es_di + 0x1b, 4);
+                let pages = (VBE_MEM / (w as usize * h as usize)).clamp(1, 255) - 1;
+                self.hw.wr(es_di + 0x1d, pages as u8);
+                self.hw.wr(es_di + 0x1e, 1);
+                self.hw.wr32(es_di + 0x28, LFB_BASE);
+                ok(self);
+            }
+            0x02 => {
+                let bx = self.cpu.bx();
+                let mode = bx & 0x1ff;
+                if mode < 0x100 {
+                    self.hw.vga.vbe = None;
+                    self.set_mode(mode as u8, bx & 0x8000 != 0);
+                    ok(self);
+                    return;
+                }
+                let Some(&(_, w, h)) = VBE_MODES.iter().find(|m| m.0 == mode) else {
+                    self.cpu.set_ax(0x014f);
+                    return;
+                };
+                self.set_mode(0x13, true);
+                if self.hw.vga.vbe_mem.len() < VBE_MEM {
+                    self.hw.vga.vbe_mem.resize(VBE_MEM, 0);
+                }
+                if bx & 0x8000 == 0 {
+                    self.hw.vga.vbe_mem.iter_mut().for_each(|b| *b = 0);
+                }
+                self.hw.vga.vbe = Some(Vbe { mode, width: w, height: h, pitch: w as u32, bank: 0, start: 0 });
+                self.hw.wr(0x449, 0x13);
+                self.hw.vga.dirty = true;
+                ok(self);
+            }
+            0x03 => {
+                let m = self.hw.vga.vbe.map_or(self.bda_mode() as u16, |b| b.mode);
+                self.cpu.set_bx(m);
+                ok(self);
+            }
+            0x04 => {
+                // Save/restore state: nothing to save.
+                self.cpu.set_bx(1);
+                ok(self);
+            }
+            0x05 => {
+                let Some(b) = self.hw.vga.vbe.as_mut() else {
+                    self.cpu.set_ax(0x034f);
+                    return;
+                };
+                if self.cpu.bh() == 0 {
+                    b.bank = self.cpu.dx() as u32 % (VBE_MEM as u32 >> 16);
+                } else {
+                    let bank = b.bank as u16;
+                    self.cpu.set_dx(bank);
+                }
+                ok(self);
+            }
+            0x06 => {
+                let Some(b) = self.hw.vga.vbe.as_mut() else {
+                    self.cpu.set_ax(0x034f);
+                    return;
+                };
+                match self.cpu.bl() {
+                    0 => b.pitch = (self.cpu.cx() as u32).max(b.width as u32),
+                    2 => b.pitch = (self.cpu.cx() as u32).max(b.width as u32),
+                    _ => {}
+                }
+                let (pitch, h) = (b.pitch, b.height);
+                self.cpu.set_bx(pitch as u16);
+                self.cpu.set_cx(pitch as u16);
+                self.cpu.set_dx(((VBE_MEM as u32 / pitch) as u16).max(h));
+                self.hw.vga.dirty = true;
+                ok(self);
+            }
+            0x07 => {
+                let Some(b) = self.hw.vga.vbe.as_mut() else {
+                    self.cpu.set_ax(0x034f);
+                    return;
+                };
+                match self.cpu.bl() & 0x7f {
+                    0 => b.start = self.cpu.dx() as u32 * b.pitch + self.cpu.cx() as u32,
+                    1 => {
+                        let (x, y) = (b.start % b.pitch, b.start / b.pitch);
+                        self.cpu.set_cx(x as u16);
+                        self.cpu.set_dx(y as u16);
+                    }
+                    _ => {}
+                }
+                self.hw.vga.dirty = true;
+                ok(self);
+            }
+            0x08 => {
+                self.cpu.set_bh(6);
+                ok(self);
+            }
+            0x09 => {
+                let (start, n) = (self.cpu.dx() as usize, self.cpu.cx() as usize);
+                for i in 0..n {
+                    let a = es_di + i as u32 * 4;
+                    let (b, g, r) = (self.hw.rd(a), self.hw.rd(a + 1), self.hw.rd(a + 2));
+                    if self.cpu.bl() & 1 == 0 {
+                        if let Some(e) = self.hw.vga.dac.get_mut(start + i) {
+                            *e = [r & 0x3f, g & 0x3f, b & 0x3f];
+                        }
+                    } else if let Some(e) = self.hw.vga.dac.get(start + i).copied() {
+                        self.hw.wr(a, e[2]);
+                        self.hw.wr(a + 1, e[1]);
+                        self.hw.wr(a + 2, e[0]);
+                    }
+                }
+                self.hw.vga.palette_dirty = true;
+                self.hw.vga.dirty = true;
+                ok(self);
+            }
+            _ => self.cpu.set_ax(0x014f),
         }
     }
 

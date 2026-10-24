@@ -9,6 +9,26 @@ use alloc::vec::Vec;
 
 pub const PLANE: usize = 0x10000;
 
+/// VESA modes: number, width, height (8 bits per pixel).
+pub const VBE_MODES: [(u16, u16, u16); 4] = [(0x100, 640, 400), (0x101, 640, 480), (0x103, 800, 600), (0x105, 1024, 768)];
+/// Video memory of the VESA modes, and where the linear framebuffer is.
+pub const VBE_MEM: usize = 2 * 1024 * 1024;
+pub const LFB_BASE: u32 = 0xe000_0000;
+
+/// A VESA mode in use: its memory is `Vga::vbe_mem`.
+#[derive(Clone, Copy, Debug)]
+pub struct Vbe {
+    pub mode: u16,
+    pub width: u16,
+    pub height: u16,
+    /// Bytes per scan line.
+    pub pitch: u32,
+    /// The 64 KB bank the A000h window shows.
+    pub bank: u32,
+    /// The first pixel shown (display start).
+    pub start: u32,
+}
+
 #[derive(Clone)]
 pub struct Vga {
     pub planes: Vec<u8>,
@@ -40,6 +60,8 @@ pub struct Vga {
     pub dirty: bool,
     /// The palette or the DAC changed.
     pub palette_dirty: bool,
+    pub vbe: Option<Vbe>,
+    pub vbe_mem: Vec<u8>,
 }
 
 impl Default for Vga {
@@ -83,6 +105,8 @@ impl Vga {
             cga_mode: 0,
             dirty: true,
             palette_dirty: true,
+            vbe: None,
+            vbe_mem: Vec::new(),
         };
         v.set_mode_regs(3);
         v.load_dac(3);
@@ -367,6 +391,9 @@ impl Vga {
     }
 
     pub fn kind(&self) -> Kind {
+        if let Some(b) = &self.vbe {
+            return Kind::Graphics { width: b.width, height: b.height };
+        }
         let cols = self.crtc[1] as u32 + 1;
         if !self.graphics() {
             let rows = (self.scanlines() / self.row_height()).max(1);
@@ -438,7 +465,7 @@ impl Vga {
     /// entries for the indices it uses.
     pub fn palette(&self) -> [u32; 256] {
         let mut p = [0; 256];
-        if self.attr[0x10] & 0x40 != 0 {
+        if self.attr[0x10] & 0x40 != 0 || self.vbe.is_some() {
             for (i, c) in p.iter_mut().enumerate() {
                 *c = self.rgb(i as u8);
             }
@@ -458,6 +485,15 @@ impl Vga {
         let (w, h) = (width as usize, height as usize);
         out.clear();
         out.resize(w * h, 0);
+        if let Some(b) = &self.vbe {
+            for y in 0..h {
+                let a = b.start as usize + y * b.pitch as usize;
+                if let Some(src) = self.vbe_mem.get(a..a + w) {
+                    out[y * w..y * w + w].copy_from_slice(src);
+                }
+            }
+            return (w, h);
+        }
         let start = self.text_start() as usize;
         // Bytes per row in each plane (planes are addressed as chain-4
         // leaves them: pixel x of a 256-colour row is at x / 4).

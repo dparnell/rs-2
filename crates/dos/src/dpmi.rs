@@ -1364,8 +1364,11 @@ impl Machine {
             0x0800 => {
                 let phys = (self.cpu.bx() as u32) << 16 | self.cpu.cx() as u32;
                 let size = (self.cpu.si() as u32) << 16 | self.cpu.di() as u32;
-                // Only the first megabyte (video memory) is there to map.
-                if phys.saturating_add(size) > 0x110000 {
+                // The first megabyte and the VESA linear framebuffer are
+                // there to map (at their own addresses: no paging).
+                let lfb = crate::video::LFB_BASE;
+                let in_lfb = phys >= lfb && phys.saturating_add(size) <= lfb + crate::video::VBE_MEM as u32;
+                if phys.saturating_add(size) > 0x110000 && !in_lfb {
                     return Err(0x8021);
                 }
             }

@@ -131,7 +131,9 @@ All served in Rust, on the guest's registers and memory:
   are real guest structures (PSP handle table at PSP:18h, `SetHandleCount`
   67h), each SFT entry backed by an OS/2 file handle.
 - **INT 10h** video BIOS (modes 0-7, 0Dh-13h, cursor, scrolling, teletype,
-  palette and DAC, fonts 8x8/8x14/8x16, VBE 1.2 for 640x480x8 later), **INT
+  palette and DAC, fonts 8x8/8x14/8x16; VBE 2.0 with 8-bit modes 100h,
+  101h, 103h, 105h through a banked window at A000h and a linear
+  framebuffer at E0000000h), **INT
   16h** keyboard (00h-12h, buffer in the BDA at 40:1E, fed by IRQ 1 / INT
   9 with real scan codes), **INT 13h** (floppy and hard disk: answers "no
   drive" for direct disk access — OS/2 does not let VDMs at raw disks by

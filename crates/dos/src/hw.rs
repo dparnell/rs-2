@@ -98,8 +98,14 @@ impl Hw {
             return self.ram[a as usize];
         }
         if a < 0xc0000 {
-            if a < 0xb0000 && self.vga.planar() {
-                return self.vga.read(a - 0xa0000);
+            if a < 0xb0000 {
+                if let Some(b) = &self.vga.vbe {
+                    let i = (b.bank as usize) << 16 | (a as usize & 0xffff);
+                    return self.vga.vbe_mem.get(i).copied().unwrap_or(0);
+                }
+                if self.vga.planar() {
+                    return self.vga.read(a - 0xa0000);
+                }
             }
             return self.ram[a as usize];
         }
@@ -110,6 +116,9 @@ impl Hw {
                 }
             }
             return self.ram[a as usize];
+        }
+        if a >= crate::video::LFB_BASE {
+            return self.vga.vbe_mem.get((a - crate::video::LFB_BASE) as usize).copied().unwrap_or(0xff);
         }
         self.ext.get((a - EXT_BASE) as usize).copied().unwrap_or(0xff)
     }
@@ -126,9 +135,19 @@ impl Hw {
             return;
         }
         if a < 0xc0000 {
-            if a < 0xb0000 && self.vga.planar() {
-                self.vga.write(a - 0xa0000, v);
-                return;
+            if a < 0xb0000 {
+                if let Some(b) = &self.vga.vbe {
+                    let i = (b.bank as usize) << 16 | (a as usize & 0xffff);
+                    if let Some(m) = self.vga.vbe_mem.get_mut(i) {
+                        *m = v;
+                    }
+                    self.vga.dirty = true;
+                    return;
+                }
+                if self.vga.planar() {
+                    self.vga.write(a - 0xa0000, v);
+                    return;
+                }
             }
             self.ram[a as usize] = v;
             self.vga.dirty = true;
@@ -149,6 +168,13 @@ impl Hw {
                 0x100000.. => self.ram[a as usize] = v,
                 // ROM.
                 _ => {}
+            }
+            return;
+        }
+        if a >= crate::video::LFB_BASE {
+            if let Some(m) = self.vga.vbe_mem.get_mut((a - crate::video::LFB_BASE) as usize) {
+                *m = v;
+                self.vga.dirty = true;
             }
             return;
         }
