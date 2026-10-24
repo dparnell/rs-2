@@ -7,6 +7,21 @@ name = "bootinfo"
 version = "0.1.0"
 
 [[package]]
+name = "dos"
+version = "0.1.0"
+dependencies = [
+ "x86emu",
+]
+
+[[package]]
+name = "dosrun"
+version = "0.1.0"
+dependencies = [
+ "dos",
+ "x86emu",
+]
+
+[[package]]
 name = "elf2lx"
 version = "0.1.0"
 

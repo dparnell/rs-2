@@ -1,0 +1,10 @@
+[package]
+name = "dosrun"
+description = "Run DOS programs on the host with rs2's DOS machine (tests and quick checks)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+dos = { path = "../../crates/dos" }
+x86emu = { path = "../../crates/x86emu" }
