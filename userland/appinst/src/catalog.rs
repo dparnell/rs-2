@@ -15,6 +15,8 @@ pub struct Object {
     pub id: &'static [u8],
     /// The folder (its ID) when not the category's.
     pub folder: &'static [u8],
+    /// The Workplace Shell's PROGTYPE (VDM, WINDOWEDVDM); empty: PM.
+    pub progtype: &'static [u8],
 }
 
 pub struct File {
@@ -100,7 +102,7 @@ pub fn load() -> Vec<Category> {
                 let Some(a) = cats.last_mut().and_then(|c| c.apps.last_mut()) else { continue };
                 match word {
                     b"needs" => a.needs.push(get(0)),
-                    b"object" => a.objects.push(Object { title: get(0), program: get(1), params: get(2), dir: get(3), id: get(4), folder: get(5) }),
+                    b"object" => a.objects.push(Object { title: get(0), program: get(1), params: get(2), dir: get(3), id: get(4), folder: get(5), progtype: get(6) }),
                     b"file" => a.files.push(File { target: get(0), source: get(1), stored: get(2) }),
                     _ => {}
                 }

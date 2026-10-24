@@ -263,7 +263,16 @@ DOS/4GW, PMODE/W, DOS/32A or CWSDPMI-style extenders run on it.
   DOS settings (`DOS_SETTING=value` lines, as OS/2 passes them in
   `PgmInputs` / the program object's environment) configure the machine.
 - **Program objects** of type `PROG_VDM` / `PROG_WINDOWEDVDM` on the
-  desktop start the same way.
+  desktop start the same way: the Workplace Shell's WPProgram with
+  `PROGTYPE=VDM` or `WINDOWEDVDM` (its DOS Window and DOS Full Screen
+  in Command Prompts, IBM's `<WP_DOSWIN>` and `<WP_DOSFS>`), RS2SHELL's
+  program items. APPINST installs IBM's QBasic, DEBUG, EDLIN, MEM,
+  DOSKEY and GRAFTABL from the CD into `C:\OS2\MDOS` with QBasic and DOS
+  Editor objects in a DOS Programs folder.
+- **Keys in a window**: PM does not pass Shift, Ctrl and Alt on by
+  themselves, so the kernel sends their presses and releases to the
+  DOS session when a key's shift state differs from what the session saw
+  (Alt+F opens QBasic's File menu, Shift+F1 its help).
 - **Alt+Home** switches a DOS session between full screen and its window;
   a DOS session in a graphics mode can be windowed too.
 

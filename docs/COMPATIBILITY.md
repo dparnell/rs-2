@@ -288,17 +288,27 @@ desktop program objects. "dosrun" = on the host with `tools/dosrun`
 | tests/dos VESA.COM | works | dosrun: VBE 2.0 controller and mode information, mode 101h (640x480, 256 colours) drawn through the banked window with 4F05h. Modes 100h, 101h, 103h, 105h; the linear framebuffer at E0000000h (DPMI 0800h maps it). |
 | tests/dos DPMITEST.COM | works | QEMU, full screen and windowed, and dosrun: a 32-bit DPMI client (INT 31h 0300h output, LDT descriptors, a flat 4 GB selector, 1 MB block, 32-bit code segment, #DE exception handler, protected-mode INT hook, real-mode callback via 0301h, DOS memory, IRQ 0 hooked in protected mode arriving during a real-mode BIOS wait). |
 | MEM.EXE (IBM, OS/2's DOS) | works | dosrun: MEM and MEM /C (MCB chain, UMBs, EMS, XMS, HMA). |
-| DEBUG.EXE (IBM) | works | dosrun: register dump, D, U, A (assembling), G with INT 3. |
+| DEBUG.EXE (IBM) | works | dosrun: register dump, D, U, A (assembling), G with INT 3; lowercase commands (it checks each character against DOS's DBCS lead-byte table, which the first memory block used to overlay). |
 | EDLIN.COM (IBM) | works | dosrun: listing, editing a line, saving (E). |
-| QBASIC.EXE (IBM) | works | QEMU in a DOS window: the editor, then a typed SCREEN 13 program's output in the window. dosrun: the full-screen editor, typing a program, F5: a SCREEN 13 program (LINE, CIRCLE, text in graphics); `QBASIC /RUN MORTGAGE.BAS` (IBM's sample: menus, floating point; the same figures with the x87 and with QBASIC's own floating point). |
-| COMMAND.COM (IBM, OS/2's DOS) | works | dosrun: DIR, MEM (EXEC), `ECHO > file`, TYPE, EXIT. Not shipped; a test of the DOS kernel's internals. |
-| DOSKEY.COM (IBM) | works | dosrun, with rs2's COMMAND.COM (which reads its lines through DOSKEY's INT 2Fh 4810h when DOSKEY answers 4800h): installs resident, Up recalls commands. Under IBM's COMMAND.COM the next command hangs (that COMMAND.COM loops over DOS's data). |
+| QBASIC.EXE (IBM) | works | QEMU, installed by APPINST from the CD and started from the Workplace Shell's QBasic object (DOS Programs folder): the editor in a DOS window, Shift+F1 help (QBASIC.HLP), Alt+F menus; the QBasic Full Screen object; the DOS Editor object (`QBASIC /EDITOR`, IBM DOS Editor) in a window. Earlier: a typed SCREEN 13 program's output in the window. dosrun: the full-screen editor, typing a program, F5: a SCREEN 13 program (LINE, CIRCLE, text in graphics); `QBASIC /RUN MORTGAGE.BAS` (IBM's sample: menus, floating point; the same figures with the x87 and with QBASIC's own floating point). |
+| COMMAND.COM (IBM, OS/2's DOS) | works | dosrun: DIR, MEM (EXEC), `ECHO > file`, TYPE, EXIT. Not shipped (APPINST leaves rs2's COMMAND.COM in place); a test of the DOS kernel's internals. |
+| DOSKEY.COM (IBM) | works | dosrun, with rs2's COMMAND.COM (which reads its lines through DOSKEY's INT 2Fh 4810h when DOSKEY answers 4800h) and with IBM's: installs resident, Up recalls commands. |
+| GRAFTABL.COM (IBM) | works | dosrun: loads code page 437's graphics characters. |
+| BASICA.COM, BASIC.COM (IBM) | fails | dosrun: loops setting the cursor (INT 10h 02h, row FFh); not in APPINST. |
+| SUBST.EXE, JOIN.EXE (IBM) | fails | "Incorrect function" (they need DOS internals rs2's DOS does not have); not in APPINST. |
 | tests/dos BEEP.COM | partial | dosrun and QEMU: the PIT channel 2 / port 61h tones are seen by VDM.EXE and played as a square wave through rs2's audio mixer when there is sound hardware (`--sound`); not yet listened to. |
 
-Not yet: Sound Blaster 16 (16-bit/stereo), the OPL2/OPL3 FM synthesizer (AdLib), VESA modes with more than 8 bits per pixel, DOS settings in the program object notebook (the
-VDM reads them from the environment: `DOS_HIGH`, `DOS_UMB`,
-`EMS_MEMORY_LIMIT`, `XMS_MEMORY_LIMIT`, `DPMI_MEMORY_LIMIT`), direct
-disk access (INT 13h, 25h/26h).
+APPINST's **DOS Programs** category copies IBM's QBasic (QBASIC.EXE,
+QBASIC.HLP, MORTGAGE.BAS), DEBUG, EDLIN, MEM, DOSKEY and GRAFTABL from
+the CD into `C:\OS2\MDOS` (on a DOS session's PATH) and makes the QBasic,
+QBasic Full Screen and DOS Editor objects (WPProgram, PROGTYPE=WINDOWEDVDM
+or VDM) in a DOS Programs folder in Programs. OS/2 Warp 4 has no EDIT
+command; DOS Editor is QBasic's editor mode.
+
+Not yet: Sound Blaster 16 (16-bit/stereo), the OPL2/OPL3 FM synthesizer
+(AdLib), VESA modes with more than 8 bits per pixel, direct disk access
+(INT 13h, 25h/26h), the DOS settings page in the Workplace Shell's
+program notebook (RS2SHELL has it).
 
 ## Fixed while getting these to run
 
