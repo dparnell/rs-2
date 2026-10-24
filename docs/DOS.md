@@ -251,6 +251,18 @@ reflected DOS call) reaches its protected-mode handler too, through a
 real-mode stub the host puts in the IVT meanwhile. Programs bound to
 DOS/4GW, PMODE/W, DOS/32A or CWSDPMI-style extenders run on it.
 
+### The DOS API in protected mode
+
+A client that asks for the "MS-DOS" extensions (INT 2Fh AX=168Ah,
+`MS-DOS` or OS/2's `WINOS2`: the extension API gives the LDT alias)
+gets the DOS API translated, as OS/2's VDPX.SYS does with
+`DPMI_DOS_API=AUTO`: INT 21h, 10h-12h, 15h, 16h, 1Ah, 25h/26h and 33h
+from protected mode are served directly on its selectors (DOS reaches
+memory through the segment registers' bases), with selectors for the
+segments they take or return. A mouse event handler set from protected
+mode is called in protected mode. Win-OS/2 needs this (docs/WINOS2.md).
+INT 31h AX=0010h (VDPMI: allocate several selectors) is there too.
+
 ## Starting DOS sessions
 
 - **From CMD**: a program that is a DOS executable (`.COM`, or an `.EXE`
