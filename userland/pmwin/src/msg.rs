@@ -172,7 +172,12 @@ pub fn send(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     if !reply {
         return 0;
     }
-    wait_reply(q, mine, id)
+    let before = s.queues.get_mut(&mine).and_then(|x| x.awaiting.replace((h, msg)));
+    let r = wait_reply(q, mine, id);
+    if let Some(x) = st().queues.get_mut(&mine) {
+        x.awaiting = before;
+    }
+    r
 }
 
 /// Notify a window: sent to windows of the calling thread, posted to
@@ -270,6 +275,8 @@ pub extern "C" fn WinCreateMsgQueue(_hab: u32, _cmsg: i32) -> u32 {
         msg_pos: s.pointer,
         msg_time: now(),
         hung: false,
+        modal: alloc::vec::Vec::new(),
+        awaiting: None,
     };
     s.queues.insert(h, q);
     // A PM program: the PM server runs while there are any.

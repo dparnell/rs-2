@@ -1321,7 +1321,7 @@ pub(crate) fn read_file(name: &[u8]) -> Option<Vec<u8>> {
     ok.then_some(v)
 }
 
-fn write_file(name: &[u8], d: &[u8]) -> bool {
+pub fn write_file(name: &[u8], d: &[u8]) -> bool {
     let mut z = name.to_vec();
     z.push(0);
     let (mut hf, mut action) = (0u32, 0u32);

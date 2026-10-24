@@ -42,6 +42,7 @@ mod msg;
 mod notebook;
 mod pointer;
 mod rect;
+mod report;
 mod res;
 mod scrollbar;
 mod server;

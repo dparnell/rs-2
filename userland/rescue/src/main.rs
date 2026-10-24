@@ -51,6 +51,10 @@ unsafe extern "C" {
 }
 
 const SEM: &[u8] = b"\\SEM32\\RS2\\RESCUE\0";
+/// Asking the PM server for PM's own state (PMWIN's report.rs), and its
+/// answer.
+const PM_ASK: &[u8] = b"\\SEM32\\RS2\\PMSTATE\0";
+const PM_DONE: &[u8] = b"\\SEM32\\RS2\\PMSTATED\0";
 const ROWS: usize = 25;
 const COLS: usize = 80;
 /// Process rows on the screen.
@@ -155,6 +159,40 @@ fn boot_drive() -> u8 {
     if (1..=26).contains(&v[0]) { b'A' + v[0] as u8 - 1 } else { b'C' }
 }
 
+/// PM's own state: the PM server writes it to RS2PM.TXT when asked, unless
+/// a thread keeps PM's lock.
+fn pm_state() -> String {
+    let (ask, done) = unsafe { (ASK, DONE) };
+    if ask == 0 || done == 0 {
+        return String::from("---- PM ----\r\n(no semaphores to ask PM with)\r\n");
+    }
+    let mut n = 0;
+    unsafe {
+        DosResetEventSem(done, &mut n);
+        DosPostEventSem(ask);
+    }
+    if unsafe { DosWaitEventSem(done, 3000) } != 0 {
+        return String::from("---- PM ----\r\nPM did not answer within 3 seconds: a thread keeps its lock, or the PM server's input thread is stuck.\r\n");
+    }
+    let name = alloc::format!("{}:\\RS2PM.TXT\0", boot_drive() as char);
+    let (mut hf, mut action) = (0u32, 0u32);
+    // OPEN_ACTION_OPEN_IF_EXISTS; DENYWRITE | READONLY.
+    if unsafe { DosOpen(name.as_ptr(), &mut hf, &mut action, 0, 0, 0x01, 0x20, core::ptr::null_mut()) } != 0 {
+        return String::from("---- PM ----\r\n(RS2PM.TXT could not be read)\r\n");
+    }
+    let mut buf = alloc::vec![0u8; 64 * 1024];
+    let mut got = 0u32;
+    unsafe {
+        DosRead(hf, buf.as_mut_ptr(), buf.len() as u32, &mut got);
+        DosClose(hf);
+    }
+    String::from_utf8_lossy(&buf[..got as usize]).into_owned()
+}
+
+/// The semaphores for asking PM (created here: RESCUE starts first).
+static mut ASK: u32 = 0;
+static mut DONE: u32 = 0;
+
 /// Append a report to RS2HANG.TXT on the boot drive; its name.
 fn save_report(procs: &[Proc]) -> Option<String> {
     let mut dt = DateTime::default();
@@ -172,6 +210,7 @@ fn save_report(procs: &[Proc]) -> Option<String> {
         r.push_str(line);
         r.push_str("\r\n");
     }
+    r.push_str(&pm_state());
     r.push_str("\r\n");
     let name = alloc::format!("{}:\\RS2HANG.TXT", boot_drive() as char);
     let mut z = name.clone().into_bytes();
@@ -300,6 +339,13 @@ fn main(_s: &os2::Startup) -> u32 {
     // One copy: a second finds the semaphore there.
     if unsafe { DosCreateEventSem(SEM.as_ptr(), &mut hev, 0, 0) } != 0 {
         return 1;
+    }
+    unsafe {
+        let (mut a, mut d) = (0u32, 0u32);
+        if DosCreateEventSem(PM_ASK.as_ptr(), &mut a, 0, 0) == 0 && DosCreateEventSem(PM_DONE.as_ptr(), &mut d, 0, 0) == 0 {
+            ASK = a;
+            DONE = d;
+        }
     }
     loop {
         if unsafe { DosWaitEventSem(hev, 0xffff_ffff) } != 0 {

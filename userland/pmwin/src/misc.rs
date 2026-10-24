@@ -823,6 +823,7 @@ pub extern "C" fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32 {
     let mouse = st().buttons & 1 != 0;
     let mut ok = false;
     let mut m = state::QMsg::default();
+    state::modal_begin("WinTrackRect", h);
     loop {
         if crate::msg::WinGetMsg(1, &mut m, 0, 0, 0) == 0 {
             crate::msg::WinPostQueueMsg(st().my_queue(), win::WM_QUIT, 0, 0);
@@ -877,6 +878,7 @@ pub extern "C" fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32 {
             }
         }
     }
+    state::modal_end();
     invert_frame(hps, &cur, border);
     if st().capture == h {
         st().capture = if old_capture == h { 0 } else { old_capture };

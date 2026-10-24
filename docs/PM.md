@@ -410,7 +410,16 @@ whatever is on the screen:
   thread gets ERROR_SEM_OWNER_DIED and carries on);
 - S appends a report to `RS2HANG.TXT` on the boot drive: the processes
   and every thread's state and kernel stack (`Rs2QueryThreadReport`, what
-  Ctrl+Alt+F12 writes on the serial port);
+  Ctrl+Alt+F12 writes on the serial port), then PM's own view: RESCUE
+  posts `\SEM32\RS2\PMSTATE`, the PM server's input thread (it takes
+  PM's lock at least every 100 ms) writes RS2PM.TXT and posts
+  `\SEM32\RS2\PMSTATED` (PMWIN's `report.rs`): the capture, focus and
+  active windows, each message queue (waiting for messages, waiting for
+  the reply to a message it sent and to which window, in a modal loop
+  such as `WinProcessDlg` or `WinTrackRect`, tracking a menu, not
+  responding) and the top-level windows in z-order (class, title,
+  position, visible, disabled, minimized, needing paint, queue, owner).
+  No answer within 3 seconds is reported too: a thread keeps PM's lock;
 - F5 refreshes, Esc ends the pop-up and PM repaints.
 
 ## The switch list

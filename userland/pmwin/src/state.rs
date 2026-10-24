@@ -49,6 +49,11 @@ pub struct Queue {
     pub msg_time: u32,
     /// Marked "not responding" by the PM server.
     pub hung: bool,
+    /// Modal loops the thread is in, innermost last (the rescue report):
+    /// what, and its window.
+    pub modal: Vec<(&'static str, u32)>,
+    /// The reply the thread waits for: (window, message) it sent.
+    pub awaiting: Option<(u32, u32)>,
 }
 
 pub struct PsEntry {
@@ -349,6 +354,22 @@ pub fn now() -> u32 {
     let mut v = [0u32; 1];
     unsafe { os2::DosQuerySysInfo(14, 14, v.as_mut_ptr(), 4) };
     v[0]
+}
+
+/// The calling thread enters a modal loop (`what`, on window `h`):
+/// noted for the rescue report until [`modal_end`].
+pub fn modal_begin(what: &'static str, h: u32) {
+    let q = st().my_queue();
+    if let Some(x) = st().queues.get_mut(&q) {
+        x.modal.push((what, h));
+    }
+}
+
+pub fn modal_end() {
+    let q = st().my_queue();
+    if let Some(x) = st().queues.get_mut(&q) {
+        x.modal.pop();
+    }
 }
 
 impl State {

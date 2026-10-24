@@ -234,6 +234,7 @@ pub extern "C" fn WinProcessDlg(h: u32) -> u32 {
     win::show(h, true);
     win::activate(h);
     let mut m = QMsg::default();
+    crate::state::modal_begin("WinProcessDlg", h);
     while data(h).is_some_and(|d| !d.dismissed) {
         if msg::WinGetMsg(1, &mut m, 0, 0, 0) == 0 {
             // WM_QUIT ends the dialog; the application's loop sees it too.
@@ -245,6 +246,7 @@ pub extern "C" fn WinProcessDlg(h: u32) -> u32 {
         }
         msg::WinDispatchMsg(1, &m);
     }
+    crate::state::modal_end();
     restore_owner(h);
     data(h).map_or(DID_ERROR, |d| d.result)
 }
