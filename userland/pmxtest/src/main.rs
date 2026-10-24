@@ -1,7 +1,8 @@
 //! Self-checks of the Presentation Manager features beyond the basics:
-//! hooks (hooks.rs). Each check prints PASS or FAIL; the last line is
-//! "pmxtest done: N failure(s)" and the exit code N. `PMXTEST CHILD`
-//! is the second process the system hooks are checked in; `PMXTEST
+//! hooks (hooks.rs), DDE with another process (dde.rs). Each check
+//! prints PASS or FAIL; the last line is "pmxtest done: N failure(s)"
+//! and the exit code N. `PMXTEST CHILD` is the second process the system
+//! hooks are checked in, `PMXTEST DDESERVER` the DDE server; `PMXTEST
 //! RECORD` waits for three keys or clicks (typed by `xtask run --type`)
 //! and reports what the journal record hook saw.
 
@@ -14,6 +15,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use os2::*;
 
+mod dde;
 mod hooks;
 mod pm;
 
@@ -53,6 +55,9 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     if let Some(r) = hooks::client_msg(h, msg, mp1, mp2) {
         return r;
     }
+    if let Some(r) = dde::client_msg(h, msg, mp1, mp2) {
+        return r;
+    }
     unsafe { WinDefWindowProc(h, msg, mp1, mp2) }
 }
 
@@ -79,11 +84,21 @@ fn main(s: &Startup) -> u32 {
         }
         return r;
     }
+    if args.starts_with(b"DDESERVER") {
+        let r = dde::server(hab);
+        unsafe {
+            WinDestroyWindow(frame);
+            WinDestroyMsgQueue(hmq);
+            WinTerminate(hab);
+        }
+        return r;
+    }
     if args.starts_with(b"RECORD") {
         hooks::record(hab, client);
     } else {
         check("WinInitialize/WinCreateMsgQueue and a window", hab != 0 && hmq != 0 && client != 0);
         hooks::hook_checks(hab, hmq, client);
+        dde::dde_checks(hab, client);
     }
     unsafe {
         WinDestroyWindow(frame);

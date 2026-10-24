@@ -874,10 +874,11 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 WinDefWindowProc(h, msg, mp1, mp2)
             }
         }
-        // Messages a frame does not know (0x213-0x406, such as the help
-        // manager's HM_ messages, and WM_USER on) go to its client, as in
-        // IBM's frame procedure.
-        0x213..=0x406 | 0x1000.. => {
+        // Messages a frame does not know (0x7b-0xba but WM_QUERYCONVERTPOS,
+        // among them the DDE messages WinDdeInitiate sends to frames;
+        // 0x213-0x406, such as the help manager's HM_ messages; WM_USER
+        // on) go to its client, as in IBM's frame procedure.
+        0x7b..=0xaf | 0xb1..=0xba | 0x213..=0x406 | 0x1000.. => {
             let c = WinWindowFromID(h, FID_CLIENT);
             if c != 0 { send(c, msg, mp1, mp2) } else { WinDefWindowProc(h, msg, mp1, mp2) }
         }
