@@ -141,6 +141,7 @@ dependencies = [
 name = "xtask"
 version = "0.1.0"
 dependencies = [
+ "dos",
  "fat",
  "hpfs",
  "ipf",
