@@ -42,10 +42,13 @@ pub const FUCASE: u16 = 0x1ac2;
 pub const FCHARS: u16 = 0x1b44;
 pub const COLLATE: u16 = 0x1b6c;
 pub const DBCS: u16 = 0x1c6e;
+/// The end of DOS's data (DBCS's empty table and a spare word).
+pub const DOSSEG_END: u16 = 0x1c74;
 /// The DOS kernel's own PSP (owner of the first environment).
 pub const SYS_PSP: u16 = 0x0060;
-/// First MCB of conventional memory.
-pub const FIRST_MCB: u16 = 0x0200;
+/// First MCB of conventional memory, past DOS's data.
+pub const FIRST_MCB: u16 = 0x0240;
+const _: () = assert!((DOSSEG as u32) * 16 + DOSSEG_END as u32 <= (FIRST_MCB as u32) * 16);
 
 /// DOS error codes.
 pub mod err {
