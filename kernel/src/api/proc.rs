@@ -361,6 +361,7 @@ pub fn dos_wait_thread(c: &mut Ctx) -> u32 {
     // DosWaitThread(ptid, option)
     let (ptid, nowait) = (c.arg(0), c.arg(1) != 0);
     let Some(want) = c.read_u32(ptid) else { return err::INVALID_ADDRESS };
+    crate::trace!("    tid {want}{}", if nowait { " (no wait)" } else { "" });
     if want == c.thread.tid {
         return err::INVALID_THREADID;
     }

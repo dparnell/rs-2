@@ -1,5 +1,6 @@
 //! Self-checks of the Presentation Manager features beyond the basics:
-//! hooks (hooks.rs), DDE with another process (dde.rs). Each check
+//! hooks (hooks.rs), DDE with another process (dde.rs), the registry
+//! through Open32's calls (reg.rs). Each check
 //! prints PASS or FAIL; the last line is "pmxtest done: N failure(s)"
 //! and the exit code N. `PMXTEST CHILD` is the second process the system
 //! hooks are checked in, `PMXTEST DDESERVER` the DDE server; `PMXTEST
@@ -18,6 +19,7 @@ use os2::*;
 mod dde;
 mod hooks;
 mod pm;
+mod reg;
 
 use pm::*;
 
@@ -61,6 +63,47 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     unsafe { WinDefWindowProc(h, msg, mp1, mp2) }
 }
 
+/// `PMXTEST WINS`: the window tree (class, text, position, style), for
+/// looking at what another program made.
+fn list_windows(parent: u32, depth: usize) {
+    let e = unsafe { WinBeginEnumWindows(parent) };
+    loop {
+        let h = unsafe { WinGetNextWindow(e) };
+        if h == 0 {
+            break;
+        }
+        let mut class = [0u8; 32];
+        let mut text = [0u8; 48];
+        let mut swp = [0i32; 9];
+        let n = unsafe { WinQueryClassName(h, 32, class.as_mut_ptr()) } as usize;
+        let t = unsafe { WinQueryWindowText(h, 48, text.as_mut_ptr()) } as usize;
+        unsafe { WinQueryWindowPos(h, swp.as_mut_ptr()) };
+        let style = unsafe { WinQueryWindowULong(h, -2) };
+        let id = unsafe { WinQueryWindowUShort(h, -1) };
+        let line = alloc::format!(
+            "{:w$}{h:#x} {} id {id:#x} '{}' ({}, {}) {}x{} style {style:#x}\0",
+            "",
+            core::str::from_utf8(&class[..n]).unwrap_or("?"),
+            core::str::from_utf8(&text[..t]).unwrap_or("?"),
+            swp[4],
+            swp[3],
+            swp[2],
+            swp[1],
+            w = depth * 2
+        );
+        // On the serial port too (PMXTEST may run from a command prompt).
+        unsafe extern "C" {
+            #[link_name = "RS2API.4"]
+            fn Rs2DebugTrace(psz: *const u8) -> u32;
+        }
+        unsafe { Rs2DebugTrace(line.as_ptr()) };
+        if depth < 3 {
+            list_windows(h, depth + 1);
+        }
+    }
+    unsafe { WinEndEnumWindows(e) };
+}
+
 fn main(s: &Startup) -> u32 {
     let hab = unsafe { WinInitialize(0) };
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
@@ -84,6 +127,22 @@ fn main(s: &Startup) -> u32 {
         }
         return r;
     }
+    if args.starts_with(b"WINS") {
+        // `PMXTEST WINS PROGRAM`: start it first.
+        let prog: alloc::vec::Vec<u8> = args[4..].iter().copied().skip_while(|&c| c == b' ').collect();
+        if !prog.is_empty() {
+            let mut name = prog.clone();
+            name.push(0);
+            let mut a = prog.clone();
+            a.extend_from_slice(b"\0\0");
+            let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+            let rc = unsafe { DosExecPgm(core::ptr::null_mut(), 0, EXEC_ASYNC, a.as_ptr(), core::ptr::null(), &mut res, name.as_ptr()) };
+            println!("started {}: {rc}", core::str::from_utf8(&prog).unwrap_or("?"));
+        }
+        unsafe { DosSleep(15000) };
+        list_windows(HWND_DESKTOP, 0);
+        return 0;
+    }
     if args.starts_with(b"DDESERVER") {
         let r = dde::server(hab);
         unsafe {
@@ -99,6 +158,7 @@ fn main(s: &Startup) -> u32 {
         check("WinInitialize/WinCreateMsgQueue and a window", hab != 0 && hmq != 0 && client != 0);
         hooks::hook_checks(hab, hmq, client);
         dde::dde_checks(hab, client);
+        reg::reg_checks();
     }
     unsafe {
         WinDestroyWindow(frame);

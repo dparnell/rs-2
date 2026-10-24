@@ -99,6 +99,22 @@ unsafe extern "C" {
     pub fn WinShowWindow(h: u32, show: u32) -> u32;
     #[link_name = "PMWIN.851"]
     pub fn WinSetActiveWindow(desk: u32, h: u32) -> u32;
+    #[link_name = "PMWIN.702"]
+    pub fn WinBeginEnumWindows(h: u32) -> u32;
+    #[link_name = "PMWIN.756"]
+    pub fn WinGetNextWindow(henum: u32) -> u32;
+    #[link_name = "PMWIN.737"]
+    pub fn WinEndEnumWindows(henum: u32) -> u32;
+    #[link_name = "PMWIN.837"]
+    pub fn WinQueryWindowPos(h: u32, swp: *mut i32) -> u32;
+    #[link_name = "PMWIN.805"]
+    pub fn WinQueryClassName(h: u32, n: i32, buf: *mut u8) -> i32;
+    #[link_name = "PMWIN.841"]
+    pub fn WinQueryWindowText(h: u32, n: i32, buf: *mut u8) -> i32;
+    #[link_name = "PMWIN.844"]
+    pub fn WinQueryWindowUShort(h: u32, i: i32) -> u32;
+    #[link_name = "PMWIN.843"]
+    pub fn WinQueryWindowULong(h: u32, i: i32) -> u32;
     #[link_name = "PMWIN.875"]
     pub fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32;
 }

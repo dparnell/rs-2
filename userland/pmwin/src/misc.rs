@@ -71,9 +71,11 @@ pub extern "C" fn WinTerminate(_hab: u32) -> u32 {
     1
 }
 
+/// WinQueryAnchorBlock(hwnd): NULLHANDLE for a window that does not
+/// exist (the Open Class library tells valid windows from it).
 #[unsafe(no_mangle)]
-pub extern "C" fn WinQueryAnchorBlock(_h: u32) -> u32 {
-    HAB
+pub extern "C" fn WinQueryAnchorBlock(h: u32) -> u32 {
+    if st().desk.exists(h) || h == pmwin::HWND_DESKTOP || h == pmwin::HWND_OBJECT { HAB } else { 0 }
 }
 
 /// Record an error for WinGetLastError.
@@ -518,6 +520,12 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryVersion(_hab: u32) -> u32 {
     20 | 45 << 8
+}
+
+/// WinQueryObjectWindow(hwndDesktop): the root of the object windows.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryObjectWindow(_desk: u32) -> u32 {
+    pmwin::HWND_OBJECT
 }
 
 /// WinQueryCp(hmq): the queue's code page (HMQ_CURRENT: the caller's).

@@ -13,7 +13,8 @@
 //! a 64 KB boundary in the link). Executables also get a stack object.
 //! The exports file lists `NAME [@ordinal]` per line (DLLs); `NAME=symbol`
 //! exports a symbol under another name, `NAME=MODULE.ordinal` forwards the
-//! entry to another module's ordinal (an LX forwarder entry).
+//! entry to another module's ordinal (an LX forwarder entry). A second
+//! line with an ordinal already listed only adds a name for it.
 
 use std::collections::BTreeMap;
 use std::process::ExitCode;
@@ -544,6 +545,10 @@ fn write_lx(
     let mut ord = 1u16;
     for e in exports {
         let eord = &e.ord;
+        // A second name for an ordinal: only a name table entry.
+        if *eord < ord {
+            continue;
+        }
         if *eord > ord {
             // Skip unused ordinals.
             let mut gap = eord - ord;

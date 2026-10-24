@@ -308,6 +308,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pmwinx-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "pmwp-dll"
 version = "0.1.0"
 dependencies = [
@@ -326,6 +333,13 @@ dependencies = [
 
 [[package]]
 name = "pmxtest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "registry-dll"
 version = "0.1.0"
 dependencies = [
  "os2",

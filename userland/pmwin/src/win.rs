@@ -461,7 +461,10 @@ pub extern "C" fn WinWindowFromPoint(parent: u32, pptl: *const PointL, children:
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowProcess(h: u32, ppid: *mut u32, ptid: *mut u32) -> u32 {
     let s = st();
-    let Some(q) = s.desk.get(h).and_then(|w| s.queues.get(&w.queue)) else { return 0 };
+    // The object window (and windows no queue owns) belong to PM: the
+    // PM server.
+    let queue = s.desk.get(h).map(|w| if w.queue == 0 { s.server_queue } else { w.queue });
+    let Some(q) = queue.and_then(|q| s.queues.get(&q)) else { return 0 };
     unsafe {
         if !ppid.is_null() {
             ppid.write_unaligned(q.pid);

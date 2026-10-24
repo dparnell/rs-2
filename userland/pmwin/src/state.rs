@@ -300,7 +300,8 @@ pub fn init(surface: Surface) {
         ptr_hidden: 0,
         ptr_hardware: false,
         ptr_level: 0,
-        next_hmq: 1,
+        // 1 is HMQ_CURRENT.
+        next_hmq: 2,
         cascade: 0,
         ctl: BTreeMap::new(),
         accels: Vec::new(),

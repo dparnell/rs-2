@@ -26,7 +26,7 @@ pub struct PointL {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Default)]
 pub struct RectL {
     pub left: i32,
     pub bottom: i32,
@@ -80,6 +80,9 @@ pub struct PsExtra {
     pub generation: u32,
     /// Retained segments and metafile recording.
     pub seg: crate::gpiseg::SegState,
+    /// The pick aperture: its centre and its size (None: the default).
+    pub pick_pos: (i32, i32),
+    pub pick_size: Option<(i32, i32)>,
 }
 
 const HPS_BASE: u32 = 0x100;
@@ -426,6 +429,62 @@ pub extern "C" fn GpiQueryPS(hps: u32, size: *mut i32) -> u32 {
         }
     }
     e.gpi.options & !0x1c | e.ps.page_units
+}
+
+/// The default pick aperture's size (IBM's PMGPI asks the device).
+const PICK_DEFAULT: (i32, i32) = (10, 10);
+
+fn point_in(p: *const i32) -> Option<(i32, i32)> {
+    (!p.is_null()).then(|| unsafe { (p.read_unaligned(), p.add(1).read_unaligned()) })
+}
+
+fn point_out(p: *mut i32, v: (i32, i32)) -> bool {
+    if p.is_null() {
+        return false;
+    }
+    unsafe {
+        p.write_unaligned(v.0);
+        p.add(1).write_unaligned(v.1);
+    }
+    true
+}
+
+/// GpiSetPickAperturePosition(hps, pptlPick): the centre of the pick
+/// aperture (correlation is not done, the aperture is kept).
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiSetPickAperturePosition(hps: u32, p: *const i32) -> u32 {
+    let Some(e) = entry(st(), hps) else { return 0 };
+    let Some(v) = point_in(p) else { return 0 };
+    e.gpi.pick_pos = v;
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiQueryPickAperturePosition(hps: u32, p: *mut i32) -> u32 {
+    let Some(e) = entry(st(), hps) else { return 0 };
+    point_out(p, e.gpi.pick_pos) as u32
+}
+
+/// GpiSetPickApertureSize(hps, lOptions, psizlSize): PICKAP_DEFAULT (0)
+/// or PICKAP_REC (2) with a size.
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiSetPickApertureSize(hps: u32, opt: u32, p: *const i32) -> u32 {
+    let Some(e) = entry(st(), hps) else { return 0 };
+    match opt {
+        0 => e.gpi.pick_size = None,
+        2 => match point_in(p) {
+            Some(v) if v.0 >= 0 && v.1 >= 0 => e.gpi.pick_size = Some(v),
+            _ => return 0,
+        },
+        _ => return 0,
+    }
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiQueryPickApertureSize(hps: u32, p: *mut i32) -> u32 {
+    let Some(e) = entry(st(), hps) else { return 0 };
+    point_out(p, e.gpi.pick_size.unwrap_or(PICK_DEFAULT)) as u32
 }
 
 /// GpiSavePS / GpiRestorePS: a single level is enough for most programs;

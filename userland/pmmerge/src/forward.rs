@@ -79,12 +79,15 @@ forward! {
     WinExcludeUpdateRegion = "PMWIN.742";
     WinFillRect = "PMWIN.743";
     WinFindAtom = "PMWIN.744";
+    WinFlashWindow = "PMWIN.745";
     WinFocusChange = "PMWIN.746";
     WinFreeErrorInfo = "PMWIN.748";
     WinGetCurrentTime = "PMWIN.750";
     WinGetErrorInfo = "PMWIN.751";
     WinGetKeyState = "PMWIN.752";
     WinGetLastError = "PMWIN.753";
+    WinGetMaxPosition = "PMWIN.754";
+    WinGetMinPosition = "PMWIN.755";
     WinGetMsg = "PMWIN.915";
     WinGetNextWindow = "PMWIN.756";
     WinGetPS = "PMWIN.757";
@@ -148,6 +151,7 @@ forward! {
     WinQueryFocus = "PMWIN.817";
     WinQueryMsgPos = "PMWIN.818";
     WinQueryMsgTime = "PMWIN.819";
+    WinQueryObjectWindow = "PMWIN.820";
     WinQueryPointer = "PMWIN.821";
     WinQueryPointerInfo = "PMWIN.822";
     WinQueryPointerPos = "PMWIN.823";

@@ -25,6 +25,10 @@ pub const FCF_DLGBORDER: u32 = 0x0100;
 pub const FCF_BORDER: u32 = 0x0200;
 pub const FCF_SHELLPOSITION: u32 = 0x0400;
 pub const FCF_TASKLIST: u32 = 0x0800;
+const FS_TASKLIST: u32 = 0x0008;
+const FS_DLGBORDER: u32 = 0x0080;
+const FS_BORDER: u32 = 0x0100;
+const FS_SIZEBORDER: u32 = 0x0800;
 pub const FCF_ICON: u32 = 0x4000;
 pub const FCF_ACCELTABLE: u32 = 0x8000;
 pub const FCF_HIDEBUTTON: u32 = 0x0100_0000;
@@ -146,6 +150,25 @@ fn setup(frame: u32, fcd: u32) {
     };
     let id = if id == 0 { st().desk.get(frame).map_or(0, |w| w.id) } else { id };
     let title = st().desk.get(frame).map_or(alloc::vec::Vec::new(), |w| w.text.clone());
+    // The frame styles (FS_*) give a frame made with WinCreateWindow its
+    // border and its switch entry as the create flags do (the Open Class
+    // library's frames have FS_SIZEBORDER | FS_TASKLIST).
+    let style = st().desk.get(frame).map_or(0, |w| w.style);
+    let mut fcf = fcf;
+    if fcf & (FCF_SIZEBORDER | FCF_DLGBORDER | FCF_BORDER) == 0 {
+        fcf |= if style & FS_SIZEBORDER != 0 {
+            FCF_SIZEBORDER
+        } else if style & FS_DLGBORDER != 0 {
+            FCF_DLGBORDER
+        } else if style & FS_BORDER != 0 {
+            FCF_BORDER
+        } else {
+            0
+        };
+    }
+    if style & FS_TASKLIST != 0 {
+        fcf |= FCF_TASKLIST;
+    }
     st().frames.insert(frame, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0, shell_pos: false });
     if fcf & FCF_ICON != 0 {
         let i = crate::pointer::WinLoadPointer(1, hmod, id);
@@ -216,7 +239,10 @@ fn format(frame: u32) -> (alloc::vec::Vec<(u32, Rect)>, Rect) {
     let s = st();
     let mut out = alloc::vec::Vec::new();
     let Some(f) = s.frames.get(&frame) else { return (out, Rect::default()) };
-    let (fcf, client) = (f.fcf, f.client);
+    let fcf = f.fcf;
+    // The client is the child FID_CLIENT (its ID may be set after it was
+    // made, as the Open Class library does).
+    let client = WinWindowFromID(frame, FID_CLIENT);
     let (cx, cy) = s.desk.get(frame).map_or((0, 0), |w| (w.cx, w.cy));
     let b = border(fcf);
     let (l, mut bot, mut r, mut top) = (b, b, cx - b, cy - b);
@@ -486,20 +512,7 @@ pub fn minimize(h: u32) {
     let was_max = w.style & ws::MAXIMIZED != 0;
     let kids: alloc::vec::Vec<u32> = w.children.iter().copied().filter(|&k| s.desk.get(k).is_some_and(|x| x.visible_style())).collect();
     let viewer = s.min_viewer != 0 && s.desk.exists(s.min_viewer);
-    let (sw, sh) = (s.surface.width, s.surface.height);
-    // Where it goes: where it was last minimized, else the first free
-    // place along the bottom.
-    let taken: alloc::vec::Vec<Rect> = s
-        .frames
-        .iter()
-        .filter(|&(&f, x)| f != h && x.min.as_ref().is_some_and(|m| !m.viewer))
-        .filter_map(|(&f, _)| s.desk.get(f).map(|x| Rect::new(x.x, x.y, x.x + x.cx, x.y + x.cy)))
-        .collect();
-    let icon_pos = s.frames.get(&h).and_then(|f| f.icon_pos);
-    let slot = match icon_pos {
-        Some((x, y)) => Rect::new(x, y, x + pmwin::minimize::ICON_W, y + pmwin::minimize::ICON_H),
-        None => pmwin::minimize::free_slot(&taken, sw, sh),
-    };
+    let slot = min_slot(h);
     minmax_frame(h, SWP_MINIMIZE, (slot.left, slot.bottom, slot.width(), slot.height()));
     let s = st();
     for &k in &kids {
@@ -591,6 +604,87 @@ pub fn draw_frame(c: &mut Canvas, f: u32, active: bool) {
 }
 
 /// Maximize or restore a frame.
+/// Where a frame goes when it is minimized: where it was last minimized,
+/// else the first free place along the bottom.
+fn min_slot(h: u32) -> Rect {
+    let s = st();
+    let (sw, sh) = (s.surface.width, s.surface.height);
+    let taken: alloc::vec::Vec<Rect> = s
+        .frames
+        .iter()
+        .filter(|&(&f, x)| f != h && x.min.as_ref().is_some_and(|m| !m.viewer))
+        .filter_map(|(&f, _)| s.desk.get(f).map(|x| Rect::new(x.x, x.y, x.x + x.cx, x.y + x.cy)))
+        .collect();
+    match s.frames.get(&h).and_then(|f| f.icon_pos) {
+        Some((x, y)) => Rect::new(x, y, x + pmwin::minimize::ICON_W, y + pmwin::minimize::ICON_H),
+        None => pmwin::minimize::free_slot(&taken, sw, sh),
+    }
+}
+
+/// SWP fields: fl, cy, cx, y, x, hwndInsertBehind, hwnd.
+fn put_swp(pswp: *mut u32, h: u32, (x, y, cx, cy): (i32, i32, i32, i32)) {
+    unsafe {
+        *pswp |= 0x0003;
+        *pswp.add(1) = cy as u32;
+        *pswp.add(2) = cx as u32;
+        *pswp.add(3) = y as u32;
+        *pswp.add(4) = x as u32;
+        *pswp.add(6) = h;
+    }
+}
+
+/// WinGetMaxPosition(hwnd, pswp): where a frame goes maximized: its
+/// parent's area (the screen) with the sizing border outside (IBM's
+/// XGetMaxPosition asks the frame for its border, WM_QUERYBORDERSIZE).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetMaxPosition(h: u32, pswp: *mut u32) -> u32 {
+    if pswp.is_null() || !st().desk.exists(h) {
+        return 0;
+    }
+    let b = if st().frames.contains_key(&h) { border(fcf(h)) } else { 0 };
+    let parent = ctl::parent(h);
+    let (cx, cy) = if parent == HWND_DESKTOP || parent == 0 { (st().surface.width, st().surface.height) } else { ctl::size(parent) };
+    put_swp(pswp, h, (-b, -b, cx + 2 * b, cy + 2 * b));
+    1
+}
+
+/// WinGetMinPosition(hwnd, pswp, pptl): where a frame goes minimized
+/// (pptl, a position to start from, is not needed: the icons fill the
+/// bottom from the left).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetMinPosition(h: u32, pswp: *mut u32, _pptl: *const i32) -> u32 {
+    if pswp.is_null() || !st().desk.exists(h) {
+        return 0;
+    }
+    let r = min_slot(h);
+    put_swp(pswp, h, (r.left, r.bottom, r.width(), r.height()));
+    1
+}
+
+const TID_FLASHWINDOW: u32 = 0xfffd;
+
+/// WinFlashWindow(hwnd, fFlash): the frame's title bar flashes (turns
+/// active and inactive twice a second) until it is told to stop.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinFlashWindow(h: u32, on: u32) -> u32 {
+    if !st().frames.contains_key(&h) {
+        return 0;
+    }
+    let tb = WinWindowFromID(h, FID_TITLEBAR);
+    if on != 0 {
+        crate::msg::WinStartTimer(0, h, TID_FLASHWINDOW, 500);
+        if tb != 0 {
+            send(tb, TBM_SETHILITE, (!title_active(tb)) as u32, 0);
+        }
+    } else {
+        crate::msg::WinStopTimer(0, h, TID_FLASHWINDOW);
+        if tb != 0 {
+            send(tb, TBM_SETHILITE, 0, 0);
+        }
+    }
+    1
+}
+
 pub fn maximize(h: u32, on: bool) {
     if on && is_minimized(h) {
         restore(h);
@@ -733,6 +827,14 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_PAINT => {
             paint(h);
+            0
+        }
+        crate::win::WM_TIMER if mp1 & 0xffff == TID_FLASHWINDOW => {
+            let tb = WinWindowFromID(h, FID_TITLEBAR);
+            if tb != 0 {
+                let lit = ctl::data::<bool>(tb).is_some_and(|b| *b);
+                send(tb, TBM_SETHILITE, (!lit) as u32, 0);
+            }
             0
         }
         WM_BUTTON1DOWN if is_minimized(h) => {

@@ -726,6 +726,9 @@ pub extern "C" fn WinQueryCapture(_desk: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryQueueInfo(hmq: u32, p: *mut u8, cb: u32) -> u32 {
     let s = st();
+    // HMQ_CURRENT: the caller's queue (the Open Class library asks so
+    // whether the thread has one).
+    let hmq = if hmq == 1 { s.my_queue() } else { hmq };
     let Some(q) = s.queues.get(&hmq) else { return 0 };
     if p.is_null() {
         return 0;

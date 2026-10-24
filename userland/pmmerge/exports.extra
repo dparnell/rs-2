@@ -75,12 +75,15 @@ WinEqualRect @5173
 WinExcludeUpdateRegion @5174
 WinFillRect @5176
 WinFindAtom @5177
+WinFlashWindow @5178
 WinFocusChange @5179
 WinFreeErrorInfo @5180
 WinGetCurrentTime @5182
 WinGetErrorInfo @5185
 WinGetKeyState @5188
 WinGetLastError @5189
+WinGetMaxPosition @5190
+WinGetMinPosition @5191
 WinGetMsg @5192
 WinGetNextWindow @5193
 WinGetPS @5195
@@ -144,6 +147,7 @@ WinQueryDlgItemTextLength @5271
 WinQueryFocus @5272
 WinQueryMsgPos @5273
 WinQueryMsgTime @5274
+WinQueryObjectWindow @5275
 WinQueryPointer @5277
 WinQueryPointerInfo @5278
 WinQueryPointerPos @5279
