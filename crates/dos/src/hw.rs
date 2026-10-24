@@ -47,6 +47,8 @@ pub struct Hw {
     /// In DPMI protected mode: hardware interrupts come as vectors from
     /// this base (IRQ 0-15), not the PIC's real-mode ones.
     pub irq_remap: Option<u8>,
+    pub dma: crate::sb::Dma,
+    pub sb: crate::sb::SoundBlaster,
 }
 
 impl Hw {
@@ -71,6 +73,8 @@ impl Hw {
             speaker_changed: false,
             com_present: false,
             irq_remap: None,
+            dma: crate::sb::Dma::default(),
+            sb: crate::sb::SoundBlaster::default(),
         }
     }
 
@@ -273,6 +277,8 @@ impl Hw {
             }
             // Joystick: nothing connected.
             0x201 => 0xff,
+            0x00..=0x0f | 0x81..=0x8f => self.dma.io_read(port),
+            0x220..=0x22f => self.sb.io_read(port),
             _ => 0xff,
         }
     }
@@ -299,8 +305,10 @@ impl Hw {
             0x71 => self.cmos.write(v),
             0x92 => self.a20 = v & 2 != 0,
             0x3b0..=0x3df => self.vga.io_write(port, v),
-            // POST codes, DMA page registers, delay port.
-            0x80..=0x8f | 0xed => {}
+            0x00..=0x0f | 0x81..=0x8f => self.dma.io_write(port, v),
+            0x220..=0x22f => self.sb.io_write(port, v),
+            // POST codes, the delay port.
+            0x80 | 0xed => {}
             _ => {
                 if !self.unknown_ports.contains(&port) && self.unknown_ports.len() < 64 {
                     self.unknown_ports.push(port);

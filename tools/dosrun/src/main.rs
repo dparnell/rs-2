@@ -30,6 +30,8 @@ struct Run {
     last_gfx: Option<(usize, usize, Vec<u8>, [u32; 256])>,
     trace: bool,
     cp437: Vec<char>,
+    /// Sound Blaster output collected for --wav (rate, samples).
+    pcm: (u32, Vec<u8>),
 }
 
 enum KeyItem {
@@ -300,6 +302,12 @@ impl Host for Run {
             }
         }
     }
+    fn pcm(&mut self, rate: u32, data: &[u8]) {
+        if self.pcm.0 == 0 {
+            self.pcm.0 = rate;
+        }
+        self.pcm.1.extend_from_slice(data);
+    }
     fn log(&mut self, msg: &str) {
         if self.trace || !msg.starts_with("cb ") {
             eprintln!("{msg}");
@@ -479,6 +487,7 @@ fn main() {
     let mut cfg = Config::default();
     let mut cwd = String::new();
     let mut stats = false;
+    let mut wav_out: Option<String> = None;
     while let Some(a) = args.first().cloned() {
         if !a.starts_with("--") {
             break;
@@ -501,6 +510,7 @@ fn main() {
             "--nofpu" => cfg.fpu = false,
             "--noems" => cfg.ems_kb = 0,
             "--stats" => stats = true,
+            "--wav" => wav_out = Some(val()),
             _ => panic!("unknown option {a}"),
         }
     }
@@ -527,6 +537,7 @@ fn main() {
         last_gfx: None,
         trace,
         cp437: cp437(),
+        pcm: (0, Vec::new()),
     };
     let mut m = Machine::new(&mut host, cfg);
     m.dos.cwd[2] = cwd.to_ascii_uppercase();
@@ -559,6 +570,26 @@ fn main() {
         eprintln!("dosrun: {} instructions in {:.2} s: {:.1} MIPS", m.cpu.icount, secs, m.cpu.icount as f64 / secs / 1e6);
     }
     let _ = fs::remove_dir_all(&z);
+    if let Some(w) = &wav_out {
+        // 8-bit mono WAV.
+        let (rate, data) = (host.pcm.0.max(1), &host.pcm.1);
+        let mut f = Vec::new();
+        f.extend_from_slice(b"RIFF");
+        f.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
+        f.extend_from_slice(b"WAVEfmt ");
+        f.extend_from_slice(&16u32.to_le_bytes());
+        f.extend_from_slice(&1u16.to_le_bytes());
+        f.extend_from_slice(&1u16.to_le_bytes());
+        f.extend_from_slice(&rate.to_le_bytes());
+        f.extend_from_slice(&rate.to_le_bytes());
+        f.extend_from_slice(&1u16.to_le_bytes());
+        f.extend_from_slice(&8u16.to_le_bytes());
+        f.extend_from_slice(b"data");
+        f.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        f.extend_from_slice(data);
+        fs::write(w, f).unwrap();
+        eprintln!("dosrun: {} samples at {} Hz to {w}", data.len(), rate);
+    }
     if let (Some(p), Some((w, h, px, pal))) = (&png_out, &host.last_gfx) {
         write_png(Path::new(p), *w, *h, px, pal);
     }

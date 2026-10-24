@@ -282,6 +282,7 @@ desktop program objects. "dosrun" = on the host with `tools/dosrun`
 | rs2 COMMAND.COM | works | QEMU and dosrun: VER, DIR (/W /B /A), CD, MD, RD, COPY (wildcards, `+`), DEL, REN, TYPE, SET, PATH, PROMPT, ECHO, batch files (`%0`-`%9`, `%VAR%`, IF ERRORLEVEL/EXIST/==, FOR, GOTO, CALL, SHIFT, PAUSE), redirection and pipes, /C /K /P. As the "DOS Window" and "DOS Full Screen" desktop objects. |
 | tests/dos HELLO.COM | works | QEMU: DOS and BIOS output, the command tail, file create/write/read/delete, the exit code. |
 | tests/dos GFX.COM | works | QEMU: mode 13h (256 colours) and mode 12h (VGA write mode 2) full screen (scaled to the framebuffer) and in a window (resized to the mode), keys between them, Alt+Home both ways. |
+| tests/dos SBTEST.COM | works | dosrun (`--wav` captures the output): Sound Blaster 2.0 found at 220h (DSP reset, version 2.01), DMA channel 1 programmed, an 11025-sample block played at ~11 kHz by single-cycle 8-bit DMA, the IRQ 7 at its end. In VDM.EXE the samples go to rs2's audio mixer (not yet listened to in QEMU). |
 | tests/dos VESA.COM | works | dosrun: VBE 2.0 controller and mode information, mode 101h (640x480, 256 colours) drawn through the banked window with 4F05h. Modes 100h, 101h, 103h, 105h; the linear framebuffer at E0000000h (DPMI 0800h maps it). |
 | tests/dos DPMITEST.COM | works | QEMU, full screen and windowed, and dosrun: a 32-bit DPMI client (INT 31h 0300h output, LDT descriptors, a flat 4 GB selector, 1 MB block, 32-bit code segment, #DE exception handler, protected-mode INT hook, real-mode callback via 0301h, DOS memory, IRQ 0 hooked in protected mode arriving during a real-mode BIOS wait). |
 | MEM.EXE (IBM, OS/2's DOS) | works | dosrun: MEM and MEM /C (MCB chain, UMBs, EMS, XMS, HMA). |
@@ -292,7 +293,7 @@ desktop program objects. "dosrun" = on the host with `tools/dosrun`
 | DOSKEY.COM (IBM) | works | dosrun, with rs2's COMMAND.COM (which reads its lines through DOSKEY's INT 2Fh 4810h when DOSKEY answers 4800h): installs resident, Up recalls commands. Under IBM's COMMAND.COM the next command hangs (that COMMAND.COM loops over DOS's data). |
 | tests/dos BEEP.COM | partial | dosrun and QEMU: the PIT channel 2 / port 61h tones are seen by VDM.EXE and played as a square wave through rs2's audio mixer when there is sound hardware (`--sound`); not yet listened to. |
 
-Not yet: Sound Blaster, VESA modes with more than 8 bits per pixel, DOS settings in the program object notebook (the
+Not yet: Sound Blaster 16 (16-bit/stereo), the OPL2/OPL3 FM synthesizer (AdLib), VESA modes with more than 8 bits per pixel, DOS settings in the program object notebook (the
 VDM reads them from the environment: `DOS_HIGH`, `DOS_UMB`,
 `EMS_MEMORY_LIMIT`, `XMS_MEMORY_LIMIT`, `DPMI_MEMORY_LIMIT`), direct
 disk access (INT 13h, 25h/26h).

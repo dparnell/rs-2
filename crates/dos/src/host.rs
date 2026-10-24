@@ -131,6 +131,10 @@ pub trait Host {
     fn speaker(&mut self, hz: Option<u32>) {
         let _ = hz;
     }
+    /// Sound Blaster output: 8-bit unsigned mono PCM at `rate` Hz.
+    fn pcm(&mut self, rate: u32, data: &[u8]) {
+        let _ = (rate, data);
+    }
     /// A diagnostic message.
     fn log(&mut self, msg: &str) {
         let _ = msg;

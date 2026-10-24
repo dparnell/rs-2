@@ -23,6 +23,7 @@ pub mod ems;
 pub mod host;
 pub mod hw;
 pub mod mouse;
+pub mod sb;
 pub mod shell;
 pub mod video;
 pub mod xms;
@@ -146,6 +147,10 @@ impl Machine {
         if m.cfg.fpu {
             m.cpu.fpu = Some(Default::default());
         }
+        // Programs find the Sound Blaster through BLASTER.
+        if !m.cfg.env.iter().any(|v| v.len() > 8 && v[..8].eq_ignore_ascii_case("BLASTER=")) {
+            m.cfg.env.push(alloc::string::String::from("BLASTER=A220 I7 D1 T3"));
+        }
         m.hw.umb = m.cfg.umb;
         m.t0 = host.micros();
         m.hw.now = host.now();
@@ -246,6 +251,7 @@ impl Machine {
         self.tick(host);
         self.take_events(host);
         self.devices();
+        self.sb_tick(host);
         let spk = self.hw.speaker().or((self.hw.us_now < self.beep_until).then_some(896));
         if spk != self.speaker_on {
             self.speaker_on = spk;

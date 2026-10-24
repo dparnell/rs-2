@@ -46,6 +46,8 @@ unsafe extern "C" {
     fn Rs2AudioWrite(h: u32, data: *const u8, cb: u32) -> u32;
     #[link_name = "RS2API.303"]
     fn Rs2AudioQueryPos(h: u32, bytes: *mut u32) -> u32;
+    #[link_name = "RS2API.306"]
+    fn Rs2AudioClose(h: u32) -> u32;
 }
 
 // ---- The PC speaker ----
@@ -139,6 +141,9 @@ fn trace(s: &str) {
 }
 
 struct Os2Host {
+    /// The Sound Blaster's stream: (handle, rate); handle 0 = none,
+    /// u32::MAX = no audio hardware.
+    sb_stream: (u32, u32),
     /// Input read while waiting, for the next poll.
     pending: VecDeque<Event>,
     tmr_freq: u64,
@@ -449,6 +454,24 @@ impl Host for Os2Host {
     fn speaker(&mut self, hz: Option<u32>) {
         speaker(hz);
     }
+    fn pcm(&mut self, rate: u32, data: &[u8]) {
+        let (h, r) = self.sb_stream;
+        if h == u32::MAX {
+            return;
+        }
+        if h == 0 || r != rate {
+            if h != 0 {
+                unsafe { Rs2AudioClose(h) };
+            }
+            let mut nh = 0;
+            if unsafe { Rs2AudioOpen(rate.clamp(4000, 96000), 1, 8, &mut nh) } != 0 {
+                self.sb_stream = (u32::MAX, 0);
+                return;
+            }
+            self.sb_stream = (nh, rate);
+        }
+        unsafe { Rs2AudioWrite(self.sb_stream.0, data.as_ptr(), data.len() as u32) };
+    }
     fn font(&mut self, height: u8) -> Option<Vec<u8>> {
         let mut f = vec![0u8; 256 * height as usize];
         let rc = unsafe { Rs2VioQueryFont(0, height as u32, f.as_mut_ptr(), f.len() as u32) };
@@ -517,7 +540,7 @@ fn main(s: &os2::Startup) -> u32 {
     unsafe { DosTmrQueryFreq(&mut freq) };
     let (mut cur, mut drives) = (0, 0);
     unsafe { DosQueryCurrentDisk(&mut cur, &mut drives) };
-    let mut host = Os2Host { pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives };
+    let mut host = Os2Host { sb_stream: (0, 0), pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives };
     let mut m = Machine::new(&mut host, cfg);
     if cur >= 1 && cur <= 26 {
         m.dos.drive = (cur - 1) as u8;

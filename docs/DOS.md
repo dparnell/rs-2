@@ -164,8 +164,10 @@ Emulated in the machine, with the I/O ports programs touch directly:
   controller, DAC at 3C0h-3DFh, planar memory at A0000h with write modes
   0-3 and read modes 0-1, latches, chain-4, mode X) that also covers EGA
   and CGA modes, and MDA/CGA text at B000h/B800h.
-- **PC speaker** (61h + PIT channel 2), **Sound Blaster** (DSP at 220h,
-  8-bit DMA playback, IRQ 5/7) later, both as PCM to the host's audio.
+- **PC speaker** (61h + PIT channel 2) and a **Sound Blaster 2.0** (DSP
+  2.01 at 220h, IRQ 7, 8-bit single-cycle and auto-init DMA on channel 1
+  of an 8237; `BLASTER=A220 I7 D1 T3`), both as PCM to the host's audio.
+  No FM synthesizer (AdLib) yet.
 - Ports nobody emulates read 0xFF and ignore writes (logged once).
 
 ### Screen
@@ -206,7 +208,8 @@ for INT 33h.
 
 The speaker's square wave (PIT channel 2 gated by port 61h bits 0-1) is
 synthesised at 22050 Hz into a stream on rs2's mixer (`Rs2AudioOpen`,
-RS2API 300-308); a Sound Blaster's DMA buffers go the same way later.
+RS2API 300-308); the Sound Blaster's DMA blocks go to a stream of their
+own at the rate the program set.
 Without sound hardware the session is silent.
 
 ### Timing and idle
