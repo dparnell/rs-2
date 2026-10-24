@@ -1,0 +1,7 @@
+; The window and keyboard layer calls are PMMERGE's (as IBM's PMMERGE has them)
+Win32SetLangInfo=PMMERGE.3500 @20
+Win32QueryLangInfo=PMMERGE.3501 @21
+Win32SetKbdLayer=PMMERGE.3502 @22
+Win32QueryKbdLayer=PMMERGE.3503 @23
+Win32SetLangViewer=PMMERGE.3504 @24
+Win32QueryLangViewer=PMMERGE.3505 @25

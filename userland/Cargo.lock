@@ -205,6 +205,13 @@ name = "os2-pack"
 version = "0.1.0"
 
 [[package]]
+name = "pmbidi-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "pmctls-dll"
 version = "0.1.0"
 dependencies = [
@@ -431,6 +438,13 @@ dependencies = [
 
 [[package]]
 name = "testdll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "thailib-dll"
 version = "0.1.0"
 dependencies = [
  "os2",

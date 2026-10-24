@@ -1,0 +1,13 @@
+[package]
+name = "thailib-dll"
+description = "THAILIB.DLL: the Thai keyboard layer calls of a system without Thai support"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "thailib"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

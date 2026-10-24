@@ -53,6 +53,7 @@ Rs2SetFileIcon=__a_Rs2SetFileIcon @9006
 WinCalcFrameRect=__a_WinCalcFrameRect @704
 WinGetMaxPosition=__a_WinGetMaxPosition @754
 WinGetMinPosition=__a_WinGetMinPosition @755
+WinCreateFrameControls=__a_WinCreateFrameControls @906
 WinFlashWindow=__a_WinFlashWindow @745
 GpiCreatePS=__a_GpiCreatePS @4369
 GpiDestroyPS=__a_GpiDestroyPS @4379

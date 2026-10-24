@@ -36,6 +36,7 @@ WinCreateAccelTable @5130
 WinCreateAtomTable @5131
 WinCreateCursor @5132
 WinCreateDlg @5133
+WinCreateFrameControls @5134
 WinCreateMenu @5135
 WinCreateMsgQueue @5136
 WinCreatePointer @5137

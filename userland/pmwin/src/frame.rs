@@ -661,6 +661,26 @@ pub extern "C" fn WinGetMinPosition(h: u32, pswp: *mut u32, _pptl: *const i32) -
     1
 }
 
+/// WinCreateFrameControls(hwndFrame, pfcdata, pszTitle): the standard
+/// frame controls FRAMECDATA's create flags ask for, on a frame window
+/// (made with WinCreateWindow, say).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinCreateFrameControls(h: u32, fcd: *const u8, title: *const u8) -> u32 {
+    if fcd.is_null() || !st().desk.exists(h) {
+        return 0;
+    }
+    let (fcf, hmod, id) = unsafe { ((fcd.add(2) as *const u32).read_unaligned(), (fcd.add(6) as *const u16).read_unaligned() as u32, (fcd.add(8) as *const u16).read_unaligned() as u32) };
+    let title = ctl::cstr(title);
+    if !st().frames.contains_key(&h) {
+        st().frames.insert(h, Frame { fcf, client: 0, accel: 0, focus_save: 0, restore: None, icon: 0, min: None, icon_pos: None, help: 0, shell_pos: false });
+    } else if let Some(f) = st().frames.get_mut(&h) {
+        f.fcf |= fcf;
+    }
+    create_controls(h, fcf, &title, hmod, id);
+    layout(h);
+    1
+}
+
 const TID_FLASHWINDOW: u32 = 0xfffd;
 
 /// WinFlashWindow(hwnd, fFlash): the frame's title bar flashes (turns

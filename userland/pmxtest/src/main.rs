@@ -1,7 +1,7 @@
 //! Self-checks of the Presentation Manager features beyond the basics:
 //! hooks (hooks.rs), DDE with another process (dde.rs), the registry
 //! through Open32's calls (reg.rs), owner drawing (owner.rs),
-//! presentation parameters (pres.rs). Each check
+//! presentation parameters (pres.rs), PMBIDI (bidi.rs). Each check
 //! prints PASS or FAIL; the last line is "pmxtest done: N failure(s)"
 //! and the exit code N. `PMXTEST CHILD` is the second process the system
 //! hooks are checked in, `PMXTEST DDESERVER` the DDE server; `PMXTEST
@@ -17,6 +17,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use os2::*;
 
+mod bidi;
 mod dde;
 mod hooks;
 mod owner;
@@ -170,6 +171,7 @@ fn main(s: &Startup) -> u32 {
         reg::reg_checks();
         owner::owner_checks(hab, client);
         pres::pres_checks(client);
+        bidi::bidi_checks(client);
     }
     unsafe {
         WinDestroyWindow(frame);

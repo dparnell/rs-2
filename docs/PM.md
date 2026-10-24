@@ -36,6 +36,7 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006); `WinStoreWindowPos`/`WinRestoreWindowPos`; `WinCreateObject` for program objects. |
 | `userland/pmspl` → PMSPL.DLL | The spooler API (`Spl*`) of a system without printers (see [Status](#status)). |
 | `userland/registry` → REGISTRY.DLL, `userland/pmwinx` → PMWINX.DLL | The registry (Win32 registry calls) and Open32's forwarders to it (see [Open32 and the registry](#open32-and-the-registry-pmwinx-registry)). |
+| `userland/pmbidi` → PMBIDI.DLL, `userland/thailib` → THAILIB.DLL | Bidirectional language support of a system without bidirectional code pages (see [Bidirectional languages](#bidirectional-languages-pmbidi)). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
 | `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
 | `userland/pmshapi` etc. | Smaller DLLs: profile (OS2.INI) APIs, program list and task position (PMSHAPI), PMDRAG (direct manipulation: see [Drag and drop](#drag-and-drop-pmdrag)), PMMERGE (IBM PMMERGE's ordinals, see below), LIBUNI and UCONV (locales and code page conversion, see [Locales](#locales-libuni-and-uconv)). The help manager is HELPMGR.DLL (see [The help manager](#the-help-manager-helpmgrdll-and-viewexe)). |
@@ -1075,6 +1076,28 @@ index form, or the system colour.
 
 Not done: the frame border's colours, scroll bars, the container's other
 colours, the BIDI parameters (`PP_BIDI_*`), `PP_FONTHANDLE`.
+
+## Bidirectional languages (PMBIDI)
+
+OS/2's Arabic and Hebrew support is PMBIDI.DLL (calls for the
+bidirectional attributes of processes, windows and presentation spaces,
+the keyboard's national layer, and X/Open's layout objects, done by
+BDCALL32 in the bidirectional editions) and PMMERGE's language calls
+(`WinSetLangInfo`, `WinQueryLangInfo`, `WinSetKbdLayer`,
+`WinQueryKbdLayer`, `WinSetLangViewer`, `WinQueryLangViewer`, ordinals
+3500-3505; PMBIDI's Win32 entries forward there). rs2's code pages are not
+bidirectional (`WinQueryCpType` says so), so rs2's PMBIDI
+(`userland/pmbidi`) transforms text into the same text, as IBM's does for
+text without bidirectional characters (`layout_object_transform` and
+`layout_object_editshape` copy, with identity index maps and level 0;
+`setvalues`/`getvalues` keep the values), and the attribute calls keep
+what they are given: per window (`LI_BD_WND_ATTR`, `LI_BD_CLIP_ATTR`; the
+window is asked first with IBM's messages 0xBD0-0xBD3), per process, per
+presentation space (`Gpi32SetBidiAttr`, which the WarpCenter calls). The
+keyboard has no national layer; `WinSetKbdLayer` keeps the layer and
+tells the language viewer. THAILIB.DLL (`userland/thailib`) has the two
+Thai keyboard layer calls BDVIEWER uses. PMXTEST checks them; TEXTCON1
+runs on them.
 
 ## Hooks
 

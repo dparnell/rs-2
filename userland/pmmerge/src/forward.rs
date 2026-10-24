@@ -40,6 +40,7 @@ forward! {
     WinCreateAtomTable = "PMWIN.714";
     WinCreateCursor = "PMWIN.715";
     WinCreateDlg = "PMWIN.922";
+    WinCreateFrameControls = "PMWIN.906";
     WinCreateMenu = "PMWIN.907";
     WinCreateMsgQueue = "PMWIN.716";
     WinCreatePointer = "PMWIN.717";
