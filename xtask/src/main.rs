@@ -489,6 +489,9 @@ fn build(o: &Opts) -> Option<PathBuf> {
     if let Ok(text) = std::fs::read_to_string(&list) {
         let mut files = image::manifest(&root(), &text);
         files.extend(userland);
+        if !o.dist {
+            files.extend(dos_tests());
+        }
         // The version the installer shows (and an update compares).
         let version = root().join("target/rs2-version.txt");
         std::fs::write(&version, version_text()).unwrap();
@@ -544,6 +547,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("desktest", "RS2\\DESKTEST.EXE"),
         ("testdll", "RS2\\TESTDLL.DLL"),
         ("cmd", "OS2\\CMD.EXE"),
+        ("vdm", "OS2\\MDOS\\VDM.EXE"),
         ("more", "OS2\\MORE.EXE"),
         ("find", "OS2\\FIND.EXE"),
         ("sort", "OS2\\SORT.EXE"),
@@ -644,6 +648,10 @@ fn build_userland() -> Option<image::FileList> {
         }
         files.push((lx, dest.to_string()));
     }
+    // rs2's COMMAND.COM for DOS sessions: the stub of crates/dos.
+    let command = out_dir.join("COMMAND.COM");
+    std::fs::write(&command, dos::shell::command_com()).unwrap();
+    files.push((command, "OS2\\MDOS\\COMMAND.COM".to_string()));
     for (src, dest) in HELP_FILES {
         let path = ul.join(src);
         let text = std::fs::read(&path).ok()?;
@@ -659,6 +667,21 @@ fn build_userland() -> Option<image::FileList> {
         files.push((out, dest.to_string()));
     }
     Some(files)
+}
+
+/// The DOS test programs (tests/dos, assembled when clang is there) as
+/// C:\\DOS\\*.
+fn dos_tests() -> image::FileList {
+    let dir = root().join("tests/dos");
+    let _ = Command::new("sh").arg(dir.join("build.sh")).status();
+    let mut v = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir.join("bin")) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_ascii_uppercase();
+            v.push((e.path(), format!("DOS\\{name}")));
+        }
+    }
+    v
 }
 
 /// Remove debug information (keeps the boot image small).

@@ -608,6 +608,9 @@ pub const PROG_DEFAULT: u32 = 0;
 pub const PROG_FULLSCREEN: u32 = 1;
 pub const PROG_WINDOWABLEVIO: u32 = 2;
 pub const PROG_PM: u32 = 3;
+/// A DOS session on the full screen, and in a window.
+pub const PROG_VDM: u32 = 4;
+pub const PROG_WINDOWEDVDM: u32 = 7;
 pub const PROG_GROUP: u32 = 5;
 pub const SHE_VISIBLE: u32 = 0;
 pub const SHE_INVISIBLE: u32 = 1;

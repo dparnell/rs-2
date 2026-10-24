@@ -281,6 +281,46 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   flags, shift state, typematic rate, read/peek, code page, translate,
   hardware ID). COM1 also carries the kernel log.
 
+## DOS sessions
+
+DOS programs run in DOS sessions (docs/DOS.md): full screen or in a PM
+window, started from CMD (IBM's and rs2's), by DosStartSession, or from
+desktop program objects. "dosrun" = on the host with `tools/dosrun`
+(the same DOS machine); "QEMU" = in a DOS session of rs2.
+
+| Program | Status | Notes |
+|---------|--------|-------|
+| rs2 COMMAND.COM | works | QEMU and dosrun: VER, DIR (/W /B /A), CD, MD, RD, COPY (wildcards, `+`), DEL, REN, TYPE, SET, PATH, PROMPT, ECHO, batch files (`%0`-`%9`, `%VAR%`, IF ERRORLEVEL/EXIST/==, FOR, GOTO, CALL, SHIFT, PAUSE), redirection and pipes, /C /K /P. As the "DOS Window" and "DOS Full Screen" desktop objects. |
+| tests/dos HELLO.COM | works | QEMU: DOS and BIOS output, the command tail, file create/write/read/delete, the exit code. |
+| tests/dos GFX.COM | works | QEMU: mode 13h (256 colours) and mode 12h (VGA write mode 2) full screen (scaled to the framebuffer) and in a window (resized to the mode), keys between them, Alt+Home both ways. |
+| tests/dos MOUSE.COM | works | QEMU, full screen: INT 33h reset, the pointer shown, positions from the (VMware absolute) pointer scaled to the 640x200 virtual screen (centre 320,100), left and right buttons. In a window the pointer's position over the window is used. |
+| tests/dos BENCH.COM | works | Speed: about 100 million instructions a second on dosrun (Apple M-series host, native), 5.7 million in a DOS session under QEMU's TCG on the same host (QEMU emulating x86-64 costs most of it; native x86 hardware runs VDM.EXE without that). |
+| tests/dos SBTEST.COM | works | dosrun (`--wav` captures the output): Sound Blaster 2.0 found at 220h (DSP reset, version 2.01), DMA channel 1 programmed, an 11025-sample block played at ~11 kHz by single-cycle 8-bit DMA, the IRQ 7 at its end. In VDM.EXE the samples go to rs2's audio mixer (not yet listened to in QEMU). |
+| tests/dos VESA.COM | works | dosrun: VBE 2.0 controller and mode information, mode 101h (640x480, 256 colours) drawn through the banked window with 4F05h. Modes 100h, 101h, 103h, 105h; the linear framebuffer at E0000000h (DPMI 0800h maps it). |
+| tests/dos DPMITEST.COM | works | QEMU, full screen and windowed, and dosrun: a 32-bit DPMI client (INT 31h 0300h output, LDT descriptors, a flat 4 GB selector, 1 MB block, 32-bit code segment, #DE exception handler, protected-mode INT hook, real-mode callback via 0301h, DOS memory, IRQ 0 hooked in protected mode arriving during a real-mode BIOS wait). |
+| MEM.EXE (IBM, OS/2's DOS) | works | dosrun: MEM and MEM /C (MCB chain, UMBs, EMS, XMS, HMA). |
+| DEBUG.EXE (IBM) | works | dosrun: register dump, D, U, A (assembling), G with INT 3; lowercase commands (it checks each character against DOS's DBCS lead-byte table, which the first memory block used to overlay). |
+| EDLIN.COM (IBM) | works | dosrun: listing, editing a line, saving (E). |
+| QBASIC.EXE (IBM) | works | QEMU, installed by APPINST from the CD and started from the Workplace Shell's QBasic object (DOS Programs folder): the editor in a DOS window, Shift+F1 help (QBASIC.HLP), Alt+F menus; the QBasic Full Screen object; the DOS Editor object (`QBASIC /EDITOR`, IBM DOS Editor) in a window. Earlier: a typed SCREEN 13 program's output in the window. dosrun: the full-screen editor, typing a program, F5: a SCREEN 13 program (LINE, CIRCLE, text in graphics); `QBASIC /RUN MORTGAGE.BAS` (IBM's sample: menus, floating point; the same figures with the x87 and with QBASIC's own floating point). |
+| COMMAND.COM (IBM, OS/2's DOS) | works | dosrun: DIR, MEM (EXEC), `ECHO > file`, TYPE, EXIT. Not shipped (APPINST leaves rs2's COMMAND.COM in place); a test of the DOS kernel's internals. |
+| DOSKEY.COM (IBM) | works | dosrun, with rs2's COMMAND.COM (which reads its lines through DOSKEY's INT 2Fh 4810h when DOSKEY answers 4800h) and with IBM's: installs resident, Up recalls commands. |
+| GRAFTABL.COM (IBM) | works | dosrun: loads code page 437's graphics characters. |
+| BASICA.COM, BASIC.COM (IBM) | fails | dosrun: loops setting the cursor (INT 10h 02h, row FFh); not in APPINST. |
+| SUBST.EXE, JOIN.EXE (IBM) | fails | "Incorrect function" (they need DOS internals rs2's DOS does not have); not in APPINST. |
+| tests/dos BEEP.COM | partial | dosrun and QEMU: the PIT channel 2 / port 61h tones are seen by VDM.EXE and played as a square wave through rs2's audio mixer when there is sound hardware (`--sound`); not yet listened to. |
+
+APPINST's **DOS Programs** category copies IBM's QBasic (QBASIC.EXE,
+QBASIC.HLP, MORTGAGE.BAS), DEBUG, EDLIN, MEM, DOSKEY and GRAFTABL from
+the CD into `C:\OS2\MDOS` (on a DOS session's PATH) and makes the QBasic,
+QBasic Full Screen and DOS Editor objects (WPProgram, PROGTYPE=WINDOWEDVDM
+or VDM) in a DOS Programs folder in Programs. OS/2 Warp 4 has no EDIT
+command; DOS Editor is QBasic's editor mode.
+
+Not yet: Sound Blaster 16 (16-bit/stereo), the OPL2/OPL3 FM synthesizer
+(AdLib), VESA modes with more than 8 bits per pixel, direct disk access
+(INT 13h, 25h/26h), the DOS settings page in the Workplace Shell's
+program notebook (RS2SHELL has it).
+
 ## Fixed while getting these to run
 
 - KbdSetStatus rejected binary mode with echo on in one call; OS/2

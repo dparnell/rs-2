@@ -35,6 +35,10 @@ const ST_BLINK: u32 = 0x02;
 const ST_WINDOWED: u32 = 0x04;
 const ST_MOUSE: u32 = 0x08;
 const ST_USERFONT: u32 = 0x10;
+/// A DOS session's graphics picture (Rs2VioReadPixels).
+const ST_PIXELS: u32 = 0x20;
+/// A DOS session: the mouse goes to it as positions (Rs2VdmMouse).
+const ST_DOS: u32 = 0x40;
 
 /// Rs2VioControl commands.
 const CTL_FOCUS: u32 = 1;
@@ -146,6 +150,7 @@ pub fn read_screen(c: &mut Ctx) -> u32 {
         return ERROR_SMG_SESSION_NOT_FOUND;
     }
     let mouse = crate::mouse::is_open(sid);
+    let dos = crate::vdm::is_dos(sid);
     let r = crate::screen::with_session(sid, |s| {
         let (cr, cc) = s.cursor().unwrap_or((s.cur_row, s.cur_col));
         let (a, b) = s.cursor_lines();
@@ -164,6 +169,12 @@ pub fn read_screen(c: &mut Ctx) -> u32 {
         }
         if s.user_font {
             f |= ST_USERFONT;
+        }
+        if s.pixmap.is_some() {
+            f |= ST_PIXELS;
+        }
+        if dos {
+            f |= ST_DOS;
         }
         let mut st = Vec::with_capacity(128);
         for v in [s.changes, s.cols as u32, s.rows as u32, cr as u32, cc as u32, a as u32, b as u32, s.cell_h as u32, s.codepage().number() as u32, f, s.font_gen] {
@@ -199,6 +210,8 @@ pub fn read_screen(c: &mut Ctx) -> u32 {
 /// loaded with VioSetFont when that has cy rows.
 pub fn query_font(c: &mut Ctx) -> u32 {
     let (sid, cy, p, cb) = (c.arg(0), c.arg(1) as usize, c.arg(2), c.arg(3));
+    // Session 0: the caller's own (a DOS session's ROM fonts).
+    let sid = if sid == 0 { c.process.session.load(Ordering::Relaxed) } else { sid };
     if !matches!(cy, 8 | 14 | 16) || (cb as usize) < 256 * cy {
         return err::INVALID_PARAMETER;
     }

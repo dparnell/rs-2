@@ -9,8 +9,10 @@ OS/2 executables (16-bit NE, 16/32-bit LX) unmodified on x86-64 hardware.
 OS/2 processes run in *compatibility mode*, which executes 32-bit and 16-bit
 protected-mode code natively with real segment descriptors. Nothing is
 emulated or translated for application code. Virtual-8086 mode does not exist
-in long mode, so DOS sessions (MVDM) will need a CPU emulator; that is
-deliberately out of the first milestones.
+in long mode, so DOS sessions run on a CPU emulator: `VDM.EXE`, an
+ordinary OS/2 process leading the session, runs rs2's own DOS machine
+(BIOS, DOS kernel, DPMI host and COMMAND.COM in Rust, around an 80486
+emulator); see [DOS.md](DOS.md).
 
 **OS/2 memory layout is reproduced exactly.** Every process has its own LDT
 in which the first 512 MB of the address space is *tiled*: LDT entry `n`
@@ -200,10 +202,12 @@ tools, so it can be written to a CD, a USB stick or attached to a VM.
 | Path | What |
 |------|------|
 | `crates/os2-exe` | `no_std` MZ/NE/LX parser, shared by the kernel loader and tools |
+| `crates/x86emu`, `crates/dos` | The CPU emulator and the DOS machine of DOS sessions ([DOS.md](DOS.md)) |
 | `boot` | UEFI loader |
 | `kernel` | The kernel |
 | `xtask` | Host build tool: builds everything, makes disk images and ISOs, runs QEMU |
 | `tools/lxdump` | Inspect OS/2 executables |
+| `tools/dosrun` | Run DOS programs on the host with rs2's DOS machine |
 | `tools/ghidra` | Headless Ghidra scripts for reverse engineering |
 | `tools/scripts` | One-off analysis scripts (Python) |
 | `docs` | Design notes and research |

@@ -197,6 +197,17 @@ pub fn make_windowed(sid: u32) {
     crate::viowin::changed();
 }
 
+/// Make `sid` windowable: shown in its window (`windowed`) or on the full
+/// screen, Alt+Home switching between the two (DOS sessions).
+pub fn make_windowable(sid: u32, windowed: bool) {
+    if let Some(s) = SESSIONS.lock().iter_mut().find(|s| s.id == sid) {
+        s.windowable = true;
+        s.windowed = windowed;
+    }
+    crate::screen::with_session(sid, |s| s.set_windowed(true, windowed));
+    crate::viowin::changed();
+}
+
 /// Whether `sid` is shown in a PM window now.
 pub fn is_windowed(sid: u32) -> bool {
     sid != 1 && SESSIONS.lock().iter().any(|s| s.id == sid && s.windowed)
@@ -373,6 +384,7 @@ pub fn process_ended(pid: u32, code: u32) {
     crate::mouse::drop_session(s.id);
     crate::conkbd::drop_session(s.id);
     crate::api::vio::drop_session(s.id);
+    crate::vdm::drop_session(s.id);
     if s.windowable {
         crate::viowin::session_ended(s.id);
     }

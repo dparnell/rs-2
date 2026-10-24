@@ -145,6 +145,17 @@ impl PhysBuf {
     }
 }
 
+/// The picture of a DOS session in a graphics mode: 8-bit pixels and
+/// their palette (0x00RRGGBB), scaled onto the framebuffer (4:3).
+pub struct Pixmap {
+    pub w: usize,
+    pub h: usize,
+    pub data: Vec<u8>,
+    pub pal: [u32; 256],
+    /// Bumped by every change.
+    pub generation: u32,
+}
+
 pub struct Screen {
     fb: Framebuffer,
     pixels: *mut u32,
@@ -197,6 +208,9 @@ pub struct Screen {
     pub watched: bool,
     /// Shown in a PM window now (the text-mode mouse pointer is not drawn).
     pub windowed: bool,
+    /// A DOS session's graphics mode picture (text cells are not shown
+    /// meanwhile).
+    pub pixmap: Option<Pixmap>,
 }
 
 unsafe impl Send for Screen {}
@@ -267,6 +281,7 @@ impl Screen {
             core::ptr::addr_of_mut!((*s).font_gen).write(0);
             core::ptr::addr_of_mut!((*s).watched).write(false);
             core::ptr::addr_of_mut!((*s).windowed).write(false);
+            core::ptr::addr_of_mut!((*s).pixmap).write(None);
         }
         let s = unsafe { &mut *s };
         for row in s.cells.iter_mut() {
@@ -424,12 +439,104 @@ impl Screen {
         if !self.visible || self.graphics {
             return;
         }
+        if let Some(h) = self.pixmap.as_ref().map(|p| p.h) {
+            self.fill_black();
+            self.draw_pixmap(0, h);
+            return;
+        }
         self.clear_border();
         self.redraw();
     }
 
+    /// Fill the whole framebuffer with black.
+    fn fill_black(&mut self) {
+        let (w, h, stride) = (self.fb.width as usize, self.fb.height as usize, self.fb.stride as usize);
+        mark_dirty(0, h as u32);
+        for y in 0..h {
+            let line = unsafe { self.pixels.add(y * stride) };
+            for x in 0..w {
+                unsafe { line.add(x).write_volatile(0) };
+            }
+        }
+    }
+
+    /// Where a pixmap is shown: (x, y, width, height) of the largest 4:3
+    /// area of the framebuffer, centred.
+    fn pix_rect(&self) -> (usize, usize, usize, usize) {
+        let (fw, fh) = (self.fb.width as usize, self.fb.height as usize);
+        let tw = fw.min(fh * 4 / 3);
+        let th = (tw * 3 / 4).min(fh);
+        ((fw - tw) / 2, (fh - th) / 2, tw, th)
+    }
+
+    /// Draw source rows `y0..y1` of the pixmap.
+    fn draw_pixmap(&mut self, y0: usize, y1: usize) {
+        let Some(p) = self.pixmap.as_ref() else { return };
+        let (rx, ry, tw, th) = self.pix_rect();
+        if p.w == 0 || p.h == 0 || tw == 0 || th == 0 {
+            return;
+        }
+        let bgr = self.fb.format != 0;
+        let mut pal = [0u32; 256];
+        for (i, c) in pal.iter_mut().enumerate() {
+            let v = p.pal[i];
+            *c = if bgr { v & 0xff_ffff } else { (v >> 16 & 0xff) | (v & 0xff00) | (v & 0xff) << 16 };
+        }
+        let xmap: Vec<u32> = (0..tw).map(|x| (x * p.w / tw) as u32).collect();
+        // Destination rows whose source row is in y0..y1.
+        let d0 = (y0 * th).div_ceil(p.h);
+        let d1 = ((y1 * th).div_ceil(p.h)).min(th);
+        let stride = self.fb.stride as usize;
+        for dy in d0..d1 {
+            let sy = dy * p.h / th;
+            let src = &p.data[sy * p.w..sy * p.w + p.w];
+            let line = unsafe { self.pixels.add((ry + dy) * stride + rx) };
+            for (dx, &sx) in xmap.iter().enumerate() {
+                unsafe { line.add(dx).write_volatile(pal[src[sx as usize] as usize]) };
+            }
+        }
+        mark_dirty((ry + d0) as u32, (ry + d1) as u32);
+    }
+
+    /// Show a picture of `w` x `h` (a DOS session's graphics mode): rows
+    /// `y0..` from `rows`, with palette `pal`.
+    pub fn set_pixels(&mut self, w: usize, h: usize, y0: usize, rows: &[u8], pal: &[u32; 256]) {
+        let new = !matches!(&self.pixmap, Some(p) if p.w == w && p.h == h);
+        if new {
+            self.pixmap = Some(Pixmap { w, h, data: alloc::vec![0; w * h], pal: *pal, generation: 0 });
+        }
+        let p = self.pixmap.as_mut().unwrap();
+        let pal_changed = p.pal != *pal;
+        p.pal = *pal;
+        let n = if w == 0 { 0 } else { (rows.len() / w).min(h.saturating_sub(y0)) };
+        p.data[y0 * w..(y0 + n) * w].copy_from_slice(&rows[..n * w]);
+        p.generation = p.generation.wrapping_add(1);
+        self.touch();
+        if self.visible && !self.graphics {
+            if new {
+                self.fill_black();
+                self.draw_pixmap(0, h);
+            } else if pal_changed {
+                self.draw_pixmap(0, h);
+            } else {
+                self.draw_pixmap(y0, y0 + n);
+            }
+        }
+    }
+
+    /// Back to the text screen.
+    pub fn clear_pixels(&mut self) {
+        if self.pixmap.take().is_some() {
+            self.touch();
+            self.layout();
+        }
+    }
+
     /// Fill the framebuffer outside the text area with the border colour.
     fn clear_border(&mut self) {
+        if self.pixmap.is_some() {
+            return;
+        }
         let c = self.palette[(self.overscan & 15) as usize];
         let (w, h, stride) = (self.fb.width as usize, self.fb.height as usize, self.fb.stride as usize);
         let (tx1, ty1) = (self.x0 + self.cols * CELL_W, self.y0 + self.rows * self.cell_h);
@@ -481,7 +588,7 @@ impl Screen {
     }
 
     fn draw(&mut self, row: usize, col: usize) {
-        if !self.visible || self.graphics {
+        if !self.visible || self.graphics || self.pixmap.is_some() {
             return;
         }
         let cell = self.cells[row][col];
@@ -595,7 +702,7 @@ impl Screen {
             }
         }
         self.sync_phys_rows(top, bottom);
-        if !self.visible || self.graphics {
+        if !self.visible || self.graphics || self.pixmap.is_some() {
             return;
         }
         // Move the pixels of the surviving rows in one copy, then draw only

@@ -100,6 +100,10 @@ pub fn drop_session(sid: u32) {
 /// Motion from a device: button bits (0 left, 1 right, 2 middle) and
 /// movement with y growing downwards.
 pub fn motion(buttons: u8, dx: i32, dy: i32) {
+    let fg = crate::session::foreground();
+    if !crate::session::popup_active() && crate::vdm::mouse(fg, buttons, dx, dy) {
+        return;
+    }
     deliver(buttons, || crate::display::mouse(buttons, dx, dy), |m, rows, cols| {
         m.acc.0 += dy;
         m.acc.1 += dx;
@@ -117,6 +121,12 @@ pub fn motion(buttons: u8, dx: i32, dy: i32) {
 /// the pointer goes to the cell under that point of the framebuffer.
 pub fn motion_abs(buttons: u8, x: u32, y: u32, max_x: u32, max_y: u32) {
     let sid = crate::session::foreground();
+    if !crate::session::popup_active() && crate::vdm::is_dos(sid) {
+        let fx = (x as u64 * 65535 / max_x.max(1) as u64) as u32;
+        let fy = (y as u64 * 65535 / max_y.max(1) as u64) as u32;
+        crate::vdm::mouse_abs(sid, buttons, fx, fy);
+        return;
+    }
     let cell = crate::screen::framebuffer().and_then(|fb| {
         let (px, py) = crate::display::abs_to_pixels(&fb, x, y, max_x, max_y);
         crate::screen::with_session(sid, |sc| sc.cell_at(px as usize, py as usize))

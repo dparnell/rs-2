@@ -9,13 +9,17 @@ pub const PROG_DEFAULT: u32 = 0;
 pub const PROG_FULLSCREEN: u32 = 1;
 pub const PROG_WINDOWABLEVIO: u32 = 2;
 pub const PROG_PM: u32 = 3;
+pub const PROG_VDM: u32 = 4;
+pub const PROG_WINDOWEDVDM: u32 = 7;
 
 /// Start `exe` with `params` in `dir` (the command processor for "*" or
 /// nothing; .CMD and .BAT files in one). Returns the error, 0 if it
-/// started.
+/// started. A DOS session (PROG_VDM, PROG_WINDOWEDVDM) runs its own
+/// COMMAND.COM for "*" and .BAT files.
 pub fn start(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) -> u32 {
     let up = exe.to_ascii_uppercase();
-    let batch = up.ends_with(b".CMD") || up.ends_with(b".BAT");
+    let dos = progc == PROG_VDM || progc == PROG_WINDOWEDVDM;
+    let batch = !dos && (up.ends_with(b".CMD") || up.ends_with(b".BAT"));
     let shell = exe.is_empty() || exe == b"*";
     let (name, inputs): (Option<Vec<u8>>, Vec<u8>) = if batch {
         let mut i = b"/K ".to_vec();
@@ -34,6 +38,8 @@ pub fn start(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) ->
         PROG_FULLSCREEN => 1,
         PROG_WINDOWABLEVIO => 2,
         PROG_PM => 3,
+        PROG_VDM => 4,
+        PROG_WINDOWEDVDM => 7,
         _ if batch => 2,
         _ => 0,
     };

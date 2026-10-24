@@ -320,6 +320,8 @@ pub struct StartData {
 }
 
 unsafe extern "C" {
+    #[link_name = "DOSCALLS.323"]
+    pub fn DosQueryAppType(name: *const u8, flags: *mut u32) -> APIRET;
     #[link_name = "SESMGR.37"]
     pub fn DosStartSession(sd: *const StartData, sid: *mut u32, pid: *mut u32) -> APIRET;
     #[link_name = "SESMGR.38"]

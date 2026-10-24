@@ -1,0 +1,9 @@
+[package]
+name = "dos"
+description = "no_std DOS virtual machine (BIOS, DOS kernel, XMS, EMS, mouse, DPMI, COMMAND.COM) around the x86emu CPU"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+x86emu = { path = "../x86emu" }

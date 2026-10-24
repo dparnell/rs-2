@@ -45,6 +45,7 @@ mod smp;
 mod sync;
 mod task;
 mod trap;
+mod vdm;
 mod vm;
 mod viowin;
 mod vmware;

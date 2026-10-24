@@ -8,11 +8,14 @@
 #                                            or in the folder with ID IN
 #   app ID | NAME | DESCRIPTION
 #   needs ID                                 another app installed with it
-#   object TITLE | PROGRAM | PARAMETERS | WORKING DIRECTORY | OBJECT ID [| IN]
+#   object TITLE | PROGRAM | PARAMETERS | WORKING DIRECTORY | OBJECT ID [| IN [| TYPE]]
 #                                            (IBM's INI.RC IDs where it has
 #                                            the object); IN: the folder
 #                                            (its ID) when not the
-#                                            category's, as in INI.RC
+#                                            category's, as in INI.RC;
+#                                            TYPE: PROGTYPE (VDM: DOS full
+#                                            screen, WINDOWEDVDM: DOS
+#                                            window), PM when not given
 #   file TARGET | CD FILE [| STORED]         CD FILE: the packed file that
 #                                            holds TARGET, or TARGET itself;
 #                                            STORED: its path in the packed
@@ -285,3 +288,31 @@ file \PSFONTS\COUR.PFB | OS2IMAGE\DISK_21\COUR.PFB
 file \PSFONTS\COURB.PFB | OS2IMAGE\DISK_18\COURB.PFB
 file \PSFONTS\COURI.PFB | OS2IMAGE\DISK_22\COURI.PFB
 file \PSFONTS\COURBI.PFB | OS2IMAGE\DISK_17\COURBI.PFB
+
+category DOS Programs | DOS Programs | <RS2_DOSPROGRAMS>
+
+app qbasic | QBasic | The BASIC of DOS: an editor with menus and help to write and run BASIC programs, graphics (SCREEN 1-13) and sound, with the MORTGAGE.BAS example. In a DOS window and full screen.
+object QBasic | \OS2\MDOS\QBASIC.EXE | | \OS2\MDOS | <RS2_QBASIC> | | WINDOWEDVDM
+object QBasic Full Screen | \OS2\MDOS\QBASIC.EXE | | \OS2\MDOS | <RS2_QBASICFS> | | VDM
+file \OS2\MDOS\QBASIC.EXE | OS2IMAGE\DISK_19\DOS
+file \OS2\MDOS\QBASIC.HLP | OS2IMAGE\DISK_18\DOS
+file \OS2\MDOS\MORTGAGE.BAS | OS2IMAGE\DISK_20\DOS
+
+app dosedit | DOS Editor | IBM's DOS editor (QBASIC /EDITOR): edits text files with menus and help. OS/2 has no EDIT command; its object starts QBasic as the editor.
+needs qbasic
+object DOS Editor | \OS2\MDOS\QBASIC.EXE | /EDITOR | \OS2\MDOS | <RS2_DOSEDIT> | | WINDOWEDVDM
+
+app dosdebug | DEBUG | The DOS debugger: shows and changes memory and registers, assembles, disassembles and traces DOS programs.
+file \OS2\MDOS\DEBUG.EXE | OS2IMAGE\DISK_20\DOS
+
+app edlin | EDLIN | The DOS line editor.
+file \OS2\MDOS\EDLIN.COM | OS2IMAGE\DISK_20\DOS
+
+app dosmem | MEM | Shows a DOS session's conventional, upper, EMS and XMS memory and the programs in it (MEM /C).
+file \OS2\MDOS\MEM.EXE | OS2IMAGE\DISK_19\DOS
+
+app doskey | DOSKEY | Recalls and edits earlier commands in a DOS session, and keeps macros.
+file \OS2\MDOS\DOSKEY.COM | OS2IMAGE\DISK_20\DOS
+
+app graftabl | GRAFTABL | Loads the characters 80h-FFh for CGA graphics modes.
+file \OS2\MDOS\GRAFTABL.COM | OS2IMAGE\DISK_20\DOS

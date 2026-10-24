@@ -408,6 +408,10 @@ pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
             return;
         }
     }
+    // DOS sessions read the keyboard as scan codes.
+    if crate::vdm::key(sid, sc, ext, ev.map_or(0, |k| k.ch)) {
+        return;
+    }
     if sid == crate::session::pm_session() && sid != 0 {
         match &ev {
             Some(k) => crate::display::key(k, false),
@@ -450,6 +454,9 @@ fn is_alt_home(k: &KeyInfo) -> bool {
 pub fn inject_key(sid: u32, k: KeyInfo, up: bool) {
     let ext = k.status & 0x02 != 0;
     if !up && is_alt_home(&k) && crate::session::set_windowed(sid, false) {
+        return;
+    }
+    if crate::vdm::key_window(sid, k.scan & 0x7f | if up { 0x80 } else { 0 }, ext, if up { 0 } else { k.ch }, k.shift) {
         return;
     }
     let mut k = k;

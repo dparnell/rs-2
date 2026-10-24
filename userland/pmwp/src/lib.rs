@@ -159,6 +159,8 @@ pub extern "C" fn WinCreateObject(class: *const u8, title: *const u8, setup: *co
         Some(v) if v == b"FULLSCREEN" => 1,
         Some(v) if v == b"WINDOWABLEVIO" => 2,
         Some(v) if v == b"PM" => 3,
+        Some(v) if v == b"VDM" => 4,
+        Some(v) if v == b"WINDOWEDVDM" => 7,
         _ => 0,
     };
     let ptr = |v: &Option<Vec<u8>>| v.as_ref().map_or(0, |v| v.as_ptr() as u32);

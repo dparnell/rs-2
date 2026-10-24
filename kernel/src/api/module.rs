@@ -442,7 +442,8 @@ pub fn dos_query_app_type(c: &mut Ctx) -> u32 {
         }
     }
     let Some(data) = crate::fs::read_file(&path.display()) else { return err::FILE_NOT_FOUND };
-    let t = app_type(&data);
+    // .COM files are DOS programs.
+    let t = if path.file_name().to_ascii_uppercase().ends_with(".COM") && !data.starts_with(b"MZ") { 0x0020 } else { app_type(&data) };
     if c.is16 { c.write_u16(ptype, t as u16) } else { c.write_u32(ptype, t) };
     0
 }

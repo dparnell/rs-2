@@ -599,6 +599,18 @@ pub fn read_file(path: &str) -> Option<Arc<[u8]>> {
     Some(Arc::from(v))
 }
 
+/// Read up to `n` bytes at `off` of a file given a fully qualified path.
+pub fn read_range(path: &str, off: u64, n: usize) -> Option<Vec<u8>> {
+    let empty: [String; 26] = Default::default();
+    let p = path::canonical(path, 2, &empty).ok()?;
+    let fs = fs_of(&p).ok()?;
+    let f = fs.open(&p.rel()).ok()?;
+    let mut v = alloc::vec![0u8; n];
+    let k = f.read(off, &mut v).ok()?;
+    v.truncate(k);
+    Some(v)
+}
+
 pub fn stat(path: &FullPath) -> Result<FileInfo, u32> {
     fs_of(path)?.stat(&path.rel())
 }

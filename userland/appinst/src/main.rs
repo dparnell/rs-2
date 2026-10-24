@@ -407,7 +407,11 @@ fn object(group: u32, o: &catalog::Object, d: u8) {
     // parameters, startup directory, icon, environment, SWP.
     let mut pd = [0u32; 18];
     pd[0] = 72;
-    pd[1] = PROG_PM;
+    pd[1] = match o.progtype {
+        b"VDM" => PROG_VDM,
+        b"WINDOWEDVDM" => PROG_WINDOWEDVDM,
+        _ => PROG_PM,
+    };
     pd[2] = SHE_VISIBLE;
     for (k, s) in strs.iter().enumerate() {
         pd[3 + k] = if s.len() > 1 || k == 0 { s.as_ptr() as u32 } else { 0 };
@@ -452,7 +456,8 @@ fn wps_folder(title: &[u8], id: &[u8], within: &[u8]) -> u32 {
 fn wps_object(folder: &[u8], o: &catalog::Object, d: u8) -> bool {
     let mut s = b"EXENAME=".to_vec();
     s.extend_from_slice(&media::on(d, o.program));
-    s.extend_from_slice(b";PROGTYPE=PM");
+    s.extend_from_slice(b";PROGTYPE=");
+    s.extend_from_slice(if o.progtype.is_empty() { b"PM" } else { o.progtype });
     if !o.params.is_empty() {
         s.extend_from_slice(b";PARAMETERS=");
         s.extend_from_slice(o.params);

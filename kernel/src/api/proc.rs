@@ -98,6 +98,18 @@ fn exec(c: &mut Ctx) -> u32 {
     if !matches!(mode, EXEC_SYNC | EXEC_ASYNC | EXEC_ASYNCRESULT | EXEC_BACKGROUND) {
         return err::INVALID_FUNCTION;
     }
+    // A DOS program runs in a DOS session of its own (in a window when
+    // the caller is in one); the call returns at once.
+    let full = path.display();
+    if super::sesmgr::is_dos_file(&full) {
+        return match super::sesmgr::start_dos_session(c, &full, args.trim_start(), env) {
+            Ok((_, pid, _)) => {
+                write_result(c, pres, if mode == EXEC_SYNC { 0 } else { pid }, 0);
+                0
+            }
+            Err(e) => e,
+        };
+    }
     let _ = crate::loader::take_fail();
     let r = process::exec(process::ExecParams {
         path: &path.display(),

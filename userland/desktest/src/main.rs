@@ -111,6 +111,11 @@ fn program_objects() {
     q.params.clear();
     check("PrfChangeProgram", objects::change_program(h, &q));
     check("the change is there", objects::definition(h).is_some_and(|d| d.title == b"Renamed" && d.progc == PROG_WINDOWABLEVIO && d.params.is_empty()));
+    // A DOS program object with DOS settings in its environment.
+    let mut dosp = q.clone();
+    dosp.progc = PROG_WINDOWEDVDM;
+    dosp.env = b"DOS_HIGH=0\0EMS_MEMORY_LIMIT=0\0".to_vec();
+    check("a DOS object's settings (pszEnvironment) are kept", objects::change_program(h, &dosp) && objects::definition(h).is_some_and(|d| d.progc == PROG_WINDOWEDVDM && d.env == dosp.env));
     objects::set_icon_pos(b"DESKTOP", b"PTEST", Some((123, -4)));
     check("icon positions in RS2_IconPos", objects::icon_pos(b"DESKTOP", b"PTEST") == Some((123, -4)));
     objects::set_icon_pos(b"DESKTOP", b"PTEST", None);
@@ -263,8 +268,41 @@ fn shadow_checks() {
     check("shadows cleaned up", shadows::all().len() == before);
 }
 
+/// `DESKTEST DOS W|F`: DOS program objects (GFX.COM and the DPMI test
+/// under COMMAND.COM /K, from C:\\DOS) in the Startup folder, in DOS
+/// windows (W) or full screen (F), started by the shell as it starts
+/// objects; removed again once started.
+fn dos_objects(windowed: bool) -> u32 {
+    make_ini();
+    let Some(g) = objects::query_u32(objects::APP_DESKTOP, b"StartupGroup").filter(|&h| objects::group_exists(h)) else {
+        os2::println!("no Startup folder");
+        return 1;
+    };
+    let progc = if windowed { PROG_WINDOWEDVDM } else { PROG_VDM };
+    let gfx = Program { progc, title: b"GFX test".to_vec(), exe: b"C:\\DOS\\GFX.COM".to_vec(), ..Program::default() };
+    let dpmi = Program { progc, title: b"DPMI test".to_vec(), exe: b"C:\\OS2\\MDOS\\COMMAND.COM".to_vec(), params: b"/K C:\\DOS\\DPMITEST".to_vec(), ..Program::default() };
+    let (a, b) = (objects::add_program(g, &gfx), objects::add_program(g, &dpmi));
+    check("DOS program objects in the Startup folder", a != 0 && b != 0);
+    let prog = objects::sys_path(b"OS2\\RS2SHELL.EXE");
+    let mut args = prog.clone();
+    args.push(0);
+    args.extend_from_slice(b"/STARTUP\0\0");
+    let pz = z(&prog);
+    let mut fail = [0u8; 64];
+    let mut res = os2::ResultCodes { code_terminate: 0, code_result: 0 };
+    let rc = unsafe { os2::DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, 0, args.as_ptr(), core::ptr::null(), &mut res, pz.as_ptr()) };
+    check("RS2SHELL /STARTUP starts them", rc == 0);
+    unsafe { os2::DosSleep(2000) };
+    objects::remove_program(a);
+    objects::remove_program(b);
+    FAILS.load(Ordering::Relaxed)
+}
+
 fn main(s: &os2::Startup) -> u32 {
     let args: alloc::vec::Vec<u8> = s.args().iter().copied().skip_while(|&c| c == b' ').collect();
+    if let Some(m) = args.strip_prefix(b"DOS ") {
+        return dos_objects(m.first() == Some(&b'W'));
+    }
     // DESKTEST MARK FILE: write FILE (a Startup folder object).
     if let Some(f) = args.strip_prefix(b"MARK ") {
         files::write(f, b"started");

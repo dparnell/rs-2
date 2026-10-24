@@ -1,8 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "boot", "kernel", "tools/lxdump", "tools/elf2lx", "tools/unpack", "xtask"]
+members = ["crates/*", "boot", "kernel", "tools/lxdump", "tools/elf2lx", "tools/unpack", "tools/dosrun", "xtask"]
 # boot and kernel are cross-compiled by xtask.
-default-members = ["crates/os2-exe", "crates/bootinfo", "crates/fat", "crates/gpi", "crates/hpfs", "crates/jfs", "crates/inifile", "crates/ipf", "crates/mci", "crates/midi", "crates/mmfmt", "crates/os2-pack", "crates/pmwin", "crates/tcpip", "crates/uls", "crates/viocell", "tools/lxdump", "tools/elf2lx", "tools/unpack", "xtask"]
+default-members = ["crates/x86emu", "crates/dos", "crates/os2-exe", "crates/bootinfo", "crates/fat", "crates/gpi", "crates/hpfs", "crates/jfs", "crates/inifile", "crates/ipf", "crates/mci", "crates/midi", "crates/mmfmt", "crates/os2-pack", "crates/pmwin", "crates/tcpip", "crates/uls", "crates/viocell", "tools/lxdump", "tools/elf2lx", "tools/unpack", "tools/dosrun", "xtask"]
 
 [workspace.package]
 edition = "2024"

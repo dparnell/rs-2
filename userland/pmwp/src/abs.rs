@@ -37,6 +37,8 @@ fn progtype(v: &[u8]) -> u32 {
         b"FULLSCREEN" => launch::PROG_FULLSCREEN,
         b"WINDOWABLEVIO" => launch::PROG_WINDOWABLEVIO,
         b"PM" => launch::PROG_PM,
+        b"VDM" => launch::PROG_VDM,
+        b"WINDOWEDVDM" => launch::PROG_WINDOWEDVDM,
         _ => launch::PROG_DEFAULT,
     }
 }
@@ -366,7 +368,7 @@ extern "C" fn prog_icon(obj: usize) -> u32 {
         let p = pd(obj);
         let exe = str_bytes(&p.exe).to_vec();
         let h = if exe.is_empty() || exe == b"*" {
-            crate::icons::shell(if p.progc == launch::PROG_FULLSCREEN { crate::icons::PROMPT_FULL_SCREEN } else { crate::icons::PROMPT_WINDOW })
+            crate::icons::shell(if p.progc == launch::PROG_FULLSCREEN || p.progc == launch::PROG_VDM { crate::icons::PROMPT_FULL_SCREEN } else { crate::icons::PROMPT_WINDOW })
         } else {
             let f = z(&exe);
             unsafe { crate::fs::Rs2LoadFileIcon(f.as_ptr(), 0) }
