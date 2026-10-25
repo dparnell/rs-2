@@ -141,10 +141,12 @@ pub fn sync(sm: &mut Seamless, view: &View, object: u32) {
     }
     sm.win_gen = g;
     let list = read_windows(view.s);
-    // Frames of windows that went away or are hidden.
+    // Frames of windows that went away or are hidden. A minimised one
+    // keeps its frame, hidden, for its window list entry.
     let shown = |f: u16| f & sf::WF_VISIBLE != 0 && f & sf::WF_MINIMIZED == 0;
+    let kept = |f: u16| f & sf::WF_VISIBLE != 0;
     sm.wins.retain(|w| {
-        let keep = list.iter().any(|(h, f, r, _)| *h == w.hwnd && shown(*f) && r.2 > 0 && r.3 > 0);
+        let keep = list.iter().any(|(h, f, r, _)| *h == w.hwnd && kept(*f) && r.2 > 0 && r.3 > 0);
         if !keep {
             unsafe {
                 Rs2PmVioWindow(w.client, 0, 0);
@@ -159,14 +161,17 @@ pub fn sync(sm: &mut Seamless, view: &View, object: u32) {
         if flags & sf::WF_ACTIVE != 0 {
             active = *hwnd;
         }
-        if !shown(*flags) || r.2 <= 0 || r.3 <= 0 {
+        if !kept(*flags) || r.2 <= 0 || r.3 <= 0 {
             continue;
         }
         let (x, y, w, h) = pm_rect(*r);
         match sm.wins.iter().position(|o| o.hwnd == *hwnd) {
             Some(i) => {
                 let o = &mut sm.wins[i];
-                if o.rect != *r {
+                if (unsafe { WinIsWindowVisible(o.frame) } != 0) != shown(*flags) {
+                    unsafe { WinShowWindow(o.frame, shown(*flags) as u32) };
+                }
+                if shown(*flags) && o.rect != *r {
                     o.rect = *r;
                     unsafe {
                         WinSetWindowPos(o.frame, 0, x, y, w, h, SWP_SIZE | SWP_MOVE);
@@ -189,12 +194,17 @@ pub fn sync(sm: &mut Seamless, view: &View, object: u32) {
                 let mut t = title.clone();
                 t.push(0);
                 let mut client = 0;
+                if !shown(*flags) && fcf == 0 {
+                    // Minimised and not in the window list: nothing to show.
+                    continue;
+                }
                 let frame = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, CLASS.as_ptr(), t.as_ptr(), 0, 0, *hwnd as u32, &mut client) };
                 if frame == 0 {
                     continue;
                 }
+                let show = if shown(*flags) { SWP_SHOW } else { 0 };
                 unsafe {
-                    WinSetWindowPos(frame, HWND_TOP, x, y, w, h, SWP_SIZE | SWP_MOVE | SWP_ZORDER | SWP_SHOW | SWP_NOACTIVATE);
+                    WinSetWindowPos(frame, HWND_TOP, x, y, w, h, SWP_SIZE | SWP_MOVE | SWP_ZORDER | show | SWP_NOACTIVATE);
                     Rs2PmVioWindow(client, sm.sid, VW_DIRECT);
                 }
                 sm.wins.push(SWin { hwnd: *hwnd, frame, client, rect: *r, flags: *flags, title: title.clone() });
@@ -205,7 +215,7 @@ pub fn sync(sm: &mut Seamless, view: &View, object: u32) {
     // Windows (one of ours is active, or Windows activated a window).
     if ours_active || active != sm.active_win {
         for (hwnd, ..) in &list {
-            if let Some(o) = sm.wins.iter().find(|o| o.hwnd == *hwnd) {
+            if let Some(o) = sm.wins.iter().find(|o| o.hwnd == *hwnd && o.flags & sf::WF_MINIMIZED == 0) {
                 unsafe { WinSetWindowPos(o.frame, HWND_TOP, 0, 0, 0, 0, SWP_ZORDER) };
             }
         }
@@ -243,10 +253,15 @@ pub fn tick(sm: &mut Seamless) {
             }
         }
     }
-    // A frame the window list showed again.
-    for o in &sm.wins {
+    // A frame the window list showed again: Windows restores the window
+    // (asked once; the window list then shows it as Windows reports).
+    for i in 0..sm.wins.len() {
+        let o = &sm.wins[i];
         if o.flags & sf::WF_MINIMIZED != 0 && unsafe { WinIsWindowVisible(o.frame) } != 0 {
-            sm.request(sf::REQ_RESTORE, o.hwnd, 0);
+            let hwnd = o.hwnd;
+            sm.wins[i].flags &= !sf::WF_MINIMIZED;
+            sm.request(sf::REQ_RESTORE, hwnd, 0);
+            sm.request(sf::REQ_ACTIVATE, hwnd, 0);
         }
     }
 }
