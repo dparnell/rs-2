@@ -462,7 +462,7 @@ fn check_postscript(what: &str, out: &[u8], pages: usize) {
     check(&alloc::format!("{what}: text shown with xshow"), has(out, b"(Hello, printer) [") && has(out, b"] xshow"));
     check(&alloc::format!("{what}: an outline font's glyphs (Type 3)"), has(out, b"setcharwidth") && has(out, b"(rs2 prints!) ["));
     check(&alloc::format!("{what}: a patterned area"), has(out, b"makepattern") && has(out, b"setcolor"));
-    check(&alloc::format!("{what}: a dashed blue line"), has(out, b"0 0 1 rg") && has(out, b"[4 4] 0 d"));
+    check(&alloc::format!("{what}: a dashed blue line"), has(out, b"0 0 1 rg") && has(out, b"[12.5 12.5] 0 d"));
     check(&alloc::format!("{what}: a red box"), has(out, b"1 0 0 rg"));
     check(&alloc::format!("{what}: the bitmap as an image"), has(out, b"false 3 colorimage"));
 }
