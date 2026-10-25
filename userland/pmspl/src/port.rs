@@ -95,7 +95,7 @@ pub extern "C" fn PrtOpen(dev: *const u8, ph: *mut u32, action: *mut u32, _size:
     let document = job.map(|j| j.document).unwrap_or_default();
     let sink = if port.starts_with(b"LPR") || port.starts_with(b"IPP") {
         Sink::Net { lpr: port.starts_with(b"LPR"), settings, data: Vec::new() }
-    } else if port == b"FILE" {
+    } else if port.starts_with(b"FILE") {
         let id = if id == 0 { jobs::locked(jobs::next_id) } else { id };
         match open_handle(&file_target(&settings, id)) {
             Ok(h) => Sink::Handle(h),

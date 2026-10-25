@@ -106,6 +106,26 @@ fn num(s: &mut String, x: f64) {
     }
 }
 
+/// A number with up to six decimals (matrices).
+fn fine(s: &mut String, x: f64) {
+    let m = x * 1_000_000.0;
+    let v = if m >= 0.0 { crate::math::floor(m + 0.5) } else { -crate::math::floor(-m + 0.5) } as i64;
+    let (neg, a) = (v < 0, v.unsigned_abs());
+    if neg {
+        s.push('-');
+    }
+    let _ = write!(s, "{}", a / 1_000_000);
+    let mut frac = a % 1_000_000;
+    if frac != 0 {
+        let mut digits = 6;
+        while frac % 10 == 0 {
+            frac /= 10;
+            digits -= 1;
+        }
+        let _ = write!(s, ".{:0width$}", frac, width = digits);
+    }
+}
+
 fn nums(s: &mut String, xs: &[f64]) {
     for (i, &x) in xs.iter().enumerate() {
         if i > 0 {
@@ -683,8 +703,13 @@ impl Sink for PsWriter {
         self.set_color(run.color);
         let id = self.fonts[fi].id;
         let mut s = String::new();
-        let _ = write!(s, "F{id} [");
-        nums(&mut s, &[run.matrix[0], run.matrix[1], run.matrix[2], run.matrix[3]]);
+        let _ = write!(s, "/F{id} findfont [");
+        for (i, &v) in run.matrix.iter().enumerate() {
+            if i > 0 {
+                s.push(' ');
+            }
+            fine(&mut s, v);
+        }
         s.push_str(" 0 0] makefont setfont ");
         nums(&mut s, &[run.xs[0], run.y]);
         s.push_str(" m ");
@@ -729,6 +754,12 @@ mod tests {
         let mut s = String::new();
         nums(&mut s, &[1.0, -2.5, 0.125, 3.999, -0.05]);
         assert_eq!(s, "1 -2.5 0.13 4 -0.05");
+        let mut s = String::new();
+        for v in [0.020508, -1.5, 3.0, 0.0000004] {
+            fine(&mut s, v);
+            s.push(' ');
+        }
+        assert_eq!(s, "0.020508 -1.5 3 0 ");
     }
 
     #[test]

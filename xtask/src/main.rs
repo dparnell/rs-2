@@ -547,6 +547,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("desktest", "RS2\\DESKTEST.EXE"),
         ("testdll", "RS2\\TESTDLL.DLL"),
         ("pmxtest", "RS2\\PMXTEST.EXE"),
+        ("prntest", "RS2\\PRNTEST.EXE"),
         ("pmxhook", "RS2\\PMXHOOK.DLL"),
         ("cmd", "OS2\\CMD.EXE"),
         ("vdm", "OS2\\MDOS\\VDM.EXE"),

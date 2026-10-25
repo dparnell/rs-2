@@ -395,7 +395,8 @@ pub extern "C" fn GpiSetCharSet(hps: u32, lcid: i32) -> u32 {
     crate::gpiseg::rec_attr(hps, || Attr::CharSet(lcid));
     let Some(e) = entry(st(), hps) else { return 0 };
     let (lf, loaded) = if lcid == 0 {
-        (LogFont::default(), 0)
+        // The device's default font (a printer's is an outline font).
+        (LogFont { outline: e.ps.device_font.is_some_and(|f| f.source.is_some()), ..LogFont::default() }, 0)
     } else {
         match e.gpi.lcids.iter().find(|(l, _)| *l == lcid) {
             Some((_, Lcid::Font(lf, _, n))) => (*lf, *n),
@@ -405,7 +406,7 @@ pub extern "C" fn GpiSetCharSet(hps: u32, lcid: i32) -> u32 {
     e.ps.will_change_attrs();
     e.ps.attrs.char_set = lcid;
     e.ps.logfont = lf;
-    e.ps.font = loaded_font(loaded).unwrap_or_else(gpi::font::system);
+    e.ps.font = loaded_font(loaded).or(if lcid == 0 { e.ps.device_font } else { None }).unwrap_or_else(gpi::font::system);
     1
 }
 
@@ -424,8 +425,8 @@ pub extern "C" fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32 {
     e.gpi.lcids.retain(|(l, _)| lcid != -1 && *l != lcid);
     if e.ps.attrs.char_set == lcid || lcid == -1 {
         e.ps.attrs.char_set = 0;
-        e.ps.logfont = LogFont::default();
-        e.ps.font = gpi::font::system();
+        e.ps.logfont = LogFont { outline: e.ps.device_font.is_some_and(|f| f.source.is_some()), ..LogFont::default() };
+        e.ps.font = e.ps.device_font.unwrap_or_else(gpi::font::system);
     }
     (e.gpi.lcids.len() != before || lcid == -1) as u32
 }

@@ -23,6 +23,7 @@ enum DcKind {
     Memory,
     Info,
     Metafile(alloc::boxed::Box<crate::gpiseg::MetaRec>),
+    Printer(alloc::boxed::Box<crate::printer::PrinterDc>),
 }
 
 struct Bm {
@@ -83,8 +84,33 @@ fn dc_add(k: DcKind) -> u32 {
 pub fn meta_rec(hdc: u32) -> Option<&'static mut crate::gpiseg::MetaRec> {
     match dc_get(hdc)? {
         DcKind::Metafile(m) => Some(m),
+        DcKind::Printer(p) => p.meta.as_deref_mut(),
         _ => None,
     }
+}
+
+/// A printer DC of the caller.
+pub fn printer(hdc: u32) -> Option<&'static mut crate::printer::PrinterDc> {
+    match dc_get(hdc)? {
+        DcKind::Printer(p) => Some(p),
+        _ => None,
+    }
+}
+
+/// The vector device of a printer DC, taken out while a PS draws on it.
+pub fn take_sink(hdc: u32) -> Option<alloc::boxed::Box<dyn gpi::psdev::Sink>> {
+    printer(hdc)?.writer.take()
+}
+
+pub fn put_sink(hdc: u32, k: alloc::boxed::Box<dyn gpi::psdev::Sink>) {
+    if let Some(p) = printer(hdc) {
+        p.writer = Some(k);
+    }
+}
+
+/// Whether a PS on `hdc` draws through a printer's vector device.
+pub fn draws_vectors(hdc: u32) -> bool {
+    printer(hdc).is_some_and(|p| p.writer.is_some())
 }
 
 /// The presentation space for `hdc | 1`: one per DC, associated with it,
@@ -179,10 +205,31 @@ pub fn delete_bitmap_of(p: u32, h: u32) {
 
 /// Associate a PS with a device context.
 pub fn associate(hps: u32, hdc: u32) -> bool {
+    if let Some(p) = printer(hdc) {
+        let (page, std, vectors) = (p.page(), p.kind == crate::printer::Kind::Std, p.writer.is_some());
+        let Some(e) = entry(st(), hps) else { return false };
+        e.gpi.hdc = hdc;
+        e.hwnd = 0;
+        e.gpi.memory = false;
+        e.gpi.seg.meta_dc = 0;
+        // The printer's resolution for page units, its default font.
+        e.ps.device_ppm = crate::printer::DPI * 10000 / 254;
+        let (u, sz) = (e.ps.page_units, e.ps.page_size);
+        e.ps.set_page(u, sz);
+        if let Some(f) = crate::printer::default_font() {
+            e.ps.set_device_font(f, true);
+        }
+        e.ps.set_vis(Point::new(0, 0), if vectors { vec![page] } else { Vec::new() });
+        if std {
+            crate::gpiseg::set_meta_dc(hps, hdc);
+        }
+        return true;
+    }
     let kind = match dc_get(hdc) {
         Some(DcKind::Window(h)) => DcKind::Window(*h),
         Some(DcKind::Memory) => DcKind::Memory,
         Some(DcKind::Info) => DcKind::Info,
+        Some(DcKind::Printer(_)) => unreachable!(),
         Some(DcKind::Metafile(_)) => {
             let Some(e) = entry(st(), hps) else { return false };
             e.gpi.hdc = hdc;
@@ -209,12 +256,26 @@ pub fn associate(hps: u32, hdc: u32) -> bool {
             e.gpi.memory = true;
             e.ps.set_vis(Point::new(0, 0), Vec::new());
         }
-        DcKind::Info | DcKind::Metafile(_) => {
+        DcKind::Info | DcKind::Metafile(_) | DcKind::Printer(_) => {
             e.hwnd = 0;
             e.gpi.memory = false;
         }
     }
     true
+}
+
+/// A PS leaves a printer DC: back to the display's resolution and font.
+pub fn leave_printer(e: &mut crate::state::PsEntry) {
+    if e.ps.device_font.is_some() || e.ps.device_ppm != gpi::xform::PELS_PER_METRE {
+        e.ps.device_font = None;
+        e.ps.device_ppm = gpi::xform::PELS_PER_METRE;
+        let (u, sz) = (e.ps.page_units, e.ps.page_size);
+        e.ps.set_page(u, sz);
+        if e.ps.attrs.char_set == 0 {
+            e.ps.font = gpi::font::system();
+            e.ps.logfont = gpi::LogFont::default();
+        }
+    }
 }
 
 fn rects(p: *const RectL, n: i32) -> Option<Vec<Rect>> {
@@ -623,15 +684,36 @@ const OD_METAFILE: i32 = 3;
 const OD_INFO: i32 = 6;
 const OD_METAFILE_NOQUERY: i32 = 7;
 const OD_MEMORY: i32 = 8;
+const OD_METAFILE_NOQUERY_TK: i32 = 9;
 
 /// DevOpenDC(hab, lType, pszToken, lCount, pdopData, hdcComp): memory,
-/// information and metafile DCs; there are no printers yet.
+/// information and metafile DCs, and printers (OD_QUEUED, OD_DIRECT,
+/// OD_INFO for a queue: printer.rs).
 #[unsafe(no_mangle)]
-pub extern "C" fn DevOpenDC(_hab: u32, ty: i32, _token: *const u8, _n: i32, _dop: *const u32, _comp: u32) -> u32 {
+pub extern "C" fn DevOpenDC(_hab: u32, ty: i32, _token: *const u8, n: i32, dop: *const u32, _comp: u32) -> u32 {
+    if crate::printer::wants_printer(ty, n, dop) {
+        let addr = if n >= 1 && !dop.is_null() { (unsafe { dop.read_unaligned() }) as *const u8 } else { core::ptr::null() };
+        let mut name = Vec::new();
+        if !addr.is_null() {
+            let mut i = 0;
+            while unsafe { *addr.add(i) } != 0 {
+                name.push(unsafe { *addr.add(i) });
+                i += 1;
+            }
+        }
+        if !crate::printer::known(&name) {
+            crate::misc::set_error(0x4021); // PMERR_SPL_NO_SUCH_LOG_ADDRESS
+            return 0;
+        }
+        return match crate::printer::open(ty, n, dop) {
+            Some(p) => dc_add(DcKind::Printer(alloc::boxed::Box::new(p))),
+            None => 0,
+        };
+    }
     let k = match ty {
         OD_MEMORY => DcKind::Memory,
         OD_INFO | OD_SCREEN => DcKind::Info,
-        OD_METAFILE | OD_METAFILE_NOQUERY => DcKind::Metafile(alloc::boxed::Box::new(crate::gpiseg::MetaRec::new())),
+        OD_METAFILE | OD_METAFILE_NOQUERY | OD_METAFILE_NOQUERY_TK => DcKind::Metafile(alloc::boxed::Box::new(crate::gpiseg::MetaRec::new())),
         _ => return 0,
     };
     dc_add(k)
@@ -647,10 +729,14 @@ pub extern "C" fn DevCloseDC(hdc: u32) -> u32 {
         let (_, hps) = o.dc_pss.remove(at);
         crate::gpiapi::GpiDestroyPS(hps);
     }
+    if let Some(p) = printer(hdc) {
+        p.close();
+    }
     let me = crate::state::pid();
     for e in st().pss.iter_mut().flatten().filter(|e| e.pid == me && e.gpi.hdc == hdc) {
         e.gpi.hdc = 0;
         e.gpi.seg.meta_dc = 0;
+        leave_printer(e);
     }
     match objects().dcs.get_mut(i).and_then(|d| d.take()) {
         Some(DcKind::Metafile(m)) => crate::gpiseg::new_mf(m.build()),
@@ -733,35 +819,72 @@ pub extern "C" fn DevQueryCaps(hdc: u32, start: i32, n: i32, out: *mut i32) -> u
     if !known || out.is_null() || start < 0 || n < 0 {
         return 0;
     }
+    // A printer DC, or a PS on one.
+    let pdc = if printer(hdc).is_some() { hdc } else { entry(st(), hdc).map_or(0, |e| e.gpi.hdc) };
+    if let Some(p) = printer(pdc) {
+        let family = match p.kind {
+            crate::printer::Kind::Direct => 5,
+            crate::printer::Kind::Info => 6,
+            _ => 2,
+        };
+        for i in 0..n {
+            unsafe { out.add(i as usize).write_unaligned(p.caps(start + i, family)) };
+        }
+        return 1;
+    }
     for i in 0..n {
         unsafe { out.add(i as usize).write_unaligned(caps(start + i)) };
     }
     1
 }
 
-/// DevEscape: DEVESC_NOTIMPLEMENTED.
+/// DevEscape(hdc, lCode, lInCount, pbInData, plOutCount, pbOutData):
+/// printer DCs (printer.rs); others: DEVESC_NOTIMPLEMENTED.
 #[unsafe(no_mangle)]
-pub extern "C" fn DevEscape(_hdc: u32, _code: i32, _nin: i32, _pin: *const u8, _nout: *mut i32, _pout: *mut u8) -> i32 {
+pub extern "C" fn DevEscape(hdc: u32, code: i32, nin: i32, pin: *const u8, nout: *mut i32, pout: *mut u8) -> i32 {
+    let Some(p) = printer(hdc) else { return 0 };
+    let input = if nin > 0 && !pin.is_null() { unsafe { core::slice::from_raw_parts(pin, nin as usize) }.to_vec() } else { Vec::new() };
+    p.escape(code, &input, nout, pout)
+}
+
+fn cstr<'a>(p: *const u8) -> &'a [u8] {
+    if p.is_null() {
+        return &[];
+    }
+    let mut n = 0;
+    while unsafe { *p.add(n) } != 0 {
+        n += 1;
+    }
+    unsafe { core::slice::from_raw_parts(p, n) }
+}
+
+/// DevPostDeviceModes(hab, pdrivDriverData, pszDriverName,
+/// pszDeviceName, pszName, flOptions): the PostScript driver's job
+/// properties (printer.rs).
+#[unsafe(no_mangle)]
+pub extern "C" fn DevPostDeviceModes(_hab: u32, drv: *mut u8, name: *const u8, dev: *const u8, pname: *const u8, fl: u32) -> i32 {
+    let (d, v, n) = (cstr(name).to_vec(), cstr(dev).to_vec(), cstr(pname).to_vec());
+    crate::printer::post_device_modes(drv, &d, &v, &n, fl)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn DevQueryDeviceNames(_hab: u32, drv: *const u8, n: *mut i32, names: *mut u8, desc: *mut u8, nt: *mut i32, types: *mut u8) -> u32 {
+    if crate::printer::device_names(cstr(drv), n, names, desc, nt, types) {
+        return 1;
+    }
+    write(n, 0);
+    write(nt, 0);
     0
 }
 
-/// DevPostDeviceModes: no printer drivers (DPDM_ERROR).
+/// DevQueryHardcopyCaps(hdc, lStartForm, lForms, phciHcInfo): the forms
+/// of a printer DC (DQHC_ERROR for others).
 #[unsafe(no_mangle)]
-pub extern "C" fn DevPostDeviceModes(_hab: u32, _drv: *mut u8, _name: *const u8, _dev: *const u8, _pname: *const u8, _fl: u32) -> i32 {
-    -1
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn DevQueryDeviceNames(_hab: u32, _drv: *const u8, n: *mut i32, _names: *mut u8, _desc: *mut u8, nt: *mut i32, _types: *mut u8) -> u32 {
-    write(n, 0);
-    write(nt, 0);
-    1
-}
-
-/// DevQueryHardcopyCaps: DQHC_ERROR.
-#[unsafe(no_mangle)]
-pub extern "C" fn DevQueryHardcopyCaps(_hdc: u32, _start: i32, _n: i32, _info: *mut u8) -> i32 {
-    -1
+pub extern "C" fn DevQueryHardcopyCaps(hdc: u32, start: i32, n: i32, info: *mut u8) -> i32 {
+    match printer(hdc) {
+        Some(p) => p.hardcopy(start, n, info),
+        None => -1,
+    }
 }
 
 // ---- Bitmaps ----
@@ -1030,7 +1153,7 @@ fn source_pels(hps: u32, r: Rect, w: i32, h: i32) -> Option<(Vec<Option<u32>>, b
             let surf = b.bm.surface();
             Some((bitmap::sample(&surf, r, w, h), b.bm.is_mono(), back))
         }
-        Target::Nowhere => None,
+        Target::Nowhere | Target::Printer(_) => None,
     }
 }
 
@@ -1038,11 +1161,39 @@ fn target_is_mono(hps: u32) -> bool {
     entry(st(), hps).is_some_and(|e| e.gpi.memory && bm(e.gpi.bitmap).is_some_and(|b| b.bm.is_mono()))
 }
 
-/// Blit samples to a target device rectangle.
-fn blit_to(hps: u32, t: Rect, src: Option<(Vec<Option<u32>>, bool, u32)>, rop: i32) -> i32 {
+/// How many samples a blit from `sr` to the device rectangle `t` takes:
+/// one per target pel, but a printer (which scales images itself) gets
+/// no more than the source has.
+fn samples(hps: u32, t: Rect, sr: Rect) -> (i32, i32) {
+    // Printer DCs of every kind (a queued one records the samples for
+    // the printer to scale).
+    let vectors = entry(st(), hps).is_some_and(|e| e.hwnd == 0 && !e.gpi.memory && printer(e.gpi.hdc).is_some());
+    if vectors { (t.width().min(sr.width().max(1)), t.height().min(sr.height().max(1))) } else { (t.width(), t.height()) }
+}
+
+/// Draw `w` x `h` samples into the device rectangle `t` (a recorded
+/// blit being played): resampled to the target's pels unless the PS
+/// draws vectors.
+pub fn blit_samples(hps: u32, t: Rect, rop: u8, mono: bool, (w, h): (i32, i32), v: &[Option<u32>]) {
+    let (tw, th) = samples(hps, t, Rect::new(0, 0, w, h));
+    let v: Vec<Option<u32>> = if (tw, th) == (w, h) {
+        v.to_vec()
+    } else {
+        (0..tw * th).map(|k| {
+            let (i, j) = (k % tw, k / tw);
+            v.get(((j * h / th) * w + i * w / tw) as usize).copied().flatten()
+        }).collect()
+    };
+    draw(hps, |e, s| e.ps.blit(s, t, Some((&v, tw, th)), rop, mono, None));
+}
+
+/// Blit samples (`w` x `h`) to a target device rectangle.
+fn blit_to(hps: u32, t: Rect, src: Option<(Vec<Option<u32>>, bool, u32)>, rop: i32, (w, h): (i32, i32)) -> i32 {
     let rop = rop as u8;
     let mono_dst = target_is_mono(hps);
-    let (w, h) = (t.width(), t.height());
+    if let Some((v, mono, _)) = &src {
+        crate::gpiseg::rec_blit(hps, t, rop, *mono, (w, h), v);
+    }
     draw(hps, |e, s| match &src {
         Some((v, mono, back)) => {
             let md = (mono_dst && !mono).then_some(*back);
@@ -1073,14 +1224,18 @@ pub extern "C" fn GpiBitBlt(dst: u32, src: u32, n: i32, p: *const PointL, rop: i
             return GPI_ERROR;
         }
         let sr = if pts.len() >= 4 { norm(pts[2], pts[3]) } else { Rect::new(pts[2].x, pts[2].y, pts[2].x + t.width(), pts[2].y + t.height()) };
-        match source_pels(src, sr, t.width(), t.height()) {
-            Some(v) => Some(v),
+        let (w, h) = samples(dst, t, sr);
+        match source_pels(src, sr, w, h) {
+            Some(v) => Some((v, (w, h))),
             None => return GPI_ERROR,
         }
     } else {
         None
     };
-    blit_to(dst, t, s, rop)
+    match s {
+        Some((v, dims)) => blit_to(dst, t, Some(v), rop, dims),
+        None => blit_to(dst, t, None, rop, (t.width(), t.height())),
+    }
 }
 
 /// World target rectangle (inclusive corners) to device.
@@ -1110,11 +1265,15 @@ pub extern "C" fn GpiWCBitBlt(dst: u32, hbm: u32, n: i32, p: *const PointL, rop:
             _ => Rect::new(0, 0, b.bm.width, b.bm.height),
         };
         let surf = b.bm.surface();
-        Some((bitmap::sample(&surf, sr, t.width(), t.height()), b.bm.is_mono(), 0xffffff))
+        let (w, h) = samples(dst, t, sr);
+        Some(((bitmap::sample(&surf, sr, w, h), b.bm.is_mono(), 0xffffff), (w, h)))
     } else {
         None
     };
-    blit_to(dst, t, src, rop)
+    match src {
+        Some((v, dims)) => blit_to(dst, t, Some(v), rop, dims),
+        None => blit_to(dst, t, None, rop, (t.width(), t.height())),
+    }
 }
 
 /// GpiDrawBits(hps, pBits, pbmiInfoTable, lCount, aptlPoints, lRop,
@@ -1136,8 +1295,9 @@ pub extern "C" fn GpiDrawBits(dst: u32, bits: *const u8, bmi: *const u8, n: i32,
         _ => Rect::new(0, 0, i.width, i.height),
     };
     let surf = b.surface();
-    let v = bitmap::sample(&surf, sr, t.width(), t.height());
-    blit_to(dst, t, Some((v, false, 0xffffff)), rop)
+    let dims = samples(dst, t, sr);
+    let v = bitmap::sample(&surf, sr, dims.0, dims.1);
+    blit_to(dst, t, Some((v, false, 0xffffff)), rop, dims)
 }
 
 /// WinDrawBitmap(hpsDst, hbm, pwrcSrc, pptlDst, clrFore, clrBack, fl):
@@ -1157,10 +1317,11 @@ pub extern "C" fn WinDrawBitmap(hps: u32, hbm: u32, src: *const RectL, dst: *con
         Rect::new(p.x, p.y, p.x + sr.width(), p.y + sr.height())
     };
     let surf = b.bm.surface();
-    let v = bitmap::sample(&surf, sr, t.width(), t.height());
+    let (w, h) = samples(hps, t, sr);
+    let v = bitmap::sample(&surf, sr, w, h);
     let mono = b.bm.is_mono();
     let rop = if fl & 1 != 0 { 0x33 } else { 0xcc };
-    let (w, h) = (t.width(), t.height());
+    crate::gpiseg::rec_blit(hps, t, rop, mono, (w, h), &v);
     draw(hps, |e, s| {
         let saved = e.ps.attrs.image;
         if fl & 8 == 0 {

@@ -44,6 +44,7 @@ mod msg;
 mod notebook;
 mod pointer;
 mod pp;
+mod printer;
 mod rect;
 mod report;
 mod res;

@@ -310,6 +310,8 @@ pub struct Ps {
     /// The device's default font (printers: an outline font), which
     /// resets restore instead of the system font.
     pub device_font: Option<&'static Font>,
+    /// The device's resolution (pels per metre) for page units.
+    pub device_ppm: i32,
 }
 
 impl Ps {
@@ -350,6 +352,7 @@ impl Ps {
             display: true,
             sink: core::cell::RefCell::new(None),
             device_font: None,
+            device_ppm: xform::PELS_PER_METRE,
         }
     }
 
@@ -636,7 +639,7 @@ impl Ps {
     pub fn set_page(&mut self, units: u32, size: (i32, i32)) {
         self.page_units = units;
         self.page_size = size;
-        let k = xform::page_unit_scale(units);
+        let k = xform::page_unit_scale_at(units, self.device_ppm);
         self.page = Matrix::scale(k, k);
         self.update_xf();
     }
@@ -892,7 +895,10 @@ impl Ps {
             }
             self.note_bounds(Rect::new(round(lo.0), round(lo.1), round(hi.0) + 1, round(hi.1) + 1));
             if let Some(c) = Self::on_paper(mix, fg) {
-                let dash: Vec<f64> = pattern::line_dashes(lt).map(|d| d.iter().map(|&x| x as f64).collect()).unwrap_or_default();
+                // Line types are made for the display's pels: as long on
+                // paper as on the screen.
+                let k = (self.device_ppm as f64 / xform::PELS_PER_METRE as f64).max(1.0);
+                let dash: Vec<f64> = pattern::line_dashes(lt).map(|d| d.iter().map(|&x| x as f64 * k).collect()).unwrap_or_default();
                 let v = self.to_surface(core::slice::from_ref(&pts.to_vec())).remove(0);
                 self.vector(|k, clip| k.stroke(clip, &v, closed, w as f64, c, &dash));
             }
