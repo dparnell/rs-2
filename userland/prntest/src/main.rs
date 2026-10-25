@@ -14,6 +14,11 @@
 //! `PRNTEST LPR host port [queue]` also prints a page to an LPD at
 //! host:port and `PRNTEST IPP host port [path]` to an IPP printer; the
 //! listener checks what arrives.
+//!
+//! `PRNTEST SETPORT printer port settings [RUN program args]` only sets a
+//! printer's port (and the port's settings), then runs the program: how
+//! the tests point the default printer at a host listener before an IBM
+//! program prints.
 
 #![no_std]
 #![no_main]
@@ -608,10 +613,46 @@ fn cleanup() {
     check("SplDeletePort", unsafe { SplDeletePort(null(), PORT.as_ptr()) } == 0);
 }
 
+/// SETPORT printer port settings [RUN program args].
+fn set_port_and_run(args: &[&[u8]]) -> u32 {
+    unsafe extern "C" {
+        #[link_name = "PMSPL.402"]
+        fn SplSetDevice(comp: *const u8, dev: *const u8, level: u32, buf: *const u8, cb: u32, parm: u32) -> u32;
+    }
+    let (Some(prn), Some(port)) = (args.get(1), args.get(2)) else {
+        println!("usage: PRNTEST SETPORT printer port settings [RUN program args]");
+        return 1;
+    };
+    let port = upper(port);
+    let pz = [&port[..], b"\0"].concat();
+    unsafe { SplCreatePort(null(), pz.as_ptr(), null(), 0, null(), 0) };
+    set_port(&pz, args.get(3).copied().unwrap_or(b""));
+    let prn = [&upper(prn)[..], b"\0"].concat();
+    let rc = unsafe { SplSetDevice(null(), prn.as_ptr(), 3, pz.as_ptr(), pz.len() as u32, 3) };
+    println!("prntest: port set: {rc}");
+    if let Some(i) = args.iter().position(|a| a.eq_ignore_ascii_case(b"RUN")) {
+        let Some(prog) = args.get(i + 1) else { return rc };
+        let mut a = Vec::new();
+        a.extend_from_slice(prog);
+        a.push(0);
+        a.extend_from_slice(&args[i + 2..].join(&b' '));
+        a.extend_from_slice(b"\0\0");
+        let path = [*prog, b"\0"].concat();
+        let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+        let mut fail = [0u8; 64];
+        let r = unsafe { DosExecPgm(fail.as_mut_ptr(), 64, 0, a.as_ptr(), null(), &mut res, path.as_ptr()) };
+        println!("prntest: {} ended: {r} {}", core::str::from_utf8(prog).unwrap_or("?"), res.code_result);
+    }
+    rc
+}
+
 fn main(s: &Startup) -> u32 {
     let hab = unsafe { WinInitialize(0) };
     unsafe { WinCreateMsgQueue(hab, 0) };
     let args: Vec<&[u8]> = s.args().split(|&c| c == b' ').filter(|a| !a.is_empty()).collect();
+    if args.first().is_some_and(|a| a.eq_ignore_ascii_case(b"SETPORT")) {
+        return set_port_and_run(&args);
+    }
     let keep = args.iter().any(|a| a.eq_ignore_ascii_case(b"KEEP"));
     setup();
     spooler_calls();
