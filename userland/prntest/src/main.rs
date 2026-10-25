@@ -96,6 +96,10 @@ unsafe extern "C" {
     fn GpiDeleteBitmap(hbm: u32) -> u32;
     #[link_name = "PMGPI.471"]
     fn GpiQueryPS(hps: u32, size: *mut i32) -> u32;
+    #[link_name = "PMGPI.401"]
+    fn GpiLoadMetaFile(hab: u32, name: *const u8) -> u32;
+    #[link_name = "PMGPI.411"]
+    fn GpiPlayMetaFile(hps: u32, hmf: u32, n1: i32, opts: *const i32, segs: *mut i32, n2: i32, desc: *mut u8) -> i32;
 
     #[link_name = "PMSPL.399"]
     fn SplEnumQueue(comp: *const u8, level: u32, buf: *mut u8, cb: u32, ret: *mut u32, total: *mut u32, need: *mut u32, r: u32) -> u32;
@@ -653,6 +657,9 @@ fn main(s: &Startup) -> u32 {
     if args.first().is_some_and(|a| a.eq_ignore_ascii_case(b"SETPORT")) {
         return set_port_and_run(&args);
     }
+    if args.first().is_some_and(|a| a.eq_ignore_ascii_case(b"MET")) {
+        return metafile_colors(args.get(1).copied().unwrap_or(b""));
+    }
     let keep = args.iter().any(|a| a.eq_ignore_ascii_case(b"KEEP"));
     setup();
     spooler_calls();
@@ -674,6 +681,51 @@ fn main(s: &Startup) -> u32 {
     let f = FAILS.load(Ordering::Relaxed);
     println!("prntest done: {f} failure(s)");
     f
+}
+
+/// MET file: play a metafile on a direct and on a queued printer DC and
+/// list the colours the PostScript sets (a diagnostic).
+fn metafile_colors(file: &[u8]) -> u32 {
+    setup();
+    let name = [file, b"\0"].concat();
+    for ty in [OD_DIRECT, OD_QUEUED] {
+        delete(OUT);
+        let mut d = dop(b"PM_Q_STD\0");
+        if ty == OD_DIRECT {
+            d[0] = PRN.as_ptr() as u32;
+        }
+        let hmf = unsafe { GpiLoadMetaFile(0, name.as_ptr()) };
+        let hdc = unsafe { DevOpenDC(0, ty, b"*\0".as_ptr(), 9, d.as_ptr(), 0) };
+        let size = [0i32, 0];
+        let hps = unsafe { GpiCreatePS(0, hdc, size.as_ptr(), PU_PELS | GPIA_ASSOC) };
+        unsafe { DevEscape(hdc, DEVESC_STARTDOC, 3, b"met".as_ptr(), null_mut(), null_mut()) };
+        let opts = [0, 1, 0, 3, 1, 1, 3, 2, 3];
+        let mut segs = 0;
+        let mut desc = [0u8; 2];
+        let rc = unsafe { GpiPlayMetaFile(hps, hmf, 9, opts.as_ptr(), &mut segs, 0, desc.as_mut_ptr()) };
+        let mut id = [0u8; 2];
+        let mut n = 2;
+        unsafe {
+            DevEscape(hdc, DEVESC_ENDDOC, 0, null(), &mut n, id.as_mut_ptr());
+            GpiAssociate(hps, 0);
+            GpiDestroyPS(hps);
+            DevCloseDC(hdc);
+        }
+        let jid = u16::from_le_bytes(id) as u32;
+        if ty == OD_QUEUED {
+            wait_printed(jid, 60);
+        }
+        let out = wait_output(10).unwrap_or_default();
+        let mut colors: Vec<&[u8]> = out.split(|&c| c == b'\n').filter(|l| l.ends_with(b" rg")).collect();
+        colors.sort();
+        colors.dedup();
+        println!("prntest met: {} play {} job {} bytes {} colours {}", if ty == OD_DIRECT { "direct" } else { "queued" }, rc, jid, out.len(), colors.len());
+        for c in colors.iter().take(20) {
+            println!("  {}", core::str::from_utf8(c).unwrap_or("?"));
+        }
+    }
+    cleanup();
+    0
 }
 
 fn upper(s: &[u8]) -> Vec<u8> {

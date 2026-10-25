@@ -442,12 +442,10 @@ impl PrinterDc {
                 // that cannot be reached fails STARTDOC).
                 self.open_out()
             }
-            Kind::Std => {
-                if let Some(m) = self.meta.as_mut() {
-                    m.segs = vec![(0, Vec::new())];
-                }
-                true
-            }
+            // What was recorded before STARTDOC stays: programs set up
+            // colour tables and fonts first (the Toolkit's PRTSAMP plays
+            // its metafile once to load them).
+            Kind::Std => true,
             Kind::Info => false,
         }
     }
@@ -496,6 +494,10 @@ impl PrinterDc {
                 let bits = self.meta.as_ref().map(|m| m.build()).unwrap_or_default();
                 if !self.write(&bits) {
                     self.failed = true;
+                }
+                // The next document starts empty (the logical fonts stay).
+                if let Some(m) = self.meta.as_mut() {
+                    m.segs = vec![(0, Vec::new())];
                 }
             }
             Kind::Info => return false,

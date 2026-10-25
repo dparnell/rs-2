@@ -247,7 +247,7 @@ IPP), and the Workplace Shell's printer objects work:
 | The PostScript driver: DevOpenDC OD_QUEUED/OD_DIRECT/OD_INFO, STARTDOC/NEWFRAME/ENDDOC/ABORTDOC/RAWDATA/GETJOBID/job properties escapes, DevQueryCaps (300 dpi, CAPS_TECH_POSTSCRIPT), DevQueryHardcopyCaps (Letter, A4, Legal, A3, A5, Executive), DevQueryDeviceNames, DevPostDeviceModes (a job properties dialog: form, orientation, copies) | PMWIN `printer.rs`, `crates/gpi/src/psdev.rs` | PRNTEST, host unit tests (`cargo test -p gpi`), Ghostscript renders the output as the screen shows it |
 | Ports: FILE (FILEn), LPT1-3 (the kernel drives the parallel port), COM1-4, LPRn (RFC 1179), IPPn (IPP/1.1 Print-Job) | PMSPL `port.rs`, kernel `chardev.rs` | PRNTEST LPR/IPP with `tools/scripts/printer_listen.py`; LPT1 with QEMU's `-parallel file:` |
 | Printer objects: job view, settings (queue, driver, job properties, port and settings, default printer), new printers from the template, deleting, files dropped and data files' Print | PMWP `printer.rs` | QEMU desktop runs (screenshots in the session's progress folder) |
-| Print in programs | rs2's E (File > Print), the help manager (Services > Print), IBM's Picture Viewer | QEMU runs, output rendered with Ghostscript |
+| Print in programs | rs2's E (File > Print), the help manager (Services > Print), IBM's Picture Viewer, the Toolkit's print sample (PRTSAMP: a metafile, sized to the page) | QEMU runs, output rendered with Ghostscript |
 
 **Tests.** `RS2\PRNTEST.EXE` (userland/prntest) makes a queue on a
 printer on a file port and checks the spooler calls, a raw job (held,
@@ -263,7 +263,9 @@ host and `cargo xtask run --net --init "RS2\PRNTEST.EXE LPR 10.0.2.2
 PORT q"` the listener saves what arrives (QEMU's user network reaches
 the host as 10.0.2.2). `PRNTEST SETPORT printer port settings RUN
 program args` points a printer at a port and runs a program (how IBM
-programs were printed to the host listener).
+programs were printed to the host listener). A PM_Q_STD queued DC keeps
+what was recorded before DEVESC_STARTDOC (colour tables, fonts: PRTSAMP
+plays its metafile once to size it first).
 
 Not done yet:
 - DOS, Win-OS/2 and other programs that write to `LPT1` themselves go
@@ -271,6 +273,13 @@ Not done yet:
   the spooler as raw jobs (EPM's Raw ASCII printing works that way).
 - EPM's formatted printing starts but never opens its printer DC (its
   print loop waits; COMPATIBILITY.md).
+- The Toolkit's PRTSAMP.MET prints as rs2 draws it on the screen, a
+  black silhouette: its colours are indices 0x800-0xE00 of its colour
+  table, which rs2's metafile playing does not apply (a GPI matter; the
+  PostScript follows whatever the GPI draws). `PRNTEST MET file` plays
+  a metafile on a direct and a queued printer DC and lists the colours
+  the PostScript sets. PRTSAMP's main window does not show (it prints
+  from the keyboard); not looked at.
 - Separator pages, job retention, forms per queue, remote (LAN Server)
   queues, IBM's port driver (.PDR) and queue processor interfaces for
   other vendors' modules, and IBM's spool files' (.SPL) device
