@@ -7,8 +7,9 @@
 //! (scan code, extended-key flag, the full shift state, key releases),
 //! so the session sees them exactly as on its full screen, in the order
 //! they were typed, even while the host is busy. PM keeps Alt+Space and
-//! Alt+F4 (the frame's system menu and Close) and, while the host marks
-//! text, every key (the window gets WM_CHAR as usual).
+//! Alt+F4 (the frame's system menu and Close), Shift+PgUp and Shift+PgDn
+//! (the window's scroll back) and, while the host marks text, every key
+//! (the window gets WM_CHAR as usual).
 
 use alloc::vec::Vec;
 
@@ -69,6 +70,10 @@ pub fn key(target: u32, ev: &Input) -> bool {
     let alt = ev.flags & 0x08 != 0;
     // The frame's own keys: Alt+Space (system menu), Alt+F4 (close).
     if alt && (scan == 0x39 || scan == 0x3e) {
+        return false;
+    }
+    // Shift+PgUp, Shift+PgDn: the scroll back (not with Ctrl or Alt).
+    if ev.flags & 0x03 != 0 && ev.flags & 0x0c == 0 && (scan == 0x49 || scan == 0x51) {
         return false;
     }
     unsafe { Rs2VioKey(sid, ev) };

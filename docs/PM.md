@@ -295,6 +295,15 @@ RS2API services for the host (32-bit, `_System`):
 | 14 | `Rs2VioKey(ULONG sid, PINPUTEVENT p)`: a key as Rs2ReadInput reports it (character, scan code, extended flag, shift state, make/break): through the session's keyboard monitors, then its input mode (Ctrl+C, Ctrl+Break, Ctrl+S, PrtSc), to its queue; Alt+Home switches it to the full screen |
 | 15 | `Rs2VioMouse(ULONG sid, LONG row, LONG col, ULONG fsButtons)`: the pointer over a cell: events into the session's mouse queue (and monitors) if it opened the mouse |
 | 16 | `Rs2VioControl(ULONG sid, ULONG cmd, ULONG arg)`: 1 focus, 2 windowed (1) or full screen (0), 3 end the session (its processes are killed), 4 select any session, 5 register as the host |
+| 17 | `Rs2VioReadHistory(ULONG sid, ULONG ulEnd, ULONG cLines, ULONG cCols, PUSHORT pCells, ULONG cb)`: the scroll back: lines ulEnd - cLines .. ulEnd, cCols cells each, oldest first (lines are numbered from the first that ever scrolled off; lines no longer kept are blank) |
+
+The kernel keeps the last 1000 lines that scroll off a windowable
+session's screen: a scroll of the whole screen, or of all of it below a
+one-line status line (rs2's shell), keeps the rows that leave the top; a
+clear keeps the rows down to the last one with text. RS2VIOSTATE reports
+how many lines ever scrolled off (offset 108) and how many keys were
+typed into the window (offset 112, Rs2VioKey key presses other than
+Shift, Ctrl, Alt and the locks).
 
 **The host**, `C:\OS2\PMVIOWIN.EXE` (`userland/pmviowin`), is an
 ordinary PM program. The kernel starts it (detached) when the first
@@ -317,10 +326,16 @@ for a session:
 - the window takes the size of the text mode (the session's cell height
   unless a font size was chosen) and follows mode changes (`MODE
   CO80,43`); when it is smaller than the screen, the scroll bars scroll it;
+- the scroll back sits above the screen: the vertical scroll bar and
+  Shift+PgUp / Shift+PgDn show it (PMWIN keeps those keys for the
+  window), the view follows new output while it shows the screen's last
+  row, and typing brings the screen back; marks can span it;
 - the system menu adds Mark, Copy, Copy All, Paste, Fullscreen (Alt+Home)
-  and Font 8 x 16 / 8 x 14 / 8 x 8. Dragging with mouse button 1 marks a
-  block (unless the program opened the mouse, which then gets the mouse
-  events); Mark marks with the arrow keys (Shift extends, Enter copies,
+  and Font 8 x 16 / 8 x 14 / 8 x 8. Dragging with mouse button 1 marks
+  the text from cell to cell, line by line (with Alt held at the press, a
+  rectangular block), scrolling when the pointer leaves the window above
+  or below; a click without a drag clears the mark (unless the program opened the
+  mouse, which then gets the mouse events); Mark marks with the arrow keys (Shift extends, Enter copies,
   Esc cancels). Copy and Copy All put CF_TEXT on the clipboard (trailing
   blanks dropped, CR LF line ends); Paste types CF_TEXT into the session
   (line ends as Enter);
@@ -333,7 +348,8 @@ client windows (`Rs2PmVioWindow(hwnd, sid, fl)`, private ordinal 9002)
 and hands a key for the one with the focus straight to the kernel with
 `Rs2VioKey`, with the scan code, the extended-key flag, the full shift
 state and the release, in the order typed; Alt+Space and Alt+F4 stay
-with the frame, and an open menu or the host's mark mode gets keys as
+with the frame, Shift+PgUp and Shift+PgDn with the window (its scroll
+back), and an open menu or the host's mark mode gets keys as
 WM_CHAR. Shift keys alone are not reported to the session (PM's raw
 input has no events for them).
 

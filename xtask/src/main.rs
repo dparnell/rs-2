@@ -21,7 +21,8 @@
 //! `--desktop` boots into the Workplace Shell (`init=OS2\PMSHELL.EXE` in place
 //! of work/cmdline.txt's `init=`), `--init "PROGRAM ARGS"` into another
 //! program. `--type-file` reads the keys for `--type`
-//! from a file (its line ends are not typed).
+//! from a file (its line ends are not typed). In the keys, `{keydown K}` and
+//! `{keyup K}` hold and release a key (QEMU qcode, e.g. `alt`).
 //!
 //! Extra files for `\RS2\MODULES` are listed in `work/modules.txt`, one path
 //! per line (relative to the repository root).
@@ -1017,6 +1018,13 @@ fn run(o: &Opts) -> bool {
                     let ev = |axis: &str, val: &str| format!(r#"{{"type":"abs","data":{{"axis":"{axis}","value":{val}}}}}"#);
                     let events = format!("[{},{}]", ev("x", v[0]), ev("y", v[1]));
                     qmp(&qmp_sock, &format!(r#"{{"execute":"input-send-event","arguments":{{"events":{events}}}}}"#));
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                }
+                // A key held: {keydown alt} ... {keyup alt} (QEMU qcodes).
+                if let Some((down, k)) = key.strip_prefix("keydown ").map(|k| (true, k)).or_else(|| key.strip_prefix("keyup ").map(|k| (false, k))) {
+                    let ev = format!(r#"[{{"type":"key","data":{{"down":{down},"key":{{"type":"qcode","data":"{k}"}}}}}}]"#);
+                    qmp(&qmp_sock, &format!(r#"{{"execute":"input-send-event","arguments":{{"events":{ev}}}}}"#));
                     std::thread::sleep(Duration::from_millis(100));
                     continue;
                 }

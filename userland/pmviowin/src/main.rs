@@ -13,10 +13,13 @@
 //!   (crate `viocell`) and draws them with GpiDrawBits;
 //! - keys reach the session from PM's input thread directly (the client
 //!   is registered with `Rs2PmVioWindow`); mouse events go to sessions
-//!   that opened the mouse (`Rs2VioMouse`), otherwise the mouse marks
-//!   text;
+//!   that opened the mouse (`Rs2VioMouse`), otherwise dragging marks text
+//!   from cell to cell (with Alt a rectangle) and a click clears it;
 //! - the system menu has Mark, Copy, Copy All, Paste, Fullscreen and the
-//!   font sizes; Close asks before it ends the session's programs.
+//!   font sizes; Close asks before it ends the session's programs;
+//! - lines that scroll off the screen stay above it (the kernel keeps the
+//!   last 1000, `Rs2VioReadHistory`): the scroll bar or Shift+PgUp and
+//!   Shift+PgDn show them, typing shows the screen again.
 //!
 //! Usage: `PMVIOWIN [/SHELL]`: with /SHELL it starts a command prompt in
 //! a window when there is none and keeps running when the last window
@@ -217,6 +220,8 @@ unsafe extern "C" {
     fn Rs2VdmMouse(sid: u32, x: u32, y: u32, buttons: u32) -> u32;
     #[link_name = "RS2API.16"]
     fn Rs2VioControl(sid: u32, cmd: u32, arg: u32) -> u32;
+    #[link_name = "RS2API.17"]
+    fn Rs2VioReadHistory(sid: u32, end: u32, lines: u32, cols: u32, cells: *mut u16, cb: u32) -> u32;
 }
 
 // Messages and constants.
@@ -271,6 +276,8 @@ const VK_LEFT: u32 = 0x15;
 const VK_UP: u32 = 0x16;
 const VK_RIGHT: u32 = 0x17;
 const VK_DOWN: u32 = 0x18;
+const VK_PAGEUP: u32 = 0x11;
+const VK_PAGEDOWN: u32 = 0x12;
 const VK_ENTER: u32 = 0x1e;
 
 const SWP_SIZE: u32 = 0x0001;
@@ -292,6 +299,8 @@ const TID_BLINK: u32 = 1;
 const CLR_BLACK: i32 = -1;
 
 const MAX_CELLS: usize = 132 * 100;
+/// Scroll back lines kept (as many as the kernel keeps).
+const HISTORY: usize = 1000;
 
 // ---- Windows ----
 
@@ -304,7 +313,13 @@ struct Win {
     changes: u32,
     cols: usize,
     rows: usize,
+    /// The scroll back rows (`hist` of them) and then the screen's.
     cells: Vec<u16>,
+    hist: usize,
+    /// The session's count of lines that scrolled off and of keys typed
+    /// into the window, last read.
+    scrolled: u32,
+    keys: u32,
     cur: Option<(usize, usize)>,
     cur_lines: (usize, usize),
     cell_h: usize,
@@ -318,12 +333,15 @@ struct Win {
     font: Vec<u8>,
     /// What the font was loaded for: (height, code page, font generation).
     font_key: (usize, u32, u32),
-    /// First visible column and row.
+    /// First visible column and row (rows count the scroll back first).
     sx: usize,
     sy: usize,
     mark: Option<Block>,
-    /// Mouse marking in progress from this cell.
+    /// Mouse marking in progress from this cell (the mark starts once the
+    /// mouse moves off it): text from cell to cell, or a rectangle when
+    /// Alt was down.
     anchor: Option<(usize, usize)>,
+    rect: bool,
     /// Mark mode from the menu: keys mark text instead of reaching the
     /// session.
     mark_mode: bool,
@@ -366,8 +384,23 @@ fn pix_size(w: usize, h: usize) -> (i32, i32) {
 }
 
 impl Win {
+    /// The scroll back and the screen.
     fn grid(&self) -> Grid<'_> {
-        Grid { cells: &self.cells, cols: self.cols, rows: self.rows }
+        Grid { cells: &self.cells, cols: self.cols, rows: self.total() }
+    }
+
+    fn screen_grid(&self) -> Grid<'_> {
+        Grid { cells: &self.cells[self.hist * self.cols..], cols: self.cols, rows: self.rows }
+    }
+
+    /// Rows of the scroll back and the screen.
+    fn total(&self) -> usize {
+        self.hist + self.rows
+    }
+
+    /// The first visible row when the screen's last row is at the bottom.
+    fn bottom(&self) -> usize {
+        self.total().saturating_sub(self.visible().1)
     }
 
     fn content_size(&self) -> (i32, i32) {
@@ -411,7 +444,7 @@ impl Win {
     /// The cell under client point (x, y), clamped to the screen.
     fn cell_at(&self, x: i32, y: i32) -> (usize, usize) {
         let (_, ch) = self.client_size();
-        let row = ((ch - 1 - y).max(0) as usize / self.font_h.max(1) + self.sy).min(self.rows.saturating_sub(1));
+        let row = ((ch - 1 - y).max(0) as usize / self.font_h.max(1) + self.sy).min(self.total().saturating_sub(1));
         let col = (x.max(0) as usize / viocell::CELL_W + self.sx).min(self.cols.saturating_sub(1));
         (row, col)
     }
@@ -471,13 +504,44 @@ fn refresh(i: usize) {
     let had_pix = w.pix.take().is_some() || core::mem::take(&mut w.pix_dims) != (0, 0);
     let (cols, rows) = (st[1] as usize, st[2] as usize);
     cells.truncate(cols * rows);
+    let was_bottom = w.sy >= w.bottom();
+    // Lines that scrolled off since the last read.
+    let (scrolled, keys) = (st[27], st[28]);
+    let new = (scrolled.wrapping_sub(w.scrolled) as usize).min(HISTORY);
+    let mut lines: Vec<u16> = Vec::new();
+    if new > 0 && cols > 0 {
+        lines.resize(new * cols, 0x0720);
+        if unsafe { Rs2VioReadHistory(w.sid, scrolled, new as u32, cols as u32, lines.as_mut_ptr(), (lines.len() * 2) as u32) } != 0 {
+            lines.clear();
+        }
+    }
+    w.scrolled = scrolled;
+    let jump = keys != w.keys;
+    w.keys = keys;
+    // The scroll back at the new width, the new lines, the oldest dropped.
+    let mut back: Vec<u16> = Vec::with_capacity((w.hist + new) * cols);
+    for r in 0..w.hist {
+        let old = &w.cells[r * w.cols..r * w.cols + w.cols];
+        back.extend((0..cols).map(|c| old.get(c).copied().unwrap_or(0x0720)));
+    }
+    back.extend_from_slice(&lines);
+    let hist = back.len() / cols.max(1);
+    let dropped = hist.saturating_sub(HISTORY);
+    back.drain(..dropped * cols);
+    let hist = hist - dropped;
+    if dropped > 0 {
+        w.sy = w.sy.saturating_sub(dropped);
+        w.anchor = w.anchor.and_then(|(r, c)| r.checked_sub(dropped).map(|r| (r, c)));
+        w.mark = w.mark.and_then(|m| (m.top >= dropped).then(|| Block { top: m.top - dropped, bottom: m.bottom - dropped, ..m }));
+    }
+    let hist_changed = hist != w.hist || !lines.is_empty();
     let cur = (st[9] & ST_CURSOR != 0).then_some((st[3] as usize, st[4] as usize));
     let cell_h = st[7] as usize;
     let mut palette = [0u32; 16];
     palette.copy_from_slice(&st[11..27]);
     w.changes = st[0];
     let mode_changed = cols != w.cols || rows != w.rows || cell_h != w.cell_h;
-    let mut all = mode_changed || had_pix || palette != w.palette || (st[9] ^ w.flags) & ST_BLINK != 0 || st[10] != w.font_gen || st[8] != w.codepage;
+    let mut all = mode_changed || had_pix || hist_changed || palette != w.palette || (st[9] ^ w.flags) & ST_BLINK != 0 || st[10] != w.font_gen || st[8] != w.codepage;
     let old_cur = w.cur;
     w.cols = cols;
     w.rows = rows;
@@ -492,31 +556,43 @@ fn refresh(i: usize) {
         all = true;
     }
     let w = &mut wins()[i];
-    if all {
-        w.cells = cells;
-    } else {
+    if !all {
         // Rows whose cells changed, as column spans.
+        let h = w.hist;
         for r in 0..rows {
             let row = &cells[r * cols..r * cols + cols];
-            let old = &w.cells[r * cols..r * cols + cols];
+            let old = &w.cells[(h + r) * cols..(h + r) * cols + cols];
             if row == old {
                 continue;
             }
             let first = (0..cols).find(|&c| row[c] != old[c]).unwrap_or(0);
             let last = (0..cols).rev().find(|&c| row[c] != old[c]).unwrap_or(cols - 1);
-            w.invalidate_cells(r, r + 1, first, last + 1);
+            w.invalidate_cells(h + r, h + r + 1, first, last + 1);
         }
-        w.cells = cells;
         if old_cur != cur || cur.is_some() {
             for (r, c) in [old_cur, cur].into_iter().flatten() {
-                w.invalidate_cells(r, r + 1, c, c + 1);
+                w.invalidate_cells(h + r, h + r + 1, c, c + 1);
             }
         }
     }
+    back.extend_from_slice(&cells);
+    w.cells = back;
+    w.hist = hist;
     if mode_changed || had_pix {
         fit_window(i);
-    } else if all {
-        wins()[i].invalidate_all();
+        return;
+    }
+    // Typing, or output while the screen's bottom is shown: the screen.
+    let b = w.bottom();
+    if (jump || was_bottom) && w.sy != b {
+        w.sy = b;
+        all = true;
+    }
+    if all {
+        w.invalidate_all();
+    }
+    if hist_changed || all {
+        update_scrollbars(i);
     }
 }
 
@@ -565,7 +641,7 @@ fn fit_window(i: usize) {
     {
         let w = &mut wins()[i];
         w.sx = 0;
-        w.sy = 0;
+        w.sy = if w.pix.is_some() { 0 } else { w.bottom() };
     }
     update_scrollbars(i);
     wins()[i].invalidate_all();
@@ -597,7 +673,7 @@ fn frame_pos(frame: u32, r: &mut RectL) {
 fn update_scrollbars(i: usize) {
     let (frame, cols, rows, (vc, vr), sx, sy) = {
         let w = &wins()[i];
-        (w.frame, w.cols, w.rows, w.visible(), w.sx, w.sy)
+        (w.frame, w.cols, if w.pix.is_some() { w.rows } else { w.total() }, w.visible(), w.sx, w.sy)
     };
     let vs = unsafe { WinWindowFromID(frame, FID_VERTSCROLL) };
     let hs = unsafe { WinWindowFromID(frame, FID_HORZSCROLL) };
@@ -617,7 +693,7 @@ fn scroll_to(i: usize, sx: usize, sy: usize) {
     let w = &mut wins()[i];
     let (vc, vr) = w.visible();
     let sx = sx.min(w.cols.saturating_sub(vc));
-    let sy = sy.min(w.rows.saturating_sub(vr));
+    let sy = sy.min(w.total().saturating_sub(vr));
     if (sx, sy) == (w.sx, w.sy) {
         return;
     }
@@ -697,6 +773,9 @@ fn create_window(s: &VioSession) -> Option<usize> {
         cols: 0,
         rows: 0,
         cells: Vec::new(),
+        hist: 0,
+        scrolled: 0,
+        keys: 0,
         cur: None,
         cur_lines: (14, 15),
         cell_h: 16,
@@ -712,6 +791,7 @@ fn create_window(s: &VioSession) -> Option<usize> {
         sy: 0,
         mark: None,
         anchor: None,
+        rect: false,
         mark_mode: false,
         windowed: s.flags & VS_WINDOWED != 0,
         focus: false,
@@ -819,7 +899,7 @@ fn paint(i: usize) {
         return;
     }
     let (cw, ch) = w.client_size();
-    let (pw, ph) = w.content_size();
+    let (pw, ph) = (w.content_size().0, (w.total() * w.font_h) as i32);
     // Outside the text: black.
     let x_end = pw - (w.sx * viocell::CELL_W) as i32;
     let y_end = ch - (ph - (w.sy * w.font_h) as i32);
@@ -837,7 +917,7 @@ fn paint(i: usize) {
         let r1 = ((((ch - r.b).max(0)) + fh - 1) / fh) as usize + w.sy;
         let c0 = (r.l.max(0) / cwid) as usize + w.sx;
         let c1 = ((r.r.max(0) + cwid - 1) / cwid) as usize + w.sx;
-        let (r1, c1) = (r1.min(w.rows), c1.min(w.cols));
+        let (r1, c1) = (r1.min(w.total()), c1.min(w.cols));
         if r0 < r1 && c0 < c1 {
             let width = (c1 - c0) * viocell::CELL_W;
             let height = (r1 - r0) * w.font_h;
@@ -846,7 +926,7 @@ fn paint(i: usize) {
             let blink_off = BLINK_OFF.load(Ordering::Relaxed) != 0;
             let cursor = w.cur.filter(|_| w.focus && !blink_off).map(|(row, col)| {
                 let (a, b) = viocell::scale_lines(w.cur_lines.0, w.cur_lines.1, w.cell_h, w.font_h);
-                Cursor { row, col, first: a, last: b }
+                Cursor { row: w.hist + row, col, first: a, last: b }
             });
             let style = Style { palette: w.palette, blink: w.flags & ST_BLINK != 0, blink_off, cursor, mark: w.mark };
             let font = Font { glyphs: &w.font, height: w.font_h };
@@ -875,10 +955,10 @@ fn blink() {
             continue;
         }
         if let Some((r, c)) = w.cur.filter(|_| w.focus) {
-            w.invalidate_cells(r, r + 1, c, c + 1);
+            w.invalidate_cells(w.hist + r, w.hist + r + 1, c, c + 1);
         }
         if w.flags & ST_BLINK != 0 {
-            for r in 0..w.rows {
+            for r in 0..w.total() {
                 let row = &w.cells[r * w.cols..r * w.cols + w.cols];
                 if let (Some(a), Some(b)) = (row.iter().position(|c| c & 0x8000 != 0), row.iter().rposition(|c| c & 0x8000 != 0)) {
                     w.invalidate_cells(r, r + 1, a, b + 1);
@@ -960,7 +1040,7 @@ fn command(i: usize, id: u32) {
             let w = &mut wins()[i];
             w.mark_mode = !w.mark_mode;
             w.register();
-            let start = w.cur.unwrap_or((0, 0));
+            let start = w.cur.map_or((w.sy, 0), |(r, c)| (w.hist + r, c));
             let mm = w.mark_mode;
             set_mark(i, if mm { Some(Block::spanning(start, start)) } else { None });
         }
@@ -974,7 +1054,7 @@ fn command(i: usize, id: u32) {
             end_mark_mode(i);
         }
         IDM_COPYALL => {
-            let t = viocell::all_text(&wins()[i].grid());
+            let t = viocell::all_text(&wins()[i].screen_grid());
             copy_text(&t);
         }
         IDM_PASTE => paste(sid),
@@ -997,13 +1077,21 @@ fn char_msg(i: usize, mp1: u32, mp2: u32) -> u32 {
     let fs = mp1 & 0xffff;
     let up = fs & KC_KEYUP != 0;
     let vk = if fs & KC_VIRTUALKEY != 0 { mp2 >> 16 } else { 0 };
+    // Shift+PgUp, Shift+PgDn (PM keeps them for the window): the scroll back.
+    if matches!(vk, VK_PAGEUP | VK_PAGEDOWN) && fs & KC_SHIFT != 0 && fs & (KC_CTRL | KC_ALT) == 0 {
+        if !up {
+            let (sx, sy, (_, vr)) = (wins()[i].sx, wins()[i].sy, wins()[i].visible());
+            scroll_to(i, sx, if vk == VK_PAGEUP { sy.saturating_sub(vr) } else { sy + vr });
+        }
+        return 1;
+    }
     if wins()[i].mark_mode {
         if up {
             return 1;
         }
         let w = &wins()[i];
         let m = w.mark.unwrap_or(Block::spanning((0, 0), (0, 0)));
-        let (rows, cols) = (w.rows, w.cols);
+        let (rows, cols) = (w.total(), w.cols);
         let shift = fs & KC_SHIFT != 0;
         let mv = |r: usize, c: usize, dr: i32, dc: i32| ((r as i32 + dr).clamp(0, rows as i32 - 1) as usize, (c as i32 + dc).clamp(0, cols as i32 - 1) as usize);
         let (dr, dc) = match vk {
@@ -1055,7 +1143,7 @@ fn char_msg(i: usize, mp1: u32, mp2: u32) -> u32 {
     1
 }
 
-fn mouse(i: usize, msg: u32, mp1: u32) -> bool {
+fn mouse(i: usize, msg: u32, mp1: u32, mp2: u32) -> bool {
     let x = mp1 as i16 as i32;
     let y = (mp1 >> 16) as i16 as i32;
     let (cell, sid, uses_mouse, marking) = {
@@ -1109,9 +1197,11 @@ fn mouse(i: usize, msg: u32, mp1: u32) -> bool {
     }
     match msg {
         WM_BUTTON1DOWN => {
+            // A click clears the mark; dragging from here makes a new one.
             let client = wins()[i].client;
             wins()[i].anchor = Some(cell);
-            set_mark(i, Some(Block::spanning(cell, cell)));
+            wins()[i].rect = (mp2 >> 16) & KC_ALT != 0;
+            set_mark(i, None);
             unsafe {
                 WinSetFocus(HWND_DESKTOP, client);
                 WinSetCapture(HWND_DESKTOP, client);
@@ -1119,8 +1209,19 @@ fn mouse(i: usize, msg: u32, mp1: u32) -> bool {
             true
         }
         WM_MOUSEMOVE if marking => {
+            // Above or below the window: scroll a row that way.
+            let (_, ch) = wins()[i].client_size();
+            let (sx, sy) = (wins()[i].sx, wins()[i].sy);
+            if y >= ch {
+                scroll_to(i, sx, sy.saturating_sub(1));
+            } else if y < 0 {
+                scroll_to(i, sx, sy + 1);
+            }
+            let cell = wins()[i].cell_at(x, y);
             let a = wins()[i].anchor.unwrap_or(cell);
-            set_mark(i, Some(Block::spanning(a, cell)));
+            if cell != a || wins()[i].mark.is_some() {
+                set_mark(i, Some(if wins()[i].rect { Block::spanning(a, cell) } else { Block::text(a, cell) }));
+            }
             false
         }
         WM_BUTTON1UP if marking => {
@@ -1170,7 +1271,7 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             w.focus = on;
             unsafe { Rs2VioControl(w.sid, CTL_FOCUS, on as u32) };
             if let Some((r, c)) = w.cur {
-                w.invalidate_cells(r, r + 1, c, c + 1);
+                w.invalidate_cells(w.hist + r, w.hist + r + 1, c, c + 1);
             }
             0
         }
@@ -1194,7 +1295,7 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_CHAR => char_msg(i, mp1, mp2),
         WM_MOUSEMOVE | WM_BUTTON1DOWN | WM_BUTTON1UP | WM_BUTTON2DOWN | WM_BUTTON2UP | WM_BUTTON3DOWN | WM_BUTTON3UP => {
-            if mouse(i, msg, mp1) { 1 } else { unsafe { WinDefWindowProc(h, msg, mp1, mp2) } }
+            if mouse(i, msg, mp1, mp2) { 1 } else { unsafe { WinDefWindowProc(h, msg, mp1, mp2) } }
         }
         WM_CLOSE => {
             close(i);

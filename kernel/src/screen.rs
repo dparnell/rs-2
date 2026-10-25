@@ -23,6 +23,7 @@
 use bootinfo::{Framebuffer, PHYS_MAP_BASE};
 
 use alloc::boxed::Box;
+use alloc::collections::VecDeque;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 
@@ -37,6 +38,8 @@ pub const CELL_W: usize = 8;
 pub const CELL_H: usize = 16;
 pub const MAX_COLS: usize = 132;
 pub const MAX_ROWS: usize = 100;
+/// Lines kept that scrolled off a windowable session's screen.
+pub const HISTORY: usize = 1000;
 
 /// Note that framebuffer rows `top..end` were drawn (whole rows: the
 /// width is clipped when the damage is taken).
@@ -211,6 +214,14 @@ pub struct Screen {
     /// A DOS session's graphics mode picture (text cells are not shown
     /// meanwhile).
     pub pixmap: Option<Pixmap>,
+    /// Lines that scrolled off the top of a windowable session's whole
+    /// screen, oldest first (the PM host's scroll back), and how many
+    /// ever did.
+    history: VecDeque<Vec<u16>>,
+    pub scrolled: u32,
+    /// Keys typed into the session's window (the host shows the screen
+    /// again rather than its scroll back).
+    pub keys: u32,
 }
 
 unsafe impl Send for Screen {}
@@ -282,6 +293,9 @@ impl Screen {
             core::ptr::addr_of_mut!((*s).watched).write(false);
             core::ptr::addr_of_mut!((*s).windowed).write(false);
             core::ptr::addr_of_mut!((*s).pixmap).write(None);
+            core::ptr::addr_of_mut!((*s).history).write(VecDeque::new());
+            core::ptr::addr_of_mut!((*s).scrolled).write(0);
+            core::ptr::addr_of_mut!((*s).keys).write(0);
         }
         let s = unsafe { &mut *s };
         for row in s.cells.iter_mut() {
@@ -324,6 +338,46 @@ impl Screen {
             v.extend_from_slice(&self.cells[r][..self.cols]);
         }
         v
+    }
+
+    /// Lines `end - n .. end` of the scroll back (numbered from the first
+    /// line that ever scrolled off), `cols` cells each; lines no longer
+    /// kept are blank.
+    pub fn history_lines(&self, end: u32, n: usize, cols: usize) -> Vec<u16> {
+        let end = end.min(self.scrolled);
+        let first_kept = self.scrolled - self.history.len() as u32;
+        let mut v = Vec::with_capacity(n * cols);
+        for k in 0..n as u32 {
+            let back = n as u32 - k;
+            let row = (back <= end && end - back >= first_kept).then(|| &self.history[(end - back - first_kept) as usize]);
+            for c in 0..cols {
+                v.push(row.and_then(|r| r.get(c).copied()).unwrap_or(0x0720));
+            }
+        }
+        v
+    }
+
+    /// A key was typed into the session's window.
+    pub fn note_key(&mut self) {
+        self.keys = self.keys.wrapping_add(1);
+        self.touch();
+    }
+
+    /// Keep rows `top..top + n` for the scroll back (a clear of the whole
+    /// region keeps only the rows down to the last one with text).
+    fn keep_history(&mut self, top: usize, n: usize) {
+        let mut n = n.min(self.rows - top);
+        if top + n == self.rows {
+            let blank = |r: &[u16]| r.iter().all(|&c| matches!(c as u8, 0 | b' '));
+            n = (top..self.rows).rev().find(|&r| !blank(&self.cells[r][..self.cols])).map_or(0, |r| r + 1 - top);
+        }
+        for r in top..top + n {
+            if self.history.len() == HISTORY {
+                self.history.pop_front();
+            }
+            self.history.push_back(self.cells[r][..self.cols].to_vec());
+            self.scrolled = self.scrolled.wrapping_add(1);
+        }
     }
 
     /// The 16 attribute colours as 0x00RRGGBB.
@@ -696,6 +750,10 @@ impl Screen {
         }
         let n = n.min(bottom - top + 1);
         self.touch();
+        // The whole screen, or all of it below a status line (rs2's shell).
+        if top <= 1 && bottom == self.rows - 1 && self.watched && !self.graphics && self.pixmap.is_none() {
+            self.keep_history(top, n);
+        }
         for r in top..=bottom {
             for c in 0..self.cols {
                 self.cells[r][c] = if r + n <= bottom { self.cells[r + n][c] } else { fill };

@@ -56,22 +56,34 @@ impl Font<'_> {
     }
 }
 
-/// A rectangular block of cells (inclusive), as VIO windows mark text.
+/// Marked cells (inclusive): a rectangular block, as VIO windows mark
+/// text, or with `lines` the text from (`top`, `left`) to (`bottom`,
+/// `right`) in reading order, as terminals select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Block {
     pub top: usize,
     pub left: usize,
     pub bottom: usize,
     pub right: usize,
+    pub lines: bool,
 }
 
 impl Block {
     /// The block with corners `a` and `b` (row, column), in any order.
     pub fn spanning(a: (usize, usize), b: (usize, usize)) -> Block {
-        Block { top: a.0.min(b.0), left: a.1.min(b.1), bottom: a.0.max(b.0), right: a.1.max(b.1) }
+        Block { top: a.0.min(b.0), left: a.1.min(b.1), bottom: a.0.max(b.0), right: a.1.max(b.1), lines: false }
+    }
+
+    /// The text between cells `a` and `b` (row, column), in any order.
+    pub fn text(a: (usize, usize), b: (usize, usize)) -> Block {
+        let (s, e) = if a <= b { (a, b) } else { (b, a) };
+        Block { top: s.0, left: s.1, bottom: e.0, right: e.1, lines: true }
     }
 
     pub fn contains(&self, row: usize, col: usize) -> bool {
+        if self.lines {
+            return (row, col) >= (self.top, self.left) && (row, col) <= (self.bottom, self.right);
+        }
         row >= self.top && row <= self.bottom && col >= self.left && col <= self.right
     }
 
@@ -80,7 +92,18 @@ impl Block {
         if rows == 0 || cols == 0 || self.top >= rows || self.left >= cols {
             return None;
         }
-        Some(Block { bottom: self.bottom.min(rows - 1), right: self.right.min(cols - 1), ..self })
+        let right = if self.lines && self.bottom >= rows { cols - 1 } else { self.right.min(cols - 1) };
+        Some(Block { bottom: self.bottom.min(rows - 1), right, ..self })
+    }
+
+    /// The columns of `row` marked (`row` inside the block).
+    fn columns(&self, row: usize, cols: usize) -> (usize, usize) {
+        if !self.lines {
+            return (self.left, self.right);
+        }
+        let first = if row == self.top { self.left } else { 0 };
+        let last = if row == self.bottom { self.right } else { cols - 1 };
+        (first, last)
     }
 }
 
@@ -182,17 +205,22 @@ pub fn render_bgr24(grid: &Grid, font: &Font, style: &Style, rows: Range<usize>,
 }
 
 /// The text of a block of cells: one line per row with its trailing
-/// blanks removed, CR LF after each line. NUL characters read as blanks.
+/// blanks removed, CR LF after each line (in a text mark, not after a last
+/// line that stops before the end of its row). NUL characters read as
+/// blanks.
 pub fn block_text(grid: &Grid, block: Block) -> Vec<u8> {
     let mut out = Vec::new();
     let Some(b) = block.clamp(grid.rows, grid.cols) else { return out };
     for row in b.top..=b.bottom {
-        let mut line: Vec<u8> = (b.left..=b.right).map(|c| grid.cell(row, c) as u8).map(|ch| if ch == 0 { b' ' } else { ch }).collect();
+        let (first, last) = b.columns(row, grid.cols);
+        let mut line: Vec<u8> = (first..=last).map(|c| grid.cell(row, c) as u8).map(|ch| if ch == 0 { b' ' } else { ch }).collect();
         while line.last() == Some(&b' ') {
             line.pop();
         }
         out.extend_from_slice(&line);
-        out.extend_from_slice(b"\r\n");
+        if !b.lines || row < b.bottom || last == grid.cols - 1 {
+            out.extend_from_slice(b"\r\n");
+        }
     }
     out
 }
@@ -203,7 +231,7 @@ pub fn all_text(grid: &Grid) -> Vec<u8> {
     if grid.rows == 0 || grid.cols == 0 {
         return Vec::new();
     }
-    let mut t = block_text(grid, Block { top: 0, left: 0, bottom: grid.rows - 1, right: grid.cols - 1 });
+    let mut t = block_text(grid, Block::spanning((0, 0), (grid.rows - 1, grid.cols - 1)));
     while t.ends_with(b"\r\n\r\n") {
         t.truncate(t.len() - 2);
     }
@@ -360,6 +388,12 @@ mod tests {
         assert_eq!(all_text(&g), b"ab\r\n xy\r\n");
         // Outside the screen.
         assert_eq!(block_text(&g, Block::spanning((5, 5), (6, 6))), b"");
+        // Text marks: from a cell to a cell in reading order.
+        assert_eq!(block_text(&g, Block::text((1, 2), (0, 1))), b"b\r\n xy");
+        assert_eq!(block_text(&g, Block::text((0, 1), (0, 1))), b"b");
+        assert_eq!(block_text(&g, Block::text((0, 0), (1, 3))), b"ab\r\n xy\r\n");
+        let m = Block::text((0, 2), (1, 1));
+        assert!(m.contains(0, 3) && m.contains(1, 0) && !m.contains(0, 1) && !m.contains(1, 2));
         let blank = vec![0x0720u16; 4];
         assert_eq!(all_text(&Grid { cells: &blank, cols: 2, rows: 2 }), b"");
     }

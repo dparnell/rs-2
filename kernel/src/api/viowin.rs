@@ -10,6 +10,7 @@
 //! | 14 | `Rs2VioKey(ULONG sid, PINPUTEVENT pKey)` |
 //! | 15 | `Rs2VioMouse(ULONG sid, LONG row, LONG col, ULONG fsButtons)` |
 //! | 16 | `Rs2VioControl(ULONG sid, ULONG cmd, ULONG arg)` |
+//! | 17 | `Rs2VioReadHistory(ULONG sid, ULONG ulEnd, ULONG cLines, ULONG cCols, PUSHORT pCells, ULONG cbCells)` |
 
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
@@ -142,8 +143,9 @@ pub fn query_sessions(c: &mut Ctx) -> u32 {
 ///
 /// RS2VIOSTATE: gen, cols, rows, cursor row, cursor column, first and
 /// last cursor scan line (of cell_h), cell_h, code page, flags (ST_*),
-/// font generation, then 16 colours 0x00RRGGBB (offset 44), 20 bytes
-/// reserved.
+/// font generation, then 16 colours 0x00RRGGBB (offset 44), the lines
+/// that ever scrolled off the screen (offset 108, see Rs2VioReadHistory),
+/// the keys typed into the window (offset 112), 12 bytes reserved.
 pub fn read_screen(c: &mut Ctx) -> u32 {
     let (sid, pstate, pcells, cb) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
     if !session::exists(sid) {
@@ -183,6 +185,9 @@ pub fn read_screen(c: &mut Ctx) -> u32 {
         for v in s.palette_rgb() {
             st.extend_from_slice(&v.to_le_bytes());
         }
+        for v in [s.scrolled, s.keys] {
+            st.extend_from_slice(&v.to_le_bytes());
+        }
         st.resize(128, 0);
         let cells = if pcells != 0 { s.cells_vec() } else { Vec::new() };
         (st, cells)
@@ -202,6 +207,26 @@ pub fn read_screen(c: &mut Ctx) -> u32 {
         }
     }
     0
+}
+
+/// Rs2VioReadHistory(sid, ulEnd, cLines, cCols, pCells, cbCells): the
+/// scroll back of a windowable session: lines ulEnd - cLines .. ulEnd
+/// (numbered from the first line that ever scrolled off its screen;
+/// RS2VIOSTATE says how many did), cCols cells each, oldest first, as
+/// far as cbCells holds. Lines no longer kept (the last 1000 are) are
+/// blank.
+pub fn read_history(c: &mut Ctx) -> u32 {
+    let (sid, end, n, cols, p, cb) = (c.arg(0), c.arg(1), c.arg(2) as usize, c.arg(3) as usize, c.arg(4), c.arg(5) as usize);
+    if cols == 0 || cols > crate::screen::MAX_COLS || n > crate::screen::HISTORY {
+        return err::INVALID_PARAMETER;
+    }
+    let n = n.min(cb / 2 / cols);
+    let Some(cells) = crate::screen::with_session(sid, |s| s.history_lines(end, n, cols)) else { return ERROR_SMG_SESSION_NOT_FOUND };
+    let mut b = Vec::with_capacity(cells.len() * 2);
+    for v in &cells {
+        b.extend_from_slice(&v.to_le_bytes());
+    }
+    if c.write(p, &b) { 0 } else { err::INVALID_ADDRESS }
 }
 
 /// Rs2VioQueryFont(sid, cy, pGlyphs, cb): the 256 glyphs (cy bytes each,
@@ -244,7 +269,12 @@ pub fn key(c: &mut Ctx) -> u32 {
             t => t,
         },
     };
-    crate::conkbd::inject_key(sid, k, a >> 24 & 1 != 0);
+    let up = a >> 24 & 1 != 0;
+    // Shift, Ctrl, Alt, Caps/Num/Scroll Lock
+    if !up && !matches!(k.scan, 0x2a | 0x36 | 0x1d | 0x38 | 0x3a | 0x45 | 0x46) {
+        crate::screen::with_session(sid, |s| s.note_key());
+    }
+    crate::conkbd::inject_key(sid, k, up);
     0
 }
 

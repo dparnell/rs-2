@@ -269,6 +269,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 14) => super::viowin::key,
         (8, 15) => super::viowin::mouse,
         (8, 16) => super::viowin::control,
+        (8, 17) => super::viowin::read_history,
         (8, 400) => super::vdm::register,
         (8, 401) => super::vdm::read_input,
         (8, 402) => super::vdm::set_text,
