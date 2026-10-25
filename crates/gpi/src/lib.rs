@@ -20,6 +20,7 @@ pub mod math;
 pub mod metafile;
 pub mod pattern;
 mod ps;
+pub mod psdev;
 pub mod raster;
 pub mod ttf;
 pub mod type1;

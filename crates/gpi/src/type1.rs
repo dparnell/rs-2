@@ -244,6 +244,12 @@ impl crate::font::Outlines for Type1 {
     fn metrics(&self) -> (i32, i32, i32) {
         (self.ascender, self.descender, self.avg_width)
     }
+    fn outline(&self, ch: char) -> (Outline, f64) {
+        match glyph_name(ch) {
+            Some(n) if self.charstring(n).is_some() => self.outline_of(n),
+            _ => self.outline_of(b"space"),
+        }
+    }
 }
 
 /// A charstring being run.

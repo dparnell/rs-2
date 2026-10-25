@@ -41,6 +41,9 @@ pub trait Outlines: Sync {
     fn render(&self, ch: char, scale: f64, bold: f64) -> crate::ttf::Rendered;
     /// (ascender, descender, average width) in font units.
     fn metrics(&self) -> (i32, i32, i32);
+    /// A character's outline (font units, y up) and advance in units,
+    /// for devices that draw outlines themselves (PostScript).
+    fn outline(&self, ch: char) -> (crate::ttf::Outline, f64);
 }
 
 impl Outlines for crate::ttf::Ttf {
@@ -52,6 +55,10 @@ impl Outlines for crate::ttf::Ttf {
     }
     fn metrics(&self) -> (i32, i32, i32) {
         (self.ascender, self.descender, self.avg_width)
+    }
+    fn outline(&self, ch: char) -> (crate::ttf::Outline, f64) {
+        let g = self.glyph_index(ch);
+        (crate::ttf::Ttf::outline(self, g), self.advance(g) as f64)
     }
 }
 
@@ -142,7 +149,7 @@ fn lookup(c: char) -> Option<[u8; 16]> {
 /// them). BEL to CR stay blank: text passes tabs and line ends.
 const CP850_LOW: &str = "\u{263a}\u{263b}\u{2665}\u{2666}\u{2663}\u{2660}       \u{266b}\u{263c}\u{25ba}\u{25c4}\u{2195}\u{203c}\u{b6}\u{a7}\u{25ac}\u{21a8}\u{2191}\u{2193}\u{2192}\u{2190}\u{221f}\u{2194}\u{25b2}\u{25bc}";
 
-fn cp850(b: u8) -> char {
+pub fn cp850(b: u8) -> char {
     match b {
         0x01..=0x1f => CP850_LOW.chars().nth((b - 1) as usize).unwrap_or(' '),
         0x20..=0x7e => b as char,
