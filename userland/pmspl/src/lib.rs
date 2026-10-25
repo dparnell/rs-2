@@ -32,10 +32,27 @@ mod util;
 pub const PMERR_INVALID_PARM: u32 = 0x1303;
 pub const PMERR_SPL_QUEUE_NOT_FOUND: u32 = 0x4024;
 
+/// _DLL_InitTerm(hmod, flag): on initialization (flag 0) the spooler's
+/// configuration is written if missing, for programs that read
+/// OS2SYS.INI themselves (BACKPRN) before calling the spooler. The
+/// loader keeps only 4-byte stack alignment: Rust code gets 16.
+#[unsafe(naked)]
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.start")]
-pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
-    1
+pub extern "C" fn _start() {
+    core::arch::naked_asm!(
+        "push ebp", "mov ebp, esp", "and esp, -16", "sub esp, 16",
+        "mov eax, [ebp + 12]", "mov [esp], eax",
+        "call {init}",
+        "mov esp, ebp", "pop ebp", "mov eax, 1", "ret",
+        init = sym init,
+    );
+}
+
+extern "C" fn init(flag: u32) {
+    if flag == 0 {
+        jobs::locked(|| ());
+    }
 }
 
 /// WinSetErrorInfo, when the process uses PMWIN (PMSPL does not import
