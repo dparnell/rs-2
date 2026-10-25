@@ -20,7 +20,8 @@
 //! session's id, a rectangle (top, left, height, width), two window tags
 //! (session id, hwnd), flags and a code at +24h. Windows reports its
 //! top-level windows with them (created 1, destroyed 2, activated 3,
-//! moved, sized, shown, hidden, minimised 4, title 12h); PM sends the
+//! moved, sized, shown, hidden, minimised 4, mouse capture 0Ah, title
+//! 12h); PM sends the
 //! same codes back to activate, close, place and start programs (16h).
 //! This module keeps the window list the messages describe for the
 //! seamless host and makes the host's requests into messages for
@@ -40,7 +41,9 @@ pub const MSG_DESTROY: u16 = 2;
 pub const MSG_ACTIVATE: u16 = 3;
 pub const MSG_POSITION: u16 = 4;
 pub const MSG_INIT: u16 = 5;
-pub const MSG_SHOW: u16 = 0x0a;
+/// Windows captures the mouse (+18h: 40h) or releases it (80h);
+/// blocking: PM's answer at +8 says yes (USER's MOVESIZE stops on 0).
+pub const MSG_CAPTURE: u16 = 0x0a;
 pub const MSG_TITLE: u16 = 0x12;
 pub const MSG_RUN: u16 = 0x16;
 
@@ -198,11 +201,6 @@ impl Vwin {
                     self.windows.insert(pos, w);
                 }
             }
-            MSG_SHOW => {
-                if let Some(w) = self.window(hwnd) {
-                    w.visible = flags & 0x40 != 0;
-                }
-            }
             MSG_TITLE => {
                 let t = cstr(m, 0x2c);
                 if let Some(w) = self.window(hwnd) {
@@ -348,12 +346,27 @@ impl Machine {
                     }
                     host.log(&t);
                 }
+                // A window that moves takes its picture along, as PM
+                // moves its bits on OS/2 (seamless Windows does not
+                // repaint it).
+                let hwnd = rd16(&m, 0x20);
+                let before = self.vwin.windows.iter().find(|w| w.hwnd == hwnd).map(|w| (w.x, w.y, w.w, w.h));
                 self.vwin.learn(&m);
+                let after = self.vwin.windows.iter().find(|w| w.hwnd == hwnd).map(|w| (w.x, w.y, w.w, w.h));
+                if let (Some(b), Some(a), true) = (before, after, self.vwin.seamless) {
+                    if (b.0, b.1) != (a.0, a.1) && rd16(&m, 0x24) == MSG_POSITION {
+                        self.disp.move_picture(b, a);
+                    }
+                }
                 if ah == 0x02 {
                     // PM's answer to WINSHELD's first message: the width
                     // of the windows' sizing borders (PM's).
                     if rd16(&m, 0x24) == MSG_INIT && m.len() >= 0x2c {
                         self.hw.wr16(at + 8, 4);
+                    }
+                    // The mouse is Windows' while it captures it.
+                    if rd16(&m, 0x24) == MSG_CAPTURE && m.len() >= 0x2c {
+                        self.hw.wr16(at + 8, 1);
                     }
                     self.cpu.regs[ECX] = (self.cpu.regs[ECX] & 0xffff_0000) | len as u32;
                 }

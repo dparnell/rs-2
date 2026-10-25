@@ -130,6 +130,34 @@ impl Display {
         self.damage.push(r);
     }
 
+    /// Copy the picture of rectangle `from` (x, y, w, h) to `to`'s place
+    /// (as much of it as both sizes hold).
+    pub fn move_picture(&mut self, from: (i32, i32, i32, i32), to: (i32, i32, i32, i32)) {
+        let (sw, sh) = (self.w as i32, self.h as i32);
+        let (w, h) = (from.2.min(to.2), from.3.min(to.3));
+        if !self.enabled || w <= 0 || h <= 0 {
+            return;
+        }
+        let mut buf = vec![0u8; (w * h) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let (sx, sy) = (from.0 + x, from.1 + y);
+                if sx >= 0 && sy >= 0 && sx < sw && sy < sh {
+                    buf[(y * w + x) as usize] = self.pix[(sy * sw + sx) as usize];
+                }
+            }
+        }
+        for y in 0..h {
+            for x in 0..w {
+                let (dx, dy) = (to.0 + x, to.1 + y);
+                if dx >= 0 && dy >= 0 && dx < sw && dy < sh {
+                    self.pix[(dy * sw + dx) as usize] = buf[(y * w + x) as usize];
+                }
+            }
+        }
+        self.touch(Rect::new(to.0, to.1, to.0 + w, to.1 + h));
+    }
+
     pub fn take_damage(&mut self) -> Vec<Rect> {
         core::mem::take(&mut self.damage)
     }
@@ -406,7 +434,9 @@ impl Machine {
         }
         d.enabled = true;
         d.touch(Rect::new(0, 0, w as i32, h as i32));
+        // The mouse moves over this screen.
         self.mouse.screen = Some((w as i32, h as i32));
+        (self.mouse.min_x, self.mouse.min_y, self.mouse.max_x, self.mouse.max_y) = (0, 0, w as i32 - 1, h as i32 - 1);
         1
     }
 

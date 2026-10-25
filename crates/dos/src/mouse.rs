@@ -51,7 +51,8 @@ pub struct Mouse {
     pub owner: u16,
     /// Win-OS/2's MOUSE.DRV asked VMOUSE$ for its scale factors: its
     /// protected-mode handler gets absolute positions (AX bit 15, CX
-    /// and DX 0-65535 across the screen), as OS/2's VMOUSE gives them.
+    /// and DX 0-65535 across the screen, pixels in a seamless session),
+    /// as OS/2's VMOUSE gives them.
     pub absolute: bool,
     /// The position as a fraction of the screen (0-65535 each way).
     pub abs: (u32, u32),
@@ -228,11 +229,13 @@ impl Machine {
         let abs = self.mouse.absolute && self.mouse.handler_pm;
         self.cpu.set_ax(ev & mask | if abs { 0x8000 } else { 0 });
         self.cpu.set_bx(b as u16);
-        if abs {
+        if abs && !self.vwin.seamless {
             let (ax, ay) = self.mouse.abs;
             self.cpu.set_cx(ax as u16);
             self.cpu.set_dx(ay as u16);
         } else {
+            // Seamless: IBM's USER takes absolute positions as pixels
+            // (MOUSE_EVENT with fMSeamless), as VMOUSE gives them there.
             self.cpu.set_cx(x as u16);
             self.cpu.set_dx(y as u16);
         }

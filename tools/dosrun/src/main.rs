@@ -39,6 +39,8 @@ struct Run {
     pcm: (u32, Vec<u8>),
     /// --display: RS2DISP.DRV's screen size.
     display: (u32, u32),
+    /// The mouse buttons held ({press} until {release}).
+    held: u8,
 }
 
 enum KeyItem {
@@ -288,6 +290,9 @@ impl Host for Run {
             }
             Some(KeyItem::Wait(s)) => self.next_key_at = t + s,
             Some(KeyItem::Mouse(x, y, buttons)) => {
+                // 0xff: the buttons held.
+                let buttons = if buttons == 0xff { self.held } else { buttons };
+                self.held = buttons;
                 let (w, h) = self.last_gfx.as_ref().map_or((640, 480), |g| (g.0 as i64, g.1 as i64));
                 let ax = ((x as i64 * 65536 + 32768) / w).clamp(0, 65535) as u32;
                 let ay = ((y as i64 * 65536 + 32768) / h).clamp(0, 65535) as u32;
@@ -446,13 +451,13 @@ fn parse_keys(s: &str) -> VecDeque<KeyItem> {
             let xy = |i: usize| words.get(i).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
             match words.first().copied() {
                 Some("mouse") => {
-                    q.push_back(KeyItem::Mouse(xy(1), xy(2), 0));
+                    q.push_back(KeyItem::Mouse(xy(1), xy(2), 0xff));
                     continue;
                 }
                 Some(c @ ("click" | "rclick" | "dclick" | "press" | "release")) => {
                     let b = if c == "rclick" { 2 } else { 1 };
                     let (x, y) = (xy(1), xy(2));
-                    q.push_back(KeyItem::Mouse(x, y, 0));
+                    q.push_back(KeyItem::Mouse(x, y, if c == "release" { 0xff } else { 0 }));
                     for _ in 0..if c == "dclick" { 2 } else { 1 } {
                         if c != "release" {
                             q.push_back(KeyItem::Mouse(x, y, b));
@@ -644,6 +649,7 @@ fn main() {
         cp437: cp437(),
         pcm: (0, Vec::new()),
         display,
+        held: 0,
     };
     let mut m = Machine::new(&mut host, cfg);
     m.disp.trace = disp_trace;
