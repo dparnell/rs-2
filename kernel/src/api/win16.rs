@@ -9,15 +9,21 @@
 //! with `Rs2Win16SetIntHandler` the kernel reflects it there instead, as
 //! Windows' DPMI host reflects them into KERNEL.
 //!
+//! Protection faults in the program's 16-bit code go to the handler too
+//! (the interrupt number is 100h + the exception number), so it can
+//! emulate what Windows tolerates (an invalid selector loaded into ES).
+//!
 //! The handler is a `_pascal far` 16-bit procedure taking a far pointer
 //! to the interrupted registers (INTREGS, below). It is called on the
 //! interrupted stack, which then holds from SP up: the far return address
 //! (the gate slot `RETURN_ORDINAL`), the pointer, and INTREGS. It may
 //! change any register in INTREGS; when it returns (RETF 4) the kernel
-//! loads them and resumes after the INT instruction.
+//! loads them and resumes after the INT instruction (at IP, for a
+//! fault). A fault the handler leaves alone (the number still 100h +
+//! the exception) is delivered as the exception it was.
 //!
 //! INTREGS (USHORTs): AX, BX, CX, DX, SI, DI, BP, DS, ES, FLAGS, IP, CS,
-//! the interrupt number, SP.
+//! the interrupt number, SP, the fault's error code.
 //!
 //! | Ordinal | Call |
 //! |---------|------|
@@ -30,13 +36,14 @@ use super::Ctx;
 use crate::arch::idt::TrapFrame;
 use crate::loader::gate;
 use crate::task::process::Process;
+use crate::task::thread::Thread;
 use crate::vm;
 
 /// Gate slot (module 0) the handler returns to; no OS/2 DOSCALLS export
 /// has this ordinal.
 pub const RETURN_ORDINAL: u32 = 21;
 
-const REGS: usize = 14;
+const REGS: usize = 15;
 const AX: usize = 0;
 const BX: usize = 1;
 const CX: usize = 2;
@@ -51,6 +58,9 @@ const IP: usize = 10;
 const CS: usize = 11;
 const INTNO: usize = 12;
 const SP: usize = 13;
+const ERROR: usize = 14;
+/// The interrupt number of a reflected fault: 100h + the exception.
+const FAULT: u16 = 0x100;
 
 /// RS2API 420: Rs2Win16SetIntHandler(pfnHandler16).
 pub fn set_int_handler(c: &mut Ctx) -> u32 {
@@ -59,16 +69,14 @@ pub fn set_int_handler(c: &mut Ctx) -> u32 {
     0
 }
 
-/// A protection fault in user code: if it is an INT instruction in 16-bit
-/// code of a process with a Win16 interrupt handler, enter the handler.
+/// A protection fault in user code: if it is in 16-bit code of a process
+/// with a Win16 interrupt handler (an INT instruction, or another fault
+/// outside the handler's own code), enter the handler.
 pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
     let handler = p.win16_int.load(Ordering::Relaxed);
-    // The error code of a fault on a gate the program may not use: IDT
-    // bit and the vector.
-    if handler == 0 || f.vector != 13 || f.error & 3 != 2 {
+    if handler == 0 || f.vector != 13 {
         return false;
     }
-    let vector = (f.error >> 3) as u8;
     let mut sp = p.space.lock();
     let cs = f.cs as u16;
     let ss = f.ss as u16;
@@ -78,9 +86,16 @@ pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
     let ip = f.rip as u16;
     let Some(lin) = sp.linear(cs, ip as u32) else { return false };
     let mut insn = [0u8; 2];
-    if !sp.read_bytes(lin, &mut insn) || insn != [0xcd, vector] {
+    if !sp.read_bytes(lin, &mut insn) {
         return false;
     }
+    // The error code of an INT through a gate the program may not use:
+    // IDT bit and the vector.
+    let int = f.error & 3 == 2 && insn == [0xcd, (f.error >> 3) as u8];
+    if !int && cs == (handler >> 16) as u16 {
+        return false;
+    }
+    let (number, resume) = if int { ((f.error >> 3) as u16, ip.wrapping_add(2)) } else { (FAULT | f.vector as u16, ip) };
     let regs: [u16; REGS] = [
         f.rax as u16,
         f.rbx as u16,
@@ -92,10 +107,11 @@ pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
         f.ds as u16,
         f.es as u16,
         f.rflags as u16,
-        ip.wrapping_add(2),
+        resume,
         cs,
-        vector as u16,
+        number,
         f.rsp as u16,
+        f.error as u16,
     ];
     let sp16 = (f.rsp as u16).wrapping_sub((REGS * 2 + 8) as u16);
     let regs_off = sp16.wrapping_add(8);
@@ -118,7 +134,7 @@ pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
 }
 
 /// The handler returned to the gate slot: SS:SP is at INTREGS.
-pub fn returned(f: &mut TrapFrame, p: &Arc<Process>) {
+pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     let mut sp = p.space.lock();
     let ss = f.ss as u16;
     let base = vm::desc_base(sp.descriptor(ss));
@@ -141,5 +157,12 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>) {
     f.rip = r(IP);
     f.cs = r(CS);
     f.rsp = r(SP);
-    let _ = INTNO;
+    drop(sp);
+    let n = r(INTNO) as u16;
+    if n & FAULT != 0 {
+        // Not handled: the fault as it was.
+        f.vector = (n & 0xff) as u64;
+        f.error = r(ERROR);
+        crate::api::exceptions::deliver(f, p, t);
+    }
 }

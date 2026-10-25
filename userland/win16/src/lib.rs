@@ -198,6 +198,12 @@ entries! {
     k_makeprocinstance = 1051, 6;
     k_freeprocinstance = 1052, 4;
     k_getinstancedata = 1054, 6;
+    k_lclose = 1081, 2;
+    k_lread = 1082, 8;
+    k_lcreat = 1083, 6;
+    k_llseek = 1084, 8;
+    k_lopen = 1085, 6;
+    k_lwrite = 1086, 8;
     k_lstrcpy = 1088, 8;
     k_lstrcat = 1089, 8;
     k_lstrlen = 1090, 4;
@@ -207,6 +213,7 @@ entries! {
     k_getwinflags = 1132, 0;
     k_fatalappexit = 1137, 6;
     k_sethandlecount = 1199, 2;
+    k_isdbcsleadbyte = 1207, 2;
     // USER
     u_messagebox = 2001, 12;
     u_initapp = 2005, 2;
@@ -234,6 +241,15 @@ entries! {
     u_destroywindow = 2053, 2;
     u_movewindow = 2056, 12;
     u_registerclass = 2057, 4;
+    u_setrect = 2072, 12;
+    u_setrectempty = 2073, 4;
+    u_copyrect = 2074, 8;
+    u_isrectempty = 2075, 4;
+    u_ptinrect = 2076, 8;
+    u_offsetrect = 2077, 8;
+    u_inflaterect = 2078, 8;
+    u_intersectrect = 2079, 12;
+    u_unionrect = 2080, 12;
     u_getactivewindow = 2060, 0;
     u_getdc = 2066, 2;
     u_releasedc = 2068, 4;
@@ -281,6 +297,7 @@ entries! {
     kb_ansitooem = 4005, 8;
     kb_oemtoansi = 4006, 8;
     kb_getkeyboardtype = 4130, 2;
+    kb_getkbcodepage = 4132, 0;
 }
 
 extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {

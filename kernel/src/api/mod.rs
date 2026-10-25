@@ -428,7 +428,7 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         return;
     }
     if module == 0 && ordinal == win16::RETURN_ORDINAL {
-        win16::returned(f, &process);
+        win16::returned(f, &process, &thread);
         return;
     }
     if module == 0 && ordinal == exceptions::HANDLER_RETURN_ORDINAL {

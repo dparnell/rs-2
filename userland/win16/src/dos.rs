@@ -1,7 +1,9 @@
 //! The interrupts of Windows programs, reflected here by the kernel
 //! (api/win16.rs): INT 21h (DOS, as Windows' KERNEL serves it to
 //! protected-mode programs, on OS/2 files) and WIN16's own INT E0h
-//! (InitTask).
+//! (InitTask); and their protection faults, of which one is fixed up:
+//! loading an invalid selector into ES or DS (compilers load far
+//! pointers early, before they know the pointer is one) loads 0.
 
 use crate::kernel;
 use crate::pm::trace;
@@ -24,6 +26,7 @@ pub mod reg {
     pub const CS: usize = 11;
     pub const INTNO: usize = 12;
     pub const SP: usize = 13;
+    pub const ERROR: usize = 14;
 }
 use reg::*;
 
@@ -33,10 +36,16 @@ pub fn interrupt(p: *mut u16) {
     if p.is_null() {
         return;
     }
-    let mut r: [u16; 14] = core::array::from_fn(|i| unsafe { p.add(i).read_unaligned() });
+    let mut r: Regs = core::array::from_fn(|i| unsafe { p.add(i).read_unaligned() });
     match r[INTNO] {
         0xe0 => kernel::init_task(&mut r),
         0x21 => int21(&mut r),
+        // A protection fault: handled when it is fixed (the number 0).
+        0x10d => {
+            if segment_load(&mut r) {
+                r[INTNO] = 0;
+            }
+        }
         n => {
             trace(format_args!("WIN16: INT {n:02X}h AX={:04X} at {:04X}:{:04X} not supported", r[AX], r[CS], r[IP].wrapping_sub(2)));
             r[FLAGS] |= CF;
@@ -47,17 +56,134 @@ pub fn interrupt(p: *mut u16) {
     }
 }
 
+/// INTREGS.
+pub type Regs = [u16; 15];
+
+/// A protection fault loading ES or DS with a selector that is not
+/// valid (LES, LDS, MOV sreg, POP sreg): load 0 and go on.
+fn segment_load(r: &mut Regs) -> bool {
+    let code = flat((r[CS] as u32) << 16 | r[IP] as u32) as *const u8;
+    let at = |i: usize| unsafe { *code.add(i) };
+    // The stack segment: the program's (where this handler was called).
+    let ss = (thunk16::sp16() >> 16) as u16;
+    let mut i = 0;
+    let mut seg = None;
+    loop {
+        match at(i) {
+            0x26 => seg = Some(r[ES]),
+            0x2e => seg = Some(r[CS]),
+            0x36 => seg = Some(ss),
+            0x3e => seg = Some(r[DS]),
+            0x66 | 0x67 => return false,
+            _ => break,
+        }
+        i += 1;
+    }
+    let op = at(i);
+    let bad = r[ERROR] & !3;
+    let fixed = match op {
+        // POP ES, POP DS
+        0x07 | 0x1f => {
+            let sel = unsafe { (flat((ss as u32) << 16 | r[SP] as u32) as *const u16).read_unaligned() };
+            if sel & !3 != bad {
+                return false;
+            }
+            r[if op == 0x07 { ES } else { DS }] = 0;
+            r[SP] = r[SP].wrapping_add(2);
+            i + 1
+        }
+        // MOV ES/DS, r/m16 and LES/LDS r16, m16:16
+        0x8e | 0xc4 | 0xc5 => {
+            let modrm = at(i + 1);
+            let (md, reg, rm) = (modrm >> 6, (modrm >> 3) & 7, modrm & 7);
+            let sreg = match op {
+                0xc4 => ES,
+                0xc5 => DS,
+                _ if reg == 0 => ES,
+                _ if reg == 3 => DS,
+                _ => return false,
+            };
+            // The 16-bit effective address.
+            let (mut ea, mut def) = match rm {
+                0 => (r[BX].wrapping_add(r[SI]), r[DS]),
+                1 => (r[BX].wrapping_add(r[DI]), r[DS]),
+                2 => (r[BP].wrapping_add(r[SI]), ss),
+                3 => (r[BP].wrapping_add(r[DI]), ss),
+                4 => (r[SI], r[DS]),
+                5 => (r[DI], r[DS]),
+                6 => (r[BP], ss),
+                _ => (r[BX], r[DS]),
+            };
+            let mut len = 2;
+            match md {
+                0 if rm == 6 => {
+                    ea = at(i + 2) as u16 | (at(i + 3) as u16) << 8;
+                    def = r[DS];
+                    len = 4;
+                }
+                1 => {
+                    ea = ea.wrapping_add(at(i + 2) as i8 as u16);
+                    len = 3;
+                }
+                2 => {
+                    ea = ea.wrapping_add(at(i + 2) as u16 | (at(i + 3) as u16) << 8);
+                    len = 4;
+                }
+                _ => {}
+            }
+            const GPR: [usize; 8] = [AX, CX, DX, BX, SP, BP, SI, DI];
+            if md == 3 {
+                // MOV sreg, r16
+                if op != 0x8e || r[GPR[rm as usize]] & !3 != bad {
+                    return false;
+                }
+            } else {
+                let m = flat((seg.unwrap_or(def) as u32) << 16 | ea as u32) as *const u16;
+                if m.is_null() {
+                    return false;
+                }
+                let (off, sel) = unsafe { (m.read_unaligned(), m.add(1).read_unaligned()) };
+                let loaded = if op == 0x8e { off } else { sel };
+                if loaded & !3 != bad {
+                    return false;
+                }
+                if op != 0x8e {
+                    r[GPR[reg as usize]] = off;
+                }
+            }
+            r[sreg] = 0;
+            i + len
+        }
+        _ => return false,
+    };
+    if crate::tracing() {
+        trace(format_args!("W16 {:04X}:{:04X}: invalid selector {bad:#06x} loaded as 0", r[CS], r[IP]));
+    }
+    r[IP] = r[IP].wrapping_add(fixed as u16);
+    true
+}
+
 fn hi(v: u16) -> u8 {
     (v >> 8) as u8
 }
 
-fn ok(r: &mut [u16; 14]) {
+fn ok(r: &mut Regs) {
     r[FLAGS] &= !CF;
 }
 
-fn fail(r: &mut [u16; 14], e: u32) {
-    r[AX] = e as u16;
+fn fail(r: &mut Regs, e: u32) {
+    r[AX] = dos_error(e) as u16;
     r[FLAGS] |= CF;
+}
+
+/// The DOS error code of an OS/2 one: OS/2's codes extend DOS's, but
+/// opening a file that does not exist fails with ERROR_OPEN_FAILED.
+pub fn dos_error(e: u32) -> u32 {
+    match e {
+        110 => 2,
+        e if e > 0x58 => 0x1f, // general failure
+        e => e,
+    }
 }
 
 /// DS:DX (or another register pair) as a flat pointer.
@@ -72,7 +198,7 @@ fn path(seg: u16, off: u16) -> alloc::vec::Vec<u8> {
     v
 }
 
-fn int21(r: &mut [u16; 14]) {
+fn int21(r: &mut Regs) {
     let ah = hi(r[AX]);
     let al = r[AX] as u8;
     if crate::tracing() {

@@ -230,6 +230,54 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         52 => 0,
         // GetInstanceData(inst, ptr, cb): no other instances.
         54 => 0,
+        // _lclose(hf)
+        81 => {
+            let h = a.w();
+            if unsafe { os2::DosClose(h as u32) } == 0 { 0 } else { HFILE_ERROR }
+        }
+        // _lread(hf, buf, cb), _lwrite(hf, buf, cb)
+        82 | 86 => {
+            let (h, buf, cb) = (a.w(), a.l(), a.w());
+            let p = huge(buf);
+            let mut n = 0u32;
+            let e = unsafe {
+                if ord == 82 { os2::DosRead(h as u32, p, cb as u32, &mut n) } else { os2::DosWrite(h as u32, p, cb as u32, &mut n) }
+            };
+            if e == 0 { n } else { HFILE_ERROR }
+        }
+        // _lcreat(path, attr), _lopen(path, mode)
+        83 | 85 => {
+            let (path, v) = (a.l(), a.w());
+            let mut p = far_str(path).unwrap_or(b"").to_vec();
+            p.push(0);
+            let (flags, mode, attr) = if ord == 83 {
+                (0x12, 0x42, v as u32 & 0x27)
+            } else {
+                // OF_READ/WRITE/READWRITE and the OF_SHARE_* modes
+                // (compatibility mode: deny none).
+                let share = match v as u32 & 0x70 {
+                    0 => 0x40,
+                    s => s,
+                };
+                (0x01, (v as u32 & 3) | share, 0)
+            };
+            let (mut hf, mut action) = (0u32, 0u32);
+            match unsafe { os2::DosOpen(p.as_ptr(), &mut hf, &mut action, 0, attr, flags, mode, core::ptr::null_mut()) } {
+                0 => hf,
+                _ => HFILE_ERROR,
+            }
+        }
+        // _llseek(hf, offset, origin): the new position.
+        84 => {
+            let h = a.w();
+            let off = a.l() as i32;
+            let origin = a.w();
+            let mut pos = 0u32;
+            match unsafe { os2::DosSetFilePtr(h as u32, off, origin as u32, &mut pos) } {
+                0 => pos,
+                _ => u32::MAX,
+            }
+        }
         // lstrcpy(dst, src)
         88 => {
             let (d, s) = (a.l(), a.l());
@@ -296,8 +344,18 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // SetHandleCount(n)
         199 => a.w().min(255) as u32,
+        // IsDBCSLeadByte(c): single-byte code pages.
+        207 => 0,
         _ => 0,
     }
+}
+
+const HFILE_ERROR: u32 = 0xffff;
+
+/// A huge (16:16) pointer as flat memory: tiled, the tiles of a block
+/// are contiguous.
+fn huge(far: u32) -> *mut u8 {
+    flat(far)
 }
 
 /// WF_PMODE | WF_CPU386 | WF_ENHANCED | WF_80x87.
@@ -319,6 +377,8 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
             }
             1
         }
+        // GetKBCodePage
+        132 => 437,
         // GetKeyboardType(which): an enhanced 101/102-key keyboard.
         130 => match a.w() {
             0 => 4,
@@ -333,7 +393,7 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
 /// in, Windows' InitTask results out (AX 1, ES:BX the command tail, CX
 /// the stack limit, DX nCmdShow, SI the previous instance, DI the
 /// instance).
-pub fn init_task(r: &mut [u16; 14]) {
+pub fn init_task(r: &mut crate::dos::Regs) {
     use crate::dos::reg::*;
     let (stack, heap, inst) = (r[BX], r[CX], r[DI]);
     let ds = r[DS];

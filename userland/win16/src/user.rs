@@ -369,6 +369,61 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let p = a.p();
             register_class(p) as u32
         }
+        // SetRect(lpRect, left, top, right, bottom)
+        72 => {
+            let r = a.l();
+            let v = [a.i(), a.i(), a.i(), a.i()];
+            write_rect(r, v);
+            0
+        }
+        // SetRectEmpty(lpRect)
+        73 => {
+            write_rect(a.l(), [0; 4]);
+            0
+        }
+        // CopyRect(dst, src)
+        74 => {
+            let (d, s) = (a.l(), a.l());
+            if let Some(r) = read_rect(s) {
+                write_rect(d, r);
+            }
+            1
+        }
+        // IsRectEmpty(lpRect)
+        75 => read_rect(a.l()).is_none_or(|r| r[2] <= r[0] || r[3] <= r[1]) as u32,
+        // PtInRect(lpRect, POINT)
+        76 => {
+            let r = a.l();
+            let pt = a.l();
+            let (x, y) = (pt as i16 as i32, (pt >> 16) as i16 as i32);
+            read_rect(r).is_some_and(|r| x >= r[0] && x < r[2] && y >= r[1] && y < r[3]) as u32
+        }
+        // OffsetRect(lpRect, dx, dy), InflateRect(lpRect, dx, dy)
+        77 | 78 => {
+            let (p, dx, dy) = (a.l(), a.i(), a.i());
+            if let Some(r) = read_rect(p) {
+                write_rect(p, if ord == 77 { [r[0] + dx, r[1] + dy, r[2] + dx, r[3] + dy] } else { [r[0] - dx, r[1] - dy, r[2] + dx, r[3] + dy] });
+            }
+            0
+        }
+        // IntersectRect(dst, a, b), UnionRect(dst, a, b): not empty?
+        79 | 80 => {
+            let (d, s1, s2) = (a.l(), a.l(), a.l());
+            let (Some(x), Some(y)) = (read_rect(s1), read_rect(s2)) else { return 0 };
+            let empty = |r: [i32; 4]| r[2] <= r[0] || r[3] <= r[1];
+            let r = if ord == 79 {
+                [x[0].max(y[0]), x[1].max(y[1]), x[2].min(y[2]), x[3].min(y[3])]
+            } else if empty(x) {
+                y
+            } else if empty(y) {
+                x
+            } else {
+                [x[0].min(y[0]), x[1].min(y[1]), x[2].max(y[2]), x[3].max(y[3])]
+            };
+            let r = if empty(r) { [0; 4] } else { r };
+            write_rect(d, r);
+            !empty(r) as u32
+        }
         // GetActiveWindow
         60 => hwnd_of(unsafe { WinQueryActiveWindow(HWND_DESKTOP) }) as u32,
         // GetDC(hwnd)
