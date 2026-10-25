@@ -1,0 +1,13 @@
+[package]
+name = "pmprint-qpr"
+description = "PMPRINT.QPR: the queue processor for PM_Q_STD and PM_Q_RAW jobs"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmprint"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

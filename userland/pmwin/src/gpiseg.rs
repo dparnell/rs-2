@@ -115,6 +115,12 @@ impl MetaRec {
         self.segs.last_mut().unwrap().1.extend_from_slice(b);
     }
 
+    /// Record an escape order.
+    pub fn escape(&mut self, ident: u8, data: &[u8]) {
+        let b = enc(&Order::Escape { ident, data: data.to_vec() });
+        self.append(&b);
+    }
+
     /// Start a segment (0: back to unnamed drawing).
     fn begin(&mut self, id: i32) {
         if self.segs.last().is_some_and(|s| s.1.is_empty()) {
@@ -397,6 +403,9 @@ pub fn rec_bundle(hps: u32, prim: i32, mask: u32) {
 struct Play {
     /// GpiImage being collected (format, width, height, rows).
     image: Option<(i32, i32, i32, Vec<u8>)>,
+    /// A recorded bit-block transfer being collected (its header, the
+    /// samples).
+    blit: Option<(Vec<u8>, Vec<u8>)>,
     /// Escapes that load objects are done (LC_LOADDISC, CTAB_REPLACE,
     /// LT_ORIGINALVIEW).
     fonts: bool,
@@ -697,6 +706,7 @@ fn exec(hps: u32, o: &Order, p: &mut Play) {
             GpiSetPel(hps, &pl(*q));
         }
         Order::Escape { ident, data } => escape(hps, *ident, data, p),
+
         Order::Nop
         | Order::Comment(_)
         | Order::BeginSegment { .. }
@@ -709,7 +719,7 @@ fn exec(hps: u32, o: &Order, p: &mut Play) {
 }
 
 /// IBM's metafile escapes.
-fn escape(hps: u32, ident: u8, d: &[u8], p: &Play) {
+fn escape(hps: u32, ident: u8, d: &[u8], p: &mut Play) {
     use crate::gpiapi::*;
     match ident {
         goca::ESC_CREATELOGCOLORTABLE if p.ctab && d.len() >= 16 => {
@@ -746,6 +756,26 @@ fn escape(hps: u32, ident: u8, d: &[u8], p: &Play) {
         }
         goca::ESC_SAVEPS => {
             GpiSavePS(hps);
+        }
+        ESC_BLIT_BEGIN if d.len() >= 28 => p.blit = Some((d.to_vec(), Vec::new())),
+        ESC_BLIT_DATA => {
+            if let Some((_, px)) = &mut p.blit {
+                px.extend_from_slice(d);
+            }
+        }
+        ESC_BLIT_END => {
+            if let Some((h, px)) = p.blit.take() {
+                play_blit(hps, &h, &px);
+            }
+        }
+        // A device escape recorded on a printer's PM_Q_STD DC (NEWFRAME):
+        // done on the DC the metafile is played on.
+        crate::printer::ESC_DEVESCAPE if d.len() >= 4 => {
+            let hdc = entry(st(), hps).map_or(0, |e| e.gpi.hdc);
+            let code = le32(d, 0);
+            if hdc != 0 && code == crate::printer::DEVESC_NEWFRAME {
+                crate::gpiobj::DevEscape(hdc, code, (d.len() - 4) as i32, d[4..].as_ptr(), core::ptr::null_mut(), core::ptr::null_mut());
+            }
         }
         goca::ESC_RESTOREPS => {
             GpiRestorePS(hps, -1);
@@ -1180,6 +1210,60 @@ pub extern "C" fn GpiQueryDefAttrs(hps: u32, prim: i32, mask: u32, b: *mut u8) -
         e.ps.attrs = cur;
     }
     r
+}
+
+// ---- Bit-block transfers on metafiles ----
+//
+// GpiBitBlt, GpiWCBitBlt, GpiDrawBits and WinDrawBitmap onto a metafile
+// PS are recorded as rs2's own escape orders: a header (the target as
+// world points, inclusive; the ROP; whether the source is monochrome;
+// the samples' width and height), the samples (RGB plus a byte that is
+// 0 for samples outside the source) in pieces, and an end. Playing them
+// does the blit on the playing PS, scaled to where the target lands.
+
+const ESC_BLIT_BEGIN: u8 = 0x81;
+const ESC_BLIT_DATA: u8 = 0x82;
+const ESC_BLIT_END: u8 = 0x83;
+
+/// Record a blit of `w` x `h` samples to the device rectangle `t`.
+pub fn rec_blit(hps: u32, t: gpi::Rect, rop: u8, mono: bool, (w, h): (i32, i32), px: &[Option<u32>]) {
+    let Some(e) = entry(st(), hps) else { return };
+    if e.gpi.seg.meta_dc == 0 || t.is_empty() {
+        return;
+    }
+    let mut c = [Point::new(t.left, t.bottom), Point::new(t.right - 1, t.top - 1)];
+    e.ps.convert(gpi::CVTC_DEVICE, gpi::CVTC_WORLD, &mut c);
+    let mut hdr = Vec::with_capacity(28);
+    for v in [c[0].x, c[0].y, c[1].x, c[1].y] {
+        hdr.extend_from_slice(&v.to_le_bytes());
+    }
+    hdr.extend_from_slice(&[rop, mono as u8, 0, 0]);
+    hdr.extend_from_slice(&w.to_le_bytes());
+    hdr.extend_from_slice(&h.to_le_bytes());
+    rec_meta(hps, ESC_BLIT_BEGIN, || hdr);
+    let mut data = Vec::with_capacity(px.len() * 4);
+    for p in px {
+        match p {
+            Some(c) => data.extend_from_slice(&[(c >> 16) as u8, (c >> 8) as u8, *c as u8, 1]),
+            None => data.extend_from_slice(&[0, 0, 0, 0]),
+        }
+    }
+    for chunk in data.chunks(60000) {
+        rec_meta(hps, ESC_BLIT_DATA, || chunk.to_vec());
+    }
+    rec_meta(hps, ESC_BLIT_END, Vec::new);
+}
+
+fn play_blit(hps: u32, h: &[u8], px: &[u8]) {
+    let (rop, mono, w, hh) = (h[16], h[17] != 0, le32(h, 20), le32(h, 24));
+    if w <= 0 || hh <= 0 || px.len() < (w * hh * 4) as usize {
+        return;
+    }
+    let Some(e) = entry(st(), hps) else { return };
+    let d = e.ps.world_rect_to_device(gpi::Rect::new(le32(h, 0), le32(h, 4), le32(h, 8), le32(h, 12)));
+    let t = gpi::Rect::new(d.left, d.bottom, d.right + 1, d.top + 1);
+    let v: Vec<Option<u32>> = px.chunks(4).take((w * hh) as usize).map(|c| (c[3] != 0).then(|| (c[0] as u32) << 16 | (c[1] as u32) << 8 | c[2] as u32)).collect();
+    crate::gpiobj::blit_samples(hps, t, rop, mono, (w, hh), &v);
 }
 
 /// GpiImage(hps, lFormat, psizlImageSize, lLength, pbData): a 1 bpp image

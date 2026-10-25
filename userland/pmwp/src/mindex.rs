@@ -82,7 +82,7 @@ fn wins() -> &'static mut Vec<IndexWin> {
     unsafe { &mut WINS }
 }
 
-fn read_all(path: &[u8]) -> Option<Vec<u8>> {
+pub(crate) fn read_all(path: &[u8]) -> Option<Vec<u8>> {
     let p = z(path);
     let (mut hf, mut act) = (0u32, 0u32);
     // Read only, deny write.

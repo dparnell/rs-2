@@ -114,9 +114,14 @@ pub const PU_TWIPS: u32 = 0x1c;
 /// Display resolution in pels per metre (96 dpi).
 pub const PELS_PER_METRE: i32 = 3780;
 
-/// Device pels per page unit.
+/// Device pels per page unit (on the display).
 pub fn page_unit_scale(units: u32) -> f64 {
-    let ppm = PELS_PER_METRE as f64;
+    page_unit_scale_at(units, PELS_PER_METRE)
+}
+
+/// Device pels per page unit on a device of `ppm` pels per metre.
+pub fn page_unit_scale_at(units: u32, ppm: i32) -> f64 {
+    let ppm = ppm as f64;
     match units {
         PU_LOMETRIC => ppm / 10_000.0,
         PU_HIMETRIC => ppm / 100_000.0,

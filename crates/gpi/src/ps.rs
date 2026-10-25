@@ -22,6 +22,7 @@ use crate::color::{ColorTable, Rgb, CLR_BACKGROUND, CLR_DEFAULT};
 use crate::font::{self, Font};
 use crate::math::{abs, fx, round, sqrt, PI};
 use crate::pattern::{self, Pattern};
+use crate::psdev::{Face, GlyphRun, Paint, Sink};
 use crate::raster::{self, ipt, Pf};
 use crate::rect::{Point, Rect};
 use crate::region::{Op, Region};
@@ -304,6 +305,13 @@ pub struct Ps {
     pub collect_bounds: bool,
     /// DCTL_DISPLAY off: draw nothing (bounds are still collected).
     pub display: bool,
+    /// A vector device (a printer) the drawing goes to instead of pels.
+    pub sink: core::cell::RefCell<Option<alloc::boxed::Box<dyn Sink>>>,
+    /// The device's default font (printers: an outline font), which
+    /// resets restore instead of the system font.
+    pub device_font: Option<&'static Font>,
+    /// The device's resolution (pels per metre) for page units.
+    pub device_ppm: i32,
 }
 
 impl Ps {
@@ -342,7 +350,80 @@ impl Ps {
             bounds: None,
             collect_bounds: false,
             display: true,
+            sink: core::cell::RefCell::new(None),
+            device_font: None,
+            device_ppm: xform::PELS_PER_METRE,
         }
+    }
+
+    /// Whether drawing goes to a vector device.
+    pub fn is_vector(&self) -> bool {
+        self.sink.borrow().is_some()
+    }
+
+    /// Run `f` on the vector device, if there is one.
+    fn vector(&self, f: impl FnOnce(&mut dyn Sink, &[Rect])) -> bool {
+        let mut b = self.sink.borrow_mut();
+        match b.as_mut() {
+            Some(k) => {
+                if self.display {
+                    f(&mut **k, &self.clip);
+                }
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Make `f` the device's default font (an outline font when
+    /// `outline`): the current font now and after resets.
+    pub fn set_device_font(&mut self, f: &'static Font, outline: bool) {
+        self.device_font = Some(f);
+        self.font = f;
+        self.logfont = LogFont { outline, ..LogFont::default() };
+        let b = (f.width << 16, f.height << 16);
+        self.attrs.char_box = b;
+        self.defaults.char_box = b;
+    }
+
+    /// A colour mixed onto white paper (vector devices have no pels to
+    /// mix with).
+    fn on_paper(m: Mix, c: Rgb) -> Option<Rgb> {
+        match m {
+            Mix::LeaveAlone => None,
+            Mix::Overpaint => Some(c),
+            m => Some(m.apply(0xffffff, c)),
+        }
+    }
+
+    /// The vector paint for a bundle (`solid` ignores the pattern).
+    fn vector_paint(&self, b: &Bundle, solid: bool) -> Option<Paint> {
+        let (fg, mix, bg, bmix) = self.resolve(b);
+        let fg = Self::on_paper(mix, fg)?;
+        let fill = if solid { Fill::Bits([0xff; 8]) } else { self.fill_source() };
+        let org = (self.attrs.pattern_ref.x + self.origin.x, self.attrs.pattern_ref.y + self.origin.y);
+        Some(match fill {
+            Fill::Bits(p) if p == [0xff; 8] => Paint::Solid(fg),
+            Fill::Bits(p) if p == [0; 8] => match Self::on_paper(bmix, bg) {
+                Some(c) => Paint::Solid(c),
+                None => return None,
+            },
+            Fill::Bits(p) => Paint::Pattern { bits: p, fg, bg: Self::on_paper(bmix, bg), org },
+            Fill::Colors(c) => Paint::Colors { cells: c, org },
+        })
+    }
+
+    /// Device figures to surface coordinates.
+    fn to_surface(&self, figs: &[Vec<Pf>]) -> Vec<Vec<Pf>> {
+        let (ox, oy) = (self.origin.x as f64, self.origin.y as f64);
+        figs.iter().map(|f| f.iter().map(|&(x, y)| (x + ox, y + oy)).collect()).collect()
+    }
+
+    /// Fill device figures on the vector device.
+    fn vector_fill(&self, figs: &[Vec<Pf>], winding: bool, b: &Bundle, solid: bool) {
+        let Some(p) = self.vector_paint(b, solid) else { return };
+        let figs = self.to_surface(figs);
+        self.vector(|k, clip| k.fill(clip, &figs, winding, &p));
     }
 
     // ---- Simple drawing for the window manager ----
@@ -354,6 +435,9 @@ impl Ps {
     /// Fill a page rectangle with a colour (overpaint).
     pub fn fill_rect(&self, s: &mut Surface, r: Rect, c: Rgb) {
         let d = self.device(r);
+        if self.vector(|k, clip| k.rects(clip, &[d], &Paint::Solid(c))) {
+            return;
+        }
         for cr in &self.clip {
             s.fill(d.intersect(cr), c);
         }
@@ -364,6 +448,11 @@ impl Ps {
         let (dx, dy) = (x + self.origin.x, y + self.origin.y);
         let p = Point::new(dx, dy);
         if !self.clip.iter().any(|r| r.contains(p)) {
+            return;
+        }
+        if let Some(c) = Self::on_paper(mix, c)
+            && self.vector(|k, clip| k.rects(clip, &[Rect::new(dx, dy, dx + 1, dy + 1)], &Paint::Solid(c)))
+        {
             return;
         }
         match mix {
@@ -550,7 +639,7 @@ impl Ps {
     pub fn set_page(&mut self, units: u32, size: (i32, i32)) {
         self.page_units = units;
         self.page_size = size;
-        let k = xform::page_unit_scale(units);
+        let k = xform::page_unit_scale_at(units, self.device_ppm);
         self.page = Matrix::scale(k, k);
         self.update_xf();
     }
@@ -707,6 +796,10 @@ impl Ps {
             self.pattern_bitmap = None;
             self.logfont = LogFont::default();
             self.font = font::system();
+            if let Some(f) = self.device_font {
+                let outline = f.source.is_some();
+                self.set_device_font(f, outline);
+            }
             self.refresh_clip();
         }
         self.sync_simple();
@@ -735,6 +828,15 @@ impl Ps {
     pub fn paint(&mut self, s: &mut Surface, g: &Region, b: Bundle, solid: bool) {
         self.note_bounds(g.bounds());
         if !self.display {
+            return;
+        }
+        if self.is_vector() {
+            if let Some(p) = self.vector_paint(&b, solid) {
+                let mut dr = g.clone();
+                dr.offset(self.origin.x, self.origin.y);
+                let rects = dr.rects();
+                self.vector(|k, clip| k.rects(clip, &rects, &p));
+            }
             return;
         }
         let (fg, mix, bg, bmix) = self.resolve(&b);
@@ -784,6 +886,25 @@ impl Ps {
             w if w <= 0 => 1,
             w => round(fx(w)).max(1),
         };
+        if self.is_vector() {
+            let mut lo = (f64::MAX, f64::MAX);
+            let mut hi = (f64::MIN, f64::MIN);
+            for &(x, y) in pts {
+                lo = (lo.0.min(x), lo.1.min(y));
+                hi = (hi.0.max(x), hi.1.max(y));
+            }
+            self.note_bounds(Rect::new(round(lo.0), round(lo.1), round(hi.0) + 1, round(hi.1) + 1));
+            if let Some(c) = Self::on_paper(mix, fg) {
+                // Line types are made for the display's pels: as long on
+                // paper as on the screen.
+                let k = (self.device_ppm as f64 / xform::PELS_PER_METRE as f64).max(1.0);
+                let dash: Vec<f64> = pattern::line_dashes(lt).map(|d| d.iter().map(|&x| x as f64 * k).collect()).unwrap_or_default();
+                let v = self.to_surface(core::slice::from_ref(&pts.to_vec())).remove(0);
+                self.vector(|k, clip| k.stroke(clip, &v, closed, w as f64, c, &dash));
+            }
+            let _ = (bg, bmix);
+            return;
+        }
         let n = pts.len();
         let segs = if closed && n > 2 { n } else { n.saturating_sub(1) };
         // Steps are only visited inside the clip (widened by the pen), so
@@ -897,9 +1018,13 @@ impl Ps {
             return;
         }
         if ctl & DRO_FILL != 0 {
-            let g = raster::fill_region(&[pts.clone()], false, true);
             let b = self.attrs.area;
-            self.paint(s, &g, b, false);
+            if self.is_vector() {
+                self.vector_fill(core::slice::from_ref(&pts), false, &b, false);
+            } else {
+                let g = raster::fill_region(&[pts.clone()], false, true);
+                self.paint(s, &g, b, false);
+            }
         }
         if ctl & DRO_OUTLINE != 0 || ctl & 3 == 0 {
             self.style_pos = 0;
@@ -1115,9 +1240,13 @@ impl Ps {
         self.build = Build::None;
         let figs = core::mem::take(&mut self.figs);
         let polys: Vec<Vec<Pf>> = figs.iter().map(|f| f.pts.clone()).collect();
-        let g = raster::fill_region(&polys, flags & BA_WINDING != 0, flags & BA_EXCL == 0);
         let b = self.attrs.area;
-        self.paint(s, &g, b, false);
+        if self.is_vector() {
+            self.vector_fill(&polys, flags & BA_WINDING != 0, &b, false);
+        } else {
+            let g = raster::fill_region(&polys, flags & BA_WINDING != 0, flags & BA_EXCL == 0);
+            self.paint(s, &g, b, false);
+        }
         if flags & BA_BOUNDARY != 0 {
             for f in &polys {
                 self.style_pos = 0;
@@ -1174,6 +1303,13 @@ impl Ps {
 
     /// GpiFillPath (FPATH_WINDING 2, FPATH_EXCL 8).
     pub fn fill_path(&mut self, s: &mut Surface, opts: i32) -> bool {
+        if self.is_vector() {
+            let Some(p) = self.path.take() else { return false };
+            let polys: Vec<Vec<Pf>> = p.into_iter().map(|f| f.pts).collect();
+            let b = self.attrs.area;
+            self.vector_fill(&polys, opts & 2 != 0, &b, false);
+            return true;
+        }
         let Some(g) = self.path_region(opts & 2 != 0, opts & 8 == 0) else { return false };
         let b = self.attrs.area;
         self.paint(s, &g, b, false);
@@ -1205,6 +1341,11 @@ impl Ps {
         let mut polys = Vec::new();
         for f in &p {
             raster::wide_stroke(&f.pts, f.closed, w, &mut polys);
+        }
+        if self.is_vector() {
+            let b = self.attrs.line;
+            self.vector_fill(&polys, true, &b, true);
+            return true;
         }
         let g = raster::fill_region(&polys, true, false);
         let b = self.attrs.line;
@@ -1332,6 +1473,17 @@ impl Ps {
                 }
                 x += adv[i];
             }
+        } else if self.is_vector() {
+            self.note_bounds(text_rect);
+            let back = if opaque {
+                Some(rect.map_or(text_rect, |r| {
+                    let d = self.world_rect_to_device(r);
+                    Rect::new(d.left, d.bottom, d.right + 1, d.top + 1)
+                }))
+            } else {
+                None
+            };
+            self.vector_text(text, &adv, start, f, (sx, sy), (fg, mix, bg, bmix), back, text_rect, total);
         } else {
             self.note_bounds(text_rect);
             if self.display {
@@ -1406,6 +1558,58 @@ impl Ps {
             self.clip = c;
         }
         self.pos = self.world((start.0 + total, start.1));
+    }
+
+    /// Text on a vector device: the background (`back`: the opaque
+    /// rectangle, device), then the glyphs as one run of the face the
+    /// GPI draws with, at the GPI's advances `adv`.
+    #[allow(clippy::too_many_arguments)]
+    fn vector_text(&self, text: &[u8], adv: &[f64], start: Pf, f: &'static Font, scale: (f64, f64), colors: (Rgb, Mix, Rgb, Mix), back: Option<Rect>, text_rect: Rect, total: f64) {
+        let (fg, mix, bg, bmix) = colors;
+        let (sx, sy) = scale;
+        let (ox, oy) = (self.origin.x as f64, self.origin.y as f64);
+        let at = |r: Rect| r.offset(self.origin.x, self.origin.y);
+        match back {
+            Some(r) => {
+                self.vector(|k, clip| k.rects(clip, &[at(r)], &Paint::Solid(bg)));
+            }
+            None => {
+                if let Some(c) = Self::on_paper(bmix, bg) {
+                    self.vector(|k, clip| k.rects(clip, &[at(text_rect)], &Paint::Solid(c)));
+                }
+            }
+        }
+        let Some(color) = Self::on_paper(mix, fg) else { return };
+        let slant = self.slant();
+        let lf = self.logfont;
+        let (face, matrix, em) = match f.source {
+            Some(src) if f.em > 0 => {
+                let em = f.em as f64;
+                let s = src.outlines.scale_for(em);
+                let extra = if lf.bold { em / 40.0 } else { 0.0 };
+                (Face::Outline { outlines: src.outlines, bold: (src.bold * em + extra) / s }, [s * sx, 0.0, slant * s * sy, s * sy], em * sy)
+            }
+            _ => (Face::Image(f), [sx, 0.0, slant * sy, sy], f.height as f64 * sy),
+        };
+        let mut xs = Vec::with_capacity(text.len());
+        let mut x = start.0 + ox;
+        for a in adv {
+            xs.push(x);
+            x += a;
+        }
+        let y = start.1 + oy;
+        self.vector(|k, clip| {
+            k.glyphs(clip, &GlyphRun { face, codes: text, xs: &xs, y, matrix, color });
+            if lf.bold && matches!(face, Face::Image(_)) {
+                let xs1: Vec<f64> = xs.iter().map(|x| x + 1.0).collect();
+                k.glyphs(clip, &GlyphRun { face, codes: text, xs: &xs1, y, matrix, color });
+            }
+            if lf.underscore {
+                let t = round(em / 18.0).max(1);
+                let y0 = round(y) - 1 - t;
+                k.rects(clip, &[Rect::new(round(start.0 + ox), y0, round(start.0 + ox + total), y0 + t)], &Paint::Solid(color));
+            }
+        });
     }
 
     /// GpiQueryTextBox: corners relative to the start point (world):
@@ -1488,6 +1692,60 @@ impl Ps {
         let org = (pref.x + self.origin.x, pref.y + self.origin.y);
         let dt = t.offset(self.origin.x, self.origin.y);
         let uses_p = bitmap::rop_uses_pattern(rop);
+        if self.is_vector() {
+            // The result over white paper; samples the ROP leaves alone
+            // (the same over white and black) are transparent. The source
+            // may have fewer samples than the target has pels.
+            let (w, h) = src.map_or((1, 1), |(_, w, h)| (w.max(1), h.max(1)));
+            let mut px = Vec::with_capacity((w * h) as usize);
+            for j in 0..h {
+                for i in 0..w {
+                    let sv = match src {
+                        Some((v, _, _)) => match v.get((j * w + i) as usize).copied().flatten() {
+                            Some(v) => {
+                                let v = if mono_src { if v & 0x808080 != 0 { ifg } else { ibg } } else { v };
+                                match mono_dst {
+                                    Some(back) => if v == back { 0 } else { 0xffffff },
+                                    None => v,
+                                }
+                            }
+                            None => {
+                                px.push(None);
+                                continue;
+                            }
+                        },
+                        None => 0,
+                    };
+                    let pv = if !uses_p {
+                        0
+                    } else {
+                        // The pattern at the sample's device position.
+                        let (x, y) = (dt.left + i * dt.width() / w, dt.bottom + j * dt.height() / h);
+                        match &fill {
+                            Fill::Bits(p) => if pattern::bit(p, x, y, org) { pfg } else { pbg },
+                            Fill::Colors(c) => {
+                                let (a, b) = ((x - org.0).rem_euclid(8) as usize, 7 - (y - org.1).rem_euclid(8) as usize);
+                                c[b * 8 + a]
+                            }
+                        }
+                    };
+                    let on_white = bitmap::rop3(rop, pv, sv, 0xffffff);
+                    let on_black = bitmap::rop3(rop, pv, sv, 0);
+                    px.push(if on_white == 0xffffff && on_black == 0 { None } else { Some(on_white) });
+                }
+            }
+            if src.is_none() {
+                // No source: the pattern (PATCOPY...) or one colour
+                // (BLACKNESS, WHITENESS) over the area.
+                let paint = if uses_p && rop == 0xf0 { self.vector_paint(&self.attrs.area, false) } else { px.first().copied().flatten().map(Paint::Solid) };
+                if let Some(p) = paint {
+                    self.vector(|k, clip| k.rects(clip, &[dt], &p));
+                }
+                return;
+            }
+            self.vector(|k, clip| k.image(clip, dt, w, h, &px));
+            return;
+        }
         for c in &self.clip {
             let r = dt.intersect(c).intersect(&s.bounds());
             if r.is_empty() {
@@ -1920,5 +2178,74 @@ mod clip_tests {
         ps.gpi_line(&mut s, Point::new(99, 20));
         assert_eq!(s.get(70, 70), Some(0));
         assert_eq!(s.get(55, 70), Some(0xffffff));
+    }
+}
+
+#[cfg(test)]
+mod vector_tests {
+    use super::*;
+    use crate::psdev::PsWriter;
+    use alloc::string::String;
+    use alloc::vec;
+
+    fn printer() -> Ps {
+        let ps = Ps::new(Point::new(0, 0), vec![Rect::new(0, 0, 2550, 3300)]);
+        *ps.sink.borrow_mut() = Some(alloc::boxed::Box::new(PsWriter::new(300, (612, 792), false)));
+        ps
+    }
+
+    fn output(ps: &Ps) -> String {
+        let mut b = ps.sink.borrow_mut();
+        let w = b.as_mut().unwrap().as_any().downcast_mut::<PsWriter>().unwrap();
+        w.end_doc();
+        String::from_utf8(w.take()).unwrap()
+    }
+
+    #[test]
+    fn shapes_lines_and_text_become_postscript() {
+        let mut ps = printer();
+        let mut s = unsafe { Surface::new(core::ptr::null_mut(), 0, 0, 0, false) };
+        ps.gpi_move(Point::new(100, 100));
+        ps.gpi_box(&mut s, DRO_FILL, Point::new(500, 400), 0, 0);
+        ps.attrs.line.color = crate::color::CLR_RED;
+        ps.gpi_move(Point::new(0, 0));
+        ps.gpi_line(&mut s, Point::new(1000, 1000));
+        ps.gpi_text(&mut s, Point::new(200, 2000), b"Hi", None, None, false, false);
+        let t = output(&ps);
+        assert!(t.contains("n 100 100 m 500 100 l 500 400 l 100 400 l h\nef\n"), "{t}");
+        assert!(t.contains("1 0 0 rg\n1 w\n[] 0 d\nn 0 0 m 1000 1000 l\ns\n"), "{t}");
+        // An image font: a Type 3 font with imagemask glyphs, shown with
+        // xshow at the font's advances.
+        assert!(t.contains("G1 /g72 {0 0 setcharwidth"), "{t}");
+        assert!(t.contains("imagemask"));
+        assert!(t.contains("200 2000 m (Hi) ["), "{t}");
+        assert!(t.contains("] xshow\n"));
+    }
+
+    #[test]
+    fn areas_and_patterns() {
+        let mut ps = printer();
+        let mut s = unsafe { Surface::new(core::ptr::null_mut(), 0, 0, 0, false) };
+        ps.attrs.pattern = 7; // PATSYM_HALFTONE
+        ps.begin_area(BA_WINDING);
+        ps.gpi_move(Point::new(10, 10));
+        ps.gpi_polyline(&mut s, &[Point::new(100, 10), Point::new(55, 90)]);
+        ps.end_area(&mut s);
+        let t = output(&ps);
+        assert!(t.contains("makepattern"), "{t}");
+        assert!(t.contains("n 10 10 m 100 10 l 55 90 l h\nf gr\n"), "{t}");
+    }
+
+    #[test]
+    fn mixes_go_onto_white_paper() {
+        let mut ps = printer();
+        let mut s = unsafe { Surface::new(core::ptr::null_mut(), 0, 0, 0, false) };
+        ps.attrs.area.mix = 4; // FM_XOR: black on white prints black
+        ps.gpi_move(Point::new(0, 0));
+        ps.gpi_box(&mut s, DRO_FILL, Point::new(10, 10), 0, 0);
+        ps.attrs.area.mix = 5; // FM_LEAVEALONE
+        ps.gpi_box(&mut s, DRO_FILL, Point::new(20, 20), 0, 0);
+        let t = output(&ps);
+        assert_eq!(t.matches(" h\nef\n").count(), 1, "{t}");
     }
 }

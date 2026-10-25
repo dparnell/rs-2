@@ -202,8 +202,10 @@ pub fn wm_checks(hab: u32, hmq: u32, client: u32, other: u32) {
         let mut qi = [0u32; 5];
         check("WinQueryQueueInfo", WinQueryQueueInfo(hmq, qi.as_mut_ptr(), 20) != 0 && qi[0] == 20 && qi[2] == 1);
         let (mut ret, mut total, mut need) = (9, 9, 9);
+        // The spooler's queues (PRNTEST checks them): with no buffer,
+        // ERROR_MORE_DATA and the size needed.
         let rc = SplEnumQueue(null(), 3, null_mut(), 0, &mut ret, &mut total, &mut need, 0);
-        check("SplEnumQueue: no printer queues", rc == 0 && ret == 0 && total == 0 && need == 0);
+        check("SplEnumQueue without a buffer: the size of the queues", rc == 234 && ret == 0 && total >= 1 && need >= 44);
         WinGetLastError(hab);
         check("GpiCopyMetaFile of a bad handle: PMERR_INV_HMF", GpiCopyMetaFile(0x1234) == 0 && WinGetLastError(hab) & 0xffff == 0x207e);
         check("SplQueryQueue: NERR_QNotFound", SplQueryQueue(null(), b"LPT1Q\0".as_ptr(), 3, null_mut(), 0, &mut need) == 2150);

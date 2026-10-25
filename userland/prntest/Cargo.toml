@@ -1,0 +1,9 @@
+[package]
+name = "prntest"
+description = "Exercises printing: the spooler calls (PMSPL), queued and direct printer DCs, the PostScript the driver writes"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

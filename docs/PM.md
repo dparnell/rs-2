@@ -34,7 +34,8 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmgpi` → PMGPI.DLL | Exports (`Gpi*`, `Dev*`) as forwarders to PMWIN, which implements them at ordinal 4000 + the PMGPI ordinal, since presentation spaces belong to windows. |
 | `userland/pmctls` → PMCTLS.DLL | The standard file and font dialogs (`WinFileDlg`, `WinFontDlg`): ordinary PM dialogs, built from templates made in memory, run through PMWIN like an application's. |
 | `userland/pmwp` → PMWP.DLL | The Workplace Shell calls programs use without it: `WinLoadFileIcon`, `WinSetFileIcon`, `WinFreeFileIcon`, forwarded to PMWIN (rs2-private ordinals 9004-9006); `WinStoreWindowPos`/`WinRestoreWindowPos`; `WinCreateObject` for program objects. |
-| `userland/pmspl` → PMSPL.DLL | The spooler API (`Spl*`) of a system without printers (see [Status](#status)). |
+| `userland/pmspl` → PMSPL.DLL | The spooler: queues, printers, ports and jobs, the `Spl*` and `Prt*` calls ([PRINTING.md](PRINTING.md)). |
+| `userland/pmspool` → PMSPOOL.EXE, `userland/pmprint` → PMPRINT.QPR | The spooler process and the queue processor ([PRINTING.md](PRINTING.md)). |
 | `userland/registry` → REGISTRY.DLL, `userland/pmwinx` → PMWINX.DLL | The registry (Win32 registry calls) and Open32's forwarders to it (see [Open32 and the registry](#open32-and-the-registry-pmwinx-registry)). |
 | `userland/pmbidi` → PMBIDI.DLL, `userland/thailib` → THAILIB.DLL | Bidirectional language support of a system without bidirectional code pages (see [Bidirectional languages](#bidirectional-languages-pmbidi)). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
@@ -622,11 +623,14 @@ mouse and keyboard. What PMWIN has:
   (`crates/pmwin/src/winpos.rs`), scaled when the screen size changed;
   presentation parameters are not stored, and those of a record OS/2
   wrote are skipped.
-- PMSPL.DLL is the spooler API of a system without printers: queue,
-  device, job, driver and port lists are empty, named ones are "not
-  found" (`NERR_QNotFound` etc.), `SplQmOpen` fails. Programs that look
-  for printers at start (EPM, the system log viewer, MarkVision, the
-  printer utilities) load and say there are none.
+- Printing: PMSPL.DLL is a spooler (queues, printers, ports, jobs in
+  `\SPOOL`), PMSPOOL.EXE runs it, PMPRINT.QPR prints jobs, and PMWIN's
+  GRE has a PostScript printer driver (`DevOpenDC` with `OD_QUEUED`,
+  `OD_DIRECT` and `OD_INFO` for a queue or printer, the print escapes,
+  `DevQueryCaps`, `DevQueryHardcopyCaps`, `DevQueryDeviceNames`,
+  `DevPostDeviceModes` with a job properties dialog; presentation
+  spaces on a printer DC draw through `gpi::psdev`). See
+  [PRINTING.md](PRINTING.md).
 - Metafiles and retained segments: see [Metafiles and
   segments](#metafiles-and-segments).
 - `WinSetClipbrdViewer` sends the new viewer `WM_DRAWCLIPBOARD` at once
@@ -771,7 +775,7 @@ The GPI covers:
   them), `WinBeginEnumWindows`/`WinGetNextWindow`/`WinEndEnumWindows`,
   `WinQueryClassName`. Timers run at most at the 31 ms clock rate.
 
-Not done: printing (no printer DCs), rotated or sheared text, real
+Not done: rotated or sheared text, real
 outline fonts, line ends, joins and mitre limits, `GpiPolygons` and
 `GpiCreatePolygonRegion`.
 
@@ -1843,7 +1847,9 @@ and templates are rs2's own. IBM's E runs as well (see
   was (OS2.INI `WINDOWPOSITION`, written on exit), else where the shell
   puts programs (WinQueryTaskSizePos).
 - **Menus** with E's ids (File 0x400: New 0x402, Open 0x401, Save 0x403,
-  Save as 0x404, Autosave 0x406; Edit 0x410: Undo 0x411, Cut 0x422, Copy
+  Save as 0x404, Autosave 0x406, and rs2's own Print 0x405: the text on
+  the default printer, after asking, in Courier 10 points through a
+  queued DC, `e/src/print.rs`; Edit 0x410: Undo 0x411, Cut 0x422, Copy
   0x423, Paste 0x424, Clear 0x425, Find 0x426, Select all 0x427; Options
   0x428: Set font 0x42a, Set colors 0x42b, Word wrap 0x42c with On 0x433
   and Off 0x434; Help 0x42d: Help index 0x42f, General help 0x431, Using
@@ -2067,7 +2073,9 @@ when IPF_KEYS has its key.
 
 **The menu bar** is IBM's (HPMGRMRI.DLL's menu 101 for help windows, 102
 for books, with their keys; `userland/helpmgr/src/services.rs`):
-Services has Search, Print (disabled: no printers), Bookmark (books),
+Services has Search, Print (this section, all sections or the
+contents on the default printer, `print.rs`; disabled without a
+printer), Bookmark (books),
 New window (the panel in a window of its own), Copy (the panel's text
 to the clipboard, words placed by columns as IBM's LoadMarkedText),
 Copy to file and Append to file (`text.tmp` in the current directory,
@@ -2176,7 +2184,7 @@ their own when less than 64 KB of the caller's is left (VIEWDOC's
 stack is 8 KB). HELPMGR's other unpublished ordinals (38-44: MscCleanUp
 and path helpers) are not there; nothing on the media imports them.
 
-Not done: printing, the Search dialog's scopes (rs2 searches every
+Not done: the Search dialog's scopes (rs2 searches every
 section of the open libraries and of the marked ones), metafiles of
 dynamic data,
 the viewport style word (title bar, scroll bars, rules: viewports always

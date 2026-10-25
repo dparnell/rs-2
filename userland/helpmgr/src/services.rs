@@ -3,7 +3,8 @@
 //! for help windows, 102 for books, dialog 20001 Bookmark; strings 6001
 //! on):
 //!
-//! - Services: Search, Print (no printers: disabled), Bookmark (books),
+//! - Services: Search, Print (print.rs; disabled without a printer),
+//!   Bookmark (books),
 //!   New window, Copy (the panel's text to the clipboard), Copy to file
 //!   and Append to file (`text.tmp` in the current directory, as IBM's
 //!   WriteToFile), Exit (books).
@@ -119,7 +120,9 @@ fn template(items: &[M]) -> Vec<u8> {
 
 /// IBM's menu 101 (help windows) or 102 (books).
 fn menu(book: bool) -> Vec<M> {
-    let mut services = vec![M::Item(IDM_SEARCH, b"~Search...\tCtrl+S", 0), M::Item(IDM_PRINT, b"~Print...", MIA_DISABLED)];
+    // Print needs a printer (print.rs).
+    let print = if crate::print::default_printer().is_some() { 0 } else { MIA_DISABLED };
+    let mut services = vec![M::Item(IDM_SEARCH, b"~Search...\tCtrl+S", 0), M::Item(IDM_PRINT, b"~Print...", print)];
     if book {
         services.push(M::Item(IDM_BOOKMARK, b"~Bookmark...\tCtrl+B", 0));
     }
@@ -475,11 +478,11 @@ const MBID_CANCEL: u32 = 2;
 
 /// One control of a dialog template: class (WC_* number), text, style,
 /// position and size (dialog units), id.
-struct Ctl(u16, &'static [u8], u32, [i16; 4], u16);
+pub(crate) struct Ctl(pub u16, pub &'static [u8], pub u32, pub [i16; 4], pub u16);
 
 /// A dialog template (as `parse_dialog` reads it): the frame, then its
 /// controls; FCF flags as the frame's control data.
-fn dialog(title: &[u8], frame: Ctl, fcf: u32, ctls: &[Ctl]) -> Vec<u8> {
+pub(crate) fn dialog(title: &[u8], frame: Ctl, fcf: u32, ctls: &[Ctl]) -> Vec<u8> {
     let n = ctls.len() + 1;
     let head = 14;
     let mut b = vec![0u8; head + 30 * n];

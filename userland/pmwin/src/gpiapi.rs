@@ -235,10 +235,15 @@ pub fn refresh(s: &mut State, hps: u32) {
 pub enum Target {
     Screen,
     Bitmap(u32),
+    /// A printer DC's vector device.
+    Printer(u32),
     Nowhere,
 }
 
 pub fn target(e: &PsEntry) -> Target {
+    if e.hwnd == 0 && !e.gpi.memory && e.gpi.hdc != 0 && gpiobj::draws_vectors(e.gpi.hdc) {
+        return Target::Printer(e.gpi.hdc);
+    }
     if e.gpi.memory {
         if e.gpi.bitmap != 0 { Target::Bitmap(e.gpi.bitmap) } else { Target::Nowhere }
     } else if e.hwnd != 0 {
@@ -270,6 +275,18 @@ pub fn draw<R>(hps: u32, f: impl FnOnce(&mut PsEntry, &mut Surface) -> R) -> Opt
         Target::Bitmap(h) => {
             let mut surface = gpiobj::bitmap_surface(h).unwrap_or_else(null_surface);
             entry(s, hps).map(|e| f(e, &mut surface))
+        }
+        Target::Printer(hdc) => {
+            let mut surface = null_surface();
+            let k = gpiobj::take_sink(hdc);
+            let e = entry(s, hps)?;
+            *e.ps.sink.borrow_mut() = k;
+            let r = f(e, &mut surface);
+            let k = entry(st(), hps).and_then(|e| e.ps.sink.borrow_mut().take());
+            if let Some(k) = k {
+                gpiobj::put_sink(hdc, k);
+            }
+            Some(r)
         }
         Target::Nowhere => {
             let mut surface = null_surface();
@@ -379,6 +396,7 @@ pub extern "C" fn GpiAssociate(hps: u32, hdc: u32) -> u32 {
         e.gpi.seg.meta_dc = 0;
         e.hwnd = 0;
         e.ps.set_vis(Point::new(0, 0), Vec::new());
+        gpiobj::leave_printer(e);
         return 1;
     }
     gpiobj::associate(hps, hdc) as u32
@@ -1178,7 +1196,8 @@ pub extern "C" fn GpiErase(hps: u32) -> u32 {
             s.desk.get(h).map_or(Rect::default(), |w| w.rect())
         }
         Target::Bitmap(b) => gpiobj::bitmap_size(b).map_or(Rect::default(), |(w, h)| Rect::new(0, 0, w, h)),
-        Target::Nowhere => Rect::default(),
+        // Paper is blank already.
+        Target::Nowhere | Target::Printer(_) => Rect::default(),
     };
     draw(hps, |e, surf| e.ps.erase(surf, r)).map_or(0, |_| 1)
 }

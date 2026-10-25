@@ -340,7 +340,8 @@ Status markers: done, in progress, planned.
 - done (help): IBM's help window menu bar (copying a panel, viewed
   pages, expanding and collapsing the contents), the library list
   (marked libraries searched), bookmarks for books (kept in `NAME.cp`)
-- planned (help): printing, metafiles in dynamic data, viewport styles
+- done (help): Services > Print (docs/PRINTING.md)
+- planned (help): metafiles in dynamic data, viewport styles
 - done: PMWIN hooks as IBM's PMWIN calls them (send, input, message
   filter, journal record and playback, loader, the rest; system hooks
   in every process), DDE (WinDdeInitiate/PostMsg/Respond with another
@@ -394,9 +395,25 @@ Status markers: done, in progress, planned.
   (Network folder, Printers with shell-side printer objects), objects'
   use lists; the Toolkit's wpstutor.dll registered in the running shell
   and working (docs/WPS.md)
-- planned: printing (a spooler and printer drivers), network groups (a
+- done: printing (docs/PRINTING.md): the spooler, the PostScript
+  driver, printer objects
+- planned: network groups (a
   LAN requester), the rest of WPCONFIG (docs/WPS.md, "What is not
   there")
+
+## Printing (done: first version)
+
+- done: design (docs/PRINTING.md); PMSPL as a spooler (queues, printers,
+  ports, jobs in \SPOOL; the Spl*, SplQm* and Prt* calls), PMSPOOL.EXE,
+  PMPRINT.QPR (PM_Q_STD metafiles and PM_Q_RAW); a PostScript printer
+  driver in PMWIN's GRE (crates/gpi psdev: paths, patterns, images,
+  Type 3 fonts from rs2's fonts); ports FILE, LPT1-3 (the kernel drives
+  a parallel port), LPR and IPP; Workplace Shell printer objects (job
+  view, settings, new printers, printing files); Print in E, the help
+  manager; IBM's Picture Viewer prints; PRNTEST
+- planned: DOS and Win-OS/2 printing through LPT into the spooler,
+  EPM's formatted printing (its print loop waits), separator pages,
+  remote queues, compressed images (Flate), other printer languages
 
 ## DOS sessions (done: first version)
 

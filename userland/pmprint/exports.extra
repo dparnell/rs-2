@@ -1,0 +1,7 @@
+SPLQPOPEN=__a_SplQpOpen @12
+SPLQPCLOSE=__a_SplQpClose @13
+SPLQPPRINT=__a_SplQpPrint @14
+SPLQPCONTROL=__a_SplQpControl @9
+SPLQPQUERYDT=__a_SplQpQueryDt @10
+SPLQPQUERYFLAGS=__a_SplQpQueryFlags @11
+SPLQPPRINTSEPARATOR=__a_SplQpPrintSeparator @5

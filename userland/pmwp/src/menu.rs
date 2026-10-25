@@ -59,6 +59,8 @@ pub const WPMENUID_SHUTDOWN: u32 = 704;
 pub const WPMENUID_WINDOWLIST: u32 = 728;
 /// rs2's own: rename in place (handled by the view).
 pub const MENUID_RENAME: u32 = 0x6400;
+const WPMENUID_PRINT: u32 = 3;
+const CTXT_PRINT: u32 = 0x0020;
 
 const MM_INSERTITEM: u32 = 0x0180;
 const MM_QUERYITEM: u32 = 0x0182;
@@ -141,7 +143,7 @@ fn is(o: usize, c: &str) -> bool {
 /// wpDisplayMenu(hwndOwner, hwndClient, pptl, ulMenuType, ulReserved).
 extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const PointL, kind: u32, _res: u32) -> u32 {
     let all = CTXT_OPEN | CTXT_SETTINGS | CTXT_HELP | CTXT_DELETE | CTXT_COPY | CTXT_MOVE | CTXT_SHADOW | CTXT_PROGRAM | CTXT_ICON | CTXT_TREE
-        | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH | CTXT_SORT | CTXT_NEW | CTXT_FIND;
+        | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH | CTXT_SORT | CTXT_NEW | CTXT_FIND | CTXT_PRINT;
     let flags = obj::call(m::WPObject::wpFilterPopupMenu, &[o, all as usize, 0, 0]) as u32;
     let folder = is(o, "WPFolder");
     // A drive's views are its root folder's.
@@ -225,6 +227,10 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
         if flags & CTXT_DELETE != 0 {
             items.push(Menu::Item(WPMENUID_DELETE as u16, b"~Delete...", true));
         }
+        // Data files print on the default printer (printer.rs).
+        if flags & CTXT_PRINT != 0 && is(o, "WPDataFile") && !folder {
+            items.push(Menu::Item(WPMENUID_PRINT as u16, b"~Print", true));
+        }
     }
     let menu = popup_menu(&items);
     if menu == 0 {
@@ -254,6 +260,9 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
         WPMENUID_DETAILS => view_of(o, OPEN_DETAILS),
         WPMENUID_PROGRAM => view_of(o, OPEN_RUNNING),
         WPMENUID_REFRESH => view::refresh(o),
+        WPMENUID_PRINT => {
+            crate::printer::print_object(o);
+        }
         WPMENUID_SHUTDOWN => crate::shutdown::ask(),
         WPMENUID_WINDOWLIST => {
             post(HWND_DESKTOP, WM_RS2_WINLIST, 0, 0);

@@ -23,6 +23,7 @@ mod exports;
 mod help16;
 mod library;
 mod pm;
+mod print;
 mod render;
 mod services;
 mod stack;
