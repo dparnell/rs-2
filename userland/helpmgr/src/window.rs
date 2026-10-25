@@ -980,6 +980,7 @@ fn menu_command(v: &mut View, id: u16) {
             go(v, Mode::Search(q), true);
         }
         sv::IDM_BOOKMARK if inst.book => bookmarks(v),
+        sv::IDM_PRINT => print(v),
         sv::IDM_EXIT => {
             post(v.frame, WM_CLOSE, 0, 0);
         }
@@ -1016,6 +1017,54 @@ fn menu_command(v: &mut View, id: u16) {
             WinMessageBox(HWND_DESKTOP, v.frame, b"Information Presentation Facility\n\nrs2's help manager and book viewer.\0".as_ptr(), b"Product Information\0".as_ptr(), 0, 0x4000);
         },
         _ => {}
+    }
+}
+
+/// Services' Print: this section (the page as shown), all the
+/// library's sections, or its contents, on the default printer.
+fn print(v: &mut View) {
+    let inst = v.inst();
+    let Some((queue, descr)) = crate::print::default_printer() else { return };
+    let section = match (&v.mode, &v.page) {
+        (Mode::Panel(_), Some(page)) => Some((panel_title(inst, &v.mode), sv::page_text(page, crate::render::char_size().0))),
+        _ => None,
+    };
+    let what = crate::print::ask(v.frame, section.is_some(), if descr.is_empty() { &queue } else { &descr });
+    let lib = match v.mode {
+        Mode::Panel(p) => p.lib,
+        _ => 0,
+    };
+    let Some(l) = inst.libs.get(lib) else { return };
+    let doc = l.doc();
+    let count = doc.header.toc_count;
+    let mut sections: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    match what {
+        crate::print::WHAT_THIS => sections.extend(section),
+        crate::print::WHAT_ALL => {
+            for t in 0..count {
+                if let Ok(e) = doc.toc(t) {
+                    sections.push((e.title.clone(), ipf::text::plain(doc, t)));
+                }
+            }
+        }
+        crate::print::WHAT_CONTENTS => {
+            let mut text = Vec::new();
+            for t in 0..count {
+                if let Ok(e) = doc.toc(t)
+                    && !e.hidden()
+                {
+                    text.extend(core::iter::repeat_n(b' ', 4 * e.level().saturating_sub(1) as usize));
+                    text.extend_from_slice(&e.title);
+                    text.extend_from_slice(b"\r\n");
+                }
+            }
+            sections.push((b"Contents".to_vec(), text));
+        }
+        _ => return,
+    }
+    let name = if doc.title().is_empty() { b"Help".to_vec() } else { doc.title().to_vec() };
+    if !crate::print::print(&queue, &name, &sections) {
+        unsafe { WinMessageBox(HWND_DESKTOP, v.frame, b"The help could not be printed.\0".as_ptr(), b"Print\0".as_ptr(), 0, 0x4000 | 0x0040) };
     }
 }
 
