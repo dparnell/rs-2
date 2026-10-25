@@ -16,6 +16,10 @@
 #                                            TYPE: PROGTYPE (VDM: DOS full
 #                                            screen, WINDOWEDVDM: DOS
 #                                            window), PM when not given
+#   make TARGET | HOW | INPUT                a file made from an installed
+#                                            one after the files are in
+#                                            place (rs2disp: rs2's display
+#                                            driver from VGA.DRV)
 #   file TARGET | CD FILE [| STORED]         CD FILE: the packed file that
 #                                            holds TARGET, or TARGET itself;
 #                                            STORED: its path in the packed
@@ -329,14 +333,15 @@ object Write | \OS2\MDOS\WINOS2\WINOS2.COM | WRITE.EXE | \OS2\MDOS\WINOS2 | <RS2
 object Paintbrush | \OS2\MDOS\WINOS2\WINOS2.COM | PBRUSH.EXE | \OS2\MDOS\WINOS2 | <RS2_WPBRUSH> | | VDM
 object File Manager | \OS2\MDOS\WINOS2\WINOS2.COM | WINFILE.EXE | \OS2\MDOS\WINOS2 | <RS2_WWINFILE> | | VDM
 object Control Panel | \OS2\MDOS\WINOS2\WINOS2.COM | CONTROL.EXE | \OS2\MDOS\WINOS2 | <RS2_WCONTROL> | | VDM
-ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | display.drv | vga.drv
+make \OS2\MDOS\WINOS2\SYSTEM\RS2DISP.DRV | rs2disp | \OS2\MDOS\WINOS2\SYSTEM\VGA.DRV
+ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | display.drv | rs2disp.drv
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | sdisplay.drv | swinvga.drv
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | fonts.fon | vgasys.fon
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | fixedfon.fon | vgafix.fon
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | oemfonts.fon | vgaoem.fon
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | useos2shield | 0
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | keyboard | keyboard.dll |
-ini \OS2\MDOS\WINOS2\WIN.INI | Settings | display.drv | vga.drv
+ini \OS2\MDOS\WINOS2\WIN.INI | Settings | display.drv | rs2disp.drv
 file \OS2\MDOS\WINOS2\SYSTEM\OS2K386.EXE | OS2IMAGE\DISK_18\WINENVFP | \SYSTEM\OS2K386.EXE
 file \OS2\MDOS\WINOS2\SYSTEM\SWINVGA.DRV | OS2IMAGE\DISK_18\WINENVFP | \SYSTEM\SWINVGA.DRV
 file \OS2\MDOS\WINOS2\SYSTEM\WINSMSG.DLL | OS2IMAGE\DISK_18\WINENVFP | \SYSTEM\WINSMSG.DLL

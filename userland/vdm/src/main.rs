@@ -161,6 +161,8 @@ struct Os2Host {
     surf_size: (usize, usize),
     surf_pal: bool,
     surf_ptr_gen: u32,
+    /// The pointer's rectangle as last drawn on the full screen.
+    fs_ptr: Option<::dos::disp::Rect>,
     /// WINOS2_SCREEN=WxH: the size of a windowed Win-OS/2 desktop.
     display: Option<(u32, u32)>,
 }
@@ -305,18 +307,41 @@ impl Os2Host {
                 }
                 s.set(sf::SEQ, seq.wrapping_add(1));
             }
-            if rects.is_empty() {
+            // Where the pointer is drawn on the full screen.
+            let ptr = d.pointer.as_ref().map(|p| {
+                let (x, y) = (d.pointer_pos.0 - p.hot.0, d.pointer_pos.1 - p.hot.1);
+                ::dos::disp::Rect::new(x, y, x + p.w as i32, y + p.h as i32)
+            });
+            if rects.is_empty() && ptr == self.fs_ptr {
                 return;
             }
             if Rs2VdmSurface(2, 0, 0) == 1 {
                 // On the full screen: the rows that changed as the
-                // kernel's picture.
-                let y0 = rects.iter().map(|r| r.y0).min().unwrap_or(0).max(0) as usize;
-                let y1 = (rects.iter().map(|r| r.y1).max().unwrap_or(0).max(0) as usize).min(h);
+                // kernel's picture, with the pointer drawn in.
+                let mut rows: Vec<(i32, i32)> = rects.iter().map(|r| (r.y0, r.y1)).collect();
+                rows.extend(self.fs_ptr.iter().chain(ptr.iter()).map(|r| (r.y0, r.y1)));
+                let y0 = rows.iter().map(|r| r.0).min().unwrap_or(0).max(0) as usize;
+                let y1 = (rows.iter().map(|r| r.1).max().unwrap_or(0).max(0) as usize).min(h);
                 if y0 < y1 {
-                    Rs2VdmSetPixels(w as u32, h as u32, y0 as u32, (y1 - y0) as u32, d.pix[y0 * w..].as_ptr(), d.pal.as_ptr());
+                    let mut buf = d.pix[y0 * w..y1 * w].to_vec();
+                    if let (Some(p), Some(r)) = (&d.pointer, ptr) {
+                        for py in 0..p.h {
+                            for px in 0..p.w {
+                                let (x, y) = (r.x0 + px as i32, r.y0 + py as i32);
+                                if x < 0 || x >= w as i32 || (y as usize) < y0 || y as usize >= y1 || y < 0 {
+                                    continue;
+                                }
+                                let bit = |m: &[u8]| m[py * p.width_bytes + px / 8] >> (7 - px % 8) & 1 != 0;
+                                let o = (y as usize - y0) * w + x as usize;
+                                let v = if bit(&p.and) { buf[o] } else { 0 };
+                                buf[o] = if bit(&p.xor) { v ^ 0xff } else { v };
+                            }
+                        }
+                    }
+                    Rs2VdmSetPixels(w as u32, h as u32, y0 as u32, (y1 - y0) as u32, buf.as_ptr(), d.pal.as_ptr());
                 }
             }
+            self.fs_ptr = ptr;
         }
         self.last_text = None;
         self.last_pix = None;
@@ -666,7 +691,7 @@ fn main(s: &os2::Startup) -> u32 {
     unsafe { DosTmrQueryFreq(&mut freq) };
     let (mut cur, mut drives) = (0, 0);
     unsafe { DosQueryCurrentDisk(&mut cur, &mut drives) };
-    let mut host = Os2Host { sb_stream: (0, 0), pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, display };
+    let mut host = Os2Host { sb_stream: (0, 0), pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display };
     let mut m = Machine::new(&mut host, cfg);
     if cur >= 1 && cur <= 26 {
         m.dos.drive = (cur - 1) as u8;

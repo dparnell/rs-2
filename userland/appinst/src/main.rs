@@ -79,6 +79,8 @@ struct Job {
     apps_dir: bool,
     /// .INI settings to write afterwards (file, section, key, value).
     inis: Vec<(&'static [u8], &'static [u8], &'static [u8], &'static [u8])>,
+    /// Files made from installed ones (target, how, input).
+    makes: Vec<(&'static [u8], &'static [u8], &'static [u8])>,
     current: Vec<u8>,
     errors: Vec<Vec<u8>>,
     config_changed: bool,
@@ -315,6 +317,7 @@ fn start(a: &mut App) {
     let mut files: Vec<(&'static [u8], &'static [u8], &'static [u8])> = Vec::new();
     let mut apps_dir = false;
     let mut inis = Vec::new();
+    let mut makes = Vec::new();
     for (c, cat) in a.cats.iter().enumerate() {
         for (i, ap) in cat.apps.iter().enumerate() {
             if !a.tree.checked[c][i] {
@@ -327,6 +330,7 @@ fn start(a: &mut App) {
                 apps_dir |= f.target.len() > 10 && f.target[..10].eq_ignore_ascii_case(b"\\OS2\\APPS\\");
             }
             inis.extend(ap.inis.iter().map(|i| (i.file, i.section, i.key, i.value)));
+            makes.extend(ap.makes.iter().map(|m| (m.target, m.how, m.input)));
         }
     }
     // One packed file after the other: each is read once.
@@ -334,7 +338,7 @@ fn start(a: &mut App) {
     let total = files.len() as u32;
     unsafe {
         *core::ptr::addr_of_mut!(JOB) =
-            Some(Job { client: a.client, cd, target: a.target, files, apps_dir, inis, current: Vec::new(), errors: Vec::new(), config_changed: false });
+            Some(Job { client: a.client, cd, target: a.target, files, apps_dir, inis, makes, current: Vec::new(), errors: Vec::new(), config_changed: false });
     }
     a.busy = true;
     a.progress = (0, total);
@@ -363,6 +367,18 @@ unsafe extern "C" fn worker(_: u32) {
             let mut s = target.to_vec();
             s.push(b' ');
             s.extend_from_slice(&e);
+            j.errors.push(s);
+        }
+    }
+    for &(target, how, input) in &j.makes {
+        let made = match how {
+            b"rs2disp" => media::read_file(&media::on(j.target, input)).and_then(|v| win16drv::build(&v).ok()),
+            _ => None,
+        };
+        let ok = made.is_some_and(|data| media::write(&media::on(j.target, target), &media::Unpacked { data, date: 0, time: 0, attributes: 0x20, eas: None }).is_ok());
+        if !ok {
+            let mut s = target.to_vec();
+            s.extend_from_slice(b" could not be made");
             j.errors.push(s);
         }
     }

@@ -15,6 +15,7 @@ version = "0.1.0"
 dependencies = [
  "os2",
  "os2-pack",
+ "win16drv",
 ]
 
 [[package]]
