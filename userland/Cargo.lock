@@ -59,6 +59,7 @@ dependencies = [
 name = "dos"
 version = "0.1.0"
 dependencies = [
+ "win16drv",
  "x86emu",
 ]
 
@@ -306,6 +307,7 @@ version = "0.1.0"
 dependencies = [
  "os2",
  "viocell",
+ "win16drv",
 ]
 
 [[package]]
@@ -515,6 +517,7 @@ version = "0.1.0"
 dependencies = [
  "dos",
  "os2",
+ "win16drv",
  "x86emu",
 ]
 
@@ -527,6 +530,10 @@ dependencies = [
 
 [[package]]
 name = "viocell"
+version = "0.1.0"
+
+[[package]]
+name = "win16drv"
 version = "0.1.0"
 
 [[package]]

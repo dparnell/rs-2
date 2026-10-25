@@ -570,6 +570,7 @@ fn main() {
     let mut stats = false;
     let mut wav_out: Option<String> = None;
     let mut display = (800, 600);
+    let mut disp_trace = false;
     while let Some(a) = args.first().cloned() {
         if !a.starts_with("--") {
             break;
@@ -592,6 +593,7 @@ fn main() {
             "--nofpu" => cfg.fpu = false,
             "--noems" => cfg.ems_kb = 0,
             "--stats" => stats = true,
+            "--disp-trace" => disp_trace = true,
             "--watch" => watch = u32::from_str_radix(val().trim_start_matches("0x"), 16).unwrap(),
             "--wav" => wav_out = Some(val()),
             "--display" => {
@@ -629,6 +631,7 @@ fn main() {
         display,
     };
     let mut m = Machine::new(&mut host, cfg);
+    m.disp.trace = disp_trace;
     m.dos.cwd[2] = cwd.to_ascii_uppercase();
     m.hw.watch = watch;
     let path = if prog.contains(':') {

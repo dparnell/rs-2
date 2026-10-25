@@ -324,6 +324,14 @@ impl Machine {
                     self.vdd_entry_pm();
                     return Cb::Done;
                 }
+                if v == 0x66 {
+                    let sz = if self.client().bits32 { 4 } else { 2 };
+                    let sp = if self.cpu.seg[SS].big() { self.cpu.regs[ESP] } else { self.cpu.regs[ESP] & 0xffff };
+                    self.pm_flags_at = Some(self.cpu.seg[SS].base.wrapping_add(sp + 2 * sz));
+                    self.vwin_int66(host);
+                    self.pm_flags_at = None;
+                    return Cb::Done;
+                }
                 if v == 0x21 {
                     let sz = if self.client().bits32 { 4 } else { 2 };
                     let sp = if self.cpu.seg[SS].big() { self.cpu.regs[ESP] } else { self.cpu.regs[ESP] & 0xffff };
@@ -646,6 +654,13 @@ impl Machine {
             return;
         }
         if matches!(v, 0x10..=0x12 | 0x15 | 0x16 | 0x1a | 0x33) && !hw && self.dpmi_bios(host, v, f + 8) {
+            return;
+        }
+        if v == 0x66 && !hw {
+            // VWIN (crate::vwin), on the client's selectors.
+            self.pm_flags_at = Some(f + 8);
+            self.vwin_int66(host);
+            self.pm_flags_at = None;
             return;
         }
         if matches!(v, 0x25 | 0x26) && !hw && self.frame_get(f, 1) & 3 == 3 {

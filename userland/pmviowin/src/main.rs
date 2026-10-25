@@ -32,6 +32,8 @@
 
 extern crate alloc;
 
+mod surface;
+
 use alloc::vec::Vec;
 use core::ptr::{null, null_mut};
 use core::sync::atomic::{AtomicU32, Ordering};
@@ -195,6 +197,8 @@ const ST_MOUSE: u32 = 0x08;
 const ST_PIXELS: u32 = 0x20;
 /// A DOS session: the mouse goes to it as positions (Rs2VdmMouse).
 const ST_DOS: u32 = 0x40;
+/// A DOS session with a display surface in shared memory (surface.rs).
+const ST_SURFACE: u32 = 0x80;
 
 const CTL_FOCUS: u32 = 1;
 const CTL_WINDOWED: u32 = 2;
@@ -351,6 +355,10 @@ struct Win {
     /// A DOS session's graphics picture: width, height, pixels, palette.
     pix: Option<(usize, usize, Vec<u8>, [u32; 256])>,
     pix_dims: (usize, usize),
+    /// The session's leader (a DOS session's VDM names its surface by it).
+    leader: u32,
+    /// A display surface (Win-OS/2 with RS2DISP.DRV).
+    view: Option<surface::View>,
 }
 
 static mut WINS: Vec<Win> = Vec::new();
@@ -404,6 +412,9 @@ impl Win {
     }
 
     fn content_size(&self) -> (i32, i32) {
+        if let Some(v) = &self.view {
+            return (v.w as i32, v.h as i32);
+        }
         if let Some((w, h, ..)) = &self.pix {
             return pix_size(*w, *h);
         }
@@ -467,6 +478,38 @@ fn refresh(i: usize) {
     let mut cells: Vec<u16> = alloc::vec![0; MAX_CELLS];
     if unsafe { Rs2VioReadScreen(w.sid, st.as_mut_ptr(), cells.as_mut_ptr(), (MAX_CELLS * 2) as u32) } != 0 {
         return;
+    }
+    if st[9] & ST_SURFACE != 0 {
+        // A display surface: redraw what changed.
+        if w.view.is_none() {
+            w.view = surface::View::open(w.leader);
+        }
+        if let Some(v) = w.view.as_mut() {
+            let dims = (v.w, v.h);
+            let damage = v.damage();
+            w.changes = st[0];
+            w.flags = st[9];
+            if (v.w, v.h) != dims || w.pix_dims != (v.w, v.h) {
+                w.pix_dims = (v.w, v.h);
+                w.pix = None;
+                fit_window(i);
+                return;
+            }
+            let (_, ch) = w.client_size();
+            match damage {
+                None => w.invalidate_all(),
+                Some(rs) => {
+                    for (x0, y0, x1, y1) in rs {
+                        let r = RectL { l: x0, b: ch - y1, r: x1, t: ch - y0 };
+                        unsafe { WinInvalidateRect(w.client, &r, 0) };
+                    }
+                }
+            }
+            return;
+        }
+    } else if w.view.is_some() {
+        w.view = None;
+        w.pix_dims = (0, 0);
     }
     if st[9] & ST_PIXELS != 0 {
         // A DOS session in a graphics mode: the picture instead of cells.
@@ -798,6 +841,8 @@ fn create_window(s: &VioSession) -> Option<usize> {
         buttons: 0,
         pix: None,
         pix_dims: (0, 0),
+        leader: s.leader,
+        view: None,
     });
     HAD_WINDOWS.store(1, Ordering::Relaxed);
     let i = wins().len() - 1;
@@ -863,6 +908,19 @@ fn paint(i: usize) {
     let w = &wins()[i];
     let mut r = RectL::default();
     let hps = unsafe { WinBeginPaint(w.client, 0, &mut r) };
+    if let Some(v) = &w.view {
+        let (cw, ch) = w.client_size();
+        v.paint(hps, &r, ch);
+        let (dw, dh) = (v.w as i32, v.h as i32);
+        if cw > dw {
+            unsafe { WinFillRect(hps, &RectL { l: dw, b: 0, r: cw, t: ch }, CLR_BLACK) };
+        }
+        if ch > dh {
+            unsafe { WinFillRect(hps, &RectL { l: 0, b: 0, r: dw.min(cw), t: ch - dh }, CLR_BLACK) };
+        }
+        unsafe { WinEndPaint(hps) };
+        return;
+    }
     if let Some((pw, ph, px, pal)) = &w.pix {
         // The whole picture as a bottom-up 24-bit bitmap, stretched to
         // its shown size.
@@ -1173,6 +1231,11 @@ fn mouse(i: usize, msg: u32, mp1: u32, mp2: u32) -> bool {
             }
             WinSetCapture(HWND_DESKTOP, if b != 0 { client } else { 0 });
             Rs2VdmMouse(sid, fx, fy, b);
+        }
+        // Windows' pointer shape over its surface.
+        if let Some(v) = w.view.as_mut() {
+            v.set_pointer(client);
+            return true;
         }
         return msg != WM_MOUSEMOVE;
     }

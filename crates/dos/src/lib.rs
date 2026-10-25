@@ -27,6 +27,7 @@ pub mod mouse;
 pub mod sb;
 pub mod shell;
 pub mod vdd;
+pub mod vwin;
 pub mod video;
 pub mod xms;
 
@@ -451,6 +452,10 @@ impl Machine {
             0x20..=0x2f => self.dos_interrupt(host, v),
             0x33 => {
                 self.int33(host);
+                Cb::Done
+            }
+            0x66 => {
+                self.vwin_int66(host);
                 Cb::Done
             }
             0x67 => {

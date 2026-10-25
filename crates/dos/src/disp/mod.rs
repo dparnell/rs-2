@@ -97,11 +97,13 @@ pub struct Display {
     saved: Option<(Rect, Vec<u8>)>,
     /// Entries already logged as unexpected (debugging).
     logged: Vec<u32>,
+    /// Log every call (debugging).
+    pub trace: bool,
 }
 
 impl Default for Display {
     fn default() -> Self {
-        Display { enabled: false, w: 0, h: 0, pix: Vec::new(), pal: PALETTE, damage: Vec::new(), pointer: None, pointer_pos: (0, 0), pointer_gen: 0, saved: None, logged: Vec::new() }
+        Display { enabled: false, w: 0, h: 0, pix: Vec::new(), pal: PALETTE, damage: Vec::new(), pointer: None, pointer_pos: (0, 0), pointer_gen: 0, saved: None, logged: Vec::new(), trace: false }
     }
 }
 
@@ -324,6 +326,13 @@ impl Machine {
         let ord = n - CB_DISP;
         let Some(&(_, _, size)) = win16drv::ENTRIES.iter().find(|e| e.0 == ord) else { return };
         let mut a = self.disp_args(size);
+        if self.disp.trace {
+            let mut t = alloc::format!("disp {ord}:");
+            for b in a.b.chunks(2).rev() {
+                t.push_str(&alloc::format!(" {:04x}", u16::from_le_bytes([b[0], b[1]])));
+            }
+            host.log(&t);
+        }
         let r: u32 = match ord {
             1 => self.disp_bitblt(&mut a),
             2 => self.disp_colorinfo(&mut a),

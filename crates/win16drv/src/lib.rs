@@ -14,6 +14,8 @@
 
 extern crate alloc;
 
+pub mod surface;
+
 use alloc::vec;
 use alloc::vec::Vec;
 

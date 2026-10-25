@@ -11,6 +11,7 @@
 //! | 403 | `Rs2VdmSetPixels(ULONG cx, ULONG cy, ULONG y0, ULONG cRows, PBYTE pRows, PULONG pPalette)` |
 //! | 404 | `Rs2VioReadPixels(ULONG sid, PULONG pInfo, PBYTE pPixels, ULONG cb, PULONG pPalette)` |
 //! | 405 | `Rs2VdmMouse(ULONG sid, ULONG x, ULONG y, ULONG fsButtons)` |
+//! | 406 | `Rs2VdmSurface(ULONG cmd, ULONG a, ULONG b)` |
 //!
 //! Rs2VdmRegister makes the caller's session a DOS session: from then on
 //! its keys and mouse are not translated into KBD and MOU events but
@@ -38,6 +39,14 @@
 //! holds), pPalette 256 entries; ERROR_INVALID_FUNCTION (1) when the
 //! session shows text. Rs2VdmMouse gives a windowed DOS session the
 //! pointer's position over its window (0-65535 each way).
+//!
+//! Rs2VdmSurface tells the kernel about a display surface the session's
+//! VDM keeps in shared memory (`\SHAREMEM\RS2VDM\<pid>.DSP`, its
+//! layout in userland/vdm; Win-OS/2's RS2DISP.DRV draws it): cmd 1 the
+//! session shows an a x b surface, 0 no longer; 2 it changed (the PM host
+//! redraws; returns 1 when the session is on the full screen, where the
+//! VDM shows it with Rs2VdmSetPixels, else 0); 3 the screen's size into
+//! the ULONGs at a and b.
 
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
@@ -196,6 +205,30 @@ pub fn read_pixels(c: &mut Ctx) -> u32 {
         }
     }
     0
+}
+
+pub fn surface(c: &mut Ctx) -> u32 {
+    let (cmd, a, b) = (c.arg(0), c.arg(1), c.arg(2));
+    let s = sid(c);
+    match cmd {
+        0 | 1 => {
+            let v = (cmd == 1 && a > 0 && b > 0 && a <= 4096 && b <= 4096).then_some((a as usize, b as usize));
+            crate::screen::with_session(s, |sc| sc.set_surface(v));
+            0
+        }
+        2 => crate::screen::with_session(s, |sc| {
+            sc.surface_changed();
+            sc.is_visible() as u32
+        })
+        .unwrap_or(0),
+        3 => {
+            let Some(fb) = crate::screen::framebuffer() else { return err::INVALID_FUNCTION };
+            c.write_u32(a, fb.width);
+            c.write_u32(b, fb.height);
+            0
+        }
+        _ => err::INVALID_PARAMETER,
+    }
 }
 
 pub fn mouse(c: &mut Ctx) -> u32 {
