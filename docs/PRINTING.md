@@ -232,3 +232,53 @@ can compare it.
 Not planned yet: DOS and Win-OS/2 printing through LPT1 into the
 spooler, remote (LAN Server) queues, separator pages, bidirectional
 printers, and other printer languages (PCL).
+
+## Status
+
+**Printing works.** A program prints a page through the spooler to a
+PostScript file, to a parallel port, and to network printers (LPR and
+IPP), and the Workplace Shell's printer objects work:
+
+| What | Where | Checked |
+|------|-------|---------|
+| The spooler: queues, printers, ports, jobs (`\SPOOL\queue\nnnnn.SPL`/`.SHD`); SplEnum/Query/Set/Create/Delete for queues, jobs, devices and ports, SplEnumPrinter, SplEnumDriver, SplEnumQueueProcessor, hold/release/purge/copy, SplControlDevice; the queue manager (SplQmOpen...SplQmClose, SplQmGetJobID, SplQmNewPage); Prt* | `userland/pmspl` | PRNTEST |
+| The spooler thread (SPL32QMINITIALIZE), started on demand | `userland/pmspool`, PMSPL `spooler.rs` | PRNTEST: jobs printed and removed, held jobs wait, deleted jobs never print |
+| The queue processor: PM_Q_STD (the metafile played on an OD_DIRECT DC, page setup from the metafile) and PM_Q_RAW (DEVESC_RAWDATA) | `userland/pmprint` | PRNTEST |
+| The PostScript driver: DevOpenDC OD_QUEUED/OD_DIRECT/OD_INFO, STARTDOC/NEWFRAME/ENDDOC/ABORTDOC/RAWDATA/GETJOBID/job properties escapes, DevQueryCaps (300 dpi, CAPS_TECH_POSTSCRIPT), DevQueryHardcopyCaps (Letter, A4, Legal, A3, A5, Executive), DevQueryDeviceNames, DevPostDeviceModes (a job properties dialog: form, orientation, copies) | PMWIN `printer.rs`, `crates/gpi/src/psdev.rs` | PRNTEST, host unit tests (`cargo test -p gpi`), Ghostscript renders the output as the screen shows it |
+| Ports: FILE (FILEn), LPT1-3 (the kernel drives the parallel port), COM1-4, LPRn (RFC 1179), IPPn (IPP/1.1 Print-Job) | PMSPL `port.rs`, kernel `chardev.rs` | PRNTEST LPR/IPP with `tools/scripts/printer_listen.py`; LPT1 with QEMU's `-parallel file:` |
+| Printer objects: job view, settings (queue, driver, job properties, port and settings, default printer), new printers from the template, deleting, files dropped and data files' Print | PMWP `printer.rs` | QEMU desktop runs (screenshots in the session's progress folder) |
+| Print in programs | rs2's E (File > Print), the help manager (Services > Print), IBM's Picture Viewer | QEMU runs, output rendered with Ghostscript |
+
+**Tests.** `RS2\PRNTEST.EXE` (userland/prntest) makes a queue on a
+printer on a file port and checks the spooler calls, a raw job (held,
+changed, released, printed unchanged), two pages through a PM_Q_STD
+queued DC, a PM_Q_RAW queued DC and an OD_DIRECT DC (each output is
+checked as PostScript: DSC structure and page count, text with
+`xshow`, outline fonts' Type 3 glyphs, a patterned area, a dashed line,
+a box, an image), raw data on a raw OD_DIRECT DC, the job properties
+and device names, and A4 landscape. `PRNTEST LPR host port queue` and
+`PRNTEST IPP host port path` print to a network printer as well; with
+`python3 -I tools/scripts/printer_listen.py lpd|ipp PORT DIR` on the
+host and `cargo xtask run --net --init "RS2\PRNTEST.EXE LPR 10.0.2.2
+PORT q"` the listener saves what arrives (QEMU's user network reaches
+the host as 10.0.2.2). `PRNTEST SETPORT printer port settings RUN
+program args` points a printer at a port and runs a program (how IBM
+programs were printed to the host listener).
+
+Not done yet:
+- DOS, Win-OS/2 and other programs that write to `LPT1` themselves go
+  straight to the parallel port; OS/2's kernel hands such output to
+  the spooler as raw jobs (EPM's Raw ASCII printing works that way).
+- EPM's formatted printing starts but never opens its printer DC (its
+  print loop waits; COMPATIBILITY.md).
+- Separator pages, job retention, forms per queue, remote (LAN Server)
+  queues, IBM's port driver (.PDR) and queue processor interfaces for
+  other vendors' modules, and IBM's spool files' (.SPL) device
+  escape order (rs2 records DEVESC_NEWFRAME as its own escape order
+  0x80 and blits as 0x81-0x83).
+- PostScript size: images are run-length and ASCII85 encoded (no
+  Flate); glyphs are Type 3 procedures without ToUnicode, so PDFs made
+  from the output have no searchable text.
+- Text on printers is laid out with the fonts' pel advances at 300 dpi
+  (as on the screen), and outline faces are made at each size used
+  (Source::at keeps 32 sizes); larger sizes are scaled.
