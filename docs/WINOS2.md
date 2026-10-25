@@ -230,8 +230,9 @@ for the session but:
   (menus, drop-downs and dialogs too), at the same place, painting its
   part of the surface (the rectangles the VDM reports damaged);
 - **window list entries** for windows with a caption, titled as in
-  Windows; WM_CLOSE to a frame (a Close command on it) closes the Windows
-  window (Windows asks about unsaved changes as usual);
+  Windows; the window list's End task (a close request to the frame)
+  closes the Windows window, Windows asking about unsaved changes as
+  usual;
 - **the mouse** as positions on the Windows screen, captured while a
   button is down, with Windows' pointer as the PM pointer;
 - **keys** straight to the session while one of its frames has the focus
