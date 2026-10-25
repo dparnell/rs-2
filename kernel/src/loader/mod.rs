@@ -426,6 +426,11 @@ pub const WIN16_MODULES: &[(&str, u32)] = &[
     ("SYSTEM", 5400),
 ];
 
+/// KERNEL's absolute entries (WIN16 ordinals): __AHSHIFT, __AHINCR (a
+/// huge block's tiles are 8 selectors apart) and __WINFLAGS (protected
+/// mode, 386, enhanced mode, coprocessor).
+pub const WIN16_CONSTANTS: &[(u32, u16)] = &[(1113, 3), (1114, 8), (1178, 0x0425)];
+
 /// Where a Windows module's import of `name` goes: WIN16 and the
 /// ordinal base for the system modules, else `name` itself (base 0).
 pub fn win16_import(name: &str) -> (String, u32) {

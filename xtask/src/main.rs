@@ -490,6 +490,7 @@ fn build(o: &Opts) -> Option<PathBuf> {
     if let Ok(text) = std::fs::read_to_string(&list) {
         let mut files = image::manifest(&root(), &text);
         files.extend(userland);
+        files.extend(win16_tests());
         if !o.dist {
             files.extend(dos_tests());
         }
@@ -614,6 +615,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmspool", "OS2\\PMSPOOL.EXE"),
         ("pmprint", "OS2\\DLL\\PMPRINT.QPR"),
         ("som", "OS2\\DLL\\SOM.DLL"),
+        ("win16", "OS2\\DLL\\WIN16.DLL"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
@@ -689,6 +691,21 @@ fn dos_tests() -> image::FileList {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().to_ascii_uppercase();
             v.push((e.path(), format!("DOS\\{name}")));
+        }
+    }
+    v
+}
+
+/// The Windows 3.x test programs (userland/win16test, built with Open
+/// Watcom when it is installed) as C:\\RS2\\*.EXE.
+fn win16_tests() -> image::FileList {
+    let dir = root().join("userland/win16test");
+    let _ = Command::new("sh").arg(dir.join("build.sh")).status();
+    let mut v = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(dir.join("bin")) {
+        for e in rd.flatten() {
+            let name = e.file_name().to_string_lossy().to_ascii_uppercase();
+            v.push((e.path(), format!("RS2\\{name}")));
         }
     }
     v

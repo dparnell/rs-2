@@ -555,6 +555,14 @@ name = "viocell"
 version = "0.1.0"
 
 [[package]]
+name = "win16-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "thunk16",
+]
+
+[[package]]
 name = "win16drv"
 version = "0.1.0"
 

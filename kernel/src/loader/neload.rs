@@ -133,16 +133,23 @@ pub fn load(
                 },
                 ne::Target::ImportOrdinal { module, ordinal } => {
                     let base = ord_bases.get(module as usize - 1).copied().unwrap_or(0);
-                    import_target(&imports, module, ImportBy::Ordinal(base + ordinal as u32)).map_err(|e| {
-                        crate::trace!(
-                            "loader: {}: import {}.{} not found",
-                            path,
-                            import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"),
-                            ordinal
-                        );
-                        super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
-                        e
-                    })?
+                    let constant = (base != 0)
+                        .then(|| super::WIN16_CONSTANTS.iter().find(|c| c.0 == base + ordinal as u32))
+                        .flatten();
+                    if let Some(&(_, v)) = constant {
+                        Target::constant(v)
+                    } else {
+                        import_target(&imports, module, ImportBy::Ordinal(base + ordinal as u32)).map_err(|e| {
+                            crate::trace!(
+                                "loader: {}: import {}.{} not found",
+                                path,
+                                import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"),
+                                ordinal
+                            );
+                            super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
+                            e
+                        })?
+                    }
                 }
                 ne::Target::ImportName { module, name_offset } => {
                     let name = m.imported_name(name_offset).map(s).map_err(|_| err::BAD_EXE_FORMAT)?;
