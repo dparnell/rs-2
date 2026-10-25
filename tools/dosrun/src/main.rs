@@ -571,6 +571,7 @@ fn main() {
     let mut wav_out: Option<String> = None;
     let mut display = (800, 600);
     let mut disp_trace = false;
+    let mut vwin_trace = false;
     while let Some(a) = args.first().cloned() {
         if !a.starts_with("--") {
             break;
@@ -594,6 +595,8 @@ fn main() {
             "--noems" => cfg.ems_kb = 0,
             "--stats" => stats = true,
             "--disp-trace" => disp_trace = true,
+            "--seamless" => cfg.seamless = true,
+            "--vwin-trace" => vwin_trace = true,
             "--watch" => watch = u32::from_str_radix(val().trim_start_matches("0x"), 16).unwrap(),
             "--wav" => wav_out = Some(val()),
             "--display" => {
@@ -632,6 +635,7 @@ fn main() {
     };
     let mut m = Machine::new(&mut host, cfg);
     m.disp.trace = disp_trace;
+    m.vwin.trace = vwin_trace;
     m.dos.cwd[2] = cwd.to_ascii_uppercase();
     m.hw.watch = watch;
     let path = if prog.contains(':') {
@@ -654,6 +658,11 @@ fn main() {
         if t0.elapsed().as_secs_f64() > timeout {
             let (cs, ip) = m.where_now();
             eprintln!("dosrun: timeout at {cs:04x}:{ip:04x}");
+            // The code there (to find the module it is in).
+            let base = m.cpu.seg[x86emu::CS].base.wrapping_add(ip);
+            let mut code = [0u8; 32];
+            m.hw.read_bytes(base.wrapping_sub(16), &mut code);
+            eprintln!("dosrun: code at {:#x}-16: {}", base, code.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(""));
             break 124;
         }
     };

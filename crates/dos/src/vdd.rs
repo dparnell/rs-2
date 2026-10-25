@@ -16,16 +16,25 @@ pub const CB_VDD_LAST: u16 = 0x60f;
 /// each.
 pub const VDD_CODE: u16 = bios::SPECIAL + 0x200;
 
-/// The VDDs with entry points.
-const VDDS: [&[u8]; 1] = [b"VMOUSE$"];
+/// The VDDs with entry points (the last has no name: VWIN's message
+/// entry, which WINSMSG calls like an interrupt, flags pushed: IRET).
+const VDDS: [&[u8]; 3] = [b"VMOUSE$", b"VWIN", b""];
 const VMOUSE: u16 = 0;
+pub const VWIN: u16 = 1;
+pub const VWIN_INT: u16 = 2;
+
+/// The stub's return: RETF, or IRET for an entry called like an
+/// interrupt.
+pub(crate) fn vdd_ret(k: u16) -> u8 {
+    if k == VWIN_INT { 0xcf } else { 0xcb }
+}
 
 impl Machine {
     pub(crate) fn vdd_rom_init(&mut self) {
         for k in 0..VDDS.len() as u16 {
             let n = CB_VDD + k;
             let a = Machine::lin(bios::ROM, VDD_CODE + k * 8);
-            self.hw.write_bytes(a, &[0xfe, 0x38, n as u8, (n >> 8) as u8, 0xcb]);
+            self.hw.write_bytes(a, &[0xfe, 0x38, n as u8, (n >> 8) as u8, vdd_ret(k)]);
         }
     }
 
@@ -43,7 +52,7 @@ impl Machine {
             name[n] = b.to_ascii_uppercase();
             n += 1;
         }
-        VDDS.iter().position(|v| *v == &name[..n]).map(|k| k as u16)
+        VDDS.iter().position(|v| n > 0 && *v == &name[..n]).map(|k| k as u16)
     }
 
     /// INT 2Fh AX=4011h in real mode.
@@ -73,9 +82,10 @@ impl Machine {
 
     /// A far call to VDD `k`'s entry point.
     pub(crate) fn vdd_call<H: Host>(&mut self, host: &mut H, k: u16) {
-        let _ = host;
         match k {
             VMOUSE => self.vmouse_api(),
+            VWIN => self.vwin_entry(host),
+            VWIN_INT => self.vwin_int66(host),
             _ => self.cpu.flags |= CF,
         }
     }

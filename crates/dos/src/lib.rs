@@ -63,6 +63,10 @@ pub struct Config {
     /// The country code (COUNTRY=) and code page.
     pub country: u16,
     pub codepage: u16,
+    /// A seamless Win-OS/2 session (VWIN says so: crate::vwin).
+    pub seamless: bool,
+    /// The session's id for VWIN's messages.
+    pub session_id: u32,
 }
 
 impl Default for Config {
@@ -79,6 +83,8 @@ impl Default for Config {
             trace: false,
             country: 1,
             codepage: 437,
+            seamless: false,
+            session_id: 1,
         }
     }
 }
@@ -102,6 +108,8 @@ pub struct Machine {
     pub dpmi: dpmi::Dpmi,
     /// RS2DISP.DRV's screen (Win-OS/2 with the paravirtual display).
     pub disp: disp::Display,
+    /// VWIN (Win-OS/2's shield: WINSHELD's messages, seamless windows).
+    pub vwin: vwin::Vwin,
     pub shells: Vec<shell::Shell>,
     /// The first program ended with this exit code.
     pub exited: Option<u8>,
@@ -126,6 +134,8 @@ pub struct Machine {
     pub close_requested: bool,
     /// A BEL sounds until then (microseconds).
     pub beep_until: u64,
+    /// The window list generation the host last saw.
+    vwin_shown: u32,
 }
 
 impl Machine {
@@ -139,6 +149,7 @@ impl Machine {
             mouse: mouse::Mouse::default(),
             dpmi: dpmi::Dpmi::default(),
             disp: disp::Display::default(),
+            vwin: vwin::Vwin::default(),
             shells: Vec::new(),
             exited: None,
             chain_int: None,
@@ -152,6 +163,7 @@ impl Machine {
             speaker_on: None,
             close_requested: false,
             beep_until: 0,
+            vwin_shown: 0,
             cfg,
         };
         if m.cfg.fpu {
@@ -162,6 +174,8 @@ impl Machine {
             m.cfg.env.push(alloc::string::String::from("BLASTER=A220 I7 D1 T3"));
         }
         m.hw.umb = m.cfg.umb;
+        m.vwin.seamless = m.cfg.seamless;
+        m.vwin.id = m.cfg.session_id;
         m.t0 = host.micros();
         m.hw.now = host.now();
         m.bios_init(host);
@@ -246,6 +260,10 @@ impl Machine {
                     self.waiting = false;
                 }
                 Event::Close => self.close_requested = true,
+                Event::Window(r) => {
+                    self.vwin_request(r);
+                    self.waiting = false;
+                }
             }
         }
         self.events = ev;
@@ -335,9 +353,16 @@ impl Machine {
     }
 
     pub fn present<H: Host>(&mut self, host: &mut H) {
+        for l in core::mem::take(&mut self.vwin.log) {
+            host.log(&l);
+        }
         if self.disp.enabled {
             let damage = self.disp.take_damage();
             host.present_display(&self.disp, &damage);
+            if self.vwin.generation != self.vwin_shown {
+                self.vwin_shown = self.vwin.generation;
+                host.windows(&self.vwin.windows, self.vwin.active);
+            }
             return;
         }
         host.present(&self.hw.vga, &self.hw.ram);

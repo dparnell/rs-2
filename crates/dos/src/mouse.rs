@@ -190,7 +190,7 @@ impl Machine {
 
     /// Raise IRQ 12 when the handler has events to see.
     pub(crate) fn mouse_irq(&mut self) {
-        if self.mouse.pending != 0 && !self.mouse.in_handler {
+        if (self.mouse.pending != 0 || self.vwin_call_ready()) && !self.mouse.in_handler {
             self.hw.pic.raise(12);
         }
     }
@@ -198,6 +198,18 @@ impl Machine {
     /// INT 74h (IRQ 12): call the program's event handler.
     pub(crate) fn mouse_service(&mut self) {
         self.eoi(12);
+        // VWIN's user routine (WINSHELD's) is called from here too: the
+        // same far call into protected mode from real mode.
+        if !self.mouse.in_handler && !self.cpu.pm() && self.vwin_call_ready() {
+            let mut segs = [0u16; 6];
+            for (i, s) in segs.iter_mut().enumerate() {
+                *s = self.cpu.seg[i].sel;
+            }
+            self.mouse.saved = Saved { regs: self.cpu.regs, segs, eip: self.cpu.eip, flags: self.cpu.flags };
+            self.mouse.in_handler = true;
+            self.vwin_call_routine();
+            return;
+        }
         let ev = core::mem::take(&mut self.mouse.pending);
         let Some((mask, seg, off)) = self.mouse.handler else { return };
         if ev & mask == 0 || self.mouse.in_handler || self.cpu.pm() {
@@ -231,7 +243,7 @@ impl Machine {
             // In protected mode; mouse_handler_done follows its return.
             let _ = self.cpu.pop(&mut self.hw, 2);
             let _ = self.cpu.pop(&mut self.hw, 2);
-            self.dpmi_call_pm(seg, off as u32);
+            self.dpmi_call_pm_args(seg, off as u32, &[]);
             return;
         }
         self.cpu.seg[CS] = Seg::real_code(seg);
@@ -247,6 +259,7 @@ impl Machine {
         self.cpu.eip = s.eip;
         self.cpu.flags = s.flags;
         self.mouse.in_handler = false;
+        self.vwin.in_call = false;
     }
 
     fn mouse_visible(&self) -> bool {
