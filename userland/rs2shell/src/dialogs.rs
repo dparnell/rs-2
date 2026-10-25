@@ -27,6 +27,11 @@ const ID_FULL: u16 = 213;
 const ID_PM: u16 = 214;
 const ID_DOSWIN: u16 = 215;
 const ID_DOSFULL: u16 = 216;
+const ID_WINSEAMLESS: u16 = 217;
+const ID_WINFULL: u16 = 218;
+/// Win-OS/2: seamless in the common session, full screen.
+const PROG_31_ENHSEAMLESSCOMMON: u32 = 18;
+const PROG_31_ENH: u32 = 19;
 const ID_TITLE: u16 = 221;
 const ID_DOS_HIGH: u16 = 231;
 const ID_DOS_UMB: u16 = 232;
@@ -83,12 +88,14 @@ fn session_page() -> Vec<u8> {
     let radio = |t: &[u8], y: i16, id: u16, first: bool| item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | if first { WS_GROUP } else { 0 } | 0x0004, (10, y, 200, 10), id);
     template(page_frame(), alloc::vec![
         label(b"Run the program:", (6, 104, 200)),
-        radio(b"As the ~program says (default)", 88, ID_DEFAULT, true),
-        radio(b"In an OS/2 ~window", 74, ID_WINDOW, false),
-        radio(b"OS/2 ~full screen", 60, ID_FULL, false),
-        radio(b"Presentation ~Manager", 46, ID_PM, false),
-        radio(b"In a ~DOS window", 32, ID_DOSWIN, false),
-        radio(b"DOS full ~screen", 18, ID_DOSFULL, false),
+        radio(b"As the ~program says (default)", 92, ID_DEFAULT, true),
+        radio(b"In an OS/2 ~window", 80, ID_WINDOW, false),
+        radio(b"OS/2 ~full screen", 68, ID_FULL, false),
+        radio(b"Presentation ~Manager", 56, ID_PM, false),
+        radio(b"In a ~DOS window", 44, ID_DOSWIN, false),
+        radio(b"DOS full ~screen", 32, ID_DOSFULL, false),
+        radio(b"WIN-OS/2 window (s~eamless)", 20, ID_WINSEAMLESS, false),
+        radio(b"WIN-OS/2 full screen", 8, ID_WINFULL, false),
     ])
 }
 
@@ -189,6 +196,8 @@ extern "C" fn settings_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
                 PROG_PM => ID_PM,
                 PROG_WINDOWEDVDM => ID_DOSWIN,
                 PROG_VDM => ID_DOSFULL,
+                13..=18 => ID_WINSEAMLESS,
+                19 | 20 => ID_WINFULL,
                 _ => ID_DEFAULT,
             };
             unsafe { WinSendDlgItemMsg(pages[1], radio as u32, BM_SETCHECK, 1, 0) };
@@ -263,7 +272,7 @@ fn save_settings(dlg: u32) -> bool {
         }
     }
     p.env = env;
-    p.progc = [(ID_WINDOW, PROG_WINDOWABLEVIO), (ID_FULL, PROG_FULLSCREEN), (ID_PM, PROG_PM), (ID_DOSWIN, PROG_WINDOWEDVDM), (ID_DOSFULL, PROG_VDM)]
+    p.progc = [(ID_WINDOW, PROG_WINDOWABLEVIO), (ID_FULL, PROG_FULLSCREEN), (ID_PM, PROG_PM), (ID_DOSWIN, PROG_WINDOWEDVDM), (ID_DOSFULL, PROG_VDM), (ID_WINSEAMLESS, PROG_31_ENHSEAMLESSCOMMON), (ID_WINFULL, PROG_31_ENH)]
         .into_iter()
         .find(|(id, _)| unsafe { WinSendDlgItemMsg(pages[1], *id as u32, BM_QUERYCHECK, 0, 0) } != 0)
         .map_or(PROG_DEFAULT, |x| x.1);
