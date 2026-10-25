@@ -20,13 +20,13 @@ OS/2 shield) and rs2's own display driver, RS2DISP.DRV, at any size.
 
 | What | dosrun (host) | QEMU (rs2) |
 |------|---------------|------------|
-| Full screen (`WIN-OS/2 Full Screen`) | works | works (about 2 minutes to start under TCG) |
+| Full screen (`WIN-OS/2 Full Screen`) | works (VGA.DRV and RS2DISP) | works with VGA.DRV (about 2 minutes to start under TCG); RS2DISP full screen (the kernel's scaled picture) not checked in QEMU |
 | In a PM window (`WIN-OS/2 Desktop in a Window`), RS2DISP at 800x600 | works (`--display WxH`) | works, Windows' pointer is the PM pointer |
 | Seamless (`WIN-OS/2 Window`, the accessories' objects) | works (`--seamless`) | works: each Windows window a PM window |
 | WINSHELD (`useos2shield=1`) | works: starts the programs, or Program Manager with the OS/2 *Desktop* icon | works |
 | Clock, Notepad, Calculator, Write, Paintbrush, Control Panel, File Manager, Cardfile on RS2DISP | work | Clock, Notepad and Program Manager checked, seamless |
 | Seamless windows: typing, clicks, activation, moving by the title bar (with the outline shown), closing (Alt+F4, Windows' message boxes as windows), the window list | works (`--keys` with `{press}`, `{mouse}`, `{release}`) | works |
-| Mouse | absolute positions (`{mouse X Y}` in `--keys`) | absolute (QEMU's tablet, VMware's pointer) |
+| Mouse | absolute positions (`{mouse X Y}` in `--keys`) | absolute (QEMU's tablet) |
 | Keyboard | works | works |
 | Clipboard and DDE with OS/2 | - | not yet |
 
@@ -230,7 +230,8 @@ for the session but:
   (menus, drop-downs and dialogs too), at the same place, painting its
   part of the surface (the rectangles the VDM reports damaged);
 - **window list entries** for windows with a caption, titled as in
-  Windows; Close in the window list closes the Windows window;
+  Windows; WM_CLOSE to a frame (a Close command on it) closes the Windows
+  window (Windows asks about unsaved changes as usual);
 - **the mouse** as positions on the Windows screen, captured while a
   button is down, with Windows' pointer as the PM pointer;
 - **keys** straight to the session while one of its frames has the focus
@@ -263,8 +264,8 @@ common session), a separate seamless session and *WIN-OS/2 full
 screen*. APPINST's *WIN-OS/2 Window* (IBM's
 `<WP_WIN2WIN>`: Program Manager) and the accessories' objects are
 PROG_31_ENHSEAMLESSCOMMON, as IBM's INI.RC has them. `DESKTEST WIN`
-starts Clock from such an object through RS2SHELL and Notepad with
-DosStartSession into the same session.
+starts Clock from such an object through RS2SHELL, then Notepad and
+Program Manager with DosStartSession into the same session.
 
 How it differs from IBM's: OS/2's seamless driver (SWINVGA) draws into
 the real framebuffer, clipped to what PM gives it, and PM's display
@@ -309,7 +310,8 @@ used the same files (the probe's install script and mkrs2disp).
 | DOS programs from Windows (WINOLDAP, PIFs) | medium | INT 21h 4Bh (exec) from protected mode is still reflected without translation. |
 | 32-bit DPMI clients and the DOS API | small | The direct path is for 16-bit clients. |
 | RS2DISP | small each | No palette management (256-colour programs get the fixed palette), RLE DIBs, device fonts, ENUMOBJ. |
-| The OS/2 *Desktop* icon | small | WINSHELD's GoPM icon (INT 66h E500h with VVID's "switch to PM") does not switch to the PM desktop yet. |
+| The OS/2 *Desktop* icon | small | WINSHELD's GoPM icon calls VWIN (INT 66h E500h: VWIN.SYS's WINPASSDATA, which passes the request on to VVID); rs2 does nothing with it yet, so it does not switch to the PM desktop. |
+| Not checked in QEMU | - | Minimising and restoring from the window list, PM-side Tile and Cascade, RS2DISP full screen. |
 
 ## Testing
 
