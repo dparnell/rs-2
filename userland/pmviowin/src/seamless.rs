@@ -38,20 +38,26 @@ unsafe extern "C" {
     fn WinInvertRect(hps: u32, r: *const RectL) -> u32;
     #[link_name = "PMWIN.848"]
     fn WinReleasePS(hps: u32) -> u32;
-    #[link_name = "PMWIN.9013"]
-    fn WinRemoveSwitchEntry(h: u32) -> u32;
+    #[link_name = "PMWIN.9011"]
+    fn WinChangeSwitchEntry(h: u32, ctl: *const u8) -> u32;
+    #[link_name = "PMWIN.9012"]
+    fn WinQuerySwitchEntry(h: u32, ctl: *mut u8) -> u32;
     #[link_name = "PMWIN.9014"]
     fn WinQuerySwitchHandle(hwnd: u32, pid: u32) -> u32;
 }
 
-/// The session's own (hidden) frame leaves the window list: its Windows
-/// windows are there instead.
+/// The session's own (hidden) frame leaves the window list (its switch
+/// entry SWL_INVISIBLE): its Windows windows are there instead.
 pub fn hide_session_frame(frame: u32) {
     unsafe {
         WinShowWindow(frame, 0);
         let h = WinQuerySwitchHandle(frame, 0);
-        if h != 0 {
-            WinRemoveSwitchEntry(h);
+        // SWCNTRL: hwnd, hwndIcon, hprog, idProcess, idSession,
+        // uchVisibility (offset 20), fbJump, szSwtitle, bProgType.
+        let mut ctl = [0u8; 96];
+        if h != 0 && WinQuerySwitchEntry(h, ctl.as_mut_ptr()) == 0 {
+            ctl[20..24].copy_from_slice(&1u32.to_le_bytes());
+            WinChangeSwitchEntry(h, ctl.as_ptr());
         }
     }
 }
