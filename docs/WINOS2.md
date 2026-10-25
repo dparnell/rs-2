@@ -24,7 +24,8 @@ OS/2 shield) and rs2's own display driver, RS2DISP.DRV, at any size.
 | In a PM window (`WIN-OS/2 Desktop in a Window`), RS2DISP at 800x600 | works (`--display WxH`) | works, Windows' pointer is the PM pointer |
 | Seamless (`WIN-OS/2 Window`, the accessories' objects) | works (`--seamless`) | works: each Windows window a PM window |
 | WINSHELD (`useos2shield=1`) | works: starts the programs, or Program Manager with the OS/2 *Desktop* icon | works |
-| Clock, Notepad, Calculator, Write, Paintbrush, Control Panel, File Manager, Cardfile on RS2DISP | work | Clock and Notepad checked |
+| Clock, Notepad, Calculator, Write, Paintbrush, Control Panel, File Manager, Cardfile on RS2DISP | work | Clock, Notepad and Program Manager checked, seamless |
+| Seamless windows: typing, clicks, activation, moving by the title bar (with the outline shown), closing (Alt+F4, Windows' message boxes as windows), the window list | works (`--keys` with `{press}`, `{mouse}`, `{release}`) | works |
 | Mouse | absolute positions (`{mouse X Y}` in `--keys`) | absolute (QEMU's tablet, VMware's pointer) |
 | Keyboard | works | works |
 | Clipboard and DDE with OS/2 | - | not yet |
@@ -237,10 +238,13 @@ for the session but:
 - **z-order and activation** both ways: Windows' order among the frames
   while the user works in Windows, Windows' active window active in PM,
   a frame PM activates activated in Windows; moves and sizes made in
-  Windows move the frames (RS2API 407 `Rs2VdmRequest` carries the host's
-  requests: activate, close, place, minimise, restore, maximise, run);
-- **minimised Windows programs** have no frame but keep their window list
-  entry, and showing it restores them;
+  Windows move the frames, and frames PM moves or sizes (the window
+  list's Tile and Cascade) are placed there in Windows (RS2API 407
+  `Rs2VdmRequest` carries the host's requests: activate, close, place,
+  minimise, restore, maximise, run);
+- **minimised Windows programs** keep a hidden frame for their window
+  list entry, and showing it from the window list restores and activates
+  them;
 - **a see-through overlay**: while a mouse button is down, what Windows
   draws on its (never shown) desktop outside its windows, such as the
   outline of a window being dragged, is inverted on the PM screen and
@@ -253,7 +257,10 @@ running WINOS2.COM with the program, seamless ones windowed with
 WINOS2_SEAMLESS=1, the full-screen ones full screen. The *common* types
 (14, 16, 18) share one session: a program started while it runs is sent
 to it (REQ_RUN) and WINSHELD starts it there. The Workplace Shell,
-RS2SHELL and APPINST know the types; APPINST's *WIN-OS/2 Window* (IBM's
+RS2SHELL and APPINST know the types; the Workplace Shell's Session page
+and RS2SHELL's program settings offer *WIN-OS/2 window (seamless)* (the
+common session), a separate seamless session and *WIN-OS/2 full
+screen*. APPINST's *WIN-OS/2 Window* (IBM's
 `<WP_WIN2WIN>`: Program Manager) and the accessories' objects are
 PROG_31_ENHSEAMLESSCOMMON, as IBM's INI.RC has them. `DESKTEST WIN`
 starts Clock from such an object through RS2SHELL and Notepad with
