@@ -999,6 +999,11 @@ fn run(o: &Opts) -> bool {
                     std::thread::sleep(Duration::from_secs(1));
                     continue;
                 }
+                // {sleep N}: N seconds.
+                if let Some(n) = key.strip_prefix("sleep ").and_then(|n| n.parse::<f64>().ok()) {
+                    std::thread::sleep(Duration::from_secs_f64(n));
+                    continue;
+                }
                 // {shot NAME}: a screenshot now, as work/NAME.png.
                 if let Some(name) = key.strip_prefix("shot ") {
                     let ppm = work.join(format!("{name}.ppm"));
@@ -1089,7 +1094,8 @@ fn run(o: &Opts) -> bool {
 }
 
 /// QEMU key names for a string. "^X" is Ctrl+X, "{name}" a QEMU key name
-/// as is (e.g. {ctrl-esc}, {alt-esc}, {down}), "{sleep}" a one second pause,
+/// as is (e.g. {ctrl-esc}, {alt-esc}, {down}), "{sleep}" a one second pause
+/// ("{sleep N}" N seconds),
 /// "{mouse_move dx dy}" / "{mouse_button n}" QEMU mouse commands,
 /// "{mouse_abs x y}" an absolute pointer position (0..32767, via QMP),
 /// "{shot NAME}" a screenshot as work/NAME.png.

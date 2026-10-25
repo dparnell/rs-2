@@ -71,6 +71,8 @@ const H_SAVE: u32 = 0x2018;
 const H_IRQRET: u32 = 0x2020;
 const H_EXTAPI: u32 = 0x2028;
 const H_PMCALLRET: u32 = 0x2030;
+/// VDD entry points (crate::vdd), 8 bytes each.
+const H_VDD: u32 = 0x2040;
 const H_DEFEXC: u32 = 0x2100;
 const H_STACK0: u32 = 0x7000;
 const H_LOCKED: u32 = 0x8000;
@@ -318,6 +320,10 @@ impl Machine {
                 // The default handler (a client chaining to it): the
                 // caller's IRET frame is on the client's stack.
                 let v = (n - CB_DEFINT) as u8;
+                if v == 0x2f && self.cpu.ax() == 0x4011 {
+                    self.vdd_entry_pm();
+                    return Cb::Done;
+                }
                 if v == 0x21 {
                     let sz = if self.client().bits32 { 4 } else { 2 };
                     let sp = if self.cpu.seg[SS].big() { self.cpu.regs[ESP] } else { self.cpu.regs[ESP] & 0xffff };
@@ -409,6 +415,10 @@ impl Machine {
         stub(self, H_EXTAPI, CB_EXTAPI);
         stub(self, H_PMCALLRET, CB_PMCALLRET);
         self.hw.wr(area + H_EXTAPI + 4, 0xcb);
+        for k in 0..=(crate::vdd::CB_VDD_LAST - crate::vdd::CB_VDD) {
+            let n = crate::vdd::CB_VDD + k;
+            self.hw.write_bytes(area + H_VDD + k as u32 * 8, &[0xfe, 0x38, n as u8, (n >> 8) as u8, 0xcb]);
+        }
         self.hw.wr(area + H_SAVE, 0xcb);
         // TSS: the ring-0 stack.
         self.hw.wr32(area + H_TSS + 4, area + H_STACK0);
@@ -599,6 +609,10 @@ impl Machine {
             return;
         }
         if v == 0x2f && !hw && self.cpu.ax() == 0x168a && self.dpmi_vendor_api() {
+            return;
+        }
+        if v == 0x2f && !hw && self.cpu.ax() == 0x4011 && self.client().pm_vectors[0x2f].is_none() {
+            self.vdd_entry_pm();
             return;
         }
         if let Some((sel, off)) = self.client().pm_vectors[v as usize] {
@@ -843,6 +857,12 @@ impl Machine {
         }
         self.cpu.set_al(0);
         true
+    }
+
+    /// VDD `k`'s protected-mode entry point (crate::vdd).
+    pub(crate) fn dpmi_vdd_entry(&mut self, k: u16) -> (u16, u16) {
+        let sel = if self.client().bits32 { SEL_CODE3 } else { SEL_CODE3_16 };
+        (sel, (H_VDD + k as u32 * 8) as u16)
     }
 
     /// The extension API (a far call): AX=0000h the version (0100h),

@@ -5,7 +5,11 @@
 //! Drive C: is the current directory (or `--c DIR`); `--drive D=DIR`
 //! adds drives. `--keys TEXT` types keys when the program waits for
 //! input (`\n` Enter, `{esc}`, `{f1}`..`{f10}`, `{up}` `{down}` `{left}`
-//! `{right}`, `{wait}` half a second, `{alt-x}`, `{ctrl-c}`). At the end
+//! `{right}`, `{wait}` half a second (`{wait N}` N seconds), `{alt-x}`,
+//! `{ctrl-c}`; the mouse at a pixel of the screen: `{mouse X Y}` moves,
+//! `{click X Y}`, `{rclick X Y}`, `{dclick X Y}`, `{press X Y}` and
+//! `{release X Y}` with the left button; `{shot FILE}` saves the screen
+//! as a PNG then). At the end
 //! the text screen is printed (or written to `--screen FILE`); `--png
 //! FILE` saves the screen of a graphics mode. `--timeout SECS` ends a
 //! program that runs too long, `--trace` logs every BIOS/DOS call.
@@ -37,6 +41,9 @@ struct Run {
 enum KeyItem {
     Scan(Vec<(u8, u8)>),
     Wait(f64),
+    /// The mouse at a pixel, with these buttons.
+    Mouse(i32, i32, u8),
+    Shot(String),
 }
 
 fn now_secs(s: &Instant) -> f64 {
@@ -275,6 +282,19 @@ impl Host for Run {
                 self.idle_since_key = false;
             }
             Some(KeyItem::Wait(s)) => self.next_key_at = t + s,
+            Some(KeyItem::Mouse(x, y, buttons)) => {
+                let (w, h) = self.last_gfx.as_ref().map_or((640, 480), |g| (g.0 as i64, g.1 as i64));
+                let ax = ((x as i64 * 65536 + 32768) / w).clamp(0, 65535) as u32;
+                let ay = ((y as i64 * 65536 + 32768) / h).clamp(0, 65535) as u32;
+                out.push(Event::MouseAbs { x: ax, y: ay, buttons });
+                self.next_key_at = t + 0.05;
+                self.idle_since_key = false;
+            }
+            Some(KeyItem::Shot(p)) => {
+                if let Some((w, h, px, pal)) = &self.last_gfx {
+                    write_png(Path::new(&p), *w, *h, px, pal);
+                }
+            }
             None => {}
         }
     }
@@ -388,6 +408,37 @@ fn parse_keys(s: &str) -> VecDeque<KeyItem> {
         if c == '{' {
             let name: String = chars.by_ref().take_while(|&c| c != '}').collect();
             let ext = |sc: u8| vec![(0xe0, 0), (sc, 0), (0xe0, 0), (sc | 0x80, 0)];
+            let words: Vec<&str> = name.split_whitespace().collect();
+            let xy = |i: usize| words.get(i).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+            match words.first().copied() {
+                Some("mouse") => {
+                    q.push_back(KeyItem::Mouse(xy(1), xy(2), 0));
+                    continue;
+                }
+                Some(c @ ("click" | "rclick" | "dclick" | "press" | "release")) => {
+                    let b = if c == "rclick" { 2 } else { 1 };
+                    let (x, y) = (xy(1), xy(2));
+                    q.push_back(KeyItem::Mouse(x, y, 0));
+                    for _ in 0..if c == "dclick" { 2 } else { 1 } {
+                        if c != "release" {
+                            q.push_back(KeyItem::Mouse(x, y, b));
+                        }
+                        if c != "press" {
+                            q.push_back(KeyItem::Mouse(x, y, 0));
+                        }
+                    }
+                    continue;
+                }
+                Some("shot") => {
+                    q.push_back(KeyItem::Shot(words.get(1).unwrap_or(&"shot.png").to_string()));
+                    continue;
+                }
+                Some("wait") if words.len() > 1 => {
+                    q.push_back(KeyItem::Wait(words[1].parse().unwrap_or(0.5)));
+                    continue;
+                }
+                _ => {}
+            }
             let item = match name.as_str() {
                 "wait" => KeyItem::Wait(0.5),
                 "enter" => KeyItem::Scan(press(0x1c, b'\r')),

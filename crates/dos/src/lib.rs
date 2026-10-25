@@ -25,6 +25,7 @@ pub mod hw;
 pub mod mouse;
 pub mod sb;
 pub mod shell;
+pub mod vdd;
 pub mod video;
 pub mod xms;
 
@@ -163,6 +164,7 @@ impl Machine {
         m.xms_init();
         m.ems_init();
         m.dpmi_rom_init();
+        m.vdd_rom_init();
         m
     }
 
@@ -366,6 +368,10 @@ impl Machine {
                 Cb::Done
             }
             dpmi::CB_FIRST..=dpmi::CB_LAST => self.dpmi_callback(host, n),
+            vdd::CB_VDD..=vdd::CB_VDD_LAST => {
+                self.vdd_call(host, n - vdd::CB_VDD);
+                Cb::Done
+            }
             _ => {
                 host.log(&alloc::format!("dos: unknown callback {n:#x}"));
                 Cb::Done

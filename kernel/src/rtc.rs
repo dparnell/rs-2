@@ -104,14 +104,15 @@ pub fn weekday(y: u16, m: u8, d: u8) -> u8 {
 }
 
 /// Seconds since 1970-01-01 00:00:00.
+/// Years outside 1970-2105 (a torn CMOS read) are clamped to them.
 pub fn unix_time(t: &DateTime) -> u32 {
     let days_before = |y: u32| -> u32 { 365 * (y - 1970) + (y - 1969) / 4 - (y - 1901) / 100 + (y - 1601) / 400 };
     const CUM: [u32; 12] = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
-    let y = t.year as u32;
+    let y = (t.year as u32).clamp(1970, 2105);
     let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let mut days = days_before(y) + CUM[(t.month as usize).clamp(1, 12) - 1] + t.day as u32 - 1;
+    let mut days = days_before(y) + CUM[(t.month as usize).clamp(1, 12) - 1] + (t.day as u32).clamp(1, 31) - 1;
     if leap && t.month > 2 {
         days += 1;
     }
-    days * 86400 + t.hour as u32 * 3600 + t.minute as u32 * 60 + t.second as u32
+    days.saturating_mul(86400).saturating_add(t.hour.min(23) as u32 * 3600 + t.minute.min(59) as u32 * 60 + t.second.min(59) as u32)
 }

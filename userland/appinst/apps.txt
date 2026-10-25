@@ -321,6 +321,7 @@ category Win-OS/2 | Win-OS/2 | <RS2_WINOS2>
 
 app winos2 | Win-OS/2 | IBM's Windows 3.1 for OS/2, full screen in a DOS session: Program Manager and the Windows accessories in 640x480 with 16 colours (VGA). Its WIN-OS/2 Full Screen object goes into Command Prompts, as OS/2 has it; the Win-OS/2 folder starts accessories directly. Not yet: Windows programs in windows on the desktop (seamless), the clipboard and DDE with OS/2 programs, the OS/2 shield (WINSHELD), sound and printing.
 object WIN-OS/2 Full Screen | \OS2\MDOS\WINOS2\WINOS2.COM | | \OS2\MDOS\WINOS2 | <WP_WINFS> | <WP_PROMPTS> | VDM
+object WIN-OS/2 Window | \OS2\MDOS\WINOS2\WINOS2.COM | | \OS2\MDOS\WINOS2 | <WP_WIN2WIN> | <WP_PROMPTS> | WINDOWEDVDM
 object Clock | \OS2\MDOS\WINOS2\WINOS2.COM | CLOCK.EXE | \OS2\MDOS\WINOS2 | <RS2_WCLOCK> | | VDM
 object Notepad | \OS2\MDOS\WINOS2\WINOS2.COM | NOTEPAD.EXE | \OS2\MDOS\WINOS2 | <RS2_WNOTEPAD> | | VDM
 object Calculator | \OS2\MDOS\WINOS2\WINOS2.COM | CALC.EXE | \OS2\MDOS\WINOS2 | <RS2_WCALC> | | VDM

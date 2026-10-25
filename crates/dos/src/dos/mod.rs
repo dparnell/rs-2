@@ -460,6 +460,7 @@ impl Machine {
                 let (maj, min) = self.cfg.version;
                 self.cpu.set_bx((min as u16) << 8 | maj as u16);
             }
+            0x4011 => self.vdd_entry_rm(),
             0x1600 => self.cpu.set_al(0),
             0x1a00 => self.cpu.set_al(0),
             0x4a01 | 0x4a02 => {
