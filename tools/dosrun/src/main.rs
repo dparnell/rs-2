@@ -12,7 +12,8 @@
 //! as a PNG then). At the end
 //! the text screen is printed (or written to `--screen FILE`); `--png
 //! FILE` saves the screen of a graphics mode. `--timeout SECS` ends a
-//! program that runs too long, `--trace` logs every BIOS/DOS call.
+//! program that runs too long, `--trace` logs every BIOS/DOS call,
+//! `--display WxH` sets the size of RS2DISP.DRV's screen (800x600).
 
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
@@ -36,6 +37,8 @@ struct Run {
     cp437: Vec<char>,
     /// Sound Blaster output collected for --wav (rate, samples).
     pcm: (u32, Vec<u8>),
+    /// --display: RS2DISP.DRV's screen size.
+    display: (u32, u32),
 }
 
 enum KeyItem {
@@ -325,6 +328,29 @@ impl Host for Run {
             }
         }
     }
+    fn display_size(&mut self) -> (u32, u32) {
+        self.display
+    }
+    fn present_display(&mut self, d: &dos::disp::Display, _damage: &[dos::disp::Rect]) {
+        // The picture with the pointer drawn in.
+        let mut px = d.pix.clone();
+        if let Some(p) = &d.pointer {
+            let (x0, y0) = (d.pointer_pos.0 - p.hot.0, d.pointer_pos.1 - p.hot.1);
+            for r in 0..p.h {
+                for c in 0..p.w {
+                    let (x, y) = (x0 + c as i32, y0 + r as i32);
+                    if x < 0 || y < 0 || x >= d.w as i32 || y >= d.h as i32 {
+                        continue;
+                    }
+                    let bit = |m: &[u8]| m[r * p.width_bytes + c / 8] >> (7 - c % 8) & 1 != 0;
+                    let o = y as usize * d.w + x as usize;
+                    let v = if bit(&p.and) { px[o] } else { 0 };
+                    px[o] = if bit(&p.xor) { v ^ 0xff } else { v };
+                }
+            }
+        }
+        self.last_gfx = Some((d.w, d.h, px, d.pal));
+    }
     fn pcm(&mut self, rate: u32, data: &[u8]) {
         if self.pcm.0 == 0 {
             self.pcm.0 = rate;
@@ -543,6 +569,7 @@ fn main() {
     let mut watch = u32::MAX;
     let mut stats = false;
     let mut wav_out: Option<String> = None;
+    let mut display = (800, 600);
     while let Some(a) = args.first().cloned() {
         if !a.starts_with("--") {
             break;
@@ -567,6 +594,11 @@ fn main() {
             "--stats" => stats = true,
             "--watch" => watch = u32::from_str_radix(val().trim_start_matches("0x"), 16).unwrap(),
             "--wav" => wav_out = Some(val()),
+            "--display" => {
+                let v = val();
+                let (w, h) = v.split_once('x').expect("--display WxH");
+                display = (w.parse().unwrap(), h.parse().unwrap());
+            }
             _ => panic!("unknown option {a}"),
         }
     }
@@ -594,6 +626,7 @@ fn main() {
         trace,
         cp437: cp437(),
         pcm: (0, Vec::new()),
+        display,
     };
     let mut m = Machine::new(&mut host, cfg);
     m.dos.cwd[2] = cwd.to_ascii_uppercase();

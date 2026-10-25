@@ -583,7 +583,7 @@ impl Machine {
     }
 
     /// Linear address of a protected-mode sel:off.
-    fn dpmi_lin(&mut self, sel: u16, off: u32) -> u32 {
+    pub(crate) fn dpmi_lin(&mut self, sel: u16, off: u32) -> u32 {
         let base = if sel & 4 != 0 {
             let a = self.dpmi.client.as_ref().map_or(0, |c| c.desc_addr(sel));
             let d = self.dpmi_rw64(a);

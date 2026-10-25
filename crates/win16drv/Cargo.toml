@@ -1,0 +1,8 @@
+[package]
+name = "win16drv"
+description = "rs2's paravirtual Windows 3.1 display driver RS2DISP.DRV: its entry points and the generator of its NE module"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]

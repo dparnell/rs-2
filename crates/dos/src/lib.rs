@@ -17,6 +17,7 @@ extern crate alloc;
 
 pub mod bios;
 pub mod devices;
+pub mod disp;
 pub mod dos;
 pub mod dpmi;
 pub mod ems;
@@ -98,6 +99,8 @@ pub struct Machine {
     pub ems: ems::Ems,
     pub mouse: mouse::Mouse,
     pub dpmi: dpmi::Dpmi,
+    /// RS2DISP.DRV's screen (Win-OS/2 with the paravirtual display).
+    pub disp: disp::Display,
     pub shells: Vec<shell::Shell>,
     /// The first program ended with this exit code.
     pub exited: Option<u8>,
@@ -134,6 +137,7 @@ impl Machine {
             ems: ems::Ems::default(),
             mouse: mouse::Mouse::default(),
             dpmi: dpmi::Dpmi::default(),
+            disp: disp::Display::default(),
             shells: Vec::new(),
             exited: None,
             chain_int: None,
@@ -330,6 +334,11 @@ impl Machine {
     }
 
     pub fn present<H: Host>(&mut self, host: &mut H) {
+        if self.disp.enabled {
+            let damage = self.disp.take_damage();
+            host.present_display(&self.disp, &damage);
+            return;
+        }
         host.present(&self.hw.vga, &self.hw.ram);
         self.hw.vga.dirty = false;
         self.hw.vga.palette_dirty = false;
@@ -368,6 +377,10 @@ impl Machine {
                 Cb::Done
             }
             dpmi::CB_FIRST..=dpmi::CB_LAST => self.dpmi_callback(host, n),
+            disp::CB_DISP..=disp::CB_DISP_LAST => {
+                self.disp_call(host, n);
+                Cb::Done
+            }
             vdd::CB_VDD..=vdd::CB_VDD_LAST => {
                 self.vdd_call(host, n - vdd::CB_VDD);
                 Cb::Done

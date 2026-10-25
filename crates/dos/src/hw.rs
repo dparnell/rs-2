@@ -206,13 +206,37 @@ impl Hw {
         &self.ram[a as usize..a as usize + len]
     }
 
+    /// Where `len` bytes at `a` are plain memory in one piece: (in
+    /// extended memory, index).
+    #[inline]
+    fn plain(&self, a: u32, len: usize) -> Option<(bool, usize)> {
+        let end = a as u64 + len as u64;
+        if end <= 0xa0000 {
+            return Some((false, a as usize));
+        }
+        if self.a20 && a >= EXT_BASE && a < crate::video::LFB_BASE && end <= EXT_BASE as u64 + self.ext.len() as u64 {
+            return Some((true, (a - EXT_BASE) as usize));
+        }
+        None
+    }
+
     pub fn read_bytes(&mut self, a: u32, out: &mut [u8]) {
+        if let Some((ext, i)) = self.plain(a, out.len()) {
+            out.copy_from_slice(if ext { &self.ext[i..i + out.len()] } else { &self.ram[i..i + out.len()] });
+            return;
+        }
         for (i, b) in out.iter_mut().enumerate() {
             *b = self.rd(a.wrapping_add(i as u32));
         }
     }
 
     pub fn write_bytes(&mut self, a: u32, data: &[u8]) {
+        if let Some((ext, i)) = self.plain(a, data.len()) {
+            if self.watch == u32::MAX {
+                if ext { &mut self.ext[i..i + data.len()] } else { &mut self.ram[i..i + data.len()] }.copy_from_slice(data);
+                return;
+            }
+        }
         for (i, b) in data.iter().enumerate() {
             self.wr(a.wrapping_add(i as u32), *b);
         }
