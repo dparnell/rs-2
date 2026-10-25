@@ -15,7 +15,10 @@
 #                                            category's, as in INI.RC;
 #                                            TYPE: PROGTYPE (VDM: DOS full
 #                                            screen, WINDOWEDVDM: DOS
-#                                            window), PM when not given
+#                                            window, PROG_31_*: Win-OS/2,
+#                                            e.g. PROG_31_ENHSEAMLESSCOMMON
+#                                            seamless in the common
+#                                            session), PM when not given
 #   make TARGET | HOW | INPUT                a file made from an installed
 #                                            one after the files are in
 #                                            place (rs2disp: rs2's display
@@ -325,21 +328,22 @@ category Win-OS/2 | Win-OS/2 | <RS2_WINOS2>
 
 app winos2 | Win-OS/2 | IBM's Windows 3.1 for OS/2, full screen in a DOS session: Program Manager and the Windows accessories in 640x480 with 16 colours (VGA). Its WIN-OS/2 Full Screen object goes into Command Prompts, as OS/2 has it; the Win-OS/2 folder starts accessories directly. Not yet: Windows programs in windows on the desktop (seamless), the clipboard and DDE with OS/2 programs, the OS/2 shield (WINSHELD), sound and printing.
 object WIN-OS/2 Full Screen | \OS2\MDOS\WINOS2\WINOS2.COM | | \OS2\MDOS\WINOS2 | <WP_WINFS> | <WP_PROMPTS> | VDM
-object WIN-OS/2 Window | \OS2\MDOS\WINOS2\WINOS2.COM | | \OS2\MDOS\WINOS2 | <WP_WIN2WIN> | <WP_PROMPTS> | WINDOWEDVDM
-object Clock | \OS2\MDOS\WINOS2\WINOS2.COM | CLOCK.EXE | \OS2\MDOS\WINOS2 | <RS2_WCLOCK> | | VDM
-object Notepad | \OS2\MDOS\WINOS2\WINOS2.COM | NOTEPAD.EXE | \OS2\MDOS\WINOS2 | <RS2_WNOTEPAD> | | VDM
-object Calculator | \OS2\MDOS\WINOS2\WINOS2.COM | CALC.EXE | \OS2\MDOS\WINOS2 | <RS2_WCALC> | | VDM
-object Write | \OS2\MDOS\WINOS2\WINOS2.COM | WRITE.EXE | \OS2\MDOS\WINOS2 | <RS2_WWRITE> | | VDM
-object Paintbrush | \OS2\MDOS\WINOS2\WINOS2.COM | PBRUSH.EXE | \OS2\MDOS\WINOS2 | <RS2_WPBRUSH> | | VDM
-object File Manager | \OS2\MDOS\WINOS2\WINOS2.COM | WINFILE.EXE | \OS2\MDOS\WINOS2 | <RS2_WWINFILE> | | VDM
-object Control Panel | \OS2\MDOS\WINOS2\WINOS2.COM | CONTROL.EXE | \OS2\MDOS\WINOS2 | <RS2_WCONTROL> | | VDM
+object WIN-OS/2 Window | \OS2\MDOS\WINOS2\PROGMAN.EXE | | \OS2\MDOS\WINOS2 | <WP_WIN2WIN> | <WP_PROMPTS> | PROG_31_ENHSEAMLESSCOMMON
+object WIN-OS/2 Desktop in a Window | \OS2\MDOS\WINOS2\WINOS2.COM | | \OS2\MDOS\WINOS2 | <RS2_WINOS2DESK> | <WP_PROMPTS> | WINDOWEDVDM
+object Clock | \OS2\MDOS\WINOS2\CLOCK.EXE | | \OS2\MDOS\WINOS2 | <RS2_WCLOCK> | | PROG_31_ENHSEAMLESSCOMMON
+object Notepad | \OS2\MDOS\WINOS2\NOTEPAD.EXE | | \OS2\MDOS\WINOS2 | <RS2_WNOTEPAD> | | PROG_31_ENHSEAMLESSCOMMON
+object Calculator | \OS2\MDOS\WINOS2\CALC.EXE | | \OS2\MDOS\WINOS2 | <RS2_WCALC> | | PROG_31_ENHSEAMLESSCOMMON
+object Write | \OS2\MDOS\WINOS2\WRITE.EXE | | \OS2\MDOS\WINOS2 | <RS2_WWRITE> | | PROG_31_ENHSEAMLESSCOMMON
+object Paintbrush | \OS2\MDOS\WINOS2\PBRUSH.EXE | | \OS2\MDOS\WINOS2 | <RS2_WPBRUSH> | | PROG_31_ENHSEAMLESSCOMMON
+object File Manager | \OS2\MDOS\WINOS2\WINFILE.EXE | | \OS2\MDOS\WINOS2 | <RS2_WWINFILE> | | PROG_31_ENHSEAMLESSCOMMON
+object Control Panel | \OS2\MDOS\WINOS2\CONTROL.EXE | | \OS2\MDOS\WINOS2 | <RS2_WCONTROL> | | PROG_31_ENHSEAMLESSCOMMON
 make \OS2\MDOS\WINOS2\SYSTEM\RS2DISP.DRV | rs2disp | \OS2\MDOS\WINOS2\SYSTEM\VGA.DRV
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | display.drv | rs2disp.drv
-ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | sdisplay.drv | swinvga.drv
+ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | sdisplay.drv | rs2disp.drv
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | fonts.fon | vgasys.fon
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | fixedfon.fon | vgafix.fon
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | oemfonts.fon | vgaoem.fon
-ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | useos2shield | 0
+ini \OS2\MDOS\WINOS2\SYSTEM.INI | boot | useos2shield | 1
 ini \OS2\MDOS\WINOS2\SYSTEM.INI | keyboard | keyboard.dll |
 ini \OS2\MDOS\WINOS2\WIN.INI | Settings | display.drv | rs2disp.drv
 file \OS2\MDOS\WINOS2\SYSTEM\OS2K386.EXE | OS2IMAGE\DISK_18\WINENVFP | \SYSTEM\OS2K386.EXE

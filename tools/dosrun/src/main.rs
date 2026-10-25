@@ -9,7 +9,7 @@
 //! `{ctrl-c}`; the mouse at a pixel of the screen: `{mouse X Y}` moves,
 //! `{click X Y}`, `{rclick X Y}`, `{dclick X Y}`, `{press X Y}` and
 //! `{release X Y}` with the left button; `{shot FILE}` saves the screen
-//! as a PNG then). At the end
+//! as a PNG then; `{run CMD}` asks seamless Win-OS/2 to start CMD). At the end
 //! the text screen is printed (or written to `--screen FILE`); `--png
 //! FILE` saves the screen of a graphics mode. `--timeout SECS` ends a
 //! program that runs too long, `--trace` logs every BIOS/DOS call,
@@ -47,6 +47,8 @@ enum KeyItem {
     /// The mouse at a pixel, with these buttons.
     Mouse(i32, i32, u8),
     Shot(String),
+    /// A seamless host's request to start a program in Win-OS/2.
+    Run(String),
 }
 
 fn now_secs(s: &Instant) -> f64 {
@@ -293,6 +295,12 @@ impl Host for Run {
                 self.next_key_at = t + 0.05;
                 self.idle_since_key = false;
             }
+            Some(KeyItem::Run(c)) => {
+                let mut cmd = [0u8; 128];
+                let n = c.len().min(127);
+                cmd[..n].copy_from_slice(&c.as_bytes()[..n]);
+                out.push(Event::Window(dos::vwin::Request::Run(cmd)));
+            }
             Some(KeyItem::Shot(p)) => {
                 if let Some((w, h, px, pal)) = &self.last_gfx {
                     write_png(Path::new(&p), *w, *h, px, pal);
@@ -453,6 +461,10 @@ fn parse_keys(s: &str) -> VecDeque<KeyItem> {
                             q.push_back(KeyItem::Mouse(x, y, 0));
                         }
                     }
+                    continue;
+                }
+                Some("run") => {
+                    q.push_back(KeyItem::Run(words[1..].join(" ")));
                     continue;
                 }
                 Some("shot") => {

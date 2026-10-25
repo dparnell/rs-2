@@ -32,6 +32,8 @@ unsafe extern "C" {
 /// A session's surface as the window sees it.
 pub struct View {
     pub s: Surface,
+    /// A seamless session: its windows are shown, not its screen.
+    pub seamless: bool,
     pub w: usize,
     pub h: usize,
     /// Damage entries seen.
@@ -57,7 +59,9 @@ impl View {
             return None;
         }
         let (w, h) = unsafe { (s.get(sf::W) as usize, s.get(sf::H) as usize) };
-        Some(View { s, w, h, seq: unsafe { s.get(sf::SEQ) }, ptr_gen: 0, hptr: 0, pal_gen: u32::MAX, pal: [0; 256] })
+        let seamless = unsafe { s.get(sf::FLAGS) } & sf::FL_SEAMLESS != 0;
+        Some(View {
+            seamless, s, w, h, seq: unsafe { s.get(sf::SEQ) }, ptr_gen: 0, hptr: 0, pal_gen: u32::MAX, pal: [0; 256] })
     }
 
     /// The rectangles (surface coordinates) damaged since the last call;
@@ -93,10 +97,17 @@ impl View {
     /// Draw the part of the surface under client rectangle `r` (client
     /// height `ch`, the surface's top left at the client's top left).
     pub fn paint(&self, hps: u32, r: &RectL, ch: i32) {
-        let x0 = r.l.max(0) as usize;
-        let x1 = (r.r.max(0) as usize).min(self.w);
-        let y0 = (ch - r.t).max(0) as usize;
-        let y1 = ((ch - r.b).max(0) as usize).min(self.h);
+        self.paint_at(hps, r, ch, 0, 0);
+    }
+
+    /// The same with surface point (ox, oy) at the client's top left.
+    pub fn paint_at(&self, hps: u32, r: &RectL, ch: i32, ox: i32, oy: i32) {
+        let cx0 = r.l.max(0);
+        let cy0 = (ch - r.t).max(0);
+        let x0 = (ox + cx0).clamp(0, self.w as i32) as usize;
+        let x1 = (ox + r.r.max(0)).clamp(0, self.w as i32) as usize;
+        let y0 = (oy + cy0).clamp(0, self.h as i32) as usize;
+        let y1 = (oy + (ch - r.b).max(0)).clamp(0, self.h as i32) as usize;
         if x0 >= x1 || y0 >= y1 {
             return;
         }
@@ -120,7 +131,7 @@ impl View {
         bmi[6..8].copy_from_slice(&(bh as u16).to_le_bytes());
         bmi[8] = 1;
         bmi[10] = 24;
-        let (l, b) = (x0 as i32, ch - y1 as i32);
+        let (l, b) = (x0 as i32 - ox, ch - (y1 as i32 - oy));
         let pts = [PointL { x: l, y: b }, PointL { x: l + bw as i32 - 1, y: b + bh as i32 - 1 }, PointL { x: 0, y: 0 }];
         unsafe { crate::GpiDrawBits(hps, buf.as_ptr(), bmi.as_ptr(), 3, pts.as_ptr(), 0xcc, 0) };
     }

@@ -12,6 +12,7 @@
 //! | 404 | `Rs2VioReadPixels(ULONG sid, PULONG pInfo, PBYTE pPixels, ULONG cb, PULONG pPalette)` |
 //! | 405 | `Rs2VdmMouse(ULONG sid, ULONG x, ULONG y, ULONG fsButtons)` |
 //! | 406 | `Rs2VdmSurface(ULONG cmd, ULONG a, ULONG b)` |
+//! | 407 | `Rs2VdmRequest(ULONG sid, ULONG code, LONG a, LONG b)` |
 //!
 //! Rs2VdmRegister makes the caller's session a DOS session: from then on
 //! its keys and mouse are not translated into KBD and MOU events but
@@ -47,6 +48,10 @@
 //! redraws; returns 1 when the session is on the full screen, where the
 //! VDM shows it with Rs2VdmSetPixels, else 0); 3 the screen's size into
 //! the ULONGs at a and b.
+//!
+//! Rs2VdmRequest queues a request of the seamless host for the session's
+//! Win-OS/2 (VDMEVENT kind 4: flags the code, a, b; the codes in
+//! win16drv::surface).
 
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
@@ -229,6 +234,11 @@ pub fn surface(c: &mut Ctx) -> u32 {
         }
         _ => err::INVALID_PARAMETER,
     }
+}
+
+pub fn request(c: &mut Ctx) -> u32 {
+    let (s, code, a, b) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
+    if crate::vdm::request(s, code as u16, a as i32, b as i32) { 0 } else { ERROR_SMG_SESSION_NOT_FOUND }
 }
 
 pub fn mouse(c: &mut Ctx) -> u32 {

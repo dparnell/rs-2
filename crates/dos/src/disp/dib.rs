@@ -5,7 +5,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use super::{cref_of, mono_of, nearest, Args, Dev, Rect, PALETTE};
+use super::{cref_of, mono_of, nearest, Args, Rect, PALETTE};
 use crate::Machine;
 
 /// The 16 colours of a 4-bit DIB the driver writes.
@@ -223,6 +223,3 @@ fn nearest16(rgb: u32) -> u8 {
     }
     best.1
 }
-
-#[allow(dead_code)]
-fn unused(_: &Dev) {}

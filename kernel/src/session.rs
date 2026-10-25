@@ -260,6 +260,11 @@ pub fn set_leader(sid: u32, pid: u32) {
     }
 }
 
+/// The leader process of session `sid`.
+pub fn leader(sid: u32) -> Option<u32> {
+    SESSIONS.lock().iter().find(|s| s.id == sid).map(|s| s.leader)
+}
+
 /// Undo `create` when the program could not be started.
 pub fn discard(sid: u32) {
     SESSIONS.lock().retain(|s| s.id != sid);

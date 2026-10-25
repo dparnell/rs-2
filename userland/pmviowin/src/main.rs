@@ -32,6 +32,7 @@
 
 extern crate alloc;
 
+mod seamless;
 mod surface;
 
 use alloc::vec::Vec;
@@ -286,6 +287,10 @@ const VK_ENTER: u32 = 0x1e;
 
 const SWP_SIZE: u32 = 0x0001;
 const SWP_MOVE: u32 = 0x0002;
+const SWP_ZORDER: u32 = 0x0004;
+const SWP_SHOW: u32 = 0x0008;
+const SWP_NOACTIVATE: u32 = 0x0080;
+const HWND_TOP: u32 = 3;
 
 /// System menu items.
 const IDM_MARK: u32 = 0x7f01;
@@ -359,6 +364,8 @@ struct Win {
     leader: u32,
     /// A display surface (Win-OS/2 with RS2DISP.DRV).
     view: Option<surface::View>,
+    /// A seamless Win-OS/2 session's windows.
+    seam: Option<seamless::Seamless>,
 }
 
 static mut WINS: Vec<Win> = Vec::new();
@@ -484,6 +491,20 @@ fn refresh(i: usize) {
         if w.view.is_none() {
             w.view = surface::View::open(w.leader);
         }
+        if let Some(v) = w.view.as_mut().filter(|v| v.seamless) {
+            // Seamless: the Windows windows, not the session's frame.
+            let damage = v.damage();
+            w.changes = st[0];
+            w.flags = st[9];
+            if w.seam.is_none() {
+                w.seam = Some(seamless::Seamless::new(w.sid));
+                unsafe { WinShowWindow(w.frame, 0) };
+            }
+            let sm = w.seam.as_mut().unwrap();
+            seamless::sync(sm, v, OBJECT.load(Ordering::Relaxed));
+            seamless::damage(sm, v, damage);
+            return;
+        }
         if let Some(v) = w.view.as_mut() {
             let dims = (v.w, v.h);
             let damage = v.damage();
@@ -510,6 +531,12 @@ fn refresh(i: usize) {
     } else if w.view.is_some() {
         w.view = None;
         w.pix_dims = (0, 0);
+        if let Some(mut sm) = w.seam.take() {
+            seamless::destroy(&mut sm);
+            if w.windowed {
+                unsafe { WinShowWindow(w.frame, 1) };
+            }
+        }
     }
     if st[9] & ST_PIXELS != 0 {
         // A DOS session in a graphics mode: the picture instead of cells.
@@ -755,6 +782,9 @@ fn sync() {
     // Windows of sessions that ended.
     let gone: Vec<u32> = wins().iter().filter(|w| !list.iter().any(|s| s.sid == w.sid)).map(|w| w.frame).collect();
     for f in gone {
+        if let Some(sm) = wins().iter_mut().find(|w| w.frame == f).and_then(|w| w.seam.as_mut()) {
+            seamless::destroy(sm);
+        }
         wins().retain(|w| w.frame != f);
         unsafe { WinDestroyWindow(f) };
     }
@@ -778,10 +808,13 @@ fn sync() {
             let w = &mut wins()[i];
             w.windowed = windowed;
             w.register();
-            unsafe { WinShowWindow(w.frame, windowed as u32) };
+            unsafe { WinShowWindow(w.frame, (windowed && w.seam.is_none()) as u32) };
         }
         if wins()[i].changes != s.changes {
             refresh(i);
+        }
+        if s.flags & VS_ACTIVATE != 0 && windowed && wins()[i].seam.is_some() {
+            continue;
         }
         if s.flags & VS_ACTIVATE != 0 && windowed {
             let w = &wins()[i];
@@ -843,6 +876,7 @@ fn create_window(s: &VioSession) -> Option<usize> {
         pix_dims: (0, 0),
         leader: s.leader,
         view: None,
+        seam: None,
     });
     HAD_WINDOWS.store(1, Ordering::Relaxed);
     let i = wins().len() - 1;
@@ -1372,6 +1406,30 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     }
 }
 
+/// The clients of a seamless session's frames (seamless.rs).
+extern "C" fn seamless_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    let Some((i, j)) = wins().iter().enumerate().find_map(|(i, w)| w.seam.as_ref().and_then(|s| s.by_client(h)).map(|j| (i, j))) else {
+        return unsafe { WinDefWindowProc(h, msg, mp1, mp2) };
+    };
+    let w = &mut wins()[i];
+    let (Some(sm), Some(view)) = (w.seam.as_mut(), w.view.as_mut()) else { return 0 };
+    match msg {
+        WM_PAINT => {
+            seamless::paint(&sm.wins[j], view);
+            0
+        }
+        WM_MOUSEMOVE | WM_BUTTON1DOWN | WM_BUTTON1UP | WM_BUTTON2DOWN | WM_BUTTON2UP | WM_BUTTON3DOWN | WM_BUTTON3UP => {
+            seamless::mouse(sm, j, view, msg, mp1);
+            1
+        }
+        WM_CLOSE => {
+            seamless::close(sm, j);
+            0
+        }
+        _ => unsafe { WinDefWindowProc(h, msg, mp1, mp2) },
+    }
+}
+
 extern "C" fn object_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         WM_SYNC => {
@@ -1381,6 +1439,14 @@ extern "C" fn object_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_TIMER if mp1 == TID_BLINK => {
             blink();
+            0
+        }
+        WM_TIMER if seamless::is_timer(mp1) => {
+            for w in wins().iter_mut() {
+                if let Some(sm) = w.seam.as_mut() {
+                    seamless::tick(sm);
+                }
+            }
             0
         }
         _ => unsafe { WinDefWindowProc(h, msg, mp1, mp2) },
@@ -1455,6 +1521,7 @@ fn main(s: &os2::Startup) -> u32 {
         HAB.store(hab, Ordering::Relaxed);
         WinRegisterClass(hab, b"Rs2VioWindow\0".as_ptr(), client_proc, 0, 0);
         WinRegisterClass(hab, b"Rs2VioHost\0".as_ptr(), object_proc, 0, 0);
+        WinRegisterClass(hab, seamless::CLASS.as_ptr(), seamless_proc, 0, 0);
         let obj = WinCreateWindow(HWND_OBJECT, b"Rs2VioHost\0".as_ptr(), b"\0".as_ptr(), 0, 0, 0, 0, 0, 0, 3, 0, null(), null());
         OBJECT.store(obj, Ordering::Relaxed);
         Rs2VioControl(0, CTL_REGISTER, 0);

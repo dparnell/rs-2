@@ -26,6 +26,7 @@ mod text;
 use alloc::vec;
 use alloc::vec::Vec;
 
+pub use blt::{rop2, rop3};
 pub use win16drv::{CB_DISP, CB_DISP_LAST};
 use x86emu::SS;
 
@@ -95,15 +96,13 @@ pub struct Display {
     pub pointer_gen: u32,
     /// SAVESCREENBITMAP's copy.
     saved: Option<(Rect, Vec<u8>)>,
-    /// Entries already logged as unexpected (debugging).
-    logged: Vec<u32>,
     /// Log every call (debugging).
     pub trace: bool,
 }
 
 impl Default for Display {
     fn default() -> Self {
-        Display { enabled: false, w: 0, h: 0, pix: Vec::new(), pal: PALETTE, damage: Vec::new(), pointer: None, pointer_pos: (0, 0), pointer_gen: 0, saved: None, logged: Vec::new(), trace: false }
+        Display { enabled: false, w: 0, h: 0, pix: Vec::new(), pal: PALETTE, damage: Vec::new(), pointer: None, pointer_pos: (0, 0), pointer_gen: 0, saved: None, trace: false }
     }
 }
 
@@ -293,7 +292,6 @@ pub(crate) struct DrawMode {
     pub bk_mode: u16,
     pub bk: u32,
     pub text: u32,
-    pub tbreak_extra: i32,
     pub break_extra: i32,
     pub break_err: i32,
     pub break_rem: i32,
@@ -303,7 +301,7 @@ pub(crate) struct DrawMode {
 
 impl Default for DrawMode {
     fn default() -> Self {
-        DrawMode { rop2: 13, bk_mode: 2, bk: 0x1ff, text: 0, tbreak_extra: 0, break_extra: 0, break_err: 0, break_rem: 0, break_count: 0, char_extra: 0 }
+        DrawMode { rop2: 13, bk_mode: 2, bk: 0x1ff, text: 0, break_extra: 0, break_err: 0, break_rem: 0, break_count: 0, char_extra: 0 }
     }
 }
 
@@ -377,14 +375,6 @@ impl Machine {
         };
         self.cpu.set_ax(r as u16);
         self.cpu.set_dx((r >> 16) as u16);
-    }
-
-    /// Log something unexpected once per key (debugging).
-    pub(crate) fn disp_log_once<H: Host>(&mut self, host: &mut H, key: u32, msg: &str) {
-        if !self.disp.logged.contains(&key) {
-            self.disp.logged.push(key);
-            host.log(msg);
-        }
     }
 
     /// ENABLE(lpDevInfo, wStyle, lpDestDevType, lpOutputFile, lpData):
@@ -465,7 +455,6 @@ impl Machine {
             bk_mode: w(self, 2) as u16,
             bk: self.hw.rd32(l + 4),
             text: self.hw.rd32(l + 8),
-            tbreak_extra: w(self, 12),
             break_extra: w(self, 14),
             break_err: w(self, 16),
             break_rem: w(self, 18),

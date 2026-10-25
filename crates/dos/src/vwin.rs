@@ -135,7 +135,7 @@ impl Vwin {
     }
 
     /// Learn from a message Windows sends to PM.
-    fn learn(&mut self, m: &[u8]) {
+    pub fn learn(&mut self, m: &[u8]) {
         let code = rd16(m, 0x24);
         let hwnd = rd16(m, 0x20);
         let (top, left, height, width) = (rd16(m, 8) as i16 as i32, rd16(m, 0x0a) as i16 as i32, rd16(m, 0x0c) as i16 as i32, rd16(m, 0x0e) as i16 as i32);
@@ -224,6 +224,11 @@ impl Vwin {
         m[0x20..0x22].copy_from_slice(&hwnd.to_le_bytes());
         m[0x24..0x26].copy_from_slice(&code.to_le_bytes());
         m
+    }
+
+    /// The next message for Windows (as WINSHELD reads it).
+    pub fn next_message(&mut self) -> Option<Vec<u8>> {
+        self.inbox.pop_front()
     }
 
     /// Queue a request of the host for Windows.

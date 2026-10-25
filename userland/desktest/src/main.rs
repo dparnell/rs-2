@@ -298,10 +298,63 @@ fn dos_objects(windowed: bool) -> u32 {
     FAILS.load(Ordering::Relaxed)
 }
 
+/// `DESKTEST WIN`: Win-OS/2 program objects (Clock and Notepad, of type
+/// PROG_31_ENHSEAMLESSCOMMON as APPINST makes them) in the Startup
+/// folder, started by the shell: one seamless Win-OS/2 session, the
+/// second program started in the first one's (docs/WINOS2.md).
+fn winos2_objects() -> u32 {
+    make_ini();
+    let Some(g) = objects::query_u32(objects::APP_DESKTOP, b"StartupGroup").filter(|&h| objects::group_exists(h)) else {
+        os2::println!("no Startup folder");
+        return 1;
+    };
+    const PROG_31_ENHSEAMLESSCOMMON: u32 = 18;
+    let dir = b"C:\\OS2\\MDOS\\WINOS2".to_vec();
+    let clock = Program { progc: PROG_31_ENHSEAMLESSCOMMON, title: b"Clock".to_vec(), exe: b"C:\\OS2\\MDOS\\WINOS2\\CLOCK.EXE".to_vec(), dir: dir.clone(), ..Program::default() };
+    let notepad = Program { progc: PROG_31_ENHSEAMLESSCOMMON, title: b"Notepad".to_vec(), exe: b"C:\\OS2\\MDOS\\WINOS2\\NOTEPAD.EXE".to_vec(), dir, ..Program::default() };
+    let a = objects::add_program(g, &clock);
+    check("a seamless Win-OS/2 object in the Startup folder", a != 0 && objects::definition(a).is_some_and(|d| d.progc == PROG_31_ENHSEAMLESSCOMMON));
+    let prog = objects::sys_path(b"OS2\\RS2SHELL.EXE");
+    let mut args = prog.clone();
+    args.push(0);
+    args.extend_from_slice(b"/STARTUP\0\0");
+    let pz = z(&prog);
+    let mut fail = [0u8; 64];
+    let mut res = os2::ResultCodes { code_terminate: 0, code_result: 0 };
+    let rc = unsafe { os2::DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, 0, args.as_ptr(), core::ptr::null(), &mut res, pz.as_ptr()) };
+    check("RS2SHELL /STARTUP starts it", rc == 0);
+    objects::remove_program(a);
+    // The second one (as the shell starts it: DosStartSession with the
+    // object's type) goes into the first one's session.
+    unsafe { os2::DosSleep(3000) };
+    let (t, n) = (z(&notepad.title), z(&notepad.exe));
+    let empty = [0u8; 1];
+    let sd = os2::StartData {
+        length: core::mem::size_of::<os2::StartData>() as u16,
+        related: 0,
+        fgbg: 0,
+        trace: 0,
+        title: t.as_ptr(),
+        name: n.as_ptr(),
+        inputs: empty.as_ptr(),
+        termq: core::ptr::null(),
+        env: core::ptr::null(),
+        inherit: 0,
+        session_type: PROG_31_ENHSEAMLESSCOMMON as u16,
+    };
+    let (mut sid, mut pid) = (0, 0);
+    let rc = unsafe { os2::DosStartSession(&sd, &mut sid, &mut pid) };
+    check("a second one goes into the same session", (rc == 0 || rc == 457) && sid != 0);
+    FAILS.load(Ordering::Relaxed)
+}
+
 fn main(s: &os2::Startup) -> u32 {
     let args: alloc::vec::Vec<u8> = s.args().iter().copied().skip_while(|&c| c == b' ').collect();
     if let Some(m) = args.strip_prefix(b"DOS ") {
         return dos_objects(m.first() == Some(&b'W'));
+    }
+    if args.starts_with(b"WIN") {
+        return winos2_objects();
     }
     // DESKTEST MARK FILE: write FILE (a Startup folder object).
     if let Some(f) = args.strip_prefix(b"MARK ") {

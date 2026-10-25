@@ -437,6 +437,15 @@ fn object(group: u32, o: &catalog::Object, d: u8) {
     pd[1] = match o.progtype {
         b"VDM" => PROG_VDM,
         b"WINDOWEDVDM" => PROG_WINDOWEDVDM,
+        // Win-OS/2 (pmshl.h's PROG_30_* and PROG_31_*).
+        b"PROG_SEAMLESSVDM" | b"PROG_30_STDSEAMLESSVDM" => 13,
+        b"PROG_SEAMLESSCOMMON" | b"PROG_30_STDSEAMLESSCOMMON" => 14,
+        b"PROG_31_STDSEAMLESSVDM" => 15,
+        b"PROG_31_STDSEAMLESSCOMMON" => 16,
+        b"PROG_31_ENHSEAMLESSVDM" => 17,
+        b"PROG_31_ENHSEAMLESSCOMMON" => 18,
+        b"PROG_31_ENH" | b"WIN" | b"PROG_WINDOW_REAL" | b"PROG_WINDOW_PROT" | b"PROG_WINDOW_AUTO" => 19,
+        b"PROG_31_STD" => 20,
         _ => PROG_PM,
     };
     pd[2] = SHE_VISIBLE;

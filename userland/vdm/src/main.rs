@@ -163,6 +163,12 @@ struct Os2Host {
     surf_ptr_gen: u32,
     /// The pointer's rectangle as last drawn on the full screen.
     fs_ptr: Option<::dos::disp::Rect>,
+    /// A seamless Win-OS/2 session (WINOS2_SEAMLESS=1).
+    seamless: bool,
+    /// The first half of a REQ_PLACE: hwnd, x, y.
+    place: Option<(u16, i16, i16)>,
+    /// A command line arriving in REQ_RUN_TEXT pieces.
+    run_text: Vec<u8>,
     /// WINOS2_SCREEN=WxH: the size of a windowed Win-OS/2 desktop.
     display: Option<(u32, u32)>,
 }
@@ -182,9 +188,94 @@ impl Os2Host {
         let mut n = 0;
         unsafe { Rs2VdmReadInput(buf.as_mut_ptr(), 64, &mut n, ms) };
         for e in &buf[..n as usize] {
+            if e.kind == 4 {
+                if let Some(r) = self.request(e) {
+                    self.pending.push_back(Event::Window(r));
+                }
+                continue;
+            }
             if let Some(ev) = convert(e) {
                 self.pending.push_back(ev);
             }
+        }
+    }
+
+    /// A request of the seamless host (win16drv::surface::REQ_*).
+    fn request(&mut self, e: &VdmEvent) -> Option<::dos::vwin::Request> {
+        use ::dos::vwin::Request;
+        let hwnd = e.a as u16;
+        let lo = |v: i32| v as i16;
+        let hi = |v: i32| (v >> 16) as i16;
+        Some(match e.flags as u32 {
+            sf::REQ_ACTIVATE => Request::Activate { hwnd },
+            sf::REQ_CLOSE => Request::Close { hwnd },
+            sf::REQ_PLACE_POS => {
+                self.place = Some((hwnd, lo(e.b), hi(e.b)));
+                return None;
+            }
+            sf::REQ_PLACE_SIZE => {
+                let (h, x, y) = self.place.take().filter(|p| p.0 == hwnd)?;
+                Request::Place { hwnd: h, x, y, w: lo(e.b), h: hi(e.b) }
+            }
+            sf::REQ_MINIMIZE => Request::Minimize { hwnd },
+            sf::REQ_RESTORE => Request::Restore { hwnd },
+            sf::REQ_MAXIMIZE => Request::Maximize { hwnd },
+            sf::REQ_RUN_TEXT => {
+                self.run_text.extend_from_slice(&e.a.to_le_bytes());
+                self.run_text.extend_from_slice(&e.b.to_le_bytes());
+                return None;
+            }
+            sf::REQ_RUN => {
+                let text: Vec<u8> = if e.a == -1 {
+                    core::mem::take(&mut self.run_text)
+                } else {
+                    let s = self.surf?;
+                    let n = (e.a as usize).min(sf::HOST_CMD_LEN - 1);
+                    unsafe { s.bytes(sf::HOST_CMD, n).to_vec() }
+                };
+                let mut cmd = [0u8; 128];
+                let n = text.iter().position(|&c| c == 0).unwrap_or(text.len()).min(127);
+                cmd[..n].copy_from_slice(&text[..n]);
+                Request::Run(cmd)
+            }
+            _ => return None,
+        })
+    }
+
+    /// Win-OS/2's windows into the shared surface for the seamless host.
+    fn show_windows(&mut self, list: &[::dos::vwin::Window], active: u16) {
+        let Some(s) = self.surf else { return };
+        unsafe {
+            let n = list.len().min(sf::MAX_WINDOWS);
+            for (i, w) in list.iter().take(n).enumerate() {
+                let e = sf::WINDOWS + i * sf::WINDOW_SIZE;
+                let mut fl = 0u16;
+                if w.visible {
+                    fl |= sf::WF_VISIBLE;
+                }
+                if w.minimized {
+                    fl |= sf::WF_MINIMIZED;
+                }
+                if w.maximized {
+                    fl |= sf::WF_MAXIMIZED;
+                }
+                if w.hwnd == active {
+                    fl |= sf::WF_ACTIVE;
+                }
+                s.set(e + sf::WIN_HWND, w.hwnd as u32 | (fl as u32) << 16);
+                for (o, v) in [(sf::WIN_X, w.x), (sf::WIN_Y, w.y), (sf::WIN_W, w.w), (sf::WIN_H, w.h)] {
+                    s.set(e + o, v as u32);
+                }
+                s.set(e + sf::WIN_STYLE, w.style);
+                s.set(e + sf::WIN_OWNER, w.owner as u32);
+                let t = s.bytes(e + sf::WIN_TITLE, sf::WIN_TITLE_LEN);
+                t.fill(0);
+                let k = w.title.len().min(sf::WIN_TITLE_LEN - 1);
+                t[..k].copy_from_slice(&w.title[..k]);
+            }
+            s.set(sf::WIN_COUNT, n as u32);
+            s.set(sf::WIN_GEN, s.get(sf::WIN_GEN).wrapping_add(1));
+            Rs2VdmSurface(2, 0, 0);
         }
     }
 
@@ -259,6 +350,7 @@ impl Os2Host {
         let full = self.surf_size != (w, h);
         unsafe {
             if full {
+                s.set(sf::FLAGS, if self.seamless { sf::FL_SEAMLESS } else { 0 });
                 s.set(0, sf::MAGIC);
                 s.set(sf::W, w as u32);
                 s.set(sf::H, h as u32);
@@ -578,12 +670,19 @@ impl Host for Os2Host {
         self.read_input(ms);
     }
     fn display_size(&mut self) -> (u32, u32) {
+        let (mut fw, mut fh) = (0u32, 0u32);
+        unsafe { Rs2VdmSurface(3, &mut fw as *mut u32 as u32, &mut fh as *mut u32 as u32) };
+        // Seamless: the Windows desktop is the PM screen.
+        if self.seamless && fw > 0 {
+            return (fw, fh);
+        }
         if let Some(s) = self.display {
             return s;
         }
-        let (mut fw, mut fh) = (0u32, 0u32);
-        unsafe { Rs2VdmSurface(3, &mut fw as *mut u32 as u32, &mut fh as *mut u32 as u32) };
         if fw >= 1024 && fh >= 768 { (800, 600) } else { (640, 480) }
+    }
+    fn windows(&mut self, list: &[::dos::vwin::Window], active: u16) {
+        self.show_windows(list, active);
     }
     fn present_display(&mut self, d: &::dos::disp::Display, damage: &[::dos::disp::Rect]) {
         self.show_display(d, damage);
@@ -674,6 +773,7 @@ fn main(s: &os2::Startup) -> u32 {
                 "DPMI_MEMORY_LIMIT" => cfg.dpmi_kb = num(v).map_or(cfg.dpmi_kb, |m| m * 1024),
                 "HW_NOFPU" => cfg.fpu = !on(v),
                 "VDM_TRACE" => cfg.trace = on(v),
+                "WINOS2_SEAMLESS" => cfg.seamless = on(v),
                 "WINOS2_SCREEN" => {
                     display = v.split_once(['x', 'X']).and_then(|(a, b)| Some((num(a)?, num(b)?)));
                 }
@@ -691,7 +791,7 @@ fn main(s: &os2::Startup) -> u32 {
     unsafe { DosTmrQueryFreq(&mut freq) };
     let (mut cur, mut drives) = (0, 0);
     unsafe { DosQueryCurrentDisk(&mut cur, &mut drives) };
-    let mut host = Os2Host { sb_stream: (0, 0), pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display };
+    let mut host = Os2Host { sb_stream: (0, 0), pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display, seamless: cfg.seamless, place: None, run_text: Vec::new() };
     let mut m = Machine::new(&mut host, cfg);
     if cur >= 1 && cur <= 26 {
         m.dos.drive = (cur - 1) as u8;

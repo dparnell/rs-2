@@ -5,7 +5,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use super::{mono_of, nearest, phys, Args, Dev, DrawMode, Ptr, Rect};
+use super::{mono_of, phys, Args, Dev, DrawMode, Ptr, Rect};
 use crate::Machine;
 
 /// A realized brush (REALIZEOBJECT, 80 bytes in GDI's memory).
@@ -18,7 +18,6 @@ const PEN_MAGIC: u16 = 0x5052;
 pub(crate) enum BrushKind {
     /// The colour pattern as it is.
     Pattern,
-    Hollow,
     /// The mono pattern's 1s in the brush colour, 0s in the background
     /// colour (or left alone when the background mode is transparent).
     Hatched,
@@ -52,7 +51,7 @@ impl Brush {
         for (x, o) in out.iter_mut().enumerate() {
             let bit = bits >> (7 - x) & 1;
             *o = match self.kind {
-                BrushKind::Pattern | BrushKind::Hollow => {
+                BrushKind::Pattern => {
                     if mono {
                         bit
                     } else {
@@ -102,7 +101,7 @@ const HATCHES: [[u8; 8]; 6] = [
 /// One raster operation on pixel values: bit by bit, `rop` the ROP3
 /// index (bit P*4 + S*2 + D of it is the result).
 #[inline]
-pub(crate) fn rop3(rop: u8, p: u8, s: u8, d: u8) -> u8 {
+pub fn rop3(rop: u8, p: u8, s: u8, d: u8) -> u8 {
     match rop {
         0xcc => s,
         0xf0 => p,
@@ -137,7 +136,7 @@ pub(crate) fn rop3(rop: u8, p: u8, s: u8, d: u8) -> u8 {
 /// A binary raster operation (R2_BLACK 1 .. R2_WHITE 16) on pen P and
 /// destination D.
 #[inline]
-pub(crate) fn rop2(r: u8, p: u8, d: u8) -> u8 {
+pub fn rop2(r: u8, p: u8, d: u8) -> u8 {
     match r {
         13 => p,
         7 => p ^ d,
@@ -312,7 +311,6 @@ impl Machine {
                     Some(br) => {
                         b[2] = match br.kind {
                             BrushKind::Pattern => 0,
-                            BrushKind::Hollow => 1,
                             BrushKind::Hatched => 2,
                             BrushKind::Mono => 3,
                         };
@@ -521,7 +519,3 @@ pub(crate) fn pen_value(p: u32, mono: bool) -> u8 {
     if mono { (p >> 8) as u8 & 1 } else { p as u8 }
 }
 
-#[allow(dead_code)]
-pub(crate) fn nearest_index(c: u32) -> u8 {
-    nearest(c)
-}

@@ -88,6 +88,8 @@ pub fn start_env(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32
         PROG_PM => 3,
         PROG_VDM => 4,
         PROG_WINDOWEDVDM => 7,
+        // Win-OS/2: the kernel starts WINOS2.COM with the program.
+        13..=20 => progc as u16,
         _ if batch => 2,
         _ => 0,
     };

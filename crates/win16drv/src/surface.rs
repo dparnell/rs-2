@@ -14,8 +14,17 @@
 //! | 0040h | palette: 256 x 0x00RRGGBB |
 //! | 0440h | pointer AND mask, then (0640h) XOR mask: 512 bytes each, rows top down |
 //! | 0840h | damage ring: 64 x (x0, y0, x1, y1) LONGs, entry `seq % 64` written before seq is bumped |
-//! | 1000h | seamless windows: 128 x 128 bytes (see `Window`) |
+//! | 0C40h | flags: bit 0 a seamless session (the host shows its windows, not its screen) |
+//! | 1000h | seamless windows: 128 x 128 bytes, bottom of the z-order first (`WIN_*`) |
+//! | 5000h | the host's command line for `REQ_RUN` (256 bytes, written by the host) |
 //! | 10000h | pixels: width x height bytes, top row first |
+//!
+//! A window entry: hwnd (USHORT), flags (USHORT, `WF_*`), x, y, width,
+//! height (LONGs, the Windows screen's coordinates), style (ULONG),
+//! owner (USHORT), 2 bytes reserved, the title (100 bytes, NUL-terminated).
+//!
+//! The host's requests reach the VDM as input events (RS2API 407
+//! `Rs2VdmRequest(sid, code, a, b)`, `REQ_*`).
 //!
 //! A host that finds the sequence more than 64 ahead of what it saw
 //! redraws everything.
@@ -45,7 +54,43 @@ pub const RING_LEN: u32 = 64;
 pub const WINDOWS: usize = 0x1000;
 pub const WINDOW_SIZE: usize = 128;
 pub const MAX_WINDOWS: usize = 128;
+pub const FLAGS: usize = 0x0c40;
+pub const FL_SEAMLESS: u32 = 1;
+pub const HOST_CMD: usize = 0x5000;
+pub const HOST_CMD_LEN: usize = 256;
 pub const PIXELS: usize = 0x10000;
+
+/// Window entry fields.
+pub const WIN_HWND: usize = 0;
+pub const WIN_FLAGS: usize = 2;
+pub const WIN_X: usize = 4;
+pub const WIN_Y: usize = 8;
+pub const WIN_W: usize = 12;
+pub const WIN_H: usize = 16;
+pub const WIN_STYLE: usize = 20;
+pub const WIN_OWNER: usize = 24;
+pub const WIN_TITLE: usize = 28;
+pub const WIN_TITLE_LEN: usize = 100;
+pub const WF_VISIBLE: u16 = 0x01;
+pub const WF_MINIMIZED: u16 = 0x02;
+pub const WF_MAXIMIZED: u16 = 0x04;
+pub const WF_ACTIVE: u16 = 0x08;
+
+/// Requests (`Rs2VdmRequest` codes): a = hwnd, except as noted.
+pub const REQ_ACTIVATE: u32 = 1;
+pub const REQ_CLOSE: u32 = 2;
+/// Place, in two: the position (b = x | y << 16), then the size (b = w | h << 16).
+pub const REQ_PLACE_POS: u32 = 3;
+pub const REQ_PLACE_SIZE: u32 = 4;
+pub const REQ_MINIMIZE: u32 = 5;
+pub const REQ_RESTORE: u32 = 6;
+pub const REQ_MAXIMIZE: u32 = 7;
+/// Start the program at HOST_CMD (a: its length), or (a = -1) the one
+/// REQ_RUN_TEXT gave.
+pub const REQ_RUN: u32 = 8;
+/// 8 more bytes of a command line in a and b (the kernel's way: it
+/// cannot reach the surface).
+pub const REQ_RUN_TEXT: u32 = 9;
 
 /// The shared memory's size for a w x h surface.
 pub const fn size(w: usize, h: usize) -> usize {
