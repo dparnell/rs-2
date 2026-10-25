@@ -498,7 +498,7 @@ fn refresh(i: usize) {
             w.flags = st[9];
             if w.seam.is_none() {
                 w.seam = Some(seamless::Seamless::new(w.sid));
-                unsafe { WinShowWindow(w.frame, 0) };
+                seamless::hide_session_frame(w.frame);
             }
             let sm = w.seam.as_mut().unwrap();
             seamless::sync(sm, v, OBJECT.load(Ordering::Relaxed));

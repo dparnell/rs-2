@@ -38,6 +38,22 @@ unsafe extern "C" {
     fn WinInvertRect(hps: u32, r: *const RectL) -> u32;
     #[link_name = "PMWIN.848"]
     fn WinReleasePS(hps: u32) -> u32;
+    #[link_name = "PMWIN.9013"]
+    fn WinRemoveSwitchEntry(h: u32) -> u32;
+    #[link_name = "PMWIN.9014"]
+    fn WinQuerySwitchHandle(hwnd: u32, pid: u32) -> u32;
+}
+
+/// The session's own (hidden) frame leaves the window list: its Windows
+/// windows are there instead.
+pub fn hide_session_frame(frame: u32) {
+    unsafe {
+        WinShowWindow(frame, 0);
+        let h = WinQuerySwitchHandle(frame, 0);
+        if h != 0 {
+            WinRemoveSwitchEntry(h);
+        }
+    }
 }
 
 /// The window class of the frames' clients.
