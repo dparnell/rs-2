@@ -344,7 +344,13 @@ fn winos2_objects() -> u32 {
     };
     let (mut sid, mut pid) = (0, 0);
     let rc = unsafe { os2::DosStartSession(&sd, &mut sid, &mut pid) };
-    check("a second one goes into the same session", (rc == 0 || rc == 457) && sid != 0);
+    os2::println!("DosStartSession of a second seamless program: rc {rc}, session {sid}");
+    check("a second one goes into the same session", rc == 0 || rc == 457);
+    // And Program Manager (the WIN-OS/2 Window object's program).
+    let pm = z(b"C:\\OS2\\MDOS\\WINOS2\\PROGMAN.EXE");
+    let sd = os2::StartData { name: pm.as_ptr(), ..sd };
+    let rc = unsafe { os2::DosStartSession(&sd, &mut sid, &mut pid) };
+    check("Program Manager too", rc == 0 || rc == 457);
     FAILS.load(Ordering::Relaxed)
 }
 

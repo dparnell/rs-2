@@ -65,14 +65,17 @@ pub struct Seamless {
     active_pm: u32,
     pub buttons: u32,
     timer: bool,
-    /// The overlay: a bit per surface pixel inverted on the PM screen.
+    /// The overlay: a bit per surface pixel inverted on the PM screen,
+    /// the rectangle they are in, and ticks since the buttons went up.
     overlay: Vec<u8>,
     overlay_on: bool,
+    overlay_box: (i32, i32, i32, i32),
+    idle_ticks: u32,
 }
 
 impl Seamless {
     pub fn new(sid: u32) -> Seamless {
-        Seamless { sid, wins: Vec::new(), win_gen: u32::MAX, active_win: 0, active_pm: 0, buttons: 0, timer: false, overlay: Vec::new(), overlay_on: false }
+        Seamless { sid, wins: Vec::new(), win_gen: u32::MAX, active_win: 0, active_pm: 0, buttons: 0, timer: false, overlay: Vec::new(), overlay_on: false, overlay_box: (i32::MAX, i32::MAX, i32::MIN, i32::MIN), idle_ticks: 0 }
     }
 
     pub fn by_client(&self, h: u32) -> Option<usize> {
@@ -206,6 +209,14 @@ pub fn sync(sm: &mut Seamless, view: &View, object: u32) {
 
 /// The timer: what the user did on the PM side, to Windows.
 pub fn tick(sm: &mut Seamless) {
+    if sm.buttons == 0 && sm.overlay_on {
+        sm.idle_ticks += 1;
+        if sm.idle_ticks > 3 {
+            overlay_done(sm);
+        }
+    } else {
+        sm.idle_ticks = 0;
+    }
     let a = unsafe { WinQueryActiveWindow(HWND_DESKTOP) };
     if a != sm.active_pm {
         sm.active_pm = a;
@@ -276,8 +287,24 @@ fn overlay(sm: &mut Seamless, view: &View, r: (i32, i32, i32, i32)) {
     }
     if any {
         sm.overlay_on = true;
+        let b = &mut sm.overlay_box;
+        *b = (b.0.min(x0), b.1.min(y0), b.2.max(x1), b.3.max(y1));
     } else if sm.overlay_on && sm.overlay.iter().all(|&b| b == 0) {
         sm.overlay_on = false;
+    }
+}
+
+/// The drag is over: PM repaints what the overlay covered (windows may
+/// have repainted under it meanwhile, so inverting back is not enough).
+fn overlay_done(sm: &mut Seamless) {
+    let (x0, y0, x1, y1) = sm.overlay_box;
+    sm.overlay.iter_mut().for_each(|b| *b = 0);
+    sm.overlay_on = false;
+    sm.overlay_box = (i32::MAX, i32::MAX, i32::MIN, i32::MIN);
+    if x0 < x1 && y0 < y1 {
+        let sh = screen_h();
+        let r = RectL { l: x0, b: sh - y1, r: x1, t: sh - y0 };
+        unsafe { WinInvalidateRect(HWND_DESKTOP, &r, 1) };
     }
 }
 

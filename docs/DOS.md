@@ -22,6 +22,7 @@ behaviour; none of them is needed or shipped.
 | `kernel` | Starting DOS sessions (DosStartSession types 4 and 7, DOS programs from CMD and program objects), the session's pixel screen for graphics modes, raw scan codes for DOS sessions. |
 | `userland/pmviowin` | Also shows windowed DOS sessions, text and graphics. |
 | `tests/dos` | Small DOS test programs (assembler source, built by xtask). |
+| `crates/win16drv` | RS2DISP.DRV, Win-OS/2's display driver (its NE module, made from the user's VGA.DRV) and the layout of the display surface a VDM shares with PMVIOWIN (docs/WINOS2.md). |
 
 ## Where the emulator runs: a user process
 
@@ -141,7 +142,10 @@ All served in Rust, on the guest's registers and memory:
   15h** (A20, 88h extended memory = 0 when XMS is present, 87h block move,
   C0h configuration, 86h wait, 4Fh key intercept), **INT 11h/12h**,
   **INT 2Fh** (multiplex: XMS 43h, DPMI 1687h, 1680h idle, OS/2 4010h
-  version query, `ISWINDOW`-style queries), **INT 33h** mouse driver
+  version query, 4011h VDD entry points by name (`crates/dos::vdd`:
+  `VMOUSE$`, `VWIN`; real and protected mode, as OS/2's VDDs register
+  them), `ISWINDOW`-style queries), **INT 66h** (VWIN, Win-OS/2's shield:
+  `crates/dos::vwin`, docs/WINOS2.md), **INT 33h** mouse driver
   (reset, show/hide, position, buttons, event handler 0Ch/14h, text and
   graphics cursors drawn by the driver), **INT 67h** EMS.
 
@@ -191,6 +195,16 @@ The machine keeps the video state; the VDM shows it through the session:
   framebuffer; when the session is windowed `PMVIOWIN` reads it
   (`Rs2QueryPixels`) and draws it with `GpiDrawBits` into its window. A
   generation counter wakes PMVIOWIN as for text changes.
+- **RS2DISP.DRV** (Win-OS/2's display driver, `crates/dos::disp`) draws
+  an 8-bit screen of its own of any size (`WINOS2_SCREEN=WxH`, the PM
+  screen's in a seamless session). The VDM keeps it in named shared
+  memory with a ring of the rectangles that changed, the palette, the
+  pointer and (seamless) Windows' window list (`win16drv::surface`);
+  RS2API 406 `Rs2VdmSurface` wakes PMVIOWIN, which redraws only those
+  rectangles and makes Windows' pointer the PM pointer. On the full screen
+  the VDM hands the changed rows, pointer drawn in, to the kernel's
+  picture. RS2API 407 `Rs2VdmRequest` carries a seamless host's requests
+  (activate, close, place, minimise, restore, maximise, run) to the VDM.
 
 ### Keyboard and mouse
 
@@ -291,6 +305,13 @@ INT 31h AX=0010h (VDPMI: allocate several selectors) is there too.
 The DOS session ends when its first program (or the `COMMAND.COM` it
 started) exits; `EXIT` at rs2's COMMAND.COM ends it.
 
+- **Win-OS/2 sessions**: DosStartSession of the Win-OS/2 types
+  (PROG_30_STDSEAMLESSVDM 13 ... PROG_31_STD 20, the program objects'
+  PROGTYPE) starts VDM.EXE running `WINOS2.COM` with the program: the
+  seamless ones in a window with `WINOS2_SEAMLESS=1` (one session for all
+  the "common" ones: a program started while it runs is sent to it), the
+  others full screen (docs/WINOS2.md).
+
 ## COMMAND.COM
 
 rs2's COMMAND.COM is a callback stub on disk (`C:\OS2\MDOS\COMMAND.COM`)
@@ -328,7 +349,13 @@ interpreter does about 100 MIPS on a current host).
   output, files), GFX (modes 13h and 12h), DPMITEST (a 32-bit DPMI
   client), VESA, SBTEST (Sound Blaster DMA and IRQ), BEEP, COMMAND.COM.
   `dosrun --keys`, `--png`, `--wav`, `--trace` and `--stats` help with
-  other programs.
+  other programs; `--keys` also takes the mouse (`{mouse X Y}`,
+  `{click X Y}`, `{press X Y}`, `{release X Y}`, `{dclick X Y}`),
+  `{shot FILE}` and, for seamless Win-OS/2, `{run CMD}`; `--display WxH`,
+  `--seamless`, `--disp-trace` and `--vwin-trace` are for Win-OS/2
+  (docs/WINOS2.md).
+- `cargo test -p dos --test winos2`: RS2DISP's raster operations and
+  palette, VWIN's messages.
 - In QEMU: xtask puts the test programs in `C:\DOS` on development
   images; `DESKTEST DOS W` (or `F`) starts GFX and DPMITEST as desktop
   objects in DOS windows (full screen).
