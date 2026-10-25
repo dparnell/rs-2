@@ -439,6 +439,7 @@ fn lpt_present(n: usize) -> bool {
     if present {
         // Not reset (INIT is active low), selected.
         unsafe { outb(base + 2, PARA_CTR_INIT | PARA_CTR_SELECT) };
+        crate::println!("LPT{}: parallel port at {:#x}, status {:#04x}", n + 1, base, unsafe { inb(base + 1) });
     }
     LPT_STATE[n].store(if present { 1 } else { 2 }, Ordering::Relaxed);
     present
@@ -483,16 +484,29 @@ pub fn lpt_write(n: usize, data: &[u8]) -> usize {
             outb(base + 2, c);
         }
     }
+    // The last byte taken (the printer not busy any more), briefly.
+    for _ in 0..1000 {
+        if unsafe { inb(base + 1) } & PARA_STS_BUSY != 0 {
+            break;
+        }
+    }
     data.len()
 }
 
 /// Category 5 (printer) IOCtls.
 pub fn lpt_ioctl(n: usize, f: u32) -> Result<Vec<u8>, u32> {
     match f {
-        // PRT_GETPRINTERSTATUS: the port's status lines (not busy,
-        // selected, no error, paper), or selected and not busy.
+        // PRT_GETPRINTERSTATUS: not busy (0x80), out of paper (0x20),
+        // selected (0x10), I/O error (0x08), from the port's status
+        // lines (ERROR is active low); without a port selected and not
+        // busy.
         0x66 => {
-            let st = if lpt_present(n) { (unsafe { inb(LPT_BASES[n] + 1) }) & 0xf8 } else { 0x90 };
+            let st = if lpt_present(n) {
+                let hw = unsafe { inb(LPT_BASES[n] + 1) };
+                (hw & 0xb0) | if hw & 0x08 == 0 { 0x08 } else { 0 }
+            } else {
+                0x90
+            };
             Ok(alloc::vec![st])
         }
         // PRT_GETFRAMECTL: 80 characters per line, 6 lines per inch.
