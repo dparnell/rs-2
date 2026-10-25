@@ -271,6 +271,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pmprint-qpr"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "pmshapi-dll"
 version = "0.1.0"
 dependencies = [
@@ -288,6 +295,13 @@ dependencies = [
 
 [[package]]
 name = "pmspl-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "pmspool"
 version = "0.1.0"
 dependencies = [
  "os2",

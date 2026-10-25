@@ -1,0 +1,7 @@
+PMPRINT	1	SplQpOpen
+PMPRINT	2	SplQpClose
+PMPRINT	3	SplQpPrint
+PMPRINT	4	SplQpControl
+PMPRINT	6	SplQpQueryDt
+PMPRINT	7	SplQpQueryFlags
+PMPRINT	8	SplQpPrintSeparator

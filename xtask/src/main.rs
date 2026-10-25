@@ -609,6 +609,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("mdm", "OS2\\DLL\\MDM.DLL"),
         ("mciapi", "OS2\\DLL\\MCIAPI.DLL"),
         ("pmspl", "OS2\\DLL\\PMSPL.DLL"),
+        ("pmspool", "OS2\\PMSPOOL.EXE"),
+        ("pmprint", "OS2\\DLL\\PMPRINT.QPR"),
         ("som", "OS2\\DLL\\SOM.DLL"),
     ];
 
@@ -616,7 +618,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
 const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP")];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell"];
+const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
@@ -641,7 +643,7 @@ fn build_userland() -> Option<image::FileList> {
         if PM_PROGRAMS.contains(bin) {
             cmd.arg("--pm");
         }
-        if dest.ends_with(".DLL") {
+        if dest.ends_with(".DLL") || dest.ends_with(".QPR") || dest.ends_with(".DRV") {
             let defs = ul.join(bin).join("exports.def");
             cmd.arg("--dll").arg("--exports").arg(defs);
         }

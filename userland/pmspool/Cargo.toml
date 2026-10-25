@@ -1,0 +1,9 @@
+[package]
+name = "pmspool"
+description = "PMSPOOL.EXE: runs the spooler (PMSPL's spooler thread)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
