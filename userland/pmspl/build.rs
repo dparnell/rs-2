@@ -1,6 +1,6 @@
 fn main() {
     // DLLs live in the shared arena.
-    println!("cargo:rustc-link-arg=--defsym=__image_base=0x13a40000");
+    println!("cargo:rustc-link-arg=--defsym=__image_base=0x13ac0000");
     // Keep every exported function through --gc-sections.
     let defs = std::fs::read_to_string("exports.def").unwrap();
     for line in defs.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with(';')) {

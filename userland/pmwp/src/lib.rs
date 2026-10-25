@@ -43,6 +43,7 @@ mod mindex;
 mod minwin;
 mod obj;
 mod pages;
+mod printer;
 /// rs2's shell's PM bindings (shared).
 #[path = "../../rs2shell/src/pm.rs"]
 #[allow(dead_code, unused_imports, clippy::all)]

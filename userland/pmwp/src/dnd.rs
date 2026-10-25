@@ -356,7 +356,7 @@ extern "C" fn folder_drop(f: usize, _cnr: u32, pdinfo: u32, it: u32) -> u32 {
 }
 
 /// The files dropped (paths).
-fn dropped_files(pdinfo: u32) -> Option<Vec<Vec<u8>>> {
+pub fn dropped_files(pdinfo: u32) -> Option<Vec<Vec<u8>>> {
     let mut v = Vec::new();
     for it in items(pdinfo) {
         let o = item_object(it);

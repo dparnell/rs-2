@@ -69,6 +69,10 @@ pub fn create_from(o: usize, folder: usize, title: Option<&[u8]>) -> usize {
     if style & OBJSTYLE_TEMPLATE != 0 {
         obj::call(m::WPObject::wpSetStyle, &[made, (style & !OBJSTYLE_TEMPLATE) as usize]);
     }
+    // IBM's wpCopiedFromTemplate: a new printer gets its own queue.
+    if wps::is(made, "WPPrinter") {
+        crate::printer::copied_from_template(made);
+    }
     obj::call(m::WPObject::wpSaveImmediate, &[made]);
     // Its title, edited where the folder is open.
     if let Some(w) = view::wins().iter().position(|w| w.obj == folder && w.view == obj::OPEN_CONTENTS) {

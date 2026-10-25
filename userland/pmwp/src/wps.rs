@@ -68,7 +68,7 @@ fn implementation(name: &str) -> Impl {
         "WPSystem" => crate::system::impl_system(),
         "WPClock" => crate::system::impl_clock(),
         "WPNetwork" => crate::connections::impl_network(),
-        "WPPrinter" => crate::connections::impl_printer(),
+        "WPPrinter" => crate::printer::impl_printer(),
         "WPMouse" => crate::setup::impl_mouse(),
         "WPKeyboard" => crate::setup::impl_keyboard(),
         "WPSound" => crate::setup::impl_sound(),
