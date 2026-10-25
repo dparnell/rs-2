@@ -312,7 +312,7 @@ used the same files (the probe's install script and mkrs2disp).
 | 32-bit DPMI clients and the DOS API | small | The direct path is for 16-bit clients. |
 | RS2DISP | small each | No palette management (256-colour programs get the fixed palette), RLE DIBs, device fonts, ENUMOBJ. |
 | The OS/2 *Desktop* icon | small | WINSHELD's GoPM icon calls VWIN (INT 66h E500h: VWIN.SYS's WINPASSDATA, which passes the request on to VVID); rs2 does nothing with it yet, so it does not switch to the PM desktop. |
-| Not checked in QEMU | - | Minimising and restoring from the window list, PM-side Tile and Cascade, RS2DISP full screen. |
+| Not checked in QEMU | - | PM-side Tile and Cascade, RS2DISP full screen. (Minimising with Windows' button, the window list's entries and restoring a minimised program with *Switch to* were checked.) |
 
 ## Testing
 
