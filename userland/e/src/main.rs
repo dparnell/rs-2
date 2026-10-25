@@ -34,6 +34,7 @@ mod dialogs;
 mod drop;
 mod file;
 mod pm;
+mod print;
 mod selftest;
 
 use alloc::vec::Vec;
@@ -48,6 +49,8 @@ pub const IDM_OPEN: u16 = 0x401;
 pub const IDM_NEW: u16 = 0x402;
 pub const IDM_SAVE: u16 = 0x403;
 pub const IDM_SAVEAS: u16 = 0x404;
+/// rs2's own: File > Print.
+pub const IDM_PRINT: u16 = 0x405;
 pub const IDM_AUTOSAVE: u16 = 0x406;
 pub const IDM_PRODUCTINFO: u16 = 0x408;
 pub const IDM_CLOSE: u16 = 0x409;
@@ -334,6 +337,8 @@ fn menu_items() -> Vec<Menu<'static>> {
             Menu::Item(IDM_SAVE, b"~Save"),
             Menu::Item(IDM_SAVEAS, b"Save ~as..."),
             Menu::Item(IDM_AUTOSAVE, b"A~utosave..."),
+            Menu::Sep,
+            Menu::Item(IDM_PRINT, b"~Print..."),
         ]),
         Menu::Sub(IDM_EDIT, b"~Edit", alloc::vec![
             Menu::Item(IDM_UNDO, b"~Undo\tAlt+Backspace"),
@@ -745,6 +750,7 @@ pub fn command(id: u16) -> bool {
         }
         IDM_SAVE => save(),
         IDM_SAVEAS => save_as(),
+        IDM_PRINT => print(),
         IDM_AUTOSAVE => {
             dialogs::autosave();
             true
@@ -1057,6 +1063,30 @@ pub fn save() -> bool {
         Some(t) => write_with(&path, t),
         None => false,
     }
+}
+
+/// File > Print: the text on the default printer, after asking.
+pub fn print() -> bool {
+    let a = app();
+    let Some((queue, descr)) = print::default_printer() else {
+        message(a.frame, b"There is no printer: make one in the Printers folder.", b"System Editor - Print", MB_OK | MB_WARNING);
+        return false;
+    };
+    let name = a.path.clone().unwrap_or_else(|| b"Untitled".to_vec());
+    let leaf = name.rsplit(|&c| c == b'\\').next().unwrap_or(&name).to_vec();
+    let mut q = b"Print ".to_vec();
+    q.extend_from_slice(&leaf);
+    q.extend_from_slice(b" on ");
+    q.extend_from_slice(if descr.is_empty() { &queue } else { &descr });
+    q.push(b'?');
+    if message(a.frame, &q, b"System Editor - Print", MB_OKCANCEL | 0x0010) != MBID_OK {
+        return false;
+    }
+    let ok = print::print_text(&queue, &leaf, &get_text());
+    if !ok {
+        message(a.frame, b"The file could not be printed.", b"System Editor - Print", MB_OK | MB_ERROR);
+    }
+    ok
 }
 
 /// File > Save as: the file dialog (with its Type button), asking before
