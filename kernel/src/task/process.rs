@@ -108,6 +108,8 @@ pub struct Process {
     pub tls_used: AtomicU32,
     /// File handle limit (DosSetMaxFH / DosSetRelMaxFH).
     pub max_fh: AtomicU32,
+    /// Win16 interrupt handler (16:16), 0 if none (api/win16.rs).
+    pub win16_int: AtomicU32,
 }
 
 /// Thread-local memory: dwords per thread (in the process information area).
@@ -229,6 +231,17 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         frame.rax = env_sel as u64;
         frame.rbx = cmd_off as u64;
         frame.rcx = (start.autodata_size & 0xffff) as u64;
+        if let Some((heap, stack)) = start.windows {
+            // Windows' start registers (InitTask takes them): BX the stack
+            // size, CX the local heap size, DI the instance (DGROUP), SI
+            // the previous instance (none: each Windows task is its own
+            // process), ES the PSP (made by InitTask).
+            frame.rbx = stack as u64;
+            frame.rcx = heap as u64;
+            frame.rdi = frame.ds;
+            frame.rsi = 0;
+            frame.rax = 0;
+        }
     } else {
         // [esp] = return address (exit stub), hmod, 0, env, cmdline.
         let sp = (stack_flat - 20) & !3;
@@ -297,6 +310,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
             Some(q) => q.max_fh.load(Ordering::Relaxed),
             None => 20,
         }),
+        win16_int: AtomicU32::new(0),
     });
     let stack_bottom = stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000));
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;

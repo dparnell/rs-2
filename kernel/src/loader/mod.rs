@@ -121,6 +121,9 @@ pub struct Start {
     pub autodata: Option<usize>,
     /// Size of the automatic data segment (16-bit), 0 = 64K.
     pub autodata_size: u32,
+    /// A Windows program (docs/WIN16.md): its local heap and stack sizes,
+    /// which it gets in CX and BX at the start for InitTask.
+    pub windows: Option<(u16, u16)>,
 }
 
 pub struct Module {
@@ -407,6 +410,30 @@ fn import_target(imports: &[Arc<Module>], module: u16, by: ImportBy<'_>) -> Resu
 /// Load the modules a module imports (system-wide, not attached).
 fn load_imports(names: &[String]) -> Result<Vec<Arc<Module>>, u32> {
     names.iter().map(|n| load_global(n)).collect()
+}
+
+/// rs2's Win16 layer (docs/WIN16.md): the Windows modules WIN16.DLL
+/// implements, with the base its ordinals for each start at (Windows
+/// ordinal n of KERNEL is WIN16 ordinal 1000 + n).
+pub const WIN16_DLL: &str = "WIN16";
+pub const WIN16_MODULES: &[(&str, u32)] = &[
+    ("KERNEL", 1000),
+    ("USER", 2000),
+    ("GDI", 3000),
+    ("KEYBOARD", 4000),
+    ("WIN87EM", 5000),
+    ("SOUND", 5200),
+    ("SYSTEM", 5400),
+];
+
+/// Where a Windows module's import of `name` goes: WIN16 and the
+/// ordinal base for the system modules, else `name` itself (base 0).
+pub fn win16_import(name: &str) -> (String, u32) {
+    let m = module_name(name);
+    match WIN16_MODULES.iter().find(|(n, _)| *n == m) {
+        Some(&(_, base)) => (String::from(WIN16_DLL), base),
+        None => (m, 0),
+    }
 }
 
 /// Write a fixup value of `size` bytes at `at` in an image buffer.
