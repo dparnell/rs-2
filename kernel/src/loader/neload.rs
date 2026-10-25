@@ -6,7 +6,7 @@ use alloc::sync::Arc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use os2_exe::ne::{self, flags, sflags, Entry, SourceKind};
+use os2_exe::ne::{self, flags, sflags, target, Entry, SourceKind};
 
 use super::{err, import_target, load_imports, Export, Format, ImportBy, Module, Object, Start, Target};
 use crate::vm::{self, pag, AddressSpace, PageState, SegKind, SharedMem, PAGE};
@@ -30,15 +30,31 @@ pub fn load(
     if (h.flags & flags::LIBRARY != 0) != dll {
         return Err(err::INVALID_MODULETYPE);
     }
+    // Windows modules (docs/WIN16.md) import KERNEL, USER, GDI... from
+    // rs2's Win16 layer. Self-loading programs bring their own segment
+    // loader, which needs Windows' loader interface: not supported.
+    let windows = h.target_os == target::WINDOWS;
+    if windows && h.flags & flags::SELF_LOADING != 0 {
+        crate::trace!("loader: {path}: self-loading Windows programs are not supported");
+        return Err(err::BAD_EXE_FORMAT);
+    }
     let segs = m.segments().map_err(|_| err::BAD_EXE_FORMAT)?;
     let import_names: Vec<String> =
         m.import_modules().map_err(|_| err::BAD_EXE_FORMAT)?.iter().map(|n| s(n)).collect();
-    let imports = load_imports(&import_names)?;
+    let (load_names, ord_bases): (Vec<String>, Vec<u32>) = if windows {
+        import_names.iter().map(|n| super::win16_import(n)).unzip()
+    } else {
+        (import_names.clone(), alloc::vec![0; import_names.len()])
+    };
+    let imports = load_imports(&load_names)?;
     let autodata = (h.autodata != 0).then(|| h.autodata as usize - 1);
 
     // Segment sizes: the automatic data segment also holds the local heap
     // and (for programs whose SS is DGROUP) the stack.
     let mut sizes = Vec::with_capacity(segs.len());
+    // A Windows program's is 64 KB: its stack follows the static data,
+    // and the local heap gets the rest (it grows in place, as LocalAlloc
+    // grows DGROUP on Windows).
     for (i, sg) in segs.iter().enumerate() {
         let mut size = sg.min_alloc.max(sg.file_size);
         if Some(i) == autodata {
@@ -46,7 +62,7 @@ pub fn load(
             if !dll && h.ss as usize == i + 1 {
                 size += h.stack as u32;
             }
-            size = size.min(0x10000);
+            size = if windows && !dll { 0x10000 } else { size.min(0x10000) };
         }
         sizes.push(size.max(1));
     }
@@ -116,16 +132,24 @@ pub fn load(
                     _ => return Err(err::INVALID_ORDINAL),
                 },
                 ne::Target::ImportOrdinal { module, ordinal } => {
-                    import_target(&imports, module, ImportBy::Ordinal(ordinal as u32)).map_err(|e| {
-                        crate::trace!(
-                            "loader: {}: import {}.{} not found",
-                            path,
-                            import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"),
-                            ordinal
-                        );
-                        super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
-                        e
-                    })?
+                    let base = ord_bases.get(module as usize - 1).copied().unwrap_or(0);
+                    let constant = (base != 0)
+                        .then(|| super::WIN16_CONSTANTS.iter().find(|c| c.0 == base + ordinal as u32))
+                        .flatten();
+                    if let Some(&(_, v)) = constant {
+                        Target::constant(v)
+                    } else {
+                        import_target(&imports, module, ImportBy::Ordinal(base + ordinal as u32)).map_err(|e| {
+                            crate::trace!(
+                                "loader: {}: import {}.{} not found",
+                                path,
+                                import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"),
+                                ordinal
+                            );
+                            super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
+                            e
+                        })?
+                    }
                 }
                 ne::Target::ImportName { module, name_offset } => {
                     let name = m.imported_name(name_offset).map(s).map_err(|_| err::BAD_EXE_FORMAT)?;
@@ -214,13 +238,29 @@ pub fn load(
 
     let start = seg_target(h.cs as u8, h.ip).map(|entry| {
         let ss = h.ss as usize;
-        let sp = if h.sp == 0 && ss >= 1 && ss <= sizes.len() { sizes[ss - 1] as u16 } else { h.sp };
+        let sp = if h.sp == 0 && ss >= 1 && ss <= sizes.len() {
+            if windows {
+                // Windows: the stack ends after the data and the stack size.
+                let sg = &segs[ss - 1];
+                ((sg.min_alloc.max(sg.file_size) + h.stack as u32).min(0xfffe) & !1) as u16
+            } else {
+                sizes[ss - 1] as u16
+            }
+        } else {
+            h.sp
+        };
         let stack = if ss >= 1 && ss <= segs.len() {
             Target::far16(sel_of(ss - 1), sp, bases[ss - 1] + sp as u32)
         } else {
             Target::default()
         };
-        Start { entry, stack, autodata, autodata_size: autodata.map(|a| sizes[a] & 0xffff).unwrap_or(0) }
+        Start {
+            entry,
+            stack,
+            autodata,
+            autodata_size: autodata.map(|a| sizes[a] & 0xffff).unwrap_or(0),
+            windows: windows.then_some((h.heap, h.stack)),
+        }
     });
     let name = m.name().map(s).unwrap_or_else(|_| super::module_name(path));
     Ok(Arc::new(Module {

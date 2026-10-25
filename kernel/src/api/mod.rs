@@ -46,6 +46,7 @@ pub mod avio;
 pub mod vio;
 pub mod vdm;
 pub mod viowin;
+pub mod win16;
 pub mod xproc;
 pub mod names;
 mod names_gen;
@@ -424,6 +425,10 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         drop(thread);
         drop(process);
         subsys::returned(f, tid);
+        return;
+    }
+    if module == 0 && ordinal == win16::RETURN_ORDINAL {
+        win16::returned(f, &process, &thread);
         return;
     }
     if module == 0 && ordinal == exceptions::HANDLER_RETURN_ORDINAL {

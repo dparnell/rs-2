@@ -1,0 +1,14 @@
+[package]
+name = "win16-dll"
+description = "WIN16.DLL: KERNEL, USER and GDI for Windows 3.x programs, on PM and GPI (docs/WIN16.md)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "win16"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2", features = ["heap"] }
+thunk16 = { path = "../thunk16" }

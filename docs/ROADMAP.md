@@ -433,6 +433,28 @@ Status markers: done, in progress, planned.
   objects (DOS Window, DOS Full Screen, PROG_VDM/PROG_WINDOWEDVDM)
 - planned: PC speaker and Sound Blaster sound, VESA, DOS settings, speed
 
+## Native Win16 (stage 1 done)
+
+Windows 3.x programs as OS/2 processes, without Win-OS/2 or any
+Microsoft file (docs/WIN16.md).
+
+- done (stage 1): design (docs/WIN16.md); the NE loader loads Windows
+  modules (target OS 2) with WIN16.DLL as their KERNEL, USER, GDI and
+  KEYBOARD (Windows ordinals at fixed bases); Windows' start registers;
+  INTs and protection faults of Windows programs reflected to WIN16
+  (RS2API 420: INT 21h, InitTask, invalid ES/DS loads); InitTask, global
+  and local memory, modules, the DOS calls; window classes, windows as
+  PM frames and windows, the message loop with translated messages and
+  y-down coordinates, painting (BeginPaint, TextOut, DrawText, FillRect,
+  lines), MessageBox; `RS2\HELLO16.EXE` and `RS2\W16TEST.EXE` (built
+  with Open Watcom from `userland/win16test`)
+- planned (stage 2): Windows-style built-in controls drawn through
+  WIN16's GDI, dialogs, menus, resources, bitmaps and fonts, Windows
+  DLLs
+- planned (stage 3): COMMDLG, the clipboard, printing, DDE
+- planned (stage 4): DPMI, the floating point emulator, MMSYSTEM, OLE,
+  TOOLHELP and the task/module databases
+
 ## Milestone 5: install media (first version done)
 
 - done: hybrid ISO/USB image (El Torito EFI + MBR ESP), live session

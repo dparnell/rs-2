@@ -276,6 +276,7 @@ pub fn load(
         stack: target_of(h.esp_object, h.esp).unwrap_or_default(),
         autodata,
         autodata_size: autodata.map(|a| lxobjs[a].virtual_size).unwrap_or(0),
+        windows: None,
     });
     let name = m.name().map(s).unwrap_or_else(|_| super::module_name(path));
     let all16 = lxobjs.iter().all(|o| is16(o));

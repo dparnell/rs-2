@@ -154,7 +154,7 @@ features under `\OS2IMAGE\FI` (system management, printer utilities).
 | STPM.EXE, MPPMNEW.EXE, MINSTALL.EXE (multimedia installation) | fails | WinRegisterCircularSlider (PMCTLS), MMPARTS.DLL (in two pieces on the CD) and PMWP's object calls. |
 | PMSPOOL.EXE, PMSHELL.EXE | fails | IBM's spooler process and Workplace Shell: rs2 has its own PMSPOOL (IBM's only calls PMSPL's SPL32QMINITIALIZE, which rs2's PMSPL has: [PRINTING.md](PRINTING.md)), and IBM's PMSHELL needs IBM's PMWP; rs2 has its own PMSHELL and PMWP ([WPS.md](WPS.md)). |
 | JAVA.EXE, JAVAPM.EXE (Java 1.1, `\FI\PACKAGE`) | not tried | |
-| CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | works (in Win-OS/2) | Windows 3.1 programs: they run in Win-OS/2 (see below and docs/WINOS2.md), seamless as windows on the PM desktop. |
+| CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | works (in Win-OS/2) | Windows 3.1 programs: they run in Win-OS/2 (see below and docs/WINOS2.md), seamless as windows on the PM desktop. Natively (docs/WIN16.md, without Win-OS/2) they need stage 2 (controls, dialogs, menus, resources). |
 | ATMCNTRL.EXE, FASTLOAD.EXE (disk 21), PROMIX.EXE, AUDIOVER.EXE | not supported | Also Windows 3.1 programs (NE modules for Windows, importing KERNEL, USER and GDI), not 16-bit PM ones: WIN-OS/2's Adobe Type Manager control panel, its fast loader and multimedia driver utilities. |
 
 ## Workplace Shell classes
@@ -319,6 +319,11 @@ the CD into `C:\OS2\MDOS` (on a DOS session's PATH) and makes the QBasic,
 QBasic Full Screen and DOS Editor objects (WPProgram, PROGTYPE=WINDOWEDVDM
 or VDM) in a DOS Programs folder in Programs. OS/2 Warp 4 has no EDIT
 command; DOS Editor is QBasic's editor mode.
+
+Windows 3.x programs also run without Win-OS/2, natively as OS/2
+processes on rs2's WIN16.DLL (docs/WIN16.md). Stage 1 runs programs
+that use windows, painting, text and message boxes (`RS2\HELLO16.EXE`,
+`RS2\W16TEST.EXE`); controls, dialogs, menus and resources are stage 2.
 
 APPINST's **Win-OS/2** category copies IBM's Win-OS/2 from the CD into
 `C:\OS2\MDOS\WINOS2`, makes rs2's display driver RS2DISP.DRV from its

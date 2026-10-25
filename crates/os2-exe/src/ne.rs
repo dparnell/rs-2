@@ -13,8 +13,16 @@ pub mod flags {
     pub const PM_INCOMPATIBLE: u16 = 0x0100;
     pub const PM_COMPATIBLE: u16 = 0x0200;
     pub const PM_APP: u16 = 0x0300;
+    /// Windows: the program loads its own segments (a loader in segment 1).
+    pub const SELF_LOADING: u16 = 0x0800;
     pub const NOT_LOADABLE: u16 = 0x2000;
     pub const LIBRARY: u16 = 0x8000;
+}
+
+/// The target operating system byte (header offset 0x36).
+pub mod target {
+    pub const OS2: u8 = 1;
+    pub const WINDOWS: u8 = 2;
 }
 
 /// Segment flags.
