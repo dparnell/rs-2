@@ -69,6 +69,8 @@ pub struct SWin {
     pub rect: (i32, i32, i32, i32),
     pub flags: u16,
     pub title: Vec<u8>,
+    /// A place PM asked Windows for (PM coordinates), not yet reported.
+    pub asked: Option<(i32, i32, i32, i32)>,
 }
 
 /// A seamless session's windows.
@@ -173,6 +175,7 @@ pub fn sync(sm: &mut Seamless, view: &View, object: u32) {
                 }
                 if shown(*flags) && o.rect != *r {
                     o.rect = *r;
+                    o.asked = None;
                     unsafe {
                         WinSetWindowPos(o.frame, 0, x, y, w, h, SWP_SIZE | SWP_MOVE);
                         WinInvalidateRect(o.client, null(), 0);
@@ -207,7 +210,7 @@ pub fn sync(sm: &mut Seamless, view: &View, object: u32) {
                     WinSetWindowPos(frame, HWND_TOP, x, y, w, h, SWP_SIZE | SWP_MOVE | SWP_ZORDER | show | SWP_NOACTIVATE);
                     Rs2PmVioWindow(client, sm.sid, VW_DIRECT);
                 }
-                sm.wins.push(SWin { hwnd: *hwnd, frame, client, rect: *r, flags: *flags, title: title.clone() });
+                sm.wins.push(SWin { hwnd: *hwnd, frame, client, rect: *r, flags: *flags, title: title.clone(), asked: None });
             }
         }
     }
@@ -251,6 +254,23 @@ pub fn tick(sm: &mut Seamless) {
                 sm.active_win = o.hwnd;
                 sm.request(sf::REQ_ACTIVATE, o.hwnd, 0);
             }
+        }
+    }
+    // A frame PM moved or sized (the window list's Tile and Cascade):
+    // Windows places the window there.
+    for i in 0..sm.wins.len() {
+        let o = &sm.wins[i];
+        if o.flags & sf::WF_MINIMIZED != 0 || unsafe { WinIsWindowVisible(o.frame) } == 0 {
+            continue;
+        }
+        let mut r = RectL::default();
+        crate::frame_pos(o.frame, &mut r);
+        let now = (r.l, r.b, r.r - r.l, r.t - r.b);
+        if now != pm_rect(o.rect) && now.2 > 0 && now.3 > 0 && o.asked != Some(now) {
+            let (hwnd, wx, wy) = (o.hwnd, r.l, screen_h() - r.t);
+            sm.wins[i].asked = Some(now);
+            sm.request(sf::REQ_PLACE_POS, hwnd, (wx & 0xffff) | wy << 16);
+            sm.request(sf::REQ_PLACE_SIZE, hwnd, (now.2 & 0xffff) | now.3 << 16);
         }
     }
     // A frame the window list showed again: Windows restores the window
