@@ -9,7 +9,10 @@ in a DOS session, served by OS/2's virtual device drivers (VDPMI, VDPX,
 VWIN, VVGA, VMOUSE).
 
 rs2 never ships it. It is on the user's OS/2 CD, and APPINST copies it
-from there (category *Win-OS/2*), as it does QBasic.
+from there (category *Win-OS/2*), as it does QBasic. The media-free
+alternative is rs2's native Win16 layer (docs/WIN16.md): Windows
+programs as OS/2 processes on rs2's own KERNEL, USER and GDI, without a
+DOS session or any IBM or Microsoft file.
 
 ## Status
 
