@@ -168,7 +168,7 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
             }
         }
         (Handle::Char(CharDev::Com(n)), 0xb) => crate::chardev::com_general(n as usize, r.function).err().unwrap_or(0),
-        (Handle::Char(CharDev::Lpt(_)), 5) => match crate::chardev::lpt_ioctl(r.function) {
+        (Handle::Char(CharDev::Lpt(n)), 5) => match crate::chardev::lpt_ioctl(n as usize, r.function) {
             Ok(d) => put_data(c, r, 0, &d),
             Err(e) => e,
         },
