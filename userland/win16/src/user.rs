@@ -551,7 +551,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 }
             }
             trace(format_args!("WIN16: {} from the program's resources not supported", if ord == 173 { "LoadCursor" } else { "LoadIcon" }));
-            if ord == 173 { 32512 } else { 32512 }
+            // IDC_ARROW, IDI_APPLICATION
+            32512
         }
         // GetSystemMetrics(index)
         179 => system_metric(a.i()) as u32,
@@ -909,8 +910,9 @@ fn set_timer(h: u16, id: u16, ms: u16, proc_: u32) -> u16 {
         }
     };
     let s = u();
+    // A timer of no window gets an ID of its own.
     let id = if h == 0 { 0x100 + s.timers.len() as u16 } else { id };
-    let pm_id = if h == 0 { id as u32 } else { id as u32 };
+    let pm_id = id as u32;
     if unsafe { WinStartTimer(TASK.get().hab, pm, pm_id, ms as u32) } == 0 {
         return 0;
     }
