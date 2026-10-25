@@ -686,11 +686,17 @@ extern "C" fn wpAddProgramAssociationPage(o: usize, nb: u32) -> u32 {
 
 // ---- WPProgram: the Session page ----
 
-const SESSIONS: [(u16, &[u8], u32); 4] = [
+const SESSIONS: [(u16, &[u8], u32); 7] = [
     (840, b"~OS/2 full screen", crate::launch::PROG_FULLSCREEN),
     (841, b"OS/2 ~window", crate::launch::PROG_WINDOWABLEVIO),
     (842, b"DOS ~full screen", 4),
     (843, b"DOS wi~ndow", 7),
+    // Win-OS/2 (PROG_31_ENHSEAMLESSCOMMON, PROG_31_ENHSEAMLESSVDM,
+    // PROG_31_ENH): seamless in the common session, in one of its own,
+    // full screen.
+    (845, b"WIN-OS/2 window (~seamless)", 18),
+    (846, b"WIN-OS/2 window, se~parate session", 17),
+    (847, b"WIN-OS/2 full scr~een", 19),
 ];
 
 fn progc(o: usize) -> u32 {
@@ -735,9 +741,9 @@ extern "C" fn session_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 }
 
 extern "C" fn wpAddProgramSessionPage(o: usize, nb: u32) -> u32 {
-    let mut items: Vec<Item> = SESSIONS.iter().enumerate().map(|(i, &(id, t, _))| radio(t, (12, 92 - 12 * i as i16, 200), id, i == 0)).collect();
+    let mut items: Vec<Item> = SESSIONS.iter().enumerate().map(|(i, &(id, t, _))| radio(t, (12, 92 - 11 * i as i16, 200), id, i == 0)).collect();
     items.insert(0, book::label(b"Session", (6, 106, 220)));
-    items.push(static_text(b"", (6, 30, 224), 844));
+    items.push(static_text(b"", (6, 6, 224), 844));
     add_page(o, nb, session_proc, items, b"~Session\0")
 }
 

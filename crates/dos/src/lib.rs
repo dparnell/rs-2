@@ -17,6 +17,7 @@ extern crate alloc;
 
 pub mod bios;
 pub mod devices;
+pub mod disp;
 pub mod dos;
 pub mod dpmi;
 pub mod ems;
@@ -25,6 +26,8 @@ pub mod hw;
 pub mod mouse;
 pub mod sb;
 pub mod shell;
+pub mod vdd;
+pub mod vwin;
 pub mod video;
 pub mod xms;
 
@@ -60,6 +63,10 @@ pub struct Config {
     /// The country code (COUNTRY=) and code page.
     pub country: u16,
     pub codepage: u16,
+    /// A seamless Win-OS/2 session (VWIN says so: crate::vwin).
+    pub seamless: bool,
+    /// The session's id for VWIN's messages.
+    pub session_id: u32,
 }
 
 impl Default for Config {
@@ -76,6 +83,8 @@ impl Default for Config {
             trace: false,
             country: 1,
             codepage: 437,
+            seamless: false,
+            session_id: 1,
         }
     }
 }
@@ -97,6 +106,10 @@ pub struct Machine {
     pub ems: ems::Ems,
     pub mouse: mouse::Mouse,
     pub dpmi: dpmi::Dpmi,
+    /// RS2DISP.DRV's screen (Win-OS/2 with the paravirtual display).
+    pub disp: disp::Display,
+    /// VWIN (Win-OS/2's shield: WINSHELD's messages, seamless windows).
+    pub vwin: vwin::Vwin,
     pub shells: Vec<shell::Shell>,
     /// The first program ended with this exit code.
     pub exited: Option<u8>,
@@ -121,6 +134,8 @@ pub struct Machine {
     pub close_requested: bool,
     /// A BEL sounds until then (microseconds).
     pub beep_until: u64,
+    /// The window list generation the host last saw.
+    vwin_shown: u32,
 }
 
 impl Machine {
@@ -133,6 +148,8 @@ impl Machine {
             ems: ems::Ems::default(),
             mouse: mouse::Mouse::default(),
             dpmi: dpmi::Dpmi::default(),
+            disp: disp::Display::default(),
+            vwin: vwin::Vwin::default(),
             shells: Vec::new(),
             exited: None,
             chain_int: None,
@@ -146,6 +163,7 @@ impl Machine {
             speaker_on: None,
             close_requested: false,
             beep_until: 0,
+            vwin_shown: 0,
             cfg,
         };
         if m.cfg.fpu {
@@ -156,6 +174,8 @@ impl Machine {
             m.cfg.env.push(alloc::string::String::from("BLASTER=A220 I7 D1 T3"));
         }
         m.hw.umb = m.cfg.umb;
+        m.vwin.seamless = m.cfg.seamless;
+        m.vwin.id = m.cfg.session_id;
         m.t0 = host.micros();
         m.hw.now = host.now();
         m.bios_init(host);
@@ -163,6 +183,7 @@ impl Machine {
         m.xms_init();
         m.ems_init();
         m.dpmi_rom_init();
+        m.vdd_rom_init();
         m
     }
 
@@ -239,6 +260,10 @@ impl Machine {
                     self.waiting = false;
                 }
                 Event::Close => self.close_requested = true,
+                Event::Window(r) => {
+                    self.vwin_request(r);
+                    self.waiting = false;
+                }
             }
         }
         self.events = ev;
@@ -328,6 +353,18 @@ impl Machine {
     }
 
     pub fn present<H: Host>(&mut self, host: &mut H) {
+        for l in core::mem::take(&mut self.vwin.log) {
+            host.log(&l);
+        }
+        if self.disp.enabled {
+            let damage = self.disp.take_damage();
+            host.present_display(&self.disp, &damage);
+            if self.vwin.generation != self.vwin_shown {
+                self.vwin_shown = self.vwin.generation;
+                host.windows(&self.vwin.windows, self.vwin.active);
+            }
+            return;
+        }
         host.present(&self.hw.vga, &self.hw.ram);
         self.hw.vga.dirty = false;
         self.hw.vga.palette_dirty = false;
@@ -366,6 +403,14 @@ impl Machine {
                 Cb::Done
             }
             dpmi::CB_FIRST..=dpmi::CB_LAST => self.dpmi_callback(host, n),
+            disp::CB_DISP..=disp::CB_DISP_LAST => {
+                self.disp_call(host, n);
+                Cb::Done
+            }
+            vdd::CB_VDD..=vdd::CB_VDD_LAST => {
+                self.vdd_call(host, n - vdd::CB_VDD);
+                Cb::Done
+            }
             _ => {
                 host.log(&alloc::format!("dos: unknown callback {n:#x}"));
                 Cb::Done
@@ -432,6 +477,10 @@ impl Machine {
             0x20..=0x2f => self.dos_interrupt(host, v),
             0x33 => {
                 self.int33(host);
+                Cb::Done
+            }
+            0x66 => {
+                self.vwin_int66(host);
                 Cb::Done
             }
             0x67 => {

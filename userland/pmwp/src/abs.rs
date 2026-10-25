@@ -32,13 +32,22 @@ fn pd<'a>(obj: usize) -> &'a mut ProgData {
     som::data(wps::ccd("WPProgram"), obj)
 }
 
-fn progtype(v: &[u8]) -> u32 {
+pub fn progtype(v: &[u8]) -> u32 {
     match v.to_ascii_uppercase().as_slice() {
         b"FULLSCREEN" => launch::PROG_FULLSCREEN,
         b"WINDOWABLEVIO" => launch::PROG_WINDOWABLEVIO,
         b"PM" => launch::PROG_PM,
         b"VDM" => launch::PROG_VDM,
         b"WINDOWEDVDM" => launch::PROG_WINDOWEDVDM,
+        // Win-OS/2 (pmshl.h's PROG_30_* and PROG_31_*).
+        b"PROG_SEAMLESSVDM" | b"PROG_30_STDSEAMLESSVDM" => 13,
+        b"PROG_SEAMLESSCOMMON" | b"PROG_30_STDSEAMLESSCOMMON" => 14,
+        b"PROG_31_STDSEAMLESSVDM" => 15,
+        b"PROG_31_STDSEAMLESSCOMMON" => 16,
+        b"PROG_31_ENHSEAMLESSVDM" => 17,
+        b"PROG_31_ENHSEAMLESSCOMMON" => 18,
+        b"PROG_31_ENH" | b"WIN" | b"PROG_WINDOW_REAL" | b"PROG_WINDOW_PROT" | b"PROG_WINDOW_AUTO" => 19,
+        b"PROG_31_STD" => 20,
         _ => launch::PROG_DEFAULT,
     }
 }

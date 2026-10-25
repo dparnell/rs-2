@@ -23,6 +23,7 @@ use alloc::vec::Vec;
 
 use ::dos::video::{Kind, Vga};
 use ::dos::{Config, Create, DateTime, DirEntry, Event, Host, Machine, OpenMode};
+use win16drv::surface::{self as sf, Surface};
 use os2::*;
 
 os2::entry!(main);
@@ -40,6 +41,8 @@ unsafe extern "C" {
     fn Rs2VdmSetText(t: *const VdmText, cells: *const u16) -> u32;
     #[link_name = "RS2API.403"]
     fn Rs2VdmSetPixels(cx: u32, cy: u32, y0: u32, rows: u32, data: *const u8, pal: *const u32) -> u32;
+    #[link_name = "RS2API.406"]
+    fn Rs2VdmSurface(cmd: u32, a: u32, b: u32) -> u32;
     #[link_name = "RS2API.301"]
     fn Rs2AudioOpen(rate: u32, channels: u32, bits: u32, h: *mut u32) -> u32;
     #[link_name = "RS2API.302"]
@@ -152,6 +155,22 @@ struct Os2Host {
     last_pix: Option<(usize, usize, Vec<u8>, [u32; 256])>,
     pix: Vec<u8>,
     drives: u32,
+    /// RS2DISP.DRV's screen in shared memory (win16drv::surface) and
+    /// what the host has been told: size, palette and pointer generation.
+    surf: Option<Surface>,
+    surf_size: (usize, usize),
+    surf_pal: bool,
+    surf_ptr_gen: u32,
+    /// The pointer's rectangle as last drawn on the full screen.
+    fs_ptr: Option<::dos::disp::Rect>,
+    /// A seamless Win-OS/2 session (WINOS2_SEAMLESS=1).
+    seamless: bool,
+    /// The first half of a REQ_PLACE: hwnd, x, y.
+    place: Option<(u16, i16, i16)>,
+    /// A command line arriving in REQ_RUN_TEXT pieces.
+    run_text: Vec<u8>,
+    /// WINOS2_SCREEN=WxH: the size of a windowed Win-OS/2 desktop.
+    display: Option<(u32, u32)>,
 }
 
 fn convert(e: &VdmEvent) -> Option<Event> {
@@ -169,9 +188,94 @@ impl Os2Host {
         let mut n = 0;
         unsafe { Rs2VdmReadInput(buf.as_mut_ptr(), 64, &mut n, ms) };
         for e in &buf[..n as usize] {
+            if e.kind == 4 {
+                if let Some(r) = self.request(e) {
+                    self.pending.push_back(Event::Window(r));
+                }
+                continue;
+            }
             if let Some(ev) = convert(e) {
                 self.pending.push_back(ev);
             }
+        }
+    }
+
+    /// A request of the seamless host (win16drv::surface::REQ_*).
+    fn request(&mut self, e: &VdmEvent) -> Option<::dos::vwin::Request> {
+        use ::dos::vwin::Request;
+        let hwnd = e.a as u16;
+        let lo = |v: i32| v as i16;
+        let hi = |v: i32| (v >> 16) as i16;
+        Some(match e.flags as u32 {
+            sf::REQ_ACTIVATE => Request::Activate { hwnd },
+            sf::REQ_CLOSE => Request::Close { hwnd },
+            sf::REQ_PLACE_POS => {
+                self.place = Some((hwnd, lo(e.b), hi(e.b)));
+                return None;
+            }
+            sf::REQ_PLACE_SIZE => {
+                let (h, x, y) = self.place.take().filter(|p| p.0 == hwnd)?;
+                Request::Place { hwnd: h, x, y, w: lo(e.b), h: hi(e.b) }
+            }
+            sf::REQ_MINIMIZE => Request::Minimize { hwnd },
+            sf::REQ_RESTORE => Request::Restore { hwnd },
+            sf::REQ_MAXIMIZE => Request::Maximize { hwnd },
+            sf::REQ_RUN_TEXT => {
+                self.run_text.extend_from_slice(&e.a.to_le_bytes());
+                self.run_text.extend_from_slice(&e.b.to_le_bytes());
+                return None;
+            }
+            sf::REQ_RUN => {
+                let text: Vec<u8> = if e.a == -1 {
+                    core::mem::take(&mut self.run_text)
+                } else {
+                    let s = self.surf?;
+                    let n = (e.a as usize).min(sf::HOST_CMD_LEN - 1);
+                    unsafe { s.bytes(sf::HOST_CMD, n).to_vec() }
+                };
+                let mut cmd = [0u8; 128];
+                let n = text.iter().position(|&c| c == 0).unwrap_or(text.len()).min(127);
+                cmd[..n].copy_from_slice(&text[..n]);
+                Request::Run(cmd)
+            }
+            _ => return None,
+        })
+    }
+
+    /// Win-OS/2's windows into the shared surface for the seamless host.
+    fn show_windows(&mut self, list: &[::dos::vwin::Window], active: u16) {
+        let Some(s) = self.surf else { return };
+        unsafe {
+            let n = list.len().min(sf::MAX_WINDOWS);
+            for (i, w) in list.iter().take(n).enumerate() {
+                let e = sf::WINDOWS + i * sf::WINDOW_SIZE;
+                let mut fl = 0u16;
+                if w.visible {
+                    fl |= sf::WF_VISIBLE;
+                }
+                if w.minimized {
+                    fl |= sf::WF_MINIMIZED;
+                }
+                if w.maximized {
+                    fl |= sf::WF_MAXIMIZED;
+                }
+                if w.hwnd == active {
+                    fl |= sf::WF_ACTIVE;
+                }
+                s.set(e + sf::WIN_HWND, w.hwnd as u32 | (fl as u32) << 16);
+                for (o, v) in [(sf::WIN_X, w.x), (sf::WIN_Y, w.y), (sf::WIN_W, w.w), (sf::WIN_H, w.h)] {
+                    s.set(e + o, v as u32);
+                }
+                s.set(e + sf::WIN_STYLE, w.style);
+                s.set(e + sf::WIN_OWNER, w.owner as u32);
+                let t = s.bytes(e + sf::WIN_TITLE, sf::WIN_TITLE_LEN);
+                t.fill(0);
+                let k = w.title.len().min(sf::WIN_TITLE_LEN - 1);
+                t[..k].copy_from_slice(&w.title[..k]);
+            }
+            s.set(sf::WIN_COUNT, n as u32);
+            s.set(sf::WIN_GEN, s.get(sf::WIN_GEN).wrapping_add(1));
+            Rs2VdmSurface(2, 0, 0);
         }
     }
 
@@ -218,6 +322,129 @@ impl Os2Host {
         unsafe { Rs2VdmSetText(&t, cells.as_ptr()) };
         self.last_text = Some((t, cells));
         self.last_pix = None;
+    }
+
+    /// RS2DISP's screen: the damaged rectangles into the shared surface
+    /// (made on first use), the palette and pointer when they changed;
+    /// on the full screen through the kernel's picture too.
+    fn show_display(&mut self, d: &::dos::disp::Display, damage: &[::dos::disp::Rect]) {
+        if self.surf.is_none() {
+            let size = sf::size(1600, 1200);
+            let mut pid = 0u32;
+            unsafe {
+                let (mut tib, mut pib) = (core::ptr::null_mut(), core::ptr::null_mut());
+                DosGetInfoBlocks(&mut tib, &mut pib);
+                if !pib.is_null() {
+                    pid = (*pib).pid;
+                }
+            }
+            let name = sf::name(pid);
+            let mut base: *mut u8 = core::ptr::null_mut();
+            if unsafe { DosAllocSharedMem(&mut base, name.as_ptr(), size as u32, 0x13) } != 0 || base.is_null() {
+                return;
+            }
+            self.surf = Some(Surface(base));
+        }
+        let s = self.surf.unwrap();
+        let (w, h) = (d.w, d.h);
+        let full = self.surf_size != (w, h);
+        unsafe {
+            if full {
+                s.set(sf::FLAGS, if self.seamless { sf::FL_SEAMLESS } else { 0 });
+                s.set(0, sf::MAGIC);
+                s.set(sf::W, w as u32);
+                s.set(sf::H, h as u32);
+                Rs2VdmSurface(1, w as u32, h as u32);
+                self.surf_size = (w, h);
+                self.surf_pal = false;
+            }
+            if !self.surf_pal {
+                for (i, &c) in d.pal.iter().enumerate() {
+                    s.set(sf::PALETTE + i * 4, c);
+                }
+                s.set(sf::PAL_GEN, s.get(sf::PAL_GEN).wrapping_add(1));
+                self.surf_pal = true;
+            }
+            if d.pointer_gen != self.surf_ptr_gen || full {
+                self.surf_ptr_gen = d.pointer_gen;
+                match &d.pointer {
+                    Some(p) => {
+                        let n = (p.width_bytes * p.h).min(sf::PTR_MASK);
+                        s.bytes(sf::PTR_AND, n).copy_from_slice(&p.and[..n]);
+                        s.bytes(sf::PTR_XOR, n).copy_from_slice(&p.xor[..n]);
+                        for (o, v) in [(sf::PTR_HOTX, p.hot.0 as u32), (sf::PTR_HOTY, p.hot.1 as u32), (sf::PTR_W, p.w as u32), (sf::PTR_H, p.h as u32), (sf::PTR_WB, p.width_bytes as u32), (sf::PTR_SHOWN, 1)] {
+                            s.set(o, v);
+                        }
+                    }
+                    None => s.set(sf::PTR_SHOWN, 0),
+                }
+                s.set(sf::PTR_GEN, s.get(sf::PTR_GEN).wrapping_add(1));
+            }
+            s.set(sf::PTR_X, d.pointer_pos.0 as u32);
+            s.set(sf::PTR_Y, d.pointer_pos.1 as u32);
+            let all = [::dos::disp::Rect::new(0, 0, w as i32, h as i32)];
+            let rects: &[::dos::disp::Rect] = if full { &all } else { damage };
+            let pix = s.bytes(sf::PIXELS, w * h);
+            for r in rects {
+                for y in r.y0.max(0) as usize..(r.y1.max(0) as usize).min(h) {
+                    let (a, b) = (y * w + r.x0.max(0) as usize, y * w + (r.x1.max(0) as usize).min(w));
+                    if a < b {
+                        pix[a..b].copy_from_slice(&d.pix[a..b]);
+                    }
+                }
+                let seq = s.get(sf::SEQ);
+                let e = sf::RING + (seq % sf::RING_LEN) as usize * 16;
+                for (k, v) in [r.x0, r.y0, r.x1, r.y1].into_iter().enumerate() {
+                    s.set(e + k * 4, v as u32);
+                }
+                s.set(sf::SEQ, seq.wrapping_add(1));
+            }
+            // Where the pointer is drawn on the full screen.
+            let ptr = d.pointer.as_ref().map(|p| {
+                let (x, y) = (d.pointer_pos.0 - p.hot.0, d.pointer_pos.1 - p.hot.1);
+                ::dos::disp::Rect::new(x, y, x + p.w as i32, y + p.h as i32)
+            });
+            if rects.is_empty() && ptr == self.fs_ptr {
+                return;
+            }
+            if Rs2VdmSurface(2, 0, 0) == 1 {
+                // On the full screen: the rows that changed as the
+                // kernel's picture, with the pointer drawn in.
+                let mut rows: Vec<(i32, i32)> = rects.iter().map(|r| (r.y0, r.y1)).collect();
+                rows.extend(self.fs_ptr.iter().chain(ptr.iter()).map(|r| (r.y0, r.y1)));
+                let y0 = rows.iter().map(|r| r.0).min().unwrap_or(0).max(0) as usize;
+                let y1 = (rows.iter().map(|r| r.1).max().unwrap_or(0).max(0) as usize).min(h);
+                if y0 < y1 {
+                    let mut buf = d.pix[y0 * w..y1 * w].to_vec();
+                    if let (Some(p), Some(r)) = (&d.pointer, ptr) {
+                        for py in 0..p.h {
+                            for px in 0..p.w {
+                                let (x, y) = (r.x0 + px as i32, r.y0 + py as i32);
+                                if x < 0 || x >= w as i32 || (y as usize) < y0 || y as usize >= y1 || y < 0 {
+                                    continue;
+                                }
+                                let bit = |m: &[u8]| m[py * p.width_bytes + px / 8] >> (7 - px % 8) & 1 != 0;
+                                let o = (y as usize - y0) * w + x as usize;
+                                let v = if bit(&p.and) { buf[o] } else { 0 };
+                                buf[o] = if bit(&p.xor) { v ^ 0xff } else { v };
+                            }
+                        }
+                    }
+                    Rs2VdmSetPixels(w as u32, h as u32, y0 as u32, (y1 - y0) as u32, buf.as_ptr(), d.pal.as_ptr());
+                }
+            }
+            self.fs_ptr = ptr;
+        }
+        self.last_text = None;
+        self.last_pix = None;
+    }
+
+    /// The surface is no longer shown (Windows ended).
+    fn end_display(&mut self) {
+        if self.surf_size != (0, 0) {
+            unsafe { Rs2VdmSurface(0, 0, 0) };
+            self.surf_size = (0, 0);
+        }
     }
 
     fn show_pixels(&mut self, v: &Vga, ram: &[u8]) {
@@ -442,7 +669,26 @@ impl Host for Os2Host {
         let ms = (us / 1000).clamp(1, 50) as u32;
         self.read_input(ms);
     }
+    fn display_size(&mut self) -> (u32, u32) {
+        let (mut fw, mut fh) = (0u32, 0u32);
+        unsafe { Rs2VdmSurface(3, &mut fw as *mut u32 as u32, &mut fh as *mut u32 as u32) };
+        // Seamless: the Windows desktop is the PM screen.
+        if self.seamless && fw > 0 {
+            return (fw, fh);
+        }
+        if let Some(s) = self.display {
+            return s;
+        }
+        if fw >= 1024 && fh >= 768 { (800, 600) } else { (640, 480) }
+    }
+    fn windows(&mut self, list: &[::dos::vwin::Window], active: u16) {
+        self.show_windows(list, active);
+    }
+    fn present_display(&mut self, d: &::dos::disp::Display, damage: &[::dos::disp::Rect]) {
+        self.show_display(d, damage);
+    }
     fn present(&mut self, v: &Vga, ram: &[u8]) {
+        self.end_display();
         match v.kind() {
             Kind::Text { cols, rows, base } => self.show_text(v, ram, cols, rows, base),
             Kind::Graphics { .. } => self.show_pixels(v, ram),
@@ -505,6 +751,7 @@ fn main(s: &os2::Startup) -> u32 {
     let mut cfg = Config::default();
     let mut env: Vec<String> = Vec::new();
     let mut os2_path = String::new();
+    let mut display = None;
     unsafe {
         let mut p = s.env;
         while *p != 0 {
@@ -526,6 +773,10 @@ fn main(s: &os2::Startup) -> u32 {
                 "DPMI_MEMORY_LIMIT" => cfg.dpmi_kb = num(v).map_or(cfg.dpmi_kb, |m| m * 1024),
                 "HW_NOFPU" => cfg.fpu = !on(v),
                 "VDM_TRACE" => cfg.trace = on(v),
+                "WINOS2_SEAMLESS" => cfg.seamless = on(v),
+                "WINOS2_SCREEN" => {
+                    display = v.split_once(['x', 'X']).and_then(|(a, b)| Some((num(a)?, num(b)?)));
+                }
                 "PATH" => os2_path = String::from(v),
                 "COMSPEC" | "BEGINLIBPATH" | "ENDLIBPATH" | "LIBPATH" | "DPATH" | "KEYS" | "SYSTEM_INI" | "OS2_SHELL" | "RUNWORKPLACE" | "AUTOSTART" | "USER_INI" | "PROMPT" => {}
                 k if k.starts_with("DOS_") || k.starts_with("EMS_") || k.starts_with("XMS_") || k.starts_with("DPMI_") || k.starts_with("VIDEO_") || k.starts_with("HW_") || k.starts_with("IDLE_") || k.starts_with("KBD_") || k.starts_with("MOUSE_") => {}
@@ -540,7 +791,7 @@ fn main(s: &os2::Startup) -> u32 {
     unsafe { DosTmrQueryFreq(&mut freq) };
     let (mut cur, mut drives) = (0, 0);
     unsafe { DosQueryCurrentDisk(&mut cur, &mut drives) };
-    let mut host = Os2Host { sb_stream: (0, 0), pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives };
+    let mut host = Os2Host { sb_stream: (0, 0), pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display, seamless: cfg.seamless, place: None, run_text: Vec::new() };
     let mut m = Machine::new(&mut host, cfg);
     if cur >= 1 && cur <= 26 {
         m.dos.drive = (cur - 1) as u8;

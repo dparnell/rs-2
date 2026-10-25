@@ -154,7 +154,7 @@ features under `\OS2IMAGE\FI` (system management, printer utilities).
 | STPM.EXE, MPPMNEW.EXE, MINSTALL.EXE (multimedia installation) | fails | WinRegisterCircularSlider (PMCTLS), MMPARTS.DLL (in two pieces on the CD) and PMWP's object calls. |
 | PMSPOOL.EXE, PMSHELL.EXE | fails | IBM's spooler process and Workplace Shell: rs2 has its own PMSPOOL (IBM's only calls PMSPL's SPL32QMINITIALIZE, which rs2's PMSPL has: [PRINTING.md](PRINTING.md)), and IBM's PMSHELL needs IBM's PMWP; rs2 has its own PMSHELL and PMWP ([WPS.md](WPS.md)). |
 | JAVA.EXE, JAVAPM.EXE (Java 1.1, `\FI\PACKAGE`) | not tried | |
-| CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | not supported | Windows 3.1 programs for WIN-OS/2, which rs2 does not have. |
+| CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | works (in Win-OS/2) | Windows 3.1 programs: they run in Win-OS/2 (see below and docs/WINOS2.md), seamless as windows on the PM desktop. |
 | ATMCNTRL.EXE, FASTLOAD.EXE (disk 21), PROMIX.EXE, AUDIOVER.EXE | not supported | Also Windows 3.1 programs (NE modules for Windows, importing KERNEL, USER and GDI), not 16-bit PM ones: WIN-OS/2's Adobe Type Manager control panel, its fast loader and multimedia driver utilities. |
 
 ## Workplace Shell classes
@@ -310,7 +310,7 @@ desktop program objects. "dosrun" = on the host with `tools/dosrun`
 | GRAFTABL.COM (IBM) | works | dosrun: loads code page 437's graphics characters. |
 | BASICA.COM, BASIC.COM (IBM) | fails | dosrun: loops setting the cursor (INT 10h 02h, row FFh); not in APPINST. |
 | SUBST.EXE, JOIN.EXE (IBM) | fails | "Incorrect function" (they need DOS internals rs2's DOS does not have); not in APPINST. |
-| Win-OS/2 (IBM's Windows 3.1 for OS/2: WINOS2.COM, OS2K386.EXE) | partial | Full screen, 640x480x16 (docs/WINOS2.md). QEMU: Program Manager from CMD in a full-screen DOS session (about 2 minutes under TCG), keys, mouse clicks (the pointer does not yet follow QEMU's absolute pointer exactly). dosrun: Program Manager, Clock, Notepad, Calculator, Write, Paintbrush, File Manager, Control Panel; `WINOS2 PROGRAM.EXE`. Not yet: WINSHELD (IBM's default `useos2shield=1`: needs VWIN.SYS's INT 66h), seamless and windowed Win-OS/2, clipboard/DDE with OS/2, sound, printing. |
+| Win-OS/2 (IBM's Windows 3.1 for OS/2: WINOS2.COM, OS2K386.EXE) | works | docs/WINOS2.md. Full screen, in a PM window and seamless (Windows programs' windows as PM windows beside OS/2 programs', in the window list, moved, activated and closed from either side), on rs2's display driver RS2DISP.DRV at any size, with IBM's WINSHELD (`useos2shield=1`) on rs2's VWIN. QEMU: Clock and Notepad seamless from program objects (about 2 minutes to start under TCG), keys and the absolute pointer. dosrun: Program Manager, Clock, Notepad, Calculator, Write, Paintbrush, File Manager, Control Panel, Cardfile. Not yet: clipboard/DDE with OS/2, sound, printing, palette management (256-colour programs get a fixed palette). |
 | tests/dos BEEP.COM | partial | dosrun and QEMU: the PIT channel 2 / port 61h tones are seen by VDM.EXE and played as a square wave through rs2's audio mixer when there is sound hardware (`--sound`); not yet listened to. |
 
 APPINST's **DOS Programs** category copies IBM's QBasic (QBASIC.EXE,
@@ -321,9 +321,11 @@ or VDM) in a DOS Programs folder in Programs. OS/2 Warp 4 has no EDIT
 command; DOS Editor is QBasic's editor mode.
 
 APPINST's **Win-OS/2** category copies IBM's Win-OS/2 from the CD into
-`C:\OS2\MDOS\WINOS2`, sets SYSTEM.INI for VGA without the OS/2 shield,
-and makes WIN-OS/2 Full Screen in Command Prompts and a Win-OS/2 folder
-with the accessories (docs/WINOS2.md).
+`C:\OS2\MDOS\WINOS2`, makes rs2's display driver RS2DISP.DRV from its
+VGA.DRV, sets SYSTEM.INI (RS2DISP, the OS/2 shield on), and makes WIN-OS/2
+Full Screen, WIN-OS/2 Window (seamless) and WIN-OS/2 Desktop in a Window
+in Command Prompts and a Win-OS/2 folder with the accessories, seamless
+(docs/WINOS2.md).
 
 Not yet: Sound Blaster 16 (16-bit/stereo), the OPL2/OPL3 FM synthesizer
 (AdLib), VESA modes with more than 8 bits per pixel, direct disk access

@@ -71,6 +71,8 @@ pub enum Event {
     MouseAbs { x: u32, y: u32, buttons: u8 },
     /// The user asked to end the session (closing its window).
     Close,
+    /// The seamless host asks Windows to do something (crate::vwin).
+    Window(crate::vwin::Request),
 }
 
 /// The services of the system around the machine.
@@ -127,6 +129,21 @@ pub trait Host {
     fn wait(&mut self, us: u64);
     /// Show the screen (called when it changed, at most every few ms).
     fn present(&mut self, v: &crate::video::Vga, ram: &[u8]);
+    /// The size of the screen RS2DISP.DRV (crate::disp) draws, asked
+    /// when Windows enables it.
+    fn display_size(&mut self) -> (u32, u32) {
+        (800, 600)
+    }
+    /// Show RS2DISP.DRV's screen: the rectangles that changed since the
+    /// last call (all of it the first time), the pointer in `d.pointer`.
+    fn present_display(&mut self, d: &crate::disp::Display, damage: &[crate::disp::Rect]) {
+        let _ = (d, damage);
+    }
+    /// Win-OS/2's top-level windows changed (seamless sessions,
+    /// crate::vwin): bottom of the z-order first, and the active one.
+    fn windows(&mut self, list: &[crate::vwin::Window], active: u16) {
+        let _ = (list, active);
+    }
     /// The PC speaker: `Some(hz)` sounding, `None` silent.
     fn speaker(&mut self, hz: Option<u32>) {
         let _ = hz;

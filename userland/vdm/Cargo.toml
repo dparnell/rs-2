@@ -9,3 +9,4 @@ license.workspace = true
 os2 = { path = "../os2" }
 dos = { path = "../../crates/dos" }
 x86emu = { path = "../../crates/x86emu" }
+win16drv = { path = "../../crates/win16drv" }

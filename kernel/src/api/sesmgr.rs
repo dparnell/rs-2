@@ -25,6 +25,13 @@ const SSF_TYPE_WINDOWABLEVIO: u16 = 2;
 const SSF_TYPE_PM: u16 = 3;
 const SSF_TYPE_VDM: u16 = 4;
 const SSF_TYPE_WINDOWEDVDM: u16 = 7;
+/// Win-OS/2 (PROG_30_STDSEAMLESSVDM 13 .. PROG_31_STD 20): seamless,
+/// seamless in the common session (14, 16, 18), full screen (19, 20).
+const PROG_30_STDSEAMLESSVDM: u16 = 13;
+const PROG_31_STD: u16 = 20;
+
+/// Win-OS/2's loader.
+const WINOS2_PATH: &str = "C:\\OS2\\MDOS\\WINOS2\\WINOS2.COM";
 
 /// The fields of STARTDATA rs2 uses.
 struct StartData {
@@ -63,7 +70,7 @@ fn read_start_data(c: &Ctx, at: u32) -> Result<StartData, u32> {
         _ => return Err(ERROR_SMG_INVALID_RELATED_OPT),
     };
     let ty = u16_at(30);
-    if ty > SSF_TYPE_WINDOWEDVDM || ty == 5 || ty == 6 {
+    if (ty > SSF_TYPE_WINDOWEDVDM && !(PROG_30_STDSEAMLESSVDM..=PROG_31_STD).contains(&ty)) || ty == 5 || ty == 6 {
         return Err(ERROR_SMG_INVALID_PROGRAM_TYPE);
     }
     let env = match ptr_at(24) {
@@ -242,9 +249,49 @@ fn start_dos(c: &Ctx, sd: &StartData, path: Option<String>, inputs: &str, env: V
     Ok((sid, child.pid, rc))
 }
 
+/// A Win-OS/2 session (docs/WINOS2.md): a DOS session running
+/// WINOS2.COM with the program; seamless ones (with WINOS2_SEAMLESS=1)
+/// in a PM window host that shows their windows, and the "common" ones
+/// in one shared session, which gets later programs as requests.
+fn start_winos2(c: &Ctx, sd: &StartData, mut env: Vec<String>) -> Result<(u32, u32, u32), u32> {
+    let ty = sd.session_type;
+    let seamless = ty < 19;
+    let common = seamless && ty % 2 == 0;
+    let mut cmd = sd.name.clone().unwrap_or_default();
+    if !sd.inputs.is_empty() {
+        if !cmd.is_empty() {
+            cmd.push(' ');
+        }
+        cmd.push_str(sd.inputs.trim());
+    }
+    if common {
+        if let Some(sid) = crate::vdm::seamless_common() {
+            if crate::vdm::run_in(sid, if cmd.is_empty() { "PROGMAN.EXE" } else { &cmd }) {
+                return Ok((sid, session::leader(sid).unwrap_or(0), 0));
+            }
+        }
+    }
+    if seamless {
+        env.retain(|e| !e.to_ascii_uppercase().starts_with("WINOS2_SEAMLESS="));
+        env.push(String::from("WINOS2_SEAMLESS=1"));
+    }
+    let mut sd2 = StartData { related: sd.related, background: sd.background, title: sd.title.clone(), name: None, inputs: String::new(), termq: sd.termq.clone(), env: None, session_type: if seamless { SSF_TYPE_WINDOWEDVDM } else { SSF_TYPE_VDM } };
+    if sd2.title.is_none() {
+        sd2.title = Some(String::from(if seamless { "WIN-OS/2" } else { "WIN-OS/2 Full Screen" }));
+    }
+    let r = start_dos(c, &sd2, Some(String::from(WINOS2_PATH)), &cmd, env)?;
+    if common {
+        crate::vdm::set_seamless_common(r.0);
+    }
+    Ok(r)
+}
+
 /// Start a session; returns (session id, pid, return code).
 fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
     let env = sd.env.clone().unwrap_or_else(|| super::proc::parent_env(c));
+    if (PROG_30_STDSEAMLESSVDM..=PROG_31_STD).contains(&sd.session_type) {
+        return start_winos2(c, &sd, env);
+    }
     let comspec = env_value(&env, "COMSPEC").unwrap_or_else(|| String::from("C:\\OS2\\CMD.EXE"));
     let dos_type = sd.session_type == SSF_TYPE_VDM || sd.session_type == SSF_TYPE_WINDOWEDVDM;
     if dos_type {

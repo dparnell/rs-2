@@ -214,6 +214,9 @@ pub struct Screen {
     /// A DOS session's graphics mode picture (text cells are not shown
     /// meanwhile).
     pub pixmap: Option<Pixmap>,
+    /// A DOS session shows a display surface of this size in shared
+    /// memory (Win-OS/2's RS2DISP.DRV): the PM host draws it from there.
+    pub surface: Option<(usize, usize)>,
     /// Lines that scrolled off the top of a windowable session's whole
     /// screen, oldest first (the PM host's scroll back), and how many
     /// ever did.
@@ -293,6 +296,7 @@ impl Screen {
             core::ptr::addr_of_mut!((*s).watched).write(false);
             core::ptr::addr_of_mut!((*s).windowed).write(false);
             core::ptr::addr_of_mut!((*s).pixmap).write(None);
+            core::ptr::addr_of_mut!((*s).surface).write(None);
             core::ptr::addr_of_mut!((*s).history).write(VecDeque::new());
             core::ptr::addr_of_mut!((*s).scrolled).write(0);
             core::ptr::addr_of_mut!((*s).keys).write(0);
@@ -576,6 +580,25 @@ impl Screen {
                 self.draw_pixmap(y0, y0 + n);
             }
         }
+    }
+
+    /// A display surface in shared memory shows the session (or no
+    /// longer, None); `touch` the screen for each change of it.
+    pub fn set_surface(&mut self, s: Option<(usize, usize)>) {
+        if self.surface != s {
+            self.surface = s;
+            self.touch();
+        }
+    }
+
+    /// Something on the surface changed: the host redraws.
+    pub fn surface_changed(&mut self) {
+        self.touch();
+    }
+
+    /// Shown on the framebuffer now (not in a window).
+    pub fn is_visible(&self) -> bool {
+        self.visible
     }
 
     /// Back to the text screen.

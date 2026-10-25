@@ -12,3 +12,4 @@ path = "src/main.rs"
 [dependencies]
 os2 = { path = "../os2" }
 os2-pack = { path = "../../crates/os2-pack" }
+win16drv = { path = "../../crates/win16drv" }

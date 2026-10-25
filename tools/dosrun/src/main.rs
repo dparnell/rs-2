@@ -5,10 +5,15 @@
 //! Drive C: is the current directory (or `--c DIR`); `--drive D=DIR`
 //! adds drives. `--keys TEXT` types keys when the program waits for
 //! input (`\n` Enter, `{esc}`, `{f1}`..`{f10}`, `{up}` `{down}` `{left}`
-//! `{right}`, `{wait}` half a second, `{alt-x}`, `{ctrl-c}`). At the end
+//! `{right}`, `{wait}` half a second (`{wait N}` N seconds), `{alt-x}`,
+//! `{ctrl-c}`; the mouse at a pixel of the screen: `{mouse X Y}` moves,
+//! `{click X Y}`, `{rclick X Y}`, `{dclick X Y}`, `{press X Y}` and
+//! `{release X Y}` with the left button; `{shot FILE}` saves the screen
+//! as a PNG then; `{run CMD}` asks seamless Win-OS/2 to start CMD). At the end
 //! the text screen is printed (or written to `--screen FILE`); `--png
 //! FILE` saves the screen of a graphics mode. `--timeout SECS` ends a
-//! program that runs too long, `--trace` logs every BIOS/DOS call.
+//! program that runs too long, `--trace` logs every BIOS/DOS call,
+//! `--display WxH` sets the size of RS2DISP.DRV's screen (800x600).
 
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
@@ -32,11 +37,20 @@ struct Run {
     cp437: Vec<char>,
     /// Sound Blaster output collected for --wav (rate, samples).
     pcm: (u32, Vec<u8>),
+    /// --display: RS2DISP.DRV's screen size.
+    display: (u32, u32),
+    /// The mouse buttons held ({press} until {release}).
+    held: u8,
 }
 
 enum KeyItem {
     Scan(Vec<(u8, u8)>),
     Wait(f64),
+    /// The mouse at a pixel, with these buttons.
+    Mouse(i32, i32, u8),
+    Shot(String),
+    /// A seamless host's request to start a program in Win-OS/2.
+    Run(String),
 }
 
 fn now_secs(s: &Instant) -> f64 {
@@ -275,6 +289,28 @@ impl Host for Run {
                 self.idle_since_key = false;
             }
             Some(KeyItem::Wait(s)) => self.next_key_at = t + s,
+            Some(KeyItem::Mouse(x, y, buttons)) => {
+                // 0xff: the buttons held.
+                let buttons = if buttons == 0xff { self.held } else { buttons };
+                self.held = buttons;
+                let (w, h) = self.last_gfx.as_ref().map_or((640, 480), |g| (g.0 as i64, g.1 as i64));
+                let ax = ((x as i64 * 65536 + 32768) / w).clamp(0, 65535) as u32;
+                let ay = ((y as i64 * 65536 + 32768) / h).clamp(0, 65535) as u32;
+                out.push(Event::MouseAbs { x: ax, y: ay, buttons });
+                self.next_key_at = t + 0.05;
+                self.idle_since_key = false;
+            }
+            Some(KeyItem::Run(c)) => {
+                let mut cmd = [0u8; 128];
+                let n = c.len().min(127);
+                cmd[..n].copy_from_slice(&c.as_bytes()[..n]);
+                out.push(Event::Window(dos::vwin::Request::Run(cmd)));
+            }
+            Some(KeyItem::Shot(p)) => {
+                if let Some((w, h, px, pal)) = &self.last_gfx {
+                    write_png(Path::new(&p), *w, *h, px, pal);
+                }
+            }
             None => {}
         }
     }
@@ -304,6 +340,29 @@ impl Host for Run {
                 self.last_gfx = Some((w, h, px, v.palette()));
             }
         }
+    }
+    fn display_size(&mut self) -> (u32, u32) {
+        self.display
+    }
+    fn present_display(&mut self, d: &dos::disp::Display, _damage: &[dos::disp::Rect]) {
+        // The picture with the pointer drawn in.
+        let mut px = d.pix.clone();
+        if let Some(p) = &d.pointer {
+            let (x0, y0) = (d.pointer_pos.0 - p.hot.0, d.pointer_pos.1 - p.hot.1);
+            for r in 0..p.h {
+                for c in 0..p.w {
+                    let (x, y) = (x0 + c as i32, y0 + r as i32);
+                    if x < 0 || y < 0 || x >= d.w as i32 || y >= d.h as i32 {
+                        continue;
+                    }
+                    let bit = |m: &[u8]| m[r * p.width_bytes + c / 8] >> (7 - c % 8) & 1 != 0;
+                    let o = y as usize * d.w + x as usize;
+                    let v = if bit(&p.and) { px[o] } else { 0 };
+                    px[o] = if bit(&p.xor) { v ^ 0xff } else { v };
+                }
+            }
+        }
+        self.last_gfx = Some((d.w, d.h, px, d.pal));
     }
     fn pcm(&mut self, rate: u32, data: &[u8]) {
         if self.pcm.0 == 0 {
@@ -388,6 +447,41 @@ fn parse_keys(s: &str) -> VecDeque<KeyItem> {
         if c == '{' {
             let name: String = chars.by_ref().take_while(|&c| c != '}').collect();
             let ext = |sc: u8| vec![(0xe0, 0), (sc, 0), (0xe0, 0), (sc | 0x80, 0)];
+            let words: Vec<&str> = name.split_whitespace().collect();
+            let xy = |i: usize| words.get(i).and_then(|v| v.parse::<i32>().ok()).unwrap_or(0);
+            match words.first().copied() {
+                Some("mouse") => {
+                    q.push_back(KeyItem::Mouse(xy(1), xy(2), 0xff));
+                    continue;
+                }
+                Some(c @ ("click" | "rclick" | "dclick" | "press" | "release")) => {
+                    let b = if c == "rclick" { 2 } else { 1 };
+                    let (x, y) = (xy(1), xy(2));
+                    q.push_back(KeyItem::Mouse(x, y, if c == "release" { 0xff } else { 0 }));
+                    for _ in 0..if c == "dclick" { 2 } else { 1 } {
+                        if c != "release" {
+                            q.push_back(KeyItem::Mouse(x, y, b));
+                        }
+                        if c != "press" {
+                            q.push_back(KeyItem::Mouse(x, y, 0));
+                        }
+                    }
+                    continue;
+                }
+                Some("run") => {
+                    q.push_back(KeyItem::Run(words[1..].join(" ")));
+                    continue;
+                }
+                Some("shot") => {
+                    q.push_back(KeyItem::Shot(words.get(1).unwrap_or(&"shot.png").to_string()));
+                    continue;
+                }
+                Some("wait") if words.len() > 1 => {
+                    q.push_back(KeyItem::Wait(words[1].parse().unwrap_or(0.5)));
+                    continue;
+                }
+                _ => {}
+            }
             let item = match name.as_str() {
                 "wait" => KeyItem::Wait(0.5),
                 "enter" => KeyItem::Scan(press(0x1c, b'\r')),
@@ -492,6 +586,9 @@ fn main() {
     let mut watch = u32::MAX;
     let mut stats = false;
     let mut wav_out: Option<String> = None;
+    let mut display = (800, 600);
+    let mut disp_trace = false;
+    let mut vwin_trace = false;
     while let Some(a) = args.first().cloned() {
         if !a.starts_with("--") {
             break;
@@ -514,8 +611,16 @@ fn main() {
             "--nofpu" => cfg.fpu = false,
             "--noems" => cfg.ems_kb = 0,
             "--stats" => stats = true,
+            "--disp-trace" => disp_trace = true,
+            "--seamless" => cfg.seamless = true,
+            "--vwin-trace" => vwin_trace = true,
             "--watch" => watch = u32::from_str_radix(val().trim_start_matches("0x"), 16).unwrap(),
             "--wav" => wav_out = Some(val()),
+            "--display" => {
+                let v = val();
+                let (w, h) = v.split_once('x').expect("--display WxH");
+                display = (w.parse().unwrap(), h.parse().unwrap());
+            }
             _ => panic!("unknown option {a}"),
         }
     }
@@ -543,8 +648,12 @@ fn main() {
         trace,
         cp437: cp437(),
         pcm: (0, Vec::new()),
+        display,
+        held: 0,
     };
     let mut m = Machine::new(&mut host, cfg);
+    m.disp.trace = disp_trace;
+    m.vwin.trace = vwin_trace;
     m.dos.cwd[2] = cwd.to_ascii_uppercase();
     m.hw.watch = watch;
     let path = if prog.contains(':') {
@@ -567,6 +676,11 @@ fn main() {
         if t0.elapsed().as_secs_f64() > timeout {
             let (cs, ip) = m.where_now();
             eprintln!("dosrun: timeout at {cs:04x}:{ip:04x}");
+            // The code there (to find the module it is in).
+            let base = m.cpu.seg[x86emu::CS].base.wrapping_add(ip);
+            let mut code = [0u8; 32];
+            m.hw.read_bytes(base.wrapping_sub(16), &mut code);
+            eprintln!("dosrun: code at {:#x}-16: {}", base, code.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(""));
             break 124;
         }
     };

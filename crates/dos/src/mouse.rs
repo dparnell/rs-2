@@ -49,6 +49,16 @@ pub struct Mouse {
     gfx_under: Option<(i32, i32, [[u8; 16]; 16])>,
     pub reset_done: bool,
     pub owner: u16,
+    /// Win-OS/2's MOUSE.DRV asked VMOUSE$ for its scale factors: its
+    /// protected-mode handler gets absolute positions (AX bit 15, CX
+    /// and DX 0-65535 across the screen, pixels in a seamless session),
+    /// as OS/2's VMOUSE gives them.
+    pub absolute: bool,
+    /// The position as a fraction of the screen (0-65535 each way).
+    pub abs: (u32, u32),
+    /// The screen's size when a display driver of the machine's own
+    /// (crate::disp) draws it, instead of the video mode's.
+    pub screen: Option<(i32, i32)>,
 }
 
 impl Default for Mouse {
@@ -87,6 +97,9 @@ impl Default for Mouse {
             gfx_under: None,
             reset_done: false,
             owner: 0,
+            absolute: false,
+            abs: (0x8000, 0x8000),
+            screen: None,
         }
     }
 }
@@ -94,6 +107,9 @@ impl Default for Mouse {
 impl Machine {
     /// The virtual screen the driver uses for the current mode.
     fn mouse_extent(&mut self) -> (i32, i32) {
+        if let Some(s) = self.mouse.screen {
+            return s;
+        }
         let m = self.bda_mode();
         match m {
             0x0f | 0x10 => (640, 350),
@@ -124,6 +140,9 @@ impl Machine {
         ms.acc.1 -= py * ms.mickey_y.max(1);
         let (x, y) = (ms.x + px, ms.y + py);
         self.mouse_move_to(x, y, buttons, dx != 0 || dy != 0);
+        let (w, h) = self.mouse_extent();
+        let ms = &mut self.mouse;
+        ms.abs = (((ms.x.max(0) as u32) << 16) / w.max(1) as u32, ((ms.y.max(0) as u32) << 16) / h.max(1) as u32);
     }
 
     pub(crate) fn mouse_abs(&mut self, x: u32, y: u32, buttons: u8) {
@@ -131,9 +150,13 @@ impl Machine {
         let nx = (x as i64 * w as i64 / 65536) as i32;
         let ny = (y as i64 * h as i64 / 65536) as i32;
         let (dx, dy) = (nx - self.mouse.x, ny - self.mouse.y);
-        self.mouse.mickeys.0 += dx * self.mouse.mickey_x / 8;
-        self.mouse.mickeys.1 += dy * self.mouse.mickey_y / 8;
-        self.mouse_move_to(nx, ny, buttons, dx != 0 || dy != 0);
+        let moved = (x.min(65535), y.min(65535)) != self.mouse.abs;
+        self.mouse.abs = (x.min(65535), y.min(65535));
+        // At least a mickey for a move, which MOUSE.DRV checks.
+        let mk = |d: i32, m: i32, a: bool| if d == 0 && a { 1 } else { d * m / 8 };
+        self.mouse.mickeys.0 += mk(dx, self.mouse.mickey_x, moved);
+        self.mouse.mickeys.1 += mk(dy, self.mouse.mickey_y, false);
+        self.mouse_move_to(nx, ny, buttons, moved || dx != 0 || dy != 0);
     }
 
     fn mouse_move_to(&mut self, x: i32, y: i32, buttons: u8, moved: bool) {
@@ -168,7 +191,7 @@ impl Machine {
 
     /// Raise IRQ 12 when the handler has events to see.
     pub(crate) fn mouse_irq(&mut self) {
-        if self.mouse.pending != 0 && !self.mouse.in_handler {
+        if (self.mouse.pending != 0 || self.vwin_call_ready()) && !self.mouse.in_handler {
             self.hw.pic.raise(12);
         }
     }
@@ -176,6 +199,18 @@ impl Machine {
     /// INT 74h (IRQ 12): call the program's event handler.
     pub(crate) fn mouse_service(&mut self) {
         self.eoi(12);
+        // VWIN's user routine (WINSHELD's) is called from here too: the
+        // same far call into protected mode from real mode.
+        if !self.mouse.in_handler && !self.cpu.pm() && self.vwin_call_ready() {
+            let mut segs = [0u16; 6];
+            for (i, s) in segs.iter_mut().enumerate() {
+                *s = self.cpu.seg[i].sel;
+            }
+            self.mouse.saved = Saved { regs: self.cpu.regs, segs, eip: self.cpu.eip, flags: self.cpu.flags };
+            self.mouse.in_handler = true;
+            self.vwin_call_routine();
+            return;
+        }
         let ev = core::mem::take(&mut self.mouse.pending);
         let Some((mask, seg, off)) = self.mouse.handler else { return };
         if ev & mask == 0 || self.mouse.in_handler || self.cpu.pm() {
@@ -191,10 +226,19 @@ impl Machine {
         let _ = self.cpu.push(&mut self.hw, crate::bios::ROM as u32, 2);
         let _ = self.cpu.push(&mut self.hw, crate::bios::MOUSE_RET_CODE as u32, 2);
         let (b, x, y) = (self.mouse.buttons, self.mouse.x, self.mouse.y);
-        self.cpu.set_ax(ev & mask);
+        let abs = self.mouse.absolute && self.mouse.handler_pm;
+        self.cpu.set_ax(ev & mask | if abs { 0x8000 } else { 0 });
         self.cpu.set_bx(b as u16);
-        self.cpu.set_cx(x as u16);
-        self.cpu.set_dx(y as u16);
+        if abs && !self.vwin.seamless {
+            let (ax, ay) = self.mouse.abs;
+            self.cpu.set_cx(ax as u16);
+            self.cpu.set_dx(ay as u16);
+        } else {
+            // Seamless: IBM's USER takes absolute positions as pixels
+            // (MOUSE_EVENT with fMSeamless), as VMOUSE gives them there.
+            self.cpu.set_cx(x as u16);
+            self.cpu.set_dx(y as u16);
+        }
         let (mx, my) = self.mouse.mickeys;
         self.cpu.set_si(mx as u16);
         self.cpu.set_di(my as u16);
@@ -202,7 +246,7 @@ impl Machine {
             // In protected mode; mouse_handler_done follows its return.
             let _ = self.cpu.pop(&mut self.hw, 2);
             let _ = self.cpu.pop(&mut self.hw, 2);
-            self.dpmi_call_pm(seg, off as u32);
+            self.dpmi_call_pm_args(seg, off as u32, &[]);
             return;
         }
         self.cpu.seg[CS] = Seg::real_code(seg);
@@ -218,6 +262,7 @@ impl Machine {
         self.cpu.eip = s.eip;
         self.cpu.flags = s.flags;
         self.mouse.in_handler = false;
+        self.vwin.in_call = false;
     }
 
     fn mouse_visible(&self) -> bool {
@@ -300,7 +345,9 @@ impl Machine {
     fn mouse_reset(&mut self) {
         self.mouse_hide_cursor();
         let keep = (self.mouse.x, self.mouse.y, self.mouse.buttons);
+        let (absolute, abs, screen) = (self.mouse.absolute, self.mouse.abs, self.mouse.screen);
         self.mouse = Mouse::default();
+        (self.mouse.absolute, self.mouse.abs, self.mouse.screen) = (absolute, abs, screen);
         let (w, h) = self.mouse_extent();
         self.mouse.max_x = w - 1;
         self.mouse.max_y = h - 1;

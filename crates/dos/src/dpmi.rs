@@ -71,6 +71,8 @@ const H_SAVE: u32 = 0x2018;
 const H_IRQRET: u32 = 0x2020;
 const H_EXTAPI: u32 = 0x2028;
 const H_PMCALLRET: u32 = 0x2030;
+/// VDD entry points (crate::vdd), 8 bytes each.
+const H_VDD: u32 = 0x2040;
 const H_DEFEXC: u32 = 0x2100;
 const H_STACK0: u32 = 0x7000;
 const H_LOCKED: u32 = 0x8000;
@@ -318,6 +320,18 @@ impl Machine {
                 // The default handler (a client chaining to it): the
                 // caller's IRET frame is on the client's stack.
                 let v = (n - CB_DEFINT) as u8;
+                if v == 0x2f && self.cpu.ax() == 0x4011 {
+                    self.vdd_entry_pm();
+                    return Cb::Done;
+                }
+                if v == 0x66 {
+                    let sz = if self.client().bits32 { 4 } else { 2 };
+                    let sp = if self.cpu.seg[SS].big() { self.cpu.regs[ESP] } else { self.cpu.regs[ESP] & 0xffff };
+                    self.pm_flags_at = Some(self.cpu.seg[SS].base.wrapping_add(sp + 2 * sz));
+                    self.vwin_int66(host);
+                    self.pm_flags_at = None;
+                    return Cb::Done;
+                }
                 if v == 0x21 {
                     let sz = if self.client().bits32 { 4 } else { 2 };
                     let sp = if self.cpu.seg[SS].big() { self.cpu.regs[ESP] } else { self.cpu.regs[ESP] & 0xffff };
@@ -409,6 +423,10 @@ impl Machine {
         stub(self, H_EXTAPI, CB_EXTAPI);
         stub(self, H_PMCALLRET, CB_PMCALLRET);
         self.hw.wr(area + H_EXTAPI + 4, 0xcb);
+        for k in 0..=(crate::vdd::CB_VDD_LAST - crate::vdd::CB_VDD) {
+            let n = crate::vdd::CB_VDD + k;
+            self.hw.write_bytes(area + H_VDD + k as u32 * 8, &[0xfe, 0x38, n as u8, (n >> 8) as u8, crate::vdd::vdd_ret(k)]);
+        }
         self.hw.wr(area + H_SAVE, 0xcb);
         // TSS: the ring-0 stack.
         self.hw.wr32(area + H_TSS + 4, area + H_STACK0);
@@ -573,7 +591,7 @@ impl Machine {
     }
 
     /// Linear address of a protected-mode sel:off.
-    fn dpmi_lin(&mut self, sel: u16, off: u32) -> u32 {
+    pub(crate) fn dpmi_lin(&mut self, sel: u16, off: u32) -> u32 {
         let base = if sel & 4 != 0 {
             let a = self.dpmi.client.as_ref().map_or(0, |c| c.desc_addr(sel));
             let d = self.dpmi_rw64(a);
@@ -599,6 +617,10 @@ impl Machine {
             return;
         }
         if v == 0x2f && !hw && self.cpu.ax() == 0x168a && self.dpmi_vendor_api() {
+            return;
+        }
+        if v == 0x2f && !hw && self.cpu.ax() == 0x4011 && self.client().pm_vectors[0x2f].is_none() {
+            self.vdd_entry_pm();
             return;
         }
         if let Some((sel, off)) = self.client().pm_vectors[v as usize] {
@@ -632,6 +654,13 @@ impl Machine {
             return;
         }
         if matches!(v, 0x10..=0x12 | 0x15 | 0x16 | 0x1a | 0x33) && !hw && self.dpmi_bios(host, v, f + 8) {
+            return;
+        }
+        if v == 0x66 && !hw {
+            // VWIN (crate::vwin), on the client's selectors.
+            self.pm_flags_at = Some(f + 8);
+            self.vwin_int66(host);
+            self.pm_flags_at = None;
             return;
         }
         if matches!(v, 0x25 | 0x26) && !hw && self.frame_get(f, 1) & 3 == 3 {
@@ -843,6 +872,12 @@ impl Machine {
         }
         self.cpu.set_al(0);
         true
+    }
+
+    /// VDD `k`'s protected-mode entry point (crate::vdd).
+    pub(crate) fn dpmi_vdd_entry(&mut self, k: u16) -> (u16, u16) {
+        let sel = if self.client().bits32 { SEL_CODE3 } else { SEL_CODE3_16 };
+        (sel, (H_VDD + k as u32 * 8) as u16)
     }
 
     /// The extension API (a far call): AX=0000h the version (0100h),
@@ -1285,7 +1320,9 @@ impl Machine {
     /// `sel:off` with the general registers as they are (the mouse event
     /// handler a client set from protected mode); its RETF comes back to
     /// CB_PMCALLRET.
-    pub(crate) fn dpmi_call_pm(&mut self, sel: u16, off: u32) {
+    /// With `args` (words, the first pushed first) above the return
+    /// address, for a Pascal procedure.
+    pub(crate) fn dpmi_call_pm_args(&mut self, sel: u16, off: u32, args: &[u16]) {
         if self.dpmi.client.is_none() {
             return;
         }
@@ -1299,8 +1336,9 @@ impl Machine {
         self.cpu.idtr = Dtr { base: area + H_IDT, limit: 256 * 8 - 1 };
         self.hw.irq_remap = Some(HW_BASE);
         let sz = if bits32 { 4 } else { 2 };
-        let frame = [H_PMCALLRET, if bits32 { SEL_CODE3 as u32 } else { SEL_CODE3_16 as u32 }];
-        let base = locked_top - sz * 2;
+        let mut frame = vec![H_PMCALLRET, if bits32 { SEL_CODE3 as u32 } else { SEL_CODE3_16 as u32 }];
+        frame.extend(args.iter().rev().map(|&a| a as u32));
+        let base = locked_top - sz * frame.len() as u32;
         for (i, x) in frame.iter().enumerate() {
             let a = area + base + i as u32 * sz;
             if sz == 4 {

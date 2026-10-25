@@ -40,6 +40,15 @@ pub struct Ini {
     pub value: &'static [u8],
 }
 
+/// A file the install makes from an installed one (`make` lines):
+/// RS2DISP.DRV, rs2's display driver for Win-OS/2, from VGA.DRV.
+pub struct Make {
+    pub target: &'static [u8],
+    /// What makes it: `rs2disp`.
+    pub how: &'static [u8],
+    pub input: &'static [u8],
+}
+
 pub struct App {
     pub id: &'static [u8],
     pub name: &'static [u8],
@@ -48,6 +57,7 @@ pub struct App {
     pub objects: Vec<Object>,
     pub files: Vec<File>,
     pub inis: Vec<Ini>,
+    pub makes: Vec<Make>,
 }
 
 pub struct Category {
@@ -107,6 +117,7 @@ pub fn load() -> Vec<Category> {
                         objects: Vec::new(),
                         files: Vec::new(),
                         inis: Vec::new(),
+                        makes: Vec::new(),
                     });
                 }
             }
@@ -117,6 +128,7 @@ pub fn load() -> Vec<Category> {
                     b"object" => a.objects.push(Object { title: get(0), program: get(1), params: get(2), dir: get(3), id: get(4), folder: get(5), progtype: get(6) }),
                     b"file" => a.files.push(File { target: get(0), source: get(1), stored: get(2) }),
                     b"ini" => a.inis.push(Ini { file: get(0), section: get(1), key: get(2), value: get(3) }),
+                    b"make" => a.makes.push(Make { target: get(0), how: get(1), input: get(2) }),
                     _ => {}
                 }
             }

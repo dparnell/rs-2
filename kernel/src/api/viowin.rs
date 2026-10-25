@@ -40,6 +40,9 @@ const ST_USERFONT: u32 = 0x10;
 const ST_PIXELS: u32 = 0x20;
 /// A DOS session: the mouse goes to it as positions (Rs2VdmMouse).
 const ST_DOS: u32 = 0x40;
+/// A DOS session showing a display surface in shared memory
+/// (Rs2VdmSurface): its size at offsets 116 and 120.
+const ST_SURFACE: u32 = 0x80;
 
 /// Rs2VioControl commands.
 const CTL_FOCUS: u32 = 1;
@@ -145,7 +148,8 @@ pub fn query_sessions(c: &mut Ctx) -> u32 {
 /// last cursor scan line (of cell_h), cell_h, code page, flags (ST_*),
 /// font generation, then 16 colours 0x00RRGGBB (offset 44), the lines
 /// that ever scrolled off the screen (offset 108, see Rs2VioReadHistory),
-/// the keys typed into the window (offset 112), 12 bytes reserved.
+/// the keys typed into the window (offset 112), a display surface's
+/// width and height (offsets 116, 120: ST_SURFACE), 4 bytes reserved.
 pub fn read_screen(c: &mut Ctx) -> u32 {
     let (sid, pstate, pcells, cb) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
     if !session::exists(sid) {
@@ -178,6 +182,9 @@ pub fn read_screen(c: &mut Ctx) -> u32 {
         if dos {
             f |= ST_DOS;
         }
+        if s.surface.is_some() {
+            f |= ST_SURFACE;
+        }
         let mut st = Vec::with_capacity(128);
         for v in [s.changes, s.cols as u32, s.rows as u32, cr as u32, cc as u32, a as u32, b as u32, s.cell_h as u32, s.codepage().number() as u32, f, s.font_gen] {
             st.extend_from_slice(&v.to_le_bytes());
@@ -185,7 +192,8 @@ pub fn read_screen(c: &mut Ctx) -> u32 {
         for v in s.palette_rgb() {
             st.extend_from_slice(&v.to_le_bytes());
         }
-        for v in [s.scrolled, s.keys] {
+        let (sw, sh) = s.surface.unwrap_or((0, 0));
+        for v in [s.scrolled, s.keys, sw as u32, sh as u32] {
             st.extend_from_slice(&v.to_le_bytes());
         }
         st.resize(128, 0);

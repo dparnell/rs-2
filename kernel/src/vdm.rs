@@ -20,6 +20,8 @@ pub const COMMAND_PATH: &str = "C:\\OS2\\MDOS\\COMMAND.COM";
 pub const EV_KEY: u16 = 1;
 pub const EV_MOUSE: u16 = 2;
 pub const EV_MOUSE_ABS: u16 = 3;
+/// A request of the seamless host for Win-OS/2 (flags: the code).
+pub const EV_REQUEST: u16 = 4;
 
 /// One input event: kind, flags (key: the character the layout gives;
 /// mouse: buttons), a (key: scan code byte; mouse: dx or x 0-65535), b
@@ -34,6 +36,9 @@ pub struct Event {
 
 struct Vdm {
     events: VecDeque<Event>,
+    /// The common seamless Win-OS/2 session (DosStartSession of
+    /// PROG_31_ENHSEAMLESSCOMMON and the like start their programs in it).
+    seamless_common: bool,
     /// Shift, Ctrl and Alt as the session last saw them pressed (keys
     /// from its window).
     held: u8,
@@ -48,7 +53,7 @@ static ANY: AtomicBool = AtomicBool::new(false);
 
 /// Make `sid` a DOS session.
 pub fn register(sid: u32) {
-    VDMS.lock().entry(sid).or_insert_with(|| Vdm { events: VecDeque::new(), held: 0 });
+    VDMS.lock().entry(sid).or_insert_with(|| Vdm { events: VecDeque::new(), held: 0, seamless_common: false });
     ANY.store(true, Ordering::Relaxed);
 }
 
@@ -125,6 +130,38 @@ pub fn mouse(sid: u32, buttons: u8, dx: i32, dy: i32) -> bool {
 /// The mouse at a point of the screen (0-65535 across and down).
 pub fn mouse_abs(sid: u32, buttons: u8, x: u32, y: u32) -> bool {
     is_dos(sid) && push(sid, Event { kind: EV_MOUSE_ABS, flags: buttons as u16, a: x.min(65535) as i32, b: y.min(65535) as i32 })
+}
+
+/// Mark `sid` as the common seamless Win-OS/2 session.
+pub fn set_seamless_common(sid: u32) {
+    if let Some(v) = VDMS.lock().get_mut(&sid) {
+        v.seamless_common = true;
+    }
+}
+
+/// The common seamless Win-OS/2 session, if one runs.
+pub fn seamless_common() -> Option<u32> {
+    VDMS.lock().iter().find(|(_, v)| v.seamless_common).map(|(&s, _)| s)
+}
+
+/// Ask Win-OS/2 in session `sid` to start `cmd` (REQ_RUN_TEXT pieces,
+/// then REQ_RUN).
+pub fn run_in(sid: u32, cmd: &str) -> bool {
+    let b = cmd.as_bytes();
+    for chunk in b.chunks(8) {
+        let mut v = [0u8; 8];
+        v[..chunk.len()].copy_from_slice(chunk);
+        let (a, bb) = (i32::from_le_bytes([v[0], v[1], v[2], v[3]]), i32::from_le_bytes([v[4], v[5], v[6], v[7]]));
+        if !request(sid, 9, a, bb) {
+            return false;
+        }
+    }
+    request(sid, 8, -1, 0)
+}
+
+/// A request of the seamless PM host (win16drv::surface::REQ_*).
+pub fn request(sid: u32, code: u16, a: i32, b: i32) -> bool {
+    is_dos(sid) && push(sid, Event { kind: EV_REQUEST, flags: code, a, b })
 }
 
 /// Take up to `max` events of `sid`, waiting until `deadline` (ticks)
