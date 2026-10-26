@@ -34,6 +34,7 @@ mod misc;
 mod pm;
 mod res;
 mod scroll;
+mod stubs;
 mod user;
 
 use core::cell::UnsafeCell;

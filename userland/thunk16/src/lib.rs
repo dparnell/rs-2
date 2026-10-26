@@ -484,7 +484,14 @@ macro_rules! entries16_pascal {
     (dispatch = $dispatch:path; $($name:ident = $idx:literal, $size:literal;)*) => {
         $crate::entries16_pascal!(@emit $dispatch; ; $($name = $idx, $size;)*);
     };
+    // A second list in the same module needs labels of its own.
+    (dispatch = $dispatch:path; labels = $common:literal, $back:literal, $flat:literal; $($name:ident = $idx:literal, $size:literal;)*) => {
+        $crate::entries16_pascal!(@emit $dispatch, $common, $back, $flat; ; $($name = $idx, $size;)*);
+    };
     (@emit $dispatch:path; $($pre:expr,)*; $($name:ident = $idx:literal, $size:literal;)*) => {
+        $crate::entries16_pascal!(@emit $dispatch, ".Lt16p_common", ".Lt16p_back", ".Lt16p_flat"; $($pre,)*; $($name = $idx, $size;)*);
+    };
+    (@emit $dispatch:path, $common:literal, $back:literal, $flat:literal; $($pre:expr,)*; $($name:ident = $idx:literal, $size:literal;)*) => {
         core::arch::global_asm!(
             ".pushsection .text.thunk16p,\"ax\"",
             ".p2align 13",
@@ -496,12 +503,12 @@ macro_rules! entries16_pascal {
                 concat!("mov ax, ", stringify!($idx)),
                 // call near .Lt16p_common
                 ".byte 0xe8",
-                ".short .Lt16p_common - . - 2",
+                concat!(".short ", $common, " - . - 2"),
                 // retf SIZE
                 ".byte 0xca",
                 concat!(".short ", stringify!($size)),
             )*
-            $crate::common16!(".Lt16p_common", ".Lt16p_back", ".Lt16p_flat", "8", "0xc3"),
+            $crate::common16!($common, $back, $flat, "8", "0xc3"),
             ".code32",
             ".popsection",
             enter = sym $crate::thunk16_enter,

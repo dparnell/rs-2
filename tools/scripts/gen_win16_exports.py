@@ -1,23 +1,33 @@
 #!/usr/bin/env python3
 """Generate userland/win16/exports.def from the entries! list in
 userland/win16/src/lib.rs and the Windows names and ordinals in Open
-Watcom's Win16 import libraries (WATCOM, default ~/opt/watcom).
+Watcom's Win16 import libraries (WATCOM, default ~/opt/watcom), and
+userland/win16/src/stubs.rs: an entry for every other function of the
+modules WIN16 implements that Open Watcom's headers have a prototype for
+(its argument size comes from the prototype), which traces the call and
+returns 0. Rerun after adding entries (or after a merge that did).
 
 WIN16 ordinal = module base + Windows ordinal (KERNEL 1000, USER 2000,
-GDI 3000, KEYBOARD 4000), as in kernel/src/loader/mod.rs WIN16_MODULES.
+GDI 3000, KEYBOARD 4000...), as in kernel/src/loader/mod.rs WIN16_MODULES.
 Run with python3 -I tools/scripts/gen_win16_exports.py.
 """
-import os, re, struct, sys
+import glob, os, re, struct, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WATCOM = os.environ.get('WATCOM', os.path.expanduser('~/opt/watcom'))
-BASES = {'KERNEL': 1000, 'USER': 2000, 'GDI': 3000, 'KEYBOARD': 4000}
+# Keep in step with WIN16_MODULES (kernel/src/loader/mod.rs).
+BASES = {'KERNEL': 1000, 'USER': 2000, 'GDI': 3000, 'KEYBOARD': 4000, 'WIN87EM': 5000,
+         'SOUND': 5200, 'SYSTEM': 5400, 'TOOLHELP': 6000, 'VER': 6200, 'LZEXPAND': 6400,
+         'SHELL': 6800, 'MMSYSTEM': 10000}
 # Register-based entries: 16-bit code of their own in src/lib.rs.
 EXTRA = ['INITTASK=w16_inittask @1091', 'DOS3CALL=w16_dos3call @1102', '_WSPRINTF=u_wsprintf @2420']
+# Not to be stubbed: register-based or with variable arguments.
+NO_STUB = {'INITTASK', 'DOS3CALL', '_WSPRINTF', 'WSPRINTF'}
 
 
 def imports(lib):
-    """(module, ordinal) -> name from the OMF IMPDEF records of a library."""
+    """(module, ordinal) -> name from the OMF IMPDEF records of a library
+    (the upper-case name when there are several)."""
     d = open(lib, 'rb').read()
     out = {}
     for m in re.finditer(rb'\x88..[\x00\x80]\xa0\x01', d, re.S):
@@ -33,29 +43,106 @@ def imports(lib):
         n = b[p]
         mod = b[p + 1:p + 1 + n].decode()
         p += 1 + n
-        if by_ord and name == name.upper():
-            out.setdefault((mod, struct.unpack_from('<H', b, p)[0]), name)
+        if by_ord:
+            key = (mod, struct.unpack_from('<H', b, p)[0])
+            if key not in out or name == name.upper():
+                out[key] = name
+    return out
+
+
+def prototypes():
+    """Upper-case function name -> bytes of arguments, from the WINAPI
+    prototypes in Open Watcom's Win16 headers."""
+    txt = ''
+    for f in sorted(glob.glob(os.path.join(WATCOM, 'h/win/*.h'))):
+        txt += open(f, encoding='latin1').read() + '\n'
+    txt = re.sub(r'/\*.*?\*/', ' ', txt, flags=re.S)
+    txt = re.sub(r'//[^\n]*', ' ', txt)
+    four = {'DWORD', 'LONG', 'LPARAM', 'LRESULT', 'COLORREF', 'FARPROC', 'POINT', 'SEGPTR', 'HRESULT',
+            'FOURCC', 'ULONG', 'SCODE', 'SIZE', 'float', 'long'}
+    for m in re.finditer(r'typedef[^;]*?\(\s*(?:CALLBACK|WINAPI|FAR\s+PASCAL|__far)[^)]*?\*\s*(\w+)\s*\)', txt):
+        four.add(m.group(1))
+    for m in re.finditer(r'typedef[^;{}]*?(?:FAR|__far)\s*\*\s*(\w+)\s*;', txt):
+        four.add(m.group(1))
+    for m in re.finditer(r'typedef\s+(?:struct\s+\w+|\w+)\s+(?:FAR|__far|__huge|_huge|huge)\s*\*\s*(\w+)', txt):
+        four.add(m.group(1))
+    for m in re.finditer(r'typedef\s+(DWORD|LONG|ULONG|long|unsigned long|LPVOID|LPSTR)\s+(\w+)\s*;', txt):
+        four.add(m.group(2))
+    four |= set(re.findall(r'\b(LP\w+)\b', txt))
+    near = {'NEAR', 'near', '__near', '_near'}
+    out = {}
+    conv = {'WINAPI', 'CALLBACK'} | set(re.findall(r'#define\s+(\w+)\s+(?:FAR\s+PASCAL|__far\s+__pascal|WINAPI)\s*\n', txt))
+    for m in re.finditer(r'\b(?:%s|FAR\s+PASCAL)\s+(\w+)\s*\(([^;{]*?)\)\s*;' % '|'.join(sorted(conv)), txt):
+        name, args = m.group(1), m.group(2).strip()
+        if '...' in args:
+            continue
+        n = 0
+        if args not in ('', 'void', 'VOID'):
+            for a in args.split(','):
+                toks = re.findall(r'\w+|\*', a)
+                if ('*' in toks and not near & set(toks)) or four & set(toks):
+                    n += 4
+                elif 'double' in toks:
+                    n += 8
+                else:
+                    n += 2
+        out.setdefault(name.upper(), n)
     return out
 
 
 def main():
-    names = imports(os.path.join(WATCOM, 'lib286/win/windows.lib'))
+    names = {}
+    for lib in sorted(glob.glob(os.path.join(WATCOM, 'lib286/win/*.lib'))):
+        for k, v in imports(lib).items():
+            names.setdefault(k, v)
     src = open(os.path.join(ROOT, 'userland/win16/src/lib.rs')).read()
-    inv = {v: k for k, v in BASES.items()}
+    inv = sorted(((b, m) for m, b in BASES.items()), reverse=True)
+    mod_of = lambda idx: next((b, m) for b, m in inv if idx >= b)
     out = ["; WIN16: KERNEL (1000 + its ordinal), USER (2000 +), GDI (3000 +), KEYBOARD",
-           "; (4000 +); the names are Windows'. The 16-bit entries are src/lib.rs entries!.",
+           "; (4000 +)...; the names are Windows'. The 16-bit entries are src/lib.rs entries!,",
+           "; the ones not implemented yet src/stubs.rs.",
            "; Generated by tools/scripts/gen_win16_exports.py."]
+    done = set()
     for sym, idx in re.findall(r'^\s+(\w+) = (\d+), \d+;', src, re.M):
         idx = int(idx)
         if idx < 1000:
             continue
-        mod = inv[idx // 1000 * 1000]
-        name = names.get((mod, idx % 1000))
+        base, mod = mod_of(idx)
+        name = names.get((mod, idx - base))
         if name is None:
-            sys.exit(f'{sym}: no {mod}.{idx % 1000} in the import library')
+            sys.exit(f'{sym}: no {mod}.{idx - base} in the import libraries')
         out.append(f'{name}={sym} @{idx}')
+        done.add(idx)
+    for e in EXTRA:
+        done.add(int(e.split('@')[1]))
     out += EXTRA
+    protos = prototypes()
+    stubs = []
+    for (mod, o), name in sorted(names.items()):
+        if mod not in BASES:
+            continue
+        idx = BASES[mod] + o
+        size = protos.get(name.upper())
+        if idx in done or size is None or name.upper() in NO_STUB:
+            continue
+        stubs.append((idx, size, mod, o, name))
+        out.append(f'{name}=x_{idx} @{idx}')
     open(os.path.join(ROOT, 'userland/win16/exports.def'), 'w').write('\n'.join(out) + '\n')
+    rs = ['//! The Windows functions WIN16 does not implement yet (generated by',
+          '//! tools/scripts/gen_win16_exports.py from Open Watcom\'s import libraries',
+          '//! and headers): each traces its first call and returns 0.',
+          '',
+          'thunk16::entries16_pascal! {',
+          '    dispatch = dispatch;',
+          '    labels = ".Lt16x_common", ".Lt16x_back", ".Lt16x_flat";']
+    rs += [f'    x_{idx} = {idx}, {size};' for idx, size, *_ in stubs]
+    rs += ['}', '', '/// (WIN16 ordinal, Windows module.ordinal name).',
+           'pub static NAMES: &[(u16, &str)] = &[']
+    rs += [f'    ({idx}, "{mod}.{o} {name}"),' for idx, _, mod, o, name in stubs]
+    rs += ['];', '', 'extern "C" fn dispatch(idx: u32, _args: *const u8) -> u32 {',
+           '    crate::misc::not_implemented(idx);', '    0', '}', '']
+    open(os.path.join(ROOT, 'userland/win16/src/stubs.rs'), 'w').write('\n'.join(rs))
+    print(f'{len(done)} entries, {len(stubs)} stubs')
 
 
 main()
