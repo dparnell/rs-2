@@ -2269,7 +2269,7 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
             (m, if vk != 0 { vk } else { chr & 0xff }, lp)
         }
         m if crate::dde::is_w16x(m) => crate::dde::incoming(m, q.mp1, q.mp2),
-        m if crate::dde::is_pm_dde(m) => crate::dde::from_pm(m, q.mp1, q.mp2),
+        m if crate::dde::is_pm_dde(m) => crate::dde::from_pm(m, q.mp1, q.mp2, q.time),
         m if crate::clip::is_clip_message(m) => crate::clip::translate(m, q.mp1, q.mp2),
         m if m & POSTED != 0 => ((m & 0xffff) as u16, q.mp1 as u16, q.mp2),
         _ => return None,

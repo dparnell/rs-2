@@ -1163,7 +1163,8 @@ static void raw_dde_tests(HWND hwnd)
     n = pm_acks;
     PostMessage(pm_server, WM_DDE_EXECUTE, (WPARAM)hwnd, MAKELONG(0, h));
     pump(&pm_acks, n);
-    check(pm_acks == n + 1 && (pm_status & 0x8000) && pm_hi == h, "WM_DDE_EXECUTE to the PM server: ACK with the commands back");
+    wsprintf(line, "WM_DDE_EXECUTE to the PM server: ACK with the commands back (%d %04x %04x %04x)", pm_acks - n, pm_status, pm_hi, h);
+    check(pm_acks == n + 1 && (pm_status & 0x8000) && pm_hi == h, line);
     GlobalFree(h);
     n = pm_terms;
     PostMessage(pm_server, WM_DDE_TERMINATE, (WPARAM)hwnd, 0);

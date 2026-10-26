@@ -350,17 +350,19 @@ pub fn is_pm_dde(m: u32) -> bool {
 }
 
 /// One of PM's DDE messages (from a PM server) as Windows' message. A
-/// message is translated once (PeekMessage looks at it before it takes
-/// it): the DDESTRUCT is freed then.
-pub fn from_pm(m: u32, mp1: u32, mp2: u32) -> (u16, u16, u32) {
-    static LAST: Global<Option<((u32, u32, u32), (u16, u16, u32))>> = Global::new(None);
+/// message (its time tells it from another with the same parameters) is
+/// translated once, as PeekMessage may look at it before GetMessage
+/// takes it: the DDESTRUCT is freed then.
+pub fn from_pm(m: u32, mp1: u32, mp2: u32, time: u32) -> (u16, u16, u32) {
+    static LAST: Global<Option<((u32, u32, u32, u32), (u16, u16, u32))>> = Global::new(None);
+    let key = (m, mp1, mp2, time);
     if let Some((k, r)) = *LAST.get() {
-        if k == (m, mp1, mp2) && mp2 != 0 {
+        if k == key && mp2 != 0 && time != 0 {
             return r;
         }
     }
     let r = translate_pm_dde(m, mp1, mp2);
-    *LAST.get() = Some(((m, mp1, mp2), r));
+    *LAST.get() = Some((key, r));
     r
 }
 
