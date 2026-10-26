@@ -40,8 +40,25 @@ pub fn interrupt(p: *mut u16) {
     match r[INTNO] {
         0xe0 => kernel::init_task(&mut r),
         0xe1 => kernel::fpmath(&mut r),
+        0xe2 => kernel::catch(&mut r),
+        0xe3 => kernel::throw(&mut r),
+        0xe4 => kernel::undefined_dynalink(&r),
         0x21 => int21(&mut r),
         0x25 | 0x26 => abs_disk(&mut r),
+        0x31 => dpmi(&mut r),
+        // The multiplex interrupt: nothing is installed (AL stays).
+        0x2f => {}
+        // BIOS time of day: CX:DX the ticks (18.2 a second) since
+        // midnight, AL whether midnight passed.
+        0x1a if hi(r[AX]) == 0 => {
+            let mut dt = os2::DateTime::default();
+            unsafe { os2::DosGetDateTime(&mut dt) };
+            let cs = ((dt.hours as u32 * 60 + dt.minutes as u32) * 60 + dt.seconds as u32) * 100 + dt.hundredths as u32;
+            let ticks = (cs as u64 * 1_193_180 / 6_553_600) as u32;
+            r[CX] = (ticks >> 16) as u16;
+            r[DX] = ticks as u16;
+            r[AX] &= 0xff00;
+        }
         // A protection fault: handled when it is fixed (the number 0).
         0x10d => {
             if segment_load(&mut r) {
@@ -60,6 +77,138 @@ pub fn interrupt(p: *mut u16) {
 
 /// INTREGS.
 pub type Regs = [u16; 15];
+
+/// DPMI 0.9 (INT 31h), as Windows' DPMI host gives it to Windows programs:
+/// LDT descriptors (rs2's alias selectors, RS2API 421), DOS memory (global
+/// blocks: there is no real mode, the segment is the selector), interrupt
+/// vectors (kept, never called), memory information. Real-mode calls and
+/// callbacks fail.
+fn dpmi(r: &mut Regs) {
+    use crate::pm::Rs2Win16Selector as sel;
+    let seg_of = |hi: u16, lo: u16| (hi as u32) << 16 | lo as u32;
+    ok(r);
+    let bad = |r: &mut Regs| {
+        r[AX] = 0x8022; // invalid selector
+        r[FLAGS] |= CF;
+    };
+    match r[AX] {
+        // Allocate CX descriptors.
+        0x0000 => match unsafe { sel(9, 0, r[CX] as u32) } {
+            0 => {
+                r[AX] = 0x8011;
+                r[FLAGS] |= CF;
+            }
+            s => r[AX] = s as u16,
+        },
+        // Free a descriptor.
+        0x0001 => {
+            if unsafe { sel(4, r[BX] as u32, 0) } == 0 {
+                bad(r);
+            }
+        }
+        // The selector increment.
+        0x0003 => r[AX] = 8,
+        // Get a segment's base (CX:DX), set it, set its limit.
+        0x0006 => match unsafe { sel(1, r[BX] as u32, 0) } {
+            u32::MAX => bad(r),
+            b => {
+                r[CX] = (b >> 16) as u16;
+                r[DX] = b as u16;
+            }
+        },
+        0x0007 | 0x0008 => {
+            let op = if r[AX] == 7 { 2 } else { 3 };
+            if unsafe { sel(op, r[BX] as u32, seg_of(r[CX], r[DX])) } == 0 {
+                bad(r);
+            }
+        }
+        // Set access rights (CL bit 3: code).
+        0x0009 => {
+            if unsafe { sel(7, r[BX] as u32, if r[CX] & 8 != 0 { 2 } else { 1 }) } == 0 {
+                bad(r);
+            }
+        }
+        // A data alias of a code segment.
+        0x000a => match unsafe { sel(0, r[BX] as u32, 1) } {
+            0 => bad(r),
+            s => r[AX] = s as u16,
+        },
+        // Get and set the descriptor at ES:DI.
+        0x000b => {
+            let (b, l) = unsafe { (sel(1, r[BX] as u32, 0), sel(5, r[BX] as u32, 0)) };
+            if b == u32::MAX {
+                return bad(r);
+            }
+            let ar: u32;
+            unsafe { core::arch::asm!("lar {0:e}, {1:e}", out(reg) ar, in(reg) r[BX] as u32, options(nostack)) };
+            let d = ptr(r[ES], r[DI]);
+            let g = l > 0xfffff;
+            let lim = if g { l >> 12 } else { l };
+            let v = [lim as u8, (lim >> 8) as u8, b as u8, (b >> 8) as u8, (b >> 16) as u8, (ar >> 8) as u8, ((lim >> 16) & 0xf) as u8 | if g { 0x80 } else { 0 }, (b >> 24) as u8];
+            unsafe { core::ptr::copy_nonoverlapping(v.as_ptr(), d, 8) };
+        }
+        0x000c => {
+            let d = ptr(r[ES], r[DI]);
+            let v = unsafe { core::slice::from_raw_parts(d, 8) };
+            let base = v[2] as u32 | (v[3] as u32) << 8 | (v[4] as u32) << 16 | (v[7] as u32) << 24;
+            let mut lim = v[0] as u32 | (v[1] as u32) << 8 | ((v[6] & 0xf) as u32) << 16;
+            if v[6] & 0x80 != 0 {
+                lim = lim << 12 | 0xfff;
+            }
+            let s = r[BX] as u32;
+            unsafe {
+                if sel(2, s, base) == 0 || sel(3, s, lim) == 0 || sel(7, s, if v[5] & 8 != 0 { 2 } else { 1 }) == 0 {
+                    return bad(r);
+                }
+            }
+        }
+        // DOS memory: BX paragraphs; AX the segment, DX the selector.
+        0x0100 => {
+            let h = kernel::global_alloc(0x40, r[BX] as u32 * 16);
+            if h == 0 {
+                r[AX] = 8;
+                r[BX] = 0;
+                r[FLAGS] |= CF;
+            } else {
+                r[AX] = h;
+                r[DX] = h;
+            }
+        }
+        0x0101 => {
+            kernel::global_free(r[DX]);
+        }
+        // Real-mode interrupt vectors: none (CX:DX 0).
+        0x0200 | 0x0202 | 0x0204 => {
+            r[CX] = 0;
+            r[DX] = 0;
+        }
+        0x0201 | 0x0203 | 0x0205 => {}
+        // The version: 0.90, 32-bit host, a 386, PICs at 08h and 70h.
+        0x0400 => {
+            r[AX] = 0x005a;
+            r[BX] = 0x0003;
+            r[CX] = (r[CX] & 0xff00) | 3;
+            r[DX] = 0x0870;
+        }
+        // Free memory information at ES:DI.
+        0x0500 => {
+            let d = ptr(r[ES], r[DI]) as *mut u32;
+            for i in 0..12 {
+                unsafe { d.add(i).write_unaligned(if i == 0 { 16 << 20 } else { u32::MAX }) };
+            }
+        }
+        // Lock, unlock, page discarding: nothing to do.
+        0x0600..=0x0603 | 0x0702 | 0x0703 => {}
+        // Real mode calls, callbacks, physical mappings: none.
+        _ => {
+            if crate::tracing() {
+                trace(format_args!("W16 INT 31h AX={:04X} not supported", r[AX]));
+            }
+            r[AX] = 0x8001;
+            r[FLAGS] |= CF;
+        }
+    }
+}
 
 /// INT 25h and 26h: absolute disk read and write of drive AL, CX
 /// sectors from DX to DS:BX (CX FFFFh: a packet at DS:BX with the start
@@ -102,6 +251,38 @@ fn abs_disk(r: &mut Regs) {
     // is their last (the error code): it becomes the pushed flags.
     r[SP] = r[SP].wrapping_sub(2);
     r[ERROR] = r[FLAGS];
+}
+
+/// DOS's upper-case table (size word, then characters 80h-FFh), in a
+/// global block (16:16).
+fn upcase_table() -> u32 {
+    static T: crate::Global<u32> = crate::Global::new(0);
+    let t = T.get();
+    if *t == 0 {
+        let h = kernel::global_alloc(0x40, 130);
+        let p = flat((h as u32) << 16);
+        if !p.is_null() {
+            unsafe {
+                (p as *mut u16).write_unaligned(128);
+                for i in 0..128u8 {
+                    let c = 0x80 + i;
+                    *p.add(2 + i as usize) = match c {
+                        0x81 => 0x9a,
+                        0x82 => 0x90,
+                        0x84 => 0x8e,
+                        0x86 => 0x8f,
+                        0x87 => 0x80,
+                        0x91 => 0x92,
+                        0x94 => 0x99,
+                        0xa4 => 0xa5,
+                        c => c,
+                    };
+                }
+            }
+        }
+        *t = (h as u32) << 16;
+    }
+    *t
 }
 
 /// The disk transfer address (0: the PSP's, at 80h).
@@ -432,6 +613,30 @@ fn int21(r: &mut Regs) {
                 e => fail(r, e),
             }
         }
+        // IOCTL 09h: is the drive remote (DX bit 12): no.
+        0x44 if al == 9 => r[DX] = 0,
+        // Get the extended error: none.
+        0x59 => {
+            r[AX] = 0;
+            r[BX] = 0;
+            r[CX] &= 0x00ff;
+        }
+        // Country information 65h: 04h the file name upper-case table at
+        // ES:DI (an ID and a pointer to a size and 128 characters).
+        0x65 if al == 4 || al == 2 => {
+            let t = upcase_table();
+            let d = ptr(r[ES], r[DI]);
+            unsafe {
+                *d = al;
+                (d.add(1) as *mut u32).write_unaligned(t);
+            }
+            r[CX] = 5;
+        }
+        // The global code page (6601h): 437.
+        0x66 if al == 1 => {
+            r[BX] = 437;
+            r[DX] = 437;
+        }
         // Long file names (Windows 95): not here.
         0x71 => fail(r, 0x7100),
         // DOS version: 5.0.
@@ -462,6 +667,9 @@ fn int21(r: &mut Regs) {
         // Create (CX attributes) and open (AL mode) a file.
         0x3c | 0x3d => {
             let p = path(r[DS], r[DX]);
+            if crate::tracing() {
+                trace(format_args!("W16 {} {}", if ah == 0x3c { "create" } else { "open" }, p[..p.len() - 1].iter().map(|&c| c as char).collect::<alloc::string::String>()));
+            }
             // DOS's compatibility sharing mode is OS/2's deny none.
             let share = match al as u32 & 0x70 {
                 0 => 0x40,

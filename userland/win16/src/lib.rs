@@ -31,22 +31,28 @@ mod dde;
 mod ddeml;
 mod dialog;
 mod dos;
+mod draw;
 mod edit;
 mod gdi;
 mod icon;
 mod kernel;
 mod listbox;
+mod lz;
+mod mdi;
 mod mem16;
 mod menu;
 mod misc;
 mod module;
+mod ole;
 mod pm;
 mod print;
+mod profile;
 mod region;
 mod res;
 mod scroll;
 mod stubs;
 mod user;
+mod ver;
 
 use core::cell::UnsafeCell;
 use thunk16::Pascal;
@@ -169,6 +175,20 @@ core::arch::global_asm!(
     "w16_fpmath:",
     "int 0xe1",
     ".byte 0xcb",
+    // An import WIN16 does not have (loader: WIN16_UNDEFINED).
+    ".globl w16_undefined",
+    "w16_undefined:",
+    "int 0xe4",
+    ".byte 0xcb",
+    // Catch(lpCatchBuf), Throw(lpCatchBuf, nThrowBack)
+    ".globl w16_catch",
+    "w16_catch:",
+    "int 0xe2",
+    ".byte 0xca, 4, 0",
+    ".globl w16_throw",
+    "w16_throw:",
+    "int 0xe3",
+    ".byte 0xca, 6, 0",
     ".code32",
     ".popsection",
 );
@@ -197,9 +217,10 @@ entries! {
     p_combo = 6, 10;
     p_scrollbar = 7, 10;
     p_combolbox = 8, 10;
+    p_mdiclient = 9, 10;
     // The common dialogs' dialog procedure and DDEML's window procedure.
-    p_commdlg = 9, 10;
-    p_ddeml = 10, 10;
+    p_commdlg = 11, 10;
+    p_ddeml = 12, 10;
     // KERNEL
     k_fatalexit = 1001, 2;
     k_getversion = 1003, 0;
@@ -228,6 +249,7 @@ entries! {
     k_waitevent = 1030, 2;
     k_getcurrenttask = 1036, 0;
     k_getcurrentpdb = 1037, 0;
+    k_loadmodule = 1045, 8;
     k_getmodulehandle = 1047, 4;
     k_getmoduleusage = 1048, 2;
     k_getmodulefilename = 1049, 8;
@@ -263,6 +285,7 @@ entries! {
     k_gettempdrive = 1092, 2;
     k_loadlibrary = 1095, 4;
     k_freelibrary = 1096, 2;
+    k_gettempfilename = 1097, 12;
     k_seterrormode = 1107, 2;
     k_outputdebugstring = 1115, 4;
     k_getprivateprofileint = 1127, 14;
@@ -270,32 +293,48 @@ entries! {
     k_writeprivateprofilestring = 1129, 16;
     k_getdosenvironment = 1131, 0;
     k_getwinflags = 1132, 0;
+    k_getexeptr = 1133, 2;
+    k_getheapspaces = 1138, 2;
     k_getwindowsdirectory = 1134, 6;
     k_getsystemdirectory = 1135, 6;
     k_getdrivetype = 1136, 2;
     k_fatalappexit = 1137, 6;
+    k_getnumtasks = 1152, 0;
     k_winexec = 1166, 6;
+    k_getfreespace = 1169, 2;
     k_alloccstodsalias = 1170, 2;
     k_allocdstocsalias = 1171, 2;
     k_allocselector = 1175, 2;
     k_freeselector = 1176, 2;
     k_prestochangoselector = 1177, 4;
+    k_globaldosalloc = 1184, 4;
+    k_globaldosfree = 1185, 2;
     k_getselectorbase = 1186, 2;
     k_setselectorbase = 1187, 6;
     k_getselectorlimit = 1188, 2;
     k_setselectorlimit = 1189, 6;
     k_sethandlecount = 1199, 2;
     k_isdbcsleadbyte = 1207, 2;
+    k_istask = 1320, 2;
+    k_isbadreadptr = 1334, 6;
+    k_isbadwriteptr = 1335, 6;
+    k_isbadcodeptr = 1336, 4;
+    k_isbadstringptr = 1337, 6;
+    k_isbadhugereadptr = 1346, 8;
+    k_isbadhugewriteptr = 1347, 8;
     k_hmemcpy = 1348, 12;
     k__hread = 1349, 10;
     k__hwrite = 1350, 10;
+    k_lstrcpyn = 1353, 10;
     // USER
     u_messagebox = 2001, 12;
     u_initapp = 2005, 2;
     u_postquitmessage = 2006, 2;
+    u_exitwindows = 2007, 6;
     u_settimer = 2010, 10;
     u_killtimer = 2012, 4;
     u_gettickcount = 2013, 0;
+    u_gettimerresolution = 2014, 0;
     u_getcurrenttime = 2015, 0;
     u_getcursorpos = 2017, 4;
     u_setcapture = 2018, 2;
@@ -307,6 +346,7 @@ entries! {
     u_removeprop = 2024, 6;
     u_getprop = 2025, 6;
     u_setprop = 2026, 8;
+    u_enumprops = 2027, 6;
     u_clienttoscreen = 2028, 6;
     u_screentoclient = 2029, 6;
     u_windowfrompoint = 2030, 4;
@@ -322,12 +362,15 @@ entries! {
     u_endpaint = 2040, 6;
     u_createwindow = 2041, 30;
     u_showwindow = 2042, 4;
+    u_closewindow = 2043, 2;
+    u_openicon = 2044, 2;
     u_bringwindowtotop = 2045, 2;
     u_getparent = 2046, 2;
     u_iswindow = 2047, 2;
     u_ischild = 2048, 4;
     u_iswindowvisible = 2049, 2;
     u_findwindow = 2050, 8;
+    u_anypopup = 2052, 0;
     u_destroywindow = 2053, 2;
     u_enumwindows = 2054, 8;
     u_enumchildwindows = 2055, 10;
@@ -389,6 +432,7 @@ entries! {
     u_waitmessage = 2112, 0;
     u_translatemessage = 2113, 4;
     u_dispatchmessage = 2114, 4;
+    u_replymessage = 2115, 4;
     u_postappmessage = 2116, 10;
     u_registerwindowmessage = 2118, 4;
     u_getmessagepos = 2119, 0;
@@ -450,17 +494,27 @@ entries! {
     u_translateaccelerator = 2178, 8;
     u_getsystemmetrics = 2179, 2;
     u_getsyscolor = 2180, 2;
+    u_setsyscolors = 2181, 10;
     u_getcaretpos = 2183, 4;
+    u_querysendmessage = 2184, 10;
+    u_graystring = 2185, 22;
+    u_swapmousebutton = 2186, 2;
+    u_setsysmodalwindow = 2188, 2;
+    u_getsysmodalwindow = 2189, 0;
     u_getupdaterect = 2190, 8;
     u_childwindowfrompoint = 2191, 6;
     u_insendmessage = 2192, 0;
     u_isclipboardformatavailable = 2193, 2;
+    u_tabbedtextout = 2196, 20;
+    u_gettabbedtextextent = 2197, 14;
     u_dialogboxindirect = 2218, 10;
     u_createdialogindirect = 2219, 12;
     u_loadmenuindirect = 2220, 4;
+    u_scrolldc = 2221, 20;
     u_getkeyboardstate = 2222, 4;
     u_setkeyboardstate = 2223, 4;
     u_getwindowtask = 2224, 2;
+    u_enumtaskwindows = 2225, 10;
     u_getnextdlggroupitem = 2227, 6;
     u_getnextdlgtabitem = 2228, 6;
     u_gettopwindow = 2229, 2;
@@ -470,6 +524,8 @@ entries! {
     u_unhookwindowshook = 2234, 6;
     u_defhookproc = 2235, 12;
     u_getcapture = 2236, 0;
+    u_getupdatergn = 2237, 6;
+    u_excludeupdatergn = 2238, 4;
     u_dialogboxparam = 2239, 16;
     u_dialogboxindirectparam = 2240, 14;
     u_createdialogparam = 2241, 16;
@@ -477,12 +533,17 @@ entries! {
     u_getdialogbaseunits = 2243, 0;
     u_equalrect = 2244, 8;
     u_getcursor = 2247, 0;
+    u_getopenclipboardwindow = 2248, 0;
     u_getasynckeystate = 2249, 2;
     u_getmenustate = 2250, 6;
     u_mapwindowpoints = 2258, 10;
+    u_begindeferwindowpos = 2259, 2;
+    u_deferwindowpos = 2260, 16;
+    u_enddeferwindowpos = 2261, 2;
     u_getwindow = 2262, 4;
     u_getmenuitemcount = 2263, 2;
     u_getmenuitemid = 2264, 4;
+    u_showownedpopups = 2265, 4;
     u_setmessagequeue = 2266, 2;
     u_showscrollbar = 2267, 6;
     u_globaladdatom = 2268, 4;
@@ -497,12 +558,17 @@ entries! {
     u_getfreesystemresources = 2284, 2;
     u_getdesktopwindow = 2286, 0;
     u_getlastactivepopup = 2287, 2;
+    u_getmessageextrainfo = 2288, 0;
     u_redrawwindow = 2290, 10;
     u_setwindowshookex = 2291, 10;
     u_unhookwindowshookex = 2292, 4;
     u_callnexthookex = 2293, 12;
+    u_lockwindowupdate = 2294, 2;
     u_defdlgproc = 2308, 10;
+    u_getqueuestatus = 2334, 2;
+    u_getinputstate = 2335, 0;
     u_ismenu = 2358, 2;
+    u_getdcex = 2359, 8;
     u_copyicon = 2368, 4;
     u_copycursor = 2369, 4;
     u_getwindowplacement = 2370, 6;
@@ -531,6 +597,9 @@ entries! {
     u_ischarlower = 2436, 2;
     u_ansiupperbuff = 2437, 6;
     u_ansilowerbuff = 2438, 6;
+    u_defframeproc = 2445, 12;
+    u_defmdichildproc = 2447, 10;
+    u_translatemdisysaccel = 2451, 6;
     u_createwindowex = 2452, 34;
     u_adjustwindowrectex = 2454, 14;
     u_destroyicon = 2457, 2;
@@ -540,13 +609,25 @@ entries! {
     u_ansinext = 2472, 4;
     u_ansiprev = 2473, 8;
     u_enablescrollbar = 2482, 6;
+    u_systemparametersinfo = 2483, 10;
+    u_wnetgetconnection = 2512, 12;
+    u_wnetgetcaps = 2513, 2;
+    u_wnetgetuser = 2516, 8;
+    u_wnetaddconnection = 2517, 12;
+    u_wnetcancelconnection = 2518, 6;
+    u_wnetgeterror = 2519, 4;
+    u_wnetgeterrortext = 2520, 10;
+    u_wnetgetdirectorytype = 2530, 8;
     // GDI
     g_setbkcolor = 3001, 6;
     g_setbkmode = 3002, 4;
     g_setmapmode = 3003, 4;
     g_setrop2 = 3004, 4;
+    g_setpolyfillmode = 3006, 4;
     g_setstretchbltmode = 3007, 4;
+    g_settextcharacterextra = 3008, 4;
     g_settextcolor = 3009, 6;
+    g_settextjustification = 3010, 6;
     g_setwindoworg = 3011, 6;
     g_setwindowext = 3012, 6;
     g_setviewportorg = 3013, 6;
@@ -559,12 +640,16 @@ entries! {
     g_moveto = 3020, 6;
     g_excludecliprect = 3021, 10;
     g_intersectcliprect = 3022, 10;
+    g_arc = 3023, 18;
     g_ellipse = 3024, 10;
+    g_floodfill = 3025, 10;
+    g_pie = 3026, 18;
     g_rectangle = 3027, 10;
     g_roundrect = 3028, 14;
     g_patblt = 3029, 14;
     g_savedc = 3030, 2;
     g_setpixel = 3031, 10;
+    g_offsetcliprgn = 3032, 6;
     g_textout = 3033, 12;
     g_bitblt = 3034, 20;
     g_stretchblt = 3035, 24;
@@ -611,9 +696,11 @@ entries! {
     g_getmapmode = 3081, 2;
     g_getobject = 3082, 8;
     g_getpixel = 3083, 6;
+    g_getpolyfillmode = 3084, 2;
     g_getrop2 = 3085, 2;
     g_getstockobject = 3087, 2;
     g_getstretchbltmode = 3088, 2;
+    g_gettextcharacterextra = 3089, 2;
     g_gettextcolor = 3090, 2;
     g_gettextextent = 3091, 8;
     g_gettextface = 3092, 8;
@@ -623,6 +710,7 @@ entries! {
     g_getwindowext = 3096, 2;
     g_getwindoworg = 3097, 2;
     g_lptodp = 3099, 8;
+    g_linedda = 3100, 16;
     g_offsetrgn = 3101, 6;
     g_ptvisible = 3103, 6;
     g_rectvisible = 3104, 6;
@@ -635,11 +723,16 @@ entries! {
     g_getnearestcolor = 3154, 6;
     g_creatediscardablebitmap = 3156, 6;
     g_ptinregion = 3161, 6;
+    g_getbitmapdimension = 3162, 2;
+    g_setbitmapdimension = 3163, 6;
     g_setrectrgn = 3172, 10;
     g_rectinregion = 3181, 6;
+    g_getcharabcwidths = 3307, 10;
+    g_getrasterizercaps = 3313, 6;
     g_enumfontfamilies = 3330, 14;
     g_gettextalign = 3345, 2;
     g_settextalign = 3346, 4;
+    g_chord = 3348, 18;
     g_getcharwidth = 3350, 10;
     g_exttextout = 3351, 22;
     g_createpalette = 3360, 4;
@@ -649,6 +742,7 @@ entries! {
     g_animatepalette = 3367, 10;
     g_resizepalette = 3368, 4;
     g_getnearestpaletteindex = 3370, 6;
+    g_extfloodfill = 3372, 12;
     g_setsystempaletteuse = 3373, 4;
     g_getsystempaletteuse = 3374, 2;
     g_getsystempaletteentries = 3375, 10;
@@ -659,7 +753,10 @@ entries! {
     g_setdibitstodevice = 3443, 28;
     g_createroundrectrgn = 3444, 12;
     g_createdibpatternbrush = 3445, 4;
+    g_polypolygon = 3450, 12;
     g_createpolypolygonrgn = 3451, 12;
+    g_isgdiobject = 3462, 2;
+    g_getbitmapdimensionex = 3468, 6;
     g_getbrushorgex = 3469, 6;
     g_getcurrentpositionex = 3470, 6;
     g_gettextextentpoint = 3471, 12;
@@ -669,6 +766,7 @@ entries! {
     g_getwindoworgex = 3475, 6;
     g_offsetviewportorgex = 3476, 10;
     g_offsetwindoworgex = 3477, 10;
+    g_setbitmapdimensionex = 3478, 10;
     g_setviewportextex = 3479, 10;
     g_setviewportorgex = 3480, 10;
     g_setwindowextex = 3481, 10;
@@ -682,7 +780,45 @@ entries! {
     kb_oemtoansi = 4006, 8;
     kb_getkeyboardtype = 4130, 2;
     kb_getkbcodepage = 4132, 0;
+    kb_ansitooembuff = 4134, 10;
+    kb_oemtoansibuff = 4135, 10;
+    // TOOLHELP
+    th_notifyregister = 6273, 8;
+    th_notifyunregister = 6274, 2;
+    th_interruptregister = 6275, 6;
+    th_interruptunregister = 6276, 2;
+    th_terminateapp = 6277, 4;
+    th_timercount = 6280, 4;
+    // COMPOBJ, OLE2
+    co_coinitialize = 7002, 4;
+    co_couninitialize = 7003, 0;
+    co_cogetmalloc = 7004, 8;
+    co_isequalguid = 7018, 8;
+    ol_oleinitialize = 7102, 4;
+    ol_oleuninitialize = 7103, 0;
+    // VER
+    v_getfileresourcesize = 6302, 16;
+    v_getfileresource = 6303, 24;
+    v_getfileversioninfosize = 6306, 8;
+    v_getfileversioninfo = 6307, 16;
+    v_verfindfile = 6308, 30;
+    v_verinstallfile = 6309, 30;
+    v_verlanguagename = 6310, 8;
+    v_verqueryvalue = 6311, 16;
+    // LZEXPAND
+    lz_lzcopy = 6401, 4;
+    lz_lzopenfile = 6402, 10;
+    lz_lzinit = 6403, 2;
+    lz_lzseek = 6404, 8;
+    lz_lzread = 6405, 8;
+    lz_lzclose = 6406, 2;
+    lz_lzstart = 6407, 0;
+    lz_copylzfile = 6408, 4;
+    lz_lzdone = 6409, 0;
+    lz_getexpandedname = 6410, 8;
     // SHELL
+    sh_dragacceptfiles = 6509, 4;
+    sh_shellexecute = 6520, 20;
     sh_extracticon = 6534, 8;
     // Stage 3: printing (GDI, print.rs), COMMDLG (commdlg.rs), DDEML
     // (ddeml.rs).
@@ -733,18 +869,20 @@ entries! {
 }
 
 extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
-    let r = dispatch_(idx, args);
-    if tracing() && idx != 1 {
-        // The arguments as words, first argument first (_pascal pushes
-        // them left to right), and the result.
-        let n = arg_size(idx) / 2;
-        let mut s = alloc::string::String::new();
-        for i in (0..n).rev() {
-            let w = unsafe { (args.add(2 * i) as *const u16).read_unaligned() };
-            let _ = core::fmt::write(&mut s, format_args!(" {w:04x}"));
-        }
-        trace(format_args!("W16 {}{} -> {:x}", idx, s, r));
+    if !tracing() || idx == 1 {
+        return dispatch_(idx, args);
     }
+    // The arguments as words, first argument first (_pascal pushes them
+    // left to right), then the result.
+    let n = arg_size(idx) / 2;
+    let mut s = alloc::string::String::new();
+    for i in (0..n).rev() {
+        let w = unsafe { (args.add(2 * i) as *const u16).read_unaligned() };
+        let _ = core::fmt::write(&mut s, format_args!(" {w:04x}"));
+    }
+    trace(format_args!("W16 {}{}", idx, s));
+    let r = dispatch_(idx, args);
+    trace(format_args!("W16 {} -> {:x}", idx, r));
     r
 }
 
@@ -756,7 +894,12 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
     if let Some(r) = print::call(idx, &mut Pascal::new(args, size)) {
         return r;
     }
-    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)) {
+    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)).or_else(|| mdi::call(idx, &mut a))
+        .or_else(|| draw::call(idx, &mut a))
+        .or_else(|| lz::call(idx, &mut a))
+        .or_else(|| ver::call(idx, &mut a))
+        .or_else(|| ole::call(idx, &mut a))
+    {
         return r;
     }
     match idx {
@@ -764,7 +907,7 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
             dos::interrupt(thunk16::flat(a.l()) as *mut u16);
             0
         }
-        2..=10 => {
+        2..=12 => {
             let (h, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
             native(idx, h, m, wp, lp)
         }
@@ -787,14 +930,15 @@ pub fn native_depth() -> u32 {
 }
 
 /// Call one of WIN16's window procedures: a built-in control's (entry
-/// 2-8), the common dialogs' (9), DDEML's (10), DefWindowProc (2107) or
-/// DefDlgProc (2308).
+/// 2-8), MDICLIENT's (9), the common dialogs' (11), DDEML's (12),
+/// DefWindowProc (2107) or DefDlgProc (2308).
 pub fn native(idx: u32, h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     *NATIVE_DEPTH.get() += 1;
     let r = match idx {
         2..=8 => ctl::proc_(idx, h, m, wp, lp),
-        9 => commdlg::dlg_proc(h, m, wp, lp),
-        10 => ddeml::wnd_proc(h, m, wp, lp),
+        9 => mdi::client_proc(h, m, wp, lp),
+        11 => commdlg::dlg_proc(h, m, wp, lp),
+        12 => ddeml::wnd_proc(h, m, wp, lp),
         2107 => user::def_window_proc(h, m, wp, lp),
         2308 => dialog::def_dlg_proc(h, m, wp, lp),
         _ => 0,

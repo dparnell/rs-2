@@ -20,6 +20,8 @@ BYTE FAR * WINAPI DdeAccessData(HDDEDATA, DWORD FAR *);
 #include <stdio.h>
 #include <io.h>
 #include <fcntl.h>
+#include <lzexpand.h>
+#include <ver.h>
 #include "w16test.h"
 
 #pragma library("commdlg")
@@ -890,7 +892,7 @@ static void print_tests(void)
     check(DeleteDC(dc), "DeleteDC");
 }
 
-static void atom_tests(void)
+static void stage3_atom_tests(void)
 {
     ATOM a = GlobalAddAtom("W16TEST atom"), b;
     char t[40];
@@ -1250,13 +1252,298 @@ static void stage3_tests(HINSTANCE hInst)
     s3wnd = CreateWindow("Stage3", "W16TEST stage 3", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, 400, 300,
                          NULL, NULL, hInst, NULL);
     font_tests(s3wnd);
-    atom_tests();
+    stage3_atom_tests();
     clipboard_tests(s3wnd);
     print_tests();
     commdlg_tests(s3wnd);
     ddeml_tests();
     raw_dde_tests(s3wnd);
     DestroyWindow(s3wnd);
+}
+
+/* ---- What real programs needed (docs/WIN16.md, "Real programs") ---- */
+
+static void bitmap_tests(void)
+{
+    HDC mem, mem2;
+    HBITMAP bm, bm2, mono, old, old2;
+    BITMAP info;
+    static BYTE bits[8 * 2] = { 0xff, 0, 0x00, 0, 0xf0, 0, 0x0f, 0, 0xff, 0, 0, 0, 0, 0, 0, 0 };
+    BYTE back[16];
+    struct { BITMAPINFOHEADER h; RGBQUAD c[2]; } bi;
+    BYTE row[64];
+
+    mem = CreateCompatibleDC(NULL);
+    check(mem != 0, "CreateCompatibleDC");
+    bm = CreateCompatibleBitmap(mem, 16, 16);
+    check(bm != 0 && GetObject(bm, sizeof info, &info) == sizeof info && info.bmWidth == 16 && info.bmBitsPixel == 1,
+          "CreateCompatibleBitmap of a new memory DC is monochrome");
+    DeleteObject(bm);
+    bm = CreateBitmap(16, 16, 1, 24, NULL);
+    check(GetObject(bm, sizeof info, &info) == sizeof info && info.bmHeight == 16 && info.bmBitsPixel == 24, "CreateBitmap 24 bpp, GetObject");
+    old = SelectObject(mem, bm);
+    check(old != 0, "SelectObject of a bitmap into a memory DC");
+    PatBlt(mem, 0, 0, 16, 16, WHITENESS);
+    check(GetPixel(mem, 5, 5) == RGB(255, 255, 255), "PatBlt WHITENESS, GetPixel");
+    SetPixel(mem, 3, 4, RGB(255, 0, 0));
+    check(GetPixel(mem, 3, 4) == RGB(255, 0, 0) && GetPixel(mem, 4, 3) == RGB(255, 255, 255), "SetPixel/GetPixel in a bitmap (y down)");
+
+    mem2 = CreateCompatibleDC(mem);
+    bm2 = CreateBitmap(16, 16, 1, 24, NULL);
+    old2 = SelectObject(mem2, bm2);
+    PatBlt(mem2, 0, 0, 16, 16, BLACKNESS);
+    BitBlt(mem2, 8, 8, 8, 8, mem, 0, 0, SRCCOPY);
+    check(GetPixel(mem2, 11, 12) == RGB(255, 0, 0) && GetPixel(mem2, 1, 1) == RGB(0, 0, 0), "BitBlt SRCCOPY between memory DCs");
+    StretchBlt(mem2, 0, 0, 16, 16, mem, 0, 0, 8, 8, SRCCOPY);
+    check(GetPixel(mem2, 6, 8) == RGB(255, 0, 0) && GetPixel(mem2, 7, 9) == RGB(255, 0, 0), "StretchBlt doubles");
+
+    /* A monochrome bitmap: 1 bits take the target's background colour, 0
+       bits its text colour. */
+    mono = CreateBitmap(8, 8, 1, 1, bits);
+    SelectObject(mem2, mono);
+    check(GetPixel(mem2, 0, 0) == RGB(255, 255, 255) && GetPixel(mem2, 0, 1) == RGB(0, 0, 0) && GetPixel(mem2, 4, 2) == RGB(0, 0, 0)
+          && GetPixel(mem2, 3, 2) == RGB(255, 255, 255), "CreateBitmap monochrome with DDB bits (rows top-down, word aligned)");
+    check(GetBitmapBits(mono, sizeof back, back) == 16 && memcmp(back, bits, 16) == 0, "GetBitmapBits");
+    SetTextColor(mem, RGB(0, 0, 255));
+    SetBkColor(mem, RGB(0, 255, 0));
+    BitBlt(mem, 0, 0, 8, 8, mem2, 0, 0, SRCCOPY);
+    check(GetPixel(mem, 0, 0) == RGB(0, 255, 0) && GetPixel(mem, 0, 1) == RGB(0, 0, 255), "BitBlt monochrome to colour: bk and text colours");
+
+    /* GetDIBits: 24-bit rows bottom-up. */
+    memset(&bi, 0, sizeof bi);
+    bi.h.biSize = sizeof bi.h;
+    bi.h.biWidth = 16;
+    bi.h.biHeight = 16;
+    bi.h.biPlanes = 1;
+    bi.h.biBitCount = 24;
+    SelectObject(mem, old);
+    check(GetDIBits(mem, bm, 15, 1, row, (BITMAPINFO FAR *)&bi, DIB_RGB_COLORS) == 1 && row[0] == 0 && row[1] == 255 && row[2] == 0,
+          "GetDIBits (the top row is the last scan)");
+    row[0] = 0x10; row[1] = 0x20; row[2] = 0x30;
+    SetDIBits(mem, bm, 15, 1, row, (BITMAPINFO FAR *)&bi, DIB_RGB_COLORS);
+    SelectObject(mem, bm);
+    check(GetPixel(mem, 0, 0) == RGB(0x30, 0x20, 0x10), "SetDIBits");
+    SelectObject(mem, old);
+    SelectObject(mem2, old2);
+    check(DeleteObject(bm) && DeleteObject(bm2) && DeleteObject(mono), "DeleteObject of bitmaps");
+    DeleteDC(mem2);
+    check(DeleteDC(mem), "DeleteDC");
+}
+
+static void mapping_tests(void)
+{
+    HDC dc = CreateCompatibleDC(NULL);
+    POINT p;
+
+    SetMapMode(dc, MM_ANISOTROPIC);
+    SetWindowExt(dc, 100, 100);
+    SetViewportExt(dc, 200, 300);
+    SetViewportOrg(dc, 5, 7);
+    p.x = 10;
+    p.y = 10;
+    LPtoDP(dc, &p, 1);
+    check(p.x == 25 && p.y == 37, "MM_ANISOTROPIC: LPtoDP");
+    DPtoLP(dc, &p, 1);
+    check(p.x == 10 && p.y == 10, "DPtoLP");
+    check(GetMapMode(dc) == MM_ANISOTROPIC, "GetMapMode");
+    SetMapMode(dc, MM_TEXT);
+    SetWindowOrg(dc, 3, 4);
+    p.x = 3;
+    p.y = 4;
+    LPtoDP(dc, &p, 1);
+    check(p.x == 5 && p.y == 7, "MM_TEXT with a window and viewport origin");
+    DeleteDC(dc);
+}
+
+static void region_tests(void)
+{
+    HRGN a = CreateRectRgn(0, 0, 10, 10), b = CreateRectRgn(5, 5, 15, 15), c = CreateRectRgn(0, 0, 0, 0);
+    HRGN e;
+    RECT r;
+
+    check(CombineRgn(c, a, b, RGN_OR) == COMPLEXREGION, "CombineRgn RGN_OR");
+    check(PtInRegion(c, 12, 12) && PtInRegion(c, 2, 2) && !PtInRegion(c, 12, 2), "PtInRegion");
+    check(CombineRgn(c, a, b, RGN_AND) == SIMPLEREGION && GetRgnBox(c, &r) && r.left == 5 && r.top == 5 && r.right == 10 && r.bottom == 10,
+          "CombineRgn RGN_AND, GetRgnBox");
+    check(CombineRgn(c, a, b, RGN_DIFF) == COMPLEXREGION && !PtInRegion(c, 7, 7) && PtInRegion(c, 7, 2), "CombineRgn RGN_DIFF");
+    e = CreateEllipticRgn(0, 0, 20, 10);
+    check(PtInRegion(e, 10, 5) && !PtInRegion(e, 0, 0), "CreateEllipticRgn");
+    OffsetRgn(a, 5, 5);
+    check(EqualRgn(a, b), "OffsetRgn, EqualRgn");
+    DeleteObject(a);
+    DeleteObject(b);
+    DeleteObject(c);
+    DeleteObject(e);
+}
+
+static int atom_tests(HWND hwnd)
+{
+    ATOM at = AddAtom("W16Test atom");
+    ATOM g = GlobalAddAtom("W16Test global");
+    char buf[32];
+
+    check(at >= 0xc000 && FindAtom("w16test ATOM") == at, "AddAtom/FindAtom (case does not matter)");
+    check(GetAtomName(at, buf, sizeof buf) == 12 && strcmp(buf, "W16Test atom") == 0, "GetAtomName");
+    check(AddAtom("#123") == 123, "AddAtom of \"#123\" is the integer atom");
+    check(g >= 0xc000 && GlobalFindAtom("W16Test global") == g, "GlobalAddAtom/GlobalFindAtom");
+    GlobalDeleteAtom(g);
+    check(RegisterWindowMessage("W16TestMessage") >= 0xc000 && RegisterWindowMessage("W16TestMessage") == RegisterWindowMessage("w16testmessage"),
+          "RegisterWindowMessage");
+    check(SetProp(hwnd, "W16Prop", (HANDLE)0x1234) && GetProp(hwnd, "W16Prop") == (HANDLE)0x1234, "SetProp/GetProp");
+    check(RemoveProp(hwnd, "W16Prop") == (HANDLE)0x1234 && GetProp(hwnd, "W16Prop") == 0, "RemoveProp");
+    return 0;
+}
+
+static void profile_tests(void)
+{
+    char buf[64];
+
+    check(WritePrivateProfileString("Sect", "Key", "Value one", "W16TEST.INI"), "WritePrivateProfileString");
+    WritePrivateProfileString("Sect", "Number", "42", "W16TEST.INI");
+    WritePrivateProfileString("Other", "A", "b", "W16TEST.INI");
+    check(GetPrivateProfileString("sect", "key", "x", buf, sizeof buf, "W16TEST.INI") == 9 && strcmp(buf, "Value one") == 0,
+          "GetPrivateProfileString");
+    check(GetPrivateProfileInt("Sect", "Number", 7, "W16TEST.INI") == 42 && GetPrivateProfileInt("Sect", "None", 7, "W16TEST.INI") == 7,
+          "GetPrivateProfileInt");
+    GetPrivateProfileString("Sect", NULL, "", buf, sizeof buf, "W16TEST.INI");
+    check(strcmp(buf, "Key") == 0 && strcmp(buf + 4, "Number") == 0 && buf[11] == 0, "GetPrivateProfileString of a section's keys");
+    WritePrivateProfileString("Sect", "Key", NULL, "W16TEST.INI");
+    check(GetPrivateProfileString("Sect", "Key", "gone", buf, sizeof buf, "W16TEST.INI") == 4, "WritePrivateProfileString deletes a key");
+    WritePrivateProfileString("Sect", NULL, NULL, "W16TEST.INI");
+    WritePrivateProfileString("Other", NULL, NULL, "W16TEST.INI");
+    check(GetPrivateProfileInt("Sect", "Number", 7, "W16TEST.INI") == 7, "WritePrivateProfileString deletes a section");
+    check(WriteProfileString("W16Test", "Key", "win") && GetProfileString("W16Test", "Key", "", buf, sizeof buf) == 3, "WIN.INI");
+    WriteProfileString("W16Test", NULL, NULL);
+}
+
+static int child_activations;
+static HWND frame_client;
+
+LONG FAR PASCAL _export MdiChildProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_MDIACTIVATE && wp)
+        child_activations++;
+    return DefMDIChildProc(hwnd, msg, wp, lp);
+}
+
+LONG FAR PASCAL _export FrameProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    return DefFrameProc(hwnd, frame_client, msg, wp, lp);
+}
+
+static void mdi_tests(HINSTANCE hInst)
+{
+    WNDCLASS wc;
+    CLIENTCREATESTRUCT ccs;
+    MDICREATESTRUCT mcs;
+    HWND frame, c1, c2;
+    HMENU menu, win;
+
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = FrameProc;
+    wc.hInstance = hInst;
+    wc.hbrBackground = COLOR_APPWORKSPACE + 1;
+    wc.lpszClassName = "W16Frame";
+    RegisterClass(&wc);
+    wc.lpfnWndProc = MdiChildProc;
+    wc.hbrBackground = GetStockObject(WHITE_BRUSH);
+    wc.lpszClassName = "W16Child";
+    RegisterClass(&wc);
+    menu = CreateMenu();
+    win = CreatePopupMenu();
+    AppendMenu(win, MF_STRING, 1, "&Tile");
+    AppendMenu(menu, MF_POPUP, (UINT)win, "&Window");
+    frame = CreateWindow("W16Frame", "W16TEST MDI", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 30, 30, 400, 300, NULL, menu, hInst, NULL);
+    ccs.hWindowMenu = win;
+    ccs.idFirstChild = 1000;
+    frame_client = CreateWindow("MDICLIENT", NULL, WS_CHILD | WS_CLIPCHILDREN | WS_VISIBLE, 0, 0, 300, 200, frame, (HMENU)1, hInst,
+                                (LPSTR)&ccs);
+    check(frame_client != 0, "CreateWindow MDICLIENT");
+    ShowWindow(frame, SW_SHOW);
+    memset(&mcs, 0, sizeof mcs);
+    mcs.szClass = "W16Child";
+    mcs.szTitle = "Child one";
+    mcs.hOwner = hInst;
+    mcs.x = mcs.y = mcs.cx = mcs.cy = CW_USEDEFAULT;
+    c1 = (HWND)SendMessage(frame_client, WM_MDICREATE, 0, (LPARAM)(LPMDICREATESTRUCT)&mcs);
+    mcs.szTitle = "Child two";
+    c2 = (HWND)SendMessage(frame_client, WM_MDICREATE, 0, (LPARAM)(LPMDICREATESTRUCT)&mcs);
+    check(c1 != 0 && c2 != 0 && GetParent(c1) == frame_client, "WM_MDICREATE");
+    check(LOWORD(SendMessage(frame_client, WM_MDIGETACTIVE, 0, 0)) == (WORD)c2 && child_activations == 2, "WM_MDIGETACTIVE, WM_MDIACTIVATE");
+    check(GetMenuItemCount(win) == 4 && GetMenuState(win, 1001, MF_BYCOMMAND) & MF_CHECKED, "the Window menu lists the children");
+    SendMessage(frame_client, WM_MDIACTIVATE, (WPARAM)c1, 0);
+    check(LOWORD(SendMessage(frame_client, WM_MDIGETACTIVE, 0, 0)) == (WORD)c1, "WM_MDIACTIVATE");
+    SendMessage(frame_client, WM_MDIDESTROY, (WPARAM)c1, 0);
+    check(!IsWindow(c1) && LOWORD(SendMessage(frame_client, WM_MDIGETACTIVE, 0, 0)) == (WORD)c2 && GetMenuItemCount(win) == 3, "WM_MDIDESTROY");
+    DestroyWindow(frame);
+}
+
+static void misc_tests(void)
+{
+    CATCHBUF cb;
+    static volatile int stage;
+    int r;
+    char buf[8];
+    static char src[] = "hello world";
+    OFSTRUCT of;
+    HFILE hf;
+    int fd;
+    /* "ABCD" and a 4-byte copy of it: COMPRESS's SZDD format. */
+    static BYTE szdd[] = { 'S', 'Z', 'D', 'D', 0x88, 0xf0, 0x27, 0x33, 'A', 'X', 8, 0, 0, 0, 0x0f, 'A', 'B', 'C', 'D', 0xf0, 0xf1 };
+
+    stage = 0;
+    r = Catch(cb);
+    if (r == 0) {
+        stage = 1;
+        Throw(cb, 5);
+        stage = 2;
+    }
+    check(r == 5 && stage == 1, "Catch/Throw");
+    lstrcpyn(buf, src, sizeof buf);
+    check(strcmp(buf, "hello w") == 0, "lstrcpyn");
+    hmemcpy(buf, src + 6, 6);
+    check(memcmp(buf, "world", 6) == 0, "hmemcpy");
+    check(IsBadReadPtr(NULL, 1) && !IsBadReadPtr(src, sizeof src) && !IsBadWritePtr(buf, sizeof buf), "IsBadReadPtr/IsBadWritePtr");
+    check(GetDriveType(2) == DRIVE_FIXED && GetDriveType(25) == 0, "GetDriveType");
+
+    fd = open("C:\\W16LZ.TM_", O_CREAT | O_TRUNC | O_RDWR | O_BINARY, 0666);
+    write(fd, szdd, sizeof szdd);
+    close(fd);
+    hf = LZOpenFile("C:\\W16LZ.TM_", &of, OF_READ);
+    memset(buf, 0, sizeof buf);
+    check(hf >= 0 && LZRead(hf, buf, 8) == 8 && memcmp(buf, "ABCDABCD", 8) == 0, "LZOpenFile/LZRead expand SZDD");
+    LZClose(hf);
+    unlink("C:\\W16LZ.TM_");
+}
+
+static void version_tests(void)
+{
+    char path[128];
+    DWORD h, n;
+    static char info[512];
+    LPSTR v;
+    UINT len;
+
+    GetModuleFileName(hInstance, path, sizeof path);
+    n = GetFileVersionInfoSize(path, &h);
+    check(n > 0 && n <= sizeof info && GetFileVersionInfo(path, h, sizeof info, info), "GetFileVersionInfoSize/GetFileVersionInfo");
+    check(VerQueryValue(info, "\\StringFileInfo\\040904E4\\FileVersion", (void FAR * FAR *)&v, &len) && lstrcmp(v, "1.0") == 0,
+          "VerQueryValue");
+}
+
+static void real_app_tests(HINSTANCE hInst)
+{
+    HWND hwnd = CreateWindow("Stage2", "W16TEST real programs", WS_OVERLAPPEDWINDOW, 20, 20, 200, 100, NULL, NULL, hInst, NULL);
+
+    bitmap_tests();
+    mapping_tests();
+    region_tests();
+    atom_tests(hwnd);
+    profile_tests();
+    mdi_tests(hInst);
+    misc_tests();
+    version_tests();
+    DestroyWindow(hwnd);
 }
 
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
@@ -1267,6 +1554,7 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     user_tests(hInst);
     stage2_tests(hInst);
     stage3_tests(hInst);
+    real_app_tests(hInst);
     sprintf(line, "w16test done: %d failure(s)\r\n", failures);
     out(line);
     return failures;

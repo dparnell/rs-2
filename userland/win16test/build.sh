@@ -18,7 +18,7 @@ mkdir -p "$dir/bin" "$dir/obj"
 cd "$dir/obj"
 for src in "$dir"/*.c; do
     name=$(basename "$src" .c | tr a-z A-Z)
-    wcl -q -bt=windows -l=windows -zW -fe="$name.EXE" "$src"
+    wcl -q -bt=windows -l=windows -zW -fe="$name.EXE" "$src" lzexpand.lib ver.lib
     # Resources (NAME.rc) are bound into the program.
     rc="$dir/$(basename "$src" .c).rc"
     [ -f "$rc" ] && wrc -q -bt=windows -i="$dir" "$rc" "$name.EXE"

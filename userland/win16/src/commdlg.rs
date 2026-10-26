@@ -435,8 +435,12 @@ struct File {
     dir: Vec<u8>,
     /// The patterns of the file list ("*.txt;*.doc").
     pattern: Vec<u8>,
-    /// The directories of the directory list's items.
+    /// The directories of the directory list's items, and how they are
+    /// shown (indented).
     dirs: Vec<Vec<u8>>,
+    labels: Vec<Vec<u8>>,
+    /// The file list's names (its items, for owner-drawn lists).
+    files: Vec<Vec<u8>>,
     /// The filter patterns (cmb1's items).
     filters: Vec<Vec<u8>>,
     /// The current directory when the dialog started.
@@ -703,16 +707,19 @@ fn change_dir(h: u16, dir: &[u8]) -> bool {
     let lst = get_item(h, LST2);
     send(lst, LB_RESETCONTENT, 0, 0);
     let mut dirs = Vec::new();
+    let mut labels = Vec::new();
     let parts: Vec<&[u8]> = d[3..].split(|&c| c == b'\\').filter(|p| !p.is_empty()).collect();
     let mut path = d[..3].to_vec();
     send_str(lst, LB_ADDSTRING, 0, &path);
     dirs.push(path.clone());
+    labels.push(path.clone());
     for (i, p) in parts.iter().enumerate() {
         path = join(&path, p);
         let mut s = vec![b' '; 2 * (i + 1)];
         s.extend_from_slice(p);
         send_str(lst, LB_ADDSTRING, 0, &s);
         dirs.push(path.clone());
+        labels.push(s);
     }
     let cur = dirs.len() - 1;
     for sub in list(&d, b"*", true) {
@@ -720,10 +727,12 @@ fn change_dir(h: u16, dir: &[u8]) -> bool {
         s.extend_from_slice(&sub);
         send_str(lst, LB_ADDSTRING, 0, &s);
         dirs.push(join(&d, &sub));
+        labels.push(s);
     }
     send(lst, LB_SETCURSEL, cur as u16, 0);
     if let Some(f) = file(h) {
         f.dirs = dirs;
+        f.labels = labels;
     }
     // The drive.
     let drives = get_item(h, CMB2);
@@ -743,18 +752,69 @@ fn change_dir(h: u16, dir: &[u8]) -> bool {
 fn fill_files(h: u16, dir: &[u8], pattern: &[u8]) {
     let lst = get_item(h, LST1);
     send(lst, LB_RESETCONTENT, 0, 0);
+    let mut names = Vec::new();
     for spec in pattern.split(|&c| c == b';') {
         let spec = spec.trim_ascii();
-        if spec.is_empty() {
-            continue;
+        if !spec.is_empty() {
+            names.extend(list(dir, spec, false));
         }
-        for n in list(dir, spec, false) {
-            send_str(lst, LB_ADDSTRING, 0, &n);
-        }
+    }
+    names.sort();
+    names.dedup();
+    for n in &names {
+        send_str(lst, LB_ADDSTRING, 0, n);
+    }
+    if let Some(f) = file(h) {
+        f.files = names;
+    }
+}
+
+/// WM_DRAWITEM for an owner-drawn file or directory list (a program's
+/// template, as Windows 3.1's own): the name, a folder for directories.
+fn draw_file_item(h: u16, p: *const u16) {
+    let rd = |i: usize| unsafe { p.add(i).read_unaligned() };
+    let (id, item, action, state, hdc) = (rd(1), rd(2), rd(3), rd(4), rd(6));
+    let r = [rd(7) as i16 as i32, rd(8) as i16 as i32, rd(9) as i16 as i32, rd(10) as i16 as i32];
+    // ODA_FOCUS alone: the focus rectangle.
+    if action == 4 {
+        gdi::focus_rect(hdc, r);
+        return;
+    }
+    let Some(f) = file(h) else { return };
+    let text = match id {
+        LST1 => f.files.get(item as usize).cloned(),
+        _ => f.labels.get(item as usize).cloned(),
+    };
+    let sel = state & 1 != 0;
+    let (bg, fg) = if sel { (gdi::COLOR_HIGHLIGHT, gdi::COLOR_HIGHLIGHTTEXT) } else { (gdi::COLOR_WINDOW, gdi::COLOR_WINDOWTEXT) };
+    gdi::fill(hdc, r, gdi::sys_color(bg));
+    let Some(t) = text else { return };
+    let indent = t.iter().take_while(|&&c| c == b' ').count() as i32;
+    let name = t.trim_ascii();
+    let mut x = r[0] + 2;
+    let mid = (r[1] + r[3]) / 2;
+    if id == LST2 {
+        // A small folder: open for the path, closed for subdirectories.
+        x += indent * 4;
+        let (fx, fy) = (x, mid - 5);
+        gdi::fill(hdc, [fx, fy, fx + 6, fy + 2], 0x00c0c0);
+        gdi::fill(hdc, [fx, fy + 2, fx + 14, fy + 10], 0x00ffff);
+        gdi::frame(hdc, [fx, fy + 2, fx + 14, fy + 10], 0x008080);
+        x += 18;
+    }
+    gdi::set_text_color(hdc, gdi::sys_color(fg));
+    gdi::set_bk_mode(hdc, gdi::TRANSPARENT);
+    gdi::text_at(hdc, x, mid - gdi::line_height(hdc) / 2, name);
+    if state & 0x10 != 0 {
+        gdi::focus_rect(hdc, r);
     }
 }
 
 fn file_msg(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
+    if m == W_DRAWITEM && (wp == LST1 || wp == LST2) {
+        draw_file_item(h, flat(lp) as *const u16);
+        return 1;
+    }
     if m != W_COMMAND {
         return 0;
     }
@@ -771,7 +831,7 @@ fn file_msg(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
         LST1 if code == LBN_SELCHANGE || code == LBN_DBLCLK => {
             let c = get_item(h, LST1);
             let i = send(c, LB_GETCURSEL, 0, 0) as u16;
-            let t = item_text(c, LB_GETTEXT, i);
+            let t = file(h).and_then(|f| f.files.get(i as usize).cloned()).unwrap_or_default();
             if !t.is_empty() {
                 set_text(h, EDT1, &t);
                 if code == LBN_DBLCLK {
@@ -1504,6 +1564,10 @@ fn choose_font(st: u32) -> bool {
         f.italic = b(10);
         f.underline = b(11);
         f.strike = b(12);
+    }
+    // Only fixed-pitch faces offered: one of them.
+    if fl & CF_FIXEDPITCHONLY != 0 && !FACES.iter().any(|x| x.1 & 3 == 1 && x.0.eq_ignore_ascii_case(&f.face)) {
+        f.face = b"Courier New".to_vec();
     }
     let hook = if fl & CF_ENABLEHOOK != 0 { rd32(st, CF_HOOK) } else { 0 };
     let cd = Cd { kind: Kind::Font(f), st, hook };

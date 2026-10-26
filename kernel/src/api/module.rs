@@ -45,6 +45,9 @@ pub struct InitRun {
     pub then_exit: bool,
     /// Linear address below which the routines' stack frames go.
     pub stack_top: u32,
+    /// The run this one started inside (a DLL's init routine that loads
+    /// another DLL): it goes on when this one is done.
+    pub outer: Option<alloc::boxed::Box<InitRun>>,
 }
 
 /// Modules (dependencies first) whose init routine must run for `space`.
@@ -186,7 +189,8 @@ pub fn start(p: &Process, t: &Thread, f: &mut TrapFrame, calls: Vec<InitCall>, a
         let esp = if vm::desc_big(d) { f.rsp as u32 } else { f.rsp as u32 & 0xffff };
         vm::desc_base(d).wrapping_add(esp).wrapping_sub(0x100)
     };
-    let run = InitRun { calls: calls.into(), resume: *f, at_start, result_handle, stack_top, then_exit: false };
+    let outer = t.init_run.lock().take().map(alloc::boxed::Box::new);
+    let run = InitRun { calls: calls.into(), resume: *f, at_start, result_handle, stack_top, then_exit: false, outer };
     setup_call(p, f, run.calls.front().unwrap(), stack_top);
     *t.init_run.lock() = Some(run);
     true
@@ -202,7 +206,8 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     if call.flag == 0 {
         if !ok {
             crate::println!("DLL {} failed to initialise", call.module.name);
-            let run = guard.take().unwrap();
+            let mut run = guard.take().unwrap();
+            *guard = run.outer.take().map(|b| *b);
             drop(guard);
             if run.at_start {
                 p.exit(1, ERROR_INIT_ROUTINE_FAILED);
@@ -224,7 +229,8 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
         setup_call(p, f, &next, top);
         return;
     }
-    let run = guard.take().unwrap();
+    let mut run = guard.take().unwrap();
+    *guard = run.outer.take().map(|b| *b);
     drop(guard);
     *f = run.resume;
     if run.then_exit {

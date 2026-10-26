@@ -1027,7 +1027,13 @@ fn titlebar_paint(h: u32) {
 
 /// The title bar shows its frame as active.
 pub fn title_active(h: u32) -> bool {
-    st().active == win::top_level(h) || ctl::data::<bool>(h).is_some_and(|b| *b)
+    // A frame inside another window (an MDI child) is lit by its owner
+    // with TBM_SETHILITE only.
+    let lit = ctl::data::<bool>(h).is_some_and(|b| *b);
+    if win::top_level(h) != ctl::parent(h) {
+        return lit;
+    }
+    st().active == win::top_level(h) || lit
 }
 
 /// A title bar; one of a frame whose thread does not respond is grey

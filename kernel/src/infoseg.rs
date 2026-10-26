@@ -11,6 +11,12 @@ use crate::sync::Once;
 use crate::vm::{self, AddressSpace, PageState, SegKind, SharedMem, PAGE};
 
 static OBJ: Once<Arc<SharedMem>> = Once::new();
+/// The BIOS data area of Windows programs (KERNEL's __0040H selector,
+/// docs/WIN16.md): a read-only page with the fields programs read, the
+/// timer tick count at 6Ch kept current.
+static BIOS: Once<Arc<SharedMem>> = Once::new();
+/// Milliseconds of the day at uptime 0 (from the RTC).
+static DAY_OFFSET: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 static SELECTOR: AtomicU16 = AtomicU16::new(0);
 
 pub fn global_selector() -> u16 {
@@ -54,7 +60,51 @@ pub fn init() {
         *p.add(70) = 16; // csgWindowableVioMax
         *p.add(71) = 16; // csgPMMax
     }
+    let base = vm::reserve_shared(PAGE, None).expect("BIOS data address");
+    let bios = SharedMem::new(base, PAGE, vm::pag::READ, None);
+    let f = bios.frame(0).expect("BIOS data memory");
+    bios.pages.lock()[0] = PageState::Committed;
+    let b = crate::mm::phys::phys_to_virt(f);
+    unsafe {
+        let w16 = |o: usize, v: u16| (b.add(o) as *mut u16).write_unaligned(v);
+        w16(0x10, 0x0026); // equipment: FPU, mouse, 80x25 colour
+        w16(0x13, 640); // conventional memory (KB)
+        *b.add(0x49) = 3; // video mode
+        w16(0x4a, 80); // columns
+        w16(0x4c, 4000); // page size
+        w16(0x63, 0x3d4); // CRT controller
+        *b.add(0x84) = 24; // rows - 1
+        w16(0x85, 16); // character height
+    }
+    BIOS.set(bios);
+    // Selector 40h: Windows' DPMI host gives programs a GDT selector for
+    // real-mode segment 40h (the Delphi compiler reads the tick count
+    // through it); it is mapped in Windows programs only.
+    gdt::set_entry(8, descriptor(base, 0xfff, access::PRESENT | access::DPL3 | access::CODE_DATA | access::ACCESSED, 0));
     update();
+}
+
+/// The BIOS data area's selector (0: none).
+pub fn bios_selector() -> u16 {
+    BIOS.get().map_or(0, |b| vm::tile_selector(b.base))
+}
+
+/// Map the BIOS data area into a Windows program's address space.
+pub fn attach_bios(space: &mut AddressSpace) {
+    if let Some(b) = BIOS.get() {
+        if space.region(b.base).is_none() {
+            space.map_shared(b.clone(), vm::pag::READ, SegKind::Data);
+        }
+    }
+}
+
+/// The BIOS timer tick count (18.2 a second since midnight).
+pub fn bios_tick() {
+    let Some(b) = BIOS.get() else { return };
+    let ms = (crate::irq::uptime_ms() + DAY_OFFSET.load(Ordering::Relaxed)) % 86_400_000;
+    let ticks = (ms * 1_193_180 / 65_536_000) as u32;
+    let p = crate::mm::phys::phys_to_virt(b.frames.lock()[0]);
+    unsafe { (p.add(0x6c) as *mut u32).write_unaligned(ticks) };
 }
 
 /// The foreground session changed (sgCurrent, pidForeground).
@@ -83,6 +133,8 @@ pub fn update() {
     }
     let t = crate::rtc::now();
     let ms = crate::irq::uptime_ms();
+    let day = ((t.hour as u64 * 60 + t.minute as u64) * 60 + t.second as u64) * 1000;
+    DAY_OFFSET.store((day + 86_400_000 - ms % 86_400_000) % 86_400_000, Ordering::Relaxed);
     let p = page();
     unsafe {
         (p as *mut u32).write_unaligned(crate::rtc::unix_time(&t));

@@ -9,6 +9,7 @@
 //! | `0x10`   | kernel data |
 //! | `0x20`   | TSS (two slots) |
 //! | `0x30`   | current process LDT (two slots) |
+//! | `0x40`   | the BIOS data area of Windows programs (infoseg.rs) |
 //! | `0x53`   | user flat data (`DS`/`ES`/`SS` of 32-bit code) |
 //! | `0x5B`   | user flat 32-bit code |
 //! | `0x150B` | thread information block (`FS` of 32-bit code) |

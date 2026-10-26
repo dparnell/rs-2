@@ -28,12 +28,14 @@ files are involved. This is the media-free alternative to Win-OS/2
 | BUTTON, STATIC, EDIT (single and multi-line), LISTBOX, COMBOBOX, SCROLLBAR, drawn by WIN16 | works (stage 2) |
 | Subclassing (SetWindowLong GWL_WNDPROC, CallWindowProc), window scroll bars, the caret, the clipboard (CF_TEXT, PM's) | works (stage 2) |
 | CreateFont and the stock fonts, ellipses, polygons, clipping rectangles, SaveDC/RestoreDC | works (stage 2) |
-| MDI, bitmaps (CreateBitmap, BitBlt, DIBs), regions, mapping modes, owner-drawn combo boxes, Windows DLLs, WIN.INI | later (stage 2 remainder) |
+| MDI, bitmaps (CreateBitmap, BitBlt, DIBs), regions, mapping modes, Windows DLLs, WIN.INI and private profiles, icons, hooks, atoms and properties | works (real programs, below) |
+| Every documented import (unimplemented ones are stubs), undocumented ones load | works (real programs) |
+| DPMI (the selector calls), the BIOS data area, WIN87EM, VER, LZEXPAND, COM's task allocator | works (what real programs asked for) |
 | COMMDLG: Open, Save As, Color, Font, Print, Print Setup, Find, Replace as WIN16 dialogs, with programs' hooks and templates; CommDlgExtendedError, GetFileTitle | works (stage 3) |
 | Printing: printer DCs (CreateDC, CreateIC) on rs2's spooler and PostScript driver, Escape (STARTDOC, NEWFRAME, ENDDOC, ABORTDOC, NEXTBAND, GETPHYSPAGESIZE, PASSTHROUGH...), StartDoc...EndDoc, SetAbortProc, GetDeviceCaps, WIN.INI's printers | works (stage 3) |
 | DDE between Windows tasks (WM_DDE_*, GMEM_DDESHARE, global atoms), to PM programs' DDE servers, DDEML | works (stage 3) |
 | The clipboard: CF_TEXT, CF_BITMAP, CF_DIB, CF_METAFILEPICT, registered formats, delayed rendering, shared with PM programs | works (stage 3) |
-| DPMI, MMSYSTEM, OLE, TOOLHELP, the compatibility tail | stage 4 |
+| MMSYSTEM, OLE 2, TOOLHELP's databases, the rest of the compatibility tail | stage 4 |
 
 Checked in QEMU: `RS2\HELLO16.EXE` (a classic hello world: a window
 class, text painted in WM_PAINT, a MessageBox on a click) shows as a PM
@@ -45,16 +47,17 @@ list, Enter) and `RS2\NOTE16.EXE` (a Notepad on the multi-line edit
 control: scroll bars, selection, the clipboard, undo, word wrap, saving
 a file, a file name dialog) work; `RS2\W16TEST.EXE` checks KERNEL, USER,
 GDI, the DOS calls and stage 2's resources, menus, accelerators,
-dialogs and controls and stage 3's common dialogs, printing, atoms,
-clipboard formats and DDE (`w16test done: 0 failure(s)`). Stage 3 added
-the common dialogs to NOTE16 (Open, Save As, Print, Print Setup, Font,
-Background Color, Find, Replace), `RS2\PRINT16.EXE` (a page of text and
-graphics on the default printer, rendered with Ghostscript from the
-PostScript the spooler writes) and the DDE pair `RS2\DDECLI16.EXE` (a
-client in WM_DDE_* messages) and `RS2\DDESRV16.EXE` (a DDEML server) in
-two processes. All are built from source with Open Watcom (below).
-Screenshots: `work/progress/win16-native` (stage 1),
-`work/progress/win16-stage2`, `work/progress/win16-stage3`.
+dialogs and controls, what real programs needed, and stage 3's common
+dialogs, printing, clipboard formats and DDE (`w16test done: 0
+failure(s)`). Stage 3 added the common dialogs to NOTE16 (Open, Save As,
+Print, Print Setup, Font, Background Color, Find, Replace),
+`RS2\PRINT16.EXE` (a page of text and graphics on the default printer,
+rendered with Ghostscript from the PostScript the spooler writes) and
+the DDE pair `RS2\DDECLI16.EXE` (a client in WM_DDE_* messages) and
+`RS2\DDESRV16.EXE` (a DDEML server) in two processes. All are built
+from source with Open Watcom (below). Screenshots:
+`work/progress/win16-native` (stage 1), `work/progress/win16-stage2`,
+`work/progress/win16-stage3`.
 
 ![DLG16: a Windows dialog on rs2](images/rs2-win16-dlg16.png)
 
@@ -427,7 +430,7 @@ built in Rust (dialog units of the system font, laid out like Windows
 chx1, rad1, psh1, stc1...), so a program's own template
 (`*_ENABLETEMPLATE` from its resources, `*_ENABLETEMPLATEHANDLE` from a
 global block) works with the dialog procedure here, as it does with
-Windows'. That procedure is WIN16 entry 9 (a 16:16 address like the
+Windows'. That procedure is WIN16 entry 11 (a 16:16 address like the
 built-in controls'); DefDlgProc calls it as any dialog procedure. A
 program's hook gets every message first: WM_INITDIALOG with its
 structure as lParam (after the dialog has been filled in), and returning
@@ -595,6 +598,134 @@ metafiles are not played), SHELL's drag and drop, and the messages with
 pointers that cross tasks (WM_SETTEXT, WM_GETTEXT to another task's
 window).
 
+## Real programs
+
+The test programs above are rs2's own. Real Windows 3.x programs (all
+under `work/win16apps`, never in the repository) need much more of
+Windows; what they needed, in the order they asked for it:
+
+- **Imports WIN16 does not have.** Every function of KERNEL, USER, GDI,
+  KEYBOARD, SOUND, TOOLHELP, VER, LZEXPAND, SHELL, MMSYSTEM, COMMDLG and
+  DDEML with a prototype in Open Watcom's headers has an entry: the ones
+  not implemented are generated stubs (`src/stubs.rs`,
+  `tools/scripts/gen_win16_exports.py` takes the argument sizes from the
+  prototypes) that say `WIN16: not implemented: GDI.34 BITBLT` on the
+  serial port once and return 0. An import with no entry at all (an
+  undocumented ordinal) loads as Windows loads it: the call, if it ever
+  comes, shows "Call to Undefined Dynalink" and ends the program.
+- **Windows DLLs** of the program's own (WNDHOOKS.DLL, CTL3D...): the
+  loader finds them in the program's directory first, gives each process
+  its own copy of their data (each Windows task is a process here) and
+  runs LibEntry with Windows' registers (DI the instance, CX the heap
+  size); their exported procedures start with `mov ax, DGROUP` as
+  Windows' loader patches them. LoadLibrary, FreeLibrary,
+  GetModuleHandle, GetProcAddress (16:16 addresses) and the resource
+  calls work on them (`module.rs`).
+- **Bitmaps** (`bitmap.rs`): memory DCs are PM memory presentation
+  spaces, HBITMAPs PM bitmaps (1 or 24 bits per pixel), BitBlt and
+  StretchBlt PM's GpiBitBlt with Windows' ROP3 codes, monochrome
+  conversions in Windows' colours; DDB bits (SetBitmapBits, CreateBitmap),
+  DIBs (CreateDIBitmap, Get/SetDIBits, SetDIBitsToDevice, StretchDIBits:
+  Windows' BITMAPINFO is PM's), LoadBitmap, palettes, pattern brushes
+  (their average colour). **Regions** (`region.rs`) are rectangle lists;
+  **mapping modes** and the window/viewport origins and extents
+  transform every coordinate GDI takes.
+- **Icons and cursors** (`icon.rs`) from RT_GROUP_ICON/RT_ICON,
+  CreateIcon, ExtractIcon, DrawIcon (mask and image).
+- **MDI** (`mdi.rs`): MDI children are PM frame windows inside the
+  MDICLIENT's PM window.
+- **KERNEL**: the selector functions (AllocSelector, AllocCStoDSAlias,
+  PrestoChangoSelector, SetSelectorBase...: RS2API 421), Catch/Throw,
+  atoms (local, and PM's system atom table for global atoms and
+  registered messages), window properties, `.INI` files (`profile.rs`,
+  in `C:\WINDOWS`), WinExec, hmemcpy, _hread, IsBadReadPtr, GetDriveType,
+  INT 21h find first/next, INT 25h/26h; WIN87EM's __FPMATH; TOOLHELP's
+  registration calls; VER (version resources); LZEXPAND (SZDD files).
+- **Messages Windows sends in its own order**: none before WM_NCCREATE;
+  a window created hidden gets WM_SIZE and WM_MOVE when first shown;
+  thunk16 returns a segment register the call freed as 0 (GlobalFree of
+  the block ES points at).
+- **COMPOBJ/OLE2**: CoGetMalloc's task allocator (an IMalloc whose
+  methods are WIN16 entries), CoInitialize, OleInitialize, IsEqualGUID;
+  the rest of OLE 2 are stubs returning E_FAIL.
+- **The BIOS data area**: selector 40h (and KERNEL's `__0040H`) is a
+  read-only page with BIOS-like contents and a tick count the kernel
+  updates (Windows programs only); the kernel accepts a DS or ES with any
+  RPL on a ring 3 descriptor, as Windows' selector values sometimes have.
+- **DDEML and COMMDLG** are WIN16's own (stage 3, above): PFE's Open
+  and Print dialogs (its own templates, owner-drawn file lists) open
+  files and print them (through rs2's spooler; checked as far as a host
+  LPR listener and Ghostscript).
+
+### Compatibility
+
+| Program | Version | Built with | Status | Notes |
+|---------|---------|------------|--------|-------|
+| Watcom samples GENERIC, WATZEE, SHOOTGAL, ALARM, LIFE, EDIT, ICONVIEW (MDI), TESTCTL | Open Watcom 2 | C | works | |
+| Calmira | 2.2 | Delphi 1 | works | The desktop, the Computer window, Tip of the Day; GPL |
+| Programmer's File Editor (PFE) | 1.01 (16-bit) | C | works | MDI editor; File Open and Print (its own COMMDLG templates) work |
+| GNU Chess | 3.21 | C | works | CICA Dec 1993 |
+| KLOTZ, BoxWorld, Columns, Hextris, Mines | | C, Borland Pascal | works | CICA Dec 1993 |
+| WinTrek | | C | works | Its DLL's hInstance compared signed: DLL instances are low alias selectors |
+| Euchre, Cribbage | | OWL | works | Window hooks |
+| Magic, WinCode, PEGIF, WinPong, FSR | | | works | CICA Dec 1993 |
+| Neko | | | starts | Not checked in depth |
+| Jewels | | | starts | |
+| Hyperoid | | C | partly | Draws its own title bar with GetWindowDC: lands in the client area |
+| LIFEAPP | | | partly | Loading a snapshot fails (current directory) |
+| **Delphi** | 1.0 | Delphi 1 | **works, with gaps** | See below |
+
+### Delphi 1.0
+
+The user's own copy (never in the repository): the `RUNIMAGE` tree of
+the CD copied to `C:\DELPHI` (BIN, LIB, GALLERY, IMAGES), its IDAPI to
+`C:\IDAPI`, BIVBX11.DLL, BOLE16D.DLL, BWCC.DLL and the VBX files to
+`C:\WINDOWS\SYSTEM` (no Microsoft DLLs: WIN16 is KERNEL, USER, GDI and
+the rest), and two INI files in `C:\WINDOWS`:
+
+```
+; DELPHI.INI
+[Library]
+SearchPath=C:\DELPHI\LIB
+ComponentLibrary=C:\DELPHI\BIN\COMPLIB.DCL
+SaveLibrarySource=1
+[Gallery]
+BaseDir=C:\DELPHI\GALLERY
+[Debugging]
+IntegratedDebugging=0
+
+; WIN.INI
+[IDAPI]
+DLLPATH=C:\IDAPI
+CONFIGFILE01=C:\IDAPI\IDAPI.CFG
+[Borland Language Drivers]
+LDPath=C:\IDAPI\LANGDRV
+```
+
+`C:\DELPHI\BIN\DELPHI.EXE` starts the IDE: the main window with the
+component palette, Form1 in the form designer, the code editor and the
+Object Inspector. Components drop onto the form, Ctrl+F9 compiles
+(UNIT1.DCU, PROJECT1.EXE) and F9 runs the compiled program, a native
+Windows program on WIN16 like any other.
+
+![Delphi 1.0 on rs2: the IDE and the program it compiled](images/rs2-win16-delphi.png)
+
+Not yet:
+
+- **The integrated debugger.** With IntegratedDebugging=1 (Delphi's
+  default) Run ends the IDE: the debugger needs TOOLHELP's task and
+  module databases (TaskFindHandle, ModuleFirst, GlobalHandleToSel,
+  GlobalEntryHandle, NotifyRegister's events) and the debug registers.
+  Hence `IntegratedDebugging=0`.
+- **The Object Inspector's property list** (an owner-drawn list box)
+  stays 0 by 0 pels: the IDE never sizes it. The inspector's first
+  WM_SIZE comes before its children exist; what Windows does differently
+  there is not found yet.
+- COMMDLG (Open, Save As...) and DDE are stage 3's (above); not tried
+  with Delphi yet.
+
+![Calmira 2.2, a Windows 3.1 shell written in Delphi, on rs2](images/rs2-win16-calmira.png)
+
 ## Building the test programs
 
 The test programs are C, built with Open Watcom v2's Win16 target
@@ -631,16 +762,10 @@ the DOS calls and fix-ups to the serial port.
 
 ## Later stages
 
-**Stage 2: what is left.** MDI (MDICLIENT, DefFrameProc,
-DefMDIChildProc), bitmaps (CreateBitmap, CreateCompatibleDC, BitBlt,
-StretchBlt, DIBs, LoadBitmap), regions and clip regions, mapping modes,
-pen and brush styles (hatches, patterns, dashed pens), owner-drawn combo
+**Stage 2: what is left.** Pen and brush styles (hatches, patterns, dashed pens), owner-drawn combo
 boxes and LBS_OWNERDRAWVARIABLE, multi-column list boxes, DlgDirList,
-font enumeration, the non-client messages for programs that draw their
-own frame, MessageBox as a WIN16 dialog, the program's own icons and
-cursors, Windows DLLs of the program's own (LibMain, WEP, patched export
-prologues), WIN.INI and private profiles (GetProfileString answers the
-default for now).
+the non-client messages for programs that draw their
+own frame (Hyperoid), MessageBox as a WIN16 dialog.
 
 **Stage 3** (COMMDLG, printing, DDE, the clipboard) is done; what it
 leaves is listed above. SHELL (ShellExecute, drag and drop of files)

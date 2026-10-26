@@ -324,8 +324,12 @@ Windows 3.x programs also run without Win-OS/2, natively as OS/2
 processes on rs2's WIN16.DLL (docs/WIN16.md): windows, painting, text,
 message boxes, menus and accelerators, dialogs and the standard controls
 (`RS2\HELLO16.EXE`, `RS2\MENU16.EXE`, `RS2\DLG16.EXE`, `RS2\NOTE16.EXE`,
-`RS2\W16TEST.EXE`), the common dialogs, printing to rs2's printers, DDE
-and the clipboard's formats (`RS2\PRINT16.EXE`, `RS2\DDECLI16.EXE`).
+`RS2\W16TEST.EXE`), bitmaps, MDI, Windows DLLs and profiles. Real
+programs run too: Delphi 1.0 (the IDE, designing, compiling and running
+a program), Calmira, PFE, GNU Chess and many CICA shareware programs;
+the compatibility table is in docs/WIN16.md ("Real programs"). The common
+dialogs, printing to rs2's printers, DDE and the clipboard's formats
+work too (`RS2\PRINT16.EXE`, `RS2\DDECLI16.EXE`).
 
 APPINST's **Win-OS/2** category copies IBM's Win-OS/2 from the CD into
 `C:\OS2\MDOS\WINOS2`, makes rs2's display driver RS2DISP.DRV from its

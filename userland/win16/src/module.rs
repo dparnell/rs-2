@@ -15,8 +15,12 @@ use crate::{cstr, far_str, Global};
 
 pub struct Module {
     /// The instance handle: DGROUP's selector (a module without data: its
-    /// first segment's).
+    /// first segment's); for a DLL, a second selector for DGROUP below
+    /// 8000h (programs compare instance handles as signed numbers, and a
+    /// DLL's own selectors are near the top of the LDT).
     pub hinst: u16,
+    /// DGROUP's own selector.
+    pub dgroup: u16,
     /// The OS/2 module handle.
     pub hmod: u32,
     /// The base name, upper case ("CTL3DV2").
@@ -45,6 +49,12 @@ pub const SYSTEM: &[(&[u8], u16, u32)] = &[
     (b"VER", 0x0f57, 6300),
     (b"LZEXPAND", 0x0f5f, 6400),
     (b"SHELL", 0x0f67, 6500),
+    (b"COMPOBJ", 0x0f77, 7000),
+    (b"OLE2", 0x0f7f, 7100),
+    (b"STORAGE", 0x0f87, 7300),
+    (b"OLE2DISP", 0x0f8f, 7400),
+    (b"OLE2NLS", 0x0f97, 7600),
+    (b"TYPELIB", 0x0f9f, 7700),
     (b"MMSYSTEM", 0x0f6f, 10000),
 ];
 
@@ -68,7 +78,7 @@ pub fn register_exe(hinst: u16) {
     }
     let hmod = unsafe { (*pib).hmte };
     let name = path_of(hmod).map(|p| base_name(&p)).unwrap_or_default();
-    MODULES.get().insert(0, Module { hinst, hmod, name, loads: 0, image: None });
+    MODULES.get().insert(0, Module { hinst, dgroup: hinst, hmod, name, loads: 0, image: None });
 }
 
 /// The program's instance.
@@ -82,7 +92,20 @@ pub fn find(h: u16) -> Option<&'static mut Module> {
     if h == 0 {
         return ms.first_mut();
     }
-    ms.iter_mut().find(|m| m.hinst == h || (m.hinst | 7) == (h | 7))
+    if let Some(i) = ms.iter().position(|m| m.hinst == h || (m.hinst | 7) == (h | 7) || (m.dgroup | 7) == (h | 7)) {
+        return MODULES.get().get_mut(i);
+    }
+    // A DLL loaded with the program (not through LoadLibrary): the module
+    // whose segment the handle is.
+    if system(h).is_some() {
+        return None;
+    }
+    let hmod = unsafe { crate::pm::Rs2Win16Selector(8, h as u32, 0) };
+    if hmod == 0 {
+        return None;
+    }
+    register(hmod);
+    MODULES.get().iter_mut().find(|m| m.hmod == hmod)
 }
 
 /// The file name of an OS/2 module.
@@ -110,11 +133,13 @@ fn register(hmod: u32) -> u16 {
             seg = crate::res::w16(&head, ne + 0x0e) as u32;
         }
     }
-    let hinst = unsafe { crate::pm::Rs2Win16Selector(6, hmod, seg) } as u16;
-    if hinst == 0 {
+    let dgroup = unsafe { crate::pm::Rs2Win16Selector(6, hmod, seg) } as u16;
+    if dgroup == 0 {
         return 0;
     }
-    ms.push(Module { hinst, hmod, name: base_name(&path), loads: 0, image: None });
+    let alias = if dgroup >= 0x8000 { unsafe { crate::pm::Rs2Win16Selector(0, dgroup as u32, 1) as u16 } } else { 0 };
+    let hinst = if alias != 0 && alias < 0x8000 { alias } else { dgroup };
+    ms.push(Module { hinst, dgroup, hmod, name: base_name(&path), loads: 0, image: None });
     hinst
 }
 
@@ -165,6 +190,9 @@ pub fn load_library(name: u32) -> u16 {
             let d = &dir[..dir.iter().rposition(|&c| c == b'\\').map_or(0, |i| i + 1)];
             tries.push([d, &with_ext].concat());
         }
+        for d in [crate::profile::SYSTEM_DIR, crate::profile::WINDOWS_DIR] {
+            tries.push([d, b"\\", &with_ext].concat());
+        }
         tries.push(base.clone());
     }
     for t in &tries {
@@ -198,8 +226,11 @@ pub fn free_library(h: u16) {
     }
     ms[i].loads -= 1;
     if ms[i].loads == 0 {
-        let hmod = ms[i].hmod;
+        let (hmod, hinst, dgroup) = (ms[i].hmod, ms[i].hinst, ms[i].dgroup);
         ms.remove(i);
+        if hinst != dgroup {
+            unsafe { crate::pm::Rs2Win16Selector(4, hinst as u32, 0) };
+        }
         unsafe { os2::DosFreeModule(hmod) };
     }
 }
