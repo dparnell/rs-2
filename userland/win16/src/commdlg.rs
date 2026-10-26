@@ -1211,8 +1211,8 @@ fn color_msg(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             let Some(c) = color(h) else { return 0 };
             let col = if (COLOR_BASIC..COLOR_BASIC + 48).contains(&id) { BASIC[(id - COLOR_BASIC) as usize] } else { c.cust[((id - COLOR_CUST) & 15) as usize] };
             let sel = col == c.rgb;
-            gdi::fill(hdc, r, gdi::sys_color(gdi::COLOR_BTNFACE));
-            // A sunken swatch; the selected one framed in black, the
+            gdi::fill(hdc, r, gdi::sys_color(gdi::COLOR_WINDOW));
+            // A swatch; the selected one framed in black, the
             // focused one with a focus rectangle.
             gdi::fill(hdc, [r[0] + 2, r[1] + 2, r[2] - 2, r[3] - 2], col);
             gdi::frame(hdc, [r[0] + 1, r[1] + 1, r[2] - 1, r[3] - 1], 0x808080);
@@ -1232,24 +1232,10 @@ fn color_msg(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             }
             let hdc = begin_paint_rs(h);
             let (cx, cy) = client_size(h);
-            gdi::fill(hdc, [0, 0, cx, cy], gdi::sys_color(gdi::COLOR_BTNFACE));
+            gdi::fill(hdc, [0, 0, cx, cy], gdi::sys_color(gdi::COLOR_WINDOW));
             paint_spectrum(h, hdc);
             gdi::release_dc(hdc);
             1
-        }
-        W_ERASEBKGND => {
-            let (cx, cy) = client_size(h);
-            gdi::fill(wp, [0, 0, cx, cy], gdi::sys_color(gdi::COLOR_BTNFACE));
-            1
-        }
-        W_CTLCOLOR => {
-            // Statics and buttons on the dialog's grey.
-            let kind = (lp >> 16) as u16;
-            if kind == crate::ctl::CTLCOLOR_STATIC || kind == crate::ctl::CTLCOLOR_BTN || kind == 4 {
-                gdi::set_bk_color(wp, gdi::sys_color(gdi::COLOR_BTNFACE));
-                return gdi::sys_brush(gdi::COLOR_BTNFACE) as u32;
-            }
-            0
         }
         W_LBUTTONDOWN => {
             let (x, y) = (lp as i16 as i32, (lp >> 16) as i16 as i32);

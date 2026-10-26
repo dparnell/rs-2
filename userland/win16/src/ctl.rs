@@ -302,7 +302,9 @@ fn button(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
         W_GETFONT => btn(h).map_or(0, |b| b.font as u32),
         W_GETDLGCODE => match k {
             BS_DEFPUSHBUTTON => DLGC_BUTTON | DLGC_DEFPUSHBUTTON,
-            BS_PUSHBUTTON | BS_USERBUTTON | BS_OWNERDRAW => DLGC_BUTTON | DLGC_UNDEFPUSHBUTTON,
+            BS_PUSHBUTTON | BS_USERBUTTON => DLGC_BUTTON | DLGC_UNDEFPUSHBUTTON,
+            // An owner-drawn button is not made the default (it would be
+            // restyled as a push button).
             BS_RADIOBUTTON | BS_AUTORADIOBUTTON => DLGC_BUTTON | DLGC_RADIOBUTTON,
             BS_GROUPBOX => DLGC_STATIC,
             _ => DLGC_BUTTON,
