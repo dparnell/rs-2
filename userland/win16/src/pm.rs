@@ -174,6 +174,85 @@ unsafe extern "C" {
     #[link_name = "PMGPI.531"]
     pub fn GpiSetLineWidth(hps: u32, w: i32) -> u32;
 
+    #[link_name = "PMGPI.513"]
+    pub fn GpiSetCharSet(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.378"]
+    pub fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.368"]
+    pub fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *const u8) -> i32;
+    #[link_name = "PMGPI.510"]
+    pub fn GpiSetCharBox(hps: u32, p: *const i32) -> u32;
+    #[link_name = "PMGPI.396"]
+    pub fn GpiIntersectClipRectangle(hps: u32, r: *const RectL) -> i32;
+    #[link_name = "PMGPI.391"]
+    pub fn GpiExcludeClipRectangle(hps: u32, r: *const RectL) -> i32;
+    #[link_name = "PMGPI.516"]
+    pub fn GpiSetClipRegion(hps: u32, h: u32, old: *mut u32) -> i32;
+    #[link_name = "PMGPI.435"]
+    pub fn GpiQueryClipBox(hps: u32, r: *mut RectL) -> i32;
+    #[link_name = "PMGPI.502"]
+    pub fn GpiSetArcParams(hps: u32, p: *const [i32; 4]) -> u32;
+    #[link_name = "PMGPI.393"]
+    pub fn GpiFullArc(hps: u32, ctl: i32, mult: i32) -> i32;
+    #[link_name = "PMGPI.415"]
+    pub fn GpiPolyLine(hps: u32, n: i32, p: *const PointL) -> i32;
+    #[link_name = "PMGPI.476"]
+    pub fn GpiQueryPel(hps: u32, p: *const PointL) -> i32;
+    #[link_name = "PMGPI.352"]
+    pub fn GpiBeginArea(hps: u32, opts: u32) -> u32;
+    #[link_name = "PMGPI.385"]
+    pub fn GpiEndArea(hps: u32) -> i32;
+    #[link_name = "PMWIN.767"]
+    pub fn WinInvertRect(hps: u32, r: *const RectL) -> u32;
+    #[link_name = "PMWIN.852"]
+    pub fn WinSetCapture(desk: u32, h: u32) -> u32;
+    #[link_name = "PMWIN.804"]
+    pub fn WinQueryCapture(desk: u32) -> u32;
+    #[link_name = "PMWIN.849"]
+    pub fn WinScrollWindow(h: u32, dx: i32, dy: i32, scroll: *const RectL, clip: *const RectL, rgn: u32, upd: *mut RectL, fl: u32) -> i32;
+    #[link_name = "PMWIN.864"]
+    pub fn WinSetOwner(h: u32, owner: u32) -> u32;
+    #[link_name = "PMWIN.865"]
+    pub fn WinSetParent(h: u32, parent: u32, redraw: u32) -> u32;
+    #[link_name = "PMWIN.899"]
+    pub fn WinWindowFromID(h: u32, id: u32) -> u32;
+    #[link_name = "PMWIN.879"]
+    pub fn WinSetWindowUShort(h: u32, i: i32, v: u16) -> u32;
+    #[link_name = "PMWIN.715"]
+    pub fn WinCreateCursor(h: u32, x: i32, y: i32, cx: i32, cy: i32, fs: u32, clip: *const RectL) -> u32;
+    #[link_name = "PMWIN.880"]
+    pub fn WinShowCursor(h: u32, show: u32) -> u32;
+    #[link_name = "PMWIN.725"]
+    pub fn WinDestroyCursor(h: u32) -> u32;
+    #[link_name = "PMWIN.793"]
+    pub fn WinOpenClipbrd(hab: u32) -> u32;
+    #[link_name = "PMWIN.707"]
+    pub fn WinCloseClipbrd(hab: u32) -> u32;
+    #[link_name = "PMWIN.733"]
+    pub fn WinEmptyClipbrd(hab: u32) -> u32;
+    #[link_name = "PMWIN.854"]
+    pub fn WinSetClipbrdData(hab: u32, data: u32, fmt: u32, info: u32) -> u32;
+    #[link_name = "PMWIN.806"]
+    pub fn WinQueryClipbrdData(hab: u32, fmt: u32) -> u32;
+    #[link_name = "PMWIN.807"]
+    pub fn WinQueryClipbrdFmtInfo(hab: u32, fmt: u32, info: *mut u32) -> u32;
+    #[link_name = "PMWIN.752"]
+    pub fn WinGetKeyState(desk: u32, vk: i32) -> i32;
+    #[link_name = "PMWIN.831"]
+    pub fn WinQueryUpdateRect(h: u32, r: *mut RectL) -> u32;
+    #[link_name = "PMWIN.900"]
+    pub fn WinWindowFromPoint(h: u32, p: *const PointL, children: u32) -> u32;
+    #[link_name = "PMWIN.818"]
+    pub fn WinQueryMsgPos(hab: u32, p: *mut PointL) -> u32;
+    #[link_name = "PMWIN.819"]
+    pub fn WinQueryMsgTime(hab: u32) -> u32;
+    #[link_name = "PMWIN.773"]
+    pub fn WinIsWindowEnabled(h: u32) -> u32;
+    #[link_name = "PMWIN.745"]
+    pub fn WinFlashWindow(h: u32, on: u32) -> u32;
+    #[link_name = "PMWIN.867"]
+    pub fn WinSetPointerPos(desk: u32, x: i32, y: i32) -> u32;
+
     #[link_name = "DOSCALLS.320"]
     pub fn DosQueryModuleName(hmod: u32, cb: u32, buf: *mut u8) -> u32;
     #[link_name = "RS2API.4"]
@@ -204,6 +283,24 @@ pub const WM_MOUSEMOVE: u32 = 0x0070;
 pub const WM_BUTTON1DOWN: u32 = 0x0071;
 pub const WM_BUTTON3DBLCLK: u32 = 0x0079;
 pub const WM_CHAR: u32 = 0x007a;
+pub const WM_SYSCOMMAND: u32 = 0x0021;
+pub const WM_CONTROL: u32 = 0x0030;
+pub const WM_VSCROLL: u32 = 0x0031;
+pub const WM_HSCROLL: u32 = 0x0032;
+pub const WM_INITMENU: u32 = 0x0033;
+pub const WM_MENUSELECT: u32 = 0x0034;
+pub const WM_MENUEND: u32 = 0x0035;
+pub const WM_UPDATEFRAME: u32 = 0x0042;
+pub const WM_BUTTON1UP: u32 = 0x0072;
+pub const FID_MENU: u32 = 0x8005;
+pub const FID_VERTSCROLL: u32 = 0x8006;
+pub const FID_HORZSCROLL: u32 = 0x8007;
+pub const FID_CLIENT: u32 = 0x8008;
+pub const HWND_OBJECT: u32 = 2;
+pub const HWND_BOTTOM: u32 = 4;
+pub const QWS_ID: i32 = -1;
+pub const WS_CLIPCHILDREN: u32 = 0x2000_0000;
+pub const WS_DISABLED: u32 = 0x4000_0000;
 
 // Frame creation flags.
 pub const FCF_TITLEBAR: u32 = 0x0001;
@@ -232,13 +329,19 @@ pub const SWP_RESTORE: u32 = 0x1000;
 pub const QW_PARENT: i32 = 5;
 pub const SV_CXSCREEN: i32 = 20;
 pub const SV_CYSCREEN: i32 = 21;
-pub const SV_CXPOINTER: i32 = 25;
-pub const SV_CYPOINTER: i32 = 26;
+pub const SV_CXVSCROLL: i32 = 22;
+pub const SV_CYHSCROLL: i32 = 23;
+pub const SV_CYVSCROLLARROW: i32 = 24;
+pub const SV_CXHSCROLLARROW: i32 = 25;
+pub const SV_CXBORDER: i32 = 26;
+pub const SV_CYBORDER: i32 = 27;
+pub const SV_CXDLGFRAME: i32 = 28;
 pub const SV_CYTITLEBAR: i32 = 30;
+pub const SV_CYMENU: i32 = 35;
+pub const SV_CXPOINTER: i32 = 40;
+pub const SV_CYPOINTER: i32 = 41;
 pub const SV_CXSIZEBORDER: i32 = 4;
 pub const SV_CYSIZEBORDER: i32 = 5;
-pub const SV_CXBORDER: i32 = 2;
-pub const SV_CYBORDER: i32 = 3;
 
 pub const LCOLF_RGB: i32 = 3;
 pub const BM_LEAVEALONE: i32 = 5;

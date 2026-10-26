@@ -1,0 +1,20 @@
+/* W16TEST's resource IDs. */
+#define IDS_HELLO    1
+#define IDS_SEVENTEEN 17
+#define IDM_OPEN     201
+#define IDM_SAVE     202
+#define IDM_QUIT     203
+#define IDM_ABOUT    301
+#define IDA_F5       900
+#define IDA_CTRLQ    901
+#define IDC_EDIT     100
+#define IDC_MULTI    101
+#define IDC_KEEP     102
+#define IDC_R1       103
+#define IDC_R2       104
+#define IDC_R3       105
+#define IDC_LIST     106
+#define IDC_COMBO    107
+#define IDC_DROP     108
+#define IDC_SCROLL   109
+#define IDC_LABEL    110

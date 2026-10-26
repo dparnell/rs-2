@@ -1,0 +1,50 @@
+/* DLG16's dialog (one of each control) and menu. */
+#include <windows.h>
+#include "dlg16.h"
+
+Dlg16 MENU
+BEGIN
+    POPUP "&Dialog"
+    BEGIN
+        MENUITEM "&Order...", IDM_DIALOG
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_EXIT
+    END
+END
+
+Order DIALOG 12, 12, 284, 214
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Order a pizza"
+BEGIN
+    LTEXT           "&Name:", -1, 6, 8, 36, 9
+    EDITTEXT        IDC_NAME, 44, 6, 96, 12, ES_AUTOHSCROLL
+    LTEXT           "&Password:", -1, 6, 24, 36, 9
+    EDITTEXT        IDC_PASS, 44, 22, 96, 12, ES_PASSWORD | ES_AUTOHSCROLL
+    LTEXT           "&Age:", -1, 6, 40, 36, 9
+    EDITTEXT        IDC_AGE, 44, 38, 30, 12
+    GROUPBOX        "Size", -1, 6, 54, 68, 50
+    CONTROL         "&Small", IDC_SMALL, "BUTTON", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, 12, 66, 56, 10
+    CONTROL         "&Medium", IDC_MEDIUM, "BUTTON", BS_AUTORADIOBUTTON, 12, 78, 56, 10
+    CONTROL         "&Large", IDC_LARGE, "BUTTON", BS_AUTORADIOBUTTON, 12, 90, 56, 10
+    CONTROL         "&Extra cheese", IDC_CHEESE, "BUTTON", BS_AUTOCHECKBOX | WS_GROUP | WS_TABSTOP, 80, 58, 64, 10
+    CONTROL         "&Olives", IDC_OLIVES, "BUTTON", BS_AUTO3STATE | WS_TABSTOP, 80, 70, 64, 10
+    LTEXT           "&Drink:", -1, 80, 84, 60, 9
+    COMBOBOX        IDC_DRINK, 80, 94, 64, 46, CBS_SIMPLE | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "&Colour:", -1, 150, 8, 60, 9
+    COMBOBOX        IDC_COLOUR, 150, 18, 62, 60, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "&Font:", -1, 218, 8, 60, 9
+    COMBOBOX        IDC_FONT, 218, 18, 60, 60, CBS_DROPDOWN | CBS_SORT | WS_VSCROLL | WS_TABSTOP
+    LTEXT           "&Toppings:", -1, 150, 38, 60, 9
+    LISTBOX         IDC_TOPPINGS, 150, 48, 128, 52, LBS_NOTIFY | LBS_MULTIPLESEL | WS_VSCROLL | WS_BORDER | WS_TABSTOP
+    LTEXT           "&Volume:", -1, 150, 108, 32, 9
+    SCROLLBAR       IDC_VOLUME, 184, 108, 74, 10, SBS_HORZ | WS_TABSTOP
+    CTEXT           "50", IDC_VOLVAL, 260, 108, 18, 9
+    LTEXT           "N&otes:", -1, 6, 148, 36, 9
+    EDITTEXT        IDC_NOTES, 44, 146, 234, 30, ES_MULTILINE | ES_AUTOVSCROLL | WS_VSCROLL
+    CONTROL         "", -1, "STATIC", SS_ICON, 8, 184, 0, 0
+    CONTROL         "", -1, "STATIC", SS_BLACKFRAME, 44, 182, 102, 26
+    CTEXT           "Every control is drawn by rs2's WIN16.DLL", -1, 46, 184, 98, 22
+    DEFPUSHBUTTON   "OK", IDOK, 150, 194, 40, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 194, 194, 40, 14
+    PUSHBUTTON      "&Reset", IDC_RESET, 238, 194, 40, 14
+END

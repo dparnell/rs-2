@@ -13,7 +13,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 WATCOM = os.environ.get('WATCOM', os.path.expanduser('~/opt/watcom'))
 BASES = {'KERNEL': 1000, 'USER': 2000, 'GDI': 3000, 'KEYBOARD': 4000}
 # Register-based entries: 16-bit code of their own in src/lib.rs.
-EXTRA = ['INITTASK=w16_inittask @1091', 'DOS3CALL=w16_dos3call @1102']
+EXTRA = ['INITTASK=w16_inittask @1091', 'DOS3CALL=w16_dos3call @1102', '_WSPRINTF=u_wsprintf @2420']
 
 
 def imports(lib):

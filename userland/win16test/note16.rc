@@ -1,0 +1,53 @@
+/* NOTE16's menu, accelerators and file name dialog. */
+#include <windows.h>
+#include "note16.h"
+
+Note16 MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&New", IDM_NEW
+        MENUITEM "&Open...\tCtrl+O", IDM_OPEN
+        MENUITEM "&Save\tCtrl+S", IDM_SAVE
+        MENUITEM "Save &As...", IDM_SAVEAS
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_EXIT
+    END
+    POPUP "&Edit"
+    BEGIN
+        MENUITEM "&Undo\tCtrl+Z", IDM_UNDO
+        MENUITEM SEPARATOR
+        MENUITEM "Cu&t\tCtrl+X", IDM_CUT
+        MENUITEM "&Copy\tCtrl+C", IDM_COPY
+        MENUITEM "&Paste\tCtrl+V", IDM_PASTE
+        MENUITEM "De&lete\tDel", IDM_DELETE
+        MENUITEM SEPARATOR
+        MENUITEM "Select &All", IDM_SELALL
+        MENUITEM "Time/&Date\tF5", IDM_TIME
+    END
+    POPUP "&Options"
+    BEGIN
+        MENUITEM "&Word Wrap", IDM_WRAP
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About Note16...", IDM_ABOUT
+    END
+END
+
+Note16 ACCELERATORS
+BEGIN
+    "^O", IDM_OPEN
+    "^S", IDM_SAVE
+    VK_F5, IDM_TIME, VIRTKEY
+END
+
+FileName DIALOG 20, 20, 200, 58
+STYLE DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "File name"
+BEGIN
+    LTEXT           "&File name:", -1, 6, 8, 50, 9
+    EDITTEXT        IDC_FILE, 6, 20, 188, 12, ES_AUTOHSCROLL | ES_UPPERCASE
+    DEFPUSHBUTTON   "OK", IDOK, 98, 38, 46, 14
+    PUSHBUTTON      "Cancel", IDCANCEL, 148, 38, 46, 14
+END
