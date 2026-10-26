@@ -178,6 +178,8 @@ pub struct Wnd {
     /// WM_SIZE and WM_MOVE have been sent (a window created hidden gets
     /// them when first shown, as Windows does it).
     pub sized: bool,
+    /// The client origin WM_MOVE last told the program.
+    pub moved_to: Option<u32>,
 }
 
 /// A PM message being handled as a Windows message.
@@ -1238,7 +1240,9 @@ fn init_app() -> u32 {
         return 0;
     }
     unsafe {
-        WinRegisterClass(t.hab, b"Win16Wnd\0".as_ptr(), pm_wndproc, 0, 4);
+        // CS_MOVENOTIFY: WM_MOVE when a window moves (Windows programs keep
+        // their windows' positions from it).
+        WinRegisterClass(t.hab, b"Win16Wnd\0".as_ptr(), pm_wndproc, 0x0001, 4);
         WinRegisterClass(t.hab, b"Win16Frame\0".as_ptr(), frame_proc, 0, 4);
     }
     crate::scroll::register(t.hab);
@@ -1536,6 +1540,7 @@ pub fn create(c: &Create) -> u16 {
         props: Vec::new(),
         created: false,
         sized: false,
+        moved_to: None,
     });
     if !child && parent != 0 {
         let of = wnd(top_level(parent)).map_or(0, |w| w.frame);
@@ -1777,7 +1782,11 @@ fn send_size_move(h: u16) {
     w.sized = true;
     let (cw, ch) = client_size(h);
     send(h, W_SIZE, 0, (ch as u32) << 16 | cw as u32 & 0xffff);
-    send(h, W_MOVE, 0, client_origin(h));
+    let o = client_origin(h);
+    if let Some(w) = wnd(h) {
+        w.moved_to = Some(o);
+    }
+    send(h, W_MOVE, 0, o);
 }
 
 pub fn show_window(h: u16, cmd: u16) -> bool {
@@ -2554,8 +2563,16 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             send_inflight(h, W_SIZE, kind, (cy as u32) << 16 | cx as u32, q);
             0
         }
+        // (PM also says so when an ancestor moves: Windows only when the
+        // window moves in its parent.)
         WM_MOVE => {
-            send_inflight(h, W_MOVE, 0, client_origin(h), q);
+            let o = client_origin(h);
+            if wnd(h).is_some_and(|w| w.moved_to != Some(o)) {
+                if let Some(w) = wnd(h) {
+                    w.moved_to = Some(o);
+                }
+                send_inflight(h, W_MOVE, 0, o, q);
+            }
             0
         }
         WM_ACTIVATE => {
