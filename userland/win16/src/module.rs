@@ -92,7 +92,20 @@ pub fn find(h: u16) -> Option<&'static mut Module> {
     if h == 0 {
         return ms.first_mut();
     }
-    ms.iter_mut().find(|m| m.hinst == h || (m.hinst | 7) == (h | 7) || (m.dgroup | 7) == (h | 7))
+    if let Some(i) = ms.iter().position(|m| m.hinst == h || (m.hinst | 7) == (h | 7) || (m.dgroup | 7) == (h | 7)) {
+        return MODULES.get().get_mut(i);
+    }
+    // A DLL loaded with the program (not through LoadLibrary): the module
+    // whose segment the handle is.
+    if system(h).is_some() {
+        return None;
+    }
+    let hmod = unsafe { crate::pm::Rs2Win16Selector(8, h as u32, 0) };
+    if hmod == 0 {
+        return None;
+    }
+    register(hmod);
+    MODULES.get().iter_mut().find(|m| m.hmod == hmod)
 }
 
 /// The file name of an OS/2 module.

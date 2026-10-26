@@ -601,6 +601,14 @@ entries! {
     u_ansiprev = 2473, 8;
     u_enablescrollbar = 2482, 6;
     u_systemparametersinfo = 2483, 10;
+    u_wnetgetconnection = 2512, 12;
+    u_wnetgetcaps = 2513, 2;
+    u_wnetgetuser = 2516, 8;
+    u_wnetaddconnection = 2517, 12;
+    u_wnetcancelconnection = 2518, 6;
+    u_wnetgeterror = 2519, 4;
+    u_wnetgeterrortext = 2520, 10;
+    u_wnetgetdirectorytype = 2530, 8;
     // GDI
     g_setbkcolor = 3001, 6;
     g_setbkmode = 3002, 4;
@@ -781,6 +789,8 @@ entries! {
     th_terminateapp = 6277, 4;
     th_timercount = 6280, 4;
     // VER
+    v_getfileresourcesize = 6302, 16;
+    v_getfileresource = 6303, 24;
     v_getfileversioninfosize = 6306, 8;
     v_getfileversioninfo = 6307, 16;
     v_verfindfile = 6308, 30;

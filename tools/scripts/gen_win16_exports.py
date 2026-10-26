@@ -28,6 +28,9 @@ S_OK_STUBS = {'OLEINITIALIZE', 'COINITIALIZE', 'OLEUNINITIALIZE', 'COUNINITIALIZ
 EXTRA = ['INITTASK=w16_inittask @1091', 'DOS3CALL=w16_dos3call @1102', '_WSPRINTF=u_wsprintf @2420',
          '__FPMATH=w16_fpmath @5001',
          'CATCH=w16_catch @1055', 'THROW=w16_throw @1056', 'UNDEFINED_DYNALINK=w16_undefined @999']
+# Windows names Open Watcom's import libraries lack (USER's network calls).
+MORE_NAMES = {('USER', 513): 'WNETGETCAPS', ('USER', 516): 'WNETGETUSER', ('USER', 519): 'WNETGETERROR',
+              ('USER', 520): 'WNETGETERRORTEXT', ('USER', 530): 'WNETGETDIRECTORYTYPE'}
 # Not to be stubbed: register-based or with variable arguments.
 NO_STUB = {'INITTASK', 'DOS3CALL', '_WSPRINTF', 'WSPRINTF', 'CATCH', 'THROW'}
 
@@ -107,6 +110,8 @@ def main():
     for lib in sorted(glob.glob(os.path.join(WATCOM, 'lib286/win/*.lib'))):
         for k, v in imports(lib).items():
             names.setdefault(k, v)
+    for k, v in MORE_NAMES.items():
+        names.setdefault(k, v)
     src = open(os.path.join(ROOT, 'userland/win16/src/lib.rs')).read()
     inv = sorted(((b, m) for m, b in BASES.items()), reverse=True)
     mod_of = lambda idx: next((b, m) for b, m in inv if idx >= b)

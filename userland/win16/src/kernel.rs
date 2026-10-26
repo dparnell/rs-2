@@ -482,21 +482,22 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
     }
 }
 
-/// PrestoChangoSelector(src, dst): dst describes src's memory with the
-/// other type (code for data, data for code). With src == dst the
-/// selector changes type in place (how programs make a data block they
-/// wrote code into executable).
+/// PrestoChangoSelector(src, dst): dst (a selector from AllocSelector)
+/// now describes src's memory, with the other type (code for data, data
+/// for code); dst is returned. With src == dst the selector changes type
+/// in place (how programs make a data block they wrote code into
+/// executable).
 fn selector_copy(src: u32, dst: u32) -> u32 {
     use crate::pm::Rs2Win16Selector as sel;
     let code = is_code(src as u16);
-    if src == dst {
-        return if unsafe { sel(7, src, if code { 1 } else { 2 }) } != 0 { dst } else { 0 };
+    let kind = if code { 1 } else { 2 };
+    if src != dst {
+        let (base, limit) = unsafe { (sel(1, src, 0), sel(5, src, 0)) };
+        if base == u32::MAX || unsafe { sel(2, dst, base) } == 0 || unsafe { sel(3, dst, limit) } == 0 {
+            return 0;
+        }
     }
-    let new = unsafe { sel(0, src, if code { 1 } else { 2 }) };
-    if new != 0 && dst != 0 {
-        unsafe { sel(4, dst, 0) };
-    }
-    new
+    if unsafe { sel(7, dst, kind) } != 0 { dst } else { 0 }
 }
 
 /// Is `sel` a code selector (LAR's type bit 3)?

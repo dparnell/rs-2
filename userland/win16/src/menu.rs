@@ -171,8 +171,17 @@ pub fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
     let mut mi = MenuItem { pos, ..Default::default() };
     if flags & MF_SEPARATOR != 0 || (flags & (MF_POPUP | MF_BITMAP | MF_OWNERDRAW) == 0 && text.is_empty() && id == 0) {
         mi.style = MIS_SEPARATOR;
-        // WIN16's own separators have IDs (to be removed by them).
-        mi.id = if id >= 0xf000 { id } else { 0xffff };
+        // Separators get IDs of their own (PM's 0xFFFF is "no item", and
+        // programs remove separators by position); WIN16's own (0xF000
+        // and up) keep theirs.
+        mi.id = if id >= 0xf000 {
+            id
+        } else {
+            let s = m();
+            let i = s.next_popup_id;
+            s.next_popup_id = s.next_popup_id.wrapping_add(1).max(0xf800);
+            i
+        };
     } else {
         mi.style = MIS_TEXT;
         if flags & MF_POPUP != 0 {

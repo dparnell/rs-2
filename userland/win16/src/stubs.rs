@@ -576,11 +576,6 @@ thunk16::entries16_pascal! {
     x_2402 = 2402, 6;
     x_2422 = 2422, 10;
     x_2423 = 2423, 10;
-    x_2512 = 2512, 12;
-    x_2517 = 2517, 12;
-    x_2518 = 2518, 6;
-    x_6302 = 6302, 16;
-    x_6303 = 6303, 24;
 }
 
 /// (WIN16 ordinal, Windows module.ordinal name).
@@ -1155,11 +1150,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (2402, "USER.402 GETPRIORITYCLIPBOARDFORMAT"),
     (2422, "USER.422 DLGDIRSELECTEX"),
     (2423, "USER.423 DLGDIRSELECTCOMBOBOXEX"),
-    (2512, "USER.512 WNETGETCONNECTION"),
-    (2517, "USER.517 WNETADDCONNECTION"),
-    (2518, "USER.518 WNETCANCELCONNECTION"),
-    (6302, "VER.2 GETFILERESOURCESIZE"),
-    (6303, "VER.3 GETFILERESOURCE"),
 ];
 
 /// The OLE functions returning an HRESULT: E_FAIL.

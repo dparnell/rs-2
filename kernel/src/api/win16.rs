@@ -78,12 +78,29 @@ pub fn set_int_handler(c: &mut Ctx) -> u32 {
 /// keeps the type), 1 the base of `sel`, 2 set the base of an alias, 3
 /// set its limit, 4 free an alias, 5 the limit of `sel`, 6 the selector
 /// of segment `value` (1-based) of the module whose handle is `sel`
-/// (0: the number of segments), 7 make `sel` itself data (`value` 1) or
+/// (0: the number of segments), 9 `value` new consecutive selectors (8
+/// apart, data, base 0, limit 0: DPMI's allocation, for huge blocks): the
+/// first, 8 the handle of the module one of whose
+/// segments `sel` is, 7 make `sel` itself data (`value` 1) or
 /// 16-bit code (2), its base and limit kept. Returns the
 /// selector or value, 0 (or 0xFFFFFFFF for 1 and 5) on error; 2-4 return
 /// 1 on success.
 pub fn selector(c: &mut Ctx) -> u32 {
     let (op, sel, value) = (c.arg(0), c.arg(1) as u16, c.arg(2));
+    if op == 9 {
+        let n = value.clamp(1, 256);
+        let mut sp = c.process.space.lock();
+        let Some(first) = sp.find_private(n * 0x1_0000) else { return 0 };
+        for i in 0..n {
+            let Ok(sel) = sp.alias_at(first + i * 0x1_0000, 0, 0, vm::SegKind::Data) else { return 0 };
+            sp.ldt[(sel >> 3) as usize] |= 1 << 41;
+        }
+        return vm::tile_selector(first) as u32;
+    }
+    if op == 8 {
+        let s = sel | 7;
+        return crate::loader::all_modules().iter().find(|m| m.objects.iter().any(|o| o.selector() == s)).map_or(0, |m| m.hmte as u32);
+    }
     if op == 6 {
         let Some(m) = crate::loader::by_handle(sel) else { return 0 };
         return match value {

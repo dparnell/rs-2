@@ -151,8 +151,8 @@ fn exists(p: &[u8]) -> bool {
     unsafe { os2::DosQueryPathInfo(z.as_ptr(), 1, fs.as_mut_ptr(), 24) == 0 && fs[20] & 0x10 == 0 }
 }
 
-/// Where Windows finds a program.
-fn find_program(name: &[u8]) -> Option<Vec<u8>> {
+/// Where Windows finds a program (or another file OpenFile looks for).
+pub fn find_program(name: &[u8]) -> Option<Vec<u8>> {
     if name.iter().any(|&c| c == b'\\' || c == b':') {
         return exists(name).then(|| name.to_vec());
     }
@@ -430,6 +430,43 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         2293 => {
             let (h, code, wp, lp) = (a.l(), a.w(), a.w(), a.l());
             next_hook(h).map_or(0, |p| PascalCall::new().w(code).w(wp).l(lp).call(p))
+        }
+        // The network calls (USER 512-530, WNet*): no Windows network.
+        // WNetGetCaps(index): no capabilities.
+        2513 => {
+            a.w();
+            0
+        }
+        // WNetGetConnection(local, remote, lpcb), WNetGetUser(buf, lpcb),
+        // WNetAddConnection(net, password, local), WNetCancelConnection(
+        // name, force), WNetGetError(lpError), WNetGetErrorText(error,
+        // buf, lpcb), WNetGetDirectoryType(dir, lpType): WN_NOT_SUPPORTED
+        // (a directory is a local one).
+        2512 | 2516 | 2517 | 2518 | 2519 | 2520 | 2530 => {
+            match ord {
+                2512 | 2520 => {
+                    let _ = (a.l(), a.l(), a.l());
+                }
+                2516 => {
+                    let _ = (a.l(), a.l());
+                }
+                2517 => {
+                    let _ = (a.l(), a.l(), a.l());
+                }
+                2518 => {
+                    let _ = (a.l(), a.w());
+                }
+                2519 => {
+                    a.l();
+                }
+                _ => {
+                    let (_d, t) = (a.l(), a.p());
+                    if !t.is_null() {
+                        unsafe { (t as *mut i16).write_unaligned(0) };
+                    }
+                }
+            }
+            1
         }
         // SetMessageQueue(size)
         2266 => {

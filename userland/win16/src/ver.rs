@@ -12,7 +12,7 @@ const RT_VERSION: u16 = 16;
 
 /// The version resource of a file.
 fn version_of(path: &[u8]) -> Option<Vec<u8>> {
-    let file = crate::module::read_file(path, usize::MAX)?;
+    let file = crate::module::read_file(&crate::compat::find_program(path)?, usize::MAX)?;
     let (off, len) = res::list_type(&file, RT_VERSION).first().copied().or_else(|| res::find_in_file(&file, RT_VERSION, &Name::Id(1)))?;
     Some(file[off..off + len].to_vec())
 }
@@ -63,6 +63,39 @@ fn query(b: &[u8], path: &[u8]) -> Option<(usize, usize)> {
 
 pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
     Some(match ord {
+        // GetFileResourceSize(file, type, id, lpdwOffset),
+        // GetFileResource(file, type, id, offset, len, data): a resource of
+        // an NE file (VS_FILE_INFO is RT_VERSION).
+        6302 | 6303 => {
+            let (f, t, id) = (a.l(), a.l(), a.l());
+            let Some(path) = crate::far_str(f) else { return Some(0) };
+            if crate::tracing() {
+                crate::trace(format_args!("W16 version resource of {}", path.iter().map(|&c| c as char).collect::<alloc::string::String>()));
+            }
+            let Some(file) = crate::compat::find_program(path).and_then(|p| crate::module::read_file(&p, usize::MAX)) else { return Some(0) };
+            let ty = Name::of(t).unwrap_or(Name::Id(RT_VERSION));
+            let name = Name::of(id).unwrap_or(Name::Id(1));
+            let found = match (&ty, &name) {
+                (Name::Id(t), _) => res::find_in_file(&file, *t, &name).or_else(|| res::list_type(&file, *t).first().copied()),
+                _ => None,
+            };
+            let Some((off, len)) = found else { return Some(0) };
+            if ord == 6302 {
+                let p = a.p();
+                if !p.is_null() {
+                    unsafe { (p as *mut u32).write_unaligned(off as u32) };
+                }
+                len as u32
+            } else {
+                let (_o, n, d) = (a.l(), a.l(), a.p());
+                if d.is_null() {
+                    return Some(0);
+                }
+                let k = len.min(n as usize);
+                unsafe { core::ptr::copy_nonoverlapping(file[off..].as_ptr(), d, k) };
+                1
+            }
+        }
         // GetFileVersionInfoSize(file, lpdwHandle)
         6306 => {
             let (f, h) = (a.l(), a.p());

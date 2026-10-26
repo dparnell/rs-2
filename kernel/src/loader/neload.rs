@@ -250,6 +250,12 @@ pub fn load(
             }
         } else {
             prot |= pag::EXECUTE;
+            // Windows programs write to code through data aliases
+            // (AllocCStoDSAlias): its pages are writable, its descriptor
+            // stays execute/read.
+            if windows {
+                prot |= pag::WRITE;
+            }
         }
         let seg = if data_seg { SegKind::Data } else { SegKind::Code16 };
         let base = bases[i];
@@ -259,9 +265,10 @@ pub fn load(
         let mut obj =
             Object { base, size, prot, seg, is16: true, code: !data_seg, limit, shared: None, pristine: None };
         if dll {
-            // A Windows DLL's data is the process's own: each Windows task
-            // is a process, and the DLL is initialised in each.
-            let shared = !data_seg || (!windows && sg.flags & sflags::SHARED != 0) || prot & pag::WRITE == 0;
+            // A Windows DLL is the process's own, code and data: each
+            // Windows task is a process, the DLL is initialised in each,
+            // and its code may be written.
+            let shared = !windows && (!data_seg || sg.flags & sflags::SHARED != 0 || prot & pag::WRITE == 0);
             if shared {
                 let sm = SharedMem::new(base, size, prot, None);
                 for p in 0..(size / PAGE) as usize {
