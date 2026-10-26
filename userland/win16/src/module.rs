@@ -49,6 +49,12 @@ pub const SYSTEM: &[(&[u8], u16, u32)] = &[
     (b"VER", 0x0f57, 6300),
     (b"LZEXPAND", 0x0f5f, 6400),
     (b"SHELL", 0x0f67, 6500),
+    (b"COMPOBJ", 0x0f77, 7000),
+    (b"OLE2", 0x0f7f, 7100),
+    (b"STORAGE", 0x0f87, 7300),
+    (b"OLE2DISP", 0x0f8f, 7400),
+    (b"OLE2NLS", 0x0f97, 7600),
+    (b"TYPELIB", 0x0f9f, 7700),
     (b"MMSYSTEM", 0x0f6f, 10000),
 ];
 
@@ -170,6 +176,9 @@ pub fn load_library(name: u32) -> u16 {
         if let Some(dir) = find(0).and_then(|m| path_of(m.hmod)) {
             let d = &dir[..dir.iter().rposition(|&c| c == b'\\').map_or(0, |i| i + 1)];
             tries.push([d, &with_ext].concat());
+        }
+        for d in [crate::profile::SYSTEM_DIR, crate::profile::WINDOWS_DIR] {
+            tries.push([d, b"\\", &with_ext].concat());
         }
         tries.push(base.clone());
     }

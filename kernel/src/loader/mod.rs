@@ -430,6 +430,12 @@ pub const WIN16_MODULES: &[(&str, u32)] = &[
     ("VER", 6300),
     ("LZEXPAND", 6400),
     ("SHELL", 6500),
+    ("COMPOBJ", 7000),
+    ("OLE2", 7100),
+    ("STORAGE", 7300),
+    ("OLE2DISP", 7400),
+    ("OLE2NLS", 7600),
+    ("TYPELIB", 7700),
     ("MMSYSTEM", 10000),
 ];
 

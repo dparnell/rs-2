@@ -42,14 +42,20 @@ pub fn load(
     let import_names: Vec<String> =
         m.import_modules().map_err(|_| err::BAD_EXE_FORMAT)?.iter().map(|n| s(n)).collect();
     let (load_names, ord_bases): (Vec<String>, Vec<u32>) = if windows {
-        // Windows finds a program's DLLs in the program's directory first.
+        // Windows finds a program's DLLs in the program's directory, then
+        // the Windows directories (C:\WINDOWS, docs/WIN16.md), then the
+        // PATH (here LIBPATH).
         let dir = &path[..path.rfind('\\').map_or(0, |i| i + 1)];
         import_names
             .iter()
             .map(|n| match super::win16_import(n) {
-                (m, 0) if !dir.is_empty() && super::find_loaded(&m).is_none() => {
-                    let full = alloc::format!("{dir}{m}.DLL");
-                    (if crate::fs::read_file(&full).is_some() { full } else { m }, 0)
+                (m, 0) if super::find_loaded(&m).is_none() => {
+                    let found = [dir, "C:\\WINDOWS\\SYSTEM\\", "C:\\WINDOWS\\"]
+                        .iter()
+                        .filter(|d| !d.is_empty())
+                        .map(|d| alloc::format!("{d}{m}.DLL"))
+                        .find(|f| crate::fs::read_file(f).is_some());
+                    (found.unwrap_or(m), 0)
                 }
                 r => r,
             })
