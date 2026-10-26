@@ -433,7 +433,7 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
 }
 
 /// InitTask (INT E0h from w16_inittask): the program's start registers
-/// in, Windows' InitTask results out (AX 1, ES:BX the command tail, CX
+/// in, Windows' InitTask results out (AX 1, ES:BX the command line, CX
 /// the stack limit, DX nCmdShow, SI the previous instance, DI the
 /// instance).
 pub fn init_task(r: &mut crate::dos::Regs) {
@@ -459,7 +459,9 @@ pub fn init_task(r: &mut crate::dos::Regs) {
     }
     t.psp = make_psp();
     r[AX] = 1;
-    r[BX] = 0x81;
+    // The command line: a NUL-terminated copy of the PSP's tail (startup
+    // code takes it as a C string).
+    r[BX] = 0x100;
     r[ES] = t.psp;
     r[CX] = top;
     r[DX] = t.cmdshow;
@@ -507,6 +509,8 @@ fn make_psp() -> u16 {
         }
         *p.add(o) = 0x0d;
         *p.add(o + 1) = 0;
+        core::ptr::copy_nonoverlapping(args.as_ptr(), p.add(0x100), n);
+        *p.add(0x100 + n) = 0;
     }
     (far(p) >> 16) as u16
 }

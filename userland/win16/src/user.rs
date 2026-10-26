@@ -1445,7 +1445,7 @@ pub fn create(c: &Create) -> u16 {
         let pmy = ph - y - cy;
         // A child goes below its siblings (the first one created is the
         // top of the Z order, as GetWindow(GW_CHILD) has it).
-        let behind = HWND_TOP;
+        let behind = if child { HWND_BOTTOM } else { HWND_TOP };
         let clip = crate::pm::WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
         if has_nonclient(nc) {
             let f = unsafe { WinCreateWindow(pm_parent, b"Win16Frame\0".as_ptr(), text.as_ptr(), clip, x, pmy, cx, cy, pm_parent, behind, c.menu as u32, core::ptr::null(), core::ptr::null()) };
@@ -2140,6 +2140,33 @@ pub fn call_beep() {
     unsafe { WinAlarm(HWND_DESKTOP, 2) };
 }
 
+/// The Windows virtual key of a character key's set-1 scan code
+/// (letters and digits are their upper-case characters, punctuation the
+/// VK_OEM_ keys), whatever the shift state.
+fn scan_vkey(scan: u8) -> Option<u16> {
+    let c = scan_letter(scan);
+    if c != 0 {
+        return Some(c.to_ascii_uppercase() as u16);
+    }
+    Some(match scan {
+        0x27 => 0xba, // ; :
+        0x0d => 0xbb, // = +
+        0x33 => 0xbc, // , <
+        0x0c => 0xbd, // - _
+        0x34 => 0xbe, // . >
+        0x35 => 0xbf, // / ?
+        0x29 => 0xc0, // ` ~
+        0x1a => 0xdb, // [ {
+        0x2b => 0xdc, // \ |
+        0x1b => 0xdd, // ] }
+        0x28 => 0xde, // ' "
+        0x37 => 0x6a, // keypad *
+        0x4a => 0x6d, // keypad -
+        0x4e => 0x6b, // keypad +
+        _ => return None,
+    })
+}
+
 /// The letter or digit of a set-1 scan code.
 fn scan_letter(scan: u8) -> u8 {
     const ROWS: [(u8, &[u8]); 4] = [(0x02, b"1234567890"), (0x10, b"qwertyuiop"), (0x1e, b"asdfghjkl"), (0x2c, b"zxcvbnm")];
@@ -2209,7 +2236,7 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
                     fs |= 0x0001;
                 }
             }
-            let vk = if fs & 0x0002 != 0 { vkey(pvk, chr) } else { vkey(0, chr) };
+            let vk = if fs & 0x0002 != 0 { vkey(pvk, chr) } else { scan_vkey(scan as u8).unwrap_or_else(|| vkey(0, chr)) };
             if vk == 0 && fs & 0x0001 == 0 {
                 return None;
             }
