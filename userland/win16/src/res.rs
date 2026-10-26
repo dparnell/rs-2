@@ -106,6 +106,51 @@ impl Image {
 
     /// The resource's (offset, length) in the file.
     fn find(&self, ty: &Name, name: &Name) -> Option<(usize, usize)> {
+        self.find_direct(ty, name).or_else(|| {
+            // Windows 3.0 programs name resources in an RT_NAMETABLE (15):
+            // entries of a length, the type and the resource's IDs, the
+            // type's name and the resource's name.
+            let (Name::Str(n), Name::Id(t)) = (name, ty) else { return None };
+            let (off, len) = self.find_direct(&Name::Id(15), &Name::Id(1)).or_else(|| self.first_of(15))?;
+            let tab = &self.file[off..off + len];
+            let mut p = 0;
+            while p + 6 < tab.len() {
+                let n_len = w16(tab, p) as usize;
+                if n_len < 7 {
+                    break;
+                }
+                let (ety, eid) = (w16(tab, p + 2), w16(tab, p + 4));
+                let mut q = p + 6;
+                let _ty_name = sz(tab, &mut q);
+                let id_name = sz(tab, &mut q);
+                if ety & 0x7fff == *t && id_name.eq_ignore_ascii_case(n) {
+                    return self.find_direct(ty, &Name::Id(eid & 0x7fff));
+                }
+                p += n_len;
+            }
+            None
+        })
+    }
+
+    /// The first resource of a type.
+    fn first_of(&self, ty: u16) -> Option<(usize, usize)> {
+        let mut p = self.table + 2;
+        loop {
+            let tid = self.w(p);
+            if tid == 0 || p >= self.file.len() {
+                return None;
+            }
+            let count = self.w(p + 2) as usize;
+            if tid == 0x8000 | ty && count > 0 {
+                let off = (self.w(p + 8) as usize) << self.shift;
+                let len = (self.w(p + 10) as usize) << self.shift;
+                return (off + len <= self.file.len()).then_some((off, len));
+            }
+            p += 8 + 12 * count;
+        }
+    }
+
+    fn find_direct(&self, ty: &Name, name: &Name) -> Option<(usize, usize)> {
         let mut p = self.table + 2;
         loop {
             let tid = self.w(p);
