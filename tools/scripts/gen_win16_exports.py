@@ -17,10 +17,11 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 WATCOM = os.environ.get('WATCOM', os.path.expanduser('~/opt/watcom'))
 # Keep in step with WIN16_MODULES (kernel/src/loader/mod.rs).
 BASES = {'KERNEL': 1000, 'USER': 2000, 'GDI': 3000, 'KEYBOARD': 4000, 'WIN87EM': 5000,
-         'SOUND': 5200, 'SYSTEM': 5400, 'TOOLHELP': 6000, 'VER': 6200, 'LZEXPAND': 6400,
-         'SHELL': 6800, 'MMSYSTEM': 10000}
+         'SOUND': 5200, 'SYSTEM': 5400, 'COMMDLG': 6000, 'DDEML': 6100, 'TOOLHELP': 6200,
+         'VER': 6300, 'LZEXPAND': 6400, 'SHELL': 6500, 'MMSYSTEM': 10000}
 # Register-based entries: 16-bit code of their own in src/lib.rs.
-EXTRA = ['INITTASK=w16_inittask @1091', 'DOS3CALL=w16_dos3call @1102', '_WSPRINTF=u_wsprintf @2420']
+EXTRA = ['INITTASK=w16_inittask @1091', 'DOS3CALL=w16_dos3call @1102', '_WSPRINTF=u_wsprintf @2420',
+         '__FPMATH=w16_fpmath @5001']
 # Not to be stubbed: register-based or with variable arguments.
 NO_STUB = {'INITTASK', 'DOS3CALL', '_WSPRINTF', 'WSPRINTF'}
 

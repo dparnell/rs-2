@@ -20,6 +20,7 @@
 extern crate alloc;
 extern crate os2;
 
+mod bitmap;
 mod caret;
 mod ctl;
 mod dialog;
@@ -31,7 +32,9 @@ mod listbox;
 mod mem16;
 mod menu;
 mod misc;
+mod module;
 mod pm;
+mod region;
 mod res;
 mod scroll;
 mod stubs;
@@ -154,6 +157,10 @@ core::arch::global_asm!(
     "w16_dos3call:",
     "int 0x21",
     ".byte 0xcb",
+    ".globl w16_fpmath",
+    "w16_fpmath:",
+    "int 0xe1",
+    ".byte 0xcb",
     ".code32",
     ".popsection",
 );
@@ -224,6 +231,7 @@ entries! {
     k_loadresource = 1061, 4;
     k_lockresource = 1062, 2;
     k_freeresource = 1063, 2;
+    k_accessresource = 1064, 4;
     k_sizeofresource = 1065, 4;
     k_openfile = 1074, 10;
     k_lclose = 1081, 2;
@@ -247,8 +255,18 @@ entries! {
     k_getwinflags = 1132, 0;
     k_getwindowsdirectory = 1134, 6;
     k_getsystemdirectory = 1135, 6;
+    k_getdrivetype = 1136, 2;
     k_fatalappexit = 1137, 6;
     k_winexec = 1166, 6;
+    k_alloccstodsalias = 1170, 2;
+    k_allocdstocsalias = 1171, 2;
+    k_allocselector = 1175, 2;
+    k_freeselector = 1176, 2;
+    k_prestochangoselector = 1177, 4;
+    k_getselectorbase = 1186, 2;
+    k_setselectorbase = 1187, 6;
+    k_getselectorlimit = 1188, 2;
+    k_setselectorlimit = 1189, 6;
     k_sethandlecount = 1199, 2;
     k_isdbcsleadbyte = 1207, 2;
     // USER
@@ -402,6 +420,7 @@ entries! {
     u_winhelp = 2171, 12;
     u_loadcursor = 2173, 6;
     u_loadicon = 2174, 6;
+    u_loadbitmap = 2175, 6;
     u_loadstring = 2176, 10;
     u_loadaccelerators = 2177, 6;
     u_translateaccelerator = 2178, 8;
@@ -442,6 +461,8 @@ entries! {
     u_iszoomed = 2272, 2;
     u_getdlgctrlid = 2277, 2;
     u_getdesktophwnd = 2278, 0;
+    u_selectpalette = 2282, 6;
+    u_realizepalette = 2283, 2;
     u_getdesktopwindow = 2286, 0;
     u_getlastactivepopup = 2287, 2;
     u_redrawwindow = 2290, 10;
@@ -481,7 +502,16 @@ entries! {
     g_setbkmode = 3002, 4;
     g_setmapmode = 3003, 4;
     g_setrop2 = 3004, 4;
+    g_setstretchbltmode = 3007, 4;
     g_settextcolor = 3009, 6;
+    g_setwindoworg = 3011, 6;
+    g_setwindowext = 3012, 6;
+    g_setviewportorg = 3013, 6;
+    g_setviewportext = 3014, 6;
+    g_offsetwindoworg = 3015, 6;
+    g_scalewindowext = 3016, 10;
+    g_offsetviewportorg = 3017, 6;
+    g_scaleviewportext = 3018, 10;
     g_lineto = 3019, 6;
     g_moveto = 3020, 6;
     g_excludecliprect = 3021, 10;
@@ -493,37 +523,112 @@ entries! {
     g_savedc = 3030, 2;
     g_setpixel = 3031, 10;
     g_textout = 3033, 12;
+    g_bitblt = 3034, 20;
+    g_stretchblt = 3035, 24;
     g_polygon = 3036, 8;
     g_polyline = 3037, 8;
     g_restoredc = 3039, 4;
+    g_fillrgn = 3040, 6;
+    g_framergn = 3041, 10;
+    g_invertrgn = 3042, 4;
+    g_paintrgn = 3043, 4;
+    g_selectcliprgn = 3044, 4;
     g_selectobject = 3045, 4;
+    g_combinergn = 3047, 8;
+    g_createbitmap = 3048, 12;
+    g_createbitmapindirect = 3049, 4;
     g_createbrushindirect = 3050, 4;
+    g_createcompatiblebitmap = 3051, 6;
+    g_createcompatibledc = 3052, 2;
+    g_createdc = 3053, 16;
+    g_createellipticrgn = 3054, 8;
+    g_createellipticrgnindirect = 3055, 4;
     g_createfont = 3056, 30;
     g_createfontindirect = 3057, 4;
     g_createhatchbrush = 3058, 6;
+    g_createpatternbrush = 3060, 2;
     g_createpen = 3061, 8;
     g_createpenindirect = 3062, 4;
+    g_createpolygonrgn = 3063, 8;
+    g_createrectrgn = 3064, 8;
+    g_createrectrgnindirect = 3065, 4;
     g_createsolidbrush = 3066, 4;
+    g_dptolp = 3067, 8;
+    g_deletedc = 3068, 2;
     g_deleteobject = 3069, 2;
+    g_equalrgn = 3072, 4;
+    g_getbitmapbits = 3074, 10;
     g_getbkcolor = 3075, 2;
     g_getbkmode = 3076, 2;
     g_getclipbox = 3077, 6;
     g_getcurrentposition = 3078, 2;
+    g_getdcorg = 3079, 2;
     g_getdevicecaps = 3080, 4;
     g_getmapmode = 3081, 2;
     g_getobject = 3082, 8;
     g_getpixel = 3083, 6;
     g_getrop2 = 3085, 2;
     g_getstockobject = 3087, 2;
+    g_getstretchbltmode = 3088, 2;
     g_gettextcolor = 3090, 2;
     g_gettextextent = 3091, 8;
     g_gettextface = 3092, 8;
     g_gettextmetrics = 3093, 6;
+    g_getviewportext = 3094, 2;
+    g_getviewportorg = 3095, 2;
+    g_getwindowext = 3096, 2;
+    g_getwindoworg = 3097, 2;
+    g_lptodp = 3099, 8;
+    g_offsetrgn = 3101, 6;
+    g_setbitmapbits = 3106, 10;
     g_muldiv = 3128, 6;
+    g_getrgnbox = 3134, 6;
+    g_setbrushorg = 3148, 6;
+    g_createic = 3153, 16;
+    g_getnearestcolor = 3154, 6;
+    g_creatediscardablebitmap = 3156, 6;
+    g_ptinregion = 3161, 6;
+    g_setrectrgn = 3172, 10;
+    g_rectinregion = 3181, 6;
     g_gettextalign = 3345, 2;
     g_settextalign = 3346, 4;
     g_getcharwidth = 3350, 10;
     g_exttextout = 3351, 22;
+    g_createpalette = 3360, 4;
+    g_getpaletteentries = 3363, 10;
+    g_setpaletteentries = 3364, 10;
+    g_updatecolors = 3366, 2;
+    g_animatepalette = 3367, 10;
+    g_resizepalette = 3368, 4;
+    g_getnearestpaletteindex = 3370, 6;
+    g_setsystempaletteuse = 3373, 4;
+    g_getsystempaletteuse = 3374, 2;
+    g_getsystempaletteentries = 3375, 10;
+    g_stretchdibits = 3439, 32;
+    g_setdibits = 3440, 18;
+    g_getdibits = 3441, 18;
+    g_createdibitmap = 3442, 20;
+    g_setdibitstodevice = 3443, 28;
+    g_createroundrectrgn = 3444, 12;
+    g_createdibpatternbrush = 3445, 4;
+    g_createpolypolygonrgn = 3451, 12;
+    g_getbrushorgex = 3469, 6;
+    g_getcurrentpositionex = 3470, 6;
+    g_gettextextentpoint = 3471, 12;
+    g_getviewportextex = 3472, 6;
+    g_getviewportorgex = 3473, 6;
+    g_getwindowextex = 3474, 6;
+    g_getwindoworgex = 3475, 6;
+    g_offsetviewportorgex = 3476, 10;
+    g_offsetwindoworgex = 3477, 10;
+    g_setviewportextex = 3479, 10;
+    g_setviewportorgex = 3480, 10;
+    g_setwindowextex = 3481, 10;
+    g_setwindoworgex = 3482, 10;
+    g_movetoex = 3483, 10;
+    g_scaleviewportextex = 3484, 14;
+    g_scalewindowextex = 3485, 14;
+    g_getaspectratiofilterex = 3486, 6;
     // KEYBOARD
     kb_ansitooem = 4005, 8;
     kb_oemtoansi = 4006, 8;
@@ -536,6 +641,9 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
     let mut a = Pascal::new(args, size);
     if tracing() && idx != 1 {
         trace(format_args!("W16 {}", idx));
+    }
+    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)) {
+        return r;
     }
     match idx {
         1 => {

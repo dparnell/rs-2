@@ -145,6 +145,12 @@ fn setup_call(p: &Process, f: &mut TrapFrame, call: &InitCall, top: u32) {
         f.rsi = 0;
         f.rcx = 0;
         f.rax = 0;
+        // A Windows DLL's LibEntry: DI the instance (DGROUP), CX the local
+        // heap's size, ES:SI the command line (none).
+        if let Some((heap, _)) = start.windows {
+            f.rdi = f.ds;
+            f.rcx = heap as u64;
+        }
     } else {
         // _DLL_InitTerm(hmod, flag)
         let esp = top.wrapping_sub(0x40) & !0xf;

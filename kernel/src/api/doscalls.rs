@@ -278,6 +278,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 405) => super::vdm::mouse,
         (8, 406) => super::vdm::surface,
         (8, 420) => super::win16::set_int_handler,
+        (8, 421) => super::win16::selector,
         (8, 407) => super::vdm::request,
         (8, 100) => super::sysctl::rs2_query_counters,
         (8, 200) => super::sockets::query_iface,

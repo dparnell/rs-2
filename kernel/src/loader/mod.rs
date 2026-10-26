@@ -424,10 +424,12 @@ pub const WIN16_MODULES: &[(&str, u32)] = &[
     ("WIN87EM", 5000),
     ("SOUND", 5200),
     ("SYSTEM", 5400),
-    ("TOOLHELP", 6000),
-    ("VER", 6200),
+    ("COMMDLG", 6000),
+    ("DDEML", 6100),
+    ("TOOLHELP", 6200),
+    ("VER", 6300),
     ("LZEXPAND", 6400),
-    ("SHELL", 6800),
+    ("SHELL", 6500),
     ("MMSYSTEM", 10000),
 ];
 
