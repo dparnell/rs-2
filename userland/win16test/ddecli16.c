@@ -3,8 +3,8 @@
  * conversation with RS2DDE|Clock, requests, pokes, executes, starts and
  * stops an advise loop, is refused an unknown item and terminates,
  * checking each answer. Writes PASS/FAIL lines to standard output and
- * "ddecli16 done: N failure(s)". Start DDESRV16 first (START /PM
- * RS2\DDESRV16.EXE), then this. A test of rs2's DDE between Windows
+ * "ddecli16 done: N failure(s)". It starts DDESRV16 (WinExec) when no
+ * server answers. A test of rs2's DDE between Windows
  * tasks (docs/WIN16.md). */
 
 #include <windows.h>
@@ -65,6 +65,8 @@ static void delay(DWORD ms)
 
 static void post(UINT msg, WORD lo, WORD hi)
 {
+    /* Slowly enough to watch. */
+    delay(300);
     if (!PostMessage(server, msg, (WPARAM)hMain, MAKELONG(lo, hi)))
         check(0, "PostMessage to the server");
 }
@@ -120,6 +122,9 @@ static void run(void)
     HGLOBAL h;
 
     out("ddecli16: DDE with DDESRV16\r\n");
+    SendMessage((HWND)0xffff, WM_DDE_INITIATE, (WPARAM)hMain, MAKELONG(app, topic));
+    if (!server)
+        check(WinExec("DDESRV16.EXE", SW_SHOWNORMAL) > 32, "no server yet: WinExec DDESRV16");
     for (tries = 0; tries < 40 && !server; tries++) {
         SendMessage((HWND)0xffff, WM_DDE_INITIATE, (WPARAM)hMain, MAKELONG(app, topic));
         if (!server)
@@ -161,10 +166,12 @@ static void run(void)
     execute("[inc]");
     check(!wait_for(&ndata, n, 1000), "no WM_DDE_DATA after the advise loop stopped");
 
+    /* The server ends the conversation as it quits; the answer is a
+     * WM_DDE_TERMINATE of our own (its window may be gone already). */
     check(execute("[quit]"), "WM_DDE_EXECUTE [quit]");
-    post(WM_DDE_TERMINATE, 0, 0);
     wait_for(&terminated, FALSE, 5000);
-    check(terminated, "WM_DDE_TERMINATE answered with WM_DDE_TERMINATE");
+    check(terminated, "the server's WM_DDE_TERMINATE as it quits");
+    PostMessage(server, WM_DDE_TERMINATE, (WPARAM)hMain, 0);
     GlobalDeleteAtom(app);
     GlobalDeleteAtom(topic);
 }
@@ -250,8 +257,8 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     run();
     sprintf(line, "ddecli16 done: %d failure(s)\r\n", failures);
     out(line);
-    /* Stay a moment for the screenshot. */
-    delay(3000);
+    /* Stay a moment ("show": a while, for screenshots). */
+    delay(_fstrstr(cmd, "show") ? 20000 : 2000);
     DestroyWindow(hMain);
     while (GetMessage(&msg, NULL, 0, 0))
         DispatchMessage(&msg);

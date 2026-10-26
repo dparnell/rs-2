@@ -274,11 +274,11 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let (buf, max) = (a.p(), a.i());
             crate::user::copy_out(if ord == 134 { b"C:\\OS2\\MDOS\\WINOS2" } else { b"C:\\OS2\\MDOS\\WINOS2\\SYSTEM" }, buf, max) as u32
         }
-        // WinExec(cmdline, show): not yet (file not found).
+        // WinExec(cmdline, show): the program started (asynchronously), a
+        // value above 32; else 2 (file not found).
         166 => {
-            a.l();
-            a.w();
-            2
+            let (cmd, _show) = (a.l(), a.w());
+            win_exec(far_str(cmd).unwrap_or(b""))
         }
         // _lclose(hf)
         81 => {
@@ -401,6 +401,47 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
 }
 
 const HFILE_ERROR: u32 = 0xffff;
+
+/// WinExec: the program (".EXE" added; as given, else in the program's
+/// own directory) started with DosExecPgm, EXEC_ASYNC.
+fn win_exec(cmd: &[u8]) -> u32 {
+    let cmd = cmd.trim_ascii();
+    let n = cmd.iter().position(|&c| c == b' ').unwrap_or(cmd.len());
+    let (prog, args) = (&cmd[..n], cmd[n..].trim_ascii());
+    if prog.is_empty() {
+        return 2;
+    }
+    let mut prog = prog.to_vec();
+    if !prog.rsplit(|&c| c == b'\\').next().unwrap_or(&prog).contains(&b'.') {
+        prog.extend_from_slice(b".EXE");
+    }
+    let mut paths = alloc::vec![prog.clone()];
+    if !prog.contains(&b'\\') && !prog.contains(&b':') {
+        let mut own = [0u8; 260];
+        let k = module_file_name(TASK.get().hinst, own.as_mut_ptr(), 260) as usize;
+        if let Some(i) = own[..k].iter().rposition(|&c| c == b'\\') {
+            let mut p = own[..=i].to_vec();
+            p.extend_from_slice(&prog);
+            paths.push(p);
+        }
+    }
+    for p in paths {
+        let mut z = p.clone();
+        z.push(0);
+        // "program\0arguments\0\0"
+        let mut argv = p.clone();
+        argv.push(0);
+        argv.extend_from_slice(args);
+        argv.extend_from_slice(&[0, 0]);
+        let mut res = os2::ResultCodes { code_terminate: 0, code_result: 0 };
+        let mut fail = [0u8; 64];
+        // EXEC_ASYNC
+        if unsafe { os2::DosExecPgm(fail.as_mut_ptr(), 64, 1, argv.as_ptr(), core::ptr::null(), &mut res, z.as_ptr()) } == 0 {
+            return 33;
+        }
+    }
+    2
+}
 
 /// A profile string (or, for `list`, NUL-separated keys and a final NUL)
 /// into a buffer of `max` bytes: the bytes copied, without the last NUL.

@@ -190,7 +190,7 @@ pub fn incoming(msg: u32, mp1: u32, mp2: u32) -> (u16, u16, u32) {
 }
 
 pub fn is_w16x(msg: u32) -> bool {
-    msg & 0xfff0_0000 == 0 && msg & W16X != 0 && msg & !(W16X | FLAGS | 0xffff) == 0
+    msg & W16X != 0 && msg & !(W16X | FLAGS | 0xffff) == 0
 }
 
 /// SendMessage to a proxy: the receiver's result.
