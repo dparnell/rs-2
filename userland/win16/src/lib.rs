@@ -285,6 +285,7 @@ entries! {
     k_getdosenvironment = 1131, 0;
     k_getwinflags = 1132, 0;
     k_getexeptr = 1133, 2;
+    k_getheapspaces = 1138, 2;
     k_getwindowsdirectory = 1134, 6;
     k_getsystemdirectory = 1135, 6;
     k_getdrivetype = 1136, 2;

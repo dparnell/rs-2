@@ -19,17 +19,19 @@ pub struct Hook {
 pub static HOOKS: Global<Vec<Hook>> = Global::new(Vec::new());
 static NEXT_HOOK: Global<u32> = Global::new(0x4b48_0001);
 
-/// Call the hooks of one type (newest first, as Windows chains them)
-/// until one returns non-zero.
+/// Call the newest hook of a type (it passes the call on with
+/// CallNextHookEx or DefHookProc).
 pub fn call_hooks(kind: i16, code: i16, wp: u16, lp: u32) -> u32 {
-    let procs: Vec<u32> = HOOKS.get().iter().rev().filter(|h| h.kind == kind).map(|h| h.proc_).collect();
-    for p in procs {
-        let r = PascalCall::new().w(code as u16).w(wp).l(lp).call(p);
-        if r != 0 {
-            return r;
-        }
-    }
-    0
+    let Some(p) = HOOKS.get().iter().rev().find(|h| h.kind == kind).map(|h| h.proc_) else { return 0 };
+    PascalCall::new().w(code as u16).w(wp).l(lp).call(p)
+}
+
+/// The hook after `h` (older) in its chain.
+fn next_hook(h: u32) -> Option<u32> {
+    let hs = HOOKS.get();
+    let i = hs.iter().position(|x| x.h == h)?;
+    let kind = hs[i].kind;
+    hs[..i].iter().rev().find(|x| x.kind == kind).map(|x| x.proc_)
 }
 
 pub fn has_hooks(kind: i16) -> bool {
@@ -249,6 +251,12 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             a.w();
             16 << 20
         }
+        // GetHeapSpaces(hmodule): the free bytes and the size of a module's
+        // local heap (USER's and GDI's, for resource meters: 90% free).
+        1138 => {
+            a.w();
+            0xffff_0000 | 0xe666
+        }
         // GetNumTasks, IsTask(htask), GetExePtr(h)
         1152 => 1,
         1320 => (a.w() == crate::kernel::TASK.get().hinst) as u32,
@@ -412,15 +420,16 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             HOOKS.get().retain(|x| x.h != h);
             1
         }
-        // DefHookProc(code, wp, lp, lpfnNext), CallNextHookEx(hhook, code,
-        // wp, lp): the chain is called by WIN16 itself.
+        // DefHookProc(code, wp, lp, lplpfnNext): the next procedure is
+        // the one SetWindowsHook returned (none here).
         2235 => {
             let _ = (a.w(), a.w(), a.l(), a.l());
             0
         }
+        // CallNextHookEx(hhook, code, wp, lp)
         2293 => {
-            let _ = (a.l(), a.w(), a.w(), a.l());
-            0
+            let (h, code, wp, lp) = (a.l(), a.w(), a.w(), a.l());
+            next_hook(h).map_or(0, |p| PascalCall::new().w(code).w(wp).l(lp).call(p))
         }
         // SetMessageQueue(size)
         2266 => {

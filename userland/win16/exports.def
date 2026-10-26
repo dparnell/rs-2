@@ -73,6 +73,7 @@ WRITEPRIVATEPROFILESTRING=k_writeprivateprofilestring @1129
 GETDOSENVIRONMENT=k_getdosenvironment @1131
 GETWINFLAGS=k_getwinflags @1132
 GETEXEPTR=k_getexeptr @1133
+GETHEAPSPACES=k_getheapspaces @1138
 GETWINDOWSDIRECTORY=k_getwindowsdirectory @1134
 GETSYSTEMDIRECTORY=k_getsystemdirectory @1135
 GETDRIVETYPE=k_getdrivetype @1136

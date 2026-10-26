@@ -452,8 +452,26 @@ pub fn call_proc(proc_: u32, hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
     PascalCall::new().w(hwnd).w(msg).w(wp).l(lp).call(proc_)
 }
 
-/// Send a message to a window: its procedure, now.
+/// Send a message to a window: its procedure, now. WH_CALLWNDPROC hooks
+/// see it first (CWPSTRUCT: lParam, wParam, message, hwnd), and may
+/// change the window's procedure (subclassing a window being created).
 pub fn send(hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
+    if wnd(hwnd).is_none() {
+        return 0;
+    }
+    if crate::compat::has_hooks(4) {
+        let saved = thunk16::sp16();
+        let far = thunk16::alloc16(10);
+        let p = flat(far);
+        unsafe {
+            (p as *mut u32).write_unaligned(lp);
+            (p.add(4) as *mut u16).write_unaligned(wp);
+            (p.add(6) as *mut u16).write_unaligned(msg);
+            (p.add(8) as *mut u16).write_unaligned(hwnd);
+        }
+        crate::compat::call_hooks(4, 0, 1, far);
+        thunk16::set_sp16(saved);
+    }
     let Some(p) = wnd(hwnd).map(|w| w.proc_) else { return 0 };
     call_proc(p, hwnd, msg, wp, lp)
 }
@@ -2411,10 +2429,18 @@ pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) ->
         if msg == W_MOUSEMOVE || (0x201..=0x209).contains(&msg) {
             send(hwnd, W_SETCURSOR, hwnd, (msg as u32) << 16 | 1);
         }
+        // WH_KEYBOARD hooks may take a key (virtual key, key data).
+        if (0x100..=0x105).contains(&msg) && crate::compat::has_hooks(2) && crate::compat::call_hooks(2, 0, wp, lp) != 0 {
+            continue;
+        }
         if crate::tracing() && (0x100..=0x109).contains(&msg) {
             trace(format_args!("W16 key {hwnd:#x} {msg:#x} {wp:#x} {lp:#x} (PM {:#x} {:#x})", q.mp1, q.mp2));
         }
         write_msg(p, hwnd, msg, wp, lp, q.time, (q.x, q.y));
+        // WH_GETMESSAGE hooks see (and may change) the message.
+        if crate::compat::has_hooks(3) {
+            crate::compat::call_hooks(3, 0, 0, thunk16::far(p));
+        }
         let sy = screen_size().1;
         u().msg_time = q.time;
         u().msg_pos = ((sy - 1 - q.y) as u32 & 0xffff) << 16 | q.x as u32 & 0xffff;
