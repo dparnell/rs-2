@@ -15,8 +15,12 @@ use crate::{cstr, far_str, Global};
 
 pub struct Module {
     /// The instance handle: DGROUP's selector (a module without data: its
-    /// first segment's).
+    /// first segment's); for a DLL, a second selector for DGROUP below
+    /// 8000h (programs compare instance handles as signed numbers, and a
+    /// DLL's own selectors are near the top of the LDT).
     pub hinst: u16,
+    /// DGROUP's own selector.
+    pub dgroup: u16,
     /// The OS/2 module handle.
     pub hmod: u32,
     /// The base name, upper case ("CTL3DV2").
@@ -68,7 +72,7 @@ pub fn register_exe(hinst: u16) {
     }
     let hmod = unsafe { (*pib).hmte };
     let name = path_of(hmod).map(|p| base_name(&p)).unwrap_or_default();
-    MODULES.get().insert(0, Module { hinst, hmod, name, loads: 0, image: None });
+    MODULES.get().insert(0, Module { hinst, dgroup: hinst, hmod, name, loads: 0, image: None });
 }
 
 /// The program's instance.
@@ -82,7 +86,7 @@ pub fn find(h: u16) -> Option<&'static mut Module> {
     if h == 0 {
         return ms.first_mut();
     }
-    ms.iter_mut().find(|m| m.hinst == h || (m.hinst | 7) == (h | 7))
+    ms.iter_mut().find(|m| m.hinst == h || (m.hinst | 7) == (h | 7) || (m.dgroup | 7) == (h | 7))
 }
 
 /// The file name of an OS/2 module.
@@ -110,11 +114,13 @@ fn register(hmod: u32) -> u16 {
             seg = crate::res::w16(&head, ne + 0x0e) as u32;
         }
     }
-    let hinst = unsafe { crate::pm::Rs2Win16Selector(6, hmod, seg) } as u16;
-    if hinst == 0 {
+    let dgroup = unsafe { crate::pm::Rs2Win16Selector(6, hmod, seg) } as u16;
+    if dgroup == 0 {
         return 0;
     }
-    ms.push(Module { hinst, hmod, name: base_name(&path), loads: 0, image: None });
+    let alias = if dgroup >= 0x8000 { unsafe { crate::pm::Rs2Win16Selector(0, dgroup as u32, 1) as u16 } } else { 0 };
+    let hinst = if alias != 0 && alias < 0x8000 { alias } else { dgroup };
+    ms.push(Module { hinst, dgroup, hmod, name: base_name(&path), loads: 0, image: None });
     hinst
 }
 
@@ -198,8 +204,11 @@ pub fn free_library(h: u16) {
     }
     ms[i].loads -= 1;
     if ms[i].loads == 0 {
-        let hmod = ms[i].hmod;
+        let (hmod, hinst, dgroup) = (ms[i].hmod, ms[i].hinst, ms[i].dgroup);
         ms.remove(i);
+        if hinst != dgroup {
+            unsafe { crate::pm::Rs2Win16Selector(4, hinst as u32, 0) };
+        }
         unsafe { os2::DosFreeModule(hmod) };
     }
 }
