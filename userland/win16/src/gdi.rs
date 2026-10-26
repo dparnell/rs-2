@@ -150,6 +150,24 @@ fn g() -> &'static mut Gdi {
     g
 }
 
+/// DeleteObject: not the stock objects, nor a bitmap a DC has selected.
+pub fn delete_object(o: u16) -> bool {
+    let Some(i) = o.checked_sub(OBJ_BASE).map(|i| i as usize / 2) else { return false };
+    if i < STOCK || i >= g().objs.len() || g().sys_brushes.contains(&o) {
+        return i < STOCK || g().sys_brushes.contains(&o);
+    }
+    if let Some(Obj::Bitmap { hbm, .. }) = obj(o) {
+        // Not while a DC has it selected.
+        if g().dcs.iter().any(|d| d.bitmap == o) {
+            return false;
+        }
+        unsafe { GpiDeleteBitmap(hbm) };
+    }
+    g().objs[i] = None;
+    g().widths.remove(&o);
+    true
+}
+
 /// Windows' 20 static colours (the default palette).
 pub const DEFAULT_PALETTE: [u32; 20] = [
     0x000000, 0x000080, 0x008000, 0x008080, 0x800000, 0x800080, 0x808000, 0xc0c0c0, 0xc0dcc0, 0xf0caa6,
@@ -1282,20 +1300,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // DeleteObject(obj): not the stock ones.
         69 => {
             let o = a.w();
-            let Some(i) = o.checked_sub(OBJ_BASE).map(|i| i as usize / 2) else { return 0 };
-            if i < STOCK || i >= g().objs.len() || g().sys_brushes.contains(&o) {
-                return (i < STOCK || g().sys_brushes.contains(&o)) as u32;
-            }
-            if let Some(Obj::Bitmap { hbm, .. }) = obj(o) {
-                // Not while a DC has it selected.
-                if g().dcs.iter().any(|d| d.bitmap == o) {
-                    return 0;
-                }
-                unsafe { GpiDeleteBitmap(hbm) };
-            }
-            g().objs[i] = None;
-            g().widths.remove(&o);
-            1
+            delete_object(o) as u32
         }
         // GetBkColor(hdc), GetBkMode(hdc), GetTextColor(hdc)
         75 => bk_color(a.w()),

@@ -776,12 +776,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             }
             1
         }
-        // DrawIcon(hdc, x, y, hicon): rs2's application icon.
-        84 => {
-            let (hdc, x, y, _i) = (a.w(), a.i(), a.i(), a.w());
-            crate::ctl::draw_icon(hdc, x, y);
-            1
-        }
         // DrawText(hdc, text, count, lpRect, format)
         85 => {
             let (hdc, s, n, r, fmt) = (a.w(), a.l(), a.i(), a.l(), a.w());
@@ -916,19 +910,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         136 => {
             let (h, i, v) = (a.w(), a.i(), a.l());
             window_value(h, i, Some(v), true)
-        }
-        // LoadCursor(hinst, name), LoadIcon(hinst, name): the built-in
-        // ones (IDC_*, IDI_*); the program's own are drawn as rs2's.
-        173 | 174 => {
-            let (hi, name) = (a.w(), a.l());
-            if name >> 16 == 0 {
-                let id = name as u16;
-                if hi == 0 || (32512..=32651).contains(&id) {
-                    return id as u32;
-                }
-            }
-            // IDC_ARROW, IDI_APPLICATION
-            32512
         }
         // GetSystemMetrics(index)
         179 => system_metric(a.i()) as u32,
@@ -2276,6 +2257,14 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
 /// message range filter is not applied.)
 pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) -> u32 {
     collect();
+    if crate::tracing() {
+        static LAST: Global<(u32, u32)> = Global::new((0, 0));
+        let fa = unsafe { (WinQueryFocus(HWND_DESKTOP), WinQueryActiveWindow(HWND_DESKTOP)) };
+        if *LAST.get() != fa {
+            *LAST.get() = fa;
+            trace(format_args!("W16 focus PM {:#x} ({:#x}) active {:#x} ({:#x})", fa.0, hwnd_of(fa.0), fa.1, hwnd_of(fa.1)));
+        }
+    }
     let hab = TASK.get().hab;
     let filter = if h == 0 { 0 } else { wnd(h).map_or(0, |w| w.client) };
     loop {

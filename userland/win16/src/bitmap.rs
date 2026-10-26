@@ -200,6 +200,12 @@ fn default_bitmap() -> u16 {
     *d
 }
 
+/// Select a memory DC's own default bitmap again (so that a bitmap can be
+/// deleted).
+pub fn deselect(hdc: u16) -> u16 {
+    select_default(hdc)
+}
+
 /// Select a memory DC's own default bitmap again.
 fn select_default(hdc: u16) -> u16 {
     let Some(d) = gdi::dc(hdc) else { return 0 };
@@ -360,6 +366,32 @@ fn blit_colors(hdc: u16) {
 /// Whether the DC draws into a monochrome bitmap.
 fn is_mono(hdc: u16) -> bool {
     gdi::dc(hdc).is_some_and(|d| d.kind == gdi::DcKind::Memory && (d.bitmap == 0 || bitmap_of(d.bitmap).is_some_and(|b| b.3 == 1)))
+}
+
+/// BitBlt.
+#[allow(clippy::too_many_arguments)]
+pub fn blit(dst: u16, x: i32, y: i32, w: i32, h: i32, src: u16, sx: i32, sy: i32, rop: u32) -> u32 {
+    blt(dst, x, y, w, h, src, sx, sy, w, h, rop)
+}
+
+/// A copy of a bitmap.
+pub fn copy_bitmap(h: u16) -> u16 {
+    let Some((_, w, bh, bpp)) = bitmap_of(h) else { return 0 };
+    let n = new_bitmap(w, bh, bpp);
+    let (a, b) = (create_memory_dc(), create_memory_dc());
+    select(a, h);
+    select(b, n);
+    blt(b, 0, 0, w, bh, a, 0, 0, w, bh, 0x00cc_0020);
+    select_default(a);
+    select_default(b);
+    gdi::release_dc(a);
+    gdi::release_dc(b);
+    n
+}
+
+/// CreateBitmap with DDB bits, for icons.
+pub fn create_ddb(w: i32, h: i32, bpp: u16, bits: *const u8) -> u16 {
+    create_bitmap(w, h, bpp, bits) as u16
 }
 
 /// StretchBlt (and BitBlt: the source the target's size).

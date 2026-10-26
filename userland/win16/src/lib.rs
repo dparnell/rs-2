@@ -29,6 +29,7 @@ mod dialog;
 mod dos;
 mod edit;
 mod gdi;
+mod icon;
 mod kernel;
 mod listbox;
 mod mem16;
@@ -494,11 +495,15 @@ entries! {
     u_callnexthookex = 2293, 12;
     u_defdlgproc = 2308, 10;
     u_ismenu = 2358, 2;
+    u_copyicon = 2368, 4;
+    u_copycursor = 2369, 4;
     u_getwindowplacement = 2370, 6;
     u_setwindowplacement = 2371, 6;
     u_subtractrect = 2373, 12;
     u_unregisterclass = 2403, 6;
     u_getclassinfo = 2404, 10;
+    u_createcursor = 2406, 18;
+    u_createicon = 2407, 18;
     u_insertmenu = 2410, 12;
     u_appendmenu = 2411, 10;
     u_removemenu = 2412, 6;
@@ -669,6 +674,8 @@ entries! {
     kb_oemtoansi = 4006, 8;
     kb_getkeyboardtype = 4130, 2;
     kb_getkbcodepage = 4132, 0;
+    // SHELL
+    sh_extracticon = 6534, 8;
 }
 
 extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
@@ -690,7 +697,7 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
 fn dispatch_(idx: u32, args: *const u8) -> u32 {
     let size = arg_size(idx);
     let mut a = Pascal::new(args, size);
-    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)) {
+    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)) {
         return r;
     }
     match idx {

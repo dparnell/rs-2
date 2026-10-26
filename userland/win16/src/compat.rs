@@ -170,11 +170,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             let _ = (a.l(), a.w(), a.w(), a.l());
             0
         }
-        // DestroyIcon(hicon), DestroyCursor(hcursor)
-        2457 | 2458 => {
-            a.w();
-            1
-        }
         // SetMessageQueue(size)
         2266 => {
             a.w();
@@ -204,11 +199,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         3070 | 3330 => {
             let (_h, face, p, data) = (a.w(), a.l(), a.l(), a.l());
             enum_fonts(face, p, data)
-        }
-        // ExtractIcon(hinst, file, index): no icons in other files.
-        6534 => {
-            let (_h, _f, _i) = (a.w(), a.l(), a.w());
-            0
         }
         _ => return None,
     })

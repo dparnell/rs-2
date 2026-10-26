@@ -127,6 +127,53 @@ impl Image {
     }
 }
 
+/// The resources of one type in an NE file's bytes: (offset, length) in
+/// table order.
+pub fn list_type(file: &[u8], ty: u16) -> Vec<(usize, usize)> {
+    let Some(img) = table_of(file) else { return Vec::new() };
+    let mut v = Vec::new();
+    let mut p = img.0 + 2;
+    let rd = |o: usize| w16(file, o);
+    loop {
+        let tid = rd(p);
+        if tid == 0 || p >= file.len() {
+            return v;
+        }
+        let count = rd(p + 2) as usize;
+        p += 8;
+        for _ in 0..count {
+            if tid == 0x8000 | ty {
+                let off = (rd(p) as usize) << img.1;
+                let len = (rd(p + 2) as usize) << img.1;
+                if off + len <= file.len() {
+                    v.push((off, len));
+                }
+            }
+            p += 12;
+        }
+    }
+}
+
+/// A resource in an NE file's bytes: (offset, length).
+pub fn find_in_file(file: &[u8], ty: u16, name: &Name) -> Option<(usize, usize)> {
+    let (table, shift) = table_of(file)?;
+    let img = Image { file: file.to_vec(), table, shift };
+    img.find(&Name::Id(ty), name)
+}
+
+/// The resource table's offset and alignment shift in an NE file.
+fn table_of(file: &[u8]) -> Option<(usize, u32)> {
+    let ne = l32(file, 0x3c) as usize;
+    if w16(file, ne) != 0x454e {
+        return None;
+    }
+    let (rt, rn) = (w16(file, ne + 0x24) as usize, w16(file, ne + 0x26) as usize);
+    if rt == rn {
+        return None;
+    }
+    Some((ne + rt, w16(file, ne + rt) as u32))
+}
+
 /// The bytes of a resource of the module `hinst` (0: the program).
 pub fn find(hinst: u16, ty: u16, name: &Name) -> Option<&'static [u8]> {
     let img = image(hinst)?;

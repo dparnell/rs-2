@@ -286,7 +286,6 @@ thunk16::entries16_pascal! {
     x_6513 = 6513, 6;
     x_6520 = 6520, 20;
     x_6521 = 6521, 12;
-    x_6534 = 6534, 8;
     x_5201 = 5201, 0;
     x_5202 = 5202, 0;
     x_5203 = 5203, 4;
@@ -402,11 +401,7 @@ thunk16::entries16_pascal! {
     x_2334 = 2334, 2;
     x_2335 = 2335, 0;
     x_2359 = 2359, 8;
-    x_2368 = 2368, 4;
-    x_2369 = 2369, 4;
     x_2402 = 2402, 6;
-    x_2406 = 2406, 18;
-    x_2407 = 2407, 18;
     x_2422 = 2422, 10;
     x_2423 = 2423, 10;
     x_2445 = 2445, 12;
@@ -709,7 +704,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (6513, "SHELL.13 DRAGQUERYPOINT"),
     (6520, "SHELL.20 SHELLEXECUTE"),
     (6521, "SHELL.21 FINDEXECUTABLE"),
-    (6534, "SHELL.34 EXTRACTICON"),
     (5201, "SOUND.1 OPENSOUND"),
     (5202, "SOUND.2 CLOSESOUND"),
     (5203, "SOUND.3 SETVOICEQUEUESIZE"),
@@ -825,11 +819,7 @@ pub static NAMES: &[(u16, &str)] = &[
     (2334, "USER.334 GETQUEUESTATUS"),
     (2335, "USER.335 GETINPUTSTATE"),
     (2359, "USER.359 GETDCEX"),
-    (2368, "USER.368 COPYICON"),
-    (2369, "USER.369 COPYCURSOR"),
     (2402, "USER.402 GETPRIORITYCLIPBOARDFORMAT"),
-    (2406, "USER.406 CREATECURSOR"),
-    (2407, "USER.407 CREATEICON"),
     (2422, "USER.422 DLGDIRSELECTEX"),
     (2423, "USER.423 DLGDIRSELECTCOMBOBOXEX"),
     (2445, "USER.445 DEFFRAMEPROC"),
