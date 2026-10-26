@@ -154,7 +154,7 @@ features under `\OS2IMAGE\FI` (system management, printer utilities).
 | STPM.EXE, MPPMNEW.EXE, MINSTALL.EXE (multimedia installation) | fails | WinRegisterCircularSlider (PMCTLS), MMPARTS.DLL (in two pieces on the CD) and PMWP's object calls. |
 | PMSPOOL.EXE, PMSHELL.EXE | fails | IBM's spooler process and Workplace Shell: rs2 has its own PMSPOOL (IBM's only calls PMSPL's SPL32QMINITIALIZE, which rs2's PMSPL has: [PRINTING.md](PRINTING.md)), and IBM's PMSHELL needs IBM's PMWP; rs2 has its own PMSHELL and PMWP ([WPS.md](WPS.md)). |
 | JAVA.EXE, JAVAPM.EXE (Java 1.1, `\FI\PACKAGE`) | not tried | |
-| CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | works (in Win-OS/2) | Windows 3.1 programs: they run in Win-OS/2 (see below and docs/WINOS2.md), seamless as windows on the PM desktop. Natively (docs/WIN16.md, without Win-OS/2) stage 2 has the controls, dialogs, menus and resources they use; bitmaps, MDI and COMMDLG are later stages. |
+| CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | works (in Win-OS/2) | Windows 3.1 programs: they run in Win-OS/2 (see below and docs/WINOS2.md), seamless as windows on the PM desktop. Natively (docs/WIN16.md, without Win-OS/2) stage 2 has the controls, dialogs, menus and resources they use, stage 3 COMMDLG, printing, DDE and the clipboard. |
 | ATMCNTRL.EXE, FASTLOAD.EXE (disk 21), PROMIX.EXE, AUDIOVER.EXE | not supported | Also Windows 3.1 programs (NE modules for Windows, importing KERNEL, USER and GDI), not 16-bit PM ones: WIN-OS/2's Adobe Type Manager control panel, its fast loader and multimedia driver utilities. |
 
 ## Workplace Shell classes
@@ -324,7 +324,8 @@ Windows 3.x programs also run without Win-OS/2, natively as OS/2
 processes on rs2's WIN16.DLL (docs/WIN16.md): windows, painting, text,
 message boxes, menus and accelerators, dialogs and the standard controls
 (`RS2\HELLO16.EXE`, `RS2\MENU16.EXE`, `RS2\DLG16.EXE`, `RS2\NOTE16.EXE`,
-`RS2\W16TEST.EXE`); bitmaps, MDI, COMMDLG and printing are later stages.
+`RS2\W16TEST.EXE`), the common dialogs, printing to rs2's printers, DDE
+and the clipboard's formats (`RS2\PRINT16.EXE`, `RS2\DDECLI16.EXE`).
 
 APPINST's **Win-OS/2** category copies IBM's Win-OS/2 from the CD into
 `C:\OS2\MDOS\WINOS2`, makes rs2's display driver RS2DISP.DRV from its

@@ -37,6 +37,8 @@ unsafe extern "C" {
     fn GpiDestroyPS(hps: u32) -> u32;
     #[link_name = "PMGPI.351"]
     fn GpiAssociate(hps: u32, hdc: u32) -> u32;
+    #[link_name = "PMGPI.609"]
+    fn DevPostDeviceModes(hab: u32, drv: *mut u8, name: *const u8, dev: *const u8, pname: *const u8, fl: u32) -> i32;
 }
 
 const OD_QUEUED: i32 = 2;
@@ -50,6 +52,7 @@ const DEVESC_ABORTDOC: i32 = 8153;
 const DEVESC_NEWFRAME: i32 = 16300;
 const DEVESC_DRAFTMODE: i32 = 16301;
 const DEVESC_FLUSHOUTPUT: i32 = 16302;
+const DEVESC_RAWDATA: i32 = 16303;
 
 /// SP_ERROR, SP_APPABORT.
 const SP_ERROR: u32 = 0xffff;
@@ -199,6 +202,36 @@ fn drivdata_with(p: &Printer, dm: Option<u32>) -> Vec<u8> {
         put(52, rd16(54).clamp(1, 999) as u32);
     }
     d
+}
+
+/// DMPAPER_* of the driver's forms (Letter, A4, Legal, A3, A5,
+/// Executive).
+const PAPERS: [u16; 6] = [1, 9, 5, 8, 11, 7];
+
+/// Print Setup's Options: the driver's job properties dialog on the
+/// printer's properties with this orientation (1, 2) and paper
+/// (DMPAPER_*): the new ones, None when cancelled.
+pub fn job_properties(p: &Printer, orient: u16, paper: u16) -> Option<(u16, u16)> {
+    let mut dm = [0u8; 68];
+    dm[40] = 0x03;
+    dm[44..46].copy_from_slice(&orient.to_le_bytes());
+    dm[46..48].copy_from_slice(&paper.to_le_bytes());
+    let mut dd = crate::mem16::with(68, |far, q| {
+        unsafe { core::ptr::copy_nonoverlapping(dm.as_ptr(), q, 68) };
+        drivdata_with(p, Some(far))
+    });
+    if dd.len() < 56 {
+        return None;
+    }
+    let z = |v: &[u8]| crate::user::z(v);
+    let (drv, dev, q) = (z(if p.driver.is_empty() { b"PSCRIPT" } else { &p.driver }), z(&p.device), z(&p.queue));
+    let hab = crate::kernel::TASK.get().hab;
+    // DPDM_POSTJOBPROP: DEV_OK when changed.
+    if unsafe { DevPostDeviceModes(hab, dd.as_mut_ptr(), drv.as_ptr(), dev.as_ptr(), q.as_ptr(), 0) } != 1 {
+        return None;
+    }
+    let rd = |o: usize| u32::from_le_bytes(dd[o..o + 4].try_into().unwrap());
+    Some((if rd(48) != 0 { 2 } else { 1 }, PAPERS.get(rd(44) as usize).copied().unwrap_or(1)))
 }
 
 /// A printer DC's state.
@@ -430,7 +463,7 @@ fn esc_call(hdc: u16, esc: i32, n: i32, pin: u32, pout: u32) -> u32 {
             if done { new_frame(hdc) } else { 1 }
         }
         // QUERYESCSUPPORT(escape)
-        8 => matches!(in_word(), 1..=3 | 6..=13 | 17 | 20..=23 | 0x100 | 4096 | 4097) as u32,
+        8 => matches!(in_word(), 1..=3 | 6..=13 | 17 | 19..=23 | 33 | 37) as u32,
         // SETABORTPROC(proc)
         9 => {
             if let (Some(p), false) = (pdc(hdc), pin == 0) {
@@ -478,8 +511,19 @@ fn esc_call(hdc: u16, esc: i32, n: i32, pin: u32, pout: u32) -> u32 {
             crate::user::copy_out(b"PostScript", flat(pout), 32);
             1
         }
-        // SETLINECAP, SETLINEJOIN, SETMITERLIMIT
-        21..=23 => 1,
+        // SETLINECAP, SETLINEJOIN, SETMITERLIMIT; EPSPRINTING
+        21..=23 | 33 => 1,
+        // PASSTHROUGH, POSTSCRIPT_DATA: a count and PostScript, sent as it
+        // is (the DC spools the driver's PostScript).
+        19 | 37 => {
+            let Some(p) = pdc(hdc) else { return SP_ERROR };
+            let k = in_word() as usize;
+            if pin == 0 || !p.in_doc {
+                return SP_ERROR;
+            }
+            let data = unsafe { core::slice::from_raw_parts(flat(pin).add(2), k) };
+            if escape(p, DEVESC_RAWDATA, data) { k as u32 } else { SP_ERROR }
+        }
         _ => 0,
     }
 }

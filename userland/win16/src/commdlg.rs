@@ -2028,7 +2028,6 @@ fn print_init(h: u16) {
         let src = get_item(h, CMB3);
         send_str(src, CB_ADDSTRING, 0, b"Automatic");
         send(src, CB_SETCURSEL, 0, 0);
-        enable(h, PSH1, false);
         return;
     }
     let copies = p.copies;
@@ -2133,6 +2132,24 @@ fn print_msg(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
                     let label = printer_label(&p.printers[p.sel]);
                     set_text(h, STC1, &label);
                 }
+            }
+            1
+        }
+        PSH1 if setup => {
+            // Options: the driver's job properties.
+            let specific = checked(h, RAD4);
+            let sel = send(get_item(h, CMB1), CB_GETCURSEL, 0, 0) as usize;
+            let paper = PAPERS.get(send(get_item(h, CMB2), CB_GETCURSEL, 0, 0) as usize).map_or(1, |x| x.1);
+            let orient = if checked(h, RAD2) { 2 } else { 1 };
+            let Some(p) = print(h) else { return 1 };
+            let dflt = p.printers.iter().position(|x| x.default).unwrap_or(0);
+            let i = if specific && sel < p.printers.len() { sel } else { dflt };
+            let pr = p.printers[i].clone();
+            if let Some((o, pa)) = crate::print::job_properties(&pr, orient, paper) {
+                check(h, RAD1, o == 1);
+                check(h, RAD2, o == 2);
+                let k = PAPERS.iter().position(|x| x.1 == pa).unwrap_or(0);
+                send(get_item(h, CMB2), CB_SETCURSEL, k as u16, 0);
             }
             1
         }

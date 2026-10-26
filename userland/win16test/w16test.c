@@ -971,6 +971,33 @@ static void clipboard_tests(HWND hwnd)
     EmptyClipboard();
     CloseClipboard();
     check(destroys == 1 && !IsClipboardFormatAvailable(CF_TEXT), "EmptyClipboard: WM_DESTROYCLIPBOARD to the owner");
+
+    /* CF_BITMAP: a GDI bitmap; it comes back as a bitmap and a DIB. */
+    {
+        HDC dc = GetDC(hwnd), mem = CreateCompatibleDC(dc);
+        HBITMAP bm = CreateCompatibleBitmap(dc, 5, 3), got, old;
+        BITMAP info;
+        RECT rc;
+        old = SelectObject(mem, bm);
+        SetRect(&rc, 0, 0, 5, 3);
+        FillRect(mem, &rc, GetStockObject(BLACK_BRUSH));
+        SelectObject(mem, old);
+        DeleteDC(mem);
+        ReleaseDC(hwnd, dc);
+        OpenClipboard(hwnd);
+        EmptyClipboard();
+        check(SetClipboardData(CF_BITMAP, bm) == bm, "SetClipboardData CF_BITMAP");
+        CloseClipboard();
+        check(IsClipboardFormatAvailable(CF_BITMAP) && IsClipboardFormatAvailable(CF_DIB), "a bitmap is a DIB too");
+        OpenClipboard(hwnd);
+        got = GetClipboardData(CF_BITMAP);
+        check(got && GetObject(got, sizeof info, &info) && info.bmWidth == 5 && info.bmHeight == 3, "GetClipboardData CF_BITMAP: the bitmap's size");
+        h = GetClipboardData(CF_DIB);
+        p = h ? GlobalLock(h) : NULL;
+        check(p && ((BITMAPINFOHEADER FAR *)p)->biWidth == 5 && ((BITMAPINFOHEADER FAR *)p)->biHeight == 3, "GetClipboardData CF_DIB of a bitmap");
+        EmptyClipboard();
+        CloseClipboard();
+    }
 }
 
 /* ---- DDEML in one task: a server and a client instance ---- */
@@ -1073,13 +1100,77 @@ static void ddeml_tests(void)
     check(DdeUninitialize(cli) && DdeUninitialize(srv), "DdeUninitialize");
 }
 
+/* A PM program's DDE server (PMXTEST DDESERVER): what came back. */
+static HWND pm_server;
+static int pm_acks, pm_datas, pm_terms;
+static WORD pm_status;
+static HGLOBAL pm_hi;
+static char pm_data[60];
+
+static void pump(int *n, int was)
+{
+    DWORD start = GetTickCount();
+    MSG msg;
+    while (*n == was && GetTickCount() - start < 5000)
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            DispatchMessage(&msg);
+}
+
 static void raw_dde_tests(HWND hwnd)
 {
     /* WM_DDE_INITIATE broadcast reaches the task's own windows. */
-    ATOM a = GlobalAddAtom("NoSuchService");
+    ATOM a = GlobalAddAtom("NoSuchService"), app, topic;
     LRESULT r = SendMessage((HWND)0xffff, WM_DDE_INITIATE, (WPARAM)hwnd, MAKELONG(a, a));
+    HGLOBAL h;
+    WORD FAR *p;
+    int i, n;
     check(r == 0, "WM_DDE_INITIATE to all windows (nobody answers)");
     GlobalDeleteAtom(a);
+
+    /* A PM program's server, through PM's DDE. */
+    check(WinExec("C:\\RS2\\PMXTEST.EXE DDESERVER", SW_SHOWNORMAL) > 32, "WinExec PMXTEST DDESERVER (a PM DDE server)");
+    app = GlobalAddAtom("PMXTEST");
+    topic = GlobalAddAtom("System");
+    for (i = 0; i < 40 && !pm_server; i++) {
+        SendMessage((HWND)0xffff, WM_DDE_INITIATE, (WPARAM)hwnd, MAKELONG(app, topic));
+        if (!pm_server) {
+            int never = 0;
+            DWORD start = GetTickCount();
+            while (GetTickCount() - start < 250)
+                pump(&never, 0);
+        }
+    }
+    check(pm_server != 0, "WM_DDE_INITIATE reaches a PM server: WM_DDE_ACK (its WM_DDE_INITIATEACK)");
+    if (!pm_server)
+        return;
+    n = pm_datas;
+    PostMessage(pm_server, WM_DDE_REQUEST, (WPARAM)hwnd, MAKELONG(CF_TEXT, GlobalAddAtom("Greeting")));
+    pump(&pm_datas, n);
+    check(pm_datas == n + 1 && lstrcmp(pm_data, "hello from the server") == 0, "WM_DDE_REQUEST to the PM server: WM_DDE_DATA (from its DDESTRUCT)");
+    h = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, 4 + 6);
+    p = (WORD FAR *)GlobalLock(h);
+    p[0] = 0x2000;
+    p[1] = CF_TEXT;
+    _fmemcpy(p + 2, "12345", 6);
+    GlobalUnlock(h);
+    n = pm_acks;
+    PostMessage(pm_server, WM_DDE_POKE, (WPARAM)hwnd, MAKELONG(h, GlobalAddAtom("Value")));
+    pump(&pm_acks, n);
+    check(pm_acks == n + 1 && (pm_status & 0x8000), "WM_DDE_POKE to the PM server: a positive WM_DDE_ACK");
+    h = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, 7);
+    lstrcpy(GlobalLock(h), "[quit]");
+    GlobalUnlock(h);
+    n = pm_acks;
+    PostMessage(pm_server, WM_DDE_EXECUTE, (WPARAM)hwnd, MAKELONG(0, h));
+    pump(&pm_acks, n);
+    check(pm_acks == n + 1 && (pm_status & 0x8000) && pm_hi == h, "WM_DDE_EXECUTE to the PM server: ACK with the commands back");
+    GlobalFree(h);
+    n = pm_terms;
+    PostMessage(pm_server, WM_DDE_TERMINATE, (WPARAM)hwnd, 0);
+    pump(&pm_terms, n);
+    check(pm_terms == n + 1, "WM_DDE_TERMINATE: the PM server terminates too");
+    GlobalDeleteAtom(app);
+    GlobalDeleteAtom(topic);
 }
 
 /* CreateFont on the screen: Courier New is fixed pitch. */
@@ -1108,6 +1199,30 @@ LONG FAR PASCAL _export Stage3WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         return 0;
     }
     switch (msg) {
+    case WM_DDE_ACK:
+        if (!pm_server) {
+            pm_server = (HWND)wp;
+            GlobalDeleteAtom(LOWORD(lp));
+            GlobalDeleteAtom(HIWORD(lp));
+        } else {
+            pm_status = LOWORD(lp);
+            pm_hi = (HGLOBAL)HIWORD(lp);
+            pm_acks++;
+        }
+        return 0;
+    case WM_DDE_DATA: {
+        HGLOBAL h = (HGLOBAL)LOWORD(lp);
+        WORD FAR *p = (WORD FAR *)GlobalLock(h);
+        lstrcpy(pm_data, (LPSTR)(p + 2));
+        GlobalUnlock(h);
+        GlobalFree(h);
+        GlobalDeleteAtom(HIWORD(lp));
+        pm_datas++;
+        return 0;
+    }
+    case WM_DDE_TERMINATE:
+        pm_terms++;
+        return 0;
     case WM_RENDERFORMAT:
         renders++;
         SetClipboardData(wp, global_with("rendered", 9));
