@@ -493,6 +493,18 @@ pub fn from_dib(data: &[u8]) -> u16 {
         return 0;
     }
     let p = data.as_ptr();
+    // A Windows 2.x bitmap: a version word (2), a BITMAP and DDB bits.
+    if w16(p, 0) == 2 && w16(p, 2) == 0 {
+        let (w, h, bpp) = (w16(p, 4) as i16 as i32, w16(p, 6) as i16 as i32, data[10] as u16 * data[11] as u16);
+        if w <= 0 || h <= 0 {
+            return 0;
+        }
+        return create_bitmap(w, h, bpp, unsafe { p.add(16) }) as u16;
+    }
+    let cb = l32(p, 0);
+    if cb != 12 && !(16..=64).contains(&cb) {
+        return 0;
+    }
     let (w, h, bpp) = dib_size(p);
     let (len, _) = dib_header(p, 0);
     if w <= 0 || h <= 0 || len > data.len() {

@@ -172,6 +172,38 @@ fn find_program(name: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+fn temp_file_name(pre: &[u8], unique: u16, buf: *mut u8) -> u16 {
+    let mut v: *const u8 = core::ptr::null();
+    let dir = if unsafe { os2::DosScanEnv(b"TEMP\0".as_ptr(), &mut v) } == 0 && !v.is_null() {
+        unsafe { crate::cstr(v) }.to_vec()
+    } else {
+        crate::profile::make_dirs();
+        crate::profile::WINDOWS_DIR.to_vec()
+    };
+    let dir = dir.strip_suffix(b"\\").unwrap_or(&dir).to_vec();
+    let pre = &pre[..pre.len().min(3)];
+    let mk = |n: u16| [&dir[..], b"\\~", pre, alloc::format!("{:04X}.TMP", n).as_bytes()].concat();
+    let mut n = unique;
+    if unique == 0 {
+        n = (unsafe { crate::pm::WinGetCurrentTime(crate::kernel::TASK.get().hab) } & 0xffff) as u16;
+        loop {
+            n = n.wrapping_add(1).max(1);
+            let p = mk(n);
+            if !exists(&p) {
+                let mut z = p.clone();
+                z.push(0);
+                let (mut hf, mut action) = (0u32, 0u32);
+                if unsafe { os2::DosOpen(z.as_ptr(), &mut hf, &mut action, 0, 0, 0x10, 0x42, core::ptr::null_mut()) } == 0 {
+                    unsafe { os2::DosClose(hf) };
+                    break;
+                }
+            }
+        }
+    }
+    crate::user::copy_out(&mk(n), buf, 144);
+    n
+}
+
 /// IsBadReadPtr and friends: can `n` bytes at `far` be read (written,
 /// executed)?
 fn bad_ptr(far: u32, n: u32, write: bool, code: bool) -> bool {
@@ -204,6 +236,13 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         1166 => {
             let (c, _show) = (a.l(), a.w());
             exec(crate::far_str(c).unwrap_or(b"")) as u32
+        }
+        // GetTempFileName(drive, prefix, unique, buf): "dir\~PRE1234.TMP"
+        // in TEMP (or the Windows directory); with no number given, a new
+        // file is made.
+        1097 => {
+            let (_drive, pre, unique, buf) = (a.w(), a.l(), a.w(), a.p());
+            temp_file_name(crate::far_str(pre).unwrap_or(b""), unique, buf) as u32
         }
         // GetFreeSpace(flags): bytes of global memory free.
         1169 => {

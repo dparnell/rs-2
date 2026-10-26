@@ -75,7 +75,6 @@ thunk16::entries16_pascal! {
     x_1066 = 1066, 8;
     x_1067 = 1067, 10;
     x_1093 = 1093, 4;
-    x_1097 = 1097, 12;
     x_1100 = 1100, 0;
     x_1104 = 1104, 8;
     x_1106 = 1106, 2;
@@ -393,7 +392,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (1066, "KERNEL.66 ALLOCRESOURCE"),
     (1067, "KERNEL.67 SETRESOURCEHANDLER"),
     (1093, "KERNEL.93 GETCODEHANDLE"),
-    (1097, "KERNEL.97 GETTEMPFILENAME"),
     (1100, "KERNEL.100 VALIDATECODESEGMENTS"),
     (1104, "KERNEL.104 GETCODEINFO"),
     (1106, "KERNEL.106 SETSWAPAREASIZE"),

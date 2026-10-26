@@ -276,6 +276,7 @@ entries! {
     k_gettempdrive = 1092, 2;
     k_loadlibrary = 1095, 4;
     k_freelibrary = 1096, 2;
+    k_gettempfilename = 1097, 12;
     k_seterrormode = 1107, 2;
     k_outputdebugstring = 1115, 4;
     k_getprivateprofileint = 1127, 14;
@@ -803,18 +804,20 @@ entries! {
 }
 
 extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
-    let r = dispatch_(idx, args);
-    if tracing() && idx != 1 {
-        // The arguments as words, first argument first (_pascal pushes
-        // them left to right), and the result.
-        let n = arg_size(idx) / 2;
-        let mut s = alloc::string::String::new();
-        for i in (0..n).rev() {
-            let w = unsafe { (args.add(2 * i) as *const u16).read_unaligned() };
-            let _ = core::fmt::write(&mut s, format_args!(" {w:04x}"));
-        }
-        trace(format_args!("W16 {}{} -> {:x}", idx, s, r));
+    if !tracing() || idx == 1 {
+        return dispatch_(idx, args);
     }
+    // The arguments as words, first argument first (_pascal pushes them
+    // left to right), then the result.
+    let n = arg_size(idx) / 2;
+    let mut s = alloc::string::String::new();
+    for i in (0..n).rev() {
+        let w = unsafe { (args.add(2 * i) as *const u16).read_unaligned() };
+        let _ = core::fmt::write(&mut s, format_args!(" {w:04x}"));
+    }
+    trace(format_args!("W16 {}{}", idx, s));
+    let r = dispatch_(idx, args);
+    trace(format_args!("W16 {} -> {:x}", idx, r));
     r
 }
 

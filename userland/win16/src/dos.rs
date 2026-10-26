@@ -45,6 +45,17 @@ pub fn interrupt(p: *mut u16) {
         0xe4 => kernel::undefined_dynalink(&r),
         0x21 => int21(&mut r),
         0x25 | 0x26 => abs_disk(&mut r),
+        // BIOS time of day: CX:DX the ticks (18.2 a second) since
+        // midnight, AL whether midnight passed.
+        0x1a if hi(r[AX]) == 0 => {
+            let mut dt = os2::DateTime::default();
+            unsafe { os2::DosGetDateTime(&mut dt) };
+            let cs = ((dt.hours as u32 * 60 + dt.minutes as u32) * 60 + dt.seconds as u32) * 100 + dt.hundredths as u32;
+            let ticks = (cs as u64 * 1_193_180 / 6_553_600) as u32;
+            r[CX] = (ticks >> 16) as u16;
+            r[DX] = ticks as u16;
+            r[AX] &= 0xff00;
+        }
         // A protection fault: handled when it is fixed (the number 0).
         0x10d => {
             if segment_load(&mut r) {
