@@ -38,6 +38,7 @@ BEGIN
     BEGIN
         MENUITEM "&Word Wrap", IDM_WRAP
         MENUITEM "&Font...", IDM_FONT
+        MENUITEM "&Background Color...", IDM_COLOR
     END
     POPUP "&Help"
     BEGIN

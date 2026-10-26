@@ -21,7 +21,8 @@ static BOOL wrap;
 static char file[128] = "C:\\NOTE16.TXT";
 static HFONT font;
 static LOGFONT logfont;
-static COLORREF textcolor;
+static COLORREF textcolor, background = RGB(255, 255, 255), custom[16];
+static HBRUSH bgbrush;
 static UINT findmsg;
 static HWND hFind;
 static FINDREPLACE fr;
@@ -204,6 +205,24 @@ static void choose_font(HWND hwnd)
     SendMessage(hEdit, WM_SETFONT, (WPARAM)font, MAKELONG(TRUE, 0));
 }
 
+static void choose_color(HWND hwnd)
+{
+    CHOOSECOLOR cc;
+    memset(&cc, 0, sizeof cc);
+    cc.lStructSize = sizeof cc;
+    cc.hwndOwner = hwnd;
+    cc.rgbResult = background;
+    cc.lpCustColors = custom;
+    cc.Flags = CC_RGBINIT;
+    if (!ChooseColor(&cc))
+        return;
+    background = cc.rgbResult;
+    if (bgbrush)
+        DeleteObject(bgbrush);
+    bgbrush = CreateSolidBrush(background);
+    InvalidateRect(hEdit, NULL, TRUE);
+}
+
 static void find_dialog(HWND hwnd, BOOL replace)
 {
     if (hFind) {
@@ -377,10 +396,10 @@ LONG FAR PASCAL _export NoteWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     }
     switch (msg) {
     case WM_CTLCOLOR:
-        if (font && (HWND)LOWORD(lp) == hEdit) {
+        if ((font || bgbrush) && (HWND)LOWORD(lp) == hEdit) {
             SetTextColor((HDC)wp, textcolor);
-            SetBkColor((HDC)wp, GetSysColor(COLOR_WINDOW));
-            return (LONG)(WORD)GetStockObject(WHITE_BRUSH);
+            SetBkColor((HDC)wp, background);
+            return (LONG)(WORD)(bgbrush ? bgbrush : GetStockObject(WHITE_BRUSH));
         }
         break;
     case WM_CREATE:
@@ -427,6 +446,7 @@ LONG FAR PASCAL _export NoteWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
         case IDM_PRINT: print(hwnd); break;
         case IDM_PRINTSETUP: print_setup(hwnd); break;
         case IDM_FONT: choose_font(hwnd); break;
+        case IDM_COLOR: choose_color(hwnd); break;
         case IDM_FIND: find_dialog(hwnd, FALSE); break;
         case IDM_REPLACE: find_dialog(hwnd, TRUE); break;
         case IDM_FINDNEXT:

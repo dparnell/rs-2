@@ -15,6 +15,7 @@
 #define IDM_TIME     207
 #define IDM_WRAP     301
 #define IDM_FONT     302
+#define IDM_COLOR    303
 #define IDM_FIND     601
 #define IDM_FINDNEXT 602
 #define IDM_REPLACE  603

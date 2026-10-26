@@ -602,9 +602,28 @@ pub fn global_free(h: u16) -> bool {
     match GLOBALS.get().remove(&(h | 7)) {
         Some(b) => {
             unsafe { os2::DosFreeMem(b.base) };
+            forget_selector(h | 7);
             true
         }
         None => false,
+    }
+}
+
+/// A selector is gone: the 16-bit caller's DS and ES (saved by the entry
+/// stub, below which `sp16` points 32 bytes down) no longer hold it, as
+/// Windows' GlobalFree does, so that the return does not fault.
+fn forget_selector(sel: u16) {
+    let v = thunk16::sp16();
+    if v == 0 {
+        return;
+    }
+    // The stub's frame: fs, bx, di, si, es, ds, bp.
+    let frame = flat(v.wrapping_add(32)) as *mut u16;
+    for i in [4, 5] {
+        let p = unsafe { frame.add(i) };
+        if unsafe { p.read_unaligned() } | 7 == sel {
+            unsafe { p.write_unaligned(0) };
+        }
     }
 }
 
@@ -690,6 +709,7 @@ pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
     unsafe { core::ptr::copy_nonoverlapping(old, nb, old_size as usize) };
     GLOBALS.get().remove(&h);
     unsafe { os2::DosFreeMem(old) };
+    forget_selector(h);
     nh
 }
 

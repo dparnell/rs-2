@@ -1,16 +1,29 @@
 /* W16TEST: checks of rs2's native Win16 layer (docs/WIN16.md). A
  * Windows 3.x program that calls KERNEL, USER and GDI and the DOS API
+ * (stage 3: COMMDLG, printing, atoms, the clipboard's formats, DDEML)
  * and writes PASS/FAIL lines to standard output (INT 21h), ending with
  * "w16test done: N failure(s)". Run it with
  * cargo xtask run --release --headless --timeout 150 --init "RS2\W16TEST.EXE"
  */
 
 #include <windows.h>
+#include <commdlg.h>
+#include <cderr.h>
+#include <drivinit.h>
+/* Watcom's ddeml.h declares DdeAccessData near (Windows': BYTE FAR *). */
+#define DdeAccessData DdeAccessData_near
+#include <ddeml.h>
+#undef DdeAccessData
+BYTE FAR * WINAPI DdeAccessData(HDDEDATA, DWORD FAR *);
+#include <dde.h>
 #include <string.h>
 #include <stdio.h>
 #include <io.h>
 #include <fcntl.h>
 #include "w16test.h"
+
+#pragma library("commdlg")
+#pragma library("ddeml")
 
 static int failures;
 static char line[160];
@@ -593,6 +606,543 @@ static void stage2_tests(HINSTANCE hInst)
     DestroyWindow(hwnd);
 }
 
+
+/* ---- Stage 3 ---- */
+
+static HWND s3wnd;
+static int hook_inits, hook_ok, findmsgs, renders, destroys;
+static DWORD find_flags;
+static char find_seen[40];
+static UINT findmsg;
+static UINT reg_fmt;
+
+/* Hooks that check the dialog's controls and press OK (or Cancel). */
+UINT CALLBACK _export FileHook(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_INITDIALOG) {
+        OPENFILENAME FAR *o = (OPENFILENAME FAR *)lp;
+        hook_inits++;
+        hook_ok = GetDlgItem(dlg, 0x480) && GetDlgItem(dlg, 0x460) && GetDlgItem(dlg, 0x461) &&
+                  GetDlgItem(dlg, 0x470) && GetDlgItem(dlg, 0x471) &&
+                  SendDlgItemMessage(dlg, 0x460, LB_GETCOUNT, 0, 0) > 0 && o->lCustData == 1234;
+        SetDlgItemText(dlg, 0x480, (LPSTR)o->lCustData == 0 ? "" : (o->Flags & OFN_OVERWRITEPROMPT ? "newfile" : "w16test.exe"));
+        PostMessage(dlg, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+UINT CALLBACK _export OkHook(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_INITDIALOG) {
+        hook_inits++;
+        PostMessage(dlg, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+UINT CALLBACK _export FontHook(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_INITDIALOG) {
+        LOGFONT lf;
+        hook_inits++;
+        memset(&lf, 0, sizeof lf);
+        SendMessage(dlg, WM_CHOOSEFONT_GETLOGFONT, 0, (LPARAM)(LPLOGFONT)&lf);
+        hook_ok = lstrcmp(lf.lfFaceName, "Times New Roman") == 0 && lf.lfWeight == FW_BOLD;
+        PostMessage(dlg, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+UINT CALLBACK _export SetupHook(HWND dlg, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_INITDIALOG) {
+        hook_inits++;
+        hook_ok = IsDlgButtonChecked(dlg, 0x420) && !IsDlgButtonChecked(dlg, 0x421);
+        /* Landscape. */
+        CheckRadioButton(dlg, 0x420, 0x421, 0x421);
+        PostMessage(dlg, WM_COMMAND, IDOK, 0);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static BOOL is_file(LPSTR p, const char *want)
+{
+    return lstrcmpi(p, want) == 0;
+}
+
+static void commdlg_tests(HWND hwnd)
+{
+    OPENFILENAME ofn;
+    CHOOSECOLOR cc;
+    CHOOSEFONT cf;
+    LOGFONT lf;
+    PRINTDLG pd;
+    FINDREPLACE fr;
+    COLORREF cust[16];
+    char file[128], title[20], what[40];
+    HWND hdlg;
+    int i;
+
+    memset(&ofn, 0, sizeof ofn);
+    ofn.lStructSize = sizeof ofn - 1;
+    check(!GetOpenFileName(&ofn) && CommDlgExtendedError() == CDERR_STRUCTSIZE, "GetOpenFileName with a bad size: CDERR_STRUCTSIZE");
+    check(GetFileTitle("C:\\RS2\\W16TEST.EXE", title, sizeof title) == 0 && lstrcmp(title, "W16TEST.EXE") == 0, "GetFileTitle");
+
+    /* Open: the hook checks the controls, types a name and presses OK. */
+    memset(&ofn, 0, sizeof ofn);
+    file[0] = 0;
+    ofn.lStructSize = sizeof ofn;
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = "Programs\0*.exe\0All\0*.*\0";
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = sizeof file;
+    ofn.lpstrFileTitle = title;
+    ofn.nMaxFileTitle = sizeof title;
+    ofn.lpstrInitialDir = "C:\\RS2";
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY | OFN_ENABLEHOOK | OFN_NOCHANGEDIR;
+    ofn.lCustData = 1234;
+    ofn.lpfnHook = (LPOFNHOOKPROC)MakeProcInstance((FARPROC)FileHook, hInstance);
+    hook_inits = hook_ok = 0;
+    check(GetOpenFileName(&ofn), "GetOpenFileName (a hook presses OK)");
+    check(hook_inits == 1 && hook_ok, "the hook's WM_INITDIALOG: the structure, edt1 lst1 lst2 cmb1 cmb2, files listed");
+    check(is_file(file, "c:\\rs2\\w16test.exe") && ofn.nFileOffset == 7 && ofn.nFileExtension == 15, "GetOpenFileName: the path, nFileOffset, nFileExtension");
+    check(lstrcmpi(title, "w16test.exe") == 0 && ofn.nFilterIndex == 1, "GetOpenFileName: the file title and filter index");
+
+    /* Save As: the default extension. */
+    file[0] = 0;
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_HIDEREADONLY | OFN_ENABLEHOOK | OFN_NOCHANGEDIR;
+    ofn.lpstrDefExt = "txt";
+    check(GetSaveFileName(&ofn) && is_file(file, "c:\\rs2\\newfile.txt") && (ofn.Flags & OFN_EXTENSIONDIFFERENT) == 0,
+          "GetSaveFileName: the default extension added");
+    /* Too small a buffer. */
+    file[0] = 0;
+    ofn.nMaxFile = 6;
+    ofn.Flags = OFN_HIDEREADONLY | OFN_ENABLEHOOK | OFN_NOCHANGEDIR;
+    check(!GetOpenFileName(&ofn) && CommDlgExtendedError() == FNERR_BUFFERTOOSMALL && *(WORD *)file == 19,
+          "GetOpenFileName into a small buffer: FNERR_BUFFERTOOSMALL and the size");
+    FreeProcInstance((FARPROC)ofn.lpfnHook);
+
+    /* Color */
+    memset(&cc, 0, sizeof cc);
+    for (i = 0; i < 16; i++)
+        cust[i] = RGB(i * 16, 0, 0);
+    cc.lStructSize = sizeof cc;
+    cc.hwndOwner = hwnd;
+    cc.rgbResult = RGB(0, 128, 128);
+    cc.lpCustColors = cust;
+    cc.Flags = CC_RGBINIT | CC_ENABLEHOOK;
+    cc.lpfnHook = (LPCCHOOKPROC)MakeProcInstance((FARPROC)OkHook, hInstance);
+    hook_inits = 0;
+    check(ChooseColor(&cc) && hook_inits == 1 && cc.rgbResult == RGB(0, 128, 128) && cust[5] == RGB(80, 0, 0), "ChooseColor (OK): the colour and custom colours kept");
+    cc.Flags = CC_RGBINIT | CC_FULLOPEN | CC_ENABLEHOOK;
+    check(ChooseColor(&cc) && hook_inits == 2, "ChooseColor full open");
+    FreeProcInstance((FARPROC)cc.lpfnHook);
+
+    /* Font */
+    memset(&lf, 0, sizeof lf);
+    lf.lfHeight = -16;
+    lf.lfWeight = FW_BOLD;
+    lstrcpy(lf.lfFaceName, "Times New Roman");
+    memset(&cf, 0, sizeof cf);
+    cf.lStructSize = sizeof cf;
+    cf.hwndOwner = hwnd;
+    cf.lpLogFont = &lf;
+    cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_EFFECTS | CF_ENABLEHOOK;
+    cf.rgbColors = RGB(255, 0, 0);
+    cf.lpfnHook = (LPCFHOOKPROC)MakeProcInstance((FARPROC)FontHook, hInstance);
+    hook_inits = hook_ok = 0;
+    check(ChooseFont(&cf) && hook_inits == 1 && hook_ok, "ChooseFont: WM_CHOOSEFONT_GETLOGFONT in the hook");
+    check(lstrcmp(lf.lfFaceName, "Times New Roman") == 0 && lf.lfWeight == FW_BOLD && cf.iPointSize == 120 && lf.lfHeight == -16,
+          "ChooseFont: the LOGFONT and iPointSize (12 points)");
+    check(cf.rgbColors == RGB(255, 0, 0) && (cf.nFontType & BOLD_FONTTYPE), "ChooseFont: the colour and font type");
+    FreeProcInstance((FARPROC)cf.lpfnHook);
+
+    /* Print: the default printer, its DC. */
+    memset(&pd, 0, sizeof pd);
+    pd.lStructSize = sizeof pd;
+    pd.hwndOwner = hwnd;
+    pd.Flags = PD_RETURNDEFAULT | PD_RETURNDC;
+    check(PrintDlg(&pd) && pd.hDevNames && pd.hDevMode && pd.hDC, "PrintDlg PD_RETURNDEFAULT: hDevNames, hDevMode, a DC");
+    if (pd.hDevNames) {
+        DEVNAMES FAR *dn = (DEVNAMES FAR *)GlobalLock(pd.hDevNames);
+        char dev[120];
+        GetProfileString("windows", "device", "", dev, sizeof dev);
+        wsprintf(line, "%s,%s,%s", (LPSTR)dn + dn->wDeviceOffset, (LPSTR)dn + dn->wDriverOffset, (LPSTR)dn + dn->wOutputOffset);
+        check(lstrcmp(line, dev) == 0 && dn->wDefault == DN_DEFAULTPRN, "DEVNAMES: WIN.INI's default printer");
+        GlobalUnlock(pd.hDevNames);
+    }
+    if (pd.hDC) {
+        check(GetDeviceCaps(pd.hDC, TECHNOLOGY) == DT_RASPRINTER, "PrintDlg's DC is a printer's");
+        DeleteDC(pd.hDC);
+    }
+    /* Setup: the hook chooses Landscape. */
+    pd.Flags = PD_PRINTSETUP | PD_ENABLESETUPHOOK;
+    pd.lpfnSetupHook = (LPSETUPHOOKPROC)MakeProcInstance((FARPROC)SetupHook, hInstance);
+    hook_inits = hook_ok = 0;
+    check(PrintDlg(&pd) && hook_inits == 1 && hook_ok, "PrintDlg PD_PRINTSETUP: portrait at first");
+    if (pd.hDevMode) {
+        DEVMODE FAR *dm = (DEVMODE FAR *)GlobalLock(pd.hDevMode);
+        check(dm->dmOrientation == 2, "Print Setup: landscape in the DEVMODE");
+        GlobalUnlock(pd.hDevMode);
+    }
+    FreeProcInstance((FARPROC)pd.lpfnSetupHook);
+    /* Print with the hook: OK, a DC with the landscape page; the copies
+     * are the DEVMODE's. */
+    if (pd.hDevMode) {
+        DEVMODE FAR *dm = (DEVMODE FAR *)GlobalLock(pd.hDevMode);
+        dm->dmCopies = 2;
+        GlobalUnlock(pd.hDevMode);
+    }
+    pd.Flags = PD_RETURNDC | PD_ENABLEPRINTHOOK | PD_NOSELECTION;
+    pd.nCopies = 1;
+    pd.lpfnPrintHook = (LPPRINTHOOKPROC)MakeProcInstance((FARPROC)OkHook, hInstance);
+    hook_inits = 0;
+    i = PrintDlg(&pd);
+    wsprintf(line, "PrintDlg (OK): copies, a DC (%d %d %d %04x %lx)", i, hook_inits, pd.nCopies, pd.hDC, CommDlgExtendedError());
+    check(i && hook_inits == 1 && pd.nCopies == 2 && pd.hDC, line);
+    if (pd.hDC) {
+        check(GetDeviceCaps(pd.hDC, HORZRES) > GetDeviceCaps(pd.hDC, VERTRES), "the DC's page is landscape (from the DEVMODE)");
+        DeleteDC(pd.hDC);
+    }
+    FreeProcInstance((FARPROC)pd.lpfnPrintHook);
+    GlobalFree(pd.hDevMode);
+    GlobalFree(pd.hDevNames);
+
+    /* Find: modeless; FINDMSGSTRING to the owner. */
+    memset(&fr, 0, sizeof fr);
+    lstrcpy(what, "needle");
+    fr.lStructSize = sizeof fr;
+    fr.hwndOwner = hwnd;
+    fr.Flags = FR_DOWN | FR_MATCHCASE;
+    fr.lpstrFindWhat = what;
+    fr.wFindWhatLen = sizeof what;
+    hdlg = FindText(&fr);
+    check(hdlg != 0 && IsWindow(hdlg), "FindText: a modeless dialog");
+    if (hdlg) {
+        char t[40];
+        GetDlgItemText(hdlg, 0x480, t, sizeof t);
+        check(lstrcmp(t, "needle") == 0 && IsDlgButtonChecked(hdlg, 0x411) && IsDlgButtonChecked(hdlg, 0x421), "FindText: the text, Match Case, Down");
+        SetDlgItemText(hdlg, 0x480, "haystack");
+        findmsgs = 0;
+        SendMessage(hdlg, WM_COMMAND, IDOK, 0);
+        check(findmsgs == 1 && (find_flags & FR_FINDNEXT) && (find_flags & FR_MATCHCASE) && lstrcmp(find_seen, "haystack") == 0,
+              "Find Next: FINDMSGSTRING with FR_FINDNEXT and the text");
+        SendMessage(hdlg, WM_COMMAND, IDCANCEL, 0);
+        check(findmsgs == 2 && (find_flags & FR_DIALOGTERM) && !IsWindow(hdlg), "Cancel: FR_DIALOGTERM, the dialog gone");
+    }
+    fr.lpstrReplaceWith = file;
+    fr.wReplaceWithLen = sizeof file;
+    lstrcpy(file, "pin");
+    hdlg = ReplaceText(&fr);
+    check(hdlg != 0, "ReplaceText");
+    if (hdlg) {
+        findmsgs = 0;
+        SendMessage(hdlg, WM_COMMAND, 0x401, 0);
+        check(findmsgs == 1 && (find_flags & FR_REPLACEALL) && lstrcmp(file, "pin") == 0, "Replace All: FR_REPLACEALL");
+        DestroyWindow(hdlg);
+    }
+}
+
+BOOL FAR PASCAL _export TestAbortProc(HDC hdc, int code)
+{
+    return TRUE;
+}
+
+static void print_tests(void)
+{
+    char dev[120], *device, *driver, *port;
+    HDC dc, ic;
+    DOCINFO di;
+    int esc = NEWFRAME;
+
+    GetProfileString("windows", "device", "", dev, sizeof dev);
+    device = strtok(dev, ",");
+    driver = strtok(NULL, ",");
+    port = strtok(NULL, ",");
+    check(device && driver && port, "WIN.INI [windows] device=");
+    if (!device || !driver || !port)
+        return;
+    GetProfileString("devices", device, "", line, sizeof line);
+    check(_fstrncmp(line, driver, lstrlen(driver)) == 0, "WIN.INI [devices]: the driver and port");
+    ic = CreateIC(driver, device, port, NULL);
+    wsprintf(line, "CreateIC on the printer: 300 dpi (%04x, %d)", ic, ic ? GetDeviceCaps(ic, LOGPIXELSY) : 0);
+    check(ic && GetDeviceCaps(ic, LOGPIXELSY) == 300, line);
+    DeleteDC(ic);
+    dc = CreateDC(driver, device, port, NULL);
+    check(dc != 0, "CreateDC on the printer");
+    if (!dc)
+        return;
+    check(Escape(dc, QUERYESCSUPPORT, sizeof esc, (LPSTR)&esc, NULL) > 0, "Escape QUERYESCSUPPORT");
+    SetAbortProc(dc, (ABORTPROC)MakeProcInstance((FARPROC)TestAbortProc, hInstance));
+    di.cbSize = sizeof di;
+    di.lpszDocName = "W16TEST";
+    di.lpszOutput = NULL;
+    check(StartDoc(dc, &di) > 0 && StartPage(dc) > 0, "StartDoc, StartPage");
+    TextOut(dc, 300, 300, "W16TEST", 7);
+    Rectangle(dc, 300, 400, 900, 700);
+    check(EndPage(dc) > 0 && EndDoc(dc) > 0, "EndPage, EndDoc");
+    check(StartDoc(dc, &di) > 0 && AbortDoc(dc) > 0, "AbortDoc");
+    check(DeleteDC(dc), "DeleteDC");
+}
+
+static void atom_tests(void)
+{
+    ATOM a = GlobalAddAtom("W16TEST atom"), b;
+    char t[40];
+    check(a >= 0xc000 && GlobalFindAtom("w16test ATOM") == a, "GlobalAddAtom, GlobalFindAtom (case blind)");
+    check(GlobalGetAtomName(a, t, sizeof t) == 12 && lstrcmp(t, "W16TEST atom") == 0, "GlobalGetAtomName");
+    GlobalDeleteAtom(a);
+    check(GlobalFindAtom("W16TEST atom") == 0, "GlobalDeleteAtom");
+    b = AddAtom("local");
+    check(b >= 0xc000 && FindAtom("LOCAL") == b && GetAtomName(b, t, sizeof t) == 5, "AddAtom, FindAtom, GetAtomName");
+    check(AddAtom(MAKEINTATOM(42)) == 42 && GetAtomName(42, t, sizeof t) && lstrcmp(t, "#42") == 0, "integer atoms");
+    check(RegisterWindowMessage("W16TEST msg") == RegisterWindowMessage("w16test MSG") && RegisterWindowMessage("W16TEST msg") >= 0xc000,
+          "RegisterWindowMessage: one number per name");
+}
+
+static HGLOBAL global_with(const void FAR *p, int n)
+{
+    HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, n);
+    _fmemcpy(GlobalLock(h), p, n);
+    GlobalUnlock(h);
+    return h;
+}
+
+static void clipboard_tests(HWND hwnd)
+{
+    static const BYTE dib[40 + 16] = {40, 0, 0, 0, 2, 0, 0, 0, 2, 0, 0, 0, 1, 0, 24, 0, 0, 0, 0, 0, 16, 0, 0, 0,
+                                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                                      0, 0, 255, 0, 255, 0, 0, 0, 255, 0, 0, 0, 0, 255, 0, 0};
+    METAFILEPICT mp, FAR *pm;
+    HGLOBAL h;
+    BYTE FAR *p;
+    UINT f;
+    int n, dibs = 0, bitmaps = 0;
+    char t[40];
+
+    reg_fmt = RegisterClipboardFormat("W16TEST format");
+    check(reg_fmt >= 0xc000 && RegisterClipboardFormat("W16TEST format") == reg_fmt, "RegisterClipboardFormat");
+    check(GetClipboardFormatName(reg_fmt, t, sizeof t) == 14 && lstrcmp(t, "W16TEST format") == 0, "GetClipboardFormatName");
+    check(OpenClipboard(hwnd) && EmptyClipboard(), "OpenClipboard, EmptyClipboard");
+    SetClipboardData(CF_TEXT, global_with("clip text", 10));
+    SetClipboardData(reg_fmt, global_with("0123456789", 10));
+    SetClipboardData(CF_DIB, global_with(dib, sizeof dib));
+    mp.mm = MM_ANISOTROPIC;
+    mp.xExt = 100;
+    mp.yExt = 50;
+    mp.hMF = global_with("metafile bits here!", 20);
+    SetClipboardData(CF_METAFILEPICT, global_with(&mp, sizeof mp));
+    /* Delayed rendering of a second registered format. */
+    SetClipboardData(reg_fmt + 0, global_with("0123456789", 10));
+    SetClipboardData(RegisterClipboardFormat("W16TEST delayed"), NULL);
+    CloseClipboard();
+
+    check(IsClipboardFormatAvailable(CF_TEXT) && IsClipboardFormatAvailable(CF_OEMTEXT) && IsClipboardFormatAvailable(reg_fmt) &&
+          IsClipboardFormatAvailable(CF_DIB) && IsClipboardFormatAvailable(CF_METAFILEPICT), "IsClipboardFormatAvailable");
+    check(IsClipboardFormatAvailable(CF_BITMAP), "a DIB is a bitmap for PM programs too");
+    OpenClipboard(hwnd);
+    for (f = 0, n = 0; (f = EnumClipboardFormats(f)) != 0 && n < 20; n++) {
+        dibs += f == CF_DIB;
+        bitmaps += f == CF_BITMAP;
+    }
+    check(n == CountClipboardFormats() && n >= 6 && dibs == 1, "EnumClipboardFormats, CountClipboardFormats");
+    h = GetClipboardData(CF_TEXT);
+    check(h && lstrcmp(GlobalLock(h), "clip text") == 0, "GetClipboardData CF_TEXT");
+    h = GetClipboardData(reg_fmt);
+    p = h ? GlobalLock(h) : NULL;
+    check(p && GlobalSize(h) == 10 && _fmemcmp(p, "0123456789", 10) == 0, "a registered format: the bytes and GlobalSize");
+    h = GetClipboardData(CF_DIB);
+    p = h ? GlobalLock(h) : NULL;
+    check(p && GlobalSize(h) == sizeof dib && _fmemcmp(p, dib, sizeof dib) == 0, "GetClipboardData CF_DIB");
+    h = GetClipboardData(CF_METAFILEPICT);
+    pm = h ? (METAFILEPICT FAR *)GlobalLock(h) : NULL;
+    check(pm && pm->mm == MM_ANISOTROPIC && pm->xExt == 100 && pm->yExt == 50 && pm->hMF &&
+          lstrcmp(GlobalLock(pm->hMF), "metafile bits here!") == 0, "GetClipboardData CF_METAFILEPICT (with the metafile)");
+    renders = 0;
+    h = GetClipboardData(RegisterClipboardFormat("W16TEST delayed"));
+    check(renders == 1 && h && lstrcmp(GlobalLock(h), "rendered") == 0, "delayed rendering: WM_RENDERFORMAT to the owner");
+    check(GetClipboardOwner() == hwnd, "GetClipboardOwner");
+    destroys = 0;
+    EmptyClipboard();
+    CloseClipboard();
+    check(destroys == 1 && !IsClipboardFormatAvailable(CF_TEXT), "EmptyClipboard: WM_DESTROYCLIPBOARD to the owner");
+}
+
+/* ---- DDEML in one task: a server and a client instance ---- */
+
+static DWORD srv, cli;
+static HSZ hszSvc, hszTopic, hszItem;
+static char srv_text[40] = "initial";
+static int advdata, srv_connects;
+static char adv_seen[40];
+
+HDDEDATA CALLBACK _export SrvCallback(UINT type, UINT fmt, HCONV conv, HSZ h1, HSZ h2, HDDEDATA data, DWORD d1, DWORD d2)
+{
+    switch (type) {
+    case XTYP_CONNECT:
+        srv_connects++;
+        return (HDDEDATA)(DdeCmpStringHandles(h1, hszTopic) == 0);
+    case XTYP_REQUEST:
+    case XTYP_ADVREQ:
+        return DdeCreateDataHandle(srv, srv_text, lstrlen(srv_text) + 1, 0, h2, CF_TEXT, 0);
+    case XTYP_POKE:
+        DdeGetData(data, srv_text, sizeof srv_text, 0);
+        DdePostAdvise(srv, hszTopic, hszItem);
+        return (HDDEDATA)DDE_FACK;
+    case XTYP_EXECUTE: {
+        char cmd[40];
+        DdeGetData(data, cmd, sizeof cmd, 0);
+        return (HDDEDATA)(lstrcmp(cmd, "[ok]") == 0 ? DDE_FACK : DDE_FNOTPROCESSED);
+    }
+    case XTYP_ADVSTART:
+        return (HDDEDATA)TRUE;
+    }
+    return 0;
+}
+
+HDDEDATA CALLBACK _export CliCallback(UINT type, UINT fmt, HCONV conv, HSZ h1, HSZ h2, HDDEDATA data, DWORD d1, DWORD d2)
+{
+    if (type == XTYP_ADVDATA) {
+        advdata++;
+        DdeGetData(data, adv_seen, sizeof adv_seen, 0);
+        return (HDDEDATA)DDE_FACK;
+    }
+    return 0;
+}
+
+static void ddeml_tests(void)
+{
+    HCONV conv;
+    HDDEDATA d;
+    DWORD res, n;
+    char t[40];
+    LPBYTE p;
+
+    check(DdeInitialize(&srv, (PFNCALLBACK)MakeProcInstance((FARPROC)SrvCallback, hInstance), APPCLASS_STANDARD, 0) == DMLERR_NO_ERROR,
+          "DdeInitialize (server)");
+    check(DdeInitialize(&cli, (PFNCALLBACK)MakeProcInstance((FARPROC)CliCallback, hInstance), APPCMD_CLIENTONLY, 0) == DMLERR_NO_ERROR &&
+          cli != srv, "DdeInitialize (client)");
+    hszSvc = DdeCreateStringHandle(srv, "W16TestSvc", CP_WINANSI);
+    hszTopic = DdeCreateStringHandle(srv, "Topic", CP_WINANSI);
+    hszItem = DdeCreateStringHandle(srv, "Item", CP_WINANSI);
+    check(hszSvc && DdeQueryString(srv, hszSvc, t, sizeof t, CP_WINANSI) == 10 && lstrcmp(t, "W16TestSvc") == 0, "DdeCreateStringHandle, DdeQueryString");
+    check(DdeCmpStringHandles(hszSvc, DdeCreateStringHandle(cli, "w16testsvc", CP_WINANSI)) == 0, "DdeCmpStringHandles (case blind)");
+    d = DdeCreateDataHandle(cli, "abc", 4, 0, 0, CF_TEXT, 0);
+    d = DdeAddData(d, "xyz", 4, 3);
+    p = DdeAccessData(d, &n);
+    check(p && n == 7 && lstrcmp((LPSTR)p, "abcxyz") == 0, "DdeCreateDataHandle, DdeAddData, DdeAccessData");
+    DdeUnaccessData(d);
+    check(DdeGetData(d, NULL, 0, 0) == 7 && DdeFreeDataHandle(d), "DdeGetData (size), DdeFreeDataHandle");
+
+    check(DdeConnect(cli, hszSvc, hszTopic, NULL) == 0 && DdeGetLastError(cli) == DMLERR_NO_CONV_ESTABLISHED, "DdeConnect before DdeNameService: none");
+    DdeNameService(srv, hszSvc, 0, DNS_REGISTER);
+    conv = DdeConnect(cli, hszSvc, hszTopic, NULL);
+    check(conv != 0 && srv_connects >= 1, "DdeConnect: XTYP_CONNECT, a conversation");
+    if (!conv)
+        return;
+    d = DdeClientTransaction(NULL, 0, conv, hszItem, CF_TEXT, XTYP_REQUEST, 5000, &res);
+    check(d && DdeGetData(d, t, sizeof t, 0) == 8 && lstrcmp(t, "initial") == 0, "XTYP_REQUEST");
+    DdeFreeDataHandle(d);
+    check(DdeClientTransaction(NULL, 0, conv, hszItem, CF_TEXT, XTYP_ADVSTART, 5000, &res) != 0, "XTYP_ADVSTART");
+    check(DdeClientTransaction("poked", 6, conv, hszItem, CF_TEXT, XTYP_POKE, 5000, &res) && (res & DDE_FACK), "XTYP_POKE: DDE_FACK");
+    /* The advise data comes in a posted message. */
+    {
+        MSG msg;
+        DWORD start = GetTickCount();
+        while (!advdata && GetTickCount() - start < 3000)
+            if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+                DispatchMessage(&msg);
+    }
+    check(advdata == 1 && lstrcmp(adv_seen, "poked") == 0, "DdePostAdvise: XTYP_ADVDATA with the new value");
+    check(DdeClientTransaction("[ok]", 5, conv, 0, 0, XTYP_EXECUTE, 5000, &res) && (res & DDE_FACK), "XTYP_EXECUTE");
+    check(!DdeClientTransaction("[no]", 5, conv, 0, 0, XTYP_EXECUTE, 5000, &res) && DdeGetLastError(cli) == DMLERR_NOTPROCESSED,
+          "XTYP_EXECUTE refused: DMLERR_NOTPROCESSED");
+    check(DdeClientTransaction(NULL, 0, conv, hszItem, CF_TEXT, XTYP_ADVSTOP, 5000, &res) != 0, "XTYP_ADVSTOP");
+    {
+        CONVINFO ci;
+        ci.cb = sizeof ci;
+        check(DdeQueryConvInfo(conv, QID_SYNC, &ci) && (ci.wStatus & ST_CONNECTED) && (ci.wStatus & ST_CLIENT) && ci.hszTopic == hszTopic,
+              "DdeQueryConvInfo");
+    }
+    check(DdeDisconnect(conv), "DdeDisconnect");
+    check(DdeUninitialize(cli) && DdeUninitialize(srv), "DdeUninitialize");
+}
+
+static void raw_dde_tests(HWND hwnd)
+{
+    /* WM_DDE_INITIATE broadcast reaches the task's own windows. */
+    ATOM a = GlobalAddAtom("NoSuchService");
+    LRESULT r = SendMessage((HWND)0xffff, WM_DDE_INITIATE, (WPARAM)hwnd, MAKELONG(a, a));
+    check(r == 0, "WM_DDE_INITIATE to all windows (nobody answers)");
+    GlobalDeleteAtom(a);
+}
+
+/* CreateFont on the screen: Courier New is fixed pitch. */
+static void font_tests(HWND hwnd)
+{
+    HDC dc = GetDC(hwnd);
+    HFONT f = CreateFont(-13, 0, 0, 0, FW_BOLD, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, FIXED_PITCH | FF_MODERN, "Courier New");
+    HFONT old = SelectObject(dc, f);
+    DWORD i = GetTextExtent(dc, "iiii", 4), w = GetTextExtent(dc, "WWWW", 4);
+    char face[40];
+    GetTextFace(dc, sizeof face, face);
+    wsprintf(line, "CreateFont Courier New: fixed pitch (%d, %d, %s)", LOWORD(i), LOWORD(w), (LPSTR)face);
+    check(LOWORD(i) == LOWORD(w), line);
+    SelectObject(dc, old);
+    DeleteObject(f);
+    ReleaseDC(hwnd, dc);
+}
+
+LONG FAR PASCAL _export Stage3WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == findmsg && findmsg) {
+        FINDREPLACE FAR *f = (FINDREPLACE FAR *)lp;
+        findmsgs++;
+        find_flags = f->Flags;
+        lstrcpy(find_seen, f->lpstrFindWhat);
+        return 0;
+    }
+    switch (msg) {
+    case WM_RENDERFORMAT:
+        renders++;
+        SetClipboardData(wp, global_with("rendered", 9));
+        return 0;
+    case WM_DESTROYCLIPBOARD:
+        destroys++;
+        return 0;
+    }
+    return DefWindowProc(hwnd, msg, wp, lp);
+}
+
+static void stage3_tests(HINSTANCE hInst)
+{
+    WNDCLASS wc;
+
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = Stage3WndProc;
+    wc.hInstance = hInst;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = GetStockObject(WHITE_BRUSH);
+    wc.lpszClassName = "Stage3";
+    RegisterClass(&wc);
+    findmsg = RegisterWindowMessage("commdlg_FindReplace");
+    s3wnd = CreateWindow("Stage3", "W16TEST stage 3", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, 400, 300,
+                         NULL, NULL, hInst, NULL);
+    font_tests(s3wnd);
+    atom_tests();
+    clipboard_tests(s3wnd);
+    print_tests();
+    commdlg_tests(s3wnd);
+    ddeml_tests();
+    raw_dde_tests(s3wnd);
+    DestroyWindow(s3wnd);
+}
+
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
 {
     out("w16test: rs2's native Win16 layer\r\n");
@@ -600,6 +1150,7 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     dos_tests();
     user_tests(hInst);
     stage2_tests(hInst);
+    stage3_tests(hInst);
     sprintf(line, "w16test done: %d failure(s)\r\n", failures);
     out(line);
     return failures;

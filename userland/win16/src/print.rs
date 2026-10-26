@@ -40,7 +40,7 @@ unsafe extern "C" {
 }
 
 const OD_QUEUED: i32 = 2;
-const OD_INFO: i32 = 4;
+const OD_INFO: i32 = 6;
 const PU_PELS: u32 = 0x0008;
 const GPIA_ASSOC: u32 = 0x4000;
 
