@@ -779,7 +779,16 @@ pub fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
     hf
 }
 
-fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
+/// GlobalSize: a block's size.
+pub fn global_size(h: u16) -> u32 {
+    let h = h | 7;
+    match GLOBALS.get().get(&h) {
+        Some(b) => b.size,
+        None => segment_size(h),
+    }
+}
+
+pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
     let h = h | 7;
     let g = GLOBALS.get();
     let Some(b) = g.get_mut(&h) else { return 0 };

@@ -40,6 +40,7 @@ mod mem16;
 mod menu;
 mod misc;
 mod module;
+mod ole;
 mod pm;
 mod profile;
 mod region;
@@ -788,6 +789,13 @@ entries! {
     th_interruptunregister = 6276, 2;
     th_terminateapp = 6277, 4;
     th_timercount = 6280, 4;
+    // COMPOBJ, OLE2
+    co_coinitialize = 7002, 4;
+    co_couninitialize = 7003, 0;
+    co_cogetmalloc = 7004, 8;
+    co_isequalguid = 7018, 8;
+    ol_oleinitialize = 7102, 4;
+    ol_oleuninitialize = 7103, 0;
     // VER
     v_getfileresourcesize = 6302, 16;
     v_getfileresource = 6303, 24;
@@ -839,6 +847,7 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
         .or_else(|| draw::call(idx, &mut a))
         .or_else(|| lz::call(idx, &mut a))
         .or_else(|| ver::call(idx, &mut a))
+        .or_else(|| ole::call(idx, &mut a))
     {
         return r;
     }
