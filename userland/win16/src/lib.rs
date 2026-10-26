@@ -772,6 +772,8 @@ entries! {
     kb_oemtoansi = 4006, 8;
     kb_getkeyboardtype = 4130, 2;
     kb_getkbcodepage = 4132, 0;
+    kb_ansitooembuff = 4134, 10;
+    kb_oemtoansibuff = 4135, 10;
     // DDEML (minimal, dde_stub.rs)
     dd_ddeinitialize = 6102, 16;
     dd_ddeuninitialize = 6103, 4;

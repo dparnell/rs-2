@@ -64,6 +64,13 @@ pub fn load(
         (import_names.clone(), alloc::vec![0; import_names.len()])
     };
     let imports = load_imports(&load_names)?;
+    // A Windows program's process has the BIOS data area (its DLLs'
+    // __0040H imports point there too).
+    if windows && !dll {
+        if let Some(sp) = space.as_deref_mut() {
+            crate::infoseg::attach_bios(sp);
+        }
+    }
     let autodata = (h.autodata != 0).then(|| h.autodata as usize - 1);
 
     // Segment sizes: the automatic data segment also holds the local heap
@@ -177,6 +184,13 @@ pub fn load(
                         .flatten();
                     if let Some(&(_, v)) = constant {
                         Target::constant(v)
+                    } else if base == 1000 && super::WIN16_BIOS_SELECTORS.contains(&ordinal) {
+                        // __0040H and the other real-mode segments: the
+                        // BIOS data area (infoseg.rs).
+                        if let Some(sp) = space.as_deref_mut() {
+                            crate::infoseg::attach_bios(sp);
+                        }
+                        Target::constant(crate::infoseg::bios_selector())
                     } else {
                         let found = import_target(&imports, module, ImportBy::Ordinal(base + ordinal as u32));
                         let mname = import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?");

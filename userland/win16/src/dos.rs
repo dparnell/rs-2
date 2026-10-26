@@ -667,6 +667,9 @@ fn int21(r: &mut Regs) {
         // Create (CX attributes) and open (AL mode) a file.
         0x3c | 0x3d => {
             let p = path(r[DS], r[DX]);
+            if crate::tracing() {
+                trace(format_args!("W16 {} {}", if ah == 0x3c { "create" } else { "open" }, p[..p.len() - 1].iter().map(|&c| c as char).collect::<alloc::string::String>()));
+            }
             // DOS's compatibility sharing mode is OS/2's deny none.
             let share = match al as u32 & 0x70 {
                 0 => 0x40,

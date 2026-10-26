@@ -470,6 +470,15 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
             }
             1
         }
+        // AnsiToOemBuff(src, dst, n), OemToAnsiBuff(src, dst, n)
+        134 | 135 => {
+            let (s, d, n) = (a.l(), a.l(), a.w());
+            let (src, dst) = (flat(s), flat(d));
+            if !src.is_null() && !dst.is_null() && src != dst {
+                unsafe { core::ptr::copy(src, dst, n as usize) };
+            }
+            0
+        }
         // GetKBCodePage
         132 => 437,
         // GetKeyboardType(which): an enhanced 101/102-key keyboard.

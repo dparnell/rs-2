@@ -439,6 +439,11 @@ pub const WIN16_MODULES: &[(&str, u32)] = &[
     ("MMSYSTEM", 10000),
 ];
 
+/// KERNEL's selectors for real-mode memory (__0040H 193; __0000H 183,
+/// __A000H 174, __B000H 181, __B800H 182, __C000H 195, __D000H 179,
+/// __E000H 190, __F000H 194): rs2's BIOS data area page.
+pub const WIN16_BIOS_SELECTORS: &[u16] = &[193, 183, 174, 181, 182, 195, 179, 190, 194];
+
 /// WIN16's entry for imports it does not have (a call ends the program).
 pub const WIN16_UNDEFINED: u32 = 999;
 
