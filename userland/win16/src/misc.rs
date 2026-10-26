@@ -13,6 +13,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
     if let Some(r) = crate::menu::call(ord, a) {
         return r;
     }
+    if let Some(r) = crate::clip::call(ord, a) {
+        return r;
+    }
     if let Some(r) = crate::caret::call(ord, a) {
         return r;
     }

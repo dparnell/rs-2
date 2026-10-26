@@ -4,14 +4,14 @@ userland/win16/src/lib.rs and the Windows names and ordinals in Open
 Watcom's Win16 import libraries (WATCOM, default ~/opt/watcom).
 
 WIN16 ordinal = module base + Windows ordinal (KERNEL 1000, USER 2000,
-GDI 3000, KEYBOARD 4000), as in kernel/src/loader/mod.rs WIN16_MODULES.
+GDI 3000, KEYBOARD 4000, COMMDLG 6000, DDEML 6100), as in kernel/src/loader/mod.rs WIN16_MODULES.
 Run with python3 -I tools/scripts/gen_win16_exports.py.
 """
 import os, re, struct, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 WATCOM = os.environ.get('WATCOM', os.path.expanduser('~/opt/watcom'))
-BASES = {'KERNEL': 1000, 'USER': 2000, 'GDI': 3000, 'KEYBOARD': 4000}
+BASES = {'KERNEL': 1000, 'USER': 2000, 'GDI': 3000, 'KEYBOARD': 4000, 'COMMDLG': 6000, 'DDEML': 6100}
 # Register-based entries: 16-bit code of their own in src/lib.rs.
 EXTRA = ['INITTASK=w16_inittask @1091', 'DOS3CALL=w16_dos3call @1102', '_WSPRINTF=u_wsprintf @2420']
 
@@ -39,7 +39,9 @@ def imports(lib):
 
 
 def main():
-    names = imports(os.path.join(WATCOM, 'lib286/win/windows.lib'))
+    names = {}
+    for lib in ('windows.lib', 'commdlg.lib', 'ddeml.lib'):
+        names.update(imports(os.path.join(WATCOM, 'lib286/win', lib)))
     src = open(os.path.join(ROOT, 'userland/win16/src/lib.rs')).read()
     inv = {v: k for k, v in BASES.items()}
     out = ["; WIN16: KERNEL (1000 + its ordinal), USER (2000 +), GDI (3000 +), KEYBOARD",
@@ -49,10 +51,11 @@ def main():
         idx = int(idx)
         if idx < 1000:
             continue
-        mod = inv[idx // 1000 * 1000]
-        name = names.get((mod, idx % 1000))
+        base = idx // 100 * 100 if idx // 100 * 100 in inv else idx // 1000 * 1000
+        mod = inv[base]
+        name = names.get((mod, idx - base))
         if name is None:
-            sys.exit(f'{sym}: no {mod}.{idx % 1000} in the import library')
+            sys.exit(f'{sym}: no {mod}.{idx - base} in the import library')
         out.append(f'{name}={sym} @{idx}')
     out += EXTRA
     open(os.path.join(ROOT, 'userland/win16/exports.def'), 'w').write('\n'.join(out) + '\n')

@@ -21,7 +21,11 @@ extern crate alloc;
 extern crate os2;
 
 mod caret;
+mod clip;
+mod commdlg;
 mod ctl;
+mod dde;
+mod ddeml;
 mod dialog;
 mod dos;
 mod edit;
@@ -32,6 +36,7 @@ mod mem16;
 mod menu;
 mod misc;
 mod pm;
+mod print;
 mod res;
 mod scroll;
 mod user;
@@ -181,6 +186,9 @@ entries! {
     p_combo = 6, 10;
     p_scrollbar = 7, 10;
     p_combolbox = 8, 10;
+    // The common dialogs' dialog procedure and DDEML's window procedure.
+    p_commdlg = 9, 10;
+    p_ddeml = 10, 10;
     // KERNEL
     k_fatalexit = 1001, 2;
     k_getversion = 1003, 0;
@@ -528,6 +536,65 @@ entries! {
     kb_oemtoansi = 4006, 8;
     kb_getkeyboardtype = 4130, 2;
     kb_getkbcodepage = 4132, 0;
+    // Stage 3: atoms (KERNEL, USER), printing (GDI, print.rs), COMMDLG
+    // (commdlg.rs), DDEML (ddeml.rs).
+    k_initatomtable = 1068, 2;
+    k_findatom = 1069, 4;
+    k_addatom = 1070, 4;
+    k_deleteatom = 1071, 2;
+    k_getatomname = 1072, 8;
+    k_getatomhandle = 1073, 2;
+    u_globaladdatom = 2268, 4;
+    u_globaldeleteatom = 2269, 2;
+    u_globalfindatom = 2270, 4;
+    u_globalgetatomname = 2271, 8;
+    g_escape = 3038, 14;
+    g_createdc = 3053, 16;
+    g_deletedc = 3068, 2;
+    g_createic = 3153, 16;
+    g_queryabort = 3155, 4;
+    g_startdoc = 3377, 6;
+    g_enddoc = 3378, 2;
+    g_startpage = 3379, 2;
+    g_endpage = 3380, 2;
+    g_setabortproc = 3381, 6;
+    g_abortdoc = 3382, 2;
+    cd_getopenfilename = 6001, 4;
+    cd_getsavefilename = 6002, 4;
+    cd_choosecolor = 6005, 4;
+    cd_findtext = 6011, 4;
+    cd_replacetext = 6012, 4;
+    cd_choosefont = 6015, 4;
+    cd_printdlg = 6020, 4;
+    cd_commdlgextendederror = 6026, 0;
+    cd_getfiletitle = 6027, 10;
+    dm_ddeinitialize = 6102, 16;
+    dm_ddeuninitialize = 6103, 4;
+    dm_ddeconnectlist = 6104, 20;
+    dm_ddequerynextserver = 6105, 8;
+    dm_ddedisconnectlist = 6106, 4;
+    dm_ddeconnect = 6107, 16;
+    dm_ddedisconnect = 6108, 4;
+    dm_ddequeryconvinfo = 6109, 12;
+    dm_ddesetuserhandle = 6110, 12;
+    dm_ddeclienttransaction = 6111, 28;
+    dm_ddeabandontransaction = 6112, 12;
+    dm_ddepostadvise = 6113, 12;
+    dm_ddecreatedatahandle = 6114, 24;
+    dm_ddeadddata = 6115, 16;
+    dm_ddegetdata = 6116, 16;
+    dm_ddeaccessdata = 6117, 8;
+    dm_ddeunaccessdata = 6118, 4;
+    dm_ddefreedatahandle = 6119, 4;
+    dm_ddegetlasterror = 6120, 4;
+    dm_ddecreatestringhandle = 6121, 10;
+    dm_ddefreestringhandle = 6122, 8;
+    dm_ddequerystring = 6123, 18;
+    dm_ddekeepstringhandle = 6124, 8;
+    dm_ddeenablecallback = 6126, 10;
+    dm_ddenameservice = 6127, 14;
+    dm_ddecmpstringhandles = 6136, 8;
+    dm_ddereconnect = 6137, 4;
 }
 
 extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
@@ -541,14 +608,21 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
             dos::interrupt(thunk16::flat(a.l()) as *mut u16);
             0
         }
-        2..=8 => {
+        2..=10 => {
             let (h, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
             native(idx, h, m, wp, lp)
         }
+        1068..=1073 => dde::atoms(idx - 1000, &mut a).unwrap_or(0),
+        2268..=2271 => dde::atoms(idx - 1000, &mut a).unwrap_or(0),
         1000..2000 => kernel::call(idx - 1000, &mut a),
         2000..3000 => user::call(idx - 2000, &mut a),
-        3000..4000 => gdi::call(idx - 3000, &mut a),
+        3000..4000 => match print::call(idx - 3000, &mut a) {
+            Some(r) => r,
+            None => gdi::call(idx - 3000, &mut a),
+        },
         4000..5000 => kernel::keyboard(idx - 4000, &mut a),
+        6000..6100 => commdlg::call(idx - 6000, &mut a),
+        6100..6200 => ddeml::call(idx - 6100, &mut a),
         _ => 0,
     }
 }
@@ -562,11 +636,14 @@ pub fn native_depth() -> u32 {
 }
 
 /// Call one of WIN16's window procedures: a built-in control's (entry
-/// 2-8), DefWindowProc (2107) or DefDlgProc (2308).
+/// 2-8), the common dialogs' (9), DDEML's (10), DefWindowProc (2107) or
+/// DefDlgProc (2308).
 pub fn native(idx: u32, h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     *NATIVE_DEPTH.get() += 1;
     let r = match idx {
         2..=8 => ctl::proc_(idx, h, m, wp, lp),
+        9 => commdlg::dlg_proc(h, m, wp, lp),
+        10 => ddeml::wnd_proc(h, m, wp, lp),
         2107 => user::def_window_proc(h, m, wp, lp),
         2308 => dialog::def_dlg_proc(h, m, wp, lp),
         _ => 0,

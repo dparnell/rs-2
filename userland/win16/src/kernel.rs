@@ -51,6 +51,7 @@ static HEAPS: Global<BTreeMap<u16, Heap>> = Global::new(BTreeMap::new());
 const GMEM_ZEROINIT: u16 = 0x0040;
 const GMEM_MODIFY: u16 = 0x0080;
 const GMEM_MOVEABLE: u16 = 0x0002;
+pub const GMEM_DDESHARE: u16 = 0x2000;
 const LMEM_MOVEABLE: u16 = 0x0002;
 const LMEM_ZEROINIT: u16 = 0x0040;
 const LMEM_MODIFY: u16 = 0x0080;
@@ -233,7 +234,13 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // GetProfileString(app, key, default, buf, max),
         // GetPrivateProfileString(+file): the default.
         58 | 128 => {
-            let (_app, _key, def, buf, max) = (a.l(), a.l(), a.l(), a.p(), a.i());
+            let (app, key, def, buf, max) = (a.l(), a.l(), a.l(), a.p(), a.i());
+            if ord == 58 {
+                // WIN.INI's printers (print.rs).
+                if let Some(v) = crate::print::profile(far_str(app).unwrap_or(b""), far_str(key)) {
+                    return profile_out(&v, buf, max);
+                }
+            }
             crate::user::copy_out(far_str(def).unwrap_or(b""), buf, max) as u32
         }
         // WriteProfileString(app, key, value), WritePrivateProfileString
@@ -395,6 +402,24 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
 
 const HFILE_ERROR: u32 = 0xffff;
 
+/// A profile string (or, for `list`, NUL-separated keys and a final NUL)
+/// into a buffer of `max` bytes: the bytes copied, without the last NUL.
+fn profile_out(v: &[u8], buf: *mut u8, max: i32) -> u32 {
+    if buf.is_null() || max <= 0 {
+        return 0;
+    }
+    let max = max as usize;
+    let n = v.len().min(max - 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(v.as_ptr(), buf, n);
+        *buf.add(n) = 0;
+        if n + 1 < max {
+            *buf.add(n + 1) = 0;
+        }
+    }
+    n as u32
+}
+
 /// A huge (16:16) pointer as flat memory: tiled, the tiles of a block
 /// are contiguous.
 fn huge(far: u32) -> *mut u8 {
@@ -533,7 +558,15 @@ pub fn global_alloc(fl: u16, n: u32) -> u16 {
     let size = n.max(1);
     let room = size.next_multiple_of(0x10000);
     let mut p: *mut u8 = core::ptr::null_mut();
-    if unsafe { os2::DosAllocMem(&mut p, room, os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | os2::OBJ_TILE) } != 0 {
+    let rw = os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | os2::OBJ_TILE;
+    // GMEM_DDESHARE blocks are giveable shared memory: the same address
+    // and selector in every process they are given to (DDE, dde.rs).
+    let rc = if fl & GMEM_DDESHARE != 0 {
+        unsafe { os2::DosAllocSharedMem(&mut p, core::ptr::null(), room, rw | os2::OBJ_GIVEABLE) }
+    } else {
+        unsafe { os2::DosAllocMem(&mut p, room, rw) }
+    };
+    if rc != 0 {
         return 0;
     }
     // Committed memory is zero already (GMEM_ZEROINIT).
@@ -541,6 +574,28 @@ pub fn global_alloc(fl: u16, n: u32) -> u16 {
     let h = (far(p) >> 16) as u16;
     GLOBALS.get().insert(h, Block { base: p, size, room, flags: fl, locks: 0 });
     h
+}
+
+/// A GMEM_DDESHARE block another process gave this one (dde.rs): a
+/// global block here from now on.
+pub fn adopt(h: u16, size: u32) {
+    let h = h | 7;
+    if GLOBALS.get().contains_key(&h) {
+        return;
+    }
+    let base = flat((h as u32) << 16);
+    let room = size.next_multiple_of(0x10000).max(0x10000);
+    GLOBALS.get().insert(h, Block { base, size: size.max(1), room, flags: GMEM_DDESHARE, locks: 0 });
+}
+
+/// Is `h` a GMEM_DDESHARE block of this process?
+pub fn is_shared(h: u16) -> bool {
+    GLOBALS.get().get(&(h | 7)).is_some_and(|b| b.flags & GMEM_DDESHARE != 0)
+}
+
+/// GlobalSize of a block of this process (0 if none).
+pub fn global_size(h: u16) -> u32 {
+    GLOBALS.get().get(&(h | 7)).map_or(0, |b| b.size)
 }
 
 pub fn global_free(h: u16) -> bool {
@@ -609,7 +664,7 @@ fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
     hf
 }
 
-fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
+pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
     let h = h | 7;
     let g = GLOBALS.get();
     let Some(b) = g.get_mut(&h) else { return 0 };

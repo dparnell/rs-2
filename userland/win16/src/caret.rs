@@ -86,10 +86,6 @@ pub fn window_gone(h: u16) {
 
 // ---- The clipboard ----
 
-const CF_TEXT: u16 = 1;
-const CF_OEMTEXT: u16 = 7;
-
-static CLIP_OPEN: Global<bool> = Global::new(false);
 
 /// Text on the clipboard (CF_TEXT).
 pub fn clip_text() -> Option<Vec<u8>> {
@@ -129,7 +125,6 @@ fn give_text(t: &[u8]) -> bool {
 }
 
 pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
-    let hab = TASK.get().hab;
     Some(match ord {
         // CreateCaret(hwnd, hbitmap, cx, cy)
         163 => {
@@ -170,112 +165,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 }
             }
             0
-        }
-        // OpenClipboard(hwnd)
-        137 => {
-            a.w();
-            if *CLIP_OPEN.get() {
-                return Some(0);
-            }
-            let ok = unsafe { WinOpenClipbrd(hab) } != 0;
-            *CLIP_OPEN.get() = ok;
-            ok as u32
-        }
-        // CloseClipboard
-        138 => {
-            if !*CLIP_OPEN.get() {
-                return Some(0);
-            }
-            *CLIP_OPEN.get() = false;
-            unsafe { WinCloseClipbrd(hab) };
-            1
-        }
-        // EmptyClipboard
-        139 => {
-            if !*CLIP_OPEN.get() {
-                return Some(0);
-            }
-            unsafe { WinEmptyClipbrd(hab) };
-            1
-        }
-        // GetClipboardOwner
-        140 => 0,
-        // SetClipboardData(fmt, hglobal): text is copied to PM's.
-        141 => {
-            let (fmt, hg) = (a.w(), a.w());
-            if !*CLIP_OPEN.get() || hg == 0 {
-                return Some(0);
-            }
-            if fmt == CF_TEXT || fmt == CF_OEMTEXT {
-                let p = thunk16::flat(((hg | 7) as u32) << 16);
-                let t = unsafe { crate::cstr(p) }.to_vec();
-                if !give_text(&t) {
-                    return Some(0);
-                }
-                crate::kernel::global_free(hg);
-            }
-            hg as u32
-        }
-        // GetClipboardData(fmt): a global block with a copy.
-        142 => {
-            let fmt = a.w();
-            if fmt != CF_TEXT && fmt != CF_OEMTEXT {
-                return Some(0);
-            }
-            let p = unsafe { WinQueryClipbrdData(hab, 1) } as *const u8;
-            if p.is_null() {
-                return Some(0);
-            }
-            let t = unsafe { crate::cstr(p) };
-            let h = crate::kernel::global_alloc(2, t.len() as u32 + 1);
-            if h != 0 {
-                let d = thunk16::flat((h as u32) << 16);
-                unsafe {
-                    core::ptr::copy_nonoverlapping(t.as_ptr(), d, t.len());
-                    *d.add(t.len()) = 0;
-                }
-            }
-            h as u32
-        }
-        // CountClipboardFormats
-        143 => {
-            let mut info = 0;
-            (unsafe { WinQueryClipbrdFmtInfo(hab, 1, &mut info) } != 0) as u32
-        }
-        // EnumClipboardFormats(fmt)
-        144 => {
-            let f = a.w();
-            let mut info = 0;
-            if f == 0 && unsafe { WinQueryClipbrdFmtInfo(hab, 1, &mut info) } != 0 { CF_TEXT as u32 } else { 0 }
-        }
-        // RegisterClipboardFormat(name)
-        145 => {
-            a.l();
-            0xc000
-        }
-        // GetClipboardFormatName(fmt, buf, max)
-        146 => {
-            a.w();
-            a.l();
-            a.w();
-            0
-        }
-        // SetClipboardViewer, GetClipboardViewer, ChangeClipboardChain
-        147 => {
-            a.w();
-            0
-        }
-        148 => 0,
-        149 => {
-            a.w();
-            a.w();
-            0
-        }
-        // IsClipboardFormatAvailable(fmt)
-        193 => {
-            let f = a.w();
-            let mut info = 0;
-            ((f == CF_TEXT || f == CF_OEMTEXT) && unsafe { WinQueryClipbrdFmtInfo(hab, 1, &mut info) } != 0) as u32
         }
         _ => return None,
     })

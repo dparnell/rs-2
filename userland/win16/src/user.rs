@@ -201,8 +201,6 @@ struct User {
     last_char: Option<(u16, u16, u16, u32)>,
     timers: Vec<Timer>,
     cascade: i32,
-    /// Registered window messages.
-    messages: Vec<Vec<u8>>,
     /// The last message's time and position (GetMessageTime, GetMessagePos).
     msg_time: u32,
     msg_pos: u32,
@@ -219,7 +217,6 @@ static USER: Global<User> = Global::new(User {
     last_char: None,
     timers: Vec::new(),
     cascade: 0,
-    messages: Vec::new(),
     msg_time: 0,
     msg_pos: 0,
 });
@@ -324,8 +321,8 @@ pub fn z(s: &[u8]) -> Vec<u8> {
 
 /// The far addresses of the procedures implemented here (built-in
 /// controls, DefWindowProc, DefDlgProc) and their entry numbers.
-fn natives() -> &'static [(u32, u32); 9] {
-    static N: Global<[(u32, u32); 9]> = Global::new([(0, 0); 9]);
+fn natives() -> &'static [(u32, u32); 11] {
+    static N: Global<[(u32, u32); 11]> = Global::new([(0, 0); 11]);
     let n = N.get();
     if n[0].0 == 0 {
         unsafe extern "C" {
@@ -336,6 +333,8 @@ fn natives() -> &'static [(u32, u32); 9] {
             fn p_combo();
             fn p_scrollbar();
             fn p_combolbox();
+            fn p_commdlg();
+            fn p_ddeml();
             fn u_defwindowproc();
             fn u_defdlgproc();
         }
@@ -348,6 +347,8 @@ fn natives() -> &'static [(u32, u32); 9] {
             (f(p_combo), 6),
             (f(p_scrollbar), 7),
             (f(p_combolbox), 8),
+            (f(p_commdlg), 9),
+            (f(p_ddeml), 10),
             (f(u_defwindowproc), 2107),
             (f(u_defdlgproc), 2308),
         ];
@@ -373,7 +374,13 @@ pub fn call_proc(proc_: u32, hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
 
 /// Send a message to a window: its procedure, now.
 pub fn send(hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
-    let Some(p) = wnd(hwnd).map(|w| w.proc_) else { return 0 };
+    let Some(p) = wnd(hwnd).map(|w| w.proc_) else {
+        // Another task's window, or all top-level windows (dde.rs).
+        if hwnd == 0xffff {
+            return crate::dde::broadcast(msg, wp, lp);
+        }
+        return crate::dde::send_foreign(hwnd, msg, wp, lp).unwrap_or(0);
+    };
     call_proc(p, hwnd, msg, wp, lp)
 }
 
@@ -572,7 +579,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             wnd(h).map_or(0, |w| w.parent as u32)
         }
         // IsWindow(hwnd)
-        47 => wnd(a.w()).is_some() as u32,
+        47 => {
+            let h = a.w();
+            (wnd(h).is_some() || crate::dde::is_foreign_window(h)) as u32
+        }
         // IsChild(parent, hwnd)
         48 => {
             let (p, h) = (a.w(), a.w());
@@ -850,15 +860,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             post(0, m, wp, lp) as u32
         }
         // RegisterWindowMessage(name): 0xC000 and up.
-        118 => {
-            let s = far_str(a.l()).unwrap_or(b"").to_ascii_uppercase();
-            let m = &mut u().messages;
-            let i = m.iter().position(|x| *x == s).unwrap_or_else(|| {
-                m.push(s);
-                m.len() - 1
-            });
-            0xc100 + i as u32
-        }
+        118 => register_message(far_str(a.l()).unwrap_or(b"")) as u32,
         // GetMessagePos, GetMessageTime
         119 => u().msg_pos,
         120 => u().msg_time,
@@ -1178,6 +1180,15 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         _ => crate::misc::call(ord, a),
     }
+}
+
+/// RegisterWindowMessage: the name's global atom (0xC000 and up), the
+/// same in every task (and PM program).
+pub fn register_message(name: &[u8]) -> u16 {
+    if name.is_empty() {
+        return 0;
+    }
+    crate::dde::add_global_atom(name)
 }
 
 fn init_app() -> u32 {
@@ -2050,7 +2061,7 @@ pub fn post(h: u16, m: u16, wp: u16, lp: u32) -> bool {
         None if h == 0 || h == 0xffff => {
             return unsafe { WinPostQueueMsg(TASK.get().hmq, POSTED | m as u32, wp as u32, lp) } != 0;
         }
-        None => return false,
+        None => return crate::dde::post_foreign(h, m, wp, lp).unwrap_or(false),
     };
     unsafe { WinPostMsg(pm, POSTED | m as u32, wp as u32, lp) != 0 }
 }
@@ -2259,6 +2270,8 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
             }
             (m, if vk != 0 { vk } else { chr & 0xff }, lp)
         }
+        m if crate::dde::is_w16x(m) => crate::dde::incoming(m, q.mp1, q.mp2),
+        m if crate::clip::is_clip_message(m) => crate::clip::translate(m, q.mp1, q.mp2),
         m if m & POSTED != 0 => ((m & 0xffff) as u16, q.mp1 as u16, q.mp2),
         _ => return None,
     })

@@ -25,6 +25,8 @@ pub enum DcKind {
     Paint,
     /// From GetDC: ReleaseDC.
     Window,
+    /// A printer's (print.rs): DeleteDC.
+    Printer,
 }
 
 /// A font: the face (0 system, 1 monospaced, 2 sans, 3 serif, 4 the
@@ -146,6 +148,7 @@ fn new_obj(o: Obj) -> u16 {
     };
     let h = OBJ_BASE + 2 * i as u16;
     g.widths.remove(&h);
+    g.widths.remove(&(h | 1));
     h
 }
 
@@ -211,9 +214,22 @@ pub fn release_dc(hdc: u16) -> bool {
         match d.kind {
             DcKind::Paint => WinEndPaint(d.hps),
             DcKind::Window => WinReleasePS(d.hps),
+            DcKind::Printer => {
+                crate::print::close(hdc);
+                1
+            }
         }
     };
     true
+}
+
+/// A printer's page is done (NEWFRAME): the PS's font and colours are
+/// set again on the next page.
+pub fn page_done(hdc: u16) {
+    if let Some(d) = dc(hdc) {
+        d.applied = 0;
+        unsafe { GpiCreateLogColorTable(d.hps, 0, LCOLF_RGB, 0, 0, core::ptr::null()) };
+    }
 }
 
 /// A Windows rectangle (y down) as a PM one.
@@ -316,6 +332,9 @@ fn apply_font(d: &mut Dc) {
         Some(Obj::Font(f)) => f,
         _ => sys_font(),
     };
+    // A printer has no system font: Helvetica (Courier for the fixed
+    // fonts) at 10 points.
+    let f = if d.kind == DcKind::Printer && f.face <= 1 { Font { face: if f.face == 1 { 4 } else { 2 }, height: if f.height == 0 { -42 } else { f.height }, ..f } } else { f };
     unsafe {
         GpiSetCharSet(d.hps, 0);
         if d.applied != 0 && d.applied != SYSTEM_FONT {
@@ -392,7 +411,9 @@ fn text_width_ps(hps: u32, s: &[u8]) -> i32 {
 /// The width of each character of the DC's font.
 pub fn char_widths(hdc: u16) -> [u8; 256] {
     let Some(d) = dc(hdc) else { return [8; 256] };
-    if let Some(w) = g().widths.get(&d.s.font) {
+    // (Printers' widths are kept apart: font | 1.)
+    let key = d.s.font | (d.kind == DcKind::Printer) as u16;
+    if let Some(w) = g().widths.get(&key) {
         return *w;
     }
     apply_font(d);
@@ -401,8 +422,7 @@ pub fn char_widths(hdc: u16) -> [u8; 256] {
         *v = text_width_ps(d.hps, &[c as u8]).clamp(0, 255) as u8;
     }
     w[0] = 0;
-    let f = d.s.font;
-    g().widths.insert(f, w);
+    g().widths.insert(key, w);
     w
 }
 
@@ -947,6 +967,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // GetDeviceCaps(hdc, index)
         80 => {
             let (_h, i) = (a.w(), a.w());
+            if let Some(v) = crate::print::caps(_h, i) {
+                return v;
+            }
             let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
             match i {
                 0 => 0x300,           // DRIVERVERSION

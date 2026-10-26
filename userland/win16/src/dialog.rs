@@ -14,7 +14,7 @@
 //! the value.
 
 use alloc::vec::Vec;
-use thunk16::{flat, Pascal, PascalCall};
+use thunk16::{flat, Pascal};
 
 use crate::res::{self, Name};
 use crate::user::*;
@@ -64,6 +64,11 @@ fn dlg(h: u16) -> Option<&'static mut Dlg> {
 
 pub fn is_dialog(h: u16) -> bool {
     dlg(h).is_some()
+}
+
+/// A dialog's base units (its font's).
+pub fn base_units_of(h: u16) -> (i32, i32) {
+    dlg(h).map_or_else(base_units, |d| d.base)
 }
 
 /// The system font's base units (GetDialogBaseUnits).
@@ -457,7 +462,7 @@ pub fn def_dlg_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     let proc_ = dlg(h).map_or(0, |d| d.proc_);
     if proc_ != 0 {
         set_long(h, DWL_MSGRESULT, 0);
-        let r = PascalCall::new().w(h).w(m).w(wp).l(lp).call(proc_) as u16;
+        let r = call_proc(proc_, h, m, wp, lp) as u16;
         if r != 0 {
             return match m {
                 W_CTLCOLOR | W_COMPAREITEM | W_VKEYTOITEM | W_CHARTOITEM | W_INITDIALOG | 0x0037 => r as u32,
