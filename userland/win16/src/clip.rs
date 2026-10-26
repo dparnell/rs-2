@@ -5,8 +5,8 @@
 //!   (CF_BITMAP; a Windows DIB is an OS/2 2.0 bitmap with a 40-byte
 //!   header). A PM bitmap on the clipboard is a DIB (24 bits) for
 //!   Windows programs.
-//! - CF_BITMAP is a GDI bitmap: given to PM as its PM bitmap, and PM's
-//!   bitmap comes back as one (gdi.rs `bitmap_pm`/`bitmap_from_pm`).
+//! - CF_BITMAP is a GDI bitmap (bitmap.rs): PM gets a PM bitmap with its
+//!   picture, and a PM bitmap comes back as a new GDI bitmap.
 //! - CF_METAFILEPICT keeps its METAFILEPICT and the metafile's bits
 //!   (Windows programs paste it; PM programs do not see it).
 //! - Registered formats (RegisterClipboardFormat) are global atoms, the
@@ -537,13 +537,15 @@ pub fn translate(m: u32, mp1: u32, _mp2: u32) -> (u16, u16, u32) {
     }
 }
 
-/// The PM bitmap of a GDI bitmap (taken by the clipboard). (GDI has no
-/// bitmaps yet: stage 2's remainder.)
-fn bitmap_pm(_h: u16) -> Option<u32> {
-    None
+/// A PM bitmap for the clipboard with a GDI bitmap's picture (the
+/// clipboard keeps it; the program's bitmap stays its own).
+fn bitmap_pm(h: u16) -> Option<u32> {
+    let (hbm, ..) = crate::bitmap::bitmap_of(h)?;
+    let copy = dib_to_pm(&pm_to_dib(hbm)?);
+    (copy != 0).then_some(copy)
 }
 
-/// A GDI bitmap of (a copy of) a PM bitmap.
-fn bitmap_from_pm(_hbm: u32) -> u16 {
-    0
+/// A GDI bitmap with (a copy of) a PM bitmap's picture.
+fn bitmap_from_pm(hbm: u32) -> u16 {
+    pm_to_dib(hbm).map_or(0, |d| crate::bitmap::from_dib(&d))
 }

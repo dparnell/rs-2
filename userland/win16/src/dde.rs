@@ -12,9 +12,8 @@
 //!   the Windows message, with a proxy of the sender as wParam.
 //! - **SendMessage(0xFFFF, ...)** (WM_DDE_INITIATE) goes to the task's
 //!   top-level windows and to every other task's.
-//! - **Global atoms** are PM's system atom table (shared by every PM
-//!   process, PM programs included); local atoms a PM atom table of the
-//!   task's own.
+//! - **Global atoms** are PM's system atom table (atom.rs), shared by
+//!   every PM process, PM programs included.
 //! - **GMEM_DDESHARE blocks** are giveable shared memory (kernel.rs),
 //!   tiled at the same address in every process, so the handle in
 //!   lParam (WM_DDE_DATA's hData, WM_DDE_POKE's, WM_DDE_ADVISE's
@@ -26,17 +25,13 @@ use alloc::vec::Vec;
 
 use crate::pm::*;
 use crate::user::{self, wnd, WS_CHILD};
-use crate::{far_str, Global};
+use crate::Global;
 
 unsafe extern "C" {
     #[link_name = "PMWIN.830"]
     fn WinQuerySystemAtomTable() -> u32;
-    #[link_name = "PMWIN.714"]
-    fn WinCreateAtomTable(initial: u32, buckets: u32) -> u32;
     #[link_name = "PMWIN.700"]
     fn WinAddAtom(t: u32, name: *const u8) -> u32;
-    #[link_name = "PMWIN.744"]
-    fn WinFindAtom(t: u32, name: *const u8) -> u32;
     #[link_name = "PMWIN.721"]
     fn WinDeleteAtom(t: u32, atom: u32) -> u32;
     #[link_name = "PMWIN.802"]
@@ -251,67 +246,6 @@ pub fn broadcast(m: u16, wp: u16, lp: u32) -> u32 {
 }
 
 // ---- Atoms ----
-
-/// An atom name argument for PM: a string, or MAKEINTATOM.
-fn atom_name(far: u32) -> Vec<u8> {
-    match far_str(far) {
-        Some(s) => user::z(s),
-        // "#n"
-        None => user::z(alloc::format!("#{}", far as u16).as_bytes()),
-    }
-}
-
-fn local_table() -> u32 {
-    static T: Global<u32> = Global::new(0);
-    let t = T.get();
-    if *t == 0 {
-        *t = unsafe { WinCreateAtomTable(0, 0) };
-    }
-    *t
-}
-
-/// The atom calls: KERNEL's local ones (68-73) and USER's global ones
-/// (268-271, as 1268-1271), None for others.
-pub fn atoms(ord: u32, a: &mut thunk16::Pascal) -> Option<u32> {
-    let table = || if ord >= 1000 { unsafe { WinQuerySystemAtomTable() } } else { local_table() };
-    Some(match ord {
-        // InitAtomTable(size)
-        68 => {
-            a.w();
-            (local_table() != 0) as u32
-        }
-        // FindAtom(name), GlobalFindAtom
-        69 | 1270 => {
-            let n = atom_name(a.l());
-            unsafe { WinFindAtom(table(), n.as_ptr()) & 0xffff }
-        }
-        // AddAtom(name), GlobalAddAtom
-        70 | 1268 => {
-            let n = atom_name(a.l());
-            unsafe { WinAddAtom(table(), n.as_ptr()) & 0xffff }
-        }
-        // DeleteAtom(atom), GlobalDeleteAtom: 0 when deleted.
-        71 | 1269 => {
-            let atom = a.w();
-            unsafe { WinDeleteAtom(table(), atom as u32) & 0xffff }
-        }
-        // GetAtomName(atom, buf, n), GlobalGetAtomName
-        72 | 1271 => {
-            let (atom, buf, n) = (a.w(), a.p(), a.i());
-            if buf.is_null() || n <= 0 {
-                return Some(0);
-            }
-            if atom < 0xc000 {
-                let s = alloc::format!("#{atom}");
-                return Some(user::copy_out(s.as_bytes(), buf, n) as u32);
-            }
-            unsafe { WinQueryAtomName(table(), atom as u32, buf, n as u32) }
-        }
-        // GetAtomHandle(atom)
-        73 => a.w() as u32,
-        _ => return None,
-    })
-}
 
 /// A global atom's name (for DDEML).
 pub fn global_atom_name(atom: u16) -> Vec<u8> {

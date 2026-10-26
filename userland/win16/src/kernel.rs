@@ -57,7 +57,6 @@ const LMEM_ZEROINIT: u16 = 0x0040;
 const LMEM_MODIFY: u16 = 0x0080;
 
 /// Fake module handles of the system modules (GetModuleHandle).
-const SYSTEM_MODULES: &[(&[u8], u16, u32)] = &[(b"KERNEL", 0x0f07, 1000), (b"USER", 0x0f0f, 2000), (b"GDI", 0x0f17, 3000), (b"KEYBOARD", 0x0f1f, 4000)];
 
 pub fn call(ord: u32, a: &mut Pascal) -> u32 {
     match ord {
@@ -116,6 +115,35 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // LocalCompact(min): the largest free block.
         13 => largest_free(crate::caller_ds()) as u32,
+        // AllocCStoDSAlias(sel), AllocDStoCSAlias(sel), AllocSelector(sel):
+        // a new selector for the same memory (data, code, the same type).
+        170 | 171 | 175 => {
+            let sel = a.w() as u32;
+            unsafe { crate::pm::Rs2Win16Selector(0, sel, match ord { 170 => 1, 171 => 2, _ => 0 }) }
+        }
+        // FreeSelector(sel): 0 when freed.
+        176 => {
+            let sel = a.w() as u32;
+            (unsafe { crate::pm::Rs2Win16Selector(4, sel, 0) } == 0) as u32 * sel
+        }
+        // PrestoChangoSelector(src, dst): dst describes src's memory with
+        // the other type (code for data, data for code).
+        177 => {
+            let (src, dst) = (a.w() as u32, a.w() as u32);
+            selector_copy(src, dst)
+        }
+        // GetSelectorBase(sel), GetSelectorLimit(sel)
+        186 | 188 => {
+            let sel = a.w() as u32;
+            let v = unsafe { crate::pm::Rs2Win16Selector(if ord == 186 { 1 } else { 5 }, sel, 0) };
+            if v == u32::MAX { 0 } else { v }
+        }
+        // SetSelectorBase(sel, base): sel; SetSelectorLimit(sel, limit): 0.
+        187 | 189 => {
+            let (sel, v) = (a.w() as u32, a.l());
+            let ok = unsafe { crate::pm::Rs2Win16Selector(if ord == 187 { 2 } else { 3 }, sel, v) } != 0;
+            if ord == 187 { ok as u32 * sel } else { 0 }
+        }
         // GlobalAlloc(flags, bytes)
         15 => {
             let fl = a.w();
@@ -194,7 +222,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // GetModuleHandle(name)
         47 => {
             let p = a.l();
-            module_handle(p) as u32
+            crate::module::handle(p) as u32
         }
         // GetModuleUsage(h)
         48 => {
@@ -257,17 +285,27 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             a.w();
             b'C' as u32
         }
-        // LoadLibrary(name): no Windows DLLs of the program's own yet
-        // (file not found).
+        // LoadLibrary(name)
         95 => {
             let n = a.l();
-            trace(format_args!("WIN16: LoadLibrary({}) not supported", far_str(n).unwrap_or(b"").iter().map(|&c| c as char).collect::<alloc::string::String>()));
-            2
+            crate::module::load_library(n) as u32
         }
         // FreeLibrary(h)
         96 => {
-            a.w();
+            let h = a.w();
+            crate::module::free_library(h);
             0
+        }
+        // GetDriveType(drive): 2 removable (A:, B:), 3 fixed, 0 none.
+        136 => {
+            let d = a.w() as u32;
+            let (mut cur, mut map) = (0u32, 0u32);
+            unsafe { os2::DosQueryCurrentDisk(&mut cur, &mut map) };
+            match d {
+                _ if d >= 26 || map & (1 << d) == 0 => 0,
+                0 | 1 => 2,
+                _ => 3,
+            }
         }
         // GetWindowsDirectory(buf, max), GetSystemDirectory(buf, max)
         134 | 135 => {
@@ -294,6 +332,17 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 if ord == 82 { os2::DosRead(h as u32, p, cb as u32, &mut n) } else { os2::DosWrite(h as u32, p, cb as u32, &mut n) }
             };
             if e == 0 { n } else { HFILE_ERROR }
+        }
+        // _hread(hf, buf, cb), _hwrite(hf, buf, cb): 32-bit counts, the
+        // buffer huge (its tiles are contiguous).
+        349 | 350 => {
+            let (h, buf, cb) = (a.w(), a.l(), a.l());
+            let p = huge(buf);
+            let mut n = 0u32;
+            let e = unsafe {
+                if ord == 349 { os2::DosRead(h as u32, p, cb, &mut n) } else { os2::DosWrite(h as u32, p, cb, &mut n) }
+            };
+            if e == 0 { n } else { u32::MAX }
         }
         // _lcreat(path, attr), _lopen(path, mode)
         83 | 85 => {
@@ -463,7 +512,7 @@ fn profile_out(v: &[u8], buf: *mut u8, max: i32) -> u32 {
 
 /// A huge (16:16) pointer as flat memory: tiled, the tiles of a block
 /// are contiguous.
-fn huge(far: u32) -> *mut u8 {
+pub fn huge(far: u32) -> *mut u8 {
     flat(far)
 }
 
@@ -498,6 +547,31 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
     }
 }
 
+/// PrestoChangoSelector(src, dst): dst describes src's memory with the
+/// other type (code for data, data for code). With src == dst the
+/// selector changes type in place (how programs make a data block they
+/// wrote code into executable).
+fn selector_copy(src: u32, dst: u32) -> u32 {
+    use crate::pm::Rs2Win16Selector as sel;
+    let code = is_code(src as u16);
+    if src == dst {
+        return if unsafe { sel(7, src, if code { 1 } else { 2 }) } != 0 { dst } else { 0 };
+    }
+    let new = unsafe { sel(0, src, if code { 1 } else { 2 }) };
+    if new != 0 && dst != 0 {
+        unsafe { sel(4, dst, 0) };
+    }
+    new
+}
+
+/// Is `sel` a code selector (LAR's type bit 3)?
+fn is_code(sel: u16) -> bool {
+    let ar: u32;
+    let ok: u8;
+    unsafe { core::arch::asm!("lar {0:e}, {1:e}", "setz {2}", out(reg) ar, in(reg) sel as u32, out(reg_byte) ok, options(nostack)) };
+    ok != 0 && ar & (1 << 11) != 0
+}
+
 /// InitTask (INT E0h from w16_inittask): the program's start registers
 /// in, Windows' InitTask results out (AX 1, ES:BX the command line, CX
 /// the stack limit, DX nCmdShow, SI the previous instance, DI the
@@ -524,6 +598,7 @@ pub fn init_task(r: &mut crate::dos::Regs) {
         local_init(ds, bottom, 0xfff0);
     }
     t.psp = make_psp();
+    crate::module::register_exe(t.hinst);
     r[AX] = 1;
     // The command line: a NUL-terminated copy of the PSP's tail (startup
     // code takes it as a C string).
@@ -535,6 +610,44 @@ pub fn init_task(r: &mut crate::dos::Regs) {
     r[DI] = t.hinst;
     if crate::tracing() {
         trace(format_args!("W16 InitTask: inst {:#x} stack {:#x}-{:#x} heap {:#x} psp {:#x}", t.hinst, top, bottom, heap, t.psp));
+    }
+}
+
+/// WIN87EM's __FPMATH (INT E1h from w16_fpmath), the floating point
+/// emulator's interface: BX the function. The coprocessor does the work,
+/// so the programs' FPU instructions stay as they are (their OSFIXUPs
+/// would turn them into the emulator's INTs) and this answers for it.
+pub fn fpmath(r: &mut crate::dos::Regs) {
+    use crate::dos::reg::*;
+    match r[BX] {
+        // 0 initialise, 1 terminate, 3 set the exception handler.
+        0 | 1 | 3 => r[AX] = 0,
+        // Set the control word (AX).
+        4 => {
+            let cw = r[AX];
+            unsafe { core::arch::asm!("fldcw [{0}]", in(reg) &cw, options(nostack)) };
+        }
+        // Get the control word.
+        5 => {
+            let mut cw = 0u16;
+            unsafe { core::arch::asm!("fnstcw [{0}]", in(reg) &mut cw, options(nostack)) };
+            r[AX] = cw;
+        }
+        // Get and clear the status word.
+        8 => {
+            let sw: u16;
+            unsafe { core::arch::asm!("fnstsw ax", "fnclex", out("ax") sw, options(nostack)) };
+            r[AX] = sw;
+        }
+        // The stack depth: values are not kept on the emulator's stack.
+        10 => r[AX] = 0,
+        // A coprocessor is present.
+        11 => r[AX] = 1,
+        n => {
+            if crate::tracing() {
+                trace(format_args!("W16 __FPMATH {n} not supported"));
+            }
+        }
     }
 }
 
@@ -843,48 +956,23 @@ fn local_realloc(seg: u16, h: u16, n: u16, fl: u16) -> u16 {
     off
 }
 
-fn module_handle(name: u32) -> u16 {
-    let t = TASK.get();
-    let Some(n) = far_str(name) else {
-        // An instance handle: its module.
-        return if name as u16 == t.hinst || name == 0 { t.hinst } else { 0 };
-    };
-    let base = n.rsplit(|&c| c == b'\\' || c == b':').next().unwrap_or(n);
-    let base = base.split(|&c| c == b'.').next().unwrap_or(base);
-    if let Some(&(_, h, _)) = SYSTEM_MODULES.iter().find(|(m, _, _)| m.eq_ignore_ascii_case(base)) {
-        return h;
-    }
-    // The program itself.
-    let mut path = [0u8; 260];
-    if module_file_name(t.hinst, path.as_mut_ptr(), 260) > 0 {
-        let p = unsafe { cstr(path.as_ptr()) };
-        let pb = p.rsplit(|&c| c == b'\\').next().unwrap_or(p);
-        let pb = pb.split(|&c| c == b'.').next().unwrap_or(pb);
-        if pb.eq_ignore_ascii_case(base) {
-            return t.hinst;
-        }
-    }
-    0
-}
-
 fn module_file_name(h: u16, buf: *mut u8, cb: i32) -> i32 {
     if buf.is_null() || cb <= 0 {
         return 0;
     }
-    let mut path = [0u8; 260];
-    let ok = if SYSTEM_MODULES.iter().any(|m| m.1 == h) {
+    let hmod = if crate::module::system(h).is_some() {
         let mut hmod = 0;
-        unsafe { os2::DosQueryModuleHandle(b"WIN16\0".as_ptr(), &mut hmod) == 0 && pm::DosQueryModuleName(hmod, 260, path.as_mut_ptr()) == 0 }
+        if unsafe { os2::DosQueryModuleHandle(b"WIN16\0".as_ptr(), &mut hmod) } != 0 {
+            return 0;
+        }
+        hmod
     } else {
-        let mut tib = core::ptr::null_mut();
-        let mut pib: *mut os2::Pib = core::ptr::null_mut();
-        unsafe { os2::DosGetInfoBlocks(&mut tib, &mut pib) };
-        !pib.is_null() && unsafe { pm::DosQueryModuleName((*pib).hmte, 260, path.as_mut_ptr()) } == 0
+        match crate::module::find(h) {
+            Some(m) => m.hmod,
+            None => return 0,
+        }
     };
-    if !ok {
-        return 0;
-    }
-    let p = unsafe { cstr(path.as_ptr()) };
+    let Some(p) = crate::module::path_of(hmod) else { return 0 };
     let n = p.len().min(cb as usize - 1);
     unsafe {
         core::ptr::copy_nonoverlapping(p.as_ptr(), buf, n);
@@ -894,9 +982,9 @@ fn module_file_name(h: u16, buf: *mut u8, cb: i32) -> i32 {
 }
 
 /// GetProcAddress: the system modules' entries (by name or ordinal) are
-/// WIN16's.
+/// WIN16's, a DLL's its own.
 fn proc_address(h: u16, name: u32) -> u32 {
-    let Some(&(_, _, base)) = SYSTEM_MODULES.iter().find(|m| m.1 == h) else { return 0 };
+    let Some(&(_, _, base)) = crate::module::system(h) else { return crate::module::proc_address(h, name) };
     let mut hmod = 0;
     if unsafe { os2::DosQueryModuleHandle(b"WIN16\0".as_ptr(), &mut hmod) } != 0 {
         return 0;

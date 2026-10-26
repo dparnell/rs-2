@@ -170,6 +170,8 @@ pub struct Wnd {
     /// The window's scroll bars (WS_VSCROLL, WS_HSCROLL).
     pub vsb: Option<crate::scroll::Bar>,
     pub hsb: Option<crate::scroll::Bar>,
+    /// SetProp's properties: (atom, data).
+    pub props: Vec<(u16, u16)>,
 }
 
 /// A PM message being handled as a Windows message.
@@ -787,12 +789,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             }
             1
         }
-        // DrawIcon(hdc, x, y, hicon): rs2's application icon.
-        84 => {
-            let (hdc, x, y, _i) = (a.w(), a.i(), a.i(), a.w());
-            crate::ctl::draw_icon(hdc, x, y);
-            1
-        }
         // DrawText(hdc, text, count, lpRect, format)
         85 => {
             let (hdc, s, n, r, fmt) = (a.w(), a.l(), a.i(), a.l(), a.w());
@@ -859,8 +855,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let (_t, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
             post(0, m, wp, lp) as u32
         }
-        // RegisterWindowMessage(name): 0xC000 and up.
-        118 => register_message(far_str(a.l()).unwrap_or(b"")) as u32,
         // GetMessagePos, GetMessageTime
         119 => u().msg_pos,
         120 => u().msg_time,
@@ -929,19 +923,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         136 => {
             let (h, i, v) = (a.w(), a.i(), a.l());
             window_value(h, i, Some(v), true)
-        }
-        // LoadCursor(hinst, name), LoadIcon(hinst, name): the built-in
-        // ones (IDC_*, IDI_*); the program's own are drawn as rs2's.
-        173 | 174 => {
-            let (hi, name) = (a.w(), a.l());
-            if name >> 16 == 0 {
-                let id = name as u16;
-                if hi == 0 || (32512..=32651).contains(&id) {
-                    return id as u32;
-                }
-            }
-            // IDC_ARROW, IDI_APPLICATION
-            32512
         }
         // GetSystemMetrics(index)
         179 => system_metric(a.i()) as u32,
@@ -1492,6 +1473,7 @@ pub fn create(c: &Create) -> u16 {
         data: None,
         vsb: None,
         hsb: None,
+        props: Vec::new(),
     });
     if !child && parent != 0 {
         let of = wnd(top_level(parent)).map_or(0, |w| w.frame);
@@ -1705,6 +1687,22 @@ pub fn to_screen(h: u16, x: i32, y: i32) -> (i32, i32) {
     let mut p = [x as i16, y as i16];
     map_point(h, p.as_mut_ptr(), true);
     (p[0] as i32, p[1] as i32)
+}
+
+/// IsIconic, IsZoomed.
+pub fn is_iconic(h: u16) -> bool {
+    frame_state(h) & SWP_MINIMIZE != 0
+}
+
+pub fn is_zoomed(h: u16) -> bool {
+    frame_state(h) & SWP_MAXIMIZE != 0
+}
+
+fn frame_state(h: u16) -> u32 {
+    let Some(f) = wnd(h).map(|w| w.frame) else { return 0 };
+    let mut swp = Swp::default();
+    unsafe { WinQueryWindowPos(f, &mut swp) };
+    swp.fl
 }
 
 pub fn show_window(h: u16, cmd: u16) -> bool {
@@ -2283,6 +2281,14 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
 /// message range filter is not applied.)
 pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) -> u32 {
     collect();
+    if crate::tracing() {
+        static LAST: Global<(u32, u32)> = Global::new((0, 0));
+        let fa = unsafe { (WinQueryFocus(HWND_DESKTOP), WinQueryActiveWindow(HWND_DESKTOP)) };
+        if *LAST.get() != fa {
+            *LAST.get() = fa;
+            trace(format_args!("W16 focus PM {:#x} ({:#x}) active {:#x} ({:#x})", fa.0, hwnd_of(fa.0), fa.1, hwnd_of(fa.1)));
+        }
+    }
     let hab = TASK.get().hab;
     let filter = if h == 0 { 0 } else { wnd(h).map_or(0, |w| w.client) };
     loop {

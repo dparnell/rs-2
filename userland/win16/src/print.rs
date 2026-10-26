@@ -341,55 +341,50 @@ fn abort_doc(hdc: u16) -> u32 {
     1
 }
 
-/// The GDI calls of printing (Windows ordinal of GDI), None for others.
-pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
-    Some(match ord {
+/// The GDI calls of printing (WIN16 ordinals), None for others (and for
+/// CreateDC/CreateIC of the display: bitmap.rs's memory DCs).
+pub fn call(idx: u32, a: &mut Pascal) -> Option<u32> {
+    Some(match idx {
         // Escape(hdc, escape, cbIn, lpIn, lpOut)
-        38 => {
+        3038 => {
             let (hdc, esc, n, pin, pout) = (a.w(), a.i(), a.i(), a.l(), a.l());
             esc_call(hdc, esc, n, pin, pout)
         }
         // CreateDC(driver, device, output, lpInitData), CreateIC
-        53 | 153 => {
+        3053 | 3153 => {
             let (drv, dev, out, init) = (a.l(), a.l(), a.l(), a.l());
             let (drv, dev, out) = (far_str(drv).unwrap_or(b""), far_str(dev).unwrap_or(b""), far_str(out).unwrap_or(b""));
-            if drv.eq_ignore_ascii_case(b"DISPLAY") || drv.eq_ignore_ascii_case(b"DISPLAY.DRV") {
-                // The screen.
-                return Some(crate::user::get_dc(0) as u32);
+            if drv.is_empty() || drv.eq_ignore_ascii_case(b"DISPLAY") || drv.eq_ignore_ascii_case(b"DISPLAY.DRV") {
+                return None;
             }
             let list = printers();
             let i = find(&list, dev, out).or_else(|| (dev.is_empty() && out.is_empty()).then(|| list.iter().position(|p| p.default)).flatten());
             let Some(i) = i else { return Some(0) };
-            create_dc(&list[i], Some(init), ord == 53) as u32
-        }
-        // DeleteDC(hdc)
-        68 => {
-            let hdc = a.w();
-            gdi::release_dc(hdc) as u32
+            create_dc(&list[i], Some(init), idx == 3053) as u32
         }
         // QueryAbort(hdc, reserved)
-        155 => {
+        3155 => {
             let (hdc, _) = (a.w(), a.w());
             keep_going(hdc) as u32
         }
         // StartDoc(hdc, lpDocInfo): DOCINFO (cbSize, lpszDocName,
         // lpszOutput).
-        377 => {
+        3377 => {
             let (hdc, di) = (a.w(), a.l());
             let name = if di == 0 { None } else { far_str(unsafe { (flat(di).add(2) as *const u32).read_unaligned() }) };
             start_doc(hdc, name.unwrap_or(b""))
         }
         // EndDoc(hdc)
-        378 => end_doc(a.w()),
+        3378 => end_doc(a.w()),
         // StartPage(hdc)
-        379 => {
+        3379 => {
             let hdc = a.w();
             if pdc(hdc).is_some_and(|p| p.in_doc) { 1 } else { 0 }
         }
         // EndPage(hdc)
-        380 => new_frame(a.w()),
+        3380 => new_frame(a.w()),
         // SetAbortProc(hdc, proc)
-        381 => {
+        3381 => {
             let (hdc, p) = (a.w(), a.l());
             match pdc(hdc) {
                 Some(d) => {
@@ -400,7 +395,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             }
         }
         // AbortDoc(hdc)
-        382 => abort_doc(a.w()),
+        3382 => abort_doc(a.w()),
         _ => return None,
     })
 }

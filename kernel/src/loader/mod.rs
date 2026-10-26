@@ -426,6 +426,11 @@ pub const WIN16_MODULES: &[(&str, u32)] = &[
     ("SYSTEM", 5400),
     ("COMMDLG", 6000),
     ("DDEML", 6100),
+    ("TOOLHELP", 6200),
+    ("VER", 6300),
+    ("LZEXPAND", 6400),
+    ("SHELL", 6500),
+    ("MMSYSTEM", 10000),
 ];
 
 /// KERNEL's absolute entries (WIN16 ordinals): __AHSHIFT, __AHINCR (a

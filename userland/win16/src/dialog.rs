@@ -628,7 +628,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         87 | 239 => {
             let (hi, name, owner, p) = (a.w(), a.l(), a.w(), a.l());
             let param = if ord == 239 { a.l() } else { 0 };
-            let Some(t) = Name::of(name).and_then(|n| res::find(res::RT_DIALOG, &n)) else { return Some(0xffff) };
+            let Some(t) = Name::of(name).and_then(|n| res::find(hi, res::RT_DIALOG, &n)) else { return Some(0xffff) };
             dialog_box(hi, t, owner, p, param) as u16 as u32
         }
         // DialogBoxIndirect(hinst, hglobal, owner, proc), +Param
@@ -642,7 +642,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         89 | 241 => {
             let (hi, name, owner, p) = (a.w(), a.l(), a.w(), a.l());
             let param = if ord == 241 { a.l() } else { 0 };
-            let Some(t) = Name::of(name).and_then(|n| res::find(res::RT_DIALOG, &n)) else { return Some(0) };
+            let Some(t) = Name::of(name).and_then(|n| res::find(hi, res::RT_DIALOG, &n)) else { return Some(0) };
             create_dialog(hi, t, owner, p, param) as u32
         }
         // CreateDialogIndirect(hinst, lpTemplate, owner, proc), +Param

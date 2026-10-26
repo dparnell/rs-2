@@ -20,9 +20,12 @@
 extern crate alloc;
 extern crate os2;
 
+mod atom;
+mod bitmap;
 mod caret;
 mod clip;
 mod commdlg;
+mod compat;
 mod ctl;
 mod dde;
 mod ddeml;
@@ -30,15 +33,19 @@ mod dialog;
 mod dos;
 mod edit;
 mod gdi;
+mod icon;
 mod kernel;
 mod listbox;
 mod mem16;
 mod menu;
 mod misc;
+mod module;
 mod pm;
 mod print;
+mod region;
 mod res;
 mod scroll;
+mod stubs;
 mod user;
 
 use core::cell::UnsafeCell;
@@ -158,6 +165,10 @@ core::arch::global_asm!(
     "w16_dos3call:",
     "int 0x21",
     ".byte 0xcb",
+    ".globl w16_fpmath",
+    "w16_fpmath:",
+    "int 0xe1",
+    ".byte 0xcb",
     ".code32",
     ".popsection",
 );
@@ -231,7 +242,14 @@ entries! {
     k_loadresource = 1061, 4;
     k_lockresource = 1062, 2;
     k_freeresource = 1063, 2;
+    k_accessresource = 1064, 4;
     k_sizeofresource = 1065, 4;
+    k_initatomtable = 1068, 2;
+    k_findatom = 1069, 4;
+    k_addatom = 1070, 4;
+    k_deleteatom = 1071, 2;
+    k_getatomname = 1072, 8;
+    k_getatomhandle = 1073, 2;
     k_openfile = 1074, 10;
     k_lclose = 1081, 2;
     k_lread = 1082, 8;
@@ -254,10 +272,23 @@ entries! {
     k_getwinflags = 1132, 0;
     k_getwindowsdirectory = 1134, 6;
     k_getsystemdirectory = 1135, 6;
+    k_getdrivetype = 1136, 2;
     k_fatalappexit = 1137, 6;
     k_winexec = 1166, 6;
+    k_alloccstodsalias = 1170, 2;
+    k_allocdstocsalias = 1171, 2;
+    k_allocselector = 1175, 2;
+    k_freeselector = 1176, 2;
+    k_prestochangoselector = 1177, 4;
+    k_getselectorbase = 1186, 2;
+    k_setselectorbase = 1187, 6;
+    k_getselectorlimit = 1188, 2;
+    k_setselectorlimit = 1189, 6;
     k_sethandlecount = 1199, 2;
     k_isdbcsleadbyte = 1207, 2;
+    k_hmemcpy = 1348, 12;
+    k__hread = 1349, 10;
+    k__hwrite = 1350, 10;
     // USER
     u_messagebox = 2001, 12;
     u_initapp = 2005, 2;
@@ -273,6 +304,9 @@ entries! {
     u_getdoubleclicktime = 2021, 0;
     u_setfocus = 2022, 2;
     u_getfocus = 2023, 0;
+    u_removeprop = 2024, 6;
+    u_getprop = 2025, 6;
+    u_setprop = 2026, 8;
     u_clienttoscreen = 2028, 6;
     u_screentoclient = 2029, 6;
     u_windowfrompoint = 2030, 4;
@@ -359,6 +393,7 @@ entries! {
     u_registerwindowmessage = 2118, 4;
     u_getmessagepos = 2119, 0;
     u_getmessagetime = 2120, 0;
+    u_setwindowshook = 2121, 6;
     u_callwindowproc = 2122, 14;
     u_updatewindow = 2124, 2;
     u_invalidaterect = 2125, 8;
@@ -409,6 +444,7 @@ entries! {
     u_winhelp = 2171, 12;
     u_loadcursor = 2173, 6;
     u_loadicon = 2174, 6;
+    u_loadbitmap = 2175, 6;
     u_loadstring = 2176, 10;
     u_loadaccelerators = 2177, 6;
     u_translateaccelerator = 2178, 8;
@@ -431,6 +467,8 @@ entries! {
     u_getnextwindow = 2230, 4;
     u_setwindowpos = 2232, 14;
     u_setparent = 2233, 4;
+    u_unhookwindowshook = 2234, 6;
+    u_defhookproc = 2235, 12;
     u_getcapture = 2236, 0;
     u_dialogboxparam = 2239, 16;
     u_dialogboxindirectparam = 2240, 14;
@@ -445,18 +483,35 @@ entries! {
     u_getwindow = 2262, 4;
     u_getmenuitemcount = 2263, 2;
     u_getmenuitemid = 2264, 4;
+    u_setmessagequeue = 2266, 2;
     u_showscrollbar = 2267, 6;
+    u_globaladdatom = 2268, 4;
+    u_globaldeleteatom = 2269, 2;
+    u_globalfindatom = 2270, 4;
+    u_globalgetatomname = 2271, 8;
     u_iszoomed = 2272, 2;
     u_getdlgctrlid = 2277, 2;
     u_getdesktophwnd = 2278, 0;
+    u_selectpalette = 2282, 6;
+    u_realizepalette = 2283, 2;
+    u_getfreesystemresources = 2284, 2;
     u_getdesktopwindow = 2286, 0;
     u_getlastactivepopup = 2287, 2;
     u_redrawwindow = 2290, 10;
+    u_setwindowshookex = 2291, 10;
+    u_unhookwindowshookex = 2292, 4;
+    u_callnexthookex = 2293, 12;
     u_defdlgproc = 2308, 10;
     u_ismenu = 2358, 2;
+    u_copyicon = 2368, 4;
+    u_copycursor = 2369, 4;
+    u_getwindowplacement = 2370, 6;
+    u_setwindowplacement = 2371, 6;
     u_subtractrect = 2373, 12;
     u_unregisterclass = 2403, 6;
     u_getclassinfo = 2404, 10;
+    u_createcursor = 2406, 18;
+    u_createicon = 2407, 18;
     u_insertmenu = 2410, 12;
     u_appendmenu = 2411, 10;
     u_removemenu = 2412, 6;
@@ -478,6 +533,8 @@ entries! {
     u_ansilowerbuff = 2438, 6;
     u_createwindowex = 2452, 34;
     u_adjustwindowrectex = 2454, 14;
+    u_destroyicon = 2457, 2;
+    u_destroycursor = 2458, 2;
     u_drawfocusrect = 2466, 6;
     u_lstrcmpi = 2471, 8;
     u_ansinext = 2472, 4;
@@ -488,7 +545,16 @@ entries! {
     g_setbkmode = 3002, 4;
     g_setmapmode = 3003, 4;
     g_setrop2 = 3004, 4;
+    g_setstretchbltmode = 3007, 4;
     g_settextcolor = 3009, 6;
+    g_setwindoworg = 3011, 6;
+    g_setwindowext = 3012, 6;
+    g_setviewportorg = 3013, 6;
+    g_setviewportext = 3014, 6;
+    g_offsetwindoworg = 3015, 6;
+    g_scalewindowext = 3016, 10;
+    g_offsetviewportorg = 3017, 6;
+    g_scaleviewportext = 3018, 10;
     g_lineto = 3019, 6;
     g_moveto = 3020, 6;
     g_excludecliprect = 3021, 10;
@@ -500,58 +566,127 @@ entries! {
     g_savedc = 3030, 2;
     g_setpixel = 3031, 10;
     g_textout = 3033, 12;
+    g_bitblt = 3034, 20;
+    g_stretchblt = 3035, 24;
     g_polygon = 3036, 8;
     g_polyline = 3037, 8;
     g_restoredc = 3039, 4;
+    g_fillrgn = 3040, 6;
+    g_framergn = 3041, 10;
+    g_invertrgn = 3042, 4;
+    g_paintrgn = 3043, 4;
+    g_selectcliprgn = 3044, 4;
     g_selectobject = 3045, 4;
+    g_combinergn = 3047, 8;
+    g_createbitmap = 3048, 12;
+    g_createbitmapindirect = 3049, 4;
     g_createbrushindirect = 3050, 4;
+    g_createcompatiblebitmap = 3051, 6;
+    g_createcompatibledc = 3052, 2;
+    g_createdc = 3053, 16;
+    g_createellipticrgn = 3054, 8;
+    g_createellipticrgnindirect = 3055, 4;
     g_createfont = 3056, 30;
     g_createfontindirect = 3057, 4;
     g_createhatchbrush = 3058, 6;
+    g_createpatternbrush = 3060, 2;
     g_createpen = 3061, 8;
     g_createpenindirect = 3062, 4;
+    g_createpolygonrgn = 3063, 8;
+    g_createrectrgn = 3064, 8;
+    g_createrectrgnindirect = 3065, 4;
     g_createsolidbrush = 3066, 4;
+    g_dptolp = 3067, 8;
+    g_deletedc = 3068, 2;
     g_deleteobject = 3069, 2;
+    g_enumfonts = 3070, 14;
+    g_equalrgn = 3072, 4;
+    g_getbitmapbits = 3074, 10;
     g_getbkcolor = 3075, 2;
     g_getbkmode = 3076, 2;
     g_getclipbox = 3077, 6;
     g_getcurrentposition = 3078, 2;
+    g_getdcorg = 3079, 2;
     g_getdevicecaps = 3080, 4;
     g_getmapmode = 3081, 2;
     g_getobject = 3082, 8;
     g_getpixel = 3083, 6;
     g_getrop2 = 3085, 2;
     g_getstockobject = 3087, 2;
+    g_getstretchbltmode = 3088, 2;
     g_gettextcolor = 3090, 2;
     g_gettextextent = 3091, 8;
     g_gettextface = 3092, 8;
     g_gettextmetrics = 3093, 6;
+    g_getviewportext = 3094, 2;
+    g_getviewportorg = 3095, 2;
+    g_getwindowext = 3096, 2;
+    g_getwindoworg = 3097, 2;
+    g_lptodp = 3099, 8;
+    g_offsetrgn = 3101, 6;
+    g_ptvisible = 3103, 6;
+    g_rectvisible = 3104, 6;
+    g_setbitmapbits = 3106, 10;
     g_muldiv = 3128, 6;
+    g_getrgnbox = 3134, 6;
+    g_setbrushorg = 3148, 6;
+    g_unrealizeobject = 3150, 2;
+    g_createic = 3153, 16;
+    g_getnearestcolor = 3154, 6;
+    g_creatediscardablebitmap = 3156, 6;
+    g_ptinregion = 3161, 6;
+    g_setrectrgn = 3172, 10;
+    g_rectinregion = 3181, 6;
+    g_enumfontfamilies = 3330, 14;
     g_gettextalign = 3345, 2;
     g_settextalign = 3346, 4;
     g_getcharwidth = 3350, 10;
     g_exttextout = 3351, 22;
+    g_createpalette = 3360, 4;
+    g_getpaletteentries = 3363, 10;
+    g_setpaletteentries = 3364, 10;
+    g_updatecolors = 3366, 2;
+    g_animatepalette = 3367, 10;
+    g_resizepalette = 3368, 4;
+    g_getnearestpaletteindex = 3370, 6;
+    g_setsystempaletteuse = 3373, 4;
+    g_getsystempaletteuse = 3374, 2;
+    g_getsystempaletteentries = 3375, 10;
+    g_stretchdibits = 3439, 32;
+    g_setdibits = 3440, 18;
+    g_getdibits = 3441, 18;
+    g_createdibitmap = 3442, 20;
+    g_setdibitstodevice = 3443, 28;
+    g_createroundrectrgn = 3444, 12;
+    g_createdibpatternbrush = 3445, 4;
+    g_createpolypolygonrgn = 3451, 12;
+    g_getbrushorgex = 3469, 6;
+    g_getcurrentpositionex = 3470, 6;
+    g_gettextextentpoint = 3471, 12;
+    g_getviewportextex = 3472, 6;
+    g_getviewportorgex = 3473, 6;
+    g_getwindowextex = 3474, 6;
+    g_getwindoworgex = 3475, 6;
+    g_offsetviewportorgex = 3476, 10;
+    g_offsetwindoworgex = 3477, 10;
+    g_setviewportextex = 3479, 10;
+    g_setviewportorgex = 3480, 10;
+    g_setwindowextex = 3481, 10;
+    g_setwindoworgex = 3482, 10;
+    g_movetoex = 3483, 10;
+    g_scaleviewportextex = 3484, 14;
+    g_scalewindowextex = 3485, 14;
+    g_getaspectratiofilterex = 3486, 6;
     // KEYBOARD
     kb_ansitooem = 4005, 8;
     kb_oemtoansi = 4006, 8;
     kb_getkeyboardtype = 4130, 2;
     kb_getkbcodepage = 4132, 0;
-    // Stage 3: atoms (KERNEL, USER), printing (GDI, print.rs), COMMDLG
-    // (commdlg.rs), DDEML (ddeml.rs).
-    k_initatomtable = 1068, 2;
-    k_findatom = 1069, 4;
-    k_addatom = 1070, 4;
-    k_deleteatom = 1071, 2;
-    k_getatomname = 1072, 8;
-    k_getatomhandle = 1073, 2;
-    u_globaladdatom = 2268, 4;
-    u_globaldeleteatom = 2269, 2;
-    u_globalfindatom = 2270, 4;
-    u_globalgetatomname = 2271, 8;
+    // SHELL
+    sh_extracticon = 6534, 8;
+    // Stage 3: printing (GDI, print.rs), COMMDLG (commdlg.rs), DDEML
+    // (ddeml.rs).
     g_escape = 3038, 14;
-    g_createdc = 3053, 16;
-    g_deletedc = 3068, 2;
-    g_createic = 3153, 16;
     g_queryabort = 3155, 4;
     g_startdoc = 3377, 6;
     g_enddoc = 3378, 2;
@@ -598,10 +733,31 @@ entries! {
 }
 
 extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
+    let r = dispatch_(idx, args);
+    if tracing() && idx != 1 {
+        // The arguments as words, first argument first (_pascal pushes
+        // them left to right), and the result.
+        let n = arg_size(idx) / 2;
+        let mut s = alloc::string::String::new();
+        for i in (0..n).rev() {
+            let w = unsafe { (args.add(2 * i) as *const u16).read_unaligned() };
+            let _ = core::fmt::write(&mut s, format_args!(" {w:04x}"));
+        }
+        trace(format_args!("W16 {}{} -> {:x}", idx, s, r));
+    }
+    r
+}
+
+fn dispatch_(idx: u32, args: *const u8) -> u32 {
     let size = arg_size(idx);
     let mut a = Pascal::new(args, size);
-    if tracing() && idx != 1 {
-        trace(format_args!("W16 {}", idx));
+    // Printers' DCs and the printing calls (before bitmap.rs's display
+    // DCs).
+    if let Some(r) = print::call(idx, &mut Pascal::new(args, size)) {
+        return r;
+    }
+    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)) {
+        return r;
     }
     match idx {
         1 => {
@@ -612,14 +768,9 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
             let (h, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
             native(idx, h, m, wp, lp)
         }
-        1068..=1073 => dde::atoms(idx - 1000, &mut a).unwrap_or(0),
-        2268..=2271 => dde::atoms(idx - 1000, &mut a).unwrap_or(0),
         1000..2000 => kernel::call(idx - 1000, &mut a),
         2000..3000 => user::call(idx - 2000, &mut a),
-        3000..4000 => match print::call(idx - 3000, &mut a) {
-            Some(r) => r,
-            None => gdi::call(idx - 3000, &mut a),
-        },
+        3000..4000 => gdi::call(idx - 3000, &mut a),
         4000..5000 => kernel::keyboard(idx - 4000, &mut a),
         6000..6100 => commdlg::call(idx - 6000, &mut a),
         6100..6200 => ddeml::call(idx - 6100, &mut a),

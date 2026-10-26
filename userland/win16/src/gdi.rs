@@ -25,6 +25,9 @@ pub enum DcKind {
     Paint,
     /// From GetDC: ReleaseDC.
     Window,
+    /// From CreateCompatibleDC (or CreateDC/CreateIC of the display): a
+    /// PM memory PS on a memory DC (bitmap.rs); DeleteDC.
+    Memory,
     /// A printer's (print.rs): DeleteDC.
     Printer,
 }
@@ -42,12 +45,17 @@ pub struct Font {
     pub underline: bool,
 }
 
-#[derive(Clone, Copy)]
-enum Obj {
+#[derive(Clone)]
+pub enum Obj {
     Brush { color: u32, null: bool },
     Pen { style: u16, width: u16, color: u32 },
     Font(Font),
-    Palette,
+    /// A PM bitmap: width, height, bits per pixel (1: monochrome).
+    Bitmap { hbm: u32, w: i32, h: i32, bpp: u16 },
+    /// The COLORREFs of a logical palette.
+    Palette(Vec<u32>),
+    /// A region: non-overlapping rectangles (region.rs).
+    Region(Vec<[i32; 4]>),
 }
 
 #[derive(Clone, Copy)]
@@ -61,18 +69,33 @@ struct State {
     pos: (i32, i32),
     rop2: u16,
     align: u16,
+    palette: u16,
+    stretch: u16,
+    /// The mapping mode, window and viewport origins and extents.
+    map: u16,
+    worg: (i32, i32),
+    wext: (i32, i32),
+    vorg: (i32, i32),
+    vext: (i32, i32),
 }
 
-struct Dc {
-    hdc: u16,
-    hps: u32,
-    height: i32,
-    kind: DcKind,
+pub struct Dc {
+    pub hdc: u16,
+    pub hps: u32,
+    pub height: i32,
+    pub kind: DcKind,
     s: State,
+    /// The PM window (0 for a memory DC).
+    pub pmwnd: u32,
+    /// A memory DC's PM device context, its selected bitmap (0: the
+    /// default 1x1 monochrome one) and that default bitmap.
+    pub mem: u32,
+    pub bitmap: u16,
+    pub def_bm: u32,
     /// The font made current in the PS (0: none yet).
     applied: u16,
     saved: Vec<(State, bool)>,
-    clipped: bool,
+    pub clipped: bool,
 }
 
 struct Gdi {
@@ -117,24 +140,54 @@ fn g() -> &'static mut Gdi {
             p(0x000000, 0),     // BLACK_PEN
             p(0, 5),            // NULL_PEN
             None,
-            mono,                              // OEM_FIXED_FONT
-            mono,                              // ANSI_FIXED_FONT
+            mono.clone(),                      // OEM_FIXED_FONT
+            mono.clone(),                      // ANSI_FIXED_FONT
             Some(Obj::Font(Font { weight: 400, ..sys_font() })), // ANSI_VAR_FONT
             Some(Obj::Font(sys_font())),       // SYSTEM_FONT
             Some(Obj::Font(sys_font())),       // DEVICE_DEFAULT_FONT
-            Some(Obj::Palette),
+            Some(Obj::Palette(DEFAULT_PALETTE.to_vec())), // DEFAULT_PALETTE
             mono,                              // SYSTEM_FIXED_FONT
         ];
     }
     g
 }
 
-fn obj(h: u16) -> Option<Obj> {
-    let i = h.checked_sub(OBJ_BASE)? as usize / 2;
-    g().objs.get(i).copied().flatten()
+/// DeleteObject: not the stock objects, nor a bitmap a DC has selected.
+pub fn delete_object(o: u16) -> bool {
+    let Some(i) = o.checked_sub(OBJ_BASE).map(|i| i as usize / 2) else { return false };
+    if i < STOCK || i >= g().objs.len() || g().sys_brushes.contains(&o) {
+        return i < STOCK || g().sys_brushes.contains(&o);
+    }
+    if let Some(Obj::Bitmap { hbm, .. }) = obj(o) {
+        // Not while a DC has it selected.
+        if g().dcs.iter().any(|d| d.bitmap == o) {
+            return false;
+        }
+        unsafe { GpiDeleteBitmap(hbm) };
+    }
+    g().objs[i] = None;
+    g().widths.remove(&o);
+    true
 }
 
-fn new_obj(o: Obj) -> u16 {
+/// Windows' 20 static colours (the default palette).
+pub const DEFAULT_PALETTE: [u32; 20] = [
+    0x000000, 0x000080, 0x008000, 0x008080, 0x800000, 0x800080, 0x808000, 0xc0c0c0, 0xc0dcc0, 0xf0caa6,
+    0xf0fbff, 0xa4a0a0, 0x808080, 0x0000ff, 0x00ff00, 0x00ffff, 0xff0000, 0xff00ff, 0xffff00, 0xffffff,
+];
+
+pub fn obj(h: u16) -> Option<Obj> {
+    let i = h.checked_sub(OBJ_BASE)? as usize / 2;
+    g().objs.get(i).cloned().flatten()
+}
+
+/// The object itself, to change it.
+pub fn obj_mut(h: u16) -> Option<&'static mut Obj> {
+    let i = h.checked_sub(OBJ_BASE)? as usize / 2;
+    g().objs.get_mut(i).and_then(|o| o.as_mut())
+}
+
+pub fn new_obj(o: Obj) -> u16 {
     let g = g();
     let i = match g.objs.iter().skip(STOCK).position(|o| o.is_none()) {
         Some(i) => {
@@ -157,7 +210,7 @@ fn new_obj(o: Obj) -> u16 {
     h
 }
 
-fn dc(h: u16) -> Option<&'static mut Dc> {
+pub fn dc(h: u16) -> Option<&'static mut Dc> {
     g().dcs.iter_mut().find(|d| d.hdc == h)
 }
 
@@ -177,12 +230,25 @@ pub fn is_font(h: u16) -> bool {
     matches!(obj(h), Some(Obj::Font(_)))
 }
 
-/// PM's RGB for a COLORREF.
+/// PM's RGB for a COLORREF; PALETTEINDEX(i) (high byte 1) is entry i of
+/// the palette last selected.
 pub fn rgb(c: u32) -> i32 {
+    let c = if c >> 24 == 1 {
+        let i = (c & 0xffff) as usize;
+        match obj(*CUR_PALETTE.get()) {
+            Some(Obj::Palette(p)) => p.get(i).copied().unwrap_or(0),
+            _ => DEFAULT_PALETTE.get(i).copied().unwrap_or(0),
+        }
+    } else {
+        c
+    };
     ((c & 0xff) << 16 | (c & 0xff00) | (c >> 16) & 0xff) as i32
 }
 
-pub fn new_dc(hps: u32, _pm: u32, height: i32, kind: DcKind) -> u16 {
+/// The palette last selected into a DC (for PALETTEINDEX colours).
+pub static CUR_PALETTE: Global<u16> = Global::new(OBJ_BASE + 2 * 15);
+
+pub fn new_dc(hps: u32, pm: u32, height: i32, kind: DcKind) -> u16 {
     if hps == 0 {
         return 0;
     }
@@ -195,12 +261,68 @@ pub fn new_dc(hps: u32, _pm: u32, height: i32, kind: DcKind) -> u16 {
         hps,
         height,
         kind,
-        s: State { text: 0, bk: 0xffffff, bk_mode: OPAQUE, brush: OBJ_BASE, pen: OBJ_BASE + 2 * 7, font: SYSTEM_FONT, pos: (0, 0), rop2: 13, align: 0 },
+        s: State {
+            text: 0,
+            bk: 0xffffff,
+            bk_mode: OPAQUE,
+            brush: OBJ_BASE,
+            pen: OBJ_BASE + 2 * 7,
+            font: SYSTEM_FONT,
+            pos: (0, 0),
+            rop2: 13,
+            align: 0,
+            palette: OBJ_BASE + 2 * 15,
+            stretch: 1,
+            map: MM_TEXT,
+            worg: (0, 0),
+            wext: (1, 1),
+            vorg: (0, 0),
+            vext: (1, 1),
+        },
+        pmwnd: pm,
+        mem: 0,
+        bitmap: 0,
+        def_bm: 0,
         applied: 0,
         saved: Vec::new(),
         clipped: false,
     });
     hdc
+}
+
+/// The PS of the memory DC that has the bitmap `h` selected.
+pub fn dc_with_bitmap(h: u16) -> Option<u32> {
+    g().dcs.iter().find(|d| d.bitmap == h).map(|d| d.hps)
+}
+
+/// The DC's brush.
+pub fn brush_of(hdc: u16) -> u16 {
+    dc(hdc).map_or(0, |d| d.s.brush)
+}
+
+pub fn set_stretch_mode(hdc: u16, m: u16) -> u16 {
+    dc(hdc).map_or(0, |d| core::mem::replace(&mut d.s.stretch, m))
+}
+
+pub fn stretch_mode(hdc: u16) -> u16 {
+    dc(hdc).map_or(0, |d| d.s.stretch)
+}
+
+/// SelectPalette: the previous palette.
+pub fn select_palette(hdc: u16, p: u16) -> u16 {
+    if !matches!(obj(p), Some(Obj::Palette(_))) {
+        return 0;
+    }
+    *CUR_PALETTE.get() = p;
+    dc(hdc).map_or(0, |d| core::mem::replace(&mut d.s.palette, p))
+}
+
+/// The colours of the DC's palette.
+pub fn palette_colors(hdc: u16) -> Vec<u32> {
+    match dc(hdc).and_then(|d| obj(d.s.palette)) {
+        Some(Obj::Palette(p)) => p,
+        _ => DEFAULT_PALETTE.to_vec(),
+    }
 }
 
 pub fn release_dc(hdc: u16) -> bool {
@@ -219,6 +341,10 @@ pub fn release_dc(hdc: u16) -> bool {
         match d.kind {
             DcKind::Paint => WinEndPaint(d.hps),
             DcKind::Window => WinReleasePS(d.hps),
+            DcKind::Memory => {
+                crate::bitmap::delete_memory(&d);
+                1
+            }
             DcKind::Printer => {
                 crate::print::close(hdc);
                 1
@@ -237,13 +363,289 @@ pub fn page_done(hdc: u16) {
     }
 }
 
-/// A Windows rectangle (y down) as a PM one.
-fn pm_rect(d: &Dc, r: [i32; 4]) -> RectL {
+pub const MM_TEXT: u16 = 1;
+const MM_ISOTROPIC: u16 = 7;
+const MM_ANISOTROPIC: u16 = 8;
+
+/// A logical point in device units (Windows' y down): the window origin
+/// and extent map to the viewport's.
+pub fn to_dev(d: &Dc, x: i32, y: i32) -> (i32, i32) {
+    let s = &d.s;
+    if s.map == MM_TEXT {
+        return (x - s.worg.0 + s.vorg.0, y - s.worg.1 + s.vorg.1);
+    }
+    let we = |e: i32| if e == 0 { 1 } else { e };
+    (
+        ((x - s.worg.0) as i64 * s.vext.0 as i64 / we(s.wext.0) as i64) as i32 + s.vorg.0,
+        ((y - s.worg.1) as i64 * s.vext.1 as i64 / we(s.wext.1) as i64) as i32 + s.vorg.1,
+    )
+}
+
+/// A device point in logical units.
+pub fn to_log(d: &Dc, x: i32, y: i32) -> (i32, i32) {
+    let s = &d.s;
+    if s.map == MM_TEXT {
+        return (x - s.vorg.0 + s.worg.0, y - s.vorg.1 + s.worg.1);
+    }
+    let ve = |e: i32| if e == 0 { 1 } else { e };
+    (
+        ((x - s.vorg.0) as i64 * s.wext.0 as i64 / ve(s.vext.0) as i64) as i32 + s.worg.0,
+        ((y - s.vorg.1) as i64 * s.wext.1 as i64 / ve(s.vext.1) as i64) as i32 + s.worg.1,
+    )
+}
+
+/// A logical rectangle in device units (normalised).
+pub fn dev_rect(d: &Dc, r: [i32; 4]) -> [i32; 4] {
+    let (a, b) = (to_dev(d, r[0], r[1]), to_dev(d, r[2], r[3]));
+    [a.0.min(b.0), a.1.min(b.1), a.0.max(b.0), a.1.max(b.1)]
+}
+
+/// A logical point as a PM device point.
+pub fn pm_pt(d: &Dc, x: i32, y: i32) -> PointL {
+    let (x, y) = to_dev(d, x, y);
+    PointL { x, y: d.height - 1 - y }
+}
+
+/// A Windows rectangle (logical, y down) as a PM one.
+pub fn pm_rect(d: &Dc, r: [i32; 4]) -> RectL {
+    pm_rect_dev(d, dev_rect(d, r))
+}
+
+/// A Windows device rectangle as a PM one.
+pub fn pm_rect_dev(d: &Dc, r: [i32; 4]) -> RectL {
     RectL { l: r[0], b: d.height - r[3], r: r[2], t: d.height - r[1] }
 }
 
+/// The extents of the fixed mapping modes (window, viewport) at `dpi`
+/// pels per inch (96, a printer's 300): y goes up.
+fn fixed_extents(map: u16, dpi: i32) -> Option<((i32, i32), (i32, i32))> {
+    let per_inch = match map {
+        2 => 254,  // MM_LOMETRIC
+        3 => 2540, // MM_HIMETRIC
+        4 => 100,  // MM_LOENGLISH
+        5 => 1000, // MM_HIENGLISH
+        6 => 1440, // MM_TWIPS
+        _ => return None,
+    };
+    Some(((per_inch, per_inch), (dpi, -dpi)))
+}
+
+/// The mapping calls: SetMapMode, the origins and extents (their old
+/// values packed x | y << 16, or written to a POINT/SIZE for the Ex
+/// forms), DPtoLP and LPtoDP.
+fn mapping(ord: u32, a: &mut Pascal) -> Option<u32> {
+    let pack = |v: (i32, i32)| (v.1 as u32 & 0xffff) << 16 | v.0 as u32 & 0xffff;
+    let put = |p: *mut u8, v: (i32, i32)| {
+        if !p.is_null() {
+            unsafe {
+                (p as *mut i16).write_unaligned(v.0 as i16);
+                (p.add(2) as *mut i16).write_unaligned(v.1 as i16);
+            }
+        }
+    };
+    Some(match ord {
+        // SetMapMode(hdc, mode)
+        3 => {
+            let (h, m) = (a.w(), a.w());
+            let Some(d) = dc(h) else { return Some(0) };
+            if !(1..=8).contains(&m) {
+                return Some(0);
+            }
+            let old = core::mem::replace(&mut d.s.map, m);
+            let dpi = if d.kind == DcKind::Printer { 300 } else { 96 };
+            if let Some((w, v)) = fixed_extents(m, dpi) {
+                d.s.wext = w;
+                d.s.vext = v;
+            } else if m == MM_TEXT || (old != MM_ISOTROPIC && old != MM_ANISOTROPIC) {
+                d.s.wext = (1, 1);
+                d.s.vext = (1, 1);
+            }
+            old as u32
+        }
+        // GetMapMode(hdc)
+        81 => dc(a.w()).map_or(0, |d| d.s.map as u32),
+        // SetWindowOrg, SetWindowExt, SetViewportOrg, SetViewportExt(hdc,
+        // x, y) and their Ex forms (+ the old value's address).
+        11..=14 | 479..=482 => {
+            let (h, x, y) = (a.w(), a.i(), a.i());
+            let p = if ord > 400 { a.p() } else { core::ptr::null_mut() };
+            let Some(d) = dc(h) else { return Some(0) };
+            let which = match ord {
+                11 | 482 => 0,
+                12 | 481 => 1,
+                13 | 480 => 2,
+                _ => 3,
+            };
+            let fixed_ext = which % 2 == 1 && d.s.map != MM_ISOTROPIC && d.s.map != MM_ANISOTROPIC;
+            let slot = match which {
+                0 => &mut d.s.worg,
+                1 => &mut d.s.wext,
+                2 => &mut d.s.vorg,
+                _ => &mut d.s.vext,
+            };
+            let old = *slot;
+            if !fixed_ext && !(which % 2 == 1 && (x == 0 || y == 0)) {
+                *slot = (x, y);
+            }
+            if d.s.map == MM_ISOTROPIC && which % 2 == 1 {
+                isotropic(d);
+            }
+            if ord > 400 {
+                put(p, old);
+                1
+            } else {
+                pack(old)
+            }
+        }
+        // OffsetWindowOrg, OffsetViewportOrg(hdc, dx, dy) (+ Ex)
+        15 | 17 | 476 | 477 => {
+            let (h, x, y) = (a.w(), a.i(), a.i());
+            let p = if ord > 400 { a.p() } else { core::ptr::null_mut() };
+            let Some(d) = dc(h) else { return Some(0) };
+            let slot = if ord == 15 || ord == 477 { &mut d.s.worg } else { &mut d.s.vorg };
+            let old = *slot;
+            *slot = (old.0 + x, old.1 + y);
+            if ord > 400 {
+                put(p, old);
+                1
+            } else {
+                pack(old)
+            }
+        }
+        // ScaleWindowExt, ScaleViewportExt(hdc, xnum, xdenom, ynum,
+        // ydenom) (+ Ex)
+        16 | 18 | 484 | 485 => {
+            let (h, xn, xd, yn, yd) = (a.w(), a.i(), a.i(), a.i(), a.i());
+            let p = if ord > 400 { a.p() } else { core::ptr::null_mut() };
+            let Some(d) = dc(h) else { return Some(0) };
+            let aniso = d.s.map == MM_ISOTROPIC || d.s.map == MM_ANISOTROPIC;
+            let slot = if ord == 16 || ord == 485 { &mut d.s.wext } else { &mut d.s.vext };
+            let old = *slot;
+            if aniso && xd != 0 && yd != 0 {
+                *slot = (old.0 * xn / xd, old.1 * yn / yd);
+                if d.s.map == MM_ISOTROPIC {
+                    isotropic(d);
+                }
+            }
+            if ord > 400 {
+                put(p, old);
+                1
+            } else {
+                pack(old)
+            }
+        }
+        // GetViewportExt, GetViewportOrg, GetWindowExt, GetWindowOrg(hdc)
+        94..=97 => {
+            let h = a.w();
+            let Some(d) = dc(h) else { return Some(0) };
+            pack(match ord {
+                94 => d.s.vext,
+                95 => d.s.vorg,
+                96 => d.s.wext,
+                _ => d.s.worg,
+            })
+        }
+        // GetViewportExtEx, GetViewportOrgEx, GetWindowExtEx,
+        // GetWindowOrgEx(hdc, lpPoint)
+        472..=475 => {
+            let (h, p) = (a.w(), a.p());
+            let Some(d) = dc(h) else { return Some(0) };
+            put(p, match ord {
+                472 => d.s.vext,
+                473 => d.s.vorg,
+                474 => d.s.wext,
+                _ => d.s.worg,
+            });
+            1
+        }
+        // DPtoLP(hdc, points, n), LPtoDP(hdc, points, n)
+        67 | 99 => {
+            let (h, p, n) = (a.w(), a.p(), a.i());
+            let Some(d) = dc(h) else { return Some(0) };
+            for i in 0..n.max(0) as usize {
+                let q = unsafe { p.add(4 * i) };
+                let (x, y) = unsafe { ((q as *const i16).read_unaligned() as i32, (q.add(2) as *const i16).read_unaligned() as i32) };
+                put(q, if ord == 67 { to_log(d, x, y) } else { to_dev(d, x, y) });
+            }
+            1
+        }
+        // MoveToEx(hdc, x, y, lpOld), GetCurrentPositionEx(hdc, lpPoint)
+        483 => {
+            let (h, x, y, p) = (a.w(), a.i(), a.i(), a.p());
+            let Some(d) = dc(h) else { return Some(0) };
+            let old = core::mem::replace(&mut d.s.pos, (x, y));
+            put(p, old);
+            1
+        }
+        470 => {
+            let (h, p) = (a.w(), a.p());
+            let Some(d) = dc(h) else { return Some(0) };
+            put(p, d.s.pos);
+            1
+        }
+        // GetTextExtentPoint(hdc, text, count, lpSize)
+        471 => {
+            let (h, s, n, p) = (a.w(), a.l(), a.i(), a.p());
+            if dc(h).is_none() {
+                return Some(0);
+            }
+            let text = if n > 0 { unsafe { core::slice::from_raw_parts(flat(s), n as usize) } } else { &[] };
+            put(p, (text_width(h, text), line_height(h)));
+            1
+        }
+        // GetDCOrg(hdc): the DC's origin on the screen.
+        79 => {
+            let h = a.w();
+            dc_origin(h).map_or(0, pack)
+        }
+        // GetBrushOrgEx(hdc, lpPoint), SetBrushOrg(hdc, x, y)
+        469 => {
+            let (_h, p) = (a.w(), a.p());
+            put(p, (0, 0));
+            1
+        }
+        148 => {
+            let (_h, _x, _y) = (a.w(), a.i(), a.i());
+            0
+        }
+        // GetAspectRatioFilterEx(hdc, lpSize)
+        486 => {
+            let (_h, p) = (a.w(), a.p());
+            put(p, (0, 0));
+            1
+        }
+        _ => return None,
+    })
+}
+
+/// MM_ISOTROPIC: the viewport extent shrinks so that a logical unit is
+/// as wide as it is high.
+fn isotropic(d: &mut Dc) {
+    let (wx, wy) = (d.s.wext.0.max(1) as i64, d.s.wext.1.abs().max(1) as i64);
+    let (vx, vy) = (d.s.vext.0 as i64, d.s.vext.1 as i64);
+    let (sx, sy) = (vx.abs() * 1000 / wx, vy.abs() * 1000 / wy);
+    if sx > sy {
+        d.s.vext.0 = (vx.signum() * wx * sy / 1000) as i32;
+    } else {
+        d.s.vext.1 = (vy.signum() * wy * sx / 1000) as i32;
+    }
+}
+
+/// The screen position of a DC's top-left corner (window DCs).
+fn dc_origin(h: u16) -> Option<(i32, i32)> {
+    let d = dc(h)?;
+    let hwnd = d.pmwnd;
+    if hwnd == 0 {
+        return Some((0, 0));
+    }
+    let mut p = PointL { x: 0, y: d.height };
+    unsafe { WinMapWindowPoints(hwnd, HWND_DESKTOP, &mut p, 1) };
+    let sh = unsafe { WinQuerySysValue(HWND_DESKTOP, SV_CYSCREEN) };
+    Some((p.x, sh - p.y))
+}
+
 /// The brush's colour: an HBRUSH, or a system colour index + 1.
-fn brush_color(br: u16) -> Option<u32> {
+pub fn brush_color(br: u16) -> Option<u32> {
     if (1..=21).contains(&br) {
         return Some(sys_color(br - 1));
     }
@@ -485,6 +887,7 @@ pub fn text_at(hdc: u16, x: i32, y: i32, s: &[u8]) {
     }
     let (asc, _, _, _) = metrics(d);
     set_text_attrs(d);
+    let (x, y) = to_dev(d, x, y);
     let p = PointL { x, y: d.height - y - asc };
     unsafe { GpiCharStringAt(d.hps, &p, s.len() as i32, s.as_ptr()) };
 }
@@ -500,8 +903,8 @@ pub fn line(hdc: u16, x0: i32, y0: i32, x1: i32, y1: i32, c: u32) {
         unsafe {
             GpiSetColor(d.hps, rgb(c));
             GpiSetLineWidth(d.hps, 1 << 16);
-            GpiMove(d.hps, &PointL { x: x0, y: d.height - 1 - y0 });
-            GpiLine(d.hps, &PointL { x: x1, y: d.height - 1 - y1 });
+            GpiMove(d.hps, &pm_pt(d, x0, y0));
+            GpiLine(d.hps, &pm_pt(d, x1, y1));
         }
     }
 }
@@ -665,7 +1068,7 @@ fn ellipse(d: &Dc, l: i32, t: i32, r: i32, b: i32) {
 }
 
 fn points(p: *const i16, n: usize, d: &Dc) -> Vec<PointL> {
-    (0..n).map(|i| unsafe { PointL { x: p.add(2 * i).read_unaligned() as i32, y: d.height - 1 - p.add(2 * i + 1).read_unaligned() as i32 } }).collect()
+    (0..n).map(|i| unsafe { pm_pt(d, p.add(2 * i).read_unaligned() as i32, p.add(2 * i + 1).read_unaligned() as i32) }).collect()
 }
 
 /// LOGFONT -> Font: lfHeight, lfWidth, lfEscapement, lfOrientation,
@@ -686,6 +1089,9 @@ fn font_of(height: i32, width: i32, weight: u16, italic: bool, underline: bool, 
 }
 
 pub fn call(ord: u32, a: &mut Pascal) -> u32 {
+    if let Some(r) = mapping(ord, a) {
+        return r;
+    }
     match ord {
         // SetBkColor(hdc, color), SetTextColor(hdc, color): the old one.
         1 | 9 => {
@@ -702,12 +1108,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 return 0;
             }
             set_bk_mode(h, m) as u32
-        }
-        // SetMapMode(hdc, mode): MM_TEXT only.
-        3 => {
-            a.w();
-            a.w();
-            1
         }
         // SetROP2(hdc, rop)
         4 => {
@@ -777,8 +1177,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             d.s.pos = (x, y);
             let Some((color, width)) = pen_color(d) else { return 1 };
             let color = if d.s.rop2 == 6 || d.s.rop2 == 7 { 0xffffff ^ color } else { color };
-            let from = PointL { x: x0, y: d.height - 1 - y0 };
-            let to = PointL { x, y: d.height - 1 - y };
+            let from = pm_pt(d, x0, y0);
+            let to = pm_pt(d, x, y);
             unsafe {
                 GpiSetColor(d.hps, rgb(color));
                 GpiSetLineWidth(d.hps, width << 16);
@@ -864,6 +1264,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 Some(Obj::Brush { .. }) => core::mem::replace(&mut d.s.brush, o) as u32,
                 Some(Obj::Pen { .. }) => core::mem::replace(&mut d.s.pen, o) as u32,
                 Some(Obj::Font(_)) => core::mem::replace(&mut d.s.font, o) as u32,
+                Some(Obj::Bitmap { .. }) => crate::bitmap::select(h, o) as u32,
+                // A region: SelectClipRgn's result (the region type).
+                Some(Obj::Region(_)) => crate::region::select_clip(h, o) as u32,
                 _ => 0,
             }
         }
@@ -924,13 +1327,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // DeleteObject(obj): not the stock ones.
         69 => {
             let o = a.w();
-            let Some(i) = o.checked_sub(OBJ_BASE).map(|i| i as usize / 2) else { return 0 };
-            if i < STOCK || i >= g().objs.len() || g().sys_brushes.contains(&o) {
-                return (i < STOCK || g().sys_brushes.contains(&o)) as u32;
-            }
-            g().objs[i] = None;
-            g().widths.remove(&o);
-            1
+            delete_object(o) as u32
         }
         // GetBkColor(hdc), GetBkMode(hdc), GetTextColor(hdc)
         75 => bk_color(a.w()),
@@ -942,18 +1339,15 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let Some(d) = dc(h) else { return 0 };
             let mut rc = RectL::default();
             unsafe { GpiQueryClipBox(d.hps, &mut rc) };
-            write_rect(r, [rc.l, d.height - rc.t - 1, rc.r + 1, d.height - rc.b]);
+            let (l, t) = to_log(d, rc.l, d.height - rc.t - 1);
+            let (rr, b) = to_log(d, rc.r + 1, d.height - rc.b);
+            write_rect(r, [l.min(rr), t.min(b), l.max(rr), t.max(b)]);
             2
         }
         // GetCurrentPosition(hdc): x in AX, y in DX.
         78 => {
             let h = a.w();
             dc(h).map_or(0, |d| (d.s.pos.1 as u32 & 0xffff) << 16 | d.s.pos.0 as u32 & 0xffff)
-        }
-        // GetMapMode(hdc): MM_TEXT.
-        81 => {
-            a.w();
-            1
         }
         // GetObject(obj, cb, buf)
         82 => {
@@ -964,7 +1358,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         83 => {
             let (h, x, y) = (a.w(), a.i(), a.i());
             let Some(d) = dc(h) else { return 0 };
-            let c = unsafe { GpiQueryPel(d.hps, &PointL { x, y: d.height - 1 - y }) } as u32;
+            let c = unsafe { GpiQueryPel(d.hps, &pm_pt(d, x, y)) } as u32;
             // PM's RGB back to a COLORREF.
             (c & 0xff) << 16 | (c & 0xff00) | (c >> 16) & 0xff
         }
@@ -1180,6 +1574,16 @@ fn get_object(o: u16, cb: i32, p: *mut u8) -> i32 {
             b.extend_from_slice(&0u16.to_le_bytes());
             b.extend_from_slice(&color.to_le_bytes());
         }
+        // BITMAP: type, width, height, bytes per row (words), planes,
+        // bits per pixel, bits (none).
+        Some(Obj::Bitmap { w, h, bpp, .. }) => {
+            for v in [0, w, h, ((w * bpp as i32 + 15) / 16) * 2] {
+                b.extend_from_slice(&(v as i16).to_le_bytes());
+            }
+            b.extend_from_slice(&[1, bpp as u8, 0, 0, 0, 0]);
+        }
+        // A palette: its number of entries.
+        Some(Obj::Palette(p)) => b.extend_from_slice(&(p.len() as u16).to_le_bytes()),
         Some(Obj::Font(f)) => {
             let h = if f.height == 0 { 16 } else { f.height };
             for v in [h, f.width, 0, 0, f.weight as i32] {

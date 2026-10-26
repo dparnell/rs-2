@@ -207,3 +207,16 @@ pub fn sprintf(buf: *mut u8, fmt: &[u8], args: *const u8) -> usize {
     }
     out.len().min(1024)
 }
+
+/// A Windows function WIN16 does not implement yet (stubs.rs) was called:
+/// say so once (it returns 0).
+pub fn not_implemented(idx: u32) {
+    static SEEN: crate::Global<Vec<u32>> = crate::Global::new(Vec::new());
+    let seen = SEEN.get();
+    if seen.contains(&idx) {
+        return;
+    }
+    seen.push(idx);
+    let name = crate::stubs::NAMES.iter().find(|n| n.0 as u32 == idx).map_or("?", |n| n.1);
+    crate::trace(format_args!("WIN16: not implemented: {name}"));
+}

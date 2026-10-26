@@ -320,9 +320,9 @@ fn items(t: &[u8], p: &mut usize, menu: u16) {
     }
 }
 
-/// LoadMenu from the program's resources.
-pub fn load(_hinst: u16, name: &Name) -> u16 {
-    match res::find(res::RT_MENU, name) {
+/// LoadMenu from a module's resources.
+pub fn load(hinst: u16, name: &Name) -> u16 {
+    match res::find(hinst, res::RT_MENU, name) {
         Some(t) => from_template(t),
         None => 0,
     }
@@ -637,8 +637,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         }
         // LoadAccelerators(hinst, name)
         177 => {
-            let (_hi, n) = (a.w(), a.l());
-            let Some(t) = Name::of(n).and_then(|n| res::find(res::RT_ACCELERATOR, &n)) else { return Some(0) };
+            let (hi, n) = (a.w(), a.l());
+            let Some(t) = Name::of(n).and_then(|n| res::find(hi, res::RT_ACCELERATOR, &n)) else { return Some(0) };
             let mut v = Vec::new();
             for e in t.chunks(5) {
                 if e.len() < 5 {

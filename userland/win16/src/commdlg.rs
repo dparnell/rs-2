@@ -310,7 +310,7 @@ fn template(use_res: bool, use_handle: bool, hinst: u16, name: u32, ours: Vec<u8
         return Some(unsafe { core::slice::from_raw_parts(p, 0x8000) }.to_vec());
     }
     if use_res {
-        let t = res::Name::of(name).and_then(|n| res::find(res::RT_DIALOG, &n));
+        let t = res::Name::of(name).and_then(|n| res::find(hinst, res::RT_DIALOG, &n));
         if t.is_none() {
             *ERROR.get() = CDERR_FINDRESFAILURE;
         }
