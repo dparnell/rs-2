@@ -9,7 +9,7 @@ files are involved. This is the media-free alternative to Win-OS/2
 
 ![HELLO16 on rs2](images/rs2-win16-hello.png)
 
-## Status (stage 1)
+## Status (stage 2)
 
 | What | State |
 |------|-------|
@@ -21,16 +21,32 @@ files are involved. This is the media-free alternative to Win-OS/2
 | WM_PAINT, BeginPaint/EndPaint, TextOut, DrawText, FillRect, lines | works |
 | MessageBox | works (PM's message box for now) |
 | Moving, sizing, closing (Alt+F4, the system menu) from PM | works |
-| Built-in controls, dialogs, menus, resources | stage 2 |
-| COMMDLG, clipboard, printing, DDE | stage 3 |
+| The program's resources: strings, menus, accelerators, dialog templates, FindResource/LoadResource | works (stage 2) |
+| Menus: menu bars, pop-ups, check marks, grayed items, WM_INITMENU(POPUP), WM_MENUSELECT, TrackPopupMenu | works (stage 2) |
+| Accelerators (LoadAccelerators, TranslateAccelerator) | works (stage 2) |
+| Dialogs: DialogBox(Param), CreateDialog(Param), the Indirect forms, DefDlgProc, IsDialogMessage (Tab, arrows in groups, Enter, Esc, mnemonics) | works (stage 2) |
+| BUTTON, STATIC, EDIT (single and multi-line), LISTBOX, COMBOBOX, SCROLLBAR, drawn by WIN16 | works (stage 2) |
+| Subclassing (SetWindowLong GWL_WNDPROC, CallWindowProc), window scroll bars, the caret, the clipboard (CF_TEXT, PM's) | works (stage 2) |
+| CreateFont and the stock fonts, ellipses, polygons, clipping rectangles, SaveDC/RestoreDC | works (stage 2) |
+| MDI, bitmaps (CreateBitmap, BitBlt, DIBs), regions, mapping modes, owner-drawn combo boxes, Windows DLLs, WIN.INI | later (stage 2 remainder) |
+| COMMDLG, printing, DDE | stage 3 |
 | DPMI, MMSYSTEM, OLE, TOOLHELP, the compatibility tail | stage 4 |
 
 Checked in QEMU: `RS2\HELLO16.EXE` (a classic hello world: a window
 class, text painted in WM_PAINT, a MessageBox on a click) shows as a PM
-window, moves, repaints and closes; `RS2\W16TEST.EXE` checks KERNEL,
-USER, GDI and the DOS calls (`w16test done: 0 failure(s)`). Both are
-built from source with Open Watcom (below). Screenshots:
-`work/progress/win16-native`.
+window, moves, repaints and closes; `RS2\MENU16.EXE` (a menu bar from
+its resources, check marks, a cascading pop-up, accelerators, a pop-up
+menu on the right button), `RS2\DLG16.EXE` (a modal dialog with one of
+each control, driven from the keyboard: mnemonics, Tab, a drop-down
+list, Enter) and `RS2\NOTE16.EXE` (a Notepad on the multi-line edit
+control: scroll bars, selection, the clipboard, undo, word wrap, saving
+a file, a file name dialog) work; `RS2\W16TEST.EXE` checks KERNEL, USER,
+GDI, the DOS calls and stage 2's resources, menus, accelerators,
+dialogs and controls (`w16test done: 0 failure(s)`, 126 checks). All
+are built from source with Open Watcom (below). Screenshots:
+`work/progress/win16-native` (stage 1), `work/progress/win16-stage2`.
+
+![DLG16: a Windows dialog on rs2](images/rs2-win16-dlg16.png)
 
 ## Windows programs are not OS/2 programs
 
@@ -195,8 +211,9 @@ What it costs, and how the later stages deal with it:
 - **hPrevInstance is always 0**, so each instance registers its own
   window classes (they are per process here) and GetInstanceData has no
   other instance to copy from. Programs that refuse a second instance
-  by looking at hPrevInstance start again; FindWindow (stage 2) finds
-  the first one's windows, which is how most programs do it anyway.
+  by looking at hPrevInstance start again; FindWindow, which is how
+  most programs do it anyway, will have to find the first one's windows
+  (it looks at the task's own windows so far).
 - **Global memory passed between tasks** (DDE, the clipboard, pointers
   in messages to another task's window): GMEM_DDESHARE blocks will be
   shared memory at the same address in every process (rs2's shared
@@ -271,34 +288,99 @@ background colour; DrawText draws line by line with WinDrawText
 (alignment, DT_SINGLELINE vertical centring, word breaks, `&` mnemonics
 as PM's `~`, DT_CALCRECT). Stock objects, solid brushes, pens,
 MoveTo/LineTo and Rectangle are there; GetTextMetrics and GetTextExtent
-answer from the PS's font.
+answer from the PS's font. Stage 2 added Ellipse (GpiFullArc), Polygon
+and Polyline, PatBlt with the solid raster operations, SetPixel and
+GetPixel, IntersectClipRect and ExcludeClipRect, SaveDC and RestoreDC,
+the text alignments (SetTextAlign), ExtTextOut, GetCharWidth, GetObject,
+the indirect brushes and pens, and fonts (below); USER's InvertRect,
+FrameRect and DrawFocusRect. The built-in controls draw with the same
+functions from Rust (`gdi::fill`, `gdi::text_at`, `gdi::draw_text_bytes`).
 
-## Controls, dialogs and menus (stage 2)
+## Controls, dialogs and menus
 
-The built-in window classes (BUTTON, STATIC, EDIT, LISTBOX, COMBOBOX,
-SCROLLBAR, MDICLIENT and the dialog class) will be WIN16's own: window
-procedures in Rust that draw Windows 3.1-style controls through WIN16's
-GDI on the control's DC, not PM controls. Windows programs depend on the
+**Built-in controls.** BUTTON, STATIC, EDIT, LISTBOX, COMBOBOX (and its
+list, COMBOLBOX) and SCROLLBAR are WIN16's own window classes, with
+window procedures in Rust (`ctl.rs`, `edit.rs`, `listbox.rs`,
+`scroll.rs`) that draw Windows 3.1-style controls through WIN16's GDI on
+the control's DC, not PM controls. Windows programs depend on the
 controls' Windows behaviour in detail: their messages (BM_, EM_, LB_,
-CB_, SBM_) and notifications (WM_COMMAND with the code in lParam's high
-word), WM_CTLCOLOR for colours, owner-drawn items (WM_DRAWITEM with an
-HDC), and subclassing (a program replaces an edit control's procedure
-and calls the original with CallWindowProc, so the built-in procedures
-need 16:16 addresses: a pool of 16-bit stubs, as PMWIN's
-`w16_proc_pool`). Drawing through our GDI keeps one DC model for the
-program's drawing and the controls'.
+CB_, the scroll bar calls) and notifications (WM_COMMAND with the code in
+lParam's high word: BN_CLICKED, EN_CHANGE, LBN_SELCHANGE, CBN_DROPDOWN...),
+WM_CTLCOLOR for colours (the dialog procedure can change a control's),
+WM_SETFONT, WM_GETDLGCODE, owner-drawn buttons and list boxes
+(WM_DRAWITEM with an HDC, WM_MEASUREITEM), and subclassing. Each
+built-in procedure has a 16:16 address of its own (a WIN16 entry below
+1000, not exported), so GetWindowLong(GWL_WNDPROC) gives programs a
+procedure they can call with CallWindowProc or directly; calls from WIN16
+to these addresses (and to DefWindowProc's and DefDlgProc's) go straight
+to the Rust code. A control's state is the window's `data`; windows
+destroyed while a built-in procedure runs are freed when none runs.
 
-Dialogs come from Windows dialog templates (RT_DIALOG, in dialog units
-of the system font) with a dialog manager in Rust (DialogBox,
-CreateDialog, IsDialogMessage, tab order, default push buttons,
-EndDialog). Menus come from RT_MENU templates or CreateMenu/AppendMenu;
-the menu bar is a WIN16 window in the frame's menu slot, drawn by WIN16,
-with Windows' menu messages (WM_INITMENU, WM_INITMENUPOPUP,
-WM_MENUSELECT, WM_COMMAND). MessageBox becomes a WIN16 dialog then (in
-stage 1 it is PM's WinMessageBox). Stage 2 also reads the program's
-resources (LoadString, LoadIcon, LoadCursor, LoadBitmap, LoadMenu,
-LoadAccelerators) from the Windows resource table, and loads Windows DLLs
-of the program's own (LibMain, WEP, patched export prologues).
+The EDIT control keeps its text in WIN16 (EM_GETHANDLE has no local
+block to give): single-line edits scroll sideways, multi-line ones break
+lines at CR LF (and at words unless they scroll sideways), with the
+window's scroll bars, selection with the mouse and the shift keys,
+Ctrl+X/C/V, Shift+Del, Ctrl+Ins and Shift+Ins through PM's clipboard, one
+level of undo, password characters, read-only, tab stops, EM_LIMITTEXT.
+A combo box is an edit control (CBS_SIMPLE, CBS_DROPDOWN) or a drawn
+selection field (CBS_DROPDOWNLIST) with a list box: a child below it, or
+a pop-up shown under it while dropped, the mouse captured by the combo
+box meanwhile as Windows does.
+
+**Plain windows and the non-client area.** A child window (or a pop-up
+without a caption) with WS_BORDER, WS_DLGFRAME, WS_THICKFRAME or scroll
+bars is a `Win16Frame` PM window that draws the border and holds the
+client window and the scroll bars, so GetClientRect, the scroll bars and
+the border are Windows'. A top-level window's scroll bars are WIN16's
+`Win16Sb` windows with PM's frame IDs (FID_VERTSCROLL, FID_HORZSCROLL), so
+PM's frame places them. Scroll bars (the SCROLLBAR control and window
+scroll bars alike) draw and track in Windows 3.1's style: arrows that
+repeat, page areas, the thumb (SB_THUMBTRACK, SB_THUMBPOSITION), a
+window bar hidden by an empty range. Child windows go below their
+siblings, as Windows creates them (the first control is the top of the Z
+order).
+
+**Dialogs** come from Windows dialog templates (RT_DIALOG, or in memory
+for the Indirect forms) in dialog units of the system font (a quarter of
+its average width, an eighth of its height; GetDialogBaseUnits). The
+dialog is a top-level window of the dialog class (#32770, or the
+template's) whose procedure is DefDlgProc, which calls the dialog
+procedure (DWL_DLGPROC) first; WM_INITDIALOG focuses the first tab stop
+when the procedure returns TRUE. DialogBox disables the owner and runs a
+message loop with IsDialogMessage until EndDialog. IsDialogMessage does
+the dialog manager's keyboard interface from WM_GETDLGCODE: Tab and
+Shift+Tab through WS_TABSTOP controls (an edit control's text selected),
+arrows within a WS_GROUP group (an auto radio button is checked), Enter
+for the focused or the default push button (DM_GETDEFID), Esc for
+IDCANCEL, Alt+letter and letter mnemonics (a static's mnemonic focuses
+the next control). The default button's thick border follows the focus.
+
+**Menus.** An HMENU is a PM menu window (WC_MENU): menu bars from
+CreateMenu or RT_MENU templates become the frame's FID_MENU with SetMenu
+(or the class's menu), pop-ups are hidden menu windows hung on their
+items (MIS_SUBMENU, with IDs of their own: Windows' pop-up items have
+none). PM's menus draw and track themselves, keyboard included (Alt,
+F10, mnemonics); their notifications, which PM's frame passes to the
+client, become Windows' WM_INITMENU, WM_INITMENUPOPUP (with the pop-up's
+HMENU and position), WM_MENUSELECT and WM_COMMAND. "&" mnemonics are PM's
+"~". TrackPopupMenu shows a pop-up at a point and returns when it closes.
+Accelerator tables (RT_ACCELERATOR) are WIN16's: TranslateAccelerator
+matches WM_KEYDOWN (FVIRTKEY entries, with the shift states) or WM_CHAR
+(ASCII entries) and sends WM_COMMAND with lParam 1 << 16, unless the
+command is a grayed item of the window's menu.
+
+**Keys.** PM's WM_CHAR becomes WM_KEYDOWN/UP with Windows' virtual keys
+(VK_OEM_ keys for punctuation, from the scan code) or WM_SYSKEYDOWN for
+Alt combinations and F10; TranslateMessage posts WM_CHAR (Ctrl+letter is
+a control character) or WM_SYSCHAR. A system key's DefWindowProc passes
+the key to the top-level PM frame (its menu, Alt+F4); a child window's
+other keys go nowhere.
+
+**Resources** are read from the program's NE file when first needed:
+LoadString, LoadMenu, LoadAccelerators, the dialog calls, FindResource,
+LoadResource (a global block with a copy), LockResource, SizeofResource.
+The program's own icons and cursors are rs2's application icon and the
+arrow; DrawIcon draws the icon. MessageBox is still PM's WinMessageBox.
 
 ## Fonts and system art
 
@@ -306,12 +388,15 @@ Everything a Windows program sees is rs2's own:
 
 - **Fonts.** The system font is rs2's system font (docs/PM.md, Fonts);
   OEM_FIXED_FONT, ANSI_FIXED_FONT and SYSTEM_FIXED_FONT are rs2's
-  monospaced face. CreateFont (stage 2) maps Windows' face names to
-  rs2's faces (MS Sans Serif and Helv to the sans, Courier to the mono,
-  Tms Rmn and Times New Roman to the serif) and its sizes through
-  LOGPIXELSY 96. Windows raster font files (.FON: NE modules with
-  RT_FONT resources) a program brings can be added with
-  AddFontResource (stage 3).
+  monospaced face ("System Monospaced"). CreateFont and
+  CreateFontIndirect map Windows' face names to rs2's outline faces
+  (Courier, Fixedsys and Terminal to Courier; Times, Tms Rmn and Roman
+  to Times New Roman; the rest to Helvetica) at the requested height
+  (negative: the em, positive: the cell), with bold, italic and
+  underline; a font is a PM logical font of the DC (local ID 1) while it
+  is selected. Font enumeration and Windows raster font files (.FON: NE
+  modules with RT_FONT resources) added with AddFontResource are
+  later.
 - **Cursors.** The IDC_ cursors are PM's system pointers (rs2's own
   art): IDC_ARROW the arrow, IDC_IBEAM the text pointer, IDC_WAIT the
   clock, the IDC_SIZE* the sizing pointers.
@@ -332,28 +417,38 @@ arm64 binaries in `armo64/`) into `~/opt/watcom`, or set `WATCOM`.
 on drive C: as `C:\RS2\*.EXE` when Open Watcom is installed.
 
 - `HELLO16.EXE`: the hello world (`hello16.c`).
-- `W16TEST.EXE`: checks (`w16test.c`); `cargo xtask run --release
-  --headless --timeout 150 --init "RS2\W16TEST.EXE"` ends with
+- `MENU16.EXE`: menus and accelerators (`menu16.c`, `menu16.rc`).
+- `DLG16.EXE`: a dialog with every control (`dlg16.c`, `dlg16.rc`).
+- `NOTE16.EXE`: a Notepad on the edit control (`note16.c`, `note16.rc`).
+- `W16TEST.EXE`: checks (`w16test.c`, `w16test.rc`); `cargo xtask run
+  --release --headless --timeout 150 --init "RS2\W16TEST.EXE"` ends with
   `w16test done: 0 failure(s)`.
+
+A program's resources are the `.rc` file of the same name, compiled and
+bound by Open Watcom's `wrc -bt=windows` (Windows 3.x resource syntax:
+CONTROL statements for the auto buttons). `tools/scripts/gen_win16_exports.py`
+makes `userland/win16/exports.def` from the `entries!` list.
 
 `SET W16TRACE=1` in CONFIG.SYS traces WIN16's calls (by WIN16 ordinal),
 the DOS calls and fix-ups to the serial port.
 
 ## Later stages
 
-**Stage 2: controls, dialogs and menus.** The built-in controls, the
-dialog manager and Windows dialog templates, menus and accelerators,
-the program's resources, carets, window scroll bars (WS_VSCROLL,
-SetScrollRange), MDI, FindWindow and the window enumeration calls,
-CreateFont and font enumeration, bitmaps (CreateBitmap,
-CreateCompatibleDC, BitBlt, StretchBlt, DIBs), regions and clipping,
-mapping modes, pen and brush styles, the non-client messages for
-programs that draw their own frame, Windows DLLs of the program's own,
-WIN.INI and private profiles (GetProfileString, in rs2's own WIN.INI).
+**Stage 2: what is left.** MDI (MDICLIENT, DefFrameProc,
+DefMDIChildProc), bitmaps (CreateBitmap, CreateCompatibleDC, BitBlt,
+StretchBlt, DIBs, LoadBitmap), regions and clip regions, mapping modes,
+pen and brush styles (hatches, patterns, dashed pens), owner-drawn combo
+boxes and LBS_OWNERDRAWVARIABLE, multi-column list boxes, DlgDirList,
+font enumeration, the non-client messages for programs that draw their
+own frame, MessageBox as a WIN16 dialog, the program's own icons and
+cursors, Windows DLLs of the program's own (LibMain, WEP, patched export
+prologues), WIN.INI and private profiles (GetProfileString answers the
+default for now).
 
 **Stage 3: COMMDLG, clipboard, printing and DDE.** COMMDLG's Open, Save
-As, Color, Font, Print and Find dialogs (as WIN16 dialogs); the clipboard
-shared with PM (CF_TEXT, CF_BITMAP, metafiles); printing through printer
+As, Color, Font, Print and Find dialogs (as WIN16 dialogs); the rest of
+the clipboard shared with PM (CF_BITMAP, metafiles, registered formats;
+CF_TEXT works since stage 2); printing through printer
 DCs into rs2's spooler and PostScript driver (docs/PRINTING.md:
 Escape(STARTDOC), StartDoc/EndPage); DDE between Windows tasks and with
 PM programs (GMEM_DDESHARE as shared memory); SHELL (ShellExecute,

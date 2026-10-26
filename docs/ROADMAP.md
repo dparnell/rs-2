@@ -433,7 +433,7 @@ Status markers: done, in progress, planned.
   objects (DOS Window, DOS Full Screen, PROG_VDM/PROG_WINDOWEDVDM)
 - planned: PC speaker and Sound Blaster sound, VESA, DOS settings, speed
 
-## Native Win16 (stage 1 done)
+## Native Win16 (stages 1 and 2 done)
 
 Windows 3.x programs as OS/2 processes, without Win-OS/2 or any
 Microsoft file (docs/WIN16.md).
@@ -448,9 +448,17 @@ Microsoft file (docs/WIN16.md).
   y-down coordinates, painting (BeginPaint, TextOut, DrawText, FillRect,
   lines), MessageBox; `RS2\HELLO16.EXE` and `RS2\W16TEST.EXE` (built
   with Open Watcom from `userland/win16test`)
-- planned (stage 2): Windows-style built-in controls drawn through
-  WIN16's GDI, dialogs, menus, resources, bitmaps and fonts, Windows
-  DLLs
+- done (stage 2): the program's resources (strings, menus,
+  accelerators, dialog templates, FindResource/LoadResource); menus as
+  PM menus with Windows' messages; accelerators; dialogs (DialogBox,
+  CreateDialog, DefDlgProc, IsDialogMessage with Tab, arrows, Enter,
+  Esc and mnemonics); BUTTON, STATIC, EDIT, LISTBOX, COMBOBOX and
+  SCROLLBAR as Windows 3.1-style controls drawn through WIN16's GDI;
+  subclassing; window scroll bars; the caret; CF_TEXT on PM's clipboard;
+  CreateFont; `RS2\MENU16.EXE`, `RS2\DLG16.EXE`, `RS2\NOTE16.EXE` and
+  W16TEST's stage-2 checks
+- planned (rest of stage 2): MDI, bitmaps and DIBs, regions, mapping
+  modes, font enumeration, Windows DLLs, WIN.INI
 - planned (stage 3): COMMDLG, the clipboard, printing, DDE
 - planned (stage 4): DPMI, the floating point emulator, MMSYSTEM, OLE,
   TOOLHELP and the task/module databases
