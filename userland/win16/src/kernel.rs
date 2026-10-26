@@ -326,6 +326,17 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             };
             if e == 0 { n } else { HFILE_ERROR }
         }
+        // _hread(hf, buf, cb), _hwrite(hf, buf, cb): 32-bit counts, the
+        // buffer huge (its tiles are contiguous).
+        349 | 350 => {
+            let (h, buf, cb) = (a.w(), a.l(), a.l());
+            let p = huge(buf);
+            let mut n = 0u32;
+            let e = unsafe {
+                if ord == 349 { os2::DosRead(h as u32, p, cb, &mut n) } else { os2::DosWrite(h as u32, p, cb, &mut n) }
+            };
+            if e == 0 { n } else { u32::MAX }
+        }
         // _lcreat(path, attr), _lopen(path, mode)
         83 | 85 => {
             let (path, v) = (a.l(), a.w());
@@ -435,7 +446,7 @@ const HFILE_ERROR: u32 = 0xffff;
 
 /// A huge (16:16) pointer as flat memory: tiled, the tiles of a block
 /// are contiguous.
-fn huge(far: u32) -> *mut u8 {
+pub fn huge(far: u32) -> *mut u8 {
     flat(far)
 }
 
@@ -470,13 +481,16 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
     }
 }
 
-/// PrestoChangoSelector: a fresh selector of the other type for src's
-/// memory takes dst's place (rs2 cannot retype an existing selector, so
-/// dst must be one AllocSelector made; it is freed and the new one
-/// returned).
+/// PrestoChangoSelector(src, dst): dst describes src's memory with the
+/// other type (code for data, data for code). With src == dst the
+/// selector changes type in place (how programs make a data block they
+/// wrote code into executable).
 fn selector_copy(src: u32, dst: u32) -> u32 {
     use crate::pm::Rs2Win16Selector as sel;
-    let code = unsafe { sel(5, src, 0) } != u32::MAX && is_code(src as u16);
+    let code = is_code(src as u16);
+    if src == dst {
+        return if unsafe { sel(7, src, if code { 1 } else { 2 }) } != 0 { dst } else { 0 };
+    }
     let new = unsafe { sel(0, src, if code { 1 } else { 2 }) };
     if new != 0 && dst != 0 {
         unsafe { sel(4, dst, 0) };

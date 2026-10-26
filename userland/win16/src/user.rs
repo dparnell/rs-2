@@ -170,6 +170,8 @@ pub struct Wnd {
     /// The window's scroll bars (WS_VSCROLL, WS_HSCROLL).
     pub vsb: Option<crate::scroll::Bar>,
     pub hsb: Option<crate::scroll::Bar>,
+    /// SetProp's properties: (atom, data).
+    pub props: Vec<(u16, u16)>,
 }
 
 /// A PM message being handled as a Windows message.
@@ -201,8 +203,6 @@ struct User {
     last_char: Option<(u16, u16, u16, u32)>,
     timers: Vec<Timer>,
     cascade: i32,
-    /// Registered window messages.
-    messages: Vec<Vec<u8>>,
     /// The last message's time and position (GetMessageTime, GetMessagePos).
     msg_time: u32,
     msg_pos: u32,
@@ -219,7 +219,6 @@ static USER: Global<User> = Global::new(User {
     last_char: None,
     timers: Vec::new(),
     cascade: 0,
-    messages: Vec::new(),
     msg_time: 0,
     msg_pos: 0,
 });
@@ -849,16 +848,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let (_t, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
             post(0, m, wp, lp) as u32
         }
-        // RegisterWindowMessage(name): 0xC000 and up.
-        118 => {
-            let s = far_str(a.l()).unwrap_or(b"").to_ascii_uppercase();
-            let m = &mut u().messages;
-            let i = m.iter().position(|x| *x == s).unwrap_or_else(|| {
-                m.push(s);
-                m.len() - 1
-            });
-            0xc100 + i as u32
-        }
         // GetMessagePos, GetMessageTime
         119 => u().msg_pos,
         120 => u().msg_time,
@@ -1481,6 +1470,7 @@ pub fn create(c: &Create) -> u16 {
         data: None,
         vsb: None,
         hsb: None,
+        props: Vec::new(),
     });
     if !child && parent != 0 {
         let of = wnd(top_level(parent)).map_or(0, |w| w.frame);
@@ -1694,6 +1684,22 @@ pub fn to_screen(h: u16, x: i32, y: i32) -> (i32, i32) {
     let mut p = [x as i16, y as i16];
     map_point(h, p.as_mut_ptr(), true);
     (p[0] as i32, p[1] as i32)
+}
+
+/// IsIconic, IsZoomed.
+pub fn is_iconic(h: u16) -> bool {
+    frame_state(h) & SWP_MINIMIZE != 0
+}
+
+pub fn is_zoomed(h: u16) -> bool {
+    frame_state(h) & SWP_MAXIMIZE != 0
+}
+
+fn frame_state(h: u16) -> u32 {
+    let Some(f) = wnd(h).map(|w| w.frame) else { return 0 };
+    let mut swp = Swp::default();
+    unsafe { WinQueryWindowPos(f, &mut swp) };
+    swp.fl
 }
 
 pub fn show_window(h: u16, cmd: u16) -> bool {

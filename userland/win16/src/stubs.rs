@@ -18,31 +18,31 @@ thunk16::entries16_pascal! {
     x_6101 = 6101, 2;
     x_6102 = 6102, 14;
     x_6103 = 6103, 4;
-    x_6104 = 6104, 14;
-    x_6105 = 6105, 4;
-    x_6106 = 6106, 2;
-    x_6107 = 6107, 12;
-    x_6108 = 6108, 2;
-    x_6109 = 6109, 10;
-    x_6110 = 6110, 10;
-    x_6111 = 6111, 24;
-    x_6112 = 6112, 10;
-    x_6113 = 6113, 8;
-    x_6114 = 6114, 22;
-    x_6115 = 6115, 14;
-    x_6116 = 6116, 14;
-    x_6117 = 6117, 6;
-    x_6118 = 6118, 2;
-    x_6119 = 6119, 2;
+    x_6104 = 6104, 20;
+    x_6105 = 6105, 8;
+    x_6106 = 6106, 4;
+    x_6107 = 6107, 16;
+    x_6108 = 6108, 4;
+    x_6109 = 6109, 12;
+    x_6110 = 6110, 12;
+    x_6111 = 6111, 28;
+    x_6112 = 6112, 12;
+    x_6113 = 6113, 12;
+    x_6114 = 6114, 24;
+    x_6115 = 6115, 16;
+    x_6116 = 6116, 16;
+    x_6117 = 6117, 8;
+    x_6118 = 6118, 4;
+    x_6119 = 6119, 4;
     x_6120 = 6120, 4;
     x_6121 = 6121, 10;
-    x_6122 = 6122, 6;
-    x_6123 = 6123, 16;
-    x_6124 = 6124, 6;
-    x_6126 = 6126, 8;
-    x_6127 = 6127, 10;
-    x_6136 = 6136, 4;
-    x_6137 = 6137, 2;
+    x_6122 = 6122, 8;
+    x_6123 = 6123, 18;
+    x_6124 = 6124, 8;
+    x_6126 = 6126, 10;
+    x_6127 = 6127, 14;
+    x_6136 = 6136, 8;
+    x_6137 = 6137, 4;
     x_3006 = 3006, 4;
     x_3008 = 3008, 4;
     x_3010 = 3010, 6;
@@ -52,13 +52,10 @@ thunk16::entries16_pascal! {
     x_3032 = 3032, 6;
     x_3038 = 3038, 14;
     x_3059 = 3059, 2;
-    x_3070 = 3070, 14;
     x_3071 = 3071, 12;
     x_3084 = 3084, 2;
     x_3089 = 3089, 2;
     x_3100 = 3100, 16;
-    x_3103 = 3103, 6;
-    x_3104 = 3104, 6;
     x_3119 = 3119, 4;
     x_3123 = 3123, 4;
     x_3124 = 3124, 4;
@@ -69,7 +66,6 @@ thunk16::entries16_pascal! {
     x_3133 = 3133, 10;
     x_3136 = 3136, 4;
     x_3149 = 3149, 2;
-    x_3150 = 3150, 2;
     x_3151 = 3151, 6;
     x_3155 = 3155, 4;
     x_3159 = 3159, 2;
@@ -88,7 +84,6 @@ thunk16::entries16_pascal! {
     x_3310 = 3310, 14;
     x_3311 = 3311, 18;
     x_3313 = 3313, 6;
-    x_3330 = 3330, 14;
     x_3332 = 3332, 8;
     x_3348 = 3348, 18;
     x_3349 = 3349, 6;
@@ -110,12 +105,6 @@ thunk16::entries16_pascal! {
     x_1056 = 1056, 6;
     x_1066 = 1066, 8;
     x_1067 = 1067, 10;
-    x_1068 = 1068, 2;
-    x_1069 = 1069, 4;
-    x_1070 = 1070, 4;
-    x_1071 = 1071, 2;
-    x_1072 = 1072, 8;
-    x_1073 = 1073, 2;
     x_1093 = 1093, 4;
     x_1097 = 1097, 12;
     x_1100 = 1100, 0;
@@ -151,9 +140,6 @@ thunk16::entries16_pascal! {
     x_1337 = 1337, 6;
     x_1346 = 1346, 8;
     x_1347 = 1347, 8;
-    x_1348 = 1348, 12;
-    x_1349 = 1349, 10;
-    x_1350 = 1350, 10;
     x_1353 = 1353, 10;
     x_1355 = 1355, 6;
     x_1356 = 1356, 4;
@@ -355,15 +341,11 @@ thunk16::entries16_pascal! {
     x_2007 = 2007, 6;
     x_2014 = 2014, 0;
     x_2016 = 2016, 4;
-    x_2024 = 2024, 6;
-    x_2025 = 2025, 6;
-    x_2026 = 2026, 8;
     x_2027 = 2027, 6;
     x_2043 = 2043, 2;
     x_2044 = 2044, 2;
     x_2052 = 2052, 0;
     x_2115 = 2115, 4;
-    x_2121 = 2121, 6;
     x_2123 = 2123, 6;
     x_2170 = 2170, 2;
     x_2181 = 2181, 10;
@@ -396,8 +378,6 @@ thunk16::entries16_pascal! {
     x_2225 = 2225, 10;
     x_2226 = 2226, 6;
     x_2231 = 2231, 0;
-    x_2234 = 2234, 6;
-    x_2235 = 2235, 12;
     x_2237 = 2237, 6;
     x_2238 = 2238, 4;
     x_2245 = 2245, 8;
@@ -414,16 +394,7 @@ thunk16::entries16_pascal! {
     x_2260 = 2260, 16;
     x_2261 = 2261, 2;
     x_2265 = 2265, 4;
-    x_2266 = 2266, 2;
-    x_2268 = 2268, 4;
-    x_2269 = 2269, 2;
-    x_2270 = 2270, 4;
-    x_2271 = 2271, 8;
-    x_2284 = 2284, 2;
     x_2288 = 2288, 0;
-    x_2291 = 2291, 10;
-    x_2292 = 2292, 2;
-    x_2293 = 2293, 10;
     x_2294 = 2294, 2;
     x_2309 = 2309, 4;
     x_2319 = 2319, 22;
@@ -433,8 +404,6 @@ thunk16::entries16_pascal! {
     x_2359 = 2359, 8;
     x_2368 = 2368, 4;
     x_2369 = 2369, 4;
-    x_2370 = 2370, 6;
-    x_2371 = 2371, 6;
     x_2402 = 2402, 6;
     x_2406 = 2406, 18;
     x_2407 = 2407, 18;
@@ -443,8 +412,6 @@ thunk16::entries16_pascal! {
     x_2445 = 2445, 12;
     x_2447 = 2447, 10;
     x_2451 = 2451, 6;
-    x_2457 = 2457, 2;
-    x_2458 = 2458, 2;
     x_2483 = 2483, 10;
     x_2512 = 2512, 12;
     x_2517 = 2517, 12;
@@ -508,13 +475,10 @@ pub static NAMES: &[(u16, &str)] = &[
     (3032, "GDI.32 OFFSETCLIPRGN"),
     (3038, "GDI.38 ESCAPE"),
     (3059, "GDI.59 WEP"),
-    (3070, "GDI.70 ENUMFONTS"),
     (3071, "GDI.71 ENUMOBJECTS"),
     (3084, "GDI.84 GETPOLYFILLMODE"),
     (3089, "GDI.89 GETTEXTCHARACTEREXTRA"),
     (3100, "GDI.100 LINEDDA"),
-    (3103, "GDI.103 PTVISIBLE"),
-    (3104, "GDI.104 RECTVISIBLE"),
     (3119, "GDI.119 ADDFONTRESOURCE"),
     (3123, "GDI.123 PLAYMETAFILE"),
     (3124, "GDI.124 GETMETAFILE"),
@@ -525,7 +489,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (3133, "GDI.133 GETENVIRONMENT"),
     (3136, "GDI.136 REMOVEFONTRESOURCE"),
     (3149, "GDI.149 GETBRUSHORG"),
-    (3150, "GDI.150 UNREALIZEOBJECT"),
     (3151, "GDI.151 COPYMETAFILE"),
     (3155, "GDI.155 QUERYABORT"),
     (3159, "GDI.159 GETMETAFILEBITS"),
@@ -544,7 +507,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (3310, "GDI.310 CREATESCALABLEFONTRESOURCE"),
     (3311, "GDI.311 GETFONTDATA"),
     (3313, "GDI.313 GETRASTERIZERCAPS"),
-    (3330, "GDI.330 ENUMFONTFAMILIES"),
     (3332, "GDI.332 GETKERNINGPAIRS"),
     (3348, "GDI.348 CHORD"),
     (3349, "GDI.349 SETMAPPERFLAGS"),
@@ -566,12 +528,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (1056, "KERNEL.56 THROW"),
     (1066, "KERNEL.66 ALLOCRESOURCE"),
     (1067, "KERNEL.67 SETRESOURCEHANDLER"),
-    (1068, "KERNEL.68 INITATOMTABLE"),
-    (1069, "KERNEL.69 FINDATOM"),
-    (1070, "KERNEL.70 ADDATOM"),
-    (1071, "KERNEL.71 DELETEATOM"),
-    (1072, "KERNEL.72 GETATOMNAME"),
-    (1073, "KERNEL.73 GETATOMHANDLE"),
     (1093, "KERNEL.93 GETCODEHANDLE"),
     (1097, "KERNEL.97 GETTEMPFILENAME"),
     (1100, "KERNEL.100 VALIDATECODESEGMENTS"),
@@ -607,9 +563,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (1337, "KERNEL.337 ISBADSTRINGPTR"),
     (1346, "KERNEL.346 ISBADHUGEREADPTR"),
     (1347, "KERNEL.347 ISBADHUGEWRITEPTR"),
-    (1348, "KERNEL.348 HMEMCPY"),
-    (1349, "KERNEL.349 _HREAD"),
-    (1350, "KERNEL.350 _HWRITE"),
     (1353, "KERNEL.353 LSTRCPYN"),
     (1355, "KERNEL.355 GETWINDEBUGINFO"),
     (1356, "KERNEL.356 SETWINDEBUGINFO"),
@@ -811,15 +764,11 @@ pub static NAMES: &[(u16, &str)] = &[
     (2007, "USER.7 EXITWINDOWS"),
     (2014, "USER.14 GETTIMERRESOLUTION"),
     (2016, "USER.16 CLIPCURSOR"),
-    (2024, "USER.24 REMOVEPROP"),
-    (2025, "USER.25 GETPROP"),
-    (2026, "USER.26 SETPROP"),
     (2027, "USER.27 ENUMPROPS"),
     (2043, "USER.43 CLOSEWINDOW"),
     (2044, "USER.44 OPENICON"),
     (2052, "USER.52 ANYPOPUP"),
     (2115, "USER.115 REPLYMESSAGE"),
-    (2121, "USER.121 SETWINDOWSHOOK"),
     (2123, "USER.123 CALLMSGFILTER"),
     (2170, "USER.170 ARRANGEICONICWINDOWS"),
     (2181, "USER.181 SETSYSCOLORS"),
@@ -852,8 +801,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (2225, "USER.225 ENUMTASKWINDOWS"),
     (2226, "USER.226 LOCKINPUT"),
     (2231, "USER.231 GETSYSTEMDEBUGSTATE"),
-    (2234, "USER.234 UNHOOKWINDOWSHOOK"),
-    (2235, "USER.235 DEFHOOKPROC"),
     (2237, "USER.237 GETUPDATERGN"),
     (2238, "USER.238 EXCLUDEUPDATERGN"),
     (2245, "USER.245 ENABLECOMMNOTIFICATION"),
@@ -870,16 +817,7 @@ pub static NAMES: &[(u16, &str)] = &[
     (2260, "USER.260 DEFERWINDOWPOS"),
     (2261, "USER.261 ENDDEFERWINDOWPOS"),
     (2265, "USER.265 SHOWOWNEDPOPUPS"),
-    (2266, "USER.266 SETMESSAGEQUEUE"),
-    (2268, "USER.268 GLOBALADDATOM"),
-    (2269, "USER.269 GLOBALDELETEATOM"),
-    (2270, "USER.270 GLOBALFINDATOM"),
-    (2271, "USER.271 GLOBALGETATOMNAME"),
-    (2284, "USER.284 GETFREESYSTEMRESOURCES"),
     (2288, "USER.288 GETMESSAGEEXTRAINFO"),
-    (2291, "USER.291 SETWINDOWSHOOKEX"),
-    (2292, "USER.292 UNHOOKWINDOWSHOOKEX"),
-    (2293, "USER.293 CALLNEXTHOOKEX"),
     (2294, "USER.294 LOCKWINDOWUPDATE"),
     (2309, "USER.309 GETCLIPCURSOR"),
     (2319, "USER.319 SCROLLWINDOWEX"),
@@ -889,8 +827,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (2359, "USER.359 GETDCEX"),
     (2368, "USER.368 COPYICON"),
     (2369, "USER.369 COPYCURSOR"),
-    (2370, "USER.370 GETWINDOWPLACEMENT"),
-    (2371, "USER.371 SETWINDOWPLACEMENT"),
     (2402, "USER.402 GETPRIORITYCLIPBOARDFORMAT"),
     (2406, "USER.406 CREATECURSOR"),
     (2407, "USER.407 CREATEICON"),
@@ -899,8 +835,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (2445, "USER.445 DEFFRAMEPROC"),
     (2447, "USER.447 DEFMDICHILDPROC"),
     (2451, "USER.451 TRANSLATEMDISYSACCEL"),
-    (2457, "USER.457 DESTROYICON"),
-    (2458, "USER.458 DESTROYCURSOR"),
     (2483, "USER.483 SYSTEMPARAMETERSINFO"),
     (2512, "USER.512 WNETGETCONNECTION"),
     (2517, "USER.517 WNETADDCONNECTION"),

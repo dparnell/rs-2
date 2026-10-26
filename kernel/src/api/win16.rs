@@ -78,7 +78,8 @@ pub fn set_int_handler(c: &mut Ctx) -> u32 {
 /// keeps the type), 1 the base of `sel`, 2 set the base of an alias, 3
 /// set its limit, 4 free an alias, 5 the limit of `sel`, 6 the selector
 /// of segment `value` (1-based) of the module whose handle is `sel`
-/// (0: the number of segments). Returns the
+/// (0: the number of segments), 7 make `sel` itself data (`value` 1) or
+/// 16-bit code (2), its base and limit kept. Returns the
 /// selector or value, 0 (or 0xFFFFFFFF for 1 and 5) on error; 2-4 return
 /// 1 on success.
 pub fn selector(c: &mut Ctx) -> u32 {
@@ -141,6 +142,13 @@ pub fn selector(c: &mut Ctx) -> u32 {
         4 if alias(&sp) => {
             sp.ldt[(sel >> 3) as usize] = 0;
             let _ = sp.free(vm::tiled_flat(sel, 0));
+            1
+        }
+        7 if d != 0 && (value == 1 || value == 2) => {
+            use crate::arch::gdt::access::*;
+            let a = PRESENT | DPL3 | CODE_DATA | ACCESSED | if value == 2 { CODE | READABLE } else { WRITABLE };
+            let i = (sel >> 3) as usize;
+            sp.ldt[i] = sp.ldt[i] & !(0xff << 40 | 1 << 54) | (a as u64) << 40;
             1
         }
         1 | 5 => u32::MAX,

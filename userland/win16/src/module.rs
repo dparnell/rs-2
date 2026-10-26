@@ -225,7 +225,8 @@ pub fn proc_address(h: u16, name: u32) -> u32 {
         }
         None => unsafe { os2::DosQueryProcAddr(hmod, name & 0xffff, core::ptr::null(), &mut f) },
     };
-    if r != 0 || f == 0 { 0 } else { thunk16::far(f as *const u8) }
+    // A 16-bit module's procedures come back as 16:16 addresses.
+    if r != 0 { 0 } else { f as u32 }
 }
 
 /// The whole file (or its first `max` bytes).

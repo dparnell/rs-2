@@ -20,8 +20,10 @@
 extern crate alloc;
 extern crate os2;
 
+mod atom;
 mod bitmap;
 mod caret;
+mod compat;
 mod ctl;
 mod dialog;
 mod dos;
@@ -233,6 +235,12 @@ entries! {
     k_freeresource = 1063, 2;
     k_accessresource = 1064, 4;
     k_sizeofresource = 1065, 4;
+    k_initatomtable = 1068, 2;
+    k_findatom = 1069, 4;
+    k_addatom = 1070, 4;
+    k_deleteatom = 1071, 2;
+    k_getatomname = 1072, 8;
+    k_getatomhandle = 1073, 2;
     k_openfile = 1074, 10;
     k_lclose = 1081, 2;
     k_lread = 1082, 8;
@@ -269,6 +277,9 @@ entries! {
     k_setselectorlimit = 1189, 6;
     k_sethandlecount = 1199, 2;
     k_isdbcsleadbyte = 1207, 2;
+    k_hmemcpy = 1348, 12;
+    k__hread = 1349, 10;
+    k__hwrite = 1350, 10;
     // USER
     u_messagebox = 2001, 12;
     u_initapp = 2005, 2;
@@ -284,6 +295,9 @@ entries! {
     u_getdoubleclicktime = 2021, 0;
     u_setfocus = 2022, 2;
     u_getfocus = 2023, 0;
+    u_removeprop = 2024, 6;
+    u_getprop = 2025, 6;
+    u_setprop = 2026, 8;
     u_clienttoscreen = 2028, 6;
     u_screentoclient = 2029, 6;
     u_windowfrompoint = 2030, 4;
@@ -370,6 +384,7 @@ entries! {
     u_registerwindowmessage = 2118, 4;
     u_getmessagepos = 2119, 0;
     u_getmessagetime = 2120, 0;
+    u_setwindowshook = 2121, 6;
     u_callwindowproc = 2122, 14;
     u_updatewindow = 2124, 2;
     u_invalidaterect = 2125, 8;
@@ -443,6 +458,8 @@ entries! {
     u_getnextwindow = 2230, 4;
     u_setwindowpos = 2232, 14;
     u_setparent = 2233, 4;
+    u_unhookwindowshook = 2234, 6;
+    u_defhookproc = 2235, 12;
     u_getcapture = 2236, 0;
     u_dialogboxparam = 2239, 16;
     u_dialogboxindirectparam = 2240, 14;
@@ -457,17 +474,28 @@ entries! {
     u_getwindow = 2262, 4;
     u_getmenuitemcount = 2263, 2;
     u_getmenuitemid = 2264, 4;
+    u_setmessagequeue = 2266, 2;
     u_showscrollbar = 2267, 6;
+    u_globaladdatom = 2268, 4;
+    u_globaldeleteatom = 2269, 2;
+    u_globalfindatom = 2270, 4;
+    u_globalgetatomname = 2271, 8;
     u_iszoomed = 2272, 2;
     u_getdlgctrlid = 2277, 2;
     u_getdesktophwnd = 2278, 0;
     u_selectpalette = 2282, 6;
     u_realizepalette = 2283, 2;
+    u_getfreesystemresources = 2284, 2;
     u_getdesktopwindow = 2286, 0;
     u_getlastactivepopup = 2287, 2;
     u_redrawwindow = 2290, 10;
+    u_setwindowshookex = 2291, 10;
+    u_unhookwindowshookex = 2292, 4;
+    u_callnexthookex = 2293, 12;
     u_defdlgproc = 2308, 10;
     u_ismenu = 2358, 2;
+    u_getwindowplacement = 2370, 6;
+    u_setwindowplacement = 2371, 6;
     u_subtractrect = 2373, 12;
     u_unregisterclass = 2403, 6;
     u_getclassinfo = 2404, 10;
@@ -492,6 +520,8 @@ entries! {
     u_ansilowerbuff = 2438, 6;
     u_createwindowex = 2452, 34;
     u_adjustwindowrectex = 2454, 14;
+    u_destroyicon = 2457, 2;
+    u_destroycursor = 2458, 2;
     u_drawfocusrect = 2466, 6;
     u_lstrcmpi = 2471, 8;
     u_ansinext = 2472, 4;
@@ -556,6 +586,7 @@ entries! {
     g_dptolp = 3067, 8;
     g_deletedc = 3068, 2;
     g_deleteobject = 3069, 2;
+    g_enumfonts = 3070, 14;
     g_equalrgn = 3072, 4;
     g_getbitmapbits = 3074, 10;
     g_getbkcolor = 3075, 2;
@@ -580,16 +611,20 @@ entries! {
     g_getwindoworg = 3097, 2;
     g_lptodp = 3099, 8;
     g_offsetrgn = 3101, 6;
+    g_ptvisible = 3103, 6;
+    g_rectvisible = 3104, 6;
     g_setbitmapbits = 3106, 10;
     g_muldiv = 3128, 6;
     g_getrgnbox = 3134, 6;
     g_setbrushorg = 3148, 6;
+    g_unrealizeobject = 3150, 2;
     g_createic = 3153, 16;
     g_getnearestcolor = 3154, 6;
     g_creatediscardablebitmap = 3156, 6;
     g_ptinregion = 3161, 6;
     g_setrectrgn = 3172, 10;
     g_rectinregion = 3181, 6;
+    g_enumfontfamilies = 3330, 14;
     g_gettextalign = 3345, 2;
     g_settextalign = 3346, 4;
     g_getcharwidth = 3350, 10;
@@ -637,12 +672,25 @@ entries! {
 }
 
 extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
+    let r = dispatch_(idx, args);
+    if tracing() && idx != 1 {
+        // The arguments as words, first argument first (_pascal pushes
+        // them left to right), and the result.
+        let n = arg_size(idx) / 2;
+        let mut s = alloc::string::String::new();
+        for i in (0..n).rev() {
+            let w = unsafe { (args.add(2 * i) as *const u16).read_unaligned() };
+            let _ = core::fmt::write(&mut s, format_args!(" {w:04x}"));
+        }
+        trace(format_args!("W16 {}{} -> {:x}", idx, s, r));
+    }
+    r
+}
+
+fn dispatch_(idx: u32, args: *const u8) -> u32 {
     let size = arg_size(idx);
     let mut a = Pascal::new(args, size);
-    if tracing() && idx != 1 {
-        trace(format_args!("W16 {}", idx));
-    }
-    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)) {
+    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)) {
         return r;
     }
     match idx {

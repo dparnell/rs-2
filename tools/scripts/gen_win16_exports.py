@@ -70,6 +70,7 @@ def prototypes():
     for m in re.finditer(r'typedef\s+(DWORD|LONG|ULONG|long|unsigned long|LPVOID|LPSTR)\s+(\w+)\s*;', txt):
         four.add(m.group(2))
     four |= set(re.findall(r'\b(LP\w+)\b', txt))
+    four |= set(re.findall(r'DECLARE_HANDLE32\(\s*(\w+)\s*\)', txt))
     near = {'NEAR', 'near', '__near', '_near'}
     out = {}
     conv = {'WINAPI', 'CALLBACK'} | set(re.findall(r'#define\s+(\w+)\s+(?:FAR\s+PASCAL|__far\s+__pascal|WINAPI)\s*\n', txt))
