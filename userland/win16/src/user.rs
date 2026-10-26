@@ -161,6 +161,10 @@ pub struct Wnd {
     pub menu: u16,
     /// A PM frame window (with a title bar or a frame).
     pub framed: bool,
+    /// The non-client parts of a plain window: WS_BORDER, WS_DLGFRAME,
+    /// WS_THICKFRAME, WS_VSCROLL, WS_HSCROLL (a combo box's are its
+    /// list's).
+    pub nc: u32,
     /// The state of a built-in control.
     pub data: Option<Box<dyn Any>>,
     /// The window's scroll bars (WS_VSCROLL, WS_HSCROLL).
@@ -1327,9 +1331,23 @@ pub fn frame_insets(style: u32, menu: bool) -> (i32, i32, i32, i32) {
     (b, top, r, bb)
 }
 
+/// The border of a plain window (WS_THICKFRAME, WS_DLGFRAME, WS_BORDER).
+fn plain_border(nc: u32) -> i32 {
+    let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
+    if nc & WS_THICKFRAME != 0 {
+        q(SV_CXSIZEBORDER)
+    } else if nc & WS_DLGFRAME != 0 {
+        q(SV_CXDLGFRAME)
+    } else if nc & WS_BORDER != 0 {
+        q(SV_CXBORDER).max(1)
+    } else {
+        0
+    }
+}
+
 /// Is a window of this style a PM frame (rather than a plain window)?
 fn is_framed(style: u32) -> bool {
-    style & WS_CHILD == 0 && (style & WS_POPUP == 0 || style & (WS_CAPTION | WS_THICKFRAME | WS_DLGFRAME) != 0)
+    style & WS_CHILD == 0 && (style & WS_POPUP == 0 || style & WS_CAPTION == WS_CAPTION || style & (WS_THICKFRAME | WS_DLGFRAME) != 0)
 }
 
 /// Does a plain window of this style have a non-client area?
@@ -1381,6 +1399,8 @@ pub fn create(c: &Create) -> u16 {
     let child = style & WS_CHILD != 0;
     let framed = is_framed(style);
     let parent = c.parent;
+    let combo = u().classes[ci].name == b"COMBOBOX";
+    let nc = style & if combo { WS_DLGFRAME | WS_THICKFRAME } else { WS_BORDER | WS_DLGFRAME | WS_THICKFRAME | WS_VSCROLL | WS_HSCROLL };
     if child && wnd(parent).is_none() {
         return 0;
     }
@@ -1407,6 +1427,13 @@ pub fn create(c: &Create) -> u16 {
             cy = 100;
         }
     }
+    // A drop-down combo box is the height of its selection field; the
+    // height given is for the dropped list (combo_create gets it from
+    // CREATESTRUCT).
+    let full_cy = cy;
+    if combo && style & 3 > 1 {
+        cy = crate::listbox::field_height();
+    }
     let (frame, client) = if framed {
         let mut fcf = frame_flags(style, parent != 0);
         let mut client = 0;
@@ -1416,13 +1443,16 @@ pub fn create(c: &Create) -> u16 {
         let pm_parent = if child { wnd(parent).map_or(0, |w| w.client) } else { HWND_DESKTOP };
         let ph = if child { client_height(pm_parent) } else { sy };
         let pmy = ph - y - cy;
+        // A child goes below its siblings (the first one created is the
+        // top of the Z order, as GetWindow(GW_CHILD) has it).
+        let behind = HWND_TOP;
         let clip = crate::pm::WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
-        if has_nonclient(style) {
-            let f = unsafe { WinCreateWindow(pm_parent, b"Win16Frame\0".as_ptr(), text.as_ptr(), clip, x, pmy, cx, cy, pm_parent, HWND_TOP, c.menu as u32, core::ptr::null(), core::ptr::null()) };
+        if has_nonclient(nc) {
+            let f = unsafe { WinCreateWindow(pm_parent, b"Win16Frame\0".as_ptr(), text.as_ptr(), clip, x, pmy, cx, cy, pm_parent, behind, c.menu as u32, core::ptr::null(), core::ptr::null()) };
             let cl = unsafe { WinCreateWindow(f, b"Win16Wnd\0".as_ptr(), text.as_ptr(), clip | crate::pm::WS_VISIBLE, 0, 0, cx, cy, f, HWND_TOP, FID_CLIENT, core::ptr::null(), core::ptr::null()) };
             (f, cl)
         } else {
-            let h = unsafe { WinCreateWindow(pm_parent, b"Win16Wnd\0".as_ptr(), text.as_ptr(), clip, x, pmy, cx, cy, pm_parent, HWND_TOP, c.menu as u32, core::ptr::null(), core::ptr::null()) };
+            let h = unsafe { WinCreateWindow(pm_parent, b"Win16Wnd\0".as_ptr(), text.as_ptr(), clip, x, pmy, cx, cy, pm_parent, behind, c.menu as u32, core::ptr::null(), core::ptr::null()) };
             (h, h)
         }
     };
@@ -1447,6 +1477,7 @@ pub fn create(c: &Create) -> u16 {
         text: c.title.to_vec(),
         menu: 0,
         framed,
+        nc,
         data: None,
         vsb: None,
         hsb: None,
@@ -1455,10 +1486,11 @@ pub fn create(c: &Create) -> u16 {
         let of = wnd(top_level(parent)).map_or(0, |w| w.frame);
         unsafe { WinSetOwner(frame, of) };
     }
-    if style & WS_VSCROLL != 0 {
+    let bars = if framed { style } else { nc };
+    if bars & WS_VSCROLL != 0 {
         crate::scroll::create_bar(hwnd, true);
     }
-    if style & WS_HSCROLL != 0 {
+    if bars & WS_HSCROLL != 0 {
         crate::scroll::create_bar(hwnd, false);
     }
     if framed {
@@ -1492,7 +1524,7 @@ pub fn create(c: &Create) -> u16 {
     let p = flat(cs);
     let mut b = Vec::with_capacity(34);
     b.extend_from_slice(&c.param.to_le_bytes());
-    for v in [c.hinst, c.menu, parent, cy as u16, cx as u16, y as u16, x as u16] {
+    for v in [c.hinst, c.menu, parent, full_cy as u16, cx as u16, y as u16, x as u16] {
         b.extend_from_slice(&v.to_le_bytes());
     }
     b.extend_from_slice(&style.to_le_bytes());
@@ -1529,12 +1561,13 @@ pub fn layout_frame(h: u16) {
     if w.framed || w.frame == w.client {
         return;
     }
-    let (f, c, style) = (w.frame, w.client, w.style);
+    let (f, c, nc) = (w.frame, w.client, w.nc);
     let vs = w.vsb.as_ref().filter(|b| b.shown).map(|b| b.pm);
     let hs = w.hsb.as_ref().filter(|b| b.shown).map(|b| b.pm);
     let mut r = RectL::default();
     unsafe { WinQueryWindowRect(f, &mut r) };
-    let (l, t, rr, b) = frame_insets(style & !(WS_VSCROLL | WS_HSCROLL | WS_CAPTION), false);
+    let bd = plain_border(nc);
+    let (l, t, rr, b) = (bd, bd, bd, bd);
     let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
     let (sw, sh) = (q(SV_CXVSCROLL), q(SV_CYHSCROLL));
     let mut inner = RectL { l: r.l + l, b: r.b + b, r: r.r - rr, t: r.t - t };
@@ -1566,10 +1599,10 @@ extern "C" fn frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         WM_PAINT => {
             let h = hwnd_of(pmh);
             let hps = unsafe { WinBeginPaint(pmh, 0, core::ptr::null_mut()) };
+            unsafe { GpiCreateLogColorTable(hps, 0, LCOLF_RGB, 0, 0, core::ptr::null()) };
             let mut r = RectL::default();
             unsafe { WinQueryWindowRect(pmh, &mut r) };
-            let style = wnd(h).map_or(0, |w| w.style);
-            let (l, t, rr, b) = frame_insets(style & !(WS_VSCROLL | WS_HSCROLL | WS_CAPTION), false);
+            let l = plain_border(wnd(h).map_or(0, |w| w.nc));
             let black = 0;
             let face = gdi::rgb(gdi::sys_color(gdi::COLOR_BTNFACE));
             unsafe {
@@ -1582,7 +1615,6 @@ extern "C" fn frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                         WinFillRect(hps, &inner, face);
                     }
                 }
-                let _ = (t, rr, b);
                 // The size box between the scroll bars.
                 let both = wnd(h).is_some_and(|w| w.vsb.as_ref().is_some_and(|b| b.shown) && w.hsb.as_ref().is_some_and(|b| b.shown));
                 if both {
@@ -2108,6 +2140,17 @@ pub fn call_beep() {
     unsafe { WinAlarm(HWND_DESKTOP, 2) };
 }
 
+/// The letter or digit of a set-1 scan code.
+fn scan_letter(scan: u8) -> u8 {
+    const ROWS: [(u8, &[u8]); 4] = [(0x02, b"1234567890"), (0x10, b"qwertyuiop"), (0x1e, b"asdfghjkl"), (0x2c, b"zxcvbnm")];
+    for (base, keys) in ROWS {
+        if scan >= base && ((scan - base) as usize) < keys.len() {
+            return keys[(scan - base) as usize];
+        }
+    }
+    0
+}
+
 /// GetKeyState: bit 15 down, bit 0 toggled.
 pub fn key_state(vk: u16) -> u16 {
     let pm = match vk {
@@ -2152,11 +2195,21 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
         WM_CHAR => {
             let fs = q.mp1 as u16;
             let (repeat, scan) = ((q.mp1 >> 16) as u8 as u32, (q.mp1 >> 24) as u32);
-            let (chr, pvk) = (q.mp2 as u16, (q.mp2 >> 16) as u16);
-            let vk = if fs & 0x0002 != 0 { vkey(pvk, chr) } else { vkey(0, chr) };
+            let (mut chr, pvk) = (q.mp2 as u16, (q.mp2 >> 16) as u16);
             let up = fs & 0x0040 != 0;
             let alt = fs & 0x0020 != 0;
             let ctrl = fs & 0x0010 != 0;
+            let mut fs = fs;
+            // Alt and Ctrl with a letter or digit carry no character in
+            // PM: the scan code's.
+            if (alt || ctrl) && fs & 0x0003 == 0 {
+                let c = scan_letter(scan as u8);
+                if c != 0 {
+                    chr = c as u16;
+                    fs |= 0x0001;
+                }
+            }
+            let vk = if fs & 0x0002 != 0 { vkey(pvk, chr) } else { vkey(0, chr) };
             if vk == 0 && fs & 0x0001 == 0 {
                 return None;
             }
@@ -2224,6 +2277,9 @@ pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) ->
         // processing sends it.
         if msg == W_MOUSEMOVE || (0x201..=0x209).contains(&msg) {
             send(hwnd, W_SETCURSOR, hwnd, (msg as u32) << 16 | 1);
+        }
+        if crate::tracing() && (0x100..=0x109).contains(&msg) {
+            trace(format_args!("W16 key {hwnd:#x} {msg:#x} {wp:#x} {lp:#x} (PM {:#x} {:#x})", q.mp1, q.mp2));
         }
         write_msg(p, hwnd, msg, wp, lp, q.time, (q.x, q.y));
         let sy = screen_size().1;
@@ -2397,11 +2453,9 @@ pub fn def_window_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             return 0;
         }
         W_PAINT => {
-            // Validate: an empty BeginPaint/EndPaint.
-            if let Some(c) = wnd(h).map(|w| w.client) {
-                let hps = unsafe { WinBeginPaint(c, 0, core::ptr::null_mut()) };
-                unsafe { WinEndPaint(hps) };
-            }
+            // BeginPaint (erasing) and EndPaint.
+            let hdc = begin_paint(h, core::ptr::null_mut());
+            gdi::release_dc(hdc);
             return 0;
         }
         W_ERASEBKGND => {
@@ -2540,7 +2594,8 @@ fn begin_paint(h: u16, ps: *mut u8) -> u16 {
 /// itself) and the update rectangle.
 pub fn begin_paint_rs(h: u16) -> u16 {
     let Some(c) = wnd(h).map(|w| w.client) else { return 0 };
-    let hps = unsafe { WinBeginPaint(c, 0, core::ptr::null_mut()) };
+    let mut rc = RectL::default();
+    let hps = unsafe { WinBeginPaint(c, 0, &mut rc) };
     if hps == 0 {
         return 0;
     }

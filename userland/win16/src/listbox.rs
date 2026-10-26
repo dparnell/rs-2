@@ -857,22 +857,21 @@ fn class(n: &[u8]) -> usize {
     find_class_name(n).unwrap_or(0)
 }
 
-fn combo_create(h: u16) {
+/// The selection field's height (the system font's).
+pub fn field_height() -> i32 {
+    base_units().1 + 8
+}
+
+fn combo_create(h: u16, total: i32) {
     let Some(w) = wnd(h) else { return };
     let (st, hinst) = (w.style, w.hinst);
     let kind = st & 3;
     let kind = if kind == 0 { CBS_SIMPLE } else { kind };
     let r = window_rect(h);
-    let (cx, total) = (r[2] - r[0], r[3] - r[1]);
-    let hdc = get_dc(h);
-    let lh = gdi::line_height(hdc);
-    gdi::release_dc(hdc);
-    let field_h = lh + 8;
+    let cx = r[2] - r[0];
+    let lh = base_units().1;
+    let field_h = field_height();
     w.data = Some(alloc::boxed::Box::new(Combo { kind, edit: 0, list: 0, dropped: false, tracking: false, font: 0, field_h, list_h: (total - field_h).max(lh * 3 + 2), focus: false, ext_ui: false, before: -1 }));
-    // A drop-down combo box is the field's height; the list hangs below.
-    if kind != CBS_SIMPLE {
-        move_to(h, [r[0], r[1], r[2], r[1] + field_h]);
-    }
     let bw = button_w();
     if kind != CBS_DROPDOWNLIST {
         let ew = if kind == CBS_SIMPLE { cx } else { cx - bw };
@@ -1129,7 +1128,9 @@ fn combo_mouse(h: u16, m: u16, wp: u16, lp: u32) {
 pub fn combo_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     match m {
         W_CREATE => {
-            combo_create(h);
+            // CREATESTRUCT's cy: the height with the list.
+            let total = unsafe { (thunk16::flat(lp).add(10) as *const i16).read_unaligned() } as i32;
+            combo_create(h, total);
             0
         }
         W_DESTROY => {
@@ -1155,7 +1156,8 @@ pub fn combo_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             0
         }
         W_GETFONT => cb(h).map_or(0, |c| c.font as u32),
-        W_GETDLGCODE => DLGC_WANTARROWS | DLGC_WANTCHARS,
+        // A dropped list takes Enter and Esc.
+        W_GETDLGCODE => DLGC_WANTARROWS | DLGC_WANTCHARS | if cb(h).is_some_and(|c| c.dropped) && (wp == 0x0d || wp == 0x1b) { DLGC_WANTALLKEYS } else { 0 },
         W_SETFOCUS => {
             let Some(c) = cb(h) else { return 0 };
             if c.edit != 0 {

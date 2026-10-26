@@ -378,6 +378,12 @@ pub fn is_dialog_message(h: u16, p: *mut u8) -> bool {
         return false;
     }
     let keyish = matches!(m, W_KEYDOWN | W_CHAR | W_SYSCHAR);
+    // The dialog's control the message is for (a combo box's edit
+    // control is the combo box's).
+    let mut ctl = mh;
+    while ctl != h && wnd(ctl).is_some_and(|w| w.parent != h && w.style & WS_CHILD != 0) {
+        ctl = wnd(ctl).map_or(h, |w| w.parent);
+    }
     if keyish {
         let code = send(mh, W_GETDLGCODE, wp, thunk16::far(p));
         if code & DLGC_WANTALLKEYS == 0 {
@@ -386,14 +392,14 @@ pub fn is_dialog_message(h: u16, p: *mut u8) -> bool {
                     // VK_TAB
                     0x09 if code & DLGC_WANTTAB == 0 => {
                         let prev = send_key_state(0x10);
-                        let n = next_tab(h, mh, prev);
+                        let n = next_tab(h, ctl, prev);
                         focus_control(h, n);
                         return true;
                     }
                     // VK_LEFT, VK_UP, VK_RIGHT, VK_DOWN
                     0x25..=0x28 if code & DLGC_WANTARROWS == 0 => {
-                        let n = next_group(h, mh, wp == 0x25 || wp == 0x26);
-                        if n != mh {
+                        let n = next_group(h, ctl, wp == 0x25 || wp == 0x26);
+                        if n != ctl {
                             set_focus(n);
                             check_default(h, n);
                             if send(n, W_GETDLGCODE, 0, 0) & DLGC_RADIOBUTTON != 0 {

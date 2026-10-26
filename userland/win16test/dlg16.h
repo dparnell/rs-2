@@ -1,0 +1,19 @@
+/* DLG16's resource IDs. */
+#define IDM_DIALOG   100
+#define IDM_EXIT     101
+#define IDC_NAME     201
+#define IDC_PASS     202
+#define IDC_AGE      203
+#define IDC_SMALL    204
+#define IDC_MEDIUM   205
+#define IDC_LARGE    206
+#define IDC_CHEESE   207
+#define IDC_OLIVES   208
+#define IDC_COLOUR   209
+#define IDC_FONT     210
+#define IDC_TOPPINGS 211
+#define IDC_DRINK    212
+#define IDC_VOLUME   213
+#define IDC_VOLVAL   214
+#define IDC_NOTES    215
+#define IDC_RESET    216
