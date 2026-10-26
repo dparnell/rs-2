@@ -603,6 +603,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             if wnd(h).is_some() {
                 let (cx, cy) = client_size(h);
                 write_rect(r, [0, 0, cx, cy]);
+                if crate::tracing() {
+                    trace(format_args!("W16 GetClientRect {h:#x}: {cx}x{cy}"));
+                }
             }
             0
         }
@@ -1613,7 +1616,8 @@ pub fn create(c: &Create) -> u16 {
         show_window(hwnd, 5);
     }
     if crate::tracing() {
-        trace(format_args!("W16 CreateWindow -> {hwnd:#x} (PM {frame:#x}/{client:#x})"));
+        let cname: alloc::string::String = u().classes[ci].name.iter().map(|&c| c as char).collect();
+        trace(format_args!("W16 CreateWindow -> {hwnd:#x} (PM {frame:#x}/{client:#x}) class {cname} parent {parent:#x} style {style:#x} {x},{y} {cx}x{cy}"));
     }
     hwnd
 }
