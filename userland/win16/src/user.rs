@@ -276,6 +276,11 @@ pub fn hwnd_above(pm: u32) -> u16 {
 }
 
 /// The windows of the task, in creation order.
+/// The top-level windows.
+pub fn top_levels() -> Vec<u16> {
+    u().wnds.iter().filter(|w| w.style & WS_CHILD == 0).map(|w| w.hwnd).collect()
+}
+
 pub fn all() -> Vec<u16> {
     u().wnds.iter().map(|w| w.hwnd).collect()
 }

@@ -433,6 +433,9 @@ pub const WIN16_MODULES: &[(&str, u32)] = &[
     ("MMSYSTEM", 10000),
 ];
 
+/// WIN16's entry for imports it does not have (a call ends the program).
+pub const WIN16_UNDEFINED: u32 = 999;
+
 /// KERNEL's absolute entries (WIN16 ordinals): __AHSHIFT, __AHINCR (a
 /// huge block's tiles are 8 selectors apart) and __WINFLAGS (protected
 /// mode, 386, enhanced mode, coprocessor).

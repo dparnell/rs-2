@@ -39,6 +39,7 @@ mod menu;
 mod misc;
 mod module;
 mod pm;
+mod profile;
 mod region;
 mod res;
 mod scroll;
@@ -166,6 +167,11 @@ core::arch::global_asm!(
     "w16_fpmath:",
     "int 0xe1",
     ".byte 0xcb",
+    // An import WIN16 does not have (loader: WIN16_UNDEFINED).
+    ".globl w16_undefined",
+    "w16_undefined:",
+    "int 0xe4",
+    ".byte 0xcb",
     // Catch(lpCatchBuf), Throw(lpCatchBuf, nThrowBack)
     ".globl w16_catch",
     "w16_catch:",
@@ -274,25 +280,38 @@ entries! {
     k_writeprivateprofilestring = 1129, 16;
     k_getdosenvironment = 1131, 0;
     k_getwinflags = 1132, 0;
+    k_getexeptr = 1133, 2;
     k_getwindowsdirectory = 1134, 6;
     k_getsystemdirectory = 1135, 6;
     k_getdrivetype = 1136, 2;
     k_fatalappexit = 1137, 6;
+    k_getnumtasks = 1152, 0;
     k_winexec = 1166, 6;
+    k_getfreespace = 1169, 2;
     k_alloccstodsalias = 1170, 2;
     k_allocdstocsalias = 1171, 2;
     k_allocselector = 1175, 2;
     k_freeselector = 1176, 2;
     k_prestochangoselector = 1177, 4;
+    k_globaldosalloc = 1184, 4;
+    k_globaldosfree = 1185, 2;
     k_getselectorbase = 1186, 2;
     k_setselectorbase = 1187, 6;
     k_getselectorlimit = 1188, 2;
     k_setselectorlimit = 1189, 6;
     k_sethandlecount = 1199, 2;
     k_isdbcsleadbyte = 1207, 2;
+    k_istask = 1320, 2;
+    k_isbadreadptr = 1334, 6;
+    k_isbadwriteptr = 1335, 6;
+    k_isbadcodeptr = 1336, 4;
+    k_isbadstringptr = 1337, 6;
+    k_isbadhugereadptr = 1346, 8;
+    k_isbadhugewriteptr = 1347, 8;
     k_hmemcpy = 1348, 12;
     k__hread = 1349, 10;
     k__hwrite = 1350, 10;
+    k_lstrcpyn = 1353, 10;
     // USER
     u_messagebox = 2001, 12;
     u_initapp = 2005, 2;
@@ -465,6 +484,7 @@ entries! {
     u_getkeyboardstate = 2222, 4;
     u_setkeyboardstate = 2223, 4;
     u_getwindowtask = 2224, 2;
+    u_enumtaskwindows = 2225, 10;
     u_getnextdlggroupitem = 2227, 6;
     u_getnextdlgtabitem = 2228, 6;
     u_gettopwindow = 2229, 2;
@@ -699,7 +719,16 @@ entries! {
     dd_ddequerystring = 6123, 18;
     dd_ddekeepstringhandle = 6124, 8;
     dd_ddenameservice = 6127, 14;
+    // TOOLHELP
+    th_notifyregister = 6273, 8;
+    th_notifyunregister = 6274, 2;
+    th_interruptregister = 6275, 6;
+    th_interruptunregister = 6276, 2;
+    th_terminateapp = 6277, 4;
+    th_timercount = 6280, 4;
     // SHELL
+    sh_dragacceptfiles = 6509, 4;
+    sh_shellexecute = 6520, 20;
     sh_extracticon = 6534, 8;
 }
 

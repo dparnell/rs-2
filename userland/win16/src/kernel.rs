@@ -252,20 +252,26 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         52 => 0,
         // GetInstanceData(inst, ptr, cb): no other instances.
         54 => 0,
-        // GetProfileInt(app, key, default), GetPrivateProfileInt(+file):
-        // no WIN.INI yet, the default.
+        // GetProfileInt(app, key, default), GetPrivateProfileInt(+file)
         57 | 127 => {
-            let (_app, _key, def) = (a.l(), a.l(), a.w());
-            def as u32
+            let (app, key, def) = (a.l(), a.l(), a.w());
+            let file = if ord == 127 { far_str(a.l()).unwrap_or(b"").to_vec() } else { b"WIN.INI".to_vec() };
+            crate::profile::get_int(&file, app, key, def)
         }
         // GetProfileString(app, key, default, buf, max),
-        // GetPrivateProfileString(+file): the default.
+        // GetPrivateProfileString(+file)
         58 | 128 => {
-            let (_app, _key, def, buf, max) = (a.l(), a.l(), a.l(), a.p(), a.i());
-            crate::user::copy_out(far_str(def).unwrap_or(b""), buf, max) as u32
+            let (app, key, def, buf, max) = (a.l(), a.l(), a.l(), a.p(), a.i());
+            let file = if ord == 128 { far_str(a.l()).unwrap_or(b"").to_vec() } else { b"WIN.INI".to_vec() };
+            crate::profile::get_string(&file, app, key, def, buf, max)
         }
         // WriteProfileString(app, key, value), WritePrivateProfileString
-        59 | 129 => 1,
+        // (+file)
+        59 | 129 => {
+            let (app, key, value) = (a.l(), a.l(), a.l());
+            let file = if ord == 129 { far_str(a.l()).unwrap_or(b"").to_vec() } else { b"WIN.INI".to_vec() };
+            crate::profile::write_string(&file, app, key, value)
+        }
         // FindResource .. SizeofResource
         60..=65 => crate::res::kernel(ord, a),
         // OpenFile(path, lpOfStruct, style)
@@ -303,13 +309,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // GetWindowsDirectory(buf, max), GetSystemDirectory(buf, max)
         134 | 135 => {
             let (buf, max) = (a.p(), a.i());
-            crate::user::copy_out(if ord == 134 { b"C:\\OS2\\MDOS\\WINOS2" } else { b"C:\\OS2\\MDOS\\WINOS2\\SYSTEM" }, buf, max) as u32
-        }
-        // WinExec(cmdline, show): not yet (file not found).
-        166 => {
-            a.l();
-            a.w();
-            2
+            crate::profile::make_dirs();
+            crate::user::copy_out(if ord == 134 { crate::profile::WINDOWS_DIR } else { crate::profile::SYSTEM_DIR }, buf, max) as u32
         }
         // _lclose(hf)
         81 => {
@@ -586,6 +587,20 @@ pub fn throw(r: &mut crate::dos::Regs) {
     r[DI] = v(5);
     r[DS] = v(6);
     r[AX] = value;
+}
+
+/// A call to an import WIN16 does not have: Windows' fatal message, then
+/// the end of the program.
+pub fn undefined_dynalink(r: &crate::dos::Regs) {
+    use crate::dos::reg::*;
+    let ss = (thunk16::sp16() >> 16) as u32;
+    let st = flat(ss << 16 | r[SP] as u32) as *const u16;
+    let (ip, cs) = unsafe { (st.read_unaligned(), st.add(1).read_unaligned()) };
+    trace(format_args!("WIN16: call to an undefined dynalink from {cs:04X}:{:04X}", ip.wrapping_sub(5)));
+    unsafe {
+        crate::pm::WinMessageBox(crate::pm::HWND_DESKTOP, 0, b"Call to Undefined Dynalink\0".as_ptr(), b"Application Error\0".as_ptr(), 0, 0x4000 | 0x0040);
+        os2::DosExit(1, 0xff);
+    }
 }
 
 /// WIN87EM's __FPMATH (INT E1h from w16_fpmath), the floating point

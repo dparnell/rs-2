@@ -172,25 +172,40 @@ pub fn load(
                     if let Some(&(_, v)) = constant {
                         Target::constant(v)
                     } else {
-                        import_target(&imports, module, ImportBy::Ordinal(base + ordinal as u32)).map_err(|e| {
-                            crate::trace!(
-                                "loader: {}: import {}.{} not found",
-                                path,
-                                import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"),
-                                ordinal
-                            );
-                            super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
-                            e
-                        })?
+                        let found = import_target(&imports, module, ImportBy::Ordinal(base + ordinal as u32));
+                        let mname = import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?");
+                        match found {
+                            Ok(t) => t,
+                            // A Windows module's import WIN16 does not have:
+                            // as on Windows, the program loads and a call
+                            // to it ends the program ("Call to Undefined
+                            // Dynalink").
+                            Err(_) if base != 0 => {
+                                crate::trace!("loader: {path}: import {mname}.{ordinal} not found: undefined dynalink");
+                                import_target(&imports, module, ImportBy::Ordinal(super::WIN16_UNDEFINED))?
+                            }
+                            Err(e) => {
+                                crate::trace!("loader: {path}: import {mname}.{ordinal} not found");
+                                super::set_fail(mname);
+                                return Err(e);
+                            }
+                        }
                     }
                 }
                 ne::Target::ImportName { module, name_offset } => {
                     let name = m.imported_name(name_offset).map(s).map_err(|_| err::BAD_EXE_FORMAT)?;
-                    import_target(&imports, module, ImportBy::Name(&name)).map_err(|e| {
-                        crate::trace!("loader: {}: import {} not found", path, name);
-                        super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
-                        e
-                    })?
+                    match import_target(&imports, module, ImportBy::Name(&name)) {
+                        Ok(t) => t,
+                        Err(_) if ord_bases.get(module as usize - 1).is_some_and(|&b| b != 0) => {
+                            crate::trace!("loader: {path}: import {name} not found: undefined dynalink");
+                            import_target(&imports, module, ImportBy::Ordinal(super::WIN16_UNDEFINED))?
+                        }
+                        Err(e) => {
+                            crate::trace!("loader: {}: import {} not found", path, name);
+                            super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
+                            return Err(e);
+                        }
+                    }
                 }
                 ne::Target::OsFixup { .. } => continue,
             };

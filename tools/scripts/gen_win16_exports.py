@@ -21,9 +21,10 @@ BASES = {'KERNEL': 1000, 'USER': 2000, 'GDI': 3000, 'KEYBOARD': 4000, 'WIN87EM':
          'VER': 6300, 'LZEXPAND': 6400, 'SHELL': 6500, 'MMSYSTEM': 10000}
 # Register-based entries: 16-bit code of their own in src/lib.rs.
 EXTRA = ['INITTASK=w16_inittask @1091', 'DOS3CALL=w16_dos3call @1102', '_WSPRINTF=u_wsprintf @2420',
-         '__FPMATH=w16_fpmath @5001']
+         '__FPMATH=w16_fpmath @5001',
+         'CATCH=w16_catch @1055', 'THROW=w16_throw @1056', 'UNDEFINED_DYNALINK=w16_undefined @999']
 # Not to be stubbed: register-based or with variable arguments.
-NO_STUB = {'INITTASK', 'DOS3CALL', '_WSPRINTF', 'WSPRINTF'}
+NO_STUB = {'INITTASK', 'DOS3CALL', '_WSPRINTF', 'WSPRINTF', 'CATCH', 'THROW'}
 
 
 def imports(lib):
