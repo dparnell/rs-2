@@ -231,7 +231,7 @@ pub fn create_dc(p: &Printer, dm: Option<u32>, output: bool) -> u16 {
         q.as_ptr() as u32,
         drv.as_ptr() as u32,
         if dd.is_empty() { 0 } else { dd.as_ptr() as u32 },
-        b"PM_Q_STD\0".as_ptr() as u32,
+        b"PM_Q_RAW\0".as_ptr() as u32,
         b"Windows program\0".as_ptr() as u32,
         0,
         0,

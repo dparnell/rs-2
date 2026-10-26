@@ -278,6 +278,11 @@ impl PsWriter {
         }
         self.doc = true;
         self.pages = 0;
+        // Fonts and patterns are defined in each document (a DC can print
+        // several, one after the other).
+        self.fonts.clear();
+        self.patterns.clear();
+        (self.clip, self.color, self.width, self.dash) = (None, None, None, None);
         let (w, h) = self.paper;
         let mut s = String::new();
         s.push_str("%!PS-Adobe-3.0\n%%Creator: rs2 PostScript driver\n%%Title: ");
@@ -843,6 +848,21 @@ mod tests {
         let t = text(&mut w);
         assert_eq!(t.matches("makepattern").count(), 1);
         assert_eq!(t.matches("P1 setcolor").count(), 2);
+    }
+
+    #[test]
+    fn each_document_defines_its_patterns() {
+        let mut w = PsWriter::new(300, (612, 792), false);
+        let page = [Rect::new(0, 0, 2550, 3300)];
+        let p = Paint::Pattern { bits: [0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55, 0xaa, 0x55], fg: 0, bg: Some(0xffffff), org: (0, 0) };
+        for _ in 0..2 {
+            w.begin_doc();
+            w.rects(&page, &[Rect::new(0, 0, 50, 50)], &p);
+            w.end_doc();
+        }
+        let t = text(&mut w);
+        assert_eq!(t.matches("%!PS-Adobe-3.0").count(), 2);
+        assert_eq!(t.matches("makepattern").count(), 2);
     }
 
     #[test]

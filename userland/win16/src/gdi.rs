@@ -149,6 +149,11 @@ fn new_obj(o: Obj) -> u16 {
     let h = OBJ_BASE + 2 * i as u16;
     g.widths.remove(&h);
     g.widths.remove(&(h | 1));
+    // A new font in a deleted one's slot: the DCs that had that one in
+    // their PS make theirs again.
+    for d in g.dcs.iter_mut().filter(|d| d.applied == h) {
+        d.applied = 0;
+    }
     h
 }
 
@@ -651,8 +656,9 @@ fn ellipse(d: &Dc, l: i32, t: i32, r: i32, b: i32) {
             GpiSetColor(d.hps, rgb(col));
             GpiFullArc(d.hps, DRO_FILL, 1 << 16);
         }
-        if let Some((col, _)) = pen_color(d) {
+        if let Some((col, w)) = pen_color(d) {
             GpiSetColor(d.hps, rgb(col));
+            GpiSetLineWidth(d.hps, w << 16);
             GpiFullArc(d.hps, DRO_OUTLINE, 1 << 16);
         }
     }
@@ -1148,9 +1154,10 @@ fn rectangle(h: u16, l: i32, t: i32, r: i32, b: i32) -> u32 {
     if let Some(c) = brush_color(d.s.brush) {
         unsafe { WinFillRect(d.hps, &rc, rgb(c)) };
     }
-    if let Some((color, _)) = pen_color(d) {
+    if let Some((color, w)) = pen_color(d) {
         unsafe {
             GpiSetColor(d.hps, rgb(color));
+            GpiSetLineWidth(d.hps, w << 16);
             GpiMove(d.hps, &PointL { x: rc.l, y: rc.b });
             GpiBox(d.hps, DRO_OUTLINE, &PointL { x: rc.r - 1, y: rc.t - 1 }, 0, 0);
         }
