@@ -172,6 +172,12 @@ pub struct Wnd {
     pub hsb: Option<crate::scroll::Bar>,
     /// SetProp's properties: (atom, data).
     pub props: Vec<(u16, u16)>,
+    /// WM_NCCREATE has been sent: PM's messages reach the procedure
+    /// from then on (Windows sends none before it).
+    pub created: bool,
+    /// WM_SIZE and WM_MOVE have been sent (a window created hidden gets
+    /// them when first shown, as Windows does it).
+    pub sized: bool,
 }
 
 /// A PM message being handled as a Windows message.
@@ -323,8 +329,8 @@ pub fn z(s: &[u8]) -> Vec<u8> {
 
 /// The far addresses of the procedures implemented here (built-in
 /// controls, DefWindowProc, DefDlgProc) and their entry numbers.
-fn natives() -> &'static [(u32, u32); 9] {
-    static N: Global<[(u32, u32); 9]> = Global::new([(0, 0); 9]);
+fn natives() -> &'static [(u32, u32); 10] {
+    static N: Global<[(u32, u32); 10]> = Global::new([(0, 0); 10]);
     let n = N.get();
     if n[0].0 == 0 {
         unsafe extern "C" {
@@ -335,6 +341,7 @@ fn natives() -> &'static [(u32, u32); 9] {
             fn p_combo();
             fn p_scrollbar();
             fn p_combolbox();
+            fn p_mdiclient();
             fn u_defwindowproc();
             fn u_defdlgproc();
         }
@@ -347,6 +354,7 @@ fn natives() -> &'static [(u32, u32); 9] {
             (f(p_combo), 6),
             (f(p_scrollbar), 7),
             (f(p_combolbox), 8),
+            (f(p_mdiclient), 9),
             (f(u_defwindowproc), 2107),
             (f(u_defdlgproc), 2308),
         ];
@@ -366,6 +374,9 @@ pub fn call_proc(proc_: u32, hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
     }
     if let Some(&(_, idx)) = natives().iter().find(|n| n.0 == proc_) {
         return crate::native(idx, hwnd, msg, wp, lp);
+    }
+    if crate::tracing() {
+        trace(format_args!("W16 msg {hwnd:#x} {msg:#x} {wp:#x} {lp:#x}"));
     }
     PascalCall::new().w(hwnd).w(msg).w(wp).l(lp).call(proc_)
 }
@@ -1168,7 +1179,7 @@ fn init_app() -> u32 {
     crate::scroll::register(t.hab);
     // The built-in classes: (name, procedure, style, extra bytes,
     // cursor, brush).
-    let builtin: [(&[u8], u32, u16, u16, u16, u16); 8] = [
+    let builtin: [(&[u8], u32, u16, u16, u16, u16); 9] = [
         (b"BUTTON", 2, CS_DBLCLKS | 0x80, 0, 32512, 0),
         (b"STATIC", 3, 0x80, 0, 32512, 0),
         (b"EDIT", 4, CS_DBLCLKS | 0x80, 0, 32513, 0),
@@ -1176,6 +1187,8 @@ fn init_app() -> u32 {
         (b"COMBOBOX", 6, CS_DBLCLKS | 0x80, 0, 32512, 0),
         (b"SCROLLBAR", 7, CS_DBLCLKS | 0x80, 0, 32512, 0),
         (b"COMBOLBOX", 8, CS_DBLCLKS | 0x80, 0, 32512, 0),
+        // COLOR_APPWORKSPACE + 1
+        (b"MDICLIENT", 9, 0, 0, 32512, 13),
         (b"#32770", 2308, 0x0800, crate::dialog::DLGWINDOWEXTRA, 32512, 0),
     ];
     for (i, (name, idx, style, extra, cursor, brush)) in builtin.into_iter().enumerate() {
@@ -1326,7 +1339,7 @@ fn has_nonclient(style: u32) -> bool {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn create_window(exstyle: u32, class: u32, title: u32, style: u32, pos: [i32; 4], parent: u16, menu: u16, hinst: u16, param: u32) -> u16 {
+pub fn create_window(exstyle: u32, class: u32, title: u32, style: u32, pos: [i32; 4], parent: u16, menu: u16, hinst: u16, param: u32) -> u16 {
     let Some(ci) = find_class(class) else {
         trace(format_args!(
             "WIN16: CreateWindow: class {} not found",
@@ -1367,8 +1380,10 @@ pub fn create(c: &Create) -> u16 {
     let text = z(c.title);
     let [mut x, mut y, mut cx, mut cy] = c.pos;
     let child = style & WS_CHILD != 0;
-    let framed = is_framed(style);
     let parent = c.parent;
+    // An MDI child is a PM frame inside the MDI client (mdi.rs).
+    let mdi_child = child && style & WS_CAPTION == WS_CAPTION && crate::mdi::is_client(parent);
+    let framed = is_framed(style) || mdi_child;
     let combo = u().classes[ci].name == b"COMBOBOX";
     let nc = style & if combo { WS_DLGFRAME | WS_THICKFRAME } else { WS_BORDER | WS_DLGFRAME | WS_THICKFRAME | WS_VSCROLL | WS_HSCROLL };
     if child && wnd(parent).is_none() {
@@ -1407,7 +1422,9 @@ pub fn create(c: &Create) -> u16 {
     let (frame, client) = if framed {
         let mut fcf = frame_flags(style, parent != 0);
         let mut client = 0;
-        let f = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, b"Win16Wnd\0".as_ptr(), text.as_ptr(), crate::pm::WS_CLIPCHILDREN, 0, 0, &mut client) };
+        let pm_parent = if mdi_child { wnd(parent).map_or(HWND_DESKTOP, |w| w.client) } else { HWND_DESKTOP };
+        let fs = if mdi_child { WS_CLIPSIBLINGS } else { 0 };
+        let f = unsafe { WinCreateStdWindow(pm_parent, fs, &mut fcf, b"Win16Wnd\0".as_ptr(), text.as_ptr(), crate::pm::WS_CLIPCHILDREN, 0, 0, &mut client) };
         (f, client)
     } else {
         let pm_parent = if child { wnd(parent).map_or(0, |w| w.client) } else { HWND_DESKTOP };
@@ -1452,6 +1469,8 @@ pub fn create(c: &Create) -> u16 {
         vsb: None,
         hsb: None,
         props: Vec::new(),
+        created: false,
+        sized: false,
     });
     if !child && parent != 0 {
         let of = wnd(top_level(parent)).map_or(0, |w| w.frame);
@@ -1475,9 +1494,10 @@ pub fn create(c: &Create) -> u16 {
         if m != 0 {
             crate::menu::set_menu(hwnd, m);
         }
+        let ph = if mdi_child { wnd(parent).map_or(sy, |w| client_height(w.client)) } else { sy };
         unsafe {
             WinSendMsg(frame, WM_UPDATEFRAME, 0, 0);
-            WinSetWindowPos(frame, HWND_TOP, x, sy - y - cy, cx, cy, SWP_MOVE | SWP_SIZE);
+            WinSetWindowPos(frame, HWND_TOP, x, ph - y - cy, cx, cy, SWP_MOVE | SWP_SIZE);
         }
     } else {
         layout_frame(hwnd);
@@ -1503,15 +1523,18 @@ pub fn create(c: &Create) -> u16 {
     b.extend_from_slice(&class_far.to_le_bytes());
     b.extend_from_slice(&c.exstyle.to_le_bytes());
     unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), p, b.len()) };
+    if let Some(w) = wnd(hwnd) {
+        w.created = true;
+    }
     let ok = send(hwnd, W_NCCREATE, 0, cs) != 0 && send(hwnd, W_CREATE, 0, cs) as i32 != -1;
     thunk16::set_sp16(saved);
     if !ok || wnd(hwnd).is_none() {
         destroy_window(hwnd);
         return 0;
     }
-    let (w, h) = client_size(hwnd);
-    send(hwnd, W_SIZE, 0, (h as u32) << 16 | w as u32 & 0xffff);
-    send(hwnd, W_MOVE, 0, client_origin(hwnd));
+    if style & WS_VISIBLE != 0 {
+        send_size_move(hwnd);
+    }
     if child {
         let id = c.menu;
         send(parent, W_PARENTNOTIFY, W_CREATE, (id as u32) << 16 | hwnd as u32);
@@ -1683,6 +1706,15 @@ fn frame_state(h: u16) -> u32 {
     swp.fl
 }
 
+/// WM_SIZE and WM_MOVE with the window's present size and place.
+fn send_size_move(h: u16) {
+    let Some(w) = wnd(h) else { return };
+    w.sized = true;
+    let (cw, ch) = client_size(h);
+    send(h, W_SIZE, 0, (ch as u32) << 16 | cw as u32 & 0xffff);
+    send(h, W_MOVE, 0, client_origin(h));
+}
+
 pub fn show_window(h: u16, cmd: u16) -> bool {
     let Some((f, child, framed)) = wnd(h).map(|w| (w.frame, w.style & WS_CHILD != 0, w.framed)) else { return false };
     let was = unsafe { WinIsWindowVisible(f) } != 0;
@@ -1694,11 +1726,14 @@ pub fn show_window(h: u16, cmd: u16) -> bool {
         9 => SWP_SHOW | SWP_RESTORE | SWP_ACTIVATE | SWP_ZORDER,
         _ => SWP_SHOW | SWP_ACTIVATE | SWP_ZORDER,
     };
-    if child || !framed {
+    if !framed {
         fl &= !(SWP_ACTIVATE | SWP_MINIMIZE | SWP_MAXIMIZE | SWP_RESTORE);
         if !child && fl & SWP_SHOW != 0 {
             fl |= SWP_ZORDER;
         }
+    } else if child {
+        // An MDI child: PM activates top-level frames only.
+        fl &= !SWP_ACTIVATE;
     }
     if cmd != 0 && !was {
         send(h, W_SHOWWINDOW, 1, 0);
@@ -1713,6 +1748,9 @@ pub fn show_window(h: u16, cmd: u16) -> bool {
         }
     }
     unsafe { WinSetWindowPos(f, HWND_TOP, 0, 0, 0, 0, fl) };
+    if cmd != 0 && !wnd(h).is_some_and(|w| w.sized) {
+        send_size_move(h);
+    }
     if fl & SWP_ACTIVATE != 0 && !is_child(h, focus()) {
         if let Some(c) = wnd(h).map(|w| w.client) {
             unsafe { WinSetFocus(HWND_DESKTOP, c) };
@@ -2396,7 +2434,7 @@ pub fn dispatch(p: *mut u8) -> u32 {
 
 /// PM's window procedure of the Windows windows' client areas.
 extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
-    let Some(h) = by_client(pmh).map(|w| w.hwnd) else {
+    let Some(h) = by_client(pmh).filter(|w| w.created).map(|w| w.hwnd) else {
         return unsafe { WinDefWindowProc(pmh, msg, mp1, mp2) };
     };
     let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
@@ -2411,6 +2449,9 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             let mut swp = Swp::default();
             unsafe { WinQueryWindowPos(f, &mut swp) };
             let kind = if swp.fl & SWP_MINIMIZE != 0 { 1 } else if swp.fl & SWP_MAXIMIZE != 0 { 2 } else { 0 };
+            if let Some(w) = wnd(h) {
+                w.sized = true;
+            }
             send_inflight(h, W_SIZE, kind, (cy as u32) << 16 | cx as u32, q);
             0
         }

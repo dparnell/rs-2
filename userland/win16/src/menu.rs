@@ -163,7 +163,7 @@ fn win_text(s: &[u8]) -> Vec<u8> {
 
 /// Insert an item at `pos` (-1: the end): Windows' flags, ID or pop-up
 /// HMENU, and text.
-fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
+pub fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
     let pm = pm_of(menu);
     if pm == 0 {
         return false;
@@ -171,7 +171,8 @@ fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
     let mut mi = MenuItem { pos, ..Default::default() };
     if flags & MF_SEPARATOR != 0 || (flags & (MF_POPUP | MF_BITMAP | MF_OWNERDRAW) == 0 && text.is_empty() && id == 0) {
         mi.style = MIS_SEPARATOR;
-        mi.id = 0xffff;
+        // WIN16's own separators have IDs (to be removed by them).
+        mi.id = if id >= 0xf000 { id } else { 0xffff };
     } else {
         mi.style = MIS_TEXT;
         if flags & MF_POPUP != 0 {
@@ -201,6 +202,28 @@ fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
     }
     let t = pm_text(text);
     send(pm, MM_INSERTITEM, &mi as *const MenuItem as u32, t.as_ptr() as u32) != MIT_NONE
+}
+
+/// The menu or submenu that has the item `id` itself.
+fn holder(pm: u32, id: u16) -> Option<u32> {
+    if pm == 0 {
+        return None;
+    }
+    if send(pm, MM_ITEMPOSITIONFROMID, mp(id as u32, 0), 0) != MIT_NONE {
+        return Some(pm);
+    }
+    let n = send(pm, MM_QUERYITEMCOUNT, 0, 0);
+    for i in 0..n {
+        let sid = send(pm, MM_ITEMIDFROMPOSITION, i, 0);
+        if let Some(mi) = query(pm, sid as u16) {
+            if mi.sub != 0 {
+                if let Some(m) = holder(mi.sub, id) {
+                    return Some(m);
+                }
+            }
+        }
+    }
+    None
 }
 
 /// The PM ID of an item given by ID or (MF_BYPOSITION) position.
@@ -253,7 +276,12 @@ fn set_attr(menu: u16, which: u16, flags: u16, mask: u16, on: bool) -> u32 {
     }
 }
 
-fn remove(menu: u16, which: u16, flags: u16, destroy: bool) -> bool {
+/// The number of items of a menu.
+pub fn item_count(menu: u16) -> u32 {
+    send(pm_of(menu), MM_QUERYITEMCOUNT, 0, 0)
+}
+
+pub fn remove(menu: u16, which: u16, flags: u16, destroy: bool) -> bool {
     let pm = pm_of(menu);
     let Some(id) = item_id(pm, which, flags) else { return false };
     if let Some(mi) = query(pm, id) {
@@ -589,13 +617,13 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // InsertMenu(hmenu, pos, flags, id, text)
         410 => {
             let (h, pos, fl, id, text) = (a.w(), a.w(), a.w(), a.w(), a.l());
-            let pm = pm_of(h);
-            let at = if fl & MF_BYPOSITION != 0 {
-                pos as i16
+            // By command: before the item, in the (sub)menu that has it.
+            let (h, at) = if fl & MF_BYPOSITION != 0 {
+                (h, pos as i16)
             } else {
-                match send(pm, MM_ITEMPOSITIONFROMID, mp(pos as u32, 0), 0) {
-                    MIT_NONE => -1,
-                    p => p as i16,
+                match holder(pm_of(h), pos) {
+                    Some(m) => (handle_of(m), send(m, MM_ITEMPOSITIONFROMID, mp(pos as u32, 0), 0) as i16),
+                    None => (h, -1),
                 }
             };
             insert(h, at, fl, id, &item_text(fl, text)) as u32
@@ -613,8 +641,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // ModifyMenu(hmenu, pos, flags, id, text)
         414 => {
             let (h, pos, fl, id, text) = (a.w(), a.w(), a.w(), a.w(), a.l());
-            let pm = pm_of(h);
-            let Some(old) = item_id(pm, pos, fl) else { return Some(0) };
+            let Some(old) = item_id(pm_of(h), pos, fl) else { return Some(0) };
+            // The item stays in the (sub)menu that has it, where it was.
+            let pm = holder(pm_of(h), old).unwrap_or(pm_of(h));
+            let h = handle_of(pm);
             let at = send(pm, MM_ITEMPOSITIONFROMID, mp(old as u32, 0), 0) as i16;
             remove(h, old, 0, false);
             insert(h, at, fl & !MF_BYPOSITION, id, &item_text(fl, text)) as u32

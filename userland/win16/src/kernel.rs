@@ -547,6 +547,47 @@ pub fn init_task(r: &mut crate::dos::Regs) {
     }
 }
 
+/// Catch(lpCatchBuf) (INT E2h from w16_catch): the caller's state after
+/// Catch returns (its return address, SP past the return address and
+/// the argument, BP, SI, DI, DS) into the CATCHBUF; 0.
+pub fn catch(r: &mut crate::dos::Regs) {
+    use crate::dos::reg::*;
+    let ss = (thunk16::sp16() >> 16) as u32;
+    let st = flat(ss << 16 | r[SP] as u32) as *const u16;
+    let rd = |i: usize| unsafe { st.add(i).read_unaligned() };
+    let (ip, cs, buf) = (rd(0), rd(1), rd(2) as u32 | (rd(3) as u32) << 16);
+    let b = flat(buf) as *mut u16;
+    if !b.is_null() {
+        for (i, v) in [ip, cs, r[SP].wrapping_add(8), r[BP], r[SI], r[DI], r[DS], ss as u16, 0].iter().enumerate() {
+            unsafe { b.add(i).write_unaligned(*v) };
+        }
+    }
+    r[AX] = 0;
+}
+
+/// Throw(lpCatchBuf, nThrowBack) (INT E3h from w16_throw): back to where
+/// Catch returned, which now returns nThrowBack.
+pub fn throw(r: &mut crate::dos::Regs) {
+    use crate::dos::reg::*;
+    let ss = (thunk16::sp16() >> 16) as u32;
+    let st = flat(ss << 16 | r[SP] as u32) as *const u16;
+    let rd = |i: usize| unsafe { st.add(i).read_unaligned() };
+    let (value, buf) = (rd(2), rd(3) as u32 | (rd(4) as u32) << 16);
+    let b = flat(buf) as *const u16;
+    if b.is_null() {
+        return;
+    }
+    let v = |i: usize| unsafe { b.add(i).read_unaligned() };
+    r[IP] = v(0);
+    r[CS] = v(1);
+    r[SP] = v(2);
+    r[BP] = v(3);
+    r[SI] = v(4);
+    r[DI] = v(5);
+    r[DS] = v(6);
+    r[AX] = value;
+}
+
 /// WIN87EM's __FPMATH (INT E1h from w16_fpmath), the floating point
 /// emulator's interface: BX the function. The coprocessor does the work,
 /// so the programs' FPU instructions stay as they are (their OSFIXUPs

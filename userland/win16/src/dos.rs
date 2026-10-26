@@ -40,6 +40,8 @@ pub fn interrupt(p: *mut u16) {
     match r[INTNO] {
         0xe0 => kernel::init_task(&mut r),
         0xe1 => kernel::fpmath(&mut r),
+        0xe2 => kernel::catch(&mut r),
+        0xe3 => kernel::throw(&mut r),
         0x21 => int21(&mut r),
         0x25 | 0x26 => abs_disk(&mut r),
         // A protection fault: handled when it is fixed (the number 0).

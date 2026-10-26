@@ -25,6 +25,7 @@ mod bitmap;
 mod caret;
 mod compat;
 mod ctl;
+mod dde_stub;
 mod dialog;
 mod dos;
 mod edit;
@@ -32,6 +33,7 @@ mod gdi;
 mod icon;
 mod kernel;
 mod listbox;
+mod mdi;
 mod mem16;
 mod menu;
 mod misc;
@@ -164,6 +166,15 @@ core::arch::global_asm!(
     "w16_fpmath:",
     "int 0xe1",
     ".byte 0xcb",
+    // Catch(lpCatchBuf), Throw(lpCatchBuf, nThrowBack)
+    ".globl w16_catch",
+    "w16_catch:",
+    "int 0xe2",
+    ".byte 0xca, 4, 0",
+    ".globl w16_throw",
+    "w16_throw:",
+    "int 0xe3",
+    ".byte 0xca, 6, 0",
     ".code32",
     ".popsection",
 );
@@ -192,6 +203,7 @@ entries! {
     p_combo = 6, 10;
     p_scrollbar = 7, 10;
     p_combolbox = 8, 10;
+    p_mdiclient = 9, 10;
     // KERNEL
     k_fatalexit = 1001, 2;
     k_getversion = 1003, 0;
@@ -523,6 +535,9 @@ entries! {
     u_ischarlower = 2436, 2;
     u_ansiupperbuff = 2437, 6;
     u_ansilowerbuff = 2438, 6;
+    u_defframeproc = 2445, 12;
+    u_defmdichildproc = 2447, 10;
+    u_translatemdisysaccel = 2451, 6;
     u_createwindowex = 2452, 34;
     u_adjustwindowrectex = 2454, 14;
     u_destroyicon = 2457, 2;
@@ -674,6 +689,16 @@ entries! {
     kb_oemtoansi = 4006, 8;
     kb_getkeyboardtype = 4130, 2;
     kb_getkbcodepage = 4132, 0;
+    // DDEML (minimal, dde_stub.rs)
+    dd_ddeinitialize = 6102, 16;
+    dd_ddeuninitialize = 6103, 4;
+    dd_ddeconnect = 6107, 16;
+    dd_ddegetlasterror = 6120, 4;
+    dd_ddecreatestringhandle = 6121, 10;
+    dd_ddefreestringhandle = 6122, 8;
+    dd_ddequerystring = 6123, 18;
+    dd_ddekeepstringhandle = 6124, 8;
+    dd_ddenameservice = 6127, 14;
     // SHELL
     sh_extracticon = 6534, 8;
 }
@@ -697,7 +722,7 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
 fn dispatch_(idx: u32, args: *const u8) -> u32 {
     let size = arg_size(idx);
     let mut a = Pascal::new(args, size);
-    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)) {
+    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)).or_else(|| dde_stub::call(idx, &mut a)).or_else(|| mdi::call(idx, &mut a)) {
         return r;
     }
     match idx {
@@ -705,7 +730,7 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
             dos::interrupt(thunk16::flat(a.l()) as *mut u16);
             0
         }
-        2..=8 => {
+        2..=9 => {
             let (h, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
             native(idx, h, m, wp, lp)
         }
@@ -731,6 +756,7 @@ pub fn native(idx: u32, h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     *NATIVE_DEPTH.get() += 1;
     let r = match idx {
         2..=8 => ctl::proc_(idx, h, m, wp, lp),
+        9 => mdi::client_proc(h, m, wp, lp),
         2107 => user::def_window_proc(h, m, wp, lp),
         2308 => dialog::def_dlg_proc(h, m, wp, lp),
         _ => 0,
