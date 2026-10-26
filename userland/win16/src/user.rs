@@ -2072,8 +2072,34 @@ fn set_cursor(c: u16) -> u16 {
     32512
 }
 
+/// Break text into lines of at most `max` characters at blanks, as
+/// Windows' message box wraps long lines (PM's keeps them).
+fn wrap(s: &[u8], max: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(s.len() + 8);
+    for (i, line) in s.split(|&c| c == b'\n').enumerate() {
+        if i > 0 {
+            out.push(b'\n');
+        }
+        let mut col = 0;
+        for (j, word) in line.split(|&c| c == b' ').enumerate() {
+            if j > 0 {
+                if col + 1 + word.len() > max && col > 0 {
+                    out.push(b'\n');
+                    col = 0;
+                } else {
+                    out.push(b' ');
+                    col += 1;
+                }
+            }
+            out.extend_from_slice(word);
+            col += word.len();
+        }
+    }
+    out
+}
+
 fn message_box(h: u16, text: u32, cap: u32, ty: u16) -> u32 {
-    let t = z(far_str(text).unwrap_or(b""));
+    let t = z(&wrap(far_str(text).unwrap_or(b""), 64));
     let c = z(far_str(cap).unwrap_or(b"Error"));
     let buttons = match ty & 0x0f {
         1 => 1, // OKCANCEL
