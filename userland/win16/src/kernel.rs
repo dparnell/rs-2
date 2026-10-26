@@ -131,13 +131,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // GlobalFree(h): 0 when freed.
         17 => {
             let h = a.w();
-            match GLOBALS.get().remove(&(h | 7)) {
-                Some(b) => {
-                    unsafe { os2::DosFreeMem(b.base) };
-                    0
-                }
-                None => h as u32,
-            }
+            if global_free(h) { 0 } else { h as u32 }
         }
         // GlobalLock(h): selector:0.
         18 => {
@@ -230,6 +224,55 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         52 => 0,
         // GetInstanceData(inst, ptr, cb): no other instances.
         54 => 0,
+        // GetProfileInt(app, key, default), GetPrivateProfileInt(+file):
+        // no WIN.INI yet, the default.
+        57 | 127 => {
+            let (_app, _key, def) = (a.l(), a.l(), a.w());
+            def as u32
+        }
+        // GetProfileString(app, key, default, buf, max),
+        // GetPrivateProfileString(+file): the default.
+        58 | 128 => {
+            let (_app, _key, def, buf, max) = (a.l(), a.l(), a.l(), a.p(), a.i());
+            crate::user::copy_out(far_str(def).unwrap_or(b""), buf, max) as u32
+        }
+        // WriteProfileString(app, key, value), WritePrivateProfileString
+        59 | 129 => 1,
+        // FindResource .. SizeofResource
+        60..=65 => crate::res::kernel(ord, a),
+        // OpenFile(path, lpOfStruct, style)
+        74 => {
+            let (path, of, style) = (a.l(), a.p(), a.w());
+            open_file(far_str(path).unwrap_or(b""), of, style)
+        }
+        // GetTempDrive(drive): C:
+        92 => {
+            a.w();
+            b'C' as u32
+        }
+        // LoadLibrary(name): no Windows DLLs of the program's own yet
+        // (file not found).
+        95 => {
+            let n = a.l();
+            trace(format_args!("WIN16: LoadLibrary({}) not supported", far_str(n).unwrap_or(b"").iter().map(|&c| c as char).collect::<alloc::string::String>()));
+            2
+        }
+        // FreeLibrary(h)
+        96 => {
+            a.w();
+            0
+        }
+        // GetWindowsDirectory(buf, max), GetSystemDirectory(buf, max)
+        134 | 135 => {
+            let (buf, max) = (a.p(), a.i());
+            crate::user::copy_out(if ord == 134 { b"C:\\OS2\\MDOS\\WINOS2" } else { b"C:\\OS2\\MDOS\\WINOS2\\SYSTEM" }, buf, max) as u32
+        }
+        // WinExec(cmdline, show): not yet (file not found).
+        166 => {
+            a.l();
+            a.w();
+            2
+        }
         // _lclose(hf)
         81 => {
             let h = a.w();
@@ -482,7 +525,7 @@ fn segment_size(sel: u16) -> u32 {
     cb.min(0x10000)
 }
 
-fn global_alloc(fl: u16, n: u32) -> u16 {
+pub fn global_alloc(fl: u16, n: u32) -> u16 {
     let size = n.max(1);
     let room = size.next_multiple_of(0x10000);
     let mut p: *mut u8 = core::ptr::null_mut();
@@ -494,6 +537,72 @@ fn global_alloc(fl: u16, n: u32) -> u16 {
     let h = (far(p) >> 16) as u16;
     GLOBALS.get().insert(h, Block { base: p, size, room, flags: fl, locks: 0 });
     h
+}
+
+pub fn global_free(h: u16) -> bool {
+    match GLOBALS.get().remove(&(h | 7)) {
+        Some(b) => {
+            unsafe { os2::DosFreeMem(b.base) };
+            true
+        }
+        None => false,
+    }
+}
+
+/// OpenFile: OF_READ/WRITE/READWRITE, OF_CREATE, OF_EXIST, OF_DELETE,
+/// OF_PARSE; the OFSTRUCT (cBytes, fFixedDisk, nErrCode, reserved,
+/// szPathName) gets the full path.
+fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
+    const OF_PARSE: u16 = 0x0100;
+    const OF_DELETE: u16 = 0x0200;
+    const OF_CREATE: u16 = 0x1000;
+    const OF_EXIST: u16 = 0x4000;
+    let mut full = [0u8; 260];
+    let mut z = path.to_vec();
+    z.push(0);
+    unsafe extern "C" {
+        #[link_name = "DOSCALLS.223"]
+        fn DosQueryPathInfo(p: *const u8, level: u32, buf: *mut u8, cb: u32) -> u32;
+    }
+    // FIL_QUERYFULLNAME
+    if unsafe { DosQueryPathInfo(z.as_ptr(), 5, full.as_mut_ptr(), 260) } != 0 {
+        full[..path.len().min(259)].copy_from_slice(&path[..path.len().min(259)]);
+    }
+    let name = unsafe { cstr(full.as_ptr()) }.to_ascii_uppercase();
+    let set = |err: u16| {
+        if of.is_null() {
+            return;
+        }
+        let mut b = [0u8; 136];
+        b[0] = 136;
+        b[1] = 1;
+        b[2..4].copy_from_slice(&err.to_le_bytes());
+        let n = name.len().min(127);
+        b[8..8 + n].copy_from_slice(&name[..n]);
+        unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), of, 136) };
+    };
+    if style & OF_PARSE != 0 {
+        set(0);
+        return 0;
+    }
+    if style & OF_DELETE != 0 {
+        let ok = unsafe { os2::DosDelete(z.as_ptr()) } == 0;
+        set(if ok { 0 } else { 2 });
+        return if ok { 1 } else { HFILE_ERROR };
+    }
+    let (flags, mode) = if style & OF_CREATE != 0 { (0x12, 0x42 | (style as u32 & 3)) } else { (0x01, (style as u32 & 3) | 0x40) };
+    let (mut hf, mut action) = (0u32, 0u32);
+    let r = unsafe { os2::DosOpen(z.as_ptr(), &mut hf, &mut action, 0, 0, flags, mode, core::ptr::null_mut()) };
+    if r != 0 {
+        set(if r == 110 { 2 } else { r as u16 });
+        return HFILE_ERROR;
+    }
+    set(0);
+    if style & OF_EXIST != 0 {
+        unsafe { os2::DosClose(hf) };
+        return 1;
+    }
+    hf
 }
 
 fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {

@@ -1,0 +1,61 @@
+/* MENU16's menu, accelerators and strings. */
+#include <windows.h>
+#include "menu16.h"
+
+Menu16 MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&New\tCtrl+N", IDM_NEW
+        MENUITEM "&Open...\tCtrl+O", IDM_OPEN
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit\tAlt+F4", IDM_EXIT
+    END
+    POPUP "&Edit"
+    BEGIN
+        MENUITEM "&Undo\tCtrl+Z", IDM_UNDO, GRAYED
+        MENUITEM SEPARATOR
+        MENUITEM "Cu&t\tCtrl+X", IDM_CUT
+        MENUITEM "&Copy\tCtrl+C", IDM_COPY
+        MENUITEM "&Paste\tCtrl+V", IDM_PASTE
+    END
+    POPUP "&Options"
+    BEGIN
+        MENUITEM "Show &grid\tCtrl+G", IDM_GRID, CHECKED
+        POPUP "&Colour"
+        BEGIN
+            MENUITEM "&Red\tF5", IDM_RED
+            MENUITEM "&Green\tF6", IDM_GREEN
+            MENUITEM "&Blue\tF7", IDM_BLUE
+        END
+        MENUITEM SEPARATOR
+        MENUITEM "&Bigger\t+", IDM_BIGGER
+        MENUITEM "&Smaller\t-", IDM_SMALLER
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About Menu16...\tF1", IDM_ABOUT
+    END
+END
+
+Menu16 ACCELERATORS
+BEGIN
+    "^N", IDM_NEW
+    "^O", IDM_OPEN
+    "^X", IDM_CUT
+    "^C", IDM_COPY
+    "^V", IDM_PASTE
+    "^G", IDM_GRID
+    "+", IDM_BIGGER
+    "-", IDM_SMALLER
+    VK_F5, IDM_RED, VIRTKEY
+    VK_F6, IDM_GREEN, VIRTKEY
+    VK_F7, IDM_BLUE, VIRTKEY
+    VK_F1, IDM_ABOUT, VIRTKEY
+END
+
+STRINGTABLE
+BEGIN
+    IDS_TITLE, "Menu16: menus and accelerators"
+    IDS_HINT, "Use the menus or their keys (Ctrl+G, F5-F7, +, -, F1)."
+END
