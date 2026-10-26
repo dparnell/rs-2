@@ -246,6 +246,29 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             let (_drive, pre, unique, buf) = (a.w(), a.l(), a.w(), a.p());
             temp_file_name(crate::far_str(pre).unwrap_or(b""), unique, buf) as u32
         }
+        // LoadModule(name, lpParameterBlock: environment, command tail (a
+        // length byte, then the text), show, reserved): a program started
+        // as WinExec starts it (DLLs: LoadLibrary).
+        1045 => {
+            let (n, pb) = (a.l(), a.p());
+            let name = crate::far_str(n).unwrap_or(b"").to_vec();
+            let mut cmd = name.clone();
+            if !pb.is_null() {
+                let tail = thunk16::flat(unsafe { (pb.add(2) as *const u32).read_unaligned() });
+                if !tail.is_null() {
+                    let len = unsafe { *tail } as usize;
+                    let t = unsafe { core::slice::from_raw_parts(tail.add(1), len) };
+                    let t = t.split(|&c| c == b'\r').next().unwrap_or(t);
+                    cmd.push(b' ');
+                    cmd.extend_from_slice(t);
+                }
+            }
+            let up = name.to_ascii_uppercase();
+            if up.ends_with(b".DLL") || up.ends_with(b".DRV") {
+                return Some(crate::module::load_library(n) as u32);
+            }
+            exec(&cmd) as u32
+        }
         // GetFreeSpace(flags): bytes of global memory free.
         1169 => {
             a.w();

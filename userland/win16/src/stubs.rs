@@ -107,7 +107,6 @@ thunk16::entries16_pascal! {
     x_3380 = 3380, 2;
     x_3381 = 3381, 6;
     x_3382 = 3382, 2;
-    x_1045 = 1045, 8;
     x_1046 = 1046, 2;
     x_1066 = 1066, 8;
     x_1067 = 1067, 10;
@@ -673,7 +672,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (3380, "GDI.380 ENDPAGE"),
     (3381, "GDI.381 SETABORTPROC"),
     (3382, "GDI.382 ABORTDOC"),
-    (1045, "KERNEL.45 LOADMODULE"),
     (1046, "KERNEL.46 FREEMODULE"),
     (1066, "KERNEL.66 ALLOCRESOURCE"),
     (1067, "KERNEL.67 SETRESOURCEHANDLER"),
