@@ -276,6 +276,72 @@ pub fn hwnd_above(pm: u32) -> u16 {
 }
 
 /// The windows of the task, in creation order.
+/// The client area's update rectangle (Windows coordinates).
+pub fn update_rect(h: u16) -> Option<[i32; 4]> {
+    let c = wnd(h)?.client;
+    let mut rc = RectL::default();
+    let some = unsafe { WinQueryUpdateRect(c, &mut rc) } != 0 && rc.r > rc.l && rc.t > rc.b;
+    let ch = client_height(c);
+    some.then_some([rc.l, ch - rc.t, rc.r, ch - rc.b])
+}
+
+/// The pop-ups a window owns.
+pub fn owned_popups(h: u16) -> Vec<u16> {
+    u().wnds.iter().filter(|w| w.parent == h && w.style & WS_CHILD == 0).map(|w| w.hwnd).collect()
+}
+
+/// Is input or a message waiting in the queue?
+pub fn input_waiting() -> bool {
+    let mut q = QMsg::default();
+    unsafe { WinPeekMsg(TASK.get().hab, &mut q, 0, 0, 0, PM_NOREMOVE) != 0 }
+}
+
+/// SetWindowPos(hwnd, after, x, y, cx, cy, flags): SWP_NOSIZE 1,
+/// SWP_NOMOVE 2, SWP_NOZORDER 4, SWP_NOACTIVATE 0x10, SWP_SHOWWINDOW 0x40,
+/// SWP_HIDEWINDOW 0x80.
+pub fn set_window_pos(h: u16, after: u16, x: i32, y: i32, cx: i32, cy: i32, fl: u16) -> bool {
+    let mut f = 0;
+    if fl & 1 == 0 {
+        f |= SWP_SIZE;
+    }
+    if fl & 2 == 0 {
+        f |= SWP_MOVE;
+    }
+    if fl & 0x40 != 0 {
+        f |= SWP_SHOW;
+    }
+    if fl & 0x80 != 0 {
+        f |= SWP_HIDE;
+    }
+    if fl & 0x14 == 0 && !is_child_style(h) {
+        f |= SWP_ACTIVATE;
+    }
+    if let Some(w) = wnd(h) {
+        if fl & 0x40 != 0 {
+            w.style |= WS_VISIBLE;
+        }
+        if fl & 0x80 != 0 {
+            w.style &= !WS_VISIBLE;
+        }
+    }
+    let ok = move_window(h, x, y, cx, cy, f);
+    // The Z order: HWND_TOP 0, HWND_BOTTOM 1, or behind a window.
+    if fl & 4 == 0 {
+        if let Some(fr) = wnd(h).map(|w| w.frame) {
+            let behind = match after {
+                0 | 0xffff => HWND_TOP,
+                1 => HWND_BOTTOM,
+                a => wnd(a).map_or(HWND_TOP, |w| w.frame),
+            };
+            unsafe { WinSetWindowPos(fr, behind, 0, 0, 0, 0, SWP_ZORDER) };
+        }
+    }
+    if fl & 0x40 != 0 && !wnd(h).is_some_and(|w| w.sized) {
+        send_size_move(h);
+    }
+    ok
+}
+
 /// The top-level windows.
 pub fn top_levels() -> Vec<u16> {
     u().wnds.iter().filter(|w| w.style & WS_CHILD == 0).map(|w| w.hwnd).collect()
@@ -981,32 +1047,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // SetWindowPos(hwnd, after, x, y, cx, cy, flags)
         232 => {
-            let (h, _after, x, y, cx, cy, fl) = (a.w(), a.w(), a.i(), a.i(), a.i(), a.i(), a.w());
-            let mut f = 0;
-            if fl & 1 == 0 {
-                f |= SWP_SIZE;
-            }
-            if fl & 2 == 0 {
-                f |= SWP_MOVE;
-            }
-            if fl & 0x40 != 0 {
-                f |= SWP_SHOW;
-            }
-            if fl & 0x80 != 0 {
-                f |= SWP_HIDE;
-            }
-            if fl & 0x14 == 0 && !is_child_style(h) {
-                f |= SWP_ACTIVATE | SWP_ZORDER;
-            }
-            if let Some(w) = wnd(h) {
-                if fl & 0x40 != 0 {
-                    w.style |= WS_VISIBLE;
-                }
-                if fl & 0x80 != 0 {
-                    w.style &= !WS_VISIBLE;
-                }
-            }
-            move_window(h, x, y, cx, cy, f) as u32
+            let (h, after, x, y, cx, cy, fl) = (a.w(), a.w(), a.i(), a.i(), a.i(), a.i(), a.w());
+            set_window_pos(h, after, x, y, cx, cy, fl) as u32
         }
         // SetParent(hwnd, parent): the old parent.
         233 => {

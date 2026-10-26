@@ -725,7 +725,7 @@ pub fn global_free(h: u16) -> bool {
 /// OpenFile: OF_READ/WRITE/READWRITE, OF_CREATE, OF_EXIST, OF_DELETE,
 /// OF_PARSE; the OFSTRUCT (cBytes, fFixedDisk, nErrCode, reserved,
 /// szPathName) gets the full path.
-fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
+pub fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
     const OF_PARSE: u16 = 0x0100;
     const OF_DELETE: u16 = 0x0200;
     const OF_CREATE: u16 = 0x1000;

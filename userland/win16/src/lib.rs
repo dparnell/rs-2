@@ -28,11 +28,13 @@ mod ctl;
 mod dde_stub;
 mod dialog;
 mod dos;
+mod draw;
 mod edit;
 mod gdi;
 mod icon;
 mod kernel;
 mod listbox;
+mod lz;
 mod mdi;
 mod mem16;
 mod menu;
@@ -45,6 +47,7 @@ mod res;
 mod scroll;
 mod stubs;
 mod user;
+mod ver;
 
 use core::cell::UnsafeCell;
 use thunk16::Pascal;
@@ -316,9 +319,11 @@ entries! {
     u_messagebox = 2001, 12;
     u_initapp = 2005, 2;
     u_postquitmessage = 2006, 2;
+    u_exitwindows = 2007, 6;
     u_settimer = 2010, 10;
     u_killtimer = 2012, 4;
     u_gettickcount = 2013, 0;
+    u_gettimerresolution = 2014, 0;
     u_getcurrenttime = 2015, 0;
     u_getcursorpos = 2017, 4;
     u_setcapture = 2018, 2;
@@ -330,6 +335,7 @@ entries! {
     u_removeprop = 2024, 6;
     u_getprop = 2025, 6;
     u_setprop = 2026, 8;
+    u_enumprops = 2027, 6;
     u_clienttoscreen = 2028, 6;
     u_screentoclient = 2029, 6;
     u_windowfrompoint = 2030, 4;
@@ -345,12 +351,15 @@ entries! {
     u_endpaint = 2040, 6;
     u_createwindow = 2041, 30;
     u_showwindow = 2042, 4;
+    u_closewindow = 2043, 2;
+    u_openicon = 2044, 2;
     u_bringwindowtotop = 2045, 2;
     u_getparent = 2046, 2;
     u_iswindow = 2047, 2;
     u_ischild = 2048, 4;
     u_iswindowvisible = 2049, 2;
     u_findwindow = 2050, 8;
+    u_anypopup = 2052, 0;
     u_destroywindow = 2053, 2;
     u_enumwindows = 2054, 8;
     u_enumchildwindows = 2055, 10;
@@ -412,6 +421,7 @@ entries! {
     u_waitmessage = 2112, 0;
     u_translatemessage = 2113, 4;
     u_dispatchmessage = 2114, 4;
+    u_replymessage = 2115, 4;
     u_postappmessage = 2116, 10;
     u_registerwindowmessage = 2118, 4;
     u_getmessagepos = 2119, 0;
@@ -473,14 +483,23 @@ entries! {
     u_translateaccelerator = 2178, 8;
     u_getsystemmetrics = 2179, 2;
     u_getsyscolor = 2180, 2;
+    u_setsyscolors = 2181, 10;
     u_getcaretpos = 2183, 4;
+    u_querysendmessage = 2184, 10;
+    u_graystring = 2185, 22;
+    u_swapmousebutton = 2186, 2;
+    u_setsysmodalwindow = 2188, 2;
+    u_getsysmodalwindow = 2189, 0;
     u_getupdaterect = 2190, 8;
     u_childwindowfrompoint = 2191, 6;
     u_insendmessage = 2192, 0;
     u_isclipboardformatavailable = 2193, 2;
+    u_tabbedtextout = 2196, 20;
+    u_gettabbedtextextent = 2197, 14;
     u_dialogboxindirect = 2218, 10;
     u_createdialogindirect = 2219, 12;
     u_loadmenuindirect = 2220, 4;
+    u_scrolldc = 2221, 20;
     u_getkeyboardstate = 2222, 4;
     u_setkeyboardstate = 2223, 4;
     u_getwindowtask = 2224, 2;
@@ -494,6 +513,8 @@ entries! {
     u_unhookwindowshook = 2234, 6;
     u_defhookproc = 2235, 12;
     u_getcapture = 2236, 0;
+    u_getupdatergn = 2237, 6;
+    u_excludeupdatergn = 2238, 4;
     u_dialogboxparam = 2239, 16;
     u_dialogboxindirectparam = 2240, 14;
     u_createdialogparam = 2241, 16;
@@ -501,12 +522,17 @@ entries! {
     u_getdialogbaseunits = 2243, 0;
     u_equalrect = 2244, 8;
     u_getcursor = 2247, 0;
+    u_getopenclipboardwindow = 2248, 0;
     u_getasynckeystate = 2249, 2;
     u_getmenustate = 2250, 6;
     u_mapwindowpoints = 2258, 10;
+    u_begindeferwindowpos = 2259, 2;
+    u_deferwindowpos = 2260, 16;
+    u_enddeferwindowpos = 2261, 2;
     u_getwindow = 2262, 4;
     u_getmenuitemcount = 2263, 2;
     u_getmenuitemid = 2264, 4;
+    u_showownedpopups = 2265, 4;
     u_setmessagequeue = 2266, 2;
     u_showscrollbar = 2267, 6;
     u_globaladdatom = 2268, 4;
@@ -521,12 +547,17 @@ entries! {
     u_getfreesystemresources = 2284, 2;
     u_getdesktopwindow = 2286, 0;
     u_getlastactivepopup = 2287, 2;
+    u_getmessageextrainfo = 2288, 0;
     u_redrawwindow = 2290, 10;
     u_setwindowshookex = 2291, 10;
     u_unhookwindowshookex = 2292, 4;
     u_callnexthookex = 2293, 12;
+    u_lockwindowupdate = 2294, 2;
     u_defdlgproc = 2308, 10;
+    u_getqueuestatus = 2334, 2;
+    u_getinputstate = 2335, 0;
     u_ismenu = 2358, 2;
+    u_getdcex = 2359, 8;
     u_copyicon = 2368, 4;
     u_copycursor = 2369, 4;
     u_getwindowplacement = 2370, 6;
@@ -567,13 +598,17 @@ entries! {
     u_ansinext = 2472, 4;
     u_ansiprev = 2473, 8;
     u_enablescrollbar = 2482, 6;
+    u_systemparametersinfo = 2483, 10;
     // GDI
     g_setbkcolor = 3001, 6;
     g_setbkmode = 3002, 4;
     g_setmapmode = 3003, 4;
     g_setrop2 = 3004, 4;
+    g_setpolyfillmode = 3006, 4;
     g_setstretchbltmode = 3007, 4;
+    g_settextcharacterextra = 3008, 4;
     g_settextcolor = 3009, 6;
+    g_settextjustification = 3010, 6;
     g_setwindoworg = 3011, 6;
     g_setwindowext = 3012, 6;
     g_setviewportorg = 3013, 6;
@@ -586,12 +621,16 @@ entries! {
     g_moveto = 3020, 6;
     g_excludecliprect = 3021, 10;
     g_intersectcliprect = 3022, 10;
+    g_arc = 3023, 18;
     g_ellipse = 3024, 10;
+    g_floodfill = 3025, 10;
+    g_pie = 3026, 18;
     g_rectangle = 3027, 10;
     g_roundrect = 3028, 14;
     g_patblt = 3029, 14;
     g_savedc = 3030, 2;
     g_setpixel = 3031, 10;
+    g_offsetcliprgn = 3032, 6;
     g_textout = 3033, 12;
     g_bitblt = 3034, 20;
     g_stretchblt = 3035, 24;
@@ -638,9 +677,11 @@ entries! {
     g_getmapmode = 3081, 2;
     g_getobject = 3082, 8;
     g_getpixel = 3083, 6;
+    g_getpolyfillmode = 3084, 2;
     g_getrop2 = 3085, 2;
     g_getstockobject = 3087, 2;
     g_getstretchbltmode = 3088, 2;
+    g_gettextcharacterextra = 3089, 2;
     g_gettextcolor = 3090, 2;
     g_gettextextent = 3091, 8;
     g_gettextface = 3092, 8;
@@ -650,6 +691,7 @@ entries! {
     g_getwindowext = 3096, 2;
     g_getwindoworg = 3097, 2;
     g_lptodp = 3099, 8;
+    g_linedda = 3100, 16;
     g_offsetrgn = 3101, 6;
     g_ptvisible = 3103, 6;
     g_rectvisible = 3104, 6;
@@ -662,11 +704,16 @@ entries! {
     g_getnearestcolor = 3154, 6;
     g_creatediscardablebitmap = 3156, 6;
     g_ptinregion = 3161, 6;
+    g_getbitmapdimension = 3162, 2;
+    g_setbitmapdimension = 3163, 6;
     g_setrectrgn = 3172, 10;
     g_rectinregion = 3181, 6;
+    g_getcharabcwidths = 3307, 10;
+    g_getrasterizercaps = 3313, 6;
     g_enumfontfamilies = 3330, 14;
     g_gettextalign = 3345, 2;
     g_settextalign = 3346, 4;
+    g_chord = 3348, 18;
     g_getcharwidth = 3350, 10;
     g_exttextout = 3351, 22;
     g_createpalette = 3360, 4;
@@ -676,6 +723,7 @@ entries! {
     g_animatepalette = 3367, 10;
     g_resizepalette = 3368, 4;
     g_getnearestpaletteindex = 3370, 6;
+    g_extfloodfill = 3372, 12;
     g_setsystempaletteuse = 3373, 4;
     g_getsystempaletteuse = 3374, 2;
     g_getsystempaletteentries = 3375, 10;
@@ -686,7 +734,10 @@ entries! {
     g_setdibitstodevice = 3443, 28;
     g_createroundrectrgn = 3444, 12;
     g_createdibpatternbrush = 3445, 4;
+    g_polypolygon = 3450, 12;
     g_createpolypolygonrgn = 3451, 12;
+    g_isgdiobject = 3462, 2;
+    g_getbitmapdimensionex = 3468, 6;
     g_getbrushorgex = 3469, 6;
     g_getcurrentpositionex = 3470, 6;
     g_gettextextentpoint = 3471, 12;
@@ -696,6 +747,7 @@ entries! {
     g_getwindoworgex = 3475, 6;
     g_offsetviewportorgex = 3476, 10;
     g_offsetwindoworgex = 3477, 10;
+    g_setbitmapdimensionex = 3478, 10;
     g_setviewportextex = 3479, 10;
     g_setviewportorgex = 3480, 10;
     g_setwindowextex = 3481, 10;
@@ -726,6 +778,24 @@ entries! {
     th_interruptunregister = 6276, 2;
     th_terminateapp = 6277, 4;
     th_timercount = 6280, 4;
+    // VER
+    v_getfileversioninfosize = 6306, 8;
+    v_getfileversioninfo = 6307, 16;
+    v_verfindfile = 6308, 30;
+    v_verinstallfile = 6309, 30;
+    v_verlanguagename = 6310, 8;
+    v_verqueryvalue = 6311, 16;
+    // LZEXPAND
+    lz_lzcopy = 6401, 4;
+    lz_lzopenfile = 6402, 10;
+    lz_lzinit = 6403, 2;
+    lz_lzseek = 6404, 8;
+    lz_lzread = 6405, 8;
+    lz_lzclose = 6406, 2;
+    lz_lzstart = 6407, 0;
+    lz_copylzfile = 6408, 4;
+    lz_lzdone = 6409, 0;
+    lz_getexpandedname = 6410, 8;
     // SHELL
     sh_dragacceptfiles = 6509, 4;
     sh_shellexecute = 6520, 20;
@@ -751,7 +821,11 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
 fn dispatch_(idx: u32, args: *const u8) -> u32 {
     let size = arg_size(idx);
     let mut a = Pascal::new(args, size);
-    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)).or_else(|| dde_stub::call(idx, &mut a)).or_else(|| mdi::call(idx, &mut a)) {
+    if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)).or_else(|| dde_stub::call(idx, &mut a)).or_else(|| mdi::call(idx, &mut a))
+        .or_else(|| draw::call(idx, &mut a))
+        .or_else(|| lz::call(idx, &mut a))
+        .or_else(|| ver::call(idx, &mut a))
+    {
         return r;
     }
     match idx {

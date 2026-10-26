@@ -46,3 +46,22 @@ BEGIN
     DEFPUSHBUTTON   "OK", IDOK, 120, 128, 44, 14, WS_GROUP
     PUSHBUTTON      "Cancel", IDCANCEL, 170, 128, 44, 14
 END
+
+1 VERSIONINFO
+FILEVERSION 1, 0, 0, 0
+PRODUCTVERSION 1, 0, 0, 0
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "CompanyName", "rs2"
+            VALUE "FileDescription", "rs2 native Win16 checks"
+            VALUE "FileVersion", "1.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1252
+    END
+END

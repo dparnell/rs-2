@@ -69,6 +69,7 @@ struct State {
     align: u16,
     palette: u16,
     stretch: u16,
+    poly_fill: u16,
     /// The mapping mode, window and viewport origins and extents.
     map: u16,
     worg: (i32, i32),
@@ -265,6 +266,7 @@ pub fn new_dc(hps: u32, pm: u32, height: i32, kind: DcKind) -> u16 {
             align: 0,
             palette: OBJ_BASE + 2 * 15,
             stretch: 1,
+            poly_fill: 1,
             map: MM_TEXT,
             worg: (0, 0),
             wext: (1, 1),
@@ -280,6 +282,97 @@ pub fn new_dc(hps: u32, pm: u32, height: i32, kind: DcKind) -> u16 {
         clipped: false,
     });
     hdc
+}
+
+/// SetPolyFillMode: ALTERNATE 1, WINDING 2.
+pub fn set_poly_fill_mode(hdc: u16, m: u16) -> u16 {
+    if m != 1 && m != 2 {
+        return 0;
+    }
+    dc(hdc).map_or(0, |d| core::mem::replace(&mut d.s.poly_fill, m))
+}
+
+pub fn poly_fill_mode(hdc: u16) -> u16 {
+    dc(hdc).map_or(0, |d| d.s.poly_fill)
+}
+
+/// The DC's size in pels: its window's client area, or its bitmap.
+pub fn dc_size(hdc: u16) -> (i32, i32) {
+    let Some(d) = dc(hdc) else { return (0, 0) };
+    if d.kind == DcKind::Memory {
+        return match obj(d.bitmap) {
+            Some(Obj::Bitmap { w, h, .. }) => (w, h),
+            _ => (1, 1),
+        };
+    }
+    let mut r = RectL::default();
+    unsafe { WinQueryWindowRect(d.pmwnd, &mut r) };
+    (r.r - r.l, d.height)
+}
+
+/// Fill a device rectangle with a brush.
+pub fn fill_rect_dev(hdc: u16, r: [i32; 4], br: u16) {
+    let Some(c) = brush_color(br) else { return };
+    let Some(d) = dc(hdc) else { return };
+    if r[2] <= r[0] || r[3] <= r[1] {
+        return;
+    }
+    let rc = pm_rect_dev(d, r);
+    unsafe { WinFillRect(d.hps, &rc, rgb(c)) };
+}
+
+/// Polygons (logical points): the brush inside (the DC's fill mode),
+/// the pen along each (closed).
+pub fn poly_poly(hdc: u16, polys: &[Vec<(i32, i32)>]) -> bool {
+    let Some(d) = dc(hdc) else { return false };
+    let pm: Vec<Vec<PointL>> = polys.iter().filter(|p| p.len() >= 2).map(|p| p.iter().map(|&(x, y)| pm_pt(d, x, y)).collect()).collect();
+    unsafe {
+        if let Some(c) = brush_color(d.s.brush) {
+            GpiSetColor(d.hps, rgb(c));
+            // BA_BOUNDARY | BA_ALTERNATE or BA_WINDING
+            GpiBeginArea(d.hps, if d.s.poly_fill == 2 { 2 } else { 0 });
+            for p in &pm {
+                GpiMove(d.hps, &p[0]);
+                GpiPolyLine(d.hps, p.len() as i32 - 1, p[1..].as_ptr());
+            }
+            GpiEndArea(d.hps);
+        }
+        if let Some((c, w)) = pen_color(d) {
+            GpiSetColor(d.hps, rgb(c));
+            GpiSetLineWidth(d.hps, w << 16);
+            for p in &pm {
+                GpiMove(d.hps, &p[0]);
+                GpiPolyLine(d.hps, p.len() as i32 - 1, p[1..].as_ptr());
+                GpiLine(d.hps, &p[0]);
+            }
+        }
+    }
+    true
+}
+
+/// A polyline (the pen) or polygon (`fill`: the brush inside, the pen
+/// around; `close` joins the last point to the first).
+pub fn poly(hdc: u16, pts: &[(i32, i32)], fill: bool, close: bool) -> bool {
+    if fill {
+        return poly_poly(hdc, &[pts.to_vec()]);
+    }
+    let Some(d) = dc(hdc) else { return false };
+    if pts.len() < 2 {
+        return false;
+    }
+    let pm: Vec<PointL> = pts.iter().map(|&(x, y)| pm_pt(d, x, y)).collect();
+    if let Some((c, w)) = pen_color(d) {
+        unsafe {
+            GpiSetColor(d.hps, rgb(c));
+            GpiSetLineWidth(d.hps, w << 16);
+            GpiMove(d.hps, &pm[0]);
+            GpiPolyLine(d.hps, pm.len() as i32 - 1, pm[1..].as_ptr());
+            if close {
+                GpiLine(d.hps, &pm[0]);
+            }
+        }
+    }
+    true
 }
 
 /// The PS of the memory DC that has the bitmap `h` selected.

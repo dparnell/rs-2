@@ -374,6 +374,33 @@ pub fn blit(dst: u16, x: i32, y: i32, w: i32, h: i32, src: u16, sx: i32, sy: i32
     blt(dst, x, y, w, h, src, sx, sy, w, h, rop)
 }
 
+/// The pels of a DC's device rectangle (0, 0, w, h) as COLORREFs, rows
+/// bottom-up.
+pub fn read_pels(hdc: u16, w: i32, h: i32) -> Option<Vec<u32>> {
+    let src = gdi::dc(hdc)?.hps;
+    let b = new_bitmap(w, h, 24);
+    let mem = create_memory_dc();
+    select(mem, b);
+    let dst = gdi::dc(mem)?.hps;
+    let pts = [PointL { x: 0, y: 0 }, PointL { x: w, y: h }, PointL { x: 0, y: 0 }];
+    unsafe { GpiBitBlt(dst, src, 3, pts.as_ptr(), 0xcc, 2) };
+    let stride = (w as usize * 3).div_ceil(4) * 4;
+    let mut buf = alloc::vec![0u8; stride * h as usize];
+    let mut bmi = info(w, h, 24, &[]);
+    unsafe { GpiQueryBitmapBits(dst, 0, h, buf.as_mut_ptr(), bmi.as_mut_ptr()) };
+    select_default(mem);
+    gdi::release_dc(mem);
+    gdi::delete_object(b);
+    let mut v = Vec::with_capacity((w * h) as usize);
+    for y in 0..h as usize {
+        for x in 0..w as usize {
+            let o = y * stride + x * 3;
+            v.push((buf[o] as u32) << 16 | (buf[o + 1] as u32) << 8 | buf[o + 2] as u32);
+        }
+    }
+    Some(v)
+}
+
 /// A copy of a bitmap.
 pub fn copy_bitmap(h: u16) -> u16 {
     let Some((_, w, bh, bpp)) = bitmap_of(h) else { return 0 };
