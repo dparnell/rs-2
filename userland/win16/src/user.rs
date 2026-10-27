@@ -175,9 +175,11 @@ pub struct Wnd {
     /// WM_NCCREATE has been sent: PM's messages reach the procedure
     /// from then on (Windows sends none before it).
     pub created: bool,
-    /// WM_SIZE and WM_MOVE have been sent (a window created hidden gets
-    /// them when first shown, as Windows does it).
-    pub sized: bool,
+    /// An overlapped window's first ShowWindow sends WM_SIZE and WM_MOVE,
+    /// even if it was moved or sized while hidden (Windows sends them from
+    /// CreateWindow to child and pop-up windows only). Delphi's forms lay
+    /// out their children then.
+    pub need_size: bool,
     /// The client origin WM_MOVE last told the program.
     pub moved_to: Option<u32>,
 }
@@ -337,9 +339,6 @@ pub fn set_window_pos(h: u16, after: u16, x: i32, y: i32, cx: i32, cy: i32, fl: 
             };
             unsafe { WinSetWindowPos(fr, behind, 0, 0, 0, 0, SWP_ZORDER) };
         }
-    }
-    if fl & 0x40 != 0 && !wnd(h).is_some_and(|w| w.sized) {
-        send_size_move(h);
     }
     ok
 }
@@ -1562,7 +1561,7 @@ pub fn create(c: &Create) -> u16 {
         hsb: None,
         props: Vec::new(),
         created: false,
-        sized: false,
+        need_size: style & (WS_CHILD | WS_POPUP) == 0,
         moved_to: None,
     });
     if !child && parent != 0 {
@@ -1625,7 +1624,7 @@ pub fn create(c: &Create) -> u16 {
         destroy_window(hwnd);
         return 0;
     }
-    if style & WS_VISIBLE != 0 {
+    if !wnd(hwnd).is_some_and(|w| w.need_size) {
         send_size_move(hwnd);
     }
     if child {
@@ -1803,7 +1802,7 @@ fn frame_state(h: u16) -> u32 {
 /// WM_SIZE and WM_MOVE with the window's present size and place.
 fn send_size_move(h: u16) {
     let Some(w) = wnd(h) else { return };
-    w.sized = true;
+    w.need_size = false;
     let (cw, ch) = client_size(h);
     send(h, W_SIZE, 0, (ch as u32) << 16 | cw as u32 & 0xffff);
     let o = client_origin(h);
@@ -1846,7 +1845,7 @@ pub fn show_window(h: u16, cmd: u16) -> bool {
         }
     }
     unsafe { WinSetWindowPos(f, HWND_TOP, 0, 0, 0, 0, fl) };
-    if cmd != 0 && !wnd(h).is_some_and(|w| w.sized) {
+    if cmd != 0 && wnd(h).is_some_and(|w| w.need_size) {
         send_size_move(h);
     }
     if fl & SWP_ACTIVATE != 0 && !is_child(h, focus()) {
@@ -2584,9 +2583,6 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             let mut swp = Swp::default();
             unsafe { WinQueryWindowPos(f, &mut swp) };
             let kind = if swp.fl & SWP_MINIMIZE != 0 { 1 } else if swp.fl & SWP_MAXIMIZE != 0 { 2 } else { 0 };
-            if let Some(w) = wnd(h) {
-                w.sized = true;
-            }
             send_inflight(h, W_SIZE, kind, (cy as u32) << 16 | cx as u32, q);
             0
         }
