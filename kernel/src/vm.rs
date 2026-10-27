@@ -760,6 +760,14 @@ impl AddressSpace {
     /// an otherwise unused tile whose LDT entry describes other memory.
     pub fn alias(&mut self, base: u32, limit: u32, kind: SegKind) -> Result<u16, VmError> {
         let tile = self.find_private(TILE).ok_or(VmError::NoMemory)?;
+        self.alias_at(tile, base, limit, kind)
+    }
+
+    /// An alias selector on the free tile `tile`.
+    pub fn alias_at(&mut self, tile: u32, base: u32, limit: u32, kind: SegKind) -> Result<u16, VmError> {
+        if self.region(tile).is_some() {
+            return Err(VmError::InvalidAddress);
+        }
         self.insert(Region {
             base: tile,
             size: PAGE,

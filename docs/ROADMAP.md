@@ -433,7 +433,7 @@ Status markers: done, in progress, planned.
   objects (DOS Window, DOS Full Screen, PROG_VDM/PROG_WINDOWEDVDM)
 - planned: PC speaker and Sound Blaster sound, VESA, DOS settings, speed
 
-## Native Win16 (stages 1 and 2 done)
+## Native Win16 (stages 1 to 3 done)
 
 Windows 3.x programs as OS/2 processes, without Win-OS/2 or any
 Microsoft file (docs/WIN16.md).
@@ -459,7 +459,16 @@ Microsoft file (docs/WIN16.md).
   W16TEST's stage-2 checks
 - planned (rest of stage 2): MDI, bitmaps and DIBs, regions, mapping
   modes, font enumeration, Windows DLLs, WIN.INI
-- planned (stage 3): COMMDLG, the clipboard, printing, DDE
+- done (stage 3): COMMDLG (Open, Save As, Color, Font, Print, Print
+  Setup, Find, Replace as WIN16 dialogs, hooks and templates); printing
+  from Windows programs into rs2's spooler and PostScript driver
+  (printer DCs, Escape, StartDoc...EndDoc, abort procedures, WIN.INI's
+  printers); DDE between Windows tasks (proxy windows, GMEM_DDESHARE as
+  shared memory, global atoms), to PM programs' DDE servers, and DDEML;
+  the clipboard's formats (CF_BITMAP, CF_DIB, CF_METAFILEPICT,
+  registered formats, delayed rendering) on PM's; NOTE16's dialogs,
+  `RS2\PRINT16.EXE`, `RS2\DDECLI16.EXE`/`RS2\DDESRV16.EXE`, W16TEST's
+  stage-3 checks
 - planned (stage 4): DPMI, the floating point emulator, MMSYSTEM, OLE,
   TOOLHELP and the task/module databases
 

@@ -192,7 +192,7 @@ pub extern "C" fn WinQuerySysValue(_desk: u32, i: i32) -> i32 {
         30 => win::TITLE_H,          // SV_CYTITLEBAR
         31 | 32 => 16,               // SV_CYVSLIDER / SV_CXHSLIDER
         33 | 34 => 18,               // SV_CX/CYMINMAXBUTTON
-        35 => 16,                    // SV_CYMENU
+        35 => crate::frame::MENU_H,  // SV_CYMENU: the menu bar
         38 | 39 => 32,               // SV_CX/CYICON
         40 | 41 => 32,               // SV_CX/CYPOINTER
         43 => 3,                     // SV_CMOUSEBUTTONS

@@ -161,6 +161,9 @@ pub fn timer_tick(_f: &mut TrapFrame) {
     if crate::irq::ticks() % 250 == 0 {
         crate::infoseg::update();
     }
+    if crate::irq::ticks() % 50 == 0 {
+        crate::infoseg::bios_tick();
+    }
 }
 
 /// Last chance before `iretq` to user mode: preemption and sanity checks on
@@ -196,9 +199,8 @@ pub fn before_user_return(f: &mut TrapFrame) -> bool {
         if sel < 4 {
             return true;
         }
-        if sel & 3 != 3 {
-            return false;
-        }
+        // Any RPL: a DPL 3 descriptor loads at CPL 3 whatever the RPL
+        // (Windows programs use selector 40h, RPL 0).
         let d = space.descriptor(sel);
         // Present, code/data, DPL 3; code must be readable.
         let present = d & (1 << 47) != 0;

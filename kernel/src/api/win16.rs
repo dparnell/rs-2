@@ -28,6 +28,7 @@
 //! | Ordinal | Call |
 //! |---------|------|
 //! | 420 | `Rs2Win16SetIntHandler(ULONG pfnHandler16)` (32-bit `_System`; 0 removes it) |
+//! | 421 | `Rs2Win16Selector(ULONG op, ULONG sel, ULONG value)`: KERNEL's selector functions (below) |
 
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
@@ -67,6 +68,109 @@ pub fn set_int_handler(c: &mut Ctx) -> u32 {
     let h = c.arg(0);
     c.process.win16_int.store(h, Ordering::Relaxed);
     0
+}
+
+/// RS2API 421: Rs2Win16Selector(op, sel, value), for KERNEL's selector
+/// functions (AllocSelector, AllocCStoDSAlias, SetSelectorBase...) and
+/// DPMI's. Selectors made here are aliases (vm alias tiles: an LDT entry
+/// not describing its own tile). `op`: 0 a new selector like `sel` (a
+/// copy of its descriptor; `value` 1 makes it data, 2 16-bit code, 0
+/// keeps the type), 1 the base of `sel`, 2 set the base of an alias, 3
+/// set its limit, 4 free an alias, 5 the limit of `sel`, 6 the selector
+/// of segment `value` (1-based) of the module whose handle is `sel`
+/// (0: the number of segments), 9 `value` new consecutive selectors (8
+/// apart, data, base 0, limit 0: DPMI's allocation, for huge blocks): the
+/// first, 8 the handle of the module one of whose
+/// segments `sel` is, 7 make `sel` itself data (`value` 1) or
+/// 16-bit code (2), its base and limit kept. Returns the
+/// selector or value, 0 (or 0xFFFFFFFF for 1 and 5) on error; 2-4 return
+/// 1 on success.
+pub fn selector(c: &mut Ctx) -> u32 {
+    let (op, sel, value) = (c.arg(0), c.arg(1) as u16, c.arg(2));
+    if op == 9 {
+        let n = value.clamp(1, 256);
+        let mut sp = c.process.space.lock();
+        let Some(first) = sp.find_private(n * 0x1_0000) else { return 0 };
+        for i in 0..n {
+            let Ok(sel) = sp.alias_at(first + i * 0x1_0000, 0, 0, vm::SegKind::Data) else { return 0 };
+            sp.ldt[(sel >> 3) as usize] |= 1 << 41;
+        }
+        return vm::tile_selector(first) as u32;
+    }
+    if op == 8 {
+        let s = sel | 7;
+        return crate::loader::all_modules().iter().find(|m| m.objects.iter().any(|o| o.selector() == s)).map_or(0, |m| m.hmte as u32);
+    }
+    if op == 6 {
+        let Some(m) = crate::loader::by_handle(sel) else { return 0 };
+        return match value {
+            0 => m.objects.len() as u32,
+            n => m.objects.get(n as usize - 1).map_or(0, |o| o.selector() as u32),
+        };
+    }
+    let mut sp = c.process.space.lock();
+    let ldt = |sel: u16| sel & 4 != 0 && (sel >> 3) != 0;
+    let d = if ldt(sel) { sp.descriptor(sel) } else { 0 };
+    let base = ((d >> 16) & 0xff_ffff) as u32 | ((d >> 56) as u32) << 24;
+    let mut limit = (d & 0xffff) as u32 | ((d >> 32) & 0xf_0000) as u32;
+    if d & (1 << 55) != 0 {
+        limit = limit << 12 | 0xfff;
+    }
+    // An alias tile: reserved, no descriptors of its own (SegKind::None).
+    let alias = |sp: &vm::AddressSpace| {
+        let tile = vm::tiled_flat(sel, 0);
+        ldt(sel) && sp.region(tile).is_some_and(|r| r.seg == vm::SegKind::None && r.base == tile)
+    };
+    match op {
+        0 => {
+            let kind = match value {
+                1 => vm::SegKind::Data,
+                2 => vm::SegKind::Code16,
+                _ if d & (1 << 43) != 0 => vm::SegKind::Code16,
+                _ => vm::SegKind::Data,
+            };
+            if d == 0 && sel != 0 {
+                return 0;
+            }
+            let Ok(new) = sp.alias(base, if d == 0 { 0 } else { limit }, kind) else { return 0 };
+            // alias() makes data read-only: Windows' are writable.
+            if kind == vm::SegKind::Data {
+                let i = (new >> 3) as usize;
+                sp.ldt[i] |= 1 << 41;
+            }
+            new as u32
+        }
+        1 if d != 0 => base,
+        5 if d != 0 => limit,
+        2 | 3 if alias(&sp) => {
+            let i = (sel >> 3) as usize;
+            let (b, l) = if op == 2 { (value, limit) } else { (base, value) };
+            let old = sp.ldt[i];
+            let g = l > 0xfffff;
+            let l = if g { l >> 12 } else { l };
+            let mut n = old & !(0xffff | 0xff_ffff << 16 | 0xf << 48 | 0xff << 56 | 1 << 55);
+            n |= (l & 0xffff) as u64 | (b as u64 & 0xff_ffff) << 16 | ((l as u64 >> 16) & 0xf) << 48 | (b as u64 >> 24) << 56;
+            if g {
+                n |= 1 << 55;
+            }
+            sp.ldt[i] = n;
+            1
+        }
+        4 if alias(&sp) => {
+            sp.ldt[(sel >> 3) as usize] = 0;
+            let _ = sp.free(vm::tiled_flat(sel, 0));
+            1
+        }
+        7 if d != 0 && (value == 1 || value == 2) => {
+            use crate::arch::gdt::access::*;
+            let a = PRESENT | DPL3 | CODE_DATA | ACCESSED | if value == 2 { CODE | READABLE } else { WRITABLE };
+            let i = (sel >> 3) as usize;
+            sp.ldt[i] = sp.ldt[i] & !(0xff << 40 | 1 << 54) | (a as u64) << 40;
+            1
+        }
+        1 | 5 => u32::MAX,
+        _ => 0,
+    }
 }
 
 /// A protection fault in user code: if it is in 16-bit code of a process

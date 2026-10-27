@@ -51,12 +51,12 @@ static HEAPS: Global<BTreeMap<u16, Heap>> = Global::new(BTreeMap::new());
 const GMEM_ZEROINIT: u16 = 0x0040;
 const GMEM_MODIFY: u16 = 0x0080;
 const GMEM_MOVEABLE: u16 = 0x0002;
+pub const GMEM_DDESHARE: u16 = 0x2000;
 const LMEM_MOVEABLE: u16 = 0x0002;
 const LMEM_ZEROINIT: u16 = 0x0040;
 const LMEM_MODIFY: u16 = 0x0080;
 
 /// Fake module handles of the system modules (GetModuleHandle).
-const SYSTEM_MODULES: &[(&[u8], u16, u32)] = &[(b"KERNEL", 0x0f07, 1000), (b"USER", 0x0f0f, 2000), (b"GDI", 0x0f17, 3000), (b"KEYBOARD", 0x0f1f, 4000)];
 
 pub fn call(ord: u32, a: &mut Pascal) -> u32 {
     match ord {
@@ -115,6 +115,35 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // LocalCompact(min): the largest free block.
         13 => largest_free(crate::caller_ds()) as u32,
+        // AllocCStoDSAlias(sel), AllocDStoCSAlias(sel), AllocSelector(sel):
+        // a new selector for the same memory (data, code, the same type).
+        170 | 171 | 175 => {
+            let sel = a.w() as u32;
+            unsafe { crate::pm::Rs2Win16Selector(0, sel, match ord { 170 => 1, 171 => 2, _ => 0 }) }
+        }
+        // FreeSelector(sel): 0 when freed.
+        176 => {
+            let sel = a.w() as u32;
+            (unsafe { crate::pm::Rs2Win16Selector(4, sel, 0) } == 0) as u32 * sel
+        }
+        // PrestoChangoSelector(src, dst): dst describes src's memory with
+        // the other type (code for data, data for code).
+        177 => {
+            let (src, dst) = (a.w() as u32, a.w() as u32);
+            selector_copy(src, dst)
+        }
+        // GetSelectorBase(sel), GetSelectorLimit(sel)
+        186 | 188 => {
+            let sel = a.w() as u32;
+            let v = unsafe { crate::pm::Rs2Win16Selector(if ord == 186 { 1 } else { 5 }, sel, 0) };
+            if v == u32::MAX { 0 } else { v }
+        }
+        // SetSelectorBase(sel, base): sel; SetSelectorLimit(sel, limit): 0.
+        187 | 189 => {
+            let (sel, v) = (a.w() as u32, a.l());
+            let ok = unsafe { crate::pm::Rs2Win16Selector(if ord == 187 { 2 } else { 3 }, sel, v) } != 0;
+            if ord == 187 { ok as u32 * sel } else { 0 }
+        }
         // GlobalAlloc(flags, bytes)
         15 => {
             let fl = a.w();
@@ -193,7 +222,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // GetModuleHandle(name)
         47 => {
             let p = a.l();
-            module_handle(p) as u32
+            crate::module::handle(p) as u32
         }
         // GetModuleUsage(h)
         48 => {
@@ -224,20 +253,32 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         52 => 0,
         // GetInstanceData(inst, ptr, cb): no other instances.
         54 => 0,
-        // GetProfileInt(app, key, default), GetPrivateProfileInt(+file):
-        // no WIN.INI yet, the default.
+        // GetProfileInt(app, key, default), GetPrivateProfileInt(+file)
         57 | 127 => {
-            let (_app, _key, def) = (a.l(), a.l(), a.w());
-            def as u32
+            let (app, key, def) = (a.l(), a.l(), a.w());
+            let file = if ord == 127 { far_str(a.l()).unwrap_or(b"").to_vec() } else { b"WIN.INI".to_vec() };
+            crate::profile::get_int(&file, app, key, def)
         }
         // GetProfileString(app, key, default, buf, max),
-        // GetPrivateProfileString(+file): the default.
+        // GetPrivateProfileString(+file)
         58 | 128 => {
-            let (_app, _key, def, buf, max) = (a.l(), a.l(), a.l(), a.p(), a.i());
-            crate::user::copy_out(far_str(def).unwrap_or(b""), buf, max) as u32
+            let (app, key, def, buf, max) = (a.l(), a.l(), a.l(), a.p(), a.i());
+            if ord == 58 {
+                // WIN.INI's printers are the spooler's queues (print.rs).
+                if let Some(v) = crate::print::profile(far_str(app).unwrap_or(b""), far_str(key)) {
+                    return profile_out(&v, buf, max);
+                }
+            }
+            let file = if ord == 128 { far_str(a.l()).unwrap_or(b"").to_vec() } else { b"WIN.INI".to_vec() };
+            crate::profile::get_string(&file, app, key, def, buf, max)
         }
         // WriteProfileString(app, key, value), WritePrivateProfileString
-        59 | 129 => 1,
+        // (+file)
+        59 | 129 => {
+            let (app, key, value) = (a.l(), a.l(), a.l());
+            let file = if ord == 129 { far_str(a.l()).unwrap_or(b"").to_vec() } else { b"WIN.INI".to_vec() };
+            crate::profile::write_string(&file, app, key, value)
+        }
         // FindResource .. SizeofResource
         60..=65 => crate::res::kernel(ord, a),
         // OpenFile(path, lpOfStruct, style)
@@ -250,28 +291,33 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             a.w();
             b'C' as u32
         }
-        // LoadLibrary(name): no Windows DLLs of the program's own yet
-        // (file not found).
+        // LoadLibrary(name)
         95 => {
             let n = a.l();
-            trace(format_args!("WIN16: LoadLibrary({}) not supported", far_str(n).unwrap_or(b"").iter().map(|&c| c as char).collect::<alloc::string::String>()));
-            2
+            crate::module::load_library(n) as u32
         }
         // FreeLibrary(h)
         96 => {
-            a.w();
+            let h = a.w();
+            crate::module::free_library(h);
             0
+        }
+        // GetDriveType(drive): 2 removable (A:, B:), 3 fixed, 0 none.
+        136 => {
+            let d = a.w() as u32;
+            let (mut cur, mut map) = (0u32, 0u32);
+            unsafe { os2::DosQueryCurrentDisk(&mut cur, &mut map) };
+            match d {
+                _ if d >= 26 || map & (1 << d) == 0 => 0,
+                0 | 1 => 2,
+                _ => 3,
+            }
         }
         // GetWindowsDirectory(buf, max), GetSystemDirectory(buf, max)
         134 | 135 => {
             let (buf, max) = (a.p(), a.i());
-            crate::user::copy_out(if ord == 134 { b"C:\\OS2\\MDOS\\WINOS2" } else { b"C:\\OS2\\MDOS\\WINOS2\\SYSTEM" }, buf, max) as u32
-        }
-        // WinExec(cmdline, show): not yet (file not found).
-        166 => {
-            a.l();
-            a.w();
-            2
+            crate::profile::make_dirs();
+            crate::user::copy_out(if ord == 134 { crate::profile::WINDOWS_DIR } else { crate::profile::SYSTEM_DIR }, buf, max) as u32
         }
         // _lclose(hf)
         81 => {
@@ -287,6 +333,17 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 if ord == 82 { os2::DosRead(h as u32, p, cb as u32, &mut n) } else { os2::DosWrite(h as u32, p, cb as u32, &mut n) }
             };
             if e == 0 { n } else { HFILE_ERROR }
+        }
+        // _hread(hf, buf, cb), _hwrite(hf, buf, cb): 32-bit counts, the
+        // buffer huge (its tiles are contiguous).
+        349 | 350 => {
+            let (h, buf, cb) = (a.w(), a.l(), a.l());
+            let p = huge(buf);
+            let mut n = 0u32;
+            let e = unsafe {
+                if ord == 349 { os2::DosRead(h as u32, p, cb, &mut n) } else { os2::DosWrite(h as u32, p, cb, &mut n) }
+            };
+            if e == 0 { n } else { u32::MAX }
         }
         // _lcreat(path, attr), _lopen(path, mode)
         83 | 85 => {
@@ -395,9 +452,28 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
 
 const HFILE_ERROR: u32 = 0xffff;
 
+
+/// A profile string (or, for `list`, NUL-separated keys and a final NUL)
+/// into a buffer of `max` bytes: the bytes copied, without the last NUL.
+fn profile_out(v: &[u8], buf: *mut u8, max: i32) -> u32 {
+    if buf.is_null() || max <= 0 {
+        return 0;
+    }
+    let max = max as usize;
+    let n = v.len().min(max - 1);
+    unsafe {
+        core::ptr::copy_nonoverlapping(v.as_ptr(), buf, n);
+        *buf.add(n) = 0;
+        if n + 1 < max {
+            *buf.add(n + 1) = 0;
+        }
+    }
+    n as u32
+}
+
 /// A huge (16:16) pointer as flat memory: tiled, the tiles of a block
 /// are contiguous.
-fn huge(far: u32) -> *mut u8 {
+pub fn huge(far: u32) -> *mut u8 {
     flat(far)
 }
 
@@ -420,6 +496,15 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
             }
             1
         }
+        // AnsiToOemBuff(src, dst, n), OemToAnsiBuff(src, dst, n)
+        134 | 135 => {
+            let (s, d, n) = (a.l(), a.l(), a.w());
+            let (src, dst) = (flat(s), flat(d));
+            if !src.is_null() && !dst.is_null() && src != dst {
+                unsafe { core::ptr::copy(src, dst, n as usize) };
+            }
+            0
+        }
         // GetKBCodePage
         132 => 437,
         // GetKeyboardType(which): an enhanced 101/102-key keyboard.
@@ -430,6 +515,32 @@ pub fn keyboard(ord: u32, a: &mut Pascal) -> u32 {
         },
         _ => 0,
     }
+}
+
+/// PrestoChangoSelector(src, dst): dst (a selector from AllocSelector)
+/// now describes src's memory, with the other type (code for data, data
+/// for code); dst is returned. With src == dst the selector changes type
+/// in place (how programs make a data block they wrote code into
+/// executable).
+fn selector_copy(src: u32, dst: u32) -> u32 {
+    use crate::pm::Rs2Win16Selector as sel;
+    let code = is_code(src as u16);
+    let kind = if code { 1 } else { 2 };
+    if src != dst {
+        let (base, limit) = unsafe { (sel(1, src, 0), sel(5, src, 0)) };
+        if base == u32::MAX || unsafe { sel(2, dst, base) } == 0 || unsafe { sel(3, dst, limit) } == 0 {
+            return 0;
+        }
+    }
+    if unsafe { sel(7, dst, kind) } != 0 { dst } else { 0 }
+}
+
+/// Is `sel` a code selector (LAR's type bit 3)?
+fn is_code(sel: u16) -> bool {
+    let ar: u32;
+    let ok: u8;
+    unsafe { core::arch::asm!("lar {0:e}, {1:e}", "setz {2}", out(reg) ar, in(reg) sel as u32, out(reg_byte) ok, options(nostack)) };
+    ok != 0 && ar & (1 << 11) != 0
 }
 
 /// InitTask (INT E0h from w16_inittask): the program's start registers
@@ -458,6 +569,7 @@ pub fn init_task(r: &mut crate::dos::Regs) {
         local_init(ds, bottom, 0xfff0);
     }
     t.psp = make_psp();
+    crate::module::register_exe(t.hinst);
     r[AX] = 1;
     // The command line: a NUL-terminated copy of the PSP's tail (startup
     // code takes it as a C string).
@@ -469,6 +581,99 @@ pub fn init_task(r: &mut crate::dos::Regs) {
     r[DI] = t.hinst;
     if crate::tracing() {
         trace(format_args!("W16 InitTask: inst {:#x} stack {:#x}-{:#x} heap {:#x} psp {:#x}", t.hinst, top, bottom, heap, t.psp));
+    }
+}
+
+/// Catch(lpCatchBuf) (INT E2h from w16_catch): the caller's state after
+/// Catch returns (its return address, SP past the return address and
+/// the argument, BP, SI, DI, DS) into the CATCHBUF; 0.
+pub fn catch(r: &mut crate::dos::Regs) {
+    use crate::dos::reg::*;
+    let ss = (thunk16::sp16() >> 16) as u32;
+    let st = flat(ss << 16 | r[SP] as u32) as *const u16;
+    let rd = |i: usize| unsafe { st.add(i).read_unaligned() };
+    let (ip, cs, buf) = (rd(0), rd(1), rd(2) as u32 | (rd(3) as u32) << 16);
+    let b = flat(buf) as *mut u16;
+    if !b.is_null() {
+        for (i, v) in [ip, cs, r[SP].wrapping_add(8), r[BP], r[SI], r[DI], r[DS], ss as u16, 0].iter().enumerate() {
+            unsafe { b.add(i).write_unaligned(*v) };
+        }
+    }
+    r[AX] = 0;
+}
+
+/// Throw(lpCatchBuf, nThrowBack) (INT E3h from w16_throw): back to where
+/// Catch returned, which now returns nThrowBack.
+pub fn throw(r: &mut crate::dos::Regs) {
+    use crate::dos::reg::*;
+    let ss = (thunk16::sp16() >> 16) as u32;
+    let st = flat(ss << 16 | r[SP] as u32) as *const u16;
+    let rd = |i: usize| unsafe { st.add(i).read_unaligned() };
+    let (value, buf) = (rd(2), rd(3) as u32 | (rd(4) as u32) << 16);
+    let b = flat(buf) as *const u16;
+    if b.is_null() {
+        return;
+    }
+    let v = |i: usize| unsafe { b.add(i).read_unaligned() };
+    r[IP] = v(0);
+    r[CS] = v(1);
+    r[SP] = v(2);
+    r[BP] = v(3);
+    r[SI] = v(4);
+    r[DI] = v(5);
+    r[DS] = v(6);
+    r[AX] = value;
+}
+
+/// A call to an import WIN16 does not have: Windows' fatal message, then
+/// the end of the program.
+pub fn undefined_dynalink(r: &crate::dos::Regs) {
+    use crate::dos::reg::*;
+    let ss = (thunk16::sp16() >> 16) as u32;
+    let st = flat(ss << 16 | r[SP] as u32) as *const u16;
+    let (ip, cs) = unsafe { (st.read_unaligned(), st.add(1).read_unaligned()) };
+    trace(format_args!("WIN16: call to an undefined dynalink from {cs:04X}:{:04X}", ip.wrapping_sub(5)));
+    unsafe {
+        crate::pm::WinMessageBox(crate::pm::HWND_DESKTOP, 0, b"Call to Undefined Dynalink\0".as_ptr(), b"Application Error\0".as_ptr(), 0, 0x4000 | 0x0040);
+        os2::DosExit(1, 0xff);
+    }
+}
+
+/// WIN87EM's __FPMATH (INT E1h from w16_fpmath), the floating point
+/// emulator's interface: BX the function. The coprocessor does the work,
+/// so the programs' FPU instructions stay as they are (their OSFIXUPs
+/// would turn them into the emulator's INTs) and this answers for it.
+pub fn fpmath(r: &mut crate::dos::Regs) {
+    use crate::dos::reg::*;
+    match r[BX] {
+        // 0 initialise, 1 terminate, 3 set the exception handler.
+        0 | 1 | 3 => r[AX] = 0,
+        // Set the control word (AX).
+        4 => {
+            let cw = r[AX];
+            unsafe { core::arch::asm!("fldcw [{0}]", in(reg) &cw, options(nostack)) };
+        }
+        // Get the control word.
+        5 => {
+            let mut cw = 0u16;
+            unsafe { core::arch::asm!("fnstcw [{0}]", in(reg) &mut cw, options(nostack)) };
+            r[AX] = cw;
+        }
+        // Get and clear the status word.
+        8 => {
+            let sw: u16;
+            unsafe { core::arch::asm!("fnstsw ax", "fnclex", out("ax") sw, options(nostack)) };
+            r[AX] = sw;
+        }
+        // The stack depth: values are not kept on the emulator's stack.
+        10 => r[AX] = 0,
+        // A coprocessor is present.
+        11 => r[AX] = 1,
+        n => {
+            if crate::tracing() {
+                trace(format_args!("W16 __FPMATH {n} not supported"));
+            }
+        }
     }
 }
 
@@ -533,7 +738,15 @@ pub fn global_alloc(fl: u16, n: u32) -> u16 {
     let size = n.max(1);
     let room = size.next_multiple_of(0x10000);
     let mut p: *mut u8 = core::ptr::null_mut();
-    if unsafe { os2::DosAllocMem(&mut p, room, os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | os2::OBJ_TILE) } != 0 {
+    let rw = os2::PAG_READ | os2::PAG_WRITE | os2::PAG_COMMIT | os2::OBJ_TILE;
+    // GMEM_DDESHARE blocks are giveable shared memory: the same address
+    // and selector in every process they are given to (DDE, dde.rs).
+    let rc = if fl & GMEM_DDESHARE != 0 {
+        unsafe { os2::DosAllocSharedMem(&mut p, core::ptr::null(), room, rw | os2::OBJ_GIVEABLE) }
+    } else {
+        unsafe { os2::DosAllocMem(&mut p, room, rw) }
+    };
+    if rc != 0 {
         return 0;
     }
     // Committed memory is zero already (GMEM_ZEROINIT).
@@ -543,20 +756,57 @@ pub fn global_alloc(fl: u16, n: u32) -> u16 {
     h
 }
 
+/// A GMEM_DDESHARE block another process gave this one (dde.rs): a
+/// global block here from now on.
+pub fn adopt(h: u16, size: u32) {
+    let h = h | 7;
+    if GLOBALS.get().contains_key(&h) {
+        return;
+    }
+    let base = flat((h as u32) << 16);
+    let room = size.next_multiple_of(0x10000).max(0x10000);
+    GLOBALS.get().insert(h, Block { base, size: size.max(1), room, flags: GMEM_DDESHARE, locks: 0 });
+}
+
+/// Is `h` a GMEM_DDESHARE block of this process?
+pub fn is_shared(h: u16) -> bool {
+    GLOBALS.get().get(&(h | 7)).is_some_and(|b| b.flags & GMEM_DDESHARE != 0)
+}
+
+
 pub fn global_free(h: u16) -> bool {
     match GLOBALS.get().remove(&(h | 7)) {
         Some(b) => {
             unsafe { os2::DosFreeMem(b.base) };
+            forget_selector(h | 7);
             true
         }
         None => false,
     }
 }
 
+/// A selector is gone: the 16-bit caller's DS and ES (saved by the entry
+/// stub, below which `sp16` points 32 bytes down) no longer hold it, as
+/// Windows' GlobalFree does, so that the return does not fault.
+fn forget_selector(sel: u16) {
+    let v = thunk16::sp16();
+    if v == 0 {
+        return;
+    }
+    // The stub's frame: fs, bx, di, si, es, ds, bp.
+    let frame = flat(v.wrapping_add(32)) as *mut u16;
+    for i in [4, 5] {
+        let p = unsafe { frame.add(i) };
+        if unsafe { p.read_unaligned() } | 7 == sel {
+            unsafe { p.write_unaligned(0) };
+        }
+    }
+}
+
 /// OpenFile: OF_READ/WRITE/READWRITE, OF_CREATE, OF_EXIST, OF_DELETE,
 /// OF_PARSE; the OFSTRUCT (cBytes, fFixedDisk, nErrCode, reserved,
 /// szPathName) gets the full path.
-fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
+pub fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
     const OF_PARSE: u16 = 0x0100;
     const OF_DELETE: u16 = 0x0200;
     const OF_CREATE: u16 = 0x1000;
@@ -609,7 +859,16 @@ fn open_file(path: &[u8], of: *mut u8, style: u16) -> u32 {
     hf
 }
 
-fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
+/// GlobalSize: a block's size.
+pub fn global_size(h: u16) -> u32 {
+    let h = h | 7;
+    match GLOBALS.get().get(&h) {
+        Some(b) => b.size,
+        None => segment_size(h),
+    }
+}
+
+pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
     let h = h | 7;
     let g = GLOBALS.get();
     let Some(b) = g.get_mut(&h) else { return 0 };
@@ -635,6 +894,7 @@ fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
     unsafe { core::ptr::copy_nonoverlapping(old, nb, old_size as usize) };
     GLOBALS.get().remove(&h);
     unsafe { os2::DosFreeMem(old) };
+    forget_selector(h);
     nh
 }
 
@@ -727,48 +987,23 @@ fn local_realloc(seg: u16, h: u16, n: u16, fl: u16) -> u16 {
     off
 }
 
-fn module_handle(name: u32) -> u16 {
-    let t = TASK.get();
-    let Some(n) = far_str(name) else {
-        // An instance handle: its module.
-        return if name as u16 == t.hinst || name == 0 { t.hinst } else { 0 };
-    };
-    let base = n.rsplit(|&c| c == b'\\' || c == b':').next().unwrap_or(n);
-    let base = base.split(|&c| c == b'.').next().unwrap_or(base);
-    if let Some(&(_, h, _)) = SYSTEM_MODULES.iter().find(|(m, _, _)| m.eq_ignore_ascii_case(base)) {
-        return h;
-    }
-    // The program itself.
-    let mut path = [0u8; 260];
-    if module_file_name(t.hinst, path.as_mut_ptr(), 260) > 0 {
-        let p = unsafe { cstr(path.as_ptr()) };
-        let pb = p.rsplit(|&c| c == b'\\').next().unwrap_or(p);
-        let pb = pb.split(|&c| c == b'.').next().unwrap_or(pb);
-        if pb.eq_ignore_ascii_case(base) {
-            return t.hinst;
-        }
-    }
-    0
-}
-
 fn module_file_name(h: u16, buf: *mut u8, cb: i32) -> i32 {
     if buf.is_null() || cb <= 0 {
         return 0;
     }
-    let mut path = [0u8; 260];
-    let ok = if SYSTEM_MODULES.iter().any(|m| m.1 == h) {
+    let hmod = if crate::module::system(h).is_some() {
         let mut hmod = 0;
-        unsafe { os2::DosQueryModuleHandle(b"WIN16\0".as_ptr(), &mut hmod) == 0 && pm::DosQueryModuleName(hmod, 260, path.as_mut_ptr()) == 0 }
+        if unsafe { os2::DosQueryModuleHandle(b"WIN16\0".as_ptr(), &mut hmod) } != 0 {
+            return 0;
+        }
+        hmod
     } else {
-        let mut tib = core::ptr::null_mut();
-        let mut pib: *mut os2::Pib = core::ptr::null_mut();
-        unsafe { os2::DosGetInfoBlocks(&mut tib, &mut pib) };
-        !pib.is_null() && unsafe { pm::DosQueryModuleName((*pib).hmte, 260, path.as_mut_ptr()) } == 0
+        match crate::module::find(h) {
+            Some(m) => m.hmod,
+            None => return 0,
+        }
     };
-    if !ok {
-        return 0;
-    }
-    let p = unsafe { cstr(path.as_ptr()) };
+    let Some(p) = crate::module::path_of(hmod) else { return 0 };
     let n = p.len().min(cb as usize - 1);
     unsafe {
         core::ptr::copy_nonoverlapping(p.as_ptr(), buf, n);
@@ -778,9 +1013,9 @@ fn module_file_name(h: u16, buf: *mut u8, cb: i32) -> i32 {
 }
 
 /// GetProcAddress: the system modules' entries (by name or ordinal) are
-/// WIN16's.
+/// WIN16's, a DLL's its own.
 fn proc_address(h: u16, name: u32) -> u32 {
-    let Some(&(_, _, base)) = SYSTEM_MODULES.iter().find(|m| m.1 == h) else { return 0 };
+    let Some(&(_, _, base)) = crate::module::system(h) else { return crate::module::proc_address(h, name) };
     let mut hmod = 0;
     if unsafe { os2::DosQueryModuleHandle(b"WIN16\0".as_ptr(), &mut hmod) } != 0 {
         return 0;

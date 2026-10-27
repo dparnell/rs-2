@@ -42,11 +42,35 @@ pub fn load(
     let import_names: Vec<String> =
         m.import_modules().map_err(|_| err::BAD_EXE_FORMAT)?.iter().map(|n| s(n)).collect();
     let (load_names, ord_bases): (Vec<String>, Vec<u32>) = if windows {
-        import_names.iter().map(|n| super::win16_import(n)).unzip()
+        // Windows finds a program's DLLs in the program's directory, then
+        // the Windows directories (C:\WINDOWS, docs/WIN16.md), then the
+        // PATH (here LIBPATH).
+        let dir = &path[..path.rfind('\\').map_or(0, |i| i + 1)];
+        import_names
+            .iter()
+            .map(|n| match super::win16_import(n) {
+                (m, 0) if super::find_loaded(&m).is_none() => {
+                    let found = [dir, "C:\\WINDOWS\\SYSTEM\\", "C:\\WINDOWS\\"]
+                        .iter()
+                        .filter(|d| !d.is_empty())
+                        .map(|d| alloc::format!("{d}{m}.DLL"))
+                        .find(|f| crate::fs::read_file(f).is_some());
+                    (found.unwrap_or(m), 0)
+                }
+                r => r,
+            })
+            .unzip()
     } else {
         (import_names.clone(), alloc::vec![0; import_names.len()])
     };
     let imports = load_imports(&load_names)?;
+    // A Windows program's process has the BIOS data area (its DLLs'
+    // __0040H imports point there too).
+    if windows && !dll {
+        if let Some(sp) = space.as_deref_mut() {
+            crate::infoseg::attach_bios(sp);
+        }
+    }
     let autodata = (h.autodata != 0).then(|| h.autodata as usize - 1);
 
     // Segment sizes: the automatic data segment also holds the local heap
@@ -62,7 +86,7 @@ pub fn load(
             if !dll && h.ss as usize == i + 1 {
                 size += h.stack as u32;
             }
-            size = if windows && !dll { 0x10000 } else { size.min(0x10000) };
+            size = if windows { 0x10000 } else { size.min(0x10000) };
         }
         sizes.push(size.max(1));
     }
@@ -98,6 +122,28 @@ pub fn load(
             }
         }
         images.push(img);
+    }
+
+    // A Windows DLL's exported procedures load DS from AX (`push ds; pop
+    // ax; nop` or `mov ax, ds; nop`, then `mov ds, ax`): Windows' loader
+    // makes the first instruction `mov ax, DGROUP`, so that they get the
+    // DLL's data whoever calls them.
+    if windows && dll {
+        if let Some(a) = autodata {
+            let [lo, hi] = sel_of(a).to_le_bytes();
+            for e in m.entries().map_err(|_| err::BAD_EXE_FORMAT)? {
+                let (Entry::Fixed { segment, offset, flags: fl } | Entry::Movable { segment, offset, flags: fl }) = e else { continue };
+                let i = segment as usize;
+                if fl & 1 == 0 || i == 0 || i > segs.len() || segs[i - 1].flags & sflags::DATA != 0 {
+                    continue;
+                }
+                let img = &mut images[i - 1];
+                let o = offset as usize;
+                if o + 3 <= img.len() && matches!(img[o..o + 3], [0x1e, 0x58, 0x90] | [0x8c, 0xd8, 0x90]) {
+                    img[o..o + 3].copy_from_slice(&[0xb8, lo, hi]);
+                }
+            }
+        }
     }
 
     // Exports.
@@ -138,26 +184,48 @@ pub fn load(
                         .flatten();
                     if let Some(&(_, v)) = constant {
                         Target::constant(v)
+                    } else if base == 1000 && super::WIN16_BIOS_SELECTORS.contains(&ordinal) {
+                        // __0040H and the other real-mode segments: the
+                        // BIOS data area (infoseg.rs).
+                        if let Some(sp) = space.as_deref_mut() {
+                            crate::infoseg::attach_bios(sp);
+                        }
+                        Target::constant(crate::infoseg::bios_selector())
                     } else {
-                        import_target(&imports, module, ImportBy::Ordinal(base + ordinal as u32)).map_err(|e| {
-                            crate::trace!(
-                                "loader: {}: import {}.{} not found",
-                                path,
-                                import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"),
-                                ordinal
-                            );
-                            super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
-                            e
-                        })?
+                        let found = import_target(&imports, module, ImportBy::Ordinal(base + ordinal as u32));
+                        let mname = import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?");
+                        match found {
+                            Ok(t) => t,
+                            // A Windows module's import WIN16 does not have:
+                            // as on Windows, the program loads and a call
+                            // to it ends the program ("Call to Undefined
+                            // Dynalink").
+                            Err(_) if base != 0 => {
+                                crate::trace!("loader: {path}: import {mname}.{ordinal} not found: undefined dynalink");
+                                import_target(&imports, module, ImportBy::Ordinal(super::WIN16_UNDEFINED))?
+                            }
+                            Err(e) => {
+                                crate::trace!("loader: {path}: import {mname}.{ordinal} not found");
+                                super::set_fail(mname);
+                                return Err(e);
+                            }
+                        }
                     }
                 }
                 ne::Target::ImportName { module, name_offset } => {
                     let name = m.imported_name(name_offset).map(s).map_err(|_| err::BAD_EXE_FORMAT)?;
-                    import_target(&imports, module, ImportBy::Name(&name)).map_err(|e| {
-                        crate::trace!("loader: {}: import {} not found", path, name);
-                        super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
-                        e
-                    })?
+                    match import_target(&imports, module, ImportBy::Name(&name)) {
+                        Ok(t) => t,
+                        Err(_) if ord_bases.get(module as usize - 1).is_some_and(|&b| b != 0) => {
+                            crate::trace!("loader: {path}: import {name} not found: undefined dynalink");
+                            import_target(&imports, module, ImportBy::Ordinal(super::WIN16_UNDEFINED))?
+                        }
+                        Err(e) => {
+                            crate::trace!("loader: {}: import {} not found", path, name);
+                            super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
+                            return Err(e);
+                        }
+                    }
                 }
                 ne::Target::OsFixup { .. } => continue,
             };
@@ -196,6 +264,12 @@ pub fn load(
             }
         } else {
             prot |= pag::EXECUTE;
+            // Windows programs write to code through data aliases
+            // (AllocCStoDSAlias): its pages are writable, its descriptor
+            // stays execute/read.
+            if windows {
+                prot |= pag::WRITE;
+            }
         }
         let seg = if data_seg { SegKind::Data } else { SegKind::Code16 };
         let base = bases[i];
@@ -205,7 +279,10 @@ pub fn load(
         let mut obj =
             Object { base, size, prot, seg, is16: true, code: !data_seg, limit, shared: None, pristine: None };
         if dll {
-            let shared = !data_seg || sg.flags & sflags::SHARED != 0 || prot & pag::WRITE == 0;
+            // A Windows DLL is the process's own, code and data: each
+            // Windows task is a process, the DLL is initialised in each,
+            // and its code may be written.
+            let shared = !windows && (!data_seg || sg.flags & sflags::SHARED != 0 || prot & pag::WRITE == 0);
             if shared {
                 let sm = SharedMem::new(base, size, prot, None);
                 for p in 0..(size / PAGE) as usize {
@@ -277,7 +354,7 @@ pub fn load(
         imports,
         start: if dll { None } else { start },
         init: if dll { start } else { None },
-        per_process_init: h.flags & flags::PER_PROCESS_INIT != 0,
+        per_process_init: windows || h.flags & flags::PER_PROCESS_INIT != 0,
         per_process_term: false,
         global_init_done: core::sync::atomic::AtomicBool::new(false),
         image: Some(data.clone()),

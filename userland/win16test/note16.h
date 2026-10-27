@@ -4,6 +4,8 @@
 #define IDM_SAVE     103
 #define IDM_SAVEAS   104
 #define IDM_EXIT     105
+#define IDM_PRINT    106
+#define IDM_PRINTSETUP 107
 #define IDM_UNDO     201
 #define IDM_CUT      202
 #define IDM_COPY     203
@@ -12,5 +14,9 @@
 #define IDM_SELALL   206
 #define IDM_TIME     207
 #define IDM_WRAP     301
+#define IDM_FONT     302
+#define IDM_COLOR    303
+#define IDM_FIND     601
+#define IDM_FINDNEXT 602
+#define IDM_REPLACE  603
 #define IDM_ABOUT    401
-#define IDC_FILE     501

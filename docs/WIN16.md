@@ -9,7 +9,7 @@ files are involved. This is the media-free alternative to Win-OS/2
 
 ![HELLO16 on rs2](images/rs2-win16-hello.png)
 
-## Status (stage 2)
+## Status (stage 3)
 
 | What | State |
 |------|-------|
@@ -28,9 +28,14 @@ files are involved. This is the media-free alternative to Win-OS/2
 | BUTTON, STATIC, EDIT (single and multi-line), LISTBOX, COMBOBOX, SCROLLBAR, drawn by WIN16 | works (stage 2) |
 | Subclassing (SetWindowLong GWL_WNDPROC, CallWindowProc), window scroll bars, the caret, the clipboard (CF_TEXT, PM's) | works (stage 2) |
 | CreateFont and the stock fonts, ellipses, polygons, clipping rectangles, SaveDC/RestoreDC | works (stage 2) |
-| MDI, bitmaps (CreateBitmap, BitBlt, DIBs), regions, mapping modes, owner-drawn combo boxes, Windows DLLs, WIN.INI | later (stage 2 remainder) |
-| COMMDLG, printing, DDE | stage 3 |
-| DPMI, MMSYSTEM, OLE, TOOLHELP, the compatibility tail | stage 4 |
+| MDI, bitmaps (CreateBitmap, BitBlt, DIBs), regions, mapping modes, Windows DLLs, WIN.INI and private profiles, icons, hooks, atoms and properties | works (real programs, below) |
+| Every documented import (unimplemented ones are stubs), undocumented ones load | works (real programs) |
+| DPMI (the selector calls), the BIOS data area, WIN87EM, VER, LZEXPAND, COM's task allocator | works (what real programs asked for) |
+| COMMDLG: Open, Save As, Color, Font, Print, Print Setup, Find, Replace as WIN16 dialogs, with programs' hooks and templates; CommDlgExtendedError, GetFileTitle | works (stage 3) |
+| Printing: printer DCs (CreateDC, CreateIC) on rs2's spooler and PostScript driver, Escape (STARTDOC, NEWFRAME, ENDDOC, ABORTDOC, NEXTBAND, GETPHYSPAGESIZE, PASSTHROUGH...), StartDoc...EndDoc, SetAbortProc, GetDeviceCaps, WIN.INI's printers | works (stage 3) |
+| DDE between Windows tasks (WM_DDE_*, GMEM_DDESHARE, global atoms), to PM programs' DDE servers, DDEML | works (stage 3) |
+| The clipboard: CF_TEXT, CF_BITMAP, CF_DIB, CF_METAFILEPICT, registered formats, delayed rendering, shared with PM programs | works (stage 3) |
+| MMSYSTEM, OLE 2, TOOLHELP's databases, the rest of the compatibility tail | stage 4 |
 
 Checked in QEMU: `RS2\HELLO16.EXE` (a classic hello world: a window
 class, text painted in WM_PAINT, a MessageBox on a click) shows as a PM
@@ -42,9 +47,17 @@ list, Enter) and `RS2\NOTE16.EXE` (a Notepad on the multi-line edit
 control: scroll bars, selection, the clipboard, undo, word wrap, saving
 a file, a file name dialog) work; `RS2\W16TEST.EXE` checks KERNEL, USER,
 GDI, the DOS calls and stage 2's resources, menus, accelerators,
-dialogs and controls (`w16test done: 0 failure(s)`, 126 checks). All
-are built from source with Open Watcom (below). Screenshots:
-`work/progress/win16-native` (stage 1), `work/progress/win16-stage2`.
+dialogs and controls, what real programs needed, and stage 3's common
+dialogs, printing, clipboard formats and DDE (`w16test done: 0
+failure(s)`). Stage 3 added the common dialogs to NOTE16 (Open, Save As,
+Print, Print Setup, Font, Background Color, Find, Replace),
+`RS2\PRINT16.EXE` (a page of text and graphics on the default printer,
+rendered with Ghostscript from the PostScript the spooler writes) and
+the DDE pair `RS2\DDECLI16.EXE` (a client in WM_DDE_* messages) and
+`RS2\DDESRV16.EXE` (a DDEML server) in two processes. All are built
+from source with Open Watcom (below). Screenshots:
+`work/progress/win16-native` (stage 1), `work/progress/win16-stage2`,
+`work/progress/win16-stage3`.
 
 ![DLG16: a Windows dialog on rs2](images/rs2-win16-dlg16.png)
 
@@ -406,6 +419,313 @@ Everything a Windows program sees is rs2's own:
 - **System colours.** GetSysColor answers Windows 3.1's default scheme
   (stage 2 can follow PM's scheme instead).
 
+## Common dialogs, printing, DDE and the clipboard (stage 3)
+
+### COMMDLG
+
+`userland/win16/src/commdlg.rs`. COMMDLG's imports go to WIN16 (6000 +
+the ordinal). Each common dialog is a WIN16 dialog made from a template
+built in Rust (dialog units of the system font, laid out like Windows
+3.1's) whose controls have Windows' IDs from `dlgs.h` (edt1, lst1, cmb1,
+chx1, rad1, psh1, stc1...), so a program's own template
+(`*_ENABLETEMPLATE` from its resources, `*_ENABLETEMPLATEHANDLE` from a
+global block) works with the dialog procedure here, as it does with
+Windows'. That procedure is WIN16 entry 11 (a 16:16 address like the
+built-in controls'); DefDlgProc calls it as any dialog procedure. A
+program's hook gets every message first: WM_INITDIALOG with its
+structure as lParam (after the dialog has been filled in), and returning
+TRUE keeps the default handling from running. CommDlgExtendedError
+answers the cderr.h codes (CDERR_STRUCTSIZE, FNERR_BUFFERTOOSMALL with
+the size needed in the buffer, PDERR_NODEFAULTPRN...).
+
+- **Open and Save As** (GetOpenFileName, GetSaveFileName): the file
+  list of the filter's patterns (several, `*.cmd;*.bat`), the
+  directory list as Windows 3.1 draws it (the path's parts, then the
+  subdirectories, indented), drives with their volume labels, the
+  filters, a typed pattern or directory changing the lists, Enter in the
+  directory list opening it. OK checks the name as the flags ask
+  (OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OFN_CREATEPROMPT,
+  OFN_OVERWRITEPROMPT, OFN_NOREADONLYRETURN), adds lpstrDefExt, sends
+  the hook FILEOKSTRING, and fills lpstrFile, nFileOffset,
+  nFileExtension, lpstrFileTitle, nFilterIndex and the flags. The
+  current directory follows the dialog unless OFN_NOCHANGEDIR. Names are
+  lower case, as on Windows 3.1's FAT drives.
+- **Color** (ChooseColor): the 48 basic colours and 16 custom colours
+  as owner-drawn buttons (keyboard and mouse), "Define Custom Colors"
+  opening the right half (CC_FULLOPEN: open at once): the hue and
+  saturation spectrum and the luminosity bar (clicked), the colour,
+  Hue/Sat/Lum and Red/Green/Blue in Windows' 0-240 and 0-255 scales,
+  Add to Custom Colors.
+- **Font** (ChooseFont): faces (Arial, Courier New, Times New Roman, MS
+  Sans Serif, System, Fixedsys: the names CreateFont maps to rs2's
+  fonts), styles, sizes, strikeout and underline, the 16 colours
+  (CF_EFFECTS), a sample in the font; CF_INITTOLOGFONTSTRUCT,
+  CF_USESTYLE, CF_LIMITSIZE, CF_FIXEDPITCHONLY, WM_CHOOSEFONT_GETLOGFONT;
+  the LOGFONT, iPointSize, rgbColors and nFontType come back.
+- **Print and Print Setup** (PrintDlg): the printers are rs2's
+  queues (below). Print has the range (all, selection, pages with
+  their check), copies, collate and print to file, and Setup... ; Print
+  Setup the default or a specific printer, orientation, paper size,
+  and Options..., which shows rs2's PostScript driver's job properties
+  dialog (DevPostDeviceModes). hDevMode (a Windows 3.1 DEVMODE:
+  orientation, paper, copies) and hDevNames (driver, device, port) are
+  made or updated; PD_RETURNDC/PD_RETURNIC make the DC, PD_RETURNDEFAULT
+  answers without a dialog.
+- **Find and Replace** (FindText, ReplaceText): modeless; each button
+  sends the owner FINDMSGSTRING ("commdlg_FindReplace", registered) with
+  the FINDREPLACE's flags (FR_FINDNEXT, FR_REPLACE, FR_REPLACEALL,
+  FR_DIALOGTERM, FR_DOWN, FR_MATCHCASE, FR_WHOLEWORD) and the texts.
+  The program's loop calls IsDialogMessage for it, as on Windows.
+
+### Printing
+
+`userland/win16/src/print.rs`, on docs/PRINTING.md's spooler and
+PostScript driver.
+
+- **The printers are the spooler's queues.** A Windows printer's device
+  name is the queue's description, its driver the queue's (PSCRIPT),
+  its port the queue's name and a colon (`PSPRINT:`). WIN.INI is not a
+  file: GetProfileString answers `[windows] device=` (the default queue:
+  `PostScript Printer,PSCRIPT,PSPRINT:`), `[devices]` and
+  `[PrinterPorts]` from the queues, which is how Windows 3.x programs
+  find printers.
+- **CreateDC** with a printer's driver, device or port is a queued PM
+  DC (DevOpenDC OD_QUEUED, PM_Q_RAW: the driver writes the PostScript
+  and the spooler sends it as it is, as Windows spools its drivers'
+  output) with a presentation space in device pels; **CreateIC** an
+  OD_INFO DC that answers queries. A DEVMODE in lpInitData (orientation,
+  paper size, copies) changes the queue's job properties for the DC.
+  GDI draws on the PS as on a window's, y flipped by the page height
+  (the printable page: Letter is 2550 x 3300 pels at 300 dpi); the
+  fixed mapping modes (MM_LOENGLISH...) are at 300 dpi; the system
+  font, which printers do not have, is Helvetica 10 points (the fixed
+  ones Courier). CreateDC("DISPLAY") is bitmap.rs's memory DC. DeleteDC
+  closes the PM DC (a document still open is abandoned).
+- **Jobs**: StartDoc (DOCINFO's name) or Escape(STARTDOC) is
+  DEVESC_STARTDOC; EndPage, Escape(NEWFRAME) and NEXTBAND's last band
+  are DEVESC_NEWFRAME; EndDoc and Escape(ENDDOC) DEVESC_ENDDOC (the job
+  is queued); AbortDoc and Escape(ABORTDOC) DEVESC_ABORTDOC. The abort
+  procedure (SetAbortProc, Escape(SETABORTPROC)) is called at each page
+  and stops the job when it returns FALSE (SP_APPABORT); QueryAbort
+  calls it. Other escapes: QUERYESCSUPPORT, GETPHYSPAGESIZE,
+  GETPRINTINGOFFSET, GETSCALINGFACTOR, SETCOPYCOUNT, GETTECHNOLOGY
+  ("PostScript"), FLUSHOUTPUT, DRAFTMODE, SETLINECAP/JOIN/MITERLIMIT,
+  EPSPRINTING, and PASSTHROUGH and POSTSCRIPT_DATA (PostScript into the
+  job as it is: DEVESC_RAWDATA).
+- **GetDeviceCaps** of a printer: DT_RASPRINTER, 300 dpi (LOGPIXELSX/Y,
+  ASPECTX/Y), the page in pels and millimetres, 8 colours, the curve,
+  line, polygon, text and raster capabilities.
+
+The PostScript can be looked at on the host: the default queue prints
+to `C:\SPOOL\OUTPUT\JOBnnnnn.PS`, so `--init "CMD.EXE /K RS2\PRINT16.EXE
+& PING -c 15 127.0.0.1 & TYPE C:\SPOOL\OUTPUT\JOB00001.PS"` puts it in
+the serial log, and Ghostscript renders it (`gs -sDEVICE=png16m`);
+`PRNTEST SETPORT` sends it to a host LPR listener instead
+(docs/PRINTING.md).
+
+### DDE and DDEML
+
+`userland/win16/src/dde.rs`, `ddeml.rs`. Each Windows task is a process
+of its own, so DDE between two of them crosses processes:
+
+- **Windows of other tasks** are proxy HWNDs (0x1004 and up, below the
+  task's own handles) for their PM client windows. SendMessage and
+  PostMessage to a proxy send the message to that PM window as PM
+  message `W16X | msg` (0x20000) with the sender's PM window in mp1
+  when wParam is a window (the DDE messages) and lParam in mp2; the
+  receiving WIN16 turns it back into the Windows message with a proxy of
+  the sender. SendMessage(0xFFFF, ...) (WM_DDE_INITIATE) goes to the
+  task's top-level windows and every other task's (their `Win16Wnd`
+  client windows); IsWindow knows proxies.
+- **Global atoms** (GlobalAddAtom, the atoms in DDE messages) are PM's
+  system atom table, the same numbers in every process.
+- **GMEM_DDESHARE blocks** are giveable shared memory: tiled, so a
+  block's selector is the same in every process it is given to.
+  WM_DDE_DATA's, WM_DDE_POKE's and WM_DDE_ADVISE's block (lParam's low
+  word) and WM_DDE_EXECUTE's commands (high word) are given to the
+  receiver (DosGiveSharedMem), which adopts them as its own global
+  blocks (GlobalLock, GlobalFree work). GlobalFree clears the caller's
+  saved DS and ES when they hold the freed selector, as Windows does.
+- **PM programs' DDE servers**: a Windows task's WM_DDE_INITIATE also
+  goes to PM's DDE (WinDdeInitiate with the atoms' names). A PM server's
+  WM_DDE_INITIATEACK, WM_DDE_DATA, WM_DDE_ACK and WM_DDE_TERMINATE come
+  to the Windows client as Windows' messages (DDESTRUCTs become
+  GMEM_DDESHARE blocks and atoms), and the client's REQUEST, POKE,
+  EXECUTE, ADVISE, UNADVISE, ACK and TERMINATE become DDESTRUCTs
+  (WinDdePostMsg). A PM client of a Windows server is not bridged yet.
+- **DDEML** is built on these messages, as Windows' DDEML.DLL is, so
+  DDEML programs talk to programs that use the messages: an instance's
+  hidden window answers WM_DDE_INITIATE for its services
+  (DdeNameService, XTYP_CONNECT, XTYP_CONNECT_CONFIRM); each
+  conversation has a window; DdeClientTransaction does XTYP_REQUEST,
+  POKE, EXECUTE, ADVSTART (XTYPF_NODATA, XTYPF_ACKREQ) and ADVSTOP,
+  waiting in a message loop of its own (or TIMEOUT_ASYNC, completed with
+  XTYP_XACT_COMPLETE); DdePostAdvise runs XTYP_ADVREQ for the advise
+  loops; XTYP_ADVDATA, XTYP_DISCONNECT; string handles are global atoms
+  (DdeCreateStringHandle, DdeQueryString, DdeCmpStringHandles), data
+  handles global blocks (DdeCreateDataHandle, DdeAddData, DdeGetData,
+  DdeAccessData); DdeConnectList, DdeQueryConvInfo, DdeSetUserHandle,
+  DdeEnableCallback, DdeGetLastError. Monitors (APPCLASS_MONITOR) and
+  XTYP_REGISTER broadcasts are not done.
+
+### The clipboard
+
+`userland/win16/src/clip.rs`, on PM's clipboard (shared with every PM
+program): CF_TEXT and CF_OEMTEXT are PM's CF_TEXT; CF_DIB is kept as it
+is and also given to PM programs as a PM bitmap (a Windows DIB is an
+OS/2 2.0 bitmap with a 40-byte header), and a PM bitmap is a 24-bit DIB
+for Windows programs; CF_BITMAP is a GDI bitmap (bitmap.rs), a PM bitmap
+with its picture for PM; CF_METAFILEPICT keeps the METAFILEPICT and its
+metafile's bits; registered formats (RegisterClipboardFormat) are global
+atoms, the same numbers PM programs get for the names; Windows' other
+formats are PM formats named "Win16 format n". Data other than text
+keeps its exact size. Delayed rendering is PM's: the owner (the window
+that opened the clipboard when it was emptied) gets WM_RENDERFORMAT,
+WM_RENDERALLFORMATS and WM_DESTROYCLIPBOARD, the viewer
+WM_DRAWCLIPBOARD (PM has one viewer: SetClipboardViewer replaces it,
+ChangeClipboardChain removes it).
+
+### What stage 3 leaves
+
+Multiple selection in the Open dialog (OFN_ALLOWMULTISELECT), the
+LBSELCHSTRING, SHAREVISTRING and HELPMSGSTRING messages, Print to File
+(the job goes to the printer's port), the printer driver's own entries
+(ExtDeviceMode, DeviceMode, DeviceCapabilities: there is no PSCRIPT.DRV
+module to load), WriteProfileString of `[windows] device=` (changing the
+default printer), a PM DDE client talking to a Windows server, DDEML
+monitors, metafiles drawn from CF_METAFILEPICT for PM programs (Windows
+metafiles are not played), SHELL's drag and drop, and the messages with
+pointers that cross tasks (WM_SETTEXT, WM_GETTEXT to another task's
+window).
+
+## Real programs
+
+The test programs above are rs2's own. Real Windows 3.x programs (all
+under `work/win16apps`, never in the repository) need much more of
+Windows; what they needed, in the order they asked for it:
+
+- **Imports WIN16 does not have.** Every function of KERNEL, USER, GDI,
+  KEYBOARD, SOUND, TOOLHELP, VER, LZEXPAND, SHELL, MMSYSTEM, COMMDLG and
+  DDEML with a prototype in Open Watcom's headers has an entry: the ones
+  not implemented are generated stubs (`src/stubs.rs`,
+  `tools/scripts/gen_win16_exports.py` takes the argument sizes from the
+  prototypes) that say `WIN16: not implemented: GDI.34 BITBLT` on the
+  serial port once and return 0. An import with no entry at all (an
+  undocumented ordinal) loads as Windows loads it: the call, if it ever
+  comes, shows "Call to Undefined Dynalink" and ends the program.
+- **Windows DLLs** of the program's own (WNDHOOKS.DLL, CTL3D...): the
+  loader finds them in the program's directory first, gives each process
+  its own copy of their data (each Windows task is a process here) and
+  runs LibEntry with Windows' registers (DI the instance, CX the heap
+  size); their exported procedures start with `mov ax, DGROUP` as
+  Windows' loader patches them. LoadLibrary, FreeLibrary,
+  GetModuleHandle, GetProcAddress (16:16 addresses) and the resource
+  calls work on them (`module.rs`).
+- **Bitmaps** (`bitmap.rs`): memory DCs are PM memory presentation
+  spaces, HBITMAPs PM bitmaps (1 or 24 bits per pixel), BitBlt and
+  StretchBlt PM's GpiBitBlt with Windows' ROP3 codes, monochrome
+  conversions in Windows' colours; DDB bits (SetBitmapBits, CreateBitmap),
+  DIBs (CreateDIBitmap, Get/SetDIBits, SetDIBitsToDevice, StretchDIBits:
+  Windows' BITMAPINFO is PM's), LoadBitmap, palettes, pattern brushes
+  (their average colour). **Regions** (`region.rs`) are rectangle lists;
+  **mapping modes** and the window/viewport origins and extents
+  transform every coordinate GDI takes.
+- **Icons and cursors** (`icon.rs`) from RT_GROUP_ICON/RT_ICON,
+  CreateIcon, ExtractIcon, DrawIcon (mask and image).
+- **MDI** (`mdi.rs`): MDI children are PM frame windows inside the
+  MDICLIENT's PM window.
+- **KERNEL**: the selector functions (AllocSelector, AllocCStoDSAlias,
+  PrestoChangoSelector, SetSelectorBase...: RS2API 421), Catch/Throw,
+  atoms (local, and PM's system atom table for global atoms and
+  registered messages), window properties, `.INI` files (`profile.rs`,
+  in `C:\WINDOWS`), WinExec, hmemcpy, _hread, IsBadReadPtr, GetDriveType,
+  INT 21h find first/next, INT 25h/26h; WIN87EM's __FPMATH; TOOLHELP's
+  registration calls; VER (version resources); LZEXPAND (SZDD files).
+- **Messages Windows sends in its own order**: none before WM_NCCREATE;
+  a window created hidden gets WM_SIZE and WM_MOVE when first shown;
+  thunk16 returns a segment register the call freed as 0 (GlobalFree of
+  the block ES points at).
+- **COMPOBJ/OLE2**: CoGetMalloc's task allocator (an IMalloc whose
+  methods are WIN16 entries), CoInitialize, OleInitialize, IsEqualGUID;
+  the rest of OLE 2 are stubs returning E_FAIL.
+- **The BIOS data area**: selector 40h (and KERNEL's `__0040H`) is a
+  read-only page with BIOS-like contents and a tick count the kernel
+  updates (Windows programs only); the kernel accepts a DS or ES with any
+  RPL on a ring 3 descriptor, as Windows' selector values sometimes have.
+- **DDEML and COMMDLG** are WIN16's own (stage 3, above): PFE's Open
+  and Print dialogs (its own templates, owner-drawn file lists) open
+  files and print them (through rs2's spooler; checked as far as a host
+  LPR listener and Ghostscript).
+
+### Compatibility
+
+| Program | Version | Built with | Status | Notes |
+|---------|---------|------------|--------|-------|
+| Watcom samples GENERIC, WATZEE, SHOOTGAL, ALARM, LIFE, EDIT, ICONVIEW (MDI), TESTCTL | Open Watcom 2 | C | works | |
+| Calmira | 2.2 | Delphi 1 | works | The desktop, the Computer window, Tip of the Day; GPL |
+| Programmer's File Editor (PFE) | 1.01 (16-bit) | C | works | MDI editor; File Open and Print (its own COMMDLG templates) work |
+| GNU Chess | 3.21 | C | works | CICA Dec 1993 |
+| KLOTZ, BoxWorld, Columns, Hextris, Mines | | C, Borland Pascal | works | CICA Dec 1993 |
+| WinTrek | | C | works | Its DLL's hInstance compared signed: DLL instances are low alias selectors |
+| Euchre, Cribbage | | OWL | works | Window hooks |
+| Magic, WinCode, PEGIF, WinPong, FSR | | | works | CICA Dec 1993 |
+| Neko | | | starts | Not checked in depth |
+| Jewels | | | starts | |
+| Hyperoid | | C | partly | Draws its own title bar with GetWindowDC: lands in the client area |
+| LIFEAPP | | | partly | Loading a snapshot fails (current directory) |
+| **Delphi** | 1.0 | Delphi 1 | **works, with gaps** | See below |
+
+### Delphi 1.0
+
+The user's own copy (never in the repository): the `RUNIMAGE` tree of
+the CD copied to `C:\DELPHI` (BIN, LIB, GALLERY, IMAGES), its IDAPI to
+`C:\IDAPI`, BIVBX11.DLL, BOLE16D.DLL, BWCC.DLL and the VBX files to
+`C:\WINDOWS\SYSTEM` (no Microsoft DLLs: WIN16 is KERNEL, USER, GDI and
+the rest), and two INI files in `C:\WINDOWS`:
+
+```
+; DELPHI.INI
+[Library]
+SearchPath=C:\DELPHI\LIB
+ComponentLibrary=C:\DELPHI\BIN\COMPLIB.DCL
+SaveLibrarySource=1
+[Gallery]
+BaseDir=C:\DELPHI\GALLERY
+[Debugging]
+IntegratedDebugging=0
+
+; WIN.INI
+[IDAPI]
+DLLPATH=C:\IDAPI
+CONFIGFILE01=C:\IDAPI\IDAPI.CFG
+[Borland Language Drivers]
+LDPath=C:\IDAPI\LANGDRV
+```
+
+`C:\DELPHI\BIN\DELPHI.EXE` starts the IDE: the main window with the
+component palette, Form1 in the form designer, the code editor and the
+Object Inspector. Components drop onto the form, Ctrl+F9 compiles
+(UNIT1.DCU, PROJECT1.EXE) and F9 runs the compiled program, a native
+Windows program on WIN16 like any other.
+
+![Delphi 1.0 on rs2: the IDE and the program it compiled](images/rs2-win16-delphi.png)
+
+Not yet:
+
+- **The integrated debugger.** With IntegratedDebugging=1 (Delphi's
+  default) Run ends the IDE: the debugger needs TOOLHELP's task and
+  module databases (TaskFindHandle, ModuleFirst, GlobalHandleToSel,
+  GlobalEntryHandle, NotifyRegister's events) and the debug registers.
+  Hence `IntegratedDebugging=0`.
+- **The Object Inspector's property list** (an owner-drawn list box)
+  stays 0 by 0 pels: the IDE never sizes it. The inspector's first
+  WM_SIZE comes before its children exist; what Windows does differently
+  there is not found yet.
+- COMMDLG (Open, Save As...) and DDE are stage 3's (above); not tried
+  with Delphi yet.
+
+![Calmira 2.2, a Windows 3.1 shell written in Delphi, on rs2](images/rs2-win16-calmira.png)
+
 ## Building the test programs
 
 The test programs are C, built with Open Watcom v2's Win16 target
@@ -419,7 +739,15 @@ on drive C: as `C:\RS2\*.EXE` when Open Watcom is installed.
 - `HELLO16.EXE`: the hello world (`hello16.c`).
 - `MENU16.EXE`: menus and accelerators (`menu16.c`, `menu16.rc`).
 - `DLG16.EXE`: a dialog with every control (`dlg16.c`, `dlg16.rc`).
-- `NOTE16.EXE`: a Notepad on the edit control (`note16.c`, `note16.rc`).
+- `NOTE16.EXE`: a Notepad on the edit control, with the common dialogs
+  (`note16.c`, `note16.rc`).
+- `PRINT16.EXE`: a test page on the default printer, through WIN.INI,
+  CreateDC, StartDoc...EndDoc and the Windows 3.0 escapes; PASS/FAIL
+  lines (`print16.c`).
+- `DDESRV16.EXE`, `DDECLI16.EXE`: a DDEML server and a client in
+  WM_DDE_* messages, two tasks (`ddesrv16.c`, `ddecli16.c`); `--init
+  "RS2\DDECLI16.EXE"` starts the server (WinExec) and ends with
+  `ddecli16 done: 0 failure(s)`.
 - `W16TEST.EXE`: checks (`w16test.c`, `w16test.rc`); `cargo xtask run
   --release --headless --timeout 150 --init "RS2\W16TEST.EXE"` ends with
   `w16test done: 0 failure(s)`.
@@ -434,25 +762,14 @@ the DOS calls and fix-ups to the serial port.
 
 ## Later stages
 
-**Stage 2: what is left.** MDI (MDICLIENT, DefFrameProc,
-DefMDIChildProc), bitmaps (CreateBitmap, CreateCompatibleDC, BitBlt,
-StretchBlt, DIBs, LoadBitmap), regions and clip regions, mapping modes,
-pen and brush styles (hatches, patterns, dashed pens), owner-drawn combo
+**Stage 2: what is left.** Pen and brush styles (hatches, patterns, dashed pens), owner-drawn combo
 boxes and LBS_OWNERDRAWVARIABLE, multi-column list boxes, DlgDirList,
-font enumeration, the non-client messages for programs that draw their
-own frame, MessageBox as a WIN16 dialog, the program's own icons and
-cursors, Windows DLLs of the program's own (LibMain, WEP, patched export
-prologues), WIN.INI and private profiles (GetProfileString answers the
-default for now).
+the non-client messages for programs that draw their
+own frame (Hyperoid), MessageBox as a WIN16 dialog.
 
-**Stage 3: COMMDLG, clipboard, printing and DDE.** COMMDLG's Open, Save
-As, Color, Font, Print and Find dialogs (as WIN16 dialogs); the rest of
-the clipboard shared with PM (CF_BITMAP, metafiles, registered formats;
-CF_TEXT works since stage 2); printing through printer
-DCs into rs2's spooler and PostScript driver (docs/PRINTING.md:
-Escape(STARTDOC), StartDoc/EndPage); DDE between Windows tasks and with
-PM programs (GMEM_DDESHARE as shared memory); SHELL (ShellExecute,
-drag and drop of files); cross-process messages with pointers.
+**Stage 3** (COMMDLG, printing, DDE, the clipboard) is done; what it
+leaves is listed above. SHELL (ShellExecute, drag and drop of files)
+and messages with pointers that cross tasks remain.
 
 **Stage 4: the compatibility tail.** DPMI (INT 31h for programs that
 manage selectors or call real mode), the floating point emulator

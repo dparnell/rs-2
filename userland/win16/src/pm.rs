@@ -145,6 +145,34 @@ unsafe extern "C" {
     #[link_name = "PMWIN.913"]
     pub fn WinDrawText(hps: u32, cch: i32, text: *const u8, r: *mut RectL, fg: i32, bg: i32, fl: u32) -> i32;
 
+    #[link_name = "PMGPI.588"]
+    pub fn GpiSetAttrs(hps: u32, prim: i32, attrs: u32, defs: u32, bundle: *const u8) -> u32;
+    #[link_name = "PMGPI.355"]
+    pub fn GpiBitBlt(dst: u32, src: u32, n: i32, p: *const PointL, rop: i32, opts: u32) -> i32;
+    #[link_name = "PMGPI.598"]
+    pub fn GpiCreateBitmap(hps: u32, hdr: *const u8, opts: u32, init: *const u8, bmi: *const u8) -> u32;
+    #[link_name = "PMGPI.371"]
+    pub fn GpiDeleteBitmap(hbm: u32) -> u32;
+    #[link_name = "PMGPI.506"]
+    pub fn GpiSetBitmap(hps: u32, hbm: u32) -> u32;
+    #[link_name = "PMGPI.602"]
+    pub fn GpiSetBitmapBits(hps: u32, start: i32, scans: i32, buf: *const u8, bmi: *const u8) -> i32;
+    #[link_name = "PMGPI.599"]
+    pub fn GpiQueryBitmapBits(hps: u32, start: i32, scans: i32, buf: *mut u8, bmi: *mut u8) -> i32;
+    #[link_name = "PMGPI.369"]
+    pub fn GpiCreatePS(hab: u32, hdc: u32, size: *const i32, opts: u32) -> u32;
+    #[link_name = "PMGPI.379"]
+    pub fn GpiDestroyPS(hps: u32) -> u32;
+    #[link_name = "PMGPI.610"]
+    pub fn DevOpenDC(hab: u32, ty: i32, token: *const u8, n: i32, dop: *const u32, comp: u32) -> u32;
+    #[link_name = "PMGPI.604"]
+    pub fn DevCloseDC(hdc: u32) -> u32;
+    #[link_name = "PMGPI.370"]
+    pub fn GpiCreateRegion(hps: u32, n: i32, rects: *const RectL) -> u32;
+    #[link_name = "PMGPI.611"]
+    pub fn GpiDestroyRegion(hps: u32, h: u32) -> u32;
+    #[link_name = "PMGPI.603"]
+    pub fn GpiDrawBits(hps: u32, bits: *const u8, bmi: *const u8, n: i32, p: *const PointL, rop: i32, opts: u32) -> i32;
     #[link_name = "PMGPI.592"]
     pub fn GpiCreateLogColorTable(hps: u32, opts: u32, fmt: i32, start: i32, count: i32, table: *const i32) -> u32;
     #[link_name = "PMGPI.517"]
@@ -259,6 +287,8 @@ unsafe extern "C" {
     pub fn Rs2DebugTrace(psz: *const u8) -> u32;
     #[link_name = "RS2API.420"]
     pub fn Rs2Win16SetIntHandler(handler: u32) -> u32;
+    #[link_name = "RS2API.421"]
+    pub fn Rs2Win16Selector(op: u32, sel: u32, value: u32) -> u32;
 }
 
 pub const HWND_DESKTOP: u32 = 1;

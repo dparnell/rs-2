@@ -1,8 +1,9 @@
-//! The program's resources, from the resource table of its NE file
+//! The resources of the program and its DLLs, from the resource table of
+//! the NE file
 //! (Windows' format: an alignment shift, then TYPEINFO records of
 //! NAMEINFO entries; IDs with bit 15 set are numbers, others offsets of
-//! names in the table). The file is read once, when a resource is first
-//! needed. KERNEL's FindResource, LoadResource, LockResource,
+//! names in the table). A module's file is read once, when a resource is
+//! first needed. KERNEL's FindResource, LoadResource, LockResource,
 //! SizeofResource, FreeResource and USER's LoadString are here; menus,
 //! accelerators and dialog templates are parsed by menu.rs and
 //! dialog.rs from `find`.
@@ -46,52 +47,29 @@ impl Name {
     }
 }
 
-struct Image {
+pub struct Image {
     file: Vec<u8>,
     /// The resource table's offset in the file (0: none).
     table: usize,
     shift: u32,
 }
 
-static IMAGE: Global<Option<Image>> = Global::new(None);
+/// Resources handed out by FindResource (HRSRC = index + 1): the module,
+/// offset and length in its file.
+static FOUND: Global<Vec<(u16, usize, usize)>> = Global::new(Vec::new());
 
-/// Resources handed out by FindResource (HRSRC = index + 1): offset and
-/// length in the file.
-static FOUND: Global<Vec<(usize, usize)>> = Global::new(Vec::new());
-
-fn image() -> Option<&'static Image> {
-    let g = IMAGE.get();
-    if g.is_none() {
-        *g = Some(read_image().unwrap_or(Image { file: Vec::new(), table: 0, shift: 0 }));
+/// The resources of the module with instance `hinst` (0: the program).
+fn image(hinst: u16) -> Option<&'static Image> {
+    let m = crate::module::find(hinst)?;
+    if m.image.is_none() {
+        let img = crate::module::path_of(m.hmod).and_then(|p| read_image(&p));
+        m.image = Some(img.unwrap_or(Image { file: Vec::new(), table: 0, shift: 0 }));
     }
-    g.as_ref().filter(|i| i.table != 0)
+    m.image.as_ref().filter(|i| i.table != 0)
 }
 
-fn read_image() -> Option<Image> {
-    let mut tib = core::ptr::null_mut();
-    let mut pib: *mut os2::Pib = core::ptr::null_mut();
-    unsafe { os2::DosGetInfoBlocks(&mut tib, &mut pib) };
-    if pib.is_null() {
-        return None;
-    }
-    let mut path = [0u8; 260];
-    if unsafe { crate::pm::DosQueryModuleName((*pib).hmte, 260, path.as_mut_ptr()) } != 0 {
-        return None;
-    }
-    let (mut hf, mut action) = (0u32, 0u32);
-    if unsafe { os2::DosOpen(path.as_ptr(), &mut hf, &mut action, 0, 0, 0x01, 0x40, core::ptr::null_mut()) } != 0 {
-        return None;
-    }
-    let mut file = Vec::new();
-    let mut buf = alloc::vec![0u8; 0x8000];
-    loop {
-        let mut n = 0u32;
-        if unsafe { os2::DosRead(hf, buf.as_mut_ptr(), buf.len() as u32, &mut n) } != 0 || n == 0 {
-            break;
-        }
-        file.extend_from_slice(&buf[..n as usize]);
-    }
-    unsafe { os2::DosClose(hf) };
+fn read_image(path: &[u8]) -> Option<Image> {
+    let file = crate::module::read_file(path, usize::MAX)?;
     let w = |o: usize| file.get(o..o + 2).map_or(0, |b| u16::from_le_bytes([b[0], b[1]]));
     let ne = file.get(0x3c..0x40).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]])) as usize;
     if w(ne) != 0x454e {
@@ -128,6 +106,51 @@ impl Image {
 
     /// The resource's (offset, length) in the file.
     fn find(&self, ty: &Name, name: &Name) -> Option<(usize, usize)> {
+        self.find_direct(ty, name).or_else(|| {
+            // Windows 3.0 programs name resources in an RT_NAMETABLE (15):
+            // entries of a length, the type and the resource's IDs, the
+            // type's name and the resource's name.
+            let (Name::Str(n), Name::Id(t)) = (name, ty) else { return None };
+            let (off, len) = self.find_direct(&Name::Id(15), &Name::Id(1)).or_else(|| self.first_of(15))?;
+            let tab = &self.file[off..off + len];
+            let mut p = 0;
+            while p + 6 < tab.len() {
+                let n_len = w16(tab, p) as usize;
+                if n_len < 7 {
+                    break;
+                }
+                let (ety, eid) = (w16(tab, p + 2), w16(tab, p + 4));
+                let mut q = p + 6;
+                let _ty_name = sz(tab, &mut q);
+                let id_name = sz(tab, &mut q);
+                if ety & 0x7fff == *t && id_name.eq_ignore_ascii_case(n) {
+                    return self.find_direct(ty, &Name::Id(eid & 0x7fff));
+                }
+                p += n_len;
+            }
+            None
+        })
+    }
+
+    /// The first resource of a type.
+    fn first_of(&self, ty: u16) -> Option<(usize, usize)> {
+        let mut p = self.table + 2;
+        loop {
+            let tid = self.w(p);
+            if tid == 0 || p >= self.file.len() {
+                return None;
+            }
+            let count = self.w(p + 2) as usize;
+            if tid == 0x8000 | ty && count > 0 {
+                let off = (self.w(p + 8) as usize) << self.shift;
+                let len = (self.w(p + 10) as usize) << self.shift;
+                return (off + len <= self.file.len()).then_some((off, len));
+            }
+            p += 8 + 12 * count;
+        }
+    }
+
+    fn find_direct(&self, ty: &Name, name: &Name) -> Option<(usize, usize)> {
         let mut p = self.table + 2;
         loop {
             let tid = self.w(p);
@@ -149,19 +172,66 @@ impl Image {
     }
 }
 
-/// The bytes of a resource.
-pub fn find(ty: u16, name: &Name) -> Option<&'static [u8]> {
-    let img = image()?;
+/// The resources of one type in an NE file's bytes: (offset, length) in
+/// table order.
+pub fn list_type(file: &[u8], ty: u16) -> Vec<(usize, usize)> {
+    let Some(img) = table_of(file) else { return Vec::new() };
+    let mut v = Vec::new();
+    let mut p = img.0 + 2;
+    let rd = |o: usize| w16(file, o);
+    loop {
+        let tid = rd(p);
+        if tid == 0 || p >= file.len() {
+            return v;
+        }
+        let count = rd(p + 2) as usize;
+        p += 8;
+        for _ in 0..count {
+            if tid == 0x8000 | ty {
+                let off = (rd(p) as usize) << img.1;
+                let len = (rd(p + 2) as usize) << img.1;
+                if off + len <= file.len() {
+                    v.push((off, len));
+                }
+            }
+            p += 12;
+        }
+    }
+}
+
+/// A resource in an NE file's bytes: (offset, length).
+pub fn find_in_file(file: &[u8], ty: u16, name: &Name) -> Option<(usize, usize)> {
+    let (table, shift) = table_of(file)?;
+    let img = Image { file: file.to_vec(), table, shift };
+    img.find(&Name::Id(ty), name)
+}
+
+/// The resource table's offset and alignment shift in an NE file.
+fn table_of(file: &[u8]) -> Option<(usize, u32)> {
+    let ne = l32(file, 0x3c) as usize;
+    if w16(file, ne) != 0x454e {
+        return None;
+    }
+    let (rt, rn) = (w16(file, ne + 0x24) as usize, w16(file, ne + 0x26) as usize);
+    if rt == rn {
+        return None;
+    }
+    Some((ne + rt, w16(file, ne + rt) as u32))
+}
+
+/// The bytes of a resource of the module `hinst` (0: the program).
+pub fn find(hinst: u16, ty: u16, name: &Name) -> Option<&'static [u8]> {
+    let img = image(hinst)?;
     let (off, len) = img.find(&Name::Id(ty), name)?;
     Some(&img.file[off..off + len])
 }
 
 /// LoadString: the string's length (0 if none).
-fn load_string(id: u16, buf: *mut u8, max: i32) -> i32 {
+fn load_string(hinst: u16, id: u16, buf: *mut u8, max: i32) -> i32 {
     if buf.is_null() || max <= 0 {
         return 0;
     }
-    let Some(block) = find(RT_STRING, &Name::Id((id >> 4) + 1)) else {
+    let Some(block) = find(hinst, RT_STRING, &Name::Id((id >> 4) + 1)) else {
         unsafe { *buf = 0 };
         return 0;
     };
@@ -179,10 +249,11 @@ pub fn kernel(ord: u32, a: &mut Pascal) -> u32 {
     match ord {
         // FindResource(hinst, name, type): HRSRC.
         60 => {
-            let (_hi, n, t) = (a.w(), a.l(), a.l());
+            let (hi, n, t) = (a.w(), a.l(), a.l());
             let (Some(n), Some(t)) = (Name::of(n), Name::of(t)) else { return 0 };
-            let Some(img) = image() else { return 0 };
-            let Some(r) = img.find(&t, &n) else { return 0 };
+            let Some(img) = image(hi) else { return 0 };
+            let Some((off, len)) = img.find(&t, &n) else { return 0 };
+            let r = (hi, off, len);
             let f = FOUND.get();
             let i = f.iter().position(|&x| x == r).unwrap_or_else(|| {
                 f.push(r);
@@ -193,14 +264,28 @@ pub fn kernel(ord: u32, a: &mut Pascal) -> u32 {
         // LoadResource(hinst, hrsrc): a global block with a copy.
         61 => {
             let (_hi, r) = (a.w(), a.w());
-            let Some(&(off, len)) = FOUND.get().get((r as usize).wrapping_sub(1)) else { return 0 };
-            let Some(img) = image() else { return 0 };
+            let Some(&(hi, off, len)) = FOUND.get().get((r as usize).wrapping_sub(1)) else { return 0 };
+            let Some(img) = image(hi) else { return 0 };
             let h = crate::kernel::global_alloc(0, len as u32);
             if h != 0 {
                 let p = thunk16::flat((h as u32) << 16);
                 unsafe { core::ptr::copy_nonoverlapping(img.file[off..].as_ptr(), p, len) };
             }
             h as u32
+        }
+        // AccessResource(hinst, hrsrc): the module's file, open at the
+        // resource (the program reads it with _lread).
+        64 => {
+            let (_hi, r) = (a.w(), a.w());
+            let Some(&(hi, off, _)) = FOUND.get().get((r as usize).wrapping_sub(1)) else { return 0xffff };
+            let Some(mut path) = crate::module::find(hi).and_then(|m| crate::module::path_of(m.hmod)) else { return 0xffff };
+            path.push(0);
+            let (mut hf, mut action, mut pos) = (0u32, 0u32, 0u32);
+            if unsafe { os2::DosOpen(path.as_ptr(), &mut hf, &mut action, 0, 0, 0x01, 0x40, core::ptr::null_mut()) } != 0 {
+                return 0xffff;
+            }
+            unsafe { os2::DosSetFilePtr(hf, off as i32, 0, &mut pos) };
+            hf
         }
         // LockResource(hglobal): its address.
         62 => {
@@ -216,7 +301,7 @@ pub fn kernel(ord: u32, a: &mut Pascal) -> u32 {
         // SizeofResource(hinst, hrsrc)
         65 => {
             let (_hi, r) = (a.w(), a.w());
-            FOUND.get().get((r as usize).wrapping_sub(1)).map_or(0, |&(_, len)| len as u32)
+            FOUND.get().get((r as usize).wrapping_sub(1)).map_or(0, |&(_, _, len)| len as u32)
         }
         _ => 0,
     }
@@ -224,8 +309,8 @@ pub fn kernel(ord: u32, a: &mut Pascal) -> u32 {
 
 /// USER's LoadString(hinst, id, buf, max).
 pub fn user_load_string(a: &mut Pascal) -> u32 {
-    let (_hi, id, buf, max) = (a.w(), a.w(), a.p(), a.i());
-    load_string(id, buf, max) as u32
+    let (hi, id, buf, max) = (a.w(), a.w(), a.p(), a.i());
+    load_string(hi, id, buf, max) as u32
 }
 
 /// Read a NUL-terminated string at `*p` of `b` (moving past it).
