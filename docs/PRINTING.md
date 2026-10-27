@@ -289,6 +289,9 @@ Not done yet:
 - PostScript size: images are run-length and ASCII85 encoded (no
   Flate); glyphs are Type 3 procedures without ToUnicode, so PDFs made
   from the output have no searchable text.
+- WinFillRect on a PM_Q_STD queued DC is not recorded in the metafile
+  (the fill is missing from the printout; found by Win16 printing, which
+  uses PM_Q_RAW DCs for that and for fidelity).
 - Text on printers is laid out with the fonts' pel advances at 300 dpi
   (as on the screen), and outline faces are made at each size used
   (Source::at keeps 32 sizes); larger sizes are scaled.
