@@ -26,6 +26,7 @@ const LBS_HASSTRINGS: u32 = 0x0040;
 const LBS_USETABSTOPS: u32 = 0x0080;
 const LBS_WANTKEYBOARDINPUT: u32 = 0x0400;
 const LBS_EXTENDEDSEL: u32 = 0x0800;
+const LBS_DISABLENOSCROLL: u32 = 0x1000;
 
 const LB_ADDSTRING: u16 = W_USER + 1;
 const LB_INSERTSTRING: u16 = W_USER + 2;
@@ -88,6 +89,8 @@ pub struct ListBox {
     tabs: Vec<i32>,
     /// The combo box this list belongs to (0: none).
     combo: u16,
+    /// LB_SETHORIZONTALEXTENT's width.
+    hext: i32,
 }
 
 fn lb(h: u16) -> Option<&'static mut ListBox> {
@@ -124,8 +127,16 @@ fn notify_lb(h: u16, code: u16) {
     }
 }
 
+/// The scroll bars: shown only while there is something to scroll to,
+/// unless LBS_DISABLENOSCROLL (as Windows 3.1's list boxes do it).
 fn update_bar(h: u16) {
-    if style(h) & WS_VSCROLL == 0 {
+    let st = style(h);
+    let keep = st & LBS_DISABLENOSCROLL != 0;
+    if st & WS_HSCROLL != 0 {
+        let wide = lb(h).map_or(0, |l| l.hext) > client_size(h).0;
+        crate::scroll::show(h, 0, wide || keep);
+    }
+    if st & WS_VSCROLL == 0 {
         return;
     }
     let vis = visible(h);
@@ -135,6 +146,7 @@ fn update_bar(h: u16) {
     let top = l.top;
     crate::scroll::set_range(h, 1, 0, max);
     crate::scroll::set_pos(h, 1, top);
+    crate::scroll::show(h, 1, max > 0 || keep);
 }
 
 fn show_item(h: u16, i: i32) {
@@ -406,7 +418,7 @@ pub fn proc_(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
         W_CREATE => {
             let combo = wnd(h).filter(|w| is_combo(w.parent)).map_or(0, |w| w.parent);
             if let Some(w) = wnd(h) {
-                w.data = Some(alloc::boxed::Box::new(ListBox { items: Vec::new(), cur: -1, caret: 0, anchor: 0, top: 0, font: 0, item_h: 16, focus: false, captured: false, tabs: Vec::new(), combo }));
+                w.data = Some(alloc::boxed::Box::new(ListBox { items: Vec::new(), cur: -1, caret: 0, anchor: 0, top: 0, font: 0, item_h: 16, focus: false, captured: false, tabs: Vec::new(), combo, hext: 0 }));
             }
             measure(h);
             update_bar(h);
@@ -716,8 +728,15 @@ pub fn proc_(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             }
             1
         }
-        LB_GETHORIZONTALEXTENT => 0,
-        LB_SETHORIZONTALEXTENT | LB_SETCOLUMNWIDTH => 0,
+        LB_GETHORIZONTALEXTENT => lb(h).map_or(0, |l| l.hext as u32),
+        LB_SETHORIZONTALEXTENT => {
+            if let Some(l) = lb(h) {
+                l.hext = wp as i16 as i32;
+            }
+            update_bar(h);
+            0
+        }
+        LB_SETCOLUMNWIDTH => 0,
         LB_GETITEMRECT => {
             let (cx, _) = client_size(h);
             let Some(l) = lb(h) else { return LB_ERR };

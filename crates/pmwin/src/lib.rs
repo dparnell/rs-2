@@ -37,4 +37,7 @@ pub mod ws {
     pub const SYNCPAINT: u32 = 0x0200_0000;
     pub const MINIMIZED: u32 = 0x0100_0000;
     pub const MAXIMIZED: u32 = 0x0080_0000;
+    /// rs2's own: a top-level window that a click does not activate
+    /// (Windows' WS_CHILD windows of the desktop, drop-down lists).
+    pub const NOACTIVATE: u32 = 0x0010_0000;
 }

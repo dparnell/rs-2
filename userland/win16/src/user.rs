@@ -1089,6 +1089,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let Some((f, old)) = wnd(h).map(|w| (w.frame, w.parent)) else { return 0 };
             let pc = if p == 0 { HWND_DESKTOP } else { wnd(p).map_or(HWND_DESKTOP, |w| w.client) };
             unsafe { WinSetParent(f, pc, 1) };
+            // A child of the desktop is not activated by a click.
+            let desk_child = p == 0 && is_child_style(h);
+            unsafe { WinSetWindowBits(f, QWL_STYLE, if desk_child { NOACTIVATE } else { 0 }, NOACTIVATE) };
             if let Some(w) = wnd(h) {
                 w.parent = p;
             }
@@ -1861,7 +1864,9 @@ pub fn show_window(h: u16, cmd: u16) -> bool {
 fn move_window(h: u16, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> bool {
     let Some((f, parent)) = wnd(h).map(|w| (w.frame, w.parent)) else { return false };
     let child = is_child_style(h);
-    let ph = if child { wnd(parent).map_or(0, |p| client_height(p.client)) } else { screen_size().1 };
+    // A child of the desktop (SetParent(hwnd, NULL)) is placed on the
+    // screen.
+    let ph = wnd(parent).filter(|_| child).map_or(screen_size().1, |p| client_height(p.client));
     let (mut cx, mut cy) = (cx, cy);
     if fl & SWP_SIZE == 0 {
         let mut swp = Swp::default();
@@ -1945,6 +1950,25 @@ pub fn focus() -> u16 {
 /// SetFocus: the previous focus window.
 pub fn set_focus(h: u16) -> u16 {
     let old = focus();
+    // Windows refuses the focus to a window in a disabled one, and to a
+    // child window of the desktop (a drop-down list: SetParent(NULL)).
+    let mut t = h;
+    for _ in 0..64 {
+        let Some((style, parent)) = wnd(t).map(|w| (w.style, w.parent)) else { break };
+        if style & WS_DISABLED != 0 {
+            return 0;
+        }
+        if style & WS_CHILD == 0 {
+            break;
+        }
+        if parent == 0 {
+            if style & WS_POPUP == 0 {
+                return 0;
+            }
+            break;
+        }
+        t = parent;
+    }
     if h != 0 && old != h {
         if let Some(c) = wnd(h).map(|w| w.client) {
             unsafe { WinSetFocus(HWND_DESKTOP, c) };
