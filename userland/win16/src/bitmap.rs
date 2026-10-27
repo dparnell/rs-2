@@ -542,9 +542,18 @@ fn average(h: u16) -> u32 {
 /// The system bitmaps (LoadBitmap(NULL, OBM_*)): rs2's own drawing, in
 /// the button face colour.
 fn system_bitmap(id: u16) -> u16 {
+    let sm = |i| crate::user::system_metric(i);
     let (w, h) = match id {
         // OBM_CHECKBOXES: 4 x 3 boxes of 14 pels.
         32759 => (56, 42),
+        // The scroll arrows and the combo box button: a scroll bar's
+        // width.
+        32734..=32743 | 32750..=32753 | 32738 => (sm(2), sm(20)),
+        // OBM_REDUCE...OBM_RESTORED: title bar buttons.
+        32744..=32749 => (sm(30), sm(31)),
+        // OBM_CLOSE: the system menu boxes of a window and of an MDI
+        // child, side by side.
+        32754 => (sm(30) * 2, sm(31)),
         _ => (16, 16),
     };
     let b = new_bitmap(w, h, 24);
@@ -573,6 +582,69 @@ fn system_bitmap(id: u16) -> u16 {
                         check(hdc, ox, oy);
                     }
                 }
+            }
+        }
+        // The arrows (D: pressed, I: inactive) and OBM_COMBO: a framed
+        // button with a triangle.
+        32734..=32743 | 32750..=32753 | 32738 => {
+            let dir = match id {
+                32753 | 32743 | 32737 => b'u',
+                32752 | 32742 | 32736 | 32738 => b'd',
+                32751 | 32741 | 32735 => b'r',
+                _ => b'l',
+            };
+            let pressed = (32740..=32743).contains(&id);
+            let grey = (32734..=32737).contains(&id);
+            gdi::frame(hdc, [0, 0, w, h], 0);
+            let inner = [1 + pressed as i32, 1 + pressed as i32, w - 1 + pressed as i32, h - 1 + pressed as i32];
+            crate::scroll::raised(hdc, [1, 1, w - 1, h - 1], pressed);
+            let c = if grey { gdi::sys_color(gdi::COLOR_GRAYTEXT) } else { 0 };
+            if id == 32738 {
+                // The drop-down's triangle stands on a bar.
+                let r = [inner[0], inner[1] - 2, inner[2], inner[3] - 2];
+                crate::scroll::triangle(hdc, r, b'd', c);
+                let (cx, cy) = ((r[0] + r[2]) / 2, (r[1] + r[3]) / 2);
+                let n = ((r[2] - r[0]).min(r[3] - r[1]) / 4).max(2);
+                gdi::fill(hdc, [cx - n + 1, cy + n / 2 + 2, cx + n, cy + n / 2 + 3], c);
+            } else {
+                crate::scroll::triangle(hdc, inner, dir, c);
+            }
+        }
+        // OBM_REDUCE, OBM_ZOOM, OBM_RESTORE and their pressed forms.
+        32744..=32749 => {
+            let pressed = id <= 32746;
+            crate::scroll::raised(hdc, [0, 0, w, h], pressed);
+            let o = pressed as i32;
+            let r = [o, o, w + o, h + o];
+            match id {
+                32749 | 32746 => crate::scroll::triangle(hdc, r, b'd', 0),
+                32748 | 32745 => crate::scroll::triangle(hdc, r, b'u', 0),
+                _ => {
+                    crate::scroll::triangle(hdc, [r[0], r[1] - h / 5, r[2], r[3] - h / 5], b'u', 0);
+                    crate::scroll::triangle(hdc, [r[0], r[1] + h / 5, r[2], r[3] + h / 5], b'd', 0);
+                }
+            }
+        }
+        // OBM_CLOSE: a long bar (a window's) and a short one (an MDI
+        // child's).
+        32754 => {
+            let half = w / 2;
+            for (x0, bar) in [(0, half * 2 / 3), (half, half / 3)] {
+                let cy = h / 2;
+                let l = x0 + (half - bar) / 2;
+                gdi::fill(hdc, [l + 1, cy, l + bar + 1, cy + 3], gdi::sys_color(gdi::COLOR_BTNSHADOW));
+                gdi::fill(hdc, [l, cy - 1, l + bar, cy + 2], 0xffffff);
+                gdi::frame(hdc, [l, cy - 1, l + bar, cy + 2], 0);
+            }
+        }
+        // OBM_MNARROW: a menu's cascade arrow.
+        32739 => crate::scroll::triangle(hdc, [0, 0, w, h], b'r', 0),
+        // OBM_SIZE, OBM_BTSIZE: the size box.
+        32766 | 32761 => {
+            for i in 0..3 {
+                let d = 4 + i * 4;
+                gdi::line(hdc, w - d, h - 1, w - 1, h - d, 0xffffff);
+                gdi::line(hdc, w - d + 1, h - 1, w - 1, h - d + 1, gdi::sys_color(gdi::COLOR_BTNSHADOW));
             }
         }
         _ => {}

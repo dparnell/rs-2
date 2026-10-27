@@ -2895,7 +2895,7 @@ fn class_value(h: u16, i: i32, set: Option<u32>, long: bool) -> u32 {
     u32::from_le_bytes(old)
 }
 
-fn system_metric(i: i32) -> i32 {
+pub fn system_metric(i: i32) -> i32 {
     let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
     match i {
         0 => q(SV_CXSCREEN),

@@ -257,6 +257,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         57 | 127 => {
             let (app, key, def) = (a.l(), a.l(), a.w());
             let file = if ord == 127 { far_str(a.l()).unwrap_or(b"").to_vec() } else { b"WIN.INI".to_vec() };
+            trace_profile(&file, app, key);
             crate::profile::get_int(&file, app, key, def)
         }
         // GetProfileString(app, key, default, buf, max),
@@ -270,6 +271,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 }
             }
             let file = if ord == 128 { far_str(a.l()).unwrap_or(b"").to_vec() } else { b"WIN.INI".to_vec() };
+            trace_profile(&file, app, key);
             crate::profile::get_string(&file, app, key, def, buf, max)
         }
         // WriteProfileString(app, key, value), WritePrivateProfileString
@@ -1030,4 +1032,13 @@ fn proc_address(h: u16, name: u32) -> u32 {
         None => unsafe { os2::DosQueryProcAddr(hmod, base + (name & 0xffff), core::ptr::null(), &mut f) },
     };
     if r != 0 || f == 0 { 0 } else { far(f as *const u8) }
+}
+
+/// W16TRACE: the profile entries a program reads.
+fn trace_profile(file: &[u8], app: u32, key: u32) {
+    if crate::tracing() {
+        let st = |b: &[u8]| -> alloc::string::String { b.iter().map(|&c| c as char).collect() };
+        let k = if key >> 16 == 0 { alloc::string::String::from("(all)") } else { st(far_str(key).unwrap_or(b"")) };
+        crate::trace(format_args!("W16 profile {} [{}] {}", st(file), st(far_str(app).unwrap_or(b"")), k));
+    }
 }
