@@ -52,6 +52,7 @@ mod res;
 mod scroll;
 mod stubs;
 mod toolhelp;
+mod w16lock;
 mod user;
 mod ver;
 

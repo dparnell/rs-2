@@ -212,11 +212,13 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         150 => {
             a.w();
             crate::toolhelp::poll(true);
+            crate::w16lock::yield_now();
             0
         }
         // Yield: a debugged task the debugger let go runs (toolhelp.rs).
         29 => {
             crate::toolhelp::poll(true);
+            crate::w16lock::yield_now();
             0
         }
         // WaitEvent(task): no events for a task here.
@@ -572,6 +574,7 @@ pub fn init_task(r: &mut crate::dos::Regs) {
     use crate::dos::reg::*;
     let (stack, heap, inst) = (r[BX], r[CX], r[DI]);
     let ds = r[DS];
+    crate::w16lock::init();
     let t = TASK.get();
     t.hinst = if inst != 0 { inst } else { ds };
     // The stack: SS:SP is where the program started (a far call and the

@@ -125,9 +125,18 @@ struct State {
     /// Stopped threads to let go when this task next yields (Windows
     /// runs the other task only then): (process, thread, registers).
     pending: Vec<(u32, u32, Option<[u32; 16]>)>,
+    /// The thread handling a stop (w16lock.rs): its id, its PM queue, the
+    /// task it stands for (GetCurrentTask there) and whether it waits
+    /// for messages; the stop record it was given.
+    stop_tid: u32,
+    stop_hmq: u32,
+    stop_task: u16,
+    stop_pid: u32,
+    stop_waiting: bool,
+    stop_rec: [u32; 20],
 }
 
-static ST: Global<State> = Global::new(State { reg: core::ptr::null_mut(), tdb: 0, current: 0, exited: false, views: Vec::new(), out: core::ptr::null_mut(), in_int: false, iret: None, timer: false, last_poll: 0, pending: Vec::new() });
+static ST: Global<State> = Global::new(State { reg: core::ptr::null_mut(), tdb: 0, current: 0, exited: false, views: Vec::new(), out: core::ptr::null_mut(), in_int: false, iret: None, timer: false, last_poll: 0, pending: Vec::new(), stop_tid: 0, stop_hmq: 0, stop_task: 0, stop_pid: 0, stop_waiting: false, stop_rec: [0; 20] });
 
 fn pib() -> Option<&'static os2::Pib> {
     let mut tib = core::ptr::null_mut();
@@ -442,7 +451,7 @@ pub fn poll(idle: bool) {
         return;
     }
     // Tasks the debugger let go run now, with its breakpoints.
-    if idle && !s.pending.is_empty() {
+    if idle && !s.pending.is_empty() && !on_stop_thread() {
         for v in s.views.iter_mut().filter(|v| v.attached && !v.exited) {
             sync(v);
         }
@@ -460,6 +469,9 @@ pub fn poll(idle: bool) {
     for v in s.views.iter_mut().filter(|v| v.attached && !v.exited) {
         sync(v);
     }
+    if ST.get().stop_tid != 0 {
+        return;
+    }
     let mut rec = [0u32; 20];
     if unsafe { crate::pm::Rs2Win16Debug(3, 0, rec.as_mut_ptr() as u32, 0, 0) } == 0 {
         return;
@@ -470,6 +482,80 @@ pub fn poll(idle: bool) {
 /// A debugged task stopped: the callback with TOOLHELP's frame, then the
 /// task goes on from where the callback's IRET says.
 fn stopped(rec: &[u32; 20]) {
+    let s = ST.get();
+    if s.stop_tid != 0 {
+        return;
+    }
+    s.stop_rec = *rec;
+    s.stop_pid = rec[0];
+    s.stop_task = view(rec[0]).map_or(0, |v| v.tdb);
+    s.stop_waiting = false;
+    s.stop_tid = u32::MAX;
+    crate::w16lock::other_started();
+    let mut t = 0u32;
+    if unsafe { os2::DosCreateThread(&mut t, stop_thread, 0, 0, 0x2_0000) } != 0 {
+        crate::w16lock::other_ended();
+        ST.get().stop_tid = 0;
+        unsafe { crate::pm::Rs2Win16Debug(4, rec[0], rec[1], 0, 0) };
+    }
+}
+
+/// The thread a stop is handled on: the stopped task, as far as the
+/// interrupt callback can tell (GetCurrentTask, its own message queue for
+/// PostAppMessage to that task), running when the debugger's thread
+/// waits for messages.
+unsafe extern "C" fn stop_thread(_: u32) {
+    crate::w16lock::acquire();
+    ST.get().stop_tid = this_tid();
+    let hab = unsafe { crate::pm::WinInitialize(0) };
+    let hmq = unsafe { crate::pm::WinCreateMsgQueue(hab, 0) };
+    ST.get().stop_hmq = hmq;
+    let rec = ST.get().stop_rec;
+    run_stop(&rec);
+    unsafe {
+        crate::pm::WinDestroyMsgQueue(hmq);
+        crate::pm::WinTerminate(hab);
+    }
+    let s = ST.get();
+    s.stop_tid = 0;
+    s.stop_hmq = 0;
+    s.stop_task = 0;
+    crate::w16lock::other_ended();
+    crate::w16lock::release();
+}
+
+fn this_tid() -> u32 {
+    let mut tib: *mut os2::Tib = core::ptr::null_mut();
+    let mut pib: *mut os2::Pib = core::ptr::null_mut();
+    unsafe { os2::DosGetInfoBlocks(&mut tib, &mut pib) };
+    unsafe { tib.as_ref().and_then(|t| t.ptib2.as_ref()).map_or(0, |t2| t2.tid) }
+}
+
+/// On the stop's thread?
+fn on_stop_thread() -> bool {
+    let s = ST.get().stop_tid;
+    s != 0 && s == this_tid()
+}
+
+/// GetMessage on the stop's thread waits (the debugger's thread runs).
+pub fn stop_thread_waits(w: bool) {
+    if on_stop_thread() {
+        ST.get().stop_waiting = w;
+    }
+}
+
+/// PostAppMessage to a task being stopped: its thread's queue.
+pub fn task_queue(task: u16) -> Option<u32> {
+    let s = ST.get();
+    (s.stop_tid != 0 && s.stop_hmq != 0 && task != 0 && task | 7 == s.stop_task | 7).then_some(s.stop_hmq)
+}
+
+/// The PM queue of the calling thread (the stop's thread has its own).
+pub fn thread_queue() -> Option<u32> {
+    on_stop_thread().then(|| ST.get().stop_hmq).filter(|&q| q != 0)
+}
+
+fn run_stop(rec: &[u32; 20]) {
     let (p, tid, vector) = (rec[0], rec[1], rec[2] as u16);
     let mut regs = [0u32; 16];
     regs.copy_from_slice(&rec[4..20]);
@@ -489,14 +575,12 @@ fn stopped(rec: &[u32; 20]) {
     let mut resume: Option<[u32; 16]> = None;
     if cb != 0 && copy_cs != 0 {
         let s = ST.get();
-        let saved = s.current;
-        s.current = tdb;
+        let _ = tdb;
         s.in_int = true;
         s.iret = None;
         PascalCall::new().w(fl).w(copy_cs).w(ip).w(0).w(vector).w(regs[0] as u16).call(cb);
         let s = ST.get();
         s.in_int = false;
-        s.current = saved;
         if let Some((tcs, tip, tfl)) = s.iret.take() {
             let real = view(p).map_or(0, |v| v.segs.iter().find(|x| x.1 | 7 == tcs | 7).map_or(0, |x| x.0));
             if real != 0 {
@@ -508,8 +592,10 @@ fn stopped(rec: &[u32; 20]) {
             }
         }
     }
+    // The task goes on once the debugger yields (Windows switches to it
+    // only then), with the breakpoints the debugger set meanwhile.
     if crate::tracing() {
-        crate::trace(format_args!("W16 debug: task {p} goes on at {:?} when this task yields", resume.map(|r| (r[10], r[8], r[9]))));
+        crate::trace(format_args!("W16 debug: task {p} goes on at {:?} when the debugger yields", resume.map(|r| (r[10], r[8], r[9]))));
     }
     ST.get().pending.push((p, tid, resume));
 }
@@ -655,7 +741,7 @@ fn entry_breakpoint(start: u32) {
 /// (resume), back to where `int3` called it. True if it was that.
 pub fn iret_trap(r: &mut crate::dos::Regs) -> bool {
     use crate::dos::reg::*;
-    if !ST.get().in_int {
+    if !ST.get().in_int || (ST.get().stop_tid != 0 && !on_stop_thread()) {
         return false;
     }
     let ss = (thunk16::sp16() >> 16) as u16;
@@ -728,6 +814,15 @@ pub fn wait_started(child: u32) -> Option<u16> {
                 let mut rec = [0u32; 20];
                 if unsafe { crate::pm::Rs2Win16Debug(3, child, rec.as_mut_ptr() as u32, 0, 0) } != 0 {
                     stopped(&rec);
+                    // Its handling runs (on its thread) until the task goes
+                    // on or waits for the debugger.
+                    for _ in 0..500 {
+                        let s = ST.get();
+                        if s.stop_tid == 0 || s.stop_waiting {
+                            break;
+                        }
+                        crate::w16lock::waiting(|| unsafe { os2::DosSleep(10) });
+                    }
                     break;
                 }
                 if slot(child).is_none() {
@@ -743,13 +838,19 @@ pub fn wait_started(child: u32) -> Option<u16> {
 
 /// Make GetCurrentTask answer another task (0: this one): the old value.
 pub fn set_current(t: u16) -> u16 {
+    // (The stop's thread stays the stopped task.)
+    if on_stop_thread() {
+        return t;
+    }
     core::mem::replace(&mut ST.get().current, t)
 }
 
 /// GetCurrentTask.
 pub fn current_task() -> u16 {
     let s = ST.get();
-    if s.current != 0 {
+    if on_stop_thread() && s.stop_task != 0 {
+        s.stop_task
+    } else if s.current != 0 {
         s.current
     } else if s.tdb != 0 {
         s.tdb

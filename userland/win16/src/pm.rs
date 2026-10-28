@@ -54,6 +54,10 @@ unsafe extern "C" {
     pub fn WinInitialize(fl: u32) -> u32;
     #[link_name = "PMWIN.716"]
     pub fn WinCreateMsgQueue(hab: u32, n: i32) -> u32;
+    #[link_name = "PMWIN.726"]
+    pub fn WinDestroyMsgQueue(hmq: u32) -> u32;
+    #[link_name = "PMWIN.888"]
+    pub fn WinTerminate(hab: u32) -> u32;
     #[link_name = "PMWIN.926"]
     pub fn WinRegisterClass(hab: u32, name: *const u8, proc_: WndProc, style: u32, words: u32) -> u32;
     #[link_name = "PMWIN.908"]

@@ -519,6 +519,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // MessageBox(hwnd, text, caption, type)
         1 => {
             let (h, text, cap, ty) = (a.w(), a.l(), a.l(), a.w());
+            if crate::tracing() {
+                let t: alloc::string::String = far_str(text).unwrap_or(b"").iter().map(|&c| c as char).collect();
+                trace(format_args!("W16 MessageBox: {t}"));
+            }
             message_box(h, text, cap, ty)
         }
         // InitApp(hInstance)
@@ -968,7 +972,16 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // PostAppMessage(task, msg, wParam, lParam)
         116 => {
-            let (_t, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
+            let (t, m, wp, lp) = (a.w(), a.w(), a.w(), a.l());
+            // To a task being stopped: its thread (toolhelp.rs).
+            if let Some(q) = crate::toolhelp::task_queue(t) {
+                return unsafe { WinPostQueueMsg(q, POSTED | m as u32, wp as u32, lp) };
+            }
+            // To this task (from a stop's thread too): its own queue.
+            if t == 0 || t | 7 == crate::toolhelp::own_tdb() | 7 {
+                let q = if t == 0 { crate::toolhelp::thread_queue().unwrap_or(TASK.get().hmq) } else { TASK.get().hmq };
+                return unsafe { WinPostQueueMsg(q, POSTED | m as u32, wp as u32, lp) };
+            }
             post(0, m, wp, lp) as u32
         }
         // GetMessagePos, GetMessageTime
@@ -2281,7 +2294,8 @@ pub fn post(h: u16, m: u16, wp: u16, lp: u32) -> bool {
     let pm = match wnd(h) {
         Some(w) => w.client,
         None if h == 0 || h == 0xffff => {
-            return unsafe { WinPostQueueMsg(TASK.get().hmq, POSTED | m as u32, wp as u32, lp) } != 0;
+            let q = crate::toolhelp::thread_queue().unwrap_or(TASK.get().hmq);
+            return unsafe { WinPostQueueMsg(q, POSTED | m as u32, wp as u32, lp) } != 0;
         }
         None => return crate::dde::post_foreign(h, m, wp, lp).unwrap_or(false),
     };
@@ -2584,12 +2598,20 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
                 if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
                     crate::toolhelp::poll(true);
                 }
-                unsafe { WinGetMsg(hab, &mut q, filter, 0, 0) };
+                // Waiting: another thread of the task may run (w16lock.rs).
+                crate::w16lock::waiting(|| {
+                    crate::toolhelp::stop_thread_waits(true);
+                    unsafe { WinGetMsg(hab, &mut q, filter, 0, 0) };
+                    crate::toolhelp::stop_thread_waits(false);
+                });
             }
             Some(fl) if lo != 0 || hi != 0 => match peek_range(hab, filter, lo, hi.max(lo), fl & 1 != 0) {
                 Some(m) => q = m,
                 None => {
                     crate::toolhelp::poll(fl & 2 == 0);
+                    if fl & 2 == 0 {
+                        crate::w16lock::yield_now();
+                    }
                     return 0;
                 }
             },
@@ -2597,6 +2619,9 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
                 if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
                     // PM_NOYIELD (2) keeps the other tasks waiting.
                     crate::toolhelp::poll(fl & 2 == 0);
+                    if fl & 2 == 0 {
+                        crate::w16lock::yield_now();
+                    }
                     return 0;
                 }
                 let ours = q.msg == WM_QUIT || win_message(&q).is_some();
@@ -2651,7 +2676,8 @@ fn wait_message() {
     let hab = TASK.get().hab;
     let mut q = QMsg::default();
     while unsafe { WinPeekMsg(hab, &mut q, 0, 0, 0, PM_NOREMOVE) } == 0 {
-        unsafe { os2::DosSleep(10) };
+        crate::toolhelp::poll(true);
+        crate::w16lock::waiting(|| unsafe { os2::DosSleep(10) });
     }
 }
 
