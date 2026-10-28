@@ -87,6 +87,13 @@ fn m() -> &'static mut Menus {
 }
 
 /// The PM menu window of an HMENU.
+/// A menu window becomes a menu bar (horizontal) or a pop-up.
+fn set_bar(pm: u32, bar: bool) {
+    if pm != 0 {
+        unsafe { WinSetWindowBits(pm, QWL_STYLE, if bar { MS_ACTIONBAR } else { 0 }, MS_ACTIONBAR) };
+    }
+}
+
 fn pm_of(h: u16) -> u32 {
     m().menus.iter().find(|x| x.h == h).map_or(0, |x| x.pm)
 }
@@ -189,6 +196,10 @@ pub fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
             if sub == 0 {
                 return false;
             }
+            // Windows' CreateMenu and CreatePopupMenu make the same menu
+            // (Delphi's drop-downs come from CreateMenu): it is a pop-up
+            // now.
+            set_bar(sub, false);
             mi.style |= MIS_SUBMENU;
             mi.sub = sub;
             let s = m();
@@ -380,6 +391,7 @@ pub fn set_menu(hwnd: u16, menu: u16) -> bool {
             WinSetParent(oldpm, HWND_DESKTOP, 0);
         }
         if pm != 0 {
+            set_bar(pm, true);
             WinSetParent(pm, f, 0);
             WinSetOwner(pm, f);
             WinSetWindowUShort(pm, QWS_ID, FID_MENU as u16);
@@ -733,6 +745,7 @@ pub fn end_menu() {
 
 fn track_popup(menu: u16, x: i32, y: i32, hwnd: u16) -> bool {
     let pm = pm_of(menu);
+    set_bar(pm, false);
     let Some(c) = wnd(hwnd).map(|w| w.client) else { return false };
     if pm == 0 {
         return false;
