@@ -882,6 +882,15 @@ pub fn field_height() -> i32 {
 }
 
 fn combo_create(h: u16, total: i32) {
+    // A combo box has no scroll bars of its own (a superclass's window,
+    // Delphi's TComboBox, comes with its list's WS_VSCROLL), as Windows'
+    // takes them off when it is made.
+    if let Some(w) = wnd(h) {
+        w.style &= !(WS_VSCROLL | WS_HSCROLL);
+        w.nc &= !(WS_VSCROLL | WS_HSCROLL);
+    }
+    crate::scroll::show(h, 3, false);
+    layout_frame(h);
     let Some(w) = wnd(h) else { return };
     let (st, hinst) = (w.style, w.hinst);
     let kind = st & 3;
@@ -911,6 +920,28 @@ fn combo_create(h: u16, total: i32) {
     }
     if let Some(l) = lb(list) {
         l.combo = h;
+    }
+    combo_size(h);
+}
+
+/// A drop-down combo box is as high as its field: a height given (made
+/// with, or SetWindowPos) is the field's and the dropped list's. The edit
+/// control follows the width.
+fn combo_size(h: u16) {
+    let Some(c) = cb(h) else { return };
+    let (kind, field_h, edit) = (c.kind, c.field_h, c.edit);
+    let r = window_rect(h);
+    let (cx, cy) = (r[2] - r[0], r[3] - r[1]);
+    if kind != CBS_SIMPLE && cy != field_h {
+        if cy > field_h {
+            c.list_h = cy - field_h;
+        }
+        move_to(h, [r[0], r[1], r[2], r[1] + field_h]);
+        return;
+    }
+    if edit != 0 {
+        let ew = if kind == CBS_SIMPLE { cx } else { cx - button_w() };
+        move_to(edit, [0, 0, ew.max(0), field_h]);
     }
 }
 
@@ -1150,6 +1181,10 @@ pub fn combo_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             // CREATESTRUCT's cy: the height with the list.
             let total = unsafe { (thunk16::flat(lp).add(10) as *const i16).read_unaligned() } as i32;
             combo_create(h, total);
+            0
+        }
+        W_SIZE => {
+            combo_size(h);
             0
         }
         W_DESTROY => {

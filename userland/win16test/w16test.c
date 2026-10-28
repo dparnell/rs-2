@@ -1562,6 +1562,15 @@ LONG FAR PASCAL _export SizeWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     return DefWindowProc(hwnd, msg, wp, lp);
 }
 
+static WNDPROC combo_proc;
+
+/* A superclass of COMBOBOX, as Delphi's VCL makes TComboBox: its own
+ * procedure, the combo box's behind it. */
+LONG FAR PASCAL _export SuperComboProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    return CallWindowProc((FARPROC)combo_proc, hwnd, msg, wp, lp);
+}
+
 static void delphi_tests(HINSTANCE hInst)
 {
     WNDCLASS wc;
@@ -1652,6 +1661,32 @@ static void delphi_tests(HINSTANCE hInst)
     GetClientRect(list, &crc);
     check(crc.bottom < 78 && SendMessage(list, LB_GETHORIZONTALEXTENT, 0, 0) == 400, "LB_SETHORIZONTALEXTENT wider than the list: a horizontal one");
     DestroyWindow(list);
+
+    /* A superclassed combo box made with the list's WS_VSCROLL and the
+     * dropped height: no scroll bar of its own, the field's height. */
+    {
+        WNDCLASS cw;
+        HWND cb;
+        RECT wr;
+        GetClassInfo(NULL, "COMBOBOX", &cw);
+        combo_proc = cw.lpfnWndProc;
+        cw.lpfnWndProc = SuperComboProc;
+        cw.hInstance = hInst;
+        cw.lpszClassName = "W16SuperCombo";
+        check(RegisterClass(&cw) != 0, "RegisterClass of a COMBOBOX superclass");
+        check(!RegisterClass(&cw), "the module's second class of the name fails");
+        cb = CreateWindow("W16SuperCombo", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWN | CBS_HASSTRINGS, 5, 40, 120, 150, top, (HMENU)8, hInst, NULL);
+        GetWindowRect(cb, &wr);
+        GetClientRect(cb, &crc);
+        sprintf(line, "a superclassed drop-down combo box is its field's height, no scroll bar (%dx%d, client %d)", wr.right - wr.left, wr.bottom - wr.top, crc.right);
+        check(cb && wr.bottom - wr.top < 40 && crc.right == wr.right - wr.left, line);
+        SetWindowPos(cb, 0, 0, 0, 120, 200, SWP_NOMOVE | SWP_NOZORDER);
+        GetWindowRect(cb, &rc);
+        check(rc.bottom - rc.top == wr.bottom - wr.top, "SetWindowPos's height is the dropped list's");
+        SendMessage(cb, CB_ADDSTRING, 0, (LPARAM)(LPSTR)"x");
+        check(SendMessage(cb, CB_GETCOUNT, 0, 0) == 1, "it is a combo box");
+        DestroyWindow(cb);
+    }
     DestroyWindow(top);
 }
 
