@@ -23,10 +23,12 @@ BYTE FAR * WINAPI DdeAccessData(HDDEDATA, DWORD FAR *);
 #include <fcntl.h>
 #include <lzexpand.h>
 #include <ver.h>
+#include <toolhelp.h>
 #include "w16test.h"
 
 #pragma library("commdlg")
 #pragma library("ddeml")
+#pragma library("toolhelp")
 
 static int failures;
 static char line[160];
@@ -1653,6 +1655,77 @@ static void delphi_tests(HINSTANCE hInst)
     DestroyWindow(top);
 }
 
+/* TOOLHELP (stage 4): the databases, and notifications from another
+ * task (a process of its own here). */
+static HTASK nfy_task, nfy_exit_task;
+static int nfy_starts, nfy_exits;
+
+BOOL FAR PASCAL _export TestNotify(WORD id, DWORD data)
+{
+    if (id == NFY_STARTTASK) {
+        nfy_starts++;
+        nfy_task = GetCurrentTask();
+    } else if (id == NFY_EXITTASK) {
+        nfy_exits++;
+        nfy_exit_task = GetCurrentTask();
+    }
+    (void)data;
+    return FALSE;
+}
+
+static void toolhelp_tests(HINSTANCE hInst)
+{
+    TASKENTRY te;
+    MODULEENTRY me;
+    GLOBALENTRY ge;
+    STACKTRACEENTRY ste;
+    MEMMANINFO mmi;
+    HTASK me_task = GetCurrentTask();
+    BYTE buf[4];
+    BOOL found = FALSE;
+    MSG msg;
+    DWORD t0;
+    int i;
+
+    te.dwSize = sizeof te;
+    for (i = TaskFirst(&te); i; i = TaskNext(&te))
+        if (te.hTask == me_task)
+            found = TRUE;
+    check(found, "TaskFirst/TaskNext find this task");
+    te.dwSize = sizeof te;
+    check(TaskFindHandle(&te, me_task) && te.hInst == hInst && lstrcmp(te.szModule, "W16TEST") == 0, "TaskFindHandle: instance and module name");
+    check(*(WORD FAR *)MAKELP(me_task, 0xfa) == 0x4454 && *(WORD FAR *)MAKELP(me_task, 0x1c) == (WORD)hInst, "the task database: \"TD\", hInstance at 1Ch");
+    me.dwSize = sizeof me;
+    check(ModuleFindHandle(&me, te.hModule) && lstrcmp(me.szModule, "W16TEST") == 0, "ModuleFindHandle");
+    me.dwSize = sizeof me;
+    check(ModuleFindName(&me, "USER") && me.hModule == GetModuleHandle("USER"), "ModuleFindName(\"USER\")");
+    ge.dwSize = sizeof ge;
+    check(GlobalEntryHandle(&ge, (HGLOBAL)hInst) && ge.wType == GT_DGROUP, "GlobalEntryHandle: DGROUP");
+    check(GlobalHandleToSel((HGLOBAL)hInst) == (WORD)hInst, "GlobalHandleToSel");
+    ste.dwSize = sizeof ste;
+    i = StackTraceFirst(&ste, NULL);
+    sprintf(line, "StackTraceFirst: this task's stack (%d, SS %04X, CS:IP %04X:%04X)", i, ste.wSS, ste.wCS, ste.wIP);
+    check(i && ste.wSS == SELECTOROF((void FAR *)&ste) && ste.wCS == SELECTOROF((void (FAR *)(HINSTANCE))toolhelp_tests), line);
+    mmi.dwSize = sizeof mmi;
+    check(MemManInfo(&mmi) && mmi.wPageSize == 4096 && mmi.dwTotalPages > 0, "MemManInfo");
+    check(MemoryRead((WORD)me_task, 0xfa, buf, 2) == 2 && buf[0] == 'T' && buf[1] == 'D', "MemoryRead");
+
+    /* Another task: its start and its end, through NotifyRegister. */
+    check(NotifyRegister(NULL, (LPFNNOTIFYCALLBACK)TestNotify, NF_NORMAL), "NotifyRegister");
+    check(WinExec("RS2\\HELLO16.EXE", SW_SHOWMINNOACTIVE) > 32, "WinExec(HELLO16) returns its instance");
+    check(nfy_starts == 1 && nfy_task != 0 && nfy_task != me_task, "NFY_STARTTASK before WinExec returns, GetCurrentTask its task");
+    te.dwSize = sizeof te;
+    check(nfy_task && TaskFindHandle(&te, nfy_task) && lstrcmp(te.szModule, "HELLO16") == 0, "TaskFindHandle on the other task");
+    check(IsTask(nfy_task) && GetCurrentTask() == me_task, "IsTask; GetCurrentTask is this task again");
+    TerminateApp(nfy_task, NO_UAE_BOX);
+    t0 = GetTickCount();
+    while (nfy_exits == 0 && GetTickCount() - t0 < 5000)
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            DispatchMessage(&msg);
+    check(nfy_exits == 1 && nfy_exit_task == nfy_task, "NFY_EXITTASK for it");
+    NotifyUnRegister(NULL);
+}
+
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
 {
     out("w16test: rs2's native Win16 layer\r\n");
@@ -1663,6 +1736,7 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     stage3_tests(hInst);
     real_app_tests(hInst);
     delphi_tests(hInst);
+    toolhelp_tests(hInst);
     sprintf(line, "w16test done: %d failure(s)\r\n", failures);
     out(line);
     return failures;

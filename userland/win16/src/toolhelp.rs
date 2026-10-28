@@ -801,13 +801,13 @@ fn global_at(p: *mut u8, i: usize) -> u32 {
 /// above (far frames have an odd BP, as Windows' prologues make them).
 fn fill_frame(p: *mut u8, ss: u16, bp: u16, cs: u16, ip: u16) {
     put16(p, 4, current_task());
-    put16(p, 8, ss);
-    put16(p, 10, bp);
-    put16(p, 12, cs);
-    put16(p, 14, ip);
+    put16(p, 6, ss);
+    put16(p, 8, bp);
+    put16(p, 10, cs);
+    put16(p, 12, ip);
     let hmod = unsafe { crate::pm::Rs2Win16Selector(8, cs as u32, 0) };
     let module = if hmod != 0 { crate::module::find(cs).map_or(0, |m| m.hinst) } else { 0 };
-    put16(p, 16, module);
+    put16(p, 14, module);
     let mut seg = 0;
     if hmod != 0 {
         let n = unsafe { crate::pm::Rs2Win16Selector(6, hmod, 0) };
@@ -817,8 +817,8 @@ fn fill_frame(p: *mut u8, ss: u16, bp: u16, cs: u16, ip: u16) {
             }
         }
     }
-    put16(p, 18, seg);
-    put16(p, 20, 0);
+    put16(p, 16, seg);
+    put16(p, 18, 0);
 }
 
 fn read16(ss: u16, off: u16) -> Option<u16> {
@@ -831,7 +831,7 @@ fn read16(ss: u16, off: u16) -> Option<u16> {
 
 fn stack_next(p: *mut u8) -> u32 {
     let g = |o| unsafe { (p.add(o) as *const u16).read_unaligned() };
-    let (ss, bp, cs) = (g(8), g(10), g(12));
+    let (ss, bp, cs) = (g(6), g(8), g(10));
     let bp0 = bp & !1;
     if bp0 == 0 {
         return 0;
@@ -974,9 +974,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             }
             let ss = (thunk16::sp16() >> 16) as u16;
             let frame = flat(thunk16::sp16().wrapping_add(32)) as *const u16;
-            // The entry stub saved BP last (fs, bx, di, si, es, ds, bp),
-            // then the caller's return address.
-            let (bp, ip, cs) = unsafe { (frame.add(6).read_unaligned(), frame.add(7).read_unaligned(), frame.add(8).read_unaligned()) };
+            // The entry stub saved (fs, bx, di, si, es, ds, bp) below the
+            // entry's near call to it, then the caller's return address.
+            let (bp, ip, cs) = unsafe { (frame.add(6).read_unaligned(), frame.add(8).read_unaligned(), frame.add(9).read_unaligned()) };
             fill_frame(p, ss, bp, cs, ip);
             1
         }
