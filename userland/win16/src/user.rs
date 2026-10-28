@@ -209,8 +209,11 @@ struct User {
     inflight: Vec<InFlight>,
     /// The PM message behind the last message GetMessage returned.
     last: Option<(u16, u16, QMsg)>,
-    /// The character of the last WM_KEYDOWN (TranslateMessage posts it).
-    last_char: Option<(u16, u16, u16, u32)>,
+    /// The characters of the WM_KEYDOWNs translated but not yet given to
+    /// TranslateMessage (which posts them): (PM time, hwnd, wParam,
+    /// lParam, WM_CHAR or WM_SYSCHAR, the character). A program's
+    /// PeekMessage may look at the next keys before it translates one.
+    chars: Vec<(u32, u16, u16, u32, u16, u16)>,
     timers: Vec<Timer>,
     cascade: i32,
     /// The last message's time and position (GetMessageTime, GetMessagePos).
@@ -226,7 +229,7 @@ static USER: Global<User> = Global::new(User {
     next_atom: 0xc000,
     inflight: Vec::new(),
     last: None,
-    last_char: None,
+    chars: Vec::new(),
     timers: Vec::new(),
     cascade: 0,
     msg_time: 0,
@@ -2473,15 +2476,21 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
                 (false, true) => W_SYSKEYDOWN,
                 (true, true) => W_SYSKEYUP,
             };
+            let wp = if vk != 0 { vk } else { chr & 0xff };
             if !up && fs & 0x0001 != 0 && chr != 0 {
                 // Ctrl+letter is a control character.
                 let c = chr & 0xff;
                 let c = if ctrl && !alt && (c as u8).is_ascii_alphabetic() { c & 0x1f } else { c };
-                u().last_char = Some((w_hwnd, if alt { W_SYSCHAR } else { W_CHAR }, c, lp));
-            } else if !up {
-                u().last_char = None;
+                let cs = &mut u().chars;
+                // (PeekMessage, then GetMessage, translate one key twice.)
+                if !cs.iter().any(|x| x.0 == q.time && x.1 == w_hwnd && x.3 == lp) {
+                    if cs.len() >= 32 {
+                        cs.remove(0);
+                    }
+                    cs.push((q.time, w_hwnd, wp, lp, if alt { W_SYSCHAR } else { W_CHAR }, c));
+                }
             }
-            (m, if vk != 0 { vk } else { chr & 0xff }, lp)
+            (m, wp, lp)
         }
         m if crate::dde::is_w16x(m) => crate::dde::incoming(m, q.mp1, q.mp2),
         m if crate::dde::is_pm_dde(m) => crate::dde::from_pm(m, q.mp1, q.mp2, q.time),
@@ -2491,11 +2500,55 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
     })
 }
 
+/// PeekMessage with a message range: the oldest PM queue message that is
+/// a Windows message of the range (taken off the queue if `remove`).
+/// The PM ranges that can hold them: keys (WM_CHAR), the mouse, WM_PAINT,
+/// WM_TIMER, and the messages programs post (POSTED, and W16X from other
+/// tasks).
+fn peek_range(hab: u32, filter: u32, lo: u16, hi: u16, remove: bool) -> Option<QMsg> {
+    let (lo32, hi32) = (lo as u32, hi as u32);
+    let has = |a: u32, b: u32| lo32 <= b && a <= hi32;
+    let mut ranges: Vec<(u32, u32)> = alloc::vec![(POSTED | lo32, POSTED | hi32), (crate::dde::W16X | lo32, crate::dde::W16X | hi32)];
+    if has(0x100, 0x108) {
+        ranges.push((WM_CHAR, WM_CHAR));
+    }
+    if has(0x200, 0x209) {
+        ranges.push((WM_MOUSEMOVE, 0x79));
+    }
+    if has(0x0f, 0x0f) {
+        ranges.push((WM_PAINT, WM_PAINT));
+    }
+    if has(0x113, 0x113) {
+        ranges.push((WM_TIMER, WM_TIMER));
+    }
+    let mut best: Option<(QMsg, (u32, u32))> = None;
+    for r in ranges {
+        let mut q = QMsg::default();
+        if unsafe { WinPeekMsg(hab, &mut q, filter, r.0, r.1, PM_NOREMOVE) } == 0 {
+            continue;
+        }
+        let Some((_, m, _, _)) = win_message(&q) else { continue };
+        if m < lo || m > hi {
+            continue;
+        }
+        if best.as_ref().is_none_or(|b| q.time < b.0.time) {
+            best = Some((q, r));
+        }
+    }
+    let (q, r) = best?;
+    if remove {
+        let mut q2 = QMsg::default();
+        unsafe { WinPeekMsg(hab, &mut q2, filter, r.0, r.1, PM_REMOVE) };
+        return Some(q2);
+    }
+    Some(q)
+}
+
 /// GetMessage / PeekMessage (flags given): the next message for the
 /// task's Windows windows into MSG (hwnd, message, wParam, lParam,
-/// time, pt); PM's other messages are dispatched on the way. (The
-/// message range filter is not applied.)
-pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) -> u32 {
+/// time, pt); PM's other messages are dispatched on the way. PeekMessage
+/// applies the message range (GetMessage does not).
+pub fn get_message(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 {
     collect();
     if crate::tracing() {
         static LAST: Global<(u32, u32)> = Global::new((0, 0));
@@ -2513,6 +2566,10 @@ pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) ->
             None => {
                 unsafe { WinGetMsg(hab, &mut q, filter, 0, 0) };
             }
+            Some(fl) if lo != 0 || hi != 0 => match peek_range(hab, filter, lo, hi.max(lo), fl & 1 != 0) {
+                Some(m) => q = m,
+                None => return 0,
+            },
             Some(fl) => {
                 if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
                     return 0;
@@ -2617,14 +2674,13 @@ pub fn read_msg(p: *const u8) -> Option<(u16, u16, u16, u32)> {
 }
 
 pub fn translate(p: *const u16) -> bool {
-    let Some((h, m, _, _)) = read_msg(p as *const u8) else { return false };
+    let Some((h, m, wp, lp)) = read_msg(p as *const u8) else { return false };
     if m != W_KEYDOWN && m != W_SYSKEYDOWN {
         return false;
     }
-    let Some((ch, cm, c, lp)) = u().last_char.take() else { return false };
-    if ch != h {
-        return false;
-    }
+    let cs = &mut u().chars;
+    let Some(i) = cs.iter().position(|x| x.1 == h && x.2 == wp && x.3 == lp) else { return false };
+    let (_, _, _, _, cm, c) = cs.remove(i);
     let pm = wnd(h).map_or(0, |w| w.client);
     unsafe { WinPostMsg(pm, POSTED | cm as u32, c as u32, lp) != 0 }
 }

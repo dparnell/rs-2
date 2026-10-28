@@ -1662,6 +1662,17 @@ static void delphi_tests(HINSTANCE hInst)
     check(crc.bottom < 78 && SendMessage(list, LB_GETHORIZONTALEXTENT, 0, 0) == 400, "LB_SETHORIZONTALEXTENT wider than the list: a horizontal one");
     DestroyWindow(list);
 
+    /* PeekMessage's message range: only that range is looked at (and
+     * taken off the queue). */
+    {
+        MSG m1;
+        PostMessage(top, WM_USER + 5, 1, 0);
+        PostMessage(top, WM_USER + 6, 2, 0);
+        check(PeekMessage(&m1, NULL, WM_USER + 6, WM_USER + 6, PM_REMOVE) && m1.message == WM_USER + 6 && m1.wParam == 2, "PeekMessage with a range takes that message");
+        check(!PeekMessage(&m1, NULL, WM_USER + 6, WM_USER + 6, PM_NOREMOVE), "and none is left of the range");
+        check(PeekMessage(&m1, NULL, 0, 0, PM_REMOVE) && m1.message == WM_USER + 5, "the message before it is still there");
+    }
+
     /* A superclassed combo box made with the list's WS_VSCROLL and the
      * dropped height: no scroll bar of its own, the field's height. */
     {
