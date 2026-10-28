@@ -29,6 +29,7 @@
 //! |---------|------|
 //! | 420 | `Rs2Win16SetIntHandler(ULONG pfnHandler16)` (32-bit `_System`; 0 removes it) |
 //! | 421 | `Rs2Win16Selector(ULONG op, ULONG sel, ULONG value)`: KERNEL's selector functions (below) |
+//! | 422 | `Rs2Win16ReadTask(ULONG pid, ULONG sel, ULONG off, PVOID buf, ULONG cb)`: read another Windows task's memory (TOOLHELP: debuggers' copies of the debuggee's segments); the bytes read |
 
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
@@ -68,6 +69,53 @@ pub fn set_int_handler(c: &mut Ctx) -> u32 {
     let h = c.arg(0);
     c.process.win16_int.store(h, Ordering::Relaxed);
     0
+}
+
+/// RS2API 422: Rs2Win16ReadTask(pid, sel, off, buf, cb): up to `cb`
+/// bytes (64 KB at most) at `sel:off` in process `pid` into `buf`. Both
+/// processes must be Windows programs (an interrupt handler registered);
+/// pages that are not there read as zeros. The bytes read (0 if `sel` is
+/// not a selector there).
+pub fn read_task(c: &mut Ctx) -> u32 {
+    let (pid, sel, off, buf, cb) = (c.arg(0), c.arg(1) as u16, c.arg(2), c.arg(3), c.arg(4).min(0x1_0000));
+    if c.process.win16_int.load(Ordering::Relaxed) == 0 {
+        return 0;
+    }
+    let Some(p) = crate::task::process::by_pid(pid) else { return 0 };
+    if p.win16_int.load(Ordering::Relaxed) == 0 || sel & 4 == 0 || sel >> 3 == 0 {
+        return 0;
+    }
+    // Read into a copy first: the two address spaces are never locked at
+    // once.
+    let data = {
+        let mut sp = p.space.lock();
+        let d = sp.descriptor(sel);
+        if d == 0 {
+            return 0;
+        }
+        let mut limit = (d & 0xffff) as u32 | ((d >> 32) & 0xf_0000) as u32;
+        if d & (1 << 55) != 0 {
+            limit = limit << 12 | 0xfff;
+        }
+        if off > limit {
+            return 0;
+        }
+        let n = cb.min(limit - off + 1);
+        let Some(lin) = sp.linear(sel, off) else { return 0 };
+        let mut v = alloc::vec![0u8; n as usize];
+        // Page by page: one that is not there stays zero.
+        let mut i = 0u32;
+        while i < n {
+            let step = (0x1000 - (lin.wrapping_add(i) & 0xfff)).min(n - i);
+            let _ = sp.read_bytes(lin.wrapping_add(i), &mut v[i as usize..(i + step) as usize]);
+            i += step;
+        }
+        v
+    };
+    if !c.write(buf, &data) {
+        return 0;
+    }
+    data.len() as u32
 }
 
 /// RS2API 421: Rs2Win16Selector(op, sel, value), for KERNEL's selector

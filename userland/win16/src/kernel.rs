@@ -214,8 +214,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         30 => 0,
         // GetCurrentTask (and the first task, in DX)
         36 => {
-            let t = TASK.get().hinst as u32;
-            t << 16 | t
+            let t = crate::toolhelp::current_task() as u32;
+            let first = crate::toolhelp::own_tdb() as u32;
+            (if first != 0 { first } else { t }) << 16 | t
         }
         // GetCurrentPDB
         37 => TASK.get().psp as u32,
@@ -417,11 +418,20 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let m = a.w();
             core::mem::replace(&mut TASK.get().error_mode, m) as u32
         }
+        // GetCodeHandle(lpfn): the handle of the code segment the
+        // procedure is in.
+        93 => {
+            let f = a.l();
+            let sel = (f >> 16) as u16;
+            let ok = sel & 4 != 0 && unsafe { crate::pm::Rs2Win16Selector(5, sel as u32, 0) } != u32::MAX;
+            if ok { (sel | 7) as u32 } else { 0 }
+        }
         // OutputDebugString(s)
         115 => {
             let s = a.l();
             let t = far_str(s).unwrap_or(b"");
             trace(format_args!("W16 debug: {}", t.iter().map(|&c| c as char).collect::<alloc::string::String>()));
+            crate::toolhelp::output_debug_string(t);
             0
         }
         // GetDOSEnvironment
@@ -572,6 +582,11 @@ pub fn init_task(r: &mut crate::dos::Regs) {
     }
     t.psp = make_psp();
     crate::module::register_exe(t.hinst);
+    // The task database and NFY_STARTTASK (the program's start: the
+    // return address of its InitTask call).
+    let st = flat((ds as u32) << 16 | r[SP] as u32) as *const u16;
+    let start = unsafe { st.read_unaligned() as u32 | (st.add(1).read_unaligned() as u32) << 16 };
+    crate::toolhelp::task_started(t.hinst, t.psp, t.cmdshow, (ds, r[SP], top, top, bottom), start);
     r[AX] = 1;
     // The command line: a NUL-terminated copy of the PSP's tail (startup
     // code takes it as a C string).
@@ -583,6 +598,14 @@ pub fn init_task(r: &mut crate::dos::Regs) {
     r[DI] = t.hinst;
     if crate::tracing() {
         trace(format_args!("W16 InitTask: inst {:#x} stack {:#x}-{:#x} heap {:#x} psp {:#x}", t.hinst, top, bottom, heap, t.psp));
+        // The program's segments (to find a selector's segment).
+        let hmod = crate::module::find(0).map_or(0, |m| m.hmod);
+        let n = unsafe { crate::pm::Rs2Win16Selector(6, hmod, 0) };
+        let mut s = alloc::string::String::new();
+        for i in 1..=n {
+            let _ = core::fmt::write(&mut s, format_args!(" {}={:x}", i, unsafe { crate::pm::Rs2Win16Selector(6, hmod, i) }));
+        }
+        trace(format_args!("W16 segments:{s}"));
     }
 }
 
@@ -734,6 +757,16 @@ fn segment_size(sel: u16) -> u32 {
         return 0;
     }
     cb.min(0x10000)
+}
+
+/// The lock count of a global block (TOOLHELP).
+pub fn lock_count(h: u16) -> u16 {
+    GLOBALS.get().get(&(h | 7)).map_or(0, |b| b.locks)
+}
+
+/// The GlobalAlloc blocks (TOOLHELP's GlobalFirst/GlobalNext).
+pub fn global_handles() -> alloc::vec::Vec<u16> {
+    GLOBALS.get().keys().copied().collect()
 }
 
 pub fn global_alloc(fl: u16, n: u32) -> u16 {

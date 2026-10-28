@@ -343,6 +343,11 @@ pub fn set_window_pos(h: u16, after: u16, x: i32, y: i32, cx: i32, cy: i32, fl: 
     ok
 }
 
+/// The registered classes: (name, instance) (TOOLHELP's ClassFirst).
+pub fn class_list() -> Vec<(Vec<u8>, u16)> {
+    u().classes.iter().map(|c| (c.name.clone(), c.hinst)).collect()
+}
+
 /// The top-level windows.
 pub fn top_levels() -> Vec<u16> {
     u().wnds.iter().filter(|w| w.style & WS_CHILD == 0).map(|w| w.hwnd).collect()
@@ -1063,10 +1068,22 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             a.l();
             0
         }
+        // SwitchToThisWindow(hwnd, fRestore) (undocumented): bring the
+        // window up and activate it.
+        172 => {
+            let (h, restore) = (a.w(), a.w());
+            show_window(h, if restore != 0 && is_iconic(h) { 9 } else { 5 });
+            0
+        }
+        // EndMenu (undocumented): close the menu being tracked.
+        187 => {
+            crate::menu::end_menu();
+            0
+        }
         // GetWindowTask(hwnd)
         224 => {
             a.w();
-            TASK.get().hinst as u32
+            crate::toolhelp::current_task() as u32
         }
         // GetTopWindow(hwnd)
         229 => {
@@ -1264,6 +1281,7 @@ fn init_app() -> u32 {
         trace(format_args!("WIN16: no PM message queue"));
         return 0;
     }
+    crate::toolhelp::queue_created(t.hmq);
     unsafe {
         // CS_MOVENOTIFY: WM_MOVE when a window moves (Windows programs keep
         // their windows' positions from it).
@@ -2476,6 +2494,10 @@ pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) ->
             return peek.is_some() as u32;
         }
         let Some((hwnd, msg, wp, lp)) = win_message(&q) else {
+            if q.msg == crate::toolhelp::NOTIFY_MSG && q.hwnd == 0 {
+                crate::toolhelp::deliver(q.mp1, q.mp2);
+                continue;
+            }
             unsafe { WinDispatchMsg(hab, &q) };
             if peek.is_some() {
                 // Only Windows messages count for PeekMessage.

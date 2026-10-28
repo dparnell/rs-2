@@ -712,6 +712,25 @@ fn item_text(fl: u16, text: u32) -> Vec<u8> {
 
 /// TrackPopupMenu: show the menu at (x, y) on the screen; its commands go
 /// to the window; returns when the menu closes.
+/// The pop-up menu TrackPopupMenu shows (EndMenu closes it).
+static TRACKING: crate::Global<u32> = crate::Global::new(0);
+
+/// EndMenu: the pop-up being tracked, or the active window's menu bar,
+/// leaves menu mode.
+pub fn end_menu() {
+    let pm = core::mem::replace(TRACKING.get(), 0);
+    // MM_ENDMENUMODE
+    if pm != 0 && unsafe { WinIsWindowVisible(pm) } != 0 {
+        unsafe { WinSendMsg(pm, 0x0186, 1, 0) };
+        return;
+    }
+    let active = unsafe { crate::pm::WinQueryActiveWindow(HWND_DESKTOP) };
+    let bar = unsafe { WinWindowFromID(active, FID_MENU) };
+    if bar != 0 {
+        unsafe { WinSendMsg(bar, 0x0186, 1, 0) };
+    }
+}
+
 fn track_popup(menu: u16, x: i32, y: i32, hwnd: u16) -> bool {
     let pm = pm_of(menu);
     let Some(c) = wnd(hwnd).map(|w| w.client) else { return false };
@@ -728,6 +747,7 @@ fn track_popup(menu: u16, x: i32, y: i32, hwnd: u16) -> bool {
         return false;
     }
     let hab = crate::kernel::TASK.get().hab;
+    *TRACKING.get() = pm;
     while unsafe { WinIsWindowVisible(pm) } != 0 {
         let mut q = QMsg::default();
         if unsafe { WinGetMsg(hab, &mut q, 0, 0, 0) } == 0 {
