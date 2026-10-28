@@ -510,6 +510,7 @@ entries! {
     u_getupdaterect = 2190, 8;
     u_childwindowfrompoint = 2191, 6;
     u_insendmessage = 2192, 0;
+    u_getsystemdebugstate = 2231, 0;
     u_isclipboardformatavailable = 2193, 2;
     u_tabbedtextout = 2196, 20;
     u_gettabbedtextextent = 2197, 14;

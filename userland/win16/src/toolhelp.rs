@@ -43,6 +43,21 @@ const MAGIC: u32 = 0x5431_3657; // "W16T"
 /// The PM queue message of a notification: mp1 the NFY_ code and the
 /// process of the task it is about, mp2 the data.
 pub const NOTIFY_MSG: u32 = 0x0004_0000 | 0x4e46;
+/// The PM queue message that has the task's own thread run what a stop's
+/// thread switched it to (TaskSwitch).
+pub const SWITCH_MSG: u32 = 0x0004_0000 | 0x4e47;
+
+/// TaskSwitch from a stop's thread to this task: where it runs (0: none),
+/// and whether it has.
+static SWITCH_TO: AtomicU32 = AtomicU32::new(0);
+static SWITCHED: AtomicU32 = AtomicU32::new(0);
+/// A message was posted to the stop's thread that it has not yet taken.
+static STOP_KICKED: AtomicU32 = AtomicU32::new(0);
+/// The stop's thread waited for messages (the debugger ran meanwhile).
+static STOP_YIELDED: AtomicU32 = AtomicU32::new(0);
+/// The stop's thread yielded to this task (DirectedYield, Yield), and goes
+/// on when the task yields back.
+static HANDED: AtomicU32 = AtomicU32::new(0);
 
 const NFY_STARTTASK: u16 = 4;
 const NFY_EXITTASK: u16 = 5;
@@ -234,6 +249,28 @@ fn new_block(size: u32) -> Option<(u16, *mut u8)> {
     Some(((thunk16::far(p) >> 16) as u16, p))
 }
 
+/// PrestoChangoSelector of a selector this process does not have, from a
+/// debugger: another task's selector met in that task's memory (on Windows
+/// all tasks share one LDT; here the debugger has only the copies). The
+/// alias describes a block of its own, so that what the debugger writes
+/// there (a breakpoint) goes nowhere instead of faulting.
+pub fn scratch_alias(src: u32, dst: u32) -> u32 {
+    use crate::pm::Rs2Win16Selector as sel;
+    static SCRATCH: Global<u32> = Global::new(0);
+    if !ST.get().views.iter().any(|v| v.attached && !v.exited) || unsafe { sel(1, dst, 0) } == u32::MAX {
+        return 0;
+    }
+    if *SCRATCH.get() == 0 {
+        let Some((_, p)) = new_block(0x1_0000) else { return 0 };
+        *SCRATCH.get() = p as u32;
+    }
+    if crate::tracing() {
+        crate::trace(format_args!("W16 debug: {src:04x} is not this process's selector: {dst:04x} describes a scratch block"));
+    }
+    let ok = unsafe { sel(2, dst, *SCRATCH.get()) != 0 && sel(3, dst, 0xffff) != 0 && sel(7, dst, 2) != 0 };
+    if ok { dst } else { 0 }
+}
+
 /// Fill a TDB (Windows' layout: the fields programs read).
 #[allow(clippy::too_many_arguments)]
 fn fill_tdb(p: *mut u8, tdb: u16, ss_sp: u32, hinst: u16, hmodule: u16, hmq: u32, psp: u16, cmdshow: u16, name: &[u8]) {
@@ -392,7 +429,7 @@ fn view(p: u32) -> Option<&'static mut View> {
         s.timer = unsafe { crate::pm::WinStartTimer(crate::kernel::TASK.get().hab, 0, 0x7d15, 50) } != 0;
     }
     if crate::tracing() {
-        crate::trace(format_args!("W16 view of task {p}: {} segments, attached {attached}", segs.len()));
+        crate::trace(format_args!("W16 view of task {p}: {} segments, attached {attached}: {:x?}", segs.len(), segs));
     }
     s.views.push(View { pid: p, tdb, moddb, segs, name, path, exited: false, csip, attached, base });
     s.views.last_mut()
@@ -511,6 +548,8 @@ unsafe extern "C" fn stop_thread(_: u32) {
     let hmq = unsafe { crate::pm::WinCreateMsgQueue(hab, 0) };
     ST.get().stop_hmq = hmq;
     let rec = ST.get().stop_rec;
+    STOP_KICKED.store(0, Ordering::SeqCst);
+    STOP_YIELDED.store(0, Ordering::SeqCst);
     run_stop(&rec);
     unsafe {
         crate::pm::WinDestroyMsgQueue(hmq);
@@ -540,6 +579,11 @@ fn on_stop_thread() -> bool {
 /// GetMessage on the stop's thread waits (the debugger's thread runs).
 pub fn stop_thread_waits(w: bool) {
     if on_stop_thread() {
+        if w {
+            STOP_YIELDED.store(1, Ordering::SeqCst);
+        } else {
+            STOP_KICKED.store(0, Ordering::SeqCst);
+        }
         ST.get().stop_waiting = w;
     }
 }
@@ -547,7 +591,89 @@ pub fn stop_thread_waits(w: bool) {
 /// PostAppMessage to a task being stopped: its thread's queue.
 pub fn task_queue(task: u16) -> Option<u32> {
     let s = ST.get();
-    (s.stop_tid != 0 && s.stop_hmq != 0 && task != 0 && task | 7 == s.stop_task | 7).then_some(s.stop_hmq)
+    let q = (s.stop_tid != 0 && s.stop_hmq != 0 && task != 0 && task | 7 == s.stop_task | 7).then_some(s.stop_hmq);
+    if q.is_some() {
+        STOP_KICKED.store(1, Ordering::SeqCst);
+    }
+    q
+}
+
+/// The stop's thread runs (this thread waiting) until it has taken what
+/// was posted to it and then goes on or waits for messages again.
+fn let_stop_run() {
+    HANDED.store(0, Ordering::SeqCst);
+    for _ in 0..500 {
+        let s = ST.get();
+        // (Or it yields to this task, or switches it to code of its own:
+        // this thread goes back to its messages.)
+        if s.stop_tid == 0 || (s.stop_waiting && STOP_KICKED.load(Ordering::SeqCst) == 0) || HANDED.load(Ordering::SeqCst) != 0 || SWITCH_TO.load(Ordering::SeqCst) != 0 {
+            break;
+        }
+        crate::w16lock::waiting(|| unsafe { os2::DosSleep(5) });
+    }
+}
+
+/// This task yields (Yield, PeekMessage or GetMessage finding nothing):
+/// a stop's thread that yielded to it goes on now, until it is done or
+/// waits or yields again.
+pub fn task_yields() {
+    if HANDED.load(Ordering::SeqCst) != 0 && !on_stop_thread() && ST.get().stop_tid != 0 {
+        let_stop_run();
+    }
+}
+
+/// A stop's thread yields to this task (the debugger), which runs until
+/// it yields back, as Windows would switch from the stopped task to it.
+fn yield_to_task() {
+    HANDED.store(1, Ordering::SeqCst);
+    for _ in 0..1000 {
+        if HANDED.load(Ordering::SeqCst) == 0 {
+            break;
+        }
+        crate::w16lock::waiting(|| unsafe { os2::DosSleep(5) });
+    }
+    HANDED.store(0, Ordering::SeqCst);
+}
+
+/// DirectedYield(task): Windows runs that task until it yields. A task a
+/// debugger stopped, told to go on (PostAppMessage to its stop's thread):
+/// the stop is let go, the task runs, and a stop it comes to at once (a
+/// single step) is handled before the debugger goes on, as Windows would
+/// have run the task to it inside DirectedYield.
+pub fn directed_yield(task: u16) {
+    if on_stop_thread() {
+        if task != 0 && task | 7 != ST.get().stop_task | 7 {
+            yield_to_task();
+        }
+        return;
+    }
+    poll(true);
+    if ST.get().stop_tid == 0 || task | 7 != ST.get().stop_task | 7 {
+        task_yields();
+        crate::w16lock::yield_now();
+        return;
+    }
+    let p = ST.get().stop_pid;
+    let_stop_run();
+    if ST.get().stop_tid != 0 || !ST.get().pending.iter().any(|x| x.0 == p) {
+        return;
+    }
+    // (A while: a task that goes on running never stops here.)
+    for _ in 0..40 {
+        // (poll may meet the stop itself.)
+        poll(true);
+        if ST.get().stop_tid == 0 {
+            let mut rec = [0u32; 20];
+            if unsafe { crate::pm::Rs2Win16Debug(3, p, rec.as_mut_ptr() as u32, 0, 0) } != 0 {
+                stopped(&rec);
+            }
+        }
+        if ST.get().stop_tid != 0 {
+            let_stop_run();
+            return;
+        }
+        unsafe { os2::DosSleep(5) };
+    }
 }
 
 /// The PM queue of the calling thread (the stop's thread has its own).
@@ -592,12 +718,42 @@ fn run_stop(rec: &[u32; 20]) {
             }
         }
     }
+    // A single step the handler goes on with, without having waited for
+    // the debugger (stepping through a statement, or past a breakpoint):
+    // the task goes on now, as Windows returns to it from the interrupt.
+    if on_stop_thread() && STOP_YIELDED.load(Ordering::SeqCst) == 0 && resume.is_some_and(|r| r[9] & 0x100 != 0) {
+        if let Some(v) = view(p) {
+            sync(v);
+        }
+        if crate::tracing() {
+            crate::trace(format_args!("W16 debug: task {p} steps on at {:?}", resume.map(|r| (r[10], r[8], r[9]))));
+        }
+        let rp = resume.as_ref().map_or(0, |r| r.as_ptr() as u32);
+        unsafe { crate::pm::Rs2Win16Debug(4, p, tid, rp, 0) };
+        return;
+    }
     // The task goes on once the debugger yields (Windows switches to it
     // only then), with the breakpoints the debugger set meanwhile.
     if crate::tracing() {
         crate::trace(format_args!("W16 debug: task {p} goes on at {:?} when the debugger yields", resume.map(|r| (r[10], r[8], r[9]))));
     }
     ST.get().pending.push((p, tid, resume));
+}
+
+/// SWITCH_MSG on the task's own thread: it runs what a stop's thread
+/// switched it to (that returns far to `callback_return`, the address
+/// TaskGetCSIP gave).
+pub fn switched_to() {
+    let csip = SWITCH_TO.swap(0, Ordering::SeqCst);
+    if csip != 0 {
+        if crate::tracing() {
+            crate::trace(format_args!("W16 TaskSwitch: this task runs {:04x}:{:04x}", csip >> 16, csip & 0xffff));
+        }
+        let saved = set_current(0);
+        PascalCall::new().call(csip);
+        set_current(saved);
+    }
+    SWITCHED.store(1, Ordering::SeqCst);
 }
 
 /// A module database as Windows keeps it: the NE header and its tables
@@ -1356,14 +1512,34 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 None => 0,
             }
         }
+        // A stop's thread asking for this task's own: it waits in its
+        // scheduler, and a far return there resumes it (`switched_to`).
         6282 => {
             let t = a.w();
+            if on_stop_thread() && t != 0 && t | 7 == own_tdb() | 7 {
+                return Some(thunk16::callback_return());
+            }
             view_of(t).map_or(0, |v| v.csip)
         }
         // TaskSwitch: the task goes on (from where it is: the copy's
-        // address is not where its code is).
+        // address is not where its code is). From a stop's thread to this
+        // task (a debugger evaluating a breakpoint's condition in its own
+        // task): the task's thread runs `csip`, and the stopped task goes
+        // on once it has and waits again, as Windows switches back to it
+        // only when the debugger yields.
         6283 => {
             let (t, csip) = (a.w(), a.l());
+            if on_stop_thread() && t != 0 && t | 7 == own_tdb() | 7 {
+                SWITCHED.store(0, Ordering::SeqCst);
+                SWITCH_TO.store(csip, Ordering::SeqCst);
+                unsafe { crate::pm::WinPostQueueMsg(crate::kernel::TASK.get().hmq, SWITCH_MSG, 0, 0) };
+                crate::w16lock::waiting(|| {
+                    while SWITCHED.load(Ordering::SeqCst) == 0 {
+                        unsafe { os2::DosSleep(5) };
+                    }
+                });
+                return Some(1);
+            }
             let Some(v) = view_of(t) else { return Some(0) };
             v.csip = csip;
             let p = v.pid;

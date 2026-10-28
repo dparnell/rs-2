@@ -130,7 +130,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // the other type (code for data, data for code).
         177 => {
             let (src, dst) = (a.w() as u32, a.w() as u32);
-            selector_copy(src, dst)
+            match selector_copy(src, dst) {
+                0 => crate::toolhelp::scratch_alias(src, dst),
+                r => r,
+            }
         }
         // GetSelectorBase(sel), GetSelectorLimit(sel)
         186 | 188 => {
@@ -208,16 +211,16 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // GlobalCompact(min): the free memory.
         25 => 0x00ff_0000,
-        // DirectedYield(hTask): as Yield.
+        // DirectedYield(hTask): as Yield; a debugged task let go runs to
+        // its next stop first (toolhelp.rs).
         150 => {
-            a.w();
-            crate::toolhelp::poll(true);
-            crate::w16lock::yield_now();
+            crate::toolhelp::directed_yield(a.w());
             0
         }
         // Yield: a debugged task the debugger let go runs (toolhelp.rs).
         29 => {
             crate::toolhelp::poll(true);
+            crate::toolhelp::task_yields();
             crate::w16lock::yield_now();
             0
         }

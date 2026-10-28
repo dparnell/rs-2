@@ -329,9 +329,13 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             if crate::kernel::global_free(s) { 0 } else { s as u32 }
         }
         // EnumTaskWindows(htask, proc, lParam): the task's top-level
-        // windows.
+        // windows. Another task's (a process of its own, as a task a
+        // debugger stopped) are not this task's to enumerate.
         2225 => {
-            let (_t, p, lp) = (a.w(), a.l(), a.l());
+            let (t, p, lp) = (a.w(), a.l(), a.l());
+            if crate::toolhelp::task_pid(t).is_some_and(|p| p != crate::toolhelp::own_pid()) {
+                return Some(1);
+            }
             for w in crate::user::top_levels() {
                 if crate::user::wnd(w).is_some() && PascalCall::new().w(w).l(lp).call(p) as u16 == 0 {
                     break;

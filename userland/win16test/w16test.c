@@ -1719,6 +1719,16 @@ BOOL FAR PASCAL _export TestNotify(WORD id, DWORD data)
     return FALSE;
 }
 
+static int enum_count;
+
+BOOL FAR PASCAL _export CountWnd(HWND hwnd, LPARAM lp)
+{
+    (void)hwnd;
+    (void)lp;
+    enum_count++;
+    return TRUE;
+}
+
 static void toolhelp_tests(HINSTANCE hInst)
 {
     TASKENTRY te;
@@ -1763,6 +1773,19 @@ static void toolhelp_tests(HINSTANCE hInst)
     te.dwSize = sizeof te;
     check(nfy_task && TaskFindHandle(&te, nfy_task) && lstrcmp(te.szModule, "HELLO16") == 0, "TaskFindHandle on the other task");
     check(IsTask(nfy_task) && GetCurrentTask() == me_task, "IsTask; GetCurrentTask is this task again");
+    {
+        /* EnumTaskWindows: this task's windows, none of them another's. */
+        HWND tw = CreateWindow("W16Test", "enum", WS_OVERLAPPED, 0, 0, 50, 50, NULL, NULL, hInst, NULL);
+        int own;
+        enum_count = 0;
+        EnumTaskWindows(me_task, (WNDENUMPROC)CountWnd, 0);
+        own = enum_count;
+        enum_count = 0;
+        EnumTaskWindows(nfy_task, (WNDENUMPROC)CountWnd, 0);
+        check(tw && own >= 1 && enum_count == 0, "EnumTaskWindows: this task's windows, not for another task");
+        DestroyWindow(tw);
+    }
+    check(GetSystemDebugState() == 0, "GetSystemDebugState: no menu, no system-modal window");
     TerminateApp(nfy_task, NO_UAE_BOX);
     t0 = GetTickCount();
     while (nfy_exits == 0 && GetTickCount() - t0 < 5000)

@@ -1074,6 +1074,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // InSendMessage
         192 => 0,
+        // GetSystemDebugState: no menu is tracked, no system-modal window,
+        // every task has its queue.
+        231 => 0,
         // GetKeyboardState(lpKeys)
         222 => {
             let p = a.p();
@@ -2590,6 +2593,9 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
     }
     let hab = TASK.get().hab;
     let filter = if h == 0 { 0 } else { wnd(h).map_or(0, |w| w.client) };
+    // PeekMessage that finds nothing yields, then looks once more (what
+    // the tasks it let run posted, as a debugged task's stop, is seen).
+    let mut yielded = false;
     loop {
         crate::toolhelp::poll(false);
         let mut q = QMsg::default();
@@ -2597,6 +2603,7 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
             None => {
                 if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
                     crate::toolhelp::poll(true);
+                    crate::toolhelp::task_yields();
                 }
                 // Waiting: another thread of the task may run (w16lock.rs).
                 crate::w16lock::waiting(|| {
@@ -2608,21 +2615,27 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
             Some(fl) if lo != 0 || hi != 0 => match peek_range(hab, filter, lo, hi.max(lo), fl & 1 != 0) {
                 Some(m) => q = m,
                 None => {
-                    crate::toolhelp::poll(fl & 2 == 0);
-                    if fl & 2 == 0 {
-                        crate::w16lock::yield_now();
+                    if fl & 2 != 0 || yielded {
+                        return 0;
                     }
-                    return 0;
+                    crate::toolhelp::poll(true);
+                    crate::toolhelp::task_yields();
+                    crate::w16lock::yield_now();
+                    yielded = true;
+                    continue;
                 }
             },
             Some(fl) => {
                 if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
                     // PM_NOYIELD (2) keeps the other tasks waiting.
-                    crate::toolhelp::poll(fl & 2 == 0);
-                    if fl & 2 == 0 {
-                        crate::w16lock::yield_now();
+                    if fl & 2 != 0 || yielded {
+                        return 0;
                     }
-                    return 0;
+                    crate::toolhelp::poll(true);
+                    crate::toolhelp::task_yields();
+                    crate::w16lock::yield_now();
+                    yielded = true;
+                    continue;
                 }
                 let ours = q.msg == WM_QUIT || win_message(&q).is_some();
                 if !ours || fl & 1 != 0 {
@@ -2637,6 +2650,10 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
         let Some((hwnd, msg, wp, lp)) = win_message(&q) else {
             if q.msg == crate::toolhelp::NOTIFY_MSG && q.hwnd == 0 {
                 crate::toolhelp::deliver(q.mp1, q.mp2);
+                continue;
+            }
+            if q.msg == crate::toolhelp::SWITCH_MSG && q.hwnd == 0 {
+                crate::toolhelp::switched_to();
                 continue;
             }
             unsafe { WinDispatchMsg(hab, &q) };
@@ -2677,6 +2694,7 @@ fn wait_message() {
     let mut q = QMsg::default();
     while unsafe { WinPeekMsg(hab, &mut q, 0, 0, 0, PM_NOREMOVE) } == 0 {
         crate::toolhelp::poll(true);
+        crate::toolhelp::task_yields();
         crate::w16lock::waiting(|| unsafe { os2::DosSleep(10) });
     }
 }
