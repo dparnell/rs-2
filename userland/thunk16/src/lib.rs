@@ -232,6 +232,15 @@ impl PascalCall {
     }
 }
 
+/// The 16:16 address a 16-bit procedure `call16` calls returns to (a
+/// far return there ends the call).
+pub fn callback_return() -> u32 {
+    unsafe extern "C" {
+        fn thunk16_cb16_back();
+    }
+    far(thunk16_cb16_back as *const u8)
+}
+
 impl Default for PascalCall {
     fn default() -> Self {
         Self::new()
@@ -300,6 +309,8 @@ core::arch::global_asm!(
     ".byte 0x66, 0xcb",
     ".code16",
     ".Lcb16_back:",
+    ".globl thunk16_cb16_back",
+    "thunk16_cb16_back:",
     // jmp far 0x5b:.Lcb32_back
     ".byte 0x66, 0xea",
     ".long .Lcb32_back",

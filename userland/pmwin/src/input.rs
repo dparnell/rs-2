@@ -119,7 +119,8 @@ pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
     }
     let o = st().desk.origin(target);
     let mp1 = pack(p.x - o.x, p.y - o.y);
-    if down & 1 != 0 && target != HWND_DESKTOP && st().capture == 0 && !menu::is_menu(target) {
+    let no_activate = st().desk.get(win::top_level(target)).is_some_and(|w| w.style & pmwin::ws::NOACTIVATE != 0);
+    if down & 1 != 0 && target != HWND_DESKTOP && st().capture == 0 && !menu::is_menu(target) && !no_activate {
         win::activate(target);
     }
     if down == 0 && up == 0 {

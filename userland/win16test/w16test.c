@@ -6,6 +6,7 @@
  * cargo xtask run --release --headless --timeout 150 --init "RS2\W16TEST.EXE"
  */
 
+#define OEMRESOURCE
 #include <windows.h>
 #include <commdlg.h>
 #include <cderr.h>
@@ -22,10 +23,12 @@ BYTE FAR * WINAPI DdeAccessData(HDDEDATA, DWORD FAR *);
 #include <fcntl.h>
 #include <lzexpand.h>
 #include <ver.h>
+#include <toolhelp.h>
 #include "w16test.h"
 
 #pragma library("commdlg")
 #pragma library("ddeml")
+#pragma library("toolhelp")
 
 static int failures;
 static char line[160];
@@ -1546,6 +1549,229 @@ static void real_app_tests(HINSTANCE hInst)
     DestroyWindow(hwnd);
 }
 
+/* What Delphi 1.0's IDE needed (docs/WIN16.md "Delphi 1.0"). */
+static int sizes;
+static LPARAM last_size;
+
+LONG FAR PASCAL _export SizeWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_SIZE) {
+        sizes++;
+        last_size = lp;
+    }
+    return DefWindowProc(hwnd, msg, wp, lp);
+}
+
+static WNDPROC combo_proc;
+
+/* A superclass of COMBOBOX, as Delphi's VCL makes TComboBox: its own
+ * procedure, the combo box's behind it. */
+LONG FAR PASCAL _export SuperComboProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    return CallWindowProc((FARPROC)combo_proc, hwnd, msg, wp, lp);
+}
+
+static void delphi_tests(HINSTANCE hInst)
+{
+    WNDCLASS wc;
+    HWND top, child, list, owner;
+    HBITMAP bm;
+    BITMAP b;
+    HDC mem;
+    RECT rc, crc;
+    int i, n;
+
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = SizeWndProc;
+    wc.hInstance = hInst;
+    wc.hbrBackground = GetStockObject(WHITE_BRUSH);
+    wc.lpszClassName = "W16Size";
+    RegisterClass(&wc);
+
+    /* An overlapped window gets WM_SIZE when first shown, even if it was
+     * sized while hidden (Delphi's forms lay out their children then). */
+    sizes = 0;
+    top = CreateWindow("W16Size", "sizes", WS_OVERLAPPEDWINDOW, 10, 10, 200, 150, NULL, NULL, hInst, NULL);
+    check(sizes == 0, "an overlapped window created hidden: no WM_SIZE yet");
+    SetWindowPos(top, 0, 10, 10, 220, 160, SWP_NOZORDER | SWP_NOACTIVATE);
+    n = sizes;
+    check(n == 1, "SetWindowPos of a hidden window: WM_SIZE");
+    SetWindowPos(top, 0, 20, 20, 220, 160, SWP_NOZORDER | SWP_NOACTIVATE);
+    check(sizes == n, "SetWindowPos to the same size: no WM_SIZE");
+    ShowWindow(top, SW_SHOWNORMAL);
+    GetClientRect(top, &rc);
+    check(sizes == n + 1 && last_size == MAKELONG(rc.right, rc.bottom), "the first ShowWindow sends WM_SIZE");
+    n = sizes;
+    ShowWindow(top, SW_HIDE);
+    ShowWindow(top, SW_SHOWNORMAL);
+    check(sizes == n, "a second ShowWindow: no WM_SIZE");
+
+    /* A child window gets WM_SIZE from CreateWindow, visible or not. */
+    sizes = 0;
+    child = CreateWindow("W16Size", "", WS_CHILD, 0, 0, 30, 20, top, (HMENU)5, hInst, NULL);
+    check(sizes == 1 && last_size == MAKELONG(30, 20), "a hidden child window: WM_SIZE from CreateWindow");
+    n = sizes;
+    ShowWindow(child, SW_SHOW);
+    check(sizes == n, "showing it: no second WM_SIZE");
+
+    /* The system bitmaps: the combo box button is drawn. */
+    bm = LoadBitmap(NULL, MAKEINTRESOURCE(OBM_COMBO));
+    check(bm != 0 && GetObject(bm, sizeof b, &b) == sizeof b && b.bmWidth >= 13 && b.bmHeight >= 13, "LoadBitmap(NULL, OBM_COMBO)");
+    if (bm) {
+        COLORREF c0, cc;
+        mem = CreateCompatibleDC(NULL);
+        SelectObject(mem, bm);
+        c0 = GetPixel(mem, 0, 0);
+        cc = GetPixel(mem, b.bmWidth / 2, b.bmHeight / 2 - 1);
+        n = 0;
+        for (i = 1; i < b.bmHeight - 1; i++)
+            if (GetPixel(mem, b.bmWidth / 2, i) == RGB(0, 0, 0))
+                n++;
+        check(n >= 2, "OBM_COMBO has its arrow");
+        DeleteDC(mem);
+        DeleteObject(bm);
+        (void)c0; (void)cc;
+    }
+    bm = LoadBitmap(NULL, MAKEINTRESOURCE(OBM_DNARROW));
+    check(bm != 0 && GetObject(bm, sizeof b, &b) == sizeof b && b.bmWidth == GetSystemMetrics(SM_CXVSCROLL), "LoadBitmap(NULL, OBM_DNARROW): a scroll bar wide");
+    if (bm)
+        DeleteObject(bm);
+
+    /* A drop-down list: a child made a child of the desktop takes no
+     * focus and is placed on the screen. */
+    owner = CreateWindow("EDIT", "", WS_CHILD | WS_VISIBLE | WS_BORDER, 5, 5, 100, 20, top, (HMENU)6, hInst, NULL);
+    SetFocus(owner);
+    list = CreateWindow("LISTBOX", "", WS_CHILD | WS_BORDER | WS_VSCROLL | WS_HSCROLL, 0, 0, 100, 80, owner, (HMENU)7, hInst, NULL);
+    check(SetParent(list, NULL) == owner, "SetParent(list, NULL): the old parent");
+    SetWindowPos(list, HWND_TOP, 300, 200, 100, 80, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    GetWindowRect(list, &rc);
+    sprintf(line, "a child of the desktop is placed on the screen: (300,200)-(400,280), is (%d,%d)-(%d,%d)", rc.left, rc.top, rc.right, rc.bottom);
+    check(rc.left == 300 && rc.top == 200 && rc.right == 400 && rc.bottom == 280, line);
+    check(SetFocus(list) == 0 && GetFocus() == owner, "SetFocus on a child of the desktop fails");
+    /* Its scroll bars show only when there is something to scroll. */
+    SendMessage(list, LB_ADDSTRING, 0, (LPARAM)(LPSTR)"one");
+    SendMessage(list, LB_ADDSTRING, 0, (LPARAM)(LPSTR)"two");
+    GetClientRect(list, &crc);
+    check(crc.right == 98 && crc.bottom == 78, "a list box with two items has no scroll bars");
+    for (i = 0; i < 20; i++)
+        SendMessage(list, LB_ADDSTRING, 0, (LPARAM)(LPSTR)"more");
+    GetClientRect(list, &crc);
+    check(crc.right < 98 && crc.bottom == 78, "and a vertical one with 22 items");
+    SendMessage(list, LB_SETHORIZONTALEXTENT, 400, 0);
+    GetClientRect(list, &crc);
+    check(crc.bottom < 78 && SendMessage(list, LB_GETHORIZONTALEXTENT, 0, 0) == 400, "LB_SETHORIZONTALEXTENT wider than the list: a horizontal one");
+    DestroyWindow(list);
+
+    /* PeekMessage's message range: only that range is looked at (and
+     * taken off the queue). */
+    {
+        MSG m1;
+        PostMessage(top, WM_USER + 5, 1, 0);
+        PostMessage(top, WM_USER + 6, 2, 0);
+        check(PeekMessage(&m1, NULL, WM_USER + 6, WM_USER + 6, PM_REMOVE) && m1.message == WM_USER + 6 && m1.wParam == 2, "PeekMessage with a range takes that message");
+        check(!PeekMessage(&m1, NULL, WM_USER + 6, WM_USER + 6, PM_NOREMOVE), "and none is left of the range");
+        check(PeekMessage(&m1, NULL, 0, 0, PM_REMOVE) && m1.message == WM_USER + 5, "the message before it is still there");
+    }
+
+    /* A superclassed combo box made with the list's WS_VSCROLL and the
+     * dropped height: no scroll bar of its own, the field's height. */
+    {
+        WNDCLASS cw;
+        HWND cb;
+        RECT wr;
+        GetClassInfo(NULL, "COMBOBOX", &cw);
+        combo_proc = cw.lpfnWndProc;
+        cw.lpfnWndProc = SuperComboProc;
+        cw.hInstance = hInst;
+        cw.lpszClassName = "W16SuperCombo";
+        check(RegisterClass(&cw) != 0, "RegisterClass of a COMBOBOX superclass");
+        check(!RegisterClass(&cw), "the module's second class of the name fails");
+        cb = CreateWindow("W16SuperCombo", "", WS_CHILD | WS_VISIBLE | WS_VSCROLL | CBS_DROPDOWN | CBS_HASSTRINGS, 5, 40, 120, 150, top, (HMENU)8, hInst, NULL);
+        GetWindowRect(cb, &wr);
+        GetClientRect(cb, &crc);
+        sprintf(line, "a superclassed drop-down combo box is its field's height, no scroll bar (%dx%d, client %d)", wr.right - wr.left, wr.bottom - wr.top, crc.right);
+        check(cb && wr.bottom - wr.top < 40 && crc.right == wr.right - wr.left, line);
+        SetWindowPos(cb, 0, 0, 0, 120, 200, SWP_NOMOVE | SWP_NOZORDER);
+        GetWindowRect(cb, &rc);
+        check(rc.bottom - rc.top == wr.bottom - wr.top, "SetWindowPos's height is the dropped list's");
+        SendMessage(cb, CB_ADDSTRING, 0, (LPARAM)(LPSTR)"x");
+        check(SendMessage(cb, CB_GETCOUNT, 0, 0) == 1, "it is a combo box");
+        DestroyWindow(cb);
+    }
+    DestroyWindow(top);
+}
+
+/* TOOLHELP (stage 4): the databases, and notifications from another
+ * task (a process of its own here). */
+static HTASK nfy_task, nfy_exit_task;
+static int nfy_starts, nfy_exits;
+
+BOOL FAR PASCAL _export TestNotify(WORD id, DWORD data)
+{
+    if (id == NFY_STARTTASK) {
+        nfy_starts++;
+        nfy_task = GetCurrentTask();
+    } else if (id == NFY_EXITTASK) {
+        nfy_exits++;
+        nfy_exit_task = GetCurrentTask();
+    }
+    (void)data;
+    return FALSE;
+}
+
+static void toolhelp_tests(HINSTANCE hInst)
+{
+    TASKENTRY te;
+    MODULEENTRY me;
+    GLOBALENTRY ge;
+    STACKTRACEENTRY ste;
+    MEMMANINFO mmi;
+    HTASK me_task = GetCurrentTask();
+    BYTE buf[4];
+    BOOL found = FALSE;
+    MSG msg;
+    DWORD t0;
+    int i;
+
+    te.dwSize = sizeof te;
+    for (i = TaskFirst(&te); i; i = TaskNext(&te))
+        if (te.hTask == me_task)
+            found = TRUE;
+    check(found, "TaskFirst/TaskNext find this task");
+    te.dwSize = sizeof te;
+    check(TaskFindHandle(&te, me_task) && te.hInst == hInst && lstrcmp(te.szModule, "W16TEST") == 0, "TaskFindHandle: instance and module name");
+    check(*(WORD FAR *)MAKELP(me_task, 0xfa) == 0x4454 && *(WORD FAR *)MAKELP(me_task, 0x1c) == (WORD)hInst, "the task database: \"TD\", hInstance at 1Ch");
+    me.dwSize = sizeof me;
+    check(ModuleFindHandle(&me, te.hModule) && lstrcmp(me.szModule, "W16TEST") == 0, "ModuleFindHandle");
+    me.dwSize = sizeof me;
+    check(ModuleFindName(&me, "USER") && me.hModule == GetModuleHandle("USER"), "ModuleFindName(\"USER\")");
+    ge.dwSize = sizeof ge;
+    check(GlobalEntryHandle(&ge, (HGLOBAL)hInst) && ge.wType == GT_DGROUP, "GlobalEntryHandle: DGROUP");
+    check(GlobalHandleToSel((HGLOBAL)hInst) == (WORD)hInst, "GlobalHandleToSel");
+    ste.dwSize = sizeof ste;
+    i = StackTraceFirst(&ste, NULL);
+    sprintf(line, "StackTraceFirst: this task's stack (%d, SS %04X, CS:IP %04X:%04X)", i, ste.wSS, ste.wCS, ste.wIP);
+    check(i && ste.wSS == SELECTOROF((void FAR *)&ste) && ste.wCS == SELECTOROF((void (FAR *)(HINSTANCE))toolhelp_tests), line);
+    mmi.dwSize = sizeof mmi;
+    check(MemManInfo(&mmi) && mmi.wPageSize == 4096 && mmi.dwTotalPages > 0, "MemManInfo");
+    check(MemoryRead((WORD)me_task, 0xfa, buf, 2) == 2 && buf[0] == 'T' && buf[1] == 'D', "MemoryRead");
+
+    /* Another task: its start and its end, through NotifyRegister. */
+    check(NotifyRegister(NULL, (LPFNNOTIFYCALLBACK)TestNotify, NF_NORMAL), "NotifyRegister");
+    check(WinExec("RS2\\HELLO16.EXE", SW_SHOWMINNOACTIVE) > 32, "WinExec(HELLO16) returns its instance");
+    check(nfy_starts == 1 && nfy_task != 0 && nfy_task != me_task, "NFY_STARTTASK before WinExec returns, GetCurrentTask its task");
+    te.dwSize = sizeof te;
+    check(nfy_task && TaskFindHandle(&te, nfy_task) && lstrcmp(te.szModule, "HELLO16") == 0, "TaskFindHandle on the other task");
+    check(IsTask(nfy_task) && GetCurrentTask() == me_task, "IsTask; GetCurrentTask is this task again");
+    TerminateApp(nfy_task, NO_UAE_BOX);
+    t0 = GetTickCount();
+    while (nfy_exits == 0 && GetTickCount() - t0 < 5000)
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            DispatchMessage(&msg);
+    check(nfy_exits == 1 && nfy_exit_task == nfy_task, "NFY_EXITTASK for it");
+    NotifyUnRegister(NULL);
+}
+
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
 {
     out("w16test: rs2's native Win16 layer\r\n");
@@ -1555,6 +1781,8 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     stage2_tests(hInst);
     stage3_tests(hInst);
     real_app_tests(hInst);
+    delphi_tests(hInst);
+    toolhelp_tests(hInst);
     sprintf(line, "w16test done: %d failure(s)\r\n", failures);
     out(line);
     return failures;

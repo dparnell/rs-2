@@ -51,6 +51,7 @@ mod region;
 mod res;
 mod scroll;
 mod stubs;
+mod toolhelp;
 mod user;
 mod ver;
 
@@ -105,6 +106,8 @@ extern "C" fn init(flag: u32) {
         }
         let f = thunk16::far(w16_int as *const u8);
         unsafe { pm::Rs2Win16SetIntHandler(f) };
+    } else {
+        toolhelp::task_exiting(0);
     }
 }
 
@@ -283,6 +286,7 @@ entries! {
     k_lstrcat = 1089, 8;
     k_lstrlen = 1090, 4;
     k_gettempdrive = 1092, 2;
+    k_getcodehandle = 1093, 4;
     k_loadlibrary = 1095, 4;
     k_freelibrary = 1096, 2;
     k_gettempfilename = 1097, 12;
@@ -513,6 +517,8 @@ entries! {
     u_scrolldc = 2221, 20;
     u_getkeyboardstate = 2222, 4;
     u_setkeyboardstate = 2223, 4;
+    u_switchtothiswindow = 2172, 4;
+    u_endmenu = 2187, 0;
     u_getwindowtask = 2224, 2;
     u_enumtaskwindows = 2225, 10;
     u_getnextdlggroupitem = 2227, 6;
@@ -783,12 +789,40 @@ entries! {
     kb_ansitooembuff = 4134, 10;
     kb_oemtoansibuff = 4135, 10;
     // TOOLHELP
+    th_globalhandletosel = 6250, 2;
+    th_globalfirst = 6251, 6;
+    th_globalnext = 6252, 6;
+    th_globalinfo = 6253, 4;
+    th_globalentryhandle = 6254, 6;
+    th_globalentrymodule = 6255, 8;
+    th_localinfo = 6256, 6;
+    th_localfirst = 6257, 6;
+    th_localnext = 6258, 4;
+    th_modulefirst = 6259, 4;
+    th_modulenext = 6260, 4;
+    th_modulefindname = 6261, 8;
+    th_modulefindhandle = 6262, 6;
+    th_taskfirst = 6263, 4;
+    th_tasknext = 6264, 4;
+    th_taskfindhandle = 6265, 6;
+    th_stacktracefirst = 6266, 6;
+    th_stacktracecsipfirst = 6267, 12;
+    th_stacktracenext = 6268, 4;
+    th_classfirst = 6269, 4;
+    th_classnext = 6270, 4;
+    th_systemheapinfo = 6271, 4;
+    th_memmaninfo = 6272, 4;
     th_notifyregister = 6273, 8;
     th_notifyunregister = 6274, 2;
     th_interruptregister = 6275, 6;
     th_interruptunregister = 6276, 2;
     th_terminateapp = 6277, 4;
+    th_memoryread = 6278, 14;
+    th_memorywrite = 6279, 14;
     th_timercount = 6280, 4;
+    th_tasksetcsip = 6281, 6;
+    th_taskgetcsip = 6282, 2;
+    th_taskswitch = 6283, 6;
     // COMPOBJ, OLE2
     co_coinitialize = 7002, 4;
     co_couninitialize = 7003, 0;
@@ -892,6 +926,9 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
     // Printers' DCs and the printing calls (before bitmap.rs's display
     // DCs).
     if let Some(r) = print::call(idx, &mut Pascal::new(args, size)) {
+        return r;
+    }
+    if let Some(r) = toolhelp::call(idx, &mut a) {
         return r;
     }
     if let Some(r) = bitmap::call(idx, &mut a).or_else(|| region::call(idx, &mut a)).or_else(|| atom::call(idx, &mut a)).or_else(|| compat::call(idx, &mut a)).or_else(|| icon::call(idx, &mut a)).or_else(|| mdi::call(idx, &mut a))

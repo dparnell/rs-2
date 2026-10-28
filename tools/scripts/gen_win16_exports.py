@@ -30,7 +30,8 @@ EXTRA = ['INITTASK=w16_inittask @1091', 'DOS3CALL=w16_dos3call @1102', '_WSPRINT
          'CATCH=w16_catch @1055', 'THROW=w16_throw @1056', 'UNDEFINED_DYNALINK=w16_undefined @999']
 # Windows names Open Watcom's import libraries lack (USER's network calls).
 MORE_NAMES = {('USER', 513): 'WNETGETCAPS', ('USER', 516): 'WNETGETUSER', ('USER', 519): 'WNETGETERROR',
-              ('USER', 520): 'WNETGETERRORTEXT', ('USER', 530): 'WNETGETDIRECTORYTYPE'}
+              ('USER', 520): 'WNETGETERRORTEXT', ('USER', 530): 'WNETGETDIRECTORYTYPE',
+              ('USER', 172): 'SWITCHTOTHISWINDOW', ('USER', 187): 'ENDMENU'}
 # Not to be stubbed: register-based or with variable arguments.
 NO_STUB = {'INITTASK', 'DOS3CALL', '_WSPRINTF', 'WSPRINTF', 'CATCH', 'THROW'}
 

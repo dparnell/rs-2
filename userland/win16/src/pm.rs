@@ -242,6 +242,8 @@ unsafe extern "C" {
     pub fn WinSetOwner(h: u32, owner: u32) -> u32;
     #[link_name = "PMWIN.865"]
     pub fn WinSetParent(h: u32, parent: u32, redraw: u32) -> u32;
+    #[link_name = "PMWIN.874"]
+    pub fn WinSetWindowBits(h: u32, i: i32, v: u32, mask: u32) -> u32;
     #[link_name = "PMWIN.899"]
     pub fn WinWindowFromID(h: u32, id: u32) -> u32;
     #[link_name = "PMWIN.879"]
@@ -289,6 +291,8 @@ unsafe extern "C" {
     pub fn Rs2Win16SetIntHandler(handler: u32) -> u32;
     #[link_name = "RS2API.421"]
     pub fn Rs2Win16Selector(op: u32, sel: u32, value: u32) -> u32;
+    #[link_name = "RS2API.422"]
+    pub fn Rs2Win16ReadTask(pid: u32, sel: u32, off: u32, buf: *mut u8, cb: u32) -> u32;
 }
 
 pub const HWND_DESKTOP: u32 = 1;
@@ -345,6 +349,9 @@ pub const FCF_NOBYTEALIGN: u32 = 0x1000;
 
 pub const WS_VISIBLE: u32 = 0x8000_0000;
 pub const WS_CLIPSIBLINGS: u32 = 0x1000_0000;
+/// rs2's PM: not activated by a click (pmwin::ws::NOACTIVATE).
+pub const NOACTIVATE: u32 = 0x0010_0000;
+pub const QWL_STYLE: i32 = -2;
 
 pub const SWP_SIZE: u32 = 0x0001;
 pub const SWP_MOVE: u32 = 0x0002;

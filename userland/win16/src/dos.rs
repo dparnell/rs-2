@@ -61,7 +61,7 @@ pub fn interrupt(p: *mut u16) {
         }
         // A protection fault: handled when it is fixed (the number 0).
         0x10d => {
-            if segment_load(&mut r) {
+            if crate::toolhelp::iret_trap(&mut r) || segment_load(&mut r) {
                 r[INTNO] = 0;
             }
         }
@@ -754,7 +754,10 @@ fn int21(r: &mut Regs) {
         }
         0x49 | 0x4a => fail(r, 9),
         // Exit.
-        0x4c => unsafe { os2::DosExit(1, al as u32) },
+        0x4c => {
+            crate::toolhelp::task_exiting(al as u16);
+            unsafe { os2::DosExit(1, al as u32) }
+        }
         // The PSP.
         0x51 | 0x62 => r[BX] = kernel::TASK.get().psp,
         _ => {

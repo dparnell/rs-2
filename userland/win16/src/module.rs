@@ -81,6 +81,12 @@ pub fn register_exe(hinst: u16) {
     MODULES.get().insert(0, Module { hinst, dgroup: hinst, hmod, name, loads: 0, image: None });
 }
 
+/// The program and its DLLs: (handle, name, file) (TOOLHELP's
+/// ModuleFirst).
+pub fn list() -> Vec<(u16, Vec<u8>, Vec<u8>)> {
+    MODULES.get().iter().map(|m| (m.hinst, m.name.clone(), path_of(m.hmod).unwrap_or_default())).collect()
+}
+
 /// The program's instance.
 pub fn exe() -> u16 {
     MODULES.get().first().map_or(0, |m| m.hinst)

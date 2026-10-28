@@ -128,8 +128,12 @@ pub fn exec(cmd: &[u8]) -> u16 {
     z.push(0);
     let mut fail = [0u8; 64];
     let mut res = os2::ResultCodes { code_terminate: 0, code_result: 0 };
-    // EXEC_ASYNC: it runs on its own.
+    let mut ty = 0u32;
+    let windows = unsafe { os2::DosQueryAppType(z.as_ptr(), &mut ty) } == 0 && ty & 0x0200 != 0;
+    // EXEC_ASYNC: it runs on its own. Windows returns once the new task
+    // has started (and debuggers have heard of it): its instance handle.
     match unsafe { os2::DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, 1, a.as_ptr(), core::ptr::null(), &mut res, z.as_ptr()) } {
+        0 if windows => crate::toolhelp::wait_started(res.code_terminate).filter(|&h| h > 32).unwrap_or(33),
         0 => 33,
         2 | 3 | 110 => 2,
         8 => 8,
@@ -282,7 +286,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         }
         // GetNumTasks, IsTask(htask), GetExePtr(h)
         1152 => 1,
-        1320 => (a.w() == crate::kernel::TASK.get().hinst) as u32,
+        1320 => crate::toolhelp::is_task(a.w()) as u32,
         1133 => {
             let h = a.w();
             crate::module::find(h).map_or(0, |m| m.hinst as u32)
@@ -352,27 +356,6 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             }
             exec(&c) as u32
         }
-        // TOOLHELP: InterruptRegister(task, proc), InterruptUnRegister,
-        // NotifyRegister(task, proc, flags), NotifyUnRegister: accepted
-        // (no faults or notifications are delivered yet).
-        6275 => {
-            let (_t, _p) = (a.w(), a.l());
-            1
-        }
-        6276 | 6274 => {
-            a.w();
-            1
-        }
-        6273 => {
-            let (_t, _p, _f) = (a.w(), a.l(), a.w());
-            1
-        }
-        // TerminateApp(task, flags)
-        6277 => {
-            let (_t, _f) = (a.w(), a.w());
-            unsafe { os2::DosExit(1, 0xff) };
-            0
-        }
         // TimerCount(lpTimerInfo: dwSize, dwmsSinceStart, dwmsThisVM)
         6280 => {
             let p = a.p();
@@ -422,14 +405,20 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // SetWindowsHookEx(type, proc, hinst, task): a hook handle.
         2121 | 2291 => {
             let (kind, p) = (a.w() as i16, a.l());
-            if ord == 2291 {
+            let task = if ord == 2291 {
                 a.w();
-                a.w();
-            }
+                a.w()
+            } else {
+                0
+            };
             let n = NEXT_HOOK.get();
             let h = *n;
             *n += 1;
-            HOOKS.get().push(Hook { h, kind, proc_: p });
+            // A hook on another task (a process of its own) is not called
+            // here: its handle is given, nothing is hooked.
+            if task == 0 || crate::toolhelp::task_pid(task).is_none_or(|p| p == crate::toolhelp::own_pid()) {
+                HOOKS.get().push(Hook { h, kind, proc_: p });
+            }
             if ord == 2291 { h } else { 0 }
         }
         // UnhookWindowsHook(type, proc), UnhookWindowsHookEx(hhook)

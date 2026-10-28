@@ -175,9 +175,11 @@ pub struct Wnd {
     /// WM_NCCREATE has been sent: PM's messages reach the procedure
     /// from then on (Windows sends none before it).
     pub created: bool,
-    /// WM_SIZE and WM_MOVE have been sent (a window created hidden gets
-    /// them when first shown, as Windows does it).
-    pub sized: bool,
+    /// An overlapped window's first ShowWindow sends WM_SIZE and WM_MOVE,
+    /// even if it was moved or sized while hidden (Windows sends them from
+    /// CreateWindow to child and pop-up windows only). Delphi's forms lay
+    /// out their children then.
+    pub need_size: bool,
     /// The client origin WM_MOVE last told the program.
     pub moved_to: Option<u32>,
 }
@@ -207,8 +209,11 @@ struct User {
     inflight: Vec<InFlight>,
     /// The PM message behind the last message GetMessage returned.
     last: Option<(u16, u16, QMsg)>,
-    /// The character of the last WM_KEYDOWN (TranslateMessage posts it).
-    last_char: Option<(u16, u16, u16, u32)>,
+    /// The characters of the WM_KEYDOWNs translated but not yet given to
+    /// TranslateMessage (which posts them): (PM time, hwnd, wParam,
+    /// lParam, WM_CHAR or WM_SYSCHAR, the character). A program's
+    /// PeekMessage may look at the next keys before it translates one.
+    chars: Vec<(u32, u16, u16, u32, u16, u16)>,
     timers: Vec<Timer>,
     cascade: i32,
     /// The last message's time and position (GetMessageTime, GetMessagePos).
@@ -224,7 +229,7 @@ static USER: Global<User> = Global::new(User {
     next_atom: 0xc000,
     inflight: Vec::new(),
     last: None,
-    last_char: None,
+    chars: Vec::new(),
     timers: Vec::new(),
     cascade: 0,
     msg_time: 0,
@@ -338,10 +343,12 @@ pub fn set_window_pos(h: u16, after: u16, x: i32, y: i32, cx: i32, cy: i32, fl: 
             unsafe { WinSetWindowPos(fr, behind, 0, 0, 0, 0, SWP_ZORDER) };
         }
     }
-    if fl & 0x40 != 0 && !wnd(h).is_some_and(|w| w.sized) {
-        send_size_move(h);
-    }
     ok
+}
+
+/// The registered classes: (name, instance) (TOOLHELP's ClassFirst).
+pub fn class_list() -> Vec<(Vec<u8>, u16)> {
+    u().classes.iter().map(|c| (c.name.clone(), c.hinst)).collect()
 }
 
 /// The top-level windows.
@@ -1064,10 +1071,22 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             a.l();
             0
         }
+        // SwitchToThisWindow(hwnd, fRestore) (undocumented): bring the
+        // window up and activate it.
+        172 => {
+            let (h, restore) = (a.w(), a.w());
+            show_window(h, if restore != 0 && is_iconic(h) { 9 } else { 5 });
+            0
+        }
+        // EndMenu (undocumented): close the menu being tracked.
+        187 => {
+            crate::menu::end_menu();
+            0
+        }
         // GetWindowTask(hwnd)
         224 => {
             a.w();
-            TASK.get().hinst as u32
+            crate::toolhelp::current_task() as u32
         }
         // GetTopWindow(hwnd)
         229 => {
@@ -1090,6 +1109,9 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let Some((f, old)) = wnd(h).map(|w| (w.frame, w.parent)) else { return 0 };
             let pc = if p == 0 { HWND_DESKTOP } else { wnd(p).map_or(HWND_DESKTOP, |w| w.client) };
             unsafe { WinSetParent(f, pc, 1) };
+            // A child of the desktop is not activated by a click.
+            let desk_child = p == 0 && is_child_style(h);
+            unsafe { WinSetWindowBits(f, QWL_STYLE, if desk_child { NOACTIVATE } else { 0 }, NOACTIVATE) };
             if let Some(w) = wnd(h) {
                 w.parent = p;
             }
@@ -1180,8 +1202,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // UnregisterClass(name, hinst)
         403 => {
-            let (n, _hi) = (a.l(), a.w());
-            match find_class(n) {
+            let (n, hi) = (a.l(), a.w());
+            match find_class_in(n, hi) {
                 Some(i) if !u().wnds.iter().any(|w| w.class == i) && u().classes[i].atom >= 0xc000 => {
                     u().classes[i].name.clear();
                     u().classes[i].atom = 0;
@@ -1192,8 +1214,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // GetClassInfo(hinst, name, lpWndClass)
         404 => {
-            let (_hi, n, p) = (a.w(), a.l(), a.p());
-            let Some(i) = find_class(n) else { return 0 };
+            let (hi, n, p) = (a.w(), a.l(), a.p());
+            let Some(i) = find_class_in(n, hi) else { return 0 };
             let c = &u().classes[i];
             if !p.is_null() {
                 let mut b = [0u8; 26];
@@ -1262,6 +1284,7 @@ fn init_app() -> u32 {
         trace(format_args!("WIN16: no PM message queue"));
         return 0;
     }
+    crate::toolhelp::queue_created(t.hmq);
     unsafe {
         // CS_MOVENOTIFY: WM_MOVE when a window moves (Windows programs keep
         // their windows' positions from it).
@@ -1311,13 +1334,15 @@ fn register_class(p: *mut u8) -> u16 {
     let l = |o: usize| unsafe { (p.add(o) as *const u32).read_unaligned() };
     let Some(name) = far_str(l(22)) else { return 0 };
     let name = name.to_ascii_uppercase();
+    let hinst = w(10).max(1);
+    let global = w(0) & CS_GLOBALCLASS != 0;
     let s = u();
-    if s.classes.iter().any(|c| c.name == name && c.hinst != 0) {
+    // A module has one class of a name; global classes are one for all.
+    if s.classes.iter().any(|c| c.name == name && c.hinst != 0 && (same_module(c.hinst, hinst) || global && c.style & CS_GLOBALCLASS != 0)) {
         return 0;
     }
-    // A program's class of a built-in name replaces it for the program.
-    if let Some(c) = s.classes.iter_mut().find(|c| c.name == name) {
-        c.name.clear();
+    if crate::tracing() {
+        trace(format_args!("W16 RegisterClass {} instance {hinst:#x} style {:#x}", name.iter().map(|&c| c as char).collect::<alloc::string::String>(), w(0)));
     }
     let atom = s.next_atom;
     s.next_atom += 1;
@@ -1328,7 +1353,7 @@ fn register_class(p: *mut u8) -> u16 {
         proc_: l(2),
         cls_extra: alloc::vec![0; w(6) as usize],
         wnd_extra: w(8),
-        hinst: w(10).max(1),
+        hinst,
         icon: w(12),
         cursor: w(14),
         brush: w(16),
@@ -1337,16 +1362,48 @@ fn register_class(p: *mut u8) -> u16 {
     atom
 }
 
-pub fn find_class(name: u32) -> Option<usize> {
-    let s = u();
-    match far_str(name) {
-        Some(n) => s.classes.iter().position(|c| !c.name.is_empty() && c.name.eq_ignore_ascii_case(n)),
-        None => s.classes.iter().position(|c| c.atom == name as u16 && c.atom != 0),
+const CS_GLOBALCLASS: u16 = 0x4000;
+
+/// Are two instance handles of one module (an EXE or a DLL)?
+fn same_module(a: u16, b: u16) -> bool {
+    if a | 7 == b | 7 {
+        return true;
+    }
+    match (crate::module::find(a).map(|m| m.hmod), crate::module::find(b).map(|m| m.hmod)) {
+        (Some(x), Some(y)) => x == y,
+        _ => false,
     }
 }
 
+/// A class as Windows finds it for a module: the module's own classes
+/// first, then the global ones (CS_GLOBALCLASS), then the system's
+/// (WIN16's built-in classes, no instance).
+pub fn find_class_in(name: u32, hinst: u16) -> Option<usize> {
+    let s = u();
+    let hit = |c: &Class| match far_str(name) {
+        Some(n) => !c.name.is_empty() && c.name.eq_ignore_ascii_case(n),
+        None => c.atom == name as u16 && c.atom != 0,
+    };
+    let own = |c: &Class| c.hinst != 0 && c.style & CS_GLOBALCLASS == 0 && hinst != 0 && same_module(c.hinst, hinst);
+    s.classes
+        .iter()
+        .position(|c| hit(c) && own(c))
+        .or_else(|| s.classes.iter().position(|c| hit(c) && c.hinst != 0 && c.style & CS_GLOBALCLASS != 0))
+        .or_else(|| s.classes.iter().position(|c| hit(c) && c.hinst == 0))
+        // An instance handle of no module (0, or a block a DLL
+        // allocated): the class of that name registered last.
+        .or_else(|| (hinst == 0 || crate::module::find(hinst).is_none()).then(|| s.classes.iter().rposition(|c| hit(c))).flatten())
+}
+
+/// A class by name for the program (its classes, then the system's).
+pub fn find_class(name: u32) -> Option<usize> {
+    find_class_in(name, crate::module::exe())
+}
+
 pub fn find_class_name(n: &[u8]) -> Option<usize> {
-    u().classes.iter().position(|c| !c.name.is_empty() && c.name.eq_ignore_ascii_case(n))
+    let s = u();
+    let hit = |c: &Class| !c.name.is_empty() && c.name.eq_ignore_ascii_case(n);
+    s.classes.iter().position(|c| hit(c) && c.hinst != 0).or_else(|| s.classes.iter().position(hit))
 }
 
 pub fn class_atom(ci: usize) -> u16 {
@@ -1432,9 +1489,9 @@ fn has_nonclient(style: u32) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 pub fn create_window(exstyle: u32, class: u32, title: u32, style: u32, pos: [i32; 4], parent: u16, menu: u16, hinst: u16, param: u32) -> u16 {
-    let Some(ci) = find_class(class) else {
+    let Some(ci) = find_class_in(class, hinst) else {
         trace(format_args!(
-            "WIN16: CreateWindow: class {} not found",
+            "WIN16: CreateWindow: class {} not found (instance {hinst:#x})",
             far_str(class).map(|n| n.iter().map(|&c| c as char).collect::<alloc::string::String>()).unwrap_or_default()
         ));
         return 0;
@@ -1562,7 +1619,7 @@ pub fn create(c: &Create) -> u16 {
         hsb: None,
         props: Vec::new(),
         created: false,
-        sized: false,
+        need_size: style & (WS_CHILD | WS_POPUP) == 0,
         moved_to: None,
     });
     if !child && parent != 0 {
@@ -1625,7 +1682,7 @@ pub fn create(c: &Create) -> u16 {
         destroy_window(hwnd);
         return 0;
     }
-    if style & WS_VISIBLE != 0 {
+    if !wnd(hwnd).is_some_and(|w| w.need_size) {
         send_size_move(hwnd);
     }
     if child {
@@ -1803,7 +1860,7 @@ fn frame_state(h: u16) -> u32 {
 /// WM_SIZE and WM_MOVE with the window's present size and place.
 fn send_size_move(h: u16) {
     let Some(w) = wnd(h) else { return };
-    w.sized = true;
+    w.need_size = false;
     let (cw, ch) = client_size(h);
     send(h, W_SIZE, 0, (ch as u32) << 16 | cw as u32 & 0xffff);
     let o = client_origin(h);
@@ -1846,7 +1903,7 @@ pub fn show_window(h: u16, cmd: u16) -> bool {
         }
     }
     unsafe { WinSetWindowPos(f, HWND_TOP, 0, 0, 0, 0, fl) };
-    if cmd != 0 && !wnd(h).is_some_and(|w| w.sized) {
+    if cmd != 0 && wnd(h).is_some_and(|w| w.need_size) {
         send_size_move(h);
     }
     if fl & SWP_ACTIVATE != 0 && !is_child(h, focus()) {
@@ -1862,7 +1919,9 @@ pub fn show_window(h: u16, cmd: u16) -> bool {
 fn move_window(h: u16, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> bool {
     let Some((f, parent)) = wnd(h).map(|w| (w.frame, w.parent)) else { return false };
     let child = is_child_style(h);
-    let ph = if child { wnd(parent).map_or(0, |p| client_height(p.client)) } else { screen_size().1 };
+    // A child of the desktop (SetParent(hwnd, NULL)) is placed on the
+    // screen.
+    let ph = wnd(parent).filter(|_| child).map_or(screen_size().1, |p| client_height(p.client));
     let (mut cx, mut cy) = (cx, cy);
     if fl & SWP_SIZE == 0 {
         let mut swp = Swp::default();
@@ -1946,6 +2005,25 @@ pub fn focus() -> u16 {
 /// SetFocus: the previous focus window.
 pub fn set_focus(h: u16) -> u16 {
     let old = focus();
+    // Windows refuses the focus to a window in a disabled one, and to a
+    // child window of the desktop (a drop-down list: SetParent(NULL)).
+    let mut t = h;
+    for _ in 0..64 {
+        let Some((style, parent)) = wnd(t).map(|w| (w.style, w.parent)) else { break };
+        if style & WS_DISABLED != 0 {
+            return 0;
+        }
+        if style & WS_CHILD == 0 {
+            break;
+        }
+        if parent == 0 {
+            if style & WS_POPUP == 0 {
+                return 0;
+            }
+            break;
+        }
+        t = parent;
+    }
     if h != 0 && old != h {
         if let Some(c) = wnd(h).map(|w| w.client) {
             unsafe { WinSetFocus(HWND_DESKTOP, c) };
@@ -2398,15 +2476,21 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
                 (false, true) => W_SYSKEYDOWN,
                 (true, true) => W_SYSKEYUP,
             };
+            let wp = if vk != 0 { vk } else { chr & 0xff };
             if !up && fs & 0x0001 != 0 && chr != 0 {
                 // Ctrl+letter is a control character.
                 let c = chr & 0xff;
                 let c = if ctrl && !alt && (c as u8).is_ascii_alphabetic() { c & 0x1f } else { c };
-                u().last_char = Some((w_hwnd, if alt { W_SYSCHAR } else { W_CHAR }, c, lp));
-            } else if !up {
-                u().last_char = None;
+                let cs = &mut u().chars;
+                // (PeekMessage, then GetMessage, translate one key twice.)
+                if !cs.iter().any(|x| x.0 == q.time && x.1 == w_hwnd && x.3 == lp) {
+                    if cs.len() >= 32 {
+                        cs.remove(0);
+                    }
+                    cs.push((q.time, w_hwnd, wp, lp, if alt { W_SYSCHAR } else { W_CHAR }, c));
+                }
             }
-            (m, if vk != 0 { vk } else { chr & 0xff }, lp)
+            (m, wp, lp)
         }
         m if crate::dde::is_w16x(m) => crate::dde::incoming(m, q.mp1, q.mp2),
         m if crate::dde::is_pm_dde(m) => crate::dde::from_pm(m, q.mp1, q.mp2, q.time),
@@ -2416,11 +2500,55 @@ fn translate_pm(w_hwnd: u16, q: &QMsg) -> Option<(u16, u16, u32)> {
     })
 }
 
+/// PeekMessage with a message range: the oldest PM queue message that is
+/// a Windows message of the range (taken off the queue if `remove`).
+/// The PM ranges that can hold them: keys (WM_CHAR), the mouse, WM_PAINT,
+/// WM_TIMER, and the messages programs post (POSTED, and W16X from other
+/// tasks).
+fn peek_range(hab: u32, filter: u32, lo: u16, hi: u16, remove: bool) -> Option<QMsg> {
+    let (lo32, hi32) = (lo as u32, hi as u32);
+    let has = |a: u32, b: u32| lo32 <= b && a <= hi32;
+    let mut ranges: Vec<(u32, u32)> = alloc::vec![(POSTED | lo32, POSTED | hi32), (crate::dde::W16X | lo32, crate::dde::W16X | hi32)];
+    if has(0x100, 0x108) {
+        ranges.push((WM_CHAR, WM_CHAR));
+    }
+    if has(0x200, 0x209) {
+        ranges.push((WM_MOUSEMOVE, 0x79));
+    }
+    if has(0x0f, 0x0f) {
+        ranges.push((WM_PAINT, WM_PAINT));
+    }
+    if has(0x113, 0x113) {
+        ranges.push((WM_TIMER, WM_TIMER));
+    }
+    let mut best: Option<(QMsg, (u32, u32))> = None;
+    for r in ranges {
+        let mut q = QMsg::default();
+        if unsafe { WinPeekMsg(hab, &mut q, filter, r.0, r.1, PM_NOREMOVE) } == 0 {
+            continue;
+        }
+        let Some((_, m, _, _)) = win_message(&q) else { continue };
+        if m < lo || m > hi {
+            continue;
+        }
+        if best.as_ref().is_none_or(|b| q.time < b.0.time) {
+            best = Some((q, r));
+        }
+    }
+    let (q, r) = best?;
+    if remove {
+        let mut q2 = QMsg::default();
+        unsafe { WinPeekMsg(hab, &mut q2, filter, r.0, r.1, PM_REMOVE) };
+        return Some(q2);
+    }
+    Some(q)
+}
+
 /// GetMessage / PeekMessage (flags given): the next message for the
 /// task's Windows windows into MSG (hwnd, message, wParam, lParam,
-/// time, pt); PM's other messages are dispatched on the way. (The
-/// message range filter is not applied.)
-pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) -> u32 {
+/// time, pt); PM's other messages are dispatched on the way. PeekMessage
+/// applies the message range (GetMessage does not).
+pub fn get_message(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 {
     collect();
     if crate::tracing() {
         static LAST: Global<(u32, u32)> = Global::new((0, 0));
@@ -2438,6 +2566,10 @@ pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) ->
             None => {
                 unsafe { WinGetMsg(hab, &mut q, filter, 0, 0) };
             }
+            Some(fl) if lo != 0 || hi != 0 => match peek_range(hab, filter, lo, hi.max(lo), fl & 1 != 0) {
+                Some(m) => q = m,
+                None => return 0,
+            },
             Some(fl) => {
                 if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
                     return 0;
@@ -2453,6 +2585,10 @@ pub fn get_message(p: *mut u8, h: u16, _lo: u16, _hi: u16, peek: Option<u16>) ->
             return peek.is_some() as u32;
         }
         let Some((hwnd, msg, wp, lp)) = win_message(&q) else {
+            if q.msg == crate::toolhelp::NOTIFY_MSG && q.hwnd == 0 {
+                crate::toolhelp::deliver(q.mp1, q.mp2);
+                continue;
+            }
             unsafe { WinDispatchMsg(hab, &q) };
             if peek.is_some() {
                 // Only Windows messages count for PeekMessage.
@@ -2538,14 +2674,13 @@ pub fn read_msg(p: *const u8) -> Option<(u16, u16, u16, u32)> {
 }
 
 pub fn translate(p: *const u16) -> bool {
-    let Some((h, m, _, _)) = read_msg(p as *const u8) else { return false };
+    let Some((h, m, wp, lp)) = read_msg(p as *const u8) else { return false };
     if m != W_KEYDOWN && m != W_SYSKEYDOWN {
         return false;
     }
-    let Some((ch, cm, c, lp)) = u().last_char.take() else { return false };
-    if ch != h {
-        return false;
-    }
+    let cs = &mut u().chars;
+    let Some(i) = cs.iter().position(|x| x.1 == h && x.2 == wp && x.3 == lp) else { return false };
+    let (_, _, _, _, cm, c) = cs.remove(i);
     let pm = wnd(h).map_or(0, |w| w.client);
     unsafe { WinPostMsg(pm, POSTED | cm as u32, c as u32, lp) != 0 }
 }
@@ -2584,9 +2719,6 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             let mut swp = Swp::default();
             unsafe { WinQueryWindowPos(f, &mut swp) };
             let kind = if swp.fl & SWP_MINIMIZE != 0 { 1 } else if swp.fl & SWP_MAXIMIZE != 0 { 2 } else { 0 };
-            if let Some(w) = wnd(h) {
-                w.sized = true;
-            }
             send_inflight(h, W_SIZE, kind, (cy as u32) << 16 | cx as u32, q);
             0
         }
@@ -2899,7 +3031,7 @@ fn class_value(h: u16, i: i32, set: Option<u32>, long: bool) -> u32 {
     u32::from_le_bytes(old)
 }
 
-fn system_metric(i: i32) -> i32 {
+pub fn system_metric(i: i32) -> i32 {
     let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
     match i {
         0 => q(SV_CXSCREEN),
