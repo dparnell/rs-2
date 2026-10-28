@@ -1199,8 +1199,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // UnregisterClass(name, hinst)
         403 => {
-            let (n, _hi) = (a.l(), a.w());
-            match find_class(n) {
+            let (n, hi) = (a.l(), a.w());
+            match find_class_in(n, hi) {
                 Some(i) if !u().wnds.iter().any(|w| w.class == i) && u().classes[i].atom >= 0xc000 => {
                     u().classes[i].name.clear();
                     u().classes[i].atom = 0;
@@ -1211,8 +1211,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // GetClassInfo(hinst, name, lpWndClass)
         404 => {
-            let (_hi, n, p) = (a.w(), a.l(), a.p());
-            let Some(i) = find_class(n) else { return 0 };
+            let (hi, n, p) = (a.w(), a.l(), a.p());
+            let Some(i) = find_class_in(n, hi) else { return 0 };
             let c = &u().classes[i];
             if !p.is_null() {
                 let mut b = [0u8; 26];
@@ -1331,13 +1331,15 @@ fn register_class(p: *mut u8) -> u16 {
     let l = |o: usize| unsafe { (p.add(o) as *const u32).read_unaligned() };
     let Some(name) = far_str(l(22)) else { return 0 };
     let name = name.to_ascii_uppercase();
+    let hinst = w(10).max(1);
+    let global = w(0) & CS_GLOBALCLASS != 0;
     let s = u();
-    if s.classes.iter().any(|c| c.name == name && c.hinst != 0) {
+    // A module has one class of a name; global classes are one for all.
+    if s.classes.iter().any(|c| c.name == name && c.hinst != 0 && (same_module(c.hinst, hinst) || global && c.style & CS_GLOBALCLASS != 0)) {
         return 0;
     }
-    // A program's class of a built-in name replaces it for the program.
-    if let Some(c) = s.classes.iter_mut().find(|c| c.name == name) {
-        c.name.clear();
+    if crate::tracing() {
+        trace(format_args!("W16 RegisterClass {} instance {hinst:#x} style {:#x}", name.iter().map(|&c| c as char).collect::<alloc::string::String>(), w(0)));
     }
     let atom = s.next_atom;
     s.next_atom += 1;
@@ -1348,7 +1350,7 @@ fn register_class(p: *mut u8) -> u16 {
         proc_: l(2),
         cls_extra: alloc::vec![0; w(6) as usize],
         wnd_extra: w(8),
-        hinst: w(10).max(1),
+        hinst,
         icon: w(12),
         cursor: w(14),
         brush: w(16),
@@ -1357,16 +1359,48 @@ fn register_class(p: *mut u8) -> u16 {
     atom
 }
 
-pub fn find_class(name: u32) -> Option<usize> {
-    let s = u();
-    match far_str(name) {
-        Some(n) => s.classes.iter().position(|c| !c.name.is_empty() && c.name.eq_ignore_ascii_case(n)),
-        None => s.classes.iter().position(|c| c.atom == name as u16 && c.atom != 0),
+const CS_GLOBALCLASS: u16 = 0x4000;
+
+/// Are two instance handles of one module (an EXE or a DLL)?
+fn same_module(a: u16, b: u16) -> bool {
+    if a | 7 == b | 7 {
+        return true;
+    }
+    match (crate::module::find(a).map(|m| m.hmod), crate::module::find(b).map(|m| m.hmod)) {
+        (Some(x), Some(y)) => x == y,
+        _ => false,
     }
 }
 
+/// A class as Windows finds it for a module: the module's own classes
+/// first, then the global ones (CS_GLOBALCLASS), then the system's
+/// (WIN16's built-in classes, no instance).
+pub fn find_class_in(name: u32, hinst: u16) -> Option<usize> {
+    let s = u();
+    let hit = |c: &Class| match far_str(name) {
+        Some(n) => !c.name.is_empty() && c.name.eq_ignore_ascii_case(n),
+        None => c.atom == name as u16 && c.atom != 0,
+    };
+    let own = |c: &Class| c.hinst != 0 && c.style & CS_GLOBALCLASS == 0 && hinst != 0 && same_module(c.hinst, hinst);
+    s.classes
+        .iter()
+        .position(|c| hit(c) && own(c))
+        .or_else(|| s.classes.iter().position(|c| hit(c) && c.hinst != 0 && c.style & CS_GLOBALCLASS != 0))
+        .or_else(|| s.classes.iter().position(|c| hit(c) && c.hinst == 0))
+        // An instance handle of no module (0, or a block a DLL
+        // allocated): the class of that name registered last.
+        .or_else(|| (hinst == 0 || crate::module::find(hinst).is_none()).then(|| s.classes.iter().rposition(|c| hit(c))).flatten())
+}
+
+/// A class by name for the program (its classes, then the system's).
+pub fn find_class(name: u32) -> Option<usize> {
+    find_class_in(name, crate::module::exe())
+}
+
 pub fn find_class_name(n: &[u8]) -> Option<usize> {
-    u().classes.iter().position(|c| !c.name.is_empty() && c.name.eq_ignore_ascii_case(n))
+    let s = u();
+    let hit = |c: &Class| !c.name.is_empty() && c.name.eq_ignore_ascii_case(n);
+    s.classes.iter().position(|c| hit(c) && c.hinst != 0).or_else(|| s.classes.iter().position(hit))
 }
 
 pub fn class_atom(ci: usize) -> u16 {
@@ -1452,9 +1486,9 @@ fn has_nonclient(style: u32) -> bool {
 
 #[allow(clippy::too_many_arguments)]
 pub fn create_window(exstyle: u32, class: u32, title: u32, style: u32, pos: [i32; 4], parent: u16, menu: u16, hinst: u16, param: u32) -> u16 {
-    let Some(ci) = find_class(class) else {
+    let Some(ci) = find_class_in(class, hinst) else {
         trace(format_args!(
-            "WIN16: CreateWindow: class {} not found",
+            "WIN16: CreateWindow: class {} not found (instance {hinst:#x})",
             far_str(class).map(|n| n.iter().map(|&c| c as char).collect::<alloc::string::String>()).unwrap_or_default()
         ));
         return 0;
