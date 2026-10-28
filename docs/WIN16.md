@@ -36,7 +36,7 @@ files are involved. This is the media-free alternative to Win-OS/2
 | DDE between Windows tasks (WM_DDE_*, GMEM_DDESHARE, global atoms), to PM programs' DDE servers, DDEML | works (stage 3) |
 | The clipboard: CF_TEXT, CF_BITMAP, CF_DIB, CF_METAFILEPICT, registered formats, delayed rendering, shared with PM programs | works (stage 3) |
 | TOOLHELP: the task, module and global heap databases, stack traces, MemoryRead/Write, NotifyRegister's task start and end across processes | works (stage 4, below) |
-| Debugging another task (breakpoints, single steps, a stopped task's registers) | works through the kernel's debug interface ("TOOLHELP and debuggers"); Delphi's statement steps run on instead of stopping |
+| Debugging another task (breakpoints, single steps, a stopped task's registers) | works through the kernel's debug interface ("TOOLHELP and debuggers") |
 | MMSYSTEM, OLE 2, the rest of the compatibility tail | stage 4 |
 
 Checked in QEMU: `RS2\HELLO16.EXE` (a classic hello world: a window
@@ -677,7 +677,7 @@ Windows; what they needed, in the order they asked for it:
 | Jewels | | | starts | |
 | Hyperoid | | C | partly | Draws its own title bar with GetWindowDC: lands in the client area |
 | LIFEAPP | | | partly | Loading a snapshot fails (current directory) |
-| **Delphi** | 1.0 | Delphi 1 | **works** | Designs, edits properties, compiles and runs programs; the integrated debugger stops at breakpoints and runs on, its statement steps do not stop yet (below) |
+| **Delphi** | 1.0 | Delphi 1 | **works** | Designs, edits properties, compiles and runs programs; the integrated debugger stops at breakpoints, steps and runs on (below) |
 
 ### Delphi 1.0
 
@@ -764,8 +764,14 @@ What it needed, besides stage 3 (each has a W16TEST check):
 **The integrated debugger** (on by default): F9 compiles the project
 and runs it under the debugger; a breakpoint (F5) stops the program
 with its line shown as the execution point and the title "[Stopped]",
-the program's window not responding as on Windows, and Run goes on
-from there. Delphi's debug kernel (PASDBK16.DLL) works the Windows 3.1
+the program's window not responding as on Windows; Step Over (F8)
+goes to the next line (over calls, with a breakpoint after them) and
+Run goes on from there. Start Delphi in its own directory
+(`C:\DELPHI\BIN`, as Program Manager would), or save projects
+elsewhere than the root of a drive: PASDBK16 takes a module whose
+directory is a prefix of the Windows directory (`C:` of
+`C:\PROJECT1.EXE` is one of `C:\WINDOWS`) for a system module, and
+steps over all of it, so that its steps run the program on. Delphi's debug kernel (PASDBK16.DLL) works the Windows 3.1
 way: its interrupt callback runs inside the stopped task, plants INT 3s,
 steps past them with the trap flag, evaluates a breakpoint's condition
 by switching to the IDE's task (TaskSwitch) and waits in a message loop
@@ -774,13 +780,10 @@ debuggers" says how rs2 gives it that.
 
 ![Delphi stopped at a breakpoint in a button's OnClick](images/rs2-win16-delphi-breakpoint.png)
 
+![Step Over: the execution point on the next line](images/rs2-win16-delphi-step.png)
+
 Not yet:
 
-- **Stepping** in the integrated debugger: Step Over (F8) and Trace
-  Into (F7) step off the breakpoint and then run the program on instead
-  of stopping at the next line: PASDBK16's statement step finds no
-  source position for the address it is at (its symbol table lookup),
-  and runs. Breakpoints, Run and Program Reset work (below).
 - **Help**: Help|Contents and F1 do nothing; Windows Help (WINHELP.EXE)
   is not there, and WinHelp has no viewer to start (rs2's VIEW reads
   OS/2 .INF/.HLP files, not Windows .HLP).
@@ -866,8 +869,10 @@ A stop is handled the way Windows runs it, inside the stopped task:
   call, as Windows would have run the task to it. DirectedYield from
   the stop's thread to the debugger runs the debugger until it yields
   back. A single step the handler goes on with without waiting resumes
-  the task at once, as Windows returns to it from the interrupt;
-  otherwise the task goes on when the debugger next yields;
+  the task at once, as Windows returns to it from the interrupt (and a
+  DirectedYield that let it go waits for its next stop, so that a
+  statement step goes on inside the debugger's loop); otherwise the
+  task goes on when the debugger next yields;
 - **TaskGetCSIP/TaskSwitch** of the debugger's own task, from the stop's
   thread, run code in the debugger's thread (a SWITCH message wakes it),
   returning to where it was; the stopped task goes on after;

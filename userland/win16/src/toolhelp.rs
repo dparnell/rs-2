@@ -58,6 +58,8 @@ static STOP_YIELDED: AtomicU32 = AtomicU32::new(0);
 /// The stop's thread yielded to this task (DirectedYield, Yield), and goes
 /// on when the task yields back.
 static HANDED: AtomicU32 = AtomicU32::new(0);
+/// The process a stop's thread let go on at once (a single step).
+static STEPPED_ON: AtomicU32 = AtomicU32::new(0);
 
 const NFY_STARTTASK: u16 = 4;
 const NFY_EXITTASK: u16 = 5;
@@ -654,8 +656,11 @@ pub fn directed_yield(task: u16) {
         return;
     }
     let p = ST.get().stop_pid;
+    STEPPED_ON.store(0, Ordering::SeqCst);
     let_stop_run();
-    if ST.get().stop_tid != 0 || !ST.get().pending.iter().any(|x| x.0 == p) {
+    // It goes on (later, or already: a single step), and comes to a stop.
+    let stepped = STEPPED_ON.swap(0, Ordering::SeqCst) == p;
+    if ST.get().stop_tid != 0 || !(stepped || ST.get().pending.iter().any(|x| x.0 == p)) {
         return;
     }
     // (A while: a task that goes on running never stops here.)
@@ -730,6 +735,7 @@ fn run_stop(rec: &[u32; 20]) {
         }
         let rp = resume.as_ref().map_or(0, |r| r.as_ptr() as u32);
         unsafe { crate::pm::Rs2Win16Debug(4, p, tid, rp, 0) };
+        STEPPED_ON.store(p, Ordering::SeqCst);
         return;
     }
     // The task goes on once the debugger yields (Windows switches to it
