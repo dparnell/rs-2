@@ -35,7 +35,9 @@ files are involved. This is the media-free alternative to Win-OS/2
 | Printing: printer DCs (CreateDC, CreateIC) on rs2's spooler and PostScript driver, Escape (STARTDOC, NEWFRAME, ENDDOC, ABORTDOC, NEXTBAND, GETPHYSPAGESIZE, PASSTHROUGH...), StartDoc...EndDoc, SetAbortProc, GetDeviceCaps, WIN.INI's printers | works (stage 3) |
 | DDE between Windows tasks (WM_DDE_*, GMEM_DDESHARE, global atoms), to PM programs' DDE servers, DDEML | works (stage 3) |
 | The clipboard: CF_TEXT, CF_BITMAP, CF_DIB, CF_METAFILEPICT, registered formats, delayed rendering, shared with PM programs | works (stage 3) |
-| MMSYSTEM, OLE 2, TOOLHELP's databases, the rest of the compatibility tail | stage 4 |
+| TOOLHELP: the task, module and global heap databases, stack traces, MemoryRead/Write, NotifyRegister's task start and end across processes | works (stage 4, below) |
+| Debugging another task (breakpoints, single steps, a stopped task's registers) | no: tasks are processes ("TOOLHELP and debuggers") |
+| MMSYSTEM, OLE 2, the rest of the compatibility tail | stage 4 |
 
 Checked in QEMU: `RS2\HELLO16.EXE` (a classic hello world: a window
 class, text painted in WM_PAINT, a MessageBox on a click) shows as a PM
@@ -120,9 +122,11 @@ same loader reads both, but a Windows module differs in several ways.
   module name and the "TD" signature. The *module database* is the NE
   header in memory: GetModuleHandle returns its selector, the usage
   count is at offset 2 and the segment table carries the segments'
-  handles. TOOLHELP walks both. Stage 1 has neither (GetCurrentTask
-  returns the instance, GetModuleHandle the instance or a fixed handle
-  for a system module); stage 4 builds them for the programs that look.
+  handles. TOOLHELP walks both. Stage 1 had neither; now GetCurrentTask
+  returns the task's TDB (Windows' fields), while a module's handle is
+  still its instance (GetModuleHandle, or a fixed handle for a system
+  module); another task's module database is built from its file
+  ("TOOLHELP and debuggers").
 
 ## Loading
 
@@ -673,7 +677,7 @@ Windows; what they needed, in the order they asked for it:
 | Jewels | | | starts | |
 | Hyperoid | | C | partly | Draws its own title bar with GetWindowDC: lands in the client area |
 | LIFEAPP | | | partly | Loading a snapshot fails (current directory) |
-| **Delphi** | 1.0 | Delphi 1 | **works, with gaps** | See below |
+| **Delphi** | 1.0 | Delphi 1 | **works** | Designs, edits properties, compiles and runs programs; the integrated debugger cannot stop the program (below) |
 
 ### Delphi 1.0
 
@@ -691,8 +695,6 @@ ComponentLibrary=C:\DELPHI\BIN\COMPLIB.DCL
 SaveLibrarySource=1
 [Gallery]
 BaseDir=C:\DELPHI\GALLERY
-[Debugging]
-IntegratedDebugging=0
 
 ; WIN.INI
 [IDAPI]
@@ -704,25 +706,139 @@ LDPath=C:\IDAPI\LANGDRV
 
 `C:\DELPHI\BIN\DELPHI.EXE` starts the IDE: the main window with the
 component palette, Form1 in the form designer, the code editor and the
-Object Inspector. Components drop onto the form, Ctrl+F9 compiles
-(UNIT1.DCU, PROJECT1.EXE) and F9 runs the compiled program, a native
-Windows program on WIN16 like any other.
+Object Inspector. With Delphi's default settings:
+
+- **The Object Inspector** lists the properties and events and edits
+  them: text values, the drop-down lists of enumerations, the Events tab
+  (a double click on an event writes its handler in the code editor).
+- **The form designer**: components of every palette page drop onto the
+  form (Edit, Memo, ListBox, Button, ComboBox, the dialogs components,
+  MainMenu, TTable...), with grab handles; the menu designer edits a
+  MainMenu.
+- **Files and projects**: File|New Form shows the Gallery (Browse
+  Gallery: blank form, About box, dialogs...), File|Save Project As and
+  Open use WIN16's COMMDLG with Delphi's own templates; Options|Project
+  and Options|Environment work.
+- Ctrl+F9 compiles (UNIT1.DCU, PROJECT1.EXE) and F9 runs the compiled
+  program, a native Windows program on WIN16 like any other: its
+  controls, its TOpenDialog...
 
 ![Delphi 1.0 on rs2: the IDE and the program it compiled](images/rs2-win16-delphi.png)
 
+![The Object Inspector's property list and a drop-down editor](images/rs2-win16-delphi-inspector.png)
+
+What it needed, besides stage 3 (each has a W16TEST check):
+
+- **WM_SIZE in Windows' order.** An overlapped window gets WM_SIZE and
+  WM_MOVE on its first ShowWindow even when it was sized while hidden
+  (Wine's and ReactOS' WIN_NEED_SIZE); child and pop-up windows get
+  them from CreateWindow, visible or not. The Object Inspector lays out
+  its property list in its OnResize, which only that first-show WM_SIZE
+  calls after the list exists.
+- **Children of the desktop.** The inspector's drop-down lists are
+  child windows that SetParent(hwnd, NULL) moves to the desktop: placed
+  in screen coordinates, they take no focus (SetFocus returns 0, as on
+  Windows) and a click does not activate them (rs2 PM's NOACTIVATE
+  style bit, pmwin::ws::NOACTIVATE).
+- **The system bitmaps**: LoadBitmap(NULL, OBM_COMBO) and the other
+  OBM_ images, which the inspector's buttons are drawn from.
+- **List boxes** show their scroll bars only when there is something to
+  scroll (LBS_DISABLENOSCROLL keeps them), as Windows 3.1's do.
+- **Menus**: CreateMenu and CreatePopupMenu make the same menu; one
+  becomes a drop-down when inserted with MF_POPUP (Delphi's menus are
+  made with CreateMenu).
+- **Window classes per module**: the IDE and its component library
+  (COMPLIB.DCL) both register TListBox, TMemo...; a window gets its
+  module's class, then a CS_GLOBALCLASS one, then the system's.
+- **Superclassed combo boxes** (TComboBox): the combo box takes its own
+  scroll bars off and a drop-down one keeps its field's height, a larger
+  height being the dropped list's.
+- **PeekMessage's message range** (the code editor drained WM_CHARs and
+  lost every other key) and TranslateMessage finding the character of
+  the key it is given.
+- **TOOLHELP** and LoadModule waiting for the new task's start (below),
+  GetCodeHandle, SwitchToThisWindow, EndMenu.
+
+![The Events tab and a handler the inspector wrote](images/rs2-win16-delphi-events.png)
+
 Not yet:
 
-- **The integrated debugger.** With IntegratedDebugging=1 (Delphi's
-  default) Run ends the IDE: the debugger needs TOOLHELP's task and
-  module databases (TaskFindHandle, ModuleFirst, GlobalHandleToSel,
-  GlobalEntryHandle, NotifyRegister's events) and the debug registers.
-  Hence `IntegratedDebugging=0`.
-- **The Object Inspector's property list** (an owner-drawn list box)
-  stays 0 by 0 pels: the IDE never sizes it. The inspector's first
-  WM_SIZE comes before its children exist; what Windows does differently
-  there is not found yet.
-- COMMDLG (Open, Save As...) and DDE are stage 3's (above); not tried
-  with Delphi yet.
+- **The integrated debugger** (on by default): F9 compiles and starts
+  the program, which runs, and the IDE goes on, but it reports "Could
+  not run/step the process": breakpoints are not hit and the program
+  cannot be stopped or stepped. Delphi's debug kernel (PASDBK16.DLL)
+  works the Windows 3.1 way: its NotifyRegister and InterruptRegister
+  callbacks run inside the debuggee, it plants INT 3s, resumes the
+  stopped task with TaskSwitch after a PostAppMessage, a WH_CALLWNDPROC
+  hook on the debuggee's task and data the DLL shares between the two
+  tasks. Each task being a process here, none of that reaches the other
+  task (see "TOOLHELP and debuggers" for what is done and what is
+  missing). With `[Debugging] IntegratedDebugging=0` in DELPHI.INI (or
+  Options|Environment, Integrated debugging off) Run starts the program
+  without the message.
+- **Help**: Help|Contents and F1 do nothing; Windows Help (WINHELP.EXE)
+  is not there, and WinHelp has no viewer to start (rs2's VIEW reads
+  OS/2 .INF/.HLP files, not Windows .HLP).
+- The Object Inspector's name column starts narrow: TPropListBox sets
+  its divider from its first WM_SIZE, which Windows sends from
+  CreateWindow while the list is still 0 pels wide (as WIN16 now does);
+  drag the divider. The IDE's toolbar hints sometimes stay up.
+
+### TOOLHELP and debuggers
+
+`userland/win16/src/toolhelp.rs`. Windows' TOOLHELP walks KERNEL's lists
+in one address space; here selectors mean nothing outside their
+process (the same numbers are other segments in the next one), so:
+
+- the **task registry**, a shared object every WIN16 process maps
+  (`\SHAREMEM\RS2W16\TASKS.DAT`), lists the tasks: process, instance,
+  stack, start address, segments, module name and path, and each one's
+  NotifyRegister and InterruptRegister callbacks;
+- each task has a **task database** (TDB, Windows' layout with the "TD"
+  signature: hInstance at 1Ch, hModule at 1Eh...), whose selector is its
+  task handle (GetCurrentTask, GetWindowTask, IsTask);
+- another task is seen through a **view**: a TDB, a module database (the
+  NE header and tables of its file, the segment table with handles) and
+  copies of its segments, read with RS2API 422 `Rs2Win16ReadTask(pid,
+  sel, off, buf, cb)` (both processes must be Windows programs), all
+  selectors of this process. Everything TOOLHELP says about the other
+  task (its handle, hInstance, hModule, SS, start CS:IP,
+  GlobalEntryModule's blocks) is in terms of the view, so a debugger
+  reads, and writes its breakpoints into, the copies, never into its own
+  segments that happen to have the same numbers.
+
+TaskFirst/TaskNext/TaskFindHandle, ModuleFirst/ModuleNext/
+ModuleFindName/ModuleFindHandle (the program, its DLLs, other tasks,
+WIN16's system modules), GlobalFirst/GlobalNext/GlobalInfo/
+GlobalEntryHandle/GlobalEntryModule/GlobalHandleToSel, ClassFirst/
+ClassNext, StackTraceFirst/StackTraceCSIPFirst/StackTraceNext (this
+task's stack), MemManInfo, SystemHeapInfo, MemoryRead/MemoryWrite (this
+process's selectors, which include the views) and TerminateApp (another
+task: its process ends, and NFY_EXITTASK is given for it) work.
+
+**Notifications** cross processes as PM queue messages: a task that
+starts (InitTask) or ends posts NFY_STARTTASK / NFY_EXITTASK, and
+OutputDebugString NFY_OUTSTR, to every process with a callback, whose
+WIN16 calls the callback from its message loop, GetCurrentTask
+answering the task the event is about, as it would inside that task.
+WinExec and LoadModule return once the new task has started and its
+NFY_STARTTASK was delivered (Windows runs the new task's start inside
+LoadModule), with its instance handle. A debugger's **entry
+breakpoint** works: while a task with both callbacks exists, a new task
+waits in InitTask; if the debugger put an INT 3 on its start (in the
+copy), its interrupt callback is called with TOOLHELP's frame, and its
+IRET to the copy (a data selector: it faults) is taken as its return;
+then the task goes on. TaskGetCSIP/TaskSetCSIP keep the view's address,
+TaskSwitch lets the task go on.
+
+Missing, and why: a task's own faults and INT 3s are not given to
+another process's interrupt callback, nothing stops a running task or
+reads its live registers, and hooks and DirectedYield/PostAppMessage
+into another task do nothing there. Doing it would take the debugger and
+the debuggee in one process (tasks as threads of one Win16 machine, with
+a Win16Lock, as Wine has it) or a cross-process debug interface in the
+kernel (DosDebug-like: stop, registers, breakpoints). Delphi's debugger
+also expects its DLL's data shared between the tasks.
 
 ![Calmira 2.2, a Windows 3.1 shell written in Delphi, on rs2](images/rs2-win16-calmira.png)
 
@@ -775,9 +891,12 @@ and messages with pointers that cross tasks remain.
 manage selectors or call real mode), the floating point emulator
 (WIN87EM, OSFIXUPs, INT 34h-3Dh), MMSYSTEM (waveOut, midiOut, MCI on
 rs2's MMPM, docs/MMPM.md), OLE 1 and 2 (OLECLI, OLESVR, COMPOBJ,
-STORAGE, OLE2), TOOLHELP with the task and module databases, the BIOS
+STORAGE, OLE2), the BIOS
 and video selectors (`__0040H`, `__A000H`...), self-loading programs,
 Windows 2.x programs, SOUND and SYSTEM.
+
+TOOLHELP is done ("TOOLHELP and debuggers") except debugging another
+task.
 
 **Out of scope:** VxD calls (INT 2Fh 1684h finds no device), Windows
 device drivers (display, printer and keyboard .DRV files), real-mode
