@@ -208,8 +208,17 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // GlobalCompact(min): the free memory.
         25 => 0x00ff_0000,
-        // Yield
-        29 => 0,
+        // DirectedYield(hTask): as Yield.
+        150 => {
+            a.w();
+            crate::toolhelp::poll(true);
+            0
+        }
+        // Yield: a debugged task the debugger let go runs (toolhelp.rs).
+        29 => {
+            crate::toolhelp::poll(true);
+            0
+        }
         // WaitEvent(task): no events for a task here.
         30 => 0,
         // GetCurrentTask (and the first task, in DX)

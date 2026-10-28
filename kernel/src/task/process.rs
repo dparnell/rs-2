@@ -110,6 +110,8 @@ pub struct Process {
     pub max_fh: AtomicU32,
     /// Win16 interrupt handler (16:16), 0 if none (api/win16.rs).
     pub win16_int: AtomicU32,
+    /// The process debugging this Windows task (RS2API 423), 0 if none.
+    pub win16_debugger: AtomicU32,
 }
 
 /// Thread-local memory: dwords per thread (in the process information area).
@@ -311,6 +313,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
             None => 20,
         }),
         win16_int: AtomicU32::new(0),
+        win16_debugger: AtomicU32::new(0),
     });
     let stack_bottom = stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000));
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;

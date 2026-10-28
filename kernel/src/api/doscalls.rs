@@ -280,6 +280,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 420) => super::win16::set_int_handler,
         (8, 421) => super::win16::selector,
         (8, 422) => super::win16::read_task,
+        (8, 423) => super::win16::debug,
         (8, 407) => super::vdm::request,
         (8, 100) => super::sysctl::rs2_query_counters,
         (8, 200) => super::sockets::query_iface,

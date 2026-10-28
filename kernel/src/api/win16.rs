@@ -30,6 +30,7 @@
 //! | 420 | `Rs2Win16SetIntHandler(ULONG pfnHandler16)` (32-bit `_System`; 0 removes it) |
 //! | 421 | `Rs2Win16Selector(ULONG op, ULONG sel, ULONG value)`: KERNEL's selector functions (below) |
 //! | 422 | `Rs2Win16ReadTask(ULONG pid, ULONG sel, ULONG off, PVOID buf, ULONG cb)`: read another Windows task's memory (TOOLHELP: debuggers' copies of the debuggee's segments); the bytes read |
+//! | 423 | `Rs2Win16Debug(ULONG op, ULONG pid, ULONG a, ULONG b, ULONG c)`: debug another Windows task (below) |
 
 use alloc::sync::Arc;
 use core::sync::atomic::Ordering;
@@ -316,5 +317,174 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
         f.vector = (n & 0xff) as u64;
         f.error = r(ERROR);
         crate::api::exceptions::deliver(f, p, t);
+    }
+}
+
+// ---- Debugging another Windows task (RS2API 423) ----
+//
+// A Windows debugger (TOOLHELP's interrupt callbacks, userland/win16
+// toolhelp.rs) attaches to a task: from then on the task's INT 3s
+// (breakpoints) and single steps (INT 1, the trap flag) in 16-bit code
+// stop the thread that took them, here in its trap. The debugger takes
+// the stop's registers, writes the task's memory (its breakpoints) and
+// resumes the thread with registers of its choice (another CS:IP, the
+// trap flag for a single step).
+//
+// Stop record (ULONGs): pid, tid, the exception (1 or 3), its error code,
+// then EAX EBX ECX EDX ESI EDI EBP ESP EIP EFLAGS CS DS ES FS GS SS.
+
+const DREGS: usize = 16;
+
+struct Stop {
+    pid: u32,
+    tid: u32,
+    vector: u32,
+    error: u32,
+    regs: [u32; DREGS],
+    reported: bool,
+    resumed: bool,
+}
+
+static STOPS: crate::sync::SpinLock<alloc::vec::Vec<Stop>> = crate::sync::SpinLock::new(alloc::vec::Vec::new());
+static STOP_WAIT: crate::task::WaitQueue = crate::task::WaitQueue::new();
+
+fn frame_regs(f: &TrapFrame) -> [u32; DREGS] {
+    [
+        f.rax as u32, f.rbx as u32, f.rcx as u32, f.rdx as u32, f.rsi as u32, f.rdi as u32, f.rbp as u32, f.rsp as u32,
+        f.rip as u32, f.rflags as u32, f.cs as u32, f.ds as u32, f.es as u32, f.fs as u32, f.gs as u32, f.ss as u32,
+    ]
+}
+
+/// A debug exception of an attached task: the thread waits for its
+/// debugger (true: handled, the thread goes on, or ends if told to).
+pub fn debug_trap(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool {
+    let dbg = p.win16_debugger.load(Ordering::Relaxed);
+    if dbg == 0 || (f.vector != 1 && f.vector != 3) {
+        return false;
+    }
+    if vm::desc_big(p.space.lock().descriptor(f.cs as u16)) {
+        return false;
+    }
+    if crate::task::process::by_pid(dbg).is_none() {
+        p.win16_debugger.store(0, Ordering::Relaxed);
+        return false;
+    }
+    let (pid, tid) = (p.pid, t.tid);
+    STOPS.lock().push(Stop { pid, tid, vector: f.vector as u32, error: f.error as u32, regs: frame_regs(f), reported: false, resumed: false });
+    let resumed = |s: &Stop| s.pid == pid && s.tid == tid && s.resumed;
+    loop {
+        // A second at a time: the debugger may be gone.
+        let deadline = crate::irq::ticks() + crate::irq::HZ;
+        let done = STOP_WAIT.wait_until(Some(deadline), || STOPS.lock().iter().any(resumed));
+        if done || t.exit_requested() {
+            break;
+        }
+        if crate::task::process::by_pid(dbg).is_none() || p.win16_debugger.load(Ordering::Relaxed) != dbg {
+            break;
+        }
+    }
+    let mut stops = STOPS.lock();
+    let Some(i) = stops.iter().position(|s| s.pid == pid && s.tid == tid) else { return true };
+    let s = stops.remove(i);
+    drop(stops);
+    if s.resumed {
+        let r = s.regs;
+        f.rax = r[0] as u64;
+        f.rbx = r[1] as u64;
+        f.rcx = r[2] as u64;
+        f.rdx = r[3] as u64;
+        f.rsi = r[4] as u64;
+        f.rdi = r[5] as u64;
+        f.rbp = r[6] as u64;
+        f.rsp = r[7] as u64;
+        f.rip = r[8] as u64;
+        // The arithmetic flags, the direction flag and the trap flag.
+        f.rflags = (f.rflags & !0xdd5) | (r[9] as u64 & 0xdd5) | 0x202;
+        f.cs = r[10] as u64;
+        f.ds = r[11] as u64;
+        f.es = r[12] as u64;
+    }
+    true
+}
+
+/// RS2API 423: Rs2Win16Debug(op, pid, a, b, c). Both processes must be
+/// Windows programs.
+/// - 0 attach to task `pid`, 1 detach (its stopped threads go on);
+/// - 2 write `c` bytes from `b` at `a` (selector << 16 | offset) in it;
+/// - 3 the next stop not yet taken of a task this process debugs (`pid`,
+///   or 0 for any) into `a` (the stop record, 80 bytes): 1, 0 if none;
+/// - 4 resume thread `a` of `pid` with the registers at `b` (16 ULONGs,
+///   the stop record's; 0: as it stopped).
+pub fn debug(c: &mut Ctx) -> u32 {
+    let (op, pid, a, b, cc) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4));
+    if c.process.win16_int.load(Ordering::Relaxed) == 0 {
+        return 0;
+    }
+    let me = c.process.pid;
+    let target = || crate::task::process::by_pid(pid).filter(|p| p.win16_int.load(Ordering::Relaxed) != 0);
+    match op {
+        0 => match target() {
+            Some(p) if pid != me => {
+                p.win16_debugger.store(me, Ordering::Relaxed);
+                1
+            }
+            _ => 0,
+        },
+        1 => {
+            if let Some(p) = target() {
+                let _ = p.win16_debugger.compare_exchange(me, 0, Ordering::Relaxed, Ordering::Relaxed);
+            }
+            for s in STOPS.lock().iter_mut().filter(|s| s.pid == pid) {
+                s.resumed = true;
+            }
+            STOP_WAIT.wake_all();
+            1
+        }
+        2 => {
+            let Some(p) = target().filter(|p| p.win16_debugger.load(Ordering::Relaxed) == me) else { return 0 };
+            let Some(data) = c.read_vec(b, cc.min(0x1_0000)) else { return 0 };
+            let mut sp = p.space.lock();
+            let (sel, off) = ((a >> 16) as u16, a & 0xffff);
+            if sel & 4 == 0 || sp.descriptor(sel) == 0 {
+                return 0;
+            }
+            let Some(lin) = sp.linear(sel, off) else { return 0 };
+            sp.poke_bytes(lin, &data) as u32
+        }
+        3 => {
+            let mut rec = None;
+            {
+                let mut stops = STOPS.lock();
+                let mine = |s: &Stop| !s.reported && !s.resumed && (pid == 0 || s.pid == pid) && crate::task::process::by_pid(s.pid).is_some_and(|p| p.win16_debugger.load(Ordering::Relaxed) == me);
+                if let Some(s) = stops.iter_mut().find(|s| mine(s)) {
+                    s.reported = true;
+                    let mut v = alloc::vec::Vec::with_capacity(80);
+                    for w in [s.pid, s.tid, s.vector, s.error].iter().chain(s.regs.iter()) {
+                        v.extend_from_slice(&w.to_le_bytes());
+                    }
+                    rec = Some(v);
+                }
+            }
+            match rec {
+                Some(v) => c.write(a, &v) as u32,
+                None => 0,
+            }
+        }
+        4 => {
+            let regs = if b != 0 { c.read_vec(b, (DREGS * 4) as u32) } else { None };
+            let mut ok = 0;
+            for s in STOPS.lock().iter_mut().filter(|s| s.pid == pid && s.tid == a && !s.resumed) {
+                if let Some(r) = &regs {
+                    for i in 0..DREGS {
+                        s.regs[i] = u32::from_le_bytes([r[i * 4], r[i * 4 + 1], r[i * 4 + 2], r[i * 4 + 3]]);
+                    }
+                }
+                s.resumed = true;
+                ok = 1;
+            }
+            STOP_WAIT.wake_all();
+            ok
+        }
+        _ => 0,
     }
 }

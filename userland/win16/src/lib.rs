@@ -287,6 +287,7 @@ entries! {
     k_lstrlen = 1090, 4;
     k_gettempdrive = 1092, 2;
     k_getcodehandle = 1093, 4;
+    k_directedyield = 1150, 2;
     k_loadlibrary = 1095, 4;
     k_freelibrary = 1096, 2;
     k_gettempfilename = 1097, 12;

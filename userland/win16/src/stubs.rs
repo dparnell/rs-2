@@ -83,7 +83,6 @@ thunk16::entries16_pascal! {
     x_1111 = 1111, 2;
     x_1112 = 1112, 2;
     x_1121 = 1121, 4;
-    x_1150 = 1150, 2;
     x_1154 = 1154, 4;
     x_1156 = 1156, 4;
     x_1163 = 1163, 2;
@@ -584,7 +583,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (1111, "KERNEL.111 GLOBALWIRE"),
     (1112, "KERNEL.112 GLOBALUNWIRE"),
     (1121, "KERNEL.121 LOCALSHRINK"),
-    (1150, "KERNEL.150 DIRECTEDYIELD"),
     (1154, "KERNEL.154 GLOBALNOTIFY"),
     (1156, "KERNEL.156 LIMITEMSPAGES"),
     (1163, "KERNEL.163 GLOBALLRUOLDEST"),

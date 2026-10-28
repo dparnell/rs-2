@@ -293,6 +293,8 @@ unsafe extern "C" {
     pub fn Rs2Win16Selector(op: u32, sel: u32, value: u32) -> u32;
     #[link_name = "RS2API.422"]
     pub fn Rs2Win16ReadTask(pid: u32, sel: u32, off: u32, buf: *mut u8, cb: u32) -> u32;
+    #[link_name = "RS2API.423"]
+    pub fn Rs2Win16Debug(op: u32, pid: u32, a: u32, b: u32, c: u32) -> u32;
 }
 
 pub const HWND_DESKTOP: u32 = 1;

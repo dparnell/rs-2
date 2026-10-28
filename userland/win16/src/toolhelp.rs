@@ -96,6 +96,13 @@ struct View {
     exited: bool,
     /// Where it stopped (its copy's CS:IP), for TaskGetCSIP/TaskSetCSIP.
     csip: u32,
+    /// Debugged through the kernel (RS2API 423): its INT 3s and single
+    /// steps stop it, and the copies' changes (breakpoints) are written
+    /// into it.
+    attached: bool,
+    /// Each copy as last read from the task (what the debugger changed
+    /// since is written back).
+    base: Vec<Vec<u8>>,
 }
 
 struct State {
@@ -110,9 +117,17 @@ struct State {
     out: *mut u8,
     /// An interrupt callback is running (int3).
     in_int: bool,
+    /// The IRET that ended the interrupt callback: CS, IP, FLAGS.
+    iret: Option<(u16, u16, u16)>,
+    /// A debugger timer runs (GetMessage wakes to look for stops).
+    timer: bool,
+    last_poll: u32,
+    /// Stopped threads to let go when this task next yields (Windows
+    /// runs the other task only then): (process, thread, registers).
+    pending: Vec<(u32, u32, Option<[u32; 16]>)>,
 }
 
-static ST: Global<State> = Global::new(State { reg: core::ptr::null_mut(), tdb: 0, current: 0, exited: false, views: Vec::new(), out: core::ptr::null_mut(), in_int: false });
+static ST: Global<State> = Global::new(State { reg: core::ptr::null_mut(), tdb: 0, current: 0, exited: false, views: Vec::new(), out: core::ptr::null_mut(), in_int: false, iret: None, timer: false, last_poll: 0, pending: Vec::new() });
 
 fn pib() -> Option<&'static os2::Pib> {
     let mut tib = core::ptr::null_mut();
@@ -360,8 +375,143 @@ fn view(p: u32) -> Option<&'static mut View> {
     let map = |sel: u16| segs.iter().find(|x| x.0 | 7 == sel | 7).map_or(0, |x| x.1);
     fill_tdb(tp, tdb, (map(t.ss) as u32) << 16 | t.sp as u32, map(t.hinst), moddb, t.hmq, 0, 1, &name);
     let csip = (map((t.start >> 16) as u16) as u32) << 16 | t.start & 0xffff;
-    s.views.push(View { pid: p, tdb, moddb, segs, name, path, exited: false, csip });
+    let base = segs.iter().map(|&(_, c)| unsafe { core::slice::from_raw_parts(flat((c as u32) << 16), 0x1_0000) }.to_vec()).collect();
+    // A debugger (this task has an interrupt callback) debugs it.
+    let attached = with_slot(pid(), |s| s.interrupt).unwrap_or(0) != 0 && unsafe { crate::pm::Rs2Win16Debug(0, p, 0, 0, 0) } != 0;
+    if attached && !s.timer {
+        // GetMessage wakes now and then to look for stops.
+        s.timer = unsafe { crate::pm::WinStartTimer(crate::kernel::TASK.get().hab, 0, 0x7d15, 50) } != 0;
+    }
+    if crate::tracing() {
+        crate::trace(format_args!("W16 view of task {p}: {} segments, attached {attached}", segs.len()));
+    }
+    s.views.push(View { pid: p, tdb, moddb, segs, name, path, exited: false, csip, attached, base });
     s.views.last_mut()
+}
+
+/// Read the task's segments into the copies again (it stopped).
+fn refresh(v: &mut View) {
+    for (i, &(real, copy)) in v.segs.iter().enumerate() {
+        let cp = flat((copy as u32) << 16);
+        unsafe { crate::pm::Rs2Win16ReadTask(v.pid, real as u32, 0, cp, 0x1_0000) };
+        if let Some(b) = v.base.get_mut(i) {
+            b.copy_from_slice(unsafe { core::slice::from_raw_parts(cp, 0x1_0000) });
+        }
+    }
+}
+
+/// Write what the debugger changed in the copies (its breakpoints, a
+/// variable) into the task.
+fn sync(v: &mut View) {
+    if !v.attached {
+        return;
+    }
+    for (i, &(real, copy)) in v.segs.iter().enumerate() {
+        let cp = flat((copy as u32) << 16);
+        let now = unsafe { core::slice::from_raw_parts(cp, 0x1_0000) };
+        let Some(base) = v.base.get_mut(i) else { continue };
+        let mut o = 0;
+        while o < now.len() {
+            if now[o] == base[o] {
+                o += 1;
+                continue;
+            }
+            let start = o;
+            while o < now.len() && now[o] != base[o] && o - start < 256 {
+                o += 1;
+            }
+            let n = o - start;
+            if unsafe { crate::pm::Rs2Win16Debug(2, v.pid, (real as u32) << 16 | start as u32, now.as_ptr().add(start) as u32, n as u32) } != 0 {
+                base[start..o].copy_from_slice(&now[start..o]);
+            }
+            if crate::tracing() {
+                crate::trace(format_args!("W16 debug: {n} bytes to {real:04x}:{start:04x} of task {}", v.pid));
+            }
+        }
+    }
+}
+
+/// GetMessage/PeekMessage: a debugger's breakpoints go into its tasks,
+/// and a task that stopped (INT 3, a single step) is given to the
+/// interrupt callback. `idle`: this task yields (Yield, or no message
+/// for GetMessage/PeekMessage), and the tasks it let go run, as Windows
+/// would switch to them only then.
+pub fn poll(idle: bool) {
+    let s = ST.get();
+    if s.in_int || !s.views.iter().any(|v| v.attached && !v.exited) {
+        return;
+    }
+    // Tasks the debugger let go run now, with its breakpoints.
+    if idle && !s.pending.is_empty() {
+        for v in s.views.iter_mut().filter(|v| v.attached && !v.exited) {
+            sync(v);
+        }
+        for (p, tid, regs) in core::mem::take(&mut ST.get().pending) {
+            let rp = regs.as_ref().map_or(0, |r| r.as_ptr() as u32);
+            unsafe { crate::pm::Rs2Win16Debug(4, p, tid, rp, 0) };
+        }
+    }
+    let s = ST.get();
+    let now = unsafe { crate::pm::WinGetCurrentTime(crate::kernel::TASK.get().hab) };
+    if now.wrapping_sub(s.last_poll) < 20 {
+        return;
+    }
+    s.last_poll = now;
+    for v in s.views.iter_mut().filter(|v| v.attached && !v.exited) {
+        sync(v);
+    }
+    let mut rec = [0u32; 20];
+    if unsafe { crate::pm::Rs2Win16Debug(3, 0, rec.as_mut_ptr() as u32, 0, 0) } == 0 {
+        return;
+    }
+    stopped(&rec);
+}
+
+/// A debugged task stopped: the callback with TOOLHELP's frame, then the
+/// task goes on from where the callback's IRET says.
+fn stopped(rec: &[u32; 20]) {
+    let (p, tid, vector) = (rec[0], rec[1], rec[2] as u16);
+    let mut regs = [0u32; 16];
+    regs.copy_from_slice(&rec[4..20]);
+    let Some(v) = view(p) else {
+        unsafe { crate::pm::Rs2Win16Debug(4, p, tid, 0, 0) };
+        return;
+    };
+    refresh(v);
+    let (cs, ip, fl) = (regs[10] as u16, regs[8] as u16, regs[9] as u16);
+    let copy_cs = translate(v, cs);
+    v.csip = (copy_cs as u32) << 16 | ip as u32;
+    let tdb = v.tdb;
+    if crate::tracing() {
+        crate::trace(format_args!("W16 debug: task {p} INT {vector} at {cs:04x}:{ip:04x} (copy {copy_cs:04x})"));
+    }
+    let cb = with_slot(pid(), |s| s.interrupt).unwrap_or(0);
+    let mut resume: Option<[u32; 16]> = None;
+    if cb != 0 && copy_cs != 0 {
+        let s = ST.get();
+        let saved = s.current;
+        s.current = tdb;
+        s.in_int = true;
+        s.iret = None;
+        PascalCall::new().w(fl).w(copy_cs).w(ip).w(0).w(vector).w(regs[0] as u16).call(cb);
+        let s = ST.get();
+        s.in_int = false;
+        s.current = saved;
+        if let Some((tcs, tip, tfl)) = s.iret.take() {
+            let real = view(p).map_or(0, |v| v.segs.iter().find(|x| x.1 | 7 == tcs | 7).map_or(0, |x| x.0));
+            if real != 0 {
+                let mut r = regs;
+                r[10] = real as u32;
+                r[8] = tip as u32;
+                r[9] = tfl as u32;
+                resume = Some(r);
+            }
+        }
+    }
+    if crate::tracing() {
+        crate::trace(format_args!("W16 debug: task {p} goes on at {:?} when this task yields", resume.map(|r| (r[10], r[8], r[9]))));
+    }
+    ST.get().pending.push((p, tid, resume));
 }
 
 /// A module database as Windows keeps it: the NE header and its tables
@@ -460,7 +610,12 @@ pub fn deliver(mp1: u32, data: u32) {
     }
     PascalCall::new().w(id).l(data).call(cb);
     if id == NFY_STARTTASK && from != me {
-        entry_breakpoint(data);
+        // The debugger's breakpoint on the start goes into the task (it
+        // stops there itself), or, not debugged, is played here.
+        match view(from) {
+            Some(v) if v.attached => sync(v),
+            _ => entry_breakpoint(data),
+        }
         with_slot(from, |s| s.go = 1);
     }
     ST.get().current = saved;
@@ -509,10 +664,11 @@ pub fn iret_trap(r: &mut crate::dos::Regs) -> bool {
         return false;
     }
     let st = |o: u16| read16(ss, r[SP].wrapping_add(o)).unwrap_or(0);
-    let (tip, tcs) = (st(0), st(2));
+    let (tip, tcs, tfl) = (st(0), st(2), st(4));
     if view_block(tcs).is_none() {
         return false;
     }
+    ST.get().iret = Some((tcs, tip, tfl));
     if crate::tracing() {
         crate::trace(format_args!("W16 INT 3 handler resumes {tcs:04x}:{tip:04x}"));
     }
@@ -564,9 +720,30 @@ pub fn wait_started(child: u32) -> Option<u16> {
         }
         let t = slot(child)?;
         let v = view(child)?;
-        return Some(translate(v, t.hinst));
+        let inst = translate(v, t.hinst);
+        // A debugged task runs to the debugger's breakpoint on its start
+        // inside LoadModule too: that stop is given before it returns.
+        if v.attached {
+            for _ in 0..250 {
+                let mut rec = [0u32; 20];
+                if unsafe { crate::pm::Rs2Win16Debug(3, child, rec.as_mut_ptr() as u32, 0, 0) } != 0 {
+                    stopped(&rec);
+                    break;
+                }
+                if slot(child).is_none() {
+                    break;
+                }
+                unsafe { os2::DosSleep(20) };
+            }
+        }
+        return Some(inst);
     }
     slot(child).map(|t| t.hinst)
+}
+
+/// Make GetCurrentTask answer another task (0: this one): the old value.
+pub fn set_current(t: u16) -> u16 {
+    core::mem::replace(&mut ST.get().current, t)
 }
 
 /// GetCurrentTask.
@@ -822,11 +999,11 @@ fn fill_frame(p: *mut u8, ss: u16, bp: u16, cs: u16, ip: u16) {
 }
 
 fn read16(ss: u16, off: u16) -> Option<u16> {
-    let (_, limit) = selector(ss)?;
+    let (base, limit) = selector(ss)?;
     if off as u32 + 1 > limit {
         return None;
     }
-    Some(unsafe { (flat((ss as u32) << 16 | off as u32) as *const u16).read_unaligned() })
+    Some(unsafe { ((base as usize + off as usize) as *const u16).read_unaligned() })
 }
 
 fn stack_next(p: *mut u8) -> u32 {
@@ -1050,8 +1227,16 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 return Some(0);
             }
             let n = n.min(limit - off + 1);
-            let p = flat((sel as u32) << 16) as usize + off as usize;
-            let _ = base;
+            // The selector's own base (aliases are not tiled).
+            let p = base as usize + off as usize;
+            // Only memory that may be written (a debugger patching an API
+            // entry would write into WIN16's code).
+            if ord == 6279 {
+                let (mut size, mut fl) = (n, 0u32);
+                if unsafe { os2::DosQueryMem(p as *mut u8, &mut size, &mut fl) } != 0 || fl & os2::PAG_WRITE == 0 || size < n {
+                    return Some(0);
+                }
+            }
             unsafe {
                 if ord == 6278 {
                     core::ptr::copy(p as *const u8, buf, n as usize);

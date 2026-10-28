@@ -928,6 +928,12 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // GetMessage(lpMsg, hwnd, min, max)
         108 => {
             let (p, h, lo, hi) = (a.p(), a.w(), a.w(), a.w());
+            if crate::tracing() {
+                // The caller (the entry stub's frame: its far return).
+                let f = thunk16::flat(thunk16::sp16().wrapping_add(32)) as *const u16;
+                let (ip, cs) = unsafe { (f.add(8).read_unaligned(), f.add(9).read_unaligned()) };
+                trace(format_args!("W16 GetMessage from {cs:04x}:{ip:04x}"));
+            }
             get_message(p, h, lo, hi, None)
         }
         // PeekMessage(lpMsg, hwnd, min, max, flags)
@@ -2549,6 +2555,16 @@ fn peek_range(hab: u32, filter: u32, lo: u16, hi: u16, remove: bool) -> Option<Q
 /// time, pt); PM's other messages are dispatched on the way. PeekMessage
 /// applies the message range (GetMessage does not).
 pub fn get_message(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 {
+    // A debugger's code that stopped another task (GetCurrentTask is
+    // that task) waits for messages: on Windows the tasks switch there,
+    // and what is dispatched runs as this task.
+    let saved = crate::toolhelp::set_current(0);
+    let r = get_message_(p, h, lo, hi, peek);
+    crate::toolhelp::set_current(saved);
+    r
+}
+
+fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 {
     collect();
     if crate::tracing() {
         static LAST: Global<(u32, u32)> = Global::new((0, 0));
@@ -2561,17 +2577,26 @@ pub fn get_message(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u
     let hab = TASK.get().hab;
     let filter = if h == 0 { 0 } else { wnd(h).map_or(0, |w| w.client) };
     loop {
+        crate::toolhelp::poll(false);
         let mut q = QMsg::default();
         match peek {
             None => {
+                if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
+                    crate::toolhelp::poll(true);
+                }
                 unsafe { WinGetMsg(hab, &mut q, filter, 0, 0) };
             }
             Some(fl) if lo != 0 || hi != 0 => match peek_range(hab, filter, lo, hi.max(lo), fl & 1 != 0) {
                 Some(m) => q = m,
-                None => return 0,
+                None => {
+                    crate::toolhelp::poll(fl & 2 == 0);
+                    return 0;
+                }
             },
             Some(fl) => {
                 if unsafe { WinPeekMsg(hab, &mut q, filter, 0, 0, PM_NOREMOVE) } == 0 {
+                    // PM_NOYIELD (2) keeps the other tasks waiting.
+                    crate::toolhelp::poll(fl & 2 == 0);
                     return 0;
                 }
                 let ours = q.msg == WM_QUIT || win_message(&q).is_some();
@@ -2686,6 +2711,15 @@ pub fn translate(p: *const u16) -> bool {
 }
 
 pub fn dispatch(p: *mut u8) -> u32 {
+    // (A stopped task's loop dispatches this task's messages: they run as
+    // this task, as in get_message.)
+    let saved = crate::toolhelp::set_current(0);
+    let r = dispatch_(p);
+    crate::toolhelp::set_current(saved);
+    r
+}
+
+fn dispatch_(p: *mut u8) -> u32 {
     let Some((h, m, wp, lp)) = read_msg(p) else { return 0 };
     // A timer's procedure gets WM_TIMER itself.
     if m == W_TIMER && lp != 0 {
