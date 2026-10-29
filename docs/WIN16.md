@@ -617,6 +617,22 @@ Windows; what they needed, in the order they asked for it:
   serial port once and return 0. An import with no entry at all (an
   undocumented ordinal) loads as Windows loads it: the call, if it ever
   comes, shows "Call to Undefined Dynalink" and ends the program.
+- **Faults** in a Windows program's 16-bit code go to WIN16 (the
+  kernel reflects protection faults, divide errors, invalid
+  instructions, stack faults and the page faults nothing resolves, such
+  as a write to a code segment's pages). The ones it cannot fix (it
+  fixes a load of an invalid selector into DS or ES, and TOOLHELP's
+  debugger IRETs) show Windows 3.1's "Application Error" box, `NAME
+  caused a General Protection Fault in module MODULE.EXE at 0001:0234`
+  (a Divide by Zero, an Invalid Instruction, a Stack Fault; the
+  segment's number in its module and the offset; a page fault is the
+  protection fault Windows' segments would have raised), and end the
+  program when it is closed; the same line goes to the serial port. A
+  program never just disappears.
+  PMXTEST checks it with `HELLO16 GPF` started as the Workplace Shell
+  starts programs. A program the shell cannot start at all (a missing
+  file or DLL) gets the shell's "Cannot start the program" box with the
+  system's message for the error.
 - **Windows DLLs** of the program's own (WNDHOOKS.DLL, CTL3D...): the
   loader finds them in the program's directory first, gives each process
   its own copy of their data (each Windows task is a process here) and
@@ -684,8 +700,11 @@ Windows; what they needed, in the order they asked for it:
 
 **Installing it from its CD.** Delphi's own installer runs on WIN16:
 with the CD in the drive (the user's own copy; in QEMU `--virtio-cd
-delphi_1.iso`, drive D: on a system disk), start `D:\INSTALL\SETUP.EXE`
-from a command prompt or the Drives folder. It is Borland's installer:
+delphi_1.iso`, drive D: on a system disk; the CD's own letter, E: or
+later, when there is a second partition) start `INSTALL\SETUP.EXE` on
+it from a command prompt or by double-clicking it in the Drives folder;
+`INSTALL\DISK1\SETUP.EXE` is the same program as
+`INSTALL\DISK1\INSTALL.EXE` and works as well. It is Borland's installer:
 SETUP starts `DISK1\INSTALL.EXE` (the "Borland Install Loader"), which
 expands INSTRUN.EXE and BAMGR16.DLL with LZEXPAND into
 `C:\WINDOWS\TEMP` and starts INSTRUN; INSTRUN unpacks its helper DLLs

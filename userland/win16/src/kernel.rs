@@ -679,6 +679,39 @@ pub fn undefined_dynalink(r: &crate::dos::Regs) {
     }
 }
 
+/// A fault nothing fixed: Windows 3.1's "Application Error" ("NAME caused
+/// a General Protection Fault in module MOD at 0001:0234.", the segment's
+/// number in its module), then the end of the program, rather than a
+/// program that is gone with nothing on the screen. A page fault (a write
+/// to a code segment's pages) is the protection fault Windows' segments
+/// would have raised.
+pub fn application_error(r: &crate::dos::Regs) {
+    use crate::dos::reg::*;
+    let (cs, ip) = (r[CS], r[IP]);
+    let what = match r[INTNO] & 0xff {
+        0 => "a Divide by Zero",
+        6 => "an Invalid Instruction",
+        12 => "a Stack Fault",
+        _ => "a General Protection Fault",
+    };
+    let task = crate::module::find(0).map(|m| m.name.clone()).unwrap_or_default();
+    let hmod = unsafe { pm::Rs2Win16Selector(8, cs as u32, 0) };
+    let module = crate::module::path_of(hmod)
+        .filter(|_| hmod != 0)
+        .map(|p| p.rsplit(|&c| c == b'\\').next().unwrap_or(&p).to_ascii_uppercase())
+        .unwrap_or_else(|| b"UNKNOWN".to_vec());
+    let n = if hmod != 0 { unsafe { pm::Rs2Win16Selector(6, hmod, 0) } } else { 0 };
+    let seg = (1..=n).find(|&i| unsafe { pm::Rs2Win16Selector(6, hmod, i) } as u16 | 7 == cs | 7).unwrap_or(0);
+    let (task, module) = (alloc::string::String::from_utf8_lossy(&task), alloc::string::String::from_utf8_lossy(&module));
+    let at = if seg != 0 { alloc::format!("{seg:04X}:{ip:04X}") } else { alloc::format!("{cs:04X}:{ip:04X}") };
+    trace(format_args!("WIN16: {task} caused {what} in module {module} at {at} (CS={cs:04X}, fault {:02X}h)", r[INTNO] & 0xff));
+    let t = alloc::format!("{task} caused {what} in module {module} at {at}.\0");
+    unsafe {
+        pm::WinMessageBox(pm::HWND_DESKTOP, 0, t.as_ptr(), b"Application Error\0".as_ptr(), 0, 0x4000 | 0x0040);
+        os2::DosExit(1, 0xff);
+    }
+}
+
 /// WIN87EM's __FPMATH (INT E1h from w16_fpmath), the floating point
 /// emulator's interface: BX the function. The coprocessor does the work,
 /// so the programs' FPU instructions stay as they are (their OSFIXUPs

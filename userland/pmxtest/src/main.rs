@@ -2,7 +2,8 @@
 //! hooks (hooks.rs), DDE with another process (dde.rs), the registry
 //! through Open32's calls (reg.rs), owner drawing (owner.rs),
 //! presentation parameters (pres.rs), PMBIDI (bidi.rs), AVIO (avio.rs), lazy drag and
-//! DrgDragFiles (drag.rs). Each check
+//! DrgDragFiles (drag.rs), a Windows program's Application Error
+//! (win16.rs). Each check
 //! prints PASS or FAIL; the last line is "pmxtest done: N failure(s)"
 //! and the exit code N. `PMXTEST CHILD` is the second process the system
 //! hooks are checked in, `PMXTEST DDESERVER` the DDE server; `PMXTEST
@@ -27,6 +28,7 @@ mod owner;
 mod pm;
 mod pres;
 mod reg;
+mod win16;
 
 use pm::*;
 
@@ -180,6 +182,7 @@ fn main(s: &Startup) -> u32 {
         bidi::bidi_checks(client);
         avio::avio_checks(hab, client);
         drag::drag_checks(hab, client);
+        win16::win16_checks(hab);
     }
     unsafe {
         WinDestroyWindow(frame);

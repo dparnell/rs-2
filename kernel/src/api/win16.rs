@@ -147,8 +147,14 @@ pub fn selector(c: &mut Ctx) -> u32 {
         return vm::tile_selector(first) as u32;
     }
     if op == 8 {
+        // This process's program or a DLL: another program's segments may
+        // have the same selectors in its own LDT.
         let s = sel | 7;
-        return crate::loader::all_modules().iter().find(|m| m.objects.iter().any(|o| o.selector() == s)).map_or(0, |m| m.hmte as u32);
+        let exe = c.process.exe.clone();
+        return crate::loader::all_modules()
+            .iter()
+            .find(|m| (m.is_dll || Arc::ptr_eq(m, &exe)) && m.objects.iter().any(|o| o.selector() == s))
+            .map_or(0, |m| m.hmte as u32);
     }
     if op == 6 {
         let Some(m) = crate::loader::by_handle(sel) else { return 0 };
@@ -222,12 +228,15 @@ pub fn selector(c: &mut Ctx) -> u32 {
     }
 }
 
-/// A protection fault in user code: if it is in 16-bit code of a process
-/// with a Win16 interrupt handler (an INT instruction, or another fault
-/// outside the handler's own code), enter the handler.
+/// A fault in user code: if it is in 16-bit code of a process with a
+/// Win16 interrupt handler (an INT instruction, or another fault outside
+/// the handler's own code), enter the handler. Protection faults, and the
+/// divide errors, invalid instructions, stack faults and page faults
+/// nothing resolved (a write to a code segment's pages), which Windows
+/// reports as its programs' faults.
 pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
     let handler = p.win16_int.load(Ordering::Relaxed);
-    if handler == 0 || f.vector != 13 {
+    if handler == 0 || !matches!(f.vector, 0 | 6 | 12 | 13 | 14) {
         return false;
     }
     let mut sp = p.space.lock();
@@ -244,7 +253,7 @@ pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
     }
     // The error code of an INT through a gate the program may not use:
     // IDT bit and the vector.
-    let int = f.error & 3 == 2 && insn == [0xcd, (f.error >> 3) as u8];
+    let int = f.vector == 13 && f.error & 3 == 2 && insn == [0xcd, (f.error >> 3) as u8];
     if !int && cs == (handler >> 16) as u16 {
         return false;
     }

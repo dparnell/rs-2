@@ -40,6 +40,24 @@ unsafe extern "C" {
     fn WinSetObjectData(h: u32, setup: *const u8) -> u32;
     #[link_name = "PMWP.251"]
     fn WinDestroyObject(h: u32) -> u32;
+    #[link_name = "PMWP.286"]
+    fn WinOpenObject(h: u32, view: u32, flag: u32) -> u32;
+    #[link_name = "PMWIN.763"]
+    fn WinInitialize(fl: u32) -> u32;
+    #[link_name = "PMWIN.716"]
+    fn WinCreateMsgQueue(hab: u32, cmsg: i32) -> u32;
+    #[link_name = "PMWIN.726"]
+    fn WinDestroyMsgQueue(hmq: u32) -> u32;
+    #[link_name = "PMWIN.702"]
+    fn WinBeginEnumWindows(h: u32) -> u32;
+    #[link_name = "PMWIN.756"]
+    fn WinGetNextWindow(e: u32) -> u32;
+    #[link_name = "PMWIN.737"]
+    fn WinEndEnumWindows(e: u32) -> u32;
+    #[link_name = "PMWIN.841"]
+    fn WinQueryWindowText(h: u32, cb: i32, buf: *mut u8) -> i32;
+    #[link_name = "PMWIN.919"]
+    fn WinPostMsg(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32;
     #[link_name = "PMWP.287"]
     fn WinMoveObject(h: u32, dest: u32, flags: u32) -> u32;
     #[link_name = "PMWP.288"]
@@ -246,6 +264,75 @@ fn make() {
     check("WinEnumObjectClasses", unsafe { WinEnumObjectClasses(eb.as_mut_ptr(), &mut size) } != 0);
     let _ = unsafe { M_WPObjectClassData[0] };
     new_classes();
+    start_error();
+}
+
+/// The text the shell's "cannot start" box showed (start_error's watcher).
+static mut BOX_TEXT: Vec<u8> = Vec::new();
+
+fn window_text(h: u32) -> Vec<u8> {
+    let mut b = [0u8; 200];
+    let n = unsafe { WinQueryWindowText(h, 200, b.as_mut_ptr()) };
+    b[..n.max(0) as usize].to_vec()
+}
+
+/// Waits (10 s at most) for the shell's message box, keeps its texts and
+/// presses OK (WM_COMMAND MBID_OK).
+unsafe extern "C" fn box_watcher(_: u32) {
+    unsafe { WinInitialize(0) };
+    for _ in 0..1000 {
+        let e = unsafe { WinBeginEnumWindows(1) };
+        let mut found = 0;
+        loop {
+            let h = unsafe { WinGetNextWindow(e) };
+            if h == 0 {
+                break;
+            }
+            if window_text(h) == b"Workplace Shell" {
+                found = h;
+                break;
+            }
+        }
+        unsafe { WinEndEnumWindows(e) };
+        if found != 0 {
+            let mut all = Vec::new();
+            let c = unsafe { WinBeginEnumWindows(found) };
+            loop {
+                let k = unsafe { WinGetNextWindow(c) };
+                if k == 0 {
+                    break;
+                }
+                all.extend_from_slice(&window_text(k));
+                all.push(b'|');
+            }
+            unsafe { WinEndEnumWindows(c) };
+            unsafe { BOX_TEXT = all };
+            unsafe { WinPostMsg(found, 0x20, 1, 1) };
+            return;
+        }
+        unsafe { DosSleep(10) };
+    }
+}
+
+/// Opening a program object whose program cannot start shows why (as
+/// IBM's shell does) instead of nothing.
+fn start_error() {
+    let p = create(b"WPProgram", b"Missing", b"EXENAME=C:\\NOSUCH\\MISSING.EXE", b"<RS2_TESTFLDR>");
+    check("program object for a missing program", p >> 16 == 2);
+    // The message box needs a message queue on this thread, as the
+    // shell's has.
+    let hab = unsafe { WinInitialize(0) };
+    let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
+    let mut tid = 0;
+    unsafe { DosCreateThread(&mut tid, box_watcher, 0, 0, 65536) };
+    unsafe { WinOpenObject(p, 0, 0) };
+    unsafe { WinDestroyMsgQueue(hmq) };
+    let t = unsafe { BOX_TEXT.clone() };
+    check(
+        "opening it shows \"Cannot start the program\" with the error",
+        t.windows(47).any(|w| w == b"Cannot start the program C:\\NOSUCH\\MISSING.EXE.") && t.len() > 50,
+    );
+    unsafe { WinDestroyObject(p) };
 }
 
 fn class_title(o: usize) -> Vec<u8> {
