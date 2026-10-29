@@ -2003,6 +2003,54 @@ static void installer_tests(HINSTANCE hInst)
     }
 }
 
+/* Delphi's TNotebook (Environment Options): a page is made 0 high, the
+ * controls of a page not shown before are made hidden, each shown with
+ * SetWindowPos while the page is still hidden, the page is shown and
+ * then sized to the notebook. The controls keep their places from the
+ * page's top and are on the screen. */
+static int drawn(HWND h)
+{
+    HDC hdc;
+    RECT rc;
+    int x, y, n = 0;
+
+    UpdateWindow(GetParent(GetParent(h)));
+    hdc = GetDC(h);
+    GetClientRect(h, &rc);
+    for (y = 0; y < rc.bottom; y += 2)
+        for (x = 0; x < 16 && x < rc.right; x++)
+            if (GetPixel(hdc, x, y) != RGB(255, 255, 255))
+                n++;
+    ReleaseDC(h, hdc);
+    return n;
+}
+
+static void notebook_tests(HINSTANCE hInst)
+{
+    const UINT show = SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW;
+    HWND top, page, group, cb;
+    MSG msg;
+    RECT pr, cr;
+
+    top = CreateWindow("W16Size", "notebook", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, 300, 220, NULL, NULL, hInst, NULL);
+    page = CreateWindow("W16Size", "", WS_CHILD | WS_CLIPCHILDREN, 0, 0, 0, 0, top, NULL, hInst, NULL);
+    group = CreateWindow("BUTTON", "Group", WS_CHILD | WS_CLIPSIBLINGS | BS_GROUPBOX, 10, 10, 220, 100, page, NULL, hInst, NULL);
+    cb = CreateWindow("BUTTON", "Check", WS_CHILD | WS_CLIPSIBLINGS | BS_AUTOCHECKBOX, 10, 30, 150, 20, group, NULL, hInst, NULL);
+    SetWindowPos(cb, 0, 0, 0, 0, 0, SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE);
+    SetWindowPos(cb, 0, 0, 0, 0, 0, show);
+    SetWindowPos(group, 0, 0, 0, 0, 0, show);
+    SetWindowPos(page, 0, 0, 0, 0, 0, show);
+    SetWindowPos(page, 0, 0, 0, 280, 170, SWP_NOZORDER | SWP_NOACTIVATE);
+    while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+        DispatchMessage(&msg);
+    check(IsWindowVisible(cb) && IsWindowVisible(group), "a page shown after its controls: they are visible");
+    GetWindowRect(page, &pr);
+    GetWindowRect(cb, &cr);
+    check(cr.top - pr.top == 40 && cr.left - pr.left == 20, "a page sized after its controls: they keep their places from its top");
+    check(drawn(cb) > 0, "a page shown after its controls: they are drawn");
+    DestroyWindow(top);
+}
+
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
 {
     out("w16test: rs2's native Win16 layer\r\n");
@@ -2015,6 +2063,7 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     delphi_tests(hInst);
     toolhelp_tests(hInst);
     installer_tests(hInst);
+    notebook_tests(hInst);
     sprintf(line, "w16test done: %d failure(s)\r\n", failures);
     out(line);
     return failures;

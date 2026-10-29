@@ -2795,6 +2795,25 @@ fn dispatch_(p: *mut u8) -> u32 {
     }
 }
 
+/// A client area that changed height: its children keep their distance
+/// from its top, as on Windows (PM keeps them where they are from the
+/// bottom). Delphi's notebook pages are made 0 high, get their controls,
+/// and are only then sized to the notebook.
+fn keep_children_at_top(h: u16, old: i32, new: i32) {
+    let dy = new - old;
+    if dy == 0 {
+        return;
+    }
+    for c in children(h) {
+        let Some(f) = wnd(c).map(|w| w.frame) else { continue };
+        let mut swp = Swp::default();
+        unsafe {
+            WinQueryWindowPos(f, &mut swp);
+            WinSetWindowPos(f, HWND_TOP, swp.x, swp.y + dy, 0, 0, SWP_MOVE);
+        }
+    }
+}
+
 /// PM's window procedure of the Windows windows' client areas.
 extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let Some(h) = by_client(pmh).filter(|w| w.created).map(|w| w.hwnd) else {
@@ -2804,6 +2823,7 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         WM_SIZE => {
             let (cx, cy) = (mp2 as u16, (mp2 >> 16) as u16);
+            keep_children_at_top(h, (mp1 >> 16) as u16 as i32, cy as i32);
             let cls = wnd(h).and_then(|w| u().classes.get(w.class)).map_or(0, |c| c.style);
             if cls & (CS_HREDRAW | CS_VREDRAW) != 0 {
                 unsafe { WinInvalidateRect(pmh, core::ptr::null(), 0) };

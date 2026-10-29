@@ -290,6 +290,72 @@ pub fn parse(b: &[u8]) -> Vec<Entry> {
     out
 }
 
+/// A Windows icon (an RT_GROUP_ICON directory and its RT_ICON images, as
+/// `image(id)` gives them) as an OS/2 icon file: a bitmap array of 'CI'
+/// images. A Windows image is a DIB twice its height, the colour bitmap
+/// and then the AND mask, both bottom-up: the AND mask becomes the upper
+/// half of the 1 bpp bitmap and the XOR half is 0 (colour where AND is
+/// 0, transparent where it is 1). None without a usable image.
+pub fn from_windows<'a>(dir: &[u8], image: impl Fn(u16) -> Option<&'a [u8]>) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let n = u16le(dir, 4)? as usize;
+    for k in 0..n {
+        let Some(id) = u16le(dir, 6 + 14 * k + 12) else { break };
+        let Some(dib) = image(id) else { continue };
+        let Some(info) = Info::parse(dib, false) else { continue };
+        let (w, h, bpp) = (info.width, info.height / 2, info.bitcount);
+        if info.cbfix < 40 || info.compression != 0 || !(1..=8).contains(&bpp) || w <= 0 || h <= 0 || w > 256 {
+            continue;
+        }
+        let used = u32le(dib, 32).unwrap_or(0) as usize;
+        let colors = if used != 0 && used < 1 << bpp { used } else { 1 << bpp };
+        let table = info.cbfix as usize;
+        let (xstride, mstride) = ((w as usize * bpp as usize).div_ceil(32) * 4, (w as usize).div_ceil(32) * 4);
+        let xor_at = table + colors * 4;
+        let and_at = xor_at + xstride * h as usize;
+        let Some(and) = dib.get(and_at..and_at + mstride * h as usize) else { continue };
+        let xor = &dib[xor_at..and_at];
+        let header = |out: &mut Vec<u8>, height: i32, bits: u16| {
+            out.extend_from_slice(&40u32.to_le_bytes());
+            out.extend_from_slice(&(w as u32).to_le_bytes());
+            out.extend_from_slice(&(height as u32).to_le_bytes());
+            out.extend_from_slice(&1u16.to_le_bytes());
+            out.extend_from_slice(&bits.to_le_bytes());
+            out.extend_from_slice(&[0; 24]);
+        };
+        // BITMAPARRAYFILEHEADER, two BITMAPFILEHEADERs with their headers
+        // and colour tables, then the mask and the colour bits.
+        let start = out.len();
+        let mono_len = 14 + 40 + 8;
+        let colour_len = 14 + 40 + 4 * (1 << bpp);
+        let mask_bits = start + 14 + mono_len + colour_len;
+        let colour_bits = mask_bits + 2 * mstride * h as usize;
+        let next = colour_bits + xstride * h as usize;
+        out.extend_from_slice(&0x4142u16.to_le_bytes());
+        out.extend_from_slice(&14u32.to_le_bytes());
+        out.extend_from_slice(&(if k + 1 < n { next as u32 } else { 0 }).to_le_bytes());
+        out.extend_from_slice(&[0; 4]);
+        for (bits_at, height, bits) in [(mask_bits, 2 * h, 1u16), (colour_bits, h, bpp)] {
+            out.extend_from_slice(&KIND_CI.to_le_bytes());
+            out.extend_from_slice(&(14u32 + 40).to_le_bytes());
+            out.extend_from_slice(&[0; 4]);
+            out.extend_from_slice(&(bits_at as u32).to_le_bytes());
+            header(&mut out, height, bits);
+            if bits == 1 {
+                out.extend_from_slice(&[0, 0, 0, 0, 0xff, 0xff, 0xff, 0]);
+            } else {
+                out.extend_from_slice(&dib[table..xor_at]);
+                out.resize(out.len() + 4 * ((1 << bpp) - colors), 0);
+            }
+        }
+        out.resize(out.len() + mstride * h as usize, 0);
+        out.extend_from_slice(and);
+        out.extend_from_slice(xor);
+    }
+    // The last image ends the array.
+    (!out.is_empty()).then_some(out)
+}
+
 /// The image to use at `size` x `size` pels on a `screen` display: one
 /// of that size (made for any display or for this one, the most colours
 /// first), else the nearest larger one, else the largest.
@@ -454,6 +520,41 @@ mod tests {
         draw(&mut s, &[Rect::new(0, 0, 4, 4)], 1, 1, &img, false);
         assert_eq!(s.get(2, 1), Some(0xff00ff), "inverted");
         assert_eq!(s.get(2, 2), Some(0x0000ff));
+    }
+
+    /// A Windows icon: 32 x 32, 4 bpp, red but for a transparent bottom
+    /// row and a blue top-left pixel.
+    #[test]
+    fn windows_icon() {
+        let mut dib = Vec::new();
+        for v in [40u32, 32, 64] {
+            dib.extend_from_slice(&v.to_le_bytes());
+        }
+        dib.extend_from_slice(&1u16.to_le_bytes());
+        dib.extend_from_slice(&4u16.to_le_bytes());
+        dib.extend_from_slice(&[0; 24]);
+        let mut table = [0u8; 64];
+        table[4..8].copy_from_slice(&[0, 0, 0xff, 0]); // 1: red
+        table[8..12].copy_from_slice(&[0xff, 0, 0, 0]); // 2: blue
+        dib.extend_from_slice(&table);
+        let mut xor = vec![0x11u8; 16 * 32];
+        xor[31 * 16] = 0x21; // the top row (bottom-up: the last), x 0
+        dib.extend_from_slice(&xor);
+        let mut and = vec![0u8; 4 * 32];
+        and[..4].fill(0xff); // the bottom row
+        dib.extend_from_slice(&and);
+        let mut dir = vec![0, 0, 1, 0, 1, 0, 32, 32, 16, 0, 1, 0, 4, 0];
+        dir.extend_from_slice(&(dib.len() as u32).to_le_bytes());
+        dir.extend_from_slice(&7u16.to_le_bytes());
+        let b = from_windows(&dir, |id| (id == 7).then_some(&dib[..])).unwrap();
+        let e = parse(&b);
+        assert_eq!(e.len(), 1);
+        let c = choose(&e, 32, (1024, 768)).unwrap();
+        assert_eq!((c.image.w, c.image.h, c.bits), (32, 32, 4));
+        assert_eq!(c.image.at(3, 0), TRANSPARENT);
+        assert_eq!(c.image.at(3, 1), rgb(0xff0000));
+        assert_eq!(c.image.at(0, 31), rgb(0x0000ff));
+        assert!(from_windows(&dir, |_| None).is_none());
     }
 
     /// The Toolkit's sample icons, when the media is there.

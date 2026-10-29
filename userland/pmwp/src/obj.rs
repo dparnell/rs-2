@@ -65,6 +65,10 @@ pub struct Data {
     pub ccview: u32,
     /// The object's use list (IBM's USEITEMs: memory, open views).
     pub use_list: usize,
+    /// Where its own icon came from ("ICONFILE=..." or
+    /// "ICONRESOURCE=..."), kept with the object so the icon is there
+    /// again after a restart.
+    pub icon_from: Str,
 }
 
 pub const CCVIEW_DEFAULT: u32 = 0;
@@ -219,6 +223,9 @@ extern "C" fn wpSaveState(obj: usize) -> u32 {
     if d(obj).ccview != CCVIEW_DEFAULT {
         wpSaveLong(obj, c, 6, d(obj).ccview);
     }
+    if d(obj).icon_from.is_some() {
+        wpSaveString(obj, c, 7, str_ptr(&d(obj).icon_from));
+    }
     1
 }
 
@@ -240,6 +247,11 @@ extern "C" fn wpRestoreState(obj: usize, _reserved: u32) -> u32 {
     }
     if let Some(v) = restored_long(obj, b"WPObject", 6) {
         d(obj).ccview = v;
+    }
+    if let Some(v) = restored_string(obj, b"WPObject", 7) {
+        if let Some(i) = v.iter().position(|&c| c == b'=') {
+            set_icon_from(obj, &v[..i], &v[i + 1..]);
+        }
     }
     1
 }
@@ -492,6 +504,7 @@ extern "C" fn wpUnInitData(obj: usize) {
     dd.title = None;
     dd.object_id = None;
     dd.state = None;
+    dd.icon_from = None;
     wps::unregister(obj);
 }
 
@@ -650,6 +663,21 @@ fn icon_resource(v: &[u8]) -> u32 {
     unsafe { WinLoadPointer(1, h, id) }
 }
 
+/// ICONFILE=file or ICONRESOURCE=id module: the object's icon, and where
+/// it came from for its saved state.
+fn set_icon_from(obj: usize, key: &[u8], v: &[u8]) {
+    let h = if key == b"ICONFILE" {
+        let p = z(v);
+        unsafe { Rs2LoadFileIcon(p.as_ptr(), 0) }
+    } else {
+        icon_resource(v)
+    };
+    if h != 0 {
+        call(m::WPObject::wpSetIcon, &[obj, h as usize]);
+        d(obj).icon_from = str_new(&[key, b"=", v].concat());
+    }
+}
+
 extern "C" fn wpSetup(obj: usize, setup: *const u8) -> u32 {
     let style_bits: &[(&[u8], u32)] = &[
         (b"NOMOVE", OBJSTYLE_NOMOVE),
@@ -690,19 +718,7 @@ extern "C" fn wpSetup(obj: usize, setup: *const u8) -> u32 {
                 };
                 call(m::WPObject::wpSetConcurrentView, &[obj, cc as usize]);
             }
-            b"ICONFILE" => {
-                let p = z(&v);
-                let h = unsafe { Rs2LoadFileIcon(p.as_ptr(), 0) };
-                if h != 0 {
-                    call(m::WPObject::wpSetIcon, &[obj, h as usize]);
-                }
-            }
-            b"ICONRESOURCE" => {
-                let h = icon_resource(&v);
-                if h != 0 {
-                    call(m::WPObject::wpSetIcon, &[obj, h as usize]);
-                }
-            }
+            b"ICONFILE" | b"ICONRESOURCE" => set_icon_from(obj, &k, &v),
             _ => {
                 if let Some(&(_, bit)) = style_bits.iter().find(|(n, _)| *n == k.as_slice()) {
                     let s = d(obj).style;

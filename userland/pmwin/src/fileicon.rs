@@ -113,8 +113,12 @@ fn read_file(path: &[u8]) -> Option<Mem> {
     r
 }
 
-/// An executable's icon resource.
+/// An executable's icon resource: an OS/2 program's RT_POINTER, a
+/// Windows program's first icon group.
 fn exe_icon(data: &[u8]) -> Option<Vec<u8>> {
+    if let Some(b) = windows_icon(data, 0) {
+        return Some(b);
+    }
     let list = os2_exe::res::list(data);
     let pick = list
         .iter()
@@ -122,6 +126,17 @@ fn exe_icon(data: &[u8]) -> Option<Vec<u8>> {
         .or_else(|| list.iter().find(|&&(t, n)| t == RT_POINTER && n == 1))
         .or_else(|| list.iter().filter(|&&(t, _)| t == RT_POINTER).min_by_key(|&&(_, n)| n))?;
     os2_exe::res::get(data, pick.0, pick.1)
+}
+
+/// The `index`-th icon group of a Windows program (as ExtractIcon counts
+/// them), in OS/2's icon format.
+pub fn windows_icon(data: &[u8], index: usize) -> Option<Vec<u8>> {
+    const RT_ICON: u16 = 3;
+    const RT_GROUP_ICON: u16 = 14;
+    let groups = os2_exe::res::windows(data, RT_GROUP_ICON);
+    let &(_, dir) = groups.get(index)?;
+    let images = os2_exe::res::windows(data, RT_ICON);
+    gpi::icon::from_windows(dir, |id| images.iter().find(|i| i.0 == id).map(|i| i.1))
 }
 
 fn has_ext(path: &[u8], exts: &[&[u8]]) -> bool {
