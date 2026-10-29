@@ -752,13 +752,17 @@ What the installer needed (each has a W16TEST check):
   XTYP_REQUEST for "Groups" or a group answers from there. Without a
   running Workplace Shell (booted to a command prompt) the folder cannot
   be made and the items go on the desktop.
+- **EM_SETHANDLE**: View Readme gives its edit control the text in a
+  local block of a segment it made with LocalInit; the control takes
+  the text from there.
 - SHARE answered as loaded (INT 2Fh AX=1000h), DPMI 0002h for segment
   40h and 0604h (the page size).
 
 Not yet: the installer still says SHARE.EXE is not loaded (its check is
 not INT 2Fh; it is a notice, Continue goes on; OS/2 shares files
-itself), and View Readme at the end opens its readme window empty.
-Windows' Help files it installs need WinHelp (below).
+itself). Windows' Help files it installs need WinHelp (below). Its own
+registry keys read `DELPHI\shellopencommand`: the backslashes are
+missing in Borland's compiled script itself.
 
 **By hand**, as before: the `RUNIMAGE` tree of
 the CD copied to `C:\DELPHI` (BIN, LIB, GALLERY, IMAGES), its IDAPI to

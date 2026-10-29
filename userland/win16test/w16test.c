@@ -1878,6 +1878,19 @@ static void installer_tests(HINSTANCE hInst)
     check(GetWindow(parent, GW_CHILD) == frame, "ShowWindow keeps a child's place in the Z order");
     DestroyWindow(parent);
 
+    /* EM_SETHANDLE: an edit control's text from a local block of its
+     * instance's segment (the installer's README window). */
+    {
+        HWND e = CreateWindow("EDIT", "", WS_POPUP | ES_MULTILINE, 0, 0, 200, 100, NULL, NULL, hInst, NULL);
+        HLOCAL hl = LocalAlloc(LMEM_MOVEABLE, 32);
+        lstrcpy(LocalLock(hl), "Read me\r\nfirst");
+        LocalUnlock(hl);
+        SendMessage(e, EM_SETHANDLE, (WPARAM)hl, 0);
+        GetWindowText(e, buf, sizeof buf);
+        check(lstrcmp(buf, "Read me\r\nfirst") == 0 && SendMessage(e, EM_GETLINECOUNT, 0, 0) == 2, "EM_SETHANDLE: the text of a local block");
+        DestroyWindow(e);
+    }
+
     /* The registration database (SHELL), and REGEDIT /s merging a .REG
      * file (the installer registers OLE 2 so). */
     {
