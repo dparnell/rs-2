@@ -104,6 +104,14 @@ unsafe extern "C" {
     fn GpiQueryBitmapParameters(hbm: u32, p: *mut u32) -> u32;
     #[link_name = "PMWIN.9003"]
     fn Rs2SetMinimizeViewer(h: u32) -> u32;
+    #[link_name = "PMWIN.757"]
+    fn WinGetPS(h: u32) -> u32;
+    #[link_name = "PMWIN.848"]
+    fn WinReleasePS(hps: u32) -> u32;
+    #[link_name = "PMGPI.592"]
+    fn GpiCreateLogColorTable(hps: u32, opts: u32, fmt: i32, start: i32, n: i32, t: *const i32) -> u32;
+    #[link_name = "PMGPI.476"]
+    fn GpiQueryPel(hps: u32, p: *const i32) -> i32;
     #[link_name = "PMWP.209"]
     fn WinLoadFileIcon(name: *const u8, private: u32) -> u32;
     #[link_name = "PMWP.210"]
@@ -355,6 +363,30 @@ fn icon_file() -> Vec<u8> {
         b.extend_from_slice(&row.to_be_bytes());
     }
     b
+}
+
+/// A Windows program's own icon (NOTE16's: solid red, from its
+/// RT_GROUP_ICON and RT_ICON resources), drawn in `client`.
+fn windows_icon(client: u32) {
+    let name = b"C:\\RS2\\NOTE16.EXE\0";
+    let mut info = [0u8; 64];
+    if unsafe { DosQueryPathInfo(name.as_ptr(), 1, info.as_mut_ptr(), 64) } != 0 {
+        println!("SKIP a Windows program's icon (no C:\\RS2\\NOTE16.EXE)");
+        return;
+    }
+    let h = unsafe { WinLoadFileIcon(name.as_ptr(), 1) };
+    let hps = unsafe { WinGetPS(client) };
+    let c = unsafe {
+        // LCOLF_RGB: GpiQueryPel answers RGB.
+        GpiCreateLogColorTable(hps, 0, 3, 0, 0, core::ptr::null());
+        WinDrawPointer(hps, 4, 4, h, 0);
+        GpiQueryPel(hps, [20, 20].as_ptr())
+    };
+    unsafe {
+        WinReleasePS(hps);
+        WinFreeFileIcon(h);
+    }
+    check("WinLoadFileIcon (a Windows program): its own icon", h != 0 && c == 0xff0000);
 }
 
 fn file_icons() {
@@ -627,6 +659,7 @@ fn main(s: &Startup) -> u32 {
     pump(hab);
     pointers();
     file_icons();
+    windows_icon(client);
     frames(hab, client);
     moves(hab);
     let cnr = container(hab, client);

@@ -791,7 +791,20 @@ What the installer needed (each has a W16TEST check):
   groups are listed in PROGMAN.INI as Program Manager keeps them; an
   XTYP_REQUEST for "Groups" or a group answers from there. Without a
   running Workplace Shell (booted to a command prompt) the folder cannot
-  be made and the items go on the desktop.
+  be made and the items go on the desktop. An item's program is looked
+  up as Windows would (the Windows directory, the PATH) and shows its
+  own Windows icon (the Workplace Shell reads Windows programs' icon
+  groups); `NOTEPAD.EXE file` (Delphi's readme items) opens the file in
+  the System Editor (E.EXE), as there is no Windows Notepad; a program
+  that is not there at all (`WINHELP.EXE file.HLP`) shows the icon of
+  the file it opens. The trace (`W16TRACE`) lists each command with its
+  arguments.
+- **Children keep their place from the top** when their parent changes
+  height, as on Windows (PM keeps a child's distance from its parent's
+  bottom). Delphi's notebooks (Options|Environment, Project) make a page
+  0 high, create its controls, show it and only then size it to the
+  notebook: the controls of every page but the first were left below
+  the page, out of sight.
 - **EM_SETHANDLE**: View Readme gives its edit control the text in a
   local block of a segment it made with LocalInit; the control takes
   the text from there.

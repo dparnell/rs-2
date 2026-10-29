@@ -1,6 +1,9 @@
-/* NOTE16's menu and accelerators. */
+/* NOTE16's icon (solid red: SHELLTST reads it as the program's icon),
+ * menu and accelerators. */
 #include <windows.h>
 #include "note16.h"
+
+Note16 ICON note16.ico
 
 Note16 MENU
 BEGIN

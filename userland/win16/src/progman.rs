@@ -192,7 +192,14 @@ fn execute(text: &[u8]) -> bool {
         i += 1;
         let args: Vec<Vec<u8>> = args.into_iter().map(|a| trim(&a).to_vec()).collect();
         if crate::tracing() {
-            crate::pm::trace(format_args!("W16 PROGMAN {}", core::str::from_utf8(&name).unwrap_or("?")));
+            let mut all = Vec::new();
+            for (k, a) in args.iter().enumerate() {
+                if k > 0 {
+                    all.push(b',');
+                }
+                all.extend_from_slice(a);
+            }
+            crate::pm::trace(format_args!("W16 PROGMAN {}({})", core::str::from_utf8(&name).unwrap_or("?"), core::str::from_utf8(&all).unwrap_or("?")));
         }
         ok &= command(&name, &args);
     }
@@ -369,6 +376,17 @@ fn add_item(cmd: &[u8], name: &[u8], icon: &[u8], dir: &[u8]) {
         None => (cmd, &b""[..]),
     };
     let title = if name.is_empty() { crate::module::base_name(exe) } else { name.to_vec() };
+    // The program where Windows would find it ("NOTEPAD.EXE README.TXT":
+    // the Windows directory, the PATH). Windows' Notepad is not there:
+    // the System Editor opens the text instead. A program that is not
+    // there at all (WINHELP.EXE) shows the icon of the file it opens.
+    let found = crate::compat::find_program(exe)
+        .or_else(|| crate::module::base_name(exe).eq_ignore_ascii_case(b"NOTEPAD.EXE").then(|| crate::compat::find_program(b"E.EXE")).flatten());
+    let icon = match &found {
+        None if icon.is_empty() && crate::compat::find_program(params).is_some() => params,
+        _ => icon,
+    };
+    let exe = found.as_deref().unwrap_or(exe);
     // The program's own directory unless one is given (as Program
     // Manager starts it).
     let dir = if dir.is_empty() { exe[..exe.iter().rposition(|&c| c == b'\\').unwrap_or(0)].to_vec() } else { dir.to_vec() };

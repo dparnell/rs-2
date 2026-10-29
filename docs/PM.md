@@ -1039,7 +1039,10 @@ mini icon on its system menu button.
 extended attribute, else for an executable (`.EXE`, `.DLL`) its
 `RT_DEFAULTICON`, else `RT_POINTER` 1, else its first `RT_POINTER`
 resource (read from the file with `os2_exe::res`, without loading it),
-else rs2's folder, program or file icon; the file is read with the PM
+else rs2's folder, program or file icon; for a Windows program (an NE
+file for Windows), its first icon group (RT_GROUP_ICON and its RT_ICON
+images, converted to OS/2's icon format by `gpi::icon::from_windows`),
+as Win-OS/2's programs show their icons on the desktop; the file is read with the PM
 lock released. `WinSetFileIcon` writes the `.ICON` EA from an icon file
 (`ICON_FILE`), a resource (`ICON_RESOURCE`) or data (`ICON_DATA`), and
 `ICON_CLEAR` removes it; `WinFreeFileIcon`.
