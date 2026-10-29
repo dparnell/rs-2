@@ -1905,7 +1905,11 @@ pub fn show_window(h: u16, cmd: u16) -> bool {
     };
     if !framed {
         fl &= !(SWP_ACTIVATE | SWP_MINIMIZE | SWP_MAXIMIZE | SWP_RESTORE);
-        if !child && fl & SWP_SHOW != 0 {
+        // A child keeps its place in the Z order (dialog controls stay in
+        // their template's order), as on Windows.
+        if child {
+            fl &= !SWP_ZORDER;
+        } else if fl & SWP_SHOW != 0 {
             fl |= SWP_ZORDER;
         }
     } else if child {

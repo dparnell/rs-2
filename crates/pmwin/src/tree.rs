@@ -415,6 +415,23 @@ impl Desktop {
         self.invalidate(h, None, true);
     }
 
+    /// Put a window just below a sibling (WinCreateWindow's and
+    /// WinSetWindowPos' hwndInsertBehind when it names a window).
+    pub fn place_behind(&mut self, h: Hwnd, behind: Hwnd) {
+        let Some(p) = self.get(h).map(|w| w.parent) else { return };
+        if h == behind || self.get(behind).map(|w| w.parent) != Some(p) {
+            return;
+        }
+        if let Some(pw) = self.windows.get_mut(&p) {
+            pw.children.retain(|&c| c != h);
+            let at = pw.children.iter().position(|&c| c == behind).unwrap_or(0);
+            pw.children.insert(at, h);
+        }
+        self.generation = self.generation.wrapping_add(1);
+        let r = self.screen_rect(h);
+        self.invalidate_screen(r);
+    }
+
     /// Move a window to the bottom of its siblings; what it uncovers is
     /// repainted.
     pub fn to_bottom(&mut self, h: Hwnd) {
