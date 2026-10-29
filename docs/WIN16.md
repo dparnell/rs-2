@@ -653,8 +653,9 @@ Windows; what they needed, in the order they asked for it:
   methods are WIN16 entries), CoInitialize, OleInitialize, IsEqualGUID;
   the rest of OLE 2 are stubs returning E_FAIL.
 - **The BIOS data area**: selector 40h (and KERNEL's `__0040H`) is a
-  read-only page with BIOS-like contents and a tick count the kernel
-  updates (Windows programs only); the kernel accepts a DS or ES with any
+  page with BIOS-like contents and a tick count the kernel updates
+  (Windows programs only), one for all of them as on Windows and
+  writable (setup programs keep the floppy motor on through 40:40); the kernel accepts a DS or ES with any
   RPL on a ring 3 descriptor, as Windows' selector values sometimes have.
 - **DDEML and COMMDLG** are WIN16's own (stage 3, above): PFE's Open
   and Print dialogs (its own templates, owner-drawn file lists) open
@@ -677,11 +678,93 @@ Windows; what they needed, in the order they asked for it:
 | Jewels | | | starts | |
 | Hyperoid | | C | partly | Draws its own title bar with GetWindowDC: lands in the client area |
 | LIFEAPP | | | partly | Loading a snapshot fails (current directory) |
-| **Delphi** | 1.0 | Delphi 1 | **works** | Designs, edits properties, compiles and runs programs; the integrated debugger stops at breakpoints, steps and runs on (below) |
+| **Delphi** | 1.0 | Delphi 1 | **works** | Installs from its CD with its own installer; designs, edits properties, compiles and runs programs; the integrated debugger stops at breakpoints, steps and runs on (below) |
 
 ### Delphi 1.0
 
-The user's own copy (never in the repository): the `RUNIMAGE` tree of
+**Installing it from its CD.** Delphi's own installer runs on WIN16:
+with the CD in the drive (the user's own copy; in QEMU `--virtio-cd
+delphi_1.iso`, drive D: on a system disk), start `D:\INSTALL\SETUP.EXE`
+from a command prompt or the Drives folder. It is Borland's installer:
+SETUP starts `DISK1\INSTALL.EXE` (the "Borland Install Loader"), which
+expands INSTRUN.EXE and BAMGR16.DLL with LZEXPAND into
+`C:\WINDOWS\TEMP` and starts INSTRUN; INSTRUN unpacks its helper DLLs
+from INSTXTRA.PAK (Quantum compression, its own code), loads its script
+engine (BAENG16.DLL) and runs the compiled install script, the `INSTALL`
+resource of type `SCR`. The pages: Complete, Minimum or Custom, the
+directories (`C:\DELPHI`, `C:\RPTSMITH`, `C:\IBLOCAL`, `C:\DBD`), the
+database engine's (`C:\IDAPI`), then Install: the dashboard screen
+reads the fifteen "diskettes" of `INSTALL\DISK1`..`DISK15` (a few
+minutes), configures the Borland Database Engine (IDAPINST.DLL writes
+IDAPI.CFG for the country and code page), registers Delphi's file types
+and merges OLE2.REG into the registration database, offers to add
+`C:\IBLOCAL\BIN;C:\IDAPI` to AUTOEXEC.BAT's PATH (harmless here), makes a
+Delphi group with Program Manager and ends with "Delphi is now
+installed". What it writes: the program trees, `C:\WINDOWS\SYSTEM`
+(BWCC, the VBXs, and the Microsoft redistributables on the CD: OLE 2,
+CTL3D, ODBC; WIN16's own COMPOBJ, OLE2, STORAGE... are used, not those
+files), WIN.INI ([IDAPI], [Borland Language Drivers], [Interbase],
+[Extensions]...), DELPHI.INI, RPTSMITH.INI, ODBC.INI, PROGMAN.INI and
+REG.DAT. The installed Delphi then starts from `C:\DELPHI\BIN`, designs,
+compiles and runs programs (checked on a system disk with only rs2's
+own files: `cargo xtask disk --system --size 300`, booted with
+`--hdd IMG --boot-hdd` and the CD: install, reboot, Delphi, a button
+dropped on Form1, F9).
+
+![Delphi's installer on rs2](images/rs2-win16-delphi-install.png)
+
+![The installer done](images/rs2-win16-delphi-installed.png)
+
+What the installer needed (each has a W16TEST check):
+
+- **A writable BIOS data area** (it writes 40:40, the floppy motor's
+  count).
+- **RT_NAMETABLE with named types**: its scripts are found as
+  FindResource(hInst, "INSTALL", "SCR"), named through the program's
+  Windows 3.0 name table (type 15) as type 7F01h, resource 1.
+- **Dialog controls in Windows' Z order** (the first created on top;
+  ShowWindow keeps a child's place; PM's WinCreateWindow now honours
+  hwndInsertBehind) and **see-through frames**: frame statics and group
+  boxes draw only their frame and text, and the controls inside them
+  show whether they come before or after the frame in the template
+  (rs2 PM's `TRANSPARENT` window style: not clipped from the parent or
+  lower siblings).
+- **What Windows Setup writes**: WIN.INI's [intl] (iCountry, sLanguage,
+  date, time and number formats, from the system's country settings)
+  and SYSTEM.INI's `[boot.description] codepage`, answered when the
+  files do not have them; IDAPINST picks the engine's configuration by
+  them (without, it looked up a resource that does not exist and
+  faulted).
+- **The registration database** (`reg.rs`): RegOpenKey, RegCreateKey,
+  RegSetValue, RegQueryValue, RegEnumKey, RegDeleteKey, RegCloseKey on
+  `C:\WINDOWS\REG.DAT`, kept as the text REGEDIT merges (`REGEDIT` on
+  the first line, `HKEY_CLASSES_ROOT\key = value` lines; not Windows'
+  binary file). `REGEDIT [/s] FILE.REG` started with WinExec merges the
+  file when there is no REGEDIT.EXE.
+- **A Program Manager** (`progman.rs`): when nobody answers a
+  WM_DDE_INITIATE for PROGMAN (no Windows shell such as Calmira runs, no
+  PM program serves it), a window of the task does, for DDEML and plain
+  DDE clients: `[CreateGroup(name)]` makes a folder on the Workplace
+  Shell's desktop, `[AddItem(command, name, icon, index, x, y, dir)]` a
+  program object in it (`[ReplaceItem]` and `[DeleteItem]` remove one,
+  `[DeleteGroup]` the folder, `[ShowGroup]` selects the group), and the
+  groups are listed in PROGMAN.INI as Program Manager keeps them; an
+  XTYP_REQUEST for "Groups" or a group answers from there. Without a
+  running Workplace Shell (booted to a command prompt) the folder cannot
+  be made and the items go on the desktop.
+- **EM_SETHANDLE**: View Readme gives its edit control the text in a
+  local block of a segment it made with LocalInit; the control takes
+  the text from there.
+- SHARE answered as loaded (INT 2Fh AX=1000h), DPMI 0002h for segment
+  40h and 0604h (the page size).
+
+Not yet: the installer still says SHARE.EXE is not loaded (its check is
+not INT 2Fh; it is a notice, Continue goes on; OS/2 shares files
+itself). Windows' Help files it installs need WinHelp (below). Its own
+registry keys read `DELPHI\shellopencommand`: the backslashes are
+missing in Borland's compiled script itself.
+
+**By hand**, as before: the `RUNIMAGE` tree of
 the CD copied to `C:\DELPHI` (BIN, LIB, GALLERY, IMAGES), its IDAPI to
 `C:\IDAPI`, BIVBX11.DLL, BOLE16D.DLL, BWCC.DLL and the VBX files to
 `C:\WINDOWS\SYSTEM` (no Microsoft DLLs: WIN16 is KERNEL, USER, GDI and

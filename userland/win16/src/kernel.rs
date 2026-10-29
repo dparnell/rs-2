@@ -686,8 +686,9 @@ pub fn undefined_dynalink(r: &crate::dos::Regs) {
 pub fn fpmath(r: &mut crate::dos::Regs) {
     use crate::dos::reg::*;
     match r[BX] {
-        // 0 initialise, 1 terminate, 3 set the exception handler.
-        0 | 1 | 3 => r[AX] = 0,
+        // 0 install, 1 initialise, 2 deinstall (programs' exit code),
+        // 3 set the exception handler.
+        0..=3 => r[AX] = 0,
         // Set the control word (AX).
         4 => {
             let cw = r[AX];

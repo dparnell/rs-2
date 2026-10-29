@@ -266,6 +266,20 @@ pub fn proc_address(h: u16, name: u32) -> u32 {
     if r != 0 { 0 } else { f as u32 }
 }
 
+/// Replace (or create) a file with `data`.
+pub fn write_file(path: &[u8], data: &[u8]) -> bool {
+    let mut z = path.to_vec();
+    z.push(0);
+    let (mut hf, mut action, mut n) = (0u32, 0u32, 0u32);
+    // Replace or create, write only, deny write.
+    if unsafe { os2::DosOpen(z.as_ptr(), &mut hf, &mut action, 0, 0, 0x12, 0x21, core::ptr::null_mut()) } != 0 {
+        return false;
+    }
+    let ok = unsafe { os2::DosWrite(hf, data.as_ptr(), data.len() as u32, &mut n) } == 0 && n as usize == data.len();
+    unsafe { os2::DosClose(hf) };
+    ok
+}
+
 /// The whole file (or its first `max` bytes).
 pub fn read_file(path: &[u8], max: usize) -> Option<Vec<u8>> {
     let mut z = path.to_vec();

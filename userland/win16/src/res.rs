@@ -109,8 +109,12 @@ impl Image {
         self.find_direct(ty, name).or_else(|| {
             // Windows 3.0 programs name resources in an RT_NAMETABLE (15):
             // entries of a length, the type and the resource's IDs, the
-            // type's name and the resource's name.
-            let (Name::Str(n), Name::Id(t)) = (name, ty) else { return None };
+            // type's name and the resource's name. A named type has its
+            // ID's high bit set (Borland's installer finds its scripts as
+            // type "SCR", stored as 7F01h).
+            if matches!((ty, name), (Name::Id(_), Name::Id(_))) {
+                return None;
+            }
             let (off, len) = self.find_direct(&Name::Id(15), &Name::Id(1)).or_else(|| self.first_of(15))?;
             let tab = &self.file[off..off + len];
             let mut p = 0;
@@ -121,10 +125,19 @@ impl Image {
                 }
                 let (ety, eid) = (w16(tab, p + 2), w16(tab, p + 4));
                 let mut q = p + 6;
-                let _ty_name = sz(tab, &mut q);
+                let ty_name = sz(tab, &mut q);
                 let id_name = sz(tab, &mut q);
-                if ety & 0x7fff == *t && id_name.eq_ignore_ascii_case(n) {
-                    return self.find_direct(ty, &Name::Id(eid & 0x7fff));
+                let ty_ok = match ty {
+                    Name::Id(t) => ety & 0x7fff == *t,
+                    Name::Str(s) => ety & 0x8000 != 0 && ty_name.eq_ignore_ascii_case(s),
+                };
+                let id_ok = match name {
+                    Name::Id(_) => true,
+                    Name::Str(n) => id_name.eq_ignore_ascii_case(n),
+                };
+                if ty_ok && id_ok {
+                    let id = if let Name::Id(i) = name { *i } else { eid & 0x7fff };
+                    return self.find_direct(&Name::Id(ety & 0x7fff), &Name::Id(id));
                 }
                 p += n_len;
             }

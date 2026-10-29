@@ -457,6 +457,7 @@ fn other_tasks_windows() -> Vec<u32> {
 /// SendMessage(0xFFFF, ...): every top-level window, the task's own and
 /// the other tasks'.
 pub fn broadcast(m: u16, wp: u16, lp: u32) -> u32 {
+    let acks = *ACKS.get();
     let own: Vec<u16> = user::all().into_iter().filter(|&h| wnd(h).is_some_and(|w| w.style & WS_CHILD == 0)).collect();
     for h in own {
         if wnd(h).is_some() {
@@ -469,8 +470,20 @@ pub fn broadcast(m: u16, wp: u16, lp: u32) -> u32 {
     }
     if m == WM_DDE_INITIATE {
         pm_initiate(wp, lp as u16, (lp >> 16) as u16);
+        // Nobody answered for Program Manager: WIN16's stand-in does.
+        if *ACKS.get() == acks {
+            crate::progman::initiate(wp, lp as u16, (lp >> 16) as u16);
+        }
     }
     0
+}
+
+/// WM_DDE_ACKs delivered in this task (did a WM_DDE_INITIATE get an
+/// answer?).
+static ACKS: Global<u32> = Global::new(0);
+
+pub fn note_ack() {
+    *ACKS.get() = ACKS.get().wrapping_add(1);
 }
 
 // ---- Atoms ----

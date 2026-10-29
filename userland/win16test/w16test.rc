@@ -47,6 +47,20 @@ BEGIN
     PUSHBUTTON      "Cancel", IDCANCEL, 170, 128, 44, 14
 END
 
+/* A Windows 3.0 name table (RT_NAMETABLE, 15) naming resource 1 of type
+ * 7F01h "INSTALL" of type "SCR", as Borland's installer finds its
+ * scripts: entries of a length, the type, the ID, the type's name and the
+ * resource's name. */
+1 15
+BEGIN
+    0x0012, 0xFF01, 0x8001, "SCR\0INSTALL\0", 0x0000
+END
+
+1 32513
+BEGIN
+    "script\0"
+END
+
 1 VERSIONINFO
 FILEVERSION 1, 0, 0, 0
 PRODUCTVERSION 1, 0, 0, 0

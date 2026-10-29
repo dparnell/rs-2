@@ -293,11 +293,28 @@ pub extern "C" fn WinCreateWindow(
     cx: i32,
     cy: i32,
     owner: u32,
-    _behind: u32,
+    behind: u32,
     id: u32,
     ctl: u32,
     pres: u32,
 ) -> u32 {
+    let h = create_window(parent, class, name, style, x, y, cx, cy, owner, id, ctl, pres);
+    // hwndInsertBehind: new windows go on top of their siblings; HWND_BOTTOM
+    // or a sibling places them lower (WIN16's dialog controls, the first
+    // of which is the top of the Z order as on Windows).
+    if h != 0 && behind != HWND_TOP {
+        let s = st();
+        match behind {
+            4 => s.desk.to_bottom(h),
+            b if s.desk.exists(b) => s.desk.place_behind(h, b),
+            _ => {}
+        }
+    }
+    h
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_window(parent: u32, class: *const u8, name: *const u8, style: u32, x: i32, y: i32, cx: i32, cy: i32, owner: u32, id: u32, ctl: u32, pres: u32) -> u32 {
     let class = class_name(class);
     // The window gets its PRESPARAMS before WM_CREATE.
     crate::pp::set_pending(pres);
@@ -663,6 +680,10 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
     // HWND_BOTTOM: below its siblings (above a pinned desktop window).
     if fl & SWP_ZORDER != 0 && behind == 4 {
         st().desk.to_bottom(h);
+    }
+    // Below a sibling.
+    if fl & SWP_ZORDER != 0 && behind != HWND_TOP && behind != 4 && st().desk.exists(behind) {
+        st().desk.place_behind(h, behind);
     }
     if fl & SWP_ACTIVATE != 0 {
         activate(h);

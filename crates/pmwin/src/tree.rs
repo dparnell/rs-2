@@ -249,7 +249,7 @@ impl Desktop {
             g.intersect(&self.screen_rect(w.parent));
             let above = p.children.iter().skip_while(|&&c| c != cur).skip(1);
             for &s in above {
-                if self.get(s).is_some_and(|x| x.visible_style()) {
+                if self.get(s).is_some_and(|x| x.visible_style() && x.style & crate::ws::TRANSPARENT == 0) {
                     g.subtract(&self.screen_rect(s));
                 }
             }
@@ -257,7 +257,7 @@ impl Desktop {
         }
         if clip_children {
             for &c in &self.get(h).map_or(Vec::new(), |w| w.children.clone()) {
-                if self.get(c).is_some_and(|x| x.visible_style()) {
+                if self.get(c).is_some_and(|x| x.visible_style() && x.style & crate::ws::TRANSPARENT == 0) {
                     g.subtract(&self.screen_rect(c));
                 }
             }
@@ -308,15 +308,18 @@ impl Desktop {
         let Some(w) = self.windows.get(&h) else { return };
         // Children are included when asked, and also otherwise unless the
         // window clips them (PM's WinInvalidateRect): a parent without
-        // WS_CLIPCHILDREN paints over them, so they must paint again.
-        if children || w.style & crate::ws::CLIPCHILDREN == 0 {
-            let kids = w.children.clone();
-            for c in kids {
-                let Some(cw) = self.get(c) else { continue };
-                let local = r.offset(-cw.x, -cw.y);
-                if !local.intersect(&cw.rect()).is_empty() {
-                    self.invalidate(c, Some(local), children);
-                }
+        // WS_CLIPCHILDREN paints over them, so they must paint again, as
+        // must transparent children, which the parent never clips.
+        let clips = !children && w.style & crate::ws::CLIPCHILDREN != 0;
+        let kids = w.children.clone();
+        for c in kids {
+            let Some(cw) = self.get(c) else { continue };
+            if clips && cw.style & crate::ws::TRANSPARENT == 0 {
+                continue;
+            }
+            let local = r.offset(-cw.x, -cw.y);
+            if !local.intersect(&cw.rect()).is_empty() {
+                self.invalidate(c, Some(local), children);
             }
         }
     }
@@ -413,6 +416,23 @@ impl Desktop {
         }
         self.generation = self.generation.wrapping_add(1);
         self.invalidate(h, None, true);
+    }
+
+    /// Put a window just below a sibling (WinCreateWindow's and
+    /// WinSetWindowPos' hwndInsertBehind when it names a window).
+    pub fn place_behind(&mut self, h: Hwnd, behind: Hwnd) {
+        let Some(p) = self.get(h).map(|w| w.parent) else { return };
+        if h == behind || self.get(behind).map(|w| w.parent) != Some(p) {
+            return;
+        }
+        if let Some(pw) = self.windows.get_mut(&p) {
+            pw.children.retain(|&c| c != h);
+            let at = pw.children.iter().position(|&c| c == behind).unwrap_or(0);
+            pw.children.insert(at, h);
+        }
+        self.generation = self.generation.wrapping_add(1);
+        let r = self.screen_rect(h);
+        self.invalidate_screen(r);
     }
 
     /// Move a window to the bottom of its siblings; what it uncovers is

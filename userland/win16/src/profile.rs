@@ -103,8 +103,77 @@ fn unquote(v: &[u8]) -> &[u8] {
 /// A key's value.
 pub fn get(file: &[u8], app: &[u8], key: &[u8]) -> Option<Vec<u8>> {
     let lines = read(file);
-    let (h, end) = find_section(&lines, app)?;
-    lines[h + 1..end].iter().filter_map(|l| key_value(l)).find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| unquote(v).to_vec())
+    let v = find_section(&lines, app)
+        .and_then(|(h, end)| lines[h + 1..end].iter().filter_map(|l| key_value(l)).find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| unquote(v).to_vec()));
+    v.or_else(|| setup_default(file, app, key))
+}
+
+/// What Windows Setup writes and programs count on finding: WIN.INI's
+/// [intl] (from the system's country settings) and SYSTEM.INI's code
+/// page ([boot.description] codepage). Borland's installer picks its
+/// database engine configuration by iCountry and the code page.
+fn setup_default(file: &[u8], app: &[u8], key: &[u8]) -> Option<Vec<u8>> {
+    let name = file.rsplit(|&c| c == b'\\' || c == b':').next().unwrap_or(file);
+    let num = |n: u32| alloc::format!("{n}").into_bytes();
+    if name.eq_ignore_ascii_case(b"SYSTEM.INI") && app.eq_ignore_ascii_case(b"boot.description") && key.eq_ignore_ascii_case(b"codepage") {
+        let (mut cp, mut n) = ([0u32; 4], 0u32);
+        unsafe { os2::DosQueryCp(16, cp.as_mut_ptr(), &mut n) };
+        return Some(num(if cp[0] == 0 { 437 } else { cp[0] }));
+    }
+    if !name.eq_ignore_ascii_case(b"WIN.INI") || !app.eq_ignore_ascii_case(b"intl") {
+        return None;
+    }
+    let cc = os2::CountryCode::default();
+    let mut ci = os2::CountryInfo::default();
+    let mut n = 0u32;
+    if unsafe { os2::DosQueryCtryInfo(core::mem::size_of::<os2::CountryInfo>() as u32, &cc, &mut ci, &mut n) } != 0 {
+        ci.country = 1;
+    }
+    let sz = |b: &[u8]| b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())].to_vec();
+    let country = if ci.country == 0 { 1 } else { ci.country };
+    // Windows' language codes for the common countries.
+    let lang: &[u8] = match country {
+        44 | 61 | 64 | 27 | 353 => b"eng",
+        49 | 41 | 43 => b"deu",
+        33 | 32 => b"fra",
+        39 => b"ita",
+        34 => b"esp",
+        31 => b"nld",
+        46 => b"sve",
+        45 => b"dan",
+        47 => b"nor",
+        358 => b"fin",
+        351 | 55 => b"ptg",
+        _ => b"enu",
+    };
+    let date_sep = sz(&ci.date_sep);
+    let date_sep = if date_sep.is_empty() { b"/".to_vec() } else { date_sep };
+    let short = match ci.date_fmt {
+        1 => [b"dd", &date_sep[..], b"MM", &date_sep[..], b"yy"].concat(),
+        2 => [b"yy", &date_sep[..], b"MM", &date_sep[..], b"dd"].concat(),
+        _ => [b"M", &date_sep[..], b"d", &date_sep[..], b"yy"].concat(),
+    };
+    let k = key.to_ascii_lowercase();
+    Some(match &k[..] {
+        b"icountry" => num(country),
+        b"slanguage" => lang.to_vec(),
+        b"idate" => num(ci.date_fmt),
+        b"sdate" => date_sep,
+        b"sshortdate" => short,
+        b"stime" => sz(&ci.time_sep),
+        b"itime" => num(ci.time_fmt as u32 & 1),
+        b"s1159" => b"AM".to_vec(),
+        b"s2359" => b"PM".to_vec(),
+        b"sdecimal" => sz(&ci.decimal),
+        b"sthousand" => sz(&ci.thousands),
+        b"scurrency" => sz(&ci.currency),
+        b"icurrency" => num(ci.currency_fmt as u32 & 3),
+        b"icurrdigits" | b"idigits" => num(ci.decimals as u32),
+        b"slist" => sz(&ci.data_sep),
+        b"imeasure" => num((country == 1) as u32),
+        b"ilzero" => num(0),
+        _ => return None,
+    })
 }
 
 /// Copy a NUL-separated list (double NUL at the end) to a buffer: the
@@ -145,6 +214,7 @@ pub fn get_string(file: &[u8], app: u32, key: u32, def: u32, buf: *mut u8, n: i3
         return copy_list(&keys, buf, n);
     };
     let v = sec.and_then(|(h, e)| lines[h + 1..e].iter().filter_map(|l| key_value(l)).find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| unquote(v).to_vec()));
+    let v = v.or_else(|| setup_default(file, app, key));
     let v = v.unwrap_or_else(|| trim(far_str(def).unwrap_or(b"")).to_vec());
     crate::user::copy_out(&v, buf, n) as u32
 }

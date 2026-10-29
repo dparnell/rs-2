@@ -4,7 +4,7 @@
 //! Ctrl+C, Ctrl+V, Shift+Del, Ctrl+Ins, Shift+Ins) through PM's, one
 //! level of undo, the window's scroll bars, and the EM_ messages and EN_
 //! notifications. The text is kept here (EM_GETHANDLE has no local
-//! block to give).
+//! block to give; EM_SETHANDLE's block is copied).
 
 use alloc::vec::Vec;
 
@@ -1096,7 +1096,27 @@ pub fn proc_(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             1
         }
         EM_GETHANDLE => 0,
-        EM_SETHANDLE => 0,
+        // EM_SETHANDLE(hlocal): the text in a local block of the control's
+        // instance segment (a local handle is its offset here); programs
+        // make that a segment of its own with LocalInit (Delphi's
+        // installer shows its README so).
+        EM_SETHANDLE => {
+            let seg = wnd(h).map_or(0, |w| w.hinst);
+            if seg != 0 && wp != 0 {
+                let t = crate::far_str((seg as u32) << 16 | wp as u32).unwrap_or(b"").to_vec();
+                let Some(e) = ed(h) else { return 0 };
+                e.text = t;
+                e.anchor = 0;
+                e.caret = 0;
+                e.top = 0;
+                e.xoff = 0;
+                e.modified = false;
+                e.undo = None;
+                reflow(h);
+                refresh(h);
+            }
+            0
+        }
         _ => def_window_proc(h, m, wp, lp),
     }
 }

@@ -118,7 +118,15 @@ pub fn exec(cmd: &[u8]) -> u16 {
         return 2;
     }
     let with_ext = if prog.iter().rev().take_while(|&&c| c != b'\\').any(|&c| c == b'.') { prog.to_vec() } else { [prog, b".EXE"].concat() };
-    let Some(path) = find_program(&with_ext) else { return 2 };
+    let Some(path) = find_program(&with_ext) else {
+        // REGEDIT FILE.REG (/s: silently) merges a file into the
+        // registration database: done here when there is no REGEDIT.EXE.
+        if crate::module::base_name(prog) == b"REGEDIT" {
+            let file = args.split(|&c| c == b' ').filter(|a| !a.is_empty() && a[0] != b'/' && a[0] != b'-').last().unwrap_or(b"");
+            return if crate::reg::merge(file) { 33 } else { 2 };
+        }
+        return 2;
+    };
     // DosExecPgm's arguments: the program name, NUL, the arguments, NUL NUL.
     let mut a = path.clone();
     a.push(0);
