@@ -628,7 +628,18 @@ Windows; what they needed, in the order they asked for it:
   segment's number in its module and the offset; a page fault is the
   protection fault Windows' segments would have raised), and end the
   program when it is closed; the same line goes to the serial port. A
-  program never just disappears.
+  program never just disappears; the line is also written to the
+  program's standard error (the command prompt it was started from).
+- **WinExec failures** are said too, though Windows says nothing:
+  setup programs that only start the next program and end (Borland's
+  SETUP and INSTALL) would otherwise end without a word. When the
+  program cannot be started, or a Windows program ends before it gets
+  to InitTask, a line such as `WIN16: SETUP WinExec
+  D:\INSTALL\DISK1\INSTALL.EXE: cannot start it: SYS0002: ...` (the
+  system's message, the module that failed to load) or `... it ended
+  before it started (termination 1, result 255)` goes to the caller's
+  standard error and the serial port. W16TEST checks the error WinExec
+  returns for a file that is no program (11).
   PMXTEST checks it with `HELLO16 GPF` started as the Workplace Shell
   starts programs. A program the shell cannot start at all (a missing
   file or DLL) gets the shell's "Cannot start the program" box with the

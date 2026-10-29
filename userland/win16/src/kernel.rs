@@ -706,6 +706,7 @@ pub fn application_error(r: &crate::dos::Regs) {
     let at = if seg != 0 { alloc::format!("{seg:04X}:{ip:04X}") } else { alloc::format!("{cs:04X}:{ip:04X}") };
     trace(format_args!("WIN16: {task} caused {what} in module {module} at {at} (CS={cs:04X}, fault {:02X}h)", r[INTNO] & 0xff));
     let t = alloc::format!("{task} caused {what} in module {module} at {at}.\0");
+    crate::stderr_line(&alloc::format!("WIN16: {}", &t[..t.len() - 1]));
     unsafe {
         pm::WinMessageBox(pm::HWND_DESKTOP, 0, t.as_ptr(), b"Application Error\0".as_ptr(), 0, 0x4000 | 0x0040);
         os2::DosExit(1, 0xff);

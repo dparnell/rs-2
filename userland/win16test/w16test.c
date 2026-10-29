@@ -1919,6 +1919,19 @@ static void installer_tests(HINSTANCE hInst)
         RegDeleteKey(HKEY_CLASSES_ROOT, "W16Merged");
     }
 
+    /* WinExec of a file that is no program: Windows' error 11 (and WIN16
+     * says why on standard error and the serial port, as setup programs
+     * that only start the next one say nothing). */
+    {
+        static char junk[] = "this is not a program";
+        OFSTRUCT bad;
+        HFILE f = _lcreat("C:\\W16BAD.EXE", 0);
+        _lwrite(f, junk, sizeof junk);
+        _lclose(f);
+        check(WinExec("C:\\W16BAD.EXE", SW_SHOWNORMAL) == 11, "WinExec of a file that is not a program: 11");
+        OpenFile("C:\\W16BAD.EXE", &bad, OF_DELETE);
+    }
+
     /* What Windows Setup writes: WIN.INI's [intl], SYSTEM.INI's code
      * page; SHARE is loaded (INT 2Fh AX=1000h). */
     check(GetProfileInt("intl", "iCountry", 0) != 0, "WIN.INI [intl] iCountry from the country settings");

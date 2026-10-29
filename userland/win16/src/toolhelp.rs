@@ -932,12 +932,18 @@ pub fn iret_trap(r: &mut crate::dos::Regs) -> bool {
     true
 }
 
+/// How the last program wait_started waited for ended before it
+/// reached InitTask: (termination code, result code).
+pub static ENDED_AT_START: crate::Global<Option<(u32, u32)>> = crate::Global::new(None);
+
 /// WinExec, LoadModule: wait (a while) for the Windows program just
 /// started as process `child` to reach InitTask, and deliver the
 /// notifications it sent: its instance handle (None if it does not
-/// start). A debugger's view of it is made then.
+/// start; ENDED_AT_START says how it ended if it did). A debugger's
+/// view of it is made then.
 pub fn wait_started(child: u32) -> Option<u16> {
     let mut found = false;
+    *ENDED_AT_START.get() = None;
     for _ in 0..250 {
         if slot(child).is_some() {
             found = true;
@@ -947,6 +953,7 @@ pub fn wait_started(child: u32) -> Option<u16> {
         let mut res = os2::ResultCodes { code_terminate: 0, code_result: 0 };
         let mut pid = 0u32;
         if unsafe { os2::DosWaitChild(0, 1, &mut res, &mut pid, child) } == 0 {
+            *ENDED_AT_START.get() = Some((res.code_terminate, res.code_result));
             return None;
         }
         unsafe { os2::DosSleep(20) };
