@@ -40,4 +40,8 @@ pub mod ws {
     /// rs2's own: a top-level window that a click does not activate
     /// (Windows' WS_CHILD windows of the desktop, drop-down lists).
     pub const NOACTIVATE: u32 = 0x0010_0000;
+    /// rs2's own: a child that draws only its border or text (Windows'
+    /// frame statics and group boxes, WS_EX_TRANSPARENT): it clips neither
+    /// its parent nor the siblings below it, and repaints with its parent.
+    pub const TRANSPARENT: u32 = 0x0020_0000;
 }

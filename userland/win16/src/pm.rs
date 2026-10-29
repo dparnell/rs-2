@@ -357,6 +357,8 @@ pub const WS_VISIBLE: u32 = 0x8000_0000;
 pub const WS_CLIPSIBLINGS: u32 = 0x1000_0000;
 /// rs2's PM: not activated by a click (pmwin::ws::NOACTIVATE).
 pub const NOACTIVATE: u32 = 0x0010_0000;
+/// rs2's PM: drawn over what is beneath it (pmwin::ws::TRANSPARENT).
+pub const TRANSPARENT: u32 = 0x0020_0000;
 pub const QWL_STYLE: i32 = -2;
 
 pub const SWP_SIZE: u32 = 0x0001;

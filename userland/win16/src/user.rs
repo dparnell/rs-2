@@ -100,6 +100,7 @@ pub const W_USER: u16 = 0x0400;
 // Window styles.
 pub const WS_POPUP: u32 = 0x8000_0000;
 pub const WS_CHILD: u32 = 0x4000_0000;
+pub const WS_EX_TRANSPARENT: u32 = 0x0000_0020;
 pub const WS_VISIBLE: u32 = 0x1000_0000;
 pub const WS_DISABLED: u32 = 0x0800_0000;
 pub const WS_CLIPCHILDREN: u32 = 0x0200_0000;
@@ -1676,6 +1677,11 @@ pub fn create(c: &Create) -> u16 {
     }
     if style & WS_DISABLED != 0 {
         unsafe { WinEnableWindow(frame, 0) };
+    }
+    // WS_EX_TRANSPARENT: the windows beneath show through (frame statics
+    // and group boxes say so in their WM_CREATE).
+    if child && c.exstyle & WS_EX_TRANSPARENT != 0 {
+        unsafe { WinSetWindowBits(frame, QWL_STYLE, crate::pm::TRANSPARENT, crate::pm::TRANSPARENT) };
     }
     // WM_NCCREATE and WM_CREATE get a CREATESTRUCT (on the 16-bit
     // stack): lpCreateParams, hInstance, hMenu, hwndParent, cy, cx, y,

@@ -272,6 +272,9 @@ fn button(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             if let Some(w) = wnd(h) {
                 w.data = Some(alloc::boxed::Box::new(Button::default()));
             }
+            if k == BS_GROUPBOX {
+                see_through(h);
+            }
             0
         }
         W_ERASEBKGND => 1,
@@ -501,7 +504,10 @@ fn paint_button(h: u16, hdc: u16) {
         return;
     }
     let br = ctl_color(h, hdc, CTLCOLOR_BTN);
-    gdi::fill_rect(hdc, [0, 0, cx, cy], br);
+    // A group box is its frame and title only.
+    if k != BS_GROUPBOX {
+        gdi::fill_rect(hdc, [0, 0, cx, cy], br);
+    }
     gdi::set_bk_mode(hdc, gdi::TRANSPARENT);
     if !enabled {
         gdi::set_text_color(hdc, gdi::sys_color(gdi::COLOR_GRAYTEXT));
@@ -578,6 +584,14 @@ struct Static {
     icon: u16,
 }
 
+/// A control that draws only a frame or text (a group box, a frame
+/// static) shows the windows beneath it, as on Windows.
+fn see_through(h: u16) {
+    if let Some(f) = wnd(h).map(|w| w.frame) {
+        unsafe { crate::pm::WinSetWindowBits(f, crate::pm::QWL_STYLE, crate::pm::TRANSPARENT, crate::pm::TRANSPARENT) };
+    }
+}
+
 fn static_(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     match m {
         W_CREATE => {
@@ -588,6 +602,9 @@ fn static_(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
                     let r = window_rect(h);
                     move_to(h, [r[0], r[1], r[0] + 32, r[1] + 32]);
                 }
+            }
+            if matches!(style(h) & 0x0f, SS_BLACKFRAME | SS_GRAYFRAME | SS_WHITEFRAME) {
+                see_through(h);
             }
             0
         }
@@ -642,9 +659,8 @@ fn paint_static(h: u16, hdc: u16) {
         SS_BLACKRECT => gdi::fill(hdc, r, frame),
         SS_GRAYRECT => gdi::fill(hdc, r, gray),
         SS_WHITERECT => gdi::fill(hdc, r, white),
+        // A frame is only its border (the controls inside show through).
         SS_BLACKFRAME | SS_GRAYFRAME | SS_WHITEFRAME => {
-            let br = ctl_color(h, hdc, CTLCOLOR_STATIC);
-            gdi::fill_rect(hdc, [1, 1, cx - 1, cy - 1], br);
             let c = match st & 0x0f {
                 SS_BLACKFRAME => frame,
                 SS_GRAYFRAME => gray,

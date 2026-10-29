@@ -15,7 +15,9 @@
 //!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE] [--sound-in FILE|tone:HZ]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
-//! cargo xtask disk [--hpfs|--fat32] [-o FILE]  test hard disk from work/disk.txt
+//! cargo xtask disk [--hpfs|--fat32] [--system] [--size MB] [-o FILE]
+//!                                           test hard disk from work/disk.txt
+//!                                           (64 MB unless --size)
 //! ```
 //!
 //! `--desktop` boots into the Workplace Shell (`init=OS2\PMSHELL.EXE` in place
@@ -96,6 +98,8 @@ struct Opts {
     timeout: Option<u64>,
     screenshot: Option<PathBuf>,
     output: Option<PathBuf>,
+    /// `disk --size MB`: the image's size (64 MB by default).
+    disk_mb: u64,
     qemu_extra: Vec<String>,
     /// Keystrokes to send (\n = Enter), and when (seconds after start).
     typing: Option<String>,
@@ -176,6 +180,7 @@ fn parse(args: &[String]) -> Opts {
         timeout: None,
         screenshot: None,
         output: None,
+        disk_mb: 64,
         qemu_extra: vec![],
         typing: None,
         type_at: None,
@@ -377,6 +382,10 @@ fn parse(args: &[String]) -> Opts {
                 i += 1;
                 o.output = Some(PathBuf::from(&args[i]));
             }
+            "--size" => {
+                i += 1;
+                o.disk_mb = args[i].parse().expect("--size MB");
+            }
             "--" => {
                 o.qemu_extra = args[i + 1..].to_vec();
                 break;
@@ -418,9 +427,9 @@ fn main() -> ExitCode {
             }
             let out = o.output.clone().unwrap_or_else(|| root().join("work/disk.img"));
             let img = if o.hpfs && !o.system {
-                hpfsimg::disk(&files, "RS2HPFS", 64)
+                hpfsimg::disk(&files, "RS2HPFS", o.disk_mb)
             } else {
-                image::disk(&files, "RS2DISK", 64, o.fat32.then_some(fat::FatType::Fat32))
+                image::disk(&files, "RS2DISK", o.disk_mb, o.fat32.then_some(fat::FatType::Fat32))
             };
             std::fs::write(&out, img).unwrap();
             println!("wrote {}", out.display());
