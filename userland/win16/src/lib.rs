@@ -913,9 +913,29 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
     // left to right), then the result.
     let n = arg_size(idx) / 2;
     let mut s = alloc::string::String::new();
-    for i in (0..n).rev() {
-        let w = unsafe { (args.add(2 * i) as *const u16).read_unaligned() };
+    let words: alloc::vec::Vec<u16> = (0..n).rev().map(|i| unsafe { (args.add(2 * i) as *const u16).read_unaligned() }).collect();
+    for w in &words {
         let _ = core::fmt::write(&mut s, format_args!(" {w:04x}"));
+    }
+    // The strings of calls that name files, modules and resources (the
+    // word index of each far pointer's selector).
+    let strings: &[usize] = match idx {
+        1045 | 1047 | 1074 | 1083 | 1085 | 1095 | 1166 => &[0],
+        1050 => &[1],
+        1060 => &[1, 3],
+        2001 => &[1, 3],
+        2050 => &[0, 2],
+        6121 => &[2],
+        _ => &[],
+    };
+    for &k in strings {
+        if let (Some(&sel), Some(&off)) = (words.get(k), words.get(k + 1)) {
+            if sel != 0 {
+                if let Some(t) = far_str((sel as u32) << 16 | off as u32) {
+                    let _ = core::fmt::write(&mut s, format_args!(" \"{}\"", t.iter().take(80).map(|&b| b as char).collect::<alloc::string::String>()));
+                }
+            }
+        }
     }
     trace(format_args!("W16 {}{}", idx, s));
     let r = dispatch_(idx, args);

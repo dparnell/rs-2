@@ -12,8 +12,10 @@ use crate::vm::{self, AddressSpace, PageState, SegKind, SharedMem, PAGE};
 
 static OBJ: Once<Arc<SharedMem>> = Once::new();
 /// The BIOS data area of Windows programs (KERNEL's __0040H selector,
-/// docs/WIN16.md): a read-only page with the fields programs read, the
-/// timer tick count at 6Ch kept current.
+/// docs/WIN16.md): a page with the fields programs read, the timer tick
+/// count at 6Ch kept current. Programs may write it, as on Windows (setup
+/// programs keep the floppy motor on through 40:40); it is one page for
+/// all of them, like the real BIOS data area.
 static BIOS: Once<Arc<SharedMem>> = Once::new();
 /// Milliseconds of the day at uptime 0 (from the RTC).
 static DAY_OFFSET: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
@@ -61,7 +63,7 @@ pub fn init() {
         *p.add(71) = 16; // csgPMMax
     }
     let base = vm::reserve_shared(PAGE, None).expect("BIOS data address");
-    let bios = SharedMem::new(base, PAGE, vm::pag::READ, None);
+    let bios = SharedMem::new(base, PAGE, vm::pag::READ | vm::pag::WRITE, None);
     let f = bios.frame(0).expect("BIOS data memory");
     bios.pages.lock()[0] = PageState::Committed;
     let b = crate::mm::phys::phys_to_virt(f);
@@ -80,7 +82,7 @@ pub fn init() {
     // Selector 40h: Windows' DPMI host gives programs a GDT selector for
     // real-mode segment 40h (the Delphi compiler reads the tick count
     // through it); it is mapped in Windows programs only.
-    gdt::set_entry(8, descriptor(base, 0xfff, access::PRESENT | access::DPL3 | access::CODE_DATA | access::ACCESSED, 0));
+    gdt::set_entry(8, descriptor(base, 0xfff, access::PRESENT | access::DPL3 | access::CODE_DATA | access::WRITABLE | access::ACCESSED, 0));
     update();
 }
 
@@ -93,7 +95,7 @@ pub fn bios_selector() -> u16 {
 pub fn attach_bios(space: &mut AddressSpace) {
     if let Some(b) = BIOS.get() {
         if space.region(b.base).is_none() {
-            space.map_shared(b.clone(), vm::pag::READ, SegKind::Data);
+            space.map_shared(b.clone(), vm::pag::READ | vm::pag::WRITE, SegKind::Data);
         }
     }
 }
