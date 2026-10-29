@@ -52,6 +52,7 @@ mod res;
 mod scroll;
 mod stubs;
 mod toolhelp;
+mod w16lock;
 mod user;
 mod ver;
 
@@ -287,6 +288,7 @@ entries! {
     k_lstrlen = 1090, 4;
     k_gettempdrive = 1092, 2;
     k_getcodehandle = 1093, 4;
+    k_directedyield = 1150, 2;
     k_loadlibrary = 1095, 4;
     k_freelibrary = 1096, 2;
     k_gettempfilename = 1097, 12;
@@ -508,6 +510,7 @@ entries! {
     u_getupdaterect = 2190, 8;
     u_childwindowfrompoint = 2191, 6;
     u_insendmessage = 2192, 0;
+    u_getsystemdebugstate = 2231, 0;
     u_isclipboardformatavailable = 2193, 2;
     u_tabbedtextout = 2196, 20;
     u_gettabbedtextextent = 2197, 14;

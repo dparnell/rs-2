@@ -83,7 +83,6 @@ thunk16::entries16_pascal! {
     x_1111 = 1111, 2;
     x_1112 = 1112, 2;
     x_1121 = 1121, 4;
-    x_1150 = 1150, 2;
     x_1154 = 1154, 4;
     x_1156 = 1156, 4;
     x_1163 = 1163, 2;
@@ -487,7 +486,6 @@ thunk16::entries16_pascal! {
     x_2214 = 2214, 4;
     x_2215 = 2215, 4;
     x_2226 = 2226, 6;
-    x_2231 = 2231, 0;
     x_2245 = 2245, 8;
     x_2246 = 2246, 8;
     x_2251 = 2251, 12;
@@ -584,7 +582,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (1111, "KERNEL.111 GLOBALWIRE"),
     (1112, "KERNEL.112 GLOBALUNWIRE"),
     (1121, "KERNEL.121 LOCALSHRINK"),
-    (1150, "KERNEL.150 DIRECTEDYIELD"),
     (1154, "KERNEL.154 GLOBALNOTIFY"),
     (1156, "KERNEL.156 LIMITEMSPAGES"),
     (1163, "KERNEL.163 GLOBALLRUOLDEST"),
@@ -988,7 +985,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (2214, "USER.214 ESCAPECOMMFUNCTION"),
     (2215, "USER.215 FLUSHCOMM"),
     (2226, "USER.226 LOCKINPUT"),
-    (2231, "USER.231 GETSYSTEMDEBUGSTATE"),
     (2245, "USER.245 ENABLECOMMNOTIFICATION"),
     (2246, "USER.246 EXITWINDOWSEXEC"),
     (2251, "USER.251 SENDDRIVERMESSAGE"),

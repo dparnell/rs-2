@@ -43,6 +43,23 @@ const MAGIC: u32 = 0x5431_3657; // "W16T"
 /// The PM queue message of a notification: mp1 the NFY_ code and the
 /// process of the task it is about, mp2 the data.
 pub const NOTIFY_MSG: u32 = 0x0004_0000 | 0x4e46;
+/// The PM queue message that has the task's own thread run what a stop's
+/// thread switched it to (TaskSwitch).
+pub const SWITCH_MSG: u32 = 0x0004_0000 | 0x4e47;
+
+/// TaskSwitch from a stop's thread to this task: where it runs (0: none),
+/// and whether it has.
+static SWITCH_TO: AtomicU32 = AtomicU32::new(0);
+static SWITCHED: AtomicU32 = AtomicU32::new(0);
+/// A message was posted to the stop's thread that it has not yet taken.
+static STOP_KICKED: AtomicU32 = AtomicU32::new(0);
+/// The stop's thread waited for messages (the debugger ran meanwhile).
+static STOP_YIELDED: AtomicU32 = AtomicU32::new(0);
+/// The stop's thread yielded to this task (DirectedYield, Yield), and goes
+/// on when the task yields back.
+static HANDED: AtomicU32 = AtomicU32::new(0);
+/// The process a stop's thread let go on at once (a single step).
+static STEPPED_ON: AtomicU32 = AtomicU32::new(0);
 
 const NFY_STARTTASK: u16 = 4;
 const NFY_EXITTASK: u16 = 5;
@@ -96,6 +113,13 @@ struct View {
     exited: bool,
     /// Where it stopped (its copy's CS:IP), for TaskGetCSIP/TaskSetCSIP.
     csip: u32,
+    /// Debugged through the kernel (RS2API 423): its INT 3s and single
+    /// steps stop it, and the copies' changes (breakpoints) are written
+    /// into it.
+    attached: bool,
+    /// Each copy as last read from the task (what the debugger changed
+    /// since is written back).
+    base: Vec<Vec<u8>>,
 }
 
 struct State {
@@ -110,9 +134,26 @@ struct State {
     out: *mut u8,
     /// An interrupt callback is running (int3).
     in_int: bool,
+    /// The IRET that ended the interrupt callback: CS, IP, FLAGS.
+    iret: Option<(u16, u16, u16)>,
+    /// A debugger timer runs (GetMessage wakes to look for stops).
+    timer: bool,
+    last_poll: u32,
+    /// Stopped threads to let go when this task next yields (Windows
+    /// runs the other task only then): (process, thread, registers).
+    pending: Vec<(u32, u32, Option<[u32; 16]>)>,
+    /// The thread handling a stop (w16lock.rs): its id, its PM queue, the
+    /// task it stands for (GetCurrentTask there) and whether it waits
+    /// for messages; the stop record it was given.
+    stop_tid: u32,
+    stop_hmq: u32,
+    stop_task: u16,
+    stop_pid: u32,
+    stop_waiting: bool,
+    stop_rec: [u32; 20],
 }
 
-static ST: Global<State> = Global::new(State { reg: core::ptr::null_mut(), tdb: 0, current: 0, exited: false, views: Vec::new(), out: core::ptr::null_mut(), in_int: false });
+static ST: Global<State> = Global::new(State { reg: core::ptr::null_mut(), tdb: 0, current: 0, exited: false, views: Vec::new(), out: core::ptr::null_mut(), in_int: false, iret: None, timer: false, last_poll: 0, pending: Vec::new(), stop_tid: 0, stop_hmq: 0, stop_task: 0, stop_pid: 0, stop_waiting: false, stop_rec: [0; 20] });
 
 fn pib() -> Option<&'static os2::Pib> {
     let mut tib = core::ptr::null_mut();
@@ -208,6 +249,28 @@ fn new_block(size: u32) -> Option<(u16, *mut u8)> {
         return None;
     }
     Some(((thunk16::far(p) >> 16) as u16, p))
+}
+
+/// PrestoChangoSelector of a selector this process does not have, from a
+/// debugger: another task's selector met in that task's memory (on Windows
+/// all tasks share one LDT; here the debugger has only the copies). The
+/// alias describes a block of its own, so that what the debugger writes
+/// there (a breakpoint) goes nowhere instead of faulting.
+pub fn scratch_alias(src: u32, dst: u32) -> u32 {
+    use crate::pm::Rs2Win16Selector as sel;
+    static SCRATCH: Global<u32> = Global::new(0);
+    if !ST.get().views.iter().any(|v| v.attached && !v.exited) || unsafe { sel(1, dst, 0) } == u32::MAX {
+        return 0;
+    }
+    if *SCRATCH.get() == 0 {
+        let Some((_, p)) = new_block(0x1_0000) else { return 0 };
+        *SCRATCH.get() = p as u32;
+    }
+    if crate::tracing() {
+        crate::trace(format_args!("W16 debug: {src:04x} is not this process's selector: {dst:04x} describes a scratch block"));
+    }
+    let ok = unsafe { sel(2, dst, *SCRATCH.get()) != 0 && sel(3, dst, 0xffff) != 0 && sel(7, dst, 2) != 0 };
+    if ok { dst } else { 0 }
 }
 
 /// Fill a TDB (Windows' layout: the fields programs read).
@@ -360,8 +423,343 @@ fn view(p: u32) -> Option<&'static mut View> {
     let map = |sel: u16| segs.iter().find(|x| x.0 | 7 == sel | 7).map_or(0, |x| x.1);
     fill_tdb(tp, tdb, (map(t.ss) as u32) << 16 | t.sp as u32, map(t.hinst), moddb, t.hmq, 0, 1, &name);
     let csip = (map((t.start >> 16) as u16) as u32) << 16 | t.start & 0xffff;
-    s.views.push(View { pid: p, tdb, moddb, segs, name, path, exited: false, csip });
+    let base = segs.iter().map(|&(_, c)| unsafe { core::slice::from_raw_parts(flat((c as u32) << 16), 0x1_0000) }.to_vec()).collect();
+    // A debugger (this task has an interrupt callback) debugs it.
+    let attached = with_slot(pid(), |s| s.interrupt).unwrap_or(0) != 0 && unsafe { crate::pm::Rs2Win16Debug(0, p, 0, 0, 0) } != 0;
+    if attached && !s.timer {
+        // GetMessage wakes now and then to look for stops.
+        s.timer = unsafe { crate::pm::WinStartTimer(crate::kernel::TASK.get().hab, 0, 0x7d15, 50) } != 0;
+    }
+    if crate::tracing() {
+        crate::trace(format_args!("W16 view of task {p}: {} segments, attached {attached}: {:x?}", segs.len(), segs));
+    }
+    s.views.push(View { pid: p, tdb, moddb, segs, name, path, exited: false, csip, attached, base });
     s.views.last_mut()
+}
+
+/// Read the task's segments into the copies again (it stopped).
+fn refresh(v: &mut View) {
+    for (i, &(real, copy)) in v.segs.iter().enumerate() {
+        let cp = flat((copy as u32) << 16);
+        unsafe { crate::pm::Rs2Win16ReadTask(v.pid, real as u32, 0, cp, 0x1_0000) };
+        if let Some(b) = v.base.get_mut(i) {
+            b.copy_from_slice(unsafe { core::slice::from_raw_parts(cp, 0x1_0000) });
+        }
+    }
+}
+
+/// Write what the debugger changed in the copies (its breakpoints, a
+/// variable) into the task.
+fn sync(v: &mut View) {
+    if !v.attached {
+        return;
+    }
+    for (i, &(real, copy)) in v.segs.iter().enumerate() {
+        let cp = flat((copy as u32) << 16);
+        let now = unsafe { core::slice::from_raw_parts(cp, 0x1_0000) };
+        let Some(base) = v.base.get_mut(i) else { continue };
+        let mut o = 0;
+        while o < now.len() {
+            if now[o] == base[o] {
+                o += 1;
+                continue;
+            }
+            let start = o;
+            while o < now.len() && now[o] != base[o] && o - start < 256 {
+                o += 1;
+            }
+            let n = o - start;
+            if unsafe { crate::pm::Rs2Win16Debug(2, v.pid, (real as u32) << 16 | start as u32, now.as_ptr().add(start) as u32, n as u32) } != 0 {
+                base[start..o].copy_from_slice(&now[start..o]);
+            }
+            if crate::tracing() {
+                crate::trace(format_args!("W16 debug: {n} bytes to {real:04x}:{start:04x} of task {}", v.pid));
+            }
+        }
+    }
+}
+
+/// GetMessage/PeekMessage: a debugger's breakpoints go into its tasks,
+/// and a task that stopped (INT 3, a single step) is given to the
+/// interrupt callback. `idle`: this task yields (Yield, or no message
+/// for GetMessage/PeekMessage), and the tasks it let go run, as Windows
+/// would switch to them only then.
+pub fn poll(idle: bool) {
+    let s = ST.get();
+    if s.in_int || !s.views.iter().any(|v| v.attached && !v.exited) {
+        return;
+    }
+    // Tasks the debugger let go run now, with its breakpoints.
+    if idle && !s.pending.is_empty() && !on_stop_thread() {
+        for v in s.views.iter_mut().filter(|v| v.attached && !v.exited) {
+            sync(v);
+        }
+        for (p, tid, regs) in core::mem::take(&mut ST.get().pending) {
+            let rp = regs.as_ref().map_or(0, |r| r.as_ptr() as u32);
+            unsafe { crate::pm::Rs2Win16Debug(4, p, tid, rp, 0) };
+        }
+    }
+    let s = ST.get();
+    let now = unsafe { crate::pm::WinGetCurrentTime(crate::kernel::TASK.get().hab) };
+    if now.wrapping_sub(s.last_poll) < 20 {
+        return;
+    }
+    s.last_poll = now;
+    for v in s.views.iter_mut().filter(|v| v.attached && !v.exited) {
+        sync(v);
+    }
+    if ST.get().stop_tid != 0 {
+        return;
+    }
+    let mut rec = [0u32; 20];
+    if unsafe { crate::pm::Rs2Win16Debug(3, 0, rec.as_mut_ptr() as u32, 0, 0) } == 0 {
+        return;
+    }
+    stopped(&rec);
+}
+
+/// A debugged task stopped: the callback with TOOLHELP's frame, then the
+/// task goes on from where the callback's IRET says.
+fn stopped(rec: &[u32; 20]) {
+    let s = ST.get();
+    if s.stop_tid != 0 {
+        return;
+    }
+    s.stop_rec = *rec;
+    s.stop_pid = rec[0];
+    s.stop_task = view(rec[0]).map_or(0, |v| v.tdb);
+    s.stop_waiting = false;
+    s.stop_tid = u32::MAX;
+    crate::w16lock::other_started();
+    let mut t = 0u32;
+    if unsafe { os2::DosCreateThread(&mut t, stop_thread, 0, 0, 0x2_0000) } != 0 {
+        crate::w16lock::other_ended();
+        ST.get().stop_tid = 0;
+        unsafe { crate::pm::Rs2Win16Debug(4, rec[0], rec[1], 0, 0) };
+    }
+}
+
+/// The thread a stop is handled on: the stopped task, as far as the
+/// interrupt callback can tell (GetCurrentTask, its own message queue for
+/// PostAppMessage to that task), running when the debugger's thread
+/// waits for messages.
+unsafe extern "C" fn stop_thread(_: u32) {
+    crate::w16lock::acquire();
+    ST.get().stop_tid = this_tid();
+    let hab = unsafe { crate::pm::WinInitialize(0) };
+    let hmq = unsafe { crate::pm::WinCreateMsgQueue(hab, 0) };
+    ST.get().stop_hmq = hmq;
+    let rec = ST.get().stop_rec;
+    STOP_KICKED.store(0, Ordering::SeqCst);
+    STOP_YIELDED.store(0, Ordering::SeqCst);
+    run_stop(&rec);
+    unsafe {
+        crate::pm::WinDestroyMsgQueue(hmq);
+        crate::pm::WinTerminate(hab);
+    }
+    let s = ST.get();
+    s.stop_tid = 0;
+    s.stop_hmq = 0;
+    s.stop_task = 0;
+    crate::w16lock::other_ended();
+    crate::w16lock::release();
+}
+
+fn this_tid() -> u32 {
+    let mut tib: *mut os2::Tib = core::ptr::null_mut();
+    let mut pib: *mut os2::Pib = core::ptr::null_mut();
+    unsafe { os2::DosGetInfoBlocks(&mut tib, &mut pib) };
+    unsafe { tib.as_ref().and_then(|t| t.ptib2.as_ref()).map_or(0, |t2| t2.tid) }
+}
+
+/// On the stop's thread?
+fn on_stop_thread() -> bool {
+    let s = ST.get().stop_tid;
+    s != 0 && s == this_tid()
+}
+
+/// GetMessage on the stop's thread waits (the debugger's thread runs).
+pub fn stop_thread_waits(w: bool) {
+    if on_stop_thread() {
+        if w {
+            STOP_YIELDED.store(1, Ordering::SeqCst);
+        } else {
+            STOP_KICKED.store(0, Ordering::SeqCst);
+        }
+        ST.get().stop_waiting = w;
+    }
+}
+
+/// PostAppMessage to a task being stopped: its thread's queue.
+pub fn task_queue(task: u16) -> Option<u32> {
+    let s = ST.get();
+    let q = (s.stop_tid != 0 && s.stop_hmq != 0 && task != 0 && task | 7 == s.stop_task | 7).then_some(s.stop_hmq);
+    if q.is_some() {
+        STOP_KICKED.store(1, Ordering::SeqCst);
+    }
+    q
+}
+
+/// The stop's thread runs (this thread waiting) until it has taken what
+/// was posted to it and then goes on or waits for messages again.
+fn let_stop_run() {
+    HANDED.store(0, Ordering::SeqCst);
+    for _ in 0..500 {
+        let s = ST.get();
+        // (Or it yields to this task, or switches it to code of its own:
+        // this thread goes back to its messages.)
+        if s.stop_tid == 0 || (s.stop_waiting && STOP_KICKED.load(Ordering::SeqCst) == 0) || HANDED.load(Ordering::SeqCst) != 0 || SWITCH_TO.load(Ordering::SeqCst) != 0 {
+            break;
+        }
+        crate::w16lock::waiting(|| unsafe { os2::DosSleep(5) });
+    }
+}
+
+/// This task yields (Yield, PeekMessage or GetMessage finding nothing):
+/// a stop's thread that yielded to it goes on now, until it is done or
+/// waits or yields again.
+pub fn task_yields() {
+    if HANDED.load(Ordering::SeqCst) != 0 && !on_stop_thread() && ST.get().stop_tid != 0 {
+        let_stop_run();
+    }
+}
+
+/// A stop's thread yields to this task (the debugger), which runs until
+/// it yields back, as Windows would switch from the stopped task to it.
+fn yield_to_task() {
+    HANDED.store(1, Ordering::SeqCst);
+    for _ in 0..1000 {
+        if HANDED.load(Ordering::SeqCst) == 0 {
+            break;
+        }
+        crate::w16lock::waiting(|| unsafe { os2::DosSleep(5) });
+    }
+    HANDED.store(0, Ordering::SeqCst);
+}
+
+/// DirectedYield(task): Windows runs that task until it yields. A task a
+/// debugger stopped, told to go on (PostAppMessage to its stop's thread):
+/// the stop is let go, the task runs, and a stop it comes to at once (a
+/// single step) is handled before the debugger goes on, as Windows would
+/// have run the task to it inside DirectedYield.
+pub fn directed_yield(task: u16) {
+    if on_stop_thread() {
+        if task != 0 && task | 7 != ST.get().stop_task | 7 {
+            yield_to_task();
+        }
+        return;
+    }
+    poll(true);
+    if ST.get().stop_tid == 0 || task | 7 != ST.get().stop_task | 7 {
+        task_yields();
+        crate::w16lock::yield_now();
+        return;
+    }
+    let p = ST.get().stop_pid;
+    STEPPED_ON.store(0, Ordering::SeqCst);
+    let_stop_run();
+    // It goes on (later, or already: a single step), and comes to a stop.
+    let stepped = STEPPED_ON.swap(0, Ordering::SeqCst) == p;
+    if ST.get().stop_tid != 0 || !(stepped || ST.get().pending.iter().any(|x| x.0 == p)) {
+        return;
+    }
+    // (A while: a task that goes on running never stops here.)
+    for _ in 0..40 {
+        // (poll may meet the stop itself.)
+        poll(true);
+        if ST.get().stop_tid == 0 {
+            let mut rec = [0u32; 20];
+            if unsafe { crate::pm::Rs2Win16Debug(3, p, rec.as_mut_ptr() as u32, 0, 0) } != 0 {
+                stopped(&rec);
+            }
+        }
+        if ST.get().stop_tid != 0 {
+            let_stop_run();
+            return;
+        }
+        unsafe { os2::DosSleep(5) };
+    }
+}
+
+/// The PM queue of the calling thread (the stop's thread has its own).
+pub fn thread_queue() -> Option<u32> {
+    on_stop_thread().then(|| ST.get().stop_hmq).filter(|&q| q != 0)
+}
+
+fn run_stop(rec: &[u32; 20]) {
+    let (p, tid, vector) = (rec[0], rec[1], rec[2] as u16);
+    let mut regs = [0u32; 16];
+    regs.copy_from_slice(&rec[4..20]);
+    let Some(v) = view(p) else {
+        unsafe { crate::pm::Rs2Win16Debug(4, p, tid, 0, 0) };
+        return;
+    };
+    refresh(v);
+    let (cs, ip, fl) = (regs[10] as u16, regs[8] as u16, regs[9] as u16);
+    let copy_cs = translate(v, cs);
+    v.csip = (copy_cs as u32) << 16 | ip as u32;
+    let tdb = v.tdb;
+    if crate::tracing() {
+        crate::trace(format_args!("W16 debug: task {p} INT {vector} at {cs:04x}:{ip:04x} (copy {copy_cs:04x})"));
+    }
+    let cb = with_slot(pid(), |s| s.interrupt).unwrap_or(0);
+    let mut resume: Option<[u32; 16]> = None;
+    if cb != 0 && copy_cs != 0 {
+        let s = ST.get();
+        let _ = tdb;
+        s.in_int = true;
+        s.iret = None;
+        PascalCall::new().w(fl).w(copy_cs).w(ip).w(0).w(vector).w(regs[0] as u16).call(cb);
+        let s = ST.get();
+        s.in_int = false;
+        if let Some((tcs, tip, tfl)) = s.iret.take() {
+            let real = view(p).map_or(0, |v| v.segs.iter().find(|x| x.1 | 7 == tcs | 7).map_or(0, |x| x.0));
+            if real != 0 {
+                let mut r = regs;
+                r[10] = real as u32;
+                r[8] = tip as u32;
+                r[9] = tfl as u32;
+                resume = Some(r);
+            }
+        }
+    }
+    // A single step the handler goes on with, without having waited for
+    // the debugger (stepping through a statement, or past a breakpoint):
+    // the task goes on now, as Windows returns to it from the interrupt.
+    if on_stop_thread() && STOP_YIELDED.load(Ordering::SeqCst) == 0 && resume.is_some_and(|r| r[9] & 0x100 != 0) {
+        if let Some(v) = view(p) {
+            sync(v);
+        }
+        if crate::tracing() {
+            crate::trace(format_args!("W16 debug: task {p} steps on at {:?}", resume.map(|r| (r[10], r[8], r[9]))));
+        }
+        let rp = resume.as_ref().map_or(0, |r| r.as_ptr() as u32);
+        unsafe { crate::pm::Rs2Win16Debug(4, p, tid, rp, 0) };
+        STEPPED_ON.store(p, Ordering::SeqCst);
+        return;
+    }
+    // The task goes on once the debugger yields (Windows switches to it
+    // only then), with the breakpoints the debugger set meanwhile.
+    if crate::tracing() {
+        crate::trace(format_args!("W16 debug: task {p} goes on at {:?} when the debugger yields", resume.map(|r| (r[10], r[8], r[9]))));
+    }
+    ST.get().pending.push((p, tid, resume));
+}
+
+/// SWITCH_MSG on the task's own thread: it runs what a stop's thread
+/// switched it to (that returns far to `callback_return`, the address
+/// TaskGetCSIP gave).
+pub fn switched_to() {
+    let csip = SWITCH_TO.swap(0, Ordering::SeqCst);
+    if csip != 0 {
+        if crate::tracing() {
+            crate::trace(format_args!("W16 TaskSwitch: this task runs {:04x}:{:04x}", csip >> 16, csip & 0xffff));
+        }
+        let saved = set_current(0);
+        PascalCall::new().call(csip);
+        set_current(saved);
+    }
+    SWITCHED.store(1, Ordering::SeqCst);
 }
 
 /// A module database as Windows keeps it: the NE header and its tables
@@ -460,7 +858,12 @@ pub fn deliver(mp1: u32, data: u32) {
     }
     PascalCall::new().w(id).l(data).call(cb);
     if id == NFY_STARTTASK && from != me {
-        entry_breakpoint(data);
+        // The debugger's breakpoint on the start goes into the task (it
+        // stops there itself), or, not debugged, is played here.
+        match view(from) {
+            Some(v) if v.attached => sync(v),
+            _ => entry_breakpoint(data),
+        }
         with_slot(from, |s| s.go = 1);
     }
     ST.get().current = saved;
@@ -500,7 +903,7 @@ fn entry_breakpoint(start: u32) {
 /// (resume), back to where `int3` called it. True if it was that.
 pub fn iret_trap(r: &mut crate::dos::Regs) -> bool {
     use crate::dos::reg::*;
-    if !ST.get().in_int {
+    if !ST.get().in_int || (ST.get().stop_tid != 0 && !on_stop_thread()) {
         return false;
     }
     let ss = (thunk16::sp16() >> 16) as u16;
@@ -509,10 +912,11 @@ pub fn iret_trap(r: &mut crate::dos::Regs) -> bool {
         return false;
     }
     let st = |o: u16| read16(ss, r[SP].wrapping_add(o)).unwrap_or(0);
-    let (tip, tcs) = (st(0), st(2));
+    let (tip, tcs, tfl) = (st(0), st(2), st(4));
     if view_block(tcs).is_none() {
         return false;
     }
+    ST.get().iret = Some((tcs, tip, tfl));
     if crate::tracing() {
         crate::trace(format_args!("W16 INT 3 handler resumes {tcs:04x}:{tip:04x}"));
     }
@@ -564,15 +968,51 @@ pub fn wait_started(child: u32) -> Option<u16> {
         }
         let t = slot(child)?;
         let v = view(child)?;
-        return Some(translate(v, t.hinst));
+        let inst = translate(v, t.hinst);
+        // A debugged task runs to the debugger's breakpoint on its start
+        // inside LoadModule too: that stop is given before it returns.
+        if v.attached {
+            for _ in 0..250 {
+                let mut rec = [0u32; 20];
+                if unsafe { crate::pm::Rs2Win16Debug(3, child, rec.as_mut_ptr() as u32, 0, 0) } != 0 {
+                    stopped(&rec);
+                    // Its handling runs (on its thread) until the task goes
+                    // on or waits for the debugger.
+                    for _ in 0..500 {
+                        let s = ST.get();
+                        if s.stop_tid == 0 || s.stop_waiting {
+                            break;
+                        }
+                        crate::w16lock::waiting(|| unsafe { os2::DosSleep(10) });
+                    }
+                    break;
+                }
+                if slot(child).is_none() {
+                    break;
+                }
+                unsafe { os2::DosSleep(20) };
+            }
+        }
+        return Some(inst);
     }
     slot(child).map(|t| t.hinst)
+}
+
+/// Make GetCurrentTask answer another task (0: this one): the old value.
+pub fn set_current(t: u16) -> u16 {
+    // (The stop's thread stays the stopped task.)
+    if on_stop_thread() {
+        return t;
+    }
+    core::mem::replace(&mut ST.get().current, t)
 }
 
 /// GetCurrentTask.
 pub fn current_task() -> u16 {
     let s = ST.get();
-    if s.current != 0 {
+    if on_stop_thread() && s.stop_task != 0 {
+        s.stop_task
+    } else if s.current != 0 {
         s.current
     } else if s.tdb != 0 {
         s.tdb
@@ -822,11 +1262,11 @@ fn fill_frame(p: *mut u8, ss: u16, bp: u16, cs: u16, ip: u16) {
 }
 
 fn read16(ss: u16, off: u16) -> Option<u16> {
-    let (_, limit) = selector(ss)?;
+    let (base, limit) = selector(ss)?;
     if off as u32 + 1 > limit {
         return None;
     }
-    Some(unsafe { (flat((ss as u32) << 16 | off as u32) as *const u16).read_unaligned() })
+    Some(unsafe { ((base as usize + off as usize) as *const u16).read_unaligned() })
 }
 
 fn stack_next(p: *mut u8) -> u32 {
@@ -1050,8 +1490,16 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 return Some(0);
             }
             let n = n.min(limit - off + 1);
-            let p = flat((sel as u32) << 16) as usize + off as usize;
-            let _ = base;
+            // The selector's own base (aliases are not tiled).
+            let p = base as usize + off as usize;
+            // Only memory that may be written (a debugger patching an API
+            // entry would write into WIN16's code).
+            if ord == 6279 {
+                let (mut size, mut fl) = (n, 0u32);
+                if unsafe { os2::DosQueryMem(p as *mut u8, &mut size, &mut fl) } != 0 || fl & os2::PAG_WRITE == 0 || size < n {
+                    return Some(0);
+                }
+            }
             unsafe {
                 if ord == 6278 {
                     core::ptr::copy(p as *const u8, buf, n as usize);
@@ -1070,14 +1518,34 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 None => 0,
             }
         }
+        // A stop's thread asking for this task's own: it waits in its
+        // scheduler, and a far return there resumes it (`switched_to`).
         6282 => {
             let t = a.w();
+            if on_stop_thread() && t != 0 && t | 7 == own_tdb() | 7 {
+                return Some(thunk16::callback_return());
+            }
             view_of(t).map_or(0, |v| v.csip)
         }
         // TaskSwitch: the task goes on (from where it is: the copy's
-        // address is not where its code is).
+        // address is not where its code is). From a stop's thread to this
+        // task (a debugger evaluating a breakpoint's condition in its own
+        // task): the task's thread runs `csip`, and the stopped task goes
+        // on once it has and waits again, as Windows switches back to it
+        // only when the debugger yields.
         6283 => {
             let (t, csip) = (a.w(), a.l());
+            if on_stop_thread() && t != 0 && t | 7 == own_tdb() | 7 {
+                SWITCHED.store(0, Ordering::SeqCst);
+                SWITCH_TO.store(csip, Ordering::SeqCst);
+                unsafe { crate::pm::WinPostQueueMsg(crate::kernel::TASK.get().hmq, SWITCH_MSG, 0, 0) };
+                crate::w16lock::waiting(|| {
+                    while SWITCHED.load(Ordering::SeqCst) == 0 {
+                        unsafe { os2::DosSleep(5) };
+                    }
+                });
+                return Some(1);
+            }
             let Some(v) = view_of(t) else { return Some(0) };
             v.csip = csip;
             let p = v.pid;

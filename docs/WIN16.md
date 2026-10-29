@@ -36,7 +36,7 @@ files are involved. This is the media-free alternative to Win-OS/2
 | DDE between Windows tasks (WM_DDE_*, GMEM_DDESHARE, global atoms), to PM programs' DDE servers, DDEML | works (stage 3) |
 | The clipboard: CF_TEXT, CF_BITMAP, CF_DIB, CF_METAFILEPICT, registered formats, delayed rendering, shared with PM programs | works (stage 3) |
 | TOOLHELP: the task, module and global heap databases, stack traces, MemoryRead/Write, NotifyRegister's task start and end across processes | works (stage 4, below) |
-| Debugging another task (breakpoints, single steps, a stopped task's registers) | no: tasks are processes ("TOOLHELP and debuggers") |
+| Debugging another task (breakpoints, single steps, a stopped task's registers) | works through the kernel's debug interface ("TOOLHELP and debuggers") |
 | MMSYSTEM, OLE 2, the rest of the compatibility tail | stage 4 |
 
 Checked in QEMU: `RS2\HELLO16.EXE` (a classic hello world: a window
@@ -677,7 +677,7 @@ Windows; what they needed, in the order they asked for it:
 | Jewels | | | starts | |
 | Hyperoid | | C | partly | Draws its own title bar with GetWindowDC: lands in the client area |
 | LIFEAPP | | | partly | Loading a snapshot fails (current directory) |
-| **Delphi** | 1.0 | Delphi 1 | **works** | Designs, edits properties, compiles and runs programs; the integrated debugger cannot stop the program (below) |
+| **Delphi** | 1.0 | Delphi 1 | **works** | Designs, edits properties, compiles and runs programs; the integrated debugger stops at breakpoints, steps and runs on (below) |
 
 ### Delphi 1.0
 
@@ -761,21 +761,30 @@ What it needed, besides stage 3 (each has a W16TEST check):
 
 ![The Events tab and a handler the inspector wrote](images/rs2-win16-delphi-events.png)
 
+**The integrated debugger** (on by default): F9 compiles the project
+and runs it under the debugger; a breakpoint (F5) stops the program
+with its line shown as the execution point and the title "[Stopped]",
+the program's window not responding as on Windows; Step Over (F8)
+goes to the next line (over calls, with a breakpoint after them),
+Trace Into (F7) into calls (out again through code without source), and
+Run goes on from there. Start Delphi in its own directory
+(`C:\DELPHI\BIN`, as Program Manager would), or save projects
+elsewhere than the root of a drive: PASDBK16 takes a module whose
+directory is a prefix of the Windows directory (`C:` of
+`C:\PROJECT1.EXE` is one of `C:\WINDOWS`) for a system module, and
+steps over all of it, so that its steps run the program on. Delphi's debug kernel (PASDBK16.DLL) works the Windows 3.1
+way: its interrupt callback runs inside the stopped task, plants INT 3s,
+steps past them with the trap flag, evaluates a breakpoint's condition
+by switching to the IDE's task (TaskSwitch) and waits in a message loop
+of the stopped task while the IDE shows the stop. "TOOLHELP and
+debuggers" says how rs2 gives it that.
+
+![Delphi stopped at a breakpoint in a button's OnClick](images/rs2-win16-delphi-breakpoint.png)
+
+![Step Over: the execution point on the next line](images/rs2-win16-delphi-step.png)
+
 Not yet:
 
-- **The integrated debugger** (on by default): F9 compiles and starts
-  the program, which runs, and the IDE goes on, but it reports "Could
-  not run/step the process": breakpoints are not hit and the program
-  cannot be stopped or stepped. Delphi's debug kernel (PASDBK16.DLL)
-  works the Windows 3.1 way: its NotifyRegister and InterruptRegister
-  callbacks run inside the debuggee, it plants INT 3s, resumes the
-  stopped task with TaskSwitch after a PostAppMessage, a WH_CALLWNDPROC
-  hook on the debuggee's task and data the DLL shares between the two
-  tasks. Each task being a process here, none of that reaches the other
-  task (see "TOOLHELP and debuggers" for what is done and what is
-  missing). With `[Debugging] IntegratedDebugging=0` in DELPHI.INI (or
-  Options|Environment, Integrated debugging off) Run starts the program
-  without the message.
 - **Help**: Help|Contents and F1 do nothing; Windows Help (WINHELP.EXE)
   is not there, and WinHelp has no viewer to start (rs2's VIEW reads
   OS/2 .INF/.HLP files, not Windows .HLP).
@@ -831,14 +840,55 @@ IRET to the copy (a data selector: it faults) is taken as its return;
 then the task goes on. TaskGetCSIP/TaskSetCSIP keep the view's address,
 TaskSwitch lets the task go on.
 
-Missing, and why: a task's own faults and INT 3s are not given to
-another process's interrupt callback, nothing stops a running task or
-reads its live registers, and hooks and DirectedYield/PostAppMessage
-into another task do nothing there. Doing it would take the debugger and
-the debuggee in one process (tasks as threads of one Win16 machine, with
-a Win16Lock, as Wine has it) or a cross-process debug interface in the
-kernel (DosDebug-like: stop, registers, breakpoints). Delphi's debugger
-also expects its DLL's data shared between the tasks.
+**Debugging another task** goes through the kernel: RS2API 423
+`Rs2Win16Debug(op, pid, a, b, c)` attaches a debugger process to a task
+(op 0, detach 1), writes the task's memory through its selectors (2),
+hands out the task's stops (3: process, thread, vector and the 16-bit
+registers) and resumes a stopped thread with registers (4). A thread of
+a debugged task that meets INT 3 or a single step (INT 1) in 16-bit
+code waits in the kernel until it is resumed. The debugger attaches to a
+task it sees when it has an interrupt callback; its breakpoints are
+written into its copies and synced into the task (what differs from
+the copies as last read) before the task runs on, and a stop refreshes
+the copies.
+
+A stop is handled the way Windows runs it, inside the stopped task:
+
+- on a **thread of its own** in the debugger's process, standing for the
+  stopped task: GetCurrentTask answers that task there, it has its own
+  message queue (PostAppMessage to the stopped task lands there) and the
+  interrupt callback is called on it with TOOLHELP's frame (its IRET to
+  the copy is taken as its return);
+- the two threads take turns under a **Win16Lock**
+  (`userland/win16/src/w16lock.rs`), handed over only where a Windows
+  task would yield: GetMessage or WaitMessage waiting, a PeekMessage that
+  finds nothing (which then looks once more, as Windows' does: what the
+  other ran meanwhile posted is seen), Yield and DirectedYield;
+- **DirectedYield** to the stopped task lets its thread take what the
+  debugger posted to it, and resumes the task; a stop the task comes to
+  at once (the single step off a breakpoint) is handled inside the
+  call, as Windows would have run the task to it. DirectedYield from
+  the stop's thread to the debugger runs the debugger until it yields
+  back. A single step the handler goes on with without waiting resumes
+  the task at once, as Windows returns to it from the interrupt (and a
+  DirectedYield that let it go waits for its next stop, so that a
+  statement step goes on inside the debugger's loop); otherwise the
+  task goes on when the debugger next yields;
+- **TaskGetCSIP/TaskSwitch** of the debugger's own task, from the stop's
+  thread, run code in the debugger's thread (a SWITCH message wakes it),
+  returning to where it was; the stopped task goes on after;
+- EnumTaskWindows of another task lists none of this task's windows.
+
+What does not carry over is the one LDT Windows' tasks share: a far
+pointer the debugger reads out of the task's memory holds the task's
+own selector, which in the debugger's process is another segment. A
+debugger that dereferences one reads its own memory; PrestoChangoSelector
+of a selector the debugger does not have gives an alias of a scratch
+block, so that a breakpoint written there goes nowhere instead of
+faulting. Delphi does this once when a program starts (its exception
+hook); that breakpoint is not planted. Open Watcom's and other OS/2
+debuggers use DosDebug, which rs2 does not implement (the kernel's stop,
+register and memory handling above is what it would build on).
 
 ![Calmira 2.2, a Windows 3.1 shell written in Delphi, on rs2](images/rs2-win16-calmira.png)
 
@@ -895,8 +945,8 @@ STORAGE, OLE2), the BIOS
 and video selectors (`__0040H`, `__A000H`...), self-loading programs,
 Windows 2.x programs, SOUND and SYSTEM.
 
-TOOLHELP is done ("TOOLHELP and debuggers") except debugging another
-task.
+TOOLHELP is done, debugging another task included ("TOOLHELP and
+debuggers").
 
 **Out of scope:** VxD calls (INT 2Fh 1684h finds no device), Windows
 device drivers (display, printer and keyboard .DRV files), real-mode

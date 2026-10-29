@@ -129,6 +129,9 @@ pub fn user_exception(f: &mut TrapFrame) {
             }
         }
     }
+    if crate::api::win16::debug_trap(f, &p, &t) {
+        return;
+    }
     if crate::api::win16::reflect(f, &p) {
         return;
     }

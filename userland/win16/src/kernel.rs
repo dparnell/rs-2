@@ -130,7 +130,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // the other type (code for data, data for code).
         177 => {
             let (src, dst) = (a.w() as u32, a.w() as u32);
-            selector_copy(src, dst)
+            match selector_copy(src, dst) {
+                0 => crate::toolhelp::scratch_alias(src, dst),
+                r => r,
+            }
         }
         // GetSelectorBase(sel), GetSelectorLimit(sel)
         186 | 188 => {
@@ -208,8 +211,19 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // GlobalCompact(min): the free memory.
         25 => 0x00ff_0000,
-        // Yield
-        29 => 0,
+        // DirectedYield(hTask): as Yield; a debugged task let go runs to
+        // its next stop first (toolhelp.rs).
+        150 => {
+            crate::toolhelp::directed_yield(a.w());
+            0
+        }
+        // Yield: a debugged task the debugger let go runs (toolhelp.rs).
+        29 => {
+            crate::toolhelp::poll(true);
+            crate::toolhelp::task_yields();
+            crate::w16lock::yield_now();
+            0
+        }
         // WaitEvent(task): no events for a task here.
         30 => 0,
         // GetCurrentTask (and the first task, in DX)
@@ -563,6 +577,7 @@ pub fn init_task(r: &mut crate::dos::Regs) {
     use crate::dos::reg::*;
     let (stack, heap, inst) = (r[BX], r[CX], r[DI]);
     let ds = r[DS];
+    crate::w16lock::init();
     let t = TASK.get();
     t.hinst = if inst != 0 { inst } else { ds };
     // The stack: SS:SP is where the program started (a far call and the

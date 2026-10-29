@@ -54,6 +54,10 @@ unsafe extern "C" {
     pub fn WinInitialize(fl: u32) -> u32;
     #[link_name = "PMWIN.716"]
     pub fn WinCreateMsgQueue(hab: u32, n: i32) -> u32;
+    #[link_name = "PMWIN.726"]
+    pub fn WinDestroyMsgQueue(hmq: u32) -> u32;
+    #[link_name = "PMWIN.888"]
+    pub fn WinTerminate(hab: u32) -> u32;
     #[link_name = "PMWIN.926"]
     pub fn WinRegisterClass(hab: u32, name: *const u8, proc_: WndProc, style: u32, words: u32) -> u32;
     #[link_name = "PMWIN.908"]
@@ -293,6 +297,8 @@ unsafe extern "C" {
     pub fn Rs2Win16Selector(op: u32, sel: u32, value: u32) -> u32;
     #[link_name = "RS2API.422"]
     pub fn Rs2Win16ReadTask(pid: u32, sel: u32, off: u32, buf: *mut u8, cb: u32) -> u32;
+    #[link_name = "RS2API.423"]
+    pub fn Rs2Win16Debug(op: u32, pid: u32, a: u32, b: u32, c: u32) -> u32;
 }
 
 pub const HWND_DESKTOP: u32 = 1;
