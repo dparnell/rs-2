@@ -765,7 +765,8 @@ What it needed, besides stage 3 (each has a W16TEST check):
 and runs it under the debugger; a breakpoint (F5) stops the program
 with its line shown as the execution point and the title "[Stopped]",
 the program's window not responding as on Windows; Step Over (F8)
-goes to the next line (over calls, with a breakpoint after them) and
+goes to the next line (over calls, with a breakpoint after them),
+Trace Into (F7) into calls (out again through code without source), and
 Run goes on from there. Start Delphi in its own directory
 (`C:\DELPHI\BIN`, as Program Manager would), or save projects
 elsewhere than the root of a drive: PASDBK16 takes a module whose
