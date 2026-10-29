@@ -24,11 +24,13 @@ BYTE FAR * WINAPI DdeAccessData(HDDEDATA, DWORD FAR *);
 #include <lzexpand.h>
 #include <ver.h>
 #include <toolhelp.h>
+#include <shellapi.h>
 #include "w16test.h"
 
 #pragma library("commdlg")
 #pragma library("ddeml")
 #pragma library("toolhelp")
+#pragma library("shell")
 
 static int failures;
 static char line[160];
@@ -1795,6 +1797,162 @@ static void toolhelp_tests(HINSTANCE hInst)
     NotifyUnRegister(NULL);
 }
 
+/* INT 2Fh AX=1000h: SHARE's installed state (FFh: loaded). */
+BYTE share_state(void);
+#pragma aux share_state = "mov ax, 1000h" "int 2Fh" value [al] modify [ax];
+
+/* The pixel at (x, y) of a window, once it has painted. */
+static COLORREF pixel_at(HWND w, int x, int y)
+{
+    HDC hdc;
+    COLORREF c;
+
+    UpdateWindow(w);
+    hdc = GetDC(w);
+    c = GetPixel(hdc, x, y);
+    ReleaseDC(w, hdc);
+    return c;
+}
+
+/* What Delphi 1.0's installer (Borland's INSTALL.EXE, INSTRUN) needs. */
+static void installer_tests(HINSTANCE hInst)
+{
+    BYTE FAR *bda = (BYTE FAR *)MAKELP(0x40, 0x40);
+    BYTE old;
+    HRSRC r;
+    HGLOBAL g;
+    LPSTR p;
+    HWND parent, b1, frame, b2, box, b3;
+    COLORREF c;
+    char buf[80];
+
+    /* The BIOS data area is writable: setup programs keep the floppy
+     * motor running through 40:40. */
+    old = *bda;
+    *bda = 0xff;
+    check(*bda == 0xff, "the BIOS data area (40:40) is writable");
+    *bda = old;
+
+    /* Named types through RT_NAMETABLE. */
+    r = FindResource(hInst, "INSTALL", "SCR");
+    check(r != 0, "FindResource: a named type and name from the RT_NAMETABLE");
+    g = r ? LoadResource(hInst, r) : 0;
+    p = g ? LockResource(g) : NULL;
+    check(p != NULL && lstrcmp(p, "script") == 0, "LoadResource of a resource named in the RT_NAMETABLE");
+    if (g) {
+        FreeResource(g);
+    }
+    check(FindResource(hInst, "NOTTHERE", "SCR") == 0, "FindResource: a name not in the name table");
+
+    /* Child windows in Windows' Z order (the first created on top) and
+     * frames that show what is inside them: a button created before a
+     * frame static that covers it, a frame static and a group box
+     * created before the buttons inside them. */
+    parent = CreateWindow("Stage2", "zorder", WS_OVERLAPPED | WS_CAPTION | WS_VISIBLE, 40, 40, 360, 140, NULL, NULL, hInst, NULL);
+    b1 = CreateWindow("BUTTON", "One", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 20, 20, 60, 30, parent, (HMENU)1, hInst, NULL);
+    frame = CreateWindow("STATIC", "", WS_CHILD | WS_VISIBLE | SS_GRAYFRAME, 10, 10, 100, 80, parent, (HMENU)2, hInst, NULL);
+    check(GetWindow(parent, GW_CHILD) == b1 && GetWindow(b1, GW_HWNDNEXT) == frame, "children in creation order, the first on top (GW_CHILD, GW_HWNDNEXT)");
+    c = pixel_at(parent, 25, 35);
+    wsprintf(buf, "a button under a later frame static shows, is %06lX", c);
+    check(c == GetSysColor(COLOR_BTNFACE), buf);
+    c = pixel_at(parent, 95, 75);
+    wsprintf(buf, "a frame static's inside is its parent's background, is %06lX", c);
+    check(c == RGB(255, 255, 255), buf);
+    DestroyWindow(frame);
+    DestroyWindow(b1);
+    frame = CreateWindow("STATIC", "", WS_CHILD | WS_VISIBLE | SS_BLACKFRAME, 10, 10, 100, 80, parent, (HMENU)2, hInst, NULL);
+    b2 = CreateWindow("BUTTON", "Two", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 20, 20, 60, 30, parent, (HMENU)3, hInst, NULL);
+    box = CreateWindow("BUTTON", "Group", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 130, 5, 200, 90, parent, (HMENU)4, hInst, NULL);
+    b3 = CreateWindow("BUTTON", "Three", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 150, 30, 60, 30, parent, (HMENU)5, hInst, NULL);
+    c = pixel_at(parent, 25, 35);
+    wsprintf(buf, "a button inside an earlier frame static shows, is %06lX", c);
+    check(c == GetSysColor(COLOR_BTNFACE), buf);
+    c = pixel_at(parent, 155, 45);
+    wsprintf(buf, "a button inside an earlier group box shows, is %06lX", c);
+    check(c == GetSysColor(COLOR_BTNFACE), buf);
+    c = pixel_at(parent, 300, 70);
+    wsprintf(buf, "a group box's inside is its parent's background, is %06lX", c);
+    check(c == RGB(255, 255, 255), buf);
+    ShowWindow(b2, SW_HIDE);
+    ShowWindow(b2, SW_SHOW);
+    check(GetWindow(parent, GW_CHILD) == frame, "ShowWindow keeps a child's place in the Z order");
+    DestroyWindow(parent);
+
+    /* The registration database (SHELL), and REGEDIT /s merging a .REG
+     * file (the installer registers OLE 2 so). */
+    {
+        HKEY k, k2;
+        LONG cb;
+        HFILE f;
+        static const char reg[] = "REGEDIT\r\nHKEY_CLASSES_ROOT\\W16Merged = merged value\r\nHKEY_CLASSES_ROOT\\W16Merged\\sub = deep\r\n";
+
+        check(RegCreateKey(HKEY_CLASSES_ROOT, "W16Test\\Shell", &k) == ERROR_SUCCESS, "RegCreateKey (and its parent)");
+        check(RegSetValue(k, "open", REG_SZ, "w16test.exe %1", 14) == ERROR_SUCCESS, "RegSetValue");
+        cb = sizeof buf;
+        check(RegQueryValue(HKEY_CLASSES_ROOT, "W16Test\\Shell\\open", buf, &cb) == ERROR_SUCCESS && lstrcmp(buf, "w16test.exe %1") == 0 && cb == 15,
+              "RegQueryValue: the value and its size");
+        check(RegOpenKey(HKEY_CLASSES_ROOT, "W16Test", &k2) == ERROR_SUCCESS && RegEnumKey(k2, 0, buf, sizeof buf) == ERROR_SUCCESS && lstrcmp(buf, "Shell") == 0 &&
+              RegEnumKey(k2, 1, buf, sizeof buf) != ERROR_SUCCESS, "RegOpenKey, RegEnumKey");
+        RegCloseKey(k);
+        check(RegDeleteKey(k2, NULL) == ERROR_SUCCESS && RegOpenKey(HKEY_CLASSES_ROOT, "W16Test\\Shell", &k) != ERROR_SUCCESS, "RegDeleteKey (and the keys below)");
+        RegCloseKey(k2);
+        check(RegOpenKey(HKEY_CLASSES_ROOT, "W16NoSuchKey", &k) == ERROR_BADKEY, "RegOpenKey of a missing key: ERROR_BADKEY");
+        f = _lcreat("C:\\W16TEST.REG", 0);
+        _lwrite(f, reg, sizeof reg - 1);
+        _lclose(f);
+        check(WinExec("REGEDIT /s C:\\W16TEST.REG", SW_HIDE) > 32, "WinExec REGEDIT /s (no REGEDIT.EXE)");
+        cb = sizeof buf;
+        check(RegQueryValue(HKEY_CLASSES_ROOT, "W16Merged\\sub", buf, &cb) == ERROR_SUCCESS && lstrcmp(buf, "deep") == 0, "REGEDIT merged the .REG file");
+        RegDeleteKey(HKEY_CLASSES_ROOT, "W16Merged");
+    }
+
+    /* What Windows Setup writes: WIN.INI's [intl], SYSTEM.INI's code
+     * page; SHARE is loaded (INT 2Fh AX=1000h). */
+    check(GetProfileInt("intl", "iCountry", 0) != 0, "WIN.INI [intl] iCountry from the country settings");
+    GetProfileString("intl", "sLanguage", "", buf, sizeof buf);
+    check(lstrlen(buf) == 3, "WIN.INI [intl] sLanguage");
+    check(GetPrivateProfileInt("boot.description", "codepage", 0, "SYSTEM.INI") != 0, "SYSTEM.INI [boot.description] codepage");
+    check(share_state() == 0xff, "INT 2Fh AX=1000h: SHARE is loaded");
+
+    /* Program Manager's DDE, as setup programs use it (WIN16's stand-in
+     * when no Program Manager runs). */
+    {
+        DWORD inst = 0, res;
+        HSZ pm;
+        HCONV conv;
+        HDDEDATA d;
+        HSZ groups;
+        static char text[200];
+        static const char cmd[] = "[CreateGroup(\"W16 Test Group\")][ShowGroup(\"W16 Test Group\", 1)]";
+        static const char del[] = "[DeleteGroup(\"W16 Test Group\")]";
+
+        DdeInitialize(&inst, (PFNCALLBACK)MakeProcInstance((FARPROC)CliCallback, hInstance), APPCMD_CLIENTONLY, 0);
+        pm = DdeCreateStringHandle(inst, "PROGMAN", CP_WINANSI);
+        conv = DdeConnect(inst, pm, pm, NULL);
+        check(conv != 0, "DdeConnect to PROGMAN");
+        if (conv) {
+            check(DdeClientTransaction((LPBYTE)cmd, sizeof cmd, conv, 0, 0, XTYP_EXECUTE, 5000, &res) && (res & DDE_FACK),
+                  "PROGMAN: [CreateGroup][ShowGroup]");
+            GetPrivateProfileString("Group Names", "C:\\WINDOWS\\W16TESTG.GRP", "", text, sizeof text, "PROGMAN.INI");
+            check(lstrcmp(text, "W16 Test Group") == 0, "PROGMAN: the group in PROGMAN.INI");
+            groups = DdeCreateStringHandle(inst, "Groups", CP_WINANSI);
+            d = DdeClientTransaction(NULL, 0, conv, groups, CF_TEXT, XTYP_REQUEST, 5000, &res);
+            text[0] = 0;
+            if (d) {
+                DdeGetData(d, text, sizeof text, 0);
+                DdeFreeDataHandle(d);
+            }
+            check(strstr(text, "W16 Test Group\r\n") != NULL, "PROGMAN: XTYP_REQUEST Groups lists it");
+            check(DdeClientTransaction((LPBYTE)del, sizeof del, conv, 0, 0, XTYP_EXECUTE, 5000, &res) && (res & DDE_FACK),
+                  "PROGMAN: [DeleteGroup]");
+            GetPrivateProfileString("Group Names", "C:\\WINDOWS\\W16TESTG.GRP", "", text, sizeof text, "PROGMAN.INI");
+            check(text[0] == 0, "PROGMAN: the group gone from PROGMAN.INI");
+            DdeDisconnect(conv);
+        }
+        DdeUninitialize(inst);
+    }
+}
+
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
 {
     out("w16test: rs2's native Win16 layer\r\n");
@@ -1806,6 +1964,7 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     real_app_tests(hInst);
     delphi_tests(hInst);
     toolhelp_tests(hInst);
+    installer_tests(hInst);
     sprintf(line, "w16test done: %d failure(s)\r\n", failures);
     out(line);
     return failures;

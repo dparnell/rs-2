@@ -46,7 +46,10 @@ pub fn interrupt(p: *mut u16) {
         0x21 => int21(&mut r),
         0x25 | 0x26 => abs_disk(&mut r),
         0x31 => dpmi(&mut r),
-        // The multiplex interrupt: nothing is installed (AL stays).
+        // The multiplex interrupt: SHARE is installed (AL FFh: OS/2
+        // shares files itself, as its DOS sessions report; Borland's
+        // database engine asks); nothing else is (AL stays).
+        0x2f if r[AX] == 0x1000 => r[AX] = 0x10ff,
         0x2f => {}
         // BIOS time of day: CX:DX the ticks (18.2 a second) since
         // midnight, AL whether midnight passed.
@@ -106,8 +109,15 @@ fn dpmi(r: &mut Regs) {
                 bad(r);
             }
         }
+        // A selector for real-mode segment BX: the BIOS data area's.
+        0x0002 if r[BX] == 0x40 => r[AX] = 0x40,
         // The selector increment.
         0x0003 => r[AX] = 8,
+        // The page size: BX:CX.
+        0x0604 => {
+            r[BX] = 0;
+            r[CX] = 4096;
+        }
         // Get a segment's base (CX:DX), set it, set its limit.
         0x0006 => match unsafe { sel(1, r[BX] as u32, 0) } {
             u32::MAX => bad(r),

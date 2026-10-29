@@ -46,7 +46,9 @@ mod module;
 mod ole;
 mod pm;
 mod print;
+mod progman;
 mod profile;
+mod reg;
 mod region;
 mod res;
 mod scroll;
@@ -225,6 +227,8 @@ entries! {
     // The common dialogs' dialog procedure and DDEML's window procedure.
     p_commdlg = 11, 10;
     p_ddeml = 12, 10;
+    // The Program Manager stand-in's window procedure (progman.rs).
+    p_progman = 10, 10;
     // KERNEL
     k_fatalexit = 1001, 2;
     k_getversion = 1003, 0;
@@ -854,6 +858,13 @@ entries! {
     lz_lzdone = 6409, 0;
     lz_getexpandedname = 6410, 8;
     // SHELL
+    sh_regopenkey = 6501, 12;
+    sh_regcreatekey = 6502, 12;
+    sh_regclosekey = 6503, 4;
+    sh_regdeletekey = 6504, 8;
+    sh_regsetvalue = 6505, 20;
+    sh_regqueryvalue = 6506, 16;
+    sh_regenumkey = 6507, 16;
     sh_dragacceptfiles = 6509, 4;
     sh_shellexecute = 6520, 20;
     sh_extracticon = 6534, 8;
@@ -958,6 +969,7 @@ fn dispatch_(idx: u32, args: *const u8) -> u32 {
         .or_else(|| draw::call(idx, &mut a))
         .or_else(|| lz::call(idx, &mut a))
         .or_else(|| ver::call(idx, &mut a))
+        .or_else(|| reg::call(idx, &mut a))
         .or_else(|| ole::call(idx, &mut a))
     {
         return r;
@@ -990,7 +1002,8 @@ pub fn native_depth() -> u32 {
 }
 
 /// Call one of WIN16's window procedures: a built-in control's (entry
-/// 2-8), MDICLIENT's (9), the common dialogs' (11), DDEML's (12),
+/// 2-8), MDICLIENT's (9), the Program Manager stand-in's (10), the
+/// common dialogs' (11), DDEML's (12),
 /// DefWindowProc (2107) or DefDlgProc (2308).
 pub fn native(idx: u32, h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     *NATIVE_DEPTH.get() += 1;
@@ -999,6 +1012,7 @@ pub fn native(idx: u32, h: u16, m: u16, wp: u16, lp: u32) -> u32 {
         9 => mdi::client_proc(h, m, wp, lp),
         11 => commdlg::dlg_proc(h, m, wp, lp),
         12 => ddeml::wnd_proc(h, m, wp, lp),
+        10 => progman::wnd_proc(h, m, wp, lp),
         2107 => user::def_window_proc(h, m, wp, lp),
         2308 => dialog::def_dlg_proc(h, m, wp, lp),
         _ => 0,

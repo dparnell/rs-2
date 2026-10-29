@@ -421,13 +421,6 @@ thunk16::entries16_pascal! {
     x_7530 = 7530, 6;
     x_7531 = 7531, 14;
     x_7532 = 7532, 6;
-    x_6501 = 6501, 12;
-    x_6502 = 6502, 12;
-    x_6503 = 6503, 4;
-    x_6504 = 6504, 8;
-    x_6505 = 6505, 20;
-    x_6506 = 6506, 16;
-    x_6507 = 6507, 16;
     x_6508 = 6508, 2;
     x_6511 = 6511, 10;
     x_6512 = 6512, 2;
@@ -920,13 +913,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (7530, "OLE2DISP.130 VARCYFROMUI1"),
     (7531, "OLE2DISP.131 VARBSTRFROMUI1"),
     (7532, "OLE2DISP.132 VARBOOLFROMUI1"),
-    (6501, "SHELL.1 REGOPENKEY"),
-    (6502, "SHELL.2 REGCREATEKEY"),
-    (6503, "SHELL.3 REGCLOSEKEY"),
-    (6504, "SHELL.4 REGDELETEKEY"),
-    (6505, "SHELL.5 REGSETVALUE"),
-    (6506, "SHELL.6 REGQUERYVALUE"),
-    (6507, "SHELL.7 REGENUMKEY"),
     (6508, "SHELL.8 WEP"),
     (6511, "SHELL.11 DRAGQUERYFILE"),
     (6512, "SHELL.12 DRAGFINISH"),

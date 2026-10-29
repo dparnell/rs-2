@@ -410,8 +410,8 @@ pub fn z(s: &[u8]) -> Vec<u8> {
 
 /// The far addresses of the procedures implemented here (built-in
 /// controls, DefWindowProc, DefDlgProc) and their entry numbers.
-fn natives() -> &'static [(u32, u32); 12] {
-    static N: Global<[(u32, u32); 12]> = Global::new([(0, 0); 12]);
+fn natives() -> &'static [(u32, u32); 13] {
+    static N: Global<[(u32, u32); 13]> = Global::new([(0, 0); 13]);
     let n = N.get();
     if n[0].0 == 0 {
         unsafe extern "C" {
@@ -425,6 +425,7 @@ fn natives() -> &'static [(u32, u32); 12] {
             fn p_mdiclient();
             fn p_commdlg();
             fn p_ddeml();
+            fn p_progman();
             fn u_defwindowproc();
             fn u_defdlgproc();
         }
@@ -440,6 +441,7 @@ fn natives() -> &'static [(u32, u32); 12] {
             (f(p_mdiclient), 9),
             (f(p_commdlg), 11),
             (f(p_ddeml), 12),
+            (f(p_progman), 10),
             (f(u_defwindowproc), 2107),
             (f(u_defdlgproc), 2308),
         ];
@@ -456,6 +458,9 @@ pub fn native_far(idx: u32) -> u32 {
 pub fn call_proc(proc_: u32, hwnd: u16, msg: u16, wp: u16, lp: u32) -> u32 {
     if proc_ == 0 {
         return 0;
+    }
+    if msg == crate::dde::WM_DDE_ACK {
+        crate::dde::note_ack();
     }
     if let Some(&(_, idx)) = natives().iter().find(|n| n.0 == proc_) {
         return crate::native(idx, hwnd, msg, wp, lp);
