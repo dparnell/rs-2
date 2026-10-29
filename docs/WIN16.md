@@ -617,6 +617,16 @@ Windows; what they needed, in the order they asked for it:
   serial port once and return 0. An import with no entry at all (an
   undocumented ordinal) loads as Windows loads it: the call, if it ever
   comes, shows "Call to Undefined Dynalink" and ends the program.
+- **Huge blocks** (GlobalAlloc over 64 KB) take consecutive tiles, a
+  selector each (`__AHINCR` 8 apart); as on Windows, each selector's
+  limit reaches the end of the block, so 386 code can address all of it
+  with 32-bit offsets from the first (Borland's installer's Quantum
+  decompressor keeps its 256 KB window so). With 64 KB limits it faulted
+  on real processors and VMware; QEMU's emulated processor does not
+  check segment limits there, so such bugs only show on real hardware.
+- **32-bit registers** keep their upper halves across the INTs and
+  faults WIN16 handles (its handler sees 16-bit registers; the kernel
+  keeps the rest for the return).
 - **Faults** in a Windows program's 16-bit code go to WIN16 (the
   kernel reflects protection faults, divide errors, invalid
   instructions, stack faults and the page faults nothing resolves, such

@@ -837,8 +837,20 @@ pub fn global_alloc(fl: u16, n: u32) -> u16 {
     // Committed memory is zero already (GMEM_ZEROINIT).
     let _ = GMEM_ZEROINIT;
     let h = (far(p) >> 16) as u16;
+    huge_limits(h, room);
     GLOBALS.get().insert(h, Block { base: p, size, room, flags: fl, locks: 0 });
     h
+}
+
+/// A block over 64 KB: as on Windows, its first selector reaches the
+/// whole block (and each next one the rest), which 386 code addresses
+/// with 32-bit offsets (Borland's installer's Quantum decompressor).
+/// rs2's tiles otherwise have 64 KB limits, which only a real processor
+/// enforces.
+fn huge_limits(h: u16, room: u32) {
+    if room > 0x1_0000 {
+        unsafe { crate::pm::Rs2Win16Selector(10, h as u32, 0) };
+    }
 }
 
 /// A GMEM_DDESHARE block another process gave this one (dde.rs): a
@@ -850,6 +862,7 @@ pub fn adopt(h: u16, size: u32) {
     }
     let base = flat((h as u32) << 16);
     let room = size.next_multiple_of(0x10000).max(0x10000);
+    huge_limits(h, room);
     GLOBALS.get().insert(h, Block { base, size: size.max(1), room, flags: GMEM_DDESHARE, locks: 0 });
 }
 
