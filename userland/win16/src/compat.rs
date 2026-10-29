@@ -140,14 +140,62 @@ pub fn exec(cmd: &[u8]) -> u16 {
     let windows = unsafe { os2::DosQueryAppType(z.as_ptr(), &mut ty) } == 0 && ty & 0x0200 != 0;
     // EXEC_ASYNC: it runs on its own. Windows returns once the new task
     // has started (and debuggers have heard of it): its instance handle.
-    match unsafe { os2::DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, 1, a.as_ptr(), core::ptr::null(), &mut res, z.as_ptr()) } {
-        0 if windows => crate::toolhelp::wait_started(res.code_terminate).filter(|&h| h > 32).unwrap_or(33),
+    let rc = unsafe { os2::DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, 1, a.as_ptr(), core::ptr::null(), &mut res, z.as_ptr()) };
+    let path = &z[..z.len() - 1];
+    if rc != 0 {
+        let what = unsafe { crate::cstr(fail.as_ptr()) };
+        let what = if what.is_empty() || what.eq_ignore_ascii_case(path) { alloc::string::String::new() } else { alloc::format!(" ({})", alloc::string::String::from_utf8_lossy(what)) };
+        report(path, args, &alloc::format!("cannot start it: {}{what}", sys_message(rc, path)));
+    }
+    match rc {
+        0 if windows => match crate::toolhelp::wait_started(res.code_terminate) {
+            Some(h) if h > 32 => h,
+            _ => {
+                if let Some((term, code)) = *crate::toolhelp::ENDED_AT_START.get() {
+                    report(path, args, &alloc::format!("it ended before it started (termination {term}, result {code})"));
+                }
+                33
+            }
+        },
         0 => 33,
         2 | 3 | 110 => 2,
         8 => 8,
         191 | 193 => 11,
         _ => 31,
     }
+}
+
+/// OSO001.MSG's text for an error ("SYS0002: The system cannot find the
+/// file specified."; %1 the program), or SYSnnnn without the file.
+fn sys_message(rc: u32, program: &[u8]) -> alloc::string::String {
+    let mut buf = [0u8; 300];
+    let mut n = 0;
+    let file = b"OSO001.MSG\0";
+    let mut p = program.to_vec();
+    p.push(0);
+    let table = [p.as_ptr()];
+    if unsafe { os2::DosGetMessage(table.as_ptr(), 1, buf.as_mut_ptr(), buf.len() as u32, rc, file.as_ptr(), &mut n) } == 0 {
+        let t = buf[..n as usize].trim_ascii_end();
+        return alloc::string::String::from_utf8_lossy(t).replace("\r\n", " ");
+    }
+    alloc::format!("SYS{rc:04}")
+}
+
+/// A program WinExec started that did not run, on the caller's standard
+/// error (the command prompt it was started from) and the serial port:
+/// Windows says nothing, and setup programs that only start the next
+/// one (Borland's SETUP and INSTALL) would end without a word.
+fn report(path: &[u8], args: &[u8], why: &str) {
+    let me = crate::module::find(0).map(|m| m.name.clone()).unwrap_or_default();
+    let line = alloc::format!(
+        "WIN16: {} WinExec {}{}{}: {why}",
+        alloc::string::String::from_utf8_lossy(&me),
+        alloc::string::String::from_utf8_lossy(path),
+        if args.is_empty() { "" } else { " " },
+        alloc::string::String::from_utf8_lossy(args)
+    );
+    crate::pm::trace(format_args!("{line}"));
+    crate::stderr_line(&line);
 }
 
 fn trim(s: &[u8]) -> &[u8] {

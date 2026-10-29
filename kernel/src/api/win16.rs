@@ -133,7 +133,8 @@ pub fn read_task(c: &mut Ctx) -> u32 {
 /// segments `sel` is, 7 make `sel` itself data (`value` 1) or
 /// 16-bit code (2), its base and limit kept. Returns the
 /// selector or value, 0 (or 0xFFFFFFFF for 1 and 5) on error; 2-4 return
-/// 1 on success.
+/// 1 on success. 10: the selectors of the block `sel` starts each reach
+/// its end (Windows' huge blocks), 1 on success.
 pub fn selector(c: &mut Ctx) -> u32 {
     let (op, sel, value) = (c.arg(0), c.arg(1) as u16, c.arg(2));
     if op == 9 {
@@ -146,9 +147,38 @@ pub fn selector(c: &mut Ctx) -> u32 {
         }
         return vm::tile_selector(first) as u32;
     }
+    if op == 10 {
+        // A huge block's selectors as Windows makes them: each reaches the
+        // end of the block (programs address it with 32-bit offsets from
+        // the first).
+        let mut sp = c.process.space.lock();
+        let start = vm::tiled_flat(sel, 0);
+        let Some(r) = sp.region(start) else { return 0 };
+        if r.seg != vm::SegKind::Data || r.base != start {
+            return 0;
+        }
+        let (end, flags) = (r.end().min(vm::TILED_TOP), r.flags);
+        let mut tile = start;
+        while tile < end {
+            let limit = end - tile - 1;
+            sp.ldt[(tile >> 16) as usize] = if limit > 0xf_ffff {
+                vm::seg_descriptor(tile, limit >> 12, vm::SegKind::Data, flags) | 1 << 55
+            } else {
+                vm::seg_descriptor(tile, limit, vm::SegKind::Data, flags)
+            };
+            tile += 0x1_0000;
+        }
+        return 1;
+    }
     if op == 8 {
+        // This process's program or a DLL: another program's segments may
+        // have the same selectors in its own LDT.
         let s = sel | 7;
-        return crate::loader::all_modules().iter().find(|m| m.objects.iter().any(|o| o.selector() == s)).map_or(0, |m| m.hmte as u32);
+        let exe = c.process.exe.clone();
+        return crate::loader::all_modules()
+            .iter()
+            .find(|m| (m.is_dll || Arc::ptr_eq(m, &exe)) && m.objects.iter().any(|o| o.selector() == s))
+            .map_or(0, |m| m.hmte as u32);
     }
     if op == 6 {
         let Some(m) = crate::loader::by_handle(sel) else { return 0 };
@@ -222,12 +252,15 @@ pub fn selector(c: &mut Ctx) -> u32 {
     }
 }
 
-/// A protection fault in user code: if it is in 16-bit code of a process
-/// with a Win16 interrupt handler (an INT instruction, or another fault
-/// outside the handler's own code), enter the handler.
-pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
+/// A fault in user code: if it is in 16-bit code of a process with a
+/// Win16 interrupt handler (an INT instruction, or another fault outside
+/// the handler's own code), enter the handler. Protection faults, and the
+/// divide errors, invalid instructions, stack faults and page faults
+/// nothing resolved (a write to a code segment's pages), which Windows
+/// reports as its programs' faults.
+pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool {
     let handler = p.win16_int.load(Ordering::Relaxed);
-    if handler == 0 || f.vector != 13 {
+    if handler == 0 || !matches!(f.vector, 0 | 6 | 12 | 13 | 14) {
         return false;
     }
     let mut sp = p.space.lock();
@@ -244,7 +277,7 @@ pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
     }
     // The error code of an INT through a gate the program may not use:
     // IDT bit and the vector.
-    let int = f.error & 3 == 2 && insn == [0xcd, (f.error >> 3) as u8];
+    let int = f.vector == 13 && f.error & 3 == 2 && insn == [0xcd, (f.error >> 3) as u8];
     if !int && cs == (handler >> 16) as u16 {
         return false;
     }
@@ -280,6 +313,9 @@ pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
     if !sp.poke_bytes(base.wrapping_add(sp16 as u32), &b) {
         return false;
     }
+    // The registers' upper halves, for `returned`.
+    let hi = |v: u64| (v >> 16) as u16;
+    t.win16_hi.lock().push([hi(f.rax), hi(f.rbx), hi(f.rcx), hi(f.rdx), hi(f.rsi), hi(f.rdi), hi(f.rbp), hi(f.rsp)]);
     f.rsp = sp16 as u64;
     f.cs = (handler >> 16) as u64;
     f.rip = (handler & 0xffff) as u64;
@@ -288,6 +324,7 @@ pub fn reflect(f: &mut TrapFrame, p: &Arc<Process>) -> bool {
 
 /// The handler returned to the gate slot: SS:SP is at INTREGS.
 pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
+    let hi = t.win16_hi.lock().pop().unwrap_or_default();
     let mut sp = p.space.lock();
     let ss = f.ss as u16;
     let base = vm::desc_base(sp.descriptor(ss));
@@ -296,20 +333,22 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
         return;
     }
     let r = |i: usize| u16::from_le_bytes([b[i * 2], b[i * 2 + 1]]) as u64;
-    f.rax = r(AX);
-    f.rbx = r(BX);
-    f.rcx = r(CX);
-    f.rdx = r(DX);
-    f.rsi = r(SI);
-    f.rdi = r(DI);
-    f.rbp = r(BP);
+    // 32-bit registers keep their upper halves (the handler's are 16-bit).
+    let w = |i: usize, h: u16| r(i) | (h as u64) << 16;
+    f.rax = w(AX, hi[0]);
+    f.rbx = w(BX, hi[1]);
+    f.rcx = w(CX, hi[2]);
+    f.rdx = w(DX, hi[3]);
+    f.rsi = w(SI, hi[4]);
+    f.rdi = w(DI, hi[5]);
+    f.rbp = w(BP, hi[6]);
     f.ds = r(DS);
     f.es = r(ES);
     // Only the arithmetic and direction flags.
     f.rflags = (f.rflags & !0xcd5) | (r(FLAGS) & 0xcd5) | 0x202;
     f.rip = r(IP);
     f.cs = r(CS);
-    f.rsp = r(SP);
+    f.rsp = r(SP) | (hi[7] as u64) << 16;
     drop(sp);
     let n = r(INTNO) as u16;
     if n & FAULT != 0 {

@@ -617,6 +617,43 @@ Windows; what they needed, in the order they asked for it:
   serial port once and return 0. An import with no entry at all (an
   undocumented ordinal) loads as Windows loads it: the call, if it ever
   comes, shows "Call to Undefined Dynalink" and ends the program.
+- **Huge blocks** (GlobalAlloc over 64 KB) take consecutive tiles, a
+  selector each (`__AHINCR` 8 apart); as on Windows, each selector's
+  limit reaches the end of the block, so 386 code can address all of it
+  with 32-bit offsets from the first (Borland's installer's Quantum
+  decompressor keeps its 256 KB window so). With 64 KB limits it faulted
+  on real processors and VMware; QEMU's emulated processor does not
+  check segment limits there, so such bugs only show on real hardware.
+- **32-bit registers** keep their upper halves across the INTs and
+  faults WIN16 handles (its handler sees 16-bit registers; the kernel
+  keeps the rest for the return).
+- **Faults** in a Windows program's 16-bit code go to WIN16 (the
+  kernel reflects protection faults, divide errors, invalid
+  instructions, stack faults and the page faults nothing resolves, such
+  as a write to a code segment's pages). The ones it cannot fix (it
+  fixes a load of an invalid selector into DS or ES, and TOOLHELP's
+  debugger IRETs) show Windows 3.1's "Application Error" box, `NAME
+  caused a General Protection Fault in module MODULE.EXE at 0001:0234`
+  (a Divide by Zero, an Invalid Instruction, a Stack Fault; the
+  segment's number in its module and the offset; a page fault is the
+  protection fault Windows' segments would have raised), and end the
+  program when it is closed; the same line goes to the serial port. A
+  program never just disappears; the line is also written to the
+  program's standard error (the command prompt it was started from).
+- **WinExec failures** are said too, though Windows says nothing:
+  setup programs that only start the next program and end (Borland's
+  SETUP and INSTALL) would otherwise end without a word. When the
+  program cannot be started, or a Windows program ends before it gets
+  to InitTask, a line such as `WIN16: SETUP WinExec
+  D:\INSTALL\DISK1\INSTALL.EXE: cannot start it: SYS0002: ...` (the
+  system's message, the module that failed to load) or `... it ended
+  before it started (termination 1, result 255)` goes to the caller's
+  standard error and the serial port. W16TEST checks the error WinExec
+  returns for a file that is no program (11).
+  PMXTEST checks it with `HELLO16 GPF` started as the Workplace Shell
+  starts programs. A program the shell cannot start at all (a missing
+  file or DLL) gets the shell's "Cannot start the program" box with the
+  system's message for the error.
 - **Windows DLLs** of the program's own (WNDHOOKS.DLL, CTL3D...): the
   loader finds them in the program's directory first, gives each process
   its own copy of their data (each Windows task is a process here) and
@@ -684,8 +721,11 @@ Windows; what they needed, in the order they asked for it:
 
 **Installing it from its CD.** Delphi's own installer runs on WIN16:
 with the CD in the drive (the user's own copy; in QEMU `--virtio-cd
-delphi_1.iso`, drive D: on a system disk), start `D:\INSTALL\SETUP.EXE`
-from a command prompt or the Drives folder. It is Borland's installer:
+delphi_1.iso`, drive D: on a system disk; the CD's own letter, E: or
+later, when there is a second partition) start `INSTALL\SETUP.EXE` on
+it from a command prompt or by double-clicking it in the Drives folder;
+`INSTALL\DISK1\SETUP.EXE` is the same program as
+`INSTALL\DISK1\INSTALL.EXE` and works as well. It is Borland's installer:
 SETUP starts `DISK1\INSTALL.EXE` (the "Borland Install Loader"), which
 expands INSTRUN.EXE and BAMGR16.DLL with LZEXPAND into
 `C:\WINDOWS\TEMP` and starts INSTRUN; INSTRUN unpacks its helper DLLs

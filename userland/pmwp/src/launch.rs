@@ -5,6 +5,13 @@ use alloc::vec::Vec;
 
 use crate::util::*;
 
+unsafe extern "C" {
+    #[link_name = "PMWIN.789"]
+    fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title: *const u8, id: u32, style: u32) -> u32;
+}
+
+const HWND_DESKTOP: u32 = 1;
+
 pub const PROG_DEFAULT: u32 = 0;
 pub const PROG_FULLSCREEN: u32 = 1;
 pub const PROG_WINDOWABLEVIO: u32 = 2;
@@ -14,9 +21,37 @@ pub const PROG_WINDOWEDVDM: u32 = 7;
 
 /// Start `exe` with `params` in `dir` (the command processor for "*" or
 /// nothing; .CMD and .BAT files in one). Returns the error, 0 if it
-/// started. A DOS session (PROG_VDM, PROG_WINDOWEDVDM) runs its own
-/// COMMAND.COM for "*" and .BAT files.
+/// started; a program that did not start is reported in a message box,
+/// as the Workplace Shell does. A DOS session (PROG_VDM,
+/// PROG_WINDOWEDVDM) runs its own COMMAND.COM for "*" and .BAT files.
 pub fn start(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) -> u32 {
+    let rc = start_session(exe, params, dir, title, progc);
+    if rc != 0 {
+        report(exe, rc);
+    }
+    rc
+}
+
+/// "Cannot start the program": the program and OSO001.MSG's text for the
+/// error (SYSnnnn without the file).
+fn report(exe: &[u8], rc: u32) {
+    let mut t = b"Cannot start the program ".to_vec();
+    t.extend_from_slice(if exe.is_empty() || exe == b"*" { b"*" } else { exe });
+    t.extend_from_slice(b".\n\n");
+    let mut buf = [0u8; 512];
+    let mut n = 0;
+    let file = b"OSO001.MSG\0";
+    if unsafe { os2::DosGetMessage(core::ptr::null(), 0, buf.as_mut_ptr(), buf.len() as u32, rc, file.as_ptr(), &mut n) } == 0 {
+        t.extend_from_slice(buf[..n as usize].trim_ascii_end());
+    } else {
+        t.extend_from_slice(alloc::format!("SYS{rc:04}").as_bytes());
+    }
+    let t = z(&t);
+    // MB_OK | MB_ERROR | MB_MOVEABLE
+    unsafe { WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, t.as_ptr(), b"Workplace Shell\0".as_ptr(), 0, 0x0000 | 0x0040 | 0x4000) };
+}
+
+fn start_session(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) -> u32 {
     let up = exe.to_ascii_uppercase();
     let dos = progc == PROG_VDM || progc == PROG_WINDOWEDVDM;
     let batch = !dos && (up.ends_with(b".CMD") || up.ends_with(b".BAT"));

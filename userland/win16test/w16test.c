@@ -1801,6 +1801,17 @@ static void toolhelp_tests(HINSTANCE hInst)
 BYTE share_state(void);
 #pragma aux share_state = "mov ax, 1000h" "int 2Fh" value [al] modify [ax];
 
+/* INT 21h AH=30h with EBX's upper half set (386 code keeps 32-bit
+ * values in registers across DOS calls): EBX's upper half after it. */
+WORD int21_keeps_ebx(void);
+#pragma aux int21_keeps_ebx = \
+    0x66 0xbb 0x78 0x56 0x34 0x12 /* mov ebx, 12345678h */ \
+    0xb4 0x30                     /* mov ah, 30h */ \
+    0xcd 0x21                     /* int 21h */ \
+    0x66 0x8b 0xc3                /* mov eax, ebx */ \
+    0x66 0xc1 0xe8 0x10           /* shr eax, 16 */ \
+    value [ax] modify [ax bx cx dx];
+
 /* The pixel at (x, y) of a window, once it has painted. */
 static COLORREF pixel_at(HWND w, int x, int y)
 {
@@ -1919,6 +1930,19 @@ static void installer_tests(HINSTANCE hInst)
         RegDeleteKey(HKEY_CLASSES_ROOT, "W16Merged");
     }
 
+    /* WinExec of a file that is no program: Windows' error 11 (and WIN16
+     * says why on standard error and the serial port, as setup programs
+     * that only start the next one say nothing). */
+    {
+        static char junk[] = "this is not a program";
+        OFSTRUCT bad;
+        HFILE f = _lcreat("C:\\W16BAD.EXE", 0);
+        _lwrite(f, junk, sizeof junk);
+        _lclose(f);
+        check(WinExec("C:\\W16BAD.EXE", SW_SHOWNORMAL) == 11, "WinExec of a file that is not a program: 11");
+        OpenFile("C:\\W16BAD.EXE", &bad, OF_DELETE);
+    }
+
     /* What Windows Setup writes: WIN.INI's [intl], SYSTEM.INI's code
      * page; SHARE is loaded (INT 2Fh AX=1000h). */
     check(GetProfileInt("intl", "iCountry", 0) != 0, "WIN.INI [intl] iCountry from the country settings");
@@ -1926,6 +1950,19 @@ static void installer_tests(HINSTANCE hInst)
     check(lstrlen(buf) == 3, "WIN.INI [intl] sLanguage");
     check(GetPrivateProfileInt("boot.description", "codepage", 0, "SYSTEM.INI") != 0, "SYSTEM.INI [boot.description] codepage");
     check(share_state() == 0xff, "INT 2Fh AX=1000h: SHARE is loaded");
+    check(int21_keeps_ebx() == 0x1234, "INT 21h keeps the upper half of a 32-bit register");
+
+    /* A huge block's selectors reach its end, as on Windows (Borland's
+     * Quantum decompressor addresses its 256 KB window with 32-bit
+     * offsets from the first). */
+    {
+        HGLOBAL g = GlobalAlloc(GMEM_MOVEABLE, 0x40000L);
+        void FAR *p = GlobalLock(g);
+        UINT sel = p ? SELECTOROF(p) : 0;
+        check(sel && GetSelectorLimit(sel) == 0x3ffffL && GetSelectorLimit(sel + 8) == 0x2ffffL, "GlobalAlloc 256 KB: the first selector reaches the whole block");
+        GlobalUnlock(g);
+        GlobalFree(g);
+    }
 
     /* Program Manager's DDE, as setup programs use it (WIN16's stand-in
      * when no Program Manager runs). */

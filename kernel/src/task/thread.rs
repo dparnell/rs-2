@@ -95,6 +95,10 @@ pub struct Thread {
     pub tlm_page: AtomicU64,
     /// DosEnterMustComplete nesting: signals wait while it is non-zero.
     pub must_complete: AtomicU32,
+    /// The upper halves of EAX..EBP and ESP of each interrupt or fault
+    /// reflected to the Win16 handler (api/win16.rs), innermost last: its
+    /// registers are 16-bit and 386 code keeps 32-bit values in them.
+    pub win16_hi: crate::sync::SpinLock<alloc::vec::Vec<[u16; 8]>>,
     /// Termination unwind (XCPT_[ASYNC_]PROCESS_TERMINATE to the exception
     /// handlers before the thread dies): 0 not started, 1 running, 2 done.
     pub exit_unwind: AtomicU8,
@@ -153,6 +157,7 @@ impl Thread {
             owned_stack: AtomicU32::new(0),
             tlm_page: AtomicU64::new(0),
             must_complete: AtomicU32::new(0),
+            win16_hi: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
             exit_unwind: AtomicU8::new(0),
             sync_exit: AtomicBool::new(false),
         }

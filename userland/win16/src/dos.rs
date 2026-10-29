@@ -62,12 +62,17 @@ pub fn interrupt(p: *mut u16) {
             r[DX] = ticks as u16;
             r[AX] &= 0xff00;
         }
-        // A protection fault: handled when it is fixed (the number 0).
+        // A protection fault: handled when it is fixed (the number 0);
+        // otherwise, as for the other faults, Windows' "Application
+        // Error" and the program ends.
         0x10d => {
             if crate::toolhelp::iret_trap(&mut r) || segment_load(&mut r) {
                 r[INTNO] = 0;
+            } else {
+                kernel::application_error(&r);
             }
         }
+        0x100 | 0x106 | 0x10c | 0x10e => kernel::application_error(&r),
         n => {
             trace(format_args!("WIN16: INT {n:02X}h AX={:04X} at {:04X}:{:04X} not supported", r[AX], r[CS], r[IP].wrapping_sub(2)));
             r[FLAGS] |= CF;

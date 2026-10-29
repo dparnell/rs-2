@@ -150,6 +150,15 @@ pub unsafe fn cstr<'a>(p: *const u8) -> &'a [u8] {
     unsafe { core::slice::from_raw_parts(p, n) }
 }
 
+/// A line on standard error (the command prompt a program was started
+/// from; nothing when there is none).
+pub fn stderr_line(text: &str) {
+    let mut b = text.as_bytes().to_vec();
+    b.extend_from_slice(b"\r\n");
+    let mut n = 0;
+    unsafe { os2::DosWrite(2, b.as_ptr(), b.len() as u32, &mut n) };
+}
+
 /// A string argument (far pointer) as bytes; a resource ID (selector 0)
 /// as None.
 pub fn far_str<'a>(far: u32) -> Option<&'a [u8]> {

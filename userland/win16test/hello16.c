@@ -1,7 +1,9 @@
 /* HELLO16: a classic Windows 3.x hello world, the first test of rs2's
  * native Win16 layer (docs/WIN16.md). A window class, a WM_PAINT that
- * draws text, a MessageBox on a click. Built with Open Watcom's Win16
- * target (build.sh). */
+ * draws text, a MessageBox on a click. `HELLO16 GPF` writes to its own
+ * code segment first: a General Protection Fault (PMXTEST checks WIN16's
+ * "Application Error" for it). Built with Open Watcom's Win16 target
+ * (build.sh). */
 
 #include <windows.h>
 
@@ -39,6 +41,8 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     HWND hwnd;
     MSG msg;
 
+    if (cmd[0] == 'G' && cmd[1] == 'P' && cmd[2] == 'F')
+        *(char FAR *)HelloWndProc = 0;
     if (!hPrev) {
         wc.style = CS_HREDRAW | CS_VREDRAW;
         wc.lpfnWndProc = HelloWndProc;
