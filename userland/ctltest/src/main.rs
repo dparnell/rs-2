@@ -139,6 +139,12 @@ fn noted(id: u32, code: u32) -> bool {
 extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     if msg == 0x0030 {
         notes().push(mp1);
+        // Entry field 113 overflowing: make room (EM_SETTEXTLIMIT) and
+        // say so, as VisualAge Smalltalk's text widgets do.
+        if mp1 == mp(113, 0x0020) {
+            send(mp2, 0x0143, 64, 0);
+            return 1;
+        }
         return 0;
     }
     unsafe { WinDefWindowProc(h, msg, mp1, mp2) }
@@ -297,6 +303,14 @@ fn entry_combo_checks(hab: u32, client: u32) {
     send(e, 0x0142, mp(10, 10), 0);
     send(e, 0x0147, 0, 0); // EM_PASTE
     check("EM_PASTE", text(e) == b"entry textentry");
+    unsafe { WinDestroyWindow(e) };
+    // At the text limit (32 without ENTRYFDATA) EN_OVERFLOW goes to the
+    // owner; when it makes room the character goes in.
+    let e = create(client, 6, b"0123456789012345678901234567890", 0, (0, 0, 300, 20), 113, null());
+    send(e, 0x0142, mp(31, 31), 0); // EM_SETSEL at the end
+    send(e, 0x007a, 0x0001 | 1 << 16 | 0x20 << 24, b'd' as u32); // WM_CHAR 'd'
+    send(e, 0x007a, 0x0001 | 1 << 16 | 0x20 << 24, b'd' as u32);
+    check("EN_OVERFLOW handled by the owner: the character goes in", noted(113, 0x20) && text(e) == b"0123456789012345678901234567890dd");
     unsafe { WinDestroyWindow(e) };
     // CBS_DROPDOWN.
     let c = create(client, 2, b"", 0x0002, (0, 0, 150, 120), 111, null());

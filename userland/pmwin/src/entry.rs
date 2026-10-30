@@ -143,11 +143,17 @@ fn replace(h: u32, t: &[u8]) -> bool {
     if !e.insert && a == b && !t.is_empty() {
         b = (a + t.len()).min(text.len());
     }
-    if text.len() - (b - a) + t.len() > e.limit {
-        ctl::notify(h, EN_OVERFLOW);
-        crate::misc::WinAlarm(1, 0);
-        return false;
+    let need = text.len() - (b - a) + t.len();
+    if need > e.limit {
+        // The owner may make room (raise the limit) and return TRUE:
+        // then the text goes in, as PM's entry field retries.
+        let handled = ctl::notify(h, EN_OVERFLOW) != 0;
+        if !handled || data(h).is_none_or(|e| need > e.limit) {
+            crate::misc::WinAlarm(1, 0);
+            return false;
+        }
     }
+    let Some(e) = data(h) else { return false };
     text.splice(a..b, t.iter().copied());
     (e.cursor, e.anchor, e.changed) = (a + t.len(), a + t.len(), true);
     if let Some(w) = st().desk.get_mut(h) {
