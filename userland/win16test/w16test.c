@@ -1123,6 +1123,29 @@ static void pump(int *n, int was)
             DispatchMessage(&msg);
 }
 
+/* Until the PM server's ACK of one message: its item's name, or an
+ * execute's commands (h). Another WM_DDE_ACK that comes first is not
+ * this message's. How many ACKs came, 0 if its did not. */
+static int pump_ack(const char *item, HGLOBAL h)
+{
+    DWORD start = GetTickCount();
+    MSG msg;
+    char name[16];
+    int n = pm_acks, got = 0;
+
+    while (GetTickCount() - start < 5000) {
+        if (pm_acks != n) {
+            n = pm_acks;
+            got++;
+            if (h ? pm_hi == h : GlobalGetAtomName((ATOM)pm_hi, name, sizeof name) && lstrcmpi(name, item) == 0)
+                return got;
+        }
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            DispatchMessage(&msg);
+    }
+    return 0;
+}
+
 static void raw_dde_tests(HWND hwnd)
 {
     /* WM_DDE_INITIATE broadcast reaches the task's own windows. */
@@ -1160,18 +1183,15 @@ static void raw_dde_tests(HWND hwnd)
     p[1] = CF_TEXT;
     _fmemcpy(p + 2, "12345", 6);
     GlobalUnlock(h);
-    n = pm_acks;
     PostMessage(pm_server, WM_DDE_POKE, (WPARAM)hwnd, MAKELONG(h, GlobalAddAtom("Value")));
-    pump(&pm_acks, n);
-    check(pm_acks == n + 1 && (pm_status & 0x8000), "WM_DDE_POKE to the PM server: a positive WM_DDE_ACK");
+    check(pump_ack("Value", 0) && (pm_status & 0x8000), "WM_DDE_POKE to the PM server: a positive WM_DDE_ACK");
     h = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, 7);
     lstrcpy(GlobalLock(h), "[quit]");
     GlobalUnlock(h);
-    n = pm_acks;
     PostMessage(pm_server, WM_DDE_EXECUTE, (WPARAM)hwnd, MAKELONG(0, h));
-    pump(&pm_acks, n);
-    wsprintf(line, "WM_DDE_EXECUTE to the PM server: ACK with the commands back (%d %04x %04x %04x)", pm_acks - n, pm_status, pm_hi, h);
-    check(pm_acks == n + 1 && (pm_status & 0x8000) && pm_hi == h, line);
+    n = pump_ack(NULL, h);
+    wsprintf(line, "WM_DDE_EXECUTE to the PM server: ACK with the commands back (%d %04x %04x %04x)", n, pm_status, pm_hi, h);
+    check(n && (pm_status & 0x8000) && pm_hi == h, line);
     GlobalFree(h);
     n = pm_terms;
     PostMessage(pm_server, WM_DDE_TERMINATE, (WPARAM)hwnd, 0);
@@ -2081,6 +2101,19 @@ static void nomove_tests(HINSTANCE hInst)
  * trace: the DLL is not loaded here (Delphi refuses to start a second
  * time when GetModuleHandle finds COMPLIB.DCL), and loading it runs its
  * LibMain in this process. */
+/* A task of this module is running (TaskFirst/TaskNext). */
+static BOOL task_running(const char *module)
+{
+    TASKENTRY te;
+    BOOL ok;
+
+    te.dwSize = sizeof te;
+    for (ok = TaskFirst(&te); ok; ok = TaskNext(&te))
+        if (lstrcmp(te.szModule, module) == 0)
+            return TRUE;
+    return FALSE;
+}
+
 static void dll_tests(void)
 {
     char buf[8];
@@ -2091,19 +2124,22 @@ static void dll_tests(void)
 
     WritePrivateProfileString("run", "value", "", "W16DLL.INI");
     check(WinExec("C:\\RS2\\HELLO16.EXE DLL", SW_SHOWMINNOACTIVE) > 32, "WinExec(HELLO16 DLL): it loads W16DLL and ends");
+    /* Its whole value: the file may be read as it is being written. */
     t0 = GetTickCount();
     buf[0] = 0;
-    while (buf[0] == 0 && GetTickCount() - t0 < 10000) {
+    while (lstrcmp(buf, "42") != 0 && lstrcmp(buf, "0") != 0 && GetTickCount() - t0 < 30000) {
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
             DispatchMessage(&msg);
         GetPrivateProfileString("run", "value", "", buf, sizeof buf, "W16DLL.INI");
     }
     check(lstrcmp(buf, "42") == 0, "the other program's W16DLL ran its LibMain");
-    /* It ends right after writing. */
+    /* It ends right after writing: wait until it has (no time is long
+     * enough on a busy machine). */
     t0 = GetTickCount();
-    while (GetTickCount() - t0 < 1500)
+    while (task_running("HELLO16") && GetTickCount() - t0 < 30000)
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
             DispatchMessage(&msg);
+    check(!task_running("HELLO16"), "HELLO16 ended (TaskFirst/TaskNext no longer list it)");
     check(GetModuleHandle("W16DLL") == 0, "a DLL of a program that ended is not loaded here (GetModuleHandle)");
     d = LoadLibrary("W16DLL.DLL");
     f = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(void))GetProcAddress(d, "W16DLLVALUE") : NULL;
