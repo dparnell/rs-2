@@ -1800,6 +1800,14 @@ static STD_FRAME_PROC: core::sync::atomic::AtomicUsize = core::sync::atomic::Ato
 extern "C" fn std_frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     let old = STD_FRAME_PROC.load(core::sync::atomic::Ordering::Relaxed);
     let old: WndProc = unsafe { core::mem::transmute(old) };
+    // A program's own system menu items (GetSystemMenu): WM_SYSCOMMAND
+    // with their IDs. PM's own (0x8000 and up) the frame carries out.
+    if msg == WM_SYSCOMMAND && mp1 & 0xffff < 0x8000 {
+        if let Some(h) = by_frame(pmh).filter(|w| w.created).map(|w| w.hwnd) {
+            let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
+            return send_inflight(h, W_SYSCOMMAND, mp1 as u16, 0, q);
+        }
+    }
     let r = old(pmh, msg, mp1, mp2);
     if msg == WM_ACTIVATE {
         if let Some(h) = by_frame(pmh).filter(|w| w.created && w.frame != w.client).map(|w| w.hwnd) {

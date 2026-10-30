@@ -39,6 +39,9 @@ const MIS_SEPARATOR: u16 = 0x0004;
 const MIS_SUBMENU: u16 = 0x0010;
 const MIS_BREAKSEPARATOR: u16 = 0x0800;
 const MIS_BREAK: u16 = 0x0400;
+const MIS_SYSCOMMAND: u16 = 0x0040;
+const FID_SYSMENU: u32 = 0x8002;
+const SC_SYSMENU: u16 = 0x8007;
 const MIA_CHECKED: u16 = 0x2000;
 const MIA_DISABLED: u16 = 0x4000;
 const MS_ACTIONBAR: u32 = 0x0001;
@@ -78,9 +81,11 @@ struct Menus {
     /// IDs of pop-up items (PM wants one for every item).
     next_popup_id: u16,
     accels: Vec<Vec<(u8, u16, u16)>>,
+    /// System menus (PM menu windows) GetSystemMenu gave out.
+    system: Vec<u32>,
 }
 
-static MENUS: Global<Menus> = Global::new(Menus { menus: Vec::new(), next: 0x6004, next_popup_id: 0xf800, accels: Vec::new() });
+static MENUS: Global<Menus> = Global::new(Menus { menus: Vec::new(), next: 0x6004, next_popup_id: 0xf800, accels: Vec::new(), system: Vec::new() });
 
 fn m() -> &'static mut Menus {
     MENUS.get()
@@ -220,8 +225,27 @@ pub fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
     if flags & MF_CHECKED != 0 {
         mi.attr |= MIA_CHECKED;
     }
+    // A program's items in a system menu send WM_SYSCOMMAND.
+    if m().system.contains(&pm) {
+        mi.style |= MIS_SYSCOMMAND;
+    }
     let t = pm_text(text);
     send(pm, MM_INSERTITEM, &mi as *const MenuItem as u32, t.as_ptr() as u32) != MIT_NONE
+}
+
+/// A window's system menu (the pop-up of its frame's FID_SYSMENU).
+fn system_menu(h: u16) -> u16 {
+    let Some(f) = wnd(user::top_level(h)).filter(|w| w.framed).map(|w| w.frame) else { return 0 };
+    let sm = unsafe { WinWindowFromID(f, FID_SYSMENU) };
+    let Some(mi) = query(sm, SC_SYSMENU) else { return 0 };
+    let sub = mi.sub;
+    if sub == 0 {
+        return 0;
+    }
+    if !m().system.contains(&sub) {
+        m().system.push(sub);
+    }
+    handle_of(sub)
 }
 
 /// The menu or submenu that has the item `id` itself.
@@ -551,11 +575,15 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             let (h, id, fl) = (a.w(), a.w(), a.w());
             set_attr(h, id, fl, MIA_DISABLED, fl & (MF_GRAYED | MF_DISABLED) != 0)
         }
-        // GetSystemMenu(hwnd, revert): not WIN16's.
+        // GetSystemMenu(hwnd, revert): the frame's system menu, which
+        // programs add their own items to (Resource Workshop gives up
+        // without it). Reverting is not supported: 0, as Windows returns.
         156 => {
-            a.w();
-            a.w();
-            0
+            let (h, revert) = (a.w(), a.w());
+            if revert != 0 {
+                return Some(0);
+            }
+            system_menu(h) as u32
         }
         // GetMenu(hwnd)
         157 => wnd(a.w()).map_or(0, |w| w.menu as u32),
