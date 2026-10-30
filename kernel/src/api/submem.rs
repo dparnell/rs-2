@@ -215,33 +215,139 @@ fn seg_base(c: &Ctx, sel: u32) -> u32 {
     c.far16_to_flat(sel << 16)
 }
 
-/// DosSubSet(sel, fFlags, cbSize): 1 = initialise, 0 = new (larger) size.
+// The 16-bit calls (OS/2 1.x) have a heap of their own kind, as IBM's
+// DOSCALL1 (16-bit code there): at the start of the segment an 8-byte
+// header (+0 offset of the first free block, 0 = none; +2 size of the
+// area after the header; +4 a RAM semaphore), then the area; free blocks
+// are `+0 next free block, +2 size`, in address order. Sizes are rounded
+// up to multiples of 4.
+
+/// Size rounded up to 4 bytes (0 for 0 and for sizes that wrap).
+fn round4(cb: u32) -> u32 {
+    (cb + 3) & 0xfffc
+}
+
+/// DosSubSet(sel, fFlags, usSize): 1 = initialise, 0 = new (larger)
+/// size; a size of 0 is 64 KB, at least 12 bytes.
 pub fn dos16_sub_set(c: &mut Ctx) -> u32 {
     let (sel, flags, cb) = (c.arg(0), c.arg(1), c.arg(2));
-    let cb = if cb == 0 { 0x10000 } else { cb };
+    if flags & 0xfffe != 0 {
+        return err::DOSSUB_BADFLAG;
+    }
+    let size = round4(cb);
+    if size != 0 && size < 12 {
+        return err::DOSSUB_BADSIZE;
+    }
+    let size = (size as u16).wrapping_sub(8);
     let base = seg_base(c, sel);
     if base == 0 || base == 0xffff_ffff {
         return err::DOSSUB_BADSELECTOR;
     }
-    set_mem(c, base, if flags & 1 != 0 { DOSSUB_INIT } else { DOSSUB_GROW }, cb)
+    let rd = |o: u16| c.read_u16(base + o as u32).unwrap_or(0);
+    let wr = |o: u16, v: u16| c.write_u16(base + o as u32, v);
+    if flags == 1 {
+        for (o, v) in [(0, 8), (2, size), (4, 0), (6, 0), (8, 0), (10, size)] {
+            if !wr(o, v) {
+                return err::INVALID_ADDRESS;
+            }
+        }
+        return 0;
+    }
+    let old = rd(2);
+    if size <= old {
+        return if size == old { 0 } else { err::DOSSUB_SHRINK };
+    }
+    // The last free block grows if it ends where the area did; else the
+    // new room is a free block of its own.
+    let mut last = 0;
+    while rd(last) != 0 {
+        last = rd(last);
+    }
+    wr(2, size);
+    let (more, end) = (size - old, old + 8);
+    if last != 0 && last + rd(last + 2) == end {
+        wr(last + 2, rd(last + 2) + more);
+    } else {
+        wr(end, 0);
+        wr(end + 2, more);
+        wr(last, end);
+    }
+    0
 }
 
-/// DosSubAlloc(sel, pusOffset, cbSize)
+/// DosSubAlloc(sel, pusOffset, usSize): the first free block large enough.
 pub fn dos16_sub_alloc(c: &mut Ctx) -> u32 {
     let (sel, poff, cb) = (c.arg(0), c.ptr(1), c.arg(2));
     let base = seg_base(c, sel);
-    match alloc(c, base, if cb == 0 { 0x10000 } else { cb }) {
-        Ok(a) => {
-            c.write_u16(poff, (a - base) as u16);
-            0
-        }
-        Err(e) => e,
+    let rd = |o: u16| c.read_u16(base + o as u32).unwrap_or(0);
+    let wr = |o: u16, v: u16| c.write_u16(base + o as u32, v);
+    c.write_u16(poff, 0);
+    let size = round4(cb) as u16;
+    if size == 0 {
+        return err::DOSSUB_BADSIZE;
     }
+    let (mut prev, mut cur, mut largest) = (0u16, rd(0), 0u16);
+    while cur != 0 {
+        let have = rd(cur + 2);
+        if size <= have {
+            if size == have {
+                wr(prev, rd(cur));
+            } else {
+                let rest = cur + size;
+                wr(prev, rest);
+                wr(rest, rd(cur));
+                wr(rest + 2, have - size);
+            }
+            c.write_u16(poff, cur);
+            return 0;
+        }
+        largest = largest.max(have);
+        prev = cur;
+        cur = rd(cur);
+    }
+    // Not enough: the largest free block's size goes back.
+    c.write_u16(poff, largest);
+    err::DOSSUB_NOMEM
 }
 
-/// DosSubFree(sel, usOffset, cbSize)
+/// DosSubFree(sel, usOffset, usSize): back into the free list, merged
+/// with its neighbours.
 pub fn dos16_sub_free(c: &mut Ctx) -> u32 {
-    let (sel, off, cb) = (c.arg(0), c.arg(1), c.arg(2));
+    let (sel, off, cb) = (c.arg(0), c.arg(1) as u16, c.arg(2));
     let base = seg_base(c, sel);
-    free(c, base, base + off, if cb == 0 { 0x10000 } else { cb })
+    let rd = |o: u16| c.read_u16(base + o as u32).unwrap_or(0);
+    let wr = |o: u16, v: u16| c.write_u16(base + o as u32, v);
+    let size = round4(cb) as u16;
+    if size == 0 {
+        return err::DOSSUB_BADSIZE;
+    }
+    // The free blocks before and after it.
+    let (mut prev, mut next) = (0u16, rd(0));
+    while next != 0 && next < off {
+        prev = next;
+        next = rd(next);
+    }
+    if off == 0 || next == off {
+        return err::DOSSUB_OVERLAP;
+    }
+    let prev_end = if prev == 0 { 0 } else { prev + rd(prev + 2) };
+    let end = off.wrapping_add(size);
+    let fits = if next == 0 { end.wrapping_sub(1) <= rd(2).wrapping_add(7) } else { end <= next };
+    if off < prev_end || !fits {
+        return err::DOSSUB_OVERLAP;
+    }
+    let mut block = prev;
+    if prev != 0 && prev_end == off {
+        wr(prev + 2, rd(prev + 2) + size);
+    } else {
+        wr(prev, off);
+        wr(off, next);
+        wr(off + 2, size);
+        block = off;
+    }
+    if next != 0 && block + rd(block + 2) == next {
+        wr(block, rd(next));
+        wr(block + 2, rd(block + 2) + rd(next + 2));
+    }
+    0
 }

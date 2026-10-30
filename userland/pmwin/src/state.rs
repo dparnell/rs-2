@@ -154,6 +154,8 @@ pub struct State {
     pub focus: u32,
     pub active: u32,
     pub capture: u32,
+    /// WinSetSysModalWindow's window (recorded; input is not limited to it).
+    pub sysmodal: u32,
     pub drag: Option<Drag>,
     pub pointer: Point,
     pub buttons: u8,
@@ -284,6 +286,7 @@ pub fn init(surface: Surface) {
         focus: 0,
         active: 0,
         capture: 0,
+        sysmodal: 0,
         drag: None,
         pointer: Point::new(surface.width / 2, surface.height / 2),
         buttons: 0,

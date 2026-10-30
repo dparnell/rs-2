@@ -98,9 +98,18 @@ pub extern "C" fn static_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_CREATE => {
+            // Frames draw only their outline: their parent paints the
+            // inside (it does not clip them, as IBM's parent-clipped
+            // statics; a dialog's SS_FGNDFRAME around its fields shows
+            // the dialog's background there).
+            let kind = ctl::style(h) & 0x7f;
+            if matches!(kind, SS_FGNDFRAME | SS_HALFTONEFRAME | SS_BKGNDFRAME) {
+                if let Some(w) = crate::state::st().desk.get_mut(h) {
+                    w.style |= pmwin::ws::TRANSPARENT;
+                }
+            }
             // Icon statics show the icon named by their text (a resource
             // id, or an SPTR_* for SS_SYSICON) and take its size.
-            let kind = ctl::style(h) & 0x7f;
             if matches!(kind, SS_ICON | SS_SYSICON) {
                 if let Some(id) = crate::bitmap::static_id(h) {
                     let hp = if kind == SS_SYSICON { crate::pointer::system(id) } else { crate::pointer::WinLoadPointer(1, crate::dlg::RES_HMOD.load(core::sync::atomic::Ordering::Relaxed), id) };

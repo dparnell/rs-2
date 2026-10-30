@@ -59,6 +59,7 @@ GpiQueryArcParams @422
 GpiQueryAttrMode @423
 GpiQueryBackColor @424
 GpiQueryBackMix @425
+GpiQueryBitmapDimension @426
 GpiQueryBitmapHandle @427
 GpiQueryBoundaryData @428
 GpiQueryCharAngle @429
@@ -82,6 +83,7 @@ GpiQueryDrawControl @446
 GpiQueryDrawingMode @447
 GpiQueryFontMetrics @453
 GpiQueryInitialSegmentAttrs @455
+GpiQueryKerningPairs @456
 GpiQueryLineEnd @457
 GpiQueryLineJoin @458
 GpiQueryLineType @459
@@ -171,6 +173,7 @@ GpiUnloadFonts @555
 GpiWCBitBlt @557
 GpiPolyLineDisjoint @558
 GpiPathToRegion @559
+GpiFloodFill @560
 GpiOutlinePath @563
 GpiTranslate @564
 GpiScale @565
@@ -181,6 +184,7 @@ GpiSetDefArcParams @570
 GpiSetDefViewingLimits @572
 GpiQueryBitmapParameters @573
 GpiQueryLogicalFont @574
+GpiQueryFaceString @575
 GpiDeletePalette @577
 GpiSelectPalette @578
 GpiQueryPalette @579
@@ -225,6 +229,7 @@ GpiLoadPublicFonts @622
 GpiUnloadPublicFonts @623
 GpiQueryTextAlignment @648
 GpiSetTextAlignment @649
+GpiPolygons @650
 GpiCreateRoundRectRegion @661
 GpiCreateEllipticRegion @662
 GpiAbortPath @722

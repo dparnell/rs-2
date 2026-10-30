@@ -52,6 +52,19 @@ fn find(title: &[u8]) -> Option<(u32, Vec<u8>)> {
     found
 }
 
+/// The box's text lines (`find`'s `|`-separated control texts, in either
+/// order: the message box breaks long lines) joined by blanks contain
+/// `what`.
+fn joined_contains(body: &[u8], what: &[u8]) -> bool {
+    let mut parts: Vec<&[u8]> = body.split(|&c| c == b'|').filter(|p| !p.is_empty()).collect();
+    let join = |ps: &[&[u8]]| ps.join(&b' ');
+    if contains(&join(&parts), what) {
+        return true;
+    }
+    parts.reverse();
+    contains(&join(&parts), what)
+}
+
 pub fn win16_checks(hab: u32) {
     let mut info = [0u8; 64];
     if unsafe { DosQueryPathInfo(b"C:\\RS2\\HELLO16.EXE\0".as_ptr(), 1, info.as_mut_ptr(), 64) } != 0 {
@@ -86,7 +99,7 @@ pub fn win16_checks(hab: u32) {
     let (h, body) = boxed.unwrap_or_default();
     check(
         "WIN16's Application Error for a General Protection Fault",
-        h != 0 && contains(&body, b"HELLO16 caused a General Protection Fault in module HELLO16.EXE at 0001:"),
+        h != 0 && joined_contains(&body, b"HELLO16 caused a General Protection Fault in module HELLO16.EXE at 0001:"),
     );
     if h == 0 {
         return;

@@ -104,6 +104,8 @@ const DEPTHS: usize = 12;
 const STACK: u32 = 64 * 1024;
 static STACKS: [[AtomicU32; DEPTHS]; SLOTS] = [const { [const { AtomicU32::new(0) }; DEPTHS] }; SLOTS];
 static DEPTH: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+/// The 16-bit SS:SP of the caller at each nesting depth.
+static CALLER: [[AtomicU32; DEPTHS]; SLOTS] = [const { [const { AtomicU32::new(0) }; DEPTHS] }; SLOTS];
 
 fn slot() -> usize {
     let tid: u32;
@@ -113,11 +115,26 @@ fn slot() -> usize {
     tid as usize % SLOTS
 }
 
-/// Entering from 16-bit code: the top of the calling thread's 32-bit
-/// stack for this nesting depth (allocated on first use).
-pub extern "C" fn thunk16_enter() -> u32 {
+/// Entering from 16-bit code at SS:SP: the top of the calling thread's
+/// 32-bit stack for this nesting depth (allocated on first use). A call
+/// made from 16-bit code nested in another (a window procedure PMWIN
+/// calls) comes from lower on the same 16-bit stack; one from as high or
+/// higher means the frames recorded there were left without returning
+/// (WinThrow out of a window procedure), and their depths are free again.
+pub extern "C" fn thunk16_enter(ss: u32, sp: u32) -> u32 {
     let s = slot();
-    let d = (DEPTH[s].fetch_add(1, Ordering::Relaxed) as usize).min(DEPTHS - 1);
+    let at = ss << 16 | sp & 0xffff;
+    let mut d = DEPTH[s].load(Ordering::Relaxed) as usize;
+    while d > 0 && d <= DEPTHS {
+        let c = CALLER[s][d - 1].load(Ordering::Relaxed);
+        if c >> 16 != ss || c & 0xffff > sp & 0xffff {
+            break;
+        }
+        d -= 1;
+    }
+    DEPTH[s].store(d as u32 + 1, Ordering::Relaxed);
+    let d = d.min(DEPTHS - 1);
+    CALLER[s][d].store(at, Ordering::Relaxed);
     let st = &STACKS[s][d];
     let mut base = st.load(Ordering::Acquire);
     if base == 0 {
@@ -397,6 +414,9 @@ macro_rules! common16 {
             "push ebx\n",
             "mov ebp, esp\n",
             "and esp, -16\n",
+            "sub esp, 8\n",
+            "push esi\n",
+            "push edi\n",
             "call {enter}\n",
             "mov esp, eax\n",
             "sub esp, 8\n",

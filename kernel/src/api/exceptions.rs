@@ -293,6 +293,16 @@ pub fn handler_returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     if prev == xcpt::END_OF_CHAIN || prev == 0 {
         // Unhandled: restore the faulting state for the report.
         load_context(&mut sp, d.context, f);
+        // A guard page nobody took: the default (the stack grows) and on.
+        if d.code == xcpt::GUARD_PAGE_VIOLATION {
+            let (addr, write) = (rd(&mut sp, d.report + 24).unwrap_or(0), rd(&mut sp, d.report + 20).unwrap_or(0) == 2);
+            drop(sp);
+            if crate::task::guard_default(p, addr, write) {
+                return;
+            }
+            default_action(f, p, t, xcpt::ACCESS_VIOLATION);
+            return;
+        }
         drop(sp);
         default_action(f, p, t, d.code);
         return;

@@ -91,15 +91,25 @@ pub fn load(
         sizes.push(size.max(1));
     }
 
-    // Addresses: one 64 KB tile per segment.
+    // Addresses: one 64 KB tile per segment. A resource larger than
+    // 64 KB is in consecutive segments (resources with the same type and
+    // name): a huge segment, in consecutive tiles of a program.
+    let runs = if windows { alloc::vec![1; segs.len()] } else { huge_runs(&data, header, &m, segs.len()) };
     let mut bases = Vec::with_capacity(segs.len());
-    for &size in &sizes {
+    let mut next: Option<u32> = None;
+    for (i, &size) in sizes.iter().enumerate() {
         let base = if dll {
             vm::reserve_shared(size, None).ok_or(err::NOT_ENOUGH_MEMORY)?
         } else {
             let sp = space.as_deref_mut().unwrap();
             // Reserve as we go so later segments get distinct tiles.
-            let b = sp.find_private(size).ok_or(err::NOT_ENOUGH_MEMORY)?;
+            let b = match next.take() {
+                Some(b) => b,
+                None => sp.find_private(size.max(runs[i] as u32 * 0x10000)).ok_or(err::NOT_ENOUGH_MEMORY)?,
+            };
+            if runs[i] > 1 {
+                next = Some(b + 0x10000);
+            }
             sp.alloc(size, pag::READ | pag::WRITE | pag::COMMIT, SegKind::Data, Some(b))
                 .map_err(|_| err::NOT_ENOUGH_MEMORY)?;
             b
@@ -394,3 +404,22 @@ fn apply(img: &mut [u8], at: usize, kind: SourceKind, t: &Target, additive: bool
     }
     Ok(())
 }
+
+/// For each segment of an OS/2 NE module, how many segments (itself
+/// included) the huge resource it is part of has from it on: resources
+/// are the last segments, and a resource larger than 64 KB takes several
+/// table entries of the same type and name in a row.
+fn huge_runs(data: &[u8], header: usize, m: &ne::Module, nsegs: usize) -> Vec<usize> {
+    let mut runs = alloc::vec![1; nsegs];
+    let n = m.header.resource_count as usize;
+    let table = header + m.header.resource_table as usize;
+    let Some(first) = nsegs.checked_sub(n) else { return runs };
+    let entry = |i: usize| data.get(table + 4 * i..table + 4 * i + 4).map(|b| [b[0], b[1], b[2], b[3]]);
+    for i in (0..n.saturating_sub(1)).rev() {
+        if entry(i).is_some() && entry(i) == entry(i + 1) {
+            runs[first + i] = runs[first + i + 1] + 1;
+        }
+    }
+    runs
+}
+

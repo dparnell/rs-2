@@ -91,6 +91,7 @@ forward! {
     GpiQueryAttrMode = 4423;
     GpiQueryBackColor = 4424;
     GpiQueryBackMix = 4425;
+    GpiQueryBitmapDimension = 4426;
     GpiQueryBitmapHandle = 4427;
     GpiQueryBoundaryData = 4428;
     GpiQueryCharAngle = 4429;
@@ -114,6 +115,7 @@ forward! {
     GpiQueryDrawingMode = 4447;
     GpiQueryFontMetrics = 4453;
     GpiQueryInitialSegmentAttrs = 4455;
+    GpiQueryKerningPairs = 4456;
     GpiQueryLineEnd = 4457;
     GpiQueryLineJoin = 4458;
     GpiQueryLineType = 4459;
@@ -203,6 +205,7 @@ forward! {
     GpiWCBitBlt = 4557;
     GpiPolyLineDisjoint = 4558;
     GpiPathToRegion = 4559;
+    GpiFloodFill = 4560;
     GpiOutlinePath = 4563;
     GpiTranslate = 4564;
     GpiScale = 4565;
@@ -213,6 +216,7 @@ forward! {
     GpiSetDefViewingLimits = 4572;
     GpiQueryBitmapParameters = 4573;
     GpiQueryLogicalFont = 4574;
+    GpiQueryFaceString = 4575;
     GpiDeletePalette = 4577;
     GpiSelectPalette = 4578;
     GpiQueryPalette = 4579;
@@ -257,6 +261,7 @@ forward! {
     GpiUnloadPublicFonts = 4623;
     GpiQueryTextAlignment = 4648;
     GpiSetTextAlignment = 4649;
+    GpiPolygons = 4650;
     GpiCreateRoundRectRegion = 4661;
     GpiCreateEllipticRegion = 4662;
     GpiAbortPath = 4722;

@@ -115,13 +115,16 @@ pub fn user_exception(f: &mut TrapFrame) {
             match r {
                 Fault::Resolved => return,
                 Fault::Guard => {
-                    // Default guard page handling: grow the stack down.
-                    let mut sp = p.space.lock();
-                    let page = (addr as u32) & !(vm::PAGE - 1);
-                    if page >= vm::PAGE {
-                        let _ = sp.set_mem(page - vm::PAGE, vm::PAGE, vm::pag::COMMIT | vm::pag::GUARD);
+                    // The page is committed now. As on OS/2 the thread's
+                    // exception handlers see XCPT_GUARD_PAGE_VIOLATION
+                    // first (programs grow their heaps so: Borland's
+                    // TLINK); without one that takes it, the default
+                    // grows the stack down.
+                    let info = [if write { 2 } else { 1 }, addr as u32];
+                    if crate::api::exceptions::raise(f, &p, &t, crate::api::exceptions::xcpt::GUARD_PAGE_VIOLATION, 0, &info, f.rip as u32) {
+                        return;
                     }
-                    if sp.fault_in(addr as u32, write) == Fault::Resolved {
+                    if guard_default(&p, addr as u32, write) {
                         return;
                     }
                 }
@@ -136,6 +139,18 @@ pub fn user_exception(f: &mut TrapFrame) {
         return;
     }
     crate::api::exceptions::deliver(f, &p, &t);
+}
+
+/// The default action for a guard page fault at `addr` (already
+/// committed): the page below becomes the guard page (a stack growing
+/// down). True if the access can be retried.
+pub fn guard_default(p: &Arc<crate::task::process::Process>, addr: u32, write: bool) -> bool {
+    let mut sp = p.space.lock();
+    let page = addr & !(vm::PAGE - 1);
+    if page >= vm::PAGE {
+        let _ = sp.set_mem(page - vm::PAGE, vm::PAGE, vm::pag::COMMIT | vm::pag::GUARD);
+    }
+    sp.fault_in(addr, write) == Fault::Resolved
 }
 
 /// Resolve a page fault taken by the kernel while touching user memory.

@@ -1,5 +1,6 @@
 //! PMSHAPI.DLL: the profile calls (Prf*) on real INI files, the program
-//! list (PrfAddProgram & co., kept in the user profile) and the task
+//! list (PrfAddProgram & co., kept in the user profile and shown on the
+//! desktop) and the task
 //! position and title calls.
 //!
 //! Profiles are OS/2 binary INI files (format: crates/inifile), shared by
@@ -23,6 +24,7 @@
 extern crate alloc;
 extern crate os2;
 
+mod desktop;
 mod exports;
 mod prf;
 mod proglist;

@@ -633,6 +633,53 @@ pub extern "C" fn WinGetMsg(_hab: u32, pq: *mut QMsg, filter: u32, first: u32, l
     (m.msg != WM_QUIT) as u32
 }
 
+/// WinWaitMsg(hab, msgFirst, msgLast): waits until a message in the range
+/// is in the queue (it stays there).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWaitMsg(_hab: u32, first: u32, last: u32) -> u32 {
+    next_message(0, first, last, false, true).is_some() as u32
+}
+
+// The calls debuggers use on the queues of the program they debug (OS/2
+// 2.x's IPMD, Borland's Turbo Debugger; not in the Warp 4 Toolkit, IBM's
+// PMMERGE has them: QuerySendMsg, ReplyMsg, QueueFromID, ThreadAssocQueue).
+
+/// WinQueueFromID(hab, pid, tid): the message queue of that thread.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueueFromID(_hab: u32, pid: u32, tid: u32) -> u32 {
+    st().queues.iter().find(|(_, q)| q.pid == pid && q.tid == tid).map_or(0, |(&h, _)| h)
+}
+
+/// WinQuerySendMsg(hab, hmqSender, hmqReceiver, pqmsg): a message one
+/// queue's thread sent to another's that is waiting for its reply. rs2
+/// does not let another thread answer it: none.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQuerySendMsg(_hab: u32, _from: u32, _to: u32, _pq: *mut QMsg) -> u32 {
+    0
+}
+
+/// WinReplyMsg(hab, hmqSender, hmqReceiver, mresult): answer such a
+/// message for the receiver (see WinQuerySendMsg): FALSE.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinReplyMsg(_hab: u32, _from: u32, _to: u32, _result: u32) -> u32 {
+    0
+}
+
+/// WinThreadAssocQueue(hab, hmq): lets the calling thread act for another
+/// thread's queue (NULLHANDLE ends that). Accepted for an existing queue;
+/// the calling thread keeps using its own.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinThreadAssocQueue(_hab: u32, hmq: u32) -> u32 {
+    (hmq == 0 || st().queues.contains_key(&hmq)) as u32
+}
+
+/// WinLockInput(hmq, fLock): locks the system's input to the debugger
+/// (hmq must be NULLHANDLE). Accepted.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinLockInput(hmq: u32, _lock: u32) -> u32 {
+    (hmq == 0) as u32
+}
+
 /// WinPeekMsg(hab, pqmsg, hwndFilter, msgFirst, msgLast, fl): PM_REMOVE = 1.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinPeekMsg(_hab: u32, pq: *mut QMsg, filter: u32, first: u32, last: u32, fl: u32) -> u32 {

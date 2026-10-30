@@ -559,8 +559,21 @@ common thunk; rs2's are:
   copied back after the call. WM_INITDLG and WM_CONTROL parameters and
   application messages pass as they are.
 
+`WinCatch`/`WinThrow` (PMWIN 248/249) are 16-bit code in `win16.rs`, as
+IBM's: the CATCHBUF (16 bytes) holds the return address, BP, SP, SI, DI,
+DS and SS, and `WinThrow` of 0 returns 1. A throw out of a 16-bit window
+procedure that PMWIN called leaves thunk16's 32-bit frames behind;
+thunk16 records the 16-bit SS:SP of each nesting depth and forgets the
+depths a new call comes from as high or higher on the same stack. (A
+throw past PMWIN into 32-bit code that called 16-bit code, CTLTEST's
+case, cannot return there: only programs whose outermost code is
+16-bit throw that way.) The 16-bit program list calls (PMSHAPI 50-60)
+convert IBM's 16-bit PROGDETAILS (64 bytes: byte-sized PROGTYPE, a
+16-bit SWP) and PROGTITLE (byte-sized PROGTYPE) as PMMERGE's
+PDETAILS16TO32 does.
+
 **Not done.** The 16-bit heap (WinCreateHeap, WinAllocMem ...),
-WinCatch/WinThrow, DDE, WinCallMsgFilter, the 16-bit program list calls,
+DDE, WinCallMsgFilter,
 16-bit GPI calls whose structures differ (bitmap headers are passed as
 they are), posted messages carrying converted structures, the class
 "thunk procedures" (WinSetClassThunkProc). WIN16BUILDPTRHANDLE (PMWIN
@@ -694,7 +707,22 @@ mouse and keyboard. What PMWIN has:
   `WinSetParent`, `WinWaitEventSem`.
 - Threads and processes: see [Processes and input](#processes-and-input)
   (`template.exe` uses an object window on a second thread).
-  `WinMessageBox` is a modal dialog built from a template.
+  `WinMessageBox` is a modal dialog built from a template; lines longer
+  than 2/5 of the screen are broken at blanks (IBM's message box has a
+  text field of fixed width drawn with `DT_WORDBREAK`), up to 2/3 of the
+  screen high. `WinDestroyWindow` works only on the calling thread's
+  windows (PMERR_CALL_FROM_WRONG_THREAD, as IBM's checks the window's
+  queue). Dialogs made from templates clip their controls only if the
+  template has `WS_CLIPCHILDREN` (rs2's other frames always do): the
+  dialog paints under them, and frame statics (`SS_FGNDFRAME`,
+  `SS_HALFTONEFRAME`, `SS_BKGNDFRAME`) are `TRANSPARENT` (drawing only
+  their outline). `WinWaitMsg`, `WinGetClipPS` (clipping chosen by
+  `PSF_CLIPCHILDREN`), `WinSetSysModalWindow`/`WinQuerySysModalWindow`
+  (recorded only) and the calls debuggers use on the debuggee's queues
+  (`WinQueueFromID`; `WinQuerySendMsg` finds none and `WinReplyMsg`
+  fails; `WinThreadAssocQueue` and `WinLockInput` are accepted without
+  effect; PMWIN 990-995, not in the Warp 4 Toolkit) are there for
+  Borland's IDE and Turbo Debugger.
 - `HELPMGR.DLL` (see [The help manager](#the-help-manager-helpmgrdll-and-viewexe)), the
   file and font dialogs of `PMCTLS.DLL` (see [Standard
   dialogs](#standard-dialogs)), the clipboard and atom tables (see [The
@@ -1510,10 +1538,21 @@ of the same title; `PrfAddProgram` needs an existing group;
 its programs; `PrfQueryProgramHandle` matches the executable
 case-insensitively, a name without a path in any directory.
 
+**On the desktop.** As on OS/2 2.x and later, where installers written
+for OS/2 1.x make their groups with these calls (IBM's PMSHAPI posts
+each change to the shell), a change to the user profile's list shows in
+the Workplace Shell (`userland/pmshapi/src/desktop.rs`): a group is a
+folder on the desktop with the object ID `<PRF_GROUP_hhhhhhhh>` (its
+handle), a program a program object in its group's folder
+(`<PRF_PROG_hhhhhhhh>`: EXENAME, PARAMETERS, STARTUPDIR, ICONFILE,
+PROGTYPE from the details); changing a program makes its object again,
+removing a program or destroying a group deletes the objects. Groups and
+programs with `SHE_INVISIBLE` get none. PMSHAPI loads PMWP for this when
+first needed; without a running shell nothing happens. WPSTEST checks it.
+
 **Not done.** WinGetLastError codes (PMSHAPI does not call PMWIN), the
-`PL_ALTERED` broadcast after `PrfReset`, the 16-bit program list calls
-(`Prf16AddProgram` and the like; the 16-bit profile calls are there,
-see "16-bit PM programs"), `PrfQueryProgramCategory`, `WinStartApp`;
+`PL_ALTERED` broadcast after `PrfReset`, `PrfQueryProgramCategory` (the
+16-bit one returns PROG_DEFAULT), `WinStartApp`;
 the profile names in shared memory last while some process
 has PMSHAPI loaded (afterwards `USER_INI`/`SYSTEM_INI` apply again, so
 a `PrfReset` is forgotten); the program list is rs2's own layout, not

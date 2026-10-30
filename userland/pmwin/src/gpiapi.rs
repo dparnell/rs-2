@@ -1243,6 +1243,54 @@ pub extern "C" fn GpiEndArea(hps: u32) -> i32 {
     draw(hps, |e, s| ok(e.ps.end_area(s))).unwrap_or(GPI_ERROR)
 }
 
+/// GpiPolygons(hps, ulCount, paplgn, flOptions, flModel): polygons
+/// (POLYGON: ULONG ulPoints, PPOINTL aPointl), each closed, filled as one
+/// area (POLYGON_BOUNDARY 1, POLYGON_WINDING 2, POLYGON_EXCL 8: the area's
+/// BA_* options) or with POLYGON_NOFILL (0x10) only outlined.
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiPolygons(hps: u32, count: u32, polys: *const u32, opts: u32, _model: u32) -> i32 {
+    if polys.is_null() {
+        return GPI_ERROR;
+    }
+    let fill = opts & 0x10 == 0;
+    if fill && GpiBeginArea(hps, opts & 0xb) == 0 {
+        return GPI_ERROR;
+    }
+    for i in 0..count as usize {
+        let (n, p) = unsafe { (polys.add(2 * i).read_unaligned(), polys.add(2 * i + 1).read_unaligned() as *const PointL) };
+        let Some(pts) = points(p, n as i32) else { continue };
+        let Some(&first) = pts.first() else { continue };
+        let start = PointL { x: first.x, y: first.y };
+        GpiMove(hps, &start);
+        let mut ring = pts[1..].to_vec();
+        ring.push(first);
+        let ring: Vec<PointL> = ring.iter().map(|q| PointL { x: q.x, y: q.y }).collect();
+        GpiPolyLine(hps, ring.len() as i32, ring.as_ptr());
+    }
+    if fill { GpiEndArea(hps) } else { GPI_OK }
+}
+
+/// GpiFloodFill(hps, lOptions, lColor): not done (GPI_ERROR).
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiFloodFill(_hps: u32, _opts: i32, _color: i32) -> i32 {
+    GPI_ERROR
+}
+
+/// GpiQueryBitmapDimension(hbm, psizlBitmapDimension): the size in 0.1 mm
+/// set for the bitmap; rs2 keeps none (GpiSetBitmapDimension is not
+/// there): 0 by 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiQueryBitmapDimension(_hbm: u32, psize: *mut i32) -> u32 {
+    if psize.is_null() {
+        return 0;
+    }
+    unsafe {
+        psize.write_unaligned(0);
+        psize.add(1).write_unaligned(0);
+    }
+    1
+}
+
 /// GpiBeginPath(hps, lPath): only path 1 exists.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiBeginPath(hps: u32, id: i32) -> u32 {

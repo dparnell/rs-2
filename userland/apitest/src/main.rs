@@ -13,6 +13,7 @@ use os2::*;
 extern crate alloc;
 
 mod eas;
+mod t16;
 
 os2::entry!(main);
 
@@ -41,6 +42,7 @@ fn main(s: &Startup) -> u32 {
     files();
     eas::run();
     threads_and_sems();
+    t16::run();
     exceptions();
     pipes();
     named_pipes();
@@ -275,6 +277,8 @@ fn threads_and_sems() {
 }
 
 static mut FAULTS: u32 = 0;
+static mut GUARD_AT: u32 = 0;
+static mut GUARD_ACCESS: u32 = 0;
 
 unsafe extern "C" fn handler(
     rep: *mut ExceptionReportRecord,
@@ -297,6 +301,14 @@ unsafe extern "C" fn handler(
                 FAULTS += 10;
                 XCPT_CONTINUE_EXECUTION
             }
+            // A guard page: recorded (its address, the access), then the
+            // access is retried (the page is committed now).
+            0x8000_0001 => {
+                FAULTS += 100;
+                GUARD_AT = (*rep).info[1];
+                GUARD_ACCESS = (*rep).info[0];
+                XCPT_CONTINUE_EXECUTION
+            }
             _ => XCPT_CONTINUE_SEARCH,
         }
     }
@@ -313,6 +325,21 @@ fn exceptions() {
         r.num = 0x2000_0001;
         let rc = DosRaiseException(&mut r);
         check("DosRaiseException continued", rc == 0 && FAULTS == 11);
+        // A guard page (DosSetMem PAG_GUARD) raises XCPT_GUARD_PAGE_VIOLATION
+        // to the handlers on the first touch (the page is then plain
+        // committed memory); programs grow their heaps so (Borland's TLINK).
+        let mut p: *mut u8 = null_mut();
+        let ok = DosAllocMem(&mut p, 0x4000, PAG_READ | PAG_WRITE) == 0
+            && DosSetMem(p, 0x1000, 0x400 | PAG_COMMIT) == 0
+            && DosSetMem(p.add(0x1000), 0x1000, 0x400 | PAG_COMMIT | PAG_GUARD) == 0;
+        check("DosSetMem PAG_GUARD", ok);
+        if ok {
+            core::ptr::write_volatile(p.add(0x1010), 7u8);
+            check("the guard page raises XCPT_GUARD_PAGE_VIOLATION to the handler", FAULTS == 111 && GUARD_AT == p as u32 + 0x1010 && GUARD_ACCESS == 2);
+            core::ptr::write_volatile(p.add(0x1020), 8u8);
+            check("only once, and the write went through", FAULTS == 111 && core::ptr::read_volatile(p.add(0x1010)) == 7);
+            DosFreeMem(p);
+        }
         check("DosUnsetExceptionHandler", DosUnsetExceptionHandler(&mut rec) == 0);
     }
 }
