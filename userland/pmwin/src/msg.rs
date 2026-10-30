@@ -647,6 +647,13 @@ pub extern "C" fn WinPeekMsg(_hab: u32, pq: *mut QMsg, filter: u32, first: u32, 
     }
 }
 
+/// WinWaitMsg(hab, msgFirst, msgLast): waits until a message in the range
+/// (all messages for 0, 0) is in the queue, leaving it there.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWaitMsg(_hab: u32, first: u32, last: u32) -> u32 {
+    next_message(0, first, last, false, true).is_some() as u32
+}
+
 /// WinQueryQueueStatus(hwndDesktop): QS_* bits of what waits (the high
 /// word, what was added since the last call, is the same here).
 #[unsafe(no_mangle)]

@@ -235,6 +235,9 @@ pub struct State {
     /// Virtual key states by VK_* (0x80: down, 0x01: toggled), as the
     /// input thread last saw them (WinGetKeyState).
     pub keys: [u8; 256],
+    /// Physical key states by scan code (0x80: down, 0x01: pressed since
+    /// WinGetPhysKeyState last asked).
+    pub phys: [u8; 256],
     /// The switch list (WinAddSwitchEntry, see switch.rs).
     pub switch: crate::switch::SwitchList,
     /// The text cursor (WinCreateCursor).
@@ -325,6 +328,7 @@ pub fn init(surface: Surface) {
         damage_held: None,
         drawing: Vec::new(),
         keys: [0; 256],
+        phys: [0; 256],
         switch: Default::default(),
         cursor: Default::default(),
         metafiles: Vec::new(),

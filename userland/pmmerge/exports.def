@@ -98,6 +98,7 @@ WinGetMaxPosition @5190
 WinGetMinPosition @5191
 WinGetMsg @5192
 WinGetNextWindow @5193
+WinGetPhysKeyState @5194
 WinGetPS @5195
 WinGetScreenPS @5196
 WinGetSysBitmap @5197
@@ -249,6 +250,7 @@ WinUpperChar @5405
 WinValidateRect @5406
 WinValidateRegion @5407
 WinWaitEventSem @5409
+WinWaitMsg @5410
 WinWindowFromID @5414
 WinWindowFromPoint @5415
 WINQUERYPROFILEINT=PMSHAPI.2 @2001

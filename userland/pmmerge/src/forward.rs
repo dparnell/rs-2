@@ -91,6 +91,7 @@ forward! {
     WinGetMinPosition = "PMWIN.755";
     WinGetMsg = "PMWIN.915";
     WinGetNextWindow = "PMWIN.756";
+    WinGetPhysKeyState = "PMWIN.758";
     WinGetPS = "PMWIN.757";
     WinGetScreenPS = "PMWIN.759";
     WinGetSysBitmap = "PMWIN.760";
@@ -242,6 +243,7 @@ forward! {
     WinValidateRect = "PMWIN.895";
     WinValidateRegion = "PMWIN.896";
     WinWaitEventSem = "PMWIN.978";
+    WinWaitMsg = "PMWIN.897";
     WinWindowFromID = "PMWIN.899";
     WinWindowFromPoint = "PMWIN.900";
 }
