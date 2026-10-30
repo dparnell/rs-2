@@ -1302,6 +1302,15 @@ pub fn register_message(name: &[u8]) -> u16 {
     crate::dde::add_global_atom(name)
 }
 
+/// PM for a USER or GDI call before InitApp: DLLs' LibMain run before
+/// the program's InitTask (BWCC's registers its messages there:
+/// RegisterWindowMessage is PM's atom table).
+pub fn ensure_pm() {
+    if TASK.get().hmq == 0 {
+        init_app();
+    }
+}
+
 fn init_app() -> u32 {
     let t = TASK.get();
     if t.hmq != 0 {
