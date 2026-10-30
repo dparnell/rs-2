@@ -1611,6 +1611,10 @@ pub fn create(c: &Create) -> u16 {
         let pm_parent = if mdi_child { wnd(parent).map_or(HWND_DESKTOP, |w| w.client) } else { HWND_DESKTOP };
         let fs = if mdi_child { WS_CLIPSIBLINGS } else { 0 };
         let f = unsafe { WinCreateStdWindow(pm_parent, fs, &mut fcf, b"Win16Wnd\0".as_ptr(), text.as_ptr(), pm_clip_children(style), 0, 0, &mut client) };
+        if f != 0 {
+            let old = unsafe { WinSubclassWindow(f, std_frame_proc) };
+            STD_FRAME_PROC.store(old, core::sync::atomic::Ordering::Relaxed);
+        }
         (f, client)
     } else {
         let pm_parent = if child { wnd(parent).map_or(0, |w| w.client) } else { HWND_DESKTOP };
@@ -1776,10 +1780,38 @@ pub fn layout_frame(h: u16) {
     unsafe { WinSetWindowPos(c, HWND_TOP, inner.l, inner.b, (inner.r - inner.l).max(0), (inner.t - inner.b).max(0), SWP_MOVE | SWP_SIZE) };
 }
 
+/// PM's frame procedure, which the frames of Windows windows are
+/// subclassed from.
+static STD_FRAME_PROC: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// The frames of Windows windows: PM tells a frame of its activation, and
+/// Windows the window (WM_ACTIVATE). BWCC dialog procedures post their
+/// task the dialog to give IsDialogMessage on WM_ACTIVATE (the Visual
+/// Solutions Pack installer: Enter did nothing).
+extern "C" fn std_frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    let old = STD_FRAME_PROC.load(core::sync::atomic::Ordering::Relaxed);
+    let old: WndProc = unsafe { core::mem::transmute(old) };
+    let r = old(pmh, msg, mp1, mp2);
+    if msg == WM_ACTIVATE {
+        if let Some(h) = by_frame(pmh).filter(|w| w.created && w.frame != w.client).map(|w| w.hwnd) {
+            let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
+            send_inflight(h, W_ACTIVATE, (mp1 & 0xffff != 0) as u16, 0, q);
+        }
+    }
+    r
+}
+
 /// The PM procedure of `Win16Frame`: the border of a plain window and
 /// the corner between its scroll bars.
 extern "C" fn frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
+        WM_ACTIVATE => {
+            if let Some(h) = by_frame(pmh).filter(|w| w.created && w.frame == pmh && w.client != pmh).map(|w| w.hwnd) {
+                let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
+                send_inflight(h, W_ACTIVATE, (mp1 & 0xffff != 0) as u16, 0, q);
+            }
+            0
+        }
         WM_SIZE => {
             let h = hwnd_of(pmh);
             if h != 0 {
