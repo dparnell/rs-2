@@ -223,6 +223,8 @@ struct User {
     /// The last message's time and position (GetMessageTime, GetMessagePos).
     msg_time: u32,
     msg_pos: u32,
+    /// SetEventHook's hook.
+    event_hook: u32,
 }
 
 static USER: Global<User> = Global::new(User {
@@ -238,6 +240,7 @@ static USER: Global<User> = Global::new(User {
     cascade: 0,
     msg_time: 0,
     msg_pos: 0,
+    event_hook: 0,
 });
 
 fn u() -> &'static mut User {
@@ -1117,6 +1120,18 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         187 => {
             crate::menu::end_menu();
             0
+        }
+        // RepaintScreen (undocumented): every window paints again.
+        275 => {
+            unsafe { WinInvalidateRect(HWND_DESKTOP, core::ptr::null(), 1) };
+            0
+        }
+        // SetEventHook(lpfn) (undocumented; debuggers take the keyboard
+        // and mouse events with it): the previous hook. The hook is kept
+        // but not called: input reaches the programs' queues as before.
+        321 => {
+            let f = a.l();
+            core::mem::replace(&mut u().event_hook, f)
         }
         // GetWindowTask(hwnd)
         224 => {

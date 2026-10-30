@@ -55,6 +55,12 @@ pub fn interrupt(p: *mut u16) {
         // has it): an FPU, a mouse, an 80x25 colour display. Resource
         // Workshop asks for the coprocessor.
         0x11 => r[AX] = 0x0026,
+        // BIOS video: the mode (AH 0Fh) is 80x25 colour text, page 0, as
+        // in a Windows 3.1 system VM (Turbo Debugger's TDWGUI.DLL asks).
+        0x10 if hi(r[AX]) == 0x0f => {
+            r[AX] = 0x5003;
+            r[BX] &= 0x00ff;
+        }
         // BIOS time of day: CX:DX the ticks (18.2 a second) since
         // midnight, AL whether midnight passed.
         0x1a if hi(r[AX]) == 0 => {

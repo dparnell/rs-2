@@ -535,6 +535,8 @@ entries! {
     u_setkeyboardstate = 2223, 4;
     u_switchtothiswindow = 2172, 4;
     u_endmenu = 2187, 0;
+    u_repaintscreen = 2275, 0;
+    u_seteventhook = 2321, 4;
     u_getwindowtask = 2224, 2;
     u_enumtaskwindows = 2225, 10;
     u_getnextdlggroupitem = 2227, 6;
