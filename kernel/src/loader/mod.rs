@@ -313,7 +313,14 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     let mname = module_name(name);
     let found = REGISTRY.lock().modules.iter().find(|m| m.is_dll && m.name.eq_ignore_ascii_case(&mname)).cloned();
     if let Some(m) = found {
-        return Ok(m);
+        if !rewritten(&m) {
+            return Ok(m);
+        }
+        // A 16-bit DLL whose file was written since it was loaded (Delphi
+        // rebuilds its component library COMPLIB.DCL, frees it and loads
+        // it again): the new file, under a new handle. Programs using the
+        // old one keep it.
+        REGISTRY.lock().modules.retain(|x| !Arc::ptr_eq(x, &m));
     }
     let (path, data) = crate::fs::find_module(name).ok_or_else(|| {
         crate::trace!("loader: module {name} not found");
@@ -323,6 +330,15 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     let m = load_image(&path, data, true, None).inspect_err(|e| crate::trace!("loader: {path}: error {e}"))?;
     register(m.clone());
     Ok(m)
+}
+
+/// Is a loaded 16-bit DLL's file no longer what was loaded?
+fn rewritten(m: &Module) -> bool {
+    if m.format != Format::Ne {
+        return false;
+    }
+    let Some(img) = &m.image else { return false };
+    crate::fs::read_file(&m.path).is_some_and(|d| d[..] != img[..])
 }
 
 /// Load (or find) a DLL and attach it to the address space `space`
