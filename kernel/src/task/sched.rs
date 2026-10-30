@@ -526,6 +526,13 @@ fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
                 None => {}
             }
             gdt::set_tib_base(next.tib(), 0xfff);
+            // The local information segment's tidCurrent is the running
+            // thread's (Microsoft C's multithread _chkstk finds the
+            // thread's stack limit by it).
+            let at = (p.info + crate::task::process::info::LINFOSEG + 6) as u64;
+            if let Some(pa) = crate::mm::paging::translate(p.cr3, at) {
+                unsafe { (crate::mm::phys::phys_to_virt(pa) as *mut u16).write_unaligned(next.tid as u16) };
+            }
         }
         None => {
             // Kernel threads run on the kernel page tables so a process's

@@ -518,6 +518,13 @@ pub extern "C" fn WinDestroyWindow(h: u32) -> u32 {
     if !st().desk.exists(h) {
         return 0;
     }
+    // Only the window's own thread may destroy it, as on OS/2 (Borland's
+    // installer tries from its worker thread; the window stays and gets
+    // the worker's "done" message).
+    if st().queue_of(h) != st().my_queue() {
+        crate::misc::set_error(0x1009); // PMERR_CALL_FROM_WRONG_THREAD
+        return 0;
+    }
     destroy(h);
     1
 }

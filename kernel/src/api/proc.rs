@@ -328,6 +328,9 @@ pub fn dos16_create_thread(c: &mut Ctx) -> u32 {
             return err::INVALID_ADDRESS;
         }
     }
+    // The other registers are the creating thread's, as on OS/2: Borland's
+    // _beginthread passes the thread function in CX:DX and its argument in
+    // SI:DI to the stub it starts.
     let frame = TrapFrame {
         rflags: 0x202,
         cs: (pfn >> 16) as u64,
@@ -335,7 +338,13 @@ pub fn dos16_create_thread(c: &mut Ctx) -> u32 {
         ss: ss as u64,
         rsp: sp_off as u64,
         ds: c.f.ds,
-        es: c.f.ds,
+        es: c.f.es,
+        rbx: c.f.rbx & 0xffff_ffff,
+        rcx: c.f.rcx & 0xffff_ffff,
+        rdx: c.f.rdx & 0xffff_ffff,
+        rsi: c.f.rsi & 0xffff_ffff,
+        rdi: c.f.rdi & 0xffff_ffff,
+        rbp: c.f.rbp & 0xffff_ffff,
         ..Default::default()
     };
     let base = c.space().linear(ss, 0).unwrap_or(0);

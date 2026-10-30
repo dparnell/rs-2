@@ -171,6 +171,15 @@ pub fn create_from(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u3
         return 0;
     }
     ctl::set_data(h, Dlg { result: 0, dismissed: false, disabled_owner: 0 });
+    // A dialog clips its controls only if its template says so: it paints
+    // its background under the others (a control that draws only part of
+    // itself, such as a frame static or Borland's installer gauge, shows
+    // the dialog there; controls repaint after their parent).
+    if t.style & ws::CLIPCHILDREN == 0 {
+        if let Some(w) = st().desk.get_mut(h) {
+            w.style &= !ws::CLIPCHILDREN;
+        }
+    }
     let b = frame::border(fcf);
     for c in &t.children {
         create_item(h, h, c, b);

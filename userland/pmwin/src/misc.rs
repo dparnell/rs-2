@@ -318,7 +318,35 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
     let font = gpi::font::system();
     let text = cstr(text);
     let title = cstr(title);
-    let lines: Vec<Vec<u8>> = text.split(|&b| b == b'\n').map(|l| l.iter().copied().filter(|&b| b != b'\r').collect()).collect();
+    // Lines longer than the box are broken at blanks (IBM's MboxScaleSize
+    // draws the text with DT_WORDBREAK in a field of fixed width, the box
+    // growing downwards up to 2/3 of the screen).
+    let (sw, sh) = (st().surface.width, st().surface.height);
+    let max = (sw * 2 / 5).max(320);
+    let mut lines: Vec<Vec<u8>> = Vec::new();
+    for l in text.split(|&b| b == b'\n') {
+        let l: Vec<u8> = l.iter().copied().filter(|&b| b != b'\r').collect();
+        let mut rest = &l[..];
+        loop {
+            if font.text_width(rest) <= max {
+                lines.push(rest.to_vec());
+                break;
+            }
+            // The longest start that fits and ends before a blank (or as
+            // much as fits when a word is wider than the box).
+            let mut cut = (1..rest.len()).rev().find(|&i| rest[i] == b' ' && font.text_width(&rest[..i]) <= max);
+            if cut.is_none() {
+                cut = (1..rest.len()).rev().find(|&i| font.text_width(&rest[..i]) <= max);
+            }
+            let cut = cut.unwrap_or(rest.len());
+            lines.push(rest[..cut].to_vec());
+            rest = &rest[cut..];
+            while rest.first() == Some(&b' ') {
+                rest = &rest[1..];
+            }
+        }
+    }
+    let lines: Vec<Vec<u8>> = lines.into_iter().take(((sh * 2 / 3 - 60) / font.height).max(1) as usize).collect();
     let bw = 80;
     let tw = lines.iter().map(|l| font.text_width(l)).max().unwrap_or(0).max(font.text_width(&title) + 40).max(buttons.len() as i32 * (bw + 10)).max(160);
     // Template coordinates are dialog units (2x2 pixels).
@@ -358,7 +386,6 @@ pub extern "C" fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title:
     }
     // FCF_TITLEBAR (control data); FS_DLGBORDER | FS_SCREENALIGN.
     let fcf: u32 = 0x0001;
-    let (sw, sh) = (st().surface.width, st().surface.height);
     let t = res::DlgItemT {
         class: b"#1".to_vec(),
         text: title,
