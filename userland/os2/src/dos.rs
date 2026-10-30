@@ -231,6 +231,10 @@ unsafe extern "C" {
     pub fn DosGetDateTime(dt: *mut DateTime) -> APIRET;
     #[link_name = "DOSCALLS.348"]
     pub fn DosQuerySysInfo(first: u32, last: u32, buf: *mut u32, cb: u32) -> APIRET;
+    #[link_name = "DOSCALLS.873"]
+    pub fn DosSetExtLIBPATH(path: *const u8, flags: u32) -> APIRET;
+    #[link_name = "DOSCALLS.874"]
+    pub fn DosQueryExtLIBPATH(path: *mut u8, flags: u32) -> APIRET;
     #[link_name = "DOSCALLS.311"]
     pub fn DosCreateThread(ptid: *mut u32, pfn: ThreadFn, param: u32, flags: u32, cb_stack: u32) -> APIRET;
     #[link_name = "DOSCALLS.349"]

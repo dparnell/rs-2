@@ -50,6 +50,7 @@ fn main(s: &Startup) -> u32 {
     shared_memory();
     queues();
     sessions();
+    cmd_beginlibpath();
     messages();
     nls();
     console::run();
@@ -440,6 +441,26 @@ fn sessions() {
         check("session termination queue", ok);
         check("stop ended session fails", DosStopSession(0, sid) == 371);
         DosCloseQueue(hq);
+    }
+}
+
+/// CMD's SET BEGINLIBPATH is the process's extended LIBPATH (IBM CMD
+/// calls DosSetExtLIBPATH; VisualAge Smalltalk's VAWINDOW.CMD relies on
+/// it), and %BEGINLIBPATH% reads it back.
+fn cmd_beginlibpath() {
+    unsafe {
+        let mut hf = 0;
+        let mut action = 0;
+        let rc = DosOpen(b"C:\\RS2LP.CMD\0".as_ptr(), &mut hf, &mut action, 0, FILE_NORMAL,
+            OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYWRITE, null_mut());
+        let text = b"@SET BEGINLIBPATH=C:\\RS2LP\r\n@IF \"%BEGINLIBPATH%\"==\"C:\\RS2LP\" EXIT 7\r\n@EXIT 1\r\n";
+        let mut n = 0;
+        DosWrite(hf, text.as_ptr(), text.len() as u32, &mut n);
+        DosClose(hf);
+        let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+        let rc2 = DosExecPgm(null_mut(), 0, 0, b"CMD.EXE\0/C C:\\RS2LP.CMD\0\0".as_ptr(), null(), &mut res, b"C:\\OS2\\CMD.EXE\0".as_ptr());
+        DosDelete(b"C:\\RS2LP.CMD\0".as_ptr());
+        check("CMD: SET BEGINLIBPATH is the extended LIBPATH", rc == 0 && rc2 == 0 && res.code_result == 7);
     }
 }
 
