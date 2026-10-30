@@ -499,6 +499,27 @@ fn dlls() {
         let rc = DosLoadModule(null_mut(), 0, b"NOSUCH\0".as_ptr(), &mut h2);
         check("DosLoadModule missing", rc == 2 || rc == 126);
         check("DosFreeModule", DosFreeModule(h) == 0);
+        // TESTDLL's twin flagged as having its internal fixups removed
+        // (yet carrying them), its preferred bases taken by TESTDLL: moved
+        // and fixed up all the same (VisualAge Smalltalk's EMNTV50.DLL).
+        let mut hb = 0;
+        let rc = DosLoadModule(null_mut(), 0, b"TESTDLLB\0".as_ptr(), &mut hb);
+        let mut pa: usize = 0;
+        let mut pc: usize = 0;
+        let ok = rc == 0
+            && DosQueryProcAddr(hb, 1, null(), &mut pa) == 0
+            && DosQueryProcAddr(hb, 2, null(), &mut pc) == 0;
+        let (sum, inits) = if ok {
+            let add: extern "C" fn(u32, u32) -> u32 = core::mem::transmute(pa);
+            let count: extern "C" fn() -> u32 = core::mem::transmute(pc);
+            (add(40, 2), count())
+        } else {
+            (0, 0)
+        };
+        check("DLL marked without internal fixups moved off taken bases", ok && pa != TestAdd as usize && sum == 42 && inits == 1);
+        if rc == 0 {
+            DosFreeModule(hb);
+        }
     }
 }
 
