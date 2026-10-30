@@ -90,6 +90,7 @@ WinFindAtom @5177
 WinFlashWindow @5178
 WinFocusChange @5179
 WinFreeErrorInfo @5180
+WinGetClipPS @5181
 WinGetCurrentTime @5182
 WinGetErrorInfo @5185
 WinGetKeyState @5188

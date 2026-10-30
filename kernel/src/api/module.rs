@@ -342,12 +342,15 @@ pub fn dos_query_proc_addr(c: &mut Ctx) -> u32 {
     // DosQueryProcAddr(hmod, ordinal, pszName, ppfn)
     let (h, ord, pname, ppfn) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
     let Some(m) = module_by_handle(c, h) else { return err::INVALID_HANDLE };
+    let mut asked = None;
     let t = if pname != 0 && ord == 0 {
         let Some(name) = c.read_str(pname, 256) else { return err::INVALID_ADDRESS };
         if super::tracing() {
             crate::trace!("    proc {name} in {}", m.name);
         }
-        resolve_named(&m, &name)
+        let t = resolve_named(&m, &name);
+        asked = Some(name);
+        t
     } else {
         m.resolve_ordinal(ord, 0)
     };
@@ -358,7 +361,14 @@ pub fn dos_query_proc_addr(c: &mut Ctx) -> u32 {
             c.write_u32(ppfn, v);
             0
         }
-        Err(e) => e,
+        Err(e) => {
+            // What programs look for and rs2 lacks (they may go without).
+            match asked {
+                Some(name) => crate::trace!("DosQueryProcAddr: {}.{name} not found", m.name),
+                None => crate::trace!("DosQueryProcAddr: {}.{ord} not found", m.name),
+            }
+            e
+        }
     }
 }
 

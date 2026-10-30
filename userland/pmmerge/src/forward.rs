@@ -83,6 +83,7 @@ forward! {
     WinFlashWindow = "PMWIN.745";
     WinFocusChange = "PMWIN.746";
     WinFreeErrorInfo = "PMWIN.748";
+    WinGetClipPS = "PMWIN.749";
     WinGetCurrentTime = "PMWIN.750";
     WinGetErrorInfo = "PMWIN.751";
     WinGetKeyState = "PMWIN.752";

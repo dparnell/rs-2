@@ -1263,6 +1263,28 @@ pub extern "C" fn WinGetPS(h: u32) -> u32 {
     hps
 }
 
+/// WinGetClipPS(hwnd, hwndClip, fl): a cached PS clipped as `fl` asks:
+/// PSF_CLIPCHILDREN (0x10) leaves out the children, PSF_PARENTCLIP (0x20)
+/// gives the parent's visible area. Siblings above are left out as for
+/// WinGetPS (PSF_CLIPSIBLINGS); hwndClip with PSF_CLIPUPWARDS/DOWNWARDS
+/// is taken as that.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetClipPS(h: u32, _clip: u32, fl: u32) -> u32 {
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return 0 };
+    let parent = w.parent;
+    let vis = if fl & 0x20 != 0 && s.desk.exists(parent) {
+        s.desk.visible_region(parent, fl & 0x10 != 0)
+    } else {
+        s.desk.visible_region(h, fl & 0x10 != 0)
+    };
+    let o = s.desk.origin(h);
+    let hps = gpiapi::create(s, h, o, vis.rects);
+    gpiapi::track_window(st(), hps, None);
+    crate::hooks::window_dc(hps, h, true);
+    hps
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn WinReleasePS(hps: u32) -> u32 {
     if crate::hooks::any(crate::hooks::HK_WINDOWDC) {

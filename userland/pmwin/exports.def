@@ -455,6 +455,7 @@ WinSetWindowUShort=__a_WinSetWindowUShort @879
 WinBeginPaint=__a_WinBeginPaint @703
 WinEndPaint=__a_WinEndPaint @738
 WinGetPS=__a_WinGetPS @757
+WinGetClipPS=__a_WinGetClipPS @749
 WinReleasePS=__a_WinReleasePS @848
 WinFillRect=__a_WinFillRect @743
 WinInvalidateRect=__a_WinInvalidateRect @765

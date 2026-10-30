@@ -482,17 +482,18 @@ aligned! {
     __a_WinBeginPaint => crate::win::WinBeginPaint, 3, 453;
     __a_WinEndPaint => crate::win::WinEndPaint, 1, 454;
     __a_WinGetPS => crate::win::WinGetPS, 1, 455;
-    __a_WinReleasePS => crate::win::WinReleasePS, 1, 456;
-    __a_WinFillRect => crate::win::WinFillRect, 3, 457;
-    __a_WinInvalidateRect => crate::win::WinInvalidateRect, 3, 458;
-    __a_WinInvalidateRegion => crate::win::WinInvalidateRegion, 3, 459;
-    __a_WinValidateRect => crate::win::WinValidateRect, 3, 460;
-    __a_WinUpdateWindow => crate::win::WinUpdateWindow, 1, 461;
-    __a_WinDrawText => crate::win::WinDrawText, 7, 462;
+    __a_WinGetClipPS => crate::win::WinGetClipPS, 3, 456;
+    __a_WinReleasePS => crate::win::WinReleasePS, 1, 457;
+    __a_WinFillRect => crate::win::WinFillRect, 3, 458;
+    __a_WinInvalidateRect => crate::win::WinInvalidateRect, 3, 459;
+    __a_WinInvalidateRegion => crate::win::WinInvalidateRegion, 3, 460;
+    __a_WinValidateRect => crate::win::WinValidateRect, 3, 461;
+    __a_WinUpdateWindow => crate::win::WinUpdateWindow, 1, 462;
+    __a_WinDrawText => crate::win::WinDrawText, 7, 463;
 }
 
 /// Export names and argument counts by trampoline index.
-pub static NAMES: [(&str, u8); 463] = [
+pub static NAMES: [(&str, u8); 464] = [
     ("WinLoadAccelTable", 3),
     ("WinCreateAccelTable", 2),
     ("WinDestroyAccelTable", 1),
@@ -949,6 +950,7 @@ pub static NAMES: [(&str, u8); 463] = [
     ("WinBeginPaint", 3),
     ("WinEndPaint", 1),
     ("WinGetPS", 1),
+    ("WinGetClipPS", 3),
     ("WinReleasePS", 1),
     ("WinFillRect", 3),
     ("WinInvalidateRect", 3),
