@@ -4,6 +4,7 @@
 win16! {
     api {
         1 WIN16QUERYDESKTOPWINDOW 8 "ll" __a_WinQueryDesktopWindow;
+        2 WIN16QUERYOBJECTWINDOW 4 "l" __a_WinQueryObjectWindow;
         4 WIN16QUERYCLASSNAME 10 "lip" __a_WinQueryClassName;
         6 WIN16CREATEWINDOW 42 "lppliiiillwpp" __a_WinCreateWindow;
         7 WIN16DESTROYWINDOW 4 "l" __a_WinDestroyWindow;
@@ -48,6 +49,7 @@ win16! {
         58 WIN16CREATEMSGQUEUE 6 "li" __a_WinCreateMsgQueue;
         59 WIN16DESTROYMSGQUEUE 4 "l" __a_WinDestroyMsgQueue;
         60 WIN16QUERYQUEUESTATUS 4 "l" __a_WinQueryQueueStatus;
+        67 WIN16WAITMSG 8 "lww" __a_WinWaitMsg;
         71 WIN16QUERYMSGPOS 8 "lp" __a_WinQueryMsgPos;
         72 WIN16QUERYMSGTIME 4 "l" __a_WinQueryMsgTime;
         75 WIN16SETCAPTURE 8 "ll" __a_WinSetCapture;
@@ -99,8 +101,14 @@ win16! {
         138 WIN16ALARM 6 "lw" __a_WinAlarm;
         139 WIN16MESSAGEBOX 20 "llppww" __a_WinMessageBox;
         140 WIN16CREATESTDWINDOW 32 "llppplwwp" __a_WinCreateStdWindow;
+        141 WIN16CREATEFRAMECONTROLS 12 "lpp" __a_WinCreateFrameControls;
         143 WIN16CALCFRAMERECT 10 "lpw" __a_WinCalcFrameRect;
+        144 WIN16FLASHWINDOW 6 "lw" __a_WinFlashWindow;
+        146 WIN16GETMINPOSITION 12 "lpp" __a_WinGetMinPosition;
+        147 WIN16GETMAXPOSITION 8 "lp" __a_WinGetMaxPosition;
         149 WIN16QUERYSYSVALUE 6 "li" __a_WinQuerySysValue;
+        150 WIN16SETSYSVALUE 10 "lil" __a_WinSetSysValue;
+        151 WIN16SETSYSCOLORS 24 "lllllp" __a_WinSetSysColors;
         152 WIN16QUERYSYSCOLOR 12 "lll" __a_WinQuerySysColor;
         153 WIN16SCROLLWINDOW 26 "liipplpw" __a_WinScrollWindow;
         156 GPI16LOADBITMAP 16 "lwwll" __a_GpiLoadBitmap;
@@ -121,6 +129,7 @@ win16! {
         173 WIN16FILLRECT 12 "lpl" __a_WinFillRect;
         177 WIN16DRAWPOINTER 14 "liilw" __a_WinDrawPointer;
         211 WIN16GETKEYSTATE 6 "li" __a_WinGetKeyState;
+        213 WIN16SETKEYBOARDSTATETABLE 10 "lpw" __a_WinSetKeyboardStateTable;
         215 WIN16SETCP 6 "lw" __a_WinSetCp;
         216 WIN16QUERYCP 4 "l" __a_WinQueryCp;
         218 WIN16CPTRANSLATESTRING 18 "lwpwwp" __a_WinCpTranslateString;
@@ -154,10 +163,22 @@ win16! {
         301 WIN16SETPRESPARAM 16 "lllp" __a_WinSetPresParam;
         302 WIN16QUERYPRESPARAM 26 "lllplpw" __a_WinQueryPresParam;
         303 WIN16REMOVEPRESPARAM 8 "ll" __a_WinRemovePresParam;
+        304 WIN16THREADASSOCQUEUE 8 "ll" __a_WinThreadAssocQueue;
+        305 WIN16QUEUEFROMID 8 "lww" __a_WinQueueFromID;
+        306 WIN16QUERYSENDMSG 16 "lllp" __a_WinQuerySendMsg;
+        307 WIN16REPLYMSG 16 "llll" __a_WinReplyMsg;
+        308 WIN16WAKETHREAD 4 "l" __a_WinWakeThread;
+        309 WIN16LOCKINPUT 6 "lw" __a_WinLockInput;
         320 WIN16POPUPMENU 20 "llliiiw" __a_WinPopupMenu;
         321 WIN16REALIZEPALETTE 12 "llp" __a_WinRealizePalette;
+        602 WIN16DELETELIBRARY 6 "lw" __a_WinDeleteLibrary;
+        603 WIN16LOADPROCEDURE 10 "lwp" __a_WinLoadProcedure;
+        604 WIN16DELETEPROCEDURE 8 "ll" __a_WinDeleteProcedure;
+        608 WIN16REGISTERUSERMSG 16 "lwiiiii" __a_WinRegisterUserMsg;
         609 WIN16QUERYANCHORBLOCK 4 "l" __a_WinQueryAnchorBlock;
+        612 WIN16REGISTERUSERDATATYPE 12 "liip" __a_WinRegisterUserDatatype;
         614 WIN16ISWINDOWSHOWING 4 "l" __a_WinIsWindowShowing;
+        615 WIN16LOADLIBRARY 8 "lp" __a_WinLoadLibrary;
         616 WIN16CREATEPOINTERINDIRECT 8 "lp" __a_WinCreatePointerIndirect;
         617 WIN16QUERYPOINTERINFO 8 "lp" __a_WinQueryPointerInfo;
         633 WIN16SETPOINTEROWNER 8 "lww" __a_WinSetPointerOwner;
@@ -185,6 +206,10 @@ win16! {
         4027 GPI16QUERYDRAWINGMODE 4 "l" __a_GpiQueryDrawingMode;
         4028 GPI16GETDATA 24 "llpllp" __a_GpiGetData;
         4029 GPI16PUTDATA 16 "llpp" __a_GpiPutData;
+        4030 GPI16SETPICKAPERTURESIZE 12 "llp" __a_GpiSetPickApertureSize;
+        4031 GPI16QUERYPICKAPERTURESIZE 8 "lp" __a_GpiQueryPickApertureSize;
+        4032 GPI16SETPICKAPERTUREPOSITION 8 "lp" __a_GpiSetPickAperturePosition;
+        4033 GPI16QUERYPICKAPERTUREPOSITION 8 "lp" __a_GpiQueryPickAperturePosition;
         4042 GPI16RESETBOUNDARYDATA 4 "l" __a_GpiResetBoundaryData;
         4043 GPI16QUERYBOUNDARYDATA 8 "lp" __a_GpiQueryBoundaryData;
         4044 GPI16OPENSEGMENT 8 "ll" __a_GpiOpenSegment;
@@ -362,6 +387,7 @@ win16! {
         4285 GPI16ROTATE 20 "lpllp" __a_GpiRotate;
         4286 GPI16POLYLINEDISJOINT 12 "llp" __a_GpiPolyLineDisjoint;
         4287 GPI16PATHTOREGION 12 "lll" __a_GpiPathToRegion;
+        4289 GPI16FLOODFILL 12 "lll" __a_GpiFloodFill;
         4290 GPI16DRAWBITS 28 "lpplpll" __a_GpiDrawBits;
         4291 GPI16QUERYBITMAPINFOHEADER 8 "lp" __a_GpiQueryBitmapInfoHeader;
         4292 GPI16QUERYLOGICALFONT 20 "llppl" __a_GpiQueryLogicalFont;

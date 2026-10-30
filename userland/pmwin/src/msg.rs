@@ -259,6 +259,79 @@ pub fn abandon_sent(queue: &mut Queue) {
     }
 }
 
+// ---- Debugger support (IBM's PMWIN 304-309, 994 and 995) ----
+
+/// WinQueueFromID(hab, pid, tid): a thread's message queue.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueueFromID(_hab: u32, p: u32, t: u32) -> u32 {
+    st().queues.iter().find(|(_, q)| q.pid == p && q.tid == t).map_or(0, |(&h, _)| h)
+}
+
+/// WinThreadAssocQueue(hab, hmq): the calling thread processes hmq's
+/// messages (a debugger, for the thread it stopped); NULLHANDLE ends it.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinThreadAssocQueue(_hab: u32, hmq: u32) -> u32 {
+    let s = st();
+    let me = (pid(), state::tid());
+    s.assoc.retain(|a| (a.0, a.1) != me);
+    if hmq == 0 {
+        return 1;
+    }
+    if !s.queues.contains_key(&hmq) {
+        return 0;
+    }
+    s.assoc.push((me.0, me.1, hmq));
+    1
+}
+
+/// WinQuerySendMsg(hab, hmqSender, hmqReceiver, pqmsg): the oldest message
+/// hmqSender sent to hmqReceiver that is not answered yet (any sender for
+/// NULLHANDLE), in pqmsg; its handle, or 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQuerySendMsg(_hab: u32, from: u32, to: u32, pq: *mut QMsg) -> u32 {
+    let Some(m) = st().queues.get(&to).and_then(|q| q.sent.iter().find(|m| from == 0 || m.from == from).copied()) else { return 0 };
+    if !pq.is_null() {
+        unsafe { pq.write_unaligned(qmsg(m.hwnd, m.msg, m.mp1, m.mp2)) };
+    }
+    m.id
+}
+
+/// WinReplyMsg(hab, hmqSender, hmqReceiver, mresult): answer the oldest
+/// message hmqSender sent to hmqReceiver with mresult (a debugger, for the
+/// thread it stopped).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinReplyMsg(_hab: u32, from: u32, to: u32, r: u32) -> u32 {
+    let s = st();
+    let Some(q) = s.queues.get_mut(&to) else { return 0 };
+    let Some(i) = q.sent.iter().position(|m| from == 0 || m.from == from) else { return 0 };
+    let Some(m) = q.sent.remove(i) else { return 0 };
+    if m.reply {
+        s.replies.push((m.id, r));
+        if m.from != 0 {
+            s.wake.insert(m.from);
+        }
+    }
+    1
+}
+
+/// WinWakeThread(hmq): the queue's thread stops waiting for messages.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWakeThread(hmq: u32) -> u32 {
+    let s = st();
+    if !s.queues.contains_key(&hmq) {
+        return 0;
+    }
+    s.wake.insert(hmq);
+    1
+}
+
+/// WinLockInput(hmq, fLock): as IBM's, only NULLHANDLE (the whole
+/// system's input) is accepted; rs2 does not lock input.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinLockInput(hmq: u32, _lock: u32) -> u32 {
+    (hmq == 0) as u32
+}
+
 // ---- Queues ----
 
 #[unsafe(no_mangle)]
