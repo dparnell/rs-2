@@ -367,9 +367,26 @@ pub fn is_16bit(module: u32, ordinal: u32) -> bool {
 /// Log every API call to the serial port (`apitrace` on the command line).
 pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
-/// True while `apitrace` is on.
+/// `apitrace=NAME.EXE` on the kernel command line: trace that program's
+/// calls only (its file name; the extension may be left out).
+pub static TRACE_EXE: SpinLock<Option<alloc::string::String>> = SpinLock::new(None);
+pub static TRACE_SOME: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// Whether `apitrace=NAME` names this process's program.
+fn traced(p: &Process) -> bool {
+    TRACE_SOME.load(core::sync::atomic::Ordering::Relaxed)
+        && TRACE_EXE.lock().as_deref().is_some_and(|n| {
+            let file = p.exe.path.rsplit('\\').next().unwrap_or("").to_ascii_uppercase();
+            file.strip_suffix(".EXE").unwrap_or(&file) == n
+        })
+}
+
+/// True while `apitrace` is on (for the current thread's program with
+/// `apitrace=NAME`).
 pub fn tracing() -> bool {
     TRACE.load(core::sync::atomic::Ordering::Relaxed)
+        || (TRACE_SOME.load(core::sync::atomic::Ordering::Relaxed)
+            && crate::task::sched::current().process().is_some_and(|p| traced(&p)))
 }
 
 static WARNED: SpinLock<Vec<(u32, u32)>> = SpinLock::new(Vec::new());
@@ -501,7 +518,7 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         dx: None,
         pop32: if !is16 && module == 4 && ordinal == 6 { 4 } else { 0 },
     };
-    let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed);
+    let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed) || traced(&process);
     if trace {
         let ret = ctx.read_u32(ctx.args_at - 4).unwrap_or(0);
         crate::trace!(

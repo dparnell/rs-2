@@ -107,6 +107,12 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     if cmdline.split_whitespace().any(|w| w == "apitrace") {
         api::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
     }
+    // apitrace=NAME.EXE: only that program's calls.
+    if let Some(n) = cmdline.split_whitespace().find_map(|w| w.strip_prefix("apitrace=")) {
+        let n = n.to_ascii_uppercase();
+        *api::TRACE_EXE.lock() = Some(n.strip_suffix(".EXE").unwrap_or(&n).into());
+        api::TRACE_SOME.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
     smp::start_aps();
     msi::start();
     drivers::hotplug::start();
