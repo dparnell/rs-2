@@ -28,6 +28,10 @@ unsafe extern "C" {
     fn W16SendMsg();
     #[link_name = "PMWIN.269"]
     fn W16QueryWindowPtr();
+    #[link_name = "PMWIN.248"]
+    fn W16Catch();
+    #[link_name = "PMWIN.249"]
+    fn W16Throw();
     #[link_name = "PMWIN.929"]
     fn WinSubclassWindow(h: u32, p: u32) -> u32;
     #[link_name = "PMWIN.839"]
@@ -39,13 +43,15 @@ unsafe extern "C" {
     #[link_name = "PMWIN.837"]
     fn WinQueryWindowPos(h: u32, swp: *mut i32) -> u32;
     static ct16_proc: u8;
+    static ct16_catch: u8;
 }
 
 // A 16-bit window procedure (_pascal far: hwnd, msg, mp1, mp2; the stack
 // after `push bp`: mp2 at bp+6, mp1 at bp+10, msg at bp+14, hwnd at
-// bp+16). WM_USER and up: returns mp1 + msg. WM_QUERYWINDOWPARAMS:
-// returns fsStatus read through the 16:16 WNDPARAMS pointer and sets
-// cchText to 77. Anything else: 0.
+// bp+16). WM_USER + 9: WinThrow(mp2, 1) through the 16:16 procedure in
+// mp1 (out of the window procedure, past 32-bit PMWIN). WM_USER and up:
+// returns mp1 + msg. WM_QUERYWINDOWPARAMS: returns fsStatus read through
+// the 16:16 WNDPARAMS pointer and sets cchText to 77. Anything else: 0.
 core::arch::global_asm!(
     ".pushsection .text.ct16,\"ax\"",
     ".p2align 4",
@@ -57,6 +63,14 @@ core::arch::global_asm!(
     "xor ax, ax",
     "xor dx, dx",
     "mov cx, word ptr [bp + 14]",
+    "cmp cx, 0x1009",
+    "jne 4f",
+    "push word ptr [bp + 8]",
+    "push word ptr [bp + 6]",
+    "push 1",
+    // call far [bp + 10]
+    ".byte 0xff, 0x5e, 10",
+    "4:",
     "cmp cx, 0x000b",
     "jne 2f",
     "push es",
@@ -78,6 +92,59 @@ core::arch::global_asm!(
     "pop bp",
     // retf 14
     ".byte 0xca, 14, 0",
+    // ct16_catch(pfnCatch, pfnThrow, pfnSendMsg, hwnd, pcatchbuf) (_pascal
+    // far; after `push bp`: pcatchbuf at bp+6, hwnd bp+10, pfnSendMsg
+    // bp+14, pfnThrow bp+18, pfnCatch bp+22): WinCatch, then with SI and
+    // DI changed WinThrow(pcatchbuf, 0) (hwnd 0) or WinSendMsg(hwnd,
+    // WM_USER + 9, pfnThrow, pcatchbuf), whose procedure throws. Returns
+    // what WinCatch returned the second time; 0xFFFE if SI/DI did not come
+    // back, 0xFFFF if nothing threw.
+    ".globl ct16_catch",
+    "ct16_catch:",
+    "push bp",
+    "mov bp, sp",
+    "push si",
+    "push di",
+    "mov si, 0x1234",
+    "mov di, 0x5678",
+    "push word ptr [bp + 8]",
+    "push word ptr [bp + 6]",
+    ".byte 0xff, 0x5e, 22",
+    "or ax, ax",
+    "jnz 1f",
+    "xor si, si",
+    "xor di, di",
+    "mov ax, word ptr [bp + 10]",
+    "or ax, word ptr [bp + 12]",
+    "jnz 2f",
+    "push word ptr [bp + 8]",
+    "push word ptr [bp + 6]",
+    "push 0",
+    ".byte 0xff, 0x5e, 18",
+    "2:",
+    "push word ptr [bp + 12]",
+    "push word ptr [bp + 10]",
+    "push 0x1009",
+    "push word ptr [bp + 20]",
+    "push word ptr [bp + 18]",
+    "push word ptr [bp + 8]",
+    "push word ptr [bp + 6]",
+    ".byte 0xff, 0x5e, 14",
+    "mov ax, 0xffff",
+    "jmp 3f",
+    "1:",
+    "cmp si, 0x1234",
+    "jne 4f",
+    "cmp di, 0x5678",
+    "je 3f",
+    "4:",
+    "mov ax, 0xfffe",
+    "3:",
+    "xor dx, dx",
+    "pop di",
+    "pop si",
+    "pop bp",
+    ".byte 0xca, 20, 0",
     ".code32",
     ".popsection",
 );
@@ -161,5 +228,15 @@ pub fn pm16_checks(hab: u32, client: u32) {
     let now = unsafe { WinQueryWindowPtr(client, QWP_PFNWP as i32) };
     check("putting the old one back restores the 32-bit procedure", now == orig);
     unsafe { WinSubclassWindow(client, orig) };
+
+    // WinCatch/WinThrow: back to where WinCatch returned, with its SI, DI,
+    // BP and SP. (A throw out of a window procedure that PMWIN called
+    // works in a 16-bit program, whose outermost code is 16-bit; here the
+    // caller is 32-bit code, which a throw past PMWIN would not return
+    // to.)
+    let catch = far(&raw const ct16_catch);
+    let mut cb = [0u8; 16];
+    let r = PascalCall::new().l(f16(W16Catch)).l(f16(W16Throw)).l(f16(W16SendMsg)).l(0).l(far(cb.as_mut_ptr())).call(catch) & 0xffff;
+    check("WinThrow(.., 0): WinCatch returns 1, registers as they were", r == 1);
     PascalCall::new().l(h).call(f16(W16DestroyWindow));
 }

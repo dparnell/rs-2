@@ -225,6 +225,8 @@ pub struct Ctx<'a> {
     /// that the DosGetMessage library stub pushes in front of the
     /// arguments of DosTrueGetMessage).
     pop32: u32,
+    /// The call is traced (`apitrace`): file calls also show their paths.
+    pub trace: bool,
 }
 
 pub type Handler = fn(&mut Ctx) -> u32;
@@ -367,6 +369,10 @@ pub fn is_16bit(module: u32, ordinal: u32) -> bool {
 /// Log every API call to the serial port (`apitrace` on the command line).
 pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
+/// `apitrace=NAME` on the command line: trace the calls of programs whose
+/// name starts with NAME.
+pub static TRACE_NAME: crate::sync::Once<alloc::string::String> = crate::sync::Once::new();
+
 /// True while `apitrace` is on.
 pub fn tracing() -> bool {
     TRACE.load(core::sync::atomic::Ordering::Relaxed)
@@ -454,6 +460,7 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
             no_return: true,
             dx: None,
             pop32: 0,
+            trace: false,
         };
         proc::thread_returned(&mut ctx);
         return;
@@ -500,8 +507,14 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         no_return: false,
         dx: None,
         pop32: if !is16 && module == 4 && ordinal == 6 { 4 } else { 0 },
+        trace: false,
     };
-    let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed);
+    let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed)
+        || TRACE_NAME.get().is_some_and(|n| {
+            let name = &process.exe.name;
+            name[name.rfind('\\').map_or(0, |i| i + 1)..].to_ascii_uppercase().starts_with(n.as_str())
+        });
+    ctx.trace = trace;
     if trace {
         let ret = ctx.read_u32(ctx.args_at - 4).unwrap_or(0);
         crate::trace!(

@@ -40,7 +40,11 @@ pub fn resolve(c: &Ctx, p: &str) -> Result<FullPath, u32> {
 }
 
 fn read_path(c: &Ctx, addr: u32) -> Result<String, u32> {
-    c.read_str(addr, path::MAX_PATH).ok_or(err::INVALID_ADDRESS)
+    let p = c.read_str(addr, path::MAX_PATH).ok_or(err::INVALID_ADDRESS);
+    if c.trace {
+        crate::trace!("    path {:?}", p);
+    }
+    p
 }
 
 /// Check that each component fits the file system's naming rules.
@@ -184,6 +188,9 @@ pub fn dos16_read(c: &mut Ctx) -> u32 {
 
 pub fn dos_read(c: &mut Ctx) -> u32 {
     let (e, n) = read_handle(c, c.arg(0), c.arg(1), c.arg(2));
+    if c.trace {
+        crate::trace!("    read {} of {} at {:x}", n, c.arg(2), c.arg(1));
+    }
     c.write_u32(c.arg(3), n);
     e
 }
@@ -240,7 +247,11 @@ fn seek(c: &Ctx, hf: u32, off: i64, method: u32) -> Result<u64, u32> {
 }
 
 pub fn dos_set_file_ptr(c: &mut Ctx) -> u32 {
-    match seek(c, c.arg(0), c.arg(1) as i32 as i64, c.arg(2)) {
+    let r = seek(c, c.arg(0), c.arg(1) as i32 as i64, c.arg(2));
+    if c.trace {
+        crate::trace!("    seek {} {} -> {:?}", c.arg(1) as i32, c.arg(2), r);
+    }
+    match r {
         Ok(p) => {
             c.write_u32(c.arg(3), p as u32);
             0

@@ -107,6 +107,10 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     if cmdline.split_whitespace().any(|w| w == "apitrace") {
         api::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
     }
+    // apitrace=NAME: only the programs whose name starts with NAME.
+    if let Some(n) = cmdline.split_whitespace().find_map(|w| w.strip_prefix("apitrace=")) {
+        api::TRACE_NAME.set(n.to_ascii_uppercase());
+    }
     smp::start_aps();
     msi::start();
     drivers::hotplug::start();

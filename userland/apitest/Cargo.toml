@@ -7,3 +7,4 @@ license.workspace = true
 
 [dependencies]
 os2 = { path = "../os2" }
+thunk16 = { path = "../thunk16" }
