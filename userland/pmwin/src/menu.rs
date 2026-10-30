@@ -801,6 +801,12 @@ fn open_sub(h: u32, i: usize, first: bool) {
         m.sel = None;
         m.open = 0;
     }
+    // A submenu made with another menu as its parent (WinCreateMenu with
+    // the menu bar, as VisualAge Smalltalk makes its pull-downs) drops
+    // down on the desktop, where the position is reckoned.
+    if ctl::parent(sub) != HWND_DESKTOP {
+        st().desk.set_parent(sub, HWND_DESKTOP);
+    }
     st().desk.set_pos(sub, left, top - hh, w, hh);
     st().desk.to_top(sub);
     win::show(sub, true);
