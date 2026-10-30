@@ -18,7 +18,25 @@ unsafe extern "C" {
     fn WinDefDlgProc(h: u32, m: u32, a: u32, b: u32) -> u32;
     #[link_name = "PMWIN.897"]
     fn WinWaitMsg(hab: u32, first: u32, last: u32) -> u32;
+    #[link_name = "PMWIN.907"]
+    fn WinCreateMenu(parent: u32, t: *const u8) -> u32;
 }
+
+/// MENUITEM: iPosition, afStyle, afAttribute, id, hwndSubMenu, hItem.
+#[repr(C, packed)]
+#[derive(Default, Clone, Copy)]
+struct MenuItem {
+    pos: i16,
+    style: u16,
+    attr: u16,
+    id: u16,
+    sub: u32,
+    item: u32,
+}
+
+const MM_INSERTITEM: u32 = 0x0180;
+const MM_QUERYITEM: u32 = 0x0182;
+const MM_QUERYITEMTEXT: u32 = 0x018b;
 
 /// What WM_CREATE brought: mp1, then the CREATESTRUCT's pPresParams,
 /// pCtlData, id and hwndParent.
@@ -88,6 +106,22 @@ pub fn owatcom_checks(hab: u32, hmq: u32, client: u32) {
         let r = WinProcessDlg(d);
         check("WinProcessDlg of a dismissed dialog", d != 0 && r == 7 && WinIsWindowShowing(d) == 0);
         WinDestroyWindow(d);
+
+        // WinCreateMenu without a template: an empty menu. Items inserted
+        // with style 0 are text items, one with a submenu is MIS_SUBMENU.
+        let bar = WinCreateMenu(HWND_DESKTOP, core::ptr::null());
+        let sub = WinCreateMenu(HWND_DESKTOP, core::ptr::null());
+        let mut mi = MenuItem { pos: -1, id: 1, ..Default::default() };
+        WinSendMsg(bar, MM_INSERTITEM, &mi as *const MenuItem as u32, b"~File\0".as_ptr() as u32);
+        mi.id = 2;
+        mi.sub = sub;
+        WinSendMsg(bar, MM_INSERTITEM, &mi as *const MenuItem as u32, b"~Edit\0".as_ptr() as u32);
+        let mut buf = [0u8; 16];
+        let n = WinSendMsg(bar, MM_QUERYITEMTEXT, 1 | 16 << 16, buf.as_mut_ptr() as u32);
+        let mut q = MenuItem::default();
+        WinSendMsg(bar, MM_QUERYITEM, 2, &mut q as *mut MenuItem as u32);
+        check("WinCreateMenu(NULL) and MM_INSERTITEM with style 0", bar != 0 && n == 5 && &buf[..5] == b"~File" && { q.style } == 0x11);
+        WinDestroyWindow(bar);
 
         // WinWaitMsg: returns once a message in the range is queued and
         // leaves it there.
