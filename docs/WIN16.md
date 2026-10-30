@@ -805,6 +805,21 @@ What the installer needed (each has a W16TEST check):
   0 high, create its controls, show it and only then size it to the
   notebook: the controls of every page but the first were left below
   the page, out of sight.
+- **SWP_NOMOVE keeps the top-left corner**: a window SetWindowPos sizes
+  without moving keeps its top where it is and grows down, as on
+  Windows (PM keeps the bottom-left corner). Delphi makes a combo box as
+  high as its dropped list as it is clicked (Options|Environment, Editor
+  colors): the field went up by the list's height, the click was let go
+  outside it and the list closed with the field out of sight. The list
+  drops below the field whatever the combo box's height.
+- **GetModuleHandle finds this program's modules only**: rs2's loader
+  keeps a DLL registered after the programs that used it end, and
+  DosQueryModuleHandle finds it there; GetModuleHandle takes a module
+  from it only when this process uses it (Rs2Win16Selector 11: its
+  program, what it imports or loaded, and their imports). Delphi asks
+  for COMPLIB.DCL before loading it and, finding the one of a Delphi
+  that ended, said it was "already loaded" until the system was
+  restarted.
 - **EM_SETHANDLE**: View Readme gives its edit control the text in a
   local block of a segment it made with LocalInit; the control takes
   the text from there.
@@ -1038,7 +1053,9 @@ arm64 binaries in `armo64/`) into `~/opt/watcom`, or set `WATCOM`.
 `userland/win16test/bin/`, and `cargo xtask build` (and `iso`) puts them
 on drive C: as `C:\RS2\*.EXE` when Open Watcom is installed.
 
-- `HELLO16.EXE`: the hello world (`hello16.c`).
+- `HELLO16.EXE`: the hello world (`hello16.c`); `HELLO16 GPF` faults,
+  `HELLO16 DLL` loads `W16DLL.DLL` (`w16dll.c`, built as a DLL) and ends
+  without freeing it, for W16TEST.
 - `MENU16.EXE`: menus and accelerators (`menu16.c`, `menu16.rc`).
 - `DLG16.EXE`: a dialog with every control (`dlg16.c`, `dlg16.rc`).
 - `NOTE16.EXE`: a Notepad on the edit control, with the common dialogs

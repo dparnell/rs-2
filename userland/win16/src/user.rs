@@ -1960,13 +1960,21 @@ fn move_window(h: u16, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> bool {
     // screen.
     let ph = wnd(parent).filter(|_| child).map_or(screen_size().1, |p| client_height(p.client));
     let (mut cx, mut cy) = (cx, cy);
+    let mut swp = Swp::default();
+    unsafe { WinQueryWindowPos(f, &mut swp) };
     if fl & SWP_SIZE == 0 {
-        let mut swp = Swp::default();
-        unsafe { WinQueryWindowPos(f, &mut swp) };
         cx = swp.cx;
         cy = swp.cy;
     }
-    let ok = unsafe { WinSetWindowPos(f, HWND_TOP, x, ph - y - cy, cx, cy, fl) != 0 };
+    // Sized without moving (SWP_NOMOVE): Windows keeps the top-left
+    // corner where it is, PM the bottom-left. Delphi's combo boxes are
+    // made as high as their dropped list this way.
+    let (fl, x, py) = if fl & (SWP_SIZE | SWP_MOVE) == SWP_SIZE && cy != swp.cy {
+        (fl | SWP_MOVE, swp.x, swp.y + swp.cy - cy)
+    } else {
+        (fl, x, ph - y - cy)
+    };
+    let ok = unsafe { WinSetWindowPos(f, HWND_TOP, x, py, cx, cy, fl) != 0 };
     if fl & SWP_SIZE != 0 {
         layout_frame(h);
     }

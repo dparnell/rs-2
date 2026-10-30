@@ -2051,6 +2051,68 @@ static void notebook_tests(HINSTANCE hInst)
     DestroyWindow(top);
 }
 
+/* SetWindowPos with SWP_NOMOVE keeps the top-left corner (Delphi makes
+ * a combo box as high as its dropped list this way, as the user clicks
+ * it: the field must stay where it is, under the mouse). */
+static void nomove_tests(HINSTANCE hInst)
+{
+    HWND top, cb, st;
+    RECT pr, r;
+
+    top = CreateWindow("W16Size", "nomove", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 40, 40, 300, 220, NULL, NULL, hInst, NULL);
+    cb = CreateWindow("COMBOBOX", "", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST, 10, 30, 150, 100, top, NULL, hInst, NULL);
+    st = CreateWindow("STATIC", "x", WS_CHILD | WS_VISIBLE, 10, 80, 50, 20, top, NULL, hInst, NULL);
+    SendMessage(cb, CB_ADDSTRING, 0, (LPARAM)(LPSTR)"one");
+    GetWindowRect(cb, &r);
+    ScreenToClient(top, (POINT FAR *)&r);
+    SetWindowPos(cb, 0, 0, 0, 150, 120, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    GetWindowRect(cb, &pr);
+    ScreenToClient(top, (POINT FAR *)&pr);
+    check(pr.top == r.top && pr.left == r.left, "SetWindowPos SWP_NOMOVE of a combo box (its dropped height): the field stays");
+    SetWindowPos(st, 0, 0, 0, 50, 60, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    GetWindowRect(st, &r);
+    r.bottom -= r.top;
+    ScreenToClient(top, (POINT FAR *)&r);
+    check(r.top == 80 && r.left == 10 && r.bottom == 60, "SetWindowPos SWP_NOMOVE: the top-left corner stays, the window grows down");
+    DestroyWindow(top);
+}
+
+/* A program that loaded a DLL and ended (without freeing it) leaves no
+ * trace: the DLL is not loaded here (Delphi refuses to start a second
+ * time when GetModuleHandle finds COMPLIB.DCL), and loading it runs its
+ * LibMain in this process. */
+static void dll_tests(void)
+{
+    char buf[8];
+    DWORD t0;
+    MSG msg;
+    HINSTANCE d;
+    int (FAR PASCAL *f)(void);
+
+    WritePrivateProfileString("run", "value", "", "W16DLL.INI");
+    check(WinExec("C:\\RS2\\HELLO16.EXE DLL", SW_SHOWMINNOACTIVE) > 32, "WinExec(HELLO16 DLL): it loads W16DLL and ends");
+    t0 = GetTickCount();
+    buf[0] = 0;
+    while (buf[0] == 0 && GetTickCount() - t0 < 10000) {
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            DispatchMessage(&msg);
+        GetPrivateProfileString("run", "value", "", buf, sizeof buf, "W16DLL.INI");
+    }
+    check(lstrcmp(buf, "42") == 0, "the other program's W16DLL ran its LibMain");
+    /* It ends right after writing. */
+    t0 = GetTickCount();
+    while (GetTickCount() - t0 < 1500)
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            DispatchMessage(&msg);
+    check(GetModuleHandle("W16DLL") == 0, "a DLL of a program that ended is not loaded here (GetModuleHandle)");
+    d = LoadLibrary("W16DLL.DLL");
+    f = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(void))GetProcAddress(d, "W16DLLVALUE") : NULL;
+    check(f && f() == 42, "LoadLibrary of it again: its LibMain runs here");
+    check(GetModuleHandle("W16DLL") == d, "GetModuleHandle finds it now");
+    if (d > HINSTANCE_ERROR)
+        FreeLibrary(d);
+}
+
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
 {
     out("w16test: rs2's native Win16 layer\r\n");
@@ -2064,6 +2126,8 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     toolhelp_tests(hInst);
     installer_tests(hInst);
     notebook_tests(hInst);
+    nomove_tests(hInst);
+    dll_tests();
     sprintf(line, "w16test done: %d failure(s)\r\n", failures);
     out(line);
     return failures;

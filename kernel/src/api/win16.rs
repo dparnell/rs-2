@@ -134,7 +134,12 @@ pub fn read_task(c: &mut Ctx) -> u32 {
 /// 16-bit code (2), its base and limit kept. Returns the
 /// selector or value, 0 (or 0xFFFFFFFF for 1 and 5) on error; 2-4 return
 /// 1 on success. 10: the selectors of the block `sel` starts each reach
-/// its end (Windows' huge blocks), 1 on success.
+/// its end (Windows' huge blocks), 1 on success. 11: 1 if this process
+/// uses the module whose handle is `sel` (its program, what that imports,
+/// what it loaded with DosLoadModule, and their imports): the loader
+/// keeps DLLs registered after the processes that used them end, and a
+/// Windows program asking GetModuleHandle for one must not find another
+/// program's.
 pub fn selector(c: &mut Ctx) -> u32 {
     let (op, sel, value) = (c.arg(0), c.arg(1) as u16, c.arg(2));
     if op == 9 {
@@ -169,6 +174,21 @@ pub fn selector(c: &mut Ctx) -> u32 {
             tile += 0x1_0000;
         }
         return 1;
+    }
+    if op == 11 {
+        let mut todo = alloc::vec![c.process.exe.clone()];
+        todo.extend(c.process.loaded.lock().iter().map(|(m, _)| m.clone()));
+        let mut seen: alloc::vec::Vec<u16> = alloc::vec::Vec::new();
+        while let Some(m) = todo.pop() {
+            if m.hmte == sel {
+                return 1;
+            }
+            if !seen.contains(&m.hmte) {
+                seen.push(m.hmte);
+                todo.extend(m.imports.iter().cloned());
+            }
+        }
+        return 0;
     }
     if op == 8 {
         // This process's program or a DLL: another program's segments may

@@ -18,6 +18,12 @@ mkdir -p "$dir/bin" "$dir/obj"
 cd "$dir/obj"
 for src in "$dir"/*.c; do
     name=$(basename "$src" .c | tr a-z A-Z)
+    # W16DLL.C is a DLL.
+    if [ "$name" = W16DLL ]; then
+        wcl -q -bt=windows -bd -l=windows_dll -zW -fe="$name.DLL" "$src"
+        mv "$name.DLL" "$dir/bin/"
+        continue
+    fi
     wcl -q -bt=windows -l=windows -zW -fe="$name.EXE" "$src" lzexpand.lib ver.lib
     # Resources (NAME.rc) are bound into the program.
     rc="$dir/$(basename "$src" .c).rc"

@@ -162,11 +162,13 @@ pub fn handle(name: u32) -> u16 {
     if let Some(m) = MODULES.get().iter().find(|m| m.name == base) {
         return m.hinst;
     }
-    // A DLL the program imports: loaded with it.
+    // A DLL the program imports: loaded with it. (The system's list has
+    // DLLs of programs that ended too: Delphi refuses to start when it
+    // finds COMPLIB.DCL already loaded.)
     let mut z = base.clone();
     z.push(0);
     let mut hmod = 0;
-    if unsafe { os2::DosQueryModuleHandle(z.as_ptr(), &mut hmod) } == 0 {
+    if unsafe { os2::DosQueryModuleHandle(z.as_ptr(), &mut hmod) } == 0 && unsafe { crate::pm::Rs2Win16Selector(11, hmod, 0) } != 0 {
         return register(hmod);
     }
     0
