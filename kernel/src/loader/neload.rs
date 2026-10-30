@@ -94,7 +94,7 @@ pub fn load(
     let mut bases = Vec::with_capacity(segs.len());
     for &size in &sizes {
         let base = if dll {
-            vm::reserve_shared(size, None).ok_or(err::NOT_ENOUGH_MEMORY)?
+            if windows { vm::reserve_win16(size) } else { vm::reserve_shared(size, None) }.ok_or(err::NOT_ENOUGH_MEMORY)?
         } else {
             let sp = space.as_deref_mut().unwrap();
             // Reserve as we go so later segments get distinct tiles.
