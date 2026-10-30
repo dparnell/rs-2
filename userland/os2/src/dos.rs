@@ -346,6 +346,47 @@ unsafe extern "C" {
     pub fn DosFreeModule(hmod: u32) -> APIRET;
     #[link_name = "DOSCALLS.319"]
     pub fn DosQueryModuleHandle(name: *const u8, phmod: *mut u32) -> APIRET;
+    #[link_name = "DOSCALLS.320"]
+    pub fn DosQueryModuleName(hmod: u32, cb: u32, buf: *mut u8) -> APIRET;
+    #[link_name = "DOSCALLS.317"]
+    pub fn DosDebug(pdbgbuf: *mut UDb) -> APIRET;
+}
+
+/// DosDebug's buffer (Toolkit bsedos.h uDB_t).
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct UDb {
+    pub pid: u32,
+    pub tid: u32,
+    pub cmd: i32,
+    pub value: u32,
+    pub addr: u32,
+    pub buffer: u32,
+    pub len: u32,
+    pub index: u32,
+    pub mte: u32,
+    pub eax: u32,
+    pub ecx: u32,
+    pub edx: u32,
+    pub ebx: u32,
+    pub esp: u32,
+    pub ebp: u32,
+    pub esi: u32,
+    pub edi: u32,
+    pub eflags: u32,
+    pub eip: u32,
+    /// CS, DS, ES, FS, GS, SS: limit, base, access, attributes, selector.
+    pub segs: [DbgSeg; 6],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct DbgSeg {
+    pub lim: u32,
+    pub base: u32,
+    pub acc: u8,
+    pub atr: u8,
+    pub sel: u16,
 }
 
 pub const OBJ_GIVEABLE: u32 = 0x0200;

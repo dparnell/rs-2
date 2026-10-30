@@ -518,6 +518,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (0, 306) => dos_query_mem,
         (0, 312) => dos_get_info_blocks,
         (0, 319) => dos_query_module_handle,
+        (0, 317) => super::debug::dos_debug,
         (0, 320) => dos_query_module_name,
         (0, 348) => dos_query_sys_info,
         (0, 354) => dos_set_exception_handler,

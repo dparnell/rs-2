@@ -83,9 +83,13 @@ switch_stacks:
 // First switch into a new thread lands here with rsp at its TrapFrame.
 thread_trampoline:
     call {finish}
+    // A debuggee's new thread may be held before its first instruction.
+    mov rdi, rsp
+    call {first}
     jmp trap_return
 "#,
     finish = sym finish_switch,
+    first = sym crate::api::debug::first_user_return,
 );
 
 unsafe extern "C" {

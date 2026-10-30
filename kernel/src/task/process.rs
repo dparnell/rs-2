@@ -112,6 +112,8 @@ pub struct Process {
     pub win16_int: AtomicU32,
     /// The process debugging this Windows task (RS2API 423), 0 if none.
     pub win16_debugger: AtomicU32,
+    /// Under DosDebug control (api/debug.rs).
+    pub debugged: core::sync::atomic::AtomicBool,
 }
 
 /// Thread-local memory: dwords per thread (in the process information area).
@@ -180,6 +182,9 @@ pub struct ExecParams<'a> {
     pub detached: bool,
     /// Session to run in.
     pub session: u32,
+    /// Started under DosDebug control (EXEC_TRACE, TraceOpt): thread 1
+    /// waits for its debugger before its first instruction.
+    pub traced: bool,
 }
 
 pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
@@ -314,6 +319,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         }),
         win16_int: AtomicU32::new(0),
         win16_debugger: AtomicU32::new(0),
+        debugged: core::sync::atomic::AtomicBool::new(p.traced),
     });
     let stack_bottom = stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000));
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;
@@ -325,6 +331,9 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
     let calls = crate::api::module::init_order(core::slice::from_ref(&exe), &proc);
     crate::api::module::start(&proc, &t, t.user_frame(), calls, true, None);
     PROCESSES.lock().push(proc.clone());
+    if p.traced {
+        crate::api::debug::traced(&proc);
+    }
     sched::start(t);
     Ok(proc)
 }
@@ -518,6 +527,7 @@ impl Process {
             .filter(|t| t.state() != super::thread::State::Dead)
             .count();
         if alive > 0 {
+            crate::api::debug::thread_ended(self, sched::current().tid);
             return;
         }
         {
@@ -536,6 +546,7 @@ impl Process {
         crate::api::avio::process_ended(self.pid);
         crate::net::socket::process_ended(self.pid);
         crate::audio::process_ended(self.pid);
+        crate::api::debug::process_ended(self);
         // The program's module (and the file image it keeps).
         loader::unregister_exe(&self.exe);
         crate::session::process_ended(self.pid, self.exit_info().map_or(0, |e| e.code));

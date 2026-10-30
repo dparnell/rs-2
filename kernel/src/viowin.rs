@@ -88,6 +88,7 @@ pub fn ensure_host(env: Vec<String>) -> bool {
         handles: Vec::new(),
         detached: true,
         session: if pm != 0 { pm } else { 1 },
+        traced: false,
     });
     match r {
         Ok(p) => {

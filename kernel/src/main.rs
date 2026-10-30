@@ -243,6 +243,7 @@ pub mod boot {
             handles: Vec::new(),
             detached,
             session: 1,
+            traced: false,
         });
         match r {
             Ok(p) => Some(p.pid),

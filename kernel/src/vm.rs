@@ -453,6 +453,10 @@ impl AddressSpace {
     /// Release the object starting at `base`.
     pub fn free(&mut self, base: u32) -> Result<(), VmError> {
         let r = self.regions.remove(&base).ok_or(VmError::InvalidAddress)?;
+        // A debugger's aliases of the pages go first (DBG_N_AliasFree).
+        if matches!(r.backing, Backing::Private) {
+            crate::api::debug::memory_freed(self.root, r.base, r.base + r.size);
+        }
         let mut frames = Vec::new();
         let mut unmapped = false;
         for i in 0..r.size / PAGE {
@@ -611,6 +615,17 @@ impl AddressSpace {
         if !self.check(addr, data.len() as u32, true) {
             return false;
         }
+        self.copy_in(addr, data)
+    }
+
+    /// A debugger's write (DosDebug): committed pages, whatever their
+    /// protection (breakpoints go into code).
+    pub fn debug_write(&mut self, addr: u32, data: &[u8]) -> bool {
+        self.check(addr, data.len() as u32, false) && self.copy_in(addr, data)
+    }
+
+    /// Copy into pages that are present.
+    fn copy_in(&mut self, addr: u32, data: &[u8]) -> bool {
         // The pages may be read-only for the user (loader writes): go through
         // the physical frames.
         let mut done = 0usize;
@@ -818,6 +833,56 @@ impl AddressSpace {
         }
         Some(desc_base(d).wrapping_add(off))
     }
+}
+
+/// Map `len` bytes at `addr` of `src` into `dst` (DosDebug's
+/// DBG_C_MapROAlias/MapRWAlias): the alias shares the frames of `src`'s
+/// pages. Returns the address of `addr`'s byte in `dst`.
+pub fn alias(src: &SpinLock<AddressSpace>, dst: &SpinLock<AddressSpace>, addr: u32, len: u32, write: bool) -> Result<u32, u32> {
+    if len == 0 {
+        return Err(87);
+    }
+    let first = addr & !(PAGE - 1);
+    let end = addr.checked_add(len).ok_or(87u32)?.next_multiple_of(PAGE);
+    let frames: Vec<u64> = {
+        let mut s = src.lock();
+        if !s.check(first, end - first, write) {
+            return Err(487);
+        }
+        let mut v = Vec::new();
+        let mut p = first;
+        while p < end {
+            let Some(pa) = paging::translate(s.root, p as u64) else { return Err(487) };
+            v.push(pa & paging::ADDR_MASK);
+            p += PAGE;
+        }
+        v
+    };
+    let size = end - first;
+    let flags = pag::READ | pag::COMMIT | if write { pag::WRITE } else { 0 };
+    let mut d = dst.lock();
+    let base = d.find_private(size).ok_or(8u32)?;
+    let n = frames.len();
+    // Device-style frames: the alias never frees them.
+    let obj = Arc::new(SharedMem {
+        base,
+        size,
+        name: None,
+        flags,
+        frames: SpinLock::new(frames),
+        pages: SpinLock::new(vec![PageState::Committed; n]),
+        device: true,
+    });
+    d.insert(Region {
+        base,
+        size,
+        flags,
+        pages: Vec::new(),
+        backing: Backing::Shared(obj),
+        seg: SegKind::Data,
+        seg_limit: None,
+    });
+    Ok(base + (addr - first))
 }
 
 impl Drop for AddressSpace {

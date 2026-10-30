@@ -18,7 +18,9 @@ use crate::vm::{self, pag, SegKind};
 const EXEC_SYNC: u32 = 0;
 const EXEC_ASYNC: u32 = 1;
 const EXEC_ASYNCRESULT: u32 = 2;
+const EXEC_TRACE: u32 = 3;
 const EXEC_BACKGROUND: u32 = 4;
+const EXEC_ASYNCRESULTDB: u32 = 6;
 
 /// Read a double-NUL terminated block of strings.
 pub(super) fn read_block(c: &Ctx, addr: u32, max: usize) -> Option<Vec<String>> {
@@ -95,7 +97,7 @@ fn exec(c: &mut Ctx) -> u32 {
         }
     }
     let mode = flags & 7;
-    if !matches!(mode, EXEC_SYNC | EXEC_ASYNC | EXEC_ASYNCRESULT | EXEC_BACKGROUND) {
+    if !matches!(mode, EXEC_SYNC | EXEC_ASYNC | EXEC_ASYNCRESULT | EXEC_TRACE | EXEC_BACKGROUND | EXEC_ASYNCRESULTDB) {
         return err::INVALID_FUNCTION;
     }
     // A DOS program runs in a DOS session of its own (in a window when
@@ -120,6 +122,7 @@ fn exec(c: &mut Ctx) -> u32 {
         handles: inherited_handles(&c.process),
         detached: mode == EXEC_ASYNC || mode == EXEC_BACKGROUND,
         session: c.process.session.load(core::sync::atomic::Ordering::Relaxed),
+        traced: mode == EXEC_TRACE || mode == EXEC_ASYNCRESULTDB,
     });
     let child = match r {
         Ok(p) => p,

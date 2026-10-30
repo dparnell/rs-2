@@ -129,6 +129,10 @@ pub fn user_exception(f: &mut TrapFrame) {
             }
         }
     }
+    // Breakpoints and single steps of a program under DosDebug.
+    if crate::api::debug::trap(f, &p, &t) {
+        return;
+    }
     if crate::api::win16::debug_trap(f, &p, &t) {
         return;
     }
@@ -189,6 +193,8 @@ pub fn before_user_return(f: &mut TrapFrame) -> bool {
     }
     let Some(p) = t.process() else { return false };
     crate::api::proc::hold_if_needed(&t, &p);
+    // A debuggee stops while its debugger has it stopped.
+    crate::api::debug::hold(&t, &p, f);
     if crate::api::proc::exit_list_step(&t, &p, f) || t.exit_requested() {
         return true;
     }
