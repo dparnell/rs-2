@@ -123,6 +123,10 @@ unsafe extern "C" {
     fn GpiSetMarker(hps: u32, s: i32) -> u32;
     #[link_name = "PMGPI.352"]
     fn GpiBeginArea(hps: u32, fl: u32) -> u32;
+    #[link_name = "PMGPI.650"]
+    fn GpiPolygons(hps: u32, n: u32, p: *const Polygon, fl: u32, model: u32) -> i32;
+    #[link_name = "PMGPI.560"]
+    fn GpiFloodFill(hps: u32, fl: i32, color: i32) -> i32;
     #[link_name = "PMGPI.385"]
     fn GpiEndArea(hps: u32) -> i32;
     #[link_name = "PMGPI.354"]
@@ -305,6 +309,13 @@ const CHS_OPAQUE: u32 = 1;
 const CHS_CLIP: u32 = 0x10;
 const MAKEFIXED: i32 = 0x10000;
 
+/// POLYGON: ulPoints, aPointl.
+#[repr(C)]
+struct Polygon {
+    n: u32,
+    pts: *const PointL,
+}
+
 fn pt(x: i32, y: i32) -> PointL {
     PointL { x, y }
 }
@@ -424,6 +435,30 @@ fn self_checks(hab: u32) {
             GpiEndArea(m2.hps);
             check(name, pel(&m2, 5, 5) == 0x0000ff && (pel(&m2, 15, 15) == 0xffffff) == hole);
         }
+        // GpiPolygons (the Open Watcom installer's): the first polygon
+        // starts at the current position, the others at their first point;
+        // POLYGON_ALTERNATE leaves the overlap empty.
+        GpiErase(m2.hps);
+        GpiSetColor(m2.hps, CLR_RED);
+        GpiMove(m2.hps, &pt(2, 2));
+        let a = [pt(20, 2), pt(20, 20), pt(2, 20)];
+        let b = [pt(10, 10), pt(29, 10), pt(29, 29), pt(10, 29)];
+        let polys = [Polygon { n: 3, pts: a.as_ptr() }, Polygon { n: 4, pts: b.as_ptr() }];
+        let rc = GpiPolygons(m2.hps, 2, polys.as_ptr(), 0, 0);
+        check("GpiPolygons", rc == 1 && pel(&m2, 5, 5) == 0xff0000 && pel(&m2, 25, 25) == 0xff0000 && pel(&m2, 15, 15) == 0xffffff && pel(&m2, 25, 5) == 0xffffff);
+        // GpiFloodFill from the current position: FF_BOUNDARY up to the
+        // red outline, then FF_SURFACE over the blue pels.
+        GpiErase(m2.hps);
+        GpiSetColor(m2.hps, CLR_RED);
+        GpiMove(m2.hps, &pt(4, 4));
+        GpiBox(m2.hps, DRO_OUTLINE, &pt(27, 27), 0, 0);
+        GpiSetColor(m2.hps, CLR_BLUE);
+        GpiMove(m2.hps, &pt(15, 15));
+        let rc = GpiFloodFill(m2.hps, 0, CLR_RED);
+        check("GpiFloodFill FF_BOUNDARY", rc == 1 && pel(&m2, 15, 15) == 0x0000ff && pel(&m2, 5, 26) == 0x0000ff && pel(&m2, 4, 4) == 0xff0000 && pel(&m2, 2, 2) == 0xffffff);
+        GpiSetColor(m2.hps, CLR_GREEN);
+        let rc = GpiFloodFill(m2.hps, 1, CLR_BLUE);
+        check("GpiFloodFill FF_SURFACE", rc == 1 && pel(&m2, 26, 5) == 0x00ff00 && pel(&m2, 30, 30) == 0xffffff);
         // Clip region: lines only inside it.
         GpiErase(m2.hps);
         GpiSetColor(m2.hps, CLR_NEUTRAL);

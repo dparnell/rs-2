@@ -3,7 +3,7 @@
 //! through Open32's calls (reg.rs), owner drawing (owner.rs),
 //! presentation parameters (pres.rs), PMBIDI (bidi.rs), AVIO (avio.rs), lazy drag and
 //! DrgDragFiles (drag.rs), a Windows program's Application Error
-//! (win16.rs). Each check
+//! (win16.rs), what the Open Watcom installer needs (owatcom.rs). Each check
 //! prints PASS or FAIL; the last line is "pmxtest done: N failure(s)"
 //! and the exit code N. `PMXTEST CHILD` is the second process the system
 //! hooks are checked in, `PMXTEST DDESERVER` the DDE server; `PMXTEST
@@ -24,6 +24,7 @@ mod bidi;
 mod dde;
 mod drag;
 mod hooks;
+mod owatcom;
 mod owner;
 mod pm;
 mod pres;
@@ -183,6 +184,7 @@ fn main(s: &Startup) -> u32 {
         avio::avio_checks(hab, client);
         drag::drag_checks(hab, client);
         win16::win16_checks(hab);
+        owatcom::owatcom_checks(hab, hmq, client);
     }
     unsafe {
         WinDestroyWindow(frame);
