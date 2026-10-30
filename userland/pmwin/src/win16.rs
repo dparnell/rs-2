@@ -66,6 +66,13 @@ core::arch::global_asm!(
     "xor ax, ax",
     "xor dx, dx",
     ".byte 0xca, 4, 0",
+    // PMWIN 328 (IBM's PMMERGE 2163, among the 16-bit debugging entries;
+    // Turbo Debugger's TDDEBUG imports it): 0, four bytes of arguments.
+    ".globl W16NOP328",
+    "W16NOP328:",
+    "xor ax, ax",
+    "xor dx, dx",
+    ".byte 0xca, 4, 0",
     ".globl WIN16THROW",
     "WIN16THROW:",
     "mov bx, sp",

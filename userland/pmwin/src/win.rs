@@ -1256,6 +1256,40 @@ pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
     1
 }
 
+/// WinGetClipPS(hwnd, hwndClip, fl): WinGetPS with the clipping chosen by
+/// PSF_CLIPCHILDREN (0x10); the other PSF_* flags and hwndClip are taken
+/// as WinGetPS does (siblings above clip).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetClipPS(h: u32, _clip: u32, fl: u32) -> u32 {
+    let s = st();
+    if s.desk.get(h).is_none() {
+        return 0;
+    }
+    let vis = s.desk.visible_region(h, fl & 0x10 != 0);
+    let o = s.desk.origin(h);
+    let hps = gpiapi::create(s, h, o, vis.rects);
+    gpiapi::track_window(st(), hps, None);
+    hps
+}
+
+/// WinSetSysModalWindow(hwndDesktop, hwnd): recorded for
+/// WinQuerySysModalWindow (input is not limited to it).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetSysModalWindow(_desk: u32, h: u32) -> u32 {
+    let s = st();
+    if h != 0 && !s.desk.exists(h) {
+        return 0;
+    }
+    s.sysmodal = h;
+    1
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQuerySysModalWindow(_desk: u32) -> u32 {
+    let s = st();
+    if s.desk.exists(s.sysmodal) { s.sysmodal } else { 0 }
+}
+
 /// WinGetPS(hwnd): a presentation space clipped to the visible region.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinGetPS(h: u32) -> u32 {

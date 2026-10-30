@@ -83,6 +83,7 @@ forward! {
     WinFlashWindow = "PMWIN.745";
     WinFocusChange = "PMWIN.746";
     WinFreeErrorInfo = "PMWIN.748";
+    WinGetClipPS = "PMWIN.749";
     WinGetCurrentTime = "PMWIN.750";
     WinGetErrorInfo = "PMWIN.751";
     WinGetKeyState = "PMWIN.752";
@@ -114,6 +115,7 @@ forward! {
     WinLoadPointer = "PMWIN.780";
     WinLoadProcedure = "PMWIN.986";
     WinLoadString = "PMWIN.781";
+    WinLockInput = "PMWIN.995";
     WinLockWindowUpdate = "PMWIN.784";
     WinMapDlgPoints = "PMWIN.787";
     WinMapWindowPoints = "PMWIN.788";
@@ -159,10 +161,12 @@ forward! {
     WinQueryPresParam = "PMWIN.939";
     WinQueryQueueInfo = "PMWIN.824";
     WinQueryQueueStatus = "PMWIN.825";
+    WinQuerySendMsg = "PMWIN.990";
     WinQuerySwitchEntry = "PMSHAPI.124";
     WinQuerySwitchHandle = "PMSHAPI.125";
     WinQuerySwitchList = "PMSHAPI.126";
     WinQuerySysColor = "PMWIN.826";
+    WinQuerySysModalWindow = "PMWIN.827";
     WinQuerySysPointer = "PMWIN.828";
     WinQuerySysPointerData = "PMWIN.1003";
     WinQuerySystemAtomTable = "PMWIN.830";
@@ -182,6 +186,7 @@ forward! {
     WinQueryWindowTextLength = "PMWIN.842";
     WinQueryWindowULong = "PMWIN.843";
     WinQueryWindowUShort = "PMWIN.844";
+    WinQueueFromID = "PMWIN.993";
     WinRealizePalette = "PMWIN.941";
     WinRegisterClass = "PMWIN.926";
     WinRegisterUserDatatype = "PMWIN.845";
@@ -190,6 +195,7 @@ forward! {
     WinReleasePS = "PMWIN.848";
     WinRemovePresParam = "PMWIN.940";
     WinRemoveSwitchEntry = "PMSHAPI.129";
+    WinReplyMsg = "PMWIN.991";
     WinRequestMutexSem = "PMWIN.979";
     WinScrollWindow = "PMWIN.849";
     WinSendDlgItemMsg = "PMWIN.903";
@@ -217,6 +223,7 @@ forward! {
     WinSetRect = "PMWIN.868";
     WinSetRectEmpty = "PMWIN.869";
     WinSetSysColors = "PMWIN.871";
+    WinSetSysModalWindow = "PMWIN.872";
     WinSetSysValue = "PMWIN.873";
     WinSetWindowBits = "PMWIN.874";
     WinSetWindowPos = "PMWIN.875";
@@ -233,6 +240,7 @@ forward! {
     WinSubtractRect = "PMWIN.887";
     WinSwitchToProgram = "PMSHAPI.131";
     WinTerminate = "PMWIN.888";
+    WinThreadAssocQueue = "PMWIN.994";
     WinTrackRect = "PMWIN.890";
     WinTranslateAccel = "PMWIN.904";
     WinUnionRect = "PMWIN.891";
@@ -242,6 +250,7 @@ forward! {
     WinValidateRect = "PMWIN.895";
     WinValidateRegion = "PMWIN.896";
     WinWaitEventSem = "PMWIN.978";
+    WinWaitMsg = "PMWIN.897";
     WinWindowFromID = "PMWIN.899";
     WinWindowFromPoint = "PMWIN.900";
 }

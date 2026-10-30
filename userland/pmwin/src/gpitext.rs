@@ -531,6 +531,33 @@ fn metrics(font: usize, f: &gpi::font::Font, scale: (f64, f64), w: &dyn Fn(f64, 
     m
 }
 
+/// GpiQueryKerningPairs(hps, lCount, akrnprData): rs2's fonts have no
+/// kerning pairs: 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiQueryKerningPairs(_hps: u32, _count: i32, _out: *mut u8) -> i32 {
+    0
+}
+
+/// GpiQueryFaceString(hps, pszFamilyName, pfnd, lLength, pszFaceName):
+/// the face of a family with the FACENAMEDESC's weight, width and type;
+/// rs2 names faces as their families: the family name, its length
+/// returned (0 if it does not fit).
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiQueryFaceString(_hps: u32, family: *const u8, _attrs: *const u8, len: i32, face: *mut u8) -> u32 {
+    if family.is_null() {
+        return 0;
+    }
+    let n = (0..).take_while(|&i| unsafe { *family.add(i) } != 0).count();
+    if face.is_null() || len <= n as i32 {
+        return 0;
+    }
+    unsafe {
+        core::ptr::copy(family, face, n);
+        *face.add(n) = 0;
+    }
+    n as u32
+}
+
 /// GpiQueryFontMetrics(hps, lMetricsLength, pfmMetrics)
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiQueryFontMetrics(hps: u32, len: i32, out: *mut u8) -> u32 {

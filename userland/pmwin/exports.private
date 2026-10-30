@@ -17,3 +17,8 @@ WinRemoveSwitchEntry 9013
 WinQuerySwitchHandle 9014
 WinQuerySwitchList 9015
 WinSwitchToProgram 9016
+WinQuerySendMsg 990
+WinReplyMsg 991
+WinQueueFromID 993
+WinThreadAssocQueue 994
+WinLockInput 995
