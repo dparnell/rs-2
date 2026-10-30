@@ -14,6 +14,16 @@ unsafe extern "C" {
     fn D16GetInfoSeg();
     #[link_name = "DOSCALLS.145"]
     fn D16CreateThread();
+    #[link_name = "DOSCALLS.34"]
+    fn D16AllocSeg();
+    #[link_name = "DOSCALLS.39"]
+    fn D16FreeSeg();
+    #[link_name = "DOSCALLS.146"]
+    fn D16SubSet();
+    #[link_name = "DOSCALLS.147"]
+    fn D16SubAlloc();
+    #[link_name = "DOSCALLS.148"]
+    fn D16SubFree();
     static at16_create: u8;
     static at16_thread: u8;
 }
@@ -75,7 +85,41 @@ core::arch::global_asm!(
     ".popsection",
 );
 
+/// 16-bit suballocation (DosSubSet, DosSubAlloc, DosSubFree): IBM's
+/// 16-bit layout, an 8-byte header, 4-byte granularity, areas from 12
+/// bytes (IPFC sets up 22-byte ones).
+fn suballoc() {
+    let gate = |f: unsafe extern "C" fn()| far(f as *const u8);
+    let mut sel = 0u16;
+    // DosAllocSeg(usSize, pSel, fAlloc)
+    let r = PascalCall::new().w(0x100).l(far(&raw mut sel as *const u8)).w(0).call(gate(D16AllocSeg)) & 0xffff;
+    check("16-bit DosAllocSeg", r == 0 && sel != 0);
+    let seg = flat((sel as u32) << 16) as *const u16;
+    let set = |flags: u16, size: u16| PascalCall::new().w(sel).w(flags).w(size).call(gate(D16SubSet)) & 0xffff;
+    let alloc = |size: u16| {
+        let mut off = 0u16;
+        let r = PascalCall::new().w(sel).l(far(&raw mut off as *const u8)).w(size).call(gate(D16SubAlloc)) & 0xffff;
+        (r, off)
+    };
+    let free = |off: u16, size: u16| PascalCall::new().w(sel).w(off).w(size).call(gate(D16SubFree)) & 0xffff;
+    check("DosSubSet below 12 bytes: ERROR_DOSSUB_BADSIZE", set(1, 8) == 313);
+    check("DosSubSet of 22 bytes", set(1, 0x16) == 0);
+    let w = |i: usize| unsafe { seg.add(i).read_volatile() };
+    check("its header: first free block at 8, 16 bytes", w(0) == 8 && w(1) == 16 && w(4) == 0 && w(5) == 16);
+    let (r1, a) = alloc(5);
+    let (r2, b) = alloc(4);
+    check("DosSubAlloc rounds to 4 bytes, first fit", r1 == 0 && a == 8 && r2 == 0 && b == 16);
+    let (r3, big) = alloc(12);
+    check("too large: ERROR_DOSSUB_NOMEM with the largest free size", r3 == 311 && big == 4);
+    check("DosSubFree of a block not given out: ERROR_DOSSUB_OVERLAP", free(22, 4) == 312);
+    check("DosSubFree merges the blocks back", free(a, 5) == 0 && free(b, 4) == 0 && w(0) == 8 && w(4) == 0 && w(5) == 16);
+    check("DosSubSet grows the area", set(0, 0x40) == 0 && w(1) == 56 && w(5) == 56);
+    check("but does not shrink it", set(0, 0x20) == 310);
+    PascalCall::new().w(sel).call(gate(D16FreeSeg));
+}
+
 pub fn run() {
+    suballoc();
     let gate = |f: unsafe extern "C" fn()| far(f as *const u8);
     let (mut gsel, mut lsel) = (0u16, 0u16);
     PascalCall::new().l(far(&raw mut gsel as *const u8)).l(far(&raw mut lsel as *const u8)).call(gate(D16GetInfoSeg));
