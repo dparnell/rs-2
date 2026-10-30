@@ -51,6 +51,16 @@ pub fn interrupt(p: *mut u16) {
         // database engine asks); nothing else is (AL stays).
         0x2f if r[AX] == 0x1000 => r[AX] = 0x10ff,
         0x2f => {}
+        // BIOS equipment list (the word at 40:10, as the BIOS data area
+        // has it): an FPU, a mouse, an 80x25 colour display. Resource
+        // Workshop asks for the coprocessor.
+        0x11 => r[AX] = 0x0026,
+        // BIOS video: the mode (AH 0Fh) is 80x25 colour text, page 0, as
+        // in a Windows 3.1 system VM (Turbo Debugger's TDWGUI.DLL asks).
+        0x10 if hi(r[AX]) == 0x0f => {
+            r[AX] = 0x5003;
+            r[BX] &= 0x00ff;
+        }
         // BIOS time of day: CX:DX the ticks (18.2 a second) since
         // midnight, AL whether midnight passed.
         0x1a if hi(r[AX]) == 0 => {
@@ -478,6 +488,9 @@ fn ok(r: &mut Regs) {
 }
 
 fn fail(r: &mut Regs, e: u32) {
+    if crate::tracing() {
+        trace(format_args!("W16 INT 21h AX={:04X} failed: {e}", r[AX]));
+    }
     r[AX] = dos_error(e) as u16;
     r[FLAGS] |= CF;
 }

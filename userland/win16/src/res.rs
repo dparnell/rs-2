@@ -68,6 +68,28 @@ fn image(hinst: u16) -> Option<&'static Image> {
     m.image.as_ref().filter(|i| i.table != 0)
 }
 
+/// The size of a module's automatic data segment in its file (its
+/// static data: the larger of the minimum allocation and the data in the
+/// file), found by the segment's selector.
+pub fn static_data_size(seg: u16) -> Option<u32> {
+    let m = crate::module::find(seg)?;
+    let path = crate::module::path_of(m.hmod)?;
+    let f = crate::module::read_file(&path, 0x10000)?;
+    let ne = l32(&f, 0x3c) as usize;
+    if w16(&f, ne) != 0x454e {
+        return None;
+    }
+    let auto = w16(&f, ne + 0x0e) as usize;
+    if auto == 0 {
+        return None;
+    }
+    let e = ne + w16(&f, ne + 0x22) as usize + (auto - 1) * 8;
+    let (off, len, min) = (w16(&f, e), w16(&f, e + 2), w16(&f, e + 6));
+    let len = if len == 0 && off != 0 { 0x10000 } else { len as u32 };
+    let min = if min == 0 { 0x10000 } else { min as u32 };
+    Some(len.max(min))
+}
+
 fn read_image(path: &[u8]) -> Option<Image> {
     let file = crate::module::read_file(path, usize::MAX)?;
     let w = |o: usize| file.get(o..o + 2).map_or(0, |b| u16::from_le_bytes([b[0], b[1]]));

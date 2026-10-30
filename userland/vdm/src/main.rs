@@ -496,7 +496,10 @@ impl Host for Os2Host {
         let m = (mode.access() as u32).min(2) | share | OPEN_FLAGS_NOINHERIT | OPEN_FLAGS_FAIL_ON_ERROR;
         let rc = unsafe { DosOpen(p.as_ptr(), &mut h, &mut action, 0, 0, OPEN_ACTION_FAIL_IF_NEW | OPEN_ACTION_OPEN_IF_EXISTS, m, core::ptr::null_mut()) };
         if rc != 0 {
-            return Err(rc as u16);
+            // A file that is not there: OS/2's ERROR_OPEN_FAILED, DOS's
+            // "file not found" (the Delphi 1.01 patch's PATCH.EXE opens its
+            // temporary file first and creates it on error 2).
+            return Err(if rc == 110 { 2 } else { rc as u16 });
         }
         Ok(h)
     }

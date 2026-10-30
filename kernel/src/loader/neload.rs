@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use os2_exe::ne::{self, flags, sflags, target, Entry, SourceKind};
 
-use super::{err, import_target, load_imports, Export, Format, ImportBy, Module, Object, Start, Target};
+use super::{err, import_target, Export, Format, ImportBy, Module, Object, Start, Target};
 use crate::vm::{self, pag, AddressSpace, PageState, SegKind, SharedMem, PAGE};
 
 fn s(b: &[u8]) -> String {
@@ -63,7 +63,6 @@ pub fn load(
     } else {
         (import_names.clone(), alloc::vec![0; import_names.len()])
     };
-    let imports = load_imports(&load_names)?;
     // A Windows program's process has the BIOS data area (its DLLs'
     // __0040H imports point there too).
     if windows && !dll {
@@ -99,7 +98,7 @@ pub fn load(
     let mut next: Option<u32> = None;
     for (i, &size) in sizes.iter().enumerate() {
         let base = if dll {
-            vm::reserve_shared(size, None).ok_or(err::NOT_ENOUGH_MEMORY)?
+            if windows { vm::reserve_win16(size) } else { vm::reserve_shared(size, None) }.ok_or(err::NOT_ENOUGH_MEMORY)?
         } else {
             let sp = space.as_deref_mut().unwrap();
             // Reserve as we go so later segments get distinct tiles.
@@ -176,6 +175,22 @@ pub fn load(
         names.insert(s(n), ord);
     }
 
+    // The imported modules. Windows DLLs may import each other (Resource
+    // Workshop's WORKLIB1 and WORKLIB2): while a DLL loads, its exports
+    // (its segments have their addresses already) are listed as pending,
+    // and a module importing it meanwhile resolves its imports from there.
+    let own = m.name().map(s).unwrap_or_else(|_| super::module_name(path)).to_ascii_uppercase();
+    let _pending = (windows && dll).then(|| Pending::add(&own, &exports, &names));
+    let mut imports = Vec::with_capacity(load_names.len());
+    for n in &load_names {
+        if windows && Pending::has(&super::module_name(n)) {
+            imports.push(Err(super::module_name(n)));
+        } else {
+            imports.push(Ok(super::load_global(n)?));
+        }
+    }
+    let imports = Imports(imports);
+
     // Relocations.
     for (i, sg) in segs.iter().enumerate() {
         for r in m.relocs(sg).map_err(|_| err::BAD_EXE_FORMAT)? {
@@ -202,7 +217,7 @@ pub fn load(
                         }
                         Target::constant(crate::infoseg::bios_selector())
                     } else {
-                        let found = import_target(&imports, module, ImportBy::Ordinal(base + ordinal as u32));
+                        let found = imports.target(module, ImportBy::Ordinal(base + ordinal as u32));
                         let mname = import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?");
                         match found {
                             Ok(t) => t,
@@ -212,7 +227,7 @@ pub fn load(
                             // Dynalink").
                             Err(_) if base != 0 => {
                                 crate::trace!("loader: {path}: import {mname}.{ordinal} not found: undefined dynalink");
-                                import_target(&imports, module, ImportBy::Ordinal(super::WIN16_UNDEFINED))?
+                                imports.target(module, ImportBy::Ordinal(super::WIN16_UNDEFINED))?
                             }
                             Err(e) => {
                                 crate::trace!("loader: {path}: import {mname}.{ordinal} not found");
@@ -224,11 +239,11 @@ pub fn load(
                 }
                 ne::Target::ImportName { module, name_offset } => {
                     let name = m.imported_name(name_offset).map(s).map_err(|_| err::BAD_EXE_FORMAT)?;
-                    match import_target(&imports, module, ImportBy::Name(&name)) {
+                    match imports.target(module, ImportBy::Name(&name)) {
                         Ok(t) => t,
                         Err(_) if ord_bases.get(module as usize - 1).is_some_and(|&b| b != 0) => {
                             crate::trace!("loader: {path}: import {name} not found: undefined dynalink");
-                            import_target(&imports, module, ImportBy::Ordinal(super::WIN16_UNDEFINED))?
+                            imports.target(module, ImportBy::Ordinal(super::WIN16_UNDEFINED))?
                         }
                         Err(e) => {
                             crate::trace!("loader: {}: import {} not found", path, name);
@@ -361,7 +376,7 @@ pub fn load(
         objects,
         exports,
         names,
-        imports,
+        imports: imports.0.into_iter().flatten().collect(),
         start: if dll { None } else { start },
         init: if dll { start } else { None },
         per_process_init: windows || h.flags & flags::PER_PROCESS_INIT != 0,
@@ -369,6 +384,62 @@ pub fn load(
         global_init_done: core::sync::atomic::AtomicBool::new(false),
         image: Some(data.clone()),
     }))
+}
+
+/// Windows DLLs being loaded: name, exports, exported names.
+static PENDING: crate::sync::SpinLock<Vec<(String, Vec<Export>, BTreeMap<String, u16>)>> = crate::sync::SpinLock::new(Vec::new());
+
+/// A DLL listed in PENDING while it loads (removed when dropped).
+struct Pending(String);
+
+impl Pending {
+    fn add(name: &str, exports: &[Export], names: &BTreeMap<String, u16>) -> Pending {
+        let e = exports.iter().map(|e| match e {
+            Export::At(t) => Export::At(*t),
+            _ => Export::None,
+        });
+        PENDING.lock().push((name.to_string(), e.collect(), names.clone()));
+        Pending(name.to_string())
+    }
+
+    fn has(name: &str) -> bool {
+        PENDING.lock().iter().any(|p| p.0.eq_ignore_ascii_case(name))
+    }
+
+    fn target(name: &str, by: ImportBy<'_>) -> Result<Target, u32> {
+        let l = PENDING.lock();
+        let p = l.iter().find(|p| p.0.eq_ignore_ascii_case(name)).ok_or(err::MOD_NOT_FOUND)?;
+        let ord = match by {
+            ImportBy::Ordinal(o) => o,
+            ImportBy::Name(n) => p.2.get(n).or_else(|| p.2.iter().find(|(k, _)| k.eq_ignore_ascii_case(n)).map(|(_, v)| v)).copied().ok_or(err::PROC_NOT_FOUND)? as u32,
+        };
+        match p.1.get(ord.wrapping_sub(1) as usize) {
+            Some(Export::At(t)) => Ok(*t),
+            _ => Err(err::INVALID_ORDINAL),
+        }
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        let mut l = PENDING.lock();
+        if let Some(i) = l.iter().rposition(|p| p.0 == self.0) {
+            l.remove(i);
+        }
+    }
+}
+
+/// A module's imports: loaded modules, or the names of DLLs still loading.
+struct Imports(Vec<Result<Arc<Module>, String>>);
+
+impl Imports {
+    fn target(&self, module: u16, by: ImportBy<'_>) -> Result<Target, u32> {
+        match self.0.get((module as usize).wrapping_sub(1)) {
+            Some(Ok(m)) => import_target(core::slice::from_ref(m), 1, by),
+            Some(Err(name)) => Pending::target(name, by),
+            None => Err(err::BAD_EXE_FORMAT),
+        }
+    }
 }
 
 fn apply(img: &mut [u8], at: usize, kind: SourceKind, t: &Target, additive: bool) -> Result<(), u32> {

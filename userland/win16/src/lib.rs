@@ -535,6 +535,8 @@ entries! {
     u_setkeyboardstate = 2223, 4;
     u_switchtothiswindow = 2172, 4;
     u_endmenu = 2187, 0;
+    u_repaintscreen = 2275, 0;
+    u_seteventhook = 2321, 4;
     u_getwindowtask = 2224, 2;
     u_enumtaskwindows = 2225, 10;
     u_getnextdlggroupitem = 2227, 6;
@@ -966,6 +968,9 @@ extern "C" fn dispatch(idx: u32, args: *const u8) -> u32 {
 fn dispatch_(idx: u32, args: *const u8) -> u32 {
     let size = arg_size(idx);
     let mut a = Pascal::new(args, size);
+    if (2000..4000).contains(&idx) {
+        user::ensure_pm();
+    }
     // Printers' DCs and the printing calls (before bitmap.rs's display
     // DCs).
     if let Some(r) = print::call(idx, &mut Pascal::new(args, size)) {

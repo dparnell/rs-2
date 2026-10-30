@@ -222,6 +222,32 @@ pub fn reserve_shared(size: u32, at: Option<u32>) -> Option<u32> {
     }
 }
 
+/// Where Windows DLLs' segments go (docs/WIN16.md): selectors below
+/// 8000h, as on Windows, where programs compare selectors and instance
+/// handles as signed numbers and a DLL's hInstance (its DGROUP selector)
+/// is what LoadLibrary returns.
+pub const WIN16_DLL_BASE: u32 = 0x0800_0000;
+pub const WIN16_DLL_TOP: u32 = 0x1000_0000;
+
+/// Reserve `size` bytes (rounded to 64 KB) for a Windows DLL's segment,
+/// from the bottom of its window; the shared arena when that is full.
+pub fn reserve_win16(size: u32) -> Option<u32> {
+    let size = size.next_multiple_of(TILE);
+    let mut a = shared_arena().lock();
+    let mut base = WIN16_DLL_BASE;
+    while base + size <= WIN16_DLL_TOP {
+        match a.iter().find(|&(&b, &s)| base < b + s && b < base + size) {
+            Some((&b, &s)) => base = (b + s).next_multiple_of(TILE),
+            None => {
+                a.insert(base, size);
+                return Some(base);
+            }
+        }
+    }
+    drop(a);
+    reserve_shared(size, None)
+}
+
 pub fn release_shared(base: u32) {
     shared_arena().lock().remove(&base);
 }

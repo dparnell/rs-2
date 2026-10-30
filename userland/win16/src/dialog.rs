@@ -205,9 +205,12 @@ pub fn create_dialog(hinst: u16, t: &[u8], owner: u16, proc_: u32, param: u32) -
             }
             _ => res::sz(t, &mut p).to_vec(),
         };
+        // An ordinal text (an icon static's icon, a custom control's
+        // bitmap) reaches the control as Windows passes it: 0xFF and the
+        // number.
         let text = match text_at(t, &mut p) {
             Text::Str(s) => s.to_vec(),
-            Text::Ord(_) => Vec::new(),
+            Text::Ord(v) => [&[0xff][..], &v.to_le_bytes()].concat(),
         };
         let extra = t.get(p).copied().unwrap_or(0) as usize;
         p += 1 + extra;

@@ -236,8 +236,10 @@ impl Desktop {
     }
 
     /// The part of the window that can be seen, in device coordinates:
-    /// clipped to its ancestors, minus siblings above it at every level,
-    /// and minus its own visible children if `clip_children`.
+    /// clipped to its ancestors, minus siblings above it at every level
+    /// (below the desktop only for windows with WS_CLIPSIBLINGS: as in
+    /// PM, the others draw over their siblings), and minus its own
+    /// visible children if `clip_children`.
     pub fn visible_region(&self, h: Hwnd, clip_children: bool) -> Region {
         if !self.is_showing(h) {
             return Region::new();
@@ -247,6 +249,10 @@ impl Desktop {
         while let Some(w) = self.get(cur) {
             let Some(p) = self.get(w.parent) else { break };
             g.intersect(&self.screen_rect(w.parent));
+            if w.parent != HWND_DESKTOP && w.style & crate::ws::CLIPSIBLINGS == 0 {
+                cur = w.parent;
+                continue;
+            }
             let above = p.children.iter().skip_while(|&&c| c != cur).skip(1);
             for &s in above {
                 if self.get(s).is_some_and(|x| x.visible_style() && x.style & crate::ws::TRANSPARENT == 0) {

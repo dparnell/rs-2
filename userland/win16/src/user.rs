@@ -56,6 +56,7 @@ pub const W_SHOWWINDOW: u16 = 0x0018;
 pub const W_CTLCOLOR: u16 = 0x0019;
 pub const W_CANCELMODE: u16 = 0x001f;
 pub const W_SETCURSOR: u16 = 0x0020;
+pub const W_NCHITTEST: u16 = 0x0084;
 pub const W_MOUSEACTIVATE: u16 = 0x0021;
 pub const W_NEXTDLGCTL: u16 = 0x0028;
 pub const W_DRAWITEM: u16 = 0x002b;
@@ -101,9 +102,11 @@ pub const W_USER: u16 = 0x0400;
 pub const WS_POPUP: u32 = 0x8000_0000;
 pub const WS_CHILD: u32 = 0x4000_0000;
 pub const WS_EX_TRANSPARENT: u32 = 0x0000_0020;
+const WS_EX_NOPARENTNOTIFY: u32 = 0x0000_0004;
 pub const WS_VISIBLE: u32 = 0x1000_0000;
 pub const WS_DISABLED: u32 = 0x0800_0000;
 pub const WS_CLIPCHILDREN: u32 = 0x0200_0000;
+const W_CLIPSIBLINGS: u32 = 0x0400_0000;
 pub const WS_CAPTION: u32 = 0x00c0_0000;
 pub const WS_BORDER: u32 = 0x0080_0000;
 pub const WS_DLGFRAME: u32 = 0x0040_0000;
@@ -220,6 +223,8 @@ struct User {
     /// The last message's time and position (GetMessageTime, GetMessagePos).
     msg_time: u32,
     msg_pos: u32,
+    /// SetEventHook's hook.
+    event_hook: u32,
 }
 
 static USER: Global<User> = Global::new(User {
@@ -235,6 +240,7 @@ static USER: Global<User> = Global::new(User {
     cascade: 0,
     msg_time: 0,
     msg_pos: 0,
+    event_hook: 0,
 });
 
 fn u() -> &'static mut User {
@@ -912,6 +918,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // DrawText(hdc, text, count, lpRect, format)
         85 => {
             let (hdc, s, n, r, fmt) = (a.w(), a.l(), a.i(), a.l(), a.w());
+            if crate::tracing() {
+                let t: alloc::vec::Vec<u8> = if n < 0 { far_str(s).unwrap_or(b"").to_vec() } else { unsafe { core::slice::from_raw_parts(flat(s), n as usize) }.to_vec() };
+                trace(format_args!("W16 DrawText {:?} {:?}", alloc::string::String::from_utf8_lossy(&t), read_rect(r)));
+            }
             gdi::draw_text(hdc, s, n, r, fmt) as u32
         }
         // MessageBeep(type)
@@ -1111,6 +1121,18 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             crate::menu::end_menu();
             0
         }
+        // RepaintScreen (undocumented): every window paints again.
+        275 => {
+            unsafe { WinInvalidateRect(HWND_DESKTOP, core::ptr::null(), 1) };
+            0
+        }
+        // SetEventHook(lpfn) (undocumented; debuggers take the keyboard
+        // and mouse events with it): the previous hook. The hook is kept
+        // but not called: input reaches the programs' queues as before.
+        321 => {
+            let f = a.l();
+            core::mem::replace(&mut u().event_hook, f)
+        }
         // GetWindowTask(hwnd)
         224 => {
             a.w();
@@ -1301,6 +1323,15 @@ pub fn register_message(name: &[u8]) -> u16 {
     crate::dde::add_global_atom(name)
 }
 
+/// PM for a USER or GDI call before InitApp: DLLs' LibMain run before
+/// the program's InitTask (BWCC's registers its messages there:
+/// RegisterWindowMessage is PM's atom table).
+pub fn ensure_pm() {
+    if TASK.get().hmq == 0 {
+        init_app();
+    }
+}
+
 fn init_app() -> u32 {
     let t = TASK.get();
     if t.hmq != 0 {
@@ -1439,6 +1470,14 @@ pub fn class_atom(ci: usize) -> u16 {
 }
 
 /// Frame creation flags for a window style.
+/// PM's WS_CLIPCHILDREN for a window's client when the Windows style
+/// has it. Without it the window draws over its children, as on Windows:
+/// BWCC's dialogs (BORDLG) draw their static texts themselves, over the
+/// BORSTATIC children they validate.
+fn pm_clip_children(style: u32) -> u32 {
+    if style & WS_CLIPCHILDREN != 0 { crate::pm::WS_CLIPCHILDREN } else { 0 }
+}
+
 fn frame_flags(style: u32, owned: bool) -> u32 {
     let mut f = FCF_NOBYTEALIGN;
     if style & WS_CAPTION == WS_CAPTION {
@@ -1489,6 +1528,12 @@ pub fn frame_insets(style: u32, menu: bool) -> (i32, i32, i32, i32) {
     let r = b + if style & WS_VSCROLL != 0 { q(SV_CXVSCROLL) } else { 0 };
     let bb = b + if style & WS_HSCROLL != 0 { q(SV_CYHSCROLL) } else { 0 };
     (b, top, r, bb)
+}
+
+/// The caption bar of a plain window with WS_CAPTION (a child window:
+/// top-level ones are PM frames), as AdjustWindowRect counts it.
+fn caption_height(nc: u32) -> i32 {
+    if nc & WS_CAPTION == WS_CAPTION { unsafe { WinQuerySysValue(HWND_DESKTOP, SV_CYTITLEBAR) } } else { 0 }
 }
 
 /// The border of a plain window (WS_THICKFRAME, WS_DLGFRAME, WS_BORDER).
@@ -1601,7 +1646,11 @@ pub fn create(c: &Create) -> u16 {
         let mut client = 0;
         let pm_parent = if mdi_child { wnd(parent).map_or(HWND_DESKTOP, |w| w.client) } else { HWND_DESKTOP };
         let fs = if mdi_child { WS_CLIPSIBLINGS } else { 0 };
-        let f = unsafe { WinCreateStdWindow(pm_parent, fs, &mut fcf, b"Win16Wnd\0".as_ptr(), text.as_ptr(), crate::pm::WS_CLIPCHILDREN, 0, 0, &mut client) };
+        let f = unsafe { WinCreateStdWindow(pm_parent, fs, &mut fcf, b"Win16Wnd\0".as_ptr(), text.as_ptr(), pm_clip_children(style), 0, 0, &mut client) };
+        if f != 0 {
+            let old = unsafe { WinSubclassWindow(f, std_frame_proc) };
+            STD_FRAME_PROC.store(old, core::sync::atomic::Ordering::Relaxed);
+        }
         (f, client)
     } else {
         let pm_parent = if child { wnd(parent).map_or(0, |w| w.client) } else { HWND_DESKTOP };
@@ -1610,9 +1659,13 @@ pub fn create(c: &Create) -> u16 {
         // A child goes below its siblings (the first one created is the
         // top of the Z order, as GetWindow(GW_CHILD) has it).
         let behind = if child { HWND_BOTTOM } else { HWND_TOP };
-        let clip = crate::pm::WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+        // Children clip their siblings only with WS_CLIPSIBLINGS: without,
+        // a control drawn after a sibling above it shows over it (BWCC's
+        // group shades are above the controls they hold).
+        let siblings = if !child || style & W_CLIPSIBLINGS != 0 { WS_CLIPSIBLINGS } else { 0 };
+        let clip = pm_clip_children(style) | siblings;
         if has_nonclient(nc) {
-            let f = unsafe { WinCreateWindow(pm_parent, b"Win16Frame\0".as_ptr(), text.as_ptr(), clip, x, pmy, cx, cy, pm_parent, behind, c.menu as u32, core::ptr::null(), core::ptr::null()) };
+            let f = unsafe { WinCreateWindow(pm_parent, b"Win16Frame\0".as_ptr(), text.as_ptr(), crate::pm::WS_CLIPCHILDREN | siblings, x, pmy, cx, cy, pm_parent, behind, c.menu as u32, core::ptr::null(), core::ptr::null()) };
             let cl = unsafe { WinCreateWindow(f, b"Win16Wnd\0".as_ptr(), text.as_ptr(), clip | crate::pm::WS_VISIBLE, 0, 0, cx, cy, f, HWND_TOP, FID_CLIENT, core::ptr::null(), core::ptr::null()) };
             (f, cl)
         } else {
@@ -1638,7 +1691,7 @@ pub fn create(c: &Create) -> u16 {
         id: if child { c.menu } else { 0 },
         hinst: c.hinst,
         extra: alloc::vec![0; cextra as usize],
-        text: c.title.to_vec(),
+        text: c.title.split(|&b| b == 0).next().unwrap_or(&[]).to_vec(),
         menu: 0,
         framed,
         nc,
@@ -1745,8 +1798,8 @@ pub fn layout_frame(h: u16) {
     let mut r = RectL::default();
     unsafe { WinQueryWindowRect(f, &mut r) };
     let bd = plain_border(nc);
-    let (l, t, rr, b) = (bd, bd, bd, bd);
     let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
+    let (l, t, rr, b) = (bd, bd + caption_height(nc), bd, bd);
     let (sw, sh) = (q(SV_CXVSCROLL), q(SV_CYHSCROLL));
     let mut inner = RectL { l: r.l + l, b: r.b + b, r: r.r - rr, t: r.t - t };
     // The scroll bars overlap the border, as Windows draws them.
@@ -1763,10 +1816,46 @@ pub fn layout_frame(h: u16) {
     unsafe { WinSetWindowPos(c, HWND_TOP, inner.l, inner.b, (inner.r - inner.l).max(0), (inner.t - inner.b).max(0), SWP_MOVE | SWP_SIZE) };
 }
 
+/// PM's frame procedure, which the frames of Windows windows are
+/// subclassed from.
+static STD_FRAME_PROC: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
+
+/// The frames of Windows windows: PM tells a frame of its activation, and
+/// Windows the window (WM_ACTIVATE). BWCC dialog procedures post their
+/// task the dialog to give IsDialogMessage on WM_ACTIVATE (the Visual
+/// Solutions Pack installer: Enter did nothing).
+extern "C" fn std_frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    let old = STD_FRAME_PROC.load(core::sync::atomic::Ordering::Relaxed);
+    let old: WndProc = unsafe { core::mem::transmute(old) };
+    // A program's own system menu items (GetSystemMenu): WM_SYSCOMMAND
+    // with their IDs. PM's own (0x8000 and up) the frame carries out.
+    if msg == WM_SYSCOMMAND && mp1 & 0xffff < 0x8000 {
+        if let Some(h) = by_frame(pmh).filter(|w| w.created).map(|w| w.hwnd) {
+            let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
+            return send_inflight(h, W_SYSCOMMAND, mp1 as u16, 0, q);
+        }
+    }
+    let r = old(pmh, msg, mp1, mp2);
+    if msg == WM_ACTIVATE {
+        if let Some(h) = by_frame(pmh).filter(|w| w.created && w.frame != w.client).map(|w| w.hwnd) {
+            let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
+            send_inflight(h, W_ACTIVATE, (mp1 & 0xffff != 0) as u16, 0, q);
+        }
+    }
+    r
+}
+
 /// The PM procedure of `Win16Frame`: the border of a plain window and
 /// the corner between its scroll bars.
 extern "C" fn frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
+        WM_ACTIVATE => {
+            if let Some(h) = by_frame(pmh).filter(|w| w.created && w.frame == pmh && w.client != pmh).map(|w| w.hwnd) {
+                let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
+                send_inflight(h, W_ACTIVATE, (mp1 & 0xffff != 0) as u16, 0, q);
+            }
+            0
+        }
         WM_SIZE => {
             let h = hwnd_of(pmh);
             if h != 0 {
@@ -1792,6 +1881,20 @@ extern "C" fn frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     if l > 1 {
                         WinFillRect(hps, &inner, face);
                     }
+                }
+                // The caption: the title on the caption colour (active
+                // while the focus is in the window).
+                let cap = caption_height(wnd(h).map_or(0, |w| w.nc));
+                if cap > 0 {
+                    let active = h != 0 && (focus() == h || is_child(h, focus()));
+                    let (bg, fg) = if active { (gdi::sys_color(2), gdi::sys_color(9)) } else { (gdi::sys_color(3), gdi::sys_color(19)) };
+                    let mut cr = RectL { l: r.l + l, b: r.t - l - cap, r: r.r - l, t: r.t - l };
+                    WinFillRect(hps, &cr, gdi::rgb(bg) as i32);
+                    let line = RectL { l: cr.l, b: cr.b, r: cr.r, t: cr.b + 1 };
+                    WinFillRect(hps, &line, black);
+                    cr.b += 1;
+                    let t = window_text(h);
+                    WinDrawText(hps, t.len() as i32, t.as_ptr(), &mut cr, gdi::rgb(fg) as i32, 0, 0x0100 | 0x0400);
                 }
                 // The size box between the scroll bars.
                 let both = wnd(h).is_some_and(|w| w.vsb.as_ref().is_some_and(|b| b.shown) && w.hsb.as_ref().is_some_and(|b| b.shown));
@@ -1864,6 +1967,48 @@ fn map_point(h: u16, p: *mut i16, to_screen: bool) {
     unsafe {
         p.write_unaligned(pt.x as i16);
         p.add(1).write_unaligned(ny as i16);
+    }
+}
+
+/// The window a mouse message goes to: `h`, or the first parent of it
+/// that does not answer WM_NCHITTEST with HTTRANSPARENT (-1); `lp` in
+/// that window's client coordinates.
+fn hit_target(h: u16, lp: u32) -> (u16, u32) {
+    let (sx, sy) = to_screen(h, lp as i16 as i32, (lp >> 16) as i16 as i32);
+    let mut t = h;
+    for _ in 0..16 {
+        let at = (sy as u16 as u32) << 16 | sx as u16 as u32;
+        if send(t, W_NCHITTEST, 0, at) as i16 != -1 {
+            break;
+        }
+        match wnd(t).filter(|w| w.style & WS_CHILD != 0).map(|w| w.parent) {
+            Some(p) if p != 0 => t = p,
+            _ => break,
+        }
+    }
+    if t == h {
+        return (h, lp);
+    }
+    let (ox, oy) = to_screen(t, 0, 0);
+    (t, ((sy - oy) as u16 as u32) << 16 | (sx - ox) as u16 as u32)
+}
+
+/// WM_PARENTNOTIFY for a button pressed in a child window: each parent
+/// up the chain hears of it (the point in its own client coordinates),
+/// unless the child has WS_EX_NOPARENTNOTIFY. Resource Workshop's dialog
+/// editor places a new control so.
+fn parent_notify_click(h: u16, m: u16, lp: u32) {
+    let (sx, sy) = to_screen(h, lp as i16 as i32, (lp >> 16) as i16 as i32);
+    let mut c = h;
+    for _ in 0..16 {
+        let Some((style, ex, parent)) = wnd(c).map(|w| (w.style, w.exstyle, w.parent)) else { break };
+        if style & WS_CHILD == 0 || ex & WS_EX_NOPARENTNOTIFY != 0 || parent == 0 {
+            break;
+        }
+        let (ox, oy) = to_screen(parent, 0, 0);
+        let (x, y) = (sx - ox, sy - oy);
+        send(parent, W_PARENTNOTIFY, m, (y as u16 as u32) << 16 | x as u16 as u32);
+        c = parent;
     }
 }
 
@@ -2081,6 +2226,10 @@ fn set_capture(h: u16) -> u16 {
     let old = hwnd_above(unsafe { WinQueryCapture(HWND_DESKTOP) });
     if let Some(c) = wnd(h).map(|w| w.client) {
         unsafe { WinSetCapture(HWND_DESKTOP, c) };
+    } else if h == 0 {
+        // SetCapture(NULL) lets the mouse go, as ReleaseCapture does
+        // (Resource Workshop's tool palette).
+        unsafe { WinSetCapture(HWND_DESKTOP, 0) };
     }
     old
 }
@@ -2670,7 +2819,7 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
             write_msg(p, 0, W_QUIT, q.mp1 as u16, 0, q.time, (q.x, q.y));
             return peek.is_some() as u32;
         }
-        let Some((hwnd, msg, wp, lp)) = win_message(&q) else {
+        let Some((mut hwnd, msg, wp, mut lp)) = win_message(&q) else {
             if q.msg == crate::toolhelp::NOTIFY_MSG && q.hwnd == 0 {
                 crate::toolhelp::deliver(q.mp1, q.mp2);
                 continue;
@@ -2686,10 +2835,21 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
             }
             continue;
         };
+        // A window that answers WM_NCHITTEST with HTTRANSPARENT lets the
+        // mouse through to its parent (Resource Workshop's dialog editor
+        // gets the clicks on the dialog it edits so).
+        if (0x200..=0x209).contains(&msg) {
+            (hwnd, lp) = hit_target(hwnd, lp);
+        }
         // WM_SETCURSOR before the mouse messages, as Windows' input
         // processing sends it.
         if msg == W_MOUSEMOVE || (0x201..=0x209).contains(&msg) {
             send(hwnd, W_SETCURSOR, hwnd, (msg as u32) << 16 | 1);
+        }
+        // A button pressed in a child window: its parents hear of it
+        // first (once, as the message is taken).
+        if matches!(msg, W_LBUTTONDOWN | 0x0204 | 0x0207) && peek.map_or(true, |fl| fl & 1 != 0) {
+            parent_notify_click(hwnd, msg, lp);
         }
         // WH_KEYBOARD hooks may take a key (virtual key, key data).
         if (0x100..=0x105).contains(&msg) && crate::compat::has_hooks(2) && crate::compat::call_hooks(2, 0, wp, lp) != 0 {
@@ -2897,6 +3057,8 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 pub fn def_window_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     let inflight = u().inflight.iter().rev().find(|f| f.hwnd == h && f.msg == m).copied();
     match m {
+        // The mouse messages WIN16 delivers are the client area's.
+        W_NCHITTEST => return 1,
         W_NCCREATE => {
             // The window text, from CREATESTRUCT's lpszName.
             let name = unsafe { (flat(lp).add(22) as *const u32).read_unaligned() };
@@ -3032,11 +3194,34 @@ fn begin_paint(h: u16, ps: *mut u8) -> u16 {
     if hps == 0 {
         return 0;
     }
+    // A window without WS_CLIPCHILDREN paints over its children: they
+    // paint again after it, unless its painting validates them (BWCC's
+    // dialogs draw their static texts themselves). Resource Workshop
+    // updates the controls of the dialog it edits and then the dialog.
+    if wnd(h).is_some_and(|w| w.style & WS_CLIPCHILDREN == 0) {
+        for k in children(h) {
+            let Some(f) = wnd(k).filter(|w| w.style & WS_VISIBLE != 0).map(|w| w.frame) else { continue };
+            let mut swp = Swp::default();
+            unsafe { WinQueryWindowPos(f, &mut swp) };
+            let r = RectL { l: rc.l.max(swp.x) - swp.x, b: rc.b.max(swp.y) - swp.y, r: rc.r.min(swp.x + swp.cx) - swp.x, t: rc.t.min(swp.y + swp.cy) - swp.y };
+            if r.l < r.r && r.b < r.t {
+                unsafe { WinInvalidateRect(f, &r, 1) };
+            }
+        }
+    }
     let ch = client_height(c);
     let hdc = gdi::new_dc(hps, c, ch, gdi::DcKind::Paint);
     crate::caret::hide_for_paint(h);
     // WM_ERASEBKGND (the class brush, by default).
     let erased = send(h, W_ERASEBKGND, hdc, 0) != 0;
+    // What the window invalidated while erasing is part of this painting,
+    // as with Windows' BeginPaint (Borland's VBX runtime invalidates the
+    // control on WM_ERASEBKGND: each paint asked for the next one).
+    let mut more = RectL::default();
+    if unsafe { WinQueryUpdateRect(c, &mut more) } != 0 && more.r > more.l && more.t > more.b {
+        unsafe { WinValidateRect(c, core::ptr::null(), 0) };
+        rc = RectL { l: rc.l.min(more.l), b: rc.b.min(more.b), r: rc.r.max(more.r), t: rc.t.max(more.t) };
+    }
     if !ps.is_null() {
         let mut b = [0u8; 32];
         b[0..2].copy_from_slice(&hdc.to_le_bytes());
@@ -3077,6 +3262,16 @@ fn window_value(h: u16, i: i32, set: Option<u32>, long: bool) -> u32 {
         let old = *f;
         if let Some(v) = set {
             *f = v;
+        }
+        if let (-16, Some(v)) = (i, set) {
+            if (old ^ v) & WS_CLIPCHILDREN != 0 {
+                let c = w.client;
+                unsafe { WinSetWindowBits(c, QWL_STYLE, pm_clip_children(v), crate::pm::WS_CLIPCHILDREN) };
+            }
+            if (old ^ v) & W_CLIPSIBLINGS != 0 && v & WS_CHILD != 0 {
+                let f = w.frame;
+                unsafe { WinSetWindowBits(f, QWL_STYLE, if v & W_CLIPSIBLINGS != 0 { WS_CLIPSIBLINGS } else { 0 }, WS_CLIPSIBLINGS) };
+            }
         }
         return old;
     }

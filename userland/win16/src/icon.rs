@@ -139,7 +139,7 @@ fn pick(dir: &[u8], cursor: bool) -> Option<u16> {
 }
 
 /// LoadIcon / LoadCursor from a module's resources.
-fn load(hinst: u16, name: &Name, cursor: bool) -> u16 {
+pub fn load(hinst: u16, name: &Name, cursor: bool) -> u16 {
     let (gt, it) = if cursor { (RT_GROUP_CURSOR, RT_CURSOR) } else { (RT_GROUP_ICON, RT_ICON) };
     let Some(dir) = res::find(hinst, gt, name) else { return 0 };
     let Some(id) = pick(dir, cursor) else { return 0 };

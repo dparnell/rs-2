@@ -52,6 +52,8 @@ pub struct Swp {
 unsafe extern "C" {
     #[link_name = "PMWIN.763"]
     pub fn WinInitialize(fl: u32) -> u32;
+    #[link_name = "PMWIN.929"]
+    pub fn WinSubclassWindow(h: u32, proc_: WndProc) -> usize;
     #[link_name = "PMWIN.716"]
     pub fn WinCreateMsgQueue(hab: u32, n: i32) -> u32;
     #[link_name = "PMWIN.726"]
