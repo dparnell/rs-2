@@ -261,6 +261,8 @@ unsafe extern "C" {
     fn WinGetScreenPS(desk: u32) -> u32;
     #[link_name = "PMWIN.848"]
     fn WinReleasePS(hps: u32) -> u32;
+    #[link_name = "PMWIN.749"]
+    fn WinGetClipPS(h: u32, clip: u32, fl: u32) -> u32;
 }
 
 static FAILS: AtomicU32 = AtomicU32::new(0);
@@ -563,6 +565,9 @@ fn self_checks(hab: u32) {
         DevQueryCaps(sdc, 37, 2, res.as_mut_ptr());
         check("GpiQueryDevice of the screen PS", sdc != 0 && res[0] > 0 && res[1] > 0);
         WinReleasePS(sps);
+        // WinGetClipPS (PSF_CLIPSIBLINGS | PSF_CLIPCHILDREN) on the desktop.
+        let cps = WinGetClipPS(1, 0, 0x18);
+        check("WinGetClipPS", cps != 0 && GpiQueryDevice(cps) != 0 && WinReleasePS(cps) != 0);
     }
 }
 
