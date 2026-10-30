@@ -14,6 +14,7 @@ use alloc::vec::Vec;
 use inifile::Profile;
 use inifile::proglist::{APP, ENVIRONMENT, EXECUTABLE, Entry, NEXT, PROG_GROUP, SGH_ROOT, TITLE, handle, key};
 
+use crate::desktop;
 use crate::prf::{self, HINI_PROFILE, HINI_USERPROFILE, cbytes};
 
 const PROGDETAILS: usize = 72;
@@ -21,6 +22,11 @@ const PROGTITLE: usize = 16;
 
 fn target(hini: u32) -> u32 {
     if hini == HINI_PROFILE { HINI_USERPROFILE } else { hini }
+}
+
+/// Changes to the user profile's list show on the desktop (desktop.rs).
+fn on_desktop(hini: u32) -> bool {
+    target(hini) == HINI_USERPROFILE
 }
 
 /// Entries of the program list in key order.
@@ -107,7 +113,7 @@ pub extern "C" fn PrfAddProgram(hini: u32, details: *const u8, group: u32) -> u3
     if e.progc == PROG_GROUP {
         return 0;
     }
-    prf::write(target(hini), |p| {
+    let h = prf::write(target(hini), |p| {
         if !is_group(p, group) {
             return None;
         }
@@ -115,7 +121,11 @@ pub extern "C" fn PrfAddProgram(hini: u32, details: *const u8, group: u32) -> u3
         put(p, h, &e)?;
         Some(h)
     })
-    .unwrap_or(0)
+    .unwrap_or(0);
+    if h != 0 && on_desktop(hini) {
+        desktop::program(h, &e);
+    }
+    h
 }
 
 /// PrfChangeProgram(hini, hprog, pDetails): replace a program's details
@@ -126,7 +136,7 @@ pub extern "C" fn PrfChangeProgram(hini: u32, hprog: u32, details: *const u8) ->
     if details.is_null() {
         return 0;
     }
-    prf::write(target(hini), |p| {
+    let Some(e) = prf::write(target(hini), |p| {
         let old = entry(p, hprog)?;
         let mut e = unsafe { from_details(details, old.group) };
         if old.is_group() {
@@ -134,9 +144,15 @@ pub extern "C" fn PrfChangeProgram(hini: u32, hprog: u32, details: *const u8) ->
         } else if e.progc == PROG_GROUP {
             return None;
         }
-        put(p, hprog, &e)
-    })
-    .is_some() as u32
+        put(p, hprog, &e)?;
+        Some(e)
+    }) else {
+        return 0;
+    };
+    if on_desktop(hini) {
+        if e.is_group() { desktop::group(hprog, &e) } else { desktop::program(hprog, &e) }
+    }
+    1
 }
 
 /// PrfQueryDefinition(hini, hprog, pDetails, cchBufferMax): the bytes a
@@ -178,13 +194,17 @@ pub extern "C" fn PrfQueryDefinition(hini: u32, hprog: u32, details: *mut u8, cb
 /// PrfRemoveProgram(hini, hprog): a program (not a group).
 #[unsafe(no_mangle)]
 pub extern "C" fn PrfRemoveProgram(hini: u32, hprog: u32) -> u32 {
-    prf::write(target(hini), |p| {
+    let ok = prf::write(target(hini), |p| {
         if entry(p, hprog)?.is_group() {
             return None;
         }
         p.remove_key(APP, &key(hprog)).then_some(())
     })
-    .is_some() as u32
+    .is_some();
+    if ok && on_desktop(hini) {
+        desktop::remove_program(hprog);
+    }
+    ok as u32
 }
 
 /// PrfQueryProgramTitles(hini, hprogGroup, pTitles, cchBufferMax,
@@ -239,23 +259,28 @@ pub extern "C" fn PrfQueryProgramTitles(hini: u32, group: u32, titles: *mut u8, 
 #[unsafe(no_mangle)]
 pub extern "C" fn PrfCreateGroup(hini: u32, title: *const u8, visibility: u32) -> u32 {
     let Some(t) = (unsafe { cbytes(title) }).filter(|t| !t.is_empty()) else { return 0 };
-    prf::write(target(hini), |p| {
-        if let Some((h, _)) = entries(p).into_iter().find(|(_, e)| e.is_group() && e.fields[TITLE].as_deref() == Some(t)) {
-            return Some(h);
+    let Some((h, e)) = prf::write(target(hini), |p| {
+        if let Some(found) = entries(p).into_iter().find(|(_, e)| e.is_group() && e.fields[TITLE].as_deref() == Some(t)) {
+            return Some(found);
         }
         let mut e = Entry { group: SGH_ROOT, progc: PROG_GROUP, visible: visibility & 0xff, ..Entry::default() };
         e.fields[TITLE] = Some(t.to_vec());
         let h = new_handle(p);
         put(p, h, &e)?;
-        Some(h)
-    })
-    .unwrap_or(0)
+        Some((h, e))
+    }) else {
+        return 0;
+    };
+    if on_desktop(hini) {
+        desktop::group(h, &e);
+    }
+    h
 }
 
 /// PrfDestroyGroup(hini, hprogGroup): a group and its programs.
 #[unsafe(no_mangle)]
 pub extern "C" fn PrfDestroyGroup(hini: u32, group: u32) -> u32 {
-    prf::write(target(hini), |p| {
+    let ok = prf::write(target(hini), |p| {
         if !is_group(p, group) {
             return None;
         }
@@ -266,7 +291,11 @@ pub extern "C" fn PrfDestroyGroup(hini: u32, group: u32) -> u32 {
         }
         Some(())
     })
-    .is_some() as u32
+    .is_some();
+    if ok && on_desktop(hini) {
+        desktop::remove_group(group);
+    }
+    ok as u32
 }
 
 fn same_exe(stored: &[u8], wanted: &[u8]) -> bool {

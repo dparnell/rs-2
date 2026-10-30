@@ -33,8 +33,22 @@ pub fn find(m: &Module, ty: u16, name: u16) -> Option<(u32, u32)> {
                 let t = u16::from_le_bytes([*image.get(o)?, *image.get(o + 1)?]);
                 let nm = u16::from_le_bytes([*image.get(o + 2)?, *image.get(o + 3)?]);
                 if t == ty && nm == name {
+                    // A resource larger than 64 KB goes on in the next
+                    // entries of the same type and name (consecutive
+                    // tiles: a huge segment).
                     let obj = m.objects.get(first + i)?;
-                    return Some((obj.base, obj.limit.map_or(obj.size, |l| l + 1)));
+                    let mut size = obj.limit.map_or(obj.size, |l| l + 1);
+                    let same = |k: usize| image.get(table + k * 4..table + k * 4 + 4) == image.get(o..o + 4);
+                    let mut k = i + 1;
+                    while k < n && same(k) {
+                        let Some(next) = m.objects.get(first + k) else { break };
+                        if next.base != obj.base + 0x10000 * (k - i) as u32 {
+                            break;
+                        }
+                        size = 0x10000 * (k - i) as u32 + next.limit.map_or(next.size, |l| l + 1);
+                        k += 1;
+                    }
+                    return Some((obj.base, size));
                 }
             }
             None

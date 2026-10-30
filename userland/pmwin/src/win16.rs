@@ -36,6 +36,59 @@ macro_rules! win16 {
 
 include!("win16_table.rs");
 
+// WinCatch(pcatchbuf) and WinThrow(pcatchbuf, sThrowBack): 16-bit code, as
+// IBM's (PMMERGE 2137/2138). The CATCHBUF (16 bytes) holds the return
+// address (IP, CS), BP, SP (pointing at the saved BP), SI, DI, DS and
+// SS; WinThrow returns from that WinCatch with sThrowBack (1 for 0).
+// thunk16 forgets the 32-bit frames a throw leaves behind (its 16-bit
+// SP comes back above them).
+core::arch::global_asm!(
+    ".pushsection .text.w16catch,\"ax\"",
+    ".p2align 6",
+    ".code16",
+    ".globl WIN16CATCH",
+    "WIN16CATCH:",
+    "push bp",
+    "mov bp, sp",
+    "les bx, [bp + 6]",
+    "mov ax, [bp + 4]",
+    "mov es:[bx + 2], ax",
+    "mov ax, [bp + 2]",
+    "mov es:[bx], ax",
+    "mov ax, [bp]",
+    "mov es:[bx + 4], ax",
+    "mov es:[bx + 6], sp",
+    "mov es:[bx + 14], ss",
+    "mov es:[bx + 12], ds",
+    "mov es:[bx + 8], si",
+    "mov es:[bx + 10], di",
+    "pop bp",
+    "xor ax, ax",
+    "xor dx, dx",
+    ".byte 0xca, 4, 0",
+    ".globl WIN16THROW",
+    "WIN16THROW:",
+    "mov bx, sp",
+    "mov ax, ss:[bx + 4]",
+    "or ax, ax",
+    "jnz 1f",
+    "inc ax",
+    "1:",
+    "les bx, ss:[bx + 6]",
+    "mov ds, es:[bx + 12]",
+    "mov ss, es:[bx + 14]",
+    "mov sp, es:[bx + 6]",
+    "mov bp, es:[bx + 4]",
+    "mov di, es:[bx + 10]",
+    "mov si, es:[bx + 8]",
+    "push word ptr es:[bx + 2]",
+    "push word ptr es:[bx]",
+    "xor dx, dx",
+    ".byte 0xca, 10, 0",
+    ".code32",
+    ".popsection",
+);
+
 extern "C" fn dispatch16(idx: u32, args: *const u8) -> u32 {
     if idx >= 0x8000 {
         return pool_call((idx - 0x8000) as usize, args);
