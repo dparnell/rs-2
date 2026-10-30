@@ -2081,6 +2081,19 @@ static void nomove_tests(HINSTANCE hInst)
  * trace: the DLL is not loaded here (Delphi refuses to start a second
  * time when GetModuleHandle finds COMPLIB.DCL), and loading it runs its
  * LibMain in this process. */
+/* A task of this module is running (TaskFirst/TaskNext). */
+static BOOL task_running(const char *module)
+{
+    TASKENTRY te;
+    BOOL ok;
+
+    te.dwSize = sizeof te;
+    for (ok = TaskFirst(&te); ok; ok = TaskNext(&te))
+        if (lstrcmp(te.szModule, module) == 0)
+            return TRUE;
+    return FALSE;
+}
+
 static void dll_tests(void)
 {
     char buf[8];
@@ -2091,19 +2104,22 @@ static void dll_tests(void)
 
     WritePrivateProfileString("run", "value", "", "W16DLL.INI");
     check(WinExec("C:\\RS2\\HELLO16.EXE DLL", SW_SHOWMINNOACTIVE) > 32, "WinExec(HELLO16 DLL): it loads W16DLL and ends");
+    /* Its whole value: the file may be read as it is being written. */
     t0 = GetTickCount();
     buf[0] = 0;
-    while (buf[0] == 0 && GetTickCount() - t0 < 10000) {
+    while (lstrcmp(buf, "42") != 0 && lstrcmp(buf, "0") != 0 && GetTickCount() - t0 < 30000) {
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
             DispatchMessage(&msg);
         GetPrivateProfileString("run", "value", "", buf, sizeof buf, "W16DLL.INI");
     }
     check(lstrcmp(buf, "42") == 0, "the other program's W16DLL ran its LibMain");
-    /* It ends right after writing. */
+    /* It ends right after writing: wait until it has (no time is long
+     * enough on a busy machine). */
     t0 = GetTickCount();
-    while (GetTickCount() - t0 < 1500)
+    while (task_running("HELLO16") && GetTickCount() - t0 < 30000)
         if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
             DispatchMessage(&msg);
+    check(!task_running("HELLO16"), "HELLO16 ended (TaskFirst/TaskNext no longer list it)");
     check(GetModuleHandle("W16DLL") == 0, "a DLL of a program that ended is not loaded here (GetModuleHandle)");
     d = LoadLibrary("W16DLL.DLL");
     f = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(void))GetProcAddress(d, "W16DLLVALUE") : NULL;
