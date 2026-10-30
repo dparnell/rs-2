@@ -104,6 +104,7 @@ pub const WS_EX_TRANSPARENT: u32 = 0x0000_0020;
 pub const WS_VISIBLE: u32 = 0x1000_0000;
 pub const WS_DISABLED: u32 = 0x0800_0000;
 pub const WS_CLIPCHILDREN: u32 = 0x0200_0000;
+const W_CLIPSIBLINGS: u32 = 0x0400_0000;
 pub const WS_CAPTION: u32 = 0x00c0_0000;
 pub const WS_BORDER: u32 = 0x0080_0000;
 pub const WS_DLGFRAME: u32 = 0x0040_0000;
@@ -1439,6 +1440,14 @@ pub fn class_atom(ci: usize) -> u16 {
 }
 
 /// Frame creation flags for a window style.
+/// PM's WS_CLIPCHILDREN for a window's client when the Windows style
+/// has it. Without it the window draws over its children, as on Windows:
+/// BWCC's dialogs (BORDLG) draw their static texts themselves, over the
+/// BORSTATIC children they validate.
+fn pm_clip_children(style: u32) -> u32 {
+    if style & WS_CLIPCHILDREN != 0 { crate::pm::WS_CLIPCHILDREN } else { 0 }
+}
+
 fn frame_flags(style: u32, owned: bool) -> u32 {
     let mut f = FCF_NOBYTEALIGN;
     if style & WS_CAPTION == WS_CAPTION {
@@ -1601,7 +1610,7 @@ pub fn create(c: &Create) -> u16 {
         let mut client = 0;
         let pm_parent = if mdi_child { wnd(parent).map_or(HWND_DESKTOP, |w| w.client) } else { HWND_DESKTOP };
         let fs = if mdi_child { WS_CLIPSIBLINGS } else { 0 };
-        let f = unsafe { WinCreateStdWindow(pm_parent, fs, &mut fcf, b"Win16Wnd\0".as_ptr(), text.as_ptr(), crate::pm::WS_CLIPCHILDREN, 0, 0, &mut client) };
+        let f = unsafe { WinCreateStdWindow(pm_parent, fs, &mut fcf, b"Win16Wnd\0".as_ptr(), text.as_ptr(), pm_clip_children(style), 0, 0, &mut client) };
         (f, client)
     } else {
         let pm_parent = if child { wnd(parent).map_or(0, |w| w.client) } else { HWND_DESKTOP };
@@ -1610,9 +1619,13 @@ pub fn create(c: &Create) -> u16 {
         // A child goes below its siblings (the first one created is the
         // top of the Z order, as GetWindow(GW_CHILD) has it).
         let behind = if child { HWND_BOTTOM } else { HWND_TOP };
-        let clip = crate::pm::WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
+        // Children clip their siblings only with WS_CLIPSIBLINGS: without,
+        // a control drawn after a sibling above it shows over it (BWCC's
+        // group shades are above the controls they hold).
+        let siblings = if !child || style & W_CLIPSIBLINGS != 0 { WS_CLIPSIBLINGS } else { 0 };
+        let clip = pm_clip_children(style) | siblings;
         if has_nonclient(nc) {
-            let f = unsafe { WinCreateWindow(pm_parent, b"Win16Frame\0".as_ptr(), text.as_ptr(), clip, x, pmy, cx, cy, pm_parent, behind, c.menu as u32, core::ptr::null(), core::ptr::null()) };
+            let f = unsafe { WinCreateWindow(pm_parent, b"Win16Frame\0".as_ptr(), text.as_ptr(), crate::pm::WS_CLIPCHILDREN | siblings, x, pmy, cx, cy, pm_parent, behind, c.menu as u32, core::ptr::null(), core::ptr::null()) };
             let cl = unsafe { WinCreateWindow(f, b"Win16Wnd\0".as_ptr(), text.as_ptr(), clip | crate::pm::WS_VISIBLE, 0, 0, cx, cy, f, HWND_TOP, FID_CLIENT, core::ptr::null(), core::ptr::null()) };
             (f, cl)
         } else {
@@ -3077,6 +3090,16 @@ fn window_value(h: u16, i: i32, set: Option<u32>, long: bool) -> u32 {
         let old = *f;
         if let Some(v) = set {
             *f = v;
+        }
+        if let (-16, Some(v)) = (i, set) {
+            if (old ^ v) & WS_CLIPCHILDREN != 0 {
+                let c = w.client;
+                unsafe { WinSetWindowBits(c, QWL_STYLE, pm_clip_children(v), crate::pm::WS_CLIPCHILDREN) };
+            }
+            if (old ^ v) & W_CLIPSIBLINGS != 0 && v & WS_CHILD != 0 {
+                let f = w.frame;
+                unsafe { WinSetWindowBits(f, QWL_STYLE, if v & W_CLIPSIBLINGS != 0 { WS_CLIPSIBLINGS } else { 0 }, WS_CLIPSIBLINGS) };
+            }
         }
         return old;
     }
