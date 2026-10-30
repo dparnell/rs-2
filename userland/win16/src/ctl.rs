@@ -598,7 +598,24 @@ fn static_(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             if let Some(w) = wnd(h) {
                 w.data = Some(alloc::boxed::Box::new(Static::default()));
                 if w.style & 0x0f == SS_ICON {
-                    // An icon static is the icon's size.
+                    // An icon static is the icon's size, and shows the icon
+                    // its text names (0xFF and the resource's number in a
+                    // dialog template).
+                    // (CREATESTRUCT's lpszName: the window's text ends
+                    // at a zero byte of the number.)
+                    let name_far = unsafe { (thunk16::flat(lp).add(22) as *const u32).read_unaligned() };
+                    let t = if name_far != 0 { unsafe { core::slice::from_raw_parts(thunk16::flat(name_far), 3) }.to_vec() } else { Vec::new() };
+                    let t = if t.first() == Some(&0xff) { t } else { w.text.clone() };
+                    let hinst = w.hinst;
+                    let name = match t.first() {
+                        Some(0xff) => Some(crate::res::Name::Id(u16::from_le_bytes([t.get(1).copied().unwrap_or(0), t.get(2).copied().unwrap_or(0)]))),
+                        Some(_) => Some(crate::res::Name::from_bytes(&t)),
+                        None => None,
+                    };
+                    let icon = name.map_or(0, |n| crate::icon::load(hinst, &n, false));
+                    if let Some(s) = data::<Static>(h) {
+                        s.icon = icon;
+                    }
                     let r = window_rect(h);
                     move_to(h, [r[0], r[1], r[0] + 32, r[1] + 32]);
                 }
@@ -671,7 +688,10 @@ fn paint_static(h: u16, hdc: u16) {
         SS_ICON => {
             let br = ctl_color(h, hdc, CTLCOLOR_STATIC);
             gdi::fill_rect(hdc, r, br);
-            draw_icon(hdc, 0, 0);
+            let icon = data::<Static>(h).map_or(0, |s| s.icon);
+            if icon == 0 || !crate::icon::draw(hdc, 0, 0, icon) {
+                draw_icon(hdc, 0, 0);
+            }
         }
         k => {
             let br = ctl_color(h, hdc, CTLCOLOR_STATIC);

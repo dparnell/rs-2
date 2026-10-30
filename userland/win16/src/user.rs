@@ -1655,7 +1655,7 @@ pub fn create(c: &Create) -> u16 {
         id: if child { c.menu } else { 0 },
         hinst: c.hinst,
         extra: alloc::vec![0; cextra as usize],
-        text: c.title.to_vec(),
+        text: c.title.split(|&b| b == 0).next().unwrap_or(&[]).to_vec(),
         menu: 0,
         framed,
         nc,
