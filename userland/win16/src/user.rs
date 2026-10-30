@@ -3199,6 +3199,14 @@ fn begin_paint(h: u16, ps: *mut u8) -> u16 {
     crate::caret::hide_for_paint(h);
     // WM_ERASEBKGND (the class brush, by default).
     let erased = send(h, W_ERASEBKGND, hdc, 0) != 0;
+    // What the window invalidated while erasing is part of this painting,
+    // as with Windows' BeginPaint (Borland's VBX runtime invalidates the
+    // control on WM_ERASEBKGND: each paint asked for the next one).
+    let mut more = RectL::default();
+    if unsafe { WinQueryUpdateRect(c, &mut more) } != 0 && more.r > more.l && more.t > more.b {
+        unsafe { WinValidateRect(c, core::ptr::null(), 0) };
+        rc = RectL { l: rc.l.min(more.l), b: rc.b.min(more.b), r: rc.r.max(more.r), t: rc.t.max(more.t) };
+    }
     if !ps.is_null() {
         let mut b = [0u8; 32];
         b[0..2].copy_from_slice(&hdc.to_le_bytes());
