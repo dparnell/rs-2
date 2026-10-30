@@ -77,6 +77,9 @@ pub fn load(
         };
         bases.push((base, size));
     }
+    if crate::api::tracing() {
+        crate::trace!("    {path}: objects at {:x?}", bases);
+    }
 
     // Decode pages into per-object images.
     let ps = h.page_size as usize;

@@ -195,6 +195,9 @@ fn flat32(sp: &vm::AddressSpace, f: &TrapFrame) -> bool {
 /// Entry point for CPU exceptions raised by user code.
 pub fn deliver(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     let (code, info) = translate(f);
+    if super::tracing() {
+        crate::trace!("    exception {code:x} {info:x?} at {:x}:{:x} vector {} error {:x}", f.cs, f.rip, f.vector, f.error);
+    }
     if !raise(f, p, t, code, 0, &info, f.rip as u32) {
         default_action(f, p, t, code);
     }
