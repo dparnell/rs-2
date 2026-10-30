@@ -255,6 +255,12 @@ unsafe extern "C" {
     fn WinCpTranslateString(hab: u32, from: u32, src: *const u8, to: u32, max: u32, dst: *mut u8) -> u32;
     #[link_name = "PMGPI.606"]
     fn DevQueryCaps(hdc: u32, start: i32, n: i32, out: *mut i32) -> u32;
+    #[link_name = "PMGPI.444"]
+    fn GpiQueryDevice(hps: u32) -> u32;
+    #[link_name = "PMWIN.759"]
+    fn WinGetScreenPS(desk: u32) -> u32;
+    #[link_name = "PMWIN.848"]
+    fn WinReleasePS(hps: u32) -> u32;
 }
 
 static FAILS: AtomicU32 = AtomicU32::new(0);
@@ -548,6 +554,15 @@ fn self_checks(hab: u32) {
         DevQueryCaps(hdc, 16, 1, caps.as_mut_ptr());
         check("DevQueryCaps CAPS_COLOR_BITCOUNT", caps[0] == 24);
         DevCloseDC(hdc);
+
+        // The screen PS is on the screen's DC (VisualAge Smalltalk's font
+        // server divides by its CAPS_VERTICAL_FONT_RES).
+        let sps = WinGetScreenPS(1);
+        let sdc = GpiQueryDevice(sps);
+        let mut res = [0i32; 2];
+        DevQueryCaps(sdc, 37, 2, res.as_mut_ptr());
+        check("GpiQueryDevice of the screen PS", sdc != 0 && res[0] > 0 && res[1] > 0);
+        WinReleasePS(sps);
     }
 }
 

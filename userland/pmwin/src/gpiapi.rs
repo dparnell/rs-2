@@ -405,8 +405,9 @@ pub extern "C" fn GpiAssociate(hps: u32, hdc: u32) -> u32 {
 /// GpiQueryDevice(hps): the associated device context.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiQueryDevice(hps: u32) -> u32 {
-    // A window's cached PS (WinGetPS, WinBeginPaint) is on the screen.
-    query(hps, |e| if e.gpi.hdc == 0 && e.hwnd != 0 { crate::gpiobj::SCREEN_DC } else { e.gpi.hdc }, 0)
+    // A cached PS (WinGetPS, WinBeginPaint, WinGetScreenPS) is on the
+    // screen.
+    query(hps, |e| if e.gpi.hdc == 0 && (e.hwnd != 0 || e.gpi.cached) { crate::gpiobj::SCREEN_DC } else { e.gpi.hdc }, 0)
 }
 
 /// GpiResetPS(hps, flOptions): GRES_ATTRS 1, GRES_SEGMENTS 2, GRES_ALL 4.
