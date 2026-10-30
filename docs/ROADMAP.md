@@ -13,7 +13,8 @@ Status markers: done, in progress, planned.
 - done: files (VFS, FAT, OS/2 paths and wildcards, share modes), pipes,
   DosExecPgm/DosCWait, threads, 16- and 32-bit semaphores, exception
   handling, exit lists, timers, queues, shared memory, resources,
-  Ctrl+C signals, module APIs, CONFIG.SYS processing
+  Ctrl+C signals, module APIs, CONFIG.SYS processing, DosDebug (a debugger
+  driving a traced program: Open Watcom's `wd`)
 - done: VIO, KBD, MOU (PS/2 and USB mice, text pointer), MSG (message
   files and bound message segments), NLS (87 countries, 21 single-byte
   and the DBCS code pages, CODEPAGE=/COUNTRY=), national keyboard layouts

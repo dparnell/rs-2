@@ -175,6 +175,20 @@ other. Alt+Home moves the session between its window and the full
 screen. While a text session has the screen, PM draws into a shadow
 buffer. See [PM.md](PM.md#windowed-vio-sessions-os2-window).
 
+**Debugging OS/2 programs (DosDebug).** A program started with the
+trace option (DosStartSession TraceOpt, DosExecPgm EXEC_TRACE) waits
+before its first instruction for a debugger's DBG_C_Connect
+(`kernel/src/api/debug.rs`). Its threads stop on their way back to user
+mode (and a new thread before its first instruction) whenever the
+debuggee is stopped; a breakpoint, single step, exception, new thread or
+module stops the whole process and posts a notification, which the
+debugger collects one per DosDebug call with the posting thread's
+registers, as IBM's kernel does (studied in OS2KRNLB: DbgCall, DbgTrap,
+DbgContinue). Registers are the stopped thread's saved user frame; the
+FPU state its FXSAVE area, converted to FSAVE's layout. `dbgtrace` on the
+kernel command line logs every DosDebug call and result to the serial
+port.
+
 **Debugging a wedged system.** Ctrl+Alt+F12 (QEMU: `--type '{ctrl-alt-f12}'`)
 prints to the serial port the device interrupt counts, every process's
 threads with their state, priority, last user-mode address and the
