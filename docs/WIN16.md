@@ -795,9 +795,10 @@ What the installer needed (each has a W16TEST check):
   up as Windows would (the Windows directory, the PATH) and shows its
   own Windows icon (the Workplace Shell reads Windows programs' icon
   groups); `NOTEPAD.EXE file` (Delphi's readme items) opens the file in
-  the System Editor (E.EXE), as there is no Windows Notepad; a program
-  that is not there at all (`WINHELP.EXE file.HLP`) shows the icon of
-  the file it opens. The trace (`W16TRACE`) lists each command with its
+  the System Editor (E.EXE), as there is no Windows Notepad; such an
+  item, and one whose program is not there at all (`WINHELP.EXE
+  file.HLP`), shows the icon of the file it opens. A group made before
+  this keeps its items as they were until it is made again. The trace (`W16TRACE`) lists each command with its
   arguments.
 - **Children keep their place from the top** when their parent changes
   height, as on Windows (PM keeps a child's distance from its parent's
