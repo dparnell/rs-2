@@ -1123,6 +1123,29 @@ static void pump(int *n, int was)
             DispatchMessage(&msg);
 }
 
+/* Until the PM server's ACK of one message: its item's name, or an
+ * execute's commands (h). Another WM_DDE_ACK that comes first is not
+ * this message's. How many ACKs came, 0 if its did not. */
+static int pump_ack(const char *item, HGLOBAL h)
+{
+    DWORD start = GetTickCount();
+    MSG msg;
+    char name[16];
+    int n = pm_acks, got = 0;
+
+    while (GetTickCount() - start < 5000) {
+        if (pm_acks != n) {
+            n = pm_acks;
+            got++;
+            if (h ? pm_hi == h : GlobalGetAtomName((ATOM)pm_hi, name, sizeof name) && lstrcmpi(name, item) == 0)
+                return got;
+        }
+        if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            DispatchMessage(&msg);
+    }
+    return 0;
+}
+
 static void raw_dde_tests(HWND hwnd)
 {
     /* WM_DDE_INITIATE broadcast reaches the task's own windows. */
@@ -1160,18 +1183,15 @@ static void raw_dde_tests(HWND hwnd)
     p[1] = CF_TEXT;
     _fmemcpy(p + 2, "12345", 6);
     GlobalUnlock(h);
-    n = pm_acks;
     PostMessage(pm_server, WM_DDE_POKE, (WPARAM)hwnd, MAKELONG(h, GlobalAddAtom("Value")));
-    pump(&pm_acks, n);
-    check(pm_acks == n + 1 && (pm_status & 0x8000), "WM_DDE_POKE to the PM server: a positive WM_DDE_ACK");
+    check(pump_ack("Value", 0) && (pm_status & 0x8000), "WM_DDE_POKE to the PM server: a positive WM_DDE_ACK");
     h = GlobalAlloc(GMEM_MOVEABLE | GMEM_DDESHARE, 7);
     lstrcpy(GlobalLock(h), "[quit]");
     GlobalUnlock(h);
-    n = pm_acks;
     PostMessage(pm_server, WM_DDE_EXECUTE, (WPARAM)hwnd, MAKELONG(0, h));
-    pump(&pm_acks, n);
-    wsprintf(line, "WM_DDE_EXECUTE to the PM server: ACK with the commands back (%d %04x %04x %04x)", pm_acks - n, pm_status, pm_hi, h);
-    check(pm_acks == n + 1 && (pm_status & 0x8000) && pm_hi == h, line);
+    n = pump_ack(NULL, h);
+    wsprintf(line, "WM_DDE_EXECUTE to the PM server: ACK with the commands back (%d %04x %04x %04x)", n, pm_status, pm_hi, h);
+    check(n && (pm_status & 0x8000) && pm_hi == h, line);
     GlobalFree(h);
     n = pm_terms;
     PostMessage(pm_server, WM_DDE_TERMINATE, (WPARAM)hwnd, 0);
