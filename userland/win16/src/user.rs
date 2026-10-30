@@ -1515,6 +1515,12 @@ pub fn frame_insets(style: u32, menu: bool) -> (i32, i32, i32, i32) {
     (b, top, r, bb)
 }
 
+/// The caption bar of a plain window with WS_CAPTION (a child window:
+/// top-level ones are PM frames), as AdjustWindowRect counts it.
+fn caption_height(nc: u32) -> i32 {
+    if nc & WS_CAPTION == WS_CAPTION { unsafe { WinQuerySysValue(HWND_DESKTOP, SV_CYTITLEBAR) } } else { 0 }
+}
+
 /// The border of a plain window (WS_THICKFRAME, WS_DLGFRAME, WS_BORDER).
 fn plain_border(nc: u32) -> i32 {
     let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
@@ -1777,8 +1783,8 @@ pub fn layout_frame(h: u16) {
     let mut r = RectL::default();
     unsafe { WinQueryWindowRect(f, &mut r) };
     let bd = plain_border(nc);
-    let (l, t, rr, b) = (bd, bd, bd, bd);
     let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
+    let (l, t, rr, b) = (bd, bd + caption_height(nc), bd, bd);
     let (sw, sh) = (q(SV_CXVSCROLL), q(SV_CYHSCROLL));
     let mut inner = RectL { l: r.l + l, b: r.b + b, r: r.r - rr, t: r.t - t };
     // The scroll bars overlap the border, as Windows draws them.
@@ -1860,6 +1866,20 @@ extern "C" fn frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     if l > 1 {
                         WinFillRect(hps, &inner, face);
                     }
+                }
+                // The caption: the title on the caption colour (active
+                // while the focus is in the window).
+                let cap = caption_height(wnd(h).map_or(0, |w| w.nc));
+                if cap > 0 {
+                    let active = h != 0 && (focus() == h || is_child(h, focus()));
+                    let (bg, fg) = if active { (gdi::sys_color(2), gdi::sys_color(9)) } else { (gdi::sys_color(3), gdi::sys_color(19)) };
+                    let mut cr = RectL { l: r.l + l, b: r.t - l - cap, r: r.r - l, t: r.t - l };
+                    WinFillRect(hps, &cr, gdi::rgb(bg) as i32);
+                    let line = RectL { l: cr.l, b: cr.b, r: cr.r, t: cr.b + 1 };
+                    WinFillRect(hps, &line, black);
+                    cr.b += 1;
+                    let t = window_text(h);
+                    WinDrawText(hps, t.len() as i32, t.as_ptr(), &mut cr, gdi::rgb(fg) as i32, 0, 0x0100 | 0x0400);
                 }
                 // The size box between the scroll bars.
                 let both = wnd(h).is_some_and(|w| w.vsb.as_ref().is_some_and(|b| b.shown) && w.hsb.as_ref().is_some_and(|b| b.shown));
@@ -3158,6 +3178,21 @@ fn begin_paint(h: u16, ps: *mut u8) -> u16 {
     let hps = unsafe { WinBeginPaint(c, 0, &mut rc) };
     if hps == 0 {
         return 0;
+    }
+    // A window without WS_CLIPCHILDREN paints over its children: they
+    // paint again after it, unless its painting validates them (BWCC's
+    // dialogs draw their static texts themselves). Resource Workshop
+    // updates the controls of the dialog it edits and then the dialog.
+    if wnd(h).is_some_and(|w| w.style & WS_CLIPCHILDREN == 0) {
+        for k in children(h) {
+            let Some(f) = wnd(k).filter(|w| w.style & WS_VISIBLE != 0).map(|w| w.frame) else { continue };
+            let mut swp = Swp::default();
+            unsafe { WinQueryWindowPos(f, &mut swp) };
+            let r = RectL { l: rc.l.max(swp.x) - swp.x, b: rc.b.max(swp.y) - swp.y, r: rc.r.min(swp.x + swp.cx) - swp.x, t: rc.t.min(swp.y + swp.cy) - swp.y };
+            if r.l < r.r && r.b < r.t {
+                unsafe { WinInvalidateRect(f, &r, 1) };
+            }
+        }
     }
     let ch = client_height(c);
     let hdc = gdi::new_dc(hps, c, ch, gdi::DcKind::Paint);
