@@ -997,6 +997,23 @@ pub fn global_realloc(h: u16, n: u32, fl: u16) -> u16 {
 }
 
 pub fn local_init(seg: u16, start: u16, end: u16) -> bool {
+    // A start of 0: the heap is at the end of the segment, after its
+    // static data (Windows' DGROUP is the static data and the heap's
+    // `end` bytes), and grows as Windows grows DGROUP. Resource
+    // Workshop's WORKLIB1 has LocalInit(DS, 0, 1000h); a heap over its
+    // static data zeroed them.
+    let (start, end) = if start == 0 {
+        match crate::res::static_data_size(seg) {
+            Some(n) if n < 0xfff0 => (n as u16, 0xfff0),
+            _ => {
+                let top = (segment_size(seg).min(0xffff) as u16).saturating_sub(1);
+                let n = end.min(0xfffe);
+                (top.saturating_sub(n), top)
+            }
+        }
+    } else {
+        (start, end)
+    };
     let start = start.max(0x10).next_multiple_of(4);
     if end <= start {
         return false;

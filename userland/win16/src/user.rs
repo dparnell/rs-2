@@ -913,6 +913,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // DrawText(hdc, text, count, lpRect, format)
         85 => {
             let (hdc, s, n, r, fmt) = (a.w(), a.l(), a.i(), a.l(), a.w());
+            if crate::tracing() {
+                let t: alloc::vec::Vec<u8> = if n < 0 { far_str(s).unwrap_or(b"").to_vec() } else { unsafe { core::slice::from_raw_parts(flat(s), n as usize) }.to_vec() };
+                trace(format_args!("W16 DrawText {:?} {:?}", alloc::string::String::from_utf8_lossy(&t), read_rect(r)));
+            }
             gdi::draw_text(hdc, s, n, r, fmt) as u32
         }
         // MessageBeep(type)
