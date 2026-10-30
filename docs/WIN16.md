@@ -661,7 +661,15 @@ Windows; what they needed, in the order they asked for it:
   size); their exported procedures start with `mov ax, DGROUP` as
   Windows' loader patches them. LoadLibrary, FreeLibrary,
   GetModuleHandle, GetProcAddress (16:16 addresses) and the resource
-  calls work on them (`module.rs`).
+  calls work on them (`module.rs`). Their segments have selectors below
+  8000h, as on Windows (the loader puts them at 128-256 MB of the
+  shared arena: `vm::reserve_win16`), so the instance handle LibEntry
+  gets is the one LoadLibrary returns and programs may compare
+  selectors as signed numbers. DLLs may import each other (the loader
+  lays out a DLL's segments and exports before loading its imports, and
+  resolves an import of a DLL still loading from those). A DLL whose
+  file was written since it was loaded (Delphi's rebuilt COMPLIB.DCL) is
+  loaded anew.
 - **Bitmaps** (`bitmap.rs`): memory DCs are PM memory presentation
   spaces, HBITMAPs PM bitmaps (1 or 24 bits per pixel), BitBlt and
   StretchBlt PM's GpiBitBlt with Windows' ROP3 codes, monochrome
@@ -708,7 +716,7 @@ Windows; what they needed, in the order they asked for it:
 | Programmer's File Editor (PFE) | 1.01 (16-bit) | C | works | MDI editor; File Open and Print (its own COMMDLG templates) work |
 | GNU Chess | 3.21 | C | works | CICA Dec 1993 |
 | KLOTZ, BoxWorld, Columns, Hextris, Mines | | C, Borland Pascal | works | CICA Dec 1993 |
-| WinTrek | | C | works | Its DLL's hInstance compared signed: DLL instances are low alias selectors |
+| WinTrek | | C | works | Its DLL's hInstance compared signed: DLL selectors are below 8000h |
 | Euchre, Cribbage | | OWL | works | Window hooks |
 | Magic, WinCode, PEGIF, WinPong, FSR | | | works | CICA Dec 1993 |
 | Neko | | | starts | Not checked in depth |
@@ -716,6 +724,11 @@ Windows; what they needed, in the order they asked for it:
 | Hyperoid | | C | partly | Draws its own title bar with GetWindowDC: lands in the client area |
 | LIFEAPP | | | partly | Loading a snapshot fails (current directory) |
 | **Delphi** | 1.0 | Delphi 1 | **works** | Installs from its CD with its own installer; designs, edits properties, compiles and runs programs; the integrated debugger stops at breakpoints, steps and runs on (below) |
+| Delphi 1.01 patch | 1.01 | DOS (RTPatch) | works | PATCH.EXE from the RAD Pack CD in a DOS session; the patched Delphi compiles and runs programs |
+| RAD Pack setup | 1995 | Delphi 1 | works | The CD's launcher and the four installers it starts (below) |
+| **Resource Workshop** | 4.5 | C++ (OWL) | **works** | Opens a resource script, edits a dialog (a control placed from its tool palette), saves the script |
+| **Visual Solutions Pack** | 1.0 | VBX | **works** | Its installer (BWCC dialogs); a VBX installed into Delphi's palette, on a form, in a compiled program |
+| Turbo Debugger for Windows | 4.6 | | starts | Stops in its display DLL at the VGA's ports; needs TDDEBUG.386 (below) |
 
 ### Delphi 1.0
 
@@ -944,6 +957,134 @@ Not yet:
   its divider from its first WM_SIZE, which Windows sends from
   CreateWindow while the list is still 0 pels wide (as WIN16 now does);
   drag the divider. The IDE's toolbar hints sometimes stay up.
+
+### The Delphi RAD Pack
+
+The RAD Pack for Delphi CD (the user's own copy; in QEMU `--virtio-cd
+delphi_1_rad_pack.iso` next to a system disk with Delphi installed, as
+above) installs with its own setup programs. `INSTALL\SETUP.EXE` is a
+Delphi program with a button for each part, which starts that part's
+installer with WinExec and comes back when it ends:
+
+- **Resource Workshop** (`INSTALL\RW`): Borland's installer, as
+  Delphi's: `C:\WORKSHOP`, BWCC and BIVBX into `C:\WINDOWS\SYSTEM`,
+  the Resource Expert's sources into `C:\DELPHI\RCEXPERT`, a "Resource
+  Workshop 4.5" group (Program Manager DDE).
+- **Visual Solutions Pack** (`INSTALL\BVSP`): an older Borland installer
+  whose dialogs are BWCC's (BORDLG): the VBX controls (MicroHelp's,
+  Sax's, VisualTools', TX Text, ImageKnife, the ODBC drivers and their
+  ODBC.INI entries) into `C:\WINDOWS\SYSTEM`, examples and help into
+  `C:\BVSP`, a group of 26 items.
+- **Turbo Debugger for Windows** (`INSTALL\TDW`): `C:\TDW`, TDW.INI, a
+  group.
+- **Delphi VCL Source** (`INSTALL\VCLSRC`): a DOS program, which WinExec
+  starts in a windowed DOS session (`docs/DOS.md`); it offers the CD's
+  drive for the destination (the drive it was started from) and runs
+  UNZIP into `C:\DELPHI\SOURCE` (VCL, RTL, RTL70, LIB, SAMPLES).
+
+![The RAD Pack's setup](images/rs2-win16-radpack-setup.png)
+
+![The Visual Solutions Pack's installer](images/rs2-win16-radpack-vsp.png)
+
+![The VCL source installer in a DOS session](images/rs2-win16-radpack-vcl.png)
+
+**Resource Workshop** (`C:\WORKSHOP\BIN\WORKSHOP.EXE`, started in its
+own directory) opens a resource script (File|Open project), lists its
+resources, opens a dialog in its dialog editor with the Tools and
+Alignment palettes, places a control from the palette with a click on
+the dialog and saves the script (with a `#define` for the new control's
+ID and the old script as `TEST.~RC`).
+
+![Resource Workshop editing a dialog](images/rs2-win16-radpack-rw.png)
+
+**VBX controls in Delphi**: Options|Install Components, VBX..., the VBX
+file (`C:\WINDOWS\SYSTEM\MHGA200.VBX`, MicroHelp's gauge): Delphi
+loads it, lists its class (TMhgauge), writes its wrapper unit and
+rebuilds COMPLIB.DCL; the control is on the VBX page of the palette,
+drops on a form and works in the compiled program (BIVBX11.DLL, Borland's
+VBX runtime: `Mhgauge1.Value := 60` draws the gauge at 60 %).
+
+![A VBX gauge in a compiled Delphi program](images/rs2-win16-radpack-vbx.png)
+
+**The Delphi 1.01 patch** (`PATCH\DELPHI\US` on the CD; French and
+German too): `PATCH C:\DELPHI DELPHI.RTP` from a command prompt applies
+its 73 file patches (DELPHI.EXE, the DCUs...) in a DOS session in about
+a minute and a half; the patched tree is byte for byte the one
+`tools/dosrun` makes, and the patched Delphi compiles and runs programs.
+
+What they needed (W16TEST checks each):
+
+- **WS_CLIPCHILDREN and WS_CLIPSIBLINGS as the program sets them**
+  (WIN16 gave every window both). BWCC's dialogs draw their static texts
+  themselves, over the BORSTATIC children they validate; their controls
+  are below the BORSHADE group panels in Z order and draw over them. PM
+  (`crates/pmwin` tree.rs) clips a window from the siblings above it
+  only with WS_CLIPSIBLINGS below the desktop, as PM does. A parent
+  without WS_CLIPCHILDREN marks the children under its update region for
+  repainting in BeginPaint (Resource Workshop updates the edited
+  dialog's controls before the dialog).
+- **WM_ACTIVATE for windows with a frame**: PM tells the frame, WIN16
+  (a frame subclass) the window. BWCC's dialog procedure posts its task
+  the dialog for IsDialogMessage then: Enter did nothing.
+- **Dialog controls with an ordinal text** get it as Windows passes it
+  (0xFF and the number, in CREATESTRUCT); icon statics show the icon it
+  names.
+- **DLLs that import each other** (WORKLIB1 and WORKLIB2: the kernel's
+  NE loader recursed until its stack overflowed), **USER before InitApp**
+  (BWCC's LibMain registers window messages), **GetSystemMenu** (with
+  WM_SYSCOMMAND for a program's items), **INT 11h**, **SetCapture(NULL)**
+  (the tool palette lets the mouse go so), **WM_PARENTNOTIFY** for
+  button presses, **WM_NCHITTEST**: a window answering HTTRANSPARENT
+  lets the mouse through to its parent (the dialog editor gets the
+  clicks on the dialog so; statics and group boxes are transparent, as
+  on Windows), **captions of child windows** (the editor's windows and
+  palettes; the edited dialog's controls were a caption's height off).
+- **LocalInit(seg, 0, size)**: a start of 0 is the end of the segment's
+  static data, the heap growing from there; WIN16 put the heap over
+  WORKLIB1's static data, which LocalAlloc's zeroing wiped (Resource
+  Workshop forgot its instance and could not open a script).
+- **Windows DLL selectors below 8000h** (above): LibEntry got the DLL's
+  real DGROUP selector and LoadLibrary a low alias; the VBX registered
+  its model under one and Delphi looked it up under the other.
+- **A DLL file rewritten** is loaded anew (COMPLIB.DCL after a rebuild).
+- **BeginPaint takes in what WM_ERASEBKGND invalidates**: BIVBX
+  invalidates a control while it erases; each painting asked for the
+  next one, and Delphi never got to start the program after F9.
+- **DOS sessions**: opening a missing file fails with DOS's error 2, not
+  OS/2's 110 (PATCH.EXE opens its temporary file first, creating it on
+  error 2).
+
+Not yet:
+
+- Resource Workshop's Open dialog lists its directories and drives
+  without their names: its list control (WORKLIB2) takes a never-set
+  local variable for the font height when the item has no font. On
+  Windows that slot holds what USER's own BeginPaint left on the stack;
+  here what WIN16's thunks leave makes the name's rectangle upside down.
+  Typing the path works.
+- The Turbo Debugger installer's last page shows its picture button
+  empty (Borland's BORBTNII class gets its bitmaps another way).
+- WinHelp (all the RAD Pack's .HLP files, as Delphi's).
+- **Turbo Debugger for Windows** (`C:\TDW\BIN\TDW.EXE`) starts, loads
+  its debugger DLL (TDWINTH.DLL, TOOLHELP-based) and its display DLL
+  (TDWGUI.DLL, which draws TDW's text screen in a window) and stops with
+  a protection fault where TDWGUI.DLL reads the cursor from the VGA's
+  CRT controller ports (OUT 3D4h / IN 3D5h): Windows' display VxD
+  virtualizes them for Windows programs; rs2 does not allow port I/O.
+  What it would take: emulating the VGA's text-mode registers (CRTC
+  index/data, the cursor) and the B800h text buffer for Windows programs
+  in WIN16's fault handler, or a display DLL of rs2's own in TDW.INI
+  (VIDEODLL) that draws in a PM window; USER's DisableOEMLayer and
+  EnableOEMLayer (USER.3, USER.4: TDW's full-screen display switches to
+  text mode with them); SetEventHook calling its hook with the keyboard
+  and mouse events while the debuggee is stopped (it only records the
+  hook now); and above all **TDDEBUG.386**, the VxD TDW finds through
+  INT 2Fh AX=1684h (its API entry point): the 386 debug registers
+  (hardware breakpoints), the NMI/Ctrl+Alt+SysRq break, reading and
+  writing any VM's memory and the system's descriptor tables. Those
+  would be a WIN16 entry point backed by kernel calls in the manner of
+  RS2API 423 (Rs2Win16Debug), which already stops, steps and resumes
+  Win16 tasks for Delphi's integrated debugger.
 
 ### TOOLHELP and debuggers
 

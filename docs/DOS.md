@@ -130,7 +130,10 @@ All served in Rust, on the guest's registers and memory:
   names (long HPFS/JFS names are not visible to FCB and find calls in
   short form, as on OS/2: they are skipped). The SFT and job file table
   are real guest structures (PSP handle table at PSP:18h, `SetHandleCount`
-  67h), each SFT entry backed by an OS/2 file handle.
+  67h), each SFT entry backed by an OS/2 file handle. Errors are DOS's:
+  opening a file that is not there is error 2 (OS/2 says 110,
+  ERROR_OPEN_FAILED; the Delphi 1.01 patch's PATCH.EXE creates its
+  temporary file on error 2), creating one that is there 80.
 - **INT 10h** video BIOS (modes 0-7, 0Dh-13h, cursor, scrolling, teletype,
   palette and DAC, fonts 8x8/8x14/8x16; VBE 2.0 with 8-bit modes 100h,
   101h, 103h, 105h through a banked window at A000h and a linear
