@@ -1227,6 +1227,57 @@ pub extern "C" fn GpiQueryPel(hps: u32, p: *const PointL) -> i32 {
 
 // ---- Areas and paths ----
 
+/// POLYGON: ulPoints, aPointl.
+#[repr(C)]
+#[derive(Clone, Copy)]
+pub struct Polygon {
+    pub n: u32,
+    pub pts: *const PointL,
+}
+
+/// GpiPolygons(hps, ulCount, paplgn, flOptions, flModel): an area of
+/// closed polygons; the first starts at the current position, the others
+/// at their first point. POLYGON_BOUNDARY 1, POLYGON_WINDING 2,
+/// POLYGON_EXCL 8 (flModel), POLYGON_NOFILL 0x10 (outlines only).
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiPolygons(hps: u32, count: u32, polys: *const Polygon, opts: u32, model: u32) -> i32 {
+    if polys.is_null() && count != 0 {
+        return GPI_ERROR;
+    }
+    let list: Vec<Polygon> = (0..count as usize).map(|i| unsafe { polys.add(i).read_unaligned() }).collect();
+    let fill = (opts | model) & 0x10 == 0;
+    if fill && GpiBeginArea(hps, (opts | model) & (1 | 2 | 8)) == 0 {
+        return GPI_ERROR;
+    }
+    let mut start = PointL { x: 0, y: 0 };
+    GpiQueryCurrentPosition(hps, &mut start);
+    for (i, p) in list.iter().enumerate() {
+        if p.pts.is_null() || p.n == 0 {
+            continue;
+        }
+        let pts: Vec<PointL> = (0..p.n as usize).map(|k| unsafe { p.pts.add(k).read_unaligned() }).collect();
+        let (first, mut rest) = if i == 0 { (start, pts) } else { (pts[0], pts[1..].to_vec()) };
+        if i != 0 {
+            GpiMove(hps, &first);
+        }
+        if !fill {
+            // Outlines are closed here; an area closes its figures.
+            rest.push(first);
+        }
+        if !rest.is_empty() {
+            GpiPolyLine(hps, rest.len() as i32, rest.as_ptr());
+        }
+    }
+    if fill { GpiEndArea(hps) } else { GPI_OK }
+}
+
+/// GpiFloodFill(hps, lOptions, lColor): FF_BOUNDARY 0 fills up to pels of
+/// lColor, FF_SURFACE 1 over pels of lColor, from the current position.
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiFloodFill(hps: u32, opts: i32, color: i32) -> i32 {
+    draw(hps, |e, s| e.ps.flood_fill(s, opts & 1 != 0, color)).map_or(GPI_ERROR, |ok| if ok { GPI_OK } else { GPI_ERROR })
+}
+
 /// GpiBeginArea(hps, flOptions): BA_BOUNDARY 1, BA_WINDING 2, BA_EXCL 8.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiBeginArea(hps: u32, opts: u32) -> u32 {
@@ -1241,39 +1292,6 @@ pub extern "C" fn GpiEndArea(hps: u32) -> i32 {
         return GPI_OK;
     }
     draw(hps, |e, s| ok(e.ps.end_area(s))).unwrap_or(GPI_ERROR)
-}
-
-/// GpiPolygons(hps, ulCount, paplgn, flOptions, flModel): polygons
-/// (POLYGON: ULONG ulPoints, PPOINTL aPointl), each closed, filled as one
-/// area (POLYGON_BOUNDARY 1, POLYGON_WINDING 2, POLYGON_EXCL 8: the area's
-/// BA_* options) or with POLYGON_NOFILL (0x10) only outlined.
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiPolygons(hps: u32, count: u32, polys: *const u32, opts: u32, _model: u32) -> i32 {
-    if polys.is_null() {
-        return GPI_ERROR;
-    }
-    let fill = opts & 0x10 == 0;
-    if fill && GpiBeginArea(hps, opts & 0xb) == 0 {
-        return GPI_ERROR;
-    }
-    for i in 0..count as usize {
-        let (n, p) = unsafe { (polys.add(2 * i).read_unaligned(), polys.add(2 * i + 1).read_unaligned() as *const PointL) };
-        let Some(pts) = points(p, n as i32) else { continue };
-        let Some(&first) = pts.first() else { continue };
-        let start = PointL { x: first.x, y: first.y };
-        GpiMove(hps, &start);
-        let mut ring = pts[1..].to_vec();
-        ring.push(first);
-        let ring: Vec<PointL> = ring.iter().map(|q| PointL { x: q.x, y: q.y }).collect();
-        GpiPolyLine(hps, ring.len() as i32, ring.as_ptr());
-    }
-    if fill { GpiEndArea(hps) } else { GPI_OK }
-}
-
-/// GpiFloodFill(hps, lOptions, lColor): not done (GPI_ERROR).
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiFloodFill(_hps: u32, _opts: i32, _color: i32) -> i32 {
-    GPI_ERROR
 }
 
 /// GpiQueryBitmapDimension(hbm, psizlBitmapDimension): the size in 0.1 mm

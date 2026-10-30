@@ -22,3 +22,4 @@ WinReplyMsg 991
 WinQueueFromID 993
 WinThreadAssocQueue 994
 WinLockInput 995
+WinWakeThread 9021

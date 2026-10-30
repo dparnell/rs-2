@@ -237,8 +237,12 @@ pub extern "C" fn WinProcessDlg(h: u32) -> u32 {
 /// message filter hooks (MSGF_DIALOGBOX, MSGF_MESSAGEBOX) process is not
 /// dispatched.
 pub fn process(h: u32, msgf: u32) -> u32 {
-    if data(h).is_none() {
-        return DID_ERROR;
+    let Some(d) = data(h) else { return DID_ERROR };
+    // Dismissed before the loop (the Open Watcom installer measures a
+    // dialog's font this way): IBM's loop returns at once and the dialog
+    // stays hidden.
+    if d.dismissed {
+        return d.result;
     }
     let owner = win::top_level(ctl::owner(h));
     if owner != 0 && owner != HWND_DESKTOP && owner != h && ctl::enabled(owner) {
@@ -246,9 +250,6 @@ pub fn process(h: u32, msgf: u32) -> u32 {
         if let Some(d) = data(h) {
             d.disabled_owner = owner;
         }
-    }
-    if let Some(d) = data(h) {
-        d.dismissed = false;
     }
     win::show(h, true);
     win::activate(h);

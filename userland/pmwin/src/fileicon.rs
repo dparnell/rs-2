@@ -93,6 +93,13 @@ fn attributes(path: &[u8]) -> Option<u32> {
 
 /// The whole file (up to 8 MB).
 fn read_file(path: &[u8]) -> Option<Mem> {
+    read_head(path, false)
+}
+
+/// The file, or with `head` its first 8 MB when it is longer (an
+/// executable with data appended, such as the Open Watcom installer's
+/// ZIP archive, keeps its resources in front).
+fn read_head(path: &[u8], head: bool) -> Option<Mem> {
     let mut z = path.to_vec();
     z.push(0);
     let (mut hf, mut action) = (0u32, 0u32);
@@ -104,6 +111,9 @@ fn read_file(path: &[u8]) -> Option<Mem> {
     unsafe { os2::DosSetFilePtr(hf, 0, 2, &mut size) };
     let mut pos = 0u32;
     unsafe { os2::DosSetFilePtr(hf, 0, 0, &mut pos) };
+    if head {
+        size = size.min(8 << 20);
+    }
     let r = (size > 0 && size <= 8 << 20).then(|| Mem::new(size as usize)).flatten().and_then(|m| {
         let mut got = 0u32;
         let ok = unsafe { os2::DosRead(hf, m.p, size, &mut got) } == 0 && got == size;
@@ -160,8 +170,15 @@ fn find(path: &[u8]) -> Option<Source> {
     if attr & FILE_DIRECTORY != 0 {
         return Some(Source::System(sysptr::SPTR_FOLDER));
     }
+    // An icon or pointer file is its own icon (as in IBM's shell:
+    // ICONFILE=C:\WATCOM\WATCOM.ICO, the Open Watcom installer's folders).
+    if has_ext(path, &[b"ICO", b"PTR"]) {
+        if let Some(m) = read_file(path).filter(|m| matches!(m.slice().get(..2), Some(b"BA" | b"IC" | b"CI" | b"PT" | b"CP"))) {
+            return Some(Source::Data(m));
+        }
+    }
     if has_ext(path, &[b"EXE", b"DLL"]) {
-        if let Some(b) = read_file(path).and_then(|d| exe_icon(d.slice())) {
+        if let Some(b) = read_head(path, true).and_then(|d| exe_icon(d.slice())) {
             return Some(Source::Bytes(b));
         }
     }

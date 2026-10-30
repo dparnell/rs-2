@@ -1256,6 +1256,62 @@ impl Ps {
         true
     }
 
+    /// GpiFloodFill: fill with the area attributes from the current
+    /// position: FF_BOUNDARY (`surface` false) up to pels of `color`,
+    /// FF_SURFACE over the connected pels of `color`. False when the start
+    /// pel is outside the clip region.
+    pub fn flood_fill(&mut self, s: &mut Surface, surface: bool, color: i32) -> bool {
+        let (px, py) = ipt(self.dev(self.pos));
+        let (x0, y0) = (px + self.origin.x, py + self.origin.y);
+        let c = self.rgb(color);
+        let b = Region::from_rects(&self.clip).bounds().intersect(&s.bounds());
+        if b.is_empty() || !self.clip.iter().any(|r| r.contains(Point::new(x0, y0))) {
+            return false;
+        }
+        let (w, h) = (b.right - b.left, b.top - b.bottom);
+        let mut seen = vec![false; (w * h) as usize];
+        let fills = |seen: &[bool], x: i32, y: i32| -> bool {
+            if !b.contains(Point::new(x, y)) || seen[((y - b.bottom) * w + (x - b.left)) as usize] {
+                return false;
+            }
+            let p = Point::new(x, y);
+            self.clip.iter().any(|r| r.contains(p)) && s.get(x, y).is_some_and(|v| (v == c) == surface)
+        };
+        let mut spans = crate::region::Spans::new();
+        let mut todo = vec![(x0, y0)];
+        while let Some((x, y)) = todo.pop() {
+            if !fills(&seen, x, y) {
+                continue;
+            }
+            // The whole run through (x, y), then seeds in the rows next to it.
+            let (mut l, mut r) = (x, x + 1);
+            while fills(&seen, l - 1, y) {
+                l -= 1;
+            }
+            while fills(&seen, r, y) {
+                r += 1;
+            }
+            for i in l..r {
+                seen[((y - b.bottom) * w + (i - b.left)) as usize] = true;
+            }
+            spans.add(y - self.origin.y, l - self.origin.x, r - self.origin.x);
+            for ny in [y - 1, y + 1] {
+                let mut run = false;
+                for i in l..r {
+                    let f = fills(&seen, i, ny);
+                    if f && !run {
+                        todo.push((i, ny));
+                    }
+                    run = f;
+                }
+            }
+        }
+        let g = spans.into_region();
+        let a = self.attrs.area;
+        self.paint(s, &g, a, false);
+        true
+    }
+
     // ---- Paths ----
 
     pub fn begin_path(&mut self) -> bool {
@@ -1950,6 +2006,26 @@ mod tests {
             assert_eq!(s.get(5, 5), Some(0));
             assert_eq!(s.get(15, 15) == Some(0xffffff), hole);
         }
+    }
+
+    #[test]
+    fn flood_fill_boundary_and_surface() {
+        let (mut buf, mut ps) = setup(30, 30);
+        let mut s = surface(&mut buf, 30, 30);
+        ps.gpi_move(Point::new(2, 2));
+        ps.gpi_polyline(&mut s, &[Point::new(27, 2), Point::new(27, 27), Point::new(2, 27), Point::new(2, 2)]);
+        ps.attrs.area.color = 2; // CLR_RED
+        ps.gpi_move(Point::new(15, 15));
+        assert!(ps.flood_fill(&mut s, false, crate::color::CLR_BLACK));
+        assert_eq!(s.get(15, 15), Some(0xff0000));
+        assert_eq!(s.get(3, 26), Some(0xff0000));
+        assert_eq!(s.get(2, 2), Some(0));
+        assert_eq!(s.get(1, 1), Some(0xffffff));
+        // FF_SURFACE: over the connected red pels only.
+        ps.attrs.area.color = 1; // CLR_BLUE
+        assert!(ps.flood_fill(&mut s, true, 2));
+        assert_eq!(s.get(26, 3), Some(0x0000ff));
+        assert_eq!(s.get(28, 28), Some(0xffffff));
     }
 
     #[test]
