@@ -84,12 +84,91 @@ Status: **works** = the tested function behaves as on OS/2;
 | IMPLIB.EXE | works | |
 | MAPSYM.EXE, MARKEXE.EXE | works | |
 | MKMSGF.EXE, MSGBIND.EXE | works | Usage text only. |
-| RC.EXE, RC16.EXE, RCPP.EXE | works | Usage text only. |
+| RC.EXE, RC16.EXE, RCPP.EXE | partial | RC16 binds a `.RES` into a 32-bit program (Borland's CLOCK example, see [Borland C++](#borland-c-for-os2-20)); RC.EXE needs LIBCM.DLL (VisualAge C runtime, not on the media). |
 | GENCAT.EXE, RPCGEN.EXE, FWDSTAMP.EXE | works | Usage text only. |
 | PACK.EXE, PACK2.EXE | partial | PACK.MSG is not on the media. |
 | WORMS.EXE (sample) | works | Mouse pointer and clicks through MOUCALLS (Exit by clicking), also in a PM window (clicks reach it as cell positions). |
 | TIMER0.EXE (sample) | works | Reports that the TIMER0$ sample driver is missing. |
 | EAS.EXE (sample) | not tested | The EA editor sample is a Presentation Manager program. |
+
+## Development tools
+
+### Borland C++ for OS/2 2.0
+
+From the user's CD (`BC_OS2.ISO`, Borland C++ 4.11 compiler, Turbo Link
+1.5, MAKE 3.7, IBM's IPFC 2.1, the IDE, Resource Workshop, Turbo
+Debugger), on a system disk with only rs2's files (`cargo xtask disk
+--system --size 300`, booted with `--hdd IMG --boot-hdd --virtio-cd
+BC_OS2.ISO`; the CD is drive D:).
+
+| Program | Status | Notes |
+|---------|--------|-------|
+| INSTALL\INSTALL.EXE (the installer) | works | A 16-bit PM program built with Microsoft C 6 (multithread runtime). From a command prompt (`D:`, `CD \INSTALL`, `INSTALL`): its main window, the Tools and Library / Miscellaneous / Directory options dialogs, Install. A worker thread unpacks the 158 `.PAK` archives (about 64 MB, the "speedometer" counting up; some 7 minutes under QEMU), converts the `.HLP` files to `.INF` with HLP2INF, rewrites CONFIG.SYS (the original kept as CONFIG.BOR: `C:\BCOS2\BIN` added to LIBPATH, PATH, HELP and BOOKSHELF, `SET IPFC=C:\BCOS2\IPFC` added) and makes its groups with the OS/2 1.x program list calls (`PrfCreateGroup`, `PrfAddProgram`), which appear on the desktop as the folders "Borland C++" (Borland C++, Borland Debugger, Resource Workshop, with the programs' icons) and "Borland Help" (16 help books); "Installation successful!", then the README in its own MLE window, and it exits. Both folders are there after a restart. |
+| BCC.EXE, TLINK.EXE | works | After the restart: `bcc hello.c` compiles and links a text-mode program, which runs. |
+| MAKE.EXE, BRCC.EXE | works | `make` in `C:\BCOS2\EXAMPLES\CLOCK` (the PM clock example) runs BRCC on CLOCK.RC, BCC on the nine C files and TLINK. |
+| RC.EXE (binding the resources) | partial | The examples' makefiles and the IDE bind `.RES` files with `rc FILE.RES FILE.EXE`, OS/2's own resource compiler (`\OS2\RC.EXE` on IBM's systems), which is not on Borland's CD and which rs2 does not have yet. Tested with the Toolkit's 16-bit RC16.EXE copied to `C:\OS2\RC.EXE` (the Toolkit's 32-bit RC.EXE needs LIBCM.DLL, the VisualAge C runtime, which is not on the media): the resources are bound and CLOCK.EXE runs (its dial, menus). |
+| IPFC.EXE (IBM's IPF compiler 2.1, on Borland's CD) | works | `make clock.hlp` compiles the example's five IPF files; F1 in CLOCK shows the help in rs2's help manager. |
+| HLP2INF.EXE | works | Run by the installer, and by hand. |
+| BC.EXE (the IDE) | partial | Starts (its window, menu bar, speed bar, an editor window, the status line); its menus open from the keyboard (Alt+letter); Alt+F4 closes it. A mouse click on the editor does not give it the keyboard focus, so typing goes to the IDE's main client window and nothing appears in the editor (IBM's `WinDefWindowProc` passes unhandled mouse button messages to the parent, a frame, which rs2 does not do yet). Project > Open project brings up the file dialog, but with BC's own dialog procedure the directory and file lists stay empty and BC reports `C:\t\*.PRJ` followed by garbage as not accessible. So a project was not built or run from the IDE. |
+| Integrated debugger (TDDEBUG.DLL) | partial | Loads with the IDE (after rs2 got PM's debugger calls, below) and runs its event loop (it polls its event queue with `DosQueryQueue` between `WinPeekMsg` calls); a debugging session was not started, as no project could be built in the IDE. |
+| TD.EXE, TDOS2.EXE (Turbo Debugger) | not tested | Their imports resolve. |
+| WORKSHOP.EXE (Resource Workshop) | not tested | Imports BPMCC.DLL's `BPMCCGETVERSION`, which the installer puts in `\OS2\DLL`. |
+
+![Borland's installer on rs2](images/rs2-bcos2-install.png)
+
+![The CLOCK example built with BCC, BRCC, TLINK and IPFC, its help open](images/rs2-bcos2-clock.png)
+
+What it needed from rs2 (the suite that checks each is named; the huge
+resources and the message box line breaks have no check):
+
+- **WinCatch / WinThrow** (PMWIN 248/249, CTLTEST): 16-bit code with
+  IBM's CATCHBUF (return address, BP, SP, SI, DI, DS, SS); `WinThrow` of
+  0 returns 1. A throw from a 16-bit window procedure that PMWIN called
+  leaves 32-bit thunk frames behind: thunk16 forgets them when the next
+  call comes from as high or higher on the 16-bit stack.
+- **The 16-bit program list calls** (`Prf16AddProgram` ... PMSHAPI 50-60,
+  with IBM's 16-bit PROGDETAILS and PROGTITLE: byte-sized PROGTYPE, a
+  16-bit SWP), and **program list groups and programs shown on the
+  desktop**: a change to the user profile's list makes or removes a
+  Workplace Shell folder or program object (WPSTEST).
+- **NE resources larger than 64 KB** (the installer's 640x480 bitmap):
+  consecutive segments with the same type and name, loaded into
+  consecutive tiles (a huge segment), their total size reported.
+- **16-bit `DosCreateThread` starts the thread with the creator's
+  registers** (Microsoft C's and Borland's `_beginthread` pass the thread
+  function in CX:DX and its argument in SI:DI), and **the local
+  information segment's `tidCurrent` follows the running thread** (MSC's
+  multithread `_chkstk` looks up the thread's stack limit by it; the
+  installer's worker thread stopped with "R6000 stack overflow"). APITEST.
+- **`WinDestroyWindow` only from the window's own thread**
+  (PMERR_CALL_FROM_WRONG_THREAD, as IBM's): the installer's worker thread
+  tries to destroy the progress dialog and later posts it its "done"
+  message; rs2 had destroyed it and the installer never ended (CTLTEST).
+- **Dialogs paint under their controls** unless their template has
+  WS_CLIPCHILDREN, and frame statics draw only their outline: the
+  installer's option dialogs and its gauge control showed other windows
+  through them (CTLTEST).
+- **`WinMessageBox` breaks long lines** at blanks (up to 2/5 of the
+  screen wide, 2/3 high).
+- **Guard pages raise `XCPT_GUARD_PAGE_VIOLATION` to the thread's
+  handlers** before the default (the stack grows): TLINK grows its heap
+  so, and without it reported "General error in module ..." (APITEST).
+- **IBM's 16-bit suballocation** (`DosSubSet`, `DosSubAlloc`,
+  `DosSubFree`): its own 8-byte header and 4-byte granularity; IPFC sets
+  up 22-byte areas, which the 32-bit layout rs2 used refused ("125: Not
+  enough memory") (APITEST).
+- **PMWIN and PMGPI calls the IDE and its DLLs import**: `WinWaitMsg`,
+  `WinGetClipPS`, `WinSetSysModalWindow`/`WinQuerySysModalWindow`, PM's
+  debugger calls (`WinQueueFromID`, `WinQuerySendMsg`, `WinReplyMsg`,
+  `WinThreadAssocQueue`, `WinLockInput`, PMWIN 990-995, not in the Warp
+  4 Toolkit), PMWIN 328 (a 16-bit stub, as IBM's), `GpiPolygons`,
+  `GpiQueryBitmapDimension`, `GpiQueryKerningPairs`,
+  `GpiQueryFaceString`, `GpiFloodFill` (not done: GPI_ERROR).
+
+Debugging aid added on the way: `apitrace=NAME` on the kernel command
+line (`\RS2\CMDLINE`) traces only the programs whose module name
+starts with NAME, with the paths of file calls and the offsets and sizes
+of `DosSetFilePtr`/`DosRead`.
 
 ## Presentation Manager programs
 
@@ -437,6 +516,10 @@ program notebook (RS2SHELL has it).
   to the physical frame of a RAM semaphore even after it was freed.
 
 ## Missing or incomplete
+
+- rs2 has no RC.EXE of its own (OS/2 ships one in `\OS2`); development
+  tools that bind resources with it (Borland C++'s makefiles and IDE)
+  need one.
 
 - Extended attributes: `ERROR_NEED_EAS_FOUND` is only reported by
   `DosCopy` (critical EAs to a target without EA support); `DosOpen` does

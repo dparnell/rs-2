@@ -18,6 +18,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use os2::*;
 
+mod dlg;
 mod pm16;
 mod wm;
 
@@ -492,6 +493,7 @@ fn main(s: &Startup) -> u32 {
     helper_checks(hab);
     wm::wm_checks(hab, hmq, client, frame);
     pm16::pm16_checks(hab, client);
+    dlg::checks(hab, client);
     clipboard_checks(hab);
     // The clipboard seen from another process.
     let mut res = ResultCodes { code_terminate: 0, code_result: 0 };

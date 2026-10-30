@@ -82,6 +82,12 @@ unsafe extern "C" {
     fn somResolveByName(obj: usize, name: *const u8) -> usize;
     #[link_name = "SOM.82"]
     fn somGetClassFromMToken(token: usize) -> usize;
+    #[link_name = "PMSHAPI.9000"]
+    fn PrfCreateGroup(hini: u32, title: *const u8, vis: u32) -> u32;
+    #[link_name = "PMSHAPI.109"]
+    fn PrfAddProgram(hini: u32, details: *const u32, group: u32) -> u32;
+    #[link_name = "PMSHAPI.106"]
+    fn PrfDestroyGroup(hini: u32, group: u32) -> u32;
     #[link_name = "PMSHAPI.118"]
     fn PrfWriteProfileData(hini: u32, app: *const u8, key: *const u8, buf: *const u8, len: u32) -> u32;
     #[link_name = "PMSHAPI.117"]
@@ -577,6 +583,30 @@ fn remote() {
     check("WinQueryObject <WP_DESKTOP>", query(b"<WP_DESKTOP>") >> 16 == 3);
 }
 
+/// The program list on the desktop: a group made with PrfCreateGroup in
+/// the user profile is a folder (<PRF_GROUP_hhhhhhhh>) on the desktop, a
+/// program added to it a program object in that folder; destroying the
+/// group removes both (installers written for OS/2 1.x, as Borland
+/// C++'s, make their groups so).
+fn program_list() {
+    const HINI_USERPROFILE: u32 = 0xffff_ffff;
+    let g = unsafe { PrfCreateGroup(HINI_USERPROFILE, b"WPSTEST Group\0".as_ptr(), 0) };
+    check("PrfCreateGroup", g != 0);
+    let id = |kind: &[u8], h: u32| [b"<PRF_", kind, b"_", alloc::format!("{h:08X}").as_bytes(), b">"].concat();
+    let folder = query(&id(b"GROUP", g));
+    check("the group is a folder on the desktop", folder != 0 && title(object(folder)) == b"WPSTEST Group");
+    let (t, e) = (b"Program from the list\0", b"C:\\OS2\\E.EXE\0");
+    let mut d = [0u32; 18];
+    d[0] = 72;
+    d[1] = 3;
+    d[3] = t.as_ptr() as u32;
+    d[4] = e.as_ptr() as u32;
+    let p = unsafe { PrfAddProgram(HINI_USERPROFILE, d.as_ptr(), g) };
+    let prog = query(&id(b"PROG", p));
+    check("PrfAddProgram: a program object in that folder", p != 0 && prog != 0 && contents(object(folder)).contains(&object(prog)));
+    check("PrfDestroyGroup removes the folder and the program", unsafe { PrfDestroyGroup(HINI_USERPROFILE, g) } != 0 && query(&id(b"GROUP", g)) == 0 && query(&id(b"PROG", p)) == 0);
+}
+
 fn main(st: &Startup) -> u32 {
     let args = st.args();
     let word = args.split(|&c| c == b' ').find(|w| !w.is_empty()).unwrap_or(b"");
@@ -604,6 +634,7 @@ fn main(st: &Startup) -> u32 {
         class_dll(args);
     } else {
         make();
+        program_list();
     }
     let n = unsafe { FAILS };
     println!("wpstest done: {} failure(s)", n);
