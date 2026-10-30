@@ -37,7 +37,7 @@ use core::sync::atomic::Ordering;
 use super::exceptions::xcpt;
 use super::{err, Ctx};
 use crate::arch::idt::{TrapFrame, API_VECTOR};
-use crate::loader::{Format, Module};
+use crate::loader::Module;
 use crate::sync::SpinLock;
 use crate::task::thread::{State, Thread};
 use crate::task::{process, sched, Process, WaitQueue};
@@ -221,6 +221,10 @@ impl Debuggee {
     }
 }
 
+/// Log every DosDebug call and its result to the serial port (`dbgtrace`
+/// on the kernel command line; `apitrace` too).
+pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
 static DEBUGGEES: SpinLock<Vec<Debuggee>> = SpinLock::new(Vec::new());
 /// Both sides wait here: debuggee threads for the debugger to let them
 /// run, the debugger for a notification.
@@ -252,8 +256,10 @@ fn with<R>(pid: u32, f: impl FnOnce(&mut Debuggee) -> R) -> Option<R> {
 }
 
 /// The modules a process uses: its program first, then the DLLs in the
-/// order their initialisation runs (kernel-implemented ones have no file
-/// and are left out).
+/// order their initialisation runs. The kernel-implemented ones (DOSCALLS
+/// ...) count: on OS/2 every program has DOSCALL1 reported before its
+/// first instruction, and debuggers rely on a DLL coming first (Open
+/// Watcom's trap file loads its helper DLL there).
 fn modules_of(p: &Process) -> Vec<Arc<Module>> {
     fn visit(m: &Arc<Module>, seen: &mut Vec<u16>, out: &mut Vec<Arc<Module>>) {
         if seen.contains(&m.hmte) {
@@ -263,9 +269,7 @@ fn modules_of(p: &Process) -> Vec<Arc<Module>> {
         for imp in &m.imports {
             visit(imp, seen, out);
         }
-        if m.format != Format::Virtual {
-            out.push(m.clone());
-        }
+        out.push(m.clone());
     }
     let mut out = alloc::vec![p.exe.clone()];
     let mut seen = alloc::vec![p.exe.hmte];
@@ -798,7 +802,28 @@ pub fn dos_debug(c: &mut Ctx) -> u32 {
     }
     let cmd = u.get(udb::CMD) as i32;
     u.set(udb::CMD, note::SUCCESS as u32);
+    let show = |u: &Udb| {
+        alloc::format!(
+            "pid {} tid {} value {:x} addr {:x} buffer {:x} len {:x} index {:x} mte {:x} eip {:x}",
+            u.get(udb::PID),
+            u.get(udb::TID),
+            u.get(udb::VALUE),
+            u.get(udb::ADDR),
+            u.get(udb::BUFFER),
+            u.get(udb::LEN),
+            u.get(udb::INDEX),
+            u.get(udb::MTE),
+            u.get(udb::EIP)
+        )
+    };
+    let trace = super::tracing() || TRACE.load(Ordering::Relaxed);
+    if trace {
+        crate::trace!("    DosDebug cmd {cmd} {}", show(&u));
+    }
     command(c, &mut u, cmd);
+    if trace {
+        crate::trace!("    -> {} {}", u.get(udb::CMD) as i32, show(&u));
+    }
     if !c.write(at, &u.0) {
         return err::INVALID_ADDRESS;
     }
