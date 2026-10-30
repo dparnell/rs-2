@@ -35,8 +35,11 @@ pub fn load(
         m.import_modules().map_err(|_| err::BAD_EXE_FORMAT)?.iter().map(|n| s(n)).collect();
     let mut imports = load_imports(&import_names)?;
 
-    // Choose an address for each object.
-    let fixups_stripped = h.module_flags & mflags::INTERNAL_FIXUPS_REMOVED != 0;
+    // Choose an address for each object. A module marked as having had its
+    // internal fixups removed can still carry them (VisualAge Smalltalk's
+    // EMNTV50.DLL, based at 0x10000): then it can be moved like any other.
+    let fixups_stripped = h.module_flags & mflags::INTERNAL_FIXUPS_REMOVED != 0
+        && !(1..=h.page_count).any(|p| m.fixups(p).is_ok_and(|f| f.iter().any(|x| matches!(x.target, lx::Target::Internal { .. }))));
     let mut bases = Vec::with_capacity(lxobjs.len());
     for o in &lxobjs {
         let size = o.virtual_size.max(1);
