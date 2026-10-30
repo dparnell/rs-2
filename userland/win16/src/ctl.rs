@@ -277,6 +277,8 @@ fn button(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             }
             0
         }
+        // Group boxes let the mouse through to their parent, as Windows'.
+        W_NCHITTEST if k == BS_GROUPBOX => 0xffff_ffff,
         W_ERASEBKGND => 1,
         W_PAINT => {
             let hdc = begin_paint_rs(h);
@@ -626,6 +628,9 @@ fn static_(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
             0
         }
         W_ERASEBKGND => 1,
+        // Statics let the mouse through to their parent (HTTRANSPARENT),
+        // as Windows' do.
+        W_NCHITTEST => 0xffff_ffff,
         W_PAINT => {
             let hdc = begin_paint_rs(h);
             paint_static(h, hdc);

@@ -56,6 +56,7 @@ pub const W_SHOWWINDOW: u16 = 0x0018;
 pub const W_CTLCOLOR: u16 = 0x0019;
 pub const W_CANCELMODE: u16 = 0x001f;
 pub const W_SETCURSOR: u16 = 0x0020;
+pub const W_NCHITTEST: u16 = 0x0084;
 pub const W_MOUSEACTIVATE: u16 = 0x0021;
 pub const W_NEXTDLGCTL: u16 = 0x0028;
 pub const W_DRAWITEM: u16 = 0x002b;
@@ -101,6 +102,7 @@ pub const W_USER: u16 = 0x0400;
 pub const WS_POPUP: u32 = 0x8000_0000;
 pub const WS_CHILD: u32 = 0x4000_0000;
 pub const WS_EX_TRANSPARENT: u32 = 0x0000_0020;
+const WS_EX_NOPARENTNOTIFY: u32 = 0x0000_0004;
 pub const WS_VISIBLE: u32 = 0x1000_0000;
 pub const WS_DISABLED: u32 = 0x0800_0000;
 pub const WS_CLIPCHILDREN: u32 = 0x0200_0000;
@@ -1933,6 +1935,48 @@ fn map_point(h: u16, p: *mut i16, to_screen: bool) {
     }
 }
 
+/// The window a mouse message goes to: `h`, or the first parent of it
+/// that does not answer WM_NCHITTEST with HTTRANSPARENT (-1); `lp` in
+/// that window's client coordinates.
+fn hit_target(h: u16, lp: u32) -> (u16, u32) {
+    let (sx, sy) = to_screen(h, lp as i16 as i32, (lp >> 16) as i16 as i32);
+    let mut t = h;
+    for _ in 0..16 {
+        let at = (sy as u16 as u32) << 16 | sx as u16 as u32;
+        if send(t, W_NCHITTEST, 0, at) as i16 != -1 {
+            break;
+        }
+        match wnd(t).filter(|w| w.style & WS_CHILD != 0).map(|w| w.parent) {
+            Some(p) if p != 0 => t = p,
+            _ => break,
+        }
+    }
+    if t == h {
+        return (h, lp);
+    }
+    let (ox, oy) = to_screen(t, 0, 0);
+    (t, ((sy - oy) as u16 as u32) << 16 | (sx - ox) as u16 as u32)
+}
+
+/// WM_PARENTNOTIFY for a button pressed in a child window: each parent
+/// up the chain hears of it (the point in its own client coordinates),
+/// unless the child has WS_EX_NOPARENTNOTIFY. Resource Workshop's dialog
+/// editor places a new control so.
+fn parent_notify_click(h: u16, m: u16, lp: u32) {
+    let (sx, sy) = to_screen(h, lp as i16 as i32, (lp >> 16) as i16 as i32);
+    let mut c = h;
+    for _ in 0..16 {
+        let Some((style, ex, parent)) = wnd(c).map(|w| (w.style, w.exstyle, w.parent)) else { break };
+        if style & WS_CHILD == 0 || ex & WS_EX_NOPARENTNOTIFY != 0 || parent == 0 {
+            break;
+        }
+        let (ox, oy) = to_screen(parent, 0, 0);
+        let (x, y) = (sx - ox, sy - oy);
+        send(parent, W_PARENTNOTIFY, m, (y as u16 as u32) << 16 | x as u16 as u32);
+        c = parent;
+    }
+}
+
 /// A point in a window's client coordinates to the screen's.
 pub fn to_screen(h: u16, x: i32, y: i32) -> (i32, i32) {
     let mut p = [x as i16, y as i16];
@@ -2147,6 +2191,10 @@ fn set_capture(h: u16) -> u16 {
     let old = hwnd_above(unsafe { WinQueryCapture(HWND_DESKTOP) });
     if let Some(c) = wnd(h).map(|w| w.client) {
         unsafe { WinSetCapture(HWND_DESKTOP, c) };
+    } else if h == 0 {
+        // SetCapture(NULL) lets the mouse go, as ReleaseCapture does
+        // (Resource Workshop's tool palette).
+        unsafe { WinSetCapture(HWND_DESKTOP, 0) };
     }
     old
 }
@@ -2736,7 +2784,7 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
             write_msg(p, 0, W_QUIT, q.mp1 as u16, 0, q.time, (q.x, q.y));
             return peek.is_some() as u32;
         }
-        let Some((hwnd, msg, wp, lp)) = win_message(&q) else {
+        let Some((mut hwnd, msg, wp, mut lp)) = win_message(&q) else {
             if q.msg == crate::toolhelp::NOTIFY_MSG && q.hwnd == 0 {
                 crate::toolhelp::deliver(q.mp1, q.mp2);
                 continue;
@@ -2752,10 +2800,21 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
             }
             continue;
         };
+        // A window that answers WM_NCHITTEST with HTTRANSPARENT lets the
+        // mouse through to its parent (Resource Workshop's dialog editor
+        // gets the clicks on the dialog it edits so).
+        if (0x200..=0x209).contains(&msg) {
+            (hwnd, lp) = hit_target(hwnd, lp);
+        }
         // WM_SETCURSOR before the mouse messages, as Windows' input
         // processing sends it.
         if msg == W_MOUSEMOVE || (0x201..=0x209).contains(&msg) {
             send(hwnd, W_SETCURSOR, hwnd, (msg as u32) << 16 | 1);
+        }
+        // A button pressed in a child window: its parents hear of it
+        // first (once, as the message is taken).
+        if matches!(msg, W_LBUTTONDOWN | 0x0204 | 0x0207) && peek.map_or(true, |fl| fl & 1 != 0) {
+            parent_notify_click(hwnd, msg, lp);
         }
         // WH_KEYBOARD hooks may take a key (virtual key, key data).
         if (0x100..=0x105).contains(&msg) && crate::compat::has_hooks(2) && crate::compat::call_hooks(2, 0, wp, lp) != 0 {
@@ -2963,6 +3022,8 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 pub fn def_window_proc(h: u16, m: u16, wp: u16, lp: u32) -> u32 {
     let inflight = u().inflight.iter().rev().find(|f| f.hwnd == h && f.msg == m).copied();
     match m {
+        // The mouse messages WIN16 delivers are the client area's.
+        W_NCHITTEST => return 1,
         W_NCCREATE => {
             // The window text, from CREATESTRUCT's lpszName.
             let name = unsafe { (flat(lp).add(22) as *const u32).read_unaligned() };
