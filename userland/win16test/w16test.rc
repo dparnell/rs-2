@@ -47,6 +47,19 @@ BEGIN
     PUSHBUTTON      "Cancel", IDCANCEL, 170, 128, 44, 14
 END
 
+IDI_TEST ICON note16.ico
+
+/* Controls whose text is an ordinal (0xFF and the number): an icon
+ * static, and a control of a class of W16TEST's (Borland's installers'
+ * picture buttons are made so). */
+RadDlg DIALOG 10, 10, 160, 60
+STYLE WS_POPUP | WS_CAPTION
+CAPTION "W16TEST ordinals"
+BEGIN
+    ICON            IDI_TEST, IDC_RADICON, 6, 6, 18, 20
+    CONTROL         IDI_TEST, IDC_ORD, "W16Ord", WS_CHILD | WS_VISIBLE, 40, 6, 40, 20
+END
+
 /* A Windows 3.0 name table (RT_NAMETABLE, 15) naming resource 1 of type
  * 7F01h "INSTALL" of type "SCR", as Borland's installer finds its
  * scripts: entries of a length, the type, the ID, the type's name and the

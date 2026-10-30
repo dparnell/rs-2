@@ -2113,6 +2113,328 @@ static void dll_tests(void)
         FreeLibrary(d);
 }
 
+/* The Delphi RAD Pack (Resource Workshop, the Visual Solutions Pack and
+ * its installer's BWCC dialogs, Borland's VBX runtime). */
+static int rad_paints, rad_child_paints, rad_activates, ord_seen, icon_seen;
+static WORD ord_id;
+
+LONG FAR PASCAL _export RadWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    PAINTSTRUCT ps;
+
+    switch (msg) {
+    case WM_ACTIVATE:
+        if (wp != WA_INACTIVE)
+            rad_activates++;
+        break;
+    case WM_ERASEBKGND:
+        /* As Borland's VBX runtime does. */
+        if (GetProp(h, "inval"))
+            InvalidateRect(h, NULL, FALSE);
+        break;
+    case WM_PAINT:
+        BeginPaint(h, &ps);
+        EndPaint(h, &ps);
+        if (GetProp(h, "child"))
+            rad_child_paints++;
+        else
+            rad_paints++;
+        return 0;
+    }
+    return DefWindowProc(h, msg, wp, lp);
+}
+
+LONG FAR PASCAL _export OrdWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    LPCSTR n;
+
+    if (msg == WM_CREATE) {
+        n = ((CREATESTRUCT FAR *)lp)->lpszName;
+        if (n != NULL && (BYTE)n[0] == 0xff) {
+            ord_seen = 1;
+            ord_id = *(WORD FAR *)(n + 1);
+        }
+    }
+    return DefWindowProc(h, msg, wp, lp);
+}
+
+BOOL FAR PASCAL _export RadDlgProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_INITDIALOG) {
+        icon_seen = SendDlgItemMessage(h, IDC_RADICON, WM_USER + 1, 0, 0) != 0;
+        EndDialog(h, 1);
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void rad_pump(DWORD ms)
+{
+    DWORD t0 = GetTickCount();
+    MSG msg;
+
+    do {
+        while (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+            DispatchMessage(&msg);
+    } while (GetTickCount() - t0 < ms);
+}
+
+static COLORREF rad_pixel(HWND h, int x, int y)
+{
+    HDC dc = GetDC(h);
+    COLORREF c = GetPixel(dc, x, y);
+
+    ReleaseDC(h, dc);
+    return c;
+}
+
+static void fill_red(HWND h, int cx, int cy)
+{
+    HDC dc = GetDC(h);
+    HBRUSH b = CreateSolidBrush(RGB(255, 0, 0));
+    RECT r;
+
+    SetRect(&r, 0, 0, cx, cy);
+    FillRect(dc, &r, b);
+    DeleteObject(b);
+    ReleaseDC(h, dc);
+}
+
+static HLOCAL alloc_in(WORD sel)
+{
+    HLOCAL h;
+
+    _asm {
+        push ds
+        mov ax, sel
+        mov ds, ax
+    }
+    h = LocalAlloc(LMEM_FIXED, 16);
+    _asm {
+        pop ds
+    }
+    return h;
+}
+
+static WORD bios_equipment(void)
+{
+    WORD r;
+
+    _asm {
+        int 11h
+        mov r, ax
+    }
+    return r;
+}
+
+static WORD bios_video_mode(void)
+{
+    WORD r;
+
+    _asm {
+        mov ah, 0fh
+        int 10h
+        mov r, ax
+    }
+    return r;
+}
+
+static void radpack_tests(HINSTANCE hInst)
+{
+    WNDCLASS wc;
+    HWND top, par, kid, a, b, w, st, gb, pb, ch;
+    HMENU sm;
+    RECT r, cr;
+    HGLOBAL g;
+    WORD sel;
+    HLOCAL hl;
+    int n;
+    FARPROC dp;
+
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = RadWndProc;
+    wc.hInstance = hInst;
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = GetStockObject(WHITE_BRUSH);
+    wc.lpszClassName = "W16Rad";
+    RegisterClass(&wc);
+    wc.lpfnWndProc = OrdWndProc;
+    wc.lpszClassName = "W16Ord";
+    RegisterClass(&wc);
+
+    /* A framed window hears of its activation. */
+    rad_activates = 0;
+    top = CreateWindow("W16Rad", "radpack", WS_OVERLAPPEDWINDOW, 40, 40, 360, 260, NULL, NULL, hInst, NULL);
+    ShowWindow(top, SW_SHOWNORMAL);
+    UpdateWindow(top);
+    rad_pump(300);
+    check(rad_activates > 0, "a window with a frame gets WM_ACTIVATE (BWCC dialogs give IsDialogMessage their dialog then)");
+
+    /* WS_CLIPCHILDREN and WS_CLIPSIBLINGS as the program sets them. */
+    par = CreateWindow("W16Rad", "", WS_CHILD | WS_VISIBLE, 0, 0, 200, 150, top, NULL, hInst, NULL);
+    kid = CreateWindow("STATIC", "", WS_CHILD | WS_VISIBLE | SS_WHITERECT, 20, 20, 40, 40, par, NULL, hInst, NULL);
+    rad_pump(200);
+    fill_red(par, 100, 100);
+    check(rad_pixel(kid, 5, 5) == RGB(255, 0, 0), "a window without WS_CLIPCHILDREN draws over its children (BWCC's dialogs draw their texts so)");
+    SetWindowLong(par, GWL_STYLE, GetWindowLong(par, GWL_STYLE) | WS_CLIPCHILDREN);
+    InvalidateRect(kid, NULL, TRUE);
+    UpdateWindow(kid);
+    fill_red(par, 100, 100);
+    check(rad_pixel(kid, 5, 5) == RGB(255, 255, 255), "with WS_CLIPCHILDREN it does not");
+    DestroyWindow(par);
+    par = CreateWindow("W16Rad", "", WS_CHILD | WS_VISIBLE, 0, 0, 200, 150, top, NULL, hInst, NULL);
+    a = CreateWindow("STATIC", "", WS_CHILD | WS_VISIBLE | SS_BLACKRECT, 10, 10, 60, 60, par, NULL, hInst, NULL);
+    b = CreateWindow("W16Rad", "", WS_CHILD | WS_VISIBLE, 40, 40, 60, 60, par, NULL, hInst, NULL);
+    rad_pump(200);
+    fill_red(b, 60, 60);
+    check(rad_pixel(par, 50, 50) == RGB(255, 0, 0), "a child without WS_CLIPSIBLINGS draws over the sibling above it (controls under BWCC's group shades)");
+    SetWindowLong(b, GWL_STYLE, GetWindowLong(b, GWL_STYLE) | WS_CLIPSIBLINGS);
+    InvalidateRect(a, NULL, TRUE);
+    UpdateWindow(a);
+    fill_red(b, 60, 60);
+    check(rad_pixel(par, 50, 50) == RGB(0, 0, 0), "with WS_CLIPSIBLINGS it does not");
+    DestroyWindow(par);
+
+    /* A parent without WS_CLIPCHILDREN paints over its children: they
+     * paint again after it, even when they were updated before it
+     * (Resource Workshop's dialog editor). */
+    par = CreateWindow("W16Rad", "", WS_CHILD | WS_VISIBLE, 0, 0, 200, 150, top, NULL, hInst, NULL);
+    kid = CreateWindow("W16Rad", "", WS_CHILD | WS_VISIBLE, 20, 20, 40, 40, par, NULL, hInst, NULL);
+    SetProp(kid, "child", (HANDLE)1);
+    rad_pump(200);
+    InvalidateRect(kid, NULL, TRUE);
+    InvalidateRect(par, NULL, TRUE);
+    UpdateWindow(kid);
+    rad_child_paints = 0;
+    UpdateWindow(par);
+    rad_pump(200);
+    check(rad_child_paints > 0, "children paint again after their non-clipping parent paints");
+    RemoveProp(kid, "child");
+    DestroyWindow(par);
+
+    /* An invalidation while the window erases its background belongs to
+     * that painting (Borland's VBX runtime; each painting asked for the
+     * next one). */
+    w = CreateWindow("W16Rad", "", WS_CHILD | WS_VISIBLE, 0, 0, 100, 100, top, NULL, hInst, NULL);
+    SetProp(w, "inval", (HANDLE)1);
+    rad_pump(200);
+    rad_paints = 0;
+    InvalidateRect(w, NULL, TRUE);
+    UpdateWindow(w);
+    rad_pump(300);
+    check(rad_paints == 1 && !GetUpdateRect(w, NULL, FALSE), "InvalidateRect on WM_ERASEBKGND: one WM_PAINT, no more");
+    RemoveProp(w, "inval");
+    DestroyWindow(w);
+
+    /* Child windows with a caption: AdjustWindowRect's caption is there. */
+    ch = CreateWindow("W16Rad", "caption", WS_CHILD | WS_CAPTION | WS_VISIBLE, 10, 10, 200, 100, top, NULL, hInst, NULL);
+    GetClientRect(ch, &cr);
+    SetRect(&r, 0, 0, cr.right, cr.bottom);
+    AdjustWindowRect(&r, WS_CHILD | WS_CAPTION, FALSE);
+    check(r.right - r.left == 200 && r.bottom - r.top == 100, "a child window with WS_CAPTION: its caption and border are AdjustWindowRect's");
+    DestroyWindow(ch);
+
+    /* Hit testing: statics and group boxes let the mouse through. */
+    st = CreateWindow("STATIC", "text", WS_CHILD | WS_VISIBLE, 10, 10, 60, 20, top, NULL, hInst, NULL);
+    gb = CreateWindow("BUTTON", "group", WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 10, 40, 100, 60, top, NULL, hInst, NULL);
+    pb = CreateWindow("BUTTON", "push", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 120, 40, 60, 24, top, NULL, hInst, NULL);
+    check(SendMessage(st, WM_NCHITTEST, 0, 0L) == HTTRANSPARENT && SendMessage(gb, WM_NCHITTEST, 0, 0L) == HTTRANSPARENT,
+          "statics and group boxes answer WM_NCHITTEST with HTTRANSPARENT");
+    check(SendMessage(pb, WM_NCHITTEST, 0, 0L) == HTCLIENT, "a push button answers HTCLIENT");
+    DestroyWindow(st);
+    DestroyWindow(gb);
+    DestroyWindow(pb);
+
+    /* SetCapture(NULL) lets the mouse go (Resource Workshop's palette). */
+    SetCapture(top);
+    check(GetCapture() == top, "SetCapture");
+    check(SetCapture(NULL) == top && GetCapture() == NULL, "SetCapture(NULL) releases the mouse");
+
+    /* The system menu, which programs add to (Resource Workshop). */
+    sm = GetSystemMenu(top, FALSE);
+    n = sm ? GetMenuItemCount(sm) : 0;
+    check(sm != 0 && n > 0 && AppendMenu(sm, MF_STRING, 0x120, "Extra") && GetMenuItemCount(sm) == n + 1, "GetSystemMenu, AppendMenu to it");
+    DestroyWindow(top);
+
+    /* Ordinal texts in a dialog template. */
+    dp = MakeProcInstance((FARPROC)RadDlgProc, hInst);
+    ord_seen = icon_seen = 0;
+    DialogBox(hInst, "RadDlg", NULL, dp);
+    FreeProcInstance(dp);
+    check(ord_seen && ord_id == IDI_TEST, "a control's ordinal text reaches it as 0xFF and the number (CREATESTRUCT)");
+    check(icon_seen, "an icon static shows its template's icon (STM_GETICON)");
+
+    /* LocalInit(seg, 0, size): the heap at the segment's end. */
+    g = GlobalAlloc(GMEM_FIXED | GMEM_ZEROINIT, 0x1000);
+    sel = HIWORD((DWORD)GlobalLock(g));
+    check(LocalInit(sel, 0, 0x200) && (hl = alloc_in(sel)) != 0 && (WORD)hl >= 0x1000 - 0x200 - 4,
+          "LocalInit(seg, 0, size): the heap is at the end of the segment (WORKLIB1's static data stays)");
+    GlobalUnlock(g);
+    GlobalFree(g);
+
+    check((bios_equipment() & 2) != 0, "INT 11h: the equipment list has the coprocessor");
+    check(LOBYTE(bios_video_mode()) == 3, "INT 10h AH=0Fh: 80x25 colour text");
+    check(GetProcAddress(GetModuleHandle("USER"), MAKEINTRESOURCE(275)) != NULL && GetProcAddress(GetModuleHandle("USER"), MAKEINTRESOURCE(321)) != NULL,
+          "USER's RepaintScreen and SetEventHook (Turbo Debugger)");
+}
+
+/* Windows DLLs that import each other (Resource Workshop's WORKLIB1 and
+ * WORKLIB2); a DLL's instance handle; a DLL whose file is replaced. */
+static int copy_file(const char *from, const char *to)
+{
+    static char buf[4096];
+    int in, o, n, ok = 1;
+
+    in = open(from, O_RDONLY | O_BINARY);
+    o = open(to, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, 0666);
+    if (in < 0 || o < 0)
+        ok = 0;
+    while (ok && (n = read(in, buf, sizeof buf)) > 0)
+        ok = write(o, buf, n) == n;
+    if (in >= 0)
+        close(in);
+    if (o >= 0)
+        close(o);
+    return ok;
+}
+
+static void dll_cycle_tests(void)
+{
+    HINSTANCE d;
+    int (FAR PASCAL *f)(void);
+    UINT (FAR PASCAL *m)(void);
+    HINSTANCE (FAR PASCAL *inst)(void);
+
+    d = LoadLibrary("W16CYC1.DLL");
+    f = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(void))GetProcAddress(d, "W16CYC1VALUE") : NULL;
+    m = d > HINSTANCE_ERROR ? (UINT (FAR PASCAL *)(void))GetProcAddress(d, "W16CYC1MESSAGE") : NULL;
+    check(f && f() == 11, "two DLLs that import each other load and call each other");
+    check(m && m() >= 0xc000, "a DLL's LibMain registers a window message");
+    if (d > HINSTANCE_ERROR)
+        FreeLibrary(d);
+
+    d = LoadLibrary("W16DLL.DLL");
+    inst = d > HINSTANCE_ERROR ? (HINSTANCE (FAR PASCAL *)(void))GetProcAddress(d, "W16DLLINSTANCE") : NULL;
+    check(inst && inst() == d, "a DLL's LibMain gets the instance handle LoadLibrary returns (a VBX's models are found by it)");
+    check((WORD)d < 0x8000 && SELECTOROF(inst) < 0x8000, "a DLL's selectors are below 8000h");
+    if (d > HINSTANCE_ERROR)
+        FreeLibrary(d);
+
+    /* Replace W16DLL.DLL with W16D43.DLL (the same module, value 43), as
+     * Delphi rebuilds COMPLIB.DCL, and load it again. */
+    if (copy_file("C:\\RS2\\W16DLL.DLL", "C:\\W16DLL.SAV") && copy_file("C:\\RS2\\W16D43.DLL", "C:\\RS2\\W16DLL.DLL")) {
+        d = LoadLibrary("W16DLL.DLL");
+        f = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(void))GetProcAddress(d, "W16DLLVALUE") : NULL;
+        check(f && f() == 43, "a DLL whose file was replaced loads from the new file");
+        if (d > HINSTANCE_ERROR)
+            FreeLibrary(d);
+        copy_file("C:\\W16DLL.SAV", "C:\\RS2\\W16DLL.DLL");
+        unlink("C:\\W16DLL.SAV");
+    } else {
+        check(0, "a DLL whose file was replaced loads from the new file (copying it)");
+    }
+}
+
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
 {
     out("w16test: rs2's native Win16 layer\r\n");
@@ -2128,6 +2450,8 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     notebook_tests(hInst);
     nomove_tests(hInst);
     dll_tests();
+    radpack_tests(hInst);
+    dll_cycle_tests();
     sprintf(line, "w16test done: %d failure(s)\r\n", failures);
     out(line);
     return failures;

@@ -18,12 +18,24 @@ mkdir -p "$dir/bin" "$dir/obj"
 cd "$dir/obj"
 for src in "$dir"/*.c; do
     name=$(basename "$src" .c | tr a-z A-Z)
-    # W16DLL.C is a DLL.
-    if [ "$name" = W16DLL ]; then
+    # W16DLL.C is a DLL, linked a second time as W16D43.DLL (module name
+    # W16DLL, another value). W16CYC1 and W16CYC2 import each other.
+    case "$name" in
+    W16DLL)
         wcl -q -bt=windows -bd -l=windows_dll -zW -fe="$name.DLL" "$src"
         mv "$name.DLL" "$dir/bin/"
-        continue
-    fi
+        wcl -q -bt=windows -bd -zW -DW16DLL_VALUE=43 -c -fo=W16D43.OBJ "$src"
+        wlink op q system windows_dll name W16D43.DLL op modname=W16DLL file W16D43.OBJ
+        mv W16D43.DLL "$dir/bin/"
+        continue ;;
+    W16CYC1|W16CYC2)
+        other=W16CYC2; imp=W16CYC2VALUE
+        [ "$name" = W16CYC2 ] && other=W16CYC1 && imp=W16CYC1BASE
+        wcl -q -bt=windows -bd -zW -c -fo="$name.OBJ" "$src"
+        wlink op q system windows_dll name "$name.DLL" file "$name.OBJ" import "$imp" "$other.$imp"
+        mv "$name.DLL" "$dir/bin/"
+        continue ;;
+    esac
     wcl -q -bt=windows -l=windows -zW -fe="$name.EXE" "$src" lzexpand.lib ver.lib
     # Resources (NAME.rc) are bound into the program.
     rc="$dir/$(basename "$src" .c).rc"

@@ -18,3 +18,6 @@
 #define IDC_DROP     108
 #define IDC_SCROLL   109
 #define IDC_LABEL    110
+#define IDI_TEST     7
+#define IDC_RADICON     120
+#define IDC_ORD      121
