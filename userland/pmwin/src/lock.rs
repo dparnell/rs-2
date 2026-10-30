@@ -152,7 +152,8 @@ extern "C" fn enter_traced(idx: u32, ebp: u32) {
 }
 
 /// PMTRACE set in a process's environment: its PM API calls are
-/// logged on the serial port (0: not checked yet, 1: off, 2: on).
+/// logged on the serial port (0: not checked yet, 1: off, 2: on, 3: with
+/// what they return, for PMTRACE=2).
 static TRACE: AtomicU32 = AtomicU32::new(0);
 
 pub fn tracing() -> bool {
@@ -160,10 +161,11 @@ pub fn tracing() -> bool {
         0 => {
             let mut v: *const u8 = core::ptr::null();
             let on = unsafe { os2::DosScanEnv(b"PMTRACE\0".as_ptr(), &mut v) } == 0;
-            TRACE.store(if on { 2 } else { 1 }, Ordering::Relaxed);
+            let rets = on && !v.is_null() && unsafe { *v } == b'2';
+            TRACE.store(if rets { 3 } else if on { 2 } else { 1 }, Ordering::Relaxed);
             on
         }
-        v => v == 2,
+        v => v >= 2,
     }
 }
 
@@ -180,6 +182,15 @@ fn trace_call(idx: u32, args: u32) {
     }
     s.push(')');
     crate::trace(format_args!("{} {s}", tid()));
+}
+
+/// Exit from the export trampolines: `ret` is what the export returns
+/// (eax), logged for PMTRACE=2.
+pub extern "C" fn leave_export(ret: u32) {
+    if OWNER.load(Ordering::Relaxed) == tid() && DEPTH.load(Ordering::Relaxed) == 1 && TRACE.load(Ordering::Relaxed) == 3 {
+        crate::trace(format_args!("{} = {ret:x}", tid()));
+    }
+    leave();
 }
 
 pub extern "C" fn leave() {

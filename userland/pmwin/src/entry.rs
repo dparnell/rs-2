@@ -11,7 +11,7 @@ use crate::draw;
 use crate::lock::wndproc;
 use crate::msg::WinDefWindowProc;
 use crate::state::st;
-use crate::win::{WM_BUTTON1DOWN, WM_BUTTON1UP, WM_CHAR, WM_MOUSEMOVE, WM_PAINT, WM_SETFOCUS};
+use crate::win::{WM_BUTTON1DOWN, WM_BUTTON1UP, WM_CHAR, WM_MOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SIZE};
 
 const WM_CREATE: u32 = 0x0001;
 
@@ -395,6 +395,16 @@ pub extern "C" fn entry_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             let (a, b) = sel(e);
             mp(a as u32, b as u32)
         }),
+        WM_SIZE => {
+            // Sized (a combo box sizes its field after the text was set):
+            // the text from the start, as much as shows the cursor.
+            if let Some(e) = data(h) {
+                e.first = 0;
+            }
+            reveal(h);
+            ctl::invalidate(h);
+            0
+        }
         EM_SETSEL => {
             let len = ctl::text(h).len();
             if let Some(e) = data(h) {

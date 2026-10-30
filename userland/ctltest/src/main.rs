@@ -63,6 +63,10 @@ unsafe extern "C" {
     fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32;
     #[link_name = "PMWIN.877"]
     fn WinSetWindowText(h: u32, t: *const u8) -> u32;
+    #[link_name = "PMWIN.875"]
+    fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32;
+    #[link_name = "PMWIN.899"]
+    fn WinWindowFromID(h: u32, id: u32) -> u32;
     #[link_name = "PMWIN.918"]
     fn WinPeekMsg(hab: u32, q: *mut QMsg, h: u32, a: u32, b: u32, fl: u32) -> u32;
     #[link_name = "PMWIN.912"]
@@ -308,6 +312,16 @@ fn entry_combo_checks(hab: u32, client: u32) {
     send(c, 0x0170, 1, 0); // CBM_SHOWLIST
     check("CBM_SHOWLIST (CBN_SHOWLIST)", send(c, 0x0172, 0, 0) == 1 && noted(111, 6));
     send(c, 0x0170, 0, 0);
+    unsafe { WinDestroyWindow(c) };
+    // CBS_DROPDOWNLIST made with no size and sized after an item was
+    // selected (VisualAge Smalltalk): the field shows its text from the
+    // start.
+    let c = create(client, 2, b"", 0x0004, (0, 0, 0, 0), 112, null());
+    send(c, 0x0161, 0xffff_ffff, b"English\0".as_ptr() as u32);
+    send(c, 0x0164, 0, 1);
+    unsafe { WinSetWindowPos(c, 0, 10, 10, 150, 120, 3) }; // SWP_SIZE | SWP_MOVE
+    let e = unsafe { WinWindowFromID(c, 0x029b) };
+    check("combo sized after its selection shows the text from the start", e != 0 && text(c) == b"English" && send(e, 0x0148, 0, 0) == 0); // EM_QUERYFIRSTCHAR
     unsafe { WinDestroyWindow(c) };
 }
 

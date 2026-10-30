@@ -211,6 +211,28 @@ pub extern "C" fn WinQueryObjectPath(h: u32, buf: *mut u8, cb: u32) -> u32 {
     1
 }
 
+/// WinQueryActiveDesktopPathname(pszPathName, ulSize): the directory of
+/// the desktop folder (<WP_DESKTOP>, else the boot drive's DESKTOP).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryActiveDesktopPathname(buf: *mut u8, cb: u32) -> u32 {
+    let p = match wps::handle_of_id(b"<WP_DESKTOP>").and_then(wps::path_of_handle) {
+        Some(p) => p,
+        None => {
+            let mut boot = 3u32;
+            unsafe { os2::DosQuerySysInfo(5, 5, &mut boot, 4) };
+            alloc::vec![b'A' + boot as u8 - 1, b':', b'\\', b'D', b'E', b'S', b'K', b'T', b'O', b'P']
+        }
+    };
+    if buf.is_null() || (cb as usize) < p.len() + 1 {
+        return 0;
+    }
+    unsafe {
+        core::ptr::copy_nonoverlapping(p.as_ptr(), buf, p.len());
+        *buf.add(p.len()) = 0;
+    }
+    1
+}
+
 // ---- Classes ----
 
 /// WinRegisterObjectClass: the class must load from the DLL.

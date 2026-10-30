@@ -19,7 +19,7 @@ macro_rules! aligned {
                 "mov eax, [esp]", "mov edx, [esp + 4]",
                 "mov esp, ebp", "pop ebp", "ret",
                 pad = const ($copy * 4 + 15) / 16 * 16, n = const $copy, f = sym $target,
-                idx = const $idx, enter = sym crate::lock::enter, leave = sym crate::lock::leave,
+                idx = const $idx, enter = sym crate::lock::enter, leave = sym crate::lock::leave_export,
             );
         }
     )*};

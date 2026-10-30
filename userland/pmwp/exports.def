@@ -9,6 +9,7 @@ WinMoveObject=__a_WinMoveObject @287
 WinCopyObject=__a_WinCopyObject @288
 WinCreateShadow=__a_WinCreateShadow @289
 WinQueryObjectPath=__a_WinQueryObjectPath @263
+WinQueryActiveDesktopPathname=__a_WinQueryActiveDesktopPathname @262
 WinRegisterObjectClass=__a_WinRegisterObjectClass @200
 WinDeregisterObjectClass=__a_WinDeregisterObjectClass @201
 WinReplaceObjectClass=__a_WinReplaceObjectClass @219
