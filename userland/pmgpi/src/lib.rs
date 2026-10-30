@@ -203,6 +203,7 @@ forward! {
     GpiWCBitBlt = 4557;
     GpiPolyLineDisjoint = 4558;
     GpiPathToRegion = 4559;
+    GpiFloodFill = 4560;
     GpiOutlinePath = 4563;
     GpiTranslate = 4564;
     GpiScale = 4565;
@@ -257,6 +258,7 @@ forward! {
     GpiUnloadPublicFonts = 4623;
     GpiQueryTextAlignment = 4648;
     GpiSetTextAlignment = 4649;
+    GpiPolygons = 4650;
     GpiCreateRoundRectRegion = 4661;
     GpiCreateEllipticRegion = 4662;
     GpiAbortPath = 4722;

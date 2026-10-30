@@ -374,6 +374,13 @@ fn windows_icon(client: u32) {
         println!("SKIP a Windows program's icon (no C:\\RS2\\NOTE16.EXE)");
         return;
     }
+    let (h, c) = icon_colour(client, name);
+    check("WinLoadFileIcon (a Windows program): its own icon", h && c == 0xff0000);
+    big_exe_icon(client, name);
+}
+
+/// A file's icon drawn in `client`: loaded, and the colour of a pel in it.
+fn icon_colour(client: u32, name: &[u8]) -> (bool, i32) {
     let h = unsafe { WinLoadFileIcon(name.as_ptr(), 1) };
     let hps = unsafe { WinGetPS(client) };
     let c = unsafe {
@@ -386,7 +393,46 @@ fn windows_icon(client: u32) {
         WinReleasePS(hps);
         WinFreeFileIcon(h);
     }
-    check("WinLoadFileIcon (a Windows program): its own icon", h != 0 && c == 0xff0000);
+    (h != 0, c)
+}
+
+/// An executable with a lot of data appended (the Open Watcom installer
+/// carries its 80 MB ZIP archive so) still shows its own icon: NOTE16
+/// with 9 MB after it.
+fn big_exe_icon(client: u32, src: &[u8]) {
+    let big = b"C:\\SHBIG.EXE\0";
+    // FSALLOCATE: idFileSystem, cSectorUnit, cUnit, cUnitAvail, cbSector.
+    let mut fa = [0u32; 5];
+    unsafe { DosQueryFSInfo(3, 1, fa.as_mut_ptr() as *mut u8, 18) };
+    let free = fa[1] as u64 * fa[3] as u64 * (fa[4] & 0xffff) as u64;
+    if free < 10 << 20 {
+        println!("SKIP a 9 MB executable's icon (C: has {} KB free)", free >> 10);
+        return;
+    }
+    let (mut hf, mut act) = (0u32, 0u32);
+    let mut data = alloc::vec![0u8; 256 << 10];
+    let mut n = 0u32;
+    if unsafe { DosOpen(src.as_ptr(), &mut hf, &mut act, 0, 0, 0x01, 0x40, core::ptr::null_mut()) } == 0 {
+        unsafe {
+            DosRead(hf, data.as_mut_ptr(), data.len() as u32, &mut n);
+            DosClose(hf);
+        }
+    }
+    data.truncate(n as usize);
+    if unsafe { DosOpen(big.as_ptr(), &mut hf, &mut act, 0, 0, 0x12, 0x42, core::ptr::null_mut()) } == 0 {
+        let zeros = alloc::vec![0u8; 64 << 10];
+        let mut w = 0u32;
+        unsafe {
+            DosWrite(hf, data.as_ptr(), data.len() as u32, &mut w);
+            for _ in 0..(9 << 20) / zeros.len() {
+                DosWrite(hf, zeros.as_ptr(), zeros.len() as u32, &mut w);
+            }
+            DosClose(hf);
+        }
+    }
+    let (h, c) = icon_colour(client, big);
+    check("WinLoadFileIcon: a 9 MB executable's own icon", h && c == 0xff0000);
+    unsafe { DosDelete(big.as_ptr()) };
 }
 
 fn file_icons() {
@@ -428,7 +474,26 @@ fn file_icons() {
         WinFreeFileIcon(h2);
         DosDelete(name.as_ptr());
     }
+    // An icon file is its own icon (ICONFILE=...\WATCOM.ICO).
+    let ico = b"C:\\SHTEST.ICO\0";
+    let mut hf = 0u32;
+    if unsafe { DosOpen(ico.as_ptr(), &mut hf, &mut act, 0, 0, 0x12, 0x42, core::ptr::null_mut()) } == 0 {
+        let mut n = 0;
+        unsafe {
+            DosWrite(hf, data.as_ptr(), data.len() as u32, &mut n);
+            DosClose(hf);
+        }
+    }
+    let hi = unsafe { WinLoadFileIcon(ico.as_ptr(), 1) };
+    let mut p3 = [0u32; 7];
+    let got = hi != 0 && unsafe { WinQueryPointerInfo(hi, p3.as_mut_ptr()) } != 0;
+    check("WinLoadFileIcon of an .ICO file: the icon in it", got && p3[4] == 0);
+    unsafe {
+        WinFreeFileIcon(hi);
+        DosDelete(ico.as_ptr());
+    }
 }
+
 
 /// A client whose class has CS_MOVENOTIFY: counts its WM_MOVEs.
 extern "C" fn move_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {

@@ -254,6 +254,13 @@ fn make() {
     check("data file copied", cp >> 16 == 3 && exists(b"C:\\DESKTOP\\notes.txt"));
     let sub = create(b"WPFolder", b"Sub", b"", b"<RS2_TESTFLDR>");
     check("subfolder", sub != 0 && exists(&path(sub)));
+    // A title that cannot be a file name keeps its characters (the Open
+    // Watcom installer's "Open Watcom C/C++" folder).
+    let ow = create(b"WPFolder", b"Tools C/C++", b"", b"<RS2_TESTFLDR>");
+    let fp = path(ow);
+    let cut = fp.iter().rposition(|&c| c == b'\\').unwrap_or(0);
+    let (dir, name) = (&fp[..cut], fp.get(cut + 1..).unwrap_or_default());
+    check("folder title with a slash", ow != 0 && title(object(ow)) == b"Tools C/C++" && long_name(dir, name) == b"Tools C/C++");
     let cls = unsafe { WPObjectNewClass(1, 2) };
     check("WPObjectNewClass", cls != 0 && cls == unsafe { WPObjectClassData[0] });
     let title_tok = unsafe { WPObjectClassData[1] };

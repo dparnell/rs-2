@@ -124,8 +124,10 @@ pub fn create(obj: usize, folder: usize, title: &[u8]) -> bool {
         long = stored.is_some_and(|n| n != name);
     }
     if ok {
-        if long {
-            ea_write(&p, b".LONGNAME", Some((EAT_ASCII, &name)));
+        // The title itself when the file name had to differ from it
+        // ("Open Watcom C/C++", the Open Watcom installer's folder).
+        if long || name != title {
+            ea_write(&p, b".LONGNAME", Some((EAT_ASCII, title)));
         }
         set_real_name_raw(obj, &p);
     }

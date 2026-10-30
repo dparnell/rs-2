@@ -114,6 +114,7 @@ forward! {
     WinLoadPointer = "PMWIN.780";
     WinLoadProcedure = "PMWIN.986";
     WinLoadString = "PMWIN.781";
+    WinLockInput = "PMWIN.995";
     WinLockWindowUpdate = "PMWIN.784";
     WinMapDlgPoints = "PMWIN.787";
     WinMapWindowPoints = "PMWIN.788";
@@ -233,6 +234,7 @@ forward! {
     WinSubtractRect = "PMWIN.887";
     WinSwitchToProgram = "PMSHAPI.131";
     WinTerminate = "PMWIN.888";
+    WinThreadAssocQueue = "PMWIN.994";
     WinTrackRect = "PMWIN.890";
     WinTranslateAccel = "PMWIN.904";
     WinUnionRect = "PMWIN.891";
@@ -242,6 +244,7 @@ forward! {
     WinValidateRect = "PMWIN.895";
     WinValidateRegion = "PMWIN.896";
     WinWaitEventSem = "PMWIN.978";
+    WinWaitMsg = "PMWIN.897";
     WinWindowFromID = "PMWIN.899";
     WinWindowFromPoint = "PMWIN.900";
 }

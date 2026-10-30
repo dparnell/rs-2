@@ -162,15 +162,16 @@ pub fn create(parent: u32, class: &[u8], text: &[u8], style: u32, pos: Rect, own
             f.client = h;
         }
     }
-    // WM_CREATE: mp1 = control data, mp2 = CREATESTRUCT (pCtlData,
-    // pPresParams, id, hwndInsertBehind, hwndOwner, cy, cx, y, x,
-    // flStyle, pszText, pszClass, hwndParent).
+    // WM_CREATE: mp1 = control data, mp2 = CREATESTRUCT (pPresParams,
+    // pCtlData, id, hwndInsertBehind, hwndOwner, cy, cx, y, x,
+    // flStyle, pszText, pszClass, hwndParent). The Open Watcom GUI
+    // library finds its window from pCtlData there.
     let mut tz = text.to_vec();
     tz.push(0);
     let mut cz = class.to_vec();
     cz.push(0);
     let cs: [u32; 13] = [
-        ctl, 0, id, 3, owner, pos.height() as u32, pos.width() as u32, pos.bottom as u32, pos.left as u32, style, tz.as_ptr() as u32, cz.as_ptr() as u32, parent,
+        0, ctl, id, 3, owner, pos.height() as u32, pos.width() as u32, pos.bottom as u32, pos.left as u32, style, tz.as_ptr() as u32, cz.as_ptr() as u32, parent,
     ];
     if send(h, WM_CREATE, ctl, cs.as_ptr() as u32) != 0 {
         // A non-zero result from WM_CREATE fails the creation.
@@ -298,6 +299,10 @@ pub extern "C" fn WinCreateWindow(
     ctl: u32,
     pres: u32,
 ) -> u32 {
+    // IBM makes a window without a parent for NULLHANDLE: it is never
+    // shown (the Open Watcom installer's progress window). rs2 keeps it
+    // under the object window.
+    let parent = if parent == 0 { pmwin::HWND_OBJECT } else { parent };
     let h = create_window(parent, class, name, style, x, y, cx, cy, owner, id, ctl, pres);
     // hwndInsertBehind: new windows go on top of their siblings; HWND_BOTTOM
     // or a sibling places them lower (WIN16's dialog controls, the first
@@ -357,6 +362,11 @@ pub extern "C" fn WinCreateStdWindow(
     id: u32,
     phwnd_client: *mut u32,
 ) -> u32 {
+    // As IBM's: the parent must be a window, HWND_DESKTOP or HWND_OBJECT
+    // (NULLHANDLE fails).
+    if parent != HWND_DESKTOP && parent != pmwin::HWND_OBJECT && !st().desk.exists(parent) {
+        return 0;
+    }
     let fcf = if pfl.is_null() { 0 } else { unsafe { pfl.read_unaligned() } };
     // FCF_SHELLPOSITION: as on OS/2, the frame stays without a size (its
     // client gets no WM_SIZE) until it is first shown.

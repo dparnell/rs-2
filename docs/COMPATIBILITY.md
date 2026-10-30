@@ -343,6 +343,58 @@ Not yet: Sound Blaster 16 (16-bit/stereo), the OPL2/OPL3 FM synthesizer
 (INT 13h, 25h/26h: they fail, with 25h/26h's flags left on the stack as DOS leaves them), the DOS settings page in the Workplace Shell's
 program notebook (RS2SHELL has it).
 
+## Open Watcom C/C++ 1.9 (OS/2 host)
+
+`open-watcom-c-os2-1.9.exe`, Open Watcom's own OS/2 installer (an LX PM
+program with the files in a ZIP appended), on a system disk with only
+rs2's files (`cargo xtask disk --system --size 1000`, the installer copied
+to `C:\OWSETUP.EXE`). The test programs and the BUILD.CMD that builds them
+are in `tests/owatcom` (a second disk, `--virtio-disk`).
+
+| What | Status | Notes |
+|------|--------|-------|
+| Installer, as the boot program | works | License, install directory, Full or Selective installation, the component pages, its progress window over the logo (copying the 200 MB of a Full installation takes about 6 minutes in QEMU), "Setup needs to modify CONFIG.SYS" (Make all the modifications: LIBPATH, PATH, HELP, BOOKSHELF, INCLUDE, WATCOM, EDPATH, WIPFC, `RUN=...\NMPBIND.EXE`; the old file kept as CONFIG.000), "Setup has completed". |
+| Installer, from an OS/2 window on the desktop | works | The same, and it makes its desktop folders through WinCreateObject: "Open Watcom C/C++" (IDE, Source Browser, Profiler, the debuggers, the remote links, Getting Started, Read Me) and "Open Watcom C/C++ Tools Help" (the help books), both with WATCOM.ICO as their icon. |
+| Installer, from the Workplace Shell | works | Double-clicked in the Drive C folder (OWSETUP.EXE shows its own icon); the same result. After the reboot the IDE starts from its program object in the folder. |
+| After the reboot: `wcl386 -l=os2v2 hello.c` | works | Compiler (WCC386.EXE with WCCD386.DLL), WLINK; the program runs (argv, printf of a double, getenv). |
+| `wcl386 -l=os2v2_pm pmhello.c` | works | The PM program opens its window on the desktop and closes itself (a timer). |
+| `wcl -l=os2 -i=%WATCOM%\h\os21x hello16.c` | works | 16-bit OS/2 program (NE); it reports DosGetVersion 20.45. The installer's INCLUDE names the 32-bit headers only, so 16-bit builds need the `-i` (as on OS/2). |
+| `wmake` | works | Builds the three programs from `tests/owatcom/makefile`. |
+| `wd` (debugger) | partial | Its full-screen interface comes up and the trap file (STD.D32) loads, but loading the program fails ("The task was not loaded"): the trap file debugs through `DosDebug` (DOSCALLS 317), which rs2 does not have (nor DosStartSession's trace option). |
+| `ide` (IDE) | partial | Starts with its menus (File, Actions, Targets ...), tool bar and status line; menus open with the mouse. Alt+letter does not open them (not followed up). Building a project from it is not tried. |
+| `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | fails | Imports `NAMPIPES`, OS/2 1.x's named pipe module, which Warp's kernel does not provide either (it is for remote debugging over named pipes). |
+
+Fixed for it:
+
+- PMGPI: `GpiPolygons` and `GpiFloodFill` (FF_BOUNDARY, FF_SURFACE);
+  PMWIN: `WinWaitMsg` (GPITEST, PMXTEST).
+- PMWIN: `CREATESTRUCT` begins with pPresParams, then pCtlData (rs2 had
+  them the other way round; the Open Watcom GUI library finds its window
+  data in WM_CREATE's pCtlData, and without it painted nothing).
+- PMWIN, as IBM's (studied in PMMERGE): `WinProcessDlg` returns at once
+  for a dialog dismissed before it (the installer measures a dialog font
+  so); `WinCreateWindow` with parent NULLHANDLE makes a window that is
+  never shown, `WinCreateStdWindow` and `WinGetPS` fail for it;
+  `WinCreateMenu` without a template makes an empty menu, and
+  MM_INSERTITEM makes an item of no type a text item and one with a
+  submenu MIS_SUBMENU (the IDE's menu bar).
+- PMWIN: the debugger-support calls `WinThreadAssocQueue`,
+  `WinQueueFromID`, `WinQuerySendMsg`, `WinReplyMsg`, `WinWakeThread`,
+  `WinLockInput` (IBM's 16-bit ordinals 304-309, 32-bit 994 and 995)
+  that the debugger's trap file imports.
+- Loader: an LX module with flag 0x10 (internal fixups applied for the
+  preferred bases) that still carries its internal fixup records is
+  relocated when those bases are taken (Open Watcom's DLLs are linked
+  at 0x10000; WCCD386.DLL failed with error 8).
+- CONFIG.SYS sets `USER_INI` and `SYSTEM_INI` as Warp's does (the IDE
+  reads USER_INI and faulted without it).
+- WPS: an object whose title cannot be its file name keeps the title in
+  `.LONGNAME` ("Open Watcom C/C++" showed as "Open Watcom C_C++").
+- File icons: an .ICO or .PTR file is its own icon (the folders'
+  `ICONFILE=C:\WATCOM\WATCOM.ICO` gave a document icon), and an
+  executable longer than 8 MB (the installer: 84 MB with its ZIP
+  appended) still shows its icon (SHELLTST).
+
 ## Fixed while getting these to run
 
 - KbdSetStatus rejected binary mode with echo on in one call; OS/2

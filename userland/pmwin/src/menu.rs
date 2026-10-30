@@ -215,14 +215,17 @@ pub extern "C" fn WinLoadMenu(parent: u32, hmod: u32, id: u32) -> u32 {
     h
 }
 
-/// WinCreateMenu(hwndParent, pmt): a menu from a template in memory.
+/// WinCreateMenu(hwndParent, pmt): a menu from a template in memory; an
+/// empty one without a template (as IBM's: the Open Watcom GUI library
+/// builds its menus so, with MM_INSERTITEM).
 #[unsafe(no_mangle)]
 pub extern "C" fn WinCreateMenu(parent: u32, pmt: *const u8) -> u32 {
-    if pmt.is_null() {
-        return 0;
-    }
-    let cb = unsafe { (pmt as *const u16).read_unaligned() } as usize;
-    let items = res::parse_menu(unsafe { core::slice::from_raw_parts(pmt, cb) }).unwrap_or_default();
+    let items = if pmt.is_null() {
+        Default::default()
+    } else {
+        let cb = unsafe { (pmt as *const u16).read_unaligned() } as usize;
+        res::parse_menu(unsafe { core::slice::from_raw_parts(pmt, cb) }).unwrap_or_default()
+    };
     let bar = frame::is_frame(parent);
     let p = if parent == pmwin::HWND_OBJECT || parent == 0 { HWND_DESKTOP } else { parent };
     create(p, parent, if bar { ws::VISIBLE | MS_ACTIONBAR } else { 0 }, if bar { FID_MENU } else { 0 }, &items)
@@ -644,7 +647,16 @@ fn insert(h: u32, p: *const MenuItem, text: *const u8) -> u32 {
     if p.is_null() {
         return MIT_NONE;
     }
-    let mi = unsafe { p.read_unaligned() };
+    let mut mi = unsafe { p.read_unaligned() };
+    // As IBM's: an item that is none of text, bitmap, separator, owner
+    // drawn or button separator is text (the Open Watcom GUI library
+    // inserts its items with style 0), one with a submenu is MIS_SUBMENU.
+    if mi.style & (MIS_TEXT | MIS_BITMAP | MIS_SEPARATOR | MIS_OWNERDRAW | 0x0200) == 0 {
+        mi.style |= MIS_TEXT;
+    }
+    if mi.sub != 0 && st().desk.exists(mi.sub) {
+        mi.style |= MIS_SUBMENU;
+    }
     let t = if mi.style & (MIS_TEXT | MIS_BITMAP) != 0 && mi.style & MIS_BITMAP == 0 { ctl::cstr(text) } else { Vec::new() };
     let Some(m) = data(h) else { return MIT_NONE };
     let at = if mi.pos == MIT_END || mi.pos < 0 { m.items.len() } else { (mi.pos as usize).min(m.items.len()) };

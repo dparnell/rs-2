@@ -125,6 +125,7 @@ pub struct Drag {
 }
 
 /// A message sent to a window of another thread.
+#[derive(Clone, Copy)]
 pub struct Sent {
     pub id: u32,
     pub hwnd: u32,
@@ -192,6 +193,9 @@ pub struct State {
     pub replies: Vec<(u32, u32)>,
     /// Queues to wake when the lock is released.
     pub wake: BTreeSet<u32>,
+    /// WinThreadAssocQueue: threads (pid, tid) that process another
+    /// thread's queue (a debugger's, for the thread it stopped).
+    pub assoc: Vec<(u32, u32, u32)>,
     /// GPI objects (regions, bitmaps, DCs, palettes) of each process.
     pub objects: BTreeMap<u32, crate::gpiobj::Objects>,
     /// PM processes (pids) that have called WinInitialize.
@@ -310,6 +314,7 @@ pub fn init(surface: Surface) {
         next_sent: 1,
         replies: Vec::new(),
         wake: BTreeSet::new(),
+        assoc: Vec::new(),
         objects: BTreeMap::new(),
         procs: Vec::new(),
         server_pid: 0,
@@ -383,6 +388,9 @@ impl State {
     /// The calling thread's message queue.
     pub fn my_queue(&self) -> u32 {
         let (p, t) = (pid(), tid());
+        if let Some(&(_, _, q)) = self.assoc.iter().find(|a| a.0 == p && a.1 == t) {
+            return q;
+        }
         self.queues.iter().find(|(_, q)| q.tid == t && q.pid == p).map_or(0, |(&h, _)| h)
     }
 

@@ -36,7 +36,15 @@ pub fn load(
     let mut imports = load_imports(&import_names)?;
 
     // Choose an address for each object.
-    let fixups_stripped = h.module_flags & mflags::INTERNAL_FIXUPS_REMOVED != 0;
+    // Flag 0x10 says the internal fixups were applied for the preferred
+    // bases; a module that still carries their records can go elsewhere
+    // (Open Watcom's DLLs: bases 0x10000.. and every record kept).
+    let fixups_stripped = h.module_flags & mflags::INTERNAL_FIXUPS_REMOVED != 0
+        && !lxobjs.iter().any(|o| {
+            (0..o.page_count).any(|i| {
+                m.fixups(o.page_index + i).is_ok_and(|f| f.iter().any(|f| matches!(f.target, lx::Target::Internal { .. } | lx::Target::InternalEntry { .. })))
+            })
+        });
     let mut bases = Vec::with_capacity(lxobjs.len());
     for o in &lxobjs {
         let size = o.virtual_size.max(1);
