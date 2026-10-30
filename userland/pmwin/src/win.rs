@@ -1252,6 +1252,9 @@ pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
 /// WinGetPS(hwnd): a presentation space clipped to the visible region.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinGetPS(h: u32) -> u32 {
+    // IBM maps handles below 8 through its handle table: NULLHANDLE gets
+    // a PS too (the Open Watcom installer measures its text with one).
+    let h = if h == 0 { HWND_DESKTOP } else { h };
     let s = st();
     let Some(w) = s.desk.get(h) else { return 0 };
     let clip_children = w.style & ws::CLIPCHILDREN != 0;

@@ -242,6 +242,7 @@ forward! {
     WinValidateRect = "PMWIN.895";
     WinValidateRegion = "PMWIN.896";
     WinWaitEventSem = "PMWIN.978";
+    WinWaitMsg = "PMWIN.897";
     WinWindowFromID = "PMWIN.899";
     WinWindowFromPoint = "PMWIN.900";
 }

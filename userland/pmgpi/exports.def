@@ -171,6 +171,7 @@ GpiUnloadFonts @555
 GpiWCBitBlt @557
 GpiPolyLineDisjoint @558
 GpiPathToRegion @559
+GpiFloodFill @560
 GpiOutlinePath @563
 GpiTranslate @564
 GpiScale @565
@@ -225,6 +226,7 @@ GpiLoadPublicFonts @622
 GpiUnloadPublicFonts @623
 GpiQueryTextAlignment @648
 GpiSetTextAlignment @649
+GpiPolygons @650
 GpiCreateRoundRectRegion @661
 GpiCreateEllipticRegion @662
 GpiAbortPath @722

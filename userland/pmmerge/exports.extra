@@ -238,6 +238,7 @@ WinUpperChar @5405
 WinValidateRect @5406
 WinValidateRegion @5407
 WinWaitEventSem @5409
+WinWaitMsg @5410
 WinWindowFromID @5414
 WinWindowFromPoint @5415
 WINQUERYPROFILEINT=PMSHAPI.2 @2001

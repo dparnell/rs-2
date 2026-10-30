@@ -633,6 +633,13 @@ pub extern "C" fn WinGetMsg(_hab: u32, pq: *mut QMsg, filter: u32, first: u32, l
     (m.msg != WM_QUIT) as u32
 }
 
+/// WinWaitMsg(hab, msgFirst, msgLast): wait until a message in the range
+/// is in the queue (it stays there).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWaitMsg(_hab: u32, first: u32, last: u32) -> u32 {
+    next_message(0, first, last, false, true).is_some() as u32
+}
+
 /// WinPeekMsg(hab, pqmsg, hwndFilter, msgFirst, msgLast, fl): PM_REMOVE = 1.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinPeekMsg(_hab: u32, pq: *mut QMsg, filter: u32, first: u32, last: u32, fl: u32) -> u32 {
