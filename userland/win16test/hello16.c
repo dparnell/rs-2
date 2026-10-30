@@ -43,6 +43,14 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
 
     if (cmd[0] == 'G' && cmd[1] == 'P' && cmd[2] == 'F')
         *(char FAR *)HelloWndProc = 0;
+    /* HELLO16 DLL: load W16DLL, say what its LibMain set (W16DLL.INI) and
+     * end without freeing it. */
+    if (cmd[0] == 'D' && cmd[1] == 'L' && cmd[2] == 'L') {
+        HINSTANCE d = LoadLibrary("W16DLL.DLL");
+        int (FAR PASCAL *f)(void) = d > HINSTANCE_ERROR ? (int (FAR PASCAL *)(void))GetProcAddress(d, "W16DLLVALUE") : NULL;
+        WritePrivateProfileString("run", "value", f && f() == 42 ? "42" : "0", "W16DLL.INI");
+        return 0;
+    }
     if (!hPrev) {
         wc.style = CS_HREDRAW | CS_VREDRAW;
         wc.lpfnWndProc = HelloWndProc;

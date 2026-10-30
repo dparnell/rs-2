@@ -994,9 +994,9 @@ fn drop_down(h: u16) {
     }
     let r = window_rect(h);
     let (sx, sy) = to_screen(h, 0, 0);
-    let (cx, cy) = (r[2] - r[0], r[3] - r[1]);
-    let ch = client_size(h).1;
-    let _ = cy;
+    let cx = r[2] - r[0];
+    // Below the field (a combo box can be as high as its dropped list).
+    let ch = cb(h).map_or(0, |c| c.field_h).min(client_size(h).1).max(1);
     // The list's height: its items, up to the height given.
     let ih = lb(list).map_or(16, |l| l.item_h);
     let n = lb(list).map_or(0, |l| l.items.len() as i32).max(1);

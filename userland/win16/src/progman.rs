@@ -378,14 +378,14 @@ fn add_item(cmd: &[u8], name: &[u8], icon: &[u8], dir: &[u8]) {
     let title = if name.is_empty() { crate::module::base_name(exe) } else { name.to_vec() };
     // The program where Windows would find it ("NOTEPAD.EXE README.TXT":
     // the Windows directory, the PATH). Windows' Notepad is not there:
-    // the System Editor opens the text instead. A program that is not
-    // there at all (WINHELP.EXE) shows the icon of the file it opens.
-    let found = crate::compat::find_program(exe)
-        .or_else(|| crate::module::base_name(exe).eq_ignore_ascii_case(b"NOTEPAD.EXE").then(|| crate::compat::find_program(b"E.EXE")).flatten());
-    let icon = match &found {
-        None if icon.is_empty() && crate::compat::find_program(params).is_some() => params,
-        _ => icon,
-    };
+    // the System Editor opens the text instead. A Notepad item, or one
+    // whose program is not there at all (WINHELP.EXE), shows the icon of
+    // the file it opens.
+    let found = crate::compat::find_program(exe);
+    let notepad = found.is_none() && crate::module::base_name(exe) == b"NOTEPAD";
+    let doc_icon = (found.is_none() || notepad) && icon.is_empty() && crate::compat::find_program(params).is_some();
+    let icon = if doc_icon { params } else { icon };
+    let found = if notepad { crate::compat::find_program(b"E.EXE") } else { found };
     let exe = found.as_deref().unwrap_or(exe);
     // The program's own directory unless one is given (as Program
     // Manager starts it).
