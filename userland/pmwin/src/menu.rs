@@ -218,11 +218,15 @@ pub extern "C" fn WinLoadMenu(parent: u32, hmod: u32, id: u32) -> u32 {
 /// WinCreateMenu(hwndParent, pmt): a menu from a template in memory.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinCreateMenu(parent: u32, pmt: *const u8) -> u32 {
-    if pmt.is_null() {
-        return 0;
-    }
-    let cb = unsafe { (pmt as *const u16).read_unaligned() } as usize;
-    let items = res::parse_menu(unsafe { core::slice::from_raw_parts(pmt, cb) }).unwrap_or_default();
+    // No template: an empty menu (IBM's makes the WC_MENU window with the
+    // template as its control data; VisualAge Smalltalk fills its menus
+    // with MM_INSERTITEM).
+    let items = if pmt.is_null() {
+        Vec::new()
+    } else {
+        let cb = unsafe { (pmt as *const u16).read_unaligned() } as usize;
+        res::parse_menu(unsafe { core::slice::from_raw_parts(pmt, cb) }).unwrap_or_default()
+    };
     let bar = frame::is_frame(parent);
     let p = if parent == pmwin::HWND_OBJECT || parent == 0 { HWND_DESKTOP } else { parent };
     create(p, parent, if bar { ws::VISIBLE | MS_ACTIONBAR } else { 0 }, if bar { FID_MENU } else { 0 }, &items)
