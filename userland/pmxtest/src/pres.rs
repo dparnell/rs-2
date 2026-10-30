@@ -20,6 +20,8 @@ unsafe extern "C" {
     fn WinUpdateWindow(h: u32) -> u32;
     #[link_name = "PMGPI.476"]
     fn GpiQueryPel(hps: u32, p: *const i32) -> i32;
+    #[link_name = "PMWIN.826"]
+    fn WinQuerySysColor(desk: u32, clr: i32, reserved: i32) -> u32;
 }
 
 const PP_FOREGROUNDCOLOR: u32 = 1;
@@ -63,6 +65,14 @@ fn pel(h: u32, x: i32, y: i32) -> i32 {
 }
 
 pub fn pres_checks(client: u32) {
+    // Every system colour has Warp 4's default: VisualAge Smalltalk draws
+    // its labels in SYSCLR_WINDOWSTATICTEXT on SYSCLR_DIALOGBACKGROUND.
+    let c = |i: i32| unsafe { WinQuerySysColor(1, i, 0) };
+    check(
+        "WinQuerySysColor: Warp 4's text colours",
+        c(-26) == 0x000080 && c(-27) == 0 && c(-18) == 0 && c(-46) == 0xa0a0a0 && c(-34) == 0xcccccc,
+    );
+
     // An application's own id.
     changed().clear();
     let ok = unsafe { WinSetPresParam(client, PP_USER + 1, 5, b"hello".as_ptr()) } != 0;
