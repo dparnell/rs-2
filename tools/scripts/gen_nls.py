@@ -482,7 +482,7 @@ LAYOUTS = [
      '_ _ ² ³ _ _ _ { [ ] } \\ _ @ _ € _ _ _ _ _ _ _ _ ~ _ _ _ _ _ _ _ _ _ _ _ _ | _ _ _ _ _ _ µ _ _ _'),
     ('FR', 850, '.',
      "² & é \" ' ( - è _ ç à ) = a z e r t y u i o p d^ $ q s d f g h j k l m ù * < w x c v b n , ; : !",
-     '_ 1 2 3 4 5 6 7 8 9 0 ° + A Z E R T Y U I O P d¨ £ Q S D F G H J K L M % µ > W X C V B N ? . / §',
+     '- 1 2 3 4 5 6 7 8 9 0 ° + A Z E R T Y U I O P d¨ £ Q S D F G H J K L M % µ > W X C V B N ? . / §',
      '_ _ d~ # { [ | d` \\ ^ @ ] } _ _ € _ _ _ _ _ _ _ _ ¤ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _'),
     ('BE', 850, '.',
      "² & é \" ' ( § è ! ç à ) - a z e r t y u i o p d^ $ q s d f g h j k l m ù µ < w x c v b n , ; : =",
@@ -552,8 +552,12 @@ LAYOUTS = [
 
 
 def layout_keys(norm, shift, alt):
-    def tok(t):
+    # "_" is an empty key in the AltGr row, the underscore itself in the
+    # normal and Shift rows (where "-" alone stands for an empty key).
+    def tok(t, row=0):
         if t == '_':
+            return 0 if row == 2 else ord('_')
+        if t == '-' and row == 1:
             return 0
         if len(t) == 2 and t[0] == 'd' and t[1] in DEAD:
             return 0x80000000 | ord(DEAD[t[1]])
@@ -566,7 +570,7 @@ def layout_keys(norm, shift, alt):
         assert len(r) == 48, (len(r), r)
     keys = []
     for i, scan in enumerate(KEY_SCANS):
-        n, sh, a = (tok(rows[0][i]), tok(rows[1][i]), tok(rows[2][i]))
+        n, sh, a = (tok(rows[0][i]), tok(rows[1][i], 1), tok(rows[2][i], 2))
         # AltGr+Shift on a letter gives its capital.
         sa = 0
         if a and a < 0x80000000 and chr(a).isalpha() and len(chr(a).upper()) == 1:

@@ -440,6 +440,13 @@ fn keyboard(b: &Buf) {
     x[4] = 0x02; // left shift
     call(KBDXLATE, &[xp[0], xp[1], 0]);
     check("KbdXlate", rc == 0 && lower == b'a' && b.bytes(0xa80, 1)[0] == b'A' && w16(b, 0xa8c) == 1);
+    // Shift+minus is the underscore (the layouts had lost it).
+    let x = b.bytes(0xa80, 18);
+    x.fill(0);
+    x[1] = 0x0c;
+    x[4] = 0x02;
+    call(KBDXLATE, &[xp[0], xp[1], 0]);
+    check("KbdXlate: Shift+minus is '_'", b.bytes(0xa80, 1)[0] == b'_');
 }
 
 fn monitors(b: &Buf) {
