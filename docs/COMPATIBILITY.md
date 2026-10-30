@@ -354,7 +354,8 @@ are in `tests/owatcom` (a second disk, `--virtio-disk`).
 | What | Status | Notes |
 |------|--------|-------|
 | Installer, as the boot program | works | License, install directory, Full or Selective installation, the component pages, its progress window over the logo (copying the 200 MB of a Full installation takes about 6 minutes in QEMU), "Setup needs to modify CONFIG.SYS" (Make all the modifications: LIBPATH, PATH, HELP, BOOKSHELF, INCLUDE, WATCOM, EDPATH, WIPFC, `RUN=...\NMPBIND.EXE`; the old file kept as CONFIG.000), "Setup has completed". |
-| Installer, from an OS/2 window on the desktop | works | The same, and it makes its desktop folders through WinCreateObject: "Open Watcom C/C++" with the tools' program objects, and "Open Watcom C/C++ Tools Help". |
+| Installer, from an OS/2 window on the desktop | works | The same, and it makes its desktop folders through WinCreateObject: "Open Watcom C/C++" (IDE, Source Browser, Profiler, the debuggers, the remote links, Getting Started, Read Me) and "Open Watcom C/C++ Tools Help" (the help books), both with WATCOM.ICO as their icon. |
+| Installer, from the Workplace Shell | works | Double-clicked in the Drive C folder (OWSETUP.EXE shows its own icon); the same result. After the reboot the IDE starts from its program object in the folder. |
 | After the reboot: `wcl386 -l=os2v2 hello.c` | works | Compiler (WCC386.EXE with WCCD386.DLL), WLINK; the program runs (argv, printf of a double, getenv). |
 | `wcl386 -l=os2v2_pm pmhello.c` | works | The PM program opens its window on the desktop and closes itself (a timer). |
 | `wcl -l=os2 -i=%WATCOM%\h\os21x hello16.c` | works | 16-bit OS/2 program (NE); it reports DosGetVersion 20.45. The installer's INCLUDE names the 32-bit headers only, so 16-bit builds need the `-i` (as on OS/2). |
@@ -389,6 +390,10 @@ Fixed for it:
   reads USER_INI and faulted without it).
 - WPS: an object whose title cannot be its file name keeps the title in
   `.LONGNAME` ("Open Watcom C/C++" showed as "Open Watcom C_C++").
+- File icons: an .ICO or .PTR file is its own icon (the folders'
+  `ICONFILE=C:\WATCOM\WATCOM.ICO` gave a document icon), and an
+  executable longer than 8 MB (the installer: 84 MB with its ZIP
+  appended) still shows its icon (SHELLTST).
 
 ## Fixed while getting these to run
 
