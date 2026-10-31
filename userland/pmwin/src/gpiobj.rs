@@ -779,6 +779,13 @@ pub fn palette8() -> Option<&'static mut gpi::palette::Physical> {
     st().palette8.as_deref_mut()
 }
 
+/// The display's bits per pel: the format of the bitmaps PM makes for
+/// it (pointers' colour bitmaps, system bitmaps), as IBM's are device
+/// bitmaps.
+pub fn device_bitcount() -> u16 {
+    if palette8().is_some() { 8 } else { 24 }
+}
+
 /// Device capabilities (CAPS_*) of the display. At 8 bits per pel they
 /// are what IBM's GRADD engine (GRE2VMAN FillInCapsTable) reports: 256
 /// colours, realizable colour tables and the palette manager.

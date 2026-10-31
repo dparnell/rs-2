@@ -1833,6 +1833,16 @@ WORD int21_keeps_ebx(void);
     value [ax] modify [ax bx cx dx];
 
 /* The pixel at (x, y) of a window, once it has painted. */
+/* The colour a pel of `c` shows (the nearest palette colour on a
+ * 256-colour display). */
+static COLORREF shown(COLORREF c)
+{
+    HDC hdc = GetDC(NULL);
+    c = GetNearestColor(hdc, c);
+    ReleaseDC(NULL, hdc);
+    return c;
+}
+
 static COLORREF pixel_at(HWND w, int x, int y)
 {
     HDC hdc;
@@ -1885,7 +1895,7 @@ static void installer_tests(HINSTANCE hInst)
     check(GetWindow(parent, GW_CHILD) == b1 && GetWindow(b1, GW_HWNDNEXT) == frame, "children in creation order, the first on top (GW_CHILD, GW_HWNDNEXT)");
     c = pixel_at(parent, 25, 35);
     wsprintf(buf, "a button under a later frame static shows, is %06lX", c);
-    check(c == GetSysColor(COLOR_BTNFACE), buf);
+    check(c == shown(GetSysColor(COLOR_BTNFACE)), buf);
     c = pixel_at(parent, 95, 75);
     wsprintf(buf, "a frame static's inside is its parent's background, is %06lX", c);
     check(c == RGB(255, 255, 255), buf);
@@ -1897,10 +1907,10 @@ static void installer_tests(HINSTANCE hInst)
     b3 = CreateWindow("BUTTON", "Three", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 150, 30, 60, 30, parent, (HMENU)5, hInst, NULL);
     c = pixel_at(parent, 25, 35);
     wsprintf(buf, "a button inside an earlier frame static shows, is %06lX", c);
-    check(c == GetSysColor(COLOR_BTNFACE), buf);
+    check(c == shown(GetSysColor(COLOR_BTNFACE)), buf);
     c = pixel_at(parent, 155, 45);
     wsprintf(buf, "a button inside an earlier group box shows, is %06lX", c);
-    check(c == GetSysColor(COLOR_BTNFACE), buf);
+    check(c == shown(GetSysColor(COLOR_BTNFACE)), buf);
     c = pixel_at(parent, 300, 70);
     wsprintf(buf, "a group box's inside is its parent's background, is %06lX", c);
     check(c == RGB(255, 255, 255), buf);

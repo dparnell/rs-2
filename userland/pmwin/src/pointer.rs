@@ -180,7 +180,10 @@ pub extern "C" fn WinSetPointerOwner(h: u32, p: u32, destroy: u32) -> u32 {
 
 /// The bitmaps of a pointer: the AND/XOR mask and the colour bitmap.
 fn bitmaps(img: &Image, mono: bool) -> (u32, u32) {
-    let (m, c) = img.to_bitmaps(!mono);
+    let (m, mut c) = img.to_bitmaps(!mono);
+    if let Some(c) = c.as_mut() {
+        c.bitcount = crate::gpiobj::device_bitcount();
+    }
     let hm = crate::gpiobj::new_bitmap(m);
     let hc = c.map_or(0, crate::gpiobj::new_bitmap);
     (hm, hc)

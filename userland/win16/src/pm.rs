@@ -88,6 +88,10 @@ unsafe extern "C" {
     pub fn WinGetPS(h: u32) -> u32;
     #[link_name = "PMWIN.848"]
     pub fn WinReleasePS(hps: u32) -> u32;
+    #[link_name = "PMWIN.759"]
+    pub fn WinGetScreenPS(desk: u32) -> u32;
+    #[link_name = "PMGPI.469"]
+    pub fn GpiQueryNearestColor(hps: u32, opts: u32, rgb: i32) -> i32;
     #[link_name = "PMWIN.728"]
     pub fn WinDestroyWindow(h: u32) -> u32;
     #[link_name = "PMWIN.743"]

@@ -849,10 +849,18 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             let Some(Obj::Palette(pal)) = gdi::obj(h) else { return Some(0) };
             nearest(&pal, c) as u32
         }
-        // GetNearestColor(hdc, color): the display has every colour.
+        // GetNearestColor(hdc, color): the display's (every colour in
+        // true colour; its palette's nearest at 256 colours).
         3154 => {
             let (_h, c) = (a.w(), a.l());
-            c & 0xffffff
+            let rgb = (c & 0xff) << 16 | c & 0xff00 | (c >> 16) & 0xff;
+            let n = unsafe {
+                let hps = WinGetScreenPS(1);
+                let n = GpiQueryNearestColor(hps, 0, rgb as i32);
+                WinReleasePS(hps);
+                n
+            };
+            if n < 0 { c & 0xffffff } else { (n as u32 & 0xff) << 16 | n as u32 & 0xff00 | (n as u32 >> 16) & 0xff }
         }
         // SetSystemPaletteUse(hdc, use), GetSystemPaletteUse(hdc):
         // SYSPAL_STATIC.
