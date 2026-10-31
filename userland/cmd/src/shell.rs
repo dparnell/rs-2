@@ -202,6 +202,11 @@ pub fn run(s: &os2::Startup) -> u32 {
     let up = args.to_ascii_uppercase();
     if let Some(rest) = up.strip_prefix("/C").map(|_| &args[2..]) {
         sh.run_line(rest.trim());
+        // A batch file named there runs to its end.
+        while sh.exit.is_none() {
+            let Some(line) = crate::batch::next_line(&mut sh) else { break };
+            sh.run_line(&line);
+        }
         return sh.exit.unwrap_or(sh.rc);
     }
     let mut first = None;

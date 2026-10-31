@@ -152,7 +152,7 @@ fn object_in(objects: &[Object], addr: u32) -> Option<usize> {
 const OBJ_READ: u32 = 0x0001;
 const OBJ_WRITE: u32 = 0x0002;
 const OBJ_EXEC: u32 = 0x0004;
-const OBJ_SHARED: u32 = 0x0010;
+const OBJ_SHARED: u32 = 0x0020;
 const OBJ_BIG: u32 = 0x2000;
 const OBJ_ALIAS16: u32 = 0x1000;
 

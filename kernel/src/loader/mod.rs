@@ -318,7 +318,11 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
         // on the next load. rs2 keeps it: its shared data starts over and
         // a global init runs again (the C runtime of VisualAge Smalltalk's
         // ABTBMP50.DLL keeps its state there and freed it at termination).
-        if !in_use(&m) {
+        let used = in_use(&m);
+        if crate::api::tracing() {
+            crate::trace!("    {} found, in use {used}", m.name);
+        }
+        if !used {
             reset(&m);
         }
         return Ok(m);

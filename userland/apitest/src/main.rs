@@ -446,21 +446,30 @@ fn sessions() {
 
 /// CMD's SET BEGINLIBPATH is the process's extended LIBPATH (IBM CMD
 /// calls DosSetExtLIBPATH; VisualAge Smalltalk's VAWINDOW.CMD relies on
-/// it), and %BEGINLIBPATH% reads it back.
+/// it), and %BEGINLIBPATH% reads it back; `CMD /C` runs a batch file to
+/// its end.
 fn cmd_beginlibpath() {
     unsafe {
         let mut hf = 0;
         let mut action = 0;
         let rc = DosOpen(b"C:\\RS2LP.CMD\0".as_ptr(), &mut hf, &mut action, 0, FILE_NORMAL,
             OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYWRITE, null_mut());
-        let text = b"@SET BEGINLIBPATH=C:\\RS2LP\r\n@IF \"%BEGINLIBPATH%\"==\"C:\\RS2LP\" EXIT 7\r\n@EXIT 1\r\n";
+        let text = b"@SET BEGINLIBPATH=C:\\RS2LP\r\n@ECHO %BEGINLIBPATH%>C:\\RS2LP.TXT\r\n";
         let mut n = 0;
         DosWrite(hf, text.as_ptr(), text.len() as u32, &mut n);
         DosClose(hf);
         let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
         let rc2 = DosExecPgm(null_mut(), 0, 0, b"CMD.EXE\0/C C:\\RS2LP.CMD\0\0".as_ptr(), null(), &mut res, b"C:\\OS2\\CMD.EXE\0".as_ptr());
+        let mut buf = [0u8; 32];
+        let mut got = 0;
+        let rc3 = DosOpen(b"C:\\RS2LP.TXT\0".as_ptr(), &mut hf, &mut action, 0, FILE_NORMAL, OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_READONLY | OPEN_SHARE_DENYWRITE, null_mut());
+        if rc3 == 0 {
+            DosRead(hf, buf.as_mut_ptr(), buf.len() as u32, &mut got);
+            DosClose(hf);
+        }
         DosDelete(b"C:\\RS2LP.CMD\0".as_ptr());
-        check("CMD: SET BEGINLIBPATH is the extended LIBPATH", rc == 0 && rc2 == 0 && res.code_result == 7);
+        DosDelete(b"C:\\RS2LP.TXT\0".as_ptr());
+        check("CMD: SET BEGINLIBPATH is the extended LIBPATH", rc == 0 && rc2 == 0 && buf[..got as usize].starts_with(b"C:\\RS2LP\r\n"));
     }
 }
 
