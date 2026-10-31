@@ -177,6 +177,50 @@ reading CONFIG.SYS at boot (it wins over the loader's `video=`, which
 picks among the firmware's modes). `DISPLAY WxH` switches and saves
 without asking. A plain firmware framebuffer cannot change modes.
 
+**256 colours.** OS/2 Warp 4 users picked the colours with the
+resolution ("1024 x 768 x 256" on the Screen page); some programs need a
+256-colour display (VisualAge Smalltalk builds its icons at the device's
+bitmap format and takes only 1, 4 or 8 bits). rs2's PM can be such a
+display: `VIDEO=WxHx256` in CONFIG.SYS (`x16M`, or no third number, is
+true colour; 65536 colours is not offered and gives true colour), chosen
+in Display (System Setup; `DISPLAY WxHx256`), or `video=WxHx256` on the
+kernel command line. It takes effect at the next start: programs keep the
+device's capabilities from when they started. The kernel reports it in
+bit 1 of `Rs2MapDisplay`'s flags; the framebuffer stays 32 bits per pel,
+and PM gives programs an 8-bit, palette-managed device as IBM's GRADD
+engine describes one:
+
+- `DevQueryCaps`: CAPS_COLORS and CAPS_PHYS_COLORS 256,
+  CAPS_COLOR_BITCOUNT 8, CAPS_COLOR_TABLE_SUPPORT with
+  CAPS_COLTABL_REALIZE (GRE2VMAN's `FillInCapsTable` adds REALIZE and
+  TRUE_MIX at 8 bits).
+- `GpiQueryDeviceBitmapFormats`: the device's format first, then the
+  others in PMMERGE's order (its `QueryDeviceBitmaps32`): (1,8), (1,24),
+  (1,4), (1,1); in true colour (1,24), (1,8), (1,4), (1,1).
+- The hardware palette (`gpi::palette::Physical`, in PM's shared state)
+  starts as PMMERGE's 256-entry default palette (a 7x8x4 colour cube with
+  32 greys); every pel PM draws on the screen gets the nearest of its
+  colours (the screen `Surface` maps colours as it writes them, through a
+  6-6-6-bit table filled in as colours are first used), so `GpiQueryPel`
+  and bit-block transfers from the screen see palette colours. Memory
+  bitmaps keep their pels; 8-bit bitmap bits use the same default
+  palette as their colour table.
+- `GpiQueryRealColors` lists the hardware palette by physical index;
+  `GpiQueryNearestColor` gives its nearest colour (LCOLOPT_REALIZED: of
+  the PS's palette).
+- `WinRealizePalette` for the window with the focus (or the active
+  frame) gives the palette selected in the PS hardware entries as
+  PMMERGE does: a colour already there is shared (not with PC_RESERVED or
+  PC_NOCOLLAPSE), others take entries between the two halves of the
+  default palette, which shrinks to make room (256, 128, 64, then 16
+  entries, PMMERGE's `ReduceDirectDefPalette` and its
+  ulDefaultPalette128/64/16), else the nearest colour. It returns the
+  number of entries mapped and sets *pcclr to the hardware entries that
+  changed; when some did, every queue gets `WM_REALIZEPALETTE` (mp1: the
+  frame), as IBM's `WinBroadcastMsg(BMSG_POSTQUEUE)`. Other windows'
+  realizations map to what is there. The full default palette comes
+  back when the realized palette is deleted or its process ends.
+
 ## Processes and input
 
 **Shared state.** PMWIN keeps everything in one named shared memory
@@ -2434,7 +2478,11 @@ it gets.
   saved and loaded; retained segments in `DM_RETAIN` and
   `DM_DRAWANDRETAIN`, drawn by `GpiDrawChain`, read with `GpiGetData`
   and played with `GpiPutData`, drawn onto a metafile;
-  `WinCpTranslateString`), then a window with every kind of primitive
+  `WinCpTranslateString`; the display's capabilities, bitmap formats,
+  real and nearest colours and a pel on the screen, for true colour or,
+  when CONFIG.SYS has `VIDEO=WxHx256` or with `GPITEST 256`, for a
+  256-colour display, with a palette realized and given back), then a
+  window with every kind of primitive
   for a screenshot check (it also draws `C:\YOSEMITE.BMP` when
   present).
 - The application installer: a dist system disk (`cargo xtask disk
