@@ -257,6 +257,12 @@ pub fn load(
                     sm.pages.lock()[p] = PageState::Committed;
                 }
                 obj.shared = Some(sm);
+                // Writable shared data: its loaded contents, to start over
+                // from when the module is loaded again after it was let go
+                // everywhere (loader::load_global).
+                if o.flags & oflags::WRITE != 0 {
+                    obj.pristine = Some(img);
+                }
             } else {
                 obj.pristine = Some(img);
             }

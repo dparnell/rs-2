@@ -519,6 +519,21 @@ fn dlls() {
         check("DLL marked without internal fixups moved off taken bases", ok && pa != TestAdd as usize && sum == 42 && inits == 1);
         if rc == 0 {
             DosFreeModule(hb);
+            // Let go everywhere, loaded again: its shared data starts over
+            // (OS/2 reads it in again; VisualAge's ABTBMP50.DLL relies on it).
+            let mut hb2 = 0;
+            let mut ps: usize = 0;
+            let rc = DosLoadModule(null_mut(), 0, b"TESTDLLB\0".as_ptr(), &mut hb2);
+            let shared = if rc == 0 && DosQueryProcAddr(hb2, 5, null(), &mut ps) == 0 {
+                let f: extern "C" fn() -> u32 = core::mem::transmute(ps);
+                f()
+            } else {
+                0
+            };
+            check("a DLL loaded again after it was let go starts with fresh shared data", shared == 1);
+            if rc == 0 {
+                DosFreeModule(hb2);
+            }
         }
     }
 }

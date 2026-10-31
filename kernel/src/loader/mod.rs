@@ -102,7 +102,8 @@ pub struct Object {
     pub limit: Option<u32>,
     /// Shared backing (DLL shared objects).
     pub shared: Option<Arc<SharedMem>>,
-    /// Fixed-up initial contents for per-process instance data.
+    /// Fixed-up initial contents for per-process instance data (and for
+    /// writable shared data, see `load_global`).
     pub pristine: Option<Vec<u8>>,
 }
 
@@ -313,6 +314,13 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     let mname = module_name(name);
     let found = REGISTRY.lock().modules.iter().find(|m| m.is_dll && m.name.eq_ignore_ascii_case(&mname)).cloned();
     if let Some(m) = found {
+        // OS/2 discards a DLL no process uses any more and reads it again
+        // on the next load. rs2 keeps it: its shared data starts over and
+        // a global init runs again (the C runtime of VisualAge Smalltalk's
+        // ABTBMP50.DLL keeps its state there and freed it at termination).
+        if !in_use(&m) {
+            reset(&m);
+        }
         return Ok(m);
     }
     let (path, data) = crate::fs::find_module(name).ok_or_else(|| {
@@ -323,6 +331,39 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     let m = load_image(&path, data, true, None).inspect_err(|e| crate::trace!("loader: {path}: error {e}"))?;
     register(m.clone());
     Ok(m)
+}
+
+/// Whether a live process uses `m`: its program, a DLL it loaded, or
+/// what they import.
+fn in_use(m: &Arc<Module>) -> bool {
+    fn uses(x: &Arc<Module>, m: &Arc<Module>, seen: &mut Vec<u16>) -> bool {
+        if Arc::ptr_eq(x, m) {
+            return true;
+        }
+        if seen.contains(&x.hmte) {
+            return false;
+        }
+        seen.push(x.hmte);
+        x.imports.iter().any(|i| uses(i, m, seen))
+    }
+    crate::task::process::all().iter().any(|p| {
+        let mut seen = Vec::new();
+        uses(&p.exe, m, &mut seen) || p.loaded.lock().iter().any(|(x, _)| uses(x, m, &mut seen))
+    })
+}
+
+/// A DLL's writable shared data back to how it was loaded, its global
+/// initialisation not done.
+fn reset(m: &Module) {
+    for o in &m.objects {
+        let (Some(sh), Some(img)) = (&o.shared, &o.pristine) else { continue };
+        for (i, page) in img.chunks(crate::vm::PAGE as usize).enumerate() {
+            if let Some(fr) = sh.frame(i) {
+                unsafe { core::ptr::copy_nonoverlapping(page.as_ptr(), crate::mm::phys::phys_to_virt(fr), page.len()) };
+            }
+        }
+    }
+    m.global_init_done.store(false, core::sync::atomic::Ordering::Relaxed);
 }
 
 /// Load (or find) a DLL and attach it to the address space `space`
