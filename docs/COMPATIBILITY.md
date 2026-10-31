@@ -212,7 +212,7 @@ from an OS/2 window on the desktop.
 |------|--------|-------|
 | Manager installer (`cd_m\install_o\install.cmd`) | works | Welcome, licence (Accept), features, destination `C:\ibmvast\vast60`, program folder, copying; `MGR60.DAT` arrives identical to the CD. |
 | Client installer (`cd_c\install_o\install.cmd`) | works | The same pages plus the folder dialog (Browse, typed `D:\vast60`), Code Management (Standalone, File I/O), the library path; files copied to D:, `ABT.INI` written, its WPS folder (Development Image, Command Prompt, Uninstall, Readme) on the desktop. |
-| ABT.EXE (the development image) | partial | Starts (trial notice; `ABTPAY60.DLL`, the licence DLL, is not on the evaluation media), asks whose image it is, connects the image to the library (about 10 minutes the first time), System Transcript, its menus (File, Edit, Tools, Help), File > New opens a Workspace where `3 + 4` displays `7` (Ctrl+D), the ENVY/Smalltalk Debugger opens on errors. Fails: the VisualAge Organizer's icons ("Invalid icon depth": VisualAge builds them from a device pixmap at the depth GpiQueryDeviceBitmapFormats gives first, 24 on rs2's display, and its CgIcon takes 1, 4 or 8 bits). Not yet verified: the class browsers, the Composition Editor, File > Save Image (no visible effect in the test). |
+| ABT.EXE (the development image) | works at 256 colours | Starts (trial notice; `ABTPAY60.DLL`, the licence DLL, is not on the evaluation media), asks whose image it is, connects the image to the library (about 10 minutes the first time), System Transcript, its menus (File, Edit, Tools, Help), File > New opens a Workspace where `3 + 4` displays `7` (Ctrl+D), the ENVY/Smalltalk Debugger opens on errors. Needs a 256-colour display, as on IBM's OS/2: `VIDEO=1024x768x256` in CONFIG.SYS, or Colors 256 in Display ([PM.md](PM.md#the-screen-damage-and-display-modes)). Then the VisualAge Organizer opens with its Quick Start, and Create a new part opens the Composition Editor (parts palette, a Window part). In 16 million colours the Organizer stops with "Invalid icon depth": VisualAge builds its icons at the depth GpiQueryDeviceBitmapFormats gives first (the device's, 24) and its CgIcon takes 1, 4 or 8 bits; IBM's PMMERGE also lists the device's depth first. Not yet verified: the class browsers, building and running a part, File > Save Image. |
 | Manager's EMSRV.EXE, EMADMIN.EXE | not tried | TCP/IP (SO32DLL, TCP32DLL) programs for team development: EMSRV serves the library over the network. |
 | Server runtime (`server\`: ESVIO.EXE, ABTVSP40.EXE) | not tried | The headless VM for deployed images (DOSCALLS, ESVM40, a few PMWIN/PMGPI calls) and the Web Connection files; needs a packaged image. |
 
@@ -229,7 +229,17 @@ desktop; PMWP `WinQueryActiveDesktopPathname`; CMD's `SET BEGINLIBPATH`
 is DosSetExtLIBPATH; keyboard layouts had lost "_"; the loader moves DLLs
 flagged "internal fixups removed" that still carry them (EMNTV50,
 ABTBMP50 and ABTICO50 are based at 0x10000) and starts a DLL no process
-uses any more over from its file's shared data (ABTBMP50's C runtime).
+uses any more over from its file's shared data (ABTBMP50's C runtime);
+PM's 256-colour display mode (8-bit capabilities and bitmap formats, a
+palette-managed screen), with pointers' colour bitmaps in the device's
+format (GPITEST checks both modes).
+
+Testing it: the installed disks (system on FAT with the manager in
+`C:\ibmvast`, client on an HPFS data disk D:) booted with `--vmware`
+(the absolute pointer, for clicks through QMP), the client CD as a
+virtio CD, `VIDEO=1024x768x256` in the disk's CONFIG.SYS and `CMD /K
+C:\VA.CMD` (VAWINDOW.CMD with ABT.EXE) as the boot program; each start
+reconnects the image to the library (about 10 minutes in QEMU).
 
 ### OS/2's PM applets (survey)
 

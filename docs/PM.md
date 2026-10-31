@@ -204,7 +204,10 @@ engine describes one:
   6-6-6-bit table filled in as colours are first used), so `GpiQueryPel`
   and bit-block transfers from the screen see palette colours. Memory
   bitmaps keep their pels; 8-bit bitmap bits use the same default
-  palette as their colour table.
+  palette as their colour table. The bitmaps PM makes for the display
+  (pointers' and icons' colour bitmaps in POINTERINFO, system bitmaps)
+  are in its format, 8 bits per pel, as IBM's device bitmaps are
+  (VisualAge Smalltalk scales its icons from them).
 - `GpiQueryRealColors` lists the hardware palette by physical index;
   `GpiQueryNearestColor` gives its nearest colour (LCOLOPT_REALIZED: of
   the PS's palette).
