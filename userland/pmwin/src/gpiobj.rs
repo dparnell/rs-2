@@ -1080,7 +1080,10 @@ pub extern "C" fn GpiQueryBitmapBits(hps: u32, start: i32, scans: i32, buf: *mut
 /// pairs, preferred first.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiQueryDeviceBitmapFormats(_hps: u32, n: i32, out: *mut i32) -> u32 {
-    let f = [1, 24, 1, 1, 1, 4, 1, 8];
+    // (planes, bits): the device's own format first, then the others from
+    // the deepest down, as IBM's graphics engine lists them
+    // (QueryDeviceBitmaps32 for a 24-bit device).
+    let f = [1, 24, 1, 8, 1, 4, 1, 1];
     if out.is_null() {
         return 0;
     }

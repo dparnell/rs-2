@@ -263,6 +263,8 @@ unsafe extern "C" {
     fn WinReleasePS(hps: u32) -> u32;
     #[link_name = "PMWIN.749"]
     fn WinGetClipPS(h: u32, clip: u32, fl: u32) -> u32;
+    #[link_name = "PMGPI.445"]
+    fn GpiQueryDeviceBitmapFormats(hps: u32, n: i32, out: *mut i32) -> u32;
 }
 
 static FAILS: AtomicU32 = AtomicU32::new(0);
@@ -568,6 +570,12 @@ fn self_checks(hab: u32) {
         // WinGetClipPS (PSF_CLIPSIBLINGS | PSF_CLIPCHILDREN) on the desktop.
         let cps = WinGetClipPS(1, 0, 0x18);
         check("WinGetClipPS", cps != 0 && GpiQueryDevice(cps) != 0 && WinReleasePS(cps) != 0);
+        // The device's format first, then 8, 4 and 1 bit, as IBM's engine.
+        let mut f = [0i32; 8];
+        let sps = WinGetScreenPS(1);
+        let ok = GpiQueryDeviceBitmapFormats(sps, 8, f.as_mut_ptr()) != 0;
+        WinReleasePS(sps);
+        check("GpiQueryDeviceBitmapFormats", ok && f == [1, 24, 1, 8, 1, 4, 1, 1]);
     }
 }
 
