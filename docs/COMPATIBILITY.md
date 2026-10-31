@@ -107,6 +107,51 @@ HELPMGR. Tested with keyboard and mouse input from
 | Toolkit `controls/style.exe` | partial | Its MLE editor, the button, list box, combo box (simple, drop-down, drop-down list), entry field (MLE and entry field), static, slider, spin button (master and servant), value set (its icons drawn) and notebook dialogs (both pages, the tabs, the page buttons, Alt+PgUp/PgDn), the container dialog (its record in the icon, name, text and detail views, switched from the context menu that button 2 brings up), message boxes with their query, warning, information and action icons; the frame's icon (FCF_ICON) on the system menu button and when minimized, minimize and restore. Presentation parameters are ignored. |
 | Toolkit `clipbrd.exe` | works | Selecting a rectangle with the mouse (WinTrackRect), Copy/Cut as CF_BITMAP and Paste stretched into another selection. |
 
+### IBM VisualAge Smalltalk Enterprise 6.0 (development tools)
+
+The user's media (`va600_co.zip` client, `va600_mo.zip` manager,
+`va600_so.zip` server; an evaluation copy). Everything on them is 32-bit
+OS/2 LX. The installer is IBM's own, written in Smalltalk:
+`install_o\INSTALL.CMD` sets BEGINLIBPATH and starts `SETUP.EXE` (a VM
+launcher) with `ESVM40.DLL` (the Smalltalk VM) and `SETUP.ICX` (a
+packaged image). The development environment is `ABT.EXE` with the same
+VM, `ABT.ICX` and the `ICSRUN` components, reached through VAWINDOW.CMD
+(which sets BEGINLIBPATH and starts ABT.EXE with START /PGM). The source
+code lives in the manager library `MGR60.DAT` (122 MB), opened through
+`EMNTV50.DLL` (File I/O, standalone) or EMSRV over TCP/IP (team). The VM
+calls OS/2 from Smalltalk (`PlatformFunction`: DosLoadModule and
+DosQueryProcAddr by ordinal), so a missing API shows as a walkback
+("Primitive failed ... OS error 182", written to `C:\TEMP\WALKBACK.LOG`)
+rather than a loader error; rs2 logs `DosQueryProcAddr: MOD.n not found`
+on the serial port.
+
+Tested in QEMU with a FAT system disk, an HPFS data disk (D:, the client
+needs HPFS for its long names) and both CDs as ISOs, the installers run
+from an OS/2 window on the desktop.
+
+| Part | Status | Notes |
+|------|--------|-------|
+| Manager installer (`cd_m\install_o\install.cmd`) | works | Welcome, licence (Accept), features, destination `C:\ibmvast\vast60`, program folder, copying; `MGR60.DAT` arrives identical to the CD. |
+| Client installer (`cd_c\install_o\install.cmd`) | works | The same pages plus the folder dialog (Browse, typed `D:\vast60`), Code Management (Standalone, File I/O), the library path; files copied to D:, `ABT.INI` written, its WPS folder (Development Image, Command Prompt, Uninstall, Readme) on the desktop. |
+| ABT.EXE (the development image) | partial | Starts (trial notice; `ABTPAY60.DLL`, the licence DLL, is not on the evaluation media), asks whose image it is, connects the image to the library (about 10 minutes the first time), System Transcript, its menus (File, Edit, Tools, Help), File > New opens a Workspace where `3 + 4` displays `7` (Ctrl+D), the ENVY/Smalltalk Debugger opens on errors. Fails: the VisualAge Organizer's icons ("Invalid icon depth": VisualAge builds them from a device pixmap at the depth GpiQueryDeviceBitmapFormats gives first, 24 on rs2's display, and its CgIcon takes 1, 4 or 8 bits). Not yet verified: the class browsers, the Composition Editor, File > Save Image (no visible effect in the test). |
+| Manager's EMSRV.EXE, EMADMIN.EXE | not tried | TCP/IP (SO32DLL, TCP32DLL) programs for team development: EMSRV serves the library over the network. |
+| Server runtime (`server\`: ESVIO.EXE, ABTVSP40.EXE) | not tried | The headless VM for deployed images (DOSCALLS, ESVM40, a few PMWIN/PMGPI calls) and the Web Connection files; needs a packaged image. |
+
+Fixed for it (each with a suite check): PMWIN `WinGetPhysKeyState`,
+`WinWaitMsg`, `WinGetClipPS`; `GpiQueryDevice` of a screen PS (the
+font server divided by a 0 resolution); every SYSCLR has Warp 4's default
+(labels drawn in SYSCLR_WINDOWSTATICTEXT were grey on grey); a cached PS
+gets the window's PP_FONTNAMESIZE font (as IBM's GetCe); combo box entry
+fields sized after their selection scroll back; entry fields retry a
+character after the owner answers EN_OVERFLOW (the 33rd character typed
+was lost); `WinCreateMenu` without a template; submenus made with the
+menu bar as parent (and action-bar style) drop down vertically on the
+desktop; PMWP `WinQueryActiveDesktopPathname`; CMD's `SET BEGINLIBPATH`
+is DosSetExtLIBPATH; keyboard layouts had lost "_"; the loader moves DLLs
+flagged "internal fixups removed" that still carry them (EMNTV50,
+ABTBMP50 and ABTICO50 are based at 0x10000) and starts a DLL no process
+uses any more over from its file's shared data (ABTBMP50's C runtime).
+
 ### OS/2's PM applets (survey)
 
 The PM programs of OS/2 itself (from the client CD, with their DLLs,

@@ -2258,7 +2258,12 @@ starting it), PMWIN logs every PM call the program makes, with its
 arguments, on the serial port (`[pid] tid WinSendMsg(f, 1d4, 0, 0)`).
 Only the application's calls are logged, not PMWIN's own nested ones.
 The export trampolines pass their index to the lock's entry
-(`gen_pm_exports.py` writes the names table).
+(`gen_pm_exports.py` writes the names table). `SET PMTRACE=2` also logs
+what each call returns (`[pid] tid = 1a`), which tells the window handles
+a program gets. For the kernel's side, `apitrace=NAME.EXE` on the kernel
+command line (`RS2\CMDLINE`) traces one program's DOS calls, the files it
+opens, the modules it loads (where their objects went) and the exceptions
+it gets.
 
 ## Milestones
 
