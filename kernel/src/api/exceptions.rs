@@ -195,6 +195,10 @@ fn flat32(sp: &vm::AddressSpace, f: &TrapFrame) -> bool {
 /// Entry point for CPU exceptions raised by user code.
 pub fn deliver(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     let (code, info) = translate(f);
+    // A debugger sees it first (DBG_X_FIRST_CHANCE).
+    if super::debug::exception(f, p, t, code, &info, false) {
+        return;
+    }
     if !raise(f, p, t, code, 0, &info, f.rip as u32) {
         default_action(f, p, t, code);
     }
@@ -215,14 +219,25 @@ pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, fl
         return false;
     }
     let nested = !t.xcpt.lock().is_empty();
-    // Build the records below the current stack pointer.
+    let flags = flags | if nested { xcpt::EH_NESTED_CALL } else { 0 };
+    let Some((report, context)) = build_records(&mut sp, f, code, flags, info, address) else { return false };
+    let d = Dispatch { report, context, reg: head, unwind: None, code };
+    call_handler(&mut sp, f, &d, report.wrapping_sub(16));
+    drop(sp);
+    t.xcpt.lock().push(d);
+    true
+}
+
+/// Build the exception report and context records below the thread's
+/// stack pointer; returns their addresses.
+fn build_records(sp: &mut vm::AddressSpace, f: &TrapFrame, code: u32, flags: u32, info: &[u32], address: u32) -> Option<(u32, u32)> {
     let esp = (f.rsp as u32).wrapping_sub(256) & !15;
     let context = esp.wrapping_sub(CONTEXT_SIZE);
     let report = context.wrapping_sub(REPORT_SIZE) & !15;
     let mut r = alloc::vec![0u8; REPORT_SIZE as usize];
     let put = |b: &mut Vec<u8>, o: usize, v: u32| b[o..o + 4].copy_from_slice(&v.to_le_bytes());
     put(&mut r, 0, code);
-    put(&mut r, 4, flags | if nested { xcpt::EH_NESTED_CALL } else { 0 });
+    put(&mut r, 4, flags);
     put(&mut r, 8, 0);
     put(&mut r, 12, address);
     put(&mut r, 16, info.len().min(4) as u32);
@@ -230,14 +245,21 @@ pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, fl
         put(&mut r, 20 + i * 4, *v);
     }
     if !sp.poke_bytes(report, &r) {
-        return false;
+        return None;
     }
-    save_context(&mut sp, context, f);
-    let d = Dispatch { report, context, reg: head, unwind: None, code };
-    call_handler(&mut sp, f, &d, report.wrapping_sub(16));
-    drop(sp);
-    t.xcpt.lock().push(d);
-    true
+    save_context(sp, context, f);
+    Some((report, context))
+}
+
+/// The records of an exception for its debugger (DBG_N_Exception's Buffer
+/// and Len), on the stack of 32-bit code; None for 16-bit code.
+pub fn records(p: &Arc<Process>, t: &Arc<Thread>, f: &TrapFrame, code: u32, info: &[u32], address: u32) -> Option<(u32, u32)> {
+    let mut sp = p.space.lock();
+    if !flat32(&sp, f) {
+        return None;
+    }
+    let nested = !t.xcpt.lock().is_empty();
+    build_records(&mut sp, f, code, if nested { xcpt::EH_NESTED_CALL } else { 0 }, info, address)
 }
 
 /// Set up the frame to call the handler of `d.reg`.
@@ -466,6 +488,10 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
         }
         xcpt::PROCESS_TERMINATE | xcpt::ASYNC_PROCESS_TERMINATE | xcpt::UNWIND => return,
         _ => {}
+    }
+    // Unhandled: a debugger has the last chance (DBG_X_LAST_CHANCE).
+    if super::debug::exception(f, p, t, code, &[], true) {
+        return;
     }
     let (sys, what) = match code {
         xcpt::INTEGER_DIVIDE_BY_ZERO => ("SYS3172", "divide by zero"),

@@ -44,6 +44,8 @@ struct StartData {
     env: Option<Vec<String>>,
     /// SessionType (SSF_TYPE_*).
     session_type: u16,
+    /// TraceOpt: the program starts under DosDebug control.
+    trace: bool,
 }
 
 /// Read STARTDATA (pointers are 16:16 for the 16-bit API).
@@ -86,6 +88,7 @@ fn read_start_data(c: &Ctx, at: u32) -> Result<StartData, u32> {
         termq: if related { str_at(20).filter(|s| !s.is_empty()) } else { None },
         env,
         session_type: ty,
+        trace: u16_at(6) != 0,
     })
 }
 
@@ -188,7 +191,7 @@ fn is_mz_only(path: &str) -> bool {
 /// Start a DOS session for DosExecPgm of a DOS program: unrelated, in
 /// the foreground, windowed as the caller is.
 pub fn start_dos_session(c: &Ctx, path: &str, inputs: &str, env: Vec<String>) -> Result<(u32, u32, u32), u32> {
-    let sd = StartData { related: false, background: false, title: None, name: None, inputs: String::new(), termq: None, env: None, session_type: SSF_TYPE_DEFAULT };
+    let sd = StartData { related: false, background: false, title: None, name: None, inputs: String::new(), termq: None, env: None, session_type: SSF_TYPE_DEFAULT, trace: false };
     start_dos(c, &sd, Some(path.to_string()), inputs, env)
 }
 
@@ -225,6 +228,7 @@ fn start_dos(c: &Ctx, sd: &StartData, path: Option<String>, inputs: &str, env: V
         handles: super::file::console_handles(),
         detached: true,
         session: sid,
+        traced: false,
     });
     let child = match r {
         Ok(p) => p,
@@ -275,7 +279,7 @@ fn start_winos2(c: &Ctx, sd: &StartData, mut env: Vec<String>) -> Result<(u32, u
         env.retain(|e| !e.to_ascii_uppercase().starts_with("WINOS2_SEAMLESS="));
         env.push(String::from("WINOS2_SEAMLESS=1"));
     }
-    let mut sd2 = StartData { related: sd.related, background: sd.background, title: sd.title.clone(), name: None, inputs: String::new(), termq: sd.termq.clone(), env: None, session_type: if seamless { SSF_TYPE_WINDOWEDVDM } else { SSF_TYPE_VDM } };
+    let mut sd2 = StartData { related: sd.related, background: sd.background, title: sd.title.clone(), name: None, inputs: String::new(), termq: sd.termq.clone(), env: None, session_type: if seamless { SSF_TYPE_WINDOWEDVDM } else { SSF_TYPE_VDM }, trace: false };
     if sd2.title.is_none() {
         sd2.title = Some(String::from(if seamless { "WIN-OS/2" } else { "WIN-OS/2 Full Screen" }));
     }
@@ -347,6 +351,7 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
         handles: super::file::console_handles(),
         detached: true,
         session: sid,
+        traced: sd.trace,
     });
     let child = match r {
         Ok(p) => p,

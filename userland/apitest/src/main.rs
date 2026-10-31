@@ -36,6 +36,9 @@ fn main(s: &Startup) -> u32 {
         console::keys();
         return 0;
     }
+    if core::str::from_utf8(s.args()).is_ok_and(|a| a.trim() == "dbgchild") {
+        return debug_child();
+    }
     info_blocks();
     memory();
     suballoc();
@@ -52,6 +55,7 @@ fn main(s: &Startup) -> u32 {
     shared_memory();
     queues();
     sessions();
+    debugging();
     messages();
     nls();
     console::run();
@@ -779,4 +783,240 @@ fn nls() {
         }
         check("DosSetProcessCp not prepared", DosSetProcessCp(1125) == 472);
     }
+}
+
+// ---- DosDebug ----
+
+const DBG_C_READ_MEM: i32 = 1;
+const DBG_C_READ_REG: i32 = 3;
+const DBG_C_WRITE_REG: i32 = 6;
+const DBG_C_GO: i32 = 7;
+const DBG_C_TERM: i32 = 8;
+const DBG_C_SSTEP: i32 = 9;
+const DBG_C_STOP: i32 = 10;
+const DBG_C_NUM_TO_ADDR: i32 = 13;
+const DBG_C_READ_CO_REGS: i32 = 14;
+const DBG_C_THRD_STAT: i32 = 17;
+const DBG_C_MAP_RO_ALIAS: i32 = 18;
+const DBG_C_UNMAP_ALIAS: i32 = 20;
+const DBG_C_CONNECT: i32 = 21;
+const DBG_C_READ_MEM_BUF: i32 = 22;
+const DBG_C_WRITE_MEM_BUF: i32 = 23;
+const DBG_C_SET_WATCH: i32 = 24;
+const DBG_C_CLEAR_WATCH: i32 = 25;
+const DBG_C_CONTINUE: i32 = 27;
+const DBG_C_LIN_TO_SEL: i32 = 30;
+const DBG_C_SEL_TO_LIN: i32 = 31;
+const DBG_N_ERROR: i32 = -1;
+const DBG_N_PROC_TERM: i32 = -6;
+const DBG_N_EXCEPTION: i32 = -7;
+const DBG_N_MODULE_LOAD: i32 = -8;
+const DBG_N_WATCHPOINT: i32 = -14;
+const DBG_W_LOCAL: u32 = 2;
+const DBG_W_WRITE: u32 = 0x2_0000;
+const DBG_W_READ_WRITE: u32 = 0x3_0000;
+const XCPT_CONTINUE_EXECUTION: u32 = 0xffff_ffff;
+const XCPT_CONTINUE_STOP: u32 = 0x0071_6668;
+const XCPT_BREAKPOINT: u32 = 0xC000_009F;
+const XCPT_SINGLE_STEP: u32 = 0xC000_00A0;
+
+/// The traced child's variable: the debugger reads and rewrites it.
+static mut DEBUG_VAR: u32 = 0x1234;
+/// Watched by the debugger: the child writes the first, the kernel the
+/// second (DosQuerySysInfo's result).
+static mut WATCH_VAR: u32 = 0;
+static mut KERNEL_WATCH_VAR: u32 = 0;
+
+/// `APITEST dbgchild`: run under the debugger. A breakpoint, two
+/// instructions to single step, two writes to watched variables, then the
+/// exit code tells what the debugger changed (DEBUG_VAR and EAX).
+fn debug_child() -> u32 {
+    let eax: u32;
+    unsafe {
+        core::arch::asm!("int3", "nop", "nop", inout("eax") 0u32 => eax);
+        core::ptr::write_volatile(&raw mut WATCH_VAR, 7);
+        // QSV_MAX_PATH_LENGTH
+        DosQuerySysInfo(1, 1, &raw mut KERNEL_WATCH_VAR, 4);
+        DEBUG_VAR + eax
+    }
+}
+
+fn dbg(b: &mut UDb, cmd: i32) -> i32 {
+    b.cmd = cmd;
+    let rc = unsafe { DosDebug(b) };
+    if rc != 0 { DBG_N_ERROR } else { b.cmd }
+}
+
+/// Start `APITEST dbgchild` traced; its pid.
+fn start_traced() -> u32 {
+    let mut pib = null_mut();
+    let mut tib = null_mut();
+    let mut path = [0u8; 260];
+    unsafe {
+        DosGetInfoBlocks(&mut tib, &mut pib);
+        DosQueryModuleName((*pib).hmte, 260, path.as_mut_ptr());
+    }
+    let mut args = [0u8; 300];
+    let n = path.iter().position(|&c| c == 0).unwrap_or(0);
+    args[..n].copy_from_slice(&path[..n]);
+    args[n + 1..n + 9].copy_from_slice(b"dbgchild");
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let mut fail = [0u8; 64];
+    // EXEC_TRACE: asynchronous, the child under DosDebug control.
+    let rc = unsafe { DosExecPgm(fail.as_mut_ptr(), 64, 3, args.as_ptr(), null(), &mut res, path.as_ptr()) };
+    if rc == 0 { res.code_terminate } else { 0 }
+}
+
+fn debugging() {
+    let pid = start_traced();
+    check("DosExecPgm EXEC_TRACE", pid != 0);
+    if pid == 0 {
+        return;
+    }
+    let mut b = UDb { pid, value: 1, ..Default::default() };
+    let n = dbg(&mut b, DBG_C_CONNECT);
+    check("DBG_C_Connect", n == 0 && b.segs[0].sel == 0x5b && b.eip != 0);
+    let entry = b.eip;
+    b = UDb { pid, ..Default::default() };
+    let n = dbg(&mut b, DBG_C_STOP);
+    let mut me = null_mut();
+    let mut pib = null_mut();
+    unsafe { DosGetInfoBlocks(&mut me, &mut pib) };
+    // The child's program module (its own handle) has the same file.
+    let (mut name, mut mine) = ([0u8; 260], [0u8; 260]);
+    let named = unsafe { DosQueryModuleName(b.value, 260, name.as_mut_ptr()) == 0 && DosQueryModuleName((*pib).hmte, 260, mine.as_mut_ptr()) == 0 };
+    check("DBG_C_Stop reports the program's module", n == DBG_N_MODULE_LOAD && named && name == mine);
+    let hmte = b.value;
+    b.value = XCPT_CONTINUE_STOP;
+    check("DBG_C_Continue XCPT_CONTINUE_STOP", dbg(&mut b, DBG_C_CONTINUE) == 0);
+    // Stopped before its first instruction.
+    b.tid = 1;
+    check("stopped at the entry", dbg(&mut b, DBG_C_READ_REG) == 0 && b.eip == entry);
+    b.mte = hmte;
+    b.value = 1;
+    let f = debug_child as usize as u32;
+    check("DBG_C_NumToAddr", dbg(&mut b, DBG_C_NUM_TO_ADDR) == 0 && b.addr != 0 && b.addr <= f && f - b.addr < 0x10_0000);
+    // Run to the breakpoint (module loads on the way).
+    let mut n;
+    let mut guard = 0;
+    loop {
+        b.tid = 0;
+        n = dbg(&mut b, DBG_C_GO);
+        guard += 1;
+        if n != DBG_N_MODULE_LOAD || guard > 50 {
+            break;
+        }
+    }
+    let bp = b.addr;
+    check("breakpoint: pre-first-chance XCPT_BREAKPOINT", n == DBG_N_EXCEPTION && b.value == 0 && b.buffer == XCPT_BREAKPOINT);
+    check("breakpoint: EIP at the INT 3", b.eip == bp && b.tid == 1);
+    b.value = XCPT_CONTINUE_STOP;
+    dbg(&mut b, DBG_C_CONTINUE);
+    let mut byte = 0u8;
+    b.addr = bp;
+    b.buffer = &raw mut byte as u32;
+    b.len = 1;
+    check("DBG_C_ReadMemBuf code", dbg(&mut b, DBG_C_READ_MEM_BUF) == 0 && byte == 0xcc);
+    // Memory: the child's copy of DEBUG_VAR.
+    let var = &raw mut DEBUG_VAR as u32;
+    let mut v = 0u32;
+    b.addr = var;
+    b.buffer = &raw mut v as u32;
+    b.len = 4;
+    check("DBG_C_ReadMemBuf data", dbg(&mut b, DBG_C_READ_MEM_BUF) == 0 && v == 0x1234);
+    v = 0x5600;
+    check("DBG_C_WriteMemBuf", dbg(&mut b, DBG_C_WRITE_MEM_BUF) == 0);
+    b.addr = var;
+    check("DBG_C_ReadMem (word)", dbg(&mut b, DBG_C_READ_MEM) == 0 && b.value == 0x5600);
+    // An alias of the page in this process.
+    b.addr = var;
+    b.len = 4;
+    let ok = dbg(&mut b, DBG_C_MAP_RO_ALIAS) == 0 && b.buffer != 0 && unsafe { *(b.buffer as *const u32) } == 0x5600;
+    check("DBG_C_MapROAlias", ok && dbg(&mut b, DBG_C_UNMAP_ALIAS) == 0);
+    // Registers: past the INT 3, EAX = 0x78.
+    b.tid = 1;
+    dbg(&mut b, DBG_C_READ_REG);
+    b.eip = bp + 1;
+    b.eax = 0x78;
+    check("DBG_C_WriteReg", dbg(&mut b, DBG_C_WRITE_REG) == 0);
+    let mut bad = b;
+    bad.segs[0].sel = 0x53;
+    check("DBG_C_WriteReg bad CS fails", dbg(&mut bad, DBG_C_WRITE_REG) == DBG_N_ERROR);
+    let mut fpu = [0u8; 108];
+    b.buffer = fpu.as_mut_ptr() as u32;
+    b.len = 108;
+    b.value = 1;
+    b.index = 0;
+    check("DBG_C_ReadCoRegs", dbg(&mut b, DBG_C_READ_CO_REGS) == 0 && fpu[0] & 0x3f == 0x3f);
+    let mut ts = [0u8; 4];
+    b.buffer = ts.as_mut_ptr() as u32;
+    b.len = 4;
+    check("DBG_C_ThrdStat", dbg(&mut b, DBG_C_THRD_STAT) == 0 && ts[0] == 0 && ts[1] == 0);
+    b.tid = 9;
+    check("DBG_C_ThrdStat no thread", dbg(&mut b, DBG_C_THRD_STAT) == DBG_N_ERROR);
+    // Selectors.
+    b.addr = var;
+    let ok = dbg(&mut b, DBG_C_LIN_TO_SEL) == 0 && b.index == var & 0xffff;
+    check("DBG_C_LinToSel/SelToLin", ok && dbg(&mut b, DBG_C_SEL_TO_LIN) == 0 && b.addr == var);
+    // Watchpoints: IBM's handles are 8 + the debug register.
+    let watch = |b: &mut UDb, addr: u32, len: u32, value: u32| {
+        b.addr = addr;
+        b.len = len;
+        b.value = value;
+        b.index = 0;
+        if dbg(b, DBG_C_SET_WATCH) == 0 { b.index } else { 0 }
+    };
+    let wvar = &raw mut WATCH_VAR as u32;
+    let kvar = &raw mut KERNEL_WATCH_VAR as u32;
+    let w1 = watch(&mut b, wvar, 4, DBG_W_LOCAL | DBG_W_WRITE);
+    let w2 = watch(&mut b, kvar, 4, DBG_W_LOCAL | DBG_W_WRITE);
+    let w3 = watch(&mut b, var, 2, DBG_W_LOCAL | DBG_W_READ_WRITE);
+    check("DBG_C_SetWatch", w1 == 8 && w2 == 9 && w3 == 10);
+    let bad = [watch(&mut b, var, 3, DBG_W_LOCAL | DBG_W_WRITE), watch(&mut b, var + 1, 2, DBG_W_LOCAL | DBG_W_WRITE)];
+    check("DBG_C_SetWatch bad length or alignment fails", bad == [0, 0] && b.cmd == DBG_N_ERROR);
+    b.index = w3;
+    check("DBG_C_ClearWatch", dbg(&mut b, DBG_C_CLEAR_WATCH) == 0 && dbg(&mut b, DBG_C_CLEAR_WATCH) == DBG_N_ERROR);
+    // One instruction (the first NOP).
+    b.tid = 1;
+    let n = dbg(&mut b, DBG_C_SSTEP);
+    check("single step", n == DBG_N_EXCEPTION && b.value == 0 && b.buffer == XCPT_SINGLE_STEP && b.addr == bp + 2);
+    check("single step registers", b.eip == bp + 2 && b.eax == 0x78 && b.eflags & 0x100 == 0);
+    b.value = XCPT_CONTINUE_EXECUTION;
+    let n = dbg(&mut b, DBG_C_CONTINUE);
+    let mut seen = 0u32;
+    b.addr = wvar;
+    b.buffer = &raw mut seen as u32;
+    b.len = 4;
+    let ok = n == DBG_N_WATCHPOINT && b.index == w1 && b.tid == 1 && dbg(&mut b, DBG_C_READ_MEM_BUF) == 0 && seen == 7;
+    check("DBG_N_Watchpoint after the program's write", ok);
+    let n = dbg(&mut b, DBG_C_GO);
+    b.addr = kvar;
+    b.len = 4;
+    let ok = n == DBG_N_WATCHPOINT && b.index == w2 && dbg(&mut b, DBG_C_READ_MEM_BUF) == 0 && seen == 260;
+    check("DBG_N_Watchpoint after the kernel's write", ok);
+    b.index = w1;
+    check("a watchpoint that fired is gone", dbg(&mut b, DBG_C_CLEAR_WATCH) == DBG_N_ERROR);
+    let mut guard = 0;
+    let mut n = dbg(&mut b, DBG_C_GO);
+    while n != DBG_N_PROC_TERM && n != DBG_N_ERROR && guard < 50 {
+        b.value = XCPT_CONTINUE_EXECUTION;
+        n = dbg(&mut b, DBG_C_CONTINUE);
+        guard += 1;
+    }
+    check("runs to the end: DBG_N_ProcTerm", n == DBG_N_PROC_TERM && b.value == 0x5678);
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let mut got = 0;
+    let rc = unsafe { DosWaitChild(0, 0, &mut res, &mut got, pid) };
+    check("traced child's result", rc == 0 && res.code_result == 0x5678);
+    b.pid = pid;
+    dbg(&mut b, DBG_C_TERM);
+    check("DosDebug after the end fails", dbg(&mut b, DBG_C_READ_REG) == DBG_N_ERROR);
+
+    // DBG_C_Term ends a debuggee.
+    let pid = start_traced();
+    let mut b = UDb { pid, value: 1, ..Default::default() };
+    let connected = dbg(&mut b, DBG_C_CONNECT) == 0;
+    check("DBG_C_Term", connected && dbg(&mut b, DBG_C_TERM) == 0);
+    let rc = unsafe { DosWaitChild(0, 0, &mut res, &mut got, pid) };
+    check("terminated child", rc == 0 && res.code_terminate == 3);
 }

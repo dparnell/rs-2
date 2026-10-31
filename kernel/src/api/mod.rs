@@ -10,6 +10,7 @@
 //!   return address, callee pops them; result in AX.
 
 pub mod audio;
+pub mod debug;
 pub mod doscalls;
 pub mod exceptions;
 pub mod file;

@@ -57,6 +57,8 @@ pub struct PerCpu {
     /// own root even while CR3 holds this CPU's thread-local memory
     /// copies), 0 for the kernel's.
     pub space_root: AtomicU64,
+    /// Debug registers hold a process's watchpoints (api/debug.rs).
+    pub dr7_loaded: AtomicBool,
     /// Only touched by this CPU with interrupts disabled.
     current: UnsafeCell<Option<Arc<Thread>>>,
     idle: UnsafeCell<Option<Arc<Thread>>>,
@@ -82,6 +84,7 @@ impl PerCpu {
             slice_end: AtomicU64::new(0),
             cur_class: AtomicU8::new(IDLE_CLASS),
             space_root: AtomicU64::new(0),
+            dr7_loaded: AtomicBool::new(false),
             current: UnsafeCell::new(None),
             idle: UnsafeCell::new(None),
             switched_from: UnsafeCell::new(None),

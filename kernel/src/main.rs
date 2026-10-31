@@ -111,6 +111,9 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     if let Some(n) = cmdline.split_whitespace().find_map(|w| w.strip_prefix("apitrace=")) {
         api::TRACE_NAME.set(n.to_ascii_uppercase());
     }
+    if cmdline.split_whitespace().any(|w| w == "dbgtrace") {
+        api::debug::TRACE.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
     smp::start_aps();
     msi::start();
     drivers::hotplug::start();
@@ -247,6 +250,7 @@ pub mod boot {
             handles: Vec::new(),
             detached,
             session: 1,
+            traced: false,
         });
         match r {
             Ok(p) => Some(p.pid),
