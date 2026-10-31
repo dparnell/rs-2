@@ -11,7 +11,7 @@ use crate::draw;
 use crate::lock::wndproc;
 use crate::msg::WinDefWindowProc;
 use crate::state::st;
-use crate::win::{WM_BUTTON1DOWN, WM_BUTTON1UP, WM_CHAR, WM_MOUSEMOVE, WM_PAINT, WM_SETFOCUS};
+use crate::win::{WM_BUTTON1DOWN, WM_BUTTON1UP, WM_CHAR, WM_MOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SIZE};
 
 const WM_CREATE: u32 = 0x0001;
 
@@ -143,11 +143,17 @@ fn replace(h: u32, t: &[u8]) -> bool {
     if !e.insert && a == b && !t.is_empty() {
         b = (a + t.len()).min(text.len());
     }
-    if text.len() - (b - a) + t.len() > e.limit {
-        ctl::notify(h, EN_OVERFLOW);
-        crate::misc::WinAlarm(1, 0);
-        return false;
+    let need = text.len() - (b - a) + t.len();
+    if need > e.limit {
+        // The owner may make room (raise the limit) and return TRUE:
+        // then the text goes in, as PM's entry field retries.
+        let handled = ctl::notify(h, EN_OVERFLOW) != 0;
+        if !handled || data(h).is_none_or(|e| need > e.limit) {
+            crate::misc::WinAlarm(1, 0);
+            return false;
+        }
     }
+    let Some(e) = data(h) else { return false };
     text.splice(a..b, t.iter().copied());
     (e.cursor, e.anchor, e.changed) = (a + t.len(), a + t.len(), true);
     if let Some(w) = st().desk.get_mut(h) {
@@ -395,6 +401,16 @@ pub extern "C" fn entry_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             let (a, b) = sel(e);
             mp(a as u32, b as u32)
         }),
+        WM_SIZE => {
+            // Sized (a combo box sizes its field after the text was set):
+            // the text from the start, as much as shows the cursor.
+            if let Some(e) = data(h) {
+                e.first = 0;
+            }
+            reveal(h);
+            ctl::invalidate(h);
+            0
+        }
         EM_SETSEL => {
             let len = ctl::text(h).len();
             if let Some(e) = data(h) {

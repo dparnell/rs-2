@@ -220,8 +220,11 @@ pub extern "C" fn WinLoadMenu(parent: u32, hmod: u32, id: u32) -> u32 {
 /// builds its menus so, with MM_INSERTITEM).
 #[unsafe(no_mangle)]
 pub extern "C" fn WinCreateMenu(parent: u32, pmt: *const u8) -> u32 {
+    // No template: an empty menu (IBM's makes the WC_MENU window with the
+    // template as its control data; VisualAge Smalltalk fills its menus
+    // with MM_INSERTITEM).
     let items = if pmt.is_null() {
-        Default::default()
+        Vec::new()
     } else {
         let cb = unsafe { (pmt as *const u16).read_unaligned() } as usize;
         res::parse_menu(unsafe { core::slice::from_raw_parts(pmt, cb) }).unwrap_or_default()
@@ -796,6 +799,16 @@ fn open_sub(h: u32, i: usize, first: bool) {
     }
     close_from(h);
     send(notify_target(root()), WM_INITMENU, id as u32, sub);
+    // A submenu made by WinCreateMenu (an action bar there, and a child
+    // of the window given: VisualAge Smalltalk makes its pull-downs with
+    // the menu bar as parent) drops down as a vertical menu on the
+    // desktop, where the position is reckoned.
+    if horizontal(sub) || ctl::parent(sub) != HWND_DESKTOP {
+        if let Some(w) = st().desk.get_mut(sub) {
+            w.style &= !(MS_ACTIONBAR | MS_TITLEBUTTON | ws::VISIBLE);
+        }
+        st().desk.set_parent(sub, HWND_DESKTOP);
+    }
     let r = rects(h).get(i).copied().unwrap_or_default();
     let sr = st().desk.screen_rect(h);
     let (w, hh) = popup_size(sub);

@@ -88,6 +88,7 @@ WinGetMaxPosition @5190
 WinGetMinPosition @5191
 WinGetMsg @5192
 WinGetNextWindow @5193
+WinGetPhysKeyState @5194
 WinGetPS @5195
 WinGetScreenPS @5196
 WinGetSysBitmap @5197

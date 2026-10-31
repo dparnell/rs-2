@@ -32,6 +32,12 @@ unsafe extern "C" {
     fn WinPopupMenu(parent: u32, owner: u32, menu: u32, x: i32, y: i32, id: u32, fs: u32) -> u32;
     #[link_name = "PMGPI.476"]
     fn GpiQueryPel(hps: u32, p: *const i32) -> i32;
+    #[link_name = "PMWIN.907"]
+    fn WinCreateMenu(parent: u32, pmt: *const u8) -> u32;
+    #[link_name = "PMWIN.834"]
+    fn WinQueryWindow(h: u32, cmd: i32) -> u32;
+    #[link_name = "PMWIN.775"]
+    fn WinIsWindowVisible(h: u32) -> u32;
 }
 
 const WM_CONTROL: u32 = 0x0030;
@@ -164,6 +170,34 @@ pub fn owner_checks(hab: u32, client: u32) {
         WinDestroyWindow(menu);
     }
     pump(hab);
+
+    // WinCreateMenu without a template: an empty menu to fill
+    // (VisualAge Smalltalk builds its menus so).
+    let m = unsafe { WinCreateMenu(client, null()) };
+    let n0 = unsafe { WinSendMsg(m, 0x0184, 0, 0) }; // MM_QUERYITEMCOUNT
+    let mut mi = [0u8; 16];
+    mi[0..2].copy_from_slice(&(-1i16).to_le_bytes());
+    mi[2..4].copy_from_slice(&1u16.to_le_bytes()); // MIS_TEXT
+    mi[6..8].copy_from_slice(&(ID_ITEM as u16).to_le_bytes());
+    unsafe { WinSendMsg(m, 0x0180, mi.as_ptr() as u32, b"~File\0".as_ptr() as u32) };
+    let n1 = unsafe { WinSendMsg(m, 0x0184, 0, 0) };
+    check("WinCreateMenu without a template", m != 0 && n0 == 0 && n1 == 1);
+    // A pull-down made with the menu as its parent (VisualAge Smalltalk)
+    // drops down on the desktop.
+    let sub = unsafe { WinCreateMenu(m, null()) };
+    unsafe { WinSendMsg(sub, 0x0180, mi.as_ptr() as u32, b"~Open\0".as_ptr() as u32) };
+    let mut si = [0u8; 16];
+    si[0..2].copy_from_slice(&0i16.to_le_bytes());
+    si[2..4].copy_from_slice(&(1u16 | 0x10).to_le_bytes()); // MIS_TEXT | MIS_SUBMENU
+    si[6..8].copy_from_slice(&(ID_ITEM as u16 + 1).to_le_bytes());
+    si[8..12].copy_from_slice(&sub.to_le_bytes());
+    unsafe { WinSendMsg(m, 0x0180, si.as_ptr() as u32, b"~Tools\0".as_ptr() as u32) };
+    unsafe { WinSendMsg(m, 0x0185, 1, 0) }; // MM_STARTMENUMODE, the submenu shown
+    let on_desktop = unsafe { WinQueryWindow(sub, 5) == 1 && WinIsWindowVisible(sub) != 0 };
+    unsafe { WinSendMsg(m, 0x0186, 1, 0) }; // MM_ENDMENUMODE
+    pump(hab);
+    check("a submenu made as a child of its menu drops down on the desktop", sub != 0 && on_desktop);
+    unsafe { WinDestroyWindow(m) };
 
     // A user button.
     s.buttons.clear();

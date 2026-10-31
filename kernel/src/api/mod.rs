@@ -374,9 +374,20 @@ pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBoo
 /// name starts with NAME.
 pub static TRACE_NAME: crate::sync::Once<alloc::string::String> = crate::sync::Once::new();
 
-/// True while `apitrace` is on.
+/// Whether `apitrace=NAME` names this process's program.
+fn traced(p: &Process) -> bool {
+    TRACE_NAME.get().is_some_and(|n| {
+        let name = &p.exe.name;
+        name[name.rfind('\\').map_or(0, |i| i + 1)..].to_ascii_uppercase().starts_with(n.as_str())
+    })
+}
+
+/// True while `apitrace` is on (for the current thread's program with
+/// `apitrace=NAME`).
 pub fn tracing() -> bool {
     TRACE.load(core::sync::atomic::Ordering::Relaxed)
+        || (TRACE_NAME.get().is_some()
+            && crate::task::sched::current().process().is_some_and(|p| traced(&p)))
 }
 
 static WARNED: SpinLock<Vec<(u32, u32)>> = SpinLock::new(Vec::new());
@@ -510,11 +521,7 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         pop32: if !is16 && module == 4 && ordinal == 6 { 4 } else { 0 },
         trace: false,
     };
-    let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed)
-        || TRACE_NAME.get().is_some_and(|n| {
-            let name = &process.exe.name;
-            name[name.rfind('\\').map_or(0, |i| i + 1)..].to_ascii_uppercase().starts_with(n.as_str())
-        });
+    let trace = TRACE.load(core::sync::atomic::Ordering::Relaxed) || traced(&process);
     ctx.trace = trace;
     if trace {
         let ret = ctx.read_u32(ctx.args_at - 4).unwrap_or(0);

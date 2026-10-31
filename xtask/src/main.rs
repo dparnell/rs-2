@@ -668,6 +668,26 @@ fn build_userland() -> Option<image::FileList> {
             return None;
         }
         files.push((lx, dest.to_string()));
+        // TESTDLL again, marked as having its internal fixups removed:
+        // the loader must still move it, its bases being taken by TESTDLL
+        // (APITEST; IBM DLLs such as VisualAge's EMNTV50 are built so).
+        if *bin == "testdll" {
+            let lx = out_dir.join("TESTDLLB.DLL");
+            let ok = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
+                .current_dir(root())
+                .args(["run", "-q", "--release", "-p", "elf2lx", "--"])
+                .arg(&elf)
+                .arg(&lx)
+                .args(["--dll", "--fixups-removed", "--name", "TESTDLLB", "--exports"])
+                .arg(ul.join(bin).join("exports.def"))
+                .status()
+                .ok()?
+                .success();
+            if !ok {
+                return None;
+            }
+            files.push((lx, "RS2\\TESTDLLB.DLL".to_string()));
+        }
     }
     // rs2's COMMAND.COM for DOS sessions: the stub of crates/dos.
     let command = out_dir.join("COMMAND.COM");

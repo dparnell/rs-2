@@ -49,6 +49,16 @@ pub fn default(i: i32) -> Rgb {
         SYSCLR_HELPHILITE => 0x008080,
         SYSCLR_HILITEBACKGROUND => 0x000080,
         SYSCLR_HILITEFOREGROUND => 0xffffff,
+        // The rest as Warp 4's default scheme (OS2\VGA.RC, PM_Colors).
+        -27 | -18 | -35 | -38 => 0x000000, // OUTPUTTEXT, MENUTEXT, ICONTEXT, BUTTONDEFAULT
+        -26 => 0x000080,                    // WINDOWSTATICTEXT
+        -46 => 0xa0a0a0,                    // MENUDISABLEDTEXT
+        -36 | -37 | -48 | -50 => 0x808080,  // SHADOW, TITLEBOTTOM, SHADOWTEXT, SHADOWHILITEBGND
+        -49 => 0xffff00,                    // SHADOWHILITEFGND
+        -16 | -43 | -47 => 0xffffff,        // TITLETEXT, PAGEBACKGROUND, ENTRYFIELD
+        -25 => 0xc0c0c0,                    // SCROLLBAR
+        -30 => default(SYSCLR_ACTIVETITLE), // ACTIVETITLETEXTBGND
+        -31 => default(SYSCLR_INACTIVETITLE),
         _ => 0xcccccc,
     }
 }

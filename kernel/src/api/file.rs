@@ -476,6 +476,9 @@ pub fn dos_open(c: &mut Ctx) -> u32 {
         Err(e) => return e,
     };
     let eas = OpenEas { eaop: c.arg(7), ..NO_EAS };
+    if super::tracing() {
+        crate::trace!("    open {name} flags {:x} mode {:x}", c.arg(5), c.arg(6));
+    }
     match open(c, &name, c.arg(3) as u64, c.arg(4), c.arg(5), c.arg(6), eas) {
         Ok((h, act)) => {
             c.write_u32(c.arg(1), h);

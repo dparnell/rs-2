@@ -152,18 +152,21 @@ fn object_in(objects: &[Object], addr: u32) -> Option<usize> {
 const OBJ_READ: u32 = 0x0001;
 const OBJ_WRITE: u32 = 0x0002;
 const OBJ_EXEC: u32 = 0x0004;
-const OBJ_SHARED: u32 = 0x0010;
+const OBJ_SHARED: u32 = 0x0020;
 const OBJ_BIG: u32 = 0x2000;
 const OBJ_ALIAS16: u32 = 0x1000;
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 2 {
-        eprintln!("usage: elf2lx INPUT OUTPUT [--dll] [--name NAME] [--stack BYTES] [--exports FILE] [--pm]");
+        eprintln!("usage: elf2lx INPUT OUTPUT [--dll] [--name NAME] [--stack BYTES] [--exports FILE] [--pm] [--fixups-removed]");
         return ExitCode::FAILURE;
     }
     let mut dll = false;
     let mut pm = false;
+    // Mark the module as having had its internal fixups removed (it keeps
+    // them: for testing loaders, as some IBM DLLs are).
+    let mut fixups_removed = false;
     let mut name = std::path::Path::new(&args[1]).file_stem().unwrap().to_string_lossy().to_ascii_uppercase();
     let mut stack = 0x10000u32;
     let mut exports_file = None;
@@ -172,6 +175,7 @@ fn main() -> ExitCode {
         match args[i].as_str() {
             "--dll" => dll = true,
             "--pm" => pm = true,
+            "--fixups-removed" => fixups_removed = true,
             "--name" => {
                 i += 1;
                 name = args[i].to_ascii_uppercase();
@@ -414,7 +418,12 @@ fn main() -> ExitCode {
     }
     exports.sort_by_key(|e| e.ord);
 
-    let lx = write_lx(&name, dll, pm, &elf, &objects, &fixups, &modules, &procs, &exports, esp_obj, esp);
+    let mut lx = write_lx(&name, dll, pm, &elf, &objects, &fixups, &modules, &procs, &exports, esp_obj, esp);
+    if fixups_removed {
+        // Module flags of the LX header (after the MZ stub).
+        let o = u32le(&lx, 0x3c) as usize;
+        lx[o + 0x10] |= 0x10;
+    }
     std::fs::write(&args[1], lx).expect("write output");
     ExitCode::SUCCESS
 }

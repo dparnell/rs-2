@@ -10,6 +10,12 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 static INITS: AtomicU32 = AtomicU32::new(0);
 
+/// Initialisations since the module was loaded in the system (shared by
+/// all processes; starts over when the DLL is loaded again after every
+/// process let go of it).
+#[unsafe(link_section = ".shared.inits")]
+static SHARED_INITS: AtomicU32 = AtomicU32::new(0);
+
 /// _DLL_InitTerm(hmod, flag): flag 0 = init, 1 = term. Returns 1 for
 /// success.
 #[unsafe(no_mangle)]
@@ -17,6 +23,7 @@ static INITS: AtomicU32 = AtomicU32::new(0);
 pub extern "C" fn _start(_hmod: u32, flag: u32) -> u32 {
     if flag == 0 {
         INITS.fetch_add(1, Ordering::Relaxed);
+        SHARED_INITS.fetch_add(1, Ordering::Relaxed);
     } else {
         // Termination: visible in the output so tests can check it ran.
         let msg = b"TESTDLL terminated\r\n";
@@ -34,6 +41,11 @@ pub extern "C" fn TestAdd(a: u32, b: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn TestInitCount() -> u32 {
     INITS.load(Ordering::Relaxed)
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn TestSharedInits() -> u32 {
+    SHARED_INITS.load(Ordering::Relaxed)
 }
 
 #[unsafe(no_mangle)]

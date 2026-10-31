@@ -3,3 +3,4 @@ TestAdd @1
 TestInitCount @2
 TestGreeting @3
 VIOREPLACE @4
+TestSharedInits @5

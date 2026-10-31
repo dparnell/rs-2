@@ -93,7 +93,9 @@ fn layout(h: u32) {
     let bw = button_w(h);
     let Some(d) = data(h) else { return };
     let (e, l) = (d.entry, d.list);
-    st().desk.set_pos(e, 3, cy - eh + 3, (cx - bw - 6).max(0), eh - 6);
+    let ew = (cx - bw - 6).max(0);
+    st().desk.set_pos(e, 3, cy - eh + 3, ew, eh - 6);
+    send(e, WM_SIZE, 0, mp(ew as u32, (eh - 6).max(0) as u32));
     let lh = (cy - eh).max(0);
     st().desk.set_pos(l, 0, 0, cx, lh);
     win::show(l, simple(h) || data(h).is_some_and(|d| d.showing));

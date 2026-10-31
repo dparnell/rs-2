@@ -21,6 +21,25 @@ pub struct Shell {
     pub locals: Vec<(Vec<(String, String)>, String)>,
 }
 
+/// BEGINLIBPATH, ENDLIBPATH, LIBPATHSTRICT: DosSetExtLIBPATH's flag.
+pub fn ext_libpath(name: &str) -> Option<u32> {
+    match name {
+        "BEGINLIBPATH" => Some(1),
+        "ENDLIBPATH" => Some(2),
+        "LIBPATHSTRICT" => Some(3),
+        _ => None,
+    }
+}
+
+pub fn query_ext_libpath(flag: u32) -> String {
+    let mut b = [0u8; 1024];
+    if unsafe { os2::DosQueryExtLIBPATH(b.as_mut_ptr(), flag) } != 0 {
+        return String::new();
+    }
+    let n = b.iter().position(|&c| c == 0).unwrap_or(b.len());
+    b[..n].iter().map(|&c| c as char).collect()
+}
+
 impl Shell {
     pub fn get(&self, name: &str) -> Option<&str> {
         self.env.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
@@ -28,6 +47,13 @@ impl Shell {
 
     pub fn set(&mut self, name: &str, value: &str) {
         let name = name.to_ascii_uppercase();
+        // The process's extended LIBPATH, not variables: the programs it
+        // starts inherit them.
+        if let Some(flag) = ext_libpath(&name) {
+            let v = alloc::format!("{value}\0");
+            unsafe { os2::DosSetExtLIBPATH(os2::text_bytes(&v).as_ptr(), flag) };
+            return;
+        }
         self.env.retain(|(k, _)| *k != name);
         if !value.is_empty() {
             self.env.push((name, value.to_string()));
@@ -75,7 +101,9 @@ impl Shell {
             if let Some(end) = line[i + 1..].find('%') {
                 let name = &line[i + 1..i + 1 + end];
                 if !name.is_empty() && !name.contains(' ') {
-                    if let Some(v) = self.get(name) {
+                    if let Some(flag) = ext_libpath(&name.to_ascii_uppercase()) {
+                        out.push_str(&query_ext_libpath(flag));
+                    } else if let Some(v) = self.get(name) {
                         out.push_str(v);
                     }
                     i += end + 2;
@@ -174,6 +202,11 @@ pub fn run(s: &os2::Startup) -> u32 {
     let up = args.to_ascii_uppercase();
     if let Some(rest) = up.strip_prefix("/C").map(|_| &args[2..]) {
         sh.run_line(rest.trim());
+        // A batch file named there runs to its end.
+        while sh.exit.is_none() {
+            let Some(line) = crate::batch::next_line(&mut sh) else { break };
+            sh.run_line(&line);
+        }
         return sh.exit.unwrap_or(sh.rc);
     }
     let mut first = None;

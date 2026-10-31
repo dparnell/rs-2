@@ -112,8 +112,16 @@ fn insert(s: &mut State, e: PsEntry) -> u32 {
 /// Create a cached presentation space for a window, clipped to `clip`
 /// (device rectangles).
 pub fn create(s: &mut State, hwnd: u32, origin: Point, clip: Vec<Rect>) -> u32 {
+    let mut ps = new_ps(origin, clip);
+    // The window's font (PP_FONTNAMESIZE, its own or an owner's) is the
+    // PS's font, as IBM's cache entries select it (GetCe).
+    if hwnd != 0 {
+        if let Some(f) = crate::pp::font_name(hwnd).and_then(|n| crate::fonts::by_name(&n)) {
+            ps.font = f;
+        }
+    }
     let e = PsEntry {
-        ps: new_ps(origin, clip),
+        ps,
         hwnd,
         color_index: gpi::color::CLR_NEUTRAL,
         back_index: gpi::color::CLR_BACKGROUND,
@@ -405,8 +413,9 @@ pub extern "C" fn GpiAssociate(hps: u32, hdc: u32) -> u32 {
 /// GpiQueryDevice(hps): the associated device context.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiQueryDevice(hps: u32) -> u32 {
-    // A window's cached PS (WinGetPS, WinBeginPaint) is on the screen.
-    query(hps, |e| if e.gpi.hdc == 0 && e.hwnd != 0 { crate::gpiobj::SCREEN_DC } else { e.gpi.hdc }, 0)
+    // A cached PS (WinGetPS, WinBeginPaint, WinGetScreenPS) is on the
+    // screen.
+    query(hps, |e| if e.gpi.hdc == 0 && (e.hwnd != 0 || e.gpi.cached) { crate::gpiobj::SCREEN_DC } else { e.gpi.hdc }, 0)
 }
 
 /// GpiResetPS(hps, flOptions): GRES_ATTRS 1, GRES_SEGMENTS 2, GRES_ALL 4.

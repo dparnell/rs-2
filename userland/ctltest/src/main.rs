@@ -64,6 +64,10 @@ unsafe extern "C" {
     fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32;
     #[link_name = "PMWIN.877"]
     fn WinSetWindowText(h: u32, t: *const u8) -> u32;
+    #[link_name = "PMWIN.875"]
+    fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32;
+    #[link_name = "PMWIN.899"]
+    fn WinWindowFromID(h: u32, id: u32) -> u32;
     #[link_name = "PMWIN.918"]
     fn WinPeekMsg(hab: u32, q: *mut QMsg, h: u32, a: u32, b: u32, fl: u32) -> u32;
     #[link_name = "PMWIN.912"]
@@ -136,6 +140,12 @@ fn noted(id: u32, code: u32) -> bool {
 extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     if msg == 0x0030 {
         notes().push(mp1);
+        // Entry field 113 overflowing: make room (EM_SETTEXTLIMIT) and
+        // say so, as VisualAge Smalltalk's text widgets do.
+        if mp1 == mp(113, 0x0020) {
+            send(mp2, 0x0143, 64, 0);
+            return 1;
+        }
         return 0;
     }
     unsafe { WinDefWindowProc(h, msg, mp1, mp2) }
@@ -295,6 +305,14 @@ fn entry_combo_checks(hab: u32, client: u32) {
     send(e, 0x0147, 0, 0); // EM_PASTE
     check("EM_PASTE", text(e) == b"entry textentry");
     unsafe { WinDestroyWindow(e) };
+    // At the text limit (32 without ENTRYFDATA) EN_OVERFLOW goes to the
+    // owner; when it makes room the character goes in.
+    let e = create(client, 6, b"0123456789012345678901234567890", 0, (0, 0, 300, 20), 113, null());
+    send(e, 0x0142, mp(31, 31), 0); // EM_SETSEL at the end
+    send(e, 0x007a, 0x0001 | 1 << 16 | 0x20 << 24, b'd' as u32); // WM_CHAR 'd'
+    send(e, 0x007a, 0x0001 | 1 << 16 | 0x20 << 24, b'd' as u32);
+    check("EN_OVERFLOW handled by the owner: the character goes in", noted(113, 0x20) && text(e) == b"0123456789012345678901234567890dd");
+    unsafe { WinDestroyWindow(e) };
     // CBS_DROPDOWN.
     let c = create(client, 2, b"", 0x0002, (0, 0, 150, 120), 111, null());
     for t in [&b"Red\0"[..], b"Green\0", b"Blue\0"] {
@@ -309,6 +327,16 @@ fn entry_combo_checks(hab: u32, client: u32) {
     send(c, 0x0170, 1, 0); // CBM_SHOWLIST
     check("CBM_SHOWLIST (CBN_SHOWLIST)", send(c, 0x0172, 0, 0) == 1 && noted(111, 6));
     send(c, 0x0170, 0, 0);
+    unsafe { WinDestroyWindow(c) };
+    // CBS_DROPDOWNLIST made with no size and sized after an item was
+    // selected (VisualAge Smalltalk): the field shows its text from the
+    // start.
+    let c = create(client, 2, b"", 0x0004, (0, 0, 0, 0), 112, null());
+    send(c, 0x0161, 0xffff_ffff, b"English\0".as_ptr() as u32);
+    send(c, 0x0164, 0, 1);
+    unsafe { WinSetWindowPos(c, 0, 10, 10, 150, 120, 3) }; // SWP_SIZE | SWP_MOVE
+    let e = unsafe { WinWindowFromID(c, 0x029b) };
+    check("combo sized after its selection shows the text from the start", e != 0 && text(c) == b"English" && send(e, 0x0148, 0, 0) == 0); // EM_QUERYFIRSTCHAR
     unsafe { WinDestroyWindow(c) };
 }
 

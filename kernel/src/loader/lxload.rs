@@ -38,7 +38,8 @@ pub fn load(
     // Choose an address for each object.
     // Flag 0x10 says the internal fixups were applied for the preferred
     // bases; a module that still carries their records can go elsewhere
-    // (Open Watcom's DLLs: bases 0x10000.. and every record kept).
+    // (Open Watcom's DLLs: bases 0x10000.. and every record kept;
+    // VisualAge Smalltalk's EMNTV50.DLL).
     let fixups_stripped = h.module_flags & mflags::INTERNAL_FIXUPS_REMOVED != 0
         && !lxobjs.iter().any(|o| {
             (0..o.page_count).any(|i| {
@@ -81,6 +82,9 @@ pub fn load(
             }
         };
         bases.push((base, size));
+    }
+    if crate::api::tracing() {
+        crate::trace!("    {path}: objects at {:x?}", bases);
     }
 
     // Decode pages into per-object images.
@@ -259,6 +263,12 @@ pub fn load(
                     sm.pages.lock()[p] = PageState::Committed;
                 }
                 obj.shared = Some(sm);
+                // Writable shared data: its loaded contents, to start over
+                // from when the module is loaded again after it was let go
+                // everywhere (loader::load_global).
+                if o.flags & oflags::WRITE != 0 {
+                    obj.pristine = Some(img);
+                }
             } else {
                 obj.pristine = Some(img);
             }

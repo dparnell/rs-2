@@ -102,7 +102,8 @@ pub struct Object {
     pub limit: Option<u32>,
     /// Shared backing (DLL shared objects).
     pub shared: Option<Arc<SharedMem>>,
-    /// Fixed-up initial contents for per-process instance data.
+    /// Fixed-up initial contents for per-process instance data (and for
+    /// writable shared data, see `load_global`).
     pub pristine: Option<Vec<u8>>,
 }
 
@@ -313,14 +314,26 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     let mname = module_name(name);
     let found = REGISTRY.lock().modules.iter().find(|m| m.is_dll && m.name.eq_ignore_ascii_case(&mname)).cloned();
     if let Some(m) = found {
-        if !rewritten(&m) {
+        if rewritten(&m) {
+            // A 16-bit DLL whose file was written since it was loaded (Delphi
+            // rebuilds its component library COMPLIB.DCL, frees it and loads
+            // it again): the new file, under a new handle. Programs using the
+            // old one keep it.
+            REGISTRY.lock().modules.retain(|x| !Arc::ptr_eq(x, &m));
+        } else {
+            // OS/2 discards a DLL no process uses any more and reads it again
+            // on the next load. rs2 keeps it: its shared data starts over and
+            // a global init runs again (the C runtime of VisualAge Smalltalk's
+            // ABTBMP50.DLL keeps its state there and freed it at termination).
+            let used = in_use(&m);
+            if crate::api::tracing() {
+                crate::trace!("    {} found, in use {used}", m.name);
+            }
+            if !used {
+                reset(&m);
+            }
             return Ok(m);
         }
-        // A 16-bit DLL whose file was written since it was loaded (Delphi
-        // rebuilds its component library COMPLIB.DCL, frees it and loads
-        // it again): the new file, under a new handle. Programs using the
-        // old one keep it.
-        REGISTRY.lock().modules.retain(|x| !Arc::ptr_eq(x, &m));
     }
     let (path, data) = crate::fs::find_module(name).ok_or_else(|| {
         crate::trace!("loader: module {name} not found");
@@ -339,6 +352,39 @@ fn rewritten(m: &Module) -> bool {
     }
     let Some(img) = &m.image else { return false };
     crate::fs::read_file(&m.path).is_some_and(|d| d[..] != img[..])
+}
+
+/// Whether a live process uses `m`: its program, a DLL it loaded, or
+/// what they import.
+fn in_use(m: &Arc<Module>) -> bool {
+    fn uses(x: &Arc<Module>, m: &Arc<Module>, seen: &mut Vec<u16>) -> bool {
+        if Arc::ptr_eq(x, m) {
+            return true;
+        }
+        if seen.contains(&x.hmte) {
+            return false;
+        }
+        seen.push(x.hmte);
+        x.imports.iter().any(|i| uses(i, m, seen))
+    }
+    crate::task::process::all().iter().any(|p| {
+        let mut seen = Vec::new();
+        uses(&p.exe, m, &mut seen) || p.loaded.lock().iter().any(|(x, _)| uses(x, m, &mut seen))
+    })
+}
+
+/// A DLL's writable shared data back to how it was loaded, its global
+/// initialisation not done.
+fn reset(m: &Module) {
+    for o in &m.objects {
+        let (Some(sh), Some(img)) = (&o.shared, &o.pristine) else { continue };
+        for (i, page) in img.chunks(crate::vm::PAGE as usize).enumerate() {
+            if let Some(fr) = sh.frame(i) {
+                unsafe { core::ptr::copy_nonoverlapping(page.as_ptr(), crate::mm::phys::phys_to_virt(fr), page.len()) };
+            }
+        }
+    }
+    m.global_init_done.store(false, core::sync::atomic::Ordering::Relaxed);
 }
 
 /// Load (or find) a DLL and attach it to the address space `space`

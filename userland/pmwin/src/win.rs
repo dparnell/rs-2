@@ -1266,22 +1266,6 @@ pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
     1
 }
 
-/// WinGetClipPS(hwnd, hwndClip, fl): WinGetPS with the clipping chosen by
-/// PSF_CLIPCHILDREN (0x10); the other PSF_* flags and hwndClip are taken
-/// as WinGetPS does (siblings above clip).
-#[unsafe(no_mangle)]
-pub extern "C" fn WinGetClipPS(h: u32, _clip: u32, fl: u32) -> u32 {
-    let s = st();
-    if s.desk.get(h).is_none() {
-        return 0;
-    }
-    let vis = s.desk.visible_region(h, fl & 0x10 != 0);
-    let o = s.desk.origin(h);
-    let hps = gpiapi::create(s, h, o, vis.rects);
-    gpiapi::track_window(st(), hps, None);
-    hps
-}
-
 /// WinSetSysModalWindow(hwndDesktop, hwnd): recorded for
 /// WinQuerySysModalWindow (input is not limited to it).
 #[unsafe(no_mangle)]
@@ -1307,6 +1291,28 @@ pub extern "C" fn WinGetPS(h: u32) -> u32 {
     let Some(w) = s.desk.get(h) else { return 0 };
     let clip_children = w.style & ws::CLIPCHILDREN != 0;
     let vis = s.desk.visible_region(h, clip_children);
+    let o = s.desk.origin(h);
+    let hps = gpiapi::create(s, h, o, vis.rects);
+    gpiapi::track_window(st(), hps, None);
+    crate::hooks::window_dc(hps, h, true);
+    hps
+}
+
+/// WinGetClipPS(hwnd, hwndClip, fl): a cached PS clipped as `fl` asks:
+/// PSF_CLIPCHILDREN (0x10) leaves out the children, PSF_PARENTCLIP (0x20)
+/// gives the parent's visible area. Siblings above are left out as for
+/// WinGetPS (PSF_CLIPSIBLINGS); hwndClip with PSF_CLIPUPWARDS/DOWNWARDS
+/// is taken as that.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetClipPS(h: u32, _clip: u32, fl: u32) -> u32 {
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return 0 };
+    let parent = w.parent;
+    let vis = if fl & 0x20 != 0 && s.desk.exists(parent) {
+        s.desk.visible_region(parent, fl & 0x10 != 0)
+    } else {
+        s.desk.visible_region(h, fl & 0x10 != 0)
+    };
     let o = s.desk.origin(h);
     let hps = gpiapi::create(s, h, o, vis.rects);
     gpiapi::track_window(st(), hps, None);

@@ -54,6 +54,8 @@ for f in sorted(glob.glob(f'{dll_dir}/src/*.rs')):
 # crate::lock::enter before the function and crate::lock::leave after it.
 locked = os.path.exists(f'{dll_dir}/src/lock.rs')
 if locked:
+    # A lock that logs what exports return (PMTRACE) has leave_export(eax).
+    leave_fn = 'leave_export' if 'fn leave_export' in open(f'{dll_dir}/src/lock.rs').read() else 'leave'
     # ecx = the export's index (crate::exports::NAMES) for PMTRACE.
     body = ['                "push ebp", "mov ebp, esp", "and esp, -16",',
             '                "mov ecx, {idx}", "call {enter}",',
@@ -67,7 +69,7 @@ if locked:
             '                "mov eax, [esp]", "mov edx, [esp + 4]",',
             '                "mov esp, ebp", "pop ebp", "ret",',
             '                pad = const ($copy * 4 + 15) / 16 * 16, n = const $copy, f = sym $target,',
-            '                idx = const $idx, enter = sym crate::lock::enter, leave = sym crate::lock::leave,']
+            '                idx = const $idx, enter = sym crate::lock::enter, leave = sym crate::lock::' + leave_fn + ',']
 else:
     body = ['                "push ebp", "mov ebp, esp", "and esp, -16",',
             '                "sub esp, {pad}",',

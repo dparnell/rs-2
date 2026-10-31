@@ -20,11 +20,25 @@ unsafe extern "C" {
     fn WinUpdateWindow(h: u32) -> u32;
     #[link_name = "PMGPI.476"]
     fn GpiQueryPel(hps: u32, p: *const i32) -> i32;
+    #[link_name = "PMWIN.826"]
+    fn WinQuerySysColor(desk: u32, clr: i32, reserved: i32) -> u32;
+    #[link_name = "PMGPI.453"]
+    fn GpiQueryFontMetrics(hps: u32, cb: i32, fm: *mut u8) -> u32;
+}
+
+/// FONTMETRICS of a window's cached PS: lEmHeight and the whole.
+fn ps_font(h: u32) -> (i32, [u8; 208]) {
+    let mut fm = [0u8; 208];
+    let hps = unsafe { WinGetPS(h) };
+    unsafe { GpiQueryFontMetrics(hps, fm.len() as i32, fm.as_mut_ptr()) };
+    unsafe { WinReleasePS(hps) };
+    (i32::from_le_bytes([fm[68], fm[69], fm[70], fm[71]]), fm)
 }
 
 const PP_FOREGROUNDCOLOR: u32 = 1;
 const PP_FOREGROUNDCOLORINDEX: u32 = 2;
 const PP_BACKGROUNDCOLOR: u32 = 3;
+const PP_FONTNAMESIZE: u32 = 15;
 const PP_USER: u32 = 0x8000;
 const QPF_NOINHERIT: u32 = 1;
 const QPF_ID2COLORINDEX: u32 = 4;
@@ -63,12 +77,28 @@ fn pel(h: u32, x: i32, y: i32) -> i32 {
 }
 
 pub fn pres_checks(client: u32) {
+    // Every system colour has Warp 4's default: VisualAge Smalltalk draws
+    // its labels in SYSCLR_WINDOWSTATICTEXT on SYSCLR_DIALOGBACKGROUND.
+    let c = |i: i32| unsafe { WinQuerySysColor(1, i, 0) };
+    check(
+        "WinQuerySysColor: Warp 4's text colours",
+        c(-26) == 0x000080 && c(-27) == 0 && c(-18) == 0 && c(-46) == 0xa0a0a0 && c(-34) == 0xcccccc,
+    );
+
     // An application's own id.
     changed().clear();
     let ok = unsafe { WinSetPresParam(client, PP_USER + 1, 5, b"hello".as_ptr()) } != 0;
     let (n, id, b) = query(client, PP_USER + 1, 0, 0);
     check("WinSetPresParam/WinQueryPresParam: an application's id", ok && n == 5 && id == PP_USER + 1 && b == b"hello");
     check("WM_PRESPARAMCHANGED to the window", changed().contains(&(client, PP_USER + 1)));
+
+    // A window's cached PS has its font parameter's font (VisualAge
+    // Smalltalk draws its labels with WinDrawText in it).
+    let plain = ps_font(client);
+    unsafe { WinSetPresParam(client, PP_FONTNAMESIZE, 11, b"18.Courier\0".as_ptr()) };
+    let (em, fm) = ps_font(client);
+    unsafe { WinRemovePresParam(client, PP_FONTNAMESIZE) };
+    check("WinGetPS: the window's PP_FONTNAMESIZE font", em >= 20 && fm != plain.1 && ps_font(client).1 == plain.1);
 
     // Owned windows take it, unless they have it themselves.
     let kid = unsafe { WinCreateWindow(client, b"PmxTest\0".as_ptr(), null(), 0x8000_0000, 300, 200, 40, 40, client, 3, 70, null(), null()) };

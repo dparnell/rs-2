@@ -66,6 +66,8 @@ unsafe extern "C" {
     fn WinCreateShadow(h: u32, dest: u32, flags: u32) -> u32;
     #[link_name = "PMWP.263"]
     fn WinQueryObjectPath(h: u32, buf: *mut u8, cb: u32) -> u32;
+    #[link_name = "PMWP.262"]
+    fn WinQueryActiveDesktopPathname(buf: *mut u8, cb: u32) -> u32;
     #[link_name = "PMWP.200"]
     fn WinRegisterObjectClass(class: *const u8, module: *const u8) -> u32;
     #[link_name = "PMWP.201"]
@@ -226,6 +228,9 @@ fn make() {
     let desk = query(b"<WP_DESKTOP>");
     check("desktop handle", desk >> 16 == 3);
     check("desktop path", path(desk) == b"C:\\DESKTOP");
+    let mut b = [0u8; 260];
+    let ok = unsafe { WinQueryActiveDesktopPathname(b.as_mut_ptr(), b.len() as u32) } != 0;
+    check("WinQueryActiveDesktopPathname", ok && cstr(b.as_ptr()) == b"C:\\DESKTOP");
     let f = create(b"WPFolder", b"Test Folder", b"OBJECTID=<RS2_TESTFLDR>", b"<WP_DESKTOP>");
     check("folder made", f >> 16 == 3);
     let fp = path(f);

@@ -393,6 +393,8 @@ pub fn key(ev: &Input) {
     }
     let s = st();
     note_shift(s, shift);
+    let k = &mut s.phys[scan as usize];
+    *k = if up { *k & 0x01 } else { 0x81 };
     if vkey != 0 {
         set_key(s, vkey as usize, !up);
     }
@@ -485,6 +487,17 @@ pub fn event(ev: &Input) {
 pub extern "C" fn WinGetKeyState(_desk: u32, vk: i32) -> i32 {
     let Some(&k) = st().keys.get(vk as usize) else { return 0 };
     (if k & 0x80 != 0 { 0xffff_8000u32 as i32 } else { 0 }) | (k & 1) as i32
+}
+
+/// WinGetPhysKeyState(hwndDesktop, scan): the key with that scan code as
+/// the keyboard has it now: 0x8000 (sign-extended) while it is down, | 1
+/// when it was pressed since the last call asked about it.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetPhysKeyState(_desk: u32, scan: i32) -> i32 {
+    let Some(k) = st().phys.get_mut(scan as usize) else { return 0 };
+    let r = (if *k & 0x80 != 0 { 0xffff_8000u32 as i32 } else { 0 }) | (*k & 1) as i32;
+    *k &= 0x80;
+    r
 }
 
 /// WinSetKeyboardStateTable(hwndDesktop, pKeyStateTable, fSet): the 256

@@ -92,6 +92,7 @@ forward! {
     WinGetMinPosition = "PMWIN.755";
     WinGetMsg = "PMWIN.915";
     WinGetNextWindow = "PMWIN.756";
+    WinGetPhysKeyState = "PMWIN.758";
     WinGetPS = "PMWIN.757";
     WinGetScreenPS = "PMWIN.759";
     WinGetSysBitmap = "PMWIN.760";
