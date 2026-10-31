@@ -161,7 +161,10 @@ fn apply(info: DisplayInfo) {
     let shadowed = s.surface.pixels() as usize != s.screen;
     s.screen = info.address as usize;
     let mut surface = unsafe { Surface::new(info.address as *mut u32, w, h, info.stride as i32, info.flags & 1 != 0) };
-    unsafe { surface.set_damage(&mut s.damage) };
+    unsafe {
+        surface.set_damage(&mut s.damage);
+        surface.set_palette(s.surface.palette());
+    }
     s.shadow = alloc::vec::Vec::new();
     s.surface = surface;
     s.damage.clear();

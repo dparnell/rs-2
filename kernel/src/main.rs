@@ -173,6 +173,9 @@ pub mod boot {
     }
 
     pub fn start(cmdline: &str) {
+        if let Some(n) = bootinfo::video_colors(cmdline) {
+            crate::display::set_colors256(n == 256);
+        }
         let cfg = crate::config::load().unwrap_or_default();
         crate::config::apply_nls(&cfg);
         crate::config::apply_sched(&cfg);

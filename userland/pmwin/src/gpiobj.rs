@@ -773,10 +773,26 @@ pub extern "C" fn WinQueryWindowDC(h: u32) -> u32 {
     o.dcs.iter().position(|d| matches!(d, Some(DcKind::Window(w)) if *w == h)).map_or(0, dc_handle)
 }
 
-/// Device capabilities (CAPS_*) of the display.
+/// A 256-colour display's hardware palette (`VIDEO=WxHx256`); None on a
+/// true-colour one.
+pub fn palette8() -> Option<&'static mut gpi::palette::Physical> {
+    st().palette8.as_deref_mut()
+}
+
+/// Device capabilities (CAPS_*) of the display. At 8 bits per pel they
+/// are what IBM's GRADD engine (GRE2VMAN FillInCapsTable) reports: 256
+/// colours, realizable colour tables and the palette manager.
 fn caps(i: i32) -> i32 {
     let s = st();
     let (w, h) = (s.surface.width, s.surface.height);
+    if s.palette8.is_some() {
+        match i {
+            14 | 33 => return 256,             // COLORS, PHYS_COLORS
+            16 => return 8,                    // COLOR_BITCOUNT
+            17 => return 1 | 4 | 8,            // COLOR_TABLE_SUPPORT: RGB_8, TRUE_MIX, REALIZE
+            _ => {}
+        }
+    }
     match i {
         1 => 4,                                // IO_CAPS: supports I/O
         2 => 2,                                // TECHNOLOGY: raster display
@@ -1077,11 +1093,12 @@ pub extern "C" fn GpiQueryBitmapBits(hps: u32, start: i32, scans: i32, buf: *mut
 }
 
 /// GpiQueryDeviceBitmapFormats(hps, lCount, alArray): (planes, bitcount)
-/// pairs, preferred first.
+/// pairs, the device's own format first, then as IBM's PMMERGE lists the
+/// others for it (QueryDeviceBitmaps32).
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiQueryDeviceBitmapFormats(_hps: u32, n: i32, out: *mut i32) -> u32 {
-    let f = [1, 24, 1, 1, 1, 4, 1, 8];
-    if out.is_null() {
+    let f = if palette8().is_some() { [1, 8, 1, 24, 1, 4, 1, 1] } else { [1, 24, 1, 8, 1, 4, 1, 1] };
+    if out.is_null() || n < 2 {
         return 0;
     }
     for (i, v) in f.iter().take(n.max(0) as usize).enumerate() {
@@ -1404,15 +1421,56 @@ pub extern "C" fn GpiQueryColorIndex(hps: u32, _opts: u32, rgb: i32) -> i32 {
     entry(st(), hps).map_or(-1, |e| e.ps.colors.index_of(rgb as u32))
 }
 
-/// True colour: every RGB value is available as is.
+/// On a true-colour display every RGB value is available as is; at 256
+/// colours, the nearest colour of the hardware palette (LCOLOPT_REALIZED
+/// 2: of the PS's palette).
 #[unsafe(no_mangle)]
-pub extern "C" fn GpiQueryNearestColor(hps: u32, _opts: u32, rgb: i32) -> i32 {
-    entry(st(), hps).map_or(-1, |_| rgb & 0xff_ffff)
+pub extern "C" fn GpiQueryNearestColor(hps: u32, opts: u32, rgb: i32) -> i32 {
+    let Some(e) = entry(st(), hps) else { return -1 };
+    if opts & !2 != 0 || rgb as u32 >> 24 != 0 {
+        return -1;
+    }
+    if printer(e.gpi.hdc).is_some() {
+        return rgb;
+    }
+    let pal = e.ps.colors.palette.clone();
+    match palette8() {
+        Some(p) => match pal.filter(|_| opts & 2 != 0) {
+            Some(t) => t.get(gpi::color::nearest(&t, rgb as u32)).copied().unwrap_or(0) as i32,
+            None => p.map(rgb as u32) as i32,
+        },
+        None => rgb,
+    }
 }
 
+/// GpiQueryRealColors(hps, flOptions, lStart, lCount, alColors): the
+/// colours the device can show. At 256 colours IBM's GRE lists the
+/// hardware palette by physical index (LCOLOPT_INDEX 2: each preceded
+/// by the logical index nearest to it).
 #[unsafe(no_mangle)]
-pub extern "C" fn GpiQueryRealColors(hps: u32, _opts: u32, start: i32, n: i32, out: *mut i32) -> i32 {
+pub extern "C" fn GpiQueryRealColors(hps: u32, opts: u32, start: i32, n: i32, out: *mut i32) -> i32 {
     let Some(e) = entry(st(), hps) else { return -1 };
+    if n > 0 && out.is_null() {
+        return 0;
+    }
+    if let Some(p) = palette8().filter(|_| printer(e.gpi.hdc).is_none()) {
+        if !(0..256).contains(&start) || opts & !3 != 0 {
+            return -1;
+        }
+        let mut k = 0usize;
+        let mut i = start as usize;
+        while i < 256 && k + if opts & 2 != 0 { 2 } else { 1 } <= n.max(0) as usize {
+            let c = p.rgb[i];
+            if opts & 2 != 0 {
+                write(unsafe { out.add(k) }, e.ps.colors.index_of(c));
+                k += 1;
+            }
+            write(unsafe { out.add(k) }, c as i32);
+            k += 1;
+            i += 1;
+        }
+        return k as i32;
+    }
     let t = e.ps.colors.table().to_vec();
     let mut k = 0;
     for c in t.iter().skip(start.max(0) as usize).take(n.max(0) as usize) {
@@ -1441,7 +1499,30 @@ pub extern "C" fn GpiCreatePalette(_hab: u32, _opts: u32, fmt: u32, n: u32, t: *
 
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiDeletePalette(h: u32) -> u32 {
-    remove(&mut objects().palettes, h, HPAL_BASE).is_some() as u32
+    let ok = remove(&mut objects().palettes, h, HPAL_BASE).is_some();
+    if ok && st().realized == (crate::shared::pid(), h) {
+        unrealize();
+    }
+    ok as u32
+}
+
+/// The realized palette is gone (deleted, its process ended): the
+/// default palette gets all of the hardware palette again, and windows
+/// are told (WM_REALIZEPALETTE).
+pub fn unrealize() {
+    let s = st();
+    s.realized = (0, 0);
+    if let Some(p) = palette8() {
+        if p.restore() != 0 {
+            realize_broadcast(0);
+        }
+    }
+}
+
+/// Post WM_REALIZEPALETTE (mp1: the frame that realized) to every queue,
+/// as IBM's WinRealizePalette does (WinBroadcastMsg BMSG_POSTQUEUE).
+fn realize_broadcast(frame: u32) {
+    crate::msg::WinBroadcastMsg(pmwin::HWND_DESKTOP, 0x0209, frame, 0, 2);
 }
 
 fn rgbs(p: &[u32]) -> Vec<u32> {
@@ -1566,12 +1647,32 @@ pub extern "C" fn GpiQueryPaletteInfo(h: u32, _hps: u32, _opts: u32, start: u32,
 }
 
 /// WinRealizePalette(hwnd, hps, pcclr): a true-colour display needs no
-/// realisation; no physical entries change.
+/// realisation; no physical entries change. At 256 colours the palette
+/// selected in `hps` gets hardware entries (gpi::palette::Physical::
+/// realize; IBM only realizes for the window with the focus, and others
+/// map to what is there); *pcclr = hardware entries changed, and when
+/// some did every queue gets WM_REALIZEPALETTE. Returns the number of
+/// the palette's entries mapped.
 #[unsafe(no_mangle)]
-pub extern "C" fn WinRealizePalette(_h: u32, hps: u32, cclr: *mut u32) -> i32 {
-    if entry(st(), hps).is_none() {
+pub extern "C" fn WinRealizePalette(h: u32, hps: u32, cclr: *mut u32) -> i32 {
+    if cclr.is_null() {
         return -1;
     }
+    let Some(e) = entry(st(), hps) else { return -1 };
+    let hpal = e.gpi.palette;
     write(cclr, 0);
-    0
+    let Some(p) = palette8() else { return 0 };
+    let Some(t) = (hpal != 0).then(|| get(&mut objects().palettes, hpal, HPAL_BASE).cloned()).flatten() else { return 0 };
+    let s = st();
+    let top = crate::win::top_level(h);
+    if h > 1 && top != s.active && top != crate::win::top_level(s.focus) {
+        return t.len() as i32;
+    }
+    let (map, changed) = p.realize(&t);
+    s.realized = (crate::shared::pid(), hpal);
+    write(cclr, changed);
+    if changed != 0 {
+        realize_broadcast(top);
+    }
+    map.len() as i32
 }

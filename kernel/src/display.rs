@@ -88,6 +88,19 @@ static PRESENT_ALL: AtomicBool = AtomicBool::new(false);
 /// so that PM notices a change even if it missed the EV_MODE event).
 static MODE_GEN: AtomicU32 = AtomicU32::new(0);
 
+/// PM's display is a palette-managed 256-colour one (`VIDEO=WxHx256`):
+/// the framebuffer stays true colour, PM draws in the colours of its
+/// hardware palette and tells programs the device has 8 bits per pel.
+static COLORS256: AtomicBool = AtomicBool::new(false);
+
+pub fn set_colors256(on: bool) {
+    COLORS256.store(on, Ordering::Relaxed);
+}
+
+pub fn colors256() -> bool {
+    COLORS256.load(Ordering::Relaxed)
+}
+
 pub fn mode_generation() -> u32 {
     MODE_GEN.load(Ordering::Relaxed)
 }

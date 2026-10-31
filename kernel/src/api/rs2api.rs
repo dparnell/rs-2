@@ -33,7 +33,7 @@ pub fn rs2_map_display(c: &mut Ctx) -> u32 {
 
 fn write_info(c: &mut Ctx, d: &display::Info) {
     let at = c.arg(0);
-    for (i, v) in [d.obj.base + d.offset, d.width, d.height, d.stride, d.red_low as u32].into_iter().enumerate() {
+    for (i, v) in [d.obj.base + d.offset, d.width, d.height, d.stride, d.red_low as u32 | (display::colors256() as u32) << 1].into_iter().enumerate() {
         c.write_u32(at + i as u32 * 4, v);
     }
 }

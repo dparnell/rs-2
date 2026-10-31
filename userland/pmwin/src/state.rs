@@ -250,6 +250,11 @@ pub struct State {
     pub cursor: pmwin::cursor::CursorState,
     /// Metafiles (gpiseg.rs).
     pub metafiles: Vec<Option<crate::gpiseg::Mf>>,
+    /// A 256-colour display's hardware palette (None: true colour); the
+    /// screen surface draws in its colours.
+    pub palette8: Option<Box<gpi::palette::Physical>>,
+    /// The palette realized in it last: (pid, hpal), 0 for none.
+    pub realized: (u32, u32),
 }
 
 /// No presentation parameter colour.
@@ -280,7 +285,7 @@ pub fn st() -> &'static mut State {
 }
 
 /// Create the state (the first PM process does).
-pub fn init(surface: Surface) {
+pub fn init(surface: Surface, colors256: bool) {
     let desk = Desktop::new(surface.width, surface.height);
     let s = Box::new(State {
         surface,
@@ -340,10 +345,15 @@ pub fn init(surface: Surface) {
         switch: Default::default(),
         cursor: Default::default(),
         metafiles: Vec::new(),
+        palette8: colors256.then(|| Box::new(gpi::palette::Physical::new())),
+        realized: (0, 0),
     });
     let p = Box::into_raw(s);
     unsafe {
         (*p).surface.set_damage(&mut (*p).damage);
+        if let Some(pal) = (*p).palette8.as_deref_mut() {
+            (*p).surface.set_palette(pal);
+        }
         (*crate::shared::header()).state = p as *mut u8;
     }
 }

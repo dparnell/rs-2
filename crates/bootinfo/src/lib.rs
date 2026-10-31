@@ -131,3 +131,19 @@ pub fn video_mode(cmdline: &str) -> Option<(u32, u32)> {
     let (w, h) = (w.parse().ok()?, h.parse().ok()?);
     (w >= 640 && h >= 480).then_some((w, h))
 }
+
+/// The number of colours asked for with `video=WIDTHxHEIGHTxCOLORS`
+/// (`256`, `65536`/`64K`, `16777216`/`16M`), as OS/2's Screen settings
+/// name a mode ("1024 x 768 x 256").
+pub fn video_colors(cmdline: &str) -> Option<u32> {
+    let v = cmdline.split_whitespace().find_map(|w| w.strip_prefix("video="))?;
+    let c = v.split(['x', 'X']).nth(2)?;
+    let c = c.split(|c: char| !c.is_ascii_alphanumeric()).next()?;
+    if c.eq_ignore_ascii_case("64K") {
+        Some(65536)
+    } else if c.eq_ignore_ascii_case("16M") {
+        Some(1 << 24)
+    } else {
+        c.parse().ok()
+    }
+}

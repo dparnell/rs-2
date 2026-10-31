@@ -267,9 +267,26 @@ unsafe extern "C" {
     fn WinReleasePS(hps: u32) -> u32;
     #[link_name = "PMWIN.749"]
     fn WinGetClipPS(h: u32, clip: u32, fl: u32) -> u32;
+    #[link_name = "PMGPI.445"]
+    fn GpiQueryDeviceBitmapFormats(hps: u32, n: i32, out: *mut i32) -> u32;
+    #[link_name = "PMGPI.469"]
+    fn GpiQueryNearestColor(hps: u32, opts: u32, rgb: i32) -> i32;
+    #[link_name = "PMGPI.480"]
+    fn GpiQueryRealColors(hps: u32, opts: u32, start: i32, n: i32, out: *mut i32) -> i32;
+    #[link_name = "PMGPI.577"]
+    fn GpiDeletePalette(h: u32) -> u32;
+    #[link_name = "PMWIN.941"]
+    fn WinRealizePalette(h: u32, hps: u32, cclr: *mut u32) -> i32;
+    #[link_name = "PMWIN.918"]
+    fn WinPeekMsg(hab: u32, q: *mut QMsg, h: u32, a: u32, b: u32, fl: u32) -> u32;
+    #[link_name = "PMWIN.757"]
+    fn WinGetPS(h: u32) -> u32;
 }
 
 static FAILS: AtomicU32 = AtomicU32::new(0);
+/// The display is expected to have 256 colours (`GPITEST 256`, or
+/// `VIDEO=WxHx256` in CONFIG.SYS).
+static C256: AtomicU32 = AtomicU32::new(0);
 
 fn check(name: &str, ok: bool) {
     if ok {
@@ -589,7 +606,7 @@ fn self_checks(hab: u32) {
         let hdc = DevOpenDC(hab, OD_MEMORY, b"*\0".as_ptr(), 0, null(), 0);
         let mut caps = [0i32; 2];
         DevQueryCaps(hdc, 16, 1, caps.as_mut_ptr());
-        check("DevQueryCaps CAPS_COLOR_BITCOUNT", caps[0] == 24);
+        check("DevQueryCaps CAPS_COLOR_BITCOUNT", caps[0] == if C256.load(Ordering::Relaxed) != 0 { 8 } else { 24 });
         DevCloseDC(hdc);
 
         // The screen PS is on the screen's DC (VisualAge Smalltalk's font
@@ -603,6 +620,100 @@ fn self_checks(hab: u32) {
         // WinGetClipPS (PSF_CLIPSIBLINGS | PSF_CLIPCHILDREN) on the desktop.
         let cps = WinGetClipPS(1, 0, 0x18);
         check("WinGetClipPS", cps != 0 && GpiQueryDevice(cps) != 0 && WinReleasePS(cps) != 0);
+    }
+}
+
+// ---- The display's colours ----
+
+/// Whether CONFIG.SYS sets up a 256-colour display (`VIDEO=WxHx256`).
+fn config_256() -> bool {
+    let mut buf = alloc::vec![0u8; 16384];
+    let (mut hf, mut action, mut n) = (0, 0, 0);
+    unsafe {
+        // OPEN_ACTION_OPEN_IF_EXISTS, OPEN_SHARE_DENYNONE | OPEN_ACCESS_READONLY
+        if DosOpen(b"C:\\CONFIG.SYS\0".as_ptr(), &mut hf, &mut action, 0, 0, 1, 0x40, null_mut()) != 0 {
+            return false;
+        }
+        DosRead(hf, buf.as_mut_ptr(), buf.len() as u32, &mut n);
+        DosClose(hf);
+    }
+    buf[..n as usize].split(|&b| b == b'\n').any(|l| {
+        let l: alloc::vec::Vec<u8> = l.iter().filter(|b| !b.is_ascii_whitespace()).map(|b| b.to_ascii_uppercase()).collect();
+        l.starts_with(b"VIDEO=") && l.ends_with(b"X256")
+    })
+}
+
+extern "C" fn plain_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    unsafe { WinDefWindowProc(h, msg, mp1, mp2) }
+}
+
+/// The display's capabilities, bitmap formats and colours: true colour,
+/// or a palette-managed 256-colour display as IBM's GRADD engine
+/// describes one (pels in the nearest colour of the hardware palette,
+/// palettes realized into it).
+fn display_checks(hab: u32) {
+    let c256 = C256.load(Ordering::Relaxed) != 0;
+    unsafe {
+        let sps = WinGetScreenPS(1);
+        let sdc = GpiQueryDevice(sps);
+        let mut caps = [0i32; 34];
+        DevQueryCaps(sdc, 0, 34, caps.as_mut_ptr());
+        let mut f = [0i32; 8];
+        let fok = GpiQueryDeviceBitmapFormats(sps, 8, f.as_mut_ptr()) != 0;
+        let mut real = [0i32; 256];
+        let nreal = GpiQueryRealColors(sps, 0, 0, 256, real.as_mut_ptr());
+        if c256 {
+            check("256 colours: CAPS_COLOR_BITCOUNT 8, CAPS_COLORS and CAPS_PHYS_COLORS 256", caps[16] == 8 && caps[14] == 256 && caps[33] == 256);
+            check("256 colours: CAPS_COLTABL_REALIZE and CAPS_PALETTE_MANAGER", caps[17] & 8 != 0 && caps[32] & 0x100 != 0);
+            check("256 colours: GpiQueryDeviceBitmapFormats 8 bits first", fok && f == [1, 8, 1, 24, 1, 4, 1, 1]);
+            check("256 colours: GpiQueryRealColors lists the hardware palette", nreal == 256 && real[0] == 0 && real[255] == 0xffffff && real[112] == 0x080808);
+            check("256 colours: GpiQueryNearestColor", GpiQueryNearestColor(sps, 0, 0x808080) == 0x838383 && GpiQueryNearestColor(sps, 0, 0xffffff) == 0xffffff);
+        } else {
+            check("true colour: CAPS_COLOR_BITCOUNT 24, CAPS_COLORS 16M", caps[16] == 24 && caps[14] == 1 << 24);
+            check("true colour: GpiQueryDeviceBitmapFormats 24 bits first", fok && f == [1, 24, 1, 8, 1, 4, 1, 1]);
+            check("true colour: GpiQueryNearestColor", GpiQueryNearestColor(sps, 0, 0x123456) == 0x123456);
+        }
+        WinReleasePS(sps);
+
+        // Pels on the screen, and (256 colours) a palette realized.
+        WinRegisterClass(hab, b"GpiTestPal\0".as_ptr(), plain_proc, 0, 0);
+        let mut fcf = 1; // FCF_TITLEBAR
+        let mut client = 0;
+        let frame = WinCreateStdWindow(1, 0, &mut fcf, b"GpiTestPal\0".as_ptr(), b"Palette\0".as_ptr(), 0, 0, 2, &mut client);
+        // SWP_SIZE | SWP_MOVE | SWP_SHOW | SWP_ACTIVATE
+        WinSetWindowPos(frame, 0, 10, 10, 200, 100, 0x1 | 0x2 | 0x8 | 0x80);
+        let hps = WinGetPS(client);
+        GpiCreateLogColorTable(hps, 0, 3, 0, 0, null());
+        GpiSetColor(hps, 0x123456);
+        GpiMove(hps, &pt(0, 0));
+        GpiBox(hps, DRO_FILL, &pt(9, 9), 0, 0);
+        let pel = GpiQueryPel(hps, &pt(5, 5));
+        if c256 {
+            check("256 colours: a pel on the screen has the nearest palette colour", pel == GpiQueryNearestColor(hps, 0, 0x123456) && pel != 0x123456);
+            let t: [u32; 20] = core::array::from_fn(|i| 0x103050 + i as u32);
+            let pal = GpiCreatePalette(hab, 0, 2, 20, t.as_ptr());
+            // LCOLF_DEFAULT: indices again (they are palette slots now).
+            GpiCreateLogColorTable(hps, 0, 0, 0, 0, null());
+            GpiSelectPalette(hps, pal);
+            let mut changed = 0;
+            let n = WinRealizePalette(client, hps, &mut changed);
+            check("256 colours: WinRealizePalette", n == 20 && changed >= 20);
+            let nreal = GpiQueryRealColors(hps, 0, 0, 256, real.as_mut_ptr());
+            check("256 colours: realized colours in the hardware palette", nreal == 256 && t.iter().all(|&c| real.contains(&(c as i32))));
+            GpiSetColor(hps, 5);
+            GpiMove(hps, &pt(20, 0));
+            GpiBox(hps, DRO_FILL, &pt(29, 9), 0, 0);
+            check("256 colours: a pel in a realized palette colour", GpiQueryPel(hps, &pt(25, 5)) == 5);
+            let mut q = QMsg::default();
+            check("256 colours: WM_REALIZEPALETTE posted", WinPeekMsg(hab, &mut q, 0, 0x209, 0x209, 1) != 0);
+            GpiSelectPalette(hps, 0);
+            check("256 colours: GpiDeletePalette gives the entries back", GpiDeletePalette(pal) != 0 && GpiQueryRealColors(hps, 0, 64, 1, real.as_mut_ptr()) == 1 && real[0] == 0x550000);
+            while WinPeekMsg(hab, &mut q, 0, 0x209, 0x209, 1) != 0 {}
+        } else {
+            check("true colour: a pel on the screen", pel == 0x123456);
+        }
+        WinReleasePS(hps);
+        WinDestroyWindow(frame);
     }
 }
 
@@ -1053,13 +1164,16 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     }
 }
 
-fn main(_s: &Startup) -> u32 {
+fn main(s: &Startup) -> u32 {
+    let c256 = s.args().split(|&b| b == b' ').any(|w| w == b"256") || config_256();
+    C256.store(c256 as u32, Ordering::Relaxed);
     let hab = unsafe { WinInitialize(0) };
     HAB.store(hab, Ordering::Relaxed);
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
     check("WinInitialize/WinCreateMsgQueue", hab != 0 && hmq != 0);
     self_checks(hab);
     meta_checks(hab);
+    display_checks(hab);
     let pic = load_picture(b"C:\\YOSEMITE.BMP\0");
     if pic != 0 {
         check("GpiCreateBitmap from a bitmap file", true);
