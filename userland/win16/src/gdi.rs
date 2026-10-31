@@ -117,6 +117,8 @@ const OBJ_BASE: u16 = 0x0100;
 pub const OPAQUE: u16 = 2;
 pub const TRANSPARENT: u16 = 1;
 pub const SYSTEM_FONT: u16 = OBJ_BASE + 2 * 13;
+/// The stock DEFAULT_PALETTE.
+pub const STOCK_PALETTE: u16 = OBJ_BASE + 2 * 15;
 pub const ANSI_FIXED_FONT: u16 = OBJ_BASE + 2 * 11;
 const STOCK: usize = 17;
 
@@ -165,6 +167,9 @@ pub fn delete_object(o: u16) -> bool {
             return false;
         }
         unsafe { GpiDeleteBitmap(hbm) };
+    }
+    if let Some(Obj::Palette(_)) = obj(o) {
+        crate::bitmap::forget_palette(o);
     }
     g().objs[i] = None;
     g().widths.remove(&o);
@@ -247,7 +252,7 @@ pub fn rgb(c: u32) -> i32 {
 }
 
 /// The palette last selected into a DC (for PALETTEINDEX colours).
-pub static CUR_PALETTE: Global<u16> = Global::new(OBJ_BASE + 2 * 15);
+pub static CUR_PALETTE: Global<u16> = Global::new(STOCK_PALETTE);
 
 pub fn new_dc(hps: u32, pm: u32, height: i32, kind: DcKind) -> u16 {
     if hps == 0 {
@@ -272,7 +277,7 @@ pub fn new_dc(hps: u32, pm: u32, height: i32, kind: DcKind) -> u16 {
             pos: (0, 0),
             rop2: 13,
             align: 0,
-            palette: OBJ_BASE + 2 * 15,
+            palette: STOCK_PALETTE,
             stretch: 1,
             poly_fill: 1,
             map: MM_TEXT,
@@ -408,6 +413,11 @@ pub fn select_palette(hdc: u16, p: u16) -> u16 {
     }
     *CUR_PALETTE.get() = p;
     dc(hdc).map_or(0, |d| core::mem::replace(&mut d.s.palette, p))
+}
+
+/// The palette selected into a DC.
+pub fn dc_palette(hdc: u16) -> u16 {
+    dc(hdc).map_or(STOCK_PALETTE, |d| d.s.palette)
 }
 
 /// The colours of the DC's palette.
@@ -1253,8 +1263,10 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         // SetPixel(hdc, x, y, color)
         31 => {
             let (h, x, y, c) = (a.w(), a.i(), a.i(), a.l());
-            fill(h, [x, y, x + 1, y + 1], c & 0xffffff);
-            c & 0xffffff
+            // PALETTEINDEX colours too; the colour set comes back.
+            fill(h, [x, y, x + 1, y + 1], c);
+            let c = rgb(c) as u32;
+            (c & 0xff) << 16 | c & 0xff00 | (c >> 16) & 0xff
         }
         // Rectangle(hdc, left, top, right, bottom): the brush inside, the
         // pen around.
@@ -1464,6 +1476,11 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 return v;
             }
             let q = |v| unsafe { WinQuerySysValue(HWND_DESKTOP, v) };
+            // PM's display: true colour, or 256 colours with a palette
+            // (what Windows 3.1's 256-colour drivers report: 20 static
+            // colours, 6 bits per gun).
+            let bits = crate::bitmap::display_bits();
+            let pal = bits == 8;
             match i {
                 0 => 0x300,           // DRIVERVERSION
                 2 => 1,               // TECHNOLOGY: DT_RASDISPLAY
@@ -1471,15 +1488,22 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
                 6 => 180,             // VERTSIZE
                 8 => q(SV_CXSCREEN) as u32,
                 10 => q(SV_CYSCREEN) as u32,
-                12 => 24,             // BITSPIXEL
+                12 => bits as u32,    // BITSPIXEL
                 14 => 1,              // PLANES
+                24 if pal => 20,      // NUMCOLORS
                 24 => u32::MAX >> 16, // NUMCOLORS: many
                 26 => 0x7fff,         // NUMPENS...
-                38 => 0x0001 | 0x0008 | 0x0080 | 0x0200, // RASTERCAPS: BITBLT, BITMAP64, DI_BITMAP, STRETCHBLT
+                // RASTERCAPS: BITBLT, BITMAP64, DI_BITMAP, STRETCHBLT
+                // (and PALETTE)
+                38 => 0x0001 | 0x0008 | 0x0080 | 0x0200 | if pal { 0x0100 } else { 0 },
                 40 => 36,             // ASPECTX
                 42 => 36,             // ASPECTY
                 44 => 51,             // ASPECTXY
                 88 | 90 => 96,        // LOGPIXELSX/Y
+                104 if pal => 256,    // SIZEPALETTE
+                106 if pal => 20,     // NUMRESERVED
+                108 if pal => 18,     // COLORRES
+                108 => 24,
                 _ => 0,
             }
         }

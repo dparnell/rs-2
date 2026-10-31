@@ -92,6 +92,22 @@ unsafe extern "C" {
     pub fn WinGetScreenPS(desk: u32) -> u32;
     #[link_name = "PMGPI.469"]
     pub fn GpiQueryNearestColor(hps: u32, opts: u32, rgb: i32) -> i32;
+    #[link_name = "PMGPI.606"]
+    pub fn DevQueryCaps(hdc: u32, start: i32, n: i32, out: *mut i32) -> u32;
+    #[link_name = "PMGPI.480"]
+    pub fn GpiQueryRealColors(hps: u32, opts: u32, start: i32, n: i32, out: *mut i32) -> i32;
+    #[link_name = "PMGPI.594"]
+    pub fn GpiCreatePalette(hab: u32, opts: u32, fmt: u32, n: u32, t: *const u32) -> u32;
+    #[link_name = "PMGPI.577"]
+    pub fn GpiDeletePalette(h: u32) -> u32;
+    #[link_name = "PMGPI.578"]
+    pub fn GpiSelectPalette(hps: u32, h: u32) -> u32;
+    #[link_name = "PMGPI.595"]
+    pub fn GpiAnimatePalette(h: u32, fmt: u32, start: u32, n: u32, t: *const u32) -> i32;
+    #[link_name = "PMGPI.596"]
+    pub fn GpiSetPaletteEntries(h: u32, fmt: u32, start: u32, n: u32, t: *const u32) -> u32;
+    #[link_name = "PMWIN.941"]
+    pub fn WinRealizePalette(h: u32, hps: u32, cclr: *mut u32) -> i32;
     #[link_name = "PMWIN.728"]
     pub fn WinDestroyWindow(h: u32) -> u32;
     #[link_name = "PMWIN.743"]
@@ -319,6 +335,7 @@ pub const WM_MOVE: u32 = 0x0006;
 pub const WM_SIZE: u32 = 0x0007;
 pub const WM_ACTIVATE: u32 = 0x000d;
 pub const WM_SETFOCUS: u32 = 0x000f;
+pub const WM_REALIZEPALETTE: u32 = 0x0209;
 pub const WM_COMMAND: u32 = 0x0020;
 pub const WM_PAINT: u32 = 0x0023;
 pub const WM_TIMER: u32 = 0x0024;
