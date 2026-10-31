@@ -360,7 +360,7 @@ are in `tests/owatcom` (a second disk, `--virtio-disk`).
 | `wcl386 -l=os2v2_pm pmhello.c` | works | The PM program opens its window on the desktop and closes itself (a timer). |
 | `wcl -l=os2 -i=%WATCOM%\h\os21x hello16.c` | works | 16-bit OS/2 program (NE); it reports DosGetVersion 20.45. The installer's INCLUDE names the 32-bit headers only, so 16-bit builds need the `-i` (as on OS/2). |
 | `wmake` | works | Builds the three programs from `tests/owatcom/makefile`. |
-| `wd` (debugger) | works | `wd hello` (built with `wcl386 -d2`) loads the program through its trap file (STD.D32: DosStartSession with the trace option, then `DosDebug`), loads its helper DLL (WDSPLICE) into it, stops at `main` with the source and the locals, steps (F10, with DBG_C_SStep and breakpoints), shows the variables as they change, and runs the program to its end (F5: "The task has completed running"). Watchpoints (DBG_C_SetWatch, the debug registers) are not there: the debugger single-steps for them. |
+| `wd` (debugger) | works | `wd hello` (built with `wcl386 -d2`) loads the program through its trap file (STD.D32: DosStartSession with the trace option, then `DosDebug`), loads its helper DLL (WDSPLICE) into it, stops at `main` with the source and the locals, steps (F10, with DBG_C_SStep and breakpoints), shows the variables as they change, and runs the program to its end (F5: "The task has completed running"). Watchpoints work with the debug registers: a 4-byte break on write on `i` stops after `i = 0` and again after `i++` ("Break on write ... Old value=0 New value=1"). |
 | `ide` (IDE) | partial | Starts with its menus (File, Actions, Targets ...), tool bar and status line; menus open with the mouse. Alt+letter does not open them (not followed up). Building a project from it is not tried. |
 | `NMPBIND.EXE` (CONFIG.SYS `RUN=`) | fails | Imports `NAMPIPES`, OS/2 1.x's named pipe module, which Warp's kernel does not provide either (it is for remote debugging over named pipes). |
 
@@ -371,8 +371,10 @@ Fixed for it:
   step, continue after an exception, read and write memory, registers
   and the FPU, thread status, freeze and resume, object and selector
   conversions, aliases, terminate; breakpoint, single step, exception
-  (first and last chance), module load and free, thread and process
-  notifications. As on OS/2 the kernel's own modules (DOSCALLS ...) are
+  (first and last chance), watchpoint, module load and free, thread and
+  process notifications. Watchpoints (DBG_C_SetWatch, DBG_C_ClearWatch)
+  use the debug registers, four per debuggee; global ones (every process)
+  are not there. As on OS/2 the kernel's own modules (DOSCALLS ...) are
   reported as DLLs before the program starts: Open Watcom's trap file
   loads its helper DLL at that point and otherwise ran the program to its
   end. APITEST traces a child through it.

@@ -28,6 +28,11 @@
 //! * Module loads: DBG_C_Connect has the program's module reported first;
 //!   each DLL follows as the debuggee runs on (one per DBG_C_Go), before its
 //!   initialisation routine, as do DLLs loaded later (DosLoadModule).
+//! * Watchpoints (DBG_C_SetWatch) use the debug registers, four per
+//!   debuggee, for all its threads. They are one-shot: a hit disables and
+//!   frees the watchpoint (`DbgWPHit`), and is reported as
+//!   DBG_N_Watchpoint when the thread next returns to user mode
+//!   (`DbgWatchpoint`), also when the kernel touched the memory for it.
 
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
@@ -68,6 +73,8 @@ mod cmd {
     pub const CONNECT: i32 = 21;
     pub const READ_MEM_BUF: i32 = 22;
     pub const WRITE_MEM_BUF: i32 = 23;
+    pub const SET_WATCH: i32 = 24;
+    pub const CLEAR_WATCH: i32 = 25;
     pub const CONTINUE: i32 = 27;
     pub const ADDR_TO_OBJECT: i32 = 28;
     pub const LIN_TO_SEL: i32 = 30;
@@ -84,6 +91,7 @@ mod note {
     pub const THREAD_TERM: i32 = -10;
     pub const ASYNC_STOP: i32 = -11;
     pub const ALIAS_FREE: i32 = -13;
+    pub const WATCHPOINT: i32 = -14;
     pub const THREAD_CREATE: i32 = -15;
     pub const MODULE_FREE: i32 = -16;
 }
@@ -208,6 +216,8 @@ struct Debuggee {
     term: bool,
     /// The process has ended (DBG_N_ProcTerm posted).
     ended: bool,
+    /// Watchpoints, by debug register.
+    watches: [Option<Watch>; 4],
 }
 
 impl Debuggee {
@@ -248,6 +258,7 @@ pub fn traced(p: &Arc<Process>) {
         last_tid: 1,
         term: false,
         ended: false,
+        watches: [None; 4],
     });
 }
 
@@ -399,6 +410,9 @@ pub fn hold(t: &Arc<Thread>, p: &Arc<Process>, f: &mut TrapFrame) {
                 d.announced.push(tid);
                 return Some(Event::new(tid, note::THREAD_CREATE));
             }
+            if let Some(e) = watch_event(d, t) {
+                return Some(e);
+            }
             if let Some(m) = mods.iter().find(|m| !d.modules.contains(&m.hmte)) {
                 d.modules.push(m.hmte);
                 return Some(Event::module(tid, note::MODULE_LOAD, m.hmte));
@@ -420,7 +434,7 @@ pub fn hold(t: &Arc<Thread>, p: &Arc<Process>, f: &mut TrapFrame) {
         };
         match ev {
             Some(mut e) => {
-                if e.note == note::EXCEPTION {
+                if e.note == note::EXCEPTION || e.note == note::WATCHPOINT {
                     e.addr = code_linear(p, f);
                 }
                 stop(t, p, f, e);
@@ -459,6 +473,10 @@ fn connected(p: &Process) -> bool {
 /// (the thread goes on as the debugger left it); false: deliver it as an
 /// exception to the program.
 pub fn trap(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool {
+    // A watchpoint: reported on the way back to user mode (hold).
+    if f.vector == 1 && watch_hit() != 0 {
+        return true;
+    }
     if (f.vector != 1 && f.vector != 3) || !connected(p) {
         return false;
     }
@@ -545,6 +563,222 @@ pub fn process_ended(p: &Process) {
             q.exit(3, 0);
         }
     }
+}
+
+// ---- Watchpoints ----
+
+/// A watchpoint (DBG_C_SetWatch) in one of the debug registers.
+#[derive(Clone, Copy)]
+struct Watch {
+    addr: u32,
+    len: u32,
+    /// DR7's R/W and LEN bits for it.
+    rwlen: u32,
+}
+
+/// DBG_C_SetWatch's Value: scope (low word) and type (high word).
+const WATCH_GLOBAL: u32 = 1;
+const WATCH_LOCAL: u32 = 2;
+const WATCH_EXECUTE: u32 = 0x1_0000;
+const WATCH_WRITE: u32 = 0x2_0000;
+const WATCH_READ_WRITE: u32 = 0x3_0000;
+/// IBM's handles (Index): 8 | the register, 4 more for a global one.
+const WATCH_HANDLE: u32 = 8;
+/// No debug register free (IBM's _DbgWPAlloc).
+const ERROR_NO_WATCH: u32 = 0x129;
+/// DR7: exact data breakpoints (LE).
+const DR7_LE: u32 = 0x100;
+/// A watchpoint was ever set (kernel_access does nothing until then).
+static WATCHING: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+
+/// DR7's bits for register `i`: its local enable, and R/W and LEN.
+fn dr7_bits(i: usize) -> u32 {
+    (3 << (2 * i)) | (0xf << (16 + 4 * i))
+}
+
+fn write_dr(n: u8, v: u64) {
+    unsafe {
+        match n {
+            0 => core::arch::asm!("mov dr0, {}", in(reg) v, options(nomem, nostack)),
+            1 => core::arch::asm!("mov dr1, {}", in(reg) v, options(nomem, nostack)),
+            2 => core::arch::asm!("mov dr2, {}", in(reg) v, options(nomem, nostack)),
+            3 => core::arch::asm!("mov dr3, {}", in(reg) v, options(nomem, nostack)),
+            6 => core::arch::asm!("mov dr6, {}", in(reg) v, options(nomem, nostack)),
+            _ => core::arch::asm!("mov dr7, {}", in(reg) v, options(nomem, nostack)),
+        }
+    }
+}
+
+fn read_dr6() -> u64 {
+    let v;
+    unsafe { core::arch::asm!("mov {}, dr6", out(reg) v, options(nomem, nostack)) };
+    v
+}
+
+/// A thread of `p` (None: a kernel thread) is about to run on this CPU:
+/// load its process's watchpoints, or turn off those of the last one.
+pub fn switch_in(p: Option<&Process>) {
+    let dr7 = p.map_or(0, |p| p.dr7.load(Ordering::SeqCst));
+    // Only registers still enabled count (a hit disables one).
+    let dr7 = if dr7 & 0xff != 0 { dr7 } else { 0 };
+    let c = crate::smp::this();
+    if dr7 == 0 && !c.dr7_loaded.load(Ordering::Relaxed) {
+        return;
+    }
+    if let Some(p) = p.filter(|_| dr7 != 0) {
+        for (i, r) in p.dregs.iter().enumerate() {
+            write_dr(i as u8, r.load(Ordering::SeqCst) as u64);
+        }
+    }
+    write_dr(7, dr7 as u64);
+    c.dr7_loaded.store(dr7 != 0, Ordering::Relaxed);
+}
+
+/// Watchpoints (debug register numbers, bits 0-3) fired: they are
+/// disabled and noted on the thread, which reports them on its way back to
+/// user mode (IBM's DbgWPHit).
+fn mark_hits(t: &Thread, p: &Process, hits: u8) {
+    let off = (0..4).filter(|&i| hits & (1 << i) != 0).fold(0, |m, i| m | 3 << (2 * i));
+    p.dr7.fetch_and(!off, Ordering::SeqCst);
+    switch_in(Some(p));
+    t.watch_hits.fetch_or(hits, Ordering::SeqCst);
+}
+
+/// A debug exception (#DB): the watchpoints that fired (DR6 B0-B3).
+fn watch_hit() -> u8 {
+    let dr6 = read_dr6();
+    write_dr(6, 0xffff_0ff0);
+    let Some(t) = sched::current_opt() else { return 0 };
+    let Some(p) = t.process() else { return 0 };
+    let dr7 = p.dr7.load(Ordering::SeqCst);
+    // B0-B3 may be set for registers that are not enabled.
+    let hits = (0..4).filter(|&i| dr6 & (1 << i) != 0 && dr7 & (1 << (2 * i)) != 0).fold(0u8, |m, i| m | 1 << i);
+    if hits != 0 {
+        mark_hits(&t, &p, hits);
+    }
+    hits
+}
+
+/// The kernel reads or writes user memory of the address space with page
+/// tables `root` (vm::AddressSpace::read_bytes, write_bytes). It goes
+/// through the physical frames, where the debug registers do not see it:
+/// the watchpoints of the current process on that memory fire here, as
+/// they would on OS/2, whose kernel uses the user's addresses.
+pub fn kernel_access(root: u64, addr: u32, len: u32, write: bool) {
+    if !WATCHING.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(t) = sched::current_opt() else { return };
+    let Some(p) = t.process() else { return };
+    let dr7 = p.dr7.load(Ordering::SeqCst);
+    if dr7 & 0xff == 0 || crate::smp::this().space_root.load(Ordering::Relaxed) != root {
+        return;
+    }
+    let end = addr as u64 + len as u64;
+    let mut hits = 0u8;
+    for i in 0..4 {
+        let rwlen = dr7 >> (16 + 4 * i) & 0xf;
+        // Write (R/W 01) or read/write (11) watchpoints that are enabled.
+        let kind = rwlen & 3;
+        if dr7 & (1 << (2 * i)) == 0 || !(kind == 3 || (kind == 1 && write)) {
+            continue;
+        }
+        let at = p.dregs[i].load(Ordering::SeqCst) as u64;
+        let n = (rwlen >> 2) as u64 + 1;
+        if len != 0 && at < end && (addr as u64) < at + n {
+            hits |= 1 << i;
+        }
+    }
+    if hits != 0 {
+        mark_hits(&t, &p, hits);
+    }
+}
+
+/// A debug exception in the kernel: a watchpoint that fired while the
+/// kernel touched the debuggee's memory for it (an API's arguments or
+/// results). The kernel goes on; the thread reports it when it returns to
+/// user mode.
+pub fn kernel_trap(f: &TrapFrame) -> bool {
+    f.vector == 1 && watch_hit() != 0
+}
+
+/// The next watchpoint the thread hit, freeing it (IBM's DbgWatchpoint).
+/// One the debugger cleared since is not reported.
+fn watch_event(d: &mut Debuggee, t: &Thread) -> Option<Event> {
+    loop {
+        let hits = t.watch_hits.load(Ordering::SeqCst);
+        if hits == 0 {
+            return None;
+        }
+        let i = hits.trailing_zeros();
+        t.watch_hits.fetch_and(!(1 << i), Ordering::SeqCst);
+        if d.watches[i as usize].take().is_some() {
+            // Value: the process; Addr: where it is now (filled in by the
+            // caller); Len: the thread; Index: the watchpoint.
+            let e = Event::new(t.tid, note::WATCHPOINT);
+            return Some(Event { mask: 0x1b, value: d.pid, len: t.tid, index: WATCH_HANDLE | i, ..e });
+        }
+    }
+}
+
+/// DBG_C_SetWatch: Addr, Len (1, 2 or 4, aligned), Value (scope | type);
+/// returns the watchpoint's handle in Index (IBM's DbgSetWatch, DbgWPSet).
+fn set_watch(p: &Process, u: &mut Udb) {
+    if u.get(udb::INDEX) != 0 {
+        u.error(err::INVALID_DATA);
+        return;
+    }
+    let (value, addr, len) = (u.get(udb::VALUE), u.get(udb::ADDR), u.get(udb::LEN));
+    match value & 0xffff {
+        WATCH_LOCAL => {}
+        // Global watchpoints (any process touching the address) are not
+        // there: as if the registers were all taken.
+        WATCH_GLOBAL => {
+            u.error(ERROR_NO_WATCH);
+            return;
+        }
+        _ => {
+            u.error(err::INVALID_PARAMETER);
+            return;
+        }
+    }
+    let rw = match value & 0xffff_0000 {
+        WATCH_EXECUTE if len == 1 => 0,
+        WATCH_WRITE => 1,
+        WATCH_READ_WRITE => 3,
+        _ => 4,
+    };
+    let lenbits = match len {
+        1 => 0,
+        2 => 1,
+        4 => 3,
+        _ => 4,
+    };
+    if rw == 4 || lenbits == 4 || addr & (len - 1) != 0 {
+        u.error(err::INVALID_PARAMETER);
+        return;
+    }
+    if addr < vm::GATE_BASE + vm::GATE_SIZE && addr.saturating_add(len) > vm::GATE_BASE {
+        u.error(err::INVALID_ADDRESS);
+        return;
+    }
+    let rwlen = rw | lenbits << 2;
+    let slot = with(p.pid, |d| {
+        let i = d.watches.iter().position(|w| w.is_none())?;
+        d.watches[i] = Some(Watch { addr, len, rwlen });
+        Some(i)
+    })
+    .flatten();
+    let Some(i) = slot else {
+        u.error(ERROR_NO_WATCH);
+        return;
+    };
+    WATCHING.store(true, Ordering::Relaxed);
+    p.dregs[i].store(addr, Ordering::SeqCst);
+    let _ = p.dr7.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
+        Some(v & !dr7_bits(i) | 1 << (2 * i) | rwlen << (16 + 4 * i) | DR7_LE)
+    });
+    u.set(udb::INDEX, WATCH_HANDLE | i as u32);
 }
 
 // ---- The debugger's side ----
@@ -1036,6 +1270,20 @@ fn command(c: &mut Ctx, u: &mut Udb, cmd: i32) {
             map_alias(c, &p, u, cmd == cmd::MAP_RW_ALIAS);
         }
         cmd::UNMAP_ALIAS => unmap_alias(c, u),
+        cmd::SET_WATCH => {
+            let Some(p) = live(u) else { return };
+            set_watch(&p, u);
+        }
+        cmd::CLEAR_WATCH => {
+            let Some(p) = live(u) else { return };
+            let i = u.get(udb::INDEX);
+            let ok = i & !3 == WATCH_HANDLE && with(pid, |d| d.watches[(i & 3) as usize].take().is_some()) == Some(true);
+            if ok {
+                p.dr7.fetch_and(!dr7_bits((i & 3) as usize), Ordering::SeqCst);
+            } else {
+                u.error(err::INVALID_PARAMETER);
+            }
+        }
         _ => u.error(err::INVALID_FUNCTION),
     }
 }

@@ -513,6 +513,7 @@ pub fn schedule() {
 fn prepare_switch(prev: &Arc<Thread>, next: &Arc<Thread>) {
     gdt::set_kernel_stack(next.kstack_top());
     let (pp, np) = (prev.process(), next.process());
+    crate::api::debug::switch_in(np.as_deref());
     let same = matches!((&pp, &np), (Some(a), Some(b)) if Arc::ptr_eq(a, b));
     if let Some(pp) = &pp {
         if !same {

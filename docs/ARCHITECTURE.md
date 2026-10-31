@@ -185,7 +185,16 @@ module stops the whole process and posts a notification, which the
 debugger collects one per DosDebug call with the posting thread's
 registers, as IBM's kernel does (studied in OS2KRNLB: DbgCall, DbgTrap,
 DbgContinue). Registers are the stopped thread's saved user frame; the
-FPU state its FXSAVE area, converted to FSAVE's layout. `dbgtrace` on the
+FPU state its FXSAVE area, converted to FSAVE's layout. Watchpoints
+(DBG_C_SetWatch) are the debuggee's DR0-DR3 and DR7, kept on its
+Process and loaded by the context switch; as in IBM's DbgWPHit and
+DbgWatchpoint they are one-shot, and a hit (a #DB in user or kernel
+mode) is reported when the thread next returns to user mode. The kernel
+copies to and from user memory through the physical frames, where the
+debug registers do not see it, so `AddressSpace::read_bytes`/
+`write_bytes` check the current process's watchpoints themselves (OS/2's
+kernel uses the user's addresses, so its watchpoints catch an API
+writing a result). `dbgtrace` on the
 kernel command line logs every DosDebug call and result to the serial
 port.
 

@@ -114,6 +114,10 @@ pub struct Process {
     pub win16_debugger: AtomicU32,
     /// Under DosDebug control (api/debug.rs).
     pub debugged: core::sync::atomic::AtomicBool,
+    /// Its watchpoints' debug registers: DR0-DR3 and DR7 (0: none), loaded
+    /// whenever one of its threads runs (api/debug.rs).
+    pub dregs: [AtomicU32; 4],
+    pub dr7: AtomicU32,
 }
 
 /// Thread-local memory: dwords per thread (in the process information area).
@@ -320,6 +324,8 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         win16_int: AtomicU32::new(0),
         win16_debugger: AtomicU32::new(0),
         debugged: core::sync::atomic::AtomicBool::new(p.traced),
+        dregs: [const { AtomicU32::new(0) }; 4],
+        dr7: AtomicU32::new(0),
     });
     let stack_bottom = stack_flat.saturating_sub(start.stack.flat.min(0x10000).max(0x1000));
     let t = proc.new_thread(frame, stack_bottom, stack_flat)?;

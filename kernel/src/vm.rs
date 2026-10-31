@@ -615,6 +615,7 @@ impl AddressSpace {
         if !self.check(addr, data.len() as u32, true) {
             return false;
         }
+        crate::api::debug::kernel_access(self.root, addr, data.len() as u32, true);
         self.copy_in(addr, data)
     }
 
@@ -672,6 +673,7 @@ impl AddressSpace {
         if !self.check(addr, out.len() as u32, false) {
             return false;
         }
+        crate::api::debug::kernel_access(self.root, addr, out.len() as u32, false);
         let mut done = 0usize;
         while done < out.len() {
             let va = addr as u64 + done as u64;

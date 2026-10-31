@@ -775,6 +775,8 @@ const DBG_C_UNMAP_ALIAS: i32 = 20;
 const DBG_C_CONNECT: i32 = 21;
 const DBG_C_READ_MEM_BUF: i32 = 22;
 const DBG_C_WRITE_MEM_BUF: i32 = 23;
+const DBG_C_SET_WATCH: i32 = 24;
+const DBG_C_CLEAR_WATCH: i32 = 25;
 const DBG_C_CONTINUE: i32 = 27;
 const DBG_C_LIN_TO_SEL: i32 = 30;
 const DBG_C_SEL_TO_LIN: i32 = 31;
@@ -782,6 +784,10 @@ const DBG_N_ERROR: i32 = -1;
 const DBG_N_PROC_TERM: i32 = -6;
 const DBG_N_EXCEPTION: i32 = -7;
 const DBG_N_MODULE_LOAD: i32 = -8;
+const DBG_N_WATCHPOINT: i32 = -14;
+const DBG_W_LOCAL: u32 = 2;
+const DBG_W_WRITE: u32 = 0x2_0000;
+const DBG_W_READ_WRITE: u32 = 0x3_0000;
 const XCPT_CONTINUE_EXECUTION: u32 = 0xffff_ffff;
 const XCPT_CONTINUE_STOP: u32 = 0x0071_6668;
 const XCPT_BREAKPOINT: u32 = 0xC000_009F;
@@ -789,14 +795,21 @@ const XCPT_SINGLE_STEP: u32 = 0xC000_00A0;
 
 /// The traced child's variable: the debugger reads and rewrites it.
 static mut DEBUG_VAR: u32 = 0x1234;
+/// Watched by the debugger: the child writes the first, the kernel the
+/// second (DosQuerySysInfo's result).
+static mut WATCH_VAR: u32 = 0;
+static mut KERNEL_WATCH_VAR: u32 = 0;
 
 /// `APITEST dbgchild`: run under the debugger. A breakpoint, two
-/// instructions to single step, then the exit code tells what the debugger
-/// changed (DEBUG_VAR and EAX).
+/// instructions to single step, two writes to watched variables, then the
+/// exit code tells what the debugger changed (DEBUG_VAR and EAX).
 fn debug_child() -> u32 {
     let eax: u32;
     unsafe {
         core::arch::asm!("int3", "nop", "nop", inout("eax") 0u32 => eax);
+        core::ptr::write_volatile(&raw mut WATCH_VAR, 7);
+        // QSV_MAX_PATH_LENGTH
+        DosQuerySysInfo(1, 1, &raw mut KERNEL_WATCH_VAR, 4);
         DEBUG_VAR + eax
     }
 }
@@ -918,14 +931,46 @@ fn debugging() {
     b.addr = var;
     let ok = dbg(&mut b, DBG_C_LIN_TO_SEL) == 0 && b.index == var & 0xffff;
     check("DBG_C_LinToSel/SelToLin", ok && dbg(&mut b, DBG_C_SEL_TO_LIN) == 0 && b.addr == var);
+    // Watchpoints: IBM's handles are 8 + the debug register.
+    let watch = |b: &mut UDb, addr: u32, len: u32, value: u32| {
+        b.addr = addr;
+        b.len = len;
+        b.value = value;
+        b.index = 0;
+        if dbg(b, DBG_C_SET_WATCH) == 0 { b.index } else { 0 }
+    };
+    let wvar = &raw mut WATCH_VAR as u32;
+    let kvar = &raw mut KERNEL_WATCH_VAR as u32;
+    let w1 = watch(&mut b, wvar, 4, DBG_W_LOCAL | DBG_W_WRITE);
+    let w2 = watch(&mut b, kvar, 4, DBG_W_LOCAL | DBG_W_WRITE);
+    let w3 = watch(&mut b, var, 2, DBG_W_LOCAL | DBG_W_READ_WRITE);
+    check("DBG_C_SetWatch", w1 == 8 && w2 == 9 && w3 == 10);
+    let bad = [watch(&mut b, var, 3, DBG_W_LOCAL | DBG_W_WRITE), watch(&mut b, var + 1, 2, DBG_W_LOCAL | DBG_W_WRITE)];
+    check("DBG_C_SetWatch bad length or alignment fails", bad == [0, 0] && b.cmd == DBG_N_ERROR);
+    b.index = w3;
+    check("DBG_C_ClearWatch", dbg(&mut b, DBG_C_CLEAR_WATCH) == 0 && dbg(&mut b, DBG_C_CLEAR_WATCH) == DBG_N_ERROR);
     // One instruction (the first NOP).
     b.tid = 1;
     let n = dbg(&mut b, DBG_C_SSTEP);
     check("single step", n == DBG_N_EXCEPTION && b.value == 0 && b.buffer == XCPT_SINGLE_STEP && b.addr == bp + 2);
     check("single step registers", b.eip == bp + 2 && b.eax == 0x78 && b.eflags & 0x100 == 0);
     b.value = XCPT_CONTINUE_EXECUTION;
+    let n = dbg(&mut b, DBG_C_CONTINUE);
+    let mut seen = 0u32;
+    b.addr = wvar;
+    b.buffer = &raw mut seen as u32;
+    b.len = 4;
+    let ok = n == DBG_N_WATCHPOINT && b.index == w1 && b.tid == 1 && dbg(&mut b, DBG_C_READ_MEM_BUF) == 0 && seen == 7;
+    check("DBG_N_Watchpoint after the program's write", ok);
+    let n = dbg(&mut b, DBG_C_GO);
+    b.addr = kvar;
+    b.len = 4;
+    let ok = n == DBG_N_WATCHPOINT && b.index == w2 && dbg(&mut b, DBG_C_READ_MEM_BUF) == 0 && seen == 260;
+    check("DBG_N_Watchpoint after the kernel's write", ok);
+    b.index = w1;
+    check("a watchpoint that fired is gone", dbg(&mut b, DBG_C_CLEAR_WATCH) == DBG_N_ERROR);
     let mut guard = 0;
-    let mut n = dbg(&mut b, DBG_C_CONTINUE);
+    let mut n = dbg(&mut b, DBG_C_GO);
     while n != DBG_N_PROC_TERM && n != DBG_N_ERROR && guard < 50 {
         b.value = XCPT_CONTINUE_EXECUTION;
         n = dbg(&mut b, DBG_C_CONTINUE);
