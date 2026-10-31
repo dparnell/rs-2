@@ -7,8 +7,14 @@
 //! kept resolution is saved as `VIDEO=WxH` in CONFIG.SYS, which the
 //! kernel applies at the next start.
 //!
-//! Usage: `DISPLAY` (the window), `DISPLAY WxH` (switch and save without
-//! asking, e.g. from a script).
+//! The colours (16 million, or 256 from a palette as on OS/2's 8-bit
+//! displays, which some programs need) are saved with it,
+//! `VIDEO=WxHx256`, and change at the next start, as programs keep the
+//! device's colours from when they started.
+//!
+//! Usage: `DISPLAY` (the window), `DISPLAY WxH` or `DISPLAY WxHxCOLORS`
+//! (switch and save without asking, e.g. from a script; COLORS 256 or
+//! 16M).
 
 #![no_std]
 #![no_main]
@@ -39,7 +45,13 @@ const ID_STATUS: u32 = 12;
 const ID_APPLY: u32 = 13;
 /// Close, or Revert while asking.
 const ID_CLOSE: u32 = 14;
+const ID_COLORS: u32 = 15;
+const ID_TRUE: u32 = 16;
+const ID_256: u32 = 17;
 const TID_COUNT: u32 = 1;
+const BS_AUTORADIOBUTTON: u32 = 4;
+const BM_QUERYCHECK: u32 = 0x0124;
+const BM_SETCHECK: u32 = 0x0125;
 
 /// Seconds to keep a new resolution without an answer.
 const CONFIRM_SECONDS: u32 = 15;
@@ -57,6 +69,14 @@ unsafe extern "C" {
     fn WinStartTimer(hab: u32, h: u32, id: u32, ms: u32) -> u32;
     #[link_name = "PMWIN.885"]
     fn WinStopTimer(hab: u32, h: u32, id: u32) -> u32;
+    #[link_name = "PMWIN.759"]
+    fn WinGetScreenPS(desk: u32) -> u32;
+    #[link_name = "PMWIN.848"]
+    fn WinReleasePS(hps: u32) -> u32;
+    #[link_name = "PMGPI.444"]
+    fn GpiQueryDevice(hps: u32) -> u32;
+    #[link_name = "PMGPI.606"]
+    fn DevQueryCaps(hdc: u32, start: i32, n: i32, out: *mut i32) -> u32;
 }
 
 struct App {
@@ -69,6 +89,9 @@ struct App {
     asking: Option<((u32, u32), (u32, u32), u32)>,
     /// The screen size the window was last centred on.
     centred: (i32, i32),
+    /// 256 colours now, and in CONFIG.SYS (for the next start).
+    now256: bool,
+    saved256: bool,
 }
 
 static mut APP: Option<App> = None;
@@ -110,10 +133,37 @@ fn modes() -> Vec<(u32, u32)> {
     (0..n.min(32) as usize).map(|i| (v[i * 2], v[i * 2 + 1])).collect()
 }
 
-/// "WxH" (also "W x H").
-fn parse_mode(s: &str) -> Option<(u32, u32)> {
-    let (w, h) = s.split_once(['x', 'X'])?;
-    Some((w.trim().parse().ok()?, h.trim().parse().ok()?))
+/// "WxH" (also "W x H"), with "xCOLORS" (256, 16M): whether 256.
+fn parse_mode(s: &str) -> Option<(u32, u32, Option<bool>)> {
+    let mut it = s.split(['x', 'X']);
+    let (w, h) = (it.next()?.trim().parse().ok()?, it.next()?.trim().parse().ok()?);
+    let c = match it.next().map(str::trim) {
+        None => None,
+        Some("256") => Some(true),
+        Some("16M" | "16777216" | "64K" | "65536") => Some(false),
+        Some(_) => return None,
+    };
+    Some((w, h, c))
+}
+
+/// Whether the display has 256 colours (CAPS_COLOR_BITCOUNT 8).
+fn colors256_now() -> bool {
+    let mut bits = 0;
+    unsafe {
+        let hps = WinGetScreenPS(HWND_DESKTOP);
+        DevQueryCaps(GpiQueryDevice(hps), 16, 1, &mut bits);
+        WinReleasePS(hps);
+    }
+    bits == 8
+}
+
+/// The VIDEO= statement of CONFIG.SYS: whether it asks for 256 colours.
+fn colors256_saved() -> bool {
+    let text = read_file(&config_path()).unwrap_or_default();
+    text.split(|&b| b == b'\n').any(|l| {
+        let t: Vec<u8> = l.iter().filter(|b| !b.is_ascii_whitespace()).map(|b| b.to_ascii_uppercase()).collect();
+        t.starts_with(b"VIDEO=") && t.ends_with(b"X256")
+    })
 }
 
 /// The boot drive's CONFIG.SYS.
@@ -158,9 +208,9 @@ fn write_file(path: &[u8], data: &[u8]) -> bool {
     rc == 0 && done as usize == data.len()
 }
 
-/// CONFIG.SYS with its VIDEO= statement set to `w` x `h` (replacing
-/// any there).
-fn with_video(text: &[u8], w: u32, h: u32) -> Vec<u8> {
+/// CONFIG.SYS with its VIDEO= statement set to `w` x `h`, x 256 for 256
+/// colours (replacing any there).
+fn with_video(text: &[u8], w: u32, h: u32, c256: bool) -> Vec<u8> {
     let text = match text.iter().position(|&b| b == 0x1a) {
         Some(i) => &text[..i],
         None => text,
@@ -176,15 +226,16 @@ fn with_video(text: &[u8], w: u32, h: u32) -> Vec<u8> {
     if !out.is_empty() && !out.ends_with(b"\n") {
         out.extend_from_slice(b"\r\n");
     }
-    out.extend_from_slice(alloc::format!("VIDEO={w}x{h}\r\n").as_bytes());
+    let c = if c256 { "x256" } else { "" };
+    out.extend_from_slice(alloc::format!("VIDEO={w}x{h}{c}\r\n").as_bytes());
     out
 }
 
-/// Save the resolution for the next start.
-fn save(w: u32, h: u32) -> bool {
+/// Save the resolution and colours for the next start.
+fn save(w: u32, h: u32, c256: bool) -> bool {
     let path = config_path();
     let old = read_file(&path).unwrap_or_default();
-    write_file(&path, &with_video(&old, w, h))
+    write_file(&path, &with_video(&old, w, h, c256))
 }
 
 fn main(s: &os2::Startup) -> u32 {
@@ -195,10 +246,10 @@ fn main(s: &os2::Startup) -> u32 {
         os2::println!("DISPLAY: Presentation Manager is not available");
         return 1;
     }
-    if let Some((w, h)) = parse_mode(&args) {
-        let rc = unsafe { Rs2SetDisplayMode(w, h) };
+    if let Some((w, h, c)) = parse_mode(&args) {
+        let rc = if (w, h) == current() { 0 } else { unsafe { Rs2SetDisplayMode(w, h) } };
         if rc == 0 {
-            save(w, h);
+            save(w, h, c.unwrap_or_else(colors256_saved));
         }
         unsafe {
             WinDestroyMsgQueue(hmq);
@@ -207,7 +258,7 @@ fn main(s: &os2::Startup) -> u32 {
         return rc;
     }
     unsafe {
-        *core::ptr::addr_of_mut!(APP) = Some(App { hab, frame: 0, client: 0, modes: modes(), asking: None, centred: (0, 0) });
+        *core::ptr::addr_of_mut!(APP) = Some(App { hab, frame: 0, client: 0, modes: modes(), asking: None, centred: (0, 0), now256: colors256_now(), saved256: colors256_saved() });
         WinRegisterClass(hab, CLASS.as_ptr(), client_proc, WS_CLIPCHILDREN, 0);
     }
     let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_MINBUTTON | FCF_TASKLIST | 0x0200; // FCF_DLGBORDER
@@ -234,7 +285,7 @@ fn main(s: &os2::Startup) -> u32 {
 /// changed size).
 fn centre(show: bool) {
     let a = app();
-    let (cx, cy) = (340, 260);
+    let (cx, cy) = (340, 320);
     let mut r = RectL { l: 0, b: 0, r: cx, t: cy };
     unsafe { WinCalcFrameRect(a.frame, &mut r, 0) };
     let (fw, fh) = (r.r - r.l, r.t - r.b);
@@ -252,9 +303,13 @@ fn control(parent: u32, class: &[u8], text: &str, style: u32, id: u32, x: i32, y
 /// The controls (client coordinates, from the bottom left).
 fn build(h: u32) {
     let label = SS_TEXT | DT_LEFT | DT_VCENTER;
-    control(h, WC_STATIC, "Screen resolution:", label, ID_LABEL, 12, 228, 316, 20);
-    control(h, WC_LISTBOX, "", WS_TABSTOP | WS_GROUP, ID_MODES, 12, 92, 316, 132);
-    control(h, WC_STATIC, "", SS_TEXT | DT_LEFT | DT_WORDBREAK, ID_STATUS, 12, 48, 316, 40);
+    control(h, WC_STATIC, "Screen resolution:", label, ID_LABEL, 12, 288, 316, 20);
+    control(h, WC_LISTBOX, "", WS_TABSTOP | WS_GROUP, ID_MODES, 12, 152, 316, 132);
+    control(h, WC_STATIC, "Colors:", label, ID_COLORS, 12, 124, 70, 20);
+    control(h, WC_BUTTON, "16 million", BS_AUTORADIOBUTTON | WS_TABSTOP | WS_GROUP, ID_TRUE, 84, 124, 120, 20);
+    control(h, WC_BUTTON, "256", BS_AUTORADIOBUTTON, ID_256, 212, 124, 100, 20);
+    control(h, WC_STATIC, "", SS_TEXT | DT_LEFT | DT_WORDBREAK, ID_STATUS, 12, 48, 316, 70);
+    unsafe { WinSendMsg(item(if app().saved256 { ID_256 } else { ID_TRUE }), BM_SETCHECK, 1, 0) };
     control(h, WC_BUTTON, "~Apply", BS_PUSHBUTTON | WS_TABSTOP | WS_GROUP, ID_APPLY, 120, 10, 100, 30);
     control(h, WC_BUTTON, "Close", BS_PUSHBUTTON | WS_TABSTOP, ID_CLOSE, 228, 10, 100, 30);
     fill_list();
@@ -273,12 +328,26 @@ fn fill_list() {
         unsafe { WinSendMsg(item(ID_MODES), LM_INSERTITEM, LIT_END, t.as_ptr() as u32) };
     }
     if app().modes.is_empty() {
-        set_text(ID_STATUS, &alloc::format!("This display stays at {} x {}: it has no driver that can change the resolution.", cur.0, cur.1));
-        unsafe { WinEnableWindow(item(ID_APPLY), 0) };
+        set_text(ID_STATUS, &alloc::format!("This display stays at {} x {}: it has no driver that can change the resolution.{}", cur.0, cur.1, colors_note()));
     } else {
         unsafe { WinSendMsg(item(ID_MODES), LM_SELECTITEM, sel as u32, 1) };
-        set_text(ID_STATUS, &alloc::format!("The screen is at {} x {}.", cur.0, cur.1));
+        set_text(ID_STATUS, &alloc::format!("The screen is at {} x {}.{}", cur.0, cur.1, colors_note()));
     }
+}
+
+/// The colours now and after the next start.
+fn colors_note() -> String {
+    let name = |c: bool| if c { "256" } else { "16 million" };
+    let a = app();
+    if a.now256 == a.saved256 {
+        alloc::format!(" {} colors.", name(a.now256))
+    } else {
+        alloc::format!(" {} colors now, {} after the next start.", name(a.now256), name(a.saved256))
+    }
+}
+
+fn chosen256() -> bool {
+    unsafe { WinSendMsg(item(ID_256), BM_QUERYCHECK, 0, 0) != 0 }
 }
 
 fn selected() -> Option<(u32, u32)> {
@@ -286,10 +355,20 @@ fn selected() -> Option<(u32, u32)> {
     app().modes.get(i as usize).copied().filter(|_| i >= 0)
 }
 
-/// Switch to the selected resolution and ask whether to keep it.
+/// Switch to the selected resolution and ask whether to keep it. New
+/// colours are only saved (for the next start).
 fn apply() {
-    let Some((w, h)) = selected() else { return };
     let old = current();
+    let (w, h) = selected().unwrap_or(old);
+    if chosen256() != app().saved256 {
+        let c = chosen256();
+        if !save(old.0, old.1, c) {
+            set_text(ID_STATUS, "The colors could not be saved in CONFIG.SYS.");
+            return;
+        }
+        app().saved256 = c;
+        fill_list();
+    }
     if (w, h) == old {
         return;
     }
@@ -325,10 +404,10 @@ fn answer(keep: bool) {
     unsafe { WinEnableWindow(item(ID_MODES), 1) };
     fill_list();
     let (w, h) = if keep { new } else { old };
-    if keep && !save(w, h) {
+    if keep && !save(w, h, app().saved256) {
         set_text(ID_STATUS, &alloc::format!("The screen is at {w} x {h}. It could not be saved in CONFIG.SYS."));
     } else if keep {
-        set_text(ID_STATUS, &alloc::format!("The screen is at {w} x {h} (saved for the next start)."));
+        set_text(ID_STATUS, &alloc::format!("The screen is at {w} x {h} (saved for the next start).{}", colors_note()));
     }
     unsafe { WinSetFocus(HWND_DESKTOP, item(ID_MODES)) };
 }
