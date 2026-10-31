@@ -788,6 +788,16 @@ fn open_sub(h: u32, i: usize, first: bool) {
     }
     close_from(h);
     send(notify_target(root()), WM_INITMENU, id as u32, sub);
+    // A submenu made by WinCreateMenu (an action bar there, and a child
+    // of the window given: VisualAge Smalltalk makes its pull-downs with
+    // the menu bar as parent) drops down as a vertical menu on the
+    // desktop, where the position is reckoned.
+    if horizontal(sub) || ctl::parent(sub) != HWND_DESKTOP {
+        if let Some(w) = st().desk.get_mut(sub) {
+            w.style &= !(MS_ACTIONBAR | MS_TITLEBUTTON | ws::VISIBLE);
+        }
+        st().desk.set_parent(sub, HWND_DESKTOP);
+    }
     let r = rects(h).get(i).copied().unwrap_or_default();
     let sr = st().desk.screen_rect(h);
     let (w, hh) = popup_size(sub);
@@ -800,12 +810,6 @@ fn open_sub(h: u32, i: usize, first: bool) {
     if let Some(m) = data(sub) {
         m.sel = None;
         m.open = 0;
-    }
-    // A submenu made with another menu as its parent (WinCreateMenu with
-    // the menu bar, as VisualAge Smalltalk makes its pull-downs) drops
-    // down on the desktop, where the position is reckoned.
-    if ctl::parent(sub) != HWND_DESKTOP {
-        st().desk.set_parent(sub, HWND_DESKTOP);
     }
     st().desk.set_pos(sub, left, top - hh, w, hh);
     st().desk.to_top(sub);
