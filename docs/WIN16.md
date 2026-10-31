@@ -313,6 +313,47 @@ the indirect brushes and pens, and fonts (below); USER's InvertRect,
 FrameRect and DrawFocusRect. The built-in controls draw with the same
 functions from Rust (`gdi::fill`, `gdi::text_at`, `gdi::draw_text_bytes`).
 
+**The display's colours** follow PM's device (docs/PM.md "256
+colours"): WIN16 asks PM once per process (DevQueryCaps
+CAPS_COLOR_BITCOUNT on a screen PS, `bitmap::display_bits`). In true
+colour GetDeviceCaps reports BITSPIXEL 24, NUMCOLORS -1, no palette.
+When PM runs at 256 colours (`VIDEO=WxHx256`) a program sees what
+Windows 3.1 on a 256-colour palette display reports: BITSPIXEL 8,
+PLANES 1, NUMCOLORS 20, SIZEPALETTE 256, NUMRESERVED 20, COLORRES 18 and
+RC_PALETTE in RASTERCAPS. Then:
+
+- CreateCompatibleBitmap, CreateDiscardableBitmap, CreateDIBitmap,
+  LoadBitmap and CreateBitmap with 8 bits per pixel make 8-bit PM
+  bitmaps, whose DDB bits (Get/SetBitmapBits) are indexes into the
+  system palette (pels drawn into them keep their colours, as PM's
+  memory bitmaps do).
+- GetSystemPaletteEntries is PM's hardware palette (GpiQueryRealColors:
+  PMMERGE's default palette, black at 0 and white at 255, with realized
+  colours in the middle); in true colour it is Windows' 20 static
+  colours at the ends of a colour cube. GetNearestColor is
+  GpiQueryNearestColor.
+- A logical palette (keeping its entries' PC_* flags, which are PM's
+  bits too) gets a PM palette (GpiCreatePalette, LCOLF_CONSECRGB) when
+  it is first selected; SelectPalette is also GpiSelectPalette on the
+  DC's PS, SetPaletteEntries GpiSetPaletteEntries, AnimatePalette
+  GpiAnimatePalette; ResizePalette and DeleteObject delete the PM palette
+  (deleting the realized one gives the default palette back).
+- RealizePalette selects the DC's palette in its PS and calls
+  WinRealizePalette for the DC's window: the foreground window's
+  colours take hardware entries, others map to what is there; it returns
+  the entries mapped (a memory DC's palette maps to what is there). The
+  stock DEFAULT_PALETTE is PM's default (no palette).
+- PM's WM_REALIZEPALETTE, posted to every queue when the hardware
+  palette changed, becomes WM_PALETTECHANGED to each top-level window
+  (wParam: the window that realized, when it is the task's); a
+  top-level window being activated gets WM_QUERYNEWPALETTE after
+  WM_ACTIVATE.
+
+In true colour RealizePalette returns 0 and nothing else changes.
+PALETTEINDEX colours are the selected palette's entries in both modes.
+W16TEST's palette checks pass in both (run it with and without
+`VIDEO=1024x768x256` in CONFIG.SYS).
+
 ## Controls, dialogs and menus
 
 **Built-in controls.** BUTTON, STATIC, EDIT, LISTBOX, COMBOBOX (and its
@@ -671,7 +712,8 @@ Windows; what they needed, in the order they asked for it:
   file was written since it was loaded (Delphi's rebuilt COMPLIB.DCL) is
   loaded anew.
 - **Bitmaps** (`bitmap.rs`): memory DCs are PM memory presentation
-  spaces, HBITMAPs PM bitmaps (1 or 24 bits per pixel), BitBlt and
+  spaces, HBITMAPs PM bitmaps (1 bit per pixel, or the display's 24 or
+  8: "The display's colours" above), BitBlt and
   StretchBlt PM's GpiBitBlt with Windows' ROP3 codes, monochrome
   conversions in Windows' colours; DDB bits (SetBitmapBits, CreateBitmap),
   DIBs (CreateDIBitmap, Get/SetDIBits, SetDIBitsToDevice, StretchDIBits:
