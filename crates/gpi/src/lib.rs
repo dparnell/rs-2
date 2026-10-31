@@ -18,6 +18,7 @@ pub mod goca;
 pub mod icon;
 pub mod math;
 pub mod metafile;
+pub mod palette;
 pub mod pattern;
 mod ps;
 pub mod psdev;

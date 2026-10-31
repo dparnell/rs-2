@@ -209,22 +209,8 @@ pub fn standard_table(bitcount: u16) -> Vec<Rgb> {
             0x000000, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xcccccc, 0x808080, 0xff0000, 0x00ff00,
             0xffff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xffffff,
         ],
-        8 => {
-            // 6x6x6 colour cube, then 40 greys.
-            let mut t = Vec::with_capacity(256);
-            for r in 0..6u32 {
-                for g in 0..6u32 {
-                    for b in 0..6u32 {
-                        t.push((r * 51) << 16 | (g * 51) << 8 | b * 51);
-                    }
-                }
-            }
-            for i in 0..40u32 {
-                let v = i * 255 / 39;
-                t.push(v << 16 | v << 8 | v);
-            }
-            t
-        }
+        // The system's default palette (PMMERGE's ulDefaultPalette256).
+        8 => crate::palette::default_palette(256),
         _ => Vec::new(),
     }
 }
