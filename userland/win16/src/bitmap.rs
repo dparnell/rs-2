@@ -4,8 +4,10 @@
 //! (CreateCompatibleDC) is a PM memory presentation space on a memory
 //! device context (DevOpenDC OD_MEMORY), so every GDI call draws into the
 //! selected bitmap as it draws into a window. Like Windows', a new memory
-//! DC has a 1x1 monochrome bitmap. Colour bitmaps are 24 bits per pixel
-//! (the display's format, GetDeviceCaps BITSPIXEL); monochrome ones 1.
+//! DC has a 1x1 monochrome bitmap. Colour bitmaps are in the display's
+//! format (GetDeviceCaps BITSPIXEL: 24 bits per pixel, 8 when PM runs at
+//! 256 colours, whose DDB bits are indexes into the system palette);
+//! monochrome ones 1.
 //!
 //! BitBlt and StretchBlt are GpiBitBlt: Windows' ternary raster
 //! operations are PM's (the ROP's high word is the ROP3 index). A
@@ -56,15 +58,57 @@ fn info(w: i32, h: i32, bpp: u16, colors: &[u32]) -> Vec<u8> {
     v
 }
 
-/// The colour table of a DDB format: black and white, or the default
-/// palette's colours.
+/// The colour table of a DDB format: black and white, the default
+/// palette's colours, or the system palette's.
 fn ddb_colors(bpp: u16) -> Vec<u32> {
     match bpp {
         1 => alloc::vec![0, 0xffffff],
         4 => (0..16).map(|i| gdi::DEFAULT_PALETTE[if i < 8 { i } else { i + 4 }]).collect(),
-        8 => (0..256).map(|i| if i < 10 { gdi::DEFAULT_PALETTE[i] } else if i >= 246 { gdi::DEFAULT_PALETTE[i - 236] } else { cube(i - 10) }).collect(),
+        8 => system_colors(),
         _ => Vec::new(),
     }
+}
+
+/// The display's bits per pel as PM reports them (DevQueryCaps
+/// CAPS_COLOR_BITCOUNT of the screen): 8 when PM runs at 256 colours,
+/// else 24. PM's mode is fixed from its start.
+pub fn display_bits() -> u16 {
+    static BITS: Global<u16> = Global::new(0);
+    let b = BITS.get();
+    if *b == 0 {
+        let mut v = 24;
+        unsafe {
+            let hps = WinGetScreenPS(HWND_DESKTOP);
+            DevQueryCaps(hps, 16, 1, &mut v);
+            WinReleasePS(hps);
+        }
+        *b = if v == 8 { 8 } else { 24 };
+    }
+    *b
+}
+
+/// The system palette as COLORREFs: PM's hardware palette at 256 colours
+/// (GpiQueryRealColors by physical index), else Windows' static colours
+/// at both ends of a colour cube.
+pub fn system_colors() -> Vec<u32> {
+    if display_bits() == 8 {
+        let mut t = [0i32; 256];
+        let n = unsafe {
+            let hps = WinGetScreenPS(HWND_DESKTOP);
+            let n = GpiQueryRealColors(hps, 0, 0, 256, t.as_mut_ptr());
+            WinReleasePS(hps);
+            n
+        };
+        if n == 256 {
+            return t.iter().map(|&c| from_pm(c as u32)).collect();
+        }
+    }
+    (0..256).map(|i| if i < 10 { gdi::DEFAULT_PALETTE[i] } else if i >= 246 { gdi::DEFAULT_PALETTE[i - 236] } else { cube(i - 10) }).collect()
+}
+
+/// PM's RGB as a COLORREF.
+fn from_pm(c: u32) -> u32 {
+    (c & 0xff) << 16 | c & 0xff00 | (c >> 16) & 0xff
 }
 
 /// A 6x6x6 colour cube for the 8-bit DDB entries between the static
@@ -75,15 +119,20 @@ fn cube(i: usize) -> u32 {
     (b * 51) << 16 | (g * 51) << 8 | r * 51
 }
 
-/// A new PM bitmap (bits per pixel 1 or 24).
+/// A new PM bitmap (bits per pixel 1, 8 or 24).
 fn pm_bitmap(w: i32, h: i32, bpp: u16) -> u32 {
     let hdr = info(w.max(1), h.max(1), bpp, &[]);
     unsafe { GpiCreateBitmap(0, hdr.as_ptr(), 0, core::ptr::null(), core::ptr::null()) }
 }
 
-/// A bitmap object for a new PM bitmap.
+/// A bitmap object for a new PM bitmap: monochrome, 8 bits per pel on a
+/// 256-colour display, else 24.
 pub fn new_bitmap(w: i32, h: i32, bpp: u16) -> u16 {
-    let bpp = if bpp == 1 { 1 } else { 24 };
+    let bpp = match bpp {
+        1 => 1,
+        8 if display_bits() == 8 => 8,
+        _ => 24,
+    };
     let hbm = pm_bitmap(w, h, bpp);
     if hbm == 0 {
         return 0;
@@ -511,7 +560,7 @@ pub fn from_dib(data: &[u8]) -> u16 {
     if w <= 0 || h <= 0 || len > data.len() {
         return 0;
     }
-    let b = new_bitmap(w, h, if bpp == 1 { 1 } else { 24 });
+    let b = new_bitmap(w, h, if bpp == 1 { 1 } else { display_bits() });
     if b != 0 {
         with_ps(b, |hps, _| unsafe { GpiSetBitmapBits(hps, 0, h, p.add(len), p) });
     }
@@ -556,7 +605,7 @@ fn system_bitmap(id: u16) -> u16 {
         32754 => (sm(30) * 2, sm(31)),
         _ => (16, 16),
     };
-    let b = new_bitmap(w, h, 24);
+    let b = new_bitmap(w, h, display_bits());
     let hdc = create_memory_dc();
     select(hdc, b);
     gdi::fill(hdc, [0, 0, w, h], gdi::sys_color(gdi::COLOR_BTNFACE));
@@ -702,7 +751,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // CreateCompatibleBitmap(hdc, w, h), CreateDiscardableBitmap
         3051 | 3156 => {
             let (h, w, hh) = (a.w(), a.i(), a.i());
-            new_bitmap(w, hh, if is_mono(h) { 1 } else { 24 }) as u32
+            new_bitmap(w, hh, if is_mono(h) { 1 } else { display_bits() }) as u32
         }
         // CreateCompatibleDC(hdc)
         3052 => {
@@ -743,7 +792,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 return Some(0);
             }
             let (w, hh, _) = dib_size(hdr);
-            let b = new_bitmap(w, hh, if is_mono(h) { 1 } else { 24 });
+            let b = new_bitmap(w, hh, if is_mono(h) { 1 } else { display_bits() });
             if b != 0 && init & CBM_INIT != 0 && !bits.is_null() && !bmi.is_null() {
                 set_dib_bits(h, b, 0, hh, bits, bmi, usage);
             }
@@ -794,7 +843,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 return Some(0);
             }
             let n = w16(p, 2) as usize;
-            let v = (0..n.min(1024)).map(|i| l32(p, 4 + 4 * i) & 0xffffff).collect();
+            let v = (0..n.min(1024)).map(|i| l32(p, 4 + 4 * i)).collect();
             gdi::new_obj(Obj::Palette(v)) as u32
         }
         // GetPaletteEntries(hpal, start, n, entries), SetPaletteEntries
@@ -813,9 +862,12 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
                 if ord == 3363 {
                     unsafe { (p.add(4 * i) as *mut u32).write_unaligned(pal[k]) };
                 } else {
-                    pal[k] = l32(p, 4 * i) & 0xffffff;
+                    pal[k] = l32(p, 4 * i);
                 }
                 done += 1;
+            }
+            if ord == 3364 && done != 0 {
+                pm_palette_entries(h, start, done as usize, false);
             }
             done
         }
@@ -830,17 +882,19 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             if let (Some(Obj::Palette(pal)), false) = (gdi::obj_mut(h), p.is_null()) {
                 for i in 0..n {
                     if let Some(e) = pal.get_mut(start + i) {
-                        *e = l32(p, 4 * i) & 0xffffff;
+                        *e = l32(p, 4 * i);
                     }
                 }
+                pm_palette_entries(h, start, n, true);
             }
             0
         }
-        // ResizePalette(hpal, n)
+        // ResizePalette(hpal, n): PM's palette is made again.
         3368 => {
             let (h, n) = (a.w(), a.w() as usize);
             let Some(Obj::Palette(pal)) = gdi::obj_mut(h) else { return Some(0) };
             pal.resize(n, 0);
+            forget_palette(h);
             1
         }
         // GetNearestPaletteIndex(hpal, color)
@@ -849,10 +903,18 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             let Some(Obj::Palette(pal)) = gdi::obj(h) else { return Some(0) };
             nearest(&pal, c) as u32
         }
-        // GetNearestColor(hdc, color): the display has every colour.
+        // GetNearestColor(hdc, color): the display's (every colour in
+        // true colour; its palette's nearest at 256 colours).
         3154 => {
             let (_h, c) = (a.w(), a.l());
-            c & 0xffffff
+            let rgb = (c & 0xff) << 16 | c & 0xff00 | (c >> 16) & 0xff;
+            let n = unsafe {
+                let hps = WinGetScreenPS(1);
+                let n = GpiQueryNearestColor(hps, 0, rgb as i32);
+                WinReleasePS(hps);
+                n
+            };
+            if n < 0 { c & 0xffffff } else { (n as u32 & 0xff) << 16 | n as u32 & 0xff00 | (n as u32 >> 16) & 0xff }
         }
         // SetSystemPaletteUse(hdc, use), GetSystemPaletteUse(hdc):
         // SYSPAL_STATIC.
@@ -868,7 +930,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // GetSystemPaletteEntries(hdc, start, n, entries)
         3375 => {
             let (_h, start, n, p) = (a.w(), a.w() as usize, a.w() as usize, a.p());
-            let all = ddb_colors(8);
+            let all = system_colors();
             if p.is_null() {
                 return Some(256);
             }
@@ -881,11 +943,17 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // SelectPalette(hdc, hpal, background), RealizePalette(hdc)
         2282 => {
             let (h, p, _bg) = (a.w(), a.w(), a.w());
-            gdi::select_palette(h, p) as u32
+            let old = gdi::select_palette(h, p);
+            if old != 0 && display_bits() == 8 {
+                if let Some(d) = gdi::dc(h) {
+                    unsafe { GpiSelectPalette(d.hps, pm_palette(p)) };
+                }
+            }
+            old as u32
         }
         2283 => {
-            a.w();
-            0
+            let h = a.w();
+            realize_palette(h)
         }
         // LoadBitmap(hinst, name)
         2175 => {
@@ -903,15 +971,95 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
     })
 }
 
+/// The PM palettes of GDI palettes, made as they are first selected at
+/// 256 colours: (HPALETTE, PM's HPAL).
+static PM_PALETTES: Global<Vec<(u16, u32)>> = Global::new(Vec::new());
+
+/// PALETTEENTRYs (red, green, blue, flags) as PM's palette entries
+/// (flags in the top byte, PC_RESERVED, PC_EXPLICIT and PC_NOCOLLAPSE
+/// the same bits, then RGB).
+fn pm_entries(pal: &[u32]) -> Vec<u32> {
+    pal.iter().map(|&e| e & 0xff00_0000 | from_pm(e & 0xff_ffff)).collect()
+}
+
+/// The PM palette of a GDI palette (0, PM's default, for the stock
+/// DEFAULT_PALETTE).
+fn pm_palette(h: u16) -> u32 {
+    if h == gdi::STOCK_PALETTE {
+        return 0;
+    }
+    let Some(Obj::Palette(pal)) = gdi::obj(h) else { return 0 };
+    let v = PM_PALETTES.get();
+    if let Some(&(_, p)) = v.iter().find(|e| e.0 == h) {
+        return p;
+    }
+    let t = pm_entries(&pal);
+    let hab = crate::kernel::TASK.get().hab;
+    // LCOLF_CONSECRGB
+    let p = unsafe { GpiCreatePalette(hab, 0, 2, t.len() as u32, t.as_ptr()) };
+    if p != 0 {
+        v.push((h, p));
+    }
+    p
+}
+
+/// SetPaletteEntries and AnimatePalette: PM's palette changes too.
+fn pm_palette_entries(h: u16, start: usize, n: usize, animate: bool) {
+    let Some(&(_, p)) = PM_PALETTES.get().iter().find(|e| e.0 == h) else { return };
+    let Some(Obj::Palette(pal)) = gdi::obj(h) else { return };
+    let t = pm_entries(pal.get(start..(start + n).min(pal.len())).unwrap_or(&[]));
+    unsafe {
+        if animate {
+            GpiAnimatePalette(p, 2, start as u32, t.len() as u32, t.as_ptr());
+        } else {
+            GpiSetPaletteEntries(p, 2, start as u32, t.len() as u32, t.as_ptr());
+        }
+    }
+}
+
+/// A GDI palette deleted or resized: its PM palette goes (deleting the
+/// realized one gives the system its default palette back).
+pub fn forget_palette(h: u16) {
+    let v = PM_PALETTES.get();
+    if let Some(i) = v.iter().position(|e| e.0 == h) {
+        unsafe { GpiDeletePalette(v[i].1) };
+        v.remove(i);
+    }
+}
+
+/// RealizePalette(hdc): at 256 colours the DC's palette is PM's palette
+/// selected in its PS, and WinRealizePalette gives it hardware entries
+/// (the foreground window's; others map to what is there). Returns the
+/// entries mapped; a true-colour display has nothing to realize.
+fn realize_palette(hdc: u16) -> u32 {
+    if display_bits() != 8 {
+        return 0;
+    }
+    let Some(d) = gdi::dc(hdc) else { return 0 };
+    let (hps, pmwnd, kind, h) = (d.hps, d.pmwnd, d.kind, gdi::dc_palette(hdc));
+    let p = pm_palette(h);
+    unsafe { GpiSelectPalette(hps, p) };
+    if p == 0 {
+        return 0;
+    }
+    // A memory DC's palette maps to what is there.
+    if kind == gdi::DcKind::Memory || pmwnd == 0 {
+        return gdi::palette_colors(hdc).len() as u32;
+    }
+    let mut changed = 0;
+    unsafe { WinRealizePalette(pmwnd, hps, &mut changed) }.max(0) as u32
+}
+
 /// CreateBitmap: monochrome (1 bit) or colour, with DDB bits.
 fn create_bitmap(w: i32, h: i32, bpp: u16, bits: *const u8) -> u32 {
     let b = new_bitmap(w, h, bpp);
     if b != 0 && !bits.is_null() {
         let stride = ((w.max(1) as usize * if bpp == 1 { 1 } else { bpp as usize }).div_ceil(16)) * 2;
-        if bpp == 1 || bpp == 24 {
+        if bitmap_of(b).is_some_and(|o| o.3 == bpp) {
             set_ddb_bits(b, bits, stride * h.max(1) as usize);
         } else {
-            // 4 and 8 bits: indexes into the default colours.
+            // 4 bits, and 8 on a true-colour display: indexes into the
+            // default colours.
             let src_stride = ((w as usize * bpp as usize).div_ceil(16)) * 2;
             let dst_stride = ((w as usize * bpp as usize).div_ceil(32)) * 4;
             let mut buf = alloc::vec![0u8; dst_stride * h as usize];

@@ -58,7 +58,7 @@ pub extern "C" fn WinInitialize(_fl: u32) -> u32 {
             let surface = unsafe {
                 Surface::new(info.address as *mut u32, info.width as i32, info.height as i32, info.stride as i32, info.flags & 1 != 0)
             };
-            state::init(surface);
+            state::init(surface, info.flags & 2 != 0);
             win::register_builtin();
         }
         crate::fonts::init();

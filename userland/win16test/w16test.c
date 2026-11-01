@@ -1556,6 +1556,125 @@ static void version_tests(void)
           "VerQueryValue");
 }
 
+/* The display's colours follow PM's: true colour, or 256 colours with a
+ * palette (VIDEO=WxHx256). Every check passes in both. */
+static int pal_changed, pal_query;
+static HWND pal_from;
+
+LONG FAR PASCAL _export PalWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    switch (msg) {
+    case WM_PALETTECHANGED:
+        pal_changed++;
+        pal_from = (HWND)wp;
+        return 0;
+    case WM_QUERYNEWPALETTE:
+        pal_query++;
+        return 0;
+    }
+    return DefWindowProc(hwnd, msg, wp, lp);
+}
+
+static void palette_tests(HINSTANCE hInst)
+{
+    WNDCLASS wc;
+    HWND w;
+    HDC dc, mem;
+    HPALETTE hpal, old;
+    HBITMAP bm, oldbm;
+    BITMAP info;
+    PALETTEENTRY sys[256], back[2];
+    struct { WORD ver, n; PALETTEENTRY e[2]; } lp;
+    static BYTE bits8[4] = { 0, 255, 0, 0 };
+    static BYTE bits24[12] = { 0, 0, 0, 255, 255, 255 };
+    BYTE got[12];
+    MSG m;
+    int bits, pal, n, i, found;
+    COLORREF odd = RGB(0x12, 0x34, 0x56);
+
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = PalWndProc;
+    wc.hInstance = hInst;
+    wc.hbrBackground = GetStockObject(WHITE_BRUSH);
+    wc.lpszClassName = "W16Pal";
+    RegisterClass(&wc);
+    w = CreateWindow("W16Pal", "W16TEST palette", WS_OVERLAPPEDWINDOW, 40, 40, 160, 100, NULL, NULL, hInst, NULL);
+    ShowWindow(w, SW_SHOWNORMAL);
+    UpdateWindow(w);
+    dc = GetDC(w);
+    bits = GetDeviceCaps(dc, BITSPIXEL);
+    pal = (GetDeviceCaps(dc, RASTERCAPS) & RC_PALETTE) != 0;
+    wsprintf(line, "GetDeviceCaps: %d bits per pixel, RC_PALETTE %d", bits, pal);
+    check((bits == 24 && !pal) || (bits == 8 && pal), line);
+    if (pal) {
+        check(GetDeviceCaps(dc, PLANES) == 1 && GetDeviceCaps(dc, NUMCOLORS) == 20 && GetDeviceCaps(dc, SIZEPALETTE) == 256
+              && GetDeviceCaps(dc, NUMRESERVED) == 20 && GetDeviceCaps(dc, COLORRES) == 18,
+              "256 colours: PLANES 1, NUMCOLORS 20, SIZEPALETTE 256, NUMRESERVED 20, COLORRES 18");
+        check(pal_query > 0, "256 colours: WM_QUERYNEWPALETTE as the window was activated");
+    } else {
+        check(GetDeviceCaps(dc, NUMCOLORS) == -1 && GetDeviceCaps(dc, SIZEPALETTE) == 0, "true colour: NUMCOLORS -1, SIZEPALETTE 0");
+    }
+
+    /* The system palette: black first, white last. */
+    n = GetSystemPaletteEntries(dc, 0, 256, sys);
+    check(n == 256 && sys[0].peRed == 0 && sys[0].peGreen == 0 && sys[0].peBlue == 0 && sys[255].peRed == 255
+          && sys[255].peGreen == 255 && sys[255].peBlue == 255, "GetSystemPaletteEntries: black first, white last");
+
+    /* A DDB compatible with the display is in its format: 8-bit indexes
+       into the system palette at 256 colours. */
+    bm = CreateCompatibleBitmap(dc, 4, 1);
+    GetObject(bm, sizeof info, &info);
+    wsprintf(line, "CreateCompatibleBitmap of the display: %d bits per pixel, %d bytes a row", info.bmBitsPixel, info.bmWidthBytes);
+    check(info.bmBitsPixel == bits && info.bmPlanes == 1 && info.bmWidthBytes == (bits == 8 ? 4 : 12), line);
+    n = bits == 8 ? 4 : 12;
+    SetBitmapBits(bm, n, bits == 8 ? (void FAR *)bits8 : (void FAR *)bits24);
+    mem = CreateCompatibleDC(dc);
+    oldbm = SelectObject(mem, bm);
+    check(GetPixel(mem, 0, 0) == RGB(0, 0, 0) && GetPixel(mem, 1, 0) == RGB(255, 255, 255), "the DDB's bits (black, white)");
+    memset(got, 0x55, sizeof got);
+    check(GetBitmapBits(bm, n, got) == n && memcmp(got, bits == 8 ? bits8 : bits24, n) == 0, "GetBitmapBits of the display's format");
+    SelectObject(mem, oldbm);
+    DeleteDC(mem);
+    DeleteObject(bm);
+
+    /* A logical palette keeps its entries' flags. */
+    lp.ver = 0x300;
+    lp.n = 2;
+    lp.e[0].peRed = 0x12; lp.e[0].peGreen = 0x34; lp.e[0].peBlue = 0x56; lp.e[0].peFlags = 0;
+    lp.e[1].peRed = 0xfe; lp.e[1].peGreen = 0x01; lp.e[1].peBlue = 0x80; lp.e[1].peFlags = PC_RESERVED;
+    hpal = CreatePalette((LOGPALETTE FAR *)&lp);
+    check(GetPaletteEntries(hpal, 0, 2, back) == 2 && back[1].peRed == 0xfe && back[1].peFlags == PC_RESERVED,
+          "GetPaletteEntries (with the flags)");
+
+    /* Realized in the foreground: at 256 colours the system palette gets
+       the colours (and the windows hear of it), in true colour there is
+       nothing to realize. */
+    old = SelectPalette(dc, hpal, FALSE);
+    pal_changed = 0;
+    n = RealizePalette(dc);
+    while (PeekMessage(&m, 0, 0, 0, PM_REMOVE))
+        DispatchMessage(&m);
+    GetSystemPaletteEntries(dc, 0, 256, sys);
+    for (i = 0, found = 0; i < 256; i++)
+        if (sys[i].peRed == 0x12 && sys[i].peGreen == 0x34 && sys[i].peBlue == 0x56)
+            found = 1;
+    wsprintf(line, "RealizePalette: %d entries, in the system palette %d, WM_PALETTECHANGED %d (from %04x)", n, found, pal_changed, pal_from);
+    check(pal ? n == 2 && found && pal_changed > 0 && pal_from == w : n == 0, line);
+    check(GetNearestColor(dc, odd) == odd, "GetNearestColor of a realized colour");
+    SetPixel(dc, 2, 2, PALETTEINDEX(0));
+    check(GetPixel(dc, 2, 2) == odd, "PALETTEINDEX(0) draws the palette's colour");
+    SelectPalette(dc, old, FALSE);
+    RealizePalette(dc);
+    check(DeleteObject(hpal), "DeleteObject of a palette");
+    GetSystemPaletteEntries(dc, 0, 256, sys);
+    for (i = 0, found = 0; i < 256; i++)
+        if (sys[i].peRed == 0x12 && sys[i].peGreen == 0x34 && sys[i].peBlue == 0x56)
+            found = 1;
+    check(!found, "deleting the realized palette gives the system palette back");
+    ReleaseDC(w, dc);
+    DestroyWindow(w);
+}
+
 static void real_app_tests(HINSTANCE hInst)
 {
     HWND hwnd = CreateWindow("Stage2", "W16TEST real programs", WS_OVERLAPPEDWINDOW, 20, 20, 200, 100, NULL, NULL, hInst, NULL);
@@ -1833,6 +1952,16 @@ WORD int21_keeps_ebx(void);
     value [ax] modify [ax bx cx dx];
 
 /* The pixel at (x, y) of a window, once it has painted. */
+/* The colour a pel of `c` shows (the nearest palette colour on a
+ * 256-colour display). */
+static COLORREF shown(COLORREF c)
+{
+    HDC hdc = GetDC(NULL);
+    c = GetNearestColor(hdc, c);
+    ReleaseDC(NULL, hdc);
+    return c;
+}
+
 static COLORREF pixel_at(HWND w, int x, int y)
 {
     HDC hdc;
@@ -1885,7 +2014,7 @@ static void installer_tests(HINSTANCE hInst)
     check(GetWindow(parent, GW_CHILD) == b1 && GetWindow(b1, GW_HWNDNEXT) == frame, "children in creation order, the first on top (GW_CHILD, GW_HWNDNEXT)");
     c = pixel_at(parent, 25, 35);
     wsprintf(buf, "a button under a later frame static shows, is %06lX", c);
-    check(c == GetSysColor(COLOR_BTNFACE), buf);
+    check(c == shown(GetSysColor(COLOR_BTNFACE)), buf);
     c = pixel_at(parent, 95, 75);
     wsprintf(buf, "a frame static's inside is its parent's background, is %06lX", c);
     check(c == RGB(255, 255, 255), buf);
@@ -1897,10 +2026,10 @@ static void installer_tests(HINSTANCE hInst)
     b3 = CreateWindow("BUTTON", "Three", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 150, 30, 60, 30, parent, (HMENU)5, hInst, NULL);
     c = pixel_at(parent, 25, 35);
     wsprintf(buf, "a button inside an earlier frame static shows, is %06lX", c);
-    check(c == GetSysColor(COLOR_BTNFACE), buf);
+    check(c == shown(GetSysColor(COLOR_BTNFACE)), buf);
     c = pixel_at(parent, 155, 45);
     wsprintf(buf, "a button inside an earlier group box shows, is %06lX", c);
-    check(c == GetSysColor(COLOR_BTNFACE), buf);
+    check(c == shown(GetSysColor(COLOR_BTNFACE)), buf);
     c = pixel_at(parent, 300, 70);
     wsprintf(buf, "a group box's inside is its parent's background, is %06lX", c);
     check(c == RGB(255, 255, 255), buf);
@@ -2480,6 +2609,7 @@ int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
     stage2_tests(hInst);
     stage3_tests(hInst);
     real_app_tests(hInst);
+    palette_tests(hInst);
     delphi_tests(hInst);
     toolhelp_tests(hInst);
     installer_tests(hInst);

@@ -514,6 +514,10 @@ fn ghost(h: u32) {
 pub fn process_gone(p: u32) {
     let s = st();
     s.procs.retain(|&x| x != p);
+    if s.realized.0 == p {
+        crate::gpiobj::unrealize();
+    }
+    let s = st();
     let queues: Vec<u32> = s.queues.iter().filter(|(_, q)| q.pid == p).map(|(&h, _)| h).collect();
     for q in &queues {
         for h in win::top_windows_of(*q) {

@@ -49,6 +49,8 @@ pub const W_GETTEXT: u16 = 0x000d;
 pub const W_GETTEXTLENGTH: u16 = 0x000e;
 pub const W_PAINT: u16 = 0x000f;
 pub const W_CLOSE: u16 = 0x0010;
+pub const W_QUERYNEWPALETTE: u16 = 0x030f;
+pub const W_PALETTECHANGED: u16 = 0x0311;
 pub const W_QUERYENDSESSION: u16 = 0x0011;
 pub const W_QUIT: u16 = 0x0012;
 pub const W_ERASEBKGND: u16 = 0x0014;
@@ -1839,10 +1841,33 @@ extern "C" fn std_frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     if msg == WM_ACTIVATE {
         if let Some(h) = by_frame(pmh).filter(|w| w.created && w.frame != w.client).map(|w| w.hwnd) {
             let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
-            send_inflight(h, W_ACTIVATE, (mp1 & 0xffff != 0) as u16, 0, q);
+            activate(h, mp1 & 0xffff != 0, q);
         }
     }
     r
+}
+
+/// WM_ACTIVATE; on a 256-colour display a top-level window being
+/// activated then gets WM_QUERYNEWPALETTE, as Windows sends it, to
+/// realize its palette in the foreground.
+fn activate(h: u16, active: bool, q: QMsg) {
+    send_inflight(h, W_ACTIVATE, active as u16, 0, q);
+    if active && crate::bitmap::display_bits() == 8 && wnd(h).is_some_and(|w| w.style & WS_CHILD == 0) {
+        send(h, W_QUERYNEWPALETTE, 0, 0);
+    }
+}
+
+/// PM's WM_REALIZEPALETTE, posted to every queue when a realization
+/// changed the hardware palette (mp1: the frame that realized): Windows'
+/// WM_PALETTECHANGED to every top-level window (wParam: the window that
+/// realized its palette, if it is one of the task's).
+fn palette_changed(frame: u32) {
+    let from = by_frame(frame).map_or(0, |w| w.hwnd);
+    for h in top_levels() {
+        if wnd(h).is_some_and(|w| w.created) {
+            send(h, W_PALETTECHANGED, from, 0);
+        }
+    }
 }
 
 /// The PM procedure of `Win16Frame`: the border of a plain window and
@@ -1852,7 +1877,7 @@ extern "C" fn frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         WM_ACTIVATE => {
             if let Some(h) = by_frame(pmh).filter(|w| w.created && w.frame == pmh && w.client != pmh).map(|w| w.hwnd) {
                 let q = QMsg { hwnd: pmh, msg, mp1, mp2, ..Default::default() };
-                send_inflight(h, W_ACTIVATE, (mp1 & 0xffff != 0) as u16, 0, q);
+                activate(h, mp1 & 0xffff != 0, q);
             }
             0
         }
@@ -2828,6 +2853,10 @@ fn get_message_(p: *mut u8, h: u16, lo: u16, hi: u16, peek: Option<u16>) -> u32 
                 crate::toolhelp::switched_to();
                 continue;
             }
+            if q.msg == WM_REALIZEPALETTE && q.hwnd == 0 {
+                palette_changed(q.mp1);
+                continue;
+            }
             unsafe { WinDispatchMsg(hab, &q) };
             if peek.is_some() {
                 // Only Windows messages count for PeekMessage.
@@ -3016,7 +3045,7 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_ACTIVATE => {
-            send_inflight(h, W_ACTIVATE, (mp1 & 0xffff != 0) as u16, 0, q);
+            activate(h, mp1 & 0xffff != 0, q);
             0
         }
         WM_SETFOCUS => {

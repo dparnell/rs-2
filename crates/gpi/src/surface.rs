@@ -4,6 +4,7 @@
 
 use crate::color::Rgb;
 use crate::damage::Damage;
+use crate::palette::Physical;
 use crate::rect::Rect;
 
 #[derive(Clone, Copy, Debug)]
@@ -17,6 +18,9 @@ pub struct Surface {
     pub red_low: bool,
     /// Where drawing is noted (null: nowhere).
     damage: *mut Damage,
+    /// A 256-colour display's hardware palette: pels get the nearest of
+    /// its colours (null: true colour).
+    palette: *mut Physical,
 }
 
 unsafe impl Send for Surface {}
@@ -26,7 +30,7 @@ impl Surface {
     /// `pixels` must point to `stride * height` writable pixels that stay
     /// valid while the surface is used.
     pub unsafe fn new(pixels: *mut u32, width: i32, height: i32, stride: i32, red_low: bool) -> Self {
-        Surface { pixels, width, height, stride, red_low, damage: core::ptr::null_mut() }
+        Surface { pixels, width, height, stride, red_low, damage: core::ptr::null_mut(), palette: core::ptr::null_mut() }
     }
 
     /// Note what is drawn from now on in `d` (null: nowhere).
@@ -36,6 +40,18 @@ impl Surface {
     /// one thread may draw at a time.
     pub unsafe fn set_damage(&mut self, d: *mut Damage) {
         self.damage = d;
+    }
+
+    /// Draw in the colours of palette `p` (null: true colour).
+    ///
+    /// # Safety
+    /// As for [`Surface::set_damage`].
+    pub unsafe fn set_palette(&mut self, p: *mut Physical) {
+        self.palette = p;
+    }
+
+    pub fn palette(&self) -> *mut Physical {
+        self.palette
     }
 
     fn note(&self, r: Rect) {
@@ -62,6 +78,10 @@ impl Surface {
     }
 
     fn encode(&self, c: Rgb) -> u32 {
+        let c = match unsafe { self.palette.as_mut() } {
+            Some(p) => p.map(c),
+            None => c,
+        };
         if self.red_low { (c >> 16) & 0xff | c & 0xff00 | (c & 0xff) << 16 } else { c & 0xff_ffff }
     }
 

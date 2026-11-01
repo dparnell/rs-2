@@ -213,7 +213,7 @@ pub extern "C" fn WinGetSysBitmap(_desk: u32, ibm: u32) -> u32 {
         SBMP_SIZEBOX => (16, 16),
         _ => return 0,
     };
-    let mut bm = Bitmap::new(w, h, 1, 24);
+    let mut bm = Bitmap::new(w, h, 1, gpiobj::device_bitcount());
     let surface = bm.surface();
     let mut ps = Ps::new(Point::new(0, 0), vec![Rect::new(0, 0, w, h)]);
     let mut c = Canvas::new(&mut ps, surface, w, h);
