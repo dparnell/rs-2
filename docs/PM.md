@@ -39,6 +39,7 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/registry` → REGISTRY.DLL, `userland/pmwinx` → PMWINX.DLL | The registry (Win32 registry calls) and Open32's forwarders to it (see [Open32 and the registry](#open32-and-the-registry-pmwinx-registry)). |
 | `userland/pmddeml` → PMDDEML.DLL | The DDE management library (`WinDde*`) on PM's DDE (see [Dynamic data exchange](#dynamic-data-exchange-dde)). |
 | `userland/pmviop` → PMVIOP.DLL | `WinDefAVioWindowProc` (see [AVIO](#avio-vio-presentation-spaces-in-windows)). |
+| `userland/pmgre` → PMGRE.DLL | The graphics engine's entry points (`Gre32EntryN`) for programs that call it directly, dispatched in PMWIN (see [The graphics engine](#the-graphics-engine-pmgre)). |
 | `userland/pmbidi` → PMBIDI.DLL, `userland/thailib` → THAILIB.DLL | Bidirectional language support of a system without bidirectional code pages (see [Bidirectional languages](#bidirectional-languages-pmbidi)). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
 | `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
@@ -578,6 +579,78 @@ to rs2's PMWIN or PMSHAPI export: `userland/pmmerge/ibm-forwards.txt`
 `tools/scripts/gen_pmmerge_forwards.py`, which `gen_pm_exports.py` runs
 after regenerating PMWIN's or PMSHAPI's exports.
 
+## The graphics engine (PMGRE)
+
+OS/2's GPI is a layer over the graphics engine (GRE): PMGPI and PMWIN
+call it through `Gre32Entry2` ... `Gre32Entry10` (N arguments: usually a
+device context first, a placeholder the engine fills in second to last,
+and the function number last), and some programs call it themselves
+with the Toolkit's `GreXxx` macros (pmddim.h). IBM's PMGRE.DLL only
+forwards to PMMERGE, whose dispatcher (`Dispatch32`, studied with
+`pmmrggre.sym`) works on the function number's low word: bit 0x4000
+says the first argument is a DC, which it checks (an unknown one is
+PMERR_INV_HDC, and the call returns the function's default value from
+a table by the low byte: -1 for GreGetPel, GreGetBitmapBits, the colour
+queries, GreEscape ..., else 0); the high word (COM_DRAW, COM_TRANSFORM
+...) is replaced by the DC's own flags, so programs pass 0 there; the
+low 9 bits index the device's function table, filled from the display
+driver and the engine, whose empty slots fail with
+PMERR_DEV_FUNC_NOT_INSTALLED and 0.
+
+rs2 has no presentation drivers, so its PMGRE (`userland/pmgre`) hands
+each call to PMWIN (`Rs2GreEntry`, private ordinal 9033: the arguments'
+address on the caller's stack and their count), whose `gre.rs` checks
+the DC as IBM's dispatcher does (rs2's DC handles are even, so only
+the lowest bit is cleared: `hdc | 1` is the DC's own PS) and runs the
+functions programs on the CD use on the DC's presentation space (the
+one the program associated with it, which holds a memory DC's bitmap,
+else the DC's own), in device coordinates:
+
+| Function | Number | |
+|----------|--------|-|
+| GreBitblt | 0x6026 | `GpiBitBlt` between the two DCs (target corners with the top right exclusive, then the source's); BITBLTATTRS colours for monochrome sources |
+| GreSaveScreenBits | 0x402C | keeps the pels of a rectangle of the DC; returns a handle |
+| GreRestoreScreenBits | 0x402D | `RSB_RESTORE` (1) puts them back, inside the given rectangle; `RSB_FREE` (2) forgets them |
+| GreGetDCOrigin | 0x40BA | where the DC's device space starts on the screen (a window DC's window, else 0, 0) |
+| GreQueryDeviceCaps | 0x40D1 | `DevQueryCaps` |
+| GreEscape | 0x40D2 | `DevEscape` |
+| GreGetHandle, GreSetHandle | 0x4203, 0x4204 | eight handles kept per DC |
+| GreSetDCOwner, GreSetBitmapOwner | 0x420B, 0x021A | succeed (a bad bitmap: PMERR_INV_HBITMAP) |
+| GreQueryEngineVersion | 0x020A | 0x23F, Warp 4.5's |
+
+Every other function number fails as an empty slot does. PMGRE also
+exports `InnerGre32EntryN` (72-80, the engine's reentry, the same way)
+and `GetDriverInfo32` (37: a presentation driver's data for a DC or
+bitmap; there are none, so -1). Its 16-bit entries, the `SSAlloc*`
+memory and `RamSem*` calls, `SetDriverInfo32`, `PostDeviceModes32` and
+`PostEscape32` are display and printer driver interfaces and are left
+out. On IBM's GRADD display drivers GreSaveScreenBits is not supported
+(it returns 0: the engine's `SaveScreenBits32` does nothing and no
+GRADD driver fills the slot); rs2's works (programs that probe it, as
+COMETRUN does, fall back to blits when it returns 0). The
+`RSB_` values are not in the Toolkit; COMETRUN's use of them (1 right
+after a trial save, 3 to erase) is what they rest on.
+
+Programs on the media that import PMGRE: COMETRUN.EXE and COMETDLL.DLL
+(Comet cursor: GreBitblt, GreSave/RestoreScreenBits, GreGetDCOrigin,
+GreSetDCOwner, GreSetBitmapOwner, GetDriverInfo32), WPPRINT.DLL and the
+printer installer's DRVINST.DLL (Gre32Entry4), the Toolkit's KIUTIL.DLL
+(GreGetHandle) and DIVE sample GAMESRVR.DLL, Java 1.1.8 and 1.3
+(JAVAW.DLL, AWT.DLL: GreQueryEngineVersion, font handles, GreEscape,
+GreSetupDC); IBM's PMGPI, PMSPL, PMWINX (Open32) and THAILIB, whose
+rs2 versions do not need it; and the display and printer drivers.
+COMETDLL is also a display driver *hook* (it exports
+`OS2_PM_DRV_ENABLE`: OS/2 loads it into the engine to hide the comet
+around other programs' drawing, and sets a flag in its
+`GlobCometData`); rs2 cannot load engine hooks, so COMETRUN runs only
+when started as `COMETRUN force` and is enabled in OS2.INI
+(`PM_ControlPanel` `CometCursor`, a 64-byte record the Mouse settings
+write; its fifth ULONG is the on switch). It then draws its trail on
+the display opened with `OD_DIRECT`: saved screen bits under each comet,
+AND and OR blits of a mask and image from a memory bitmap, erased as
+the pointer moves on and when it stops. GPITEST checks the engine
+calls.
+
 ## 16-bit PM programs (the OS/2 1.x API)
 
 16-bit PM programs (OS/2 1.x and early 2.x ones such as Seek and Scan and
@@ -870,7 +943,9 @@ self-checks on memory bitmaps and shows the primitives in a window.
 The GPI covers:
 
 - Presentation spaces on window DCs (`WinOpenWindowDC`), memory DCs
-  (`DevOpenDC` `OD_MEMORY`) or none (`GpiCreatePS`, `GpiAssociate`,
+  (`DevOpenDC` `OD_MEMORY`), the display opened directly (`OD_DIRECT`
+  with the `DISPLAY` driver: draws on the whole screen, over every
+  window) or none (`GpiCreatePS`, `GpiAssociate`,
   `GpiResetPS`); a window PS follows its window's visible region, and
   `WinBeginPaint` can borrow it. `DevQueryCaps` describes a 24-bit,
   96 dpi display.
