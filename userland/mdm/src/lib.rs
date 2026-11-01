@@ -68,6 +68,7 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
     let mut r = base_req(msg, flags, p, user);
     match msg {
         MCI_OPEN => return open_command(&mut r, p),
+        MCI_SYSINFO if flags & MCI_SYSINFO_ITEM != 0 => return sysinfo_item(rd(p, 20), rd(p, 24)),
         MCI_SYSINFO => {
             r.value = rd(p, 12);
             r.item = rd(p, 20);
@@ -140,6 +141,117 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
             }
         }
         _ => {}
+    }
+    Ok(0)
+}
+
+/// A device's install name: rs2's devices are built in, one of each
+/// type ("rs2Waveaudio01", as MCI_SYSINFO_INSTALLNAME says).
+fn install_name(t: u16) -> String {
+    alloc::format!("rs2{}", device_name(t, 1))
+}
+
+/// The installed device an install, logical ("Waveaudio01") or type name
+/// stands for.
+fn installed_by_name(name: &str) -> Option<u16> {
+    if name.is_empty() {
+        return None;
+    }
+    INSTALLED.iter().copied().find(|&t| {
+        name.eq_ignore_ascii_case(&install_name(t)) || name.eq_ignore_ascii_case(&device_name(t, 1)) || parse_device_name(name).is_some_and(|(pt, o)| pt == t && o <= 1)
+    })
+}
+
+/// A NUL-terminated string in a fixed-size field at `p + off`.
+fn put_str(p: u32, off: u32, s: &str, size: usize) {
+    let n = s.len().min(size - 1);
+    unsafe {
+        let d = (p + off) as *mut u8;
+        core::ptr::write_bytes(d, 0, size);
+        core::ptr::copy_nonoverlapping(s.as_ptr(), d, n);
+    }
+}
+
+/// MCI_SYSINFO with MCI_SYSINFO_ITEM: what MMPM2.INI says about the
+/// installed devices (Multimedia Setup builds its pages from it). rs2's
+/// devices are built in: the queries answer for them, the changes (new
+/// drivers, aliases, extensions...) are not kept.
+fn sysinfo_item(item: u32, q: u32) -> Result<u32, u32> {
+    if q == 0 {
+        return Err(MCIERR_MISSING_PARAMETER);
+    }
+    let named = || installed_by_name(&cstr(q as *const u8)).ok_or(MCIERR_DEVICE_NOT_FOUND);
+    match item {
+        MCI_SYSINFO_QUERY_NAMES => {
+            // MCI_SYSINFO_QUERY_NAME: szInstallName[20], szLogicalName[20],
+            // szAliasName[20], usDeviceType, usDeviceOrd; found by the
+            // first name given.
+            let t = [0u32, 20, 40]
+                .iter()
+                .map(|&o| cstr((q + o) as *const u8))
+                .find(|n| !n.is_empty())
+                .and_then(|n| installed_by_name(&n))
+                .ok_or(MCIERR_DEVICE_NOT_FOUND)?;
+            put_str(q, 0, &install_name(t), 20);
+            put_str(q, 20, &device_name(t, 1), 20);
+            put_str(q, 40, "", 20);
+            wr16(q, 60, t);
+            wr16(q, 62, 1);
+        }
+        MCI_SYSINFO_QUERY_DRIVER => {
+            // MCI_SYSINFO_LOGDEVICE (packed): usDeviceType at 20,
+            // ulDeviceFlag 22, szVersionNumber 26, szProductInfo 32,
+            // szMCDDriver 72, szVSDDriver 92, szPDDName 112, szMCDTable 121,
+            // szVSDTable 141, usShareType 161, szResourceName 163,
+            // usResourceUnits 183, usResourceClasses 185, ausClassArray 187,
+            // ausValidClassArray 207 (to 407).
+            let t = named()?;
+            unsafe { core::ptr::write_bytes((q + 20) as *mut u8, 0, 407 - 20) };
+            wr16(q, 20, t);
+            wr(q, 22, MCI_SYSINFO_DEV_CONTROLLABLE);
+            put_str(q, 26, "1.0", 6);
+            put_str(q, 32, &alloc::format!("rs2 {}", devtype_name(t).unwrap_or("device")), 40);
+            put_str(q, 72, "MDM", 20);
+            put_str(q, 163, &install_name(t), 20);
+            wr16(q, 183, 1);
+            wr16(q, 185, 1);
+            wr16(q, 187, 1);
+            wr16(q, 207, 1);
+        }
+        MCI_SYSINFO_QUERY_PARAMS => {
+            // MCI_SYSINFO_DEVPARAMS: szDevParams[128] after the name.
+            named()?;
+            put_str(q, 20, "", 128);
+        }
+        MCI_SYSINFO_QUERY_CONNECTORS => {
+            named()?;
+            wr16(q, 20, 0);
+        }
+        MCI_SYSINFO_QUERY_EXTENSIONS => {
+            // MCI_SYSINFO_EXTENSION: usNumExtensions, szExtension[25][4].
+            let t = named()?;
+            let ext = extensions(t);
+            wr16(q, 20, ext.len() as u16);
+            for (i, e) in ext.iter().enumerate() {
+                put_str(q, 22 + i as u32 * 4, e, 4);
+            }
+        }
+        MCI_SYSINFO_QUERY_TYPES => {
+            // MCI_SYSINFO_TYPES: szTypes[257].
+            let t = named()?;
+            put_str(q, 20, ea_types(t), 257);
+        }
+        MCI_SYSINFO_QUERY_DEFAULT => {
+            // MCI_SYSINFO_DEFAULTDEVICE: the install name for usDeviceType.
+            let t = rd16(q, 20);
+            if !INSTALLED.contains(&t) {
+                return Err(MCIERR_DEVICE_NOT_FOUND);
+            }
+            put_str(q, 0, &install_name(t), 20);
+        }
+        // Installing, deleting and changing devices.
+        0x1 | 0x4 | 0x8 | 0x20 | 0x80 | 0x200 | 0x800 | 0x2000 => return Err(MCIERR_UNSUPPORTED_FUNCTION),
+        _ => return Err(MCIERR_INVALID_ITEM_FLAG),
     }
     Ok(0)
 }

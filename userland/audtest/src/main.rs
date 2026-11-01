@@ -28,6 +28,9 @@
 //! error answers. `AUDTEST MCI [HZ]` records through MDM.DLL's
 //! mciSendCommand (the same `--sound-in`): into a memory playlist's DATA
 //! buffers, and into a new file element that it saves.
+//!
+//! Every run first checks MDM's MCI_SYSINFO_ITEM queries (the installed
+//! devices as Multimedia Setup reads them).
 
 #![no_std]
 #![no_main]
@@ -593,7 +596,53 @@ fn mci_tests(hz: f64) {
     }
 }
 
+/// MCI_SYSINFO's MCI_SYSINFO_ITEM queries (Multimedia Setup builds its
+/// device pages from them): names, the driver record, extensions, the
+/// default device; the changes are refused.
+fn sysinfo_items() {
+    const MCI_SYSINFO: u32 = 15;
+    const MCI_WAIT: u32 = 2;
+    const MCI_SYSINFO_ITEM: u32 = 0x1000;
+    let zstr = |b: &[u8]| -> Vec<u8> { b.iter().copied().take_while(|&c| c != 0).collect() };
+    let item = |it: u32, q: *mut u8| -> u32 {
+        // MCI_SYSINFO_PARMS: hwndDummyCallback, pszReturn, ulRetSize,
+        // ulNumber, usDeviceType, usReserved0, ulItem, pSysInfoParm.
+        let mut p = [0u32; 7];
+        p[5] = it;
+        p[6] = q as u32;
+        unsafe { mciSendCommand(0, MCI_SYSINFO, MCI_WAIT | MCI_SYSINFO_ITEM, p.as_mut_ptr(), 0) }
+    };
+    // MCI_SYSINFO_QUERY_NAME by the logical name.
+    let mut qn = [0u8; 64];
+    qn[20..31].copy_from_slice(b"Waveaudio01");
+    let rc = item(0x400, qn.as_mut_ptr());
+    let install = zstr(&qn[..20]);
+    check("MCI_SYSINFO_QUERY_NAMES", rc == 0 && !install.is_empty() && qn[60] == 7 && qn[62] == 1);
+    // MCI_SYSINFO_LOGDEVICE: usDeviceType 20, ulDeviceFlag 22.
+    let mut ld = [0u8; 407];
+    ld[..install.len()].copy_from_slice(&install);
+    let rc = item(0x2, ld.as_mut_ptr());
+    check("MCI_SYSINFO_QUERY_DRIVER: a controllable waveaudio device", rc == 0 && ld[20] == 7 && ld[22] & 1 == 1);
+    // MCI_SYSINFO_EXTENSION: usNumExtensions, szExtension[25][4].
+    let mut ex = [0u8; 122];
+    ex[..install.len()].copy_from_slice(&install);
+    let rc = item(0x100, ex.as_mut_ptr());
+    check("MCI_SYSINFO_QUERY_EXTENSIONS", rc == 0 && ex[20] > 0 && &ex[22..26] == b"WAV\0");
+    // MCI_SYSINFO_DEFAULTDEVICE for DEVTYPE_SEQUENCER.
+    let mut dd = [0u8; 22];
+    dd[20] = 8;
+    let rc = item(0x1000, dd.as_mut_ptr());
+    let mut qs = [0u8; 64];
+    qs[..20].copy_from_slice(&dd[..20]);
+    check("MCI_SYSINFO_QUERY_DEFAULT", rc == 0 && item(0x400, qs.as_mut_ptr()) == 0 && zstr(&qs[20..40]) == b"Sequencer01");
+    check("MCI_SYSINFO_SET_ALIAS is refused", item(0x200, ld.as_mut_ptr()) != 0);
+    let mut none = [0u8; 407];
+    none[..6].copy_from_slice(b"nosuch");
+    check("MCI_SYSINFO_QUERY_DRIVER of no device", item(0x2, none.as_mut_ptr()) != 0);
+}
+
 fn main(s: &Startup) -> u32 {
+    sysinfo_items();
     let args = core::str::from_utf8(s.args()).unwrap_or("").trim();
     let mut words = args.split_whitespace();
     let mode = words.next().unwrap_or("");
