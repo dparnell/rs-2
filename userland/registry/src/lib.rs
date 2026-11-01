@@ -442,9 +442,14 @@ fn key_name(k: &Key) -> Vec<u8> {
     get(file(k.hive), &k.path, b"K").unwrap_or(last)
 }
 
-/// The mapping of a key (map.rs), from its stored values.
+/// The mapping of a key (map.rs), from its stored values (a
+/// spooler_value key's name too).
 fn mapping_of(k: &Key) -> Option<map::Map> {
-    map::mapping(&stored(k), &key_name(k))
+    let mut m = map::mapping(&stored(k), b"")?;
+    if m.method == Some(map::Method::SpoolerValue) {
+        m.name = key_name(k);
+    }
+    Some(m)
 }
 
 /// A value's type and data. A key that maps its values reads its own

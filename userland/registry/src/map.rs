@@ -30,8 +30,6 @@ unsafe extern "C" {
     fn PrfQueryProfile(hab: u32, prf: *mut u32) -> u32;
     #[link_name = "LIBUNI.20"]
     fn UniCreateLocaleObject(ty: i32, spec: *const u16, out: *mut u32) -> i32;
-    #[link_name = "LIBUNI.21"]
-    fn UniFreeLocaleObject(lo: u32) -> i32;
     #[link_name = "LIBUNI.22"]
     fn UniFreeMem(p: *mut u16) -> i32;
     #[link_name = "LIBUNI.30"]
@@ -232,24 +230,27 @@ const LOCI: [&str; 125] = [
     "sDebit", "sCredit", "sLatin1Locale", "wTimeFormat", "wShortDate", "wLongDate",
 ];
 
+/// The default locale's object, made on first use and kept (making one
+/// reads the user locales again: 125 of them for one enumeration took
+/// REGEDIT2 seconds).
+static mut LOCALE: u32 = 0;
+
 /// Locale item i + 1 of the default locale in the process code page,
 /// with its NUL.
 fn uls_item(i: usize) -> Result<Vec<u8>, u32> {
-    let mut lo = 0;
+    let lo = unsafe { &mut *core::ptr::addr_of_mut!(LOCALE) };
     // UNI_UCS_STRING_POINTER, "": the default locale.
-    if unsafe { UniCreateLocaleObject(3, [0u16].as_ptr(), &mut lo) } != 0 {
+    if *lo == 0 && unsafe { UniCreateLocaleObject(3, [0u16].as_ptr(), lo) } != 0 {
+        *lo = 0;
         return Err(ERROR_GEN_FAILURE);
     }
     let mut p = core::ptr::null_mut();
-    let rc = unsafe { UniQueryLocaleItem(lo, i as i32 + 1, &mut p) };
-    let r = if rc != 0 || p.is_null() {
-        Err(ERROR_GEN_FAILURE)
-    } else {
-        let mut v = crate::wide::to_cp(&crate::wide::wstr(p));
-        v.push(0);
-        unsafe { UniFreeMem(p) };
-        Ok(v)
-    };
-    unsafe { UniFreeLocaleObject(lo) };
-    r
+    let rc = unsafe { UniQueryLocaleItem(*lo, i as i32 + 1, &mut p) };
+    if rc != 0 || p.is_null() {
+        return Err(ERROR_GEN_FAILURE);
+    }
+    let mut v = crate::wide::to_cp(&crate::wide::wstr(p));
+    v.push(0);
+    unsafe { UniFreeMem(p) };
+    Ok(v)
 }

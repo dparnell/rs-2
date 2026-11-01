@@ -63,6 +63,8 @@ unsafe extern "C" {
     fn PrfOpenProfile(hab: u32, name: *const u8) -> u32;
     #[link_name = "PMSHAPI.103"]
     fn PrfCloseProfile(hini: u32) -> u32;
+    #[link_name = "PMSHAPI.107"]
+    fn PrfQueryProfile(hab: u32, prf: *mut u32) -> u32;
     #[link_name = "PMSHAPI.118"]
     fn PrfWriteProfileData(hini: u32, app: *const u8, key: *const u8, data: *const u8, len: u32) -> u32;
 }
@@ -217,7 +219,31 @@ fn map_checks() {
         let (_, ty, m) = query(f, b"OS2_INI_ACCESS_METHOD\0");
         let (_, _, a) = query(f, b"OS2_INI_APP_NAME\0");
         check("the Fonts key maps OS2.INI's PM_Fonts (profile_sz)", rc == 0 && ty == REG_SZ && m == b"profile_sz\0" && a == b"PM_Fonts\0");
+        // Its values are OS2.INI's (the user profile, read through
+        // HINI_USERPROFILE); without PM_Fonts there: ERROR_INVALID_NAME.
+        let (names, end) = value_names(f);
+        let mut nval = 99;
+        RegQueryInfoKey(f, null_mut(), null_mut(), 0, null_mut(), null_mut(), null_mut(), &mut nval, null_mut(), null_mut(), null_mut(), null_mut());
+        os2::println!("  Fonts: {} values, then {}", names.len(), end);
+        check("the Fonts key lists PM_Fonts's keys", nval as usize == names.len() && (end == ERROR_NO_MORE_ITEMS || (end == ERROR_INVALID_NAME && names.is_empty())));
         RegCloseKey(f);
+        // A key mapping the user profile by its file name.
+        let mut user = [0u8; 260];
+        let mut sys = [0u8; 260];
+        let mut prf = [260u32, user.as_mut_ptr() as u32, 260, sys.as_mut_ptr() as u32];
+        PrfQueryProfile(0, prf.as_mut_ptr());
+        let n = user.iter().position(|&c| c == 0).unwrap_or(0);
+        PrfWriteProfileData(0xffff_ffff, b"PmxUserApp\0".as_ptr(), b"Key\0".as_ptr(), b"user\0".as_ptr(), 5);
+        let mut u = 0;
+        RegCreateKey(HKEY_CURRENT_USER, b"PmxUserMap\0".as_ptr(), &mut u);
+        let ok = RegSetValueEx(u, b"OS2_INI_FILE_NAME\0".as_ptr(), 0, REG_SZ, user.as_ptr(), n as u32 + 1) == 0
+            && RegSetValueEx(u, b"OS2_INI_APP_NAME\0".as_ptr(), 0, REG_SZ, b"PmxUserApp\0".as_ptr(), 11) == 0
+            && RegSetValueEx(u, b"OS2_INI_ACCESS_METHOD\0".as_ptr(), 0, REG_SZ, b"profile_sz\0".as_ptr(), 11) == 0;
+        let (rc, ty, d) = query(u, b"Key\0");
+        check("a key mapping the user profile (OS2.INI) reads it", ok && rc == 0 && ty == REG_SZ && d == b"user\0");
+        RegCloseKey(u);
+        RegDeleteKey(HKEY_CURRENT_USER, b"PmxUserMap\0".as_ptr());
+        PrfWriteProfileData(0xffff_ffff, b"PmxUserApp\0".as_ptr(), null(), null(), 0);
 
         // A profile of our own.
         let mut drive = 3u32;
@@ -277,10 +303,18 @@ fn uls_checks() {
         let (rc, _, d) = query(k, b"ICOUNTRY\0");
         check("uls: names without case (iCountry)", rc == 0 && d.len() > 1 && d.last() == Some(&0));
         check("uls: an unknown item is ERROR_FILE_NOT_FOUND", query(k, b"sNothing\0").0 == ERROR_FILE_NOT_FOUND);
+        let ms = || {
+            let mut t = 0u32;
+            os2::DosQuerySysInfo(14, 14, &mut t, 4);
+            t
+        };
+        let t0 = ms();
         let (names, end) = value_names(k);
+        let t1 = ms();
         check("uls: RegEnumValue lists the 125 items", names.len() == 125 && names[0] == b"sDateTime" && names[124] == b"wLongDate" && end == ERROR_NO_MORE_ITEMS);
         let mut nval = 0;
         RegQueryInfoKey(k, null_mut(), null_mut(), 0, null_mut(), null_mut(), null_mut(), &mut nval, null_mut(), null_mut(), null_mut(), null_mut());
+        os2::println!("  uls: 125 RegEnumValue {} ms, RegQueryInfoKey {} ms", t1 - t0, ms() - t1);
         check("uls: RegQueryInfoKey counts them", nval == 125);
         RegCloseKey(k);
     }
