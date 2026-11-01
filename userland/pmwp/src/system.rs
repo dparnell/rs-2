@@ -23,7 +23,7 @@ use crate::obj::{self, OPEN_SETTINGS};
 use crate::pm::*;
 use crate::setup::{add_page, check, checked, radio, spin, spin_init, spin_value};
 use crate::som;
-use crate::util::{parse_dec, prf_read, prf_write, z, HINI_USER};
+use crate::util::{cstr, parse_dec, prf_read, prf_write, z, HINI_USER};
 use crate::wps::{self, Impl};
 
 unsafe extern "C" {
@@ -37,6 +37,10 @@ unsafe extern "C" {
     fn GpiSetColor(hps: u32, c: i32) -> u32;
     #[link_name = "PMWIN.800"]
     fn WinQueryAnchorBlock(h: u32) -> u32;
+    #[link_name = "PMWIN.873"]
+    fn WinSetSysValue(desk: u32, i: i32, v: i32) -> u32;
+    #[link_name = "PMWIN.9030"]
+    fn Rs2SetMinButtonType(hide_button: u32, hide_window: u32) -> u32;
 }
 
 // ---- Object open behavior ----
@@ -51,45 +55,451 @@ fn set_concurrent_view(on: bool) {
     prf_write(HINI_USER, b"PM_ControlPanel", b"ConcurrentView", Some(if on { b"1\0" } else { b"0\0" }));
 }
 
-// ---- System: the Window page ----
+// ---- System: the settings (as WPCONFIG keeps them) ----
+//
+// `PM_ControlPanel` in OS2.INI, under the names WPSystem's
+// wpclsQuerySetting and wpclsSetSetting take (the Toolkit's wpsystem.h
+// values): Animation (SV_ANIMATION too), MinButtonType (1 hide button,
+// 2 minimize button), HiddenMinWindows (1 hide, 2 to the viewer, 3 to
+// the desktop), PrintScreen (SV_PRINTSCREEN too), LogoDisplayTime (ms;
+// -1 indefinite, 0 none) and NameClash (NAMECLASH_PROMPT, _RENAME,
+// _REPLACE).
 
-const ID_VIEWER: u16 = 700;
-const ID_DESKTOP: u16 = 701;
-const ID_EXISTING: u16 = 702;
-const ID_NEW: u16 = 703;
+const SV_ANIMATION: i32 = 93;
+const SV_PRINTSCREEN: i32 = 97;
+
+pub const BUTTON_HIDE: u32 = 1;
+pub const BUTTON_MINIMIZE: u32 = 2;
+pub const MIN_HIDE: u32 = 1;
+pub const MIN_VIEWER: u32 = 2;
+pub const MIN_DESKTOP: u32 = 3;
+pub const LOGO_INDEFINITE: i32 = -1;
+const LOGO_DEFAULT_MS: i32 = 2000;
+pub const NAMECLASH_RENAME: u32 = 0x02;
+pub const NAMECLASH_REPLACE: u32 = 0x08;
+pub const NAMECLASH_PROMPT: u32 = 0x10;
+
+const CP: &[u8] = b"PM_ControlPanel";
+
+fn cp_int(key: &[u8]) -> Option<i32> {
+    let v = prf_read(HINI_USER, CP, key)?;
+    let t = v.strip_suffix(&[0]).unwrap_or(&v).trim_ascii();
+    match t.strip_prefix(b"-") {
+        Some(n) => parse_dec(n).map(|n| -(n as i32)),
+        None => parse_dec(t).map(|n| n as i32),
+    }
+}
+
+fn set_cp_int(key: &[u8], v: i32) {
+    let mut t = alloc::format!("{v}").into_bytes();
+    t.push(0);
+    prf_write(HINI_USER, CP, key, Some(&t));
+}
+
+/// Windows zoom when they are minimized, restored, maximized or hidden.
+pub fn animation() -> bool {
+    cp_int(b"Animation").is_none_or(|v| v != 0)
+}
+
+pub fn set_animation(on: bool) {
+    set_cp_int(b"Animation", on as i32);
+    unsafe { WinSetSysValue(HWND_DESKTOP, SV_ANIMATION, on as i32) };
+}
+
+/// The button windows show: BUTTON_HIDE or BUTTON_MINIMIZE.
+pub fn button_appearance() -> u32 {
+    match cp_int(b"MinButtonType") {
+        Some(1) => BUTTON_HIDE,
+        _ => BUTTON_MINIMIZE,
+    }
+}
+
+pub fn set_button_appearance(b: u32) {
+    set_cp_int(b"MinButtonType", b as i32);
+    apply_min_buttons();
+}
+
+/// What minimizing does: MIN_HIDE, MIN_VIEWER or MIN_DESKTOP (the last
+/// two also kept as RS2SHELL's `RS2_Desktop` `MinimizeTo`).
+pub fn min_behavior() -> u32 {
+    match cp_int(b"HiddenMinWindows") {
+        Some(1) => MIN_HIDE,
+        Some(3) => MIN_DESKTOP,
+        Some(2) => MIN_VIEWER,
+        _ if crate::minwin::to_viewer() => MIN_VIEWER,
+        _ => MIN_DESKTOP,
+    }
+}
+
+pub fn set_min_behavior(b: u32) {
+    set_cp_int(b"HiddenMinWindows", b as i32);
+    match b {
+        MIN_VIEWER => crate::minwin::set_to_viewer(true),
+        MIN_DESKTOP => crate::minwin::set_to_viewer(false),
+        _ => {}
+    }
+    apply_min_buttons();
+}
+
+/// PMWIN's frames follow the button appearance and the hide behavior.
+pub fn apply_min_buttons() {
+    unsafe { Rs2SetMinButtonType((button_appearance() == BUTTON_HIDE) as u32, (min_behavior() == MIN_HIDE) as u32) };
+}
+
+pub fn print_screen() -> bool {
+    cp_int(b"PrintScreen").is_none_or(|v| v != 0)
+}
+
+pub fn set_print_screen(on: bool) {
+    set_cp_int(b"PrintScreen", on as i32);
+    unsafe { WinSetSysValue(HWND_DESKTOP, SV_PRINTSCREEN, on as i32) };
+}
+
+/// How long programs show their logo (ms; LOGO_INDEFINITE, or 0: not
+/// at all).
+pub fn logo_time() -> i32 {
+    cp_int(b"LogoDisplayTime").unwrap_or(LOGO_DEFAULT_MS)
+}
+
+pub fn set_logo_time(ms: i32) {
+    set_cp_int(b"LogoDisplayTime", ms);
+}
+
+/// What happens when an object comes into a folder that has one with
+/// the same name: NAMECLASH_PROMPT (the default), _RENAME or _REPLACE.
+pub fn name_clash() -> u32 {
+    match cp_int(b"NameClash") {
+        Some(2) => NAMECLASH_RENAME,
+        Some(8) => NAMECLASH_REPLACE,
+        _ => NAMECLASH_PROMPT,
+    }
+}
+
+pub fn set_name_clash(v: u32) {
+    set_cp_int(b"NameClash", v as i32);
+}
+
+/// When the shell starts: PMWIN gets the settings OS2.INI keeps.
+pub fn apply_saved() {
+    unsafe {
+        WinSetSysValue(HWND_DESKTOP, SV_ANIMATION, animation() as i32);
+        WinSetSysValue(HWND_DESKTOP, SV_PRINTSCREEN, print_screen() as i32);
+    }
+    apply_min_buttons();
+}
+
+/// M_WPSystem's wpclsQuerySetting(pszSetting, pValue, ulValueLen): one
+/// of the settings above (and ConcurrentView) as a ULONG; the size
+/// returned, or 0.
+extern "C" fn sys_query_setting(_cls: usize, name: *const u8, value: *mut u32, len: u32) -> u32 {
+    if name.is_null() || value.is_null() || len < 4 {
+        return 0;
+    }
+    let v = match cstr(name) {
+        b"Animation" => animation() as u32,
+        b"MinButtonAppearance" => button_appearance(),
+        b"MinButtonBehavior" => min_behavior(),
+        b"PrintScreen" => print_screen() as u32,
+        b"LogoDisplayTime" => logo_time() as u32,
+        b"NameClash" => name_clash(),
+        // CCVIEW_ON 1, CCVIEW_OFF 2.
+        b"ConcurrentView" => if concurrent_view() { 1 } else { 2 },
+        _ => return 0,
+    };
+    unsafe { *value = v };
+    4
+}
+
+/// M_WPSystem's wpclsSetSetting(pszSetting, pValue): sets one (the
+/// *_DEFAULT values of wpsystem.h set the default).
+extern "C" fn sys_set_setting(_cls: usize, name: *const u8, value: *const u32) -> u32 {
+    if name.is_null() || value.is_null() {
+        return 0;
+    }
+    let v = unsafe { *value };
+    match cstr(name) {
+        // ANIMATION_DEFAULT, PRINTSCREEN_DEFAULT: on.
+        b"Animation" => set_animation(v != 0),
+        b"MinButtonAppearance" => set_button_appearance(if v == BUTTON_HIDE { BUTTON_HIDE } else { BUTTON_MINIMIZE }),
+        b"MinButtonBehavior" if (1..=3).contains(&v) => set_min_behavior(v),
+        b"PrintScreen" => set_print_screen(v != 0),
+        b"LogoDisplayTime" => set_logo_time(if v as i32 == -2 { LOGO_DEFAULT_MS } else { v as i32 }),
+        b"NameClash" => set_name_clash(match v {
+            NAMECLASH_RENAME | NAMECLASH_REPLACE => v,
+            _ => NAMECLASH_PROMPT,
+        }),
+        b"ConcurrentView" => set_concurrent_view(v == 1),
+        _ => return 0,
+    }
+    1
+}
+
+// ---- System: the Window page (WPCONFIG's dialog 1200) ----
+
+const ID_HIDEBUTTON: u16 = 1224;
+const ID_MINBUTTON: u16 = 1225;
+const ID_HIDEWINDOW: u16 = 1301;
+const ID_VIEWER: u16 = 1222;
+const ID_DESKTOP: u16 = 1221;
+const ID_ANIM_ON: u16 = 1203;
+const ID_ANIM_OFF: u16 = 1204;
+const ID_EXISTING: u16 = 1218;
+const ID_NEW: u16 = 1219;
+const ID_DEFAULT: u16 = 103;
+const SPBN_CHANGE: u32 = 0x20d;
+
+fn enable(h: u32, id: u16, on: bool) {
+    unsafe { WinEnableWindow(WinWindowFromID(h, id as u32), on as u32) };
+}
+
+fn group(t: &[u8], (x, y, cx, cy): (i16, i16, i16, i16)) -> Item {
+    // SS_GROUPBOX
+    item(WC_STATIC, t, WS_VISIBLE | 0x0002, (x, y, cx, cy), 0xffff)
+}
+
+fn push(t: &[u8], (x, y): (i16, i16), id: u16) -> Item {
+    item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP, (x, y, 40, 14), id)
+}
+
+fn window_page_init(h: u32) {
+    let hide = button_appearance() == BUTTON_HIDE;
+    check(h, if hide { ID_HIDEBUTTON } else { ID_MINBUTTON }, true);
+    check(h, match min_behavior() {
+        MIN_HIDE => ID_HIDEWINDOW,
+        MIN_VIEWER => ID_VIEWER,
+        _ => ID_DESKTOP,
+    }, true);
+    // A hide button always hides.
+    for id in [ID_HIDEWINDOW, ID_VIEWER, ID_DESKTOP] {
+        enable(h, id, !hide);
+    }
+    check(h, if animation() { ID_ANIM_ON } else { ID_ANIM_OFF }, true);
+    check(h, if concurrent_view() { ID_NEW } else { ID_EXISTING }, true);
+}
 
 extern "C" fn window_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     match msg {
         WM_INITDLG => {
-            check(h, if crate::minwin::to_viewer() { ID_VIEWER } else { ID_DESKTOP }, true);
-            check(h, if concurrent_view() { ID_NEW } else { ID_EXISTING }, true);
+            window_page_init(h);
             0
         }
         WM_CONTROL if (a >> 16) == 1 => {
             // BN_CLICKED on a radio button.
             match (a & 0xffff) as u16 {
-                ID_VIEWER => crate::minwin::set_to_viewer(true),
-                ID_DESKTOP => crate::minwin::set_to_viewer(false),
+                ID_HIDEBUTTON => set_button_appearance(BUTTON_HIDE),
+                ID_MINBUTTON => set_button_appearance(BUTTON_MINIMIZE),
+                ID_HIDEWINDOW => set_min_behavior(MIN_HIDE),
+                ID_VIEWER => set_min_behavior(MIN_VIEWER),
+                ID_DESKTOP => set_min_behavior(MIN_DESKTOP),
+                ID_ANIM_ON => set_animation(true),
+                ID_ANIM_OFF => set_animation(false),
                 ID_EXISTING => set_concurrent_view(false),
                 ID_NEW => set_concurrent_view(true),
-                _ => {}
+                _ => return 0,
+            }
+            let hide = button_appearance() == BUTTON_HIDE;
+            for id in [ID_HIDEWINDOW, ID_VIEWER, ID_DESKTOP] {
+                enable(h, id, !hide);
             }
             0
         }
-        WM_COMMAND => 0,
+        WM_COMMAND => {
+            if (a & 0xffff) as u16 == ID_DEFAULT {
+                set_button_appearance(BUTTON_MINIMIZE);
+                set_min_behavior(MIN_VIEWER);
+                set_animation(true);
+                set_concurrent_view(false);
+                window_page_init(h);
+            }
+            0
+        }
         _ => unsafe { WinDefDlgProc(h, msg, a, b) },
     }
 }
 
 extern "C" fn wpAddSystemWindowPage(o: usize, nb: u32) -> u32 {
     add_page(o, nb, window_page_proc, alloc::vec![
-        book::label(b"Minimize button behavior", (6, 106, 220)),
-        radio(b"Minimize window to ~viewer", (12, 92, 210), ID_VIEWER, true),
-        radio(b"Minimize ~window to desktop", (12, 80, 210), ID_DESKTOP, false),
-        book::label(b"Object open behavior", (6, 60, 220)),
-        radio(b"Display ~existing window", (12, 46, 210), ID_EXISTING, true),
-        radio(b"~Create new window", (12, 34, 210), ID_NEW, false),
+        group(b"Button appearance for windows", (4, 74, 110, 42)),
+        radio(b"Hide ~button", (8, 96, 100), ID_HIDEBUTTON, true),
+        radio(b"~Minimize button", (8, 84, 100), ID_MINBUTTON, false),
+        group(b"Minimize button behavior", (120, 62, 114, 54)),
+        radio(b"~Hide window", (124, 96, 106), ID_HIDEWINDOW, true),
+        radio(b"Minimize window to ~viewer", (124, 84, 106), ID_VIEWER, false),
+        radio(b"Minimize ~window to desktop", (124, 72, 106), ID_DESKTOP, false),
+        group(b"Animation", (4, 22, 110, 42)),
+        radio(b"~Enabled", (8, 44, 100), ID_ANIM_ON, true),
+        radio(b"D~isabled", (8, 32, 100), ID_ANIM_OFF, false),
+        group(b"Object open behavior", (120, 22, 114, 38)),
+        radio(b"Display ~existing window", (124, 42, 106), ID_EXISTING, true),
+        radio(b"~Create new window", (124, 30, 106), ID_NEW, false),
+        push(b"~Default", (4, 2), ID_DEFAULT),
     ], b"~Window\0")
+}
+
+// ---- System: the Logo page (dialog 1201) ----
+
+const ID_LOGO_INDEF: u16 = 1209;
+const ID_LOGO_NONE: u16 = 1210;
+const ID_LOGO_TIMED: u16 = 1211;
+const ID_LOGO_SECS: u16 = 1212;
+const ID_LOGO_TENTHS: u16 = 1213;
+
+fn logo_init(h: u32) {
+    let t = logo_time();
+    check(h, match t {
+        LOGO_INDEFINITE => ID_LOGO_INDEF,
+        0 => ID_LOGO_NONE,
+        _ => ID_LOGO_TIMED,
+    }, true);
+    let ms = if t > 0 { t } else { LOGO_DEFAULT_MS };
+    spin_init(h, ID_LOGO_SECS, 0, 32, ms / 1000);
+    spin_init(h, ID_LOGO_TENTHS, 0, 9, ms % 1000 / 100);
+    enable(h, ID_LOGO_SECS, t > 0);
+    enable(h, ID_LOGO_TENTHS, t > 0);
+}
+
+extern "C" fn logo_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            logo_init(h);
+            0
+        }
+        WM_CONTROL => {
+            let id = (a & 0xffff) as u16;
+            match (id, a >> 16) {
+                (ID_LOGO_INDEF, 1) => set_logo_time(LOGO_INDEFINITE),
+                (ID_LOGO_NONE, 1) => set_logo_time(0),
+                (ID_LOGO_TIMED, 1) | (ID_LOGO_SECS | ID_LOGO_TENTHS, SPBN_CHANGE) => {
+                    let (s, t) = (spin_value(h, ID_LOGO_SECS).unwrap_or(2), spin_value(h, ID_LOGO_TENTHS).unwrap_or(0));
+                    let ms = (s.clamp(0, 32) * 1000 + t.clamp(0, 9) * 100).max(100);
+                    if checked(h, ID_LOGO_TIMED) {
+                        set_logo_time(ms);
+                    }
+                }
+                _ => return 0,
+            }
+            let t = logo_time();
+            enable(h, ID_LOGO_SECS, t > 0);
+            enable(h, ID_LOGO_TENTHS, t > 0);
+            0
+        }
+        WM_COMMAND => {
+            if (a & 0xffff) as u16 == ID_DEFAULT {
+                set_logo_time(LOGO_DEFAULT_MS);
+                logo_init(h);
+            }
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+extern "C" fn wpAddSystemLogoPage(o: usize, nb: u32) -> u32 {
+    add_page(o, nb, logo_page_proc, alloc::vec![
+        group(b"Logo display time", (4, 40, 150, 76)),
+        radio(b"~Indefinite", (8, 96, 100), ID_LOGO_INDEF, true),
+        radio(b"~None", (8, 84, 100), ID_LOGO_NONE, false),
+        radio(b"~Timed", (8, 72, 100), ID_LOGO_TIMED, false),
+        book::label(b"Seconds", (20, 62, 40)),
+        spin((20, 48, 40), ID_LOGO_SECS),
+        book::label(b"Tenths", (70, 62, 40)),
+        spin((70, 48, 30), ID_LOGO_TENTHS),
+        book::label(b"How long programs show their logo window.", (4, 26, 220)),
+        push(b"~Default", (4, 2), ID_DEFAULT),
+    ], b"~Logo\0")
+}
+
+// ---- System: the Print Screen page (dialog 1300) ----
+
+const ID_PRTSC_ON: u16 = 1203;
+const ID_PRTSC_OFF: u16 = 1204;
+
+extern "C" fn print_screen_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            check(h, if print_screen() { ID_PRTSC_ON } else { ID_PRTSC_OFF }, true);
+            0
+        }
+        WM_CONTROL if (a >> 16) == 1 => {
+            match (a & 0xffff) as u16 {
+                ID_PRTSC_ON => set_print_screen(true),
+                ID_PRTSC_OFF => set_print_screen(false),
+                _ => {}
+            }
+            0
+        }
+        WM_COMMAND => {
+            if (a & 0xffff) as u16 == ID_DEFAULT {
+                set_print_screen(true);
+                check(h, ID_PRTSC_ON, true);
+            }
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+extern "C" fn wpAddSystemPrintScreenPage(o: usize, nb: u32) -> u32 {
+    add_page(o, nb, print_screen_page_proc, alloc::vec![
+        group(b"Print Screen key", (4, 50, 170, 66)),
+        radio(b"~Enable", (8, 96, 100), ID_PRTSC_ON, true),
+        radio(b"Dis~able", (8, 84, 100), ID_PRTSC_OFF, false),
+        book::label(b"Print Screen prints the active window", (8, 68, 160)),
+        book::label(b"(or the desktop) on the default printer.", (8, 58, 160)),
+        push(b"~Default", (4, 2), ID_DEFAULT),
+    ], b"~Print Screen\0")
+}
+
+// ---- System: the Title page (dialog 3052) ----
+
+const ID_CLASH_PROMPT: u16 = 1345;
+const ID_CLASH_RENAME: u16 = 1346;
+const ID_CLASH_REPLACE: u16 = 523;
+
+fn title_init(h: u32) {
+    check(h, match name_clash() {
+        NAMECLASH_RENAME => ID_CLASH_RENAME,
+        NAMECLASH_REPLACE => ID_CLASH_REPLACE,
+        _ => ID_CLASH_PROMPT,
+    }, true);
+}
+
+extern "C" fn title_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            title_init(h);
+            0
+        }
+        WM_CONTROL if (a >> 16) == 1 => {
+            match (a & 0xffff) as u16 {
+                ID_CLASH_PROMPT => set_name_clash(NAMECLASH_PROMPT),
+                ID_CLASH_RENAME => set_name_clash(NAMECLASH_RENAME),
+                ID_CLASH_REPLACE => set_name_clash(NAMECLASH_REPLACE),
+                _ => {}
+            }
+            0
+        }
+        WM_COMMAND => {
+            if (a & 0xffff) as u16 == ID_DEFAULT {
+                set_name_clash(NAMECLASH_PROMPT);
+                title_init(h);
+            }
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+extern "C" fn wpAddTitleConfirmationPage(o: usize, nb: u32) -> u32 {
+    add_page(o, nb, title_page_proc, alloc::vec![
+        group(b"Duplicate title", (4, 30, 210, 86)),
+        book::label(b"In the event that an object is added to a folder", (8, 98, 200)),
+        book::label(b"that contains an object of the same title:", (8, 88, 200)),
+        radio(b"~Prompt for appropriate action", (8, 72, 180), ID_CLASH_PROMPT, true),
+        radio(b"~Auto-rename object", (8, 58, 180), ID_CLASH_RENAME, false),
+        radio(b"~Replace existing object", (8, 44, 180), ID_CLASH_REPLACE, false),
+        push(b"~Default", (4, 2), ID_DEFAULT),
+    ], b"~Title\0")
 }
 
 // ---- System: the Confirmations page ----
@@ -130,10 +540,15 @@ extern "C" fn wpAddSystemConfirmationPage(o: usize, nb: u32) -> u32 {
     add_page(o, nb, confirm_page_proc, items, b"~Confirmations\0")
 }
 
+/// IBM's order of the tabs: Confirmations, Title, Window, Print Screen,
+/// Logo (each page goes in front of those before it).
 extern "C" fn system_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPSystem"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
-    wps::call("WPSystem", m::WPSystem::wpAddSystemConfirmationPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddSystemLogoPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddSystemPrintScreenPage, &[o, nb as usize]);
     wps::call("WPSystem", m::WPSystem::wpAddSystemWindowPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddTitleConfirmationPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddSystemConfirmationPage, &[o, nb as usize]);
     1
 }
 
@@ -521,6 +936,11 @@ extern "C" fn clock_add_pages(o: usize, nb: u32) -> u32 {
 methods! {
     __m_wpAddSystemWindowPage => wpAddSystemWindowPage, 2;
     __m_wpAddSystemConfirmationPage => wpAddSystemConfirmationPage, 2;
+    __m_wpAddSystemLogoPage => wpAddSystemLogoPage, 2;
+    __m_wpAddSystemPrintScreenPage => wpAddSystemPrintScreenPage, 2;
+    __m_wpAddTitleConfirmationPage => wpAddTitleConfirmationPage, 2;
+    __m_sys_query_setting => sys_query_setting, 4;
+    __m_sys_set_setting => sys_set_setting, 3;
     __m_system_add_pages => system_add_pages, 2;
     __m_rs2_system_add_pages => rs2_system_add_pages, 2;
     __m_wpAddClockView1Page => wpAddClockView1Page, 2;
@@ -538,8 +958,19 @@ pub fn impl_system() -> Impl {
         methods: alloc::vec![
             ("wpAddSystemWindowPage", __m_wpAddSystemWindowPage as usize),
             ("wpAddSystemConfirmationPage", __m_wpAddSystemConfirmationPage as usize),
+            ("wpAddSystemLogoPage", __m_wpAddSystemLogoPage as usize),
+            ("wpAddSystemPrintScreenPage", __m_wpAddSystemPrintScreenPage as usize),
+            ("wpAddTitleConfirmationPage", __m_wpAddTitleConfirmationPage as usize),
         ],
         overrides: alloc::vec![("wpAddSettingsPages", __m_system_add_pages as usize), crate::pages::no_window_page_override()],
+    }
+}
+
+pub fn impl_m_system() -> Impl {
+    Impl {
+        data: 0,
+        methods: Vec::new(),
+        overrides: alloc::vec![("wpclsQuerySetting", __m_sys_query_setting as usize), ("wpclsSetSetting", __m_sys_set_setting as usize)],
     }
 }
 

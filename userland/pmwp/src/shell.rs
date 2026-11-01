@@ -54,6 +54,7 @@ pub extern "C" fn ShlStartWorkplace(hab: u32, _hmq: u32) -> u32 {
     install::run();
     crate::printer::sync_printers();
     crate::setup::apply_saved();
+    crate::system::apply_saved();
     ipc::start_server(hab);
     let desk = wps::object_from_location(b"<WP_DESKTOP>");
     if desk != 0 {

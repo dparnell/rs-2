@@ -651,9 +651,78 @@ fn program_list() {
     check("PrfDestroyGroup removes the folder and the program", unsafe { PrfDestroyGroup(HINI_USERPROFILE, g) } != 0 && query(&id(b"GROUP", g)) == 0 && query(&id(b"PROG", p)) == 0);
 }
 
+/// `WPSTEST SHELL cmd; cmd; ...` (as the boot's first program, for
+/// tests that look at the desktop): starts PMSHELL, waits until its
+/// desktop is there, then runs the commands against the running shell:
+/// `OPEN id view` (WinOpenObject: 0 default, 2 settings, 1 contents),
+/// `SET id setup` (WinSetObjectData), `SLEEP n` (seconds). Then it waits
+/// for PMSHELL to end.
+fn shell(args: &[u8]) -> u32 {
+    let rest = args.trim_ascii_start();
+    let rest = &rest[rest.iter().position(|&c| c == b' ').unwrap_or(rest.len())..];
+    let prog = b"C:\\OS2\\PMSHELL.EXE\0";
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let mut fail = [0u8; 64];
+    // EXEC_ASYNCRESULT
+    let rc = unsafe { DosExecPgm(fail.as_mut_ptr(), 64, 2, b"PMSHELL\0\0\0".as_ptr(), core::ptr::null(), &mut res, prog.as_ptr()) };
+    if rc != 0 {
+        println!("wpstest: PMSHELL not started: {}", rc);
+        return 1;
+    }
+    let pid = res.code_terminate;
+    let mut up = false;
+    for _ in 0..120 {
+        unsafe { DosSleep(500) };
+        if query(b"<WP_DESKTOP>") != 0 {
+            up = true;
+            break;
+        }
+    }
+    println!("wpstest: shell {}", if up { "up" } else { "not up" });
+    // The desktop paints and the Startup folder's objects open.
+    unsafe { DosSleep(3000) };
+    for cmd in rest.split(|&c| c == b';') {
+        let w: Vec<&[u8]> = cmd.split(|&c| c == b' ').filter(|w| !w.is_empty()).collect();
+        let Some(&verb) = w.first() else { continue };
+        let arg = |i: usize| w.get(i).copied().unwrap_or(b"");
+        let num = |i: usize| s(arg(i)).parse::<u32>().unwrap_or(0);
+        match verb.to_ascii_uppercase().as_slice() {
+            b"OPEN" => {
+                // The first start's objects may still be on their way.
+                let mut ok = false;
+                for _ in 0..40 {
+                    let h = query(arg(1));
+                    ok = h != 0 && unsafe { WinOpenObject(h, num(2), 1) } != 0;
+                    if ok {
+                        break;
+                    }
+                    unsafe { DosSleep(500) };
+                }
+                println!("wpstest: open {} view {}: {}", s(arg(1)), num(2), ok);
+            }
+            b"SET" => {
+                let h = query(arg(1));
+                let setup = z(&w[2..].join(&b' '));
+                let ok = h != 0 && unsafe { WinSetObjectData(h, setup.as_ptr()) } != 0;
+                println!("wpstest: set {}: {}", s(arg(1)), ok);
+            }
+            b"SLEEP" => unsafe {
+                DosSleep(num(1) * 1000);
+            },
+            _ => println!("wpstest: what is {}?", s(verb)),
+        }
+    }
+    let mut pid_out = 0u32;
+    unsafe { DosWaitChild(0, 0, &mut res, &mut pid_out, pid) };
+    0
+}
+
 fn main(st: &Startup) -> u32 {
     let args = st.args();
     let word = args.split(|&c| c == b' ').find(|w| !w.is_empty()).unwrap_or(b"");
+    if word.eq_ignore_ascii_case(b"SHELL") {
+        return shell(args);
+    }
     if [&b"REMOTE"[..], b"REGISTER", b"OLDDESKTOP", b"DUPES"].iter().any(|w| word.eq_ignore_ascii_case(w)) {
         match word.to_ascii_uppercase().as_slice() {
             b"REMOTE" => remote(),
