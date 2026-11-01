@@ -311,7 +311,10 @@ fn make() {
     let m = unsafe { WinMoveObject(p, desk, 0) };
     check("program moved to the desktop", m == p && ini_has(b"PM_Abstract:FldrContent", &hex(desk)));
     let cp = unsafe { WinCopyObject(d, desk, 0) };
-    check("data file copied", cp >> 16 == 3 && exists(b"C:\\DESKTOP\notes.txt"));
+    if cp >> 16 != 3 || !exists(b"C:\\DESKTOP\\notes.txt") {
+        println!("  copy: {:x}, desktop has notes.txt: {}", cp, exists(b"C:\\DESKTOP\\notes.txt"));
+    }
+    check("data file copied", cp >> 16 == 3 && exists(b"C:\\DESKTOP\\notes.txt"));
     let sub = create(b"WPFolder", b"Sub", b"", b"<RS2_TESTFLDR>");
     check("subfolder", sub != 0 && exists(&path(sub)));
     // A title that cannot be a file name keeps its characters (the Open
@@ -442,6 +445,13 @@ fn new_classes() {
         unsafe { WinDestroyObject(h) };
     }
     desktop_settings();
+
+    // WPPRINT's Spooler: its settings are its view, with IBM's methods.
+    let sp = create(b"WPSpool", b"Test Spooler", b"", b"<WP_DESKTOP>");
+    let so = object(sp);
+    check("WPSpool object", sp >> 16 == 2 && so != 0 && somres(so, b"wpAddSetPathPage") != 0 && somres(so, b"wpAddSetPriorityPage") != 0);
+    check("the Spooler opens its settings", call(so, b"wpQueryDefaultView", &[]) == 2);
+    unsafe { WinDestroyObject(sp) };
 
     let n = create(b"WPNetwork", b"Test Network", b"", b"<RS2_TESTFLDR>");
     check("WPNetwork: a folder", n >> 16 == 3 && exists(&path(n)) && class_title(object(n)) == b"Network");
