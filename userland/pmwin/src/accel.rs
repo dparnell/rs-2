@@ -109,6 +109,17 @@ fn apply(t: &[Accel], target: u32, m: &mut QMsg) -> bool {
     true
 }
 
+/// Is the key Alt+letter for an item of the frame's menu?
+fn mnemonic_of(frame: u32, m: &QMsg) -> bool {
+    let k = Key::from(m.mp1, m.mp2);
+    if !k.alt() || k.ctrl() || k.up() {
+        return false;
+    }
+    let c = k.letter(m.mp1);
+    let bar = win::WinWindowFromID(frame, FID_MENU);
+    c != 0 && bar != 0 && crate::menu::has_mnemonic(bar, c)
+}
+
 /// Translate a WM_CHAR taken off the queue into a command, if it is an
 /// accelerator.
 pub fn translate(m: &mut QMsg) -> bool {
@@ -122,6 +133,15 @@ pub fn translate(m: &mut QMsg) -> bool {
             if apply(&t.clone(), cur, m) {
                 return true;
             }
+        }
+        // Then the frame's menu (IBM's FrameTranslateAccel asks it, as
+        // each frame from the focus up gets WM_TRANSLATEACCEL): an
+        // Alt+letter mnemonic of its action bar goes to that frame, also
+        // from inside a frame without a menu (Borland's IDE: Alt+P in
+        // an MDI document's editor opens the main window's Project).
+        if frame::is_frame(cur) && mnemonic_of(cur, m) {
+            m.hwnd = cur;
+            return true;
         }
         cur = ctl::parent(cur);
     }

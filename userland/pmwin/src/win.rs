@@ -1441,15 +1441,27 @@ pub extern "C" fn WinUpdateWindow(h: u32) -> u32 {
         if win.update.is_empty() {
             continue;
         }
-        let (parent, x, y) = (win.parent, win.x, win.y);
+        // Windows around it that do not clip their children and still
+        // have to paint would paint over it later: what it paints now is
+        // taken out of their update regions (OS/2's Solitaire turns a
+        // card over so; Borland's IDE fills a project list inside a
+        // document frame inside an MDI client that does not clip). IBM's
+        // XUpdateWindow leaves the window for later instead, but rs2
+        // also invalidates the parent where a child is shown, which
+        // would leave it waiting for no reason.
         let mut mine = win.update.clone();
-        mine.offset(x, y);
-        if let Some(p) = s.desk.get_mut(parent) {
-            if p.style & ws::CLIPCHILDREN == 0 && !p.update.is_empty() && parent != HWND_DESKTOP {
+        let o = s.desk.origin(w);
+        mine.offset(o.x, o.y);
+        let mut a = win.parent;
+        while a != 0 && a != HWND_DESKTOP {
+            let ao = s.desk.origin(a);
+            let Some(aw) = s.desk.get_mut(a) else { break };
+            if aw.style & ws::CLIPCHILDREN == 0 && !aw.update.is_empty() {
                 for r in &mine.rects {
-                    p.update.subtract(r);
+                    aw.update.subtract(&r.offset(-ao.x, -ao.y));
                 }
             }
+            a = aw.parent;
         }
         if s.queue_of(w) != me {
             continue; // painted by its own thread

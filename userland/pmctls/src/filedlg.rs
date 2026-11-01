@@ -19,12 +19,15 @@ const F_DLGPROC: usize = 28;
 const F_ITYPE: usize = 32;
 const F_TYPELIST: usize = 36;
 const F_IDRIVE: usize = 40;
+const F_HMOD: usize = 48;
 const F_FULLFILE: usize = 52;
 const F_FQFILENAME: usize = 312;
 const F_FQFCOUNT: usize = 316;
+const F_DLGID: usize = 320;
 const F_EATYPE: usize = 326;
 const CCHMAXPATH: usize = 260;
 
+const FDS_CUSTOM: u32 = 0x0002;
 const FDS_HELPBUTTON: u32 = 0x0008;
 const FDS_APPLYBUTTON: u32 = 0x0010;
 const FDS_MODELESS: u32 = 0x0040;
@@ -36,6 +39,13 @@ const FDS_ERR_INVALID_DIALOG: u32 = 3;
 const FDM_FILTER: u32 = WM_USER + 40;
 const FDM_VALIDATE: u32 = WM_USER + 41;
 const FDM_ERROR: u32 = WM_USER + 42;
+
+/// Labels show their `~` mnemonic (IBM's template has DT_MNEMONIC: Borland
+/// C++ sets "~Open Filename:").
+const DT_MNEMONIC: u32 = 0x2000;
+const DT_VCENTER: u32 = 0x0400;
+const WM_DRAWITEM: u32 = 0x0036;
+const WM_MEASUREITEM: u32 = 0x0037;
 
 const DID_FILENAME_TXT: u16 = 257;
 const DID_FILENAME_ED: u16 = 258;
@@ -59,6 +69,8 @@ struct State {
     dir: Vec<u8>,
     /// File name pattern of the files list.
     pattern: Vec<u8>,
+    /// Set up, and the application's procedure has had WM_INITDLG.
+    ready: bool,
 }
 
 static mut STATES: Vec<State> = Vec::new();
@@ -268,7 +280,7 @@ fn init(dlg: u32, fild: *mut u8) {
     }
     let pattern = if has_wild(&name) { name.clone() } else { b"*".to_vec() };
     states().retain(|s| s.hwnd != dlg);
-    states().push(State { hwnd: dlg, fild, dir, pattern });
+    states().push(State { hwnd: dlg, fild, dir, pattern, ready: false });
     let title = rd32(fild, F_TITLE);
     let t: Vec<u8> = if title != 0 { cstr(title as *const u8) } else if fl & FDS_SAVEAS_DIALOG != 0 { b"Save As".to_vec() } else { b"Open".to_vec() };
     unsafe { WinSetWindowText(dlg, z(&t).as_ptr()) };
@@ -310,11 +322,9 @@ fn init(dlg: u32, fild: *mut u8) {
             }
         }
     }
-    refresh(dlg);
-    unsafe {
-        WinSendDlgItemMsg(dlg, DID_FILENAME_ED as u32, EM_SETSEL, mp(0, 0x7fff), 0);
-        WinSetFocus(1, WinWindowFromID(dlg, DID_FILENAME_ED as u32));
-    }
+    // The focus is the dialog manager's to give (the first tab stop: the
+    // file name in rs2's template; a custom template has its own order).
+    unsafe { WinSendDlgItemMsg(dlg, DID_FILENAME_ED as u32, EM_SETSEL, mp(0, 0x7fff), 0) };
 }
 
 /// OK: take the file name (a pattern or a directory changes the lists).
@@ -373,11 +383,27 @@ fn ok(dlg: u32) {
 /// The dialog's window procedure: makes the FILEDLG the QWL_USER window
 /// word before anything else and passes every message to the
 /// application's procedure (FILEDLG.pfnDlgProc), else to
-/// WinDefFileDlgProc.
+/// WinDefFileDlgProc. As IBM's WinDefFileDlgProc does on WM_INITDLG
+/// (InitializeFileDlg), the dialog is set up first, then the
+/// application's procedure gets WM_INITDLG with mp1 and mp2 0 (Borland
+/// C++'s handles it without passing it on), then the lists are filled.
 #[unsafe(no_mangle)]
 pub extern "C" fn Rs2FileDlgProc(hwnd: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     if msg == WM_INITDLG {
         unsafe { WinSetWindowPtr(hwnd, 0, mp2) };
+        init(hwnd, mp2 as *mut u8);
+        let user = if mp2 == 0 { 0 } else { rd32(mp2 as *const u8, F_DLGPROC) };
+        let r = if user != 0 {
+            let f: extern "C" fn(u32, u32, u32, u32) -> u32 = unsafe { core::mem::transmute(user as usize) };
+            f(hwnd, WM_INITDLG, 0, 0)
+        } else {
+            0
+        };
+        refresh(hwnd);
+        if let Some(s) = state(hwnd) {
+            s.ready = true;
+        }
+        return r;
     }
     let fild = unsafe { WinQueryWindowPtr(hwnd, 0) } as *const u8;
     let user = if fild.is_null() { 0 } else { rd32(fild, F_DLGPROC) };
@@ -392,9 +418,16 @@ pub extern "C" fn Rs2FileDlgProc(hwnd: u32, msg: u32, mp1: u32, mp2: u32) -> u32
 #[unsafe(no_mangle)]
 pub extern "C" fn WinDefFileDlgProc(hwnd: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
+        // The dialog was set up before the application's procedure got
+        // WM_INITDLG (Rs2FileDlgProc); what it passes on is ignored, as
+        // IBM's ignores it while initialising.
         WM_INITDLG => {
-            init(hwnd, mp2 as *mut u8);
-            1
+            if state(hwnd).is_none() {
+                let fild = unsafe { WinQueryWindowPtr(hwnd, 0) };
+                init(hwnd, if fild != 0 { fild } else { mp2 } as *mut u8);
+                refresh(hwnd);
+            }
+            0
         }
         WM_CONTROL => {
             let (id, code) = (mp1 & 0xffff, mp1 >> 16);
@@ -442,6 +475,42 @@ pub extern "C" fn WinDefFileDlgProc(hwnd: u32, msg: u32, mp1: u32, mp2: u32) -> 
             }
             0
         }
+        // An owner-drawn directory list (IBM's template, and custom ones
+        // such as Borland C++'s, have LS_OWNERDRAW there): IBM's
+        // WinDefFileDlgProc measures and draws it.
+        WM_MEASUREITEM if mp1 & 0xffff == DID_DIRECTORY_LB as u32 => {
+            let mut fm = [0i32; 52];
+            let hps = unsafe { WinGetPS(hwnd) };
+            unsafe { GpiQueryFontMetrics(hps, 208, fm.as_mut_ptr()) };
+            unsafe { WinReleasePS(hps) };
+            // lMaxBaselineExt, and a little room.
+            (fm[28] + 2).max(10) as u32
+        }
+        WM_DRAWITEM if mp1 & 0xffff == DID_DIRECTORY_LB as u32 && mp2 != 0 => {
+            // OWNERITEM: hwnd, hps, fsState, fsAttribute, fsStateOld,
+            // fsAttributeOld, rclItem, idItem (the index), hItem.
+            let oi = mp2 as *mut u32;
+            let hps = unsafe { *oi.add(1) };
+            let selected = unsafe { *oi.add(2) } != 0;
+            let mut rcl = [0i32; 4];
+            for (i, r) in rcl.iter_mut().enumerate() {
+                *r = unsafe { *oi.add(6 + i) } as i32;
+            }
+            let idx = unsafe { *oi.add(10) };
+            let t = list_text(hwnd, DID_DIRECTORY_LB as u32, idx);
+            // SYSCLR_HILITEBACKGROUND/FOREGROUND, or SYSCLR_ENTRYFIELD
+            // and SYSCLR_WINDOWTEXT.
+            let (bg, fg) = if selected { (-32, -33) } else { (-47, -17) };
+            unsafe {
+                WinFillRect(hps, rcl.as_ptr(), bg);
+                let mut r = [rcl[0] + 4, rcl[1], rcl[2], rcl[3]];
+                WinDrawText(hps, t.len() as i32, t.as_ptr(), r.as_mut_ptr(), fg, bg, DT_VCENTER);
+                // Drawn here, selection included.
+                *oi.add(2) = 0;
+                *oi.add(4) = 0;
+            }
+            1
+        }
         // The defaults: keep every file, accept every name, use the
         // standard error messages.
         FDM_FILTER | FDM_VALIDATE => 1,
@@ -461,17 +530,17 @@ fn template_for(fl: u32) -> Vec<u8> {
     frame.ctl = (0x0000_0001u32 | 0x0000_0002).to_le_bytes().to_vec();
     let mut v = Vec::new();
     let name_label: &[u8] = if save { b"Save as filename:" } else { b"Open filename:" };
-    v.push(item(WC_STATIC, name_label, st | 0x0000_0001, (6, 196, 280, 8), DID_FILENAME_TXT));
+    v.push(item(WC_STATIC, name_label, st | 0x0000_0001 | DT_MNEMONIC, (6, 196, 280, 8), DID_FILENAME_TXT));
     v.push(item(WC_ENTRYFIELD, b"", tab | WS_GROUP | 0x0000_0008 | 0x0000_0004, (8, 184, 280, 8), DID_FILENAME_ED));
-    v.push(item(WC_STATIC, if save { b"Save file as type:" } else { b"Type of file:" }, st | 0x0000_0001, (6, 168, 136, 8), DID_FILTER_TXT));
+    v.push(item(WC_STATIC, if save { b"Save file as type:" } else { b"Type of file:" }, st | 0x0000_0001 | DT_MNEMONIC, (6, 168, 136, 8), DID_FILTER_TXT));
     // CBS_DROPDOWNLIST.
     v.push(item(WC_COMBOBOX, b"", tab | WS_GROUP | 0x0000_0004, (6, 80, 136, 86), DID_FILTER_CB));
-    v.push(item(WC_STATIC, b"Drive:", st | 0x0000_0001, (152, 168, 136, 8), DID_DRIVE_TXT));
+    v.push(item(WC_STATIC, b"Drive:", st | 0x0000_0001 | DT_MNEMONIC, (152, 168, 136, 8), DID_DRIVE_TXT));
     v.push(item(WC_COMBOBOX, b"", tab | WS_GROUP | 0x0000_0004, (152, 80, 136, 86), DID_DRIVE_CB));
     v.push(item(WC_STATIC, b"", st | 0x0000_0001, (6, 142, 282, 8), DID_DIRECTORY_SELECTED));
-    v.push(item(WC_STATIC, b"Directory:", st | 0x0000_0001, (6, 130, 136, 8), DID_DIRECTORY_TXT));
+    v.push(item(WC_STATIC, b"Directory:", st | 0x0000_0001 | DT_MNEMONIC, (6, 130, 136, 8), DID_DIRECTORY_TXT));
     v.push(item(WC_LISTBOX, b"", tab | WS_GROUP, (6, 30, 136, 98), DID_DIRECTORY_LB));
-    v.push(item(WC_STATIC, b"File:", st | 0x0000_0001, (152, 130, 136, 8), DID_FILES_TXT));
+    v.push(item(WC_STATIC, b"File:", st | 0x0000_0001 | DT_MNEMONIC, (152, 130, 136, 8), DID_FILES_TXT));
     v.push(item(WC_LISTBOX, b"", tab | WS_GROUP, (152, 30, 136, 98), DID_FILES_LB));
     // Push buttons in the places of IBM's template (applications add
     // their own between OK and Cancel, where Apply goes): OK
@@ -499,10 +568,17 @@ pub extern "C" fn WinFileDlg(parent: u32, owner: u32, fild: *mut u8) -> u32 {
     let fl = rd32(fild, F_FL);
     wr32(fild, F_RETURN, 0);
     wr32(fild, F_SRC, FDS_SUCCESSFUL);
-    let t = template_for(fl);
     let proc_ = crate::exports::__a_Rs2FileDlgProc as *const () as u32;
     let parent = if parent == 0 { 1 } else { parent };
-    let dlg = unsafe { WinCreateDlg(parent, owner, proc_, t.as_ptr(), fild as u32) };
+    // FDS_CUSTOM: the application's template (hMod, usDlgId), with the
+    // standard controls' ids where it wants them.
+    let dlg = if fl & FDS_CUSTOM != 0 {
+        let id = unsafe { (fild.add(F_DLGID) as *const u16).read_unaligned() } as u32;
+        unsafe { WinLoadDlg(parent, owner, proc_, rd32(fild, F_HMOD), id, fild as u32) }
+    } else {
+        let t = template_for(fl);
+        unsafe { WinCreateDlg(parent, owner, proc_, t.as_ptr(), fild as u32) }
+    };
     if dlg == 0 {
         wr32(fild, F_SRC, FDS_ERR_INVALID_DIALOG);
         return 0;

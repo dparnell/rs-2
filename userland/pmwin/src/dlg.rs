@@ -180,13 +180,17 @@ pub fn create_from(parent: u32, owner: u32, proc_: u32, t: &DlgItemT, params: u3
             w.style &= !ws::CLIPCHILDREN;
         }
     }
-    let b = frame::border(fcf);
-    for c in &t.children {
-        create_item(h, h, c, b);
-    }
+    // The dialog procedure is in place before the controls are made, as
+    // in IBM's dialog manager: an owner-drawn list box asks it how high
+    // its items are (WM_MEASUREITEM) when it is created (Borland C++'s
+    // file dialog template).
     let proc_ = if proc_ == 0 { def_dlg_entry as *const () as u32 } else { proc_ };
     if let Some(w) = st().desk.get_mut(h) {
         w.proc_ = proc_;
+    }
+    let b = frame::border(fcf);
+    for c in &t.children {
+        create_item(h, h, c, b);
     }
     let first = WinEnumDlgItem(h, 0, EDI_FIRSTTABITEM);
     if let Some(f) = st().frames.get_mut(&h) {
