@@ -9,7 +9,8 @@
 //! prints PASS or FAIL; the last line is "pmxtest done: N failure(s)"
 //! and the exit code N. `PMXTEST CHILD` is the second process the system
 //! hooks are checked in, `PMXTEST DDESERVER` the DDE server, `PMXTEST DDEMLSERVER` the
-//! DDEML server (`PMXTEST DDEML` makes the DDEML checks only), `PMXTEST
+//! DDEML server (`PMXTEST DDEML` makes the DDEML checks only, `PMXTEST AVIO`
+//! the AVIO ones), `PMXTEST
 //! REG` makes the registry checks only; `PMXTEST RECORD` waits for three keys or clicks (typed by `xtask run --type`)
 //! and reports what the journal record hook saw.
 
@@ -187,6 +188,8 @@ fn main(s: &Startup) -> u32 {
     }
     if args.starts_with(b"RECORD") {
         hooks::record(hab, client);
+    } else if args.starts_with(b"AVIO") {
+        avio::avio_checks(hab, client);
     } else if args.starts_with(b"DDEML") {
         ddeml::ddeml_checks(hab, client);
     } else if args.starts_with(b"REG") {

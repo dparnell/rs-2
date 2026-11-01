@@ -325,6 +325,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pmviop-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "thunk16",
+]
+
+[[package]]
 name = "pmviowin"
 version = "0.1.0"
 dependencies = [
@@ -382,6 +390,7 @@ name = "pmxtest"
 version = "0.1.0"
 dependencies = [
  "os2",
+ "thunk16",
 ]
 
 [[package]]

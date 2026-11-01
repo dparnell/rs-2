@@ -1,0 +1,2 @@
+; PMVIOP.DLL: IBM's ordinal and name (the 16-bit entry point, src/lib.rs)
+WINDEFAVIOWINDOWPROC=WIN16DEFAVIOWINDOWPROC @30

@@ -6,6 +6,7 @@ WinSetAccelTable=__a_WinSetAccelTable @850
 WinQueryAccelTable=__a_WinQueryAccelTable @798
 WinTranslateAccel=__a_WinTranslateAccel @904
 WinCopyAccelTable=__a_WinCopyAccelTable @709
+Rs2AvioPaint=__a_Rs2AvioPaint @9030
 WinOpenClipbrd=__a_WinOpenClipbrd @793
 WinCloseClipbrd=__a_WinCloseClipbrd @707
 WinEmptyClipbrd=__a_WinEmptyClipbrd @733
