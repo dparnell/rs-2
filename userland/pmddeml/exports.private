@@ -1,0 +1,27 @@
+; IBM's PMDDEML ordinals (its entry table; no Toolkit library has them)
+WinDdeAbandonTransaction 100
+WinDdeAccessData 101
+WinDdeAddData 102
+WinDdeSubmitTransaction 103
+WinDdeCompareStringHandles 104
+WinDdeConnect 105
+WinDdeConnectList 106
+WinDdeCreateDataHandle 107
+WinDdeCreateStringHandle 108
+WinDdeDisconnect 109
+WinDdeDisconnectList 110
+WinDdeEnableCallback 111
+WinDdeFreeDataHandle 112
+WinDdeFreeStringHandle 113
+WinDdeGetData 114
+WinDdeInitialize 116
+WinDdeKeepStringHandle 117
+WinDdeNameService 118
+WinDdePostAdvise 119
+WinDdeQueryConvInfo 120
+WinDdeQueryNextServer 121
+WinDdeQueryString 122
+WinDdeReconnect 123
+WinDdeSetUserHandle 124
+WinDdeUninitialize 126
+WinDdeQueryModuleVersion 127

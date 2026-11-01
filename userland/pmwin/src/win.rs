@@ -212,6 +212,7 @@ pub fn remove(h: u32) {
     let showing = s.desk.is_showing(h);
     let gone = s.desk.destroy(h);
     crate::cursor::windows_gone(s, &gone);
+    crate::gpiapi::windows_gone(s, &gone);
     for f in s.frames.values_mut() {
         if gone.contains(&f.client) {
             f.client = 0;
@@ -1331,7 +1332,7 @@ pub extern "C" fn WinReleasePS(hps: u32) -> u32 {
         let h = gpiapi::entry(st(), hps).map_or(0, |e| e.hwnd);
         crate::hooks::window_dc(hps, h, false);
     }
-    gpiapi::destroy(st(), hps) as u32
+    gpiapi::release(st(), hps) as u32
 }
 
 /// WinFillRect(hps, prcl, lColor)

@@ -180,6 +180,32 @@ unsafe extern "C" {
     pub fn GpiSetCharSet(hps: u32, lcid: i32) -> u32;
     #[link_name = "PMGPI.378"]
     pub fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.610"]
+    pub fn DevOpenDC(hab: u32, ty: i32, tok: *const u8, n: i32, dop: *const u32, comp: u32) -> u32;
+    #[link_name = "PMGPI.604"]
+    pub fn DevCloseDC(hdc: u32) -> u32;
+    #[link_name = "PMGPI.369"]
+    pub fn GpiCreatePS(hab: u32, hdc: u32, size: *const i32, opts: u32) -> u32;
+    #[link_name = "PMGPI.379"]
+    pub fn GpiDestroyPS(hps: u32) -> u32;
+    #[link_name = "PMGPI.351"]
+    pub fn GpiAssociate(hps: u32, hdc: u32) -> u32;
+    #[link_name = "PMGPI.521"]
+    pub fn GpiSetDrawControl(hps: u32, ctl: i32, val: i32) -> u32;
+    #[link_name = "PMGPI.428"]
+    pub fn GpiQueryBoundaryData(hps: u32, r: *mut RectL) -> u32;
+    #[link_name = "PMGPI.520"]
+    pub fn GpiSetDefaultViewMatrix(hps: u32, n: i32, m: *const i32, opt: i32) -> u32;
+    #[link_name = "PMGPI.389"]
+    pub fn GpiErase(hps: u32) -> u32;
+    #[link_name = "PMGPI.445"]
+    pub fn GpiQueryDeviceBitmapFormats(hps: u32, n: i32, out: *mut i32) -> u32;
+    #[link_name = "PMGPI.598"]
+    pub fn GpiCreateBitmap(hps: u32, hdr: *const u8, opts: u32, init: *const u8, bmi: *const u8) -> u32;
+    #[link_name = "PMGPI.506"]
+    pub fn GpiSetBitmap(hps: u32, hbm: u32) -> u32;
+    #[link_name = "PMGPI.371"]
+    pub fn GpiDeleteBitmap(hbm: u32) -> u32;
     #[link_name = "PMWIN.730"]
     pub fn WinDrawBitmap(hps: u32, hbm: u32, src: *const RectL, dst: *const PointL, fore: i32, back: i32, fl: u32) -> u32;
 }
@@ -206,6 +232,7 @@ pub const WS_GROUP: u32 = 0x0001_0000;
 pub const FCF_TITLEBAR: u32 = 0x0001;
 pub const FCF_SYSMENU: u32 = 0x0002;
 pub const FCF_SIZEBORDER: u32 = 0x0008;
+pub const FCF_BORDER: u32 = 0x0200;
 pub const FCF_MINBUTTON: u32 = 0x0010;
 pub const FCF_MAXBUTTON: u32 = 0x0020;
 pub const FCF_SHELLPOSITION: u32 = 0x0000_0400;
@@ -228,6 +255,7 @@ pub const QWL_HMQ: i32 = -4;
 pub const SV_CXSCREEN: i32 = 20;
 pub const SV_CYSCREEN: i32 = 21;
 pub const SV_CXVSCROLL: i32 = 22;
+pub const SV_CYHSCROLL: i32 = 23;
 
 pub const WM_CREATE: u32 = 0x0001;
 pub const WM_DESTROY: u32 = 0x0002;
@@ -312,6 +340,7 @@ pub const CLR_PALEGRAY: i32 = 15;
 pub const SYSCLR_WINDOW: i32 = -20;
 pub const SYSCLR_WINDOWTEXT: i32 = -17;
 pub const SYSCLR_HELPBACKGROUND: i32 = -12;
+pub const SYSCLR_WINDOWFRAME: i32 = -19;
 pub const SYSCLR_HELPTEXT: i32 = -11;
 pub const SYSCLR_HELPHILITE: i32 = -10;
 pub const BM_LEAVEALONE: i32 = 5;

@@ -48,6 +48,14 @@ unsafe extern "C" {
     fn VIO16WRTCHARSTRATT();
     #[link_name = "VIOCALLS.52"]
     fn VIO16WRTNCELL();
+    #[link_name = "PMVIOP.30"]
+    fn WIN16DEFAVIOWINDOWPROC();
+    #[link_name = "PMWIN.743"]
+    fn WinFillRect(hps: u32, rcl: *const i32, clr: i32) -> u32;
+    #[link_name = "PMWIN.765"]
+    fn WinInvalidateRect(h: u32, rcl: *const i32, children: u32) -> u32;
+    #[link_name = "PMWIN.831"]
+    fn WinQueryUpdateRect(h: u32, rcl: *mut i32) -> u32;
 }
 
 const CLR_BLUE: i32 = 1;
@@ -98,6 +106,20 @@ pub fn avio_checks(hab: u32, client: u32) {
     call(VIO16SHOWPS, &[ROWS, COLS, 0, h]);
     pump(hab);
     check("VioWrtNCell on the PS, drawn in the window", rc == 0 && pel(win, 0, 0) == CLR_RED && pel(win, 3, 19) == CLR_RED);
+
+    // WinDefAVioWindowProc (PMVIOP's 16-bit entry) draws the PS again on
+    // WM_PAINT and validates the window.
+    let hps = unsafe { WinGetPS(win) };
+    let all = [0, 0, COLS as i32 * 8, ROWS as i32 * 16];
+    unsafe { WinFillRect(hps, all.as_ptr(), CLR_BLUE) };
+    unsafe { WinReleasePS(hps) };
+    let over = pel(win, 0, 0) == CLR_BLUE && pel(win, 3, 19) == CLR_BLUE;
+    unsafe { WinInvalidateRect(win, null(), 0) };
+    let entry = thunk16::far(WIN16DEFAVIOWINDOWPROC as *const () as *const u8);
+    thunk16::PascalCall::new().l(win).w(0x23).l(0).l(0).call(entry);
+    let mut r = [0i32; 4];
+    let valid = unsafe { WinQueryUpdateRect(win, r.as_mut_ptr()) } == 0;
+    check("WinDefAVioWindowProc (PMVIOP 30): WM_PAINT draws the PS", over && pel(win, 0, 0) == CLR_RED && pel(win, 3, 19) == CLR_RED && valid);
 
     // An attribute: bright blue background.
     b.0[0] = 0x90;

@@ -17,7 +17,9 @@
 //!   bottom, or a number with `%`, `c` characters, `x` pixels or `p`
 //!   points), `vpcx=`/`vpcy=`, `group=`, `auto`, `viewport`,
 //!   `dependent`; headings take `x=`, `y=`, `width=`, `height=` and
-//!   `group=` the same way;
+//!   `group=` the same way; both take the window controls `titlebar=`
+//!   (yes, sysmenu, minmax, both, none), `scroll=` (horizontal,
+//!   vertical, both, none) and `rules=` (border, sizeborder, none);
 //! - `:acviewport dll= objectname= objectid= objectinfo=.` with
 //!   `vpx=` and so on;
 //! - `:font facename=F size=HxW.` (`facename=default`: the document's
@@ -227,10 +229,45 @@ fn coord(line: usize, v: &[u8]) -> Result<(u8, u16), CompileError> {
     Ok((units, number(line, num)?))
 }
 
+/// The window style word of `titlebar=`, `scroll=` and `rules=` (flag
+/// 0x08 of window data), as IBM's compiler writes it: titlebar 0x100,
+/// its system menu 0x200 and minimize and maximize buttons 0x400;
+/// horizontal and vertical scroll bars 0x10 and 0x20; a border 0x04 or a
+/// sizing border 0x08; and 0x4000, 0x2000 and 0x1000 for the attributes
+/// given. A heading's word has the defaults of the others (title bar
+/// with both, both scroll bars, sizing border: IBM's help manager merges
+/// a link's given ones into it, PnlMergeViewportStyle); a link's only
+/// those given.
+fn window_style(line: usize, a: &[(Vec<u8>, Vec<u8>)], heading: bool) -> Result<Option<u16>, CompileError> {
+    let get = |k: &[u8]| a.iter().find(|(n, _)| n == k).map(|(_, v)| v.to_ascii_lowercase());
+    let groups: [(&[u8], u16, u16, &[(&[u8], u16)]); 3] = [
+        (b"titlebar", 0x4000, 0x700, &[(b"yes", 0x100), (b"sysmenu", 0x300), (b"minmax", 0x500), (b"both", 0x700), (b"none", 0)]),
+        (b"scroll", 0x2000, 0x30, &[(b"horizontal", 0x10), (b"vertical", 0x20), (b"both", 0x30), (b"none", 0)]),
+        (b"rules", 0x1000, 0x08, &[(b"border", 0x04), (b"sizeborder", 0x08), (b"none", 0)]),
+    ];
+    let mut style = 0u16;
+    let mut any = false;
+    for (name, given, default, values) in groups {
+        match get(name) {
+            Some(v) => {
+                let Some(&(_, bits)) = values.iter().find(|(n, _)| *n == v.as_slice()) else {
+                    return err(line, format!("bad {}= value {:?}", core::str::from_utf8(name).unwrap_or(""), String::from_utf8_lossy(&v)));
+                };
+                style |= given | bits;
+                any = true;
+            }
+            None if heading => style |= default,
+            None => {}
+        }
+    }
+    Ok(any.then_some(style))
+}
+
 /// The window fields of a link or heading, from attributes `names` (x,
-/// y, cx, cy) and `group=`: the flags (0x01 origin, 0x02 size, 0x400
-/// group) and the bytes after them, or None.
-fn window_data(line: usize, a: &[(Vec<u8>, Vec<u8>)], names: [&[u8]; 4]) -> Result<Option<(u16, Vec<u8>)>, CompileError> {
+/// y, cx, cy), the window controls and `group=`: the flags (0x01
+/// origin, 0x02 size, 0x08 style, 0x400 group) and the bytes after them,
+/// or None.
+fn window_data(line: usize, a: &[(Vec<u8>, Vec<u8>)], names: [&[u8]; 4], heading: bool) -> Result<Option<(u16, Vec<u8>)>, CompileError> {
     let get = |k: &[u8]| a.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone());
     let mut flags = 0u16;
     let mut d = Vec::new();
@@ -251,6 +288,10 @@ fn window_data(line: usize, a: &[(Vec<u8>, Vec<u8>)], names: [&[u8]; 4]) -> Resu
         d.push(ux << 4 | uy);
         put16(&mut d, vx);
         put16(&mut d, vy);
+    }
+    if let Some(st) = window_style(line, a, heading)? {
+        flags |= 0x08;
+        put16(&mut d, st);
     }
     if let Some(g) = get(b"group") {
         flags |= 0x400;
@@ -343,7 +384,7 @@ impl Parser {
                         return err(line, format!("res={r} used twice"));
                     }
                 }
-                let ext = window_data(line, &a, [b"x", b"y", b"width", b"height"])?;
+                let ext = window_data(line, &a, [b"x", b"y", b"width", b"height"], true)?;
                 self.panels.push(Panel {
                     level: name[1] - b'0',
                     hidden: a.iter().any(|(n, _)| n == b"hide"),
@@ -472,7 +513,7 @@ impl Parser {
                     (None, Some(id)) => Ref::Id(id.to_ascii_lowercase()),
                     _ => return err(line, ":link. needs res= or refid="),
                 };
-                let data = window_data(line, &a, [b"vpx", b"vpy", b"vpcx", b"vpcy"])?;
+                let data = window_data(line, &a, [b"vpx", b"vpy", b"vpcx", b"vpcy"], false)?;
                 let mut flags = data.as_ref().map_or(0, |d| d.0);
                 for (k, f) in [(&b"auto"[..], 0x40u16), (b"viewport", 0x80), (b"dependent", 0x200)] {
                     if a.iter().any(|(n, _)| n == k) {
@@ -505,7 +546,7 @@ impl Parser {
                 let mut d = vec![0, strs.len() as u8];
                 put16(&mut d, objid);
                 d.extend_from_slice(&strs);
-                if let Some((flags, w)) = window_data(line, &a, [b"vpx", b"vpy", b"vpcx", b"vpcy"])? {
+                if let Some((flags, w)) = window_data(line, &a, [b"vpx", b"vpy", b"vpcx", b"vpcy"], false)? {
                     put16(&mut d, flags);
                     d.extend_from_slice(&w);
                 }

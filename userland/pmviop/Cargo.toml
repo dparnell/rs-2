@@ -1,0 +1,14 @@
+[package]
+name = "pmviop-dll"
+description = "PMVIOP.DLL: WinDefAVioWindowProc (the AVIO window procedure) at IBM's ordinal"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmviop"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+thunk16 = { path = "../thunk16" }

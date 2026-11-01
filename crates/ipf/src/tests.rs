@@ -366,6 +366,27 @@ fn compile_window_data() {
     assert_eq!(t.title, b"B");
 }
 
+/// Window controls (`titlebar=`, `scroll=`, `rules=`): a heading's style
+/// word has the defaults of those not given (0x6108 is in IBM's files on
+/// the media), a link's only those given.
+#[test]
+fn compile_window_style() {
+    let src = b":userdoc.\n:h1 res=1.A\n:p.:link reftype=hd res=2 scroll=vertical rules=border group=4.w:elink.\n:h1 res=2 scroll=none titlebar=yes.B\n:p.y\n:h1 res=3 rules=none.C\n:p.z\n:h1 res=4.D\n:euserdoc.\n";
+    let data = crate::compile::compile(src, true).unwrap();
+    let doc = Doc::parse(&data).unwrap();
+    let items = crate::text::panel(&doc, 0);
+    let d = items.iter().find_map(|i| match i {
+        Some(Item::Link { data, .. }) => *data,
+        _ => None,
+    });
+    let d = d.unwrap();
+    assert_eq!((d.flags, d.style, d.group), (0x408, Some(0x3024), Some(4)));
+    assert_eq!((doc.toc(1).unwrap().ext, doc.toc(1).unwrap().style), (0x08, Some(0x6108)));
+    assert_eq!(doc.toc(2).unwrap().style, Some(0x1730));
+    assert_eq!(doc.toc(3).unwrap().style, None);
+    assert!(crate::compile::compile(b":userdoc.\n:h1 res=1 scroll=up.A\n:euserdoc.\n", true).is_err());
+}
+
 /// `:acviewport.` as IBM's compiler wrote it in the Toolkit's IPF sample,
 /// and as rs2's writes it.
 #[test]

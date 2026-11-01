@@ -25,3 +25,4 @@ WinLockInput 995
 WinWakeThread 9021
 Rs2SetMinButtonType 9030
 Rs2QueryIdleTime 9031
+Rs2AvioPaint 9032

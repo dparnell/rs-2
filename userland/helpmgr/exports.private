@@ -14,3 +14,10 @@ HMSetHelpDatabase 37
 MscAppendINF 45
 MscStriCmp 46
 MscStrniCmp 47
+MscCleanUp 38
+HPFSSplitPath 39
+ChopDot 40
+MakeHPFSFileList 41
+GoodList 42
+IsValidHPFSName 43
+HPFSMakeFullPathName 44

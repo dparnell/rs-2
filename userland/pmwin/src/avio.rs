@@ -147,3 +147,26 @@ fn draw(h: u32, i: &Info, cells: &[u16], (r0, c0, r1, c1): (usize, usize, usize,
     crate::gpiobj::GpiDrawBits(hps, buf.as_ptr(), bmi.as_ptr(), 3, pts.as_ptr(), 0xcc, 0);
     crate::win::WinReleasePS(hps);
 }
+
+/// Rs2AvioPaint(hwnd) (rs2-private, 9032; PMVIOP's WinDefAVioWindowProc
+/// on WM_PAINT): every cell of the PS associated with the window's DC
+/// drawn again; FALSE without one.
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2AvioPaint(h: u32) -> u32 {
+    let hdc = crate::gpiobj::WinQueryWindowDC(h);
+    if hdc == 0 {
+        return 0;
+    }
+    let mut info = Info::default();
+    if unsafe { Rs2AvioQuery(hdc, &mut info, core::ptr::null_mut(), 0) } != 0 || info.rows == 0 || info.cols == 0 {
+        return 0;
+    }
+    let n = info.rows as usize * info.cols as usize;
+    let mut cells = alloc::vec![0u16; n];
+    let mut now = Info::default();
+    if unsafe { Rs2AvioQuery(hdc, &mut now, cells.as_mut_ptr(), (n * 2) as u32) } != 0 {
+        return 0;
+    }
+    draw(h, &now, &cells, (0, 0, now.rows as usize - 1, now.cols as usize - 1));
+    1
+}

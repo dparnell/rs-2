@@ -37,6 +37,8 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmspl` → PMSPL.DLL | The spooler: queues, printers, ports and jobs, the `Spl*` and `Prt*` calls ([PRINTING.md](PRINTING.md)). |
 | `userland/pmspool` → PMSPOOL.EXE, `userland/pmprint` → PMPRINT.QPR | The spooler process and the queue processor ([PRINTING.md](PRINTING.md)). |
 | `userland/registry` → REGISTRY.DLL, `userland/pmwinx` → PMWINX.DLL | The registry (Win32 registry calls) and Open32's forwarders to it (see [Open32 and the registry](#open32-and-the-registry-pmwinx-registry)). |
+| `userland/pmddeml` → PMDDEML.DLL | The DDE management library (`WinDde*`) on PM's DDE (see [Dynamic data exchange](#dynamic-data-exchange-dde)). |
+| `userland/pmviop` → PMVIOP.DLL | `WinDefAVioWindowProc` (see [AVIO](#avio-vio-presentation-spaces-in-windows)). |
 | `userland/pmbidi` → PMBIDI.DLL, `userland/thailib` → THAILIB.DLL | Bidirectional language support of a system without bidirectional code pages (see [Bidirectional languages](#bidirectional-languages-pmbidi)). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
 | `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
@@ -472,9 +474,17 @@ of the process with changes (`Rs2AvioQuery`, RS2API 500; the font comes
 from `Rs2AvioFont`, 501) and renders the changed cells with crate
 `viocell` into the window (attribute bit 7 brightens the background; the
 cursor shows while the window has the focus). A program repaints on
-`WM_PAINT` with `VioShowPS`, as on OS/2. `WinDefAVioWindowProc`
-(PMVIOP.DLL) is not there: no program on the CD uses AVIO. PMXTEST checks
-the calls and what the window shows.
+`WM_PAINT` with `VioShowPS`, as on OS/2, or leaves it to
+`WinDefAVioWindowProc` (PMVIOP.DLL, userland/pmviop: IBM's ordinal 30, a
+16-bit `_pascal` entry as both Toolkit libraries import it), which
+draws the whole presentation space of the window's DC (PMWIN's
+`Rs2AvioPaint`, private ordinal 9032) and validates the window, and
+passes other messages to `WinDefWindowProc`. IBM's PMVIOP has nothing
+else programs import: its other entries are the VIO window (shield),
+console and Win-OS/2 clipboard internals of BVHWNDW, PMVDMP, SEAMLESS and
+PMMERGE, which rs2 does not have (PMVIOWIN.EXE and VDM.EXE do that
+work). PMXTEST checks the calls, what the window shows and
+`WinDefAVioWindowProc` (`PMXTEST AVIO`).
 
 ## Programs that stop responding
 
@@ -820,6 +830,23 @@ The GPI covers:
   `GpiResetPS`); a window PS follows its window's visible region, and
   `WinBeginPaint` can borrow it. `DevQueryCaps` describes a 24-bit,
   96 dpi display.
+- Presentation spaces are handed out as IBM's PMGPI and PMWIN do it
+  (studied in PMGPI's `GPI32CREATEPS`/`FullCreatePS` and PMMERGE's
+  `GetCe`, `CreateCe`, `ReleasePS`, `DestroyWindowCacheEntries`,
+  `DestroyQueueCacheEntries`). IBM sets no count per process: normal
+  presentation spaces are the process's own memory, the cached micro
+  PSs of `WinGetPS`/`WinBeginPaint` come from one system cache that grows
+  as needed (the first message queue makes five) and reuses released
+  entries. What it enforces, rs2 does too: `GpiCreatePS` wants page units,
+  a page size unless the PS is associated (PMERR_INV_PS_SIZE, null),
+  a micro or ink PS associated (an ink one in PU_PELS;
+  PMERR_INV_OR_INCOMPAT_OPTIONS) and one presentation space per device
+  context (PMERR_DC_IS_ASSOCIATED); `WinReleasePS` releases cached
+  presentation spaces only (PMERR_INV_HPS for others); a cached PS is
+  released when its window is destroyed and when the message queue of
+  the thread that got it is destroyed (and all of a process's when it
+  ends). PMERR_PS_BUSY (two threads in one PS at once) cannot happen:
+  PMWIN serialises its calls. PMXTEST checks these (`PMXTEST PS`).
 - Transforms: model and default viewing matrices (`TRANSFORM_REPLACE`,
   `ADD`, `PREEMPT`; `GpiTranslate`, `GpiScale`, `GpiRotate`), page units
   (`PU_PELS` .. `PU_TWIPS`) and page viewport, `GpiConvert`.
@@ -1312,9 +1339,67 @@ giveable shared memory given to the receiving process
 `DDEPM_NOFREE`, and the receiver frees the block or sends it on.
 rs2's queues do not fill up, so `DDEPM_RETRY` never waits. PMXTEST holds
 a conversation with a server in another process (`PMXTEST DDESERVER`):
-initiate, request, poke, execute, terminate. PMDDEML (the DDE management
-library) is not there: no program on the OS/2 CD uses it but IBM's
-PMWINX, which rs2 replaces.
+initiate, request, poke, execute, terminate.
+
+**PMDDEML** (userland/pmddeml) is the DDE management library: the
+Win32 DDEML's calls in PM (`WinDdeInitialize` ... `WinDdeQueryModuleVersion`,
+IBM's ordinals 100-127 and upper-case names; Open32 builds the Win32
+`Dde*` calls on it). The Toolkit has no header for it, so the arguments
+are those of IBM's `Win32Dde*` entry points (studied with Ghidra and
+pmddeml.sym): string handles take a code page instead of an instance,
+`WinDdeSubmitTransaction(pData, cbData, hConv, hszItem, usFmt, usType,
+ulTimeout, pulResult)` is the client transaction, HDATA_APPOWNED is 2,
+callbacks get the instance first (idInst, usType, usFmt, hConv, hsz1,
+hsz2, hData, ul1, ul2), the XTYP_/CBF_/ST_/XST_ values are Win32's and
+errors are PM error ids 0x7001-0x7013 for `WinGetLastError` (there is no
+DdeGetLastError). It is built as IBM's on PM's own DDE, so DDEML clients
+talk to plain DDE servers and the other way round:
+
+- An instance is an invisible frame on the desktop whose client is the
+  instance's agent window (the instance id); a client's
+  `WinDdeConnect` sends `WM_DDE_INITIATE` (a DDEINIT given to the
+  server's process) to each frame on the desktop in turn, its own last,
+  from a new conversation window (the HCONV, a child of the agent) until
+  one answers. The agent answers `WM_DDE_INITIATE` with
+  XTYP_CONNECT, or XTYP_WILDCONNECT (an HSZPAIR array) for an empty
+  service or topic, a conversation window per pair that responds with
+  `WinDdeRespond`, then XTYP_CONNECT_CONFIRM; APPCMD_FILTERINITS (on
+  unless DNS_FILTEROFF) answers registered services only, CBF_FAIL_*
+  refuse. `WinDdeConnectList` collects the answers in a list window,
+  terminates each and connects again to that server's frame (IBM's
+  ConvListWmDdeInitiateAck); `WinDdeQueryNextServer` walks it.
+- Transactions post `WM_DDE_REQUEST`/`POKE`/`EXECUTE`/`ADVISE`/
+  `UNADVISE` with a DDESTRUCT; a synchronous one dispatches messages
+  (`MSGF_DDEMGR` filter) until the answer or the timeout, an
+  asynchronous one (TIMEOUT_ASYNC) returns its id and ends in
+  XTYP_XACT_COMPLETE. The server's conversation turns the messages into
+  XTYP_REQUEST (a data handle is posted as `WM_DDE_DATA` with
+  DDE_FRESPONSE), XTYP_POKE, XTYP_EXECUTE (the result is the
+  acknowledgement, in the same block), XTYP_ADVSTART/XTYP_ADVSTOP
+  (advise links: item, format, DDE_FNODATA/DDE_FACKREQ);
+  `WinDdePostAdvise` runs the links (XTYP_ADVREQ, a link waiting for its
+  acknowledgement only marked changed), the client gets XTYP_ADVDATA.
+  CBR_BLOCK and `WinDdeEnableCallback` hold a conversation's messages
+  and replay them later.
+- `WinDdeNameService` registers services; the other instances get
+  XTYP_REGISTER/XTYP_UNREGISTER with the service and an instance-specific
+  handle ("NAME:(hwnd)", which `WinDdeConnect` takes to that instance
+  only). The registration goes to every frame on the desktop as a sent
+  message with a system atom of the name (IBM's handle table is shared
+  memory; rs2's handles are each process's own).
+- `WM_CLOSE` on a conversation is `WinDdeDisconnect` (a client posts
+  `WM_DDE_UNADVISE` for everything, then `WM_DDE_TERMINATE`); the
+  partner's `WM_DDE_TERMINATE` gives XTYP_DISCONNECT and destroys the
+  conversation window. `WinDdeReconnect` fails, as IBM's (its
+  DdeReconnect is empty). Not done: monitors (APPCLASS_MONITOR,
+  XTYP_MONITOR).
+
+PMXTEST checks it (`PMXTEST DDEML`): handles, then a DDEML server in
+another process (`PMXTEST DDEMLSERVER`): registration, connect,
+conversation info, synchronous and asynchronous requests, poke,
+execute, an advise loop, a refused request, a conversation list from a
+wild connect, a plain DDE client of the DDEML server and a DDEML client
+of PMXTEST's plain DDE server.
 
 ## Owner drawing
 
@@ -1356,9 +1441,14 @@ space clipped to the item and in RGB mode; what the owner does not draw
 IBM's Open32 (PMWINX.DLL, the Win32 API on OS/2) is installed with the
 Feature Installer (the CD's `FI\DAX`); programs on the CD use only its
 registry calls, which IBM's PMWINX forwards to REGISTRY.DLL (ordinals
-541-555). rs2's PMWINX holds just those forwarders, and rs2's
-REGISTRY.DLL has the Win32 registry calls (the A forms) at IBM's
-ordinals. IBM's REGISTRY keeps its keys in `\OS2\SYSTEM\SYSTEM.DAT` and
+541-555, and `RegFlushKey` at 1030). rs2's PMWINX holds just those
+forwarders, and rs2's REGISTRY.DLL has all of IBM's REGISTRY exports at
+its ordinals: the Win32 registry calls in their A and W forms
+(`RegCloseKey` 1, `RegCreateKey[Ex]A/W` 3-6, `RegDelete{Key,Value}A/W`
+7-10, `RegEnumKey[Ex]A/W` 11-14, `RegEnumValueA/W` 15-16, `RegFlushKey`
+17, `RegOpenKey[Ex]A/W` 22-25, `RegQueryInfoKeyA/W` 26-27,
+`RegQueryValue[Ex]A/W` 30-33, `RegSetValue[Ex]A/W` 42-45) and `KRegInit`/
+`KRegTerm` (50-51). IBM's REGISTRY keeps its keys in `\OS2\SYSTEM\SYSTEM.DAT` and
 `USER.DAT`, binary files mapped into shared memory with a server
 process; rs2 keeps them in two profiles (OS/2 INI files through PMSHAPI,
 shared by all processes and written through): `\OS2\SYSTEM\REGSYS.INI`
@@ -1372,9 +1462,72 @@ Open32's handles (`HKEY_LOCAL_MACHINE` 0xFFFFFFEF ... `HKEY_CLASSES_ROOT`
 REGISTRY: `HKEY_CLASSES_ROOT` is `HKEY_LOCAL_MACHINE\SOFTWARE\Classes`,
 `HKEY_CURRENT_USER` is `HKEY_USERS\.default`, `HKEY_CURRENT_CONFIG` is
 `HKEY_LOCAL_MACHINE\CONFIG\0001`. Keys are deleted with their subkeys.
-Not there: the W calls, IBM's keys that map values to INI files
-(`OS2_INI_FILE_NAME`), security and notification. PMXTEST checks the calls
-through PMWINX; the Registry Editor (REGEDIT2.EXE) runs on them.
+`RegSetValueExA` wants Reserved 0, data for a string and less than 16365
+bytes, as IBM's (which keeps strings in Unicode, 32K at most).
+
+**The W calls.** IBM's keep key and value names in the process code page
+(converted with UCONV) and string data in Unicode; rs2's keep both in the
+code page and convert names and the data of `REG_SZ`, `REG_EXPAND_SZ` and
+`REG_MULTI_SZ` values at the W calls (`userland/registry/src/wide.rs`), so
+a string set through one kind of call reads the same through the other
+(the code pages are single-byte: what is not in the code page becomes
+`?`). Name lengths count characters and data lengths bytes, as in Win32;
+IBM's `RegEnumKeyExW` and `RegQueryInfoKeyW` count name lengths in bytes,
+but nothing IBM shipped calls the W forms (Open32's os2win.h declares only
+the A calls, and PMWINX forwards none), so rs2 follows Win32 there.
+`RegSetValueExW` takes at most 32728 bytes, Reserved 0 and data for a
+string, as IBM's.
+
+**Keys that map their values** (IBM's `rbmap.c`, studied in Ghidra). A key
+whose values are only `OS2_INI_FILE_NAME`, `OS2_INI_APP_NAME` and
+`OS2_INI_ACCESS_METHOD` (all `REG_SZ`; names compared without case) shows
+other data as its values, read only; `OS2_INI_ACCESS_METHOD` names how:
+
+| Method | The key's values |
+|--------|------------------|
+| `profile` | the keys of application `OS2_INI_APP_NAME` in the OS/2 profile `OS2_INI_FILE_NAME`, as `REG_BINARY` |
+| `profile_sz` | the same as `REG_SZ` (a NUL added when the data lack one) |
+| `uls` | the items of the process's locale (LIBUNI `UniQueryLocaleItem`, items 1-125, its locale object made once per process) named as in ulsitem.h without `LOCI_` (`sShortDate`, `iCountry`...), as `REG_SZ` in the code page |
+| `spooler_key` | its own values; its subkeys are the print queues, made again (PMSPL `SplEnumQueue` level 3) whenever the key is opened or the method set: one per queue named by its printer driver's device (the DRIVDATA's `szDeviceName`), marked `spooler_value`, and the queue printed to by default (`PRQ3_TYPE_APPDEFAULT`) as the key's `Default` value |
+| `spooler_value` | the queue whose driver device is the key's name and its printer (`SplQueryDevice` level 3) as IBM's 23 values: `Priority`, `StartTime`, `UntilTime`, `Datatype` (`fsType`), `Version`, `Job ID`, `Status`, `Time`, `Time Out` as `REG_DWORD`; `Name`, `Share Name` (the printer's comment), `Print Processor`, `Printer Driver`, `Parameters`, `Separator File`, `Printer Name`, `User Name`, `Port`, `Drivers` as `REG_SZ`, and `Attributes`, `Default DevMode`, `Location`, `Description` empty |
+
+The key's own `OS2_INI_*` values and its unnamed value still read from
+the registry; enumerations (`RegEnumValue`, `RegQueryInfoKey`) list only
+what is mapped. Setting an `OS2_INI_*` value works only on a key without
+other values, and `OS2_INI_ACCESS_METHOD` only with one of the five
+methods (case-insensitive); a key that maps takes no other values and
+gives up none of the mapped ones (all `ERROR_INVALID_NAME`); deleting
+its `OS2_INI_*` values makes it an ordinary key again. Errors as IBM's: a
+profile that cannot be opened, a profile key or application that is not
+there `ERROR_INVALID_NAME` (IBM's from `PMERR_NOT_IN_IDX`), a missing
+file or application value `ERROR_FILE_NOT_FOUND`, no method
+`ERROR_GEN_FAILURE`. IBM's REGISTRY imports `PrfOpenProfile` but no Prf
+writes: nothing is written through a mapping. IBM opens the profile for
+each call; the current user and system profiles (rs2's `PrfOpenProfile`
+refuses them) are read through `HINI_USERPROFILE`/`HINI_SYSTEMPROFILE`.
+The mapping keys IBM's REGCONV makes when OS/2 is installed are made
+with the files (when missing): `HKLM\SOFTWARE\MICROSOFT\WINDOWS\
+CURRENTVERSION\FONTS` and `HKLM\SOFTWARE\WIN.INI\WINI_FONTS` (OS2.INI on
+the boot drive, `PM_Fonts`, `profile_sz`), `HKLM\SOFTWARE\WIN.INI\
+WINI_INTL` and `HKEY_CURRENT_USER\CONTROL PANEL\INTERNATIONAL` (`uls`),
+and the plain keys `HKLM\System\CurrentControlSet\Control` and
+`HKEY_CURRENT_USER\SOFTWARE\MICROSOFT\WINDOWS\CURRENTVERSION`. (IBM's
+REGISTRY keeps a key's method as flags beside the key; it accepts a
+non-string value on a mapping key that then cannot be read, and its
+`spooler_value` set also rebuilds subkeys; rs2 refuses the first and
+leaves out the second.)
+
+**Notification and security.** IBM's REGISTRY has neither: it exports
+no `RegNotifyChangeKeyValue`, `RegGetKeySecurity`/`RegSetKeySecurity`,
+`RegConnectRegistry`, `RegLoadKey`/`RegSaveKey`/`RegRestoreKey` or
+`RegReplaceKey`, PMWINX forwards none, and its `RegQueryInfoKey` reports
+no security descriptor (0 bytes) and no class or write time; rs2 is the
+same (`samDesired`, `lpSecurityAttributes` and the options are taken and
+ignored, every caller may read and write every key).
+
+PMXTEST checks the calls through PMWINX (reg.rs) and the W calls, the
+mapping keys and `RegFlushKey` at 1030 (regx.rs; `PMXTEST REG` runs only
+the registry checks); the Registry Editor (REGEDIT2.EXE) runs on them.
 
 ## The clipboard
 
@@ -2174,8 +2327,9 @@ described in [formats/ipf-structures.md](formats/ipf-structures.md),
 **The help window** is a frame on the right of the screen titled with the
 help window title and the panel's: IBM's menu bar, the panel (laid out
 by `crates/ipf` for the window's width and laid out again when it
-changes), a vertical scroll bar, and Previous, Search..., Index and
-Contents push buttons.
+changes), the scroll bars of its window style (below; both by default,
+the horizontal one scrolling what is wider than the window, as Left and
+Right do), and Previous, Search..., Index and Contents push buttons.
 Panels draw in the fonts of the file's font table (below), styles as
 logical fonts' fsSelection (real italic, bold, underscore), colours of
 `:hp4.`/`:color.` and links in SYSCLR_HELPHILITE;
@@ -2240,9 +2394,18 @@ number (0x1D), inform links, styles, colours (DdfSetColor's mapping of
 PM colours), fonts (0x67), lists (DdfBeginList/DdfListItem with margin
 escapes 0x02/0x11/0x12/0x22), text as it is with an alignment
 (DdfSetFormat/DdfSetTextAlign: escapes 0x1A/0x1B), the application's
-bitmaps (0x68, placed as `:artwork.`) and metafiles (0x69, a box of the
-rectangle: GpiPlayMetaFile draws nothing yet). A handle is valid until
-the help manager has read it. When a panel with `:ddf res=N.` is laid
+bitmaps (0x68, placed as `:artwork.`) and metafiles (0x69: placed as a
+bitmap of the rectangle, `runin`, or with an empty rectangle one
+filling the window, `fit`). A metafile is played as IBM's
+MtaPlayMetaFile does when DdfFormatCell meets it: once without a device
+with boundary data collected (GpiSetDrawControl DCTL_BOUNDARY), then
+into a memory bitmap of the rectangle's size with a default viewing
+transform that puts the centre of that boundary (5 pels around it
+added) at the bitmap's centre, scaled alike in x and y to fit
+(MtaSetTransform), erased first, its fonts loaded and its colour table
+taken (LC_LOADDISC, CTAB_REPLACE); the bitmap is kept until the page is
+laid out again and scrolls and clips like any bitmap. A handle is valid
+until the help manager has read it. When a panel with `:ddf res=N.` is laid
 out, the help manager sends HM_QUERY_DDF_DATA (mp1 the panel window, mp2
 N) to the HM_SET_OBJCOM_WINDOW window, else the application's (IBM's
 MscAppInterface: HM_SET_ACTIVE_WINDOW's, else the associated frame),
@@ -2275,6 +2438,29 @@ sent to a panel window go to the help instance, and HM_QUERY answers
 HMQW_COVERPAGE, HMQW_VIEWPORT, HMQW_OBJCOM_WINDOW, HMQW_INSTANCE,
 HMQW_ACTIVEVIEWPORT and HMQW_GROUP_VIEWPORT.
 
+**Window controls (the viewport style word).** `titlebar=`, `scroll=`
+and `rules=` of a heading or link are a style word in its window data
+(flag 0x08, after the origin and size): 0x100 a title bar, 0x200 its
+system menu, 0x400 minimize and maximize buttons (titlebar= yes 0x100,
+sysmenu 0x300, minmax 0x500, both 0x700), 0x10 and 0x20 horizontal and
+vertical scroll bars, 0x04 a border or 0x08 a sizing border, and 0x4000,
+0x2000, 0x1000 saying which of the three were given. IBM's compiler
+fills a heading's word with the defaults of the others (0x0738 when the
+heading has none: everything, sizing border), a link's has only those
+given; the help manager merges the link's into the panel's (IBM's
+PnlChangeTOCNewStyle and PnlMergeViewportStyle: a given group replaces
+the panel's). A viewport is made with the frame controls of its
+panel's word (PnlGetViewportStyle: FCF_TITLEBAR, FCF_SYSMENU,
+FCF_MINMAX, FCF_BORDER, FCF_SIZEBORDER; IBM changes the controls of a
+viewport whose next panel wants others, PnlUpdateFrameControls, rs2
+makes a new frame in its place), and every panel window, the help
+window's own too, gets the scroll bars it asks for. Bits 0x01 and 0x02
+draw rules along the panel window's top and bottom, left and right
+edges in SYSCLR_WINDOWFRAME (not beside a scroll bar or under a title
+bar, PnlDrawViewportRules); IBM's compiler does not write them.
+`crates/ipf`'s compiler writes these words as IBM's does (0x6108,
+0x1730 and the like are in the help files on the media).
+
 **Message boxes.** WinMessageBox's MB_HELP adds a Help button
 (MBID_HELP, BS_HELP | BS_NOPOINTERFOCUS, as IBM's MboxInit) and the box
 has idWindow as its id, so Help and F1 reach the help hook as HLPM_WINDOW
@@ -2304,17 +2490,38 @@ the book's window closes); window word 0 of the instance points at a
 block with the help window's frame at +0x26, as VIEWDOC reads it. The
 help manager's window procedures and entry points switch to a stack of
 their own when less than 64 KB of the caller's is left (VIEWDOC's
-stack is 8 KB). HELPMGR's other unpublished ordinals (38-44: MscCleanUp
-and path helpers) are not there; nothing on the media imports them.
+stack is 8 KB).
+
+HELPMGR's other unpublished ordinals (38-44, `src/paths.rs`; nothing on
+the media imports them) are IBM's too: MscCleanUp (38) is the exit list
+routine the first help instance of a process adds (DosExitList, as
+IBM's HMWindowProc does on WM_CREATE): it releases the help hook of the
+process's help instances that are not books' and goes on with the exit
+list. The rest are the file name helpers IBM's help manager uses for
+libraries and bookmark files: HPFSSplitPath(path, drive, dir, name,
+ext) (39: the directory with each part's trailing blanks and dots
+chopped, the extension only if it has at most three characters after
+its dot, `path` left holding the name and extension), ChopDot(pwsz,
+cch) (40: the length without trailing blanks and dots, `.` and `..`
+kept; wide characters, as IBM exports it), MakeHPFSFileList(seps, list)
+(41: the names in `list` split at any of `seps`, leading blanks
+skipped, quoted names taken whole, written back NUL-separated; their
+count, 0 for an open quote), GoodList(to, from, n) (42: copies `n`
+NUL-ended names), IsValidHPFSName (43: 1-255 characters, not `.` or
+`..`, no control characters or `<>;"'|\/`) and
+HPFSMakeFullPathName(drive, dir, name, ext, path) (44: an empty drive
+becomes the current one unless the directory is a UNC name, an empty
+directory that drive's current one, `\DIR\` or `\`, both written back).
 
 Not done: the Search dialog's scopes (rs2 searches every
-section of the open libraries and of the marked ones), metafiles of
-dynamic data,
-the viewport style word (title bar, scroll bars, rules: viewports always
-have a title bar and a vertical scroll bar), HMQW_INDEX/TOC/SEARCH/
-VIEWPAGES/LIBRARY, and the panel placement of HM_DISPLAY_HELP and
+section of the open libraries and of the marked ones), HMQW_INDEX/TOC/
+SEARCH/VIEWPAGES/LIBRARY, the panel placement of HM_DISPLAY_HELP and
 HM_HELP_CONTENTS by heading window data beyond the help window's own
-panel.
+panel, metafile `:artwork.` and whole metafile panels (IBM's
+DisplayPage plays those into the window), and the help window's own
+panel in a frame of its own: IBM shows every panel in a page frame
+inside the cover page, so its title bar and border follow the style
+word too; rs2's help window takes only its scroll bars and rules.
 
 ## Locales (LIBUNI and UCONV)
 
@@ -2426,9 +2633,16 @@ it gets.
   `PMXTEST CHILD`, and journal playback in the PM server; `PMXTEST
   RECORD` with keys from `--type` checks journal recording), a DDE
   conversation with a server in another process (`PMXTEST DDESERVER`),
-  the registry through PMWINX, owner drawing (list box, menu, user
+  PMDDEML with a DDEML server in another process and with plain DDE on
+  either side (`PMXTEST DDEMLSERVER`; `PMXTEST DDEML` runs only these),
+  the registry through PMWINX and REGISTRY's W calls, keys mapping a
+  profile, the locale and the print queues (`PMXTEST REG`: the registry
+  checks only), owner drawing (list box, menu, user
   button, value set, slider, notebook tab), presentation parameters,
-  PMBIDI, AVIO (a VIO presentation space in a window), lazy drag (the
+  PMBIDI, AVIO (a VIO presentation space in a window, PMVIOP's
+  `WinDefAVioWindowProc`; `PMXTEST AVIO`), what `GpiCreatePS` and
+  `WinReleasePS` accept and when cached presentation spaces go
+  (`PMXTEST PS`), lazy drag (the
   input hook, `DrgLazyDrop`, cancelling, the held drag pointer) and
   `DrgDragFiles` onto a `DrgAcceptDroppedFiles` window, printing PASS/FAIL and
   `pmxtest done: N failure(s)`. `PMXTEST WINS [PROGRAM]` (starting
@@ -2543,7 +2757,15 @@ it gets.
   with HMTEST.HLP from HMTEST.IPF) checks the rest: `HMTEST 1` dynamic
   data (Tab to the inform link and Enter: the data is asked for again),
   `HMTEST 2` fonts and styles, `HMTEST 5` viewports (groups, dependent,
-  auto, heading-placed), `HMTEST /MB` a message box with MB_HELP (F1).
+  auto, heading-placed), `HMTEST 11` and `12` metafiles of dynamic data
+  (in rectangles of two shapes, and filling the window), `HMTEST 13`
+  window controls (Tab to a link and Enter: a viewport without title
+  bar or scroll bars, one with a title bar alone and a horizontal scroll
+  bar that Right scrolls, one with a system menu and a vertical scroll
+  bar, and the help window's panel without scroll bars), `HMTEST /MB` a
+  message box with MB_HELP (F1). `HMTEST /PATHS` checks ordinals 38-44
+  (MscCleanUp and the path helpers), printing PASS/FAIL and `hmtest
+  paths done: N failure(s)`.
   `--init "OS2\VIEW.EXE IPF IPF-Controlled"` shows the Toolkit's IPF
   sample (samples/pm/ipf: IPF.INF to OS2\BOOK, IPF.DLL to OS2\DLL in
   work/modules.txt) with IPF.DLL's application-controlled viewport;

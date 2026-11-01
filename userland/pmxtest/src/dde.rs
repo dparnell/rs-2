@@ -41,7 +41,7 @@ fn cstr(p: *const u8) -> Vec<u8> {
 
 /// A DDESTRUCT (cbData, fsStatus, usFormat, offszItemName, offabData)
 /// with the item name and data after it, in giveable shared memory.
-fn ddestruct(status: u16, item: &[u8], data: &[u8]) -> *mut u8 {
+pub fn ddestruct(status: u16, item: &[u8], data: &[u8]) -> *mut u8 {
     let size = 12 + item.len() + 1 + data.len();
     let mut p: *mut u8 = null_mut();
     if unsafe { DosAllocSharedMem(&mut p, null(), size as u32, PAG_READ | PAG_WRITE | PAG_COMMIT | OBJ_GIVEABLE) } != 0 {
@@ -74,7 +74,7 @@ fn parts(p: *const u8) -> (u16, Vec<u8>, Vec<u8>) {
 /// What this side's client got: (message, from, status, item, data).
 static mut GOT: Vec<(u32, u32, u16, Vec<u8>, Vec<u8>)> = Vec::new();
 
-fn got() -> &'static mut Vec<(u32, u32, u16, Vec<u8>, Vec<u8>)> {
+pub fn got() -> &'static mut Vec<(u32, u32, u16, Vec<u8>, Vec<u8>)> {
     unsafe { &mut *core::ptr::addr_of_mut!(GOT) }
 }
 
@@ -162,7 +162,7 @@ pub fn server(hab: u32) -> u32 {
 }
 
 /// Wait (dispatching) until the client got message `msg`.
-fn wait_for(hab: u32, msg: u32) -> Option<(u32, u32, u16, Vec<u8>, Vec<u8>)> {
+pub fn wait_for(hab: u32, msg: u32) -> Option<(u32, u32, u16, Vec<u8>, Vec<u8>)> {
     for _ in 0..100 {
         if let Some(i) = got().iter().position(|g| g.0 == msg) {
             return Some(got().remove(i));

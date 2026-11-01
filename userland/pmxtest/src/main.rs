@@ -1,13 +1,17 @@
 //! Self-checks of the Presentation Manager features beyond the basics:
-//! hooks (hooks.rs), DDE with another process (dde.rs), the registry
-//! through Open32's calls (reg.rs), owner drawing (owner.rs),
+//! hooks (hooks.rs), DDE with another process (dde.rs) and through
+//! PMDDEML (ddeml.rs), the registry
+//! through Open32's calls (reg.rs) and the rest of it: the W calls, keys
+//! that map their values (regx.rs), owner drawing (owner.rs),
 //! presentation parameters (pres.rs), PMBIDI (bidi.rs), AVIO (avio.rs), lazy drag and
 //! DrgDragFiles (drag.rs), a Windows program's Application Error
 //! (win16.rs), what the Open Watcom installer needs (owatcom.rs). Each check
 //! prints PASS or FAIL; the last line is "pmxtest done: N failure(s)"
 //! and the exit code N. `PMXTEST CHILD` is the second process the system
-//! hooks are checked in, `PMXTEST DDESERVER` the DDE server; `PMXTEST
-//! RECORD` waits for three keys or clicks (typed by `xtask run --type`)
+//! hooks are checked in, `PMXTEST DDESERVER` the DDE server, `PMXTEST DDEMLSERVER` the
+//! DDEML server (`PMXTEST DDEML` makes the DDEML checks only, `PMXTEST AVIO`
+//! the AVIO ones, `PMXTEST PS` those of presentation spaces, ps.rs), `PMXTEST
+//! REG` makes the registry checks only; `PMXTEST RECORD` waits for three keys or clicks (typed by `xtask run --type`)
 //! and reports what the journal record hook saw.
 
 #![no_std]
@@ -22,13 +26,16 @@ use os2::*;
 mod avio;
 mod bidi;
 mod dde;
+mod ddeml;
 mod drag;
 mod hooks;
 mod owatcom;
 mod owner;
 mod pm;
 mod pres;
+mod ps;
 mod reg;
+mod regx;
 mod win16;
 
 use pm::*;
@@ -162,6 +169,15 @@ fn main(s: &Startup) -> u32 {
         list_windows(HWND_DESKTOP, 0);
         return 0;
     }
+    if args.starts_with(b"DDEMLSERVER") {
+        let r = ddeml::server(hab);
+        unsafe {
+            WinDestroyWindow(frame);
+            WinDestroyMsgQueue(hmq);
+            WinTerminate(hab);
+        }
+        return r;
+    }
     if args.starts_with(b"DDESERVER") {
         let r = dde::server(hab);
         unsafe {
@@ -173,15 +189,27 @@ fn main(s: &Startup) -> u32 {
     }
     if args.starts_with(b"RECORD") {
         hooks::record(hab, client);
+    } else if args.starts_with(b"PS") {
+        ps::ps_checks(hab, client);
+    } else if args.starts_with(b"AVIO") {
+        avio::avio_checks(hab, client);
+    } else if args.starts_with(b"DDEML") {
+        ddeml::ddeml_checks(hab, client);
+    } else if args.starts_with(b"REG") {
+        reg::reg_checks();
+        regx::regx_checks();
     } else {
         check("WinInitialize/WinCreateMsgQueue and a window", hab != 0 && hmq != 0 && client != 0);
         hooks::hook_checks(hab, hmq, client);
         dde::dde_checks(hab, client);
+        ddeml::ddeml_checks(hab, client);
         reg::reg_checks();
+        regx::regx_checks();
         owner::owner_checks(hab, client);
         pres::pres_checks(client);
         bidi::bidi_checks(client);
         avio::avio_checks(hab, client);
+        ps::ps_checks(hab, client);
         drag::drag_checks(hab, client);
         win16::win16_checks(hab);
         owatcom::owatcom_checks(hab, hmq, client);

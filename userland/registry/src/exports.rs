@@ -38,4 +38,18 @@ aligned! {
     __a_RegQueryInfoKeyA => crate::RegQueryInfoKeyA, 12;
     __a_KRegInit => crate::KRegInit, 0;
     __a_KRegTerm => crate::KRegTerm, 0;
+    __a_RegOpenKeyExW => crate::wide::RegOpenKeyExW, 5;
+    __a_RegOpenKeyW => crate::wide::RegOpenKeyW, 3;
+    __a_RegCreateKeyExW => crate::wide::RegCreateKeyExW, 9;
+    __a_RegCreateKeyW => crate::wide::RegCreateKeyW, 3;
+    __a_RegDeleteKeyW => crate::wide::RegDeleteKeyW, 2;
+    __a_RegDeleteValueW => crate::wide::RegDeleteValueW, 2;
+    __a_RegEnumKeyExW => crate::wide::RegEnumKeyExW, 8;
+    __a_RegEnumKeyW => crate::wide::RegEnumKeyW, 4;
+    __a_RegEnumValueW => crate::wide::RegEnumValueW, 8;
+    __a_RegQueryValueExW => crate::wide::RegQueryValueExW, 6;
+    __a_RegQueryValueW => crate::wide::RegQueryValueW, 4;
+    __a_RegSetValueExW => crate::wide::RegSetValueExW, 6;
+    __a_RegSetValueW => crate::wide::RegSetValueW, 5;
+    __a_RegQueryInfoKeyW => crate::wide::RegQueryInfoKeyW, 12;
 }

@@ -42,6 +42,13 @@ aligned! {
     __a_WinLoadHelpTable => crate::WinLoadHelpTable, 3;
     __a_WinCreateHelpTable => crate::WinCreateHelpTable, 2;
     __a_Rs2ViewBook => crate::Rs2ViewBook, 4;
+    __a_MscCleanUp => crate::paths::MscCleanUp, 1;
+    __a_ChopDot => crate::paths::ChopDot, 2;
+    __a_HPFSSplitPath => crate::paths::HPFSSplitPath, 5;
+    __a_MakeHPFSFileList => crate::paths::MakeHPFSFileList, 2;
+    __a_GoodList => crate::paths::GoodList, 3;
+    __a_IsValidHPFSName => crate::paths::IsValidHPFSName, 1;
+    __a_HPFSMakeFullPathName => crate::paths::HPFSMakeFullPathName, 5;
     __a_HMSetHelpDatabase => crate::viewapi::HMSetHelpDatabase, 2;
     __a_IOLoadAllTOC => crate::viewapi::IOLoadAllTOC, 1;
     __a_IOLoadAllIndex => crate::viewapi::IOLoadAllIndex, 2;
