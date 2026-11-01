@@ -353,7 +353,8 @@ extern "C" fn df_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
                         params.push(b' ');
                     }
                     params.extend_from_slice(&p);
-                    launch::start(&s(4), &params, &s(6), &s(3), unsafe { *w.add(1) });
+                    let env = unsafe { launch::env_strings(*w.add(8) as *const u8) };
+                    launch::start_env(&s(4), &params, &s(6), &s(3), unsafe { *w.add(1) }, &env);
                     return 0;
                 }
             }

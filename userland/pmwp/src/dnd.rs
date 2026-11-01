@@ -400,7 +400,8 @@ extern "C" fn program_drop(o: usize, _cnr: u32, _pdinfo: u32, it: u32) -> u32 {
     } else {
         params.extend_from_slice(&path);
     }
-    crate::launch::start(&s(4), &params, &s(6), &s(3), rd(w, 4));
+    let env = unsafe { crate::launch::env_strings(rd(w, 32) as *const u8) };
+    crate::launch::start_env(&s(4), &params, &s(6), &s(3), rd(w, 4), &env);
     1
 }
 

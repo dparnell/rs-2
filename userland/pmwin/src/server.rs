@@ -514,8 +514,10 @@ fn ghost(h: u32) {
 pub fn process_gone(p: u32) {
     let s = st();
     s.procs.retain(|&x| x != p);
-    if s.realized.0 == p {
-        crate::gpiobj::unrealize();
+    for pal in [s.palette8.as_deref_mut(), s.emul8.as_deref_mut()].into_iter().flatten() {
+        if pal.realized.0 == p {
+            crate::gpiobj::unrealize(pal);
+        }
     }
     let s = st();
     let queues: Vec<u32> = s.queues.iter().filter(|(_, q)| q.pid == p).map(|(&h, _)| h).collect();

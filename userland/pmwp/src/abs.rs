@@ -26,6 +26,32 @@ pub struct ProgData {
     pub progc: u32,
     /// The PROGDETAILS last handed out by wpQueryProgDetails' strings.
     pub env: Str,
+    /// The colours the program sees (the Compatibility page, RS2COLORS=):
+    /// 0 the display's, 256 a 256-colour display.
+    pub colors: u32,
+}
+
+/// The environment strings a program object gives its program
+/// (PROGDETAILS pszEnvironment, without the final NUL): RS2COLORS=256
+/// for a 256-colour display (see PMWIN's `gpiobj::wants256`).
+pub fn prog_env(obj: usize) -> Vec<u8> {
+    if pd(obj).colors == 256 { b"RS2COLORS=256\0".to_vec() } else { Vec::new() }
+}
+
+/// The colours the program sees: 0 (the display's) or 256.
+pub fn colors(obj: usize) -> u32 {
+    pd(obj).colors
+}
+
+pub fn set_colors(obj: usize, c: u32) {
+    pd(obj).colors = if c == 256 { 256 } else { 0 };
+    obj::call(m::WPObject::wpSaveDeferred, &[obj]);
+}
+
+/// RS2COLORS='s value: 256, or the display's colours (DEFAULT or
+/// anything else).
+fn colors_value(v: &[u8]) -> u32 {
+    if v.trim_ascii() == b"256" { 256 } else { 0 }
 }
 
 fn pd<'a>(obj: usize) -> &'a mut ProgData {
@@ -61,6 +87,8 @@ extern "C" fn prog_setup(obj: usize, setup: *const u8) -> u32 {
             b"PARAMETERS" => p.params = str_new(&v),
             b"STARTUPDIR" => p.dir = str_new(&v),
             b"PROGTYPE" => p.progc = progtype(&v),
+            // rs2's own: the Compatibility page's colours.
+            b"RS2COLORS" => p.colors = colors_value(&v),
             b"ASSOCTYPE" => crate::pages::associate_types(obj, &v),
             b"ASSOCFILTER" => {
                 // PMWP_ASSOC_FILTER: a pattern's programs (handles in
@@ -97,6 +125,7 @@ extern "C" fn prog_save_state(obj: usize) -> u32 {
     obj::wpSaveString(obj, c, 2, str_ptr(&p.params));
     obj::wpSaveString(obj, c, 3, str_ptr(&p.dir));
     obj::wpSaveLong(obj, c, 4, p.progc);
+    obj::wpSaveLong(obj, c, 5, p.colors);
     1
 }
 
@@ -115,6 +144,9 @@ extern "C" fn prog_restore_state(obj: usize, r: u32) -> u32 {
     if let Some(v) = restored_long(obj, b"WPProgram", 4) {
         p.progc = v;
     }
+    if let Some(v) = restored_long(obj, b"WPProgram", 5) {
+        p.colors = v;
+    }
     1
 }
 
@@ -132,7 +164,7 @@ extern "C" fn prog_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
         let p = pd(obj);
         let (e, a, d) = (str_bytes(&p.exe).to_vec(), str_bytes(&p.params).to_vec(), str_bytes(&p.dir).to_vec());
         let t = obj::title(obj);
-        launch::start(&e, &a, &d, &t, p.progc);
+        launch::start_env(&e, &a, &d, &t, p.progc, &prog_env(obj));
         return 0;
     }
     som::call_parent(wps::ccd("WPProgram"), wps::cd("WPObject"), m::WPObject::wpOpen, &[obj, cnr as usize, view as usize, param as usize])
@@ -144,8 +176,15 @@ extern "C" fn prog_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
 const PROGDETAILS_SIZE: usize = 72;
 
 pub fn fill_prog_details(title: &[u8], exe: &[u8], params: &[u8], dir: &[u8], progc: u32, buf: *mut u8, cb: *mut u32) -> u32 {
+    fill_prog_details_env(title, exe, params, dir, progc, b"", buf, cb)
+}
+
+/// With pszEnvironment: `env`'s strings (each ending in a NUL) and the
+/// final NUL; null when there are none.
+#[allow(clippy::too_many_arguments)]
+pub fn fill_prog_details_env(title: &[u8], exe: &[u8], params: &[u8], dir: &[u8], progc: u32, env: &[u8], buf: *mut u8, cb: *mut u32) -> u32 {
     let strings: [&[u8]; 4] = [title, exe, params, dir];
-    let need = PROGDETAILS_SIZE + strings.iter().map(|s| s.len() + 1).sum::<usize>();
+    let need = PROGDETAILS_SIZE + strings.iter().map(|s| s.len() + 1).sum::<usize>() + if env.is_empty() { 0 } else { env.len() + 1 };
     if cb.is_null() {
         return 0;
     }
@@ -165,6 +204,11 @@ pub fn fill_prog_details(title: &[u8], exe: &[u8], params: &[u8], dir: &[u8], pr
             *at.add(s.len()) = 0;
             at = at.add(s.len() + 1);
         }
+        if !env.is_empty() {
+            *w.add(8) = at as u32;
+            core::ptr::copy_nonoverlapping(env.as_ptr(), at, env.len());
+            *at.add(env.len()) = 0;
+        }
         *cb = need as u32;
     }
     1
@@ -173,7 +217,7 @@ pub fn fill_prog_details(title: &[u8], exe: &[u8], params: &[u8], dir: &[u8], pr
 extern "C" fn wpQueryProgDetails(obj: usize, buf: *mut u8, cb: *mut u32) -> u32 {
     let p = pd(obj);
     let t = obj::title(obj);
-    fill_prog_details(&t, str_bytes(&p.exe), str_bytes(&p.params), str_bytes(&p.dir), p.progc, buf, cb)
+    fill_prog_details_env(&t, str_bytes(&p.exe), str_bytes(&p.params), str_bytes(&p.dir), p.progc, &prog_env(obj), buf, cb)
 }
 
 extern "C" fn wpSetProgDetails(obj: usize, det: *const u32) -> u32 {
@@ -192,6 +236,14 @@ extern "C" fn wpSetProgDetails(obj: usize, det: *const u32) -> u32 {
         }
         if *det.add(6) != 0 {
             p.dir = str_new(&s(6));
+        }
+        if *det.add(8) != 0 {
+            let env = launch::env_strings(*det.add(8) as *const u8);
+            p.colors = env
+                .split(|&c| c == 0)
+                .filter_map(|e| (e.len() >= 10 && e[..10].eq_ignore_ascii_case(b"RS2COLORS=")).then(|| colors_value(&e[10..])))
+                .last()
+                .unwrap_or(0);
         }
         if *det.add(3) != 0 {
             let t = z(&s(3));

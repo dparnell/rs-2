@@ -224,6 +224,27 @@ fn titles(objs: &[usize]) -> Vec<Vec<u8>> {
     objs.iter().map(|&o| title(o)).collect()
 }
 
+/// A program object's environment (PROGDETAILS pszEnvironment): its
+/// strings, separated by spaces.
+fn prog_env(po: usize) -> Vec<u8> {
+    let mut buf = [0u8; 512];
+    let mut cb = buf.len() as u32;
+    if call(po, b"wpQueryProgDetails", &[buf.as_mut_ptr() as usize, &mut cb as *mut u32 as usize]) == 0 {
+        return b"?".to_vec();
+    }
+    let mut q = unsafe { *(buf.as_ptr() as *const u32).add(8) } as *const u8;
+    let mut v = Vec::new();
+    while !q.is_null() && unsafe { *q } != 0 {
+        if !v.is_empty() {
+            v.push(b' ');
+        }
+        let s = cstr(q);
+        v.extend_from_slice(&s);
+        q = unsafe { q.add(s.len() + 1) };
+    }
+    v
+}
+
 fn make() {
     let desk = query(b"<WP_DESKTOP>");
     check("desktop handle", desk >> 16 == 3);
@@ -251,6 +272,16 @@ fn make() {
     check("program details", ok && cstr(unsafe { *w.add(4) } as *const u8) == b"C:\\OS2\\E.EXE" && cstr(unsafe { *w.add(5) } as *const u8) == b"README");
     let t = z(b"TITLE=Edit 2;NODELETE=NO");
     check("WinSetObjectData", unsafe { WinSetObjectData(p, t.as_ptr()) } != 0 && title(po) == b"Edit 2");
+    // rs2's Compatibility page: RS2COLORS=256 gives the program a
+    // 256-colour display, through its environment.
+    check("program sees the display's colours", prog_env(po).is_empty());
+    let t = z(b"RS2COLORS=256");
+    check("RS2COLORS=256 in the program's environment", unsafe { WinSetObjectData(p, t.as_ptr()) } != 0 && prog_env(po) == b"RS2COLORS=256");
+    let t = z(b"RS2COLORS=DEFAULT");
+    unsafe { WinSetObjectData(p, t.as_ptr()) };
+    check("RS2COLORS=DEFAULT", prog_env(po).is_empty());
+    let t = z(b"RS2COLORS=256");
+    unsafe { WinSetObjectData(p, t.as_ptr()) };
     let d = create(b"WPDataFile", b"notes.txt", b"", b"<RS2_TESTFLDR>");
     check("data file made", d >> 16 == 3 && exists(&path(d)));
     let fo = object(f);
@@ -443,6 +474,7 @@ fn verify() {
     call(po, b"wpQueryProgDetails", &[buf.as_mut_ptr() as usize, &mut cb as *mut u32 as usize]);
     let w = buf.as_ptr() as *const u32;
     check("program details restored", cstr(unsafe { *w.add(4) } as *const u8) == b"C:\\OS2\\E.EXE");
+    check("program's colours restored (RS2COLORS=256)", prog_env(po) == b"RS2COLORS=256");
     let desk = query(b"<WP_DESKTOP>");
     let dobj = object(desk);
     let dc = titles(&contents(dobj));

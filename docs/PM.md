@@ -224,6 +224,27 @@ engine describes one:
   realizations map to what is there. The full default palette comes
   back when the realized palette is deleted or its process ends.
 
+**256 colours for one program.** A program that needs a 256-colour
+display can have one while the desktop stays in true colour:
+`RS2COLORS=256` in its environment. A program object's Compatibility
+page (rs2's own; IBM's shell has none) sets it, as does the setup string
+`RS2COLORS=256;` (`RS2COLORS=DEFAULT;` takes it away); without the
+Workplace Shell, `SET RS2COLORS=256` before starting the program. Child
+processes inherit it. PMWIN reads it once per process (`wants256`) and
+gives that process everything above, from a second hardware palette in
+the shared state (`emul8`, made when the first such program needs it,
+shared by all of them): the caps, the bitmap formats with 8 bits first,
+`GpiQueryRealColors`, `GpiQueryNearestColor`, `WinRealizePalette` and
+the default palette shrinking, 8-bit pointer and system bitmaps. Taking
+PM's lock points the screen surface at the palette of the display the
+process sees (`gpiobj::own_palette`), so its pels get that palette's
+colours; every other process draws in true colour. Windows programs
+under WIN16.DLL follow it (WIN16 asks PM's `DevQueryCaps`).
+`WM_REALIZEPALETTE` still goes to every queue. Only 256 colours is
+offered: a 16-colour display is a different driver (IBM's VGA), whose
+capabilities and bitmap formats were not studied. On a 256-colour
+display RS2COLORS changes nothing.
+
 ## Processes and input
 
 **Shared state.** PMWIN keeps everything in one named shared memory
@@ -2484,7 +2505,10 @@ it gets.
   `WinCpTranslateString`; the display's capabilities, bitmap formats,
   real and nearest colours and a pel on the screen, for true colour or,
   when CONFIG.SYS has `VIDEO=WxHx256` or with `GPITEST 256`, for a
-  256-colour display, with a palette realized and given back), then a
+  256-colour display, with a palette realized and given back; in true
+  colour it runs itself again as `GPITEST EMUL256` with
+  `RS2COLORS=256` added to its environment, which makes the 256-colour
+  checks while the first process still sees true colour), then a
   window with every kind of primitive
   for a screenshot check (it also draws `C:\YOSEMITE.BMP` when
   present).

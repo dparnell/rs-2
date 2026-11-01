@@ -96,6 +96,8 @@ pub struct Physical {
     pub default_size: usize,
     /// Entries a realized palette took (pels may map to them too).
     pub taken: [bool; 256],
+    /// The palette realized in it last: (pid, hpal), 0 for none.
+    pub realized: (u32, u32),
     /// Nearest entry by 6-6-6 RGB, filled in on first use.
     lut: Vec<u16>,
 }
@@ -108,7 +110,7 @@ impl Default for Physical {
 
 impl Physical {
     pub fn new() -> Physical {
-        let mut p = Physical { rgb: [0; 256], default_size: 256, taken: [false; 256], lut: vec![UNKNOWN; 1 << 18] };
+        let mut p = Physical { rgb: [0; 256], default_size: 256, taken: [false; 256], realized: (0, 0), lut: vec![UNKNOWN; 1 << 18] };
         p.set_default(256);
         p
     }

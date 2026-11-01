@@ -773,10 +773,54 @@ pub extern "C" fn WinQueryWindowDC(h: u32) -> u32 {
     o.dcs.iter().position(|d| matches!(d, Some(DcKind::Window(w)) if *w == h)).map_or(0, dc_handle)
 }
 
-/// A 256-colour display's hardware palette (`VIDEO=WxHx256`); None on a
-/// true-colour one.
+/// The hardware palette of the 256-colour display this process sees:
+/// the display's (`VIDEO=WxHx256`), or on a true-colour display the one
+/// PM keeps for programs started with RS2COLORS=256 (`own_palette`);
+/// None for true colour.
 pub fn palette8() -> Option<&'static mut gpi::palette::Physical> {
-    st().palette8.as_deref_mut()
+    let s = st();
+    if s.palette8.is_none() && wants256() {
+        return Some(s.emul8.get_or_insert_with(|| alloc::boxed::Box::new(gpi::palette::Physical::new())));
+    }
+    s.palette8.as_deref_mut()
+}
+
+/// RS2COLORS=256 in this process's environment (0: not checked yet,
+/// 1: no, 2: yes).
+static WANTS256: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// The process asks to see a 256-colour display (RS2COLORS=256 in its
+/// environment: a program object's Compatibility page, or SET before
+/// starting it), as some programs written for one need (VisualAge
+/// Smalltalk takes only 1, 4 or 8-bit device bitmaps).
+pub fn wants256() -> bool {
+    use core::sync::atomic::Ordering;
+    match WANTS256.load(Ordering::Relaxed) {
+        0 => {
+            let mut v: *const u8 = core::ptr::null();
+            let on = unsafe { os2::DosScanEnv(b"RS2COLORS\0".as_ptr(), &mut v) } == 0 && !v.is_null() && {
+                let t = unsafe { core::ffi::CStr::from_ptr(v as *const core::ffi::c_char) }.to_bytes();
+                t.trim_ascii() == b"256"
+            };
+            WANTS256.store(if on { 2 } else { 1 }, Ordering::Relaxed);
+            on
+        }
+        v => v == 2,
+    }
+}
+
+/// The palette the screen surface draws in for this process, set as it
+/// takes PM's lock: a program with RS2COLORS=256 draws in the colours of
+/// its 256-colour palette on a true-colour display; every other process
+/// in the display's own (none in true colour).
+pub fn own_palette() {
+    let Some(s) = crate::state::get() else { return };
+    let p = match s.palette8.as_deref_mut() {
+        Some(p) => p as *mut _,
+        None if wants256() => palette8().map_or(core::ptr::null_mut(), |p| p as *mut _),
+        None => core::ptr::null_mut(),
+    };
+    unsafe { s.surface.set_palette(p) };
 }
 
 /// The display's bits per pel: the format of the bitmaps PM makes for
@@ -792,7 +836,7 @@ pub fn device_bitcount() -> u16 {
 fn caps(i: i32) -> i32 {
     let s = st();
     let (w, h) = (s.surface.width, s.surface.height);
-    if s.palette8.is_some() {
+    if palette8().is_some() {
         match i {
             14 | 33 => return 256,             // COLORS, PHYS_COLORS
             16 => return 8,                    // COLOR_BITCOUNT
@@ -1507,22 +1551,19 @@ pub extern "C" fn GpiCreatePalette(_hab: u32, _opts: u32, fmt: u32, n: u32, t: *
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiDeletePalette(h: u32) -> u32 {
     let ok = remove(&mut objects().palettes, h, HPAL_BASE).is_some();
-    if ok && st().realized == (crate::shared::pid(), h) {
-        unrealize();
+    if let Some(p) = palette8().filter(|p| ok && p.realized == (crate::shared::pid(), h)) {
+        unrealize(p);
     }
     ok as u32
 }
 
-/// The realized palette is gone (deleted, its process ended): the
+/// The palette realized in `p` is gone (deleted, its process ended): the
 /// default palette gets all of the hardware palette again, and windows
 /// are told (WM_REALIZEPALETTE).
-pub fn unrealize() {
-    let s = st();
-    s.realized = (0, 0);
-    if let Some(p) = palette8() {
-        if p.restore() != 0 {
-            realize_broadcast(0);
-        }
+pub fn unrealize(p: &mut gpi::palette::Physical) {
+    p.realized = (0, 0);
+    if p.restore() != 0 {
+        realize_broadcast(0);
     }
 }
 
@@ -1676,7 +1717,7 @@ pub extern "C" fn WinRealizePalette(h: u32, hps: u32, cclr: *mut u32) -> i32 {
         return t.len() as i32;
     }
     let (map, changed) = p.realize(&t);
-    s.realized = (crate::shared::pid(), hpal);
+    p.realized = (crate::shared::pid(), hpal);
     write(cclr, changed);
     if changed != 0 {
         realize_broadcast(top);
