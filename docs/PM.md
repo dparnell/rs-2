@@ -904,7 +904,12 @@ The GPI covers:
   the `PATSYM_*` patterns and bitmap pattern sets.
 - Regions (y-x banded, with OR/AND/XOR/DIFF), clip regions and
   rectangles, `GpiPaintRegion`, `GpiFrameRegion`; `WinInvalidateRegion`,
-  `WinQueryUpdateRegion`, `WinValidateRegion`, `WinScrollWindow`.
+  `WinQueryUpdateRegion`, `WinValidateRegion`, `WinScrollWindow`;
+  `WinSetClipRegion`/`WinQueryClipRegion` (PMWIN 1043/1044, as IBM's:
+  a child window's own drawing is clipped to a copy of the region, its
+  siblings, children and hit testing still see its rectangle; refused
+  for the desktop and its top-level windows): the shaped graphic
+  buttons of MMPM/2's SW.DLL.
 - Bitmaps: `GpiCreateBitmap`, bits in and out in 1/4/8/24 bpp with 1.x
   and 2.x headers (and RLE4/RLE8 input), `GpiLoadBitmap` from
   `RT_BITMAP` resources, `GpiBitBlt` (ternary ROPs, stretching,
@@ -1216,7 +1221,14 @@ one scaled down). `WinCreatePointer` (a mask bitmap) and
 `WinCreatePointerIndirect` (POINTERINFO) make pointers from the
 caller's bitmaps, `WinQueryPointerInfo` gives the caller new bitmaps
 back, `WinDestroyPointer`, `WinSetPointerOwner`. `WinDrawPointer`
-draws with `DP_NORMAL`, `DP_MINI`, `DP_HALFTONED` and `DP_INVERTED`.
+draws with `DP_NORMAL`, `DP_MINI`, `DP_HALFTONED` and `DP_INVERTED`;
+`WinStretchPointer` (PMWIN 968) the same scaled to a size. IBM's
+private `Win32BuildPtrHandle` (PMWIN 964, rs2's `WinBuildPtrHandle`)
+makes a pointer from pointer file data in memory (a bitmap array or one
+image; its extent is what is committed from it on), as MMPARTS makes
+its image files' icons, and `Win32JiggleMouse` (PMWIN 1005,
+`WinJiggleMouse`) sends the window under the pointer a mouse move so
+that it sets the pointer again.
 `WinQuerySysPointer` (with fLoad: a copy) returns rs2's own drawings
 (`pmwin::sysptr`, nothing copied from IBM's): the arrow, text, wait,
 move/size and the four sizing pointers, the application icon, the
@@ -1866,9 +1878,22 @@ removing a program or destroying a group deletes the objects. Groups and
 programs with `SHE_INVISIBLE` get none. PMSHAPI loads PMWP for this when
 first needed; without a running shell nothing happens. WPSTEST checks it.
 
+**WinStartApp** (`userland/pmshapi/src/startapp.rs`) starts a
+PROGDETAILS as a session with DosStartSession: its progc's session type
+(the command processor for `*` or no executable, and for .CMD/.BAT
+files), its startup directory, the caller's environment with the
+details' variables (the shell's `WORKPLACE_PROCESS=YES` goes on as
+`WORKPLACE__PROCESS=NO`, as IBM's shell passes it), pszParams in place
+of the details' parameters, SAF_MAXIMIZED/MINIMIZED/BACKGROUND. With
+SAF_STARTCHILDAPP the session is related: its end comes on a
+termination queue of the caller's process (`\QUEUES\RS2\STARTAPP\pid`),
+which a thread reads to post `WM_APPTERMINATENOTIFY` (HAPP, result code)
+to the notify window; `WinTerminateApp` stops such a session. The HAPP
+is the session's process ID. MMPARTS starts its helper programs so.
+
 **Not done.** WinGetLastError codes (PMSHAPI does not call PMWIN), the
 `PL_ALTERED` broadcast after `PrfReset`, `PrfQueryProgramCategory` (the
-16-bit one returns PROG_DEFAULT), `WinStartApp`;
+16-bit one returns PROG_DEFAULT);
 the profile names in shared memory last while some process
 has PMSHAPI loaded (afterwards `USER_INI`/`SYSTEM_INI` apply again, so
 a `PrfReset` is forgotten); the program list is rs2's own layout, not

@@ -530,7 +530,11 @@ program.
 `OS2\PMSHELL.EXE` (`userland/pmshell`) does what IBM's PMSHELL does:
 it starts PM, calls PMWP's `ShlStartWorkplace(hab, hmq)` (ordinal 211)
 and runs the message loop. Without PM it starts the command prompt.
-If a Workplace Shell is already running, it ends.
+If a Workplace Shell is already running, it ends. As on OS/2 there are
+two PMSHELL processes: the first (PROTSHELL's) runs the shell as a
+second one with `WORKPLACE_PROCESS=YES` in its environment and starts
+it again when it ends abnormally (see "IBM's multimedia classes"
+below); the rescue screen lists both.
 
 `ShlStartWorkplace` (`shell.rs`) does the following:
 - **Builds the classes.** PMWP's classes are also built whenever the
@@ -612,6 +616,92 @@ Shutting down (`shutdown.rs`, RS2SHELL's sequence) asks first, then:
 - shutdown through the desktop menu, as far as the power-off;
 - the Startup folder (`WPSTEST STARTUP`, then PMSHELL in the same boot:
   the System Editor started).
+
+## IBM's multimedia classes (MMPARTS)
+
+IBM's MMPARTS.DLL (MMPM/2's Workplace Shell classes; the files and the
+players in [MMPM.md](MMPM.md#mmpartsdll-and-mppm)) is a third-party
+class DLL like wpstutor, much larger and built with VisualAge C++'s Open
+Class library. What it needed of rs2's shell, each as IBM's PMWP and
+PMSHELL do it (studied in Ghidra):
+
+- **The workplace process.** MMPARTS's SOMInitModule makes its classes
+  only when `WORKPLACE_PROCESS=YES` is in the environment. IBM's first
+  PMSHELL (the PROTSHELL one) runs only the message loop; PMWP's
+  StartWorkplaceExe starts `%RUNWORKPLACE%` (PMSHELL again) with its
+  environment plus `WORKPLACE_PROCESS=YES`, and that one calls
+  ShlStartWorkplace. rs2's PMSHELL does the same: without the variable
+  it runs the shell as a second PMSHELL (or `%RUNWORKPLACE%`) and waits
+  for it, starting it again when it ends abnormally (a trap, or ended
+  from the rescue screen), and while another shell runs it waits for
+  that one to end. Programs the shell starts get the variable as
+  `WORKPLACE__PROCESS=NO` (IBM's BuildEnv), so a program that loads a
+  class DLL (MPPMNEW loads MMPARTS) does not take itself for the shell.
+- **The exception guard.** PMWP exports `ShlSaveEnv` (213) and
+  `ShlExceptionHandler` (212): `if (ShlSaveEnv(&rec, ShlExceptionHandler))
+  { ... DosUnsetExceptionHandler(&rec); } else { trapped }`. ShlSaveEnv
+  puts the record (prev, handler, then EBP, EBX, EDI, ESI, ESP and the
+  return address) at the head of the thread's handler chain and returns
+  1; on an access violation the handler goes back there (ShlRestoreEnv)
+  and ShlSaveEnv returns 0, unless `SHELLEXCEPTIONHANDLER` says OFF;
+  with `PMWPDEBUG` the trap's address, its callers and the registers are
+  written out. A kill signal to the shell saves what the lazy writer
+  holds. The kernel forgets the dispatch of a handler that jumped out
+  so (its records are above the stack pointer).
+- `vhwndWorkplaceWindow` (466, the shell's object-call window, which
+  MMPARTS waits for before it configures itself) and `vhwndHelpInstance`
+  (279, 0: rs2's objects show help through their own instances);
+  `WinWaitForShell` (512: the desktop created, opened, populated; with
+  WWFS_QUERY only asked).
+- **Registered classes load when the shell starts**, as on OS/2, after
+  the first start's `PM_InstallClass`: their DLLs set themselves up and
+  their instance types and filters take effect. A class whose DLL is
+  missing or does not load stays out and the shell goes on (its files
+  wake as plain data files); WinRegisterObjectClass refuses a class whose
+  DLL does not load.
+- **The classes of files** (IBM's AddInstanceTypeAndFilter, called from
+  M_WPFileSystem's wpclsInitData, and FsParseClassInfo): a file system
+  class's wpclsQueryInstanceType and wpclsQueryInstanceFilter
+  (comma-separated) are noted when it is ready, unless its parent says
+  the same, the class registered last first, separately for folders and
+  files. A file whose `.CLASSINFO` names no class, or WPDataFile, wakes
+  as the class of its first `.TYPE` that a class claims, else of the
+  class whose filter matches its name (MMWAV: `*.WAV`, types `WAV,Digital
+  Audio`), else as before.
+- **Class icons from wpclsQueryIconData** (an ICONINFO: an icon
+  resource, an icon file or icon file data; IBM's M_WPObject's
+  wpclsQueryIcon makes and keeps the pointer): a class's own icon, and a
+  file's when it has no `.ICON` (MMPARTS's sound files show its WAV
+  icon).
+
+MMPARTS's classes that matter for files override no settings pages (a
+sound file's notebook is WPDataFile's, as on OS/2); they override the
+pop-up menu, wpOpen, the default view, drag items, titles, icons and
+the instance types and filters. Opening a WAV file's default view opens
+MMPARTS's audio editor (see MMPM.md for what works in it).
+
+**Installing it.** IBM's MINSTALL (FOURMEG.SCR) registers 31 classes from
+MMPARTS (MMDataFile, MMImage, MMAudio, MMVideo, MMMIDI, MMTarga, MMTIFF,
+MMGIF, MMPCX, MMPhotoCD, MMAVC, MMMMotion, MMDIB, MMDevice, MMCDDevice,
+MMLVDDevice, MMVolume, MMVOC, MM_AU, MMAIF, MMIFF, MMSNDF, MMAVI, MMFLI,
+MMMPG, MMMOV, MMJPG, MMWAV, MMFolder, MMFinder) and replaces WPBitmap
+and WPShadow by MMBitmap and MMShadow (from MMBIT.DLL and MMSHD.DLL,
+forwarders into MMPARTS) through `PM_InstallClassReplacement`; its
+INSTMMVW.CMD does the same with REXX's SysRegisterObjectClass. On rs2
+the classes are registered with WinRegisterObjectClass (WPSTEST
+`REGISTER`, or REXX); the replacements, the Multimedia folder
+(`<MMPM2_FOLDER>`) and its objects are not made yet.
+
+**Test.** `cargo xtask run --init "RS2\WPSTEST.EXE SHELL MMPARTS"` with
+IBM's files staged in work/modules.txt (MMPARTS.DLL in `\MMOS2\DLL`,
+OS2OM30, OS2OOOC and OS2OOR3U in `\OS2\DLL`, SW, MMPMCRTS, DIVE and
+MMPTMRI in `\MMOS2\DLL`, a WAV in `\MMOS2\SOUNDS`; LIBPATH with
+`C:\MMOS2\DLL`, `SET MMBASE=C:\MMOS2;`): a class from a missing DLL is
+refused and the shell goes on; MMAudio and MMWAV registered, an MMAudio
+object made on the desktop (its `.CLASSINFO` names MMAudio), the WAV
+file woken and saved as MMWAV, the object deleted. Without MMPARTS.DLL
+its checks are skipped. WPSTEST SHELL also has `REGISTER dll class` and
+`CREATE class title location setup` (with `|` for `;`).
 
 ## What is not there
 
