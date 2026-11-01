@@ -22,6 +22,7 @@ mod ddf;
 mod exports;
 mod help16;
 mod library;
+mod paths;
 mod pm;
 mod print;
 mod render;
@@ -292,7 +293,24 @@ pub fn create(hab: u32, names: &[u8], title: &[u8], table: HelpTable, show_ids: 
     if first && !book {
         unsafe { WinSetHook(hab, HMQ_CURRENT, HK_HELP, HelpProcessor as *const () as u32, 0) };
     }
+    // As IBM's HMWindowProc: MscCleanUp releases the hook when the
+    // process ends (EXLST_ADD, once).
+    static EXIT_LIST: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+    if !EXIT_LIST.swap(true, core::sync::atomic::Ordering::Relaxed) {
+        unsafe { os2::dos::DosExitList(1, paths::exit_routine()) };
+    }
     Ok(h)
+}
+
+/// The help hook goes (MscCleanUp; IBM's RemoveInstanceFromList calls
+/// HOOKProc(0) for each help instance that is not a book's).
+pub fn release_hooks() {
+    for &p in instances().iter() {
+        let inst = unsafe { &*p };
+        if !inst.book {
+            unsafe { WinReleaseHook(inst.hab, HMQ_CURRENT, HK_HELP, HelpProcessor as *const () as u32, 0) };
+        }
+    }
 }
 
 /// WinCreateHelpInstance(hab, phinit): HELPINIT is cb, ulReturnCode,
