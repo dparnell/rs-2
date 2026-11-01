@@ -129,6 +129,21 @@ interpret 'y = 6 * 7'
 call check y = 42, 'interpret'
 call check value('PATH', , 'OS2ENVIRONMENT') \= '', 'value() of the environment'
 
+/* REXXC, the tokenizer, and running a tokenized program */
+'@del C:\ORXTOK*.CMD 2> nul'
+call lineout 'C:\ORXTOKS.CMD', "/* tokenized */ return 'tokenized' arg(1)"
+call lineout 'C:\ORXTOKS.CMD'
+'@REXXC C:\ORXTOKS.CMD C:\ORXTOK.CMD > nul'
+call check rc = 0, 'REXXC rc' rc
+head = charin('C:\ORXTOK.CMD', 1, 14)
+call stream 'C:\ORXTOK.CMD', 'c', 'close'
+call check head \= '/* tokenized *', 'REXXC output is not the source'
+call 'C:\ORXTOK.CMD' 'ok'
+call check result = 'tokenized ok', 'a tokenized program runs'
+'@attrib C:\ORXTOK*.CMD'
+'@del C:\ORXTOKS.CMD'
+'@del C:\ORXTOK.CMD'
+
 /* REXXUTIL */
 call rxfuncadd 'SysLoadFuncs', 'REXXUTIL', 'SysLoadFuncs'
 call SysLoadFuncs
