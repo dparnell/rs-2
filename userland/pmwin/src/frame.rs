@@ -1076,9 +1076,13 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         // Messages a frame does not know (0x7b-0xba but WM_QUERYCONVERTPOS,
         // among them the DDE messages WinDdeInitiate sends to frames;
-        // 0x213-0x406, such as the help manager's HM_ messages; WM_USER
-        // on) go to its client, as in IBM's frame procedure.
-        0x7b..=0xaf | 0xb1..=0xba | 0x213..=0x406 | 0x1000.. => {
+        // everything from 0x213 on, such as the help manager's HM_
+        // messages and the secondary-window library's 0x54c-0x559 that
+        // MINSTALL sends to its frames, but the frame's own 0x407/0x408/
+        // 0x43e/0x43f, the mouse messages 0x410-0x428, WM_FLASHWINDOW's
+        // 0x691 and the bidi ones 0xbd0-0xbd3) go to its client, as in
+        // IBM's frame procedure (WinFrameWndProc).
+        0x7b..=0xaf | 0xb1..=0xba | 0x213..=0x406 | 0x409..=0x40f | 0x429..=0x43d | 0x440..=0x690 | 0x692..=0xbcf | 0xbd4.. => {
             let c = WinWindowFromID(h, FID_CLIENT);
             if c != 0 { send(c, msg, mp1, mp2) } else { WinDefWindowProc(h, msg, mp1, mp2) }
         }
