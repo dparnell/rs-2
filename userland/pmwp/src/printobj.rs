@@ -1493,6 +1493,7 @@ pub fn impl_spool() -> Impl {
             ("wpModifyPopupMenu", __m_spool_modify_menu as usize),
             ("wpMenuItemSelected", __m_spool_menu_selected as usize),
             ("wpQueryDefaultView", __m_spool_default_view as usize),
+            ("wpQueryIcon", __m_pdr_icon as usize),
             crate::pages::no_window_page_override(),
         ],
     }
