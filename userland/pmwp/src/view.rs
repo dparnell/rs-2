@@ -69,6 +69,9 @@ pub struct Win {
     /// A Find Results window (obj 0): the objects found, which it shows
     /// in place of a folder's content.
     pub found: Option<Vec<usize>>,
+    /// A window of found objects that belongs to an object (a printer's
+    /// job view): its pop-up menu is that object's.
+    pub owner: usize,
 }
 
 static mut WINS: Vec<Win> = Vec::new();
@@ -263,6 +266,16 @@ pub fn open_results(title: &[u8], found: Vec<usize>) -> usize {
     wins().len() - 1
 }
 
+/// A window of objects that belongs to `owner` (a printer's job view:
+/// its jobs).
+pub fn open_owned(title: &[u8], objs: Vec<usize>, owner: usize) -> usize {
+    let w = open_results(title, objs);
+    wins()[w].owner = owner;
+    let icon = obj::call(m::WPObject::wpQueryIcon, &[owner]) as u32;
+    send(wins()[w].frame, 0x0047, icon, 0);
+    w
+}
+
 /// A Find Results window's objects (the search is done).
 pub fn set_results(w: usize, title: &[u8], found: Vec<usize>) {
     wins()[w].found = Some(found);
@@ -285,7 +298,7 @@ fn make_view(folder: usize, view: u32, title: &[u8], desktop: bool, found: Optio
         WinCreateWindow(client, WC_CONTAINER, b"\0".as_ptr(), WS_VISIBLE | CCS_EXTENDSEL, 0, 0, 10, 10, client, HWND_TOP, ID_CHILD, core::ptr::null(), core::ptr::null())
     };
     unsafe { OLD_CNR = WinSubclassWindow(cnr, cnr_proc) as usize };
-    wins().push(Win { obj: folder, view, frame, client, child: cnr, recs: Vec::new(), desktop, fields: false, height: 0, found });
+    wins().push(Win { obj: folder, view, frame, client, child: cnr, recs: Vec::new(), desktop, fields: false, height: 0, found, owner: 0 });
     let w = wins().len() - 1;
     let mut ci = [0u32; 23];
     ci[0] = 92;
@@ -859,7 +872,7 @@ pub fn open_settings(o: usize) -> u32 {
     let nb = unsafe {
         WinCreateWindow(client, WC_NOTEBOOK, b"\0".as_ptr(), WS_VISIBLE | 0x0001 | 0x0010, 0, 0, 10, 10, client, HWND_TOP, ID_CHILD, core::ptr::null(), core::ptr::null())
     };
-    wins().push(Win { obj: o, view: OPEN_SETTINGS, frame, client, child: nb, recs: Vec::new(), desktop: false, fields: false, height: 0, found: None });
+    wins().push(Win { obj: o, view: OPEN_SETTINGS, frame, client, child: nb, recs: Vec::new(), desktop: false, fields: false, height: 0, found: None, owner: 0 });
     let w = wins().len() - 1;
     let (sw, sh) = screen();
     unsafe { send(frame, 0x0047, obj::call(m::WPObject::wpQueryIcon, &[o]) as u32, 0) };
@@ -1012,12 +1025,17 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                     // NOTIFYRECORDENTER: hwndCnr, fKey, pRecord.
                     let o = obj_of_rec(w, rd(b, 8));
                     if o != 0 {
+                        let (folder, frame) = (wins()[w].obj, wins()[w].frame);
                         obj::call(m::WPObject::wpViewObject, &[o, wins()[w].child as usize, OPEN_DEFAULT as usize, 0]);
+                        // The folder's self-close setting.
+                        crate::usermenu::opened_from(folder, frame, o);
                     }
                     0
                 }
                 CN_CONTEXTMENU => {
                     let o = obj_of_rec(w, b);
+                    // A job view's own menu is its printer's.
+                    let o = if o == 0 && wins()[w].owner != 0 { wins()[w].owner } else { o };
                     if o == 0 && wins()[w].obj == 0 {
                         return 0;
                     }
@@ -1100,6 +1118,14 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
         }
         WM_TIMER if a == crate::minwin::TID_MINWATCH => {
             crate::minwin::check();
+            0
+        }
+        WM_TIMER if a == crate::printer::TID_JOBS => {
+            crate::printer::tick();
+            0
+        }
+        WM_TIMER if a == crate::desktop::TID_AUTOLOCK => {
+            crate::desktop::auto_tick();
             0
         }
         WM_TIMER if a == crate::shutdown::TID_SHUTDOWN => {

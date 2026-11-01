@@ -22,6 +22,7 @@ pub mod classes_gen;
 mod clsmgr;
 mod connections;
 mod delete;
+mod desktop;
 mod dnd;
 mod exports;
 mod filejob;
@@ -36,6 +37,7 @@ mod shell;
 mod shutdown;
 mod templates;
 mod url;
+mod usermenu;
 mod launch;
 mod launchpad;
 mod menu;
@@ -44,6 +46,7 @@ mod minwin;
 mod obj;
 mod pages;
 mod printer;
+mod printobj;
 /// rs2's shell's PM bindings (shared).
 #[path = "../../rs2shell/src/pm.rs"]
 #[allow(dead_code, unused_imports, clippy::all)]

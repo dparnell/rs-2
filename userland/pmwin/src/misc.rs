@@ -130,7 +130,8 @@ pub extern "C" fn WinAlarm(_desk: u32, style: u32) -> u32 {
 pub extern "C" fn WinSetSysValue(_desk: u32, i: i32, v: i32) -> u32 {
     // SV_SWAPBUTTON, SV_DBLCLKTIME, SV_CX/CYDBLCLK, SV_ALARM,
     // SV_CURSORRATE, SV_FIRST/SCROLLRATE, SV_*FREQ, SV_*DURATION.
-    if !matches!(i, 0..=3 | 6 | 9..=11 | 13..=18) {
+    // SV_ANIMATION, SV_PRINTSCREEN (the System object's settings).
+    if !matches!(i, 0..=3 | 6 | 9..=11 | 13..=18 | 93 | 97) {
         set_error(0x1303); // PMERR_INVALID_PARM
         return 0;
     }
@@ -205,6 +206,8 @@ pub extern "C" fn WinQuerySysValue(_desk: u32, i: i32) -> i32 {
         68 => 75,                    // SV_CXICONTEXTWIDTH
         69 => 3,                     // SV_CICONTEXTLINES
         73 | 74 => 2,                // SV_CX/CYMOTIONSTART
+        93 => 1,                     // SV_ANIMATION
+        97 => 1,                     // SV_PRINTSCREEN
         _ => 0,
     }
 }

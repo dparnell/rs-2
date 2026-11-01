@@ -738,8 +738,10 @@ extern "C" fn lp_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             0
         }
         WM_TIMER if a == TID_FLOAT => {
-            // Floating on top of the other windows.
-            unsafe { WinSetWindowPos(wins()[w].frame, HWND_TOP, 0, 0, 0, 0, SWP_ZORDER) };
+            // Floating on top of the other windows (not of the lockup).
+            if !crate::desktop::locked() {
+                unsafe { WinSetWindowPos(wins()[w].frame, HWND_TOP, 0, 0, 0, 0, SWP_ZORDER) };
+            }
             0
         }
         DM_DRAGOVER => {

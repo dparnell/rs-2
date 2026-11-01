@@ -29,12 +29,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::ptr::{null, null_mut};
 
-use crate::book;
 use crate::classes_gen::m;
 use crate::methods;
 use crate::obj::{self, OPEN_SETTINGS};
 use crate::pm::*;
-use crate::setup::add_page;
 use crate::som;
 use crate::util::{cstr, str_bytes, str_new, z, Str};
 use crate::wps::{self, Impl};
@@ -58,14 +56,6 @@ unsafe extern "C" {
     fn SplReleaseQueue(comp: *const u8, q: *const u8) -> u32;
     #[link_name = "PMSPL.404"]
     fn SplPurgeQueue(comp: *const u8, q: *const u8) -> u32;
-    #[link_name = "PMSPL.392"]
-    fn SplEnumJob(comp: *const u8, q: *const u8, level: u32, buf: *mut u8, cb: u32, ret: *mut u32, total: *mut u32, need: *mut u32, r: u32) -> u32;
-    #[link_name = "PMSPL.386"]
-    fn SplDeleteJob(comp: *const u8, q: *const u8, id: u32) -> u32;
-    #[link_name = "PMSPL.385"]
-    fn SplHoldJob(comp: *const u8, q: *const u8, id: u32) -> u32;
-    #[link_name = "PMSPL.384"]
-    fn SplReleaseJob(comp: *const u8, q: *const u8, id: u32) -> u32;
     #[link_name = "PMSPL.401"]
     fn SplCreateDevice(comp: *const u8, level: u32, buf: *const u8, cb: u32) -> u32;
     #[link_name = "PMSPL.402"]
@@ -74,6 +64,12 @@ unsafe extern "C" {
     fn SplQueryDevice(comp: *const u8, dev: *const u8, level: u32, buf: *mut u8, cb: u32, need: *mut u32) -> u32;
     #[link_name = "PMSPL.403"]
     fn SplDeleteDevice(comp: *const u8, dev: *const u8) -> u32;
+    #[link_name = "PMSPL.413"]
+    fn SplCreatePort(comp: *const u8, port: *const u8, drv: *const u8, ver: u32, buf: *const u8, cb: u32) -> u32;
+    #[link_name = "PMGPI.607"]
+    fn DevQueryDeviceNames(hab: u32, drv: *const u8, n: *mut i32, names: *mut u8, descs: *mut u8, ntypes: *mut i32, types: *mut u8) -> u32;
+    #[link_name = "PMWIN.841"]
+    fn WinQueryWindowText(h: u32, cb: i32, buf: *mut u8) -> i32;
     #[link_name = "PMSPL.408"]
     fn SplEnumPort(comp: *const u8, level: u32, buf: *mut u8, cb: u32, ret: *mut u32, total: *mut u32, need: *mut u32, r: u32) -> u32;
     #[link_name = "PMSPL.301"]
@@ -137,6 +133,8 @@ pub struct QueueInfo {
     pub driver: Vec<u8>,
     pub drivdata: Vec<u8>,
     pub flags: u16,
+    pub priority: u16,
+    pub qproc: Vec<u8>,
 }
 
 fn queue_info_at(b: &[u8], o: usize) -> QueueInfo {
@@ -156,6 +154,8 @@ fn queue_info_at(b: &[u8], o: usize) -> QueueInfo {
         printers: ptr_str(rd32(b, o + 32)),
         driver: ptr_str(rd32(b, o + 36)),
         drivdata,
+        priority: rd16(b, o + 4),
+        qproc: ptr_str(rd32(b, o + 16)),
     }
 }
 
@@ -199,7 +199,7 @@ fn ports() -> Vec<Vec<u8>> {
     (0..ret as usize).map(|i| ptr_str(rd32(&buf, i * 12))).collect()
 }
 
-fn port_settings(port: &[u8]) -> Vec<u8> {
+pub fn port_settings(port: &[u8]) -> Vec<u8> {
     let mut buf = [0u8; 512];
     let n = unsafe { PrfQueryProfileString(HINI_SYSTEM, b"PM_SPOOLER_PORT\0".as_ptr(), z(port).as_ptr(), b"\0".as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } as usize;
     let mut v = buf[..n.min(buf.len())].to_vec();
@@ -209,7 +209,7 @@ fn port_settings(port: &[u8]) -> Vec<u8> {
     v
 }
 
-fn set_port_settings(port: &[u8], s: &[u8]) {
+pub fn set_port_settings(port: &[u8], s: &[u8]) {
     let mut v = s.to_vec();
     if !v.ends_with(b";") {
         v.push(b';');
@@ -355,245 +355,155 @@ fn one_line(t: &[u8]) -> Vec<u8> {
     t.iter().map(|&c| if c == b'\n' { b' ' } else { c }).collect()
 }
 
-/// Open job views: (printer, frame, client, list box, job ids shown).
-struct JobView {
-    obj: usize,
-    frame: u32,
-    client: u32,
-    list: u32,
-    ids: Vec<u32>,
-}
-
-static mut JOB_VIEWS: Vec<JobView> = Vec::new();
-static JOBS_CLASS: &[u8] = b"RS2PrinterJobs\0";
-
-const ID_LIST: u32 = 10;
-const ID_HOLD: u32 = 11;
-const ID_RELEASE: u32 = 12;
-const ID_DELETE: u32 = 13;
-const ID_HOLDQ: u32 = 14;
-const ID_RELEASEQ: u32 = 15;
-const ID_PURGE: u32 = 16;
-const BUTTONS: [(u32, &[u8]); 6] = [(ID_HOLD, b"~Hold"), (ID_RELEASE, b"~Release"), (ID_DELETE, b"~Delete"), (ID_HOLDQ, b"Hold ~printer"), (ID_RELEASEQ, b"Release p~rinter"), (ID_PURGE, b"Delete ~all")];
-const BAR: i32 = 30;
-const STATUS: i32 = 22;
-
-fn view_of_client(h: u32) -> Option<&'static mut JobView> {
-    unsafe { JOB_VIEWS.iter_mut().find(|v| v.client == h) }
-}
-
-fn status_text(s: u16) -> &'static [u8] {
-    if s & 0x10 != 0 {
-        return b"Error";
-    }
-    match s & 3 {
-        0 => b"Waiting",
-        1 => b"Held",
-        2 => b"Spooling",
-        _ => b"Printing",
-    }
-}
+/// Open job views (printer, frame) and the printers' job objects
+/// (printer, job id, object, the title it has).
+static mut JOB_VIEWS: Vec<(usize, u32)> = Vec::new();
+static mut JOB_OBJS: Vec<(usize, u32, usize, Vec<u8>)> = Vec::new();
+/// The desktop's timer for the job views (every two seconds).
+pub const TID_JOBS: u32 = 0x5713;
 
 fn dec(n: u32) -> Vec<u8> {
     alloc::format!("{n}").into_bytes()
 }
 
-/// Fill the job list again (keeping the selected job selected).
-fn refresh(v: &mut JobView) {
-    let q = queue_of(v.obj);
-    let sel = send(v.list, LM_QUERYSELECTION, 0xffff, 0);
-    let keep = v.ids.get(sel as usize).copied();
-    let (mut ret, mut total, mut need) = (0, 0, 0);
-    let qz = z(&q);
-    unsafe { SplEnumJob(null(), qz.as_ptr(), 2, null_mut(), 0, &mut ret, &mut total, &mut need, 0) };
-    let mut buf = vec![0u8; need as usize + 64];
-    let mut lines: Vec<(u32, Vec<u8>)> = Vec::new();
-    if unsafe { SplEnumJob(null(), qz.as_ptr(), 2, buf.as_mut_ptr(), buf.len() as u32, &mut ret, &mut total, &mut need, 0) } == 0 {
-        for i in 0..ret as usize {
-            let o = i * 32;
-            let id = rd16(&buf, o) as u32;
-            let doc = ptr_str(rd32(&buf, o + 28));
-            let doc = if doc.is_empty() { ptr_str(rd32(&buf, o + 24)) } else { doc };
-            let mut t = dec(id);
-            t.extend_from_slice(b"   ");
-            t.extend_from_slice(if doc.is_empty() { b"(untitled)" } else { &doc });
-            t.extend_from_slice(b"   ");
-            t.extend_from_slice(status_text(rd16(&buf, o + 10)));
-            t.extend_from_slice(b"   ");
-            t.extend_from_slice(&dec(rd32(&buf, o + 16)));
-            t.extend_from_slice(b" bytes");
-            lines.push((id, t));
-        }
-    }
-    let ids: Vec<u32> = lines.iter().map(|l| l.0).collect();
-    // Redraw only when something changed.
-    let same = ids == v.ids && (0..lines.len()).all(|i| {
-        let mut b = [0u8; 256];
-        let n = send(v.list, LM_QUERYITEMTEXT, mp(i as u32, 256), b.as_mut_ptr() as u32) as usize;
-        b[..n.min(256)] == lines[i].1[..]
-    });
-    if !same {
-        send(v.list, LM_DELETEALL, 0, 0);
-        for (_, t) in &lines {
-            let t = z(t);
-            send(v.list, LM_INSERTITEM, 0xffff, t.as_ptr() as u32);
-        }
-        v.ids = ids;
-        if let Some(k) = keep.and_then(|k| v.ids.iter().position(|&x| x == k)) {
-            send(v.list, LM_SELECTITEM, k as u32, 1);
-        }
-    }
-    unsafe { WinInvalidateRect(v.client, null(), 0) };
-}
-
-fn layout(v: &JobView) {
-    let mut r = RectL::default();
-    unsafe { WinQueryWindowRect(v.client, &mut r) };
-    let w = r.r - r.l;
-    unsafe {
-        WinSetWindowPos(v.list, 0, 4, BAR + 2, (w - 8).max(10), (r.t - BAR - STATUS - 4).max(10), SWP_MOVE | SWP_SIZE | SWP_SHOW);
-        let bw = ((w - 8) / BUTTONS.len() as i32).max(40);
-        for (k, (id, _)) in BUTTONS.iter().enumerate() {
-            let b = WinWindowFromID(v.client, *id);
-            WinSetWindowPos(b, 0, 4 + k as i32 * bw, 4, bw - 4, BAR - 8, SWP_MOVE | SWP_SIZE | SWP_SHOW);
-        }
-    }
-}
-
-extern "C" fn jobs_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
-    match msg {
-        WM_PAINT => {
-            let mut r = RectL::default();
-            unsafe {
-                let hps = WinBeginPaint(h, 0, &mut r);
-                WinQueryWindowRect(h, &mut r);
-                WinFillRect(hps, &r, -2);
-                if let Some(v) = view_of_client(h) {
-                    let q = queue_of(v.obj);
-                    let info = queue_info(&q);
-                    let mut t = Vec::new();
-                    match &info {
-                        Some(i) => {
-                            t.extend_from_slice(b"Queue ");
-                            t.extend_from_slice(&i.name);
-                            for p in i.printers.split(|&c| c == b',').filter(|p| !p.is_empty()) {
-                                t.extend_from_slice(b", printer ");
-                                t.extend_from_slice(p);
-                                if let Some((port, _)) = device(p) {
-                                    t.extend_from_slice(b" on ");
-                                    t.extend_from_slice(&port);
-                                }
-                            }
-                            t.extend_from_slice(alloc::format!(", {} job(s)", i.jobs).as_bytes());
-                            if i.held {
-                                t.extend_from_slice(b"  (held)");
-                            }
-                        }
-                        None => t.extend_from_slice(b"This printer's queue does not exist."),
-                    }
-                    let mut tr = RectL { l: r.l + 6, b: r.t - STATUS, r: r.r - 6, t: r.t - 2 };
-                    WinDrawText(hps, t.len() as i32, t.as_ptr(), &mut tr, -1, -2, 0x0400);
-                }
-                WinEndPaint(hps);
-            }
-            0
-        }
-        WM_SIZE => {
-            if let Some(v) = view_of_client(h) {
-                layout(v);
-            }
-            unsafe { WinInvalidateRect(h, null(), 0) };
-            0
-        }
-        WM_TIMER => {
-            if let Some(v) = view_of_client(h) {
-                refresh(v);
-            }
-            0
-        }
-        WM_COMMAND => {
-            let id = a & 0xffff;
-            let Some(v) = view_of_client(h) else { return 0 };
-            let q = z(&queue_of(v.obj));
-            let sel = send(v.list, LM_QUERYSELECTION, 0xffff, 0);
-            let job = v.ids.get(sel as usize).copied();
-            unsafe {
-                match (id, job) {
-                    (ID_HOLD, Some(j)) => {
-                        SplHoldJob(null(), q.as_ptr(), j);
-                    }
-                    (ID_RELEASE, Some(j)) => {
-                        SplReleaseJob(null(), q.as_ptr(), j);
-                    }
-                    (ID_DELETE, Some(j)) => {
-                        SplDeleteJob(null(), q.as_ptr(), j);
-                    }
-                    (ID_HOLDQ, _) => {
-                        SplHoldQueue(null(), q.as_ptr());
-                    }
-                    (ID_RELEASEQ, _) => {
-                        SplReleaseQueue(null(), q.as_ptr());
-                    }
-                    (ID_PURGE, _) => {
-                        SplPurgeQueue(null(), q.as_ptr());
-                    }
-                    _ => {}
-                }
-            }
-            refresh(v);
-            0
-        }
-        WM_CLOSE => {
-            if let Some(i) = unsafe { JOB_VIEWS.iter().position(|v| v.client == h) } {
-                let v = unsafe { JOB_VIEWS.remove(i) };
-                let hab = unsafe { WinQueryAnchorBlock(h) };
-                unsafe {
-                    WinStopTimer(hab, h, 1);
-                    WinDestroyWindow(v.frame);
-                }
-            }
-            0
-        }
-        _ => unsafe { WinDefWindowProc(h, msg, a, b) },
-    }
-}
-
-/// The job view: the queue's jobs.
-fn open_jobs(o: usize) -> u32 {
-    if let Some(v) = unsafe { JOB_VIEWS.iter().find(|v| v.obj == o) } {
-        crate::view::activate(v.frame);
-        return v.frame;
-    }
-    let hab = unsafe { WinQueryAnchorBlock(HWND_DESKTOP) };
-    // CS_SIZEREDRAW
-    unsafe { WinRegisterClass(hab, JOBS_CLASS.as_ptr(), jobs_proc, 0x0004, 0) };
+/// The view's title: the printer's, and IBM's status line ("Status:
+/// Queue held  Job(s) 2").
+fn view_title(o: usize) -> Vec<u8> {
     let mut t = one_line(&obj::title(o));
-    t.extend_from_slice(b" - Job Icon View");
-    let t = z(&t);
-    let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST;
-    let mut client = 0;
-    let frame = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, JOBS_CLASS.as_ptr(), t.as_ptr(), 0, 0, 1, &mut client) };
-    if frame == 0 {
-        return 0;
+    match queue_info(&queue_of(o)) {
+        Some(i) => {
+            t.extend_from_slice(b" (");
+            if i.held {
+                t.extend_from_slice(b"Queue held, ");
+            }
+            t.extend_from_slice(&dec(i.jobs as u32));
+            t.extend_from_slice(b" Job(s))");
+        }
+        None => t.extend_from_slice(b" (no queue)"),
     }
-    // WS_VISIBLE | LS_NOADJUSTPOS
-    let list = unsafe { WinCreateWindow(client, 0xffff_0007, b"\0".as_ptr(), WS_VISIBLE | 0x4, 0, 0, 10, 10, client, HWND_TOP, ID_LIST, null(), null()) };
-    for (id, text) in BUTTONS {
-        let t = z(text);
-        // WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON
-        unsafe { WinCreateWindow(client, 0xffff_0003, t.as_ptr(), WS_VISIBLE | WS_TABSTOP, 0, 0, 10, 10, client, HWND_TOP, id, null(), null()) };
+    t
+}
+
+/// The printer's job objects brought up to date with its queue's jobs:
+/// (objects, whether some came or went).
+fn job_objects(o: usize) -> (Vec<usize>, bool) {
+    let q = queue_of(o);
+    let js = crate::printobj::jobs(&q);
+    let objs = unsafe { &mut JOB_OBJS };
+    let mut changed = false;
+    // Jobs that are gone.
+    let gone: Vec<usize> = objs.iter().filter(|e| e.0 == o && !js.iter().any(|j| j.id == e.1)).map(|e| e.2).collect();
+    if !gone.is_empty() {
+        changed = true;
+        objs.retain(|e| !gone.contains(&e.2));
     }
-    unsafe { JOB_VIEWS.push(JobView { obj: o, frame, client, list, ids: Vec::new() }) };
-    send(frame, 0x0047, obj::call(m::WPObject::wpQueryIcon, &[o]) as u32, 0);
-    let (sw, sh) = screen();
-    unsafe { WinSetWindowPos(frame, HWND_TOP, sw / 5, sh / 3, 560.min(sw - 40), 240, SWP_SIZE | SWP_MOVE | SWP_SHOW | SWP_ACTIVATE | SWP_ZORDER) };
-    if let Some(v) = view_of_client(client) {
-        layout(v);
-        refresh(v);
+    let mut list = Vec::new();
+    for j in &js {
+        let mut title = crate::printobj::job_title(j);
+        if j.status & 3 != 0 {
+            title.push(b'\n');
+            title.extend_from_slice(crate::printobj::job_status(j.status));
+        }
+        match objs.iter_mut().find(|e| e.0 == o && e.1 == j.id) {
+            Some(e) => {
+                if e.3 != title {
+                    let t = z(&title);
+                    obj::call(m::WPObject::wpSetTitle, &[e.2, t.as_ptr() as usize]);
+                    e.3 = title;
+                }
+                list.push(e.2);
+            }
+            None => {
+                let x = crate::printobj::make_job(o, &q, j);
+                if x != 0 {
+                    if title != crate::printobj::job_title(j) {
+                        let t = z(&title);
+                        obj::call(m::WPObject::wpSetTitle, &[x, t.as_ptr() as usize]);
+                    }
+                    objs.push((o, j.id, x, title));
+                    list.push(x);
+                    changed = true;
+                }
+            }
+        }
     }
-    unsafe { WinStartTimer(hab, client, 1, 2000) };
+    // Objects of gone jobs leave the view before they are freed.
+    if !gone.is_empty() {
+        if let Some(w) = view_of(o) {
+            crate::view::set_results(w, &view_title(o), list.clone());
+        }
+        for g in gone {
+            crate::printobj::free_job(g);
+        }
+        changed = false;
+    }
+    (list, changed)
+}
+
+fn view_of(o: usize) -> Option<usize> {
+    let frame = unsafe { JOB_VIEWS.iter().find(|v| v.0 == o) }?.1;
+    crate::view::wins().iter().position(|w| w.frame == frame)
+}
+
+/// A job changed (held, deleted...): its view follows at once.
+pub fn jobs_changed(o: usize) {
+    if o != 0 && view_of(o).is_some() {
+        refresh(o);
+    }
+}
+
+fn refresh(o: usize) {
+    let Some(w) = view_of(o) else { return };
+    let (objs, changed) = job_objects(o);
+    let title = view_title(o);
+    let mut cur = [0u8; 256];
+    let n = unsafe { WinQueryWindowText(crate::view::wins()[w].frame, 256, cur.as_mut_ptr()) }.max(0) as usize;
+    if changed || !cur[..n].starts_with(&title) {
+        crate::view::set_results(w, &title, objs);
+    }
+}
+
+/// The desktop's timer: the open job views follow their queues; the
+/// objects of closed views go.
+pub fn tick() {
+    let views: Vec<(usize, u32)> = unsafe { JOB_VIEWS.clone() };
+    for (o, frame) in views {
+        if crate::view::wins().iter().any(|w| w.frame == frame) {
+            refresh(o);
+        } else {
+            unsafe { JOB_VIEWS.retain(|v| v.1 != frame) };
+            let mine: Vec<usize> = unsafe { JOB_OBJS.iter().filter(|e| e.0 == o).map(|e| e.2).collect() };
+            unsafe { JOB_OBJS.retain(|e| e.0 != o) };
+            for x in mine {
+                crate::printobj::free_job(x);
+            }
+        }
+    }
+    if unsafe { JOB_VIEWS.is_empty() } {
+        let client = crate::view::desktop_client();
+        unsafe { WinStopTimer(WinQueryAnchorBlock(HWND_DESKTOP), client, TID_JOBS) };
+    }
+}
+
+/// The job view: the queue's jobs as job objects (IBM's job icon view),
+/// in a view window whose own pop-up menu is the printer's.
+fn open_jobs(o: usize) -> u32 {
+    if let Some(w) = view_of(o) {
+        let f = crate::view::wins()[w].frame;
+        crate::view::activate(f);
+        return f;
+    }
+    let (objs, _) = job_objects(o);
+    let w = crate::view::open_owned(&view_title(o), objs, o);
+    let frame = crate::view::wins()[w].frame;
+    unsafe { JOB_VIEWS.push((o, frame)) };
+    let client = crate::view::desktop_client();
+    if client != 0 {
+        unsafe { WinStartTimer(WinQueryAnchorBlock(HWND_DESKTOP), client, TID_JOBS, 2000) };
+    }
     frame
 }
+
 
 /// A printer opens on its jobs (IBM's job icon view) unless its setup
 /// says otherwise.
@@ -689,12 +599,21 @@ pub fn copied_from_template(o: usize) {
         return;
     }
     let title = one_line(&obj::title(o));
+    // IBM's "Create a printer": the name, the driver and the port;
+    // cancelled, the new object goes again.
+    let Some((title, drv, port)) = crate::printobj::create_dialog(&title) else {
+        obj::call(m::WPObject::wpDelete, &[o, 0]);
+        return;
+    };
     if let Some(q) = create_queue(&title) {
         pd(o).queue = str_new(&q);
+        set_driver(&q, &drv);
+        set_port(&q, &port);
+        let t = z(&title);
+        obj::call(m::WPObject::wpSetTitle, &[o, t.as_ptr() as usize]);
         let id = z(&[b"<RS2_PRINTER_", &q[..], b">"].concat());
         obj::call(m::WPObject::wpSetObjectID, &[o, id.as_ptr() as usize]);
         obj::call(m::WPObject::wpSaveDeferred, &[o]);
-        obj::call(m::WPObject::wpViewObject, &[o, 0, OPEN_SETTINGS as usize, 0]);
     }
 }
 
@@ -793,169 +712,174 @@ extern "C" fn printer_drop(o: usize, _cnr: u32, _pdinfo: u32, it: u32) -> u32 {
     crate::delete::RC_DROP_DROPCOMPLETE
 }
 
-// ---- The Printer page ----
-
-const ID_QUEUE: u32 = 740;
-const ID_DEVICE: u32 = 741;
-const ID_DRIVER: u32 = 742;
-const ID_JOBPROPS: u32 = 743;
-const ID_PORT: u32 = 744;
-const ID_SETTINGS: u32 = 745;
-const ID_APPLY: u32 = 746;
-const ID_DEFAULT: u32 = 747;
-const ID_HINT: u32 = 748;
-
-const LM_INSERT: u32 = 0x0161;
-const LM_SEARCHSTRING: u32 = 0x016b;
+// ---- What the printer's pages and objects change ----
 
 /// The first printer of an object's queue.
 fn first_printer(info: &QueueInfo) -> Vec<u8> {
     info.printers.split(|&c| c == b',').find(|p| !p.is_empty()).unwrap_or(b"").to_vec()
 }
 
-fn hint(port: &[u8]) -> &'static [u8] {
-    let p: Vec<u8> = port.iter().map(|c| c.to_ascii_uppercase()).collect();
-    if p.starts_with(b"LPR") {
-        b"Settings: host;queue;port;  (port 515 and queue lp if left out)"
-    } else if p.starts_with(b"IPP") {
-        b"Settings: host;path;port;  (port 631, path /ipp/print if left out)"
-    } else if p.starts_with(b"FILE") {
-        b"Settings: the output file (or a directory ending in \\); empty: \\SPOOL\\OUTPUT"
-    } else if p.starts_with(b"COM") {
-        b"Settings: baud;parity;data bits;stop bits;handshake;"
-    } else {
-        b"The printer's data goes to this parallel port."
+/// The spooler's ports.
+pub fn port_names() -> Vec<Vec<u8>> {
+    ports()
+}
+
+/// A new port (LPRn, IPPn, FILEn).
+pub fn create_port(name: &[u8]) -> bool {
+    let n = z(name);
+    unsafe { SplCreatePort(null(), n.as_ptr(), b"\0".as_ptr(), 0, null(), 0) == 0 }
+}
+
+/// The port the queue's printer prints on.
+pub fn port_of(queue: &[u8]) -> Vec<u8> {
+    queue_info(queue).and_then(|i| device(&first_printer(&i))).map(|d| d.0).unwrap_or_default()
+}
+
+pub fn set_port(queue: &[u8], port: &[u8]) -> bool {
+    let Some(info) = queue_info(queue) else { return false };
+    let (p, pz) = (z(&first_printer(&info)), z(port));
+    let ok = unsafe { SplSetDevice(null(), p.as_ptr(), 3, pz.as_ptr(), pz.len() as u32, 3) } == 0;
+    if !ok {
+        message(HWND_DESKTOP, b"The port could not be set.", b"Printer", MB_OK | MB_ERROR);
+    }
+    ok
+}
+
+/// The queue's printer driver (DRIVER.Device).
+pub fn set_driver(queue: &[u8], drv: &[u8]) {
+    let (q, d) = (z(queue), z(drv));
+    unsafe { SplSetQueue(null(), q.as_ptr(), 3, d.as_ptr(), d.len() as u32, 13) };
+}
+
+/// The default printer (PRQ3_TYPE_APPDEFAULT: the queue programs print
+/// to unless they choose).
+pub fn set_default(queue: &[u8]) {
+    if let Some(info) = queue_info(queue) {
+        let fl = info.flags | 4;
+        unsafe { SplSetQueue(null(), z(queue).as_ptr(), 3, fl.to_le_bytes().as_ptr(), 2, 10) };
     }
 }
 
-fn fill_page(h: u32, o: usize) {
+/// The queue's priority and PRQINFO3 fsType.
+pub fn queue_priority_flags(queue: &[u8]) -> (u16, u16) {
+    queue_info(queue).map_or((5, 0), |i| (i.priority.clamp(1, 9), i.flags))
+}
+
+pub fn set_queue_priority(queue: &[u8], p: u16) {
+    unsafe { SplSetQueue(null(), z(queue).as_ptr(), 3, p.to_le_bytes().as_ptr(), 2, 2) };
+}
+
+pub fn set_queue_flags(queue: &[u8], f: u16) {
+    unsafe { SplSetQueue(null(), z(queue).as_ptr(), 3, f.to_le_bytes().as_ptr(), 2, 10) };
+}
+
+/// The queue's queue driver (processor).
+pub fn queue_driver(queue: &[u8]) -> Vec<u8> {
+    queue_info(queue).map(|i| i.qproc).filter(|q| !q.is_empty()).unwrap_or_else(|| b"PMPRINT".to_vec())
+}
+
+pub fn set_queue_driver(queue: &[u8], qp: &[u8]) {
+    let (q, p) = (z(queue), z(qp));
+    unsafe { SplSetQueue(null(), q.as_ptr(), 3, p.as_ptr(), p.len() as u32, 6) };
+}
+
+/// A presentation driver's devices (DevQueryDeviceNames).
+pub fn driver_devices(drv: &[u8]) -> Vec<Vec<u8>> {
+    let d = z(drv);
+    let (mut n, mut types) = (16i32, 0i32);
+    let mut names = alloc::vec![0u8; 32 * 16];
+    let mut descs = alloc::vec![0u8; 64 * 16];
+    let ok = unsafe { DevQueryDeviceNames(WinQueryAnchorBlock(HWND_DESKTOP), d.as_ptr(), &mut n, names.as_mut_ptr(), descs.as_mut_ptr(), &mut types, null_mut()) } != 0;
+    if !ok || n <= 0 {
+        return alloc::vec![b"Generic PostScript Printer".to_vec()];
+    }
+    (0..n.min(16) as usize).map(|i| names[i * 32..i * 32 + 32].iter().copied().take_while(|&c| c != 0).collect()).collect()
+}
+
+/// The driver's job properties dialog for the queue (DevPostDeviceModes,
+/// kept with the queue).
+pub fn job_properties(o: usize) {
     let q = queue_of(o);
-    set_item_text(h, ID_QUEUE, if q.is_empty() { b"(none)" } else { &q });
-    let Some(info) = queue_info(&q) else {
-        set_item_text(h, ID_DEVICE, b"(the queue does not exist)");
-        return;
-    };
-    let p = first_printer(&info);
-    set_item_text(h, ID_DEVICE, if p.is_empty() { b"(none)" } else { &p });
-    set_item_text(h, ID_DRIVER, &info.driver);
-    let port = device(&p).map(|d| d.0).unwrap_or_default();
-    let list = unsafe { WinWindowFromID(h, ID_PORT) };
-    send(list, LM_DELETEALL, 0, 0);
-    for x in ports() {
-        let t = z(&x);
-        send(list, LM_INSERT, 0xffff, t.as_ptr() as u32);
+    let qz = z(&q);
+    let Some(info) = queue_info(&q) else { return };
+    let drv = info.driver.clone();
+    let dot = drv.iter().position(|&c| c == b'.').unwrap_or(drv.len());
+    let (dn, dev) = (z(&drv[..dot]), z(drv.get(dot + 1..).unwrap_or(b"")));
+    let mut dd = info.drivdata.clone();
+    let need = unsafe { DevPostDeviceModes(0, null_mut(), dn.as_ptr(), dev.as_ptr(), qz.as_ptr(), 0) };
+    if dd.len() < need.max(0) as usize {
+        dd.resize(need as usize, 0);
     }
-    let pz = z(&port);
-    let at = send(list, LM_SEARCHSTRING, mp(1, 0xffff), pz.as_ptr() as u32);
-    if at != 0xffff && at < 0x8000 {
-        send(list, LM_SELECTITEM, at, 1);
-    }
-    let s = port_settings(&port);
-    let s = s.strip_suffix(b";").unwrap_or(&s);
-    set_item_text(h, ID_SETTINGS, s);
-    set_item_text(h, ID_HINT, hint(&port));
-    send(unsafe { WinWindowFromID(h, ID_DEFAULT) }, BM_SETCHECK, (info.flags & 4 != 0) as u32, 0);
-}
-
-fn selected_port(h: u32) -> Vec<u8> {
-    let list = unsafe { WinWindowFromID(h, ID_PORT) };
-    let sel = send(list, LM_QUERYSELECTION, 0xffff, 0);
-    if sel == 0xffff || sel >= 0x8000 {
-        return Vec::new();
-    }
-    let mut b = [0u8; 64];
-    let n = send(list, LM_QUERYITEMTEXT, mp(sel, 64), b.as_mut_ptr() as u32) as usize;
-    b[..n.min(64)].to_vec()
-}
-
-extern "C" fn printer_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
-    match msg {
-        WM_INITDLG => {
-            unsafe { WinSetWindowULong(h, QWL_USER, b) };
-            fill_page(h, b as usize);
-            0
-        }
-        WM_CONTROL if a & 0xffff == ID_PORT && a >> 16 == LN_SELECT => {
-            let port = selected_port(h);
-            let s = port_settings(&port);
-            set_item_text(h, ID_SETTINGS, s.strip_suffix(b";").unwrap_or(&s));
-            set_item_text(h, ID_HINT, hint(&port));
-            0
-        }
-        WM_COMMAND => {
-            let o = unsafe { WinQueryWindowULong(h, QWL_USER) } as usize;
-            let q = queue_of(o);
-            let qz = z(&q);
-            match a & 0xffff {
-                ID_JOBPROPS => {
-                    if let Some(info) = queue_info(&q) {
-                        let drv = info.driver.clone();
-                        let dot = drv.iter().position(|&c| c == b'.').unwrap_or(drv.len());
-                        let (dn, dev) = (z(&drv[..dot]), z(drv.get(dot + 1..).unwrap_or(b"")));
-                        let mut dd = info.drivdata.clone();
-                        let need = unsafe { DevPostDeviceModes(0, null_mut(), dn.as_ptr(), dev.as_ptr(), qz.as_ptr(), 0) };
-                        if dd.len() < need.max(0) as usize {
-                            dd.resize(need as usize, 0);
-                        }
-                        // DPDM_CHANGEPROP
-                        if !dd.is_empty() && unsafe { DevPostDeviceModes(0, dd.as_mut_ptr(), dn.as_ptr(), dev.as_ptr(), qz.as_ptr(), 1) } == 1 {
-                            unsafe { SplSetQueue(null(), qz.as_ptr(), 3, dd.as_ptr(), dd.len() as u32, 14) };
-                        }
-                    }
-                }
-                ID_APPLY => {
-                    let port = selected_port(h);
-                    let mut s = [0u8; 256];
-                    let n = unsafe { WinQueryDlgItemText(h, ID_SETTINGS, 256, s.as_mut_ptr()) }.max(0) as usize;
-                    if let Some(info) = queue_info(&q)
-                        && !port.is_empty()
-                    {
-                        set_port_settings(&port, &s[..n.min(256)]);
-                        let p = z(&first_printer(&info));
-                        let pz = z(&port);
-                        if unsafe { SplSetDevice(null(), p.as_ptr(), 3, pz.as_ptr(), pz.len() as u32, 3) } != 0 {
-                            message(h, b"The port could not be set.", b"Printer", MB_OK | MB_ERROR);
-                        }
-                    }
-                }
-                ID_DEFAULT => {}
-                _ => {}
-            }
-            0
-        }
-        WM_CONTROL if a & 0xffff == ID_DEFAULT => {
-            let o = unsafe { WinQueryWindowULong(h, QWL_USER) } as usize;
-            let q = queue_of(o);
-            let on = send(unsafe { WinWindowFromID(h, ID_DEFAULT) }, BM_QUERYCHECK, 0, 0) != 0;
-            if let Some(info) = queue_info(&q) {
-                let fl = if on { info.flags | 4 } else { info.flags & !4 };
-                unsafe { SplSetQueue(null(), z(&q).as_ptr(), 3, fl.to_le_bytes().as_ptr(), 2, 10) };
-            }
-            0
-        }
-        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    // DPDM_CHANGEPROP
+    if !dd.is_empty() && unsafe { DevPostDeviceModes(0, dd.as_mut_ptr(), dn.as_ptr(), dev.as_ptr(), qz.as_ptr(), 1) } == 1 {
+        unsafe { SplSetQueue(null(), qz.as_ptr(), 3, dd.as_ptr(), dd.len() as u32, 14) };
     }
 }
 
+/// IBM's printer pages: Printer driver, Output port, Queue options (in
+/// that order of tabs: each goes in front of the ones before it).
 extern "C" fn printer_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPPrinter"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
-    // LS_NOADJUSTPOS; SS_TEXT | DT_WORDBREAK; BS_AUTOCHECKBOX
-    add_page(o, nb, printer_page_proc, vec![
-        book::label(b"Queue:", (6, 108, 50)),
-        item(WC_STATIC, b"", WS_VISIBLE | 0x0001, (60, 108, 160, 8), ID_QUEUE as u16),
-        book::label(b"Printer:", (6, 98, 50)),
-        item(WC_STATIC, b"", WS_VISIBLE | 0x0001, (60, 98, 160, 8), ID_DEVICE as u16),
-        book::label(b"Driver:", (6, 88, 50)),
-        item(WC_STATIC, b"", WS_VISIBLE | 0x0001, (60, 88, 110, 8), ID_DRIVER as u16),
-        item(WC_BUTTON, b"~Job properties...", WS_VISIBLE | WS_TABSTOP | WS_GROUP, (172, 85, 60, 12), ID_JOBPROPS as u16),
-        book::label(b"Output port:", (6, 74, 60)),
-        item(WC_LISTBOX, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x4, (6, 30, 60, 42), ID_PORT as u16),
-        book::label(b"Port settings:", (72, 64, 80)),
-        item(WC_ENTRYFIELD, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x8, (74, 54, 120, 8), ID_SETTINGS as u16),
-        item(WC_BUTTON, b"~Set", WS_VISIBLE | WS_TABSTOP, (198, 51, 34, 12), ID_APPLY as u16),
-        item(WC_STATIC, b"", WS_VISIBLE | 0x0001 | 0x4000, (72, 30, 160, 20), ID_HINT as u16),
-        item(WC_BUTTON, b"~Default printer", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (6, 14, 120, 10), ID_DEFAULT as u16),
-    ], b"~Printer\0");
+    crate::printobj::wpAddQueueOptionsPage(o, nb);
+    crate::printobj::wpAddPrinterPortPage(o, nb);
+    crate::printobj::wpAddPrinterDriverPage(o, nb);
+    1
+}
+
+// The printer's pop-up menu: hold or release the queue, delete all its
+// jobs, make it the default printer.
+const ID_MHOLD: u32 = 0x7a01;
+const ID_MRELEASE: u32 = 0x7a02;
+const ID_MPURGE: u32 = 0x7a03;
+const ID_MDEFAULT: u32 = 0x7a04;
+
+#[repr(C)]
+struct MenuItem {
+    pos: i16,
+    style: u16,
+    attr: u16,
+    id: u16,
+    sub: u32,
+    item: u32,
+}
+
+extern "C" fn printer_modify_menu(o: usize, menu: u32, _cnr: u32, _pos: u32) -> u32 {
+    let Some(info) = queue_info(&queue_of(o)) else { return 1 };
+    let add = |id: u32, t: &[u8]| {
+        let mi = MenuItem { pos: -1, style: 0x0001, attr: 0, id: id as u16, sub: 0, item: 0 };
+        let t = z(t);
+        send(menu, 0x0180, &mi as *const MenuItem as u32, t.as_ptr() as u32);
+    };
+    if info.held {
+        add(ID_MRELEASE, b"~Release");
+    } else {
+        add(ID_MHOLD, b"~Hold");
+    }
+    add(ID_MPURGE, b"Delete ~all jobs...");
+    if info.flags & 4 == 0 {
+        add(ID_MDEFAULT, b"Set ~default");
+    }
+    1
+}
+
+extern "C" fn printer_menu_selected(o: usize, frame: u32, id: u32) -> u32 {
+    let q = z(&queue_of(o));
+    match id {
+        ID_MHOLD => unsafe {
+            SplHoldQueue(null(), q.as_ptr());
+        },
+        ID_MRELEASE => unsafe {
+            SplReleaseQueue(null(), q.as_ptr());
+        },
+        ID_MPURGE => {
+            if message(HWND_DESKTOP, b"Delete all jobs of this printer?", &one_line(&obj::title(o)), MB_YESNO | MB_WARNING) == MBID_YES {
+                unsafe { SplPurgeQueue(null(), q.as_ptr()) };
+            }
+        }
+        ID_MDEFAULT => set_default(&queue_of(o)),
+        _ => return som::call_parent(wps::ccd("WPPrinter"), wps::cd("WPObject"), m::WPObject::wpMenuItemSelected, &[o, frame as usize, id as usize]) as u32,
+    }
+    jobs_changed(o);
     1
 }
 
@@ -984,6 +908,8 @@ methods! {
     __m_printer_drag_over => printer_drag_over, 3;
     __m_printer_drop => printer_drop, 4;
     __m_printer_add_pages => printer_add_pages, 2;
+    __m_printer_modify_menu => printer_modify_menu, 4;
+    __m_printer_menu_selected => printer_menu_selected, 3;
     __m_wpQueryPrinterName => wpQueryPrinterName, 2;
     __m_wpSetPrinterName => wpSetPrinterName, 2;
     __m_wpDeleteAllJobs => wpDeleteAllJobs, 1;
@@ -1009,6 +935,8 @@ pub fn impl_printer() -> Impl {
             ("wpDragOver", __m_printer_drag_over as usize),
             ("wpDrop", __m_printer_drop as usize),
             ("wpAddSettingsPages", __m_printer_add_pages as usize),
+            ("wpModifyPopupMenu", __m_printer_modify_menu as usize),
+            ("wpMenuItemSelected", __m_printer_menu_selected as usize),
         ],
     }
 }

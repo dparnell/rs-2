@@ -173,7 +173,17 @@ extern "C" fn worker(param: u32) {
             if !fileops::exists(&dst) || (same && job.op == Op::Move) {
                 break;
             }
-            match ask(job, Question::Collision { dir: dir.clone(), name: name.clone(), dir_obj: fileops::is_dir(src) }) {
+            // The System object's Title page: rename or replace without
+            // asking (an object copied into its own folder is renamed).
+            let clash = crate::system::name_clash();
+            let answer = if clash == crate::system::NAMECLASH_RENAME || (clash == crate::system::NAMECLASH_REPLACE && same) {
+                Answer::Rename(free_name(dir, &name))
+            } else if clash == crate::system::NAMECLASH_REPLACE {
+                Answer::Replace
+            } else {
+                ask(job, Question::Collision { dir: dir.clone(), name: name.clone(), dir_obj: fileops::is_dir(src) })
+            };
+            match answer {
                 Answer::Rename(n) => name = n,
                 Answer::Replace if !same => {
                     replace = true;
@@ -459,11 +469,16 @@ extern "C" fn collision_proc(h: u32, m: u32, a: u32, b: u32) -> u32 {
     }
 }
 
+/// A name like `name` that no object in `dir` has.
+fn free_name(dir: &[u8], name: &[u8]) -> Vec<u8> {
+    let long = fileops::long_names(dir);
+    pmwin::drag::unique_name(name, long, |n| fileops::exists(&join(dir, n)))
+}
+
 /// The name collision dialog: an object of that name is in the target
 /// folder already.
 fn collision(owner: u32, dir: &[u8], name: &[u8], dir_obj: bool) -> Answer {
-    let long = fileops::long_names(dir);
-    let free = pmwin::drag::unique_name(name, long, |n| fileops::exists(&join(dir, n)));
+    let free = free_name(dir, name);
     let mut text = b"An object named \"".to_vec();
     text.extend_from_slice(name);
     text.extend_from_slice(b"\" is already in ");

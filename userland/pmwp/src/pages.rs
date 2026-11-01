@@ -391,6 +391,11 @@ extern "C" fn fs_add_pages(o: usize, nb: u32) -> u32 {
     wps::call("WPFileSystem", m::WPFileSystem::wpAddFile3Page, &[o, nb as usize]);
     wps::call("WPFileSystem", m::WPFileSystem::wpAddFile2Page, &[o, nb as usize]);
     wps::call("WPFileSystem", m::WPFileSystem::wpAddFile1Page, &[o, nb as usize]);
+    // The Menu tab in front of File (a folder's second Menu page first).
+    if wps::is(o, "WPFolder") {
+        wps::call("WPFolder", m::WPFolder::wpAddFolderMenu2Page, &[o, nb as usize]);
+    }
+    wps::call("WPFileSystem", m::WPFileSystem::wpAddFileMenuPage, &[o, nb as usize]);
     1
 }
 

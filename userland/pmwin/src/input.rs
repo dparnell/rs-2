@@ -87,6 +87,11 @@ pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
     if target == 0 {
         return;
     }
+    // A system-modal window (the Workplace Shell's lockup) takes all
+    // input: windows outside it get none.
+    if !in_sysmodal(target) {
+        return;
+    }
     // A window the pointer comes to starts with the arrow (its
     // WM_MOUSEMOVE processing may set another shape).
     if st().ptr_window != target {
@@ -331,6 +336,28 @@ fn hung_click(target: u32, p: Point, dbl: bool) -> bool {
     }
 }
 
+/// No system-modal window is set, or the window is it, in it or owned
+/// by it (its message boxes).
+pub fn in_sysmodal(h: u32) -> bool {
+    let s = st();
+    let m = s.sysmodal;
+    if m == 0 || !s.desk.exists(m) {
+        return true;
+    }
+    let mut cur = h;
+    for _ in 0..64 {
+        if cur == m {
+            return true;
+        }
+        let Some(w) = s.desk.get(cur) else { return false };
+        cur = if w.parent != HWND_DESKTOP && w.parent != 0 { w.parent } else { w.owner };
+        if cur == 0 || cur == HWND_DESKTOP {
+            return false;
+        }
+    }
+    false
+}
+
 /// Neither the window nor one of its ancestors is disabled.
 fn input_enabled(h: u32) -> bool {
     let s = st();
@@ -360,7 +387,7 @@ pub fn key(ev: &Input) {
     let up = ev.a >> 24 & 1 != 0;
     let shift = ev.flags as u32;
     if scan == 0x01 && shift & 0x4 != 0 {
-        if !up {
+        if !up && in_sysmodal(0) {
             crate::server::window_list();
         }
         return;
@@ -398,7 +425,10 @@ pub fn key(ev: &Input) {
     if vkey != 0 {
         set_key(s, vkey as usize, !up);
     }
-    let target = if s.focus != 0 { s.focus } else { s.active };
+    let mut target = if s.focus != 0 { s.focus } else { s.active };
+    if !in_sysmodal(target) {
+        target = s.sysmodal;
+    }
     if target != 0 && input_enabled(target) && crate::viowin::key(target, ev) {
         return;
     }
@@ -457,6 +487,9 @@ fn virtual_key(scan: u32, ch: u32) -> u32 {
 
 /// Handle one raw event (with the PM lock held).
 pub fn event(ev: &Input) {
+    if matches!(ev.kind, EV_MOUSE | EV_KEY) {
+        st().last_input = crate::state::now();
+    }
     match ev.kind {
         EV_MOUSE => mouse(Point::new(ev.a as i32, ev.b as i32), ev.flags as u8, (ev.flags >> 8) as u8, ev.time),
         EV_KEY => key(ev),
@@ -477,6 +510,17 @@ pub fn event(ev: &Input) {
         EV_HOSTSIZE => crate::display::host_size(),
         _ => {}
     }
+}
+
+/// Rs2QueryIdleTime() (rs2-private): milliseconds since the last
+/// keyboard or mouse input (the Workplace Shell's automatic lockup).
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2QueryIdleTime() -> u32 {
+    let s = st();
+    if s.last_input == 0 {
+        s.last_input = crate::state::now();
+    }
+    crate::state::now().wrapping_sub(s.last_input)
 }
 
 /// WinGetKeyState(hwndDesktop, vkey): 0x8000 (sign-extended, as IBM's

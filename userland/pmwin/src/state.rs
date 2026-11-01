@@ -155,7 +155,7 @@ pub struct State {
     pub focus: u32,
     pub active: u32,
     pub capture: u32,
-    /// WinSetSysModalWindow's window (recorded; input is not limited to it).
+    /// WinSetSysModalWindow's window: it alone gets input (input.rs).
     pub sysmodal: u32,
     pub drag: Option<Drag>,
     pub pointer: Point,
@@ -174,6 +174,14 @@ pub struct State {
     /// A window that takes minimized frames over (Rs2SetMinimizeViewer):
     /// they are hidden and it is told; 0: they become desktop icons.
     pub min_viewer: u32,
+    /// Rs2SetMinButtonType: frames show a hide button where they ask for
+    /// a minimize button (the System object's "Hide button" appearance).
+    pub hide_buttons: bool,
+    /// Rs2SetMinButtonType: minimizing hides the window (the System
+    /// object's "Hide window" minimize button behavior).
+    pub min_hides: bool,
+    /// When the last keyboard or mouse input came (ms, `now()`).
+    pub last_input: u32,
     /// The window the pointer was last over.
     pub ptr_window: u32,
     pub ptr_hidden: u32,
@@ -311,6 +319,9 @@ pub fn init(surface: Surface, colors256: bool) {
         held_ptr: 0,
         ptr_window: 0,
         min_viewer: 0,
+        hide_buttons: false,
+        min_hides: false,
+        last_input: 0,
         pp: BTreeMap::new(),
         sysvals: BTreeMap::new(),
         syscolors: BTreeMap::new(),

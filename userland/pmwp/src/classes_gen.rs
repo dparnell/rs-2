@@ -160,6 +160,24 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (362, 361, 363),
     },
     ClassDef {
+        name: "M_WPTransient",
+        parents: &["M_WPObject"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &["wpclsTransientPrivate1", "wpclsTransientPrivate2"],
+        ords: (338, 337, 339),
+    },
+    ClassDef {
+        name: "M_WPJob",
+        parents: &["M_WPTransient"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &["prtclsManageSelected"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPKeyboard",
         parents: &["M_WPAbstract"],
         meta: None,
@@ -241,6 +259,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (389, 388, 390),
     },
     ClassDef {
+        name: "M_WPPdr",
+        parents: &["M_WPTransient"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPPif",
         parents: &["M_WPDataFile"],
         meta: None,
@@ -259,6 +286,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (365, 364, 366),
     },
     ClassDef {
+        name: "M_WPPort",
+        parents: &["M_WPTransient"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPPrinter",
         parents: &["M_WPAbstract"],
         meta: None,
@@ -275,6 +311,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (344, 343, 345),
+    },
+    ClassDef {
+        name: "M_WPQdr",
+        parents: &["M_WPTransient"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "M_WPRootFolder",
@@ -331,6 +376,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
+        name: "M_WPSpool",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPStartup",
         parents: &["M_WPFolder"],
         meta: None,
@@ -356,15 +410,6 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (320, 319, 321),
-    },
-    ClassDef {
-        name: "M_WPTransient",
-        parents: &["M_WPObject"],
-        meta: None,
-        major: 1,
-        minor: 2,
-        methods: &["wpclsTransientPrivate1", "wpclsTransientPrivate2"],
-        ords: (338, 337, 339),
     },
     ClassDef {
         name: "M_WPUrl",
@@ -574,6 +619,24 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (62, 61, 63),
     },
     ClassDef {
+        name: "WPTransient",
+        parents: &["WPObject"],
+        meta: Some("M_WPTransient"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (41, 40, 42),
+    },
+    ClassDef {
+        name: "WPJob",
+        parents: &["WPTransient"],
+        meta: Some("M_WPJob"),
+        major: 1,
+        minor: 1,
+        methods: &["prtGetJobID", "prtSetJobID", "prtGetJobInfo2", "prtSetJobInfo2", "prtGetJobInfo3", "prtSetJobInfo3", "prtFreeJobInfo2", "prtFreeJobInfo3", "prtGetPDObject", "prtSetPDObject", "prtGetDocument", "prtSetDocument", "prtDupJobInfo2", "prtDupJobInfo3", "wpDeleteJob", "wpHoldJob", "wpReleaseJob", "wpPrintJobNext", "wpStartJobAgain", "wpQueryPrintObject", "wpQueryJobId", "wpQueryJobFile", "wpQueryJobType", "prtGetJobInfo4", "prtSetJobInfo4", "prtFreeJobInfo4", "prtDupJobInfo4", "wpMoveJobObject", "prtSetOutputPortname", "prtSetJobState", "prtQueryJobState"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPKeyboard",
         parents: &["WPAbstract"],
         meta: Some("M_WPKeyboard"),
@@ -608,15 +671,6 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &["wpFindMinWindow"],
         ords: (457, 456, 458),
-    },
-    ClassDef {
-        name: "WPTransient",
-        parents: &["WPObject"],
-        meta: Some("M_WPTransient"),
-        major: 1,
-        minor: 2,
-        methods: &[],
-        ords: (41, 40, 42),
     },
     ClassDef {
         name: "WPMinWindow",
@@ -673,6 +727,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (410, 409, 411),
     },
     ClassDef {
+        name: "WPPdr",
+        parents: &["WPTransient"],
+        meta: Some("M_WPPdr"),
+        major: 1,
+        minor: 1,
+        methods: &["prtGetPDriverInfo", "prtSetPDriverInfo", "prtGetPDriverName", "prtGetPDeviceName", "prtSetPdrIcon", "prtSetPDriverDiscardhwndDlg", "prtSetPDriverInstallhwndDlg", "prtGetDriverFilename", "prtSetPdrState", "prtGetPdrState"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPPif",
         parents: &["WPDataFile"],
         meta: Some("M_WPPif"),
@@ -691,6 +754,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (65, 64, 66),
     },
     ClassDef {
+        name: "WPPort",
+        parents: &["WPTransient"],
+        meta: Some("M_WPPort"),
+        major: 1,
+        minor: 1,
+        methods: &["prtGetPortInfo", "prtSetPortInfo", "prtSettings", "prtGetDeviceObject", "prtSetPortDiscardhwndDlg", "prtSetPortInstallhwndDlg", "prtPrintPort", "prtSetIcon", "prtChangePort", "prtGetStatus", "prtGetComputername", "prtSetStatus", "prtGetPDSelf", "prtSetPDSelf", "prtSetUlStatus", "prtGetUlStatus", "prtGetPortName", "prtGetPanelList", "prtIncThreadCnt", "prtDecThreadCnt", "prtSetDevicename"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPPrinter",
         parents: &["WPAbstract"],
         meta: Some("M_WPPrinter"),
@@ -707,6 +779,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &["wpAddProgramPage", "wpAddProgramSessionPage", "wpQueryProgDetails", "wpSetProgDetails", "wpProgramPrivate1", "wpProgramPrivate2", "wpAddProgramAssociationPage", "wpSetProgIcon", "wpQueryAssociationFilter", "wpQueryAssociationType", "wpSetAssociationFilter", "wpSetAssociationType", "wpQueryProgramAssociations", "wpSetProgramAssociations", "wpQueryWarnBeforeStart", "wpSetWarnBeforeStart", "undefined1", "wpSetDefaultBidiSettings", "wpQueryDefaultBidiSettings", "SetUpdateIndicator", "QueryUpdateIndicator", "wpSetBidiValues", "wpQueryBidiValues", "SetNeedSave", "QueryNeedSave", "undefined6", "wpInsertBidiPage", "wpSaveBidiState", "wpRestoreBidiState", "wpBidiSetup", "wpInitBidiData", "_get_hwndSettingsNotebook", "_set_hwndSettingsNotebook", "wpSettingsNotebook", "wpSetDefaultCpSettings", "wpSetCpValues", "wpQueryCpValues", "wpSaveCpState", "wpRestoreCpState", "wpInitCpData", "wpUndoCpSettings"],
         ords: (47, 46, 48),
+    },
+    ClassDef {
+        name: "WPQdr",
+        parents: &["WPTransient"],
+        meta: Some("M_WPQdr"),
+        major: 1,
+        minor: 1,
+        methods: &["prtGetQDriverInfo", "prtSetQDriverInfo", "prtSetQdrIcon", "prtSetQDriverDiscardhwndDlg", "prtSetQDriverInstallhwndDlg"],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "WPRootFolder",
@@ -760,6 +841,15 @@ pub static CLASSES: &[ClassDef] = &[
         major: 1,
         minor: 2,
         methods: &["wpAddSoundWarningBeepPage", "wpAddSoundSchemePage"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPSpool",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPSpool"),
+        major: 1,
+        minor: 1,
+        methods: &["wpAddSetPathPage", "wpAddSetPriorityPage", "pdvQueryXSplitBarAllJobs", "pdvSetXSplitBarAllJobs", "wpAddSetPortRedirPage", "wpAddSetViewPage", "splSetDetailsColumnVisibility", "splIsDetailsColumnVisible", "wpAddSetSyncPage"],
         ords: (0, 0, 0),
     },
     ClassDef {
@@ -912,6 +1002,13 @@ pub mod m {
     }
     pub mod M_WPIcon {
     }
+    pub mod M_WPTransient {
+        pub const wpclsTransientPrivate1: usize = 0;
+        pub const wpclsTransientPrivate2: usize = 1;
+    }
+    pub mod M_WPJob {
+        pub const prtclsManageSelected: usize = 0;
+    }
     pub mod M_WPKeyboard {
     }
     pub mod M_WPLaunchPad {
@@ -930,13 +1027,19 @@ pub mod m {
     }
     pub mod M_WPNetwork {
     }
+    pub mod M_WPPdr {
+    }
     pub mod M_WPPif {
     }
     pub mod M_WPPointer {
     }
+    pub mod M_WPPort {
+    }
     pub mod M_WPPrinter {
     }
     pub mod M_WPProgram {
+    }
+    pub mod M_WPQdr {
     }
     pub mod M_WPRootFolder {
     }
@@ -950,15 +1053,13 @@ pub mod m {
     }
     pub mod M_WPSound {
     }
+    pub mod M_WPSpool {
+    }
     pub mod M_WPStartup {
     }
     pub mod M_WPSystem {
     }
     pub mod M_WPTemplates {
-    }
-    pub mod M_WPTransient {
-        pub const wpclsTransientPrivate1: usize = 0;
-        pub const wpclsTransientPrivate2: usize = 1;
     }
     pub mod M_WPUrl {
     }
@@ -1433,6 +1534,41 @@ pub mod m {
     }
     pub mod WPIcon {
     }
+    pub mod WPTransient {
+    }
+    pub mod WPJob {
+        pub const prtGetJobID: usize = 0;
+        pub const prtSetJobID: usize = 1;
+        pub const prtGetJobInfo2: usize = 2;
+        pub const prtSetJobInfo2: usize = 3;
+        pub const prtGetJobInfo3: usize = 4;
+        pub const prtSetJobInfo3: usize = 5;
+        pub const prtFreeJobInfo2: usize = 6;
+        pub const prtFreeJobInfo3: usize = 7;
+        pub const prtGetPDObject: usize = 8;
+        pub const prtSetPDObject: usize = 9;
+        pub const prtGetDocument: usize = 10;
+        pub const prtSetDocument: usize = 11;
+        pub const prtDupJobInfo2: usize = 12;
+        pub const prtDupJobInfo3: usize = 13;
+        pub const wpDeleteJob: usize = 14;
+        pub const wpHoldJob: usize = 15;
+        pub const wpReleaseJob: usize = 16;
+        pub const wpPrintJobNext: usize = 17;
+        pub const wpStartJobAgain: usize = 18;
+        pub const wpQueryPrintObject: usize = 19;
+        pub const wpQueryJobId: usize = 20;
+        pub const wpQueryJobFile: usize = 21;
+        pub const wpQueryJobType: usize = 22;
+        pub const prtGetJobInfo4: usize = 23;
+        pub const prtSetJobInfo4: usize = 24;
+        pub const prtFreeJobInfo4: usize = 25;
+        pub const prtDupJobInfo4: usize = 26;
+        pub const wpMoveJobObject: usize = 27;
+        pub const prtSetOutputPortname: usize = 28;
+        pub const prtSetJobState: usize = 29;
+        pub const prtQueryJobState: usize = 30;
+    }
     pub mod WPKeyboard {
         pub const wpAddKeyboardMappingsPage: usize = 0;
         pub const wpAddKeyboardTimingPage: usize = 1;
@@ -1472,8 +1608,6 @@ pub mod m {
     pub mod WPMinWinViewer {
         pub const wpFindMinWindow: usize = 0;
     }
-    pub mod WPTransient {
-    }
     pub mod WPMinWindow {
     }
     pub mod WPMouse {
@@ -1500,9 +1634,44 @@ pub mod m {
     }
     pub mod WPNetwork {
     }
+    pub mod WPPdr {
+        pub const prtGetPDriverInfo: usize = 0;
+        pub const prtSetPDriverInfo: usize = 1;
+        pub const prtGetPDriverName: usize = 2;
+        pub const prtGetPDeviceName: usize = 3;
+        pub const prtSetPdrIcon: usize = 4;
+        pub const prtSetPDriverDiscardhwndDlg: usize = 5;
+        pub const prtSetPDriverInstallhwndDlg: usize = 6;
+        pub const prtGetDriverFilename: usize = 7;
+        pub const prtSetPdrState: usize = 8;
+        pub const prtGetPdrState: usize = 9;
+    }
     pub mod WPPif {
     }
     pub mod WPPointer {
+    }
+    pub mod WPPort {
+        pub const prtGetPortInfo: usize = 0;
+        pub const prtSetPortInfo: usize = 1;
+        pub const prtSettings: usize = 2;
+        pub const prtGetDeviceObject: usize = 3;
+        pub const prtSetPortDiscardhwndDlg: usize = 4;
+        pub const prtSetPortInstallhwndDlg: usize = 5;
+        pub const prtPrintPort: usize = 6;
+        pub const prtSetIcon: usize = 7;
+        pub const prtChangePort: usize = 8;
+        pub const prtGetStatus: usize = 9;
+        pub const prtGetComputername: usize = 10;
+        pub const prtSetStatus: usize = 11;
+        pub const prtGetPDSelf: usize = 12;
+        pub const prtSetPDSelf: usize = 13;
+        pub const prtSetUlStatus: usize = 14;
+        pub const prtGetUlStatus: usize = 15;
+        pub const prtGetPortName: usize = 16;
+        pub const prtGetPanelList: usize = 17;
+        pub const prtIncThreadCnt: usize = 18;
+        pub const prtDecThreadCnt: usize = 19;
+        pub const prtSetDevicename: usize = 20;
     }
     pub mod WPPrinter {
         pub const pdvNew: usize = 0;
@@ -1638,6 +1807,13 @@ pub mod m {
         pub const wpInitCpData: usize = 39;
         pub const wpUndoCpSettings: usize = 40;
     }
+    pub mod WPQdr {
+        pub const prtGetQDriverInfo: usize = 0;
+        pub const prtSetQDriverInfo: usize = 1;
+        pub const prtSetQdrIcon: usize = 2;
+        pub const prtSetQDriverDiscardhwndDlg: usize = 3;
+        pub const prtSetQDriverInstallhwndDlg: usize = 4;
+    }
     pub mod WPRootFolder {
         pub const wpRootFolderPrivate1: usize = 0;
         pub const wpRefresh: usize = 1;
@@ -1656,6 +1832,17 @@ pub mod m {
     pub mod WPSound {
         pub const wpAddSoundWarningBeepPage: usize = 0;
         pub const wpAddSoundSchemePage: usize = 1;
+    }
+    pub mod WPSpool {
+        pub const wpAddSetPathPage: usize = 0;
+        pub const wpAddSetPriorityPage: usize = 1;
+        pub const pdvQueryXSplitBarAllJobs: usize = 2;
+        pub const pdvSetXSplitBarAllJobs: usize = 3;
+        pub const wpAddSetPortRedirPage: usize = 4;
+        pub const wpAddSetViewPage: usize = 5;
+        pub const splSetDetailsColumnVisibility: usize = 6;
+        pub const splIsDetailsColumnVisible: usize = 7;
+        pub const wpAddSetSyncPage: usize = 8;
     }
     pub mod WPStartup {
     }

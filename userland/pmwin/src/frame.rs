@@ -183,7 +183,15 @@ fn setup(frame: u32, fcd: u32) {
     }
 }
 
+/// The buttons a frame shows for its create flags: with the System
+/// object's "Hide button" appearance (Rs2SetMinButtonType) a hide button
+/// where a minimize button is asked for.
+pub fn button_fcf(fcf: u32) -> u32 {
+    if st().hide_buttons && fcf & FCF_MINBUTTON != 0 { (fcf & !FCF_MINBUTTON) | FCF_HIDEBUTTON } else { fcf }
+}
+
 fn create_controls(frame: u32, fcf: u32, title: &[u8], hmod: u32, id: u32) {
+    let fcf = button_fcf(fcf);
     let vis = ws::VISIBLE;
     if fcf & FCF_TITLEBAR != 0 {
         win::create(frame, b"#9", title, vis, Rect::default(), frame, FID_TITLEBAR, 0);
@@ -479,7 +487,7 @@ pub fn draw_minimized(c: &mut Canvas, icon: u32, title: &[u8], active: bool) {
 fn sysmenu_state(h: u32) {
     let st_ = ctl::style(h);
     let (min, max) = (st_ & ws::MINIMIZED != 0, st_ & ws::MAXIMIZED != 0);
-    let f = fcf(h);
+    let f = button_fcf(fcf(h));
     let sys = WinWindowFromID(h, FID_SYSMENU);
     menu::enable_item(sys, SC_RESTORE, min || max);
     menu::enable_item(sys, SC_MINIMIZE, !min && f & FCF_MINBUTTON != 0);
@@ -513,6 +521,9 @@ pub fn minimize(h: u32) {
     let kids: alloc::vec::Vec<u32> = w.children.iter().copied().filter(|&k| s.desk.get(k).is_some_and(|x| x.visible_style())).collect();
     let viewer = s.min_viewer != 0 && s.desk.exists(s.min_viewer);
     let slot = min_slot(h);
+    let from = Rect::new(pos.0, pos.1, pos.0 + pos.2, pos.1 + pos.3);
+    let mid = from.left + from.width() / 2;
+    crate::animate::zoom(from, if viewer { Rect::new(mid - 16, 0, mid + 16, 32) } else { slot });
     minmax_frame(h, SWP_MINIMIZE, (slot.left, slot.bottom, slot.width(), slot.height()));
     let s = st();
     for &k in &kids {
@@ -544,6 +555,54 @@ pub fn minimize(h: u32) {
     }
 }
 
+/// Hide a frame (the hide button, SC_HIDE): it zooms away to the
+/// bottom of the screen when windows are animated.
+pub fn hide(h: u32) {
+    if let Some(w) = st().desk.get(h).filter(|w| w.visible_style()) {
+        let from = Rect::new(w.x, w.y, w.x + w.cx, w.y + w.cy);
+        let mid = from.left + from.width() / 2;
+        crate::animate::zoom(from, Rect::new(mid - 16, 0, mid + 16, 32));
+    }
+    win::show(h, false);
+}
+
+/// Rs2SetMinButtonType(fHideButton, fHideWindow) (rs2-private): the
+/// System object's Window page. With fHideButton frames show a hide
+/// button where they ask for a minimize button (frames made from now on,
+/// and the open ones); with fHideWindow minimizing hides the window
+/// instead of minimizing it. Returns the previous flags (bit 0, bit 1).
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2SetMinButtonType(hide_button: u32, hide_window: u32) -> u32 {
+    let s = st();
+    let prev = s.hide_buttons as u32 | (s.min_hides as u32) << 1;
+    let changed = s.hide_buttons != (hide_button != 0);
+    s.hide_buttons = hide_button != 0;
+    s.min_hides = hide_window != 0;
+    if changed {
+        // The open frames that ask for a minimize button get the buttons
+        // anew.
+        let frames: alloc::vec::Vec<u32> = st().frames.iter().filter(|(_, f)| f.fcf & FCF_MINBUTTON != 0).map(|(&h, _)| h).collect();
+        for h in frames {
+            let mm = WinWindowFromID(h, FID_MINMAX);
+            if mm == 0 {
+                continue;
+            }
+            let max = ctl::style(h) & ws::MAXIMIZED != 0;
+            crate::win::WinDestroyWindow(mm);
+            menu::create_minmax(h, button_fcf(fcf(h)));
+            if max {
+                menu::replace_id(WinWindowFromID(h, FID_MINMAX), SC_MAXIMIZE, SC_RESTORE);
+            }
+            let sys = WinWindowFromID(h, FID_SYSMENU);
+            menu::enable_item(sys, SC_HIDE, button_fcf(fcf(h)) & FCF_HIDEBUTTON != 0);
+            sysmenu_state(h);
+            layout(h);
+            st().desk.invalidate(h, None, true);
+        }
+    }
+    prev
+}
+
 /// Restore a minimized frame (or a maximized one).
 pub fn restore(h: u32) {
     if !is_minimized(h) {
@@ -551,6 +610,12 @@ pub fn restore(h: u32) {
         return;
     }
     let Some(m) = st().frames.get_mut(&h).and_then(|f| f.min.take()) else { return };
+    let to = Rect::new(m.pos.0, m.pos.1, m.pos.0 + m.pos.2, m.pos.1 + m.pos.3);
+    let from = match st().desk.get(h) {
+        Some(w) if !m.viewer => Rect::new(w.x, w.y, w.x + w.cx, w.y + w.cy),
+        _ => Rect::new(to.left + to.width() / 2 - 16, 0, to.left + to.width() / 2 + 16, 32),
+    };
+    crate::animate::zoom(from, to);
     if !m.viewer {
         let cur = st().desk.get(h).map(|w| (w.x, w.y));
         if let Some(f) = st().frames.get_mut(&h) {
@@ -733,6 +798,7 @@ pub fn maximize(h: u32, on: bool) {
             w.style &= !ws::MAXIMIZED;
         }
     }
+    crate::animate::zoom(Rect::new(cur.0, cur.1, cur.0 + cur.2, cur.1 + cur.3), Rect::new(target.0, target.1, target.0 + target.2, target.1 + target.3));
     let mm = WinWindowFromID(h, FID_MINMAX);
     if on {
         menu::replace_id(mm, SC_MAXIMIZE, SC_RESTORE);
@@ -959,8 +1025,10 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 }
                 SC_MAXIMIZE => maximize(h, true),
                 SC_RESTORE => restore(h),
+                // "Hide window" as the minimize button's behavior.
+                SC_MINIMIZE if st().min_hides => hide(h),
                 SC_MINIMIZE => minimize(h),
-                SC_HIDE => win::show(h, false),
+                SC_HIDE => hide(h),
                 SC_APPMENU => menu::start_bar(WinWindowFromID(h, FID_MENU)),
                 SC_SYSMENU => menu::start_bar(WinWindowFromID(h, FID_SYSMENU)),
                 _ => {}
