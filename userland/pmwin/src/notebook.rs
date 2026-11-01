@@ -283,9 +283,18 @@ fn turn(h: u32, id: u32) -> bool {
     if data(h).and_then(|d| d.book.page(id)).is_some_and(|p| p.dlg.is_some() && p.hwnd == 0) {
         load_dialog(h, id);
     }
-    show_top(h, id);
+    // As IBM's GotoPage: the new page is the top one when BKN_PAGESELECTED
+    // goes out, and its window is placed and shown after it (Multimedia
+    // Setup shrinks the new page's window there and the notebook sizes it
+    // again).
+    let Some(d) = data(h) else { return false };
+    let old_w = d.book.page(cur).map_or(0, |p| p.hwnd);
+    d.book.top = id;
     let mut ps = PageSelect { book: h, cur, new: id };
     send(ctl::owner(h), WM_CONTROL, mp(ctl::id(h), BKN_PAGESELECTED), &mut ps as *mut PageSelect as u32);
+    if data(h).is_some_and(|d| d.book.top == id) {
+        show_new_top(h, old_w);
+    }
     true
 }
 
@@ -294,6 +303,11 @@ fn show_top(h: u32, id: u32) {
     let Some(d) = data(h) else { return };
     let old_w = d.book.page(d.book.top).map_or(0, |p| p.hwnd);
     d.book.top = id;
+    show_new_top(h, old_w);
+}
+
+/// Show the top page's window in place of `old_w`.
+fn show_new_top(h: u32, old_w: u32) {
     let f = st().focus;
     // The focus was in the page going away: to the notebook.
     if old_w != 0 && f != 0 && st().desk.is_ancestor(old_w, f) {
