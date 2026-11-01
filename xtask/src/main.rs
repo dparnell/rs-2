@@ -613,6 +613,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("registry", "OS2\\DLL\\REGISTRY.DLL"),
         ("pmwinx", "OS2\\DLL\\PMWINX.DLL"),
         ("pmbidi", "OS2\\DLL\\PMBIDI.DLL"),
+        ("pmddeml", "OS2\\DLL\\PMDDEML.DLL"),
         ("thailib", "OS2\\DLL\\THAILIB.DLL"),
         ("pmwp", "OS2\\DLL\\PMWP.DLL"),
         ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
