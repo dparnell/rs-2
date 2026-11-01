@@ -106,8 +106,9 @@ fn list_windows(parent: u32, depth: usize) {
         unsafe { WinQueryWindowPos(h, swp.as_mut_ptr()) };
         let style = unsafe { WinQueryWindowULong(h, -2) };
         let id = unsafe { WinQueryWindowUShort(h, -1) };
+        let owner = unsafe { owner::WinQueryWindow(h, 4) };
         let line = alloc::format!(
-            "{:w$}{h:#x} {} id {id:#x} '{}' ({}, {}) {}x{} style {style:#x}\0",
+            "{:w$}{h:#x} {} id {id:#x} '{}' ({}, {}) {}x{} style {style:#x} owner {owner:#x}\0",
             "",
             core::str::from_utf8(&class[..n]).unwrap_or("?"),
             core::str::from_utf8(&text[..t]).unwrap_or("?"),
@@ -123,7 +124,7 @@ fn list_windows(parent: u32, depth: usize) {
             fn Rs2DebugTrace(psz: *const u8) -> u32;
         }
         unsafe { Rs2DebugTrace(line.as_ptr()) };
-        if depth < 3 {
+        if depth < 5 {
             list_windows(h, depth + 1);
         }
     }

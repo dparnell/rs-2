@@ -355,6 +355,7 @@ WinQueryUpdateRect=__a_WinQueryUpdateRect @831
 WinInvertRect=__a_WinInvertRect @767
 WinGetScreenPS=__a_WinGetScreenPS @759
 WinTrackRect=__a_WinTrackRect @890
+WinXxCreateHeap2=__a_WinXxCreateHeap2 @1072
 WinQueueFromID=__a_WinQueueFromID @993
 WinThreadAssocQueue=__a_WinThreadAssocQueue @994
 WinQuerySendMsg=__a_WinQuerySendMsg @990

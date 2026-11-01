@@ -35,7 +35,7 @@ unsafe extern "C" {
     #[link_name = "PMWIN.907"]
     fn WinCreateMenu(parent: u32, pmt: *const u8) -> u32;
     #[link_name = "PMWIN.834"]
-    fn WinQueryWindow(h: u32, cmd: i32) -> u32;
+    pub fn WinQueryWindow(h: u32, cmd: i32) -> u32;
     #[link_name = "PMWIN.775"]
     fn WinIsWindowVisible(h: u32) -> u32;
 }

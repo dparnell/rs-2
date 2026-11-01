@@ -1,6 +1,6 @@
 //! Self-checks of PMWIN's standard controls and clipboard: the MLE,
-//! entry fields, combo boxes, spin buttons, sliders, value sets, the
-//! clipboard (also from a second process: CTLTEST runs itself with
+//! entry fields, combo boxes, spin buttons, sliders, value sets, circular
+//! sliders, the clipboard (also from a second process: CTLTEST runs itself with
 //! CHILD), atoms, a few helpers and the 16-bit PM API (pm16.rs). Each
 //! check prints PASS or FAIL;
 //! the last line is "ctltest done: N failure(s)" and the exit code N.
@@ -114,6 +114,8 @@ unsafe extern "C" {
     fn GpiDestroyPS(hps: u32) -> u32;
     #[link_name = "PMGPI.604"]
     fn DevCloseDC(hdc: u32) -> u32;
+    #[link_name = "PMCTLS.24"]
+    fn WinRegisterCircularSlider() -> u32;
 }
 
 static FAILS: AtomicU32 = AtomicU32::new(0);
@@ -389,6 +391,62 @@ fn spin_slider_valueset_checks(client: u32) {
     send(vs, 0x0379, mp(2, 3), 0); // VM_SELECTITEM
     check("VM_SELECTITEM / VM_QUERYSELECTEDITEM (VN_SELECT)", send(vs, 0x0378, 0, 0) == mp(2, 3) && noted(140, 120));
     unsafe { WinDestroyWindow(vs) };
+    circular_slider_checks(client);
+}
+
+/// The circular slider (WC_CIRCULARSLIDER, as IBM's PMCTLS has it), which
+/// the multimedia programs' SW.DLL uses: WinRegisterCircularSlider, the
+/// default ranges, the CSM_* messages and CSN_* notifications, keys.
+fn circular_slider_checks(client: u32) {
+    const CSM_QUERYRANGE: u32 = 0x053d;
+    const CSM_SETRANGE: u32 = 0x053e;
+    const CSM_QUERYVALUE: u32 = 0x053f;
+    const CSM_SETVALUE: u32 = 0x0540;
+    const CSM_QUERYRADIUS: u32 = 0x0541;
+    const CSM_SETINCREMENT: u32 = 0x0542;
+    const CSM_QUERYINCREMENT: u32 = 0x0543;
+    const CSN_CHANGED: u32 = 0x0549;
+    const CSN_TRACKING: u32 = 0x054a;
+    check("WinRegisterCircularSlider", unsafe { WinRegisterCircularSlider() } != 0);
+    let cs = create(client, 0x41, b"~Volume", 0x0002_0000, (0, 0, 120, 120), 150, null());
+    check("a WC_CIRCULARSLIDER window", cs != 0);
+    let (mut lo, mut hi, mut v) = (-1i16, -1i16, -1i16);
+    send(cs, CSM_QUERYRANGE, &mut lo as *mut i16 as u32, &mut hi as *mut i16 as u32);
+    send(cs, CSM_QUERYVALUE, &mut v as *mut i16 as u32, 0);
+    check("the default range 0-30 and value 15", (lo, hi, v) == (0, 30, 15));
+    check("CSM_SETRANGE refuses an empty range", send(cs, CSM_SETRANGE, 5, 5) == 0 && send(cs, CSM_SETRANGE, 9, 2) == 0);
+    check("CSM_SETRANGE", send(cs, CSM_SETRANGE, 0, 100) == 1);
+    send(cs, CSM_QUERYRANGE, &mut lo as *mut i16 as u32, &mut hi as *mut i16 as u32);
+    check("CSM_QUERYRANGE", (lo, hi) == (0, 100));
+    check("CSM_SETVALUE outside the range fails", send(cs, CSM_SETVALUE, 101, 0) == 0);
+    notes().clear();
+    check("CSM_SETVALUE (CSN_CHANGED)", send(cs, CSM_SETVALUE, 40, 0) == 1 && noted(150, CSN_CHANGED));
+    send(cs, CSM_QUERYVALUE, &mut v as *mut i16 as u32, 0);
+    check("CSM_QUERYVALUE", v == 40);
+    check("CSM_SETINCREMENT refuses 0", send(cs, CSM_SETINCREMENT, 0, 10) == 0);
+    check("CSM_SETINCREMENT", send(cs, CSM_SETINCREMENT, 5, 10) == 1);
+    let (mut inc, mut tick) = (0i16, 0i16);
+    send(cs, CSM_QUERYINCREMENT, &mut inc as *mut i16 as u32, &mut tick as *mut i16 as u32);
+    check("CSM_QUERYINCREMENT", (inc, tick) == (5, 10));
+    let mut r = 0u16;
+    send(cs, CSM_QUERYRADIUS, &mut r as *mut u16 as u32, 0);
+    check("CSM_QUERYRADIUS (the window less the text line and buttons)", r > 10 && r < 60);
+    // WM_CHAR, KC_VIRTUALKEY: VK_RIGHT steps up by the scroll increment,
+    // VK_LEFT down (CSN_TRACKING, then CSN_CHANGED).
+    notes().clear();
+    send(cs, 0x007a, 0x0002, 0x0017 << 16);
+    send(cs, CSM_QUERYVALUE, &mut v as *mut i16 as u32, 0);
+    check("VK_RIGHT adds the scroll increment", v == 45 && noted(150, CSN_TRACKING) && noted(150, CSN_CHANGED));
+    send(cs, 0x007a, 0x0002, 0x0015 << 16);
+    send(cs, 0x007a, 0x0002, 0x0015 << 16);
+    send(cs, CSM_QUERYVALUE, &mut v as *mut i16 as u32, 0);
+    check("VK_LEFT takes it off", v == 35);
+    unsafe { WinDestroyWindow(cs) };
+    // CSS_360: 0-60 round, without buttons and number.
+    let round = create(client, 0x41, b"", 0x0010, (0, 0, 100, 100), 151, null());
+    send(round, CSM_QUERYRANGE, &mut lo as *mut i16 as u32, &mut hi as *mut i16 as u32);
+    check("CSS_360: the range 0-60", (lo, hi) == (0, 60));
+    unsafe { WinDestroyWindow(round) };
 }
 
 // ---- Clipboard and atoms ----

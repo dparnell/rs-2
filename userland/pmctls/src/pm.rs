@@ -8,6 +8,16 @@ use alloc::vec::Vec;
 unsafe extern "C" {
     #[link_name = "PMWIN.922"]
     pub fn WinCreateDlg(parent: u32, owner: u32, proc_: u32, pdlgt: *const u8, params: u32) -> u32;
+    #[link_name = "PMWIN.757"]
+    pub fn WinGetPS(hwnd: u32) -> u32;
+    #[link_name = "PMWIN.848"]
+    pub fn WinReleasePS(hps: u32) -> u32;
+    #[link_name = "PMWIN.913"]
+    pub fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut i32, fg: i32, bg: i32, fl: u32) -> i32;
+    #[link_name = "PMGPI.453"]
+    pub fn GpiQueryFontMetrics(hps: u32, cb: i32, pfm: *mut i32) -> u32;
+    #[link_name = "PMWIN.924"]
+    pub fn WinLoadDlg(parent: u32, owner: u32, proc_: u32, hmod: u32, id: u32, params: u32) -> u32;
     #[link_name = "PMWIN.796"]
     pub fn WinProcessDlg(hwnd: u32) -> u32;
     #[link_name = "PMWIN.728"]

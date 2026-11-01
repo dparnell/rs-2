@@ -7,3 +7,4 @@ Rs2FontSampleProc=__a_Rs2FontSampleProc @9000
 Rs2FontDlgProc=__a_Rs2FontDlgProc @9002
 WinDefFontDlgProc=__a_WinDefFontDlgProc @3
 WinFontDlg=__a_WinFontDlg @2
+WinRegisterCircularSlider=__a_WinRegisterCircularSlider @24

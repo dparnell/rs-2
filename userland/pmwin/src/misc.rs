@@ -817,3 +817,18 @@ pub extern "C" fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32 {
     }
     ok as u32
 }
+
+/// PMMERGE 5475 (PMWIN 1072; IBM's tables give it no name, its symbol is
+/// WinXxCreateHeap2): PM's own heap for a program, with pools of small
+/// blocks of the sizes listed (OS/2's REGCONV makes one at start-up and
+/// never uses it again). rs2 gives the heap's memory (`cb` bytes of
+/// committed private memory); 0 if there is none.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinXxCreateHeap2(_sel: u32, cb: u32, _fl: u32, _cpools: u32, _sizes: u32) -> u32 {
+    let mut p: *mut u8 = core::ptr::null_mut();
+    // PAG_READ | PAG_WRITE | PAG_COMMIT.
+    if unsafe { os2::DosAllocMem(&mut p, cb.max(0x1000), 0x13) } != 0 {
+        return 0;
+    }
+    p as u32
+}

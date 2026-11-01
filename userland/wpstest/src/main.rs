@@ -10,8 +10,9 @@
 //! them. `WPSTEST CLASS dll class` registers a class DLL (one of the
 //! Toolkit's samples, built for IBM's PMWP) and makes an object of it.
 //! `WPSTEST STARTUP` puts the System Editor in a Startup folder (for
-//! PMSHELL to start). `WPSTEST REMOTE`, with PMSHELL running, makes and changes an object
-//! on its desktop from this process; `WPSTEST REGISTER dll class` registers
+//! PMSHELL to start). `WPSTEST REMOTE`, with PMSHELL running, makes and changes objects
+//! on its desktop from this process (a program, a folder and a shadow in
+//! it), `WPSTEST SHELLREMOTE` starts PMSHELL first; `WPSTEST REGISTER dll class` registers
 //! a class DLL in the running shell and puts an object of it on the desktop.
 //! `WPSTEST OLDDESKTOP` marks the desktop as rs2's version 8 and `WPSTEST
 //! DUPES`, after the shell has started again, checks that the upgrade made
@@ -731,6 +732,45 @@ fn remote() {
     let t = z(b"TITLE=Made Remotely");
     check("WinSetObjectData in the shell", unsafe { WinSetObjectData(h, t.as_ptr()) } != 0);
     check("WinQueryObject <WP_DESKTOP>", query(b"<WP_DESKTOP>") >> 16 == 3);
+    // Any class, in a folder named by its object ID: OS/2's Mahjongg puts
+    // a shadow of a saved game in its folder (<MAH_FOLDER>) so.
+    let f = create(b"WPFolder", b"Remote Folder", b"OBJECTID=<RS2_REMOTEF>", b"<WP_DESKTOP>");
+    check("a folder made in the shell", f >> 16 == 3 && query(b"<RS2_REMOTEF>") == f);
+    let sh = create(b"WPShadow", b"CONFIG.SYS", b"SHADOWID=C:\\CONFIG.SYS;OBJECTID=<RS2_REMOTES>", b"<RS2_REMOTEF>");
+    check("a shadow made in that folder", sh >> 16 == 2 && query(b"<RS2_REMOTES>") == sh);
+    let mut path = [0u8; 260];
+    let ok = unsafe { WinQueryObjectPath(f, path.as_mut_ptr(), path.len() as u32) } != 0;
+    check("the folder's path from the shell", ok && path[0] != 0);
+    check("WinDestroyObject of the folder in the shell", unsafe { WinDestroyObject(f) } != 0);
+    check("its shadow went with it", query(b"<RS2_REMOTES>") == 0);
+    check("WinDestroyObject of the program in the shell", unsafe { WinDestroyObject(h) } != 0);
+}
+
+/// `WPSTEST SHELLREMOTE`: start PMSHELL, wait for its desktop, then the REMOTE
+/// checks from this process.
+fn shell_then_remote() {
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let rc = unsafe { DosExecPgm(core::ptr::null_mut(), 0, 1, b"PMSHELL\0\0".as_ptr(), core::ptr::null(), &mut res, b"C:\\OS2\\PMSHELL.EXE\0".as_ptr()) };
+    check("PMSHELL started", rc == 0);
+    // Up when its object server is (\SHAREMEM\RS2WPS.MEM with the magic
+    // "RWPS" and the server's window, see pmwp/src/ipc.rs).
+    let mut up = false;
+    for _ in 0..120 {
+        let mut p: *mut u8 = core::ptr::null_mut();
+        if unsafe { DosGetNamedSharedMem(&mut p, b"\\SHAREMEM\\RS2WPS.MEM\0".as_ptr(), 1) } == 0 {
+            let (magic, hwnd) = unsafe { ((p as *const u32).read_volatile(), (p.add(4) as *const u32).read_volatile()) };
+            unsafe { DosFreeMem(p) };
+            if magic == 0x5350_5752 && hwnd != 0 {
+                up = true;
+                break;
+            }
+        }
+        unsafe { DosSleep(500) };
+    }
+    check("the shell answers", up);
+    if up {
+        remote();
+    }
 }
 
 /// The program list on the desktop: a group made with PrfCreateGroup in
@@ -856,9 +896,10 @@ fn main(st: &Startup) -> u32 {
     if word.eq_ignore_ascii_case(b"SHELL") {
         return shell(args);
     }
-    if [&b"REMOTE"[..], b"REGISTER", b"OLDDESKTOP", b"DUPES"].iter().any(|w| word.eq_ignore_ascii_case(w)) {
+    if [&b"REMOTE"[..], b"REGISTER", b"SHELLREMOTE", b"OLDDESKTOP", b"DUPES"].iter().any(|w| word.eq_ignore_ascii_case(w)) {
         match word.to_ascii_uppercase().as_slice() {
             b"REMOTE" => remote(),
+            b"SHELLREMOTE" => shell_then_remote(),
             b"REGISTER" => register_remote(args),
             b"OLDDESKTOP" => old_desktop(),
             _ => dupes(),

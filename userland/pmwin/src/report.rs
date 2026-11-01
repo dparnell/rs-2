@@ -87,7 +87,7 @@ fn class_name(n: &[u8]) -> String {
     const PUBLIC: &[(&str, &str)] = &[
         ("#1", "WC_FRAME"), ("#2", "WC_COMBOBOX"), ("#3", "WC_BUTTON"), ("#4", "WC_MENU"), ("#5", "WC_STATIC"),
         ("#6", "WC_ENTRYFIELD"), ("#7", "WC_LISTBOX"), ("#8", "WC_SCROLLBAR"), ("#9", "WC_TITLEBAR"), ("#10", "WC_MLE"),
-        ("#32", "WC_SPINBUTTON"), ("#37", "WC_CONTAINER"), ("#38", "WC_SLIDER"), ("#39", "WC_VALUESET"), ("#40", "WC_NOTEBOOK"),
+        ("#32", "WC_SPINBUTTON"), ("#37", "WC_CONTAINER"), ("#38", "WC_SLIDER"), ("#39", "WC_VALUESET"), ("#40", "WC_NOTEBOOK"), ("#65", "WC_CIRCULARSLIDER"),
     ];
     let n = String::from_utf8_lossy(n).into_owned();
     PUBLIC.iter().find(|(k, _)| *k == n).map_or(n, |(_, v)| String::from(*v))

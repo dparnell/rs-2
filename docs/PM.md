@@ -746,14 +746,20 @@ mouse and keyboard. What PMWIN has:
   `WinCreateAccelTable`, `WinSetAccelTable`, `WinTranslateAccel`, ...),
   plus the system keys F10, Alt+F4, Alt+Space, Shift+Esc, Alt+F5,
   Alt+F9, Alt+F10 and Alt+F11; commands of
-  disabled menu items are not sent.
+  disabled menu items are not sent. Each frame from the focus window up
+  also offers the key to its menu (IBM's `FrameTranslateAccel`): an
+  Alt+letter mnemonic of a frame's action bar goes to that frame, also
+  from inside an MDI document frame that has no menu.
 - Dialogs: `WinLoadDlg`, `WinCreateDlg`, `WinProcessDlg` (modal loop,
   owner disabled; clicks on it bring up the dialog), `WinDlgBox`,
   `WinDismissDlg`, `WinDefDlgProc` (Tab/Shift+Tab, arrows within groups,
   Enter for the focused or default push button, Esc, mnemonics with or
   without Alt, `SC_CLOSE` as `DID_CANCEL`), `WM_INITDLG` with focus
   choice, `WinEnumDlgItem`, `WinSendDlgItemMsg`, `Win{Query,Set}DlgItem
-  {Text,Short}`, `WinMapDlgPoints`. Template sizes are the area inside
+  {Text,Short}`, `WinMapDlgPoints`. The dialog procedure is in place
+  before the controls are made, so owner-drawn controls'
+  `WM_MEASUREITEM` reaches it before `WM_INITDLG` (as IBM's). Template
+  sizes are the area inside
   the frame controls; a dialog unit is 2x2 pixels (8x16 system font).
   Unknown control classes become placeholder frames. The actual owner of
   a dialog is the ancestor of `hwndOwner` that is a child of the
@@ -766,7 +772,36 @@ mouse and keyboard. What PMWIN has:
 - Focus and activation: activating a frame gives it the focus, which it
   passes on to `QWL_HWNDFOCUSSAVE` (the window that last had it, or one
   the application set) or its client, so the client hears that the
-  focus came from the frame.
+  focus came from the frame. As in IBM's PMMERGE, `WinSetActiveWindow`
+  with a window that is not a frame activates the frame around it
+  (`WM_QUERYFOCUSCHAIN` `QFC_FRAME`), and `SWP_ACTIVATE` on a frame
+  inside another window (an MDI document window) brings it to the top
+  of its siblings and gives the focus straight to the window it saved
+  or its client (IBM's frame does so on `WM_ADJUSTWINDOWPOS`,
+  `FrameSetFocus`), which makes its top-level frame active; every frame
+  around the focus window remembers it.
+- `WinDefWindowProc` as IBM's: `WM_BUTTON1DOWN`/`2DOWN`/`3DOWN`
+  activate the window's frame (`WinSetActiveWindow`), then the button
+  messages a window does not use (down, up, double click) go to its
+  owner, with the pointer position mapped into the owner's coordinates;
+  `WM_CHAR` goes to the owner; `WM_HELP` to the parent. The frame
+  procedure activates itself on a button going down and passes no
+  button message on. So a click on Borland C++'s editor (a client in
+  an MDI document frame) gives it the focus. Keys a page of a notebook
+  does not use reach the notebook through the owner chain (page dialogs
+  are loaded with the notebook as owner).
+- Painting order as PM's: invalidating a window that does not clip its
+  children (`WS_CLIPCHILDREN`) invalidates its whole subtree, also
+  inside a child that clips its own (it paints over them all; Borland's
+  MDI client around its document frames); bringing a window to the top
+  repaints only what its siblings above covered (clicking the active
+  window repaints nothing); what `WinUpdateWindow` paints is taken out
+  of the update regions of every window around it that does not clip
+  its children (not only the parent), so they do not paint over it
+  later (Borland's project list inside a document frame inside the MDI
+  client). IBM's `XUpdateWindow` leaves such a window for later
+  instead, but rs2 also invalidates a parent where a child is shown,
+  which would keep it waiting.
 - Controls, each a registered class with its own window procedure:
   `WC_BUTTON` (push, default, check box, radio, 3-state and their
   automatic kinds, `BM_*`, `BN_CLICKED`), `WC_STATIC` (text with DT_*
@@ -777,7 +812,8 @@ mouse and keyboard. What PMWIN has:
   scroll-bar child, keyboard, `LM_*`, `LN_*`), `WC_SCROLLBAR` (arrows,
   paging, proportional slider tracking, `SBM_*`, `WM_VSCROLL`/
   `WM_HSCROLL`), `WC_MLE`, `WC_COMBOBOX`, `WC_SPINBUTTON`, `WC_SLIDER`,
-  `WC_VALUESET` and `WC_NOTEBOOK` (see [Standard controls](#standard-controls)).
+  `WC_CIRCULARSLIDER`, `WC_VALUESET` and `WC_NOTEBOOK` (see [Standard
+  controls](#standard-controls)).
   `WM_QUERYDLGCODE` and `WM_MATCHMNEMONIC` tell the dialog manager
   about them; entry fields, MLEs, combo boxes and spin buttons use the
   clipboard (Shift+Del, Ctrl+Ins, Shift+Ins, `EM_CUT`/`COPY`/`PASTE`).
@@ -1029,6 +1065,28 @@ what can be tested on the host is in `crates/pmwin`.
   follows the mouse (`SLN_SLIDERTRACK`) and the keyboard; `SLM_*` (the
   arm position in increments or pels, shaft and arm dimensions, tick
   positions) and `SLN_*`.
+- `WC_CIRCULARSLIDER` (`#65`; IBM's is in PMCTLS, registered when it
+  loads, and `WinRegisterCircularSlider`, PMCTLS 24, only says yes, as
+  rs2's does): a dial as IBM's (`DialWndProc`). The range is laid out in
+  6-degree steps over 180 degrees (the top half, left to right), 252
+  with `CSS_NOBUTTON` or `CSS_NOTICKS | CSS_CIRCULARVALUE`, or 360 with
+  `CSS_360` (from the bottom, clockwise; it implies no buttons and no
+  number); defaults 0-30, 0-42 or 0-60 with the value in the middle.
+  Tick marks every tick increment (`CSS_MIDPOINT` lengthens the ends and
+  the middle, `CSS_PROPORTIONALTICKS` sizes them and the buttons with
+  the dial), the value as a triangle or as a knob
+  (`CSS_CIRCULARVALUE`) and as a number (`CSS_NONUMBER`), − and +
+  buttons (`CSS_NOBUTTON`; `CSM_SETBITMAPDATA` bitmaps), the window
+  text below (`CSS_NOTEXT`). A click on the dial or its ticks moves the
+  value towards the point one scroll increment every 50 ms
+  (`CSS_POINTSELECT` jumps there and follows the pointer); the buttons
+  step by 1, then by the scroll increment every 100 ms; keys step by
+  the scroll increment (`VK_LEFT` down, other virtual keys up, as
+  IBM's). `CSM_QUERYRANGE`/`SETRANGE`, `QUERYVALUE`/`SETVALUE`,
+  `QUERYRADIUS`, `SETINCREMENT`/`QUERYINCREMENT`, `SETBITMAPDATA`;
+  `CSN_SETFOCUS`, `CSN_CHANGED`, `CSN_TRACKING` and
+  `CSN_QUERYBACKGROUNDCOLOR` to the owner. The multimedia programs'
+  SW.DLL looks `WinRegisterCircularSlider` up by name.
 - `WC_VALUESET`: rows x columns of colour (RGB or index), text and icon
   or bitmap items (bitmaps are drawn as framed squares), item
   borders, disabled items; keyboard and mouse selection; `VM_*` and
@@ -1567,7 +1625,16 @@ PMCTLS.DLL builds its dialogs as an application would: a dialog template
 made in memory, `WinCreateDlg` and `WinProcessDlg`. A wrapper procedure
 makes the FILEDLG/FONTDLG the `QWL_USER` window word before
 `WM_INITDLG` reaches the application's procedure (`pfnDlgProc`), which
-passes the rest to `WinDefFileDlgProc`/`WinDefFontDlgProc`.
+passes the rest to `WinDefFileDlgProc`/`WinDefFontDlgProc`. As IBM's
+file dialog (`InitializeFileDlg`) the dialog is set up (title, drives,
+types, name, directory) before the application's procedure gets
+`WM_INITDLG`, with mp1 and mp2 0, and the lists are filled after it,
+so a procedure that keeps `WM_INITDLG` (Borland C++'s) still gets
+working lists; `WinDefFileDlgProc` ignores the `WM_INITDLG` passed on.
+`FDS_CUSTOM` loads the application's template (`hMod`, `usDlgId`)
+instead of rs2's; `WinDefFileDlgProc` measures and draws an owner-drawn
+directory list (IBM's template and custom ones have `LS_OWNERDRAW`
+there), and the labels show `~` mnemonics.
 
 - `WinFileDlg`: Open and Save as (`FDS_OPEN_DIALOG`,
   `FDS_SAVEAS_DIALOG`, `FDS_HELPBUTTON`, `FDS_APPLYBUTTON`,

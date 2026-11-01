@@ -28,4 +28,5 @@ aligned! {
     __a_Rs2FontDlgProc => crate::fontdlg::Rs2FontDlgProc, 4;
     __a_WinDefFontDlgProc => crate::fontdlg::WinDefFontDlgProc, 4;
     __a_WinFontDlg => crate::fontdlg::WinFontDlg, 3;
+    __a_WinRegisterCircularSlider => crate::WinRegisterCircularSlider, 0;
 }

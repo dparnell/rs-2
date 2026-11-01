@@ -737,6 +737,11 @@ pub fn start_bar(h: u32) {
 }
 
 /// Alt+letter on a frame: open the menu bar item with that mnemonic.
+/// Has menu `bar` a selectable item with mnemonic `c` (lower case)?
+pub fn has_mnemonic(bar: u32, c: u8) -> bool {
+    data(bar).is_some_and(|m| m.items.iter().any(|it| selectable(it) && draw::mnemonic(&it.text) == Some(c)))
+}
+
 pub fn open_mnemonic(bar: u32, c: u8) -> bool {
     let Some(i) = data(bar).and_then(|m| m.items.iter().position(|it| selectable(it) && draw::mnemonic(&it.text) == Some(c))) else {
         return false;
