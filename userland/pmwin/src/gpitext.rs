@@ -184,14 +184,36 @@ pub extern "C" fn GpiSetCharBox(hps: u32, p: *const i32) -> u32 {
     set_attr(hps, |a| a.char_box = v)
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn GpiQueryCharBox(hps: u32, p: *mut i32) -> u32 {
-    put_pair(hps, p, |a| a.char_box)
+/// The device's default character cell in world coordinates (IBM's
+/// GpiQueryCharBox converts the cell from device to world each time, so
+/// the default box follows the page units: EPM spaces its printed lines
+/// by it on a PU_TWIPS presentation space).
+fn default_box_world(e: &crate::state::PsEntry) -> (i32, i32) {
+    let (cx, cy) = (e.ps.defaults.char_box.0 >> 16, e.ps.defaults.char_box.1 >> 16);
+    (e.ps.device_to_world_len(cx as f64, 0.0).0, e.ps.device_to_world_len(0.0, cy as f64).1)
 }
 
+/// GpiQueryCharBox(hps, psizfxBox): FIXED, in world coordinates; the
+/// default box is the device's default cell converted.
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiQueryCharBox(hps: u32, p: *mut i32) -> u32 {
+    let Some(e) = entry(st(), hps) else { return 0 };
+    let v = if e.ps.attrs.char_box == e.ps.defaults.char_box {
+        let (w, h) = default_box_world(e);
+        (w << 16, h << 16)
+    } else {
+        e.ps.attrs.char_box
+    };
+    write(p as *mut [i32; 2], [v.0, v.1]) as u32
+}
+
+/// GpiQueryDefCharBox(hps, psizlSize): the default cell, a SIZEL in world
+/// coordinates (not FIXED), as IBM's.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiQueryDefCharBox(hps: u32, p: *mut i32) -> u32 {
-    put_pair(hps, p, |_| gpi::Attrs::default().char_box)
+    let Some(e) = entry(st(), hps) else { return 0 };
+    let (w, h) = default_box_world(e);
+    write(p as *mut [i32; 2], [w, h]) as u32
 }
 
 /// GpiSetCharAngle(hps, pgradlAngle): accepted; text is drawn

@@ -89,6 +89,28 @@ pub fn devtype_for_file(name: &str) -> Option<u16> {
     }
 }
 
+/// The file name extensions a device type plays (MCI_SYSINFO's
+/// MCI_SYSINFO_QUERY_EXTENSIONS; the table `devtype_for_file` reads).
+pub fn extensions(t: u16) -> &'static [&'static str] {
+    match t {
+        DEVTYPE_WAVEFORM_AUDIO => &["WAV", "AIF", "AU", "SND", "VOC", "_AU"],
+        DEVTYPE_SEQUENCER => &["MID", "RMI", "_MI"],
+        DEVTYPE_DIGITAL_VIDEO => &["FLC", "FLI", "AVI", "MPG"],
+        _ => &[],
+    }
+}
+
+/// The extended attribute file types a device type plays
+/// (MCI_SYSINFO_QUERY_TYPES), separated by semicolons.
+pub fn ea_types(t: u16) -> &'static str {
+    match t {
+        DEVTYPE_WAVEFORM_AUDIO => "Digital Audio",
+        DEVTYPE_SEQUENCER => "MIDI",
+        DEVTYPE_DIGITAL_VIDEO => "Digital Video",
+        _ => "",
+    }
+}
+
 /// MCI_MODE_* as strings (STATUS ... MODE).
 pub fn mode_name(mode: u32) -> &'static str {
     match mode {

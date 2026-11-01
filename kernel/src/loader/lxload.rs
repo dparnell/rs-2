@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 use os2_exe::lx::{self, mflags, oflags, Entry, SourceKind};
 
-use super::{err, import_target, load_imports, patch, Export, Format, ImportBy, Module, Object, Start, Target};
+use super::{err, patch, Export, Format, ImportBy, Imports, Module, Object, Pending, Start, Target};
 use crate::vm::{self, pag, AddressSpace, PageState, SegKind, SharedMem, PAGE, TILE};
 
 fn s(b: &[u8]) -> String {
@@ -33,7 +33,6 @@ pub fn load(
     let lxobjs = m.objects().map_err(|_| err::BAD_EXE_FORMAT)?;
     let import_names: Vec<String> =
         m.import_modules().map_err(|_| err::BAD_EXE_FORMAT)?.iter().map(|n| s(n)).collect();
-    let mut imports = load_imports(&import_names)?;
 
     // Choose an address for each object.
     // Flag 0x10 says the internal fixups were applied for the preferred
@@ -132,19 +131,26 @@ pub fn load(
             }
         });
     }
+    let mut names = BTreeMap::new();
+    for (n, ord) in m.exported_names().map_err(|_| err::BAD_EXE_FORMAT)? {
+        names.insert(s(n), ord);
+    }
+
+    // The imported modules, loaded now that this DLL's exports are known:
+    // DLLs may import each other (loader::Pending).
+    let own = m.name().map(s).unwrap_or_else(|_| super::module_name(path)).to_ascii_uppercase();
+    let _pending = dll.then(|| Pending::add(&own, &exports, &names));
+    let mut imports = Imports::load(&own, &import_names)?;
     // Forwarder targets are dependencies.
     for e in &exports {
         if let Export::ForwardOrdinal { module, .. } | Export::ForwardName { module, .. } = e {
-            if !imports.iter().any(|i| i.name.eq_ignore_ascii_case(&super::module_name(module))) {
+            let mname = super::module_name(module);
+            if !imports.has(&mname) && !Pending::has(&mname) {
                 if let Ok(dep) = super::load_global(module) {
                     imports.push(dep);
                 }
             }
         }
-    }
-    let mut names = BTreeMap::new();
-    for (n, ord) in m.exported_names().map_err(|_| err::BAD_EXE_FORMAT)? {
-        names.insert(s(n), ord);
     }
 
     // Fixups.
@@ -168,7 +174,7 @@ pub fn load(
                         }
                     }
                     lx::Target::ImportOrdinal { module, ordinal } => {
-                        let t = import_target(&imports, module, ImportBy::Ordinal(ordinal)).map_err(|e| {
+                        let t = imports.target(module, ImportBy::Ordinal(ordinal)).map_err(|e| {
                             crate::trace!(
                                 "loader: {}: import {}.{} not found",
                                 path,
@@ -182,7 +188,7 @@ pub fn load(
                     }
                     lx::Target::ImportName { module, name_offset } => {
                         let name = m.import_proc_name(name_offset).map(s).map_err(|_| err::BAD_EXE_FORMAT)?;
-                        let t = import_target(&imports, module, ImportBy::Name(&name)).map_err(|e| {
+                        let t = imports.target(module, ImportBy::Name(&name)).map_err(|e| {
                             crate::trace!("loader: {}: import {} not found", path, name);
                             super::set_fail(import_names.get(module as usize - 1).map(|s| s.as_str()).unwrap_or("?"));
                             e
@@ -296,11 +302,10 @@ pub fn load(
         autodata_size: autodata.map(|a| lxobjs[a].virtual_size).unwrap_or(0),
         windows: None,
     });
-    let name = m.name().map(s).unwrap_or_else(|_| super::module_name(path));
     let all16 = lxobjs.iter().all(|o| is16(o));
     Ok(Arc::new(Module {
         hmte: super::alloc_hmte(),
-        name: name.to_ascii_uppercase(),
+        name: own,
         path: path.to_string(),
         format: Format::Lx,
         is_dll: dll,
@@ -309,7 +314,8 @@ pub fn load(
         objects,
         exports,
         names,
-        imports,
+        imports: imports.modules(),
+        cyclic: crate::sync::SpinLock::new(Vec::new()),
         start: if dll { None } else { start_info },
         init: if dll { start_info } else { None },
         per_process_init: h.module_flags & mflags::PER_PROCESS_INIT != 0,

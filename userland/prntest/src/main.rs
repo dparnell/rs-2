@@ -88,6 +88,8 @@ unsafe extern "C" {
     fn GpiSetCharSet(hps: u32, lcid: i32) -> u32;
     #[link_name = "PMGPI.510"]
     fn GpiSetCharBox(hps: u32, p: *const i32) -> u32;
+    #[link_name = "PMGPI.430"]
+    fn GpiQueryCharBox(hps: u32, p: *mut i32) -> u32;
     #[link_name = "PMGPI.598"]
     fn GpiCreateBitmap(hps: u32, hdr: *const u8, opts: u32, bits: *const u8, info: *const u8) -> u32;
     #[link_name = "PMGPI.557"]
@@ -184,6 +186,7 @@ const DEVESC_NEWFRAME: i32 = 16300;
 const DEVESC_RAWDATA: i32 = 16303;
 const PU_LOENGLISH: u32 = 0x0014;
 const PU_PELS: u32 = 0x0008;
+const PU_TWIPS: u32 = 0x001c;
 const GPIA_ASSOC: u32 = 0x4000;
 const NERR_JOBNOTFOUND: u32 = 2151;
 
@@ -586,6 +589,46 @@ fn job_properties() {
     }
 }
 
+/// The default character box on a printer in world coordinates (EPM
+/// spaces its printed lines by GpiQueryCharBox on a PU_TWIPS presentation
+/// space; IBM's converts the device's default cell each time).
+fn char_box_world() {
+    unsafe extern "C" {
+        #[link_name = "PMGPI.442"]
+        fn GpiQueryDefCharBox(hps: u32, p: *mut i32) -> u32;
+    }
+    let mut d = dop(b"PM_Q_STD\0");
+    d[0] = PRN.as_ptr() as u32;
+    let hdc = unsafe { DevOpenDC(0, OD_INFO, b"*\0".as_ptr(), 4, d.as_ptr(), 0) };
+    let size = [0i32, 0];
+    // The cell in pels (a PU_PELS space), then in twips.
+    let mut pels = [0i32; 2];
+    let hps = unsafe { GpiCreatePS(0, hdc, size.as_ptr(), PU_PELS | GPIA_ASSOC) };
+    unsafe {
+        GpiQueryCharBox(hps, pels.as_mut_ptr());
+        GpiDestroyPS(hps);
+    }
+    let hps = unsafe { GpiCreatePS(0, hdc, size.as_ptr(), PU_TWIPS | GPIA_ASSOC) };
+    // CAPS_HORIZONTAL_RESOLUTION, CAPS_VERTICAL_RESOLUTION (pels per metre).
+    let mut caps = [0i32; 2];
+    let mut cb = [0i32; 2];
+    let mut def = [0i32; 2];
+    unsafe {
+        DevQueryCaps(hdc, 8, 2, caps.as_mut_ptr());
+        GpiQueryCharBox(hps, cb.as_mut_ptr());
+        GpiQueryDefCharBox(hps, def.as_mut_ptr());
+    }
+    // Pels to twips: 1440 per inch, 39.37 inches per metre.
+    let twips = |pels: i32, res: i32| ((pels as i64 * 1440 * 3937 + res as i64 * 50) / (res as i64 * 100)) as i32;
+    let (w, h) = (twips(pels[0] >> 16, caps[0]), twips(pels[1] >> 16, caps[1]));
+    check("GpiQueryCharBox: the default box in world coordinates (PU_TWIPS)", w > 0 && cb == [w << 16, h << 16]);
+    check("GpiQueryDefCharBox: a SIZEL in world coordinates", def == [w, h]);
+    unsafe {
+        GpiDestroyPS(hps);
+        DevCloseDC(hdc);
+    }
+}
+
 /// Print to a network printer port (LPRn/IPPn) the listener checks.
 fn network(kind: &[u8], host: &[u8], port: &[u8], extra: &[u8]) {
     let pname = if kind == b"LPR" { b"LPR9\0" } else { b"IPP9\0" };
@@ -668,6 +711,7 @@ fn main(s: &Startup) -> u32 {
     queued_raw();
     direct();
     job_properties();
+    char_box_world();
     if let Some(i) = args.iter().position(|a| a.eq_ignore_ascii_case(b"LPR") || a.eq_ignore_ascii_case(b"IPP")) {
         let kind = crate::upper(args[i]);
         let host = args.get(i + 1).copied().unwrap_or(b"10.0.2.2");

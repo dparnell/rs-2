@@ -184,6 +184,10 @@ const ERR: u32 = 0xffff_ffff;
 static FAILS: AtomicU32 = AtomicU32::new(0);
 /// Refuse the next page turn in BKN_PAGESELECTEDPENDING.
 static REFUSE: AtomicBool = AtomicBool::new(false);
+/// Shrink the new page's window in BKN_PAGESELECTED (as Multimedia
+/// Setup does); SELECTED_TOP: the top page id then.
+static SHRINK: AtomicBool = AtomicBool::new(false);
+static SELECTED_TOP: AtomicU32 = AtomicU32::new(0);
 static INITDLG: AtomicU32 = AtomicU32::new(0);
 
 /// A notification: (control id, code, the notification's fields).
@@ -284,6 +288,13 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 BKN_PAGEDELETED => Note { id, code, a: field(1), b: field(2), c: field(3) },
                 _ => Note { id, code, a: mp2, b: 0, c: 0 },
             };
+            if code == BKN_PAGESELECTED {
+                SELECTED_TOP.store(top(n.a), Ordering::Relaxed);
+                if SHRINK.swap(false, Ordering::Relaxed) {
+                    let w = send(n.a, BKM_QUERYPAGEWINDOWHWND, n.c, 0);
+                    unsafe { WinSetWindowPos(w, 3, 0, 0, 10, 10, 1) };
+                }
+            }
             if code == BKN_PAGESELECTEDPENDING && REFUSE.swap(false, Ordering::Relaxed) {
                 // ulPageIdNew = 0 refuses the turn.
                 unsafe { ((mp2 + 8) as *mut u32).write_unaligned(0) };
@@ -511,6 +522,13 @@ fn checks(hab: u32, client: u32) -> u32 {
     let sel = noted(BKN_PAGESELECTED);
     check("BKN_PAGESELECTEDPENDING and BKN_PAGESELECTED (PAGESELECTNOTIFY)", pend == Some(Note { id: 10, code: BKN_PAGESELECTEDPENDING, a: nb, b: general, c: colors }) && sel == Some(Note { id: 10, code: BKN_PAGESELECTED, a: nb, b: general, c: colors }));
     check("the new top page's window shows, the old one is hidden", visible(mle) && !visible(page1) && pos(mle).2 == pr[2] - pr[0]);
+    check("BKN_PAGESELECTED: the new page is the top one", SELECTED_TOP.load(Ordering::Relaxed) == colors);
+    // The page is placed after BKN_PAGESELECTED, as IBM's notebook does:
+    // a window the owner shrinks there gets the page's size again.
+    SHRINK.store(true, Ordering::Relaxed);
+    send(nb, BKM_TURNTOPAGE, general, 0);
+    check("the new page is sized after BKN_PAGESELECTED (Multimedia Setup)", top(nb) == general && pos(page1).2 == pr[2] - pr[0]);
+    send(nb, BKM_TURNTOPAGE, colors, 0);
     REFUSE.store(true, Ordering::Relaxed);
     check("clearing ulPageIdNew refuses the turn", send(nb, BKM_TURNTOPAGE, about, 0) == 0 && top(nb) == colors);
     send(nb, BKM_TURNTOPAGE, advanced, 0);

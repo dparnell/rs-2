@@ -135,11 +135,39 @@ system-wide and can be shared); they are closed when it ends.
 
 Common to both: MM_MCINOTIFY (successful, superseded by a new command,
 aborted by STOP/SEEK/CLOSE), CAPABILITY/GETDEVCAPS, INFO, ACQUIRE/RELEASE
-(always granted), SYSINFO (one device of each type), mciGetErrorString's
+(always granted), SYSINFO (one device of each type; see below for
+MCI_SYSINFO_ITEM), mciGetErrorString's
 texts and mciGetDeviceID. A string command whose object is a file name
 opens the file's device for that command (`play KLONDIKE.FLC wait`) and
 closes it when the command, or the play it started, ends. Groups and
 the amp-mixer device are not supported.
+
+### The installed devices (MCI_SYSINFO_ITEM)
+
+IBM's MDM keeps its installed devices in MMPM2.INI and answers
+MCI_SYSINFO with MCI_SYSINFO_ITEM from it; rs2's devices are built in
+(one waveaudio, sequencer, cdaudio and digitalvideo device), so MDM
+answers the queries for them: QUERY_NAMES (install name `rs2Waveaudio01`,
+logical name `Waveaudio01`, no alias, type and ordinal, found by any of
+the names), QUERY_DRIVER (MCI_SYSINFO_LOGDEVICE: the type, controllable,
+MCD "MDM", one resource unit), QUERY_PARAMS (none), QUERY_CONNECTORS
+(none), QUERY_EXTENSIONS (WAV, AIF, AU, SND, VOC, _AU; MID, RMI, _MI; FLC,
+FLI, AVI, MPG), QUERY_TYPES (the EA types "Digital Audio", "MIDI",
+"Digital Video") and QUERY_DEFAULT. The items that change the
+configuration (installing and deleting drivers, aliases, extensions,
+types, the default device) are refused with
+MCIERR_UNSUPPORTED_FUNCTION. AUDTEST checks the queries.
+
+Multimedia Setup (IBM's STPM.EXE, in MMTEMP on the CD with its SW,
+MMPMCRTS, MIPM, MMPM, FILT, HHP, DIVE and STPMMRI DLLs) builds its
+notebook from them: the System page and a page for each device (name,
+description, default device). It needs `MMBASE` set: IBM's FILT.DLL
+writes through an uninitialised pointer when DosScanEnv does not find it.
+MINSTALL.EXE (disk 11's MMTEMP) shows its installation window; it looks
+for its CONTROL.SCR in its own directory (start it with its path, as the
+installer does) and has nothing to install from without the packed
+MMPM/2 source. MPPMNEW.EXE needs MMPARTS.DLL, which is built on OpenDoc
+(OS2OOOC, OS2OM30) and DSOM; rs2 has neither.
 
 ### Recording
 

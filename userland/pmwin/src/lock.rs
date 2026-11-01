@@ -189,7 +189,9 @@ fn trace_call(idx: u32, args: u32) {
         let _ = core::fmt::Write::write_fmt(&mut s, format_args!("{v:x}"));
     }
     s.push(')');
-    crate::trace(format_args!("{} {s}", tid()));
+    // The caller: the return address above the arguments.
+    let from = unsafe { ((args - 4) as *const u32).read_unaligned() };
+    crate::trace(format_args!("{} {s} from {from:x}", tid()));
 }
 
 /// Exit from the export trampolines: `ret` is what the export returns

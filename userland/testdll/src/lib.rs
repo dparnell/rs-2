@@ -48,6 +48,19 @@ pub extern "C" fn TestSharedInits() -> u32 {
     SHARED_INITS.load(Ordering::Relaxed)
 }
 
+unsafe extern "C" {
+    /// TestAdd through TESTDLL's own import table: a module importing
+    /// itself, the smallest circular reference (the loader must not load
+    /// it again while it loads).
+    #[link_name = "TESTDLL.1"]
+    fn SelfImportedAdd(a: u32, b: u32) -> u32;
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn TestSelfAdd(a: u32, b: u32) -> u32 {
+    unsafe { SelfImportedAdd(a, b) + 1 }
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn TestGreeting() -> *const u8 {
     b"hello from TESTDLL\0".as_ptr()

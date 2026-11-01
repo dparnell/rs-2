@@ -59,7 +59,7 @@ pub fn init_order(roots: &[Arc<Module>], p: &Process) -> Vec<InitCall> {
             return;
         }
         seen.push(m.hmte);
-        for imp in &m.imports {
+        for imp in &m.deps() {
             visit(imp, p, seen, out);
         }
         if !m.is_dll || m.init.is_none() {
@@ -92,7 +92,7 @@ pub fn term_order(p: &Process) -> Vec<InitCall> {
             return;
         }
         seen.push(m.hmte);
-        for imp in &m.imports {
+        for imp in &m.deps() {
             visit(imp, seen, order);
         }
         order.push(m.clone());

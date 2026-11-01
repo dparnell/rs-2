@@ -133,7 +133,53 @@ fn cursor_checks(hab: u32, client: u32, other: u32) {
     }
 }
 
+/// A client that answers the messages its frame passes on.
+extern "C" fn forward_client(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    match msg {
+        0x213 | 0x557 | 0x1001 | 0x413 => 0x10000 + msg,
+        // WM_ACTIVATE
+        0x0d => {
+            CLIENT_ACTIVATE.store(mp1 | 0x100, Ordering::Relaxed);
+            0
+        }
+        _ => {
+            let f: WndProc = unsafe { core::mem::transmute(DEF_PROC.load(Ordering::Relaxed) as usize) };
+            f(h, msg, mp1, mp2)
+        }
+    }
+}
+
+static DEF_PROC: AtomicU32 = AtomicU32::new(0);
+/// WM_ACTIVATE's mp1 as the client got it (| 0x100).
+static CLIENT_ACTIVATE: AtomicU32 = AtomicU32::new(0);
+
+/// IBM's frame procedure passes what it does not process itself, from
+/// 0x213 on, to its client (MINSTALL's secondary windows size themselves
+/// with 0x557 sent to the frame), but not the mouse messages 0x410-0x428;
+/// WM_ACTIVATE goes to the client as well.
+fn forward_checks(hab: u32) {
+    unsafe {
+        unsafe extern "C" {
+            #[link_name = "PMWIN.911"]
+            fn WinDefWindowProc(h: u32, m: u32, a: u32, b: u32) -> u32;
+        }
+        DEF_PROC.store(WinDefWindowProc as usize as u32, Ordering::Relaxed);
+        WinRegisterClass(hab, b"CtlFwdClient\0".as_ptr(), forward_client, 0, 0);
+        let f = WinCreateWindow(1, 0xffff_0001 as *const u8, null(), 0, 0, 0, 100, 100, 0, 3, 78, null(), 0);
+        let c = WinCreateWindow(f, b"CtlFwdClient\0".as_ptr(), null(), 0, 0, 0, 0, 0, f, 3, FID_CLIENT, null(), 0);
+        let r = [0x213u32, 0x557, 0x1001, 0x413].map(|m| WinSendMsg(f, m, 0, 0));
+        check("a frame passes messages from 0x213 on to its client (0x557: MINSTALL)", c != 0 && r[..3] == [0x10213, 0x10557, 0x11001]);
+        check("a frame keeps the mouse messages 0x410-0x428", r[3] == 0);
+        // EPM's edit window learns from WM_ACTIVATE that it is the active
+        // one (its print dialog prints through it).
+        WinSendMsg(f, 0x0d, 1, f);
+        check("a frame passes WM_ACTIVATE on to its client", CLIENT_ACTIVATE.load(Ordering::Relaxed) == 0x101);
+        WinDestroyWindow(f);
+    }
+}
+
 fn frame_checks(hab: u32) -> u32 {
+    forward_checks(hab);
     unsafe {
         let mut info = [0u32; 3];
         WinQueryClassInfo(hab, 0xffff_0001, info.as_mut_ptr());
