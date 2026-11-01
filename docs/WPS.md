@@ -296,7 +296,8 @@ and pmwp.sym/som.sym):
   metaclasses do not form a single chain, a derived metaclass with all
   of them as parents is made.
 - **The class manager** loads class DLLs through `SOMLoadModule`
-  (`SOMInitModule`, or `<Class>NewClass`). Its methods are called
+  (`SOMInitModule`, then `<Class>NewClass` when that did not make the
+  class, as IBM's does). Its methods are called
   through tokens, so a subclass such as the WPS's WPClassManager can
   override them. `somMergeInto` moves the registry and makes the target
   `SOMClassMgrObject`; the old manager forwards to it.
@@ -689,8 +690,20 @@ and WPShadow by MMBitmap and MMShadow (from MMBIT.DLL and MMSHD.DLL,
 forwarders into MMPARTS) through `PM_InstallClassReplacement`; its
 INSTMMVW.CMD does the same with REXX's SysRegisterObjectClass. On rs2
 the classes are registered with WinRegisterObjectClass (WPSTEST
-`REGISTER`, or REXX); the replacements, the Multimedia folder
-(`<MMPM2_FOLDER>`) and its objects are not made yet.
+`REGISTER`, or REXX); the Multimedia folder (`<MMPM2_FOLDER>`) and its
+objects are not made yet.
+
+**Class replacement** is IBM's: OS2.INI's `PM_Workplace:ReplaceList`
+holds, under the class replaced, the classes replacing it (each
+NUL-terminated, the last in effect); WinReplaceObjectClass adds or
+removes one (in the shell's process when called from another) and
+applies it at once (SOM's somSubstituteClass), `PM_InstallClassReplacement`
+entries (INI.RC's, MINSTALL's) go into the list when the shell starts,
+and the list is applied then, where the replacing class loads. Files of
+PMWP's own classes are found through the class manager, so MMBitmap
+stands in for WPBitmap. MMBitmap is one of the classes MMPARTS's
+SOMInitModule does not make: as IBM's, SOM's default SOMLoadModule
+then calls the DLL's `<Class>NewClass`.
 
 **Test.** `cargo xtask run --init "RS2\WPSTEST.EXE SHELL MMPARTS"` with
 IBM's files staged in work/modules.txt (MMPARTS.DLL in `\MMOS2\DLL`,
@@ -699,7 +712,9 @@ MMPTMRI in `\MMOS2\DLL`, a WAV in `\MMOS2\SOUNDS`; LIBPATH with
 `C:\MMOS2\DLL`, `SET MMBASE=C:\MMOS2;`): a class from a missing DLL is
 refused and the shell goes on; MMAudio and MMWAV registered, an MMAudio
 object made on the desktop (its `.CLASSINFO` names MMAudio), the WAV
-file woken and saved as MMWAV, the object deleted. Without MMPARTS.DLL
+file woken and saved as MMWAV, the object deleted; MMBitmap registered
+and WPBitmap replaced by it (a .BMP file wakes as MMBitmap), the
+replacement undone. Without MMPARTS.DLL
 its checks are skipped. WPSTEST SHELL also has `REGISTER dll class` and
 `CREATE class title location setup` (with `|` for `;`).
 
