@@ -538,5 +538,29 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
         f.rbp as u32
     );
     crate::println!("DS={:04x} ES={:04x} FS={:04x} GS={:04x}", f.ds, f.es, f.fs, f.gs);
+    // For debugging, to the serial log only: the top of the stack and the
+    // return addresses along the EBP chain (32-bit code).
+    if f.ss == 0x53 {
+        let mut sp = p.space.lock();
+        let esp = f.rsp as u32;
+        let mut words = [0u32; 16];
+        for (i, w) in words.iter_mut().enumerate() {
+            *w = rd(&mut sp, esp.wrapping_add(4 * i as u32)).unwrap_or(0);
+        }
+        crate::trace!("stack at {esp:08x}: {:08x?}", words);
+        let mut ebp = f.rbp as u32;
+        let mut chain = [0u32; 12];
+        let mut n = 0;
+        while n < chain.len() && ebp > esp.wrapping_sub(1) && ebp & 3 == 0 {
+            let (Some(next), Some(ret)) = (rd(&mut sp, ebp), rd(&mut sp, ebp.wrapping_add(4))) else { break };
+            chain[n] = ret;
+            n += 1;
+            if next <= ebp {
+                break;
+            }
+            ebp = next;
+        }
+        crate::trace!("callers: {:08x?}", &chain[..n]);
+    }
     p.exit(2, 0xffff);
 }
