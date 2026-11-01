@@ -647,8 +647,10 @@ Fixed for it:
   (unverified). IBM's CHKDSK could not check rs2-written FAT volumes
   (`UFAT.DLL` is not on the media); the FAT32 EA flag values follow
   FAT32.IFS from memory and are unverified against a real disk.
-- AVIO (VIO presentation spaces in PM windows) has no `WinDefAVioWindowProc`
-  (PMVIOP.DLL), and cells are always drawn in the 8-pixel-wide VIO fonts.
+- AVIO (VIO presentation spaces in PM windows): cells are always drawn in
+  the 8-pixel-wide VIO fonts; PMVIOP.DLL has only `WinDefAVioWindowProc`
+  of IBM's entries (the others are internals of IBM's VIO windows and
+  Win-OS/2).
 - Writing to QEMU's virtual FAT drive (the ESP directory) can hang QEMU
   itself (seen with BACKUP; QEMU's monitor stops answering too); FAT disk
   images are fine.
