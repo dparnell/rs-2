@@ -310,6 +310,46 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
             })
             .unwrap()
         }
+        // COPY TO BUFFER (IBM's StartCopy): the element's bytes from FROM
+        // (or the position) to TO (or the end), whole samples, into the
+        // caller's buffer; a buffer too small gets the size needed in
+        // ulBufLen and MCIERR_INVALID_BUFFER (MMPARTS's wave editor asks
+        // so, then reads the samples it draws). The clipboard is not
+        // supported.
+        MCI_COPY => {
+            if r.flags & MCI_TO_BUFFER == 0 || r.value == 0 {
+                return Err(MCIERR_UNSUPPORTED_FUNCTION);
+            }
+            if r.flags & (MCI_FROM | MCI_TO) == MCI_FROM | MCI_TO && r.from == r.to {
+                return Ok(Reply::None);
+            }
+            with(id, |d| {
+                let tf = d.time_format;
+                let w = wave(d);
+                let Some(data) = w.data.as_ref() else { return Err(MCIERR_UNSUPPORTED_FUNCTION) };
+                let len = data.len() as u32;
+                let from = if r.flags & MCI_FROM != 0 { w.from_time(r.from, tf) } else { w.pos.min(len) };
+                let to = if r.flags & MCI_TO != 0 { w.from_time(r.to, tf) } else { len };
+                if from > len || to > len || from > to {
+                    return Err(MCIERR_OUTOFRANGE);
+                }
+                let n = (to - from) / w.fmt.block.max(1) * w.fmt.block.max(1);
+                let p = r.value;
+                // MCI_EDIT_PARMS: pBuff at 16, ulBufLen at 20.
+                if rd(p, 20) < n {
+                    wr(p, 20, n);
+                    return Err(MCIERR_INVALID_BUFFER);
+                }
+                let buf = rd(p, 16);
+                if buf == 0 {
+                    return Err(MCIERR_INVALID_BUFFER);
+                }
+                unsafe { core::ptr::copy_nonoverlapping(data[from as usize..].as_ptr(), buf as *mut u8, n as usize) };
+                wr(p, 20, n);
+                Ok(Reply::None)
+            })
+            .unwrap()
+        }
         MCI_CONNECTOR => with(id, |d| connector(wave(d), r)).unwrap(),
         MCI_CONNECTION => {
             // The wave stream's connection is the amp-mixer, here the

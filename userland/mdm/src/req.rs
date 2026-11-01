@@ -34,6 +34,8 @@ pub const MCI_PUT: u32 = 44;
 pub const MCI_WHERE: u32 = 51;
 pub const MCI_WINDOW: u32 = 52;
 pub const MCI_DELETE: u32 = 53;
+pub const MCI_COPY: u32 = 56;
+pub const MCI_TO_BUFFER: u32 = 0x100;
 
 pub use mci::{MCI_NOTIFY, MCI_WAIT};
 pub const MCI_FROM: u32 = 0x4;

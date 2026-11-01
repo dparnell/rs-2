@@ -124,6 +124,12 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
             r.from = rd(p, 8);
             r.to = rd(p, 12);
         }
+        // MCI_EDIT_PARMS: the device fills pBuff and ulBufLen itself.
+        MCI_COPY if p != 0 => {
+            r.from = rd(p, 8);
+            r.to = rd(p, 12);
+            r.value = p;
+        }
         MCI_SAVE if flags & MCI_SAVE_FILE != 0 => r.element = Some(cstr(rd(p, 4) as *const u8)),
         // MCI_CONNECTOR_PARMS (hwndCallback, ulReturn, ulConnectorType,
         // ulConnectorIndex); MCI_CONNECTION_PARMS (hwndCallback,
