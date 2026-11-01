@@ -1164,16 +1164,68 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     }
 }
 
+/// GPITEST run again with RS2COLORS=256 in its environment (as a
+/// program object's Compatibility page starts a program): it sees a
+/// 256-colour display while the rest of the desktop stays in true
+/// colour. Returns its failures.
+fn emulated_256() -> u32 {
+    let mut env = alloc::vec::Vec::new();
+    unsafe {
+        let (mut tib, mut pib): (*mut Tib, *mut Pib) = (null_mut(), null_mut());
+        DosGetInfoBlocks(&mut tib, &mut pib);
+        let mut q = (*pib).pchenv;
+        while !q.is_null() && *q != 0 {
+            while *q != 0 {
+                env.push(*q);
+                q = q.add(1);
+            }
+            env.push(0);
+            q = q.add(1);
+        }
+    }
+    env.extend_from_slice(b"RS2COLORS=256\0\0");
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let mut fail = [0u8; 64];
+    let rc = unsafe { DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, 0, b"GPITEST\0EMUL256\0\0".as_ptr(), env.as_ptr(), &mut res, b"C:\\RS2\\GPITEST.EXE\0".as_ptr()) };
+    check("RS2COLORS=256: GPITEST started again", rc == 0 && res.code_terminate == 0);
+    res.code_result
+}
+
 fn main(s: &Startup) -> u32 {
-    let c256 = s.args().split(|&b| b == b' ').any(|w| w == b"256") || config_256();
+    let emul = s.args().split(|&b| b == b' ').any(|w| w == b"EMUL256");
+    let c256 = emul || s.args().split(|&b| b == b' ').any(|w| w == b"256") || config_256();
     C256.store(c256 as u32, Ordering::Relaxed);
     let hab = unsafe { WinInitialize(0) };
     HAB.store(hab, Ordering::Relaxed);
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
+    if emul {
+        // Only the display's checks, as a program with RS2COLORS=256.
+        display_checks(hab);
+        let f = FAILS.load(Ordering::Relaxed);
+        println!("RS2COLORS=256 checks: {f} failure(s)");
+        unsafe {
+            WinDestroyMsgQueue(hmq);
+            WinTerminate(hab);
+        }
+        return f;
+    }
     check("WinInitialize/WinCreateMsgQueue", hab != 0 && hmq != 0);
     self_checks(hab);
     meta_checks(hab);
     display_checks(hab);
+    if !c256 {
+        let f = emulated_256();
+        check("RS2COLORS=256: a 256-colour display for that program", f == 0);
+        // This process still sees (and draws in) true colour.
+        C256.store(0, Ordering::Relaxed);
+        unsafe {
+            let sps = WinGetScreenPS(1);
+            let mut bits = 0;
+            DevQueryCaps(GpiQueryDevice(sps), 16, 1, &mut bits);
+            check("RS2COLORS=256: other programs still see true colour", bits == 24 && GpiQueryNearestColor(sps, 0, 0x123456) == 0x123456);
+            WinReleasePS(sps);
+        }
+    }
     let pic = load_picture(b"C:\\YOSEMITE.BMP\0");
     if pic != 0 {
         check("GpiCreateBitmap from a bitmap file", true);

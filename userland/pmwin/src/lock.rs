@@ -16,6 +16,11 @@
 //! and wakes the threads it gave work to: queues it posted to, and the
 //! owners of windows it invalidated. A thread that drew is busy drawing
 //! until it waits ([`wait`]: for messages, a semaphore, a sleep).
+//!
+//! Taking the lock points the screen surface at the palette of the
+//! display the process sees (`gpiobj::own_palette`), so a program
+//! started with RS2COLORS=256 draws in 256 colours on a true-colour
+//! display.
 
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -100,6 +105,9 @@ fn acquire(t: u32, depth: u32) {
     }
     OWNER.store(t, Ordering::Relaxed);
     DEPTH.store(depth, Ordering::Relaxed);
+    // What this process draws on the screen takes the colours of the
+    // display it sees (RS2COLORS=256: a 256-colour one).
+    crate::gpiobj::own_palette();
 }
 
 fn release() {

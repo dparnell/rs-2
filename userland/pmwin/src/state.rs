@@ -253,8 +253,10 @@ pub struct State {
     /// A 256-colour display's hardware palette (None: true colour); the
     /// screen surface draws in its colours.
     pub palette8: Option<Box<gpi::palette::Physical>>,
-    /// The palette realized in it last: (pid, hpal), 0 for none.
-    pub realized: (u32, u32),
+    /// The hardware palette of the 256-colour display that programs
+    /// with RS2COLORS=256 see on a true-colour one (made when the first
+    /// such program takes the lock; see `gpiobj::own_palette`).
+    pub emul8: Option<Box<gpi::palette::Physical>>,
 }
 
 /// No presentation parameter colour.
@@ -346,7 +348,7 @@ pub fn init(surface: Surface, colors256: bool) {
         cursor: Default::default(),
         metafiles: Vec::new(),
         palette8: colors256.then(|| Box::new(gpi::palette::Physical::new())),
-        realized: (0, 0),
+        emul8: None,
     });
     let p = Box::into_raw(s);
     unsafe {
