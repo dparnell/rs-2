@@ -44,6 +44,8 @@ unsafe extern "C" {
     fn WinLockupSystem(hab: u32) -> u32;
     #[link_name = "PMWP.282"]
     fn WinUnlockSystem(hab: u32, pw: *const u8) -> u32;
+    #[link_name = "PMWIN.829"]
+    fn WinQuerySysValue(desk: u32, i: i32) -> i32;
     #[link_name = "PMWP.286"]
     fn WinOpenObject(h: u32, view: u32, flag: u32) -> u32;
     #[link_name = "PMWIN.763"]
@@ -420,8 +422,14 @@ fn new_classes() {
         let h = create(class, b"Test", b"", b"<WP_DESKTOP>");
         let o = object(h);
         check(&alloc::format!("{} object ({})", s(class), s(t)), h != 0 && o != 0 && class_title(o) == t);
+        if class == b"WPSystem" {
+            // The settings go to PM (SV_ANIMATION...) as well.
+            unsafe { WinInitialize(0) };
+            system_settings(o);
+        }
         unsafe { WinDestroyObject(h) };
     }
+    desktop_settings();
 
     let n = create(b"WPNetwork", b"Test Network", b"", b"<RS2_TESTFLDR>");
     check("WPNetwork: a folder", n >> 16 == 3 && exists(&path(n)) && class_title(object(n)) == b"Network");
@@ -461,6 +469,78 @@ fn new_classes() {
     call(po, b"wpSetAssociationFilter", &[none.as_ptr() as usize]);
     check("associations removed", call(po, b"wpQueryAssociationType", &[]) == 0 && !ini_has(b"PMWP_ASSOC_FILTER", b"*.XYZ"));
     unsafe { WinDestroyObject(d) };
+}
+
+/// M_WPSystem's wpclsQuerySetting/wpclsSetSetting: set, read back, as
+/// WPCONFIG keeps them in OS2.INI's PM_ControlPanel, and the defaults
+/// put back.
+fn system_settings(o: usize) {
+    let cls = call(o, b"somGetClass", &[]);
+    let get = |name: &[u8]| -> Option<u32> {
+        let (n, mut v) = (z(name), 0u32);
+        (call(cls, b"wpclsQuerySetting", &[n.as_ptr() as usize, &mut v as *mut u32 as usize, 4]) == 4).then_some(v)
+    };
+    let set = |name: &[u8], v: u32| -> bool {
+        let n = z(name);
+        call(cls, b"wpclsSetSetting", &[n.as_ptr() as usize, &v as *const u32 as usize]) != 0
+    };
+    let ini = |key: &[u8]| -> Vec<u8> {
+        let (a, k) = (z(b"PM_ControlPanel"), z(key));
+        let mut buf = [0u8; 16];
+        let mut n = 16u32;
+        if unsafe { PrfQueryProfileData(HINI_USER, a.as_ptr(), k.as_ptr(), buf.as_mut_ptr(), &mut n) } == 0 {
+            return Vec::new();
+        }
+        buf[..n as usize].iter().copied().take_while(|&c| c != 0).collect()
+    };
+    // NAMECLASH_RENAME, NAMECLASH_PROMPT (wpsystem.h).
+    check("wpclsSetSetting NameClash rename", set(b"NameClash", 2) && get(b"NameClash") == Some(2) && ini(b"NameClash") == b"2");
+    check("wpclsSetSetting NameClash prompt", set(b"NameClash", 0x10) && get(b"NameClash") == Some(0x10));
+    check("wpclsSetSetting LogoDisplayTime", set(b"LogoDisplayTime", 3500) && get(b"LogoDisplayTime") == Some(3500) && ini(b"LogoDisplayTime") == b"3500");
+    check("LogoDisplayTime indefinite (-1)", set(b"LogoDisplayTime", u32::MAX) && get(b"LogoDisplayTime") == Some(u32::MAX));
+    check("LOGO_DEFAULT is 2000 ms", set(b"LogoDisplayTime", (-2i32) as u32) && get(b"LogoDisplayTime") == Some(2000));
+    check("PrintScreen off and on (SV_PRINTSCREEN too)", set(b"PrintScreen", 0) && get(b"PrintScreen") == Some(0) && unsafe { WinQuerySysValue(1, 97) } == 0 && set(b"PrintScreen", 1) && unsafe { WinQuerySysValue(1, 97) } == 1);
+    check("Animation off and on (SV_ANIMATION too)", set(b"Animation", 0) && unsafe { WinQuerySysValue(1, 93) } == 0 && set(b"Animation", 1) && get(b"Animation") == Some(1));
+    check("MinButtonAppearance hide (MinButtonType 1)", set(b"MinButtonAppearance", 1) && get(b"MinButtonAppearance") == Some(1) && ini(b"MinButtonType") == b"1");
+    check("MinButtonAppearance minimize", set(b"MinButtonAppearance", 2) && get(b"MinButtonAppearance") == Some(2));
+    check("MinButtonBehavior hide, then viewer (HiddenMinWindows)", set(b"MinButtonBehavior", 1) && ini(b"HiddenMinWindows") == b"1" && set(b"MinButtonBehavior", 2) && get(b"MinButtonBehavior") == Some(2));
+    check("an unknown setting", get(b"NoSuchSetting").is_none());
+}
+
+/// The desktop's lockup and drop settings (WPDesktop's methods, IBM's
+/// PM_Lockup record).
+fn desktop_settings() {
+    let d = object(query(b"<WP_DESKTOP>"));
+    check("wpIsCurrentDesktop", d != 0 && call(d, b"wpIsCurrentDesktop", &[]) == 1);
+    check("wpSetLockupTimeout 7", call(d, b"wpSetLockupTimeout", &[7]) == 1 && call(d, b"wpQueryLockupTimeout", &[]) == 7);
+    check("wpSetLockupTimeout 0 refused", call(d, b"wpSetLockupTimeout", &[0]) == 0 && call(d, b"wpQueryLockupTimeout", &[]) == 7);
+    call(d, b"wpSetLockupFullScreen", &[0]);
+    call(d, b"wpSetLockupAutoDim", &[0]);
+    check("wpSetLockupFullScreen/AutoDim", call(d, b"wpQueryLockupFullScreen", &[]) == 0 && call(d, b"wpQueryLockupAutoDim", &[]) == 0);
+    let su = z(b"AUTOLOCKUP=YES;LOCKUPTIMEOUT=12;LOCKUPFULLSCREEN=YES;LOCKUPAUTODIM=YES;LOCKUPBACKGROUND=C:\\OS2\\BITMAP\\LOCK.BMP,T,1");
+    check("lockup setup strings", unsafe { WinSetObjectData(query(b"<WP_DESKTOP>"), su.as_ptr()) } != 0
+        && call(d, b"wpQueryAutoLockup", &[]) == 1 && call(d, b"wpQueryLockupTimeout", &[]) == 12
+        && call(d, b"wpQueryLockupFullScreen", &[]) == 1 && call(d, b"wpQueryLockupAutoDim", &[]) == 1);
+    let (a, k) = (z(b"PM_Lockup"), z(b"LockupOptions"));
+    let mut rec = [0u8; 64];
+    let mut n = 64u32;
+    let ok = unsafe { PrfQueryProfileData(HINI_USER, a.as_ptr(), k.as_ptr(), rec.as_mut_ptr(), &mut n) } != 0;
+    check("PM_Lockup LockupOptions: IBM's 46 bytes (timeout at +4)", ok && n == 46 && u16::from_le_bytes([rec[4], rec[5]]) == 12 && rec[2] == 1);
+    let (mut name, mut mode, mut scale, mut ty, mut color) = (0usize, 0u32, 0u32, 0u32, 0i32);
+    let q = somres(d, b"wpQueryLockupBackground");
+    let f: extern "C" fn(usize, *mut usize, *mut u32, *mut u32, *mut u32, *mut i32) -> u32 = unsafe { core::mem::transmute(q) };
+    f(d, &mut name, &mut mode, &mut scale, &mut ty, &mut color);
+    check("wpQueryLockupBackground (tiled image)", q != 0 && cstr(name as *const u8) == b"C:\\OS2\\BITMAP\\LOCK.BMP" && mode == 1 && ty == 2);
+    call(d, b"wpSetAutoLockup", &[0]);
+    check("wpSetAutoLockup off", call(d, b"wpQueryAutoLockup", &[]) == 0);
+    // DO_MOVE, then DO_LINK (create shadow, the default).
+    check("wpSetDefaultDropOp move", call(d, b"wpSetDefaultDropOp", &[0x20]) == 1 && call(d, b"wpQueryDefaultDropOp", &[]) == 0x20);
+    check("wpSetDefaultDropOp shadow", call(d, b"wpSetDefaultDropOp", &[0x18]) == 1 && call(d, b"wpQueryDefaultDropOp", &[]) == 0x18);
+}
+
+fn somres(o: usize, name: &[u8]) -> usize {
+    let n = z(name);
+    unsafe { somResolveByName(o, n.as_ptr()) }
 }
 
 /// A new process: the objects are woken from what was stored.
