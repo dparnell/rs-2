@@ -1,5 +1,6 @@
 Rs2WpsStart 9100
 ShlStartWorkplace 211
+ShlExceptionHandler 212
 M_WPObjectNewClass 324
 M_WPAbstractNewClass 327
 M_WPBitmapNewClass 369

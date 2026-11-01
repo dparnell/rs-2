@@ -341,6 +341,57 @@ pub extern "C" fn WinDrawPointer(hps: u32, x: i32, y: i32, h: u32, fs: u32) -> u
     .is_some() as u32
 }
 
+/// WinStretchPointer(hps, x, y, cx, cy, hptr, fs) (PMWIN 968): as
+/// WinDrawPointer, the image scaled to cx by cy (IBM's StretchPointer).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinStretchPointer(hps: u32, x: i32, y: i32, cx: i32, cy: i32, h: u32, fs: u32) -> u32 {
+    let Some(p) = get(h) else { return 0 };
+    if cx <= 0 || cy <= 0 {
+        return 0;
+    }
+    let src: &Image = if fs & DP_MINI != 0 { &p.mini } else { &p.img };
+    let mut img = src.scaled(cx, cy);
+    if fs & DP_INVERTED != 0 {
+        for v in img.px.iter_mut() {
+            if *v & icon::OPAQUE == icon::OPAQUE {
+                *v = icon::OPAQUE | !*v & 0xff_ffff;
+            }
+        }
+    }
+    gpiapi::draw(hps, |e, surface| {
+        let (dx, dy) = e.ps.world_to_device().apply(x as f64, y as f64);
+        let o = e.ps.origin;
+        icon::draw(surface, &e.ps.clip, dx as i32 + o.x, dy as i32 + o.y, &img, fs & DP_HALFTONED != 0);
+    })
+    .is_some() as u32
+}
+
+/// WinBuildPtrHandle(pData) (PMWIN 964, IBM's Win32BuildPtrHandle): a
+/// pointer of the caller from pointer or icon file data in memory (a
+/// bitmap array or a single 'CI'/'IC'/'PT'/'CP' image), as IBM's
+/// BuildPointerHandle; 0 if the data is not one. MMPARTS makes its image
+/// files' icons so.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinBuildPtrHandle(data: *const u8) -> u32 {
+    unsafe extern "C" {
+        #[link_name = "DOSCALLS.306"]
+        fn DosQueryMem(pb: *const u8, pcb: *mut u32, pfl: *mut u32) -> u32;
+    }
+    if data.is_null() {
+        return 0;
+    }
+    // The data's extent is not given: what is committed from it on.
+    let (mut cb, mut fl) = (u32::MAX, 0u32);
+    if unsafe { DosQueryMem(data, &mut cb, &mut fl) } != 0 || fl & 0x10 == 0 {
+        return 0;
+    }
+    let b = unsafe { core::slice::from_raw_parts(data, cb.min(0x40_0000) as usize) };
+    if !matches!(&b[..2.min(b.len())], b"BA" | b"CI" | b"IC" | b"PT" | b"CP") {
+        return 0;
+    }
+    from_data(b, pid())
+}
+
 /// Draw an icon (mini when `mini`) centred in `r` of a canvas.
 pub fn draw_in(c: &mut crate::draw::Canvas, r: Rect, h: u32, mini: bool, halftone: bool) -> bool {
     let Some(p) = get(h) else { return false };

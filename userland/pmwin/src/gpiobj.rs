@@ -618,6 +618,42 @@ pub fn invalidate_region(h: u32, hrgn: u32, children: bool) -> bool {
     true
 }
 
+/// WinSetClipRegion(hwnd, hrgn) (PMWIN 1043): the window draws only in
+/// a copy of the region (window coordinates); NULLHANDLE removes it. As
+/// IBM's, only for child windows: not the desktop or its top-level
+/// windows (PMERR_INVALID_HWND).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetClipRegion(h: u32, hrgn: u32) -> u32 {
+    let s = st();
+    if s.desk.get(h).is_none_or(|w| w.parent == pmwin::HWND_DESKTOP || w.parent == 0) {
+        crate::misc::set_error(0x1001); // PMERR_INVALID_HWND
+        return 0;
+    }
+    let shape = if hrgn == 0 {
+        None
+    } else {
+        let Some(g) = region(hrgn) else { return 0 };
+        let mut t = pmwin::Region::new();
+        for r in g.rects() {
+            t.add(r);
+        }
+        Some(t)
+    };
+    st().desk.set_shape(h, shape);
+    1
+}
+
+/// WinQueryClipRegion(hwnd, hrgn) (PMWIN 1044): a copy of the window's
+/// clip region in hrgn: 1 (as IBM's), 2 when it has none, 0 on error.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryClipRegion(h: u32, hrgn: u32) -> u32 {
+    let Some(w) = st().desk.get(h) else { return 0 };
+    let Some(shape) = w.shape.clone() else { return 2 };
+    let Some(d) = region(hrgn) else { return 0 };
+    *d = Region::from_rects(&shape.rects);
+    1
+}
+
 /// WinQueryUpdateRegion(hwnd, hrgn): the window's update region.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryUpdateRegion(h: u32, hrgn: u32) -> i32 {

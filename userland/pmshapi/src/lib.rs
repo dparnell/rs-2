@@ -29,6 +29,7 @@ mod exports;
 mod prf;
 mod proglist;
 mod shapi16;
+mod startapp;
 mod switch;
 
 use alloc::vec::Vec;

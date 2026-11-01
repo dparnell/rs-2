@@ -44,6 +44,10 @@ pub struct Window {
     /// WinValidateRect/Region): WinDispatchMsg can tell a window that
     /// ignored WM_PAINT from one that painted while more was invalidated.
     pub validated: u32,
+    /// WinSetClipRegion's region (window coordinates): the window draws
+    /// only there (as IBM's, it clips the window's own drawing: siblings,
+    /// children and hit testing still see its rectangle).
+    pub shape: Option<Region>,
 }
 
 impl Window {
@@ -51,8 +55,57 @@ impl Window {
         Rect::new(0, 0, self.cx, self.cy)
     }
 
+    /// The window's area in its own coordinates (its clip region, else
+    /// its rectangle).
+    pub fn area(&self) -> Region {
+        let mut g = Region::from_rect(self.rect());
+        if let Some(s) = &self.shape {
+            g = clip_to(&g, &s.rects);
+        }
+        g
+    }
+
     pub fn visible_style(&self) -> bool {
         self.style & ws::VISIBLE != 0
+    }
+}
+
+/// The parts of `g` inside any of `rects`.
+fn clip_to(g: &Region, rects: &[Rect]) -> Region {
+    let mut out = Region::new();
+    for r in rects {
+        let mut t = g.clone();
+        t.intersect(r);
+        for x in t.rects {
+            out.add(x);
+        }
+    }
+    out
+}
+
+impl Desktop {
+    /// A window's area on the screen (its clip region, else its
+    /// rectangle).
+    fn screen_area(&self, h: Hwnd) -> Region {
+        let Some(w) = self.get(h) else { return Region::new() };
+        let mut g = w.area();
+        let o = self.origin(h);
+        g.offset(o.x, o.y);
+        g
+    }
+
+    /// WinSetClipRegion: the window draws only in `shape`
+    /// (window coordinates; None: all of it).
+    pub fn set_shape(&mut self, h: Hwnd, shape: Option<Region>) {
+        let r = self.screen_rect(h);
+        let showing = self.is_showing(h);
+        if let Some(w) = self.windows.get_mut(&h) {
+            w.shape = shape;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        if showing {
+            self.invalidate_screen(r);
+        }
     }
 }
 
@@ -95,6 +148,7 @@ impl Desktop {
                 words: Vec::new(),
                 ghost: Region::new(),
                 validated: 0,
+                shape: None,
             });
         }
         d
@@ -165,6 +219,7 @@ impl Desktop {
             words: alloc::vec![0; words],
             ghost: Region::new(),
             validated: 0,
+            shape: None,
         });
         self.windows.get_mut(&parent)?.children.push(hwnd);
         self.generation = self.generation.wrapping_add(1);
@@ -244,7 +299,7 @@ impl Desktop {
         if !self.is_showing(h) {
             return Region::new();
         }
-        let mut g = Region::from_rect(self.screen_rect(h));
+        let mut g = self.screen_area(h);
         let mut cur = h;
         while let Some(w) = self.get(cur) {
             let Some(p) = self.get(w.parent) else { break };

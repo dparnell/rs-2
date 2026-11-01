@@ -95,6 +95,8 @@ aligned! {
     __a_WPTransientNewClass => crate::classdata_gen::WPTransientNewClass, 2;
     __a_WinCreateObject => crate::WinCreateObject, 5;
     __a_ShlStartWorkplace => crate::shell::ShlStartWorkplace, 2;
+    __a_ShlExceptionHandler => crate::shell::ShlExceptionHandler, 4;
+    __a_WinWaitForShell => crate::shell::WinWaitForShell, 1;
     __a_WinShutdownSystem => crate::shell::WinShutdownSystem, 2;
     __a_WinLockupSystem => crate::desktop::WinLockupSystem, 1;
     __a_WinUnlockSystem => crate::desktop::WinUnlockSystem, 2;

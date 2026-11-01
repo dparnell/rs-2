@@ -257,8 +257,20 @@ pub extern "C" fn mgr_somDumpSelfInt(mgr: usize, level: i32) {
 
 // ---- Loading class libraries ----
 
-/// The default SOMLoadModule: load the DLL and call its SOMInitModule
-/// (or, without one, `<className>NewClass`).
+/// Is a class of that name known to the class manager?
+fn class_exists(name: &[u8]) -> bool {
+    let mgr = unsafe { crate::SOMClassMgrObject };
+    if mgr == 0 {
+        return false;
+    }
+    let cid = id::static_id(name);
+    crate::call_mm(mgr, mm::CLASS_FROM_ID, &[mgr as u32, cid as u32]) != 0
+}
+
+/// The default SOMLoadModule: load the DLL and call its SOMInitModule;
+/// when there is none, or the class is still not there after it (a DLL
+/// whose SOMInitModule makes only some of its classes: MMPARTS's
+/// MMBitmap), its `<className>NewClass` ("::" as "_"), as IBM's does.
 pub extern "C" fn load_module(class_name: *const u8, file: *const u8, func: *const u8, major: i32, minor: i32, h: *mut u32) -> i32 {
     let mut hmod = 0u32;
     let mut fail = [0u8; 64];
@@ -269,13 +281,32 @@ pub extern "C" fn load_module(class_name: *const u8, file: *const u8, func: *con
     if !h.is_null() {
         unsafe { *h = hmod };
     }
+    if class_name.is_null() && func.is_null() {
+        return 0;
+    }
     let mut p: usize = 0;
     if !func.is_null() && unsafe { os2::DosQueryProcAddr(hmod, 0, func, &mut p) } == 0 && p != 0 {
         let f: extern "C" fn(i32, i32, *const u8) = unsafe { core::mem::transmute(p) };
         f(major, minor, class_name);
+        if class_name.is_null() || class_exists(unsafe { cstr(class_name) }) {
+            return 0;
+        }
+    }
+    if class_name.is_null() {
         return 0;
     }
-    let mut name: Vec<u8> = unsafe { cstr(class_name) }.to_vec();
+    let mut name: Vec<u8> = Vec::new();
+    let cn = unsafe { cstr(class_name) };
+    let mut i = 0;
+    while i < cn.len() {
+        if cn[i] == b':' && cn.get(i + 1) == Some(&b':') {
+            name.push(b'_');
+            i += 2;
+        } else {
+            name.push(cn[i]);
+            i += 1;
+        }
+    }
     name.extend_from_slice(b"NewClass\0");
     if unsafe { os2::DosQueryProcAddr(hmod, 0, name.as_ptr(), &mut p) } == 0 && p != 0 {
         let f: extern "C" fn(i32, i32) -> usize = unsafe { core::mem::transmute(p) };

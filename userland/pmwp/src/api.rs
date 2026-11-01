@@ -273,18 +273,59 @@ pub extern "C" fn WinDeregisterObjectClass(class: *const u8) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinReplaceObjectClass(old: *const u8, new: *const u8, replace: u32) -> u32 {
+    if let Some(r) = remote(ipc::OP_REPLACE, &[replace], &[cstr(old), cstr(new)]) {
+        return r;
+    }
     let (o, n) = (cstr(old).to_vec(), cstr(new).to_vec());
-    let key = b"PM_Objects:ReplaceList";
-    if replace != 0 {
-        prf_write(HINI_SYSTEM, key, &o, Some(&z(&n)));
-    } else {
-        prf_write(HINI_SYSTEM, key, &o, None);
+    if o.is_empty() || n.is_empty() {
+        return 0;
+    }
+    if !update_replace_list(&o, &n, replace != 0) {
+        return 0;
     }
     if wps::active() && replace != 0 {
-        let (zo, zn) = (z(&o), z(&n));
-        som::scm_call(11, &[zo.as_ptr() as usize, zn.as_ptr() as usize]);
+        replace_class(&o, &n);
     }
     1
+}
+
+/// OS2.INI's `PM_Workplace:ReplaceList`, as IBM's PMWP keeps it: the key
+/// is the class replaced, the value the classes replacing it (each
+/// NUL-terminated, the last in effect). False when `remove` finds nothing.
+pub fn update_replace_list(old: &[u8], new: &[u8], add: bool) -> bool {
+    let mut l: Vec<Vec<u8>> = prf_read(HINI_USER, REPLACE_LIST, old)
+        .unwrap_or_default()
+        .split(|&c| c == 0)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_vec())
+        .collect();
+    let had = l.len();
+    l.retain(|c| !eq_nocase(c, new));
+    if !add && l.len() == had {
+        return false;
+    }
+    if add {
+        l.push(new.to_vec());
+    }
+    let mut v = Vec::new();
+    for c in &l {
+        v.extend_from_slice(c);
+        v.push(0);
+    }
+    prf_write(HINI_USER, REPLACE_LIST, old, if l.is_empty() { None } else { Some(&v) })
+}
+
+pub const REPLACE_LIST: &[u8] = b"PM_Workplace:ReplaceList";
+
+/// The replacement takes effect: lookups of `old` give `new` (SOM's
+/// somSubstituteClass), when `new` loads.
+pub fn replace_class(old: &[u8], new: &[u8]) -> bool {
+    if som::find_class(new) == 0 {
+        return false;
+    }
+    let (zo, zn) = (z(old), z(new));
+    som::scm_call(11, &[zo.as_ptr() as usize, zn.as_ptr() as usize]);
+    true
 }
 
 /// The classes PMWP.DLL itself provides, which are always there.

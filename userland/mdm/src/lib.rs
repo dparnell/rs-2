@@ -51,7 +51,24 @@ pub extern "C" fn _start(_hmod: u32, flag: u32) -> u32 {
 pub extern "C" fn mciSendCommand(dev: u32, msg: u32, flags: u32, p: u32, user: u32) -> u32 {
     let (dev, msg, user) = (dev as u16, msg & 0xffff, user as u16);
     let r = send_command(dev, msg, flags, p, user);
-    r.unwrap_or_else(|e| e)
+    let rc = r.unwrap_or_else(|e| e);
+    if tracing() {
+        let w: Vec<u32> = if p != 0 { (0..7).map(|i| rd(p, i * 4)).collect() } else { Vec::new() };
+        sys::trace(format_args!("MDM: mciSendCommand({dev}, {msg}, {flags:#x}, {p:#x} {w:x?}) -> {rc}"));
+    }
+    rc
+}
+
+/// `SET MDMTRACE=1`: the commands and their results on the serial port.
+fn tracing() -> bool {
+    static mut T: u8 = 2;
+    unsafe {
+        if T == 2 {
+            let mut v: *const u8 = core::ptr::null();
+            T = (os2::DosScanEnv(b"MDMTRACE\0".as_ptr(), &mut v) == 0) as u8;
+        }
+        T == 1
+    }
 }
 
 fn base_req(msg: u32, flags: u32, p: u32, user: u16) -> Req {
@@ -107,6 +124,12 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
             r.from = rd(p, 8);
             r.to = rd(p, 12);
         }
+        // MCI_EDIT_PARMS: the device fills pBuff and ulBufLen itself.
+        MCI_COPY if p != 0 => {
+            r.from = rd(p, 8);
+            r.to = rd(p, 12);
+            r.value = p;
+        }
         MCI_SAVE if flags & MCI_SAVE_FILE != 0 => r.element = Some(cstr(rd(p, 4) as *const u8)),
         // MCI_CONNECTOR_PARMS (hwndCallback, ulReturn, ulConnectorType,
         // ulConnectorIndex); MCI_CONNECTION_PARMS (hwndCallback,
@@ -126,6 +149,11 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
             r.text = (flags & MCI_VID_WINDOW_TEXT != 0).then(|| cstr(rd(p, 12) as *const u8));
         }
         MCI_PUT => r.rect = [rd(p, 4) as i32, rd(p, 8) as i32, rd(p, 12) as i32, rd(p, 16) as i32],
+        // MCI_POSITION_PARMS (hwndCallback, ulUnits, usUserParm).
+        MCI_SET_POSITION_ADVISE if p != 0 => {
+            r.value = rd(p, 4);
+            r.item = rd16(p, 8) as u32;
+        }
         _ => {}
     }
     let reply = dev::command(id, &r)?;
@@ -249,6 +277,19 @@ fn sysinfo_item(item: u32, q: u32) -> Result<u32, u32> {
             }
             put_str(q, 0, &install_name(t), 20);
         }
+        // The device for a file (an item IBM's MDM answers but the
+        // Toolkit's headers leave out; Open Class's IMMDevice asks it for
+        // MPPM's files): { PSZ pszFile; CHAR szDevice[20] }, the device
+        // its extension is played on ("waveaudio01", as IBM's GetName
+        // writes it).
+        0x8000 => {
+            let f = rd(q, 0);
+            if f == 0 {
+                return Err(MCIERR_MISSING_PARAMETER);
+            }
+            let t = devtype_for_file(&cstr(f as *const u8)).filter(|t| INSTALLED.contains(t)).ok_or(MCIERR_DEVICE_NOT_FOUND)?;
+            put_str(q, 4, &alloc::format!("{}01", devtype_name(t).unwrap_or("other")), 20);
+        }
         // Installing, deleting and changing devices.
         0x1 | 0x4 | 0x8 | 0x20 | 0x80 | 0x200 | 0x800 | 0x2000 => return Err(MCIERR_UNSUPPORTED_FUNCTION),
         _ => return Err(MCIERR_INVALID_ITEM_FLAG),
@@ -325,6 +366,14 @@ pub extern "C" fn mciSendString(cmd: *const u8, ret: *mut u8, cb: u32, hwnd: u32
 }
 
 fn send_string(s: &str, hwnd: u32, user: u16) -> Result<String, u32> {
+    let r = send_string_inner(s, hwnd, user);
+    if tracing() {
+        sys::trace(format_args!("MDM: mciSendString({s:?}, hwnd {hwnd:#x}, user {user}) -> {r:?}"));
+    }
+    r
+}
+
+fn send_string_inner(s: &str, hwnd: u32, user: u16) -> Result<String, u32> {
     let c = mci::parse(s)?;
     let mut a = c.args.clone();
     let mut r = Req { flags: c.flags, callback: hwnd, user, from_string: true, ..Default::default() };

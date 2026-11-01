@@ -40,6 +40,8 @@ aligned! {
     __a_PrfCreateGroup => crate::proglist::PrfCreateGroup, 3;
     __a_PrfDestroyGroup => crate::proglist::PrfDestroyGroup, 2;
     __a_PrfQueryProgramHandle => crate::proglist::PrfQueryProgramHandle, 5;
+    __a_WinStartApp => crate::startapp::WinStartApp, 5;
+    __a_WinTerminateApp => crate::startapp::WinTerminateApp, 1;
     __a_WinAddSwitchEntry => crate::switch::WinAddSwitchEntry, 1;
     __a_WinCreateSwitchEntry => crate::switch::WinCreateSwitchEntry, 2;
     __a_WinChangeSwitchEntry => crate::switch::WinChangeSwitchEntry, 2;

@@ -166,8 +166,66 @@ writes through an uninitialised pointer when DosScanEnv does not find it.
 MINSTALL.EXE (disk 11's MMTEMP) shows its installation window; it looks
 for its CONTROL.SCR in its own directory (start it with its path, as the
 installer does) and has nothing to install from without the packed
-MMPM/2 source. MPPMNEW.EXE needs MMPARTS.DLL, which is built on OpenDoc
-(OS2OOOC, OS2OM30) and DSOM; rs2 has neither.
+MMPM/2 source. MPPMNEW.EXE and IBM's multimedia Workplace Shell classes
+(MMPARTS.DLL) work: see below.
+
+### MMPARTS.DLL and MPPM
+
+MMPARTS.DLL (in two pieces on the CD: disk 10's `MMPARTS.DL1` followed
+by disk 11's `MMPARTS.DL2`, 1,606,604 bytes) holds IBM's multimedia
+Workplace Shell classes (MMDataFile, MMAudio, MMWAV, MMVOC, MMImage,
+MMJPG, MMTarga and the other sound, image and video classes, MMFolder,
+the device objects) and the players, editors and viewers they open. It
+is not OpenDoc: it is built with VisualAge C++'s Open Class library,
+whose runtime DLLs are on the CD (OS2OM30.DLL, OS2OOOC.DLL, OS2OOR3U.DLL,
+IBM's: used as they are where they are installed), with SW.DLL,
+MMPMCRTS.DLL, DIVE.DLL and MMPTMRI.DLL (its texts). How the shell takes
+its classes is in [WPS.md](WPS.md#ibms-multimedia-classes-mmparts).
+MPPMNEW.EXE (installed as `\MMOS2\MPPM.EXE`; IBM's copies of it named
+CDPM, WEPM, AB, IB, VB open a device of their own) opens a file in
+MMPARTS's player: `MPPM C:\MMOS2\SOUNDS\DSK_STRT.WAV` shows the player
+window with the sound's length, and its play button plays it (checked
+in QEMU with `--sound hda --sound-wav`: the 4.5 seconds of sound came
+out). Without a file it calls MMPARTS's DisplayFinder (not tried).
+
+What Open Class's multimedia classes (IMMDevice and friends, compiled
+into MMPARTS) needed of MDM, each as IBM's MDM does it (studied in
+Ghidra in IBM's MMPM.DLL, which holds MDM):
+
+- **MM_MCIPASSDEVICE.** A new device instance becomes the active one and
+  its callback window gets `MM_MCIPASSDEVICE` (device ID, MCI_GAINING_USE)
+  (IBM's MakeInstanceActive and mdmPassDeviceNotify). IMMDevice counts
+  a device open only after it: without it every viewer gave up with
+  "Device Not Open".
+- **MCI_SYSINFO_ITEM 0x8000**, an item the Toolkit's headers leave out:
+  `{ PSZ pszFile; CHAR szDevice[20] }`, the device a file plays on by its
+  extension, as `waveaudio01` (IBM's mmFindExt and GetName). MPPM's
+  generic player finds the device for its file so.
+- **SET POSITION ADVISE** (`MCI_SET_POSITION_ADVISE_ON`/`OFF`,
+  MCI_POSITION_PARMS): while the wave device plays, `MM_MCIPOSITIONCHANGE`
+  (user word and device ID, the position) whenever the position reaches
+  another multiple of the units; the player's position field and slider
+  follow it.
+- **COPY TO BUFFER** on the wave device (MCI_EDIT_PARMS): the samples
+  from FROM to TO in the caller's buffer; a buffer too small gets the
+  size needed and `MCIERR_INVALID_BUFFER` (IBM's StartCopy). The wave
+  editor reads its samples so. Copying to the clipboard, CUT, PASTE,
+  UNDO and REDO are not supported.
+- The amp-mixer's STATUS items on the wave device (IBM's passes them to
+  its amp-mixer; rs2 has none): treble, bass, balance, gain and mid at
+  50, pitch 0.
+
+`SET MDMTRACE=1` writes every mciSendCommand (with its parameter
+block's first words) and mciSendString and what they return to the
+serial port; MMPARTS's own log comes with `SET MCICPPLG=1`.
+
+**Not yet:** the wave editor (an MMAudio object's default view) opens
+with its menus, buttons and the file, but draws no waveform and shows
+"IVBase object" in its selection fields; the image classes' views need
+MMIO's installable I/O procedures (JPEGIO and the others, registered in
+MMPM2.INI), which rs2's MMIO does not load; the digital video and MIDI
+viewers were not tried. The Multimedia folder and templates that
+MINSTALL makes (FOURMEG.SCR) are not made.
 
 ### Recording
 

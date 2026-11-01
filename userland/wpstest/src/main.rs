@@ -59,6 +59,10 @@ unsafe extern "C" {
     fn SplQmEndDoc(h: u32) -> u32;
     #[link_name = "PMSPL.306"]
     fn SplQmClose(h: u32) -> u32;
+    #[link_name = "PMWP.219"]
+    fn WinReplaceObjectClass(old: *const u8, new: *const u8, replace: u32) -> u32;
+    #[link_name = "PMWP.285"]
+    fn WinSaveObject(h: u32, async_: u32) -> u32;
     #[link_name = "PMWP.286"]
     fn WinOpenObject(h: u32, view: u32, flag: u32) -> u32;
     #[link_name = "PMWIN.763"]
@@ -678,6 +682,69 @@ fn dir_names(dir: &[u8]) -> Vec<Vec<u8>> {
     out
 }
 
+/// An extended attribute's value (with its type word), empty without one.
+fn ea_value(path: &[u8], ea: &[u8]) -> Vec<u8> {
+    let path = z(path);
+    let mut gea = [0u8; 40];
+    gea[0..4].copy_from_slice(&40u32.to_le_bytes());
+    gea[8] = ea.len() as u8;
+    gea[9..9 + ea.len()].copy_from_slice(ea);
+    let mut fea = alloc::vec![0u8; 4096];
+    fea[0..4].copy_from_slice(&4096u32.to_le_bytes());
+    let eaop: [u32; 3] = [gea.as_ptr() as u32, fea.as_mut_ptr() as u32, 0];
+    // FIL_QUERYEASFROMLIST
+    if unsafe { DosQueryPathInfo(path.as_ptr(), 3, eaop.as_ptr() as *mut u8, 12) } != 0 {
+        return Vec::new();
+    }
+    let (cb_name, cb_value) = (fea[9] as usize, u16::from_le_bytes([fea[10], fea[11]]) as usize);
+    fea[13 + cb_name..13 + cb_name + cb_value].to_vec()
+}
+
+/// `MMPARTS` (a WPSTEST SHELL command, with the shell running): IBM's
+/// multimedia classes (MMPARTS.DLL, an IBM file: only where it is
+/// installed) registered in the shell, an MMAudio object made on the
+/// desktop, a .WAV file woken as MMWAV (its instance filter) and saved
+/// with that class; a class whose DLL is missing is refused and the
+/// shell goes on.
+fn mmparts() {
+    let reg = |c: &[u8], d: &[u8]| {
+        let (c, d) = (z(c), z(d));
+        unsafe { WinRegisterObjectClass(c.as_ptr(), d.as_ptr()) }
+    };
+    check("a class from a missing DLL is not registered", reg(b"NoSuchClass", b"NOSUCHDL") == 0);
+    check("the shell goes on after it", query(b"<WP_DESKTOP>") != 0);
+    if reg(b"MMDataFile", b"MMPARTS") == 0 {
+        println!("wpstest: MMPARTS.DLL not installed: its checks skipped");
+        return;
+    }
+    check("MMAudio registered", reg(b"MMAudio", b"MMPARTS") != 0);
+    check("MMWAV registered", reg(b"MMWAV", b"MMPARTS") != 0);
+    let h = create(b"MMAudio", b"MMTest Sound", b"OBJECTID=<RS2_MMTEST>", b"<WP_DESKTOP>");
+    check("an MMAudio object on the desktop", h != 0);
+    let mut path = [0u8; 260];
+    let ok = h != 0 && unsafe { WinQueryObjectPath(h, path.as_mut_ptr(), path.len() as u32) } != 0;
+    let p = cstr(path.as_ptr());
+    check("its file", ok && !p.is_empty());
+    let has = |v: &[u8], n: &[u8]| v.windows(n.len()).any(|w| w == n);
+    check("its .CLASSINFO names MMAudio", ok && has(&ea_value(&p, b".CLASSINFO"), b"MMAudio"));
+    let wav = b"C:\\MMOS2\\SOUNDS\\DSK_STRT.WAV";
+    let hw = query(wav);
+    check("a .WAV file's object", hw != 0);
+    check("saved", hw != 0 && unsafe { WinSaveObject(hw, 0) } != 0);
+    check("as MMWAV (MMWAV's instance filter *.WAV)", has(&ea_value(wav, b".CLASSINFO"), b"MMWAV"));
+    check("the MMAudio object deleted", h != 0 && unsafe { WinDestroyObject(h) } != 0);
+    // WPBitmap replaced by MMBitmap, as MINSTALL does it: bitmap files
+    // wake as MMBitmap.
+    let (o, n) = (z(b"WPBitmap"), z(b"MMBitmap"));
+    check("MMBitmap registered", reg(b"MMBitmap", b"MMPARTS") != 0);
+    check("WinReplaceObjectClass WPBitmap with MMBitmap", unsafe { WinReplaceObjectClass(o.as_ptr(), n.as_ptr(), 1) } != 0);
+    let bmp = b"C:\\IBM\\APPS\\DEFAULT.BMP";
+    let hb = query(bmp);
+    check("a bitmap file's object", hb != 0 && unsafe { WinSaveObject(hb, 0) } != 0);
+    check("of the replacing class MMBitmap", has(&ea_value(bmp, b".CLASSINFO"), b"MMBitmap"));
+    check("the replacement undone", unsafe { WinReplaceObjectClass(o.as_ptr(), n.as_ptr(), 0) } != 0);
+}
+
 /// A file's title: its .LONGNAME EA (EAT_ASCII), else its name.
 fn long_name(dir: &[u8], name: &[u8]) -> Vec<u8> {
     let path = z(&[dir, b"\\", name].concat());
@@ -855,6 +922,19 @@ fn shell(args: &[u8]) -> u32 {
                 let ok = h != 0 && unsafe { WinSetObjectData(h, setup.as_ptr()) } != 0;
                 println!("wpstest: set {}: {}", s(arg(1)), ok);
             }
+            // REGISTER dll class: WinRegisterObjectClass in the shell.
+            b"REGISTER" => {
+                let (c, d) = (z(arg(2)), z(arg(1)));
+                println!("wpstest: register {} from {}: {}", s(arg(2)), s(arg(1)), unsafe { WinRegisterObjectClass(c.as_ptr(), d.as_ptr()) });
+            }
+            // CREATE class title location setup: WinCreateObject (`|` in
+            // the setup string for `;`, which ends the command).
+            b"CREATE" => {
+                let setup: Vec<u8> = w.get(4..).unwrap_or(&[]).join(&b' ').iter().map(|&c| if c == b'|' { b';' } else { c }).collect();
+                let h = create(arg(1), arg(2), &setup, arg(3));
+                println!("wpstest: create {} {}: {:#x}", s(arg(1)), s(arg(2)), h);
+            }
+            b"MMPARTS" => mmparts(),
             b"LOCK" => println!("wpstest: WinLockupSystem: {}", unsafe { WinLockupSystem(0) }),
             b"UNLOCK" => {
                 let p = z(arg(1));

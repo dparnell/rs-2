@@ -20,6 +20,9 @@ pub const MCI_SAVE: u32 = 16;
 pub const MCI_SET: u32 = 12;
 pub const MCI_SYSINFO: u32 = 15;
 pub const MCI_CUE: u32 = 17;
+pub const MCI_SET_POSITION_ADVISE: u32 = 20;
+pub const MCI_SET_POSITION_ADVISE_ON: u32 = 0x100;
+pub const MCI_SET_POSITION_ADVISE_OFF: u32 = 0x200;
 pub const MCI_LOAD: u32 = 22;
 pub const MCI_ACQUIREDEVICE: u32 = 23;
 pub const MCI_RELEASEDEVICE: u32 = 24;
@@ -31,6 +34,8 @@ pub const MCI_PUT: u32 = 44;
 pub const MCI_WHERE: u32 = 51;
 pub const MCI_WINDOW: u32 = 52;
 pub const MCI_DELETE: u32 = 53;
+pub const MCI_COPY: u32 = 56;
+pub const MCI_TO_BUFFER: u32 = 0x100;
 
 pub use mci::{MCI_NOTIFY, MCI_WAIT};
 pub const MCI_FROM: u32 = 0x4;

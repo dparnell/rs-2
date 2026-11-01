@@ -86,22 +86,28 @@ fn env_name(s: &[u8]) -> Vec<u8> {
 
 /// The environment of a new session: this process's, with `extra`'s
 /// strings in place of those of the same names (None: nothing extra,
-/// the session inherits it).
+/// the session inherits it). The shell's own WORKPLACE_PROCESS=YES
+/// (PMSHELL sets it for the shell's process) goes on as
+/// WORKPLACE__PROCESS=NO, as IBM's BuildEnv passes it: a program that
+/// loads a class DLL (MPPMNEW loads MMPARTS) must not take itself for
+/// the shell.
 fn env_block(extra: &[u8]) -> Option<Vec<u8>> {
-    if extra.is_empty() {
-        return None;
-    }
-    let extra: Vec<&[u8]> = extra.split(|&c| c == 0).filter(|s| !s.is_empty()).collect();
-    let names: Vec<Vec<u8>> = extra.iter().map(|s| env_name(s)).collect();
+    const WP: &[u8] = b"WORKPLACE_PROCESS=YES";
     let own = unsafe {
         let mut tib = core::ptr::null_mut();
         let mut pib: *mut os2::Pib = core::ptr::null_mut();
         os2::DosGetInfoBlocks(&mut tib, &mut pib);
         env_strings((*pib).pchenv)
     };
+    let shell = own.split(|&c| c == 0).any(|s| s.eq_ignore_ascii_case(WP));
+    if extra.is_empty() && !shell {
+        return None;
+    }
+    let extra: Vec<&[u8]> = extra.split(|&c| c == 0).filter(|s| !s.is_empty()).collect();
+    let names: Vec<Vec<u8>> = extra.iter().map(|s| env_name(s)).collect();
     let mut b = Vec::new();
     for s in own.split(|&c| c == 0).filter(|s| !s.is_empty() && !names.contains(&env_name(s))).chain(extra) {
-        b.extend_from_slice(s);
+        b.extend_from_slice(if s.eq_ignore_ascii_case(WP) { b"WORKPLACE__PROCESS=NO" } else { s });
         b.push(0);
     }
     b.push(0);

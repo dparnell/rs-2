@@ -28,3 +28,5 @@ Rs2QueryIdleTime 9031
 Rs2AvioPaint 9032
 Rs2GreEntry 9033
 WinXxCreateHeap2 1072
+WinBuildPtrHandle 964
+WinJiggleMouse 1005

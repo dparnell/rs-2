@@ -22,6 +22,8 @@ unsafe extern "C" {
     fn WinLoadPointer(desk: u32, hmod: u32, id: u32) -> u32;
     #[link_name = "PMWIN.9004"]
     fn Rs2LoadFileIcon(path: *const u8, private: u32) -> u32;
+    #[link_name = "PMWIN.964"]
+    fn WinBuildPtrHandle(data: *const u8) -> u32;
 }
 
 pub const OBJSTYLE_NOMOVE: u32 = 0x2;
@@ -954,7 +956,44 @@ const SPTR_FILE: i32 = 19;
 const SPTR_FOLDER: i32 = 20;
 const SPTR_PROGRAM: i32 = 22;
 
+/// The classes' icons from their wpclsQueryIconData: (class, pointer).
+static mut CLASS_ICONS: Vec<(usize, u32)> = Vec::new();
+
+/// A class's icon from its wpclsQueryIconData (an ICONINFO: an icon
+/// resource, an icon file or icon file data), as IBM's M_WPObject's
+/// wpclsQueryIcon makes it and keeps it; 0 when the class gives none
+/// (PMWP's own classes: their icons are below).
+pub fn class_icon_from_data(cls: usize) -> u32 {
+    if let Some(&(_, h)) = unsafe { (*(&raw const CLASS_ICONS)).iter().find(|e| e.0 == cls) } {
+        return h;
+    }
+    let n = wps::call("M_WPObject", m::M_WPObject::wpclsQueryIconData, &[cls, 0]) as usize;
+    let mut h = 0;
+    if (28..0x10000).contains(&n) {
+        let mut b = alloc::vec![0u32; n.div_ceil(4)];
+        b[0] = n as u32;
+        if wps::call("M_WPObject", m::M_WPObject::wpclsQueryIconData, &[cls, b.as_mut_ptr() as usize]) != 0 {
+            // ICONINFO: cb, fFormat, pszFileName, hmod, resid, cbIconData, pIconData.
+            h = match b[1] {
+                // ICON_FILE
+                1 if b[2] != 0 => unsafe { Rs2LoadFileIcon(b[2] as *const u8, 0) },
+                // ICON_RESOURCE
+                2 => unsafe { WinLoadPointer(1, b[3], b[4]) },
+                // ICON_DATA
+                3 if b[6] != 0 => unsafe { WinBuildPtrHandle(b[6] as *const u8) },
+                _ => 0,
+            };
+        }
+    }
+    unsafe { (*(&raw mut CLASS_ICONS)).push((cls, h)) };
+    h
+}
+
 extern "C" fn wpclsQueryIcon(cls: usize) -> u32 {
+    let h = class_icon_from_data(cls);
+    if h != 0 {
+        return h;
+    }
     let mut id = SPTR_APPICON;
     for c in ancestors_of(cls) {
         // rs2's own icons for the classes that have one (icons.rs).

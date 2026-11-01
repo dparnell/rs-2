@@ -196,7 +196,7 @@ fn flat32(sp: &vm::AddressSpace, f: &TrapFrame) -> bool {
 pub fn deliver(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     let (code, info) = translate(f);
     if super::tracing() {
-        crate::trace!("    exception {code:x} {info:x?} at {:x}:{:x} vector {} error {:x}", f.cs, f.rip, f.vector, f.error);
+        crate::trace!("    exception {code:x} {info:x?} at {:x}:{:x} vector {} error {:x} esp {:x} ebp {:x}", f.cs, f.rip, f.vector, f.error, f.rsp, f.rbp);
     }
     // A debugger sees it first (DBG_X_FIRST_CHANCE).
     if super::debug::exception(f, p, t, code, &info, false) {
@@ -221,6 +221,12 @@ pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, fl
     if head == xcpt::END_OF_CHAIN || head == 0 {
         return false;
     }
+    // A handler that jumped out instead of returning (IBM's
+    // ShlExceptionHandler goes back to ShlSaveEnv's caller, as longjmp)
+    // left its dispatch: one whose records are below the stack pointer
+    // now is over.
+    let esp = f.rsp as u32;
+    t.xcpt.lock().retain(|d| d.report > esp);
     let nested = !t.xcpt.lock().is_empty();
     let flags = flags | if nested { xcpt::EH_NESTED_CALL } else { 0 };
     let Some((report, context)) = build_records(&mut sp, f, code, flags, info, address) else { return false };
