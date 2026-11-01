@@ -259,5 +259,7 @@ forward! {
     WinWaitMsg = "PMWIN.897";
     WinWindowFromID = "PMWIN.899";
     WinWindowFromPoint = "PMWIN.900";
+    WinSetClipRegion = "PMWIN.1043";
+    WinQueryClipRegion = "PMWIN.1044";
     WinXxCreateHeap2 = "PMWIN.1072";
 }

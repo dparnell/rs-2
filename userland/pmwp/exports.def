@@ -75,6 +75,7 @@ WPTransientNewClass=__a_WPTransientNewClass @42
 WinCreateObject=__a_WinCreateObject @281
 ShlStartWorkplace=__a_ShlStartWorkplace @211
 ShlExceptionHandler=__a_ShlExceptionHandler @212
+WinWaitForShell=__a_WinWaitForShell @512
 WinShutdownSystem=__a_WinShutdownSystem @149
 WinLockupSystem=__a_WinLockupSystem @283
 WinUnlockSystem=__a_WinUnlockSystem @282

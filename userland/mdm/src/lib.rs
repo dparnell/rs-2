@@ -51,7 +51,23 @@ pub extern "C" fn _start(_hmod: u32, flag: u32) -> u32 {
 pub extern "C" fn mciSendCommand(dev: u32, msg: u32, flags: u32, p: u32, user: u32) -> u32 {
     let (dev, msg, user) = (dev as u16, msg & 0xffff, user as u16);
     let r = send_command(dev, msg, flags, p, user);
-    r.unwrap_or_else(|e| e)
+    let rc = r.unwrap_or_else(|e| e);
+    if tracing() {
+        sys::trace(format_args!("MDM: mciSendCommand({dev}, {msg}, {flags:#x}, {p:#x}) -> {rc}"));
+    }
+    rc
+}
+
+/// `SET MDMTRACE=1`: the commands and their results on the serial port.
+fn tracing() -> bool {
+    static mut T: u8 = 2;
+    unsafe {
+        if T == 2 {
+            let mut v: *const u8 = core::ptr::null();
+            T = (os2::DosScanEnv(b"MDMTRACE\0".as_ptr(), &mut v) == 0) as u8;
+        }
+        T == 1
+    }
 }
 
 fn base_req(msg: u32, flags: u32, p: u32, user: u16) -> Req {
@@ -126,6 +142,11 @@ fn send_command(id: u16, msg: u32, flags: u32, p: u32, user: u16) -> Result<u32,
             r.text = (flags & MCI_VID_WINDOW_TEXT != 0).then(|| cstr(rd(p, 12) as *const u8));
         }
         MCI_PUT => r.rect = [rd(p, 4) as i32, rd(p, 8) as i32, rd(p, 12) as i32, rd(p, 16) as i32],
+        // MCI_POSITION_PARMS (hwndCallback, ulUnits, usUserParm).
+        MCI_SET_POSITION_ADVISE if p != 0 => {
+            r.value = rd(p, 4);
+            r.item = rd16(p, 8) as u32;
+        }
         _ => {}
     }
     let reply = dev::command(id, &r)?;
@@ -325,6 +346,14 @@ pub extern "C" fn mciSendString(cmd: *const u8, ret: *mut u8, cb: u32, hwnd: u32
 }
 
 fn send_string(s: &str, hwnd: u32, user: u16) -> Result<String, u32> {
+    let r = send_string_inner(s, hwnd, user);
+    if tracing() {
+        sys::trace(format_args!("MDM: mciSendString({s:?}, hwnd {hwnd:#x}, user {user}) -> {r:?}"));
+    }
+    r
+}
+
+fn send_string_inner(s: &str, hwnd: u32, user: u16) -> Result<String, u32> {
     let c = mci::parse(s)?;
     let mut a = c.args.clone();
     let mut r = Req { flags: c.flags, callback: hwnd, user, from_string: true, ..Default::default() };

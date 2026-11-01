@@ -10,6 +10,13 @@ use crate::obj::{self, OPEN_DEFAULT};
 use crate::pm::*;
 use crate::{install, ipc, wps};
 
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.325"]
+    fn DosOpenEventSem(name: *const u8, phev: *mut u32) -> u32;
+    #[link_name = "DOSCALLS.330"]
+    fn DosQueryEventSem(hev: u32, count: *mut u32) -> u32;
+}
+
 const STARTED: &[u8] = b"WPS_STARTUP\0";
 
 fn startup_wanted() -> bool {
@@ -41,6 +48,60 @@ fn run_startup() -> u32 {
     n
 }
 
+// ---- WinWaitForShell ----
+//
+// The shell posts an event semaphore for each stage of its start: the
+// desktop created (WWFS_DESKTOPCREATED 1), opened (2) and populated (3);
+// WinWaitForShell waits for one, or with WWFS_QUERY (0x80000000) only
+// asks whether it is posted.
+
+fn stage_sem(n: u32) -> [u8; 24] {
+    let mut s = *b"\\SEM32\\RS2WPS\\DESKTOP0\0\0";
+    s[21] = b'0' + n as u8;
+    s
+}
+
+fn stages_create() {
+    for n in 1..=3 {
+        let mut h = 0;
+        unsafe { os2::DosCreateEventSem(stage_sem(n).as_ptr(), &mut h, 0, 0) };
+    }
+}
+
+fn stage_reached(n: u32) {
+    let mut h = 0;
+    if unsafe { DosOpenEventSem(stage_sem(n).as_ptr(), &mut h) } == 0 {
+        unsafe {
+            os2::DosPostEventSem(h);
+            os2::DosCloseEventSem(h);
+        }
+    }
+}
+
+/// WinWaitForShell(ulEvent) (PMWP 512): TRUE once the shell's desktop
+/// is created, opened or populated (waiting for it, unless WWFS_QUERY);
+/// FALSE for other events or without a shell.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWaitForShell(event: u32) -> u32 {
+    const WWFS_QUERY: u32 = 0x8000_0000;
+    let n = event & !WWFS_QUERY;
+    if !(1..=3).contains(&n) {
+        return 0;
+    }
+    let mut h = 0;
+    if unsafe { DosOpenEventSem(stage_sem(n).as_ptr(), &mut h) } != 0 {
+        return 0;
+    }
+    let ok = if event & WWFS_QUERY != 0 {
+        let mut count = 0;
+        (unsafe { DosQueryEventSem(h, &mut count) }) == 0 && count != 0
+    } else {
+        (unsafe { os2::DosWaitEventSem(h, u32::MAX) }) == 0
+    };
+    unsafe { os2::DosCloseEventSem(h) };
+    ok as u32
+}
+
 /// The registered classes (OS2SYS.INI's class table) are loaded when the
 /// shell starts, as on OS/2: their DLLs set themselves up (MMPARTS's
 /// SOMInitModule) and their instance types and filters choose the
@@ -68,6 +129,7 @@ pub extern "C" fn ShlStartWorkplace(hab: u32, _hmq: u32) -> u32 {
     if !wps::start() {
         return 0;
     }
+    stages_create();
     install::run();
     load_registered_classes();
     crate::printer::sync_printers();
@@ -76,7 +138,11 @@ pub extern "C" fn ShlStartWorkplace(hab: u32, _hmq: u32) -> u32 {
     ipc::start_server(hab);
     let desk = wps::object_from_location(b"<WP_DESKTOP>");
     if desk != 0 {
+        stage_reached(1);
         obj::call(m::WPObject::wpViewObject, &[desk, 0, OPEN_DEFAULT as usize, 0]);
+        // The desktop's view is filled as it opens.
+        stage_reached(2);
+        stage_reached(3);
     }
     crate::minwin::apply();
     crate::desktop::archive_at_startup();

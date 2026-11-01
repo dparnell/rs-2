@@ -255,6 +255,8 @@ WinWaitEventSem @5409
 WinWaitMsg @5410
 WinWindowFromID @5414
 WinWindowFromPoint @5415
+WinSetClipRegion @5440
+WinQueryClipRegion @5441
 WinXxCreateHeap2 @5475
 WINQUERYPROFILEINT=PMSHAPI.2 @2001
 WINQUERYPROFILESTRING=PMSHAPI.3 @2002

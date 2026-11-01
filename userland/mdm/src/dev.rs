@@ -55,7 +55,37 @@ pub struct Device {
     /// The alias CONNECTION ... ALIAS gave the device's connection (the
     /// wave stream's amp-mixer): it names the device itself.
     pub conn_alias: Option<String>,
+    /// SET POSITION ADVISE ON: MM_MCIPOSITIONCHANGE to the window every
+    /// `units` (in the time format) while playing, with the user word.
+    pub advise: Option<Advise>,
     pub kind: Kind,
+}
+
+#[derive(Clone, Copy)]
+pub struct Advise {
+    pub hwnd: u32,
+    pub units: u32,
+    pub user: u16,
+    /// The last position advised (a multiple of `units`).
+    pub last: Option<u32>,
+}
+
+impl Device {
+    /// While playing (`pos` in the time format): when the position has
+    /// come to another multiple of the advise units, MM_MCIPOSITIONCHANGE
+    /// (mp1: the user word and the device ID; mp2: the position).
+    pub fn advise_position(&mut self, pos: u32) {
+        let id = self.id;
+        let Some(a) = self.advise.as_mut() else { return };
+        if a.units == 0 || a.hwnd == 0 {
+            return;
+        }
+        let step = pos / a.units * a.units;
+        if a.last != Some(step) {
+            a.last = Some(step);
+            unsafe { WinPostMsg(a.hwnd, MM_MCIPOSITIONCHANGE, mp(a.user as u32, id as u32), step) };
+        }
+    }
 }
 
 pub static LOCK: Lock = Lock::new();
@@ -155,8 +185,16 @@ pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u1
         pending: None,
         epoch: 0,
         conn_alias: None,
+        advise: None,
         kind,
     }));
+    // The new instance is the active one: as IBM's MDM (MakeInstanceActive,
+    // mdmPassDeviceNotify), the callback window learns that it gained the
+    // device's use (Open Class's IMMDevice takes the device for open only
+    // after this).
+    if r.callback != 0 {
+        unsafe { WinPostMsg(r.callback, MM_MCIPASSDEVICE, id as u32, MCI_GAINING_USE) };
+    }
     Ok(id)
 }
 
@@ -202,6 +240,18 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
     let res = match r.msg {
         MCI_CLOSE => close(id).map(|_| Reply::None),
         MCI_ACQUIREDEVICE | MCI_RELEASEDEVICE => Ok(Reply::None),
+        // MCI_POSITION_PARMS: hwndCallback, ulUnits, usUserParm.
+        MCI_SET_POSITION_ADVISE => {
+            let on = r.flags & MCI_SET_POSITION_ADVISE_ON != 0;
+            if on == (r.flags & MCI_SET_POSITION_ADVISE_OFF != 0) {
+                return Err(if on { MCIERR_FLAGS_NOT_COMPATIBLE } else { MCIERR_MISSING_FLAG });
+            }
+            if on && r.value == 0 {
+                return Err(MCIERR_OUTOFRANGE);
+            }
+            with(id, |d| d.advise = on.then_some(Advise { hwnd: r.callback, units: r.value, user: r.item as u16, last: None }));
+            Ok(Reply::None)
+        }
         MCI_GETDEVCAPS if r.flags & MCI_GETDEVCAPS_MESSAGE != 0 => Ok(Reply::Bool(supports(typ, r.item))),
         MCI_GETDEVCAPS if r.flags & MCI_GETDEVCAPS_ITEM != 0 && typ == DEVTYPE_CD_AUDIO => specific(id, typ, r),
         MCI_GETDEVCAPS if r.flags & MCI_GETDEVCAPS_ITEM != 0 => common_caps(typ, r.item).map_or_else(|| specific(id, typ, r), Ok),

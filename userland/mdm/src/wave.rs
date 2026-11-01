@@ -427,6 +427,11 @@ pub fn command(id: u16, r: &Req) -> Result<Reply, u32> {
                 MCI_WAVE_STATUS_AVGBYTESPERSEC => Reply::Num(w.fmt.avg),
                 MCI_WAVE_STATUS_BLOCKALIGN => Reply::Num(w.fmt.block),
                 MCI_WAVE_STATUS_BITSPERSAMPLE => Reply::Num(w.fmt.bits),
+                // The amp-mixer's items, which IBM's wave device passes to
+                // its amp-mixer (rs2 has none: its settings at their
+                // middle, pitch 0): treble, bass, balance, gain, mid.
+                0x1001..=0x1004 | 0x1006 => Reply::Num(50),
+                0x1000 => Reply::Num(0),
                 _ => return Err(MCIERR_INVALID_ITEM_FLAG),
             })
         })
@@ -1008,6 +1013,15 @@ unsafe extern "C" fn player(param: u32) {
                 if let Some(at) = at {
                     wr(at, 0, rd(at, 0) + c.len() as u32);
                 }
+                // SET POSITION ADVISE: where playing has got to.
+                with(id, |d| {
+                    if current(d, epoch) && d.advise.is_some() {
+                        let tf = d.time_format;
+                        let w = wave(d);
+                        let pos = w.to_time(w.position(true), tf);
+                        d.advise_position(pos);
+                    }
+                });
             }
         }
     }

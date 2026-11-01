@@ -129,6 +129,9 @@ pub const WM_DESTROY: u32 = 0x0002;
 pub const WM_USER: u32 = 0x1000;
 
 pub const MM_MCINOTIFY: u32 = 0x0500;
+pub const MM_MCIPASSDEVICE: u32 = 0x0501;
+pub const MM_MCIPOSITIONCHANGE: u32 = 0x0502;
+pub const MCI_GAINING_USE: u32 = 2;
 pub const MM_MCICUEPOINT: u32 = 0x0503;
 pub const MM_MCIPLAYLISTMESSAGE: u32 = 0x0504;
 
