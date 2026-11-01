@@ -185,7 +185,7 @@ pub fn selector(c: &mut Ctx) -> u32 {
             }
             if !seen.contains(&m.hmte) {
                 seen.push(m.hmte);
-                todo.extend(m.imports.iter().cloned());
+                todo.extend(m.deps());
             }
         }
         return 0;

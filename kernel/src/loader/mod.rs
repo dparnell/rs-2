@@ -143,6 +143,10 @@ pub struct Module {
     pub exports: Vec<Export>,
     pub names: BTreeMap<String, u16>,
     pub imports: Vec<Arc<Module>>,
+    /// Modules this one imports that were still loading when it was
+    /// loaded (circular references, see [`Pending`]): added once they are
+    /// loaded. [`Module::deps`] is both lists.
+    pub cyclic: SpinLock<Vec<Arc<Module>>>,
     pub start: Option<Start>,
     /// DLL initialisation entry, if the module wants it.
     pub init: Option<Start>,
@@ -156,6 +160,14 @@ pub struct Module {
 }
 
 impl Module {
+    /// The modules this one imports: its import table's, and those of a
+    /// circular reference that were added later.
+    pub fn deps(&self) -> Vec<Arc<Module>> {
+        let mut v = self.imports.clone();
+        v.extend(self.cyclic.lock().iter().cloned());
+        v
+    }
+
     /// Resolve an export by ordinal, following forwarders.
     pub fn resolve_ordinal(&self, ordinal: u32, depth: u32) -> Result<Target, u32> {
         if self.format == Format::Virtual {
@@ -184,6 +196,15 @@ impl Module {
         }
         match self.exports.get(ordinal.wrapping_sub(1) as usize) {
             Some(Export::At(t)) => Ok(*t),
+            // A forwarder to a DLL still loading (MMPM/2's HHP forwards
+            // everything to MMPM, which imports it through FILT): its
+            // pending exports.
+            Some(Export::ForwardOrdinal { module, ordinal }) if Pending::has(&module_name(module)) => {
+                Pending::target(&module_name(module), ImportBy::Ordinal(*ordinal))
+            }
+            Some(Export::ForwardName { module, name }) if Pending::has(&module_name(module)) => {
+                Pending::target(&module_name(module), ImportBy::Name(name))
+            }
             Some(Export::ForwardOrdinal { module, ordinal }) if depth < 8 => {
                 let m = load_global(module)?;
                 m.resolve_ordinal(*ordinal, depth + 1)
@@ -273,6 +294,7 @@ pub fn init() {
             exports: Vec::new(),
             names: BTreeMap::new(),
             imports: Vec::new(),
+            cyclic: SpinLock::new(Vec::new()),
             start: None,
             init: None,
             per_process_init: false,
@@ -342,6 +364,7 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     })?;
     let m = load_image(&path, data, true, None).inspect_err(|e| crate::trace!("loader: {path}: error {e}"))?;
     register(m.clone());
+    Pending::loaded(&m);
     Ok(m)
 }
 
@@ -365,7 +388,7 @@ fn in_use(m: &Arc<Module>) -> bool {
             return false;
         }
         seen.push(x.hmte);
-        x.imports.iter().any(|i| uses(i, m, seen))
+        x.deps().iter().any(|i| uses(i, m, seen))
     }
     crate::task::process::all().iter().any(|p| {
         let mut seen = Vec::new();
@@ -431,7 +454,7 @@ pub fn attach(m: &Arc<Module>, space: &mut AddressSpace) -> Result<(), u32> {
             }
         }
     }
-    for imp in &m.imports {
+    for imp in &m.deps() {
         attach(imp, space)?;
     }
     Ok(())
@@ -469,9 +492,125 @@ fn import_target(imports: &[Arc<Module>], module: u16, by: ImportBy<'_>) -> Resu
     }
 }
 
-/// Load the modules a module imports (system-wide, not attached).
-fn load_imports(names: &[String]) -> Result<Vec<Arc<Module>>, u32> {
-    names.iter().map(|n| load_global(n)).collect()
+/// DLLs being loaded: name, exports, exported names. DLLs may import
+/// each other (MMPM/2's MMPM, FILT and HHP; Resource Workshop's WORKLIB1
+/// and WORKLIB2), as OS/2's loader allows: while a DLL loads, its exports
+/// (its objects have their addresses already) are listed here, and a
+/// module importing it meanwhile resolves those imports from here and gets
+/// it in its [`Module::cyclic`] list once it is loaded. Loading the
+/// import again instead would recurse until the kernel stack overflowed.
+static PENDING: SpinLock<Vec<(String, Vec<Export>, BTreeMap<String, u16>)>> = SpinLock::new(Vec::new());
+
+/// Modules that imported a pending DLL: (importer, DLL).
+static WAITING: SpinLock<Vec<(String, String)>> = SpinLock::new(Vec::new());
+
+/// A DLL listed in PENDING while it loads (removed when dropped).
+struct Pending(String);
+
+impl Pending {
+    fn add(name: &str, exports: &[Export], names: &BTreeMap<String, u16>) -> Pending {
+        let e = exports.iter().map(|e| match e {
+            Export::At(t) => Export::At(*t),
+            _ => Export::None,
+        });
+        PENDING.lock().push((name.to_string(), e.collect(), names.clone()));
+        Pending(name.to_string())
+    }
+
+    fn has(name: &str) -> bool {
+        PENDING.lock().iter().any(|p| p.0.eq_ignore_ascii_case(name))
+    }
+
+    fn target(name: &str, by: ImportBy<'_>) -> Result<Target, u32> {
+        let l = PENDING.lock();
+        let p = l.iter().find(|p| p.0.eq_ignore_ascii_case(name)).ok_or(err::MOD_NOT_FOUND)?;
+        let ord = match by {
+            ImportBy::Ordinal(o) => o,
+            ImportBy::Name(n) => p.2.get(n).or_else(|| p.2.iter().find(|(k, _)| k.eq_ignore_ascii_case(n)).map(|(_, v)| v)).copied().ok_or(err::PROC_NOT_FOUND)? as u32,
+        };
+        match p.1.get(ord.wrapping_sub(1) as usize) {
+            Some(Export::At(t)) => Ok(*t),
+            // A forwarder of a DLL still loading.
+            _ => Err(err::INVALID_ORDINAL),
+        }
+    }
+
+    /// A pending DLL `m` was loaded: it becomes a dependency of the
+    /// modules that imported it meanwhile.
+    fn loaded(m: &Arc<Module>) {
+        let importers: Vec<String> = {
+            let mut w = WAITING.lock();
+            let v = w.iter().filter(|x| x.1.eq_ignore_ascii_case(&m.name)).map(|x| x.0.clone()).collect();
+            w.retain(|x| !x.1.eq_ignore_ascii_case(&m.name));
+            v
+        };
+        for i in importers {
+            let found = REGISTRY.lock().modules.iter().find(|x| x.name.eq_ignore_ascii_case(&i)).cloned();
+            if let Some(x) = found {
+                let mut c = x.cyclic.lock();
+                if !c.iter().any(|y| Arc::ptr_eq(y, m)) {
+                    c.push(m.clone());
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Pending {
+    fn drop(&mut self) {
+        let mut l = PENDING.lock();
+        if let Some(i) = l.iter().rposition(|p| p.0 == self.0) {
+            l.remove(i);
+        }
+    }
+}
+
+/// A module's imports: loaded modules, or the names of DLLs still loading.
+struct Imports(Vec<Result<Arc<Module>, String>>);
+
+impl Imports {
+    /// Load the modules `own` imports (system-wide, not attached); those
+    /// still loading (a circular reference) are resolved from PENDING.
+    fn load(own: &str, names: &[String]) -> Result<Imports, u32> {
+        let mut v = Vec::with_capacity(names.len());
+        for n in names {
+            let mname = module_name(n);
+            if Pending::has(&mname) {
+                if crate::api::tracing() {
+                    crate::trace!("    {own} imports {mname}, which is loading (circular reference)");
+                }
+                WAITING.lock().push((own.to_string(), mname.clone()));
+                v.push(Err(mname));
+            } else {
+                v.push(Ok(load_global(n)?));
+            }
+        }
+        Ok(Imports(v))
+    }
+
+    fn target(&self, module: u16, by: ImportBy<'_>) -> Result<Target, u32> {
+        match self.0.get((module as usize).wrapping_sub(1)) {
+            Some(Ok(m)) => import_target(core::slice::from_ref(m), 1, by),
+            Some(Err(name)) => Pending::target(name, by),
+            None => Err(err::BAD_EXE_FORMAT),
+        }
+    }
+
+    fn has(&self, name: &str) -> bool {
+        self.0.iter().any(|i| match i {
+            Ok(m) => m.name.eq_ignore_ascii_case(name),
+            Err(n) => n.eq_ignore_ascii_case(name),
+        })
+    }
+
+    fn push(&mut self, m: Arc<Module>) {
+        self.0.push(Ok(m));
+    }
+
+    /// The loaded ones, for [`Module::imports`].
+    fn modules(self) -> Vec<Arc<Module>> {
+        self.0.into_iter().flatten().collect()
+    }
 }
 
 /// rs2's Win16 layer (docs/WIN16.md): the Windows modules WIN16.DLL

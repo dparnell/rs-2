@@ -277,14 +277,14 @@ fn modules_of(p: &Process) -> Vec<Arc<Module>> {
             return;
         }
         seen.push(m.hmte);
-        for imp in &m.imports {
+        for imp in &m.deps() {
             visit(imp, seen, out);
         }
         out.push(m.clone());
     }
     let mut out = alloc::vec![p.exe.clone()];
     let mut seen = alloc::vec![p.exe.hmte];
-    for imp in &p.exe.imports {
+    for imp in &p.exe.deps() {
         visit(imp, &mut seen, &mut out);
     }
     let loaded: Vec<Arc<Module>> = p.loaded.lock().iter().map(|(m, _)| m.clone()).collect();

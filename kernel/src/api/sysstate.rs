@@ -354,7 +354,8 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
             }
             prev = Some(rec);
             o.zeros(24);
-            for i in &m.imports {
+            let deps = m.deps();
+            for i in &deps {
                 o.u16(i.hmte);
             }
             o.align();
@@ -372,7 +373,7 @@ pub fn dos_query_sys_state(c: &mut Ctx) -> u32 {
             }
             o.put16(rec + 4, m.hmte);
             o.put16(rec + 6, (!m.is16) as u16);
-            o.put32(rec + 8, m.imports.len() as u32);
+            o.put32(rec + 8, deps.len() as u32);
             o.put32(rec + 12, m.objects.len() as u32);
             o.put32(rec + 16, if with_objs && !m.objects.is_empty() { o.ptr(obj_at) } else { 0 });
             o.put32(rec + 20, o.ptr(name_at));
