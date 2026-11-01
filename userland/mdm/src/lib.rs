@@ -53,7 +53,8 @@ pub extern "C" fn mciSendCommand(dev: u32, msg: u32, flags: u32, p: u32, user: u
     let r = send_command(dev, msg, flags, p, user);
     let rc = r.unwrap_or_else(|e| e);
     if tracing() {
-        sys::trace(format_args!("MDM: mciSendCommand({dev}, {msg}, {flags:#x}, {p:#x}) -> {rc}"));
+        let w: Vec<u32> = if p != 0 { (0..7).map(|i| rd(p, i * 4)).collect() } else { Vec::new() };
+        sys::trace(format_args!("MDM: mciSendCommand({dev}, {msg}, {flags:#x}, {p:#x} {w:x?}) -> {rc}"));
     }
     rc
 }
@@ -269,6 +270,19 @@ fn sysinfo_item(item: u32, q: u32) -> Result<u32, u32> {
                 return Err(MCIERR_DEVICE_NOT_FOUND);
             }
             put_str(q, 0, &install_name(t), 20);
+        }
+        // The device for a file (an item IBM's MDM answers but the
+        // Toolkit's headers leave out; Open Class's IMMDevice asks it for
+        // MPPM's files): { PSZ pszFile; CHAR szDevice[20] }, the device
+        // its extension is played on ("waveaudio01", as IBM's GetName
+        // writes it).
+        0x8000 => {
+            let f = rd(q, 0);
+            if f == 0 {
+                return Err(MCIERR_MISSING_PARAMETER);
+            }
+            let t = devtype_for_file(&cstr(f as *const u8)).filter(|t| INSTALLED.contains(t)).ok_or(MCIERR_DEVICE_NOT_FOUND)?;
+            put_str(q, 4, &alloc::format!("{}01", devtype_name(t).unwrap_or("other")), 20);
         }
         // Installing, deleting and changing devices.
         0x1 | 0x4 | 0x8 | 0x20 | 0x80 | 0x200 | 0x800 | 0x2000 => return Err(MCIERR_UNSUPPORTED_FUNCTION),

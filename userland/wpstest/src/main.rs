@@ -860,9 +860,11 @@ fn shell(args: &[u8]) -> u32 {
                 let (c, d) = (z(arg(2)), z(arg(1)));
                 println!("wpstest: register {} from {}: {}", s(arg(2)), s(arg(1)), unsafe { WinRegisterObjectClass(c.as_ptr(), d.as_ptr()) });
             }
-            // CREATE class title location setup: WinCreateObject.
+            // CREATE class title location setup: WinCreateObject (`|` in
+            // the setup string for `;`, which ends the command).
             b"CREATE" => {
-                let h = create(arg(1), arg(2), &w.get(4..).unwrap_or(&[]).join(&b' '), arg(3));
+                let setup: Vec<u8> = w.get(4..).unwrap_or(&[]).join(&b' ').iter().map(|&c| if c == b'|' { b';' } else { c }).collect();
+                let h = create(arg(1), arg(2), &setup, arg(3));
                 println!("wpstest: create {} {}: {:#x}", s(arg(1)), s(arg(2)), h);
             }
             b"LOCK" => println!("wpstest: WinLockupSystem: {}", unsafe { WinLockupSystem(0) }),
