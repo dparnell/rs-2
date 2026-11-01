@@ -308,10 +308,19 @@ fn spooler_checks() {
             let (rc, ty, d) = query(q, b"Name\0");
             let (names, _) = value_names(q);
             ok &= rc == 0 && ty == REG_SZ && d[..d.len() - 1] == n[..cn as usize] && names.len() == 23;
-            os2::println!("  queue of {}: {} values", core::str::from_utf8(&n[..cn as usize]).unwrap_or("?"), names.len());
+            let (_, pty, port) = query(q, b"Port\0");
+            let (_, tty, _) = query(q, b"Time Out\0");
+            ok &= pty == REG_SZ && tty == REG_DWORD;
+            let s = |b: &[u8]| alloc::string::String::from_utf8_lossy(b).into_owned();
+            os2::println!("  queue of {}: {} values, port {}", s(&n[..cn as usize]), names.len(), s(&port));
             RegCloseKey(q);
         }
         check("spooler_key: a subkey per queue, its 23 values (Name: the printer driver's device)", ok);
+        let (rc, _, d) = query(k, b"Default\0");
+        let (own, _) = value_names(k);
+        let mut dq = 0;
+        check("spooler_key: Default names a queue's key; only it is listed", nsub == 0 || (rc == 0 && own == [b"Default".to_vec()] && RegOpenKeyEx(k, d.as_ptr(), 0, 0, &mut dq) == 0));
+        RegCloseKey(dq);
         RegCloseKey(k);
         RegDeleteKey(HKEY_LOCAL_MACHINE, b"SOFTWARE\\PmxPrinters\0".as_ptr());
     }
