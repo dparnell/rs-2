@@ -249,7 +249,7 @@ IPP), and the Workplace Shell's printer objects work:
 | The PostScript driver: DevOpenDC OD_QUEUED/OD_DIRECT/OD_INFO, STARTDOC/NEWFRAME/ENDDOC/ABORTDOC/RAWDATA/GETJOBID/job properties escapes, DevQueryCaps (300 dpi, CAPS_TECH_POSTSCRIPT), DevQueryHardcopyCaps (Letter, A4, Legal, A3, A5, Executive), DevQueryDeviceNames, DevPostDeviceModes (a job properties dialog: form, orientation, copies) | PMWIN `printer.rs`, `crates/gpi/src/psdev.rs` | PRNTEST, host unit tests (`cargo test -p gpi`), Ghostscript renders the output as the screen shows it |
 | Ports: FILE (FILEn), LPT1-3 (the kernel drives the parallel port), COM1-4, LPRn (RFC 1179), IPPn (IPP/1.1 Print-Job) | PMSPL `port.rs`, kernel `chardev.rs` | PRNTEST LPR/IPP with `tools/scripts/printer_listen.py`; LPT1 with QEMU's `-parallel file:` |
 | Printer objects: job view, settings (queue, driver, job properties, port and settings, default printer), new printers from the template, deleting, files dropped and data files' Print | PMWP `printer.rs` | QEMU desktop runs (screenshots in the session's progress folder) |
-| Print in programs | rs2's E (File > Print), the help manager (Services > Print), IBM's Picture Viewer, the Toolkit's print sample (PRTSAMP: a metafile, sized to the page) | QEMU runs, output rendered with Ghostscript |
+| Print in programs | rs2's E (File > Print), the help manager (Services > Print), IBM's Picture Viewer, the Toolkit's print sample (PRTSAMP: a metafile, sized to the page), EPM's formatted printing (File > Print file: its print thread draws each page on a `PU_TWIPS` presentation space of a queued DC) | QEMU runs, output rendered with Ghostscript |
 | Windows 3.x programs (native Win16): printer DCs, StartDoc...EndDoc and the escapes, PrintDlg, WIN.INI's printers (docs/WIN16.md) | WIN16 `print.rs`: queued PM_Q_RAW DCs | W16TEST, `RS2\PRINT16.EXE` (output rendered with Ghostscript), NOTE16's File > Print |
 
 **Tests.** `RS2\PRNTEST.EXE` (userland/prntest) makes a queue on a
@@ -274,8 +274,6 @@ Not done yet:
 - DOS, Win-OS/2 and other programs that write to `LPT1` themselves go
   straight to the parallel port; OS/2's kernel hands such output to
   the spooler as raw jobs (EPM's Raw ASCII printing works that way).
-- EPM's formatted printing starts but never opens its printer DC (its
-  print loop waits; COMPATIBILITY.md).
 - The Toolkit's PRTSAMP.MET prints as rs2 draws it on the screen, a
   black silhouette: its colours are indices 0x800-0xE00 of its colour
   table, which rs2's metafile playing does not apply (a GPI matter; the

@@ -694,7 +694,15 @@ mouse and keyboard. What PMWIN has:
   class an application registers with WC_FRAME's procedure (from
   `WinQueryClassInfo`) and creates with `WinCreateWindow` gets its frame
   controls too (EPM's edit frames); a child with id `FID_CLIENT` is the
-  client however it was made. The built-in classes have IBM's window
+  client however it was made. As IBM's `WinFrameWndProc`, a frame
+  passes `WM_ACTIVATE` on to its client (EPM's edit window learns
+  from it that it is the active one) and every message from 0x213 up
+  that it does not process itself (all but its own 0x407/0x408/0x43e/
+  0x43f, the mouse messages 0x410-0x428, 0x691 and the bidi
+  0xbd0-0xbd3): the help manager's HM_ messages, `WM_USER` and up, and
+  the secondary-window library's 0x54c-0x559 that MINSTALL and
+  Multimedia Setup's SW.DLL send to their frames (`WinDefaultSize`'s
+  0x557). The built-in classes have IBM's window
   words (the frame 0xAC bytes, the controls 8); frames answer
   `QWS_XRESTORE`..`QWS_CYRESTORE` and `QWS_XMINIMIZE`/`QWS_YMINIMIZE`.
 - The text cursor (`WinCreateCursor`, `WinShowCursor`,
@@ -912,6 +920,10 @@ The GPI covers:
   Tms Rmn, System Proportional, WarpSans, System Monospaced) at
   lMaxBaselineExt from the same outlines, or IBM's bitmaps where
   installed; a face's own bold and italic are used, others simulated.
+  `GpiQueryCharBox` reports the default box (the device's default
+  cell) in world coordinates, converted each time as IBM's does, and
+  `GpiQueryDefCharBox` the cell as a SIZEL in world coordinates (EPM
+  spaces printed lines by the box on a `PU_TWIPS` space).
   `GpiLoadFonts` loads the image
   fonts of a font file (a resource DLL: `RT_FONTDIR`, `RT_FONT` in
   OS/2's format) for the process; `GpiQueryFonts` offers them with
@@ -1117,7 +1129,10 @@ what can be tested on the host is in `crates/pmwin`.
   window/info, tab and status texts, tab bitmaps (their pixels are
   copied for painting), dimensions, `BKM_CALCPAGERECT` both ways,
   notebook and tab colours) and `BKN_PAGESELECTEDPENDING` (clearing
-  `ulPageIdNew` refuses the turn), `BKN_PAGESELECTED`,
+  `ulPageIdNew` refuses the turn), `BKN_PAGESELECTED` (as IBM's
+  `GotoPage`: sent with the new page on top but before its window is
+  placed and shown, so an owner that resizes the page window there,
+  as Multimedia Setup does, gets it sized to the page again),
   `BKN_NEWPAGESIZE`, `BKN_PAGEDELETED`, `BKN_HELP`. Everything it
   paints lives in the shared state, so the PM server paints a hung
   program's notebook with the same code.
@@ -2480,7 +2495,7 @@ lays out the text where the escape is and frees the handle; it keeps
 the text for the panel until HM_INVALIDATE_DDF_DATA (mp1 a count, 0
 all, mp2 the ids) asks for it again. A reply that is not a DDF posts
 HM_ERROR 0x2014. Frames send messages they do not process
-(0x213-0x406, WM_USER and up) to their client as IBM's frame procedure
+(from 0x213 up) to their client as IBM's frame procedure
 does, so applications get HM_ messages in their client.
 
 **Windows of their own (viewports).** A link's data (`vpx=`, `vpy=`,
