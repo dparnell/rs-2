@@ -95,6 +95,49 @@ pub fn insert_more(o: usize, nb: u32, page: u32, name: &'static [u8]) -> u32 {
     obj::call(m::WPObject::wpInsertSettingsPage, &[o, nb as usize, pi.as_ptr() as usize]) as u32
 }
 
+/// A page that follows the page with tab `after` (its status line says
+/// `name`), when the notebook has that tab; else as insert_more.
+pub fn insert_after(o: usize, nb: u32, page: u32, name: &'static [u8], after: &[u8]) -> u32 {
+    const BKM_QUERYPAGEID: u32 = 0x0359;
+    const BKM_QUERYTABTEXT: u32 = 0x035d;
+    const BKA_NEXT: u16 = 0x0008;
+    let mut id = send(nb, BKM_QUERYPAGEID, 0, BKA_FIRST as u32);
+    let mut n = 0;
+    while id != 0 && id < 0xffff_ff00 && n < 100 {
+        let mut buf = [0u8; 64];
+        let bt = [buf.as_mut_ptr() as u32, 64u32];
+        send(nb, BKM_QUERYTABTEXT, id, bt.as_ptr() as u32);
+        if cstr(buf.as_ptr()) == after {
+            // The pages under that tab: the new one goes after the last.
+            let mut last = id;
+            loop {
+                let next = send(nb, BKM_QUERYPAGEID, last, BKA_NEXT as u32);
+                if next == 0 || next >= 0xffff_ff00 {
+                    break;
+                }
+                let mut b2 = [0u8; 4];
+                let bt2 = [b2.as_mut_ptr() as u32, 4u32];
+                if send(nb, BKM_QUERYTABTEXT, next, bt2.as_ptr() as u32) != 0 && b2[0] != 0 {
+                    break;
+                }
+                last = next;
+            }
+            let new = send(nb, BKM_INSERTPAGE, last, mp((BKA_STATUSTEXTON | BKA_AUTOPAGESIZE) as u32, BKA_NEXT as u32));
+            if new == 0 {
+                return 0;
+            }
+            send(nb, BKM_SETPAGEWINDOWHWND, new, page);
+            let t: Vec<u8> = name.iter().copied().filter(|&c| c != b'~').collect();
+            let t = alloc::boxed::Box::leak(t.into_boxed_slice());
+            send(nb, BKM_SETSTATUSLINETEXT, new, t.as_ptr() as u32);
+            return new;
+        }
+        id = send(nb, BKM_QUERYPAGEID, id, BKA_NEXT as u32);
+        n += 1;
+    }
+    insert_more(o, nb, page, name)
+}
+
 /// A PAGEINFO for one of rs2's own pages (a window already made).
 pub fn insert(o: usize, nb: u32, page: u32, name: &'static [u8]) -> u32 {
     let mut pi = [0u32; 13];
@@ -322,6 +365,10 @@ extern "C" fn wpAddFolderBackgroundPage(o: usize, nb: u32) -> u32 {
 
 extern "C" fn folder_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
+    // Window, page 2: self-close (after the Window page WPObject added).
+    if !wps::is(o, "WPDesktop") {
+        wps::call("WPFolder", m::WPFolder::wpAddFolderSelfClosePage, &[o, nb as usize]);
+    }
     wps::call("WPFolder", m::WPFolder::wpAddFolderBackgroundPage, &[o, nb as usize]);
     wps::call("WPFolder", m::WPFolder::wpAddFolderIncludePage, &[o, nb as usize]);
     wps::call("WPFolder", m::WPFolder::wpAddFolderSortPage, &[o, nb as usize]);

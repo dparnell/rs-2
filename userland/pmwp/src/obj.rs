@@ -198,6 +198,12 @@ pub fn restored_string(obj: usize, class: &[u8], key: u32) -> Option<Vec<u8>> {
     Some(r.data.strip_suffix(&[0]).unwrap_or(&r.data).to_vec())
 }
 
+/// The bytes saved under (class, key), as they were (wpSaveData).
+pub fn restored_data(obj: usize, class: &[u8], key: u32) -> Option<Vec<u8>> {
+    let c = z(class);
+    rec_find(obj, c.as_ptr(), key).map(|r| r.data.clone())
+}
+
 pub fn restored_long(obj: usize, class: &[u8], key: u32) -> Option<u32> {
     let c = z(class);
     let mut v = 0;
@@ -1151,6 +1157,7 @@ pub fn impl_object() -> Impl {
     i.methods.extend(crate::dnd::object_methods());
     i.methods.extend(crate::delete::object_methods());
     i.methods.extend(crate::pages::object_methods());
+    i.methods.extend(crate::usermenu::object_methods());
     i
 }
 

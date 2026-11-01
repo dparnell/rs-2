@@ -37,6 +37,7 @@ mod shell;
 mod shutdown;
 mod templates;
 mod url;
+mod usermenu;
 mod launch;
 mod launchpad;
 mod menu;

@@ -1012,7 +1012,10 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                     // NOTIFYRECORDENTER: hwndCnr, fKey, pRecord.
                     let o = obj_of_rec(w, rd(b, 8));
                     if o != 0 {
+                        let (folder, frame) = (wins()[w].obj, wins()[w].frame);
                         obj::call(m::WPObject::wpViewObject, &[o, wins()[w].child as usize, OPEN_DEFAULT as usize, 0]);
+                        // The folder's self-close setting.
+                        crate::usermenu::opened_from(folder, frame, o);
                     }
                     0
                 }

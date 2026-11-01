@@ -377,6 +377,12 @@ extern "C" fn program_drag_over(_o: usize, _cnr: u32, pdinfo: u32) -> u32 {
 extern "C" fn program_drop(o: usize, _cnr: u32, _pdinfo: u32, it: u32) -> u32 {
     let f = item_object(it);
     let Some(path) = (if f != 0 { wps::path_of(f) } else { None }) else { return 0 };
+    start_program_with(o, &path)
+}
+
+/// Start a program object (or program file) with a file as its last
+/// parameter.
+pub fn start_program_with(o: usize, path: &[u8]) -> u32 {
     let mut buf = alloc::vec![0u8; 2048];
     let mut cb = buf.len() as u32;
     let det = if wps::is(o, "WPProgram") {
@@ -395,10 +401,10 @@ extern "C" fn program_drop(o: usize, _cnr: u32, _pdinfo: u32, it: u32) -> u32 {
     }
     if path.contains(&b' ') {
         params.push(b'"');
-        params.extend_from_slice(&path);
+        params.extend_from_slice(path);
         params.push(b'"');
     } else {
-        params.extend_from_slice(&path);
+        params.extend_from_slice(path);
     }
     let env = unsafe { crate::launch::env_strings(rd(w, 32) as *const u8) };
     crate::launch::start_env(&s(4), &params, &s(6), &s(3), rd(w, 4), &env);

@@ -302,6 +302,7 @@ extern "C" fn fs_copy(obj: usize, folder: usize, _lock: u32) -> usize {
 
 extern "C" fn fs_uninit(obj: usize) {
     fd(obj).real = None;
+    crate::usermenu::forget(obj);
     som::call_parent(wps::ccd("WPFileSystem"), wps::cd("WPObject"), m::WPObject::wpUnInitData, &[obj]);
 }
 
@@ -411,6 +412,20 @@ pub struct FolderData {
     /// The folder's own font (PP_FONTNAMESIZE, "10.Helv"; the Font
     /// Palette).
     pub font: Option<alloc::boxed::Box<Vec<u8>>>,
+    /// Menu style, menu bar and self-close (usermenu.rs): 2 bits each,
+    /// 0 for the system's.
+    pub menu_flags: u32,
+}
+
+pub fn folder_menu_flags(o: usize) -> u32 {
+    if wps::is(o, "WPFolder") { fo(o).menu_flags } else { 0 }
+}
+
+pub fn set_folder_menu_flags(o: usize, f: u32) {
+    if wps::is(o, "WPFolder") && fo(o).menu_flags != f {
+        fo(o).menu_flags = f;
+        obj::call(m::WPObject::wpSaveDeferred, &[o]);
+    }
 }
 
 pub fn view_flags(obj: usize) -> u32 {
@@ -529,6 +544,9 @@ extern "C" fn folder_save_state(obj: usize) -> u32 {
         let s = z(n);
         obj::wpSaveString(obj, b"WPFolder\0".as_ptr(), 6, s.as_ptr());
     }
+    if f.menu_flags != 0 {
+        obj::wpSaveLong(obj, b"WPFolder\0".as_ptr(), 7, f.menu_flags);
+    }
     1
 }
 
@@ -547,6 +565,9 @@ extern "C" fn folder_restore_state(obj: usize, r: u32) -> u32 {
     }
     if let Some(v) = obj::restored_long(obj, b"WPFolder", 5) {
         fo(obj).view_flags = v;
+    }
+    if let Some(v) = obj::restored_long(obj, b"WPFolder", 7) {
+        fo(obj).menu_flags = v;
     }
     if let Some(p) = obj::restored_string(obj, b"WPFolder", 3) {
         let p = p.strip_suffix(&[0]).unwrap_or(&p).to_vec();
@@ -754,6 +775,7 @@ pub fn impl_file_system() -> Impl {
         methods: [("wpSetRealName", __m_wpSetRealName as usize), ("wpQueryRealName", __m_wpQueryRealName as usize)]
             .into_iter()
             .chain(crate::pages::file_system_methods())
+            .chain(crate::usermenu::file_system_methods())
             .collect(),
         overrides: [
             ("wpSetTitle", __m_fs_set_title as usize),
@@ -765,6 +787,7 @@ pub fn impl_file_system() -> Impl {
         ]
         .into_iter()
         .chain(crate::pages::file_system_overrides())
+        .chain(crate::usermenu::file_system_overrides())
         .collect(),
     }
 }
@@ -810,6 +833,7 @@ pub fn impl_folder() -> Impl {
         .chain(crate::sortinc::folder_methods())
         .chain(crate::viewset::folder_methods())
         .chain(crate::delete::folder_methods())
+        .chain(crate::usermenu::folder_methods())
         .collect(),
         overrides: [
             ("wpUnInitData", __m_folder_uninit as usize),

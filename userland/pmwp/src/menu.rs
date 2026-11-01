@@ -213,7 +213,14 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
     } else {
         items.push(Menu::Sep);
         let style = obj::call(m::WPObject::wpQueryStyle, &[o]) as u32;
-        items.push(Menu::Item(MENUID_RENAME as u16, b"Re~name", style & obj::OBJSTYLE_NORENAME == 0));
+        // Short menus (the folder's Menu page): no Rename, Copy, Move,
+        // Create another or Create shadow.
+        let f = obj::folder_of(o);
+        let short = f != 0 && crate::usermenu::menu_style(f) == crate::usermenu::MENUS_SHORT;
+        let flags = if short { flags & !(CTXT_COPY | CTXT_MOVE | CTXT_NEW | CTXT_SHADOW) } else { flags };
+        if !short {
+            items.push(Menu::Item(MENUID_RENAME as u16, b"Re~name", style & obj::OBJSTYLE_NORENAME == 0));
+        }
         if flags & CTXT_COPY != 0 {
             items.push(Menu::Item(WPMENUID_COPY as u16, b"~Copy...", style & obj::OBJSTYLE_NOCOPY == 0));
         }
@@ -239,6 +246,10 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
         return 0;
     }
     obj::call(m::WPObject::wpModifyPopupMenu, &[o, menu as usize, 0, 0xffff]);
+    // The user's items (the Menu page).
+    if is(o, "WPFileSystem") {
+        wps::call("WPFileSystem", m::WPFileSystem::wpAddUserItemsToPopupMenu, &[o, menu as usize, 0, 0xffff]);
+    }
     let old = unsafe { view::POPUP.0 };
     if old != 0 {
         unsafe { WinDestroyWindow(old) };
@@ -333,6 +344,7 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
             crate::delete::delete_objects(frame, &objs);
         }
         _ if crate::sortinc::menu_selected(o, id) => {}
+        _ if crate::usermenu::selected(o, id) => {}
         _ => return 0,
     }
     1
