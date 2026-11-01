@@ -30,6 +30,9 @@ pub const WM_QUIT: u32 = 0x002a;
 pub const WM_MOUSEMOVE: u32 = 0x0070;
 pub const WM_BUTTON1DOWN: u32 = 0x0071;
 pub const WM_BUTTON1UP: u32 = 0x0072;
+pub const WM_BUTTON2DOWN: u32 = 0x0074;
+pub const WM_BUTTON3DOWN: u32 = 0x0077;
+pub const WM_BUTTON3DBLCLK: u32 = 0x0079;
 pub const WM_CHAR: u32 = 0x007a;
 
 const SWP_SIZE: u32 = 0x0001;
@@ -631,9 +634,15 @@ pub fn set_focus(h: u32) {
         return;
     }
     st().focus = h;
-    let top = top_level(h);
-    if let Some(f) = st().frames.get_mut(&top).filter(|_| top != h) {
-        f.focus_save = h;
+    // The frames around it remember it (QWL_HWNDFOCUSSAVE): a frame
+    // inside another window (an MDI document) as well as the top-level
+    // one.
+    let mut p = st().desk.get(h).map_or(0, |w| w.parent);
+    while p != 0 && p != HWND_DESKTOP {
+        if let Some(f) = st().frames.get_mut(&p) {
+            f.focus_save = h;
+        }
+        p = st().desk.get(p).map_or(0, |w| w.parent);
     }
     if old != 0 && st().desk.exists(old) {
         notify(old, WM_SETFOCUS, h, 0);
@@ -703,7 +712,7 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
         st().desk.place_behind(h, behind);
     }
     if fl & SWP_ACTIVATE != 0 {
-        activate(h);
+        activate_window(h);
     }
     1
 }
@@ -719,8 +728,44 @@ pub extern "C" fn WinShowWindow(h: u32, on: u32) -> u32 {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetActiveWindow(_desk: u32, h: u32) -> u32 {
-    activate(h);
+    // As IBM's: a window that is not a frame activates the frame it is
+    // in (WM_QUERYFOCUSCHAIN QFC_FRAME), then SWP_ACTIVATE.
+    let s = st();
+    let mut f = h;
+    while f != 0 && f != HWND_DESKTOP && !s.frames.contains_key(&f) {
+        f = s.desk.get(f).map_or(0, |w| w.parent);
+    }
+    activate_window(if f == 0 || f == HWND_DESKTOP { h } else { f });
     1
+}
+
+/// SWP_ACTIVATE: a top-level window becomes the active window; a frame
+/// inside another window (an MDI document window) comes to the top of
+/// its siblings and gets the focus, which it passes on to the window
+/// that had it last or its client (IBM's frame does this on
+/// WM_ADJUSTWINDOWPOS, FrameSetFocus), and so its top-level frame
+/// becomes active.
+pub fn activate_window(h: u32) {
+    let top = top_level(h);
+    if top == h || !st().frames.contains_key(&h) {
+        activate(h);
+        return;
+    }
+    st().desk.to_top(h);
+    let f = st().focus;
+    if f != 0 && (f == h || st().desk.is_ancestor(h, f)) {
+        if top != st().active {
+            activate(top);
+            set_focus(f);
+        }
+        return;
+    }
+    // FrameSetFocus: straight to the window it saved (still inside it,
+    // enabled and visible), else its client, else the frame.
+    let (save, client) = st().frames.get(&h).map_or((0, 0), |f| (f.focus_save, f.client));
+    let ok = |w: u32| w != 0 && w != h && st().desk.is_ancestor(h, w) && st().desk.get(w).is_some_and(|x| x.visible_style() && x.style & ws::DISABLED == 0);
+    let to = if ok(save) { save } else if ok(client) { client } else { h };
+    WinSetFocus(HWND_DESKTOP, to);
 }
 
 #[unsafe(no_mangle)]

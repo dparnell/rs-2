@@ -316,7 +316,12 @@ impl Desktop {
         // window clips them (PM's WinInvalidateRect): a parent without
         // WS_CLIPCHILDREN paints over them, so they must paint again, as
         // must transparent children, which the parent never clips.
+        // What such a parent paints over is its children's descendants
+        // too, also inside a child that clips its own (Borland's IDE: an
+        // MDI client without WS_CLIPCHILDREN around a document frame that
+        // has it), so below it the whole subtree paints again.
         let clips = !children && w.style & crate::ws::CLIPCHILDREN != 0;
+        let all = children || w.style & crate::ws::CLIPCHILDREN == 0;
         let kids = w.children.clone();
         for c in kids {
             let Some(cw) = self.get(c) else { continue };
@@ -325,7 +330,7 @@ impl Desktop {
             }
             let local = r.offset(-cw.x, -cw.y);
             if !local.intersect(&cw.rect()).is_empty() {
-                self.invalidate(c, Some(local), children);
+                self.invalidate(c, Some(local), all);
             }
         }
     }
@@ -413,15 +418,31 @@ impl Desktop {
             return;
         }
         let Some(p) = self.get(h).map(|w| w.parent) else { return };
-        if let Some(pw) = self.windows.get_mut(&p) {
-            if pw.children.last() == Some(&h) {
+        // What the siblings above it covered comes to light (only that:
+        // clicking the active window repaints nothing).
+        let mut covered = Vec::new();
+        if let Some(pw) = self.windows.get(&p) {
+            let Some(at) = pw.children.iter().position(|&c| c == h) else { return };
+            if at + 1 == pw.children.len() {
                 return;
             }
+            let me = self.get(h).map_or(Rect::new(0, 0, 0, 0), |w| Rect::new(w.x, w.y, w.x + w.cx, w.y + w.cy));
+            for &c in &pw.children[at + 1..] {
+                let Some(cw) = self.get(c).filter(|cw| cw.visible_style()) else { continue };
+                let r = Rect::new(cw.x, cw.y, cw.x + cw.cx, cw.y + cw.cy).intersect(&me);
+                if !r.is_empty() {
+                    covered.push(r.offset(-me.left, -me.bottom));
+                }
+            }
+        }
+        if let Some(pw) = self.windows.get_mut(&p) {
             pw.children.retain(|&c| c != h);
             pw.children.push(h);
         }
         self.generation = self.generation.wrapping_add(1);
-        self.invalidate(h, None, true);
+        for r in covered {
+            self.invalidate(h, Some(r), true);
+        }
     }
 
     /// Put a window just below a sibling (WinCreateWindow's and
@@ -575,6 +596,47 @@ mod tests {
         assert!(d.get(c).unwrap().update.is_empty());
         d.invalidate(p, Some(Rect::new(60, 60, 80, 80)), true);
         assert!(!d.get(c).unwrap().update.is_empty());
+    }
+
+    #[test]
+    fn to_top_repaints_only_what_was_covered() {
+        let mut d = desk();
+        let a = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 100, 100), 1, 1, 0, 0).unwrap();
+        let b = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(80, 80, 180, 180), 2, 1, 0, 0).unwrap();
+        let hidden = d.create(HWND_DESKTOP, 0, 1, 0, Rect::new(0, 0, 50, 50), 3, 1, 0, 0).unwrap();
+        for h in [a, b, hidden] {
+            d.get_mut(h).unwrap().update = Region::new();
+        }
+        d.to_top(a);
+        assert_eq!(d.get(a).unwrap().update.bounds(), Rect::new(80, 80, 100, 100));
+        // On top already (the active window clicked): nothing.
+        d.get_mut(a).unwrap().update = Region::new();
+        d.to_top(a);
+        assert!(d.get(a).unwrap().update.is_empty());
+        // Only a hidden window above: nothing either.
+        d.to_top(hidden);
+        d.to_top(a);
+        assert!(d.get(a).unwrap().update.is_empty());
+    }
+
+    #[test]
+    fn a_parent_that_does_not_clip_repaints_the_whole_subtree() {
+        let mut d = desk();
+        // Borland's IDE: an MDI client without WS_CLIPCHILDREN, a document
+        // frame in it that clips its children, the editor in the frame.
+        let mdi = d.create(HWND_DESKTOP, 0, 1, ws::VISIBLE, Rect::new(0, 0, 200, 200), 1, 1, 0, 0).unwrap();
+        let doc = d.create(mdi, 0, 2, ws::VISIBLE | ws::CLIPCHILDREN, Rect::new(10, 10, 190, 190), 2, 1, 0, 0).unwrap();
+        let ed = d.create(doc, doc, 2, ws::VISIBLE, Rect::new(4, 4, 176, 176), 0x8008, 1, 0, 0).unwrap();
+        for h in [mdi, doc, ed] {
+            d.get_mut(h).unwrap().update = Region::new();
+        }
+        d.invalidate(mdi, None, false);
+        assert!(!d.get(doc).unwrap().update.is_empty());
+        assert!(!d.get(ed).unwrap().update.is_empty());
+        // The frame alone still keeps its children out.
+        d.get_mut(ed).unwrap().update = Region::new();
+        d.invalidate(doc, None, false);
+        assert!(d.get(ed).unwrap().update.is_empty());
     }
 
     #[test]

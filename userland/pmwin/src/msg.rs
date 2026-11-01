@@ -475,15 +475,32 @@ pub extern "C" fn WinDefWindowProc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 
             crate::cursor::blink(h);
             0
         }
-        // Keys a window does not use go up to its parent (a frame
-        // control's or a dialog item's frame).
+        // Keys a window does not use go to its owner (a client's frame, a
+        // dialog item's dialog), as in IBM's WinDefWindowProc.
         WM_CHAR => {
-            let parent = ctl::parent(h);
-            if parent != HWND_DESKTOP && parent != pmwin::HWND_OBJECT && parent != 0 {
-                send(parent, msg, mp1, mp2)
+            let owner = ctl::owner(h);
+            if owner != 0 && owner != h && st().desk.exists(owner) {
+                send(owner, msg, mp1, mp2)
             } else {
                 0
             }
+        }
+        // As IBM's: a button going down activates the window's frame (a
+        // frame inside another window, such as an MDI document, comes to
+        // the top and gets the focus: Borland's IDE editor), then the
+        // mouse messages a window does not use go to its owner, with the
+        // pointer position in the owner's coordinates.
+        WM_BUTTON1DOWN..=WM_BUTTON3DBLCLK => {
+            if matches!(msg, WM_BUTTON1DOWN | WM_BUTTON2DOWN | WM_BUTTON3DOWN) {
+                WinSetActiveWindow(HWND_DESKTOP, h);
+            }
+            let owner = ctl::owner(h);
+            if owner == 0 || owner == h || !st().desk.exists(owner) {
+                return 0;
+            }
+            let mut p = PointL { x: mp1 as u16 as i16 as i32, y: (mp1 >> 16) as u16 as i16 as i32 };
+            WinMapWindowPoints(h, owner, &mut p, 1);
+            send(owner, msg, (p.x as u32 & 0xffff) | (p.y as u32) << 16, mp2)
         }
         // The pointer over a window that does not set its own is the
         // arrow.

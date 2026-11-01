@@ -891,6 +891,9 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             WinDefWindowProc(h, msg, mp1, mp2)
         }
         WM_BUTTON1DOWN => {
+            // As IBM's frame: a click activates it (a frame inside
+            // another window comes to the top and gets the focus).
+            win::WinSetActiveWindow(HWND_DESKTOP, h);
             if fcf(h) & FCF_SIZEBORDER != 0 {
                 let e = edges_at(h, ctl::mouse_pos(mp1));
                 if e != 0 {
@@ -899,6 +902,13 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             }
             1
         }
+        // The other buttons: button 2 and 3 activate it too; a frame
+        // passes no mouse button message on (to its owner).
+        win::WM_BUTTON2DOWN | win::WM_BUTTON3DOWN => {
+            win::WinSetActiveWindow(HWND_DESKTOP, h);
+            0
+        }
+        0x0072..=win::WM_BUTTON3DBLCLK => 0,
         crate::win::WM_MOUSEMOVE => {
             use pmwin::sysptr::*;
             let e = if fcf(h) & FCF_SIZEBORDER != 0 && ctl::style(h) & (ws::MAXIMIZED | ws::MINIMIZED) == 0 { edges_at(h, ctl::mouse_pos(mp1)) } else { 0 };
