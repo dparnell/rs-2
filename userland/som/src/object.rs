@@ -289,12 +289,16 @@ pub extern "C" fn somDispatchD(obj: usize, mid: SomId, _desc: SomId, ap: *const 
     r[0]
 }
 
-pub extern "C" fn somCastObj(_obj: usize, _cls: usize) -> u32 {
-    0
+/// Cast the object to an ancestor of its true class (its class's
+/// somCastObjCls, as IBM's does).
+pub extern "C" fn somCastObj(obj: usize, cls: usize) -> u32 {
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::CAST_OBJ_CLS, &[c as u32, cls as u32, obj as u32]) & 0xff
 }
 
-pub extern "C" fn somResetObj(_obj: usize) -> u32 {
-    0
+pub extern "C" fn somResetObj(obj: usize) -> u32 {
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::RESET_OBJ_CLS, &[c as u32, obj as u32]) & 0xff
 }
 
 pub extern "C" fn somPrintSelf(obj: usize) -> usize {

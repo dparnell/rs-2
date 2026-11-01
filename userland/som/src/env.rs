@@ -170,16 +170,16 @@ fn class_defs() -> [Def; 76] {
         b"somDeallocate" => __m_somDeallocate;
         b"somGetRdStub" => __m_somGetRdStub;
         b"somGetNthMethodData" => __m_somGetNthMethodData;
-        b"somcPrivate2" => __m_class_private;
+        b"somCloneClass" => __m_somCloneClass;
         b"somcPrivate3" => __m_class_private;
         b"_get_somDirectInitClasses" => __m_get_somDirectInitClasses, true;
         b"somcPrivate5" => __m_class_private;
         b"somcPrivate6" => __m_class_private;
         b"somcPrivate7" => __m_class_private;
-        b"somcPrivate8" => __m_class_private;
-        b"somcPrivate9" => __m_class_private;
-        b"somcPrivate10" => __m_class_private;
-        b"somcPrivate11" => __m_class_private;
+        b"somCastObjCls" => __m_somCastObjCls;
+        b"somResetObjCls" => __m_somResetObjCls;
+        b"_get_somTrueClass" => __m_get_somTrueClass;
+        b"_get_somCastedClass" => __m_get_somCastedClass;
         b"somcPrivate12" => __m_class_private;
         b"somDefinedMethod" => __m_somDefinedMethod;
         b"somcPrivate13" => __m_class_private;
@@ -282,16 +282,16 @@ pub fn env_new() -> usize {
         SOMOBJECT = so;
         SOMCLASS = sc;
         SOMCLASSMGR = scm;
-        init_mi(so, 0, b"SOMObject", &[], 0, 4, 32, 1, 5);
+        init_mi(so, 0, b"SOMObject", &[], -1, 0, 4, 32, 1, 5);
         add_defs(so, &object_defs(), (&raw mut crate::SOMObjectClassData) as *mut usize);
-        init_mi(sc, 0, b"SOMClass", &[so], 4, 4, 76, 1, 5);
+        init_mi(sc, 0, b"SOMClass", &[so], -1, 4, 4, 76, 1, 5);
         add_defs(sc, &class_defs(), (&raw mut crate::SOMClassClassData) as *mut usize);
         override_name(sc, b"somFree", __m_class_somFree as usize);
         override_name(sc, b"somDumpSelfInt", __m_class_somDumpSelfInt as usize);
-        init_mi(scm, 0, b"SOMClassMgr", &[so], 4, 4, 22, 1, 5);
+        init_mi(scm, 0, b"SOMClassMgr", &[so], -1, 4, 4, 22, 1, 5);
         add_defs(scm, &mgr_defs(), (&raw mut crate::SOMClassMgrClassData) as *mut usize);
         override_name(scm, b"somDumpSelfInt", __m_mgr_somDumpSelfInt as usize);
-        init_mi(pdm, 0, b"SOMParentDerivedMetaclass", &[sc], 0, 4, 0, 1, 5);
+        init_mi(pdm, 0, b"SOMParentDerivedMetaclass", &[sc], -1, 0, 4, 0, 1, 5);
         class_object(so, (&raw mut crate::SOMObjectClassData) as *mut usize, (&raw mut crate::SOMObjectCClassData) as *mut usize);
         class_object(sc, (&raw mut crate::SOMClassClassData) as *mut usize, (&raw mut crate::SOMClassCClassData) as *mut usize);
         class_object(scm, (&raw mut crate::SOMClassMgrClassData) as *mut usize, (&raw mut crate::SOMClassMgrCClassData) as *mut usize);
@@ -508,11 +508,24 @@ pub unsafe fn build_class(inherit_vars: i32, sci: *const Sci, major: i32, minor:
                 }
             }
         }
-        // Overrides.
+        // Overrides (overriding a method the class does not have fails
+        // the class, as in IBM's SOM: it is freed and SOMError reports
+        // the error).
+        let old = crate::catch_begin();
         for i in 0..s.num_static_overrides as usize {
             let e = &*s.omt.add(i);
             let mid = *(e[0] as *const SomId);
             crate::call_cm(cls, cm::OVERRIDE_S_METHOD, &[cls as u32, mid as u32, e[1] as u32]);
+        }
+        let code = crate::catch_end(old);
+        if code != 0 {
+            crate::call_om(cls, crate::rt::om::SOM_FREE, &[cls as u32]);
+            if !s.cds.is_null() {
+                *s.cds = 0;
+            }
+            drop(_g);
+            crate::error(code, b"SOM.C\0", 0x6c7);
+            return 0;
         }
         // General methods (layout 3).
         if v >= 3 {

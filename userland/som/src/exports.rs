@@ -85,6 +85,7 @@ aligned! {
     __a_destroy_mutex => sys::destroy_mutex, 1;
     __a_thread_id => sys::thread_id, 0;
     __a_no_method => crate::no_method, 0;
+    __a_abstract_method => crate::abstract_method, 0;
 
     // The thunks' slow paths.
     __s_resolve => rt::slow_resolve, 2;
@@ -176,6 +177,11 @@ aligned! {
     __m_get_somDirectInitClasses => c::get_somDirectInitClasses, 2;
     __m_somDefinedMethod => c::somDefinedMethod, 2;
     __m_get_somDataAlignment => c::get_somDataAlignment, 1;
+    __m_somCloneClass => c::somCloneClass, 2;
+    __m_somCastObjCls => c::somCastObjCls, 3;
+    __m_somResetObjCls => c::somResetObjCls, 2;
+    __m_get_somTrueClass => c::get_somTrueClass, 1;
+    __m_get_somCastedClass => c::get_somCastedClass, 1;
     __m_class_somFree => c::class_somFree, 1;
     __m_class_somDumpSelfInt => c::class_somDumpSelfInt, 2;
 

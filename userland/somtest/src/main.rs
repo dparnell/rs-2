@@ -65,6 +65,8 @@ unsafe extern "C" {
     static SOMMalloc: extern "C" fn(u32) -> *mut u8;
     #[link_name = "SOM.10"]
     static SOMFree: extern "C" fn(*mut u8);
+    #[link_name = "SOM.9"]
+    static mut SOMError: usize;
 }
 
 unsafe extern "C" {
@@ -126,6 +128,8 @@ const SOM_IS_A: usize = 6;
 const SOM_RESPONDS_TO: usize = 7;
 const SOM_IS_INSTANCE_OF: usize = 8;
 const SOM_GET_SIZE: usize = 9;
+const SOM_CAST_OBJ: usize = 20;
+const SOM_RESET_OBJ: usize = 21;
 const SOM_DEFAULT_INIT: usize = 22;
 // SOMClass methods.
 const SOM_NEW: usize = 0;
@@ -133,7 +137,12 @@ const SOM_GET_NAME: usize = 4;
 const SOM_DESCENDED_FROM: usize = 6;
 const SOM_GET_PARENTS: usize = 38;
 const SOM_DEALLOCATE: usize = 47;
+const SOM_GET_INSTANCE_SIZE: usize = 12;
+const SOM_GET_INSTANCE_OFFSET: usize = 13;
 const SOM_GET_INSTANCE_PART_SIZE: usize = 14;
+// IBM's private SOMClass methods (somcPrivate8-11 in the Toolkit).
+const SOM_GET_TRUE_CLASS: usize = 58;
+const SOM_GET_CASTED_CLASS: usize = 59;
 // SOMClassMgr methods.
 const SOM_FIND_CLASS: usize = 1;
 const SOM_CLASS_FROM_ID: usize = 2;
@@ -161,6 +170,11 @@ struct Spec<'a> {
 /// somStaticClassInfo (layout version 4, as OS/2 Warp 4's compiler
 /// emits it).
 fn build(s: &Spec) -> usize {
+    // inherit_vars: implementation (data and methods) from every parent.
+    build_with(s, (1i32 << s.parents.len()) - 1)
+}
+
+fn build_with(s: &Spec, inherit: i32) -> usize {
     let mut smt: Vec<[usize; 6]> = Vec::new();
     for (i, &(n, p)) in s.methods.iter().enumerate() {
         let id: SomId = sid(n);
@@ -204,8 +218,6 @@ fn build(s: &Spec) -> usize {
     sci[25] = u32::MAX; // numDirectInitClasses: the parents
     sci[33] = s.methods.len() as u32; // numClassDataEntries
     let sci = Box::leak(sci.into_boxed_slice());
-    // inherit_vars: implementation (data and methods) from every parent.
-    let inherit = (1i32 << s.parents.len()) - 1;
     unsafe { somBuildClass(inherit, sci.as_ptr(), 1, 2) }
 }
 
@@ -359,7 +371,19 @@ extern "C" fn m_mixin_hello(_cls: usize) -> i32 {
     42
 }
 
+static mut ERRS: Vec<i32> = Vec::new();
+
+/// A SOMError that records the error and returns.
+extern "C" fn err_record(code: i32, _file: *const u8, _line: i32) {
+    unsafe { ERRS.push(code) };
+}
+extern "C" fn abs_speak(_obj: usize) -> i32 {
+    55
+}
+
 aligned! {
+    __t_err_record => err_record, 3;
+    __t_abs_speak => abs_speak, 1;
     __t_animal_init => animal_init, 2;
     __t_animal_destruct => animal_destruct, 3;
     __t_animal_set_legs => animal_set_legs, 2;
@@ -622,12 +646,165 @@ fn run() {
         take_log();
         check_eq("Mixy inherits Dog", m1(ANIMAL, 2, x) as i64, 101);
 
+        abstract_checks();
+        cast_checks();
+
         // Plain default initialization from somNew.
         let dinit: extern "C" fn(usize, usize) = f(tok(so(0), SOM_DEFAULT_INIT));
         let _ = dinit;
         let mem = (SOMMalloc)(64);
         check("SOMMalloc", !mem.is_null());
         (SOMFree)(mem);
+    }
+}
+
+/// The errors SOMError was called with since the last call.
+fn take_errs() -> Vec<i32> {
+    unsafe { core::mem::take(&mut ERRS) }
+}
+
+fn check_errs(name: &str, want: &[i32]) {
+    let got = take_errs();
+    if got == want {
+        println!("PASS {} errors {:?}", name, got);
+    } else {
+        println!("FAIL {}: errors {:?} (expected {:?})", name, got, want);
+        unsafe { FAILS += 1 };
+    }
+}
+
+fn size_of_class(c: usize) -> i64 {
+    m1(sc(), SOM_GET_INSTANCE_SIZE, c) as i64
+}
+
+/// A class with Dog's and Pet's interfaces, built with `inherit` as its
+/// inherit_vars (a bit per parent whose implementation it inherits).
+fn build_abstract(name: &[u8], parents: &[&[u8]], inherit: i32, cd: *mut usize, ccd: *mut usize) -> usize {
+    build_with(
+        &Spec {
+            name,
+            meta: None,
+            parents,
+            data: 4,
+            methods: &[(b"absM", __t_abs_speak as usize)],
+            overrides: &[(b"speak", __t_abs_speak as usize)],
+            cd,
+            ccd,
+        },
+        inherit,
+    )
+}
+
+/// Abstract inheritance: a parent without its inherit_vars bit gives
+/// only its interface (IBM's SOM: none of its data, its methods raise
+/// SOMError 20059, its initializers and destructor are not run).
+fn abstract_checks() {
+    unsafe {
+        let old = SOMError;
+        SOMError = __t_err_record as usize;
+        take_errs();
+
+        let (c, cc) = (cd(1), cd(8));
+        let cls = build_abstract(b"AbsDog", &[b"Dog"], 0, c, cc);
+        check("AbsDog (Dog's interface only) built", cls != 0);
+        check_eq("AbsDog size (no inherited data)", size_of_class(cls), 8);
+        take_log();
+        let o = m1(sc(), SOM_NEW, cls);
+        check_log("AbsDog init (no ancestor initializers)", b"");
+        check_eq("AbsDog data offset", data(cc, o) as i64 - o as i64, 4);
+        check_eq("AbsDog speak (its override)", m1(ANIMAL, 2, o) as i32 as i64, 55);
+        check_errs("AbsDog speak", &[]);
+        m1(ANIMAL, 1, o);
+        check_errs("AbsDog getLegs (abstract)", &[20059]);
+        m1(so(0), SOM_GET_SIZE, o);
+        check_errs("AbsDog somGetSize (abstract)", &[20059]);
+        somDataResolve(o, *ANIMAL_C.add(1));
+        check_errs("AbsDog Animal data (not inherited)", &[20109, 20109]);
+        somDataResolve(o, *PET_C.add(1));
+        check_errs("AbsDog Pet data (not an ancestor)", &[20109]);
+        check_eq("AbsDog absM", m1(c, 0, o) as i32 as i64, 55);
+        m2(so(0), SOM_IS_A, o, *ANIMAL);
+        check_errs("AbsDog somIsA (SOMObject's methods are abstract too)", &[20059]);
+
+        let (c, cc) = (cd(1), cd(8));
+        let cls = build_abstract(b"HalfPD1", &[b"Dog", b"Pet"], 1, c, cc);
+        check_eq("HalfPD1 (Dog's implementation, Pet's interface) size", size_of_class(cls), 20);
+        take_log();
+        let o = m1(sc(), SOM_NEW, cls);
+        check_log("HalfPD1 init", b"TAD");
+        check_eq("HalfPD1 data offset", data(cc, o) as i64 - o as i64, 16);
+        check_eq("HalfPD1 getLegs", m1(ANIMAL, 1, o) as i64, 4);
+        m1(PET, 0, o);
+        check_errs("HalfPD1 petTag (abstract)", &[20059]);
+        somDataResolve(o, *PET_C.add(1));
+        check_errs("HalfPD1 Pet data", &[20109, 20109]);
+        m1(so(0), SOM_FREE, o);
+        check_log("HalfPD1 destruct", b"dat");
+
+        let (c, cc) = (cd(1), cd(8));
+        let cls = build_abstract(b"HalfPD2", &[b"Dog", b"Pet"], 2, c, cc);
+        check_eq("HalfPD2 (Pet's implementation, Dog's interface) size", size_of_class(cls), 16);
+        take_log();
+        let o = m1(sc(), SOM_NEW, cls);
+        check_log("HalfPD2 init", b"TP");
+        check_eq("HalfPD2 data offset", data(cc, o) as i64 - o as i64, 4);
+        check_eq("HalfPD2 Pet data offset", somDataResolve(o, *PET_C.add(1)) as i64 - o as i64, 12);
+        check_eq("HalfPD2 petTag", m1(PET, 0, o) as i64, 1005);
+        m1(DOG, 0, o);
+        check_errs("HalfPD2 bark (abstract)", &[20059]);
+        m1(so(0), SOM_FREE, o);
+        check_log("HalfPD2 destruct", b"pt");
+
+        // Overriding a method the class does not have fails the class.
+        let cls = build_abstract(b"NoSpeak", &[b"SOMObject"], 1, cd(1), cd(8));
+        check("override of an unknown method fails the class", cls == 0);
+        check_errs("override of an unknown method", &[20169]);
+
+        // Instance sizes are not rounded up; somGetInstanceOffset is 0.
+        let cls = build(&Spec { name: b"Odd3", meta: None, parents: &[b"Thing"], data: 3, methods: &[], overrides: &[], cd: cd(0), ccd: cd(8) });
+        check_eq("instance size with 3 bytes of data", size_of_class(cls), 11);
+        check_eq("somGetInstanceOffset", m1(sc(), SOM_GET_INSTANCE_OFFSET, *DOG) as i64, 0);
+        SOMError = old;
+    }
+}
+
+/// somCastObj and somResetObj: an object cast to an ancestor gets a cast
+/// class ("Dog->Animal", made once per ancestor, not registered) whose
+/// methods are the ancestor's.
+fn cast_checks() {
+    unsafe {
+        let name = |o: usize| cstr(m1(so(0), SOM_GET_CLASS_NAME, o) as *const u8);
+        let (dog, animal) = (*DOG, *ANIMAL);
+        let d = m1(sc(), SOM_NEW, dog);
+        check("Dog's true class is Dog", m1(sc(), SOM_GET_TRUE_CLASS, dog) == dog && m1(sc(), SOM_GET_CASTED_CLASS, dog) == 0);
+        check("somCastObj Dog to Animal", m2(so(0), SOM_CAST_OBJ, d, animal) & 0xff != 0);
+        let c1 = m1(so(0), SOM_GET_CLASS, d);
+        check("cast object's class name", name(d) == b"Dog->Animal" && cstr(m1(sc(), SOM_GET_NAME, c1) as *const u8) == b"Dog->Animal");
+        check_eq("cast object's speak (Animal's)", m1(ANIMAL, 2, d) as i64, 1);
+        check_eq("cast object's bark (Dog's)", m1(DOG, 0, d) as i64, 7);
+        check_eq("cast object's legs", m1(ANIMAL, 1, d) as i64, 4);
+        check("cast class: true class Dog, casted class Animal", m1(sc(), SOM_GET_TRUE_CLASS, c1) == dog && m1(sc(), SOM_GET_CASTED_CLASS, c1) == animal);
+        check("cast object isA Dog, not an instance of Dog", m2(so(0), SOM_IS_A, d, dog) & 0xff != 0 && m2(so(0), SOM_IS_INSTANCE_OF, d, dog) & 0xff == 0);
+        check("cast class's metaclass", m1(so(0), SOM_GET_CLASS, c1) == m1(so(0), SOM_GET_CLASS, dog));
+        let fromid: extern "C" fn(usize, SomId) -> usize = f(tok(&raw const SOMClassMgrClassData as *const usize, SOM_CLASS_FROM_ID));
+        check("cast class not registered", fromid(SOMClassMgrObject, sid(b"Dog->Animal")) == 0);
+        check("somCastObj to a class not an ancestor fails", m2(so(0), SOM_CAST_OBJ, d, *PET) & 0xff == 0 && name(d) == b"Dog->Animal");
+        check("somCastObj to Thing", m2(so(0), SOM_CAST_OBJ, d, *THING) & 0xff != 0 && name(d) == b"Dog->Thing");
+        check_eq("Dog->Thing speak (Dog's)", m1(ANIMAL, 2, d) as i64, 101);
+        check("cast classes are reused", m2(so(0), SOM_CAST_OBJ, d, animal) & 0xff != 0 && m1(so(0), SOM_GET_CLASS, d) == c1);
+        check("somResetObj", m1(so(0), SOM_RESET_OBJ, d) & 0xff != 0 && m1(so(0), SOM_GET_CLASS, d) == dog);
+        check_eq("reset object's speak", m1(ANIMAL, 2, d) as i64, 101);
+        m2(so(0), SOM_CAST_OBJ, d, animal);
+        check("somCastObj to the true class resets", m2(so(0), SOM_CAST_OBJ, d, dog) & 0xff != 0 && m1(so(0), SOM_GET_CLASS, d) == dog);
+        let pd = m1(sc(), SOM_NEW, *PETDOG);
+        check("somCastObj PetDog to Pet (second parent)", m2(so(0), SOM_CAST_OBJ, pd, *PET) & 0xff != 0 && name(pd) == b"PetDog->Pet");
+        check_eq("PetDog->Pet petTag", m1(PET, 0, pd) as i64, 1005);
+        check_eq("PetDog->Pet speak (PetDog's)", m1(ANIMAL, 2, pd) as i64, 101);
+        take_log();
+        m1(so(0), SOM_FREE, pd);
+        check_log("cast PetDog destruct", b"pdat");
+        m1(so(0), SOM_FREE, d);
+        take_log();
     }
 }
 
@@ -665,6 +842,7 @@ fn main(s: &Startup) -> u32 {
     let word = args.split(|&c| c == b' ').find(|w| !w.is_empty()).unwrap_or(b"");
     if word.eq_ignore_ascii_case(b"LOAD") {
         load(args);
+
     } else {
         run();
     }

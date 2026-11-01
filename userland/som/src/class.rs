@@ -142,7 +142,7 @@ pub unsafe fn rec_or_new(cls: usize) -> *mut Class {
 
 pub extern "C" fn somInitMIClass(
     cls: usize,
-    _inherit_vars: i32,
+    inherit_vars: i32,
     name: *const u8,
     parents: *const Seq,
     data_size: i32,
@@ -170,7 +170,7 @@ pub extern "C" fn somInitMIClass(
     }
     let align = if align <= 0 { 4 } else { align as usize };
     unsafe {
-        init_mi(c, cls, cstr(name), &ps, data_size.max(0) as usize, align, max_methods.max(0) as usize, major, minor)
+        init_mi(c, cls, cstr(name), &ps, inherit_vars, data_size.max(0) as usize, align, max_methods.max(0) as usize, major, minor)
     };
 }
 
@@ -212,6 +212,7 @@ pub extern "C" fn somOverrideSMethod(cls: usize, mid: SomId, method: usize) {
     let Some(c) = (unsafe { r(cls) }) else { return };
     if !unsafe { override_method(c, mid, method) } {
         crate::warn(b"somOverrideSMethod: no method %s in class %s\n\0", &[id::name_of(mid) as u32, c.name as u32]);
+        crate::throw(20169, b"SOMCLS.C\0", 0x7c1);
     }
 }
 
@@ -433,8 +434,9 @@ pub extern "C" fn somGetInstanceSize(cls: usize) -> i32 {
     unsafe { r(cls) }.map_or(0, |c| c.instance_size as i32)
 }
 
-pub extern "C" fn somGetInstanceOffset(cls: usize) -> i32 {
-    unsafe { r(cls) }.map_or(0, |c| c.own_offset as i32)
+/// IBM's SOM returns 0 (the field it reads is never set).
+pub extern "C" fn somGetInstanceOffset(_cls: usize) -> i32 {
+    0
 }
 
 pub extern "C" fn somGetInstancePartSize(cls: usize) -> i32 {
@@ -512,6 +514,84 @@ pub extern "C" fn class_somDumpSelfInt(cls: usize, level: i32) {
     ]);
 }
 
+// ---- Casting objects (IBM's private SOMClass methods) ----
+
+/// somCloneClass: a copy of the class under another name, made by its
+/// metaclass and then given the class's state (as IBM's copies the class
+/// object), with a method table of its own.
+pub extern "C" fn somCloneClass(cls: usize, name: *const u8) -> usize {
+    let Some(c) = (unsafe { r(cls) }) else { return 0 };
+    let meta = unsafe { (*(*(cls as *const *const Mtab))).class_object };
+    let new = crate::call_cm(meta, cm::NEW, &[meta as u32]) as usize;
+    if new == 0 {
+        return 0;
+    }
+    unsafe {
+        let mr = &*class_of_obj(cls);
+        core::ptr::copy_nonoverlapping(cls as *const u8, new as *mut u8, mr.instance_size);
+        let rec = clone_record(c, new, cstr(name));
+        *((new + mr.somclass_off) as *mut *mut Class) = rec;
+    }
+    new
+}
+
+/// somCastObjCls: make `obj` (an instance of this class or of a cast of
+/// it) behave as an instance of its ancestor `to`: its method table
+/// becomes that of a cast class ("Dog->Animal") with `to`'s
+/// implementations of the methods `to` has, made once per ancestor.
+/// Casting to the true class resets the object.
+pub extern "C" fn somCastObjCls(cls: usize, to: usize, obj: *mut usize) -> u32 {
+    let Some(c) = (unsafe { r(cls) }) else { return 0 };
+    let t = unsafe { &mut *c.true_class() };
+    if t.obj == to {
+        unsafe { *obj = t.mtab as usize };
+        return 1;
+    }
+    if crate::call_cm(t.obj, cm::DESCENDED_FROM, &[t.obj as u32, to as u32]) & 0xff == 0 {
+        return 0;
+    }
+    let _g = lock();
+    let tr = unsafe { rec(to) };
+    if let Some(&x) = t.casts.iter().find(|&&x| unsafe { (*x).casted } == tr) {
+        unsafe { *obj = (*x).mtab as usize };
+        return 1;
+    }
+    let mut name = t.name_bytes().to_vec();
+    name.extend_from_slice(b"->");
+    name.extend_from_slice(unsafe { (*tr).name_bytes() });
+    name.push(0);
+    let clone = crate::call_cm(t.obj, cm::CLONE_CLASS, &[t.obj as u32, name.as_ptr() as u32]) as usize;
+    let Some(cr) = (unsafe { r(clone) }) else { return 0 };
+    // `to`'s implementations of its (static) methods.
+    let tor = unsafe { &*tr };
+    for &(x, xb) in &tor.blocks {
+        let Some(cb) = cr.block_of(x) else { continue };
+        for m in unsafe { &(*x).methods } {
+            unsafe { cr.mt().set(cb + m.slot, tor.mt().entry(xb + m.slot)) };
+        }
+    }
+    cr.casted = tr;
+    t.casts.push(cr);
+    unsafe { *obj = cr.mtab as usize };
+    1
+}
+
+/// somResetObjCls: give `obj` its true class's method table again.
+pub extern "C" fn somResetObjCls(cls: usize, obj: *mut usize) -> u32 {
+    if let Some(c) = unsafe { r(cls) } {
+        unsafe { *obj = (*c.true_class()).mtab as usize };
+    }
+    1
+}
+
+pub extern "C" fn get_somTrueClass(cls: usize) -> usize {
+    unsafe { r(cls) }.map_or(0, |c| unsafe { (*c.true_class()).obj })
+}
+
+pub extern "C" fn get_somCastedClass(cls: usize) -> usize {
+    unsafe { r(cls) }.map_or(0, |c| if c.casted.is_null() { 0 } else { unsafe { (*c.casted).obj } })
+}
+
 pub extern "C" fn private_stub(_cls: usize) -> usize {
     0
 }
@@ -521,6 +601,7 @@ pub mod cm {
     pub const NEW: usize = 0;
     pub const INIT_MI_CLASS: usize = 40;
     pub const CLASS_READY: usize = 3;
+    pub const DESCENDED_FROM: usize = 6;
     pub const CHECK_VERSION: usize = 7;
     pub const ADD_STATIC_METHOD: usize = 19;
     pub const OVERRIDE_S_METHOD: usize = 20;
@@ -530,6 +611,9 @@ pub mod cm {
     pub const GET_MEMBER_TOKEN: usize = 33;
     pub const ALLOCATE: usize = 46;
     pub const DEALLOCATE: usize = 47;
+    pub const CLONE_CLASS: usize = 50;
+    pub const CAST_OBJ_CLS: usize = 56;
+    pub const RESET_OBJ_CLS: usize = 57;
 }
 
 /// SOMClassMgr's method slots.
