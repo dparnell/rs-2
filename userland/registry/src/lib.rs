@@ -17,8 +17,11 @@
 //! is HKEY_LOCAL_MACHINE\CONFIG\0001, as in IBM's REGISTRY; the Win32
 //! values of the handles (0x80000000 on) are taken too. HKEY_DYN_DATA's
 //! keys are kept in the system file under DYN. Keys are deleted with their
-//! subkeys (as in Windows 95). Data are bytes in the process code page
-//! (the W calls are not there).
+//! subkeys (as in Windows 95). Names and string data are kept in the
+//! process code page; the W calls (wide.rs) convert at the boundary, as
+//! IBM's convert their names. A key with OS2_INI_FILE_NAME,
+//! OS2_INI_APP_NAME and OS2_INI_ACCESS_METHOD values shows other data as
+//! its values (map.rs: an OS/2 profile application, the locale's items).
 
 #![no_std]
 #![no_main]
@@ -30,6 +33,9 @@ extern crate os2;
 use alloc::vec::Vec;
 
 mod exports;
+mod map;
+mod spool;
+mod wide;
 
 #[unsafe(no_mangle)]
 #[unsafe(link_section = ".text.start")]
@@ -51,13 +57,16 @@ unsafe extern "C" {
 const ERROR_SUCCESS: u32 = 0;
 const ERROR_FILE_NOT_FOUND: u32 = 2;
 const ERROR_ACCESS_DENIED: u32 = 5;
+const ERROR_GEN_FAILURE: u32 = 31;
 const ERROR_INVALID_PARAMETER: u32 = 87;
+const ERROR_INVALID_NAME: u32 = 123;
 const ERROR_MORE_DATA: u32 = 234;
 const ERROR_NO_MORE_ITEMS: u32 = 259;
 const ERROR_BADKEY: u32 = 1010;
 const ERROR_CANTOPEN: u32 = 1011;
 
 const REG_SZ: u32 = 1;
+const REG_BINARY: u32 = 3;
 const REG_CREATED_NEW_KEY: u32 = 1;
 const REG_OPENED_EXISTING_KEY: u32 = 2;
 
@@ -99,15 +108,27 @@ fn file(h: Hive) -> u32 {
         name.extend_from_slice(if h == Hive::System { b":\\OS2\\SYSTEM\\REGSYS.INI\0" } else { b":\\OS2\\SYSTEM\\REGUSER.INI\0" });
         files[i] = unsafe { PrfOpenProfile(0, name.as_ptr()) };
         // The keys other predefined keys stand for (IBM's KRegInit makes
-        // them too).
+        // them too), and the keys IBM's REGCONV makes when OS/2 is
+        // installed: Windows' font list in OS2.INI's PM_Fonts, the
+        // international settings from the locale.
         if files[i] != 0 {
+            let mut ini = Vec::new();
+            ini.push(b'@' + drive as u8);
+            ini.extend_from_slice(b":\\OS2\\OS2.INI");
+            let fonts: [&[u8]; 3] = [&ini, b"PM_Fonts", b"profile_sz"];
+            let uls: [&[u8]; 3] = [b"", b"", b"uls"];
             match h {
                 Hive::System => {
                     create(h, b"HKLM", b"SOFTWARE\\Classes");
                     create(h, b"HKLM", b"CONFIG\\0001");
+                    create(h, b"HKLM", b"System\\CurrentControlSet\\Control");
+                    create_mapping(h, b"HKLM", b"SOFTWARE\\MICROSOFT\\WINDOWS\\CURRENTVERSION\\FONTS", fonts);
+                    create_mapping(h, b"HKLM", b"SOFTWARE\\WIN.INI\\WINI_FONTS", fonts);
+                    create_mapping(h, b"HKLM", b"SOFTWARE\\WIN.INI\\WINI_INTL", uls);
                 }
                 Hive::User => {
-                    create(h, b"HKU", b".default");
+                    create(h, b"HKU", b".default\\SOFTWARE\\MICROSOFT\\WINDOWS\\CURRENTVERSION");
+                    create_mapping(h, b"HKU", b".default\\CONTROL PANEL\\INTERNATIONAL", uls);
                 }
             }
         }
@@ -261,8 +282,24 @@ fn encode(name: &[u8], ty: u32, data: &[u8]) -> Vec<u8> {
     v
 }
 
-/// The values of a key, in the order they were made.
-fn values(k: &Key) -> Vec<(Vec<u8>, u32, Vec<u8>)> {
+/// A key that maps its values (IBM's REGCONV makes them when OS/2 is
+/// installed), made with its OS2_INI_* values when it is not there yet:
+/// [file, application, access method], empty ones left out.
+fn create_mapping(hive: Hive, base: &[u8], sub: &[u8], vals: [&[u8]; 3]) {
+    let k = Key { hive, path: join(base, sub) };
+    if exists(&k) || !create(hive, base, sub) {
+        return;
+    }
+    let hini = file(hive);
+    for (name, v) in [map::FILE_NAME, map::APP_NAME, map::ACCESS_METHOD].iter().zip(vals) {
+        if !v.is_empty() {
+            put(hini, &k.path, Some(&value_key(name)), Some(&encode(name, REG_SZ, &z(v))));
+        }
+    }
+}
+
+/// The values stored with a key, in the order they were made.
+fn stored(k: &Key) -> Vec<(Vec<u8>, u32, Vec<u8>)> {
     let hini = file(k.hive);
     let a = z(&k.path);
     names(hini, a.as_ptr()).into_iter().filter(|n| n.first() == Some(&b'V')).filter_map(|n| get(hini, &k.path, &n).and_then(|raw| decode(&raw))).collect()
@@ -319,11 +356,43 @@ fn is_string(ty: u32) -> bool {
     matches!(ty, 1 | 2 | 7)
 }
 
-// ---- The calls ----
+fn set_out(p: *mut u32, v: u32) {
+    if !p.is_null() {
+        unsafe { *p = v };
+    }
+}
 
-/// RegOpenKeyExA(hKey, lpSubKey, ulOptions, samDesired, phkResult).
-#[unsafe(no_mangle)]
-pub extern "C" fn RegOpenKeyExA(h: u32, sub: *const u8, _opt: u32, _sam: u32, out: *mut u32) -> u32 {
+// ---- What the A and W calls share: names and data in the code page ----
+
+/// The key a handle and a relative path name, or an error.
+fn subkey(h: u32, sub: &[u8]) -> Result<Key, u32> {
+    let base = key_of(h).ok_or(ERROR_BADKEY)?;
+    if file(base.hive) == 0 {
+        return Err(ERROR_CANTOPEN);
+    }
+    Ok(Key { hive: base.hive, path: join(&base.path, sub) })
+}
+
+pub(crate) fn open_key(h: u32, sub: &[u8], out: *mut u32) -> u32 {
+    if out.is_null() {
+        return ERROR_INVALID_PARAMETER;
+    }
+    let k = match subkey(h, sub) {
+        Ok(k) => k,
+        Err(e) => return e,
+    };
+    if !exists(&k) {
+        return ERROR_FILE_NOT_FOUND;
+    }
+    // A spooler_key key's subkeys are the queues as they are now.
+    if mapping_of(&k).is_some_and(|m| m.method == Some(map::Method::SpoolerKey)) {
+        spool::refresh(&k);
+    }
+    unsafe { *out = new_handle(k) };
+    ERROR_SUCCESS
+}
+
+pub(crate) fn create_key(h: u32, sub: &[u8], out: *mut u32, disp: *mut u32) -> u32 {
     if out.is_null() {
         return ERROR_INVALID_PARAMETER;
     }
@@ -331,12 +400,177 @@ pub extern "C" fn RegOpenKeyExA(h: u32, sub: *const u8, _opt: u32, _sam: u32, ou
     if file(base.hive) == 0 {
         return ERROR_CANTOPEN;
     }
-    let k = Key { hive: base.hive, path: join(&base.path, &cstr(sub)) };
+    if !exists(&base) {
+        return ERROR_BADKEY;
+    }
+    let k = Key { hive: base.hive, path: join(&base.path, sub) };
+    let was = exists(&k);
+    if !was && !create(base.hive, &base.path, sub) {
+        return ERROR_ACCESS_DENIED;
+    }
+    set_out(disp, if was { REG_OPENED_EXISTING_KEY } else { REG_CREATED_NEW_KEY });
+    unsafe { *out = new_handle(k) };
+    ERROR_SUCCESS
+}
+
+pub(crate) fn delete_key(h: u32, sub: &[u8]) -> u32 {
+    let Some(base) = key_of(h) else { return ERROR_BADKEY };
+    if sub.iter().all(|&c| c == b'\\') && predefined(h) {
+        return ERROR_INVALID_PARAMETER;
+    }
+    let k = Key { hive: base.hive, path: join(&base.path, sub) };
+    if !k.path.contains(&b'\\') {
+        return ERROR_ACCESS_DENIED;
+    }
     if !exists(&k) {
         return ERROR_FILE_NOT_FOUND;
     }
-    unsafe { *out = new_handle(k) };
+    let hini = file(k.hive);
+    let mut prefix = k.path.clone();
+    prefix.push(b'\\');
+    for a in apps(k.hive) {
+        if a == k.path || a.starts_with(&prefix) {
+            put(hini, &a, None, None);
+        }
+    }
     ERROR_SUCCESS
+}
+
+/// A key's name as given.
+fn key_name(k: &Key) -> Vec<u8> {
+    let last = k.path.rsplit(|&c| c == b'\\').next().unwrap_or(&[]).to_vec();
+    get(file(k.hive), &k.path, b"K").unwrap_or(last)
+}
+
+/// The mapping of a key (map.rs), from its stored values (a
+/// spooler_value key's name too).
+fn mapping_of(k: &Key) -> Option<map::Map> {
+    let mut m = map::mapping(&stored(k), b"")?;
+    if m.method == Some(map::Method::SpoolerValue) {
+        m.name = key_name(k);
+    }
+    Some(m)
+}
+
+/// A value's type and data. A key that maps its values reads its own
+/// OS2_INI_* values and the unnamed one from the registry, the others
+/// from what it maps.
+pub(crate) fn query_value(h: u32, name: &[u8]) -> Result<(u32, Vec<u8>), u32> {
+    let k = key_of(h).ok_or(ERROR_BADKEY)?;
+    if !name.is_empty() && !map::is_map_name(name) {
+        if let Some(m) = mapping_of(&k).filter(|m| m.maps_values()) {
+            return m.get(name);
+        }
+    }
+    let raw = get(file(k.hive), &k.path, &value_key(name));
+    match raw.as_deref().and_then(decode) {
+        Some((_, t, d)) => Ok((t, d)),
+        None if name.is_empty() => Ok((REG_SZ, alloc::vec![0])),
+        None => Err(ERROR_FILE_NOT_FOUND),
+    }
+}
+
+/// The i-th value: (name, type, data); a key that maps its values lists
+/// what it maps (not its OS2_INI_* values; a spooler_key key its other
+/// values).
+pub(crate) fn enum_value(h: u32, i: u32) -> Result<(Vec<u8>, u32, Vec<u8>), u32> {
+    let k = key_of(h).ok_or(ERROR_BADKEY)?;
+    match mapping_of(&k) {
+        Some(m) if m.maps_values() => m.ith(i),
+        Some(_) => stored(&k).into_iter().filter(|v| !map::is_map_name(&v.0)).nth(i as usize).ok_or(ERROR_NO_MORE_ITEMS),
+        None => stored(&k).into_iter().nth(i as usize).ok_or(ERROR_NO_MORE_ITEMS),
+    }
+}
+
+/// Every value enum_value lists (for a mapped key, up to the first
+/// error, as IBM's RegQueryInfoKey counts them).
+fn all_values(k: &Key) -> Vec<(Vec<u8>, u32, Vec<u8>)> {
+    match mapping_of(k) {
+        Some(m) if m.maps_values() => (0..).map_while(|i| m.ith(i).ok()).collect(),
+        Some(_) => stored(k).into_iter().filter(|v| !map::is_map_name(&v.0)).collect(),
+        None => stored(k),
+    }
+}
+
+/// The i-th subkey's name as given.
+pub(crate) fn enum_key(h: u32, i: u32) -> Result<Vec<u8>, u32> {
+    let k = key_of(h).ok_or(ERROR_BADKEY)?;
+    children(&k).into_iter().nth(i as usize).map(|c| c.1).ok_or(ERROR_NO_MORE_ITEMS)
+}
+
+/// Store a value. Its OS2_INI_* values (REG_SZ) make a key map its
+/// values: only on a key without other values, and only with an access
+/// method IBM's REGISTRY knows; a key that maps takes no other values.
+/// Strings get their NUL when the data leave it out.
+pub(crate) fn set_value(h: u32, name: &[u8], ty: u32, mut d: Vec<u8>) -> u32 {
+    let Some(k) = key_of(h) else { return ERROR_BADKEY };
+    if !exists(&k) {
+        return ERROR_BADKEY;
+    }
+    if is_string(ty) && d.last() != Some(&0) {
+        d.push(0);
+    }
+    let vals = stored(&k);
+    if ty == REG_SZ && map::is_map_name(name) {
+        if !vals.iter().all(|v| v.1 == REG_SZ && map::is_map_name(&v.0)) {
+            return ERROR_INVALID_NAME;
+        }
+        if map::same(name, map::ACCESS_METHOD) && map::method(&d).is_none() {
+            return ERROR_INVALID_NAME;
+        }
+    } else if map::mapping(&vals, b"").is_some() {
+        return ERROR_INVALID_NAME;
+    }
+    let hini = file(k.hive);
+    // The key of a root's values.
+    if get(hini, &k.path, b"K").is_none() && !put(hini, &k.path, Some(b"K"), Some(&k.path)) {
+        return ERROR_ACCESS_DENIED;
+    }
+    if !put(hini, &k.path, Some(&value_key(name)), Some(&encode(name, ty, &d))) {
+        return ERROR_ACCESS_DENIED;
+    }
+    if ty == REG_SZ && map::same(name, map::ACCESS_METHOD) && map::method(&d) == Some(map::Method::SpoolerKey) {
+        spool::refresh(&k);
+    }
+    ERROR_SUCCESS
+}
+
+/// Delete a value; of a key that maps its values only the OS2_INI_*
+/// values and the unnamed one (what it maps is not written).
+pub(crate) fn delete_value(h: u32, name: &[u8]) -> u32 {
+    let Some(k) = key_of(h) else { return ERROR_BADKEY };
+    if !name.is_empty() && !map::is_map_name(name) && mapping_of(&k).is_some() {
+        return ERROR_INVALID_NAME;
+    }
+    let vk = value_key(name);
+    let hini = file(k.hive);
+    if get(hini, &k.path, &vk).is_none() {
+        return ERROR_FILE_NOT_FOUND;
+    }
+    if put(hini, &k.path, Some(&vk), None) { ERROR_SUCCESS } else { ERROR_ACCESS_DENIED }
+}
+
+/// What RegQueryInfoKey reports: the subkey names and the values.
+pub(crate) fn key_info(h: u32) -> Result<(Vec<Vec<u8>>, Vec<(Vec<u8>, u32, Vec<u8>)>), u32> {
+    let k = key_of(h).ok_or(ERROR_BADKEY)?;
+    Ok((children(&k).into_iter().map(|c| c.1).collect(), all_values(&k)))
+}
+
+pub(crate) fn zero_filetime(ft: *mut u32) {
+    if !ft.is_null() {
+        unsafe {
+            *ft = 0;
+            *ft.add(1) = 0;
+        }
+    }
+}
+
+// ---- The calls ----
+
+/// RegOpenKeyExA(hKey, lpSubKey, ulOptions, samDesired, phkResult).
+#[unsafe(no_mangle)]
+pub extern "C" fn RegOpenKeyExA(h: u32, sub: *const u8, _opt: u32, _sam: u32, out: *mut u32) -> u32 {
+    open_key(h, &cstr(sub), out)
 }
 
 /// RegOpenKeyA(hKey, lpSubKey, phkResult).
@@ -349,27 +583,7 @@ pub extern "C" fn RegOpenKeyA(h: u32, sub: *const u8, out: *mut u32) -> u32 {
 /// samDesired, lpSecurityAttributes, phkResult, lpdwDisposition).
 #[unsafe(no_mangle)]
 pub extern "C" fn RegCreateKeyExA(h: u32, sub: *const u8, _r: u32, _class: *const u8, _opt: u32, _sam: u32, _sec: u32, out: *mut u32, disp: *mut u32) -> u32 {
-    if out.is_null() {
-        return ERROR_INVALID_PARAMETER;
-    }
-    let Some(base) = key_of(h) else { return ERROR_BADKEY };
-    if file(base.hive) == 0 {
-        return ERROR_CANTOPEN;
-    }
-    if !exists(&base) {
-        return ERROR_BADKEY;
-    }
-    let sub = cstr(sub);
-    let k = Key { hive: base.hive, path: join(&base.path, &sub) };
-    let was = exists(&k);
-    if !was && !create(base.hive, &base.path, &sub) {
-        return ERROR_ACCESS_DENIED;
-    }
-    if !disp.is_null() {
-        unsafe { *disp = if was { REG_OPENED_EXISTING_KEY } else { REG_CREATED_NEW_KEY } };
-    }
-    unsafe { *out = new_handle(k) };
-    ERROR_SUCCESS
+    create_key(h, &cstr(sub), out, disp)
 }
 
 /// RegCreateKeyA(hKey, lpSubKey, phkResult).
@@ -404,39 +618,13 @@ pub extern "C" fn RegFlushKey(h: u32) -> u32 {
 /// predefined key itself cannot be deleted.
 #[unsafe(no_mangle)]
 pub extern "C" fn RegDeleteKeyA(h: u32, sub: *const u8) -> u32 {
-    let Some(base) = key_of(h) else { return ERROR_BADKEY };
-    let sub = cstr(sub);
-    if sub.iter().all(|&c| c == b'\\') && predefined(h) {
-        return ERROR_INVALID_PARAMETER;
-    }
-    let k = Key { hive: base.hive, path: join(&base.path, &sub) };
-    if !k.path.contains(&b'\\') {
-        return ERROR_ACCESS_DENIED;
-    }
-    if !exists(&k) {
-        return ERROR_FILE_NOT_FOUND;
-    }
-    let hini = file(k.hive);
-    let mut prefix = k.path.clone();
-    prefix.push(b'\\');
-    for a in apps(k.hive) {
-        if a == k.path || a.starts_with(&prefix) {
-            put(hini, &a, None, None);
-        }
-    }
-    ERROR_SUCCESS
+    delete_key(h, &cstr(sub))
 }
 
 /// RegDeleteValueA(hKey, lpValueName).
 #[unsafe(no_mangle)]
 pub extern "C" fn RegDeleteValueA(h: u32, name: *const u8) -> u32 {
-    let Some(k) = key_of(h) else { return ERROR_BADKEY };
-    let vk = value_key(&cstr(name));
-    let hini = file(k.hive);
-    if get(hini, &k.path, &vk).is_none() {
-        return ERROR_FILE_NOT_FOUND;
-    }
-    if put(hini, &k.path, Some(&vk), None) { ERROR_SUCCESS } else { ERROR_ACCESS_DENIED }
+    delete_value(h, &cstr(name))
 }
 
 /// RegEnumKeyExA(hKey, dwIndex, lpName, lpcName, lpReserved, lpClass,
@@ -444,14 +632,18 @@ pub extern "C" fn RegDeleteValueA(h: u32, name: *const u8) -> u32 {
 /// NUL on return.
 #[unsafe(no_mangle)]
 pub extern "C" fn RegEnumKeyExA(h: u32, i: u32, name: *mut u8, pcch: *mut u32, _r: u32, class: *mut u8, pcclass: *mut u32, ft: *mut u32) -> u32 {
-    let Some(k) = key_of(h) else { return ERROR_BADKEY };
+    if key_of(h).is_none() {
+        return ERROR_BADKEY;
+    }
     if name.is_null() || pcch.is_null() {
         return ERROR_INVALID_PARAMETER;
     }
-    let kids = children(&k);
-    let Some((_, n)) = kids.get(i as usize) else { return ERROR_NO_MORE_ITEMS };
+    let n = match enum_key(h, i) {
+        Ok(n) => n,
+        Err(e) => return e,
+    };
     let mut cb = unsafe { *pcch };
-    let r = copy_out(n, true, name, &mut cb);
+    let r = copy_out(&n, true, name, &mut cb);
     if r != ERROR_SUCCESS {
         return r;
     }
@@ -462,12 +654,7 @@ pub extern "C" fn RegEnumKeyExA(h: u32, i: u32, name: *mut u8, pcch: *mut u32, _
             *pcclass = 0;
         }
     }
-    if !ft.is_null() {
-        unsafe {
-            *ft = 0;
-            *ft.add(1) = 0;
-        }
-    }
+    zero_filetime(ft);
     ERROR_SUCCESS
 }
 
@@ -482,23 +669,25 @@ pub extern "C" fn RegEnumKeyA(h: u32, i: u32, name: *mut u8, cch: u32) -> u32 {
 /// lpType, lpData, lpcbData).
 #[unsafe(no_mangle)]
 pub extern "C" fn RegEnumValueA(h: u32, i: u32, name: *mut u8, pcch: *mut u32, _r: u32, ty: *mut u32, data: *mut u8, pcb: *mut u32) -> u32 {
-    let Some(k) = key_of(h) else { return ERROR_BADKEY };
+    if key_of(h).is_none() {
+        return ERROR_BADKEY;
+    }
     if name.is_null() || pcch.is_null() {
         return ERROR_INVALID_PARAMETER;
     }
-    let vals = values(&k);
-    let Some((n, t, d)) = vals.get(i as usize) else { return ERROR_NO_MORE_ITEMS };
+    let (n, t, d) = match enum_value(h, i) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
     let mut cb = unsafe { *pcch };
-    let r = copy_out(n, true, name, &mut cb);
+    let r = copy_out(&n, true, name, &mut cb);
     if r != ERROR_SUCCESS {
         return r;
     }
     unsafe { *pcch = n.len() as u32 };
-    if !ty.is_null() {
-        unsafe { *ty = *t };
-    }
+    set_out(ty, t);
     if !pcb.is_null() {
-        return copy_out(d, false, data, pcb);
+        return copy_out(&d, false, data, pcb);
     }
     ERROR_SUCCESS
 }
@@ -507,20 +696,14 @@ pub extern "C" fn RegEnumValueA(h: u32, i: u32, name: *mut u8, pcch: *mut u32, _
 /// lpcbData): a missing unnamed value reads as an empty REG_SZ.
 #[unsafe(no_mangle)]
 pub extern "C" fn RegQueryValueExA(h: u32, name: *const u8, _r: u32, ty: *mut u32, data: *mut u8, pcb: *mut u32) -> u32 {
-    let Some(k) = key_of(h) else { return ERROR_BADKEY };
     if pcb.is_null() && !data.is_null() {
         return ERROR_INVALID_PARAMETER;
     }
-    let name = cstr(name);
-    let raw = get(file(k.hive), &k.path, &value_key(&name));
-    let (t, d) = match raw.as_deref().and_then(decode) {
-        Some((_, t, d)) => (t, d),
-        None if name.is_empty() => (REG_SZ, alloc::vec![0]),
-        None => return ERROR_FILE_NOT_FOUND,
+    let (t, d) = match query_value(h, &cstr(name)) {
+        Ok(v) => v,
+        Err(e) => return e,
     };
-    if !ty.is_null() {
-        unsafe { *ty = t };
-    }
+    set_out(ty, t);
     copy_out(&d, false, data, pcb)
 }
 
@@ -539,24 +722,15 @@ pub extern "C" fn RegQueryValueA(h: u32, sub: *const u8, data: *mut u8, pcb: *mu
 }
 
 /// RegSetValueExA(hKey, lpValueName, Reserved, dwType, lpData, cbData):
-/// a string's data are taken up to its NUL when cbData leaves it out.
+/// as in IBM's, Reserved must be 0, a string needs its data and the data
+/// stay below 16365 bytes (IBM keeps strings in Unicode, 32K at most).
 #[unsafe(no_mangle)]
-pub extern "C" fn RegSetValueExA(h: u32, name: *const u8, _r: u32, ty: u32, data: *const u8, cb: u32) -> u32 {
-    let Some(k) = key_of(h) else { return ERROR_BADKEY };
-    if !exists(&k) {
-        return ERROR_BADKEY;
+pub extern "C" fn RegSetValueExA(h: u32, name: *const u8, r: u32, ty: u32, data: *const u8, cb: u32) -> u32 {
+    if r != 0 || cb >= 0x3fed || (is_string(ty) && data.is_null()) {
+        return ERROR_INVALID_PARAMETER;
     }
-    let mut d = if data.is_null() { Vec::new() } else { unsafe { core::slice::from_raw_parts(data, cb as usize) }.to_vec() };
-    if is_string(ty) && d.last() != Some(&0) {
-        d.push(0);
-    }
-    let name = cstr(name);
-    let hini = file(k.hive);
-    // The key of a root's values.
-    if get(hini, &k.path, b"K").is_none() && !put(hini, &k.path, Some(b"K"), Some(&k.path)) {
-        return ERROR_ACCESS_DENIED;
-    }
-    if put(hini, &k.path, Some(&value_key(&name)), Some(&encode(&name, ty, &d))) { ERROR_SUCCESS } else { ERROR_ACCESS_DENIED }
+    let d = if data.is_null() { Vec::new() } else { unsafe { core::slice::from_raw_parts(data, cb as usize) }.to_vec() };
+    set_value(h, &cstr(name), ty, d)
 }
 
 /// RegSetValueA(hKey, lpSubKey, dwType, lpData, cbData): the unnamed
@@ -571,8 +745,7 @@ pub extern "C" fn RegSetValueA(h: u32, sub: *const u8, ty: u32, data: *const u8,
     if r != ERROR_SUCCESS {
         return r;
     }
-    let s = cstr(data);
-    let r = RegSetValueExA(k, b"\0".as_ptr(), 0, REG_SZ, s.as_ptr(), s.len() as u32);
+    let r = set_value(k, b"", REG_SZ, cstr(data));
     RegCloseKey(k);
     r
 }
@@ -595,31 +768,22 @@ pub extern "C" fn RegQueryInfoKeyA(
     sec: *mut u32,
     ft: *mut u32,
 ) -> u32 {
-    let Some(k) = key_of(h) else { return ERROR_BADKEY };
-    let kids = children(&k);
-    let vals = values(&k);
-    let set = |p: *mut u32, v: usize| {
-        if !p.is_null() {
-            unsafe { *p = v as u32 };
-        }
+    let (kids, vals) = match key_info(h) {
+        Ok(v) => v,
+        Err(e) => return e,
     };
     if !class.is_null() && !pcclass.is_null() && unsafe { *pcclass } > 0 {
         unsafe { *class = 0 };
     }
-    set(pcclass, 0);
-    set(subkeys, kids.len());
-    set(max_sub, kids.iter().map(|k| k.1.len()).max().unwrap_or(0));
-    set(max_class, 0);
-    set(nvalues, vals.len());
-    set(max_name, vals.iter().map(|v| v.0.len()).max().unwrap_or(0));
-    set(max_data, vals.iter().map(|v| v.2.len()).max().unwrap_or(0));
-    set(sec, 0);
-    if !ft.is_null() {
-        unsafe {
-            *ft = 0;
-            *ft.add(1) = 0;
-        }
-    }
+    set_out(pcclass, 0);
+    set_out(subkeys, kids.len() as u32);
+    set_out(max_sub, kids.iter().map(|k| k.len()).max().unwrap_or(0) as u32);
+    set_out(max_class, 0);
+    set_out(nvalues, vals.len() as u32);
+    set_out(max_name, vals.iter().map(|v| v.0.len()).max().unwrap_or(0) as u32);
+    set_out(max_data, vals.iter().map(|v| v.2.len()).max().unwrap_or(0) as u32);
+    set_out(sec, 0);
+    zero_filetime(ft);
     ERROR_SUCCESS
 }
 

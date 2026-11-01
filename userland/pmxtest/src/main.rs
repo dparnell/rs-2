@@ -1,13 +1,14 @@
 //! Self-checks of the Presentation Manager features beyond the basics:
 //! hooks (hooks.rs), DDE with another process (dde.rs), the registry
-//! through Open32's calls (reg.rs), owner drawing (owner.rs),
+//! through Open32's calls (reg.rs) and the rest of it: the W calls, keys
+//! that map their values (regx.rs), owner drawing (owner.rs),
 //! presentation parameters (pres.rs), PMBIDI (bidi.rs), AVIO (avio.rs), lazy drag and
 //! DrgDragFiles (drag.rs), a Windows program's Application Error
 //! (win16.rs), what the Open Watcom installer needs (owatcom.rs). Each check
 //! prints PASS or FAIL; the last line is "pmxtest done: N failure(s)"
 //! and the exit code N. `PMXTEST CHILD` is the second process the system
-//! hooks are checked in, `PMXTEST DDESERVER` the DDE server; `PMXTEST
-//! RECORD` waits for three keys or clicks (typed by `xtask run --type`)
+//! hooks are checked in, `PMXTEST DDESERVER` the DDE server, `PMXTEST
+//! REG` makes the registry checks only; `PMXTEST RECORD` waits for three keys or clicks (typed by `xtask run --type`)
 //! and reports what the journal record hook saw.
 
 #![no_std]
@@ -29,6 +30,7 @@ mod owner;
 mod pm;
 mod pres;
 mod reg;
+mod regx;
 mod win16;
 
 use pm::*;
@@ -173,11 +175,15 @@ fn main(s: &Startup) -> u32 {
     }
     if args.starts_with(b"RECORD") {
         hooks::record(hab, client);
+    } else if args.starts_with(b"REG") {
+        reg::reg_checks();
+        regx::regx_checks();
     } else {
         check("WinInitialize/WinCreateMsgQueue and a window", hab != 0 && hmq != 0 && client != 0);
         hooks::hook_checks(hab, hmq, client);
         dde::dde_checks(hab, client);
         reg::reg_checks();
+        regx::regx_checks();
         owner::owner_checks(hab, client);
         pres::pres_checks(client);
         bidi::bidi_checks(client);

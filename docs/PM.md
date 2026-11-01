@@ -1343,9 +1343,14 @@ space clipped to the item and in RGB mode; what the owner does not draw
 IBM's Open32 (PMWINX.DLL, the Win32 API on OS/2) is installed with the
 Feature Installer (the CD's `FI\DAX`); programs on the CD use only its
 registry calls, which IBM's PMWINX forwards to REGISTRY.DLL (ordinals
-541-555). rs2's PMWINX holds just those forwarders, and rs2's
-REGISTRY.DLL has the Win32 registry calls (the A forms) at IBM's
-ordinals. IBM's REGISTRY keeps its keys in `\OS2\SYSTEM\SYSTEM.DAT` and
+541-555, and `RegFlushKey` at 1030). rs2's PMWINX holds just those
+forwarders, and rs2's REGISTRY.DLL has all of IBM's REGISTRY exports at
+its ordinals: the Win32 registry calls in their A and W forms
+(`RegCloseKey` 1, `RegCreateKey[Ex]A/W` 3-6, `RegDelete{Key,Value}A/W`
+7-10, `RegEnumKey[Ex]A/W` 11-14, `RegEnumValueA/W` 15-16, `RegFlushKey`
+17, `RegOpenKey[Ex]A/W` 22-25, `RegQueryInfoKeyA/W` 26-27,
+`RegQueryValue[Ex]A/W` 30-33, `RegSetValue[Ex]A/W` 42-45) and `KRegInit`/
+`KRegTerm` (50-51). IBM's REGISTRY keeps its keys in `\OS2\SYSTEM\SYSTEM.DAT` and
 `USER.DAT`, binary files mapped into shared memory with a server
 process; rs2 keeps them in two profiles (OS/2 INI files through PMSHAPI,
 shared by all processes and written through): `\OS2\SYSTEM\REGSYS.INI`
@@ -1359,9 +1364,72 @@ Open32's handles (`HKEY_LOCAL_MACHINE` 0xFFFFFFEF ... `HKEY_CLASSES_ROOT`
 REGISTRY: `HKEY_CLASSES_ROOT` is `HKEY_LOCAL_MACHINE\SOFTWARE\Classes`,
 `HKEY_CURRENT_USER` is `HKEY_USERS\.default`, `HKEY_CURRENT_CONFIG` is
 `HKEY_LOCAL_MACHINE\CONFIG\0001`. Keys are deleted with their subkeys.
-Not there: the W calls, IBM's keys that map values to INI files
-(`OS2_INI_FILE_NAME`), security and notification. PMXTEST checks the calls
-through PMWINX; the Registry Editor (REGEDIT2.EXE) runs on them.
+`RegSetValueExA` wants Reserved 0, data for a string and less than 16365
+bytes, as IBM's (which keeps strings in Unicode, 32K at most).
+
+**The W calls.** IBM's keep key and value names in the process code page
+(converted with UCONV) and string data in Unicode; rs2's keep both in the
+code page and convert names and the data of `REG_SZ`, `REG_EXPAND_SZ` and
+`REG_MULTI_SZ` values at the W calls (`userland/registry/src/wide.rs`), so
+a string set through one kind of call reads the same through the other
+(the code pages are single-byte: what is not in the code page becomes
+`?`). Name lengths count characters and data lengths bytes, as in Win32;
+IBM's `RegEnumKeyExW` and `RegQueryInfoKeyW` count name lengths in bytes,
+but nothing IBM shipped calls the W forms (Open32's os2win.h declares only
+the A calls, and PMWINX forwards none), so rs2 follows Win32 there.
+`RegSetValueExW` takes at most 32728 bytes, Reserved 0 and data for a
+string, as IBM's.
+
+**Keys that map their values** (IBM's `rbmap.c`, studied in Ghidra). A key
+whose values are only `OS2_INI_FILE_NAME`, `OS2_INI_APP_NAME` and
+`OS2_INI_ACCESS_METHOD` (all `REG_SZ`; names compared without case) shows
+other data as its values, read only; `OS2_INI_ACCESS_METHOD` names how:
+
+| Method | The key's values |
+|--------|------------------|
+| `profile` | the keys of application `OS2_INI_APP_NAME` in the OS/2 profile `OS2_INI_FILE_NAME`, as `REG_BINARY` |
+| `profile_sz` | the same as `REG_SZ` (a NUL added when the data lack one) |
+| `uls` | the items of the process's locale (LIBUNI `UniQueryLocaleItem`, items 1-125, its locale object made once per process) named as in ulsitem.h without `LOCI_` (`sShortDate`, `iCountry`...), as `REG_SZ` in the code page |
+| `spooler_key` | its own values; its subkeys are the print queues, made again (PMSPL `SplEnumQueue` level 3) whenever the key is opened or the method set: one per queue named by its printer driver's device (the DRIVDATA's `szDeviceName`), marked `spooler_value`, and the queue printed to by default (`PRQ3_TYPE_APPDEFAULT`) as the key's `Default` value |
+| `spooler_value` | the queue whose driver device is the key's name and its printer (`SplQueryDevice` level 3) as IBM's 23 values: `Priority`, `StartTime`, `UntilTime`, `Datatype` (`fsType`), `Version`, `Job ID`, `Status`, `Time`, `Time Out` as `REG_DWORD`; `Name`, `Share Name` (the printer's comment), `Print Processor`, `Printer Driver`, `Parameters`, `Separator File`, `Printer Name`, `User Name`, `Port`, `Drivers` as `REG_SZ`, and `Attributes`, `Default DevMode`, `Location`, `Description` empty |
+
+The key's own `OS2_INI_*` values and its unnamed value still read from
+the registry; enumerations (`RegEnumValue`, `RegQueryInfoKey`) list only
+what is mapped. Setting an `OS2_INI_*` value works only on a key without
+other values, and `OS2_INI_ACCESS_METHOD` only with one of the five
+methods (case-insensitive); a key that maps takes no other values and
+gives up none of the mapped ones (all `ERROR_INVALID_NAME`); deleting
+its `OS2_INI_*` values makes it an ordinary key again. Errors as IBM's: a
+profile that cannot be opened, a profile key or application that is not
+there `ERROR_INVALID_NAME` (IBM's from `PMERR_NOT_IN_IDX`), a missing
+file or application value `ERROR_FILE_NOT_FOUND`, no method
+`ERROR_GEN_FAILURE`. IBM's REGISTRY imports `PrfOpenProfile` but no Prf
+writes: nothing is written through a mapping. IBM opens the profile for
+each call; the current user and system profiles (rs2's `PrfOpenProfile`
+refuses them) are read through `HINI_USERPROFILE`/`HINI_SYSTEMPROFILE`.
+The mapping keys IBM's REGCONV makes when OS/2 is installed are made
+with the files (when missing): `HKLM\SOFTWARE\MICROSOFT\WINDOWS\
+CURRENTVERSION\FONTS` and `HKLM\SOFTWARE\WIN.INI\WINI_FONTS` (OS2.INI on
+the boot drive, `PM_Fonts`, `profile_sz`), `HKLM\SOFTWARE\WIN.INI\
+WINI_INTL` and `HKEY_CURRENT_USER\CONTROL PANEL\INTERNATIONAL` (`uls`),
+and the plain keys `HKLM\System\CurrentControlSet\Control` and
+`HKEY_CURRENT_USER\SOFTWARE\MICROSOFT\WINDOWS\CURRENTVERSION`. (IBM's
+REGISTRY keeps a key's method as flags beside the key; it accepts a
+non-string value on a mapping key that then cannot be read, and its
+`spooler_value` set also rebuilds subkeys; rs2 refuses the first and
+leaves out the second.)
+
+**Notification and security.** IBM's REGISTRY has neither: it exports
+no `RegNotifyChangeKeyValue`, `RegGetKeySecurity`/`RegSetKeySecurity`,
+`RegConnectRegistry`, `RegLoadKey`/`RegSaveKey`/`RegRestoreKey` or
+`RegReplaceKey`, PMWINX forwards none, and its `RegQueryInfoKey` reports
+no security descriptor (0 bytes) and no class or write time; rs2 is the
+same (`samDesired`, `lpSecurityAttributes` and the options are taken and
+ignored, every caller may read and write every key).
+
+PMXTEST checks the calls through PMWINX (reg.rs) and the W calls, the
+mapping keys and `RegFlushKey` at 1030 (regx.rs; `PMXTEST REG` runs only
+the registry checks); the Registry Editor (REGEDIT2.EXE) runs on them.
 
 ## The clipboard
 
@@ -2467,7 +2535,9 @@ it gets.
   `PMXTEST CHILD`, and journal playback in the PM server; `PMXTEST
   RECORD` with keys from `--type` checks journal recording), a DDE
   conversation with a server in another process (`PMXTEST DDESERVER`),
-  the registry through PMWINX, owner drawing (list box, menu, user
+  the registry through PMWINX and REGISTRY's W calls, keys mapping a
+  profile, the locale and the print queues (`PMXTEST REG`: the registry
+  checks only), owner drawing (list box, menu, user
   button, value set, slider, notebook tab), presentation parameters,
   PMBIDI, AVIO (a VIO presentation space in a window), lazy drag (the
   input hook, `DrgLazyDrop`, cancelling, the held drag pointer) and
