@@ -98,8 +98,14 @@ EXTRA = {
     'WPFontPalette': ['WPPalette'],
     'WPSystem': ['WPAbstract'],
     'WPClock': ['WPAbstract'],
-    # WPPRINT.DLL's print destination (the IDL describes it).
+    # WPPRINT.DLL's print destination, its job, printer driver, queue
+    # driver and port objects and the Spooler (the IDL describes them).
     'WPPrinter': ['WPAbstract'],
+    'WPJob': ['WPTransient'],
+    'WPPdr': ['WPTransient'],
+    'WPQdr': ['WPTransient'],
+    'WPPort': ['WPTransient'],
+    'WPSpool': ['WPAbstract'],
 }
 for n, parents in EXTRA.items():
     classes.setdefault(n, dict(parents=parents, methods=[], meta=None, major=1, minor=1, overrides=[], dll='pmwp', file=''))

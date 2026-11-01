@@ -12,6 +12,7 @@ M_WPDesktopNewClass 357
 M_WPDiskNewClass 333
 M_WPDrivesNewClass 342
 M_WPIconNewClass 363
+M_WPTransientNewClass 339
 M_WPLaunchPadNewClass 472
 M_WPMetNewClass 408
 M_WPMinWinViewerNewClass 459
@@ -28,7 +29,6 @@ M_WPSharedDirNewClass 399
 M_WPShredderNewClass 351
 M_WPStartupNewClass 336
 M_WPTemplatesNewClass 321
-M_WPTransientNewClass 339
 WPObjectNewClass 24
 WPAbstractNewClass 27
 WPBitmapNewClass 69
@@ -42,10 +42,10 @@ WPDesktopNewClass 57
 WPDiskNewClass 36
 WPDrivesNewClass 45
 WPIconNewClass 63
+WPTransientNewClass 42
 WPLaunchPadNewClass 469
 WPMetNewClass 96
 WPMinWinViewerNewClass 458
-WPTransientNewClass 42
 WPMinWindowNewClass 436
 WPShadowNewClass 33
 WPNetLinkNewClass 420
