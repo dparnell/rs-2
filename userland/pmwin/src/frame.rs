@@ -992,6 +992,13 @@ pub extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             if t != 0 {
                 ctl::invalidate(t);
             }
+            // As IBM's frame procedure, the client hears of it too (EPM's
+            // edit window tells its owner it is the active one, and the
+            // print dialog prints through that window).
+            let c = WinWindowFromID(h, FID_CLIENT);
+            if c != 0 {
+                send(c, msg, mp1, mp2);
+            }
             0
         }
         WM_UPDATEFRAME => {

@@ -2649,7 +2649,8 @@ English and the language itself.
 
 With `PMTRACE` set in a program's environment (`SET PMTRACE=1` before
 starting it), PMWIN logs every PM call the program makes, with its
-arguments, on the serial port (`[pid] tid WinSendMsg(f, 1d4, 0, 0)`).
+arguments and the caller's address, on the serial port
+(`[pid] tid WinSendMsg(f, 1d4, 0, 0) from 1a2b3c`).
 Only the application's calls are logged, not PMWIN's own nested ones.
 The export trampolines pass their index to the lock's entry
 (`gen_pm_exports.py` writes the names table). `SET PMTRACE=2` also logs
