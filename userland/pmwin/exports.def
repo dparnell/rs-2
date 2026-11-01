@@ -299,6 +299,7 @@ GpiLoadFonts=__a_GpiLoadFonts @4400
 GpiUnloadFonts=__a_GpiUnloadFonts @4555
 GpiLoadPublicFonts=__a_GpiLoadPublicFonts @4622
 GpiUnloadPublicFonts=__a_GpiUnloadPublicFonts @4623
+Rs2GreEntry=__a_Rs2GreEntry @9033
 WinSetHook=__a_WinSetHook @928
 WinReleaseHook=__a_WinReleaseHook @927
 WinCallMsgFilter=__a_WinCallMsgFilter @905

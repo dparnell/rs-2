@@ -21,6 +21,9 @@ use crate::state::st;
 enum DcKind {
     Window(u32),
     Memory,
+    /// The display opened directly (DevOpenDC OD_DIRECT for DISPLAY):
+    /// draws on the whole screen, over every window.
+    Screen,
     Info,
     Metafile(alloc::boxed::Box<crate::gpiseg::MetaRec>),
     Printer(alloc::boxed::Box<crate::printer::PrinterDc>),
@@ -41,10 +44,12 @@ pub struct Objects {
     /// The presentation spaces that stand for DCs used as `hdc | 1`
     /// (hdc, hps).
     dc_pss: Vec<(u32, u32)>,
+    /// What the graphics engine keeps (PMGRE's functions, gre.rs).
+    pub gre: crate::gre::Objects,
 }
 
 /// The calling process's GPI objects.
-fn objects() -> &'static mut Objects {
+pub(crate) fn objects() -> &'static mut Objects {
     st().objects.entry(crate::state::pid()).or_default()
 }
 
@@ -77,6 +82,34 @@ fn dc_add(k: DcKind) -> u32 {
             v.push(Some(k));
             dc_handle(v.len() - 1)
         }
+    }
+}
+
+/// Whether `h` is a device context of the caller.
+pub fn is_dc(h: u32) -> bool {
+    dc_get(h).is_some()
+}
+
+/// Whether `h` is a bitmap of the caller.
+pub fn is_bitmap(h: u32) -> bool {
+    bm(h).is_some()
+}
+
+/// The presentation space that draws on `hdc` for the graphics engine
+/// (gre.rs): the one the program associated with it (a memory DC's
+/// holds its bitmap), else the DC's own (`hdc | 1`). 0 if `hdc` is not
+/// a DC.
+pub fn ps_of_dc(hdc: u32) -> u32 {
+    if dc_get(hdc).is_none() {
+        return 0;
+    }
+    let own = objects().dc_pss.iter().find(|(d, _)| *d == hdc).map(|&(_, p)| p);
+    let me = crate::state::pid();
+    let s = st();
+    let assoc = (0..s.pss.len()).find(|&i| s.pss[i].as_ref().is_some_and(|e| e.pid == me && e.gpi.hdc == hdc && !e.gpi.cached) && Some(0x100 + i as u32) != own);
+    match assoc {
+        Some(i) => 0x100 + i as u32,
+        None => dc_ps(hdc),
     }
 }
 
@@ -238,6 +271,7 @@ pub fn associate(hps: u32, hdc: u32) -> bool {
         Some(DcKind::Window(h)) => DcKind::Window(*h),
         Some(DcKind::Memory) => DcKind::Memory,
         Some(DcKind::Info) => DcKind::Info,
+        Some(DcKind::Screen) => DcKind::Screen,
         Some(DcKind::Printer(_)) => unreachable!(),
         Some(DcKind::Metafile(_)) => {
             let Some(e) = entry(st(), hps) else { return false };
@@ -253,6 +287,7 @@ pub fn associate(hps: u32, hdc: u32) -> bool {
     let Some(e) = entry(st(), hps) else { return false };
     e.gpi.hdc = hdc;
     e.gpi.seg.meta_dc = 0;
+    e.gpi.screen = matches!(kind, DcKind::Screen);
     match kind {
         DcKind::Window(h) => {
             e.hwnd = h;
@@ -264,6 +299,11 @@ pub fn associate(hps: u32, hdc: u32) -> bool {
             e.hwnd = 0;
             e.gpi.memory = true;
             e.ps.set_vis(Point::new(0, 0), Vec::new());
+        }
+        DcKind::Screen => {
+            // The whole screen (gpiapi::refresh follows mode changes).
+            e.hwnd = 0;
+            e.gpi.memory = false;
         }
         DcKind::Info | DcKind::Metafile(_) | DcKind::Printer(_) => {
             e.hwnd = 0;
@@ -689,6 +729,7 @@ pub extern "C" fn WinScrollWindow(h: u32, dx: i32, dy: i32, scroll: *const RectL
 // ---- Device contexts ----
 
 const OD_SCREEN: i32 = 0;
+const OD_DIRECT: i32 = 5;
 const OD_METAFILE: i32 = 3;
 const OD_INFO: i32 = 6;
 const OD_METAFILE_NOQUERY: i32 = 7;
@@ -696,8 +737,9 @@ const OD_MEMORY: i32 = 8;
 const OD_METAFILE_NOQUERY_TK: i32 = 9;
 
 /// DevOpenDC(hab, lType, pszToken, lCount, pdopData, hdcComp): memory,
-/// information and metafile DCs, and printers (OD_QUEUED, OD_DIRECT,
-/// OD_INFO for a queue: printer.rs).
+/// information and metafile DCs, the display itself (OD_DIRECT with the
+/// DISPLAY driver: COMETRUN draws its comet there), and printers
+/// (OD_QUEUED, OD_DIRECT, OD_INFO for a queue: printer.rs).
 #[unsafe(no_mangle)]
 pub extern "C" fn DevOpenDC(_hab: u32, ty: i32, _token: *const u8, n: i32, dop: *const u32, _comp: u32) -> u32 {
     if crate::printer::wants_printer(ty, n, dop) {
@@ -721,6 +763,7 @@ pub extern "C" fn DevOpenDC(_hab: u32, ty: i32, _token: *const u8, n: i32, dop: 
     }
     let k = match ty {
         OD_MEMORY => DcKind::Memory,
+        OD_DIRECT => DcKind::Screen,
         OD_INFO | OD_SCREEN => DcKind::Info,
         OD_METAFILE | OD_METAFILE_NOQUERY | OD_METAFILE_NOQUERY_TK => DcKind::Metafile(alloc::boxed::Box::new(crate::gpiseg::MetaRec::new())),
         _ => return 0,
@@ -1211,7 +1254,7 @@ pub extern "C" fn GpiLoadBitmap(_hps: u32, hmod: u32, id: u32, w: i32, h: i32) -
 
 /// Source pels of a PS for a blit (device rect `r`, `w`x`h` samples),
 /// whether the source is monochrome, and its image background colour.
-fn source_pels(hps: u32, r: Rect, w: i32, h: i32) -> Option<(Vec<Option<u32>>, bool, u32)> {
+pub(crate) fn source_pels(hps: u32, r: Rect, w: i32, h: i32) -> Option<(Vec<Option<u32>>, bool, u32)> {
     let s = st();
     gpiapi::refresh(s, hps);
     let e = entry(s, hps)?;
@@ -1265,7 +1308,7 @@ pub fn blit_samples(hps: u32, t: Rect, rop: u8, mono: bool, (w, h): (i32, i32), 
 }
 
 /// Blit samples (`w` x `h`) to a target device rectangle.
-fn blit_to(hps: u32, t: Rect, src: Option<(Vec<Option<u32>>, bool, u32)>, rop: i32, (w, h): (i32, i32)) -> i32 {
+pub(crate) fn blit_to(hps: u32, t: Rect, src: Option<(Vec<Option<u32>>, bool, u32)>, rop: i32, (w, h): (i32, i32)) -> i32 {
     let rop = rop as u8;
     let mono_dst = target_is_mono(hps);
     if let Some((v, mono, _)) = &src {
