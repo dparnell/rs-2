@@ -1266,8 +1266,10 @@ pub extern "C" fn WinEndPaint(hps: u32) -> u32 {
     1
 }
 
-/// WinSetSysModalWindow(hwndDesktop, hwnd): recorded for
-/// WinQuerySysModalWindow (input is not limited to it).
+/// WinSetSysModalWindow(hwndDesktop, hwnd): from now on only that
+/// window (with its children and the windows it owns) gets keyboard and
+/// mouse input, and Ctrl+Esc does not bring up the window list (the
+/// Workplace Shell's lockup); NULLHANDLE ends that.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetSysModalWindow(_desk: u32, h: u32) -> u32 {
     let s = st();
@@ -1275,6 +1277,9 @@ pub extern "C" fn WinSetSysModalWindow(_desk: u32, h: u32) -> u32 {
         return 0;
     }
     s.sysmodal = h;
+    if h != 0 {
+        activate(h);
+    }
     1
 }
 

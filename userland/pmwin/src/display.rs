@@ -130,6 +130,24 @@ pub fn flush_damage() {
     s.damage_held = None;
 }
 
+/// Tell the kernel what was drawn now, whether or not windows paint
+/// (window animation shows its outlines one after another).
+pub fn flush_now() {
+    let Some(s) = get() else { return };
+    if s.damage.is_empty() || s.surface.pixels() as usize != s.screen {
+        return;
+    }
+    let h = s.surface.height;
+    let mut v = [0u32; 4 * gpi::damage::MAX];
+    let rects = s.damage.rects();
+    for (i, r) in rects.iter().enumerate() {
+        v[i * 4..i * 4 + 4].copy_from_slice(&[r.left as u32, (h - r.top) as u32, r.right as u32, (h - r.bottom) as u32]);
+    }
+    unsafe { Rs2UpdateDisplay(v.as_ptr(), rects.len() as u32) };
+    s.damage.clear();
+    s.damage_held = None;
+}
+
 /// EV_HOSTSIZE: the host wants another size; the kernel picks the
 /// display's preferred one (EV_MODE follows).
 pub fn host_size() {
