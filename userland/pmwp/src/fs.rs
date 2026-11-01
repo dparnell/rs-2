@@ -216,6 +216,12 @@ extern "C" fn fs_query_icon(obj: usize) -> u32 {
         return som::call_parent(wps::ccd("WPFileSystem"), wps::cd("WPObject"), m::WPObject::wpQueryIcon, &[obj]) as u32;
     }
     if od.icon == 0 {
+        // A class's own icon (MMPARTS's sound and image classes) for a
+        // file without its .ICON.
+        let c = obj::class_icon_from_data(som::class_of(obj));
+        if c != 0 && ea_read(&path(obj), b".ICON").is_none() {
+            return c;
+        }
         let p = z(&path(obj));
         od.icon = unsafe { Rs2LoadFileIcon(p.as_ptr(), 0) };
     }
@@ -792,8 +798,86 @@ pub fn impl_file_system() -> Impl {
     }
 }
 
+// ---- The classes for files (IBM's AddInstanceTypeAndFilter) ----
+//
+// When a file system class is ready (M_WPFileSystem's wpclsInitData), its
+// wpclsQueryInstanceType and wpclsQueryInstanceFilter (comma-separated
+// lists) are noted unless its parent class says the same: a file whose
+// .CLASSINFO names no class (or WPDataFile) becomes an object of the
+// class of its first .TYPE that one names, else of the class whose
+// filter matches its name (the class registered last first), as IBM's
+// FsParseClassInfo does. MMPARTS's classes (MMAudio for "Digital Audio",
+// MMWAV for *.WAV, ...) take their files so.
+
+struct InstEntry {
+    class: Vec<u8>,
+    what: Vec<u8>,
+    folder: bool,
+}
+
+static mut INST_TYPES: Vec<InstEntry> = Vec::new();
+static mut INST_FILTERS: Vec<InstEntry> = Vec::new();
+
+fn cls_string(cls: usize, i: usize) -> Vec<u8> {
+    if cls == 0 {
+        return Vec::new();
+    }
+    let p = wps::call("M_WPFileSystem", i, &[cls]) as *const u8;
+    if p.is_null() { Vec::new() } else { cstr(p).to_vec() }
+}
+
+fn add_instance_type_and_filter(cls: usize) {
+    let parent = som::sc_call(som::sc::SOM_GET_PARENT, &[cls]);
+    let folder = som::sc_call(som::sc::SOM_DESCENDED_FROM, &[cls, wps::class("WPFolder")]) & 0xff != 0;
+    let name = som::class_name(cls).to_vec();
+    for (i, list) in [(m::M_WPFileSystem::wpclsQueryInstanceType, &raw mut INST_TYPES), (m::M_WPFileSystem::wpclsQueryInstanceFilter, &raw mut INST_FILTERS)] {
+        let own = cls_string(cls, i);
+        if own.is_empty() || eq_nocase(&own, &cls_string(parent, i)) {
+            continue;
+        }
+        let list = unsafe { &mut *list };
+        for w in own.split(|&c| c == b',').map(|w| w.trim_ascii()).filter(|w| !w.is_empty()) {
+            list.retain(|e| !(eq_nocase(&e.class, &name) && eq_nocase(&e.what, w)));
+            list.insert(0, InstEntry { class: name.clone(), what: w.to_vec(), folder });
+        }
+        debug(&alloc::format!("instance {} of {}: {:?}", if i == m::M_WPFileSystem::wpclsQueryInstanceType { "types" } else { "filters" }, s(&name), s(&own)));
+    }
+}
+
+/// The class a file or directory without its own takes from the classes'
+/// instance types and filters (None: the built-in choice).
+pub fn class_from_type_and_filter(path: &[u8], dir: bool) -> Option<Vec<u8>> {
+    let (types, filters) = unsafe { (&*(&raw const INST_TYPES), &*(&raw const INST_FILTERS)) };
+    if !types.is_empty() {
+        for t in crate::pages::ea_strings(path, b".TYPE") {
+            if let Some(e) = types.iter().find(|e| e.folder == dir && eq_nocase(&e.what, &t)) {
+                return Some(e.class.clone());
+            }
+        }
+    }
+    let name = crate::fileops::name_of(path);
+    filters.iter().find(|e| e.folder == dir && crate::sortinc::wildcard(&e.what, name)).map(|e| e.class.clone())
+}
+
+fn s(b: &[u8]) -> &str {
+    core::str::from_utf8(b).unwrap_or("?")
+}
+
+extern "C" fn fs_cls_init_data(cls: usize) {
+    som::call_parent(wps::ccd("M_WPFileSystem"), wps::cd("M_WPObject"), m::M_WPObject::wpclsInitData, &[cls]);
+    add_instance_type_and_filter(cls);
+}
+
+methods! {
+    __m_fs_cls_init_data => fs_cls_init_data, 1;
+}
+
 pub fn impl_m_file_system() -> Impl {
-    Impl { data: 0, methods: alloc::vec![("wpclsQueryObjectFromPath", __m_wpclsQueryObjectFromPath as usize)], overrides: Vec::new() }
+    Impl {
+        data: 0,
+        methods: alloc::vec![("wpclsQueryObjectFromPath", __m_wpclsQueryObjectFromPath as usize)],
+        overrides: alloc::vec![("wpclsInitData", __m_fs_cls_init_data as usize)],
+    }
 }
 
 pub fn impl_data_file() -> Impl {

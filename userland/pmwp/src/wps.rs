@@ -561,7 +561,22 @@ pub fn object_from_path(path: &[u8]) -> usize {
     let saved = ea_read(&path, b".CLASSINFO").and_then(|(_, b)| decode(&b));
     let mut c = 0;
     if let Some((cls, _, _)) = &saved {
-        c = som::find_class(cls);
+        // A plain data file may be of a class its type or name stands
+        // for (IBM's FsParseClassInfo).
+        if !cls.eq_ignore_ascii_case(b"WPDataFile") {
+            c = som::find_class(cls);
+        }
+    }
+    if c == 0 {
+        if let Some(cls) = crate::fs::class_from_type_and_filter(&path, dir) {
+            c = som::find_class(&cls);
+            debug(&alloc::format!("{}: class {} ({:x})", core::str::from_utf8(&path).unwrap_or("?"), core::str::from_utf8(&cls).unwrap_or("?"), c));
+        }
+    }
+    if c == 0 {
+        if let Some((cls, _, _)) = &saved {
+            c = som::find_class(cls);
+        }
     }
     if c == 0 {
         c = class(class_for_path(&path, dir));

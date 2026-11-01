@@ -41,6 +41,23 @@ fn run_startup() -> u32 {
     n
 }
 
+/// The registered classes (OS2SYS.INI's class table) are loaded when the
+/// shell starts, as on OS/2: their DLLs set themselves up (MMPARTS's
+/// SOMInitModule) and their instance types and filters choose the
+/// classes of files from then on. A class whose DLL is missing or does
+/// not load stays out (its objects wake as their parent classes').
+fn load_registered_classes() {
+    for (c, d) in crate::clsmgr::table() {
+        if crate::som::find_class(&c) == 0 {
+            crate::util::debug(&alloc::format!(
+                "PMWP: class {} of {} not loaded",
+                core::str::from_utf8(&c).unwrap_or("?"),
+                core::str::from_utf8(&d).unwrap_or("?")
+            ));
+        }
+    }
+}
+
 /// ShlStartWorkplace(hab, hmq): start the Workplace Shell in this process
 /// (its PM thread). FALSE if another process runs it.
 #[unsafe(no_mangle)]
@@ -52,6 +69,7 @@ pub extern "C" fn ShlStartWorkplace(hab: u32, _hmq: u32) -> u32 {
         return 0;
     }
     install::run();
+    load_registered_classes();
     crate::printer::sync_printers();
     crate::setup::apply_saved();
     crate::system::apply_saved();
