@@ -221,11 +221,28 @@ fn mapsym(s: &[u8]) -> Vec<(usize, u32, String)> {
             break;
         }
         let count = u16_at(seg + 2);
-        let table = seg + u16_at(seg + 4);
+        // A segment's symbols may take more than 64 KB (OREXX.SYM's
+        // CODE32): the offsets of the pointer table and of the symbols
+        // are then the low 16 bits. The table is the last thing before
+        // the next segment, and the symbols are in order.
+        let next = if u16_at(seg) == 0 { s.len() } else { u16_at(seg) * 16 };
+        let mut table = seg + u16_at(seg + 4);
+        while table + 0x10000 + count * 2 <= next {
+            table += 0x10000;
+        }
         let big = s[seg + 0x0e] & 1 != 0;
         let i = u16_at(seg + 6).saturating_sub(1);
+        let (mut prev, mut high) = (0, 0);
         for k in 0..count {
-            let p = seg + u16_at(table + k * 2);
+            let low = u16_at(table + k * 2);
+            if low < prev {
+                high += 0x10000;
+            }
+            prev = low;
+            let p = seg + high + low;
+            if p + 6 > s.len() {
+                break;
+            }
             let (value, at) = if big {
                 (u32::from_le_bytes(s[p..p + 4].try_into().unwrap()), p + 4)
             } else {
