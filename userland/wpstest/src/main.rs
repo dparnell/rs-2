@@ -59,6 +59,8 @@ unsafe extern "C" {
     fn SplQmEndDoc(h: u32) -> u32;
     #[link_name = "PMSPL.306"]
     fn SplQmClose(h: u32) -> u32;
+    #[link_name = "PMWP.219"]
+    fn WinReplaceObjectClass(old: *const u8, new: *const u8, replace: u32) -> u32;
     #[link_name = "PMWP.285"]
     fn WinSaveObject(h: u32, async_: u32) -> u32;
     #[link_name = "PMWP.286"]
@@ -731,6 +733,16 @@ fn mmparts() {
     check("saved", hw != 0 && unsafe { WinSaveObject(hw, 0) } != 0);
     check("as MMWAV (MMWAV's instance filter *.WAV)", has(&ea_value(wav, b".CLASSINFO"), b"MMWAV"));
     check("the MMAudio object deleted", h != 0 && unsafe { WinDestroyObject(h) } != 0);
+    // WPBitmap replaced by MMBitmap, as MINSTALL does it: bitmap files
+    // wake as MMBitmap.
+    let (o, n) = (z(b"WPBitmap"), z(b"MMBitmap"));
+    check("MMBitmap registered", reg(b"MMBitmap", b"MMPARTS") != 0);
+    check("WinReplaceObjectClass WPBitmap with MMBitmap", unsafe { WinReplaceObjectClass(o.as_ptr(), n.as_ptr(), 1) } != 0);
+    let bmp = b"C:\\IBM\\APPS\\DEFAULT.BMP";
+    let hb = query(bmp);
+    check("a bitmap file's object", hb != 0 && unsafe { WinSaveObject(hb, 0) } != 0);
+    check("of the replacing class MMBitmap", has(&ea_value(bmp, b".CLASSINFO"), b"MMBitmap"));
+    check("the replacement undone", unsafe { WinReplaceObjectClass(o.as_ptr(), n.as_ptr(), 0) } != 0);
 }
 
 /// A file's title: its .LONGNAME EA (EAT_ASCII), else its name.

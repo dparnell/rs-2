@@ -108,6 +108,20 @@ pub extern "C" fn WinWaitForShell(event: u32) -> u32 {
 /// classes of files from then on. A class whose DLL is missing or does
 /// not load stays out (its objects wake as their parent classes').
 fn load_registered_classes() {
+    use crate::util::{prf_keys, prf_read, prf_write, HINI_USER};
+    // INI.RC's and MINSTALL's `PM_InstallClassReplacement` (key: the
+    // class replaced, value: the one replacing it) go to the replace
+    // list once, as IBM's ShlInitClassInfo takes them.
+    const INSTALL: &[u8] = b"PM_InstallClassReplacement";
+    for k in prf_keys(HINI_USER, INSTALL) {
+        if let Some(v) = prf_read(HINI_USER, INSTALL, &k) {
+            let new = v.split(|&c| c == 0).next().unwrap_or(b"").to_vec();
+            if !new.is_empty() {
+                crate::api::update_replace_list(&k, &new, true);
+            }
+        }
+        prf_write(HINI_USER, INSTALL, &k, None);
+    }
     for (c, d) in crate::clsmgr::table() {
         if crate::som::find_class(&c) == 0 {
             crate::util::debug(&alloc::format!(
@@ -115,6 +129,14 @@ fn load_registered_classes() {
                 core::str::from_utf8(&c).unwrap_or("?"),
                 core::str::from_utf8(&d).unwrap_or("?")
             ));
+        }
+    }
+    // The replacements in effect (the last one for each class), where
+    // the replacing class loads.
+    for old in prf_keys(HINI_USER, crate::api::REPLACE_LIST) {
+        let v = prf_read(HINI_USER, crate::api::REPLACE_LIST, &old).unwrap_or_default();
+        if let Some(new) = v.split(|&c| c == 0).filter(|s| !s.is_empty()).last() {
+            crate::api::replace_class(&old, new);
         }
     }
 }

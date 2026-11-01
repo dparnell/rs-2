@@ -579,7 +579,13 @@ pub fn object_from_path(path: &[u8]) -> usize {
         }
     }
     if c == 0 {
-        c = class(class_for_path(&path, dir));
+        // Through the class manager: a replacement class (MMPARTS's
+        // MMBitmap for WPBitmap) stands in for PMWP's own.
+        let name = class_for_path(&path, dir);
+        c = som::find_class(name.as_bytes());
+        if c == 0 {
+            c = class(name);
+        }
     }
     if c == 0 {
         return 0;

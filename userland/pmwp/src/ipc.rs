@@ -54,6 +54,7 @@ pub const OP_REGISTER: u32 = 10;
 pub const OP_DEREGISTER: u32 = 11;
 pub const OP_LOCKUP: u32 = 12;
 pub const OP_UNLOCK: u32 = 13;
+pub const OP_REPLACE: u32 = 14;
 
 static mut BLOCK: u32 = 0;
 static mut DONE_SEM: u32 = 0;
@@ -143,6 +144,10 @@ fn serve() {
         OP_DEREGISTER => {
             let c = z(s(0));
             crate::api::WinDeregisterObjectClass(c.as_ptr())
+        }
+        OP_REPLACE => {
+            let (o, nw) = (z(s(0)), z(s(1)));
+            crate::api::WinReplaceObjectClass(o.as_ptr(), nw.as_ptr(), n(0))
         }
         _ => 0,
     };
