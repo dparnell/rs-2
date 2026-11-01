@@ -18,8 +18,9 @@ for m in re.finditer(r'\("(\w+)", "(\w+)", (\d+)\)', open(os.path.join(repo, "ke
     names.setdefault((m.group(1), m.group(3)), m.group(2))
 out = []
 for line in open(path):
-    m = re.match(r"(\S+) imp_(\w+?)_(\d+)$", line.strip())
-    if m and (m.group(2), m.group(3)) in names:
-        line = "%s %s_%s\n" % (m.group(1), m.group(2), names[(m.group(2), m.group(3))])
+    m = re.match(r"(\S+) imp_(\w+?)_(\d+)(_plus_0x[0-9a-f]+)?$", line.strip())
+    key = m and (m.group(2).upper(), m.group(3))
+    if m and key in names:
+        line = "%s %s_%s%s\n" % (m.group(1), m.group(2), names[key], m.group(4) or "")
     out.append(line)
 open(path, "w").writelines(out)

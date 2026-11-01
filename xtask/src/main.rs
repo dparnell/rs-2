@@ -628,6 +628,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmprint", "OS2\\DLL\\PMPRINT.QPR"),
         ("som", "OS2\\DLL\\SOM.DLL"),
         ("somtc", "OS2\\DLL\\SOMTC.DLL"),
+        ("somu", "OS2\\DLL\\SOMU.DLL"),
         ("win16", "OS2\\DLL\\WIN16.DLL"),
     ];
 

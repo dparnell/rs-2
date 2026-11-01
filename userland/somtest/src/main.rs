@@ -23,6 +23,7 @@ use alloc::vec::Vec;
 use os2::*;
 
 mod libs;
+mod somu;
 
 os2::entry!(main);
 
@@ -638,6 +639,7 @@ fn run() {
         (SOMFree)(mem);
     }
     libs::somtc();
+    somu::run();
 }
 
 fn load(args: &[u8]) {

@@ -44,6 +44,10 @@ unsafe extern "C" {
     pub fn somDataResolve(obj: usize, token: usize) -> usize;
     #[link_name = "SOM.37"]
     pub fn somResolve(obj: usize, token: usize) -> usize;
+    #[link_name = "SOM.48"]
+    pub fn somClassResolve(cls: usize, token: usize) -> usize;
+    #[link_name = "SOM.33"]
+    pub fn somParentResolve(mtabs: usize, token: usize) -> usize;
     #[link_name = "SOM.60"]
     pub fn somIsObj(p: usize) -> u32;
     #[link_name = "SOM.30"]
@@ -132,6 +136,33 @@ macro_rules! methods {
                 "pop ecx", "pop edi", "pop esi",
                 "call {f}", "mov esp, ebp", "pop ebp", "ret",
                 pad = const ($copy * 4 + 15) / 16 * 16, n = const $copy, f = sym $target,
+            );
+        }
+    )*};
+}
+
+/// `_Optlink` entry points (VisualAge C++'s default linkage, which IBM's
+/// SOM libraries export some functions with): the first three arguments
+/// in EAX, EDX and ECX (the caller still reserves their stack words), the
+/// rest on the stack; the caller removes them. They are passed on to a
+/// `extern "C"` function on an aligned stack.
+#[macro_export]
+macro_rules! optlink {
+    ($($tramp:ident => $target:path, $n:literal;)*) => {$(
+        #[unsafe(naked)]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn $tramp() {
+            core::arch::naked_asm!(
+                "push ebp", "mov ebp, esp", "and esp, -16",
+                "sub esp, {pad}",
+                "mov [esp], eax", "mov [esp + 4], edx", "mov [esp + 8], ecx",
+                "push esi", "push edi", "push ecx",
+                "lea esi, [ebp + 20]", "lea edi, [esp + 24]", "mov ecx, {rest}", "rep movsd",
+                "pop ecx", "pop edi", "pop esi",
+                "call {f}", "mov esp, ebp", "pop ebp", "ret",
+                pad = const (if $n > 3 { $n } else { 3 } * 4 + 15) / 16 * 16,
+                rest = const if $n > 3 { $n - 3 } else { 0 },
+                f = sym $target,
             );
         }
     )*};
@@ -261,10 +292,12 @@ pub struct ClassSpec<'a> {
     pub meta: Option<&'a str>,
     pub major: i32,
     pub minor: i32,
-    /// Instance data size.
+    /// Instance data size and alignment.
     pub data: u32,
-    /// The methods the class introduces, in release order, with their
-    /// implementations (0: one that returns 0).
+    pub align: u32,
+    /// The methods the class introduces, in release order (the order of
+    /// their tokens in the class data; "" for an entry without a method),
+    /// with their implementations (0: one that returns 0).
     pub methods: &'a [(&'a str, usize)],
     pub overrides: &'a [(&'a str, usize)],
     pub cd: *mut usize,
@@ -290,6 +323,9 @@ pub fn build_class(s: &ClassSpec) -> usize {
     }
     let mut smt: Vec<[usize; 6]> = Vec::new();
     for (k, &(m, p)) in s.methods.iter().enumerate() {
+        if m.is_empty() {
+            continue;
+        }
         let mut d = s.name.as_bytes().to_vec();
         d.extend_from_slice(b"::");
         d.extend_from_slice(m.as_bytes());
@@ -314,7 +350,7 @@ pub fn build_class(s: &ClassSpec) -> usize {
     sci[16] = s.ccd as u32;
     sci[17] = Box::leak(smt.into_boxed_slice()).as_ptr() as u32;
     sci[18] = Box::leak(omt.into_boxed_slice()).as_ptr() as u32;
-    sci[24] = 4;
+    sci[24] = s.align;
     sci[25] = u32::MAX;
     sci[33] = s.methods.len() as u32;
     let sci = Box::leak(sci.into_boxed_slice());
@@ -330,36 +366,18 @@ pub fn call(cd: *const usize, i: usize, args: &[usize]) -> usize {
     call_fn(tok, args)
 }
 
-/// Call a function (a token or an implementation) with up to 8 words.
+/// Call a function (a token or an implementation) with up to 12 words.
 #[inline(never)]
 pub fn call_fn(f: usize, a: &[usize]) -> usize {
-    if f == 0 {
+    if f == 0 || a.len() > 12 {
         return 0;
     }
-    type F0 = extern "C" fn() -> usize;
-    type F1 = extern "C" fn(usize) -> usize;
-    type F2 = extern "C" fn(usize, usize) -> usize;
-    type F3 = extern "C" fn(usize, usize, usize) -> usize;
-    type F4 = extern "C" fn(usize, usize, usize, usize) -> usize;
-    type F5 = extern "C" fn(usize, usize, usize, usize, usize) -> usize;
-    type F6 = extern "C" fn(usize, usize, usize, usize, usize, usize) -> usize;
-    type F7 = extern "C" fn(usize, usize, usize, usize, usize, usize, usize) -> usize;
-    type F8 = extern "C" fn(usize, usize, usize, usize, usize, usize, usize, usize) -> usize;
-    unsafe {
-        use core::mem::transmute as t;
-        match a.len() {
-            0 => t::<usize, F0>(f)(),
-            1 => t::<usize, F1>(f)(a[0]),
-            2 => t::<usize, F2>(f)(a[0], a[1]),
-            3 => t::<usize, F3>(f)(a[0], a[1], a[2]),
-            4 => t::<usize, F4>(f)(a[0], a[1], a[2], a[3]),
-            5 => t::<usize, F5>(f)(a[0], a[1], a[2], a[3], a[4]),
-            6 => t::<usize, F6>(f)(a[0], a[1], a[2], a[3], a[4], a[5]),
-            7 => t::<usize, F7>(f)(a[0], a[1], a[2], a[3], a[4], a[5], a[6]),
-            8 => t::<usize, F8>(f)(a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]),
-            _ => 0,
-        }
-    }
+    let mut w = [0usize; 12];
+    w[..a.len()].copy_from_slice(a);
+    type F = extern "C" fn(usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize) -> usize;
+    // _System: the callee ignores the words it does not take.
+    let g: F = unsafe { core::mem::transmute(f) };
+    g(w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7], w[8], w[9], w[10], w[11])
 }
 
 /// The parent class's implementation of a method (`parent_` calls).

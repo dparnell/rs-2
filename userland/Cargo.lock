@@ -475,6 +475,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "somu-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "somsup",
+]
+
+[[package]]
 name = "stress"
 version = "0.1.0"
 dependencies = [
