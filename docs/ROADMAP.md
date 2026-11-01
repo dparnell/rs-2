@@ -342,7 +342,8 @@ Status markers: done, in progress, planned.
   pages, expanding and collapsing the contents), the library list
   (marked libraries searched), bookmarks for books (kept in `NAME.cp`)
 - done (help): Services > Print (docs/PRINTING.md)
-- planned (help): metafiles in dynamic data, viewport styles
+- done (help): metafiles in dynamic data, viewport styles, HELPMGR's
+  ordinals 38-44
 - done: PMWIN hooks as IBM's PMWIN calls them (send, input, message
   filter, journal record and playback, loader, the rest; system hooks
   in every process), DDE (WinDdeInitiate/PostMsg/Respond with another
@@ -353,8 +354,16 @@ Status markers: done, in progress, planned.
   colours), PMDRAG's lazy drag, DrgDragFiles/DrgAcceptDroppedFiles and
   drag images with the pointer, PMWINX/REGISTRY (REGEDIT2) and PMBIDI
   (TEXTCON1); `RS2\PMXTEST.EXE`
-- planned: per-process presentation-space limits, PMDDEML (nothing on
-  the CD uses it)
+- done: PMDDEML, PMVIOP, IBM's presentation-space rules, the registry's
+  W calls and INI-mapped keys; Borland's IDE (editor focus, Open project,
+  Build all), EPM's formatted printing, the circular slider and IBM's
+  Multimedia Setup (STPM) and MINSTALL
+- done (shell): the System object's Logo, Print Screen, Title and Window
+  pages, the desktop's Lockup and Archive pages with the lockup, Menu and
+  Self-close pages, print job, driver, port and Spooler objects, Create
+  a printer
+- planned: DDEML monitors, the Print Screen key, folder menu bars, IPF
+  metafile artwork, PMGRE (COMETRUN)
 - done: display driver model (GRADD-style) on the framebuffer, mouse
   pointer; PMWIN (windows, messages, controls, dialogs), PMGPI
   (graphics, fonts), PMSHAPI
@@ -401,9 +410,8 @@ Status markers: done, in progress, planned.
   and working (docs/WPS.md)
 - done: printing (docs/PRINTING.md): the spooler, the PostScript
   driver, printer objects
-- planned: network groups (a
-  LAN requester), the rest of WPCONFIG and WPPRINT (docs/WPS.md, "What is not
-  there")
+- planned: network groups and remote printers (a LAN requester); the
+  rest of WPCONFIG and WPPRINT (docs/WPS.md, "What is not there")
 
 ## Printing (done: first version)
 
