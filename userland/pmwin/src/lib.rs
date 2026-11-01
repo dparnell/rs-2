@@ -36,6 +36,7 @@ mod gpiapi;
 mod gpiobj;
 mod gpiseg;
 mod gpitext;
+mod gre;
 mod input;
 mod listbox;
 mod lock;

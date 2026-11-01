@@ -362,8 +362,10 @@ Status markers: done, in progress, planned.
   pages, the desktop's Lockup and Archive pages with the lockup, Menu and
   Self-close pages, print job, driver, port and Spooler objects, Create
   a printer
+- done: PMGRE (programs calling the graphics engine directly: COMETRUN's
+  comet trail)
 - planned: DDEML monitors, the Print Screen key, folder menu bars, IPF
-  metafile artwork, PMGRE (COMETRUN)
+  metafile artwork
 - done: display driver model (GRADD-style) on the framebuffer, mouse
   pointer; PMWIN (windows, messages, controls, dialogs), PMGPI
   (graphics, fonts), PMSHAPI

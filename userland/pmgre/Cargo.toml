@@ -1,0 +1,13 @@
+[package]
+name = "pmgre-dll"
+description = "PMGRE.DLL: the graphics engine's entry points (Gre32Entry2..10) at IBM's ordinals, dispatched in PMWIN"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmgre"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

@@ -68,6 +68,9 @@ pub struct PsExtra {
     pub hdc: u32,
     /// Associated with a memory device context.
     pub memory: bool,
+    /// Associated with the display opened directly (OD_DIRECT DISPLAY),
+    /// or WinGetScreenPS's: draws on the whole screen.
+    pub screen: bool,
     pub bitmap: u32,
     pub clip_hrgn: u32,
     pub palette: u32,
@@ -231,6 +234,14 @@ pub fn refresh(s: &mut State, hps: u32) {
     let g = s.desk.generation;
     let Some(e) = entry(s, hps) else { return };
     let h = e.hwnd;
+    if h == 0 && e.gpi.screen && !e.gpi.memory {
+        let r = Rect::new(0, 0, s.surface.width, s.surface.height);
+        let Some(e) = entry(s, hps) else { return };
+        if e.ps.origin != Point::new(0, 0) || e.ps.vis() != [r] {
+            e.ps.set_vis(Point::new(0, 0), alloc::vec![r]);
+        }
+        return;
+    }
     if h == 0 || e.gpi.memory {
         return;
     }
@@ -287,7 +298,7 @@ pub fn target(e: &PsEntry) -> Target {
     }
     if e.gpi.memory {
         if e.gpi.bitmap != 0 { Target::Bitmap(e.gpi.bitmap) } else { Target::Nowhere }
-    } else if e.hwnd != 0 {
+    } else if e.hwnd != 0 || e.gpi.screen {
         Target::Screen
     } else {
         Target::Nowhere

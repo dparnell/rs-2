@@ -258,12 +258,14 @@ pub struct PrinterDc {
     failed: bool,
 }
 
-/// Whether DevOpenDC asks for a printer: OD_QUEUED and OD_DIRECT always,
-/// OD_INFO when the DEVOPENSTRUC names a queue, printer or driver other
-/// than the display.
+/// Whether DevOpenDC asks for a printer: OD_QUEUED always, OD_DIRECT
+/// unless the driver is the display (the screen itself), OD_INFO when
+/// the DEVOPENSTRUC names a queue, printer or driver other than the
+/// display.
 pub fn wants_printer(ty: i32, n: i32, dop: *const u32) -> bool {
     match ty {
-        OD_QUEUED | OD_DIRECT => true,
+        OD_QUEUED => true,
+        OD_DIRECT => !(n >= 2 && !dop.is_null() && cstr((unsafe { dop.add(1).read_unaligned() }) as *const u8).eq_ignore_ascii_case(b"DISPLAY")),
         6 => {
             if n < 2 || dop.is_null() {
                 return false;

@@ -54,10 +54,10 @@ fn main() {
     };
     let entries = m.entries().unwrap_or_default();
     let entry_addr = |ord: u16| -> u32 {
-        match entries.get(ord as usize - 1) {
-            Some(Entry::Entry32 { object, offset, .. }) => objects[*object as usize - 1].base + offset,
+        match entries.get((ord as usize).wrapping_sub(1)) {
+            Some(Entry::Entry32 { object, offset, .. }) => objects.get((*object as usize).wrapping_sub(1)).map_or(0, |o| o.base + offset),
             Some(Entry::Entry16 { object, offset, .. }) => {
-                objects[*object as usize - 1].base + *offset as u32
+                objects.get((*object as usize).wrapping_sub(1)).map_or(0, |o| o.base + *offset as u32)
             }
             _ => 0,
         }
