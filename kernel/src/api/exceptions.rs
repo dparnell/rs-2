@@ -376,6 +376,25 @@ pub fn dos_unwind_exception(c: &mut super::Ctx) -> u32 {
     let proc = c.process.clone();
     let mut sp = proc.space.lock();
     let head = rd(&mut sp, tib).unwrap_or(xcpt::END_OF_CHAIN);
+    if super::tracing() {
+        let mut chain = alloc::vec::Vec::new();
+        let mut r = head;
+        while r != xcpt::END_OF_CHAIN && r != 0 && chain.len() < 16 {
+            chain.push(r);
+            r = rd(&mut sp, r).unwrap_or(xcpt::END_OF_CHAIN);
+        }
+        let mut callers = alloc::vec::Vec::new();
+        let mut ebp = c.f.rbp as u32;
+        while callers.len() < 8 {
+            let (Some(next), Some(ret)) = (rd(&mut sp, ebp), rd(&mut sp, ebp.wrapping_add(4))) else { break };
+            callers.push(ret);
+            if next <= ebp {
+                break;
+            }
+            ebp = next;
+        }
+        crate::trace!("    unwind to {target:x} at {target_ip:x}, chain {chain:x?}, callers {callers:x?}");
+    }
     let u = Unwind { target, target_ip, resume, exit: false };
     if head == target || head == xcpt::END_OF_CHAIN || head == 0 {
         finish_unwind(&mut sp, c.f, &u, &t);
