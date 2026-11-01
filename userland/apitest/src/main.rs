@@ -519,12 +519,15 @@ unsafe extern "C" {
     fn TestAdd(a: u32, b: u32) -> u32;
     #[link_name = "TESTDLL.TestInitCount"]
     fn TestInitCount() -> u32;
+    #[link_name = "TESTDLL.6"]
+    fn TestSelfAdd(a: u32, b: u32) -> u32;
 }
 
 fn dlls() {
     unsafe {
         check("import by ordinal", TestAdd(40, 2) == 42);
         check("DLL init ran once", TestInitCount() == 1);
+        check("a DLL importing itself (a circular reference)", TestSelfAdd(40, 1) == 42);
         let mut h = 0;
         let rc = DosLoadModule(null_mut(), 0, b"TESTDLL\0".as_ptr(), &mut h);
         check("DosLoadModule", rc == 0 && h != 0);
