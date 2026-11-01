@@ -254,4 +254,5 @@ forward! {
     WinWaitMsg = "PMWIN.897";
     WinWindowFromID = "PMWIN.899";
     WinWindowFromPoint = "PMWIN.900";
+    WinXxCreateHeap2 = "PMWIN.1072";
 }

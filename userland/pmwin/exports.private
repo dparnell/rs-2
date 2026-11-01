@@ -23,3 +23,4 @@ WinQueueFromID 993
 WinThreadAssocQueue 994
 WinLockInput 995
 WinWakeThread 9021
+WinXxCreateHeap2 1072
