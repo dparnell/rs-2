@@ -242,7 +242,7 @@ Status markers: done, in progress, planned.
   utilities; own message files (OSO001.MSG); Cyrillic/Greek/Hebrew
   keyboard layouts; REXX
 
-## Milestone 4: Presentation Manager (started)
+## Milestone 4: Presentation Manager (largely done)
 
 - done: design (docs/PM.md); kernel display/input services (RS2API) and a
   PM session; `crates/gpi` and `crates/pmwin`; PMWIN.DLL/PMGPI.DLL run the
@@ -315,7 +315,7 @@ Status markers: done, in progress, planned.
   `RS2\DESKTEST.EXE` checks them with a drag between two processes
 - done: PMDRAG's lazy drag, DrgDragFiles/DrgAcceptDroppedFiles, drag
   images with the pointer
-- planned (shell): templates, then the SOM-based Workplace Shell
+- done (shell): templates and the SOM-based Workplace Shell (below)
 - done: profiles on real INI files (`crates/inifile`, PMSHAPI): OS2.INI
   and OS2SYS.INI from USER_INI/SYSTEM_INI, shared by all processes,
   written through safely; the program list calls, kept in OS2.INI for
@@ -355,9 +355,12 @@ Status markers: done, in progress, planned.
   (TEXTCON1); `RS2\PMXTEST.EXE`
 - planned: per-process presentation-space limits, PMDDEML (nothing on
   the CD uses it)
-- Display driver model (GRADD-style) on the framebuffer, mouse pointer
-- PMWIN (windows, messages, controls, dialogs), PMGPI (graphics, fonts),
-  PMSHAPI
+- done: display driver model (GRADD-style) on the framebuffer, mouse
+  pointer; PMWIN (windows, messages, controls, dialogs), PMGPI
+  (graphics, fonts), PMSHAPI
+- done: 256 colours for one program on a true-colour desktop
+  (`RS2COLORS=256` in its environment, the program object's
+  Compatibility page)
 - done: SOM runtime (SOM.DLL, binary compatible with IBM's: class data,
   method/data tokens, somBuildClass, initializer controls, class
   manager; `RS2\SOMTEST.EXE`, also run against IBM's SOM.DLL; IBM's
@@ -399,7 +402,7 @@ Status markers: done, in progress, planned.
 - done: printing (docs/PRINTING.md): the spooler, the PostScript
   driver, printer objects
 - planned: network groups (a
-  LAN requester), the rest of WPCONFIG (docs/WPS.md, "What is not
+  LAN requester), the rest of WPCONFIG and WPPRINT (docs/WPS.md, "What is not
   there")
 
 ## Printing (done: first version)

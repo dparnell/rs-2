@@ -248,9 +248,6 @@ The work is in phases; each phase is usable on its own:
    and palettes, and of WPPRINT's printer objects (see "What is not
    there" below for the rest).
 
-Phase 2 can start with generating the ClassData layouts and method lists
-from the IDL files.
-
 ## rs2's SOM.DLL
 
 `userland/som` builds SOM.DLL with IBM's 98 ordinals, variables and

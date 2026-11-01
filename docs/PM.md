@@ -2389,8 +2389,8 @@ it gets.
    and font dialogs; then rs2's own E.EXE (see [The System
    Editor](#the-system-editor-eexe)).
 5. (done) A desktop shell: rs2's own RS2SHELL (see [The desktop
-   shell](#the-desktop-shell-rs2shell)); the Workplace Shell (SOM) much
-   later.
+   shell](#the-desktop-shell-rs2shell)), then the Workplace Shell on
+   rs2's own SOM ([WPS.md](WPS.md)), the default desktop since.
 
 ## Testing
 
