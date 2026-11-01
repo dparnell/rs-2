@@ -69,6 +69,135 @@ pub extern "C" fn ShlStartWorkplace(hab: u32, _hmq: u32) -> u32 {
     1
 }
 
+// ---- The shell's exception guard (IBM's ShlSaveEnv and friends) ----
+//
+// PMSHELL and the WPS class DLLs (MMPARTS) guard their calls as IBM's
+// PMWP does: `if (ShlSaveEnv(&rec, ShlExceptionHandler)) { ...;
+// DosUnsetExceptionHandler(&rec); } else { a trap happened }`. The
+// record is an EXCEPTIONREGISTRATIONRECORD (prev, handler) followed by
+// the caller's EBP, EBX, EDI, ESI, ESP and return address.
+
+/// The shell's window for the object calls (IBM's: its object thread's
+/// window); MMPARTS waits for it before it configures itself.
+#[unsafe(no_mangle)]
+pub static mut vhwndWorkplaceWindow: u32 = 0;
+
+/// The shell's help instance (IBM's: made at start; rs2's objects show
+/// their help through their own instances, so none).
+#[unsafe(no_mangle)]
+pub static mut vhwndHelpInstance: u32 = 0;
+
+/// ShlSaveEnv(prec, pfnHandler) (PMWP 213): saves the caller's
+/// registers and return address in the record and puts the record at the
+/// head of the thread's exception handler chain; returns 1. When the
+/// handler takes a trap, ShlSaveEnv returns again, with 0.
+#[unsafe(no_mangle)]
+#[unsafe(naked)]
+pub extern "C" fn ShlSaveEnv() {
+    core::arch::naked_asm!(
+        "mov ecx, [esp + 4]",
+        "lea eax, [esp + 4]",
+        "mov [ecx + 0x18], eax",
+        "mov [ecx + 0x08], ebp",
+        "mov eax, [esp]",
+        "mov [ecx + 0x1c], eax",
+        "mov [ecx + 0x0c], ebx",
+        "mov [ecx + 0x10], edi",
+        "mov [ecx + 0x14], esi",
+        "mov eax, fs:[0]",
+        "mov [ecx], eax",
+        "mov eax, [esp + 8]",
+        "mov [ecx + 0x04], eax",
+        "mov fs:[0], ecx",
+        "mov eax, 1",
+        "ret",
+    );
+}
+
+/// ShlRestoreEnv(prec, rc): back to where ShlSaveEnv returned, with
+/// `rc`; the record is taken off the chain.
+#[unsafe(naked)]
+extern "C" fn shl_restore_env(_rec: u32, _rc: u32) -> ! {
+    core::arch::naked_asm!(
+        "mov ecx, [esp + 4]",
+        "mov eax, [esp + 8]",
+        "mov edx, [ecx]",
+        "mov fs:[0], edx",
+        "mov ebp, [ecx + 0x08]",
+        "mov ebx, [ecx + 0x0c]",
+        "mov edi, [ecx + 0x10]",
+        "mov esi, [ecx + 0x14]",
+        "mov esp, [ecx + 0x18]",
+        "jmp dword ptr [ecx + 0x1c]",
+    );
+}
+
+/// ShlExceptionHandler(report, rec, context, dispatcher) (PMWP 212), as
+/// IBM's: an access violation goes back to ShlSaveEnv's caller (unless
+/// SHELLEXCEPTIONHANDLER says OFF), logged; a kill signal to the shell's
+/// process saves what the lazy writer holds first. Everything else goes
+/// on to the next handler.
+#[unsafe(no_mangle)]
+pub extern "C" fn ShlExceptionHandler(report: *const u32, rec: u32, context: *const u32, _disp: u32) -> u32 {
+    const XCPT_ACCESS_VIOLATION: u32 = 0xC000_0005;
+    const XCPT_SIGNAL: u32 = 0xC001_0003;
+    const XCPT_SIGNAL_KILLPROC: u32 = 3;
+    const EH_UNWINDING: u32 = 0x02;
+    const EH_EXIT_UNWIND: u32 = 0x04;
+    if report.is_null() {
+        return 0;
+    }
+    let (code, flags) = unsafe { (*report, *report.add(1)) };
+    if flags & (EH_UNWINDING | EH_EXIT_UNWIND) != 0 {
+        return 0;
+    }
+    match code {
+        XCPT_ACCESS_VIOLATION => {
+            let mut v: *const u8 = core::ptr::null();
+            let off = unsafe { os2::DosScanEnv(b"SHELLEXCEPTIONHANDLER\0".as_ptr(), &mut v) } == 0
+                && !v.is_null()
+                && crate::util::cstr(v).windows(3).any(|w| w.eq_ignore_ascii_case(b"OFF"));
+            if off {
+                return 0;
+            }
+            if !context.is_null() {
+                // CONTEXTRECORD (bsexcpt.h): EBP at 0x98, EIP 0x9c, ESP 0xa8.
+                let (ebp, eip, esp) = unsafe { (*context.add(0x98 / 4), *context.add(0x9c / 4), *context.add(0xa8 / 4)) };
+                let mut s = alloc::format!("PMWP: trap at {eip:#x} caught by ShlExceptionHandler; called from");
+                let mut f = ebp;
+                for _ in 0..12 {
+                    if f < esp || f >= esp.wrapping_add(0x10000) || f & 3 != 0 {
+                        break;
+                    }
+                    let (next, ret) = unsafe { (*(f as *const u32), *((f + 4) as *const u32)) };
+                    s.push_str(&alloc::format!(" {ret:#x}"));
+                    if next <= f {
+                        break;
+                    }
+                    f = next;
+                }
+                crate::util::debug(&s);
+                // Registers (EDI at 0x80 .. EDX at 0x94).
+                let r = |o: usize| unsafe { *context.add(o / 4) };
+                crate::util::debug(&alloc::format!(
+                    "PMWP: eax {:x} ebx {:x} ecx {:x} edx {:x} esi {:x} edi {:x} ebp {ebp:x} esp {esp:x}",
+                    r(0x88), r(0x8c), r(0x90), r(0x94), r(0x84), r(0x80)
+                ));
+            }
+            shl_restore_env(rec, 0);
+        }
+        XCPT_SIGNAL => {
+            let sig = unsafe { *report.add(5) };
+            let mut v: *const u8 = core::ptr::null();
+            if sig == XCPT_SIGNAL_KILLPROC && unsafe { os2::DosScanEnv(b"WORKPLACE_PROCESS\0".as_ptr(), &mut v) } == 0 {
+                save_all();
+            }
+        }
+        _ => {}
+    }
+    0
+}
+
 /// WinShutdownSystem(hab, hmq): close the programs and turn off.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinShutdownSystem(_hab: u32, _hmq: u32) -> u32 {

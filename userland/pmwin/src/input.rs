@@ -57,6 +57,22 @@ pub fn post_input(h: u32, msg: u32, mp1: u32, mp2: u32, time: u32) {
     post_queue(q, QMsg { hwnd: h, msg, mp1, mp2, time, x: p.x, y: p.y, reserved });
 }
 
+/// WinJiggleMouse() (PMWIN 1005, IBM's Win32JiggleMouse): a mouse move
+/// where the pointer is, so that the window under it sets the pointer's
+/// shape again (MMPARTS calls it after its busy pointer).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinJiggleMouse() -> u32 {
+    let s = st();
+    let p = s.pointer;
+    let target = if s.capture != 0 { s.capture } else { s.desk.window_at(p) };
+    if target == 0 || !in_sysmodal(target) || (s.capture == 0 && !input_enabled(target)) {
+        return 1;
+    }
+    let o = st().desk.origin(target);
+    post_input(target, WM_MOUSEMOVE, pack(p.x - o.x, p.y - o.y), 0, crate::state::now());
+    1
+}
+
 /// A mouse event: the pointer moved to `p` and/or the buttons changed.
 pub fn mouse(p: Point, buttons: u8, shift: u8, time: u32) {
     // Mouse messages carry KC_SHIFT, KC_CTRL and KC_ALT in mp2's high word.

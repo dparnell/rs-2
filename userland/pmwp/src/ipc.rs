@@ -99,6 +99,7 @@ pub fn start_server(hab: u32) -> bool {
     wr(base, O_HWND, hwnd);
     wr(base, O_PID, my_pid());
     wr(base, O_MAGIC, MAGIC);
+    unsafe { crate::shell::vhwndWorkplaceWindow = hwnd };
     hwnd != 0
 }
 

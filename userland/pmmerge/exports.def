@@ -33,6 +33,7 @@ WinAlarm @5113
 WinBeginEnumWindows @5114
 WinBeginPaint @5115
 WinBroadcastMsg @5116
+WinBuildPtrHandle @5117
 WinCalcFrameRect @5118
 WinCallMsgFilter @5120
 WinCancelShutdown @5121
@@ -115,6 +116,7 @@ WinIsWindow @5211
 WinIsWindowEnabled @5212
 WinIsWindowShowing @5213
 WinIsWindowVisible @5214
+WinJiggleMouse @5215
 WinLoadAccelTable @5216
 WinLoadDlg @5218
 WinLoadLibrary @5219
@@ -242,12 +244,15 @@ WinSetWindowUShort @5380
 WinShowCursor @5381
 WinShowPointer @5382
 WinShowWindow @5384
+WinStartApp @5385
 WinStartTimer @5386
 WinStopTimer @5387
+WinStretchPointer @5388
 WinSubclassWindow @5389
 WinSubtractRect @5391
 WinSwitchToProgram @5393
 WinTerminate @5396
+WinTerminateApp @5397
 WinThreadAssocQueue @5398
 WinTrackRect @5399
 WinTranslateAccel @5401

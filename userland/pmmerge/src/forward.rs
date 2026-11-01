@@ -26,6 +26,7 @@ forward! {
     WinBeginEnumWindows = "PMWIN.702";
     WinBeginPaint = "PMWIN.703";
     WinBroadcastMsg = "PMWIN.901";
+    WinBuildPtrHandle = "PMWIN.964";
     WinCalcFrameRect = "PMWIN.704";
     WinCallMsgFilter = "PMWIN.905";
     WinCancelShutdown = "PMWIN.705";
@@ -108,6 +109,7 @@ forward! {
     WinIsWindowEnabled = "PMWIN.773";
     WinIsWindowShowing = "PMWIN.774";
     WinIsWindowVisible = "PMWIN.775";
+    WinJiggleMouse = "PMWIN.1005";
     WinLoadAccelTable = "PMWIN.776";
     WinLoadDlg = "PMWIN.924";
     WinLoadLibrary = "PMWIN.777";
@@ -235,12 +237,15 @@ forward! {
     WinShowCursor = "PMWIN.880";
     WinShowPointer = "PMWIN.881";
     WinShowWindow = "PMWIN.883";
+    WinStartApp = "PMSHAPI.119";
     WinStartTimer = "PMWIN.884";
     WinStopTimer = "PMWIN.885";
+    WinStretchPointer = "PMWIN.968";
     WinSubclassWindow = "PMWIN.929";
     WinSubtractRect = "PMWIN.887";
     WinSwitchToProgram = "PMSHAPI.131";
     WinTerminate = "PMWIN.888";
+    WinTerminateApp = "PMSHAPI.130";
     WinThreadAssocQueue = "PMWIN.994";
     WinTrackRect = "PMWIN.890";
     WinTranslateAccel = "PMWIN.904";

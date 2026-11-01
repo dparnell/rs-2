@@ -855,6 +855,16 @@ fn shell(args: &[u8]) -> u32 {
                 let ok = h != 0 && unsafe { WinSetObjectData(h, setup.as_ptr()) } != 0;
                 println!("wpstest: set {}: {}", s(arg(1)), ok);
             }
+            // REGISTER dll class: WinRegisterObjectClass in the shell.
+            b"REGISTER" => {
+                let (c, d) = (z(arg(2)), z(arg(1)));
+                println!("wpstest: register {} from {}: {}", s(arg(2)), s(arg(1)), unsafe { WinRegisterObjectClass(c.as_ptr(), d.as_ptr()) });
+            }
+            // CREATE class title location setup: WinCreateObject.
+            b"CREATE" => {
+                let h = create(arg(1), arg(2), &w.get(4..).unwrap_or(&[]).join(&b' '), arg(3));
+                println!("wpstest: create {} {}: {:#x}", s(arg(1)), s(arg(2)), h);
+            }
             b"LOCK" => println!("wpstest: WinLockupSystem: {}", unsafe { WinLockupSystem(0) }),
             b"UNLOCK" => {
                 let p = z(arg(1));

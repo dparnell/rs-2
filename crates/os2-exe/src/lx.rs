@@ -603,8 +603,11 @@ fn parse_fixup(r: &Reader<'_>, mut pos: usize) -> Result<(Fixup, usize), Error> 
 /// record gives the first source and its target offset; every source dword
 /// holds the page offset of the next source in its top 12 bits (0xFFF ends
 /// the chain) and, after the first, its own target offset in the low 20
-/// bits. Returns `(source, target offset)` pairs.
+/// bits; the bits above those come from the record's target offset (an
+/// object of more than 1 MB: OS2OOOC.DLL's vtables point into its last
+/// 0x6e770 bytes of code). Returns `(source, target offset)` pairs.
 pub fn fixup_chain(page: &[u8], first: i16, first_target: u32) -> Vec<(i16, u32)> {
+    let high = first_target & !0xf_ffff;
     let mut out = Vec::new();
     let (mut src, mut target) = (first, first_target);
     while src >= 0 && (src as usize) + 4 <= page.len() && out.len() < page.len() / 4 {
@@ -620,7 +623,7 @@ pub fn fixup_chain(page: &[u8], first: i16, first_target: u32) -> Vec<(i16, u32)
         if at + 4 > page.len() {
             break;
         }
-        target = u32::from_le_bytes([page[at], page[at + 1], page[at + 2], page[at + 3]]) & 0xf_ffff;
+        target = high | u32::from_le_bytes([page[at], page[at + 1], page[at + 2], page[at + 3]]) & 0xf_ffff;
     }
     out
 }
@@ -747,5 +750,14 @@ mod tests {
         page[0x55c..0x560].copy_from_slice(&0x5500_8570u32.to_le_bytes());
         page[0x550..0x554].copy_from_slice(&0xfff0_8578u32.to_le_bytes());
         assert_eq!(fixup_chain(&page, 0x54a, 0x8550), [(0x54a, 0x8550), (0x55c, 0x8570), (0x550, 0x8578)]);
+    }
+
+    #[test]
+    fn chain_targets_above_1mb_keep_the_records_high_bits() {
+        // As in OS2OOOC.DLL: a vtable whose methods are past 1 MB of code.
+        let mut page = vec![0u8; 0x1000];
+        page[0x6f8..0x6fc].copy_from_slice(&0x8280_0000u32.to_le_bytes());
+        page[0x828..0x82c].copy_from_slice(&0xfff6_6ab4u32.to_le_bytes());
+        assert_eq!(fixup_chain(&page, 0x6f8, 0x16_17c0), [(0x6f8, 0x16_17c0), (0x828, 0x16_6ab4)]);
     }
 }
