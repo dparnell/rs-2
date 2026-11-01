@@ -1389,7 +1389,7 @@ other data as its values, read only; `OS2_INI_ACCESS_METHOD` names how:
 |--------|------------------|
 | `profile` | the keys of application `OS2_INI_APP_NAME` in the OS/2 profile `OS2_INI_FILE_NAME`, as `REG_BINARY` |
 | `profile_sz` | the same as `REG_SZ` (a NUL added when the data lack one) |
-| `uls` | the items of the process's locale (LIBUNI `UniQueryLocaleItem`, items 1-125) named as in ulsitem.h without `LOCI_` (`sShortDate`, `iCountry`...), as `REG_SZ` in the code page |
+| `uls` | the items of the process's locale (LIBUNI `UniQueryLocaleItem`, items 1-125, its locale object made once per process) named as in ulsitem.h without `LOCI_` (`sShortDate`, `iCountry`...), as `REG_SZ` in the code page |
 | `spooler_key` | its own values; its subkeys are the print queues, made again (PMSPL `SplEnumQueue` level 3) whenever the key is opened or the method set: one per queue named by its printer driver's device (the DRIVDATA's `szDeviceName`), marked `spooler_value`, and the queue printed to by default (`PRQ3_TYPE_APPDEFAULT`) as the key's `Default` value |
 | `spooler_value` | the queue whose driver device is the key's name and its printer (`SplQueryDevice` level 3) as IBM's 23 values: `Priority`, `StartTime`, `UntilTime`, `Datatype` (`fsType`), `Version`, `Job ID`, `Status`, `Time`, `Time Out` as `REG_DWORD`; `Name`, `Share Name` (the printer's comment), `Print Processor`, `Printer Driver`, `Parameters`, `Separator File`, `Printer Name`, `User Name`, `Port`, `Drivers` as `REG_SZ`, and `Attributes`, `Default DevMode`, `Location`, `Description` empty |
 
