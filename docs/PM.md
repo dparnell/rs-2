@@ -37,6 +37,8 @@ The logic lives in host-testable crates; the DLLs are thin:
 | `userland/pmspl` → PMSPL.DLL | The spooler: queues, printers, ports and jobs, the `Spl*` and `Prt*` calls ([PRINTING.md](PRINTING.md)). |
 | `userland/pmspool` → PMSPOOL.EXE, `userland/pmprint` → PMPRINT.QPR | The spooler process and the queue processor ([PRINTING.md](PRINTING.md)). |
 | `userland/registry` → REGISTRY.DLL, `userland/pmwinx` → PMWINX.DLL | The registry (Win32 registry calls) and Open32's forwarders to it (see [Open32 and the registry](#open32-and-the-registry-pmwinx-registry)). |
+| `userland/pmddeml` → PMDDEML.DLL | The DDE management library (`WinDde*`) on PM's DDE (see [Dynamic data exchange](#dynamic-data-exchange-dde)). |
+| `userland/pmviop` → PMVIOP.DLL | `WinDefAVioWindowProc` (see [AVIO](#avio-vio-presentation-spaces-in-windows)). |
 | `userland/pmbidi` → PMBIDI.DLL, `userland/thailib` → THAILIB.DLL | Bidirectional language support of a system without bidirectional code pages (see [Bidirectional languages](#bidirectional-languages-pmbidi)). |
 | `crates/inifile` | OS/2 binary INI files: parse (defensively) and write in IBM's layout, the program list records. Host-tested, also on IBM's INI files from the media. See [Profiles](#profiles-ini-files). |
 | `userland/rs2shell` → `C:\OS2\RS2SHELL.EXE` | rs2's desktop shell (not the Workplace Shell): the desktop, folders, drives and files, program objects, shutdown. See [The desktop shell](#the-desktop-shell-rs2shell). Its icons are drawn in `crates/pmwin` (`shellicons.rs`). |
@@ -472,9 +474,17 @@ of the process with changes (`Rs2AvioQuery`, RS2API 500; the font comes
 from `Rs2AvioFont`, 501) and renders the changed cells with crate
 `viocell` into the window (attribute bit 7 brightens the background; the
 cursor shows while the window has the focus). A program repaints on
-`WM_PAINT` with `VioShowPS`, as on OS/2. `WinDefAVioWindowProc`
-(PMVIOP.DLL) is not there: no program on the CD uses AVIO. PMXTEST checks
-the calls and what the window shows.
+`WM_PAINT` with `VioShowPS`, as on OS/2, or leaves it to
+`WinDefAVioWindowProc` (PMVIOP.DLL, userland/pmviop: IBM's ordinal 30, a
+16-bit `_pascal` entry as both Toolkit libraries import it), which
+draws the whole presentation space of the window's DC (PMWIN's
+`Rs2AvioPaint`, private ordinal 9030) and validates the window, and
+passes other messages to `WinDefWindowProc`. IBM's PMVIOP has nothing
+else programs import: its other entries are the VIO window (shield),
+console and Win-OS/2 clipboard internals of BVHWNDW, PMVDMP, SEAMLESS and
+PMMERGE, which rs2 does not have (PMVIOWIN.EXE and VDM.EXE do that
+work). PMXTEST checks the calls, what the window shows and
+`WinDefAVioWindowProc` (`PMXTEST AVIO`).
 
 ## Programs that stop responding
 
@@ -818,6 +828,23 @@ The GPI covers:
   `GpiResetPS`); a window PS follows its window's visible region, and
   `WinBeginPaint` can borrow it. `DevQueryCaps` describes a 24-bit,
   96 dpi display.
+- Presentation spaces are handed out as IBM's PMGPI and PMWIN do it
+  (studied in PMGPI's `GPI32CREATEPS`/`FullCreatePS` and PMMERGE's
+  `GetCe`, `CreateCe`, `ReleasePS`, `DestroyWindowCacheEntries`,
+  `DestroyQueueCacheEntries`). IBM sets no count per process: normal
+  presentation spaces are the process's own memory, the cached micro
+  PSs of `WinGetPS`/`WinBeginPaint` come from one system cache that grows
+  as needed (the first message queue makes five) and reuses released
+  entries. What it enforces, rs2 does too: `GpiCreatePS` wants page units,
+  a page size unless the PS is associated (PMERR_INV_PS_SIZE, null),
+  a micro or ink PS associated (an ink one in PU_PELS;
+  PMERR_INV_OR_INCOMPAT_OPTIONS) and one presentation space per device
+  context (PMERR_DC_IS_ASSOCIATED); `WinReleasePS` releases cached
+  presentation spaces only (PMERR_INV_HPS for others); a cached PS is
+  released when its window is destroyed and when the message queue of
+  the thread that got it is destroyed (and all of a process's when it
+  ends). PMERR_PS_BUSY (two threads in one PS at once) cannot happen:
+  PMWIN serialises its calls. PMXTEST checks these (`PMXTEST PS`).
 - Transforms: model and default viewing matrices (`TRANSFORM_REPLACE`,
   `ADD`, `PREEMPT`; `GpiTranslate`, `GpiScale`, `GpiRotate`), page units
   (`PU_PELS` .. `PU_TWIPS`) and page viewport, `GpiConvert`.
@@ -1299,9 +1326,67 @@ giveable shared memory given to the receiving process
 `DDEPM_NOFREE`, and the receiver frees the block or sends it on.
 rs2's queues do not fill up, so `DDEPM_RETRY` never waits. PMXTEST holds
 a conversation with a server in another process (`PMXTEST DDESERVER`):
-initiate, request, poke, execute, terminate. PMDDEML (the DDE management
-library) is not there: no program on the OS/2 CD uses it but IBM's
-PMWINX, which rs2 replaces.
+initiate, request, poke, execute, terminate.
+
+**PMDDEML** (userland/pmddeml) is the DDE management library: the
+Win32 DDEML's calls in PM (`WinDdeInitialize` ... `WinDdeQueryModuleVersion`,
+IBM's ordinals 100-127 and upper-case names; Open32 builds the Win32
+`Dde*` calls on it). The Toolkit has no header for it, so the arguments
+are those of IBM's `Win32Dde*` entry points (studied with Ghidra and
+pmddeml.sym): string handles take a code page instead of an instance,
+`WinDdeSubmitTransaction(pData, cbData, hConv, hszItem, usFmt, usType,
+ulTimeout, pulResult)` is the client transaction, HDATA_APPOWNED is 2,
+callbacks get the instance first (idInst, usType, usFmt, hConv, hsz1,
+hsz2, hData, ul1, ul2), the XTYP_/CBF_/ST_/XST_ values are Win32's and
+errors are PM error ids 0x7001-0x7013 for `WinGetLastError` (there is no
+DdeGetLastError). It is built as IBM's on PM's own DDE, so DDEML clients
+talk to plain DDE servers and the other way round:
+
+- An instance is an invisible frame on the desktop whose client is the
+  instance's agent window (the instance id); a client's
+  `WinDdeConnect` sends `WM_DDE_INITIATE` (a DDEINIT given to the
+  server's process) to each frame on the desktop in turn, its own last,
+  from a new conversation window (the HCONV, a child of the agent) until
+  one answers. The agent answers `WM_DDE_INITIATE` with
+  XTYP_CONNECT, or XTYP_WILDCONNECT (an HSZPAIR array) for an empty
+  service or topic, a conversation window per pair that responds with
+  `WinDdeRespond`, then XTYP_CONNECT_CONFIRM; APPCMD_FILTERINITS (on
+  unless DNS_FILTEROFF) answers registered services only, CBF_FAIL_*
+  refuse. `WinDdeConnectList` collects the answers in a list window,
+  terminates each and connects again to that server's frame (IBM's
+  ConvListWmDdeInitiateAck); `WinDdeQueryNextServer` walks it.
+- Transactions post `WM_DDE_REQUEST`/`POKE`/`EXECUTE`/`ADVISE`/
+  `UNADVISE` with a DDESTRUCT; a synchronous one dispatches messages
+  (`MSGF_DDEMGR` filter) until the answer or the timeout, an
+  asynchronous one (TIMEOUT_ASYNC) returns its id and ends in
+  XTYP_XACT_COMPLETE. The server's conversation turns the messages into
+  XTYP_REQUEST (a data handle is posted as `WM_DDE_DATA` with
+  DDE_FRESPONSE), XTYP_POKE, XTYP_EXECUTE (the result is the
+  acknowledgement, in the same block), XTYP_ADVSTART/XTYP_ADVSTOP
+  (advise links: item, format, DDE_FNODATA/DDE_FACKREQ);
+  `WinDdePostAdvise` runs the links (XTYP_ADVREQ, a link waiting for its
+  acknowledgement only marked changed), the client gets XTYP_ADVDATA.
+  CBR_BLOCK and `WinDdeEnableCallback` hold a conversation's messages
+  and replay them later.
+- `WinDdeNameService` registers services; the other instances get
+  XTYP_REGISTER/XTYP_UNREGISTER with the service and an instance-specific
+  handle ("NAME:(hwnd)", which `WinDdeConnect` takes to that instance
+  only). The registration goes to every frame on the desktop as a sent
+  message with a system atom of the name (IBM's handle table is shared
+  memory; rs2's handles are each process's own).
+- `WM_CLOSE` on a conversation is `WinDdeDisconnect` (a client posts
+  `WM_DDE_UNADVISE` for everything, then `WM_DDE_TERMINATE`); the
+  partner's `WM_DDE_TERMINATE` gives XTYP_DISCONNECT and destroys the
+  conversation window. `WinDdeReconnect` fails, as IBM's (its
+  DdeReconnect is empty). Not done: monitors (APPCLASS_MONITOR,
+  XTYP_MONITOR).
+
+PMXTEST checks it (`PMXTEST DDEML`): handles, then a DDEML server in
+another process (`PMXTEST DDEMLSERVER`): registration, connect,
+conversation info, synchronous and asynchronous requests, poke,
+execute, an advise loop, a refused request, a conversation list from a
+wild connect, a plain DDE client of the DDEML server and a DDEML client
+of PMXTEST's plain DDE server.
 
 ## Owner drawing
 
@@ -2535,11 +2620,16 @@ it gets.
   `PMXTEST CHILD`, and journal playback in the PM server; `PMXTEST
   RECORD` with keys from `--type` checks journal recording), a DDE
   conversation with a server in another process (`PMXTEST DDESERVER`),
+  PMDDEML with a DDEML server in another process and with plain DDE on
+  either side (`PMXTEST DDEMLSERVER`; `PMXTEST DDEML` runs only these),
   the registry through PMWINX and REGISTRY's W calls, keys mapping a
   profile, the locale and the print queues (`PMXTEST REG`: the registry
   checks only), owner drawing (list box, menu, user
   button, value set, slider, notebook tab), presentation parameters,
-  PMBIDI, AVIO (a VIO presentation space in a window), lazy drag (the
+  PMBIDI, AVIO (a VIO presentation space in a window, PMVIOP's
+  `WinDefAVioWindowProc`; `PMXTEST AVIO`), what `GpiCreatePS` and
+  `WinReleasePS` accept and when cached presentation spaces go
+  (`PMXTEST PS`), lazy drag (the
   input hook, `DrgLazyDrop`, cancelling, the held drag pointer) and
   `DrgDragFiles` onto a `DrgAcceptDroppedFiles` window, printing PASS/FAIL and
   `pmxtest done: N failure(s)`. `PMXTEST WINS [PROGRAM]` (starting

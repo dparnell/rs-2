@@ -85,6 +85,8 @@ pub struct PsExtra {
     /// The pick aperture: its centre and its size (None: the default).
     pub pick_pos: (i32, i32),
     pub pick_size: Option<(i32, i32)>,
+    /// A cached PS's message queue (the thread that got it).
+    pub queue: u32,
 }
 
 const HPS_BASE: u32 = 0x100;
@@ -126,10 +128,41 @@ pub fn create(s: &mut State, hwnd: u32, origin: Point, clip: Vec<Rect>) -> u32 {
         color_index: gpi::color::CLR_NEUTRAL,
         back_index: gpi::color::CLR_BACKGROUND,
         rgb_mode: false,
-        gpi: PsExtra { cached: true, ..PsExtra::default() },
+        gpi: PsExtra { cached: true, queue: s.my_queue(), ..PsExtra::default() },
         pid: crate::state::pid(),
     };
     insert(s, e)
+}
+
+/// Cached presentation spaces go with their windows (IBM's
+/// DestroyWindowCacheEntries releases the cache entries of a destroyed
+/// window: the handle is no longer valid) ...
+pub fn windows_gone(s: &mut State, gone: &[u32]) {
+    for slot in s.pss.iter_mut() {
+        if slot.as_ref().is_some_and(|e| e.gpi.cached && gone.contains(&e.hwnd)) {
+            *slot = None;
+        }
+    }
+}
+
+/// ... and with the message queue of the thread that got them
+/// (DestroyQueueCacheEntries, when the queue is destroyed).
+pub fn queue_gone(s: &mut State, hmq: u32) {
+    for slot in s.pss.iter_mut() {
+        if slot.as_ref().is_some_and(|e| e.gpi.cached && e.gpi.queue == hmq) {
+            *slot = None;
+        }
+    }
+}
+
+/// WinReleasePS: only a cached presentation space is released (IBM's
+/// ReleasePS: PMERR_INV_HPS for any other handle).
+pub fn release(s: &mut State, hps: u32) -> bool {
+    if !entry(s, hps).is_some_and(|e| e.gpi.cached) {
+        crate::misc::set_error(0x0008_207f);
+        return false;
+    }
+    destroy(s, hps)
 }
 
 pub fn destroy(s: &mut State, hps: u32) -> bool {
@@ -347,9 +380,45 @@ fn query<T>(hps: u32, f: impl FnOnce(&PsEntry) -> T, err: T) -> T {
 
 const GPIA_ASSOC: u32 = 0x4000;
 
-/// GpiCreatePS(hab, hdc, psizlPage, flOptions)
+/// GpiCreatePS(hab, hdc, psizlPage, flOptions), with IBM's checks
+/// (PMGPI's GPI32CREATEPS and FullCreatePS): a micro PS (GPIT_MICRO,
+/// GPIT_INK) must be associated (GPIA_ASSOC) and an ink one in PU_PELS;
+/// page units must be given; a PS not associated needs a page size; a
+/// device context takes one presentation space (PMERR_DC_IS_ASSOCIATED).
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiCreatePS(_hab: u32, hdc: u32, size: *const i32, opts: u32) -> u32 {
+    const PMERR_DC_IS_ASSOCIATED: u32 = 0x2017;
+    const PMERR_INV_OR_INCOMPAT_OPTIONS: u32 = 0x20a9;
+    const PMERR_INV_PS_SIZE: u32 = 0x20ba;
+    let units = opts & 0xfc;
+    let fail = |e: u32| {
+        crate::misc::set_error(0x0008_0000 | e);
+        0
+    };
+    if opts & 0x3000 != 0 {
+        let kind = opts & 0xffff_ff03;
+        if (kind != 0x5000 && kind != 0x7000) || units == 0 || units > 0x1c || (kind == 0x7000 && units != 8) {
+            return fail(PMERR_INV_OR_INCOMPAT_OPTIONS);
+        }
+    } else {
+        let opts = opts & !0x8000;
+        if size.is_null() {
+            return fail(PMERR_INV_PS_SIZE);
+        }
+        let (cx, cy) = unsafe { (size.read_unaligned(), size.add(1).read_unaligned()) };
+        if opts & 0xffff_a003 != 0 || units == 0 || units > 0x1c || ((cx == 0 || cy == 0) && opts & GPIA_ASSOC == 0) || (opts & 0xf00) >> 8 > 2 {
+            return fail(PMERR_INV_OR_INCOMPAT_OPTIONS);
+        }
+    }
+    if opts & GPIA_ASSOC != 0 && hdc != 0 && gpiobj::dc_associated(hdc) {
+        return fail(PMERR_DC_IS_ASSOCIATED);
+    }
+    create_ps(hdc, size, opts)
+}
+
+/// A presentation space (GpiCreatePS without its checks: also the one a
+/// DC keeps for `hdc | 1`).
+pub fn create_ps(hdc: u32, size: *const i32, opts: u32) -> u32 {
     let s = st();
     let mut ps = new_ps(Point::new(0, 0), Vec::new());
     let units = match opts & 0x1c {

@@ -113,6 +113,15 @@ pub fn draws_vectors(hdc: u32) -> bool {
     printer(hdc).is_some_and(|p| p.writer.is_some())
 }
 
+/// A presentation space of the process other than the DC's own (`hdc |
+/// 1`) is associated with the DC.
+pub fn dc_associated(hdc: u32) -> bool {
+    let own = objects().dc_pss.iter().find(|(d, _)| *d == hdc).map(|&(_, p)| p);
+    let me = crate::state::pid();
+    let s = st();
+    (0..s.pss.len()).any(|i| s.pss[i].as_ref().is_some_and(|e| e.pid == me && e.gpi.hdc == hdc && !e.gpi.cached) && Some(0x100 + i as u32) != own)
+}
+
 /// The presentation space for `hdc | 1`: one per DC, associated with it,
 /// made when first used. 0 if `hdc` is not a DC.
 pub fn dc_ps(hdc: u32) -> u32 {
@@ -123,7 +132,7 @@ pub fn dc_ps(hdc: u32) -> u32 {
         return hps;
     }
     // GPIA_ASSOC | PU_PELS.
-    let hps = crate::gpiapi::GpiCreatePS(1, hdc, core::ptr::null(), 0x4008);
+    let hps = crate::gpiapi::create_ps(hdc, core::ptr::null(), 0x4008);
     if hps != 0 {
         objects().dc_pss.push((hdc, hps));
     }

@@ -10,7 +10,7 @@
 //! and the exit code N. `PMXTEST CHILD` is the second process the system
 //! hooks are checked in, `PMXTEST DDESERVER` the DDE server, `PMXTEST DDEMLSERVER` the
 //! DDEML server (`PMXTEST DDEML` makes the DDEML checks only, `PMXTEST AVIO`
-//! the AVIO ones), `PMXTEST
+//! the AVIO ones, `PMXTEST PS` those of presentation spaces, ps.rs), `PMXTEST
 //! REG` makes the registry checks only; `PMXTEST RECORD` waits for three keys or clicks (typed by `xtask run --type`)
 //! and reports what the journal record hook saw.
 
@@ -33,6 +33,7 @@ mod owatcom;
 mod owner;
 mod pm;
 mod pres;
+mod ps;
 mod reg;
 mod regx;
 mod win16;
@@ -188,6 +189,8 @@ fn main(s: &Startup) -> u32 {
     }
     if args.starts_with(b"RECORD") {
         hooks::record(hab, client);
+    } else if args.starts_with(b"PS") {
+        ps::ps_checks(hab, client);
     } else if args.starts_with(b"AVIO") {
         avio::avio_checks(hab, client);
     } else if args.starts_with(b"DDEML") {
@@ -206,6 +209,7 @@ fn main(s: &Startup) -> u32 {
         pres::pres_checks(client);
         bidi::bidi_checks(client);
         avio::avio_checks(hab, client);
+        ps::ps_checks(hab, client);
         drag::drag_checks(hab, client);
         win16::win16_checks(hab);
         owatcom::owatcom_checks(hab, hmq, client);

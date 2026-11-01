@@ -382,6 +382,7 @@ pub extern "C" fn WinDestroyMsgQueue(hmq: u32) -> u32 {
     for h in crate::win::top_windows_of(hmq) {
         crate::win::destroy(h);
     }
+    crate::gpiapi::queue_gone(st(), hmq);
     let Some(mut q) = st().queues.remove(&hmq) else { return 0 };
     abandon_sent(&mut q);
     st().timers.retain(|t| t.queue != hmq);
