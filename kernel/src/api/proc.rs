@@ -41,7 +41,7 @@ pub(super) fn read_block(c: &Ctx, addr: u32, max: usize) -> Option<Vec<String>> 
 }
 
 /// Handles a child inherits: every slot not marked no-inherit.
-fn inherited_handles(p: &Process) -> Vec<Option<Handle>> {
+pub(super) fn inherited_handles(p: &Process) -> Vec<Option<Handle>> {
     let ni = p.noinherit.lock().clone();
     p.handles
         .lock()
