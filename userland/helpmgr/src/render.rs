@@ -233,6 +233,100 @@ fn info(b: &Bitmap) -> Vec<u8> {
     v
 }
 
+/// Dynamic data's metafiles played into bitmaps: HMF, width, height and
+/// the bitmap.
+pub type MetaBitmaps = Vec<(u32, i32, i32, u32)>;
+
+pub fn free_metafiles(m: &mut MetaBitmaps) {
+    for (_, _, _, hbm) in m.drain(..) {
+        unsafe { GpiDeleteBitmap(hbm) };
+    }
+}
+
+/// FIXED a / b.
+fn fixed_div(a: i32, b: i32) -> i32 {
+    if b == 0 {
+        return 0x10000;
+    }
+    ((a as i64) * 0x10000 / b as i64) as i32
+}
+
+/// Metafile `hmf` played into a new bitmap of `cx` by `cy` pels (IBM's
+/// MtaPlayMetaFile, which DdfFormatCell has make a bitmap of the
+/// metafile's rectangle): its boundary is found by playing it without
+/// a device, then the default viewing transform centres that boundary
+/// (and 5 pels around it) on the bitmap, scaled alike in x and y to fit
+/// (MtaSetTransform), and it is played again (its fonts loaded, its
+/// colour table taken) onto the erased bitmap. 0 if it cannot be made.
+pub fn metafile_bitmap(hmf: u32, cx: i32, cy: i32) -> u32 {
+    if cx <= 0 || cy <= 0 {
+        return 0;
+    }
+    // OD_MEMORY.
+    let hdc = unsafe { DevOpenDC(0, 8, b"*\0".as_ptr(), 0, core::ptr::null(), 0) };
+    if hdc == 0 {
+        return 0;
+    }
+    let size = [cx, cy];
+    // PU_PELS | GPIA_ASSOC.
+    let hps = unsafe { GpiCreatePS(0, hdc, size.as_ptr(), 0x4008) };
+    if hps == 0 {
+        unsafe { DevCloseDC(hdc) };
+        return 0;
+    }
+    // PMF_SEGBASE, PMF_LOADTYPE, PMF_RESOLVE, PMF_LCIDS (LC_LOADDISC),
+    // PMF_RESET, PMF_SUPPRESS, PMF_COLORTABLES (CTAB_REPLACE),
+    // PMF_COLORREALIZABLE: IBM's DoDraw.
+    let opts: [i32; 8] = [0, 0, 0, 3, 0, 0, 3, 0];
+    let mut desc = [0u8; 250];
+    let mut segs = 0i32;
+    let play = |hps: u32, segs: &mut i32, desc: &mut [u8; 250]| unsafe { GpiPlayMetaFile(hps, hmf, 8, opts.as_ptr(), segs, 250, desc.as_mut_ptr()) };
+    let mut b = RectL::default();
+    unsafe {
+        GpiAssociate(hps, 0);
+        // DCTL_BOUNDARY.
+        GpiSetDrawControl(hps, 3, 1);
+        play(hps, &mut segs, &mut desc);
+        GpiQueryBoundaryData(hps, &mut b);
+        GpiSetDrawControl(hps, 3, 0);
+        GpiAssociate(hps, hdc);
+    }
+    let mut fmt = [1i32, 24];
+    unsafe { GpiQueryDeviceBitmapFormats(hps, 2, fmt.as_mut_ptr()) };
+    let mut hdr = [0u8; 12];
+    hdr[0] = 12;
+    hdr[4..6].copy_from_slice(&(cx as u16).to_le_bytes());
+    hdr[6..8].copy_from_slice(&(cy as u16).to_le_bytes());
+    hdr[8..10].copy_from_slice(&(fmt[0] as u16).to_le_bytes());
+    hdr[10..12].copy_from_slice(&(fmt[1] as u16).to_le_bytes());
+    let hbm = unsafe { GpiCreateBitmap(hps, hdr.as_ptr(), 0, core::ptr::null(), core::ptr::null()) };
+    if hbm != 0 && unsafe { GpiSetBitmap(hps, hbm) } != u32::MAX {
+        let (l, r, bt, t) = (b.l - 5, b.r + 5, b.b - 5, b.t + 5);
+        // The boundary's centre to the origin, ...
+        let m: [i32; 9] = [0x10000, 0, 0, 0, 0x10000, 0, -(l + (r - l) / 2), -(bt + (t - bt) / 2), 1];
+        unsafe { GpiSetDefaultViewMatrix(hps, 9, m.as_ptr(), 0) };
+        // ... scaled to fit (the smaller of the two scales), ...
+        let (bw, bh) = (r - l, t - bt);
+        let k = if fixed_div(bh, bw) < fixed_div(cy, cx) { fixed_div(cx, bw) } else { fixed_div(cy, bh) };
+        let m: [i32; 9] = [k, 0, 0, 0, k, 0, 0, 0, 1];
+        unsafe { GpiSetDefaultViewMatrix(hps, 9, m.as_ptr(), 1) };
+        // ... to the centre of the bitmap.
+        let m: [i32; 9] = [0x10000, 0, 0, 0, 0x10000, 0, cx / 2, cy / 2, 1];
+        unsafe {
+            GpiSetDefaultViewMatrix(hps, 9, m.as_ptr(), 1);
+            GpiErase(hps);
+        }
+        play(hps, &mut segs, &mut desc);
+        unsafe { GpiSetBitmap(hps, 0) };
+    }
+    unsafe {
+        GpiAssociate(hps, 0);
+        GpiDestroyPS(hps);
+        DevCloseDC(hdc);
+    }
+    hbm
+}
+
 /// What to draw: the page scrolled by `top` pixels into a window of
 /// `w` by `h`, with link `sel` marked.
 pub struct Draw<'a, 'p> {
@@ -248,6 +342,7 @@ pub struct Draw<'a, 'p> {
     pub image_start: u32,
     pub lib: usize,
     pub bitmaps: &'a mut Bitmaps,
+    pub metafiles: &'a mut MetaBitmaps,
 }
 
 impl Draw<'_, '_> {
@@ -288,8 +383,26 @@ impl Draw<'_, '_> {
                         continue;
                     }
                     if metafile {
-                        // GpiPlayMetaFile draws nothing yet in rs2.
-                        unsafe { GpiPlayMetaFile(hps, handle, 0, core::ptr::null(), core::ptr::null_mut(), 0, core::ptr::null_mut()) };
+                        // Played into a bitmap of the run's size (the
+                        // window's for `fit`), kept until the page goes.
+                        let (cx, cy) = (x1 - x0, y1 - y0);
+                        let hbm = match self.metafiles.iter().find(|m| (m.0, m.1, m.2) == (handle, cx, cy)) {
+                            Some(m) => m.3,
+                            None => {
+                                // One bitmap per metafile: an older size goes.
+                                if let Some(i) = self.metafiles.iter().position(|m| m.0 == handle) {
+                                    unsafe { GpiDeleteBitmap(self.metafiles.remove(i).3) };
+                                }
+                                let hbm = metafile_bitmap(handle, cx, cy);
+                                if hbm != 0 {
+                                    self.metafiles.push((handle, cx, cy, hbm));
+                                }
+                                hbm
+                            }
+                        };
+                        if hbm != 0 {
+                            unsafe { WinDrawBitmap(hps, hbm, core::ptr::null(), &PointL { x: x0, y: y0 }, 0, 0, DBM_NORMAL) };
+                        }
                     } else if fit {
                         let dst = RectL { l: x0, b: y0, r: x1, t: y1 };
                         unsafe { WinDrawBitmap(hps, handle, core::ptr::null(), &dst as *const RectL as *const PointL, 0, 0, DBM_STRETCH) };

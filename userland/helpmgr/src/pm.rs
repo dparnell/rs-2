@@ -180,6 +180,32 @@ unsafe extern "C" {
     pub fn GpiSetCharSet(hps: u32, lcid: i32) -> u32;
     #[link_name = "PMGPI.378"]
     pub fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.610"]
+    pub fn DevOpenDC(hab: u32, ty: i32, tok: *const u8, n: i32, dop: *const u32, comp: u32) -> u32;
+    #[link_name = "PMGPI.604"]
+    pub fn DevCloseDC(hdc: u32) -> u32;
+    #[link_name = "PMGPI.369"]
+    pub fn GpiCreatePS(hab: u32, hdc: u32, size: *const i32, opts: u32) -> u32;
+    #[link_name = "PMGPI.379"]
+    pub fn GpiDestroyPS(hps: u32) -> u32;
+    #[link_name = "PMGPI.351"]
+    pub fn GpiAssociate(hps: u32, hdc: u32) -> u32;
+    #[link_name = "PMGPI.521"]
+    pub fn GpiSetDrawControl(hps: u32, ctl: i32, val: i32) -> u32;
+    #[link_name = "PMGPI.428"]
+    pub fn GpiQueryBoundaryData(hps: u32, r: *mut RectL) -> u32;
+    #[link_name = "PMGPI.520"]
+    pub fn GpiSetDefaultViewMatrix(hps: u32, n: i32, m: *const i32, opt: i32) -> u32;
+    #[link_name = "PMGPI.389"]
+    pub fn GpiErase(hps: u32) -> u32;
+    #[link_name = "PMGPI.445"]
+    pub fn GpiQueryDeviceBitmapFormats(hps: u32, n: i32, out: *mut i32) -> u32;
+    #[link_name = "PMGPI.598"]
+    pub fn GpiCreateBitmap(hps: u32, hdr: *const u8, opts: u32, init: *const u8, bmi: *const u8) -> u32;
+    #[link_name = "PMGPI.506"]
+    pub fn GpiSetBitmap(hps: u32, hbm: u32) -> u32;
+    #[link_name = "PMGPI.371"]
+    pub fn GpiDeleteBitmap(hbm: u32) -> u32;
     #[link_name = "PMWIN.730"]
     pub fn WinDrawBitmap(hps: u32, hbm: u32, src: *const RectL, dst: *const PointL, fore: i32, back: i32, fl: u32) -> u32;
 }

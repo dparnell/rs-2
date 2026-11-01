@@ -69,6 +69,9 @@ struct View {
     /// The panels of the list's rows.
     rows: Vec<PanelRef>,
     bitmaps: Bitmaps,
+    /// Dynamic data's metafiles as bitmaps (until the page is laid out
+    /// again).
+    metafiles: crate::render::MetaBitmaps,
     /// A footnote window: one panel, no buttons.
     footnote: bool,
     /// A window of its own in the help window (a viewport).
@@ -212,6 +215,7 @@ fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
         sel: None,
         rows: Vec::new(),
         bitmaps: Bitmaps::new(),
+        metafiles: Vec::new(),
         footnote,
         vp: None,
         acvps: Vec::new(),
@@ -349,6 +353,7 @@ fn enter(v: &mut View) {
     v.sel = None;
     v.page = None;
     v.ddf.clear();
+    crate::render::free_metafiles(&mut v.metafiles);
     // Another panel: the viewports it opened go (all of them for the
     // help window's own panel, as IBM's PnlClearAllViewport; else the
     // dependent ones, PnlClearDependentViewport).
@@ -473,6 +478,7 @@ fn relayout(v: &mut View) {
     // The page (and the window's text) is laid out again before the
     // dynamic data it borrows is replaced.
     v.page = None;
+    crate::render::free_metafiles(&mut v.metafiles);
     let ddf = &mut v.ddf;
     let (panel, objcom, active) = (v.panel, inst.objcom, inst.app_window());
     expand_ddf(&mut cells, |res| {
@@ -960,6 +966,7 @@ fn client_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     inst.footnote = 0;
                 }
                 inst.viewports.retain(|&f| f != v.frame);
+                crate::render::free_metafiles(&mut v.metafiles);
                 drop(alloc::boxed::Box::from_raw(v as *mut View));
             }
             0
@@ -1118,6 +1125,7 @@ fn panel_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     image_start: lib.doc().header.image_start,
                     lib: p.lib,
                     bitmaps: &mut v.bitmaps,
+                    metafiles: &mut v.metafiles,
                 };
                 d.draw();
             }
