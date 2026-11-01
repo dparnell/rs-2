@@ -1,0 +1,14 @@
+[package]
+name = "somtc-dll"
+description = "SOMTC.DLL: SOM 2.1's TypeCodes (tcNew, tcKind, tcSize, tcEqual, tcPrint, ...) and the TypeCode constants of OS/2 Warp 4"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "somtc"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }
