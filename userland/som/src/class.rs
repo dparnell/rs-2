@@ -505,6 +505,27 @@ pub extern "C" fn class_somFree(cls: usize) {
     }
 }
 
+/// SOMClass's somUninit: a class object going away (somUnregisterClass)
+/// clears its ClassData, so that `<Class>NewClass` builds the class
+/// again, as IBM's does; its record stops being valid.
+pub extern "C" fn class_somUninit(cls: usize) {
+    let Some(c) = (unsafe { r(cls) }) else { return };
+    unsafe {
+        if !c.cds.is_null() && *c.cds == cls {
+            *c.cds = 0;
+        }
+        if !c.true_class.is_null() {
+            let cp = c as *mut Class;
+            (*c.true_class).casts.retain(|&x| x != cp);
+        }
+        c.magic = 0;
+        let meta = class_of_obj(cls);
+        if !meta.is_null() && (*meta).somclass_off != 0 {
+            *((cls + (*meta).somclass_off) as *mut *mut Class) = core::ptr::null_mut();
+        }
+    }
+}
+
 pub extern "C" fn class_somDumpSelfInt(cls: usize, level: i32) {
     crate::prefix_level(level);
     crate::printf(b"Class: %s (%d methods, instance size %d)\n\0", &[
@@ -625,7 +646,14 @@ pub mod mm {
     pub const UNREGISTER_CLASS: usize = 4;
     pub const LOCATE_CLASS_FILE: usize = 5;
     pub const LOAD_CLASS_FILE: usize = 6;
+    pub const UNLOAD_CLASS_FILE: usize = 7;
     pub const GET_INIT_FUNCTION: usize = 8;
+    pub const GET_RELATED_CLASSES: usize = 10;
+    pub const BEGIN_PERSISTENT_CLASSES: usize = 15;
+    pub const END_PERSISTENT_CLASSES: usize = 16;
+    pub const REGISTER_THREAD_USAGE: usize = 18;
     pub const REGISTER_CLASS_LIBRARY: usize = 19;
+    pub const JOIN_AFFINITY_GROUP: usize = 20;
+    pub const UNREGISTER_CLASS_LIBRARY: usize = 21;
 }
 

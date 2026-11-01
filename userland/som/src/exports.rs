@@ -184,6 +184,7 @@ aligned! {
     __m_get_somCastedClass => c::get_somCastedClass, 1;
     __m_class_somFree => c::class_somFree, 1;
     __m_class_somDumpSelfInt => c::class_somDumpSelfInt, 2;
+    __m_class_somUninit => c::class_somUninit, 1;
 
     // SOMClassMgr.
     __m_somFindClsInFile => m::somFindClsInFile, 5;
@@ -203,7 +204,8 @@ aligned! {
     __m_get_somRegisteredClasses => m::get_somRegisteredClasses, 2;
     __m_somBeginPersistentClasses => m::somBeginPersistentClasses, 1;
     __m_somEndPersistentClasses => m::somEndPersistentClasses, 1;
-    __m_mgr_private => m::mgr_private, 1;
+    __m_somReleaseClasses => m::somReleaseClasses, 1;
+    __m_somRegisterThreadUsage => m::somRegisterThreadUsage, 2;
     __m_somRegisterClassLibrary => m::somRegisterClassLibrary, 3;
     __m_somJoinAffinityGroup => m::somJoinAffinityGroup, 3;
     __m_somUnregisterClassLibrary => m::somUnregisterClassLibrary, 2;

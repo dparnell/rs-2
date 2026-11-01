@@ -218,8 +218,8 @@ fn mgr_defs() -> [Def; 22] {
         b"_get_somRegisteredClasses" => __m_get_somRegisteredClasses, true;
         b"somBeginPersistentClasses" => __m_somBeginPersistentClasses;
         b"somEndPersistentClasses" => __m_somEndPersistentClasses;
-        b"somcmPrivate1" => __m_mgr_private;
-        b"somcmPrivate2" => __m_mgr_private;
+        b"somReleaseClasses" => __m_somReleaseClasses;
+        b"somRegisterThreadUsage" => __m_somRegisterThreadUsage;
         b"somRegisterClassLibrary" => __m_somRegisterClassLibrary;
         b"somJoinAffinityGroup" => __m_somJoinAffinityGroup;
         b"somUnregisterClassLibrary" => __m_somUnregisterClassLibrary;
@@ -288,6 +288,7 @@ pub fn env_new() -> usize {
         add_defs(sc, &class_defs(), (&raw mut crate::SOMClassClassData) as *mut usize);
         override_name(sc, b"somFree", __m_class_somFree as usize);
         override_name(sc, b"somDumpSelfInt", __m_class_somDumpSelfInt as usize);
+        override_name(sc, b"somUninit", __m_class_somUninit as usize);
         init_mi(scm, 0, b"SOMClassMgr", &[so], -1, 4, 4, 22, 1, 5);
         add_defs(scm, &mgr_defs(), (&raw mut crate::SOMClassMgrClassData) as *mut usize);
         override_name(scm, b"somDumpSelfInt", __m_mgr_somDumpSelfInt as usize);

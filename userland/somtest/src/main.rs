@@ -146,6 +146,13 @@ const SOM_GET_CASTED_CLASS: usize = 59;
 // SOMClassMgr methods.
 const SOM_FIND_CLASS: usize = 1;
 const SOM_CLASS_FROM_ID: usize = 2;
+const SOM_UNREGISTER_CLASS: usize = 4;
+const SOM_UNLOAD_CLASS_FILE: usize = 7;
+const SOM_GET_RELATED_CLASSES: usize = 10;
+const SOM_GET_REGISTERED_CLASSES: usize = 14;
+const SOM_BEGIN_PERSISTENT_CLASSES: usize = 15;
+const SOM_END_PERSISTENT_CLASSES: usize = 16;
+const SOM_JOIN_AFFINITY_GROUP: usize = 20;
 
 // ---- Building classes as emitted code does ----
 
@@ -648,6 +655,7 @@ fn run() {
 
         abstract_checks();
         cast_checks();
+        unregister_checks();
 
         // Plain default initialization from somNew.
         let dinit: extern "C" fn(usize, usize) = f(tok(so(0), SOM_DEFAULT_INIT));
@@ -805,6 +813,88 @@ fn cast_checks() {
         check_log("cast PetDog destruct", b"pdat");
         m1(so(0), SOM_FREE, d);
         take_log();
+    }
+}
+
+fn mgr_tok(i: usize) -> usize {
+    tok(&raw const SOMClassMgrClassData as *const usize, i)
+}
+
+fn mgr1(i: usize, a: usize) -> usize {
+    unsafe { f::<extern "C" fn(usize, usize) -> usize>(mgr_tok(i))(SOMClassMgrObject, a) }
+}
+
+fn class_from_id(name: &[u8]) -> usize {
+    unsafe { f::<extern "C" fn(usize, SomId) -> usize>(mgr_tok(SOM_CLASS_FROM_ID))(SOMClassMgrObject, sid(name)) }
+}
+
+/// somGetRelatedClasses as a list (None: NULL).
+fn related(cls: usize) -> Option<Vec<usize>> {
+    let p = mgr1(SOM_GET_RELATED_CLASSES, cls) as *mut usize;
+    if p.is_null() {
+        return None;
+    }
+    let mut v = Vec::new();
+    let mut i = 0;
+    while unsafe { *p.add(i) } != 0 {
+        v.push(unsafe { *p.add(i) });
+        i += 1;
+    }
+    unsafe { (SOMFree)(p as *mut u8) };
+    Some(v)
+}
+
+fn simple(name: &[u8], parent: &[u8], c: *mut usize) -> usize {
+    build(&Spec { name, meta: None, parents: &[parent], data: 4, methods: &[], overrides: &[], cd: c, ccd: cd(8) })
+}
+
+/// Unregistering classes: the class object goes and its ClassData is
+/// cleared (so it can be built again); classes with registered
+/// subclasses or instances that are classes, and persistent ones, stay.
+fn unregister_checks() {
+    unsafe {
+        let mgr = SOMClassMgrObject;
+        let tc = cd(0);
+        let t = simple(b"Temp", b"Thing", tc);
+        check("Temp built and registered", t != 0 && class_from_id(b"Temp") == t);
+        check_eq("somUnregisterClass of a class with subclasses", mgr1(SOM_UNREGISTER_CLASS, *THING) as i64, 1);
+        check_eq("somUnregisterClass of a metaclass in use", mgr1(SOM_UNREGISTER_CLASS, *M_ANIMAL) as i64, 1);
+        check("still registered", class_from_id(b"Thing") == *THING && class_from_id(b"M_Animal") == *M_ANIMAL);
+        check("somGetRelatedClasses of a class not loaded from a file", related(t) == Some(vec![t]));
+        let mut seq = [0usize; 3];
+        f::<extern "C" fn(*mut usize, usize)>(mgr_tok(SOM_GET_REGISTERED_CLASSES))(seq.as_mut_ptr(), mgr);
+        check("registered classes, newest first", seq[1] != 0 && *(seq[2] as *const usize) == t);
+        (SOMFree)(seq[2] as *mut u8);
+        check_eq("somUnregisterClass Temp", mgr1(SOM_UNREGISTER_CLASS, t) as i64, 0);
+        check("Temp unregistered, its ClassData cleared", class_from_id(b"Temp") == 0 && *tc == 0);
+        check("somGetRelatedClasses of a class not registered", related(t).is_none());
+        check_eq("somUnregisterClass of NULL", mgr1(SOM_UNREGISTER_CLASS, 0) as i64, 0);
+        let t2 = simple(b"Temp", b"Thing", tc);
+        check("Temp built again", t2 != 0 && class_from_id(b"Temp") == t2 && *tc == t2);
+        let o = m1(sc(), SOM_NEW, t2);
+        check("an instance of it", o != 0 && m1(so(0), SOM_GET_CLASS, o) == t2);
+        m1(so(0), SOM_FREE, o);
+        check_eq("somUnloadClassFile of a class not loaded from a file", mgr1(SOM_UNLOAD_CLASS_FILE, t2) as i32 as i64, -2);
+        check("it is unregistered", class_from_id(b"Temp") == 0 && *tc == 0);
+
+        // A parent goes once its subclass has.
+        let (bc, kc) = (cd(0), cd(0));
+        let b = simple(b"TempBase", b"Thing", bc);
+        let k = simple(b"TempKid", b"TempBase", kc);
+        check_eq("unregister TempBase (TempKid registered)", mgr1(SOM_UNREGISTER_CLASS, b) as i64, 1);
+        check_eq("unregister TempKid", mgr1(SOM_UNREGISTER_CLASS, k) as i64, 0);
+        check_eq("unregister TempBase then", mgr1(SOM_UNREGISTER_CLASS, b) as i64, 0);
+        check("both gone", class_from_id(b"TempBase") == 0 && class_from_id(b"TempKid") == 0 && *bc == 0 && *kc == 0);
+
+        // Persistent classes stay.
+        f::<extern "C" fn(usize)>(mgr_tok(SOM_BEGIN_PERSISTENT_CLASSES))(mgr);
+        let p = simple(b"Pers", b"Thing", cd(0));
+        f::<extern "C" fn(usize)>(mgr_tok(SOM_END_PERSISTENT_CLASSES))(mgr);
+        check_eq("somUnregisterClass of a persistent class", mgr1(SOM_UNREGISTER_CLASS, p) as i64, 1);
+        check_eq("somUnloadClassFile of a persistent class", mgr1(SOM_UNLOAD_CLASS_FILE, p) as i32 as i64, -1);
+        check("persistent class registered", class_from_id(b"Pers") == p);
+        let join: extern "C" fn(usize, usize, usize) -> u32 = f(mgr_tok(SOM_JOIN_AFFINITY_GROUP));
+        check("somJoinAffinityGroup without a group", join(mgr, p, *DOG) & 0xff == 0);
     }
 }
 
