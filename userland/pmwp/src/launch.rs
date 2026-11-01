@@ -25,7 +25,14 @@ pub const PROG_WINDOWEDVDM: u32 = 7;
 /// as the Workplace Shell does. A DOS session (PROG_VDM,
 /// PROG_WINDOWEDVDM) runs its own COMMAND.COM for "*" and .BAT files.
 pub fn start(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) -> u32 {
-    let rc = start_session(exe, params, dir, title, progc);
+    start_env(exe, params, dir, title, progc, b"")
+}
+
+/// `start` with `env` (strings, each ending in a NUL, as a program
+/// object's PROGDETAILS pszEnvironment without its final NUL) added to
+/// the shell's environment, replacing a variable of the same name.
+pub fn start_env(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32, env: &[u8]) -> u32 {
+    let rc = start_session(exe, params, dir, title, progc, env);
     if rc != 0 {
         report(exe, rc);
     }
@@ -51,7 +58,57 @@ fn report(exe: &[u8], rc: u32) {
     unsafe { WinMessageBox(HWND_DESKTOP, HWND_DESKTOP, t.as_ptr(), b"Workplace Shell\0".as_ptr(), 0, 0x0000 | 0x0040 | 0x4000) };
 }
 
-fn start_session(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32) -> u32 {
+/// The strings of an environment block at `p` (to its empty string),
+/// each with its NUL.
+///
+/// # Safety
+/// `p` is null or points at an environment block.
+pub unsafe fn env_strings(p: *const u8) -> Vec<u8> {
+    let mut b = Vec::new();
+    let mut q = p;
+    unsafe {
+        while !q.is_null() && *q != 0 {
+            while *q != 0 {
+                b.push(*q);
+                q = q.add(1);
+            }
+            b.push(0);
+            q = q.add(1);
+        }
+    }
+    b
+}
+
+/// The variable's name in an environment string ("NAME=value").
+fn env_name(s: &[u8]) -> Vec<u8> {
+    s.split(|&c| c == b'=').next().unwrap_or(b"").to_ascii_uppercase()
+}
+
+/// The environment of a new session: this process's, with `extra`'s
+/// strings in place of those of the same names (None: nothing extra,
+/// the session inherits it).
+fn env_block(extra: &[u8]) -> Option<Vec<u8>> {
+    if extra.is_empty() {
+        return None;
+    }
+    let extra: Vec<&[u8]> = extra.split(|&c| c == 0).filter(|s| !s.is_empty()).collect();
+    let names: Vec<Vec<u8>> = extra.iter().map(|s| env_name(s)).collect();
+    let own = unsafe {
+        let mut tib = core::ptr::null_mut();
+        let mut pib: *mut os2::Pib = core::ptr::null_mut();
+        os2::DosGetInfoBlocks(&mut tib, &mut pib);
+        env_strings((*pib).pchenv)
+    };
+    let mut b = Vec::new();
+    for s in own.split(|&c| c == 0).filter(|s| !s.is_empty() && !names.contains(&env_name(s))).chain(extra) {
+        b.extend_from_slice(s);
+        b.push(0);
+    }
+    b.push(0);
+    Some(b)
+}
+
+fn start_session(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32, env: &[u8]) -> u32 {
     let up = exe.to_ascii_uppercase();
     let dos = progc == PROG_VDM || progc == PROG_WINDOWEDVDM;
     let batch = !dos && (up.ends_with(b".CMD") || up.ends_with(b".BAT"));
@@ -96,6 +153,7 @@ fn start_session(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32
     }
     let title = if title.is_empty() { split_path(exe).1 } else { title.to_vec() };
     let (t, i) = (z(&title), z(&inputs));
+    let env = env_block(env);
     let sd = os2::StartData {
         length: core::mem::size_of::<os2::StartData>() as u16,
         related: 0,
@@ -105,7 +163,7 @@ fn start_session(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32
         name: name.as_ref().map_or(core::ptr::null(), |n| n.as_ptr()),
         inputs: i.as_ptr(),
         termq: core::ptr::null(),
-        env: core::ptr::null(),
+        env: env.as_ref().map_or(core::ptr::null(), |e| e.as_ptr()),
         inherit: 0,
         session_type,
     };

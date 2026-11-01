@@ -16,7 +16,9 @@
 //!   (`PMWP_ASSOC_TYPE`) and names (`PMWP_ASSOC_FILTER`, ASSOCFILTER=)
 //!   whose files the program opens (ASSOCTYPE=,
 //!   wpQuery/SetAssociationType and -Filter); WPProgram's **Session**
-//!   page (OS/2 or DOS, full screen or window).
+//!   page (OS/2 or DOS, full screen or window), and its **Compatibility**
+//!   page (rs2's own): the colours the program sees, the display's or
+//!   256 (RS2COLORS=256 in its environment).
 //! - WPDisk's **Details** page (wpAddDiskDetailsPage): the file system,
 //!   label, serial number and space, from DosQueryFSInfo.
 
@@ -745,6 +747,45 @@ extern "C" fn wpAddProgramSessionPage(o: usize, nb: u32) -> u32 {
     items.insert(0, book::label(b"Session", (6, 106, 220)));
     items.push(static_text(b"", (6, 6, 224), 844));
     add_page(o, nb, session_proc, items, b"~Session\0")
+}
+
+// ---- WPProgram: the Compatibility page (rs2's own) ----
+
+/// The colours the program sees: the display's, or a 256-colour display
+/// for programs that need one (RS2COLORS=, `abs::colors`).
+const COLORS: [(u16, &[u8], u32); 2] = [(860, b"~Display's colors", 0), (861, b"~256 colors", 256)];
+
+extern "C" fn compat_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            let o = init_obj(h, b);
+            let c = crate::abs::colors(o);
+            for (id, _, v) in COLORS {
+                check(h, id, c == v);
+            }
+            0
+        }
+        WM_CONTROL if (a >> 16) == 1 => {
+            let id = (a & 0xffff) as u16;
+            if let Some(&(_, _, v)) = COLORS.iter().find(|s| s.0 == id) {
+                crate::abs::set_colors(page_obj(h), v);
+            }
+            0
+        }
+        WM_COMMAND => 0,
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+/// WPProgram's Compatibility page: the colour depth the program sees,
+/// for Presentation Manager and Windows programs written for a
+/// 256-colour display. IBM's shell has no such page.
+pub fn add_compat_page(o: usize, nb: u32) -> u32 {
+    let mut items: Vec<Item> = COLORS.iter().enumerate().map(|(i, &(id, t, _))| radio(t, (12, 92 - 11 * i as i16, 200), id, i == 0)).collect();
+    items.insert(0, book::label(b"Colors", (6, 106, 220)));
+    items.push(static_text(b"A program that needs a 256-color display sees one;", (6, 30, 224), 862));
+    items.push(static_text(b"the rest of the desktop keeps the display's colors.", (6, 20, 224), 863));
+    add_page(o, nb, compat_proc, items, b"~Compatibility\0")
 }
 
 // ---- WPDisk: the Details page ----

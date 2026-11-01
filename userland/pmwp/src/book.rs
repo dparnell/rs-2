@@ -245,6 +245,7 @@ extern "C" fn wpAddProgramPage(o: usize, nb: u32) -> u32 {
 extern "C" fn program_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPProgram"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
     wps::call("WPProgram", m::WPProgram::wpAddProgramAssociationPage, &[o, nb as usize]);
+    crate::pages::add_compat_page(o, nb);
     wps::call("WPProgram", m::WPProgram::wpAddProgramSessionPage, &[o, nb as usize]);
     wps::call("WPProgram", m::WPProgram::wpAddProgramPage, &[o, nb as usize]);
     1
