@@ -60,8 +60,6 @@ unsafe extern "C" {
     fn GpiBox(hps: u32, ctl: i32, p: *const PointL, h: i32, v: i32) -> i32;
     #[link_name = "PMGPI.393"]
     fn GpiFullArc(hps: u32, control: u32, mult: u32) -> i32;
-    #[link_name = "PMGPI.592"]
-    fn GpiCreateLogColorTable(hps: u32, opts: u32, fmt: i32, start: i32, n: i32, data: *const i32) -> u32;
 }
 
 // ---- The lockup options (OS2.INI PM_Lockup, IBM's layout) ----

@@ -578,7 +578,6 @@ extern "C" fn wpAddFolderMenu2Page(o: usize, nb: u32) -> u32 {
 
 // ---- WPFolder: self-close ----
 
-pub const SELFCLOSE_DEFAULT: u32 = 0;
 pub const SELFCLOSE_NEVER: u32 = 1;
 pub const SELFCLOSE_SUBFOLDERS: u32 = 2;
 pub const SELFCLOSE_ALL: u32 = 3;

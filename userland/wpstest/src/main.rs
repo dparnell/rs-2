@@ -46,6 +46,18 @@ unsafe extern "C" {
     fn WinUnlockSystem(hab: u32, pw: *const u8) -> u32;
     #[link_name = "PMWIN.829"]
     fn WinQuerySysValue(desk: u32, i: i32) -> i32;
+    #[link_name = "PMSPL.394"]
+    fn SplHoldQueue(comp: *const u8, q: *const u8) -> u32;
+    #[link_name = "PMSPL.301"]
+    fn SplQmOpen(tok: *const u8, n: i32, dop: *const u32) -> u32;
+    #[link_name = "PMSPL.302"]
+    fn SplQmStartDoc(h: u32, name: *const u8) -> u32;
+    #[link_name = "PMSPL.304"]
+    fn SplQmWrite(h: u32, n: i32, d: *const u8) -> u32;
+    #[link_name = "PMSPL.303"]
+    fn SplQmEndDoc(h: u32) -> u32;
+    #[link_name = "PMSPL.306"]
+    fn SplQmClose(h: u32) -> u32;
     #[link_name = "PMWP.286"]
     fn WinOpenObject(h: u32, view: u32, flag: u32) -> u32;
     #[link_name = "PMWIN.763"]
@@ -299,7 +311,7 @@ fn make() {
     let m = unsafe { WinMoveObject(p, desk, 0) };
     check("program moved to the desktop", m == p && ini_has(b"PM_Abstract:FldrContent", &hex(desk)));
     let cp = unsafe { WinCopyObject(d, desk, 0) };
-    check("data file copied", cp >> 16 == 3 && exists(b"C:\\DESKTOP\\notes.txt"));
+    check("data file copied", cp >> 16 == 3 && exists(b"C:\\DESKTOP\notes.txt"));
     let sub = create(b"WPFolder", b"Sub", b"", b"<RS2_TESTFLDR>");
     check("subfolder", sub != 0 && exists(&path(sub)));
     // A title that cannot be a file name keeps its characters (the Open
@@ -797,6 +809,25 @@ fn shell(args: &[u8]) -> u32 {
             b"UNLOCK" => {
                 let p = z(arg(1));
                 println!("wpstest: WinUnlockSystem: {}", unsafe { WinUnlockSystem(0, p.as_ptr()) });
+            }
+            // HOLDQ queue: the queue holds its jobs; JOB queue name: a
+            // raw job (a few lines of PostScript) on it.
+            b"HOLDQ" => {
+                let q = z(arg(1));
+                println!("wpstest: SplHoldQueue: {}", unsafe { SplHoldQueue(core::ptr::null(), q.as_ptr()) });
+            }
+            b"JOB" => {
+                let q = z(arg(1));
+                let dop = [q.as_ptr() as u32, 0, 0, b"PM_Q_RAW\0".as_ptr() as u32];
+                let data = b"%!PS\n/Helvetica findfont 20 scalefont setfont 72 700 moveto (rs2) show showpage\n";
+                let h = unsafe { SplQmOpen(b"*\0".as_ptr(), 4, dop.as_ptr()) };
+                let name = z(arg(2));
+                let ok = h != 0 && unsafe { SplQmStartDoc(h, name.as_ptr()) } != 0 && unsafe { SplQmWrite(h, data.len() as i32, data.as_ptr()) } != 0;
+                let id = if h != 0 { unsafe { SplQmEndDoc(h) } } else { 0 };
+                if h != 0 {
+                    unsafe { SplQmClose(h) };
+                }
+                println!("wpstest: job {} on {}: {}", id, s(arg(1)), ok);
             }
             b"SLEEP" => unsafe {
                 DosSleep(num(1) * 1000);

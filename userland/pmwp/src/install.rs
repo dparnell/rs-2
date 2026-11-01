@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"9";
+const DESKTOP_VERSION: &[u8] = b"10";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -62,6 +62,8 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"System;RS2System;<WP_CONFIG>;DELETE", b"OBJECTID=<RS2_SYSTEM>"),
         (b"System;WPSystem;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_SYSTEM>"),
         (b"System Clock;WPClock;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_CLOCK>"),
+        // Version 10: IBM's Spooler object (WPSpool).
+        (b"Spooler;WPSpool;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_SPOOL>"),
         (b"Keyboard;WPKeyboard;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_KEYB>"),
         (b"Mouse;WPMouse;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_MOUSE>"),
         (b"Sound;WPSound;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_SOUND>"),
@@ -203,7 +205,7 @@ pub fn run() {
     // version 4 the Assistance Center, version 5 its Help Index,
     // Glossary and Internet object, version 6 the LaunchPad, version 9
     // the Shredder, Connections (Network, Printers), the System Clock and
-    // IBM's System class in place of RS2System;
+    // IBM's System class in place of RS2System, version 10 the Spooler;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         pending.extend(defaults());
