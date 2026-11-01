@@ -307,6 +307,7 @@ WinLoadProcedure=__a_WinLoadProcedure @986
 WinDeleteProcedure=__a_WinDeleteProcedure @987
 WinRegisterUserDatatype=__a_WinRegisterUserDatatype @845
 WinRegisterUserMsg=__a_WinRegisterUserMsg @846
+Rs2QueryIdleTime=__a_Rs2QueryIdleTime @9031
 WinGetKeyState=__a_WinGetKeyState @752
 WinGetPhysKeyState=__a_WinGetPhysKeyState @758
 WinSetKeyboardStateTable=__a_WinSetKeyboardStateTable @921

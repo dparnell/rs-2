@@ -487,6 +487,9 @@ fn virtual_key(scan: u32, ch: u32) -> u32 {
 
 /// Handle one raw event (with the PM lock held).
 pub fn event(ev: &Input) {
+    if matches!(ev.kind, EV_MOUSE | EV_KEY) {
+        st().last_input = crate::state::now();
+    }
     match ev.kind {
         EV_MOUSE => mouse(Point::new(ev.a as i32, ev.b as i32), ev.flags as u8, (ev.flags >> 8) as u8, ev.time),
         EV_KEY => key(ev),
@@ -507,6 +510,17 @@ pub fn event(ev: &Input) {
         EV_HOSTSIZE => crate::display::host_size(),
         _ => {}
     }
+}
+
+/// Rs2QueryIdleTime() (rs2-private): milliseconds since the last
+/// keyboard or mouse input (the Workplace Shell's automatic lockup).
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2QueryIdleTime() -> u32 {
+    let s = st();
+    if s.last_input == 0 {
+        s.last_input = crate::state::now();
+    }
+    crate::state::now().wrapping_sub(s.last_input)
 }
 
 /// WinGetKeyState(hwndDesktop, vkey): 0x8000 (sign-extended, as IBM's

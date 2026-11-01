@@ -1102,6 +1102,10 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             crate::minwin::check();
             0
         }
+        WM_TIMER if a == crate::desktop::TID_AUTOLOCK => {
+            crate::desktop::auto_tick();
+            0
+        }
         WM_TIMER if a == crate::shutdown::TID_SHUTDOWN => {
             crate::shutdown::tick();
             0

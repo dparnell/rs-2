@@ -61,9 +61,11 @@ pub extern "C" fn ShlStartWorkplace(hab: u32, _hmq: u32) -> u32 {
         obj::call(m::WPObject::wpViewObject, &[desk, 0, OPEN_DEFAULT as usize, 0]);
     }
     crate::minwin::apply();
+    crate::desktop::archive_at_startup();
     if startup_wanted() {
         run_startup();
     }
+    crate::desktop::started();
     1
 }
 

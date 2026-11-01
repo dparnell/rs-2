@@ -40,6 +40,10 @@ unsafe extern "C" {
     fn WinSetObjectData(h: u32, setup: *const u8) -> u32;
     #[link_name = "PMWP.251"]
     fn WinDestroyObject(h: u32) -> u32;
+    #[link_name = "PMWP.283"]
+    fn WinLockupSystem(hab: u32) -> u32;
+    #[link_name = "PMWP.282"]
+    fn WinUnlockSystem(hab: u32, pw: *const u8) -> u32;
     #[link_name = "PMWP.286"]
     fn WinOpenObject(h: u32, view: u32, flag: u32) -> u32;
     #[link_name = "PMWIN.763"]
@@ -655,7 +659,8 @@ fn program_list() {
 /// tests that look at the desktop): starts PMSHELL, waits until its
 /// desktop is there, then runs the commands against the running shell:
 /// `OPEN id view` (WinOpenObject: 0 default, 2 settings, 1 contents),
-/// `SET id setup` (WinSetObjectData), `SLEEP n` (seconds). Then it waits
+/// `SET id setup` (WinSetObjectData), `LOCK` (WinLockupSystem), `UNLOCK
+/// password` (WinUnlockSystem), `SLEEP n` (seconds). Then it waits
 /// for PMSHELL to end.
 fn shell(args: &[u8]) -> u32 {
     let rest = args.trim_ascii_start();
@@ -673,7 +678,9 @@ fn shell(args: &[u8]) -> u32 {
     let mut up = false;
     for _ in 0..120 {
         unsafe { DosSleep(500) };
-        if query(b"<WP_DESKTOP>") != 0 {
+        // The shell's server for other processes' calls (ipc.rs).
+        let mut p: *mut u8 = core::ptr::null_mut();
+        if unsafe { os2::DosGetNamedSharedMem(&mut p, b"\\SHAREMEM\\RS2WPS.MEM\0".as_ptr(), 0x03) } == 0 && query(b"<WP_DESKTOP>") != 0 {
             up = true;
             break;
         }
@@ -705,6 +712,11 @@ fn shell(args: &[u8]) -> u32 {
                 let setup = z(&w[2..].join(&b' '));
                 let ok = h != 0 && unsafe { WinSetObjectData(h, setup.as_ptr()) } != 0;
                 println!("wpstest: set {}: {}", s(arg(1)), ok);
+            }
+            b"LOCK" => println!("wpstest: WinLockupSystem: {}", unsafe { WinLockupSystem(0) }),
+            b"UNLOCK" => {
+                let p = z(arg(1));
+                println!("wpstest: WinUnlockSystem: {}", unsafe { WinUnlockSystem(0, p.as_ptr()) });
             }
             b"SLEEP" => unsafe {
                 DosSleep(num(1) * 1000);

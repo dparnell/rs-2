@@ -180,6 +180,8 @@ pub struct State {
     /// Rs2SetMinButtonType: minimizing hides the window (the System
     /// object's "Hide window" minimize button behavior).
     pub min_hides: bool,
+    /// When the last keyboard or mouse input came (ms, `now()`).
+    pub last_input: u32,
     /// The window the pointer was last over.
     pub ptr_window: u32,
     pub ptr_hidden: u32,
@@ -319,6 +321,7 @@ pub fn init(surface: Surface, colors256: bool) {
         min_viewer: 0,
         hide_buttons: false,
         min_hides: false,
+        last_input: 0,
         pp: BTreeMap::new(),
         sysvals: BTreeMap::new(),
         syscolors: BTreeMap::new(),

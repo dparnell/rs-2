@@ -52,6 +52,8 @@ pub const OP_COPY: u32 = 8;
 pub const OP_SHADOW: u32 = 9;
 pub const OP_REGISTER: u32 = 10;
 pub const OP_DEREGISTER: u32 = 11;
+pub const OP_LOCKUP: u32 = 12;
+pub const OP_UNLOCK: u32 = 13;
 
 static mut BLOCK: u32 = 0;
 static mut DONE_SEM: u32 = 0;
@@ -123,6 +125,11 @@ fn serve() {
             crate::api::WinSetObjectData(n(0), setup.as_ptr())
         }
         OP_DESTROY => crate::api::WinDestroyObject(n(0)),
+        OP_LOCKUP => crate::desktop::WinLockupSystem(0),
+        OP_UNLOCK => {
+            let p = z(s(0));
+            crate::desktop::WinUnlockSystem(0, p.as_ptr())
+        }
         OP_OPEN => crate::api::WinOpenObject(n(0), n(1), n(2)),
         OP_SAVE => crate::api::WinSaveObject(n(0), n(1)),
         OP_MOVE => crate::api::WinMoveObject(n(0), n(1), n(2)),

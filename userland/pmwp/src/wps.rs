@@ -66,6 +66,7 @@ fn implementation(name: &str) -> Impl {
         "RS2WindowList" => crate::rs2obj::impl_window_list(),
         "RS2System" => crate::system::impl_rs2_system(),
         "WPSystem" => crate::system::impl_system(),
+        "WPDesktop" => crate::desktop::impl_desktop(),
         "M_WPSystem" => crate::system::impl_m_system(),
         "WPClock" => crate::system::impl_clock(),
         "WPNetwork" => crate::connections::impl_network(),

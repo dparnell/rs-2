@@ -22,6 +22,7 @@ pub mod classes_gen;
 mod clsmgr;
 mod connections;
 mod delete;
+mod desktop;
 mod dnd;
 mod exports;
 mod filejob;
