@@ -2161,8 +2161,9 @@ described in [formats/ipf-structures.md](formats/ipf-structures.md),
 **The help window** is a frame on the right of the screen titled with the
 help window title and the panel's: IBM's menu bar, the panel (laid out
 by `crates/ipf` for the window's width and laid out again when it
-changes), a vertical scroll bar, and Previous, Search..., Index and
-Contents push buttons.
+changes), the scroll bars of its window style (below; both by default,
+the horizontal one scrolling what is wider than the window, as Left and
+Right do), and Previous, Search..., Index and Contents push buttons.
 Panels draw in the fonts of the file's font table (below), styles as
 logical fonts' fsSelection (real italic, bold, underscore), colours of
 `:hp4.`/`:color.` and links in SYSCLR_HELPHILITE;
@@ -2227,9 +2228,18 @@ number (0x1D), inform links, styles, colours (DdfSetColor's mapping of
 PM colours), fonts (0x67), lists (DdfBeginList/DdfListItem with margin
 escapes 0x02/0x11/0x12/0x22), text as it is with an alignment
 (DdfSetFormat/DdfSetTextAlign: escapes 0x1A/0x1B), the application's
-bitmaps (0x68, placed as `:artwork.`) and metafiles (0x69, a box of the
-rectangle: GpiPlayMetaFile draws nothing yet). A handle is valid until
-the help manager has read it. When a panel with `:ddf res=N.` is laid
+bitmaps (0x68, placed as `:artwork.`) and metafiles (0x69: placed as a
+bitmap of the rectangle, `runin`, or with an empty rectangle one
+filling the window, `fit`). A metafile is played as IBM's
+MtaPlayMetaFile does when DdfFormatCell meets it: once without a device
+with boundary data collected (GpiSetDrawControl DCTL_BOUNDARY), then
+into a memory bitmap of the rectangle's size with a default viewing
+transform that puts the centre of that boundary (5 pels around it
+added) at the bitmap's centre, scaled alike in x and y to fit
+(MtaSetTransform), erased first, its fonts loaded and its colour table
+taken (LC_LOADDISC, CTAB_REPLACE); the bitmap is kept until the page is
+laid out again and scrolls and clips like any bitmap. A handle is valid
+until the help manager has read it. When a panel with `:ddf res=N.` is laid
 out, the help manager sends HM_QUERY_DDF_DATA (mp1 the panel window, mp2
 N) to the HM_SET_OBJCOM_WINDOW window, else the application's (IBM's
 MscAppInterface: HM_SET_ACTIVE_WINDOW's, else the associated frame),
@@ -2262,6 +2272,29 @@ sent to a panel window go to the help instance, and HM_QUERY answers
 HMQW_COVERPAGE, HMQW_VIEWPORT, HMQW_OBJCOM_WINDOW, HMQW_INSTANCE,
 HMQW_ACTIVEVIEWPORT and HMQW_GROUP_VIEWPORT.
 
+**Window controls (the viewport style word).** `titlebar=`, `scroll=`
+and `rules=` of a heading or link are a style word in its window data
+(flag 0x08, after the origin and size): 0x100 a title bar, 0x200 its
+system menu, 0x400 minimize and maximize buttons (titlebar= yes 0x100,
+sysmenu 0x300, minmax 0x500, both 0x700), 0x10 and 0x20 horizontal and
+vertical scroll bars, 0x04 a border or 0x08 a sizing border, and 0x4000,
+0x2000, 0x1000 saying which of the three were given. IBM's compiler
+fills a heading's word with the defaults of the others (0x0738 when the
+heading has none: everything, sizing border), a link's has only those
+given; the help manager merges the link's into the panel's (IBM's
+PnlChangeTOCNewStyle and PnlMergeViewportStyle: a given group replaces
+the panel's). A viewport is made with the frame controls of its
+panel's word (PnlGetViewportStyle: FCF_TITLEBAR, FCF_SYSMENU,
+FCF_MINMAX, FCF_BORDER, FCF_SIZEBORDER; IBM changes the controls of a
+viewport whose next panel wants others, PnlUpdateFrameControls, rs2
+makes a new frame in its place), and every panel window, the help
+window's own too, gets the scroll bars it asks for. Bits 0x01 and 0x02
+draw rules along the panel window's top and bottom, left and right
+edges in SYSCLR_WINDOWFRAME (not beside a scroll bar or under a title
+bar, PnlDrawViewportRules); IBM's compiler does not write them.
+`crates/ipf`'s compiler writes these words as IBM's does (0x6108,
+0x1730 and the like are in the help files on the media).
+
 **Message boxes.** WinMessageBox's MB_HELP adds a Help button
 (MBID_HELP, BS_HELP | BS_NOPOINTERFOCUS, as IBM's MboxInit) and the box
 has idWindow as its id, so Help and F1 reach the help hook as HLPM_WINDOW
@@ -2291,17 +2324,38 @@ the book's window closes); window word 0 of the instance points at a
 block with the help window's frame at +0x26, as VIEWDOC reads it. The
 help manager's window procedures and entry points switch to a stack of
 their own when less than 64 KB of the caller's is left (VIEWDOC's
-stack is 8 KB). HELPMGR's other unpublished ordinals (38-44: MscCleanUp
-and path helpers) are not there; nothing on the media imports them.
+stack is 8 KB).
+
+HELPMGR's other unpublished ordinals (38-44, `src/paths.rs`; nothing on
+the media imports them) are IBM's too: MscCleanUp (38) is the exit list
+routine the first help instance of a process adds (DosExitList, as
+IBM's HMWindowProc does on WM_CREATE): it releases the help hook of the
+process's help instances that are not books' and goes on with the exit
+list. The rest are the file name helpers IBM's help manager uses for
+libraries and bookmark files: HPFSSplitPath(path, drive, dir, name,
+ext) (39: the directory with each part's trailing blanks and dots
+chopped, the extension only if it has at most three characters after
+its dot, `path` left holding the name and extension), ChopDot(pwsz,
+cch) (40: the length without trailing blanks and dots, `.` and `..`
+kept; wide characters, as IBM exports it), MakeHPFSFileList(seps, list)
+(41: the names in `list` split at any of `seps`, leading blanks
+skipped, quoted names taken whole, written back NUL-separated; their
+count, 0 for an open quote), GoodList(to, from, n) (42: copies `n`
+NUL-ended names), IsValidHPFSName (43: 1-255 characters, not `.` or
+`..`, no control characters or `<>;"'|\/`) and
+HPFSMakeFullPathName(drive, dir, name, ext, path) (44: an empty drive
+becomes the current one unless the directory is a UNC name, an empty
+directory that drive's current one, `\DIR\` or `\`, both written back).
 
 Not done: the Search dialog's scopes (rs2 searches every
-section of the open libraries and of the marked ones), metafiles of
-dynamic data,
-the viewport style word (title bar, scroll bars, rules: viewports always
-have a title bar and a vertical scroll bar), HMQW_INDEX/TOC/SEARCH/
-VIEWPAGES/LIBRARY, and the panel placement of HM_DISPLAY_HELP and
+section of the open libraries and of the marked ones), HMQW_INDEX/TOC/
+SEARCH/VIEWPAGES/LIBRARY, the panel placement of HM_DISPLAY_HELP and
 HM_HELP_CONTENTS by heading window data beyond the help window's own
-panel.
+panel, metafile `:artwork.` and whole metafile panels (IBM's
+DisplayPage plays those into the window), and the help window's own
+panel in a frame of its own: IBM shows every panel in a page frame
+inside the cover page, so its title bar and border follow the style
+word too; rs2's help window takes only its scroll bars and rules.
 
 ## Locales (LIBUNI and UCONV)
 
@@ -2530,7 +2584,15 @@ it gets.
   with HMTEST.HLP from HMTEST.IPF) checks the rest: `HMTEST 1` dynamic
   data (Tab to the inform link and Enter: the data is asked for again),
   `HMTEST 2` fonts and styles, `HMTEST 5` viewports (groups, dependent,
-  auto, heading-placed), `HMTEST /MB` a message box with MB_HELP (F1).
+  auto, heading-placed), `HMTEST 11` and `12` metafiles of dynamic data
+  (in rectangles of two shapes, and filling the window), `HMTEST 13`
+  window controls (Tab to a link and Enter: a viewport without title
+  bar or scroll bars, one with a title bar alone and a horizontal scroll
+  bar that Right scrolls, one with a system menu and a vertical scroll
+  bar, and the help window's panel without scroll bars), `HMTEST /MB` a
+  message box with MB_HELP (F1). `HMTEST /PATHS` checks ordinals 38-44
+  (MscCleanUp and the path helpers), printing PASS/FAIL and `hmtest
+  paths done: N failure(s)`.
   `--init "OS2\VIEW.EXE IPF IPF-Controlled"` shows the Toolkit's IPF
   sample (samples/pm/ipf: IPF.INF to OS2\BOOK, IPF.DLL to OS2\DLL in
   work/modules.txt) with IPF.DLL's application-controlled viewport;
