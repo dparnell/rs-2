@@ -343,6 +343,8 @@ pub struct Draw<'a, 'p> {
     pub lib: usize,
     pub bitmaps: &'a mut Bitmaps,
     pub metafiles: &'a mut MetaBitmaps,
+    /// Pels scrolled to the left.
+    pub left: i32,
 }
 
 impl Draw<'_, '_> {
@@ -362,14 +364,18 @@ impl Draw<'_, '_> {
                     if base + r.height < 0 || base - r.height > self.h {
                         continue;
                     }
+                    let x = r.x - self.left;
+                    if x + r.width < 0 || x > self.w {
+                        continue;
+                    }
                     if r.bg != 0 {
-                        let fill = RectL { l: r.x, b: base - r.descent, r: r.x + r.width, t: base - r.descent + r.height };
+                        let fill = RectL { l: x, b: base - r.descent, r: x + r.width, t: base - r.descent + r.height };
                         unsafe { WinFillRect(hps, &fill, colour(r.bg, SYSCLR_HELPBACKGROUND)) };
                     }
                     let c = if r.link.is_some() { SYSCLR_HELPHILITE } else { colour(r.fg, SYSCLR_HELPTEXT) };
                     unsafe { GpiSetColor(hps, c) };
                     self.g.select(r.font, r.style);
-                    let p = PointL { x: r.x, y: base };
+                    let p = PointL { x, y: base };
                     unsafe { GpiCharStringAt(hps, &p, w.len() as i32, w.as_ptr()) };
                 }
                 RunKind::Image { handle, metafile, cx, cy, fit } => {
@@ -377,7 +383,7 @@ impl Draw<'_, '_> {
                         (0, 0, self.w, self.h)
                     } else {
                         let b = self.wy(r.y);
-                        (r.x, b, r.x + cx, b + cy)
+                        (r.x - self.left, b, r.x - self.left + cx, b + cy)
                     };
                     if y1 < 0 || y0 > self.h {
                         continue;
@@ -415,7 +421,7 @@ impl Draw<'_, '_> {
                         (0, 0, self.w, self.h)
                     } else {
                         let b = self.wy(r.y);
-                        (r.x, b, r.x + cx, b + cy)
+                        (r.x - self.left, b, r.x - self.left + cx, b + cy)
                     };
                     if y1 < 0 || y0 > self.h {
                         continue;
@@ -443,6 +449,7 @@ impl Draw<'_, '_> {
             unsafe { GpiSetColor(hps, SYSCLR_HELPHILITE) };
             for (x0, t, x1, b) in self.page.link_boxes(l) {
                 let (bt, bb) = (self.wy(t), self.wy(b));
+                let (x0, x1) = (x0 - self.left, x1 - self.left);
                 unsafe {
                     GpiMove(hps, &PointL { x: x0 - 1, y: bb - 1 });
                     GpiBox(hps, DRO_OUTLINE, &PointL { x: x1, y: bt }, 0, 0);

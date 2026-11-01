@@ -23,6 +23,7 @@ const ID_SCROLL: u32 = 11;
 const ID_LIST: u32 = 12;
 const ID_ENTRY: u32 = 13;
 const ID_LIBS: u32 = 14;
+const ID_HSCROLL: u32 = 15;
 const ID_PREVIOUS: u32 = 1;
 const ID_SEARCH: u32 = 2;
 const ID_INDEX: u32 = 4;
@@ -56,6 +57,7 @@ struct View {
     client: u32,
     panel: u32,
     scroll: u32,
+    hscroll: u32,
     list: u32,
     entry: u32,
     mode: Mode,
@@ -64,6 +66,14 @@ struct View {
     /// Width the page was laid out for.
     page_width: i32,
     top: i32,
+    /// Pels scrolled to the left.
+    left: i32,
+    /// The panel's window style word (titlebar=, scroll=, rules=: see
+    /// `frame_flags`), and the one a link gives the next panel.
+    style: u16,
+    next_style: Option<u16>,
+    /// A viewport's frame creation flags.
+    fcf: u32,
     line: i32,
     sel: Option<u16>,
     /// The panels of the list's rows.
@@ -156,7 +166,7 @@ fn ensure(inst: &mut Instance) -> &'static mut View {
     if let Some(v) = view_of(inst) {
         return v;
     }
-    let v = make(inst, false, HWND_DESKTOP);
+    let v = make(inst, false, HWND_DESKTOP, STYLE_DEFAULT);
     inst.frame = v.frame;
     inst.compat[0x26..0x2a].copy_from_slice(&v.frame.to_le_bytes());
     // On the right of the screen, as IBM's help windows come up.
@@ -175,7 +185,7 @@ fn ensure_footnote(inst: &mut Instance) -> &'static mut View {
             return v;
         }
     }
-    let v = make(inst, true, HWND_DESKTOP);
+    let v = make(inst, true, HWND_DESKTOP, STYLE_DEFAULT);
     inst.footnote = v.frame;
     let mut swp = Swp::default();
     unsafe { WinQueryWindowPos(inst.frame, &mut swp) };
@@ -185,18 +195,18 @@ fn ensure_footnote(inst: &mut Instance) -> &'static mut View {
 }
 
 /// A help or footnote window, or (in `parent`, a help window's client) a
-/// viewport.
-fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
+/// viewport with the frame controls of window style `style`.
+fn make(inst: &mut Instance, footnote: bool, parent: u32, style: u16) -> &'static mut View {
     let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_NOBYTEALIGN;
     if parent != HWND_DESKTOP {
-        fcf |= FCF_MAXBUTTON;
+        fcf = frame_flags(style);
     } else if !footnote {
         fcf |= FCF_MINBUTTON | FCF_MAXBUTTON | FCF_TASKLIST;
     }
     let mut client = 0u32;
     let title: &[u8] = if footnote { b"Footnote\0" } else { b"Help\0" };
     let frame = unsafe {
-        WinCreateStdWindow(parent, WS_CLIPSIBLINGS, &mut fcf, CLIENT.as_ptr(), title.as_ptr(), WS_CLIPCHILDREN, 0, 0, &mut client)
+        WinCreateStdWindow(parent, WS_CLIPSIBLINGS, &mut { fcf }, CLIENT.as_ptr(), title.as_ptr(), WS_CLIPCHILDREN, 0, 0, &mut client)
     };
     let v = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(View {
         inst: inst as *mut Instance,
@@ -204,6 +214,7 @@ fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
         client,
         panel: 0,
         scroll: 0,
+        hscroll: 0,
         list: 0,
         entry: 0,
         mode: Mode::Contents,
@@ -211,6 +222,10 @@ fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
         page: None,
         page_width: 0,
         top: 0,
+        left: 0,
+        style: STYLE_DEFAULT,
+        next_style: None,
+        fcf,
         line: 16,
         sel: None,
         rows: Vec::new(),
@@ -233,6 +248,7 @@ fn make(inst: &mut Instance, footnote: bool, parent: u32) -> &'static mut View {
     unsafe { WinSetWindowULong(v.panel, QWL_USER, v as *mut View as u32) };
     // Scroll bars and lists are #8 and #7, entry fields #6, buttons #3.
     v.scroll = child(client, b"#8\0", b"", WS_VISIBLE | 1, ID_SCROLL);
+    v.hscroll = child(client, b"#8\0", b"", 0, ID_HSCROLL);
     if !footnote && parent == HWND_DESKTOP {
         v.list = child(client, b"#7\0", b"", WS_TABSTOP, ID_LIST);
         v.entry = child(client, b"#6\0", b"", WS_TABSTOP | ES_AUTOSCROLL | ES_MARGIN, ID_ENTRY);
@@ -367,6 +383,14 @@ fn enter(v: &mut View) {
         }
         unsafe { WinDestroyWindow(f) };
     }
+    // The panel's window style: the heading's, with what the link
+    // asking for it gives (IBM's PnlChangeTOCNewStyle).
+    let next = v.next_style.take();
+    v.style = match v.mode {
+        Mode::Panel(p) => next.unwrap_or_else(|| Spec::of(v.inst(), p, None).style),
+        _ => STYLE_DEFAULT,
+    };
+    v.left = 0;
     // The panel's place first: it is laid out for its width.
     place(v);
     match v.mode.clone() {
@@ -561,6 +585,8 @@ fn clamp(v: &mut View) {
     let total = v.page.as_ref().map_or(0, |p| p.height + v.line);
     let max = (total - visible_height(v)).max(0);
     v.top = v.top.clamp(0, max);
+    let wide = v.page.as_ref().map_or(0, |p| p.width);
+    v.left = v.left.clamp(0, (wide - window_rect(v.panel).r).max(0));
 }
 
 fn set_scroll(v: &View) {
@@ -570,6 +596,21 @@ fn set_scroll(v: &View) {
     let max = ((total - vis).max(0) + line - 1) / line;
     send(v.scroll, SBM_SETSCROLLBAR, (v.top / line) as u32, (max as u32) << 16);
     send(v.scroll, SBM_SETTHUMBSIZE, ((vis / line) as u32) | (((total / line) as u32) << 16), 0);
+    // The horizontal scroll bar counts in pels.
+    let wide = v.page.as_ref().map_or(0, |p| p.width);
+    let vis = window_rect(v.panel).r.max(1);
+    send(v.hscroll, SBM_SETSCROLLBAR, v.left as u32, ((wide - vis).max(0) as u32) << 16);
+    send(v.hscroll, SBM_SETTHUMBSIZE, (vis as u32 & 0xffff) | ((wide.max(vis) as u32) << 16), 0);
+}
+
+fn hscroll_to(v: &mut View, left: i32) {
+    let old = v.left;
+    v.left = left;
+    clamp(v);
+    if v.left != old {
+        set_scroll(v);
+        unsafe { WinInvalidateRect(v.panel, core::ptr::null(), 0) };
+    }
 }
 
 fn scroll_to(v: &mut View, top: i32) {
@@ -832,16 +873,22 @@ fn place(v: &View) {
         }
         _ => (0, 0, w, top),
     };
+    // The scroll bars of the panel's window style (scroll=).
+    let (vs, hs) = (v.style & 0x20 != 0, v.style & 0x10 != 0);
+    let sb = if vs { sb } else { 0 };
+    let hb = if hs { sysval(SV_CYHSCROLL).max(12) } else { 0 };
     unsafe {
-        WinSetWindowPos(v.panel, 0, px, row + py, (pw - sb).max(0), ph, SWP_MOVE | SWP_SIZE);
-        WinSetWindowPos(v.scroll, 0, px + pw - sb, row + py, sb, ph, SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.panel, 0, px, row + py + hb, (pw - sb).max(0), (ph - hb).max(0), SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.scroll, 0, px + pw - sb, row + py + hb, sb, (ph - hb).max(0), SWP_MOVE | SWP_SIZE);
+        WinSetWindowPos(v.hscroll, 0, px, row + py, (pw - sb).max(0), hb, SWP_MOVE | SWP_SIZE);
+        WinShowWindow(v.hscroll, (panel_mode && hs) as u32);
         let ltop = if search { (top - ENTRY_ROW).max(0) } else { top };
         WinSetWindowPos(v.list, 0, 0, BUTTON_ROW, w, ltop, SWP_MOVE | SWP_SIZE);
         WinSetWindowPos(v.libs, 0, 0, BUTTON_ROW, w, top, SWP_MOVE | SWP_SIZE);
         WinShowWindow(v.libs, libraries as u32);
         WinSetWindowPos(v.entry, 0, 6, BUTTON_ROW + ltop + 4, (w - 12).max(0), ENTRY_ROW - 8, SWP_MOVE | SWP_SIZE);
         WinShowWindow(v.panel, panel_mode as u32);
-        WinShowWindow(v.scroll, panel_mode as u32);
+        WinShowWindow(v.scroll, (panel_mode && vs) as u32);
         WinShowWindow(v.list, (!panel_mode && !libraries) as u32);
         WinShowWindow(v.entry, search as u32);
         let mut x = 6;
@@ -888,7 +935,7 @@ fn client_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         // The scroll bar's notifications go to its owner, the client:
         // the panel window scrolls.
-        WM_VSCROLL => send(v.panel, msg, mp1, mp2),
+        WM_VSCROLL | WM_HSCROLL => send(v.panel, msg, mp1, mp2),
         WM_COMMAND => {
             match lo(mp1) {
                 ID_PREVIOUS => back(v),
@@ -1126,9 +1173,11 @@ fn panel_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                     lib: p.lib,
                     bitmaps: &mut v.bitmaps,
                     metafiles: &mut v.metafiles,
+                    left: v.left,
                 };
                 d.draw();
             }
+            draw_rules(hps, v.style, &r);
             unsafe { WinEndPaint(hps) };
             0
         }
@@ -1146,11 +1195,25 @@ fn panel_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             scroll_to(v, top);
             0
         }
+        WM_HSCROLL => {
+            let step = v.line;
+            let page = (window_rect(h).r - step).max(step);
+            let left = match hi(mp2) {
+                SB_LINEUP => v.left - step,
+                SB_LINEDOWN => v.left + step,
+                SB_PAGEUP => v.left - page,
+                SB_PAGEDOWN => v.left + page,
+                SB_SLIDERTRACK | SB_SLIDERPOSITION => lo(mp2) as i32,
+                _ => return 0,
+            };
+            hscroll_to(v, left);
+            0
+        }
         WM_BUTTON1DOWN => {
             unsafe { WinSetFocus(HWND_DESKTOP, h) };
             let (x, y) = (lo(mp1) as i16 as i32, hi(mp1) as i16 as i32);
             let py = visible_height(v) - y + v.top;
-            if let Some(hit) = v.page.as_ref().and_then(|p| p.hit(x, py)) {
+            if let Some(hit) = v.page.as_ref().and_then(|p| p.hit(x + v.left, py)) {
                 follow(v, hit);
             }
             1
@@ -1171,6 +1234,8 @@ fn panel_proc_(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 VK_PAGEDOWN => scroll_to(v, v.top + page),
                 VK_HOME => scroll_to(v, 0),
                 VK_END => scroll_to(v, i32::MAX / 2),
+                VK_LEFT => hscroll_to(v, v.left - line),
+                VK_RIGHT => hscroll_to(v, v.left + line),
                 VK_TAB => select_link(v, 1),
                 VK_BACKTAB => select_link(v, -1),
                 VK_NEWLINE | VK_ENTER => {
@@ -1238,7 +1303,16 @@ fn open(v: &mut View, p: PanelRef, footnote: bool, data: Option<LinkData>) {
     } else if v.footnote {
         show_panel(inst, p, true);
         close_footnote(inst);
+    } else if let Some(vp) = v.vp.as_ref().filter(|_| frame_flags(spec.style) != v.fcf) {
+        // Another panel in a viewport, with other frame controls: a
+        // new frame in its place (IBM changes the frame's controls,
+        // PnlUpdateFrameControls).
+        let s = Spec { style: spec.style, viewport: true, group: vp.group, dependent: vp.dependent, ..vp.spec };
+        let (parent, frame) = (vp.parent, v.frame);
+        unsafe { WinDestroyWindow(frame) };
+        open_viewport(inst, parent, p, s, false);
     } else {
+        v.next_style = Some(spec.style);
         go(v, Mode::Panel(p), true);
     }
 }
@@ -1336,6 +1410,75 @@ struct Spec {
     /// The link asks for a window of its own (0x80) or is `auto`.
     viewport: bool,
     dependent: bool,
+    /// The window style word.
+    style: u16,
+}
+
+/// A panel's window style when its heading has none: a title bar with
+/// its system menu and buttons, both scroll bars and a sizing border.
+pub const STYLE_DEFAULT: u16 = 0x0738;
+
+/// A link's window style over its panel's (IBM's PnlMergeViewportStyle):
+/// the controls the link gives (0x1000 rules, 0x2000 scroll bars, 0x4000
+/// title bar) replace the panel's.
+fn merge_style(panel: u16, link: u16) -> u16 {
+    let mut s = panel;
+    if link & 0x1000 != 0 {
+        s &= 0xfff0;
+    }
+    if link & 0x2000 != 0 {
+        s &= 0xffcf;
+    }
+    if link & 0x4000 != 0 {
+        s &= 0xf8ff;
+    }
+    s | link
+}
+
+/// The frame creation flags of a viewport of window style `style` (IBM's
+/// PnlGetViewportStyle): 0x100 title bar, 0x200 system menu, 0x400
+/// minimize and maximize buttons, 0x04 border, 0x08 sizing border. The
+/// scroll bars (0x10 horizontal, 0x20 vertical) are the client's.
+fn frame_flags(style: u16) -> u32 {
+    let mut f = FCF_NOBYTEALIGN;
+    for (bit, fcf) in [(0x100, FCF_TITLEBAR), (0x200, FCF_SYSMENU), (0x400, FCF_MINBUTTON | FCF_MAXBUTTON), (0x04, FCF_BORDER), (0x08, FCF_SIZEBORDER)] {
+        if style & bit != 0 {
+            f |= fcf;
+        }
+    }
+    // The sizing border wins (IBM's sets the low byte to it).
+    if f & FCF_SIZEBORDER != 0 {
+        f &= !FCF_BORDER;
+    }
+    f
+}
+
+/// Rules along the panel window's edges (window style bits 0x02 left and
+/// right, 0x01 top and bottom; none beside a scroll bar or below a title
+/// bar), as IBM's PnlDrawViewportRules.
+fn draw_rules(hps: u32, style: u16, r: &RectL) {
+    if style & 3 == 0 {
+        return;
+    }
+    let line = |a: PointL, b: PointL| unsafe {
+        GpiMove(hps, &a);
+        GpiLine(hps, &b);
+    };
+    unsafe { GpiSetColor(hps, SYSCLR_WINDOWFRAME) };
+    if style & 2 != 0 {
+        line(PointL { x: r.l, y: r.b }, PointL { x: r.l, y: r.t });
+        if style & 0x20 == 0 {
+            line(PointL { x: r.r - 1, y: r.b }, PointL { x: r.r - 1, y: r.t });
+        }
+    }
+    if style & 1 != 0 {
+        if style & 0x100 == 0 {
+            line(PointL { x: r.l, y: r.t - 1 }, PointL { x: r.r, y: r.t - 1 });
+        }
+        if style & 0x10 == 0 {
+            line(PointL { x: r.l, y: r.b }, PointL { x: r.r, y: r.b });
+        }
+    }
 }
 
 impl Spec {
@@ -1349,6 +1492,7 @@ impl Spec {
             group: d.group.or(e.group),
             viewport: d.flags & 0xc0 != 0,
             dependent: d.flags & 0x200 != 0,
+            style: merge_style(e.style.unwrap_or(STYLE_DEFAULT), d.style.unwrap_or(0)),
         }
     }
 
@@ -1438,13 +1582,18 @@ fn open_viewport(inst: &mut Instance, from: u32, p: PanelRef, spec: Spec, auto: 
     let main = ensure(inst);
     let parent = main.client;
     let v = match spec.group.and_then(|g| find_group(inst, g)).and_then(vp_view) {
-        Some(v) => v,
-        None => {
-            let v = make(inst, false, parent);
+        // The group's viewport, unless its frame controls differ.
+        Some(v) if v.fcf == frame_flags(spec.style) => v,
+        old => {
+            if let Some(o) = old {
+                unsafe { WinDestroyWindow(o.frame) };
+            }
+            let v = make(inst, false, parent, spec.style);
             inst.viewports.push(v.frame);
             v
         }
     };
+    v.next_style = Some(spec.style);
     v.vp = Some(Viewport { group: spec.group, parent: from, dependent: spec.dependent || auto, spec });
     let (w, h) = vp_area(inst);
     let (x, y, cx, cy) = spec_rect(&spec, w, h);

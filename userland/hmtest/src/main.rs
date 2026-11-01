@@ -3,8 +3,13 @@
 //! panel `res` (default 1) of the library; the application answers
 //! HM_QUERY_DDF_DATA with dynamic data made with the Ddf* functions (text
 //! styles, colours, fonts, a list, links, a bitmap) and HM_INFORM by
-//! counting and invalidating the data. `HMTEST /MB` opens a message box
-//! with a Help button (MB_HELP) instead; its help is panel 20.
+//! counting and invalidating the data; panels 11 and 12 have metafiles
+//! (DdfMetafile), 13 links to windows with other controls (titlebar=,
+//! scroll=, rules=). `HMTEST /MB` opens a message box with a Help button
+//! (MB_HELP) instead; its help is panel 20. `HMTEST /PATHS` checks
+//! HELPMGR's unpublished ordinals 38-44 (MscCleanUp and the path
+//! helpers), printing PASS or FAIL for each and `hmtest paths done: N
+//! failure(s)`.
 
 #![no_std]
 #![no_main]
@@ -12,6 +17,8 @@
 extern crate alloc;
 
 use alloc::vec::Vec;
+use core::ptr::null;
+use os2::println;
 
 os2::entry!(main);
 
@@ -80,6 +87,28 @@ unsafe extern "C" {
     fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32;
     #[link_name = "PMWIN.789"]
     fn WinMessageBox(parent: u32, owner: u32, text: *const u8, title: *const u8, id: u32, style: u32) -> u32;
+    #[link_name = "PMGPI.610"]
+    fn DevOpenDC(hab: u32, ty: i32, tok: *const u8, n: i32, dop: *const u32, comp: u32) -> u32;
+    #[link_name = "PMGPI.604"]
+    fn DevCloseDC(hdc: u32) -> u32;
+    #[link_name = "PMGPI.369"]
+    fn GpiCreatePS(hab: u32, hdc: u32, size: *const i32, opts: u32) -> u32;
+    #[link_name = "PMGPI.379"]
+    fn GpiDestroyPS(hps: u32) -> u32;
+    #[link_name = "PMGPI.351"]
+    fn GpiAssociate(hps: u32, hdc: u32) -> u32;
+    #[link_name = "PMGPI.517"]
+    fn GpiSetColor(hps: u32, c: i32) -> u32;
+    #[link_name = "PMGPI.404"]
+    fn GpiMove(hps: u32, p: *const i32) -> u32;
+    #[link_name = "PMGPI.398"]
+    fn GpiLine(hps: u32, p: *const i32) -> i32;
+    #[link_name = "PMGPI.356"]
+    fn GpiBox(hps: u32, ctl: i32, p: *const i32, h: i32, v: i32) -> i32;
+    #[link_name = "PMGPI.393"]
+    fn GpiFullArc(hps: u32, ctl: i32, mult: i32) -> i32;
+    #[link_name = "PMGPI.359"]
+    fn GpiCharStringAt(hps: u32, p: *const i32, n: i32, s: *const u8) -> i32;
     #[link_name = "PMGPI.598"]
     fn GpiCreateBitmap(hps: u32, hdr: *const u8, opts: u32, init: *const u8, bmi: *const u8) -> u32;
     #[link_name = "HELPMGR.51"]
@@ -116,6 +145,22 @@ unsafe extern "C" {
     fn DdfSetFont(h: u32, face: *const u8, w: u32, ht: u32) -> u32;
     #[link_name = "HELPMGR.88"]
     fn DdfBitmap(h: u32, hbm: u32, align: u32) -> u32;
+    #[link_name = "HELPMGR.86"]
+    fn DdfMetafile(h: u32, hmf: u32, rect: *const RectL) -> u32;
+    #[link_name = "HELPMGR.38"]
+    fn MscCleanUp(code: u32);
+    #[link_name = "HELPMGR.39"]
+    fn HPFSSplitPath(path: *mut u8, drive: *mut u8, dir: *mut u8, name: *mut u8, ext: *mut u8);
+    #[link_name = "HELPMGR.40"]
+    fn ChopDot(s: *const u16, n: u32) -> u32;
+    #[link_name = "HELPMGR.41"]
+    fn MakeHPFSFileList(seps: *const u8, list: *mut u8) -> u32;
+    #[link_name = "HELPMGR.42"]
+    fn GoodList(to: *mut u8, from: *const u8, n: u32) -> u32;
+    #[link_name = "HELPMGR.43"]
+    fn IsValidHPFSName(name: *const u8) -> u32;
+    #[link_name = "HELPMGR.44"]
+    fn HPFSMakeFullPathName(drive: *mut u8, dir: *mut u8, name: *const u8, ext: *const u8, out: *mut u8);
 }
 
 const WM_PAINT: u32 = 0x23;
@@ -134,14 +179,16 @@ const SYSCLR_WINDOW: i32 = -20;
 const SYSCLR_WINDOWTEXT: i32 = -17;
 
 struct Globals {
+    hab: u32,
     help: u32,
     panel: u32,
     informs: u32,
     bitmap: u32,
+    metafile: u32,
     error: u32,
 }
 
-static mut G: Globals = Globals { help: 0, panel: 1, informs: 0, bitmap: 0, error: 0 };
+static mut G: Globals = Globals { hab: 0, help: 0, panel: 1, informs: 0, bitmap: 0, metafile: 0, error: 0 };
 
 fn g() -> &'static mut Globals {
     unsafe { &mut *core::ptr::addr_of_mut!(G) }
@@ -195,6 +242,37 @@ fn make_bitmap(hps: u32) -> u32 {
         }
     }
     unsafe { GpiCreateBitmap(hps, hdr.as_ptr(), 4, bits.as_ptr(), hdr.as_ptr()) }
+}
+
+/// A metafile for DdfMetafile: a red box, a blue circle, a green
+/// cross and a word, on a metafile DC (OD_METAFILE).
+fn make_metafile(hab: u32) -> u32 {
+    unsafe {
+        let hdc = DevOpenDC(hab, 7, b"*\0".as_ptr(), 0, null(), 0);
+        if hdc == 0 {
+            return 0;
+        }
+        let size = [0i32, 0];
+        // PU_PELS | GPIA_ASSOC.
+        let hps = GpiCreatePS(hab, hdc, size.as_ptr(), 0x4008);
+        GpiSetColor(hps, CLR_RED);
+        GpiMove(hps, [0, 0].as_ptr());
+        // DRO_OUTLINEFILL.
+        GpiBox(hps, 3, [200, 120].as_ptr(), 0, 0);
+        GpiSetColor(hps, CLR_BLUE);
+        GpiMove(hps, [100, 60].as_ptr());
+        GpiFullArc(hps, 3, 50 << 16);
+        GpiSetColor(hps, 4);
+        GpiMove(hps, [0, 0].as_ptr());
+        GpiLine(hps, [200, 120].as_ptr());
+        GpiMove(hps, [0, 120].as_ptr());
+        GpiLine(hps, [200, 0].as_ptr());
+        GpiSetColor(hps, 7);
+        GpiCharStringAt(hps, [10, 8].as_ptr(), 8, b"Metafile".as_ptr());
+        GpiAssociate(hps, 0);
+        GpiDestroyPS(hps);
+        DevCloseDC(hdc)
+    }
 }
 
 /// The dynamic data of `:ddf res=`.
@@ -264,6 +342,20 @@ fn ddf(client: u32, res: u32) -> u32 {
                 DdfPara(d);
                 t(b"End of the dynamic data.");
             }
+            2 | 3 => {
+                if gl.metafile == 0 {
+                    gl.metafile = make_metafile(gl.hab);
+                }
+                if res == 2 {
+                    t(b"A metafile in 160 by 100 pels: ");
+                    DdfMetafile(d, gl.metafile, &RectL { l: 0, b: 0, r: 160, t: 100 });
+                    t(b" and in 240 by 60: ");
+                    DdfMetafile(d, gl.metafile, &RectL { l: 0, b: 0, r: 240, t: 60 });
+                    t(b" (in the text).");
+                } else {
+                    DdfMetafile(d, gl.metafile, null());
+                }
+            }
             _ => {
                 let n = alloc::format!("Dynamic data {res}.");
                 t(n.as_bytes());
@@ -309,13 +401,84 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     }
 }
 
+static mut FAILS: u32 = 0;
+
+fn check(name: &str, ok: bool) {
+    if ok {
+        println!("PASS {name}");
+    } else {
+        unsafe { FAILS += 1 };
+        println!("FAIL {name}");
+    }
+}
+
+/// A C string's bytes.
+fn cs(b: &[u8]) -> &[u8] {
+    &b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())]
+}
+
+/// HELPMGR's ordinals 38-44 (IBM's MscCleanUp and path helpers).
+fn path_checks() {
+    unsafe {
+        check("IsValidHPFSName: a long name", IsValidHPFSName(b"Read me.first.txt\0".as_ptr()) == 1);
+        check("IsValidHPFSName: a colon is allowed", IsValidHPFSName(b"a:b\0".as_ptr()) == 1);
+        let bad: [&[u8]; 5] = [b"\0", b".\0", b"..\0", b"a<b\0", b"a\\b\0"];
+        check("IsValidHPFSName: empty, dots, <, \\", bad.iter().all(|n| IsValidHPFSName(n.as_ptr()) == 0));
+        let long = [b'a'; 256].iter().copied().chain([0]).collect::<Vec<u8>>();
+        check("IsValidHPFSName: 256 characters", IsValidHPFSName(long.as_ptr()) == 0);
+
+        let w = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+        check("ChopDot: trailing dots and blanks", ChopDot(w("ab.. .").as_ptr(), 6) == 2);
+        check("ChopDot: . and ..", ChopDot(w("..").as_ptr(), 2) == 2 && ChopDot(w(".").as_ptr(), 1) == 1);
+
+        let (mut drive, mut dir, mut name, mut ext) = ([0u8; 8], [0u8; 260], [0u8; 260], [0u8; 260]);
+        let mut path = z(b"C:\\dir.\\sub\\file.txt");
+        HPFSSplitPath(path.as_mut_ptr(), drive.as_mut_ptr(), dir.as_mut_ptr(), name.as_mut_ptr(), ext.as_mut_ptr());
+        let ok = (cs(&drive), cs(&dir), cs(&name), cs(&ext), cs(&path)) == (&b"C:"[..], &b"\\dir\\sub\\"[..], &b"file"[..], &b".txt"[..], &b"file.txt"[..]);
+        check("HPFSSplitPath: drive, directory (dots chopped), name, extension", ok);
+        let mut path = z(b"readme.html");
+        HPFSSplitPath(path.as_mut_ptr(), drive.as_mut_ptr(), dir.as_mut_ptr(), name.as_mut_ptr(), ext.as_mut_ptr());
+        check("HPFSSplitPath: a long extension stays in the name", (cs(&drive), cs(&dir), cs(&name), cs(&ext)) == (&b""[..], &b""[..], &b"readme.html"[..], &b""[..]));
+        let mut path = z(b"x\\name.. ");
+        HPFSSplitPath(path.as_mut_ptr(), drive.as_mut_ptr(), dir.as_mut_ptr(), name.as_mut_ptr(), ext.as_mut_ptr());
+        check("HPFSSplitPath: trailing dots and blanks", (cs(&dir), cs(&name), cs(&ext), cs(&path)) == (&b"x\\"[..], &b"name"[..], &b""[..], &b"name.. "[..]));
+
+        let mut list = z(b"a.inf+ b.inf;'c d.inf'");
+        let n = MakeHPFSFileList(b"+; \0".as_ptr(), list.as_mut_ptr());
+        check("MakeHPFSFileList: separators, blanks, quotes", n == 3 && list.starts_with(b"a.inf\0b.inf\0c d.inf\0"));
+        let mut list = z(b"'open");
+        check("MakeHPFSFileList: an open quote", MakeHPFSFileList(b"+\0".as_ptr(), list.as_mut_ptr()) == 0);
+        let mut to = [0xffu8; 8];
+        check("GoodList", GoodList(to.as_mut_ptr(), b"x\0yz\0".as_ptr(), 2) == 2 && to[..5] == *b"x\0yz\0");
+
+        let (mut drive, mut dir, mut out) = (z(b"D:"), z(b"\\BOOKS\\"), [0u8; 300]);
+        HPFSMakeFullPathName(drive.as_mut_ptr(), dir.as_mut_ptr(), b"cmdref\0".as_ptr(), b".inf\0".as_ptr(), out.as_mut_ptr());
+        check("HPFSMakeFullPathName", cs(&out) == b"D:\\BOOKS\\cmdref.inf");
+        let (mut drive, mut dir) = ([0u8; 8], [0u8; 260]);
+        HPFSMakeFullPathName(drive.as_mut_ptr(), dir.as_mut_ptr(), b"f\0".as_ptr(), b".hlp\0".as_ptr(), out.as_mut_ptr());
+        let o = cs(&out);
+        let ok = o.len() >= 8 && o[1] == b':' && o[2] == b'\\' && o.ends_with(b"\\f.hlp") && o.starts_with(cs(&drive)) && cs(&drive).len() == 2 && cs(&dir).ends_with(b"\\");
+        check("HPFSMakeFullPathName: the current drive and directory", ok);
+
+        MscCleanUp(0);
+        check("MscCleanUp returns", true);
+        let f = FAILS;
+        println!("hmtest paths done: {f} failure(s)");
+    }
+}
+
 fn main(s: &os2::Startup) -> u32 {
     let args = s.args();
+    if args.windows(6).any(|w| w.eq_ignore_ascii_case(b"/PATHS")) {
+        path_checks();
+        return 0;
+    }
     let mb = args.windows(3).any(|w| w.eq_ignore_ascii_case(b"/MB"));
     if let Some(n) = args.split(|&c| c == b' ').find(|w| !w.is_empty() && w.iter().all(|c| c.is_ascii_digit())) {
         g().panel = n.iter().fold(0u32, |a, &c| a * 10 + (c - b'0') as u32);
     }
     let hab = unsafe { WinInitialize(0) };
+    g().hab = hab;
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
     unsafe { WinRegisterClass(hab, b"HMTest\0".as_ptr(), client_proc, 0, 0) };
     // FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX |
