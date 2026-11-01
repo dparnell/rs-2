@@ -19,3 +19,11 @@ mod pm;
 pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
     1
 }
+
+/// WinRegisterCircularSlider(): TRUE. As in IBM's PMCTLS, the class
+/// (WC_CIRCULARSLIDER) needs no registering by the program: rs2's PMWIN
+/// has it built in (IBM's PMCTLS registers it when it loads).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinRegisterCircularSlider() -> u32 {
+    1
+}

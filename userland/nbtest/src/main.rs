@@ -455,7 +455,7 @@ fn checks(hab: u32, client: u32) -> u32 {
     check("BKM_QUERYPAGEDATA of a bad page", send(nb, BKM_QUERYPAGEDATA, 0x7777, 0) == ERR);
 
     // Page windows: children of the client handed to the notebook.
-    let page1 = unsafe { WinCreateWindow(client, b"NbPage\0".as_ptr() as u32, b"\0".as_ptr(), WS_VISIBLE, 0, 0, 0, 0, 0, 3, 0, null(), 0) };
+    let page1 = unsafe { WinCreateWindow(client, b"NbPage\0".as_ptr() as u32, b"\0".as_ptr(), WS_VISIBLE, 0, 0, 0, 0, nb, 3, 0, null(), 0) };
     create(page1, 5, b"Settings of the kind a settings notebook holds.", WS_VISIBLE | 0x0001, (8, 200, 340, 20), page1, 200);
     let cb = create(page1, 3, b"~Enable the feature", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0005, (8, 170, 240, 20), page1, 201);
     create(page1, 3, b"~Show hidden files", WS_VISIBLE | WS_TABSTOP | 0x0005, (8, 146, 240, 20), page1, 202);

@@ -279,7 +279,7 @@ pub fn register_builtin() {
     // Window words as OS/2's classes have them (WinQueryClassInfo): the
     // frame's 172 bytes start with QWL_USER, the controls have 8 for
     // QWL_USER and the like.
-    let classes: [(u32, u32, u32); 15] = [
+    let classes: [(u32, u32, u32); 16] = [
         (1, crate::frame::frame_entry as *const () as u32, 0x20),
         (3, crate::button::button_entry as *const () as u32, 0),
         (4, crate::menu::menu_entry as *const () as u32, 0),
@@ -295,6 +295,7 @@ pub fn register_builtin() {
         (39, crate::valueset::valueset_entry as *const () as u32, 0),
         (37, crate::container::container_entry as *const () as u32, 0x2000_0000),
         (40, crate::notebook::notebook_entry as *const () as u32, 0x2000_0000),
+        (65, crate::csl::csl_entry as *const () as u32, 0),
     ];
     let s = st();
     for (n, proc_, style) in classes {
