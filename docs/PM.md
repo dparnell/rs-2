@@ -786,7 +786,9 @@ mouse and keyboard. What PMWIN has:
   `SS_HALFTONEFRAME`, `SS_BKGNDFRAME`) are `TRANSPARENT` (drawing only
   their outline). `WinWaitMsg`, `WinGetClipPS` (clipping chosen by
   `PSF_CLIPCHILDREN`), `WinSetSysModalWindow`/`WinQuerySysModalWindow`
-  (recorded only) and the calls debuggers use on the debuggee's queues
+  (the window, its children and the windows it owns get all keyboard and
+  mouse input, and Ctrl+Esc brings up no window list: the Workplace
+  Shell's lockup) and the calls debuggers use on the debuggee's queues
   (`WinQueueFromID`; `WinQuerySendMsg` finds none and `WinReplyMsg`
   fails; `WinThreadAssocQueue` and `WinLockInput` are accepted without
   effect; PMWIN 990-995, not in the Warp 4 Toolkit) are there for
@@ -1166,6 +1168,17 @@ A desktop shell can take minimized windows over: `Rs2SetMinimizeViewer
 returns the previous viewer) makes minimizing hide the frame instead,
 and the viewer gets `WM_RS2_MINWINDOW` (0x0ff8; mp1 = the frame, mp2 = 1
 minimized, 0 restored); restoring works as before.
+
+The System object's Window page sets the rest: `Rs2SetMinButtonType
+(fHideButton, fHideWindow)` (private ordinal 9030) gives frames a hide
+button where they ask for a minimize button (new frames and the open
+ones; the system menu follows) and makes minimizing hide the window;
+`SV_ANIMATION` (`WinSetSysValue`, on unless set) makes a frame zoom
+when it is minimized, restored, maximized or hidden: outlines from where
+it is to where it goes, inverted on the screen and shown at once
+(`animate.rs`). `SV_PRINTSCREEN` is kept. `Rs2QueryIdleTime()` (private
+ordinal 9031) tells the milliseconds since the last keyboard or mouse
+input (the shell's automatic lockup).
 
 Other calls a shell uses: `Rs2SetDesktopWindow(hwnd)` (private ordinal
 9007) keeps a desktop window below all others (see [The desktop

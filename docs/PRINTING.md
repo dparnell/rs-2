@@ -209,14 +209,16 @@ can compare it.
   - `IPP1`...: settings `host;path;port;` (631 and `/ipp/print` by
     default); an HTTP/1.1 POST of `application/ipp` with Print-Job and
     the document as `application/postscript`.
-- **Workplace Shell**: WPPrinter objects are queues (printer objects
-  created in the Printers folder make a queue and a printer); their
-  job view lists the queue's jobs (SplEnumJob) with hold, release,
-  delete and print next; their settings pages set the queue, the
-  printer driver (job properties) and the port (and the port's
-  settings); dropping a file prints it (as text or PostScript), WPDataFile's
-  Print does the same, and the Printers folder's template is *Install
-  New Printer*.
+- **Workplace Shell** (WPS.md, `printer.rs` and `printobj.rs`):
+  WPPrinter objects are queues; their job view shows the queue's jobs
+  as job objects (WPJob: hold, release, start again, print next,
+  delete; their settings); IBM's Printer driver, Output port and Queue
+  options pages show printer driver, port and queue driver objects
+  (WPPdr, WPPort, WPQdr; a port opens on its settings); the Spooler
+  object (WPSpool) sets the spool path; dropping a file prints it (as
+  text or PostScript), WPDataFile's Print does the same, and the
+  Printers folder's template opens IBM's *Create a printer* (name,
+  driver, port), which makes a queue and a printer.
 
 ### First targets
 
