@@ -125,9 +125,7 @@ static mut CNRS: Vec<Cnr> = Vec::new();
 const REC_EXTRA: u32 = 24;
 const CV_NAME: u32 = 0x0004;
 const CV_MINI: u32 = 0x0020;
-const CN_EMPHASIS: u32 = 4;
-const CN_ENTER: u32 = 7;
-const CN_CONTEXTMENU: u32 = 6;
+const CN_CONTEXTMENU: u32 = 119;
 
 fn cnr(h: u32) -> &'static mut Cnr {
     unsafe {
@@ -202,8 +200,9 @@ fn notify(page: u32, h: u32, code: u32, b: u32) -> Option<usize> {
         }
         // NOTIFYRECORDEMPHASIS: hwndCnr, pRecord, fEmphasisMask.
         CN_EMPHASIS if rd(b, 8) & CRA_SELECTED != 0 => {
+            // RECORDCORE: cb, flRecordAttr (selected now).
             let rec = rd(b, 4);
-            (rec != 0 && send(h, CM_QUERYRECORDEMPHASIS, 0xffff_ffff, CRA_SELECTED) == rec).then(|| obj_of(h, rec))
+            (rec != 0 && rd(rec, 4) & CRA_SELECTED != 0).then(|| obj_of(h, rec)).filter(|&o| o != 0)
         }
         _ => None,
     }
@@ -930,12 +929,12 @@ fn container(id: u16, (x, y, cx, cy): (i16, i16, i16, i16)) -> Item {
 pub extern "C" fn wpAddPrinterDriverPage(o: usize, nb: u32) -> u32 {
     add_page(o, nb, driver_page_proc, alloc::vec![
         book::label(b"Installed printer drivers", (6, 108, 120)),
-        container(ID_INSTALLED, (6, 66, 224, 40)),
-        book::label(b"Default printer driver", (6, 54, 100)),
-        container(ID_DEFDRV, (6, 22, 224, 30)),
-        item(WC_BUTTON, b"~Job properties...", WS_VISIBLE | WS_TABSTOP | WS_GROUP, (150, 52, 80, 13), ID_JOBPROPS),
+        container(ID_INSTALLED, (6, 62, 224, 44)),
+        book::label(b"Default printer driver", (6, 52, 100)),
+        container(ID_DEFDRV, (6, 14, 140, 36)),
+        item(WC_BUTTON, b"~Job properties...", WS_VISIBLE | WS_TABSTOP | WS_GROUP, (152, 30, 78, 13), ID_JOBPROPS),
         // BS_AUTOCHECKBOX
-        item(WC_BUTTON, b"~Default printer", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0001, (6, 6, 120, 10), ID_DEFPRN),
+        item(WC_BUTTON, b"~Default printer", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0001, (6, 2, 120, 10), ID_DEFPRN),
     ], b"~Printer driver\0")
 }
 
@@ -1328,6 +1327,7 @@ pub fn create_dialog(title: &[u8]) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
     if dlg == 0 {
         return None;
     }
+    center(dlg);
     unsafe {
         WinProcessDlg(dlg);
         WinDestroyWindow(dlg);
@@ -1335,6 +1335,17 @@ pub fn create_dialog(title: &[u8]) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
             free(o);
         }
         CREATE.done.then(|| (CREATE.title.clone(), CREATE.driver.clone(), CREATE.port.clone()))
+    }
+}
+
+/// A dialog in the middle of the screen, on top.
+fn center(dlg: u32) {
+    let mut r = RectL::default();
+    unsafe {
+        WinQueryWindowRect(dlg, &mut r);
+        let (sw, sh) = (WinQuerySysValue(HWND_DESKTOP, 20), WinQuerySysValue(HWND_DESKTOP, 21));
+        // SWP_MOVE | SWP_ZORDER | SWP_ACTIVATE
+        WinSetWindowPos(dlg, HWND_TOP, (sw - r.r) / 2, (sh - r.t) / 2, 0, 0, 0x0002 | 0x0004 | 0x0080);
     }
 }
 
