@@ -14,6 +14,8 @@ use os2::*;
 
 extern crate alloc;
 
+mod gre;
+
 os2::entry!(main);
 
 #[repr(C)]
@@ -1213,6 +1215,7 @@ fn main(s: &Startup) -> u32 {
     self_checks(hab);
     meta_checks(hab);
     display_checks(hab);
+    gre::gre_checks(hab);
     if !c256 {
         let f = emulated_256();
         check("RS2COLORS=256: a 256-colour display for that program", f == 0);
