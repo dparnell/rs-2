@@ -287,7 +287,9 @@ rs2's own.
 the same crate: `Interp::new` runs classic REXX as before, `Interp::new_oo`
 Object REXX (the `w` field holds the objects; the lexer and parser take
 an `oo` flag for `~`, `~~`, `[`, `]`, environment symbols and the new
-instructions). Values are strings or references to objects
+instructions; Object REXX's code is reached only through the table of
+entry points its world holds, so classic REXX.DLL does not link it).
+Values are strings or references to objects
 (`crates/rexx/src/value.rs`); variable pools and stems are shared (`Rc`) so
 that a method's pool can have the object's variables as its parent
 (EXPOSE) and a stem can be passed by reference (USE ARG). Classic REXX
