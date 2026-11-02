@@ -15,6 +15,8 @@
 //!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE] [--sound-in FILE|tone:HZ]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
+//! cargo xtask ir                            write the interface repositories
+//!                                           (target/SOM.IR, WPSH.IR, ...)
 //! cargo xtask disk [--hpfs|--fat32] [--system] [--size MB] [-o FILE]
 //!                                           test hard disk from work/disk.txt
 //!                                           (64 MB unless --size)
@@ -415,6 +417,7 @@ fn main() -> ExitCode {
     let o = parse(&args[1..]);
     let ok = match cmd.as_str() {
         "build" => build(&o).is_some(),
+        "ir" => !interface_repositories().is_empty(),
         "run" => build(&o).is_some_and(|_| run(&o)),
         "iso" => build(&o).is_some_and(|esp| iso(&o, &esp)),
         "disk" => {
@@ -506,12 +509,9 @@ fn build(o: &Opts) -> Option<PathBuf> {
     // or dist/manifest.txt (distribution: rs2's own files only).
     let list = if o.dist { root().join("dist/manifest.txt") } else { root().join("work/modules.txt") };
     if let Ok(text) = std::fs::read_to_string(&list) {
-        // rs2's interface repository, written from userland/somir/som-ir.txt
-        // (first, so that a modules.txt line can put another in its place).
-        let ir = root().join("target/SOM.IR");
-        let src = std::fs::read_to_string(root().join("userland/somir/som-ir.txt")).expect("userland/somir/som-ir.txt");
-        std::fs::write(&ir, somir::build(&src)).unwrap();
-        let mut files = vec![(ir, "OS2\\ETC\\SOM.IR".to_string())];
+        // rs2's interface repositories (first, so that a modules.txt line
+        // can put another in its place).
+        let mut files = interface_repositories();
         files.extend(image::manifest(&root(), &text));
         files.extend(userland);
         files.extend(win16_tests());
@@ -531,6 +531,20 @@ fn build(o: &Opts) -> Option<PathBuf> {
         std::fs::write(&out, img).unwrap();
     }
     Some(esp)
+}
+
+/// rs2's interface repositories (`\OS2\ETC\SOM.IR`, `WPSH.IR`, ...),
+/// written into target/ from userland/somir/*-ir.txt: the files and their
+/// paths on the boot volume.
+fn interface_repositories() -> Vec<(PathBuf, String)> {
+    let mut files = Vec::new();
+    for (txt, name) in somir::REPOSITORIES {
+        let ir = root().join("target").join(name);
+        let src = std::fs::read_to_string(root().join("userland/somir").join(txt)).expect(txt);
+        std::fs::write(&ir, somir::build(&src)).unwrap();
+        files.push((ir, format!("OS2\\ETC\\{name}")));
+    }
+    files
 }
 
 /// `rs2 COMMIT[+] built YYYY-MM-DD`: the commit the build is from ("+" when

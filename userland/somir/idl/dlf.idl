@@ -1,0 +1,204 @@
+// rs2: the DLF classes of Object REXX's REXXSOM.DLL (userland/rexxsom), as
+// rs2's REXXSOM builds them. Each holds one value of a type, which REXX
+// passes for an INOUT or OUT argument of a SOM method (the method gets the
+// value's address). Written for rs2's REXX.IR (tools/scripts/gen_som_ir.py).
+
+#ifndef dlf_idl
+#define dlf_idl
+
+#include <somobj.idl>
+
+// The DLF classes' common parent.
+interface DLFBasicType : SOMObject
+{
+#ifdef __SOMIDL__
+    implementation {
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+    };
+#endif
+};
+
+// One class per value type: the value is an attribute whose accessors the
+// class implements itself.
+
+interface DLFLong : DLFBasicType
+{
+    attribute long value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFULong : DLFBasicType
+{
+    attribute unsigned long value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFShort : DLFBasicType
+{
+    attribute short value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFUShort : DLFBasicType
+{
+    attribute unsigned short value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFFloat : DLFBasicType
+{
+    attribute float value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFDouble : DLFBasicType
+{
+    attribute double value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFChar : DLFBasicType
+{
+    attribute char value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFOctet : DLFBasicType
+{
+    attribute octet value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFBoolean : DLFBasicType
+{
+    attribute boolean value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFString : DLFBasicType
+{
+    attribute string value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+interface DLFObject : DLFBasicType
+{
+    attribute SOMObject value;
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: _get_value, _set_value;
+        majorversion = 1;
+        minorversion = 1;
+        filestem = dlf;
+        callstyle = oidl;
+        dllname = "REXXSOM.DLL";
+        value: noget, noset;
+    };
+#endif
+};
+
+#endif

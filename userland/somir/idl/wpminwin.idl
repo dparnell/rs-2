@@ -1,0 +1,28 @@
+// rs2: WPMinWindow, the objects of the Minimized Window Viewer (one per
+// minimized window; WPMinWinViewer is the folder that shows them). The
+// Toolkit does not describe the class; it introduces no public methods.
+// Written for rs2's interface repository (tools/scripts/gen_som_ir.py).
+
+#ifndef wpminwin_idl
+#define wpminwin_idl
+
+#include "wptrans.idl"
+#include <somcls.idl>
+
+interface WPMinWindow : WPTransient
+{
+#ifdef __SOMIDL__
+    implementation {
+        externalstem = WPmw;
+        local;
+        externalprefix = mw_;
+        majorversion = 1;
+        minorversion = 2;
+        filestem = wpminwin;
+        callstyle = oidl;
+        dllname = "pmwp.dll";
+    };
+#endif
+};
+
+#endif

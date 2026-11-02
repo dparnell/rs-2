@@ -1,21 +1,37 @@
-"""Generate userland/somir/som-ir.txt: the interfaces of the SOM classes rs2
-ships (SOM.DLL's SOMObject, SOMClass and SOMClassMgr, SOMU.DLL's,
-SOMIR.DLL's and SOMD.DLL's classes and the types they use), read from the
-OS/2 Toolkit's IDL (work/media/boot/toolkit/os2tk45/som/include) the way
-SOM's compiler reads it (__SOMIDL__ defined). xtask turns the text into
-rs2's \\OS2\\ETC\\SOM.IR (xtask/src/somir.rs; the format of both is in
-docs/formats/som-ir.md).
+"""Generate the text descriptions of the interface repositories rs2 ships
+(xtask turns each into a binary .IR file in \\OS2\\ETC: xtask/src/somir.rs;
+the format of both is in docs/formats/som-ir.md), read from IDL the way
+SOM's compiler reads it (__SOMIDL__ defined):
 
-usage: python3 -I tools/scripts/gen_som_ir.py REPO
+- userland/somir/som-ir.txt (SOM.IR): SOM.DLL's SOMObject, SOMClass and
+  SOMClassMgr, SOMU.DLL's, SOMIR.DLL's and SOMD.DLL's classes and the
+  types they use, from the OS/2 Toolkit's IDL (os2tk45/som/include);
+- userland/somir/wpsh-ir.txt (WPSH.IR): the Workplace Shell's classes
+  (os2tk45/idl) and their types;
+- userland/somir/wpdserv-ir.txt (WPDSERV.IR): the Workplace Shell's DSOM
+  server class WPDServer, the classes it is built on and the socket
+  classes;
+- userland/somir/rexx-ir.txt (REXX.IR): Object REXX's SOM classes (the DLF
+  classes of REXXSOM.DLL), from rs2's own IDL in userland/somir/idl.
+
+usage: python3 -I tools/scripts/gen_som_ir.py REPO [TARGET...]
+(targets: som wpsh wpdserv rexx; all of them when none is named)
 """
 import os, re, sys
 
 repo = sys.argv[1]
-INC = os.path.join(repo, 'work/media/boot/toolkit/os2tk45/som/include')
+TK = os.path.join(repo, 'work/media/boot/toolkit/os2tk45')
+# Where #include looks: rs2's own IDL first (classes the Toolkit does not
+# describe), then the Toolkit's.
+PATHS = [os.path.join(repo, 'userland/somir/idl'), os.path.join(TK, 'idl'), os.path.join(TK, 'som/include')]
 
-# The IDL files of the classes rs2 ships, in the order their definitions
-# go into the repository (what they include comes first).
-FILES = [
+# What each repository holds. `files`: the IDL files compiled, in the
+# order their definitions go into the repository (what they include comes
+# first). A top-level definition goes in when the file it comes from is in
+# `types` (types, constants, modules) or `ifaces` (interfaces); what the
+# files SOMIR lists before it hold (SOM.IR's classes) is left out, as SOM's
+# compiler leaves it out when it updates a repository.
+SOM_FILES = [
     # SOM.DLL
     'somobj.idl', 'somcls.idl', 'somcm.idl',
     # SOMU.DLL
@@ -28,6 +44,29 @@ FILES = [
     'somdserv.idl', 'servmgr.idl', 'impldef.idl', 'implrep.idl', 'nvlist.idl', 'request.idl',
     'cntxt.idl', 'principl.idl', 'orb.idl', 'boa.idl', 'somoa.idl',
 ]
+# The Workplace Shell classes of PMWP.DLL that IBM's WPSH.IR describes, in
+# its order (wpimage.idl and wpminwin.idl are rs2's: the Toolkit includes
+# the first but does not have it).
+WPSH_FILES = [
+    'wpobject.idl', 'wpfsys.idl', 'wpfolder.idl', 'wpdataf.idl', 'wpabs.idl', 'wppgmf.idl',
+    'wppgm.idl', 'wptrans.idl', 'wpshadow.idl', 'wptemps.idl', 'wpstart.idl',
+    'wpdrives.idl', 'wpminwin.idl', 'wpcmdf.idl', 'wpdisk.idl', 'wpclsmgr.idl', 'wpdesk.idl',
+    'wpicon.idl', 'wpmet.idl', 'wpmwv.idl', 'wpnetgrp.idl', 'wpnetlnk.idl', 'wpnetwrk.idl',
+    'wpimage.idl', 'wpbitmap.idl', 'wppif.idl', 'wpptr.idl', 'wprootf.idl', 'wpserver.idl',
+    'wpshdir.idl', 'wpshred.idl', 'wplnchpd.idl',
+]
+TARGETS = {
+    'som': dict(dst='som-ir.txt', ir='SOM.IR', files=SOM_FILES, types=None, ifaces=None),
+    'wpsh': dict(dst='wpsh-ir.txt', ir='WPSH.IR', files=WPSH_FILES,
+                 types={'wptypes.idl', 'wplnchpd.idl'}, ifaces=set(WPSH_FILES)),
+    'wpdserv': dict(dst='wpdserv-ir.txt', ir='WPDSERV.IR',
+                    files=['somobj.idl', 'containd.idl', 'somdtype.idl', 'somdserv.idl', 'wpdserv.idl',
+                           'stexcep.idl', 'somssock.idl', 'tcpsock.idl'],
+                    types={'somobj.idl', 'containd.idl', 'somdtype.idl', 'stexcep.idl'},
+                    ifaces={'somobj.idl', 'somdserv.idl', 'wpdserv.idl', 'somssock.idl', 'tcpsock.idl'}),
+    'rexx': dict(dst='rexx-ir.txt', ir='REXX.IR', files=['somobj.idl', 'dlf.idl'],
+                 types={'somobj.idl', 'dlf.idl'}, ifaces={'somobj.idl', 'dlf.idl'}),
+}
 
 # ---- Preprocessing ----
 
@@ -53,9 +92,13 @@ def strip_comments(s):
             i += 1
     return ''.join(out)
 
-macros = {'__SOMIDL__': '1'}
-pragmas = []  # (name, [(key, value)])
+macros = {}
 done_files = set()
+
+def reset():
+    macros.clear()
+    macros['__SOMIDL__'] = '1'
+    done_files.clear()
 
 def cond_value(expr):
     expr = re.sub(r'defined\s*\(\s*(\w+)\s*\)', lambda m: '1' if m.group(1) in macros else '0', expr)
@@ -72,8 +115,8 @@ def preprocess(name, toks):
     and line each comes from)."""
     if name in done_files:
         return
-    path = os.path.join(INC, name)
-    if not os.path.exists(path):
+    path = next((os.path.join(d, name) for d in PATHS if os.path.exists(os.path.join(d, name))), None)
+    if path is None:
         print('missing', name, file=sys.stderr)
         return
     done_files.add(name)
@@ -198,6 +241,7 @@ class Def:
 
 class Parser:
     def __init__(self, toks):
+        self.consts = {}
         self.t = toks
         self.i = 0
         self.types = {}      # scoped name -> TypeCode text (resolved)
@@ -336,8 +380,6 @@ class Parser:
             return int(v) if isinstance(v, (int, float)) and float(v).is_integer() else v
         except Exception:
             return 0
-
-    consts = {}
 
     def constructed(self, scope):
         kind = self.next()
@@ -675,6 +717,11 @@ class Parser:
                         else:
                             agg.setdefault(k, []).append(name)
                 continue
+            if self.peek(1) == ';':
+                # `local;`: a modifier without a value
+                iface.mods.append((self.next(), None))
+                self.next()
+                continue
             if self.peek(1) == '=':
                 name = self.next()
                 self.next()
@@ -741,7 +788,7 @@ def emit(d, out, depth):
         out.append('module\t%s' % d.name)
     elif d.kind == 'interface':
         data = d.extra.get('data') or []
-        dtc = 'struct(%sData%s)' % (d.name, ''.join(',%s,%s' % m for m in data)) if data else '-'
+        dtc = 'struct(%sData%s)' % (d.name, ''.join(',%s,%s' % m for m in data)) if data else 'null'
         out.append('interface\t%s\t%s\t%s' % (d.name, ','.join(d.extra['bases']), dtc))
     elif d.kind == 'operation':
         out.append('operation\t%s\t%d\t%s\t%s\t%s' % (d.name, d.extra['mode'], d.tc, ','.join(d.extra['contexts']), ','.join(d.extra['raises'])))
@@ -764,18 +811,30 @@ def emit(d, out, depth):
             emit(c, out, depth + 1)
         out.append('end')
 
-def main():
+def keep(d, t):
+    """Whether a top-level definition goes into target t's repository."""
+    if d.kind == 'interface':
+        return t['ifaces'] is None or d.file in t['ifaces']
+    return t['types'] is None or d.file in t['types']
+
+def generate(name):
+    t = TARGETS[name]
+    reset()
     toks = []
-    for f in FILES:
+    for f in t['files']:
         preprocess(f, toks)
     p = Parser(toks)
     p.definitions([], p.top)
-    out = ['# SOM.IR for rs2: generated by tools/scripts/gen_som_ir.py from the',
-           '# Toolkit\'s IDL; xtask writes \\OS2\\ETC\\SOM.IR from it.']
+    out = ['# %s for rs2: generated by tools/scripts/gen_som_ir.py from IDL;' % t['ir'],
+           '# xtask writes \\OS2\\ETC\\%s from it.' % t['ir']]
+    n = 0
     for d in p.top:
-        emit(d, out, 0)
-    dst = os.path.join(repo, 'userland/somir/som-ir.txt')
+        if keep(d, t):
+            emit(d, out, 0)
+            n += 1
+    dst = os.path.join(repo, 'userland/somir', t['dst'])
     open(dst, 'w').write('\n'.join(out) + '\n')
-    print('%d definitions at the top level, %d lines' % (len(p.top), len(out)))
+    print('%s: %d definitions at the top level, %d lines' % (t['ir'], n, len(out)))
 
-main()
+for name in sys.argv[2:] or list(TARGETS):
+    generate(name)

@@ -1,0 +1,69 @@
+// rs2: WPImageFile, the Workplace Shell's class of image data files
+// (WPBitmap, WPIcon and WPPointer are its subclasses). The Toolkit's
+// wpbitmap.idl includes this file but the Toolkit does not have it; the
+// methods are the ones its subclasses override. Written for rs2's
+// interface repository (tools/scripts/gen_som_ir.py).
+
+#ifndef wpimage_idl
+#define wpimage_idl
+
+#include "wpdataf.idl"
+#include <somcls.idl>
+
+interface M_WPImageFile;
+
+interface WPImageFile : WPDataFile
+{
+    // The image as a bitmap of the given size (0, 0: its own), and its
+    // palette; drawing stops early when *pbQuitEarly becomes TRUE.
+    BOOL wpQueryBitmapHandle(inout HBITMAP phBitmap, inout HPAL phPalette,
+                             in ULONG ulWidth, in ULONG ulHeight, in ULONG ulFlags,
+                             in LONG lBackgroundColor, inout BOOL pbQuitEarly);
+
+    // The image's BITMAPINFOHEADER2.
+    PBYTE wpQueryBitmapInfoHeader();
+
+    // The image's bits in the system's bitmap format, and their size.
+    PBYTE wpQueryBitmapData(inout ULONG pulSize);
+
+    // New bits for the image (in the system's bitmap format).
+    BOOL wpSetBitmapData(in PBYTE pBitmapData, in ULONG ulSize);
+
+    // Reading the file into the image, and writing the image to it.
+    BOOL wpReadImageFile();
+    BOOL wpWriteImageFile();
+
+#ifdef __SOMIDL__
+    implementation {
+        releaseorder: wpQueryBitmapHandle, wpQueryBitmapInfoHeader, wpQueryBitmapData,
+                      wpSetBitmapData, wpReadImageFile, wpWriteImageFile;
+        externalstem = wpimg;
+        local;
+        externalprefix = img_;
+        majorversion = 1;
+        minorversion = 2;
+        filestem = wpimage;
+        metaclass = M_WPImageFile;
+        callstyle = oidl;
+        dllname = "pmwp.dll";
+    };
+#endif
+};
+
+interface M_WPImageFile : M_WPDataFile
+{
+#ifdef __SOMIDL__
+    implementation {
+        externalstem = wpimg;
+        local;
+        externalprefix = imgM_;
+        majorversion = 1;
+        minorversion = 2;
+        filestem = wpimage;
+        callstyle = oidl;
+        dllname = "pmwp.dll";
+    };
+#endif
+};
+
+#endif
