@@ -84,6 +84,7 @@ mod hpfsimg;
 mod image;
 mod iso;
 mod png;
+mod somir;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -505,7 +506,13 @@ fn build(o: &Opts) -> Option<PathBuf> {
     // or dist/manifest.txt (distribution: rs2's own files only).
     let list = if o.dist { root().join("dist/manifest.txt") } else { root().join("work/modules.txt") };
     if let Ok(text) = std::fs::read_to_string(&list) {
-        let mut files = image::manifest(&root(), &text);
+        // rs2's interface repository, written from userland/somir/som-ir.txt
+        // (first, so that a modules.txt line can put another in its place).
+        let ir = root().join("target/SOM.IR");
+        let src = std::fs::read_to_string(root().join("userland/somir/som-ir.txt")).expect("userland/somir/som-ir.txt");
+        std::fs::write(&ir, somir::build(&src)).unwrap();
+        let mut files = vec![(ir, "OS2\\ETC\\SOM.IR".to_string())];
+        files.extend(image::manifest(&root(), &text));
         files.extend(userland);
         files.extend(win16_tests());
         if !o.dist {
