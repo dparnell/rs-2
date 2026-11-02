@@ -1300,6 +1300,7 @@ fn selection_or_all() -> Area {
 
 fn command(id: u16) {
     let a = app();
+    trace(alloc::format!("command {id}").as_bytes());
     match id {
         IDM_NEW => dialogs::new_dialog(),
         IDM_OPEN => dialogs::open(),

@@ -54,7 +54,9 @@ extern "C" fn new_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             enable(h, 106, k == Kind::Bitmap);
             enable(h, 107, k == Kind::Bitmap);
             unsafe { WinShowWindow(item(h, 108), 0) };
-            0
+            let radio = match k { Kind::Icon => 103, Kind::Pointer => 104, Kind::Bitmap => 105 };
+            unsafe { WinSetFocus(HWND_DESKTOP, item(h, radio)) };
+            1
         }
         WM_CONTROL if matches!(lo(mp1), 103..=105) => {
             let bm = checked(h, 105);
@@ -434,7 +436,20 @@ fn color_values() -> ([i64; 3], [i64; 3]) {
     }
 }
 
+/// Set while the dialog fills its own fields (their EN_CHANGE is not the
+/// user's).
+static mut FILLING: bool = false;
+
 fn show_color(h: u32, skip_entry: Option<u32>) {
+    if unsafe { FILLING } {
+        return;
+    }
+    unsafe { FILLING = true };
+    show_color_now(h, skip_entry);
+    unsafe { FILLING = false };
+}
+
+fn show_color_now(h: u32, skip_entry: Option<u32>) {
     let (v, max) = color_values();
     let hsv = unsafe { EDIT_HSV };
     for i in 0..3u32 {
@@ -489,7 +504,7 @@ extern "C" fn color_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_CONTROL => {
             let id = lo(mp1);
-            if (403..=405).contains(&id) && hi(mp1) == EN_CHANGE {
+            if (403..=405).contains(&id) && hi(mp1) == EN_CHANGE && !unsafe { FILLING } {
                 let (mut v, max) = color_values();
                 if let Some(n) = get_num(h, id) {
                     v[(id - 403) as usize] = n.clamp(0, max[(id - 403) as usize]);
@@ -545,7 +560,9 @@ pub fn edit_color(i: usize) {
             help_button_at(114, 6, 44),
         ],
     );
-    if run_dialog(a.frame, color_proc, &tpl, 0) != DID_OK {
+    let r = run_dialog(a.frame, color_proc, &tpl, 0);
+    trace(alloc::format!("edit color {i}: {r}").as_bytes());
+    if r != DID_OK {
         return;
     }
     let new = unsafe { EDIT_RGB };
