@@ -1,0 +1,10 @@
+[package]
+name = "odtest"
+description = "Self-checks of OPENDOC.DLL: a session, a document with an embedded part saved and reopened; IBM's multimedia parts on it"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }

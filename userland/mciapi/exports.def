@@ -7,3 +7,4 @@ mciRxGetDeviceID=__a_mciRxGetDeviceID @4
 mciPlayFile=__a_mciPlayFile @10
 mciPlayResource=__a_mciPlayResource @11
 mciRecordAudioFile=__a_mciRecordAudioFile @12
+mciCreatePlayFilePalette=__a_mciCreatePlayFilePalette @25
