@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"11";
+const DESKTOP_VERSION: &[u8] = b"13";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -131,6 +131,48 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         s.extend_from_slice(id);
         out.push((k, s));
     }
+    // The TCP/IP folder in Programs (version 13), as IBM's TCP/IP puts
+    // its programs in one: (file, title, object ID, program type).
+    let tcpip: [(&[u8], &[u8], &[u8], &[u8]); 3] = [
+        (b"OS2\\TCPCFG2.EXE", b"TCP/IP Configuration", b"<RS2_TCPCFG>", b"PM"),
+        (b"OS2\\FTP.EXE", b"FTP", b"<RS2_FTP>", b"WINDOWABLEVIO"),
+        (b"OS2\\TELNET.EXE", b"Telnet", b"<RS2_TELNET>", b"WINDOWABLEVIO"),
+    ];
+    if file_exists(&boot(b"?:\\OS2\\TCPCFG2.EXE")) {
+        out.push((b"TCP/IP;WPFolder;<WP_PROGRAMSFOLDER>;PRESERVEOLD".to_vec(), b"DEFAULTVIEW=ICON;OBJECTID=<RS2_TCPIPFOLDER>".to_vec()));
+    }
+    for (file, title, id, ty) in tcpip {
+        let path = [&b"?:\\"[..], file].concat();
+        if !file_exists(&boot(&path)) {
+            continue;
+        }
+        let k = [title, &b";WPProgram;<RS2_TCPIPFOLDER>;PRESERVEOLD"[..]].concat();
+        let s = [&b"EXENAME="[..], &path, b";PROGTYPE=", ty, b";OBJECTID=", id].concat();
+        out.push((k, s));
+    }
+    // The Multimedia folder in Programs (version 13), with IBM's object
+    // IDs where IBM's MMPM/2 has the object: the media player, the
+    // Digital Audio editor, the CD Player and Volume Control objects,
+    // Multimedia Setup and a shadow of the Sound object; a Multimedia
+    // Templates folder in Templates with a Wave Audio template.
+    if file_exists(&boot(b"?:\\MMOS2\\MPPM.EXE")) {
+        out.push((b"Multimedia;MMFolder;<WP_PROGRAMSFOLDER>;PRESERVEOLD".to_vec(), b"DEFAULTVIEW=ICON;OBJECTID=<MMPM2_FOLDER>".to_vec()));
+        let progs: [(&[u8], &[u8], &[u8]); 3] = [
+            (b"MPPM.EXE", b"Media Player", b"<RS2_MPPM>"),
+            (b"WEPM.EXE", b"Digital Audio", b"<RS2_WEPM>"),
+            (b"STPM.EXE", b"Multimedia Setup", b"<MMPM2_SETUP>"),
+        ];
+        for (file, title, id) in progs {
+            let k = [title, &b";WPProgram;<MMPM2_FOLDER>;PRESERVEOLD"[..]].concat();
+            let s = [&b"EXENAME=?:\\MMOS2\\"[..], file, b";STARTUPDIR=?:\\MMOS2;PROGTYPE=PM;OBJECTID=", id].concat();
+            out.push((k, s));
+        }
+        out.push((b"CD Player;MMCDDevice;<MMPM2_FOLDER>;PRESERVEOLD".to_vec(), b"OBJECTID=<MMPM2_CDPLAYER>".to_vec()));
+        out.push((b"Volume Control;MMVolume;<MMPM2_FOLDER>;PRESERVEOLD".to_vec(), b"OBJECTID=<MMPM2_VOLUME>".to_vec()));
+        out.push((b"Sound;WPShadow;<MMPM2_FOLDER>;PRESERVEOLD".to_vec(), b"SHADOWID=<WP_SOUND>;OBJECTID=<MMPM2_SNDSHAD>".to_vec()));
+        out.push((b"Multimedia Templates;WPFolder;<WP_TEMPS>;PRESERVEOLD".to_vec(), b"DEFAULTVIEW=ICON;OBJECTID=<MMPM2_MMTEMPLATEFOLDER>".to_vec()));
+        out.push((b"Wave Audio;MMWAV;<MMPM2_MMTEMPLATEFOLDER>;PRESERVEOLD".to_vec(), b"TEMPLATE=YES;OBJECTID=<RS2_WAVTEMPLATE>".to_vec()));
+    }
     // The LaunchPad, after the objects it shows (open at each start: its
     // shadow is in Startup).
     out.push((b"LaunchPad;WPLaunchPad;<WP_DESKTOP>;PRESERVEOLD".to_vec(), b"FPOBJECTS=<WP_DRIVES>,<WP_OS2WIN>,<WP_SYSED>,<WP_ASSISTANCE>;DRAWEROBJECTS=2,<WP_OS2FS>;OBJECTID=<WP_LAUNCHPAD>".to_vec()));
@@ -211,8 +253,26 @@ pub fn run() {
     // the Shredder, Connections (Network, Printers), the System Clock and
     // IBM's System class in place of RS2System, version 10 the Spooler,
     // version 11 the Command Reference and Start Here books;
+    // version 13 the TCP/IP and Multimedia folders and the multimedia
+    // classes;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
+        // rs2's multimedia classes (mm.rs) in the class table, unless
+        // other DLLs (IBM's MMPARTS) are registered for them; loaded now
+        // so that their files take them at once.
+        let mut t = clsmgr::table();
+        let mut added = Vec::new();
+        for c in crate::mm::CLASSES {
+            if !t.iter().any(|(n, _)| eq_nocase(n, c.as_bytes())) {
+                t.push((c.as_bytes().to_vec(), b"PMWP".to_vec()));
+                added.push(*c);
+            }
+        }
+        if !added.is_empty() && clsmgr::set_table(&t) {
+            for c in added {
+                crate::som::find_class(c.as_bytes());
+            }
+        }
         pending.extend(defaults());
         let mut v = DESKTOP_VERSION.to_vec();
         v.push(0);

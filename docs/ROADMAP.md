@@ -124,6 +124,14 @@ Status markers: done, in progress, planned.
   (addsockettolist/removesocketfromlist, RS2API 220/221): IBM's INETD
   hands connections to the servers it starts
 - done: INI files for PMSHAPI (see milestone 4)
+- done: rs2's own TCP/IP applications (userland/netapps, NETWORK.md):
+  FTP (active and passive), FTPD (TRUSERS), TELNET (VT100/VT220 through
+  crates/vt100), TELNETD (a command prompt on pipes), LPR/LPQ/LPRM,
+  FINGER, TFTP/TFTPD, REXEC, RSH and the TCPCFG2 notebook (NETWORK=,
+  SET HOSTNAME=, RESOLV2, HOSTS); NETCLI with tools/scripts/nethost.py
+  checks them; a TCP/IP folder on the desktop
+- planned: TELNETD with pseudo terminals (VIO programs), an LPD server,
+  TALK, REXECD/RSHD, code page translation (-cp) in FTP/TELNET
 - planned: route/arp and run-time configuration,
   code page translation in TNLS32/TNLS16,
   PCI INTx routing (ACPI _PRT) for the 8254x and PCnet, TCP keepalive/window scaling/SACK/urgent data
@@ -369,6 +377,13 @@ Status markers: done, in progress, planned.
   W calls and INI-mapped keys; Borland's IDE (editor focus, Open project,
   Build all), EPM's formatted printing, the circular slider and IBM's
   Multimedia Setup (STPM) and MINSTALL
+- done (multimedia without IBM's files): MMPMMMIO.INI and
+  mmioIniFileHandler, MMIOPROC.DLL's I/O procedures (BMP, JPEG, GIF, PCX,
+  TIFF, Targa read and written; AU, SND, VOC, AIFF, 8SVX; MIDI; AVI), MDM
+  playing AVI (DIB, RLE8, Video 1, Ultimotion) with sound and AU/VOC/AIFF,
+  the multimedia Workplace Shell classes with MMPARTS's names and the
+  Multimedia folder, the applets MPPM, WEPM, CDPM, MMVOLUME and STPM
+  ([MMPM.md](MMPM.md), [WPS.md](WPS.md))
 - done (shell): the System object's Logo, Print Screen, Title and Window
   pages, the desktop's Lockup and Archive pages with the lockup, Menu and
   Self-close pages, print job, driver, port and Spooler objects, Create
@@ -516,7 +531,8 @@ Microsoft file (docs/WIN16.md).
 ## Later
 
 - NetBIOS, NFS/SMB clients
-- MMPM/2: recording, MIDI (sequencer), CD audio, AVI/MPEG video
+- MMPM/2: MPEG and Indeo video, IBM's Ultimotion codebook (rs2 draws
+  those blocks flat), multiple images per file, compound files (RIFF CF)
 - DOS sessions: Sound Blaster, VESA modes, DOS settings in the program
   object notebook, CPU speed (a block cache), DPMI 1.0
 - self-hosting (building rs2 on rs2): 64-bit processes with a Linux

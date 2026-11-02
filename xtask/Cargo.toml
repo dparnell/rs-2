@@ -11,4 +11,5 @@ dos = { path = "../crates/dos" }
 fat = { path = "../crates/fat" }
 ipf = { path = "../crates/ipf" }
 msgf = { path = "../crates/msgf" }
+inifile = { path = "../crates/inifile" }
 hpfs = { path = "../crates/hpfs" }

@@ -32,6 +32,7 @@ extern crate os2;
 mod chunk;
 mod exports;
 mod format;
+mod ini;
 mod io;
 mod procs;
 mod stubs;

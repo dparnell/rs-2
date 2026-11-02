@@ -958,7 +958,7 @@ fn class_title(name: &[u8]) -> Option<&'static [u8]> {
         b"WPPrinter" => b"Printer\0",
         b"WPSystem" => b"System\0",
         b"WPClock" => b"System Clock\0",
-        _ => return None,
+        _ => return crate::mm::class_title(name),
     })
 }
 

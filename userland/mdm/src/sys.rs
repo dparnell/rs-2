@@ -280,3 +280,26 @@ pub fn write_file(name: &str, data: &[u8]) -> bool {
     unsafe { DosClose(h) };
     ok
 }
+
+/// The master volume Volume Control keeps in OS2.INI (`MMPM2` `MasterVolume`,
+/// `Mute`), given to the kernel mixer once per process: the mixer starts at
+/// 100 when rs2 starts.
+pub fn master_volume_once() {
+    use core::sync::atomic::{AtomicBool, Ordering};
+    static DONE: AtomicBool = AtomicBool::new(false);
+    if DONE.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    unsafe extern "C" {
+        #[link_name = "PMSHAPI.115"]
+        fn PrfQueryProfileString(hini: u32, app: *const u8, key: *const u8, def: *const u8, buf: *mut u8, cb: u32) -> u32;
+    }
+    let get = |key: &[u8]| {
+        let mut b = [0u8; 16];
+        let n = unsafe { PrfQueryProfileString(1, b"MMPM2\0".as_ptr(), key.as_ptr(), core::ptr::null(), b.as_mut_ptr(), 16) };
+        (n > 0).then(|| b.iter().take_while(|&&c| c != 0).fold(0u32, |v, &c| if c.is_ascii_digit() { v * 10 + (c - b'0') as u32 } else { v }))
+    };
+    let Some(v) = get(b"MasterVolume\0") else { return };
+    let v = if get(b"Mute\0") == Some(1) { 0 } else { v.min(100) };
+    unsafe { Rs2AudioSetVolume(0, v) };
+}

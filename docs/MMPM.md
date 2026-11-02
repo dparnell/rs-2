@@ -16,6 +16,10 @@ in a host-tested crate:
 | `crates/mmfmt` | RIFF chunks, WAVE audio, Autodesk FLI/FLC animations. `no_std` + `alloc`, no OS dependencies; tested on the host against OS/2's own files. |
 | `userland/mmio` → MMIO.DLL | The multimedia I/O manager: buffered and memory files, RIFF chunk calls, the DOS, MEM and WAVE I/O procedures. |
 | `userland/mmiotest` → RS2\MMIOTEST.EXE | Self-checks of MMIO.DLL. |
+| `crates/mmimage` | Still images: OS/2 1.x and 2.0 bitmaps and Windows DIBs (RLE4/8/24, bit fields, bitmap arrays), JPEG (baseline and progressive decoding, baseline encoding), GIF, PCX, TIFF (none, PackBits, LZW), Targa; every format read and written. Host-tested against macOS `sips`, libtiff and the OS/2 files. |
+| `crates/mmavi` | AVI files (idx1 or a scan of movi, OpenDML parts) and their video: uncompressed DIBs, RLE8, Microsoft Video 1, IBM Ultimotion. Host-tested against ffmpeg. |
+| `userland/mmioproc` → MMIOPROC.DLL | rs2's file-format I/O procedures (images, AU/SND, VOC, AIFF, 8SVX, MIDI, AVI), listed in `MMOS2\MMPMMMIO.INI`. |
+| `userland/mmapps` → MMOS2\*.EXE | The applets: MPPM (media player), WEPM (Digital Audio editor), CDPM (CD Player), MMVOLUME (Volume Control), STPM (Multimedia Setup). |
 | `crates/mci` | The media control interface's string commands (words, keywords, WAIT/NOTIFY), device types and names, file extensions, MCIERR codes and texts, the memory playlist processor. Host-tested. |
 | `userland/mdm` → MDM.DLL | The media device manager: mciSendCommand, mciSendString, the wave audio and digital video devices. |
 
@@ -84,6 +88,16 @@ PCM: 8-bit mono at 11025 or 22050 Hz, or 16-bit mono at 22050 Hz.
 and `chunks(data)`, an iterator of `Chunk { header, offset, data }` with
 `children()` for RIFF and LIST forms.
 
+### `mmfmt::sound`: other digital audio files
+
+`sound::parse(&file)` reads Sun/NeXT `.AU`/`.SND` (µ-law, A-law, linear
+8-32 bits, big-endian), Creative Voice `.VOC` (sound data, continuation,
+silence, repeat, extended and new-format blocks), AIFF/AIFC (the 80-bit
+rate; NONE, twos, sowt, raw, ulaw, alaw) and Amiga 8SVX into a `Sound`:
+a `WaveFormat` for 8-bit unsigned or 16-bit signed PCM and the samples,
+what a WAVE file of the sound holds. `build_au`, `build_voc` and
+`build_aiff` write PCM back.
+
 ## MMIO.DLL
 
 An MMIO handle is an open file with an I/O procedure. As in IBM's MMIO the
@@ -100,10 +114,11 @@ byte, `lLogicalFilePos` the caller's position. HMMIOs are per process.
 | mmioDescend, mmioAscend, mmioCreateChunk | RIFF chunks. With a parent, mmioDescend searches from the parent's first sub-chunk, as IBM's does; mmioAscend fixes the size of a chunk being written and pads it. |
 | mmioGetHeader, mmioSetHeader, mmioQueryHeaderLength | Through the procedure: the WAVE procedure's MMAUDIOHEADER (40 bytes; `ulAudioLengthInBytes` and `ulAudioLengthInMS`). |
 | mmioSet | Passed to the procedure (WAVE: no tracks or CODECs). |
-| mmioIdentifyFile, mmioIdentifyStorageSystem, mmioQueryFormatCount, mmioGetFormats, mmioGetFormatName | The format list holds WAVE; other files are DOS files. |
+| mmioIdentifyFile, mmioIdentifyStorageSystem, mmioQueryFormatCount, mmioGetFormats, mmioGetFormatName | The format list holds WAVE and the procedures of MMPMMMIO.INI (below); a file none of them recognises is a DOS file. |
+| mmioIniFileHandler | MMPMMMIO.INI's procedure list, as IBM's: MMIO_INSTALLPROC (the DLL is loaded and its procedure asked for its MMFORMATINFO unless MMIO_NOVERIFY; the module name is kept unless MMIO_FULLPATH; a procedure for the same FOURCC is replaced), MMIO_REMOVEPROC and MMIO_FINDPROC with MMIO_MATCHFIRST/MATCHNEXT, MATCHFOURCC, MATCHDLL, MATCHPROCEDURENAME. |
 | mmioInstallIOProc, mmioSendMessage, mmioStringToFOURCC, mmioGetLastError | As IBM's; installed procedures are per process and take precedence over the built-in ones. |
 | DOSIOProc, MEMIOProc, WAVEIOProc | The built-in procedures (WAVEIOProc is an rs2-private export, ordinal 300; IBM's is in WAVEPROC.DLL). |
-| mmioCF*, BNDIOProc, CFIOProc, mmioIniFileHandler, CODEC calls, mmiohlp* | Not supported: MMIOERR_UNSUPPORTED_FUNCTION (NULL for mmioCFOpen and mmioLoadCODECProc). |
+| mmioCF*, BNDIOProc, CFIOProc, CODEC calls, mmiohlp* | Not supported: MMIOERR_UNSUPPORTED_FUNCTION (NULL for mmioCFOpen and mmioLoadCODECProc). |
 
 The WAVE procedure reads and seeks within the sample data (position 0 is
 the first sample); writing a new file (MMIO_CREATE with `fccIOProc` =
@@ -120,6 +135,73 @@ writes a WAVE file with the chunk calls, reads it back as the games do
 (also through DosLoadModule), descends through it, writes one with the
 WAVE procedure, and checks memory files, buffered I/O and error codes.
 
+### The installed I/O procedures (MMPMMMIO.INI)
+
+IBM's MMIO keeps the file-format procedures installed in the system in
+`%MMBASE%\MMPMMMIO.INI` (studied in Ghidra: mmioIniFileHandler,
+mmiohlpLoadDefIOProcs in IBM's MMPM.DLL): application `MMIOINIT`, key
+`IOCOUNT` (a USHORT) and key `IOMODINFO`, an array of MMINIFILEINFO
+records of 316 bytes (FOURCC, DLL name, entry point name, capability
+flags, extended length 16, media type, procedure type, default
+extension), as MINSTALL's `mmioInstall` entries write them. rs2's MMIO
+reads the list once per process (`userland/mmio/src/ini.rs`) and loads
+a procedure (DosLoadModule, DosQueryProcAddr) when it is first needed.
+mmioOpen without a procedure asks the procedures the process installed
+itself, then WAVE, then the list's in its order (MMIOM_IDENTIFYFILE);
+mmioOpen with a FOURCC, mmioInstallIOProc's MMIO_FINDPROC and the
+format calls find the list's procedures too. Without the profile (or
+without IOCOUNT) the list is rs2's own (`userland/mmio/ioprocs.txt`),
+which xtask also writes into the distribution as `MMOS2\MMPMMMIO.INI`.
+
+rs2's procedures are in MMIOPROC.DLL (`userland/mmioproc`, one entry
+point per FOURCC; IBM ships them as separate DLLs):
+
+| FOURCC | Entry point | Format | Read | Write |
+|--------|-------------|--------|------|-------|
+| OS13, OS20, WI30 | OS13IOProc, OS20IOProc, WI30IOProc | OS/2 1.x, OS/2 2.0 and Windows bitmaps (`.BMP`; each knows its own header) | yes | uncompressed |
+| JPEG | JPEGIOProc | JPEG (`.JPG`) | baseline and progressive | baseline JFIF, quality 85 |
+| GIFC | GIFCIOProc | GIF (`.GIF`, first image) | yes | LZW (true colour reduced to a 6x7x6 colour cube) |
+| PCXC | PCXCIOProc | PCX (`.PCX`) | yes | RLE |
+| TFIC, TFIU, TFMC, TFMU | TF..IOProc | TIFF, Intel or Motorola byte order, compressed or not (`.TIF`) | none, PackBits, LZW | LZW or uncompressed |
+| TGAC, TGAU | TGACIOProc, TGAUIOProc | Targa, run-length encoded or not (`.TGA`; last in the list: no magic number) | yes | yes |
+| `AU  `, `SND ` | AUIOProc, SNDIOProc | Sun/NeXT audio (µ-law, A-law, linear 8-32 bits) | yes | 8/16-bit linear |
+| `VOC ` | VOCIOProc | Creative Voice | yes | 8/16-bit PCM |
+| AIFF | AIFFIOProc | AIFF and AIFC (NONE, twos, sowt, raw, ulaw, alaw) | yes | 8/16-bit PCM |
+| `IFF ` | IFFIOProc | Amiga 8SVX | yes | no |
+| MIDI | MIDIIOProc | Standard MIDI files and RIFF RMID | the file's MIDI data, MMMIDIHEADER | no |
+| `AVI ` | AVIIOProc | AVI movies | identified, read untranslated | no |
+
+They work as IBM's image and audio procedures do (the Toolkit's M-Motion
+sample, `samples/mm/mmioproc`, shows the protocol): the file is read
+through a storage-system handle (the DOS procedure, or
+`fccChildIOProc`) and decoded at MMIOM_OPEN. With MMIO_TRANSLATEDATA an
+image reads as an OS/2 bitmap (rows bottom-up, padded to four bytes; 1,
+4, 8 or 24 bits per pel, B, G, R), described by the MMIMAGEHEADER
+(1116 bytes: lengths and types, the XDIB prefix, BITMAPINFOHEADER2 and
+256 RGB2) that mmioGetHeader gives; without it the file's own bytes are
+read. Sounds read as PCM (8-bit unsigned or 16-bit signed, as in a WAVE
+file) with an MMAUDIOHEADER. A file opened MMIO_WRITE with translation
+takes its header from mmioSetHeader and its bitmap or samples from
+mmioWrite, and is encoded at mmioClose. Reading and writing one file at
+once (MMIO_READWRITE) is refused, as by IBM's procedures. One image per
+file (MMIOM_QUERYIMAGECOUNT is 1). The formats are `crates/mmimage` and
+`mmfmt::sound`.
+
+MMIOTEST checks the list (enumerated as the Toolkit's MMBROWSE sample
+does it; a procedure installed, found, removed; a missing DLL refused),
+the format list, and every image and audio procedure: a 37 x 23 picture
+(and an 8-bit one with its palette for GIF and OS/2 bitmaps) and 0.1 s
+of sound written with translation, identified again by mmioOpen and
+mmioIdentifyFile and read back (identical, JPEG within a tolerance).
+IBM's MMBROWSE (the Toolkit sample, not shipped) shows a JPEG through
+rs2's JPEG procedure.
+
+**Ultimotion:** IBM's codec draws some blocks from a 4096-entry table of
+luma patterns that is IBM's data (ULDC.DLL); rs2 does not ship it, so
+those blocks are drawn flat (a blockier picture). `mmavi::ulti` takes a
+table when one is supplied (`find_codebook` finds it in ULDC.DLL's
+object 1). Indeo (IV31/IV32) and MPEG are not decoded.
+
 ## MDM.DLL
 
 mciSendCommand and mciSendString both become one request (`src/req.rs`)
@@ -130,8 +212,8 @@ system-wide and can be shared); they are closed when it ends.
 
 | Device | rs2 |
 |--------|-----|
-| waveaudio (Waveaudio01) | A WAV file as the element (PCM, or µ-law/A-law/IMA ADPCM decoded by mmfmt) or a memory playlist (MCI_OPEN_PLAYLIST: DATA, BRANCH, LOOP, CALL/RETURN, MESSAGE, CUEPOINT, SEMWAIT/SEMPOST, EXIT). MCI_SET of the wave format (as the games set it before playing a playlist), time formats (MMTIME, milliseconds, bytes, samples), volume. PLAY (FROM/TO), STOP, PAUSE/RESUME, SEEK, STATUS (mode, length, position, the format, LEVEL, MONITOR). Played through the kernel's audio streams (RS2API 300-308, docs/ROADMAP.md); without sound hardware the device plays silently in real time, so PLAY WAIT and notifications behave the same. Recording (see below): RECORD, SAVE, DELETE, CUE INPUT, CONNECTOR, CONNECTION, SET MONITOR, LOAD NEW. |
-| digitalvideo (Digitalvideo01) | FLI/FLC animations. Frames are drawn with GpiDrawBits into the application's window (WINDOW HANDLE, PUT DESTINATION) or into MDM's own video window (a frame window titled with the file name, run by a thread of MDM's with its own message queue). PLAY (FROM/TO, FAST), STOP, PAUSE/RESUME, SEEK, CUE, LOAD, WINDOW (HANDLE, DEFAULT, STATE, TEXT), PUT, WHERE, STATUS (length, position, extents, hwnd). No audio track. |
+| waveaudio (Waveaudio01) | A WAV file as the element (PCM, or µ-law/A-law/IMA ADPCM decoded by mmfmt), or an AU, SND, VOC, AIFF or 8SVX file (`mmfmt::sound`, as their I/O procedures present them) or a memory playlist (MCI_OPEN_PLAYLIST: DATA, BRANCH, LOOP, CALL/RETURN, MESSAGE, CUEPOINT, SEMWAIT/SEMPOST, EXIT). MCI_SET of the wave format (as the games set it before playing a playlist), time formats (MMTIME, milliseconds, bytes, samples), volume. PLAY (FROM/TO), STOP, PAUSE/RESUME, SEEK, STATUS (mode, length, position, the format, LEVEL, MONITOR). Played through the kernel's audio streams (RS2API 300-308, docs/ROADMAP.md); without sound hardware the device plays silently in real time, so PLAY WAIT and notifications behave the same. Recording (see below): RECORD, SAVE, DELETE, CUE INPUT, CONNECTOR, CONNECTION, SET MONITOR, LOAD NEW. |
+| digitalvideo (Digitalvideo01) | FLI/FLC animations and AVI movies (`crates/mmavi`: uncompressed, RLE8, Video 1, Ultimotion; their PCM sound plays along through the audio stream, the frames keep to the clock). Frames are drawn with GpiDrawBits into the application's window (WINDOW HANDLE, PUT DESTINATION) or into MDM's own video window (a frame window titled with the file name, run by a thread of MDM's with its own message queue). PLAY (FROM/TO, FAST), STOP, PAUSE/RESUME, SEEK, CUE, LOAD, WINDOW (HANDLE, DEFAULT, STATE, TEXT), PUT, WHERE, STATUS (length, position, extents, hwnd). No audio track. |
 
 Common to both: MM_MCINOTIFY (successful, superseded by a new command,
 aborted by STOP/SEEK/CLOSE), CAPABILITY/GETDEVCAPS, INFO, ACQUIRE/RELEASE
@@ -219,13 +301,11 @@ Ghidra in IBM's MMPM.DLL, which holds MDM):
 block's first words) and mciSendString and what they return to the
 serial port; MMPARTS's own log comes with `SET MCICPPLG=1`.
 
-**Not yet:** the wave editor (an MMAudio object's default view) opens
-with its menus, buttons and the file, but draws no waveform and shows
-"IVBase object" in its selection fields; the image classes' views need
-MMIO's installable I/O procedures (JPEGIO and the others, registered in
-MMPM2.INI), which rs2's MMIO does not load; the digital video and MIDI
-viewers were not tried. The Multimedia folder and templates that
-MINSTALL makes (FOURMEG.SCR) are not made.
+**Not yet:** IBM's wave editor (an MMAudio object's default view under
+IBM's classes) opens with its menus, buttons and the file, but draws no
+waveform; the digital video and MIDI viewers were not tried. rs2 now has
+its own classes and applets for all of this (below), so IBM's MMPARTS is
+not needed.
 
 ### Recording
 
@@ -268,6 +348,45 @@ kernel calls; `--sound ac97` and `--sound es1370` for the other cards.
 The games find their sounds in `%MMBASE%\SOUNDS` (rs2's CONFIG.SYS sets
 `MMBASE=C:\MMOS2;`) and their movies in their own directory; APPINST
 installs both from the OS/2 CD with the games.
+
+## rs2's multimedia applets
+
+`userland/mmapps`, PM programs in `%MMBASE%` (`C:\MMOS2`), which rs2's
+multimedia classes (WPS.md) open:
+
+- **MPPM** (`MPPM [file]`), the media player: sounds (WAV, AU, SND, VOC,
+  AIF, IFF), MIDI songs and movies (AVI, FLC, FLI) through MDM's devices
+  (`open file alias mppm`; a movie's device draws into the player's
+  window with `window mppm handle`), with Play, Pause, Stop, Rewind and
+  Forward (5 s), a position bar to seek with, the time, a volume bar
+  (`set mppm audio volume`); images (BMP, DIB, JPG, GIF, PCX, TIF, TGA)
+  read through MMIO's image procedures with translation and drawn fitted
+  into the window. Without a file, or Open..., the open dialog.
+- **WEPM** (`WEPM [file]`), Digital Audio: a sound read through MMIO
+  (any audio procedure) shown as a waveform; a selection dragged with the
+  mouse; Play (the selection, or all; through a temporary WAV in
+  %MMBASE%), Stop, Record (MDM's wave audio device records in the
+  sound's format and the recording is inserted at the cursor), Cut,
+  Copy, Paste, Delete, New, Open..., Save and Save as... (through MMIO,
+  the format by the extension: WAV, AU, SND, VOC, AIF). An empty file (a
+  new one from the Wave Audio template) starts a new sound.
+- **CDPM** (`CDPM [device]`), the CD Player: the first drive with a disc
+  (Cdaudio01, 02, ...), its tracks (double-click one to play it), Play,
+  Pause, Stop, previous and next track, Eject, the track and time.
+- **MMVOLUME**, Volume Control: the master volume of all sound (the
+  kernel mixer's, Rs2AudioSetVolume with stream 0) and Mute, kept in
+  OS2.INI `MMPM2` `MasterVolume`/`Mute`; MDM gives them to the mixer
+  when a process first opens a device (the mixer starts at 100).
+  `MMVOLUME n`, `MUTE`, `UNMUTE`, `QUERY` without the window.
+- **STPM**, Multimedia Setup: the System page (the sound hardware, the
+  master volume and mute, the recording source, Rs2AudioSetInput, kept
+  as `MMPM2` `RecordSource`, and a test sound) and a page for each
+  device MDM has (its name, what it plays, its file types). rs2's
+  devices are built in, so nothing is installed or removed there.
+
+Checked in QEMU with screenshots: MPPM playing a Video 1 AVI (and showing
+a JPEG opened from the shell), WEPM with a WAV and a selection, CDPM
+playing `cdsim`'s simulated disc, STPM's System page.
 
 ## The MIDI sequencer and MCIAPI.DLL
 

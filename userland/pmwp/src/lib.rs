@@ -44,6 +44,7 @@ mod launchpad;
 mod menu;
 mod mindex;
 mod minwin;
+mod mm;
 mod obj;
 mod pages;
 mod printer;

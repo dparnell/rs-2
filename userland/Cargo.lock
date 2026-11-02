@@ -171,6 +171,7 @@ version = "0.1.0"
 dependencies = [
  "mci",
  "midi",
+ "mmavi",
  "mmfmt",
  "os2",
 ]
@@ -180,14 +181,43 @@ name = "midi"
 version = "0.1.0"
 
 [[package]]
+name = "mmapps"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "utils",
+]
+
+[[package]]
+name = "mmavi"
+version = "0.1.0"
+dependencies = [
+ "mmimage",
+]
+
+[[package]]
 name = "mmfmt"
+version = "0.1.0"
+
+[[package]]
+name = "mmimage"
 version = "0.1.0"
 
 [[package]]
 name = "mmio-dll"
 version = "0.1.0"
 dependencies = [
+ "inifile",
  "mmfmt",
+ "os2",
+]
+
+[[package]]
+name = "mmioproc-dll"
+version = "0.1.0"
+dependencies = [
+ "mmfmt",
+ "mmimage",
  "os2",
 ]
 
@@ -203,6 +233,15 @@ name = "nbtest"
 version = "0.1.0"
 dependencies = [
  "os2",
+]
+
+[[package]]
+name = "netapps"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "utils",
+ "vt100",
 ]
 
 [[package]]
@@ -618,6 +657,10 @@ dependencies = [
 
 [[package]]
 name = "viocell"
+version = "0.1.0"
+
+[[package]]
+name = "vt100"
 version = "0.1.0"
 
 [[package]]

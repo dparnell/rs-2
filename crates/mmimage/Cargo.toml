@@ -1,0 +1,8 @@
+[package]
+name = "mmimage"
+description = "no_std still image formats for rs2's multimedia I/O procedures: OS/2 and Windows BMP, JPEG, GIF, PCX, TIFF and Targa"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]

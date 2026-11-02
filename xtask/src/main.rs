@@ -11,7 +11,7 @@
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
 //!                  [--virtio-rng] [--virtio-console PATH] [--virtio-gpu|--virtio-gpu-pci]
 //!                  [--virtio-legacy] [--boot-virtio]
-//!                  [--net [MODEL]] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--tftp DIR]
+//!                  [--net [MODEL]] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--guestfwd RULE]... [--tftp DIR]
 //!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE] [--sound-in FILE|tone:HZ]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
@@ -63,7 +63,9 @@
 //! virtio-net) or `--net-model`
 //! names any QEMU device; `--virtio-net` is short for `--net virtio`. Host port 5555 is forwarded to
 //! guest port 23 (when free), and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
-//! rule; `--tftp DIR` has QEMU serve DIR by TFTP at 10.0.2.2. Without
+//! rule; `--guestfwd tcp:10.0.2.100:79-tcp:127.0.0.1:7979` sends the guest's
+//! connections to that address to a host port (servers on ports a user
+//! cannot bind); `--tftp DIR` has QEMU serve DIR by TFTP at 10.0.2.2. Without
 //! these options the machine has no network adapter.
 //!
 //! `--sound` adds an ICH9 HD Audio controller with a duplex codec
@@ -155,6 +157,7 @@ struct Opts {
     /// host forwarding rules.
     net: Option<String>,
     hostfwd: Vec<String>,
+    guestfwd: Vec<String>,
     /// Directory QEMU's user network serves by TFTP (10.0.2.2).
     tftp: Option<String>,
     /// Boot into the Workplace Shell (init=OS2\\PMSHELL.EXE instead of
@@ -216,6 +219,7 @@ fn parse(args: &[String]) -> Opts {
         virtio_gpu: None,
         net: None,
         hostfwd: vec![],
+        guestfwd: vec![],
         tftp: None,
         desktop: false,
         init: None,
@@ -334,6 +338,10 @@ fn parse(args: &[String]) -> Opts {
             "--hostfwd" => {
                 i += 1;
                 o.hostfwd.push(args[i].clone());
+            }
+            "--guestfwd" => {
+                i += 1;
+                o.guestfwd.push(args[i].clone());
             }
             "--hdd" => {
                 i += 1;
@@ -555,6 +563,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("wpstest", "RS2\\WPSTEST.EXE"),
         ("wpshell", "RS2\\WPSHELL.EXE"),
         ("audtest", "RS2\\AUDTEST.EXE"),
+        ("netcli", "RS2\\NETCLI.EXE"),
         ("desktest", "RS2\\DESKTEST.EXE"),
         ("testdll", "RS2\\TESTDLL.DLL"),
         ("pmxtest", "RS2\\PMXTEST.EXE"),
@@ -631,6 +640,19 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("netstat", "OS2\\NETSTAT.EXE"),
         ("hostname", "OS2\\HOSTNAME.EXE"),
         ("host", "OS2\\HOST.EXE"),
+        ("ftp", "OS2\\FTP.EXE"),
+        ("ftpd", "OS2\\FTPD.EXE"),
+        ("telnet", "OS2\\TELNET.EXE"),
+        ("telnetd", "OS2\\TELNETD.EXE"),
+        ("lpr", "OS2\\LPR.EXE"),
+        ("lpq", "OS2\\LPQ.EXE"),
+        ("lprm", "OS2\\LPRM.EXE"),
+        ("finger", "OS2\\FINGER.EXE"),
+        ("tftp", "OS2\\TFTP.EXE"),
+        ("tftpd", "OS2\\TFTPD.EXE"),
+        ("rexec", "OS2\\REXEC.EXE"),
+        ("rsh", "OS2\\RSH.EXE"),
+        ("tcpcfg2", "OS2\\TCPCFG2.EXE"),
         ("tcpip32", "OS2\\DLL\\TCPIP32.DLL"),
         ("tnls32", "OS2\\DLL\\TNLS32.DLL"),
         ("pmshapi", "OS2\\DLL\\PMSHAPI.DLL"),
@@ -654,6 +676,12 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("mmio", "OS2\\DLL\\MMIO.DLL"),
         ("mdm", "OS2\\DLL\\MDM.DLL"),
         ("mciapi", "OS2\\DLL\\MCIAPI.DLL"),
+        ("mmioproc", "OS2\\DLL\\MMIOPROC.DLL"),
+        ("mppm", "MMOS2\\MPPM.EXE"),
+        ("wepm", "MMOS2\\WEPM.EXE"),
+        ("cdpm", "MMOS2\\CDPM.EXE"),
+        ("mmvolume", "MMOS2\\MMVOLUME.EXE"),
+        ("stpm", "MMOS2\\STPM.EXE"),
         ("pmspl", "OS2\\DLL\\PMSPL.DLL"),
         ("pmspool", "OS2\\PMSPOOL.EXE"),
         ("pmprint", "OS2\\DLL\\PMPRINT.QPR"),
@@ -699,7 +727,7 @@ const MSG_FILES: &[(&str, &str, &[u16], (u16, u16))] = &[
 ];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool"];
+const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
@@ -791,7 +819,41 @@ fn build_userland() -> Option<image::FileList> {
         std::fs::write(&out, msg).unwrap();
         files.push((out, dest.to_string()));
     }
+    let ini = out_dir.join("MMPMMMIO.INI");
+    std::fs::write(&ini, mmio_ini(&std::fs::read_to_string(ul.join("mmio/ioprocs.txt")).ok()?)).unwrap();
+    files.push((ini, "MMOS2\\MMPMMMIO.INI".to_string()));
     Some(files)
+}
+
+/// MMIO's list of file-format I/O procedures (MMOS2\MMPMMMIO.INI, as
+/// IBM's installer writes it: `MMIOINIT` `IOCOUNT` and `IOMODINFO`, an
+/// array of 316-byte MMINIFILEINFO records) from userland/mmio/ioprocs.txt.
+fn mmio_ini(list: &str) -> Vec<u8> {
+    let mut data = Vec::new();
+    let mut count = 0u16;
+    for line in list.lines().filter(|l| !l.starts_with('#')) {
+        let w: Vec<&str> = line.split_whitespace().collect();
+        if w.len() < 6 {
+            continue;
+        }
+        let mut rec = [0u8; 316];
+        let text = |rec: &mut [u8; 316], off: usize, s: &str| rec[off..off + s.len()].copy_from_slice(s.as_bytes());
+        text(&mut rec, 0, &w[0].replace('_', " "));
+        text(&mut rec, 4, w[1]);
+        text(&mut rec, 264, w[2]);
+        rec[296..300].copy_from_slice(&w[3].parse::<u32>().unwrap().to_le_bytes());
+        rec[300..304].copy_from_slice(&16u32.to_le_bytes());
+        rec[304..308].copy_from_slice(&w[4].parse::<u32>().unwrap().to_le_bytes());
+        rec[308..312].copy_from_slice(&2u32.to_le_bytes());
+        text(&mut rec, 312, w[5]);
+        data.extend_from_slice(&rec);
+        count += 1;
+    }
+    let mut prof = inifile::Profile::default();
+    prof.set(b"MMIOINIT", b"VERSION", b"MULTIMEDIA MMIO INI FILE VERSION 1.0\0").unwrap();
+    prof.set(b"MMIOINIT", b"IOCOUNT", &count.to_le_bytes()).unwrap();
+    prof.set(b"MMIOINIT", b"IOMODINFO", &data).unwrap();
+    prof.to_bytes()
 }
 
 /// The DOS test programs (tests/dos, assembled when clang is there) as
@@ -992,6 +1054,10 @@ fn net_devices(o: &Opts, c: &mut Command) {
     }
     for r in &o.hostfwd {
         netdev.push_str(",hostfwd=");
+        netdev.push_str(r);
+    }
+    for r in &o.guestfwd {
+        netdev.push_str(",guestfwd=");
         netdev.push_str(r);
     }
     if let Some(d) = &o.tftp {

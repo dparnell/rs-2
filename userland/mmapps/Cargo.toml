@@ -1,0 +1,10 @@
+[package]
+name = "mmapps"
+description = "rs2's multimedia applets: the media player (MPPM), the digital audio editor (WEPM), the CD player (CDPM), Volume Control (MMVOLUME) and Multimedia Setup (STPM)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+utils = { path = "../utils" }

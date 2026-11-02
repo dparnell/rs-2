@@ -1,0 +1,12 @@
+[package]
+name = "mmavi"
+description = "no_std AVI files for rs2's digital video device and AVI I/O procedure: RIFF AVI parsing and the DIB, RLE8, Video 1 and Ultimotion codecs"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+mmimage = { path = "../mmimage" }
+
+[dev-dependencies]
+os2-exe = { path = "../os2-exe" }

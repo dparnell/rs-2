@@ -430,6 +430,8 @@ extern "C" fn prog_icon(obj: usize) -> u32 {
         let exe = str_bytes(&p.exe).to_vec();
         let h = if exe.is_empty() || exe == b"*" {
             crate::icons::shell(if p.progc == launch::PROG_FULLSCREEN || p.progc == launch::PROG_VDM { crate::icons::PROMPT_FULL_SCREEN } else { crate::icons::PROMPT_WINDOW })
+        } else if let Some(i) = crate::mm::program_icon(&exe) {
+            i
         } else {
             let f = z(&exe);
             unsafe { crate::fs::Rs2LoadFileIcon(f.as_ptr(), 0) }

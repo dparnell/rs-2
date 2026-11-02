@@ -86,7 +86,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "mmavi"
+version = "0.1.0"
+dependencies = [
+ "mmimage",
+ "os2-exe",
+]
+
+[[package]]
 name = "mmfmt"
+version = "0.1.0"
+
+[[package]]
+name = "mmimage"
 version = "0.1.0"
 
 [[package]]
@@ -151,6 +163,10 @@ name = "viocell"
 version = "0.1.0"
 
 [[package]]
+name = "vt100"
+version = "0.1.0"
+
+[[package]]
 name = "win16drv"
 version = "0.1.0"
 
@@ -168,6 +184,7 @@ dependencies = [
  "dos",
  "fat",
  "hpfs",
+ "inifile",
  "ipf",
  "msgf",
 ]

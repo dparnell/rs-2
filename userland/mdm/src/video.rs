@@ -1,7 +1,9 @@
 //! The digital video device: FLI/FLC animations (the opening movies of
-//! OS/2's Solitaire, Mahjongg and Chess). Frames are drawn into the
-//! application's window (WINDOW ... HANDLE) or into MDM's own video window,
-//! which a thread of MDM's runs with its own message queue.
+//! OS/2's Solitaire, Mahjongg and Chess) and AVI movies (`crates/mmavi`:
+//! uncompressed, RLE8, Video 1 and Ultimotion video; a PCM audio track
+//! plays along through the RS2API audio stream). Frames are drawn into
+//! the application's window (WINDOW ... HANDLE) or into MDM's own video
+//! window, which a thread of MDM's runs with its own message queue.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -12,16 +14,90 @@ use crate::req::*;
 use crate::sys::*;
 use mci::*;
 
+/// An AVI movie being played: the file, its index, the video decoder.
+pub struct AviMovie {
+    data: Vec<u8>,
+    avi: mmavi::Avi,
+    dec: mmavi::VideoDecoder,
+    /// The next frame to decode.
+    next: u32,
+}
+
+impl AviMovie {
+    /// Decode frame `next` (palette changes before it first).
+    fn step(&mut self) -> bool {
+        if self.next >= self.avi.frame_count() {
+            return false;
+        }
+        let n = self.next;
+        let changes: Vec<(u64, u32)> = self.avi.palette_changes().iter().filter(|c| c.0 == n).map(|c| (c.1, c.2)).collect();
+        for (off, len) in changes {
+            if let Some(b) = self.data.get(off as usize..off as usize + len as usize) {
+                self.dec.palette_change(b);
+            }
+        }
+        if let Some((off, len)) = self.avi.frame_chunk(n) {
+            if len > 0 {
+                if let Some(b) = self.data.get(off as usize..off as usize + len as usize) {
+                    let _ = self.dec.decode(b);
+                }
+            }
+        }
+        self.next += 1;
+        true
+    }
+
+    fn rewind(&mut self) -> bool {
+        match mmavi::VideoDecoder::new(&self.avi) {
+            Ok(d) => {
+                self.dec = d;
+                self.next = 0;
+                self.step()
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// The audio track's PCM from `ms` on: (rate, channels, bits, samples).
+    fn audio_from(&self, ms: u32) -> Option<(u32, u32, u32, Vec<u8>)> {
+        let f = self.avi.audio_format()?;
+        if f.tag != 1 || !(f.bits == 8 || f.bits == 16) || f.channels == 0 || f.rate == 0 {
+            return None;
+        }
+        let align = (f.channels as u64 * f.bits as u64 / 8).max(1);
+        let skip = (ms as u64 * f.rate as u64 / 1000) * align;
+        let mut pcm = Vec::new();
+        let mut at = 0u64;
+        for &(off, len) in self.avi.audio_chunks() {
+            let Some(b) = self.data.get(off as usize..off as usize + len as usize) else { continue };
+            let end = at + len as u64;
+            if end > skip {
+                let from = skip.saturating_sub(at) as usize;
+                pcm.extend_from_slice(&b[from.min(b.len())..]);
+            }
+            at = end;
+        }
+        Some((f.rate, f.channels as u32, f.bits as u32, pcm))
+    }
+}
+
+pub enum Movie {
+    Flc(Decoder<Vec<u8>>),
+    Avi(AviMovie),
+}
+
 pub struct Video {
-    dec: Option<Decoder<Vec<u8>>>,
+    dec: Option<Movie>,
     /// The frame shown (0-based), and how many there are.
     pub frame: u32,
     pub frames: u32,
     pub width: i32,
     pub height: i32,
     delay_ms: u32,
-    /// The image shown: 8-bit pixels, top row first, and its palette.
+    /// The image shown: 8-bit pixels (or 24-bit B, G, R with `bits` 24),
+    /// top row first, rows not padded, and its palette.
     image: Vec<u8>,
+    bits: u8,
     palette: [[u8; 3]; 256],
     /// The application's window (WINDOW HANDLE), or 0.
     pub app_hwnd: u32,
@@ -45,6 +121,7 @@ impl Video {
             height: 0,
             delay_ms: 70,
             image: Vec::new(),
+            bits: 8,
             palette: [[0; 3]; 256],
             app_hwnd: 0,
             own: (0, 0),
@@ -62,19 +139,32 @@ impl Video {
 
     pub fn load(&mut self, name: &str) -> Result<(), u32> {
         let data = read_file(name).ok_or(MCIERR_FILE_NOT_FOUND)?;
-        let mut d = Decoder::new(data).map_err(|_| MCIERR_INVALID_MEDIA_TYPE)?;
-        self.frames = d.frame_count() as u32;
-        self.width = d.width() as i32;
-        self.height = d.height() as i32;
-        self.delay_ms = d.header().delay_ms().max(10);
-        // The first frame, ready to show (CUE, or a window painted before
-        // PLAY).
-        if d.next_frame().is_ok() {
-            self.image = d.frame().to_vec();
-            self.palette = *d.palette();
+        if data.len() >= 12 && &data[0..4] == b"RIFF" && &data[8..12] == b"AVI " {
+            let avi = mmavi::Avi::parse(&data).map_err(|_| MCIERR_INVALID_MEDIA_TYPE)?;
+            let dec = mmavi::VideoDecoder::new(&avi).map_err(|_| MCIERR_UNSUPPORTED_FUNCTION)?;
+            self.frames = avi.frame_count();
+            self.width = avi.width() as i32;
+            self.height = avi.height() as i32;
+            self.delay_ms = (avi.usec_per_frame() / 1000).max(10);
+            let mut m = AviMovie { data, avi, dec, next: 0 };
+            m.step();
+            self.dec = Some(Movie::Avi(m));
+            self.take_image();
+        } else {
+            let mut d = Decoder::new(data).map_err(|_| MCIERR_INVALID_MEDIA_TYPE)?;
+            self.frames = d.frame_count() as u32;
+            self.width = d.width() as i32;
+            self.height = d.height() as i32;
+            self.delay_ms = d.header().delay_ms().max(10);
+            // The first frame, ready to show (CUE, or a window painted before
+            // PLAY).
+            let ok = d.next_frame().is_ok();
+            self.dec = Some(Movie::Flc(d));
+            if ok {
+                self.take_image();
+            }
         }
         self.frame = 0;
-        self.dec = Some(d);
         let base = name.rsplit(['\\', '/', ':']).next().unwrap_or(name);
         if self.title.is_none() {
             self.title = Some(String::from(base));
@@ -82,26 +172,66 @@ impl Video {
         Ok(())
     }
 
-    /// Back to the first frame.
-    fn rewind(&mut self) {
-        if let Some(d) = &mut self.dec {
-            d.rewind();
-            if d.next_frame().is_ok() {
+    /// Take the decoder's current frame as the image shown.
+    fn take_image(&mut self) {
+        match &self.dec {
+            Some(Movie::Flc(d)) => {
                 self.image = d.frame().to_vec();
                 self.palette = *d.palette();
+                self.bits = 8;
             }
+            Some(Movie::Avi(m)) => {
+                let img = m.dec.image();
+                let bytes = if img.bits == 24 { 3 } else { 1 };
+                let w = img.width as usize * bytes;
+                let wide;
+                // 1- and 4-bit frames do not happen in movies: widen anyway.
+                let img = if img.bits < 8 {
+                    wide = img.to_8();
+                    &wide
+                } else {
+                    img
+                };
+                self.image.clear();
+                for y in 0..img.height {
+                    self.image.extend_from_slice(&img.row(y)[..w]);
+                }
+                self.bits = if img.bits == 24 { 24 } else { 8 };
+                for (i, c) in img.palette.iter().take(256).enumerate() {
+                    self.palette[i] = *c;
+                }
+            }
+            None => {}
+        }
+    }
+
+    /// Back to the first frame.
+    fn rewind(&mut self) {
+        let ok = match &mut self.dec {
+            Some(Movie::Flc(d)) => {
+                d.rewind();
+                d.next_frame().is_ok()
+            }
+            Some(Movie::Avi(m)) => m.rewind(),
+            None => false,
+        };
+        if ok {
+            self.take_image();
         }
         self.frame = 0;
     }
 
-    /// Decode the next frame (the animation loops after its last).
+    /// Decode the next frame (an animation loops after its last).
     fn advance(&mut self) -> bool {
-        let Some(d) = &mut self.dec else { return false };
-        if d.next_frame().is_err() {
+        let ok = match &mut self.dec {
+            Some(Movie::Flc(d)) => d.next_frame().is_ok(),
+            Some(Movie::Avi(m)) => m.step() || m.rewind(),
+            None => false,
+        };
+        if !ok {
             return false;
         }
-        self.image = d.frame().to_vec();
-        self.palette = *d.palette();
+        self.take_image();
         self.frame = (self.frame + 1) % self.frames.max(1);
         true
     }
@@ -153,12 +283,16 @@ fn draw(hps: u32, win: u32, v: &Video) {
         return;
     }
     let (w, h) = (v.width as usize, v.height as usize);
-    let stride = (w + 3) & !3;
+    let rowb = if v.bits == 24 { w * 3 } else { w };
+    let stride = (rowb + 3) & !3;
+    if v.image.len() < rowb * h {
+        return;
+    }
     // PM bitmaps are bottom-up.
     let mut bits = alloc::vec![0u8; stride * h];
     for y in 0..h {
-        let src = &v.image[y * w..y * w + w];
-        bits[(h - 1 - y) * stride..(h - 1 - y) * stride + w].copy_from_slice(src);
+        let src = &v.image[y * rowb..y * rowb + rowb];
+        bits[(h - 1 - y) * stride..(h - 1 - y) * stride + rowb].copy_from_slice(src);
     }
     // BITMAPINFO2 (16-byte header) with 256 RGB2 entries.
     let mut bmi = alloc::vec![0u8; 16 + 256 * 4];
@@ -166,7 +300,7 @@ fn draw(hps: u32, win: u32, v: &Video) {
     bmi[4..8].copy_from_slice(&(w as u32).to_le_bytes());
     bmi[8..12].copy_from_slice(&(h as u32).to_le_bytes());
     bmi[12..14].copy_from_slice(&1u16.to_le_bytes());
-    bmi[14..16].copy_from_slice(&8u16.to_le_bytes());
+    bmi[14..16].copy_from_slice(&(v.bits as u16).to_le_bytes());
     for (i, c) in v.palette.iter().enumerate() {
         bmi[16 + i * 4] = c[2];
         bmi[17 + i * 4] = c[1];
@@ -526,9 +660,56 @@ fn play(id: u16, r: &Req) -> Result<Reply, u32> {
     Ok(Reply::None)
 }
 
+/// The audio track of an AVI movie, played by its own thread while the
+/// device's epoch stays the same.
+unsafe extern "C" fn sound_player(param: u32) {
+    let id = param as u16;
+    let epoch = param >> 16;
+    let track = with(id, |d| {
+        let v = video(d);
+        let ms = v.frame * v.delay_ms;
+        match &v.dec {
+            Some(Movie::Avi(m)) => m.audio_from(ms),
+            _ => None,
+        }
+    })
+    .flatten();
+    let Some((rate, ch, bits, pcm)) = track else { return };
+    let mut stream = 0;
+    if unsafe { Rs2AudioOpen(rate, ch, bits, &mut stream) } != 0 {
+        return;
+    }
+    let live = || with(id, |d| d.epoch & 0xffff == epoch && d.mode == MCI_MODE_PLAY).unwrap_or(false);
+    for piece in pcm.chunks(8192) {
+        if !live() {
+            break;
+        }
+        unsafe { Rs2AudioWrite(stream, piece.as_ptr(), piece.len() as u32) };
+    }
+    while live() {
+        if unsafe { Rs2AudioDrain(stream, 100) } == 0 {
+            break;
+        }
+    }
+    unsafe {
+        Rs2AudioStop(stream);
+        Rs2AudioClose(stream);
+    }
+}
+
 unsafe extern "C" fn player(param: u32) {
     let id = param as u16;
     let epoch = param >> 16;
+    let avi = with(id, |d| matches!(video(d).dec, Some(Movie::Avi(_)))).unwrap_or(false);
+    if avi {
+        let mut tid = 0;
+        unsafe { DosCreateThread(&mut tid, sound_player, param, 0, 65536) };
+    }
+    // AVI frames keep to the clock (a slow frame is not made up for by
+    // the sound waiting).
+    let mut clock = 0u32;
+    unsafe { DosQuerySysInfo(14, 14, &mut clock, 4) };
+    let mut due = clock;
     show_frame(id);
     let mut finished = false;
     loop {
@@ -549,7 +730,15 @@ unsafe extern "C" fn player(param: u32) {
             finished = true;
             break;
         };
-        unsafe { DosSleep(delay) };
+        if avi {
+            due = due.wrapping_add(delay);
+            let mut now = 0u32;
+            unsafe { DosQuerySysInfo(14, 14, &mut now, 4) };
+            let wait = due.wrapping_sub(now) as i32;
+            unsafe { DosSleep(wait.clamp(0, delay as i32) as u32) };
+        } else {
+            unsafe { DosSleep(delay) };
+        }
         let ok = with(id, |d| d.epoch & 0xffff == epoch && video(d).advance()).unwrap_or(false);
         if !ok {
             break;
