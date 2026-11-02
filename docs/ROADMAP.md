@@ -379,8 +379,12 @@ Status markers: done, in progress, planned.
 - done: SOM's class libraries SOMTC.DLL (TypeCodes), SOMU.DLL (before/after,
   traced and single-instance metaclasses, SOMBuf, UUIDs) and SOMIR.DLL
   (the interface repository, reading IBM's .IR files), binary compatible
-  with IBM's; SOMDesc/SOMArgList/SOMCommand and writing .IR files are
-  still to do
+  with IBM's; SOMDesc and SOMArgList read from the repository; SOMCommand
+  and writing .IR files are still to do
+- not planned: DSOM (SOMD, SOMEM, SOMS, SOMSEC, the SOMDD daemon): nothing
+  on the CD uses distributed objects. Object REXX imports SOMD.DLL but only
+  builds its client classes; a stub SOMD with those exports would let it
+  run without IBM's
 - done: the Workplace Shell's object model in PMWP.DLL (58 classes with
   IBM's class data and ordinals; WPObject, WPProgram, WPShadow,
   WPFileSystem, WPDataFile, WPFolder, WPDrives/WPDisk, the desktop,
