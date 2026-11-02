@@ -75,7 +75,19 @@ name = "midi"
 version = "0.1.0"
 
 [[package]]
+name = "mmavi"
+version = "0.1.0"
+dependencies = [
+ "mmimage",
+ "os2-exe",
+]
+
+[[package]]
 name = "mmfmt"
+version = "0.1.0"
+
+[[package]]
+name = "mmimage"
 version = "0.1.0"
 
 [[package]]
