@@ -2411,6 +2411,24 @@ through `userland/pmkit` (the PM entry points and constants they use,
 menu and dialog templates, help instances made from tables of panel
 numbers, OS2.INI settings, GPI helpers).
 
+Where they are (xtask's USER_PROGRAMS, HELP_FILES and APP_DATA put
+them on the development and dist images): `\OS2` for CLIPOS2,
+MPCPUMON, ICONEDIT, GLOCALE, PMCHKDSK and PMFORMAT, `\OS2\APPS` for
+PICVIEW, PMSEEK, KLONDIKE, MAHJONGG (with its layouts, `*.MAH`) and
+OS2CHESS, their help in `\OS2\HELP`. The Workplace Shell's first start
+(desktop version 12, [WPS.md](WPS.md#the-shell-process)) makes IBM's
+objects for them, with INI.RC's titles, object IDs, help panels and
+associations: the Utilities folder (`<WP_TOOLS>`) in Programs with
+Picture Viewer (`<WP_PICV>`, `*.MET`, `*.PIF`), Seek and Scan Files
+(`<WP_SEEK>`), Icon Editor (`<WP_ICON>`, `*.BMP`, `*.PTR`, `*.ICO`),
+Pulse (`<WP_PULSE>`) and Clipboard Viewer (`<WP_CLIPV>`); the Games
+folder (`<WP_GAMES>`) with Klondike Solitaire (`<WP_KLDK>`), OS/2 Chess
+(`<WP_CHESS>`) and the Mahjongg Solitaire folder (`<MAH_FOLDER>`:
+Mahjongg, `<MAH_EXE>`, `*.MAH`, and shadows of the layouts); Locale
+(`<WP_LOCALE>`) in System Setup. A drive's pop-up menu has Check
+disk... and Format disk... (IBM's ids 128 and 124; not for CD drives),
+which start `\OS2\PMCHKDSK.EXE X:` and `\OS2\PMFORMAT.EXE X:`.
+
 ### Clipboard Viewer (CLIPOS2.EXE)
 
 `userland/clipos2`. As IBM's: the window is the clipboard viewer
