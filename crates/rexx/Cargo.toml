@@ -1,0 +1,8 @@
+[package]
+name = "rexx"
+description = "no_std classic REXX interpreter (SAA Procedures Language 2.0, as IBM OS/2's REXX.DLL): the language, decimal arithmetic, built-in functions and stream I/O over a host interface"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]

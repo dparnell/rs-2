@@ -105,6 +105,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rexx"
+version = "0.1.0"
+
+[[package]]
 name = "rs2-boot"
 version = "0.1.0"
 dependencies = [
