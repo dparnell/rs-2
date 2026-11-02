@@ -1,6 +1,7 @@
-//! rs2's interface repository: `\OS2\ETC\SOM.IR` written from
-//! `userland/somir/som-ir.txt` (made by tools/scripts/gen_som_ir.py from
-//! the IDL of the SOM classes rs2 ships). The file format is in
+//! rs2's interface repositories: `\OS2\ETC\SOM.IR`, `WPSH.IR`,
+//! `WPDSERV.IR` and `REXX.IR` written from `userland/somir/*-ir.txt` (made
+//! by tools/scripts/gen_som_ir.py from the IDL of the SOM classes rs2
+//! ships, the Workplace Shell's and Object REXX's). The file format is in
 //! docs/formats/som-ir.md: big-endian integers, a 32-byte header, fixed
 //! and variable records for each definition, contents records for the
 //! containers and reference lists for the interfaces' derived interfaces.
@@ -22,6 +23,10 @@
 //! `self(NAME)` and `foreign("NAME","CONTEXT",SIZE)`; `-` is none.
 
 use std::collections::HashMap;
+
+/// The repositories: the text in userland/somir and the file in \OS2\ETC.
+pub const REPOSITORIES: &[(&str, &str)] =
+    &[("som-ir.txt", "SOM.IR"), ("wpsh-ir.txt", "WPSH.IR"), ("wpdserv-ir.txt", "WPDSERV.IR"), ("rexx-ir.txt", "REXX.IR")];
 
 const MAGIC: i32 = 0x0517_9979;
 

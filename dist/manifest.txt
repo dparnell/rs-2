@@ -3,7 +3,11 @@
 # the System Editor, from userland/e, and its help OS2\HELP\E.HLP compiled
 # from userland/e/E.IPF), the system message files (OS2\SYSTEM\OSO001.MSG
 # and the others, from userland/msg) and the help books (OS2\HELP\WPHELP.HLP,
-# OS2\BOOK\CMDREF.INF and START.INF, from userland/help).
+# OS2\BOOK\CMDREF.INF and START.INF, from userland/help), and the SOM
+# interface repositories OS2\ETC\SOM.IR, WPSH.IR, WPDSERV.IR and REXX.IR
+# (written from userland/somir/*-ir.txt, which tools/scripts/gen_som_ir.py
+# makes from the IDL of SOM's, the Workplace Shell's and Object REXX's
+# classes).
 dist/CONFIG.SYS -> CONFIG.SYS
 dist/README.TXT -> README.TXT
 dist/etc/HOSTS -> MPTN\ETC\HOSTS
