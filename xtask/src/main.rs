@@ -618,6 +618,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pmgre", "OS2\\DLL\\PMGRE.DLL"),
         ("thailib", "OS2\\DLL\\THAILIB.DLL"),
         ("pmwp", "OS2\\DLL\\PMWP.DLL"),
+        ("wpconfig", "OS2\\DLL\\WPCONFIG.DLL"),
         ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
         ("uconv", "OS2\\DLL\\UCONV.DLL"),
         ("mmio", "OS2\\DLL\\MMIO.DLL"),
