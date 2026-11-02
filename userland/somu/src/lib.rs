@@ -37,6 +37,7 @@ extern crate alloc;
 extern crate os2;
 
 pub mod buf;
+pub mod cmd;
 pub mod coop;
 pub mod desc;
 pub mod misc;
@@ -466,7 +467,7 @@ pub extern "C" fn SOMArgListNewClass(major: i32, minor: i32) -> usize {
         cd: p!(SOMArgListClassData),
         ccd: p!(SOMArgListCClassData),
     });
-    unsafe { SOMArgListCClassData[2] = desc::__v_set_args as usize };
+    unsafe { SOMArgListCClassData[2] = cmd::__v_set_args as usize };
     c
 }
 
@@ -485,7 +486,7 @@ pub extern "C" fn SOMCommandNewClass(major: i32, minor: i32) -> usize {
         cd: p!(SOMCommandClassData),
         ccd: p!(SOMCommandCClassData),
     });
-    unsafe { SOMCommandCClassData[2] = desc::__v_set_command as usize };
+    unsafe { SOMCommandCClassData[2] = cmd::__v_set_command as usize };
     c
 }
 

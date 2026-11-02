@@ -4,8 +4,8 @@
 //! argument list taken apart with it (IBM's: the environment first for
 //! callstyle idl, floating point arguments 8 bytes, everything else 4),
 //! and SOMMTraced's printing of arguments and results with them.
-//! SOMCommand and the externalization functions built on it (DSOM's and
-//! the persistence framework's) are not done: they fail (-1).
+//! SOMCommand, the text form of argument lists and the externalization
+//! functions are in cmd.rs.
 
 use alloc::vec::Vec;
 
@@ -27,11 +27,11 @@ unsafe extern "C" {
     #[link_name = "SOMIR.39"]
     fn RepositoryNewClass(major: i32, minor: i32) -> usize;
     #[link_name = "SOMIR.35"]
-    static ContainedClassData: [usize; 36];
+    pub static ContainedClassData: [usize; 36];
     #[link_name = "SOMIR.54"]
     static AttributeDefClassData: [usize; 6];
     #[link_name = "SOMTC.26"]
-    fn tcKind(t: usize, ev: usize) -> u32;
+    pub fn tcKind(t: usize, ev: usize) -> u32;
     #[link_name = "SOMTC.29"]
     fn tcSize(t: usize, ev: usize) -> i32;
     #[link_name = "SOMTC.7"]
@@ -42,7 +42,7 @@ unsafe extern "C" {
     fn somGetClassFromMToken(token: usize) -> usize;
 }
 
-fn cdp(a: &'static [usize]) -> *const usize {
+pub fn cdp(a: &'static [usize]) -> *const usize {
     a.as_ptr()
 }
 
@@ -62,7 +62,7 @@ fn repository() -> usize {
     r
 }
 
-fn lookup(id: &[u8]) -> usize {
+pub fn lookup(id: &[u8]) -> usize {
     let r = repository();
     if r == 0 {
         return 0;
@@ -71,7 +71,7 @@ fn lookup(id: &[u8]) -> usize {
     call(cdp(unsafe { &RepositoryClassData }), 0, &[r, 0, z.as_ptr() as usize])
 }
 
-fn modifier(id: &[u8], m: &[u8]) -> *mut u8 {
+pub fn modifier(id: &[u8], m: &[u8]) -> *mut u8 {
     let r = repository();
     if r == 0 {
         return core::ptr::null_mut();
@@ -83,25 +83,27 @@ fn modifier(id: &[u8], m: &[u8]) -> *mut u8 {
 /// What SOMDesc keeps (IBM's 28 bytes).
 #[repr(C)]
 pub struct Ds {
-    kind: u32,
-    def: usize,
-    spare: usize,
+    pub kind: u32,
+    pub def: usize,
+    /// The interface's id (SOMMalloc'd).
+    pub spare: usize,
     /// The OperationDescription (from describe).
-    op: *const usize,
+    pub op: *const usize,
     /// 1 oidl, 2 idl, 3 unknown.
-    callstyle: u32,
-    is_attr: u8,
-    is_get: u8,
-    pad: [u8; 2],
-    attr_type: usize,
+    pub callstyle: u32,
+    pub is_attr: u8,
+    pub is_get: u8,
+    pub pad: [u8; 2],
+    pub attr_type: usize,
 }
 
-fn ds(o: usize) -> &'static mut Ds {
+pub fn ds(o: usize) -> &'static mut Ds {
     data::<Ds>(p!(SOMDescCClassData), o)
 }
 
 /// Describe a method by its descriptor ("Class::method").
 fn set_desc(d: &mut Ds, descriptor: &[u8]) -> i32 {
+    somsup::free(d.spare as *mut u8);
     *d = Ds { kind: 0, def: 0, spare: 0, op: core::ptr::null(), callstyle: 3, is_attr: 0, is_get: 0, pad: [0; 2], attr_type: 0 };
     let desc = descriptor.strip_prefix(b"::").unwrap_or(descriptor);
     let Some(split) = desc.windows(2).rposition(|w| w == b"::") else { return -1 };
@@ -135,6 +137,7 @@ fn set_desc(d: &mut Ds, descriptor: &[u8]) -> i32 {
     }
     let mut iid = b"::".to_vec();
     iid.extend_from_slice(iface);
+    d.spare = somsup::dup(&iid) as usize;
     let cs = modifier(&iid, b"callstyle");
     d.callstyle = if cs.is_null() {
         2
@@ -184,7 +187,7 @@ fn descriptor(obj: usize, name: *const u8) -> Option<Vec<u8>> {
     Some(v)
 }
 
-fn num_args(d: &Ds) -> u32 {
+pub fn num_args(d: &Ds) -> u32 {
     if d.is_attr != 0 {
         return (d.is_get == 0) as u32;
     }
@@ -193,7 +196,7 @@ fn num_args(d: &Ds) -> u32 {
 
 /// The parameter description of argument `i`: name, id, defined_in,
 /// type, mode.
-fn arg_info(d: &Ds, i: u32) -> Option<[usize; 5]> {
+pub fn arg_info(d: &Ds, i: u32) -> Option<[usize; 5]> {
     if d.is_attr != 0 {
         return if d.is_get == 0 && i == 0 { Some([0, 0, 0, d.attr_type, 1]) } else { None };
     }
@@ -216,6 +219,9 @@ fn ret_info(d: &Ds) -> (usize, u32) {
 
 // ---- SOMDesc's methods ----
 
+pub fn set_som_desc_for(o: usize, obj: usize, name: *const u8) -> i32 {
+    set_som_desc(o, obj, name)
+}
 extern "C" fn set_som_desc(o: usize, obj: usize, name: *const u8) -> i32 {
     match descriptor(obj, name) {
         Some(d) => set_desc(ds(o), &d),
@@ -323,12 +329,12 @@ pub fn desc_methods() -> Vec<(&'static str, usize)> {
     ("somutGetContextIds", __m_get_context_ids as usize),
     ("somutGetCallStyle", __m_get_call_style as usize),
     ("somutIsOnewayAck", __m_is_oneway_ack as usize),
-    ("somutFlushCache", 0),
-    ("somutFlushEntry", 0),
-    ("somutGetOperationModifier", 0),
-    ("_get_somutReturnResultOwner", 0),
-    ("somutGetArgOwner", 0),
-    ("somutGetArgIndex", 0),
+    ("somutFlushCache", crate::cmd::__m_flush as usize),
+    ("somutFlushEntry", crate::cmd::__m_flush as usize),
+    ("somutGetOperationModifier", crate::cmd::__m_get_op_modifier as usize),
+    ("_get_somutReturnResultOwner", crate::cmd::__m_result_owner as usize),
+    ("somutGetArgOwner", crate::cmd::__m_arg_owner as usize),
+    ("somutGetArgIndex", crate::cmd::__m_arg_index as usize),
     ]
 }
 
@@ -337,13 +343,13 @@ pub fn desc_methods() -> Vec<(&'static str, usize)> {
 /// What SOMArgList keeps: its SOMDesc and the arguments, copied.
 #[repr(C)]
 pub struct Al {
-    desc: usize,
-    list: *mut Vec<u8>,
-    offsets: *mut Vec<u32>,
-    rest: [usize; 6],
+    pub desc: usize,
+    pub list: *mut Vec<u8>,
+    pub offsets: *mut Vec<u32>,
+    pub rest: [usize; 6],
 }
 
-fn al(o: usize) -> &'static mut Al {
+pub fn al(o: usize) -> &'static mut Al {
     let a = data::<Al>(p!(SOMArgListCClassData), o);
     if a.list.is_null() {
         a.list = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(Vec::new()));
@@ -352,7 +358,7 @@ fn al(o: usize) -> &'static mut Al {
     a
 }
 
-fn add(o: usize, bytes: &[u8]) -> i32 {
+pub fn add(o: usize, bytes: &[u8]) -> i32 {
     let a = al(o);
     let (l, off) = unsafe { (&mut *a.list, &mut *a.offsets) };
     off.push(l.len() as u32);
@@ -363,7 +369,7 @@ fn add(o: usize, bytes: &[u8]) -> i32 {
     0
 }
 
-fn arg_at(o: usize, i: u32) -> *const u8 {
+pub fn arg_at(o: usize, i: u32) -> *const u8 {
     let a = al(o);
     let (l, off) = unsafe { (&*a.list, &*a.offsets) };
     match off.get((i & 0xffff) as usize) {
@@ -515,19 +521,19 @@ pub fn arglist_methods() -> Vec<(&'static str, usize)> {
     ("somutGetNumArgsList", __m_get_num_args_list as usize),
     ("somutGetArgList", __m_get_arg_list as usize),
     ("somutSetArgList", __m_set_arg_list as usize),
-    ("somutGetArgs", 0),
-    ("somutSetArgs", 0),
+    ("somutGetArgs", crate::cmd::__m_get_args as usize),
+    ("somutSetArgs", crate::cmd::__m_set_args as usize),
     ("somutAddSomEnvArg", __m_add_word as usize),
     ]
 }
 
 pub fn command_methods() -> Vec<(&'static str, usize)> {
     alloc::vec![
-    ("somutSetCommand", 0),
-    ("somutSetClassCommand", 0),
-    ("somutGetExtRep", 0),
-    ("somutSetExtRep", 0),
-    ("somutDoCommand", 0),
+    ("somutSetCommand", crate::cmd::__m_set_command as usize),
+    ("somutSetClassCommand", crate::cmd::__m_set_class_command as usize),
+    ("somutGetExtRep", crate::cmd::__m_get_ext_rep as usize),
+    ("somutSetExtRep", crate::cmd::__m_set_ext_rep as usize),
+    ("somutDoCommand", crate::cmd::__m_do_command as usize),
     ]
 }
 
@@ -538,15 +544,6 @@ methods! {
     __m_cmd_uninit => nothing, 1;
 }
 
-/// The varargs entries (somva_SOMArgList_somutSetArgs, ...): fail.
-#[unsafe(naked)]
-pub extern "C" fn __v_set_args() {
-    core::arch::naked_asm!("mov eax, -1", "ret");
-}
-#[unsafe(naked)]
-pub extern "C" fn __v_set_command() {
-    core::arch::naked_asm!("mov eax, -1", "ret");
-}
 
 // ---- SOMMTraced's printing (IBM's formats) ----
 
@@ -650,34 +647,6 @@ pub fn trace_result(obj: usize, mid: SomId, ret: usize) -> bool {
         print_value(ret as *const u8, t);
     }
     true
-}
-
-// ---- The externalization functions (_Optlink; somExternalizeCommandInit varargs) ----
-
-pub extern "C" fn somutInternalizeObject() -> i32 {
-    -1
-}
-pub extern "C" fn somutExternalizeObject() -> i32 {
-    -1
-}
-pub extern "C" fn somutIntCommand() -> i32 {
-    -1
-}
-pub extern "C" fn somutExtCommand() -> i32 {
-    -1
-}
-
-somsup::optlink! {
-    __o_somutInternalizeObject => somutInternalizeObject, 0;
-    __o_somutExternalizeObject => somutExternalizeObject, 0;
-    __o_somutIntCommand => somutIntCommand, 0;
-    __o_somutExtCommand => somutExtCommand, 0;
-}
-
-#[unsafe(naked)]
-#[unsafe(no_mangle)]
-pub extern "C" fn __v_somExternalizeCommandInit() {
-    core::arch::naked_asm!("mov eax, -1", "ret");
 }
 
 pub fn _unused(_v: Vec<u8>) {}
