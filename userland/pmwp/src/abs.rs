@@ -414,6 +414,47 @@ extern "C" fn disk_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
     obj::call(m::WPObject::wpViewObject, &[root, cnr as usize, view as usize, param as usize]) as u32
 }
 
+// A drive's Check disk... and Format disk... items (IBM's ids), which
+// start rs2's PMCHKDSK and PMFORMAT for the drive, as IBM's shell does.
+const WPMENUID_FORMAT: u32 = 124;
+const WPMENUID_CHKDSK: u32 = 128;
+
+#[repr(C)]
+struct DiskMenuItem {
+    pos: i16,
+    style: u16,
+    attr: u16,
+    id: u16,
+    sub: u32,
+    item: u32,
+}
+
+extern "C" fn disk_modify_menu(o: usize, menu: u32, cnr: u32, pos: u32) -> u32 {
+    som::call_parent(wps::ccd("WPDisk"), wps::cd("WPObject"), m::WPObject::wpModifyPopupMenu, &[o, menu as usize, cnr as usize, pos as usize]);
+    // MIS_TEXT; not offered for a CD.
+    if !crate::icons::is_cd(dd(o).drive) {
+        for (id, t) in [(WPMENUID_CHKDSK, &b"Check disk...\0"[..]), (WPMENUID_FORMAT, b"Format disk...\0")] {
+            let mi = DiskMenuItem { pos: -1, style: 0x0001, attr: 0, id: id as u16, sub: 0, item: 0 };
+            crate::pm::send(menu, 0x0180, &mi as *const DiskMenuItem as u32, t.as_ptr() as u32);
+        }
+    }
+    1
+}
+
+extern "C" fn disk_menu_selected(o: usize, frame: u32, id: u32) -> u32 {
+    let prog: &[u8] = match id {
+        WPMENUID_CHKDSK => b"PMCHKDSK.EXE",
+        WPMENUID_FORMAT => b"PMFORMAT.EXE",
+        _ => return som::call_parent(wps::ccd("WPDisk"), wps::cd("WPObject"), m::WPObject::wpMenuItemSelected, &[o, frame as usize, id as usize]) as u32,
+    };
+    let boot = crate::install::boot_drive();
+    let exe = [&[boot][..], b":\\OS2\\", prog].concat();
+    let drive = [b'@' + dd(o).drive as u8, b':'];
+    let dir = [boot, b':', b'\\'];
+    launch::start(&exe, &drive, &dir, b"", launch::PROG_PM);
+    1
+}
+
 /// A CD drive shows a CD.
 extern "C" fn disk_icon(obj: usize) -> u32 {
     if obj::d(obj).icon == 0 && crate::icons::is_cd(dd(obj).drive) {
@@ -466,6 +507,8 @@ methods! {
     __m_disk_save_state => disk_save_state, 1;
     __m_disk_restore_state => disk_restore_state, 2;
     __m_disk_open => disk_open, 4;
+    __m_disk_modify_menu => disk_modify_menu, 4;
+    __m_disk_menu_selected => disk_menu_selected, 3;
 }
 
 pub fn impl_program() -> Impl {
@@ -532,6 +575,8 @@ pub fn impl_disk() -> Impl {
             ("wpRestoreState", __m_disk_restore_state as usize),
             ("wpOpen", __m_disk_open as usize),
             ("wpQueryIcon", __m_disk_icon as usize),
+            ("wpModifyPopupMenu", __m_disk_modify_menu as usize),
+            ("wpMenuItemSelected", __m_disk_menu_selected as usize),
         ]
         .into_iter()
         .chain(crate::dnd::overrides("WPDisk"))
