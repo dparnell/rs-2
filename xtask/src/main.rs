@@ -661,6 +661,14 @@ const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/
     ("os2chess/OS2CHESS.IPF", "OS2\\HELP\\OS2CHESS.HLP"),
 ];
 
+/// The applets' data files in userland/, with their names.
+const APP_DATA: &[(&str, &str)] = &[
+    ("mahjongg/layouts/DEFAULT.MAH", "OS2\\APPS\\DEFAULT.MAH"),
+    ("mahjongg/layouts/PYRAMID.MAH", "OS2\\APPS\\PYRAMID.MAH"),
+    ("mahjongg/layouts/FORTRESS.MAH", "OS2\\APPS\\FORTRESS.MAH"),
+    ("mahjongg/layouts/TWINPEAK.MAH", "OS2\\APPS\\TWINPEAK.MAH"),
+];
+
 /// Programs marked as PM applications (WINDOWAPI).
 const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "clipos2", "mpcpumon", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "klondike", "mahjongg", "os2chess"];
 
@@ -737,6 +745,9 @@ fn build_userland() -> Option<image::FileList> {
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());
         std::fs::write(&out, help).unwrap();
         files.push((out, dest.to_string()));
+    }
+    for (src, dest) in APP_DATA {
+        files.push((ul.join(src), dest.to_string()));
     }
     Some(files)
 }
