@@ -248,7 +248,10 @@ fn current_dir() -> Vec<u8> {
 
 // ---- messages ----
 
+#[cfg(not(orexx))]
 static FALLBACK: &str = include_str!("../../msg/REX.TXT");
+#[cfg(orexx)]
+static FALLBACK: &str = include_str!("../../msg/OREX.TXT");
 
 /// A message's text from REX.MSG (or the built-in copy), without its
 /// prefix, %1/%2 removed.
@@ -266,13 +269,17 @@ pub fn message_text(num: u32) -> Option<Vec<u8>> {
         while t.last().is_some_and(|&c| c == b'\n' || c == b'\r') {
             t.pop();
         }
+        // Object REXX's messages: "REXnnnnE: text"
+        if t.starts_with(b"REX") && t.len() > 10 && &t[8..10] == b": " {
+            t.drain(..10);
+        }
         return Some(t);
     }
     let key = alloc::format!("REX{num:04}");
     for l in FALLBACK.lines() {
         if l.starts_with(&key) && l.len() > 9 {
             let t = l[9..].trim_start_matches(": ").trim_end();
-            let t = t.replace("%1", "").replace("%2", "");
+            let t = t.replace("%1", "").replace("%2", "").replace("%0", "");
             return Some(t.into_bytes());
         }
     }
@@ -280,6 +287,7 @@ pub fn message_text(num: u32) -> Option<Vec<u8>> {
 }
 
 /// The full error report line: REXnnnn: Error n running FILE, line L: text
+#[cfg_attr(orexx, allow(dead_code))]
 fn error_report(code: u32, file: &[u8], line: u32) -> Vec<u8> {
     let ls = alloc::format!("{line}\0");
     let cs = alloc::format!("{code}\0");
@@ -754,6 +762,9 @@ impl Host for OsHost {
         // programs on disk
         if let Some(path) = find_program(name) {
             if let Some(src) = read_file(&path) {
+                // a program REXXC tokenized
+                #[cfg(orexx)]
+                let src = crate::oohost::untokenize(&src).unwrap_or(src);
                 return External::Program { source: src, path };
             }
         }
@@ -866,6 +877,9 @@ impl Host for OsHost {
     }
 
     fn report_error(&mut self, st: &mut State, code: u32, file: &[u8], line: u32) {
+        #[cfg(orexx)]
+        let text = crate::oohost::error_report(code, file, line);
+        #[cfg(not(orexx))]
         let text = error_report(code, file, line);
         if self.exit(RXSIO).is_some() {
             let mut t = text.clone();
@@ -918,6 +932,64 @@ impl Host for OsHost {
         unsafe { os2::msg::DosPutMessage(2, text.len() as u32, text.as_ptr()) };
     }
 
+    #[cfg(orexx)]
+    fn report_detail(&mut self, st: &mut State, major: u32, minor: u32, msg: &[u8]) {
+        let text = crate::oohost::detail_report(major, minor, msg);
+        if self.exit(RXSIO).is_some() {
+            let mut t = text.clone();
+            while t.last().is_some_and(|&c| c == b'\n' || c == b'\r') {
+                t.pop();
+            }
+            if self.sio_out(st, 2, &t) {
+                return;
+            }
+        }
+        unsafe { os2::msg::DosPutMessage(2, text.len() as u32, text.as_ptr()) };
+    }
+
+    #[cfg(orexx)]
+    fn find_program(&mut self, name: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+        let path = find_program(name)?;
+        let src = read_file(&path)?;
+        let src = crate::oohost::untokenize(&src).unwrap_or(src);
+        Some((src, path))
+    }
+
+    #[cfg(orexx)]
+    fn spawn(&mut self, job: alloc::boxed::Box<dyn FnOnce(&mut dyn rexx::Host)>) -> bool {
+        crate::oohost::spawn(job)
+    }
+
+    #[cfg(orexx)]
+    fn yield_now(&mut self) {
+        crate::oohost::yield_now()
+    }
+
+    #[cfg(orexx)]
+    fn wait_guard(&mut self, _st: &mut State) -> bool {
+        crate::oohost::wait()
+    }
+
+    #[cfg(orexx)]
+    fn sleep(&mut self, ms: u32) {
+        crate::oohost::sleep(ms)
+    }
+
+    #[cfg(orexx)]
+    fn ext_lookup(&mut self, _st: &mut State, name: &[u8]) -> Option<(u32, usize, bool, Vec<u8>)> {
+        crate::oohost::ext_lookup(name)
+    }
+
+    #[cfg(orexx)]
+    fn ext_class(&mut self, _st: &mut State, spec: &[u8]) -> Option<(u32, usize, Vec<u8>)> {
+        crate::oohost::ext_class(spec)
+    }
+
+    #[cfg(orexx)]
+    fn ext_send(&mut self, st: &mut State, kind: u32, handle: usize, msg: &[u8], args: &[rexx::ExtArg]) -> Result<rexx::ExtArg, rexx::ExtErr> {
+        crate::with_state(st, || crate::oohost::ext_send(kind, handle, msg, args))
+    }
+
     fn init(&mut self, st: &mut State) {
         if self.exit(RXINI).is_some() {
             let _ = self.call_exit(st, RXINI, 1, null_mut());
@@ -941,6 +1013,7 @@ impl Host for OsHost {
             OpenMode::Read => (OPEN_ACTION_FAIL_IF_NEW | OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_READONLY | OPEN_SHARE_DENYNONE),
             OpenMode::Write => (OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_WRITEONLY | OPEN_SHARE_DENYWRITE),
             OpenMode::Both => (OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYWRITE),
+            OpenMode::Replace => (OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYWRITE),
         };
         let (mut hf, mut act) = (0u32, 0u32);
         let rc = unsafe { DosOpen(z.as_ptr(), &mut hf, &mut act, 0, 0, action, access | OPEN_FLAGS_NOINHERIT, null_mut()) };

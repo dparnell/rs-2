@@ -9,4 +9,5 @@ fn main() {
         println!("cargo:rustc-link-arg=--undefined={name}");
     }
     println!("cargo:rerun-if-changed=exports.def");
+    println!("cargo::rustc-check-cfg=cfg(orexx)");
 }

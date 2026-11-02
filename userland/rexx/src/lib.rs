@@ -22,6 +22,8 @@ extern crate os2;
 
 mod api;
 mod host;
+#[cfg(orexx)]
+mod oohost;
 mod r16;
 mod stack;
 
@@ -96,6 +98,11 @@ exports! {
     __a_RexxSetHalt => set_halt;
     __a_RexxSetTrace => set_trace;
     __a_RexxResetTrace => reset_trace;
+}
+
+#[cfg(orexx)]
+exports! {
+    __a_RexxTranslateProgram => oohost::translate_program;
 }
 
 // ---- per-thread state ----
@@ -272,6 +279,9 @@ pub extern "C" fn rexx_start(
             return -3;
         };
         let Some(src) = host::read_file(&path) else { return -3 };
+        // a program REXXC tokenized
+        #[cfg(orexx)]
+        let src = oohost::untokenize(&src).unwrap_or(src);
         (src, path)
     };
     // the initial environment: as given, else the file's extension
@@ -319,8 +329,22 @@ pub extern "C" fn rexx_start(
     }
     let out = stack::deep(move || {
         let mut h = host::OsHost { exits: ex, locals: Vec::new(), tid };
+        #[cfg(orexx)]
+        let mut it = Interp::new_oo(&mut h);
+        #[cfg(not(orexx))]
         let mut it = Interp::new(&mut h);
-        it.run_program(&src, &path, ct, args, &env)
+        #[cfg(orexx)]
+        oohost::lock();
+        let r = it.run_program(&src, &path, ct, args, &env);
+        // the program's activities end before RexxStart returns
+        #[cfg(orexx)]
+        {
+            if outer {
+                oohost::wait_activities();
+            }
+            oohost::unlock();
+        }
+        r
     });
     if outer {
         unsafe { DosUnsetExceptionHandler(&mut reg) };
@@ -459,7 +483,7 @@ fn shv_one(st: &mut State, b: &mut ShvBlock) -> u8 {
                 b"QUENAME" => Some(host::queue_name()),
                 _ if u.starts_with(b"PARM.") => {
                     let n: usize = core::str::from_utf8(&u[5..]).ok().and_then(|s| s.parse().ok()).unwrap_or(0);
-                    if n == 0 { None } else { Some(st.args.get(n - 1).cloned().flatten().unwrap_or_default()) }
+                    if n == 0 { None } else { Some(st.args.get(n - 1).cloned().flatten().map(|v| v.fast_string()).unwrap_or_default()) }
                 }
                 _ => None,
             };

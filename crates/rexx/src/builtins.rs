@@ -462,7 +462,7 @@ pub fn call(it: &mut Interp, f: &mut Frame, name: &[u8], args: &[Option<Val>]) -
                     Some(_) => {
                         let n = a.pos(0, 1)? as usize;
                         match a.opt(1) {
-                            None => args.get(n - 1).cloned().flatten().unwrap_or_default(),
+                            None => args.get(n - 1).cloned().flatten().map(|v| v.fast_string()).unwrap_or_default(),
                             Some(_) => {
                                 let o = a.letter(1, b'N', b"EO")?;
                                 let exists = args.get(n - 1).is_some_and(|x| x.is_some());

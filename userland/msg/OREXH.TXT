@@ -1,0 +1,1109 @@
+; OREXH.MSG: help for rs2's Object REXX messages (HELP REXnnnn), rs2's
+; own text; installed as REXH.MSG while Object REXX is the system's
+; REXX. 200 and up explain the secondary messages of errors.
+REX
+REX0000H:
+REX0001H: EXPLANATION: The process has opened as many files as it may.
+ACTION: Close streams the program no longer needs (LINEOUT or
+        STREAM with the CLOSE command).
+REX0002H:
+REX0003H: EXPLANATION: The program file does not exist or another process
+             holds it locked.
+ACTION: Check the file name and try again.
+REX0004H: EXPLANATION: The program stopped because a halt was requested
+             (Ctrl+Break, or the application that runs it).
+ACTION: To handle halts in the program, use SIGNAL ON HALT or
+        CALL ON HALT.
+REX0005H: EXPLANATION: The interpreter could not get the memory or other
+             system resources it needs.
+ACTION: End other programs and try again.
+REX0006H: EXPLANATION: A comment was not ended with */, or a string was not
+             ended with its quote on the same line.
+ACTION: Add the missing */ or quote.
+REX0007H: EXPLANATION: A SELECT instruction must contain WHEN clauses (and
+             may end with OTHERWISE); another instruction was found,
+             or no WHEN matched and there is no OTHERWISE.
+ACTION: Correct the SELECT instruction.
+REX0008H: EXPLANATION: THEN or ELSE does not follow an IF or WHEN.
+ACTION: Check the IF and WHEN instructions; a DO group may be
+        missing its END.
+REX0009H: EXPLANATION: WHEN or OTHERWISE appears outside a SELECT
+             instruction.
+ACTION: Check the SELECT instruction for a missing or extra END.
+REX0010H: EXPLANATION: An END has no matching DO or SELECT, or the name on
+             END is not the control variable of its DO.
+ACTION: Check the DO, SELECT and END instructions.
+REX0011H: EXPLANATION: Routine calls or control structures are nested
+             more deeply than the interpreter allows, for example
+             by a recursion that does not end.
+ACTION: Check the program for endless recursion.
+REX0012H: EXPLANATION: A clause is longer than the interpreter can handle.
+ACTION: Split the clause.
+REX0013H: EXPLANATION: The program contains a character that may only
+             appear in strings or comments.
+ACTION: Remove the character or put it in quotes. Program files
+        must have CR LF line ends.
+REX0014H: EXPLANATION: The program ends inside a DO, SELECT or IF
+             instruction.
+ACTION: Add the missing END or the instruction after THEN or ELSE.
+REX0015H: EXPLANATION: A string ending in X or B is not a valid
+             hexadecimal or binary string. Blanks may separate only
+             whole bytes (hexadecimal) or groups of four digits
+             (binary).
+ACTION: Correct the string. A variable named X or B right after a
+        string must be separated from it by a blank or ||.
+REX0016H: EXPLANATION: SIGNAL, a condition trap or CALL ON names a label
+             that is not in the program.
+ACTION: Add the label or correct the name.
+REX0017H: EXPLANATION: PROCEDURE must be the first instruction of an
+             internal routine called with CALL or as a function.
+ACTION: Move the PROCEDURE instruction.
+REX0018H: EXPLANATION: IF or WHEN is not followed by THEN.
+ACTION: Add THEN.
+REX0019H: EXPLANATION: The instruction needs a string or a symbol here.
+ACTION: Correct the instruction.
+REX0020H: EXPLANATION: The instruction needs a symbol here.
+ACTION: Correct the instruction.
+REX0021H: EXPLANATION: The clause continues after the instruction is
+             complete.
+ACTION: Remove the extra data or end the clause with a semicolon.
+REX0022H: EXPLANATION: A character string is not valid.
+ACTION: Correct the string.
+REX0023H: EXPLANATION: A data string is not valid.
+ACTION: Correct the data.
+REX0024H: EXPLANATION: The TRACE setting is not one of A, C, E, F, I, L,
+             N, O, R, S, a number, or ? or ! with them.
+ACTION: Correct the TRACE instruction or function.
+REX0025H: EXPLANATION: A keyword after the instruction keyword is not
+             valid (for example in NUMERIC, PARSE or a condition
+             trap).
+ACTION: Correct the instruction.
+REX0026H: EXPLANATION: A whole number within the NUMERIC DIGITS setting is
+             needed, for example in a DO count or an exponent.
+ACTION: Correct the value.
+REX0027H: EXPLANATION: The DO instruction is not valid: TO, BY and FOR may
+             each appear once, after a control variable.
+ACTION: Correct the DO instruction.
+REX0028H: EXPLANATION: LEAVE or ITERATE is not inside a repetitive DO, or
+             names a control variable no active loop has.
+ACTION: Correct the instruction.
+REX0029H: EXPLANATION: The environment name in ADDRESS is too long.
+ACTION: Use a shorter name.
+REX0030H: EXPLANATION: A name or string is longer than allowed.
+ACTION: Shorten it.
+REX0031H: EXPLANATION: A value cannot be assigned to a symbol that starts
+             with a digit or a period.
+ACTION: Use a variable name that starts with a letter.
+REX0032H:
+REX0033H: EXPLANATION: An expression gave a value the instruction cannot
+             use, for example NUMERIC DIGITS not above NUMERIC FUZZ.
+ACTION: Correct the value.
+REX0034H: EXPLANATION: IF, WHEN, WHILE, UNTIL and the logical operators
+             need the value 0 or 1.
+ACTION: Correct the expression.
+REX0035H: EXPLANATION: An expression is not valid: an operator has no
+             operand, or two terms follow each other wrongly.
+ACTION: Correct the expression.
+REX0036H: EXPLANATION: An expression has more opening than closing
+             parentheses.
+ACTION: Add the missing parenthesis.
+REX0037H: EXPLANATION: A comma or a closing parenthesis appears where it
+             is not allowed.
+ACTION: Correct the expression.
+REX0038H: EXPLANATION: A PARSE template (or ARG or PULL) is not valid.
+ACTION: Correct the template.
+REX0039H: EXPLANATION: An expression is nested too deeply to evaluate.
+ACTION: Simplify the expression.
+REX0040H: EXPLANATION: A built-in or external routine was called with
+             arguments it does not accept, or it reported an error.
+ACTION: Check the number and the values of the arguments.
+REX0041H: EXPLANATION: A value used in arithmetic or as a number is not a
+             number.
+ACTION: Check the values in the expression.
+REX0042H: EXPLANATION: An arithmetic result is too large or too small, or
+             a division by zero was attempted.
+ACTION: Check the expression.
+REX0043H: EXPLANATION: A routine called is neither an internal label, a
+             built-in function, a registered function nor a program
+             found in the current directory or along PATH.
+ACTION: Check the name; register function packages with
+        RXFUNCADD.
+REX0044H: EXPLANATION: A routine called as a function ended without
+             returning a result.
+ACTION: End the routine with RETURN and an expression.
+REX0045H: EXPLANATION: A routine called as a function ended with RETURN
+             without an expression.
+ACTION: Return a result, or call the routine with CALL.
+REX0046H: EXPLANATION: A variable reference in parentheses is not valid.
+ACTION: Correct the reference.
+REX0047H: EXPLANATION: A label appears where it is not allowed.
+ACTION: Move the label.
+REX0048H: EXPLANATION: A system service the interpreter needed failed,
+             for example an exit reported an error.
+ACTION: Check the program and its environment.
+REX0049H: EXPLANATION: The interpreter found an internal error.
+ACTION: Report the problem.
+REX0050H:
+REX0051H:
+REX0052H:
+REX0053H:
+REX0054H:
+REX0055H:
+REX0056H:
+REX0057H:
+REX0058H:
+REX0059H:
+REX0060H:
+REX0061H:
+REX0062H:
+REX0063H:
+REX0064H:
+REX0065H:
+REX0066H:
+REX0067H:
+REX0068H:
+REX0069H:
+REX0070H:
+REX0071H:
+REX0072H:
+REX0073H:
+REX0074H:
+REX0075H:
+REX0076H:
+REX0077H:
+REX0078H:
+REX0079H:
+REX0080H:
+REX0081H:
+REX0082H:
+REX0083H:
+REX0084H:
+REX0085H:
+REX0086H:
+REX0087H:
+REX0088H:
+REX0089H:
+REX0090H: EXPLANATION: A class, method or routine of another program or object
+             system (::CLASS ... EXTERNAL) cannot be found.
+ACTION: Check the external name and that its DLL is installed.
+REX0091H: EXPLANATION: A message in an expression gave no result object.
+ACTION: Use a message instruction, or make the method return a result.
+REX0092H:
+REX0093H: EXPLANATION: A method was called with arguments it cannot take.
+ACTION: Correct the arguments of the message.
+REX0094H:
+REX0095H:
+REX0096H:
+REX0097H: EXPLANATION: The object received a message it has no method for, and
+             it has no UNKNOWN method.
+ACTION: Check the message name and the class of the object; to handle
+        such messages, use SIGNAL ON NOMETHOD or define UNKNOWN.
+REX0098H: EXPLANATION: The program could not continue (a class or library is
+             missing, or objects were used in a way that cannot work).
+ACTION: Correct the program as the secondary message says.
+REX0099H: EXPLANATION: The program's directives (::CLASS, ::METHOD, ::ROUTINE,
+             ::REQUIRES) or instructions cannot be translated.
+ACTION: Correct the program as the secondary message says.
+REX0100H:
+REX0101H:
+REX0102H:
+REX0103H:
+REX0104H:
+REX0105H:
+REX0106H:
+REX0107H:
+REX0108H:
+REX0109H:
+REX0110H:
+REX0111H:
+REX0112H:
+REX0113H:
+REX0114H: EXPLANATION: Interactive tracing pauses after each traced clause.
+ACTION: Press ENTER to go on, type = to run the clause again,
+        type an instruction to run it, or TRACE OFF to stop.
+REX0115H: EXPLANATION: RXSUBCOM was called with wrong parameters.
+ACTION: Use RXSUBCOM REGISTER, DROP, QUERY or LOAD with an
+        environment name.
+REX0116H: EXPLANATION: RXSUBCOM REGISTER needs an environment name, a DLL
+             name and a procedure name.
+ACTION: Correct the command.
+REX0117H: EXPLANATION: RXSUBCOM DROP needs an environment name and
+             optionally a DLL name.
+ACTION: Correct the command.
+REX0118H: EXPLANATION: RXSUBCOM LOAD needs an environment name and
+             optionally a DLL name.
+ACTION: Correct the command.
+REX0119H: EXPLANATION: The REXX queue system could not be set up.
+ACTION: Restart the system.
+REX0120H: EXPLANATION: The data is too long for a queue entry.
+ACTION: Use shorter entries.
+REX0121H: EXPLANATION: The memory for REXX queues is used up.
+ACTION: Delete queues or entries that are no longer needed.
+REX0122H: EXPLANATION: A queue name may contain only letters, digits and
+             the characters . ! ? _
+ACTION: Correct the name.
+REX0123H: EXPLANATION: The queue can be read and written only first in
+             first out or last in first out.
+ACTION: Use /FIFO or /LIFO.
+REX0124H: EXPLANATION: The queue named does not exist.
+ACTION: Create the queue with RXQUEUE('Create', name).
+REX0125H: EXPLANATION: RXSUBCOM QUERY needs an environment name and
+             optionally a DLL name.
+ACTION: Correct the command.
+REX0126H:
+REX0127H: EXPLANATION: REXXC was given parameters it does not know.
+ACTION: Run REXXC program [output] [/S].
+REX0128H: EXPLANATION: REXXC cannot write the tokenized program over its source.
+ACTION: Name a different output file.
+REX0129H: EXPLANATION: REXXC program [output] [/S] checks the program and, with
+             an output file, writes its tokenized form; /S writes no
+             banner.
+ACTION: None.
+REX0130H: EXPLANATION: Without an output file REXXC only checks the syntax.
+ACTION: None.
+REX0131H: EXPLANATION: The command is not valid.
+ACTION: Correct the command.
+REX0132H: EXPLANATION: A system call failed while REXXC ran (REXX may not be
+             Object REXX: run SWITCHRX.CMD).
+ACTION: Check the files and that Object REXX is installed.
+REX0133H:
+REX0134H:
+REX0135H:
+REX0136H:
+REX0137H:
+REX0138H:
+REX0139H:
+REX0140H:
+REX0141H:
+REX0142H:
+REX0143H:
+REX0144H:
+REX0145H:
+REX0146H:
+REX0147H:
+REX0148H:
+REX0149H:
+REX0150H:
+REX0151H:
+REX0152H:
+REX0153H:
+REX0154H:
+REX0155H:
+REX0156H:
+REX0157H:
+REX0158H:
+REX0159H:
+REX0160H:
+REX0161H:
+REX0162H:
+REX0163H:
+REX0164H:
+REX0165H:
+REX0166H:
+REX0167H:
+REX0168H:
+REX0169H:
+REX0170H:
+REX0171H:
+REX0172H:
+REX0173H:
+REX0174H:
+REX0175H:
+REX0176H:
+REX0177H:
+REX0178H:
+REX0179H:
+REX0180H:
+REX0181H:
+REX0182H:
+REX0183H:
+REX0184H:
+REX0185H:
+REX0186H:
+REX0187H:
+REX0188H:
+REX0189H:
+REX0190H:
+REX0191H:
+REX0192H:
+REX0193H:
+REX0194H:
+REX0195H:
+REX0196H:
+REX0197H:
+REX0198H:
+REX0199H:
+REX0200H: EXPLANATION: The file "&1" cannot be read.
+ACTION: Correct the program.
+REX0201H: EXPLANATION: The &1 condition interrupted the program.
+ACTION: Correct the program.
+REX0202H: EXPLANATION: The comment that starts on line &1 is not closed.
+ACTION: Correct the program.
+REX0203H: EXPLANATION: A string in single quotes is not closed.
+ACTION: Correct the program.
+REX0204H: EXPLANATION: A string in double quotes is not closed.
+ACTION: Correct the program.
+REX0205H: EXPLANATION: The SELECT on line &1 needs a WHEN.
+ACTION: Correct the program.
+REX0206H: EXPLANATION: The SELECT on line &1 needs WHEN, OTHERWISE or END.
+ACTION: Correct the program.
+REX0207H: EXPLANATION: No WHEN of the SELECT was true and there is no OTHERWISE.
+ACTION: Correct the program.
+REX0208H: EXPLANATION: This THEN belongs to no IF or WHEN.
+ACTION: Correct the program.
+REX0209H: EXPLANATION: This ELSE belongs to no THEN.
+ACTION: Correct the program.
+REX0210H: EXPLANATION: This WHEN belongs to no SELECT.
+ACTION: Correct the program.
+REX0211H: EXPLANATION: This OTHERWISE belongs to no SELECT.
+ACTION: Correct the program.
+REX0212H: EXPLANATION: This END belongs to no DO or SELECT.
+ACTION: Correct the program.
+REX0213H: EXPLANATION: END "&1" does not name the control variable of the DO ("&2", line &3).
+ACTION: Correct the program.
+REX0214H: EXPLANATION: The DO on line &2 has no control variable, so END cannot name one; found "&1".
+ACTION: Correct the program.
+REX0215H: EXPLANATION: END cannot come straight after THEN.
+ACTION: Correct the program.
+REX0216H: EXPLANATION: END cannot come straight after ELSE.
+ACTION: Correct the program.
+REX0217H: EXPLANATION: The END of the SELECT on line &2 cannot name a symbol; found "&1".
+ACTION: Correct the program.
+REX0218H: EXPLANATION: There is no more room on the control stack.
+ACTION: Correct the program.
+REX0219H: EXPLANATION: The character "&1" ('&2'X) is not allowed in a program.
+ACTION: Correct the program.
+REX0220H: EXPLANATION: The DO on line &1 has no END.
+ACTION: Correct the program.
+REX0221H: EXPLANATION: The SELECT on line &1 has no END.
+ACTION: Correct the program.
+REX0222H: EXPLANATION: The THEN on line &1 needs an instruction after it.
+ACTION: Correct the program.
+REX0223H: EXPLANATION: The ELSE on line &1 needs an instruction after it.
+ACTION: Correct the program.
+REX0224H: EXPLANATION: The OTHERWISE on line &1 has no END.
+ACTION: Correct the program.
+REX0225H: EXPLANATION: A blank is misplaced at position &1 of a hexadecimal string.
+ACTION: Correct the program.
+REX0226H: EXPLANATION: A blank is misplaced at position &1 of a binary string.
+ACTION: Correct the program.
+REX0227H: EXPLANATION: A hexadecimal string can hold only 0-9, a-f, A-F and blanks; found "&1".
+ACTION: Correct the program.
+REX0228H: EXPLANATION: A binary string can hold only 0, 1 and blanks; found "&1".
+ACTION: Correct the program.
+REX0229H: EXPLANATION: There is no label "&1".
+ACTION: Correct the program.
+REX0230H: EXPLANATION: PROCEDURE must be the first instruction run after an internal CALL or function call.
+ACTION: Correct the program.
+REX0231H: EXPLANATION: INTERPRET cannot run PROCEDURE.
+ACTION: Correct the program.
+REX0232H: EXPLANATION: The IF on line &1 has no THEN.
+ACTION: Correct the program.
+REX0233H: EXPLANATION: The WHEN on line &1 has no THEN.
+ACTION: Correct the program.
+REX0234H: EXPLANATION: ADDRESS must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0235H: EXPLANATION: CALL must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0236H: EXPLANATION: NAME must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0237H: EXPLANATION: SIGNAL must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0238H: EXPLANATION: STREAM must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0239H: EXPLANATION: TRACE must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0240H: EXPLANATION: PARSE must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0241H: EXPLANATION: ::CLASS must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0242H: EXPLANATION: ::METHOD must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0243H: EXPLANATION: ::ROUTINE must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0244H: EXPLANATION: ::REQUIRES must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0245H: EXPLANATION: EXTERNAL must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0246H: EXPLANATION: METACLASS must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0247H: EXPLANATION: SUBCLASS must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0248H: EXPLANATION: INHERIT must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0249H: EXPLANATION: "~" must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0250H: EXPLANATION: The colon of a superclass override must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0251H: EXPLANATION: DROP must be followed by a symbol.
+ACTION: Correct the program.
+REX0252H: EXPLANATION: EXPOSE must be followed by a symbol.
+ACTION: Correct the program.
+REX0253H: EXPLANATION: PARSE must be followed by a symbol here.
+ACTION: Correct the program.
+REX0254H: EXPLANATION: PARSE VAR must be followed by a symbol.
+ACTION: Correct the program.
+REX0255H: EXPLANATION: NUMERIC must be followed by DIGITS, FORM or FUZZ; found "&1".
+ACTION: Correct the program.
+REX0256H: EXPLANATION: "(" of a variable reference must be followed by a symbol.
+ACTION: Correct the program.
+REX0257H: EXPLANATION: LEAVE must be followed by a symbol.
+ACTION: Correct the program.
+REX0258H: EXPLANATION: ITERATE must be followed by a symbol.
+ACTION: Correct the program.
+REX0259H: EXPLANATION: END must be followed by a symbol.
+ACTION: Correct the program.
+REX0260H: EXPLANATION: ON must be followed by a symbol.
+ACTION: Correct the program.
+REX0261H: EXPLANATION: OFF must be followed by a symbol.
+ACTION: Correct the program.
+REX0262H: EXPLANATION: USE ARG must be followed by a symbol.
+ACTION: Correct the program.
+REX0263H: EXPLANATION: RAISE must be followed by a symbol.
+ACTION: Correct the program.
+REX0264H: EXPLANATION: USER must be followed by a symbol.
+ACTION: Correct the program.
+REX0265H: EXPLANATION: "::" must be followed by a symbol.
+ACTION: Correct the program.
+REX0266H: EXPLANATION: The colon of a superclass override must be followed by a symbol.
+ACTION: Correct the program.
+REX0267H: EXPLANATION: Nothing can follow NOP; found "&1".
+ACTION: Correct the program.
+REX0268H: EXPLANATION: Nothing can follow SELECT; found "&1".
+ACTION: Correct the program.
+REX0269H: EXPLANATION: Nothing can follow the NAME; found "&1".
+ACTION: Correct the program.
+REX0270H: EXPLANATION: Nothing can follow the condition name; found "&1".
+ACTION: Correct the program.
+REX0271H: EXPLANATION: Nothing can follow the SIGNAL label; found "&1".
+ACTION: Correct the program.
+REX0272H: EXPLANATION: Nothing can follow the TRACE setting; found "&1".
+ACTION: Correct the program.
+REX0273H: EXPLANATION: Nothing can follow the LEAVE variable; found "&1".
+ACTION: Correct the program.
+REX0274H: EXPLANATION: Nothing can follow the ITERATE variable; found "&1".
+ACTION: Correct the program.
+REX0275H: EXPLANATION: Nothing can follow the END variable; found "&1".
+ACTION: Correct the program.
+REX0276H: EXPLANATION: Nothing can follow NUMERIC FORM's setting; found "&1".
+ACTION: Correct the program.
+REX0277H: EXPLANATION: Nothing can follow GUARD OFF; found "&1".
+ACTION: Correct the program.
+REX0278H: EXPLANATION: The string "&1" ('&2'X) is not valid.
+ACTION: Correct the program.
+REX0279H: EXPLANATION: A double-byte character is not valid.
+ACTION: Correct the program.
+REX0280H: EXPLANATION: The data string "&1" ('&2'X) is not valid.
+ACTION: Correct the program.
+REX0281H: EXPLANATION: A TRACE letter must be one of A C E F I L N O R; found "&1".
+ACTION: Correct the program.
+REX0282H: EXPLANATION: A number for TRACE is allowed only at an interactive trace pause.
+ACTION: Correct the program.
+REX0283H: EXPLANATION: CALL ON takes ERROR, FAILURE, HALT, NOTREADY, USER or ANY; found "&1".
+ACTION: Correct the program.
+REX0284H: EXPLANATION: CALL OFF takes ERROR, FAILURE, HALT, NOTREADY, USER or ANY; found "&1".
+ACTION: Correct the program.
+REX0285H: EXPLANATION: SIGNAL ON takes ERROR, FAILURE, HALT, LOSTDIGITS, NOTREADY, NOMETHOD, NOSTRING, NOVALUE, SYNTAX, USER or ANY; found "&1".
+ACTION: Correct the program.
+REX0286H: EXPLANATION: SIGNAL OFF takes ERROR, FAILURE, HALT, LOSTDIGITS, NOTREADY, NOMETHOD, NOSTRING, NOVALUE, SYNTAX, USER or ANY; found "&1".
+ACTION: Correct the program.
+REX0287H: EXPLANATION: NUMERIC takes DIGITS, FORM or FUZZ; found "&1".
+ACTION: Correct the program.
+REX0288H: EXPLANATION: NUMERIC FORM takes SCIENTIFIC or ENGINEERING; found "&1".
+ACTION: Correct the program.
+REX0289H: EXPLANATION: ::CLASS does not know the keyword "&1".
+ACTION: Correct the program.
+REX0290H: EXPLANATION: ::METHOD does not know the keyword "&1".
+ACTION: Correct the program.
+REX0291H: EXPLANATION: ::ROUTINE does not know the keyword "&1".
+ACTION: Correct the program.
+REX0292H: EXPLANATION: ::REQUIRES does not know the keyword "&1".
+ACTION: Correct the program.
+REX0293H: EXPLANATION: PROCEDURE can be followed only by EXPOSE; found "&1".
+ACTION: Correct the program.
+REX0294H: EXPLANATION: The condition of CALL ON can be followed only by NAME; found "&1".
+ACTION: Correct the program.
+REX0295H: EXPLANATION: The condition of SIGNAL ON can be followed only by NAME; found "&1".
+ACTION: Correct the program.
+REX0296H: EXPLANATION: PARSE takes ARG, LINEIN, PULL, SOURCE, VALUE, VAR or VERSION; found "&1".
+ACTION: Correct the program.
+REX0297H: EXPLANATION: USE must be followed by ARG; found "&1".
+ACTION: Correct the program.
+REX0298H: EXPLANATION: RAISE takes ERROR, FAILURE, HALT, LOSTDIGITS, NOMETHOD, NOSTRING, NOTREADY, NOVALUE or SYNTAX; found "&1".
+ACTION: Correct the program.
+REX0299H: EXPLANATION: RAISE does not know the keyword "&1".
+ACTION: Correct the program.
+REX0300H: EXPLANATION: DESCRIPTION is given twice.
+ACTION: Correct the program.
+REX0301H: EXPLANATION: ADDITIONAL or ARRAY is given twice.
+ACTION: Correct the program.
+REX0302H: EXPLANATION: RETURN or EXIT is given twice.
+ACTION: Correct the program.
+REX0303H: EXPLANATION: GUARD ON or GUARD OFF can be followed only by WHEN; found "&1".
+ACTION: Correct the program.
+REX0304H: EXPLANATION: The power operator (**) needs a whole number on its right; found "&1".
+ACTION: Correct the program.
+REX0305H: EXPLANATION: The repetition count of a DO must be zero or a positive whole number; found "&1".
+ACTION: Correct the program.
+REX0306H: EXPLANATION: FOR of a DO must be zero or a positive whole number; found "&1".
+ACTION: Correct the program.
+REX0307H: EXPLANATION: A position in a PARSE template must be a whole number; found "&1".
+ACTION: Correct the program.
+REX0308H: EXPLANATION: NUMERIC DIGITS must be a positive whole number; found "&1".
+ACTION: Correct the program.
+REX0309H: EXPLANATION: NUMERIC FUZZ must be zero or a positive whole number; found "&1".
+ACTION: Correct the program.
+REX0310H: EXPLANATION: A number for TRACE must be a whole number; found "&1".
+ACTION: Correct the program.
+REX0311H: EXPLANATION: The result of % is not a whole number.
+ACTION: Correct the program.
+REX0312H: EXPLANATION: The result of // is not a whole number.
+ACTION: Correct the program.
+REX0313H: EXPLANATION: A DO cannot have both WHILE and UNTIL.
+ACTION: Correct the program.
+REX0314H: EXPLANATION: Nothing can follow FOREVER on a DO but WHILE or UNTIL; found "&1".
+ACTION: Correct the program.
+REX0315H: EXPLANATION: LEAVE can be used only in a repetitive DO.
+ACTION: Correct the program.
+REX0316H: EXPLANATION: ITERATE can be used only in a repetitive DO.
+ACTION: Correct the program.
+REX0317H: EXPLANATION: LEAVE "&1" names no control variable of an active DO.
+ACTION: Correct the program.
+REX0318H: EXPLANATION: ITERATE "&1" names no control variable of an active DO.
+ACTION: Correct the program.
+REX0319H: EXPLANATION: An environment name can have at most &1 characters; found "&2".
+ACTION: Correct the program.
+REX0320H: EXPLANATION: A name can have at most 250 characters: "&1".
+ACTION: Correct the program.
+REX0321H: EXPLANATION: A string can have at most 250 characters: "&1".
+ACTION: Correct the program.
+REX0322H: EXPLANATION: A hexadecimal string can have at most 250 characters: "&1".
+ACTION: Correct the program.
+REX0323H: EXPLANATION: A binary string can have at most 250 characters: "&1".
+ACTION: Correct the program.
+REX0324H: EXPLANATION: A number cannot be assigned to; found "&1".
+ACTION: Correct the program.
+REX0325H: EXPLANATION: A variable cannot start with a digit; found "&1".
+ACTION: Correct the program.
+REX0326H: EXPLANATION: A variable cannot start with a period; found "&1".
+ACTION: Correct the program.
+REX0327H: EXPLANATION: NUMERIC DIGITS ("&1") must be larger than NUMERIC FUZZ ("&2").
+ACTION: Correct the program.
+REX0328H: EXPLANATION: NUMERIC DIGITS ("&1") can be at most &2.
+ACTION: Correct the program.
+REX0329H: EXPLANATION: The value after ADDRESS VALUE is not valid.
+ACTION: Correct the program.
+REX0330H: EXPLANATION: The value after SIGNAL VALUE is not valid.
+ACTION: Correct the program.
+REX0331H: EXPLANATION: The value after TRACE VALUE is not valid.
+ACTION: Correct the program.
+REX0332H: EXPLANATION: The value after RAISE SYNTAX is not valid.
+ACTION: Correct the program.
+REX0333H: EXPLANATION: The expression after IF must be 0 or 1; found "&1".
+ACTION: Correct the program.
+REX0334H: EXPLANATION: The expression after WHEN must be 0 or 1; found "&1".
+ACTION: Correct the program.
+REX0335H: EXPLANATION: The expression after WHILE must be 0 or 1; found "&1".
+ACTION: Correct the program.
+REX0336H: EXPLANATION: The expression after UNTIL must be 0 or 1; found "&1".
+ACTION: Correct the program.
+REX0337H: EXPLANATION: The value left of "&1" must be 0 or 1; found "&2".
+ACTION: Correct the program.
+REX0338H: EXPLANATION: A logical value must be 0 or 1; found "&1".
+ACTION: Correct the program.
+REX0339H: EXPLANATION: The expression after GUARD must be 0 or 1; found "&1".
+ACTION: Correct the program.
+REX0340H: EXPLANATION: The expression is not valid at "&1".
+ACTION: Correct the program.
+REX0341H: EXPLANATION: The prefix operator "&1" needs a term after it.
+ACTION: Correct the program.
+REX0342H: EXPLANATION: IF needs an expression.
+ACTION: Correct the program.
+REX0343H: EXPLANATION: WHEN needs an expression.
+ACTION: Correct the program.
+REX0344H: EXPLANATION: The control variable of a DO needs a first value.
+ACTION: Correct the program.
+REX0345H: EXPLANATION: BY needs an expression.
+ACTION: Correct the program.
+REX0346H: EXPLANATION: TO needs an expression.
+ACTION: Correct the program.
+REX0347H: EXPLANATION: FOR needs an expression.
+ACTION: Correct the program.
+REX0348H: EXPLANATION: WHILE needs an expression.
+ACTION: Correct the program.
+REX0349H: EXPLANATION: UNTIL needs an expression.
+ACTION: Correct the program.
+REX0350H: EXPLANATION: OVER needs an expression.
+ACTION: Correct the program.
+REX0351H: EXPLANATION: INTERPRET needs an expression.
+ACTION: Correct the program.
+REX0352H: EXPLANATION: OPTIONS needs an expression.
+ACTION: Correct the program.
+REX0353H: EXPLANATION: ADDRESS VALUE needs an expression.
+ACTION: Correct the program.
+REX0354H: EXPLANATION: SIGNAL VALUE needs an expression.
+ACTION: Correct the program.
+REX0355H: EXPLANATION: TRACE VALUE needs an expression.
+ACTION: Correct the program.
+REX0356H: EXPLANATION: NUMERIC FORM VALUE needs an expression.
+ACTION: Correct the program.
+REX0357H: EXPLANATION: The assignment needs an expression.
+ACTION: Correct the program.
+REX0358H: EXPLANATION: The operator "&1" needs a term after it.
+ACTION: Correct the program.
+REX0359H: EXPLANATION: GUARD needs an expression.
+ACTION: Correct the program.
+REX0360H: EXPLANATION: DESCRIPTION of RAISE needs an expression.
+ACTION: Correct the program.
+REX0361H: EXPLANATION: ADDITIONAL of RAISE needs an expression.
+ACTION: Correct the program.
+REX0362H: EXPLANATION: ARRAY needs a "(" with its expressions.
+ACTION: Correct the program.
+REX0363H: EXPLANATION: The "(" at position &1 of line &2 is not closed.
+ACTION: Correct the program.
+REX0364H: EXPLANATION: The "[" at position &1 of line &2 is not closed.
+ACTION: Correct the program.
+REX0365H: EXPLANATION: A "," is not expected here.
+ACTION: Correct the program.
+REX0366H: EXPLANATION: A ")" closes nothing here.
+ACTION: Correct the program.
+REX0367H: EXPLANATION: A "]" is not expected here.
+ACTION: Correct the program.
+REX0368H: EXPLANATION: The PARSE template is not valid at "&1".
+ACTION: Correct the program.
+REX0369H: EXPLANATION: The PARSE position is not valid at "&1".
+ACTION: Correct the program.
+REX0370H: EXPLANATION: PARSE VALUE needs WITH.
+ACTION: Correct the program.
+REX0371H: EXPLANATION: A relative PARSE position is missing.
+ACTION: Correct the program.
+REX0372H: EXPLANATION: The external routine "&1" failed.
+ACTION: Correct the program.
+REX0373H: EXPLANATION: &1 gave a result longer than &2: "&3".
+ACTION: Correct the program.
+REX0374H: EXPLANATION: &1 needs at least &2 arguments.
+ACTION: Correct the program.
+REX0375H: EXPLANATION: &1 takes at most &2 arguments.
+ACTION: Correct the program.
+REX0376H: EXPLANATION: &1 needs argument &2.
+ACTION: Correct the program.
+REX0377H: EXPLANATION: Argument &2 of &1 must be a number; found "&3".
+ACTION: Correct the program.
+REX0378H: EXPLANATION: Argument &2 of &1 must be a whole number; found "&3".
+ACTION: Correct the program.
+REX0379H: EXPLANATION: Argument &2 of &1 must be zero or positive; found "&3".
+ACTION: Correct the program.
+REX0380H: EXPLANATION: Argument &2 of &1 must be positive; found "&3".
+ACTION: Correct the program.
+REX0381H: EXPLANATION: Argument &2 of &1 can be at most 999,999,999.
+ACTION: Correct the program.
+REX0382H: EXPLANATION: Argument &2 of &1 must be from 0 to 99; found "&3".
+ACTION: Correct the program.
+REX0383H: EXPLANATION: Argument &2 of &1 cannot be empty.
+ACTION: Correct the program.
+REX0384H: EXPLANATION: Argument &2 of &1 must be one character or empty; found "&3".
+ACTION: Correct the program.
+REX0385H: EXPLANATION: Argument &2 of &1 must be one character; found "&3".
+ACTION: Correct the program.
+REX0386H: EXPLANATION: Argument &2 of &1 must be a binary string; found "&3".
+ACTION: Correct the program.
+REX0387H: EXPLANATION: Argument &2 of &1 must be a hexadecimal string; found "&3".
+ACTION: Correct the program.
+REX0388H: EXPLANATION: Argument &2 of &1 must be a valid symbol; found "&3".
+ACTION: Correct the program.
+REX0389H: EXPLANATION: Argument &2 of &1 must be one of &3; found "&4".
+ACTION: Correct the program.
+REX0390H: EXPLANATION: A TRACE letter must be one of A C E F I L N O R; found "&1".
+ACTION: Correct the program.
+REX0391H: EXPLANATION: The first argument of RANDOM ("&1") is larger than the second ("&2").
+ACTION: Correct the program.
+REX0392H: EXPLANATION: SOURCELINE's argument ("&1") is beyond the program's last line (&2).
+ACTION: Correct the program.
+REX0393H: EXPLANATION: X2D cannot make a whole number of "&1".
+ACTION: Correct the program.
+REX0394H: EXPLANATION: Argument 2 of &1, "&2", is not in the format argument 3 names, "&3".
+ACTION: Correct the program.
+REX0395H: EXPLANATION: &1 cannot convert to the format "&2".
+ACTION: Correct the program.
+REX0396H: EXPLANATION: The range of RANDOM ("&1" to "&2") can be at most 100000.
+ACTION: Correct the program.
+REX0397H: EXPLANATION: Argument 1 of &1 must name a stream; found "&2".
+ACTION: Correct the program.
+REX0398H: EXPLANATION: A transient stream has no position.
+ACTION: Correct the program.
+REX0399H: EXPLANATION: Argument 2 of SEND ("&1") names no superclass.
+ACTION: Correct the program.
+REX0400H: EXPLANATION: Argument &2 of &1 must be a one-dimensional array; found "&3".
+ACTION: Correct the program.
+REX0401H: EXPLANATION: Argument &2 of &1 must have a string value; found "&3".
+ACTION: Correct the program.
+REX0402H: EXPLANATION: VALUE does not know the selector "&1".
+ACTION: Correct the program.
+REX0403H:
+REX0404H: EXPLANATION: "&1" is not a number and cannot be used in arithmetic.
+ACTION: Correct the program.
+REX0405H: EXPLANATION: "&1" is not a number and cannot have a prefix operator.
+ACTION: Correct the program.
+REX0406H: EXPLANATION: An exponent can have at most &1 digits; found "&2".
+ACTION: Correct the program.
+REX0407H: EXPLANATION: TO of a DO must be a number; found "&1".
+ACTION: Correct the program.
+REX0408H: EXPLANATION: BY of a DO must be a number; found "&1".
+ACTION: Correct the program.
+REX0409H: EXPLANATION: The control variable of a DO must start at a number; found "&1".
+ACTION: Correct the program.
+REX0410H: EXPLANATION: The number of RAISE SYNTAX must be a number; found "&1".
+ACTION: Correct the program.
+REX0411H: EXPLANATION: The result is too large at "&1&2&3".
+ACTION: Correct the program.
+REX0412H: EXPLANATION: The result is too small at "&1&2&3".
+ACTION: Correct the program.
+REX0413H: EXPLANATION: A number cannot be divided by zero.
+ACTION: Correct the program.
+REX0414H: EXPLANATION: The exponent ("&1") has more than &2 digits.
+ACTION: Correct the program.
+REX0415H: EXPLANATION: The exponent ("&1") has more than &2 digits.
+ACTION: Correct the program.
+REX0416H: EXPLANATION: Zero cannot be raised to a negative power.
+ACTION: Correct the program.
+REX0417H: EXPLANATION: There is no routine called "&1".
+ACTION: Correct the program.
+REX0418H: EXPLANATION: There is no program "&1" for ::REQUIRES.
+ACTION: Correct the program.
+REX0419H: EXPLANATION: The function "&1" returned no data.
+ACTION: Correct the program.
+REX0420H: EXPLANATION: "&1" was called as a function and must RETURN data.
+ACTION: Correct the program.
+REX0421H: EXPLANATION: A variable reference list has the extra token "&1"; ")" was expected.
+ACTION: Correct the program.
+REX0422H: EXPLANATION: A variable reference has no ")".
+ACTION: Correct the program.
+REX0423H: EXPLANATION: A USE ARG reference has the extra token "&1"; "," or the end was expected.
+ACTION: Correct the program.
+REX0424H: EXPLANATION: INTERPRET cannot have labels; found "&1".
+ACTION: Correct the program.
+REX0425H: EXPLANATION: A system service failed: &1.
+ACTION: Correct the program.
+REX0426H: EXPLANATION: The external class "&1" was not found.
+ACTION: Correct the program.
+REX0427H: EXPLANATION: The external method "&1" was not found.
+ACTION: Correct the program.
+REX0428H: EXPLANATION: The external routine "&1" was not found.
+ACTION: Correct the program.
+REX0429H: EXPLANATION: The message "&1" gave no result.
+ACTION: Correct the program.
+REX0430H:
+REX0431H: EXPLANATION: The method needs at least &1 arguments.
+ACTION: Correct the program.
+REX0432H: EXPLANATION: The method takes at most &1 arguments.
+ACTION: Correct the program.
+REX0433H: EXPLANATION: The method needs argument &1.
+ACTION: Correct the program.
+REX0434H: EXPLANATION: Argument &1 of the method must be a number; found "&2".
+ACTION: Correct the program.
+REX0435H: EXPLANATION: Argument &1 of the method must be a whole number; found "&2".
+ACTION: Correct the program.
+REX0436H: EXPLANATION: Argument &1 of the method must be zero or a positive whole number; found "&2".
+ACTION: Correct the program.
+REX0437H: EXPLANATION: Argument &1 of the method must be a positive whole number; found "&2".
+ACTION: Correct the program.
+REX0438H: EXPLANATION: Argument &1 of the method can be at most &2; found "&3".
+ACTION: Correct the program.
+REX0439H: EXPLANATION: Argument &1 of the method must be from 0 to 99; found "&2".
+ACTION: Correct the program.
+REX0440H: EXPLANATION: Argument &1 of the method cannot be empty.
+ACTION: Correct the program.
+REX0441H: EXPLANATION: Argument &1 of the method must be a hexadecimal string; found "&2".
+ACTION: Correct the program.
+REX0442H: EXPLANATION: Argument &1 of the method must be a valid symbol; found "&2".
+ACTION: Correct the program.
+REX0443H: EXPLANATION: Argument &1 of the method must be one of &2; found "&3".
+ACTION: Correct the program.
+REX0444H: EXPLANATION: The method's option must be one of &1; found "&2".
+ACTION: Correct the program.
+REX0445H: EXPLANATION: Argument &1 of the method must have a string value.
+ACTION: Correct the program.
+REX0446H: EXPLANATION: There is no method "&1".
+ACTION: Correct the program.
+REX0447H: EXPLANATION: "&1" is not an index of the list.
+ACTION: Correct the program.
+REX0448H: EXPLANATION: "&1" is not a position in the array.
+ACTION: Correct the program.
+REX0449H: EXPLANATION: An operator needs a second operand.
+ACTION: Correct the program.
+REX0450H: EXPLANATION: The pad or character argument is not valid; found "&1".
+ACTION: Correct the program.
+REX0451H: EXPLANATION: The length argument is not valid; found "&1".
+ACTION: Correct the program.
+REX0452H: EXPLANATION: The position argument is not valid; found "&1".
+ACTION: Correct the program.
+REX0453H: EXPLANATION: The array needs &1 subscripts.
+ACTION: Correct the program.
+REX0454H: EXPLANATION: The array takes only &1 subscripts.
+ACTION: Correct the program.
+REX0455H: EXPLANATION: A negative value needs a length to be converted.
+ACTION: Correct the program.
+REX0456H: EXPLANATION: D2X needs a whole number; found "&1".
+ACTION: Correct the program.
+REX0457H: EXPLANATION: D2C needs a whole number; found "&1".
+ACTION: Correct the program.
+REX0458H: EXPLANATION: A blank is misplaced at position &1 of a hexadecimal string.
+ACTION: Correct the program.
+REX0459H: EXPLANATION: A blank is misplaced at position &1 of a binary string.
+ACTION: Correct the program.
+REX0460H: EXPLANATION: A hexadecimal string can hold only 0-9, a-f, A-F and blanks; found "&1".
+ACTION: Correct the program.
+REX0461H: EXPLANATION: A binary string can hold only 0, 1 and blanks; found "&1".
+ACTION: Correct the program.
+REX0462H: EXPLANATION: The result of X2D is not a whole number with NUMERIC DIGITS &1.
+ACTION: Correct the program.
+REX0463H: EXPLANATION: The result of C2D is not a whole number with NUMERIC DIGITS &1.
+ACTION: Correct the program.
+REX0464H: EXPLANATION: The supplier has no more items.
+ACTION: Correct the program.
+REX0465H: EXPLANATION: Argument &1 of the method must have a string value.
+ACTION: Correct the program.
+REX0466H: EXPLANATION: Argument &1 of the method must be a one-dimensional array.
+ACTION: Correct the program.
+REX0467H: EXPLANATION: The exponent "&1" does not fit in &2 places.
+ACTION: Correct the program.
+REX0468H: EXPLANATION: The integer part "&1" does not fit in &2 places.
+ACTION: Correct the program.
+REX0469H: EXPLANATION: The target of &1 must be a number; found "&2".
+ACTION: Correct the program.
+REX0470H: EXPLANATION: Argument &1 of the method must be a message object.
+ACTION: Correct the program.
+REX0471H: EXPLANATION: The message array needs argument &1.
+ACTION: Correct the program.
+REX0472H: EXPLANATION: A message array must be a one-dimensional array of 2 items.
+ACTION: Correct the program.
+REX0473H: EXPLANATION: SECTION works only on one-dimensional arrays.
+ACTION: Correct the program.
+REX0474H: EXPLANATION: Argument &1 of the method must be an instance of the &2 class.
+ACTION: Correct the program.
+REX0475H: EXPLANATION: An index-only collection needs the same object as index and item.
+ACTION: Correct the program.
+REX0476H: EXPLANATION: The object "&1" has no method for the message "&2".
+ACTION: Correct the program.
+REX0477H: EXPLANATION: The SOM object "&1" is gone.
+ACTION: Correct the program.
+REX0478H: EXPLANATION: The object "&1" cannot be made a double-float value.
+ACTION: Correct the program.
+REX0479H: EXPLANATION: The library "&1" cannot be loaded.
+ACTION: Correct the program.
+REX0480H: EXPLANATION: The program ended abnormally.
+ACTION: Correct the program.
+REX0481H: EXPLANATION: The object "&1" cannot take the message "&2": it waits for "&3".
+ACTION: Correct the program.
+REX0482H: EXPLANATION: An object reference is not valid.
+ACTION: Correct the program.
+REX0483H: EXPLANATION: An object of the type "&1" is needed.
+ACTION: Correct the program.
+REX0484H: EXPLANATION: There is no metaclass "&1".
+ACTION: Correct the program.
+REX0485H: EXPLANATION: There is no class "&1".
+ACTION: Correct the program.
+REX0486H: EXPLANATION: The classes of the program "&1" inherit from each other in a circle.
+ACTION: Correct the program.
+REX0487H: EXPLANATION: There is no SOM class "&1".
+ACTION: Correct the program.
+REX0488H: EXPLANATION: The object "&1" cannot be made a one-dimensional array.
+ACTION: Correct the program.
+REX0489H: EXPLANATION: The object "&1" has no string value.
+ACTION: Correct the program.
+REX0490H: EXPLANATION: A message object can be sent or started only once.
+ACTION: Correct the program.
+REX0491H: EXPLANATION: The message object "&1" failed in the message "&2".
+ACTION: Correct the program.
+REX0492H: EXPLANATION: RAISE OBJECT needs a condition object; found "&1".
+ACTION: Correct the program.
+REX0493H: EXPLANATION: There is no trapped condition to propagate.
+ACTION: Correct the program.
+REX0494H: EXPLANATION: The object "&1" cannot be made a method.
+ACTION: Correct the program.
+REX0495H: EXPLANATION: The "&1" information of the method "&2" cannot be found.
+ACTION: Correct the program.
+REX0496H: EXPLANATION: The method "&1" of the class "&2" has no description.
+ACTION: Correct the program.
+REX0497H: EXPLANATION: SOM methods cannot take arguments of the type "&1" (argument &2).
+ACTION: Correct the program.
+REX0498H: EXPLANATION: SOM methods cannot return the type "&1".
+ACTION: Correct the program.
+REX0499H: EXPLANATION: A method can have at most &1 OUT or INOUT arguments.
+ACTION: Correct the program.
+REX0500H: EXPLANATION: A method can REPLY only once.
+ACTION: Correct the program.
+REX0501H: EXPLANATION: RETURN cannot give a result after REPLY.
+ACTION: Correct the program.
+REX0502H: EXPLANATION: EXIT cannot give a result after REPLY.
+ACTION: Correct the program.
+REX0503H: EXPLANATION: Only methods of the target object can override the method search.
+ACTION: Correct the program.
+REX0504H: EXPLANATION: The ADDITIONAL information of a SYNTAX condition must be a one-dimensional array.
+ACTION: Correct the program.
+REX0505H: EXPLANATION: RAISE SYNTAX does not know the error number "&1".
+ACTION: Correct the program.
+REX0506H: EXPLANATION: There is already a ::CLASS directive for this class.
+ACTION: Correct the program.
+REX0507H: EXPLANATION: There is already a ::METHOD directive for this method.
+ACTION: Correct the program.
+REX0508H: EXPLANATION: There is already a ::ROUTINE directive for this routine.
+ACTION: Correct the program.
+REX0509H: EXPLANATION: There is already a ::REQUIRES directive for this program.
+ACTION: Correct the program.
+REX0510H: EXPLANATION: ::METHOD with CLASS needs a ::CLASS directive before it.
+ACTION: Correct the program.
+REX0511H: EXPLANATION: "&1" cannot be a metaclass.
+ACTION: Correct the program.
+REX0512H: EXPLANATION: EXPOSE must be the first instruction of a method.
+ACTION: Correct the program.
+REX0513H: EXPLANATION: INTERPRET cannot run EXPOSE.
+ACTION: Correct the program.
+REX0514H: EXPLANATION: GUARD must come first, or straight after EXPOSE or USE.
+ACTION: Correct the program.
+REX0515H: EXPLANATION: GUARD can be used only in a method.
+ACTION: Correct the program.
+REX0516H: EXPLANATION: INTERPRET cannot run GUARD.
+ACTION: Correct the program.
+REX0517H: EXPLANATION: GUARD WHEN must use an exposed variable.
+ACTION: Correct the program.
+REX0518H: EXPLANATION: INTERPRET cannot run directives.
+ACTION: Correct the program.
+REX0519H: EXPLANATION: INTERPRET cannot run USE.
+ACTION: Correct the program.
+REX0520H: EXPLANATION: The directive is not known.
+ACTION: Correct the program.
+REX0521H: EXPLANATION: "&1" is not a valid external name.
+ACTION: Correct the program.
+REX0522H: EXPLANATION: USE ARG needs a "," between names; found "&1".
+ACTION: Correct the program.
+REX0523H: EXPLANATION: REPLY can be used only in a method.
+ACTION: Correct the program.
+REX0524H: EXPLANATION: Error.
+ACTION: Correct the program.
+REX0525H: EXPLANATION: running.
+ACTION: Correct the program.
+REX0526H: EXPLANATION: line.
+ACTION: Correct the program.
+REX0527H:
+REX0528H:
+REX0529H: EXPLANATION: The interpreter could not be started.
+ACTION: Correct the program.
+REX0530H: EXPLANATION: GUARD must be followed by ON or OFF; found "&1".
+ACTION: Correct the program.
+REX0531H: EXPLANATION: "&1" is not a time an alarm can be set for.
+ACTION: Correct the program.
+REX0532H: EXPLANATION: The class "&1" is not a mixin class and cannot be inherited.
+ACTION: Correct the program.
+REX0533H: EXPLANATION: The class "&1" is not a subclass of the base class "&3" of "&2".
+ACTION: Correct the program.
+REX0534H: EXPLANATION: The program "&1" was not found.
+ACTION: Correct the program.
+REX0535H: EXPLANATION: The class "&1" cannot inherit itself, a superclass or a subclass ("&2").
+ACTION: Correct the program.
+REX0536H: EXPLANATION: The class "&1" did not inherit the class "&2".
+ACTION: Correct the program.
+REX0537H: EXPLANATION: A line of the method's source is not valid.
+ACTION: Correct the program.
+REX0538H: EXPLANATION: ::REQUIRES must come before the other directives.
+ACTION: Correct the program.
+REX0539H: EXPLANATION: Argument &1 of the method must be a string or an array.
+ACTION: Correct the program.
+REX0540H: EXPLANATION: Argument &1 of the method cannot be converted to &2.
+ACTION: Correct the program.
+REX0541H: EXPLANATION: The method "&1" works only on one-dimensional arrays.
+ACTION: Correct the program.
+REX0542H: EXPLANATION: Argument &1 of the method is an array with items that are not strings.
+ACTION: Correct the program.
+REX0543H: EXPLANATION: Item &1 of the array must be a string.
+ACTION: Correct the program.
+REX0544H: EXPLANATION: Item &1 of the array must be a subclass of the target.
+ACTION: Correct the program.
+REX0545H: EXPLANATION: DO cannot have &1 twice.
+ACTION: Correct the program.
+REX0546H: EXPLANATION: An array can hold at most 99,999,999 items.
+ACTION: Correct the program.
+REX0547H: EXPLANATION: The output file "&1" cannot be written.
+ACTION: Correct the program.
+REX0548H: EXPLANATION: The arguments of FORWARD must be a one-dimensional array.
+ACTION: Correct the program.
+REX0549H: EXPLANATION: FORWARD does not know the keyword "&1".
+ACTION: Correct the program.
+REX0550H: EXPLANATION: TO is given twice.
+ACTION: Correct the program.
+REX0551H: EXPLANATION: ARGUMENTS or ARRAY is given twice.
+ACTION: Correct the program.
+REX0552H: EXPLANATION: RETURN or CONTINUE is given twice.
+ACTION: Correct the program.
+REX0553H: EXPLANATION: CLASS is given twice.
+ACTION: Correct the program.
+REX0554H: EXPLANATION: MESSAGE is given twice.
+ACTION: Correct the program.
+REX0555H: EXPLANATION: TO of FORWARD needs an expression.
+ACTION: Correct the program.
+REX0556H: EXPLANATION: ARGUMENTS of FORWARD needs an expression.
+ACTION: Correct the program.
+REX0557H: EXPLANATION: MESSAGE of FORWARD needs an expression.
+ACTION: Correct the program.
+REX0558H: EXPLANATION: CLASS of FORWARD needs an expression.
+ACTION: Correct the program.
+REX0559H: EXPLANATION: FORWARD can be used only in a method.
+ACTION: Correct the program.
+REX0560H: EXPLANATION: This version of REXX cannot run the program "&1".
+ACTION: Correct the program.
+REX0561H: EXPLANATION: INTERPRET cannot run REPLY.
+ACTION: Correct the program.
+REX0562H: EXPLANATION: INTERPRET cannot run FORWARD.
+ACTION: Correct the program.
+REX0563H: EXPLANATION: An authorization result must be 0 or 1; found "&1".
+ACTION: Correct the program.
+REX0564H: EXPLANATION: Not authorized: &1.
+ACTION: Correct the program.
+REX0565H: EXPLANATION: An ATTRIBUTE method's name must be a variable name; found "&1".
+ACTION: Correct the program.
+REX0566H: EXPLANATION: MIXINCLASS must be followed by a string or symbol.
+ACTION: Correct the program.
+REX0567H: EXPLANATION: The DSOM server of the class &1 cannot be found.
+ACTION: Correct the program.
+REX0568H: EXPLANATION: The event "&1" has too many parameters.
+ACTION: Correct the program.
+REX0569H: EXPLANATION: The OSA event "&1" cannot be made.
+ACTION: Correct the program.
+REX0570H: EXPLANATION: The direct parameter of the OSA event "&1" cannot be made.
+ACTION: Correct the program.
+REX0571H: EXPLANATION: The event information cannot be read.
+ACTION: Correct the program.
+REX0572H: EXPLANATION: The application "&1" cannot be started.
+ACTION: Correct the program.
+REX0573H: EXPLANATION: "&1" is not a parameter of the OSA event "&2".
+ACTION: Correct the program.
+REX0574H: EXPLANATION: A parameter of the OSA event "&1" cannot be made.
+ACTION: Correct the program.
+REX0575H: EXPLANATION: The OSA event "&1" cannot be sent.
+ACTION: Correct the program.
+REX0576H: EXPLANATION: The result of the OSA event "&1" cannot be handled.
+ACTION: Correct the program.
+REX0577H: EXPLANATION: The result of an OSA event cannot be made a REXX object.
+ACTION: Correct the program.
+REX0578H: EXPLANATION: "&1" is not a direct parameter of the OSA event "&2".
+ACTION: Correct the program.
+REX0579H: EXPLANATION: The key form of an object specifier is not valid.
+ACTION: Correct the program.
+REX0580H: EXPLANATION: The external class has too many parameters.
+ACTION: Correct the program.
+REX0581H: EXPLANATION: Concurrency is not available.
+ACTION: Correct the program.
+REX0582H: EXPLANATION: The key form "&1" cannot take this parameter type.
+ACTION: Correct the program.
+REX0583H: EXPLANATION: The external class needs a valid class name.
+ACTION: Correct the program.
+REX0584H: EXPLANATION: "&1" is not a known class server.
+ACTION: Correct the program.
+REX0585H: EXPLANATION: The &1 class server is not installed.
+ACTION: Correct the program.
+REX0586H: EXPLANATION: Argument &2 of &1 must be one character that is not a letter or digit, or empty; found "&3".
+ACTION: Correct the program.
+REX0587H: EXPLANATION: Argument &2 of &1, "&3", does not fit the separator of argument &4.
+ACTION: Correct the program.
+REX0588H: EXPLANATION: &1 cannot be used with QUEUE:.
+ACTION: Correct the program.

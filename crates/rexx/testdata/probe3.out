@@ -1,0 +1,72 @@
+a Supplier
+a Message
+a Method
+X.Y
+a Monitor
+The Class class
+The Object class
+The Directory class
+a List
+a Queue
+a Table
+a Relation
+a Set
+a Bag
+S.
+a Supplier
+The Alarm class
+a Monitor
+The environment
+a Directory
+String String
+Array
+3 3 1
+1 0
+String Object
+Table Relation
+5 0
+b c   abc  abc  
+  12.500 1000 6162 FF 65
+3 4
+    34 *-* y = 'a'~reverse || 'b'
+       >L>   "a"
+       >M>   "a"
+       >L>   "b"
+       >O>   "ab"
+       >>>   "ab"
+    35 *-* z = .array~of(1)~items + 1
+       >V>   "The Array class"
+       >L>   "1"
+       >>>   "1"
+       >M>   "an Array"
+       >M>   "1"
+       >L>   "1"
+       >O>   "2"
+       >>>   "2"
+    36 *-* trace o
+    39 *-*   w = i * 2
+       >>>     "2"
+    40 *-*   trace o
+    39 *-*   w = i * 2
+       >>>     "4"
+    40 *-*   trace o
+    47 *-* if 1 
+       >>>   "1"
+    47 *-*   then
+    47 *-*     do
+    48 *-*     a = 1
+       >>>       "1"
+    49 *-*     if a 
+       >>>       "1"
+    49 *-*       then
+    49 *-*         b = 2
+       >>>           "2"
+    51 *-*   end
+    52 *-* select
+    53 *-*   when a = 1 
+       >>>     "1"
+    53 *-*     then
+    53 *-*       c = 1
+       >>>         "1"
+    56 *-* trace o
+done

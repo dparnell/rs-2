@@ -6,6 +6,7 @@ use alloc::vec::Vec;
 use crate::exec::*;
 use crate::num::{Num, int_str};
 use crate::parse::*;
+
 use crate::vars::Key;
 use crate::{CallType, Err};
 
@@ -24,26 +25,54 @@ pub(crate) fn cond_index(c: Cond) -> usize {
         Cond::NoValue => 3,
         Cond::NotReady => 4,
         Cond::Syntax => 5,
+        Cond::LostDigits => 6,
+        Cond::NoMethod => 7,
+        Cond::NoString => 8,
+        Cond::Any | Cond::User => 9,
     }
 }
 
 impl Interp<'_> {
-    pub(crate) fn run(&mut self, f: &mut Frame, code: &Rc<Program>, mut pc: usize, extra: u32) -> R<Flow> {
-        let mut ctl: Vec<Ctl> = Vec::new();
+    pub(crate) fn run(&mut self, f: &mut Frame, code: &Rc<Program>, pc: usize, extra: u32) -> R<Flow> {
+        self.run_from(f, code, pc, extra, Vec::new())
+    }
+
+    /// Run from clause `pc` with the control stack `ctl` (a method going
+    /// on after REPLY on an activity of its own).
+    pub(crate) fn run_from(&mut self, f: &mut Frame, code: &Rc<Program>, mut pc: usize, extra: u32, mut ctl: Vec<Ctl>) -> R<Flow> {
         let main = Rc::ptr_eq(code, &f.prog);
         let n = code.clauses.len();
         let mut mode = Mode::Seq;
         while pc < n {
             let lvl = f.base + extra + code.clauses[pc].level;
             let m = core::mem::replace(&mut mode, Mode::Seq);
+            if self.w.is_some() {
+                // activities take turns
+                self.ticks = self.ticks.wrapping_add(1);
+                if self.ticks % 64 == 0 {
+                    self.host.yield_now();
+                }
+            }
             let mut r = self.step(f, code, pc, &mut ctl, lvl, extra, m);
+            if let Ok(Next::Reply(v)) = r {
+                // REPLY: the sender goes on with the value while the method
+                // goes on on another activity; without one, the method
+                // finishes first
+                if main && (self.ops().reply_elsewhere)(self, f, code, pc + 1, extra, &ctl) {
+                    return Ok(Flow::Return(v));
+                }
+                if let Some(a) = &f.act {
+                    *a.reply.borrow_mut() = Some(v);
+                }
+                r = Ok(Next::Go);
+            }
             if r.is_ok() && !f.pending.is_empty() {
                 if let Err(e) = self.run_pending(f, code.clauses[pc].line, lvl) {
                     r = Err(e);
                 }
             }
             match r {
-                Ok(Next::Go) => pc += 1,
+                Ok(Next::Go) | Ok(Next::Reply(_)) => pc += 1,
                 Ok(Next::Jump(t)) => pc = t,
                 Ok(Next::Again(t)) => {
                     mode = Mode::Again;
@@ -73,18 +102,39 @@ impl Interp<'_> {
                 },
                 Ok(Next::Flow(fl)) => return Ok(fl),
                 Err(Err::Syntax(no)) => {
-                    let t = cond_index(Cond::Syntax);
-                    if f.traps[t].state == TrapState::On {
+                    let mut t = cond_index(Cond::Syntax);
+                    if f.traps[t].state != TrapState::On && self.oo() && f.traps[cond_index(Cond::Any)].state == TrapState::On && !f.traps[cond_index(Cond::Any)].call {
+                        t = cond_index(Cond::Any);
+                    }
+                    if f.traps[t].state == TrapState::On && !f.traps[t].call {
                         let label = f.traps[t].label.clone();
                         f.traps[t].state = TrapState::Off;
-                        f.cond = Some(CondInfo { cond: Cond::Syntax, desc: Vec::new(), call: false });
-                        self.set_simple(b"RC", int_str(no as i64));
+                        let mut info = CondInfo::new(Cond::Syntax, Vec::new());
+                        info.code = no;
+                        info.line = self.err_at.as_ref().map_or(code.clauses[pc].line, |e| e.1);
+                        info.msg = core::mem::take(&mut self.err_msg);
+                        info.tb = core::mem::take(&mut self.tb);
+                        let l = self.traceback_text(&code.clauses[pc], lvl);
+                        info.tb.push(l);
+                        f.cond = Some(info);
+                        self.tb.clear();
+                        self.err_at = None;
+                        self.set_simple(b"RC", int_str((if no >= 1000 { no / 1000 } else { no }) as i64));
                         self.set_simple(b"SIGL", int_str(code.clauses[pc].line as i64));
                         if !main {
                             return Err(Err::Goto { label });
                         }
                         ctl.clear();
                         pc = self.label_index(f, code, pc, lvl, &label)?;
+                    } else if self.oo() && !f.top && main {
+                        // Object REXX: the caller may trap it
+                        let c = &code.clauses[pc];
+                        if self.err_at.is_none() {
+                            self.err_at = Some((f.name.clone(), c.line));
+                        }
+                        let line = self.traceback_text(c, lvl);
+                        self.tb.push(line);
+                        return Err(Err::Syntax(no));
                     } else {
                         return Err(self.fatal(f, code, pc, lvl, no));
                     }
@@ -104,6 +154,14 @@ impl Interp<'_> {
                     ctl.clear();
                     pc = self.label_index(f, code, pc, lvl, &label)?;
                 }
+                Err(Err::Cond(info)) if f.top && main => {
+                    // a condition RAISEd to the caller of the program
+                    if info.cond == Cond::Syntax {
+                        self.err_msg = info.msg.clone();
+                        return Err(self.fatal(f, code, pc, lvl, info.code));
+                    }
+                    return Err(Err::Exit(info.result));
+                }
                 Err(Err::Fatal(no)) => {
                     self.traceback(&code.clauses[pc], lvl);
                     return Err(Err::Fatal(no));
@@ -115,12 +173,12 @@ impl Interp<'_> {
     }
 
     fn traceback(&mut self, c: &Clause, lvl: u32) {
-        let mut s = alloc::format!("{:>6} +++", c.line).into_bytes();
-        for _ in 0..(1 + 2 * lvl) {
-            s.push(b' ');
-        }
-        s.extend_from_slice(&c.text);
+        let s = self.traceback_text(c, lvl);
         self.trace_line(&s);
+    }
+
+    fn traceback_text(&self, c: &Clause, lvl: u32) -> Val {
+        self.clause_line(c, lvl, if self.oo() { b"*-*" } else { b"+++" })
     }
 
     fn label_index(&mut self, f: &mut Frame, code: &Rc<Program>, pc: usize, lvl: u32, label: &[u8]) -> R<usize> {
@@ -133,29 +191,57 @@ impl Interp<'_> {
     /// Report an untrapped error at clause `pc`: the clause, then the
     /// message; the program ends.
     fn fatal(&mut self, f: &mut Frame, code: &Rc<Program>, pc: usize, lvl: u32, n: u32) -> Err {
-        let c = &code.clauses[pc.min(code.clauses.len() - 1)];
-        self.traceback(c, lvl);
-        let name = f.name.clone();
+        let c = &code.clauses[pc.min(code.clauses.len().saturating_sub(1))];
+        // Object REXX: the clauses of the calls the error came through,
+        // innermost first
+        let tb = core::mem::take(&mut self.tb);
+        for l in &tb {
+            self.trace_line(l);
+        }
+        if !code.clauses.is_empty() {
+            self.traceback(c, lvl);
+        }
+        let (name, line) = self.err_at.take().unwrap_or((f.name.clone(), c.line));
         let mut st = core::mem::replace(&mut self.st, State::empty());
-        self.host.report_error(&mut st, n, &name, c.line);
+        self.host.report_error(&mut st, if n >= 1000 { n / 1000 } else { n }, &name, line);
         self.st = st;
+        self.report_detail(n);
         Err::Fatal(n)
     }
 
     /// Run the CALL ON handlers of conditions raised in the last clause.
     fn run_pending(&mut self, f: &mut Frame, line: u32, lvl: u32) -> R<()> {
         while !f.pending.is_empty() {
-            let (c, desc) = f.pending.remove(0);
-            let t = cond_index(c);
-            let label = f.traps[t].label.clone();
+            let info = f.pending.remove(0);
+            let ui = info.user.as_ref().and_then(|u| f.utraps.iter().position(|(n, _)| n == u));
+            let mut t = cond_index(info.cond);
+            if ui.is_none() && f.traps[t].state != TrapState::On {
+                t = cond_index(Cond::Any);
+            }
+            let label = match ui {
+                Some(i) => f.utraps[i].1.label.clone(),
+                None => f.traps[t].label.clone(),
+            };
             let Some(&idx) = f.prog.labels.get(&label) else { return Err(Err::new(16)) };
-            f.traps[t].state = TrapState::Delay;
-            let saved = f.cond.replace(CondInfo { cond: c, desc, call: true });
+            match ui {
+                Some(i) => f.utraps[i].1.state = TrapState::Delay,
+                None => f.traps[t].state = TrapState::Delay,
+            }
+            let saved = f.cond.replace(info);
             self.set_simple(b"SIGL", int_str(line as i64));
             let r = self.call_internal(f, idx, Vec::new(), CallType::Subroutine, lvl);
             f.cond = saved;
-            if f.traps[t].state == TrapState::Delay {
-                f.traps[t].state = TrapState::On;
+            match ui {
+                Some(i) => {
+                    if f.utraps[i].1.state == TrapState::Delay {
+                        f.utraps[i].1.state = TrapState::On;
+                    }
+                }
+                None => {
+                    if f.traps[t].state == TrapState::Delay {
+                        f.traps[t].state = TrapState::On;
+                    }
+                }
             }
             r?;
         }
@@ -206,6 +292,8 @@ impl Interp<'_> {
             // reached at the end of a branch: skipped, not traced
             Instr::Else => {}
             Instr::When(_) | Instr::Otherwise if matches!(ctl.last(), Some(Ctl::Select { taken: true, .. })) => {}
+            // Object REXX does not trace the END of a SELECT
+            Instr::End(_) if self.oo() && matches!(code.clauses[c.link].instr, Instr::Select) => {}
             _ => {
                 if self.tracing_all(f) {
                     self.trace_clause(c, lvl);
@@ -215,6 +303,10 @@ impl Interp<'_> {
         }
         if !matches!(c.instr, Instr::Label(_) | Instr::Procedure(_)) {
             f.proc_ok = false;
+        }
+        self.cur_ol = c.olevel;
+        if !matches!(c.instr, Instr::Label(_) | Instr::Expose(_)) {
+            f.expose_ok = false;
         }
         let r = self.exec(f, code, pc, ctl, lvl, extra, mode, traced);
         if traced && f.trace.interactive && !self.quiet && r.is_ok() && !matches!(c.instr, Instr::Trace(_)) {
@@ -255,7 +347,7 @@ impl Interp<'_> {
             if line.as_slice() == b"=" {
                 return Ok(Some(true));
             }
-            let prog = match crate::parse::program(&line) {
+            let prog = match crate::parse::program_mode(&line, self.oo()) {
                 Ok(p) => Rc::new(p),
                 Err((Err::Syntax(n), _)) => {
                     self.interactive_error(n);
@@ -314,6 +406,9 @@ impl Interp<'_> {
         match &c.instr {
             Instr::Nop | Instr::Label(_) | Instr::Then => Ok(Next::Go),
             Instr::Error(e) => Err(e.clone()),
+            Instr::Message(_) | Instr::AssignMsg(..) | Instr::Use(_) | Instr::Expose(_) | Instr::Guard(..) | Instr::Reply(_) | Instr::Raise(_) | Instr::Forward(_) => {
+                (self.ops().exec_oo)(self, f, c, lvl)
+            }
             Instr::Say(e) => {
                 let v = match e {
                     Some(e) => self.eval_top(f, e, lvl)?,
@@ -325,8 +420,8 @@ impl Interp<'_> {
                 Ok(Next::Go)
             }
             Instr::Assign(v, e) => {
-                let val = self.eval_top(f, e, lvl)?;
-                self.set_var(v, val);
+                let val = self.eval_top_v(f, e, lvl)?;
+                self.set_var_v(v, val);
                 Ok(Next::Go)
             }
             Instr::Command(e) => {
@@ -364,30 +459,39 @@ impl Interp<'_> {
                 let mut av = Vec::with_capacity(args.len());
                 for a in args {
                     av.push(match a {
-                        Some(x) => Some(self.eval(f, x, lvl)?),
+                        Some(x) => Some(self.eval_v(f, x, lvl)?),
                         None => None,
                     });
                 }
                 self.set_simple(b"SIGL", int_str(c.line as i64));
-                let r = self.call_routine(f, name, *quoted, av, false, lvl)?;
+                let r = self.call_routine_v(f, name, *quoted, av, false, lvl)?;
                 match r {
                     Some(v) => {
                         if self.trace_res(f) {
-                            self.trace_val(b">>>", &v, lvl);
+                            let s = v.fast_string();
+                            self.trace_val(b">>>", &s, lvl);
                         }
-                        self.set_simple(b"RESULT", v);
+                        self.set_simple_v(b"RESULT", v);
                     }
                     None => self.st.pools.drop_var(self.st.cur_pool, &Key::Simple(b"RESULT")),
                 }
                 Ok(Next::Go)
             }
-            Instr::CallOn(cond, on, name) | Instr::SignalOn(cond, on, name) => {
+            Instr::CallOn(cond, on, name, user) | Instr::SignalOn(cond, on, name, user) => {
                 let call = matches!(c.instr, Instr::CallOn(..));
-                let t = &mut f.traps[cond_index(*cond)];
+                let t = match user {
+                    Some(u) => {
+                        if !f.utraps.iter().any(|(n, _)| n == u) {
+                            f.utraps.push((u.clone(), Trap::off()));
+                        }
+                        &mut f.utraps.iter_mut().find(|(n, _)| n == u).unwrap().1
+                    }
+                    None => &mut f.traps[cond_index(*cond)],
+                };
                 if *on {
                     t.state = TrapState::On;
                     t.call = call;
-                    t.label = name.clone().unwrap_or_else(|| cond.name().to_vec());
+                    t.label = name.clone().or_else(|| user.clone()).unwrap_or_else(|| cond.name().to_vec());
                 } else {
                     t.state = TrapState::Off;
                 }
@@ -444,14 +548,14 @@ impl Interp<'_> {
             }
             Instr::Exit(e) => {
                 let v = match e {
-                    Some(e) => Some(self.eval_top(f, e, lvl)?),
+                    Some(e) => Some(self.eval_top_v(f, e, lvl)?),
                     None => None,
                 };
                 Err(Err::Exit(v))
             }
             Instr::Return(e) => {
                 let v = match e {
-                    Some(e) => Some(self.eval_top(f, e, lvl)?),
+                    Some(e) => Some(self.eval_top_v(f, e, lvl)?),
                     None => None,
                 };
                 Ok(Next::Flow(Flow::Return(v)))
@@ -506,7 +610,7 @@ impl Interp<'_> {
             }
             Instr::Interpret(e) => {
                 let s = self.eval_top(f, e, lvl)?;
-                let prog = match crate::parse::program(&s) {
+                let prog = match crate::parse::program_mode(&s, self.oo()) {
                     Ok(mut p) => {
                         // interpreted clauses show the INTERPRET's line
                         for cl in &mut p.clauses {
@@ -591,24 +695,7 @@ impl Interp<'_> {
                 let parent = self.st.cur_pool;
                 let np = self.st.pools.push(parent);
                 self.st.cur_pool = np;
-                for it in items {
-                    match it {
-                        DropItem::Var(v) => {
-                            let name = self.ref_name(v);
-                            self.st.pools.pools[np].exposed.insert(name);
-                        }
-                        DropItem::Indirect(v) => {
-                            let name = self.ref_name(v);
-                            self.st.pools.pools[np].exposed.insert(name);
-                            let (val, name) = self.get_var(v);
-                            let list = val.unwrap_or(name);
-                            for w in words(&list) {
-                                let n = self.st.expose_name(w).ok_or(Err::new(20))?;
-                                self.st.pools.pools[np].exposed.insert(n);
-                            }
-                        }
-                    }
-                }
+                self.expose(np, items)?;
                 Ok(Next::Go)
             }
             Instr::Push(e) | Instr::Queue(e) => {
@@ -634,6 +721,30 @@ impl Interp<'_> {
                 Ok(Next::Go)
             }
         }
+    }
+
+    /// PROCEDURE EXPOSE and EXPOSE: names of pool `np` that live in its
+    /// parent.
+    pub(crate) fn expose(&mut self, np: usize, items: &[DropItem]) -> R<()> {
+        for it in items {
+            match it {
+                DropItem::Var(v) => {
+                    let name = self.ref_name(v);
+                    self.st.pools.pools[np].borrow_mut().exposed.insert(name);
+                }
+                DropItem::Indirect(v) => {
+                    let name = self.ref_name(v);
+                    self.st.pools.pools[np].borrow_mut().exposed.insert(name);
+                    let (val, name) = self.get_var(v);
+                    let list = val.unwrap_or(name);
+                    for w in words(&list) {
+                        let n = self.st.expose_name(w).ok_or(Err::new(20))?;
+                        self.st.pools.pools[np].borrow_mut().exposed.insert(n);
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     /// The name of a variable reference (tails substituted), for EXPOSE.
@@ -730,14 +841,23 @@ impl Interp<'_> {
                 if !traced {
                     self.trace_clause(c, lvl);
                 }
-                let mut s = b"       +++".to_vec();
-                for _ in 0..(3 + 2 * lvl) {
-                    s.push(b' ');
+                if self.oo() {
+                    // Object REXX: the command, then its return code
+                    self.trace_val(b">>>", &cmd, lvl);
+                    let mut rc = b"RC(".to_vec();
+                    rc.extend_from_slice(&r.rc);
+                    rc.push(b')');
+                    self.trace_val(b"+++", &rc, lvl);
+                } else {
+                    let mut s = b"       +++".to_vec();
+                    for _ in 0..(3 + 2 * lvl) {
+                        s.push(b' ');
+                    }
+                    s.extend_from_slice(b"RC(");
+                    s.extend_from_slice(&r.rc);
+                    s.push(b')');
+                    self.trace_line(&s);
                 }
-                s.extend_from_slice(b"RC(");
-                s.extend_from_slice(&r.rc);
-                s.push(b')');
-                self.trace_line(&s);
             }
             let cond = if r.cond == 2 && f.traps[cond_index(Cond::Failure)].state != TrapState::Off {
                 Cond::Failure
@@ -766,6 +886,9 @@ impl Interp<'_> {
                         return Ok(Next::Jump(end + 1));
                     }
                 }
+                if let Some(Ctl::Do { over: Some(_), .. }) = ctl.last() {
+                    return self.do_over_next(f, ctl, spec, end, elvl);
+                }
                 if let Some(Ctl::Do { var: Some(v), by, .. }) = ctl.last() {
                     let v = v.clone();
                     let by = by.clone();
@@ -789,9 +912,15 @@ impl Interp<'_> {
                 }
             }
             Mode::Seq => {
-                if simple {
-                    ctl.push(Ctl::Do { idx: pc, var: None, to: None, by: Num::zero(), for_left: None, count: None, simple: true });
+                if simple && spec.over.is_none() {
+                    ctl.push(Ctl::Do { idx: pc, var: None, to: None, by: Num::zero(), for_left: None, count: None, simple: true, over: None });
                     return Ok(Next::Go);
+                }
+                if let Some((v, e)) = &spec.over {
+                    let coll = self.eval_top_v(f, e, elvl)?;
+                    let items = (self.ops().over_items)(self, f, &coll)?;
+                    ctl.push(Ctl::Do { idx: pc, var: Some(v.clone()), to: None, by: Num::zero(), for_left: None, count: None, simple: false, over: Some((items, 0)) });
+                    return self.do_over_next(f, ctl, spec, end, elvl);
                 }
                 let mut var = None;
                 let mut to = None;
@@ -833,7 +962,7 @@ impl Interp<'_> {
                     }
                     count = Some(k);
                 }
-                ctl.push(Ctl::Do { idx: pc, var, to, by, for_left, count, simple: false });
+                ctl.push(Ctl::Do { idx: pc, var, to, by, for_left, count, simple: false, over: None });
                 if self.do_check(f, ctl, spec, elvl)? {
                     Ok(Next::Go)
                 } else {
@@ -842,6 +971,34 @@ impl Interp<'_> {
                 }
             }
         }
+    }
+
+    /// DO name OVER collection: the next item, or the end of the loop.
+    fn do_over_next(&mut self, f: &mut Frame, ctl: &mut Vec<Ctl>, spec: &DoSpec, end: usize, lvl: u32) -> R<Next> {
+        let next = match ctl.last_mut() {
+            Some(Ctl::Do { over: Some((items, i)), var: Some(v), .. }) => {
+                if *i < items.len() {
+                    let x = items[*i].clone();
+                    *i += 1;
+                    Some((v.clone(), x))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        };
+        let Some((v, x)) = next else {
+            ctl.pop();
+            return Ok(Next::Jump(end + 1));
+        };
+        self.set_var_v(&v, x);
+        if let Some(w) = &spec.while_ {
+            if !self.eval_bool(f, w, lvl)? {
+                ctl.pop();
+                return Ok(Next::Jump(end + 1));
+            }
+        }
+        Ok(Next::Go)
     }
 
     /// Whether another iteration runs (count, TO, FOR, WHILE).
@@ -881,7 +1038,10 @@ impl Interp<'_> {
         match src {
             ParseSrc::Arg => {
                 for a in self.st.args.clone() {
-                    strings.push(a.unwrap_or_default());
+                    strings.push(match a {
+                        Some(v) => self.to_str(f, &v)?,
+                        None => Vec::new(),
+                    });
                 }
             }
             ParseSrc::Linein => {
@@ -893,7 +1053,7 @@ impl Interp<'_> {
                 strings.push(l);
             }
             ParseSrc::Source => strings.push(self.st.source.clone()),
-            ParseSrc::Version => strings.push(crate::VERSION.to_vec()),
+            ParseSrc::Version => strings.push(if self.oo() { crate::OO_VERSION.to_vec() } else { crate::VERSION.to_vec() }),
             ParseSrc::Value(e) => {
                 let v = match e {
                     Some(e) => self.eval_top(f, e, lvl)?,
@@ -902,9 +1062,9 @@ impl Interp<'_> {
                 strings.push(v);
             }
             ParseSrc::Var(v) => {
-                let (val, name) = self.get_var(v);
+                let (val, name) = self.get_var_v(v);
                 let val = match val {
-                    Some(x) => x,
+                    Some(x) => self.to_str(f, &x)?,
                     None => {
                         self.novalue(f, &name)?;
                         name

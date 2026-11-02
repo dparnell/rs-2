@@ -302,6 +302,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "orexx-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "rexx",
+ "thunk16",
+]
+
+[[package]]
 name = "os2"
 version = "0.1.0"
 
@@ -616,10 +625,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "rexxsom-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "rxsom",
+ "somsup",
+]
+
+[[package]]
 name = "rexxutil-dll"
 version = "0.1.0"
 dependencies = [
  "os2",
+]
+
+[[package]]
+name = "rexxwps-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "rxsom",
+ "somsup",
 ]
 
 [[package]]
@@ -629,6 +656,14 @@ dependencies = [
  "gpi",
  "os2",
  "pmwin",
+]
+
+[[package]]
+name = "rxsom"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "somsup",
 ]
 
 [[package]]

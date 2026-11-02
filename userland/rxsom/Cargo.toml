@@ -1,0 +1,10 @@
+[package]
+name = "rxsom"
+description = "What REXXSOM.DLL and REXXWPS.DLL share: calling SOM methods by name with REXX values (signatures, argument and result conversion)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }
