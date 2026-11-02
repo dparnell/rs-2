@@ -603,6 +603,10 @@ extern "C" fn client_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             return r & 0xffff;
         }
         START_TIMER => {
+            // Output shows the window, as IBM documents it. (IBM's
+            // PMREXXIO sends REXX_MAKE_VISIBLE to WinWindowFromID(client,
+            // FID_CLIENT), which is no window, so its window appears only
+            // when the procedure reads.)
             if !io.visible.load(SeqCst) {
                 send(h, REXX_MAKE_VISIBLE, 0, 0);
             }
