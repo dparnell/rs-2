@@ -171,7 +171,20 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
 fn main(s: &os2::Startup) -> u32 {
     let a = args(s);
     // The device (Cdaudio01 for the first drive, Cdaudio02...).
-    let device = a.first().cloned().unwrap_or_else(|| String::from("cdaudio"));
+    // Without one, the first drive with a disc in it.
+    let device = a.first().cloned().unwrap_or_else(|| {
+        for n in 1..=4 {
+            if mci(&alloc::format!("open cdaudio{n:02} alias cdprobe shareable wait")).0 != 0 {
+                break;
+            }
+            let present = mci("status cdprobe media present wait").1 == "TRUE";
+            mci("close cdprobe wait");
+            if present {
+                return alloc::format!("cdaudio{n:02}");
+            }
+        }
+        String::from("cdaudio")
+    });
     let Some(pm) = pm_start() else {
         os2::print("CDPM needs Presentation Manager.\r\n");
         return 1;
