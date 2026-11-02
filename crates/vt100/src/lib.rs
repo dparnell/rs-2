@@ -62,7 +62,15 @@ struct Pen {
     concealed: bool,
 }
 
-const PEN: Pen = Pen { fg: 7, bg: 0, bold: false, underline: false, blink: false, reverse: false, concealed: false };
+const PEN: Pen = Pen {
+    fg: 7,
+    bg: 0,
+    bold: false,
+    underline: false,
+    blink: false,
+    reverse: false,
+    concealed: false,
+};
 
 #[derive(Clone, Copy)]
 struct Saved {
@@ -130,7 +138,14 @@ impl Term {
             col: 0,
             wrap_pending: false,
             pen: PEN,
-            saved: Saved { row: 0, col: 0, pen: PEN, origin: false, g: [false; 2], gl: 0 },
+            saved: Saved {
+                row: 0,
+                col: 0,
+                pen: PEN,
+                origin: false,
+                g: [false; 2],
+                gl: 0,
+            },
             top: 0,
             bottom: rows - 1,
             origin: false,
@@ -232,35 +247,65 @@ impl Term {
 
     /// What a key sends.
     pub fn key(&self, k: Key) -> &'static [u8] {
-        let app = self.app_cursor;
-        match k {
-            Key::Up => if app { b"\x1bOA" } else { b"\x1b[A" },
-            Key::Down => if app { b"\x1bOB" } else { b"\x1b[B" },
-            Key::Right => if app { b"\x1bOC" } else { b"\x1b[C" },
-            Key::Left => if app { b"\x1bOD" } else { b"\x1b[D" },
-            Key::Home => b"\x1b[1~",
-            Key::Insert => b"\x1b[2~",
-            Key::Delete => b"\x1b[3~",
-            Key::End => b"\x1b[4~",
-            Key::PageUp => b"\x1b[5~",
-            Key::PageDown => b"\x1b[6~",
-            Key::F(n) => match n {
-                1 => b"\x1bOP",
-                2 => b"\x1bOQ",
-                3 => b"\x1bOR",
-                4 => b"\x1bOS",
-                5 => b"\x1b[15~",
-                6 => b"\x1b[17~",
-                7 => b"\x1b[18~",
-                8 => b"\x1b[19~",
-                9 => b"\x1b[20~",
-                10 => b"\x1b[21~",
-                11 => b"\x1b[23~",
-                _ => b"\x1b[24~",
-            },
-        }
+        key_bytes(k, self.app_cursor)
     }
+}
 
+/// What a key sends (`app`: the host set DECCKM).
+pub fn key_bytes(k: Key, app: bool) -> &'static [u8] {
+    match k {
+        Key::Up => {
+            if app {
+                b"\x1bOA"
+            } else {
+                b"\x1b[A"
+            }
+        }
+        Key::Down => {
+            if app {
+                b"\x1bOB"
+            } else {
+                b"\x1b[B"
+            }
+        }
+        Key::Right => {
+            if app {
+                b"\x1bOC"
+            } else {
+                b"\x1b[C"
+            }
+        }
+        Key::Left => {
+            if app {
+                b"\x1bOD"
+            } else {
+                b"\x1b[D"
+            }
+        }
+        Key::Home => b"\x1b[1~",
+        Key::Insert => b"\x1b[2~",
+        Key::Delete => b"\x1b[3~",
+        Key::End => b"\x1b[4~",
+        Key::PageUp => b"\x1b[5~",
+        Key::PageDown => b"\x1b[6~",
+        Key::F(n) => match n {
+            1 => b"\x1bOP",
+            2 => b"\x1bOQ",
+            3 => b"\x1bOR",
+            4 => b"\x1bOS",
+            5 => b"\x1b[15~",
+            6 => b"\x1b[17~",
+            7 => b"\x1b[18~",
+            8 => b"\x1b[19~",
+            9 => b"\x1b[20~",
+            10 => b"\x1b[21~",
+            11 => b"\x1b[23~",
+            _ => b"\x1b[24~",
+        },
+    }
+}
+
+impl Term {
     /// What Enter sends.
     pub fn enter(&self) -> &'static [u8] {
         if self.newline_mode { b"\r\n" } else { b"\r" }
@@ -378,8 +423,8 @@ impl Term {
             return b;
         }
         const DEC: [u8; 32] = [
-            0x20, 0x04, 0xb1, 0x09, 0x0c, 0x0d, 0x0a, 0xf8, 0xf1, 0x0a, 0x0b, 0xd9, 0xbf, 0xda, 0xc0, 0xc5, 0xc4, 0xc4, 0xc4, 0xc4, 0x5f,
-            0xc3, 0xb4, 0xc1, 0xc2, 0xb3, 0xf3, 0xf2, 0xe3, 0xd8, 0x9c, 0xfa,
+            0x20, 0x04, 0xb1, 0x09, 0x0c, 0x0d, 0x0a, 0xf8, 0xf1, 0x0a, 0x0b, 0xd9, 0xbf, 0xda, 0xc0, 0xc5, 0xc4, 0xc4, 0xc4, 0xc4, 0x5f, 0xc3, 0xb4,
+            0xc1, 0xc2, 0xb3, 0xf3, 0xf2, 0xe3, 0xd8, 0x9c, 0xfa,
         ];
         DEC[(b - 0x5f) as usize]
     }
@@ -505,7 +550,14 @@ impl Term {
     }
 
     fn save(&mut self) {
-        self.saved = Saved { row: self.row, col: self.col, pen: self.pen, origin: self.origin, g: self.g, gl: self.gl };
+        self.saved = Saved {
+            row: self.row,
+            col: self.col,
+            pen: self.pen,
+            origin: self.origin,
+            g: self.g,
+            gl: self.gl,
+        };
     }
 
     fn restore(&mut self) {
@@ -865,14 +917,14 @@ impl Term {
 /// A Unicode character in code page 437 ('?' when it has none).
 pub fn unicode_to_cp437(u: u32) -> u8 {
     const HIGH: [u16; 128] = [
-        0x00c7, 0x00fc, 0x00e9, 0x00e2, 0x00e4, 0x00e0, 0x00e5, 0x00e7, 0x00ea, 0x00eb, 0x00e8, 0x00ef, 0x00ee, 0x00ec, 0x00c4, 0x00c5,
-        0x00c9, 0x00e6, 0x00c6, 0x00f4, 0x00f6, 0x00f2, 0x00fb, 0x00f9, 0x00ff, 0x00d6, 0x00dc, 0x00a2, 0x00a3, 0x00a5, 0x20a7, 0x0192,
-        0x00e1, 0x00ed, 0x00f3, 0x00fa, 0x00f1, 0x00d1, 0x00aa, 0x00ba, 0x00bf, 0x2310, 0x00ac, 0x00bd, 0x00bc, 0x00a1, 0x00ab, 0x00bb,
-        0x2591, 0x2592, 0x2593, 0x2502, 0x2524, 0x2561, 0x2562, 0x2556, 0x2555, 0x2563, 0x2551, 0x2557, 0x255d, 0x255c, 0x255b, 0x2510,
-        0x2514, 0x2534, 0x252c, 0x251c, 0x2500, 0x253c, 0x255e, 0x255f, 0x255a, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256c, 0x2567,
-        0x2568, 0x2564, 0x2565, 0x2559, 0x2558, 0x2552, 0x2553, 0x256b, 0x256a, 0x2518, 0x250c, 0x2588, 0x2584, 0x258c, 0x2590, 0x2580,
-        0x03b1, 0x00df, 0x0393, 0x03c0, 0x03a3, 0x03c3, 0x00b5, 0x03c4, 0x03a6, 0x0398, 0x03a9, 0x03b4, 0x221e, 0x03c6, 0x03b5, 0x2229,
-        0x2261, 0x00b1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00f7, 0x2248, 0x00b0, 0x2219, 0x00b7, 0x221a, 0x207f, 0x00b2, 0x25a0, 0x00a0,
+        0x00c7, 0x00fc, 0x00e9, 0x00e2, 0x00e4, 0x00e0, 0x00e5, 0x00e7, 0x00ea, 0x00eb, 0x00e8, 0x00ef, 0x00ee, 0x00ec, 0x00c4, 0x00c5, 0x00c9,
+        0x00e6, 0x00c6, 0x00f4, 0x00f6, 0x00f2, 0x00fb, 0x00f9, 0x00ff, 0x00d6, 0x00dc, 0x00a2, 0x00a3, 0x00a5, 0x20a7, 0x0192, 0x00e1, 0x00ed,
+        0x00f3, 0x00fa, 0x00f1, 0x00d1, 0x00aa, 0x00ba, 0x00bf, 0x2310, 0x00ac, 0x00bd, 0x00bc, 0x00a1, 0x00ab, 0x00bb, 0x2591, 0x2592, 0x2593,
+        0x2502, 0x2524, 0x2561, 0x2562, 0x2556, 0x2555, 0x2563, 0x2551, 0x2557, 0x255d, 0x255c, 0x255b, 0x2510, 0x2514, 0x2534, 0x252c, 0x251c,
+        0x2500, 0x253c, 0x255e, 0x255f, 0x255a, 0x2554, 0x2569, 0x2566, 0x2560, 0x2550, 0x256c, 0x2567, 0x2568, 0x2564, 0x2565, 0x2559, 0x2558,
+        0x2552, 0x2553, 0x256b, 0x256a, 0x2518, 0x250c, 0x2588, 0x2584, 0x258c, 0x2590, 0x2580, 0x03b1, 0x00df, 0x0393, 0x03c0, 0x03a3, 0x03c3,
+        0x00b5, 0x03c4, 0x03a6, 0x0398, 0x03a9, 0x03b4, 0x221e, 0x03c6, 0x03b5, 0x2229, 0x2261, 0x00b1, 0x2265, 0x2264, 0x2320, 0x2321, 0x00f7,
+        0x2248, 0x00b0, 0x2219, 0x00b7, 0x221a, 0x207f, 0x00b2, 0x25a0, 0x00a0,
     ];
     if u < 0x80 {
         return u as u8;
@@ -911,7 +963,12 @@ mod tests {
     use super::*;
 
     fn text(t: &Term, r: usize) -> alloc::string::String {
-        t.row_text(r).iter().map(|&b| b as char).collect::<alloc::string::String>().trim_end().into()
+        t.row_text(r)
+            .iter()
+            .map(|&b| b as char)
+            .collect::<alloc::string::String>()
+            .trim_end()
+            .into()
     }
 
     #[test]
