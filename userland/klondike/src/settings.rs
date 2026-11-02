@@ -222,6 +222,15 @@ const ID_BACK_HELP: u32 = 2248;
 
 /// What the pages started with (their Undo).
 static mut UNDO: Settings = DEFAULTS;
+/// The notebook's dialog (a page's Close or Esc closes it).
+static mut NOTEBOOK: u32 = 0;
+
+fn close_notebook() {
+    let d = unsafe { NOTEBOOK };
+    if d != 0 {
+        post(d, WM_CLOSE, 0, 0);
+    }
+}
 
 fn page_frame(id: u16) -> Item {
     pmkit::tpl::item(WC_FRAME, b"", 0, (0, 0, 212, 136), id)
@@ -319,14 +328,14 @@ extern "C" fn options_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
                     show_options(h, &s);
                 }
                 ID_OPT_HELP => crate::show_help(PAGE_OPTIONS),
+                DID_CANCEL => close_notebook(),
                 _ => {}
             }
             0
         }
         // Enter and Esc on a page must not end it.
         WM_CLOSE => {
-            let owner = unsafe { WinQueryWindow(WinQueryWindow(h, QW_PARENT), QW_PARENT) };
-            post(owner, WM_CLOSE, 0, 0);
+            close_notebook();
             0
         }
         _ => unsafe { WinDefDlgProc(h, m, mp1, mp2) },
@@ -340,6 +349,10 @@ extern "C" fn backs_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             match lo(mp1) {
                 ID_BACK_UNDO => s.card_back = unsafe { UNDO.card_back },
                 ID_BACK_DEFAULT => s.card_back = DEFAULTS.card_back,
+                DID_CANCEL => {
+                    close_notebook();
+                    return 0;
+                }
                 ID_BACK_HELP => {
                     crate::show_help(PAGE_BACKS);
                     return 0;
@@ -351,8 +364,7 @@ extern "C" fn backs_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_CLOSE => {
-            let owner = unsafe { WinQueryWindow(WinQueryWindow(h, QW_PARENT), QW_PARENT) };
-            post(owner, WM_CLOSE, 0, 0);
+            close_notebook();
             0
         }
         _ => unsafe { WinDefDlgProc(h, m, mp1, mp2) },
@@ -433,6 +445,7 @@ extern "C" fn backs_window(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
 extern "C" fn notebook_dlg(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
     match m {
         WM_INITDLG => {
+            unsafe { NOTEBOOK = h };
             let nb = item(h, ID_NOTEBOOK);
             send(nb, BKM_SETDIMENSIONS, mp(90, 24), BKA_MAJORTAB);
             let pages: [(&[u8], &[u8], extern "C" fn(u32, u32, u32, u32) -> u32, Vec<u8>); 2] =
@@ -462,8 +475,9 @@ pub fn notebook() {
         UNDO = a.settings;
         WinRegisterClass(a.hab, b"KlondikeBacks\0".as_ptr(), backs_window, CS_SIZEREDRAW, 0);
     }
-    let f = dialog_frame(b"Klondike Solitaire - Settings", DLG_SETTINGS, 312, 190);
-    let nb = pmkit::tpl::item(WC_NOTEBOOK, b"", WS_VISIBLE | WS_TABSTOP | BKS_BACKPAGESBR | BKS_MAJORTABRIGHT | BKS_SPIRALBIND, (0, 0, 312, 190), ID_NOTEBOOK as u16);
+    let f = dialog_frame(b"Klondike Solitaire - Settings", DLG_SETTINGS, 272, 168);
+    let nb = pmkit::tpl::item(WC_NOTEBOOK, b"", WS_VISIBLE | WS_TABSTOP | BKS_BACKPAGESBR | BKS_MAJORTABRIGHT | BKS_SPIRALBIND, (0, 0, 272, 168), ID_NOTEBOOK as u16);
     let tpl = template(f, alloc::vec![nb]);
     run_dialog(a.frame, notebook_dlg, &tpl, 0);
+    unsafe { NOTEBOOK = 0 };
 }

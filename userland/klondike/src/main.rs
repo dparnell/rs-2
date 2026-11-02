@@ -17,6 +17,8 @@
 //! The cards are rs2's own, drawn with GPI (cards.rs); there is no
 //! opening video and there are no sounds.
 //!
+//! `KLONDIKE /DEAL n` deals from seed n (for tests).
+//!
 //! `KLONDIKE /SELFTEST` checks the game logic and the card drawing and
 //! prints PASS/FAIL lines and "klondike selftest done: N failure(s)".
 
@@ -200,7 +202,12 @@ fn main(s: &os2::Startup) -> u32 {
     let (st, pos) = settings::load();
     a.settings = st;
     a.saved = st;
-    a.rng = Some(Rng::new());
+    // `/DEAL n`: deals from a fixed seed (for tests).
+    let w = words(arg(s));
+    a.rng = Some(match w.first() {
+        Some(f) if f.eq_ignore_ascii_case(b"/DEAL") => Rng::seeded(w.get(1).and_then(|n| parse_num(n)).unwrap_or(1) as u32),
+        _ => Rng::new(),
+    });
     let fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST | FCF_NOBYTEALIGN;
     let (frame, client) = std_window(a.hab, b"Patience", client_proc, CS_SIZEREDRAW, 0, fcf, TITLE, FRAME_ID);
     if frame == 0 {
@@ -827,6 +834,11 @@ fn button1_up(x: i32, y: i32) {
 fn double_click(x: i32, y: i32) {
     let a = app();
     a.sel = None;
+    // A quick second click on the talon turns up more cards.
+    if let Some((TALON, _)) = hit(x, y) {
+        talon_click();
+        return;
+    }
     let Some((p, Some(i))) = hit(x, y) else { return };
     if i + 1 != a.game.piles[p].len() {
         return;
