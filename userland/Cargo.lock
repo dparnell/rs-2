@@ -88,8 +88,10 @@ version = "0.1.0"
 name = "glocale"
 version = "0.1.0"
 dependencies = [
+ "gpi",
  "os2",
  "pmkit",
+ "pmwin",
 ]
 
 [[package]]
@@ -280,6 +282,7 @@ dependencies = [
 name = "picview"
 version = "0.1.0"
 dependencies = [
+ "gpi",
  "os2",
  "pmkit",
 ]

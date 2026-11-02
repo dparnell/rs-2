@@ -12,3 +12,5 @@ path = "src/main.rs"
 [dependencies]
 os2 = { path = "../os2" }
 pmkit = { path = "../pmkit" }
+
+gpi = { path = "../../crates/gpi" }

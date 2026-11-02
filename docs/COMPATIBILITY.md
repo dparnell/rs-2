@@ -312,7 +312,7 @@ copied from the CD.
 
 | `OS2\PMCHKDSK.EXE`, `OS2\PMFORMAT.EXE` | Check Disk, Format | IBM's dialogs; CHKDSK /P and FORMAT /P on pipes with IBM's MSG_ protocol; Results window with the usage pie; Format Progress; help. Formatting needs FORMAT /P (not in rs2's FORMAT yet) | QEMU screenshots, /SELFTEST, RS2FORMATTEST script |
 
-| `OS2\APPS\PICVIEW.EXE` | Picture Viewer | (to come) | |
+| `OS2\APPS\PICVIEW.EXE` | Picture Viewer | metafiles and spool files (pages), fit picture/page, backgrounds, IBM's Open and Save As windows, sequences, print, clipboard Cut/Copy/Paste, `/P`, `/S`, help; PIF files are not read | `/SELFTEST` (0 failures); QEMU screenshots of AAAAA.MET, the Toolkit's GRAPHIC.MET and PRTSAMP.MET (as IBM's shows them), a three-page spool file, Cut and Paste, help; printed AAAAA.MET to the host LPD listener (Ghostscript renders it as on screen) |
 
 | `OS2\APPS\PMSEEK.EXE` | Seek and Scan Files | search by name and text on a second thread (Stop), drives, found text, Open/Process/Command, Save, Copy, settings, help | `PMSEEK /SELFTEST` (0 failures); QEMU screenshots: a search of `C:\*.CMD` for "say" with found text, Open in the editor, sizing, F1 help |
 

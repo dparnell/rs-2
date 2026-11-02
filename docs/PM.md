@@ -2532,7 +2532,60 @@ it failed), nor `/F:` (diskettes); the slider's "100" is clipped.
 
 ### Picture Viewer (PICVIEW.EXE)
 
-(to come)
+`userland/picview`. As IBM's (studied in PICVIEW.EXE, its resource DLL
+PICVIEW.DLL and PMPIC.DLL): it shows metafiles (.MET) and spool files of
+the standard kind (.SPL, which are metafiles) fitted to the window with
+their proportions kept: the part of the page the picture covers ("Fit
+picture in window", the default) or the whole page ("Fit page in
+window"), on the window colour or black. `doc.rs` reads the file with
+`crates/gpi`'s metafile parser and cuts its orders at each NEWFRAME
+escape (`ESC_DEVESCAPE` with DEVESC_NEWFRAME, as a PM_Q_STD DC records
+it) into one metafile per page: a page after the first starts a segment
+of its own and repeats the logical fonts, colour table and code page set
+before it; a handle for those bytes is an empty metafile from a metafile
+DC grown with `GpiSetMetaFileBits`. `view.rs` draws a page on the
+window's normal PS: page units PU_ARBITRARY sized as the metafile's page,
+a page viewport placing the page (or the picture's bounds, found once by
+playing with boundary data on and the display off, then taken through
+the metafile's default viewing transform) in the window, the default
+viewing transform set by hand (GpiPlayMetaFile applies the metafile's
+only with RES_RESET, which would undo the page), then the metafile
+played with RES_NORESET. Printing scales through the default viewing
+transform alone, on a PS in pels: a queued DC records the drawing as a
+metafile, which keeps that transform but not a page set up in other
+units.
+
+- Menus, accelerators (Ctrl+O, S, F, B, N, Q; Shift+Delete, Ctrl+Insert,
+  Shift+Insert, Shift+Print Screen), dialog ids and help panels are
+  IBM's; the title is "Picture Viewer - NAME", with "page n of m" for
+  several pages (Page Up and Page Down page too).
+- File > Open is IBM's own window (id 400), not the standard file
+  dialog: current path, file name, drive, directory and file lists,
+  *.MET, *.PIF and *.SPL buttons, a typed pattern, directory or drive
+  changes the listing; several files (up to 50) make a sequence shown
+  interactively (Sequence > Next picture, Ctrl+N) or automatically
+  after a delay of 1-999 seconds. Save as (id 599) saves the page shown
+  as a metafile (".MET" added; replacing a file asks). Print asks for
+  copies (id 302) and prints every page on the default printer through a
+  PM_Q_STD queued DC; "There is no printer installed" without one. Edit
+  Cut/Copy put a copy on the clipboard as CF_METAFILE, Paste shows the
+  clipboard's ("Picture Viewer - Clipboard"). Page > Go to page (id 301).
+  Options > Code page (id 550) keeps the PIF country choice.
+- `PICVIEW file`; `PICVIEW /P file` prints and ends without a window
+  ("Picture Printer"); `/S` neither uses nor saves the window position.
+  OS2.INI `PicView`: WinPos (an SWP), BestFit (4 bytes: fit the picture;
+  IBM deletes the key for "fit page", which its next start reads as fit
+  the picture again: rs2 keeps a 1-byte value), BlkBackg (there: black).
+- `PICVIEW /SELFTEST` checks the page splitting, the page metafiles and
+  their bounds, the fitting, AAAAA.MET's bounds (when the image has it),
+  refused files, saving and the clipboard, and leaves `C:\PVPAGES.SPL`
+  (three pages); `PICVIEW /SELFTEST file` then goes on to show a file.
+
+**Not done**: PIF files (IBM converts them to metafiles with PMPIC.DLL's
+PicIchg, from GDDM's picture interchange format; there is no sample to
+test with, so rs2 says they are not metafiles), the window's icon, the
+drawing on a second thread (IBM's can be interrupted while a large
+picture draws).
 
 ### Seek and Scan Files (PMSEEK.EXE)
 
