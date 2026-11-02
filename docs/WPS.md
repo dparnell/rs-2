@@ -780,6 +780,50 @@ Shutting down (`shutdown.rs`, RS2SHELL's sequence) asks first, then:
 - the Startup folder (`WPSTEST STARTUP`, then PMSHELL in the same boot:
   the System Editor started).
 
+## rs2's multimedia classes
+
+`mm.rs` gives PMWP the multimedia classes, with the names of IBM's
+MMPARTS.DLL ones (MINSTALL's list) so that scripts and programs naming
+them find them: MMDataFile (WPDataFile) and its sound classes (MMAudio;
+MMWAV, MMVOC, MM_AU, MMAU, MMAIF, MMIFF, MMSNDF), MMMIDI, the video
+classes (MMVideo; MMAVI, MMFLI, MMMPG, MMMOV) and the image classes
+(MMImage; MMJPG, MMGIF, MMPCX, MMTIFF, MMTarga, MMDIB, MMPhotoCD, MMAVC,
+MMMMotion); MMFolder; MMDevice, MMCDDevice, MMLVDDevice and MMVolume
+(WPAbstract). They introduce no methods (`gen_wps_classes.py`'s EXTRA,
+with the metaclass M_MMDataFile).
+
+- **Files:** M_MMDataFile gives each data file class IBM's instance
+  filter and type (MMWAV `*.WAV` and `WAV,Digital Audio`, MMJPG
+  `*.JPG,*.JPEG,*.JPE`, ...), so files take the classes by the shell's
+  instance types and filters (IBM's AddInstanceTypeAndFilter, below), and
+  the class icons: rs2's own (`pmwin::mmicons`: a sound page, a MIDI
+  page, a film strip, a picture; the Multimedia folder, Volume Control,
+  the CD Player), unless a file has its own.
+- **Views:** opening a data file starts rs2's media player
+  (`%MMBASE%\MPPM.EXE` with the file, MMPM.md); the Open submenu has
+  Player (Viewer for images) and, for sounds, Editor (WEPM, the Digital
+  Audio editor). MMCDDevice opens the CD Player (CDPM), MMVolume Volume
+  Control (MMVOLUME), MMDevice and MMLVDDevice Multimedia Setup (STPM).
+  Program objects of those applets show the same icons.
+- **Loading:** desktop version 13 puts the classes in the class table
+  for PMWP and loads them, so they are ready (their filters in effect)
+  whenever the shell starts. When another DLL is registered for one of
+  these names (IBM's MMPARTS, by WinRegisterObjectClass or INSTMMVW.CMD)
+  the class manager loads that one instead (clsmgr.rs); rs2's are then
+  not built, from the next start of the shell.
+- **The Multimedia folder** (desktop version 13): `<MMPM2_FOLDER>`
+  (MMFolder) in Programs with Media Player, Digital Audio, Multimedia
+  Setup (`<MMPM2_SETUP>`), CD Player (MMCDDevice, `<MMPM2_CDPLAYER>`),
+  Volume Control (MMVolume, `<MMPM2_VOLUME>`) and a shadow of the Sound
+  object (`<MMPM2_SNDSHAD>`); Multimedia Templates
+  (`<MMPM2_MMTEMPLATEFOLDER>`) in Templates with a Wave Audio (MMWAV)
+  template, whose new files open in the editor as new sounds. IBM's
+  object IDs are kept where MMPM/2 has the object.
+
+Checked in QEMU (screenshots): the Multimedia folder; a folder of a WAV,
+an AU, an AVI and a JPEG, each with its class's icon; double-clicking
+the JPEG shows it in the player; a sound's menu.
+
 ## IBM's multimedia classes (MMPARTS)
 
 IBM's MMPARTS.DLL (MMPM/2's Workplace Shell classes; the files and the
@@ -852,8 +896,9 @@ and WPShadow by MMBitmap and MMShadow (from MMBIT.DLL and MMSHD.DLL,
 forwarders into MMPARTS) through `PM_InstallClassReplacement`; its
 INSTMMVW.CMD does the same with REXX's SysRegisterObjectClass. On rs2
 the classes are registered with WinRegisterObjectClass (WPSTEST
-`REGISTER`, or REXX); the Multimedia folder (`<MMPM2_FOLDER>`) and its
-objects are not made yet.
+`REGISTER`, or REXX), and take the place of rs2's own classes of the
+same names ("rs2's multimedia classes" above) from the next start of the
+shell; the Multimedia folder (`<MMPM2_FOLDER>`) is rs2's.
 
 **Class replacement** is IBM's: OS2.INI's `PM_Workplace:ReplaceList`
 holds, under the class replaced, the classes replacing it (each
