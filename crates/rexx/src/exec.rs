@@ -759,6 +759,10 @@ impl<'h> Interp<'h> {
                 set_state(f, TrapState::Off);
                 let mut info = info;
                 info.call = false;
+                if info.cond == Cond::Syntax && info.code != 0 {
+                    let rc = if info.code >= 1000 { info.code / 1000 } else { info.code };
+                    self.st.pools.set(self.st.cur_pool, &Key::Simple(b"RC"), Value::S(crate::num::int_str(rc as i64)));
+                }
                 f.cond = Some(info);
                 Err(Err::Signal { label: t.label })
             }

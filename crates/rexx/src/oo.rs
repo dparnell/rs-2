@@ -288,7 +288,8 @@ pub fn lookup(w: &World, recv: &Value, name: &[u8], start: &Start) -> Option<Fou
             }
             if let Some(b) = ci.builtin {
                 if crate::classes::has_native(b, *side, name) {
-                    return Some(Method { body: Body::Native(b), private: false, guarded: false, protected: false });
+                    let private = b == Builtin::Object && !*side && matches!(name, b"RUN" | b"SETMETHOD" | b"UNSETMETHOD");
+                    return Some(Method { body: Body::Native(b), private, guarded: false, protected: false });
                 }
             }
             None
@@ -629,7 +630,9 @@ impl Interp<'_> {
                 dd.map.insert(name, mo);
             }
         }
-        pkg.installed.borrow_mut().methods = Some(w.new_obj(&w.class(Builtin::Directory), Data::Directory(dd)));
+        if !pkg.floating.is_empty() {
+            pkg.installed.borrow_mut().methods = Some(w.new_obj(&w.class(Builtin::Directory), Data::Directory(dd)));
+        }
         // each class gets INIT
         for c in made.into_iter().flatten() {
             let v = Value::O(c);
@@ -1562,7 +1565,7 @@ fn exec_raise(it: &mut Interp, f: &mut Frame, spec: &RaiseSpec, lvl: u32) -> R<N
                 None => None,
             };
         }
-        None => info.exit = !spec.propagate,
+        None => info.exit = true,
     }
     info.line = 0;
     it.err_msg = info.msg.clone();

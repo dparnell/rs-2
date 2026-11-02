@@ -144,6 +144,17 @@ fn ibm_probe2() {
     assert!(got[n + 1].starts_with("Error 42.3:"), "{}", got[n + 1]);
 }
 
+/// tests/rexx/ORXLANG.CMD (which passes on IBM's Object REXX).
+#[test]
+fn orxlang_script() {
+    let mut h = MemHost::default();
+    let src = include_str!("../../../tests/rexx/orxlang.cmd");
+    let (out, r) = run_oo_with(src, &mut h);
+    let all = out.join("\n");
+    assert!(out.iter().any(|l| l.starts_with("ORXLANG: 100 passed, 0 failed")), "{all}");
+    assert!(r.is_ok(), "{all}");
+}
+
 #[test]
 fn orxtest_script() {
     let mut h = MemHost::default();

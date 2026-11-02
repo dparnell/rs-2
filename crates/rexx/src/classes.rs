@@ -1967,6 +1967,10 @@ fn stream_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Arg
         b"CHARIN" => s(crate::stream::charin(it, f, &sargs)?),
         b"CHAROUT" => s(crate::stream::charout(it, f, &sargs)?),
         b"ARRAYIN" | b"MAKEARRAY" | b"SUPPLIER" => {
+            if name == b"SUPPLIER" {
+                // a supplier goes through the stream from its start
+                let _ = cmd(it, f, b"SEEK =1");
+            }
             let chars = sargs.get(1).cloned().flatten().is_some_and(|o| o.first().is_some_and(|c| c.eq_ignore_ascii_case(&b'C')));
             let mut items = Vec::new();
             loop {
