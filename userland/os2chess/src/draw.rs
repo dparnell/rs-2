@@ -112,7 +112,7 @@ pub fn layout(r: RectL, v: &View) -> Layout {
     // Fit the board's edge and the tallest pieces into the window.
     let (mut minx, mut maxx, mut miny, mut maxy) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
     for (x, y) in [(-4.4f32, -4.4f32), (4.4, -4.4), (4.4, 4.4), (-4.4, 4.4)] {
-        for z in [0.0f32, 1.1] {
+        for z in [0.0f32, 1.4] {
             let (px, py, _) = proj(x, y, z);
             minx = minx.min(px);
             maxx = maxx.max(px);
@@ -133,7 +133,7 @@ pub fn layout(r: RectL, v: &View) -> Layout {
         l.corners[sq as usize] = [to(x, y, 0.0).0, to(x + 1.0, y, 0.0).0, to(x + 1.0, y + 1.0, 0.0).0, to(x, y + 1.0, 0.0).0];
         let (c, d) = to(x + 0.5, y + 0.5, 0.0);
         depth[sq as usize] = d;
-        let size = (scale / d * 0.95) as i32;
+        let size = (scale / d * 1.25) as i32;
         l.base[sq as usize] = (pt(c.x, c.y - size / 8), size);
     }
     l.board = [to(-4.4, -4.4, 0.0).0, to(4.4, -4.4, 0.0).0, to(4.4, 4.4, 0.0).0, to(-4.4, 4.4, 0.0).0];
@@ -141,6 +141,16 @@ pub fn layout(r: RectL, v: &View) -> Layout {
     ord.sort_by(|&a, &b| depth[b as usize].partial_cmp(&depth[a as usize]).unwrap_or(core::cmp::Ordering::Equal));
     l.order.copy_from_slice(&ord);
     l
+}
+
+/// The square of a piece of `side` whose shape is at a point (the
+/// nearest first: in 3-D a piece covers the squares behind it).
+pub fn piece_at(l: &Layout, p: &Position, side: i8, x: i32, y: i32) -> Option<u8> {
+    l.order.iter().rev().copied().find(|&s| {
+        let pc = p.sq[s as usize];
+        let (b, size) = l.base[s as usize];
+        pc != 0 && (pc > 0) == (side > 0) && (x - b.x).abs() <= size * 3 / 10 && y >= b.y && y <= b.y + size * 9 / 10
+    })
 }
 
 /// The square at a point, if any.
@@ -253,7 +263,7 @@ pub fn board(hps: u32, l: &Layout, p: &Position, v: &View, c: &Colors, marks: &M
         let light = (file(sq) + rank(sq)) & 1 == 1;
         let mut col = if light { c.light } else { c.dark };
         if marks.last.is_some_and(|(a, b)| a == sq || b == sq) {
-            col = mix(col, c.highlight, 3);
+            col = mix(col, c.highlight, 2);
         }
         poly(hps, &l.corners[sq as usize], col, col);
     }

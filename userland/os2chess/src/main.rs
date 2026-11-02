@@ -233,7 +233,7 @@ fn main(s: &os2::Startup) -> u32 {
     );
     a.help = Help::create(hab, frame, HELP_FILE, b"Help for OS/2 Chess", &help_windows());
     update_menu();
-    show_at_saved(hab, frame, INI_APP, b"WINDOWPOS", Some((560, 520)));
+    show_at_saved(hab, frame, INI_APP, b"WINDOWPOS", Some((620, 580)));
     unsafe { WinStartTimer(hab, client, TIMER_CLOCK, 1000) };
     a.tick = ms();
     new_status();
@@ -564,7 +564,10 @@ fn paint(hwnd: u32) {
 fn click(x: i32, y: i32) {
     let a = app();
     let Some(l) = a.layout.as_ref() else { return };
-    let Some(sq) = draw::square_at(l, x, y) else { return };
+    // A piece of the side to move is picked up by its shape, other
+    // clicks go to the square under the pointer.
+    let own = if a.setting { None } else { draw::piece_at(l, &a.game.pos, a.game.pos.side, x, y) };
+    let Some(sq) = own.or_else(|| draw::square_at(l, x, y)) else { return };
     if a.setting {
         dialogs::piece_menu(sq, x, y);
         return;

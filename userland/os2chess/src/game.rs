@@ -361,12 +361,12 @@ pub fn saved_games() -> Vec<Vec<u8>> {
         return out;
     }
     loop {
-        // FILEFINDBUF3: oNextEntryOffset, dates, sizes, attributes, cchName at 26, name at 27.
+        // FILEFINDBUF3: oNextEntryOffset, dates, sizes, attributes, cchName at 28, name at 29.
         let mut off = 0usize;
         for _ in 0..count {
             let next = rd32(&buf, off) as usize;
-            let n = buf[off + 26] as usize;
-            out.push(buf[off + 27..off + 27 + n].to_vec());
+            let n = buf[off + 28] as usize;
+            out.push(buf[off + 29..off + 29 + n].to_vec());
             if next == 0 {
                 break;
             }

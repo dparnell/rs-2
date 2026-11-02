@@ -347,7 +347,8 @@ extern "C" fn level_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
         WM_INITDLG => {
             set_check(h, ID_LEVELS[a.players[side].level as usize % 5], true);
             set_check(h, ID_BOOK, a.book);
-            0
+            unsafe { WinSetFocus(HWND_DESKTOP, item(h, DID_OK)) };
+            1
         }
         WM_COMMAND => {
             let id = lo(mp1);
@@ -396,7 +397,8 @@ extern "C" fn players_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
                 dlg_msg(h, name, EM_SETTEXTLIMIT, 31, 0);
                 set_item_text(h, name, &a.players[i].name);
             }
-            0
+            unsafe { WinSetFocus(HWND_DESKTOP, item(h, DID_OK)) };
+            1
         }
         WM_COMMAND => {
             let id = lo(mp1);
@@ -699,6 +701,7 @@ pub fn keyboard_window() {
         a.keyboard_dlg = h;
         dlg_msg(h, ID_FROM, EM_SETTEXTLIMIT, 2, 0);
         dlg_msg(h, ID_TO, EM_SETTEXTLIMIT, 2, 0);
+        unsafe { WinSetFocus(HWND_DESKTOP, item(h, ID_FROM)) };
     }
 }
 
