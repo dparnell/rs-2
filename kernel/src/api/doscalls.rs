@@ -985,9 +985,19 @@ fn find_module_handle(name: &str) -> Option<u16> {
     loader::find_loaded(&loader::module_name(name)).map(|m| m.hmte)
 }
 
+/// A loaded module's handle if the calling process uses it (its program,
+/// what it loaded, their imports): a module only another process uses is
+/// not mapped here, so programs that look a module up before loading it
+/// (IBM's REXXUTIL SysIni: DosQueryModuleHandle, else DosLoadModule) must
+/// load it.
+fn find_module_handle_here(c: &Ctx, name: &str) -> Option<u16> {
+    let h = find_module_handle(name)?;
+    super::module::term_order(&c.process).iter().any(|x| x.module.hmte == h).then_some(h)
+}
+
 fn dos_query_module_handle(c: &mut Ctx) -> u32 {
     let Some(name) = c.read_str(c.arg(0), 260) else { return err::INVALID_PARAMETER };
-    match find_module_handle(&name) {
+    match find_module_handle_here(c, &name) {
         Some(h) => {
             c.write_u32(c.arg(1), h as u32);
             0
@@ -998,7 +1008,7 @@ fn dos_query_module_handle(c: &mut Ctx) -> u32 {
 
 fn dos16_get_mod_handle(c: &mut Ctx) -> u32 {
     let Some(name) = c.read_str(c.ptr(0), 260) else { return err::INVALID_PARAMETER };
-    match find_module_handle(&name) {
+    match find_module_handle_here(c, &name) {
         Some(h) => {
             c.write_u16(c.ptr(1), h);
             0
