@@ -302,6 +302,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "odshell"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "somsup",
+]
+
+[[package]]
 name = "odtest"
 version = "0.1.0"
 dependencies = [

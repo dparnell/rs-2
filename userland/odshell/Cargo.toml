@@ -1,0 +1,10 @@
+[package]
+name = "odshell"
+description = "ODSHELL.EXE: a simple OpenDoc document shell (a document's root part in a PM window, rs2's OPENDOC.DLL)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }

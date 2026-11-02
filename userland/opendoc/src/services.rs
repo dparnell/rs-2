@@ -39,6 +39,8 @@ unsafe extern "C" {
     fn WinQueryAnchorBlock(hwnd: u32) -> u32;
     #[link_name = "PMWIN.728"]
     fn WinDestroyWindow(hwnd: u32) -> u32;
+    #[link_name = "PMWIN.875"]
+    fn WinSetWindowPos(hwnd: u32, behind: u32, x: i32, y: i32, cx: i32, cy: i32, fl: u32) -> u32;
     #[link_name = "PMWIN.877"]
     fn WinSetWindowText(hwnd: u32, text: *const u8) -> u32;
 }
@@ -295,9 +297,15 @@ fn create_window(flags: u32) -> u32 {
         if !CLASS_REGISTERED {
             CLASS_REGISTERED = WinRegisterClass(hab, CLIENT_CLASS.as_ptr(), client_proc_t as usize, 4, 0) != 0;
         }
-        let mut fl = if flags == 0 { 0x783f } else { flags };
+        // No menu, icon or accelerator resources of the caller's: those
+        // frame controls are left out; the shell places the window.
+        let mut fl = (if flags == 0 { 0x783f } else { flags } & !(0x4 | 0x400 | 0x4000 | 0x8000));
         let mut client = 0u32;
-        WinCreateStdWindow(HWND_DESKTOP, 0, &mut fl, CLIENT_CLASS.as_ptr(), b"\0".as_ptr(), 0, 0, 1, &mut client)
+        let hwnd = WinCreateStdWindow(HWND_DESKTOP, 0x2000_0000, &mut fl, CLIENT_CLASS.as_ptr(), b"\0".as_ptr(), 0x8000_0000, 0, 1, &mut client);
+        if hwnd != 0 {
+            WinSetWindowPos(hwnd, 0, 120, 120, 480, 320, 0x3); // SWP_SIZE | SWP_MOVE
+        }
+        hwnd
     }
 }
 
@@ -354,6 +362,7 @@ extern "C" fn client_proc(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> usize 
 }
 
 crate::tramp!(client_proc_t => client_proc, 4);
+
 
 fn window_resized(w: usize, client: u32) {
     let mut r = [0i32; 4];
@@ -568,7 +577,7 @@ methods! {
         let s = win(this);
         s.shown = true;
         if s.hwnd != 0 {
-            unsafe { WinShowWindow(s.hwnd, 1) };
+            unsafe { WinSetWindowPos(s.hwnd, 3, 0, 0, 0, 0, 0x8 | 0x80 | 0x4) }; // HWND_TOP, SWP_SHOW | SWP_ACTIVATE | SWP_ZORDER
         }
         0
     }

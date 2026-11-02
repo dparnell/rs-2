@@ -568,6 +568,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("initest", "RS2\\INITEST.EXE"),
         ("somtest", "RS2\\SOMTEST.EXE"),
         ("odtest", "RS2\\ODTEST.EXE"),
+        ("odshell", "OS2\\ODSHELL.EXE"),
         ("wpstest", "RS2\\WPSTEST.EXE"),
         ("wpshell", "RS2\\WPSHELL.EXE"),
         ("audtest", "RS2\\AUDTEST.EXE"),
@@ -799,7 +800,7 @@ const APP_DATA: &[(&str, &str)] = &[
 ];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "klondike", "mahjongg", "os2chess", "pmrexx"];
+const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "klondike", "mahjongg", "os2chess", "pmrexx", "odshell"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
