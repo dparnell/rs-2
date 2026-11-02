@@ -124,6 +124,14 @@ Status markers: done, in progress, planned.
   (addsockettolist/removesocketfromlist, RS2API 220/221): IBM's INETD
   hands connections to the servers it starts
 - done: INI files for PMSHAPI (see milestone 4)
+- done: rs2's own TCP/IP applications (userland/netapps, NETWORK.md):
+  FTP (active and passive), FTPD (TRUSERS), TELNET (VT100/VT220 through
+  crates/vt100), TELNETD (a command prompt on pipes), LPR/LPQ/LPRM,
+  FINGER, TFTP/TFTPD, REXEC, RSH and the TCPCFG2 notebook (NETWORK=,
+  SET HOSTNAME=, RESOLV2, HOSTS); NETCLI with tools/scripts/nethost.py
+  checks them; a TCP/IP folder on the desktop
+- planned: TELNETD with pseudo terminals (VIO programs), an LPD server,
+  TALK, REXECD/RSHD, code page translation (-cp) in FTP/TELNET
 - planned: route/arp and run-time configuration,
   code page translation in TNLS32/TNLS16,
   PCI INTx routing (ACPI _PRT) for the 8254x and PCnet, TCP keepalive/window scaling/SACK/urgent data

@@ -349,6 +349,11 @@ on the media, so rs2's own utilities take their place.
 | INETD.EXE | works | 16-bit; listens for the services of `%ETC%\INETD.LST` and starts the server with the accepted socket's number (tested with a REXX echo server on RXSOCK, reached from the host). |
 | TELNETD.EXE, LPD.EXE, BOOTP.EXE | not tried | TELNETD needs pseudo terminals. |
 
+rs2 has its own FTP, FTPD, TELNET, TELNETD, LPR, LPQ, LPRM, FINGER,
+TFTP, TFTPD, REXEC, RSH and TCP/IP Configuration notebook (TCPCFG2),
+so none of IBM's are needed ([NETWORK.md](NETWORK.md#rs2s-tcpip-applications));
+IBM's above still run in their place.
+
 ## Messages and national language support
 
 Bound messages, tested with OSO001.MSG removed from the disk: XCOPY,
