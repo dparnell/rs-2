@@ -632,13 +632,15 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("somu", "OS2\\DLL\\SOMU.DLL"),
         ("somir", "OS2\\DLL\\SOMIR.DLL"),
         ("win16", "OS2\\DLL\\WIN16.DLL"),
+        // rs2's own PM applets (userland/pmkit is what they share).
+        ("clipos2", "OS2\\CLIPOS2.EXE"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
-const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP")];
+const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP"), ("clipos2/CLIPOS2.IPF", "OS2\\HELP\\CLIPOS2.HLP")];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool"];
+const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "clipos2"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {

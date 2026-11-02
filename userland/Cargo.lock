@@ -27,6 +27,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "clipos2"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+]
+
+[[package]]
 name = "cmd"
 version = "0.1.0"
 dependencies = [
@@ -277,6 +285,13 @@ dependencies = [
  "fat",
  "hpfs",
  "jfs",
+ "os2",
+]
+
+[[package]]
+name = "pmkit"
+version = "0.1.0"
+dependencies = [
  "os2",
 ]
 
