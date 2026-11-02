@@ -647,6 +647,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("mdm", "OS2\\DLL\\MDM.DLL"),
         ("mciapi", "OS2\\DLL\\MCIAPI.DLL"),
         ("mmioproc", "OS2\\DLL\\MMIOPROC.DLL"),
+        ("mppm", "MMOS2\\MPPM.EXE"),
         ("pmspl", "OS2\\DLL\\PMSPL.DLL"),
         ("pmspool", "OS2\\PMSPOOL.EXE"),
         ("pmprint", "OS2\\DLL\\PMPRINT.QPR"),
@@ -661,7 +662,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
 const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP")];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2"];
+const PM_PROGRAMS: &[&str] = &["mppm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {

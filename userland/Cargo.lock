@@ -177,6 +177,14 @@ name = "midi"
 version = "0.1.0"
 
 [[package]]
+name = "mmapps"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "utils",
+]
+
+[[package]]
 name = "mmavi"
 version = "0.1.0"
 dependencies = [
