@@ -23,6 +23,7 @@ mod format;
 #[allow(dead_code)] // documents the full on-disk layout
 mod layout;
 mod name;
+mod repair;
 pub mod time;
 
 #[cfg(test)]
@@ -34,6 +35,7 @@ use alloc::vec::Vec;
 
 pub use ea::{fea2_size, Ea};
 pub use format::{format, FormatParams};
+pub use repair::Report as CheckReport;
 pub use name::{is_83, valid_name, CaseMap, MAX_NAME};
 
 use dir::Dirent;

@@ -707,3 +707,40 @@ fn rejects_other_file_systems() {
     let dev = Mem(RefCell::new(std::vec![0u8; 1 << 20]));
     assert_eq!(Volume::mount(dev).err(), Some(Error::NotHpfs));
 }
+
+#[test]
+fn chkdsk_finds_and_repairs_bitmap_damage() {
+    let mut v = fresh(16);
+    v.mkdir("DIR", NOW).unwrap();
+    for k in 0..40 {
+        let mut e = v.create_file(&std::format!("DIR\\F{k:02}.DAT"), 0, NOW).unwrap();
+        v.write(&mut e, 0, &pattern(1000 + k * 700, k as u32), NOW).unwrap();
+    }
+    let e = v.lookup("DIR\\F03.DAT").unwrap();
+    v.write_eas(&e, &[Ea { flags: 0, name: b".TYPE".to_vec(), value: pattern(900, 9) }]).unwrap();
+    let r = v.check(false).unwrap();
+    assert!(r.ok(), "{:?}", r.problems);
+    assert_eq!((r.dirs, r.files), (2, 40));
+    // A file's data sector marked free, a free sector marked used, a
+    // DNODE of the band marked free, the volume dirty.
+    let f10 = v.lookup("DIR\\F10.DAT").unwrap().fnode;
+    let data = v.extents(f10).unwrap()[0].disk;
+    v.free_run(data, 1).unwrap();
+    assert!(v.is_free(data), "data {data}");
+    let spare = (0..v.total).rev().find(|&s| v.is_free(s)).unwrap();
+    v.extend_at(spare, 1).unwrap();
+    let k = (0..v.band.count as usize).find(|&k| v.band.bits[k / 8] & (1 << (k % 8)) == 0).unwrap();
+    v.band.bits[k / 8] |= 1 << (k % 8);
+    let mut sp = v.read_sector(SPARE_LBA).unwrap();
+    sp[sp::FLAGS] |= 1;
+    v.write_secs(SPARE_LBA, &sp).unwrap();
+    let r = v.check(false).unwrap();
+    assert_eq!(r.problems.len(), 3, "{:?}", r.problems);
+    assert!(r.was_dirty);
+    let r = v.check(true).unwrap();
+    assert_eq!((r.marked_used, r.freed, r.dnodes), (1, 1, 1));
+    let mut v = remount(v);
+    let r = v.check(false).unwrap();
+    assert!(r.ok() && !r.was_dirty, "{:?}", r.problems);
+    assert_eq!(read_all(&mut v, "DIR\\F39.DAT"), pattern(1000 + 39 * 700, 39));
+}
