@@ -371,14 +371,15 @@ pub fn is_16bit(module: u32, ordinal: u32) -> bool {
 pub static TRACE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 /// `apitrace=NAME` on the command line: trace the calls of programs whose
-/// name starts with NAME.
+/// name starts with NAME (or one of a comma-separated list: `apitrace=CMD,PMSHELL`).
 pub static TRACE_NAME: crate::sync::Once<alloc::string::String> = crate::sync::Once::new();
 
 /// Whether `apitrace=NAME` names this process's program.
 fn traced(p: &Process) -> bool {
     TRACE_NAME.get().is_some_and(|n| {
         let name = &p.exe.name;
-        name[name.rfind('\\').map_or(0, |i| i + 1)..].to_ascii_uppercase().starts_with(n.as_str())
+        let base = name[name.rfind('\\').map_or(0, |i| i + 1)..].to_ascii_uppercase();
+        n.split(',').any(|n| !n.is_empty() && base.starts_with(n))
     })
 }
 
