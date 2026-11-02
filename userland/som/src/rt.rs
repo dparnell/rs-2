@@ -167,6 +167,8 @@ pub struct MethodDef {
     /// The argument list size from somApRdInfo (0: unknown).
     pub va_size: u32,
     pub call_type: u32,
+    /// The redispatch stub made for it (when the compiler gave none).
+    pub rd_stub: usize,
 }
 
 pub struct Class {
@@ -216,6 +218,10 @@ pub struct Class {
     pub casted: *mut Class,
     /// The true class's cast classes.
     pub casts: Vec<*mut Class>,
+    /// _set_somClassDataOrder: the ids of the ClassData entries.
+    pub cd_order: Vec<SomId>,
+    /// setUserPCallDispatch's value.
+    pub pcall_dispatch: usize,
 }
 
 impl Class {
@@ -258,6 +264,8 @@ impl Class {
             true_class: core::ptr::null_mut(),
             casted: core::ptr::null_mut(),
             casts: Vec::new(),
+            cd_order: Vec::new(),
+            pcall_dispatch: 0,
         })
     }
 
@@ -884,6 +892,8 @@ pub unsafe fn clone_record(src: &Class, obj: usize, name: &[u8]) -> *mut Class {
     cr.ctrl_built = src.ctrl_built;
     cr.num_cds_entries = src.num_cds_entries;
     cr.true_class = src.true_class();
+    cr.cd_order = src.cd_order.clone();
+    cr.pcall_dispatch = src.pcall_dispatch;
     let words = MTAB_HDR / 4 + src.nentries;
     let mut v = vec![0usize; words];
     unsafe { core::ptr::copy_nonoverlapping(src.mtab as *const usize, v.as_mut_ptr(), words) };
@@ -956,6 +966,7 @@ pub unsafe fn add_static(c: *mut Class, mid: SomId, desc: SomId, proc_: usize, r
         aggregate,
         va_size,
         call_type,
+        rd_stub: 0,
     });
     token
 }
@@ -1019,7 +1030,52 @@ pub unsafe fn add_dynamic(c: *mut Class, mid: SomId, desc: SomId, proc_: usize, 
         aggregate: false,
         va_size: 0,
         call_type: 0,
+        rd_stub: 0,
     });
+}
+
+// ---- Redispatch stubs ----
+
+/// A redispatch stub for method `mid`: called as the method, it calls
+/// the object's somDispatch with the method's id and its arguments as a
+/// va_list, and returns what somDispatch stored (as IBM's somMakeRdStub
+/// stubs do; `call_type` from the method's signature picks how the
+/// result is returned: 2 float, 4/6 double).
+pub fn make_rd_stub(mid: SomId, call_type: u32) -> usize {
+    let mut c = Vec::with_capacity(48);
+    emit(&mut c, &[0x55, 0x89, 0xe5]); // push ebp; mov ebp,esp
+    emit(&mut c, &[0x83, 0xec, 0x08]); // sub esp,8 (the result)
+    emit(&mut c, &[0x8d, 0x45, 0xf8, 0x50]); // lea eax,[ebp-8]; push eax
+    emit(&mut c, &[0x8d, 0x4d, 0x08, 0x51]); // lea ecx,[ebp+8]; push ecx
+    emit(&mut c, &[0x68]); // push mid
+    emit32(&mut c, mid as usize);
+    emit(&mut c, &[0xb8]); // mov eax, dispatcher
+    emit32(&mut c, crate::__s_rd_dispatch as usize);
+    emit(&mut c, &[0xff, 0xd0, 0x83, 0xc4, 0x0c]); // call eax; add esp,12
+    match call_type & !1 {
+        2 => emit(&mut c, &[0xd9, 0x45, 0xf8]),       // fld dword [ebp-8]
+        4 | 6 => emit(&mut c, &[0xdd, 0x45, 0xf8]),   // fld qword [ebp-8]
+        _ => emit(&mut c, &[0x8b, 0x45, 0xf8, 0x8b, 0x55, 0xfc]), // mov eax,[ebp-8]; mov edx,[ebp-4]
+    }
+    emit(&mut c, &[0xc9, 0xc3]); // leave; ret
+    place(core::ptr::null(), &c)
+}
+
+/// The redispatch stubs' call: somDispatch(obj, ret, mid, args).
+pub extern "C" fn rd_dispatch(mid: SomId, args: *const u32, ret: *mut u8) {
+    let obj = unsafe { *args };
+    crate::call_om(obj as usize, om::DISPATCH, &[obj, ret as u32, mid as u32, args as u32]);
+}
+
+/// A method's redispatch stub: the compiler's, or one made once.
+pub fn rd_stub_of(m: &mut MethodDef) -> usize {
+    if m.rd != 0 && m.rd != usize::MAX {
+        return m.rd;
+    }
+    if m.rd_stub == 0 {
+        m.rd_stub = make_rd_stub(id::static_id(unsafe { cstr(m.name) }), m.call_type);
+    }
+    m.rd_stub
 }
 
 /// A class's implementation of one of SOMObject's methods.

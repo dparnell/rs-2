@@ -90,6 +90,7 @@ aligned! {
     // The thunks' slow paths.
     __s_resolve => rt::slow_resolve, 2;
     __s_data_resolve => rt::slow_data_resolve, 2;
+    __s_rd_dispatch => rt::rd_dispatch, 3;
 
     // SOMObject.
     __m_somInit => o::somInit, 1;
@@ -178,6 +179,25 @@ aligned! {
     __m_somDefinedMethod => c::somDefinedMethod, 2;
     __m_get_somDataAlignment => c::get_somDataAlignment, 1;
     __m_somCloneClass => c::somCloneClass, 2;
+    __m_somGetMethodOffset => c::somGetMethodOffset, 2;
+    __m_somSetMethodDescriptor => c::somSetMethodDescriptor, 3;
+    __m_somLookupTerminal => c::somLookupTerminal, 2;
+    __m_set_somDirectInitClasses => c::set_somDirectInitClasses, 2;
+    __m_somGetInstanceInitMask => c::somGetInstanceInitMask, 2;
+    __m_somGetInstanceDestructionMask => c::somGetInstanceDestructionMask, 2;
+    __m_somRegLPMToken => c::somRegLPMToken, 2;
+    __m_somAddMethod => c::somAddMethod, 7;
+    __m_get_somCClassData => c::get_somCClassData, 1;
+    __m_set_somCClassData => c::set_somCClassData, 2;
+    __m_set_somClassDataOrder => c::set_somClassDataOrder, 2;
+    __m_get_somClassDataOrder => c::get_somClassDataOrder, 2;
+    __m_somGetClassDataEntry => c::somGetClassDataEntry, 2;
+    __m_somSetClassDataEntry => c::somSetClassDataEntry, 3;
+    __m_somGetInstanceAssignmentMask => c::somGetInstanceAssignmentMask, 2;
+    __m_get_somDirectAssignClasses => c::get_somDirectAssignClasses, 2;
+    __m_setUserPCallDispatch => c::setUserPCallDispatch, 3;
+    __m_get_somClassAllocate => c::get_somClassAllocate, 1;
+    __m_get_somClassDeallocate => c::get_somClassDeallocate, 1;
     __m_somCastObjCls => c::somCastObjCls, 3;
     __m_somResetObjCls => c::somResetObjCls, 2;
     __m_get_somTrueClass => c::get_somTrueClass, 1;

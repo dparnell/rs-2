@@ -231,7 +231,22 @@ pub extern "C" fn somGetClassData(cls: usize) -> *mut usize {
     unsafe { r(cls) }.map_or(core::ptr::null_mut(), |c| c.cds)
 }
 
-pub extern "C" fn somOverrideMtab(_cls: usize) {}
+/// somOverrideMtab: every static method but somDispatch goes through its
+/// redispatch stub (so that somDispatch sees every call).
+pub extern "C" fn somOverrideMtab(cls: usize) {
+    let Some(c) = (unsafe { r(cls) }) else { return };
+    let _g = lock();
+    let dispatch = id::key_of_name(b"somDispatch");
+    for &(x, xb) in &c.blocks {
+        for m in unsafe { (&mut (*x).methods).iter_mut() } {
+            if m.key == dispatch {
+                continue;
+            }
+            let stub = rd_stub_of(m);
+            unsafe { c.mt().set(xb + m.slot, stub) };
+        }
+    }
+}
 
 // ---- Queries ----
 
@@ -337,8 +352,18 @@ pub extern "C" fn somGetApplyStub(cls: usize, mid: SomId) -> usize {
     lookup_any(cls, mid).and_then(|x| x.1).map_or(0, |m| m.ap)
 }
 
+/// somGetRdStub: the method's redispatch stub (made from its signature
+/// when the compiler gave none, as IBM's does).
 pub extern "C" fn somGetRdStub(cls: usize, mid: SomId) -> usize {
-    lookup_any(cls, mid).and_then(|x| x.1).map_or(0, |m| m.rd)
+    let Some(m) = lookup_any(cls, mid).and_then(|x| x.1) else { return 0 };
+    let _g = lock();
+    match unsafe { token_info(m.token) } {
+        Some(ti) => match unsafe { (&mut (*ti.class).methods).get_mut(ti.index) } {
+            Some(md) => rd_stub_of(md),
+            None => 0,
+        },
+        None => m.rd,
+    }
 }
 
 /// All methods of a class: its blocks' static methods in table order,
@@ -613,6 +638,211 @@ pub extern "C" fn get_somCastedClass(cls: usize) -> usize {
     unsafe { r(cls) }.map_or(0, |c| if c.casted.is_null() { 0 } else { unsafe { (*c.casted).obj } })
 }
 
+// ---- IBM's other private SOMClass methods ----
+
+/// somGetMethodOffset: where a static method's slot is in the class's
+/// method table (bytes from its start; 0 for a method it does not have
+/// or a dynamic one). SOMU.DLL's cooperative metaclasses (SOMMBeforeAfter)
+/// patch method tables through it.
+pub extern "C" fn somGetMethodOffset(cls: usize, mid: SomId) -> i32 {
+    let Some(c) = (unsafe { r(cls) }) else { return 0 };
+    let (scope, simple) = split_descriptor(id::name_bytes(mid));
+    match find(c, id::key_of_name(simple), scope) {
+        Some((_, m, xb)) => (MTAB_HDR + 4 * (xb + m.slot)) as i32,
+        None => 0,
+    }
+}
+
+/// somSetMethodDescriptor: the descriptor of a method the class has.
+pub extern "C" fn somSetMethodDescriptor(cls: usize, mid: SomId, desc: SomId) -> u32 {
+    let Some(c) = (unsafe { r(cls) }) else { return 0 };
+    let (scope, simple) = split_descriptor(id::name_bytes(mid));
+    let key = id::key_of_name(simple);
+    let Some((x, _, _)) = find(c, key, scope) else { return 0 };
+    let x = x as *const Class as *mut Class;
+    if let Some(m) = unsafe { (*x).methods.iter_mut().find(|m| m.key == key) } {
+        m.descriptor = desc;
+    }
+    1
+}
+
+/// somLookupTerminal: the class's own implementation of a static method
+/// (somResolveTerminal), or somLookupMethod's for a dynamic one.
+pub extern "C" fn somLookupTerminal(cls: usize, mid: SomId) -> usize {
+    let tok = somGetMethodToken(cls, mid);
+    if tok != 0 {
+        return crate::somResolveTerminal(cls, tok);
+    }
+    somLookupMethod(cls, mid)
+}
+
+/// set_somDirectInitClasses: the classes whose initializers the class's
+/// initializers call (those it inherits the implementation of).
+pub extern "C" fn set_somDirectInitClasses(cls: usize, seq: *const Seq) {
+    let Some(c) = (unsafe { r(cls) }) else { return };
+    let mut v = Vec::new();
+    if !seq.is_null() {
+        let s = unsafe { &*seq };
+        for i in 0..s.length as usize {
+            let x = unsafe { rec(*s.buffer.add(i)) };
+            if let Some(k) = c.blocks.iter().position(|b| b.0 == x) {
+                if c.flags.get(k).is_none_or(|f| f & BLOCK_IMPL != 0) {
+                    v.push(x);
+                }
+            }
+        }
+    }
+    c.direct_init = v;
+}
+
+/// somGetInstanceInitMask, somGetInstanceDestructionMask,
+/// somGetInstanceAssignmentMask: the class's control (copied to `ctrl`
+/// when given); the mask.
+fn instance_mask(cls: usize, ctrl: *mut Ctrl, which: u32) -> *const u8 {
+    let Some(c) = (unsafe { r(cls) }) else { return core::ptr::null() };
+    {
+        let _g = lock();
+        if !c.ctrl_built {
+            unsafe { build_ctrls(c) };
+        }
+    }
+    let pm = unsafe { &*c.pmtab };
+    let x = match which {
+        0 => pm.init_ctrl,
+        1 => pm.destruct_ctrl,
+        _ => pm.assign_ctrl,
+    };
+    if !ctrl.is_null() {
+        unsafe { *ctrl = x };
+    }
+    x.mask
+}
+
+pub extern "C" fn somGetInstanceInitMask(cls: usize, ctrl: *mut Ctrl) -> *const u8 {
+    instance_mask(cls, ctrl, 0)
+}
+pub extern "C" fn somGetInstanceDestructionMask(cls: usize, ctrl: *mut Ctrl) -> *const u8 {
+    instance_mask(cls, ctrl, 1)
+}
+pub extern "C" fn somGetInstanceAssignmentMask(cls: usize, ctrl: *mut Ctrl) -> *const u8 {
+    instance_mask(cls, ctrl, 2)
+}
+
+/// somRegLPMToken: nothing to do (rs2's method tokens already resolve
+/// any method).
+pub extern "C" fn somRegLPMToken(_cls: usize, _token: *mut usize) {}
+
+/// somAddMethod: by kind, a static method (0, 2; its token), a dynamic
+/// one (1), the class's allocator (3) or deallocator (4).
+pub extern "C" fn somAddMethod(cls: usize, kind: i32, mid: SomId, desc: SomId, method: usize, rd: usize, ap: usize) -> usize {
+    match kind {
+        0 | 2 => somAddStaticMethod(cls, mid, desc, method, rd, ap),
+        1 => {
+            somAddDynamicMethod(cls, mid, desc, method, ap);
+            0
+        }
+        3 | 4 => {
+            if let Some(c) = unsafe { r(cls) } {
+                if kind == 3 {
+                    c.allocate = method;
+                } else {
+                    c.deallocate = method;
+                }
+            }
+            0
+        }
+        _ => kind as usize,
+    }
+}
+
+pub extern "C" fn get_somCClassData(cls: usize) -> *mut usize {
+    unsafe { r(cls) }.map_or(core::ptr::null_mut(), |c| c.ccds)
+}
+
+pub extern "C" fn set_somCClassData(cls: usize, ccds: *mut usize) {
+    if let Some(c) = unsafe { r(cls) } {
+        c.ccds = ccds;
+    }
+}
+
+pub extern "C" fn set_somClassDataOrder(cls: usize, seq: *const Seq) {
+    let Some(c) = (unsafe { r(cls) }) else { return };
+    c.cd_order.clear();
+    if !seq.is_null() {
+        let s = unsafe { &*seq };
+        for i in 0..s.length as usize {
+            c.cd_order.push(unsafe { *s.buffer.add(i) } as SomId);
+        }
+    }
+}
+
+pub extern "C" fn get_somClassDataOrder(ret: *mut Seq, cls: usize) -> *mut Seq {
+    let items: Vec<usize> = unsafe { r(cls) }.map_or(Vec::new(), |c| c.cd_order.iter().map(|&i| i as usize).collect());
+    unsafe { *ret = seq_of(&items) };
+    ret
+}
+
+/// somGetClassDataEntry / somSetClassDataEntry: the ClassData entry named
+/// in the class data order. IBM's index the ClassData at (n+1)*32 bytes
+/// (not *4); kept, as code may depend on where it lands.
+fn class_data_entry(cls: usize, name: SomId) -> *mut usize {
+    let Some(c) = (unsafe { r(cls) }) else { return core::ptr::null_mut() };
+    if c.cds.is_null() {
+        return core::ptr::null_mut();
+    }
+    match c.cd_order.iter().position(|&i| id::somCompareIds(i, name) != 0) {
+        Some(n) => (c.cds as usize + (n + 1) * 32) as *mut usize,
+        None => core::ptr::null_mut(),
+    }
+}
+
+pub extern "C" fn somGetClassDataEntry(cls: usize, name: SomId) -> usize {
+    let p = class_data_entry(cls, name);
+    if p.is_null() { 0 } else { unsafe { *p } }
+}
+
+pub extern "C" fn somSetClassDataEntry(cls: usize, name: SomId, value: usize) -> u32 {
+    let p = class_data_entry(cls, name);
+    if p.is_null() {
+        return 0;
+    }
+    unsafe { *p = value };
+    1
+}
+
+/// _get_somDirectAssignClasses: the direct init classes, or {1, 0}
+/// when the class has its own allocator or deallocator (as IBM's).
+pub extern "C" fn get_somDirectAssignClasses(ret: *mut Seq, cls: usize) -> *mut Seq {
+    let Some(c) = (unsafe { r(cls) }) else {
+        unsafe { *ret = Seq { maximum: 0, length: 0, buffer: core::ptr::null_mut() } };
+        return ret;
+    };
+    if c.allocate != 0 || c.deallocate != 0 {
+        unsafe { *ret = Seq { maximum: 1, length: 0, buffer: core::ptr::null_mut() } };
+        return ret;
+    }
+    let items: Vec<usize> = c.direct_init.iter().map(|&p| unsafe { (*p).obj }).collect();
+    unsafe { *ret = seq_of(&items) };
+    ret
+}
+
+pub extern "C" fn setUserPCallDispatch(cls: usize, old: usize, new: usize) -> u32 {
+    let Some(c) = (unsafe { r(cls) }) else { return 0 };
+    if c.pcall_dispatch != old {
+        return 0;
+    }
+    c.pcall_dispatch = new;
+    1
+}
+
+pub extern "C" fn get_somClassAllocate(cls: usize) -> usize {
+    unsafe { r(cls) }.map_or(0, |c| c.allocate)
+}
+
+pub extern "C" fn get_somClassDeallocate(cls: usize) -> usize {
+    unsafe { r(cls) }.map_or(0, |c| c.deallocate)
+}
+
 pub extern "C" fn private_stub(_cls: usize) -> usize {
     0
 }
@@ -629,6 +859,7 @@ pub mod cm {
     pub const ADD_DYNAMIC_METHOD: usize = 21;
     pub const SET_CLASS_DATA: usize = 28;
     pub const GET_INSTANCE_TOKEN: usize = 32;
+    pub const GET_METHOD_DATA: usize = 35;
     pub const GET_MEMBER_TOKEN: usize = 33;
     pub const ALLOCATE: usize = 46;
     pub const DEALLOCATE: usize = 47;

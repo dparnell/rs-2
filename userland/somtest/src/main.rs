@@ -898,6 +898,86 @@ fn unregister_checks() {
     }
 }
 
+// ---- Before/after metaclasses (SOMU.DLL's SOMMBeforeAfter) ----
+
+static mut BA_LOG: Vec<u8> = Vec::new();
+
+fn ba_note(mid: SomId, c: u8) {
+    if cstr(unsafe { somStringFromId(mid) }) == b"ping" {
+        unsafe { BA_LOG.push(c) };
+    }
+}
+extern "C" fn ba_before(_cls: usize, _ev: usize, _obj: usize, mid: SomId, _ap: usize) -> u32 {
+    ba_note(mid, b'<');
+    1
+}
+extern "C" fn ba_after(_cls: usize, _ev: usize, _obj: usize, mid: SomId, _ret: usize, _ap: usize) {
+    ba_note(mid, b'>');
+}
+extern "C" fn ba_ping(_obj: usize, n: i32) -> i32 {
+    unsafe { BA_LOG.push(b'p') };
+    n + 70
+}
+
+aligned! {
+    __t_ba_before => ba_before, 5;
+    __t_ba_after => ba_after, 6;
+    __t_ba_ping => ba_ping, 2;
+}
+
+/// `SOMTEST BA`: a class whose metaclass is derived from SOMU.DLL's
+/// SOMMBeforeAfter (which builds a sister class with somCloneClass, one
+/// of IBM's private SOMClass methods): its methods run between the
+/// metaclass's sommBeforeMethod and sommAfterMethod.
+fn before_after() {
+    unsafe {
+        somEnvironmentNew();
+        SOMObjectNewClass(1, 4);
+        SOMClassNewClass(1, 4);
+        let fic: extern "C" fn(usize, SomId, i32, i32, *const u8) -> usize = f(mgr_tok(0));
+        let ba = fic(SOMClassMgrObject, sid(b"SOMMBeforeAfter"), 0, 0, b"SOMU\0".as_ptr());
+        check("SOMMBeforeAfter loaded", ba != 0);
+        if ba == 0 {
+            return;
+        }
+        let (mc, mcc) = (cd(0), cd(8));
+        let meta = build(&Spec {
+            name: b"M_Count",
+            meta: None,
+            parents: &[b"SOMMBeforeAfter"],
+            data: 0,
+            methods: &[],
+            overrides: &[(b"sommBeforeMethod", __t_ba_before as usize), (b"sommAfterMethod", __t_ba_after as usize)],
+            cd: mc,
+            ccd: mcc,
+        });
+        check("M_Count (SOMMBeforeAfter subclass) built", meta != 0);
+        let (wc, wcc) = (cd(1), cd(8));
+        let w = build(&Spec {
+            name: b"Watched",
+            meta: Some(b"M_Count"),
+            parents: &[b"SOMObject"],
+            data: 4,
+            methods: &[(b"ping", __t_ba_ping as usize)],
+            overrides: &[],
+            cd: wc,
+            ccd: wcc,
+        });
+        check("Watched (metaclass M_Count) built", w != 0 && m1(so(0), SOM_GET_CLASS, w) == meta);
+        if w == 0 {
+            return;
+        }
+        let o = m1(sc(), SOM_NEW, w);
+        check("Watched instance", o != 0 && m1(so(0), SOM_GET_CLASS, o) == w);
+        BA_LOG.clear();
+        let r = m2(wc, 0, o, 5) as i32;
+        check_eq("ping through before/after", r as i64, 75);
+        let log = core::mem::take(&mut BA_LOG);
+        check("before, method, after", log == b"<p>");
+        m1(so(0), SOM_FREE, o);
+    }
+}
+
 fn load(args: &[u8]) {
     let mut it = args.split(|&c| c == b' ').filter(|s| !s.is_empty());
     let _ = it.next();
@@ -933,6 +1013,8 @@ fn main(s: &Startup) -> u32 {
     if word.eq_ignore_ascii_case(b"LOAD") {
         load(args);
 
+    } else if word.eq_ignore_ascii_case(b"BA") {
+        before_after();
     } else {
         run();
     }

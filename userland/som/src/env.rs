@@ -142,7 +142,7 @@ fn class_defs() -> [Def; 76] {
         b"somAddStaticMethod" => __m_somAddStaticMethod;
         b"somOverrideSMethod" => __m_somOverrideSMethod;
         b"somAddDynamicMethod" => __m_somAddDynamicMethod;
-        b"somcPrivate0" => __m_class_private;
+        b"somGetMethodOffset" => __m_somGetMethodOffset;
         b"somGetApplyStub" => __m_somGetApplyStub;
         b"somFindSMethod" => __m_somFindSMethod;
         b"somFindSMethodOk" => __m_somFindSMethodOk;
@@ -154,7 +154,7 @@ fn class_defs() -> [Def; 76] {
         b"somRenewNoInit" => __m_somRenewNoInit;
         b"somGetInstanceToken" => __m_somGetInstanceToken;
         b"somGetMemberToken" => __m_somGetMemberToken;
-        b"somcPrivate1" => __m_class_private;
+        b"somSetMethodDescriptor" => __m_somSetMethodDescriptor;
         b"somGetMethodData" => __m_somGetMethodData;
         b"somOverrideMtab" => __m_somOverrideMtab;
         b"somGetMethodToken" => __m_somGetMethodToken;
@@ -171,31 +171,31 @@ fn class_defs() -> [Def; 76] {
         b"somGetRdStub" => __m_somGetRdStub;
         b"somGetNthMethodData" => __m_somGetNthMethodData;
         b"somCloneClass" => __m_somCloneClass;
-        b"somcPrivate3" => __m_class_private;
+        b"somLookupTerminal" => __m_somLookupTerminal;
         b"_get_somDirectInitClasses" => __m_get_somDirectInitClasses, true;
-        b"somcPrivate5" => __m_class_private;
-        b"somcPrivate6" => __m_class_private;
-        b"somcPrivate7" => __m_class_private;
+        b"set_somDirectInitClasses" => __m_set_somDirectInitClasses;
+        b"somGetInstanceInitMask" => __m_somGetInstanceInitMask;
+        b"somGetInstanceDestructionMask" => __m_somGetInstanceDestructionMask;
         b"somCastObjCls" => __m_somCastObjCls;
         b"somResetObjCls" => __m_somResetObjCls;
         b"_get_somTrueClass" => __m_get_somTrueClass;
         b"_get_somCastedClass" => __m_get_somCastedClass;
-        b"somcPrivate12" => __m_class_private;
+        b"somRegLPMToken" => __m_somRegLPMToken;
         b"somDefinedMethod" => __m_somDefinedMethod;
-        b"somcPrivate13" => __m_class_private;
-        b"somcPrivate14" => __m_class_private;
-        b"somcPrivate15" => __m_class_private;
+        b"somAddMethod" => __m_somAddMethod;
+        b"_get_somCClassData" => __m_get_somCClassData;
+        b"_set_somCClassData" => __m_set_somCClassData;
         b"somcPrivate16" => __m_class_private;
-        b"somcPrivate17" => __m_class_private;
-        b"somcPrivate18" => __m_class_private;
-        b"somcPrivate19" => __m_class_private;
-        b"somcPrivate20" => __m_class_private;
+        b"_set_somClassDataOrder" => __m_set_somClassDataOrder;
+        b"_get_somClassDataOrder" => __m_get_somClassDataOrder, true;
+        b"somGetClassDataEntry" => __m_somGetClassDataEntry;
+        b"somSetClassDataEntry" => __m_somSetClassDataEntry;
         b"_get_somDataAlignment" => __m_get_somDataAlignment;
-        b"somcPrivate21" => __m_class_private;
-        b"somcPrivate22" => __m_class_private;
-        b"somcPrivate23" => __m_class_private;
-        b"somcPrivate24" => __m_class_private;
-        b"somcPrivate25" => __m_class_private;
+        b"somGetInstanceAssignmentMask" => __m_somGetInstanceAssignmentMask;
+        b"_get_somDirectAssignClasses" => __m_get_somDirectAssignClasses, true;
+        b"setUserPCallDispatch" => __m_setUserPCallDispatch;
+        b"_get_somClassAllocate" => __m_get_somClassAllocate;
+        b"_get_somClassDeallocate" => __m_get_somClassDeallocate;
     }
 }
 
