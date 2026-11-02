@@ -58,7 +58,7 @@ impl<D: BlockDevice> Volume<D> {
         self.imap_read_page(n as u64 + 1)
     }
 
-    fn iag_write(&mut self, n: u32, p: &[u8]) -> Result<()> {
+    pub(crate) fn iag_write(&mut self, n: u32, p: &[u8]) -> Result<()> {
         let b = self.imap_block(n as u64 + 1)?;
         self.write_blocks(b, p)
     }

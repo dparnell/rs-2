@@ -48,6 +48,7 @@ mod inode;
 #[allow(dead_code)] // documents the full on-disk layout
 pub mod layout;
 mod name;
+mod repair;
 mod upcase;
 mod xtree;
 
@@ -60,6 +61,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 pub use check::Report;
+pub use repair::Repairs;
 pub use ea::{fea2_size, Ea};
 pub use format::{format, FormatParams, Geometry, MIN_BYTES};
 pub use name::{is_83, valid_name, CodePage, MAX_NAME};

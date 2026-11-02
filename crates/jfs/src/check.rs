@@ -32,6 +32,25 @@ impl Report {
     }
 }
 
+/// What a check found that [`Volume::repair`] can set right.
+#[derive(Debug, Default)]
+pub(crate) struct Fixes {
+    /// (inode, blocks it really uses)
+    pub nblocks: Vec<(u32, u64)>,
+    /// (directory inode, its parent)
+    pub parents: Vec<(u32, u32)>,
+    /// (inode, link count it should have)
+    pub links: Vec<(u32, u32)>,
+    /// Allocated inodes in no directory.
+    pub orphans: Vec<u32>,
+    /// (IAG, free inodes counted)
+    pub iag_nfree: Vec<(u32, u32)>,
+    /// (inodes, free inodes) for the inode map control page.
+    pub imap_counts: Option<(u32, u32)>,
+    /// One bit per block: owned by something reachable.
+    pub owned: Vec<u8>,
+}
+
 struct Owners {
     bits: Vec<u8>,
     dup: u64,
@@ -59,6 +78,12 @@ impl Owners {
 impl<D: BlockDevice> Volume<D> {
     /// Check the volume's metadata; changes nothing.
     pub fn check(&mut self) -> Result<Report> {
+        Ok(self.scan()?.0)
+    }
+
+    /// The check, with what [`Volume::repair`] needs to set right.
+    pub(crate) fn scan(&mut self) -> Result<(Report, Fixes)> {
+        let mut fx = Fixes::default();
         let mut r = Report::default();
         let mapsize = self.bmap.mapsize;
         let mut own = Owners { bits: vec![0u8; mapsize.div_ceil(8) as usize], dup: 0 };
@@ -113,6 +138,7 @@ impl<D: BlockDevice> Volume<D> {
                 r.dirs += 1;
                 if i.parent() != parent {
                     r.problems.push(format!("directory {ino}: parent {} should be {parent}", i.parent()));
+                    fx.parents.push((ino, parent));
                 }
                 match self.dt_pages(&i) {
                     Ok(pages) => {
@@ -136,6 +162,7 @@ impl<D: BlockDevice> Volume<D> {
                         }
                         if i.nblocks() != blocks {
                             r.problems.push(format!("directory {ino}: {} blocks recorded, {blocks} used", i.nblocks()));
+                            fx.nblocks.push((ino, blocks));
                         }
                     }
                     Err(e) => r.problems.push(format!("directory {ino}: bad tree ({e:?})")),
@@ -203,6 +230,7 @@ impl<D: BlockDevice> Volume<D> {
                         }
                         if i.nblocks() != blocks {
                             r.problems.push(format!("file {ino}: {} blocks recorded, {blocks} used", i.nblocks()));
+                            fx.nblocks.push((ino, blocks));
                         }
                         let need = i.size().div_ceil(self.bsize as u64);
                         if x.last().map_or(0, |e| e.end()) > need {
@@ -219,6 +247,7 @@ impl<D: BlockDevice> Volume<D> {
             let want = if i.is_dir() { 2 + subdirs.get(&ino).copied().unwrap_or(0) } else { links };
             if i.nlink() != want {
                 r.problems.push(format!("inode {ino}: link count {} should be {want}", i.nlink()));
+                fx.links.push((ino, want));
             }
         }
         // Inode map: allocated inodes nobody refers to.
@@ -238,16 +267,19 @@ impl<D: BlockDevice> Volume<D> {
                     let ino = n * INOSPERIAG + e as u32 * 32 + k;
                     if w & (0x8000_0000 >> k) != 0 && ino >= FIRST_FREE_I && !seen.contains_key(&ino) {
                         r.problems.push(format!("inode {ino}: allocated but in no directory"));
+                        fx.orphans.push(ino);
                     }
                 }
             }
             if rd32(&p, iag::NFREEINOS) != nfree {
                 r.problems.push(format!("IAG {n}: {} free inodes recorded, {nfree} counted", rd32(&p, iag::NFREEINOS)));
+                fx.iag_nfree.push((n, nfree));
             }
             free_inodes += nfree;
         }
         if rd32(&self.imap.ctl, im::NUMFREE) != free_inodes || rd32(&self.imap.ctl, im::NUMINOS) != total_inodes {
             r.problems.push(String::from("inode map: counts wrong"));
+            fx.imap_counts = Some((total_inodes, free_inodes));
         }
         // Block map against what is owned.
         let mut used = 0u64;
@@ -288,8 +320,9 @@ impl<D: BlockDevice> Volume<D> {
         if nfree != self.bmap.nfree {
             r.problems.push(format!("block map: {} free recorded, {nfree} counted", self.bmap.nfree));
         }
+        fx.owned = own.bits;
         r.used_blocks = used;
         r.free_blocks = nfree;
-        Ok(r)
+        Ok((r, fx))
     }
 }

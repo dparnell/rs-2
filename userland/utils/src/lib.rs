@@ -138,6 +138,7 @@ pub mod disk;
 pub mod msgs;
 pub mod files;
 pub mod phys;
+pub mod media;
 
 pub fn stdin_is_console() -> bool {
     let (mut ty, mut attr) = (0, 0);
