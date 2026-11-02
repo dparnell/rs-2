@@ -437,11 +437,16 @@ Status markers: done, in progress, planned.
   handler registration, frames, facets, shapes, transforms, canvases,
   window state; `RS2\ODTEST.EXE`, ODSHELL.EXE (a document's root part in
   a PM window); IBM's MMODPTS parts load, save, reopen and draw on it
-- planned: OpenDoc's event dispatching (mouse, keys, menus and focus
-  through the dispatcher and arbitrator), menus/help/status line/settings
-  extensions, clipboard and drag and drop, links, undo, GPI regions for
-  shapes, nested drafts; the Apple Event Manager and OSA (OREXXSC, which
-  also needs SOMUC.DLL)
+- done (milestone 2): OpenDoc's event dispatching (ODDispatcher and
+  dispatch modules, mouse to the facet under the pointer, click
+  activation with the active border, key and menu focus), ODMenuBar as a
+  PM menu with the docshell's base menu bar, shapes as unions of
+  rectangles with GPI regions; IBM's MMAudioPart imports a WAV file and
+  plays it in ODSHELL, MMImagePart shows a JPEG (MMIO compound element
+  names, MCIAPI's play-file palette)
+- planned: OpenDoc's help/status line/settings extensions, clipboard and
+  drag and drop, links, undo, nested drafts; the Apple Event Manager and
+  OSA (OREXXSC, which also needs SOMUC.DLL)
 - not planned: DSOM itself (distributed objects, the SOMDD daemon,
   SOMDSVR; SOMEM, SOMS, SOMSEC): nothing on the CD uses it; rs2's own Object REXX does not
   use SOMD

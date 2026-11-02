@@ -135,6 +135,20 @@ writes a WAVE file with the chunk calls, reads it back as the games do
 (also through DosLoadModule), descends through it, writes one with the
 WAVE procedure, and checks memory files, buffered I/O and error codes.
 
+### Compound element names
+
+A name `NAME.EXT+ELEMENT` is an element of a storage system whose I/O
+procedure is the one installed for the extension's FOURCC.
+mmioDetermineSSIOProc(name, info, &fcc, element) returns it as IBM's
+does (IBM's is in MMPM.DLL): the MMIOINFO's child procedure if it names
+one, else the extension before the first `+`. With MMIOINFO flag 0x8000
+the separator is `|`. The element after the separator is copied out, and
+the call returns -1 when there is none. mmioOpen picks the same procedure
+for such a name when the caller names none. MDM reads element names
+through MMIO. IBM's OpenDoc multimedia parts keep their data as
+`.SU+...` elements of their storage units this way
+([OPENDOC.md](OPENDOC.md#ibms-multimedia-parts-in-use)).
+
 ### The installed I/O procedures (MMPMMMIO.INI)
 
 IBM's MMIO keeps the file-format procedures installed in the system in

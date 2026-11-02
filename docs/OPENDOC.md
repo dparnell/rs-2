@@ -203,6 +203,96 @@ reference is its `OpenDoc:Draft:RootPart` property). A storage unit
 reference inside a value is the 4-byte ID of the storage unit it names
 (strong references with the top bit clear, weak ones with it set).
 
+## Events, focus and menus (milestone 2)
+
+- **ODDispatcher and ODDispatchModule** (ordinals 296-301). OS/2's
+  ODEvent is a QMSG (`hwnd, msg, mp1, mp2, time, ptl`), as MMODPTS's
+  HandleEvent reads it (`event+4` the message, `event+8` mp1). The
+  session's dispatcher has a standard module (an ODDispatchModule) and
+  the modules and monitors added by event type (a PM message, 0 for all);
+  Dispatch calls the monitors, then the standard module, then the added
+  modules (newest first) until one handles the event. A document window's
+  client passes every message but WM_PAINT/WM_SIZE through it.
+- **The standard module:**
+  - Mouse messages (0x70-0x79, 0x410-0x42f) go to the facet under the
+    pointer: the deepest, frontmost facet whose clip shape contains the
+    point through its window transform. While a frame holds the `Mouse`
+    focus (IBM's parts take it on button-down and capture the mouse),
+    they go to that frame's facet. When a part does not handle an event,
+    it goes up the frame tree if the frame propagates events.
+  - A button-down in a frame that is not the active one first activates
+    it. The `Selection`, `Menu` and `Key` foci are taken from their owner
+    (its part gets CommitRelinquishFocus) and each is announced to the
+    frame's part with FocusAcquired, as an OpenDoc part activating itself
+    does (MMBasePart's ActivateFrame calls its own FocusAcquired).
+  - WM_CHAR goes to the `Key` focus frame. WM_COMMAND, WM_MENUSELECT and
+    WM_INITMENU go to the `Menu` focus frame; WM_INITMENU first calls the
+    part's AdjustMenus. WM_ACTIVATE activates the root frame when nothing
+    is active.
+- **The active frame** gets a border round its facets.
+- **Painting.** Each facet draws with the paint PS saved and restored,
+  and the default view matrix reset after it, because IBM's parts leave
+  it focused on their facet.
+- **What a facet shows.** Hit-testing and the border use what a facet
+  shows: its clip shape, else its frame shape placed at the frame origin.
+  IBM's parts draw from the frame origin whatever the origin of the frame
+  shape they ask for.
+- **ODMenuBar** is a real PM menu.
+  - Menus and items are kept by ID: text, enabled, checked, MENUITEM
+    styles, items before others. Menu 0 means the bar's own menus.
+  - Display builds the PM action bar (WC_MENU, FID_MENU) on the frame
+    window of the frame with the menu focus, and the menu is rebuilt when
+    a shown bar changes.
+  - The window state's base menu bar (`SetBaseMenuBar`, copied by
+    `CopyBaseMenuBar`, as IBM's parts do in InitPart) is shown for a part
+    that shows none of its own.
+  - rs2's `AddMenuLast(menuID, title, part)` takes the menu's title
+    string where IBM's takes a PM menu window.
+- **Shapes** are unions of disjoint rectangles: Union, Intersect,
+  Subtract and Outset are exact, so a shape can have holes or be an L.
+  GetRegion and GetPlatformShape make a GPI region of the rectangles.
+  Polygons are kept as their bounding boxes.
+
+## IBM's multimedia parts in use
+
+`ODSHELL C:\MM.OD - MMODPTS MMAudioPart C:\MMOS2\SOUNDS\DSK_STRT.WAV`
+makes the embedded part from a data file, as a dropped file is made into
+a part. Its storage unit names its editor and holds the file name as
+OS/2 OpenDoc's file contents (`OpenDoc:Property:Contents`,
+`OS2:Type:FileType`), and IBM's InitPartFromStorage imports it.
+
+What the import and playing needed:
+
+- **MMIO compound names.** MMBasePart keeps its media data in its storage
+  unit, as the MMIO element `.SU+pid+part+Contents+IBM:MMPM2:RawData.WAV`,
+  through its own I/O procedure for the FOURCC `SU`. MMPARTS's
+  mmioCopyData finds that procedure with mmioDetermineSSIOProc. rs2's
+  MMIO now implements it as IBM's (in MMPM.DLL): the MMIOINFO's child
+  procedure, else the extension before the first `+` (`|` with MMIOINFO
+  flag 0x8000), and the element after it. mmioOpen takes the same
+  procedure for such names. MDM reads compound element names through
+  MMIO.
+- **mciCreatePlayFilePalette** (MCIAPI 25). IBM's parts play through
+  this "play file palette" window. rs2's palette is its own (Play and
+  Stop buttons) and answers IBM's messages (PFPalProc):
+  - 0x1000 play, 0x1001 stop
+  - 0x1002/0x1003 set and query the file
+  - 0x1004/0x1005 set and query the title
+  - 0x100c the optimal size, 0x100d enable
+
+  The file plays on a device opened for it.
+
+Results:
+
+- **MMAudioPart.** Clicking the part plays DSK_STRT.WAV. The QEMU HD
+  Audio capture (`--sound hda --sound-wav`) holds the sound (673,000
+  samples, peaks at ±32,500).
+  Screenshot: work/progress/opendoc/odshell-mmaudiopart-playing.png.
+- **MMImagePart** shows FLOWER.JPG, and a click activates it
+  (odshell-mmimagepart-active.png).
+- **MMVideoPart** was not tried: there is no AVI file on the CDs to test
+  with.
+
 ## Tests and status
 
 - `RS2\ODTEST.EXE` (55 checks, all pass): a session and its type
@@ -234,19 +324,42 @@ reference inside a value is the 4-byte ID of the storage unit it names
   which negotiates its frame and draws itself
   (odshell-ibm-mmaudiopart.png).
 
-Not done yet (stubs that keep the tokens): event dispatching to parts
-(ODDispatcher; ODSHELL's window does not route mouse and keys to facets
-yet), the arbitrator beyond an owner table, menus (ODMenuBar records
-items, no PM menu), help, status line and settings extensions, clipboard
-and drag and drop (their storage units exist, nothing is exported),
-links, undo, translation, name spaces, GPI regions for shapes
-(GetRegion returns none; shapes are rectangles), nested drafts and
-draft history, the window state's own persistence. OREXXSC.DLL needs the
+Milestone 2 tests:
+
+- **`ODTEST`: 71 checks, all pass.** New since milestone 1:
+  - dispatch, focus and menus: a click in an embedded facet reaches its
+    part and activates its frame (three FocusAcquired calls); WM_CHAR
+    follows the key focus; a menu command goes to the menu-focus part,
+    then to a dispatch module of ODTEST's own; events outside every facet
+    are not dispatched; the menu bar API, copies and the base menu bar
+  - four checks of shapes with holes
+- **ODSHELL, driven with QEMU pointer and key input:**
+  - A click activates the embedded part (its active border); typed keys
+    edit the active part.
+  - The Document/Edit/Help menus show, Edit/Cut reaches the active part,
+    and Document/Save reaches the shell's own dispatch module.
+  - Screenshots: work/progress/opendoc/odshell-click-type-active-border.png,
+    odshell-edit-menu.png, odshell-after-cut.png.
+
+Still stubs (the tokens are there, the methods do little or nothing):
+
+- help, the status line and settings extensions (MMODPTS's settings
+  notebook and its own menus' texts are not tried)
+- clipboard and drag and drop: their storage units exist, but nothing is
+  exported to PM
+- links, undo, translation and name spaces
+- polygons as shapes
+- nested drafts and draft history
+- the window state's own persistence OREXXSC.DLL needs the
 Apple Event Manager, OSA and SOMUC.DLL. Calls with more than 12 words
 (ODWindowState::RegisterWindow takes 13) must be made directly, not
 through `somsup::call`.
 
-Next steps: dispatch PM input to facets (HandleEvent with OS/2's ODEvent),
-focus and menus through the arbitrator and window state, settings
-notebook pages (ODSettingsExtension) so MMODPTS's parts can be opened and
-played, GPI regions, then the Apple Event Manager for OREXXSC.
+Next steps:
+
+- the settings notebook (ODSettingsExtension pages through PMWP)
+- MMODPTS's own menu items and popup menus, tested
+- the play palette's state observer and position slider
+- clipboard and drag and drop with PM
+- MMVideoPart with an AVI file
+- the Apple Event Manager for OREXXSC
