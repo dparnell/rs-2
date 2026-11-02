@@ -287,6 +287,7 @@ pub fn message_text(num: u32) -> Option<Vec<u8>> {
 }
 
 /// The full error report line: REXnnnn: Error n running FILE, line L: text
+#[cfg_attr(orexx, allow(dead_code))]
 fn error_report(code: u32, file: &[u8], line: u32) -> Vec<u8> {
     let ls = alloc::format!("{line}\0");
     let cs = alloc::format!("{code}\0");
