@@ -345,7 +345,7 @@ result's address).
 | DLL | What it has |
 |-----|-------------|
 | SOMTC.DLL (`userland/somtc`) | TypeCodes: IBM's layout (`{ kind, alignment, 1, flags, parameters }`), tcNew/tcNewVL, tcKind, tcSize, tcAlignment (VisualAge's default packing: double 4), tcEqual, tcParameter, tcParmCount, tcCopy (one block), tcFree, tcSetAlignment (constants are never changed), tcPrint (IBM's text), tcSequenceNew, tcSeqFromListString, the `TC__` constants and the repository's description TypeCodes, the TCMalloc variables |
-| SOMU.DLL (`userland/somu`) | All 16 classes and IBM's private SOMMProxy metaclasses: SOMMBeforeAfter, SOMMTraced, SOMMSingleInstance, the cooperative metaclasses, SOMBuf (IBM's gap buffer), somutMsgManager, SOMUTId/SOMUTStringId; UUIDs, the SOMStartThread variables, the heap watcher (somWatchStart puts `somwatch*` into SOMMalloc & co.) |
+| SOMU.DLL (`userland/somu`) | All 16 classes and IBM's private SOMMProxy metaclasses: SOMMBeforeAfter, SOMMTraced, SOMMSingleInstance, the cooperative metaclasses, SOMBuf (IBM's gap buffer), somutMsgManager, SOMUTId/SOMUTStringId, SOMDesc and SOMArgList; UUIDs, the SOMStartThread variables, the heap watcher (somWatchStart puts `somwatch*` into SOMMalloc & co.) |
 | SOMIR.DLL (`userland/somir`) | The interface repository read from IBM's `.IR` files ([formats/som-ir.md](formats/som-ir.md)), the files `SOMIR` lists (rs2's CONFIG.SYS: `C:\OS2\ETC\SOM.IR`; no IR file is shipped) |
 
 **Before/after metaclasses.** IBM's SOMMBeforeAfter is built on its
@@ -367,9 +367,13 @@ returned TRUE, and the after methods of those that ran, in reverse, with
 the result's address (EAX:EDX, or ST0 when a floating point value came
 back). The method runs on the caller's arguments: the stub swaps the
 return address for its own and keeps the real one on a per-thread stack.
-SOMMTraced prints `method( Class at 0x... , ... ) called` and
-`method returns ...` when `SOMM_TRACED` is empty or names the class (the
-arguments need SOMDesc, below). IBM's SOMU on rs2's SOM cannot do this:
+SOMMTraced prints, in IBM's formats, `method( Class at 0x..., arguments
+) called` and `method returns value` when `SOMM_TRACED` is empty or names
+the class; the arguments and the result come from the interface
+repository through SOMDesc (`somIsA( Traced at 0x00086aa8, SOMMTraced at
+0x00086ab8 ) called`, `somGetClassName returns "Traced"`), else `, ...`.
+A method without a descriptor (rs2's SOM gives SOM's own methods none) is
+looked up as `IntroducingClass::method`, the class from its token. IBM's SOMU on rs2's SOM cannot do this:
 its framework needs SOM's private class methods (somcPrivate2, sister
 classes), which rs2's SOM.DLL does not have.
 
@@ -392,11 +396,16 @@ interfaces' unless `exclude_inherited`; `within` of something in an
 interface lists the interface and the interfaces derived from it.
 Updates (saveIR, irEnableUpdates) change nothing on disk.
 
-Not done: SOMDesc, SOMArgList and SOMCommand (method descriptions and
-argument lists from the repository, used by DSOM, the persistence
-framework and SOMMTraced's argument printing) only fail, and so do the
-externalization functions built on them; SOMIR does not write `.IR`
-files; IBM's private methods (the record allocator, the persistence
+**SOMDesc and SOMArgList** describe a method from the repository (its
+OperationDef, or the AttributeDef of a `_get_`/`_set_` accessor, the
+interface's `callstyle`: idl 2, oidl 1) and take a call's arguments apart
+with it (IBM's: the environment first for idl, floating point arguments 8
+bytes). SOMDesc's argument sizes are the TypeCodes' sizes.
+
+Not done: SOMCommand (a method call written out as text, for DSOM and
+the persistence framework) and the externalization functions built on it
+fail (-1), as do SOMDesc's cache and ownership methods and SOMArgList's
+somutGetArgs/somutSetArgs; SOMIR does not write `.IR` files; IBM's private methods (the record allocator, the persistence
 helpers) are entries that return 0. SOM.DLL does not use the repository
 yet (IBM's finds a class's DLL with `lookup_modifier(class, "dllname")`
 and makes `SOMClassMgr::somInterfaceRepository` on first use).
@@ -404,7 +413,9 @@ and makes `SOMClassMgr::somInterfaceRepository` on first use).
 **Tests.** `RS2\SOMTEST.EXE` checks TypeCodes (SOMTC), every SOMU
 class's name, parent, class data and class data order, a before/after
 metaclass (before and after called once, the result seen by the after
-method, a before method returning FALSE skipping the method), a single
+method, a before method returning FALSE skipping the method), SOMMTraced's
+output (with rs2's SOMU: IBM's faults in its tracer on SOMTEST's class
+after tracing its somDefaultInit the same way), a single
 instance class, SOMBuf and UUIDs, and, when `SOMIR` is set, the
 repository against IBM's SOM.IR (lookups, modifiers, descriptions,
 inherited operations, an attribute, a TypeDef and a ConstantDef). Run

@@ -302,7 +302,7 @@ SOMIR ([WPS.md](WPS.md#rs2s-somtc-somu-and-somir)).
 |--------|--------|-------|
 | SOMTC.DLL, SOMU.DLL, SOMIR.DLL (IBM's) | partial | Their classes load and work on rs2's SOM (SOMTEST's TypeCode, SOMU and repository checks pass with them), except SOMMBeforeAfter and SOMMTraced: IBM's cooperative framework needs SOM's private class methods (sister classes), which rs2's SOM.DLL lacks, and faults building a before/after class. rs2 ships its own three. |
 | SOMEM.DLL (event manager) | partial | Its SOMEEMan (a SOMMSingleInstance class) loads with SOMS.DLL on rs2's SOMU and SOM and makes its instance (`SOMTEST LOAD SOMEM SOMEEMan`); its event loop was not run. |
-| SOM.IR (`\OS2\ETC`) | works | Read by rs2's SOMIR (`SET SOMIR=`): all 272 top-level definitions and their contents. |
+| SOM.IR (`\OS2\ETC`) | works | Read by rs2's SOMIR (`SET SOMIR=`): SOMTEST's repository checks give the same results as with IBM's SOMIR, and rs2's SOMMTraced prints arguments and results from it. |
 
 ## Workplace Shell classes
 

@@ -80,6 +80,25 @@ tramp! {
     __t_solo_init => solo_init, 1;
 }
 
+static mut CAPTURE: Vec<u8> = Vec::new();
+static mut SAVED_OUT: extern "C" fn(u32) -> u32 = capture;
+
+tramp! {
+    __t_capture => capture, 1;
+}
+
+unsafe extern "C" {
+    #[link_name = "SOM.85"]
+    fn somSetOutChar(f: extern "C" fn(u32) -> u32);
+    #[link_name = "SOM.15"]
+    static SOMOutCharRoutine: extern "C" fn(u32) -> u32;
+}
+
+extern "C" fn capture(c: u32) -> u32 {
+    unsafe { CAPTURE.push(c as u8) };
+    1
+}
+
 fn class_name_of(cls: usize) -> &'static [u8] {
     cstr(m1(sc(), 4, cls) as *const u8)
 }
@@ -205,6 +224,51 @@ pub fn run() {
         check("before FALSE: method not called", PINGS == 0 && BEFORES == 1 && AFTERS == 0);
         m1(so(0), 2, o);
     }
+
+    // SOMMTraced: the trace of a call (captured through SOMOutCharRoutine;
+    // the arguments and results are described when SOMIR names SOM.IR).
+    // IBM's SOMU traces somDefaultInit as rs2's does, then faults in its
+    // tracer (its SOMDesc/SOMArgList) on this class: checked with rs2's.
+    let mut path = [0u8; 260];
+    unsafe { os2::DosQueryModuleName(h, path.len() as u32, path.as_mut_ptr()) };
+    let rs2 = cstr(path.as_ptr()).eq_ignore_ascii_case(b"C:\\OS2\\DLL\\SOMU.DLL");
+    if !rs2 {
+        println!("SKIP SOMMTraced (IBM's SOMU)");
+    }
+    if rs2 { unsafe {
+        let (tcd_, tccd) = (cd(0), cd(8));
+        let traced_cls = build(&Spec {
+            name: b"Traced",
+            meta: Some(b"SOMMTraced"),
+            parents: &[b"SOMObject"],
+            data: 4,
+            methods: &[],
+            overrides: &[],
+            cd: tcd_,
+            ccd: tccd,
+        });
+        let set_on: extern "C" fn(usize, usize, u32) = core::mem::transmute(*tcd.add(1));
+        set_on(traced_cls, 0, 1);
+        let t = m1(sc(), 0, traced_cls);
+        CAPTURE.clear();
+        SAVED_OUT = SOMOutCharRoutine;
+        somSetOutChar(core::mem::transmute(__t_capture as usize));
+        let name = cstr(m1(so(0), 4, t) as *const u8);
+        let isa = m2(so(0), 6, t, traced_cls);
+        somSetOutChar(SAVED_OUT);
+        let text = core::mem::take(&mut CAPTURE);
+        for line in text.split(|&c| c == b'\n').filter(|l| !l.is_empty()) {
+            println!("  trace: {}", core::str::from_utf8(line).unwrap_or("?"));
+        }
+        let has = |s: &[u8]| text.windows(s.len()).any(|w| w == s);
+        check("SOMMTraced traces somGetClassName", name == b"Traced" && has(b"somGetClassName( Traced at 0x") && has(b"somGetClassName returns"));
+        check("SOMMTraced traces somIsA", isa & 0xff != 0 && has(b"somIsA( Traced at 0x") && has(b") called"));
+        let mut v: *const u8 = core::ptr::null();
+        if os2::DosScanEnv(b"SOMIR\0".as_ptr(), &mut v) == 0 {
+            check("SOMMTraced: results from the interface repository", has(b"somGetClassName returns \"Traced\"") && has(b"somIsA returns TRUE"));
+        }
+        m1(so(0), 2, t);
+    } }
 
     // SOMMSingleInstance: one instance, counted.
     unsafe {
