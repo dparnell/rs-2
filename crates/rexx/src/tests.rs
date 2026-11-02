@@ -299,3 +299,11 @@ fn interpret_and_signal() {
     assert_eq!(run("x='y'; y.='d'; y.x=1; say y.x y.y").join(","), "1 d");
     assert_eq!(run("say value('os2var',,'OS2ENVIRONMENT')'|'; call value 'os2var','v','OS2ENVIRONMENT'; say value('os2var',,'OS2ENVIRONMENT')").join(","), "|,v");
 }
+
+#[test]
+#[ignore]
+fn speed() {
+    let t = std::time::Instant::now();
+    let out = run("x = 0; do i = 1 to 100000; x = x + i; s.i = x; end; say x");
+    std::println!("{:?} {:?}", out, t.elapsed());
+}
