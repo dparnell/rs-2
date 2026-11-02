@@ -81,7 +81,6 @@ tramp! {
 }
 
 static mut CAPTURE: Vec<u8> = Vec::new();
-static mut SAVED_OUT: extern "C" fn(u32) -> u32 = capture;
 
 tramp! {
     __t_capture => capture, 1;
@@ -89,14 +88,92 @@ tramp! {
 
 unsafe extern "C" {
     #[link_name = "SOM.85"]
-    fn somSetOutChar(f: extern "C" fn(u32) -> u32);
-    #[link_name = "SOM.15"]
-    static SOMOutCharRoutine: extern "C" fn(u32) -> u32;
+    fn somSetOutChar();
+}
+
+/// somSetOutChar(routine) is _Optlink: the routine in EAX (its stack slot
+/// reserved). It sets the thread's routine; 0 goes back to the default.
+fn set_out_char(f: usize) {
+    unsafe {
+        core::arch::asm!(
+            "push eax", "call {s}", "add esp, 4",
+            s = sym somSetOutChar,
+            inout("eax") f => _, out("ecx") _, out("edx") _,
+        );
+    }
 }
 
 extern "C" fn capture(c: u32) -> u32 {
-    unsafe { CAPTURE.push(c as u8) };
+    // A thread's routine also gets each string's terminating 0.
+    if c as u8 != 0 {
+        unsafe { CAPTURE.push(c as u8) };
+    }
     1
+}
+
+/// SOMDesc, SOMArgList and SOMCommand on SOMClass::somCheckVersion (a
+/// class object is the target; oidl: no environment).
+unsafe fn command_checks(newclass: &dyn Fn(&[u8]) -> usize, cdata: &dyn Fn(&[u8]) -> *const usize) {
+    unsafe {
+        let (dc, ac, cc) = (newclass(b"SOMDesc"), newclass(b"SOMArgList"), newclass(b"SOMCommand"));
+        let (dd, ad, cmd) = (cdata(b"SOMDesc"), cdata(b"SOMArgList"), cdata(b"SOMCommand"));
+        let t = |cd: *const usize, i: usize| *cd.add(1 + i);
+        let desc = m1(sc(), 0, dc);
+        let target = *so(0);
+        let set_desc: extern "C" fn(usize, usize, *const u8) -> i32 = core::mem::transmute(t(dd, 0));
+        check("SOMDesc for SOMClass::somCheckVersion", set_desc(desc, target, b"somCheckVersion\0".as_ptr()) == 0);
+        let get_mod: extern "C" fn(usize, *const u8) -> *const u8 = core::mem::transmute(t(dd, 12));
+        let owner: extern "C" fn(usize) -> u32 = core::mem::transmute(t(dd, 13));
+        let arg_index: extern "C" fn(usize, *const u8, *mut u16) -> i32 = core::mem::transmute(t(dd, 15));
+        let mut ix = 9u16;
+        let r = arg_index(desc, b"minorVersion\0".as_ptr(), &mut ix);
+        println!("  somCheckVersion: result owner {}, minor is argument {} ({}), modifier line {:?}", owner(desc), ix, r,
+            core::str::from_utf8(cstr(get_mod(desc, b"line\0".as_ptr()))).unwrap_or("?"));
+        check("somutGetArgIndex minorVersion = 1", r == 0 && ix == 1);
+        check("somutGetOperationModifier: none", get_mod(desc, b"nosuchmodifier\0".as_ptr()).is_null());
+        let d2 = m1(sc(), 0, dc);
+        set_desc(d2, target, b"somDefaultInit\0".as_ptr());
+        let init = get_mod(d2, b"init\0".as_ptr());
+        check("somutGetOperationModifier: init (no value) is \"\"", !init.is_null() && *init == 0);
+        // The argument list as text and back.
+        let al = m1(sc(), 0, ac);
+        let set_list: extern "C" fn(usize, usize, *const u32) -> i32 = core::mem::transmute(t(ad, 26));
+        let get_args: extern "C" fn(usize, *mut u8, u32, usize, usize, usize) -> i32 = core::mem::transmute(t(ad, 27));
+        let set_args: extern "C" fn(usize, usize, *const u8, usize, usize, usize) -> i32 = core::mem::transmute(t(ad, 28));
+        let ap = [1u32, 3];
+        check("somutSetArgList", set_list(al, desc, ap.as_ptr()) == 0);
+        let mut buf = [0u8; 200];
+        let r = get_args(al, buf.as_mut_ptr(), 200, 0, 0, 0);
+        let text = cstr(buf.as_ptr()).to_vec();
+        println!("  somutGetArgs {}: [{}]", r, core::str::from_utf8(&text).unwrap_or("?"));
+        check("somutGetArgs: IBM's text", r == 0 && text == b"         2       108         1       108         3");
+        let mut small = [0u8; 20];
+        check("somutGetArgs: -2 when the buffer is too small", get_args(al, small.as_mut_ptr(), 20, 0, 0, 0) == -2);
+        let al2 = m1(sc(), 0, ac);
+        let r = set_args(al2, desc, text.as_ptr(), 0, 0, 0);
+        let mut buf2 = [0u8; 200];
+        get_args(al2, buf2.as_mut_ptr(), 200, 0, 0, 0);
+        check("somutSetArgs: the same list again", r == 0 && cstr(buf2.as_ptr()) == &text[..]);
+        // A command: run it, and its text (the target cannot be written:
+        // a class object has none of the methods that write an object).
+        let c = m1(sc(), 0, cc);
+        let set_cc: extern "C" fn(usize, usize, usize, *mut *const u8, *const u32) -> i32 = core::mem::transmute(t(cmd, 1));
+        let get_ext: extern "C" fn(usize, *mut u8, u32, usize, usize, usize) -> i32 = core::mem::transmute(t(cmd, 2));
+        let do_cmd: extern "C" fn(usize, *mut u32) -> u32 = core::mem::transmute(t(cmd, 4));
+        let mid = sid(b"somCheckVersion");
+        let r = set_cc(c, target, 0, mid, ap.as_ptr());
+        let mut ret = 0u32;
+        do_cmd(c, &mut ret);
+        let check_version: extern "C" fn(usize, i32, i32) -> u32 = core::mem::transmute(tok(sc(), 7));
+        let direct = (check_version(target, 1, 3) & 0xff) as usize;
+        println!("  SOMCommand: set {} result {} (direct call {})", r, ret & 0xff, direct);
+        check("SOMCommand: somutSetClassCommand, somutDoCommand", r == 0 && (ret & 0xff) as usize == direct);
+        let r = get_ext(c, buf.as_mut_ptr(), 200, b"somrGetObjName\0".as_ptr() as usize, b"sompGetPersistentIdString\0".as_ptr() as usize, b"somrGetState\0".as_ptr() as usize);
+        check("somutGetExtRep: -1 (a class object cannot be written)", r == -1);
+        for o in [desc, d2, al, al2, c] {
+            m1(so(0), 2, o);
+        }
+    }
 }
 
 fn class_name_of(cls: usize) -> &'static [u8] {
@@ -225,17 +302,10 @@ pub fn run() {
         m1(so(0), 2, o);
     }
 
-    // SOMMTraced: the trace of a call (captured through SOMOutCharRoutine;
-    // the arguments and results are described when SOMIR names SOM.IR).
-    // IBM's SOMU traces somDefaultInit as rs2's does, then faults in its
-    // tracer (its SOMDesc/SOMArgList) on this class: checked with rs2's.
-    let mut path = [0u8; 260];
-    unsafe { os2::DosQueryModuleName(h, path.len() as u32, path.as_mut_ptr()) };
-    let rs2 = cstr(path.as_ptr()).eq_ignore_ascii_case(b"C:\\OS2\\DLL\\SOMU.DLL");
-    if !rs2 {
-        println!("SKIP SOMMTraced (IBM's SOMU)");
-    }
-    if rs2 { unsafe {
+    // SOMMTraced: the trace of a call (captured through the thread's
+    // output routine, somSetOutChar; the arguments and results are
+    // described when SOMIR names SOM.IR).
+    unsafe {
         let (tcd_, tccd) = (cd(0), cd(8));
         let traced_cls = build(&Spec {
             name: b"Traced",
@@ -251,11 +321,10 @@ pub fn run() {
         set_on(traced_cls, 0, 1);
         let t = m1(sc(), 0, traced_cls);
         CAPTURE.clear();
-        SAVED_OUT = SOMOutCharRoutine;
-        somSetOutChar(core::mem::transmute(__t_capture as usize));
+        set_out_char(__t_capture as usize);
         let name = cstr(m1(so(0), 4, t) as *const u8);
         let isa = m2(so(0), 6, t, traced_cls);
-        somSetOutChar(SAVED_OUT);
+        set_out_char(0);
         let text = core::mem::take(&mut CAPTURE);
         for line in text.split(|&c| c == b'\n').filter(|l| !l.is_empty()) {
             println!("  trace: {}", core::str::from_utf8(line).unwrap_or("?"));
@@ -268,7 +337,14 @@ pub fn run() {
             check("SOMMTraced: results from the interface repository", has(b"somGetClassName returns \"Traced\"") && has(b"somIsA returns TRUE"));
         }
         m1(so(0), 2, t);
-    } }
+    }
+
+    // SOMDesc's modifiers and ownership, SOMArgList's text form and a
+    // SOMCommand (the descriptions come from the repository: SOMIR set).
+    let mut v: *const u8 = core::ptr::null();
+    if unsafe { os2::DosScanEnv(b"SOMIR\0".as_ptr(), &mut v) } == 0 {
+        unsafe { command_checks(&newclass, &cdata) };
+    }
 
     // SOMMSingleInstance: one instance, counted.
     unsafe {

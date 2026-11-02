@@ -689,6 +689,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "somd-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "somsup",
+]
+
+[[package]]
 name = "somir-dll"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,14 @@
+[package]
+name = "somd-dll"
+description = "SOMD.DLL: DSOM's client library as a stub (IBM's classes, class data and exports; distributed objects are not supported)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "somd"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }

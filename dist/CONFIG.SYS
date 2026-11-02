@@ -11,8 +11,8 @@ SET GLOSSARY=C:\OS2\HELP\GLOSS
 SET BOOKSHELF=C:\OS2\BOOK
 REM Multimedia (MMPM/2): sounds and other media files in %MMBASE%
 SET MMBASE=C:\MMOS2;
-REM SOM: the interface repository files (IBM's SOM.IR, WPSH.IR, ...; none are
-REM installed with rs2)
+REM SOM: the interface repository files (rs2's SOM.IR describes the SOM
+REM classes rs2 has; programs' own files can be added, separated by ";")
 SET SOMIR=C:\OS2\ETC\SOM.IR
 SET COMSPEC=C:\OS2\CMD.EXE
 SET OS2_SHELL=C:\OS2\CMD.EXE

@@ -201,9 +201,21 @@ pub fn class_mgr() -> usize {
     unsafe { SOMClassMgrObject }
 }
 
+/// Each thread's output routine (somSetOutChar), used while
+/// SOMOutCharRoutine is the default, as in IBM's somOutputString.
+static mut THREAD_OUT: [usize; 257] = [0; 257];
+
 fn output(b: &[u8]) {
     let default = unsafe { SOMOutCharRoutine } as usize == __a_som_out_char as usize;
-    if default {
+    let mine = if default { unsafe { THREAD_OUT[(sys::thread_id() as usize).min(256)] } } else { 0 };
+    if mine != 0 {
+        let f: extern "C" fn(u32) -> u32 = unsafe { core::mem::transmute(mine) };
+        for &c in b {
+            f(c as u32);
+        }
+        // IBM's somOutputString passes the string's terminating 0 too.
+        f(0);
+    } else if default {
         let mut n = 0;
         unsafe { os2::DosWrite(1, b.as_ptr(), b.len() as u32, &mut n) };
     } else {
@@ -532,8 +544,11 @@ pub extern "C" fn somPrefixLevel(level: i32) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn somSetOutChar(f: extern "C" fn()) {
-    unsafe { SOMOutCharRoutine = f };
+/// somSetOutChar(routine) (_Optlink in IBM's SOM.DLL: see
+/// `__o_somSetOutChar`) sets the calling thread's output routine, which
+/// somPrintf & co. use while SOMOutCharRoutine is the default.
+pub extern "C" fn somSetOutChar(f: usize) {
+    unsafe { THREAD_OUT[(sys::thread_id() as usize).min(256)] = f };
 }
 
 #[unsafe(no_mangle)]
@@ -648,8 +663,41 @@ pub extern "C" fn somMakeUserRdStub(a: usize) -> usize {
     a
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn somfixMsgTemplate(a: usize, _b: usize) -> usize {
-    a
+/// somfixMsgTemplate(template) (_Optlink): turns a message template's
+/// escapes (`\n`, `\t`, `\v`, `\r`, `\a`, `\f`, `\"`) into their
+/// characters and `%#` into `%0`, in place, as IBM's does.
+pub extern "C" fn somfixMsgTemplate(a: *mut u8) {
+    if a.is_null() {
+        return;
+    }
+    unsafe {
+        let mut p = a;
+        while *p != 0 {
+            if *p == b'%' && *p.add(1) == b'#' {
+                *p.add(1) = b'0';
+            } else if *p == b'\\' {
+                let c = match *p.add(1) {
+                    b'n' => 10,
+                    b't' => 9,
+                    b'v' => 11,
+                    b'r' => 13,
+                    b'a' => 7,
+                    b'f' => 12,
+                    b'"' => b'"',
+                    _ => b'\\',
+                };
+                if c != b'\\' {
+                    *p = c;
+                    let mut q = p.add(1);
+                    while *q != 0 {
+                        *q = *q.add(1);
+                        q = q.add(1);
+                    }
+                }
+            }
+            p = p.add(1);
+        }
+    }
 }
 
 /// What the methods of a class whose implementation is not inherited

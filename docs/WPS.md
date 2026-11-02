@@ -350,14 +350,24 @@ and pmwp.sym/som.sym):
 - **The interface repository.** somLocateClassFile asks the repository's
   `lookup_modifier(class, "dllname")` once there is one (made from
   SOMIR.DLL's Repository, or when SOMIR is set), falling back to the
-  class name; _get_somInterfaceRepository hands out a copy. (IBM's
-  SOMIR.DLL on rs2's SOM still answers nothing there: not yet found why.)
+  class name (IBM's SOMIR gives the same answers there);
+  _get_somInterfaceRepository makes the manager's repository on first use
+  and hands out a copy. SOM's own methods have IBM's descriptors
+  (`::SOMClass::somNew`).
+- **_Optlink exports.** Besides somCreateDynamicClass, IBM's
+  somSetOutChar, somfixMsgTemplate and somPCallResolve take their
+  arguments in EAX, EDX, ECX. somSetOutChar sets the calling thread's
+  output routine, which somPrintf & co. use while SOMOutCharRoutine is
+  the default; it gets each string's terminating 0 too, as from IBM's
+  somOutputString.
+- **Classes in modules.** A descriptor's scope is its class's name
+  without the module (`CosSecurityAuthn::Vault::instantiate_persona`
+  overridden in `SOMSecurityAuthn::SOM_Vault`): IBM's SOMSEC.DLL needs it.
 
 Not done: SOMObject's private somComputeForwardVisitMask and
 somComputeReverseVisitMask; somSubstituteClass only redirects lookups
 (IBM's also rewrites the replaced class's ClassData); a class built again
-under a registered name replaces it (IBM's reuses the class object);
-SOM's own methods have no method descriptors.
+under a registered name replaces it (IBM's reuses the class object).
 
 **Tests.** `RS2\SOMTEST.EXE` builds classes from layout-4 static class
 information as compiler output does. It covers:
@@ -379,7 +389,13 @@ the behaviour of all the above.
 directory) builds a class whose metaclass is derived from SOMU's
 SOMMBeforeAfter and checks that its method runs between the before and
 after methods. `SOMTEST IR class...` (with SOMIR set) shows the DLL
-somLocateClassFile finds for each class.
+somLocateClassFile finds for each class. `SOMTEST SOMD` checks SOMD.DLL's
+classes and SOMD_Init (rs2's stub or IBM's, which needs SOMEM, SOMS and
+SOMSEC beside it). `SOMTEST IRW SET` changes a constant, a modifier and an
+operation's mode in the last file SOMIR lists and saves it; `SOMTEST IRW
+CHECK` (another process) finds the changes: run with IBM's SOMIR on one
+side and rs2's on the other (two boots, the file on a test disk: `cargo
+xtask disk`, `--hdd`), each reads the other's updates.
 
 `SOMTEST LOAD dll class` loads a class library through the class
 manager and makes an instance. IBM's SOMU.DLL classes (SOMUTStringId,
@@ -407,8 +423,10 @@ result's address).
 | DLL | What it has |
 |-----|-------------|
 | SOMTC.DLL (`userland/somtc`) | TypeCodes: IBM's layout (`{ kind, alignment, 1, flags, parameters }`), tcNew/tcNewVL, tcKind, tcSize, tcAlignment (VisualAge's default packing: double 4), tcEqual, tcParameter, tcParmCount, tcCopy (one block), tcFree, tcSetAlignment (constants are never changed), tcPrint (IBM's text), tcSequenceNew, tcSeqFromListString, the `TC__` constants and the repository's description TypeCodes, the TCMalloc variables |
-| SOMU.DLL (`userland/somu`) | All 16 classes and IBM's private SOMMProxy metaclasses: SOMMBeforeAfter, SOMMTraced, SOMMSingleInstance, the cooperative metaclasses, SOMBuf (IBM's gap buffer), somutMsgManager, SOMUTId/SOMUTStringId, SOMDesc and SOMArgList; UUIDs, the SOMStartThread variables, the heap watcher (somWatchStart puts `somwatch*` into SOMMalloc & co.) |
-| SOMIR.DLL (`userland/somir`) | The interface repository read from IBM's `.IR` files ([formats/som-ir.md](formats/som-ir.md)), the files `SOMIR` lists (rs2's CONFIG.SYS: `C:\OS2\ETC\SOM.IR`; no IR file is shipped) |
+| SOMU.DLL (`userland/somu`) | All 16 classes and IBM's private SOMMProxy metaclasses: SOMMBeforeAfter, SOMMTraced, SOMMSingleInstance, the cooperative metaclasses, SOMBuf (IBM's gap buffer), somutMsgManager, SOMUTId/SOMUTStringId, SOMDesc, SOMArgList and SOMCommand; UUIDs, the SOMStartThread variables, the heap watcher (somWatchStart puts `somwatch*` into SOMMalloc & co.), the externalization functions |
+| SOMIR.DLL (`userland/somir`) | The interface repository read from `.IR` files ([formats/som-ir.md](formats/som-ir.md)), the files `SOMIR` lists (rs2's CONFIG.SYS: `C:\OS2\ETC\SOM.IR`, rs2's own), and updated (saveIR) |
+| SOMD.DLL (`userland/somd`) | DSOM's client library as a stub (below) |
+| `\OS2\ETC\SOM.IR` | rs2's interface repository: the interfaces of SOM.DLL's, SOMU's, SOMIR's and SOMD's classes and the types they use (below) |
 
 **Before/after metaclasses.** IBM's SOMMBeforeAfter is built on its
 cooperative metaclass framework: SOMMCooperativeRedispatched's
@@ -434,10 +452,12 @@ SOMMTraced prints, in IBM's formats, `method( Class at 0x..., arguments
 the class; the arguments and the result come from the interface
 repository through SOMDesc (`somIsA( Traced at 0x00086aa8, SOMMTraced at
 0x00086ab8 ) called`, `somGetClassName returns "Traced"`), else `, ...`.
-A method without a descriptor (rs2's SOM gives SOM's own methods none) is
-looked up as `IntroducingClass::method`, the class from its token. IBM's SOMU on rs2's SOM cannot do this:
-its framework needs SOM's private class methods (somcPrivate2, sister
-classes), which rs2's SOM.DLL does not have.
+A method without a descriptor is looked up as `IntroducingClass::method`,
+the class from its token. IBM's SOMU works on rs2's SOM as on IBM's
+(its framework uses SOM's private class methods: sister classes,
+redispatch stubs), its SOMMTraced output the same as rs2's; nested calls
+are indented by rs2's through somPrintf, by IBM's through the C library's
+stdout (which shows them later, if at all).
 
 **SOMMSingleInstance:** SOMMProxy::HiddenClassMeta's somNew and
 somNewNoInit return the class's one instance, counting references;
@@ -456,34 +476,86 @@ container, -1 also nested modules, interfaces and operations, both also
 the enclosing scopes; an interface's contents include its base
 interfaces' unless `exclude_inherited`; `within` of something in an
 interface lists the interface and the interfaces derived from it.
-Updates (saveIR, irEnableUpdates) change nothing on disk.
+
+**Updates.** Repository::saveIR writes what the `_set_` methods changed
+back into the last file SOMIR lists, as IBM's saveToIR: a definition's
+variable record is written again in space from the file's free list
+(first fit, a larger block split) or at its end, its old record becomes
+a free block at the head of the list; modes are rewritten in the fixed
+record, a new name of the same length in the fixed record and its
+container's contents (a longer name is not saved); the file is written
+out whole. irEnableUpdates and irDisableUpdates do nothing, as IBM's.
+
+**rs2's SOM.IR.** xtask writes `\OS2\ETC\SOM.IR` (xtask/src/somir.rs) from
+`userland/somir/som-ir.txt`, a text form of the interfaces (one
+definition per line, TypeCodes written out). `tools/scripts/gen_som_ir.py
+REPO` makes the text from the Toolkit's IDL (som/include) of the classes
+rs2 ships, read as SOM's compiler reads it (`__SOMIDL__`, `#include`,
+`#pragma modifier`, foreign types from SOMFOREIGN typedefs with `impctx`)
+and arranged as IBM's compiler puts it in a repository: an interface's
+attributes become `_get_`/`_set_` OperationDefs (with an `attribute`
+modifier) first, then come its operations, its other definitions and the
+AttributeDefs; the attributes without `nodata` are its instance data. A
+modules.txt line putting another file at `OS2\ETC\SOM.IR` replaces it
+(development).
 
 **SOMDesc and SOMArgList** describe a method from the repository (its
 OperationDef, or the AttributeDef of a `_get_`/`_set_` accessor, the
 interface's `callstyle`: idl 2, oidl 1) and take a call's arguments apart
 with it (IBM's: the environment first for idl, floating point arguments 8
-bytes). SOMDesc's argument sizes are the TypeCodes' sizes.
+bytes). SOMDesc's argument sizes are the TypeCodes' sizes;
+somutGetOperationModifier gives a modifier's value ("" for one without),
+the ownership methods answer from `object_owns_result`,
+`caller_owns_result`, `object_owns_parameters`, `caller_owns_parameters`
+and `memory_management = corba` as IBM's (2 the object, 1 the caller, 3
+unspecified); there is no description cache to flush.
 
-Not done: SOMCommand (a method call written out as text, for DSOM and
-the persistence framework) and the externalization functions built on it
-fail (-1), as do SOMDesc's cache and ownership methods and SOMArgList's
-somutGetArgs/somutSetArgs; SOMIR does not write `.IR` files; IBM's private methods (the record allocator, the persistence
-helpers) are entries that return 0. SOM.DLL does not use the repository
-yet (IBM's finds a class's DLL with `lookup_modifier(class, "dllname")`
-and makes `SOMClassMgr::somInterfaceRepository` on first use).
+**SOMCommand** is a method call written out as text (userland/somu
+cmd.rs, IBM's format): the method's and the class's names (`%10d%s`
+each), the target object, then the argument list as somutGetArgs writes
+it: the count, then per argument a type letter as a `%10d` number and the
+value (`b` char/octet, `s`/`S`/`l`/`L`/`B` as `%10d`, `f`/`d` as `%20f`,
+`z` a string and `o` an object with their lengths). An object is written
+by the first of three methods its class has (somutExtCommand's defaults:
+somrGetObjName, sompGetPersistentIdString, somrGetState): `R` and its
+name, `P` and its persistent id, or `L`, its class's name and version and
+its state; only the `L` form is read back here (the others need the
+replication and persistence frameworks). somutDoCommand calls the method
+with somDispatch (somClassDispatch for another class).
+
+**SOMD.DLL** (userland/somd) is DSOM's client library as a stub: nothing
+rs2 ships uses distributed objects, but IBM's Object REXX imports it. It
+has IBM's 138 exports and ordinals and builds, when loaded as IBM's does,
+the 25 classes IBM exports class data for (SOMDObject, SOMDClientProxy
+with its SOMDMetaproxy metaclass, ObjectMgr, SOMDObjectMgr, SOMDServer,
+ORB, BOA, SOMOA, NVList, Request, Context, ImplRepository,
+ImplementationDef, Principal, ...) with IBM's parents, metaclasses,
+versions, instance sizes and class data order (`classes.rs`, generated
+from a study of IBM's DLL; Principal's parent is SOMObject, not SOMSEC's
+CosSecurityAuthn::Principal). Every method and procedure method raises
+`StExcep::NO_IMPLEMENT` in the caller's environment and returns 0;
+SOMD_Init makes SOMD_ObjectMgr (a SOMDObjectMgr), SOMD_ORBObject and
+SOMD_ImplRepObject, SOMD_Uninit frees them; the string, byte order and
+environment helpers work. IBM's SOMD.DLL imports PMWP.DLL, so Object REXX
+processes had PMWIN attached; with rs2's they do not, and IBM's REXXUTIL
+looks PMWIN up with DosQueryModuleHandle before loading it, which rs2's
+kernel answers only for modules the process uses.
+
+Not done: IBM's private methods (SOMIR's record allocator and its
+saveToIR family, the persistence helpers) remain entries that return 0;
+nothing outside IBM's own DLLs calls them.
 
 **Tests.** `RS2\SOMTEST.EXE` checks TypeCodes (SOMTC), every SOMU
 class's name, parent, class data and class data order, a before/after
 metaclass (before and after called once, the result seen by the after
 method, a before method returning FALSE skipping the method), SOMMTraced's
-output (with rs2's SOMU: IBM's faults in its tracer on SOMTEST's class
-after tracing its somDefaultInit the same way), a single
-instance class, SOMBuf and UUIDs, and, when `SOMIR` is set, the
-repository against IBM's SOM.IR (lookups, modifiers, descriptions,
-inherited operations, an attribute, a TypeDef and a ConstantDef). Run
-from a directory holding IBM's SOM, SOMTC, SOMU and SOMIR the same checks
-pass (IBM's SOMU and SOMIR on rs2's SOM load their classes, but IBM's
-before/after machinery needs IBM's SOM). IBM's SOMEM.DLL (the event
+output, a single instance class, SOMBuf and UUIDs, and, when `SOMIR` is
+set, SOMDesc's modifiers and ownership, an argument list written as text
+and read back, a SOMCommand run, and the repository (rs2's or IBM's
+SOM.IR: lookups, modifiers, descriptions, inherited operations, an
+attribute, a TypeDef and a ConstantDef). Run from a directory holding
+IBM's SOMTC, SOMU and SOMIR (with rs2's SOM), or IBM's SOM too, the same
+checks pass with the same output. IBM's SOMEM.DLL (the event
 manager, a SOMMSingleInstance class) loads and makes its SOMEEMan on
 rs2's SOMU (`SOMTEST LOAD SOMEM SOMEEMan`). `tools/scripts/irdump.py`
 prints an `.IR` file.

@@ -55,7 +55,7 @@ aligned! {
     __a_somApply => crate::somApply, 4;
     __a_somDataResolveChk => crate::somDataResolveChk, 2;
     __a_somAncestorResolve => crate::somAncestorResolve, 3;
-    __a_somfixMsgTemplate => crate::somfixMsgTemplate, 2;
+    __a_somfixMsgTemplate => crate::somfixMsgTemplate, 1;
     __a_somGetClassFromMToken => crate::somGetClassFromMToken, 1;
     __a_somEnvironmentEnd => crate::somEnvironmentEnd, 0;
     __a_somAbnormalEnd => crate::somAbnormalEnd, 0;
@@ -244,6 +244,33 @@ pub extern "C" fn __o_somCreateDynamicClass() {
         "mov dword ptr [esp + 12], ecx",
         "jmp {f}",
         f = sym __a_somCreateDynamicClass,
+    );
+}
+
+/// _Optlink entries (IBM's SOM.DLL takes these functions' first
+/// arguments in EAX, EDX and ECX): the registers go to their reserved
+/// stack slots.
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+pub extern "C" fn __o_somSetOutChar() {
+    core::arch::naked_asm!("mov dword ptr [esp + 4], eax", "jmp {f}", f = sym __a_somSetOutChar);
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+pub extern "C" fn __o_somfixMsgTemplate() {
+    core::arch::naked_asm!("mov dword ptr [esp + 4], eax", "jmp {f}", f = sym __a_somfixMsgTemplate);
+}
+
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+pub extern "C" fn __o_somPCallResolve() {
+    core::arch::naked_asm!(
+        "mov dword ptr [esp + 4], eax",
+        "mov dword ptr [esp + 8], edx",
+        "mov dword ptr [esp + 12], ecx",
+        "jmp {f}",
+        f = sym __a_somPCallResolve,
     );
 }
 

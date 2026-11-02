@@ -173,6 +173,12 @@ fn read_strings(f: &IrFile, at: u32) -> (Seq, u32) {
     (Seq::of(&v), at)
 }
 
+/// The objects made so far: (file, record, object).
+pub fn cached() -> Vec<(u32, u32, usize)> {
+    #[allow(static_mut_refs)]
+    unsafe { CACHE.iter().map(|(&(f, i), &o)| (f, i, o)).collect() }
+}
+
 /// The object of record `iid` in file `fi`, defined in `container`.
 pub fn object(fi: u32, iid: u32, container: usize) -> usize {
     if let Some(&o) = unsafe { CACHE.get(&(fi, iid)) } {

@@ -250,7 +250,9 @@ extern "C" fn lookup_modifier(r: usize, ev: Ev, id: *const u8, modifier: *const 
 }
 
 extern "C" fn release_cache(_r: usize, _ev: Ev) {}
-extern "C" fn save_ir(_r: usize, _ev: Ev) {}
+extern "C" fn save_ir(_r: usize, _ev: Ev) {
+    crate::save::save_ir();
+}
 
 extern "C" fn get_subrepositories(ret: *mut Seq, _r: usize, _ev: Ev) -> *mut Seq {
     unsafe { *ret = Seq::of(&SUBS) };

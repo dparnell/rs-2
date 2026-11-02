@@ -413,12 +413,20 @@ Status markers: done, in progress, planned.
   SOMU and SOMIR classes load on it); docs/WPS.md
 - done: SOM's class libraries SOMTC.DLL (TypeCodes), SOMU.DLL (before/after,
   traced and single-instance metaclasses, SOMBuf, UUIDs) and SOMIR.DLL
-  (the interface repository, reading IBM's .IR files), binary compatible
-  with IBM's; SOMDesc and SOMArgList read from the repository; SOMCommand
-  and writing .IR files are still to do
-- not planned: DSOM (SOMD, SOMEM, SOMS, SOMSEC, the SOMDD daemon): nothing
-  on the CD uses distributed objects. IBM's Object REXX imports SOMD.DLL
-  but only builds its client classes; rs2's Object REXX does not use it
+  (the interface repository, reading and updating .IR files), binary
+  compatible with IBM's; SOMDesc, SOMArgList and SOMCommand (calls written
+  out as text) from the repository; IBM's SOMU, SOMTC and SOMIR work on
+  rs2's SOM (before/after and traced metaclasses included) and rs2's on
+  IBM's
+- done: rs2's own `\OS2\ETC\SOM.IR` (the interfaces of the SOM classes
+  rs2 ships), written at build time from userland/somir/som-ir.txt
+  (tools/scripts/gen_som_ir.py makes it from the Toolkit's IDL)
+- done: SOMD.DLL as a stub: IBM's exports and classes, every method
+  raising NO_IMPLEMENT; IBM's Object REXX runs (ORXTEST, ORXSOM, ORXWPS)
+  without IBM's SOMD, SOMEM, SOMS and SOMSEC
+- not planned: DSOM itself (distributed objects, the SOMDD daemon,
+  SOMDSVR; SOMEM, SOMS, SOMSEC): nothing on the CD uses it; rs2's own Object REXX does not
+  use SOMD
 - done: the Workplace Shell's object model in PMWP.DLL (58 classes with
   IBM's class data and ordinals; WPObject, WPProgram, WPShadow,
   WPFileSystem, WPDataFile, WPFolder, WPDrives/WPDisk, the desktop,
