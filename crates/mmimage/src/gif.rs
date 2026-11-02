@@ -361,6 +361,26 @@ mod tests {
     }
 
     #[test]
+    fn sips_files() {
+        // sips's GIF of one of IBM's JPEGs against sips's BMP of that GIF,
+        // and our GIF read back by sips.
+        let dir = scratch();
+        for p in work_files("unpacked/disk_14/MMTEMP", "jpg").iter().take(2) {
+            let g = dir.join("sips.gif");
+            let b = dir.join("sips-gif.bmp");
+            if !sips(p, "gif", &g) || !sips(&g, "bmp", &b) { return; }
+            let d = decode(&std::fs::read(&g).unwrap()).unwrap();
+            let want = crate::bmp::decode(&std::fs::read(&b).unwrap()).unwrap();
+            assert!(same_pixels(&want, &d), "{}", p.display());
+            let ours = dir.join("ours.gif");
+            std::fs::write(&ours, encode(&d)).unwrap();
+            let b2 = dir.join("ours-gif.bmp");
+            assert!(sips(&ours, "bmp", &b2));
+            assert!(same_pixels(&d, &crate::bmp::decode(&std::fs::read(&b2).unwrap()).unwrap()));
+        }
+    }
+
+    #[test]
     fn real_files() {
         for p in work_files("media/boot/java118", "gif") {
             decode(&std::fs::read(&p).unwrap()).unwrap_or_else(|e| panic!("{}: {e:?}", p.display()));

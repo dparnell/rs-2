@@ -529,6 +529,34 @@ mod tests {
     }
 
     #[test]
+    fn libtiff_variants() {
+        // tiffcp (libtiff, when installed) rewrites our files tiled,
+        // planar, big-endian or compressed other ways: same pixels.
+        let dir = scratch();
+        for (name, img) in [("rgb", pattern24(70, 45)), ("pal", pattern_pal(70, 45, 8)), ("pal4", pattern_pal(70, 45, 4))] {
+            let src = dir.join(format!("{name}.tif"));
+            std::fs::write(&src, encode(&img, false, false)).unwrap();
+            for (v, args) in [("lzw2", &["-c", "lzw:2"][..]), ("pb", &["-c", "packbits"]), ("tiles", &["-t", "-w", "16", "-l", "32"]), ("planar", &["-p", "separate", "-c", "lzw"]), ("mm", &["-B", "-c", "lzw:2", "-r", "7"])] {
+                let out = dir.join(format!("{name}-{v}.tif"));
+                let ok = std::process::Command::new("tiffcp").args(args).arg(&src).arg(&out).stderr(std::process::Stdio::null()).status().is_ok_and(|s| s.success());
+                if !ok { return; }
+                let d = decode(&std::fs::read(&out).unwrap()).unwrap_or_else(|e| panic!("{name} {v}: {e:?}"));
+                assert!(same_pixels(&img, &d), "{name} {v}");
+            }
+        }
+        // sips's TIFF of one of IBM's JPEGs.
+        for p in work_files("unpacked/disk_21/MMTEMP", "jpg") {
+            let t = dir.join("beach.tif");
+            if !sips(&p, "tiff", &t) { return; }
+            let d = decode(&std::fs::read(&t).unwrap()).unwrap();
+            let b = dir.join("beach-tif.bmp");
+            assert!(sips(&t, "bmp", &b));
+            let want = crate::bmp::decode(&std::fs::read(&b).unwrap()).unwrap();
+            assert!(same_pixels(&want, &d));
+        }
+    }
+
+    #[test]
     fn truncated() {
         let e = encode(&pattern24(20, 20), false, true);
         for n in 0..e.len() { let _ = decode(&e[..n]); }
