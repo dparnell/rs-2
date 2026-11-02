@@ -376,6 +376,11 @@ Status markers: done, in progress, planned.
   method/data tokens, somBuildClass, initializer controls, class
   manager; `RS2\SOMTEST.EXE`, also run against IBM's SOM.DLL; IBM's
   SOMU and SOMIR classes load on it); docs/WPS.md
+- done: SOM's class libraries SOMTC.DLL (TypeCodes), SOMU.DLL (before/after,
+  traced and single-instance metaclasses, SOMBuf, UUIDs) and SOMIR.DLL
+  (the interface repository, reading IBM's .IR files), binary compatible
+  with IBM's; SOMDesc/SOMArgList/SOMCommand and writing .IR files are
+  still to do
 - done: the Workplace Shell's object model in PMWP.DLL (58 classes with
   IBM's class data and ordinals; WPObject, WPProgram, WPShadow,
   WPFileSystem, WPDataFile, WPFolder, WPDrives/WPDisk, the desktop,

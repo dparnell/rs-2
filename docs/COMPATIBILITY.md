@@ -293,6 +293,17 @@ features under `\OS2IMAGE\FI` (system management, printer utilities).
 | CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | works (in Win-OS/2) | Windows 3.1 programs: they run in Win-OS/2 (see below and docs/WINOS2.md), seamless as windows on the PM desktop. Natively (docs/WIN16.md, without Win-OS/2) stage 2 has the controls, dialogs, menus and resources they use, stage 3 COMMDLG, printing, DDE and the clipboard. |
 | ATMCNTRL.EXE, FASTLOAD.EXE (disk 21), PROMIX.EXE, AUDIOVER.EXE | not supported | Also Windows 3.1 programs (NE modules for Windows, importing KERNEL, USER and GDI), not 16-bit PM ones: WIN-OS/2's Adobe Type Manager control panel, its fast loader and multimedia driver utilities. |
 
+## SOM class libraries
+
+IBM's SOM libraries and their users on rs2's SOM.DLL, SOMTC, SOMU and
+SOMIR ([WPS.md](WPS.md#rs2s-somtc-somu-and-somir)).
+
+| Module | Status | Notes |
+|--------|--------|-------|
+| SOMTC.DLL, SOMU.DLL, SOMIR.DLL (IBM's) | partial | Their classes load and work on rs2's SOM (SOMTEST's TypeCode, SOMU and repository checks pass with them), except SOMMBeforeAfter and SOMMTraced: IBM's cooperative framework needs SOM's private class methods (sister classes), which rs2's SOM.DLL lacks, and faults building a before/after class. rs2 ships its own three. |
+| SOMEM.DLL (event manager) | partial | Its SOMEEMan (a SOMMSingleInstance class) loads with SOMS.DLL on rs2's SOMU and SOM and makes its instance (`SOMTEST LOAD SOMEM SOMEEMan`); its event loop was not run. |
+| SOM.IR (`\OS2\ETC`) | works | Read by rs2's SOMIR (`SET SOMIR=`): all 272 top-level definitions and their contents. |
+
 ## Workplace Shell classes
 
 Class DLLs built for IBM's Workplace Shell, on rs2's SOM.DLL and
