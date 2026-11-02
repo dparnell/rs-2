@@ -814,8 +814,9 @@ extern "C" fn book_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             crate::show_help(top_panel());
             0
         }
-        WM_COMMAND => 0,
-        WM_CLOSE => {
+        // The system menu's Close (and Esc) come as DID_CANCEL.
+        WM_COMMAND if lo(mp1) != DID_CANCEL => 0,
+        WM_COMMAND | WM_CLOSE => {
             if uni::complete() != 0 {
                 error(app().frame, b"The Locale database could not be updated");
             }

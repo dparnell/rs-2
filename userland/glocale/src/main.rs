@@ -381,8 +381,9 @@ fn add_record(name: &str) {
 /// Select a locale's record.
 fn select(name: &str) {
     let a = app();
-    if let Some(r) = a.recs.iter().find(|r| r.name.eq_ignore_ascii_case(name)) {
-        send(a.cnr, CM_SETRECORDEMPHASIS, r.rec, mp(1, CRA_SELECTED | CRA_CURSORED));
+    for r in &a.recs {
+        let on = r.name.eq_ignore_ascii_case(name);
+        send(a.cnr, CM_SETRECORDEMPHASIS, r.rec, mp(on as u32, if on { CRA_SELECTED | CRA_CURSORED } else { CRA_SELECTED }));
     }
 }
 
@@ -425,7 +426,7 @@ extern "C" fn client_proc(hwnd: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 }
                 CN_CONTEXTMENU => {
                     if let Some(n) = name_of(mp2) {
-                        send(a.cnr, CM_SETRECORDEMPHASIS, mp2, mp(1, CRA_SELECTED | CRA_CURSORED));
+                        select(&n);
                         a.target = Some(n);
                         let menu = popup_menu(hwnd, &popup_items());
                         let mut p = PointL::default();
@@ -577,9 +578,13 @@ pub fn make_new(owner: u32, name: &str, of: &str) -> bool {
         send(a.cnr, CM_INVALIDATERECORD, 0, 0);
     }
     select(name);
-    book::open(name, true);
+    unsafe { MADE = String::from(name) };
     true
 }
+
+/// The locale Create another made (its notebook opens once the dialog
+/// is gone).
+static mut MADE: String = String::new();
 
 fn create_another(of: &str) {
     unsafe { BASE_OF_NEW = String::from(of) };
@@ -593,7 +598,13 @@ fn create_another(of: &str) {
             help_button((105, 4, 40), ID_HELP),
         ],
     );
-    run_dialog(app().frame, name_proc, &tpl, 0);
+    unsafe { MADE = String::new() };
+    if run_dialog(app().frame, name_proc, &tpl, 0) == DID_OK {
+        let made = unsafe { (*core::ptr::addr_of!(MADE)).clone() };
+        if !made.is_empty() {
+            book::open(&made, true);
+        }
+    }
 }
 
 // ---- Delete ----
