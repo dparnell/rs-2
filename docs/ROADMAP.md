@@ -264,6 +264,11 @@ Status markers: done, in progress, planned.
   REXXUTIL.DLL, RXQUEUE, RXSUBCOM, PMREXX/PMREXXIO, REXXTRY, REX.MSG),
   binary compatible with IBM's (IBM's CMD runs procedures on it); see
   [REXX.md](REXX.md)
+- done: rs2's own Object REXX (OREXX.DLL, OREXUTIL.DLL, OREXXSOM.DLL,
+  OREXXWPS.DLL, REXXC, OREX.MSG/OREXH.MSG, SWITCHRX.CMD, WPSINST.CMD):
+  IBM's Object REXX 6.00 language and classes, activities on threads,
+  SOM classes and Workplace Shell scripting; ORXTEST, ORXSOM, ORXWPS and
+  ORXLANG pass without IBM's REXX files ([REXX.md](REXX.md#object-rexx))
 
 ## Milestone 4: Presentation Manager (largely done)
 
@@ -412,9 +417,8 @@ Status markers: done, in progress, planned.
   with IBM's; SOMDesc and SOMArgList read from the repository; SOMCommand
   and writing .IR files are still to do
 - not planned: DSOM (SOMD, SOMEM, SOMS, SOMSEC, the SOMDD daemon): nothing
-  on the CD uses distributed objects. Object REXX imports SOMD.DLL but only
-  builds its client classes; a stub SOMD with those exports would let it
-  run without IBM's
+  on the CD uses distributed objects. IBM's Object REXX imports SOMD.DLL
+  but only builds its client classes; rs2's Object REXX does not use it
 - done: the Workplace Shell's object model in PMWP.DLL (58 classes with
   IBM's class data and ordinals; WPObject, WPProgram, WPShadow,
   WPFileSystem, WPDataFile, WPFolder, WPDrives/WPDisk, the desktop,
