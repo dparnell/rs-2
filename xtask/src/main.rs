@@ -593,6 +593,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         // IBM's name: PMCHKDSK runs `CHKDSK.COM drive /P`.
         ("chkdsk", "OS2\\CHKDSK.COM"),
         ("format", "OS2\\FORMAT.EXE"),
+        // IBM's name: PMFORMAT runs `FORMAT.COM d: /P ...`.
+        ("format", "OS2\\FORMAT.COM"),
         ("mode", "OS2\\MODE.EXE"),
         ("help", "OS2\\HELP.EXE"),
         ("keyb", "OS2\\KEYB.EXE"),
