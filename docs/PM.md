@@ -2446,7 +2446,82 @@ are IBM's numbers (CLIPOS2.HLP).
 
 ### Icon Editor (ICONEDIT.EXE)
 
-(to come)
+`userland/iconedit`. As IBM's (studied in its binary, its resources
+and by running it on rs2): one window, "Icon Editor - FILE", with a
+status area along the top (a mouse showing the colours of its two
+buttons, the figure at its real size, form size, pen location, pen
+size, hot spot or selection size, figure type, which form of how many,
+the form's device, the current mode), the magnified edit area (grid,
+X background for Screen pels, the hot spot's cross, the dotted
+selection) and the palette on the right: Screen and Inverse for icons
+and pointers, then the colours (16: dark ones left, their bright
+partners right; 256: a 16 by 16 grid); button 1 picks button 1's
+colour (framed red), button 2 button 2's (framed green), a double
+click edits the colour. IBM's menus, command ids and accelerators
+(File, Edit, Palette, Options with Pen size and Preferences, Device,
+Tools, Help), its dialogs with their ids (New Figure 101, Customize
+Device 201, Device List 301, Edit color 401, Edit Predefined Device
+Forms 501, Save Options 600, Add Device 700) and help panel numbers;
+the help is ICONEDIT.HLP. `ICONEDIT file` opens a file (a name that
+does not exist starts a new figure of the kind its extension says).
+
+- **Files** (`format.rs`, no PM): icons, pointers and bitmaps with
+  OS/2 1.x headers (BITMAPFILEHEADER + 12-byte BITMAPINFOHEADER, RGB
+  triples) and 2.0 headers (BITMAPINFOHEADER2, 16 to 64 bytes, RGB2),
+  single images and bitmap arrays (`BA`, with each form's display
+  size), black and white (`IC`/`PT`: XOR mask in the bottom half of a
+  double-height 1 bpp bitmap, AND mask in the top half) and colour
+  icons and pointers (`CI`/`CP`: the masks, then the colour bitmap),
+  1, 4, 8 and 24 bits per pel, reading RLE8/RLE4 compressed 2.0 files.
+  Every pel is kept as RGB, Screen or Inverse; writing maps colours to
+  the form's palette (Screen and Inverse pels get its black entry, as
+  IBM requires). Save as asks for the layout as IBM's Save Options
+  does: 1.1 (one form), 1.2 (array, 1.x headers), 2.0 (array, 2.0
+  headers) and packed 2.0 (4 and 8 bit pels RLE-compressed), the
+  layout read marked `<..>`, and which forms to write. A bitmap of one
+  form is a plain file (cbSize the file's size; icons, pointers and
+  array entries carry the header's size, as IBM's files do). Reading
+  and writing again IBM's icons, pointers and bitmaps from the CD gives
+  the same forms, and for the 1.x files the same bytes.
+- **Forms and devices** (`devices.rs`): a figure holds forms for
+  several devices; a new icon or pointer gets the "recommended"
+  predefined devices (independent 32x32 and 16x16, colour and black and
+  white; 1024x768 40x40 and 20x20), as IBM's files have them. Device >
+  List views, adds (rendered from the current form: scaled, colours
+  mapped), deletes and orders forms; Add Device offers the predefined
+  devices and Customize; Edit Predefined changes the list (sizes,
+  colours, inherited or predefined palette, recommended), kept in
+  OS2.INI `ICONEDIT` `DEVICES`.
+- **Tools** (`edit.rs`, no PM): the pen (1x1 to 9x9, any w x h with Set
+  pen shape and the arrow keys), lines with Draw straight, flood fill
+  (Color fill), Find color, the hot spot, Select / Select all, Cut,
+  Copy (the editor's own clipboard format "IconEdit Color Bits Format",
+  which keeps Screen and Inverse, and `CF_BITMAP` for other programs),
+  Paste and Stretch paste (also from other programs' bitmaps), Clear,
+  Fill, Flip horizontal and vertical, Circle (an ellipse in the
+  selection), one level of Undo that toggles; the keyboard moves the pen
+  location and paints (Space, Enter).
+- **Palette**: Edit color (RGB or HSV scroll bars and fields, a sample;
+  every pel of the old colour takes the new one), Swap colors
+  (preserving the figure or not), Load default palette, Set default
+  palette (OS2.INI `PALETTEn`), palette files (rs2's own small format,
+  `*.PAL`: IBM's is undocumented).
+- **Test** makes a PM pointer of the form (WinCreatePointerIndirect
+  with the mask and colour bitmaps) shown over the edit area.
+- **Settings**: the window position and the options (grid, X
+  background, draw straight, pen, safe prompting, warnings, save state,
+  status area) in OS2.INI `ICONEDIT`.
+
+`ICONEDIT /SELFTEST` round-trips every layout and depth, checks the
+tools and the device list's OS2.INI form, and prints PASS/FAIL lines
+and `iconedit selftest done: N failure(s)` (also on the serial port);
+format.rs and edit.rs also build on the host (`rustc` with a small
+harness) to read the CD's files.
+
+**Not done**: IBM's palette and profile file formats (its own
+binary layouts; rs2 keeps the profile in OS2.INI and its own `.PAL`),
+Huffman and RLE24 compressed bitmaps, the `.TYPE` extended attribute
+IBM's editor writes on saving, more than one level of undo.
 
 ### Locale (GLOCALE.EXE)
 

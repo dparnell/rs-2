@@ -316,7 +316,7 @@ copied from the CD.
 
 | `OS2\APPS\PMSEEK.EXE` | Seek and Scan Files | (to come) | |
 
-| `OS2\ICONEDIT.EXE` | Icon Editor | (to come) | |
+| `OS2\ICONEDIT.EXE` | Icon Editor | icons, pointers and bitmaps (1.1, 1.2, 2.0 and packed 2.0 files, bitmap arrays of device forms, 2 to 16M colours); drawing, selection tools, clipboard, palette editing, device list, test pointer, help | `ICONEDIT /SELFTEST` (round trips, tools); QEMU screenshots: drawing, Save as and reopening, IBM's MAHJONGG.ICO opened and its forms edited, every dialog, help |
 
 | `OS2\GLOCALE.EXE` | Locale | (to come) | |
 
