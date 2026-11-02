@@ -1,0 +1,6 @@
+[package]
+name = "os2-backup"
+description = "no_std reader and writer for OS/2 BACKUP/RESTORE sets (CONTROL.nnn, BACKUP.nnn)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true

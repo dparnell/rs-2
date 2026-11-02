@@ -580,3 +580,45 @@ fn directory_index_tables() {
     let d = v.lookup("D").unwrap();
     assert_eq!(v.read_dir(&d).unwrap().len(), live.len());
 }
+
+#[test]
+fn repair_sets_maps_counts_and_log_right() {
+    let mut v = fresh(64);
+    populate(&mut v);
+    let mut e = v.create_file("ORPHAN.TXT", 0, NOW).unwrap();
+    v.write(&mut e, 0, &pattern(9000, 5), NOW).unwrap();
+    // Damage: a free block marked used, a wrong link count, a file taken
+    // out of its directory, then a log left in use.
+    v.begin().unwrap();
+    let free = (0..v.bmap.mapsize).rev().find(|&b| !v.block_used(b).unwrap()).unwrap();
+    v.mark_blocks(free, 1, true).unwrap();
+    let mut root = v.read_inode(layout::ROOT_I).unwrap();
+    let units: Vec<u16> = "ORPHAN.TXT".encode_utf16().collect();
+    v.dt_delete(&mut root, &units).unwrap();
+    v.write_inode(&root).unwrap();
+    let s = v.lookup("README.TXT").unwrap();
+    let mut i = v.read_inode(s.ino).unwrap();
+    i.set_nlink(4);
+    v.write_inode(&i).unwrap();
+    v.flush().unwrap();
+    assert!(!v.check().unwrap().ok());
+    let dev = v.dev;
+    let lp = layout::Pxd::read(&dev.0.borrow()[0x8000..0x8100], layout::sb::LOGPXD);
+    let o = (lp.addr * 4096 + 4096) as usize + layout::logsup::STATE;
+    dev.0.borrow_mut()[o..o + 4].copy_from_slice(&layout::LOGMOUNT.to_le_bytes());
+    let mut v = Volume::mount(dev).unwrap();
+    assert!(v.is_readonly());
+    let (before, done) = v.repair(NOW).unwrap();
+    assert!(!before.ok());
+    assert!(done.log_reset && done.map_blocks > 0);
+    assert_eq!(done.recovered, ["FOUND.000\\FILE0001.CHK"]);
+    ok(&mut v);
+    let mut v = remount(v);
+    assert!(!v.is_readonly());
+    ok(&mut v);
+    let r = v.lookup("FOUND.000\\FILE0001.CHK").unwrap();
+    assert_eq!(r.ino, e.ino);
+    let mut b = std::vec![0u8; 9000];
+    v.read(&r, 0, &mut b).unwrap();
+    assert_eq!(b, pattern(9000, 5));
+}

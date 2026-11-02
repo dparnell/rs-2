@@ -1,0 +1,6 @@
+[package]
+name = "lvm"
+description = "no_std partition tables for rs2's LVM: MBR with extended partitions, OS/2 LVM drive letter assignment tables (DLAT), GPT"
+edition.workspace = true
+version.workspace = true
+license.workspace = true

@@ -20,6 +20,9 @@ pub struct Partition {
     /// GPT unique partition GUID (zero for MBR partitions).
     pub guid: [u8; 16],
     pub primary: bool,
+    /// The drive letter OS/2 LVM assigned the partition's volume (its DLA
+    /// table entry), 0 for none.
+    pub letter: u8,
 }
 
 impl BlockDev for Partition {
@@ -98,7 +101,7 @@ pub fn scan(dev: &Arc<dyn BlockDev>) -> Vec<Partition> {
         if t == 0 || count == 0 || is_extended(t) {
             continue;
         }
-        out.push(Partition { dev: dev.clone(), start, count, mbr_type: t, gpt_type: [0; 16], guid: [0; 16], primary: true });
+        out.push(Partition { dev: dev.clone(), start, count, mbr_type: t, gpt_type: [0; 16], guid: [0; 16], primary: true, letter: dla_letter(dev, 0, start, count) });
     }
     for &(t, ext_start, _) in &entries {
         if !is_extended(t) {
@@ -120,6 +123,7 @@ pub fn scan(dev: &Arc<dyn BlockDev>) -> Vec<Partition> {
                     gpt_type: [0; 16],
                     guid: [0; 16],
                     primary: false,
+                    letter: dla_letter(dev, ebr_lba, ebr_lba + ls, lc),
                 });
             }
             let (nt, ns) = (ebr[462 + 4], le32(&ebr, 462 + 8) as u64);
@@ -130,6 +134,38 @@ pub fn scan(dev: &Arc<dyn BlockDev>) -> Vec<Partition> {
         }
     }
     out
+}
+
+/// The drive letter of the volume at `start`/`count` in the OS/2 LVM
+/// drive letter assignment table of the partition table at `table` (the
+/// last sector of its first track; signatures 0x424D5202 0x44464D50, a
+/// CRC-32 without final inversion at +8, 60-byte entries from +0x3C:
+/// volume serial, partition serial, size, start, ..., letter at +0x12).
+/// 0 for none (no table, no volume, no letter, or '*').
+fn dla_letter(dev: &Arc<dyn BlockDev>, table: u64, start: u64, count: u64) -> u8 {
+    let ss = dev.sector_size();
+    let mut s = vec![0u8; ss];
+    if ss != 512 || dev.read(table + 62, &mut s).is_err() || le32(&s, 0) != 0x424d_5202 || le32(&s, 4) != 0x4446_4d50 {
+        return 0;
+    }
+    let want = le32(&s, 8);
+    s[8..12].fill(0);
+    let mut c = 0xffff_ffffu32;
+    for &b in &s {
+        c ^= b as u32;
+        for _ in 0..8 {
+            c = if c & 1 != 0 { (c >> 1) ^ 0xedb8_8320 } else { c >> 1 };
+        }
+    }
+    if c != want {
+        return 0;
+    }
+    (0..4)
+        .map(|i| 0x3c + i * 60)
+        .find(|&o| le32(&s, o) != 0 && le32(&s, o + 8) as u64 == count && le32(&s, o + 12) as u64 == start)
+        .map(|o| s[o + 18].to_ascii_uppercase())
+        .filter(|l| (b'C'..=b'Z').contains(l))
+        .unwrap_or(0)
 }
 
 fn scan_gpt(dev: &Arc<dyn BlockDev>) -> Vec<Partition> {
@@ -164,7 +200,7 @@ fn scan_gpt(dev: &Arc<dyn BlockDev>) -> Vec<Partition> {
         if l < s {
             continue;
         }
-        out.push(Partition { dev: dev.clone(), start: s, count: l - s + 1, mbr_type: 0, gpt_type: ty, guid, primary: true });
+        out.push(Partition { dev: dev.clone(), start: s, count: l - s + 1, mbr_type: 0, gpt_type: ty, guid, primary: true, letter: 0 });
     }
     out
 }

@@ -39,6 +39,10 @@ Status: **works** = the tested function behaves as on OS/2;
 
 ## Base utilities
 
+IBM's utilities in rs2. rs2's own versions (which ship without IBM's files)
+are listed in [UTILITIES.md](UTILITIES.md). IBM's RESTORE restores files with
+EAs since rs2's 16-bit DosOpenL takes a 16-bit FEALIST, as DosOpen2.
+
 | Program | Status | Notes |
 |---------|--------|-------|
 | ATTRIB.EXE | works | List and change attributes. |

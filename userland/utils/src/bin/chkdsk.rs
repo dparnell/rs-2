@@ -2,10 +2,12 @@
 //!
 //! FAT volumes are read through DASD track IOCtls and checked with
 //! `fat::check`; /F repairs them (the drive is locked meanwhile, and the
-//! system remounts it when CHKDSK unlocks it). HPFS volumes get a
-//! read-only scan of the directory tree, JFS volumes a read-only check of
-//! all their metadata (`jfs::Volume::check`: trees, inode and block maps,
-//! link counts).
+//! system remounts it when CHKDSK unlocks it). HPFS volumes get the
+//! allocation check of `hpfs::Volume::check` (band and directory band
+//! bitmaps against what the tree owns; /F corrects them and clears the
+//! dirty flag), JFS volumes `jfs::Volume::check` (trees, inode and block
+//! maps, link counts) and with /F `jfs::Volume::repair` (maps, counts,
+//! orphans into FOUND.nnn, the log marked redone).
 //!
 //! /P reports to the Presentation Manager front end (IBM's PMCHKDSK, which
 //! runs `CHKDSK.COM drive /P` with its stdin and stdout on pipes): results
@@ -82,8 +84,8 @@ fn main(s: &os2::Startup) -> u32 {
     }
     match fs.as_str() {
         "FAT" => check_fat(d, fix, verbose),
-        "HPFS" => check_hpfs(d, verbose),
-        "JFS" => check_jfs(d, verbose),
+        "HPFS" => check_hpfs(d, fix, verbose),
+        "JFS" => check_jfs(d, fix, verbose),
         _ => {
             outln(&alloc::format!("CHKDSK does not support the {fs} file system."));
             1
@@ -300,8 +302,8 @@ fn list<D: fat::BlockDevice>(vol: &fat::Volume<D>, letter: char, dir: &fat::Entr
     }
 }
 
-fn check_hpfs(d: u8, verbose: bool) -> u32 {
-    let disk = match Disk::open(d, false) {
+fn check_hpfs(d: u8, fix: bool, verbose: bool) -> u32 {
+    let disk = match Disk::open(d, fix) {
         Ok(x) => x,
         Err(rc) => {
             error(rc);
@@ -316,10 +318,42 @@ fn check_hpfs(d: u8, verbose: bool) -> u32 {
             return 1;
         }
     };
-    if !pm() {
-        outln("\r\nCHKDSK is checking the directory tree (read only: repairing HPFS\r\nvolumes is not available yet).");
+    if fix && disk.lock() != 0 {
+        if pm() {
+            pm_msg(108, &[]);
+            return 108;
+        }
+        outln("CHKDSK cannot lock the drive because files on it are in use.\r\nThe /F parameter cannot be used on this drive now.");
+        return 108;
     }
+    // The allocation check (and with /F the repair): bitmaps against what
+    // the directory tree owns, the dirty flag.
+    let checked = vol.check(fix);
     let letter = (b'A' + d) as char;
+    let problems;
+    match &checked {
+        Ok(r) => {
+            problems = r.problems.len();
+            if !pm() {
+                for p in &r.problems {
+                    outln(&alloc::format!("  {p}"));
+                }
+                if r.was_dirty && fix {
+                    outln("CHKDSK cleared the volume's dirty flag.");
+                }
+                if r.marked_used + r.freed + r.dnodes > 0 {
+                    outln(&alloc::format!("CHKDSK corrected the allocation of {} sectors and {} directory blocks.", r.marked_used + r.freed, r.dnodes));
+                }
+            }
+        }
+        Err(_) => {
+            report(1373, &[], "CHKDSK cannot read the HPFS structures of this volume.");
+            if fix {
+                disk.unlock();
+            }
+            return 1;
+        }
+    }
     let (mut dirs, mut files, mut file_kb, mut bad) = (0u64, 0u64, 0u64, 0u32);
     let Ok(root) = vol.root_entry() else {
         outln("CHKDSK cannot read the root directory.");
@@ -364,18 +398,30 @@ fn check_hpfs(d: u8, verbose: bool) -> u32 {
             pm_msg(632, &[total - used]);
         }
         pm_msg(571, &[free]);
-        return if bad > 0 { 1 } else { 0 };
+        if fix {
+            drop(vol);
+            disk.unlock();
+        }
+        return if bad > 0 || (problems > 0 && !fix) { 1 } else { 0 };
     }
     let kb = |s: u32| num(s as u64 * i.sector_size as u64 / 1024, 12);
     outln(&alloc::format!("\r\n{} kilobytes total disk space.", kb(i.total_sectors)));
     outln(&alloc::format!("{} kilobytes are in {dirs} directories.", num(dirs * 2, 12)));
     outln(&alloc::format!("{} kilobytes are in {files} user files.", num(file_kb, 12)));
     outln(&alloc::format!("{} kilobytes are available for use.", kb(i.free_sectors)));
-    if bad > 0 { 1 } else { 0 }
+    if problems == 0 {
+        outln("\r\nThe allocation of the volume is consistent.");
+    }
+    if fix {
+        // Unlocking remounts the volume the repair rewrote.
+        drop(vol);
+        disk.unlock();
+    }
+    if bad > 0 || (problems > 0 && !fix) { 1 } else { 0 }
 }
 
-fn check_jfs(d: u8, verbose: bool) -> u32 {
-    let disk = match Disk::open(d, false) {
+fn check_jfs(d: u8, fix: bool, verbose: bool) -> u32 {
+    let disk = match Disk::open(d, fix) {
         Ok(x) => x,
         Err(rc) => {
             error(rc);
@@ -390,11 +436,51 @@ fn check_jfs(d: u8, verbose: bool) -> u32 {
             return 1;
         }
     };
-    vol.set_readonly(true);
-    if !pm() {
-        outln("\r\nCHKDSK is checking the file system (read only: repairing JFS\r\nvolumes is not available yet).");
+    if fix && disk.lock() != 0 {
+        if pm() {
+            pm_msg(108, &[]);
+            return 108;
+        }
+        outln("CHKDSK cannot lock the drive because files on it are in use.\r\nThe /F parameter cannot be used on this drive now.");
+        return 108;
     }
-    let r = match vol.check() {
+    vol.set_readonly(!fix);
+    let checked = if fix {
+        // Repair: what the check finds is set right from the directory
+        // tree; the log is reset and the volume marked clean.
+        let now = {
+            let mut dt = os2::DateTime::default();
+            unsafe { os2::DosGetDateTime(&mut dt) };
+            let t = fat::Timestamp::new(dt.year, dt.month, dt.day, dt.hours, dt.minutes, dt.seconds);
+            hpfs::time::from_dos(t.date, t.time)
+        };
+        match vol.repair(now) {
+            Ok((before, done)) => {
+                if !pm() {
+                    for p in &before.problems {
+                        outln(&alloc::format!("  {p}"));
+                    }
+                    if done.map_blocks > 0 {
+                        outln(&alloc::format!("CHKDSK corrected {} blocks in the block map.", done.map_blocks));
+                    }
+                    if done.inodes > 0 {
+                        outln(&alloc::format!("CHKDSK corrected {} inodes.", done.inodes));
+                    }
+                    for f in &done.recovered {
+                        outln(&alloc::format!("CHKDSK placed recovered data in {}:\\{f}.", (b'A' + d) as char));
+                    }
+                    if done.log_reset {
+                        outln("CHKDSK reset the file system log.");
+                    }
+                }
+                vol.check()
+            }
+            Err(e) => Err(e),
+        }
+    } else {
+        vol.check()
+    };
+    let r = match checked {
         Ok(r) => r,
         Err(_) => {
             report(1373, &[], "CHKDSK cannot read the JFS structures of this volume.");
@@ -420,6 +506,10 @@ fn check_jfs(d: u8, verbose: bool) -> u32 {
         }
         pm_msg(632, &[sys]);
         pm_msg(571, &[freek]);
+        if fix {
+            drop(vol);
+            disk.unlock();
+        }
         return if r.ok() { 0 } else { 1 };
     }
     if r.ok() {
@@ -433,5 +523,10 @@ fn check_jfs(d: u8, verbose: bool) -> u32 {
     outln(&alloc::format!("{} kilobytes are in extended attributes.", num(eak, 12)));
     outln(&alloc::format!("{} kilobytes are reserved for system use.", num(sys, 12)));
     outln(&alloc::format!("{} kilobytes are available for use.", num(freek, 12)));
+    if fix {
+        // Unlocking remounts the volume the repair rewrote.
+        drop(vol);
+        disk.unlock();
+    }
     if r.ok() { 0 } else { 1 }
 }

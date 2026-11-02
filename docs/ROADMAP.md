@@ -228,7 +228,9 @@ Status markers: done, in progress, planned.
   Linux ones (index tables), inline and extent EAs; MBR type 0x35, GPT and
   `root=GUID` system volumes; checked with Linux jfs_fsck. No log replay:
   volumes another system left with a busy log open read-only
-- planned: OS/2 LVM metadata, JFS log replay and CHKDSK /F for JFS
+- done: OS/2 LVM drive letter tables (volumes get their LVM letters), CHKDSK
+  /F for HPFS and JFS (no JFS log replay: the repair marks the log redone)
+- planned: JFS log replay, LVM volumes spanning partitions
 
 ## Milestone 3: rs2 user space (in progress)
 
@@ -243,8 +245,13 @@ Status markers: done, in progress, planned.
   compiled from MKMSGF source by crates/msgf; own help: WPHELP.HLP (the
   shell's help, F1 and the Help menus in PMWP), the Command Reference
   (CMDREF.INF) and Start Here (START.INF)
-- planned: CHKDSK repair for HPFS, FDISK/LVM and the rest of the base
-  utilities; Cyrillic/Greek/Hebrew keyboard layouts; REXX
+- done: the base utilities (docs/UTILITIES.md): BACKUP/RESTORE, PACK/UNPACK,
+  LVM/FDISK, COMP, DISKCOPY/DISKCOMP, EAUTIL, PATCH, PSTAT, REPLACE, SETBOOT,
+  SYSLEVEL, BLDLEVEL, CACHE, ANSI, EJECT, PRINT, RECOVER, HELPMSG, CHKDSK /F
+  for HPFS and JFS, FORMAT /P
+- planned: UNDELETE with deleted-file tracking (DELDIR), LVM volumes over
+  several partitions and Boot Manager; Cyrillic/Greek/Hebrew keyboard
+  layouts; REXX
 
 ## Milestone 4: Presentation Manager (largely done)
 

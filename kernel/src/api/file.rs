@@ -525,14 +525,15 @@ pub fn dos16_open(c: &mut Ctx) -> u32 {
 
 pub fn dos16_open_l(c: &mut Ctx) -> u32 {
     // Dos16OpenL(psz, phf, pusAction, LONGLONG cbFile, usAttr, fsOpenFlags,
-    //            ULONG fsOpenMode, peaop2, reserved)
+    //            ULONG fsOpenMode, peaop, reserved)
     let name = match read_path(c, c.ptr(0)) {
         Ok(n) => n,
         Err(e) => return e,
     };
     let size = c.arg(3) as u64 | (c.arg(4) as u64) << 32;
-    // The EAOP2 is reached through 16:16 pointers.
-    let eas = OpenEas { eaop: c.ptr(8), ptr16: true, list16: false };
+    // An OS/2 1.x EAOP with a 16-bit FEALIST, as for DosOpen2: IBM's
+    // RESTORE hands over the list as its BACKUP stored it.
+    let eas = OpenEas { eaop: c.ptr(8), ptr16: true, list16: true };
     match open(c, &name, size, c.arg(5), c.arg(6), c.arg(7), eas) {
         Ok((h, act)) => {
             c.write_u16(c.ptr(1), h as u16);
