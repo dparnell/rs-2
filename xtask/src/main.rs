@@ -610,6 +610,9 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("pstat", "OS2\\PSTAT.EXE"),
         ("eautil", "OS2\\EAUTIL.EXE"),
         ("utiltest", "RS2\\UTILTEST.EXE"),
+        ("lvm", "OS2\\LVM.EXE"),
+        // FDISK was replaced by LVM in Warp 4.5; the old name runs it.
+        ("lvm", "OS2\\FDISK.EXE"),
         ("unpack", "OS2\\UNPACK.EXE"),
         ("unpack", "OS2\\UNPACK2.EXE"),
         ("pack", "OS2\\PACK.EXE"),

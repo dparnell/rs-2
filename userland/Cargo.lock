@@ -151,6 +151,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "lvm"
+version = "0.1.0"
+
+[[package]]
 name = "mci"
 version = "0.1.0"
 
@@ -589,6 +593,7 @@ dependencies = [
  "fat",
  "hpfs",
  "jfs",
+ "lvm",
  "os2",
  "os2-backup",
  "os2-pack",

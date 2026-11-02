@@ -47,8 +47,20 @@ fn is_fat_type(t: u8) -> bool {
     matches!(t, 0x01 | 0x04 | 0x06 | 0x0b | 0x0c | 0x0e | 0x14 | 0x16 | 0x1b | 0x1c | 0x1e | 0xef)
 }
 
+/// The letter the volume being mounted asks for (OS/2 LVM), and the
+/// letters any volume asks for: others are given the remaining ones.
+static WANT: core::sync::atomic::AtomicU8 = core::sync::atomic::AtomicU8::new(0);
+static RESERVED: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
 pub(crate) fn next_letter() -> Option<u8> {
-    (2..26u8).find(|&d| crate::fs::drive(d).is_none())
+    use core::sync::atomic::Ordering;
+    let free = |d: u8| crate::fs::drive(d).is_none();
+    let w = WANT.swap(0, Ordering::Relaxed);
+    if (2..26).contains(&w) && free(w) {
+        return Some(w);
+    }
+    let r = RESERVED.load(Ordering::Relaxed);
+    (2..26u8).find(|&d| free(d) && r & (1 << d) == 0).or_else(|| (2..26u8).find(|&d| free(d)))
 }
 
 fn try_mount_fat(dev: Arc<dyn BlockDev>, what: &str) -> bool {
@@ -269,9 +281,22 @@ pub fn init() {
             None => crate::println!("boot partition not found (start {})", boot.start),
         }
     }
-    // Primary partitions, then logical drives.
+    // Primary partitions, then logical drives; volumes OS/2 LVM gave a
+    // drive letter get that letter, the others the rest in order.
     parts.sort_by_key(|p| !p.primary);
+    let reserved = parts.iter().filter(|p| p.letter != 0).fold(0u32, |m, p| m | 1 << (p.letter - b'A'));
+    RESERVED.store(reserved, core::sync::atomic::Ordering::Relaxed);
     for p in parts {
+        WANT.store(if p.letter != 0 { p.letter - b'A' } else { 0 }, core::sync::atomic::Ordering::Relaxed);
+        // An LVM volume with a letter is a drive whatever it holds, also
+        // before FORMAT has written a file system on it.
+        if p.letter != 0 && crate::fs::drive(p.letter - b'A').is_none() {
+            let (d, t) = (p.letter - b'A', p.mbr_type);
+            let fs = crate::fs::probe_volume(Arc::new(p));
+            crate::println!("disk: LVM volume {}: ({}, partition type {t:#x})", (b'A' + d) as char, fs.name());
+            crate::fs::mount(d, fs);
+            continue;
+        }
         // GPT data partitions hold any file system: probe them.
         if p.mbr_type == 0 && p.gpt_type == part::GPT_BASIC_DATA {
             match crate::fs::probe_mount(Arc::new(p)) {
@@ -311,6 +336,7 @@ pub fn init() {
         let t = p.mbr_type;
         try_mount_fat(Arc::new(p), &alloc::format!("disk: FAT partition type {t:#x}"));
     }
+    WANT.store(0, core::sync::atomic::Ordering::Relaxed);
     // Every CD drive gets a letter, with or without a disc: the disc is
     // mounted when it is used (fs/cdrom.rs). Hard errors (medium removed)
     // go through the pop-up.
