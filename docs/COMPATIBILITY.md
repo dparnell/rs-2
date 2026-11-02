@@ -322,7 +322,7 @@ copied from the CD.
 
 | `OS2\APPS\KLONDIKE.EXE` | Klondike Solitaire | (to come) | |
 
-| `OS2\APPS\MAHJONGG.EXE` | Mahjongg | (to come) | |
+| `OS2\APPS\MAHJONGG.EXE` | Mahjongg | play, IBM's menus/keys, numbered and solvable deals, hints, take back, replay, auto play, cheat, edit mode, `.MAH` files read and written (IBM's load), MAHJONGG.INI settings, own tiles and layouts, help; no sounds, tile set DLLs or background bitmaps | `MAHJONGG /SELFTEST` (33 checks), QEMU screenshots: play, hints, auto play to a won game, settings, edit mode, help |
 
 | `OS2\APPS\OS2CHESS.EXE` | OS/2 Chess | (to come) | |
 
