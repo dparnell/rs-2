@@ -180,10 +180,24 @@ name = "mmfmt"
 version = "0.1.0"
 
 [[package]]
+name = "mmimage"
+version = "0.1.0"
+
+[[package]]
 name = "mmio-dll"
 version = "0.1.0"
 dependencies = [
+ "inifile",
  "mmfmt",
+ "os2",
+]
+
+[[package]]
+name = "mmioproc-dll"
+version = "0.1.0"
+dependencies = [
+ "mmfmt",
+ "mmimage",
  "os2",
 ]
 

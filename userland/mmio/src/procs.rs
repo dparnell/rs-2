@@ -32,9 +32,10 @@ fn builtin(fcc: u32) -> Option<usize> {
     })
 }
 
-/// The procedure for `fcc`: the newest installed one, else a built-in.
+/// The procedure for `fcc`: the newest one the process installed, a
+/// built-in one, else one MMPMMMIO.INI lists (loaded now).
 pub fn find(fcc: u32) -> Option<usize> {
-    INSTALLED.with(|l| l.iter().rev().find(|e| e.0 == fcc).map(|e| e.1)).or_else(|| builtin(fcc))
+    INSTALLED.with(|l| l.iter().rev().find(|e| e.0 == fcc).map(|e| e.1)).or_else(|| builtin(fcc)).or_else(|| crate::ini::find(fcc))
 }
 
 #[unsafe(no_mangle)]
@@ -53,20 +54,41 @@ pub extern "C" fn mmioInstallIOProc(fcc: u32, proc_: usize, flags: u32) -> usize
     }
 }
 
-/// The file-format procedure that recognises file `name` (installed
-/// procedures first, then WAVE), by MMIOM_IDENTIFYFILE.
-pub fn identify(name: *const u8) -> Option<u32> {
+/// The file-format procedure that recognises file `name` or the open
+/// file `hmmio` (the process's own procedures first, then WAVE, then
+/// those of MMPMMMIO.INI in its order), by MMIOM_IDENTIFYFILE.
+pub fn identify_any(name: *const u8, hmmio: u32) -> Option<u32> {
     let installed: Vec<(u32, usize)> = INSTALLED.with(|l| l.clone());
+    let ask = |p: usize| {
+        let f: IoProc = unsafe { core::mem::transmute(p) };
+        unsafe { f(core::ptr::null_mut(), MMIOM_IDENTIFYFILE, name as i32, hmmio as i32) == 0 }
+    };
     for &(fcc, p) in installed.iter().rev() {
         if fcc == FOURCC_DOS || fcc == FOURCC_MEM {
             continue;
         }
-        let f: IoProc = unsafe { core::mem::transmute(p) };
-        if unsafe { f(core::ptr::null_mut(), MMIOM_IDENTIFYFILE, name as i32, 0) } == 0 {
+        if ask(p) {
             return Some(fcc);
         }
     }
-    (wave_identify(name, 0) == 0).then_some(FOURCC_WAVE)
+    if wave_identify(name, hmmio) == 0 {
+        return Some(FOURCC_WAVE);
+    }
+    for (fcc, _) in crate::ini::list() {
+        if installed.iter().any(|e| e.0 == fcc) {
+            continue;
+        }
+        if let Some(p) = crate::ini::find(fcc) {
+            if ask(p) {
+                return Some(fcc);
+            }
+        }
+    }
+    None
+}
+
+pub fn identify(name: *const u8) -> Option<u32> {
+    identify_any(name, 0)
 }
 
 /// MMFORMATINFO.

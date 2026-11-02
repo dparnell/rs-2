@@ -19,6 +19,8 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use os2::*;
 
+mod ioprocs;
+
 os2::entry!(main);
 
 #[repr(C)]
@@ -506,9 +508,9 @@ fn misc() {
         let want = FormatInfo::default();
         let mut n = 0;
         check("mmioQueryFormatCount", mmioQueryFormatCount(&want, &mut n, 0, 0) == 0 && n >= 1);
-        let mut list = [FormatInfo::default(); 4];
+        let mut list = [FormatInfo::default(); 40];
         let mut got = 0;
-        let ok = mmioGetFormats(&want, 4, list.as_mut_ptr(), &mut got, 0, 0) == 0;
+        let ok = mmioGetFormats(&want, 40, list.as_mut_ptr(), &mut got, 0, 0) == 0;
         check("mmioGetFormats lists WAVE", ok && got == n && list[..got as usize].iter().any(|f| f.fccIOProc == WAVE && &f.ext[..3] == b"WAV"));
 
         let mut i = info();
@@ -541,6 +543,7 @@ fn main(_s: &Startup) -> u32 {
     memory_files();
     buffered();
     misc();
+    ioprocs::run();
     let f = FAILS.load(Ordering::Relaxed);
     println!("mmiotest done: {f} failure(s)");
     f

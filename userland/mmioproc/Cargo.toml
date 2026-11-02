@@ -1,0 +1,15 @@
+[package]
+name = "mmioproc-dll"
+description = "MMIOPROC.DLL: rs2's file-format I/O procedures for MMIO (OS/2 and Windows bitmaps, JPEG, GIF, PCX, TIFF, Targa; AU, SND, VOC, AIFF, 8SVX; MIDI; AVI)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mmioproc"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+mmfmt = { path = "../../crates/mmfmt" }
+mmimage = { path = "../../crates/mmimage" }

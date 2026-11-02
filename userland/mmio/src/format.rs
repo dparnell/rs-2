@@ -72,9 +72,12 @@ pub extern "C" fn mmioSet(hmmio: u32, ext: *mut u8, flags: u32) -> u32 {
 /// procedures that describe themselves.
 fn formats() -> Vec<FormatInfo> {
     let mut v = Vec::new();
-    for fcc in [FOURCC_WAVE] {
+    let mut fccs = alloc::vec![FOURCC_WAVE];
+    fccs.extend(crate::ini::list().into_iter().map(|e| e.0).filter(|&f| f != FOURCC_WAVE));
+    for fcc in fccs {
         if let Some(p) = procs::find(fcc) {
-            let mut f = format_info(fcc).unwrap();
+            let mut f = format_info(fcc).unwrap_or(format_info(FOURCC_DOS).unwrap());
+            f.fccIOProc = fcc;
             let pf: IoProc = unsafe { core::mem::transmute(p) };
             unsafe { pf(core::ptr::null_mut(), MMIOM_GETFORMATINFO, &mut f as *mut FormatInfo as i32, 0) };
             v.push(f);
@@ -152,9 +155,7 @@ pub extern "C" fn mmioIdentifyFile(
         Some(h) => {
             let mem = handle(h).is_some_and(|h| h.mem);
             unsafe { *pss = if mem { FOURCC_MEM } else { FOURCC_DOS } };
-            let p = procs::find(FOURCC_WAVE).unwrap();
-            let pf: IoProc = unsafe { core::mem::transmute(p) };
-            if unsafe { pf(core::ptr::null_mut(), MMIOM_IDENTIFYFILE, 0, h as i32) } == 0 { FOURCC_WAVE } else { FOURCC_DOS }
+            procs::identify_any(core::ptr::null(), h).unwrap_or(FOURCC_DOS)
         }
         None => {
             if procs::DOSIOProc(core::ptr::null_mut(), MMIOM_IDENTIFYFILE, name as i32, 0) != 0 {
@@ -165,6 +166,7 @@ pub extern "C" fn mmioIdentifyFile(
         }
     };
     let mut f = format_info(fcc).unwrap_or(format_info(FOURCC_DOS).unwrap());
+    f.fccIOProc = fcc;
     if let Some(p) = procs::find(fcc) {
         let pf: IoProc = unsafe { core::mem::transmute(p) };
         unsafe { pf(core::ptr::null_mut(), MMIOM_GETFORMATINFO, &mut f as *mut FormatInfo as i32, 0) };

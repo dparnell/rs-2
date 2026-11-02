@@ -12,3 +12,4 @@ path = "src/lib.rs"
 [dependencies]
 os2 = { path = "../os2" }
 mmfmt = { path = "../../crates/mmfmt" }
+inifile = { path = "../../crates/inifile" }

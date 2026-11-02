@@ -646,6 +646,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("mmio", "OS2\\DLL\\MMIO.DLL"),
         ("mdm", "OS2\\DLL\\MDM.DLL"),
         ("mciapi", "OS2\\DLL\\MCIAPI.DLL"),
+        ("mmioproc", "OS2\\DLL\\MMIOPROC.DLL"),
         ("pmspl", "OS2\\DLL\\PMSPL.DLL"),
         ("pmspool", "OS2\\PMSPOOL.EXE"),
         ("pmprint", "OS2\\DLL\\PMPRINT.QPR"),
@@ -736,7 +737,41 @@ fn build_userland() -> Option<image::FileList> {
         std::fs::write(&out, help).unwrap();
         files.push((out, dest.to_string()));
     }
+    let ini = out_dir.join("MMPMMMIO.INI");
+    std::fs::write(&ini, mmio_ini(&std::fs::read_to_string(ul.join("mmio/ioprocs.txt")).ok()?)).unwrap();
+    files.push((ini, "MMOS2\\MMPMMMIO.INI".to_string()));
     Some(files)
+}
+
+/// MMIO's list of file-format I/O procedures (MMOS2\MMPMMMIO.INI, as
+/// IBM's installer writes it: `MMIOINIT` `IOCOUNT` and `IOMODINFO`, an
+/// array of 316-byte MMINIFILEINFO records) from userland/mmio/ioprocs.txt.
+fn mmio_ini(list: &str) -> Vec<u8> {
+    let mut data = Vec::new();
+    let mut count = 0u16;
+    for line in list.lines().filter(|l| !l.starts_with('#')) {
+        let w: Vec<&str> = line.split_whitespace().collect();
+        if w.len() < 6 {
+            continue;
+        }
+        let mut rec = [0u8; 316];
+        let text = |rec: &mut [u8; 316], off: usize, s: &str| rec[off..off + s.len()].copy_from_slice(s.as_bytes());
+        text(&mut rec, 0, &w[0].replace('_', " "));
+        text(&mut rec, 4, w[1]);
+        text(&mut rec, 264, w[2]);
+        rec[296..300].copy_from_slice(&w[3].parse::<u32>().unwrap().to_le_bytes());
+        rec[300..304].copy_from_slice(&16u32.to_le_bytes());
+        rec[304..308].copy_from_slice(&w[4].parse::<u32>().unwrap().to_le_bytes());
+        rec[308..312].copy_from_slice(&2u32.to_le_bytes());
+        text(&mut rec, 312, w[5]);
+        data.extend_from_slice(&rec);
+        count += 1;
+    }
+    let mut prof = inifile::Profile::default();
+    prof.set(b"MMIOINIT", b"VERSION", b"MULTIMEDIA MMIO INI FILE VERSION 1.0\0").unwrap();
+    prof.set(b"MMIOINIT", b"IOCOUNT", &count.to_le_bytes()).unwrap();
+    prof.set(b"MMIOINIT", b"IOMODINFO", &data).unwrap();
+    prof.to_bytes()
 }
 
 /// The DOS test programs (tests/dos, assembled when clang is there) as

@@ -1,0 +1,25 @@
+# rs2's file-format I/O procedures, as MMPMMMIO.INI lists them (IBM's
+# installer writes the same records for IBM's procedure DLLs: FOURMEG.SCR's
+# mmioInstall entries). MMIO uses this list when %MMBASE%\MMPMMMIO.INI has
+# none, and xtask writes it into the distribution's MMOS2\MMPMMMIO.INI.
+# The order is the order files are identified in.
+# FOURCC  DLL       entry point   flags  media  ext
+OS13      MMIOPROC  OS13IOProc    67     1      BMP
+OS20      MMIOPROC  OS20IOProc    67     1      BMP
+WI30      MMIOPROC  WI30IOProc    67     1      BMP
+JPEG      MMIOPROC  JPEGIOProc    67     1      JPG
+GIFC      MMIOPROC  GIFCIOProc    67     1      GIF
+PCXC      MMIOPROC  PCXCIOProc    67     1      PCX
+TFIC      MMIOPROC  TFICIOProc    67     1      TIF
+TFIU      MMIOPROC  TFIUIOProc    67     1      TIF
+TFMC      MMIOPROC  TFMCIOProc    67     1      TIF
+TFMU      MMIOPROC  TFMUIOProc    67     1      TIF
+AU__      MMIOPROC  AUIOProc      67     2      AU
+SND_      MMIOPROC  SNDIOProc     67     2      SND
+VOC_      MMIOPROC  VOCIOProc     67     2      VOC
+AIFF      MMIOPROC  AIFFIOProc    67     2      AIF
+IFF_      MMIOPROC  IFFIOProc     65     2      IFF
+MIDI      MMIOPROC  MIDIIOProc    65     4      MID
+AVI_      MMIOPROC  AVIIOProc     65     256    AVI
+TGAC      MMIOPROC  TGACIOProc    67     1      TGA
+TGAU      MMIOPROC  TGAUIOProc    67     1      TGA

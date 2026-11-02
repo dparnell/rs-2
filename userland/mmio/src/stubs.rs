@@ -292,11 +292,6 @@ pub extern "C" fn CFIOProc() -> u32 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn mmioIniFileHandler() -> u32 {
-    err::UNSUPPORTED_FUNCTION
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn mmioIdentifyFileFormat() -> u32 {
     err::UNSUPPORTED_FUNCTION
 }

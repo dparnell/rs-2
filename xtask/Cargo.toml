@@ -10,4 +10,5 @@ publish = false
 dos = { path = "../crates/dos" }
 fat = { path = "../crates/fat" }
 ipf = { path = "../crates/ipf" }
+inifile = { path = "../crates/inifile" }
 hpfs = { path = "../crates/hpfs" }

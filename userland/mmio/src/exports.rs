@@ -106,7 +106,7 @@ aligned! {
     __a_mmiohlpGetFormatString => crate::stubs::mmiohlpGetFormatString, 0;
     __a_mmiohlpGetNLSData => crate::stubs::mmiohlpGetNLSData, 0;
     __a_CFIOProc => crate::stubs::CFIOProc, 0;
-    __a_mmioIniFileHandler => crate::stubs::mmioIniFileHandler, 0;
+    __a_mmioIniFileHandler => crate::ini::mmioIniFileHandler, 2;
     __a_mmioIdentifyFileFormat => crate::stubs::mmioIdentifyFileFormat, 0;
     __a_mmioDetermineSSIOProc => crate::stubs::mmioDetermineSSIOProc, 0;
     __a_mmioDetermineFFIOProc => crate::stubs::mmioDetermineFFIOProc, 0;

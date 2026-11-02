@@ -165,5 +165,6 @@ dependencies = [
  "dos",
  "fat",
  "hpfs",
+ "inifile",
  "ipf",
 ]
