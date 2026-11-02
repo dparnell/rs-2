@@ -1,0 +1,63 @@
+; rs2's SYSLEVEL.MSG: SYSLEVEL's messages, in rs2's own words (the
+; numbers, classes and insertion points of OS/2's).
+FIX
+FIX0000I: Use it like this:
+FIX0001I: syslevel         Runs syslevel.
+FIX0002I: syslevel /d      Runs syslevel with debugging on.
+FIX0003I: syslevel /c      Runs syslevel with cleanup on.
+FIX0004I: syslevel /d /c   Runs syslevel with debugging and cleanup on.
+FIX0005I: 
+FIX0006I: syslevel <directory> Shows the information for that directory.
+FIX0007I: syslevel <directory> /c /d
+FIX0008I: 
+FIX0009I: There are too many arguments!
+FIX0010I: The list is empty.
+FIX0011I: The list of directory names is empty.
+FIX0012I: The list of syslevel file information is empty.
+FIX0013I: That drive does not exist.
+FIX0014I: /c or /d was given more than once.
+FIX0015I: A directory was given more than once.
+FIX0016I: That directory does not exist.
+FIX0017I: 
+FIX0018I: 
+FIX0019I: 
+FIX0020I: 
+FIX0021I: 
+FIX0022I: 
+FIX0023I: 
+FIX0024I: 
+FIX0025I: 
+컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴컴�
+ Enter%0
+FIX0026I: 
+FIX0027I: 
+FIX0028I: 
+FIX0029I: 
+FIX0030I: 
+FIX0031I: 
+FIX0032I: 
+FIX0033I: 
+FIX0034I: 
+FIX0035I: 
+FIX0036I: 
+FIX0037I: One moment, please...%0
+FIX0038I: 
+FIX0039I: 
+FIX0040I: Press Enter (<켸) to see the next page.
+FIX0041I: 
+FIX0042I: 
+FIX0043I: %2
+Standard Edition %3     %0
+FIX0044I: %2
+Extended Edition %3     %0
+FIX0045I: Component ID %4
+FIX0046I: Current CSD level: %5
+Prior   CSD level: %6
+
+FIX0047I: 
+FIX0048I: %2
+Extended Services %3     %0
+FIX0049I: %2
+Version %3     %0
+FIX0050I: Type %1
+%0

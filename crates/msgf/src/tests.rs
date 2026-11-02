@@ -139,6 +139,24 @@ fn media_round_trip() {
     std::eprintln!("{same} files identical");
 }
 
+/// Every message source of rs2 (userland/msg) compiles and reads back.
+#[test]
+fn rs2_sources_compile() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../userland/msg");
+    let mut n = 0;
+    for e in std::fs::read_dir(dir).unwrap().flatten() {
+        let p = e.path();
+        if !p.extension().is_some_and(|x| x.eq_ignore_ascii_case("txt")) {
+            continue;
+        }
+        let d = compile(&std::fs::read(&p).unwrap(), &Options::default()).unwrap_or_else(|e| panic!("{}: {e}", p.display()));
+        let f = MsgFile::parse(&d).unwrap();
+        assert!(f.count > 0 && f.messages().len() == f.count as usize, "{}", p.display());
+        n += 1;
+    }
+    assert!(n >= 2);
+}
+
 /// rs2's own OSO001.MSG/OSO001H.MSG sources (userland/msg) compile, and
 /// keep the numbers, classes and insertion points of IBM's files when
 /// work/ has them.

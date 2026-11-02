@@ -650,6 +650,22 @@ const HELP_FILES: &[(&str, &str)] = &[
 const MSG_FILES: &[(&str, &str, &[u16], (u16, u16))] = &[
     ("OSO001.TXT", "OS2\\SYSTEM\\OSO001.MSG", &[850, 437], (9, 1)),
     ("OSO001H.TXT", "OS2\\SYSTEM\\OSO001H.MSG", &[850, 437], (9, 1)),
+    ("PMWP.TXT", "OS2\\SYSTEM\\PMWP.MSG", &[850], (0, 0)),
+    ("REGISTRY.TXT", "OS2\\SYSTEM\\REGISTRY.MSG", &[850], (9, 1)),
+    ("PMCTL.TXT", "OS2\\SYSTEM\\PMCTL.MSG", &[850], (0, 0)),
+    ("SYSLEVEL.TXT", "OS2\\SYSLEVEL.MSG", &[850, 437], (0, 0)),
+    ("XDF.TXT", "OS2\\XDF.MSG", &[850, 437], (0, 0)),
+    ("XDFH.TXT", "OS2\\XDFH.MSG", &[850, 437], (0, 0)),
+    ("JFS.TXT", "OS2\\JFS.MSG", &[850, 437], (9, 1)),
+    ("JFSH.TXT", "OS2\\JFSH.MSG", &[850, 437], (9, 1)),
+    ("PSERROR.TXT", "OS2\\PSERROR.MSG", &[850], (9, 1)),
+    ("PSACT.TXT", "OS2\\PSACT.MSG", &[850], (9, 1)),
+    ("PSCAUSE.TXT", "OS2\\PSCAUSE.MSG", &[850], (9, 1)),
+    ("ULSERR01.TXT", "OS2\\SYSTEM\\ULSERR01.MSG", &[850], (0, 0)),
+    ("ULSACT01.TXT", "OS2\\SYSTEM\\ULSACT01.MSG", &[850], (0, 0)),
+    ("ULSCAU01.TXT", "OS2\\SYSTEM\\ULSCAU01.MSG", &[850], (0, 0)),
+    ("ULSDET01.TXT", "OS2\\SYSTEM\\ULSDET01.MSG", &[850], (0, 0)),
+    ("UCDFS.TXT", "OS2\\SYSTEM\\UCDFS.MSG", &[850], (0, 0)),
 ];
 
 /// Programs marked as PM applications (WINDOWAPI).

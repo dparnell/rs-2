@@ -1,0 +1,579 @@
+; rs2's JFSH.MSG: help for the messages of JFS's utilities, in rs2's own
+; words (the numbers, classes and insertion points of OS/2's).
+JFS
+JFS0001H: EXPLANATION: The partition is too small to hold a JFS file system.
+
+ACTION: Make the partition larger, or format some other partition.
+JFS0002H: EXPLANATION: The JFS log asked for is too big for the partition.
+
+ACTION: Ask for a smaller log in the format options, or make the
+partition larger.
+JFS0003H: EXPLANATION: JFS cannot be used on a drive whose adapter is unable to
+reach physical memory above 16 megabytes.
+
+ACTION: Use a better adapter, or format the volume as HPFS or FAT.
+JFS0004H: EXPLANATION: JFS can be put only on an LVM partition, and the
+partition given is not one.
+
+ACTION: Make the partition an LVM partition, or format some other
+partition.
+JFS0005H: 
+JFS0006H: 
+JFS0007H: 
+JFS0008H: 
+JFS0009H: 
+JFS0010H: 
+JFS0011H: 
+JFS0012H: 
+JFS0013H: 
+JFS0014H: 
+JFS0015H: 
+JFS0016H: 
+JFS0017H: 
+JFS0018H: 
+JFS0019H: 
+JFS0020H: 
+JFS0021H: 
+JFS0022H: 
+JFS0023H: 
+JFS0024H: 
+JFS0025H: 
+JFS0026H: 
+JFS0027H: 
+JFS0028H: 
+JFS0029H: 
+JFS0030H: 
+JFS0031H: 
+JFS0032H: 
+JFS0033H: 
+JFS0034H: 
+JFS0035H: 
+JFS0036H: 
+JFS0037H: 
+JFS0038H: 
+JFS0039H: 
+JFS0040H: 
+JFS0041H: 
+JFS0042H: 
+JFS0043H: 
+JFS0044H: 
+JFS0045H: 
+JFS0046H: 
+JFS0047H: 
+JFS0048H: 
+JFS0049H: 
+JFS0050H: 
+JFS0051H: 
+JFS0052H: 
+JFS0053H: 
+JFS0054H: 
+JFS0055H: 
+JFS0056H: 
+JFS0057H: 
+JFS0058H: 
+JFS0059H: 
+JFS0060H: 
+JFS0061H: 
+JFS0062H: 
+JFS0063H: 
+JFS0064H: 
+JFS0065H: 
+JFS0066H: 
+JFS0067H: 
+JFS0068H: EXPLANATION: An area of JFS meta-data that the file system depends on
+is damaged, and CHKDSK has no way to repair it.
+
+ACTION: FORMAT the partition again, then restore its data from a backup.
+JFS0069H: EXPLANATION: An area of JFS meta-data that the file system depends on
+is damaged.  CHKDSK was run to analyse only, so it may not repair it.
+
+ACTION: Run CHKDSK on the partition again with the /F parameter, which
+lets CHKDSK write to it.
+JFS0070H: 
+JFS0071H: 
+JFS0072H: 
+JFS0073H: 
+JFS0074H: 
+JFS0075H: 
+JFS0076H: 
+JFS0077H: 
+JFS0078H: 
+JFS0079H: 
+JFS0080H: EXPLANATION: CHKDSK could not make the second copy of an area of JFS
+meta-data that the file system depends on.  Without a good second copy,
+CHKDSK cannot repair that area if it is ever damaged.
+
+ACTION: Run CHKDSK with the /B parameter to empty the LVM bad block
+list.  After that, run CHKDSK with the /F parameter to try again.
+JFS0081H: 
+JFS0082H: EXPLANATION: CHKDSK cannot create \lost+found\ on the partition, so
+it cannot reconnect the lost files and/or directories it found.
+
+ACTION: Create the directory with MKDIR \lost+found, then run CHKDSK
+with the /F parameter to reconnect the lost files.
+JFS0083H: 
+JFS0084H: 
+JFS0085H: 
+JFS0086H: 
+JFS0087H: 
+JFS0088H: 
+JFS0089H: 
+JFS0090H: 
+JFS0091H: 
+JFS0092H: 
+JFS0093H: 
+JFS0094H: 
+JFS0095H: 
+JFS0096H: 
+JFS0097H: 
+JFS0098H: 
+JFS0099H: 
+JFS0100H: 
+JFS0101H: EXPLANATION: There is too little memory for CHKDSK to do /F:0
+processing on this file system.
+
+ACTION: Run CHKDSK with the /F parameter.
+JFS0102H: 
+JFS0103H: 
+JFS0104H: 
+JFS0105H: 
+JFS0106H: 
+JFS0107H: 
+JFS0108H: 
+JFS0109H: 
+JFS0110H: 
+JFS0111H: 
+JFS0112H: 
+JFS0113H: 
+JFS0114H: 
+JFS0115H: 
+JFS0116H: 
+JFS0117H: 
+JFS0118H: 
+JFS0119H: 
+JFS0120H: 
+JFS0121H: 
+JFS0122H: 
+JFS0123H: 
+JFS0124H: 
+JFS0125H: 
+JFS0126H: 
+JFS0127H: 
+JFS0128H: 
+JFS0129H: 
+JFS0130H: 
+JFS0131H: 
+JFS0132H: 
+JFS0133H: 
+JFS0134H: 
+JFS0135H: 
+JFS0136H: 
+JFS0137H: EXPLANATION: The root directory already holds an object named
+lost+found that is not a directory, so CHKDSK cannot create the lost+found
+directory there.
+
+ACTION: Give the existing lost+found object in the root another name,
+create the directory with MKDIR lost+found in the root, then run CHKDSK
+with the /F parameter to reconnect the lost files and/or directories.
+
+JFS0138H: EXPLANATION: While a file system is mounted, some of its transactions
+may be only partly written to the partition, and CHKDSK looks at
+nothing but the partition.  So for a mounted file system (that is, with
+/F:0), CHKDSK may wrongly call the partition clean or dirty.
+
+ACTION: Run CHKDSK with the /F parameter.
+JFS0139H: 
+JFS0140H: 
+JFS0141H: 
+JFS0142H: 
+JFS0143H: 
+JFS0144H: 
+JFS0145H: 
+JFS0146H: 
+JFS0147H: 
+JFS0148H: EXPLANATION: CHKDSK got an I/O error.
+
+ACTION: Fix what causes the I/O error on the partition, then run CHKDSK
+again.
+JFS0149H: 
+JFS0150H: 
+JFS0151H: 
+JFS0152H: 
+JFS0153H: 
+JFS0154H: 
+JFS0155H: 
+JFS0156H: 
+JFS0157H: 
+JFS0158H: 
+JFS0159H: 
+JFS0160H: 
+JFS0161H: 
+JFS0162H: 
+JFS0163H: 
+JFS0164H: 
+JFS0165H: EXPLANATION: CHKDSK was given more than one /F:n parameter.
+
+ACTION: Run CHKDSK again with at most one /F:n parameter.
+JFS0166H: 
+JFS0167H: EXPLANATION: CHKDSK was given a /F:n parameter whose value of n is
+not valid.
+
+ACTION: To analyse only, run CHKDSK without /F:n or with /F:0.  To
+analyse and repair, run CHKDSK with /F, or with /F:n where n is 1, 2
+or 3.
+JFS0168H: EXPLANATION: CHKDSK was given a parameter that this file system does
+not support.
+
+ACTION: Run CHKDSK again and leave out the parameter that is not valid.
+JFS0169H: EXPLANATION: The journal log is damaged, and an I/O error kept CHKDSK
+from formatting it again.  CHKDSK can still analyse and repair the
+other parts of the file system.
+
+ACTION: Fix what causes the I/O error on the partition, then run CHKDSK
+again.
+JFS0170H: 
+JFS0171H: EXPLANATION: An I/O error kept CHKDSK from checking and/or refreshing
+the partition's boot sector.  CHKDSK can still analyse and repair the
+other parts of the file system, but the system might not see the
+partition as a JFS file system.
+
+ACTION: If the system later does not see the partition as JFS, fix what
+causes the I/O error on the partition, then run CHKDSK with /F to try
+again.
+JFS0172H: 
+JFS0173H: 
+JFS0174H: 
+JFS0175H: 
+JFS0176H: 
+JFS0177H: 
+JFS0178H: 
+JFS0179H: 
+JFS0180H: 
+JFS0181H: 
+JFS0182H: 
+JFS0183H: 
+JFS0184H: 
+JFS0185H: 
+JFS0186H: 
+JFS0187H: EXPLANATION: CHKDSK got an I/O error.
+
+ACTION: Fix what causes the I/O error on the partition, then run CHKDSK
+again.
+JFS0188H: 
+JFS0189H: 
+JFS0190H: 
+JFS0191H: 
+JFS0192H: 
+JFS0193H: 
+JFS0194H: 
+JFS0195H: 
+JFS0196H: 
+JFS0197H: 
+JFS0198H: 
+JFS0199H: 
+JFS0200H: 
+JFS0201H: 
+JFS0202H: 
+JFS0203H: 
+JFS0204H: 
+JFS0205H: 
+JFS0206H: 
+JFS0207H: 
+JFS0208H: 
+JFS0209H: 
+JFS0210H: 
+JFS0211H: 
+JFS0212H: 
+JFS0213H: 
+JFS0214H: EXPLANATION: CHKDSK got an I/O error.
+
+ACTION: Fix what causes the I/O error on the partition, then run CHKDSK
+again.
+JFS0215H: EXPLANATION: CHKDSK got an I/O error.
+
+ACTION: Fix what causes the I/O error on the partition, then run CHKDSK
+again.
+JFS0216H: 
+JFS0217H: 
+JFS0218H: 
+JFS0219H: 
+JFS0220H: 
+JFS0221H: 
+JFS0222H: 
+JFS0223H: 
+JFS0224H: 
+JFS0225H: 
+JFS0226H: 
+JFS0227H: 
+JFS0228H: 
+JFS0229H: 
+JFS0230H: 
+JFS0231H: 
+JFS0232H: 
+JFS0233H: 
+JFS0234H: 
+JFS0235H: 
+JFS0236H: 
+JFS0237H: 
+JFS0238H: 
+JFS0239H: 
+JFS0240H: 
+JFS0241H: 
+JFS0242H: 
+JFS0243H: 
+JFS0244H: 
+JFS0245H: 
+JFS0246H: 
+JFS0247H: 
+JFS0248H: 
+JFS0249H: 
+JFS0250H: 
+JFS0251H: 
+JFS0252H: 
+JFS0253H: 
+JFS0254H: 
+JFS0255H: 
+JFS0256H: 
+JFS0257H: 
+JFS0258H: 
+JFS0259H: 
+JFS0260H: 
+JFS0261H: 
+JFS0262H: 
+JFS0263H: 
+JFS0264H: 
+JFS0265H: 
+JFS0266H: 
+JFS0267H: 
+JFS0268H: 
+JFS0269H: 
+JFS0270H: 
+JFS0271H: 
+JFS0272H: 
+JFS0273H: 
+JFS0274H: 
+JFS0275H: 
+JFS0276H: 
+JFS0277H: 
+JFS0278H: 
+JFS0279H: 
+JFS0280H: 
+JFS0281H: 
+JFS0282H: 
+JFS0283H: 
+JFS0284H: 
+JFS0285H: 
+JFS0286H: 
+JFS0287H: 
+JFS0288H: 
+JFS0289H: 
+JFS0290H: 
+JFS0291H: 
+JFS0292H: 
+JFS0293H: 
+JFS0294H: 
+JFS0295H: 
+JFS0296H: 
+JFS0297H: 
+JFS0298H: 
+JFS0299H: 
+JFS0300H: 
+JFS0301H: 
+JFS0302H: 
+JFS0303H: 
+JFS0304H: 
+JFS0305H: 
+JFS0306H: 
+JFS0307H: 
+JFS0308H: 
+JFS0309H: 
+JFS0310H: 
+JFS0311H: 
+JFS0312H: 
+JFS0313H: 
+JFS0314H: 
+JFS0315H: 
+JFS0316H: 
+JFS0317H: 
+JFS0318H: 
+JFS0319H: 
+JFS0320H: 
+JFS0321H: 
+JFS0322H: 
+JFS0323H: 
+JFS0324H: 
+JFS0325H: 
+JFS0326H: 
+JFS0327H: 
+JFS0328H: 
+JFS0329H: 
+JFS0330H: 
+JFS0331H: 
+JFS0332H: 
+JFS0333H: 
+JFS0334H: 
+JFS0335H: 
+JFS0336H: 
+JFS0337H: 
+JFS0338H: 
+JFS0339H: 
+JFS0340H: 
+JFS0341H: 
+JFS0342H: 
+JFS0343H: 
+JFS0344H: 
+JFS0345H: 
+JFS0346H: 
+JFS0347H: 
+JFS0348H: 
+JFS0349H: 
+JFS0350H: 
+JFS0351H: 
+JFS0352H: 
+JFS0353H: 
+JFS0354H: 
+JFS0355H: 
+JFS0356H: 
+JFS0357H: 
+JFS0358H: 
+JFS0359H: 
+JFS0360H: 
+JFS0361H: 
+JFS0362H: 
+JFS0363H: 
+JFS0364H: 
+JFS0365H: 
+JFS0366H: 
+JFS0367H: 
+JFS0368H: 
+JFS0369H: 
+JFS0370H: 
+JFS0371H: 
+JFS0372H: 
+JFS0373H: 
+JFS0374H: 
+JFS0375H: 
+JFS0376H: EXPLANATION: An error keeps CHKDSK from finishing what it was asked
+to do.  If part of a repair or refresh was already written, the partition
+is left in a state where it cannot be accessed.
+
+ACTION: If the partition cannot be accessed, fix what causes the error,
+then run CHKDSK again.  If the cause cannot be fixed, FORMAT the
+partition again, then restore its data from a backup.
+JFS0377H: 
+JFS0378H: 
+JFS0379H: 
+JFS0380H: 
+JFS0381H: 
+JFS0382H: 
+JFS0383H: 
+JFS0384H: 
+JFS0385H: 
+JFS0386H: 
+JFS0387H: 
+JFS0388H: 
+JFS0389H: 
+JFS0390H: 
+JFS0391H: 
+JFS0392H: EXPLANATION: The partition's LVM bad block table is more than half
+full.  CHKDSK can make room by moving its entries from the LVM table,
+whose size is fixed, to the JFS table, which can grow as needed.
+CHKDSK does this while the file system is in use.
+
+ACTION: Run CHKDSK with the /B parameter to move the entries from the
+LVM table to the JFS table.
+JFS0393H: 
+JFS0394H: 
+JFS0395H: 
+JFS0396H: EXPLANATION: CHKDSK is moving entries from the partition's LVM bad
+block table, whose size is fixed, to the JFS table, which can grow as needed.
+CHKDSK does this while the file system is in use.
+JFS0397H: EXPLANATION: JFS CHKDSK hit an internal error and cannot go on with
+this file system.
+
+ACTION: Write down the message, then get in touch with your support
+contact.
+JFS0398H: 
+JFS0399H: 
+JFS0400H: 
+JFS0401H: 
+JFS0402H: 
+JFS0403H: 
+JFS0404H: 
+JFS0405H: 
+JFS0406H: EXPLANATION: JFS CHKDSK cannot get write access to the file system
+right now.
+
+ACTION: If another process holds the file system locked for exclusive
+write access, run CHKDSK /B again once that process ends.  If nothing
+holds it locked, run CHKDSK with the /F parameter to correct the file
+system.  Note that /F processing also does what /B does.
+JFS0407H: 
+JFS0408H: 
+JFS0409H: 
+JFS0410H: 
+JFS0411H: 
+JFS0412H: 
+JFS0413H: 
+JFS0414H: 
+JFS0415H: 
+JFS0416H: 
+JFS0417H: 
+JFS0418H: 
+JFS0419H: 
+JFS0420H: 
+JFS0421H: 
+JFS0422H: 
+JFS0423H: 
+JFS0424H: 
+JFS0425H: 
+JFS0426H: 
+JFS0427H: 
+JFS0428H: 
+JFS0429H: 
+JFS0430H: 
+JFS0431H: 
+JFS0432H: 
+JFS0433H: 
+JFS0434H: 
+JFS0435H: 
+JFS0436H: 
+JFS0437H: 
+JFS0438H: 
+JFS0439H: 
+JFS0440H: 
+JFS0441H: 
+JFS0442H: 
+JFS0443H: 
+JFS0444H: 
+JFS0445H: 
+JFS0446H: 
+JFS0447H: 
+JFS0448H: 
+JFS0449H: 
+JFS0450H: 
+JFS0451H: EXPLANATION: An area of JFS meta-data that the file system depends on
+is damaged.
+
+ACTION: Run CHKDSK with the /F parameter.
+JFS0452H: EXPLANATION: The file system may not be intact.
+
+ACTION: Run CHKDSK with the /F parameter.
+JFS0453H: 
+JFS0454H: 
+JFS0455H: 
+JFS0456H: 
+JFS0457H: 
+JFS0458H: 
+JFS0459H: 
+JFS0460H: 
+JFS0461H: 
+JFS0462H: 
+JFS0463H: 
+JFS0464H: 
+JFS0465H: 
+JFS0466H: EXPLANATION: JFS DEFRAGFS hit an error it did not expect and cannot
+go on.
+
+ACTION: Write down the message, then get in touch with your support
+contact.%0

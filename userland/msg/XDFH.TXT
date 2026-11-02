@@ -1,0 +1,33 @@
+; rs2's XDFH.MSG: help for XDFCOPY's messages, in rs2's own words (the
+; numbers, classes and insertion points of OS/2's).
+XDF
+XDF3502H: 
+XDF3503H: 
+XDF3504H: 
+XDF3505H: 
+XDF3506H: 
+XDF3507H: 
+XDF3508H: 
+XDF3509H: 
+XDF3510H: 
+XDF3511H: 
+XDF3512H: 
+XDF3513H: 
+XDF3514H: 
+XDF3515H: 
+XDF3516H: 
+XDF3517H: EXPLANATION: The temporary file holds a whole diskette, so the hard
+disk needs that much free space.
+
+ACTION: Remove files you no longer need, then run the command again.
+XDF3518H: EXPLANATION: The given file does not hold a valid copy of a
+diskette's data.
+
+ACTION: Copy the image file again.  If it was downloaded, check the
+connection it came over.
+XDF3519H: EXPLANATION: This operation needs the XDFLOPPY.FLT driver, loaded by
+a BASEDEV=XDFLOPPY.FLT statement anywhere in CONFIG.SYS.
+
+ACTION: The operation might work in a DOS session of OS/2.
+XDF3520H: 
+XDF3521H: %0

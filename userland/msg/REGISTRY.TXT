@@ -1,0 +1,9 @@
+; rs2's REGISTRY.MSG: the registry's messages, in rs2's own words (the
+; numbers, classes and insertion points of OS/2's).
+REG
+REG0001E: This function is no longer provided here; run REGEDIT2.EXE instead.
+REG0002E: The registry ran into a condition it did not expect.
+REG0003E: The registry ran into a condition it did not expect; the data below
+describes it.  Should the problem keep happening, keep this data for
+whoever analyses it.
+
