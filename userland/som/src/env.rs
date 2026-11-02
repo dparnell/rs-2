@@ -226,13 +226,21 @@ fn mgr_defs() -> [Def; 22] {
     }
 }
 
+/// SOM's own methods, with descriptors as IBM's ("::SOMClass::somNew"):
+/// Object REXX's SOM support finds a method's signature in the interface
+/// repository by its descriptor.
 unsafe fn add_defs(c: *mut Class, defs: &[Def], cds: *mut usize) {
     for (i, &(name, p, agg)) in defs.iter().enumerate() {
         let mid = id::static_id(name);
+        let mut d: Vec<u8> = b"::".to_vec();
+        d.extend_from_slice(unsafe { (*c).name_bytes() });
+        d.extend_from_slice(b"::");
+        d.extend_from_slice(name);
+        let desc = id::static_id(&d);
         let tok = if agg {
-            unsafe { add_static(c, mid, core::ptr::null_mut(), p, usize::MAX, &AGG as *const ApRd as usize) }
+            unsafe { add_static(c, mid, desc, p, usize::MAX, &AGG as *const ApRd as usize) }
         } else {
-            unsafe { add_static(c, mid, core::ptr::null_mut(), p, 0, 0) }
+            unsafe { add_static(c, mid, desc, p, 0, 0) }
         };
         unsafe { *cds.add(1 + i) = tok };
     }
