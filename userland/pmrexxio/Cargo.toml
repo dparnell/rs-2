@@ -1,0 +1,13 @@
+[package]
+name = "pmrexxio-dll"
+description = "PMREXXIO.DLL: the Presentation Manager input/output window for REXX procedures (PMREXX)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmrexxio"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

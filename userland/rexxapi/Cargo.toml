@@ -1,0 +1,14 @@
+[package]
+name = "rexxapi-dll"
+description = "REXXAPI.DLL: the REXX API (queues, registrations of subcommand handlers, exits and functions, the macro space)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rexxapi"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+thunk16 = { path = "../thunk16" }

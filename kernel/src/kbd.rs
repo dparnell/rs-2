@@ -207,12 +207,22 @@ fn translate(s: &mut State, sc: u8) -> Option<KeyInfo> {
             c = 0;
         }
         k.ch = c;
+        if c == 0 {
+            // Alt+key: an extended code (KBDTRF_EXTENDED_CODE).
+            k.status |= 0x02;
+        }
         return Some(k);
     }
     // Keypad with NumLock, function keys and the rest: scan code only.
     if (0x47..=0x53).contains(&code) && s.shift & NUMLOCK_ON != 0 && !shifted {
         const PAD: &[u8; 13] = b"789-456+1230.";
         k.ch = if code == 0x53 { layout::keypad_decimal() } else { PAD[(code - 0x47) as usize] };
+    }
+    if k.ch == 0 {
+        // Function keys and the cursor pad: character 0 with the scan
+        // code, flagged as an extended code (REXXUTIL's SysGetKey returns
+        // such keys as two characters on that flag).
+        k.status |= 0x02;
     }
     Some(k)
 }

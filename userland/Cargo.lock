@@ -432,6 +432,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "pmrexx"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "pmrexxio-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "pmseek"
 version = "0.1.0"
 dependencies = [
@@ -561,6 +575,48 @@ dependencies = [
 
 [[package]]
 name = "rescue"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "rexx"
+version = "0.1.0"
+
+[[package]]
+name = "rexx-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "rexx",
+ "thunk16",
+]
+
+[[package]]
+name = "rexxapi-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "thunk16",
+]
+
+[[package]]
+name = "rexxcmds"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "rexxinit-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "rexxutil-dll"
 version = "0.1.0"
 dependencies = [
  "os2",

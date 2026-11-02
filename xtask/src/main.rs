@@ -671,6 +671,10 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("thailib", "OS2\\DLL\\THAILIB.DLL"),
         ("pmwp", "OS2\\DLL\\PMWP.DLL"),
         ("wpconfig", "OS2\\DLL\\WPCONFIG.DLL"),
+        ("rexx", "OS2\\DLL\\REXX.DLL"),
+        ("rexxapi", "OS2\\DLL\\REXXAPI.DLL"),
+        ("rexxutil", "OS2\\DLL\\REXXUTIL.DLL"),
+        ("rexxinit", "OS2\\DLL\\REXXINIT.DLL"),
         ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
         ("uconv", "OS2\\DLL\\UCONV.DLL"),
         ("mmio", "OS2\\DLL\\MMIO.DLL"),
@@ -702,6 +706,10 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("klondike", "OS2\\APPS\\KLONDIKE.EXE"),
         ("mahjongg", "OS2\\APPS\\MAHJONGG.EXE"),
         ("os2chess", "OS2\\APPS\\OS2CHESS.EXE"),
+        ("rxqueue", "OS2\\RXQUEUE.EXE"),
+        ("rxsubcom", "OS2\\RXSUBCOM.EXE"),
+        ("pmrexxio", "OS2\\DLL\\PMREXXIO.DLL"),
+        ("pmrexx", "OS2\\PMREXX.EXE"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
@@ -724,6 +732,7 @@ const HELP_FILES: &[(&str, &str)] = &[
     ("klondike/KLONDIKE.IPF", "OS2\\HELP\\KLONDIKE.HLP"),
     ("mahjongg/MAHJONGG.IPF", "OS2\\HELP\\MAHJONGG.HLP"),
     ("os2chess/OS2CHESS.IPF", "OS2\\HELP\\OS2CHESS.HLP"),
+    ("pmrexxio/PMREXXIO.IPF", "OS2\\HELP\\PMREXXIO.HLP"),
 ];
 
 /// Message files compiled from MKMSGF source in userland/msg (crates/msgf):
@@ -747,6 +756,8 @@ const MSG_FILES: &[(&str, &str, &[u16], (u16, u16))] = &[
     ("ULSCAU01.TXT", "OS2\\SYSTEM\\ULSCAU01.MSG", &[850], (0, 0)),
     ("ULSDET01.TXT", "OS2\\SYSTEM\\ULSDET01.MSG", &[850], (0, 0)),
     ("UCDFS.TXT", "OS2\\SYSTEM\\UCDFS.MSG", &[850], (0, 0)),
+    ("REX.TXT", "OS2\\SYSTEM\\REX.MSG", &[437], (0, 0)),
+    ("REXH.TXT", "OS2\\SYSTEM\\REXH.MSG", &[437], (0, 0)),
 ];
 
 /// The applets' data files in userland/, with their names.
@@ -758,7 +769,7 @@ const APP_DATA: &[(&str, &str)] = &[
 ];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "klondike", "mahjongg", "os2chess"];
+const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "klondike", "mahjongg", "os2chess", "pmrexx"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {

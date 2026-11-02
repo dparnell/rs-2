@@ -1,0 +1,13 @@
+[package]
+name = "pmrexx"
+description = "PMREXX.EXE: runs a REXX procedure in a Presentation Manager window (PMREXXIO.DLL)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmrexx"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

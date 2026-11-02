@@ -1,0 +1,15 @@
+[package]
+name = "rexx-dll"
+description = "REXX.DLL: the REXX interpreter (RexxStart, RexxVariablePool, RexxSetHalt/RexxSetTrace/RexxResetTrace) on crates/rexx"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rexx"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+rexx = { path = "../../crates/rexx" }
+thunk16 = { path = "../thunk16" }

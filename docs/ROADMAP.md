@@ -259,7 +259,11 @@ Status markers: done, in progress, planned.
   for HPFS and JFS, FORMAT /P
 - planned: UNDELETE with deleted-file tracking (DELDIR), LVM volumes over
   several partitions and Boot Manager; Cyrillic/Greek/Hebrew keyboard
-  layouts; REXX
+  layouts
+- done: rs2's own classic REXX (REXX.DLL, REXXAPI.DLL, REXXINIT.DLL,
+  REXXUTIL.DLL, RXQUEUE, RXSUBCOM, PMREXX/PMREXXIO, REXXTRY, REX.MSG),
+  binary compatible with IBM's (IBM's CMD runs procedures on it); see
+  [REXX.md](REXX.md)
 
 ## Milestone 4: Presentation Manager (largely done)
 

@@ -2,6 +2,12 @@
 //! the REXX interpreter (REXX.DLL, when installed) instead of as a batch
 //! file. Commands in the procedure come back to this shell through the
 //! "CMD" subcommand environment.
+//!
+//! REXX changes environment variables (VALUE(..., 'OS2ENVIRONMENT'),
+//! SETLOCAL) in the process's environment block, as OS/2's REXX does; the
+//! shell keeps its variables in a list of its own, so it writes them to
+//! the block before the procedure and around each command it runs for it,
+//! and reads them back afterwards.
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -33,6 +39,84 @@ type RegisterSubcomExe = unsafe extern "C" fn(name: *const u8, handler: usize, u
 
 const RXCOMMAND: i32 = 0;
 
+fn pib() -> *mut Pib {
+    let mut tib: *mut Tib = null_mut();
+    let mut pib: *mut Pib = null_mut();
+    unsafe { DosGetInfoBlocks(&mut tib, &mut pib) };
+    pib
+}
+
+/// Length of the variables part of an environment block (up to and with
+/// its final zero).
+fn block_len(e: *const u8) -> usize {
+    let mut n = 0;
+    unsafe {
+        while !(*e.add(n) == 0 && (n == 0 || *e.add(n - 1) == 0)) {
+            n += 1;
+        }
+    }
+    n + 1
+}
+
+/// Read the shell's variables back from the process's environment block.
+fn env_from_block(sh: &mut Shell) {
+    let p = pib();
+    if p.is_null() || unsafe { (*p).pchenv }.is_null() {
+        return;
+    }
+    let e = unsafe { (*p).pchenv };
+    let n = block_len(e);
+    let b = unsafe { core::slice::from_raw_parts(e, n) };
+    sh.env.clear();
+    for v in b.split(|&c| c == 0).filter(|v| !v.is_empty()) {
+        let s: String = v.iter().map(|&c| c as char).collect();
+        if let Some((k, val)) = s.split_once('=') {
+            sh.env.push((k.to_ascii_uppercase(), val.into()));
+        }
+    }
+}
+
+/// Write the shell's variables into the process's environment block (in
+/// place when they fit, else in a new block the PIB points to); the
+/// program name and arguments after the variables are kept.
+fn env_to_block(sh: &Shell) {
+    let p = pib();
+    if p.is_null() || unsafe { (*p).pchenv }.is_null() {
+        return;
+    }
+    let e = unsafe { (*p).pchenv } as *mut u8;
+    let old = block_len(e);
+    // the tail: program path, then the program name and arguments
+    let mut tail = 0;
+    let mut zeros = 0;
+    while zeros < 4 && tail < 4096 {
+        if unsafe { *e.add(old + tail) } == 0 {
+            zeros += 1;
+        }
+        tail += 1;
+    }
+    let nb = sh.env_block();
+    let (mut size, mut flags) = (0u32, 0u32);
+    unsafe { DosQueryMem(e, &mut size, &mut flags) };
+    let t: Vec<u8> = unsafe { core::slice::from_raw_parts(e.add(old), tail).to_vec() };
+    if (nb.len() + tail) as u32 <= size {
+        unsafe {
+            core::ptr::copy_nonoverlapping(nb.as_ptr(), e, nb.len());
+            core::ptr::copy_nonoverlapping(t.as_ptr(), e.add(nb.len()), t.len());
+        }
+    } else {
+        let mut np: *mut u8 = null_mut();
+        if unsafe { DosAllocMem(&mut np, (nb.len() + tail + 16384) as u32, PAG_COMMIT | PAG_READ | PAG_WRITE) } != 0 {
+            return;
+        }
+        unsafe {
+            core::ptr::copy_nonoverlapping(nb.as_ptr(), np, nb.len());
+            core::ptr::copy_nonoverlapping(t.as_ptr(), np.add(nb.len()), t.len());
+            (*p).pchenv = np;
+        }
+    }
+}
+
 /// The shell running the current procedure (for the subcommand handler).
 static mut SHELL: *mut Shell = null_mut();
 
@@ -43,12 +127,15 @@ extern "C" fn subcom(cmd: *const RxString, flags: *mut u16, ret: *mut RxString) 
         let line: String = core::slice::from_raw_parts((*cmd).ptr, (*cmd).len as usize).iter().map(|&b| b as char).collect();
         let rc = match SHELL.as_mut() {
             Some(sh) => {
+                env_from_block(sh);
                 sh.run_line(&line);
+                env_to_block(sh);
                 sh.rc
             }
             None => 1,
         };
-        *flags = 0; // RXSUBCOM_OK
+        // RXSUBCOM_ERROR when the command failed, as IBM's CMD reports it
+        *flags = (rc != 0) as u16;
         let text = alloc::format!("{rc}");
         // REXX supplies a 256-byte buffer.
         if !(*ret).ptr.is_null() {
@@ -107,11 +194,15 @@ pub fn run(sh: &mut Shell, path: &str, args: &str) -> bool {
     let mut result = RxString { len: 0, ptr: null_mut() };
     let prev = unsafe { SHELL };
     unsafe { SHELL = sh as *mut Shell };
+    env_to_block(sh);
     let r = unsafe { start(1, &mut arg, name.as_ptr(), null_mut(), b"CMD\0".as_ptr(), RXCOMMAND, null_mut(), &mut rc, &mut result) };
     unsafe { SHELL = prev };
+    env_from_block(sh);
     if !result.ptr.is_null() {
         unsafe { DosFreeMem(result.ptr) };
     }
-    sh.rc = if r < 0 { (-r) as u32 } else { rc as u16 as u32 };
+    // an error ends the procedure with its negative number (IBM's CMD:
+    // 65501 for -35)
+    sh.rc = if r < 0 { r as i16 as u16 as u32 } else { rc as u16 as u32 };
     true
 }

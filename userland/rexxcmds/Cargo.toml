@@ -1,0 +1,9 @@
+[package]
+name = "rexxcmds"
+description = "RXQUEUE.EXE and RXSUBCOM.EXE: REXX's queue filter and subcommand environment registration commands"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

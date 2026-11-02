@@ -1,0 +1,133 @@
+; REX.MSG: rs2's REXX messages (MKMSGF source, code page 437). The numbers
+; and their meanings are those REXX programs and tools expect; the wording
+; is rs2's own. Messages 1-99 are REXX error numbers: REXX.DLL inserts
+; message 100 ("Error n running ...") as %1, so a report reads
+; "REX0035: Error 35 running C:\X.CMD, line 3: The expression is not valid".
+REX
+REX0000W:
+REX0001W: %1No more files can be opened%2
+REX0002W:
+REX0003W: %1The program cannot be read%2
+REX0004W: %1The program was interrupted%2
+REX0005W: %1System resources are exhausted%2
+REX0006W: %1A comment or a quoted string is not closed%2
+REX0007W: %1SELECT needs a WHEN or OTHERWISE clause here%2
+REX0008W: %1THEN or ELSE is not expected here%2
+REX0009W: %1WHEN or OTHERWISE is not expected here%2
+REX0010W: %1END does not match a DO or SELECT%2
+REX0011W: %1Routines or loops are nested too deeply%2
+REX0012W: %1A clause is too long%2
+REX0013W: %1The program contains a character that is not allowed%2
+REX0014W: %1A DO, SELECT or IF instruction is not complete%2
+REX0015W: %1A hexadecimal or binary string is not valid%2
+REX0016W: %1The label cannot be found%2
+REX0017W: %1PROCEDURE is not allowed here%2
+REX0018W: %1IF or WHEN needs THEN%2
+REX0019W: %1A string or symbol is needed here%2
+REX0020W: %1A symbol is needed here%2
+REX0021W: %1The clause has extra data at its end%2
+REX0022W: %1A character string is not valid%2
+REX0023W: %1A data string is not valid%2
+REX0024W: %1The TRACE setting is not valid%2
+REX0025W: %1A sub-keyword is not valid here%2
+REX0026W: %1A whole number is needed%2
+REX0027W: %1The DO instruction is not valid%2
+REX0028W: %1LEAVE or ITERATE is not inside a matching loop%2
+REX0029W: %1The environment name is too long%2
+REX0030W: %1A name or string is too long%2
+REX0031W: %1A variable name cannot start with a digit or a period%2
+REX0032W:
+REX0033W: %1The result of an expression is not valid here%2
+REX0034W: %1A logical value must be 0 or 1%2
+REX0035W: %1The expression is not valid%2
+REX0036W: %1A parenthesis is not closed%2
+REX0037W: %1A comma or closing parenthesis is not expected here%2
+REX0038W: %1The parsing template is not valid%2
+REX0039W: %1The expression is too complex%2
+REX0040W: %1A routine was called incorrectly%2
+REX0041W: %1A value used in arithmetic is not a number%2
+REX0042W: %1An arithmetic result is too large or too small%2
+REX0043W: %1The routine cannot be found%2
+REX0044W: %1The function returned no result%2
+REX0045W: %1A function must return a result%2
+REX0046W: %1The variable reference is not valid%2
+REX0047W: %1A label is not allowed here%2
+REX0048W: %1A system service failed%2
+REX0049W: %1Internal interpreter error%2
+REX0050W:
+REX0051W:
+REX0052W:
+REX0053W:
+REX0054W:
+REX0055W:
+REX0056W:
+REX0057W:
+REX0058W:
+REX0059W:
+REX0060W:
+REX0061W:
+REX0062W:
+REX0063W:
+REX0064W:
+REX0065W:
+REX0066W:
+REX0067W:
+REX0068W:
+REX0069W:
+REX0070W:
+REX0071W:
+REX0072W:
+REX0073W:
+REX0074W:
+REX0075W:
+REX0076W:
+REX0077W:
+REX0078W:
+REX0079W:
+REX0080W:
+REX0081W:
+REX0082W:
+REX0083W:
+REX0084W:
+REX0085W:
+REX0086W:
+REX0087W:
+REX0088W:
+REX0089W:
+REX0090W:
+REX0091W:
+REX0092W:
+REX0093W:
+REX0094W:
+REX0095W:
+REX0096W:
+REX0097W:
+REX0098W:
+REX0099W:
+REX0100I: Error %3 running %2, line %1: %0
+REX0101I: %0
+REX0102W: January
+REX0103W: February
+REX0104W: March
+REX0105W: April
+REX0106W: May
+REX0107W: June
+REX0108W: July
+REX0109W: August
+REX0110W: September
+REX0111W: October
+REX0112W: November
+REX0113W: December
+REX0114W: %1Interactive trace is on: TRACE OFF ends it, ENTER goes on.%2
+REX0115W: RXSUBCOM: the parameters are not correct.
+REX0116W: RXSUBCOM: the REGISTER parameters are not correct.
+REX0117W: RXSUBCOM: the DROP parameters are not correct.
+REX0118W: RXSUBCOM: the LOAD parameters are not correct.
+REX0119W: The REXX queue system is not set up.
+REX0120E: The data has the wrong size.
+REX0121E: There is no more storage for data queues.
+REX0122E: %1 is not a valid queue name.
+REX0123E: The queue access mode is not valid.
+REX0124E: Queue %1 does not exist.
+REX0125W: RXSUBCOM: the QUERY parameters are not correct.
+REX0126I: Error %1 in interactive trace: %0
