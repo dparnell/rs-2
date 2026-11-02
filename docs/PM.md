@@ -2526,7 +2526,68 @@ IBM's editor writes on saving, more than one level of undo.
 
 ### Locale (GLOCALE.EXE)
 
-(to come)
+`userland/glocale`, on rs2's LIBUNI and UCONV
+([Locales](#locales-libuni-and-uconv)). As IBM's (studied in GLOCALE.EXE
+and GLOCMRI.DLL): the **Country Palette** window (300 by 260 pels where
+the shell puts programs) shows the user locales (`UniQueryLocaleList`)
+as globe icons in an icon-view container with an empty title line; on
+the first start the process's locale (the first name of
+`UniQueryLocaleObject(LC_ALL)` of the empty spec) is made a user locale
+and written (`UniMakeUserLocale`, `UniCompleteUserLocale`: USER.LOC).
+The menu bar (Locale: Open as > New locale / Locale, Exit Country
+Palette; Action: Create java locale, Delete..., Mark as default...; Help)
+and a locale's pop-up menu (Open as, Properties, Help, Create another,
+Create java locale, Delete..., Mark as default...) have IBM's ids.
+- **The notebook** (one window, made hidden at start and reused, titled
+  "Locale Configuration - name") is a tabbed notebook with IBM's eight
+  pages and dialog ids: Country/Region (the name, the base locale with
+  the language and country names from `UniQueryLanguageName` /
+  `UniQueryCountryName`, measurement, list separator), Collate
+  (sCollate's collations), Numeric (decimal and grouping symbols, signs,
+  digits, the negative format as samples such as `-1,000.11`), Monetary
+  (symbol, its placement and the sixteen negative formats as samples
+  such as `($1,000.11)`, digits, separators, leading zero), Date (the
+  four orders, separator, format string, today's date through
+  `UniStrftime`), Time (12/24 hours, AM/PM strings, separator, format
+  string, the time now, updated every second), Language (sLanguageID)
+  and Advanced (every item by its LOCI name, its value editable). Each
+  change is a `UniSetUserLocaleItem` at once and the page is filled
+  again from the locale (the date order and the clock rebuild sShortDate
+  and sTimeFormat with the separator, as IBM's; a time format strftime
+  cannot use is not taken); choosing another base locale makes the
+  locale again on it (`UniMakeUserLocale` with the base marked 0xFF00).
+  The notebook's buttons (`BKM_SETNOTEBOOKBUTTONS`, where IBM's pages
+  carry BS_NOTEBOOKBUTTON buttons, which rs2's notebook does not move
+  into its button area): Undo puts back the items the locale had when
+  the notebook opened, Default makes it again on its base, Help shows
+  the top page's panel (`BKN_HELP`). Closing writes USER.LOC.
+- **Create another** asks for a name (IBM's "Locale Name" dialog, 112)
+  and makes a user locale on the selected one's base (sName); a system
+  locale's name makes an override of that locale (ULS_BADOBJECT, then
+  the name as its own base), as IBM's; errors use IBM's texts in a
+  "Country Palette Error" box. The new locale's notebook opens.
+- **Delete** deletes the user locale (no question, as IBM's); deleting
+  the last one says "Restoring system default locale" and makes the
+  system's locale a user locale again.
+- **Mark as default** writes the locale's national settings to OS2.INI
+  `PM_National` and `PM_Default_National` (iCountry, iMeasurement,
+  iDate, iCurrency, iDigits, iTime, iLzero, s1159, s2359, sCurrency,
+  sThousand, sDecimal, sDate, sTime, sList), `\LANGUAGE\LOCALE\DEFAULT.LOC`
+  and, with WIN-OS/2 installed (`PM_INSTALL WINOS2_LOCATION`), WIN.INI's
+  [intl]. IBM's also tells the UNICODE$ driver the default code page and
+  country; rs2 has no such driver.
+- **Create java locale** says the Java locale was not created (rs2 has
+  no Java runtime).
+- Help: GLOCALE.HLP (rs2's text), with IBM's panel numbers for the
+  windows and pages (5010 the palette, 5020 the name dialog, 5030-5100
+  the pages) and rs2's 5011-5019 for the menu items.
+
+`GLOCALE /SELFTEST` checks the samples and format strings, makes a user
+locale on de_DE and changes it as the pages do (date order, clock,
+currency, measurement), checks the items, the date and time samples and
+USER.LOC, Default, the system-name rule and Mark as default (OS2.INI,
+DEFAULT.LOC), then deletes it: `cargo xtask run --init "OS2\GLOCALE.EXE
+/SELFTEST"` prints `glocale selftest done: 0 failure(s)`.
 
 ### Klondike Solitaire (KLONDIKE.EXE)
 
