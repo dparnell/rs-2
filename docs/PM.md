@@ -2434,7 +2434,60 @@ are IBM's numbers (CLIPOS2.HLP).
 
 ### Check Disk and Format (PMCHKDSK.EXE, PMFORMAT.EXE)
 
-(to come)
+`userland/pmchkdsk` and `userland/pmformat`, the windows a drive's
+"Check disk" and "Format disk" items start (`PMCHKDSK X:`, `PMFORMAT
+X:`). Like IBM's, both are front ends for the command-line tools: they
+run `CHKDSK.COM` or `FORMAT.COM` (found in `\OS2`, then along PATH;
+`.EXE` also does) with `/P`, standard input and output on pipes
+(`pmchkdsk/src/child.rs`, which pmformat includes: the handles 0 and 1
+pointed at the pipes for the start, the tool's lines read on a thread
+and posted to the dialog), and the tool reports as `MSG_<number>,<params>`
+lines numbered as OSO001.MSG, which the window turns into its display,
+questions (answered with a line `Y`, `N` or empty) and error boxes;
+every other line is ignored. The texts shown are rs2's own.
+
+- **Check Disk**: "Check Disk - X:" (IBM's dialog 100: "Write
+  corrections to disk", Check, Cancel, Help) runs `CHKDSK.COM X: [/F]
+  /P`. Results come from 1507 (file system), 1361-1365/1368/1819 (bytes:
+  total, bad, hidden, directories, files, free, EAs) or 568-571/632/633
+  (kilobytes); questions 1356, 1315, 1346 and 1820 are asked Yes/No;
+  errors (26, 108, 544-552, 565, 566, 589, 1210, 1341) are shown at once,
+  corrections (553-592...) together at the end. Then "Check Disk -
+  Results - X:" (dialog 900): the file system, total and available
+  bytes, and the "Current Disk Usage" pie (a `PieChart` window drawn with
+  `GpiPartialArc` areas and a shadow; slices counter-clockwise from 0
+  degrees for directories, user files, bad blocks, EAs and reserved
+  space; the free space is the slice left out), the legend naming only
+  the parts there are, each in its slice's colour (PP_FOREGROUNDCOLOR).
+- **Format** chooses IBM's dialog by the drive (`DSK_GETDEVICEPARAMS`:
+  attribute bit 0 fixed, device type 8 optical, 0/1/7 with the
+  cylinders and sectors per track for diskettes), all titled "Format
+  Disk X:": a hard disk (5001) the volume label and HPFS/JFS/FAT (the
+  current one selected), a diskette (100) the label and a capacity spin
+  button with the sizes the drive takes, an optical disk (903) "Long
+  format", another removable disk (902) the label only. Format runs
+  `FORMAT.COM X: /P /V:"label"` plus `/FS:HPFS|JFS|FAT`, or `/ONCE` and
+  `/F:size` or `/L`, under "Disk X: - Format Progress" (dialog 900): a
+  slider with 0/50/100 scale texts set from 538/1312 (percent) and
+  635/1294 (complete), the total space from 568 (KB) or 1283, the space
+  available from 537 (KB) or 1286, which also ends the formatting (OK
+  enabled and default, Stop disabled); 1271 (proceed?) is answered `Y`,
+  1288 (press Enter) with an empty line, 1309 (may take 20 minutes) asks
+  OK/Cancel; errors (19, 123, 525-540, 1210, 1274-1319, 1509) are shown.
+  Stop ends FORMAT. rs2 asks once more than IBM's program before a hard
+  disk is formatted ("All the data on drive X: will be lost").
+  `RS2FORMATTEST=script.cmd` in the environment runs the script under
+  CMD.EXE in FORMAT's place (to test the window without a disk).
+
+Help tables as IBM's (PMCHKDSK.HLP: 8061, 8068; PMFORMAT.HLP: 8063,
+8069, 8072, 8677, 8678; IBM keeps these panels in WPHELP.HLP).
+`PMCHKDSK /SELFTEST` and `PMFORMAT /SELFTEST` check the line parsing,
+the results, the command lines and the drive kinds. Checked in QEMU:
+CHKDSK of C: with and without /F to the Results window, the Format
+dialog of a FAT test disk, its help, the progress window through
+`RS2FORMATTEST` to its finished state, and FORMAT's failure being
+reported. Not done: rs2's FORMAT has no `/P` yet (so the window reports
+it failed), nor `/F:` (diskettes); the slider's "100" is clipped.
 
 ### Picture Viewer (PICVIEW.EXE)
 
