@@ -1,0 +1,9 @@
+[package]
+name = "mkmsgf"
+description = "OS/2 message file compiler (IBM MKMSGF's syntax) and decompiler"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+msgf = { path = "../../crates/msgf" }

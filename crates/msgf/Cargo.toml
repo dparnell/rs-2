@@ -1,0 +1,8 @@
+[package]
+name = "msgf"
+description = "no_std OS/2 message files (.MSG): MKMSGF's compiler from .TXT source, a reader and a decompiler"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
