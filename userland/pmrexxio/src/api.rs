@@ -149,6 +149,13 @@ unsafe extern "C" {
     #[link_name = "PMGPI.606"]
     pub fn DevQueryCaps(hdc: u32, start: i32, n: i32, out: *mut i32) -> u32;
 
+    #[link_name = "PMGPI.598"]
+    pub fn GpiCreateBitmap(hps: u32, hdr: *const u8, init: u32, bits: *const u8, info: *const u8) -> u32;
+    #[link_name = "PMGPI.371"]
+    pub fn GpiDeleteBitmap(hbm: u32) -> u32;
+    #[link_name = "PMWIN.942"]
+    pub fn WinCreatePointerIndirect(desk: u32, pi: *const u32) -> u32;
+
     #[link_name = "HELPMGR.51"]
     pub fn WinCreateHelpInstance(hab: u32, init: *mut HelpInit) -> u32;
     #[link_name = "HELPMGR.52"]
@@ -196,6 +203,7 @@ pub const WM_CLOSE: u32 = 0x0029;
 pub const WM_INITDLG: u32 = 0x003b;
 pub const WM_SAVEAPPLICATION: u32 = 0x003e;
 pub const WM_UPDATEFRAME: u32 = 0x0042;
+pub const WM_SETICON: u32 = 0x0047;
 pub const WM_ERASEBACKGROUND: u32 = 0x004f;
 pub const WM_BUTTON1DBLCLK: u32 = 0x0073;
 pub const WM_BUTTON2DBLCLK: u32 = 0x0076;

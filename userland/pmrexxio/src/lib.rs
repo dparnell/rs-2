@@ -22,6 +22,7 @@ extern crate alloc;
 extern crate os2;
 
 mod api;
+mod icon;
 mod ids;
 mod tpl;
 
@@ -298,7 +299,7 @@ extern "C" fn create_io_window(owner: u32, client: *mut u32) -> u32 {
     }
     // IBM's: title bar, system menu, menu, sizing border, minimize and
     // maximize, icon, shell position, task list; rs2's modules have no
-    // resources, so the menu is made here and there is no icon.
+    // resources, so the menu and the icon are made here.
     let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINBUTTON | FCF_MAXBUTTON | FCF_SHELLPOSITION | FCF_TASKLIST;
     let mut hclient = 0;
     let frame = unsafe { WinCreateStdWindow(owner, 0, &mut fcf, CLASS.as_ptr(), core::ptr::null(), WS_VISIBLE, hmod, RXHOST_WIN as u32, &mut hclient) };
@@ -308,6 +309,10 @@ extern "C" fn create_io_window(owner: u32, client: *mut u32) -> u32 {
     let menu = tpl::action_bar();
     unsafe { WinCreateMenu(frame, menu.as_ptr()) };
     send(frame, WM_UPDATEFRAME, FCF_MENU, 0);
+    let icon = icon::make();
+    if icon != 0 {
+        send(frame, WM_SETICON, icon, 0);
+    }
     unsafe { WinSetWindowText(WinWindowFromID(frame, FID_TITLEBAR), string(1).as_ptr()) };
     if !client.is_null() {
         unsafe { *client = hclient };
