@@ -302,10 +302,62 @@ and pmwp.sym/som.sym):
   override them. `somMergeInto` moves the registry and makes the target
   `SOMClassMgrObject`; the old manager forwards to it.
 
-Not done: `inherit_vars` without a bit for a parent (abstract
-inheritance) is treated as inheriting everything. Class unloading
-(`somUnloadClassFile`) only unregisters. `somCastObj`/`somResetObj`
-return FALSE, and somCreateDynamicClass returns NULL.
+- **Abstract inheritance.** A parent whose `inherit_vars` bit is clear
+  gives only its interface: none of its data (nor its ancestors', unless
+  another parent passes them on), its methods (SOMObject's too) run a
+  stub that raises SOMError 20059, and the class's initializers and
+  destructor skip it; without the first parent's bit the class's own
+  block and data come first. Data tokens for such a class raise 20109
+  (twice, as IBM's). Instance sizes are where the last data ends (not
+  rounded up); somGetInstanceOffset is 0. Overriding a method the class
+  does not have fails somBuildClass (20169, class freed).
+- **Casting.** somCastObj gives the object a cast class ("Dog->Animal",
+  made by the private somCloneClass once per ancestor, not registered)
+  whose methods are the ancestor's; somResetObj (or a cast to the true
+  class) puts the true class back. These go through IBM's private
+  SOMClass methods somCastObjCls, somResetObjCls, _get_somTrueClass and
+  _get_somCastedClass.
+- **Unregistering and unloading.** Registry entries count the
+  registered classes that have the class as a parent or metaclass (it
+  then cannot be unregistered: 1) and mark persistent classes
+  (somBegin/EndPersistentClasses). The classes registered while
+  somLoadClassFile loads a DLL, or somRegisterClassLibrary initializes
+  one, form an affinity group led by the class that caused it
+  (somGetRelatedClasses; somJoinAffinityGroup). somUnregisterClass frees
+  the class object (SOMClass's somUninit clears its ClassData, so
+  `<Class>NewClass` builds it again); the leader unloads its whole group
+  and somUnloadClassFile frees the DLL (SOMDeleteModule; -2 when there
+  was none). Registered classes are listed newest first.
+- **The private methods.** SOMClass's somcPrivateN entries are IBM's
+  real methods, under IBM's names: somGetMethodOffset,
+  somSetMethodDescriptor, somCloneClass, somLookupTerminal,
+  set_somDirectInitClasses, the instance init/destruction/assignment
+  masks, the cast methods above, somRegLPMToken, somAddMethod,
+  _get/_set_somCClassData, the class data order and entries (IBM's
+  index stride, (n+1)*32, kept), _get_somDirectAssignClasses,
+  setUserPCallDispatch, _get_somClassAllocate/Deallocate; SOMClassMgr's
+  are somReleaseClasses and somRegisterThreadUsage.
+- **Redispatch.** somGetRdStub makes a redispatch stub (it calls the
+  object's somDispatch with a va_list) when the compiler gave none;
+  somOverrideMtab routes every static method but somDispatch through
+  them. somDispatch and somClassDispatch take the method from the
+  class's somGetMethodData through its token and call somApply, and
+  somGetClassName/somIsA/somRespondsTo ask the class through its tokens,
+  so metaclasses can answer instead: SOMU.DLL's cooperative metaclasses
+  (SOMMBeforeAfter with its sister classes, SOMMTraced) work.
+  somCreateDynamicClass (`_Optlink` in IBM's DLL: className, parentName,
+  file, major, minor) makes a data-less subclass that way.
+- **The interface repository.** somLocateClassFile asks the repository's
+  `lookup_modifier(class, "dllname")` once there is one (made from
+  SOMIR.DLL's Repository, or when SOMIR is set), falling back to the
+  class name; _get_somInterfaceRepository hands out a copy. (IBM's
+  SOMIR.DLL on rs2's SOM still answers nothing there: not yet found why.)
+
+Not done: SOMObject's private somComputeForwardVisitMask and
+somComputeReverseVisitMask; somSubstituteClass only redirects lookups
+(IBM's also rewrites the replaced class's ClassData); a class built again
+under a registered name replaces it (IBM's reuses the class object);
+SOM's own methods have no method descriptors.
 
 **Tests.** `RS2\SOMTEST.EXE` builds classes from layout-4 static class
 information as compiler output does. It covers:
@@ -314,10 +366,20 @@ information as compiler output does. It covers:
 - multiple inheritance with a shared base, and a derived metaclass;
 - ids, dispatch by name, and the class manager.
 
-It passes on both rs2's and IBM's SOM.DLL. Run it from a directory that
-holds IBM's DLL; LIBPATH starts with `.`. IBM's SOM showed the
-destruction order, and that it requires method descriptors and an
-`inherit_vars` bit per parent.
+It also checks abstract inheritance, casting, unregistering (subclasses,
+metaclasses, persistent classes, ClassData cleared and the class built
+again, somUnloadClassFile) and somCreateDynamicClass. It passes on both
+rs2's and IBM's SOM.DLL. Run it from a directory that holds IBM's DLL;
+LIBPATH starts with `.`, but **each DLL needs its own boot**: rs2's
+loader keeps using the SOM.DLL first loaded in the system, whatever the
+next program's directory. IBM's SOM showed the destruction order and
+the behaviour of all the above.
+
+`SOMTEST BA` (with IBM's SOMU.DLL, SOMTC.DLL and SOMIR.DLL in the
+directory) builds a class whose metaclass is derived from SOMU's
+SOMMBeforeAfter and checks that its method runs between the before and
+after methods. `SOMTEST IR class...` (with SOMIR set) shows the DLL
+somLocateClassFile finds for each class.
 
 `SOMTEST LOAD dll class` loads a class library through the class
 manager and makes an instance. IBM's SOMU.DLL classes (SOMUTStringId,
