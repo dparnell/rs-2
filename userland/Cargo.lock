@@ -85,6 +85,14 @@ name = "fat"
 version = "0.1.0"
 
 [[package]]
+name = "glocale"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+]
+
+[[package]]
 name = "gpi"
 version = "0.1.0"
 
@@ -116,6 +124,14 @@ name = "hpfs"
 version = "0.1.0"
 
 [[package]]
+name = "iconedit"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+]
+
+[[package]]
 name = "inifile"
 version = "0.1.0"
 
@@ -145,6 +161,14 @@ name = "jfs"
 version = "0.1.0"
 
 [[package]]
+name = "klondike"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+]
+
+[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -156,6 +180,14 @@ version = "0.1.0"
 dependencies = [
  "os2",
  "uls",
+]
+
+[[package]]
+name = "mahjongg"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
 ]
 
 [[package]]
@@ -203,6 +235,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "mpcpumon"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+]
+
+[[package]]
 name = "nbtest"
 version = "0.1.0"
 dependencies = [
@@ -229,10 +269,34 @@ name = "os2-pack"
 version = "0.1.0"
 
 [[package]]
+name = "os2chess"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+]
+
+[[package]]
+name = "picview"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+]
+
+[[package]]
 name = "pmbidi-dll"
 version = "0.1.0"
 dependencies = [
  "os2",
+]
+
+[[package]]
+name = "pmchkdsk"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
 ]
 
 [[package]]
@@ -255,6 +319,14 @@ version = "0.1.0"
 dependencies = [
  "os2",
  "pmwin",
+]
+
+[[package]]
+name = "pmformat"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
 ]
 
 [[package]]
@@ -307,6 +379,14 @@ name = "pmprint-qpr"
 version = "0.1.0"
 dependencies = [
  "os2",
+]
+
+[[package]]
+name = "pmseek"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
 ]
 
 [[package]]

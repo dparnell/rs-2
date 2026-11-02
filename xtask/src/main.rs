@@ -634,13 +634,35 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("win16", "OS2\\DLL\\WIN16.DLL"),
         // rs2's own PM applets (userland/pmkit is what they share).
         ("clipos2", "OS2\\CLIPOS2.EXE"),
+        ("mpcpumon", "OS2\\MPCPUMON.EXE"),
+        ("pmchkdsk", "OS2\\PMCHKDSK.EXE"),
+        ("pmformat", "OS2\\PMFORMAT.EXE"),
+        ("iconedit", "OS2\\ICONEDIT.EXE"),
+        ("glocale", "OS2\\GLOCALE.EXE"),
+        ("picview", "OS2\\APPS\\PICVIEW.EXE"),
+        ("pmseek", "OS2\\APPS\\PMSEEK.EXE"),
+        ("klondike", "OS2\\APPS\\KLONDIKE.EXE"),
+        ("mahjongg", "OS2\\APPS\\MAHJONGG.EXE"),
+        ("os2chess", "OS2\\APPS\\OS2CHESS.EXE"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
-const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP"), ("clipos2/CLIPOS2.IPF", "OS2\\HELP\\CLIPOS2.HLP")];
+const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP"),
+    ("clipos2/CLIPOS2.IPF", "OS2\\HELP\\CLIPOS2.HLP"),
+    ("mpcpumon/MPCPUMON.IPF", "OS2\\HELP\\MPCPUMON.HLP"),
+    ("pmchkdsk/PMCHKDSK.IPF", "OS2\\HELP\\PMCHKDSK.HLP"),
+    ("pmformat/PMFORMAT.IPF", "OS2\\HELP\\PMFORMAT.HLP"),
+    ("iconedit/ICONEDIT.IPF", "OS2\\HELP\\ICONEDIT.HLP"),
+    ("glocale/GLOCALE.IPF", "OS2\\HELP\\GLOCALE.HLP"),
+    ("picview/PICVIEW.IPF", "OS2\\HELP\\PICVIEW.HLP"),
+    ("pmseek/PMSEEK.IPF", "OS2\\HELP\\PMSEEK.HLP"),
+    ("klondike/KLONDIKE.IPF", "OS2\\HELP\\KLONDIKE.HLP"),
+    ("mahjongg/MAHJONGG.IPF", "OS2\\HELP\\MAHJONGG.HLP"),
+    ("os2chess/OS2CHESS.IPF", "OS2\\HELP\\OS2CHESS.HLP"),
+];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "clipos2"];
+const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "clipos2", "mpcpumon", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "klondike", "mahjongg", "os2chess"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {

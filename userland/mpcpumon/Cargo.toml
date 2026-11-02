@@ -1,0 +1,14 @@
+[package]
+name = "mpcpumon"
+description = "MPCPUMON.EXE: rs2's Pulse (CPU monitor)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "mpcpumon"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+pmkit = { path = "../pmkit" }

@@ -297,6 +297,35 @@ features under `\OS2IMAGE\FI` (system management, printer utilities).
 | CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | works (in Win-OS/2) | Windows 3.1 programs: they run in Win-OS/2 (see below and docs/WINOS2.md), seamless as windows on the PM desktop. Natively (docs/WIN16.md, without Win-OS/2) stage 2 has the controls, dialogs, menus and resources they use, stage 3 COMMDLG, printing, DDE and the clipboard. |
 | ATMCNTRL.EXE, FASTLOAD.EXE (disk 21), PROMIX.EXE, AUDIOVER.EXE | not supported | Also Windows 3.1 programs (NE modules for Windows, importing KERNEL, USER and GDI), not 16-bit PM ones: WIN-OS/2's Adobe Type Manager control panel, its fast loader and multimedia driver utilities. |
 
+### rs2's own versions of the applets
+
+rs2 ships its own programs under IBM's names in IBM's places, with
+their desktop objects ([PM.md](PM.md#rs2s-pm-applets)), so none of
+IBM's files is needed for them; IBM's still run (rows above) when
+copied from the CD.
+
+| rs2's program | Replaces | How far | Checked |
+|---------------|----------|---------|---------|
+| `OS2\CLIPOS2.EXE` | Clipboard Viewer | text, bitmaps, metafiles, owner-drawn data, Render, help | QEMU screenshots |
+
+| `OS2\MPCPUMON.EXE` | Pulse | (to come) | |
+
+| `OS2\PMCHKDSK.EXE`, `OS2\PMFORMAT.EXE` | Check Disk, Format | (to come) | |
+
+| `OS2\APPS\PICVIEW.EXE` | Picture Viewer | (to come) | |
+
+| `OS2\APPS\PMSEEK.EXE` | Seek and Scan Files | (to come) | |
+
+| `OS2\ICONEDIT.EXE` | Icon Editor | (to come) | |
+
+| `OS2\GLOCALE.EXE` | Locale | (to come) | |
+
+| `OS2\APPS\KLONDIKE.EXE` | Klondike Solitaire | (to come) | |
+
+| `OS2\APPS\MAHJONGG.EXE` | Mahjongg | (to come) | |
+
+| `OS2\APPS\OS2CHESS.EXE` | OS/2 Chess | (to come) | |
+
 ## SOM class libraries
 
 IBM's SOM libraries and their users on rs2's SOM.DLL, SOMTC, SOMU and

@@ -2393,6 +2393,77 @@ happens after the drop (posted), and the source hears
 **Not done**: the window's icon, Undo restoring a font or colours (rs2's MLE
 does not undo those), the Set tabs dialog E has but does not offer.
 
+## rs2's PM applets
+
+rs2 has its own versions of the PM programs OS/2 Warp 4.52 installs,
+so a system made only of rs2's files has them all: the Utilities
+folder's (`<WP_TOOLS>`: Picture Viewer, Icon Editor, Clipboard
+Viewer, Seek and Scan Files, Pulse), the drives' Check Disk and Format
+windows, Locale in System Setup and the games (Klondike Solitaire,
+Mahjongg, OS/2 Chess). Each was written after studying IBM's program
+(Ghidra, its resources, running it on rs2) and behaves like it: the
+same menus and commands, dialogs, settings and file formats, and the
+same help panel numbers, so the shell's HELPPANEL= references work;
+the code, the pictures and the help text (IPF, compiled by
+`crates/ipf` into `OS2\HELP`) are rs2's own. They keep no resources:
+menus, dialogs and accelerators are built in memory, as E.EXE's are,
+through `userland/pmkit` (the PM entry points and constants they use,
+menu and dialog templates, help instances made from tables of panel
+numbers, OS2.INI settings, GPI helpers).
+
+### Clipboard Viewer (CLIPOS2.EXE)
+
+`userland/clipos2`. As IBM's: the window is the clipboard viewer
+(`WinSetClipbrdViewer`; a second copy says "Viewer already installed."
+and ends); the title names the format shown, "Clipboard (Text)",
+"Clipboard (empty)"; it follows the clipboard (`WM_DRAWCLIPBOARD`) and
+shows text, a bitmap or a metafile, the display formats first, with
+scroll bars (and the cursor keys) when the content is larger than the
+window. Metafiles are played once without drawing (`RES_RESET`,
+`SUP_SUPPRESS`) to learn their page size, then into a memory bitmap of
+that size. Data whose owner draws it (`CFI_OWNERDISPLAY`) is passed to
+the owner (`WM_PAINTCLIPBOARD`, `WM_SIZECLIPBOARD`, the scroll
+messages). File > Exit; Display > Render lists the formats on the
+clipboard by name (a registered format by its atom's name, else
+"unknown") and shows the one chosen; Help's items and the help panels
+are IBM's numbers (CLIPOS2.HLP).
+
+### Pulse (MPCPUMON.EXE)
+
+(to come)
+
+### Check Disk and Format (PMCHKDSK.EXE, PMFORMAT.EXE)
+
+(to come)
+
+### Picture Viewer (PICVIEW.EXE)
+
+(to come)
+
+### Seek and Scan Files (PMSEEK.EXE)
+
+(to come)
+
+### Icon Editor (ICONEDIT.EXE)
+
+(to come)
+
+### Locale (GLOCALE.EXE)
+
+(to come)
+
+### Klondike Solitaire (KLONDIKE.EXE)
+
+(to come)
+
+### Mahjongg (MAHJONGG.EXE)
+
+(to come)
+
+### OS/2 Chess (OS2CHESS.EXE)
+
+(to come)
+
 ## Installing OS/2's applications (APPINST.EXE)
 
 `C:\OS2\APPINST.EXE` (userland/appinst; "Install OS/2 Applications" in

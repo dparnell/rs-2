@@ -1,0 +1,12 @@
+//! OS2CHESS.EXE: rs2's OS/2 Chess (placeholder).
+
+#![no_std]
+#![no_main]
+
+extern crate alloc;
+
+os2::entry!(main);
+
+fn main(_s: &os2::Startup) -> u32 {
+    0
+}
