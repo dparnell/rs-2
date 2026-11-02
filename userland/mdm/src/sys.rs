@@ -238,9 +238,47 @@ pub fn trace(args: core::fmt::Arguments) {
 }
 
 /// The whole file, read with DosOpen/DosRead.
+unsafe extern "C" {
+    #[link_name = "MMIO.27"]
+    fn mmioOpen(name: *const u8, info: *mut u8, flags: u32) -> u32;
+    #[link_name = "MMIO.28"]
+    fn mmioRead(h: u32, buf: *mut u8, n: i32) -> i32;
+    #[link_name = "MMIO.32"]
+    fn mmioClose(h: u32, flags: u32) -> u32;
+}
+
+/// A compound MMIO name ("A.EXT+ELEMENT": an element of a storage system
+/// whose I/O procedure the extension names, such as IBM's OpenDoc
+/// multimedia parts' ".SU+..." storage unit data), read through MMIO.
+fn read_compound(z: &[u8]) -> Option<alloc::vec::Vec<u8>> {
+    let plus = z.iter().position(|&b| b == b'+')?;
+    if !z[..plus].contains(&b'.') {
+        return None;
+    }
+    // MMIO_READ | MMIO_DENYNONE | MMIO_NOIDENTIFY: the bytes as stored.
+    let h = unsafe { mmioOpen(z.as_ptr(), core::ptr::null_mut(), 0x4 | 0x200 | 0x4_0000) };
+    if h == 0 {
+        return None;
+    }
+    let mut out = alloc::vec::Vec::new();
+    let mut buf = alloc::vec![0u8; 32768];
+    loop {
+        let n = unsafe { mmioRead(h, buf.as_mut_ptr(), buf.len() as i32) };
+        if n <= 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n as usize]);
+    }
+    unsafe { mmioClose(h, 0) };
+    Some(out)
+}
+
 pub fn read_file(name: &str) -> Option<alloc::vec::Vec<u8>> {
     let mut z: alloc::vec::Vec<u8> = name.chars().map(|c| c as u32 as u8).collect();
     z.push(0);
+    if let Some(v) = read_compound(&z) {
+        return Some(v);
+    }
     let (mut h, mut act) = (0u32, 0u32);
     // OPEN_ACTION_OPEN_IF_EXISTS, OPEN_SHARE_DENYWRITE | OPEN_ACCESS_READONLY.
     if unsafe { DosOpen(z.as_ptr(), &mut h, &mut act, 0, 0, 1, 0x20, core::ptr::null_mut()) } != 0 {

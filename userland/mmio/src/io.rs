@@ -287,6 +287,31 @@ fn bad_flags(f: u32) -> bool {
         || (f & MMIO_APPEND != 0 && f & (MMIO_READ | MMIO_CREATE) != 0)
 }
 
+/// The FOURCC of a compound file name's storage system: the extension
+/// of the part before the first '+' ("A.SU+B" -> 'SU  ').
+fn compound_fourcc(name: *const u8) -> Option<u32> {
+    if name.is_null() {
+        return None;
+    }
+    let mut n = 0;
+    while unsafe { *name.add(n) } != 0 && n < 512 {
+        n += 1;
+    }
+    let s = unsafe { core::slice::from_raw_parts(name, n) };
+    let plus = s.iter().position(|&b| b == b'+')?;
+    let file = &s[..plus];
+    let dot = file.iter().rposition(|&b| b == b'.')?;
+    let ext = &file[dot + 1..];
+    if ext.is_empty() || ext.len() > 4 || file[dot + 1..].contains(&b'\\') {
+        return None;
+    }
+    let mut f = [b' '; 4];
+    for (i, &c) in ext.iter().enumerate() {
+        f[i] = c.to_ascii_uppercase();
+    }
+    Some(u32::from_le_bytes(f))
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn mmioOpen(name: *const u8, pinfo: *mut MmioInfo, flags: u32) -> u32 {
     if name.is_null() && pinfo.is_null() {
@@ -311,6 +336,14 @@ pub extern "C" fn mmioOpen(name: *const u8, pinfo: *mut MmioInfo, flags: u32) ->
         return fail(user, err::INVALID_PARAMETER);
     }
     if info.pIOProc == 0 {
+        if info.fccIOProc == 0 {
+            // "NAME.EXT+ELEMENT": the element of a storage system whose
+            // I/O procedure the extension names (IBM's compound names;
+            // MMODPTS's ".SU+..." storage unit elements).
+            if let Some(fcc) = compound_fourcc(name).filter(|&f| procs::find(f).is_some()) {
+                info.fccIOProc = fcc;
+            }
+        }
         if info.fccIOProc == 0 {
             // Identify the file: a file-format procedure that knows it, else DOS.
             if !name.is_null() && flags & (MMIO_CREATE | MMIO_NOIDENTIFY | MMIO_DELETE) == 0 {

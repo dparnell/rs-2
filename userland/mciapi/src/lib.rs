@@ -23,6 +23,9 @@ extern crate alloc;
 extern crate os2;
 
 mod exports;
+mod palette;
+
+pub use palette::mciCreatePlayFilePalette;
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -31,7 +34,7 @@ use os2::*;
 
 unsafe extern "C" {
     #[link_name = "MDM.2"]
-    fn mciSendString(cmd: *const u8, ret: *mut u8, cb: u32, hwnd: u32, user: u32) -> u32;
+    pub(crate) fn mciSendString(cmd: *const u8, ret: *mut u8, cb: u32, hwnd: u32, user: u32) -> u32;
     #[link_name = "MDM.3"]
     fn mciGetErrorString(err: u32, buf: *mut u8, cb: u32) -> u32;
     #[link_name = "MDM.16"]
@@ -101,7 +104,7 @@ fn arg(argv: *const RxString, argc: u32, i: u32) -> Option<String> {
     Some(b.iter().map(|&c| c as char).collect())
 }
 
-fn z(s: &str) -> Vec<u8> {
+pub(crate) fn z(s: &str) -> Vec<u8> {
     let mut v: Vec<u8> = s.chars().map(|c| c as u32 as u8).collect();
     v.push(0);
     v
@@ -212,7 +215,7 @@ pub extern "C" fn mciRxGetDeviceID(_name: *const u8, argc: u32, argv: *const RxS
     ret(r, &alloc::format!("{id}"))
 }
 
-fn cstr(p: *const u8) -> String {
+pub(crate) fn cstr(p: *const u8) -> String {
     let mut s = String::new();
     if p.is_null() {
         return s;
@@ -254,15 +257,3 @@ pub extern "C" fn mciRecordAudioFile(_owner: u32, _file: *const u8, _title: *con
     5018
 }
 
-/// mciCreatePlayFilePalette (IBM's export 25, not in the Toolkit): the
-/// small play/stop palette window MMPM/2's players show for a file (owner,
-/// position, size, styles, a palette-state observer callback, ...); IBM's
-/// MMODPTS.DLL (the OpenDoc parts) opens one for a video. rs2 has none
-/// yet: NULLHANDLE, and the caller goes on without it.
-#[unsafe(no_mangle)]
-pub extern "C" fn mciCreatePlayFilePalette(
-    _owner: u32, _a: u32, _b: u32, _c: u32, _x: i32, _y: i32, _file: *const u8, _d: u32, _e: u32,
-    _observer: usize, _user: usize, _f: u32, _flags: u32, _title: *const u8, _g: u32,
-) -> u32 {
-    0
-}

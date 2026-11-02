@@ -296,9 +296,55 @@ pub extern "C" fn mmioIdentifyFileFormat() -> u32 {
     err::UNSUPPORTED_FUNCTION
 }
 
+/// mmioDetermineSSIOProc(name, info, &fcc, element): the storage system
+/// procedure of a compound name, as IBM's (in MMPM.DLL): the child
+/// procedure the MMIOINFO names, else the extension of the part before
+/// the first '+' ('|' with MMIOINFO flag 0x8000): "A.SU+B" gives 'SU  '
+/// and the element "B". 0 when found, -1 when not.
 #[unsafe(no_mangle)]
-pub extern "C" fn mmioDetermineSSIOProc() -> u32 {
-    err::UNSUPPORTED_FUNCTION
+pub extern "C" fn mmioDetermineSSIOProc(name: *const u8, info: *const crate::MmioInfo, fcc: *mut u32, element: *mut u8) -> u32 {
+    if fcc.is_null() || (name.is_null() && info.is_null()) {
+        return 0x1969; // MMIOERR_INVALID_PARAMETER
+    }
+    unsafe { *fcc = 0 };
+    let mut sep = b'+';
+    if let Some(i) = unsafe { info.as_ref() } {
+        if i.fccChildIOProc != 0 {
+            unsafe { *fcc = i.fccChildIOProc };
+            return 0;
+        }
+        if i.ulFlags & 0x8000 != 0 {
+            sep = b'|';
+        }
+    }
+    if name.is_null() {
+        return u32::MAX;
+    }
+    let mut n = 0;
+    while unsafe { *name.add(n) } != 0 && n < 260 {
+        n += 1;
+    }
+    let s = unsafe { core::slice::from_raw_parts(name, n) };
+    let Some(at) = s.iter().position(|&b| b == sep) else { return u32::MAX };
+    let file = &s[..at];
+    let Some(dot) = file.iter().rposition(|&b| b == b'.') else { return u32::MAX };
+    let ext = &file[dot + 1..];
+    if ext.is_empty() || ext.len() > 4 {
+        return u32::MAX;
+    }
+    let mut f = [b' '; 4];
+    for (i, &c) in ext.iter().enumerate() {
+        f[i] = c.to_ascii_uppercase();
+    }
+    unsafe { *fcc = u32::from_le_bytes(f) };
+    if !element.is_null() {
+        let rest = &s[at + 1..];
+        unsafe {
+            core::ptr::copy_nonoverlapping(rest.as_ptr(), element, rest.len());
+            *element.add(rest.len()) = 0;
+        }
+    }
+    0
 }
 
 #[unsafe(no_mangle)]

@@ -1,12 +1,14 @@
 //! ODSHELL.EXE: a simple OpenDoc document shell on rs2's OPENDOC.DLL.
 //!
-//! `ODSHELL FILE [KIND [DLL CLASS]]` opens the OpenDoc document FILE (rs2's
+//! `ODSHELL FILE [KIND [DLL CLASS [DATAFILE]]]` opens the OpenDoc document FILE (rs2's
 //! container format, docs/OPENDOC.md) in a PM window: the root part's
 //! frame is the window's root frame, its facet the window's root facet,
 //! and the parts draw into the window's presentation space. A FILE that
 //! does not exist is made: its root part is ODSHELL's own RS2TextPart,
 //! holding an embedded part of KIND (another RS2TextPart if none; DLL and
-//! CLASS register a part handler first, as IBM's `RxInstallParts` does).
+//! CLASS register a part handler first, as IBM's `RxInstallParts` does;
+//! with DATAFILE the embedded part is made from that file, as a dropped
+//! file is: `ODSHELL C:\\MM.OD - MMODPTS MMAudioPart C:\\MMOS2\\SOUNDS\\X.WAV`).
 //! Closing the window saves the document.
 
 #![no_std]
@@ -132,6 +134,10 @@ const PROP_TEXT: &[u8] = b"rs2:TextPart:Text\0";
 const PROP_CHILD: &[u8] = b"rs2:TextPart:EmbeddedFrame\0";
 const TYPE_TEXT: &[u8] = b"rs2:Type:Text\0";
 const TYPE_REF: &[u8] = b"rs2:Type:StorageUnitRef\0";
+const PROP_EDITOR: &[u8] = b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Property:PreferredEditor\0";
+const PROP_CONTENTS: &[u8] = b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Property:Contents\0";
+const TYPE_ISOSTR: &[u8] = b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Type:ISOStr\0";
+const TYPE_FILETYPE: &[u8] = b"+//ISO 9070/ANSI::113722::US::CI LABS::OS2:Type:FileType\0";
 const FRAME_TYPE: &[u8] = b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Object:Frame\0";
 const VIEW_FRAME: &[u8] = b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:ViewType:Frame\0";
 const PRES_NORMAL: &[u8] = b"rs2:Presentation:Normal\0";
@@ -529,8 +535,22 @@ fn main(st: &Startup) -> u32 {
     let rf = m(cd!(ODWindowClassData), 1, &[win, e]);
     if new {
         // An embedded part in a frame of its own inside the root frame.
-        let child = m(cd!(ODDraftClassData), 23, &[draft, e, kind.as_ref().map_or(0, |k| k.as_ptr() as usize),
-            if kind.is_some() { 0 } else { b"RS2TextPart\0".as_ptr() as usize }]);
+        let child = match (args.get(3), args.get(4)) {
+            // A part made from a file: its storage unit names its editor
+            // and holds the file name as OS/2 OpenDoc's file contents
+            // (Contents, FileType), the way a dropped file becomes a part;
+            // the part reads it in InitPartFromStorage.
+            (Some(class), Some(file)) => {
+                let su = m(cd!(ODDraftClassData), 6, &[draft, e]);
+                su_set(su, PROP_EDITOR, TYPE_ISOSTR, &z(class));
+                su_set(su, PROP_CONTENTS, TYPE_FILETYPE, &z(file));
+                let id = m(cd!(ODStorageUnitClassData), 11, &[su, e]);
+                release(su);
+                m(cd!(ODDraftClassData), 24, &[draft, e, id])
+            }
+            _ => m(cd!(ODDraftClassData), 23, &[draft, e, kind.as_ref().map_or(0, |k| k.as_ptr() as usize),
+                if kind.is_some() { 0 } else { b"RS2TextPart\0".as_ptr() as usize }]),
+        };
         if child != 0 {
             if somsup::is_a(child, unsafe { RS2TextPartClassData[0] }) {
                 tp(child).text = b"An embedded part".to_vec();
