@@ -7,6 +7,7 @@ use alloc::vec::Vec;
 
 use crate::num::{Num, Numeric};
 use crate::parse::*;
+use crate::value::{ObjRef, Package, Value};
 use crate::vars::{Key, Pools};
 use crate::{CallType, Err, External, Host};
 pub(crate) use crate::run::{cond_index, find, words};
@@ -20,7 +21,7 @@ pub struct State {
     pub pools: Pools,
     pub cur_pool: usize,
     /// The running routine's arguments.
-    pub args: Vec<Option<Val>>,
+    pub args: Vec<Option<Value>>,
     /// PARSE SOURCE of the running program.
     pub source: Val,
     pub streams: crate::stream::Streams,
@@ -69,14 +70,27 @@ impl State {
         let (stem, tail) = self.resolve_name(name, symbolic)?;
         self.nextv = None;
         let key = key_of(&stem, &tail);
-        self.pools.set(self.cur_pool, &key, val);
+        self.pools.set(self.cur_pool, &key, Value::S(val));
         Ok(())
     }
 
     pub fn var_get(&mut self, name: &[u8], symbolic: bool) -> Result<Option<Val>, ()> {
+        Ok(self.var_get_v(name, symbolic)?.map(|v| v.fast_string()))
+    }
+
+    /// A variable's value (objects as they are).
+    pub fn var_get_v(&mut self, name: &[u8], symbolic: bool) -> Result<Option<Value>, ()> {
         let (stem, tail) = self.resolve_name(name, symbolic)?;
         let key = key_of(&stem, &tail);
         Ok(self.pools.get(self.cur_pool, &key))
+    }
+
+    pub fn var_set_v(&mut self, name: &[u8], val: Value, symbolic: bool) -> Result<(), ()> {
+        let (stem, tail) = self.resolve_name(name, symbolic)?;
+        self.nextv = None;
+        let key = key_of(&stem, &tail);
+        self.pools.set(self.cur_pool, &key, val);
+        Ok(())
     }
 
     pub fn var_drop(&mut self, name: &[u8], symbolic: bool) -> Result<(), ()> {
@@ -146,7 +160,7 @@ impl State {
                             tail.extend_from_slice(part);
                         } else {
                             match self.pools.get(self.cur_pool, &Key::Simple(part)) {
-                                Some(v) => tail.extend_from_slice(&v),
+                                Some(v) => tail.extend_from_slice(&v.fast_string()),
                                 None => tail.extend_from_slice(part),
                             }
                         }
@@ -182,6 +196,7 @@ fn key_of<'a>(stem: &'a [u8], tail: &'a Option<Val>) -> Key<'a> {
     }
 }
 
+
 #[derive(Clone, Copy, PartialEq)]
 pub enum TrapState {
     Off,
@@ -196,11 +211,53 @@ pub struct Trap {
     pub label: Vec<u8>,
 }
 
+impl Trap {
+    pub fn off() -> Trap {
+        Trap { state: TrapState::Off, call: false, label: Vec::new() }
+    }
+}
+
+/// The number of conditions with a trap slot (ERROR ... SYNTAX, and Object
+/// REXX's LOSTDIGITS, NOMETHOD, NOSTRING, ANY).
+pub const NCOND: usize = 10;
+
 #[derive(Clone)]
 pub struct CondInfo {
     pub cond: Cond,
+    /// USER conditions: the name.
+    pub user: Option<Name>,
     pub desc: Val,
     pub call: bool,
+    /// ADDITIONAL information.
+    pub add: Option<Value>,
+    /// SYNTAX: the error (major, or major * 1000 + minor).
+    pub code: u32,
+    /// RAISE ... RETURN/EXIT: the result.
+    pub result: Option<Value>,
+    /// RAISE ... EXIT.
+    pub exit: bool,
+    /// SYNTAX: the secondary message.
+    pub msg: Val,
+    pub line: u32,
+    /// The condition object (made when first asked for).
+    pub obj: Option<ObjRef>,
+}
+
+impl CondInfo {
+    pub fn new(cond: Cond, desc: Val) -> CondInfo {
+        CondInfo { cond, user: None, desc, call: false, add: None, code: 0, result: None, exit: false, msg: Vec::new(), line: 0, obj: None }
+    }
+    /// CONDITION('C'): "USER NAME" for user conditions.
+    pub fn name(&self) -> Val {
+        match &self.user {
+            Some(u) => {
+                let mut v = b"USER ".to_vec();
+                v.extend_from_slice(u);
+                v
+            }
+            None => self.cond.name().to_vec(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -210,6 +267,22 @@ pub struct TraceSet {
     pub inhibit: bool,
 }
 
+/// An Object REXX method activation: the message being run.
+pub struct Act {
+    pub recv: Value,
+    /// The class whose method runs, and whether it is a class method.
+    pub scope: Option<ObjRef>,
+    pub class_side: bool,
+    pub name: Vec<u8>,
+    pub args: Vec<Option<Value>>,
+    /// REPLY was run: the value it gave.
+    pub reply: core::cell::RefCell<Option<Option<Value>>>,
+    /// The method holds the object's guard.
+    pub guarded: core::cell::Cell<bool>,
+    /// The object variable pool's place on the pool stack (EXPOSE).
+    pub obj_pool: usize,
+}
+
 /// A routine activation.
 #[derive(Clone)]
 pub struct Frame {
@@ -217,7 +290,9 @@ pub struct Frame {
     pub numeric: Numeric,
     pub trace: TraceSet,
     pub addr: (Val, Val),
-    pub traps: [Trap; 6],
+    pub traps: [Trap; NCOND],
+    /// SIGNAL ON / CALL ON USER conditions.
+    pub utraps: Vec<(Name, Trap)>,
     pub cond: Option<CondInfo>,
     pub base: u32,
     pub internal: bool,
@@ -226,21 +301,55 @@ pub struct Frame {
     pub calltype: CallType,
     pub name: Val,
     pub elapsed: Option<u64>,
-    pub pending: Vec<(Cond, Val)>,
+    pub pending: Vec<CondInfo>,
     /// Interactive trace: clauses to skip pausing for.
     pub skip: i64,
+    /// Object REXX: the method being run.
+    pub act: Option<Rc<Act>>,
+    /// Object REXX: the package (classes, routines) of the code.
+    pub pkg: Option<Rc<Package>>,
+    /// EXPOSE (and USE, then GUARD) may still come.
+    pub expose_ok: bool,
+    /// The outermost program: untrapped errors are reported here.
+    pub top: bool,
 }
 
+impl Frame {
+    pub fn new(prog: Rc<Program>, name: &[u8], env: &[u8], calltype: CallType, pool_len: usize) -> Frame {
+        Frame {
+            prog,
+            numeric: Numeric::default(),
+            trace: TraceSet { opt: b'N', interactive: false, inhibit: false },
+            addr: (env.to_vec(), env.to_vec()),
+            traps: core::array::from_fn(|_| Trap::off()),
+            utraps: Vec::new(),
+            cond: None,
+            base: 1,
+            internal: false,
+            proc_ok: false,
+            pool_len,
+            calltype,
+            name: name.to_vec(),
+            elapsed: None,
+            pending: Vec::new(),
+            skip: 0,
+            act: None,
+            pkg: None,
+            expose_ok: false,
+            top: false,
+        }
+    }
+}
 
 pub(crate) enum Flow {
     Normal,
-    Return(Option<Val>),
+    Return(Option<Value>),
     Leave(Option<Name>),
     Iterate(Option<Name>),
 }
 
 pub(crate) enum Ctl {
-    Do { idx: usize, var: Option<VarRef>, to: Option<Num>, by: Num, for_left: Option<i64>, count: Option<i64>, simple: bool },
+    Do { idx: usize, var: Option<VarRef>, to: Option<Num>, by: Num, for_left: Option<i64>, count: Option<i64>, simple: bool, over: Option<(Vec<Value>, usize)> },
     Select { idx: usize, taken: bool },
 }
 
@@ -263,6 +372,16 @@ pub struct Interp<'h> {
     pub(crate) quiet: bool,
     /// The interactive-trace banner was shown.
     pub(crate) banner: bool,
+    /// Object REXX: the objects (None for classic REXX).
+    pub w: Option<Rc<crate::oo::World>>,
+    /// An error on its way to a caller that may trap it: the traceback
+    /// lines so far, and the program and line it happened at.
+    pub(crate) tb: Vec<Val>,
+    pub(crate) err_at: Option<(Val, u32)>,
+    /// The secondary message of the error being raised.
+    pub(crate) err_msg: Val,
+    /// This interpreter's activity (thread) number, for GUARD.
+    pub activity: u64,
 }
 
 pub(crate) const MAX_DEPTH: usize = 2000;
@@ -279,7 +398,27 @@ pub fn strip_blanks(s: &[u8]) -> &[u8] {
 
 impl<'h> Interp<'h> {
     pub fn new(host: &'h mut dyn Host) -> Interp<'h> {
-        Interp { host, st: State::new(), depth: 0, quiet: false, banner: false }
+        Interp { host, st: State::new(), depth: 0, quiet: false, banner: false, w: None, tb: Vec::new(), err_at: None, err_msg: Vec::new(), activity: 1 }
+    }
+
+    /// An Object REXX interpreter (`PARSE VERSION` gives OBJREXX 6.00).
+    pub fn new_oo(host: &'h mut dyn Host) -> Interp<'h> {
+        let mut it = Interp::new(host);
+        it.w = Some(crate::oo::World::new());
+        it
+    }
+
+    /// An interpreter for another activity of an Object REXX program
+    /// (START, REPLY): the same objects.
+    pub fn new_activity(host: &'h mut dyn Host, w: Rc<crate::oo::World>, activity: u64) -> Interp<'h> {
+        let mut it = Interp::new(host);
+        it.w = Some(w);
+        it.activity = activity;
+        it
+    }
+
+    pub fn oo(&self) -> bool {
+        self.w.is_some()
     }
 
     /// Run a program. Returns its result (EXIT/RETURN value) or the
@@ -292,45 +431,66 @@ impl<'h> Interp<'h> {
         args: Vec<Option<Val>>,
         env: &[u8],
     ) -> Result<Option<Val>, i32> {
-        let prog = match crate::parse::program(src) {
-            Ok(p) => Rc::new(p),
+        let args = args.into_iter().map(|a| a.map(Value::S)).collect();
+        match self.run_program_v(src, name, calltype, args, env) {
+            Ok(Some(v)) => Ok(Some(self.fast_str(&v))),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// The string of a value for the outside world (RexxStart's result).
+    pub fn fast_str(&mut self, v: &Value) -> Val {
+        match v {
+            Value::S(s) => s.clone(),
+            Value::O(_) => {
+                // run the object's STRING method if it has its own
+                let mut f = Frame::new(Rc::new(Program::empty()), b"", b"CMD", CallType::Function, self.st.pools.pools.len());
+                self.to_str(&mut f, v).unwrap_or_else(|_| v.fast_string())
+            }
+        }
+    }
+
+    pub fn run_program_v(
+        &mut self,
+        src: &[u8],
+        name: &[u8],
+        calltype: CallType,
+        args: Vec<Option<Value>>,
+        env: &[u8],
+    ) -> Result<Option<Value>, i32> {
+        let top = self.depth == 0;
+        let parsed = if self.oo() { crate::oo::load_package(src, name).map(|p| (p.main.clone(), Some(p))) } else { crate::parse::program(src).map(|p| (Rc::new(p), None)) };
+        let (prog, pkg) = match parsed {
+            Ok(p) => p,
             Err((e, line)) => {
                 let code = match e {
                     Err::Syntax(c) => c,
                     _ => 49,
                 };
+                if !top && self.oo() {
+                    // the caller may trap it
+                    self.err_at = Some((name.to_vec(), line));
+                    return Err(-(code as i32) - 0x1000_0000);
+                }
                 let mut st = core::mem::replace(&mut self.st, State::empty());
-                self.host.report_error(&mut st, code, name, line);
+                self.host.report_error(&mut st, if code >= 1000 { code / 1000 } else { code }, name, line);
                 self.st = st;
-                return Err(-(code as i32));
+                self.report_detail(code);
+                return Err(-((code / if code >= 1000 { 1000 } else { 1 }) as i32));
             }
         };
-        let mut f = Frame {
-            prog: prog.clone(),
-            numeric: Numeric::default(),
-            trace: TraceSet { opt: b'N', interactive: false, inhibit: false },
-            addr: (env.to_vec(), env.to_vec()),
-            traps: core::array::from_fn(|_| Trap { state: TrapState::Off, call: false, label: Vec::new() }),
-            cond: None,
-            base: 1,
-            internal: false,
-            proc_ok: false,
-            pool_len: self.st.pools.pools.len(),
-            calltype,
-            name: name.to_vec(),
-            elapsed: None,
-            pending: Vec::new(),
-            skip: 0,
-        };
+        let mut f = Frame::new(prog.clone(), name, env, calltype, self.st.pools.pools.len());
+        f.pkg = pkg.clone();
+        f.top = top;
         let mut source = b"OS/2 ".to_vec();
         source.extend_from_slice(calltype.word());
         source.push(b' ');
         source.extend_from_slice(name);
         let saved = (self.st.cur_pool, core::mem::replace(&mut self.st.args, args), core::mem::replace(&mut self.st.source, source));
-        let top = self.depth == 0;
         if !top {
             // an external routine: a fresh pool of its own
-            self.st.pools.pools.push(crate::vars::Pool::default());
+            self.st.pools.pools.push(Rc::new(core::cell::RefCell::new(crate::vars::Pool::default())));
             self.st.cur_pool = self.st.pools.pools.len() - 1;
         } else {
             self.st.cur_pool = 0;
@@ -346,14 +506,36 @@ impl<'h> Interp<'h> {
                 }
             }
         }
-        let r = self.run(&mut f, &prog, 0, 0);
+        // Object REXX: ::REQUIRES and ::CLASS directives are done first
+        let mut r = Ok(Flow::Normal);
+        if let Some(p) = &pkg {
+            if let Err(e) = self.install_package(&mut f, p) {
+                r = Err(e);
+            }
+        }
+        if r.is_ok() {
+            r = self.run(&mut f, &prog, 0, 0);
+        }
+        let r = match r {
+            Err(Err::Syntax(no)) if f.top || !self.oo() => {
+                // an error in the directives
+                let line = self.err_at.as_ref().map_or(1, |e| e.1);
+                let mut st = core::mem::replace(&mut self.st, State::empty());
+                self.host.report_error(&mut st, if no >= 1000 { no / 1000 } else { no }, name, line);
+                self.st = st;
+                self.report_detail(no);
+                Err(Err::Fatal(no))
+            }
+            r => r,
+        };
         self.depth -= 1;
         let out = match r {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(None),
             Err(Err::Exit(v)) => Ok(v),
-            Err(Err::Fatal(c)) => Err(-(c as i32)),
-            Err(Err::Syntax(c)) => Err(-(c as i32)),
+            Err(Err::Fatal(c)) => Err(-((c / if c >= 1000 { 1000 } else { 1 }) as i32)),
+            // passed to the caller (Object REXX)
+            Err(Err::Syntax(c)) => Err(-(c as i32) - 0x1000_0000),
             Err(_) => Err(-16),
         };
         if top {
@@ -361,12 +543,25 @@ impl<'h> Interp<'h> {
             self.host.term(&mut st);
             self.st = st;
             self.st.streams.close_all(self.host);
+            if let Some(w) = &self.w {
+                w.finish();
+            }
         }
         self.st.pools.pop_to(f.pool_len);
         self.st.cur_pool = saved.0;
         self.st.args = saved.1;
         self.st.source = saved.2;
         out
+    }
+
+    /// The secondary message of an Object REXX error (`Error 40.1: ...`).
+    pub(crate) fn report_detail(&mut self, code: u32) {
+        if code >= 1000 {
+            let msg = core::mem::take(&mut self.err_msg);
+            let mut st = core::mem::replace(&mut self.st, State::empty());
+            self.host.report_detail(&mut st, code / 1000, code % 1000, &msg);
+            self.st = st;
+        }
     }
 
     // ---- tracing ----
@@ -421,7 +616,7 @@ impl<'h> Interp<'h> {
             match part {
                 Tail::Const(c) => t.extend_from_slice(c),
                 Tail::Var(n) => match self.st.pools.get(self.st.cur_pool, &Key::Simple(n)) {
-                    Some(v) => t.extend_from_slice(&v),
+                    Some(v) => t.extend_from_slice(&v.fast_string()),
                     None => t.extend_from_slice(n),
                 },
             }
@@ -430,10 +625,24 @@ impl<'h> Interp<'h> {
     }
 
     pub fn set_var(&mut self, v: &VarRef, val: Val) {
+        self.set_var_v(v, Value::S(val))
+    }
+
+    pub fn set_var_v(&mut self, v: &VarRef, val: Value) {
         self.st.nextv = None;
         match v {
             VarRef::Simple(n) => self.st.pools.set(self.st.cur_pool, &Key::Simple(n), val),
-            VarRef::Stem(n) => self.st.pools.set(self.st.cur_pool, &Key::Stem(n), val),
+            VarRef::Stem(n) => {
+                // Object REXX: a stem object assigned to a stem makes the
+                // name refer to it
+                if let Value::O(o) = &val {
+                    if let crate::value::Data::Stem(s, _) = &*o.data.borrow() {
+                        self.st.pools.bind_stem(self.st.cur_pool, n, s.clone());
+                        return;
+                    }
+                }
+                self.st.pools.set(self.st.cur_pool, &Key::Stem(n), val)
+            }
             VarRef::Comp(s, t) => {
                 let tail = self.tail_of(t);
                 self.st.pools.set(self.st.cur_pool, &Key::Comp(s, &tail), val)
@@ -442,11 +651,21 @@ impl<'h> Interp<'h> {
     }
 
     pub(crate) fn set_simple(&mut self, n: &[u8], val: Val) {
+        self.st.pools.set(self.st.cur_pool, &Key::Simple(n), Value::S(val));
+    }
+
+    pub(crate) fn set_simple_v(&mut self, n: &[u8], val: Value) {
         self.st.pools.set(self.st.cur_pool, &Key::Simple(n), val);
     }
 
-    /// (value or None, derived name)
+    /// (value or None, derived name), as strings.
     pub(crate) fn get_var(&self, v: &VarRef) -> (Option<Val>, Val) {
+        let (val, name) = self.get_var_v(v);
+        (val.map(|x| x.fast_string()), name)
+    }
+
+    /// (value or None, derived name).
+    pub(crate) fn get_var_v(&self, v: &VarRef) -> (Option<Value>, Val) {
         match v {
             VarRef::Simple(n) => (self.st.pools.get(self.st.cur_pool, &Key::Simple(n)), n.clone()),
             VarRef::Stem(n) => (self.st.pools.get(self.st.cur_pool, &Key::Stem(n)), n.clone()),
@@ -477,15 +696,50 @@ impl<'h> Interp<'h> {
     /// CALL ON it is remembered and the handler runs after the clause.
     /// Returns Ok(true) if a trap took it.
     pub fn raise(&mut self, f: &mut Frame, c: Cond, desc: Val) -> R<bool> {
-        let t = f.traps[cond_index(c)].clone();
+        self.raise_info(f, CondInfo::new(c, desc))
+    }
+
+    pub(crate) fn raise_info(&mut self, f: &mut Frame, info: CondInfo) -> R<bool> {
+        let slot: Option<Trap> = match &info.user {
+            Some(u) => f.utraps.iter().find(|(n, _)| n == u).map(|(_, t)| t.clone()),
+            None => Some(f.traps[cond_index(info.cond)].clone()),
+        };
+        // ANY traps every condition (CALL ON ANY not SYNTAX or NOVALUE)
+        let mut any = false;
+        let t = match slot {
+            Some(t) if t.state != TrapState::Off => t,
+            _ => {
+                let a = f.traps[cond_index(Cond::Any)].clone();
+                if a.state == TrapState::Off || (a.call && matches!(info.cond, Cond::Syntax | Cond::NoValue)) {
+                    return Ok(false);
+                }
+                any = true;
+                a
+            }
+        };
+        let set_state = |f: &mut Frame, s: TrapState| {
+            if any {
+                f.traps[cond_index(Cond::Any)].state = s;
+            } else if let Some(u) = &info.user {
+                if let Some(x) = f.utraps.iter_mut().find(|(n, _)| n == u) {
+                    x.1.state = s;
+                }
+            } else {
+                f.traps[cond_index(info.cond)].state = s;
+            }
+        };
         match t.state {
             TrapState::On if !t.call => {
-                f.traps[cond_index(c)].state = TrapState::Off;
-                f.cond = Some(CondInfo { cond: c, desc, call: false });
+                set_state(f, TrapState::Off);
+                let mut info = info;
+                info.call = false;
+                f.cond = Some(info);
                 Err(Err::Signal { label: t.label })
             }
             TrapState::On => {
-                f.pending.push((c, desc));
+                let mut info = info;
+                info.call = true;
+                f.pending.push(info);
                 Ok(true)
             }
             TrapState::Delay => Ok(true),
@@ -502,16 +756,34 @@ impl<'h> Interp<'h> {
 
     // ---- expressions ----
 
+    /// Evaluate an expression to its string.
     pub fn eval(&mut self, f: &mut Frame, e: &Expr, lvl: u32) -> R<Val> {
+        let v = self.eval_v(f, e, lvl)?;
+        self.to_str(f, &v)
+    }
+
+    /// The string value of a value (objects: their STRING method).
+    pub fn to_str(&mut self, f: &mut Frame, v: &Value) -> R<Val> {
+        match v {
+            Value::S(s) => Ok(s.clone()),
+            Value::O(o) => crate::oo::obj_string(self, f, o),
+        }
+    }
+
+    pub fn eval_v(&mut self, f: &mut Frame, e: &Expr, lvl: u32) -> R<Value> {
         match e {
             Expr::Lit(v) => {
                 if self.trace_int(f) {
                     self.trace_val(b">L>", v, lvl);
                 }
-                Ok(v.clone())
+                Ok(Value::S(v.clone()))
             }
             Expr::Var(v) => {
-                let (val, name) = self.get_var(v);
+                if let (VarRef::Stem(n), true) = (v, self.oo()) {
+                    // Object REXX: a stem is its stem object
+                    return Ok(crate::oo::stem_object(self, n));
+                }
+                let (val, name) = self.get_var_v(v);
                 if self.trace_int(f) {
                     if let VarRef::Comp(..) = v {
                         self.trace_val(b">C>", &name, lvl);
@@ -520,7 +792,8 @@ impl<'h> Interp<'h> {
                 match val {
                     Some(x) => {
                         if self.trace_int(f) {
-                            self.trace_val(b">V>", &x, lvl);
+                            let s = x.fast_string();
+                            self.trace_val(b">V>", &s, lvl);
                         }
                         Ok(x)
                     }
@@ -529,7 +802,7 @@ impl<'h> Interp<'h> {
                             self.trace_val(b">L>", &name, lvl);
                         }
                         self.novalue(f, &name)?;
-                        Ok(name)
+                        Ok(Value::S(name))
                     }
                 }
             }
@@ -537,19 +810,26 @@ impl<'h> Interp<'h> {
                 let mut av = Vec::with_capacity(args.len());
                 for a in args {
                     av.push(match a {
-                        Some(x) => Some(self.eval(f, x, lvl)?),
+                        Some(x) => Some(self.eval_v(f, x, lvl)?),
                         None => None,
                     });
                 }
-                let r = self.call_routine(f, name, *quoted, av, true, lvl)?;
+                let r = self.call_routine_v(f, name, *quoted, av, true, lvl)?;
                 let r = r.ok_or(Err::new(44))?;
                 if self.trace_int(f) {
-                    self.trace_val(b">F>", &r, lvl);
+                    let s = r.fast_string();
+                    self.trace_val(b">F>", &s, lvl);
                 }
                 Ok(r)
             }
             Expr::Un(op, x) => {
-                let v = self.eval(f, x, lvl)?;
+                let v = self.eval_v(f, x, lvl)?;
+                if let Value::O(_) = &v {
+                    if let Some(r) = crate::oo::unary_op(self, f, *op, &v, lvl)? {
+                        return Ok(r);
+                    }
+                }
+                let v = self.to_str(f, &v)?;
                 let r = match op {
                     UnOp::Not => match v.as_slice() {
                         b"0" => b"1".to_vec(),
@@ -570,17 +850,22 @@ impl<'h> Interp<'h> {
                 if self.trace_int(f) {
                     self.trace_val(b">P>", &r, lvl);
                 }
-                Ok(r)
+                Ok(Value::S(r))
             }
             Expr::Bin(op, a, b) => {
-                let x = self.eval(f, a, lvl)?;
-                let y = self.eval(f, b, lvl)?;
-                let r = binop(*op, &x, &y, &f.numeric)?;
+                let x = self.eval_v(f, a, lvl)?;
+                let y = self.eval_v(f, b, lvl)?;
+                let r = match (&x, &y) {
+                    (Value::S(x), Value::S(y)) => Value::S(binop(*op, x, y, &f.numeric)?),
+                    _ => crate::oo::binary_op(self, f, *op, x, y, lvl)?,
+                };
                 if self.trace_int(f) {
-                    self.trace_val(b">O>", &r, lvl);
+                    let s = r.fast_string();
+                    self.trace_val(b">O>", &s, lvl);
                 }
                 Ok(r)
             }
+            _ => crate::oo::eval_oo(self, f, e, lvl),
         }
     }
 
@@ -589,6 +874,15 @@ impl<'h> Interp<'h> {
         let v = self.eval(f, e, lvl)?;
         if self.trace_res(f) {
             self.trace_val(b">>>", &v, lvl);
+        }
+        Ok(v)
+    }
+
+    pub(crate) fn eval_top_v(&mut self, f: &mut Frame, e: &Expr, lvl: u32) -> R<Value> {
+        let v = self.eval_v(f, e, lvl)?;
+        if self.trace_res(f) {
+            let s = v.fast_string();
+            self.trace_val(b">>>", &s, lvl);
         }
         Ok(v)
     }
@@ -606,19 +900,50 @@ impl<'h> Interp<'h> {
 
     /// Call a routine by name: internal label, built-in function, external.
     pub fn call_routine(&mut self, f: &mut Frame, name: &[u8], quoted: bool, args: Vec<Option<Val>>, func: bool, lvl: u32) -> R<Option<Val>> {
+        let args = args.into_iter().map(|a| a.map(Value::S)).collect();
+        match self.call_routine_v(f, name, quoted, args, func, lvl)? {
+            Some(v) => Ok(Some(self.to_str(f, &v)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn call_routine_v(&mut self, f: &mut Frame, name: &[u8], quoted: bool, args: Vec<Option<Value>>, func: bool, lvl: u32) -> R<Option<Value>> {
         if !quoted {
             if let Some(&idx) = f.prog.labels.get(name) {
                 return self.call_internal(f, idx, args, if func { CallType::Function } else { CallType::Subroutine }, lvl);
             }
         }
-        if let Some(r) = crate::builtins::call(self, f, name, &args) {
-            return r.map(Some);
+        if self.oo() {
+            if let Some(r) = crate::oo::call_builtin_oo(self, f, name, &args) {
+                return r;
+            }
+        }
+        // built-in functions take strings
+        let mut sargs = Vec::with_capacity(args.len());
+        for a in &args {
+            sargs.push(match a {
+                Some(v) => Some(self.to_str(f, v)?),
+                None => None,
+            });
+        }
+        if self.oo() {
+            if let Some(r) = crate::oo::oo_bif(name, &sargs) {
+                return r.map(|v| Some(Value::S(v)));
+            }
+        }
+        if let Some(r) = crate::builtins::call(self, f, name, &sargs) {
+            return r.map(|v| Some(Value::S(v)));
+        }
+        if self.oo() {
+            if let Some(r) = crate::oo::call_package_routine(self, f, name, args.clone(), func, lvl) {
+                return r;
+            }
         }
         let mut st = core::mem::replace(&mut self.st, State::empty());
-        let ext = self.host.external(&mut st, name, &args, func);
+        let ext = self.host.external(&mut st, name, &sargs, func);
         self.st = st;
         match ext {
-            External::Value(v) => Ok(v),
+            External::Value(v) => Ok(v.map(Value::S)),
             External::NotFound => Err(Err::new(43)),
             External::Error(n) => Err(Err::new(n)),
             External::Program { source, path } => {
@@ -628,15 +953,17 @@ impl<'h> Interp<'h> {
                 let ct = if func { CallType::Function } else { CallType::Subroutine };
                 let env = f.addr.0.clone();
                 // NUMERIC etc. start fresh; streams and the queue are shared
-                match self.run_program(&source, &path, ct, args, &env) {
+                match self.run_program_v(&source, &path, ct, args, &env) {
                     Ok(v) => Ok(v),
+                    // Object REXX: an error the caller may trap
+                    Err(c) if c < -0x1000_0000 => Err(Err::Syntax((-(c + 0x1000_0000)) as u32)),
                     Err(c) => Err(Err::Fatal((-c) as u32)),
                 }
             }
         }
     }
 
-    pub(crate) fn call_internal(&mut self, f: &mut Frame, idx: usize, args: Vec<Option<Val>>, ct: CallType, lvl: u32) -> R<Option<Val>> {
+    pub(crate) fn call_internal(&mut self, f: &mut Frame, idx: usize, args: Vec<Option<Value>>, ct: CallType, lvl: u32) -> R<Option<Value>> {
         if self.depth >= MAX_DEPTH {
             return Err(Err::new(11));
         }
@@ -648,6 +975,8 @@ impl<'h> Interp<'h> {
         nf.calltype = ct;
         nf.pending = Vec::new();
         nf.skip = 0;
+        nf.top = false;
+        nf.expose_ok = false;
         let saved_pool = self.st.cur_pool;
         let saved_args = core::mem::replace(&mut self.st.args, args);
         self.depth += 1;
@@ -661,8 +990,28 @@ impl<'h> Interp<'h> {
         match r {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(None),
+            Err(Err::Cond(info)) => self.cond_in_caller(f, *info),
             Err(e) => Err(e),
         }
+    }
+
+    /// A condition RAISEd with RETURN or EXIT in a routine or method this
+    /// frame called: raised here; the call's result is the RAISE's.
+    pub(crate) fn cond_in_caller(&mut self, f: &mut Frame, info: CondInfo) -> R<Option<Value>> {
+        let result = info.result.clone();
+        let exit = info.exit;
+        let code = info.code;
+        let cond = info.cond;
+        if self.raise_info(f, info)? {
+            return Ok(result);
+        }
+        if cond == Cond::Syntax {
+            return Err(Err::Syntax(code));
+        }
+        if exit {
+            return Err(Err::Exit(result));
+        }
+        Ok(result)
     }
 }
 

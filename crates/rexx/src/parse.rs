@@ -68,6 +68,23 @@ pub enum Expr {
     Call(Name, bool, Vec<Option<Expr>>),
     Un(UnOp, alloc::boxed::Box<Expr>),
     Bin(BinOp, alloc::boxed::Box<Expr>, alloc::boxed::Box<Expr>),
+    /// Object REXX: an environment symbol (`.name`, upper case, without
+    /// the period).
+    Env(Name),
+    /// Object REXX: a message term (`r~name:scope(args)`, `r~~name`).
+    Send(alloc::boxed::Box<SendExpr>),
+    /// Object REXX: `r[args]` (the message `[]`).
+    Index(alloc::boxed::Box<Expr>, Vec<Option<Expr>>),
+}
+
+#[derive(Clone, Debug)]
+pub struct SendExpr {
+    pub recv: Expr,
+    pub name: Name,
+    pub scope: Option<Expr>,
+    pub args: Vec<Option<Expr>>,
+    /// `~~`: the result is the receiver.
+    pub cascade: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -108,6 +125,12 @@ pub enum Cond {
     NoValue,
     NotReady,
     Syntax,
+    /// Object REXX's conditions.
+    LostDigits,
+    NoMethod,
+    NoString,
+    Any,
+    User,
 }
 
 impl Cond {
@@ -119,9 +142,14 @@ impl Cond {
             Cond::NoValue => b"NOVALUE",
             Cond::NotReady => b"NOTREADY",
             Cond::Syntax => b"SYNTAX",
+            Cond::LostDigits => b"LOSTDIGITS",
+            Cond::NoMethod => b"NOMETHOD",
+            Cond::NoString => b"NOSTRING",
+            Cond::Any => b"ANY",
+            Cond::User => b"USER",
         }
     }
-    fn from(s: &[u8]) -> Option<Cond> {
+    pub fn from(s: &[u8]) -> Option<Cond> {
         Some(match s {
             b"ERROR" => Cond::Error,
             b"FAILURE" => Cond::Failure,
@@ -129,6 +157,11 @@ impl Cond {
             b"NOVALUE" => Cond::NoValue,
             b"NOTREADY" => Cond::NotReady,
             b"SYNTAX" => Cond::Syntax,
+            b"LOSTDIGITS" => Cond::LostDigits,
+            b"NOMETHOD" => Cond::NoMethod,
+            b"NOSTRING" => Cond::NoString,
+            b"ANY" => Cond::Any,
+            b"USER" => Cond::User,
             _ => return None,
         })
     }
@@ -150,6 +183,8 @@ pub struct DoSpec {
     pub until: Option<Expr>,
     /// Upper-cased control variable name (for END/LEAVE/ITERATE names).
     pub name: Option<Name>,
+    /// Object REXX: DO name OVER collection.
+    pub over: Option<(VarRef, Expr)>,
 }
 
 #[derive(Clone, Debug)]
@@ -163,8 +198,10 @@ pub enum Instr {
     /// Some((env, None)) sets the environment.
     Address(Option<(AddrEnv, Option<Expr>)>),
     Call(Name, bool, Vec<Option<Expr>>),
-    CallOn(Cond, bool, Option<Name>),
-    SignalOn(Cond, bool, Option<Name>),
+    /// CALL ON/OFF condition [NAME label]; the last field names a USER
+    /// condition.
+    CallOn(Cond, bool, Option<Name>, Option<Name>),
+    SignalOn(Cond, bool, Option<Name>, Option<Name>),
     Signal(Name),
     SignalValue(Expr),
     Do(alloc::boxed::Box<DoSpec>),
@@ -192,6 +229,45 @@ pub enum Instr {
     Trace(TraceArg),
     /// A clause that could not be tokenized or parsed: raised when reached.
     Error(Err),
+    /// Object REXX: a message instruction (the result goes to RESULT).
+    Message(Expr),
+    /// Object REXX: `r~name = expr` (the message `NAME=`) or `r[i] = expr`
+    /// (`[]=`): the message term, then the value.
+    AssignMsg(Expr, Expr),
+    /// USE ARG (None: an omitted name).
+    Use(Vec<Option<VarRef>>),
+    Expose(Vec<DropItem>),
+    /// GUARD ON|OFF [WHEN expr].
+    Guard(bool, Option<Expr>),
+    Reply(Option<Expr>),
+    Raise(alloc::boxed::Box<RaiseSpec>),
+    Forward(alloc::boxed::Box<ForwardSpec>),
+}
+
+#[derive(Clone, Debug)]
+pub struct RaiseSpec {
+    pub cond: Cond,
+    /// USER condition name.
+    pub user: Option<Name>,
+    /// ERROR/FAILURE code, SYNTAX number.
+    pub code: Option<Expr>,
+    pub desc: Option<Expr>,
+    pub additional: Option<Expr>,
+    /// ARRAY (expr, ...).
+    pub array: Option<Vec<Option<Expr>>>,
+    /// RETURN or EXIT (true) and the result.
+    pub ret: Option<(bool, Option<Expr>)>,
+    pub propagate: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct ForwardSpec {
+    pub to: Option<Expr>,
+    pub arguments: Option<Expr>,
+    pub array: Option<Vec<Option<Expr>>>,
+    pub message: Option<Expr>,
+    pub class: Option<Expr>,
+    pub cont: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -237,11 +313,20 @@ pub struct Clause {
 pub struct Program {
     pub clauses: Vec<Clause>,
     pub labels: BTreeMap<Name, usize>,
-    pub lines: Vec<Vec<u8>>,
+    pub lines: alloc::rc::Rc<Vec<Vec<u8>>>,
+}
+
+impl Program {
+    pub fn empty() -> Program {
+        Program { clauses: Vec::new(), labels: BTreeMap::new(), lines: alloc::rc::Rc::new(Vec::new()) }
+    }
 }
 
 /// Parse error for the whole program (structure), with its line.
 pub type LoadErr = (Err, u32);
+
+/// Object REXX's further keywords.
+const OO_KEYWORDS: &[&[u8]] = &[b"EXPOSE", b"FORWARD", b"GUARD", b"RAISE", b"REPLY", b"USE"];
 
 const KEYWORDS: &[&[u8]] = &[
     b"ADDRESS", b"ARG", b"CALL", b"DO", b"DROP", b"ELSE", b"END", b"EXIT", b"IF", b"INTERPRET", b"ITERATE", b"LEAVE", b"NOP",
@@ -254,6 +339,8 @@ struct P<'a> {
     pos: usize,
     kw: Vec<bool>,
     fparen: Vec<bool>,
+    /// Object REXX syntax.
+    oo: bool,
 }
 
 type R<T> = Result<T, Err>;
@@ -283,8 +370,11 @@ fn tail_part(s: &[u8]) -> Tail {
 }
 
 /// A symbol in an expression: constant or variable.
-fn sym_expr(sym: &[u8]) -> Expr {
+fn sym_expr(sym: &[u8], oo: bool) -> Expr {
     let u = upper(sym);
+    if oo && u.len() > 1 && u[0] == b'.' && !u[1].is_ascii_digit() {
+        return Expr::Env(u[1..].to_vec());
+    }
     if u[0].is_ascii_digit() || u[0] == b'.' {
         Expr::Lit(u)
     } else {
@@ -293,8 +383,8 @@ fn sym_expr(sym: &[u8]) -> Expr {
 }
 
 impl<'a> P<'a> {
-    fn new(t: &'a [Token]) -> P<'a> {
-        P { t, pos: 0, kw: alloc::vec![false; t.len()], fparen: alloc::vec![false; t.len()] }
+    fn new(t: &'a [Token], oo: bool) -> P<'a> {
+        P { t, pos: 0, kw: alloc::vec![false; t.len()], fparen: alloc::vec![false; t.len()], oo }
     }
     fn peek(&self) -> Option<&'a Token> {
         self.t.get(self.pos)
@@ -328,7 +418,7 @@ impl<'a> P<'a> {
             if stop.iter().any(|k| t.is_kw(k)) {
                 return Ok(None);
             }
-            if t.tok == Tok::Comma || t.tok == Tok::RParen {
+            if t.tok == Tok::Comma || t.tok == Tok::RParen || t.tok == Tok::RBrack {
                 return Ok(None);
             }
         }
@@ -348,7 +438,7 @@ impl<'a> P<'a> {
             None => true,
             Some(t) => match &t.tok {
                 Tok::Sym(_) => stop.iter().any(|k| t.is_kw(k)),
-                Tok::Comma | Tok::RParen => true,
+                Tok::Comma | Tok::RParen | Tok::RBrack => true,
                 _ => false,
             },
         }
@@ -481,7 +571,73 @@ impl<'a> P<'a> {
             let e = self.prefix(stop)?;
             return Ok(Expr::Un(op, e.into()));
         }
-        self.term(stop)
+        let t = self.term(stop)?;
+        if self.oo { self.postfix(t) } else { Ok(t) }
+    }
+
+    /// Object REXX: messages after a term (`~name`, `~~name`, `[args]`).
+    fn postfix(&mut self, mut e: Expr) -> R<Expr> {
+        loop {
+            match self.peek() {
+                Some(t) if t.is_twiddle() => {
+                    let cascade = t.is_op(b"~~");
+                    self.pos += 1;
+                    let name = match self.peek().map(|t| &t.tok) {
+                        Some(Tok::Sym(s)) => upper(s),
+                        Some(Tok::Str { val, .. }) => upper(val),
+                        _ => return Err(Err::new(19)),
+                    };
+                    self.pos += 1;
+                    let mut scope = None;
+                    if self.peek().is_some_and(|t| t.tok == Tok::Colon) {
+                        self.pos += 1;
+                        match self.peek().map(|t| &t.tok) {
+                            Some(Tok::Sym(s)) => {
+                                let s = s.clone();
+                                self.pos += 1;
+                                scope = Some(sym_expr(&s, true));
+                            }
+                            _ => return Err(Err::new(20)),
+                        }
+                    }
+                    let mut args = Vec::new();
+                    if self.peek().is_some_and(|n| n.tok == Tok::LParen && !n.blank) {
+                        args = match self.call(Vec::new(), false)? {
+                            Expr::Call(_, _, a) => a,
+                            _ => unreachable!(),
+                        };
+                    }
+                    e = Expr::Send(alloc::boxed::Box::new(SendExpr { recv: e, name, scope, args, cascade }));
+                }
+                Some(t) if t.tok == Tok::LBrack && !t.blank => {
+                    self.pos += 1;
+                    let args = self.list_until(Tok::RBrack)?;
+                    e = Expr::Index(e.into(), args);
+                }
+                _ => return Ok(e),
+            }
+        }
+    }
+
+    /// Expressions separated by commas up to a closing token (consumed).
+    fn list_until(&mut self, close: Tok) -> R<Vec<Option<Expr>>> {
+        let mut args = Vec::new();
+        if self.peek().is_some_and(|t| t.tok == close) {
+            self.pos += 1;
+            return Ok(args);
+        }
+        loop {
+            let a = if self.peek().is_some_and(|t| t.tok == Tok::Comma || t.tok == close) { None } else { Some(self.or_expr(&[])?) };
+            args.push(a);
+            match self.peek() {
+                Some(t) if t.tok == Tok::Comma => self.pos += 1,
+                Some(t) if t.tok == close => {
+                    self.pos += 1;
+                    return Ok(args);
+                }
+                _ => return Err(Err::new(36)),
+            }
+        }
     }
 
     fn term(&mut self, stop: &[&[u8]]) -> R<Expr> {
@@ -514,9 +670,9 @@ impl<'a> P<'a> {
                     return self.call(upper(&s), false);
                 }
                 let _ = stop;
-                Ok(sym_expr(&s))
+                Ok(sym_expr(&s, self.oo))
             }
-            Tok::RParen | Tok::Comma => Err(Err::new(37)),
+            Tok::RParen | Tok::Comma | Tok::RBrack => Err(Err::new(37)),
             _ => Err(Err::new(35)),
         }
     }
@@ -676,15 +832,66 @@ impl<'a> P<'a> {
         }
     }
 
-    fn cond(&mut self, call: bool) -> R<Cond> {
+    fn cond(&mut self, call: bool) -> R<(Cond, Option<Name>)> {
         let u = self.peek().and_then(|t| t.upper()).ok_or(Err::new(25))?;
         let c = Cond::from(&u).ok_or(Err::new(25))?;
-        if call && matches!(c, Cond::NoValue | Cond::Syntax) {
+        if call && matches!(c, Cond::NoValue | Cond::Syntax | Cond::LostDigits | Cond::NoMethod | Cond::NoString) {
+            return Err(Err::new(25));
+        }
+        if !self.oo && matches!(c, Cond::LostDigits | Cond::NoMethod | Cond::NoString | Cond::Any | Cond::User) {
             return Err(Err::new(25));
         }
         // the condition name shows as written in traces (IBM's)
         self.pos += 1;
-        Ok(c)
+        if c == Cond::User {
+            let n = self.symbol_taken()?;
+            return Ok((c, Some(n)));
+        }
+        Ok((c, None))
+    }
+
+    /// RAISE and FORWARD option values: a literal string, a symbol taken
+    /// as a constant, or an expression in parentheses.
+    fn simple_term(&mut self) -> R<Expr> {
+        match self.peek().map(|t| &t.tok) {
+            Some(Tok::Str { val, .. }) => {
+                let v = val.clone();
+                self.pos += 1;
+                Ok(Expr::Lit(v))
+            }
+            Some(Tok::Sym(s)) => {
+                let s = s.clone();
+                self.pos += 1;
+                let u = upper(&s);
+                if u.len() > 1 && u[0] == b'.' && !u[1].is_ascii_digit() {
+                    return Ok(Expr::Env(u[1..].to_vec()));
+                }
+                Ok(Expr::Lit(u))
+            }
+            Some(Tok::LParen) => {
+                self.pos += 1;
+                let e = self.or_expr(&[])?;
+                if !self.peek().is_some_and(|t| t.tok == Tok::RParen) {
+                    return Err(Err::new(36));
+                }
+                self.pos += 1;
+                Ok(e)
+            }
+            _ => Err(Err::new(19)),
+        }
+    }
+
+    /// `(expr, expr, ...)` after ARRAY.
+    fn paren_list(&mut self) -> R<Vec<Option<Expr>>> {
+        if !self.peek().is_some_and(|t| t.tok == Tok::LParen) {
+            return Err(Err::new(19));
+        }
+        self.pos += 1;
+        self.list_until(Tok::RParen)
+    }
+
+    fn at_term(&self) -> bool {
+        self.peek().is_some_and(|t| matches!(t.tok, Tok::Str { .. } | Tok::Sym(_) | Tok::LParen))
     }
 }
 
@@ -720,6 +927,33 @@ fn parse_clause(p: &mut P, out: &mut Vec<Piece>) -> R<()> {
         out.push(Piece { instr: Instr::Label(name), from: start, to: p.pos });
         return parse_clause(p, out);
     }
+    if p.oo && !is_assignment(rest) {
+        // a message instruction: `r~msg(...)`, `r~msg = v`, `r[i] = v`
+        let save = p.pos;
+        let kwfirst = rest[0].upper().is_some_and(|u| KEYWORDS.contains(&u.as_slice()) || OO_KEYWORDS.contains(&u.as_slice()));
+        let msgish = rest.len() >= 2 && (rest[1].is_twiddle() || rest[1].tok == Tok::LBrack);
+        if !kwfirst || msgish {
+            let r = p.term(&[]).and_then(|t| p.postfix(t));
+            if let Ok(e) = r {
+                if matches!(e, Expr::Send(_) | Expr::Index(..)) {
+                    if p.at_end() {
+                        out.push(Piece { instr: Instr::Message(e), from: start, to: p.pos });
+                        return Ok(());
+                    }
+                    if p.peek().is_some_and(|t| t.is_op(b"=")) && !matches!(&e, Expr::Send(s) if s.cascade) {
+                        p.pos += 1;
+                        let v = p.expr(&[])?.ok_or(Err::new(35))?;
+                        if !p.at_end() {
+                            return Err(Err::new(if p.peek().is_some_and(|t| t.tok == Tok::RParen || t.tok == Tok::Comma) { 37 } else { 35 }));
+                        }
+                        out.push(Piece { instr: Instr::AssignMsg(e, v), from: start, to: p.pos });
+                        return Ok(());
+                    }
+                }
+            }
+            p.pos = save;
+        }
+    }
     if is_assignment(rest) {
         let s = rest[0].sym().unwrap();
         let v = var_ref(s).map_err(|_| {
@@ -737,7 +971,7 @@ fn parse_clause(p: &mut P, out: &mut Vec<Piece>) -> R<()> {
         out.push(Piece { instr: Instr::Assign(v, e), from: start, to: p.pos });
         return Ok(());
     }
-    let kw = rest[0].upper().filter(|u| KEYWORDS.contains(&u.as_slice()));
+    let kw = rest[0].upper().filter(|u| KEYWORDS.contains(&u.as_slice()) || (p.oo && OO_KEYWORDS.contains(&u.as_slice())));
     let Some(kw) = kw else {
         // command
         let e = p.need_expr(&[])?;
@@ -937,10 +1171,10 @@ fn parse_clause(p: &mut P, out: &mut Vec<Piece>) -> R<()> {
                 if !on {
                     p.take_kw(b"OFF");
                 }
-                let c = p.cond(true)?;
+                let (c, user) = p.cond(true)?;
                 let name = if on && p.take_kw(b"NAME") { Some(p.symbol_or_string()?) } else { None };
                 p.expect_end()?;
-                Instr::CallOn(c, on, name)
+                Instr::CallOn(c, on, name, user)
             } else {
                 let (name, quoted) = match p.peek().map(|t| &t.tok) {
                     Some(Tok::Sym(s)) => (upper(s), false),
@@ -958,10 +1192,10 @@ fn parse_clause(p: &mut P, out: &mut Vec<Piece>) -> R<()> {
                 if !on {
                     p.take_kw(b"OFF");
                 }
-                let c = p.cond(false)?;
+                let (c, user) = p.cond(false)?;
                 let name = if on && p.take_kw(b"NAME") { Some(p.symbol_or_string()?) } else { None };
                 p.expect_end()?;
-                Instr::SignalOn(c, on, name)
+                Instr::SignalOn(c, on, name, user)
             } else if p.take_kw(b"VALUE") {
                 let e = p.need_expr(&[])?;
                 p.expect_end()?;
@@ -1021,6 +1255,113 @@ fn parse_clause(p: &mut P, out: &mut Vec<Piece>) -> R<()> {
             let spec = parse_do(p)?;
             Instr::Do(spec.into())
         }
+        b"USE" => {
+            if !p.take_kw(b"ARG") {
+                return Err(Err::new(25));
+            }
+            let mut names = Vec::new();
+            if !p.at_end() {
+                loop {
+                    match p.peek().map(|t| &t.tok) {
+                        Some(Tok::Comma) => names.push(None),
+                        Some(Tok::Sym(s)) => {
+                            names.push(Some(var_ref(s)?));
+                            p.pos += 1;
+                        }
+                        _ => return Err(Err::new(20)),
+                    }
+                    if p.at_end() {
+                        break;
+                    }
+                    if !p.peek().is_some_and(|t| t.tok == Tok::Comma) {
+                        return Err(Err::new(20));
+                    }
+                    p.pos += 1;
+                    if p.at_end() {
+                        names.push(None);
+                        break;
+                    }
+                }
+            }
+            Instr::Use(names)
+        }
+        b"EXPOSE" => {
+            let l = p.name_list()?;
+            Instr::Expose(l)
+        }
+        b"GUARD" => {
+            let on = if p.take_kw(b"ON") {
+                true
+            } else if p.take_kw(b"OFF") {
+                false
+            } else {
+                return Err(Err::new(25));
+            };
+            let w = if p.take_kw(b"WHEN") { Some(p.need_expr(&[])?) } else { None };
+            p.expect_end()?;
+            Instr::Guard(on, w)
+        }
+        b"REPLY" => {
+            let e = p.expr(&[])?;
+            p.expect_end().map_err(|_| Err::new(37))?;
+            Instr::Reply(e)
+        }
+        b"RAISE" => {
+            let mut r = RaiseSpec { cond: Cond::Syntax, user: None, code: None, desc: None, additional: None, array: None, ret: None, propagate: false };
+            let u = p.peek().and_then(|t| t.upper()).ok_or(Err::new(25))?;
+            p.kw[p.pos] = true;
+            p.pos += 1;
+            if u.as_slice() == b"PROPAGATE" {
+                r.propagate = true;
+            } else {
+                r.cond = Cond::from(&u).filter(|c| *c != Cond::Any).ok_or(Err::new(25))?;
+                match r.cond {
+                    Cond::Error | Cond::Failure | Cond::Syntax => r.code = Some(p.simple_term()?),
+                    Cond::User => r.user = Some(p.symbol_or_string().map(|s| upper(&s))?),
+                    _ => {}
+                }
+            }
+            while !p.at_end() {
+                if p.take_kw(b"ADDITIONAL") {
+                    r.additional = Some(p.simple_term()?);
+                } else if p.take_kw(b"ARRAY") {
+                    r.array = Some(p.paren_list()?);
+                } else if p.take_kw(b"DESCRIPTION") {
+                    r.desc = Some(p.simple_term()?);
+                } else if p.peek_kw(b"RETURN") || p.peek_kw(b"EXIT") {
+                    let exit = p.take_kw(b"EXIT");
+                    if !exit {
+                        p.take_kw(b"RETURN");
+                    }
+                    let v = if p.at_term() { Some(p.simple_term()?) } else { None };
+                    r.ret = Some((exit, v));
+                } else {
+                    return Err(Err::new(25));
+                }
+            }
+            Instr::Raise(r.into())
+        }
+        b"FORWARD" => {
+            let mut fw = ForwardSpec { to: None, arguments: None, array: None, message: None, class: None, cont: false };
+            while !p.at_end() {
+                if p.take_kw(b"TO") {
+                    fw.to = Some(p.simple_term()?);
+                } else if p.take_kw(b"ARGUMENTS") {
+                    fw.arguments = Some(p.simple_term()?);
+                } else if p.take_kw(b"ARRAY") {
+                    fw.array = Some(p.paren_list()?);
+                } else if p.take_kw(b"MESSAGE") {
+                    fw.message = Some(p.simple_term()?);
+                } else if p.take_kw(b"CLASS") {
+                    fw.class = Some(p.simple_term()?);
+                } else if p.take_kw(b"CONTINUE") {
+                    fw.cont = true;
+                } else {
+                    return Err(Err::new(25));
+                }
+            }
+            Instr::Forward(fw.into())
+        }
         _ => return Err(Err::new(19)),
     };
     out.push(Piece { instr, from: start, to: p.pos });
@@ -1046,13 +1387,20 @@ impl P<'_> {
 }
 
 fn parse_do(p: &mut P) -> R<DoSpec> {
-    let mut d = DoSpec { var: None, count: None, forever: false, while_: None, until: None, name: None };
+    let mut d = DoSpec { var: None, count: None, forever: false, while_: None, until: None, name: None, over: None };
     const STOPS: &[&[u8]] = &[b"TO", b"BY", b"FOR", b"WHILE", b"UNTIL"];
     if p.at_end() {
         return Ok(d);
     }
     let t = &p.t[p.pos..];
-    if t.len() >= 2 && t[0].is_sym() && t[1].is_op(b"=") {
+    if p.oo && t.len() >= 2 && t[0].is_sym() && t[1].is_kw(b"OVER") {
+        let v = var_ref(t[0].sym().unwrap())?;
+        d.name = Some(upper(t[0].sym().unwrap()));
+        p.pos += 1;
+        p.take_kw(b"OVER");
+        let e = p.need_expr(&[b"WHILE", b"UNTIL"])?;
+        d.over = Some((v, e));
+    } else if t.len() >= 2 && t[0].is_sym() && t[1].is_op(b"=") {
         let v = var_ref(t[0].sym().unwrap())?;
         if let VarRef::Simple(n) = &v {
             d.name = Some(n.clone());
@@ -1118,6 +1466,9 @@ fn render(p: &P, from: usize, to: usize, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out
             let no_space = match (&pt.tok, &t.tok) {
                 (_, Tok::Comma) => true,
                 (_, Tok::Colon) => true,
+                (Tok::Colon, _) => true,
+                (_, Tok::Op(o)) | (Tok::Op(o), _) if o.starts_with(b"~") => true,
+                (_, Tok::LBrack | Tok::RBrack) | (Tok::LBrack, _) => true,
                 (_, Tok::LParen) if p.fparen[i] => true,
                 (Tok::LParen, _) if p.fparen[pi] => true,
                 (_, Tok::RParen) if p.fparen[i] => true,
@@ -1169,6 +1520,8 @@ fn render(p: &P, from: usize, to: usize, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out
             Tok::RParen => out.push(b')'),
             Tok::Comma => out.push(b','),
             Tok::Colon => out.push(b':'),
+            Tok::LBrack => out.push(b'['),
+            Tok::RBrack => out.push(b']'),
         }
         prev = Some(i);
     }
@@ -1176,13 +1529,27 @@ fn render(p: &P, from: usize, to: usize, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out
 
 /// Parse a whole program (or an INTERPRET string).
 pub fn program(src: &[u8]) -> Result<Program, LoadErr> {
+    program_mode(src, false)
+}
+
+/// Parse a program as classic REXX or (`oo`) Object REXX without
+/// directives (INTERPRET, interactive trace input).
+pub fn program_mode(src: &[u8], oo: bool) -> Result<Program, LoadErr> {
     let mut spell = BTreeMap::new();
-    let raw = crate::lex::clauses(src, &mut spell)?;
-    let mut clauses = Vec::new();
-    for rc in &raw {
-        clauses_of(rc, &spell, &mut clauses);
+    let raw = crate::lex::clauses_mode(src, &mut spell, oo)?;
+    if oo && raw.iter().any(is_directive) {
+        let line = raw.iter().find(|r| is_directive(r)).map_or(1, |r| r.line);
+        return Err((Err::new(99), line));
     }
-    let lines = src.split(|&c| c == b'\n').map(|l| l.strip_suffix(b"\r").unwrap_or(l).to_vec()).collect();
+    let lines = alloc::rc::Rc::new(src.split(|&c| c == b'\n').map(|l| l.strip_suffix(b"\r").unwrap_or(l).to_vec()).collect());
+    build(&raw, &spell, lines, oo)
+}
+
+fn build(raw: &[RawClause], spell: &BTreeMap<Vec<u8>, Vec<u8>>, lines: alloc::rc::Rc<Vec<Vec<u8>>>, oo: bool) -> Result<Program, LoadErr> {
+    let mut clauses = Vec::new();
+    for rc in raw {
+        clauses_of(rc, spell, &mut clauses, oo);
+    }
     let mut prog = Program { clauses, labels: BTreeMap::new(), lines };
     link(&mut prog)?;
     for (i, c) in prog.clauses.iter().enumerate() {
@@ -1193,9 +1560,61 @@ pub fn program(src: &[u8]) -> Result<Program, LoadErr> {
     Ok(prog)
 }
 
-fn clauses_of(rc: &RawClause, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out: &mut Vec<Clause>) {
+/// A clause starting with `::`.
+fn is_directive(r: &RawClause) -> bool {
+    r.toks.len() >= 2 && r.toks[0].tok == Tok::Colon && r.toks[1].tok == Tok::Colon && !r.toks[1].blank
+}
+
+/// A section of an Object REXX program: the code before the first
+/// directive (no directive), or a directive and the code after it.
+pub struct Section {
+    /// The directive's tokens after `::`.
+    pub dir: Option<Vec<Token>>,
+    pub line: u32,
+    pub prog: Program,
+    /// The section's source lines (Method~source).
+    pub source: Vec<Vec<u8>>,
+}
+
+/// Split an Object REXX program at its directives and parse each part.
+pub fn sections(src: &[u8]) -> Result<Vec<Section>, LoadErr> {
+    let mut spell = BTreeMap::new();
+    let raw = crate::lex::clauses_mode(src, &mut spell, true)?;
+    let lines: alloc::rc::Rc<Vec<Vec<u8>>> =
+        alloc::rc::Rc::new(src.split(|&c| c == b'\n').map(|l| l.strip_suffix(b"\r").unwrap_or(l).to_vec()).collect());
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut dir: Option<(Vec<Token>, u32)> = None;
+    let mut i = 0;
+    loop {
+        if i == raw.len() || is_directive(&raw[i]) {
+            let prog = build(&raw[start..i], &spell, lines.clone(), true)?;
+            // the source lines from the clause after the directive to the next one
+            let first = raw.get(start).map_or(0, |r| r.toks.first().map_or(r.line, |t| t.line) as usize);
+            let last = if i < raw.len() { raw[i].line as usize } else { lines.len() + 1 };
+            let source = if start < i && first >= 1 { lines[(first - 1).min(lines.len())..(last - 1).min(lines.len()).max((first - 1).min(lines.len()))].to_vec() } else { Vec::new() };
+            let (d, line) = match dir.take() {
+                Some((d, l)) => (Some(d), l),
+                None => (None, 1),
+            };
+            out.push(Section { dir: d, line, prog, source });
+            if i == raw.len() {
+                break;
+            }
+            if let Some(e) = &raw[i].err {
+                return Err((e.clone(), raw[i].line));
+            }
+            dir = Some((raw[i].toks[2..].to_vec(), raw[i].line));
+            start = i + 1;
+        }
+        i += 1;
+    }
+    Ok(out)
+}
+
+fn clauses_of(rc: &RawClause, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out: &mut Vec<Clause>, oo: bool) {
     let line = rc.toks.first().map_or(rc.line, |t| t.line);
-    let mut p = P::new(&rc.toks);
+    let mut p = P::new(&rc.toks, oo);
     let mut pieces = Vec::new();
     let r = match &rc.err {
         Some(e) => Err(e.clone()),

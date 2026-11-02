@@ -2,24 +2,36 @@
 //! looked up in the caller's pool. Stems keep a default value (from
 //! `stem. = value`) and their tails; a tail dropped while the stem has a
 //! default is kept as "dropped" so it reads as its own name again.
+//!
+//! Pools and stems are shared (`Rc`): an Object REXX method's pool has the
+//! object's variable pool as its parent (EXPOSE), and a stem can be passed
+//! by reference (USE ARG) or held by a .Stem object.
 
 use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::rc::Rc;
 use alloc::vec::Vec;
+use core::cell::RefCell;
+
+use crate::value::Value;
 
 #[derive(Default)]
 pub struct Stem {
-    pub default: Option<Vec<u8>>,
-    pub tails: BTreeMap<Vec<u8>, Option<Vec<u8>>>,
+    pub default: Option<Value>,
+    pub tails: BTreeMap<Vec<u8>, Option<Value>>,
 }
+
+pub type StemRef = Rc<RefCell<Stem>>;
 
 #[derive(Default)]
 pub struct Pool {
-    pub vars: BTreeMap<Vec<u8>, Vec<u8>>,
-    pub stems: BTreeMap<Vec<u8>, Stem>,
+    pub vars: BTreeMap<Vec<u8>, Value>,
+    pub stems: BTreeMap<Vec<u8>, StemRef>,
     /// Exposed names: simple names, stems ("A.") and compound names.
     pub exposed: BTreeSet<Vec<u8>>,
     pub parent: Option<usize>,
 }
+
+pub type PoolRef = Rc<RefCell<Pool>>;
 
 /// A fully resolved variable name.
 pub enum Key<'a> {
@@ -30,18 +42,18 @@ pub enum Key<'a> {
 }
 
 pub struct Pools {
-    pub pools: Vec<Pool>,
+    pub pools: Vec<PoolRef>,
 }
 
 impl Pools {
     pub fn new() -> Pools {
-        Pools { pools: alloc::vec![Pool::default()] }
+        Pools { pools: alloc::vec![Rc::new(RefCell::new(Pool::default()))] }
     }
 
     /// The pool that holds `key` when seen from pool `p`.
     fn owner(&self, mut p: usize, key: &Key) -> usize {
         loop {
-            let pool = &self.pools[p];
+            let pool = self.pools[p].borrow();
             let Some(parent) = pool.parent else { return p };
             let exposed = match key {
                 Key::Simple(n) | Key::Stem(n) => pool.exposed.contains(*n),
@@ -60,14 +72,14 @@ impl Pools {
         }
     }
 
-    pub fn get(&self, p: usize, key: &Key) -> Option<Vec<u8>> {
+    pub fn get(&self, p: usize, key: &Key) -> Option<Value> {
         let o = self.owner(p, key);
-        let pool = &self.pools[o];
+        let pool = self.pools[o].borrow();
         match key {
             Key::Simple(n) => pool.vars.get(*n).cloned(),
-            Key::Stem(n) => pool.stems.get(*n).and_then(|s| s.default.clone()),
+            Key::Stem(n) => pool.stems.get(*n).and_then(|s| s.borrow().default.clone()),
             Key::Comp(stem, tail) => {
-                let s = pool.stems.get(*stem)?;
+                let s = pool.stems.get(*stem)?.borrow();
                 match s.tails.get(*tail) {
                     Some(v) => v.clone(),
                     None => s.default.clone(),
@@ -76,27 +88,29 @@ impl Pools {
         }
     }
 
-    pub fn set(&mut self, p: usize, key: &Key, val: Vec<u8>) {
+    pub fn set(&self, p: usize, key: &Key, val: Value) {
         let o = self.owner(p, key);
-        let pool = &mut self.pools[o];
+        let mut pool = self.pools[o].borrow_mut();
         match key {
             Key::Simple(n) => {
                 pool.vars.insert(n.to_vec(), val);
             }
             Key::Stem(n) => {
-                let s = pool.stems.entry(n.to_vec()).or_default();
+                let s = pool.stems.entry(n.to_vec()).or_default().clone();
+                let mut s = s.borrow_mut();
                 s.tails.clear();
                 s.default = Some(val);
             }
             Key::Comp(stem, tail) => {
-                pool.stems.entry(stem.to_vec()).or_default().tails.insert(tail.to_vec(), Some(val));
+                let s = pool.stems.entry(stem.to_vec()).or_default().clone();
+                s.borrow_mut().tails.insert(tail.to_vec(), Some(val));
             }
         }
     }
 
-    pub fn drop_var(&mut self, p: usize, key: &Key) {
+    pub fn drop_var(&self, p: usize, key: &Key) {
         let o = self.owner(p, key);
-        let pool = &mut self.pools[o];
+        let mut pool = self.pools[o].borrow_mut();
         match key {
             Key::Simple(n) => {
                 pool.vars.remove(*n);
@@ -105,7 +119,8 @@ impl Pools {
                 pool.stems.remove(*n);
             }
             Key::Comp(stem, tail) => {
-                if let Some(s) = pool.stems.get_mut(*stem) {
+                if let Some(s) = pool.stems.get(*stem) {
+                    let mut s = s.borrow_mut();
                     if s.default.is_some() {
                         s.tails.insert(tail.to_vec(), None);
                     } else {
@@ -116,9 +131,34 @@ impl Pools {
         }
     }
 
+    /// The stem object behind a stem name (made if it does not exist).
+    pub fn stem(&self, p: usize, name: &[u8]) -> StemRef {
+        let o = self.owner(p, &Key::Stem(name));
+        let mut pool = self.pools[o].borrow_mut();
+        pool.stems.entry(name.to_vec()).or_default().clone()
+    }
+
+    /// Whether the stem exists (has been assigned or used).
+    pub fn has_stem(&self, p: usize, name: &[u8]) -> bool {
+        let o = self.owner(p, &Key::Stem(name));
+        self.pools[o].borrow().stems.contains_key(name)
+    }
+
+    /// Make a stem name refer to a stem object (USE ARG, `a. = b.`).
+    pub fn bind_stem(&self, p: usize, name: &[u8], s: StemRef) {
+        let o = self.owner(p, &Key::Stem(name));
+        self.pools[o].borrow_mut().stems.insert(name.to_vec(), s);
+    }
+
     /// Start a procedure's pool.
     pub fn push(&mut self, parent: usize) -> usize {
-        self.pools.push(Pool { parent: Some(parent), ..Default::default() });
+        self.pools.push(Rc::new(RefCell::new(Pool { parent: Some(parent), ..Default::default() })));
+        self.pools.len() - 1
+    }
+
+    /// Put an existing pool (an object's variables) on the stack.
+    pub fn push_pool(&mut self, p: PoolRef) -> usize {
+        self.pools.push(p);
         self.pools.len() - 1
     }
 
@@ -130,19 +170,20 @@ impl Pools {
     /// (name, value).
     pub fn list(&self, p: usize) -> Vec<(Vec<u8>, Vec<u8>)> {
         let mut out = Vec::new();
-        let pool = &self.pools[p];
+        let pool = self.pools[p].borrow();
         for (k, v) in &pool.vars {
-            out.push((k.clone(), v.clone()));
+            out.push((k.clone(), v.fast_string()));
         }
         for (stem, s) in &pool.stems {
+            let s = s.borrow();
             if let Some(d) = &s.default {
-                out.push((stem.clone(), d.clone()));
+                out.push((stem.clone(), d.fast_string()));
             }
             for (t, v) in &s.tails {
                 if let Some(v) = v {
                     let mut n = stem.clone();
                     n.extend_from_slice(t);
-                    out.push((n, v.clone()));
+                    out.push((n, v.fast_string()));
                 }
             }
         }
@@ -150,20 +191,22 @@ impl Pools {
         if let Some(parent) = pool.parent {
             for name in &pool.exposed {
                 if name.ends_with(b".") {
-                    if let Some(s) = self.pools[self.owner(parent, &Key::Stem(name))].stems.get(name) {
+                    let o = self.owner(parent, &Key::Stem(name));
+                    if let Some(s) = self.pools[o].borrow().stems.get(name) {
+                        let s = s.borrow();
                         if let Some(d) = &s.default {
-                            out.push((name.clone(), d.clone()));
+                            out.push((name.clone(), d.fast_string()));
                         }
                         for (t, v) in &s.tails {
                             if let Some(v) = v {
                                 let mut n = name.clone();
                                 n.extend_from_slice(t);
-                                out.push((n, v.clone()));
+                                out.push((n, v.fast_string()));
                             }
                         }
                     }
                 } else if let Some(v) = self.get(parent, &Key::Simple(name)) {
-                    out.push((name.clone(), v));
+                    out.push((name.clone(), v.fast_string()));
                 }
             }
         }

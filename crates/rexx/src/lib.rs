@@ -11,23 +11,31 @@
 extern crate alloc;
 
 pub mod builtins;
+pub mod classes;
 pub mod exec;
 pub mod lex;
 pub mod num;
+pub mod oo;
 pub mod parse;
 mod run;
 pub mod stream;
+pub mod value;
 pub mod vars;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_oo;
 
 use alloc::vec::Vec;
 
 pub use exec::{Interp, State};
+pub use value::Value;
 
 /// The program's version string (PARSE VERSION), IBM's.
 pub const VERSION: &[u8] = b"REXXSAA 4.00 3 Feb 1999";
+/// Object REXX's version string, IBM's.
+pub const OO_VERSION: &[u8] = b"OBJREXX 6.00 18 May 1999";
 
 /// An error or a transfer of control that leaves a clause.
 #[derive(Clone, Debug, PartialEq)]
@@ -41,7 +49,37 @@ pub enum Err {
     /// An error already reported; the program ends with it.
     Fatal(u32),
     /// EXIT: the program ends with this result.
-    Exit(Option<Vec<u8>>),
+    Exit(Option<Value>),
+    /// Object REXX: a condition raised in the caller (RAISE with RETURN
+    /// or EXIT).
+    Cond(alloc::boxed::Box<exec::CondInfo>),
+}
+
+impl core::fmt::Debug for Value {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        match self {
+            Value::S(s) => write!(f, "{:?}", alloc::string::String::from_utf8_lossy(s)),
+            Value::O(o) => write!(f, "<object {}>", o.id),
+        }
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Value) -> bool {
+        self.same(other)
+    }
+}
+
+impl core::fmt::Debug for exec::CondInfo {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(f, "<condition {:?}>", alloc::string::String::from_utf8_lossy(&self.name()))
+    }
+}
+
+impl PartialEq for exec::CondInfo {
+    fn eq(&self, _other: &exec::CondInfo) -> bool {
+        false
+    }
 }
 
 impl Err {
@@ -86,6 +124,27 @@ pub enum External {
     Error(u32),
 }
 
+/// An argument or result passed to another object system.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExtArg {
+    None,
+    Str(Vec<u8>),
+    /// An object of that system: (kind, handle, is_class, class id).
+    Obj(u32, usize, bool, Vec<u8>),
+    /// A REXX object handed to the other system (its position in the
+    /// interpreter's table of REXX objects).
+    Rexx(usize),
+}
+
+/// Why a message to another object system failed.
+#[derive(Clone, Debug, PartialEq)]
+pub enum ExtErr {
+    /// No such method (NOMETHOD, error 97).
+    NoMethod,
+    /// A REXX error with its number and secondary message.
+    Error(u32, Vec<u8>),
+}
+
 /// Local date and time.
 #[derive(Clone, Copy, Default)]
 pub struct Now {
@@ -104,6 +163,8 @@ pub enum OpenMode {
     Read,
     Write,
     Both,
+    /// Write, emptying the file first (Object REXX's OPEN WRITE REPLACE).
+    Replace,
 }
 
 /// Information about a file for STREAM's QUERY commands.
@@ -154,6 +215,35 @@ pub trait Host {
     /// Report an error ending the program: `REXnnnn: Error n running
     /// FILE, line L: text`.
     fn report_error(&mut self, st: &mut State, code: u32, file: &[u8], line: u32);
+    /// Object REXX: the secondary message of an error, after
+    /// report_error (`Error 40.1: text`).
+    fn report_detail(&mut self, _st: &mut State, _major: u32, _minor: u32, _text: &[u8]) {}
+    /// Object REXX: find a program for ::REQUIRES (the name as given,
+    /// else along PATH): (source, full name).
+    fn find_program(&mut self, _name: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+        None
+    }
+    /// Object REXX: a message to an object of another object system
+    /// (SOM, the Workplace Shell; `kind` from ext_lookup).
+    fn ext_send(&mut self, _st: &mut State, _kind: u32, _handle: usize, _msg: &[u8], _args: &[ExtArg]) -> Result<ExtArg, ExtErr> {
+        Err(ExtErr::NoMethod)
+    }
+    /// Object REXX: an environment symbol the program did not define
+    /// (.SOM, .WPS ...): Some((kind, handle, is_class, id)).
+    fn ext_lookup(&mut self, _st: &mut State, _name: &[u8]) -> Option<(u32, usize, bool, Vec<u8>)> {
+        None
+    }
+    /// Object REXX: an external class (`::CLASS x EXTERNAL 'SOM name'`).
+    fn ext_class(&mut self, _st: &mut State, _spec: &[u8]) -> Option<(u32, usize, Vec<u8>)> {
+        None
+    }
+    /// Object REXX: the host no longer needs an object's handle.
+    fn ext_release(&mut self, _kind: u32, _handle: usize) {}
+    /// Object REXX: GUARD ... WHEN is false; let other activities run.
+    /// Returns false if there are none (the condition cannot change).
+    fn wait_guard(&mut self, _st: &mut State) -> bool {
+        false
+    }
     /// Report an error in a line typed at an interactive-trace pause.
     fn report_trace_error(&mut self, st: &mut State, code: u32) {
         let mut s = alloc::format!("Error {code} in interactive trace: ").into_bytes();

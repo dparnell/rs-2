@@ -123,7 +123,7 @@ impl Interp<'_> {
             mode,
             persistent: size.is_some(),
             rpos: 0,
-            wpos: if mode == OpenMode::Read { 0 } else { size.unwrap_or(0) },
+            wpos: if matches!(mode, OpenMode::Read | OpenMode::Replace) { 0 } else { size.unwrap_or(0) },
             state: SState::Ready,
             desc: Vec::new(),
             std,
@@ -530,13 +530,31 @@ pub fn stream_fn(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
             let w0 = w.first().copied().unwrap_or(b"");
             match w0 {
                 b"OPEN" => {
-                    let mode = match w.get(1).copied() {
+                    let mut mode = match w.get(1).copied() {
                         None => OpenMode::Both,
                         Some(b"READ") => OpenMode::Read,
                         Some(b"WRITE") => OpenMode::Write,
+                        Some(b"BOTH") if it.oo() => OpenMode::Both,
+                        _ if it.oo() => OpenMode::Both,
                         _ => return Err(Err::new(40)),
                     };
-                    if w.len() > 2 {
+                    if it.oo() {
+                        // Object REXX: READ|WRITE|BOTH [APPEND|REPLACE] and
+                        // sharing and buffering options
+                        for o in &w[1..] {
+                            match *o {
+                                b"READ" | b"WRITE" | b"BOTH" | b"APPEND" | b"SHARED" | b"SHAREREAD" | b"SHAREWRITE" | b"NOBUFFER" | b"BINARY" | b"SHARE" => {}
+                                b"REPLACE" => {
+                                    if mode != OpenMode::Read {
+                                        mode = OpenMode::Replace;
+                                    }
+                                }
+                                _ if o.iter().all(|c| c.is_ascii_digit()) => {}
+                                b"RECLENGTH" => {}
+                                _ => return Err(Err::new(40)),
+                            }
+                        }
+                    } else if w.len() > 2 {
                         return Err(Err::new(40));
                     }
                     it.close_stream(&name);
@@ -582,6 +600,7 @@ pub fn stream_fn(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
                     let q = w.get(1).copied().unwrap_or(b"");
                     match q {
                         b"EXISTS" => Ok(it.host.f_exists(&name).unwrap_or_default()),
+                        b"EXIST" if it.oo() => Ok(it.host.f_exists(&name).unwrap_or_default()),
                         b"SIZE" => Ok(it.host.f_info(&name).map(|i| crate::num::int_str(i.size as i64)).unwrap_or_default()),
                         b"DATETIME" => Ok(it.host.f_info(&name).map(|i| i.datetime).unwrap_or_default()),
                         _ => Err(Err::new(40)),

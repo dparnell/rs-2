@@ -20,6 +20,9 @@ pub enum Tok {
     RParen,
     Comma,
     Colon,
+    /// Object REXX: `[` and `]`.
+    LBrack,
+    RBrack,
 }
 
 #[derive(Clone, Debug)]
@@ -55,6 +58,10 @@ impl Token {
     }
     pub fn is_term_start(&self) -> bool {
         matches!(self.tok, Tok::Str { .. } | Tok::Sym(_) | Tok::LParen)
+    }
+    /// A message operator (`~` or `~~`).
+    pub fn is_twiddle(&self) -> bool {
+        matches!(&self.tok, Tok::Op(o) if o.starts_with(b"~"))
     }
 }
 
@@ -145,6 +152,12 @@ fn conv_bin(raw: &[u8]) -> Result<Vec<u8>, Err> {
 /// Split the program into clauses. Fails only on an unterminated comment
 /// (the whole program is unusable then).
 pub fn clauses(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>) -> Result<Vec<RawClause>, (Err, u32)> {
+    clauses_mode(src, spell, false)
+}
+
+/// Split into clauses; `oo`: Object REXX's tokens too (`~`, `~~`, `[`,
+/// `]`).
+pub fn clauses_mode(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>, oo: bool) -> Result<Vec<RawClause>, (Err, u32)> {
     let mut out = Vec::new();
     let mut i = 0;
     let n = src.len();
@@ -280,6 +293,17 @@ pub fn clauses(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>) -> Result<Vec
                 cur.toks.push(Token { tok: Tok::Colon, blank, line });
                 blank = false;
                 i += 1;
+            }
+            b'[' | b']' if oo => {
+                cur.toks.push(Token { tok: if c == b'[' { Tok::LBrack } else { Tok::RBrack }, blank, line });
+                blank = false;
+                i += 1;
+            }
+            b'~' if oo => {
+                let two = i + 1 < n && src[i + 1] == b'~';
+                cur.toks.push(Token { tok: Tok::Op(if two { b"~~" } else { b"~" }), blank, line });
+                blank = false;
+                i += if two { 2 } else { 1 };
             }
             _ if is_sym_char(c) => {
                 let start = i;

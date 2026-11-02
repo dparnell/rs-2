@@ -115,7 +115,7 @@ impl Host for MemHost {
     }
     fn f_open(&mut self, name: &[u8], mode: OpenMode) -> Result<u32, u32> {
         let key = name.to_ascii_uppercase();
-        if !self.files.contains_key(&key) {
+        if !self.files.contains_key(&key) || mode == OpenMode::Replace {
             if mode == OpenMode::Read {
                 return Err(2);
             }
@@ -171,6 +171,13 @@ impl Host for MemHost {
             None
         }
     }
+    fn report_detail(&mut self, _st: &mut State, major: u32, minor: u32, text: &[u8]) {
+        self.out.push(alloc::format!("Error {major}.{minor}: {}", String::from_utf8_lossy(text)));
+    }
+    fn find_program(&mut self, name: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+        let k = name.to_ascii_uppercase();
+        self.files.get(&k).map(|d| (d.clone(), k.clone()))
+    }
     fn f_info(&mut self, name: &[u8]) -> Option<FileInfo> {
         let k = name.to_ascii_uppercase();
         self.files.get(&k).map(|d| FileInfo { size: d.len() as u64, datetime: b"11-02-26 14:05:09".to_vec() })
@@ -194,6 +201,21 @@ pub fn run(src: &str) -> Vec<String> {
 fn say(expr: &str) -> String {
     let out = run(&alloc::format!("say {expr}\n"));
     out.join("|")
+}
+
+/// Run an Object REXX program.
+pub fn run_oo_with(src: &str, h: &mut MemHost) -> (Vec<String>, Result<Option<Vec<u8>>, i32>) {
+    let src = src.replace("\r\n", "\n").replace('\n', "\r\n");
+    let r = {
+        let mut it = Interp::new_oo(h);
+        it.run_program(src.as_bytes(), b"C:\\T.CMD", CallType::Command, Vec::new(), b"CMD")
+    };
+    (core::mem::take(&mut h.out), r)
+}
+
+pub fn run_oo(src: &str) -> Vec<String> {
+    let mut h = MemHost::default();
+    run_oo_with(src, &mut h).0
 }
 
 #[test]
