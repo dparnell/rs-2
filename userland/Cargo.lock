@@ -302,6 +302,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "odtest"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "somsup",
+]
+
+[[package]]
+name = "opendoc-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "somsup",
+]
+
+[[package]]
 name = "orexx-dll"
 version = "0.1.0"
 dependencies = [

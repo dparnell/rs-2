@@ -34,3 +34,5 @@ userland/rexx/REXXTRY.CMD -> OS2\REXXTRY.CMD
 # the system's REXX, WPSINST.CMD registers its Workplace Shell classes.
 userland/rexx/SWITCHRX.CMD -> OS2\SWITCHRX.CMD
 userland/rexx/WPSINST.CMD -> OS2\WPSINST.CMD
+# OpenDoc: OS2\DLL\OPENDOC.DLL (rs2 runtime, docs/OPENDOC.md) is built
+# from userland/opendoc.

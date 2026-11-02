@@ -1,0 +1,14 @@
+[package]
+name = "opendoc-dll"
+description = "OPENDOC.DLL: rs2's OpenDoc for OS/2 runtime (IBM's ordinals, SOM classes in OpenDoc's release orders)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "opendoc"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }

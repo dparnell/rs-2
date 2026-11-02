@@ -567,6 +567,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("shelltest", "RS2\\SHELLTST.EXE"),
         ("initest", "RS2\\INITEST.EXE"),
         ("somtest", "RS2\\SOMTEST.EXE"),
+        ("odtest", "RS2\\ODTEST.EXE"),
         ("wpstest", "RS2\\WPSTEST.EXE"),
         ("wpshell", "RS2\\WPSHELL.EXE"),
         ("audtest", "RS2\\AUDTEST.EXE"),
@@ -707,6 +708,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("somu", "OS2\\DLL\\SOMU.DLL"),
         ("somir", "OS2\\DLL\\SOMIR.DLL"),
         ("somd", "OS2\\DLL\\SOMD.DLL"),
+        ("opendoc", "OS2\\DLL\\OPENDOC.DLL"),
         ("win16", "OS2\\DLL\\WIN16.DLL"),
         // rs2's own PM applets (userland/pmkit is what they share).
         ("clipos2", "OS2\\CLIPOS2.EXE"),
