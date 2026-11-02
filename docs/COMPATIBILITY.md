@@ -318,7 +318,7 @@ copied from the CD.
 
 | `OS2\ICONEDIT.EXE` | Icon Editor | (to come) | |
 
-| `OS2\GLOCALE.EXE` | Locale | (to come) | |
+| `OS2\GLOCALE.EXE` | Locale | the Country Palette of user locales, the notebook's eight pages with samples, Create another, Delete, Mark as default (OS2.INI, DEFAULT.LOC, WIN.INI), Undo and Default, help; Create java locale only says no (no Java) | `GLOCALE /SELFTEST` (0 failures); QEMU screenshots of the palette, every page, a change and Undo, Create another, the pop-up menu, Delete and help |
 
 | `OS2\APPS\KLONDIKE.EXE` | Klondike Solitaire | (to come) | |
 
