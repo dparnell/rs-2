@@ -1014,6 +1014,26 @@ fn dynamic_checks() {
     }
 }
 
+/// `SOMTEST IR class...` (with SOMIR set and SOMIR.DLL at hand): the
+/// class manager finds each class's DLL through the interface
+/// repository's `dllname` modifier.
+fn ir(args: &[u8]) {
+    unsafe {
+        somEnvironmentNew();
+        let locate: extern "C" fn(usize, SomId, i32, i32) -> *const u8 = f(mgr_tok(5));
+        for c in args.split(|&c| c == b' ').filter(|s| !s.is_empty()).skip(1) {
+            let file = cstr(locate(SOMClassMgrObject, sid(c), 0, 0));
+            println!("class {} file {}", core::str::from_utf8(c).unwrap_or("?"), core::str::from_utf8(file).unwrap_or("?"));
+        }
+        let get: extern "C" fn(usize) -> usize = f(mgr_tok(12));
+        let r = get(SOMClassMgrObject);
+        check("_get_somInterfaceRepository", r != 0 && somIsObj(r) != 0);
+        if r != 0 {
+            println!("repository class {}", core::str::from_utf8(cstr(m1(so(0), SOM_GET_CLASS_NAME, r) as *const u8)).unwrap_or("?"));
+        }
+    }
+}
+
 fn load(args: &[u8]) {
     let mut it = args.split(|&c| c == b' ').filter(|s| !s.is_empty());
     let _ = it.next();
@@ -1049,6 +1069,8 @@ fn main(s: &Startup) -> u32 {
     if word.eq_ignore_ascii_case(b"LOAD") {
         load(args);
 
+    } else if word.eq_ignore_ascii_case(b"IR") {
+        ir(args);
     } else if word.eq_ignore_ascii_case(b"BA") {
         before_after();
     } else {

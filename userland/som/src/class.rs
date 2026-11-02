@@ -862,6 +862,8 @@ pub mod cm {
     pub const OVERRIDE_S_METHOD: usize = 20;
     pub const ADD_DYNAMIC_METHOD: usize = 21;
     pub const SET_CLASS_DATA: usize = 28;
+    pub const GET_INSTANCE_SIZE: usize = 12;
+    pub const GET_CLASS_MTAB: usize = 18;
     pub const GET_INSTANCE_TOKEN: usize = 32;
     pub const GET_METHOD_DATA: usize = 35;
     pub const GET_MEMBER_TOKEN: usize = 33;
@@ -884,6 +886,8 @@ pub mod mm {
     pub const UNLOAD_CLASS_FILE: usize = 7;
     pub const GET_INIT_FUNCTION: usize = 8;
     pub const GET_RELATED_CLASSES: usize = 10;
+    pub const GET_INTERFACE_REPOSITORY: usize = 12;
+    pub const SET_INTERFACE_REPOSITORY: usize = 13;
     pub const BEGIN_PERSISTENT_CLASSES: usize = 15;
     pub const END_PERSISTENT_CLASSES: usize = 16;
     pub const REGISTER_THREAD_USAGE: usize = 18;

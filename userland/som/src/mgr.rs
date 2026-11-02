@@ -58,7 +58,13 @@ pub struct Registry {
     pub entries: Vec<Entry>,
     /// somSubstituteClass: lookups of the first name give the class.
     pub subs: Vec<(usize, usize)>,
+    /// The manager's interface repository (its own copy), the
+    /// repository's class, its lookup_modifier, and whether SOMIR was
+    /// looked at.
     pub ir: usize,
+    pub ir_class: usize,
+    pub ir_lookup: usize,
+    pub ir_checked: bool,
     /// After somMergeInto, the manager that took over.
     pub merged_into: usize,
     pub libs: Vec<Lib>,
@@ -83,6 +89,9 @@ unsafe fn reg<'a>(mgr: usize) -> Option<&'a mut Registry> {
                 entries: Vec::new(),
                 subs: Vec::new(),
                 ir: 0,
+                ir_class: 0,
+                ir_lookup: 0,
+                ir_checked: false,
                 merged_into: 0,
                 libs: Vec::new(),
                 group: 0,
@@ -515,9 +524,70 @@ pub extern "C" fn somFindClsInFile(mgr: usize, cid: SomId, major: i32, minor: i3
     c
 }
 
-pub extern "C" fn somLocateClassFile(_mgr: usize, cid: SomId, _major: i32, _minor: i32) -> *const u8 {
-    // No interface repository: a class's DLL has the class's name.
-    id::name_of(cid)
+/// The interface repository's class (SOMIR.DLL's Repository).
+fn ir_class(mgr: usize, r: &mut Registry) -> usize {
+    if r.ir_class == 0 {
+        let rid = id::static_id(b"Repository");
+        r.ir_class = crate::call_mm(mgr, mm::FIND_CLS_IN_FILE, &[mgr as u32, rid as u32, 0, 0, b"somir\0".as_ptr() as u32]) as usize;
+        r.ir_lookup = 0;
+    }
+    r.ir_class
+}
+
+/// A copy of an interface repository object (somDefaultCopyInit into
+/// memory from SOMMalloc, as IBM's class manager keeps and hands out).
+fn ir_copy(cls: usize, ir: usize) -> usize {
+    let size = crate::call_cm(cls, crate::class::cm::GET_INSTANCE_SIZE, &[cls as u32]);
+    let p = crate::malloc(size.max(4)) as usize;
+    if p == 0 {
+        return 0;
+    }
+    unsafe { *(p as *mut usize) = crate::call_cm(cls, crate::class::cm::GET_CLASS_MTAB, &[cls as u32]) as usize };
+    crate::call_om(p, om::DEFAULT_COPY_INIT, &[p as u32, 0, ir as u32]);
+    p
+}
+
+/// somLocateClassFile: the class's DLL as the interface repository's
+/// `dllname` modifier gives it (the repository is used once there is
+/// one, or when SOMIR is set), else the class's name, as IBM's does.
+pub extern "C" fn somLocateClassFile(mgr: usize, cid: SomId, major: i32, minor: i32) -> *const u8 {
+    let t = target(mgr);
+    if t != mgr {
+        return crate::call_mm(t, mm::LOCATE_CLASS_FILE, &[t as u32, cid as u32, major as u32, minor as u32]) as *const u8;
+    }
+    let name = id::name_of(cid);
+    let Some(r) = (unsafe { reg(mgr) }) else { return name };
+    let _g = lock();
+    if r.ir == 0 && !r.ir_checked {
+        let mut v: *const u8 = core::ptr::null();
+        if unsafe { os2::DosScanEnv(b"SOMIR\0".as_ptr(), &mut v) } == 0 && !v.is_null() && unsafe { *v } != 0 {
+            ir_class(mgr, r);
+        }
+    }
+    r.ir_checked = true;
+    if r.ir_class != 0 && r.ir == 0 {
+        r.ir = crate::call_cm(r.ir_class, crate::class::cm::NEW, &[r.ir_class as u32]) as usize;
+    }
+    if r.ir == 0 {
+        return name;
+    }
+    if r.ir_lookup == 0 {
+        r.ir_lookup = crate::somResolveByName(r.ir, b"lookup_modifier\0".as_ptr());
+    }
+    if r.ir_lookup == 0 {
+        return name;
+    }
+    let f: extern "C" fn(usize, *mut crate::Environment, *const u8, *const u8) -> *const u8 =
+        unsafe { core::mem::transmute(r.ir_lookup) };
+    let s = f(r.ir, crate::somGetGlobalEnvironment(), name, b"dllname\0".as_ptr());
+    if s.is_null() || unsafe { *s } == 0 {
+        return name;
+    }
+    let v = unsafe { cstr(s) };
+    let v = if v.len() >= 3 && v[0] == b'"' { &v[1..v.len() - 1] } else { v };
+    let mut out = v.to_vec();
+    out.push(0);
+    leak_vec(out)
 }
 
 pub extern "C" fn somLoadClassFile(mgr: usize, cid: SomId, major: i32, minor: i32, file: *const u8) -> usize {
@@ -595,7 +665,7 @@ pub extern "C" fn somMergeInto(mgr: usize, target_obj: usize) {
     }
     t.subs.extend_from_slice(&r.subs);
     if t.ir == 0 {
-        t.ir = r.ir;
+        (t.ir, t.ir_class, t.ir_lookup, t.ir_checked) = (r.ir, r.ir_class, r.ir_lookup, r.ir_checked);
     }
     t.groups = t.groups.max(r.groups);
     r.merged_into = target_obj;
@@ -631,14 +701,57 @@ pub extern "C" fn get_somRegisteredClasses(ret: *mut Seq, mgr: usize) -> *mut Se
     ret
 }
 
+/// _get_somInterfaceRepository: a copy of the manager's repository (the
+/// caller owns it), made from SOMIR.DLL's Repository on first use.
 pub extern "C" fn get_somInterfaceRepository(mgr: usize) -> usize {
-    unsafe { reg(target(mgr)) }.map_or(0, |r| r.ir)
+    let t = target(mgr);
+    if t != mgr {
+        return crate::call_mm(t, mm::GET_INTERFACE_REPOSITORY, &[t as u32]) as usize;
+    }
+    let Some(r) = (unsafe { reg(mgr) }) else { return 0 };
+    let (copy, cls) = {
+        let _g = lock();
+        let cls = ir_class(mgr, r);
+        if cls == 0 {
+            return 0;
+        }
+        if r.ir == 0 {
+            r.ir = crate::call_cm(cls, crate::class::cm::NEW, &[cls as u32]) as usize;
+        }
+        if r.ir == 0 {
+            return 0;
+        }
+        (ir_copy(cls, r.ir), cls)
+    };
+    if copy != 0 {
+        crate::call_mm(mgr, mm::REGISTER_THREAD_USAGE, &[mgr as u32, cls as u32]);
+    }
+    copy
 }
 
+/// _set_somInterfaceRepository: the manager keeps its own copy (the old
+/// one is freed).
 pub extern "C" fn set_somInterfaceRepository(mgr: usize, ir: usize) {
-    if let Some(r) = unsafe { reg(target(mgr)) } {
-        r.ir = ir;
+    let t = target(mgr);
+    if t != mgr {
+        crate::call_mm(t, mm::SET_INTERFACE_REPOSITORY, &[t as u32, ir as u32]);
+        return;
     }
+    let Some(r) = (unsafe { reg(mgr) }) else { return };
+    let _g = lock();
+    if ir == r.ir {
+        return;
+    }
+    let old = core::mem::take(&mut r.ir);
+    if old != 0 {
+        crate::call_om(old, om::SOM_FREE, &[old as u32]);
+    }
+    if ir != 0 {
+        let cls = crate::call_om(ir, om::GET_CLASS, &[ir as u32]) as usize;
+        r.ir_class = cls;
+        r.ir = ir_copy(cls, ir);
+    }
+    r.ir_lookup = 0;
 }
 
 /// somRegisterClassLibrary: a class library loaded by the system (its
