@@ -75,7 +75,18 @@ name = "midi"
 version = "0.1.0"
 
 [[package]]
+name = "mkmsgf"
+version = "0.1.0"
+dependencies = [
+ "msgf",
+]
+
+[[package]]
 name = "mmfmt"
+version = "0.1.0"
+
+[[package]]
+name = "msgf"
 version = "0.1.0"
 
 [[package]]
