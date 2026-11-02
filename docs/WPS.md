@@ -37,7 +37,7 @@ by name.
 | PMWP.DLL | 1 MB | All the base classes (below), the desktop, folders, settings notebooks, drag and drop, the object thread, the lazy writer; 379 exports |
 | PMWPMRI.DLL | 54 KB | PMWP's texts, menus, dialogs |
 | SOM.DLL | 92 KB | The SOM 2.1 kernel: SOMObject, SOMClass, SOMClassMgr, somBuildClass, method resolution, ids, the environment; imports only DOSCALLS, MSG and NLS |
-| SOMU.DLL | 81 KB | SOM utility classes; PMWP uses only SOMMBeforeAfter |
+| SOMU.DLL | 81 KB | SOM utility classes; PMWP uses only SOMMBeforeAfter (rs2's: [below](#rs2s-somtc-somu-and-somir)) |
 | WPCONFIG.DLL | 268 KB | The System Setup objects (System, Keyboard, Mouse, Sound, Country, Font and Colour Palettes, ...) |
 | WPPRINT.DLL | 367 KB | Printer, Job, Port, Queue and Printer Driver objects |
 | BDWPCLS.DLL, BDCALL32.DLL | | Bidirectional-language pages (called by PMWP) |
@@ -325,6 +325,106 @@ SOMMBeforeAfter, SOMMSingleInstance, SOMMTraced, SOMBuf) and SOMIR.DLL's
 interface repository classes load and work on rs2's SOM. Freeing an
 uninitialized repository object faults on both SOMs alike.
 
+
+## rs2's SOMTC, SOMU and SOMIR
+
+SOM's class libraries, binary compatible with IBM's (studied in IBM's DLLs
+with Ghidra: there are no symbols for them, the class structures came from
+each `somStaticClassInfo`): the same module names and ordinals, the same
+exported class data (IBM's class data order, which for some classes is
+not the IDL's release order: SOMMCooperative, SOMMTraced, Contained,
+Container, SubRepository), each class's parents, metaclass, version and
+instance data size, and IBM's calling conventions (a few exports are
+VisualAge C++'s `_Optlink`: arguments in EAX, EDX, ECX). `userland/somsup`
+is what they share: SOM.DLL's calls and the class building
+(`somBuildClass` with layout-4 static class information, as compiler
+output does; methods returning structures get a `somApRdInfo` saying so,
+which rs2's SOM needs to make their tokens take the object after the
+result's address).
+
+| DLL | What it has |
+|-----|-------------|
+| SOMTC.DLL (`userland/somtc`) | TypeCodes: IBM's layout (`{ kind, alignment, 1, flags, parameters }`), tcNew/tcNewVL, tcKind, tcSize, tcAlignment (VisualAge's default packing: double 4), tcEqual, tcParameter, tcParmCount, tcCopy (one block), tcFree, tcSetAlignment (constants are never changed), tcPrint (IBM's text), tcSequenceNew, tcSeqFromListString, the `TC__` constants and the repository's description TypeCodes, the TCMalloc variables |
+| SOMU.DLL (`userland/somu`) | All 16 classes and IBM's private SOMMProxy metaclasses: SOMMBeforeAfter, SOMMTraced, SOMMSingleInstance, the cooperative metaclasses, SOMBuf (IBM's gap buffer), somutMsgManager, SOMUTId/SOMUTStringId, SOMDesc and SOMArgList; UUIDs, the SOMStartThread variables, the heap watcher (somWatchStart puts `somwatch*` into SOMMalloc & co.) |
+| SOMIR.DLL (`userland/somir`) | The interface repository read from IBM's `.IR` files ([formats/som-ir.md](formats/som-ir.md)), the files `SOMIR` lists (rs2's CONFIG.SYS: `C:\OS2\ETC\SOM.IR`; no IR file is shipped) |
+
+**Before/after metaclasses.** IBM's SOMMBeforeAfter is built on its
+cooperative metaclass framework: SOMMCooperativeRedispatched's
+somClassReady points the class's method table at redispatch stubs, the
+stubs call somDispatch, and the metaclass's cooperative somDispatch calls
+the before methods, the method (found in a "sister class", a copy made
+with SOM's private class methods) and the after methods. rs2's SOMU keeps
+the classes but does the work directly: SOMMCooperativeRedispatched's
+somClassReady replaces each method of the class (except the dispatch
+methods, and somInit/somUninit, which rs2's SOM keeps as legacy
+initializers) with a stub (`push wrap; jmp ba_entry`). For an instance
+whose class's metaclass descends from SOMMBeforeAfter the stub calls the
+sommBeforeMethod implementations (`(class, ev, object, methodId, ap)`, ap
+pointing at the object among the arguments), in IBM's dispatcher order
+(sommSetBAMethodSeq: a metaclass's own, else its parents' left to right;
+the after methods right to left), the method if every before method
+returned TRUE, and the after methods of those that ran, in reverse, with
+the result's address (EAX:EDX, or ST0 when a floating point value came
+back). The method runs on the caller's arguments: the stub swaps the
+return address for its own and keeps the real one on a per-thread stack.
+SOMMTraced prints, in IBM's formats, `method( Class at 0x..., arguments
+) called` and `method returns value` when `SOMM_TRACED` is empty or names
+the class; the arguments and the result come from the interface
+repository through SOMDesc (`somIsA( Traced at 0x00086aa8, SOMMTraced at
+0x00086ab8 ) called`, `somGetClassName returns "Traced"`), else `, ...`.
+A method without a descriptor (rs2's SOM gives SOM's own methods none) is
+looked up as `IntroducingClass::method`, the class from its token. IBM's SOMU on rs2's SOM cannot do this:
+its framework needs SOM's private class methods (somcPrivate2, sister
+classes), which rs2's SOM.DLL does not have.
+
+**SOMMSingleInstance:** SOMMProxy::HiddenClassMeta's somNew and
+somNewNoInit return the class's one instance, counting references;
+somFree on it (put in the class's method table at somClassReady) frees it
+with the last one, as IBM's.
+
+**The interface repository.** A Repository (`somNew` on Repository, or
+M_Repository's createRepository) reads the files once; one SubRepository
+per file holds its top level. Definitions are made from their records
+when first looked up and kept (somFree counts down a use, as IBM's does
+until the last); getters return the object's own strings and TypeCodes;
+`describe` returns a description whose value is one SOMMalloc'd block
+(the structure, its strings and TypeCode copies), as IBM's. Lookups
+follow IBM's internalNameLookup: `lookup_name` with levels 1 searches the
+container, -1 also nested modules, interfaces and operations, both also
+the enclosing scopes; an interface's contents include its base
+interfaces' unless `exclude_inherited`; `within` of something in an
+interface lists the interface and the interfaces derived from it.
+Updates (saveIR, irEnableUpdates) change nothing on disk.
+
+**SOMDesc and SOMArgList** describe a method from the repository (its
+OperationDef, or the AttributeDef of a `_get_`/`_set_` accessor, the
+interface's `callstyle`: idl 2, oidl 1) and take a call's arguments apart
+with it (IBM's: the environment first for idl, floating point arguments 8
+bytes). SOMDesc's argument sizes are the TypeCodes' sizes.
+
+Not done: SOMCommand (a method call written out as text, for DSOM and
+the persistence framework) and the externalization functions built on it
+fail (-1), as do SOMDesc's cache and ownership methods and SOMArgList's
+somutGetArgs/somutSetArgs; SOMIR does not write `.IR` files; IBM's private methods (the record allocator, the persistence
+helpers) are entries that return 0. SOM.DLL does not use the repository
+yet (IBM's finds a class's DLL with `lookup_modifier(class, "dllname")`
+and makes `SOMClassMgr::somInterfaceRepository` on first use).
+
+**Tests.** `RS2\SOMTEST.EXE` checks TypeCodes (SOMTC), every SOMU
+class's name, parent, class data and class data order, a before/after
+metaclass (before and after called once, the result seen by the after
+method, a before method returning FALSE skipping the method), SOMMTraced's
+output (with rs2's SOMU: IBM's faults in its tracer on SOMTEST's class
+after tracing its somDefaultInit the same way), a single
+instance class, SOMBuf and UUIDs, and, when `SOMIR` is set, the
+repository against IBM's SOM.IR (lookups, modifiers, descriptions,
+inherited operations, an attribute, a TypeDef and a ConstantDef). Run
+from a directory holding IBM's SOM, SOMTC, SOMU and SOMIR the same checks
+pass (IBM's SOMU and SOMIR on rs2's SOM load their classes, but IBM's
+before/after machinery needs IBM's SOM). IBM's SOMEM.DLL (the event
+manager, a SOMMSingleInstance class) loads and makes its SOMEEMan on
+rs2's SOMU (`SOMTEST LOAD SOMEM SOMEEMan`). `tools/scripts/irdump.py`
+prints an `.IR` file.
 
 ## rs2's Workplace Shell classes
 

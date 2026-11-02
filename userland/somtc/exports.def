@@ -1,0 +1,55 @@
+; SOMTC.DLL with IBM's ordinals (OS/2 Warp 4.52's SOMTC.DLL)
+; the TypeCode constants
+TC__ushort=TC__ushort @1
+TC__string=TC__string @2
+TC__ConstDescription=TC__ConstDescription @3
+TC__TypeDescription=TC__TypeDescription @4
+TC__ModuleDescription=TC__ModuleDescription @5
+TC__boolean=TC__boolean @9
+TC__TypeCode=TC__TypeCode @10
+TC__Principal=TC__Principal @12
+TC__NamedValue=TC__NamedValue @16
+TC__InterfaceDescription=TC__InterfaceDescription @17
+TC__OperationDescription=TC__OperationDescription @18
+TC__ExceptionDescription=TC__ExceptionDescription @19
+TC__ParameterDescription=TC__ParameterDescription @20
+TC__AttributeDescription=TC__AttributeDescription @21
+TC__RepositoryDescription=TC__RepositoryDescription @23
+TC__FullInterfaceDescription=TC__FullInterfaceDescription @34
+TC__char=TC__char @37
+TC__any=TC__any @38
+TC__void=TC__void @39
+TC__long=TC__long @40
+TC__null=TC__null @42
+TC__float=TC__float @44
+TC__ulong=TC__ulong @45
+TC__octet=TC__octet @46
+TC__short=TC__short @47
+TC__Object=TC__Object @48
+TC__double=TC__double @50
+; the replaceable allocator
+TCCalloc=TCCalloc @32
+TCFree=TCFree @24
+TCMalloc=TCMalloc @36
+TCRealloc=TCRealloc @43
+; functions (_System)
+tcAlignment=__a_tcAlignment @6
+tcParameter=__a_tcParameter @7
+tcParmCount=__a_tcParmCount @8
+tcSequenceNew=__a_tcSequenceNew @11
+tcSetAlignment=__a_tcSetAlignment @15
+tcNew=__v_tcNew @22
+tcFree=__a_tcFree @25
+tcKind=__a_tcKind @26
+tciSetException=__a_tciSetException @27
+tcCopy=__a_tcCopy @28
+tcSize=__a_tcSize @29
+tcEqual=__a_tcEqual @31
+tcNewVL=__a_tcNewVL @33
+tcPrint=__a_tcPrint @35
+tciPrintf=__v_tciPrintf @41
+tcSeqFromListString=__a_tcSeqFromListString @49
+; IBM's _Optlink entries (arguments in EAX, EDX, ECX)
+tcBufferLength=__o_tcBufferLength @13
+tcCopyToBuffer=__o_tcCopyToBuffer @14
+tcDefaultAlignment=__o_tcDefaultAlignment @30

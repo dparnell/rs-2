@@ -22,6 +22,10 @@ use alloc::vec::Vec;
 
 use os2::*;
 
+mod libs;
+mod somir;
+mod somu;
+
 os2::entry!(main);
 
 type SomId = *mut *const u8;
@@ -503,6 +507,12 @@ fn check_eq(name: &str, got: i64, want: i64) {
     }
 }
 
+fn z(s: &[u8]) -> Vec<u8> {
+    let mut v = s.to_vec();
+    v.push(0);
+    v
+}
+
 fn cstr(p: *const u8) -> &'static [u8] {
     if p.is_null() {
         return b"(null)";
@@ -629,6 +639,9 @@ fn run() {
         check("SOMMalloc", !mem.is_null());
         (SOMFree)(mem);
     }
+    libs::somtc();
+    somu::run();
+    somir::run();
 }
 
 fn load(args: &[u8]) {

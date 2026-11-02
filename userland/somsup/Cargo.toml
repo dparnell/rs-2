@@ -1,0 +1,9 @@
+[package]
+name = "somsup"
+description = "What rs2's SOM class libraries (SOMTC, SOMU, SOMIR) share: SOM.DLL's calls, class building as SOM compiler output does it, method calls through tokens"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

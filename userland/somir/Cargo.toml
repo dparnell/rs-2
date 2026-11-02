@@ -1,0 +1,14 @@
+[package]
+name = "somir-dll"
+description = "SOMIR.DLL: SOM 2.1's interface repository (Repository, Contained, Container, InterfaceDef, ...) reading IBM's .IR files"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "somir"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }

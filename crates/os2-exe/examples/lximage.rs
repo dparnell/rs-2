@@ -105,16 +105,22 @@ fn main() {
                 }
                 let value = match f.target {
                     Target::Internal { object, offset } => {
-                        objects[object as usize - 1].base.wrapping_add(offset)
+                        objects[object as usize - 1].base.wrapping_add(offset).wrapping_add(f.additive)
                     }
-                    Target::InternalEntry { ordinal } => entry_addr(ordinal),
+                    Target::InternalEntry { ordinal } => entry_addr(ordinal).wrapping_add(f.additive),
                     ref t => {
-                        let name = import_name(t).unwrap();
+                        // An import with an additive (a field of an imported
+                        // structure: SOMClassClassData + 4) gets a slot of
+                        // its own, named so, rather than landing on the slot
+                        // of whatever import follows.
+                        let mut name = import_name(t).unwrap();
+                        if f.additive != 0 {
+                            name = format!("{name}+{:#x}", f.additive);
+                        }
                         let n = imports.len() as u32;
                         *imports.entry(name).or_insert(imports_base + n * 4)
                     }
-                }
-                .wrapping_add(f.additive);
+                };
                 for &s in &f.sources {
                     let at = page_at + s as i64;
                     if at < 0 {
@@ -176,7 +182,7 @@ fn main() {
         }
     }
     for (name, a) in &imports {
-        writeln!(syms, "{a:#010x} imp_{}", name.replace('.', "_")).unwrap();
+        writeln!(syms, "{a:#010x} imp_{}", name.replace('.', "_").replace('+', "_plus_")).unwrap();
     }
     if let Some(sym) = args.get(2) {
         let s = std::fs::read(sym).expect("read sym");
