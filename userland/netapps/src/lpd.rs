@@ -55,6 +55,11 @@ pub fn parse(a: &[String], flags_with_value: &[&str]) -> Result<(Target, Vec<(St
         }
         i += 1;
     }
+    // `printer@server` as an argument of its own.
+    let printer = printer.or_else(|| {
+        let i = rest.iter().position(|r| r.contains('@') && !r.starts_with('@'))?;
+        Some(rest.remove(i))
+    });
     let mut printer = printer.or_else(|| env("LPR_PRINTER")).unwrap_or_default();
     let mut server = server.or_else(|| env("LPR_SERVER")).unwrap_or_default();
     if let Some((p, s)) = printer.clone().split_once('@') {
