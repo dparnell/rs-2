@@ -609,6 +609,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("restore", "OS2\\RESTORE.EXE"),
         ("pstat", "OS2\\PSTAT.EXE"),
         ("eautil", "OS2\\EAUTIL.EXE"),
+        ("utiltest", "RS2\\UTILTEST.EXE"),
         ("unpack", "OS2\\UNPACK.EXE"),
         ("unpack", "OS2\\UNPACK2.EXE"),
         ("pack", "OS2\\PACK.EXE"),
