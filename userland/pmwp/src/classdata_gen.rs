@@ -8,9 +8,165 @@ pub static mut M_WPObjectClassData: [usize; 46] = [0; 46];
 #[unsafe(no_mangle)]
 pub static mut M_WPObjectCClassData: [usize; 8] = [0; 8];
 #[unsafe(no_mangle)]
+pub static mut WPObjectClassData: [usize; 166] = [0; 166];
+#[unsafe(no_mangle)]
+pub static mut WPObjectCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut M_WPFileSystemClassData: [usize; 7] = [0; 7];
+#[unsafe(no_mangle)]
+pub static mut M_WPFileSystemCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut WPFileSystemClassData: [usize; 44] = [0; 44];
+#[unsafe(no_mangle)]
+pub static mut WPFileSystemCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut M_WPDataFileClassData: [usize; 3] = [0; 3];
+#[unsafe(no_mangle)]
+pub static mut M_WPDataFileCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut WPDataFileClassData: [usize; 31] = [0; 31];
+#[unsafe(no_mangle)]
+pub static mut WPDataFileCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut M_MMDataFileClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut M_MMDataFileCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMDataFileClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMDataFileCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMAudioClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMAudioCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMAIFClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMAIFCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMAUClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMAUCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMImageClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMImageCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMAVCClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMAVCCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMVideoClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMVideoCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMAVIClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMAVICClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
 pub static mut M_WPAbstractClassData: [usize; 6] = [0; 6];
 #[unsafe(no_mangle)]
 pub static mut M_WPAbstractCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut WPAbstractClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut WPAbstractCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMDeviceClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMDeviceCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMCDDeviceClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMCDDeviceCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMDIBClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMDIBCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMFLIClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMFLICClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut M_WPFolderClassData: [usize; 7] = [0; 7];
+#[unsafe(no_mangle)]
+pub static mut M_WPFolderCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut WPFolderClassData: [usize; 109] = [0; 109];
+#[unsafe(no_mangle)]
+pub static mut WPFolderCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMFolderClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMFolderCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMGIFClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMGIFCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMIFFClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMIFFCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMJPGClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMJPGCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMLVDDeviceClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMLVDDeviceCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMMIDIClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMMIDICClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMMMotionClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMMMotionCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMMOVClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMMOVCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMMPGClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMMPGCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMPCXClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMPCXCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMPhotoCDClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMPhotoCDCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMSNDFClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMSNDFCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMTIFFClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMTIFFCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMTargaClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMTargaCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMVOCClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMVOCCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMVolumeClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMVolumeCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MMWAVClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MMWAVCClassData: [usize; 8] = [0; 8];
+#[unsafe(no_mangle)]
+pub static mut MM_AUClassData: [usize; 1] = [0; 1];
+#[unsafe(no_mangle)]
+pub static mut MM_AUCClassData: [usize; 8] = [0; 8];
 #[unsafe(no_mangle)]
 pub static mut M_WPBitmapClassData: [usize; 1] = [0; 1];
 #[unsafe(no_mangle)]
@@ -28,14 +184,6 @@ pub static mut M_WPColorPaletteClassData: [usize; 1] = [0; 1];
 #[unsafe(no_mangle)]
 pub static mut M_WPColorPaletteCClassData: [usize; 8] = [0; 8];
 #[unsafe(no_mangle)]
-pub static mut M_WPFileSystemClassData: [usize; 7] = [0; 7];
-#[unsafe(no_mangle)]
-pub static mut M_WPFileSystemCClassData: [usize; 8] = [0; 8];
-#[unsafe(no_mangle)]
-pub static mut M_WPDataFileClassData: [usize; 3] = [0; 3];
-#[unsafe(no_mangle)]
-pub static mut M_WPDataFileCClassData: [usize; 8] = [0; 8];
-#[unsafe(no_mangle)]
 pub static mut M_WPProgramFileClassData: [usize; 1] = [0; 1];
 #[unsafe(no_mangle)]
 pub static mut M_WPProgramFileCClassData: [usize; 8] = [0; 8];
@@ -43,10 +191,6 @@ pub static mut M_WPProgramFileCClassData: [usize; 8] = [0; 8];
 pub static mut M_WPCommandFileClassData: [usize; 1] = [0; 1];
 #[unsafe(no_mangle)]
 pub static mut M_WPCommandFileCClassData: [usize; 8] = [0; 8];
-#[unsafe(no_mangle)]
-pub static mut M_WPFolderClassData: [usize; 7] = [0; 7];
-#[unsafe(no_mangle)]
-pub static mut M_WPFolderCClassData: [usize; 8] = [0; 8];
 #[unsafe(no_mangle)]
 pub static mut M_WPDesktopClassData: [usize; 4] = [0; 4];
 #[unsafe(no_mangle)]
@@ -188,14 +332,6 @@ pub static mut M_WPUrlFolderClassData: [usize; 1] = [0; 1];
 #[unsafe(no_mangle)]
 pub static mut M_WPUrlFolderCClassData: [usize; 8] = [0; 8];
 #[unsafe(no_mangle)]
-pub static mut WPObjectClassData: [usize; 166] = [0; 166];
-#[unsafe(no_mangle)]
-pub static mut WPObjectCClassData: [usize; 8] = [0; 8];
-#[unsafe(no_mangle)]
-pub static mut WPAbstractClassData: [usize; 1] = [0; 1];
-#[unsafe(no_mangle)]
-pub static mut WPAbstractCClassData: [usize; 8] = [0; 8];
-#[unsafe(no_mangle)]
 pub static mut MindexClassData: [usize; 1] = [0; 1];
 #[unsafe(no_mangle)]
 pub static mut MindexCClassData: [usize; 8] = [0; 8];
@@ -232,14 +368,6 @@ pub static mut WPColorPaletteClassData: [usize; 1] = [0; 1];
 #[unsafe(no_mangle)]
 pub static mut WPColorPaletteCClassData: [usize; 8] = [0; 8];
 #[unsafe(no_mangle)]
-pub static mut WPFileSystemClassData: [usize; 44] = [0; 44];
-#[unsafe(no_mangle)]
-pub static mut WPFileSystemCClassData: [usize; 8] = [0; 8];
-#[unsafe(no_mangle)]
-pub static mut WPDataFileClassData: [usize; 31] = [0; 31];
-#[unsafe(no_mangle)]
-pub static mut WPDataFileCClassData: [usize; 8] = [0; 8];
-#[unsafe(no_mangle)]
 pub static mut WPProgramFileClassData: [usize; 24] = [0; 24];
 #[unsafe(no_mangle)]
 pub static mut WPProgramFileCClassData: [usize; 8] = [0; 8];
@@ -247,10 +375,6 @@ pub static mut WPProgramFileCClassData: [usize; 8] = [0; 8];
 pub static mut WPCommandFileClassData: [usize; 1] = [0; 1];
 #[unsafe(no_mangle)]
 pub static mut WPCommandFileCClassData: [usize; 8] = [0; 8];
-#[unsafe(no_mangle)]
-pub static mut WPFolderClassData: [usize; 109] = [0; 109];
-#[unsafe(no_mangle)]
-pub static mut WPFolderCClassData: [usize; 8] = [0; 8];
 #[unsafe(no_mangle)]
 pub static mut WPDesktopClassData: [usize; 21] = [0; 21];
 #[unsafe(no_mangle)]
@@ -401,392 +525,516 @@ pub extern "C" fn M_WPObjectNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(0, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPAbstractNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPObjectNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(1, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPBitmapNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPFileSystemNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(2, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPClockNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPFileSystemNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(3, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPPaletteNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPDataFileNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(4, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPColorPaletteNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPDataFileNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(5, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPFileSystemNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_MMDataFileNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(6, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPDataFileNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMDataFileNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(7, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPProgramFileNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMAudioNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(8, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPCommandFileNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMAIFNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(9, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPFolderNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMAUNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(10, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPDesktopNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMImageNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(11, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPDiskNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMAVCNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(12, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPDrivesNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMVideoNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(13, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPFontPaletteNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMAVINewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(14, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPIconNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPAbstractNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(15, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPTransientNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPAbstractNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(16, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPJobNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMDeviceNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(17, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPKeyboardNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMCDDeviceNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(18, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPLaunchPadNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMDIBNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(19, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPMetNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMFLINewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(20, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPMinWinViewerNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPFolderNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(21, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPMouseNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPFolderNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(22, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPShadowNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMFolderNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(23, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPNetLinkNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMGIFNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(24, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPNetgrpNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMIFFNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(25, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPNetworkNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMJPGNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(26, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPPdrNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMLVDDeviceNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(27, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPPifNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMMIDINewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(28, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPPointerNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMMMotionNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(29, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPPortNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMMOVNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(30, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPPrinterNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMMPGNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(31, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPProgramNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMPCXNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(32, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPQdrNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMPhotoCDNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(33, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPRootFolderNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMSNDFNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(34, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPSchemePaletteNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMTIFFNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(35, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPServerNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMTargaNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(36, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPSharedDirNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMVOCNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(37, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPShredderNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMVolumeNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(38, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPSoundNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MMWAVNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(39, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPSpoolNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MM_AUNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(40, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPStartupNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPBitmapNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(41, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPSystemNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPClockNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(42, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPTemplatesNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPPaletteNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(43, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPUrlNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPColorPaletteNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(44, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn M_WPUrlFolderNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPProgramFileNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(45, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPObjectNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPCommandFileNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(46, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPAbstractNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPDesktopNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(47, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn MindexNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPDiskNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(48, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn RS2ShutdownNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPDrivesNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(49, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn RS2SystemNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPFontPaletteNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(50, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn RS2WindowListNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPIconNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(51, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPBitmapNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPTransientNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(52, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPClassManagerNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPJobNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(53, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPClockNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPKeyboardNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(54, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPPaletteNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPLaunchPadNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(55, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPColorPaletteNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPMetNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(56, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPFileSystemNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPMinWinViewerNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(57, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPDataFileNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPMouseNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(58, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPProgramFileNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPShadowNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(59, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPCommandFileNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPNetLinkNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(60, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPFolderNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPNetgrpNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(61, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPDesktopNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPNetworkNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(62, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPDiskNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPPdrNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(63, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPDrivesNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPPifNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(64, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPFontPaletteNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPPointerNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(65, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPIconNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPPortNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(66, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPTransientNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPPrinterNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(67, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPJobNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPProgramNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(68, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPKeyboardNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPQdrNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(69, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPLaunchPadNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPRootFolderNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(70, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPMetNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPSchemePaletteNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(71, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPMinWinViewerNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPServerNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(72, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPMinWindowNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPSharedDirNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(73, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPMouseNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPShredderNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(74, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPShadowNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPSoundNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(75, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPNetLinkNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPSpoolNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(76, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPNetgrpNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPStartupNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(77, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPNetworkNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPSystemNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(78, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPPdrNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPTemplatesNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(79, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPPifNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPUrlNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(80, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPPointerNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn M_WPUrlFolderNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(81, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPPortNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn MindexNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(82, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPPrinterNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn RS2ShutdownNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(83, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPProgramNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn RS2SystemNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(84, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPQdrNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn RS2WindowListNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(85, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPRootFolderNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPBitmapNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(86, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPSchemePaletteNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPClassManagerNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(87, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPServerNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPClockNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(88, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPSharedDirNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPPaletteNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(89, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPShredderNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPColorPaletteNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(90, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPSoundNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPProgramFileNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(91, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPSpoolNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPCommandFileNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(92, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPStartupNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPDesktopNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(93, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPSystemNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPDiskNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(94, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPTemplatesNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPDrivesNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(95, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPUrlNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPFontPaletteNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(96, major, minor)
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn WPUrlFolderNewClass(major: i32, minor: i32) -> usize {
+pub extern "C" fn WPIconNewClass(major: i32, minor: i32) -> usize {
     crate::wps::new_class(97, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPTransientNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(98, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPJobNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(99, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPKeyboardNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(100, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPLaunchPadNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(101, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPMetNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(102, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPMinWinViewerNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(103, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPMinWindowNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(104, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPMouseNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(105, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPShadowNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(106, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPNetLinkNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(107, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPNetgrpNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(108, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPNetworkNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(109, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPPdrNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(110, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPPifNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(111, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPPointerNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(112, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPPortNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(113, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPPrinterNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(114, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPProgramNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(115, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPQdrNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(116, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPRootFolderNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(117, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPSchemePaletteNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(118, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPServerNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(119, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPSharedDirNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(120, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPShredderNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(121, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPSoundNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(122, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPSpoolNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(123, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPStartupNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(124, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPSystemNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(125, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPTemplatesNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(126, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPUrlNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(127, major, minor)
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn WPUrlFolderNewClass(major: i32, minor: i32) -> usize {
+    crate::wps::new_class(128, major, minor)
 }
 
 /// The class data of CLASSES[i]: ClassData, its length, CClassData.
@@ -794,103 +1042,134 @@ pub fn class_data(i: usize) -> (*mut usize, usize, *mut usize) {
     unsafe {
         match i {
             0 => ((&raw mut M_WPObjectClassData) as *mut usize, 46, (&raw mut M_WPObjectCClassData) as *mut usize),
-            1 => ((&raw mut M_WPAbstractClassData) as *mut usize, 6, (&raw mut M_WPAbstractCClassData) as *mut usize),
-            2 => ((&raw mut M_WPBitmapClassData) as *mut usize, 1, (&raw mut M_WPBitmapCClassData) as *mut usize),
-            3 => ((&raw mut M_WPClockClassData) as *mut usize, 1, (&raw mut M_WPClockCClassData) as *mut usize),
-            4 => ((&raw mut M_WPPaletteClassData) as *mut usize, 2, (&raw mut M_WPPaletteCClassData) as *mut usize),
-            5 => ((&raw mut M_WPColorPaletteClassData) as *mut usize, 1, (&raw mut M_WPColorPaletteCClassData) as *mut usize),
-            6 => ((&raw mut M_WPFileSystemClassData) as *mut usize, 7, (&raw mut M_WPFileSystemCClassData) as *mut usize),
-            7 => ((&raw mut M_WPDataFileClassData) as *mut usize, 3, (&raw mut M_WPDataFileCClassData) as *mut usize),
-            8 => ((&raw mut M_WPProgramFileClassData) as *mut usize, 1, (&raw mut M_WPProgramFileCClassData) as *mut usize),
-            9 => ((&raw mut M_WPCommandFileClassData) as *mut usize, 1, (&raw mut M_WPCommandFileCClassData) as *mut usize),
-            10 => ((&raw mut M_WPFolderClassData) as *mut usize, 7, (&raw mut M_WPFolderCClassData) as *mut usize),
-            11 => ((&raw mut M_WPDesktopClassData) as *mut usize, 4, (&raw mut M_WPDesktopCClassData) as *mut usize),
-            12 => ((&raw mut M_WPDiskClassData) as *mut usize, 1, (&raw mut M_WPDiskCClassData) as *mut usize),
-            13 => ((&raw mut M_WPDrivesClassData) as *mut usize, 1, (&raw mut M_WPDrivesCClassData) as *mut usize),
-            14 => ((&raw mut M_WPFontPaletteClassData) as *mut usize, 1, (&raw mut M_WPFontPaletteCClassData) as *mut usize),
-            15 => ((&raw mut M_WPIconClassData) as *mut usize, 1, (&raw mut M_WPIconCClassData) as *mut usize),
-            16 => ((&raw mut M_WPTransientClassData) as *mut usize, 3, (&raw mut M_WPTransientCClassData) as *mut usize),
-            17 => ((&raw mut M_WPJobClassData) as *mut usize, 2, (&raw mut M_WPJobCClassData) as *mut usize),
-            18 => ((&raw mut M_WPKeyboardClassData) as *mut usize, 1, (&raw mut M_WPKeyboardCClassData) as *mut usize),
-            19 => ((&raw mut M_WPLaunchPadClassData) as *mut usize, 1, (&raw mut M_WPLaunchPadCClassData) as *mut usize),
-            20 => ((&raw mut M_WPMetClassData) as *mut usize, 1, (&raw mut M_WPMetCClassData) as *mut usize),
-            21 => ((&raw mut M_WPMinWinViewerClassData) as *mut usize, 1, (&raw mut M_WPMinWinViewerCClassData) as *mut usize),
-            22 => ((&raw mut M_WPMouseClassData) as *mut usize, 1, (&raw mut M_WPMouseCClassData) as *mut usize),
-            23 => ((&raw mut M_WPShadowClassData) as *mut usize, 1, (&raw mut M_WPShadowCClassData) as *mut usize),
-            24 => ((&raw mut M_WPNetLinkClassData) as *mut usize, 1, (&raw mut M_WPNetLinkCClassData) as *mut usize),
-            25 => ((&raw mut M_WPNetgrpClassData) as *mut usize, 1, (&raw mut M_WPNetgrpCClassData) as *mut usize),
-            26 => ((&raw mut M_WPNetworkClassData) as *mut usize, 1, (&raw mut M_WPNetworkCClassData) as *mut usize),
-            27 => ((&raw mut M_WPPdrClassData) as *mut usize, 1, (&raw mut M_WPPdrCClassData) as *mut usize),
-            28 => ((&raw mut M_WPPifClassData) as *mut usize, 1, (&raw mut M_WPPifCClassData) as *mut usize),
-            29 => ((&raw mut M_WPPointerClassData) as *mut usize, 1, (&raw mut M_WPPointerCClassData) as *mut usize),
-            30 => ((&raw mut M_WPPortClassData) as *mut usize, 1, (&raw mut M_WPPortCClassData) as *mut usize),
-            31 => ((&raw mut M_WPPrinterClassData) as *mut usize, 1, (&raw mut M_WPPrinterCClassData) as *mut usize),
-            32 => ((&raw mut M_WPProgramClassData) as *mut usize, 1, (&raw mut M_WPProgramCClassData) as *mut usize),
-            33 => ((&raw mut M_WPQdrClassData) as *mut usize, 1, (&raw mut M_WPQdrCClassData) as *mut usize),
-            34 => ((&raw mut M_WPRootFolderClassData) as *mut usize, 1, (&raw mut M_WPRootFolderCClassData) as *mut usize),
-            35 => ((&raw mut M_WPSchemePaletteClassData) as *mut usize, 1, (&raw mut M_WPSchemePaletteCClassData) as *mut usize),
-            36 => ((&raw mut M_WPServerClassData) as *mut usize, 1, (&raw mut M_WPServerCClassData) as *mut usize),
-            37 => ((&raw mut M_WPSharedDirClassData) as *mut usize, 1, (&raw mut M_WPSharedDirCClassData) as *mut usize),
-            38 => ((&raw mut M_WPShredderClassData) as *mut usize, 1, (&raw mut M_WPShredderCClassData) as *mut usize),
-            39 => ((&raw mut M_WPSoundClassData) as *mut usize, 1, (&raw mut M_WPSoundCClassData) as *mut usize),
-            40 => ((&raw mut M_WPSpoolClassData) as *mut usize, 1, (&raw mut M_WPSpoolCClassData) as *mut usize),
-            41 => ((&raw mut M_WPStartupClassData) as *mut usize, 1, (&raw mut M_WPStartupCClassData) as *mut usize),
-            42 => ((&raw mut M_WPSystemClassData) as *mut usize, 1, (&raw mut M_WPSystemCClassData) as *mut usize),
-            43 => ((&raw mut M_WPTemplatesClassData) as *mut usize, 1, (&raw mut M_WPTemplatesCClassData) as *mut usize),
-            44 => ((&raw mut M_WPUrlClassData) as *mut usize, 1, (&raw mut M_WPUrlCClassData) as *mut usize),
-            45 => ((&raw mut M_WPUrlFolderClassData) as *mut usize, 1, (&raw mut M_WPUrlFolderCClassData) as *mut usize),
-            46 => ((&raw mut WPObjectClassData) as *mut usize, 166, (&raw mut WPObjectCClassData) as *mut usize),
-            47 => ((&raw mut WPAbstractClassData) as *mut usize, 1, (&raw mut WPAbstractCClassData) as *mut usize),
-            48 => ((&raw mut MindexClassData) as *mut usize, 1, (&raw mut MindexCClassData) as *mut usize),
-            49 => ((&raw mut RS2ShutdownClassData) as *mut usize, 1, (&raw mut RS2ShutdownCClassData) as *mut usize),
-            50 => ((&raw mut RS2SystemClassData) as *mut usize, 1, (&raw mut RS2SystemCClassData) as *mut usize),
-            51 => ((&raw mut RS2WindowListClassData) as *mut usize, 1, (&raw mut RS2WindowListCClassData) as *mut usize),
-            52 => ((&raw mut WPBitmapClassData) as *mut usize, 1, (&raw mut WPBitmapCClassData) as *mut usize),
-            53 => ((&raw mut WPClassManagerClassData) as *mut usize, 5, (&raw mut WPClassManagerCClassData) as *mut usize),
-            54 => ((&raw mut WPClockClassData) as *mut usize, 5, (&raw mut WPClockCClassData) as *mut usize),
-            55 => ((&raw mut WPPaletteClassData) as *mut usize, 18, (&raw mut WPPaletteCClassData) as *mut usize),
-            56 => ((&raw mut WPColorPaletteClassData) as *mut usize, 1, (&raw mut WPColorPaletteCClassData) as *mut usize),
-            57 => ((&raw mut WPFileSystemClassData) as *mut usize, 44, (&raw mut WPFileSystemCClassData) as *mut usize),
-            58 => ((&raw mut WPDataFileClassData) as *mut usize, 31, (&raw mut WPDataFileCClassData) as *mut usize),
-            59 => ((&raw mut WPProgramFileClassData) as *mut usize, 24, (&raw mut WPProgramFileCClassData) as *mut usize),
-            60 => ((&raw mut WPCommandFileClassData) as *mut usize, 1, (&raw mut WPCommandFileCClassData) as *mut usize),
-            61 => ((&raw mut WPFolderClassData) as *mut usize, 109, (&raw mut WPFolderCClassData) as *mut usize),
-            62 => ((&raw mut WPDesktopClassData) as *mut usize, 21, (&raw mut WPDesktopCClassData) as *mut usize),
-            63 => ((&raw mut WPDiskClassData) as *mut usize, 12, (&raw mut WPDiskCClassData) as *mut usize),
-            64 => ((&raw mut WPDrivesClassData) as *mut usize, 2, (&raw mut WPDrivesCClassData) as *mut usize),
-            65 => ((&raw mut WPFontPaletteClassData) as *mut usize, 2, (&raw mut WPFontPaletteCClassData) as *mut usize),
-            66 => ((&raw mut WPIconClassData) as *mut usize, 1, (&raw mut WPIconCClassData) as *mut usize),
-            67 => ((&raw mut WPTransientClassData) as *mut usize, 1, (&raw mut WPTransientCClassData) as *mut usize),
-            68 => ((&raw mut WPJobClassData) as *mut usize, 32, (&raw mut WPJobCClassData) as *mut usize),
-            69 => ((&raw mut WPKeyboardClassData) as *mut usize, 5, (&raw mut WPKeyboardCClassData) as *mut usize),
-            70 => ((&raw mut WPLaunchPadClassData) as *mut usize, 27, (&raw mut WPLaunchPadCClassData) as *mut usize),
-            71 => ((&raw mut WPMetClassData) as *mut usize, 1, (&raw mut WPMetCClassData) as *mut usize),
-            72 => ((&raw mut WPMinWinViewerClassData) as *mut usize, 2, (&raw mut WPMinWinViewerCClassData) as *mut usize),
-            73 => ((&raw mut WPMinWindowClassData) as *mut usize, 1, (&raw mut WPMinWindowCClassData) as *mut usize),
-            74 => ((&raw mut WPMouseClassData) as *mut usize, 6, (&raw mut WPMouseCClassData) as *mut usize),
-            75 => ((&raw mut WPShadowClassData) as *mut usize, 5, (&raw mut WPShadowCClassData) as *mut usize),
-            76 => ((&raw mut WPNetLinkClassData) as *mut usize, 3, (&raw mut WPNetLinkCClassData) as *mut usize),
-            77 => ((&raw mut WPNetgrpClassData) as *mut usize, 4, (&raw mut WPNetgrpCClassData) as *mut usize),
-            78 => ((&raw mut WPNetworkClassData) as *mut usize, 1, (&raw mut WPNetworkCClassData) as *mut usize),
-            79 => ((&raw mut WPPdrClassData) as *mut usize, 11, (&raw mut WPPdrCClassData) as *mut usize),
-            80 => ((&raw mut WPPifClassData) as *mut usize, 1, (&raw mut WPPifCClassData) as *mut usize),
-            81 => ((&raw mut WPPointerClassData) as *mut usize, 1, (&raw mut WPPointerCClassData) as *mut usize),
-            82 => ((&raw mut WPPortClassData) as *mut usize, 22, (&raw mut WPPortCClassData) as *mut usize),
-            83 => ((&raw mut WPPrinterClassData) as *mut usize, 90, (&raw mut WPPrinterCClassData) as *mut usize),
-            84 => ((&raw mut WPProgramClassData) as *mut usize, 42, (&raw mut WPProgramCClassData) as *mut usize),
-            85 => ((&raw mut WPQdrClassData) as *mut usize, 6, (&raw mut WPQdrCClassData) as *mut usize),
-            86 => ((&raw mut WPRootFolderClassData) as *mut usize, 3, (&raw mut WPRootFolderCClassData) as *mut usize),
-            87 => ((&raw mut WPSchemePaletteClassData) as *mut usize, 1, (&raw mut WPSchemePaletteCClassData) as *mut usize),
-            88 => ((&raw mut WPServerClassData) as *mut usize, 3, (&raw mut WPServerCClassData) as *mut usize),
-            89 => ((&raw mut WPSharedDirClassData) as *mut usize, 2, (&raw mut WPSharedDirCClassData) as *mut usize),
-            90 => ((&raw mut WPShredderClassData) as *mut usize, 1, (&raw mut WPShredderCClassData) as *mut usize),
-            91 => ((&raw mut WPSoundClassData) as *mut usize, 3, (&raw mut WPSoundCClassData) as *mut usize),
-            92 => ((&raw mut WPSpoolClassData) as *mut usize, 10, (&raw mut WPSpoolCClassData) as *mut usize),
-            93 => ((&raw mut WPStartupClassData) as *mut usize, 1, (&raw mut WPStartupCClassData) as *mut usize),
-            94 => ((&raw mut WPSystemClassData) as *mut usize, 14, (&raw mut WPSystemCClassData) as *mut usize),
-            95 => ((&raw mut WPTemplatesClassData) as *mut usize, 1, (&raw mut WPTemplatesCClassData) as *mut usize),
-            96 => ((&raw mut WPUrlClassData) as *mut usize, 6, (&raw mut WPUrlCClassData) as *mut usize),
-            97 => ((&raw mut WPUrlFolderClassData) as *mut usize, 1, (&raw mut WPUrlFolderCClassData) as *mut usize),
+            1 => ((&raw mut WPObjectClassData) as *mut usize, 166, (&raw mut WPObjectCClassData) as *mut usize),
+            2 => ((&raw mut M_WPFileSystemClassData) as *mut usize, 7, (&raw mut M_WPFileSystemCClassData) as *mut usize),
+            3 => ((&raw mut WPFileSystemClassData) as *mut usize, 44, (&raw mut WPFileSystemCClassData) as *mut usize),
+            4 => ((&raw mut M_WPDataFileClassData) as *mut usize, 3, (&raw mut M_WPDataFileCClassData) as *mut usize),
+            5 => ((&raw mut WPDataFileClassData) as *mut usize, 31, (&raw mut WPDataFileCClassData) as *mut usize),
+            6 => ((&raw mut M_MMDataFileClassData) as *mut usize, 1, (&raw mut M_MMDataFileCClassData) as *mut usize),
+            7 => ((&raw mut MMDataFileClassData) as *mut usize, 1, (&raw mut MMDataFileCClassData) as *mut usize),
+            8 => ((&raw mut MMAudioClassData) as *mut usize, 1, (&raw mut MMAudioCClassData) as *mut usize),
+            9 => ((&raw mut MMAIFClassData) as *mut usize, 1, (&raw mut MMAIFCClassData) as *mut usize),
+            10 => ((&raw mut MMAUClassData) as *mut usize, 1, (&raw mut MMAUCClassData) as *mut usize),
+            11 => ((&raw mut MMImageClassData) as *mut usize, 1, (&raw mut MMImageCClassData) as *mut usize),
+            12 => ((&raw mut MMAVCClassData) as *mut usize, 1, (&raw mut MMAVCCClassData) as *mut usize),
+            13 => ((&raw mut MMVideoClassData) as *mut usize, 1, (&raw mut MMVideoCClassData) as *mut usize),
+            14 => ((&raw mut MMAVIClassData) as *mut usize, 1, (&raw mut MMAVICClassData) as *mut usize),
+            15 => ((&raw mut M_WPAbstractClassData) as *mut usize, 6, (&raw mut M_WPAbstractCClassData) as *mut usize),
+            16 => ((&raw mut WPAbstractClassData) as *mut usize, 1, (&raw mut WPAbstractCClassData) as *mut usize),
+            17 => ((&raw mut MMDeviceClassData) as *mut usize, 1, (&raw mut MMDeviceCClassData) as *mut usize),
+            18 => ((&raw mut MMCDDeviceClassData) as *mut usize, 1, (&raw mut MMCDDeviceCClassData) as *mut usize),
+            19 => ((&raw mut MMDIBClassData) as *mut usize, 1, (&raw mut MMDIBCClassData) as *mut usize),
+            20 => ((&raw mut MMFLIClassData) as *mut usize, 1, (&raw mut MMFLICClassData) as *mut usize),
+            21 => ((&raw mut M_WPFolderClassData) as *mut usize, 7, (&raw mut M_WPFolderCClassData) as *mut usize),
+            22 => ((&raw mut WPFolderClassData) as *mut usize, 109, (&raw mut WPFolderCClassData) as *mut usize),
+            23 => ((&raw mut MMFolderClassData) as *mut usize, 1, (&raw mut MMFolderCClassData) as *mut usize),
+            24 => ((&raw mut MMGIFClassData) as *mut usize, 1, (&raw mut MMGIFCClassData) as *mut usize),
+            25 => ((&raw mut MMIFFClassData) as *mut usize, 1, (&raw mut MMIFFCClassData) as *mut usize),
+            26 => ((&raw mut MMJPGClassData) as *mut usize, 1, (&raw mut MMJPGCClassData) as *mut usize),
+            27 => ((&raw mut MMLVDDeviceClassData) as *mut usize, 1, (&raw mut MMLVDDeviceCClassData) as *mut usize),
+            28 => ((&raw mut MMMIDIClassData) as *mut usize, 1, (&raw mut MMMIDICClassData) as *mut usize),
+            29 => ((&raw mut MMMMotionClassData) as *mut usize, 1, (&raw mut MMMMotionCClassData) as *mut usize),
+            30 => ((&raw mut MMMOVClassData) as *mut usize, 1, (&raw mut MMMOVCClassData) as *mut usize),
+            31 => ((&raw mut MMMPGClassData) as *mut usize, 1, (&raw mut MMMPGCClassData) as *mut usize),
+            32 => ((&raw mut MMPCXClassData) as *mut usize, 1, (&raw mut MMPCXCClassData) as *mut usize),
+            33 => ((&raw mut MMPhotoCDClassData) as *mut usize, 1, (&raw mut MMPhotoCDCClassData) as *mut usize),
+            34 => ((&raw mut MMSNDFClassData) as *mut usize, 1, (&raw mut MMSNDFCClassData) as *mut usize),
+            35 => ((&raw mut MMTIFFClassData) as *mut usize, 1, (&raw mut MMTIFFCClassData) as *mut usize),
+            36 => ((&raw mut MMTargaClassData) as *mut usize, 1, (&raw mut MMTargaCClassData) as *mut usize),
+            37 => ((&raw mut MMVOCClassData) as *mut usize, 1, (&raw mut MMVOCCClassData) as *mut usize),
+            38 => ((&raw mut MMVolumeClassData) as *mut usize, 1, (&raw mut MMVolumeCClassData) as *mut usize),
+            39 => ((&raw mut MMWAVClassData) as *mut usize, 1, (&raw mut MMWAVCClassData) as *mut usize),
+            40 => ((&raw mut MM_AUClassData) as *mut usize, 1, (&raw mut MM_AUCClassData) as *mut usize),
+            41 => ((&raw mut M_WPBitmapClassData) as *mut usize, 1, (&raw mut M_WPBitmapCClassData) as *mut usize),
+            42 => ((&raw mut M_WPClockClassData) as *mut usize, 1, (&raw mut M_WPClockCClassData) as *mut usize),
+            43 => ((&raw mut M_WPPaletteClassData) as *mut usize, 2, (&raw mut M_WPPaletteCClassData) as *mut usize),
+            44 => ((&raw mut M_WPColorPaletteClassData) as *mut usize, 1, (&raw mut M_WPColorPaletteCClassData) as *mut usize),
+            45 => ((&raw mut M_WPProgramFileClassData) as *mut usize, 1, (&raw mut M_WPProgramFileCClassData) as *mut usize),
+            46 => ((&raw mut M_WPCommandFileClassData) as *mut usize, 1, (&raw mut M_WPCommandFileCClassData) as *mut usize),
+            47 => ((&raw mut M_WPDesktopClassData) as *mut usize, 4, (&raw mut M_WPDesktopCClassData) as *mut usize),
+            48 => ((&raw mut M_WPDiskClassData) as *mut usize, 1, (&raw mut M_WPDiskCClassData) as *mut usize),
+            49 => ((&raw mut M_WPDrivesClassData) as *mut usize, 1, (&raw mut M_WPDrivesCClassData) as *mut usize),
+            50 => ((&raw mut M_WPFontPaletteClassData) as *mut usize, 1, (&raw mut M_WPFontPaletteCClassData) as *mut usize),
+            51 => ((&raw mut M_WPIconClassData) as *mut usize, 1, (&raw mut M_WPIconCClassData) as *mut usize),
+            52 => ((&raw mut M_WPTransientClassData) as *mut usize, 3, (&raw mut M_WPTransientCClassData) as *mut usize),
+            53 => ((&raw mut M_WPJobClassData) as *mut usize, 2, (&raw mut M_WPJobCClassData) as *mut usize),
+            54 => ((&raw mut M_WPKeyboardClassData) as *mut usize, 1, (&raw mut M_WPKeyboardCClassData) as *mut usize),
+            55 => ((&raw mut M_WPLaunchPadClassData) as *mut usize, 1, (&raw mut M_WPLaunchPadCClassData) as *mut usize),
+            56 => ((&raw mut M_WPMetClassData) as *mut usize, 1, (&raw mut M_WPMetCClassData) as *mut usize),
+            57 => ((&raw mut M_WPMinWinViewerClassData) as *mut usize, 1, (&raw mut M_WPMinWinViewerCClassData) as *mut usize),
+            58 => ((&raw mut M_WPMouseClassData) as *mut usize, 1, (&raw mut M_WPMouseCClassData) as *mut usize),
+            59 => ((&raw mut M_WPShadowClassData) as *mut usize, 1, (&raw mut M_WPShadowCClassData) as *mut usize),
+            60 => ((&raw mut M_WPNetLinkClassData) as *mut usize, 1, (&raw mut M_WPNetLinkCClassData) as *mut usize),
+            61 => ((&raw mut M_WPNetgrpClassData) as *mut usize, 1, (&raw mut M_WPNetgrpCClassData) as *mut usize),
+            62 => ((&raw mut M_WPNetworkClassData) as *mut usize, 1, (&raw mut M_WPNetworkCClassData) as *mut usize),
+            63 => ((&raw mut M_WPPdrClassData) as *mut usize, 1, (&raw mut M_WPPdrCClassData) as *mut usize),
+            64 => ((&raw mut M_WPPifClassData) as *mut usize, 1, (&raw mut M_WPPifCClassData) as *mut usize),
+            65 => ((&raw mut M_WPPointerClassData) as *mut usize, 1, (&raw mut M_WPPointerCClassData) as *mut usize),
+            66 => ((&raw mut M_WPPortClassData) as *mut usize, 1, (&raw mut M_WPPortCClassData) as *mut usize),
+            67 => ((&raw mut M_WPPrinterClassData) as *mut usize, 1, (&raw mut M_WPPrinterCClassData) as *mut usize),
+            68 => ((&raw mut M_WPProgramClassData) as *mut usize, 1, (&raw mut M_WPProgramCClassData) as *mut usize),
+            69 => ((&raw mut M_WPQdrClassData) as *mut usize, 1, (&raw mut M_WPQdrCClassData) as *mut usize),
+            70 => ((&raw mut M_WPRootFolderClassData) as *mut usize, 1, (&raw mut M_WPRootFolderCClassData) as *mut usize),
+            71 => ((&raw mut M_WPSchemePaletteClassData) as *mut usize, 1, (&raw mut M_WPSchemePaletteCClassData) as *mut usize),
+            72 => ((&raw mut M_WPServerClassData) as *mut usize, 1, (&raw mut M_WPServerCClassData) as *mut usize),
+            73 => ((&raw mut M_WPSharedDirClassData) as *mut usize, 1, (&raw mut M_WPSharedDirCClassData) as *mut usize),
+            74 => ((&raw mut M_WPShredderClassData) as *mut usize, 1, (&raw mut M_WPShredderCClassData) as *mut usize),
+            75 => ((&raw mut M_WPSoundClassData) as *mut usize, 1, (&raw mut M_WPSoundCClassData) as *mut usize),
+            76 => ((&raw mut M_WPSpoolClassData) as *mut usize, 1, (&raw mut M_WPSpoolCClassData) as *mut usize),
+            77 => ((&raw mut M_WPStartupClassData) as *mut usize, 1, (&raw mut M_WPStartupCClassData) as *mut usize),
+            78 => ((&raw mut M_WPSystemClassData) as *mut usize, 1, (&raw mut M_WPSystemCClassData) as *mut usize),
+            79 => ((&raw mut M_WPTemplatesClassData) as *mut usize, 1, (&raw mut M_WPTemplatesCClassData) as *mut usize),
+            80 => ((&raw mut M_WPUrlClassData) as *mut usize, 1, (&raw mut M_WPUrlCClassData) as *mut usize),
+            81 => ((&raw mut M_WPUrlFolderClassData) as *mut usize, 1, (&raw mut M_WPUrlFolderCClassData) as *mut usize),
+            82 => ((&raw mut MindexClassData) as *mut usize, 1, (&raw mut MindexCClassData) as *mut usize),
+            83 => ((&raw mut RS2ShutdownClassData) as *mut usize, 1, (&raw mut RS2ShutdownCClassData) as *mut usize),
+            84 => ((&raw mut RS2SystemClassData) as *mut usize, 1, (&raw mut RS2SystemCClassData) as *mut usize),
+            85 => ((&raw mut RS2WindowListClassData) as *mut usize, 1, (&raw mut RS2WindowListCClassData) as *mut usize),
+            86 => ((&raw mut WPBitmapClassData) as *mut usize, 1, (&raw mut WPBitmapCClassData) as *mut usize),
+            87 => ((&raw mut WPClassManagerClassData) as *mut usize, 5, (&raw mut WPClassManagerCClassData) as *mut usize),
+            88 => ((&raw mut WPClockClassData) as *mut usize, 5, (&raw mut WPClockCClassData) as *mut usize),
+            89 => ((&raw mut WPPaletteClassData) as *mut usize, 18, (&raw mut WPPaletteCClassData) as *mut usize),
+            90 => ((&raw mut WPColorPaletteClassData) as *mut usize, 1, (&raw mut WPColorPaletteCClassData) as *mut usize),
+            91 => ((&raw mut WPProgramFileClassData) as *mut usize, 24, (&raw mut WPProgramFileCClassData) as *mut usize),
+            92 => ((&raw mut WPCommandFileClassData) as *mut usize, 1, (&raw mut WPCommandFileCClassData) as *mut usize),
+            93 => ((&raw mut WPDesktopClassData) as *mut usize, 21, (&raw mut WPDesktopCClassData) as *mut usize),
+            94 => ((&raw mut WPDiskClassData) as *mut usize, 12, (&raw mut WPDiskCClassData) as *mut usize),
+            95 => ((&raw mut WPDrivesClassData) as *mut usize, 2, (&raw mut WPDrivesCClassData) as *mut usize),
+            96 => ((&raw mut WPFontPaletteClassData) as *mut usize, 2, (&raw mut WPFontPaletteCClassData) as *mut usize),
+            97 => ((&raw mut WPIconClassData) as *mut usize, 1, (&raw mut WPIconCClassData) as *mut usize),
+            98 => ((&raw mut WPTransientClassData) as *mut usize, 1, (&raw mut WPTransientCClassData) as *mut usize),
+            99 => ((&raw mut WPJobClassData) as *mut usize, 32, (&raw mut WPJobCClassData) as *mut usize),
+            100 => ((&raw mut WPKeyboardClassData) as *mut usize, 5, (&raw mut WPKeyboardCClassData) as *mut usize),
+            101 => ((&raw mut WPLaunchPadClassData) as *mut usize, 27, (&raw mut WPLaunchPadCClassData) as *mut usize),
+            102 => ((&raw mut WPMetClassData) as *mut usize, 1, (&raw mut WPMetCClassData) as *mut usize),
+            103 => ((&raw mut WPMinWinViewerClassData) as *mut usize, 2, (&raw mut WPMinWinViewerCClassData) as *mut usize),
+            104 => ((&raw mut WPMinWindowClassData) as *mut usize, 1, (&raw mut WPMinWindowCClassData) as *mut usize),
+            105 => ((&raw mut WPMouseClassData) as *mut usize, 6, (&raw mut WPMouseCClassData) as *mut usize),
+            106 => ((&raw mut WPShadowClassData) as *mut usize, 5, (&raw mut WPShadowCClassData) as *mut usize),
+            107 => ((&raw mut WPNetLinkClassData) as *mut usize, 3, (&raw mut WPNetLinkCClassData) as *mut usize),
+            108 => ((&raw mut WPNetgrpClassData) as *mut usize, 4, (&raw mut WPNetgrpCClassData) as *mut usize),
+            109 => ((&raw mut WPNetworkClassData) as *mut usize, 1, (&raw mut WPNetworkCClassData) as *mut usize),
+            110 => ((&raw mut WPPdrClassData) as *mut usize, 11, (&raw mut WPPdrCClassData) as *mut usize),
+            111 => ((&raw mut WPPifClassData) as *mut usize, 1, (&raw mut WPPifCClassData) as *mut usize),
+            112 => ((&raw mut WPPointerClassData) as *mut usize, 1, (&raw mut WPPointerCClassData) as *mut usize),
+            113 => ((&raw mut WPPortClassData) as *mut usize, 22, (&raw mut WPPortCClassData) as *mut usize),
+            114 => ((&raw mut WPPrinterClassData) as *mut usize, 90, (&raw mut WPPrinterCClassData) as *mut usize),
+            115 => ((&raw mut WPProgramClassData) as *mut usize, 42, (&raw mut WPProgramCClassData) as *mut usize),
+            116 => ((&raw mut WPQdrClassData) as *mut usize, 6, (&raw mut WPQdrCClassData) as *mut usize),
+            117 => ((&raw mut WPRootFolderClassData) as *mut usize, 3, (&raw mut WPRootFolderCClassData) as *mut usize),
+            118 => ((&raw mut WPSchemePaletteClassData) as *mut usize, 1, (&raw mut WPSchemePaletteCClassData) as *mut usize),
+            119 => ((&raw mut WPServerClassData) as *mut usize, 3, (&raw mut WPServerCClassData) as *mut usize),
+            120 => ((&raw mut WPSharedDirClassData) as *mut usize, 2, (&raw mut WPSharedDirCClassData) as *mut usize),
+            121 => ((&raw mut WPShredderClassData) as *mut usize, 1, (&raw mut WPShredderCClassData) as *mut usize),
+            122 => ((&raw mut WPSoundClassData) as *mut usize, 3, (&raw mut WPSoundCClassData) as *mut usize),
+            123 => ((&raw mut WPSpoolClassData) as *mut usize, 10, (&raw mut WPSpoolCClassData) as *mut usize),
+            124 => ((&raw mut WPStartupClassData) as *mut usize, 1, (&raw mut WPStartupCClassData) as *mut usize),
+            125 => ((&raw mut WPSystemClassData) as *mut usize, 14, (&raw mut WPSystemCClassData) as *mut usize),
+            126 => ((&raw mut WPTemplatesClassData) as *mut usize, 1, (&raw mut WPTemplatesCClassData) as *mut usize),
+            127 => ((&raw mut WPUrlClassData) as *mut usize, 6, (&raw mut WPUrlCClassData) as *mut usize),
+            128 => ((&raw mut WPUrlFolderClassData) as *mut usize, 1, (&raw mut WPUrlFolderCClassData) as *mut usize),
             _ => (core::ptr::null_mut(), 0, core::ptr::null_mut()),
         }
     }

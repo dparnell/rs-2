@@ -381,6 +381,14 @@ fn open(path: &str) {
             a.sel = (0, 0);
             a.dirty = false;
         }
+        // An empty file (a new one from the Wave Audio template) is a new
+        // sound to save under its name.
+        Err(_) if read_file(path).is_some_and(|d| d.is_empty()) => {
+            a.data.clear();
+            a.file = String::from(path);
+            a.sel = (0, 0);
+            a.dirty = false;
+        }
         Err(e) => message_box(a.frame, "Digital Audio", &e, true),
     }
     info();

@@ -106,9 +106,44 @@ EXTRA = {
     'WPQdr': ['WPTransient'],
     'WPPort': ['WPTransient'],
     'WPSpool': ['WPAbstract'],
+    # rs2's multimedia classes, with the names of IBM's MMPARTS.DLL ones
+    # (no IDL: they introduce no methods). Their metaclass M_MMDataFile
+    # gives each data file class its instance filter, type and title.
+    'M_MMDataFile': ['M_WPDataFile'],
+    'MMDataFile': ['WPDataFile'],
+    'MMAudio': ['MMDataFile'],
+    'MMWAV': ['MMAudio'],
+    'MMVOC': ['MMAudio'],
+    'MM_AU': ['MMAudio'],
+    'MMAU': ['MMAudio'],
+    'MMAIF': ['MMAudio'],
+    'MMIFF': ['MMAudio'],
+    'MMSNDF': ['MMAudio'],
+    'MMMIDI': ['MMDataFile'],
+    'MMVideo': ['MMDataFile'],
+    'MMAVI': ['MMVideo'],
+    'MMFLI': ['MMVideo'],
+    'MMMPG': ['MMVideo'],
+    'MMMOV': ['MMVideo'],
+    'MMImage': ['MMDataFile'],
+    'MMJPG': ['MMImage'],
+    'MMGIF': ['MMImage'],
+    'MMPCX': ['MMImage'],
+    'MMTIFF': ['MMImage'],
+    'MMTarga': ['MMImage'],
+    'MMDIB': ['MMImage'],
+    'MMPhotoCD': ['MMImage'],
+    'MMAVC': ['MMImage'],
+    'MMMMotion': ['MMImage'],
+    'MMFolder': ['WPFolder'],
+    'MMDevice': ['WPAbstract'],
+    'MMCDDevice': ['MMDevice'],
+    'MMLVDDevice': ['MMDevice'],
+    'MMVolume': ['WPAbstract'],
 }
+EXTRA_META = {'MMDataFile': 'M_MMDataFile'}
 for n, parents in EXTRA.items():
-    classes.setdefault(n, dict(parents=parents, methods=[], meta=None, major=1, minor=1, overrides=[], dll='pmwp', file=''))
+    classes.setdefault(n, dict(parents=parents, methods=[], meta=EXTRA_META.get(n), major=1, minor=1, overrides=[], dll='pmwp', file=''))
 
 wanted = [n for n in classes if n + 'ClassData' in ords or n in EXTRA]
 # Metaclasses the IDL describes whose class data IBM does not export

@@ -187,6 +187,10 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
     if let Some(t) = action {
         open.push(Menu::Item(WPMENUID_PROGRAM as u16, t, true));
     }
+    // A multimedia data file's Player (or Viewer) and a sound's Editor.
+    for (id, t) in crate::mm::open_items(o) {
+        open.push(Menu::Item(id, t, true));
+    }
     let mut items: Vec<Menu> = Vec::new();
     if flags & CTXT_OPEN != 0 && !open.is_empty() {
         items.push(Menu::SubId(WPMENUID_OPEN as u16, b"~Open", open));

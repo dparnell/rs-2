@@ -25,6 +25,132 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (323, 322, 324),
     },
     ClassDef {
+        name: "WPObject",
+        parents: &["SOMObject"],
+        meta: Some("M_WPObject"),
+        major: 1,
+        minor: 2,
+        methods: &["wpSetTitle", "wpQueryTitle", "wpSetStyle", "wpQueryStyle", "wpSetIcon", "wpQueryIcon", "wpSetFolder", "wpQueryFolder", "wpObjectPrivate1", "wpObjectPrivate2", "wpSetDefaultView", "wpQueryDefaultView", "wpObjectPrivate3", "wpSaveState", "wpObjectPrivate4", "wpObjectPrivate5", "wpSaveLong", "wpSaveString", "wpSaveData", "wpObjectPrivate6", "wpRestoreState", "wpObjectPrivate7", "wpObjectPrivate8", "wpRestoreLong", "wpRestoreString", "wpRestoreData", "wpObjectPrivate9", "wpAllocMem", "wpFreeMem", "wpAddToObjUseList", "wpDeleteFromObjUseList", "wpFindUseItem", "wpSwitchTo", "withdrawn1", "wpFilterPopupMenu", "wpModifyPopupMenu", "wpMenuItemSelected", "wpFormatDragItem", "wpDrop", "wpDragOver", "wpRender", "wpEndConversation", "withdrawn10", "wpObjectPrivate10", "wpObjectPrivate11", "wpFree", "wpCopiedFromTemplate", "wpAddSettingsPages", "wpAddObjectGeneralPage", "wpDisplayHelp", "wpMenuItemHelpSelected", "wpInsertSettingsPage", "wpInsertPopupMenuItems", "withdrawn5", "withdrawn6", "withdrawn4", "withdrawn3", "wpCnrInsertObject", "wpCnrRemoveObject", "wpInitData", "wpUnInitData", "wpSetup", "wpScanSetupString", "wpSaveImmediate", "wpOpen", "wpClose", "wpHide", "wpRestore", "wpSetIconData", "wpQueryIconData", "wpObjectPrivate12", "wpDelete", "wpConfirmDelete", "withdrawn2", "withdrawn11", "withdrawn7", "wpRegisterView", "wpIdentify", "wpSetDefaultHelp", "wpQueryDefaultHelp", "wpDoesObjectMatch", "wpCnrRefreshDetails", "wpSetError", "wpQueryError", "wpDraggedOverObject", "wpDroppedOnObject", "wpSetDefaultIconPos", "wpQueryDefaultIconPos", "wpObjectPrivate13", "wpObjectPrivate14", "wpSetObjectID", "wpQueryObjectID", "wpIsDeleteable", "wpQueryHandle", "wpSaveDeferred", "wpAddObjectWindowPage", "wpQueryConcurrentView", "wpSetConcurrentView", "wpQueryMinWindow", "wpSetMinWindow", "wpViewObject", "wpQueryButtonAppearance", "wpSetButtonAppearance", "wpQueryConfirmations", "wpCnrSetEmphasis", "wpQueryCoreRecord", "wpFindViewItem", "wpCreateFromTemplate", "wpQueryTrueStyle", "wpAssertObjectMutexSem", "wpReleaseObjectMutexSem", "wpRequestObjectMutexSem", "wpCreateAnother", "wpCreateShadowObject", "wpCopyObject", "wpMoveObject", "wpLockObject", "wpUnlockObject", "wpIsLocked", "wpRenderComplete", "wpQueryDetailsData", "wpPrintObject", "wpObjectPrivate15", "wpSetTaskRec", "wpObjectPrivate16", "wpModifyStyle", "wpObjectPrivate17", "wpFindTaskRec", "wpAppendObject", "wpReplaceObject", "wpQueryNameClashOptions", "wpConfirmObjectTitle", "_get_pobjNext", "wpQueryContainerFlagPtr", "wpObjectPrivate18", "wpObjectPrivate19", "wpObjectPrivate20", "wpCnrDeleteUseItem", "wpObjectReady", "wpIsObjectInitialized", "wpCreateShadowObjectExt", "wpObjectPrivate21", "wpObjectPrivate22", "wpObjectPrivate26", "wpDisplayMenu", "wpWaitForClose", "wpQueryScreenGroupID", "wpSetupOnce", "wpAddObjectGeneralPage2", "wpObjectPrivate23", "wpObjectPrivate24", "wpModifyMenu", "wpFilterMenu", "wpInsertMenuItems", "wpSetMenuStyle", "wpQueryMenuStyle", "wpObjectPrivate27", "wpObjectPrivate28", "wpObjectPrivate29", "wpObjectPrivate30", "wpQueryOpenView", "wpSetOpenView", "wpObjectPrivate31", "wpObjectPrivate32", "wpObjectPrivate33"],
+        ords: (23, 22, 24),
+    },
+    ClassDef {
+        name: "M_WPFileSystem",
+        parents: &["M_WPObject"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &["wpclsQueryInstanceType", "wpclsQueryInstanceFilter", "wpclsQueryObjectFromPath", "wpclsQueryAwakeObject", "wpclsFileSysExists", "wpclsQueryInstanceClass"],
+        ords: (311, 310, 312),
+    },
+    ClassDef {
+        name: "WPFileSystem",
+        parents: &["WPObject"],
+        meta: Some("M_WPFileSystem"),
+        major: 1,
+        minor: 2,
+        methods: &["wpSetRealName", "withdrawn_wpQueryRealName", "wpSetType", "wpQueryType", "wpSetAttr", "wpQueryAttr", "wpQueryFilename", "wpAddFile1Page", "wpAddFile2Page", "wpAddFile3Page", "wpAddFileMenuPage", "wpQueryCreation", "wpQueryLastAccess", "wpQueryLastWrite", "wpQueryFileSize", "wpQueryEASize", "wpSetDateInfo", "wpSetFileSizeInfo", "wpRefresh", "wpPrintPlainTextFile", "wpSetRefreshFlags", "wpQueryRefreshFlags", "wpFilesystemPrivate1", "wpSetTitleAndRenameFile", "wpConfirmRenameFileWithExt", "wpConfirmKeepAssoc", "wpFilesystemPrivate2", "wpQueryDisk", "wpQueryDateInfo", "wpFileSystemPrivate3", "wpFileSystemPrivate4", "wpQueryRealName", "wpVerifyUpdateAccess", "wpAddUserItemsToPopupMenu", "wpFilesystemPrivate5", "wpIsDiskSwapped", "wpFilesystemPrivate6", "wpQueryEASupport", "wpFilesystemPrivate7", "wpFilesystemPrivate8", "wpFilesystemPrivate9", "wpQueryFileSizeL", "wpSetFileSizeL"],
+        ords: (11, 10, 12),
+    },
+    ClassDef {
+        name: "M_WPDataFile",
+        parents: &["M_WPFileSystem"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &["wpclsAddClipboardAssoc", "wpclsEnumClipboardClasses"],
+        ords: (317, 316, 318),
+    },
+    ClassDef {
+        name: "WPDataFile",
+        parents: &["WPFileSystem"],
+        meta: Some("M_WPDataFile"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddFileTypePage", "wpPrintMetaFile", "wpPrintPifFile", "wpPrintPrinterSpecificFile", "wpPrintUnknownFile", "wpQueryAssociatedProgram", "wpSetAssociatedFileIcon", "wpQueryAssociatedFileIcon", "wpSetContentsFromPointer", "wpQueryPointerFromContents", "wpSetContentsFromHandle", "wpQueryHandleFromContents", "wpAddBecomePage", "wpRenderFromClipboard", "undefined1", "wpSetDefaultBidiSettings", "wpQueryDefaultBidiSettings", "SetUpdateIndicator", "QueryUpdateIndicator", "wpSetBidiValues", "wpQueryBidiValues", "SetNeedSave", "QueryNeedSave", "wpInsertBidiPage", "wpSaveBidiState", "wpRestoreBidiState", "wpBidiSetup", "wpInitBidiData", "hwndSettingsNotebook", "wpSettingsNotebook"],
+        ords: (17, 16, 18),
+    },
+    ClassDef {
+        name: "M_MMDataFile",
+        parents: &["M_WPDataFile"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMDataFile",
+        parents: &["WPDataFile"],
+        meta: Some("M_MMDataFile"),
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMAudio",
+        parents: &["MMDataFile"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMAIF",
+        parents: &["MMAudio"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMAU",
+        parents: &["MMAudio"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMImage",
+        parents: &["MMDataFile"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMAVC",
+        parents: &["MMImage"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMVideo",
+        parents: &["MMDataFile"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMAVI",
+        parents: &["MMVideo"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPAbstract",
         parents: &["M_WPObject"],
         meta: None,
@@ -32,6 +158,231 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &["wpclsAbsPrivate1", "wpclsAbsPrivate2", "wpclsAbsPrivate3", "wpclsQuerySetting", "wpclsSetSetting"],
         ords: (326, 325, 327),
+    },
+    ClassDef {
+        name: "WPAbstract",
+        parents: &["WPObject"],
+        meta: Some("M_WPAbstract"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (26, 25, 27),
+    },
+    ClassDef {
+        name: "MMDevice",
+        parents: &["WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMCDDevice",
+        parents: &["MMDevice"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMDIB",
+        parents: &["MMImage"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMFLI",
+        parents: &["MMVideo"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPFolder",
+        parents: &["M_WPFileSystem"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &["wpclsFolderPrivate1", "wpclsFolderPrivate2", "wpclsQueryOpenFolders", "wpclsFolderPrivate3", "wpclsQueryIconDataN", "wpclsQueryIconN"],
+        ords: (314, 313, 315),
+    },
+    ClassDef {
+        name: "WPFolder",
+        parents: &["WPFileSystem"],
+        meta: Some("M_WPFolder"),
+        major: 1,
+        minor: 2,
+        methods: &["wpSetFldrFlags", "wpQueryFldrFlags", "wpSetFldrFont", "wpQueryFldrFont", "wpSetNextIconPos", "wpQueryNextIconPos", "wpPopulate", "wpAddToContent", "wpQueryContent", "wpAddFolderView1Page", "wpAddFolderView2Page", "wpAddFolderView3Page", "wpAddFolderIncludePage", "wpAddFolderSortPage", "wpAddFolderBackgroundPage", "wpInitIconPosData", "wpFreeIconPosData", "wpQueryIconPosition", "wpStoreIconPosData", "wpDeleteFromContent", "wpSetFldrAttr", "wpQueryFldrAttr", "wpSetFldrSort", "wpQueryFldrSort", "wpRestoreFldrRunObjs", "wpStoreFldrRunObjs", "withdrawn30", "withdrawn31", "wpDeleteContents", "wpQueryOpenFolders", "wpFolderPrivate1", "wpSearchFolder", "wpSetFldrDetailsClass", "wpQueryFldrDetailsClass", "wpRefresh", "wpSetDetailsColumnVisibility", "wpIsDetailsColumnVisible", "wpFolderPrivate2", "wpFolderPrivate3", "wpFolderPrivate4", "wpFolderPrivate5", "wpSetFldrSortClass", "wpQueryFldrSortClass", "wpSetSortAttribAvailable", "wpIsSortAttribAvailable", "wpFolderPrivate6", "wpContainsFolders", "wpFolderPrivate7", "wpQueryIconViewPos", "wpQueryDefaultView", "wpAddFirstChild", "wpFolderPrivate8", "wpHideFldrRunObjs", "wpFolderPrivate9", "wpFolderPrivate10", "wpFolderPrivate11", "wpFolderPrivate12", "wpFolderPrivate13", "wpFolderPrivate14", "wpFolderPrivate15", "wpFolderPrivate16", "wpFolderPrivate17", "wpFolderPrivate18", "wpFolderPrivate19", "wpFolderPrivate20", "wpFolderPrivate21", "wpFolderPrivate22", "wpFolderPrivate23", "wpModifyFldrFlags", "wpFolderPrivate24", "wpFolderPrivate25", "wpFolderPrivate26", "wpFolderPrivate27", "wpFolderPrivate28", "wpQueryIconTextBackgroundColor", "wpSetIconTextBackgroundColor", "wpFolderPrivate29", "wpFolderPrivate30", "wpFolderPrivate31", "wpQueryIconTextColor", "wpSetIconTextColor", "wpQueryIconTextVisibility", "wpSetIconTextVisibility", "wpAddFolderSelfClosePage", "wpFolderPrivate32", "wpFolderPrivate33", "wpFolderPrivate34", "wpFolderPrivate35", "wpFolderPrivate36", "wpFolderPrivate37", "wpFolderPrivate38", "wpFolderPrivate39", "wpFolderPrivate40", "wpFolderPrivate41", "wpFolderPrivate42", "wpAddFolderMenu2Page", "wpSetMenuBarVisibility", "wpQueryMenuBarVisibility", "wpFolderPrivate43", "wpFolderPrivate44", "wpFolderPrivate45", "wpFlushNotifications", "wpSetShadowTextColor", "wpQueryShadowTextColor", "wpSetFldrBackground", "wpQueryFldrBackground", "wpSetFldrGrid", "wpQueryFldrGrid"],
+        ords: (14, 13, 15),
+    },
+    ClassDef {
+        name: "MMFolder",
+        parents: &["WPFolder"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMGIF",
+        parents: &["MMImage"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMIFF",
+        parents: &["MMAudio"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMJPG",
+        parents: &["MMImage"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMLVDDevice",
+        parents: &["MMDevice"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMMIDI",
+        parents: &["MMDataFile"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMMMotion",
+        parents: &["MMImage"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMMOV",
+        parents: &["MMVideo"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMMPG",
+        parents: &["MMVideo"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMPCX",
+        parents: &["MMImage"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMPhotoCD",
+        parents: &["MMImage"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMSNDF",
+        parents: &["MMAudio"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMTIFF",
+        parents: &["MMImage"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMTarga",
+        parents: &["MMImage"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMVOC",
+        parents: &["MMAudio"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMVolume",
+        parents: &["WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MMWAV",
+        parents: &["MMAudio"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "MM_AU",
+        parents: &["MMAudio"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "M_WPBitmap",
@@ -70,24 +421,6 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
-        name: "M_WPFileSystem",
-        parents: &["M_WPObject"],
-        meta: None,
-        major: 1,
-        minor: 2,
-        methods: &["wpclsQueryInstanceType", "wpclsQueryInstanceFilter", "wpclsQueryObjectFromPath", "wpclsQueryAwakeObject", "wpclsFileSysExists", "wpclsQueryInstanceClass"],
-        ords: (311, 310, 312),
-    },
-    ClassDef {
-        name: "M_WPDataFile",
-        parents: &["M_WPFileSystem"],
-        meta: None,
-        major: 1,
-        minor: 2,
-        methods: &["wpclsAddClipboardAssoc", "wpclsEnumClipboardClasses"],
-        ords: (317, 316, 318),
-    },
-    ClassDef {
         name: "M_WPProgramFile",
         parents: &["M_WPDataFile"],
         meta: None,
@@ -104,15 +437,6 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (386, 385, 387),
-    },
-    ClassDef {
-        name: "M_WPFolder",
-        parents: &["M_WPFileSystem"],
-        meta: None,
-        major: 1,
-        minor: 2,
-        methods: &["wpclsFolderPrivate1", "wpclsFolderPrivate2", "wpclsQueryOpenFolders", "wpclsFolderPrivate3", "wpclsQueryIconDataN", "wpclsQueryIconN"],
-        ords: (314, 313, 315),
     },
     ClassDef {
         name: "M_WPDesktop",
@@ -430,24 +754,6 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
-        name: "WPObject",
-        parents: &["SOMObject"],
-        meta: Some("M_WPObject"),
-        major: 1,
-        minor: 2,
-        methods: &["wpSetTitle", "wpQueryTitle", "wpSetStyle", "wpQueryStyle", "wpSetIcon", "wpQueryIcon", "wpSetFolder", "wpQueryFolder", "wpObjectPrivate1", "wpObjectPrivate2", "wpSetDefaultView", "wpQueryDefaultView", "wpObjectPrivate3", "wpSaveState", "wpObjectPrivate4", "wpObjectPrivate5", "wpSaveLong", "wpSaveString", "wpSaveData", "wpObjectPrivate6", "wpRestoreState", "wpObjectPrivate7", "wpObjectPrivate8", "wpRestoreLong", "wpRestoreString", "wpRestoreData", "wpObjectPrivate9", "wpAllocMem", "wpFreeMem", "wpAddToObjUseList", "wpDeleteFromObjUseList", "wpFindUseItem", "wpSwitchTo", "withdrawn1", "wpFilterPopupMenu", "wpModifyPopupMenu", "wpMenuItemSelected", "wpFormatDragItem", "wpDrop", "wpDragOver", "wpRender", "wpEndConversation", "withdrawn10", "wpObjectPrivate10", "wpObjectPrivate11", "wpFree", "wpCopiedFromTemplate", "wpAddSettingsPages", "wpAddObjectGeneralPage", "wpDisplayHelp", "wpMenuItemHelpSelected", "wpInsertSettingsPage", "wpInsertPopupMenuItems", "withdrawn5", "withdrawn6", "withdrawn4", "withdrawn3", "wpCnrInsertObject", "wpCnrRemoveObject", "wpInitData", "wpUnInitData", "wpSetup", "wpScanSetupString", "wpSaveImmediate", "wpOpen", "wpClose", "wpHide", "wpRestore", "wpSetIconData", "wpQueryIconData", "wpObjectPrivate12", "wpDelete", "wpConfirmDelete", "withdrawn2", "withdrawn11", "withdrawn7", "wpRegisterView", "wpIdentify", "wpSetDefaultHelp", "wpQueryDefaultHelp", "wpDoesObjectMatch", "wpCnrRefreshDetails", "wpSetError", "wpQueryError", "wpDraggedOverObject", "wpDroppedOnObject", "wpSetDefaultIconPos", "wpQueryDefaultIconPos", "wpObjectPrivate13", "wpObjectPrivate14", "wpSetObjectID", "wpQueryObjectID", "wpIsDeleteable", "wpQueryHandle", "wpSaveDeferred", "wpAddObjectWindowPage", "wpQueryConcurrentView", "wpSetConcurrentView", "wpQueryMinWindow", "wpSetMinWindow", "wpViewObject", "wpQueryButtonAppearance", "wpSetButtonAppearance", "wpQueryConfirmations", "wpCnrSetEmphasis", "wpQueryCoreRecord", "wpFindViewItem", "wpCreateFromTemplate", "wpQueryTrueStyle", "wpAssertObjectMutexSem", "wpReleaseObjectMutexSem", "wpRequestObjectMutexSem", "wpCreateAnother", "wpCreateShadowObject", "wpCopyObject", "wpMoveObject", "wpLockObject", "wpUnlockObject", "wpIsLocked", "wpRenderComplete", "wpQueryDetailsData", "wpPrintObject", "wpObjectPrivate15", "wpSetTaskRec", "wpObjectPrivate16", "wpModifyStyle", "wpObjectPrivate17", "wpFindTaskRec", "wpAppendObject", "wpReplaceObject", "wpQueryNameClashOptions", "wpConfirmObjectTitle", "_get_pobjNext", "wpQueryContainerFlagPtr", "wpObjectPrivate18", "wpObjectPrivate19", "wpObjectPrivate20", "wpCnrDeleteUseItem", "wpObjectReady", "wpIsObjectInitialized", "wpCreateShadowObjectExt", "wpObjectPrivate21", "wpObjectPrivate22", "wpObjectPrivate26", "wpDisplayMenu", "wpWaitForClose", "wpQueryScreenGroupID", "wpSetupOnce", "wpAddObjectGeneralPage2", "wpObjectPrivate23", "wpObjectPrivate24", "wpModifyMenu", "wpFilterMenu", "wpInsertMenuItems", "wpSetMenuStyle", "wpQueryMenuStyle", "wpObjectPrivate27", "wpObjectPrivate28", "wpObjectPrivate29", "wpObjectPrivate30", "wpQueryOpenView", "wpSetOpenView", "wpObjectPrivate31", "wpObjectPrivate32", "wpObjectPrivate33"],
-        ords: (23, 22, 24),
-    },
-    ClassDef {
-        name: "WPAbstract",
-        parents: &["WPObject"],
-        meta: Some("M_WPAbstract"),
-        major: 1,
-        minor: 2,
-        methods: &[],
-        ords: (26, 25, 27),
-    },
-    ClassDef {
         name: "Mindex",
         parents: &["WPAbstract"],
         meta: None,
@@ -529,24 +835,6 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
-        name: "WPFileSystem",
-        parents: &["WPObject"],
-        meta: Some("M_WPFileSystem"),
-        major: 1,
-        minor: 2,
-        methods: &["wpSetRealName", "withdrawn_wpQueryRealName", "wpSetType", "wpQueryType", "wpSetAttr", "wpQueryAttr", "wpQueryFilename", "wpAddFile1Page", "wpAddFile2Page", "wpAddFile3Page", "wpAddFileMenuPage", "wpQueryCreation", "wpQueryLastAccess", "wpQueryLastWrite", "wpQueryFileSize", "wpQueryEASize", "wpSetDateInfo", "wpSetFileSizeInfo", "wpRefresh", "wpPrintPlainTextFile", "wpSetRefreshFlags", "wpQueryRefreshFlags", "wpFilesystemPrivate1", "wpSetTitleAndRenameFile", "wpConfirmRenameFileWithExt", "wpConfirmKeepAssoc", "wpFilesystemPrivate2", "wpQueryDisk", "wpQueryDateInfo", "wpFileSystemPrivate3", "wpFileSystemPrivate4", "wpQueryRealName", "wpVerifyUpdateAccess", "wpAddUserItemsToPopupMenu", "wpFilesystemPrivate5", "wpIsDiskSwapped", "wpFilesystemPrivate6", "wpQueryEASupport", "wpFilesystemPrivate7", "wpFilesystemPrivate8", "wpFilesystemPrivate9", "wpQueryFileSizeL", "wpSetFileSizeL"],
-        ords: (11, 10, 12),
-    },
-    ClassDef {
-        name: "WPDataFile",
-        parents: &["WPFileSystem"],
-        meta: Some("M_WPDataFile"),
-        major: 1,
-        minor: 2,
-        methods: &["wpAddFileTypePage", "wpPrintMetaFile", "wpPrintPifFile", "wpPrintPrinterSpecificFile", "wpPrintUnknownFile", "wpQueryAssociatedProgram", "wpSetAssociatedFileIcon", "wpQueryAssociatedFileIcon", "wpSetContentsFromPointer", "wpQueryPointerFromContents", "wpSetContentsFromHandle", "wpQueryHandleFromContents", "wpAddBecomePage", "wpRenderFromClipboard", "undefined1", "wpSetDefaultBidiSettings", "wpQueryDefaultBidiSettings", "SetUpdateIndicator", "QueryUpdateIndicator", "wpSetBidiValues", "wpQueryBidiValues", "SetNeedSave", "QueryNeedSave", "wpInsertBidiPage", "wpSaveBidiState", "wpRestoreBidiState", "wpBidiSetup", "wpInitBidiData", "hwndSettingsNotebook", "wpSettingsNotebook"],
-        ords: (17, 16, 18),
-    },
-    ClassDef {
         name: "WPProgramFile",
         parents: &["WPDataFile"],
         meta: Some("M_WPProgramFile"),
@@ -563,15 +851,6 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (86, 85, 87),
-    },
-    ClassDef {
-        name: "WPFolder",
-        parents: &["WPFileSystem"],
-        meta: Some("M_WPFolder"),
-        major: 1,
-        minor: 2,
-        methods: &["wpSetFldrFlags", "wpQueryFldrFlags", "wpSetFldrFont", "wpQueryFldrFont", "wpSetNextIconPos", "wpQueryNextIconPos", "wpPopulate", "wpAddToContent", "wpQueryContent", "wpAddFolderView1Page", "wpAddFolderView2Page", "wpAddFolderView3Page", "wpAddFolderIncludePage", "wpAddFolderSortPage", "wpAddFolderBackgroundPage", "wpInitIconPosData", "wpFreeIconPosData", "wpQueryIconPosition", "wpStoreIconPosData", "wpDeleteFromContent", "wpSetFldrAttr", "wpQueryFldrAttr", "wpSetFldrSort", "wpQueryFldrSort", "wpRestoreFldrRunObjs", "wpStoreFldrRunObjs", "withdrawn30", "withdrawn31", "wpDeleteContents", "wpQueryOpenFolders", "wpFolderPrivate1", "wpSearchFolder", "wpSetFldrDetailsClass", "wpQueryFldrDetailsClass", "wpRefresh", "wpSetDetailsColumnVisibility", "wpIsDetailsColumnVisible", "wpFolderPrivate2", "wpFolderPrivate3", "wpFolderPrivate4", "wpFolderPrivate5", "wpSetFldrSortClass", "wpQueryFldrSortClass", "wpSetSortAttribAvailable", "wpIsSortAttribAvailable", "wpFolderPrivate6", "wpContainsFolders", "wpFolderPrivate7", "wpQueryIconViewPos", "wpQueryDefaultView", "wpAddFirstChild", "wpFolderPrivate8", "wpHideFldrRunObjs", "wpFolderPrivate9", "wpFolderPrivate10", "wpFolderPrivate11", "wpFolderPrivate12", "wpFolderPrivate13", "wpFolderPrivate14", "wpFolderPrivate15", "wpFolderPrivate16", "wpFolderPrivate17", "wpFolderPrivate18", "wpFolderPrivate19", "wpFolderPrivate20", "wpFolderPrivate21", "wpFolderPrivate22", "wpFolderPrivate23", "wpModifyFldrFlags", "wpFolderPrivate24", "wpFolderPrivate25", "wpFolderPrivate26", "wpFolderPrivate27", "wpFolderPrivate28", "wpQueryIconTextBackgroundColor", "wpSetIconTextBackgroundColor", "wpFolderPrivate29", "wpFolderPrivate30", "wpFolderPrivate31", "wpQueryIconTextColor", "wpSetIconTextColor", "wpQueryIconTextVisibility", "wpSetIconTextVisibility", "wpAddFolderSelfClosePage", "wpFolderPrivate32", "wpFolderPrivate33", "wpFolderPrivate34", "wpFolderPrivate35", "wpFolderPrivate36", "wpFolderPrivate37", "wpFolderPrivate38", "wpFolderPrivate39", "wpFolderPrivate40", "wpFolderPrivate41", "wpFolderPrivate42", "wpAddFolderMenu2Page", "wpSetMenuBarVisibility", "wpQueryMenuBarVisibility", "wpFolderPrivate43", "wpFolderPrivate44", "wpFolderPrivate45", "wpFlushNotifications", "wpSetShadowTextColor", "wpQueryShadowTextColor", "wpSetFldrBackground", "wpQueryFldrBackground", "wpSetFldrGrid", "wpQueryFldrGrid"],
-        ords: (14, 13, 15),
     },
     ClassDef {
         name: "WPDesktop",
@@ -949,122 +1228,6 @@ pub mod m {
         pub const wpclsFindOneObject: usize = 43;
         pub const wpclsObjectPrivate10: usize = 44;
     }
-    pub mod M_WPAbstract {
-        pub const wpclsAbsPrivate1: usize = 0;
-        pub const wpclsAbsPrivate2: usize = 1;
-        pub const wpclsAbsPrivate3: usize = 2;
-        pub const wpclsQuerySetting: usize = 3;
-        pub const wpclsSetSetting: usize = 4;
-    }
-    pub mod M_WPBitmap {
-    }
-    pub mod M_WPClock {
-    }
-    pub mod M_WPPalette {
-        pub const wpclsQueryEditString: usize = 0;
-    }
-    pub mod M_WPColorPalette {
-    }
-    pub mod M_WPFileSystem {
-        pub const wpclsQueryInstanceType: usize = 0;
-        pub const wpclsQueryInstanceFilter: usize = 1;
-        pub const wpclsQueryObjectFromPath: usize = 2;
-        pub const wpclsQueryAwakeObject: usize = 3;
-        pub const wpclsFileSysExists: usize = 4;
-        pub const wpclsQueryInstanceClass: usize = 5;
-    }
-    pub mod M_WPDataFile {
-        pub const wpclsAddClipboardAssoc: usize = 0;
-        pub const wpclsEnumClipboardClasses: usize = 1;
-    }
-    pub mod M_WPProgramFile {
-    }
-    pub mod M_WPCommandFile {
-    }
-    pub mod M_WPFolder {
-        pub const wpclsFolderPrivate1: usize = 0;
-        pub const wpclsFolderPrivate2: usize = 1;
-        pub const wpclsQueryOpenFolders: usize = 2;
-        pub const wpclsFolderPrivate3: usize = 3;
-        pub const wpclsQueryIconDataN: usize = 4;
-        pub const wpclsQueryIconN: usize = 5;
-    }
-    pub mod M_WPDesktop {
-        pub const wpclsQueryObjectFromFrame: usize = 0;
-        pub const wpclsQueryActiveDesktop: usize = 1;
-        pub const wpclsQueryActiveDesktopHWND: usize = 2;
-    }
-    pub mod M_WPDisk {
-    }
-    pub mod M_WPDrives {
-    }
-    pub mod M_WPFontPalette {
-    }
-    pub mod M_WPIcon {
-    }
-    pub mod M_WPTransient {
-        pub const wpclsTransientPrivate1: usize = 0;
-        pub const wpclsTransientPrivate2: usize = 1;
-    }
-    pub mod M_WPJob {
-        pub const prtclsManageSelected: usize = 0;
-    }
-    pub mod M_WPKeyboard {
-    }
-    pub mod M_WPLaunchPad {
-    }
-    pub mod M_WPMet {
-    }
-    pub mod M_WPMinWinViewer {
-    }
-    pub mod M_WPMouse {
-    }
-    pub mod M_WPShadow {
-    }
-    pub mod M_WPNetLink {
-    }
-    pub mod M_WPNetgrp {
-    }
-    pub mod M_WPNetwork {
-    }
-    pub mod M_WPPdr {
-    }
-    pub mod M_WPPif {
-    }
-    pub mod M_WPPointer {
-    }
-    pub mod M_WPPort {
-    }
-    pub mod M_WPPrinter {
-    }
-    pub mod M_WPProgram {
-    }
-    pub mod M_WPQdr {
-    }
-    pub mod M_WPRootFolder {
-    }
-    pub mod M_WPSchemePalette {
-    }
-    pub mod M_WPServer {
-    }
-    pub mod M_WPSharedDir {
-    }
-    pub mod M_WPShredder {
-    }
-    pub mod M_WPSound {
-    }
-    pub mod M_WPSpool {
-    }
-    pub mod M_WPStartup {
-    }
-    pub mod M_WPSystem {
-    }
-    pub mod M_WPTemplates {
-    }
-    pub mod M_WPUrl {
-    }
-    pub mod M_WPUrlFolder {
-    }
     pub mod WPObject {
         pub const wpSetTitle: usize = 0;
         pub const wpQueryTitle: usize = 1;
@@ -1232,50 +1395,13 @@ pub mod m {
         pub const wpObjectPrivate32: usize = 163;
         pub const wpObjectPrivate33: usize = 164;
     }
-    pub mod WPAbstract {
-    }
-    pub mod Mindex {
-    }
-    pub mod RS2Shutdown {
-    }
-    pub mod RS2System {
-    }
-    pub mod RS2WindowList {
-    }
-    pub mod WPBitmap {
-    }
-    pub mod WPClassManager {
-        pub const wpClassManagerPrivate1: usize = 0;
-        pub const wpGetTrueClassName: usize = 1;
-        pub const wpReplacementIsInEffect: usize = 2;
-        pub const wpModuleForClass: usize = 3;
-    }
-    pub mod WPClock {
-        pub const wpAddClockView1Page: usize = 0;
-        pub const wpAddClockView2Page: usize = 1;
-        pub const wpAddClockDateTimePage: usize = 2;
-        pub const wpAddClockAlarmPage: usize = 3;
-    }
-    pub mod WPPalette {
-        pub const wpPaintCell: usize = 0;
-        pub const wpSelectCell: usize = 1;
-        pub const wpSetupCell: usize = 2;
-        pub const wpQueryPaletteInfo: usize = 3;
-        pub const wpSetPaletteInfo: usize = 4;
-        pub const wpEditCell: usize = 5;
-        pub const wpDragCell: usize = 6;
-        pub const withdrawn: usize = 7;
-        pub const wpInitCellStructs: usize = 8;
-        pub const wpRedrawCell: usize = 9;
-        pub const wpPaintPalette: usize = 10;
-        pub const wpPalettePrivate1: usize = 11;
-        pub const wpQueryPaletteHelp: usize = 12;
-        pub const wpPalettePrivate2: usize = 13;
-        pub const wpSaveCellData: usize = 14;
-        pub const wpRestoreCellData: usize = 15;
-        pub const wpFreeCellData: usize = 16;
-    }
-    pub mod WPColorPalette {
+    pub mod M_WPFileSystem {
+        pub const wpclsQueryInstanceType: usize = 0;
+        pub const wpclsQueryInstanceFilter: usize = 1;
+        pub const wpclsQueryObjectFromPath: usize = 2;
+        pub const wpclsQueryAwakeObject: usize = 3;
+        pub const wpclsFileSysExists: usize = 4;
+        pub const wpclsQueryInstanceClass: usize = 5;
     }
     pub mod WPFileSystem {
         pub const wpSetRealName: usize = 0;
@@ -1322,6 +1448,10 @@ pub mod m {
         pub const wpQueryFileSizeL: usize = 41;
         pub const wpSetFileSizeL: usize = 42;
     }
+    pub mod M_WPDataFile {
+        pub const wpclsAddClipboardAssoc: usize = 0;
+        pub const wpclsEnumClipboardClasses: usize = 1;
+    }
     pub mod WPDataFile {
         pub const wpAddFileTypePage: usize = 0;
         pub const wpPrintMetaFile: usize = 1;
@@ -1354,32 +1484,48 @@ pub mod m {
         pub const hwndSettingsNotebook: usize = 28;
         pub const wpSettingsNotebook: usize = 29;
     }
-    pub mod WPProgramFile {
-        pub const wpAddProgramAssociationPage: usize = 0;
-        pub const wpAddProgramPage: usize = 1;
-        pub const wpAddProgramSessionPage: usize = 2;
-        pub const wpSetProgDetails: usize = 3;
-        pub const wpQueryProgDetails: usize = 4;
-        pub const wpSetProgIcon: usize = 5;
-        pub const wpQueryAssociationFilter: usize = 6;
-        pub const wpQueryAssociationType: usize = 7;
-        pub const wpSetAssociationFilter: usize = 8;
-        pub const wpSetAssociationType: usize = 9;
-        pub const wpQueryProgramAssociations: usize = 10;
-        pub const wpSetProgramAssociations: usize = 11;
-        pub const wpQueryWarnBeforeStart: usize = 12;
-        pub const wpSetWarnBeforeStart: usize = 13;
-        pub const pgflRepParent_wpOpen: usize = 14;
-        pub const RepParent_wpDrop: usize = 15;
-        pub const wpSetDefaultCpSettings: usize = 16;
-        pub const wpSetCpValues: usize = 17;
-        pub const wpQueryCpValues: usize = 18;
-        pub const wpSaveCpState: usize = 19;
-        pub const wpRestoreCpState: usize = 20;
-        pub const wpInitCpData: usize = 21;
-        pub const wpUndoCpSettings: usize = 22;
+    pub mod M_MMDataFile {
     }
-    pub mod WPCommandFile {
+    pub mod MMDataFile {
+    }
+    pub mod MMAudio {
+    }
+    pub mod MMAIF {
+    }
+    pub mod MMAU {
+    }
+    pub mod MMImage {
+    }
+    pub mod MMAVC {
+    }
+    pub mod MMVideo {
+    }
+    pub mod MMAVI {
+    }
+    pub mod M_WPAbstract {
+        pub const wpclsAbsPrivate1: usize = 0;
+        pub const wpclsAbsPrivate2: usize = 1;
+        pub const wpclsAbsPrivate3: usize = 2;
+        pub const wpclsQuerySetting: usize = 3;
+        pub const wpclsSetSetting: usize = 4;
+    }
+    pub mod WPAbstract {
+    }
+    pub mod MMDevice {
+    }
+    pub mod MMCDDevice {
+    }
+    pub mod MMDIB {
+    }
+    pub mod MMFLI {
+    }
+    pub mod M_WPFolder {
+        pub const wpclsFolderPrivate1: usize = 0;
+        pub const wpclsFolderPrivate2: usize = 1;
+        pub const wpclsQueryOpenFolders: usize = 2;
+        pub const wpclsFolderPrivate3: usize = 3;
+        pub const wpclsQueryIconDataN: usize = 4;
+        pub const wpclsQueryIconN: usize = 5;
     }
     pub mod WPFolder {
         pub const wpSetFldrFlags: usize = 0;
@@ -1490,6 +1636,201 @@ pub mod m {
         pub const wpQueryFldrBackground: usize = 105;
         pub const wpSetFldrGrid: usize = 106;
         pub const wpQueryFldrGrid: usize = 107;
+    }
+    pub mod MMFolder {
+    }
+    pub mod MMGIF {
+    }
+    pub mod MMIFF {
+    }
+    pub mod MMJPG {
+    }
+    pub mod MMLVDDevice {
+    }
+    pub mod MMMIDI {
+    }
+    pub mod MMMMotion {
+    }
+    pub mod MMMOV {
+    }
+    pub mod MMMPG {
+    }
+    pub mod MMPCX {
+    }
+    pub mod MMPhotoCD {
+    }
+    pub mod MMSNDF {
+    }
+    pub mod MMTIFF {
+    }
+    pub mod MMTarga {
+    }
+    pub mod MMVOC {
+    }
+    pub mod MMVolume {
+    }
+    pub mod MMWAV {
+    }
+    pub mod MM_AU {
+    }
+    pub mod M_WPBitmap {
+    }
+    pub mod M_WPClock {
+    }
+    pub mod M_WPPalette {
+        pub const wpclsQueryEditString: usize = 0;
+    }
+    pub mod M_WPColorPalette {
+    }
+    pub mod M_WPProgramFile {
+    }
+    pub mod M_WPCommandFile {
+    }
+    pub mod M_WPDesktop {
+        pub const wpclsQueryObjectFromFrame: usize = 0;
+        pub const wpclsQueryActiveDesktop: usize = 1;
+        pub const wpclsQueryActiveDesktopHWND: usize = 2;
+    }
+    pub mod M_WPDisk {
+    }
+    pub mod M_WPDrives {
+    }
+    pub mod M_WPFontPalette {
+    }
+    pub mod M_WPIcon {
+    }
+    pub mod M_WPTransient {
+        pub const wpclsTransientPrivate1: usize = 0;
+        pub const wpclsTransientPrivate2: usize = 1;
+    }
+    pub mod M_WPJob {
+        pub const prtclsManageSelected: usize = 0;
+    }
+    pub mod M_WPKeyboard {
+    }
+    pub mod M_WPLaunchPad {
+    }
+    pub mod M_WPMet {
+    }
+    pub mod M_WPMinWinViewer {
+    }
+    pub mod M_WPMouse {
+    }
+    pub mod M_WPShadow {
+    }
+    pub mod M_WPNetLink {
+    }
+    pub mod M_WPNetgrp {
+    }
+    pub mod M_WPNetwork {
+    }
+    pub mod M_WPPdr {
+    }
+    pub mod M_WPPif {
+    }
+    pub mod M_WPPointer {
+    }
+    pub mod M_WPPort {
+    }
+    pub mod M_WPPrinter {
+    }
+    pub mod M_WPProgram {
+    }
+    pub mod M_WPQdr {
+    }
+    pub mod M_WPRootFolder {
+    }
+    pub mod M_WPSchemePalette {
+    }
+    pub mod M_WPServer {
+    }
+    pub mod M_WPSharedDir {
+    }
+    pub mod M_WPShredder {
+    }
+    pub mod M_WPSound {
+    }
+    pub mod M_WPSpool {
+    }
+    pub mod M_WPStartup {
+    }
+    pub mod M_WPSystem {
+    }
+    pub mod M_WPTemplates {
+    }
+    pub mod M_WPUrl {
+    }
+    pub mod M_WPUrlFolder {
+    }
+    pub mod Mindex {
+    }
+    pub mod RS2Shutdown {
+    }
+    pub mod RS2System {
+    }
+    pub mod RS2WindowList {
+    }
+    pub mod WPBitmap {
+    }
+    pub mod WPClassManager {
+        pub const wpClassManagerPrivate1: usize = 0;
+        pub const wpGetTrueClassName: usize = 1;
+        pub const wpReplacementIsInEffect: usize = 2;
+        pub const wpModuleForClass: usize = 3;
+    }
+    pub mod WPClock {
+        pub const wpAddClockView1Page: usize = 0;
+        pub const wpAddClockView2Page: usize = 1;
+        pub const wpAddClockDateTimePage: usize = 2;
+        pub const wpAddClockAlarmPage: usize = 3;
+    }
+    pub mod WPPalette {
+        pub const wpPaintCell: usize = 0;
+        pub const wpSelectCell: usize = 1;
+        pub const wpSetupCell: usize = 2;
+        pub const wpQueryPaletteInfo: usize = 3;
+        pub const wpSetPaletteInfo: usize = 4;
+        pub const wpEditCell: usize = 5;
+        pub const wpDragCell: usize = 6;
+        pub const withdrawn: usize = 7;
+        pub const wpInitCellStructs: usize = 8;
+        pub const wpRedrawCell: usize = 9;
+        pub const wpPaintPalette: usize = 10;
+        pub const wpPalettePrivate1: usize = 11;
+        pub const wpQueryPaletteHelp: usize = 12;
+        pub const wpPalettePrivate2: usize = 13;
+        pub const wpSaveCellData: usize = 14;
+        pub const wpRestoreCellData: usize = 15;
+        pub const wpFreeCellData: usize = 16;
+    }
+    pub mod WPColorPalette {
+    }
+    pub mod WPProgramFile {
+        pub const wpAddProgramAssociationPage: usize = 0;
+        pub const wpAddProgramPage: usize = 1;
+        pub const wpAddProgramSessionPage: usize = 2;
+        pub const wpSetProgDetails: usize = 3;
+        pub const wpQueryProgDetails: usize = 4;
+        pub const wpSetProgIcon: usize = 5;
+        pub const wpQueryAssociationFilter: usize = 6;
+        pub const wpQueryAssociationType: usize = 7;
+        pub const wpSetAssociationFilter: usize = 8;
+        pub const wpSetAssociationType: usize = 9;
+        pub const wpQueryProgramAssociations: usize = 10;
+        pub const wpSetProgramAssociations: usize = 11;
+        pub const wpQueryWarnBeforeStart: usize = 12;
+        pub const wpSetWarnBeforeStart: usize = 13;
+        pub const pgflRepParent_wpOpen: usize = 14;
+        pub const RepParent_wpDrop: usize = 15;
+        pub const wpSetDefaultCpSettings: usize = 16;
+        pub const wpSetCpValues: usize = 17;
+        pub const wpQueryCpValues: usize = 18;
+        pub const wpSaveCpState: usize = 19;
+        pub const wpRestoreCpState: usize = 20;
+        pub const wpInitCpData: usize = 21;
+        pub const wpUndoCpSettings: usize = 22;
+    }
+    pub mod WPCommandFile {
     }
     pub mod WPDesktop {
         pub const wpIsCurrentDesktop: usize = 0;

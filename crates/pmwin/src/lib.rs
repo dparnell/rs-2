@@ -15,6 +15,7 @@ pub mod mle;
 pub mod notebook;
 mod queue;
 pub mod minimize;
+pub mod mmicons;
 pub mod shellicons;
 mod region;
 pub mod sysptr;
