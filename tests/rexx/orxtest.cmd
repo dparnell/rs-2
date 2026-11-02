@@ -148,7 +148,7 @@ call check result = 'tokenized ok', 'a tokenized program runs'
 call rxfuncadd 'SysLoadFuncs', 'REXXUTIL', 'SysLoadFuncs'
 call SysLoadFuncs
 call check SysBootDrive() = 'C:', 'REXXUTIL SysBootDrive'
-call SysFileTree 'C:\*.CMD', 'files.', 'FO'
+call SysFileTree 'C:\*.CMD', 'files.', 'FOS'
 call check files.0 > 0, 'REXXUTIL SysFileTree'
 call check SysSearchPath('PATH', 'CMD.EXE') \= '', 'REXXUTIL SysSearchPath'
 
