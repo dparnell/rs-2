@@ -2442,7 +2442,67 @@ are IBM's numbers (CLIPOS2.HLP).
 
 ### Seek and Scan Files (PMSEEK.EXE)
 
-(to come)
+`userland/pmseek`, `OS2\APPS\PMSEEK.EXE` (help PMSEEK.HLP). Studied in
+IBM's PMSEEK.EXE (a 16-bit program) and its resource DLL PMSEEK.DLL.
+As IBM's, the window is a dialog with a sizing border and a menu bar:
+the file name to search for (`*.*` at first), the text to search for,
+the editor (`E.EXE`), the drives ("All fixed disks", which checks the
+hard disks: not A: or B:, CD-ROM (CDFS, UDF) or network drives, from
+DosQueryFSAttach; and a check box per drive DosQueryCurrentDisk
+reports), the status line, the list of files found and the Search,
+Stop, Open and Help buttons; IBM's control ids, menu ids,
+accelerators (F2 Save, F4 Clear list, F5 Search, F6 Stop, Ctrl+Insert
+Copy; IBM's F5/F6 commands 205/206 have no menu item, rs2 reads them as
+Search and Stop) and help panel numbers. When the window is sized the
+list grows and the fields keep their place under the menu (handled on
+WM_FORMATFRAME: rs2's frames get no WM_SIZE).
+
+- **Searching** runs on a second thread (with its own message queue;
+  it sends each file and the directory being searched to the window,
+  so only the window's thread touches the list) and Stop or closing the
+  window ends it. DosFindFirst/Next (FILEFINDBUF3, 64 entries a call)
+  match the name, hidden and system files included; with "Search
+  subdirectories" every directory below is walked. A pattern may name
+  a directory (`\OS2\HELP\*.HLP`) or a drive (`D:\*.INI`, then only
+  that drive). The text is looked for line by line (a match never
+  spans lines; very long "lines" of binary files are looked at in 4 KB
+  pieces), with or without "Ignore case". The status line shows
+  "Searching C:\OS2\" as it goes and at the end IBM's "Search
+  Complete... N file(s) found.  Search Time= S second(s)." (or "Search
+  Aborted..."); a full list box (32000 lines) stops the search with
+  IBM's "PM Listbox capacity exceeded."
+- **The list**: a line per file, `MM-DD-YY  HH:MM  size  path` (the
+  last write), and with "Display found text" the lines holding the
+  text below it (`-------> line`, at most 50 per file). Each line's
+  item handle leads to its file, so a found-text line opens its file.
+- **Selected** (and the Open button, and a double click): Open starts
+  the editor (looked for along PATH when it names no directory) with
+  the file in a session of its own (DosStartSession); Process starts a
+  program (.EXE, .COM) or gives any other file to `CMD.EXE /C` in an OS/2
+  window; Command... asks for a command line (IBM's "File Command"
+  dialog, filled in with the file's name) and runs it through
+  `CMD.EXE /C`.
+- **File** Save writes the list (CR LF lines) to the list file and Save
+  as asks for its name first ("N list entries saved in NAME"); **Edit**
+  Copy puts the selected line on the clipboard as text, Clear list
+  empties it.
+- **Settings**: OS2.INI application `PMSEEK`, IBM's keys: `Position`
+  ("x y cx cy", written when the program ends), `Editor`, `Saveas` and
+  `Options` ("subdirectories found-text ignore-case clear-on-search",
+  each 0 or 1), the last three written by Options > Set defaults
+  (Saveas also by Save as). Defaults: subdirectories, ignore case and
+  clear on search on.
+
+`PMSEEK /SELFTEST` checks the pattern splitting, the text matcher
+(case, matches split across reads, long lines), the list line format
+and searches of the boot drive (CONFIG.SYS holding LIBPATH, a text that
+is not there, PMSEEK.HLP found through subdirectories, a pattern with a
+directory), printing PASS/FAIL and `pmseek selftest done: N
+failure(s)`.
+
+Not done: IBM's drag and drop from the list (dragging a file to
+another program), its "Upload File" and 3270 file transfer helpers
+(SEND.EXE) and the search expressions its binary hints at (`&&`, `!!`).
 
 ### Icon Editor (ICONEDIT.EXE)
 

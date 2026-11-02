@@ -789,8 +789,6 @@ fn copy_line() {
 
 // ---- Sizing ----
 
-const LAYOUT_IDS: &[u32] = &[ID_NAME, ID_TEXT, ID_EDITOR, ID_ALLFIXED, ID_STATUS, ID_LIST];
-
 /// Note where everything is (the controls above the list keep their
 /// distance from the top, the list grows).
 fn record_layout(dlg: u32) {
@@ -799,14 +797,14 @@ fn record_layout(dlg: u32) {
     let mut h = unsafe { WinQueryWindow(dlg, 2 /* QW_TOP */) };
     while h != 0 {
         let id = unsafe { WinQueryWindowUShort(h, -1 /* QWS_ID */) } as u32;
-        if id < 0x8000 {
+        // Not the frame controls (FID_*); the labels (0xffff) too.
+        if !(0x8000..0x9000).contains(&id) {
             a.layout.push((h, window_pos(h)));
         }
         h = unsafe { WinQueryWindow(h, 0 /* QW_NEXT */) };
     }
     let s = window_pos(dlg);
     a.size0 = (s.cx, s.cy);
-    let _ = LAYOUT_IDS;
 }
 
 fn relayout(cx: i32, cy: i32) {
@@ -844,9 +842,14 @@ extern "C" fn main_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             record_layout(h);
             0
         }
-        WM_SIZE => {
+        // The frame lays out its controls (rs2's frames get no WM_SIZE;
+        // OS/2's send both): the dialog's own items follow.
+        WM_FORMATFRAME | WM_SIZE => {
             let r = unsafe { WinDefDlgProc(h, m, mp1, mp2) };
-            relayout(lo(mp2) as i16 as i32, hi(mp2) as i16 as i32);
+            let s = window_pos(h);
+            if s.fl & SWP_MINIMIZE == 0 {
+                relayout(s.cx, s.cy);
+            }
             r
         }
         WM_SEEK_STATUS => {
@@ -929,13 +932,10 @@ fn command(id: u16) {
         IDM_USINGHELP => help(HM_DISPLAY_HELP),
         IDM_KEYSHELP => help(HM_KEYS_HELP),
         IDM_PRODUCT => product_info(a.dlg, DLG_PRODUCT, b"Seek and Scan Files - Product Information", b"Seek and Scan Files", &[b"rs2 (OS/2 Warp 4.52 compatible)", b"Finds files by name and by the text in them."]),
-        DID_CANCEL_U16 => {}
         _ => {}
     }
     update_menu();
 }
-
-const DID_CANCEL_U16: u16 = DID_CANCEL as u16;
 
 fn help(msg: u32) {
     let a = app();

@@ -314,7 +314,7 @@ copied from the CD.
 
 | `OS2\APPS\PICVIEW.EXE` | Picture Viewer | (to come) | |
 
-| `OS2\APPS\PMSEEK.EXE` | Seek and Scan Files | (to come) | |
+| `OS2\APPS\PMSEEK.EXE` | Seek and Scan Files | search by name and text on a second thread (Stop), drives, found text, Open/Process/Command, Save, Copy, settings, help | `PMSEEK /SELFTEST` (0 failures); QEMU screenshots: a search of `C:\*.CMD` for "say" with found text, Open in the editor, sizing, F1 help |
 
 | `OS2\ICONEDIT.EXE` | Icon Editor | icons, pointers and bitmaps (1.1, 1.2, 2.0 and packed 2.0 files, bitmap arrays of device forms, 2 to 16M colours); drawing, selection tools, clipboard, palette editing, device list, test pointer, help | `ICONEDIT /SELFTEST` (round trips, tools); QEMU screenshots: drawing, Save as and reopening, IBM's MAHJONGG.ICO opened and its forms edited, every dialog, help |
 
