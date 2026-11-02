@@ -633,13 +633,17 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("somu", "OS2\\DLL\\SOMU.DLL"),
         ("somir", "OS2\\DLL\\SOMIR.DLL"),
         ("win16", "OS2\\DLL\\WIN16.DLL"),
+        ("rxqueue", "OS2\\RXQUEUE.EXE"),
+        ("rxsubcom", "OS2\\RXSUBCOM.EXE"),
+        ("pmrexxio", "OS2\\DLL\\PMREXXIO.DLL"),
+        ("pmrexx", "OS2\\PMREXX.EXE"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
-const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP")];
+const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP"), ("pmrexxio/PMREXXIO.IPF", "OS2\\HELP\\PMREXXIO.HLP")];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool"];
+const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "pmrexx"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
