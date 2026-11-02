@@ -166,15 +166,17 @@ methods! {
     }
     fn TransformShape(this: usize, ev: usize, s: usize) -> usize {
         if s != 0 {
-            let sh = shape(s);
-            sh.rect = xf(this).rect(sh.rect);
+            let x = *xf(this);
+            let v = shape(s).rects.iter().map(|r| x.rect(*r)).collect();
+            set_rects(shape(s), v);
         }
         0
     }
     fn InvertShape(this: usize, ev: usize, s: usize) -> usize {
         if s != 0 {
-            let sh = shape(s);
-            sh.rect = xf(this).inverse().rect(sh.rect);
+            let x = xf(this).inverse();
+            let v = shape(s).rects.iter().map(|r| x.rect(*r)).collect();
+            set_rects(shape(s), v);
         }
         0
     }
@@ -233,13 +235,21 @@ pub static BASE_TRANSFORM_O: &[(&str, M)] = &[("SOMObject::somUninit", XSomUnini
 pub static TRANSFORM_M: &[(&str, M)] =
     &[("InitTransform", InitTransform::t), ("GetMATRIXLF", GetMATRIXLF::t), ("SetMATRIXLF", SetMATRIXLF::t)];
 
-// ---- Shapes: rectangles ----
+// ---- Shapes: unions of rectangles ----
 
+/// A shape's geometry: disjoint rectangles (none: empty), with `rect`
+/// their bounding box. Union, Intersect and Subtract are exact, so
+/// shapes need not be rectangular (an L, a frame with a hole); polygons
+/// are kept as their bounding boxes.
 #[derive(Default)]
 pub struct ShapeState {
     pub rect: Rect,
+    pub rects: Vec<Rect>,
     pub mode: u32,
+    /// The GPI region made for GetRegion (0: none yet), and whether the
+    /// geometry changed since.
     pub region: u32,
+    pub stale: bool,
 }
 
 pub fn shape(this: usize) -> &'static mut ShapeState {
@@ -249,13 +259,122 @@ pub fn shape(this: usize) -> &'static mut ShapeState {
 pub fn new_shape(r: Rect) -> usize {
     let s = new_of(cd!(ODShapeClassData), "ODShape");
     if s != 0 {
-        shape(s).rect = r.normalized();
+        set_rects(shape(s), alloc::vec![r.normalized()]);
     }
     s
 }
 
 pub fn rect_of(s: usize) -> Rect {
     if s == 0 { Rect::default() } else { shape(s).rect }
+}
+
+pub fn rects_of(s: usize) -> Vec<Rect> {
+    if s == 0 { Vec::new() } else { shape(s).rects.clone() }
+}
+
+fn set_rects(s: &mut ShapeState, v: Vec<Rect>) {
+    let v: Vec<Rect> = v.into_iter().map(Rect::normalized).filter(|r| !r.is_empty()).collect();
+    s.rect = v.iter().fold(Rect::default(), |a, r| a.union(r));
+    s.rects = v;
+    s.stale = true;
+}
+
+/// `a` without `b`: up to four rectangles.
+fn minus(a: &Rect, b: &Rect) -> Vec<Rect> {
+    let i = a.intersect(b);
+    if i.is_empty() {
+        return alloc::vec![*a];
+    }
+    let mut out = Vec::new();
+    if i.top < a.top {
+        out.push(Rect { left: a.left, right: a.right, bottom: i.top, top: a.top });
+    }
+    if i.bottom > a.bottom {
+        out.push(Rect { left: a.left, right: a.right, bottom: a.bottom, top: i.bottom });
+    }
+    if i.left > a.left {
+        out.push(Rect { left: a.left, right: i.left, bottom: i.bottom, top: i.top });
+    }
+    if i.right < a.right {
+        out.push(Rect { left: i.right, right: a.right, bottom: i.bottom, top: i.top });
+    }
+    out
+}
+
+fn subtract(a: &[Rect], b: &[Rect]) -> Vec<Rect> {
+    let mut cur = a.to_vec();
+    for r in b {
+        cur = cur.iter().flat_map(|x| minus(x, r)).collect();
+    }
+    cur
+}
+
+fn intersect(a: &[Rect], b: &[Rect]) -> Vec<Rect> {
+    let mut out = Vec::new();
+    for x in a {
+        for y in b {
+            let i = x.intersect(y);
+            if !i.is_empty() {
+                out.push(i);
+            }
+        }
+    }
+    out
+}
+
+fn union(a: &[Rect], b: &[Rect]) -> Vec<Rect> {
+    let mut out = a.to_vec();
+    out.extend(subtract(b, a));
+    // One rectangle when the pieces make one.
+    let bbox = out.iter().fold(Rect::default(), |a, r| a.union(r));
+    let area = |r: &Rect| (r.right - r.left) as i64 / 0x100 * ((r.top - r.bottom) as i64 / 0x100);
+    if out.len() > 1 && out.iter().map(area).sum::<i64>() == area(&bbox) {
+        return alloc::vec![bbox];
+    }
+    out
+}
+
+fn same(a: &[Rect], b: &[Rect]) -> bool {
+    subtract(a, b).is_empty() && subtract(b, a).is_empty()
+}
+
+unsafe extern "C" {
+    #[link_name = "PMGPI.370"]
+    fn GpiCreateRegion(hps: u32, n: i32, rects: *const [i32; 4]) -> u32;
+    #[link_name = "PMGPI.611"]
+    fn GpiDestroyRegion(hps: u32, hrgn: u32) -> u32;
+}
+
+/// The presentation space regions are made for (the desktop's, kept).
+static mut REGION_PS: u32 = 0;
+
+fn region_ps() -> u32 {
+    unsafe {
+        if REGION_PS == 0 {
+            REGION_PS = crate::services::WinGetPS(1);
+        }
+        REGION_PS
+    }
+}
+
+/// The shape as a GPI region (RECTLs in whole units), made again when the
+/// geometry changed.
+fn region(this: usize) -> u32 {
+    let s = shape(this);
+    if s.region != 0 && !s.stale {
+        return s.region;
+    }
+    let ps = region_ps();
+    if ps == 0 {
+        return 0;
+    }
+    if s.region != 0 {
+        unsafe { GpiDestroyRegion(ps, s.region) };
+    }
+    let r: Vec<[i32; 4]> = s.rects.iter().map(|r| [r.left >> 16, r.bottom >> 16, r.right >> 16, r.top >> 16]).collect();
+    s.region = unsafe { GpiCreateRegion(ps, r.len() as i32, if r.is_empty() { core::ptr::null() } else { r.as_ptr() }) };
+    s.stale = false;
+    s.region
 }
 
 methods! {
@@ -269,87 +388,125 @@ methods! {
         0
     }
     fn SetRectangle(this: usize, ev: usize, r: usize) -> usize {
-        shape(this).rect = if r == 0 { Rect::default() } else { read::<Rect>(r).normalized() };
+        let r = if r == 0 { Rect::default() } else { read::<Rect>(r) };
+        set_rects(shape(this), alloc::vec![r]);
         this
     }
     fn CopyPolygon(this: usize, ev: usize, out: usize) -> usize { 0 }
-    fn SetPolygon(this: usize, ev: usize, poly: usize) -> usize { this }
-    fn GetPlatformShape(this: usize, ev: usize, g: usize) -> usize { shape(this).region as usize }
-    fn SetPlatformShape(this: usize, ev: usize, g: usize, s: usize) -> usize {
-        shape(this).region = s as u32;
-        0
-    }
-    fn SReset(this: usize, ev: usize) -> usize {
-        shape(this).rect = Rect::default();
-        0
-    }
-    fn SIsSameAs(this: usize, ev: usize, s: usize) -> usize { (shape(this).rect == rect_of(s)) as usize }
-    fn IsEmpty(this: usize, ev: usize) -> usize { shape(this).rect.is_empty() as usize }
-    fn ContainsPoint(this: usize, ev: usize, p: usize) -> usize { (p != 0 && shape(this).rect.contains(read(p))) as usize }
-    fn IsRectangular(this: usize, ev: usize) -> usize { 1 }
-    fn HasGeometry(this: usize, ev: usize) -> usize { 1 }
-    fn NewShape(this: usize, ev: usize) -> usize { new_shape(Rect::default()) }
-    fn SCopy(this: usize, ev: usize) -> usize { new_shape(shape(this).rect) }
-    fn SCopyFrom(this: usize, ev: usize, s: usize) -> usize {
-        shape(this).rect = rect_of(s);
-        this
-    }
-    fn STransform(this: usize, ev: usize, t: usize) -> usize {
-        let s = shape(this);
-        s.rect = xf_of(t).rect(s.rect);
-        this
-    }
-    fn SInverseTransform(this: usize, ev: usize, t: usize) -> usize {
-        let s = shape(this);
-        s.rect = xf_of(t).inverse().rect(s.rect);
-        this
-    }
-    fn Subtract(this: usize, ev: usize, o: usize) -> usize {
-        // Rectangles only: what is left when the other covers a whole side.
-        let s = shape(this);
-        let o = rect_of(o);
-        let i = s.rect.intersect(&o);
-        if i == s.rect {
-            s.rect = Rect::default();
-        } else if !i.is_empty() {
-            let r = &mut s.rect;
-            if i.left == r.left && i.right == r.right {
-                if i.top == r.top { r.top = i.bottom } else if i.bottom == r.bottom { r.bottom = i.top }
-            } else if i.top == r.top && i.bottom == r.bottom {
-                if i.left == r.left { r.left = i.right } else if i.right == r.right { r.right = i.left }
+    fn SetPolygon(this: usize, ev: usize, poly: usize) -> usize {
+        // ODPolygon: nContours, then per contour nVertices and the points.
+        if poly != 0 {
+            let n = read::<i32>(poly).clamp(0, 64);
+            let mut p = poly + 4;
+            let mut bbox = Rect::default();
+            let mut first = true;
+            for _ in 0..n {
+                let nv = read::<i32>(p).clamp(0, 4096);
+                p += 4;
+                for _ in 0..nv {
+                    let pt = read::<Point>(p);
+                    p += 8;
+                    let r = Rect { left: pt.x, right: pt.x, top: pt.y, bottom: pt.y };
+                    bbox = if first { r } else { Rect { left: bbox.left.min(r.left), right: bbox.right.max(r.right), top: bbox.top.max(r.top), bottom: bbox.bottom.min(r.bottom) } };
+                    first = false;
+                }
             }
+            set_rects(shape(this), alloc::vec![bbox]);
         }
         this
     }
+    fn GetPlatformShape(this: usize, ev: usize, g: usize) -> usize { region(this) as usize }
+    fn SetPlatformShape(this: usize, ev: usize, g: usize, s: usize) -> usize {
+        shape(this).region = s as u32;
+        shape(this).stale = false;
+        0
+    }
+    fn SReset(this: usize, ev: usize) -> usize {
+        set_rects(shape(this), Vec::new());
+        0
+    }
+    fn SIsSameAs(this: usize, ev: usize, s: usize) -> usize { same(&shape(this).rects, &rects_of(s)) as usize }
+    fn IsEmpty(this: usize, ev: usize) -> usize { shape(this).rects.is_empty() as usize }
+    fn ContainsPoint(this: usize, ev: usize, p: usize) -> usize {
+        (p != 0 && shape(this).rects.iter().any(|r| r.contains(read(p)))) as usize
+    }
+    fn IsRectangular(this: usize, ev: usize) -> usize { (shape(this).rects.len() <= 1) as usize }
+    fn HasGeometry(this: usize, ev: usize) -> usize { 1 }
+    fn NewShape(this: usize, ev: usize) -> usize { new_shape(Rect::default()) }
+    fn SCopy(this: usize, ev: usize) -> usize {
+        let n = new_shape(Rect::default());
+        if n != 0 {
+            set_rects(shape(n), shape(this).rects.clone());
+        }
+        n
+    }
+    fn SCopyFrom(this: usize, ev: usize, s: usize) -> usize {
+        set_rects(shape(this), rects_of(s));
+        this
+    }
+    fn STransform(this: usize, ev: usize, t: usize) -> usize {
+        let x = xf_of(t);
+        let v = shape(this).rects.iter().map(|r| x.rect(*r)).collect();
+        set_rects(shape(this), v);
+        this
+    }
+    fn SInverseTransform(this: usize, ev: usize, t: usize) -> usize {
+        let x = xf_of(t).inverse();
+        let v = shape(this).rects.iter().map(|r| x.rect(*r)).collect();
+        set_rects(shape(this), v);
+        this
+    }
+    fn Subtract(this: usize, ev: usize, o: usize) -> usize {
+        let v = subtract(&shape(this).rects, &rects_of(o));
+        set_rects(shape(this), v);
+        this
+    }
     fn Intersect(this: usize, ev: usize, o: usize) -> usize {
-        let s = shape(this);
-        s.rect = s.rect.intersect(&rect_of(o));
+        let v = intersect(&shape(this).rects, &rects_of(o));
+        set_rects(shape(this), v);
         this
     }
     fn Union(this: usize, ev: usize, o: usize) -> usize {
-        let s = shape(this);
-        s.rect = s.rect.union(&rect_of(o));
+        let v = union(&shape(this).rects, &rects_of(o));
+        set_rects(shape(this), v);
         this
     }
     fn Outset(this: usize, ev: usize, d: usize) -> usize {
         let d = d as i32;
-        let r = &mut shape(this).rect;
-        *r = Rect { left: r.left - d, right: r.right + d, top: r.top + d, bottom: r.bottom - d }.normalized();
+        let mut acc: Vec<Rect> = Vec::new();
+        for r in shape(this).rects.clone() {
+            let o = Rect { left: r.left - d, right: r.right + d, top: r.top + d, bottom: r.bottom - d }.normalized();
+            acc = union(&acc, &[o]);
+        }
+        set_rects(shape(this), acc);
         this
     }
     fn SSomUninit(this: usize) -> usize {
+        let r = shape(this).region;
+        if r != 0 && region_ps() != 0 {
+            unsafe { GpiDestroyRegion(region_ps(), r) };
+        }
         drop_state::<ShapeState>(cd!(ODBaseShapeCClassData), this);
         call_parent(cd!(ODBaseShapeCClassData), somsup::so(), somsup::om::SOM_UNINIT, &[this]);
         0
     }
-    // ODShape (OS/2): the shape as a GPI region (rs2 does not make one).
+    // ODShape (OS/2): the shape as a GPI region.
     fn InitShape(this: usize, ev: usize) -> usize { 0 }
-    fn GetRegion(this: usize, ev: usize) -> usize { shape(this).region as usize }
+    fn GetRegion(this: usize, ev: usize) -> usize { region(this) as usize }
     fn SetRegion(this: usize, ev: usize, r: usize) -> usize {
         shape(this).region = r as u32;
+        shape(this).stale = false;
         this
     }
-    fn CopyRegion(this: usize, ev: usize) -> usize { 0 }
+    fn CopyRegion(this: usize, ev: usize) -> usize {
+        // A region of the caller's own (made from the geometry).
+        let ps = region_ps();
+        if ps == 0 {
+            return 0;
+        }
+        let r: Vec<[i32; 4]> = shape(this).rects.iter().map(|r| [r.left >> 16, r.bottom >> 16, r.right >> 16, r.top >> 16]).collect();
+        unsafe { GpiCreateRegion(ps, r.len() as i32, if r.is_empty() { core::ptr::null() } else { r.as_ptr() }) as usize }
+    }
 }
 
 pub static BASE_SHAPE_M: &[(&str, M)] = &[

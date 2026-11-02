@@ -624,6 +624,30 @@ fn shapes_and_transforms() {
     let p = Point { x: 10 * ONE, y: 10 * ONE };
     check("shape ContainsPoint", m(cd!(ODBaseShapeClassData), SH_CONTAINS_POINT, &[a, e, &p as *const Point as usize]) & 0xff != 0);
     check("shape not IsEmpty", m(cd!(ODBaseShapeClassData), SH_IS_EMPTY, &[a, e]) & 0xff == 0);
+    // Shapes that are not rectangles: a square with a hole.
+    let c = cd!(ODBaseShapeClassData);
+    let outer = m(c, SH_COPY, &[a, e]);
+    let sq = rect(0, 0, 100, 100);
+    m(c, SH_SET_RECTANGLE, &[outer, e, &sq as *const Rect as usize]);
+    let inner = m(c, SH_COPY, &[outer, e]);
+    let hole = rect(25, 25, 75, 75);
+    m(c, SH_SET_RECTANGLE, &[inner, e, &hole as *const Rect as usize]);
+    let ring = m(c, SH_COPY, &[outer, e]);
+    m(c, 19, &[ring, e, inner]); // Subtract
+    let at = |x: i32, y: i32| Point { x: x * ONE, y: y * ONE };
+    let has = |s: usize, p: Point| m(c, SH_CONTAINS_POINT, &[s, e, &p as *const Point as usize]) & 0xff != 0;
+    m(c, SH_GET_BOUNDING_BOX, &[ring, e, &mut bb as *mut Rect as usize]);
+    check("Subtract makes a shape with a hole", m(c, 12, &[ring, e]) & 0xff == 0 && !has(ring, at(50, 50)) && has(ring, at(10, 10)) && has(ring, at(90, 50)) && bb == sq);
+    check("IsSameAs tells the ring from the square", m(c, 9, &[ring, e, outer]) & 0xff == 0);
+    let both = m(c, SH_COPY, &[ring, e]);
+    m(c, SH_UNION, &[both, e, inner]);
+    check("ring Union hole is the square again", m(c, 9, &[both, e, outer]) & 0xff != 0 && m(c, 12, &[both, e]) & 0xff != 0);
+    let none = m(c, SH_COPY, &[ring, e]);
+    m(c, SH_INTERSECT, &[none, e, inner]);
+    check("ring Intersect hole is empty", m(c, SH_IS_EMPTY, &[none, e]) & 0xff != 0);
+    for o in [outer, inner, ring, both, none] {
+        release(o);
+    }
 
     let tc = unsafe { ODTransformNewClass(1, 0) };
     let t = somsup::new_object(tc);
