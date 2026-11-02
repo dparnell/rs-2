@@ -468,7 +468,7 @@ fn create_window() -> bool {
     for id in [IDM_GAME, IDM_NEWDEAL, IDM_DEFAULT, IDM_OPEN, IDM_SAVE, IDM_SAVEAS, IDM_AUTOPLAY, IDM_MOVES, IDM_TAKEBACK, IDM_REPLAY, IDM_SHOWREPLAY, IDM_CHEAT, IDM_SHOW, IDM_SHOWSAME, IDM_VIEW, IDM_OPTIONS, IDM_TIMER, IDM_MATCHES, IDM_SETTINGS, IDM_HELP, IDM_USINGHELP, IDM_GENERALHELP, IDM_KEYSHELP, IDM_PRODUCT] {
         items.push((id, id));
     }
-    items.extend_from_slice(&[(IDM_RANDOM, IDM_NEWDEAL), (IDM_SAME, IDM_NEWDEAL), (IDM_SELECT, IDM_NEWDEAL), (IDM_PLAY, IDM_VIEW), (IDM_EDIT, IDM_VIEW), (IDM_SAVESETTINGS, IDM_OPTIONS), (IDM_HELPCONTENTS, IDM_HELP), (IDM_GAMEINFO, IDM_HELP)]);
+    items.extend_from_slice(&[(IDM_RANDOM, IDM_NEWDEAL), (IDM_SAME, IDM_NEWDEAL), (IDM_SELECT, IDM_NEWDEAL), (IDM_PLAY, IDM_VIEW), (IDM_EDIT, IDM_VIEW), (IDM_SAVESETTINGS, IDM_OPTIONS), (IDM_HELPCONTENTS, IDM_HELPCONTENTS), (IDM_GAMEINFO, IDM_GAMEINFO)]);
     let items: &'static [(u16, u16)] = alloc::boxed::Box::leak(items.into_boxed_slice());
     let edit_items: &'static [(u16, u16)] = &[(1, DLG_EDIT), (2, DLG_EDIT), (3701, DLG_EDIT), (3702, DLG_EDIT), (3703, DLG_EDIT), (3705, DLG_EDIT), (3706, DLG_EDIT)];
     a.help = Help::create(
@@ -965,7 +965,13 @@ fn auto_step() {
     if !a.auto {
         return;
     }
-    let pairs = a.game.free_pairs();
+    // A solvable deal's own order where it still applies, else any pair.
+    let g = &a.game;
+    let planned = g.solution.iter().copied().find(|&(p, q)| g.present[p] && g.present[q] && g.free(p) && g.free(q) && game::matches(g.face[p], g.face[q]));
+    let pairs = match planned {
+        Some(p) => alloc::vec![p],
+        None => a.game.free_pairs(),
+    };
     match pairs.first() {
         Some(&(p, q)) => {
             a.game.remove(p, q, false);

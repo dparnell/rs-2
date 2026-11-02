@@ -47,8 +47,9 @@ impl Layout {
         l.about = b"The traditional layout".to_vec();
         l.dx = 15;
         l.dy = 8;
-        l.x_stat = 0;
-        l.y_stat = 75;
+        // The status box in the empty corner at the upper left.
+        l.x_stat = 2;
+        l.y_stat = 61;
         // Level 0: eight rows (from the top), the long rows ending in
         // the three outer tiles of the middle.
         let rows: [(i32, i32); 8] = [(1, 12), (3, 10), (2, 11), (1, 12), (1, 12), (2, 11), (3, 10), (1, 12)];
