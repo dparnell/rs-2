@@ -7,3 +7,6 @@ license.workspace = true
 
 [dependencies]
 mmimage = { path = "../mmimage" }
+
+[dev-dependencies]
+os2-exe = { path = "../os2-exe" }
