@@ -2505,7 +2505,65 @@ animated card movement (moves are shown step by step, not sliding).
 
 ### Mahjongg (MAHJONGG.EXE)
 
-(to come)
+`userland/mahjongg`, in `OS2\APPS` with rs2's layouts beside it
+(`userland/mahjongg/layouts`: PYRAMID, FORTRESS and TWINPEAK.MAH, made by
+`gen.py`, and DEFAULT.MAH, which stands for the built-in layout as
+IBM's dummy file does). As IBM's (studied in its binary, resources and
+game files, and run on rs2 beside it):
+
+- **Play**: 144 tiles (34 faces four times, four flowers and four
+  seasons that pair with each other); a tile is free when nothing lies
+  on it, even partly, and its left or right side is open. Clicking
+  selects (yellow) and takes matching pairs; the status box at the
+  layout's `x_stat`/`y_stat` shows the matches (pairs takeable now) and
+  the time, which starts with the first pair. No pairs left asks New,
+  Retry, Exit or Cancel; a cleared board says how long it took and how
+  often the player cheated.
+- **Menus and keys** are IBM's ids and accelerators: Game (New deal:
+  Random Ctrl+N, Same, Select... a game number 1-30000; Default; Open...,
+  Save, Save as...; Auto play Ctrl+P), Moves (Take back Ctrl+T and
+  Alt+Backspace, Replay Ctrl+R, Show replay Ctrl+Y, Cheat Ctrl+C: the
+  next pair may be blocked, Show Ctrl+S: a pair, or one tile of it, for
+  a moment), View (Play, Edit), Options (Timer, Matches, Settings...,
+  Save settings), Help (Contents, General, Keys, Using help, Game
+  information, Product information); mouse button 2 gives IBM's pop-up
+  menu (with Show same).
+- **Deals** come from the game number (the same number, the same deal);
+  with "Deal only solvable games" the tiles are taken off the full
+  layout two free ones at a time and given matching faces, so the deal
+  plays out in that order (Auto play follows it).
+- **Game files** are IBM's `.MAH` format (`:GAME` name, help, tileset,
+  author, about; `:BOARD` dx, dy, x_stat, y_stat, color; `:LEVEL n.`
+  with positions in whole and half tiles, y upwards), read (IBM's eight
+  layouts load) and written; a new file can get a shadow in
+  `<MAH_FOLDER>` (WinCreateObject of a WPShadow, as IBM's). `MAHJONGG
+  file.MAH` opens one. The built-in layout is the traditional turtle.
+- **Edit mode** shows the layout without faces and IBM's Edit Mode
+  window (board size, level, Reset, OK, Cancel); clicks add and remove
+  tiles of the level, snapped to half tiles; OK needs 144 tiles without
+  overlaps.
+- **Settings** are kept as IBM keeps them, in `MAHJONGG.INI` (the
+  current directory, application `MAHJONGG`, values as text: ErrorBeep,
+  Solvable, HintMode, 3DView, Speed, BackClr `RGB(r,g,b)`, UseBackClr,
+  Timer, Status, and rs2's AutoHints); the first start asks for the hint
+  level (IBM's Select Initial Level). rs2's Settings dialog has IBM's
+  options as one page: beeps, solvable games, matching tiles shown,
+  hints, the side the tiles are seen from, auto play speed and the
+  background colour.
+- **Tiles** are rs2's own design, drawn with GPI into a back buffer
+  (`tiles.rs`: circles, bamboo, characters with a red seal, winds with
+  a letter and arrow, flame, pine and frame dragons, flowers, seasons);
+  each level is a seventh of a tile up and to the side.
+- `MAHJONGG /SELFTEST` checks the set, the free-tile rules, the layouts
+  (built-in, rs2's files, IBM's when in `C:\IBM\APPS`), writing and
+  reading game files (also on disk), deals by number and that solvable
+  deals play out on every layout, and taking back.
+
+Not done: IBM's tile set DLLs (TILEDEF.DLL), background bitmaps, sounds
+(rs2 ships no WAV files) and the opening movie, tile animation, the hand
+pointer, a per-layout help file shown by Game information (rs2 shows and
+edits the layout's title, author and comment there), the settings
+notebook's pages (rs2 has one dialog).
 
 ### OS/2 Chess (OS2CHESS.EXE)
 
