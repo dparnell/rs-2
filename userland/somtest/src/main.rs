@@ -23,6 +23,7 @@ use alloc::vec::Vec;
 use os2::*;
 
 mod libs;
+mod irw;
 mod somd;
 mod somir;
 mod somu;
@@ -1087,6 +1088,10 @@ fn main(s: &Startup) -> u32 {
         ir(args);
     } else if word.eq_ignore_ascii_case(b"BA") {
         before_after();
+    } else if word.eq_ignore_ascii_case(b"IRW") {
+        unsafe { somEnvironmentNew() };
+        let set = args.windows(3).any(|w| w.eq_ignore_ascii_case(b"SET"));
+        irw::run(set);
     } else if word.eq_ignore_ascii_case(b"SOMD") {
         unsafe { somEnvironmentNew() };
         somd::run();

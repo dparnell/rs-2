@@ -5,9 +5,9 @@
 //! IBM's .IR files (format in docs/formats/som-ir.md) from the files the
 //! SOMIR environment variable lists (default SOM.IR).
 //!
-//! The repository is read-only here: the update calls (saveIR, the
-//! _set_ methods' persistence, irEnableUpdates) change nothing on disk.
-//! Objects are made from the file's records when first looked up and
+//! Repository::saveIR writes what the _set_ methods changed back into the
+//! last file SOMIR lists (save.rs). Objects are made from the file's
+//! records when first looked up and
 //! kept; somFree on one counts its uses down.
 
 #![no_std]
@@ -21,6 +21,7 @@ pub mod buf;
 pub mod file;
 pub mod methods;
 pub mod model;
+pub mod save;
 pub mod tc;
 
 use methods::*;
