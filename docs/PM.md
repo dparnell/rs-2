@@ -3401,6 +3401,13 @@ it gets.
 
 ## Testing
 
+- rs2's applets ([rs2's PM applets](#rs2s-pm-applets)) check
+  themselves with `/SELFTEST` (KLONDIKE, MAHJONGG, OS2CHESS, ICONEDIT,
+  GLOCALE, MPCPUMON, PMCHKDSK, PMFORMAT, PICVIEW, PMSEEK: the game
+  rules and engines, file formats, searches, locales, counters...),
+  e.g. `cargo xtask run --init "OS2\APPS\KLONDIKE.EXE /SELFTEST"`,
+  printing PASS/FAIL and `NAME selftest done: N failure(s)` on the
+  serial port.
 - Host unit tests in `crates/gpi` (render into memory and compare pixels;
   the Toolkit's sample bitmaps when `work/media` is present) and
   `crates/pmwin` (window tree, region computation, message routing).
