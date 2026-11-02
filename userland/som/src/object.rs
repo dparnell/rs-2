@@ -171,8 +171,13 @@ pub extern "C" fn somGetClass(obj: usize) -> usize {
     unsafe { (**(obj as *const *const Mtab)).class_object }
 }
 
+// somGetClassName, somIsA and somRespondsTo ask the object's class
+// (somGetName, somDescendedFrom, somSupportsMethod through their tokens,
+// as IBM's do), so that metaclasses can answer differently.
+
 pub extern "C" fn somGetClassName(obj: usize) -> *const u8 {
-    unsafe { (**(obj as *const *const Mtab)).class_name }
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::GET_NAME, &[c as u32]) as *const u8
 }
 
 pub extern "C" fn somGetSize(obj: usize) -> i32 {
@@ -180,11 +185,8 @@ pub extern "C" fn somGetSize(obj: usize) -> i32 {
 }
 
 pub extern "C" fn somIsA(obj: usize, cls: usize) -> u32 {
-    unsafe {
-        let c = class_of_obj(obj);
-        let r = rec(cls);
-        (!c.is_null() && !r.is_null() && (*c).descends_from(r)) as u32
-    }
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::DESCENDED_FROM, &[c as u32, cls as u32]) & 0xff
 }
 
 pub extern "C" fn somIsInstanceOf(obj: usize, cls: usize) -> u32 {
@@ -192,10 +194,8 @@ pub extern "C" fn somIsInstanceOf(obj: usize, cls: usize) -> u32 {
 }
 
 pub extern "C" fn somRespondsTo(obj: usize, mid: SomId) -> u32 {
-    unsafe {
-        let c = class_of_obj(obj);
-        (!c.is_null() && lookup(&*c, id::name_bytes(mid)).is_some()) as u32
-    }
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::SUPPORTS_METHOD, &[c as u32, mid as u32]) & 0xff
 }
 
 /// Call a method with arguments from a va_list (which starts with the
@@ -242,24 +242,39 @@ pub unsafe fn apply(proc_: usize, m: Option<&MethodDef>, ret: *mut u8, ap: *cons
     }
 }
 
-unsafe fn dispatch_in(c: *mut Class, ret: *mut u8, mid: SomId, ap: *const u32) -> u32 {
-    if c.is_null() {
+/// Dispatch as IBM's SOM does: the method from the class's
+/// somGetMethodData (through its token, so that a metaclass can supply
+/// another implementation: SOMU's sistered classes do), then somApply.
+/// A method the class does not have is SOMError 20069.
+unsafe fn dispatch_in(cls: usize, obj: usize, ret: *mut u8, mid: SomId, ap: *const u32) -> u32 {
+    if cls == 0 {
         return 0;
     }
-    let Some((p, m)) = lookup(unsafe { &*c }, id::name_bytes(mid)) else { return 0 };
-    if p == 0 {
+    let mut md = crate::class::MethodData {
+        id: core::ptr::null_mut(),
+        kind: 0,
+        descriptor: core::ptr::null_mut(),
+        token: 0,
+        method: 0,
+        shared: 0,
+    };
+    let ok = crate::call_cm(cls, crate::class::cm::GET_METHOD_DATA, &[cls as u32, mid as u32, &mut md as *mut _ as u32]);
+    if ok & 0xff == 0 {
+        crate::warn(b"somDispatch: no method %s\n\0", &[id::name_of(mid) as u32]);
+        crate::error(20069, b"somobj.c\0", 0x2ad);
         return 0;
     }
-    unsafe { apply(p, m, ret, ap) };
-    1
+    let mut local = [0u32; 4];
+    let ret = if ret.is_null() { local.as_mut_ptr() as *mut u8 } else { ret };
+    crate::somApply(obj, ret, &md, ap)
 }
 
 pub extern "C" fn somDispatch(obj: usize, ret: *mut u8, mid: SomId, ap: *const u32) -> u32 {
-    unsafe { dispatch_in(class_of_obj(obj), ret, mid, ap) }
+    unsafe { dispatch_in(somGetClass(obj), obj, ret, mid, ap) }
 }
 
-pub extern "C" fn somClassDispatch(_obj: usize, cls: usize, ret: *mut u8, mid: SomId, ap: *const u32) -> u32 {
-    unsafe { dispatch_in(rec(cls), ret, mid, ap) }
+pub extern "C" fn somClassDispatch(obj: usize, cls: usize, ret: *mut u8, mid: SomId, ap: *const u32) -> u32 {
+    unsafe { dispatch_in(cls, obj, ret, mid, ap) }
 }
 
 pub extern "C" fn somDispatchV(obj: usize, mid: SomId, _desc: SomId, ap: *const u32) {
@@ -289,12 +304,16 @@ pub extern "C" fn somDispatchD(obj: usize, mid: SomId, _desc: SomId, ap: *const 
     r[0]
 }
 
-pub extern "C" fn somCastObj(_obj: usize, _cls: usize) -> u32 {
-    0
+/// Cast the object to an ancestor of its true class (its class's
+/// somCastObjCls, as IBM's does).
+pub extern "C" fn somCastObj(obj: usize, cls: usize) -> u32 {
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::CAST_OBJ_CLS, &[c as u32, cls as u32, obj as u32]) & 0xff
 }
 
-pub extern "C" fn somResetObj(_obj: usize) -> u32 {
-    0
+pub extern "C" fn somResetObj(obj: usize) -> u32 {
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::RESET_OBJ_CLS, &[c as u32, obj as u32]) & 0xff
 }
 
 pub extern "C" fn somPrintSelf(obj: usize) -> usize {

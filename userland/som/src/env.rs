@@ -142,7 +142,7 @@ fn class_defs() -> [Def; 76] {
         b"somAddStaticMethod" => __m_somAddStaticMethod;
         b"somOverrideSMethod" => __m_somOverrideSMethod;
         b"somAddDynamicMethod" => __m_somAddDynamicMethod;
-        b"somcPrivate0" => __m_class_private;
+        b"somGetMethodOffset" => __m_somGetMethodOffset;
         b"somGetApplyStub" => __m_somGetApplyStub;
         b"somFindSMethod" => __m_somFindSMethod;
         b"somFindSMethodOk" => __m_somFindSMethodOk;
@@ -154,7 +154,7 @@ fn class_defs() -> [Def; 76] {
         b"somRenewNoInit" => __m_somRenewNoInit;
         b"somGetInstanceToken" => __m_somGetInstanceToken;
         b"somGetMemberToken" => __m_somGetMemberToken;
-        b"somcPrivate1" => __m_class_private;
+        b"somSetMethodDescriptor" => __m_somSetMethodDescriptor;
         b"somGetMethodData" => __m_somGetMethodData;
         b"somOverrideMtab" => __m_somOverrideMtab;
         b"somGetMethodToken" => __m_somGetMethodToken;
@@ -170,32 +170,32 @@ fn class_defs() -> [Def; 76] {
         b"somDeallocate" => __m_somDeallocate;
         b"somGetRdStub" => __m_somGetRdStub;
         b"somGetNthMethodData" => __m_somGetNthMethodData;
-        b"somcPrivate2" => __m_class_private;
-        b"somcPrivate3" => __m_class_private;
+        b"somCloneClass" => __m_somCloneClass;
+        b"somLookupTerminal" => __m_somLookupTerminal;
         b"_get_somDirectInitClasses" => __m_get_somDirectInitClasses, true;
-        b"somcPrivate5" => __m_class_private;
-        b"somcPrivate6" => __m_class_private;
-        b"somcPrivate7" => __m_class_private;
-        b"somcPrivate8" => __m_class_private;
-        b"somcPrivate9" => __m_class_private;
-        b"somcPrivate10" => __m_class_private;
-        b"somcPrivate11" => __m_class_private;
-        b"somcPrivate12" => __m_class_private;
+        b"set_somDirectInitClasses" => __m_set_somDirectInitClasses;
+        b"somGetInstanceInitMask" => __m_somGetInstanceInitMask;
+        b"somGetInstanceDestructionMask" => __m_somGetInstanceDestructionMask;
+        b"somCastObjCls" => __m_somCastObjCls;
+        b"somResetObjCls" => __m_somResetObjCls;
+        b"_get_somTrueClass" => __m_get_somTrueClass;
+        b"_get_somCastedClass" => __m_get_somCastedClass;
+        b"somRegLPMToken" => __m_somRegLPMToken;
         b"somDefinedMethod" => __m_somDefinedMethod;
-        b"somcPrivate13" => __m_class_private;
-        b"somcPrivate14" => __m_class_private;
-        b"somcPrivate15" => __m_class_private;
+        b"somAddMethod" => __m_somAddMethod;
+        b"_get_somCClassData" => __m_get_somCClassData;
+        b"_set_somCClassData" => __m_set_somCClassData;
         b"somcPrivate16" => __m_class_private;
-        b"somcPrivate17" => __m_class_private;
-        b"somcPrivate18" => __m_class_private;
-        b"somcPrivate19" => __m_class_private;
-        b"somcPrivate20" => __m_class_private;
+        b"_set_somClassDataOrder" => __m_set_somClassDataOrder;
+        b"_get_somClassDataOrder" => __m_get_somClassDataOrder, true;
+        b"somGetClassDataEntry" => __m_somGetClassDataEntry;
+        b"somSetClassDataEntry" => __m_somSetClassDataEntry;
         b"_get_somDataAlignment" => __m_get_somDataAlignment;
-        b"somcPrivate21" => __m_class_private;
-        b"somcPrivate22" => __m_class_private;
-        b"somcPrivate23" => __m_class_private;
-        b"somcPrivate24" => __m_class_private;
-        b"somcPrivate25" => __m_class_private;
+        b"somGetInstanceAssignmentMask" => __m_somGetInstanceAssignmentMask;
+        b"_get_somDirectAssignClasses" => __m_get_somDirectAssignClasses, true;
+        b"setUserPCallDispatch" => __m_setUserPCallDispatch;
+        b"_get_somClassAllocate" => __m_get_somClassAllocate;
+        b"_get_somClassDeallocate" => __m_get_somClassDeallocate;
     }
 }
 
@@ -218,8 +218,8 @@ fn mgr_defs() -> [Def; 22] {
         b"_get_somRegisteredClasses" => __m_get_somRegisteredClasses, true;
         b"somBeginPersistentClasses" => __m_somBeginPersistentClasses;
         b"somEndPersistentClasses" => __m_somEndPersistentClasses;
-        b"somcmPrivate1" => __m_mgr_private;
-        b"somcmPrivate2" => __m_mgr_private;
+        b"somReleaseClasses" => __m_somReleaseClasses;
+        b"somRegisterThreadUsage" => __m_somRegisterThreadUsage;
         b"somRegisterClassLibrary" => __m_somRegisterClassLibrary;
         b"somJoinAffinityGroup" => __m_somJoinAffinityGroup;
         b"somUnregisterClassLibrary" => __m_somUnregisterClassLibrary;
@@ -282,16 +282,17 @@ pub fn env_new() -> usize {
         SOMOBJECT = so;
         SOMCLASS = sc;
         SOMCLASSMGR = scm;
-        init_mi(so, 0, b"SOMObject", &[], 0, 4, 32, 1, 5);
+        init_mi(so, 0, b"SOMObject", &[], -1, 0, 4, 32, 1, 5);
         add_defs(so, &object_defs(), (&raw mut crate::SOMObjectClassData) as *mut usize);
-        init_mi(sc, 0, b"SOMClass", &[so], 4, 4, 76, 1, 5);
+        init_mi(sc, 0, b"SOMClass", &[so], -1, 4, 4, 76, 1, 5);
         add_defs(sc, &class_defs(), (&raw mut crate::SOMClassClassData) as *mut usize);
         override_name(sc, b"somFree", __m_class_somFree as usize);
         override_name(sc, b"somDumpSelfInt", __m_class_somDumpSelfInt as usize);
-        init_mi(scm, 0, b"SOMClassMgr", &[so], 4, 4, 22, 1, 5);
+        override_name(sc, b"somUninit", __m_class_somUninit as usize);
+        init_mi(scm, 0, b"SOMClassMgr", &[so], -1, 4, 4, 22, 1, 5);
         add_defs(scm, &mgr_defs(), (&raw mut crate::SOMClassMgrClassData) as *mut usize);
         override_name(scm, b"somDumpSelfInt", __m_mgr_somDumpSelfInt as usize);
-        init_mi(pdm, 0, b"SOMParentDerivedMetaclass", &[sc], 0, 4, 0, 1, 5);
+        init_mi(pdm, 0, b"SOMParentDerivedMetaclass", &[sc], -1, 0, 4, 0, 1, 5);
         class_object(so, (&raw mut crate::SOMObjectClassData) as *mut usize, (&raw mut crate::SOMObjectCClassData) as *mut usize);
         class_object(sc, (&raw mut crate::SOMClassClassData) as *mut usize, (&raw mut crate::SOMClassCClassData) as *mut usize);
         class_object(scm, (&raw mut crate::SOMClassMgrClassData) as *mut usize, (&raw mut crate::SOMClassMgrCClassData) as *mut usize);
@@ -508,11 +509,24 @@ pub unsafe fn build_class(inherit_vars: i32, sci: *const Sci, major: i32, minor:
                 }
             }
         }
-        // Overrides.
+        // Overrides (overriding a method the class does not have fails
+        // the class, as in IBM's SOM: it is freed and SOMError reports
+        // the error).
+        let old = crate::catch_begin();
         for i in 0..s.num_static_overrides as usize {
             let e = &*s.omt.add(i);
             let mid = *(e[0] as *const SomId);
             crate::call_cm(cls, cm::OVERRIDE_S_METHOD, &[cls as u32, mid as u32, e[1] as u32]);
+        }
+        let code = crate::catch_end(old);
+        if code != 0 {
+            crate::call_om(cls, crate::rt::om::SOM_FREE, &[cls as u32]);
+            if !s.cds.is_null() {
+                *s.cds = 0;
+            }
+            drop(_g);
+            crate::error(code, b"SOM.C\0", 0x6c7);
+            return 0;
         }
         // General methods (layout 3).
         if v >= 3 {

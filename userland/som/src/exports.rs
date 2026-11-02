@@ -42,7 +42,7 @@ aligned! {
     __a_somClassResolve => crate::somClassResolve, 2;
     __a_somBuildClass => crate::somBuildClass, 4;
     __a_somParentNumResolve => crate::somParentNumResolve, 3;
-    __a_somCreateDynamicClass => crate::somCreateDynamicClass, 3;
+    __a_somCreateDynamicClass => crate::somCreateDynamicClass, 5;
     __a_somExceptionId => crate::somExceptionId, 1;
     __a_somExceptionValue => crate::somExceptionValue, 1;
     __a_somExceptionFree => crate::somExceptionFree, 1;
@@ -85,10 +85,12 @@ aligned! {
     __a_destroy_mutex => sys::destroy_mutex, 1;
     __a_thread_id => sys::thread_id, 0;
     __a_no_method => crate::no_method, 0;
+    __a_abstract_method => crate::abstract_method, 0;
 
     // The thunks' slow paths.
     __s_resolve => rt::slow_resolve, 2;
     __s_data_resolve => rt::slow_data_resolve, 2;
+    __s_rd_dispatch => rt::rd_dispatch, 3;
 
     // SOMObject.
     __m_somInit => o::somInit, 1;
@@ -176,8 +178,33 @@ aligned! {
     __m_get_somDirectInitClasses => c::get_somDirectInitClasses, 2;
     __m_somDefinedMethod => c::somDefinedMethod, 2;
     __m_get_somDataAlignment => c::get_somDataAlignment, 1;
+    __m_somCloneClass => c::somCloneClass, 2;
+    __m_somGetMethodOffset => c::somGetMethodOffset, 2;
+    __m_somSetMethodDescriptor => c::somSetMethodDescriptor, 3;
+    __m_somLookupTerminal => c::somLookupTerminal, 2;
+    __m_set_somDirectInitClasses => c::set_somDirectInitClasses, 2;
+    __m_somGetInstanceInitMask => c::somGetInstanceInitMask, 2;
+    __m_somGetInstanceDestructionMask => c::somGetInstanceDestructionMask, 2;
+    __m_somRegLPMToken => c::somRegLPMToken, 2;
+    __m_somAddMethod => c::somAddMethod, 7;
+    __m_get_somCClassData => c::get_somCClassData, 1;
+    __m_set_somCClassData => c::set_somCClassData, 2;
+    __m_set_somClassDataOrder => c::set_somClassDataOrder, 2;
+    __m_get_somClassDataOrder => c::get_somClassDataOrder, 2;
+    __m_somGetClassDataEntry => c::somGetClassDataEntry, 2;
+    __m_somSetClassDataEntry => c::somSetClassDataEntry, 3;
+    __m_somGetInstanceAssignmentMask => c::somGetInstanceAssignmentMask, 2;
+    __m_get_somDirectAssignClasses => c::get_somDirectAssignClasses, 2;
+    __m_setUserPCallDispatch => c::setUserPCallDispatch, 3;
+    __m_get_somClassAllocate => c::get_somClassAllocate, 1;
+    __m_get_somClassDeallocate => c::get_somClassDeallocate, 1;
+    __m_somCastObjCls => c::somCastObjCls, 3;
+    __m_somResetObjCls => c::somResetObjCls, 2;
+    __m_get_somTrueClass => c::get_somTrueClass, 1;
+    __m_get_somCastedClass => c::get_somCastedClass, 1;
     __m_class_somFree => c::class_somFree, 1;
     __m_class_somDumpSelfInt => c::class_somDumpSelfInt, 2;
+    __m_class_somUninit => c::class_somUninit, 1;
 
     // SOMClassMgr.
     __m_somFindClsInFile => m::somFindClsInFile, 5;
@@ -197,11 +224,27 @@ aligned! {
     __m_get_somRegisteredClasses => m::get_somRegisteredClasses, 2;
     __m_somBeginPersistentClasses => m::somBeginPersistentClasses, 1;
     __m_somEndPersistentClasses => m::somEndPersistentClasses, 1;
-    __m_mgr_private => m::mgr_private, 1;
+    __m_somReleaseClasses => m::somReleaseClasses, 1;
+    __m_somRegisterThreadUsage => m::somRegisterThreadUsage, 2;
     __m_somRegisterClassLibrary => m::somRegisterClassLibrary, 3;
     __m_somJoinAffinityGroup => m::somJoinAffinityGroup, 3;
     __m_somUnregisterClassLibrary => m::somUnregisterClassLibrary, 2;
     __m_mgr_somDumpSelfInt => m::mgr_somDumpSelfInt, 2;
+}
+
+/// somCreateDynamicClass is _Optlink in IBM's SOM.DLL: the first three
+/// arguments come in EAX, EDX and ECX (their stack slots reserved), the
+/// other two on the stack.
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+pub extern "C" fn __o_somCreateDynamicClass() {
+    core::arch::naked_asm!(
+        "mov dword ptr [esp + 4], eax",
+        "mov dword ptr [esp + 8], edx",
+        "mov dword ptr [esp + 12], ecx",
+        "jmp {f}",
+        f = sym __a_somCreateDynamicClass,
+    );
 }
 
 /// somPrintf(fmt, ...).

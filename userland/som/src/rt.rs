@@ -151,6 +151,7 @@ pub struct TokenInfo {
     pub index: usize,
 }
 
+#[derive(Clone)]
 pub struct MethodDef {
     /// The registered id of the method's simple name.
     pub key: usize,
@@ -166,6 +167,8 @@ pub struct MethodDef {
     /// The argument list size from somApRdInfo (0: unknown).
     pub va_size: u32,
     pub call_type: u32,
+    /// The redispatch stub made for it (when the compiler gave none).
+    pub rd_stub: usize,
 }
 
 pub struct Class {
@@ -177,6 +180,11 @@ pub struct Class {
     pub mtab: *mut Mtab,
     pub nentries: usize,
     pub blocks: Vec<(*mut Class, usize)>,
+    /// Each block's BLOCK_LEFT and BLOCK_IMPL flags.
+    pub flags: Vec<u8>,
+    /// Whether the class inherits each parent's implementation (its
+    /// `inherit_vars` bit).
+    pub impl_parents: Vec<bool>,
     /// This class's block: the marker's index and the slots after it.
     pub base: usize,
     pub block_len: usize,
@@ -204,6 +212,16 @@ pub struct Class {
     pub ready: bool,
     pub ctrl_built: bool,
     pub num_cds_entries: usize,
+    /// A class made by somCastObj (somCloneClass): the class it is a copy
+    /// of and the ancestor whose implementations it has.
+    pub true_class: *mut Class,
+    pub casted: *mut Class,
+    /// The true class's cast classes.
+    pub casts: Vec<*mut Class>,
+    /// _set_somClassDataOrder: the ids of the ClassData entries.
+    pub cd_order: Vec<SomId>,
+    /// setUserPCallDispatch's value.
+    pub pcall_dispatch: usize,
 }
 
 impl Class {
@@ -217,6 +235,8 @@ impl Class {
             mtab: core::ptr::null_mut(),
             nentries: 0,
             blocks: Vec::new(),
+            flags: Vec::new(),
+            impl_parents: Vec::new(),
             base: 0,
             block_len: 0,
             methods: Vec::new(),
@@ -241,7 +261,17 @@ impl Class {
             ready: false,
             ctrl_built: false,
             num_cds_entries: 0,
+            true_class: core::ptr::null_mut(),
+            casted: core::ptr::null_mut(),
+            casts: Vec::new(),
+            cd_order: Vec::new(),
+            pcall_dispatch: 0,
         })
+    }
+
+    /// The class a cast class is a copy of (the class itself otherwise).
+    pub fn true_class(&self) -> *mut Class {
+        if self.true_class.is_null() { self as *const Class as *mut Class } else { self.true_class }
     }
 
     pub fn name_bytes(&self) -> &[u8] {
@@ -263,6 +293,16 @@ impl Class {
 
     pub fn data_offset_of(&self, x: *mut Class) -> Option<usize> {
         self.data_offsets.iter().find(|d| d.0 == x).map(|d| d.1)
+    }
+
+    /// Whether the class inherits its `i`th parent's implementation.
+    pub fn inherits(&self, i: usize) -> bool {
+        self.impl_parents.get(i).copied().unwrap_or(true)
+    }
+
+    /// The parents whose implementation the class inherits.
+    pub fn impl_parents_list(&self) -> Vec<*mut Class> {
+        self.parents.iter().enumerate().filter(|e| self.inherits(e.0)).map(|e| *e.1).collect()
     }
 
     pub fn descends_from(&self, x: *const Class) -> bool {
@@ -304,18 +344,14 @@ pub mod om {
     pub const DEFAULT_V_ASSIGN: usize = 30;
     pub const DEFAULT_CONST_V_ASSIGN: usize = 31;
     /// Each class has its own of these (SOMObject's generic one unless
-    /// it overrides them).
-    pub const PER_CLASS: [usize; 10] = [
+    /// it overrides them); the V variants are inherited.
+    pub const PER_CLASS: [usize; 6] = [
         DEFAULT_INIT,
         DESTRUCT,
         DEFAULT_COPY_INIT,
         DEFAULT_CONST_COPY_INIT,
-        DEFAULT_V_COPY_INIT,
-        DEFAULT_CONST_V_COPY_INIT,
         DEFAULT_ASSIGN,
         DEFAULT_CONST_ASSIGN,
-        DEFAULT_V_ASSIGN,
-        DEFAULT_CONST_V_ASSIGN,
     ];
 }
 
@@ -505,9 +541,27 @@ pub extern "C" fn slow_resolve(obj: usize, token: usize) -> usize {
 }
 
 pub extern "C" fn slow_data_resolve(obj: usize, token: usize) -> usize {
+    data_resolve(obj, token, b"SOM.C\0")
+}
+
+/// The address of a token's data in an object; SOMError 20109 when the
+/// object's class does not have that data: twice when the class has the
+/// introducing class only as an interface (abstract inheritance), as
+/// IBM's SOM reports it.
+pub fn data_resolve(obj: usize, token: usize, file: &[u8]) -> usize {
+    if obj == 0 {
+        return 0;
+    }
     let p = unsafe { data_in(obj, token) };
     if p == 0 {
-        crate::error(20102, b"rt.rs\0", 2);
+        let c = unsafe { class_of_obj(obj) };
+        let ti = unsafe { token_info(token) };
+        if let (false, Some(ti)) = (c.is_null(), ti) {
+            if unsafe { (*c).blocks.iter().any(|b| b.0 == ti.class) } {
+                crate::error(20109, file, 0x2f2);
+            }
+        }
+        crate::error(20109, file, 0x2f8);
     }
     p
 }
@@ -574,13 +628,27 @@ pub fn lookup<'a>(c: &'a Class, name: &[u8]) -> Option<(usize, Option<&'a Method
 
 // ---- Building a class ----
 
+/// Block flags (as IBM's SOM keeps them): the block is on the class's
+/// leftmost chain (its first parents' first parents...), and the class
+/// inherits the block's implementation (methods and data).
+pub const BLOCK_LEFT: u8 = 1;
+pub const BLOCK_IMPL: u8 = 2;
+
 /// Lay out class `c` (its object `obj`) with `parents`: method table,
 /// instance data, parent method tables, tokens for the instance data.
+///
+/// `inherit` has a bit per parent (bit 0 for the first; parents past 32
+/// always count as set): with the bit clear the class inherits only the
+/// parent's interface (abstract inheritance, as IBM's SOM does it): the
+/// parent's methods and those of its ancestors (unless another parent
+/// passes them on) run the abstract method stub, the class has none of
+/// their data, and its initializers and destructor skip them.
 pub unsafe fn init_mi(
     c: *mut Class,
     obj: usize,
     name: &[u8],
     parents: &[*mut Class],
+    inherit: i32,
     data_size: usize,
     align: usize,
     max_methods: usize,
@@ -588,6 +656,7 @@ pub unsafe fn init_mi(
     minor: i32,
 ) {
     let c = unsafe { &mut *c };
+    let cp = c as *mut Class;
     let (e, _) = id::entry(name);
     c.key = e as usize;
     c.name = unsafe { (*e).name };
@@ -597,84 +666,148 @@ pub unsafe fn init_mi(
     c.minor = minor;
     c.data_size = data_size;
     c.align = align.clamp(1, 16).max(if data_size >= 4 { 4 } else { 1 });
+    let bit = |i: usize| i >= 32 || inherit & (1 << i) != 0;
+    c.impl_parents = (0..parents.len()).map(bit).collect();
+    let stub = crate::__a_abstract_method as usize;
 
     // Method table: the first parent's table (its blocks keep their
-    // places), this class's block, then the blocks the other parents add.
+    // places) and this class's block after it; without the first
+    // parent's implementation, this class's block first and the first
+    // parent's blocks after it. Then the blocks the other parents add.
     let mut ents: Vec<usize> = Vec::new();
     let mut blocks: Vec<(*mut Class, usize)> = Vec::new();
-    if let Some(&p1) = parents.first() {
-        let p1 = unsafe { &*p1 };
+    let mut flags: Vec<u8> = Vec::new();
+    // Instance data: the first parent's leftmost chain, this class's
+    // data, then the data of the classes whose implementation it
+    // inherits otherwise, in the order they are met.
+    let mut offsets: Vec<(*mut Class, usize)> = Vec::new();
+    let (mut off, mut len) = (4usize, 0usize);
+    let p0 = parents.first().map(|&p| unsafe { &*p });
+    if let Some(p1) = p0 {
+        off = align_up(4, p1.align);
+    }
+    if let Some(p1) = p0.filter(|_| bit(0)) {
         ents.extend_from_slice(unsafe { core::slice::from_raw_parts(p1.mt().entries(), p1.nentries) });
-        blocks.extend_from_slice(&p1.blocks);
+        for (k, &(x, xb)) in p1.blocks.iter().enumerate() {
+            let f = p1.flags[k];
+            let chain = f & (BLOCK_LEFT | BLOCK_IMPL) == BLOCK_LEFT | BLOCK_IMPL && flags.len() == k
+                && flags.iter().all(|&g| g & BLOCK_LEFT != 0);
+            blocks.push((x, xb));
+            flags.push(if chain { BLOCK_LEFT | BLOCK_IMPL } else { f & BLOCK_IMPL });
+            if chain {
+                if let Some(o) = p1.data_offset_of(x) {
+                    offsets.push((x, o));
+                    (off, len) = (o, unsafe { (*x).data_size });
+                }
+            }
+        }
     }
     c.base = ents.len();
     c.block_len = max_methods + 8;
-    ents.push(c as *mut Class as usize);
+    ents.push(cp as usize);
     ents.extend(core::iter::repeat_n(0, c.block_len));
-    blocks.push((c as *mut Class, c.base));
-    for &p in parents.iter().skip(1) {
-        let p = unsafe { &*p };
-        for &(x, xb) in &p.blocks {
+    blocks.push((cp, c.base));
+    flags.push(BLOCK_LEFT | BLOCK_IMPL);
+    c.own_offset = align_up(off + len, c.align);
+    offsets.push((cp, c.own_offset));
+    (off, len) = (c.own_offset, data_size);
+    // The rest of the first parent's blocks (already in the table when
+    // its implementation is inherited).
+    if let Some(p1) = p0 {
+        let inherited = bit(0);
+        for (k, &(x, _)) in p1.blocks.iter().enumerate() {
             let xr = unsafe { &*x };
+            if inherited {
+                if offsets.iter().any(|d| d.0 == x) {
+                    continue;
+                }
+                if p1.flags[k] & BLOCK_IMPL != 0 {
+                    let o = align_up(off + len, xr.align);
+                    offsets.push((x, o));
+                    (off, len) = (o, xr.data_size);
+                }
+                continue;
+            }
+            let nb = ents.len();
+            ents.push(x as usize);
+            ents.extend(core::iter::repeat_n(stub, xr.block_len));
+            blocks.push((x, nb));
+            flags.push(0);
+        }
+    }
+    for (pi, &p) in parents.iter().enumerate().skip(1) {
+        let p = unsafe { &*p };
+        for (k, &(x, xb)) in p.blocks.iter().enumerate() {
+            let xr = unsafe { &*x };
+            let inh = bit(pi) && p.flags[k] & BLOCK_IMPL != 0;
             let theirs = unsafe { core::slice::from_raw_parts(p.mt().entries().add(xb), 1 + xr.block_len) };
-            match blocks.iter().find(|b| b.0 == x) {
-                Some(&(_, mb)) => {
+            match blocks.iter().position(|b| b.0 == x) {
+                Some(i) => {
+                    let mb = blocks[i].1;
+                    if !inh {
+                        continue;
+                    }
+                    if flags[i] & BLOCK_IMPL == 0 {
+                        // Inherited after all: the implementation and the
+                        // data (IBM's SOM puts it right after the data
+                        // placed last, without aligning it).
+                        flags[i] |= BLOCK_IMPL;
+                        for (s, &v) in theirs.iter().enumerate().skip(1) {
+                            if ents[mb + s] == 0 || ents[mb + s] == stub {
+                                ents[mb + s] = v;
+                            }
+                        }
+                        off += len;
+                        len = xr.data_size;
+                        offsets.push((x, off));
+                        continue;
+                    }
                     // Reached twice: an implementation that overrides the
                     // introducer's wins over one that does not.
-                    for (k, m) in xr.methods.iter().enumerate() {
-                        let slot = 1 + k;
-                        if ents[mb + slot] == m.proc_ && theirs[slot] != m.proc_ {
+                    for (m, md) in xr.methods.iter().enumerate() {
+                        let slot = 1 + m;
+                        if ents[mb + slot] == md.proc_ && theirs[slot] != md.proc_ {
                             ents[mb + slot] = theirs[slot];
                         }
                     }
                 }
                 None => {
                     let nb = ents.len();
-                    ents.extend_from_slice(theirs);
+                    if inh {
+                        ents.extend_from_slice(theirs);
+                        let o = align_up(off + len, xr.align);
+                        offsets.push((x, o));
+                        (off, len) = (o, xr.data_size);
+                    } else {
+                        ents.push(x as usize);
+                        ents.extend(core::iter::repeat_n(stub, xr.block_len));
+                    }
                     blocks.push((x, nb));
+                    flags.push(if inh { BLOCK_IMPL } else { 0 });
                 }
             }
         }
     }
-    // Every class has its own initializers, destructor and assignment
-    // operators: SOMObject's generic ones unless it overrides them.
+    // Every class has its own initializer, destructor, copy initializers
+    // and assignment operators: SOMObject's generic ones unless it
+    // overrides them (IBM's somBuildClass overrides these six).
     let so = unsafe { SOMOBJECT };
     if !so.is_null() && !core::ptr::eq(so, c) {
-        let so = unsafe { &*so };
-        for &i in &om::PER_CLASS {
-            if let Some(m) = so.methods.get(i) {
-                ents[1 + i] = m.proc_;
+        let sor = unsafe { &*so };
+        if let Some(&(_, sb)) = blocks.iter().find(|b| b.0 == so) {
+            for &i in &om::PER_CLASS {
+                if let Some(m) = sor.methods.get(i) {
+                    ents[sb + 1 + i] = m.proc_;
+                }
             }
         }
     }
     c.nentries = ents.len();
     c.blocks = blocks;
-
-    // Instance data: the first parent's, this class's, then the data of
-    // classes the other parents add.
-    let mut offsets: Vec<(*mut Class, usize)> = Vec::new();
-    let mut size = 4;
-    if let Some(&p1) = parents.first() {
-        let p1 = unsafe { &*p1 };
-        offsets.extend_from_slice(&p1.data_offsets);
-        size = p1.instance_size;
-    }
-    c.own_offset = align_up(size, c.align);
-    offsets.push((c as *mut Class, c.own_offset));
-    size = c.own_offset + data_size;
-    for &p in parents.iter().skip(1) {
-        let p = unsafe { &*p };
-        for &(x, _) in &p.data_offsets {
-            if offsets.iter().any(|d| d.0 == x) {
-                continue;
-            }
-            let xr = unsafe { &*x };
-            let off = align_up(size, xr.align);
-            offsets.push((x, off));
-            size = off + xr.data_size;
-        }
-    }
-    c.instance_size = align_up(size, 4);
+    c.flags = flags;
+    // The instance size: where the data placed last ends (IBM's SOM does
+    // not round it up).
+    c.instance_size = off + len;
     c.data_offsets = offsets;
 
     let mut words = vec![0usize; MTAB_HDR / 4 + c.nentries];
@@ -715,7 +848,63 @@ pub unsafe fn init_mi(
         unused: 0,
     });
     c.inst_token = data_token(c, 0);
-    c.direct_init = parents.to_vec();
+    c.direct_init = parents.iter().zip(&c.impl_parents).filter(|x| *x.1).map(|x| *x.0).collect();
+}
+
+/// A copy of class `src` for class object `obj` under another name, with
+/// its own method table (somCloneClass). It shares the parent method
+/// tables and initializer controls, and is not registered.
+pub unsafe fn clone_record(src: &Class, obj: usize, name: &[u8]) -> *mut Class {
+    let c = Class::new();
+    let cr = unsafe { &mut *c };
+    let mut n = name.to_vec();
+    n.push(0);
+    cr.name = leak_vec(n);
+    cr.key = id::entry(name).0 as usize;
+    cr.obj = obj;
+    cr.parents = src.parents.clone();
+    cr.nentries = src.nentries;
+    cr.blocks = src.blocks.clone();
+    cr.flags = src.flags.clone();
+    cr.impl_parents = src.impl_parents.clone();
+    cr.base = src.base;
+    cr.block_len = src.block_len;
+    cr.methods = src.methods.clone();
+    cr.dynamic = src.dynamic.clone();
+    cr.data_size = src.data_size;
+    cr.align = src.align;
+    cr.own_offset = src.own_offset;
+    cr.instance_size = src.instance_size;
+    cr.data_offsets = src.data_offsets.clone();
+    cr.major = src.major;
+    cr.minor = src.minor;
+    cr.cds = src.cds;
+    cr.ccds = src.ccds;
+    cr.pmtab = src.pmtab;
+    cr.inst_token = src.inst_token;
+    cr.legacy_init = src.legacy_init;
+    cr.legacy_uninit = src.legacy_uninit;
+    cr.allocate = src.allocate;
+    cr.deallocate = src.deallocate;
+    cr.direct_init = src.direct_init.clone();
+    cr.somclass_off = src.somclass_off;
+    cr.ready = src.ready;
+    cr.ctrl_built = src.ctrl_built;
+    cr.num_cds_entries = src.num_cds_entries;
+    cr.true_class = src.true_class();
+    cr.cd_order = src.cd_order.clone();
+    cr.pcall_dispatch = src.pcall_dispatch;
+    let words = MTAB_HDR / 4 + src.nentries;
+    let mut v = vec![0usize; words];
+    unsafe { core::ptr::copy_nonoverlapping(src.mtab as *const usize, v.as_mut_ptr(), words) };
+    let mt = leak_vec(v) as *mut Mtab;
+    unsafe {
+        (*mt).class_object = obj;
+        (*mt).class_info = c;
+        (*mt).class_name = cr.name;
+    }
+    cr.mtab = mt;
+    c
 }
 
 /// Add a static method; returns its token (the existing one if the class
@@ -777,6 +966,7 @@ pub unsafe fn add_static(c: *mut Class, mid: SomId, desc: SomId, proc_: usize, r
         aggregate,
         va_size,
         call_type,
+        rd_stub: 0,
     });
     token
 }
@@ -840,7 +1030,52 @@ pub unsafe fn add_dynamic(c: *mut Class, mid: SomId, desc: SomId, proc_: usize, 
         aggregate: false,
         va_size: 0,
         call_type: 0,
+        rd_stub: 0,
     });
+}
+
+// ---- Redispatch stubs ----
+
+/// A redispatch stub for method `mid`: called as the method, it calls
+/// the object's somDispatch with the method's id and its arguments as a
+/// va_list, and returns what somDispatch stored (as IBM's somMakeRdStub
+/// stubs do; `call_type` from the method's signature picks how the
+/// result is returned: 2 float, 4/6 double).
+pub fn make_rd_stub(mid: SomId, call_type: u32) -> usize {
+    let mut c = Vec::with_capacity(48);
+    emit(&mut c, &[0x55, 0x89, 0xe5]); // push ebp; mov ebp,esp
+    emit(&mut c, &[0x83, 0xec, 0x08]); // sub esp,8 (the result)
+    emit(&mut c, &[0x8d, 0x45, 0xf8, 0x50]); // lea eax,[ebp-8]; push eax
+    emit(&mut c, &[0x8d, 0x4d, 0x08, 0x51]); // lea ecx,[ebp+8]; push ecx
+    emit(&mut c, &[0x68]); // push mid
+    emit32(&mut c, mid as usize);
+    emit(&mut c, &[0xb8]); // mov eax, dispatcher
+    emit32(&mut c, crate::__s_rd_dispatch as usize);
+    emit(&mut c, &[0xff, 0xd0, 0x83, 0xc4, 0x0c]); // call eax; add esp,12
+    match call_type & !1 {
+        2 => emit(&mut c, &[0xd9, 0x45, 0xf8]),       // fld dword [ebp-8]
+        4 | 6 => emit(&mut c, &[0xdd, 0x45, 0xf8]),   // fld qword [ebp-8]
+        _ => emit(&mut c, &[0x8b, 0x45, 0xf8, 0x8b, 0x55, 0xfc]), // mov eax,[ebp-8]; mov edx,[ebp-4]
+    }
+    emit(&mut c, &[0xc9, 0xc3]); // leave; ret
+    place(core::ptr::null(), &c)
+}
+
+/// The redispatch stubs' call: somDispatch(obj, ret, mid, args).
+pub extern "C" fn rd_dispatch(mid: SomId, args: *const u32, ret: *mut u8) {
+    let obj = unsafe { *args };
+    crate::call_om(obj as usize, om::DISPATCH, &[obj, ret as u32, mid as u32, args as u32]);
+}
+
+/// A method's redispatch stub: the compiler's, or one made once.
+pub fn rd_stub_of(m: &mut MethodDef) -> usize {
+    if m.rd != 0 && m.rd != usize::MAX {
+        return m.rd;
+    }
+    if m.rd_stub == 0 {
+        m.rd_stub = make_rd_stub(id::static_id(unsafe { cstr(m.name) }), m.call_type);
+    }
+    m.rd_stub
 }
 
 /// A class's implementation of one of SOMObject's methods.
@@ -858,12 +1093,14 @@ pub unsafe fn build_ctrls(c: *mut Class) {
     // Initialization: depth first, each class at its first occurrence.
     let mut order: Vec<*mut Class> = vec![c];
     let mut mask: Vec<u8> = Vec::new();
+    // Parents whose implementation a class does not inherit are skipped
+    // (their mask bytes stay 0).
     fn visit_first(x: *mut Class, order: &mut Vec<*mut Class>, mask: &mut Vec<u8>) {
         let parents = unsafe { (*x).parents.clone() };
         let start = mask.len();
         mask.resize(start + parents.len(), 0);
         for (i, &p) in parents.iter().enumerate() {
-            if !order.contains(&p) {
+            if unsafe { (*x).inherits(i) } && !order.contains(&p) {
                 mask[start + i] = 1;
                 order.push(p);
                 visit_first(p, order, mask);
@@ -928,7 +1165,7 @@ pub unsafe fn build_ctrls(c: *mut Class) {
     // occurrence (after every class that has it as an ancestor). The mask
     // has a byte per parent in the order they are visited.
     fn size(x: *mut Class) -> usize {
-        1 + unsafe { (*x).parents.iter().map(|&p| size(p)).sum::<usize>() }
+        1 + unsafe { (*x).impl_parents_list().iter().map(|&p| size(p)).sum::<usize>() }
     }
     fn last(x: *mut Class, pos: usize, out: &mut Vec<(*mut Class, usize)>) {
         match out.iter_mut().find(|e| e.0 == x) {
@@ -936,7 +1173,7 @@ pub unsafe fn build_ctrls(c: *mut Class) {
             None => out.push((x, pos)),
         }
         let mut q = pos + 1;
-        for &p in unsafe { (*x).parents.iter().rev() } {
+        for &p in unsafe { (*x).impl_parents_list() }.iter().rev() {
             last(p, q, out);
             q += size(p);
         }
@@ -947,10 +1184,14 @@ pub unsafe fn build_ctrls(c: *mut Class) {
     let mut dmask: Vec<u8> = Vec::new();
     fn visit_last(x: *mut Class, pos: usize, lasts: &[(*mut Class, usize)], order: &mut Vec<*mut Class>, mask: &mut Vec<u8>) {
         let parents: Vec<*mut Class> = unsafe { (*x).parents.iter().rev().copied().collect() };
+        let n = parents.len();
         let start = mask.len();
-        mask.resize(start + parents.len(), 0);
+        mask.resize(start + n, 0);
         let mut q = pos + 1;
         for (i, &p) in parents.iter().enumerate() {
+            if !unsafe { (*x).inherits(n - 1 - i) } {
+                continue;
+            }
             let lp = lasts.iter().find(|e| e.0 == p).map_or(q, |e| e.1);
             if lp == q && !order.contains(&p) {
                 mask[start + i] = 1;

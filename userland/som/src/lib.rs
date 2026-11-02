@@ -129,6 +129,50 @@ pub fn error(code: i32, file: &[u8], line: i32) {
     f(code, file.as_ptr(), line)
 }
 
+// ---- Errors raised inside SOM's own operations ----
+//
+// IBM's SOM catches errors raised while it builds a class (somThrowError
+// longjmps to the operation, which cleans up and then reports the error
+// through SOMError); elsewhere they go to SOMError at once. rs2 records
+// the error for the operation to check.
+
+static mut CATCHER: u32 = 0;
+static mut CAUGHT: i32 = 0;
+
+/// Start catching errors on this thread; returns the previous catcher.
+pub fn catch_begin() -> (u32, i32) {
+    let tid = sys::thread_id();
+    unsafe {
+        let old = (CATCHER, CAUGHT);
+        CATCHER = tid;
+        CAUGHT = 0;
+        old
+    }
+}
+
+/// Stop catching; returns the error caught (0: none).
+pub fn catch_end(old: (u32, i32)) -> i32 {
+    unsafe {
+        let code = CAUGHT;
+        (CATCHER, CAUGHT) = old;
+        code
+    }
+}
+
+/// somThrowError: to the operation catching errors on this thread, or
+/// SOMError.
+pub fn throw(code: i32, file: &[u8], line: i32) {
+    unsafe {
+        if CATCHER != 0 && CATCHER == sys::thread_id() {
+            if CAUGHT == 0 {
+                CAUGHT = code;
+            }
+            return;
+        }
+    }
+    error(code, file, line);
+}
+
 /// Call a method token with its arguments (the object first).
 pub fn call_tok(tok: usize, args: &[u32]) -> u32 {
     if tok == 0 {
@@ -290,9 +334,30 @@ pub extern "C" fn somConstructClass(init: usize, parent: usize, meta: usize, cds
     call_cm(cls, class::cm::CLASS_READY, &[cls as u32]);
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn somCreateDynamicClass(_name: *const u8, _meta: usize, _parents: usize) -> usize {
-    0
+/// somCreateDynamicClass(className, parentName, file, major, minor) (an
+/// _Optlink function in IBM's SOM.DLL: see `__o_somCreateDynamicClass`):
+/// a subclass of the named parent (found, or loaded from `file`, by the
+/// class manager) without data or methods of its own, made by the
+/// parent's metaclass, its methods redispatched (somOverrideMtab), and
+/// registered.
+pub extern "C" fn somCreateDynamicClass(name: *const u8, parent: *const u8, file: *const u8, major: i32, minor: i32) -> usize {
+    let mgr = env::env_new();
+    if mgr == 0 {
+        error(20149, b"SOMCLS.C\0", 0xee3);
+        return 0;
+    }
+    let pid = id::static_id(unsafe { cstr(parent) });
+    let p = call_mm(mgr, class::mm::FIND_CLS_IN_FILE, &[mgr as u32, pid as u32, major as u32, major as u32, file as u32]) as usize;
+    if p == 0 {
+        error(20219, b"SOMCLS.C\0", 0xeeb);
+        return 0;
+    }
+    let meta = object::somGetClass(p);
+    let cls = call_cm(meta, class::cm::NEW, &[meta as u32]) as usize;
+    call_cm(cls, class::cm::INIT_CLASS, &[cls as u32, name as u32, p as u32, 0, 0, major as u32, minor as u32]);
+    call_cm(cls, class::cm::OVERRIDE_MTAB, &[cls as u32]);
+    call_cm(cls, class::cm::CLASS_READY, &[cls as u32]);
+    cls
 }
 
 #[unsafe(no_mangle)]
@@ -381,7 +446,7 @@ pub extern "C" fn somResolveByName(obj: usize, name: *const u8) -> usize {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn somDataResolve(obj: usize, token: usize) -> usize {
-    unsafe { data_in(obj, token) }
+    data_resolve(obj, token, b"SOM.C\0")
 }
 
 #[unsafe(no_mangle)]
@@ -585,6 +650,13 @@ pub extern "C" fn somMakeUserRdStub(a: usize) -> usize {
 #[unsafe(no_mangle)]
 pub extern "C" fn somfixMsgTemplate(a: usize, _b: usize) -> usize {
     a
+}
+
+/// What the methods of a class whose implementation is not inherited
+/// (abstract inheritance) run: SOMError 20059, as IBM's SOM does.
+pub extern "C" fn abstract_method() -> usize {
+    error(20059, b"SOMCLS.C\0", 0xecb);
+    0
 }
 
 /// What a token that resolves to nothing runs.
