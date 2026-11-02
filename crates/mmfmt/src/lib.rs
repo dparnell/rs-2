@@ -13,6 +13,7 @@ extern crate alloc;
 
 pub mod flc;
 pub mod riff;
+pub mod sound;
 pub mod wav;
 
 /// Little-endian reads that fail instead of panicking past the end.
