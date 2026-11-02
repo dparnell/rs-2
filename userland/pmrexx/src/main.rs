@@ -332,7 +332,7 @@ fn main(_s: &os2::Startup) -> u32 {
     let frame = unsafe { RexxCreateIOWindow(HWND_DESKTOP, &mut client) };
     FRAME.store(frame, SeqCst);
     CLIENT.store(client, SeqCst);
-    SUPER.store(unsafe { WinSubclassWindow(client, sub_proc) }, SeqCst);
+    SUPER.store(unsafe { WinSubclassWindow(client, core::mem::transmute::<extern "C" fn(), WndProc>(a_sub_proc)) }, SeqCst);
     // Accelerators: F3 Exit, Ctrl+S Save, Delete.
     let mut accel = Vec::new();
     for v in [4u16, 437, 2, 0x22, 0x204, 0x11, b'S' as u16, 0x202, 0x11, b's' as u16, 0x202, 2, 0x1b, 0x109] {
@@ -377,7 +377,7 @@ fn main(_s: &os2::Startup) -> u32 {
         let t = z(&title);
         unsafe { WinSetWindowText(WinWindowFromID(frame, FID_TITLEBAR), t.as_ptr()) };
         if !sh.procname.is_empty() {
-            unsafe { RexxRegisterExitExe(b"PMREXXINIT\0".as_ptr(), init_exit as *const () as usize, core::ptr::null()) };
+            unsafe { RexxRegisterExitExe(b"PMREXXINIT\0".as_ptr(), a_init_exit as *const () as usize, core::ptr::null()) };
             start_rexx();
         }
     } else {
@@ -417,9 +417,34 @@ fn main(_s: &os2::Startup) -> u32 {
     0
 }
 
+/// Entry points called from other modules (whose code may keep only
+/// 4-byte stack alignment) realign the stack for Rust code.
+macro_rules! aligned {
+    ($($tramp:ident => $target:path, $copy:literal;)*) => {$(
+        #[unsafe(naked)]
+        extern "C" fn $tramp() {
+            core::arch::naked_asm!(
+                "push ebp", "mov ebp, esp", "and esp, -16",
+                "sub esp, {pad}",
+                "push esi", "push edi", "push ecx",
+                "lea esi, [ebp + 8]", "lea edi, [esp + 12]", "mov ecx, {n}", "rep movsd",
+                "pop ecx", "pop edi", "pop esi",
+                "call {f}", "mov esp, ebp", "pop ebp", "ret",
+                pad = const ($copy * 4 + 15) / 16 * 16, n = const $copy, f = sym $target,
+            );
+        }
+    )*};
+}
+
+aligned! {
+    a_sub_proc => sub_proc, 4;
+    a_init_exit => init_exit, 3;
+    a_rexx_thread => rexx_thread, 1;
+}
+
 fn start_rexx() {
     let mut tid = 0;
-    unsafe { os2::DosCreateThread(&mut tid, rexx_thread, 0, 0, 0x10000) };
+    unsafe { os2::DosCreateThread(&mut tid, core::mem::transmute::<extern "C" fn(), os2::ThreadFn>(a_rexx_thread), 0, 0, 0x10000) };
     REXX_TID.store(tid, SeqCst);
 }
 

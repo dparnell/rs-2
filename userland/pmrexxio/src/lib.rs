@@ -62,6 +62,46 @@ pub extern "C" fn _start(_hmod: u32, _flag: u32) -> u32 {
     1
 }
 
+/// Entry points called from other modules (whose code may keep only
+/// 4-byte stack alignment) realign the stack for Rust code and copy the
+/// arguments.
+macro_rules! aligned {
+    ($($(#[$m:meta])* $tramp:ident => $target:path, $copy:literal;)*) => {$(
+        $(#[$m])*
+        #[unsafe(naked)]
+        pub extern "C" fn $tramp() {
+            core::arch::naked_asm!(
+                "push ebp", "mov ebp, esp", "and esp, -16",
+                "sub esp, {pad}",
+                "push esi", "push edi", "push ecx",
+                "lea esi, [ebp + 8]", "lea edi, [esp + 12]", "mov ecx, {n}", "rep movsd",
+                "pop ecx", "pop edi", "pop esi",
+                "call {f}", "mov esp, ebp", "pop ebp", "ret",
+                pad = const ($copy * 4 + 15) / 16 * 16, n = const $copy, f = sym $target,
+            );
+        }
+    )*};
+}
+
+aligned! {
+    #[unsafe(no_mangle)] RexxCreateIOWindow => create_io_window, 2;
+    #[unsafe(no_mangle)] RexxDestroyIOWindow => destroy_io_window, 1;
+    a_client_proc => client_proc, 4;
+    a_entry_proc => entry_proc, 4;
+    a_search_proc => search_proc, 4;
+    a_io_exit => io_exit, 3;
+    a_stdin_thread => stdin_thread, 1;
+    a_stdout_thread => stdout_thread, 1;
+}
+
+fn proc_ptr(f: extern "C" fn()) -> WndProc {
+    unsafe { core::mem::transmute(f) }
+}
+
+fn thread_ptr(f: extern "C" fn()) -> os2::ThreadFn {
+    unsafe { core::mem::transmute(f) }
+}
+
 // ---- Strings ----
 
 /// The window's texts by IBM's string numbers (message boxes posted with
@@ -244,8 +284,7 @@ fn exit_data() -> Option<&'static mut Io> {
 
 /// RexxCreateIOWindow(owner, &client): the I/O frame window (hidden), or
 /// 0.
-#[unsafe(no_mangle)]
-pub extern "C" fn RexxCreateIOWindow(owner: u32, client: *mut u32) -> u32 {
+extern "C" fn create_io_window(owner: u32, client: *mut u32) -> u32 {
     let hab = unsafe { WinQueryAnchorBlock(owner) };
     if hab == 0 {
         return 0;
@@ -254,7 +293,7 @@ pub extern "C" fn RexxCreateIOWindow(owner: u32, client: *mut u32) -> u32 {
     if unsafe { os2::DosQueryModuleHandle(CLASS.as_ptr(), &mut hmod) } != 0 {
         return 0;
     }
-    if unsafe { WinRegisterClass(hab, CLASS.as_ptr(), client_proc, CS_SIZEREDRAW, 4) } == 0 {
+    if unsafe { WinRegisterClass(hab, CLASS.as_ptr(), proc_ptr(a_client_proc), CS_SIZEREDRAW, 4) } == 0 {
         return 0;
     }
     // IBM's: title bar, system menu, menu, sizing border, minimize and
@@ -277,8 +316,7 @@ pub extern "C" fn RexxCreateIOWindow(owner: u32, client: *mut u32) -> u32 {
 }
 
 /// RexxDestroyIOWindow(frame): end the I/O window and its exit.
-#[unsafe(no_mangle)]
-pub extern "C" fn RexxDestroyIOWindow(frame: u32) {
+extern "C" fn destroy_io_window(frame: u32) {
     let client = unsafe { WinWindowFromID(frame, FID_CLIENT) };
     let Some(io) = data(client) else { return };
     if io.help != 0 {
@@ -359,14 +397,14 @@ fn initialize(io: &mut Io) -> u32 {
         return rc;
     }
     let user = [io as *mut Io as u32, 0];
-    unsafe { RexxRegisterExitExe(EXIT_NAME.as_ptr(), io_exit as *const () as usize, user.as_ptr() as *const u8) };
+    unsafe { RexxRegisterExitExe(EXIT_NAME.as_ptr(), a_io_exit as *const () as usize, user.as_ptr() as *const u8) };
     let mut tid = 0;
     let p = io as *mut Io as u32;
-    let rc = unsafe { os2::DosCreateThread(&mut tid, stdin_thread, p, 0, STACK) };
+    let rc = unsafe { os2::DosCreateThread(&mut tid, thread_ptr(a_stdin_thread), p, 0, STACK) };
     if rc != 0 {
         return rc;
     }
-    unsafe { os2::DosCreateThread(&mut tid, stdout_thread, p, 0, STACK) }
+    unsafe { os2::DosCreateThread(&mut tid, thread_ptr(a_stdout_thread), p, 0, STACK) }
 }
 
 /// Writes the lines typed to the procedure's standard input.
@@ -665,7 +703,7 @@ fn create(h: u32) -> u32 {
     // IBM's loads a dialog whose window is the entry field; this is the
     // same field, subclassed.
     io.entry = unsafe { WinCreateWindow(h, WC_ENTRYFIELD, b"\0".as_ptr(), WS_TABSTOP | ES_MARGIN | ES_AUTOSCROLL, 0, 0, 0, 0, h, HWND_TOP, ID_EF1 as u32, core::ptr::null(), core::ptr::null()) };
-    let old = unsafe { WinSubclassWindow(io.entry, entry_proc) };
+    let old = unsafe { WinSubclassWindow(io.entry, proc_ptr(a_entry_proc)) };
     ENTRY_PROC.store(old, SeqCst);
     send(io.entry, EM_SETTEXTLIMIT, ANSLEN, 0);
     send(io.entry, EM_SETFIRSTCHAR, 0, 0);
@@ -950,7 +988,7 @@ static SEARCH: AtomicUsize = AtomicUsize::new(0);
 fn search(h: u32, io: &Io) {
     let mut si = SearchInfo { size: core::mem::size_of::<SearchInfo>() as u32, case: 0, text: [0; 100] };
     let t = tpl::search_dialog();
-    let dlg = unsafe { WinCreateDlg(HWND_DESKTOP, h, search_proc, t.as_ptr(), &mut si as *mut SearchInfo as usize) };
+    let dlg = unsafe { WinCreateDlg(HWND_DESKTOP, h, proc_ptr(a_search_proc), t.as_ptr(), &mut si as *mut SearchInfo as usize) };
     if dlg == 0 {
         return;
     }
