@@ -240,7 +240,11 @@ Status markers: done, in progress, planned.
   (screen mode through a 16-bit VIO thunk), HELP
 - planned: CHKDSK repair for HPFS, FDISK/LVM and the rest of the base
   utilities; own message files (OSO001.MSG); Cyrillic/Greek/Hebrew
-  keyboard layouts; REXX
+  keyboard layouts
+- done: rs2's own classic REXX (REXX.DLL, REXXAPI.DLL, REXXINIT.DLL,
+  REXXUTIL.DLL, RXQUEUE, RXSUBCOM, PMREXX/PMREXXIO, REXXTRY, REX.MSG),
+  binary compatible with IBM's (IBM's CMD runs procedures on it); see
+  [REXX.md](REXX.md)
 
 ## Milestone 4: Presentation Manager (largely done)
 
