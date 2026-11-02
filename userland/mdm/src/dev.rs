@@ -152,6 +152,7 @@ pub fn open(typ: u16, ordinal: u16, r: &Req, playlist: Option<u32>) -> Result<u1
     if !INSTALLED.contains(&typ) {
         return Err(MCIERR_DEVICE_NOT_FOUND);
     }
+    crate::sys::master_volume_once();
     // CD audio: one device per CD drive.
     if ordinal > 1 && typ != DEVTYPE_CD_AUDIO {
         return Err(MCIERR_INVALID_DEVICE_ORDINAL);

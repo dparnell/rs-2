@@ -302,12 +302,12 @@ pub fn line(hps: u32, x0: i32, y0: i32, x1: i32, y1: i32, c: i32) {
     }
 }
 
-/// A filled box (DRO_FILL) or its outline (DRO_OUTLINE).
+/// A filled box (DRO_FILL, 1) or its outline (DRO_OUTLINE, 2).
 pub fn rect(hps: u32, l: i32, b: i32, r: i32, t: i32, c: i32, filled: bool) {
     unsafe {
         GpiSetColor(hps, c);
         GpiMove(hps, &PointL { x: l, y: b });
-        GpiBox(hps, if filled { 2 } else { 1 }, &PointL { x: r, y: t }, 0, 0);
+        GpiBox(hps, if filled { 1 } else { 2 }, &PointL { x: r, y: t }, 0, 0);
     }
 }
 
@@ -366,4 +366,46 @@ pub fn fit(r: RectL, w: i32, h: i32, max_zoom: i32) -> RectL {
     let (fw, fh) = ((w as i64 * s / 1024) as i32, (h as i64 * s / 1024) as i32);
     let (x, y) = (r.l + (aw - fw) / 2, r.b + (ah - fh) / 2);
     RectL { l: x, b: y, r: x + fw, t: y + fh }
+}
+
+// ---- Files ----
+
+/// The whole file (None if it cannot be read).
+pub fn read_file(name: &str) -> Option<Vec<u8>> {
+    let z = zs(name);
+    let (mut h, mut act) = (0u32, 0u32);
+    // Open if it exists, deny write, read only.
+    if unsafe { os2::DosOpen(z.as_ptr(), &mut h, &mut act, 0, 0, 1, 0x20, core::ptr::null_mut()) } != 0 {
+        return None;
+    }
+    let mut out = Vec::new();
+    let mut buf = alloc::vec![0u8; 32768];
+    loop {
+        let mut n = 0;
+        if unsafe { os2::DosRead(h, buf.as_mut_ptr(), buf.len() as u32, &mut n) } != 0 || n == 0 {
+            break;
+        }
+        out.extend_from_slice(&buf[..n as usize]);
+    }
+    unsafe { os2::DosClose(h) };
+    Some(out)
+}
+
+/// Write a whole file (created or replaced).
+pub fn write_file(name: &str, data: &[u8]) -> bool {
+    let z = zs(name);
+    let (mut h, mut act) = (0u32, 0u32);
+    if unsafe { os2::DosOpen(z.as_ptr(), &mut h, &mut act, data.len() as u32, 0, 0x12, 0x21, core::ptr::null_mut()) } != 0 {
+        return false;
+    }
+    let mut ok = true;
+    for piece in data.chunks(32768) {
+        let mut n = 0;
+        if unsafe { os2::DosWrite(h, piece.as_ptr(), piece.len() as u32, &mut n) } != 0 || n as usize != piece.len() {
+            ok = false;
+            break;
+        }
+    }
+    unsafe { os2::DosClose(h) };
+    ok
 }
