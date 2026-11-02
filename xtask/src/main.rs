@@ -11,7 +11,7 @@
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
 //!                  [--virtio-rng] [--virtio-console PATH] [--virtio-gpu|--virtio-gpu-pci]
 //!                  [--virtio-legacy] [--boot-virtio]
-//!                  [--net [MODEL]] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--tftp DIR]
+//!                  [--net [MODEL]] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--guestfwd RULE]... [--tftp DIR]
 //!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE] [--sound-in FILE|tone:HZ]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
@@ -63,7 +63,9 @@
 //! virtio-net) or `--net-model`
 //! names any QEMU device; `--virtio-net` is short for `--net virtio`. Host port 5555 is forwarded to
 //! guest port 23 (when free), and each `--hostfwd tcp::HOSTPORT-:GUESTPORT` adds a
-//! rule; `--tftp DIR` has QEMU serve DIR by TFTP at 10.0.2.2. Without
+//! rule; `--guestfwd tcp:10.0.2.100:79-tcp:127.0.0.1:7979` sends the guest's
+//! connections to that address to a host port (servers on ports a user
+//! cannot bind); `--tftp DIR` has QEMU serve DIR by TFTP at 10.0.2.2. Without
 //! these options the machine has no network adapter.
 //!
 //! `--sound` adds an ICH9 HD Audio controller with a duplex codec
@@ -155,6 +157,7 @@ struct Opts {
     /// host forwarding rules.
     net: Option<String>,
     hostfwd: Vec<String>,
+    guestfwd: Vec<String>,
     /// Directory QEMU's user network serves by TFTP (10.0.2.2).
     tftp: Option<String>,
     /// Boot into the Workplace Shell (init=OS2\\PMSHELL.EXE instead of
@@ -216,6 +219,7 @@ fn parse(args: &[String]) -> Opts {
         virtio_gpu: None,
         net: None,
         hostfwd: vec![],
+        guestfwd: vec![],
         tftp: None,
         desktop: false,
         init: None,
@@ -334,6 +338,10 @@ fn parse(args: &[String]) -> Opts {
             "--hostfwd" => {
                 i += 1;
                 o.hostfwd.push(args[i].clone());
+            }
+            "--guestfwd" => {
+                i += 1;
+                o.guestfwd.push(args[i].clone());
             }
             "--hdd" => {
                 i += 1;
@@ -915,6 +923,10 @@ fn net_devices(o: &Opts, c: &mut Command) {
     }
     for r in &o.hostfwd {
         netdev.push_str(",hostfwd=");
+        netdev.push_str(r);
+    }
+    for r in &o.guestfwd {
+        netdev.push_str(",guestfwd=");
         netdev.push_str(r);
     }
     if let Some(d) = &o.tftp {

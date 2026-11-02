@@ -132,6 +132,10 @@ name = "viocell"
 version = "0.1.0"
 
 [[package]]
+name = "vt100"
+version = "0.1.0"
+
+[[package]]
 name = "win16drv"
 version = "0.1.0"
 
