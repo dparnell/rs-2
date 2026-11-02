@@ -308,7 +308,7 @@ copied from the CD.
 |---------------|----------|---------|---------|
 | `OS2\CLIPOS2.EXE` | Clipboard Viewer | text, bitmaps, metafiles, owner-drawn data, Render, help | QEMU screenshots |
 
-| `OS2\MPCPUMON.EXE` | Pulse | (to come) | |
+| `OS2\MPCPUMON.EXE` | Pulse | per-processor load from the performance counters, line and bar graphs, labels, grid, freeze, sample rate, colours (menus and Color Palette drops), processor status, pop-up menu, double-click to hide the frame controls, help | `MPCPUMON /SELFTEST` (0 failures, `--smp 2`); QEMU screenshots of both graphs, the dialogs, the pop-up menu and help |
 
 | `OS2\PMCHKDSK.EXE`, `OS2\PMFORMAT.EXE` | Check Disk, Format | (to come) | |
 

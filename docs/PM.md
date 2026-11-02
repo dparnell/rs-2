@@ -2430,7 +2430,48 @@ are IBM's numbers (CLIPOS2.HLP).
 
 ### Pulse (MPCPUMON.EXE)
 
-(to come)
+`userland/mpcpumon` ("CPU Monitor" in the Utilities folder). As IBM's
+"OS/2 SMP Monitor" (studied in Ghidra): one copy at a time (named
+shared memory `\SHAREMEM\MPCPUMON`); the menu bar Graph Mode (Bar,
+Line), Status, Options (Background Color and Processor Graph Color
+submenus of 16 colours, Horizontal and Vertical Labels, Freeze Screen,
+Grid, Sample Rate) and Help, IBM's command ids (1000, 1010, 1030,
+1062...) and Ctrl accelerators (B, L, S, R, V, F, G, A); the pop-up menu
+on mouse button 2 (Processor Time, Processor Status, Freeze, Grid,
+Sample Rate); a double-click hides the title bar, system menu, min/max
+buttons and menu bar (`WinSetParent` to `HWND_OBJECT`, `WM_UPDATEFRAME`)
+and shows them again; a colour dropped from the Color Palette
+(`WM_PRESPARAMCHANGED`) goes to the processor whose line or bar is under
+the pointer, else to the background; `HM_QUERY_KEYS_HELP` answers 6000.
+The window shows "% Processor Utilization", the 0-100 scale on the left,
+and along the bottom the processors with their colours ("1 -", "2 -")
+over "Processor"; in line mode a line per processor over the last 100
+samples (the newest at the right), in bar mode a bar per processor with
+its percentage and one for the average of the processors online. Each
+processor's default colour is the next of the colour list (CPU 1 brown,
+CPU 2 blue, the average after them).
+
+The load is read as IBM's reads it (`perf.rs`): DosConfigurePerf off
+then on (0, 4 and 0x28, 0), DosAliasPerfCtrs 0x0b walks the registered
+blocks' text blocks (handle at +4, flags 0x50, a name starting "CPU"),
+0x11 maps each processor's counter block; the not-idle timer at 0x18
+(negative while running: plus DosTmrQueryTime) grows by the busy time,
+so a sample's load is its growth over the time passed. Samples come from
+a PM timer at the sample rate (IBM's default, 150 ms; 50-30000 in the
+Sample Rate dialog); Freeze keeps sampling but shows the history as it
+was. Drawing goes through a memory bitmap (no flicker). Status lists
+the processors (DosGetProcessorStatus); Enter on one changes its wanted
+status and OK calls DosSetProcessorStatus, whose failure (rs2 keeps
+every processor online) is reported for that processor. Help is
+MPCPUMON.HLP with IBM's panel numbers (9000 general, 6000 keys, 1000-1070
+for the menu items, 4110/4210 for the colours). IBM's keeps no
+settings; rs2's keeps its window position and options in OS2.INI
+(`MPCPUMON`: `WINDOWPOS`, `SETTINGS`). IBM's toolbar of icon buttons
+(hidden in its usual window) and its unused "interrupts per sample" mode
+are not there. `MPCPUMON /SELFTEST` checks the load arithmetic, the hit
+testing of lines and bars, a counter block per processor
+(QSV_NUMPROCESSORS) and that the busy time and load rise while the test
+thread works.
 
 ### Check Disk and Format (PMCHKDSK.EXE, PMFORMAT.EXE)
 

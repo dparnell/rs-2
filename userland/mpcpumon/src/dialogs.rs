@@ -67,7 +67,7 @@ pub fn status() {
             label(b"its status between online and offline, then", (12, 106, 210, 8), DT_LEFT),
             label(b"choose OK to apply the changes.", (12, 98, 210, 8), DT_LEFT),
             label(b"Processor", (14, 86, 60, 8), DT_LEFT),
-            label(b"Status", (150, 86, 60, 8), DT_LEFT),
+            label(b"Status", (84, 86, 60, 8), DT_LEFT),
             list_box((12, 30, 206, 56), ID_CPULIST, 0),
             button(b"OK", (12, 8, 50), DID_OK, BS_DEFAULT),
             button(b"Cancel", (68, 8, 50), DID_CANCEL, 0),
