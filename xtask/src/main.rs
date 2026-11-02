@@ -679,6 +679,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         // REXXUTIL.DLL (and REXXSOM, REXXWPS).
         ("orexx", "OS2\\DLL\\OREXX.DLL"),
         ("rexxutil", "OS2\\DLL\\OREXUTIL.DLL"),
+        ("rexxsom", "OS2\\DLL\\OREXXSOM.DLL"),
         ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
         ("uconv", "OS2\\DLL\\UCONV.DLL"),
         ("mmio", "OS2\\DLL\\MMIO.DLL"),

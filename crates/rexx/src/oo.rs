@@ -824,6 +824,7 @@ impl Interp<'_> {
         let w = self.w.clone().unwrap();
         match v {
             ExtArg::None => None,
+            ExtArg::Nil => Some(w.nil()),
             ExtArg::Str(s) => Some(Value::S(s)),
             ExtArg::Rexx(i) => w.handed.borrow().get(i).cloned(),
             ExtArg::Obj(k, h, is_class, id) => {

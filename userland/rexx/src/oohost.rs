@@ -255,7 +255,7 @@ pub fn ext_send(kind: u32, handle: usize, msg: &[u8], args: &[ExtArg]) -> Result
     let mut xs: Vec<ExtVal> = Vec::new();
     for a in args {
         let v = match a {
-            ExtArg::None => ExtVal { kind: 0, len: 0, ptr: null_mut(), handle: 0 },
+            ExtArg::None | ExtArg::Nil => ExtVal { kind: 0, len: 0, ptr: null_mut(), handle: 0 },
             ExtArg::Str(s) => {
                 keep.push(z(s));
                 let p = keep.last_mut().unwrap();
@@ -290,6 +290,7 @@ pub fn ext_send(kind: u32, handle: usize, msg: &[u8], args: &[ExtArg]) -> Result
             2 => ExtArg::Obj(kind, r.handle as usize, false, s),
             3 => ExtArg::Obj(kind, r.handle as usize, true, s),
             4 => ExtArg::Rexx(r.handle as usize),
+            5 => ExtArg::Nil,
             _ => ExtArg::None,
         }),
         1 => Err(ExtErr::NoMethod),

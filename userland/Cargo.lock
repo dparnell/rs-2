@@ -625,6 +625,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rexxsom-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "rxsom",
+ "somsup",
+]
+
+[[package]]
 name = "rexxutil-dll"
 version = "0.1.0"
 dependencies = [
@@ -638,6 +647,14 @@ dependencies = [
  "gpi",
  "os2",
  "pmwin",
+]
+
+[[package]]
+name = "rxsom"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "somsup",
 ]
 
 [[package]]

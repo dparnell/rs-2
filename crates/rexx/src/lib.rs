@@ -132,6 +132,8 @@ pub enum ExtArg {
     Str(Vec<u8>),
     /// An object of that system: (kind, handle, is_class, class id).
     Obj(u32, usize, bool, Vec<u8>),
+    /// The other system's null object (.nil).
+    Nil,
     /// A REXX object handed to the other system (its position in the
     /// interpreter's table of REXX objects).
     Rexx(usize),

@@ -1,0 +1,15 @@
+[package]
+name = "rexxsom-dll"
+description = "REXXSOM.DLL (OREXXSOM.DLL): SOM classes from Object REXX (.SOM~import, EXTERNAL 'SOM ...' classes, the DLF classes)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rexxsom"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }
+rxsom = { path = "../rxsom" }
