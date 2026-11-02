@@ -122,6 +122,11 @@ pub fn call(sh: &mut Shell, s: &Simple) -> u32 {
     let rest = s.args.trim_start().strip_prefix(name.as_str()).unwrap_or("").trim().to_string();
     match crate::exec::find_program(sh, name) {
         Some(p) if p.to_ascii_uppercase().ends_with(".CMD") => {
+            // A REXX procedure (its first line starts with /*) runs in
+            // REXX, as when it is started without CALL.
+            if crate::rexx::run(sh, &p, &rest) {
+                return sh.rc;
+            }
             let Some(lines) = load(&p) else { return 2 };
             let mut a = alloc::vec![p];
             a.extend(crate::parse::split_words(&rest));
