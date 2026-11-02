@@ -107,9 +107,10 @@ pub fn sys_stem_sort(a: &Args, r: &mut Ret) -> u32 {
             return INVALID;
         }
     }
+    // Without stem.0 nothing is sorted, and the result is "0" (IBM's).
     let (rc, n) = count(&stem);
-    let mut ok = rc == 0;
-    if ok {
+    let mut ok = true;
+    if rc == 0 {
         let Some(n) = n else {
             return INVALID;
         };
