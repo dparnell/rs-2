@@ -203,11 +203,50 @@ reference is its `OpenDoc:Draft:RootPart` property). A storage unit
 reference inside a value is the 4-byte ID of the storage unit it names
 (strong references with the top bit clear, weak ones with it set).
 
-## Tests
+## Tests and status
 
-- `RS2\ODTEST.EXE`: creates a session, a document with a root part and an
-  embedded part (frames, facets, shapes, transforms), saves it, closes
-  everything, reopens it and checks what comes back.
-- `ODTEST MMODPTS` (with IBM's MMODPTS.DLL from work/modules.txt): loads
-  IBM's multimedia parts on rs2's OPENDOC.DLL, builds their classes and
-  creates and initialises a part in a draft.
+- `RS2\ODTEST.EXE` (55 checks, all pass): a session and its type
+  tokens; shapes and transforms; the storage unit API (properties,
+  values, focus, offsets, insert, views, references, ODException for a
+  missing property); a document with a root part and an embedded part
+  (ODTEST's own ODPart subclass built as the SOM compiler would) in
+  frames and facets (frame, content and window transforms, aggregate clip
+  shape, ContainsPoint, the arbitrator), saved to `C:\ODTEST.OD`, closed,
+  reopened: parts, frames, shapes, view types and the frame tree come
+  back.
+- `ODTEST MMODPTS` (12 checks, all pass; IBM's MMODPTS.DLL with SW.DLL,
+  MMPARTS.DLL and the Open Class runtime in LIBPATH, from a local
+  work/modules.txt): MMODPTS loads on rs2's OPENDOC.DLL, its classes
+  build on rs2's ODPart and M_ODPart, `ODRegisterPartHandlerClass`
+  registers MMAudioPart with the four kinds its metaclass reports
+  (`IBM:MMPM2:AudioPartKind`, `<DRM_OS2FILE,DRF_WAVE>`, `CF_WAVE`,
+  `...OS2:Kind:WAVE`), CreatePart by kind runs IBM's InitPart (storage
+  unit focus/add/strong references, the arbitrator's focus set, window
+  state, extensions), the draft is saved and reopened (InitPartFromStorage).
+- `ODSHELL.EXE FILE [KIND [DLL CLASS]]` (`\OS2\ODSHELL.EXE`): a simple
+  document shell. It opens or makes the document, registers a window with
+  ODWindowState (OPENDOC.DLL makes the PM frame window, the root frame,
+  the root facet on a canvas around the client window, and draws the
+  facet tree on WM_PAINT into the paint PS), and saves the draft when the
+  window closes. A new document's root part is ODSHELL's RS2TextPart with
+  an embedded part of KIND: another RS2TextPart
+  (work/progress/opendoc/odshell-embedded-part.png), or IBM's MMAudioPart,
+  which negotiates its frame and draws itself
+  (odshell-ibm-mmaudiopart.png).
+
+Not done yet (stubs that keep the tokens): event dispatching to parts
+(ODDispatcher; ODSHELL's window does not route mouse and keys to facets
+yet), the arbitrator beyond an owner table, menus (ODMenuBar records
+items, no PM menu), help, status line and settings extensions, clipboard
+and drag and drop (their storage units exist, nothing is exported),
+links, undo, translation, name spaces, GPI regions for shapes
+(GetRegion returns none; shapes are rectangles), nested drafts and
+draft history, the window state's own persistence. OREXXSC.DLL needs the
+Apple Event Manager, OSA and SOMUC.DLL. Calls with more than 12 words
+(ODWindowState::RegisterWindow takes 13) must be made directly, not
+through `somsup::call`.
+
+Next steps: dispatch PM input to facets (HandleEvent with OS/2's ODEvent),
+focus and menus through the arbitrator and window state, settings
+notebook pages (ODSettingsExtension) so MMODPTS's parts can be opened and
+played, GPI regions, then the Apple Event Manager for OREXXSC.

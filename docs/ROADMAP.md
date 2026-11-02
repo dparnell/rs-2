@@ -424,6 +424,18 @@ Status markers: done, in progress, planned.
 - done: SOMD.DLL as a stub: IBM's exports and classes, every method
   raising NO_IMPLEMENT; IBM's Object REXX runs (ORXTEST, ORXSOM, ORXWPS)
   without IBM's SOMD, SOMEM, SOMS and SOMSEC
+- done (milestone 1): OpenDoc for OS/2 (docs/OPENDOC.md): rs2's own
+  OPENDOC.DLL with IBM's ordinals (decoded from MMODPTS's and OREXXSC's
+  imports), its SOM classes in OpenDoc's release orders: session, storage
+  (rs2's own container file), drafts, storage units, parts and part
+  handler registration, frames, facets, shapes, transforms, canvases,
+  window state; `RS2\ODTEST.EXE`, ODSHELL.EXE (a document's root part in
+  a PM window); IBM's MMODPTS parts load, save, reopen and draw on it
+- planned: OpenDoc's event dispatching (mouse, keys, menus and focus
+  through the dispatcher and arbitrator), menus/help/status line/settings
+  extensions, clipboard and drag and drop, links, undo, GPI regions for
+  shapes, nested drafts; the Apple Event Manager and OSA (OREXXSC, which
+  also needs SOMUC.DLL)
 - not planned: DSOM itself (distributed objects, the SOMDD daemon,
   SOMDSVR; SOMEM, SOMS, SOMSEC): nothing on the CD uses it; rs2's own Object REXX does not
   use SOMD
