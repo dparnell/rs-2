@@ -138,3 +138,40 @@ fn media_round_trip() {
     }
     std::eprintln!("{same} files identical");
 }
+
+/// rs2's own OSO001.MSG/OSO001H.MSG sources (userland/msg) compile, and
+/// keep the numbers, classes and insertion points of IBM's files when
+/// work/ has them.
+#[test]
+fn rs2_system_messages() {
+    let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../userland/msg");
+    let opts = Options { code_pages: vec![850, 437], language: (9, 1), ..Default::default() };
+    let m = compile(&std::fs::read(dir.join("OSO001.TXT")).unwrap(), &opts).unwrap();
+    let h = compile(&std::fs::read(dir.join("OSO001H.TXT")).unwrap(), &opts).unwrap();
+    let (m, h) = (MsgFile::parse(&m).unwrap(), MsgFile::parse(&h).unwrap());
+    assert_eq!((m.first, m.count, h.first, h.count), (0, 3507, 0, 3507));
+    assert_eq!(m.get(0).unwrap().1, b"Y N A R I\r\n");
+    assert_eq!(m.get(2).unwrap().0, b'E');
+    let pct = |t: &[u8]| -> Vec<u8> {
+        let mut v: Vec<u8> = t.windows(2).filter(|w| w[0] == b'%' && (b'1'..=b'9').contains(&w[1])).map(|w| w[1]).collect();
+        v.sort();
+        v.dedup();
+        v
+    };
+    let ibm = media_files().into_iter().find(|p| p.file_name().is_some_and(|n| n == "OSO001.MSG"));
+    let Some(ibm) = ibm else { return };
+    let d = std::fs::read(ibm).unwrap();
+    let i = MsgFile::parse(&d).unwrap();
+    for n in 0..3507u16 {
+        let (ic, it) = i.get(n).unwrap();
+        let (mc, mt) = m.get(n).unwrap();
+        assert_eq!(ic, mc, "class of SYS{n:04}");
+        assert_eq!(pct(it), pct(mt), "insertions of SYS{n:04}");
+        // Prompts (no line end) stay prompts; IBM's last message ends with
+        // a stray NUL.
+        if n != 3506 {
+            assert_eq!(it.ends_with(b"\r\n"), mt.ends_with(b"\r\n"), "line end of SYS{n:04}");
+        }
+        assert_eq!(h.get(n).unwrap().0, b'H');
+    }
+}

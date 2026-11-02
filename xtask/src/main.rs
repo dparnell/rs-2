@@ -637,6 +637,13 @@ const USER_PROGRAMS: &[(&str, &str)] =
 /// Help files compiled from IPF source in userland/, with their names.
 const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP")];
 
+/// Message files compiled from MKMSGF source in userland/msg (crates/msgf):
+/// source, name on the disk, code pages, language family and sublanguage.
+const MSG_FILES: &[(&str, &str, &[u16], (u16, u16))] = &[
+    ("OSO001.TXT", "OS2\\SYSTEM\\OSO001.MSG", &[850, 437], (9, 1)),
+    ("OSO001H.TXT", "OS2\\SYSTEM\\OSO001H.MSG", &[850, 437], (9, 1)),
+];
+
 /// Programs marked as PM applications (WINDOWAPI).
 const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool"];
 
@@ -712,6 +719,22 @@ fn build_userland() -> Option<image::FileList> {
         };
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());
         std::fs::write(&out, help).unwrap();
+        files.push((out, dest.to_string()));
+    }
+    for (src, dest, cps, lang) in MSG_FILES {
+        let path = ul.join("msg").join(src);
+        let text = std::fs::read(&path).ok()?;
+        let name = dest.rsplit('\\').next().unwrap();
+        let opts = msgf::Options { code_pages: cps.to_vec(), language: *lang, dbcs: Vec::new(), name: name.to_ascii_lowercase().into_bytes() };
+        let msg = match msgf::compile(&text, &opts) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("{}: {e}", path.display());
+                return None;
+            }
+        };
+        let out = out_dir.join(name);
+        std::fs::write(&out, msg).unwrap();
         files.push((out, dest.to_string()));
     }
     Some(files)

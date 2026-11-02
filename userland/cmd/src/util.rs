@@ -19,34 +19,60 @@ pub fn err_out(s: &str) {
     os2::write_text(2, s);
 }
 
+/// Message `n` of the system message file (OSO001.MSG) with its
+/// insertions, as DosGetMessage gives it ("SYSnnnn: " before errors and
+/// warnings), without the final line end; None without the file.
+pub fn sys_msg(n: u32, ins: &[&str]) -> Option<String> {
+    let owned: Vec<Vec<u8>> = ins.iter().map(|s| { let mut v: Vec<u8> = s.chars().map(|c| c as u8).collect(); v.push(0); v }).collect();
+    let table: Vec<*const u8> = owned.iter().map(|v| v.as_ptr()).collect();
+    let mut buf = [0u8; 1024];
+    let mut cb = 0u32;
+    let file = b"OSO001.MSG\0";
+    let rc = unsafe { os2::msg::DosGetMessage(table.as_ptr(), table.len() as u32, buf.as_mut_ptr(), buf.len() as u32, n, file.as_ptr(), &mut cb) };
+    if rc != 0 {
+        return None;
+    }
+    let text: String = buf[..cb as usize].iter().map(|&b| b as char).collect();
+    Some(String::from(text.trim_end_matches(['\r', '\n'])))
+}
+
+/// Print message `n` on standard error, from the message file or, without
+/// it, `fallback` ("SYSnnnn: " is put before it).
+pub fn sys_msg_err(n: u32, ins: &[&str], fallback: &str) {
+    let text = sys_msg(n, ins).unwrap_or_else(|| alloc::format!("SYS{n:04}: {fallback}"));
+    err_out(&text);
+    err_out("\r\n");
+}
+
 /// Print an error the way the system reports it: "SYSnnnn: text".
 pub fn sys_error(rc: u32) {
+    // Short texts for when OSO001.MSG is missing.
     let text = match rc {
-        2 => "The system cannot find the file specified.",
-        3 => "The system cannot find the path specified.",
-        4 => "The system cannot open the file.",
-        5 => "Access is denied.",
-        8 => "There is not enough memory available.",
-        15 => "The system cannot find the drive specified.",
+        2 => "File not found.",
+        3 => "Path not found.",
+        4 => "The file could not be opened.",
+        5 => "Access denied.",
+        8 => "Not enough memory.",
+        15 => "No such drive.",
         16 => "The directory cannot be removed.",
-        17 => "The system cannot move the file to a different disk drive.",
-        18 => "There are no more files.",
-        19 => "The diskette or disk is write protected.",
+        17 => "Files cannot be moved to another drive.",
+        18 => "No more files.",
+        19 => "The disk is write-protected.",
         21 => "The drive is not ready.",
-        32 => "The process cannot access the file because it is being used by another process.",
-        80 => "The file already exists.",
-        82 => "The directory or file cannot be created.",
-        87 => "The parameter is incorrect.",
-        110 => "The system cannot open the device or file specified.",
-        112 => "There is not enough space on the disk.",
-        123 => "The file name, directory name, or volume label syntax is incorrect.",
+        32 => "The file is in use by another process.",
+        80 => "The file exists already.",
+        82 => "The file or directory could not be created.",
+        87 => "Invalid parameter.",
+        110 => "The device or file could not be opened.",
+        112 => "The disk is full.",
+        123 => "Invalid file name, directory name or volume label.",
         145 => "The directory is not empty.",
-        191 => "The program cannot be run in OS/2 mode.",
-        193 => "The file is not a valid OS/2 program.",
+        191 => "This program does not run in OS/2 mode.",
+        193 => "Not a valid OS/2 program.",
         206 => "The file name or extension is too long.",
-        _ => "An unexpected error occurred.",
+        _ => "Unexpected error.",
     };
-    err_out(&alloc::format!("SYS{rc:04}: {text}\r\n"));
+    sys_msg_err(rc, &[], text);
 }
 
 pub fn current_drive() -> u32 {

@@ -191,10 +191,7 @@ pub fn find_program(sh: &Shell, name: &str) -> Option<String> {
 
 fn run_program(sh: &mut Shell, name: &str, args: &str, async_: bool) -> Result<Option<u32>, u32> {
     let Some(path) = find_program(sh, name) else {
-        err_out(&alloc::format!(
-            "SYS1041: The name {} is not recognized as an\r\ninternal or external command, operable program or batch file.\r\n",
-            name
-        ));
+        sys_msg_err(1041, &[name], &alloc::format!("{name} is not a command, program or batch file."));
         return Err(1041);
     };
     if path.to_ascii_uppercase().ends_with(".CMD") {

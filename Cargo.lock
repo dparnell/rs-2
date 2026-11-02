@@ -161,4 +161,5 @@ dependencies = [
  "fat",
  "hpfs",
  "ipf",
+ "msgf",
 ]
