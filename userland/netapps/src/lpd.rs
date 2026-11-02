@@ -86,7 +86,12 @@ pub fn parse(a: &[String], flags_with_value: &[&str]) -> Result<(Target, Vec<(St
 /// free, as RFC 1179 asks.
 pub fn connect(t: &Target) -> Result<Sock, String> {
     let addr = lookup(&t.server)?;
-    for lp in 721..=731u16 {
+    // Start at another port each time: the server may still hold the last
+    // connection from a port (TIME_WAIT) and refuse the same one again.
+    let first = (ms() / 100 % 11) as u16;
+    let mut refused = false;
+    for k in 0..11u16 {
+        let lp = 721 + (first + k) % 11;
         let Ok(s) = Sock::tcp() else { break };
         s.reuse();
         if s.bind([0; 4], lp).is_err() {
@@ -96,8 +101,15 @@ pub fn connect(t: &Target) -> Result<Sock, String> {
         match unsafe { Rs2SockConnect(s.0, &a, 16) } {
             0 => return Ok(s),
             48 | 49 => continue,
+            61 => refused = true,
             e => return Err(alloc::format!("{}: {}", t.server, strerror(e))),
         }
+        if refused && k >= 2 {
+            break;
+        }
+    }
+    if refused {
+        return Err(alloc::format!("{}: {}", t.server, strerror(61)));
     }
     Sock::connect_addr(addr, t.port).map_err(|e| alloc::format!("{}: {}", t.server, strerror(e)))
 }
