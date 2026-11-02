@@ -777,14 +777,29 @@ fn messages() {
         check("DosQueryMessageCP bound", rc == 0 && n == 10 && cps[..5] == [2, 850, 437, 9, 1]);
         DosFreeMem(seg);
 
-        // OSO001.MSG, when it is installed.
+        // OSO001.MSG and OSO001H.MSG (rs2's own, userland/msg).
         let oso = b"OSO001.MSG\0";
         let rc = DosGetMessage(null(), 0, buf.as_mut_ptr(), 128, 2, oso.as_ptr(), &mut n);
-        if rc == 0 {
-            check("DosGetMessage SYS0002 from OSO001.MSG", buf[..n as usize].starts_with(b"SYS0002: "));
-            let rc = DosQueryMessageCP(cps.as_mut_ptr().cast(), 16, oso.as_ptr(), &mut n);
-            check("DosQueryMessageCP OSO001.MSG", rc == 0 && n >= 8 && cps[0] as u32 * 2 + 6 == n);
-        }
+        check("DosGetMessage SYS0002 from OSO001.MSG", rc == 0 && buf[..n as usize].starts_with(b"SYS0002: ") && buf[..n as usize].ends_with(b"\r\n"));
+        let rc = DosQueryMessageCP(cps.as_mut_ptr().cast(), 16, oso.as_ptr(), &mut n);
+        check("DosQueryMessageCP OSO001.MSG", rc == 0 && n == 10 && cps[..5] == [2, 850, 437, 9, 1]);
+        let rc = DosGetMessage(null(), 0, buf.as_mut_ptr(), 128, 0, oso.as_ptr(), &mut n);
+        check("DosGetMessage SYS0000 (response letters)", rc == 0 && &buf[..n as usize] == b"Y N A R I\r\n");
+        let name = b"XYZZY\0";
+        let ins1 = [name.as_ptr()];
+        let rc = DosGetMessage(ins1.as_ptr(), 1, buf.as_mut_ptr(), 128, 1041, oso.as_ptr(), &mut n);
+        let t = &buf[..n as usize];
+        check("DosGetMessage SYS1041 with %1", rc == 0 && t.starts_with(b"SYS1041: ") && t.windows(5).any(|w| w == b"XYZZY"));
+        // A prompt has no line end; the last message stops before the
+        // file's extended header.
+        let rc = DosGetMessage(null(), 0, buf.as_mut_ptr(), 128, 1695, oso.as_ptr(), &mut n);
+        check("DosGetMessage SYS1695 prompt", rc == 0 && n > 0 && !buf[..n as usize].ends_with(b"\n"));
+        let mut big = [0u8; 2048];
+        let rc = DosGetMessage(null(), 0, big.as_mut_ptr(), 2048, 3506, oso.as_ptr(), &mut n);
+        check("DosGetMessage SYS3506 (last)", rc == 0 && big[..n as usize].ends_with(b"\r\n"));
+        let osoh = b"OSO001H.MSG\0";
+        let rc = DosGetMessage(null(), 0, big.as_mut_ptr(), 2048, 2, osoh.as_ptr(), &mut n);
+        check("DosGetMessage SYS0002 from OSO001H.MSG", rc == 0 && big[..n as usize].starts_with(b"EXPLANATION: "));
 
         // DosPutMessage breaks lines at 80 columns between words.
         let (mut r, mut w) = (0, 0);
