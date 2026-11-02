@@ -542,7 +542,7 @@ pub fn stream_fn(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
                     it.close_stream(&name);
                     match it.open_stream(&name, mode) {
                         Ok(_) => Ok(b"READY:".to_vec()),
-                        Err(e) => Ok(alloc::format!("ERROR:{e}").into_bytes()),
+                        Err(e) => Ok(alloc::format!("NOTREADY:{e}").into_bytes()),
                     }
                 }
                 b"CLOSE" => {

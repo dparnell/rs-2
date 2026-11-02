@@ -203,6 +203,9 @@ impl Interp<'_> {
                     traced = true;
                 }
             }
+            // reached at the end of a branch: skipped, not traced
+            Instr::Else => {}
+            Instr::When(_) | Instr::Otherwise if matches!(ctl.last(), Some(Ctl::Select { taken: true, .. })) => {}
             _ => {
                 if self.tracing_all(f) {
                     self.trace_clause(c, lvl);
@@ -421,7 +424,6 @@ impl Interp<'_> {
                                     name
                                 }
                             };
-                            self.drop_ref(v);
                             for w in words(&list) {
                                 self.st.var_drop(w, true).map_err(|_| Err::new(20))?;
                             }
@@ -495,7 +497,13 @@ impl Interp<'_> {
             Instr::Interpret(e) => {
                 let s = self.eval_top(f, e, lvl)?;
                 let prog = match crate::parse::program(&s) {
-                    Ok(p) => Rc::new(p),
+                    Ok(mut p) => {
+                        // interpreted clauses show the INTERPRET's line
+                        for cl in &mut p.clauses {
+                            cl.line = c.line;
+                        }
+                        Rc::new(p)
+                    }
                     Err((e, _)) => return Err(e),
                 };
                 let r = self.run(f, &prog, 0, extra + c.level + 1)?;
@@ -511,15 +519,7 @@ impl Interp<'_> {
                         ctl.truncate(k + 1);
                         Ok(if leave { Next::LeaveDo(idx) } else { Next::Again(idx) })
                     }
-                    None => {
-                        if Rc::ptr_eq(code, &f.prog) {
-                            Err(Err::new(28))
-                        } else if leave {
-                            Ok(Next::Flow(Flow::Leave(name.clone())))
-                        } else {
-                            Ok(Next::Flow(Flow::Iterate(name.clone())))
-                        }
-                    }
+                    None => Err(Err::new(28)),
                 }
             }
             Instr::NumDigits(e) => {
@@ -617,7 +617,14 @@ impl Interp<'_> {
                     TraceArg::Lit(v) => v.clone(),
                     TraceArg::Value(e) => self.eval_top(f, e, lvl)?,
                 };
+                let was = f.trace.interactive;
                 self.set_trace(f, &v)?;
+                if f.trace.interactive && !was && !self.quiet {
+                    let m = self.host.message(114).unwrap_or_default();
+                    let mut line = b"       +++ ".to_vec();
+                    line.extend_from_slice(&m);
+                    self.trace_line(&line);
+                }
                 Ok(Next::Go)
             }
         }
@@ -665,12 +672,6 @@ impl Interp<'_> {
         while i < s.len() && (s[i] == b'?' || s[i] == b'!') {
             if s[i] == b'?' {
                 f.trace.interactive = !f.trace.interactive;
-                if f.trace.interactive && !self.quiet {
-                    let m = self.host.message(114).unwrap_or_default();
-                    let mut line = b"       +++ ".to_vec();
-                    line.extend_from_slice(&m);
-                    self.trace_line(&line);
-                }
             } else {
                 f.trace.inhibit = !f.trace.inhibit;
             }
@@ -937,12 +938,7 @@ impl Interp<'_> {
         let mut rest = sec;
         for (k, t) in targets.iter().enumerate() {
             let val: Val = if k == targets.len() - 1 {
-                if targets.len() == 1 {
-                    rest.to_vec()
-                } else {
-                    let a = rest.iter().position(|&c| c != b' ').unwrap_or(rest.len());
-                    rest[a..].to_vec()
-                }
+                rest.to_vec()
             } else {
                 let a = rest.iter().position(|&c| c != b' ').unwrap_or(rest.len());
                 let r2 = &rest[a..];

@@ -464,6 +464,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rexxinit-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "rexxutil-dll"
 version = "0.1.0"
 dependencies = [

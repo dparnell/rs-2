@@ -645,6 +645,10 @@ const USER_PROGRAMS: &[(&str, &str)] =
 const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP"), ("pmrexxio/PMREXXIO.IPF", "OS2\\HELP\\PMREXXIO.HLP")];
 
 /// Programs marked as PM applications (WINDOWAPI).
+/// MKMSGF message sources (relative to userland/) compiled into message
+/// files.
+const MSG_FILES: &[(&str, &str)] = &[("rexx/msg/REX.TXT", "OS2\\SYSTEM\\REX.MSG"), ("rexx/msg/REXH.TXT", "OS2\\SYSTEM\\REXH.MSG")];
+
 const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "pmrexx"];
 
 /// Build the userland workspace and convert each program to LX.
@@ -719,6 +723,24 @@ fn build_userland() -> Option<image::FileList> {
         };
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());
         std::fs::write(&out, help).unwrap();
+        files.push((out, dest.to_string()));
+    }
+    // Message files from MKMSGF sources (crates/msgf), code page 437.
+    for (src, dest) in MSG_FILES {
+        let path = ul.join(src);
+        let text = std::fs::read(&path).ok()?;
+        let name = dest.rsplit('\\').next().unwrap();
+        let opts = msgf::Options { code_pages: vec![437], name: name.as_bytes().to_vec(), ..Default::default() };
+        let built = msgf::parse(&text, &opts.dbcs).and_then(|s| msgf::build(&s, &opts));
+        let data = match built {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("{}: {e}", path.display());
+                return None;
+            }
+        };
+        let out = out_dir.join(name);
+        std::fs::write(&out, data).unwrap();
         files.push((out, dest.to_string()));
     }
     Some(files)

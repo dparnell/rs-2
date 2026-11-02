@@ -362,6 +362,17 @@ impl OsHost {
     }
 }
 
+/// RXSUBCOM_ERROR (1) and RXSUBCOM_FAILURE (2) as condition numbers.
+fn flags_cond(flags: u16) -> u8 {
+    if flags & 1 != 0 {
+        1
+    } else if flags & 2 != 0 {
+        2
+    } else {
+        0
+    }
+}
+
 /// Run a command through CMD.EXE (the CMD environment when nobody
 /// registered one: REXX run by a program other than CMD).
 fn run_cmd(cmd: &[u8]) -> CmdResult {
@@ -537,25 +548,46 @@ impl Host for OsHost {
                 Ok(false) => {}
             }
         }
-        let envz = cz(env);
+        // "ENV.DLL" names the environment's DLL too
+        let (ename, dll) = match env.iter().position(|&c| c == b'.') {
+            Some(p) => (&env[..p], Some(&env[p + 1..])),
+            None => (env, None),
+        };
+        let is_cmd = ename.eq_ignore_ascii_case(b"CMD");
+        let envz = cz(ename);
+        let dllz = dll.map(cz);
         let mut cmdz = cz(cmd);
         let rcmd = RxString { len: cmd.len() as u32, ptr: cmdz.as_mut_ptr() };
         let mut buf = vec![0u8; 256];
         let mut ret = RxString { len: buf.len() as u32, ptr: buf.as_mut_ptr() };
         let mut flags: u16 = 0;
         let mut hrc: u16 = 0;
-        let r = crate::with_state(st, || unsafe { RexxCallSubcom(envz.as_ptr(), null(), &rcmd, &mut flags, &mut hrc, &mut ret) });
-        if r != 0 {
-            if env.eq_ignore_ascii_case(b"CMD") || env.is_empty() {
-                return run_cmd(cmd);
-            }
-            return CmdResult { rc: b"-3".to_vec(), cond: 2 };
+        let dp = dllz.as_ref().map_or(null(), |d| d.as_ptr());
+        let r = crate::with_state(st, || unsafe { RexxCallSubcom(envz.as_ptr(), dp, &rcmd, &mut flags, &mut hrc, &mut ret) });
+        if r == 30 && is_cmd {
+            // nobody registered CMD: run the command through CMD.EXE
+            return run_cmd(cmd);
         }
-        let rc = if ret.ptr.is_null() { b"0".to_vec() } else { rx_bytes(&ret) };
+        if r != 0 {
+            // RC is the API's return code (30: no such environment)
+            return CmdResult { rc: alloc::format!("{r}").into_bytes(), cond: if flags == 0 { 2 } else { flags_cond(flags) } };
+        }
+        // a handler's own nonzero return code is RC, else its result string
+        let rc = if hrc != 0 {
+            alloc::format!("{}", hrc as i16).into_bytes()
+        } else if ret.ptr.is_null() || ret.len == 0 {
+            b"0".to_vec()
+        } else {
+            rx_bytes(&ret)
+        };
         if !ret.ptr.is_null() && ret.ptr != buf.as_mut_ptr() {
             unsafe { DosFreeMem(ret.ptr) };
         }
-        let cond = if flags & 2 != 0 { 2 } else if flags & 1 != 0 { 1 } else { 0 };
+        let mut cond = flags_cond(flags);
+        // CMD's "not a command" (SYS1041) is a failure
+        if is_cmd && rc.as_slice() == b"1041" {
+            cond = 2;
+        }
         CmdResult { rc, cond }
     }
 
@@ -925,7 +957,7 @@ impl Host for OsHost {
         let size = u32::from_le_bytes([st[12], st[13], st[14], st[15]]) as u64;
         let (d, m, y) = (date & 31, (date >> 5) & 15, ((date >> 9) + 1980) % 100);
         let (s, mi, h) = ((time & 31) * 2, (time >> 5) & 63, time >> 11);
-        Some(FileInfo { size, datetime: alloc::format!("{m:02}-{d:02}-{y:02} {h:02}:{mi:02}:{s:02}").into_bytes() })
+        Some(FileInfo { size, datetime: alloc::format!("{m:02}-{d:02}-{y:02}  {h:02}:{mi:02}:{s:02}").into_bytes() })
     }
 
     fn f_is_device(&mut self, h: u32) -> bool {

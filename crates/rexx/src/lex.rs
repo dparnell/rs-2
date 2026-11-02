@@ -304,6 +304,18 @@ pub fn clauses(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>) -> Result<Vec
                 }
                 let s = src[start..i].to_vec();
                 spell.entry(upper(&s)).or_insert_with(|| s.clone());
+                // a compound symbol's stem and variable tails are symbols too
+                if !(s[0].is_ascii_digit() || s[0] == b'.') {
+                    if let Some(p) = s.iter().position(|&c| c == b'.') {
+                        let stem = s[..=p].to_vec();
+                        spell.entry(upper(&stem)).or_insert(stem);
+                        for part in s[p + 1..].split(|&c| c == b'.') {
+                            if !part.is_empty() && !part[0].is_ascii_digit() {
+                                spell.entry(upper(part)).or_insert_with(|| part.to_vec());
+                            }
+                        }
+                    }
+                }
                 cur.toks.push(Token { tok: Tok::Sym(s), blank, line });
                 blank = false;
             }

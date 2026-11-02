@@ -1,0 +1,13 @@
+[package]
+name = "rexxinit-dll"
+description = "REXXINIT.DLL: keeps the REXX API state (queues, registrations) alive"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rexxinit"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

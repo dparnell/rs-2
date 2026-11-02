@@ -1,0 +1,3 @@
+; REXXINIT.DLL: IBM's names and ordinals.
+RxApiInit=__a_RxApiInit @1
+dllinit=__a_dllinit @2

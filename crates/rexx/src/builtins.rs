@@ -1,5 +1,6 @@
 //! Built-in functions.
 
+use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 
@@ -1081,7 +1082,7 @@ pub fn call(it: &mut Interp, f: &mut Frame, name: &[u8], args: &[Option<Val>]) -
                     b'H' => int_str(now.hour as i64),
                     b'M' => int_str((now.hour * 60 + now.min) as i64),
                     b'S' => int_str(((now.hour * 60 + now.min) * 60 + now.sec) as i64),
-                    b'L' => alloc::format!("{:02}:{:02}:{:02}.{:02}", now.hour, now.min, now.sec, now.micros / 10000).into_bytes(),
+                    b'L' => alloc::format!("{:02}:{:02}:{:02}.{:06}", now.hour, now.min, now.sec, now.micros).into_bytes(),
                     _ => {
                         // E and R: the elapsed-time clock
                         let r = match f.elapsed {
@@ -1091,8 +1092,11 @@ pub fn call(it: &mut Interp, f: &mut Frame, name: &[u8], args: &[Option<Val>]) -
                                 if d < 0 {
                                     d += 86_400_000_000;
                                 }
-                                let cs = d / 10_000;
-                                alloc::format!("{}.{:02}", cs / 100, cs % 100).into_bytes()
+                                let n = Num { neg: false, dig: d.to_string().bytes().map(|c| c - b'0').collect(), exp: -6 };
+                                let mut n = n;
+                                n.round(nm.digits);
+                                n.strip_fraction();
+                                n.format(&nm)
                             }
                         };
                         if o == b'R' || f.elapsed.is_none() {
@@ -1335,11 +1339,11 @@ pub fn call(it: &mut Interp, f: &mut Frame, name: &[u8], args: &[Option<Val>]) -
             }
             b"RXFUNCADD" => {
                 a.count(3, 3)?;
-                int_str(it.host.rxfunc(b'A', a.s(0), a.s(1), a.s(2)) as i64)
+                bool_v(it.host.rxfunc(b'A', a.s(0), a.s(1), a.s(2)) != 0)
             }
             b"RXFUNCDROP" => {
                 a.count(1, 1)?;
-                int_str(it.host.rxfunc(b'D', a.s(0), b"", b"") as i64)
+                bool_v(it.host.rxfunc(b'D', a.s(0), b"", b"") != 0)
             }
             b"RXFUNCQUERY" => {
                 a.count(1, 1)?;

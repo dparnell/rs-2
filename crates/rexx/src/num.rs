@@ -181,6 +181,10 @@ impl Num {
         self.normalize_zero();
     }
 
+    pub fn strip_fraction(&mut self) {
+        self.strip_fraction_zeros();
+    }
+
     /// Remove all trailing zeros (FORMAT/whole-number checks).
     pub fn strip_all_zeros(&mut self) {
         while self.dig.last() == Some(&0) {
@@ -501,6 +505,7 @@ impl Num {
             r.strip_fraction_zeros();
         } else {
             r.round(nm.digits);
+            r.strip_fraction_zeros();
         }
         Ok(r)
     }

@@ -1103,6 +1103,11 @@ fn parse_do(p: &mut P) -> R<DoSpec> {
     Ok(d)
 }
 
+/// A compound symbol (a variable with a tail after its stem).
+fn is_compound(s: &[u8]) -> bool {
+    !(s[0].is_ascii_digit() || s[0] == b'.') && s.iter().position(|&c| c == b'.').is_some_and(|p| p + 1 < s.len())
+}
+
 /// Rebuild a clause's text for tracing.
 fn render(p: &P, from: usize, to: usize, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out: &mut Vec<u8>) {
     let mut prev: Option<usize> = None;
@@ -1131,9 +1136,24 @@ fn render(p: &P, from: usize, to: usize, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out
                         out.push(if first { c.to_ascii_uppercase() } else { c.to_ascii_lowercase() });
                         first = false;
                     }
-                } else {
+                } else if !is_compound(s) {
                     let u = upper(s);
                     out.extend_from_slice(spell.get(&u).map(|v| v.as_slice()).unwrap_or(s));
+                } else {
+                    // a compound symbol: its stem and tail symbols as first spelt
+                    let p = s.iter().position(|&c| c == b'.').unwrap();
+                    let stem = &s[..=p];
+                    out.extend_from_slice(spell.get(&upper(stem)).map(|v| v.as_slice()).unwrap_or(stem));
+                    for (k, part) in s[p + 1..].split(|&c| c == b'.').enumerate() {
+                        if k > 0 {
+                            out.push(b'.');
+                        }
+                        if part.is_empty() || part[0].is_ascii_digit() {
+                            out.extend_from_slice(part);
+                        } else {
+                            out.extend_from_slice(spell.get(&upper(part)).map(|v| v.as_slice()).unwrap_or(part));
+                        }
+                    }
                 }
             }
             Tok::Str { raw, kind, .. } => {

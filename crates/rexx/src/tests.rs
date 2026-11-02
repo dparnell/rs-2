@@ -246,7 +246,7 @@ fn routines() {
 #[test]
 fn parsing() {
     assert_eq!(run("parse value 'a b c' with q r . 1 s +1; say q'|'r'|'s").join(","), "a|b|a");
-    assert_eq!(run("parse value '  a   b  c ' with p q; say '['p']['q']'").join(","), "[a][b  c ]");
+    assert_eq!(run("parse value '  a   b  c ' with p q; say '['p']['q']'").join(","), "[a][  b  c ]");
     assert_eq!(run("parse value 'k=v;z' with k '=' v ';' z; say k v z").join(","), "k v z");
     assert_eq!(run("s='abc'; parse var s 2 x +1; say x").join(","), "b");
     assert_eq!(run("d=','; parse value 'a,b' with x (d) y; say x y").join(","), "a b");
@@ -293,7 +293,7 @@ fn streams_and_queue() {
 #[test]
 fn interpret_and_signal() {
     assert_eq!(run("interpret 'x = 5; say x*2'").join(","), "10");
-    assert_eq!(run("do i=1 to 3; interpret 'if i=2 then leave'; say i; end").join(","), "1");
+    assert_eq!(run("do i=1 to 3; interpret 'do j=1; leave; end'; say i j; end").join(","), "1 1,2 1,3 1");
     assert_eq!(run("signal there\nsay 'no'\nthere: say 'yes' sigl").join(","), "yes 1");
     assert_eq!(run("a.=0; a.1='x'; i=1; say a.i a.2 a.\ndrop a.1; say a.1").join(","), "x 0 0,A.1");
     assert_eq!(run("x='y'; y.='d'; y.x=1; say y.x y.y").join(","), "1 d");
