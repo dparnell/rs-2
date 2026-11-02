@@ -124,3 +124,21 @@ fn transform(m: Option<[i32; 6]>, r: RectL) -> RectL {
     let c = [f(r.l, r.b), f(r.r, r.b), f(r.l, r.t), f(r.r, r.t)];
     RectL::new(c.iter().map(|p| p.0).min().unwrap(), c.iter().map(|p| p.1).min().unwrap(), c.iter().map(|p| p.0).max().unwrap(), c.iter().map(|p| p.1).max().unwrap())
 }
+
+/// Draw the page fitted into `into` on a PS in pels through its default
+/// viewing transform alone (a printer's queued DC records the drawing as
+/// a metafile, which keeps the transform but not a page set up in other
+/// units).
+pub fn draw_scaled(hps: u32, doc: &mut Doc, into: RectL) {
+    let (w, h) = page_size(doc);
+    let vp = fit(doc, RectL::new(0, 0, w, h), into);
+    // Page units to pels: scale (FIXED) and the viewport's corner, after
+    // the metafile's own default viewing transform.
+    let sx = ((vp.width() as i64) << 16) / w.max(1) as i64;
+    let sy = ((vp.height() as i64) << 16) / h.max(1) as i64;
+    let m = doc.view.unwrap_or([0x10000, 0, 0, 0x10000, 0, 0]);
+    let fx = |a: i32, k: i64| ((a as i64 * k) >> 16) as i32;
+    let lf = [fx(m[0], sx), fx(m[1], sy), 0, fx(m[2], sx), fx(m[3], sy), 0, fx(m[4], sx) + vp.l, fx(m[5], sy) + vp.b, 1];
+    unsafe { GpiSetDefaultViewMatrix(hps, 9, lf.as_ptr(), 0) };
+    play(hps, doc.hmf(), false);
+}

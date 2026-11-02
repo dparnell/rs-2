@@ -43,6 +43,7 @@ pub fn print(hab: u32, doc: &mut Doc, name: &[u8], copies: u32) -> Result<(), Pr
     let mut caps = [0i32; 2];
     unsafe { DevQueryCaps(hdc, CAPS_WIDTH, 2, caps.as_mut_ptr()) };
     let (w, h) = (caps[0].max(1), caps[1].max(1));
+    crate::trace(alloc::format!("printer {}x{} pels", w, h).as_bytes());
     let size = SizeL { cx: 0, cy: 0 };
     let hps = unsafe { GpiCreatePS(hab, hdc, &size, PU_PELS | GPIF_DEFAULT | GPIT_NORMAL | GPIA_ASSOC) };
     if hps == 0 {
@@ -61,7 +62,7 @@ pub fn print(hab: u32, doc: &mut Doc, name: &[u8], copies: u32) -> Result<(), Pr
             }
             first = false;
             doc.page = p;
-            view::draw(hps, doc, area, false);
+            view::draw_scaled(hps, doc, area);
         }
     }
     doc.page = shown;
