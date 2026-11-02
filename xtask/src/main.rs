@@ -675,6 +675,10 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("rexxapi", "OS2\\DLL\\REXXAPI.DLL"),
         ("rexxutil", "OS2\\DLL\\REXXUTIL.DLL"),
         ("rexxinit", "OS2\\DLL\\REXXINIT.DLL"),
+        // Object REXX (docs/REXX.md): SWITCHRX.CMD makes these REXX.DLL and
+        // REXXUTIL.DLL (and REXXSOM, REXXWPS).
+        ("orexx", "OS2\\DLL\\OREXX.DLL"),
+        ("rexxutil", "OS2\\DLL\\OREXUTIL.DLL"),
         ("libuni", "OS2\\DLL\\LIBUNI.DLL"),
         ("uconv", "OS2\\DLL\\UCONV.DLL"),
         ("mmio", "OS2\\DLL\\MMIO.DLL"),
@@ -708,9 +712,20 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("os2chess", "OS2\\APPS\\OS2CHESS.EXE"),
         ("rxqueue", "OS2\\RXQUEUE.EXE"),
         ("rxsubcom", "OS2\\RXSUBCOM.EXE"),
+        ("rexxc", "OS2\\REXXC.EXE"),
         ("pmrexxio", "OS2\\DLL\\PMREXXIO.DLL"),
         ("pmrexx", "OS2\\PMREXX.EXE"),
     ];
+
+/// Programs whose LX module name is not their file name: Object REXX's
+/// files are the modules REXX, REXXUTIL, REXXSOM and REXXWPS (IBM's are so)
+/// and become those files when SWITCHRX.CMD switches.
+const LX_NAMES: &[(&str, &str)] = &[
+    ("OS2\\DLL\\OREXX.DLL", "REXX"),
+    ("OS2\\DLL\\OREXUTIL.DLL", "REXXUTIL"),
+    ("OS2\\DLL\\OREXXSOM.DLL", "REXXSOM"),
+    ("OS2\\DLL\\OREXXWPS.DLL", "REXXWPS"),
+];
 
 /// Help files compiled from IPF source in userland/, with their names.
 /// Names ending in .INF are books.
@@ -758,6 +773,9 @@ const MSG_FILES: &[(&str, &str, &[u16], (u16, u16))] = &[
     ("UCDFS.TXT", "OS2\\SYSTEM\\UCDFS.MSG", &[850], (0, 0)),
     ("REX.TXT", "OS2\\SYSTEM\\REX.MSG", &[437], (0, 0)),
     ("REXH.TXT", "OS2\\SYSTEM\\REXH.MSG", &[437], (0, 0)),
+    // Object REXX's, REX.MSG and REXH.MSG once SWITCHRX.CMD switches.
+    ("OREX.TXT", "OS2\\SYSTEM\\OREX.MSG", &[437], (0, 0)),
+    ("OREXH.TXT", "OS2\\SYSTEM\\OREXH.MSG", &[437], (0, 0)),
 ];
 
 /// The applets' data files in userland/, with their names.
@@ -802,6 +820,11 @@ fn build_userland() -> Option<image::FileList> {
                 std::fs::write(&path, ico).unwrap();
                 cmd.arg("--res").arg("1").arg("1").arg(&path);
             }
+        }
+        // Object REXX's files have the module names of the files they
+        // replace when SWITCHRX.CMD makes Object REXX the system's REXX.
+        if let Some((_, n)) = LX_NAMES.iter().find(|(d, _)| d == dest) {
+            cmd.arg("--name").arg(n);
         }
         if dest.ends_with(".DLL") || dest.ends_with(".QPR") || dest.ends_with(".DRV") {
             let defs = ul.join(bin).join("exports.def");

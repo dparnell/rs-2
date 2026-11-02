@@ -104,6 +104,9 @@ pub fn has_native(b: Builtin, side: bool, name: &[u8]) -> bool {
 /// The secondary messages of the errors Object REXX raises (rs2's
 /// wording), by code (major * 1000 + minor).
 pub fn secondary(code: u32) -> Option<&'static [u8]> {
+    if let Some(t) = crate::msgs::secondary(code) {
+        return Some(t);
+    }
     Some(match code {
         40001 => b"The external routine \"&1\" failed",
         40003 => b"&1 needs at least &2 arguments",

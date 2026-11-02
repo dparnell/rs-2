@@ -14,6 +14,7 @@ pub mod builtins;
 pub mod classes;
 pub mod exec;
 pub mod lex;
+pub mod msgs;
 pub mod num;
 pub mod oo;
 pub mod parse;

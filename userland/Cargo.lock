@@ -302,6 +302,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "orexx-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "rexx",
+ "thunk16",
+]
+
+[[package]]
 name = "os2"
 version = "0.1.0"
 

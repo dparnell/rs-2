@@ -1,0 +1,15 @@
+[package]
+name = "orexx-dll"
+description = "OREXX.DLL: the Object REXX interpreter (REXX.DLL built with cfg(orexx)): RexxStart and the rest of the REXX API, RexxTranslateProgram for REXXC"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "orexx"
+path = "../rexx/src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+rexx = { path = "../../crates/rexx" }
+thunk16 = { path = "../thunk16" }

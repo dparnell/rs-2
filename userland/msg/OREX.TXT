@@ -1,0 +1,598 @@
+; OREX.MSG: rs2's Object REXX messages (MKMSGF source, code page 437),
+; installed as REX.MSG while Object REXX is the system's REXX (SWITCHRX).
+; The numbers are those Object REXX programs and tools expect; the wording
+; is rs2's own. 1-99 are the error numbers; 200 and up the secondary
+; messages of error subcodes (&1, &2... are filled in by REXX.DLL, which
+; reads this file's source too: crates/rexx). An error report reads
+; "REX0042E: Error 42 running C:\X.CMD line 3:  <message 42>" and
+; "REX0413E: Error 42.3:  <message 413>".
+REX
+REX0000?:
+REX0001?:
+REX0002?:
+REX0003W: The program could not be started%0
+REX0004W: The program was interrupted%0
+REX0005W: System resources are exhausted%0
+REX0006W: A comment or a quoted string is not closed%0
+REX0007W: SELECT needs WHEN or OTHERWISE here%0
+REX0008W: THEN or ELSE is not expected here%0
+REX0009W: WHEN or OTHERWISE is not expected here%0
+REX0010W: END does not match a DO or SELECT%0
+REX0011W: Routines or loops are nested too deeply%0
+REX0012?:
+REX0013W: The program contains a character that is not allowed%0
+REX0014W: A DO, SELECT or IF instruction is not complete%0
+REX0015W: A hexadecimal or binary string is not valid%0
+REX0016W: The label cannot be found%0
+REX0017W: PROCEDURE is not allowed here%0
+REX0018W: IF or WHEN needs THEN%0
+REX0019W: A string or symbol is needed here%0
+REX0020W: A symbol is needed here%0
+REX0021W: The clause has extra data at its end%0
+REX0022W: A character string is not valid%0
+REX0023W: A data string is not valid%0
+REX0024W: The TRACE setting is not valid%0
+REX0025W: A sub-keyword is not valid here%0
+REX0026W: A whole number is needed%0
+REX0027W: The DO instruction is not valid%0
+REX0028W: LEAVE or ITERATE is not inside a matching loop%0
+REX0029W: The environment name is too long%0
+REX0030W: A name or string is too long%0
+REX0031W: A variable name cannot start with a digit or a period%0
+REX0032?:
+REX0033W: The result of an expression is not valid here%0
+REX0034W: A logical value must be 0 or 1%0
+REX0035W: The expression is not valid%0
+REX0036W: A "(" or "[" is not closed%0
+REX0037W: A ",", ")" or "]" is not expected here%0
+REX0038W: The template or pattern is not valid%0
+REX0039W: The expression is nested too deeply%0
+REX0040W: A routine was called incorrectly%0
+REX0041W: A value is not a number%0
+REX0042W: An arithmetic result is too large or too small%0
+REX0043W: The routine cannot be found%0
+REX0044W: The function or message gave no data%0
+REX0045W: RETURN needs data for a function%0
+REX0046W: A variable reference is not valid%0
+REX0047W: A label is not allowed here%0
+REX0048W: A system service failed%0
+REX0049W: The interpreter failed%0
+REX0050?:
+REX0051?:
+REX0052?:
+REX0053?:
+REX0054?:
+REX0055?:
+REX0056?:
+REX0057?:
+REX0058?:
+REX0059?:
+REX0060?:
+REX0061?:
+REX0062?:
+REX0063?:
+REX0064?:
+REX0065?:
+REX0066?:
+REX0067?:
+REX0068?:
+REX0069?:
+REX0070?:
+REX0071?:
+REX0072?:
+REX0073?:
+REX0074?:
+REX0075?:
+REX0076?:
+REX0077?:
+REX0078?:
+REX0079?:
+REX0080?:
+REX0081?:
+REX0082?:
+REX0083?:
+REX0084?:
+REX0085?:
+REX0086?:
+REX0087?:
+REX0088?:
+REX0089?:
+REX0090W: An external name cannot be found%0
+REX0091W: There is no result object%0
+REX0092?:
+REX0093W: A method was called incorrectly%0
+REX0094?:
+REX0095?:
+REX0096?:
+REX0097W: The object has no method for the message%0
+REX0098W: The program could not go on%0
+REX0099W: The program cannot be translated%0
+REX0100W: Error &1 running &2, line &3:%0
+REX0101W: %0
+REX0102W: January%0
+REX0103W: February%0
+REX0104W: March%0
+REX0105W: April%0
+REX0106W: May%0
+REX0107W: June%0
+REX0108W: July%0
+REX0109W: August%0
+REX0110W: September%0
+REX0111W: October%0
+REX0112W: November%0
+REX0113W: December%0
+REX0114I: +++ Interactive trace: TRACE OFF ends it, ENTER goes on. +++%0
+REX0115E: The RXSUBCOM parameters are not valid.
+REX0116E: The RXSUBCOM REGISTER parameters are not valid.
+REX0117E: The RXSUBCOM DROP parameters are not valid.
+REX0118E: The RXSUBCOM LOAD parameters are not valid.
+REX0119E: The REXX queues are not ready.
+REX0120E: The data is too long or too short.
+REX0121E: There is no more storage for queues.
+REX0122E: %1 cannot be a queue name.
+REX0123E: The queue cannot be opened that way.
+REX0124E: There is no queue %1.
+REX0125E: The RXSUBCOM QUERY parameters are not valid.
+REX0126W: +++ Interactive trace.  Error%0
+REX0127E: The REXXC parameters are not valid.
+REX0128E: The output file must not be the input file.
+REX0129E: Usage: REXXC program [output] [/S]
+REX0130E: Without an output file REXXC only checks the program's syntax.
+REX0131E: The command is not valid.
+REX0132E: The command failed with a system error.
+REX0133?:
+REX0134?:
+REX0135?:
+REX0136?:
+REX0137?:
+REX0138?:
+REX0139?:
+REX0140?:
+REX0141?:
+REX0142?:
+REX0143?:
+REX0144?:
+REX0145?:
+REX0146?:
+REX0147?:
+REX0148?:
+REX0149?:
+REX0150?:
+REX0151?:
+REX0152?:
+REX0153?:
+REX0154?:
+REX0155?:
+REX0156?:
+REX0157?:
+REX0158?:
+REX0159?:
+REX0160?:
+REX0161?:
+REX0162?:
+REX0163?:
+REX0164?:
+REX0165?:
+REX0166?:
+REX0167?:
+REX0168?:
+REX0169?:
+REX0170?:
+REX0171?:
+REX0172?:
+REX0173?:
+REX0174?:
+REX0175?:
+REX0176?:
+REX0177?:
+REX0178?:
+REX0179?:
+REX0180?:
+REX0181?:
+REX0182?:
+REX0183?:
+REX0184?:
+REX0185?:
+REX0186?:
+REX0187?:
+REX0188?:
+REX0189?:
+REX0190?:
+REX0191?:
+REX0192?:
+REX0193?:
+REX0194?:
+REX0195?:
+REX0196?:
+REX0197?:
+REX0198?:
+REX0199?:
+REX0200W: The file "&1" cannot be read%0
+REX0201W: The &1 condition interrupted the program%0
+REX0202W: The comment that starts on line &1 is not closed%0
+REX0203W: A string in single quotes is not closed%0
+REX0204W: A string in double quotes is not closed%0
+REX0205W: The SELECT on line &1 needs a WHEN%0
+REX0206W: The SELECT on line &1 needs WHEN, OTHERWISE or END%0
+REX0207W: No WHEN of the SELECT was true and there is no OTHERWISE%0
+REX0208W: This THEN belongs to no IF or WHEN%0
+REX0209W: This ELSE belongs to no THEN%0
+REX0210W: This WHEN belongs to no SELECT%0
+REX0211W: This OTHERWISE belongs to no SELECT%0
+REX0212W: This END belongs to no DO or SELECT%0
+REX0213W: END "&1" does not name the control variable of the DO ("&2", line &3)%0
+REX0214W: The DO on line &2 has no control variable, so END cannot name one; found "&1"%0
+REX0215W: END cannot come straight after THEN%0
+REX0216W: END cannot come straight after ELSE%0
+REX0217W: The END of the SELECT on line &2 cannot name a symbol; found "&1"%0
+REX0218W: There is no more room on the control stack%0
+REX0219W: The character "&1" ('&2'X) is not allowed in a program%0
+REX0220W: The DO on line &1 has no END%0
+REX0221W: The SELECT on line &1 has no END%0
+REX0222W: The THEN on line &1 needs an instruction after it%0
+REX0223W: The ELSE on line &1 needs an instruction after it%0
+REX0224W: The OTHERWISE on line &1 has no END%0
+REX0225W: A blank is misplaced at position &1 of a hexadecimal string%0
+REX0226W: A blank is misplaced at position &1 of a binary string%0
+REX0227W: A hexadecimal string can hold only 0-9, a-f, A-F and blanks; found "&1"%0
+REX0228W: A binary string can hold only 0, 1 and blanks; found "&1"%0
+REX0229W: There is no label "&1"%0
+REX0230W: PROCEDURE must be the first instruction run after an internal CALL or function call%0
+REX0231W: INTERPRET cannot run PROCEDURE%0
+REX0232W: The IF on line &1 has no THEN%0
+REX0233W: The WHEN on line &1 has no THEN%0
+REX0234W: ADDRESS must be followed by a string or symbol%0
+REX0235W: CALL must be followed by a string or symbol%0
+REX0236W: NAME must be followed by a string or symbol%0
+REX0237W: SIGNAL must be followed by a string or symbol%0
+REX0238W: STREAM must be followed by a string or symbol%0
+REX0239W: TRACE must be followed by a string or symbol%0
+REX0240W: PARSE must be followed by a string or symbol%0
+REX0241W: ::CLASS must be followed by a string or symbol%0
+REX0242W: ::METHOD must be followed by a string or symbol%0
+REX0243W: ::ROUTINE must be followed by a string or symbol%0
+REX0244W: ::REQUIRES must be followed by a string or symbol%0
+REX0245W: EXTERNAL must be followed by a string or symbol%0
+REX0246W: METACLASS must be followed by a string or symbol%0
+REX0247W: SUBCLASS must be followed by a string or symbol%0
+REX0248W: INHERIT must be followed by a string or symbol%0
+REX0249W: "~" must be followed by a string or symbol%0
+REX0250W: The colon of a superclass override must be followed by a string or symbol%0
+REX0251W: DROP must be followed by a symbol%0
+REX0252W: EXPOSE must be followed by a symbol%0
+REX0253W: PARSE must be followed by a symbol here%0
+REX0254W: PARSE VAR must be followed by a symbol%0
+REX0255W: NUMERIC must be followed by DIGITS, FORM or FUZZ; found "&1"%0
+REX0256W: "(" of a variable reference must be followed by a symbol%0
+REX0257W: LEAVE must be followed by a symbol%0
+REX0258W: ITERATE must be followed by a symbol%0
+REX0259W: END must be followed by a symbol%0
+REX0260W: ON must be followed by a symbol%0
+REX0261W: OFF must be followed by a symbol%0
+REX0262W: USE ARG must be followed by a symbol%0
+REX0263W: RAISE must be followed by a symbol%0
+REX0264W: USER must be followed by a symbol%0
+REX0265W: "::" must be followed by a symbol%0
+REX0266W: The colon of a superclass override must be followed by a symbol%0
+REX0267W: Nothing can follow NOP; found "&1"%0
+REX0268W: Nothing can follow SELECT; found "&1"%0
+REX0269W: Nothing can follow the NAME; found "&1"%0
+REX0270W: Nothing can follow the condition name; found "&1"%0
+REX0271W: Nothing can follow the SIGNAL label; found "&1"%0
+REX0272W: Nothing can follow the TRACE setting; found "&1"%0
+REX0273W: Nothing can follow the LEAVE variable; found "&1"%0
+REX0274W: Nothing can follow the ITERATE variable; found "&1"%0
+REX0275W: Nothing can follow the END variable; found "&1"%0
+REX0276W: Nothing can follow NUMERIC FORM's setting; found "&1"%0
+REX0277W: Nothing can follow GUARD OFF; found "&1"%0
+REX0278W: The string "&1" ('&2'X) is not valid%0
+REX0279W: A double-byte character is not valid%0
+REX0280W: The data string "&1" ('&2'X) is not valid%0
+REX0281W: A TRACE letter must be one of A C E F I L N O R; found "&1"%0
+REX0282W: A number for TRACE is allowed only at an interactive trace pause%0
+REX0283W: CALL ON takes ERROR, FAILURE, HALT, NOTREADY, USER or ANY; found "&1"%0
+REX0284W: CALL OFF takes ERROR, FAILURE, HALT, NOTREADY, USER or ANY; found "&1"%0
+REX0285W: SIGNAL ON takes ERROR, FAILURE, HALT, LOSTDIGITS, NOTREADY, NOMETHOD, NOSTRING, NOVALUE, SYNTAX, USER or ANY; found "&1"%0
+REX0286W: SIGNAL OFF takes ERROR, FAILURE, HALT, LOSTDIGITS, NOTREADY, NOMETHOD, NOSTRING, NOVALUE, SYNTAX, USER or ANY; found "&1"%0
+REX0287W: NUMERIC takes DIGITS, FORM or FUZZ; found "&1"%0
+REX0288W: NUMERIC FORM takes SCIENTIFIC or ENGINEERING; found "&1"%0
+REX0289W: ::CLASS does not know the keyword "&1"%0
+REX0290W: ::METHOD does not know the keyword "&1"%0
+REX0291W: ::ROUTINE does not know the keyword "&1"%0
+REX0292W: ::REQUIRES does not know the keyword "&1"%0
+REX0293W: PROCEDURE can be followed only by EXPOSE; found "&1"%0
+REX0294W: The condition of CALL ON can be followed only by NAME; found "&1"%0
+REX0295W: The condition of SIGNAL ON can be followed only by NAME; found "&1"%0
+REX0296W: PARSE takes ARG, LINEIN, PULL, SOURCE, VALUE, VAR or VERSION; found "&1"%0
+REX0297W: USE must be followed by ARG; found "&1"%0
+REX0298W: RAISE takes ERROR, FAILURE, HALT, LOSTDIGITS, NOMETHOD, NOSTRING, NOTREADY, NOVALUE or SYNTAX; found "&1"%0
+REX0299W: RAISE does not know the keyword "&1"%0
+REX0300W: DESCRIPTION is given twice%0
+REX0301W: ADDITIONAL or ARRAY is given twice%0
+REX0302W: RETURN or EXIT is given twice%0
+REX0303W: GUARD ON or GUARD OFF can be followed only by WHEN; found "&1"%0
+REX0304W: The power operator (**) needs a whole number on its right; found "&1"%0
+REX0305W: The repetition count of a DO must be zero or a positive whole number; found "&1"%0
+REX0306W: FOR of a DO must be zero or a positive whole number; found "&1"%0
+REX0307W: A position in a PARSE template must be a whole number; found "&1"%0
+REX0308W: NUMERIC DIGITS must be a positive whole number; found "&1"%0
+REX0309W: NUMERIC FUZZ must be zero or a positive whole number; found "&1"%0
+REX0310W: A number for TRACE must be a whole number; found "&1"%0
+REX0311W: The result of % is not a whole number%0
+REX0312W: The result of // is not a whole number%0
+REX0313W: A DO cannot have both WHILE and UNTIL%0
+REX0314W: Nothing can follow FOREVER on a DO but WHILE or UNTIL; found "&1"%0
+REX0315W: LEAVE can be used only in a repetitive DO%0
+REX0316W: ITERATE can be used only in a repetitive DO%0
+REX0317W: LEAVE "&1" names no control variable of an active DO%0
+REX0318W: ITERATE "&1" names no control variable of an active DO%0
+REX0319W: An environment name can have at most &1 characters; found "&2"%0
+REX0320W: A name can have at most 250 characters: "&1"%0
+REX0321W: A string can have at most 250 characters: "&1"%0
+REX0322W: A hexadecimal string can have at most 250 characters: "&1"%0
+REX0323W: A binary string can have at most 250 characters: "&1"%0
+REX0324W: A number cannot be assigned to; found "&1"%0
+REX0325W: A variable cannot start with a digit; found "&1"%0
+REX0326W: A variable cannot start with a period; found "&1"%0
+REX0327W: NUMERIC DIGITS ("&1") must be larger than NUMERIC FUZZ ("&2")%0
+REX0328W: NUMERIC DIGITS ("&1") can be at most &2%0
+REX0329W: The value after ADDRESS VALUE is not valid%0
+REX0330W: The value after SIGNAL VALUE is not valid%0
+REX0331W: The value after TRACE VALUE is not valid%0
+REX0332W: The value after RAISE SYNTAX is not valid%0
+REX0333W: The expression after IF must be 0 or 1; found "&1"%0
+REX0334W: The expression after WHEN must be 0 or 1; found "&1"%0
+REX0335W: The expression after WHILE must be 0 or 1; found "&1"%0
+REX0336W: The expression after UNTIL must be 0 or 1; found "&1"%0
+REX0337W: The value left of "&1" must be 0 or 1; found "&2"%0
+REX0338W: A logical value must be 0 or 1; found "&1"%0
+REX0339W: The expression after GUARD must be 0 or 1; found "&1"%0
+REX0340W: The expression is not valid at "&1"%0
+REX0341W: The prefix operator "&1" needs a term after it%0
+REX0342W: IF needs an expression%0
+REX0343W: WHEN needs an expression%0
+REX0344W: The control variable of a DO needs a first value%0
+REX0345W: BY needs an expression%0
+REX0346W: TO needs an expression%0
+REX0347W: FOR needs an expression%0
+REX0348W: WHILE needs an expression%0
+REX0349W: UNTIL needs an expression%0
+REX0350W: OVER needs an expression%0
+REX0351W: INTERPRET needs an expression%0
+REX0352W: OPTIONS needs an expression%0
+REX0353W: ADDRESS VALUE needs an expression%0
+REX0354W: SIGNAL VALUE needs an expression%0
+REX0355W: TRACE VALUE needs an expression%0
+REX0356W: NUMERIC FORM VALUE needs an expression%0
+REX0357W: The assignment needs an expression%0
+REX0358W: The operator "&1" needs a term after it%0
+REX0359W: GUARD needs an expression%0
+REX0360W: DESCRIPTION of RAISE needs an expression%0
+REX0361W: ADDITIONAL of RAISE needs an expression%0
+REX0362W: ARRAY needs a "(" with its expressions%0
+REX0363W: The "(" at position &1 of line &2 is not closed%0
+REX0364W: The "[" at position &1 of line &2 is not closed%0
+REX0365W: A "," is not expected here%0
+REX0366W: A ")" closes nothing here%0
+REX0367W: A "]" is not expected here%0
+REX0368W: The PARSE template is not valid at "&1"%0
+REX0369W: The PARSE position is not valid at "&1"%0
+REX0370W: PARSE VALUE needs WITH%0
+REX0371W: A relative PARSE position is missing%0
+REX0372W: The external routine "&1" failed%0
+REX0373W: &1 gave a result longer than &2: "&3"%0
+REX0374W: &1 needs at least &2 arguments%0
+REX0375W: &1 takes at most &2 arguments%0
+REX0376W: &1 needs argument &2%0
+REX0377W: Argument &2 of &1 must be a number; found "&3"%0
+REX0378W: Argument &2 of &1 must be a whole number; found "&3"%0
+REX0379W: Argument &2 of &1 must be zero or positive; found "&3"%0
+REX0380W: Argument &2 of &1 must be positive; found "&3"%0
+REX0381W: Argument &2 of &1 can be at most 999,999,999%0
+REX0382W: Argument &2 of &1 must be from 0 to 99; found "&3"%0
+REX0383W: Argument &2 of &1 cannot be empty%0
+REX0384W: Argument &2 of &1 must be one character or empty; found "&3"%0
+REX0385W: Argument &2 of &1 must be one character; found "&3"%0
+REX0386W: Argument &2 of &1 must be a binary string; found "&3"%0
+REX0387W: Argument &2 of &1 must be a hexadecimal string; found "&3"%0
+REX0388W: Argument &2 of &1 must be a valid symbol; found "&3"%0
+REX0389W: Argument &2 of &1 must be one of &3; found "&4"%0
+REX0390W: A TRACE letter must be one of A C E F I L N O R; found "&1"%0
+REX0391W: The first argument of RANDOM ("&1") is larger than the second ("&2")%0
+REX0392W: SOURCELINE's argument ("&1") is beyond the program's last line (&2)%0
+REX0393W: X2D cannot make a whole number of "&1"%0
+REX0394W: Argument 2 of &1, "&2", is not in the format argument 3 names, "&3"%0
+REX0395W: &1 cannot convert to the format "&2"%0
+REX0396W: The range of RANDOM ("&1" to "&2") can be at most 100000%0
+REX0397W: Argument 1 of &1 must name a stream; found "&2"%0
+REX0398W: A transient stream has no position%0
+REX0399W: Argument 2 of SEND ("&1") names no superclass%0
+REX0400W: Argument &2 of &1 must be a one-dimensional array; found "&3"%0
+REX0401W: Argument &2 of &1 must have a string value; found "&3"%0
+REX0402W: VALUE does not know the selector "&1"%0
+REX0403?:
+REX0404W: "&1" is not a number and cannot be used in arithmetic%0
+REX0405W: "&1" is not a number and cannot have a prefix operator%0
+REX0406W: An exponent can have at most &1 digits; found "&2"%0
+REX0407W: TO of a DO must be a number; found "&1"%0
+REX0408W: BY of a DO must be a number; found "&1"%0
+REX0409W: The control variable of a DO must start at a number; found "&1"%0
+REX0410W: The number of RAISE SYNTAX must be a number; found "&1"%0
+REX0411W: The result is too large at "&1&2&3"%0
+REX0412W: The result is too small at "&1&2&3"%0
+REX0413W: A number cannot be divided by zero%0
+REX0414W: The exponent ("&1") has more than &2 digits%0
+REX0415W: The exponent ("&1") has more than &2 digits%0
+REX0416W: Zero cannot be raised to a negative power%0
+REX0417W: There is no routine called "&1"%0
+REX0418W: There is no program "&1" for ::REQUIRES%0
+REX0419W: The function "&1" returned no data%0
+REX0420W: "&1" was called as a function and must RETURN data%0
+REX0421W: A variable reference list has the extra token "&1"; ")" was expected%0
+REX0422W: A variable reference has no ")"%0
+REX0423W: A USE ARG reference has the extra token "&1"; "," or the end was expected%0
+REX0424W: INTERPRET cannot have labels; found "&1"%0
+REX0425W: A system service failed: &1%0
+REX0426W: The external class "&1" was not found%0
+REX0427W: The external method "&1" was not found%0
+REX0428W: The external routine "&1" was not found%0
+REX0429W: The message "&1" gave no result%0
+REX0430?:
+REX0431W: The method needs at least &1 arguments%0
+REX0432W: The method takes at most &1 arguments%0
+REX0433W: The method needs argument &1%0
+REX0434W: Argument &1 of the method must be a number; found "&2"%0
+REX0435W: Argument &1 of the method must be a whole number; found "&2"%0
+REX0436W: Argument &1 of the method must be zero or a positive whole number; found "&2"%0
+REX0437W: Argument &1 of the method must be a positive whole number; found "&2"%0
+REX0438W: Argument &1 of the method can be at most &2; found "&3"%0
+REX0439W: Argument &1 of the method must be from 0 to 99; found "&2"%0
+REX0440W: Argument &1 of the method cannot be empty%0
+REX0441W: Argument &1 of the method must be a hexadecimal string; found "&2"%0
+REX0442W: Argument &1 of the method must be a valid symbol; found "&2"%0
+REX0443W: Argument &1 of the method must be one of &2; found "&3"%0
+REX0444W: The method's option must be one of &1; found "&2"%0
+REX0445W: Argument &1 of the method must have a string value%0
+REX0446W: There is no method "&1"%0
+REX0447W: "&1" is not an index of the list%0
+REX0448W: "&1" is not a position in the array%0
+REX0449W: An operator needs a second operand%0
+REX0450W: The pad or character argument is not valid; found "&1"%0
+REX0451W: The length argument is not valid; found "&1"%0
+REX0452W: The position argument is not valid; found "&1"%0
+REX0453W: The array needs &1 subscripts%0
+REX0454W: The array takes only &1 subscripts%0
+REX0455W: A negative value needs a length to be converted%0
+REX0456W: D2X needs a whole number; found "&1"%0
+REX0457W: D2C needs a whole number; found "&1"%0
+REX0458W: A blank is misplaced at position &1 of a hexadecimal string%0
+REX0459W: A blank is misplaced at position &1 of a binary string%0
+REX0460W: A hexadecimal string can hold only 0-9, a-f, A-F and blanks; found "&1"%0
+REX0461W: A binary string can hold only 0, 1 and blanks; found "&1"%0
+REX0462W: The result of X2D is not a whole number with NUMERIC DIGITS &1%0
+REX0463W: The result of C2D is not a whole number with NUMERIC DIGITS &1%0
+REX0464W: The supplier has no more items%0
+REX0465W: Argument &1 of the method must have a string value%0
+REX0466W: Argument &1 of the method must be a one-dimensional array%0
+REX0467W: The exponent "&1" does not fit in &2 places%0
+REX0468W: The integer part "&1" does not fit in &2 places%0
+REX0469W: The target of &1 must be a number; found "&2"%0
+REX0470W: Argument &1 of the method must be a message object%0
+REX0471W: The message array needs argument &1%0
+REX0472W: A message array must be a one-dimensional array of 2 items%0
+REX0473W: SECTION works only on one-dimensional arrays%0
+REX0474W: Argument &1 of the method must be an instance of the &2 class%0
+REX0475W: An index-only collection needs the same object as index and item%0
+REX0476W: The object "&1" has no method for the message "&2"%0
+REX0477W: The SOM object "&1" is gone%0
+REX0478W: The object "&1" cannot be made a double-float value%0
+REX0479W: The library "&1" cannot be loaded%0
+REX0480W: The program ended abnormally%0
+REX0481W: The object "&1" cannot take the message "&2": it waits for "&3"%0
+REX0482W: An object reference is not valid%0
+REX0483W: An object of the type "&1" is needed%0
+REX0484W: There is no metaclass "&1"%0
+REX0485W: There is no class "&1"%0
+REX0486W: The classes of the program "&1" inherit from each other in a circle%0
+REX0487W: There is no SOM class "&1"%0
+REX0488W: The object "&1" cannot be made a one-dimensional array%0
+REX0489W: The object "&1" has no string value%0
+REX0490W: A message object can be sent or started only once%0
+REX0491W: The message object "&1" failed in the message "&2"%0
+REX0492W: RAISE OBJECT needs a condition object; found "&1"%0
+REX0493W: There is no trapped condition to propagate%0
+REX0494W: The object "&1" cannot be made a method%0
+REX0495W: The "&1" information of the method "&2" cannot be found%0
+REX0496W: The method "&1" of the class "&2" has no description%0
+REX0497W: SOM methods cannot take arguments of the type "&1" (argument &2)%0
+REX0498W: SOM methods cannot return the type "&1"%0
+REX0499W: A method can have at most &1 OUT or INOUT arguments%0
+REX0500W: A method can REPLY only once%0
+REX0501W: RETURN cannot give a result after REPLY%0
+REX0502W: EXIT cannot give a result after REPLY%0
+REX0503W: Only methods of the target object can override the method search%0
+REX0504W: The ADDITIONAL information of a SYNTAX condition must be a one-dimensional array%0
+REX0505W: RAISE SYNTAX does not know the error number "&1"%0
+REX0506W: There is already a ::CLASS directive for this class%0
+REX0507W: There is already a ::METHOD directive for this method%0
+REX0508W: There is already a ::ROUTINE directive for this routine%0
+REX0509W: There is already a ::REQUIRES directive for this program%0
+REX0510W: ::METHOD with CLASS needs a ::CLASS directive before it%0
+REX0511W: "&1" cannot be a metaclass%0
+REX0512W: EXPOSE must be the first instruction of a method%0
+REX0513W: INTERPRET cannot run EXPOSE%0
+REX0514W: GUARD must come first, or straight after EXPOSE or USE%0
+REX0515W: GUARD can be used only in a method%0
+REX0516W: INTERPRET cannot run GUARD%0
+REX0517W: GUARD WHEN must use an exposed variable%0
+REX0518W: INTERPRET cannot run directives%0
+REX0519W: INTERPRET cannot run USE%0
+REX0520W: The directive is not known%0
+REX0521W: "&1" is not a valid external name%0
+REX0522W: USE ARG needs a "," between names; found "&1"%0
+REX0523W: REPLY can be used only in a method%0
+REX0524W: Error%0
+REX0525W: running%0
+REX0526W: line%0
+REX0527?:
+REX0528?:
+REX0529W: The interpreter could not be started%0
+REX0530W: GUARD must be followed by ON or OFF; found "&1"%0
+REX0531W: "&1" is not a time an alarm can be set for%0
+REX0532W: The class "&1" is not a mixin class and cannot be inherited%0
+REX0533W: The class "&1" is not a subclass of the base class "&3" of "&2"%0
+REX0534W: The program "&1" was not found%0
+REX0535W: The class "&1" cannot inherit itself, a superclass or a subclass ("&2")%0
+REX0536W: The class "&1" did not inherit the class "&2"%0
+REX0537W: A line of the method's source is not valid%0
+REX0538W: ::REQUIRES must come before the other directives%0
+REX0539W: Argument &1 of the method must be a string or an array%0
+REX0540W: Argument &1 of the method cannot be converted to &2%0
+REX0541W: The method "&1" works only on one-dimensional arrays%0
+REX0542W: Argument &1 of the method is an array with items that are not strings%0
+REX0543W: Item &1 of the array must be a string%0
+REX0544W: Item &1 of the array must be a subclass of the target%0
+REX0545W: DO cannot have &1 twice%0
+REX0546W: An array can hold at most 99,999,999 items%0
+REX0547W: The output file "&1" cannot be written%0
+REX0548W: The arguments of FORWARD must be a one-dimensional array%0
+REX0549W: FORWARD does not know the keyword "&1"%0
+REX0550W: TO is given twice%0
+REX0551W: ARGUMENTS or ARRAY is given twice%0
+REX0552W: RETURN or CONTINUE is given twice%0
+REX0553W: CLASS is given twice%0
+REX0554W: MESSAGE is given twice%0
+REX0555W: TO of FORWARD needs an expression%0
+REX0556W: ARGUMENTS of FORWARD needs an expression%0
+REX0557W: MESSAGE of FORWARD needs an expression%0
+REX0558W: CLASS of FORWARD needs an expression%0
+REX0559W: FORWARD can be used only in a method%0
+REX0560W: This version of REXX cannot run the program "&1"%0
+REX0561W: INTERPRET cannot run REPLY%0
+REX0562W: INTERPRET cannot run FORWARD%0
+REX0563W: An authorization result must be 0 or 1; found "&1"%0
+REX0564W: Not authorized: &1%0
+REX0565W: An ATTRIBUTE method's name must be a variable name; found "&1"%0
+REX0566W: MIXINCLASS must be followed by a string or symbol%0
+REX0567W: The DSOM server of the class &1 cannot be found%0
+REX0568W: The event "&1" has too many parameters%0
+REX0569W: The OSA event "&1" cannot be made%0
+REX0570W: The direct parameter of the OSA event "&1" cannot be made%0
+REX0571W: The event information cannot be read%0
+REX0572W: The application "&1" cannot be started%0
+REX0573W: "&1" is not a parameter of the OSA event "&2"%0
+REX0574W: A parameter of the OSA event "&1" cannot be made%0
+REX0575W: The OSA event "&1" cannot be sent%0
+REX0576W: The result of the OSA event "&1" cannot be handled%0
+REX0577W: The result of an OSA event cannot be made a REXX object%0
+REX0578W: "&1" is not a direct parameter of the OSA event "&2"%0
+REX0579W: The key form of an object specifier is not valid%0
+REX0580E: The external class has too many parameters%0
+REX0581W: Concurrency is not available%0
+REX0582W: The key form "&1" cannot take this parameter type%0
+REX0583E: The external class needs a valid class name%0
+REX0584E: "&1" is not a known class server%0
+REX0585E: The &1 class server is not installed%0
+REX0586E: Argument &2 of &1 must be one character that is not a letter or digit, or empty; found "&3"%0
+REX0587E: Argument &2 of &1, "&3", does not fit the separator of argument &4%0
+REX0588E: &1 cannot be used with QUEUE:%0
