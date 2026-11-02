@@ -58,7 +58,7 @@ impl Interp<'_> {
                 // REPLY: the sender goes on with the value while the method
                 // goes on on another activity; without one, the method
                 // finishes first
-                if main && crate::oo::reply_elsewhere(self, f, code, pc + 1, extra, &ctl) {
+                if main && (self.ops().reply_elsewhere)(self, f, code, pc + 1, extra, &ctl) {
                     return Ok(Flow::Return(v));
                 }
                 if let Some(a) = &f.act {
@@ -404,7 +404,7 @@ impl Interp<'_> {
             Instr::Nop | Instr::Label(_) | Instr::Then => Ok(Next::Go),
             Instr::Error(e) => Err(e.clone()),
             Instr::Message(_) | Instr::AssignMsg(..) | Instr::Use(_) | Instr::Expose(_) | Instr::Guard(..) | Instr::Reply(_) | Instr::Raise(_) | Instr::Forward(_) => {
-                crate::oo::exec_oo(self, f, c, lvl)
+                (self.ops().exec_oo)(self, f, c, lvl)
             }
             Instr::Say(e) => {
                 let v = match e {
@@ -915,7 +915,7 @@ impl Interp<'_> {
                 }
                 if let Some((v, e)) = &spec.over {
                     let coll = self.eval_top_v(f, e, elvl)?;
-                    let items = crate::oo::over_items(self, f, &coll)?;
+                    let items = (self.ops().over_items)(self, f, &coll)?;
                     ctl.push(Ctl::Do { idx: pc, var: Some(v.clone()), to: None, by: Num::zero(), for_left: None, count: None, simple: false, over: Some((items, 0)) });
                     return self.do_over_next(f, ctl, spec, end, elvl);
                 }

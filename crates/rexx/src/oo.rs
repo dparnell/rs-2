@@ -33,7 +33,49 @@ pub struct Found {
     pub class_side: bool,
 }
 
+/// What the interpreter calls of Object REXX, through the world (so that
+/// a classic REXX that never makes one does not link it).
+pub struct Ops {
+    pub load_package: fn(&[u8], &[u8]) -> Result<Rc<Package>, LoadErr>,
+    pub install_package: fn(&mut Interp<'_>, &mut Frame, &Rc<Package>) -> R<()>,
+    pub obj_string: fn(&mut Interp<'_>, &mut Frame, &ObjRef) -> R<Val>,
+    pub stem_object: fn(&mut Interp<'_>, &[u8]) -> Value,
+    pub unary_op: fn(&mut Interp<'_>, &mut Frame, UnOp, &Value, u32) -> R<Option<Value>>,
+    pub binary_op: fn(&mut Interp<'_>, &mut Frame, BinOp, Value, Value, u32) -> R<Value>,
+    pub eval_oo: fn(&mut Interp<'_>, &mut Frame, &Expr, u32) -> R<Value>,
+    pub call_builtin_oo: fn(&mut Interp<'_>, &mut Frame, &[u8], &[Option<Value>]) -> Option<R<Option<Value>>>,
+    pub oo_bif: fn(&[u8], &[Option<Val>]) -> Option<R<Val>>,
+    pub call_package_routine: fn(&mut Interp<'_>, &mut Frame, &[u8], Vec<Option<Value>>, bool, u32) -> Option<R<Option<Value>>>,
+    pub(crate) exec_oo: fn(&mut Interp<'_>, &mut Frame, &Clause, u32) -> R<Next>,
+    pub over_items: fn(&mut Interp<'_>, &mut Frame, &Value) -> R<Vec<Value>>,
+    pub(crate) reply_elsewhere: fn(&mut Interp<'_>, &Frame, &Rc<Program>, usize, u32, &[Ctl]) -> bool,
+    pub secondary: fn(u32) -> Option<&'static [u8]>,
+}
+
+fn install(it: &mut Interp<'_>, f: &mut Frame, p: &Rc<Package>) -> R<()> {
+    it.install_package(f, p)
+}
+
+pub static OPS: Ops = Ops {
+    load_package,
+    install_package: install,
+    obj_string,
+    stem_object,
+    unary_op,
+    binary_op,
+    eval_oo,
+    call_builtin_oo,
+    oo_bif,
+    call_package_routine,
+    exec_oo,
+    over_items,
+    reply_elsewhere,
+    secondary: crate::classes::secondary,
+};
+
 pub struct World {
+    /// The interpreter's way into Object REXX.
+    pub ops: &'static Ops,
     next: Cell<u64>,
     pub nil: ObjRef,
     /// The built-in classes, by `Builtin as usize`.
@@ -115,6 +157,7 @@ impl World {
         let local = raw_obj(next, Some(dir.clone()), Data::Directory(DirData::default()));
         next += 1;
         let w = World {
+            ops: &OPS,
             next: Cell::new(next),
             nil,
             classes,

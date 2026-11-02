@@ -432,6 +432,11 @@ impl<'h> Interp<'h> {
         self.w.is_some()
     }
 
+    /// Object REXX's entry points (only reached with Object REXX).
+    pub(crate) fn ops(&self) -> &'static crate::oo::Ops {
+        self.w.as_ref().expect("Object REXX").ops
+    }
+
     /// Run a program. Returns its result (EXIT/RETURN value) or the
     /// negative REXX error number it ended with.
     pub fn run_program(
@@ -471,7 +476,7 @@ impl<'h> Interp<'h> {
         env: &[u8],
     ) -> Result<Option<Value>, i32> {
         let top = self.depth == 0;
-        let parsed = if self.oo() { crate::oo::load_package(src, name).map(|p| (p.main.clone(), Some(p))) } else { crate::parse::program(src).map(|p| (Rc::new(p), None)) };
+        let parsed = if self.oo() { (self.ops().load_package)(src, name).map(|p| (p.main.clone(), Some(p))) } else { crate::parse::program(src).map(|p| (Rc::new(p), None)) };
         let (prog, pkg) = match parsed {
             Ok(p) => p,
             Err((e, line)) => {
@@ -520,7 +525,7 @@ impl<'h> Interp<'h> {
         // Object REXX: ::REQUIRES and ::CLASS directives are done first
         let mut r = Ok(Flow::Normal);
         if let Some(p) = &pkg {
-            if let Err(e) = self.install_package(&mut f, p) {
+            if let Err(e) = (self.ops().install_package)(self, &mut f, p) {
                 r = Err(e);
             }
         }
@@ -803,7 +808,7 @@ impl<'h> Interp<'h> {
     pub fn to_str(&mut self, f: &mut Frame, v: &Value) -> R<Val> {
         match v {
             Value::S(s) => Ok(s.clone()),
-            Value::O(o) => crate::oo::obj_string(self, f, o),
+            Value::O(o) => (self.ops().obj_string)(self, f, o),
         }
     }
 
@@ -818,7 +823,7 @@ impl<'h> Interp<'h> {
             Expr::Var(v) => {
                 if let (VarRef::Stem(n), true) = (v, self.oo()) {
                     // Object REXX: a stem is its stem object
-                    return Ok(crate::oo::stem_object(self, n));
+                    return Ok((self.ops().stem_object)(self, n));
                 }
                 let (val, name) = self.get_var_v(v);
                 if self.trace_int(f) {
@@ -862,7 +867,7 @@ impl<'h> Interp<'h> {
             Expr::Un(op, x) => {
                 let v = self.eval_v(f, x, lvl)?;
                 if let Value::O(_) = &v {
-                    if let Some(r) = crate::oo::unary_op(self, f, *op, &v, lvl)? {
+                    if let Some(r) = (self.ops().unary_op)(self, f, *op, &v, lvl)? {
                         return Ok(r);
                     }
                 }
@@ -898,7 +903,7 @@ impl<'h> Interp<'h> {
                         Err(e) if self.oo() => return Err(self.detail_arith(e, x, y, *op)),
                         Err(e) => return Err(e),
                     },
-                    _ => crate::oo::binary_op(self, f, *op, x, y, lvl)?,
+                    _ => (self.ops().binary_op)(self, f, *op, x, y, lvl)?,
                 };
                 if self.trace_int(f) {
                     let s = r.fast_string();
@@ -906,7 +911,7 @@ impl<'h> Interp<'h> {
                 }
                 Ok(r)
             }
-            _ => crate::oo::eval_oo(self, f, e, lvl),
+            _ => (self.ops().eval_oo)(self, f, e, lvl),
         }
     }
 
@@ -915,11 +920,11 @@ impl<'h> Interp<'h> {
         match e {
             Err::Syntax(41) => {
                 let bad = if Num::parse(x).is_none() { x } else { y };
-                self.err_msg = crate::oo::msg_subst(crate::classes::secondary(41001).unwrap(), &[bad]);
+                self.err_msg = crate::oo::msg_subst((self.ops().secondary)(41001).unwrap(), &[bad]);
                 Err::Syntax(41001)
             }
             Err::Syntax(42) if matches!(op, BinOp::Div | BinOp::IDiv | BinOp::Rem) && Num::parse(y).is_some_and(|n| n.is_zero()) => {
-                self.err_msg = crate::classes::secondary(42003).unwrap().to_vec();
+                self.err_msg = (self.ops().secondary)(42003).unwrap().to_vec();
                 Err::Syntax(42003)
             }
             Err::Syntax(34) => {
@@ -976,7 +981,7 @@ impl<'h> Interp<'h> {
             }
         }
         if self.oo() {
-            if let Some(r) = crate::oo::call_builtin_oo(self, f, name, &args) {
+            if let Some(r) = (self.ops().call_builtin_oo)(self, f, name, &args) {
                 return r;
             }
         }
@@ -989,7 +994,7 @@ impl<'h> Interp<'h> {
             });
         }
         if self.oo() {
-            if let Some(r) = crate::oo::oo_bif(name, &sargs) {
+            if let Some(r) = (self.ops().oo_bif)(name, &sargs) {
                 return r.map(|v| Some(Value::S(v)));
             }
         }
@@ -997,7 +1002,7 @@ impl<'h> Interp<'h> {
             return r.map(|v| Some(Value::S(v)));
         }
         if self.oo() {
-            if let Some(r) = crate::oo::call_package_routine(self, f, name, args.clone(), func, lvl) {
+            if let Some(r) = (self.ops().call_package_routine)(self, f, name, args.clone(), func, lvl) {
                 return r;
             }
         }
@@ -1007,7 +1012,7 @@ impl<'h> Interp<'h> {
         match ext {
             External::Value(v) => Ok(v.map(Value::S)),
             External::NotFound if self.oo() => {
-                self.err_msg = crate::oo::msg_subst(crate::classes::secondary(43001).unwrap(), &[name]);
+                self.err_msg = crate::oo::msg_subst((self.ops().secondary)(43001).unwrap(), &[name]);
                 Err(Err::Syntax(43001))
             }
             External::NotFound => Err(Err::new(43)),
