@@ -167,6 +167,7 @@ version = "0.1.0"
 dependencies = [
  "mci",
  "midi",
+ "mmavi",
  "mmfmt",
  "os2",
 ]
@@ -174,6 +175,13 @@ dependencies = [
 [[package]]
 name = "midi"
 version = "0.1.0"
+
+[[package]]
+name = "mmavi"
+version = "0.1.0"
+dependencies = [
+ "mmimage",
+]
 
 [[package]]
 name = "mmfmt"

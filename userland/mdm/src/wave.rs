@@ -134,12 +134,19 @@ impl Wave {
         Ok(w)
     }
 
-    /// Read a WAV file as the element.
+    /// Read a WAV file (or AU, SND, VOC, AIFF, 8SVX) as the element.
     pub fn load(&mut self, name: &str) -> Result<(), u32> {
         let file = read_file(name).ok_or(MCIERR_FILE_NOT_FOUND)?;
-        let wav = mmfmt::wav::parse(&file).map_err(|_| MCIERR_INVALID_MEDIA_TYPE)?;
-        let f = wav.format;
-        let raw = wav.data(&file);
+        // Other sound files (AU, SND, VOC, AIFF, 8SVX) as their I/O
+        // procedures present them: PCM.
+        let other;
+        let (f, raw) = match mmfmt::wav::parse(&file) {
+            Ok(wav) => (wav.format, wav.data(&file)),
+            Err(_) => {
+                other = mmfmt::sound::parse(&file).map_err(|_| MCIERR_INVALID_MEDIA_TYPE)?;
+                (other.format, &other.data[..])
+            }
+        };
         let (fmt, pcm) = if f.is_plain_pcm() {
             (f, raw.to_vec())
         } else {

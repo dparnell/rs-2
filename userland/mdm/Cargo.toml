@@ -13,4 +13,5 @@ path = "src/lib.rs"
 os2 = { path = "../os2" }
 mci = { path = "../../crates/mci" }
 mmfmt = { path = "../../crates/mmfmt" }
+mmavi = { path = "../../crates/mmavi" }
 midi = { path = "../../crates/midi" }
