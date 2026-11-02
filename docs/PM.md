@@ -2567,7 +2567,71 @@ notebook's pages (rs2 has one dialog).
 
 ### OS/2 Chess (OS2CHESS.EXE)
 
-(to come)
+`userland/os2chess`, in `OS2\APPS`. As IBM's OS/2 Chess (its resources
+and binary studied): it starts with Set Players (Human or Computer for
+each side, names; Network is greyed), then shows the board in a 3-D
+view; IBM's menus and command ids (Game: New, Load, Save, Delete,
+Print; Moves: Take back, Move status, Game record, Valid moves,
+Captured pieces; View: Rotate 3-D board, Flip board, Label board;
+Options: Timer, Keyboard input, Set players, Set position, Settings,
+Save settings; Network; Help: Contents, Index, General, Keys, Using,
+Product information), its Ctrl accelerators, the board's pop-up menu
+(button 2: Game, Moves, Label board, Show possible moves), its dialog
+ids and help panel numbers (OS2CHESS.HLP), and its messages ("Check!",
+"Checkmate!!!  White wins!", the three draw rules, "Invalid move:"
+with the reason: wrong piece colour, own piece, jumping over a piece,
+king in check or put in check, castling rules).
+
+- **Rules and computer** (`engine.rs`, rs2's own): a mailbox board
+  with Zobrist hashes, pseudo-legal moves filtered by a king-safety
+  check (castling through check, en passant, the four promotions),
+  checkmate, stalemate, 50 moves, threefold repetition and too little
+  material; long algebraic notation (`Ng1-f3`, `e4xd5`, `O-O`,
+  `e7-e8=Q`, `+`, `#`). The computer searches on its own thread
+  (alpha-beta with quiescence, a transposition table, killer moves,
+  iterative deepening under a time limit, answer posted to the window;
+  New, Take back and Load drop a search in progress). The five levels
+  of Set Computer Playing Level are 1 to 8 plies and 0.4 to 12 seconds
+  (Beginner sometimes plays a random move); "Use book openings" follows
+  a few standard openings of its own.
+- **The board** (`draw.rs`): a perspective view whose projection turns
+  with View > Rotate 3-D board (a scroll bar; Default), flipped, with
+  labels; Settings switches to a flat 2-D board. Pieces are rs2's own
+  outlines drawn with GPI areas (no bitmaps) in one of four colour
+  schemes; in 3-D the board is painted far to near and a click on a
+  piece's shape picks it up (it covers the squares behind it). Drawn
+  off screen (a memory PS) and copied.
+- **Dialogs**: Set Players and Set Computer Playing Level, Load Game /
+  Delete Game (the saved games with players and date), Pawn
+  Promotion, Player to Move (after Set position, which puts pieces
+  with a pop-up menu per square and checks the kings), Valid Moves
+  (Move plays the one chosen), Captured Pieces, Rotate Board, and the
+  modeless Game Record (White and Black columns, kept up to date),
+  Move Status (the computer's thinking time, then positions searched
+  and depth), Time Elapsed (each side's clock) and Keyboard (From/To
+  squares). Settings is one dialog (warnings, show possible moves,
+  2-D/3-D, colours) where IBM's has a notebook with sound and
+  background bitmap pages.
+- **Files**: Game > Save writes the game into its file or a new
+  `GAMEnnnn.PMC` in the current directory (the program object starts
+  it in `\OS2\APPS`), in rs2's own text format (`RS2 OS/2 Chess game
+  1`, the players, date, start position as FEN, the moves as
+  coordinates); IBM's binary `.PMC` files are not read. Print draws
+  the board and the record on the default printer (a PM_Q_STD queued
+  DC; not tried on a printer yet). Settings (players, levels, book, view, angle, labels, colours,
+  warnings, window position) are in OS2.INI under `OS2CHESS`, written
+  by Save settings.
+- **Not there**: network play (rs2 has no partner protocol for it),
+  sounds, the opening movie, animation of moving pieces, a background
+  bitmap, IBM's piece set DLLs.
+
+`OS2CHESS /SELFTEST` checks the engine: perft node counts from the
+start position (depths 3 and 4) and three standard test positions,
+make/unmake leaving the position as it was, mate in one and a back-rank
+mate found by the search, checkmate, stalemate, insufficient material,
+threefold repetition, en passant, castling and promotion moves, a book
+move (`[os2chess] os2chess selftest done: 0 failure(s)` in QEMU; the
+start position's depth 4, 197281 nodes, takes about 0.13 s).
 
 ## Installing OS/2's applications (APPINST.EXE)
 

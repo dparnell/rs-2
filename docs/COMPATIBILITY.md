@@ -324,7 +324,7 @@ copied from the CD.
 
 | `OS2\APPS\MAHJONGG.EXE` | Mahjongg | play, IBM's menus/keys, numbered and solvable deals, hints, take back, replay, auto play, cheat, edit mode, `.MAH` files read and written (IBM's load), MAHJONGG.INI settings, own tiles and layouts, help; no sounds, tile set DLLs or background bitmaps | `MAHJONGG /SELFTEST` (33 checks), QEMU screenshots: play, hints, auto play to a won game, settings, edit mode, help |
 
-| `OS2\APPS\OS2CHESS.EXE` | OS/2 Chess | (to come) | |
+| `OS2\APPS\OS2CHESS.EXE` | OS/2 Chess | 3-D (rotatable) and 2-D boards, human or computer for each side (five levels, book openings), all rules and draws, IBM's menus, dialogs, messages and help panels, save/load (rs2's own `.PMC` text format), printing (not tried on a printer); no network play or sounds | `OS2CHESS /SELFTEST` (perft, mates, draw rules) in QEMU; screenshots of play by mouse and keyboard, computer against computer to checkmate, save and load, Set position, Rotate, help |
 
 ## SOM class libraries
 
