@@ -869,8 +869,8 @@ fn program_list() {
 /// desktop is there, then runs the commands against the running shell:
 /// `OPEN id view` (WinOpenObject: 0 default, 2 settings, 1 contents),
 /// `SET id setup` (WinSetObjectData), `LOCK` (WinLockupSystem), `UNLOCK
-/// password` (WinUnlockSystem), `SLEEP n` (seconds). Then it waits
-/// for PMSHELL to end.
+/// password` (WinUnlockSystem), `SLEEP n` (seconds), `RUN program
+/// args` (DosExecPgm, waiting for it). Then it waits for PMSHELL to end.
 fn shell(args: &[u8]) -> u32 {
     let rest = args.trim_ascii_start();
     let rest = &rest[rest.iter().position(|&c| c == b' ').unwrap_or(rest.len())..];
@@ -935,6 +935,18 @@ fn shell(args: &[u8]) -> u32 {
                 println!("wpstest: create {} {}: {:#x}", s(arg(1)), s(arg(2)), h);
             }
             b"MMPARTS" => mmparts(),
+            // RUN program arguments: runs a program and waits for it (a
+            // REXX procedure that scripts the shell: CMD.EXE /C X.CMD).
+            b"RUN" => {
+                let prog = z(arg(1));
+                let mut a: Vec<u8> = arg(1).to_vec();
+                a.push(0);
+                a.extend_from_slice(&w.get(2..).unwrap_or(&[]).join(&b' '));
+                a.extend_from_slice(b"\0\0");
+                let mut r = ResultCodes { code_terminate: 0, code_result: 0 };
+                let rc = unsafe { DosExecPgm(core::ptr::null_mut(), 0, 0, a.as_ptr(), core::ptr::null(), &mut r, prog.as_ptr()) };
+                println!("wpstest: run {}: rc {} result {}", s(arg(1)), rc, r.code_result);
+            }
             b"LOCK" => println!("wpstest: WinLockupSystem: {}", unsafe { WinLockupSystem(0) }),
             b"UNLOCK" => {
                 let p = z(arg(1));

@@ -48,6 +48,29 @@ pub fn deallocate(cls: usize, mem: usize) {
     crate::call_cm(cls, cm::DEALLOCATE, &[cls as u32, mem as u32]);
 }
 
+/// Put the method table into new instance memory, as IBM's SOM does:
+/// directly for instances of SOMClass itself, otherwise through the
+/// class's somRenewNoInitNoZero, which a metaclass may override to give
+/// another object (SOMIR's M_Repository gives the shared repository).
+unsafe fn load_mtab(cls: usize, c: &Class, mem: usize) -> usize {
+    if unsafe { class_of_obj(cls) } == unsafe { SOMCLASS } {
+        unsafe { *(mem as *mut usize) = c.mtab as usize };
+        mem
+    } else {
+        crate::call_cm(cls, cm::RENEW_NO_INIT_NO_ZERO, &[cls as u32, mem as u32]) as usize
+    }
+}
+
+unsafe fn default_init(c: &mut Class, obj: usize) {
+    unsafe {
+        if !c.ctrl_built {
+            build_ctrls(c);
+        }
+        let mut ctrl = (*c.pmtab).init_ctrl;
+        crate::call_om(obj, om::DEFAULT_INIT, &[obj as u32, &mut ctrl as *mut Ctrl as u32]);
+    }
+}
+
 unsafe fn renew(cls: usize, mem: usize, zero: bool, init: bool) -> usize {
     let Some(c) = (unsafe { r(cls) }) else { return 0 };
     if mem == 0 {
@@ -57,43 +80,56 @@ unsafe fn renew(cls: usize, mem: usize, zero: bool, init: bool) -> usize {
         if zero {
             core::ptr::write_bytes(mem as *mut u8, 0, c.instance_size);
         }
-        *(mem as *mut usize) = c.mtab as usize;
+        let obj = load_mtab(cls, c, mem);
         if init {
-            if !c.ctrl_built {
-                build_ctrls(c);
-            }
-            let mut ctrl = (*c.pmtab).init_ctrl;
-            crate::call_om(mem, om::DEFAULT_INIT, &[mem as u32, &mut ctrl as *mut Ctrl as u32]);
+            default_init(c, mem);
         }
+        obj
     }
-    mem
 }
 
+/// somNew: allocate, zero, the method table (see load_mtab), then
+/// somDefaultInit on the memory; when the class's somRenewNoInitNoZero
+/// gave another object, the memory is destroyed and that object returned.
 pub extern "C" fn somNew(cls: usize) -> usize {
     let Some(c) = (unsafe { r(cls) }) else { return 0 };
     let size = c.instance_size as u32;
     let mem = allocate(cls, size);
-    unsafe { renew(cls, mem, true, true) }
+    let obj = unsafe { renew(cls, mem, true, true) };
+    if obj != mem && mem != 0 {
+        crate::call_om(mem, om::DESTRUCT, &[mem as u32, 1, 0]);
+    }
+    obj
 }
 
 pub extern "C" fn somNewNoInit(cls: usize) -> usize {
     let Some(c) = (unsafe { r(cls) }) else { return 0 };
     let size = c.instance_size as u32;
     let mem = allocate(cls, size);
-    unsafe { renew(cls, mem, true, false) }
+    let obj = unsafe { renew(cls, mem, true, false) };
+    if obj != mem && mem != 0 {
+        deallocate(cls, mem);
+    }
+    obj
 }
 
 pub extern "C" fn somRenew(cls: usize, mem: usize) -> usize {
     unsafe { renew(cls, mem, true, true) }
 }
 pub extern "C" fn somRenewNoInit(cls: usize, mem: usize) -> usize {
-    unsafe { renew(cls, mem, true, false) }
+    unsafe { renew(cls, mem, true, false) };
+    mem
 }
 pub extern "C" fn somRenewNoZero(cls: usize, mem: usize) -> usize {
     unsafe { renew(cls, mem, false, true) }
 }
+/// SOMClass's own: just the method table.
 pub extern "C" fn somRenewNoInitNoZero(cls: usize, mem: usize) -> usize {
-    unsafe { renew(cls, mem, false, false) }
+    let Some(c) = (unsafe { r(cls) }) else { return 0 };
+    if mem != 0 {
+        unsafe { *(mem as *mut usize) = c.mtab as usize };
+    }
+    mem
 }
 
 pub extern "C" fn somAllocate(cls: usize, size: i32) -> usize {
@@ -868,6 +904,7 @@ pub mod cm {
     pub const GET_METHOD_DATA: usize = 35;
     pub const GET_MEMBER_TOKEN: usize = 33;
     pub const ALLOCATE: usize = 46;
+    pub const RENEW_NO_INIT_NO_ZERO: usize = 45;
     pub const DEALLOCATE: usize = 47;
     pub const CLONE_CLASS: usize = 50;
     pub const CAST_OBJ_CLS: usize = 56;

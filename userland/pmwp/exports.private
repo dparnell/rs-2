@@ -61,3 +61,22 @@ WPSharedDirNewClass 414
 WPShredderNewClass 54
 WPStartupNewClass 39
 WPTemplatesNewClass 30
+; WPCONFIG.DLL's classes (WPCONFIG forwards to these)
+WPMouseNewClass 9101
+M_WPMouseNewClass 9104
+WPSoundNewClass 9107
+M_WPSoundNewClass 9110
+WPKeyboardNewClass 9113
+M_WPKeyboardNewClass 9116
+WPClockNewClass 9119
+M_WPClockNewClass 9122
+WPFontPaletteNewClass 9125
+M_WPFontPaletteNewClass 9128
+WPColorPaletteNewClass 9131
+M_WPColorPaletteNewClass 9134
+WPPaletteNewClass 9137
+M_WPPaletteNewClass 9140
+WPSchemePaletteNewClass 9143
+M_WPSchemePaletteNewClass 9146
+WPSystemNewClass 9149
+M_WPSystemNewClass 9152

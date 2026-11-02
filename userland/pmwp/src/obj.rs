@@ -499,7 +499,7 @@ fn undirty(obj: usize) {
 }
 
 fn changed(obj: usize) {
-    if !restoring(obj) && d(obj).handle != 0 {
+    if !restoring(obj) && d(obj).handle != 0 && !wps::is(obj, "WPTransient") {
         call(m::WPObject::wpSaveDeferred, &[obj]);
     }
 }
@@ -594,10 +594,26 @@ extern "C" fn wpQueryDefaultView(obj: usize) -> u32 {
 
 /// Abstract objects get a handle when first asked (file system objects'
 /// handles come from their paths, see WPFileSystem).
+/// Transient objects' numbers (IBM's trn_wpMakeObject counts from 1).
+static mut TRANSIENT_SEQ: u32 = 1;
+
 extern "C" fn wpQueryHandle(obj: usize) -> u32 {
     let dd = d(obj);
-    if dd.handle == 0 && !wps::is(obj, "WPTransient") {
-        dd.handle = wps::new_abstract_handle();
+    if dd.handle == 0 {
+        dd.handle = if wps::is(obj, "WPTransient") {
+            // As IBM's trn_wpQueryHandle: the object's number in the low
+            // word and its top byte, the transient class's tag (4) in
+            // between; wpclsObjectFromHandle finds the object again
+            // while it lives (Object REXX's WPS server passes handles).
+            let n = unsafe {
+                let n = TRANSIENT_SEQ;
+                TRANSIENT_SEQ += 1;
+                n
+            };
+            (n & 0xff_0000) << 8 | 0x4_0000 | (n & 0xffff)
+        } else {
+            wps::new_abstract_handle()
+        };
         wps::register(obj, dd.handle, b"");
     }
     d(obj).handle
@@ -711,6 +727,20 @@ extern "C" fn wpSetup(obj: usize, setup: *const u8) -> u32 {
             b"OBJECTID" => {
                 let i = z(&v);
                 call(m::WPObject::wpSetObjectID, &[obj, i.as_ptr() as usize]);
+            }
+            // OPEN=DEFAULT or SETTINGS: as IBM's (ShlOpenObjectOnceInitialized),
+            // the object is locked and the view opens on the shell's PM
+            // thread once the caller is done (Object REXX's WPZORXINIT,
+            // made with OPEN=DEFAULT, makes its object window so).
+            b"OPEN" => {
+                let view = match v.to_ascii_uppercase().as_slice() {
+                    b"SETTINGS" => OPEN_SETTINGS,
+                    b"DEFAULT" => OPEN_DEFAULT,
+                    _ => u32::MAX,
+                };
+                if view != u32::MAX {
+                    crate::ipc::open_later(obj, view);
+                }
             }
             b"DEFAULTVIEW" => {
                 if let Some(view) = view_from_name(&v) {

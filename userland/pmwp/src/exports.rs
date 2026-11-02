@@ -102,4 +102,22 @@ aligned! {
     __a_WinUnlockSystem => crate::desktop::WinUnlockSystem, 2;
     __a_WinStoreWindowPos => crate::winpos::WinStoreWindowPos, 3;
     __a_WinRestoreWindowPos => crate::winpos::WinRestoreWindowPos, 3;
+    __a_WPMouseNewClass => crate::classdata_gen::WPMouseNewClass, 2;
+    __a_M_WPMouseNewClass => crate::classdata_gen::M_WPMouseNewClass, 2;
+    __a_WPSoundNewClass => crate::classdata_gen::WPSoundNewClass, 2;
+    __a_M_WPSoundNewClass => crate::classdata_gen::M_WPSoundNewClass, 2;
+    __a_WPKeyboardNewClass => crate::classdata_gen::WPKeyboardNewClass, 2;
+    __a_M_WPKeyboardNewClass => crate::classdata_gen::M_WPKeyboardNewClass, 2;
+    __a_WPClockNewClass => crate::classdata_gen::WPClockNewClass, 2;
+    __a_M_WPClockNewClass => crate::classdata_gen::M_WPClockNewClass, 2;
+    __a_WPFontPaletteNewClass => crate::classdata_gen::WPFontPaletteNewClass, 2;
+    __a_M_WPFontPaletteNewClass => crate::classdata_gen::M_WPFontPaletteNewClass, 2;
+    __a_WPColorPaletteNewClass => crate::classdata_gen::WPColorPaletteNewClass, 2;
+    __a_M_WPColorPaletteNewClass => crate::classdata_gen::M_WPColorPaletteNewClass, 2;
+    __a_WPPaletteNewClass => crate::classdata_gen::WPPaletteNewClass, 2;
+    __a_M_WPPaletteNewClass => crate::classdata_gen::M_WPPaletteNewClass, 2;
+    __a_WPSchemePaletteNewClass => crate::classdata_gen::WPSchemePaletteNewClass, 2;
+    __a_M_WPSchemePaletteNewClass => crate::classdata_gen::M_WPSchemePaletteNewClass, 2;
+    __a_WPSystemNewClass => crate::classdata_gen::WPSystemNewClass, 2;
+    __a_M_WPSystemNewClass => crate::classdata_gen::M_WPSystemNewClass, 2;
 }

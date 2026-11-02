@@ -376,6 +376,25 @@ pub fn dos_unwind_exception(c: &mut super::Ctx) -> u32 {
     let proc = c.process.clone();
     let mut sp = proc.space.lock();
     let head = rd(&mut sp, tib).unwrap_or(xcpt::END_OF_CHAIN);
+    if super::tracing() {
+        let mut chain = alloc::vec::Vec::new();
+        let mut r = head;
+        while r != xcpt::END_OF_CHAIN && r != 0 && chain.len() < 16 {
+            chain.push(r);
+            r = rd(&mut sp, r).unwrap_or(xcpt::END_OF_CHAIN);
+        }
+        let mut callers = alloc::vec::Vec::new();
+        let mut ebp = c.f.rbp as u32;
+        while callers.len() < 8 {
+            let (Some(next), Some(ret)) = (rd(&mut sp, ebp), rd(&mut sp, ebp.wrapping_add(4))) else { break };
+            callers.push(ret);
+            if next <= ebp {
+                break;
+            }
+            ebp = next;
+        }
+        crate::trace!("    unwind to {target:x} at {target_ip:x}, chain {chain:x?}, callers {callers:x?}");
+    }
     let u = Unwind { target, target_ip, resume, exit: false };
     if head == target || head == xcpt::END_OF_CHAIN || head == 0 {
         finish_unwind(&mut sp, c.f, &u, &t);
@@ -538,5 +557,29 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
         f.rbp as u32
     );
     crate::println!("DS={:04x} ES={:04x} FS={:04x} GS={:04x}", f.ds, f.es, f.fs, f.gs);
+    // For debugging, to the serial log only: the top of the stack and the
+    // return addresses along the EBP chain (32-bit code).
+    if f.ss == 0x53 {
+        let mut sp = p.space.lock();
+        let esp = f.rsp as u32;
+        let mut words = [0u32; 16];
+        for (i, w) in words.iter_mut().enumerate() {
+            *w = rd(&mut sp, esp.wrapping_add(4 * i as u32)).unwrap_or(0);
+        }
+        crate::trace!("stack at {esp:08x}: {:08x?}", words);
+        let mut ebp = f.rbp as u32;
+        let mut chain = [0u32; 12];
+        let mut n = 0;
+        while n < chain.len() && ebp > esp.wrapping_sub(1) && ebp & 3 == 0 {
+            let (Some(next), Some(ret)) = (rd(&mut sp, ebp), rd(&mut sp, ebp.wrapping_add(4))) else { break };
+            chain[n] = ret;
+            n += 1;
+            if next <= ebp {
+                break;
+            }
+            ebp = next;
+        }
+        crate::trace!("callers: {:08x?}", &chain[..n]);
+    }
     p.exit(2, 0xffff);
 }
