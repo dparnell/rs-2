@@ -29,3 +29,8 @@ dist/fonts/LIBERATN.TXT -> PSFONTS\LIBERATN.TXT
 # REXX: REXXTRY (rs2's own); REXX.DLL, REXXAPI.DLL, REXXUTIL.DLL, REX.MSG
 # and REXH.MSG are built from userland/ (docs/REXX.md).
 userland/rexx/REXXTRY.CMD -> OS2\REXXTRY.CMD
+# Object REXX (OREXX.DLL, OREXUTIL.DLL, OREXXSOM.DLL, OREXXWPS.DLL, REXXC.EXE,
+# OREX.MSG and OREXH.MSG are built from userland/): SWITCHRX.CMD makes it
+# the system's REXX, WPSINST.CMD registers its Workplace Shell classes.
+userland/rexx/SWITCHRX.CMD -> OS2\SWITCHRX.CMD
+userland/rexx/WPSINST.CMD -> OS2\WPSINST.CMD
