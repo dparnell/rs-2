@@ -393,6 +393,9 @@ pub struct Interp<'h> {
     pub(crate) raised: Option<CondInfo>,
     /// Clauses run (activities take turns every so many).
     pub(crate) ticks: u32,
+    /// Object REXX: the nesting of the clause being traced (results are
+    /// indented by it).
+    pub(crate) cur_ol: u32,
 }
 
 pub(crate) const MAX_DEPTH: usize = 2000;
@@ -409,7 +412,7 @@ pub fn strip_blanks(s: &[u8]) -> &[u8] {
 
 impl<'h> Interp<'h> {
     pub fn new(host: &'h mut dyn Host) -> Interp<'h> {
-        Interp { host, st: State::new(), depth: 0, quiet: false, banner: false, w: None, tb: Vec::new(), err_at: None, err_msg: Vec::new(), activity: 1, raised: None, ticks: 0 }
+        Interp { host, st: State::new(), depth: 0, quiet: false, banner: false, w: None, tb: Vec::new(), err_at: None, err_msg: Vec::new(), activity: 1, raised: None, ticks: 0, cur_ol: 0 }
     }
 
     /// An Object REXX interpreter (`PARSE VERSION` gives OBJREXX 6.00).
@@ -625,7 +628,7 @@ impl<'h> Interp<'h> {
     pub(crate) fn trace_val(&mut self, tag: &[u8], v: &[u8], lvl: u32) {
         let mut s = b"       ".to_vec();
         s.extend_from_slice(tag);
-        let lvl = if self.oo() { 0 } else { lvl };
+        let lvl = if self.oo() { self.cur_ol } else { lvl };
         for _ in 0..(3 + 2 * lvl) {
             s.push(b' ');
         }
@@ -1055,6 +1058,7 @@ impl<'h> Interp<'h> {
         nf.expose_ok = false;
         let saved_pool = self.st.cur_pool;
         let saved_args = core::mem::replace(&mut self.st.args, args);
+        let saved_ol = self.cur_ol;
         self.depth += 1;
         let prog = f.prog.clone();
         let r = self.run(&mut nf, &prog, idx, 0);
@@ -1062,6 +1066,7 @@ impl<'h> Interp<'h> {
         self.st.pools.pop_to(nf.pool_len);
         self.st.cur_pool = saved_pool;
         self.st.args = saved_args;
+        self.cur_ol = saved_ol;
         self.st.nextv = None;
         match r {
             Ok(Flow::Return(v)) => Ok(v),

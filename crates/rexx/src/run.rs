@@ -292,6 +292,8 @@ impl Interp<'_> {
             // reached at the end of a branch: skipped, not traced
             Instr::Else => {}
             Instr::When(_) | Instr::Otherwise if matches!(ctl.last(), Some(Ctl::Select { taken: true, .. })) => {}
+            // Object REXX does not trace the END of a SELECT
+            Instr::End(_) if self.oo() && matches!(code.clauses[c.link].instr, Instr::Select) => {}
             _ => {
                 if self.tracing_all(f) {
                     self.trace_clause(c, lvl);
@@ -302,6 +304,7 @@ impl Interp<'_> {
         if !matches!(c.instr, Instr::Label(_) | Instr::Procedure(_)) {
             f.proc_ok = false;
         }
+        self.cur_ol = c.olevel;
         if !matches!(c.instr, Instr::Label(_) | Instr::Expose(_)) {
             f.expose_ok = false;
         }

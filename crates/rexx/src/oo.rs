@@ -148,11 +148,22 @@ impl World {
                 }
             }
         }
+        // .Set is a .Table, .Bag a .Relation
+        for (sub, sup) in [(Builtin::Set, Builtin::Table), (Builtin::Bag, Builtin::Relation)] {
+            let (c, s) = (classes[sub as usize].clone(), classes[sup as usize].clone());
+            if let Data::Class(ci) = &mut *c.data.borrow_mut() {
+                ci.supers = alloc::vec![s.clone()];
+            }
+            if let Data::Class(si) = &mut *s.data.borrow_mut() {
+                si.subs.push(Rc::downgrade(&c));
+            }
+        }
         // the special collections
         let nil = raw_obj(next, Some(object.clone()), Data::Nil);
         next += 1;
         let dir = classes[Builtin::Directory as usize].clone();
         let env = raw_obj(next, Some(dir.clone()), Data::Directory(DirData::default()));
+        *env.name.borrow_mut() = Some(b"The environment".to_vec());
         next += 1;
         let local = raw_obj(next, Some(dir.clone()), Data::Directory(DirData::default()));
         next += 1;
@@ -936,6 +947,7 @@ impl Interp<'_> {
         };
         self.st.cur_pool = mp;
         let saved_args = core::mem::replace(&mut self.st.args, args);
+        let saved_ol = self.cur_ol;
         let mut nf = Frame::new(code.prog.clone(), &code.pkg.name, &f.addr.0, ct, plen);
         nf.pkg = Some(code.pkg.clone());
         nf.base = lvl + 1;
@@ -955,6 +967,7 @@ impl Interp<'_> {
         self.st.pools.pop_to(plen);
         self.st.cur_pool = saved_pool;
         self.st.args = saved_args;
+        self.cur_ol = saved_ol;
         self.st.nextv = None;
         let replied = act.as_ref().and_then(|a| a.reply.borrow_mut().take());
         let r = match r {
@@ -1072,7 +1085,7 @@ pub fn eval_oo(it: &mut Interp, f: &mut Frame, e: &Expr, lvl: u32) -> R<Value> {
             let v = env_symbol(it, f, name);
             if it.trace_int(f) {
                 let s = v.fast_string();
-                it.trace_val(b">.>", &s, lvl);
+                it.trace_val(b">V>", &s, lvl);
             }
             Ok(v)
         }
@@ -1447,7 +1460,7 @@ pub(crate) fn exec_oo(it: &mut Interp, f: &mut Frame, c: &Clause, lvl: u32) -> R
                 Some(v) => {
                     if it.trace_res(f) {
                         let s = v.fast_string();
-                        it.trace_val(b">>>", &s, lvl);
+                        it.trace_val(b">V>", &s, lvl);
                     }
                     it.set_simple_v(b"RESULT", v)
                 }
@@ -1486,7 +1499,7 @@ pub(crate) fn exec_oo(it: &mut Interp, f: &mut Frame, c: &Clause, lvl: u32) -> R
                     Some(a) => {
                         if it.trace_res(f) {
                             let s = a.fast_string();
-                            it.trace_val(b">>>", &s, lvl);
+                            it.trace_val(b">V>", &s, lvl);
                         }
                         it.set_var_v(v, a)
                     }

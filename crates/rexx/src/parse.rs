@@ -1628,7 +1628,13 @@ fn src_text(src: &[u8], toks: &[Token], from: usize, to: usize) -> Vec<u8> {
         return Vec::new();
     }
     let a = (toks[from].pos as usize).min(src.len());
-    let b = (toks[to - 1].end as usize).clamp(a, src.len());
+    // IF and WHEN keep the blanks before their THEN on the same line, as
+    // IBM's traces show
+    let b = match toks.get(to) {
+        Some(t) if t.line == toks[to - 1].line && t.is_kw(b"THEN") => t.pos as usize,
+        _ => toks[to - 1].end as usize,
+    }
+    .clamp(a, src.len());
     let s = &src[a..b];
     let s = &s[..s.iter().position(|&c| c == b'\r' || c == b'\n').unwrap_or(s.len())];
     s.to_vec()
@@ -1669,7 +1675,7 @@ fn link(p: &mut Program) -> Result<(), LoadErr> {
     let n = p.clauses.len();
     let mut i = 0;
     while i < n {
-        i = link_instr(p, i, 0, 0)?;
+        i = link_instr(p, i, 0, 0, 0)?;
     }
     Ok(())
 }
@@ -1680,7 +1686,10 @@ fn err_at(p: &Program, code: u32, i: usize) -> LoadErr {
 }
 
 /// Skip labels before an instruction (they belong to the flat list).
-fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32) -> Result<usize, LoadErr> {
+/// `ol` is the clause's nesting as Object REXX traces show it, `pl` that
+/// of the block it is in (an IF's or WHEN's branch shows two deeper than
+/// the IF, a DO block's clauses one deeper than its block).
+fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32, pl: u32) -> Result<usize, LoadErr> {
     let n = p.clauses.len();
     if i >= n {
         return Err(err_at(p, 14, n.saturating_sub(1)));
@@ -1700,7 +1709,7 @@ fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32) -> Result<usize, L
                 if matches!(p.clauses[j].instr, Instr::Then | Instr::Else | Instr::When(_) | Instr::Otherwise) {
                     return Err(err_at(p, if matches!(p.clauses[j].instr, Instr::Then | Instr::Else) { 8 } else { 9 }, j));
                 }
-                j = link_instr(p, j, level + 1, ol + 1)?;
+                j = link_instr(p, j, level + 1, pl + 1, pl + 1)?;
             }
             // END name must match the control variable
             if let (Instr::End(Some(en)), Instr::Do(d)) = (&p.clauses[j].instr, &p.clauses[i].instr) {
@@ -1709,6 +1718,7 @@ fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32) -> Result<usize, L
                 }
             }
             p.clauses[j].level = level + 1;
+            p.clauses[j].olevel = pl;
             p.clauses[j].link = i;
             p.clauses[j].next = j + 1;
             p.clauses[i].link = j;
@@ -1720,6 +1730,7 @@ fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32) -> Result<usize, L
             let mut other: Option<usize> = None;
             while j < n && matches!(p.clauses[j].instr, Instr::Label(_)) {
                 p.clauses[j].level = level + 1;
+                p.clauses[j].olevel = pl + 1;
                 j += 1;
             }
             loop {
@@ -1729,22 +1740,25 @@ fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32) -> Result<usize, L
                 match &p.clauses[j].instr {
                     Instr::When(_) if other.is_none() => {
                         p.clauses[j].level = level + 1;
+                        p.clauses[j].olevel = pl + 1;
                         let w = j;
                         if w + 1 >= n || !matches!(p.clauses[w + 1].instr, Instr::Then) {
                             return Err(err_at(p, 18, w));
                         }
                         p.clauses[w + 1].level = level + 1;
-                        let e = link_instr(p, w + 2, level + 2, ol + 2)?;
+                        p.clauses[w + 1].olevel = pl + 2;
+                        let e = link_instr(p, w + 2, level + 2, pl + 3, pl + 2)?;
                         whens.push(w);
                         p.clauses[w].next = e;
                         j = e;
                     }
                     Instr::Otherwise if other.is_none() => {
                         p.clauses[j].level = level + 1;
+                        p.clauses[j].olevel = pl + 1;
                         other = Some(j);
                         j += 1;
                         while j < n && !matches!(p.clauses[j].instr, Instr::End(_)) {
-                            j = link_instr(p, j, level + 2, ol + 2)?;
+                            j = link_instr(p, j, level + 2, pl + 2, pl + 2)?;
                         }
                     }
                     Instr::End(name) => {
@@ -1758,6 +1772,7 @@ fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32) -> Result<usize, L
                     }
                     Instr::Label(_) => {
                         p.clauses[j].level = level + 1;
+                        p.clauses[j].olevel = pl + 1;
                         j += 1;
                     }
                     _ => return Err(err_at(p, 7, j)),
@@ -1765,6 +1780,7 @@ fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32) -> Result<usize, L
             }
             let end = j;
             p.clauses[end].level = if other.is_some() { level + 2 } else { level + 1 };
+            p.clauses[end].olevel = pl + 1;
             p.clauses[end].link = i;
             p.clauses[end].next = end + 1;
             // each WHEN links to the next branch; THENs and OTHERWISE to END
@@ -1783,10 +1799,12 @@ fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32) -> Result<usize, L
                 return Err(err_at(p, 18, i));
             }
             p.clauses[i + 1].level = level;
-            let e = link_instr(p, i + 2, level + 1, ol + 2)?;
+            p.clauses[i + 1].olevel = ol + 1;
+            let e = link_instr(p, i + 2, level + 1, pl + 2, pl + 1)?;
             if e < n && matches!(p.clauses[e].instr, Instr::Else) {
                 p.clauses[e].level = level;
-                let e2 = link_instr(p, e + 1, level + 1, ol + 2)?;
+                p.clauses[e].olevel = ol + 1;
+                let e2 = link_instr(p, e + 1, level + 1, pl + 2, pl + 1)?;
                 p.clauses[e].link = e2;
                 p.clauses[e].next = e2;
                 p.clauses[i].link = e;

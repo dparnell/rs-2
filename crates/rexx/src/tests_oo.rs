@@ -144,6 +144,19 @@ fn ibm_probe2() {
     assert!(got[n + 1].starts_with("Error 42.3:"), "{}", got[n + 1]);
 }
 
+/// testdata/probe3.cmd: default names, class hierarchy, string methods
+/// and traces (TRACE I and R, nested IF, DO and SELECT) as IBM's Object
+/// REXX shows them (probe3.out).
+#[test]
+fn ibm_probe3() {
+    let src = include_str!("../testdata/probe3.cmd");
+    let want: Vec<String> = include_str!("../testdata/probe3.out").lines().map(|l| String::from(l.trim_end_matches('\r'))).collect();
+    let out = run_oo(src);
+    for (i, w) in want.iter().enumerate() {
+        assert_eq!(out.get(i).map(|s| s.as_str()), Some(w.as_str()), "line {}:\n{}", i + 1, out.join("\n"));
+    }
+}
+
 /// Activities on threads: START, REPLY going on after the sender,
 /// GUARD WHEN waiting for another activity, an alarm.
 #[test]

@@ -141,7 +141,7 @@ impl Object {
         match &*self.data.borrow() {
             Data::Str(s) => return s.clone(),
             Data::Nil => return b"The NIL object".to_vec(),
-            Data::Class(c) => return c.id.clone(),
+            Data::Class(_) => {}
             Data::Stream(s) => return s.name.clone(),
             Data::Stem(s, name) => {
                 return match &s.borrow().default {
