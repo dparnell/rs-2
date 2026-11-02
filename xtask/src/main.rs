@@ -783,6 +783,15 @@ fn build_userland() -> Option<image::FileList> {
         if PM_PROGRAMS.contains(bin) {
             cmd.arg("--pm");
         }
+        // The program's icon (crates/pmwin appicons) as RT_POINTER 1.
+        let stem = dest.rsplit('\\').next().unwrap().split('.').next().unwrap();
+        if dest.ends_with(".EXE") {
+            if let Some(ico) = pmwin::appicons::icon_file(stem) {
+                let path = out_dir.join(format!("{stem}.ICO"));
+                std::fs::write(&path, ico).unwrap();
+                cmd.arg("--res").arg("1").arg("1").arg(&path);
+            }
+        }
         if dest.ends_with(".DLL") || dest.ends_with(".QPR") || dest.ends_with(".DRV") {
             let defs = ul.join(bin).join("exports.def");
             cmd.arg("--dll").arg("--exports").arg(defs);

@@ -400,6 +400,63 @@ pub fn rgb(c: Rgb) -> u32 {
     OPAQUE | c & 0xff_ffff
 }
 
+/// Images as an OS/2 icon file (also an RT_POINTER resource): a bitmap
+/// array of 'CI' images for any display, each with 2.x headers, the
+/// 1 bpp AND/XOR masks and 24 bpp colour bits, scan lines bottom-up.
+pub fn to_array(images: &[Image]) -> Vec<u8> {
+    let mut out = Vec::new();
+    for (k, img) in images.iter().enumerate() {
+        let (w, h) = (img.w as usize, img.h as usize);
+        let (mask, colour) = img.to_bitmaps(true);
+        let colour = colour.unwrap();
+        let (mstride, xstride) = (w.div_ceil(32) * 4, (w * 24).div_ceil(32) * 4);
+        let start = out.len();
+        let mono_len = 14 + 40 + 8;
+        let colour_len = 14 + 40;
+        let mask_bits = start + 14 + mono_len + colour_len;
+        let colour_bits = mask_bits + 2 * mstride * h;
+        let next = colour_bits + xstride * h;
+        out.extend_from_slice(&0x4142u16.to_le_bytes());
+        out.extend_from_slice(&14u32.to_le_bytes());
+        out.extend_from_slice(&(if k + 1 < images.len() { next as u32 } else { 0 }).to_le_bytes());
+        out.extend_from_slice(&[0; 4]);
+        for (bits_at, height, bits) in [(mask_bits, 2 * h, 1u16), (colour_bits, h, 24)] {
+            out.extend_from_slice(&KIND_CI.to_le_bytes());
+            out.extend_from_slice(&(14u32 + 40).to_le_bytes());
+            out.extend_from_slice(&[0; 4]);
+            out.extend_from_slice(&(bits_at as u32).to_le_bytes());
+            out.extend_from_slice(&40u32.to_le_bytes());
+            out.extend_from_slice(&(w as u32).to_le_bytes());
+            out.extend_from_slice(&(height as u32).to_le_bytes());
+            out.extend_from_slice(&1u16.to_le_bytes());
+            out.extend_from_slice(&bits.to_le_bytes());
+            out.extend_from_slice(&[0; 24]);
+            if bits == 1 {
+                out.extend_from_slice(&[0, 0, 0, 0, 0xff, 0xff, 0xff, 0]);
+            }
+        }
+        // Bitmap pixels are top row first; files are bottom-up.
+        for r in 0..2 * h {
+            let mut row = vec![0u8; mstride];
+            for x in 0..w {
+                if mask.pixels[(2 * h - 1 - r) * w + x] & 0xff_ffff != 0 {
+                    row[x / 8] |= 0x80 >> (x % 8);
+                }
+            }
+            out.extend_from_slice(&row);
+        }
+        for r in 0..h {
+            let mut row = vec![0u8; xstride];
+            for x in 0..w {
+                let c = colour.pixels[(h - 1 - r) * w + x];
+                row[3 * x..3 * x + 3].copy_from_slice(&[c as u8, (c >> 8) as u8, (c >> 16) as u8]);
+            }
+            out.extend_from_slice(&row);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +639,31 @@ mod tests {
             let e = parse(&b);
             assert!(!e.is_empty(), "{f}");
             assert!(choose(&e, 32, (1024, 768)).is_some_and(|c| !c.image.is_blank()), "{f}");
+        }
+    }
+
+    #[test]
+    fn array_round_trip() {
+        let mut imgs = Vec::new();
+        for n in [32, 16] {
+            let mut img = Image::new(n, n);
+            for y in 0..n {
+                for x in 0..n {
+                    let v = match (x + 2 * y) % 5 {
+                        0 => TRANSPARENT,
+                        1 => INVERT,
+                        _ => rgb((x as u32 * 7) << 16 | (y as u32 * 5) << 8 | 0x40),
+                    };
+                    img.set(x, y, v);
+                }
+            }
+            imgs.push(img);
+        }
+        let e = parse(&to_array(&imgs));
+        assert_eq!(e.len(), 2);
+        for (got, want) in e.iter().zip(&imgs) {
+            assert_eq!((got.kind, got.bits), (KIND_CI, 24));
+            assert_eq!(&got.image, want);
         }
     }
 }

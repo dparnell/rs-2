@@ -1332,6 +1332,18 @@ lock released. `WinSetFileIcon` writes the `.ICON` EA from an icon file
 (`ICON_FILE`), a resource (`ICON_RESOURCE`) or data (`ICON_DATA`), and
 `ICON_CLEAR` removes it; `WinFreeFileIcon`.
 
+**rs2's programs' icons**: `crates/pmwin/src/appicons.rs` draws an icon
+(32 x 32 and 16 x 16, rs2's own) for each of rs2's PM programs (E, VIEW,
+the applets, the multimedia programs, TCPCFG2, the installers and
+Display); `gpi::icon::to_array` writes it as an OS/2 icon file (a bitmap
+array of 24 bpp 'CI' images) and xtask passes it to elf2lx (`--res 1 1
+FILE`), which puts it in a resource object as `RT_POINTER` 1. So the
+executable's file icon, its program objects and its frame's icon are
+rs2's: pmkit's `std_window` sends the frame `WM_SETICON` with it, E and
+the multimedia programs ask for it with `FCF_ICON` (frame id 1).
+`cargo test -p pmwin appicons -- --ignored` writes them all, magnified,
+to a PPM sheet in the temporary directory.
+
 ## Minimizing
 
 Minimizing a frame (its minimize button, the system menu, Alt+F9,

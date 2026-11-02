@@ -1347,7 +1347,9 @@ fn find_first(c: &mut Ctx, spec_addr: u32, phdir: u32, attrib: u32, buf: u32, cb
         Ok(n) => n,
         Err(e) => return e,
     };
-    crate::trace!("    level {level}, {want} wanted, buffer {cb} bytes: {n} found");
+    if c.trace {
+        crate::trace!("    level {level}, {want} wanted, buffer {cb} bytes: {n} found");
+    }
     let h = {
         let mut sr = c.process.searches.lock();
         let h = if req == u32::MAX {

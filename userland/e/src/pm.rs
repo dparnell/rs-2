@@ -225,6 +225,7 @@ pub const FCF_SIZEBORDER: u32 = 0x0008;
 pub const FCF_MINMAX: u32 = 0x0030;
 pub const FCF_DLGBORDER: u32 = 0x0100;
 pub const FCF_TASKLIST: u32 = 0x0800;
+pub const FCF_ICON: u32 = 0x4000;
 pub const FCF_SHELLPOSITION: u32 = 0x0400;
 pub const FCF_NOBYTEALIGN: u32 = 0x1000;
 pub const FID_CLIENT: u32 = 0x8008;

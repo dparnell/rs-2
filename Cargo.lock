@@ -187,4 +187,5 @@ dependencies = [
  "inifile",
  "ipf",
  "msgf",
+ "pmwin",
 ]

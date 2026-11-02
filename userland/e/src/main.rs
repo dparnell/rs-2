@@ -257,7 +257,7 @@ fn main(s: &os2::Startup) -> u32 {
 pub fn create_window() -> bool {
     let a = app();
     unsafe { WinRegisterClass(a.hab, CLASS.as_ptr(), client_proc, 0x0004 /* CS_SIZEREDRAW */, 4) };
-    let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST | FCF_NOBYTEALIGN;
+    let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST | FCF_ICON | FCF_NOBYTEALIGN;
     let mut client = 0;
     let frame = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, CLASS.as_ptr(), core::ptr::null(), WS_CLIPCHILDREN, 0, FRAME_ID, &mut client) };
     if frame == 0 {

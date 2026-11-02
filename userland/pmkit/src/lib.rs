@@ -437,6 +437,11 @@ pub fn std_window(hab: u32, class: &[u8], proc_: WndProc, class_style: u32, word
     let mut fl = fcf;
     let mut client = 0;
     let frame = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0, &mut fl, c.as_ptr(), t.as_ptr(), WS_CLIPCHILDREN, 0, id, &mut client) };
+    // The program's icon (RT_POINTER 1, put there by xtask) on the frame.
+    let icon = unsafe { WinLoadPointer(HWND_DESKTOP, 0, 1) };
+    if icon != 0 {
+        send(frame, WM_SETICON, icon, 0);
+    }
     (frame, client)
 }
 

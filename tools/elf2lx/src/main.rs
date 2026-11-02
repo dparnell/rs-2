@@ -138,6 +138,15 @@ struct Fixup {
     additive: u32,
 }
 
+/// A resource table entry: type, name id, size, object and offset in it.
+struct Resource {
+    ty: u16,
+    id: u16,
+    size: u32,
+    object: u16,
+    offset: u32,
+}
+
 struct Object {
     base: u32,
     size: u32,
@@ -152,6 +161,7 @@ fn object_in(objects: &[Object], addr: u32) -> Option<usize> {
 const OBJ_READ: u32 = 0x0001;
 const OBJ_WRITE: u32 = 0x0002;
 const OBJ_EXEC: u32 = 0x0004;
+const OBJ_RESOURCE: u32 = 0x0008;
 const OBJ_SHARED: u32 = 0x0020;
 const OBJ_BIG: u32 = 0x2000;
 const OBJ_ALIAS16: u32 = 0x1000;
@@ -159,7 +169,7 @@ const OBJ_ALIAS16: u32 = 0x1000;
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 2 {
-        eprintln!("usage: elf2lx INPUT OUTPUT [--dll] [--name NAME] [--stack BYTES] [--exports FILE] [--pm] [--fixups-removed]");
+        eprintln!("usage: elf2lx INPUT OUTPUT [--dll] [--name NAME] [--stack BYTES] [--exports FILE] [--pm] [--fixups-removed] [--res TYPE ID FILE]...");
         return ExitCode::FAILURE;
     }
     let mut dll = false;
@@ -170,6 +180,9 @@ fn main() -> ExitCode {
     let mut name = std::path::Path::new(&args[1]).file_stem().unwrap().to_string_lossy().to_ascii_uppercase();
     let mut stack = 0x10000u32;
     let mut exports_file = None;
+    // Resources (type, name id, file), e.g. `--res 1 1 APP.ICO`: the
+    // program's icon (RT_POINTER 1).
+    let mut res_files: Vec<(u16, u16, String)> = Vec::new();
     let mut i = 2;
     while i < args.len() {
         match args[i].as_str() {
@@ -187,6 +200,10 @@ fn main() -> ExitCode {
             "--exports" => {
                 i += 1;
                 exports_file = Some(args[i].clone());
+            }
+            "--res" => {
+                res_files.push((args[i + 1].parse().unwrap(), args[i + 2].parse().unwrap(), args[i + 3].clone()));
+                i += 3;
             }
             _ => {}
         }
@@ -418,7 +435,25 @@ fn main() -> ExitCode {
     }
     exports.sort_by_key(|e| e.ord);
 
-    let mut lx = write_lx(&name, dll, pm, &elf, &objects, &fixups, &modules, &procs, &exports, esp_obj, esp);
+    // Resources: one object after the others (the loader places resource
+    // objects itself), each resource at a 4-byte boundary in it.
+    let mut resources: Vec<Resource> = Vec::new();
+    if !res_files.is_empty() {
+        let mut data = Vec::new();
+        let object = objects.len() as u16 + 1;
+        for (ty, id, f) in &res_files {
+            let bytes = std::fs::read(f).unwrap_or_else(|e| panic!("resource {f}: {e}"));
+            while data.len() % 4 != 0 {
+                data.push(0);
+            }
+            resources.push(Resource { ty: *ty, id: *id, size: bytes.len() as u32, object, offset: data.len() as u32 });
+            data.extend_from_slice(&bytes);
+        }
+        let base = objects.last().map_or(0x10000, |o| (o.base + o.size + 0xffff) & !0xffff);
+        objects.push(Object { base, size: data.len() as u32, flags: OBJ_READ | OBJ_RESOURCE, data });
+    }
+
+    let mut lx = write_lx(&name, dll, pm, &elf, &objects, &fixups, &modules, &procs, &exports, &resources, esp_obj, esp);
     if fixups_removed {
         // Module flags of the LX header (after the MZ stub).
         let o = u32le(&lx, 0x3c) as usize;
@@ -439,6 +474,7 @@ fn write_lx(
     modules: &[String],
     procs: &[u8],
     exports: &[Export],
+    resources: &[Resource],
     esp_obj: u32,
     esp: u32,
 ) -> Vec<u8> {
@@ -538,7 +574,8 @@ fn write_lx(
     let mut out = Vec::new();
     let obj_table = hdr_size;
     let page_table = obj_table + objects.len() * 24;
-    let resname = page_table + pages.len() * 8;
+    let rsrc_table = page_table + pages.len() * 8;
+    let resname = rsrc_table + resources.len() * 14;
     let mut resnames = Vec::new();
     resnames.push(name.len() as u8);
     resnames.extend_from_slice(name.as_bytes());
@@ -637,6 +674,8 @@ fn write_lx(
     w32(&mut h, 0x40, obj_table as u32);
     w32(&mut h, 0x44, objects.len() as u32);
     w32(&mut h, 0x48, page_table as u32);
+    w32(&mut h, 0x50, rsrc_table as u32);
+    w32(&mut h, 0x54, resources.len() as u32);
     w32(&mut h, 0x58, resname as u32);
     w32(&mut h, 0x5c, entry_table as u32);
     w32(&mut h, 0x68, fixup_page_table as u32);
@@ -668,6 +707,13 @@ fn write_lx(
         out.extend_from_slice(&e);
         file_off += p.data.len() as u32;
         let _ = p.index;
+    }
+    for r in resources {
+        out.extend_from_slice(&r.ty.to_le_bytes());
+        out.extend_from_slice(&r.id.to_le_bytes());
+        out.extend_from_slice(&r.size.to_le_bytes());
+        out.extend_from_slice(&r.object.to_le_bytes());
+        out.extend_from_slice(&r.offset.to_le_bytes());
     }
     out.extend_from_slice(&resnames);
     out.extend_from_slice(&entries);

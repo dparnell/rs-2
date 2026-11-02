@@ -95,6 +95,7 @@ pub const FCF_SHELLPOSITION: u32 = 0x0400;
 pub const FCF_TASKLIST: u32 = 0x0800;
 pub const FCF_NOBYTEALIGN: u32 = 0x1000;
 pub const FCF_ICON: u32 = 0x4000;
+pub const WM_SETICON: u32 = 0x0047;
 pub const FCF_STANDARD: u32 = 0xcc3f;
 pub const FID_SYSMENU: u32 = 0x8002;
 pub const FID_TITLEBAR: u32 = 0x8003;

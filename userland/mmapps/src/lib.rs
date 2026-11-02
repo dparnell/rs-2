@@ -207,10 +207,10 @@ impl Drop for Pm {
 /// client area `cw` x `ch`, centred; (frame, client).
 pub fn main_window(pm: &Pm, class: &[u8], proc_: WndProc, title: &str, cw: i32, ch: i32, sizable: bool) -> (u32, u32) {
     unsafe { WinRegisterClass(pm.hab, class.as_ptr(), proc_, WS_CLIPCHILDREN | 4, 4) };
-    let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_MINBUTTON | FCF_TASKLIST | if sizable { FCF_SIZEBORDER | FCF_MAXBUTTON } else { FCF_DLGBORDER };
+    let mut fcf = FCF_TITLEBAR | FCF_SYSMENU | FCF_MINBUTTON | FCF_TASKLIST | FCF_ICON | if sizable { FCF_SIZEBORDER | FCF_MAXBUTTON } else { FCF_DLGBORDER };
     let mut client = 0u32;
     let t = zs(title);
-    let frame = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, class.as_ptr(), t.as_ptr(), WS_CLIPCHILDREN, 0, 0, &mut client) };
+    let frame = unsafe { WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, class.as_ptr(), t.as_ptr(), WS_CLIPCHILDREN, 0, 1, &mut client) };
     let mut r = RectL { l: 0, b: 0, r: cw, t: ch };
     unsafe { WinCalcFrameRect(frame, &mut r, 0) };
     let (fw, fh) = (r.r - r.l, r.t - r.b);
