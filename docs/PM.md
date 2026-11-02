@@ -2705,6 +2705,66 @@ panel in a frame of its own: IBM shows every panel in a page frame
 inside the cover page, so its title bar and border follow the style
 word too; rs2's help window takes only its scroll bars and rules.
 
+## rs2's own messages and help
+
+rs2 needs none of IBM's message files or help books: it ships its own,
+in OS/2's formats, built by xtask into every image.
+
+**Message files.** `crates/msgf` reads and writes OS/2 message files
+the way IBM's MKMSGF writes them (`FF "MKMSGF" 00`, the index of 16- or
+32-bit offsets, the country block with code pages, language and file
+name, and the extended header after the last message when there are
+several code pages; the crate documentation has the layout). IBM's
+message files on the media decompile and compile back byte for byte
+(`cargo test -p msgf`). `tools/mkmsgf` is the command line tool, with
+MKMSGF's syntax:
+
+```text
+cargo run -p mkmsgf -- FILE.TXT FILE.MSG /P850,437 /L9,1 [/D81] [/V]
+cargo run -p mkmsgf -- @CONTROL.TXT
+cargo run -p mkmsgf -- --decompile FILE.MSG [FILE.TXT]
+```
+
+The sources are in `userland/msg` (MKMSGF source: a component line, then
+`SYSnnnnC: text` per message; `%0` at the end of a prompt) and xtask's
+`MSG_FILES` lists them with their place on the disk, code pages and
+language. `OSO001.TXT`/`OSO001H.TXT` carry every number of OS/2's
+system message file with its class and insertion points, in rs2's
+words; the explanations (HELP nnnn, HELPMSG) are rs2's too. A host test
+compares classes, insertion points and prompts with IBM's file when
+`work/` has it. Functional strings stay as programs expect them:
+SYS0000's response letters `Y N A R I`, column templates, command
+syntax lines. rs2's CMD takes its error texts from OSO001.MSG
+(`util::sys_msg`), with short texts of its own when the file is missing.
+
+**Help.** `userland/help` holds IPF source compiled by `crates/ipf`
+(xtask's `HELP_FILES`; a name ending in `.INF` makes a book):
+
+- `WPHELP.HLP` (`OS2\HELP`): the Workplace Shell's help, with OS/2's
+  panel numbers for the objects and tasks (Desktop 0xFA0, Folder 0x3D45,
+  Drives 0x1F4D, Help Index 0x37DF and so on), which PMWP's
+  `wpQueryDefaultHelp` gives (`userland/pmwp/src/help.rs`: by object id
+  for the Information folder and its kin, else by class, or the
+  object's `HELPPANEL=`). `wpDisplayHelp` shows a panel through a help
+  instance per library. F1 in a folder or on the desktop: each view
+  frame is associated with the shell's help instance, which has no help
+  table, so the help manager posts HM_ERROR (HMERR_HELPTABLE_UNDEFINE)
+  to the frame, which passes it to the client; the client shows the help
+  of the object with the cursor (or of the folder). The pop-up menus have
+  IBM's Help submenu (Help index, General help, Using help, Keys help:
+  WPMENUID_HELPINDEX, _EXTENDEDHELP, _HELP_FOR_HELP, _HELPKEYS).
+- `CMDREF.INF` (`OS2\BOOK`): the Command Reference, CMD's commands and
+  rs2's utilities; `VIEW CMDREF XCOPY` opens a command's panel (the help
+  manager's topic search now prefers a title or index entry that is the
+  topic itself, so `VIEW CMDREF E` finds E, not the first title with an
+  "e").
+- `START.INF`: Start Here, a short introduction.
+
+The desktop (version 11 of PMWP's objects) has Command Reference in
+Information's Reference and Commands folder and Start Here in
+Information and the Assistance Center; the Help Index merges the index
+of every help file along `HELP`, rs2's included.
+
 ## Locales (LIBUNI and UCONV)
 
 LIBUNI.DLL (userland/libuni) has OS/2's Unicode locale calls: locale

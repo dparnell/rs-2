@@ -7,12 +7,12 @@ rs2's own PM DLLs (docs/PM.md); those tested are listed under
 
 The test setup is the development C: drive built from `work/modules.txt`:
 IBM `CMD.EXE` as the shell, the programs under `C:\IBM` and `C:\TK`, the
-REXX DLLs in `C:\OS2\DLL`, and `OSO001.MSG`, `OSO001H.MSG`, `REX.MSG`,
-`REXH.MSG` in `C:\OS2\SYSTEM` (the kernel's MSG code looks there and
-along `DPATH`). The IBM files are test inputs only and are not part of
-the repository or the rs2 ISO. Programs with bound messages (MSGBIND)
-also run without OSO001.MSG; see [Messages and national language
-support](#messages-and-national-language-support).
+REXX DLLs in `C:\OS2\DLL`, and `REX.MSG`, `REXH.MSG` in `C:\OS2\SYSTEM`
+(the kernel's MSG code looks there and along `DPATH`). The IBM files are
+test inputs only and are not part of the repository or the rs2 ISO. The
+system message files (`OSO001.MSG`, `OSO001H.MSG` and the others) and
+the help books are rs2's own, built into every image; see [Messages and
+national language support](#messages-and-national-language-support).
 
 Status: **works** = the tested function behaves as on OS/2;
 **partial** = runs, but something tested is missing or differs;
@@ -351,6 +351,19 @@ on the media, so rs2's own utilities take their place.
 
 ## Messages and national language support
 
+rs2 ships its own system message files, written for rs2 and compiled
+from MKMSGF source in `userland/msg` ([PM.md](PM.md#rs2s-own-messages-and-help)):
+`OSO001.MSG` and `OSO001H.MSG` have every message number of OS/2's
+(SYS0000-SYS3506) with OS/2's classes and insertion points (a host test
+compares them with IBM's file when `work/` has it), and `PMWP`,
+`REGISTRY`, `PMCTL`, `SYSLEVEL`, `XDF`/`XDFH`, `JFS`/`JFSH`, `PSERROR`,
+`PSACT`, `PSCAUSE`, the `ULS*01` files and `UCDFS` the same for theirs.
+Tested with them: IBM's HELPMSG (`HELPMSG SYS0005` prints rs2's message
+and explanation), IBM's EAUTIL (SYS1003), IBM's CMD.EXE (its own
+messages are bound into it, so they stay IBM's), rs2's CMD (SYS1041,
+SYS0002, SYS1003, SYS1039 from the file) and HELP; APITEST checks
+DosGetMessage on them.
+
 Bound messages, tested with OSO001.MSG removed from the disk: XCOPY,
 REPLACE (old-style stub with the header at CS:0), BACKUP, RESTORE and
 HELPMSG (16-bit, version 2 segments) and XDFCOPY (32-bit, its own
@@ -367,6 +380,7 @@ and the keyboard types the German layout (dead keys, AltGr).
 | Area | Status | Notes |
 |------|--------|-------|
 | DosGetMessage, DosInsMessage, DosPutMessage | works | Bound segments first, then the file (as named, DPATH, root of the boot drive). Class `?` gives MR_MID_NOT_FOUND; E/W get the `SYSnnnn: ` prefix; `%1`-`%9` up to the count, other `%` sequences are kept (MKMSGF consumes `%0`); truncation ends with CR LF (316); the retriever's own SYS0316-0321 texts on errors. DosPutMessage breaks lines at 80 columns as DOSCALL1 does. |
+| Message files | works | rs2's own (`userland/msg`, see above). The last message of a file ends at the extended header that MKMSGF puts after it when the file has several code pages. |
 | DosQueryMessageCP | works | 16- and 32-bit (the stubs append the bound segment as a fifth argument; the 32-bit entry does not pop it). Code pages, language and sublanguage from the bound block or the file's extended header. |
 | Country information | works | 87 countries (date order, separators, currency, decimals, clock, list separator). Compared with IBM's COUNTRY.SYS: 209 of 282 tables identical; the others differ in dummy entries of COUNTRY.SYS (country 1 with foreign code pages) and Arabic currency glyphs. |
 | Case maps | works | 21 single-byte code pages (437, 850, 852, 855, 857, 860-866, 869, 874, 1125, 813, 819, 912, 915, 921, 1004); DBCS code pages map ASCII only. 263 of 282 identical to COUNTRY.SYS. |
