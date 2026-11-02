@@ -193,6 +193,20 @@ fn main(s: &os2::Startup) -> u32 {
     let o = run("C:\\OS2\\RSH.EXE", "10.0.2.100 -l bob -n ver", None, "C:\\NETT\\RSH.OUT", true);
     check(o.contains("rsh ran: ver as bob"), "RSH -> host");
 
+    // TCPCFG2's settings (the command-line form; the notebook saves the same way).
+    let o = run("C:\\OS2\\TCPCFG2.EXE", "NETWORK=10.0.2.15/24,10.0.2.2,10.0.2.3 HOSTNAME=rs2box DOMAIN=example.org", None, "C:\\NETT\\TCPCFG.OUT", true);
+    let cfg: String = read_file("C:\\CONFIG.SYS").unwrap_or_default().iter().map(|&b| b as char).collect();
+    let res: String = read_file(&etc_path("RESOLV2")).unwrap_or_default().iter().map(|&b| b as char).collect();
+    check(
+        o.contains("saved") && cfg.contains("NETWORK=10.0.2.15/24,10.0.2.2,10.0.2.3\r\n") && cfg.contains("SET HOSTNAME=rs2box\r\n") && res.contains("domain example.org") && res.contains("nameserver 10.0.2.3"),
+        "TCPCFG2: NETWORK=, SET HOSTNAME= and RESOLV2 written",
+    );
+    let o = run("C:\\OS2\\TCPCFG2.EXE", "/QUERY", None, "C:\\NETT\\TCPCFG2.OUT", true);
+    check(o.contains("NETWORK=10.0.2.15/24,10.0.2.2,10.0.2.3") && o.contains("HOSTNAME=rs2box") && o.contains("now: lan0: 10.0.2.15"), "TCPCFG2 /QUERY: settings and the interface");
+    let o = run("C:\\OS2\\TCPCFG2.EXE", "NETWORK=10.0.2.300/24", None, "C:\\NETT\\TCPCFG3.OUT", true);
+    check(o.contains("not valid"), "TCPCFG2: a bad address is refused");
+    run("C:\\OS2\\TCPCFG2.EXE", "NETWORK=dhcp HOSTNAME= DOMAIN= NAMESERVERS=", None, "C:\\NETT\\TCPCFG4.OUT", true);
+
     let (p, f) = unsafe { (PASSES, FAILS) };
     outln(&alloc::format!("NETCLI: {p} passed, {f} failed"));
     outln(&alloc::format!("NETCLI: servers stay up for {linger} seconds"));
