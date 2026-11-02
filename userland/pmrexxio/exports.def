@@ -1,0 +1,3 @@
+; PMREXXIO.DLL, with IBM's ordinals
+RexxDestroyIOWindow=RexxDestroyIOWindow @1
+RexxCreateIOWindow=RexxCreateIOWindow @2
