@@ -1007,7 +1007,10 @@ fn search(h: u32, io: &Io) {
     if r != PB_OK as u32 {
         return;
     }
-    let mut sd = MleSearch { cb: 0x1c, find: si.text.as_ptr(), replace: core::ptr::null(), cch_find: 0, cch_replace: 0, start: -1, stop: -1, cch_found: 0 };
+    // From the cursor on, as IBM's (which gives the length as 0: rs2's
+    // MLE takes the length given).
+    let len = si.text.iter().position(|&c| c == 0).unwrap_or(si.text.len());
+    let mut sd = MleSearch { cb: 0x1c, find: si.text.as_ptr(), replace: core::ptr::null(), cch_find: len as i16, cch_replace: 0, start: -1, stop: -1, cch_found: 0 };
     let fl = MLFSEARCH_SELECTMATCH | if si.case != 0 { MLFSEARCH_CASESENSITIVE } else { 0 };
     send(unsafe { WinWindowFromID(h, MLE_WNDW as u32) }, MLM_SEARCH, fl, &mut sd as *mut MleSearch as u32);
     if sd.cch_found == 0 {
