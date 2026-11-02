@@ -161,13 +161,20 @@ fn main(s: &os2::Startup) -> u32 {
     if hmq == 0 {
         return 1;
     }
+    // `/SELFTEST`: the checks; with a file, the program then goes on
+    // with it (the checks leave C:\PVPAGES.SPL, a spool file of three
+    // pages, to look at).
     if selftest {
         let fails = selftest::run(a.hab);
-        unsafe {
-            WinDestroyMsgQueue(hmq);
-            WinTerminate(a.hab);
+        if file.is_some() {
+            extra = false;
+        } else {
+            unsafe {
+                WinDestroyMsgQueue(hmq);
+                WinTerminate(a.hab);
+            }
+            return fails;
         }
-        return fails;
     }
     a.fit_picture = ini::read(INI_APP, b"BestFit").is_some_and(|v| v.len() == 4) || ini::read(INI_APP, b"BestFit").is_none();
     a.black = ini::read(INI_APP, b"BlkBackg").is_some_and(|v| v.len() == 4);

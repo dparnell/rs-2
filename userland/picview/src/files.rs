@@ -163,6 +163,18 @@ fn fill(h: u32) {
 }
 
 fn change_dir(dir: &[u8]) -> bool {
+    // "D:\PATH": the drive first (the directory call leaves it).
+    let dir = if dir.len() >= 2 && dir[1] == b':' {
+        if !change_drive(dir[0]) {
+            return false;
+        }
+        if dir.len() == 2 {
+            return true;
+        }
+        &dir[2..]
+    } else {
+        dir
+    };
     let d = z(dir);
     unsafe { os2::DosSetCurrentDir(d.as_ptr()) == 0 }
 }
@@ -293,6 +305,7 @@ extern "C" fn dlg_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             0
         }
         WM_COMMAND => {
+            crate::trace(alloc::format!("file dialog command {}", lo(mp1)).as_bytes());
             match lo(mp1) {
                 DID_OK => ok(h),
                 DID_CANCEL => unsafe {

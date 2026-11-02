@@ -145,6 +145,11 @@ pub fn run(hab: u32) -> u32 {
         t.check("clipboard round trip", pasted.is_some_and(|p| p.pages.len() == 1 && p.size == (400, 300)));
     }
 
+    // A spool file of three pages for trying the Page menu (kept).
+    let spl = metafile::build(&demo_pages());
+    t.check("spool file written", write_file(b"C:\\PVPAGES.SPL", &spl).is_ok());
+    t.check("spool file has three pages", doc::open(hab, b"C:\\PVPAGES.SPL").is_ok_and(|d| d.pages.len() == 3));
+
     crate::trace(alloc::format!("picview selftest done: {} failure(s)", t.fails).as_bytes());
     t.fails
 }
@@ -154,4 +159,18 @@ fn info_ps(hab: u32) -> u32 {
     let dop: [u32; 9] = [0; 9];
     let hdc = unsafe { DevOpenDC(hab, OD_MEMORY, b"*\0".as_ptr(), 0, dop.as_ptr(), 0) };
     unsafe { GpiCreatePS(hab, hdc, &SizeL { cx: 0, cy: 0 }, PU_PELS | GPIF_DEFAULT | GPIT_NORMAL | GPIA_ASSOC) }
+}
+
+/// Three pages, each a frame, a filled box and its number.
+fn demo_pages() -> Metafile {
+    let mut orders: Vec<Order> = alloc::vec![Order::BeginSegment { id: 1, flags: 0, len: 0 }];
+    let p = |x, y| Point { x, y };
+    for k in 0..3i32 {
+        orders.push(Order::Set(goca::Attr::Color(1 + k)));
+        orders.push(Order::Box { at: Some(p(20, 20)), flags: 0x20, corner: p(380, 280), h: 0, v: 0 });
+        orders.push(Order::Box { at: Some(p(60 + 60 * k, 80)), flags: 0x40, corner: p(160 + 60 * k, 200), h: 0, v: 0 });
+        orders.push(Order::CharString { at: Some(p(40, 240)), moving: false, text: alloc::format!("Page {}", k + 1).into_bytes() });
+        orders.push(newframe());
+    }
+    Metafile { units: PU_PELS, page: (400, 300), long: true, data: goca::encode_all(&orders), ..Metafile::default() }
 }
