@@ -616,6 +616,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("diskcopy", "OS2\\DISKCOPY.EXE"),
         ("diskcomp", "OS2\\DISKCOMP.EXE"),
         ("print", "OS2\\PRINT.EXE"),
+        ("recover", "OS2\\RECOVER.EXE"),
+        ("undelete", "OS2\\UNDELETE.EXE"),
         // FDISK was replaced by LVM in Warp 4.5; the old name runs it.
         ("lvm", "OS2\\FDISK.EXE"),
         ("unpack", "OS2\\UNPACK.EXE"),

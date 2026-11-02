@@ -260,6 +260,38 @@ fn system() {
     check("SETBOOT Boot Manager options", rc == 1 && !o.is_empty());
     let (rc, _) = run(&util("ANSI"), "ON", "");
     check("ANSI ON", rc == 0);
+    let (rc, o) = run(&util("LVM"), "/QUERY", "");
+    check("LVM /QUERY lists the disks", rc == 0 && o.contains("Drive 1"));
+    let (rc, _) = run(&util("UNDELETE"), "", "");
+    check("UNDELETE without DELDIR", rc == 1);
+}
+
+fn diskettes(root: &str) {
+    // A 1.44 MB diskette image with a boot sector BPB.
+    let mut img = alloc::vec![0u8; 1440 * 1024];
+    img[11..13].copy_from_slice(&512u16.to_le_bytes());
+    img[19..21].copy_from_slice(&2880u16.to_le_bytes());
+    img[24..26].copy_from_slice(&18u16.to_le_bytes());
+    img[26..28].copy_from_slice(&2u16.to_le_bytes());
+    img[510] = 0x55;
+    img[511] = 0xaa;
+    for (i, b) in img.iter_mut().enumerate().skip(512) {
+        *b = (i % 251) as u8;
+    }
+    let (a, b) = (join(root, "A.IMG"), join(root, "B.IMG"));
+    let _ = write_file(&a, &img);
+    let (rc, o) = run(&util("DISKCOPY"), &alloc::format!("{a} {b}"), "");
+    check("DISKCOPY copies an image", rc == 0 && o.contains("80") && o.contains("18") && read_file(&b).ok().as_deref() == Some(&img[..]));
+    let (rc, _) = run(&util("DISKCOMP"), &alloc::format!("{a} {b}"), "");
+    check("DISKCOMP finds them equal", rc == 0);
+    img[100_000] ^= 1;
+    let _ = write_file(&b, &img);
+    let (rc, o) = run(&util("DISKCOMP"), &alloc::format!("{a} {b}"), "");
+    check("DISKCOMP reports the differing track", rc == 1 && o.contains(" 2"));
+    let f = join(root, "RECOVER.TXT");
+    put(&f, "recover me\r\n");
+    let (rc, o) = run(&util("RECOVER"), &f, "");
+    check("RECOVER keeps a readable file", rc == 0 && o.contains("12") && read_file(&f).ok().as_deref() == Some(&b"recover me\r\n"[..]));
 }
 
 fn main(s: &os2::Startup) -> u32 {
@@ -286,6 +318,7 @@ fn main(s: &os2::Startup) -> u32 {
     patch(&root);
     levels(&root);
     system();
+    diskettes(&root);
     let (p, f) = (PASSED.load(Ordering::Relaxed), FAILED.load(Ordering::Relaxed));
     outln(&alloc::format!("UTILTEST: {p} passed, {f} failed"));
     rmtree(&root);
