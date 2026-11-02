@@ -11,6 +11,9 @@ SET GLOSSARY=C:\OS2\HELP\GLOSS
 SET BOOKSHELF=C:\OS2\BOOK
 REM Multimedia (MMPM/2): sounds and other media files in %MMBASE%
 SET MMBASE=C:\MMOS2;
+REM SOM: the interface repository files (IBM's SOM.IR, WPSH.IR, ...; none are
+REM installed with rs2)
+SET SOMIR=C:\OS2\ETC\SOM.IR
 SET COMSPEC=C:\OS2\CMD.EXE
 SET OS2_SHELL=C:\OS2\CMD.EXE
 REM PM: milliseconds before a program that does not take its input is "not responding"

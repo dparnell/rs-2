@@ -311,6 +311,9 @@ pub extern "C" fn ret0() {
     core::arch::naked_asm!("xor eax, eax", "ret");
 }
 
+/// somMethodInfo of a method returning a structure (SOMRdRetaggregate).
+static AGGREGATE: [u32; 3] = [8, 0, 0];
+
 /// Build a class from its description with a layout-4 somStaticClassInfo
 /// (as OS/2 Warp 4's SOM compiler emits it), unless it exists.
 pub fn build_class(s: &ClassSpec) -> usize {
@@ -326,11 +329,17 @@ pub fn build_class(s: &ClassSpec) -> usize {
         if m.is_empty() {
             continue;
         }
+        // "*name": the method returns a structure (its address is the
+        // first argument, the object the second): its somApRdInfo says so.
+        let (m, ap) = match m.strip_prefix('*') {
+            Some(m) => (m, Box::leak(Box::new([0usize, 0, AGGREGATE.as_ptr() as usize])).as_ptr() as usize),
+            None => (m, 0),
+        };
         let mut d = s.name.as_bytes().to_vec();
         d.extend_from_slice(b"::");
         d.extend_from_slice(m.as_bytes());
         let p = if p == 0 { ret0 as usize } else { p };
-        smt.push([s.cd as usize + 4 * (k + 1), leak_id_ptr(m.as_bytes()), leak_id_ptr(&d), p, usize::MAX, 0]);
+        smt.push([s.cd as usize + 4 * (k + 1), leak_id_ptr(m.as_bytes()), leak_id_ptr(&d), p, usize::MAX, ap]);
     }
     let omt: Vec<[usize; 2]> = s.overrides.iter().map(|&(m, p)| [leak_id_ptr(m.as_bytes()), p]).collect();
     let pids: Vec<SomId> = s.parents.iter().map(|p| leak_id(p.as_bytes())).collect();

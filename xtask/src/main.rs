@@ -629,6 +629,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("som", "OS2\\DLL\\SOM.DLL"),
         ("somtc", "OS2\\DLL\\SOMTC.DLL"),
         ("somu", "OS2\\DLL\\SOMU.DLL"),
+        ("somir", "OS2\\DLL\\SOMIR.DLL"),
         ("win16", "OS2\\DLL\\WIN16.DLL"),
     ];
 
