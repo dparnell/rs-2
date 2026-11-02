@@ -436,6 +436,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "rexx"
+version = "0.1.0"
+
+[[package]]
+name = "rexx-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "rexx",
+ "thunk16",
+]
+
+[[package]]
+name = "rexxapi-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "thunk16",
+]
+
+[[package]]
 name = "rexxcmds"
 version = "0.1.0"
 dependencies = [

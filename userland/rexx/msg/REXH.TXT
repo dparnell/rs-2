@@ -1,0 +1,174 @@
+; REXH.MSG: help for rs2's REXX messages (HELP REXnnnn), rs2's own text.
+REX
+REX0000H:
+REX0001H: EXPLANATION: The process has opened as many files as it may.
+ACTION: Close streams the program no longer needs (LINEOUT or
+        STREAM with the CLOSE command).
+REX0002H:
+REX0003H: EXPLANATION: The program file does not exist or another process
+             holds it locked.
+ACTION: Check the file name and try again.
+REX0004H: EXPLANATION: The program stopped because a halt was requested
+             (Ctrl+Break, or the application that runs it).
+ACTION: To handle halts in the program, use SIGNAL ON HALT or
+        CALL ON HALT.
+REX0005H: EXPLANATION: The interpreter could not get the memory or other
+             system resources it needs.
+ACTION: End other programs and try again.
+REX0006H: EXPLANATION: A comment was not ended with */, or a string was not
+             ended with its quote on the same line.
+ACTION: Add the missing */ or quote.
+REX0007H: EXPLANATION: A SELECT instruction must contain WHEN clauses (and
+             may end with OTHERWISE); another instruction was found,
+             or no WHEN matched and there is no OTHERWISE.
+ACTION: Correct the SELECT instruction.
+REX0008H: EXPLANATION: THEN or ELSE does not follow an IF or WHEN.
+ACTION: Check the IF and WHEN instructions; a DO group may be
+        missing its END.
+REX0009H: EXPLANATION: WHEN or OTHERWISE appears outside a SELECT
+             instruction.
+ACTION: Check the SELECT instruction for a missing or extra END.
+REX0010H: EXPLANATION: An END has no matching DO or SELECT, or the name on
+             END is not the control variable of its DO.
+ACTION: Check the DO, SELECT and END instructions.
+REX0011H: EXPLANATION: Routine calls or control structures are nested
+             more deeply than the interpreter allows, for example
+             by a recursion that does not end.
+ACTION: Check the program for endless recursion.
+REX0012H: EXPLANATION: A clause is longer than the interpreter can handle.
+ACTION: Split the clause.
+REX0013H: EXPLANATION: The program contains a character that may only
+             appear in strings or comments.
+ACTION: Remove the character or put it in quotes. Program files
+        must have CR LF line ends.
+REX0014H: EXPLANATION: The program ends inside a DO, SELECT or IF
+             instruction.
+ACTION: Add the missing END or the instruction after THEN or ELSE.
+REX0015H: EXPLANATION: A string ending in X or B is not a valid
+             hexadecimal or binary string. Blanks may separate only
+             whole bytes (hexadecimal) or groups of four digits
+             (binary).
+ACTION: Correct the string. A variable named X or B right after a
+        string must be separated from it by a blank or ||.
+REX0016H: EXPLANATION: SIGNAL, a condition trap or CALL ON names a label
+             that is not in the program.
+ACTION: Add the label or correct the name.
+REX0017H: EXPLANATION: PROCEDURE must be the first instruction of an
+             internal routine called with CALL or as a function.
+ACTION: Move the PROCEDURE instruction.
+REX0018H: EXPLANATION: IF or WHEN is not followed by THEN.
+ACTION: Add THEN.
+REX0019H: EXPLANATION: The instruction needs a string or a symbol here.
+ACTION: Correct the instruction.
+REX0020H: EXPLANATION: The instruction needs a symbol here.
+ACTION: Correct the instruction.
+REX0021H: EXPLANATION: The clause continues after the instruction is
+             complete.
+ACTION: Remove the extra data or end the clause with a semicolon.
+REX0022H: EXPLANATION: A character string is not valid.
+ACTION: Correct the string.
+REX0023H: EXPLANATION: A data string is not valid.
+ACTION: Correct the data.
+REX0024H: EXPLANATION: The TRACE setting is not one of A, C, E, F, I, L,
+             N, O, R, S, a number, or ? or ! with them.
+ACTION: Correct the TRACE instruction or function.
+REX0025H: EXPLANATION: A keyword after the instruction keyword is not
+             valid (for example in NUMERIC, PARSE or a condition
+             trap).
+ACTION: Correct the instruction.
+REX0026H: EXPLANATION: A whole number within the NUMERIC DIGITS setting is
+             needed, for example in a DO count or an exponent.
+ACTION: Correct the value.
+REX0027H: EXPLANATION: The DO instruction is not valid: TO, BY and FOR may
+             each appear once, after a control variable.
+ACTION: Correct the DO instruction.
+REX0028H: EXPLANATION: LEAVE or ITERATE is not inside a repetitive DO, or
+             names a control variable no active loop has.
+ACTION: Correct the instruction.
+REX0029H: EXPLANATION: The environment name in ADDRESS is too long.
+ACTION: Use a shorter name.
+REX0030H: EXPLANATION: A name or string is longer than allowed.
+ACTION: Shorten it.
+REX0031H: EXPLANATION: A value cannot be assigned to a symbol that starts
+             with a digit or a period.
+ACTION: Use a variable name that starts with a letter.
+REX0033H: EXPLANATION: An expression gave a value the instruction cannot
+             use, for example NUMERIC DIGITS not above NUMERIC FUZZ.
+ACTION: Correct the value.
+REX0034H: EXPLANATION: IF, WHEN, WHILE, UNTIL and the logical operators
+             need the value 0 or 1.
+ACTION: Correct the expression.
+REX0035H: EXPLANATION: An expression is not valid: an operator has no
+             operand, or two terms follow each other wrongly.
+ACTION: Correct the expression.
+REX0036H: EXPLANATION: An expression has more opening than closing
+             parentheses.
+ACTION: Add the missing parenthesis.
+REX0037H: EXPLANATION: A comma or a closing parenthesis appears where it
+             is not allowed.
+ACTION: Correct the expression.
+REX0038H: EXPLANATION: A PARSE template (or ARG or PULL) is not valid.
+ACTION: Correct the template.
+REX0039H: EXPLANATION: An expression is nested too deeply to evaluate.
+ACTION: Simplify the expression.
+REX0040H: EXPLANATION: A built-in or external routine was called with
+             arguments it does not accept, or it reported an error.
+ACTION: Check the number and the values of the arguments.
+REX0041H: EXPLANATION: A value used in arithmetic or as a number is not a
+             number.
+ACTION: Check the values in the expression.
+REX0042H: EXPLANATION: An arithmetic result is too large or too small, or
+             a division by zero was attempted.
+ACTION: Check the expression.
+REX0043H: EXPLANATION: A routine called is neither an internal label, a
+             built-in function, a registered function nor a program
+             found in the current directory or along PATH.
+ACTION: Check the name; register function packages with
+        RXFUNCADD.
+REX0044H: EXPLANATION: A routine called as a function ended without
+             returning a result.
+ACTION: End the routine with RETURN and an expression.
+REX0045H: EXPLANATION: A routine called as a function ended with RETURN
+             without an expression.
+ACTION: Return a result, or call the routine with CALL.
+REX0046H: EXPLANATION: A variable reference in parentheses is not valid.
+ACTION: Correct the reference.
+REX0047H: EXPLANATION: A label appears where it is not allowed.
+ACTION: Move the label.
+REX0048H: EXPLANATION: A system service the interpreter needed failed,
+             for example an exit reported an error.
+ACTION: Check the program and its environment.
+REX0049H: EXPLANATION: The interpreter found an internal error.
+ACTION: Report the problem.
+REX0114H: EXPLANATION: Interactive tracing pauses after each traced clause.
+ACTION: Press ENTER to go on, type = to run the clause again,
+        type an instruction to run it, or TRACE OFF to stop.
+REX0115H: EXPLANATION: RXSUBCOM was called with wrong parameters.
+ACTION: Use RXSUBCOM REGISTER, DROP, QUERY or LOAD with an
+        environment name.
+REX0116H: EXPLANATION: RXSUBCOM REGISTER needs an environment name, a DLL
+             name and a procedure name.
+ACTION: Correct the command.
+REX0117H: EXPLANATION: RXSUBCOM DROP needs an environment name and
+             optionally a DLL name.
+ACTION: Correct the command.
+REX0118H: EXPLANATION: RXSUBCOM LOAD needs an environment name and
+             optionally a DLL name.
+ACTION: Correct the command.
+REX0119H: EXPLANATION: The REXX queue system could not be set up.
+ACTION: Restart the system.
+REX0120H: EXPLANATION: The data is too long for a queue entry.
+ACTION: Use shorter entries.
+REX0121H: EXPLANATION: The memory for REXX queues is used up.
+ACTION: Delete queues or entries that are no longer needed.
+REX0122H: EXPLANATION: A queue name may contain only letters, digits and
+             the characters . ! ? _
+ACTION: Correct the name.
+REX0123H: EXPLANATION: The queue can be read and written only first in
+             first out or last in first out.
+ACTION: Use /FIFO or /LIFO.
+REX0124H: EXPLANATION: The queue named does not exist.
+ACTION: Create the queue with RXQUEUE('Create', name).
+REX0125H: EXPLANATION: RXSUBCOM QUERY needs an environment name and
+             optionally a DLL name.
+ACTION: Correct the command.

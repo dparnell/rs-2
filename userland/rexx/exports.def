@@ -1,0 +1,13 @@
+; REXX.DLL: IBM's names and ordinals.
+RexxStart=__a_RexxStart @1
+RexxVariablePool=__a_RexxVariablePool @2
+RexxSetHalt=__a_RexxSetHalt @3
+RexxSetTrace=__a_RexxSetTrace @4
+RexxResetTrace=__a_RexxResetTrace @5
+; 16-bit entry points (src/r16.rs)
+RXTRACERESET=RXTRACERESET @6
+RXBREAKCLEANUP=RXBREAKCLEANUP @7
+RXVAR=RXVAR @8
+REXXSAA=REXXSAA @9
+RXHALTSET=RXHALTSET @10
+RXTRACESET=RXTRACESET @11

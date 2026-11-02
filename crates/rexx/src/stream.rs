@@ -381,8 +381,7 @@ pub fn lines(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
     let Ok(i) = it.stream(&name, false) else { return Ok(b"0".to_vec()) };
     let s = &it.st.streams.list[i];
     if !s.persistent {
-        let (h, ahead) = (s.h, s.ahead.is_some());
-        let r = ahead || it.host.f_ready(h);
+        let r = it.transient_ready(i);
         return Ok(if r { b"1".to_vec() } else { b"0".to_vec() });
     }
     let pos = s.rpos;
@@ -411,8 +410,7 @@ pub fn chars(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
     let Ok(i) = it.stream(&name, false) else { return Ok(b"0".to_vec()) };
     let s = &it.st.streams.list[i];
     if !s.persistent {
-        let (h, ahead) = (s.h, s.ahead.is_some());
-        let r = ahead || it.host.f_ready(h);
+        let r = it.transient_ready(i);
         return Ok(if r { b"1".to_vec() } else { b"0".to_vec() });
     }
     let pos = s.rpos;
@@ -597,6 +595,27 @@ pub fn stream_fn(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
 }
 
 impl Interp<'_> {
+    /// Whether a transient stream has data: devices always do; pipes and
+    /// redirected input are read one character ahead (end of data: no).
+    fn transient_ready(&mut self, i: usize) -> bool {
+        let s = &self.st.streams.list[i];
+        if s.ahead.is_some() {
+            return true;
+        }
+        let h = s.h;
+        if self.host.f_is_device(h) {
+            return true;
+        }
+        let mut b = [0u8; 1];
+        match self.host.f_read(h, &mut b) {
+            Ok(1) => {
+                self.st.streams.list[i].ahead = Some(b[0]);
+                true
+            }
+            _ => false,
+        }
+    }
+
     pub fn queued_count(&mut self) -> usize {
         let mut st = core::mem::replace(&mut self.st, crate::exec::State::empty());
         let n = self.host.queued(&mut st);

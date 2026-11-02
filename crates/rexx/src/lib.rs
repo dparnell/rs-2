@@ -172,9 +172,9 @@ pub trait Host {
     /// The fully qualified name of an existing file.
     fn f_exists(&mut self, name: &[u8]) -> Option<Vec<u8>>;
     fn f_info(&mut self, name: &[u8]) -> Option<FileInfo>;
-    /// Whether a standard-stream handle has input waiting (CHARS/LINES on
-    /// a pipe or the keyboard).
-    fn f_ready(&mut self, _h: u32) -> bool {
-        true
+    /// Whether a handle is a character device (LINES and CHARS report 1
+    /// for devices without reading ahead).
+    fn f_is_device(&mut self, _h: u32) -> bool {
+        false
     }
 }
