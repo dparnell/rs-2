@@ -880,6 +880,46 @@ replacement undone. Without MMPARTS.DLL
 its checks are skipped. WPSTEST SHELL also has `REGISTER dll class` and
 `CREATE class title location setup` (with `|` for `;`).
 
+## Object REXX in the shell (REXXWPS)
+
+IBM's Object REXX scripts the Workplace Shell with OREXXWPS.DLL
+(installed as REXXWPS.DLL), a class DLL that WPSINST.CMD registers
+(WPZORXINIT and WPZORX, also under `PM_Workplace:IplLoad`). Its
+SOMInitModule starts Object REXX in the shell's process and runs the
+tokenized WPSINIT.WPS (the WPS server, `.WPS` in the global
+environment), WPCLS.IMP (the classes WPObject, WPFolder, WPAbstract,
+WPTransient, WPProgram and WPDesktop as REXX proxies) and WPREXX.IMP
+(WPZORXINIT, a WPTransient whose `OPEN=DEFAULT` makes the server's
+object window). REXX programs in other processes then send their WPS
+messages to the shell's REXX threads, which call the objects' methods
+there and hand back object handles. What it needs of rs2's shell, each
+as IBM's PMWP does it (studied in Ghidra):
+
+- **WPCONFIG.DLL.** REXXWPS names IBM's System Setup class library among
+  its modules. rs2 has those classes in PMWP; its WPCONFIG.DLL
+  (`userland/wpconfig`) exports IBM's names and ordinals as forwarders to
+  PMWP's private ordinals 9101-9154 (the NewClass functions, ClassData
+  and CClassData of WPSystem, WPClock, WPMouse, WPKeyboard, WPSound and
+  the palettes, and their metaclasses).
+- **Handles of transient objects** (IBM's trn_wpQueryHandle): the
+  object's number (counted from 1) in the low word and its top byte, the
+  transient class's tag 4 between them; wpclsObjectFromHandle finds the
+  object while it lives. Transients are still not saved.
+- **`OPEN=DEFAULT` / `OPEN=SETTINGS`** in setup strings (IBM's
+  ShlOpenObjectOnceInitialized): the object is locked and the view opens
+  on the shell's PM thread (a message to the shell's object window), so
+  objects made from other threads open their views where the shell's
+  windows live.
+- SOM's redispatch stubs (REXX overrides methods with somOverrideSMethod
+  and the method's somGetRdStub) and the interface repository.
+
+**Test.** `tests/rexx/ORXWPS.CMD`, with Object REXX staged
+(COMPATIBILITY.md): `cargo xtask run --init "RS2\WPSTEST.EXE SHELL RUN
+C:\CMD.EXE /C ORXWPS.CMD"`. It registers the classes, then makes a folder
+on the desktop and a program object in it, retitles and sets them up and
+deletes them, all from a CMD process. WPREXX.IMP's wpOpen of WPZORXINIT
+reports `Could not find routine "WPUSER"` in the shell (not found yet).
+
 ## What is not there
 
 Compared with IBM's System Setup (INI.RC's `<WP_CONFIG>`) and its other
