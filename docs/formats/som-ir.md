@@ -146,11 +146,24 @@ offset 12), and rewrites the fixed record's mode, or a new name of the
 same length there and in the container's contents record. It does not
 merge neighbouring free blocks. Either SOMIR reads the other's updates.
 
-## rs2's SOM.IR
+## rs2's SOM.IR, WPSH.IR, WPDSERV.IR and REXX.IR
 
-xtask writes `\OS2\ETC\SOM.IR` from `userland/somir/som-ir.txt`
-(xtask/src/somir.rs; `tools/scripts/gen_som_ir.py` makes the text from
-the Toolkit's IDL). It lays the file out in one pass: the header, then
+xtask writes `\OS2\ETC\SOM.IR`, `WPSH.IR`, `WPDSERV.IR` and `REXX.IR`
+from `userland/somir/som-ir.txt`, `wpsh-ir.txt`, `wpdserv-ir.txt` and
+`rexx-ir.txt` (xtask/src/somir.rs; `cargo xtask ir` writes them alone
+into target/). `tools/scripts/gen_som_ir.py` makes the text from IDL:
+the Toolkit's (`som/include` for SOM's classes, `idl` for the Workplace
+Shell's and WPDServer) and rs2's own in `userland/somir/idl` for the
+classes the Toolkit does not describe (WPImageFile, WPMinWindow, and
+REXXSOM's DLF classes as rs2 builds them). Like SOM's compiler updating
+a repository, each file after SOM.IR leaves out what SOM.IR holds:
+WPSH.IR has the Workplace Shell's interfaces and wptypes.idl's types;
+WPDSERV.IR and REXX.IR, as IBM's do, repeat SOMObject and the types of
+somobj.idl. An interface without instance data has a tk_null TypeCode,
+as in IBM's files. `tools/scripts/irdump.py` prints them for comparing
+with IBM's.
+
+It lays each file out in one pass: the header, then
 each container's definitions (fixed record, variable record, and for an
 interface, module or operation its definitions and contents record), the
 container's contents record after them, the top level's last, and at the

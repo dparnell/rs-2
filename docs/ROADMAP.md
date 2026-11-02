@@ -421,6 +421,12 @@ Status markers: done, in progress, planned.
 - done: rs2's own `\OS2\ETC\SOM.IR` (the interfaces of the SOM classes
   rs2 ships), written at build time from userland/somir/som-ir.txt
   (tools/scripts/gen_som_ir.py makes it from the Toolkit's IDL)
+- done: rs2's own `WPSH.IR` (the Workplace Shell's classes), `WPDSERV.IR`
+  (WPDServer, SOMDServer, the socket classes) and `REXX.IR` (REXXSOM's
+  DLF classes), made the same way (rs2's own IDL for the classes the
+  Toolkit does not describe: WPImageFile, WPMinWindow, the DLF classes);
+  CONFIG.SYS's SOMIR lists all four; SOMTEST, ORXTEST, ORXSOM and ORXWPS
+  pass with no IBM files, and IBM's SOMIR reads them
 - done: SOMD.DLL as a stub: IBM's exports and classes, every method
   raising NO_IMPLEMENT; IBM's Object REXX runs (ORXTEST, ORXSOM, ORXWPS)
   without IBM's SOMD, SOMEM, SOMS and SOMSEC

@@ -22,7 +22,7 @@ WinCreateObject for program objects and the file icon calls.
 | Toolkit `som/include/somapi.h`, `somcls.idl`, `somobj.idl`, `somcm.idl` | same | `somStaticClassInfo`, ClassData, SOMObject/SOMClass/SOMClassMgr |
 | Toolkit `samples/wps/wpstutor` (with a built `wpstutor.dll`) | same | a third-party WPS class DLL: a binary-compatibility test |
 | Toolkit `som/bin/sc.exe` | same | IBM's SOM compiler (for more test classes) |
-| WPSH.IR, SOM.IR | `unpacked/disk_7/OS2/ETC` | interface repositories |
+| WPSH.IR, SOM.IR | `unpacked/disk_7/OS2/ETC` | interface repositories (rs2 makes its own: docs/formats/som-ir.md) |
 | INI.RC, INISYS.RC | `unpacked/disk_2/OS2`, `disk_1` | the default desktop: 266 `PM_InstallObject` entries; MAKEINI builds OS2.INI from them (it already runs on rs2) |
 
 The Ghidra projects are made with `tools/ghidra/lxload.sh PMWP.DLL
