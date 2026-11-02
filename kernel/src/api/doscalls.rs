@@ -685,7 +685,7 @@ fn dos_sleep(c: &mut Ctx) -> u32 {
 
 fn write_datetime(c: &Ctx, a: u32) -> u32 {
     let t = crate::rtc::now();
-    let hundredths = ((crate::irq::uptime_ms() / 10) % 100) as u8;
+    let hundredths = crate::rtc::hundredths(&t);
     // DATETIME: hours, minutes, seconds, hundredths, day, month, year,
     // timezone (minutes from UTC, -1 = undefined), weekday.
     let mut b = [0u8; 11];

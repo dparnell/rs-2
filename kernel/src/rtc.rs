@@ -103,6 +103,26 @@ pub fn weekday(y: u16, m: u8, d: u8) -> u8 {
     ((y + y / 4 - y / 100 + y / 400 + T[(m as usize).clamp(1, 12) - 1] + d as u16) % 7) as u8
 }
 
+/// The second last read from the clock and the uptime at which it was first
+/// seen, for hundredths().
+static SECOND: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+static SECOND_SEEN: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
+
+/// Hundredths of a second for a time read with now(): counted from when its
+/// second was first seen (the CMOS clock has no finer field), so that times
+/// read one after the other never go backwards. The infoseg's refresh reads
+/// the clock four times a second, which keeps the count close.
+pub fn hundredths(t: &DateTime) -> u8 {
+    use core::sync::atomic::Ordering;
+    let s = unix_time(t);
+    let ms = crate::irq::uptime_ms();
+    if SECOND.swap(s, Ordering::SeqCst) != s {
+        SECOND_SEEN.store(ms, Ordering::SeqCst);
+        return 0;
+    }
+    (ms.saturating_sub(SECOND_SEEN.load(Ordering::SeqCst)) / 10).min(99) as u8
+}
+
 /// Seconds since 1970-01-01 00:00:00.
 /// Years outside 1970-2105 (a torn CMOS read) are clamped to them.
 pub fn unix_time(t: &DateTime) -> u32 {

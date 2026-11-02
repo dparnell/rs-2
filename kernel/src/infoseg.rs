@@ -144,7 +144,7 @@ pub fn update() {
         *p.add(8) = t.hour;
         *p.add(9) = t.minute;
         *p.add(10) = t.second;
-        *p.add(11) = ((ms / 10) % 100) as u8;
+        *p.add(11) = crate::rtc::hundredths(&t);
         (p.add(12) as *mut u16).write_unaligned(0xffff);
         *p.add(16) = t.day;
         *p.add(17) = t.month;
