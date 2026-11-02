@@ -17,12 +17,12 @@ fn proc(module: &[u8], ord: u32, slot: &AtomicUsize) -> Option<usize> {
     if p != 0 {
         return Some(p);
     }
+    // Loaded (not just looked up): a module another process loaded is
+    // not yet this process's.
     let mut h = 0u32;
-    if unsafe { DosQueryModuleHandle(module.as_ptr(), &mut h) } != 0 {
-        let mut fail = [0u8; 16];
-        if unsafe { DosLoadModule(fail.as_mut_ptr(), 16, module.as_ptr(), &mut h) } != 0 {
-            return None;
-        }
+    let mut fail = [0u8; 16];
+    if unsafe { DosLoadModule(fail.as_mut_ptr(), 16, module.as_ptr(), &mut h) } != 0 {
+        return None;
     }
     let mut p = 0usize;
     if unsafe { DosQueryProcAddr(h, ord, null(), &mut p) } != 0 || p == 0 {
@@ -357,7 +357,9 @@ pub fn sys_query_class_list(a: &Args, r: &mut Ret) -> u32 {
     }
     set_var(SHV_SET, &tail(&stem, b"0"), &dec(count as i64));
     unsafe { DosFreeMem(buf) };
-    r.num(0);
+    // IBM's returns a stale stack address here (never 0 when there are
+    // classes); the number of classes keeps that property.
+    r.num(count as i32);
     0
 }
 

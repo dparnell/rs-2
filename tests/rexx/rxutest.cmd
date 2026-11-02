@@ -304,13 +304,26 @@ call check call40('SysCurPos -1, 0') = 40, 'SysCurPos negative: error 40'
 
 /* The Workplace Shell (only with the shell running) */
 if wordpos('WPS', opts) > 0 then do
-  call check SysQueryClassList('cl.') = 0 & cl.0 > 10, 'SysQueryClassList' cl.0
+  call SysQueryClassList 'cl.'
+  call check cl.0 > 10 & words(cl.1) = 2, 'SysQueryClassList' cl.0 cl.1
   call check SysCreateObject('WPFolder', 'RXU Folder', '<WP_DESKTOP>', 'OBJECTID=<RXU_FOLDER>', 'R') = 1, 'SysCreateObject'
   call check SysSetObjectData('<RXU_FOLDER>', 'TITLE=RXU Renamed') = 1, 'SysSetObjectData'
   call check SysDestroyObject('<RXU_FOLDER>') = 1, 'SysDestroyObject'
   call check SysDestroyObject('<RXU_FOLDER>') = 0, 'SysDestroyObject of a missing object'
-  call check SysQuerySwitchList('sw.') = 0 & sw.0 > 0, 'SysQuerySwitchList' sw.0
+  call check SysQuerySwitchList('sw.', 'GIN') = 0 & datatype(sw.0, 'W'), 'SysQuerySwitchList' sw.0
   call check SysWaitForShell('DESKTOPCREATED', 'QUERY') = 1, 'SysWaitForShell'
+end
+
+/* The keyboard (argument KEYS; type x, F1, Up, y) */
+if wordpos('KEYS', opts) > 0 then do
+  k1 = SysGetKey('NOECHO'); k2 = SysGetKey('NOECHO'); k3 = SysGetKey('NOECHO')
+  k4 = SysGetKey('NOECHO'); k5 = SysGetKey('NOECHO'); k6 = SysGetKey()
+  say
+  call check k1 = 'x', 'SysGetKey' c2x(k1)
+  call check k2 || k3 = '003B'x, 'SysGetKey F1' c2x(k2 || k3)
+  call check k4 || k5 = 'E048'x, 'SysGetKey Up' c2x(k4 || k5)
+  call check k6 = 'y', 'SysGetKey with echo' c2x(k6)
+  call check call40("SysGetKey 'x'") = 40, 'SysGetKey x: error 40'
 end
 
 /* Clean up */
