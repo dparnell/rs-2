@@ -67,6 +67,14 @@ const ID_SCHEME: u32 = 8232;
 const ID_SHOWMOVES: u32 = 3619;
 const ID_HELP: u32 = 0x3f5;
 
+/// The dialogs' controls (each shows its dialog's help panel).
+pub const CONTROLS: [u16; 37] = [
+    ID_GAMES as u16, ID_WHUMAN as u16, ID_WCOMPUTER as u16, ID_WNETWORK as u16, ID_BHUMAN as u16, ID_BCOMPUTER as u16, ID_BNETWORK as u16, ID_WMORE as u16, ID_BMORE as u16, ID_WNAME as u16,
+    ID_BNAME as u16, 8136, 8137, 8138, 8231, 8232, ID_BOOK as u16, ID_WTIME as u16, ID_BTIME as u16, ID_SMOVE as u16, ID_SCOUNT as u16, ID_STIME as u16, ID_WNAMEREC as u16, ID_BNAMEREC as u16,
+    ID_WMOVES as u16, ID_BMOVES as u16, ID_VALIDLIST as u16, ID_VALIDCOUNT as u16, ID_CAPTURED as u16, ID_ANGLE as u16, ID_ANGLETEXT as u16, ID_FROM as u16, ID_TO as u16, ID_WARNINGS as u16,
+    ID_VIEW2D as u16, ID_VIEW3D as u16, ID_SHOWMOVES as u16,
+];
+
 fn time_text(ms: u32) -> Vec<u8> {
     let s = ms / 1000;
     alloc::format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60).into_bytes()
@@ -836,7 +844,8 @@ extern "C" fn rotate_proc(h: u32, m: u32, mp1: u32, mp2: u32) -> u32 {
             let sb = item(h, ID_ANGLE);
             send(sb, SBM_SETSCROLLBAR, a.view.angle as u32, mp(0, 359));
             show(h, a.view.angle);
-            0
+            unsafe { WinSetFocus(HWND_DESKTOP, sb) };
+            1
         }
         WM_HSCROLL => {
             let sb = item(h, ID_ANGLE);

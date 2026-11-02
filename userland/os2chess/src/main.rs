@@ -349,7 +349,7 @@ fn help_windows() -> Vec<HelpWindow<'static>> {
         (IDM_SETTINGS, 8130),
         (IDM_SAVESETTINGS, 8107),
     ];
-    alloc::vec![
+    let v = alloc::vec![
         HelpWindow { id: FRAME_ID as u16, ext: 8200, items: main },
         HelpWindow { id: dialogs::DLG_LOAD, ext: 8102, items: &[(1, 8220), (2, 8221)] },
         HelpWindow { id: dialogs::DLG_DELETE, ext: 8104, items: &[(1, 8223), (2, 8221)] },
@@ -366,7 +366,24 @@ fn help_windows() -> Vec<HelpWindow<'static>> {
         HelpWindow { id: dialogs::DLG_PROMOTE, ext: 8204, items: &[(1, 8220)] },
         HelpWindow { id: dialogs::DLG_TOMOVE, ext: 8160, items: &[(1, 8220)] },
         HelpWindow { id: dialogs::DLG_PRODUCT, ext: 8224, items: &[(1, 8224)] },
-    ]
+    ];
+    // In a dialog, the Help button and every other control show the
+    // dialog's panel (the help manager looks up the control with the
+    // focus).
+    v.into_iter()
+        .map(|w| {
+            if w.id == FRAME_ID as u16 {
+                return w;
+            }
+            let mut items: Vec<(u16, u16)> = w.items.to_vec();
+            for &id in dialogs::CONTROLS.iter().chain([0x3f5u16, 2, 1, 4, 6, 12, 22, 23, 24, 25].iter()) {
+                if !items.iter().any(|&(i, _)| i == id) {
+                    items.push((id, w.ext));
+                }
+            }
+            HelpWindow { id: w.id, ext: w.ext, items: alloc::boxed::Box::leak(items.into_boxed_slice()) }
+        })
+        .collect()
 }
 
 // ---- Settings ----
