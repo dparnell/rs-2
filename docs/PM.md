@@ -2986,12 +2986,15 @@ CD. rs2 ships none of IBM's files; this puts the user's own copies where
 OS/2 itself keeps them.
 
 - **The catalogue** is `userland/appinst/apps.txt`, built into the
-  program: categories (Games, Productivity, REXX, Command line tools,
-  Information) with their applications, each with its files (the target
+  program: categories (Productivity, REXX, Command line tools,
+  Information...) with their applications, each with its files (the target
   path and the CD's packed file that holds it), the program objects to
   make and what else it needs (PM REXX needs REXX; the command line
   tools need OS/2's message files). An application is shown as installed
-  when all its files are on the boot drive.
+  when all its files are on the boot drive. The applets and games rs2
+  has its own versions of ([rs2's PM applets](#rs2s-pm-applets):
+  Klondike, Chess, Mahjongg, the Icon Editor, Pulse, Locale, the
+  Clipboard Viewer) are no longer in it.
 - **The window**: the source (the first drive with `\OS2IMAGE`, or
   `APPINST X:`), Refresh, a tree of the categories with check boxes
   (checking a category checks all its applications, a partly checked one
@@ -3005,21 +3008,20 @@ OS/2 itself keeps them.
   like TEDIT.EXE, are copied), written with its date, time, attributes
   and extended attributes (`DosSetPathInfo` levels 1 and 2), the
   directories made as needed, each packed file read once. Then the
-  program objects are made, a folder per category ("Games",
-  "Productivity", "REXX", "Information"; objects already there are
+  program objects are made, a folder per category ("Utilities",
+  "REXX", "Information"; objects already there are
   updated). With the Workplace Shell running they are Workplace Shell
   objects (WinCreateObject, which goes to the shell's process): the
   folders in the Programs folder, the books in the Assistance Center's
   folders (Reference and Commands, Tasks, Troubleshooting), with IBM's
-  INI.RC object IDs and places where it has them (`<WP_GAMES>`,
-  `<WP_TOOLS>`, `<WP_INFO>`; `<WP_KLDK>`, `<WP_CHESS>`, `<WP_EPM>`,
+  INI.RC object IDs and places where it has them (`<WP_TOOLS>`,
+  `<WP_INFO>`; `<WP_EPM>`,
   `<WP_CMDREF>`...; apps.txt's last fields). With RS2SHELL
   they are program groups, and the program broadcasts the registered
   message `RS2_ProgramListChanged` to the top-level frames, on which
   RS2SHELL refills its desktop and program group folders. When an application
   lives in `\OS2\APPS` and CONFIG.SYS's `SET PATH` or `LIBPATH` lacks
-  `C:\OS2\APPS`, it is added (Solitaire finds its card font along the
-  PATH) and the message says to restart; rs2's own CONFIG.SYS has it.
+  `C:\OS2\APPS`, it is added and the message says to restart; rs2's own CONFIG.SYS has it.
   A boot drive that cannot be written (rs2 running from the CD) is
   reported before anything is done.
 
