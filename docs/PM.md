@@ -2482,7 +2482,8 @@ does not exist starts a new figure of the kind its extension says).
   form is a plain file (cbSize the file's size; icons, pointers and
   array entries carry the header's size, as IBM's files do). Reading
   and writing again IBM's icons, pointers and bitmaps from the CD gives
-  the same forms, and for the 1.x files the same bytes.
+  the same forms (ARROW.PTR and the two-form POOL.BMP even the same
+  bytes; icons differ only in the colour bits under transparent pels).
 - **Forms and devices** (`devices.rs`): a figure holds forms for
   several devices; a new icon or pointer gets the "recommended"
   predefined devices (independent 32x32 and 16x16, colour and black and
