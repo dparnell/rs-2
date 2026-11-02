@@ -1279,7 +1279,10 @@ fn fill(c: &Ctx, s: &mut Search, buf: u32, cb: u32, max: u32) -> Result<(u32, u3
             e.push(name.len() as u8);
             e.extend_from_slice(name);
             e.push(0);
-            while !list16 && e.len() % 4 != 0 {
+            // 16-bit callers at levels 11-13 get the 32-bit layout but
+            // packed, the next entry right after the name's zero (IBM's
+            // 16-bit CMD steps through the buffer that way).
+            while !c.is16 && e.len() % 4 != 0 {
                 e.push(0);
             }
             e
@@ -1343,6 +1346,7 @@ fn find_first(c: &mut Ctx, spec_addr: u32, phdir: u32, attrib: u32, buf: u32, cb
         Ok(n) => n,
         Err(e) => return e,
     };
+    crate::trace!("    level {level}, {want} wanted, buffer {cb} bytes: {n} found");
     let h = {
         let mut sr = c.process.searches.lock();
         let h = if req == u32::MAX {

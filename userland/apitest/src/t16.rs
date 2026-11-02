@@ -24,6 +24,10 @@ unsafe extern "C" {
     fn D16SubAlloc();
     #[link_name = "DOSCALLS.148"]
     fn D16SubFree();
+    #[link_name = "DOSCALLS.184"]
+    fn D16FindFirst2();
+    #[link_name = "DOSCALLS.63"]
+    fn D16FindClose();
     static at16_create: u8;
     static at16_thread: u8;
 }
@@ -118,8 +122,51 @@ fn suballoc() {
     PascalCall::new().w(sel).call(gate(D16FreeSeg));
 }
 
+/// 16-bit DosFindFirst2 at level 12 (as IBM's 16-bit CMD calls it): the
+/// 32-bit FILEFINDBUF4L layout, but the entries packed, each right after
+/// the previous name's zero (CMD steps through them that way and deleted
+/// "C:\" when they were padded to 4 bytes).
+fn find16() {
+    let gate = |f: unsafe extern "C" fn()| far(f as *const u8);
+    let names: [&[u8]; 2] = [b"C:\\F16A.TMP\0", b"C:\\F16BB.TMP\0"];
+    for n in names {
+        let (mut hf, mut action) = (0, 0);
+        unsafe {
+            os2::DosOpen(n.as_ptr(), &mut hf, &mut action, 0, os2::FILE_NORMAL, os2::OPEN_ACTION_CREATE_IF_NEW | os2::OPEN_ACTION_REPLACE_IF_EXISTS, os2::OPEN_ACCESS_READWRITE | os2::OPEN_SHARE_DENYWRITE, core::ptr::null_mut());
+            os2::DosClose(hf);
+        }
+    }
+    let spec = b"C:\\F16*.TMP\0";
+    let mut buf = [0u8; 600];
+    let (mut hdir, mut count) = (0xffffu16, 2u16);
+    // DosFindFirst2(pszSpec, phdir, usAttr, pBuf, cbBuf, pcSearch, usInfoLevel, ulReserved)
+    let r = PascalCall::new()
+        .l(far(spec.as_ptr()))
+        .l(far(&raw mut hdir as *const u8))
+        .w(0)
+        .l(far(buf.as_mut_ptr()))
+        .w(buf.len() as u16)
+        .l(far(&raw mut count as *const u8))
+        .w(12)
+        .l(0)
+        .call(gate(D16FindFirst2))
+        & 0xffff;
+    // 40 bytes before cchName: oNextEntryOffset, the dates, 64-bit sizes,
+    // the attribute and cbList.
+    let name = |at: usize| &buf[at + 41..at + 41 + buf[at + 40] as usize];
+    let first = name(0);
+    let next = 40 + 1 + first.len() + 1;
+    check("16-bit DosFindFirst2 level 12: two entries", r == 0 && count == 2);
+    check("the second right after the first name's zero", next < buf.len() - 48 && [first, name(next)].iter().all(|n| *n == b"F16A.TMP" || *n == b"F16BB.TMP") && first != name(next));
+    PascalCall::new().w(hdir).call(gate(D16FindClose));
+    for n in names {
+        unsafe { os2::DosDelete(n.as_ptr()) };
+    }
+}
+
 pub fn run() {
     suballoc();
+    find16();
     let gate = |f: unsafe extern "C" fn()| far(f as *const u8);
     let (mut gsel, mut lsel) = (0u16, 0u16);
     PascalCall::new().l(far(&raw mut gsel as *const u8)).l(far(&raw mut lsel as *const u8)).call(gate(D16GetInfoSeg));
