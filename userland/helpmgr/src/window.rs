@@ -837,6 +837,20 @@ fn open_selected(v: &mut View) {
 /// The panel whose title (else an index entry) matches `topic`.
 pub fn find_topic(inst: &Instance, topic: &[u8]) -> Option<PanelRef> {
     let has = |t: &[u8]| t.len() >= topic.len() && t.windows(topic.len()).any(|w| w.eq_ignore_ascii_case(topic));
+    // A title or index entry that is the topic itself comes first (VIEW
+    // CMDREF E: the E panel, not the first title with an "e" in it).
+    let same = |t: &[u8]| t.trim_ascii().eq_ignore_ascii_case(topic.trim_ascii());
+    for (lib, l) in inst.libs.iter().enumerate() {
+        let d = l.doc();
+        for t in 0..d.header.toc_count {
+            if d.toc(t).is_ok_and(|e| e.level() > 0 && same(&e.title)) {
+                return Some(PanelRef { lib, toc: t });
+            }
+        }
+        if let Some(e) = d.index().into_iter().find(|e| same(&e.text)) {
+            return Some(PanelRef { lib, toc: e.toc });
+        }
+    }
     for (lib, l) in inst.libs.iter().enumerate() {
         let d = l.doc();
         for t in 0..d.header.toc_count {

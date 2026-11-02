@@ -635,7 +635,15 @@ const USER_PROGRAMS: &[(&str, &str)] =
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
-const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP")];
+/// Names ending in .INF are books.
+const HELP_FILES: &[(&str, &str)] = &[
+    ("e/E.IPF", "OS2\\HELP\\E.HLP"),
+    ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"),
+    ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP"),
+    ("help/WPHELP.IPF", "OS2\\HELP\\WPHELP.HLP"),
+    ("help/CMDREF.IPF", "OS2\\BOOK\\CMDREF.INF"),
+    ("help/START.IPF", "OS2\\BOOK\\START.INF"),
+];
 
 /// Message files compiled from MKMSGF source in userland/msg (crates/msgf):
 /// source, name on the disk, code pages, language family and sublanguage.
@@ -710,7 +718,7 @@ fn build_userland() -> Option<image::FileList> {
     for (src, dest) in HELP_FILES {
         let path = ul.join(src);
         let text = std::fs::read(&path).ok()?;
-        let help = match ipf::compile::compile(&text, true) {
+        let help = match ipf::compile::compile(&text, !dest.ends_with(".INF")) {
             Ok(h) => h,
             Err(e) => {
                 eprintln!("{}: {e}", path.display());

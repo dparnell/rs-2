@@ -58,6 +58,11 @@ pub const WPMENUID_REFRESH: u32 = 503;
 pub const WPMENUID_SHUTDOWN: u32 = 704;
 pub const WPMENUID_LOCKUP: u32 = 705;
 pub const WPMENUID_WINDOWLIST: u32 = 728;
+pub const WPMENUID_HELP: u32 = 2;
+pub const WPMENUID_HELP_FOR_HELP: u32 = 601;
+pub const WPMENUID_EXTENDEDHELP: u32 = 602;
+pub const WPMENUID_HELPKEYS: u32 = 603;
+pub const WPMENUID_HELPINDEX: u32 = 604;
 /// rs2's own: rename in place (handled by the view).
 pub const MENUID_RENAME: u32 = 0x6400;
 const WPMENUID_PRINT: u32 = 3;
@@ -241,6 +246,21 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
             items.push(Menu::Item(WPMENUID_PRINT as u16, b"~Print", true));
         }
     }
+    // Help, as on OS/2: its index, the object's help, help for help and
+    // for the keys.
+    if flags & CTXT_HELP != 0 {
+        items.push(Menu::Sep);
+        items.push(Menu::SubId(
+            WPMENUID_HELP as u16,
+            b"~Help",
+            alloc::vec![
+                Menu::Item(WPMENUID_HELPINDEX as u16, b"Help ~index", true),
+                Menu::Item(WPMENUID_EXTENDEDHELP as u16, b"~General help", true),
+                Menu::Item(WPMENUID_HELP_FOR_HELP as u16, b"~Using help", true),
+                Menu::Item(WPMENUID_HELPKEYS as u16, b"~Keys help", true),
+            ],
+        ));
+    }
     let menu = popup_menu(&items);
     if menu == 0 {
         return 0;
@@ -275,6 +295,16 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
         WPMENUID_REFRESH => view::refresh(o),
         WPMENUID_PRINT => {
             crate::printer::print_object(o);
+        }
+        WPMENUID_HELP | WPMENUID_EXTENDEDHELP => crate::help::show(o),
+        WPMENUID_HELPINDEX => {
+            crate::help::request(frame, crate::help::LIBRARY, crate::help::HM_HELP_INDEX, 0, 0);
+        }
+        WPMENUID_HELP_FOR_HELP => {
+            crate::help::request(frame, crate::help::LIBRARY, crate::help::HM_DISPLAY_HELP, 0, 0);
+        }
+        WPMENUID_HELPKEYS => {
+            obj::call(m::WPObject::wpDisplayHelp, &[o, crate::help::PANEL_KEYS as usize, crate::help::LIBRARY.as_ptr() as usize]);
         }
         WPMENUID_SHUTDOWN => crate::shutdown::ask(),
         WPMENUID_LOCKUP => {
