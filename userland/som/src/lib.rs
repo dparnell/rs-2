@@ -334,9 +334,30 @@ pub extern "C" fn somConstructClass(init: usize, parent: usize, meta: usize, cds
     call_cm(cls, class::cm::CLASS_READY, &[cls as u32]);
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn somCreateDynamicClass(_name: *const u8, _meta: usize, _parents: usize) -> usize {
-    0
+/// somCreateDynamicClass(className, parentName, file, major, minor) (an
+/// _Optlink function in IBM's SOM.DLL: see `__o_somCreateDynamicClass`):
+/// a subclass of the named parent (found, or loaded from `file`, by the
+/// class manager) without data or methods of its own, made by the
+/// parent's metaclass, its methods redispatched (somOverrideMtab), and
+/// registered.
+pub extern "C" fn somCreateDynamicClass(name: *const u8, parent: *const u8, file: *const u8, major: i32, minor: i32) -> usize {
+    let mgr = env::env_new();
+    if mgr == 0 {
+        error(20149, b"SOMCLS.C\0", 0xee3);
+        return 0;
+    }
+    let pid = id::static_id(unsafe { cstr(parent) });
+    let p = call_mm(mgr, class::mm::FIND_CLS_IN_FILE, &[mgr as u32, pid as u32, major as u32, major as u32, file as u32]) as usize;
+    if p == 0 {
+        error(20219, b"SOMCLS.C\0", 0xeeb);
+        return 0;
+    }
+    let meta = object::somGetClass(p);
+    let cls = call_cm(meta, class::cm::NEW, &[meta as u32]) as usize;
+    call_cm(cls, class::cm::INIT_CLASS, &[cls as u32, name as u32, p as u32, 0, 0, major as u32, minor as u32]);
+    call_cm(cls, class::cm::OVERRIDE_MTAB, &[cls as u32]);
+    call_cm(cls, class::cm::CLASS_READY, &[cls as u32]);
+    cls
 }
 
 #[unsafe(no_mangle)]

@@ -851,8 +851,12 @@ pub extern "C" fn private_stub(_cls: usize) -> usize {
 pub mod cm {
     pub const NEW: usize = 0;
     pub const INIT_MI_CLASS: usize = 40;
+    pub const INIT_CLASS: usize = 2;
     pub const CLASS_READY: usize = 3;
+    pub const OVERRIDE_MTAB: usize = 36;
+    pub const GET_NAME: usize = 4;
     pub const DESCENDED_FROM: usize = 6;
+    pub const SUPPORTS_METHOD: usize = 10;
     pub const CHECK_VERSION: usize = 7;
     pub const ADD_STATIC_METHOD: usize = 19;
     pub const OVERRIDE_S_METHOD: usize = 20;

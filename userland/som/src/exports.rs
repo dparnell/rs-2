@@ -42,7 +42,7 @@ aligned! {
     __a_somClassResolve => crate::somClassResolve, 2;
     __a_somBuildClass => crate::somBuildClass, 4;
     __a_somParentNumResolve => crate::somParentNumResolve, 3;
-    __a_somCreateDynamicClass => crate::somCreateDynamicClass, 3;
+    __a_somCreateDynamicClass => crate::somCreateDynamicClass, 5;
     __a_somExceptionId => crate::somExceptionId, 1;
     __a_somExceptionValue => crate::somExceptionValue, 1;
     __a_somExceptionFree => crate::somExceptionFree, 1;
@@ -230,6 +230,21 @@ aligned! {
     __m_somJoinAffinityGroup => m::somJoinAffinityGroup, 3;
     __m_somUnregisterClassLibrary => m::somUnregisterClassLibrary, 2;
     __m_mgr_somDumpSelfInt => m::mgr_somDumpSelfInt, 2;
+}
+
+/// somCreateDynamicClass is _Optlink in IBM's SOM.DLL: the first three
+/// arguments come in EAX, EDX and ECX (their stack slots reserved), the
+/// other two on the stack.
+#[unsafe(naked)]
+#[unsafe(no_mangle)]
+pub extern "C" fn __o_somCreateDynamicClass() {
+    core::arch::naked_asm!(
+        "mov dword ptr [esp + 4], eax",
+        "mov dword ptr [esp + 8], edx",
+        "mov dword ptr [esp + 12], ecx",
+        "jmp {f}",
+        f = sym __a_somCreateDynamicClass,
+    );
 }
 
 /// somPrintf(fmt, ...).

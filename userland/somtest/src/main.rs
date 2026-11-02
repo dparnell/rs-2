@@ -51,6 +51,8 @@ unsafe extern "C" {
     fn somGetClassFromMToken(token: usize) -> usize;
     #[link_name = "SOM.60"]
     fn somIsObj(p: usize) -> u32;
+    #[link_name = "SOM.51"]
+    fn somCreateDynamicClass();
     #[link_name = "SOM.30"]
     fn somEnvironmentNew() -> usize;
     #[link_name = "SOM.14"]
@@ -142,6 +144,9 @@ const SOM_GET_INSTANCE_OFFSET: usize = 13;
 const SOM_GET_INSTANCE_PART_SIZE: usize = 14;
 // IBM's private SOMClass methods (somcPrivate8-11 in the Toolkit).
 const SOM_GET_TRUE_CLASS: usize = 58;
+const SOM_GET_CLASS_MTAB: usize = 18;
+const SOM_GET_METHOD_OFFSET: usize = 22;
+const SOM_GET_RD_STUB: usize = 48;
 const SOM_GET_CASTED_CLASS: usize = 59;
 // SOMClassMgr methods.
 const SOM_FIND_CLASS: usize = 1;
@@ -656,6 +661,7 @@ fn run() {
         abstract_checks();
         cast_checks();
         unregister_checks();
+        dynamic_checks();
 
         // Plain default initialization from somNew.
         let dinit: extern "C" fn(usize, usize) = f(tok(so(0), SOM_DEFAULT_INIT));
@@ -975,6 +981,36 @@ fn before_after() {
         let log = core::mem::take(&mut BA_LOG);
         check("before, method, after", log == b"<p>");
         m1(so(0), SOM_FREE, o);
+    }
+}
+
+/// Call an _Optlink function of five arguments (three in EAX, EDX, ECX).
+#[unsafe(naked)]
+extern "C" fn optlink5(_f: usize, _a: usize, _b: usize, _c: usize, _d: usize, _e: usize) -> usize {
+    core::arch::naked_asm!(
+        "push ebp", "mov ebp, esp",
+        "push dword ptr [ebp + 28]", "push dword ptr [ebp + 24]", "sub esp, 12",
+        "mov eax, dword ptr [ebp + 12]", "mov edx, dword ptr [ebp + 16]", "mov ecx, dword ptr [ebp + 20]",
+        "call dword ptr [ebp + 8]",
+        "mov esp, ebp", "pop ebp", "ret",
+    );
+}
+
+/// somCreateDynamicClass: a data-less subclass made by the parent's
+/// metaclass, registered, its methods redispatched.
+fn dynamic_checks() {
+    unsafe {
+        let c = optlink5(somCreateDynamicClass as usize, b"DynDog\0".as_ptr() as usize, b"Dog\0".as_ptr() as usize, 0, 1, 0);
+        check("somCreateDynamicClass DynDog", c != 0 && cstr(m1(sc(), SOM_GET_NAME, c) as *const u8) == b"DynDog");
+        check("its parent and metaclass", c != 0 && m1(sc(), 5, c) == *DOG && m1(so(0), SOM_GET_CLASS, c) == *M_ANIMAL);
+        check("registered", class_from_id(b"DynDog") == c);
+        check_eq("its size (no data of its own)", size_of_class(c), 16);
+        let m = *(c as *const usize);
+        let st = m1(sc(), SOM_GET_CLASS_MTAB, c);
+        let off = m2(sc(), SOM_GET_METHOD_OFFSET, c, sid(b"speak") as usize);
+        let rd = m2(sc(), SOM_GET_RD_STUB, c, sid(b"speak") as usize);
+        let _ = m;
+        check("its methods go through redispatch stubs", off != 0 && rd != 0 && *((st + off) as *const usize) == rd);
     }
 }
 

@@ -171,8 +171,13 @@ pub extern "C" fn somGetClass(obj: usize) -> usize {
     unsafe { (**(obj as *const *const Mtab)).class_object }
 }
 
+// somGetClassName, somIsA and somRespondsTo ask the object's class
+// (somGetName, somDescendedFrom, somSupportsMethod through their tokens,
+// as IBM's do), so that metaclasses can answer differently.
+
 pub extern "C" fn somGetClassName(obj: usize) -> *const u8 {
-    unsafe { (**(obj as *const *const Mtab)).class_name }
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::GET_NAME, &[c as u32]) as *const u8
 }
 
 pub extern "C" fn somGetSize(obj: usize) -> i32 {
@@ -180,11 +185,8 @@ pub extern "C" fn somGetSize(obj: usize) -> i32 {
 }
 
 pub extern "C" fn somIsA(obj: usize, cls: usize) -> u32 {
-    unsafe {
-        let c = class_of_obj(obj);
-        let r = rec(cls);
-        (!c.is_null() && !r.is_null() && (*c).descends_from(r)) as u32
-    }
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::DESCENDED_FROM, &[c as u32, cls as u32]) & 0xff
 }
 
 pub extern "C" fn somIsInstanceOf(obj: usize, cls: usize) -> u32 {
@@ -192,10 +194,8 @@ pub extern "C" fn somIsInstanceOf(obj: usize, cls: usize) -> u32 {
 }
 
 pub extern "C" fn somRespondsTo(obj: usize, mid: SomId) -> u32 {
-    unsafe {
-        let c = class_of_obj(obj);
-        (!c.is_null() && lookup(&*c, id::name_bytes(mid)).is_some()) as u32
-    }
+    let c = somGetClass(obj);
+    crate::call_cm(c, crate::class::cm::SUPPORTS_METHOD, &[c as u32, mid as u32]) & 0xff
 }
 
 /// Call a method with arguments from a va_list (which starts with the
