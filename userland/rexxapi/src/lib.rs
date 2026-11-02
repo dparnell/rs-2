@@ -480,8 +480,9 @@ pub(crate) fn register_dll(kind: u32, name: *const u8, module: *const u8, proc_:
     if exists && kind == KIND_FUNC {
         return 10;
     }
+    // the same name and DLL again: IBM's REXXAPI answers 30
     if !find_dll(&g, kind, n, Some(m)).is_null() {
-        return 10;
+        return 30;
     }
     let r = shared::alloc(core::mem::size_of::<shared::Reg>()) as *mut shared::Reg;
     if r.is_null() {

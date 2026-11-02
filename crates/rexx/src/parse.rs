@@ -682,7 +682,7 @@ impl<'a> P<'a> {
         if call && matches!(c, Cond::NoValue | Cond::Syntax) {
             return Err(Err::new(25));
         }
-        self.kw[self.pos] = true;
+        // the condition name shows as written in traces (IBM's)
         self.pos += 1;
         Ok(c)
     }

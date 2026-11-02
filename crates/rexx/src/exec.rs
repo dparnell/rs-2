@@ -261,6 +261,8 @@ pub struct Interp<'h> {
     pub(crate) depth: usize,
     /// Trace output suppressed (interactive trace input being run).
     pub(crate) quiet: bool,
+    /// The interactive-trace banner was shown.
+    pub(crate) banner: bool,
 }
 
 pub(crate) const MAX_DEPTH: usize = 2000;
@@ -277,7 +279,7 @@ pub fn strip_blanks(s: &[u8]) -> &[u8] {
 
 impl<'h> Interp<'h> {
     pub fn new(host: &'h mut dyn Host) -> Interp<'h> {
-        Interp { host, st: State::new(), depth: 0, quiet: false }
+        Interp { host, st: State::new(), depth: 0, quiet: false, banner: false }
     }
 
     /// Run a program. Returns its result (EXIT/RETURN value) or the

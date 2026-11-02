@@ -154,6 +154,12 @@ pub trait Host {
     /// Report an error ending the program: `REXnnnn: Error n running
     /// FILE, line L: text`.
     fn report_error(&mut self, st: &mut State, code: u32, file: &[u8], line: u32);
+    /// Report an error in a line typed at an interactive-trace pause.
+    fn report_trace_error(&mut self, st: &mut State, code: u32) {
+        let mut s = alloc::format!("Error {code} in interactive trace: ").into_bytes();
+        s.extend_from_slice(&self.message(code).unwrap_or_default());
+        self.trace_out(st, &s);
+    }
     /// Called before the first clause and after the last (exits RXINI,
     /// RXTER).
     fn init(&mut self, _st: &mut State) {}

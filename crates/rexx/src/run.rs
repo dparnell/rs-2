@@ -230,6 +230,17 @@ impl Interp<'_> {
     /// Interactive trace pause: run lines the user types until an empty
     /// one; "=" re-runs the clause (Some(true)).
     fn pause(&mut self, f: &mut Frame, lvl: u32) -> R<Option<bool>> {
+        // the first pause shows how to go on (IBM's message 114)
+        if !self.banner {
+            self.banner = true;
+            let m = self.host.message(114).unwrap_or_default();
+            let mut line = b"       +++".to_vec();
+            for _ in 0..(1 + 2 * lvl) {
+                line.push(b' ');
+            }
+            line.extend_from_slice(&m);
+            self.trace_line(&line);
+        }
         loop {
             let line = {
                 let mut st = core::mem::replace(&mut self.st, State::empty());
@@ -292,10 +303,9 @@ impl Interp<'_> {
     }
 
     fn interactive_error(&mut self, n: u32) {
-        let text = self.host.message(n).unwrap_or_default();
-        let mut s = alloc::format!("Error {n} in interactive trace: ").into_bytes();
-        s.extend_from_slice(&text);
-        self.trace_line(&s);
+        let mut st = core::mem::replace(&mut self.st, State::empty());
+        self.host.report_trace_error(&mut st, n);
+        self.st = st;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -617,13 +627,9 @@ impl Interp<'_> {
                     TraceArg::Lit(v) => v.clone(),
                     TraceArg::Value(e) => self.eval_top(f, e, lvl)?,
                 };
-                let was = f.trace.interactive;
                 self.set_trace(f, &v)?;
-                if f.trace.interactive && !was && !self.quiet {
-                    let m = self.host.message(114).unwrap_or_default();
-                    let mut line = b"       +++ ".to_vec();
-                    line.extend_from_slice(&m);
-                    self.trace_line(&line);
+                if !f.trace.interactive {
+                    self.banner = false;
                 }
                 Ok(Next::Go)
             }

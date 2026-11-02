@@ -879,6 +879,45 @@ impl Host for OsHost {
         unsafe { os2::msg::DosPutMessage(2, text.len() as u32, text.as_ptr()) };
     }
 
+    fn report_trace_error(&mut self, st: &mut State, code: u32) {
+        // message `code` with message 126 ("Error n in interactive trace:")
+        let cs = alloc::format!("{code}\0");
+        let ins: [*const u8; 1] = [cs.as_ptr()];
+        let mut head = vec![0u8; 256];
+        let mut n = 0u32;
+        let rc = unsafe { os2::msg::DosGetMessage(ins.as_ptr(), 1, head.as_mut_ptr(), head.len() as u32, 126, b"REX.MSG\0".as_ptr(), &mut n) };
+        let mut head = if rc == 0 {
+            head.truncate(n as usize);
+            head
+        } else {
+            alloc::format!("Error {code} in interactive trace: ").into_bytes()
+        };
+        head.push(0);
+        let ins2: [*const u8; 2] = [head.as_ptr(), b"\0".as_ptr()];
+        let mut out = vec![0u8; 1024];
+        let mut n2 = 0u32;
+        let rc = unsafe { os2::msg::DosGetMessage(ins2.as_ptr(), 2, out.as_mut_ptr(), out.len() as u32, code, b"REX.MSG\0".as_ptr(), &mut n2) };
+        let text = if rc == 0 {
+            out.truncate(n2 as usize);
+            out
+        } else {
+            let mut v = head[..head.len() - 1].to_vec();
+            v.extend_from_slice(&message_text(code).unwrap_or_default());
+            v.extend_from_slice(b"\r\n");
+            v
+        };
+        if self.exit(RXSIO).is_some() {
+            let mut t = text.clone();
+            while t.last().is_some_and(|&c| c == b'\n' || c == b'\r') {
+                t.pop();
+            }
+            if self.sio_out(st, 2, &t) {
+                return;
+            }
+        }
+        unsafe { os2::msg::DosPutMessage(2, text.len() as u32, text.as_ptr()) };
+    }
+
     fn init(&mut self, st: &mut State) {
         if self.exit(RXINI).is_some() {
             let _ = self.call_exit(st, RXINI, 1, null_mut());
