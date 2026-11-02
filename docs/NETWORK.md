@@ -225,6 +225,7 @@ cargo xtask run --net vmxnet3 ...                      # also 82545em, e1000e, v
 cargo xtask run --net-model DEVICE ...                 # any QEMU NIC device
 cargo xtask run --virtio-net [--virtio-legacy] ...     # virtio-net
 cargo xtask run --net --hostfwd tcp::8080-:80 ...      # more port forwards (5555 -> 23 is always there)
+cargo xtask run --net --guestfwd "tcp:10.0.2.100:79-cmd:nc 127.0.0.1 7979" ...   # guest connections to a host port
 ```
 
 QEMU's user network: the guest is 10.0.2.15, the gateway (and the host)
@@ -259,7 +260,12 @@ socket.
   Nagle or delayed ACK; out-of-order data is dropped.
 * One wait queue for all socket waiters (every event wakes every waiter).
 * IFCONFIG and NETSTAT only show; there is no `route`/`arp`, no way to
-  change the configuration at run time, no DHCP release at shutdown.
+  change the configuration at run time (TCPCFG2's settings take effect
+  at the next start), no DHCP release at shutdown.
+* rs2's TELNETD gives clients pipes, not a terminal: full-screen VIO
+  programs do not show; there is no LPD server (rs2's printers send to
+  LPR/IPP servers, PRINTING.md), no TALK/TALKD, REXECD/RSHD, BOOTP or
+  SLIP/PPP dialer; FTP and TELNET do no code page translation (-cp).
 
 ## The OS/2 socket API
 
@@ -357,6 +363,49 @@ DHCP state, DNS servers, counters); `NETSTAT` the TCP connections, `-a`
 all sockets with owning process and handle, `-r` routes, `-i`
 interfaces, `-s` counters; `HOSTNAME`; `HOST name|address` resolves
 through TCPIP32.DLL (names and PTR lookups); `PING` as before.
+
+### rs2's TCP/IP applications
+
+rs2 has its own versions of Warp 4.52's base TCP/IP clients and servers
+(`userland/netapps`, in `C:\OS2`), so it needs nothing from IBM's
+TCP/IP: Rust programs on the RS2API socket calls, with IBM's names and
+command-line forms. Shared code (`src/lib.rs`): a socket type, line
+reading, files, the %ETC% directory and SERVICES ports, console input
+(`KbdCharIn` for keys and passwords), and the RFC 1179 and TFTP
+protocols (`lpd.rs`, `tftp.rs`).
+
+| Program | What |
+|---------|------|
+| FTP | `FTP [-n] [-v] [-d] [-i] [-g] [-p] [host [port]]`: IBM's and BSD's commands (open, user, close, bye/quit, ascii, binary, type, cd, cdup, lcd, pwd, ls, dir, get/recv, put/send, append, mget, mput, mdelete, delete, mkdir, rmdir, rename, size, system, quote/literal, site, rhelp, status, verbose, debug, hash, prompt, glob, passive/sendport, `!`, help/?). Data connections are active (PORT to a port FTP listens on, as IBM's FTP makes them) or passive (`passive`, `-p`). Logs in at once unless -n, with the host's entry in %ETC%\NETRC or by asking (the password without echo). ASCII transfers give CR LF line ends; Ctrl+Z ends a text file sent. Commands come from standard input: `FTP -n host < script`. |
+| FTPD | `FTPD [-p port]`: each client on a thread. Users and their directories from %ETC%\TRUSERS (`user: name password`, then `rw: dirs` and `r: dirs`; neither means the whole system; `anonymous`/`ftp` with any password when listed, never writing). USER, PASS, QUIT, NOOP, SYST, FEAT, HELP, TYPE, MODE, STRU, ALLO, PORT, PASV, LIST (Unix `ls -l` form), NLST, RETR, STOR, APPE, SIZE, MDTM, DELE, RNFR/RNTO, CWD/CDUP, PWD, MKD, RMD and their X forms. Paths are OS/2 paths, shown with `/`. |
+| TELNET | `TELNET [-p port] [-t termtype] [-l logfile] [host [port]]`: the host's output goes through `crates/vt100` (a host-tested VT100/VT220/ANSI emulator: cursor movement and erasing, scrolling regions, insert/delete lines and characters, tab stops, the DEC line-drawing set as CP437 box characters, SGR colours and attributes, UTF-8 to CP437, device attribute and cursor reports) onto the VIO screen with VioWrtCellStr; a keyboard thread sends keys as a VT220's (cursor keys after DECCKM, F1-F12, editing keys). Options: ECHO and SUPPRESS GO AHEAD (local echo while the host does not echo), TERMINAL TYPE (VT100 unless -t) and NAWS (the screen's size). Ctrl+] ends the session; without a host it asks (`open host [port]`). |
+| TELNETD | `TELNETD [-p port]`: each client gets a command prompt (%COMSPEC%) whose standard handles are pipes; TELNETD says WILL ECHO/SGA, echoes, handles Backspace and passes lines on at Enter, converts the output's line ends; Ctrl+C starts a new prompt. `SET TELNET.PASSWORD=` asks clients for a password, as IBM's TELNETD does. Programs that write through VIO instead of their standard output are not seen by the client. |
+| LPR, LPQ, LPRM | `LPR [-p printer] [-s server] [-b\|-f\|-o] [-C class] [-J job] [-T title] [-# copies] [-h] [file...]`, `LPQ [-p printer] [-s server] [-l]`, `LPRM [-p printer] [-s server] [-a\|job...]`: RFC 1179 from a reserved port (721-731, a different one each time), the printer and server also as `printer@server` or from LPR_PRINTER and LPR_SERVER, `server:port` for an LPD on another port. |
+| FINGER | `FINGER [-l] [user]@host`. |
+| TFTP | `TFTP [-b blocksize] host [port]`, then connect, mode, ascii, binary, get, put (`host:file` names), verbose, trace, status, rexmt, timeout, blksize, quit. RFC 1350 with the block size option (RFC 2348), netascii conversion, retransmission. |
+| TFTPD | `TFTPD [path] [-l] [-n] [-t seconds] [-b maxblock] [-p port]`: reads and writes files under `path` (names may not leave it), a thread per request, block size negotiation unless -n. |
+| REXEC, RSH | `REXEC host [-l user] [-p password] [-n] command` (port 512; the user and password also from NETRC or asked for), `RSH host [-l user] [-n] command` (port 514 from a reserved port; the local user is %USER%). Redirected standard input goes to the command. |
+| TCPCFG2 | The TCP/IP Configuration notebook (PM): Network (lan0 on or off, DHCP or a fixed address, subnet mask and router, and the interfaces' state now), Host Names (host name, local domain, three name servers), Hosts (the HOSTS file in an MLE). Save writes `NETWORK=` and `SET HOSTNAME=` in CONFIG.SYS (for the next start; the name servers of a fixed address go into NETWORK=), %ETC%\RESOLV2 (`domain`, `nameserver`) and %ETC%\HOSTS. `TCPCFG2 /QUERY` and `TCPCFG2 NETWORK=... HOSTNAME=... DOMAIN=... NAMESERVERS=a,b` do the same from scripts. The desktop's Programs folder has a TCP/IP folder with it, FTP and Telnet. |
+
+**Testing.** `RS2\NETCLI.EXE` starts FTPD, TFTPD and TELNETD and runs
+the clients with scripted input (27 checks): FTP against rs2's FTPD
+(login, put and get of 300 KB in active and passive mode, compared byte
+for byte; pwd, size, mkdir, rename, ls, dir, delete, rmdir; anonymous
+read-only, a wrong password refused) and against the host's FTP server
+(active and passive); TFTP against TFTPD (octet with 512- and
+1428-byte blocks, netascii, a missing file); LPR, LPQ, LPRM, FINGER,
+REXEC and RSH against servers on the host; TCPCFG2's command-line form.
+On the host, `tools/scripts/sockhost.py` (FTP) and
+`tools/scripts/nethost.py` (LPD, finger, rexec, rsh, a VT100 test
+screen; with `--client` it logs in to the guest's FTPD in active mode
+and runs commands through its TELNETD) serve and check;
+`tools/scripts/netcli.sh` runs the guest with the port forwards: the
+guest reaches the host's servers as 10.0.2.100 on their standard ports
+(`xtask run --guestfwd tcp:10.0.2.100:515-cmd:nc 127.0.0.1 5515`: QEMU
+runs nc for each connection), the host reaches FTPD and TELNETD on 5521
+and 5523. TELNET was checked against nethost.py's VT100 screen (colours,
+line-drawing box, scrolling region, terminal type VT100 and size 80x25
+negotiated, cursor and function keys sent) and TCPCFG2 with screenshots.
 
 ### Testing with IBM's programs
 

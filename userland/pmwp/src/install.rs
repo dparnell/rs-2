@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"10";
+const DESKTOP_VERSION: &[u8] = b"11";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -127,6 +127,25 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         s.extend_from_slice(id);
         out.push((k, s));
     }
+    // The TCP/IP folder in Programs (version 11), as IBM's TCP/IP puts
+    // its programs in one: (file, title, object ID, program type).
+    let tcpip: [(&[u8], &[u8], &[u8], &[u8]); 3] = [
+        (b"OS2\\TCPCFG2.EXE", b"TCP/IP Configuration", b"<RS2_TCPCFG>", b"PM"),
+        (b"OS2\\FTP.EXE", b"FTP", b"<RS2_FTP>", b"WINDOWABLEVIO"),
+        (b"OS2\\TELNET.EXE", b"Telnet", b"<RS2_TELNET>", b"WINDOWABLEVIO"),
+    ];
+    if file_exists(&boot(b"?:\\OS2\\TCPCFG2.EXE")) {
+        out.push((b"TCP/IP;WPFolder;<WP_PROGRAMSFOLDER>;PRESERVEOLD".to_vec(), b"DEFAULTVIEW=ICON;OBJECTID=<RS2_TCPIPFOLDER>".to_vec()));
+    }
+    for (file, title, id, ty) in tcpip {
+        let path = [&b"?:\\"[..], file].concat();
+        if !file_exists(&boot(&path)) {
+            continue;
+        }
+        let k = [title, &b";WPProgram;<RS2_TCPIPFOLDER>;PRESERVEOLD"[..]].concat();
+        let s = [&b"EXENAME="[..], &path, b";PROGTYPE=", ty, b";OBJECTID=", id].concat();
+        out.push((k, s));
+    }
     // The LaunchPad, after the objects it shows (open at each start: its
     // shadow is in Startup).
     out.push((b"LaunchPad;WPLaunchPad;<WP_DESKTOP>;PRESERVEOLD".to_vec(), b"FPOBJECTS=<WP_DRIVES>,<WP_OS2WIN>,<WP_SYSED>,<WP_ASSISTANCE>;DRAWEROBJECTS=2,<WP_OS2FS>;OBJECTID=<WP_LAUNCHPAD>".to_vec()));
@@ -205,7 +224,8 @@ pub fn run() {
     // version 4 the Assistance Center, version 5 its Help Index,
     // Glossary and Internet object, version 6 the LaunchPad, version 9
     // the Shredder, Connections (Network, Printers), the System Clock and
-    // IBM's System class in place of RS2System, version 10 the Spooler;
+    // IBM's System class in place of RS2System, version 10 the Spooler,
+    // version 11 the TCP/IP folder;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         pending.extend(defaults());

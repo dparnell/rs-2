@@ -1,0 +1,8 @@
+[package]
+name = "vt100"
+description = "no_std VT100/VT220/ANSI terminal emulator (a screen of PC text cells) for rs2's TELNET"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
