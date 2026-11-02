@@ -255,8 +255,44 @@ mod tests {
     /// Runs ffmpeg (when installed) to decode `avi` to raw frames.
     pub fn ffmpeg(avi: &std::path::Path, pix: &str) -> Option<Vec<u8>> {
         let o = std::process::Command::new("ffmpeg").args(["-loglevel", "error", "-i"]).arg(avi)
-            .args(["-f", "rawvideo", "-pix_fmt", pix, "-"]).output().ok()?;
+            .args(["-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", pix, "-"]).output().ok()?;
         o.status.success().then_some(o.stdout)
+    }
+
+    #[test]
+    fn ffmpeg_encoded() {
+        // Files written by ffmpeg's encoders, decoded by us and by ffmpeg.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/mmavi-test");
+        let _ = std::fs::create_dir_all(&dir);
+        for (name, args, tol) in [
+            ("msvc16", &["-c:v", "msvideo1"][..], 0),
+            ("msrle", &["-pix_fmt", "pal8", "-c:v", "msrle"][..], 0),
+            ("rgb24", &["-pix_fmt", "bgr24", "-c:v", "rawvideo"][..], 0),
+            ("rgb555", &["-pix_fmt", "rgb555le", "-c:v", "rawvideo"][..], 0),
+            ("pal8", &["-pix_fmt", "pal8", "-c:v", "rawvideo"][..], 0),
+        ] {
+            let p = dir.join(format!("{name}.avi"));
+            let ok = std::process::Command::new("ffmpeg").args(["-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=68x52:rate=5", "-t", "3"])
+                .args(args).arg(&p).status().is_ok_and(|s| s.success());
+            if !ok { return; }
+            let data = std::fs::read(&p).unwrap();
+            let a = Avi::parse(&data).unwrap();
+            let mut d = VideoDecoder::new(&a).unwrap_or_else(|e| panic!("{name}: {e:?} {:?}", a.video_format()));
+            let Some(raw) = ffmpeg(&p, "rgb24") else { return };
+            let (w, h) = (a.width(), a.height());
+            assert_eq!(a.frame_count() as usize, raw.len() / (w * h * 3) as usize, "{name}");
+            for n in 0..a.frame_count() {
+                let (o, l) = a.frame_chunk(n).unwrap();
+                d.decode(&data[o as usize..o as usize + l as usize]).unwrap();
+                for y in 0..h {
+                    for x in 0..w {
+                        let at = (((n * h + y) * w + x) * 3) as usize;
+                        let (got, want) = (d.image().rgb(x, y), &raw[at..at + 3]);
+                        assert!((0..3).all(|k| (got[k] as i32 - want[k] as i32).abs() <= tol), "{name} frame {n} at {x},{y}: {got:?} vs {want:?}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

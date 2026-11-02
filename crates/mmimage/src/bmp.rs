@@ -186,7 +186,7 @@ pub fn rle_decode(src: &[u8], img: &mut Image, px: usize, bottom_up: bool) -> Re
             // A run: n pixels of one value (RLE4 alternates two nibbles).
             let p: [u8; 3] = if px == 3 {
                 let Some(b) = src.get(i - 1..i + 2) else { return Ok(()) };
-                i += 1;
+                i += 2;
                 [b[0], b[1], b[2]]
             } else {
                 [c, 0, 0]
@@ -327,6 +327,29 @@ mod tests {
         let d = decode(&win_header(4, 2, 4, 2, &pal, &rle4)).unwrap();
         assert_eq!((0..4).map(|x| d.index(x, 1)).collect::<Vec<_>>(), [1, 2, 1, 2]);
         assert_eq!((0..4).map(|x| d.index(x, 0)).collect::<Vec<_>>(), [3, 4, 5, 0]);
+    }
+
+    #[test]
+    fn os2_rle24_and_short_header() {
+        // OS/2 2.0, cbFix 64, RLE24 (compression 4): 3x2, bottom row a
+        // run of 3 red, top row absolute green, blue, white.
+        let mut e = encode(&Image::new(3, 2, 24), Kind::Os20);
+        e[30..34].copy_from_slice(&4u32.to_le_bytes());
+        e.truncate(14 + 64);
+        e.extend_from_slice(&[3, 0, 0, 255, 0, 0, 0, 3, 0, 255, 0, 255, 0, 0, 255, 255, 255, 0, 0, 1]);
+        let d = decode(&e).unwrap();
+        assert!((0..3).all(|x| d.rgb(x, 1) == [255, 0, 0]));
+        assert_eq!([d.rgb(0, 0), d.rgb(1, 0), d.rgb(2, 0)], [[0, 255, 0], [0, 0, 255], [255, 255, 255]]);
+        // A 16-byte BITMAPINFOHEADER2 (no compression field).
+        let i = pattern_pal(5, 3, 4);
+        let full = encode(&i, Kind::Os20);
+        let mut s = full[..14 + 16].to_vec();
+        s[14..18].copy_from_slice(&16u32.to_le_bytes());
+        s.extend_from_slice(&full[14 + 64..]);
+        let off = le32(&s, 10).unwrap() - 48;
+        s[10..14].copy_from_slice(&off.to_le_bytes());
+        assert_eq!(crate::identify(&s, s.len() as u64), Some(crate::Format::Os20Bmp));
+        assert!(same_pixels(&decode(&s).unwrap(), &i));
     }
 
     #[test]
