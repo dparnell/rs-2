@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"10";
+const DESKTOP_VERSION: &[u8] = b"12";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -101,16 +101,29 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         // DOS sessions' prompts (version 9), as IBM's INI.RC has them.
         (b"DOS Window;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=WINDOWEDVDM;OBJECTID=<WP_DOSWIN>"),
         (b"DOS Full Screen;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=VDM;OBJECTID=<WP_DOSFS>"),
+        // rs2's applets' folders (version 12), as IBM's INI.RC has them.
+        (b"Utilities;WPFolder;<WP_PROGRAMSFOLDER>;PRESERVEOLD", b"OBJECTID=<WP_TOOLS>"),
+        (b"Games;WPFolder;<WP_PROGRAMSFOLDER>;PRESERVEOLD", b"OBJECTID=<WP_GAMES>"),
     ];
     // (file, title, object ID, folder, more setup)
-    let programs: [(&[u8], &[u8], &[u8], &[u8], &[u8]); 4] = [
+    let programs: &[(&[u8], &[u8], &[u8], &[u8], &[u8])] = &[
         (b"OS2\\E.EXE", b"System Editor", b"<WP_SYSED>", b"<WP_PROGRAMSFOLDER>", b"ASSOCFILTER=*.TXT,*.DOC,*.LOG,*.ME,*.CFG,*.SYS,*.INI,*.CMD;"),
         (b"OS2\\APPINST.EXE", b"Install OS/2 Applications", b"<RS2_APPINST>", b"<WP_PROGRAMSFOLDER>", b""),
         (b"OS2\\DISPLAY.EXE", b"Display", b"<RS2_DISPLAY>", b"<WP_CONFIG>", b""),
         (b"OS2\\PMINSTAL.EXE", b"Install rs2", b"<RS2_INSTALL>", b"<WP_PROGRAMSFOLDER>", b""),
+        // rs2's applets (version 12): IBM's titles, object IDs, folders,
+        // help panels and associations (INI.RC).
+        (b"OS2\\APPS\\PICVIEW.EXE", b"Picture Viewer", b"<WP_PICV>", b"<WP_TOOLS>", b"ASSOCTYPE=Metafile,PIF file,,;ASSOCFILTER=*.MET,*.PIF,,;"),
+        (b"OS2\\APPS\\PMSEEK.EXE", b"Seek and Scan Files", b"<WP_SEEK>", b"<WP_TOOLS>", b"HELPPANEL=20285;"),
+        (b"OS2\\ICONEDIT.EXE", b"Icon Editor", b"<WP_ICON>", b"<WP_TOOLS>", b"ASSOCFILTER=*.BMP,*.PTR,*.ICO;HELPPANEL=20279;"),
+        (b"OS2\\MPCPUMON.EXE", b"Pulse", b"<WP_PULSE>", b"<WP_TOOLS>", b"HELPPANEL=20284;"),
+        (b"OS2\\CLIPOS2.EXE", b"Clipboard Viewer", b"<WP_CLIPV>", b"<WP_TOOLS>", b"HELPPANEL=20274;"),
+        (b"OS2\\GLOCALE.EXE", b"Locale", b"<WP_LOCALE>", b"<WP_CONFIG>", b""),
+        (b"OS2\\APPS\\KLONDIKE.EXE", b"Klondike Solitaire", b"<WP_KLDK>", b"<WP_GAMES>", b"STARTUPDIR=?:\\OS2\\APPS;HELPPANEL=20295;"),
+        (b"OS2\\APPS\\OS2CHESS.EXE", b"OS/2 Chess", b"<WP_CHESS>", b"<WP_GAMES>", b"STARTUPDIR=?:\\OS2\\APPS;HELPPANEL=20296;"),
     ];
     let mut out: Vec<(Vec<u8>, Vec<u8>)> = v.drain(..).map(|(k, s)| (k.to_vec(), s.to_vec())).collect();
-    for (file, title, id, folder, extra) in programs {
+    for &(file, title, id, folder, extra) in programs {
         let path = [&b"?:\\"[..], file].concat();
         if !file_exists(&boot(&path)) {
             continue;
@@ -126,6 +139,20 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         s.extend_from_slice(b"OBJECTID=");
         s.extend_from_slice(id);
         out.push((k, s));
+    }
+    // Mahjongg's folder in Games: the program and shadows of its layouts.
+    if file_exists(&boot(b"?:\\OS2\\APPS\\MAHJONGG.EXE")) {
+        out.push((b"Mahjongg Solitaire;WPFolder;<WP_GAMES>;PRESERVEOLD".to_vec(), b"OBJECTID=<MAH_FOLDER>".to_vec()));
+        out.push((b"Mahjongg;WPProgram;<MAH_FOLDER>;PRESERVEOLD".to_vec(), b"EXENAME=?:\\OS2\\APPS\\MAHJONGG.EXE;PROGTYPE=PM;ASSOCFILTER=*.MAH;STARTUPDIR=?:\\OS2\\APPS;HELPPANEL=32219;OBJECTID=<MAH_EXE>".to_vec()));
+        for name in [&b"DEFAULT"[..], b"PYRAMID", b"FORTRESS", b"TWINPEAK"] {
+            let file = [&b"?:\\OS2\\APPS\\"[..], name, b".MAH"].concat();
+            if !file_exists(&boot(&file)) {
+                continue;
+            }
+            let k = [name, b".MAH;WPShadow;<MAH_FOLDER>;PRESERVEOLD"].concat();
+            let s = [&b"SHADOWID="[..], &file, b";OBJECTID=<RS2_MAH_", name, b">"].concat();
+            out.push((k, s));
+        }
     }
     // The LaunchPad, after the objects it shows (open at each start: its
     // shadow is in Startup).
@@ -205,7 +232,8 @@ pub fn run() {
     // version 4 the Assistance Center, version 5 its Help Index,
     // Glossary and Internet object, version 6 the LaunchPad, version 9
     // the Shredder, Connections (Network, Printers), the System Clock and
-    // IBM's System class in place of RS2System, version 10 the Spooler;
+    // IBM's System class in place of RS2System, version 10 the Spooler,
+    // version 12 the applets (Utilities, Games, Locale, Mahjongg's folder);
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         pending.extend(defaults());
