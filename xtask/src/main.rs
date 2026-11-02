@@ -632,6 +632,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("somu", "OS2\\DLL\\SOMU.DLL"),
         ("somir", "OS2\\DLL\\SOMIR.DLL"),
         ("win16", "OS2\\DLL\\WIN16.DLL"),
+        ("rxqueue", "OS2\\RXQUEUE.EXE"),
+        ("rxsubcom", "OS2\\RXSUBCOM.EXE"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
