@@ -635,7 +635,38 @@ const USER_PROGRAMS: &[(&str, &str)] =
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
-const HELP_FILES: &[(&str, &str)] = &[("e/E.IPF", "OS2\\HELP\\E.HLP"), ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"), ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP")];
+/// Names ending in .INF are books.
+const HELP_FILES: &[(&str, &str)] = &[
+    ("e/E.IPF", "OS2\\HELP\\E.HLP"),
+    ("hmtest/HMTEST.IPF", "OS2\\HELP\\HMTEST.HLP"),
+    ("helpmgr/HMHELP.IPF", "OS2\\HELP\\HMHELP.HLP"),
+    ("help/WPHELP.IPF", "OS2\\HELP\\WPHELP.HLP"),
+    ("help/CMDREF.IPF", "OS2\\BOOK\\CMDREF.INF"),
+    ("help/START.IPF", "OS2\\BOOK\\START.INF"),
+];
+
+/// Message files compiled from MKMSGF source in userland/msg (crates/msgf):
+/// source, name on the disk, code pages, language family and sublanguage.
+const MSG_FILES: &[(&str, &str, &[u16], (u16, u16))] = &[
+    ("OSO001.TXT", "OS2\\SYSTEM\\OSO001.MSG", &[850, 437], (9, 1)),
+    ("OSO001H.TXT", "OS2\\SYSTEM\\OSO001H.MSG", &[850, 437], (9, 1)),
+    ("PMWP.TXT", "OS2\\SYSTEM\\PMWP.MSG", &[850], (0, 0)),
+    ("REGISTRY.TXT", "OS2\\SYSTEM\\REGISTRY.MSG", &[850], (9, 1)),
+    ("PMCTL.TXT", "OS2\\SYSTEM\\PMCTL.MSG", &[850], (0, 0)),
+    ("SYSLEVEL.TXT", "OS2\\SYSLEVEL.MSG", &[850, 437], (0, 0)),
+    ("XDF.TXT", "OS2\\XDF.MSG", &[850, 437], (0, 0)),
+    ("XDFH.TXT", "OS2\\XDFH.MSG", &[850, 437], (0, 0)),
+    ("JFS.TXT", "OS2\\JFS.MSG", &[850, 437], (9, 1)),
+    ("JFSH.TXT", "OS2\\JFSH.MSG", &[850, 437], (9, 1)),
+    ("PSERROR.TXT", "OS2\\PSERROR.MSG", &[850], (9, 1)),
+    ("PSACT.TXT", "OS2\\PSACT.MSG", &[850], (9, 1)),
+    ("PSCAUSE.TXT", "OS2\\PSCAUSE.MSG", &[850], (9, 1)),
+    ("ULSERR01.TXT", "OS2\\SYSTEM\\ULSERR01.MSG", &[850], (0, 0)),
+    ("ULSACT01.TXT", "OS2\\SYSTEM\\ULSACT01.MSG", &[850], (0, 0)),
+    ("ULSCAU01.TXT", "OS2\\SYSTEM\\ULSCAU01.MSG", &[850], (0, 0)),
+    ("ULSDET01.TXT", "OS2\\SYSTEM\\ULSDET01.MSG", &[850], (0, 0)),
+    ("UCDFS.TXT", "OS2\\SYSTEM\\UCDFS.MSG", &[850], (0, 0)),
+];
 
 /// Programs marked as PM applications (WINDOWAPI).
 const PM_PROGRAMS: &[&str] = &["pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool"];
@@ -703,7 +734,7 @@ fn build_userland() -> Option<image::FileList> {
     for (src, dest) in HELP_FILES {
         let path = ul.join(src);
         let text = std::fs::read(&path).ok()?;
-        let help = match ipf::compile::compile(&text, true) {
+        let help = match ipf::compile::compile(&text, !dest.ends_with(".INF")) {
             Ok(h) => h,
             Err(e) => {
                 eprintln!("{}: {e}", path.display());
@@ -712,6 +743,22 @@ fn build_userland() -> Option<image::FileList> {
         };
         let out = out_dir.join(dest.rsplit('\\').next().unwrap());
         std::fs::write(&out, help).unwrap();
+        files.push((out, dest.to_string()));
+    }
+    for (src, dest, cps, lang) in MSG_FILES {
+        let path = ul.join("msg").join(src);
+        let text = std::fs::read(&path).ok()?;
+        let name = dest.rsplit('\\').next().unwrap();
+        let opts = msgf::Options { code_pages: cps.to_vec(), language: *lang, dbcs: Vec::new(), name: name.to_ascii_lowercase().into_bytes() };
+        let msg = match msgf::compile(&text, &opts) {
+            Ok(m) => m,
+            Err(e) => {
+                eprintln!("{}: {e}", path.display());
+                return None;
+            }
+        };
+        let out = out_dir.join(name);
+        std::fs::write(&out, msg).unwrap();
         files.push((out, dest.to_string()));
     }
     Some(files)

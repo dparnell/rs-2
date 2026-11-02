@@ -231,6 +231,8 @@ tools, so it can be written to a CD, a USB stick or attached to a VM.
 | `xtask` | Host build tool: builds everything, makes disk images and ISOs, runs QEMU |
 | `tools/lxdump` | Inspect OS/2 executables |
 | `tools/dosrun` | Run DOS programs on the host with rs2's DOS machine |
+| `crates/msgf`, `tools/mkmsgf` | OS/2 message files: MKMSGF's compiler, a reader and a decompiler ([PM.md](PM.md#rs2s-own-messages-and-help)) |
+| `userland/msg`, `userland/help` | rs2's own system message files (MKMSGF source) and help books (IPF source) |
 | `tools/ghidra` | Headless Ghidra scripts for reverse engineering |
 | `tools/scripts` | One-off analysis scripts (Python) |
 | `docs` | Design notes and research |

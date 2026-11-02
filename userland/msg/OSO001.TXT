@@ -1,0 +1,5242 @@
+; rs2's OS/2 system messages (OSO001.MSG): the numbers, classes and
+; insertion points of OS/2's, in rs2's own words. xtask compiles it with
+; crates/msgf (as `mkmsgf OSO001.TXT oso001.msg /P850,437 /L9,1`).
+SYS
+SYS0000I: Y N A R I
+SYS0001I: The function is not valid.
+SYS0002E: The file you specified was not found.
+SYS0003E: The path you specified was not found.
+SYS0004E: The file could not be opened.
+SYS0005E: You do not have access to this resource.
+SYS0006I: The file handle is not valid.
+SYS0007I: The memory control blocks are damaged.
+SYS0008E: The system does not have enough free memory to run this command.
+Every bit of memory is currently allocated.
+SYS0009I: The memory control block address is not valid.
+SYS0010I: The environment is not valid.
+SYS0011I: A program could not be loaded because its format is not
+valid.
+SYS0012I: The access code is not valid.
+SYS0013I: The data is not valid.
+SYS0014?:
+SYS0015E: The drive you specified was not found.
+SYS0016E: The system could not remove the directory.
+SYS0017E: A file cannot be moved to another disk drive.
+SYS0018I: No further files were found.
+SYS0019E: The drive is write-protected.
+SYS0020E: The device you specified was not found.
+SYS0021E: The drive is not ready.
+SYS0022I: The device does not accept this command.
+SYS0023E: A data error occurred (CRC check failed).
+SYS0024I: A program sent a command whose length is not
+valid.
+SYS0025E: The drive could not seek to the requested area or track.
+SYS0026E: The disk or diskette you specified could not be accessed.
+SYS0027E: The drive could not find the requested sector.
+SYS0028E: The printer has no paper, or there is too little disk space
+for a spool file.
+SYS0029E: Writing to the device you specified failed.
+SYS0030E: Reading from the device you specified failed.
+SYS0031E: An attached device has failed.
+SYS0032E: Another process is using the file, so this process cannot
+access it.
+SYS0033E: Part of the file is locked by another process, so this
+process cannot access it.
+SYS0034P: This is not the expected diskette.  Put %2
+(volume serial number %3) in drive %1.
+SYS0035E: The program was unable to open the file it requested.
+SYS0036E: The file sharing buffer has overflowed.
+SYS0037E: Drive %1 is write-protected, so the system cannot write to it.
+SYS0038E: Device %1 was not found.
+SYS0039E: Device %1 is not ready.
+SYS0040I: Device %1 does not accept this command.
+SYS0041E: A data error occurred on %1 (CRC check failed).
+SYS0042I: A program sent a command to %1
+whose length was not valid.
+SYS0043E: Drive %1 could not seek to the requested area or track
+on the disk.
+SYS0044I: The disk in drive %1 does not have a format this
+operating system can use.
+SYS0045E: Drive %1 could not find the requested sector.
+SYS0046E: Printer %1 has no paper.
+SYS0047E: Writing to device %1 failed.
+SYS0048E: Reading from device %1 failed.
+SYS0049E: Device %1 has failed.
+SYS0050E: This network request is not supported.
+SYS0051E: The remote computer cannot be reached.
+SYS0052E: The name is already in use on the network.
+SYS0053E: The network path could not be found.
+SYS0054E: The network is busy or has run out of resources.
+SYS0055E: The network resource you specified can no longer be used.
+SYS0056E: The limit of NETBIOS commands has been reached.
+SYS0057E: The network adapter reported a hardware error.
+SYS0058E: The server you specified cannot carry out this request.
+SYS0059E: The network reported an unexpected error.
+SYS0060E: The remote network adapter is not compatible.
+SYS0061E: The print queue has no room for more jobs.
+SYS0062E: The server has no room to hold the file that is waiting
+to be printed.
+SYS0063E: The file you sent for printing has been deleted.
+SYS0064E: The network name you specified can no longer be used.
+SYS0065E: You have been denied access over the network.
+SYS0066E: The type of network resource is not correct.
+SYS0067E: The network name was not found.
+SYS0068E: The local network adapter has reached its limit of
+names.
+SYS0069E: The limit of NETBIOS sessions has been reached.
+SYS0070E: The remote server is paused or is still starting
+up.
+SYS0071E: The network request was refused.
+SYS0072E: The printer or disk device you specified is paused.
+SYS0073E: The diskette is write-protected.
+SYS0074E: An attached device has failed.
+SYS0075E: This XGA application does not have enough memory to run.
+To keep the application running, follow these steps:
+1. Choose End program/command/operation.
+2. Use Ctrl+Esc or Alt+Esc to move this application into the
+   background.
+3. End some other programs to make memory available.
+4. Bring the XGA application back to the foreground by choosing it
+   in the Window List.
+SYS0076?:
+SYS0077?:
+SYS0078?:
+SYS0079?:
+SYS0080I: A file with this name already exists.
+SYS0081?:
+SYS0082E: The system could not create the directory or file.
+SYS0083I: The INT 24 handler returned Fail.
+SYS0084E: There is not enough storage to handle this request.
+SYS0085E: The local device name is already being used.
+SYS0086E: The network password you gave is not correct.
+SYS0087I: A parameter is not correct.
+SYS0088W: Writing over the network failed.
+SYS0089E: No further processes can be started right now.
+SYS0090?:
+SYS0091?:
+SYS0092?:
+SYS0093?:
+SYS0094?:
+SYS0095?:
+SYS0096E: The Disk Transfer Address (DTA) in use is not valid.
+SYS0097?:
+SYS0098?:
+SYS0099E: Another application is already using device %1.
+SYS0100E: No further system semaphores can be created.
+SYS0101E: Another process owns this exclusive semaphore.
+SYS0102E: The semaphore cannot be closed while it is set.
+SYS0103E: The semaphore cannot be set any more times.
+SYS0104E: Exclusive semaphores cannot be requested at interrupt time.
+SYS0105I: The process that owned this semaphore has ended.
+SYS0106P: Put the diskette for drive %1 in the drive
+SYS0107P: The program was stopped because the other diskette was not
+put in the drive.
+SYS0108E: Another process is using or has locked the disk.
+SYS0109E: The pipe has been closed.
+SYS0110I: The device or file you specified could not be opened.
+SYS0111E: The file name is longer than allowed.
+SYS0112E: The disk is full.
+SYS0113I: No more file handles are available.
+SYS0114I: The target file handle is not valid.
+SYS0115?:
+SYS0116?:
+SYS0117I: The application made an IOCTL call that is not valid.
+SYS0118I: The value for the verify-after-write setting is not valid.
+SYS0119I: The command you requested is not supported.
+SYS0120I: This application programming interface (API) call
+works only in OS/2 mode.
+SYS0121I: The wait for the semaphore timed out.
+SYS0122I: The data area given to a system call is not large enough.
+SYS0123E: A file name or volume label has a character that is not allowed.
+SYS0124I: The level given for the system call is not valid.
+SYS0125I: There is no volume label on the disk.
+SYS0126E: The module you specified was not found.
+SYS0127E: The procedure you specified was not found.
+SYS0128?:
+SYS0129I: A DOS session cannot run this program.
+SYS0130I: da bf c0 d9 b3 b3 c4 c4 c3 b4 c2 c1 c5
+SYS0131I: c9 bb c8 bc ba ba cd cd cc b9 cb ca ce
+SYS0132I: 18 19 1b 1a
+SYS0133I: JOIN or SUBST cannot be used on a drive that has other
+drives joined to it.
+SYS0134I: JOIN or SUBST cannot be used on a drive that is already
+joined.
+SYS0135I: JOIN or SUBST cannot be used on a drive that is already
+substituted.
+SYS0136I: A JOIN could not be removed because the drive is not
+joined.
+SYS0137I: A substitution could not be removed because the drive is
+not substituted.
+SYS0138I: A drive cannot be joined to a directory that is on a
+joined drive.
+SYS0139I: A drive cannot be substituted for a directory that is on
+a substituted drive.
+SYS0140I: A drive cannot be joined to a directory that is on a
+substituted drive.
+SYS0141I: A drive cannot be substituted for a directory that is on
+a joined drive.
+SYS0142E: JOIN or SUBST cannot be carried out right now.
+SYS0143I: A drive cannot be joined or substituted to or for a
+directory on that same drive.
+SYS0144E: The directory is not directly below the root directory.
+SYS0145E: The directory still contains files or directories.
+SYS0146E: The path you specified is part of a substitution.
+SYS0147E: The system has run out of the resources this command needs.
+The process this pop-up belongs to will be ended.
+SYS0148E: The path you specified cannot be used right now.
+SYS0149I: A drive cannot be joined or substituted when a directory on
+it is already the target of a substitution.
+SYS0150E: Tracing is not allowed, or CONFIG.SYS does not set up
+system trace information.
+SYS0151E: The count of semaphore events given to DosMuxSemWait
+is not valid.
+SYS0152E: DosMuxSemWait was not run because too many semaphores
+are set already.
+SYS0153E: The list given to DosMuxSemWait is not valid.
+SYS0154I: Volume labels can be at most 11 characters long.
+Only the first 11 characters of the label you typed were written to
+the disk; the remaining characters were dropped.
+SYS0155E: No further threads can be created.
+SYS0156E: The receiving process did not accept the signal.
+SYS0157I: The segment has been discarded and cannot be locked.
+SYS0158I: The segment is not locked.
+SYS0159E: The thread ID address is not valid.
+SYS0160E: The argument string given to DosExecPgm is not valid.
+SYS0161?:
+SYS0162E: Another signal is still pending.
+SYS0163?:
+SYS0164E: The system cannot create any more threads.
+SYS0165?:
+SYS0166E: No network is installed.
+SYS0167I: The segment could not be locked in memory.
+SYS0168I: An error occurred while a segment was being swapped in.
+SYS0169I: A segment could not be swapped in.
+SYS0170I: Another process is using the segment.
+SYS0171E: A program running in this session has hit a problem and
+cannot go on.
+SYS0172?:
+SYS0173?:
+SYS0174?:
+SYS0175?:
+SYS0176?:
+SYS0177?:
+SYS0178?:
+SYS0179?:
+SYS0180E: A segment number that is not valid was found.
+SYS0181?:
+SYS0182E: %1 cannot be run by the operating system.
+SYS0183?:
+SYS0184?:
+SYS0185?:
+SYS0186E: The flag that was given is not valid.
+SYS0187E: No system semaphore with the given name exists.
+SYS0188E: %1 cannot be run by the operating system.
+SYS0189E: %1 cannot be run by the operating system.
+SYS0190E: %1 cannot be run by the operating system.
+SYS0191E: An OS/2 session cannot run %1.
+SYS0192E: %1 cannot be run by the operating system.
+SYS0193E: An OS/2 session cannot run %1.
+SYS0194E: %1 cannot be run by the operating system.
+SYS0195E: %1 cannot be run by the operating system.
+SYS0196E: This application program cannot be run by the operating system.
+SYS0197E: The operating system is not set up to run this
+application.
+SYS0198E: %1 cannot be run by the operating system.
+SYS0199E: This application program cannot be run by the operating system.
+SYS0200I: A code segment must be smaller than 64KB.
+SYS0201E: %1 cannot be run by the operating system.
+SYS0202E: %1 cannot be run by the operating system.
+SYS0203I: The environment setting you entered does not exist.
+SYS0204?: 
+SYS0205I: None of the processes in the command subtree handles
+signals.
+SYS0206E: The name or extension of the file is longer than allowed.
+SYS0207I: The ring 2 stack is already being used.
+SYS0208I: The wildcard characters * or ? are used wrongly, or there are
+too many of them.
+SYS0209E: The signal being sent is not valid.
+SYS0210E: A handler for the signal cannot be installed.
+SYS0211?: 
+SYS0212I: The segment is locked, so its size cannot be changed.
+SYS0213?: 
+SYS0214E: This program or dynamic-link module has more dynamic-link
+modules attached than the system allows.
+SYS0215?: 
+SYS0216I: The ring 2 stack cannot be made smaller.
+SYS0217?: 
+SYS0218?: 
+SYS0219E: The address of the exit list routine must be at ring 3.
+SYS0220?: 
+SYS0221?: 
+SYS0222?: 
+SYS0223?: 
+SYS0224E: The Presentation Manager (PM) session ID given cannot be
+switched to.
+SYS0225?: 
+SYS0226?: 
+SYS0227?: 
+SYS0228E: There is no such child process, or no child processes are
+left to wait for.
+SYS0229?: 
+SYS0230E: A pipe operation that is not valid was attempted.
+SYS0231E: Another process is using the pipe.
+SYS0232I: No data is waiting to be read.
+SYS0233E: The other end of the pipe has been disconnected.
+SYS0234E: There is more data to read.
+SYS0235?: 
+SYS0236?: 
+SYS0237?: 
+SYS0238?: 
+SYS0239?: 
+SYS0240E: The connection to the network has been lost.
+SYS0241E: The network name could not be found.
+SYS0242E: That network name is already registered.
+SYS0243?: 
+SYS0244?: 
+SYS0245?: 
+SYS0246?: 
+SYS0247?: 
+SYS0248?: 
+SYS0249?: 
+SYS0250E: This move or rename cannot be done.
+SYS0251E: This move or rename cannot be done.
+SYS0252E: The file system name given is not valid.
+SYS0253E: The device name given is not valid.
+SYS0254E: The extended attribute name is not valid.
+SYS0255E: The size of the extended-attribute list is wrong.
+SYS0256E: The list of extended attributes is longer than allowed.
+SYS0257I: Nothing matches the file-name pattern given.
+SYS0258E: The time limit ran out before all the requested changes
+were made.
+SYS0259I: No further attached drives or devices exist.
+SYS0260E: The structure used for the directory search is not valid
+any more.
+SYS0261I: Nothing matches the characters given.
+SYS0262E: The stack requested is larger than allowed.
+SYS0263I: The installable file system cannot be installed, because
+its attributes are not acceptable to this system.
+
+Ask the vendor of the file system for help.
+SYS0264E: The program's starting address must be at ring 3.
+SYS0265E: The start routine address of the dynamic link library (DLL)
+must be at ring 3.
+SYS0266E: The file was not copied.
+SYS0267I: A directory cannot be copied.
+SYS0268I: A network process has locked the file.
+SYS0269I: Network file management had an internal error.
+SYS0270?: 
+SYS0271?: 
+SYS0272?: 
+SYS0273?: 
+SYS0274?: 
+SYS0275?: 
+SYS0276E: The extended attributes are damaged.
+SYS0277E: There is no room left for extended attributes.
+SYS0278E: The extended attribute could not be found.
+SYS0279E: An error occurred while reading extended attributes.
+SYS0280E: This disk or diskette cannot hold extended attributes.
+SYS0281E: The system file that holds extended attributes could not be
+opened.
+SYS0282E: The file system of the target cannot store extended
+attributes.
+SYS0283E: The file system of the target cannot store extended
+attributes.
+SYS0284I: The extended attributes of the file or directory were
+dropped, because the target file system cannot store them.
+SYS0285E: A semaphore with that name already exists.
+SYS0286E: The muxwait semaphore has no entries.
+SYS0287E: The current thread owns a mutex semaphore in this muxwait
+semaphore, so it cannot wait on it.
+SYS0288E: The current thread does not own this mutex semaphore, so it
+cannot release it.
+SYS0289E: The buffer given to DosQueryMuxWaitSem is not big enough.
+SYS0290E: More semaphore handles were requested than are allowed.
+SYS0291E: The semaphore has been opened the maximum number of times.
+SYS0292E: The semaphore given is not of the right type.
+SYS0293?: 
+SYS0294?: 
+SYS0295?: 
+SYS0296?: 
+SYS0297?: 
+SYS0298E: The event semaphore has been posted the maximum number of
+times.
+SYS0299E: The event semaphore was already posted.
+SYS0300E: The event semaphore was already reset.
+SYS0301E: The semaphore is being used.
+SYS0302?: 
+SYS0303E: No process exists with the process ID the program gave.
+SYS0304?: 
+SYS0305?: 
+SYS0306?: 
+SYS0307?: 
+SYS0308?: 
+SYS0309?: 
+SYS0310?: 
+SYS0311?: 
+SYS0312?: 
+SYS0313?: 
+SYS0314?: 
+SYS0315?: 
+SYS0316E: The message given to the message retriever was cut short.
+SYS0317E: Message %1 does not exist
+in message file %2.
+SYS0318E: For message %1, message file %2 could not be found.
+SYS0319E: Message file %1 could not be read.
+SYS0320E: The message retriever was called incorrectly by a program.
+SYS0321E: The message could not be displayed.
+SYS0322?: 
+SYS0323?: 
+SYS0324?: 
+SYS0325?: 
+SYS0326?: 
+SYS0327?: 
+SYS0328?: 
+SYS0329?: 
+SYS0330E: The queue given belongs to a different process.
+SYS0331?: 
+SYS0332E: A queue with that name already exists.
+SYS0333E: The queue element given does not exist.
+SYS0334E: There is not enough memory to handle the queue request.
+SYS0335?: 
+SYS0336?: 
+SYS0337?: 
+SYS0338?: 
+SYS0339?: 
+SYS0340?: 
+SYS0341?: 
+SYS0342?: 
+SYS0343?: 
+SYS0344?: 
+SYS0345?: 
+SYS0346?: 
+SYS0347?: 
+SYS0348?: 
+SYS0349E: The function masks given to VioRegister or VioGlobReg are
+not valid.
+SYS0350E: The parameters given to VioGetPhysBuf are not valid.
+SYS0351?: 
+SYS0352?: 
+SYS0353?: 
+SYS0354?: 
+SYS0355E: Either the display mode requested is not valid, or the VIO
+function cannot be used in the current display mode.
+SYS0356E: The cursor width given to VioSetCurType is not valid.
+SYS0357?: 
+SYS0358E: The row given is not valid.
+SYS0359E: The column given is not valid.
+SYS0360?: 
+SYS0361?: 
+SYS0362?: 
+SYS0363?: 
+SYS0364?: 
+SYS0365?: 
+SYS0366E: The wait flag given is not valid.
+SYS0367E: VioScrUnlock cannot be called now.
+SYS0368?: 
+SYS0369E: The session ID given is not valid.
+SYS0370?: 
+SYS0371E: The session requested could not be found.
+SYS0372E: The title of the session cannot be changed.
+SYS0373E: A keyboard API function was given a parameter that is not
+valid.
+SYS0374?: 
+SYS0375E: A keyboard API function was given an IOWAIT parameter that
+is not valid.
+SYS0376E: A keyboard API function was given a length parameter that
+is not valid.
+SYS0377E: A keyboard API function was given a bit mask parameter
+that is not valid.
+SYS0378?: 
+SYS0379E: A parameter given to the monitor API call is not valid.
+SYS0380E: The device given to DosMonOpen could not be found.
+SYS0381E: The device handle given to the monitor API call could not
+be found.
+SYS0382E: The length given for the monitor buffer is too small.
+SYS0383E: No data was transferred.
+SYS0384E: The byte count given is too large, so no data was
+transferred.
+SYS0385E: Mouse API functions cannot be used, because neither the
+MOUSE$ nor the POINTER$ device driver is installed.
+SYS0386E: The handle given to MouClose is not valid.
+SYS0387?: 
+SYS0388?: 
+SYS0389?: 
+SYS0390?: 
+SYS0391?: 
+SYS0392?: 
+SYS0393?: 
+SYS0394?: 
+SYS0395?: 
+SYS0396E: The COUNTRY.SYS file could not be found.
+SYS0397E: The COUNTRY.SYS file could not be opened.
+SYS0398E: The country code or the code page could
+not be found.
+SYS0399E: The buffer length given is too small, so the NLS table
+returned was cut short.
+SYS0400I: Write down this message number and call your service
+representative.
+SYS0401I: Write down this message number and call your service
+representative.
+SYS0402I: Part of your application was swapped out of memory to the
+swap file on the hard disk, and the system cannot bring it back in.
+For more information, enter:
+HELP SYS%1
+SYS0403I: Part of your application was swapped out of memory to the
+swap file on the hard disk, and there is not enough memory to load
+it back in.  For more information, enter:
+HELP SYS%1
+SYS0404E: VioDeRegister cannot be called now.
+SYS0405E: VioEndPopup cannot be called now.
+SYS0406W: A VIO pop-up without waiting was requested and refused.
+SYS0407E: This process is not allowed to call the keyboard API
+function.
+SYS0408E: KbdRegister was given an ASCIIZ string whose length is not
+valid.
+SYS0409E: KbdRegister was given a function mask parameter that is not
+valid.
+SYS0410E: Keyboard API functions cannot be registered for the current
+session.
+SYS0411E: KbdDeRegister was called, but no KbdRegister is in effect
+to undo.
+SYS0412E: This process is not allowed to call the mouse API function.
+SYS0413E: MouRegister was given an ASCIIZ string whose length is not
+valid.
+SYS0414E: MouRegister was given a function mask parameter that is not
+valid.
+SYS0415E: Mouse API functions cannot be registered for the current
+session.
+SYS0416E: MouDeRegister was called, but no MouRegister is in effect
+to undo.
+SYS0417E: The Session Manager action requested is not valid.
+SYS0418E: DosSMRegisterDD cannot be called now.
+SYS0419?: 
+SYS0420?: 
+SYS0421E: One or more parameters given to the VIO call are not valid.
+SYS0422E: Saving or restoring the mode or save/redraw state is not
+allowed in the current screen group.
+SYS0423?: 
+SYS0424?: 
+SYS0425?: 
+SYS0426E: VioRegister or VioGlobalReg cannot be called now.
+SYS0427?: 
+SYS0428E: VioSaveRedrawUndo cannot be called now.
+SYS0429E: A process running in a background screen group tried to get
+a selector for the video buffer.
+SYS0430E: This VIO call cannot be used while the current VIO pop-up
+is active.
+SYS0431E: The Session Manager function requested is not valid.
+SYS0432E: The Session Manager status requested is not valid.
+SYS0433?: 
+SYS0434E: VioScrLock cannot be called now.
+SYS0435E: A mouse API function was given an IOWAIT parameter that is
+not valid.
+SYS0436E: A VIO handle that is not valid was found.
+SYS0437?: 
+SYS0438E: The length parameter given is not valid.
+SYS0439E: A keyboard API function was given a handle parameter that
+is not valid.
+SYS0440E: The system has run out of handles.
+SYS0441E: A resource problem occurred while opening a logical
+keyboard.
+SYS0442E: A code-page table could not be loaded.
+SYS0443E: The CODEPAGE= statement in CONFIG.SYS is not valid.
+SYS0444E: The system has no code-page support defined.
+SYS0445E: A keyboard API function that needs KbdGetFocus to be called
+first was used without it.
+SYS0446E: This thread has already called KbdGetFocus.
+SYS0447E: The keyboard focus cannot be obtained right now.
+SYS0448E: KbdSetCP was given a code-page ID that is not valid.
+SYS0449E: KbdGetFocus was given a keyboard handle that is not valid.
+SYS0450E: The session cannot be selected.
+SYS0451I: The Session Manager was unable to switch to the parent process,
+because that process is running in the background or a pop-up is active.
+SYS0452E: The process that made this request is not allowed to make it.
+SYS0453E: The start mode given for the session is not valid.
+SYS0454E: The related-session value given at session start is not valid.
+SYS0455E: The value given for the session bond option is not valid.
+SYS0456E: The value given for the session select option is not valid.
+SYS0457I: The process could not be started in the foreground, so the
+Session Manager is starting it in the background instead.
+SYS0458E: The value given for the session end option is not valid.
+SYS0459E: A reserved parameter was given a value that is not valid.
+SYS0460E: The process that made this request is not allowed to make it.
+SYS0461E: The length given for the data buffer is not valid.
+SYS0462E: The parent and child sessions given are not bound to each other.
+SYS0463E: There is too little free memory to carry out this Session
+Manager function.
+SYS0464E: A detached process tried to call a keyboard API function.
+SYS0465E: A detached process made a VIO call that it is not allowed to make.
+SYS0466E: A detached process tried to call a mouse function.
+SYS0467E: The requested font could not be found.
+SYS0468E: The font cannot be loaded in the video mode now in use.
+SYS0469E: The code page given is not valid.
+SYS0470?:
+SYS0471E: The video device in use does not support code pages.
+SYS0472?:
+SYS0473?:
+SYS0474?:
+SYS0475?:
+SYS0476?:
+SYS0477?:
+SYS0478E: The value given for the session trace option is not valid.
+SYS0479?:
+SYS0480E: VioPopup can be used only after the Workplace Shell has started.
+SYS0481E: The hard error and print screen handlers cannot be used.
+SYS0482?:
+SYS0483E: The requested transparent pop-up cannot be shown.
+SYS0484?:
+SYS0485?:
+SYS0486E: A reserved parameter was given a value that is not valid.
+SYS0487E: The address given is not valid.
+SYS0488I: DevHlp_AllocateGDTSelectors was asked to allocate zero
+selectors.
+SYS0489E: Too few GDT selectors are free to meet the request.
+SYS0490E: The selector is not valid.
+SYS0491E: The value given for the session type is not valid.
+SYS0492E: The value given for the initial state of the windowed session
+is not valid.
+SYS0493E: The value given for the session inherit option is not valid.
+SYS0494E: A VIO windowed program made a VIO call it is not allowed to make.
+SYS0495E: The program calling the Advanced VIO function is not allowed
+to call it.
+SYS0496E: This session has already called VioShieldInit or VioShieldTerm.
+SYS0497E: VioCreatePS did not succeed.
+SYS0498?:
+SYS0499?:
+SYS0500E: The dynamic link library PMVIOP.DLL could not be loaded.
+SYS0501I: The DOS session cannot start because too many files are open.
+Go back to an OS/2 session and close some programs so that fewer files
+are open, then return to a DOS session and run the command again.
+SYS0502E: A mouse API function was given a handle that is not valid.
+SYS0503E: The value given for the session diagnostic option is not valid.
+SYS0504E: A Presentation Manager session tried to call a keyboard API
+function.
+SYS0505E: A Presentation Manager session tried to call a mouse API
+function.
+SYS0506?:
+SYS0507E: No process with the given ID exists.
+SYS0508E: A RAS trace count is already in progress.
+SYS0509E: RAS tracing is suspended.
+SYS0510E: No RAS trace-until-error request is in effect.
+SYS0511I: The RAS trace error count has hit its limit.
+SYS0512E: RAS tracing of minor codes is not permitted.
+SYS0513E: There is an error in the RAS major or minor code table.
+SYS0514E: This RAS trace-until-error request is not permitted.
+SYS0515E: The Session Manager already has the maximum number of device
+drivers registered.
+SYS0516E: The session notification bit map is not valid.
+SYS0517E: The Logging Facility was called with a function code that is
+not valid.
+SYS0518E: The OS/2 Logging Facility is not set up.
+SYS0519E: The Logging Facility is suspended at the moment.
+SYS0520E: The buffer passed to LogGetEntries is not large enough.
+SYS0521E: LogAddEntries had to discard part of the data it was given.
+SYS0522E: LogAddEntries discarded a record that was not valid.
+SYS0523E: A Logging Facility API was asked for a logging service that is
+not valid.
+SYS0524E: A general failure occurred in the Logging Facility.
+SYS0525E: The disk given cannot be formatted.
+SYS0526E: An error occurred, so the disk given cannot be formatted for
+HPFS (High Performance File System).
+SYS0527E: The HPFS (High Performance File System) data could not be
+written to the disk given.
+SYS0528E: Formatting of the disk given was not completed.
+SYS0529E: There is too little free memory to run FORMAT.
+SYS0530E: FORMAT needs a hard disk to be specified.
+SYS0531E: Only a single drive letter can be given to FORMAT.
+SYS0532E: Error %1 occurred, so the disk given cannot be formatted
+for HPFS (High Performance File System).
+SYS0533E: The syntax of the command is described in the online help.
+SYS0534I:
+Formatting the disk...
+
+SYS0535I:
+The disk holds %1 kilobytes in total.
+SYS0536I: Bad blocks take up %1 kilobytes.
+SYS0537I: %1 kilobytes are free.
+SYS0538I: Formatting is %1% complete.%0
+SYS0539P: Enter the current volume label of drive %1:%0
+SYS0540E: The disk was not formatted for HPFS.
+SYS0541I: The HPFS (High Performance File System) driver has been loaded.
+SYS0542I: The DISKCACHE= line in CONFIG.SYS asks for %1 cache buffers.
+SYS0543E: When CHKDSK checks a hard disk, the parameter %1 cannot be
+used.
+SYS0544E: CHKDSK is unable to access drive %1.
+SYS0545E: Error %1 occurred, so CHKDSK cannot check the state of the
+disk given.
+SYS0546E: There is too little free memory to run CHKDSK.
+SYS0547E: CHKDSK is unable to write the recovered data to the disk.
+SYS0548W: Warning!  CHKDSK does not have enough memory to recover
+all of the lost data.
+SYS0549E: There is too little free disk space to run CHKDSK with the
+/F parameter.
+SYS0550E: CHKDSK was unable to recover any data.
+SYS0551W: Warning!  CHKDSK could not locate the root directory of the
+disk, but it will try to rebuild the file system anyway.
+SYS0552E: File system errors were found on the disk given.
+SYS0553I: CHKDSK found a small file system error and fixed it.
+SYS0554I: CHKDSK found a directory organization error and fixed it.
+SYS0555I: CHKDSK moved data out of a bad block to a different place
+on the disk.
+SYS0556I: CHKDSK deleted a damaged directory block.
+SYS0557I: CHKDSK deleted the damaged file %1.
+SYS0558I: CHKDSK fixed an error in the allocation of disk space.
+SYS0559P: Warning!  The disk given does not seem to be formatted for
+HPFS (High Performance File System), and running CHKDSK on it could
+destroy data.  Continue anyway (Y/N)? %0
+SYS0560I: CHKDSK fixed an allocation error in the file %1.
+SYS0561I: CHKDSK is scanning unallocated disk space.
+SYS0562E: Lost data was found on disk %1.
+SYS0563I: CHKDSK has scanned %1% of the disk.%0
+SYS0564I: CHKDSK is looking for lost data.
+SYS0565W: Warning!  CHKDSK is unable to read vital HPFS (High
+Performance File System) data on the disk given.  Back up every file on
+this disk right away, and keep the computer switched on until you have.
+SYS0566E: Another process is using the disk given.
+SYS0567I: CHKDSK recovered data that had been moved temporarily.
+SYS0568I: The disk holds %1 kilobytes in total.
+SYS0569I: %2 directories take up %1 kilobytes.
+SYS0570I: %2 user files take up %1 kilobytes.
+SYS0571I: %1 kilobytes are free to use.
+SYS0572I: Recovered files will be put in %1.
+SYS0573I: CHKDSK recovered a lost directory and named it %1.
+SYS0574I: CHKDSK wrote recovered data to the file %1.
+SYS0575I: CHKDSK recovered extended attributes that HPFS had moved.
+SYS0576E: Extended attributes were found in a temporary replacement
+sector, but CHKDSK was unable to move the data.
+SYS0577I: CHKDSK moved extended attributes out of a temporary
+replacement sector.
+SYS0578I: CHKDSK moved an access control list out of a temporary
+replacement sector.
+SYS0579E: An access control list was found in a temporary replacement
+sector, but CHKDSK was unable to move it to where it belongs.
+SYS0580I: CHKDSK shortened a damaged list of extended attributes.
+SYS0581I: CHKDSK shortened an extended attribute name that was not valid.
+SYS0582I: CHKDSK shortened an extended attribute list that contained a
+damaged block.
+SYS0583I: CHKDSK deleted an extended attribute that was not valid.
+SYS0584I: CHKDSK fixed an allocation error in an extended attribute.
+SYS0585I: CHKDSK fixed an allocation error in an access control list.
+SYS0586I: CHKDSK deleted an access control list that had a bad block.
+SYS0587I: CHKDSK deleted a damaged access control list.
+SYS0588E: CHKDSK found data in a temporary replacement sector, but was
+unable to move it to where it belongs.
+SYS0589I: The version of UHPFS.DLL being used is not the right one.
+SYS0590E: CHKDSK found data that is still in a temporary relocation
+sector.
+SYS0591I: CHKDSK fixed incorrect status information in the temporary
+allocation pool.
+SYS0592I: CHKDSK fixed incorrect status information for the required
+extended attributes.
+SYS0593E: RECOVER does not accept the parameter %1.
+SYS0594E: RECOVER is unable to find the file given.
+SYS0595E: Error %1 occurred, so the file given cannot be recovered.
+SYS0596E: There is too little free memory to run RECOVER.
+SYS0597E: RECOVER is unable to write the recovered data to the disk
+given.
+SYS0598E: RECOVER is unable to create a temporary file.
+SYS0599W: Warning!  RECOVER was unable to read the extended attributes,
+so some of them may have been lost.
+SYS0600I: %1 bytes of the file have been recovered.
+SYS0601I: %1 bytes of the file were damaged, but have been recovered.
+SYS0602I: %1 bytes of the file were not recovered.
+SYS0603E: Information about bad blocks was not written to the disk
+given.
+SYS0604E: RECOVER is unable to delete the original file %1.
+Its contents have been recovered into %2.
+SYS0605E: RECOVER is unable to create a new file called %1.
+Its contents have been recovered into %2.
+SYS0606E: The operating system reported an unexpected error.
+SYS0607E: The SYS command does not accept the parameter %1.
+SYS0608E: The SYS command cannot install the High Performance File
+System (HPFS) on the current drive.
+SYS0609E: HPFS SYS works only on drives formatted for HPFS (High
+Performance File System).
+SYS0610E: The SYS command is unable to create the file %1.
+SYS0611I: The IFS line asks for a larger cache than is allowed, so the
+largest permitted size will be used.
+SYS0612E: The IFS= line in CONFIG.SYS has a syntax error.
+SYS0613E: The cache cannot start because there is too little free memory.
+SYS0614I: Not all of the requested cache is available, so a cache size
+of %1 is being used.
+SYS0615I: DosFSCtl get returned %1
+SYS0616I: DosFSCtl set returned %1
+SYS0617I: DosFSCtl both returned %1
+SYS0618I: DosFSCtl stop returned %1
+SYS0619I: DosSetPrty returned %1
+SYS0620I: DosAllocSeg returned %1
+SYS0621I:
+          DiskIdle: %1 milliseconds
+            MaxAge: %2 milliseconds
+        BufferIdle: %3 milliseconds
+        Cache size: %4 kbytes
+SYS0622I: Usage: %1 [OPTIONS]
+OPTIONS can be any of the following:
+ -DISKIDLE:n         Wait n milliseconds of disk idle time before writing.
+ -MAXAGE:n           Keep a cache buffer at most n milliseconds.
+ -BUFFERIDLE:n       Consider a buffer idle after n milliseconds.
+ -Lazy:ON|OFF|n      Enable or disable lazy writing, or use n lazy writers.
+
+ -READAHEAD:ON|OFF|n Enable/disable read-ahead, or use n read-ahead workers.
+SYS0623I: The option %1:%2 is not valid; it needs a positive number.
+SYS0624I: The option %1:%2 is not valid; the value must be between %3
+and %4.
+SYS0625I: The option %1 is not valid.
+SYS0626E: A disk error occurred on the HPFS (High Performance File
+System) volume in drive %1.
+SYS0627E: Drive %1 was not shut down properly.  At an OS/2 command
+prompt, run CHKDSK /F on this drive.
+SYS0628I: A bad sector on drive %1 was replaced and no data was lost.
+Run CHKDSK soon so that the volume regains full speed and its pool of
+spare sectors is refilled.
+SYS0629E: When a hard disk is formatted, FORMAT does not accept the
+parameter %1.
+SYS0630E: The High Performance File System (HPFS) format was unable to
+update CONFIG.SYS.
+SYS0631P: Press Enter to start recovering the file.
+SYS0632I: %1 kilobytes are set aside for the system.
+SYS0633I: Extended attributes take up %1 kilobytes.
+SYS0634I:
+          WriteCache: %4 bytes
+            DirtyMax: %5 buffers
+               Cache: %6 buffers
+SYS0635I:
+
+The disk was formatted successfully.
+
+SYS0636E: The volume label you typed does not match the label of this
+drive.
+SYS0637E: FORMAT cannot run right now.
+SYS0638E: %2 access is not provided by the
+%1 virtual device driver.
+SYS0639E: Your keyboard is not locked.  To lock the keyboard and the
+mouse, open the pop-up menu of the desktop and choose Lockup now.
+SYS0640W: Warning!  Everything stored on hard disk %1 will be erased!
+Do you want RECOVER to continue (Y/N)? %0
+SYS0641W: Running CHKDSK /F:3 on this drive can bring back files that
+were on it before it was last formatted.
+Do you want CHKDSK to continue (Y/N)? %0
+SYS0642?: 
+SYS0643?: 
+SYS0644?: 
+SYS0645?: 
+SYS0646?: 
+SYS0647?: 
+SYS0648?: 
+SYS0649I: Local drive %1: now refers to OS/2 drive %2:
+SYS0650I: Lets one DOS session reach drives through the OS/2 file system.
+Syntax:
+  FSACCESS [!][DOSletter][DOSletter-DOSletter][DOSletter=OS2drive]
+where:
+  !                     Removes the mapping of a local drive letter.
+  DOSletter             A drive letter that DOS knows locally.
+  DOSletter-DOSletter   A range of drive letters.
+  OS2drive              The OS/2 drive letter that a DOS letter is
+                        to refer to.
+SYS0651E: DOS sessions are unavailable: CONFIG.SYS has no DEVICE=
+statement loading the virtual %1 device driver.
+SYS0652E: That drive letter is being used, so its mapping cannot be
+changed or removed.
+SYS0653E: A drive mapping needs two drive letters; the syntax given
+is wrong.
+SYS0654E: A drive range needs two drive letters; the syntax given
+is wrong.
+SYS0655E: To remove a mapping, put the ! symbol directly in front of
+a drive letter; the syntax given is wrong.
+SYS0656E: The FSFILTER.SYS device driver is not loaded.
+SYS0657E: The parameter you gave is not a drive letter.
+SYS0658P: This DOS diskette might not be startable.  Before you make a
+diskette image from it, you may want to check that it starts, by
+trying it in a VM Boot session.
+
+Continue anyway (Y/N)? %0
+SYS0659E: The target disk has too little free space for this operation.
+Free space:        %1KB
+Space required:    %2KB
+SYS0660I: EMM386: the OS/2 expanded memory (EMS 4.0) driver is
+installed.
+SYS0661I: HIMEM: the OS/2 extended memory (XMS 2.1) driver is
+installed.
+SYS0662I: MOUSE: the OS/2 mouse driver, version 6.25, is installed.
+SYS0663E: EMM386 on OS/2 needs VEMM.SYS.
+SYS0664E: HIMEM on OS/2 needs VXMS.SYS.
+SYS0665E: MOUSE on OS/2 needs VMOUSE.SYS.
+SYS0666E: EMM386 needs OS/2 version 2.0 or newer.
+SYS0667E: HIMEM needs OS/2 version 2.0 or newer.
+SYS0668E: MOUSE needs OS/2 version 2.0 or newer.
+SYS0669E: EMM386 for OS/2 was not installed: its memory range conflicts
+with the memory of an adapter.
+SYS0670E: The system cannot be started from the disk or diskette given.
+SYS0671?: 
+SYS0672?: 
+SYS0673?: 
+SYS0674?: 
+SYS0675?: 
+SYS0676?: 
+SYS0677?: 
+SYS0678?: 
+SYS0679?: 
+SYS0680?: 
+SYS0681?: 
+SYS0682?: 
+SYS0683?: 
+SYS0684?: 
+SYS0685?: 
+SYS0686?: 
+SYS0687?: 
+SYS0688?: 
+SYS0689I: Lazy writing is on, using %1 worker thread(s).
+SYS0690I: Lazy writing is off.
+SYS0691?: 
+SYS0692?: 
+SYS0693W: An HPFS (High Performance File System) structure on drive %1
+could not be read.  To avoid data loss or an unstable system, copy
+important files from this drive elsewhere, then run CHKDSK /F.
+SYS0694W: An HPFS (High Performance File System) structure could not be
+read from the drive: the FNODE of the file appears to be damaged.
+SYS0695I: Read-ahead is on, using %1 worker thread(s).
+SYS0696I: Read-ahead is off.
+SYS0697?: 
+SYS0698?: 
+SYS0699?: 
+SYS0700E: The serial port hardware cannot run at %1 baud.
+SYS0701I: baud     = %1
+SYS0702I: parity   = %1
+SYS0703I: BREAK    = %1
+SYS0704I: databits = %1
+SYS0705I: stopbits = %1
+SYS0706I: TO       = %1
+SYS0707I: XON      = %1
+SYS0708I: IDSR     = %1
+SYS0709I: ODSR     = %1
+SYS0710I: OCTS     = %1
+SYS0711I: DTR      = %1
+SYS0712I: RTS      = %1
+SYS0713I: BUFFER   = %1
+SYS0714I: ENHANCED = %1
+SYS0715I: RXDMA    = %1
+SYS0716I: TXDMA    = %1
+SYS0717E: RXDMA= and TXDMA= cannot be used while ENHANCED is OFF.
+SYS0718E: This serial port does not accept ENHANCED=%1, RXDMA=%2
+or TXDMA=%3.
+SYS0719I: BUFFER= has no effect while ENHANCED=ON and is ignored.
+SYS0720E: The %1 parameter is not available on this serial port.
+SYS0721E: %1 is not available on this serial port.
+SYS0722E: A baud rate must be given.
+SYS0723E: The parameter %1 is unknown.
+SYS0724E: The DATABITS and STOPBITS values given cannot be used
+together.
+SYS0725E: For the %3 parameter, %1=%2 is not an allowed value.
+SYS0726E: An equal sign (=) must follow the parameter %1.
+SYS0727E: The parameter %1 is not one this command knows.
+SYS0728E: The positional parameter %1 has a value outside the allowed
+range.
+SYS0729?: 
+SYS0730E: The data buffers of this character device monitor have been
+damaged, so the process is being ended.
+SYS0731E: Replacing or restoring the module failed, and the module is
+no longer usable.  A good copy may be found in the backup file.
+SYS0732E: OS/2 cannot work with your hard disk or diskette drive.
+SYS0733I: Copyright (C) the rs2 project contributors.
+SYS0734I: Usage:
+              %1 [OPTIONS]
+
+OPTIONS:
+   /K       Ends the DSOM server process of the Workplace Shell.
+   /S       Starts the DSOM server process of the Workplace Shell.
+   /Q       Shows whether the DSOM server is running.
+SYS0735I: SOMDD could not be stopped because of an error
+SYS0736I: SOMDD could not be started because of an error
+SYS0737I: SOMDD is running
+SYS0738I: SOMDD has been stopped
+SYS0739I: SOMDD has been started
+SYS0740I: SOMDD failed to start
+SYS0741I: SOMDD is not running
+SYS0742I: SOMDD cannot be stopped while the server is running
+SYS0743I: the server has been stopped
+SYS0744I: the server is running
+SYS0745I: the server is not running
+SYS0746I: the server could not be stopped because of an error
+SYS0747I: the server could not be started because of an error
+SYS0748I: the server has been started
+SYS0749I: the server failed to start
+SYS0750I: argument not valid: %1
+SYS0751I: bad switch: %1
+SYS0752I: the environment could not be initialized
+SYS0753I: conflicting arguments: start and stop were both given
+SYS0754I: Workplace Shell server start/stop utility
+SYS0755?: 
+SYS0756?: 
+SYS0757?: 
+SYS0758?: 
+SYS0759?: 
+SYS0760?: 
+SYS0761?: 
+SYS0762?: 
+SYS0763?: 
+SYS0764?: 
+SYS0765?: 
+SYS0766?: 
+SYS0767?: 
+SYS0768?: 
+SYS0769?: 
+SYS0770?: 
+SYS0771?: 
+SYS0772?: 
+SYS0773?: 
+SYS0774?: 
+SYS0775?: 
+SYS0776?: 
+SYS0777?: 
+SYS0778?: 
+SYS0779?: 
+SYS0780?: 
+SYS0781?: 
+SYS0782?: 
+SYS0783?: 
+SYS0784?: 
+SYS0785?: 
+SYS0786?: 
+SYS0787?: 
+SYS0788?: 
+SYS0789?: 
+SYS0790?: 
+SYS0791?: 
+SYS0792?: 
+SYS0793?: 
+SYS0794?: 
+SYS0795?: 
+SYS0796?: 
+SYS0797?: 
+SYS0798?: 
+SYS0799?: 
+SYS0800?: 
+SYS0801?: 
+SYS0802?: 
+SYS0803?: 
+SYS0804I:
+SYS0805?: 
+SYS0806?: 
+SYS0807?: 
+SYS0808?: 
+SYS0809?: 
+SYS0810?: 
+SYS0811?: 
+SYS0812?: 
+SYS0813?: 
+SYS0814?: 
+SYS0815?: 
+SYS0816?: 
+SYS0817?: 
+SYS0818?: 
+SYS0819?: 
+SYS0820?: 
+SYS0821?: 
+SYS0822?: 
+SYS0823?: 
+SYS0824?: 
+SYS0825?: 
+SYS0826?: 
+SYS0827?: 
+SYS0828?: 
+SYS0829?: 
+SYS0830?: 
+SYS0831?: 
+SYS0832?: 
+SYS0833?: 
+SYS0834?: 
+SYS0835?: 
+SYS0836?: 
+SYS0837?: 
+SYS0838?: 
+SYS0839?: 
+SYS0840?: 
+SYS0841?: 
+SYS0842?: 
+SYS0843?: 
+SYS0844?: 
+SYS0845?: 
+SYS0846?: 
+SYS0847?: 
+SYS0848?: 
+SYS0849?: 
+SYS0850E: Replacing the MBR failed with error %X.
+SYS0851?: 
+SYS0852?: 
+SYS0853?: 
+SYS0854?: 
+SYS0855?: 
+SYS0856?: 
+SYS0857?: 
+SYS0858?: 
+SYS0859?: 
+SYS0860I: Timeout         No
+SYS0861I: Timeout         %1
+SYS0862I: System index    %1
+SYS0863I: Mode            Advanced
+SYS0864I: Mode            Normal
+SYS0865I: System %1       %2
+SYS0866I: System %1       None
+SYS0867I: SETBOOT sets up Boot Manager on a hard disk.
+Syntax:
+  SETBOOT [/Q]
+  SETBOOT [/T:x or /T:NO][/M:m][/X:x][/N:name][/B][/IBD:d][/IBA:name]
+Parameters:
+  Q         Shows the current startup settings.
+  T:x       Waits x seconds before the default is started.
+  T:NO      Waits without a time limit.
+  M:m       Selects the mode: m=n   normal mode (the default).
+                              m=a   advanced mode.
+  X:x       Makes x (0-3) the system index.
+  N:name    Makes the volume or logical drive "name" the system
+            started at index N.
+  B         Closes the system down and starts it again.
+  IBD:d     Closes the system down and starts it again from
+            logical drive d.
+  IBA:name  Closes the system down and starts the computer again
+            from the system called "name".
+SYS0868I: The hard disk could not be accessed because of an error.
+SYS0869I: Boot Manager has not been set up on this system.
+SYS0870I: %1 does not take a value.
+SYS0871I: %1 needs a value.
+SYS0872I: The parameter %1 is not valid.
+SYS0873I: Parameter %2 does not accept the value %1.
+SYS0874I: Boot Manager has not been installed.
+SYS0875I: No system %1 has been specified yet.
+SYS0876I: Unexpected return code %1.
+SYS0877?: 
+SYS0878?: 
+SYS0879?: 
+SYS0880?: 
+SYS0881?: 
+SYS0882?: 
+SYS0883?: 
+SYS0884?: 
+SYS0885?: 
+SYS0886?: 
+SYS0887?: 
+SYS0888E: %s could not be found.
+SYS0889E: %d matching instance(s) were found, but exactly %d are needed.
+SYS0890E: The message help text file contains an error.
+SYS0891E: %s is not a valid value for the VTYPE restrictor.
+SYS0892E: This command does not accept the BOOTMGR restrictor.
+SYS0893E: There is already a Boot Manager partition.
+SYS0894E: This partition cannot be given a name.
+SYS0895E: This command cannot assign a name.
+SYS0896E: This command cannot be used on a partition that extends past
+cylinder 1024.
+SYS0897E: An error occurred on the disk. %0
+SYS0898E: Names cannot be given unless Boot Manager is used.
+SYS0899?: 
+SYS0900?: 
+SYS0901?: 
+SYS0902?: 
+SYS0903?: 
+SYS0904?: 
+SYS0905?: 
+SYS0906?: 
+SYS0907?: 
+SYS0908?: 
+SYS0909?: 
+SYS0910?: 
+SYS0911?: 
+SYS0912?: 
+SYS0913?: 
+SYS0914?: 
+SYS0915?: 
+SYS0916?: 
+SYS0917?: 
+SYS0918?: 
+SYS0919?: 
+SYS0920?: 
+SYS0921?: 
+SYS0922?: 
+SYS0923?: 
+SYS0924?: 
+SYS0925?: 
+SYS0926?: 
+SYS0927?: 
+SYS0928?: 
+SYS0929?: 
+SYS0930?: 
+SYS0931?: 
+SYS0932?: 
+SYS0933?: 
+SYS0934?: 
+SYS0935?: 
+SYS0936?: 
+SYS0937?: 
+SYS0938?: 
+SYS0939?: 
+SYS0940?: 
+SYS0941?: 
+SYS0942?: 
+SYS0943?: 
+SYS0944?: 
+SYS0945?: 
+SYS0946?: 
+SYS0947?: 
+SYS0948?: 
+SYS0949?: 
+SYS0950?: 
+SYS0951?: 
+SYS0952?: 
+SYS0953?: 
+SYS0954?: 
+SYS0955?: 
+SYS0956?: 
+SYS0957?: 
+SYS0958?: 
+SYS0959?: 
+SYS0960?: 
+SYS0961?: 
+SYS0962?: 
+SYS0963?: 
+SYS0964?: 
+SYS0965?: 
+SYS0966?: 
+SYS0967?: 
+SYS0968?: 
+SYS0969?: 
+SYS0970?: 
+SYS0971?: 
+SYS0972?: 
+SYS0973?: 
+SYS0974?: 
+SYS0975?: 
+SYS0976?: 
+SYS0977?: 
+SYS0978?: 
+SYS0979?: 
+SYS0980?: 
+SYS0981?: 
+SYS0982?: 
+SYS0983?: 
+SYS0984?: 
+SYS0985?: 
+SYS0986?: 
+SYS0987?: 
+SYS0988?: 
+SYS0989?: 
+SYS0990?: 
+SYS0991?: 
+SYS0992?: 
+SYS0993?: 
+SYS0994?: 
+SYS0995?: 
+SYS0996?: 
+SYS0997?: 
+SYS0998?: 
+SYS0999?: 
+SYS1000?: 
+SYS1001E: The command was given a parameter that is not valid.
+SYS1002E: The command cannot use the parameter %1.
+SYS1003E: The command was not typed in a form it accepts.
+SYS1004P: Loading, one moment please. %1.
+SYS1005?: 
+SYS1006E: This file is too large for sorting.
+SYS1007?: 
+SYS1008?: 
+SYS1009?: 
+SYS1010E: The file has more lines (records) than the SORT command
+can handle.
+SYS1011E: Volume %1 has no free clusters left.
+SYS1012?: 
+SYS1013?: 
+SYS1014?: 
+SYS1015P: To start recovering the files on drive %1, press Enter.
+SYS1016?: 
+SYS1017?: 
+SYS1018?: 
+SYS1019E: The drive you named does not exist.
+SYS1020?: 
+SYS1021?: 
+SYS1022?: 
+SYS1023I: Recovered %1 bytes out of %2.
+SYS1024E: Warning!  There is no more room in the directory.
+SYS1025I: Recovered %1 file(s).
+SYS1026?: 
+SYS1027?: 
+SYS1028?: 
+SYS1029?: 
+SYS1030?: 
+SYS1031?: 
+SYS1032P: Press any key to continue . . . %0
+SYS1033P: %1, Delete (Y/N)? %0
+SYS1034E: The command processor is not in the path that was given.
+SYS1035E: The path or file name given cannot be used.
+SYS1036E: The date you typed is not valid.
+SYS1037?: 
+SYS1038?: 
+SYS1039E: The batch file has no label with the name given.
+SYS1040?: 
+SYS1041E: %1 is not recognized as an internal or external
+command, a program, or a batch file.
+SYS1042?: 
+SYS1043?: 
+SYS1044E: The time you typed is not valid.
+SYS1045E: This program does not work with the version of the
+operating system that is running.
+SYS1046?: 
+SYS1047I: OS/2 command processor, version 4.5
+%1
+SYS1048I: ^C
+SYS1049I: %1 file(s) copied.
+SYS1050I: Current date: %1 %2%0
+SYS1051I: Current time: %0
+SYS1052I: Current date: %2 %1%0
+SYS1053I: Directory of %1
+
+SYS1054I: <DIR>     %0
+SYS1055?: 
+SYS1056E: There is no room left in the environment.
+SYS1057E: A DOS session cannot use the file or path name given.
+SYS1058E: A cluster failed while being written, and the FAT file system
+has no way to replace it.  Your data has been saved in the file
+HOTFIX.DAT in the root directory of drive %1.
+SYS1059E: The program given could not be run.
+SYS1060I: %1 file(s) %2 bytes used
+SYS1061E: An error involving a file was detected.
+SYS1062I: %1 file(s)
+SYS1063?: 
+SYS1064?: 
+SYS1065E: The line you typed is too long.
+SYS1066E: The target file's contents have been lost.
+SYS1067P: Put the diskette holding the batch file in the drive,
+then press any key. %0
+SYS1068P:
+Type the new date: (mm%1dd%1yy) %0
+SYS1069E: This command does not accept UNC path names.
+SYS1070P:
+Type the new time: %0
+SYS1071E: Handle %1 could not be duplicated while setting up
+redirection.
+SYS1072?: 
+SYS1073?: 
+SYS1074I: ECHO is off.
+SYS1075I: ECHO is on.
+SYS1076I: VERIFY is off.
+SYS1077I: VERIFY is on.
+SYS1078E: A file cannot be copied to itself.
+SYS1079E: %1 is not expected at this point.
+SYS1080?: 
+SYS1081E:
+CMD.EXE has stopped. %0
+SYS1082I: The process ID (PID) is %1.
+SYS1083E: Either a file with that name exists already, or the file was
+not found, or it is in use.
+SYS1084P: %1, Are you sure (Y/N)? %0
+SYS1085?: 
+SYS1086E: This string of characters is longer than allowed:
+%1
+SYS1087I:  %1      %2       %3      %4    %5      %6     %7   Void
+SYS1088I:  %1      %2       %3      %4    %5      %6     %7   Ready
+SYS1089I:  %1      %2       %3      %4    %5      %6     %7   Block
+SYS1090I: Operating System/2 version %1.%2 %0
+SYS1091I:  %1      %2       %3      %4    %5      %6     %7  Suspend
+SYS1092E: A handle could not be duplicated while setting up a pipe.
+SYS1093P: More? %0
+SYS1094I:  %1      %2       %3      %4    %5      %6     %7  CritSec
+SYS1095I:  %1      %2       %3      %4    %5      %6     %7  Running
+SYS1096I:  %1      %2       %3      %4    %5      %6     %7  Boost
+SYS1097I:  %1      %2       %3      %4    %5      %6     %7  TSD
+SYS1098I:       %1        %2      Void       %3    %4
+SYS1099I:       %1        %2      Ready      %3    %4
+SYS1100I:       %1        %2      Block      %3    %4
+SYS1101I:       %1        %2      Suspend    %3    %4
+SYS1102E: The directory could not be created.
+SYS1103E: The directory you named does not exist.
+SYS1104I: %1 is joined to %2
+SYS1105I: %1 is substituted for %2
+SYS1106I:       %1        %2      CritSec    %3    %4
+SYS1107E: The process could not be completed.
+SYS1108I:       %1        %2      Running    %3    %4
+SYS1109I:       %1        %2      Boost      %3    %4
+SYS1110I:       %1        %2      TSD        %3    %4
+SYS1111I: %1 was not installed.
+SYS1112I: This computer is neither an AT nor an XT-286.
+SYS1113I: This computer is not a PS/2 system.
+SYS1114I: This device adapter cannot be used.
+SYS1115I: The device adapter was not found, or another device is
+using it.
+SYS1116I: The interrupt level cannot be used.
+SYS1117I: There is no Advanced BIOS in this computer.
+SYS1118E: No more help exists for this message.
+SYS1119I: Revision %1.%2 %0
+SYS1120I:
+
+          ÚÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+          ³                                                      ³
+          ³                OS/2  -  Installation                 ³
+          ³                                                      ³
+          ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+
+
+          Take the diskette out of drive A.
+
+          Then put OS/2 Diskette %1 into drive A
+          and press Enter.
+SYS1121P: Sun%0
+SYS1122P: Mon%0
+SYS1123P: Tue%0
+SYS1124P: Wed%0
+SYS1125P: Thu%0
+SYS1126P: Fri%0
+SYS1127P: Sat%0
+SYS1128E: The process ID given to the command is not valid.
+SYS1129I:
+                    Semaphores in the System
+
+   Owner Process              Reference  Request         Semaphore
+(Name  ID  Session)  Index  Count       Count     Flag     Name
+SYS1130I: %1  %2  %3    %4      %5         %6     %7   %8
+SYS1131I:
+          Named Shared Memory
+
+                            Reference
+  Handle     Selector     Count          Name of Shared Memory
+SYS1132I:    %1        %2           %3          %4
+SYS1133I:
+                       Processes and Their Resources
+
+           Parent                         Dynamic
+ Process   Process   Session   Process      Link       Shared Memory
+   ID        ID        ID       Name      Libraries        Names
+SYS1134I: %1    %2    %3       %4        %5   %6
+SYS1135?: 
+SYS1136I:
+                       Dynamic Link Libraries in Use
+
+ Process   Process   Session
+  Name       ID        ID      Libraries Loaded
+SYS1137E: No source path was given.
+SYS1138I:  %1   %2       %3      %4
+SYS1139P: To start adding files, press Enter.
+SYS1140P: To start replacing files, press Enter.
+SYS1141E: These files could not be found: %1.
+SYS1142I:
+                    Processes and Threads
+
+          Parent
+Process   Process   Session   Process   Thread
+  ID        ID        ID       Name       ID    Priority   Block ID   Status
+SYS1143I:
+    Thread
+      ID      Priority     Status    Block ID    Semaphores Owned
+SYS1144I:       %1        %2                 %3    %4
+SYS1145E: You are not allowed to access %1.
+SYS1146?: 
+SYS1147?: 
+SYS1148I: No file was added.
+SYS1149I: Added %1 file(s).
+SYS1150I: No file was replaced.
+SYS1151I: Replaced %1 file(s).
+SYS1152P: Add %1 (Y/N)? %0
+SYS1153P: Replace %1 (Y/N)? %0
+SYS1154I: Adding the file %1.
+SYS1155I: Replacing the file %1.
+SYS1156?: 
+SYS1157?: 
+SYS1158?: 
+SYS1159?: 
+SYS1160?:
+SYS1161P: Compare more files (Y/N)? %0
+SYS1162P: Type the name of the first file.
+SYS1163P: Type the name of the second file.
+SYS1164I: No differences were found between the files.
+SYS1165I: COMPARE found 10 or more differences between the files
+and is stopping.
+SYS1166I: Differing byte in file 2 = %0
+SYS1167I: Differing byte in file 1 = %0
+SYS1168I: COMPARE found a difference at OFFSET %0
+SYS1169I: The two files are not the same size.  Go on comparing
+anyway (Y/N)? %0
+SYS1170I: Comparing file %1 with file %2.
+SYS1171W: The path %1 could not be found.
+SYS1172?:
+SYS1173?:
+SYS1174E: Another application is already using the device %1.
+SYS1175E: Virtual device driver %1 does not
+provide %2 access.
+SYS1176?:
+SYS1177?:
+SYS1178I: %1
+SYS1179I: The files match over the lengths that were compared.
+SYS1180?:
+SYS1181?:
+SYS1182I: The device driver for DOS programs has been loaded.
+SYS1183?:
+SYS1184E: The file could not be copied.
+SYS1185E: XCOPY ran into internal error %1.
+SYS1186E: XCOPY could not open or read the source file.
+SYS1187E: XCOPY could not open or write the target file.
+SYS1188I: Number of processors started: %1
+SYS1189E: XCOPY could not close the source file or the target file.
+SYS1190I: PSD file "%1" could not be found.
+The Platform Specific Driver (PSD) must be in the default path or in
+the path given for it in CONFIG.SYS.  Either copy the PSD file to the
+right directory or fix the CONFIG.SYS statement that names it.
+SYS1191I: OS/2 cannot start: CONFIG.SYS contains no IFS= statement.
+Add an IFS= statement naming the right file system to CONFIG.SYS,
+then restart the computer.
+SYS1192E: XCOPY could not access the source drive or the target drive.
+SYS1193E: The math coprocessor has been switched off: OS/2 does not
+work with an 80287 coprocessor.
+SYS1194E: The 80387 math coprocessor has been switched off because OS/2
+cannot use it together with an 80386 processor of B1 stepping.  The
+computer may need a hardware update; ask your service representative
+about this 80386/80387 conflict.
+SYS1195E: Line %1 of CONFIG.SYS holds the statement "%2",
+which is not recognized.  The line is skipped.
+SYS1196E: Line %1 of CONFIG.SYS gives the parameter "%3", which the
+%2 statement does not accept.  The line is skipped.
+SYS1197E: Line %1 of CONFIG.SYS has a %2 statement without the
+parameter that statement needs.  The line is skipped.
+SYS1198E: Device driver %3, named in the %2 statement on
+line %1 of CONFIG.SYS, is not suitable for this
+operating system.
+SYS1199I: OS/2 is unable to start.
+
+Error code:
+
+
+SYS1200E: The DOS environment could not be created (error code
+%1).
+SYS1201E: Device driver %3, named in the %2 statement on line %1
+of CONFIG.SYS, could not be installed.  The line is
+skipped.
+SYS1202I: The system needs device driver %1 to start, but the
+driver could not be installed.
+
+Put the right device driver in the root directory or in the \OS2
+directory of the startup drive, then restart the computer.
+SYS1203E: The program or device driver %3, named in the %2 statement
+on line %1, needs input/output privilege.  The line is
+skipped.
+SYS1204E: The program or device driver %1 needs input/output
+privilege.
+SYS1205I: Device driver %3, named in the %2 statement on line %1
+of CONFIG.SYS, changed DOS-mode system memory.
+
+Fix the device driver, or remove its DEVICE= statement from
+CONFIG.SYS, and then restart the computer.
+SYS1206E: Not enough memory is free to load the program or device
+driver %3 named in the %2 statement on line %1 of
+CONFIG.SYS.  The line is skipped.
+SYS1207I: \CONFIG.SYS has been renamed to %1.
+\OS2\OS2.INI has been renamed to %2.
+\OS2\OS2SYS.INI has been renamed to %3.
+
+Backup copies of these files kept in \OS2\INSTALL were put in place.
+SYS1208P:
+Type the new date: (yy%1mm%1dd) %0
+SYS1209P:
+Type the new date: (dd%1mm%1yy) %0
+SYS1210E: This process cannot finish because the operating system
+version is the wrong one.
+SYS1211P: Abort, Retry, Ignore? %0
+SYS1212P: Press a key to continue.
+SYS1213P: Type the new date: (yy%1dd%1mm) %0
+SYS1214?:
+SYS1215?:
+SYS1216I: Unpacked %1 file(s).
+SYS1217E: This version of UNPACK cannot decompress the file.
+SYS1218I:
+              Now installing %1
+
+
+
+
+
+
+
+            Take the diskette out of drive %2.
+
+            Put the %1
+            Installation Diskette in drive %2 and press Enter.
+SYS1219I:  %1      %2       %3      %4    %5      %6     %7  Delayed
+SYS1220I:
+              Now installing %1
+
+
+
+
+
+
+
+                 Take the diskette out of drive %3.
+
+                 Put the %1
+                 Diskette %2 in drive %3 and press Enter.
+SYS1221?:
+SYS1222I:
+ÉÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍ»
+º                                                                        º
+º                                                                        º
+º                  Copying files.  This takes a moment...                º
+º                                                                        º
+º                                                                        º
+ÈÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍÍ¼
+SYS1223E: The group code is not in the group code table.
+SYS1224E: The group code is larger than the highest allowed value.
+SYS1225I: %1    %2    %3       %4        %5   %6
+SYS1226I:
+                        Thread      Priority    State
+                          ID
+                        _______________________________________
+SYS1227I:                          %1        %2        %3
+SYS1228I:       %1        %2      Delayed    %3    %4
+SYS1229I:       %1        %2      Frozen     %3    %4
+SYS1230I:       %1        %2      GetStack   %3    %4
+SYS1231E: The drive given cannot be used; hard disks are not accepted.
+SYS1232P: Put the source diskette in drive %1
+
+SYS1233P: Put the target diskette in drive %1
+
+SYS1234E: The source diskette is damaged or does not suit the drive
+type.
+SYS1235E: The target diskette is damaged or does not suit the drive type.
+SYS1236I: Comparing these diskettes works only in OS/2 mode.
+SYS1237I: Compared %1 percent of the disk.
+SYS1238P: Compare one more diskette (Y/N)? %0
+SYS1239I: Comparing %1 tracks with
+%2 sectors per track on %3 side(s).
+SYS1240E: The drive types or the diskette types do not match.
+SYS1241I: The diskettes differ at offset %1.
+SYS1242I: The diskettes differ on side %1, track %2.
+SYS1243I: The volume serial number is %1.
+SYS1244I: The compare is finished.
+SYS1245I: No differences: the diskettes are identical.
+SYS1246P: Type the source drive letter: %0
+SYS1247P: Type the target drive letter: %0
+SYS1248E: %1 already exists as a subdirectory or file.
+SYS1249I: An error occurred while processing %1.
+SYS1250I:       %1        %2      BadStack   %3    %4
+SYS1251W: DISKCOPY was used on a diskette that must be copied with
+XDFCOPY.
+Syntax:
+  XDFCOPY [drive1][drive2]
+where:
+  drive1   The drive that holds the source diskette.
+  drive2   The drive that holds the target diskette.
+
+Both diskettes must have the same capacity (for example, drives A and
+B both 1.44MB).
+SYS1252I: Copying and formatting at the same time...
+SYS1253I: Writing to the target diskette failed.  A diskette formatted
+in eXtended Density Format (XDF) cannot be written to.
+SYS1254I: Copied %1 percent of the disk.
+SYS1255I: The target diskette might not be usable.
+SYS1256I: Copying this diskette works only in OS/2 mode.
+SYS1257P: The target diskette has to be formatted.
+Try a different diskette (Y/N)? %0
+SYS1258P: This may need a lot of diskette swapping.
+Go ahead (Y/N)? %0
+SYS1259P: Copy one more diskette (Y/N)? %0
+SYS1260I: Copying %1 tracks with %2 sectors per track on %3 side(s).
+SYS1261E: Reading the source diskette failed.
+SYS1262W: Writing to the target diskette failed.
+The data on the target diskette may be damaged.
+SYS1263E: Reading the target diskette failed.
+SYS1264I: Side %1, track %2 of the source diskette could not be
+read, and the error cannot be recovered.
+SYS1265I: Side %1, track %2 of the target diskette could not be
+read, and the error cannot be recovered.
+SYS1266I: The copy is finished.
+SYS1267E: The type of the optical disc could not be determined.
+SYS1268E: This drive does not support the optical disc or its type.
+SYS1269E: Copying the Information Transfer Block (ITB) failed.
+SYS1270P: Put a new diskette in drive %1, then press Enter. %0
+SYS1271P: Warning: everything on hard disk %1 will be destroyed!
+Go ahead with FORMAT (Y/N)? %0
+SYS1272I: The system files were copied.
+SYS1273P: Format one more diskette (Y/N)? %0
+SYS1274E: The volume requested is larger than 2,048MB.
+SYS1275E: This OS/2 release does not support the /S parameter.
+SYS1276E: FORMAT found a parameter that is not valid.
+SYS1277I: Put the target diskette in drive %1, then press Enter. %0
+SYS1278I: Put the OS/2 startup diskette in drive %1, then press
+Enter.
+SYS1279E: Formatting failed.
+SYS1280E: This disk cannot be used as a system disk.
+SYS1281E: Track 0 could not be formatted.
+SYS1282P:                                                                    %0
+SYS1283I: %1 bytes of total disk space
+SYS1284I: %1 bytes taken by system files
+SYS1285I: %1 bytes in bad sectors
+SYS1286I: %1 bytes free on disk
+SYS1287I: The format size given does not match the diskette's
+capacity.  Formatting goes on, using the size given.
+SYS1288P: Type a volume label of up to 11 characters,
+or press Enter for none. %0
+SYS1289E: Leading blanks were removed from the volume label before it
+was written to the disk.
+SYS1290I: The system files could not be copied.
+SYS1291E: Reading system file %1 failed.
+SYS1292I: File %1 is missing from the system disk.
+SYS1293I: The file system type is now %1.
+SYS1294I: Format finished.
+SYS1295E: The volume given is larger than 64 Gigabytes.
+SYS1296E: FORMAT could not write the file system to the target disk.
+SYS1297E: A parameter was given that cannot be used when formatting a
+hard disk.
+SYS1298E: These parameters cannot be used together.
+SYS1299?:
+SYS1300I: ONCE cannot be used when formatting a hard disk, so it is
+ignored.
+SYS1301I: /F is not needed here and has been ignored.
+SYS1302I: Head:%1  Cylinder:%2 %3%0
+SYS1303E: Drive %1 cannot be formatted at this time.
+SYS1304I: %1 bytes per allocation unit.
+SYS1305I: %1 allocation units in all.
+SYS1306I: %1 allocation units free on disk.
+SYS1307?:
+SYS1308?:
+SYS1309P: Formatting this disk may take as long as %1 minutes.
+Go ahead (Y/N)? %0
+SYS1310E: You must give a drive letter.
+SYS1311E: The system files cannot be found.
+SYS1312I: Formatted %1 percent of the disk %2%0
+SYS1313E: Reading from or writing to the hard disk volume failed.
+SYS1314P: Extended attributes not owned by any file were found.
+Show them as files (Y/N)? %0
+SYS1315P: Lost extended attributes that are not turned into files will
+be deleted.  Turn them into files (Y/N)? %0
+SYS1316E: The extended attributes have the wrong version.
+SYS1317I: An extended attribute error was found and fixed.
+SYS1318P: Type the current volume label of drive %1 %0
+SYS1319E: The volume label typed for drive %1 is wrong
+SYS1320E: FORMATS.TBL is missing or could not be read.  The system
+files are still being copied.
+SYS1321I: Copying system files...
+SYS1322I: /N and /T are not needed and were ignored.
+SYS1323I: %1 claimed an extended attribute that does not exist.
+This has been fixed.
+SYS1324E: %1 shares extended attribute %2 with another file
+(cross-linked).
+SYS1325E: This diskette has a larger capacity than the drive supports,
+so formatting cannot go on.
+SYS1326?:
+SYS1327I:
+[DOS Storage Report]
+%1 bytes of storage in all
+%2 bytes free
+SYS1328I: %1
+ Holds %2 non-contiguous blocks.
+SYS1329I: Every file given is contiguous.
+SYS1330E: The %1%2 parameter is not accepted.
+SYS1331?:
+SYS1332?:
+SYS1333E: CHKDSK could not access the drive given.
+SYS1334?:
+SYS1335E: %1 had an allocation error; its size was corrected.
+SYS1336E: Reading File Allocation Table %1 failed with a disk error.
+SYS1337E: Writing File Allocation Table (FAT) %1 failed with a disk
+error.
+SYS1338I: Directory %1
+SYS1339I:
+Errors were found, but /F was not given, so nothing will be
+corrected on the disk.
+SYS1340E: %1 contains a cluster that is not valid.
+SYS1341E: The current directory could not be read.
+SYS1342E: %1 has the wrong allocation size.
+SYS1343E: %1 is cross-linked with another file at cluster %2
+SYS1344I:
+%1 starts with a cluster number that is not valid.
+The entry has been cut short.
+SYS1345I: CHKDSK hit an error it cannot recover from in directory %1.
+SYS1346P: Change the directory into a file (Y/N)?  %0
+SYS1347E: Directory %1 is completely empty.
+Nothing below it is checked.
+SYS1348I: This optical media is not supported.
+SYS1349W: Subdirectory %1 is not valid.
+SYS1350W: The . entry could not be recovered.  Checking goes on.
+SYS1351E: The .. entry could not be recovered.  Nothing below this
+point is checked.
+SYS1352E: %1 has a link, attribute or size that is not valid.
+SYS1353I:
+Found %1 lost clusters in %2 chains.
+Show them as files (Y/N)? %0
+SYS1354E: The diskette's capacity could not be changed.
+SYS1355I: %1 is not present.
+SYS1356P:
+Found %1 lost clusters in %2 chains.
+Unless you turn them into files, they will be
+deleted.  Turn them into files (Y/N)? %0
+SYS1357?:
+SYS1358I: %1 bytes of disk space were freed.
+SYS1359W: %1 bytes of disk space could be freed.
+SYS1360W: The root directory has no room for recovered files.
+SYS1361I:
+%1 bytes of total disk space.
+SYS1362I: %1 bytes in damaged sectors.
+SYS1363I: %1 bytes in %2 hidden files.
+SYS1364I: %1 bytes in %2 directories.
+SYS1365I: %1 bytes in %2 user files.
+SYS1366I: %1 bytes in %2 recovered files.
+SYS1367I: %1 bytes would go into %2 recovered files.
+SYS1368I: %1 bytes free on disk.
+SYS1369?:
+SYS1370?:
+SYS1371?:
+SYS1372?:
+SYS1373I: Processing must stop.
+SYS1374E: The File Allocation Table (FAT) on drive %1 is damaged.
+SYS1375I: The volume is labeled %1.
+SYS1376W: Writing directory entry %1 failed
+with a disk error.
+SYS1377E: The root directory on drive %1 cannot be
+written.
+SYS1378?:
+SYS1379P: This disk probably is not a DOS disk.
+Go ahead? (Y/N)  %0
+SYS1380W: Reading directory entry %1 failed with a disk error.
+Nothing below this point will be checked.
+SYS1381I: Writing the memory dump...
+SYS1382I: The diskette is full.  Put another formatted diskette in
+drive A.
+SYS1383E: The diskette in drive A could not be used for the memory
+dump.
+SYS1384I: Put in Dump Diskette 1 to finish the dump.
+SYS1385I: Creating the OS/2 memory dump diskette.
+SYS1386E: CREATEDD cannot go on.
+SYS1387E: CREATEDD cannot find the diskette drive given.
+SYS1388I: This diskette already holds dump data.  Put in another
+CREATEDD diskette and press Enter.
+SYS1389P: Is the diskette in drive %2 a %1 megabyte diskette (Y/N)? %0
+SYS1390I: The program stopped before it finished.
+SYS1391I: The memory dump is finished.  Take out the dump diskette and
+restart the computer.
+SYS1392E: CREATEDD cannot use this diskette.
+SYS1393I: This diskette holds these storage address ranges:
+SYS1394I: The OS/2 Memory Dump Facility is starting and will write a
+memory dump.
+SYS1395P: Put the dump diskette made by CREATEDD in drive A, then
+press any key.
+SYS1396P: The diskette has an error.  Put in another CREATEDD dump
+diskette, then press any key.
+SYS1397E: CONFIG.SYS does not give any system trace information.
+SYS1398I: The OS/2 Memory Dump Facility cannot be used on this
+computer.  Restart the computer.
+SYS1399E: TRACE found an ON/OFF parameter that is not valid, so the
+command is ignored.
+SYS1400I: TRACE found an error in major code %1 or in its minor
+code.  That event code is ignored.
+SYS1401E: TRACE could not accept any of the major event codes given,
+so the system trace points were not changed.
+SYS1402I: TRACE could not accept any of the trace definition files
+given, so the trace status of the DLLs was not changed.
+SYS1403?:
+SYS1404E: TRACE found a syntax error, so the command is ignored.
+SYS1405E: %1 is too large for TRACE, so the file is ignored.
+SYS1406P: Press Enter to go on...
+SYS1407E: TRACE found an error in %1, so this trace definition file
+is ignored.
+SYS1408E: TRACE could not find %1, or the DLL module that goes with
+it is not loaded.
+SYS1409E: TRACE found one or more opcodes that are not valid in %1,
+so this trace definition file is ignored.
+SYS1410E: TRACE found a segment number it could not use in %1, so it
+skips this trace definition file.
+SYS1411I: Writing the memory dump...
+SYS1412I: No room is left on this diskette.  Put a different formatted
+diskette into drive A.
+SYS1413E: The memory dump could not be written to the diskette in
+drive A.
+SYS1414I: Put Dump Diskette 1 in the drive so the dump can finish.
+SYS1415I: The memory dump is finished.  Take the dump diskette out of
+the drive and start the system again.
+SYS1416I: This diskette already holds dump data.  Put in a different
+CREATEDD diskette, then press Enter.
+SYS1417E: The application's resources could not be found.
+SYS1418I: This diskette holds these memory address ranges:
+SYS1419P: Press any key when you are ready to go on.
+SYS1420?:
+SYS1421?:
+SYS1422?:
+SYS1423?:
+SYS1424?:
+SYS1425?:
+SYS1426?:
+SYS1427?:
+SYS1428?:
+SYS1429I: SPOOL is active.  Output meant for device %1 now goes to
+device %2.
+SYS1430I: SPOOL is active.  Output will go to device %1.
+SYS1431I: Output for device %1 now goes to device %2.
+SYS1432?:
+SYS1433E: The input device you named does not exist.
+SYS1434E: The output device you named does not exist.
+SYS1435I: Spooling is now turned on.
+SYS1436I: Spooling is now turned off.
+SYS1437?:
+SYS1438?:
+SYS1439?:
+SYS1440?:
+SYS1441?:
+SYS1442?:
+SYS1443?:
+SYS1444?:
+SYS1445?:
+SYS1446?:
+SYS1447?:
+SYS1448?:
+SYS1449?:
+SYS1450?:
+SYS1451?:
+SYS1452?:
+SYS1453?:
+SYS1454E: With the code pages now loaded, KEYB cannot use the country or
+subcountry code you gave.
+SYS1455?:
+SYS1456E: The operating system files could not be written to the
+target drive.
+SYS1457E: The system files cannot be copied right now.
+SYS1458E: The operating system files could not be found.
+SYS1459I: An internal error happened.
+SYS1460?:
+SYS1461E: The target drive is not usable.
+SYS1462I: The startup drive has a damaged partition table.
+SYS1463I: The startup drive could not load the operating system.
+SYS1464I: The startup drive does not contain the operating system.
+SYS1465E: The VDISK named in CONFIG.SYS could not be set up.
+SYS1466E: Not enough memory is free to set up a virtual disk.
+SYS1467I: VDISK: virtual disk %1
+Disk size:          %2 KB
+Bytes per sector:   %3
+Root entries:       %4
+SYS1468I: 0Give the error code back to the program
+1Stop the program, command or operation
+2Try the command or operation again
+3Skip the error and go on
+4Press Enter to go on
+7Show the register contents
+5Show help
+6Show the error message again
+Detached Process ID
+Pop-up Process ID
+@@BOX1469@@
+SYS1469I: ÚÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ¿
+³   %%                                                                        ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+³                                                                             ³
+ÃÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄ´
+³   %%                                                                        ³
+³   %%                                                                        ³
+³   %%                                                                        ³
+³   %%                                                                        ³
+³   %%                                                                        ³
+ÀÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÄÙ
+SYS1470E: Drive %1, named on the SWAPPATH= line of CONFIG.SYS,
+cannot be used.  Drive %2 is used instead.
+SYS1471E: Path %1, named on the SWAPPATH= line of
+CONFIG.SYS, cannot be used.  The system falls back to \OS2\SYSTEM on
+the startup drive.
+SYS1472E: File %1 could not be created.
+SYS1473I: Swapping is now turned off.
+SYS1474E: Not enough memory is free to turn on swapping.
+SYS1475I: OS2BOOT could not be found.
+SYS1476E: Path %1, named on the SWAPPATH= line of
+CONFIG.SYS, cannot be used.  The system falls back to the root
+directory of the startup drive.
+SYS1477W: Warning!  The drive that holds SWAPPER.DAT has no free space
+left, and data could be lost.  Do not dismiss this message!  Choose
+Display help below to learn what happened and how to recover.
+SYS1478I: A path name is not valid.
+SYS1479I: Listing of directory paths
+SYS1480I: Path:           %1
+SYS1481I: Subdirectories: %1
+SYS1482I: Files:          %1
+SYS1483I: Files:          None
+SYS1484I: Subdirectories: None
+SYS1485I:                  %1
+SYS1486I: There are no subdirectories.
+SYS1487I: The message number contains a character that is not allowed.
+Fix the number and enter the command again.
+SYS1488I: A message number can have at most 4 digits (as in HELP 0123).
+Enter the command again with a shorter number.
+SYS1489I: No message number was given (as in HELP 0123).  Type the
+number of the message you want.
+SYS1490E: %1 could not be found.
+SYS1491P:
+o  Alt+Esc moves to the next session.
+o  Ctrl+Esc brings up the Window List.
+o  The Master Help Index explains OS/2 and DOS tasks.
+o  HELP message-number explains a message.
+o  HELP [BOOK] SUBJECT shows online information.
+o  HELP ON turns the help line on.
+o  HELP OFF turns the help line off.
+o  EXIT closes this OS/2 session.
+
+SYS1492P: OS/2      Ctrl+Esc = Window List       HELP = get help
+SYS1493I: There is no help for that message number.
+SYS1494P:
+o  Alt+Esc moves to the next session.
+o  Ctrl+Esc brings up the Window List.
+o  The Master Help Index explains OS/2 tasks.
+o  HELP message-number explains a message.
+o  HELP ON turns the help line on.
+o  HELP OFF turns the help line off.
+o  EXIT closes this DOS session.
+
+SYS1495P:   DOS      Ctrl+Esc = Window List        HELP = get help        %0
+SYS1496I: Message file %1 could not be found.  The
+program you are using may not have a message file, the file may not be
+in the current directory, or the HELP request was not entered right.
+
+To see help for a message, type HELP, then the 3-letter prefix and the
+4-digit number of the message.  Examples: HELP SYS1496 for a system
+message, HELP NET1496 for a network message, or HELP DIR for the DIR
+command.
+
+Point DPATH (OS/2) or APPEND (DOS) at the directory that holds the
+message file and try again.  If HELP still cannot find it, copy the
+message file into the current directory and try again.
+SYS1497I: HELP could not read message file %1.  It may be
+damaged, or another process may be using it.  Wait until that process
+is done or install the message file again, then repeat the command.
+SYS1498E: The VIEW program could not be found.
+SYS1499?:
+SYS1500P:
+***************************************************
+*  Put the diskette that holds the swap file into *
+*  drive %1 and close the drive latch.            *
+***************************************************
+SYS1501P:
+***************************************************
+*  The diskette in drive %1 that holds the swap   *
+*  file is write-protected.  Make it writable.    *
+***************************************************
+SYS1502E: A read error that cannot be corrected happened while the
+system was reloading a segment from the swap file, so the system has
+stopped.  For help with this message, use any computer that runs
+OS/2 1.31 or later and type:
+HELP 1502 | more
+SYS1503I:
+***************************************************
+*    ----- The system may be about to fail -----  *
+*        No room is left in the swap file.        *
+***************************************************
+SYS1504I:
+***************************************************
+*    ----- The system may be about to fail -----  *
+*     No room is left in the swap control table.  *
+***************************************************
+SYS1505E: The virtual disk could not be set up.
+SYS1506I: File system program %1 is now running.
+SYS1507I: This disk uses the %1 file system.
+SYS1508I: v4.5 External Device set up for drive %1.
+SYS1509E: The program you named could not be started.
+SYS1510I: File system %1 does not offer this function in DOS
+mode.
+SYS1511E: The program is unable to go on.
+SYS1512E: File system %1 does not offer this function on this disk
+or diskette.
+SYS1513?:
+SYS1514I:
+Drive %1 has no volume label.
+SYS1515P: Type a volume label of at most 11 characters, or press
+Enter to leave the label as it is.  %0
+SYS1516I:
+The volume label of drive %1 is %2.
+SYS1517?:
+SYS1518I: File "%1" could not be found.  This device driver,
+program or data file is not in the default path or in the path that
+CONFIG.SYS gives for it.  Put the file in the right directory or fix
+the CONFIG.SYS statement that names it.
+SYS1519E: Not enough memory is free to load program or device
+driver %1.
+SYS1520E: %1 more diskette drive(s) could not be set up.
+SYS1521E: The %2 statement on line %1 of CONFIG.SYS has more
+parameters than it accepts.  Line %1 is skipped.
+SYS1522I: An extra diskette drive is now available as drive %1.
+SYS1523E: In the %2 statement on line %1 of CONFIG.SYS,
+"%4" was expected but "%3" was found.  Line %1 is skipped.
+SYS1524E: Another process is using source file %1, so the copy
+could end up damaged.
+SYS1525E: The option you chose is not valid.
+SYS1526E: These parameters cannot be used together.
+SYS1527?:
+SYS1528?:
+SYS1529E: The file cannot be printed on the device you named.
+SYS1530?:
+SYS1531E: Spooling is not active.
+SYS1532E: The /C and /T parameters do not work in DOS sessions.
+SYS1533E: File %1 could not be found.
+SYS1534?:
+SYS1535?:
+SYS1536?:
+SYS1537P: Type your choice: %0
+SYS1538?:
+SYS1539?:
+SYS1540?:
+SYS1541?:
+SYS1542?:
+SYS1543?:
+SYS1544?:
+SYS1545?:
+SYS1546?:
+SYS1547?:
+SYS1548?:
+SYS1549?:
+SYS1550?:
+SYS1551?:
+SYS1552?:
+SYS1553?:
+SYS1554?:
+SYS1555?:
+SYS1556?:
+SYS1557?:
+SYS1558?:
+SYS1559?:
+SYS1560?:
+SYS1561?:
+SYS1562?:
+SYS1563P: %1 is not one of the choices.  Type a valid choice.
+SYS1564P: %1 is not one of the choices.  Type Y or N
+SYS1565I: The system has no hard disks.
+SYS1566I: Data could not be read from the hard disk.
+SYS1567I: Data could not be written to the hard disk.
+Run the hardware diagnostics diskette.
+SYS1568I: Hard disk drive in use: %1
+SYS1569?:
+SYS1570?:
+SYS1571?:
+SYS1572?:
+SYS1573?:
+SYS1574?:
+SYS1575E: The parameters given to PATCH are not valid.
+SYS1576E: The patch control file is missing some of the data it needs.
+SYS1577?:
+SYS1578?:
+SYS1579I: Now patching %1
+SYS1580P: Go on patching %1 (Y/N)? %0
+SYS1581I: No patches were made.
+SYS1582I: Patches typed for %1
+SYS1583P: Apply these patches to %1 (Y/N)? %0
+SYS1584I: The patches were applied to %1
+SYS1585I: Nothing was patched in %1
+SYS1586I: The file ends at %1
+SYS1587P: Type the patch offset in hexadecimal: %0
+SYS1588E: That offset lies past the end of the file.
+SYS1589E: PATCH cannot handle this many patches.
+SYS1590E: Patch instruction file %1 does not name a file
+to patch.
+SYS1591E: A %1 command appeared with no %2 command before it.
+SYS1592E: Offset %1 is not valid for %2.
+SYS1593E: %1 is not a valid hexadecimal string for %2.
+SYS1594E: In %2, offset %1 is past or too near the end of the
+file (offset %3) to check %4 bytes.
+SYS1595E: The check of %1 did not match.
+SYS1596?:
+SYS1597E: In %2, offset %1 lies past the end of the
+file (offset %3).
+SYS1598E: The patch instruction file contains a command PATCH does
+not know: %1
+SYS1599E: PATCH could not open %1
+for adding to %2.
+SYS1600E: The patch instruction file has no patches for %1.
+SYS1601E: The parameters given to MODE are not valid.
+SYS1602I: The number of characters per line is now set.
+SYS1603I: The number of lines per inch is now set.
+SYS1604I: Endless retry is now turned on.
+SYS1605I: -- More --%0
+SYS1606I: Endless retry is now turned off
+SYS1607I: The MODE parameter %1 can be used only while spooling is
+turned off.
+SYS1608I: MODE could not set diskette ReadBack.  The command has
+stopped.
+SYS1609I: The asynchronous communications mode is now set.
+SYS1610I: MODE DSKT VER=%1
+SYS1611I: Parallel printer output cannot be sent to a communications
+port.  Use SPOOL to send the output elsewhere.
+SYS1612P: Put a diskette in drive A and press Enter, or press
+Ctrl+Break to stop the MODE command.
+SYS1613E: The MODE parameter %1 is not valid.
+SYS1614E: The MODE chars parameter %1 is not valid.
+SYS1615E: The MODE lines parameter %1 is not valid.
+SYS1616E: The MODE parameter %1 is not valid.
+SYS1617E: The MODE baud parameter %1 is not valid.
+SYS1618I: This COM port does not support the MODE parameter %1.
+SYS1619E: The MODE parameter %1 cannot be used in DOS sessions.
+SYS1620E: The COM port you named is not installed.
+SYS1621I: The MODE diskette ReadBack command finished without errors.
+SYS1622E: The MODE rows parameter %1 is not valid.
+SYS1623E: The MODE display parameter %1 is not valid.
+SYS1624E: The MODE display parameter was not given.
+SYS1625E: The MODE COM parameter "%1" is not valid.
+SYS1626?:
+SYS1627E: The MODE parameter %1 is not valid.
+SYS1628?:
+SYS1629E: The MODE display parameter %1 or rows parameter %2 is not
+valid.
+SYS1630E: The MODE databits parameter %1 is not valid.
+SYS1631E: The MODE stopbits parameter %1 is not valid.
+SYS1632E: The MODE parity parameter %1 is not valid.
+SYS1633E: The MODE parameter %1 is not valid.
+SYS1634I:
+Restoring files from drive %1:
+SYS1635P:
+Put backup diskette %1 into drive %2:
+Press Enter when you are ready.
+SYS1636P:
+Warning!  This diskette is not the next one in the set.
+Put in the right diskette, or press Enter to go on anyway.
+SYS1637P:
+Warning!  File %1 is marked read-only.
+Overwrite it (Y/N)?
+SYS1638P: Warning!  File %1 has been modified since it was backed up.
+Overwrite it (Y/N)?
+SYS1639P:
+The operating system files have been restored.
+The target disk might not work.
+SYS1640P:
+These files were backed up on %1.
+SYS1641P: %1
+SYS1642E:
+The same drive was given as both source and target.
+SYS1643E:
+The wrong number of parameters was given.
+SYS1644?:
+SYS1645E:
+There are no files to restore.
+SYS1646?:
+SYS1647?:
+SYS1648I:
+The file listed last was not restored.
+SYS1649I:
+The source diskette holds no backup files.
+SYS1650?:
+SYS1651E: Files must be restored in the order they were backed up.
+SYS1652?:
+SYS1653?:
+SYS1654?:
+SYS1655I:
+The file could not be restored.
+SYS1656P: Diskette %1
+SYS1657P:
+Put the RESTORE target diskette into drive %1.
+Press Enter when you are ready.
+SYS1658I: Files on drive %1:
+SYS1659I: Loading:
+SYS1660I: Installed:
+SYS1661I: Loading: %1
+SYS1662I: Installed: %1
+SYS1663?:
+SYS1664E: The BACKUP log file could not be written.
+Press Enter to go on, or Ctrl+Break to stop.
+SYS1665E: BACKUP needs a drive letter.
+SYS1666?:
+SYS1667E: The source drive was not given.
+SYS1668E: The target drive was not given.
+SYS1669I: Files cannot be added to the target disk, because it holds
+files made by an older version of BACKUP.
+SYS1670?:
+SYS1671E: The same drive was given as both source and target.
+SYS1672E: The FORMAT command could not be run.
+SYS1673I: KEYS is turned on.
+SYS1674I: KEYS is turned off.
+SYS1675E: The drive you named does not exist.
+SYS1676E: The FORMAT program could not be found.
+SYS1677E: The log file could not be opened.
+SYS1678E: BACKUP is unable to format drive %1.
+SYS1679I: The final backup target diskette was never put in.
+SYS1680I: BACKUP is writing its log to file %1.
+SYS1681I: Warning!  All files in the root directory of target
+drive %1: are about to be deleted.
+
+Press Enter to go on, or Ctrl+Break to stop.
+SYS1682I: Warning!  All files in the \BACKUP directory of target
+drive %1: are about to be deleted.
+
+Press Enter to go on, or Ctrl+Break to stop.
+SYS1683I: Backing up the files to drive %1.
+SYS1684P: Diskette number %1
+SYS1685I: There are no files to back up.
+SYS1686P: Put a diskette to be backed up into %1:
+
+Press Enter to go on, or Ctrl+Break to stop.
+SYS1687P: Put backup diskette %1 into drive %2:
+SYS1688E: The file cannot be backed up right now.
+SYS1689P: Put the last backup diskette into drive %1:
+
+Press Enter to go on, or Ctrl+Break to stop.
+SYS1690E: The target disk cannot be used for a backup.
+SYS1691I: The target hard disk ran out of space, so the most recent file
+was not backed up.
+SYS1692I: There is no free space left on target hard disk %1:.
+SYS1693E: The directory could not be created.
+SYS1694E: The path name exceeds the allowed length.
+SYS1695P:  (Y/N)? %0
+SYS1696?: 
+SYS1697I: Reading the source files...
+SYS1698?: 
+SYS1699I: Could not find the file or directory %1.
+SYS1700P: XCOPY needs to know whether the target %1 names a directory
+or a file.  Answer Y for a directory or N for a file.
+
+Is %1 a directory (Y/N)? %0
+SYS1701E: Files cannot be copied into a subdirectory of the source
+directory itself.
+SYS1702E: A parameter is wrong, or a required parameter is missing.
+SYS1703E: An error occurred while the system was working with the
+file %1.
+SYS1704E: XCOPY was given the wrong number of parameters and cannot
+run.
+SYS1705I: Extended ANSI screen and keyboard handling is turned on.
+SYS1706I: Extended ANSI screen and keyboard handling is turned off.
+SYS1707E: This program needs DOS 3.20 or later; an older DOS version
+is running.
+SYS1708I: You asked for %1 to be started from drive %2.
+SYS1709I: The file system used at startup could not be loaded because
+its configuration is wrong.  Install the system again.
+SYS1710I: The file system used at startup could not be initialized.
+Install the system again.
+SYS1711E: Could not find %1, a file the Dual Boot feature needs.
+SYS1712E: The drive is already set up to start the operating system
+you asked for.
+SYS1713E: The request to start %1 was not carried out.
+SYS1714W: Warning!  The system will restart automatically if you go
+on.  Let all running programs finish first, or their unsaved data
+will be lost.
+SYS1715E: Copying file %1 to %2 failed.
+SYS1716W: Warning!  Restart the computer now, either with Shutdown on
+the desktop or by pressing Ctrl+Alt+Del.
+SYS1717I: When the system is next reset, %1 will start from drive %2.
+SYS1718E: Line %1 of CONFIG.SYS has a %2 statement naming the file %3,
+which could not be found.  The system skips line %1.
+SYS1719E: Line %1 of CONFIG.SYS has a %2 statement naming the file %3,
+which holds no usable device driver or file system driver.
+The system skips line %1.
+SYS1720I: The data needed to restart the system is unusable.
+SYS1721I: 
+                                  OS/2
+                    rs2, an independent re-implementation
+%1
+SYS1722I: Startup needs the dynamic link library (DLL) %1, but it
+could not be loaded.
+
+Put the DLL in the root directory of the startup drive, or in a
+directory named on the LIBPATH line of CONFIG.SYS.
+SYS1723I: Startup needs the entry point %2 in the dynamic link
+library (DLL) %1, but the DLL does not provide it.
+
+Put the right version of the DLL in the root directory of the startup
+drive, or in a directory named on the LIBPATH line of CONFIG.SYS.
+SYS1724I: Startup could not open the CON: file it requires.
+SYS1725I: The CON: file was given a handle other than zero.
+SYS1726P: Press Enter to go on...
+SYS1727E: There is too little memory for the DISKCACHE buffers.
+SYS1728E: The DISKCACHE value set in CONFIG.SYS is not large enough.
+SYS1729E: The display cannot use code page %1.
+SYS1730E: The keyboard cannot use the code pages %1, or the DEVINFO
+statement is wrong.
+SYS1731E: BOOT could not restart the computer.
+SYS1732I: Preparing the hard disk is finished.
+SYS1733E: The country information file %1 is not valid.
+SYS1734I: Preparing the hard disk.  This may take a moment...
+SYS1735I: Code page %1 is being used.
+SYS1736E: Could not find the DOS.SYS device driver.
+SYS1737I: Switching code pages is not supported.
+SYS1738E: An error was detected during startup.
+SYS1739P: Continue (Y/N)? %0
+SYS1740W: Warning!  The DOS system files are missing, so DOS cannot be
+started.  If you go on, the OS/2 system files are put aside, and you can
+then install DOS on drive C:.  After DOS is installed, the command
+BOOT /OS2 switches back to OS/2.
+SYS1741E: KEYB could not find the keyboard translation table file in
+the location given on the DEVINFO= line of CONFIG.SYS.
+SYS1742E: KEYB hit an error while reading the keyboard translation
+table file.
+SYS1743?: 
+SYS1744E: An error occurred in the system.
+SYS1745P: The keyboard layout for the chosen country has no table for
+code page %1.  Load the table for the default code page instead
+(Y/N)?
+SYS1746E: No default translation table exists for the given country
+code.
+SYS1747I: The default table is loaded already, so it was not loaded
+again.
+SYS1748E: The keyboard could not be opened.
+SYS1749?: 
+SYS1750E: Keyboard layout %1 cannot be used.
+SYS1751E: An error occurred while the translation table was being
+loaded.
+SYS1752I: Loaded the translation table for code page %1.
+SYS1753I: Current keyboard layout: %1.
+SYS1754I: Code page of the active keyboard translation table: %1
+SYS1755I: Secondary keyboard code-page table: %1
+SYS1756I: The keyboard uses a user-defined translation table.
+SYS1757I: ÛÛÛÛ
+SYS1758I: The root directory's CONFIG.SYS file could not be opened.
+Next, a menu lists other CONFIG.SYS files that you can start the
+system with.
+SYS1759I: Running %1 failed, but startup goes on.  Look at %1 and
+fix the problem.
+SYS1760?: 
+SYS1761E: The parameter %1 is not accepted
+SYS1762E: The code page of this process cannot be read or changed.
+SYS1763?: 
+SYS1764?: 
+SYS1765?: 
+SYS1766I: Active code page: %1
+Prepared system code pages: %2
+SYS1767E: The system has not prepared code page %1.
+SYS1768I: This system offers no code-page support.
+SYS1769I: Device %2 has not prepared code page %1.
+SYS1770?: 
+SYS1771?: 
+SYS1772?: 
+SYS1773E: The START command does not accept the parameter %1.
+SYS1774?: 
+SYS1775I: No file in the print queue is printing at the moment.
+Look at the print queue of the print destination to see where
+the requested file stands.
+SYS1776P: The device has too many print queues attached to it.
+The job has been put in the queue and can no longer be cancelled.
+SYS1777P: The device has no print queue attached to it.
+The job was not put in a queue, so there is nothing to cancel.
+SYS1778E: The spooler is not installed.
+SYS1779E: The print device given is either not installed or not
+ready.
+SYS1780E: The PRINT command got an error it did not expect from the
+window system.
+SYS1781?: 
+SYS1782?: 
+SYS1783?: 
+SYS1784?: 
+SYS1785?: 
+SYS1786?: 
+SYS1787?: 
+SYS1788?: 
+SYS1789?: 
+SYS1790?: 
+SYS1791?: 
+SYS1792?: 
+SYS1793I: The input device named in the SPOOL command is already
+taken by an earlier SPOOL command, so the spooler cannot use it.
+SYS1794I: The output device named in the SPOOL command is already
+taken by an earlier SPOOL command, so the spooler cannot use it.
+SYS1795I: The window system reported an error nobody expected.
+SPOOL got back a return code it does not know.
+SYS1796P: Either the SPOOL directory parameter was given, which is no
+longer supported, or a parameter is invalid.  SPOOL skips it and
+carries on.
+SYS1797?: 
+SYS1798E: The program wants serial port %1, but another program is
+using it.  Choose one of these:
+
+Retry the operation - Switch to the program that holds the port so
+                      you can close it.  The system waits a while
+                      for you to close it, then hands the port to
+                      the program that is waiting.
+Ignore              - Go on without using %1.
+End the program     - Stop the program that is waiting for %1.
+                      Warning!  This ends both that program and its
+                      DOS session, and unsaved data may be lost.
+SYS1799E: The program wants parallel port %1, but another program is
+using it.  Choose one of these:
+
+Retry the operation - Switch to the program that holds the port so
+                      you can close it.  The system waits a while
+                      for you to close it, then hands the port to
+                      the program that is waiting.
+End the program     - Stop the program that is waiting for %1.
+                      Warning!  This ends both that program and its
+                      DOS session, and unsaved data may be lost.
+SYS1800?: 
+SYS1801E: REXX support is not installed.
+SYS1802E: %1 cannot run as a detached process.
+SYS1803E: A REXX batch file tried to chain to another batch file.
+SYS1804E: Could not find the file %1.
+SYS1805E: The process wrote to a pipe that does not exist.
+SYS1806E: The session could not be started in the foreground.
+SYS1807?: 
+SYS1808E: 
+The process was stopped.  Exception code (software diagnostic
+code): %1.
+SYS1809I: An error occurred that cannot be recovered from, so the
+process was ended.
+SYS1810E: A division by zero was detected.
+SYS1811E: The process was stopped.  Trap number (software diagnostic
+code): %1.
+SYS1812E: 
+
+The process tried to use a math coprocessor that is not there, so it
+was ended.
+SYS1813I: 
+Ctrl+Break or another process cancelled the external process.
+SYS1814?: 
+SYS1815E: OS/2 does not know a device called %1.
+SYS1816E: Could not find the batch file.
+SYS1817I: The extended attribute chain of the file or directory %1 is
+not valid.
+SYS1818E: There is too little memory to check the extended attribute
+(EA) chains.  Checking goes on without them.
+SYS1819I: %1 bytes in extended attributes.
+SYS1820I: The extended attributes of a file or directory contain an
+error.  It is left alone unless the damaged chains are turned into
+files.  Turn these extended attribute chains into files (Y/N)? %0
+SYS1821I: The extended attributes of a file or directory contain an
+error.  Show these extended attribute chains as files (Y/N)? %0
+SYS1822I: The file or directory now has the name %1.
+Its extended attributes were saved in %2.
+SYS1823I: The number of the first extended attribute cluster of %1
+is wrong, so the entry was cut short.
+SYS1824I: The file or directory now has the name %1.
+Its extended attributes were saved in %2.
+SYS1825E: A file could not be found.  It is not in the same directory as
+the Program Selector (SHELL11F.EXE).
+Note these steps:
+
+1. Copy the file named above into the Program Selector's directory,
+   or install the system again.
+2. Restart the computer.
+
+Press any key to go on, then carry out steps 1 and 2.
+SYS1826E: There is too little memory to carry out the command.
+
+Free up some memory, for example by lowering the RMSIZE=, BUFFERS=
+or TRACEBUF= value in CONFIG.SYS, then restart the computer.
+SYS1827E: The request cannot be handled because of an error that cannot
+be recovered from.  Save your programs and data if you can, then
+restart the computer.
+SYS1828E: The program could not be started because the limit on
+running programs has been reached.
+
+Close a running program, then start this one again.
+SYS1829E: Joining the extended attributes (EAs) is not permitted.
+SYS1830E: The mouse button assignments could not be set.  The mouse
+might not be installed correctly.
+
+Make sure the mouse software is installed correctly, then restart
+the computer.
+SYS1831E: The file's executable format is not acceptable.  Either the
+program is built wrongly or it was made for another version of the
+operating system.
+
+Try running the program from a DOS command prompt.
+SYS1832?: 
+SYS1833?: 
+SYS1834?: 
+SYS1835?: 
+SYS1836?: 
+SYS1837?: 
+SYS1838?: 
+SYS1839?: 
+SYS1840?: 
+SYS1841?: 
+SYS1842?: 
+SYS1843?: 
+SYS1844?: 
+SYS1845?: 
+SYS1846?: 
+SYS1847?: 
+SYS1848?: 
+SYS1849?: 
+SYS1850?: 
+SYS1851?: 
+SYS1852?: 
+SYS1853?: 
+SYS1854?: 
+SYS1855?: 
+SYS1856?: 
+SYS1857?: 
+SYS1858?: 
+SYS1859?: 
+SYS1860?: 
+SYS1861?: 
+SYS1862P: Do you really want to do this? %0
+SYS1863?: 
+SYS1864?: 
+SYS1865P: Press Esc to go back to the operating system.
+SYS1866P: %1
+SYS1867?: 
+SYS1868?: 
+SYS1869?: 
+SYS1870?: 
+SYS1871?: 
+SYS1872?: 
+SYS1873?: 
+SYS1874?: 
+SYS1875?: 
+SYS1876?: 
+SYS1877?: 
+SYS1878?: 
+SYS1879?: 
+SYS1880?: 
+SYS1881?: 
+SYS1882?: 
+SYS1883?: 
+SYS1884?: 
+SYS1885?: 
+SYS1886?: 
+SYS1887?: 
+SYS1888?: 
+SYS1889?: 
+SYS1890?: 
+SYS1891?: 
+SYS1892?: 
+SYS1893?: 
+SYS1894?: 
+SYS1895?: 
+SYS1896?: 
+SYS1897?: 
+SYS1898E: No further OS/2 mode session can be started.
+SYS1899?: 
+SYS1900?: 
+SYS1901E: DOS sessions cannot query the status of a COM port.
+SYS1902W: In an OS/2 session the P option (retry forever) is not
+valid, so it was ignored.
+SYS1903E: The Arbitration Level for %1 is wrong, so it cannot use
+enhanced mode.
+SYS1904?: 
+SYS1905?: 
+SYS1906?: 
+SYS1907I: %1 file(s) moved.
+SYS1908?: 
+SYS1909?: 
+SYS1910?: 
+SYS1911?: 
+SYS1912?: 
+SYS1913?: 
+SYS1914E: Drive %1 could not be reserved.
+SYS1915I: An internal processing error was detected at location %1.
+%2
+
+The system has stopped.  Write down everything shown above and
+get in touch with your service representative.
+SYS1916I: A user error was detected at location %1.
+%2
+SYS1917?: 
+SYS1918?: 
+SYS1919E: Line %1 of CONFIG.SYS has a %2 statement naming the file %3,
+which holds no usable program.  The system skips line %1.
+SYS1920?: 
+SYS1921?: 
+SYS1922?: 
+SYS1923E: A program running in this session hit a problem and has to
+stop.
+SYS1924E: A program running in this session ran into a problem and
+cannot go on.
+SYS1925E: %1 is not a valid program file.
+SYS1926I: A system call caused a general protection fault (trap D).
+
+%1
+
+System call arguments, from high to low:
+%2
+SYS1927E: A DOS program altered an interrupt vector that belongs to
+the system, so the program was stopped.
+SYS1928E: There is too little memory to load a code or data segment
+back in.
+SYS1929?: 
+SYS1930E: A divide error occurred in a program, which was stopped.
+
+%1
+SYS1931E: A single-step error occurred in a program, which was ended.
+
+%1
+SYS1932I: A hardware memory error was detected.
+
+Use the diagnostic programs that came with the computer to find out
+what is wrong.
+
+%1
+SYS1933E: A breakpoint error occurred in a program, which was ended.
+
+%1
+SYS1934E: An overflow error occurred in a program, which was ended.
+
+%1
+SYS1935E: A bound range error occurred in a program, which was ended.
+
+%1
+SYS1936E: A program tried to run an instruction that is not valid.
+The program was ended.
+
+%1
+SYS1937E: A program used a math coprocessor instruction, but the
+computer has no coprocessor.  The program was ended.
+
+%1
+SYS1938E: An error occurred in the system.
+
+%1
+SYS1939E: A math coprocessor instruction in a program tried to use
+memory beyond the end of a segment.  The program was ended.
+
+%1
+SYS1940E: An error occurred in the system.
+
+%1
+SYS1941E: A program tried to use a segment that is not present in
+memory.  The program was ended.
+
+%1
+SYS1942E: A program tried to use memory outside the bounds of its
+stack segment.  The program was ended.
+
+%1
+SYS1943E: A protection violation occurred in a program.
+
+%1
+SYS1944I: A non-maskable interrupt was detected.
+SYS1945E: A hardware memory error occurred on the system board at
+physical address %1.  Write down this address and see the help for
+this message.
+
+The system has stopped.
+
+Use the diagnostic programs that came with the computer to find out
+what is wrong.
+SYS1946I: The system has stopped after a hardware memory error on an
+adapter card.  Use the diagnostic programs that came with the
+computer to find out what is wrong.
+SYS1947I: The system has stopped after the hardware DMA channel timed
+out.  Use the diagnostic programs that came with the computer to
+find out what is wrong.
+SYS1948I: The system has stopped after the system board watchdog
+timer timed out.  Use the diagnostic programs that came with the
+computer to find out what is wrong.
+SYS1949E: A fatal page fault (trap E) occurred in a program.
+
+%1
+SYS1950E: A math coprocessor instruction in a program had a bad
+operand.  The program was ended.  Address of the error: %1.
+SYS1951E: A program used a math coprocessor instruction with a bad
+operand, so it was ended.  The error happened at address %1.
+SYS1952E: A program instruction made the math coprocessor divide by
+zero.  The program was ended.  Address of the error: %1.
+SYS1953E: A math coprocessor instruction in a program produced a
+result too large for the coprocessor.  The program was ended.
+Address of the error: %1.
+SYS1954E: A math coprocessor instruction in a program produced a
+result too small for the coprocessor.  The program was ended.
+Address of the error: %1.
+SYS1955E: A math coprocessor instruction in a program caused a
+rounding (precision) error.  The program was ended.  Address of the
+error: %1.
+SYS1956?: 
+SYS1957E: A program raised a math coprocessor exception whose status
+word is not valid.
+SYS1958E: A memory-parity error at physical address %1 was detected
+and the system recovered from it.  Write down this address and look
+at the help for this message before going on.
+
+Press Enter to continue...
+SYS1959E: A memory-parity error was found at physical address %1, and
+program %2 was stopped because of it.
+Write down this address and look at the help for this message before
+going on.
+
+Press Enter to continue...
+SYS1960I: Only one copy of the Installation Aid can run at a time.
+SYS1961E: A command in the program file is unknown to the Installation
+Aid: %1
+
+Make sure the command name is spelled correctly, then try again.
+SYS1962E: Panel %1 could not be shown by the Installation Aid.
+Either the panel is not on the hard disk or diskette, or its format
+is wrong.
+
+Make sure the panel exists on the hard disk or diskette and has the
+right format, then try again.
+SYS1963E: File %1 could not be created by the Installation Aid.
+Common reasons:
+o  The hard disk or diskette is full.
+o  The diskette is write-protected.
+o  A file with the same name already exists.
+
+To fix it, do one of these:
+o  Delete files you no longer need to free space on the hard disk
+   or diskette.
+o  Remove the write protection from the diskette.
+o  Give the existing file a different name.
+SYS1964E: Label %1 could not be found by the Installation Aid.
+A GOTO or CALL command names a label that is not acceptable.
+
+Fix the label name, then try again.
+SYS1965E: File %1 could not be found by the Installation Aid.
+SYS1966E: A file name that is not valid, or a syntax error, was found
+by the Installation Aid: %1
+
+Common reasons:
+o  The file name or command contains characters that are not allowed.
+   These are not allowed: . " / \ [ ] : | < > + ; , &
+   and no control characters either.
+o  The file name was mistyped.
+
+Fix the syntax and spelling, then try again.
+SYS1967E: File %1 could not be accessed by the Installation Aid.
+Common reasons:
+o  The file cannot be read or written.
+o  The file was modified.
+o  The file name is wrong.
+o  The path is wrong.
+
+To fix it, do one of these:
+o  Allow the file to be read or written.
+o  Put back the original version of the file.
+o  Make sure the file name is spelled correctly.
+o  Make sure the path is spelled correctly.
+SYS1968E: This command cannot be handled by the Installation Aid.
+Put MEMMAN=SWAP in CONFIG.SYS.
+SYS1969E: The program that is running cannot go on.
+SYS1970W: Part of the program file could not be read by the
+Installation Aid because its comment markers are unbalanced.
+SYS1971E: A syntax error was found by the Installation Aid: %1.
+
+Fix the syntax, then try again.
+SYS1972E: A SELECT statement is missing its parameter (variable),
+so the Installation Aid cannot go on.
+
+Add the variable to the SELECT statement, then try again.
+SYS1973E: The Program Selector is not installed, so it cannot be
+reached.  Add this line to CONFIG.SYS:
+
+protshell=dmpc.exe shell11f.cnf shell11f.exe cmd.exe
+SYS1974E: Label name %1 appears more than once in the program
+file, on different lines.
+Only the first of these labels will be used.
+
+Delete or rename one of the labels that share this name.
+SYS1975I: The installation failed.
+SYS1976I: Show the history file. %0
+SYS1977I: Program title ...%0
+SYS1978I: Date installed ..%0
+SYS1979I: Date updated ....%0
+SYS1980I: No minor code, group or type record in %1 fits what was
+selected on the command line, so TRACE skips this trace
+definition file.
+SYS1981E: The system trace buffer cannot be written to the device
+that was given.
+SYS1982E: TRACE could not change whether these process IDs are
+traced:
+SYS1983I: TRACE cannot run because too little memory is free.
+SYS1984I: The process ID list given to TRACE is badly formed, so the
+trace setting of the system process IDs was left unchanged.
+SYS1985E: The extension given for the program file is not accepted.
+SYS1986I: Switch %1 is not valid for TRACE and is ignored.
+SYS1987I: The /S switch (suspend logging trace points to the buffer)
+and the /R switch (resume it) cannot be used together, so TRACE
+ignores both.
+SYS1988?: 
+SYS1989?: 
+SYS1990?: 
+SYS1991E: This command or program was made for a different version
+of OS/2. $
+SYS1992P: y
+SYS1993E: A file name is required.
+SYS1994E: One or more parameters are wrong.
+SYS1995?: 
+SYS1996E: EDLIN could not open the file.
+SYS1997E: A read error in %S stopped EDLIN.
+SYS1998E: EDLIN does not edit files whose extension is .BAK.
+SYS1999E: The disk ran out of space, so all edits are lost.
+SYS2000?: 
+SYS2001E: EDLIN stopped because of a syntax error.
+SYS2002I: EDLIN made a new file.
+SYS2003I: The string was not found.
+SYS2004P: O.K.?
+SYS2005E: EDLIN stopped because the line would be longer than 253
+characters.
+SYS2006I: All of the input file has been read in.
+SYS2007P: End the edit now (Y/N)?
+SYS2008E: EDLIN needs a destination line number for this command.
+
+SYS2009E: There is too little room for EDLIN to merge in the file.
+SYS2010I: Graphic code-page table 437 (U.S. PC) is loaded right now.
+SYS2011I: Graphic code-page table 863 (Canadian French) is loaded
+right now.
+SYS2012I: Graphic code-page table 860 (Portuguese) is loaded right
+now.
+SYS2013I: Graphic code-page table 865 (Nordic) is loaded right now.
+SYS2014I: Graphic code-page table 437 (U.S. PC) has now been loaded.
+SYS2015I: Graphic code-page table 863 (Canadian French) has now been
+loaded.
+SYS2016I: Graphic code-page table 860 (Portuguese) has now been
+loaded.
+SYS2017I: Graphic code-page table 865 (Nordic) has now been loaded.
+SYS2018I: No graphic code-page table is loaded.
+SYS2019I: The graphic code-page table loaded right now is not one
+that is recognized.
+SYS2020I: Graphic code-page table 862 (Hebrew) has now been loaded.
+SYS2021I: GRAFTABL accepts these parameters:
+  437    U.S. PC code page.
+  850    Multilingual code page.
+  860    Portuguese code page.
+  862    Hebrew code page.
+  863    Canadian French code page.
+  865    Nordic code page.
+  ?      Shows the graphic code-page number and the choices.
+  /STA   Shows the name and number of the graphic code page in use.
+SYS2022I: Graphic code-page table 850 (Multilingual) is loaded
+right now.
+SYS2023I: Graphic code-page table 850 (Multilingual) has now been
+loaded.
+SYS2024I: Graphic code-page table 862 (Hebrew) is loaded right now.
+SYS2025I: The disk could not be read.
+SYS2026I: OS2LDR was not found.  There is a diskette in drive A.
+SYS2027P: Put a system diskette in the drive and restart the system.
+SYS2028I: OS2KRNL was not found.
+SYS2029I: OS2KRNL is not usable.
+SYS2030I: There is too little memory to start the operating
+system.
+SYS2031?: 
+SYS2032I: Logging Facility device driver LOG$ has been loaded.
+Buffer Size:              %1 KB
+SYS2033I:  Logging Facility LOGDAEM has been loaded.
+Log file name:    %1
+Max file size:    %2KB
+SYS2034E: LOGDAEM, the Logging Facility program, is running already.
+SYS2035I:
+Press Esc to make the logical drive. %0
+SYS2036E: Parameter %2 given to Logging Facility program %1 is not
+valid.
+SYS2037I: Parameter %2 was given twice to Logging Facility program
+%1; the extra copy was dropped.
+SYS2038E: The header of log file %1 is not valid, so logging is
+paused.
+SYS2039E: LOG.SYS, the Logging Facility device driver, is not
+installed.
+SYS2040I: Writing to side %1, track %2 of the target diskette failed
+and could not be recovered.
+SYS2041E: %1 cannot be used as the log file by the Logging Facility
+(return code %2).
+SYS2042E: Log file %1 could not be written by the Logging Facility
+(return code %2).  Local log file %3 is used instead.
+SYS2043E: Log file %1 could not be written by the Logging Facility,
+so logging is paused.
+SYS2044I: Parameter %1 was given twice for %2; the Logging Facility
+dropped the extra copy.
+SYS2045E: Log file %1 cannot grow past %2KB, so it will wrap around.
+SYS2046I: No directories are appended.
+SYS2047I: APPEND and ASSIGN conflict with each other, so APPEND is
+not active.
+SYS2048I: APPEND conflicts with the TOPVIEW program, so APPEND is
+not active.
+SYS2049I: APPEND has been installed already.
+SYS2050I: The path or a parameter is wrong.
+SYS2051I: One of the paths given to APPEND is wrong.
+SYS2052I: The version of APPEND you are using is the wrong one.
+SYS2053?: 
+SYS2054E: Device driver LOG$ does not have enough memory.
+SYS2055E: The Logging Facility did not answer the request in time.
+SYS2056E: Error %1: the redirected input ended too soon, so the
+process was stopped.
+SYS2057I: Logging is paused.
+SYS2058I: Logging has started again.
+SYS2059I: Logging now goes to log file %1.
+SYS2060E: Logging could not be sent to %1 (return code %2).
+SYS2061?: 
+SYS2062?: 
+SYS2063E: The DOS environment cannot be created because memory is
+short.
+SYS2064E: Too little memory is free to set up the DOS environment.
+SYS2065I: The system has halted.  Fix the error shown above, then
+restart the system.
+SYS2066I: DOS could not be started.
+SYS2067I: %1 does not hold a usable device driver.
+Install the right device driver file, then restart the system.
+SYS2068E: %1 messages could not be kept and were lost.
+SYS2069E: Line %1 of CONFIG.SYS has a %2 statement naming country
+information file %3, which is not valid.
+SYS2070E: A program running in this session hit a problem and cannot
+go on.
+SYS2071E: SYSLOGPM.EXE could not be found.
+SYS2072E: Parameter %1 is not valid for SYSLOG.  Nothing was done.
+SYS2073E: Logging could not be paused (return code %1).
+SYS2074E: Logging could not be started again (return code %1).
+SYS2075?: 
+SYS2076I: DOS Command Prompt
+SYS2077I: More:
+SYS2078P: Program Selector
+SYS2079?: 
+SYS2080?: 
+SYS2081E: The SELECT/ESELECT block has an error: either the ESELECT
+statement is missing or one of the SELECT statements in the block
+has a syntax error.
+
+Correct the program file, then try again.
+SYS2082?: 
+SYS2083?: 
+SYS2084?: 
+SYS2085E: %1 is not needed any more; the command can be left out.
+SYS2086E: File %1 is missing from its directory, so it could not be
+found.
+
+Note down these steps:
+
+1. Copy the file named above into the right directory, or install
+   the system again.
+2. Restart the system.
+
+Press any key to go to the command prompt, then carry out steps 1
+and 2.
+SYS2087E: Port %1 could not be opened.
+SYS2088I: DOS sessions can no longer use port %1.
+SYS2089I: DOS sessions can now use port %1.
+SYS2090E: The program could not be loaded.
+SYS2091E: A diskette drive letter is required.
+SYS2092E: %1 is not a valid MODE parameter.
+SYS2093I: The last file listed was not backed up.
+SYS2094I: The program stopped because the disk could not be read.
+SYS2095I: The program stopped because the disk could not be written.
+SYS2096?: 
+SYS2097?: 
+SYS2098?: 
+SYS2099?: 
+SYS2100?: 
+SYS2101?: 
+SYS2102E: The network has not been started.
+SYS2103?: 
+SYS2104?: 
+SYS2105?: 
+SYS2106?: 
+SYS2107?: 
+SYS2108?: 
+SYS2109?: 
+SYS2110?: 
+SYS2111?: 
+SYS2112?: 
+SYS2113?: 
+SYS2114?: 
+SYS2115?: 
+SYS2116?: 
+SYS2117E: This operation cannot be done on a redirected resource.
+SYS2118?: 
+SYS2119?: 
+SYS2120?: 
+SYS2121?: 
+SYS2122?: 
+SYS2123E: The buffer given to the API for its results is too small.
+SYS2124?: 
+SYS2125?: 
+SYS2126?: 
+SYS2127?: 
+SYS2128?: 
+SYS2129?: 
+SYS2130?: 
+SYS2131?: 
+SYS2132?: 
+SYS2133?: 
+SYS2134?: 
+SYS2135?: 
+SYS2136?: 
+SYS2137?: 
+SYS2138E: Start the network first; this operation needs it.
+SYS2139?: 
+SYS2140?: 
+SYS2141?: 
+SYS2142E: The remote server does not support the API that was
+requested.
+SYS2143?: 
+SYS2144?: 
+SYS2145?: 
+SYS2146?: 
+SYS2147?: 
+SYS2148?: 
+SYS2149?: 
+SYS2150E: No such print queue exists.
+SYS2151E: No such print job exists.
+SYS2152E: The print device was not found.
+SYS2153I: A print device with that name exists already.
+SYS2154E: A print queue with that name exists already.
+SYS2155E: No further print queues can be added.
+SYS2156E: No further print jobs can be added.
+SYS2157E: No further print devices can be added.
+SYS2158E: The print device is not running a job, so control
+operations cannot be done on it.
+SYS2159E: The print device request asks for a control function that
+is not valid.
+SYS2160?: 
+SYS2161E: The spooler has not been started.
+SYS2162E: The print device's present state does not allow this
+operation.
+SYS2163?: 
+SYS2164E: The print job's present state does not allow this
+operation.
+SYS2165E: The spooler could not get the memory it needed.
+SYS2166E: No such printer driver exists.
+SYS2167E: The queue driver cannot handle this data type.
+SYS2168E: The queue driver has not been installed.
+SYS2169?: 
+SYS2170?: 
+SYS2171?: 
+SYS2172?: 
+SYS2173?: 
+SYS2174?: 
+SYS2175?: 
+SYS2176?: 
+SYS2177?: 
+SYS2178?: 
+SYS2179?: 
+SYS2180?: 
+SYS2181?: 
+SYS2182?: 
+SYS2183?: 
+SYS2184?: 
+SYS2185?: 
+SYS2186?: 
+SYS2187?: 
+SYS2188?: 
+SYS2189?: 
+SYS2190?: 
+SYS2191?: 
+SYS2192?: 
+SYS2193?: 
+SYS2194?: 
+SYS2195?: 
+SYS2196?: 
+SYS2197?: 
+SYS2198?: 
+SYS2199?: 
+SYS2200?: 
+SYS2201?: 
+SYS2202?: 
+SYS2203?: 
+SYS2204?: 
+SYS2205?: 
+SYS2206?: 
+SYS2207?: 
+SYS2208?: 
+SYS2209?: 
+SYS2210?: 
+SYS2211?: 
+SYS2212?: 
+SYS2213?: 
+SYS2214?: 
+SYS2215E: The server through which you reach the network cannot be
+reached.
+SYS2216?: 
+SYS2217?: 
+SYS2218?: 
+SYS2219?: 
+SYS2220?: 
+SYS2221?: 
+SYS2222?: 
+SYS2223?: 
+SYS2224?: 
+SYS2225?: 
+SYS2226?: 
+SYS2227?: 
+SYS2228?: 
+SYS2229?: 
+SYS2230?: 
+SYS2231?: 
+SYS2232?: 
+SYS2233?: 
+SYS2234?: 
+SYS2235?: 
+SYS2236I: CTTY changes the device used for standard input and output.
+Syntax:
+  CTTY device
+where:
+  device   The device to use for standard input and output from now
+           on.
+
+To go back to the normal standard I/O device, type: CTTY CON
+SYS2237E: DosKrnl - A program used a coprocessor (NPX) instruction,
+but this computer has no NPX. %0
+SYS2238E: DosKrnl - Out of memory.%0
+SYS2239E: DosKrnl - Memory arena is damaged.%0
+SYS2240E: DosKrnl - Block device drivers cannot be used.%0
+SYS2241E: DosKrnl - This DOS setting is not valid: %0
+SYS2242E: The password has expired.
+SYS2243?: 
+SYS2244?: 
+SYS2245?: 
+SYS2246?: 
+SYS2247?: 
+SYS2248?: 
+SYS2249?: 
+SYS2250E: No such connection was found.
+SYS2251?: 
+SYS2252?: 
+SYS2253?: 
+SYS2254?: 
+SYS2255?: 
+SYS2256?: 
+SYS2257?: 
+SYS2258?: 
+SYS2259?: 
+SYS2260?: 
+SYS2261?: 
+SYS2262?: 
+SYS2263?: 
+SYS2264?: 
+SYS2265?: 
+SYS2266?: 
+SYS2267?: 
+SYS2268?: 
+SYS2269?: 
+SYS2270?: 
+SYS2271?: 
+SYS2272?: 
+SYS2273?: 
+SYS2274?: 
+SYS2275?: 
+SYS2276?: 
+SYS2277?: 
+SYS2278?: 
+SYS2279?: 
+SYS2280?: 
+SYS2281?: 
+SYS2282?: 
+SYS2283?: 
+SYS2284?: 
+SYS2285?: 
+SYS2286?: 
+SYS2287?: 
+SYS2288?: 
+SYS2289?: 
+SYS2290?: 
+SYS2291?: 
+SYS2292?: 
+SYS2293?: 
+SYS2294?: 
+SYS2295?: 
+SYS2296?: 
+SYS2297?: 
+SYS2298?: 
+SYS2299?: 
+SYS2300?: 
+SYS2301?: 
+SYS2302?: 
+SYS2303?: 
+SYS2304?: 
+SYS2305?: 
+SYS2306?: 
+SYS2307?: 
+SYS2308?: 
+SYS2309?: 
+SYS2310?: 
+SYS2311?: 
+SYS2312?: 
+SYS2313?: 
+SYS2314?: 
+SYS2315?: 
+SYS2316?: 
+SYS2317?: 
+SYS2318?: 
+SYS2319?: 
+SYS2320?: 
+SYS2321?: 
+SYS2322?: 
+SYS2323?: 
+SYS2324?: 
+SYS2325?: 
+SYS2326?: 
+SYS2327?: 
+SYS2328?: 
+SYS2329?: 
+SYS2330?: 
+SYS2331?: 
+SYS2332?: 
+SYS2333?: 
+SYS2334?: 
+SYS2335?: 
+SYS2336?: 
+SYS2337?: 
+SYS2338?: 
+SYS2339?: 
+SYS2340?: 
+SYS2341E: The device requested is not valid.
+SYS2342?: 
+SYS2343E: This device is being used already as a communications
+device.
+SYS2344?: 
+SYS2345?: 
+SYS2346?: 
+SYS2347?: 
+SYS2348?: 
+SYS2349?: 
+SYS2350?: 
+SYS2351E: The computer name given is not valid.
+SYS2352?: 
+SYS2353?: 
+SYS2354?: 
+SYS2355?: 
+SYS2356?: 
+SYS2357?: 
+SYS2358?: 
+SYS2359?: 
+SYS2360?: 
+SYS2361?: 
+SYS2362?: 
+SYS2363?: 
+SYS2364?: 
+SYS2365?: 
+SYS2366?: 
+SYS2367?: 
+SYS2368?: 
+SYS2369?: 
+SYS2370?: 
+SYS2371?: 
+SYS2372?: 
+SYS2373?: 
+SYS2374?: 
+SYS2375?: 
+SYS2376?: 
+SYS2377?: 
+SYS2378?: 
+SYS2379?: 
+SYS2380?: 
+SYS2381?: 
+SYS2382?: 
+SYS2383?: 
+SYS2384?: 
+SYS2385?: 
+SYS2386?: 
+SYS2387?: 
+SYS2388?: 
+SYS2389?: 
+SYS2390?: 
+SYS2391?: 
+SYS2392?: 
+SYS2393?: 
+SYS2394?: 
+SYS2395?: 
+SYS2396?: 
+SYS2397?: 
+SYS2398?: 
+SYS2399?: 
+SYS2400?: 
+SYS2401E: Files are still open on this connection.
+SYS2402?: 
+SYS2403?: 
+SYS2404?: 
+SYS2405E: The drive letter is already used by a local drive.
+SYS2406?: 
+SYS2407?: 
+SYS2408?: 
+SYS2409?: 
+SYS2410?: 
+SYS2411?: 
+SYS2412?: 
+SYS2413?: 
+SYS2414?: 
+SYS2415?: 
+SYS2416?: 
+SYS2417?: 
+SYS2418?: 
+SYS2419?: 
+SYS2420?: 
+SYS2421?: 
+SYS2422?: 
+SYS2423?: 
+SYS2424?: 
+SYS2425?: 
+SYS2426?: 
+SYS2427?: 
+SYS2428?: 
+SYS2429?: 
+SYS2430?: 
+SYS2431?: 
+SYS2432?: 
+SYS2433?: 
+SYS2434?: 
+SYS2435?: 
+SYS2436?: 
+SYS2437?: 
+SYS2438?: 
+SYS2439?: 
+SYS2440?: 
+SYS2441?: 
+SYS2442?: 
+SYS2443?: 
+SYS2444?: 
+SYS2445?: 
+SYS2446?: 
+SYS2447?: 
+SYS2448?: 
+SYS2449?: 
+SYS2450?: 
+SYS2451?: 
+SYS2452?: 
+SYS2453?: 
+SYS2454?: 
+SYS2455?: 
+SYS2456?: 
+SYS2457?: 
+SYS2458?: 
+SYS2459?: 
+SYS2460?: 
+SYS2461?: 
+SYS2462?: 
+SYS2463?: 
+SYS2464?: 
+SYS2465?: 
+SYS2466?: 
+SYS2467?: 
+SYS2468?: 
+SYS2469?: 
+SYS2470?: 
+SYS2471?: 
+SYS2472?: 
+SYS2473?: 
+SYS2474?: 
+SYS2475?: 
+SYS2476?: 
+SYS2477?: 
+SYS2478?: 
+SYS2479?: 
+SYS2480?: 
+SYS2481?: 
+SYS2482?: 
+SYS2483?: 
+SYS2484?: 
+SYS2485?: 
+SYS2486?: 
+SYS2487?: 
+SYS2488?: 
+SYS2489?: 
+SYS2490?: 
+SYS2491?: 
+SYS2492?: 
+SYS2493?: 
+SYS2494?: 
+SYS2495?: 
+SYS2496?: 
+SYS2497?: 
+SYS2498?: 
+SYS2499?: 
+SYS2500?: 
+SYS2501?: 
+SYS2502?: 
+SYS2503?: 
+SYS2504?: 
+SYS2505?: 
+SYS2506?: 
+SYS2507?: 
+SYS2508?: 
+SYS2509?: 
+SYS2510?: 
+SYS2511?: 
+SYS2512?: 
+SYS2513?: 
+SYS2514?: 
+SYS2515?: 
+SYS2516?: 
+SYS2517?: 
+SYS2518?: 
+SYS2519?: 
+SYS2520?: 
+SYS2521?: 
+SYS2522?: 
+SYS2523?: 
+SYS2524?: 
+SYS2525?: 
+SYS2526?: 
+SYS2527?: 
+SYS2528?: 
+SYS2529?: 
+SYS2530?: 
+SYS2531?: 
+SYS2532?: 
+SYS2533?: 
+SYS2534?: 
+SYS2535?: 
+SYS2536?: 
+SYS2537?: 
+SYS2538?: 
+SYS2539?: 
+SYS2540?: 
+SYS2541?: 
+SYS2542?: 
+SYS2543?: 
+SYS2544?: 
+SYS2545?: 
+SYS2546?: 
+SYS2547?: 
+SYS2548?: 
+SYS2549?: 
+SYS2550?: 
+SYS2551?: 
+SYS2552?: 
+SYS2553?: 
+SYS2554?: 
+SYS2555?: 
+SYS2556?: 
+SYS2557?: 
+SYS2558?: 
+SYS2559?: 
+SYS2560?: 
+SYS2561?: 
+SYS2562?: 
+SYS2563?: 
+SYS2564?: 
+SYS2565?: 
+SYS2566?: 
+SYS2567?: 
+SYS2568?: 
+SYS2569?: 
+SYS2570?: 
+SYS2571?: 
+SYS2572?: 
+SYS2573?: 
+SYS2574?: 
+SYS2575?: 
+SYS2576?: 
+SYS2577?: 
+SYS2578?: 
+SYS2579?: 
+SYS2580?: 
+SYS2581?: 
+SYS2582?: 
+SYS2583?: 
+SYS2584?: 
+SYS2585?: 
+SYS2586?: 
+SYS2587?: 
+SYS2588?: 
+SYS2589?: 
+SYS2590?: 
+SYS2591?: 
+SYS2592?: 
+SYS2593?: 
+SYS2594?: 
+SYS2595?: 
+SYS2596?: 
+SYS2597?: 
+SYS2598?: 
+SYS2599?: 
+SYS2600?: 
+SYS2601?: 
+SYS2602?: 
+SYS2603?: 
+SYS2604?: 
+SYS2605?: 
+SYS2606?: 
+SYS2607?: 
+SYS2608?: 
+SYS2609?: 
+SYS2610?: 
+SYS2611?: 
+SYS2612?: 
+SYS2613?: 
+SYS2614?: 
+SYS2615?: 
+SYS2616?: 
+SYS2617?: 
+SYS2618?: 
+SYS2619?: 
+SYS2620?: 
+SYS2621?: 
+SYS2622?: 
+SYS2623?: 
+SYS2624?: 
+SYS2625?: 
+SYS2626?: 
+SYS2627?: 
+SYS2628?: 
+SYS2629?: 
+SYS2630?: 
+SYS2631?: 
+SYS2632?: 
+SYS2633?: 
+SYS2634?: 
+SYS2635?: 
+SYS2636?: 
+SYS2637?: 
+SYS2638?: 
+SYS2639?: 
+SYS2640?: 
+SYS2641?: 
+SYS2642?: 
+SYS2643?: 
+SYS2644?: 
+SYS2645?: 
+SYS2646?: 
+SYS2647?: 
+SYS2648?: 
+SYS2649?: 
+SYS2650?: 
+SYS2651?: 
+SYS2652?: 
+SYS2653?: 
+SYS2654?: 
+SYS2655?: 
+SYS2656?: 
+SYS2657?: 
+SYS2658?: 
+SYS2659?: 
+SYS2660?: 
+SYS2661?: 
+SYS2662?: 
+SYS2663?: 
+SYS2664?: 
+SYS2665?: 
+SYS2666?: 
+SYS2667?: 
+SYS2668?: 
+SYS2669?: 
+SYS2670?: 
+SYS2671?: 
+SYS2672?: 
+SYS2673?: 
+SYS2674?: 
+SYS2675?: 
+SYS2676?: 
+SYS2677?: 
+SYS2678?: 
+SYS2679?: 
+SYS2680?: 
+SYS2681?: 
+SYS2682?: 
+SYS2683?: 
+SYS2684?: 
+SYS2685?: 
+SYS2686?: 
+SYS2687?: 
+SYS2688?: 
+SYS2689?: 
+SYS2690?: 
+SYS2691?: 
+SYS2692?: 
+SYS2693?: 
+SYS2694?: 
+SYS2695?: 
+SYS2696?: 
+SYS2697?: 
+SYS2698?: 
+SYS2699?: 
+SYS2700?: 
+SYS2701?: 
+SYS2702?: 
+SYS2703?: 
+SYS2704?: 
+SYS2705?: 
+SYS2706?: 
+SYS2707?: 
+SYS2708?: 
+SYS2709?: 
+SYS2710?: 
+SYS2711?: 
+SYS2712?: 
+SYS2713?: 
+SYS2714?: 
+SYS2715?: 
+SYS2716?: 
+SYS2717?: 
+SYS2718?: 
+SYS2719?: 
+SYS2720?: 
+SYS2721?: 
+SYS2722?: 
+SYS2723?: 
+SYS2724?: 
+SYS2725?: 
+SYS2726?: 
+SYS2727?: 
+SYS2728?: 
+SYS2729?: 
+SYS2730?: 
+SYS2731?: 
+SYS2732?: 
+SYS2733?: 
+SYS2734?: 
+SYS2735?: 
+SYS2736?: 
+SYS2737?: 
+SYS2738?: 
+SYS2739?: 
+SYS2740?: 
+SYS2741?: 
+SYS2742?: 
+SYS2743?: 
+SYS2744?: 
+SYS2745?: 
+SYS2746?: 
+SYS2747?: 
+SYS2748?: 
+SYS2749?: 
+SYS2750?: 
+SYS2751?: 
+SYS2752?: 
+SYS2753?: 
+SYS2754?: 
+SYS2755?: 
+SYS2756?: 
+SYS2757?: 
+SYS2758?: 
+SYS2759?: 
+SYS2760?: 
+SYS2761?: 
+SYS2762?: 
+SYS2763?: 
+SYS2764?: 
+SYS2765?: 
+SYS2766?: 
+SYS2767?: 
+SYS2768?: 
+SYS2769?: 
+SYS2770?: 
+SYS2771?: 
+SYS2772?: 
+SYS2773?: 
+SYS2774?: 
+SYS2775?: 
+SYS2776?: 
+SYS2777?: 
+SYS2778?: 
+SYS2779?: 
+SYS2780?: 
+SYS2781?: 
+SYS2782?: 
+SYS2783?: 
+SYS2784?: 
+SYS2785?: 
+SYS2786?: 
+SYS2787?: 
+SYS2788?: 
+SYS2789?: 
+SYS2790?: 
+SYS2791?: 
+SYS2792?: 
+SYS2793?: 
+SYS2794?: 
+SYS2795?: 
+SYS2796?: 
+SYS2797?: 
+SYS2798?: 
+SYS2799?: 
+SYS2800?: 
+SYS2801?: 
+SYS2802?: 
+SYS2803?: 
+SYS2804?: 
+SYS2805?: 
+SYS2806?: 
+SYS2807?: 
+SYS2808?: 
+SYS2809?: 
+SYS2810?: 
+SYS2811?: 
+SYS2812?: 
+SYS2813?: 
+SYS2814?: 
+SYS2815?: 
+SYS2816?: 
+SYS2817?: 
+SYS2818?: 
+SYS2819?: 
+SYS2820?: 
+SYS2821?: 
+SYS2822?: 
+SYS2823?: 
+SYS2824?: 
+SYS2825?: 
+SYS2826?: 
+SYS2827?: 
+SYS2828?: 
+SYS2829?: 
+SYS2830?: 
+SYS2831?: 
+SYS2832?: 
+SYS2833?: 
+SYS2834?: 
+SYS2835?: 
+SYS2836?: 
+SYS2837?: 
+SYS2838?: 
+SYS2839?: 
+SYS2840?: 
+SYS2841?: 
+SYS2842?: 
+SYS2843?: 
+SYS2844?: 
+SYS2845?: 
+SYS2846?: 
+SYS2847?: 
+SYS2848?: 
+SYS2849?: 
+SYS2850?: 
+SYS2851?: 
+SYS2852?: 
+SYS2853?: 
+SYS2854?: 
+SYS2855?: 
+SYS2856?: 
+SYS2857?: 
+SYS2858?: 
+SYS2859?: 
+SYS2860?: 
+SYS2861?: 
+SYS2862?: 
+SYS2863?: 
+SYS2864?: 
+SYS2865?: 
+SYS2866?: 
+SYS2867?: 
+SYS2868?: 
+SYS2869?: 
+SYS2870?: 
+SYS2871?: 
+SYS2872?: 
+SYS2873?: 
+SYS2874?: 
+SYS2875?: 
+SYS2876?: 
+SYS2877?: 
+SYS2878?: 
+SYS2879?: 
+SYS2880?: 
+SYS2881?: 
+SYS2882?: 
+SYS2883?: 
+SYS2884?: 
+SYS2885?: 
+SYS2886?: 
+SYS2887?: 
+SYS2888?: 
+SYS2889?: 
+SYS2890?: 
+SYS2891?: 
+SYS2892?: 
+SYS2893?: 
+SYS2894?: 
+SYS2895?: 
+SYS2896?: 
+SYS2897?: 
+SYS2898?: 
+SYS2899?: 
+SYS2900?: 
+SYS2901?: 
+SYS2902?: 
+SYS2903?: 
+SYS2904?: 
+SYS2905?: 
+SYS2906?: 
+SYS2907?: 
+SYS2908?: 
+SYS2909?: 
+SYS2910?: 
+SYS2911?: 
+SYS2912?: 
+SYS2913?: 
+SYS2914?: 
+SYS2915?: 
+SYS2916?: 
+SYS2917?: 
+SYS2918?: 
+SYS2919?: 
+SYS2920?: 
+SYS2921?: 
+SYS2922?: 
+SYS2923?: 
+SYS2924?: 
+SYS2925?: 
+SYS2926?: 
+SYS2927?: 
+SYS2928?: 
+SYS2929?: 
+SYS2930?: 
+SYS2931?: 
+SYS2932?: 
+SYS2933?: 
+SYS2934?: 
+SYS2935?: 
+SYS2936?: 
+SYS2937?: 
+SYS2938?: 
+SYS2939?: 
+SYS2940?: 
+SYS2941?: 
+SYS2942?: 
+SYS2943?: 
+SYS2944?: 
+SYS2945?: 
+SYS2946?: 
+SYS2947?: 
+SYS2948?: 
+SYS2949?: 
+SYS2950?: 
+SYS2951?: 
+SYS2952?: 
+SYS2953?: 
+SYS2954?: 
+SYS2955?: 
+SYS2956?: 
+SYS2957?: 
+SYS2958?: 
+SYS2959?: 
+SYS2960?: 
+SYS2961?: 
+SYS2962?: 
+SYS2963?: 
+SYS2964?: 
+SYS2965?: 
+SYS2966?: 
+SYS2967?: 
+SYS2968?: 
+SYS2969?: 
+SYS2970?: 
+SYS2971?: 
+SYS2972?: 
+SYS2973?: 
+SYS2974?: 
+SYS2975?: 
+SYS2976?: 
+SYS2977?: 
+SYS2978?: 
+SYS2979?: 
+SYS2980?: 
+SYS2981?: 
+SYS2982?: 
+SYS2983?: 
+SYS2984?: 
+SYS2985?: 
+SYS2986?: 
+SYS2987?: 
+SYS2988?: 
+SYS2989?: 
+SYS2990?: 
+SYS2991?: 
+SYS2992?: 
+SYS2993?: 
+SYS2994?: 
+SYS2995?: 
+SYS2996?: 
+SYS2997?: 
+SYS2998?: 
+SYS2999?: 
+SYS3000I: OS/2 Presentation Manager is needed to run this program.%0
+SYS3001E: Drive %1, the current drive, does not exist.
+SYS3002I: OS/2 Command Interpreter version 4.5 - DOS mode
+SYS3003E: The environment size given is not valid.
+SYS3004E: OS/2 does not support CTTY.
+SYS3005E: There is no environment space left.
+SYS3006E: The drive or path given for the new COMMAND.COM is not valid.
+SYS3007E: A drive or directory in the PATH= setting is not valid.
+SYS3008I: BREAK is off.
+SYS3009I: BREAK is on.
+SYS3010E: Memory could not be allocated.
+SYS3011E: The .EXE file of the program you named is damaged.
+SYS3012E: There is not enough memory for the program.
+SYS3013E: The program's load module could not be loaded.
+SYS3014E: The name is not a built-in command, a program you can run, or
+a batch file.
+SYS3015E: COMMAND.COM could not be loaded again.
+SYS3016E: The session was stopped because COMMAND.COM could not be
+loaded.
+SYS3017E: COMMAND.COM could not be started.
+SYS3018P: Put the disk that holds %1 into drive %2, then
+press any key to continue.
+SYS3019E: Specify either ON or OFF.
+SYS3020E: Not every device has code page %1 prepared.
+SYS3021E: COPY cannot use the /B (binary) option when copying from a
+device instead of a file.
+SYS3022E: Writing to a device failed with an input/output error.
+SYS3023I: No PATH is set.
+SYS3024E: A FOR command cannot contain another FOR.
+SYS3025E: The number of parameters is wrong.
+SYS3026I: ASSIGN gives an existing drive a different drive letter.
+(Available in virtual DOS machines only.)
+Syntax:
+  ASSIGN [/S] or [x=y][x=y .... ]
+where:
+ /S   Shows which drives are assigned.
+  x   The drive letter to redirect.
+  =   Separates the two letters.
+  y   The drive that x will refer to.
+
+Examples:
+  ASSIGN /S               Show the drive assignments now in effect.
+  ASSIGN A=C and DIR A:  List the directory of drive C.
+  ASSIGN A=C B=C          Send requests for drives A and B to drive C.
+  ASSIGN                  Undo all assignments.
+SYS3027I: Drive %1: now refers to drive %2:
+SYS3028I: ASSIGN is not loaded in this session.
+SYS3029I: ASSIGN is not redirecting any drive letters.
+SYS3030E: The second drive letter was not given.
+SYS3031E: %1 is not a valid drive letter.
+SYS3032E: %1 is not a valid separator.
+SYS3033E: /%1 is not a valid switch.
+SYS3034I: Licensed program material%0
+SYS3035I: JOIN attaches a disk drive to a directory on another drive.
+(Available in virtual DOS machines only.)
+Syntax:
+  JOIN [drive] [drive\directory | /D]
+where:
+  drive             The drive to attach.
+  drive\directory   The directory it is attached to.
+  /D                Removes the attachment.
+
+Examples:
+  JOIN D: C:\path   Attach drive D to the directory C:\path.
+  JOIN              Show the drives that are attached.
+  DIR C:\path       Requests for C:\path go to drive D.
+  JOIN D: /D        Remove the attachment of drive D.
+SYS3036I: SUBST makes a directory available under a drive letter.
+(Available in virtual DOS machines only.)
+Syntax:
+  SUBST [drive] [drive\path | /D]
+where:
+  drive        The drive letter that will stand for drive\path.
+  drive\path   The drive and directory it stands for.
+  /D           Removes the substitution.
+
+Examples:
+  SUBST D: C:\path   Make drive D stand for the directory C:\path.
+  SUBST              Show the substitutions in effect.
+  DIR D:             Requests for drive D go to C:\path.
+  SUBST D: /D        Remove the substitution of drive D.
+SYS3037I: LABEL adds, changes or removes the volume label of a disk.
+Syntax:
+  LABEL [drive:][label]
+SYS3038E: LABEL cannot be used now, because JOIN, SUBST or ASSIGN has
+been used earlier.
+SYS3039I: DIR lists the files and subdirectories in a directory.
+Syntax:
+  DIR [drive:][path][filename][/W or /F][/P][/N][/A][/B][/O][/R][/S][/L]
+where:
+  drive:\path\filename   The directories and files to list.
+  /W                     Lists the names across the screen.
+  /F                     Shows complete file names with drive and path.
+  /P                     Stops after every screenful.
+  /N                     Uses the newer OS/2 listing layout.
+  /A                     Lists files with the given attributes.
+  /B                     Shows only names and extensions.
+  /O                     Sorts the list by the given fields.
+  /R                     Shows the LONGNAME extended attribute.
+                         (DOS sessions only.)
+  /S                     Includes every subdirectory.
+  /L                     Shows the listing in lowercase.
+SYS3040I: CALL runs another batch file from inside a batch file and then
+continues with the calling one.
+Syntax:
+  CALL batchfile [arguments]
+where:
+  batchfile   The batch file to run.
+  arguments   Values handed to that batch file on its command line.
+SYS3041I: CHCP on its own shows the code page in use; CHCP with a number
+switches to that code page.
+Syntax:
+  CHCP [nnn]
+where:
+  nnn   The code page to switch to.
+SYS3042I: REN or RENAME gives a file a new name, a new extension, or
+both; its contents stay the same.
+Syntax:
+  REN    [drive:][path]filename1 filename2
+  RENAME [drive:][path]filename1 filename2
+
+         Note:  filename2 may not include a drive or a path.
+where:
+  drive:\path\filename1   The file to be renamed.
+  filename2               The name it will get.
+SYS3043I: ERASE or DEL removes one or more files.
+Syntax:
+  ERASE [drive:][path]filename [/P][/N][/F]
+  DEL   [drive:][path]filename [/P][/N][/F]
+where:
+  drive:\path\filename   The file to remove.  The wildcards * and ?
+                         may be used in the name.
+ /P                      Asks before each file is removed.
+ /N                      Does not ask "Are you sure (Y/N)?" before
+                         removing the files.
+ /F                      Removes the file for good, so that UNDELETE
+                         cannot bring it back.
+SYS3044I: TYPE shows the contents of a file on the screen.
+Syntax:
+  TYPE [drive:][path]filename
+SYS3045I: REM marks a remark in a batch file or in CONFIG.SYS, or adds
+spacing.  REM with nothing after it gives an empty line.
+Syntax:
+  REM [comment]
+SYS3046I: COPY copies one or more files to another place.
+Syntax:
+  COPY [drive][path] filename [/A or /B][+][,,]][drive]][path][filename]
+  [/A or /B][/V][/F]
+where:
+  drive\path\filename   The file to copy from.
+  /A                    Treats the file as ASCII text.
+  /B                    Treats the file as binary data.
+  +                     Joins files together.
+  + ,,                  Sets a file's date and time to now.
+  drive\path\filename   The file to copy to.
+  /A                    Appends an end-of-file character.
+  /B                    Leaves out the end-of-file character.
+  /V                    Checks that the sectors written to the target
+                        disk were stored correctly.
+  /F                    Makes the copy fail when the source has
+                        extended attributes that the target file
+                        system cannot hold.
+SYS3047I: PAUSE halts a batch file and waits after showing
+"Press any key when ready ..."
+Syntax:
+  PAUSE [comment]
+SYS3048I: DATE shows or sets the date of the system and of the computer
+clock.  Any of the forms below can be used.
+Syntax:
+  DATE [mm-dd-yy] or [dd-mm-yy] or [yy-mm-dd] or [yy-dd-mm]
+where:
+  mm   The month.
+  dd   The day.
+  yy   The year.
+
+DATE with no parameters shows today's date and asks for a new one.
+Press Enter to leave the date unchanged.
+SYS3049I: TIME shows or sets the time of the system and of the computer
+clock.
+Syntax:
+  TIME [hh:mm:ss] [/N]
+where:
+  hh   The hour.
+  mm   The minutes.
+  ss   The seconds, with hundredths of a second after a period.
+  /N   Does not ask for a new time.
+
+TIME with no parameters shows the current time and asks for a new one.
+Press Enter to leave the time unchanged.
+
+TIME with parameters sets the time without asking.
+SYS3050I: VER shows which version of OS/2 is running.
+Syntax:
+  VER
+SYS3051I: VOL shows the volume label and serial number of a drive, if
+it has them.
+Syntax:
+  VOL [drive:]
+SYS3052I: CD or CHDIR shows the name of the current directory or
+switches to another one.
+Syntax:
+  CD [drive:][path]
+  CHDIR [drive:][path]
+
+To see the current directory of a drive, enter:
+CD [drive:]
+To move up one level, enter: CD ..
+To see the current drive and directory, enter: CD
+SYS3053I: MD or MKDIR creates a new subdirectory.
+Syntax:
+  MD [drive:]path
+  MKDIR [drive:]path
+where:
+  drive:\path   The drive and the name of the new directory.
+SYS3054I: RMDIR or RD deletes a directory that has nothing in it.
+Syntax:
+  RMDIR [drive:][path]
+  RD    [drive:][path]
+where:
+  drive:\path  The directory to delete.  Every file in it has to be
+               removed first.
+SYS3055I: BREAK sets whether DOS looks for Ctrl+Break before it carries
+out requests from programs.
+Syntax:
+  BREAK [ON or OFF]
+where:
+  ON   Looks for Ctrl+Break during every operation.
+  OFF  Looks for Ctrl+Break only during input and output.
+
+BREAK with no parameters shows the setting now in effect.
+SYS3056I: VERIFY makes the system check that data was stored correctly
+on a disk.
+Syntax:
+  VERIFY [ON or OFF]
+where:
+  ON   Checks every write to the disk.
+  OFF  Stops checking.  This is the default.
+
+VERIFY with no parameters shows the setting now in effect.
+SYS3057I: SET shows, defines or removes environment variables.
+Syntax:
+  SET [string1=[string2]]]
+where:
+  string1   The name of the variable.
+  string2   The text value given to the variable.
+
+SET string1 shows the variable called string1.
+
+SET with no parameters lists every environment variable.
+SYS3058I: PROMPT sets the text of the command prompt.
+Syntax:
+  PROMPT [text]
+where:
+  text   The new prompt.  It may hold ordinary characters and
+         these codes:
+           $$ - A dollar sign ($)      $I - The help line
+           $A - An ampersand (&)       $L - A less-than sign (<)
+           $B - A vertical bar (|)     $N - The default drive
+           $C - An open bracket (()    $P - The current directory
+           $D - Today's date           $Q - An equal sign (=)
+           $E - The Escape character   $R - The last return code
+           $F - A close bracket ())    $S - A space
+           $G - A greater-than (>)     $T - The time now
+           $H - A backspace            $V - The OS/2 version
+           $_ - A new line (carriage return and line feed)
+PROMPT with no parameters goes back to the standard prompt.
+SYS3059I: PATH sets the directories searched for commands and programs.
+Syntax:
+  PATH [drive:]path[;...]]
+  PATH [;]
+where:
+  drive:\path   The drives and directories to search.
+  PATH ;        Removes the search path, so only the current directory
+                is searched.
+
+PATH with no parameters shows the search path now in effect.
+SYS3060I: EXIT leaves the current command processor (CMD.EXE or
+COMMAND.COM) and goes back to the one before it.  Leaving the first
+(primary) COMMAND.COM closes the virtual DOS machine.
+SYS3061I: OS/2 does not support CTTY.
+SYS3062I: ECHO sets whether a batch file shows its commands as they run,
+or shows a message.
+Syntax:
+  ECHO [ON or OFF or message]
+where:
+  ON        Shows each command as it runs.
+  OFF       Hides the commands.
+  message   Text shown whether ECHO is ON or OFF.
+
+ECHO with no parameters shows the setting now in effect.
+SYS3063I: GOTO makes a batch file continue at the line with the given
+label.
+Syntax:
+  GOTO label
+where:
+  label  The text that names the target line in the batch file.
+SYS3064I: SHIFT moves the replaceable parameters of a batch file down by
+one place.
+Syntax:
+  SHIFT
+SYS3065I: IF runs a command in a batch file only when a condition holds.
+Syntax:
+  IF [NOT] ERRORLEVEL number command
+  IF [NOT] string1==string2 command
+  IF [NOT] EXIST [drive][path] filename command
+where:
+  NOT                        Runs the command when the condition does
+                             not hold.
+  ERRORLEVEL number          Holds when the exit code of the last
+                             program run is at least the number.
+  string1==string2           Holds when both strings are the same.
+  EXIST drive\path\filename  Holds when the file exists.
+  command                    The command run when the condition holds.
+SYS3066I: FOR runs a command once for each file in a set.
+
+At the command prompt the form is:
+  FOR %%variable IN (set) DO command
+where:
+  %%variable   A single character, digits 0-9 included, typed at the
+               prompt (as in %%3).
+  (set)        One or more items that %%variable takes in turn.  The
+               wildcards * and ? may be used in the file names.
+  command      The command run for each item of the set.
+
+Inside a batch file, write %%%%variable instead of %%variable.
+SYS3067I: CLS erases everything in the window or on the screen.
+SYS3068I: LH or LOADHIGH loads a program into upper memory.
+Syntax:
+  LH       [drive:][path]filename [arguments]
+  LOADHIGH [drive:][path]filename [arguments]
+where:
+  filename    The program to run in upper memory.
+  arguments   Any parameters the program needs.
+SYS3069I: TRUENAME shows the complete drive, path and name of a file.
+Syntax:
+  TRUENAME [drive:][path]filename
+SYS3070E: The program could not be loaded into the upper memory blocks
+(UMB).
+SYS3071E: The directory given is not correct.
+SYS3072E: The value after the switch character at the end of the
+command line is not correct.
+SYS3073E: A DBCS character cannot be used as the value of a switch.
+SYS3074E: %1 is marked read-only, so it cannot be deleted.
+SYS3075E: A path was given, so the file cannot be renamed.
+SYS3076E: A drive was given, so the file cannot be renamed.
+SYS3077I: Path names may not contain wildcards such as ? or *.  Enter
+the command again without them.
+SYS3078E: A file name is required.
+SYS3079P:
+End the batch file (Y/N)? %0
+SYS3080I: COMMAND.COM hit a critical disk error while starting and
+cannot go on.  Nothing more can be done in this session.  Close it and
+open a new one.  If COMMAND.COM still fails to start, get help from
+your service provider.
+SYS3081E: %1 was not found.
+SYS3082I: Line: %0
+SYS3083E: The DOSKEY macro was ignored because there is not enough memory
+to hold it.
+SYS3084E: The DOSKEY already loaded is not compatible, so the request
+was stopped.
+SYS3085E: BUFSIZE cannot be changed now.
+SYS3086I: The equal sign that DOSKEY needs is missing.
+SYS3087I: DOSKEY lets you edit and recall command lines and define
+macros.  (Available in virtual DOS machines only.)
+Syntax:
+  DOSKEY [/REINSTALL][/BUFSIZE=n][/M] [/H][/OVERSTRIKE or INSERT]
+         [macroname=[text]]
+where:
+  /REINSTALL   Loads a fresh copy of DOSKEY.
+  /BUFSIZE=n   Size of the history and macro buffer (512 by default).
+  /M           Lists every DOSKEY macro.
+  /H           Lists every command held in memory.
+  /OVERSTRIKE  Typing replaces the existing text.
+  /INSERT      Typing is inserted into the existing text.
+  macroname    The name of the macro being defined.
+  text         The commands the macro will run.
+
+Up/down arrows - Bring back earlier commands
+ESC            - Empties the command line
+F7             - Lists the command history
+Alt+F7         - Empties the command history
+F8             - Searches the command history
+F9             - Picks a command by its number
+Alt+F10        - Removes all macros
+SYS3088E: %1 is not a built-in command, a program you can run, or a
+batch file.
+SYS3089E: LOADFIX loads a program above the first 64KB of memory and
+runs it.
+Syntax:
+  LOADFIX [drive\path] filename [parameters]
+where:
+  filename     The program to run.
+  parameters   Any parameters the program needs.
+
+Some DOS programs fail when they are loaded below 64KB, for example
+with the message "Packed file corrupt".
+SYS3090I: COMMAND starts another copy of the command interpreter.
+Syntax:
+  COMMAND [drive][path][/P][/E:n][/C string or /K string]
+where:
+  drive\path   The directory that holds COMMAND.COM.
+  /P           Keeps the new interpreter running for good.
+  /E:n         Gives the new environment a size of n bytes.
+  /C string    Runs the string and then ends.
+  /K string    Runs the string and stays loaded.
+SYS3091I: APPEND sets the directories searched for data files that are
+not in the current directory.
+Syntax:
+  APPEND [drive][path];[drive][path][/PATH:ON or /PATH:OFF][/E]
+where:
+  drive\path   A drive and directory to search.  Separate several
+               directories with semicolons.
+  /PATH:ON     Searches the appended directories even when a file
+               request already has a path.  This is the default.
+  /PATH:OFF    Cancels /PATH:ON.
+  /E           Keeps the list of directories in an environment
+               variable called APPEND.  /E is accepted only the
+               first time APPEND is used in a session.
+
+To turn APPEND off, enter: APPEND ;
+To see the list of directories, enter: APPEND
+SYS3092I: ATTRIB shows or changes the attributes of files.
+Syntax:
+  ATTRIB [+R or -R][+S or -S][+H or -H][+A or -A][drive:][path]filename
+         [/S]
+where:
+  +R or -R     Turns the read-only attribute on or off.
+  +S or -S     Turns the system attribute on or off.
+  +H or -H     Turns the hidden attribute on or off.
+  +A or -A     Turns the archive attribute on or off.
+  drive:\path  The drive and directory.
+  filename     The file to change.
+  /S           Includes every subdirectory.
+SYS3093I: CHKDSK examines directories and files, identifies the file
+system, and reports on the state of a disk.
+Syntax for the FAT file system:
+  CHKDSK [drive:][path][filename] [/F][/V]
+Syntax for the HPFS file system:
+  CHKDSK [drive] [/C][/F[:n]]
+Syntax for the JFS file system:
+  CHKDSK [drive] [/C] [/F[:n]] [/B]
+where:
+  drive           The drive to examine.
+  path\filename   The file to examine.
+  /F              Repairs problems found on the disk.
+  /V              Lists every file on the drive with its path.
+  /C              Recovers files only when the file system is marked
+                  inconsistent.
+  /F:n            Repairs problems at level n (2 if not given):
+                    /F:0 - Examines and reports without repairing.
+                    /F:1 - Repairs damaged file system structures.
+                    /F:2 - As /F:1, and also checks all space used by
+                           the file system.
+                    /F:3 - As /F:2, and also checks the whole volume.
+  /B              Moves the entries of the LVM bad block list into the
+                  JFS bad block list.
+
+To examine the current drive, enter: CHKDSK
+SYS3094I: COMP compares two files, or two sets of files.
+Syntax:
+  COMP [drive:][path][filename] [drive:][path][filename]
+where:
+  drive:\path\filename   The first file of the comparison.
+  drive:\path\filename   The second file of the comparison.
+
+Wildcards in the file names compare whole sets of files.
+SYS3095I: DISKCOMP compares the contents of two diskettes.
+Syntax:
+  DISKCOMP [source drive] [target drive]
+SYS3096I: DISKCOPY copies everything on one diskette to another one.
+Syntax:
+  DISKCOPY [source drive] [target drive]
+
+Both diskettes have to be of the same capacity, for example 1.44M
+in drive A and 1.44M in drive B.
+SYS3097I: EDLIN starts the EDLIN line editor.
+Syntax:
+  EDLIN [drive][path] filename [/B]
+where
+  drive\path   Where the ASCII file is.
+  filename     The name of the file.
+  /B           Does not stop at the end-of-file character (Ctrl+Z).
+SYS3098I: MOVE moves a file to another directory of the same drive.
+Syntax:
+  MOVE [drive][path1] filename1 [path2] filename2
+where
+  drive            The drive the file is on.
+  path\filename1   The file to move.
+  path\filename2   Where it goes and its new name.
+SYS3099I: FIND searches one or more files for a string and writes the
+matching lines to the output device.
+Syntax:
+  FIND [/V or /C][/I][/N] "string" [drive:][path]filename[ ...]]
+where:
+  /V            Shows the lines that do not contain the string.
+  /C            Shows only how many lines contain the string.
+  /I            Treats uppercase and lowercase as the same.
+  /N            Puts the line number in front of each line shown.
+  "string"      The text to look for.
+  drive:\path   Where the files to search are.
+  filename      The file to search.
+
+With no file given, FIND searches what is typed at the prompt or piped
+in from another command.
+SYS3100I: This CD-ROM file system (CDFS) version does not work with this
+version of OS/2.
+SYS3101I: Loading the CD-ROM file system (CDFS) driver built with
+debugging and statistics (%1).
+SYS3102I: Loading the CD-ROM file system (CDFS) driver built with
+debugging (%1).
+SYS3103I: Loading the CD-ROM file system (CDFS) driver built with
+statistics (%1).
+SYS3104I: Loading the OS/2 CD-ROM file system (CDFS) driver (%1).
+SYS3105I: The device driver returned an error code that the CD-ROM file
+system (CDFS) does not know.  See the documentation of the device
+driver.
+SYS3106I: One of the CD-ROM file system (CDFS) parameters is not valid.
+SYS3107I: The cache buffer is set to its smallest size, 1 sector.
+The number of sectors given is below the lowest value the CD-ROM file
+system (CDFS) accepts, so the smallest value, 1 sector, is used and
+processing continues.
+SYS3108I: Debug output goes to communication port %1.
+SYS3109I: The cache buffer is set to its largest size.  The number of
+sectors given is above the highest value the CD-ROM file system (CDFS)
+accepts, so the largest value, 32 sectors at a time, is used and
+processing continues.
+SYS3110I: The number of sectors to read at once is below the lowest
+value accepted.  The smallest value, 1 sector, is used and processing
+continues.
+SYS3111I: The number of sectors to read at once is above the highest
+value accepted.  The largest value, 32 sectors at a time, is used and
+processing continues.
+SYS3112I: The CD-ROM file system (CDFS) uses the primary volume
+descriptor.
+SYS3113I: The CD-ROM file system (CDFS) uses the secondary volume
+descriptor you selected.
+SYS3114I: The CD-ROM file system (CDFS) uses %1 cache buffers of 64KB.
+SYS3115I: The CD-ROM file system (CDFS) reads %1 sectors at a time.
+SYS3116I: The CD-ROM file system (CDFS) failed to load.
+SYS3117I: The CD-ROM file system (CDFS) could not get any of the memory
+it asked for, so this file system driver (FSD) request failed.
+SYS3118I: The CD-ROM file system (CDFS) got only part of the memory it
+asked for, so only %1 of the %2 cache segments are in use.
+SYS3119I: The CD-ROM file system (CDFS) cannot read the global InfoSeg.
+SYS3120I: FORMAT prepares a disk for use with OS/2.
+Syntax:
+  FORMAT drive [/ONCE][/4][/T:tracks][/N:sectors][/F:xxxx][/FS:xxxxx]
+         [/L][/V[:label]] [/BS:blocksize][/LS:logsize][/S]
+where:
+  drive        The drive to format.
+  /ONCE        Formats a single disk, diskette or disc without
+               prompting.
+  /4           Formats a 360KB diskette in a drive made for 1.2MB.
+  /T:tracks    The number of tracks on each side of the disk.
+  /N:sectors   The number of sectors in each track.
+  /F:xxxx      The capacity to format the diskette to, such as
+               360, 720, 1.2, 1.44 or 2.88.
+  /FS:xxxxx    The file system to put on the disk, such as
+               FS:FAT, FS:HPFS or FS:JFS.
+  /L           Uses the long format for optical read-write disks.
+  /V:label     The volume label.
+  /BS:blocksize  The block size of the file system, in bytes.
+  /LS:logsize  The size of the journal log of the file system, in
+               megabytes.
+  /S           Makes the files on the device sparse files.
+SYS3121I: GRAFTABL lets extended characters be shown in graphics mode.
+Syntax:
+  GRAFTABL [nnn or ? or /STA]
+where:
+  nnn    The code page to use.
+  ?      Shows the code page in use and the code pages available.
+  /STA   Shows the code page GRAFTABL is using.
+SYS3122I: MEM shows how much memory in the system is used and how much
+is free.
+Syntax:
+  MEM [/P or /D or /C]
+where:
+SYS3123I:
+  /P   Shows the programs that are loaded in memory.
+  /D   Shows the programs, internal drivers and other items loaded in
+       memory, with their memory use and details.
+SYS3124I:
+  /C   Shows the programs loaded in conventional memory and in the
+       upper memory area.
+SYS3125?:
+SYS3126?:
+SYS3127?:
+SYS3128?:
+SYS3129?:
+SYS3130?:
+SYS3131?:
+SYS3132?:
+SYS3133I: MODE sets up system devices.
+Syntax:
+  Serial port:     MODE COMn[:][baud[,parity[,databits[,stopbits[,P]]]]
+  Diskette verify: MODE DSKT [VER=ON or VER=OFF]
+  Printer port:    MODE LPTn or PRN [chars[,lines[,P]]]
+SYS3134I: MORE shows output one screenful at a time.
+Syntax:
+  MORE < [drive:][path]filename
+  command | MORE
+where:
+  < drive:\path\filename   The file to show a screenful at a time.
+  command |                The command whose output is shown.
+SYS3135I: The system has stopped.  The installed Presentation Manager
+display driver does not work with the display adapters in this
+computer.  Look in the documentation of your display to find the right
+driver, then either reinstall OS/2 and choose the right display
+adapter, or change the display driver as the installation
+documentation describes.
+SYS3136I: PRINT sends files to a printer.
+Syntax to print a file:
+  PRINT [/D:device][/B] [drive:][path] filename [...]
+Syntax to cancel a queued file or the one printing:
+  PRINT [/D:device][/C or /T]
+where:
+  /D:device              The printer device, such as /D:LPT1.
+  /B                     Treats the file as binary, so Ctrl+Z does
+                         not end it.
+  drive:\path\filename   The file to print.
+  /C                     Cancels the file that is printing now.
+  /T                     Cancels every file in the print queue,
+                         including the one printing now.
+SYS3137I: RECOVER saves the readable parts of files from a disk that has
+bad sectors.
+Syntax:
+  RECOVER [drive:][path]filename
+
+See the online Command Reference for more about RECOVER.
+SYS3138I: REPLACE copies files from a source drive over files with the
+same names on a target drive.  It can also copy across only those
+source files that the target does not have yet.
+Syntax:
+  REPLACE [drive:][path]filename drive:[path]
+          [/A | /S] [/P] [/R] [/W] [/U] [/F]
+where:
+  [drive:][path]filename  The source file or files.
+  drive:[path]            The target directory that receives the files.
+  /A                      Copy only files that the target lacks.
+  /S                      Also replace matching files in every
+                          subdirectory of the target directory.
+  /P                      Ask before each file is replaced or added.
+  /R                      Replace files marked read-only as well.
+  /W                      Wait for a disk to be inserted before
+                          starting.
+  /U                      Replace only target files that are older
+                          than their source counterparts.
+  /F                      Stop with an error when extended attributes
+                          cannot be copied.
+SYS3139I: SORT reads lines from standard input, puts them in order and
+writes them to standard output.
+Syntax:
+  [drive:][path]SORT [/R] [/+n] [/Tn] < input > output
+
+where:
+  /R    Sort in descending order (Z before A, 9 before 0).
+  /+n   Compare lines starting at column n.
+  /Tn   Treat tabs as stops every n spaces.
+
+Note: SORT handles files of up to 63KB only.  The Command Reference
+describes SORT in more detail.
+SYS3140E: A software error was detected and the system
+has been halted.
+SYS3141E: A bus time-out was detected and the system has been halted.
+SYS3142E: The fail-safe timer expired and the system
+has been halted.
+SYS3143E: An I/O channel check occurred and the system has been halted.
+SYS3144E: A memory fault on the system board was detected, and the
+system has been halted.
+
+To find the cause, run the diagnostic programs that came with your
+computer.
+SYS3145E: The command interpreter is missing or damaged.  Press Enter
+to end the DOS session.
+SYS3146E: OS2LDR.MSG could not be found.
+SYS3147E: OS2LDR.MSG is damaged or in the wrong format.
+SYS3148I: TREE shows how the directories on a drive are nested.
+Syntax:
+  TREE [drive:] [/F]
+where:
+  drive:  The drive whose directories are shown.
+  /F      Also list the files in every directory.
+SYS3149I: UNDELETE brings back files that were erased.
+Syntax:
+  UNDELETE [drive:][path][filename] [/L | /S] [/A] [/F]
+where:
+  [drive:][path][filename]  The file, or group of files, to bring
+                            back.  Without it, every file of the
+                            current directory is recovered or purged.
+  /L                        Only list the erased files that can still
+                            be recovered.
+  /S                        Take in the given directory and every
+                            directory below it.
+  /A                        Recover every erased file that still
+                            exists, without asking about each one.
+  /F                        Purge the files so that they can never
+                            be recovered.
+SYS3150I: XCOPY copies groups of files, selected by the switches below.
+Syntax:
+  XCOPY [drive:][path]filename [drive:][path][filename] [/D:date]
+        [/S] [/E] [/P] [/V] [/A | /M] [/H] [/T] [/R] [/O] [/F]
+where:
+  first filename   The file or files to copy.
+  second filename  Where the copies go, and what they are called.
+  /D:date          Copy only files changed on or after this date.
+  /S               Copy directories and subdirectories that hold files.
+  /E               With /S, copy empty directories too.
+  /P               Ask before copying each file.
+  /V               Check that every copy was written correctly.
+  /A               Copy only files with the archive bit set; leave
+                   the bit set on the source file.
+  /M               Copy only files with the archive bit set; clear
+                   the bit on the source file.
+  /H               Include hidden files, keeping their attributes.
+  /T               Include system files, keeping their attributes.
+  /R               Include read-only files, keeping their attributes.
+  /O               Allow files already at the destination to be
+                   overwritten.
+  /F               Fail when a file has extended attributes that the
+                   destination file system cannot hold.
+SYS3151I: DEBUG lets you test and examine programs.
+Syntax:
+  DEBUG [drive:][path][filename [parameters]]
+where:
+ [drive:][path][filename]   The program DEBUG loads into memory.
+ [parameters]               Command-line parameters handed to that
+                            program.
+At the DEBUG prompt, type ? to list the DEBUG commands.  The Command
+Reference describes each of them.
+SYS3152I: (Continuing %1)
+SYS3153E: This directory holds more files than can be sorted.
+SYS3154E: The %1 environment variable could not be processed.
+SYS3155I: Total files listed:
+SYS3156I: %1 bytes free
+SYS3157?:
+SYS3158?:
+SYS3159?:
+SYS3160?:
+SYS3161I: This computer has an Intel 8086 or 80286 processor, which
+this version of OS/2 cannot run on.  OS/2 needs an 80386 processor
+or a compatible one.
+SYS3162I: This computer has an Intel 80386 processor of the B0 stepping,
+which OS/2 cannot run on.  Have the processor replaced, or ask your
+hardware service provider for help.
+SYS3163I: This computer has an Intel 80386 processor that does not carry
+out 32-bit multiply instructions reliably, so OS/2 cannot run on it.
+Have the processor replaced, or ask your hardware service provider
+for help.
+SYS3164?:
+SYS3165?:
+SYS3166?:
+SYS3167?:
+SYS3168?:
+SYS3169?:
+SYS3170E: A program in this session has failed and has to be
+stopped.
+SYS3171E: A program in this session has failed and has to be
+stopped.
+SYS3172E: A program in this session has failed and has to be
+stopped.
+SYS3173E: A program in this session has failed and has to be
+stopped.
+SYS3174E: A program in this session has failed and has to be
+stopped.
+SYS3175E: A program in this session has failed and has to be
+stopped.
+SYS3176E: A program in this session has failed and has to be
+stopped.
+SYS3177E: A program in this session has failed and has to be
+stopped.
+SYS3178E: A program in this session has failed and has to be
+stopped.
+SYS3179E: A program in this session has failed and has to be
+stopped.
+SYS3180E: A program in this session has failed and has to be
+stopped.
+SYS3181E: A program in this session has failed and has to be
+stopped.
+SYS3182E: A program in this session has failed and has to be
+stopped.
+SYS3183E: A program in this session has failed and has to be
+stopped.
+SYS3184E: A program in this session has failed and has to be
+stopped.
+SYS3185E: A program in this session has failed and has to be
+stopped.
+SYS3186E: A program in this session has failed and has to be
+stopped.
+SYS3187E: A program in this session has failed and has to be
+stopped.
+SYS3188E: A program in this session has failed and has to be
+stopped.
+SYS3189E: A program in this session has failed and has to be
+stopped.
+SYS3190E: A program in this session has failed and has to be
+stopped.
+SYS3191E: A program in this session has failed and has to be
+stopped.
+SYS3192E: The path or a parameter is not valid.
+SYS3193I: UNDELETE recovers files that were erased from a disk.
+Syntax:
+  UNDELETE [drive:][path][filename] [/L | /S] [/A] [/F]
+where:
+  [drive:][path][filename]  Where the erased file used to be.  The
+                            file name may contain wildcard characters.
+  /L                        Only list the erased files that can still
+                            be recovered.
+  /S                        Take in the given directory and every
+                            directory below it.
+  /A                        Recover every erased file that still
+                            exists, without asking about each one.
+  /F                        Purge the files so that they can never
+                            be recovered.
+SYS3194E: The DELDIR environment variable has no valid entry for the
+given drive.
+SYS3195I: There is nothing to undelete on this disk: the storage
+directory of the disk holds no erased files.
+SYS3196I: The control file could not be opened.  UNDELETE was unable
+to open its control files in the storage directory of the given disk.
+SYS3197E: The control file has an unsupported version.
+SYS3198P: Purge this file for good (Y/N)?
+SYS3199P: Recover this file (Y/N)?
+SYS3200E: %1 could not be recovered.
+SYS3201E: %1 could not be purged.
+SYS3202I: The control file entry for an erased file could not be read.
+The entry was skipped, and that file is left as it is.
+SYS3203E: No files match.
+SYS3204I: Purging %1.
+SYS3205I: Recovering %1.
+SYS3206E: Directory %1 could not be created.
+SYS3207P: This directory already has a file called %1.
+Enter another file name, or press Enter to go on.
+SYS3208P: %1 cannot be used as a file name.
+Enter another file name, or press Enter to go on.
+SYS3209I:
+
+How to use Syslevel:
+--------------------
+Syslevel                    : show the standard DMI information.
+Syslevel x                  : show DMI information in extended form.
+Syslevel /s (/x)            : show DMI information with 4 VPD data.
+Syslevel /p:all (/x)        : show DMI data for every software product.
+Syslevel /p:abcde (/x)      : show DMI data only for the product
+                              whose system product name is "abcde".
+Syslevel /p:"abcde XYZ" (/x): show DMI data only for the product
+                              whose system product name is "abcde XYZ".
+Syslevel /s (/p:...) (/x)   : /s, /p and /x may be used together.
+Syslevel /f                 : show the contents of the SYSLEVEL files
+                              (/f cannot be combined with others).
+
+Notes:
+  o  Options may be typed in upper or lower case and in any order.
+  o  The system product name must match in case ("abcde XYZ").
+SYS3210I: Component Name
+SYS3211I: No system product named "%1" was found.
+SYS3212E: No components were found.
+SYS3213E: The service layer is not running.
+SYS3214I: Press a key to see the next page...
+SYS3215?:
+SYS3216?:
+SYS3217?:
+SYS3218?:
+SYS3219?:
+SYS3220?:
+SYS3221I: Monochrome compatibility mode is on.
+SYS3222I: Monochrome compatibility mode is off.
+SYS3223I: The display is in a text video mode.
+SYS3224I: The display is in a graphics video mode.
+SYS3225I: Color burst is turned on.
+SYS3226I: Color burst is turned off.
+SYS3227I: Colors use %1 bits per pixel.
+SYS3228I: The screen has %1 columns and %2 rows.
+SYS3229I: The screen is %1 pels across.
+SYS3230I: The screen is %1 pels high.
+SYS3231I: Endless retry is turned on.
+SYS3232I: Endless retry is turned off.
+SYS3233I: Each line holds %1 characters.
+SYS3234I: Lines are printed at %1 per inch.
+SYS3235?: 
+SYS3236?: 
+SYS3237?: 
+SYS3238?: 
+SYS3239?: 
+SYS3240?: 
+SYS3241?: 
+SYS3242?: 
+SYS3243?: 
+SYS3244?: 
+SYS3245?: 
+SYS3246?: 
+SYS3247?: 
+SYS3248?: 
+SYS3249?: 
+SYS3250?: 
+SYS3251?: 
+SYS3252?: 
+SYS3253?: 
+SYS3254?: 
+SYS3255?: 
+SYS3256?: 
+SYS3257?: 
+SYS3258?: 
+SYS3259?: 
+SYS3260?: 
+SYS3261?: 
+SYS3262?: 
+SYS3263?: 
+SYS3264?: 
+SYS3265?: 
+SYS3266?: 
+SYS3267?: 
+SYS3268?: 
+SYS3269?: 
+SYS3270?: 
+SYS3271?: 
+SYS3272?: 
+SYS3273?: 
+SYS3274?: 
+SYS3275?: 
+SYS3276?: 
+SYS3277?: 
+SYS3278?: 
+SYS3279?: 
+SYS3280?: 
+SYS3281?: 
+SYS3282?: 
+SYS3283?: 
+SYS3284?: 
+SYS3285?: 
+SYS3286?: 
+SYS3287?: 
+SYS3288I: %1 has been installed already.
+SYS3289I: The disk has %1 bytes free.
+SYS3290I: Either memory could not be allocated or the buffer given is
+too small.  The file does not fit on the disk, or the buffer cannot
+hold it.  Free some disk space or use a larger buffer.
+SYS3291I: The device name is not valid: no device with that name is
+set up on this computer.
+
+Add the device to the system configuration files, or try again with
+another device name.
+SYS3292I: The list device PRN could not be opened because the printer
+cannot be reached.  Check how the printer is connected, then run the
+command again with a suitable output device.
+
+Name of the list device? %0
+SYS3293I:
+The program has finished.
+SYS3294I: The drive given on the command line is not valid.  Give a
+correct drive and run the command again.
+SYS3295I: The file could not be created because the disk is too full.
+Erase some files to make room, or create the file on another disk
+that has enough free space.
+SYS3296I: The disk does not have enough free space for this command.
+Erase some files to make room, or use another disk that has enough
+free space.
+SYS3297I: Drive %1 could not be read.  Run the command again.  If the
+read keeps failing, try using a backup copy of the file.
+SYS3298I: Drive %1 could not be written to.  Check that the drive
+letter is right and that the path exists, then try again.
+SYS3299?: 
+SYS3300I: Drive %1 could not be written to because the disk is
+write-protected.  Remove the write protection and try again.  A
+diskette prepared with XDF has to be formatted again.
+SYS3301I: %1^ Error%0
+SYS3302I: The EXE or HEX file contains an error and may be damaged.
+Run the command again using a backup copy of the file.
+SYS3303I: Writing to an EXE or HEX file is not allowed.  Give the file
+another name and try again with that name.
+SYS3304I: Nothing was written because no destination path and file
+name were given.  Supply a destination path and file name.
+SYS3305I: A parity error occurred, or the memory addressed does not
+exist.  Either that memory location is faulty or the program cannot
+reach the address given.  Check the address on the command line and
+run the command again.
+SYS3306I: %1 Error%0
+SYS3307I: Writing %1%2 bytes%0
+SYS3308I: %1 of the %2 Expanded Memory Specification (EMS) pages
+are allocated.
+SYS3309I: %1 of the %2 Expanded Memory Specification (EMS) handles
+are allocated.
+SYS3310I: The new handle is %1.
+SYS3311I: Physical page %2 now maps logical page %1.
+SYS3312I: Expanded memory failed while memory was being allocated,
+freed, read or written, because of a hardware or software fault.
+Check the values with XS, XA and XD, then run the command again.
+SYS3313I: The handle given does not exist or has been freed.  Run the
+command again.  If the handle still cannot be found, get a new one
+with the XA command.
+SYS3314I: The function code is not valid.
+SYS3315I: All handles are in use.  Only a limited number of handles
+can be allocated with XA.  Free some expanded memory with XD so that
+a handle becomes free, then run XA again.
+SYS3316I: A page of expanded memory could not be saved or restored.
+Run the command again.  If it fails again, free the expanded memory
+pages with XD and then try once more.
+SYS3317I: The XA command asked for more pages than exist in total.
+Run it again with a smaller number of pages.
+SYS3318I: The XA command asked for more pages than are free.  Run it
+again with fewer pages, or free some pages with XD first and then
+repeat the XA command.
+SYS3319I: A parameter of the command is not valid or is out of range.
+Check the parameters and run the command again.
+SYS3320I: The range given reaches, in whole or in part, beyond the
+logical page.  Give a different range, or map the page, look at it,
+and then repeat the command with a new range.
+SYS3321I: The range given reaches, in whole or in part, beyond the
+physical page.  Use XS to see the frame segments, then repeat the
+command with a range that fits.
+SYS3322E: The hardware configuration contains an error.
+SYS3323I: The save area is not being used.
+SYS3324E: The EMS command failed because of a software or hardware
+error.  You can:
+o  Run the command again.
+o  Run the command again with different parameters.
+SYS3325I: One or more parameters of the EMS command are missing or not
+valid.  Check with XS that the values are there, set the parameters
+again and repeat the command.
+SYS3326I: %2 pages are allocated to handle %1.
+SYS3327I: Physical page %1 is at frame segment %2.
+SYS3328I: Handle %1 has been freed.
+SYS3329I: Expanded Memory Specification (EMS) support is not installed.
+Change the system configuration files so that EMS support is enabled.
+SYS3330I: Extended error %1.
+Check the parameters and try again.
+SYS3331I: Parse error %1.
+The command line contains a syntax error.  Correct it and try
+again.
+SYS3332I: The save area is in use already.
+SYS3333I: %1 percent of the disk copied so far %2%0
+SYS3334I: DEBUG runs a tool for testing and changing programs.
+Syntax:
+  DEBUG [drive:][path][filename]
+SYS3335I: DEBUG understands these commands:
+  Assemble    A [address]            Compare     C range address
+  Dump        D [range]              Enter       E address [list]
+  Fill        F range list           Go          G [=address] [addresses]
+SYS3336I:   Address     Name          Size       Type
+SYS3337I:   -------     --------     ------     ------
+SYS3338I:   Handle      EMS Name      Size
+SYS3339I:   -------     --------     ------
+SYS3340I: %1 bytes of conventional memory in all
+SYS3341I: %1 bytes free for DOS
+SYS3342I: %1 is the largest program size that can be run
+SYS3343I: %1 bytes of EMS memory in all
+SYS3344I: %1 bytes of EMS memory free
+SYS3345I: %1 bytes of contiguous extended memory in all
+SYS3346I: Interrupt Vector %0
+SYS3347I: ROM Communication Area %0
+SYS3348I: DOS Communication Area %0
+SYS3349I: BIO %0
+SYS3350I: DOS %0
+SYS3351I: System Data %0
+SYS3352I: System Program %0
+SYS3353I: System Device Driver %0
+SYS3354I: %1 bytes of XMS memory in all
+SYS3355I: %1 bytes of memory in all
+SYS3356I:        Total FREE: %1 %2
+SYS3357?: 
+SYS3358E: The OS/2 memory dump facility cannot reach the drive named
+in the TRAPDUMP statement of CONFIG.SYS.  If a memory dump is
+started, it will be written to drive A: instead.
+SYS3359?: 
+SYS3360?: 
+SYS3361?: 
+SYS3362I: Conventional memory (below 640KB)%0
+SYS3363I: Upper memory blocks (above 640KB)%0
+SYS3364I:        Total FREE: %0
+SYS3365I:   Name                Size in Decimal       Size in Hex
+SYS3366I: -------------      ---------------------   -------------
+SYS3367I: Total bytes free for programs (conv + UMB) : %1 %2
+SYS3368I: Size of largest program that can be run    : %1 %2
+SYS3369I: Size of largest program LOADHIGH can run   : %1 %2
+SYS3370I: Memory is too fragmented for MEM /C to run.
+SYS3371I: SYSTEM
+SYS3372I: Total bytes free for programs              : %1 %2
+SYS3373I:  MEM /?
+SYS3374?: 
+SYS3375I: ----------
+SYS3376I: %1 bytes of contiguous extended memory free
+SYS3377I: System Stacks %0
+SYS3378I: -- Free -- %0
+SYS3379I: Program %0
+SYS3380I: Environment %0
+SYS3381I: Data %0
+SYS3382I: %1 bytes of XMS memory free
+SYS3383I:            64KB High Memory Area free
+SYS3384I:            High Memory Area being used
+SYS3385I:            DOS loaded into the High Memory Area
+SYS3386I:            DOS in ROM, using the High Memory Area
+SYS3387I: FREE %0
+SYS3388I:   Allocate expanded memory pages        XA pages
+  Free expanded memory                  XD handle
+  Map expanded memory pages             XM lpage ppage handle
+  Show expanded memory status           XS
+SYS3389I:    Command-line parameters handed to the program being
+    tested.
+
+Once DEBUG is running, type ? to list its commands.  The Command
+Reference describes each of them.
+SYS3390I:   Hex         H value1 value2        Input       I port
+  Load        L [address] [drive (0=A:)] [firstsector] [number]
+  Move        M range address        Name        N [pathname] [arglist]
+  Output      O port byte            Proceed     P [=address] [number]
+SYS3391I:   Quit        Q                      Register    R [register | f]
+  Search      S range list           Trace       T [=address] [value]
+  Unassemble  U [range]
+  Write       W [address] [drive (0=A:)] [firstsector] [number]
+SYS3392I: "ADDDRV
+SYS3393I: BACKUP copies files to a backup disk.
+  Syntax:
+  BACKUP source_files drive: [/L:logfile] [/D:date]
+         [/T:time] [/M] [/A] [/FS:size] [/S]
+where:
+  source_files   The files to back up.  Wildcards, subdirectories
+                 and whole drives may be given.
+  drive:         The drive the backup is written to.
+  logfile        A file in which the backup is recorded.
+  date           Back up only files changed after this date.
+  time           Back up only files changed after this time.
+  /M             Back up only files changed since the last backup.
+  /A             Add the files to an existing backup.
+  size           360, 720, 1200, 1440 or 2880: the capacity used to
+                 format the target if it is not formatted yet.
+  /S             Include every subdirectory below the source.
+SYS3394I: Install this program for your keyboard layout if you use a
+Greek keyboard.  It is only used in a DOS session.
+  Syntax: KEYBGK [/1 | /2]
+where:
+   /1      selects keyboard ID 319
+   /2      selects keyboard ID 220
+
+SYS3395I: Greek keyboard support has been loaded.
+SYS3396E: The code page is not one of the supported Greek code pages.
+SYS3397E: KEYBGK support is loaded already.
+SYS3398?: 
+SYS3399?: 
+SYS3400?: 
+SYS3401?: 
+SYS3402?: 
+SYS3403?: 
+SYS3404?: 
+SYS3405?: 
+SYS3406?: 
+SYS3407?: 
+SYS3408?: 
+SYS3409?: 
+SYS3410?: 
+SYS3411?: 
+SYS3412?: 
+SYS3413?: 
+SYS3414?: 
+SYS3415?: 
+SYS3416?: 
+SYS3417?: 
+SYS3418?: 
+SYS3419?: 
+SYS3420?: 
+SYS3421?: 
+SYS3422?: 
+SYS3423?: 
+SYS3424?: 
+SYS3425?: 
+SYS3426?: 
+SYS3427?: 
+SYS3428?: 
+SYS3429?: 
+SYS3430?: 
+SYS3431?: 
+SYS3432?: 
+SYS3433?: 
+SYS3434?: 
+SYS3435?: 
+SYS3436?: 
+SYS3437?: 
+SYS3438?: 
+SYS3439?: 
+SYS3440?: 
+SYS3441?: 
+SYS3442?: 
+SYS3443?: 
+SYS3444?: 
+SYS3445?: 
+SYS3446?: 
+SYS3447?: 
+SYS3448?: 
+SYS3449?: 
+SYS3450?: 
+SYS3451?: 
+SYS3452?: 
+SYS3453?: 
+SYS3454?: 
+SYS3455?: 
+SYS3456?: 
+SYS3457?: 
+SYS3458?: 
+SYS3459?: 
+SYS3460?: 
+SYS3461?: 
+SYS3462?: 
+SYS3463?: 
+SYS3464?: 
+SYS3465?: 
+SYS3466I: A system call hit a page fault (trap E) that could not be
+resolved.
+
+%1
+
+System call arguments, highest first:
+%2
+SYS3467I: The application was ended because one of its processes
+turned interrupts off and never turned them back on.
+
+%1
+SYS3468I: The application was ended because it called the system
+while interrupts were turned off.
+
+%1
+
+System call arguments, highest first:
+%2
+SYS3469I: A segment of the application could not be loaded on demand.
+The error was %1.  For more information, type:
+HELP SYS%2.
+SYS3470I: Exception %1 occurred in a program at %2.
+%4%3
+SYS3471I: Exception %1 occurred in a program at %2.
+The stack was too small to dispatch the exception, so the process
+was ended.
+%4%3
+SYS3472I: Exception %1 occurred in a program at %2.
+The exception could not be dispatched, so the program was ended
+without its exception handlers being run.
+%4%3
+SYS3473I: A program reached a breakpoint at %2.
+%4%3
+SYS3474I: A program raised a single-step exception at %2.
+%4%3
+SYS3475I: A program accessed memory it may not use at %2.
+%4%3
+SYS3476I: A program ran an instruction that is not valid at %2.
+%4%3
+SYS3477I: A program raised a floating-point exception for a
+denormal operand at %2.
+%4%3
+SYS3478I: A program divided a floating-point number by zero
+at %2.
+%4%3
+SYS3479I: A program raised a floating-point exception for an
+inexact result at %2.
+%4%3
+SYS3480I: A program attempted a floating-point operation that is
+not valid at %2.
+%4%3
+SYS3481I: A program raised a floating-point overflow
+at %2.
+%4%3
+SYS3482I: A program raised a floating-point stack check
+exception at %2.
+%4%3
+SYS3483I: A program raised a floating-point underflow
+at %2.
+%4%3
+SYS3484I: A program divided an integer by zero
+at %2.
+%4%3
+SYS3485I: A program raised an integer overflow
+at %2.
+%4%3
+SYS3486I: A program ran a privileged instruction at %2.
+%4%3
+SYS3487I: A program raised an in-page (page read) exception at %2.
+%4%3
+SYS3488I: A program tried to resume after an exception that cannot
+be continued, at %2.
+%4%3
+SYS3489I: A program's exception handler returned a value that is
+not valid, at %2.
+%4%3
+SYS3490I: A program used a lock prefix in a sequence that is not
+valid, at %2.
+%4%3
+SYS3491I: A program went past the bounds of an array at %2.
+%4%3
+SYS3492I: Restoring the KEY files
+SYS3493E: Give the number of the archive to restore on the command line.
+SYS3494E: The information in ARCHBASE.$$$ could not be read.
+SYS3495E: The information in ARCHBASE.$$$ could not be updated.
+SYS3496E: The list of existing archives could not be read.
+SYS3497E: No information was found for the archive number chosen.
+SYS3498E: Not every KEY file could be restored.
+SYS3499E: The Desktop subdirectory could not be restored.
+SYS3500E: The list of KEY files to restore could not be read.
+SYS3501I: Press a key to go on ...
+SYS3502I:
+                    Process Version Information
+
+                                       Sub-
+Process    Short    Version   Build    Build      SMP     Process
+  ID       Name     Number    Level    Level    Version    Name
+
+SYS3503I:
+
+                Run-Time Link Library Information
+
+                                  Sub-
+Short      Version     Build      Build      SMP       Library
+Name       Number      Level      Level    Version      Name
+SYS3504I:  %1   %2      %3      %4      %5      %6      %7
+SYS3505I:  %1   %2         %3       %4       %5      %6
+SYS3506I:
+
+Shows information about processes, threads, system semaphores, shared
+      memory and dynamic link libraries.
+Syntax:
+    [drive:][path]PSTAT [/C] [/S] [/L] [/M] [/P:pid] [/F] [/A]
+where:
+ /C - Show the processes and threads currently in the system
+ /S - Show the system semaphores used by each thread
+ /L - Show the run-time linked libraries of each process
+ /M - Show the named shared memory used by each process
+ /P:pid - Show only the process whose ID (in hexadecimal) is pid
+ /F - Show module version information for each process
+ /A - Show everything the options above show

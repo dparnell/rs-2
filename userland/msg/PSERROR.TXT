@@ -1,0 +1,16 @@
+; rs2's PSERROR.MSG: PM's logged error texts, in rs2's own words (the
+; numbers, classes and insertion points of OS/2's).
+ERR
+ERR0001E: The font drivers named in the .INI file could not be loaded
+ERR0002E: The metafile could not be accessed
+ERR0003E: The metafile's table lacks some entries
+ERR0004E: PMERR_NOT_IN_A_PM_SESSION
+ERR0005E: The PMSERV thread could not be created while the system started
+ERR0006E: DosStartSession failed while the system started
+ERR0007E: port_create_portclass failed: the Event Window Server is unreachable
+ERR0008E: DosGetMessage failed; the usual HardError messages will not be shown.
+ERR0009E: The Event Window Server reported an error; see the FFST probe data.
+ERR0010E: The logical video buffer is locked.
+ERR0011E: Font error
+ERR0012I: %1
+%0

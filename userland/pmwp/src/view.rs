@@ -85,6 +85,7 @@ static mut OLD_CNR: usize = 0;
 const CLASS: &[u8] = b"WPS_View\0";
 pub const ID_CHILD: u32 = 100;
 const CN_EXPANDTREE_: u32 = 117;
+const CN_HELP: u32 = 118;
 const VK_F2: u32 = 0x21;
 const VK_F5: u32 = 0x24;
 const VK_F10: u32 = 0x29;
@@ -150,6 +151,8 @@ fn new_frame(title: &[u8], desktop: bool) -> (u32, u32) {
     let frame = unsafe {
         WinCreateStdWindow(HWND_DESKTOP, 0, &mut fcf, CLASS.as_ptr(), if desktop { b"\0".as_ptr() } else { t.as_ptr() }, WS_CLIPCHILDREN, 0, 1, &mut client)
     };
+    // F1 in the view: the help manager tells the client (HM_ERROR).
+    crate::help::associate(frame);
     (frame, client)
 }
 
@@ -1009,6 +1012,19 @@ extern "C" fn cnr_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 
 extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     match msg {
+        // F1 reached the frame, whose help instance has no help table:
+        // help on the object with the cursor, or the view's object.
+        crate::help::HM_ERROR if a == crate::help::HMERR_HELPTABLE_UNDEFINE => {
+            let Some(w) = find_client(h) else { return 0 };
+            let cnr = wins()[w].child;
+            let cur = if cnr != 0 { send(cnr, CM_QUERYRECORDEMPHASIS, CMA_FIRST, CRA_CURSORED) } else { 0 };
+            let o = if cur != 0 && cur != 0xffff_ffff { obj_of_rec(w, cur) } else { 0 };
+            let o = if o != 0 { o } else { wins()[w].obj };
+            if o != 0 {
+                crate::help::show(o);
+            }
+            0
+        }
         WM_SIZE => {
             if let Some(w) = find_client(h) {
                 size_child(w);
@@ -1046,6 +1062,15 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                 }
                 CN_EXPANDTREE_ => {
                     expand(w, b);
+                    0
+                }
+                // F1: help on the object with the cursor, or the folder.
+                CN_HELP => {
+                    let o = obj_of_rec(w, b);
+                    let o = if o != 0 { o } else { wins()[w].obj };
+                    if o != 0 {
+                        crate::help::show(o);
+                    }
                     0
                 }
                 CN_INITDRAG => crate::dnd::begin(w, b),

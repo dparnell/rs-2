@@ -1,0 +1,77 @@
+; rs2's ULSERR01.MSG: the Unicode/locale services' error texts, in rs2's
+; own words (the numbers, classes and insertion points of OS/2's).
+ULS
+ULS0501E: Could not free a KBD table that is no longer used
+ULS0502E: Too many KBD tables have been created
+ULS0503E: The KBD table asked for cannot be found
+ULS0504E: The KBD table that was built is not valid
+ULS0505E: Bad handle
+ULS0506E: The dead-key combination did not work
+ULS0507E: No scan code was found
+ULS0508E: The scan code is not valid
+ULS0509E: The job is not valid
+ULS0510E: Not enough memory
+ULS0511?: 
+ULS0512?: 
+ULS0513?: 
+ULS0514?: 
+ULS0515?: 
+ULS0516?: 
+ULS0517?: 
+ULS0518?: 
+ULS0519?: 
+ULS0520?: 
+ULS0521E: No locale matches the country code
+ULS0522E: There is no token
+ULS0523E: That attribute name is not supported
+ULS0524E: There is too little memory
+ULS0525E: The attribute object is not valid
+ULS0526E: No code element meets the given criteria
+ULS0527E: The buffer is too small for the locale name
+ULS0528E: A value is out of range
+ULS0529?: 
+ULS0530?: 
+ULS0531?: 
+ULS0532?: 
+ULS0533?: 
+ULS0534?: 
+ULS0535?: 
+ULS0536?: 
+ULS0537?: 
+ULS0538?: 
+ULS0539?: 
+ULS0540?: 
+ULS0541E: Querying the process code page failed
+ULS0542E: An input character is not valid
+ULS0543E: An input parameter is not valid
+ULS0544E: Could not create the ULS conversion object
+ULS0545E: Could not allocate memory for the ULS conversion
+ULS0546E: Could not create the ULS memory semaphore
+ULS0547E: There are too many file descriptors
+ULS0548E: Could not read the ULS conversion alias file
+ULS0549E: Could not create the default ULS conversion object
+ULS0550?: 
+ULS0551?: 
+ULS0552?: 
+ULS0553?: 
+ULS0554?: 
+ULS0555?: 
+ULS0556?: 
+ULS0557?: 
+ULS0558?: 
+ULS0559?: 
+ULS0560?: 
+ULS0561E: Could not create the NLS root node
+ULS0562E: Could not update the NLS default node
+ULS0563E: Could not create the NLS default node
+ULS0564E: Could not set the time zone node
+ULS0565E: Could not create the NLS locale node
+ULS0566E: Could not add the single-byte locale tokens
+ULS0567E: Could not add the single-byte locales
+ULS0568E: Could not add the double-byte locale node
+ULS0569E: Could not add the double-byte locale token
+ULS0570E: Could not delete the NLS nodes
+ULS0571E: Could not delete the locale node
+ULS0572E: Could not delete the locale token
+
+%0

@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"10";
+const DESKTOP_VERSION: &[u8] = b"11";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -95,6 +95,10 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"Help Index;Mindex;<WP_INFO>;PRESERVEOLD", b"INDEX=HELP;NODELETE=YES;OBJECTID=<WP_MINDEX>"),
         (b"Online Information Overview;WPFolder;<WP_INFO>;PRESERVEOLD", b"DEFAULTVIEW=ICON;OBJECTID=<WP_INFOOVERFOLDER>;SHOWALLINTREEVIEW=YES"),
         (b"Glossary;Mindex;<WP_INFOOVERFOLDER>;PRESERVEOLD", b"INDEX=GLOSSARY;NODELETE=YES;OBJECTID=<WP_GLOSS>"),
+        // rs2's books (userland/help), as IBM's INI.RC places its own.
+        (b"Command Reference;WPProgram;<WP_REFCMDFOLDER>;PRESERVEOLD", b"EXENAME=?:\\OS2\\VIEW.EXE;PARAMETERS=CMDREF.INF;PROGTYPE=PM;OBJECTID=<WP_CMDREF>"),
+        (b"Start Here;WPProgram;<WP_INFO>;PRESERVEOLD", b"EXENAME=?:\\OS2\\VIEW.EXE;PARAMETERS=START.INF;PROGTYPE=PM;OBJECTID=<WP_STARTHERE>"),
+        (b"Start Here;WPShadow;<WP_ASSISTANCE>;PRESERVEOLD", b"SHADOWID=<WP_STARTHERE>;OBJECTID=<RS2_STARTHERESHADOW>"),
         (b"rs2 on^the Internet;WPUrl;<WP_ASSISTANCE>;PRESERVEOLD", b"URL=https://github.com/dparnell/rs-2;OBJECTID=<RS2_URL>"),
         (b"OS/2 Window;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=WINDOWABLEVIO;OBJECTID=<WP_OS2WIN>"),
         (b"OS/2 Full Screen;WPProgram;<WP_PROMPTS>;PRESERVEOLD", b"EXENAME=*;PROGTYPE=FULLSCREEN;OBJECTID=<WP_OS2FS>"),
@@ -205,7 +209,8 @@ pub fn run() {
     // version 4 the Assistance Center, version 5 its Help Index,
     // Glossary and Internet object, version 6 the LaunchPad, version 9
     // the Shredder, Connections (Network, Printers), the System Clock and
-    // IBM's System class in place of RS2System, version 10 the Spooler;
+    // IBM's System class in place of RS2System, version 10 the Spooler,
+    // version 11 the Command Reference and Start Here books;
     // PRESERVEOLD leaves what an earlier version made.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2Desktop").is_none_or(|v| v.strip_suffix(&[0]).unwrap_or(&v) != DESKTOP_VERSION) {
         pending.extend(defaults());

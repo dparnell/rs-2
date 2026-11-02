@@ -1,0 +1,16 @@
+; rs2's PSCAUSE.MSG: the causes of PM's logged errors, in rs2's own words
+; (the numbers, classes and insertion points of OS/2's).
+CAU
+CAU0001I:  The .INI file has no entry for the font drivers
+CAU0002I:  Another application is using the file
+CAU0003I:  The metafile's table lacks some entries
+CAU0004I:  A Presentation Manager call came from a session that is not a PM one
+CAU0005I:  The PMSERV thread could not be created while the system started
+CAU0006I:  DosStartSession failed while the system started: PMSHELL did not run
+CAU0007I:  port_create_portclass failed: the Event Window Server is unreachable
+CAU0008I:  DosGetMessage failed; usual HardError messages will not be shown.
+CAU0009I:  The Event Window Server reported an error; see the FFST probe data.
+CAU0010I:  Some application has locked the video buffer
+CAU0011I:  The cause is not known
+CAU0012I: 
+%0

@@ -1,0 +1,36 @@
+; rs2's XDF.MSG: XDFCOPY's messages, in rs2's own words (the numbers,
+; classes and insertion points of OS/2's).
+XDF
+XDF3502P: Press any key to go on
+XDF3503P: Put the source diskette into drive %1
+XDF3504P: Put the target diskette into drive %1
+XDF3505E: The diskette cannot be written: it is write-protected.
+XDF3506E: Reading the source diskette or image file failed.
+XDF3507E: Writing the target diskette or image file failed.  What is on the
+diskette or image file may be incomplete or damaged.
+XDF3508E: Track 0 could not be formatted.
+ACTION: Use a different diskette.  If that does not help in an OS/2
+session, run the program in a DOS session instead.
+XDF3509E: The disk image file that was named cannot be found.
+XDF3510E: Not enough memory is free to carry out this command; all of it
+is in use.
+XDF3511E: The diskette drive is not ready, or it has no diskette in it.
+XDF3512E: The message could not be found.
+XDF3513E: Ctrl+Break or another process ended the external process.
+XDF3514I: Reading...
+XDF3515I: Writing...
+XDF3516I: Verifying...
+XDF3517E: The hard disk has no room for the temporary file.
+XDF3518E: %1 is not a valid diskette image file.
+XDF3519E: The XDFLOPPY.FLT driver, which is needed, was not loaded.
+XDF3520I: XDFCOPY v1.4 -- copies XDF master diskettes (rs2)
+
+Usage:
+  XDFCOPY source_drive  target_drive [/Y] [/NV]
+
+  source_drive = diskette drive A: or B:, or an image file name
+  target_drive = diskette drive A: or B:, or an image file name
+
+  /Y  begins at once, without waiting for a diskette change
+  /NV skips the check that reads back each write
+XDF3521I: EOF

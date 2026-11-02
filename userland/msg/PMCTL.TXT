@@ -1,0 +1,13 @@
+; rs2's PMCTL.MSG: the PM controls' diagnostic messages, in rs2's own
+; words (the numbers, classes and insertion points of OS/2's).
+PMC
+PMC0001I:  %1 failed as PMCTLS started.  HMOD/HMTX value: %2  See the probe.
+PMC0002I:  %1 failed as PMWCTLS started.  HMOD/HMTX value: %2  See the probe.
+PMC0003I:  %1 received NULL instance data.  Window handle ID: %2  (decimal) %3
+PMC0004I:  PMCTLS reported an error
+PMC0005I:  PMWCTLS reported an error
+PMC0006I:  Unused
+PMC0007I:  Unused
+PMC0008I:  NULL instance data is expected only for WM_CREATE.
+
+%0

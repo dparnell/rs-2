@@ -1,0 +1,5 @@
+; rs2's PMWP.MSG: the Workplace Shell's exception message, in rs2's own
+; words (the number, class and insertion points of OS/2's).
+WPS
+WPS0001I: The Workplace Shell caught an exception.  Type: %1  Where: %2
+

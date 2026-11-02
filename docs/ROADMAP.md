@@ -238,9 +238,13 @@ Status markers: done, in progress, planned.
 - done: LABEL, CHKDSK (FAT check and /F repair; HPFS read-only scan; JFS
   read-only check), FORMAT (FAT, HPFS, JFS) on DASD handles and the category 8 disk IOCtls, MODE
   (screen mode through a 16-bit VIO thunk), HELP
+- done: own message files: OSO001.MSG/OSO001H.MSG (every message number
+  of OS/2's, in rs2's words) and OS/2's other system message files,
+  compiled from MKMSGF source by crates/msgf; own help: WPHELP.HLP (the
+  shell's help, F1 and the Help menus in PMWP), the Command Reference
+  (CMDREF.INF) and Start Here (START.INF)
 - planned: CHKDSK repair for HPFS, FDISK/LVM and the rest of the base
-  utilities; own message files (OSO001.MSG); Cyrillic/Greek/Hebrew
-  keyboard layouts; REXX
+  utilities; Cyrillic/Greek/Hebrew keyboard layouts; REXX
 
 ## Milestone 4: Presentation Manager (largely done)
 

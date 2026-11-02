@@ -1,0 +1,546 @@
+; rs2's JFS.MSG: the messages of JFS's utilities (FORMAT, CHKDSK, EXTENDFS,
+; DEFRAGFS), in rs2's own words (the numbers, classes and insertion points
+; of OS/2's).
+JFS
+JFS0001E: The partition needs to be %1 megabytes or larger.
+
+JFS0002E: The log is too big; no room is left for the file system.
+
+JFS0003E: The adapter is unable to reach physical memory above 16 megabytes.
+
+JFS0004E: The partition has to be an LVM partition.
+
+JFS0005?: 
+JFS0006?: 
+JFS0007?: 
+JFS0008?: 
+JFS0009?: 
+JFS0010?: 
+JFS0011?: 
+JFS0012?: 
+JFS0013?: 
+JFS0014?: 
+JFS0015?: 
+JFS0016?: 
+JFS0017?: 
+JFS0018?: 
+JFS0019?: 
+JFS0020?: 
+JFS0021?: 
+JFS0022?: 
+JFS0023?: 
+JFS0024?: 
+JFS0025?: 
+JFS0026?: 
+JFS0027?: 
+JFS0028?: 
+JFS0029?: 
+JFS0030?: 
+JFS0031?: 
+JFS0032?: 
+JFS0033?: 
+JFS0034?: 
+JFS0035?: 
+JFS0036?: 
+JFS0037?: 
+JFS0038?: 
+JFS0039?: 
+JFS0040?: 
+JFS0041?: 
+JFS0042?: 
+JFS0043?: 
+JFS0044?: 
+JFS0045?: 
+JFS0046?: 
+JFS0047?: 
+JFS0048?: 
+JFS0049?: 
+JFS0050?:         
+JFS0051?: 
+JFS0052I: CHKDSK  Root directory: the data format is not valid.
+JFS0053?: 
+JFS0054?: 
+JFS0055?: 
+JFS0056?: 
+JFS0057?: 
+JFS0058?: 
+JFS0059?: 
+JFS0060?: 
+JFS0061?: 
+JFS0062?: 
+JFS0063?: 
+JFS0064?: 
+JFS0065?: 
+JFS0066?: 
+JFS0067?: 
+JFS0068E: CHKDSK  The superblock is damaged and cannot be repaired: the primary
+and the secondary copies are both damaged.  CHKDSK CANNOT CONTINUE.
+
+JFS0069E: CHKDSK  The primary superblock is damaged and cannot be repaired
+without write access.  CHKDSK continuing.
+
+JFS0070?: 	
+JFS0071?: 
+JFS0072?: 
+JFS0073?: 
+JFS0074?: 
+JFS0075?: 
+JFS0076I: CHKDSK  Root directory: the format is not valid.
+JFS0077?: 
+JFS0078?: 
+JFS0079I: CHKDSK  The secondary file/directory allocation structure (%1) does
+not match the primary structure it should duplicate.
+JFS0080W: CHKDSK  The primary file/directory allocation structure (%1) could
+not be copied to the secondary.  LATER RECOVERY MAY NOT BE POSSIBLE.
+
+JFS0081?: 
+JFS0082W: CHKDSK  MINOR: The directory lost+found cannot be created in the root
+directory.  Create it there (MKDIR lost+found), then run CHKDSK with
+the /F parameter to reconnect the lost files and/or directories.
+
+JFS0083I: CHKDSK  Fileset object %1%2%3:  no path leads to it.
+JFS0084I: CHKDSK  The paths lead to a file that is not allocated.
+JFS0085?: 
+JFS0086I: CHKDSK  The paths lead to a file that is not allocated.  Will remove.
+JFS0087?: 
+JFS0088?: 
+JFS0089?: 
+JFS0090?: 
+JFS0091?: 
+JFS0092?: 
+JFS0093?: 
+JFS0094I: CHKDSK  The primary superblock could not be written.
+JFS0095?: 
+JFS0096I: CHKDSK  Directory %1%2 has more than one parent directory.
+JFS0097?: 
+JFS0098?: 
+JFS0099?: 
+JFS0100?: 
+JFS0101E: CHKDSK  Not enough dynamic storage for the workspace it needs
+(%1,%2).  CHKDSK CANNOT CONTINUE.
+
+JFS0102?: 
+JFS0103I: CHKDSK  The file system is mounted at the moment.
+JFS0104?: 
+JFS0105I: CHKDSK  Block size (bytes):  %1
+JFS0106I: CHKDSK  File system size (blocks):  %1
+JFS0107?: 
+JFS0108?: 
+JFS0109?: 
+JFS0110?: 
+JFS0111?: 
+JFS0112?: 
+JFS0113?: 
+JFS0114?: 
+JFS0115?: 
+JFS0116?: 
+JFS0117I: CHKDSK  No path could be found for the link from directory %1%2 to
+fileset object %3%4%5.
+JFS0118I: CHKDSK  Format error in the extended attributes space or descriptor.
+JFS0119?: 
+JFS0120?: 
+JFS0121I: CHKDSK  The ".." entry of directory %1%2 names the wrong parent
+directory (%3%4).
+JFS0122?: 
+JFS0123?: 
+JFS0124?: 
+JFS0125?: 
+JFS0126?: 
+JFS0127?: 
+JFS0128?: 
+JFS0129I: CHKDSK  File system object %1%2%3 has the link: %4
+JFS0130?: 
+JFS0131?: 
+JFS0132?: 
+JFS0133?: 
+JFS0134I: CHKDSK  MINOR: Not enough dynamic storage to check the format of the
+extended attributes.
+JFS0135I: CHKDSK  logredo did not succeed (rc=%1).  CHKDSK continuing.
+JFS0136?: 
+JFS0137W: CHKDSK  No lost+found directory can be created in the root directory.
+
+JFS0138W: CHKDSK  The results of checking a mounted file system cannot be
+relied on.
+
+JFS0139?: 
+JFS0140?: 
+JFS0141?: 
+JFS0142I: CHKDSK  %1 blocks cannot be accounted for.
+JFS0143I: CHKDSK  The boot sector could not be written.  CHKDSK continuing.
+JFS0144?: 
+JFS0145I: CHKDSK  The file system has wrong link counts.
+JFS0146?: 
+JFS0147?: 
+JFS0148E: CHKDSK  Reading %1 from %2 failed beyond recovery.
+CHKDSK CANNOT CONTINUE.
+
+JFS0149I: CHKDSK *Phase 0 - Replaying the journal log
+JFS0150I: CHKDSK *Phase 1 - Checking blocks, files, directories and entries
+JFS0151I: CHKDSK *Phase 2 - Counting links
+JFS0152I: CHKDSK *Phase 3 - Rescanning for duplicate blocks, verifying the tree
+JFS0153I: CHKDSK *Phase 4 - Reporting problems
+JFS0154I: CHKDSK *Phase 5 - Checking connectivity
+JFS0155I: CHKDSK *Phase 6 - Making corrections
+JFS0156I: CHKDSK *Phase 7 - Rebuilding the file/directory allocation maps
+JFS0157I: CHKDSK *Phase 8 - Rebuilding the disk allocation maps
+JFS0158I: CHKDSK *Phase 9 - Reformatting the file system log
+JFS0159?: CHKDSK  A directory entry names unallocated file %1%2.  Will remove.
+JFS0160?: 
+JFS0161I: CHKDSK  Format error in the extended attributes space or descriptor.
+Will clear.
+JFS0162?: 
+JFS0163?: 
+JFS0164?: 
+JFS0165E: CHKDSK  The /F parameter values given conflict with each other.
+
+JFS0166I: CHKDSK  Syntax: chkdsk [/f[:0|:1|:2|:3]] [/c] [/v] [/o] [/b] Device
+JFS0167E: CHKDSK  The F parameter has a value that is not recognized:   %1
+
+JFS0168E: CHKDSK  This parameter is not supported:   %1
+
+JFS0169E: CHKDSK  logformat did not succeed (rc=%1).  CHKDSK continuing.
+
+JFS0170?: 
+JFS0171W: CHKDSK  The device characteristics could not be read, so the boot
+sector cannot be refreshed.  CHKDSK continuing.
+
+JFS0172?: 
+JFS0173?: 
+JFS0174I: CHKDSK is unable to repair an allocation error in files and/or
+directories %1 through %2.
+JFS0175?: 
+JFS0176?: 
+JFS0177?: 
+JFS0178?: 
+JFS0179?: 
+JFS0180?: 
+JFS0181?: 
+JFS0182?: 
+JFS0183?: 
+JFS0184?: 
+JFS0185?: 
+JFS0186I: CHKDSK is unable to recover files and/or directories %1 through %2.
+CHKDSK CANNOT CONTINUE.
+JFS0187E: CHKDSK  Writing %1 to %2 failed beyond recovery.
+CHKDSK CANNOT CONTINUE.
+
+JFS0188I: CHKDSK  Root directory: the data format is not valid.  Will correct.
+JFS0189I: CHKDSK  Root directory: the format is not valid.  Will correct.
+JFS0190I: CHKDSK is unable to recover files and/or directories %1 through %2.
+Will release.
+JFS0191I: CHKDSK  A file claims blocks that are cross-linked.
+JFS0192I: CHKDSK is unable to repair the data format errors in this file.
+JFS0193I: CHKDSK is unable to repair the format errors in this file.
+JFS0194I: CHKDSK is unable to repair %1%2%3.
+JFS0195I: CHKDSK  Current hard disk drive:  %1
+JFS0196?: 
+JFS0197I: CHKDSK is unable to repair %1%2%3.  Will release.
+JFS0198?: 
+JFS0199I: CHKDSK  Write access could not be obtained; continuing read-only.
+JFS0200I: CHKDSK  Directory %1%2 has more than one parent directory.
+Will correct.
+JFS0201I: CHKDSK  The ".." entry of directory %1%2 names the wrong parent
+directory (%3%4).  Will correct.
+JFS0202I: CHKDSK  Found %1 blocks that were not expected.
+JFS0203I: CHKDSK  Found directories that have illegal hard links.
+JFS0204I: CHKDSK  Found ".." directory entries that name the wrong parent
+directory.
+JFS0205I: CHKDSK  Found directory entries for files and/or directories that are
+not allocated.
+JFS0206I: CHKDSK  The secondary superblock could not be written.
+JFS0207I: Found wrong link counts.  Will correct.
+JFS0208?: 
+JFS0209I: CHKDSK  The meta-data refers to some blocks more than once.
+CHKDSK CANNOT CONTINUE.
+JFS0210?: 
+JFS0211?: 
+JFS0212?: 
+JFS0213?: 
+JFS0214E: CHKDSK  UNLOCK processing failed beyond recovery.
+
+JFS0215E: CHKDSK  CLOSE processing failed beyond recovery.
+
+JFS0216?: 
+JFS0217I: CHKDSK  The right path for directory %2%3 seems to be %1.
+JFS0218?: 
+JFS0219?: 
+JFS0220?: 
+JFS0221I: CHKDSK  ERRORS WERE FOUND.  Run CHKDSK with the /F parameter to
+repair them.
+JFS0222?: 
+JFS0223I: CHKDSK  %1 directory reconnected under /lost+found/.
+JFS0224I: CHKDSK  MINOR: %1 directory could not be reconnected.
+CHKDSK continuing.
+JFS0225?: 
+JFS0226?: 
+JFS0227?: 
+JFS0228?: 
+JFS0229?: 
+JFS0230I: CHKDSK  Found files and/or directories that are not connected to the
+directory tree.
+JFS0231I: CHKDSK  Found directory entries for files that are not allocated.
+Will remove.
+JFS0232I: CHKDSK  Found files and/or directories that are not connected to the
+directory tree.  Will reconnect.
+JFS0233I: CHKDSK  Found directories with illegal hard links.  Will correct.
+JFS0234I: CHKDSK  Found directories whose ".." entries name the wrong files.
+Will correct.
+JFS0235?: 
+JFS0236I: CHKDSK  The file system is clean.
+JFS0237I: CHKDSK  The file system is clean, but it is marked dirty.  Run CHKDSK
+with the /F parameter to fix that.
+JFS0238I: CHKDSK  The file system is dirty.
+JFS0239I: CHKDSK  The file system is dirty, but it is marked clean.  As it is
+now, what happens when %1 is accessed (other than by this utility) is
+undefined.
+JFS0240?: 
+JFS0241I: CHKDSK marked the file system dirty because it has critical errors.
+The file system may not be recoverable.
+JFS0242?: 
+JFS0243?: 
+JFS0244?: 
+JFS0245?: 
+JFS0246?: 
+JFS0247?: 
+JFS0248?: 
+JFS0249?: 
+JFS0250I: CHKDSK  A directory has an entry for unallocated file %1%2.
+JFS0251?: 
+JFS0252?: 
+JFS0253?: 
+JFS0254?: 
+JFS0255?: 
+JFS0256?: 
+JFS0257?: 
+JFS0258?: 
+JFS0259?: 
+JFS0260?: 
+JFS0261?: 
+JFS0262?: 
+JFS0263?: 
+JFS0264?: 
+JFS0265I: CHKDSK  The fileset file/directory allocation map has errors.
+JFS0266?: 
+JFS0267I: CHKDSK  The control information of the fileset file/directory
+allocation map has errors.
+JFS0268?: 
+JFS0269?: 
+JFS0270?: 
+JFS0271?: 
+JFS0272?: 
+JFS0273?: 
+JFS0274?: 
+JFS0275?: 
+JFS0276?: 
+JFS0277?: 
+JFS0278?: 
+JFS0279I: CHKDSK  The disk allocation structures contain wrong data.
+JFS0280I: CHKDSK  The disk allocation control structures contain wrong data.
+JFS0281?: 
+JFS0282?: 
+JFS0283?: 
+JFS0284?: 
+JFS0285?: 
+JFS0286?: 
+JFS0287?: 
+JFS0288?: 
+JFS0289?: 
+JFS0290?: 
+JFS0291?: 
+JFS0292?: 
+JFS0293?: 
+JFS0294?: 
+JFS0295?: 
+JFS0296?: 
+JFS0297?: 
+JFS0298?: 
+JFS0299?: 
+JFS0300?: 
+JFS0301?: 
+JFS0302?: 
+JFS0303?: 
+JFS0304?: 
+JFS0305?: 
+JFS0306?: 
+JFS0307?: 
+JFS0308?: 
+JFS0309?: 
+JFS0310?: 
+JFS0311?: 
+JFS0312?: 
+JFS0313?: 
+JFS0314?: 
+JFS0315?: 
+JFS0316?: 
+JFS0317?: 
+JFS0318?: 
+JFS0319?: 
+JFS0320?: 
+JFS0321I: CHKDSK  A directory claims blocks that are cross-linked.
+JFS0322I: CHKDSK  A file system object claims blocks that are cross-linked.
+JFS0323I: CHKDSK  The file system is formatted for sparse files.
+JFS0324?: 
+JFS0325I: CHKDSK  %1 directories reconnected under /lost+found/.
+JFS0326I: CHKDSK  %1 file reconnected under /lost+found/.
+JFS0327I: CHKDSK  %1 files reconnected under /lost+found/.
+JFS0328I: CHKDSK is unable to repair the data format errors in this directory.
+JFS0329I: CHKDSK is unable to repair the data errors in this directory.
+JFS0330I: CHKDSK is unable to repair the data format errors in this file
+system object.
+JFS0331I: CHKDSK is unable to repair the format errors in this file system
+object.
+JFS0332I: CHKDSK *Phase 7 - Verifying the file/directory allocation maps
+JFS0333I: CHKDSK *Phase 8 - Verifying the disk allocation maps
+JFS0334?: 
+JFS0335?: 
+JFS0336?: 
+JFS0337?: 
+JFS0338?: 
+JFS0339?: 
+JFS0340?: 
+JFS0341?: 
+JFS0342?: 
+JFS0343I: CHKDSK  The secondary file/directory allocation table could not be
+read.
+JFS0344I: CHKDSK  The file system file/directory allocation map has errors.
+JFS0345I: CHKDSK  The control information of the file system file/directory
+allocation map has errors
+JFS0346I: CHKDSK  The secondary file/directory allocation table has errors.
+JFS0347?: 	               
+JFS0348?: 
+JFS0349?: 
+JFS0350?: 
+JFS0351I: CHKDSK  MINOR: %1 directories could not be reconnected.
+CHKDSK continuing.
+JFS0352I: CHKDSK  MINOR: %1 file could not be reconnected.  CHKDSK continuing.
+JFS0353I: CHKDSK  MINOR: %1 files could not be reconnected.  CHKDSK continuing.
+JFS0354?: 
+JFS0355?: 
+JFS0356?: 
+JFS0357?: 
+JFS0358?: 
+JFS0359?: 
+JFS0360?: 
+JFS0361?: 
+JFS0362?: 
+JFS0363?: 
+JFS0364?: 
+JFS0365?: 
+JFS0366?: 
+JFS0367?: 
+JFS0368?: 
+JFS0369?: 
+JFS0370?: 
+JFS0371?: 
+JFS0372?: 
+JFS0373?: 
+JFS0374I: CHKDSK  The primary file/directory allocation table is unreadable.
+JFS0375I: CHKDSK  The primary file/directory allocation table has errors.
+JFS0376W: CHKDSK IS STOPPING: IT CANNOT CONTINUE.
+
+JFS0377?: 	
+JFS0378?: 	
+JFS0379?: 	
+JFS0380?: 	
+JFS0381?: 	
+JFS0382?: 	
+JFS0383?: 	
+JFS0384?: 	
+JFS0385?: 	
+JFS0386?: 	
+JFS0387?: 	
+JFS0388?: 	
+JFS0389?: 
+JFS0390?: 
+JFS0391?: 
+JFS0392W: CHKDSK warning: LVM found bad blocks in this partition.
+Run CHKDSK with the /B parameter to move the entries of the LVM bad block
+table into the JFS bad block table.
+
+JFS0393?: 
+JFS0394?: 
+JFS0395I: CHKDSK  THE FILE SYSTEM CAN BE USED AGAIN.
+JFS0396I: CHKDSK  Moving the entries of this file system's LVM bad block table
+into its JFS bad block table.
+
+JFS0397E: CHKDSK  Internal error (%1,%2,%3,%4).  CHKDSK CANNOT CONTINUE.
+
+JFS0398?:  
+JFS0399?: 
+JFS0400?: 
+JFS0401?: 
+JFS0402I: CHKDSK  LVM reports %1 bad blocks; %2 of them have been moved to the
+JFS bad block list.
+JFS0403?: 
+JFS0404?: 
+JFS0405?: 
+JFS0406E: CHKDSK  The device is unavailable or another process has it locked.
+CHKDSK CANNOT CONTINUE.
+JFS0407?: 
+JFS0408I: CHKDSK  File system object %1%2%3 has an illegal link: %4
+JFS0409I: CHKDSK  Not enough storage (%1) to keep reconnecting lost files
+and/or directories.  Continuing.
+JFS0410I: CHKDSK  Format error in the access control list space or descriptor.
+JFS0411I: CHKDSK  Format error in the access control list space or descriptor.
+Will clear.
+JFS0412?: 
+JFS0413?: 
+JFS0414?: 
+JFS0415I: CHKDSK  Found a minor format error.
+JFS0416?: 
+JFS0417I: CHKDSK  Found a minor format error.  Will fix.
+JFS0418?: 
+JFS0419?: 
+JFS0420?: 
+JFS0421?: 
+JFS0422?: 
+JFS0423?: 
+JFS0424?: 
+JFS0425?: 
+JFS0426?: 
+JFS0427?: 
+JFS0428?: 
+JFS0429?: 
+JFS0430?: 
+JFS0431?: 
+JFS0432?: 
+JFS0433?: 
+JFS0434?: 
+JFS0435I: A
+JFS0436I: D
+JFS0437?: 
+JFS0438I: E
+JFS0439I: F
+JFS0440I: I
+JFS0441?: 
+JFS0442?: 
+JFS0443?: 
+JFS0444I: M
+JFS0445I: C
+JFS0446I: P
+JFS0447I: S
+JFS0448I: L
+JFS0449I: .RCN\0
+JFS0450I: The drive given is not a mounted JFS file system.
+JFS0451E: This program does not support the file system's version, or the
+superblock is damaged.
+
+JFS0452E: The file system has been marked dirty.
+
+JFS0453I: EXTENDFS finished successfully.
+JFS0454I: Usage:  EXTENDFS [/LS:logSize] drive
+JFS0455I: The file system could not be extended.
+JFS0456I: Defragmenting drive %1.  This takes a while.
+JFS0457I: 
+DEFRAGFS finished successfully.
+JFS0458I: %1 allocation groups were defragmented.
+JFS0459I: %1 allocation groups skipped: completely free.
+JFS0460I: %1 allocation groups skipped: not enough free blocks.
+JFS0461I: %1 allocation groups skipped: they hold a big contiguous free area.
+JFS0462I: 
+Allocation groups in total: %1.
+JFS0463I: Usage:  DEFRAGFS [/Q] drive
+JFS0464I: %1 allocation groups could be defragmented.
+JFS0465I: Free runs per candidate allocation group, on average: %1.
+JFS0466E:       DEFRAGFS: FATAL ERROR (%1).  DEFRAGFS IS STOPPING.
+

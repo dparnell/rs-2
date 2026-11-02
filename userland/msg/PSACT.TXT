@@ -1,0 +1,16 @@
+; rs2's PSACT.MSG: the actions for PM's logged errors, in rs2's own words
+; (the numbers, classes and insertion points of OS/2's).
+ACT
+ACT0001I:  Ask customer support to rebuild the entry and/or the .INI file.
+ACT0002I:  Close the other program that has this metafile open, then try again.
+ACT0003I:  Fix the table entry in the metafile, then repeat the operation.
+ACT0004I:  Link the program with the window API flag, or run it under PM.
+ACT0005I:  Restart the system
+ACT0006I:  Restart the system
+ACT0007I:  The system works, but restart it so the HardError component works.
+ACT0008I:  DosGetMessage failed; make the error happen again for reference.
+ACT0009I:  The Event Window Server found an error.  See the FFST probe output.
+ACT0010I:  End the application.
+ACT0011I:  Press Alt+Home twice
+ACT0012I: 
+%0

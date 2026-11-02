@@ -109,7 +109,7 @@ pub fn goto(sh: &mut Shell, label: &str) -> u32 {
             0
         }
         None => {
-            err_out(&alloc::format!("SYS1035: The label {label} was not found.\r\n"));
+            sys_msg_err(1039, &[], &alloc::format!("Label {label} not found."));
             sh.batch.pop();
             1
         }
@@ -168,7 +168,7 @@ pub fn if_cmd(sh: &mut Shell, s: &Simple) -> u32 {
         let (b, c) = split_operand(r);
         (a.trim_matches('"') == b.trim_matches('"'), c)
     } else {
-        err_out("SYS1003: The syntax of the command is incorrect.\r\n");
+        sys_msg_err(1003, &[], "Incorrect command syntax.");
         return 1;
     };
     if cond != not {
@@ -196,7 +196,7 @@ pub fn for_cmd(sh: &mut Shell, s: &Simple) -> u32 {
     let var = it.next().unwrap_or("").trim_start_matches('%').to_string();
     let rest = it.next().unwrap_or("").trim_start();
     if !rest.to_ascii_uppercase().starts_with("IN") {
-        err_out("SYS1003: The syntax of the command is incorrect.\r\n");
+        sys_msg_err(1003, &[], "Incorrect command syntax.");
         return 1;
     }
     let rest = rest[2..].trim_start();
@@ -204,7 +204,7 @@ pub fn for_cmd(sh: &mut Shell, s: &Simple) -> u32 {
     let set = &rest[open + 1..close];
     let after = rest[close + 1..].trim_start();
     if !after.to_ascii_uppercase().starts_with("DO") {
-        err_out("SYS1003: The syntax of the command is incorrect.\r\n");
+        sys_msg_err(1003, &[], "Incorrect command syntax.");
         return 1;
     }
     let cmd = after[2..].trim_start();

@@ -48,6 +48,9 @@ struct MsgFile {
     first: u32,
     count: u32,
     offsets: Vec<u32>,
+    /// Where the last message ends: the extended header at the end of
+    /// the file (offset at 0x16, when there is one) or the end.
+    end: usize,
 }
 
 impl MsgFile {
@@ -76,7 +79,10 @@ impl MsgFile {
         }
         let mut component = [0u8; 3];
         component.copy_from_slice(&data[8..11]);
-        Some(MsgFile { data: data.clone(), component, first, count, offsets })
+        let ext = u32::from_le_bytes([data[0x16], data[0x17], data[0x18], data[0x19]]) as usize;
+        let last = offsets.last().copied().unwrap_or(0) as usize;
+        let end = if ext > last && ext <= data.len() { ext } else { data.len() };
+        Some(MsgFile { data: data.clone(), component, first, count, offsets, end })
     }
 
     /// (class, text) of a message.
@@ -86,7 +92,7 @@ impl MsgFile {
         }
         let i = (num - self.first) as usize;
         let start = self.offsets[i] as usize;
-        let end = self.offsets.get(i + 1).map_or(self.data.len(), |&o| o as usize);
+        let end = self.offsets.get(i + 1).map_or(self.end, |&o| o as usize);
         if start >= end || end > self.data.len() {
             return None;
         }

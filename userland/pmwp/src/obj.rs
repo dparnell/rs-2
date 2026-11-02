@@ -1222,6 +1222,7 @@ methods! {
 pub fn impl_object() -> Impl {
     let mut i = impl_object_own();
     i.methods.extend(crate::menu::methods());
+    i.methods.extend(crate::help::object_methods());
     i.methods.extend(crate::book::object_methods());
     i.methods.extend(crate::dnd::object_methods());
     i.methods.extend(crate::delete::object_methods());
