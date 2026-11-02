@@ -11,7 +11,7 @@
 
 #![no_std]
 #![no_main]
-#![allow(non_snake_case, non_upper_case_globals, static_mut_refs, function_casts_as_integer, unused_variables, dead_code)]
+#![allow(non_snake_case, non_upper_case_globals, static_mut_refs, function_casts_as_integer, unused_variables, dead_code, unused_unsafe)]
 
 extern crate alloc;
 
@@ -82,6 +82,14 @@ unsafe extern "C" {
     fn WinGetMsg(hab: u32, qmsg: *mut [u32; 8], hwnd: u32, first: u32, last: u32) -> u32;
     #[link_name = "PMWIN.912"]
     fn WinDispatchMsg(hab: u32, qmsg: *const [u32; 8]) -> usize;
+    #[link_name = "OPENDOC.298"]
+    fn ODDispatchModuleNewClass(major: i32, minor: i32) -> usize;
+    #[link_name = "OPENDOC.300"]
+    static ODDispatcherClassData: [usize; 11];
+    #[link_name = "OPENDOC.375"]
+    static ODMenuBarClassData: [usize; 24];
+    #[link_name = "PMWIN.919"]
+    fn WinPostMsg(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> u32;
     #[link_name = "PMWIN.877"]
     fn WinSetWindowText(hwnd: u32, text: *const u8) -> u32;
     #[link_name = "PMGPI.592"]
@@ -286,6 +294,116 @@ extern "C" fn part_draw(this: usize, ev: usize, facet: usize, shape: usize) -> u
     0
 }
 
+const WM_COMMAND: u32 = 0x20;
+const WM_CHAR: u32 = 0x7a;
+const CMD_SAVE: u32 = 0x5100;
+const CMD_CLOSE: u32 = 0x5101;
+const CMD_CUT: u32 = 0x5018;
+const CMD_ABOUT: u32 = 0x5200;
+
+/// RS2TextPart's events: typed characters edit its text (Backspace
+/// deletes), Edit/Cut empties it, a click is taken (OPENDOC.DLL has made
+/// the frame active).
+extern "C" fn part_handle_event(this: usize, ev: usize, event: usize, frame: usize, facet: usize, info: usize) -> usize {
+    let q = unsafe { *(event as *const [u32; 8]) };
+    let (msg, mp1, mp2) = (q[1], q[2], q[3]);
+    match msg {
+        WM_CHAR => {
+            // KC_CHAR, not KC_KEYUP.
+            if mp1 & 0x40 != 0 || mp1 & 0x1 == 0 {
+                return 1;
+            }
+            let c = (mp2 & 0xff) as u8;
+            let t = &mut tp(this).text;
+            if c == 8 {
+                t.pop();
+            } else if c >= 0x20 {
+                t.push(c);
+            }
+        }
+        WM_COMMAND if mp1 & 0xffff == CMD_CUT => tp(this).text.clear(),
+        0x71 | 0x72 | 0x74 | 0x75 => return 1,
+        _ => return 0,
+    }
+    if frame != 0 {
+        m(cd!(ODFrameClassData), 50, &[frame, ev, 0, 0]); // Invalidate
+    }
+    1
+}
+
+static mut DRAFT: usize = 0;
+static mut FRAME_HWND: u32 = 0;
+
+/// The shell's dispatch module: the Document menu's commands that the
+/// active part did not take.
+extern "C" fn shell_dispatch(this: usize, ev: usize, event: usize, info: usize) -> usize {
+    let q = unsafe { *(event as *const [u32; 8]) };
+    if q[1] != WM_COMMAND {
+        return 0;
+    }
+    match q[2] & 0xffff {
+        CMD_SAVE => {
+            m(cd!(ODDraftClassData), 4, &[unsafe { DRAFT }, ev]);
+            println!("odshell: saved");
+            1
+        }
+        CMD_CLOSE => {
+            unsafe { WinPostMsg(FRAME_HWND, 0x29, 0, 0) }; // WM_CLOSE
+            1
+        }
+        CMD_ABOUT => 1,
+        _ => 0,
+    }
+}
+
+#[unsafe(no_mangle)]
+pub static mut RS2ShellModuleClassData: [usize; 4] = [0; 4];
+#[unsafe(no_mangle)]
+pub static mut RS2ShellModuleCClassData: [usize; 8] = [0; 8];
+
+fn shell_module() -> usize {
+    unsafe { ODDispatchModuleNewClass(1, 0) };
+    let cls = somsup::build_class(&ClassSpec {
+        name: "RS2ShellModule",
+        parents: &["ODDispatchModule"],
+        meta: None,
+        major: 1,
+        minor: 0,
+        data: 0,
+        align: 0,
+        methods: &[],
+        overrides: &[("ODDispatchModule::Dispatch", t_module as usize)],
+        cd: unsafe { (&raw mut RS2ShellModuleClassData) as *mut usize },
+        ccd: unsafe { (&raw mut RS2ShellModuleCClassData) as *mut usize },
+    });
+    somsup::new_object(cls)
+}
+
+/// The docshell's menus, the base menu bar every part's starts from:
+/// Document, Edit and Help (IBM's OpenDoc menu IDs 0x0e and 0x11 for the
+/// first two, which IBM's parts add their items to).
+fn base_menu_bar(ws: usize) {
+    let e = ev();
+    let c = cd!(ODMenuBarClassData);
+    let mb = m(cd!(ODWindowStateClassData), 18, &[ws, e, 0]);
+    let item = |menu: usize, id: u32, text: &[u8], disabled: bool| {
+        let mi = [0xffffu16, 1, if disabled { 0x4000 } else { 0 }, id as u16, 0, 0, 0, 0];
+        m(c, 14, &[mb, e, menu, id as usize, mi.as_ptr() as usize]);
+        m(c, 7, &[mb, e, menu, id as usize, text.as_ptr() as usize]);
+    };
+    m(c, 2, &[mb, e, 0x0e, b"~Document\0".as_ptr() as usize, 0]);
+    item(0x0e, CMD_SAVE, b"~Save\0", false);
+    item(0x0e, CMD_CLOSE, b"~Close\0", false);
+    m(c, 2, &[mb, e, 0x11, b"~Edit\0".as_ptr() as usize, 0]);
+    item(0x11, 0x5016, b"~Undo\0", true);
+    item(0x11, CMD_CUT, b"Cu~t\0", false);
+    item(0x11, 0x5019, b"~Copy\0", true);
+    item(0x11, 0x5020, b"~Paste\0", true);
+    m(c, 2, &[mb, e, 0x13, b"~Help\0".as_ptr() as usize, 0]);
+    item(0x13, CMD_ABOUT, b"~About ODSHELL\0", false);
+    m(cd!(ODWindowStateClassData), 15, &[ws, e, mb]);
+}
+
 extern "C" fn part_uninit(this: usize) -> usize {
     let slot: &mut usize = somsup::data(ccd(), this);
     if *slot != 0 {
@@ -302,6 +420,8 @@ somsup::methods! {
     t_externalize => part_externalize, 2;
     t_facet_added => part_facet_added, 3;
     t_draw => part_draw, 4;
+    t_handle => part_handle_event, 6;
+    t_module => shell_dispatch, 4;
     t_uninit => part_uninit, 1;
 }
 
@@ -322,6 +442,7 @@ fn text_part_class() -> usize {
             ("ODPersistentObject::Externalize", t_externalize as usize),
             ("ODPart::FacetAdded", t_facet_added as usize),
             ("ODPart::Draw", t_draw as usize),
+            ("ODPart::HandleEvent", t_handle as usize),
             ("SOMObject::somUninit", t_uninit as usize),
         ],
         cd: unsafe { (&raw mut RS2TextPartClassData) as *mut usize },
@@ -354,6 +475,10 @@ fn main(st: &Startup) -> u32 {
     m(cd!(ODSessionClassData), 0, &[session, e]);
     m(cd!(ODSessionClassData), 2, &[session, e, hab as usize]);
     text_part_class();
+    let ws = m(cd!(ODBaseSessionClassData), 13, &[session, e]);
+    base_menu_bar(ws);
+    let disp = m(cd!(ODBaseSessionClassData), 6, &[session, e]);
+    m(cd!(ODDispatcherClassData), 1, &[disp, e, WM_COMMAND as usize, shell_module()]);
 
     let sys = m(cd!(ODBaseSessionClassData), 14, &[session, e]);
     let id = ba(&file);
@@ -373,6 +498,7 @@ fn main(st: &Startup) -> u32 {
     let draft = m(cd!(ODDocumentClassData), 7, &[doc, e, 4]);
     let view = m(cd!(ODBaseSessionClassData), 30, &[session, e, VIEW_FRAME.as_ptr() as usize]);
     let pres = m(cd!(ODBaseSessionClassData), 30, &[session, e, PRES_NORMAL.as_ptr() as usize]);
+    unsafe { DRAFT = draft };
     let root;
     if new {
         root = m(cd!(ODDraftClassData), 23, &[draft, e, 0, b"RS2TextPart\0".as_ptr() as usize]);
@@ -395,7 +521,6 @@ fn main(st: &Startup) -> u32 {
     }
 
     // The window: its root frame shows the root part.
-    let ws = m(cd!(ODBaseSessionClassData), 13, &[session, e]);
     let hwnd = m(cd!(ODSessionClassData), 3, &[session, e, 0x783f]);
     // RegisterWindow takes 13 words (more than somsup::call passes).
     let reg: extern "C" fn(usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize, usize) -> usize =
@@ -425,6 +550,7 @@ fn main(st: &Startup) -> u32 {
     title.extend_from_slice(&file[..file.len() - 1]);
     title.push(0);
     unsafe { WinSetWindowText(hwnd as u32, title.as_ptr()) };
+    unsafe { FRAME_HWND = hwnd as u32 };
     m(cd!(ODWindowClassData), 6, &[win, e]); // Open: the root facet
     m(cd!(ODWindowClassData), 9, &[win, e]); // Show
     m(cd!(ODWindowClassData), 22, &[win, e]); // Select
