@@ -142,6 +142,7 @@ impl Object {
             Data::Str(s) => return s.clone(),
             Data::Nil => return b"The NIL object".to_vec(),
             Data::Class(c) => return c.id.clone(),
+            Data::Stream(s) => return s.name.clone(),
             Data::Stem(s, name) => {
                 return match &s.borrow().default {
                     Some(v) => v.fast_string(),

@@ -31,6 +31,9 @@ pub struct Token {
     /// Whitespace (or a comment) came before the token.
     pub blank: bool,
     pub line: u32,
+    /// Where the token is in the source (byte offsets).
+    pub pos: u32,
+    pub end: u32,
 }
 
 impl Token {
@@ -174,6 +177,7 @@ pub fn clauses_mode(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>, oo: bool
     };
     while i < n {
         let c = src[i];
+        let (tstart, tcount) = (i, cur.toks.len());
         // comments
         if c == b'/' && i + 1 < n && src[i + 1] == b'*' {
             let start_line = line;
@@ -265,7 +269,7 @@ pub fn clauses_mode(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>, oo: bool
                     _ => Ok(val),
                 };
                 match v {
-                    Ok(v) => cur.toks.push(Token { tok: Tok::Str { val: v, raw, kind }, blank, line }),
+                    Ok(v) => cur.toks.push(Token { tok: Tok::Str { val: v, raw, kind }, blank, line, pos: 0, end: 0 }),
                     Err(e) => {
                         if cur.err.is_none() {
                             cur.err = Some(e);
@@ -275,33 +279,33 @@ pub fn clauses_mode(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>, oo: bool
                 blank = false;
             }
             b'(' => {
-                cur.toks.push(Token { tok: Tok::LParen, blank, line });
+                cur.toks.push(Token { tok: Tok::LParen, blank, line, pos: 0, end: 0 });
                 blank = false;
                 i += 1;
             }
             b')' => {
-                cur.toks.push(Token { tok: Tok::RParen, blank, line });
+                cur.toks.push(Token { tok: Tok::RParen, blank, line, pos: 0, end: 0 });
                 blank = false;
                 i += 1;
             }
             b',' => {
-                cur.toks.push(Token { tok: Tok::Comma, blank, line });
+                cur.toks.push(Token { tok: Tok::Comma, blank, line, pos: 0, end: 0 });
                 blank = false;
                 i += 1;
             }
             b':' => {
-                cur.toks.push(Token { tok: Tok::Colon, blank, line });
+                cur.toks.push(Token { tok: Tok::Colon, blank, line, pos: 0, end: 0 });
                 blank = false;
                 i += 1;
             }
             b'[' | b']' if oo => {
-                cur.toks.push(Token { tok: if c == b'[' { Tok::LBrack } else { Tok::RBrack }, blank, line });
+                cur.toks.push(Token { tok: if c == b'[' { Tok::LBrack } else { Tok::RBrack }, blank, line, pos: 0, end: 0 });
                 blank = false;
                 i += 1;
             }
             b'~' if oo => {
                 let two = i + 1 < n && src[i + 1] == b'~';
-                cur.toks.push(Token { tok: Tok::Op(if two { b"~~" } else { b"~" }), blank, line });
+                cur.toks.push(Token { tok: Tok::Op(if two { b"~~" } else { b"~" }), blank, line, pos: 0, end: 0 });
                 blank = false;
                 i += if two { 2 } else { 1 };
             }
@@ -340,7 +344,7 @@ pub fn clauses_mode(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>, oo: bool
                         }
                     }
                 }
-                cur.toks.push(Token { tok: Tok::Sym(s), blank, line });
+                cur.toks.push(Token { tok: Tok::Sym(s), blank, line, pos: 0, end: 0 });
                 blank = false;
             }
             _ => {
@@ -361,7 +365,7 @@ pub fn clauses_mode(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>, oo: bool
                 }
                 match best {
                     Some((o, end)) => {
-                        cur.toks.push(Token { tok: Tok::Op(o), blank, line });
+                        cur.toks.push(Token { tok: Tok::Op(o), blank, line, pos: 0, end: 0 });
                         i = end;
                     }
                     None => {
@@ -373,6 +377,11 @@ pub fn clauses_mode(src: &[u8], spell: &mut BTreeMap<Vec<u8>, Vec<u8>>, oo: bool
                 }
                 blank = false;
             }
+        }
+        if cur.toks.len() > tcount {
+            let t = cur.toks.last_mut().unwrap();
+            t.pos = tstart as u32;
+            t.end = i as u32;
         }
     }
     finish(&mut cur, &mut out, line);

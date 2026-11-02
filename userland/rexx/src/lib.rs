@@ -459,7 +459,7 @@ fn shv_one(st: &mut State, b: &mut ShvBlock) -> u8 {
                 b"QUENAME" => Some(host::queue_name()),
                 _ if u.starts_with(b"PARM.") => {
                     let n: usize = core::str::from_utf8(&u[5..]).ok().and_then(|s| s.parse().ok()).unwrap_or(0);
-                    if n == 0 { None } else { Some(st.args.get(n - 1).cloned().flatten().unwrap_or_default()) }
+                    if n == 0 { None } else { Some(st.args.get(n - 1).cloned().flatten().map(|v| v.fast_string()).unwrap_or_default()) }
                 }
                 _ => None,
             };

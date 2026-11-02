@@ -241,11 +241,13 @@ pub struct CondInfo {
     pub line: u32,
     /// The condition object (made when first asked for).
     pub obj: Option<ObjRef>,
+    /// SYNTAX: the traceback (the failing clause first).
+    pub tb: Vec<Val>,
 }
 
 impl CondInfo {
     pub fn new(cond: Cond, desc: Val) -> CondInfo {
-        CondInfo { cond, user: None, desc, call: false, add: None, code: 0, result: None, exit: false, msg: Vec::new(), line: 0, obj: None }
+        CondInfo { cond, user: None, desc, call: false, add: None, code: 0, result: None, exit: false, msg: Vec::new(), line: 0, obj: None, tb: Vec::new() }
     }
     /// CONDITION('C'): "USER NAME" for user conditions.
     pub fn name(&self) -> Val {
@@ -382,6 +384,8 @@ pub struct Interp<'h> {
     pub(crate) err_msg: Val,
     /// This interpreter's activity (thread) number, for GUARD.
     pub activity: u64,
+    /// A condition an external program RAISEd in its caller.
+    pub(crate) raised: Option<CondInfo>,
 }
 
 pub(crate) const MAX_DEPTH: usize = 2000;
@@ -398,7 +402,7 @@ pub fn strip_blanks(s: &[u8]) -> &[u8] {
 
 impl<'h> Interp<'h> {
     pub fn new(host: &'h mut dyn Host) -> Interp<'h> {
-        Interp { host, st: State::new(), depth: 0, quiet: false, banner: false, w: None, tb: Vec::new(), err_at: None, err_msg: Vec::new(), activity: 1 }
+        Interp { host, st: State::new(), depth: 0, quiet: false, banner: false, w: None, tb: Vec::new(), err_at: None, err_msg: Vec::new(), activity: 1, raised: None }
     }
 
     /// An Object REXX interpreter (`PARSE VERSION` gives OBJREXX 6.00).
@@ -536,6 +540,10 @@ impl<'h> Interp<'h> {
             Err(Err::Fatal(c)) => Err(-((c / if c >= 1000 { 1000 } else { 1 }) as i32)),
             // passed to the caller (Object REXX)
             Err(Err::Syntax(c)) => Err(-(c as i32) - 0x1000_0000),
+            Err(Err::Cond(info)) if !top => {
+                self.raised = Some(*info);
+                Err(-0x0fff_ffff)
+            }
             Err(_) => Err(-16),
         };
         if top {
@@ -577,17 +585,35 @@ impl<'h> Interp<'h> {
     }
 
     pub(crate) fn trace_clause(&mut self, c: &Clause, lvl: u32) {
-        let mut s = alloc::format!("{:>6} *-*", c.line).into_bytes();
+        let s = self.clause_line(c, lvl, b"*-*");
+        self.trace_line(&s);
+    }
+
+    /// A traced clause: classic REXX rebuilds it from its tokens and
+    /// indents by nesting and call depth; Object REXX shows it as written,
+    /// indented by its nesting.
+    pub(crate) fn clause_line(&self, c: &Clause, lvl: u32, tag: &[u8]) -> Val {
+        let mut s = alloc::format!("{:>6} ", c.line).into_bytes();
+        s.extend_from_slice(tag);
+        if self.oo() {
+            s.push(b' ');
+            for _ in 0..(2 * c.olevel) {
+                s.push(b' ');
+            }
+            s.extend_from_slice(&c.src);
+            return s;
+        }
         for _ in 0..(1 + 2 * lvl) {
             s.push(b' ');
         }
         s.extend_from_slice(&c.text);
-        self.trace_line(&s);
+        s
     }
 
     pub(crate) fn trace_val(&mut self, tag: &[u8], v: &[u8], lvl: u32) {
         let mut s = b"       ".to_vec();
         s.extend_from_slice(tag);
+        let lvl = if self.oo() { 0 } else { lvl };
         for _ in 0..(3 + 2 * lvl) {
             s.push(b' ');
         }
@@ -856,7 +882,11 @@ impl<'h> Interp<'h> {
                 let x = self.eval_v(f, a, lvl)?;
                 let y = self.eval_v(f, b, lvl)?;
                 let r = match (&x, &y) {
-                    (Value::S(x), Value::S(y)) => Value::S(binop(*op, x, y, &f.numeric)?),
+                    (Value::S(x), Value::S(y)) => match binop(*op, x, y, &f.numeric) {
+                        Ok(v) => Value::S(v),
+                        Err(e) if self.oo() => return Err(self.detail_arith(e, x, y, *op)),
+                        Err(e) => return Err(e),
+                    },
                     _ => crate::oo::binary_op(self, f, *op, x, y, lvl)?,
                 };
                 if self.trace_int(f) {
@@ -866,6 +896,27 @@ impl<'h> Interp<'h> {
                 Ok(r)
             }
             _ => crate::oo::eval_oo(self, f, e, lvl),
+        }
+    }
+
+    /// Object REXX: the detailed error of an arithmetic operation.
+    pub(crate) fn detail_arith(&mut self, e: Err, x: &[u8], y: &[u8], op: BinOp) -> Err {
+        match e {
+            Err::Syntax(41) => {
+                let bad = if Num::parse(x).is_none() { x } else { y };
+                self.err_msg = crate::oo::msg_subst(crate::classes::secondary(41001).unwrap(), &[bad]);
+                Err::Syntax(41001)
+            }
+            Err::Syntax(42) if matches!(op, BinOp::Div | BinOp::IDiv | BinOp::Rem) && Num::parse(y).is_some_and(|n| n.is_zero()) => {
+                self.err_msg = crate::classes::secondary(42003).unwrap().to_vec();
+                Err::Syntax(42003)
+            }
+            Err::Syntax(34) => {
+                let bad = if !matches!(x, b"0" | b"1") { x } else { y };
+                self.err_msg = crate::oo::msg_subst(b"A logical value must be 0 or 1, not \"&1\"", &[bad]);
+                Err::Syntax(34006)
+            }
+            e => e,
         }
     }
 
@@ -944,6 +995,10 @@ impl<'h> Interp<'h> {
         self.st = st;
         match ext {
             External::Value(v) => Ok(v.map(Value::S)),
+            External::NotFound if self.oo() => {
+                self.err_msg = crate::oo::msg_subst(crate::classes::secondary(43001).unwrap(), &[name]);
+                Err(Err::Syntax(43001))
+            }
             External::NotFound => Err(Err::new(43)),
             External::Error(n) => Err(Err::new(n)),
             External::Program { source, path } => {
@@ -955,6 +1010,11 @@ impl<'h> Interp<'h> {
                 // NUMERIC etc. start fresh; streams and the queue are shared
                 match self.run_program_v(&source, &path, ct, args, &env) {
                     Ok(v) => Ok(v),
+                    // a condition RAISEd in the caller
+                    Err(-0x0fff_ffff) => match self.raised.take() {
+                        Some(info) => self.cond_in_caller(f, info, true),
+                        None => Ok(None),
+                    },
                     // Object REXX: an error the caller may trap
                     Err(c) if c < -0x1000_0000 => Err(Err::Syntax((-(c + 0x1000_0000)) as u32)),
                     Err(c) => Err(Err::Fatal((-c) as u32)),
@@ -990,26 +1050,30 @@ impl<'h> Interp<'h> {
         match r {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(None),
-            Err(Err::Cond(info)) => self.cond_in_caller(f, *info),
+            Err(Err::Cond(info)) => self.cond_in_caller(f, *info, false),
             Err(e) => Err(e),
         }
     }
 
     /// A condition RAISEd with RETURN or EXIT in a routine or method this
     /// frame called: raised here; the call's result is the RAISE's.
-    pub(crate) fn cond_in_caller(&mut self, f: &mut Frame, info: CondInfo) -> R<Option<Value>> {
+    /// `boundary`: the call was of a program, method or ::ROUTINE (RAISE
+    /// EXIT stops there); else of an internal routine.
+    pub(crate) fn cond_in_caller(&mut self, f: &mut Frame, mut info: CondInfo, boundary: bool) -> R<Option<Value>> {
+        if info.exit && !boundary {
+            return Err(Err::Cond(alloc::boxed::Box::new(info)));
+        }
+        info.exit = false;
         let result = info.result.clone();
-        let exit = info.exit;
         let code = info.code;
         let cond = info.cond;
+        let msg = info.msg.clone();
         if self.raise_info(f, info)? {
             return Ok(result);
         }
         if cond == Cond::Syntax {
+            self.err_msg = msg;
             return Err(Err::Syntax(code));
-        }
-        if exit {
-            return Err(Err::Exit(result));
         }
         Ok(result)
     }

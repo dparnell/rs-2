@@ -87,8 +87,11 @@ impl Interp<'_> {
                         f.traps[t].state = TrapState::Off;
                         let mut info = CondInfo::new(Cond::Syntax, Vec::new());
                         info.code = no;
-                        info.line = code.clauses[pc].line;
+                        info.line = self.err_at.as_ref().map_or(code.clauses[pc].line, |e| e.1);
                         info.msg = core::mem::take(&mut self.err_msg);
+                        info.tb = core::mem::take(&mut self.tb);
+                        let l = self.traceback_text(&code.clauses[pc], lvl);
+                        info.tb.push(l);
                         f.cond = Some(info);
                         self.tb.clear();
                         self.err_at = None;
@@ -127,6 +130,14 @@ impl Interp<'_> {
                     ctl.clear();
                     pc = self.label_index(f, code, pc, lvl, &label)?;
                 }
+                Err(Err::Cond(info)) if f.top && main => {
+                    // a condition RAISEd to the caller of the program
+                    if info.cond == Cond::Syntax {
+                        self.err_msg = info.msg.clone();
+                        return Err(self.fatal(f, code, pc, lvl, info.code));
+                    }
+                    return Err(Err::Exit(info.result));
+                }
                 Err(Err::Fatal(no)) => {
                     self.traceback(&code.clauses[pc], lvl);
                     return Err(Err::Fatal(no));
@@ -143,12 +154,7 @@ impl Interp<'_> {
     }
 
     fn traceback_text(&self, c: &Clause, lvl: u32) -> Val {
-        let mut s = alloc::format!("{:>6} {}", c.line, if self.oo() { "*-*" } else { "+++" }).into_bytes();
-        for _ in 0..(1 + 2 * lvl) {
-            s.push(b' ');
-        }
-        s.extend_from_slice(&c.text);
-        s
+        self.clause_line(c, lvl, if self.oo() { b"*-*" } else { b"+++" })
     }
 
     fn label_index(&mut self, f: &mut Frame, code: &Rc<Program>, pc: usize, lvl: u32, label: &[u8]) -> R<usize> {

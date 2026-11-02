@@ -113,6 +113,37 @@ fn errors_oo() {
     assert!(out[2].starts_with("Error 97.1"), "{out:?}");
 }
 
+/// The texts of messages are rs2's own: compare what comes before them.
+fn no_text(l: &str) -> String {
+    if let Some(p) = l.find(" => ") {
+        if let Some(q) = l[p..].find(" | ") {
+            return alloc::format!("{} | *", &l[..p + q]);
+        }
+    }
+    if l.starts_with("97.1 | ") {
+        let parts: Vec<&str> = l.split(" | ").collect();
+        return alloc::format!("{} | * | * | {}", parts[0], parts.last().unwrap());
+    }
+    String::from(l)
+}
+
+/// tests/../testdata/probe2.cmd behaves as on IBM's Object REXX
+/// (probe2.out: its output there, message texts left out).
+#[test]
+fn ibm_probe2() {
+    let src = include_str!("../testdata/probe2.cmd");
+    let want: Vec<&str> = include_str!("../testdata/probe2.out").lines().collect();
+    let out = run_oo(src);
+    let got: Vec<String> = out.iter().map(|l| no_text(l)).collect();
+    let n = want.len() - 2;
+    for i in 0..n.min(got.len()) {
+        assert_eq!(got[i], want[i], "line {}:\n{}", i + 1, got.join("\n"));
+    }
+    assert!(got.len() >= n + 2, "{}", got.join("\n"));
+    assert!(got[n].starts_with("REX0042") && got[n].contains("line 78"), "{}", got[n]);
+    assert!(got[n + 1].starts_with("Error 42.3:"), "{}", got[n + 1]);
+}
+
 #[test]
 fn orxtest_script() {
     let mut h = MemHost::default();

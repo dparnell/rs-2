@@ -1,0 +1,60 @@
+x = .list~new; x~insert(1, 99) => 93.918 | *
+x = .stem~new; say x~foo => 97.1 | *
+call nosuchroutine => 43.1 | *
+x = "abc"~nomethod => 97.1 | *
+x = .array~new(2,2); say x[1] => 93.925 | *
+The NIL object
+no error: say .array~of(1,2)[3]
+The NIL object
+no error: say .directory~new~foo
+The NIL object
+no error: x = .directory~new; say x["a"]
+The NIL object
+no error: x = .table~new; say x[1]
+The NIL object
+no error: x = .queue~new; say x~pull
+5 0
+no error: say .list~of(5,6)~firstitem .list~of(5,6)~first
+bc abc**
+no error: say "abc"~substr(2) "abc"~left(5, "*")
+aXbc 2
+no error: say "abc"~insert("X", 1) "abc"~pos("b")
+3 aaa
+no error: say "a b c"~words "a"~copies(3)
+1 0
+no error: say .object~new~hasmethod("STRING") .object~new~hasmethod("FOO")
+5 x
+no error: say 3~max(5, 4) "  x "~strip
+3 2
+no error: x = .bag~of(1,2,2); say x~items x[2]
+2 2
+no error: x = .relation~new; x[1] = "a"; x[1] = "b"; say x~items x~allat(1)~items
+2
+no error: x = .set~of("a","b","a"); say x~items
+q
+no error: say .string~new("q")
+Method
+no error: say .method~new("m", "return 42")~class~id
+7
+no error: say .message~new(3, "+", "I", 4)~send
+97.1 | * | * | 26 97
+SYNTAX  | SIGNAL
+List 1
+  tb:     26 *-* x = .object~new~nope
+    34 *-* y = 1 + 2
+       >>>   "3"
+    35 *-* z = .array~of(1)
+       >>>   "1"
+       >>>   "an Array"
+    36 *-* trace o
+Directory 1
+Stream Monitor a Monitor STDIN
+1 1 1
+    78 *-*     return 1 / 0
+    79 *-* call deep n - 1
+    79 *-* call deep n - 1
+    75 *-* call deep 2
+    45 *-* q~go
+    40 *-* call t2
+REX0042E: Error 42 running C:\T.CMD line 78: *
+REX0413E: Error 42.3: *

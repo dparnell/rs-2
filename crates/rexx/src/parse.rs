@@ -302,6 +302,11 @@ pub struct Clause {
     pub text: Vec<u8>,
     /// Static nesting level (for trace indentation).
     pub level: u32,
+    /// Object REXX: the nesting shown in traces (IF and ELSE branches
+    /// count twice).
+    pub olevel: u32,
+    /// Object REXX: the clause's source text (traces show it as written).
+    pub src: Vec<u8>,
     /// DO: index of its END; END: its DO or SELECT; IF: its ELSE (or 0);
     /// ELSE: the end of its instruction; WHEN: the next WHEN/OTHERWISE/END;
     /// THEN (of a WHEN) and OTHERWISE: the SELECT's END.
@@ -1542,16 +1547,21 @@ pub fn program_mode(src: &[u8], oo: bool) -> Result<Program, LoadErr> {
         return Err((Err::new(99), line));
     }
     let lines = alloc::rc::Rc::new(src.split(|&c| c == b'\n').map(|l| l.strip_suffix(b"\r").unwrap_or(l).to_vec()).collect());
-    build(&raw, &spell, lines, oo)
+    build(&raw, &spell, lines, oo, src)
 }
 
-fn build(raw: &[RawClause], spell: &BTreeMap<Vec<u8>, Vec<u8>>, lines: alloc::rc::Rc<Vec<Vec<u8>>>, oo: bool) -> Result<Program, LoadErr> {
+fn build(raw: &[RawClause], spell: &BTreeMap<Vec<u8>, Vec<u8>>, lines: alloc::rc::Rc<Vec<Vec<u8>>>, oo: bool, src: &[u8]) -> Result<Program, LoadErr> {
     let mut clauses = Vec::new();
     for rc in raw {
-        clauses_of(rc, spell, &mut clauses, oo);
+        clauses_of(rc, spell, &mut clauses, oo, src);
     }
     let mut prog = Program { clauses, labels: BTreeMap::new(), lines };
     link(&mut prog)?;
+    for c in prog.clauses.iter_mut() {
+        if c.olevel == u32::MAX {
+            c.olevel = c.level;
+        }
+    }
     for (i, c) in prog.clauses.iter().enumerate() {
         if let Instr::Label(n) = &c.instr {
             prog.labels.entry(n.clone()).or_insert(i);
@@ -1588,7 +1598,7 @@ pub fn sections(src: &[u8]) -> Result<Vec<Section>, LoadErr> {
     let mut i = 0;
     loop {
         if i == raw.len() || is_directive(&raw[i]) {
-            let prog = build(&raw[start..i], &spell, lines.clone(), true)?;
+            let prog = build(&raw[start..i], &spell, lines.clone(), true, src)?;
             // the source lines from the clause after the directive to the next one
             let first = raw.get(start).map_or(0, |r| r.toks.first().map_or(r.line, |t| t.line) as usize);
             let last = if i < raw.len() { raw[i].line as usize } else { lines.len() + 1 };
@@ -1612,7 +1622,19 @@ pub fn sections(src: &[u8]) -> Result<Vec<Section>, LoadErr> {
     Ok(out)
 }
 
-fn clauses_of(rc: &RawClause, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out: &mut Vec<Clause>, oo: bool) {
+/// A clause's source text (to the end of its first line).
+fn src_text(src: &[u8], toks: &[Token], from: usize, to: usize) -> Vec<u8> {
+    if from >= to || to > toks.len() {
+        return Vec::new();
+    }
+    let a = (toks[from].pos as usize).min(src.len());
+    let b = (toks[to - 1].end as usize).clamp(a, src.len());
+    let s = &src[a..b];
+    let s = &s[..s.iter().position(|&c| c == b'\r' || c == b'\n').unwrap_or(s.len())];
+    s.to_vec()
+}
+
+fn clauses_of(rc: &RawClause, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out: &mut Vec<Clause>, oo: bool, src: &[u8]) {
     let line = rc.toks.first().map_or(rc.line, |t| t.line);
     let mut p = P::new(&rc.toks, oo);
     let mut pieces = Vec::new();
@@ -1629,14 +1651,16 @@ fn clauses_of(rc: &RawClause, spell: &BTreeMap<Vec<u8>, Vec<u8>>, out: &mut Vec<
             text.push(b';');
         }
         let l = rc.toks.get(pc.from).map_or(line, |t| t.line);
-        out.push(Clause { instr: pc.instr, line: l, text, level: 0, link: 0, next: 0 });
+        let s = if oo { src_text(src, &rc.toks, pc.from, pc.to) } else { Vec::new() };
+        out.push(Clause { instr: pc.instr, line: l, text, level: 0, olevel: u32::MAX, src: s, link: 0, next: 0 });
     }
     if let Err(e) = r {
         let mut text = Vec::new();
         render(&p, err_from, rc.toks.len(), spell, &mut text);
         text.push(b';');
         let l = rc.toks.get(err_from).map_or(line, |t| t.line);
-        out.push(Clause { instr: Instr::Error(e), line: l, text, level: 0, link: 0, next: 0 });
+        let s = if oo { src_text(src, &rc.toks, err_from, rc.toks.len()) } else { Vec::new() };
+        out.push(Clause { instr: Instr::Error(e), line: l, text, level: 0, olevel: u32::MAX, src: s, link: 0, next: 0 });
     }
 }
 
@@ -1645,7 +1669,7 @@ fn link(p: &mut Program) -> Result<(), LoadErr> {
     let n = p.clauses.len();
     let mut i = 0;
     while i < n {
-        i = link_instr(p, i, 0)?;
+        i = link_instr(p, i, 0, 0)?;
     }
     Ok(())
 }
@@ -1656,12 +1680,13 @@ fn err_at(p: &Program, code: u32, i: usize) -> LoadErr {
 }
 
 /// Skip labels before an instruction (they belong to the flat list).
-fn link_instr(p: &mut Program, i: usize, level: u32) -> Result<usize, LoadErr> {
+fn link_instr(p: &mut Program, i: usize, level: u32, ol: u32) -> Result<usize, LoadErr> {
     let n = p.clauses.len();
     if i >= n {
         return Err(err_at(p, 14, n.saturating_sub(1)));
     }
     p.clauses[i].level = level;
+    p.clauses[i].olevel = ol;
     let next = match &p.clauses[i].instr {
         Instr::Do(_) => {
             let mut j = i + 1;
@@ -1675,7 +1700,7 @@ fn link_instr(p: &mut Program, i: usize, level: u32) -> Result<usize, LoadErr> {
                 if matches!(p.clauses[j].instr, Instr::Then | Instr::Else | Instr::When(_) | Instr::Otherwise) {
                     return Err(err_at(p, if matches!(p.clauses[j].instr, Instr::Then | Instr::Else) { 8 } else { 9 }, j));
                 }
-                j = link_instr(p, j, level + 1)?;
+                j = link_instr(p, j, level + 1, ol + 1)?;
             }
             // END name must match the control variable
             if let (Instr::End(Some(en)), Instr::Do(d)) = (&p.clauses[j].instr, &p.clauses[i].instr) {
@@ -1709,7 +1734,7 @@ fn link_instr(p: &mut Program, i: usize, level: u32) -> Result<usize, LoadErr> {
                             return Err(err_at(p, 18, w));
                         }
                         p.clauses[w + 1].level = level + 1;
-                        let e = link_instr(p, w + 2, level + 2)?;
+                        let e = link_instr(p, w + 2, level + 2, ol + 2)?;
                         whens.push(w);
                         p.clauses[w].next = e;
                         j = e;
@@ -1719,7 +1744,7 @@ fn link_instr(p: &mut Program, i: usize, level: u32) -> Result<usize, LoadErr> {
                         other = Some(j);
                         j += 1;
                         while j < n && !matches!(p.clauses[j].instr, Instr::End(_)) {
-                            j = link_instr(p, j, level + 2)?;
+                            j = link_instr(p, j, level + 2, ol + 2)?;
                         }
                     }
                     Instr::End(name) => {
@@ -1758,10 +1783,10 @@ fn link_instr(p: &mut Program, i: usize, level: u32) -> Result<usize, LoadErr> {
                 return Err(err_at(p, 18, i));
             }
             p.clauses[i + 1].level = level;
-            let e = link_instr(p, i + 2, level + 1)?;
+            let e = link_instr(p, i + 2, level + 1, ol + 2)?;
             if e < n && matches!(p.clauses[e].instr, Instr::Else) {
                 p.clauses[e].level = level;
-                let e2 = link_instr(p, e + 1, level + 1)?;
+                let e2 = link_instr(p, e + 1, level + 1, ol + 2)?;
                 p.clauses[e].link = e2;
                 p.clauses[e].next = e2;
                 p.clauses[i].link = e;

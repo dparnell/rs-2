@@ -941,6 +941,7 @@ impl Host for OsHost {
             OpenMode::Read => (OPEN_ACTION_FAIL_IF_NEW | OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_READONLY | OPEN_SHARE_DENYNONE),
             OpenMode::Write => (OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_WRITEONLY | OPEN_SHARE_DENYWRITE),
             OpenMode::Both => (OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYWRITE),
+            OpenMode::Replace => (OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_READWRITE | OPEN_SHARE_DENYWRITE),
         };
         let (mut hf, mut act) = (0u32, 0u32);
         let rc = unsafe { DosOpen(z.as_ptr(), &mut hf, &mut act, 0, 0, action, access | OPEN_FLAGS_NOINHERIT, null_mut()) };

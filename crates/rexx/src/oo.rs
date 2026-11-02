@@ -906,7 +906,9 @@ impl Interp<'_> {
         let r = match r {
             Ok(Flow::Return(v)) => Ok(v),
             Ok(_) => Ok(None),
-            Err(Err::Cond(info)) => self.cond_in_caller(f, *info),
+            Err(Err::Cond(info)) => self.cond_in_caller(f, *info, true),
+            // EXIT leaves the method or routine
+            Err(Err::Exit(v)) => Ok(v),
             Err(e) => Err(e),
         };
         match replied {
@@ -1015,7 +1017,7 @@ pub fn eval_oo(it: &mut Interp, f: &mut Frame, e: &Expr, lvl: u32) -> R<Value> {
             let mut args = Vec::with_capacity(s.args.len());
             for a in &s.args {
                 args.push(match a {
-                    Some(x) => Some(it.eval_v(f, x, lvl)?),
+                    Some(x) => Some(it.eval_top_v(f, x, lvl)?),
                     None => None,
                 });
             }
@@ -1141,44 +1143,27 @@ fn op_name(op: BinOp) -> &'static [u8] {
     }
 }
 
-/// An operator with an object operand: the object's own operator method
-/// if REXX code defines one; identity for (in)equality; else the strings.
+/// An operator whose left operand is an object: a message to it (the
+/// Object class knows only the comparisons for identity; strings convert
+/// their argument).
 pub fn binary_op(it: &mut Interp, f: &mut Frame, op: BinOp, x: Value, y: Value, lvl: u32) -> R<Value> {
-    let w = it.w.clone().unwrap();
-    let name = op_name(op);
     if let Value::O(_) = &x {
-        if let Some(found) = lookup(&w, &x, name, &Start::Normal) {
-            if !matches!(found.m.body, Body::Native(_)) {
-                return invoke(it, f, &x, name, alloc::vec![Some(y)], found, lvl)?.ok_or(Err::new(91));
-            }
-        }
-        let xs = matches!(&x, Value::O(o) if matches!(&*o.data.borrow(), Data::Str(_)));
-        if !xs {
-            match op {
-                BinOp::Eq | BinOp::SEq => return Ok(Value::S(if x.same(&y) { b"1".to_vec() } else { b"0".to_vec() })),
-                BinOp::Ne | BinOp::SNe => return Ok(Value::S(if x.same(&y) { b"0".to_vec() } else { b"1".to_vec() })),
-                _ => {}
-            }
-        }
+        let name = op_name(op);
+        return it.send(f, &x, name, alloc::vec![Some(y)], Start::Normal, lvl)?.ok_or(Err::new(91));
     }
     let a = it.to_str(f, &x)?;
     let b = it.to_str(f, &y)?;
     Ok(Value::S(binop(op, &a, &b, &f.numeric)?))
 }
 
+/// A prefix operator on an object: a message to it.
 pub fn unary_op(it: &mut Interp, f: &mut Frame, op: UnOp, v: &Value, lvl: u32) -> R<Option<Value>> {
-    let w = it.w.clone().unwrap();
     let name: &[u8] = match op {
         UnOp::Not => b"\\",
         UnOp::Neg => b"-",
         UnOp::Plus => b"+",
     };
-    if let Some(found) = lookup(&w, v, name, &Start::Normal) {
-        if !matches!(found.m.body, Body::Native(_)) {
-            return invoke(it, f, v, name, Vec::new(), found, lvl);
-        }
-    }
-    Ok(None)
+    Ok(Some(it.send(f, v, name, Vec::new(), Start::Normal, lvl)?.ok_or(Err::new(91))?))
 }
 
 // ---- built-in functions with objects ----
@@ -1298,7 +1283,12 @@ pub fn cond_object(it: &mut Interp, c: &CondInfo) -> Value {
         d.map.insert(b"MESSAGE".to_vec(), if c.msg.is_empty() { w.nil() } else { Value::S(c.msg.clone()) });
         d.map.insert(b"POSITION".to_vec(), Value::S(int_str(c.line as i64)));
         d.map.insert(b"PROGRAM".to_vec(), Value::S(it.st.source.rsplit(|&b| b == b' ').next().unwrap_or_default().to_vec()));
-        d.map.insert(b"TRACEBACK".to_vec(), w.obj(Builtin::List, Data::List(ListData::default())));
+        let mut l = ListData::default();
+        for t in &c.tb {
+            l.items.push_back((l.next, Value::S(t.clone())));
+            l.next += 1;
+        }
+        d.map.insert(b"TRACEBACK".to_vec(), w.obj(Builtin::List, Data::List(l)));
     }
     w.obj(Builtin::Directory, Data::Directory(d))
 }
@@ -1560,34 +1550,22 @@ fn exec_raise(it: &mut Interp, f: &mut Frame, spec: &RaiseSpec, lvl: u32) -> R<N
             info.msg = msg_subst(t, &refs);
         }
     }
-    if let Some((exit, e)) = &spec.ret {
-        info.exit = *exit;
-        info.result = match e {
-            Some(e) => Some(it.eval_v(f, e, lvl)?),
-            None => None,
-        };
-        if f.top && !*exit {
-            // RETURN from the main program: raise it here
-        } else {
-            it.err_msg = info.msg.clone();
-            return Err(Err::Cond(alloc::boxed::Box::new(info)));
+    // RAISE leaves the routine or method and raises the condition in its
+    // caller: RETURN in the caller of the routine, EXIT (and RAISE without
+    // either) in the caller of the program, method or ::ROUTINE
+    match &spec.ret {
+        Some((exit, e)) => {
+            info.exit = *exit;
+            info.result = match e {
+                Some(e) => Some(it.eval_v(f, e, lvl)?),
+                None => None,
+            };
         }
+        None => info.exit = !spec.propagate,
     }
-    if spec.propagate {
-        it.err_msg = info.msg.clone();
-        return Err(Err::Cond(alloc::boxed::Box::new(info)));
-    }
+    info.line = 0;
     it.err_msg = info.msg.clone();
-    let code = info.code;
-    let cond = info.cond;
-    if it.raise_info(f, info)? {
-        return Ok(Next::Go);
-    }
-    if cond == Cond::Syntax {
-        return Err(Err::Syntax(code));
-    }
-    // an untrapped condition RAISEd ends the program
-    Err(Err::Exit(None))
+    Err(Err::Cond(alloc::boxed::Box::new(info)))
 }
 
 fn exec_forward(it: &mut Interp, f: &mut Frame, spec: &ForwardSpec, lvl: u32) -> R<Next> {
