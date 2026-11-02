@@ -43,9 +43,13 @@ unsafe extern "C" {
     fn ODRegisterPartHandlerClass(class: *const u8, dll: *const u8, a: u32, b: u32) -> u32;
     #[link_name = "OPENDOC.901"]
     fn ODDeregisterPartHandlerClass(class: *const u8) -> u32;
+    #[link_name = "PMSHAPI.115"]
+    fn PrfQueryProfileString(hini: u32, app: *const u8, key: *const u8, def: *const u8, buf: *mut u8, cb: u32) -> u32;
 
     #[link_name = "OPENDOC.393"]
     static ODObjectClassData: [usize; 8];
+    #[link_name = "OPENDOC.210"]
+    static M_ODPartClassData: [usize; 6];
     #[link_name = "OPENDOC.444"]
     static ODRefCntObjectClassData: [usize; 5];
     #[link_name = "OPENDOC.423"]
@@ -786,15 +790,35 @@ fn mmodpts() {
     check("MMAudioPart descends from rs2's ODPart", somsup::sc_call(somsup::cm::SOM_DESCENDED_FROM, &[cls, part_cls]) & 0xff != 0);
     let meta = somsup::class_of(cls);
     println!("     (metaclass {})", core::str::from_utf8(s(somsup::class_name(meta) as usize)).unwrap_or("?"));
+    // M_ODPart's methods, as MMODPTS's metaclass overrides them.
+    let mpart = unsafe { (&raw const M_ODPartClassData) as *const usize };
+    let hn = m(mpart, 0, &[cls, e]);
+    println!("     (clsGetODPartHandlerName: {})", core::str::from_utf8(s(hn)).unwrap_or("?"));
+    check("clsGetODPartHandlerName (M_MMAudioPart)", s(hn) == b"MMAudioPart");
+    // The kinds the part handler registered (OS2.INI OpenDoc:PartKinds).
+    let mut keys = [0u8; 1024];
+    let n = unsafe { PrfQueryProfileString(0xffff_ffff, b"OpenDoc:PartKinds\0".as_ptr(), core::ptr::null(), b"\0".as_ptr(), keys.as_mut_ptr(), keys.len() as u32) } as usize;
+    let mut kind: Vec<u8> = Vec::new();
+    for k in keys[..n.min(keys.len())].split(|&b| b == 0).filter(|k| !k.is_empty()) {
+        let mut v = [0u8; 64];
+        let kz = [k, &b"\0"[..]].concat();
+        let vn = unsafe { PrfQueryProfileString(0xffff_ffff, b"OpenDoc:PartKinds\0".as_ptr(), kz.as_ptr(), b"\0".as_ptr(), v.as_mut_ptr(), 64) } as usize;
+        if v[..vn.min(64)].starts_with(b"MMAudioPart") {
+            println!("     (kind {} -> MMAudioPart)", core::str::from_utf8(k).unwrap_or("?"));
+            kind = k.to_vec();
+        }
+    }
+    check("the part kinds were registered (clsGetODPartKinds)", !kind.is_empty());
+    kind.push(0);
 
     let id = ba(b"C:\\ODMM.OD\0");
     let sys = m(cd!(ODBaseSessionClassData), BS_GET_STORAGE_SYSTEM, &[session, e]);
     let cont = m(cd!(ODStorageSystemClassData), SYS_CREATE_CONTAINER, &[sys, e, b"rs2:Container\0".as_ptr() as usize, &id as *const ByteArray as usize]);
     let doc = m(cd!(ODContainerClassData), CONT_ACQUIRE_DOCUMENT, &[cont, e, 1]);
     let draft = m(cd!(ODDocumentClassData), DOC_ACQUIRE_BASE_DRAFT, &[doc, e, 4]);
-    let part = m(cd!(ODDraftClassData), DR_CREATE_PART, &[draft, e, 0, b"MMAudioPart\0".as_ptr() as usize]);
+    let part = m(cd!(ODDraftClassData), DR_CREATE_PART, &[draft, e, kind.as_ptr() as usize, 0]);
     ok_ev("CreatePart MMAudioPart");
-    check("an MMAudioPart made and initialised (InitPart)", part != 0);
+    check("an MMAudioPart made by its kind and initialised (InitPart)", part != 0 && somsup::is_a(part, cls));
     if part == 0 {
         return;
     }
@@ -806,6 +830,10 @@ fn mmodpts() {
     release(props);
     m(cd!(ODDraftClassData), DR_EXTERNALIZE, &[draft, e]);
     ok_ev("draft Externalize with MMAudioPart");
+    let psu = m(cd!(ODPersistentObjectClassData), PO_GET_STORAGE_UNIT, &[part, e]);
+    let np = m(cd!(ODStorageUnitClassData), SU_COUNT_PROPERTIES, &[psu, e]);
+    println!("     (the part's storage unit has {} properties)", np);
+    check("MMAudioPart wrote its properties", np > 3);
     check("MMAudioPart document written", file_size(b"C:\\ODMM.OD\0") > 0);
     release(part);
     release(draft);

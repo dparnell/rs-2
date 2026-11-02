@@ -28,4 +28,5 @@ aligned! {
     __a_mciPlayFile => crate::mciPlayFile, 5;
     __a_mciPlayResource => crate::mciPlayResource, 7;
     __a_mciRecordAudioFile => crate::mciRecordAudioFile, 4;
+    __a_mciCreatePlayFilePalette => crate::mciCreatePlayFilePalette, 15;
 }

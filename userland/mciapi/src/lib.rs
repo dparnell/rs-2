@@ -253,3 +253,16 @@ pub extern "C" fn mciPlayResource(_owner: u32, _hmod: u32, _ty: u32, _id: u32, _
 pub extern "C" fn mciRecordAudioFile(_owner: u32, _file: *const u8, _title: *const u8, _flags: u32) -> u32 {
     5018
 }
+
+/// mciCreatePlayFilePalette (IBM's export 25, not in the Toolkit): the
+/// small play/stop palette window MMPM/2's players show for a file (owner,
+/// position, size, styles, a palette-state observer callback, ...); IBM's
+/// MMODPTS.DLL (the OpenDoc parts) opens one for a video. rs2 has none
+/// yet: NULLHANDLE, and the caller goes on without it.
+#[unsafe(no_mangle)]
+pub extern "C" fn mciCreatePlayFilePalette(
+    _owner: u32, _a: u32, _b: u32, _c: u32, _x: i32, _y: i32, _file: *const u8, _d: u32, _e: u32,
+    _observer: usize, _user: usize, _f: u32, _flags: u32, _title: *const u8, _g: u32,
+) -> u32 {
+    0
+}
