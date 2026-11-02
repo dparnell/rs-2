@@ -641,6 +641,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rexxwps-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "rxsom",
+ "somsup",
+]
+
+[[package]]
 name = "rs2shell"
 version = "0.1.0"
 dependencies = [

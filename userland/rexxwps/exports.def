@@ -1,0 +1,13 @@
+; REXXWPS.DLL: SOMInitModule at IBM's ordinal; the classes WPSINST.CMD
+; registers; rs2's bridge to OREXX.DLL from 100.
+SOMInitModule=__a_SOMInitModule @3
+WPZORXINITNewClass=__a_WPZORXINITNewClass @10
+WPZORXINITClassData=WPZORXINITClassData @11
+WPZORXINITCClassData=WPZORXINITCClassData @12
+WPZORXNewClass=__a_WPZORXNewClass @13
+WPZORXClassData=WPZORXClassData @14
+WPZORXCClassData=WPZORXCClassData @15
+rs2_ext_lookup=rs2_ext_lookup @100
+rs2_ext_class=rs2_ext_class @101
+rs2_ext_send=rs2_ext_send @102
+rs2_ext_free=rs2_ext_free @103

@@ -1,0 +1,15 @@
+[package]
+name = "rexxwps-dll"
+description = "REXXWPS.DLL (OREXXWPS.DLL): Object REXX scripting the Workplace Shell (a server in the shell, the bridge in REXX programs)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rexxwps"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }
+rxsom = { path = "../rxsom" }
