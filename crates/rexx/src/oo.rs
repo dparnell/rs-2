@@ -156,6 +156,13 @@ impl World {
         Rc::new(w)
     }
 
+    /// A new activity's number.
+    pub fn next_activity(&self) -> u64 {
+        let n = self.activities.get() + 1;
+        self.activities.set(n);
+        n
+    }
+
     pub fn id(&self) -> u64 {
         let n = self.next.get();
         self.next.set(n + 1);
@@ -945,11 +952,25 @@ pub fn invoke(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: V
                 name: name.to_vec(),
                 args: args.clone(),
                 reply: RefCell::new(None),
-                guarded: Cell::new(found.m.guarded),
+                guarded: Cell::new(false),
+                replied: Cell::new(false),
                 obj_pool: 0,
             });
+            // a guarded method has the object to itself
+            let obj = if found.m.guarded { recv.obj().cloned() } else { None };
+            if let Some(o) = &obj {
+                acquire_guard(it, o)?;
+                act.guarded.set(true);
+            }
             let code = code.clone();
-            it.run_code(f, &code, Some(act), pool, args, CallType::Subroutine, lvl)
+            let r = it.run_code(f, &code, Some(act.clone()), pool, args, CallType::Subroutine, lvl);
+            if act.guarded.get() {
+                if let Some(o) = recv.obj() {
+                    release_guard(it, o);
+                }
+                act.guarded.set(false);
+            }
+            r
         }
         Body::Get(var) => match recv {
             Value::O(o) => {
@@ -1449,21 +1470,47 @@ pub(crate) fn exec_oo(it: &mut Interp, f: &mut Frame, c: &Clause, lvl: u32) -> R
                 it.err_msg = crate::classes::secondary(99911).unwrap().to_vec();
                 return Err(Err::Syntax(99911));
             }
-            if let Some(a) = &f.act {
-                a.guarded.set(*on);
-            }
+            let a = f.act.clone().unwrap();
+            let obj = a.recv.obj().cloned();
             if let Some(e) = when {
-                // one activity runs at a time here: a condition that is
-                // false now cannot become true while we wait
-                if !it.eval_bool(f, e, lvl)? {
+                // wait until the expression is true, letting other
+                // activities run (and change the object's variables)
+                loop {
+                    if *on && !a.guarded.get() {
+                        if let Some(o) = &obj {
+                            acquire_guard(it, o)?;
+                        }
+                        a.guarded.set(true);
+                    }
+                    if it.eval_bool(f, e, lvl)? {
+                        break;
+                    }
+                    if a.guarded.get() {
+                        if let Some(o) = &obj {
+                            release_guard(it, o);
+                        }
+                        a.guarded.set(false);
+                    }
                     let mut st = core::mem::replace(&mut it.st, State::empty());
                     let ok = it.host.wait_guard(&mut st);
                     it.st = st;
-                    if !ok || !it.eval_bool(f, e, lvl)? {
+                    if !ok {
+                        // no other activity can make it true
                         it.err_msg = crate::classes::secondary(98905).unwrap().to_vec();
                         return Err(Err::Syntax(98905));
                     }
                 }
+            }
+            if *on && !a.guarded.get() {
+                if let Some(o) = &obj {
+                    acquire_guard(it, o)?;
+                }
+                a.guarded.set(true);
+            } else if !*on && a.guarded.get() {
+                if let Some(o) = &obj {
+                    release_guard(it, o);
+                }
+                a.guarded.set(false);
             }
             Ok(Next::Go)
         }
@@ -1472,7 +1519,7 @@ pub(crate) fn exec_oo(it: &mut Interp, f: &mut Frame, c: &Clause, lvl: u32) -> R
                 it.err_msg = crate::classes::secondary(99919).unwrap().to_vec();
                 return Err(Err::Syntax(99919));
             };
-            if a.reply.borrow().is_some() {
+            if a.reply.borrow().is_some() || a.replied.get() {
                 it.err_msg = crate::classes::secondary(98935).unwrap().to_vec();
                 return Err(Err::Syntax(98935));
             }
@@ -1480,13 +1527,93 @@ pub(crate) fn exec_oo(it: &mut Interp, f: &mut Frame, c: &Clause, lvl: u32) -> R
                 Some(e) => Some(it.eval_top_v(f, e, lvl)?),
                 None => None,
             };
-            *a.reply.borrow_mut() = Some(v);
-            Ok(Next::Go)
+            a.replied.set(true);
+            Ok(Next::Reply(v))
         }
         Instr::Raise(spec) => exec_raise(it, f, spec, lvl),
         Instr::Forward(spec) => exec_forward(it, f, spec, lvl),
         _ => Ok(Next::Go),
     }
+}
+
+// ---- activities ----
+
+/// Take an object's guard (exclusive use of its variables) for this
+/// activity, waiting while another holds it.
+pub(crate) fn acquire_guard(it: &mut Interp, o: &ObjRef) -> R<()> {
+    loop {
+        let (a, n) = o.guard.get();
+        if n == 0 || a == it.activity {
+            o.guard.set((it.activity, n + 1));
+            return Ok(());
+        }
+        let mut st = core::mem::replace(&mut it.st, State::empty());
+        let ok = it.host.wait_guard(&mut st);
+        it.st = st;
+        if !ok {
+            it.err_msg = crate::classes::secondary(98905).unwrap().to_vec();
+            return Err(Err::Syntax(98905));
+        }
+    }
+}
+
+pub(crate) fn release_guard(it: &mut Interp, o: &ObjRef) {
+    let (a, n) = o.guard.get();
+    if a == it.activity && n > 0 {
+        o.guard.set((if n == 1 { 0 } else { a }, n - 1));
+    }
+}
+
+/// A raw pointer that may cross to another activity's thread (only one
+/// activity runs at a time: the host's lock).
+struct Pass<T>(T);
+unsafe impl<T> Send for Pass<T> {}
+
+/// REPLY in a method's own code: go on with the rest of the method on a
+/// new activity. False if the host has no other activities.
+pub(crate) fn reply_elsewhere(it: &mut Interp, f: &Frame, code: &Rc<Program>, pc: usize, extra: u32, ctl: &[Ctl]) -> bool {
+    let Some(act) = f.act.clone() else { return false };
+    let w = it.w.clone().unwrap();
+    let mp = it.st.pools.pools[it.st.cur_pool].clone();
+    let op = mp.borrow().parent.map(|p| it.st.pools.pools[p].clone());
+    let job = Pass((f.clone(), code.clone(), ctl.to_vec(), it.st.args.clone(), w.clone(), mp, op, act.clone()));
+    let id = w.next_activity();
+    let held = act.guarded.get();
+    let ok = it.host.spawn(alloc::boxed::Box::new(move |h: &mut dyn crate::Host| {
+        let Pass((mut frame, code, ctl, args, w, mp, op, act)) = job;
+        let mut it2 = Interp::new_activity(h, w, id);
+        it2.st.pools.pools.clear();
+        match op {
+            Some(op) => {
+                it2.st.pools.pools.push(op);
+                mp.borrow_mut().parent = Some(0);
+                it2.st.pools.pools.push(mp);
+                it2.st.cur_pool = 1;
+            }
+            None => {
+                mp.borrow_mut().parent = None;
+                it2.st.pools.pools.push(mp);
+                it2.st.cur_pool = 0;
+            }
+        }
+        it2.st.args = args;
+        it2.depth = 1;
+        frame.top = true;
+        let obj = act.recv.obj().cloned();
+        // the method keeps the object's guard on its new activity
+        if held {
+            if let Some(o) = &obj {
+                let _ = acquire_guard(&mut it2, o);
+            }
+        }
+        let _ = it2.run_from(&mut frame, &code, pc, extra, ctl);
+        if held {
+            if let Some(o) = &obj {
+                release_guard(&mut it2, o);
+            }
+        }
+    }));
+    ok
 }
 
 fn exec_raise(it: &mut Interp, f: &mut Frame, spec: &RaiseSpec, lvl: u32) -> R<Next> {

@@ -247,6 +247,17 @@ pub trait Host {
     fn wait_guard(&mut self, _st: &mut State) -> bool {
         false
     }
+    /// Object REXX: run `job` as another activity (a thread of its own
+    /// that takes turns with the others: one activity runs at a time).
+    /// False: the host has no other activities (the work is then done in
+    /// this one).
+    fn spawn(&mut self, _job: alloc::boxed::Box<dyn FnOnce(&mut dyn Host)>) -> bool {
+        false
+    }
+    /// Object REXX: let other activities run for a while.
+    fn yield_now(&mut self) {}
+    /// Object REXX: wait (an alarm), letting other activities run.
+    fn sleep(&mut self, _ms: u32) {}
     /// Report an error in a line typed at an interactive-trace pause.
     fn report_trace_error(&mut self, st: &mut State, code: u32) {
         let mut s = alloc::format!("Error {code} in interactive trace: ").into_bytes();

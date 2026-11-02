@@ -281,6 +281,8 @@ pub struct Act {
     pub reply: core::cell::RefCell<Option<Option<Value>>>,
     /// The method holds the object's guard.
     pub guarded: core::cell::Cell<bool>,
+    /// REPLY was run.
+    pub replied: core::cell::Cell<bool>,
     /// The object variable pool's place on the pool stack (EXPOSE).
     pub obj_pool: usize,
 }
@@ -350,6 +352,7 @@ pub(crate) enum Flow {
     Iterate(Option<Name>),
 }
 
+#[derive(Clone)]
 pub(crate) enum Ctl {
     Do { idx: usize, var: Option<VarRef>, to: Option<Num>, by: Num, for_left: Option<i64>, count: Option<i64>, simple: bool, over: Option<(Vec<Value>, usize)> },
     Select { idx: usize, taken: bool },
@@ -364,6 +367,8 @@ pub(crate) enum Next {
     /// LEAVE the DO at this index.
     LeaveDo(usize),
     Flow(Flow),
+    /// REPLY with its value.
+    Reply(Option<Value>),
 }
 
 pub struct Interp<'h> {
@@ -386,6 +391,8 @@ pub struct Interp<'h> {
     pub activity: u64,
     /// A condition an external program RAISEd in its caller.
     pub(crate) raised: Option<CondInfo>,
+    /// Clauses run (activities take turns every so many).
+    pub(crate) ticks: u32,
 }
 
 pub(crate) const MAX_DEPTH: usize = 2000;
@@ -402,7 +409,7 @@ pub fn strip_blanks(s: &[u8]) -> &[u8] {
 
 impl<'h> Interp<'h> {
     pub fn new(host: &'h mut dyn Host) -> Interp<'h> {
-        Interp { host, st: State::new(), depth: 0, quiet: false, banner: false, w: None, tb: Vec::new(), err_at: None, err_msg: Vec::new(), activity: 1, raised: None }
+        Interp { host, st: State::new(), depth: 0, quiet: false, banner: false, w: None, tb: Vec::new(), err_at: None, err_msg: Vec::new(), activity: 1, raised: None, ticks: 0 }
     }
 
     /// An Object REXX interpreter (`PARSE VERSION` gives OBJREXX 6.00).

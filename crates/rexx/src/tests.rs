@@ -18,11 +18,50 @@ pub struct MemHost {
     pub next_h: u32,
     pub env: BTreeMap<Vec<u8>, Vec<u8>>,
     pub cmds: Vec<String>,
+    /// Object REXX activities on threads (one runs at a time).
+    pub gil: Option<std::sync::Arc<Gil>>,
+    /// Output of all activities.
+    pub shared: Option<std::sync::Arc<std::sync::Mutex<Vec<String>>>>,
+}
+
+/// The lock activities take turns with, and how many run besides the
+/// first.
+#[derive(Default)]
+pub struct Gil {
+    held: std::sync::Mutex<bool>,
+    cv: std::sync::Condvar,
+    pub active: std::sync::atomic::AtomicUsize,
+}
+
+impl Gil {
+    pub fn lock(&self) {
+        let mut h = self.held.lock().unwrap();
+        while *h {
+            h = self.cv.wait(h).unwrap();
+        }
+        *h = true;
+    }
+    pub fn unlock(&self) {
+        *self.held.lock().unwrap() = false;
+        self.cv.notify_all();
+    }
+}
+
+struct Pass<T>(T);
+unsafe impl<T> Send for Pass<T> {}
+impl<T> Pass<T> {
+    fn take(self) -> T {
+        self.0
+    }
 }
 
 impl MemHost {
     fn line(&mut self, s: &[u8]) {
-        self.out.push(String::from_utf8_lossy(s).into_owned());
+        let l = String::from_utf8_lossy(s).into_owned();
+        match &self.shared {
+            Some(sh) => sh.lock().unwrap().push(l),
+            None => self.out.push(l),
+        }
     }
 }
 
@@ -111,7 +150,7 @@ impl Host for MemHost {
     }
     fn report_error(&mut self, _st: &mut State, code: u32, file: &[u8], line: u32) {
         let s = alloc::format!("REX{:04}: Error {} running {}, line {}", code, code, String::from_utf8_lossy(file), line);
-        self.out.push(s);
+        self.line(s.as_bytes());
     }
     fn f_open(&mut self, name: &[u8], mode: OpenMode) -> Result<u32, u32> {
         let key = name.to_ascii_uppercase();
@@ -172,7 +211,43 @@ impl Host for MemHost {
         }
     }
     fn report_detail(&mut self, _st: &mut State, major: u32, minor: u32, text: &[u8]) {
-        self.out.push(alloc::format!("Error {major}.{minor}: {}", String::from_utf8_lossy(text)));
+        self.line(alloc::format!("Error {major}.{minor}: {}", String::from_utf8_lossy(text)).as_bytes());
+    }
+    fn spawn(&mut self, job: alloc::boxed::Box<dyn FnOnce(&mut dyn Host)>) -> bool {
+        let Some(gil) = self.gil.clone() else { return false };
+        gil.active.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let shared = self.shared.clone();
+        let job = Pass(job);
+        std::thread::spawn(move || {
+            let job = job.take();
+            gil.lock();
+            let mut h = MemHost { gil: Some(gil.clone()), shared, ..Default::default() };
+            job(&mut h);
+            gil.active.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            gil.unlock();
+        });
+        true
+    }
+    fn yield_now(&mut self) {
+        if let Some(g) = &self.gil {
+            g.unlock();
+            std::thread::yield_now();
+            g.lock();
+        }
+    }
+    fn wait_guard(&mut self, _st: &mut State) -> bool {
+        let Some(g) = self.gil.clone() else { return false };
+        g.unlock();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        g.lock();
+        true
+    }
+    fn sleep(&mut self, ms: u32) {
+        if let Some(g) = &self.gil {
+            g.unlock();
+            std::thread::sleep(std::time::Duration::from_millis(ms as u64));
+            g.lock();
+        }
     }
     fn find_program(&mut self, name: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
         let k = name.to_ascii_uppercase();
@@ -211,6 +286,31 @@ pub fn run_oo_with(src: &str, h: &mut MemHost) -> (Vec<String>, Result<Option<Ve
         it.run_program(src.as_bytes(), b"C:\\T.CMD", CallType::Command, Vec::new(), b"CMD")
     };
     (core::mem::take(&mut h.out), r)
+}
+
+/// Run an Object REXX program whose activities run on threads; wait for
+/// them all.
+pub fn run_oo_threads(src: &str) -> Vec<String> {
+    let gil = std::sync::Arc::new(Gil::default());
+    let shared = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut h = MemHost { gil: Some(gil.clone()), shared: Some(shared.clone()), ..Default::default() };
+    gil.lock();
+    let src = src.replace("\r\n", "\n").replace('\n', "\r\n");
+    {
+        let mut it = Interp::new_oo(&mut h);
+        let _ = it.run_program(src.as_bytes(), b"C:\\T.CMD", CallType::Command, Vec::new(), b"CMD");
+    }
+    for _ in 0..5000 {
+        if gil.active.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            break;
+        }
+        gil.unlock();
+        std::thread::sleep(std::time::Duration::from_millis(1));
+        gil.lock();
+    }
+    gil.unlock();
+    let v = shared.lock().unwrap().clone();
+    v
 }
 
 pub fn run_oo(src: &str) -> Vec<String> {

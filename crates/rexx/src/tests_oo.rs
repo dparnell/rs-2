@@ -144,6 +144,27 @@ fn ibm_probe2() {
     assert!(got[n + 1].starts_with("Error 42.3:"), "{}", got[n + 1]);
 }
 
+/// Activities on threads: START, REPLY going on after the sender,
+/// GUARD WHEN waiting for another activity, an alarm.
+#[test]
+fn activities() {
+    let out = crate::tests::run_oo_threads(
+        "b = .buffer~new\nm = b~start('TAKE')\nb~put('item')\nsay 'took' m~result\n\
+         t = .ticker~new\nsay t~go\ndo i = 1 to 2000; if t~count >= 3 then leave; x = i; end\nsay 'ticks' (t~count >= 3)\n\
+         a = .alarm~new(0.05, .message~new(.stdout, 'LINEOUT', 'I', 'alarm!'))\n\
+         do i = 1 to 200000; if \\.local~hasindex('NOPE') & i // 1000 = 0 then nop; end\n\
+         ::class buffer\n::method init\n  expose item\n  item = .nil\n::method put\n  expose item\n  use arg item\n\
+         ::method take\n  expose item\n  guard on when item \\= .nil\n  return item\n\
+         ::class ticker\n::method init\n  expose n\n  n = 0\n::method count unguarded\n  expose n\n  return n\n\
+         ::method go\n  expose n\n  reply 'going'\n  guard off\n  do 3\n    n = n + 1\n  end\n",
+    );
+    let all = out.join("|");
+    assert!(out.contains(&String::from("took item")), "{all}");
+    assert!(out.contains(&String::from("going")), "{all}");
+    assert!(out.contains(&String::from("ticks 1")), "{all}");
+    assert!(out.iter().any(|l| l.starts_with("alarm!")), "{all}");
+}
+
 /// tests/rexx/ORXLANG.CMD (which passes on IBM's Object REXX).
 #[test]
 fn orxlang_script() {

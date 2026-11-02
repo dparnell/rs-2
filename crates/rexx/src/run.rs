@@ -33,22 +33,46 @@ pub(crate) fn cond_index(c: Cond) -> usize {
 }
 
 impl Interp<'_> {
-    pub(crate) fn run(&mut self, f: &mut Frame, code: &Rc<Program>, mut pc: usize, extra: u32) -> R<Flow> {
-        let mut ctl: Vec<Ctl> = Vec::new();
+    pub(crate) fn run(&mut self, f: &mut Frame, code: &Rc<Program>, pc: usize, extra: u32) -> R<Flow> {
+        self.run_from(f, code, pc, extra, Vec::new())
+    }
+
+    /// Run from clause `pc` with the control stack `ctl` (a method going
+    /// on after REPLY on an activity of its own).
+    pub(crate) fn run_from(&mut self, f: &mut Frame, code: &Rc<Program>, mut pc: usize, extra: u32, mut ctl: Vec<Ctl>) -> R<Flow> {
         let main = Rc::ptr_eq(code, &f.prog);
         let n = code.clauses.len();
         let mut mode = Mode::Seq;
         while pc < n {
             let lvl = f.base + extra + code.clauses[pc].level;
             let m = core::mem::replace(&mut mode, Mode::Seq);
+            if self.w.is_some() {
+                // activities take turns
+                self.ticks = self.ticks.wrapping_add(1);
+                if self.ticks % 64 == 0 {
+                    self.host.yield_now();
+                }
+            }
             let mut r = self.step(f, code, pc, &mut ctl, lvl, extra, m);
+            if let Ok(Next::Reply(v)) = r {
+                // REPLY: the sender goes on with the value while the method
+                // goes on on another activity; without one, the method
+                // finishes first
+                if main && crate::oo::reply_elsewhere(self, f, code, pc + 1, extra, &ctl) {
+                    return Ok(Flow::Return(v));
+                }
+                if let Some(a) = &f.act {
+                    *a.reply.borrow_mut() = Some(v);
+                }
+                r = Ok(Next::Go);
+            }
             if r.is_ok() && !f.pending.is_empty() {
                 if let Err(e) = self.run_pending(f, code.clauses[pc].line, lvl) {
                     r = Err(e);
                 }
             }
             match r {
-                Ok(Next::Go) => pc += 1,
+                Ok(Next::Go) | Ok(Next::Reply(_)) => pc += 1,
                 Ok(Next::Jump(t)) => pc = t,
                 Ok(Next::Again(t)) => {
                     mode = Mode::Again;

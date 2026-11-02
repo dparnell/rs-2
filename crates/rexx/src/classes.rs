@@ -197,13 +197,6 @@ fn need(it: &mut Interp, args: &Args, i: usize) -> R<Value> {
     }
 }
 
-fn max_args(it: &mut Interp, args: &Args, n: usize) -> R<()> {
-    if args.len() > n {
-        let s = int_str(n as i64);
-        return Err(err93(it, 902, &[&s]));
-    }
-    Ok(())
-}
 
 fn str_arg(it: &mut Interp, f: &mut Frame, args: &Args, i: usize) -> R<Val> {
     let v = need(it, args, i)?;
@@ -458,7 +451,7 @@ fn object_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Arg
             let rest: Args = args.into_iter().skip(1).collect();
             let md = MsgData { target: recv.clone(), name: n, scope: None, args: rest, state: 0, result: None, notify: Vec::new() };
             let m = w.obj(Builtin::Message, Data::Message(alloc::boxed::Box::new(md)));
-            start_message(it, f, &m, lvl)?;
+            start_async(it, f, &m, lvl)?;
             Ok(Some(m))
         }
         _ => Ok(None),
@@ -1723,6 +1716,36 @@ fn supplier_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: A
 /// Run a message object (SEND and START: one activity runs at a time, so
 /// a started message runs to its end before START returns, unless the
 /// host gives it an activity of its own).
+/// A value that may go to another activity's thread (only one activity
+/// runs at a time: the host's lock).
+struct Pass<T>(T);
+unsafe impl<T> Send for Pass<T> {}
+
+/// START: the message on an activity of its own (or, if the host has no
+/// other activities, run now).
+pub fn start_async(it: &mut Interp, f: &mut Frame, m: &Value, lvl: u32) -> RV {
+    let Some(o) = m.obj().cloned() else { return Ok(None) };
+    let ready = matches!(&*o.data.borrow(), Data::Message(md) if md.state == 0);
+    if !ready {
+        return start_message(it, f, m, lvl);
+    }
+    let w = it.w.clone().unwrap();
+    let id = w.next_activity();
+    let job = Pass((w, m.clone()));
+    let spawned = it.host.spawn(alloc::boxed::Box::new(move |h: &mut dyn crate::Host| {
+        let Pass((w, m)) = job;
+        let mut it2 = Interp::new_activity(h, w, id);
+        it2.depth = 1;
+        let mut f2 = Frame::new(Rc::new(crate::parse::Program::empty()), b"", b"CMD", crate::CallType::Subroutine, 1);
+        let _ = start_message(&mut it2, &mut f2, &m, 0);
+    }));
+    if spawned {
+        // started: SEND and START again are errors
+        return Ok(None);
+    }
+    start_message(it, f, m, lvl)
+}
+
 pub fn start_message(it: &mut Interp, f: &mut Frame, m: &Value, lvl: u32) -> RV {
     let Some(o) = m.obj().cloned() else { return Ok(None) };
     let (target, name, scope, args, state) = match &mut *o.data.borrow_mut() {
@@ -1794,10 +1817,26 @@ fn message_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Ar
                     md.target = t;
                 }
             }
-            let r = start_message(it, f, recv, lvl)?;
-            Ok(if name == b"SEND" { r } else { None })
+            if name == b"START" {
+                start_async(it, f, recv, lvl)?;
+                return Ok(None);
+            }
+            start_message(it, f, recv, lvl)
         }
         b"RESULT" => {
+            // a started message: wait for it, letting the others run
+            loop {
+                let running = matches!(&*o.data.borrow(), Data::Message(md) if md.state == 1);
+                if !running {
+                    break;
+                }
+                let mut st = core::mem::replace(&mut it.st, State::empty());
+                let more = it.host.wait_guard(&mut st);
+                it.st = st;
+                if !more {
+                    break;
+                }
+            }
             let (state, res) = match &*o.data.borrow() {
                 Data::Message(md) => (md.state, md.result.clone()),
                 _ => (0, None),
@@ -2016,12 +2055,40 @@ fn alarm_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Args
         b"INIT" => {
             let t = str_arg(it, f, &args, 0)?;
             let m = need(it, &args, 1)?;
-            if Num::parse(&t).is_none() && !t.contains(&b':') {
-                return Err(err93(it, 951, &[&t]));
-            }
-            // there is no other activity to run it later: the alarm is
-            // kept but goes off only where the host runs activities
-            *o.data.borrow_mut() = Data::Alarm(AlarmData { msg: m, cancelled: false });
+            // seconds from now, or a time of day (hh:mm:ss)
+            let ms: u64 = match Num::parse(&t) {
+                Some(n) => {
+                    let s = alloc::format!("{}", Num::mul(&n, &Num::from_i64(1000), &crate::num::Numeric { digits: 18, fuzz: 0, engineering: false }).to_whole(18).unwrap_or(0));
+                    s.parse::<i64>().unwrap_or(0).max(0) as u64
+                }
+                None => {
+                    let parts: Vec<i64> = t.split(|&c| c == b':').map(|p| core::str::from_utf8(p).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(-1)).collect();
+                    if parts.len() != 3 || parts.iter().any(|&p| p < 0) {
+                        return Err(err93(it, 951, &[&t]));
+                    }
+                    let now = it.host.now();
+                    let at = (parts[0] * 3600 + parts[1] * 60 + parts[2]) * 1000;
+                    let cur = (now.hour as i64 * 3600 + now.min as i64 * 60 + now.sec as i64) * 1000 + now.micros as i64 / 1000;
+                    (if at >= cur { at - cur } else { at + 86_400_000 - cur }) as u64
+                }
+            };
+            *o.data.borrow_mut() = Data::Alarm(AlarmData { msg: m.clone(), cancelled: false });
+            // the alarm waits on an activity of its own (a host without
+            // activities keeps it but it never goes off)
+            let w = it.w.clone().unwrap();
+            let id = w.next_activity();
+            let job = Pass((w, recv.clone(), m));
+            it.host.spawn(alloc::boxed::Box::new(move |h: &mut dyn crate::Host| {
+                let Pass((w, alarm, m)) = job;
+                h.sleep(ms.min(u32::MAX as u64) as u32);
+                let cancelled = matches!(&*alarm.obj().unwrap().data.borrow(), Data::Alarm(a) if a.cancelled);
+                if !cancelled {
+                    let mut it2 = Interp::new_activity(h, w, id);
+                    it2.depth = 1;
+                    let mut f2 = Frame::new(Rc::new(crate::parse::Program::empty()), b"", b"CMD", crate::CallType::Subroutine, 1);
+                    let _ = it2.send(&mut f2, &m, b"SEND", Vec::new(), Start::Normal, 0);
+                }
+            }));
             Ok(None)
         }
         b"CANCEL" => {
