@@ -70,9 +70,31 @@ fn my_pid() -> u32 {
 
 // ---- The shell's side ----
 
+/// Open a view of an object (mp1) on the shell's PM thread: the view (mp2).
+pub const WM_WPS_OPEN: u32 = WM_USER + 0x501;
+
+/// OPEN= of a setup string: the object, locked meanwhile, opens its view
+/// on the shell's PM thread (at once when there is no shell window).
+pub fn open_later(obj: usize, view: u32) {
+    use crate::classes_gen::m::WPObject;
+    crate::obj::call(WPObject::wpLockObject, &[obj]);
+    let hwnd = unsafe { crate::shell::vhwndWorkplaceWindow };
+    if hwnd == 0 || unsafe { WinPostMsg(hwnd, WM_WPS_OPEN, obj as u32, view) } == 0 {
+        crate::obj::call(WPObject::wpViewObject, &[obj, 0, view as usize, 0]);
+        crate::obj::call(WPObject::wpUnlockObject, &[obj]);
+    }
+}
+
 extern "C" fn server_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     if msg == WM_WPS_CALL {
         serve();
+        return 0;
+    }
+    if msg == WM_WPS_OPEN {
+        use crate::classes_gen::m::WPObject;
+        let obj = a as usize;
+        crate::obj::call(WPObject::wpViewObject, &[obj, 0, b as usize, 0]);
+        crate::obj::call(WPObject::wpUnlockObject, &[obj]);
         return 0;
     }
     unsafe { WinDefWindowProc(h, msg, a, b) }
