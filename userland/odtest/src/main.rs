@@ -37,6 +37,14 @@ unsafe extern "C" {
     fn ODTransformNewClass(major: i32, minor: i32) -> usize;
     #[link_name = "OPENDOC.328"]
     fn ODFacetNewClass(major: i32, minor: i32) -> usize;
+    #[link_name = "OPENDOC.298"]
+    fn ODDispatchModuleNewClass(major: i32, minor: i32) -> usize;
+    #[link_name = "OPENDOC.300"]
+    static ODDispatcherClassData: [usize; 11];
+    #[link_name = "OPENDOC.504"]
+    static ODWindowClassData: [usize; 26];
+    #[link_name = "OPENDOC.375"]
+    static ODMenuBarClassData: [usize; 24];
     #[link_name = "OPENDOC.810"]
     fn StorageUnitGetValue(su: usize, ev: usize, size: usize, buf: *mut u8) -> usize;
     #[link_name = "OPENDOC.906"]
@@ -291,6 +299,11 @@ struct TestPart {
     facets: u32,
     frames: u32,
     draws: u32,
+    events: u32,
+    last_msg: u32,
+    last_frame: usize,
+    last_facet: usize,
+    foci: u32,
 }
 
 fn tp(this: usize) -> &'static mut TestPart {
@@ -386,6 +399,139 @@ extern "C" fn part_draw(this: usize, ev: usize, facet: usize, shape: usize) -> u
     0
 }
 
+/// HandleEvent: every event but a menu command is the part's.
+extern "C" fn part_handle_event(this: usize, ev: usize, event: usize, frame: usize, facet: usize, info: usize) -> usize {
+    let q = unsafe { *(event as *const [u32; 8]) };
+    let t = tp(this);
+    t.events += 1;
+    t.last_msg = q[1];
+    t.last_frame = frame;
+    t.last_facet = facet;
+    (q[1] != 0x20) as usize
+}
+
+extern "C" fn part_focus_acquired(this: usize, ev: usize, focus: usize, frame: usize) -> usize {
+    tp(this).foci += 1;
+    0
+}
+
+static mut MODULE_EVENTS: u32 = 0;
+static mut MODULE_LAST: [u32; 8] = [0; 8];
+
+/// RS2TestModule's Dispatch: the menu commands no part took.
+extern "C" fn module_dispatch(this: usize, ev: usize, event: usize, info: usize) -> usize {
+    unsafe {
+        MODULE_EVENTS += 1;
+        MODULE_LAST = *(event as *const [u32; 8]);
+    }
+    1
+}
+
+#[unsafe(no_mangle)]
+pub static mut RS2TestModuleClassData: [usize; 4] = [0; 4];
+#[unsafe(no_mangle)]
+pub static mut RS2TestModuleCClassData: [usize; 8] = [0; 8];
+
+fn test_module() -> usize {
+    unsafe { ODDispatchModuleNewClass(1, 0) };
+    let cls = somsup::build_class(&ClassSpec {
+        name: "RS2TestModule",
+        parents: &["ODDispatchModule"],
+        meta: None,
+        major: 1,
+        minor: 0,
+        data: 0,
+        align: 0,
+        methods: &[],
+        overrides: &[("ODDispatchModule::Dispatch", t_module as usize)],
+        cd: unsafe { (&raw mut RS2TestModuleClassData) as *mut usize },
+        ccd: unsafe { (&raw mut RS2TestModuleCClassData) as *mut usize },
+    });
+    somsup::new_object(cls)
+}
+
+/// Dispatch a PM message (an OS/2 ODEvent) with no window handle.
+fn dispatch(d: usize, msg: u32, mp1: u32, mp2: u32) -> bool {
+    let q = [0u32, msg, mp1, mp2, 0, 0, 0, 0];
+    m(cd!(ODDispatcherClassData), 6, &[d, ev(), q.as_ptr() as usize]) & 0xff != 0
+}
+
+fn pt(x: i32, y: i32) -> u32 {
+    (x as u16 as u32) | ((y as u16 as u32) << 16)
+}
+
+fn events_and_menus(session: usize, rf: usize, cf: usize, root: usize, child: usize) {
+    let e = ev();
+    let ws = m(cd!(ODBaseSessionClassData), BS_GET_WINDOW_STATE, &[session, e]);
+    // A window with no PM window: its root facet is made by Open.
+    let w = m(cd!(ODWindowStateClassData), 1, &[ws, e, 0, rf, 1, 1, 0, 1, 1, 0]);
+    m(cd!(ODWindowClassData), 6, &[w, e]);
+    let rfc = m(cd!(ODWindowClassData), 2, &[w, e]);
+    check("RegisterWindowForFrame and Open make the root facet", w != 0 && rfc != 0);
+    let ext = somsup::new_object(unsafe { ODTransformNewClass(1, 0) });
+    let off = Point { x: 10 * ONE, y: 20 * ONE };
+    m(cd!(ODBaseTransformClassData), XF_SET_OFFSET, &[ext, e, &off as *const Point as usize]);
+    let cfc = m(cd!(ODFacetClassData), FC_CREATE_EMBEDDED_FACET, &[rfc, e, cf, 0, ext, 0, 0, 0, 0]);
+    release(ext);
+    let d = m(cd!(ODBaseSessionClassData), 6, &[session, e]);
+    check("the session's dispatcher", d != 0);
+    let module = test_module();
+    m(cd!(ODDispatcherClassData), 1, &[d, e, 0x20, module]);
+    let arb = m(cd!(ODBaseSessionClassData), BS_GET_ARBITRATOR, &[session, e]);
+    let sel = tok(session, b"Selection\0");
+    let key = tok(session, b"Key\0");
+    let menu = tok(session, b"Menu\0");
+    let owner = |f: usize| {
+        let o = m(cd!(ODArbitratorClassData), ARB_ACQUIRE_FOCUS_OWNER, &[arb, e, f]);
+        release(o);
+        o
+    };
+    // A click in the root part only.
+    let handled = dispatch(d, 0x71, pt(150, 80), 0);
+    check("a click outside the embedded facet goes to the root part", handled && tp(root).last_msg == 0x71 && tp(root).last_frame == rf && tp(root).last_facet == rfc);
+    check("and activates the root frame", owner(sel) == rf && owner(key) == rf);
+    // A click in the embedded part's facet (10..60, 20..60 in the window).
+    tp(child).foci = 0;
+    let handled = dispatch(d, 0x71, pt(30, 40), 0);
+    check("mouse down goes to the part under the pointer", handled && tp(child).last_msg == 0x71 && tp(child).last_frame == cf && tp(child).last_facet == cfc);
+    check("the click activated the embedded frame (selection, menu, key foci)", owner(sel) == cf && owner(menu) == cf && owner(key) == cf && tp(child).foci == 3);
+    let n = tp(child).events;
+    dispatch(d, 0x7a, 0x41, 0);
+    check("WM_CHAR goes to the frame with the key focus", tp(child).events == n + 1 && tp(child).last_msg == 0x7a);
+    let n = tp(child).events;
+    let handled = dispatch(d, 0x20, 0x5100, 0);
+    check("a menu command goes to the menu focus's part, then (not taken) to the dispatch module", handled && tp(child).events == n + 1 && tp(child).last_msg == 0x20 && unsafe { MODULE_EVENTS } == 1 && unsafe { MODULE_LAST[2] } == 0x5100);
+    check("an event nobody handles is not handled", !dispatch(d, 0x1234, 0, 0));
+    let moved = dispatch(d, 0x70, pt(500, 500), 0);
+    check("mouse outside every facet is not dispatched", !moved);
+
+    // Menus.
+    let mb = m(cd!(ODWindowStateClassData), 18, &[ws, e, 0]);
+    let c = cd!(ODMenuBarClassData);
+    m(c, 2, &[mb, e, 0x0e, b"~Document\0".as_ptr() as usize, 0]);
+    m(c, 2, &[mb, e, 0x11, b"~Edit\0".as_ptr() as usize, 0]);
+    let mi = [0xffffu16, 1, 0, 0x5100, 0, 0, 0, 0];
+    m(c, 14, &[mb, e, 0x0e, 0x5100, mi.as_ptr() as usize]);
+    m(c, 7, &[mb, e, 0x0e, 0x5100, b"~Save\0".as_ptr() as usize]);
+    let mi2 = [0xffffu16, 1, 0, 0x5016, 0, 0, 0, 0];
+    m(c, 14, &[mb, e, 0x11, 0x5016, mi2.as_ptr() as usize]);
+    check("menu items exist", m(c, 16, &[mb, e, 0x0e, 0x5100]) & 0xff != 0 && m(c, 16, &[mb, e, 0, 0x11]) & 0xff != 0 && m(c, 16, &[mb, e, 0x0e, 0x5016]) & 0xff == 0);
+    check("GetMenuItemText", s(m(c, 8, &[mb, e, 0x0e, 0x5100])) == b"~Save");
+    m(c, 12, &[mb, e, 0x11, 0x5016, 0]);
+    m(c, 11, &[mb, e, 0x0e, 0x5100, 1]);
+    check("EnableMenuItem / CheckMenuItem", m(c, 17, &[mb, e, 0x11, 0x5016]) & 0xff == 0 && m(c, 18, &[mb, e, 0x0e, 0x5100]) & 0xff != 0);
+    let cp = m(c, 1, &[mb, e]);
+    check("a copied menu bar keeps its items", m(c, 16, &[cp, e, 0x11, 0x5016]) & 0xff != 0 && m(c, 17, &[cp, e, 0x11, 0x5016]) & 0xff == 0);
+    m(c, 21, &[cp, e, 0x11, 0x5016]);
+    check("RemoveMenuItem (on the copy only)", m(c, 16, &[cp, e, 0x11, 0x5016]) & 0xff == 0 && m(c, 16, &[mb, e, 0x11, 0x5016]) & 0xff != 0);
+    m(cd!(ODWindowStateClassData), 15, &[ws, e, mb]);
+    let base = m(cd!(ODWindowStateClassData), 16, &[ws, e]);
+    check("SetBaseMenuBar / CopyBaseMenuBar", base != 0 && base != mb && m(c, 16, &[base, e, 0x0e, 0x5100]) & 0xff != 0);
+    release(base);
+    release(cp);
+    ok_ev("events and menus");
+}
+
 extern "C" fn part_uninit(this: usize) -> usize {
     let slot: &mut usize = somsup::data(ccd(), this);
     if *slot != 0 {
@@ -404,6 +550,9 @@ somsup::methods! {
     t_facet_added => part_facet_added, 3;
     t_draw => part_draw, 4;
     t_uninit => part_uninit, 1;
+    t_handle => part_handle_event, 6;
+    t_focus => part_focus_acquired, 4;
+    t_module => module_dispatch, 4;
 }
 
 fn test_part_class() -> usize {
@@ -426,6 +575,8 @@ fn test_part_class() -> usize {
             ("ODPart::FacetAdded", t_facet_added as usize),
             ("ODPart::Draw", t_draw as usize),
             ("SOMObject::somUninit", t_uninit as usize),
+            ("ODPart::HandleEvent", t_handle as usize),
+            ("ODPart::FocusAcquired", t_focus as usize),
         ],
         cd: unsafe { (&raw mut RS2TestPartClassData) as *mut usize },
         ccd: unsafe { (&raw mut RS2TestPartCClassData) as *mut usize },
@@ -678,6 +829,7 @@ fn basic() {
     m(cd!(ODFocusSetClassData), FS_ADD, &[set, e, sel]);
     check("focus set Contains", m(cd!(ODFocusSetClassData), FS_CONTAINS, &[set, e, sel]) & 0xff != 0);
     somsup::free_object(set);
+    events_and_menus(session, rf, cf, root, child);
 
     // The root part's storage unit goes in the draft's properties; save.
     let props = m(cd!(ODDraftClassData), DR_ACQUIRE_DRAFT_PROPERTIES, &[draft, e]);

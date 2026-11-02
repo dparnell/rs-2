@@ -26,6 +26,7 @@ extern crate os2;
 
 #[macro_use]
 pub mod rt;
+pub mod events;
 pub mod layout;
 pub mod obj;
 pub mod part;
@@ -70,6 +71,7 @@ class_data! {
     ODClipboardClassData, ODClipboardCClassData, 16;
     ODContainerClassData, ODContainerCClassData, 12;
     ODDispatcherClassData, ODDispatcherCClassData, 12;
+    ODDispatchModuleClassData, ODDispatchModuleCClassData, 4;
     ODDocumentClassData, ODDocumentCClassData, 16;
     ODDraftClassData, ODDraftCClassData, 44;
     ODDragAndDropClassData, ODDragAndDropCClassData, 12;
@@ -141,7 +143,7 @@ pub static CLASSES: &[(&str, fn() -> Def)] = &[
     ("ODWindowState", || Def { name: "ODWindowState", parents: &["ODObject"], meta: None, data: 4, methods: services::WINDOW_STATE_M, overrides: services::WINDOW_STATE_O, cd: p!(ODWindowStateClassData), ccd: p!(ODWindowStateCClassData) }),
     ("ODWindow", || Def { name: "ODWindow", parents: &["ODRefCntObject"], meta: None, data: 4, methods: services::WINDOW_M, overrides: services::WINDOW_O, cd: p!(ODWindowClassData), ccd: p!(ODWindowCClassData) }),
     ("ODWindowIterator", || Def { name: "ODWindowIterator", parents: &["ODObject"], meta: None, data: 4, methods: services::WINDOW_ITER_M, overrides: services::WINDOW_ITER_O, cd: p!(ODWindowIteratorClassData), ccd: p!(ODWindowIteratorCClassData) }),
-    ("ODMenuBar", || Def { name: "ODMenuBar", parents: &["ODRefCntObject"], meta: None, data: 4, methods: services::MENU_BAR_M, overrides: services::MENU_BAR_O, cd: p!(ODMenuBarClassData), ccd: p!(ODMenuBarCClassData) }),
+    ("ODMenuBar", || Def { name: "ODMenuBar", parents: &["ODRefCntObject"], meta: None, data: 4, methods: events::MENU_BAR_M, overrides: events::MENU_BAR_O, cd: p!(ODMenuBarClassData), ccd: p!(ODMenuBarCClassData) }),
     ("ODClipboard", || Def { name: "ODClipboard", parents: &["ODObject"], meta: None, data: 4, methods: services::CLIPBOARD_M, overrides: &[], cd: p!(ODClipboardClassData), ccd: p!(ODClipboardCClassData) }),
     ("ODBaseDragAndDrop", || Def { name: "ODBaseDragAndDrop", parents: &["ODObject"], meta: None, data: 4, methods: services::BASE_DND_M, overrides: &[], cd: p!(ODBaseDragAndDropClassData), ccd: p!(ODBaseDragAndDropCClassData) }),
     ("ODDragAndDrop", || Def { name: "ODDragAndDrop", parents: &["ODBaseDragAndDrop"], meta: None, data: 0, methods: services::DND_M, overrides: &[], cd: p!(ODDragAndDropClassData), ccd: p!(ODDragAndDropCClassData) }),
@@ -150,7 +152,8 @@ pub static CLASSES: &[(&str, fn() -> Def)] = &[
     ("ODExtension", || Def { name: "ODExtension", parents: &["ODRefCntObject"], meta: None, data: 4, methods: services::EXTENSION_M, overrides: &[], cd: p!(ODExtensionClassData), ccd: p!(ODExtensionCClassData) }),
     ("ODSettingsExtension", || Def { name: "ODSettingsExtension", parents: &["ODExtension"], meta: None, data: 0, methods: services::SETTINGS_EXTENSION_M, overrides: &[], cd: p!(ODSettingsExtensionClassData), ccd: p!(ODSettingsExtensionCClassData) }),
     ("ODStatusLineExtension", || Def { name: "ODStatusLineExtension", parents: &["ODExtension"], meta: None, data: 0, methods: services::STATUS_LINE_M, overrides: &[], cd: p!(ODStatusLineExtensionClassData), ccd: p!(ODStatusLineExtensionCClassData) }),
-    ("ODDispatcher", || Def { name: "ODDispatcher", parents: &["ODObject"], meta: None, data: 0, methods: services::DISPATCHER_M, overrides: &[], cd: p!(ODDispatcherClassData), ccd: p!(ODDispatcherCClassData) }),
+    ("ODDispatcher", || Def { name: "ODDispatcher", parents: &["ODObject"], meta: None, data: 4, methods: events::DISPATCHER_M, overrides: events::DISPATCHER_O, cd: p!(ODDispatcherClassData), ccd: p!(ODDispatcherCClassData) }),
+    ("ODDispatchModule", || Def { name: "ODDispatchModule", parents: &["ODObject"], meta: None, data: 4, methods: events::DISPATCH_MODULE_M, overrides: &[], cd: p!(ODDispatchModuleClassData), ccd: p!(ODDispatchModuleCClassData) }),
     ("ODNameSpaceManager", || Def { name: "ODNameSpaceManager", parents: &["ODObject"], meta: None, data: 0, methods: services::NAME_SPACE_MANAGER_M, overrides: &[], cd: p!(ODNameSpaceManagerClassData), ccd: p!(ODNameSpaceManagerCClassData) }),
     ("ODTypeList", || Def { name: "ODTypeList", parents: &["ODObject"], meta: None, data: 0, methods: services::TYPE_LIST_M, overrides: &[], cd: p!(ODTypeListClassData), ccd: p!(ODTypeListCClassData) }),
     ("OSAScriptingComponent", || Def { name: "OSAScriptingComponent", parents: &["SOMObject"], meta: None, data: 0, methods: services::OSA_M, overrides: &[], cd: p!(OSAScriptingComponentClassData), ccd: p!(OSAScriptingComponentCClassData) }),
@@ -220,6 +223,7 @@ new_class_fns! {
     ODClipboardNewClass, __a_ODClipboardNewClass => "ODClipboard";
     ODContainerNewClass, __a_ODContainerNewClass => "ODContainer";
     ODDispatcherNewClass, __a_ODDispatcherNewClass => "ODDispatcher";
+    ODDispatchModuleNewClass, __a_ODDispatchModuleNewClass => "ODDispatchModule";
     ODDocumentNewClass, __a_ODDocumentNewClass => "ODDocument";
     ODDraftNewClass, __a_ODDraftNewClass => "ODDraft";
     ODDragAndDropNewClass, __a_ODDragAndDropNewClass => "ODDragAndDrop";

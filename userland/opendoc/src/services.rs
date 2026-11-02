@@ -174,7 +174,11 @@ fn make_services(this: usize) {
         s.dnd = c;
     }
     if s.dispatcher == 0 {
-        s.dispatcher = new_of(cd!(ODDispatcherClassData), "ODDispatcher");
+        let d = new_of(cd!(ODDispatcherClassData), "ODDispatcher");
+        if d != 0 {
+            crate::events::InitDispatcher(d, 0, this);
+        }
+        s.dispatcher = d;
     }
     if s.nsm == 0 {
         s.nsm = new_of(cd!(ODNameSpaceManagerClassData), "ODNameSpaceManager");
@@ -325,6 +329,9 @@ fn window_of(frame_hwnd: u32) -> usize {
 extern "C" fn client_proc(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> usize {
     unsafe {
         let frame_hwnd = crate::pmparent(hwnd);
+        if msg != WM_PAINT && msg != WM_SIZE && crate::events::client_message(hwnd, msg, mp1, mp2) {
+            return if msg == 0x7a || (0x70..=0x79).contains(&msg) { 1 } else { 0 };
+        }
         match msg {
             WM_PAINT => {
                 let mut r = [0i32; 4];
@@ -342,6 +349,7 @@ extern "C" fn client_proc(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> usize 
                             let mut ev = somsup::Environment { major: 0, exception_name: core::ptr::null(), params: core::ptr::null_mut(), anchor: 0 };
                             layout::Draw(f, &raw mut ev as usize, 0, 0);
                             layout::DrawChildren(f, &raw mut ev as usize, 0, 0);
+                            crate::events::draw_active_border(w, hps);
                             layout::pcanvas(pc).hps = old;
                         }
                     }
@@ -536,7 +544,7 @@ methods! {
     }
     fn CopyBaseMenuBar(this: usize, ev: usize) -> usize {
         let m = wstate(this).base_menu;
-        if m == 0 { 0 } else { MCopy(m, ev) }
+        if m == 0 { 0 } else { crate::events::MCopy(m, ev) }
     }
     fn SetBasePopup(this: usize, ev: usize, m: usize) -> usize {
         wstate(this).base_popup = acquire(m, ev);
@@ -544,7 +552,7 @@ methods! {
     }
     fn CopyBasePopup(this: usize, ev: usize) -> usize {
         let m = wstate(this).base_popup;
-        if m == 0 { 0 } else { MCopy(m, ev) }
+        if m == 0 { 0 } else { crate::events::MCopy(m, ev) }
     }
     fn CreateMenuBar(this: usize, ev: usize, platform: usize) -> usize { new_of(cd!(ODMenuBarClassData), "ODMenuBar") }
     fn WsSomUninit(this: usize) -> usize {
@@ -768,12 +776,17 @@ fn fset(this: usize) -> &'static mut SetState {
     state(cd!(ODFocusSetCClassData), this)
 }
 
+/// The frame owning a focus (not acquired).
+pub fn focus_owner(this: usize, focus: usize) -> usize {
+    arb(this).owners.get(&focus).copied().unwrap_or(0)
+}
+
 fn frame_part(f: usize, ev: usize) -> usize {
     if f == 0 { 0 } else { layout::FAcquirePart(f, ev) }
 }
 
 /// Give a focus to a frame: its previous owner's part is told it lost it.
-fn grant(this: usize, ev: usize, focus: usize, frame: usize) {
+pub fn grant(this: usize, ev: usize, focus: usize, frame: usize) {
     let old = arb(this).owners.insert(focus, frame).unwrap_or(0);
     if old != 0 && old != frame {
         let p = frame_part(old, ev);
@@ -880,100 +893,6 @@ pub static ARBITRATOR_M: &[(&str, M)] = &[
 pub static ARBITRATOR_O: &[(&str, M)] = &[("SOMObject::somUninit", ArbSomUninit::t)];
 pub static FOCUS_SET_M: &[(&str, M)] = &[("Add", Add::t), ("Remove", SetRemove::t), ("Contains", Contains::t)];
 pub static FOCUS_SET_O: &[(&str, M)] = &[("SOMObject::somUninit", SetSomUninit::t)];
-
-// ---- ODMenuBar (OS/2): items kept by menu and item ID ----
-
-#[derive(Default, Clone)]
-pub struct MenuState {
-    pub items: BTreeMap<(u16, u16), (bool, bool, Vec<u8>)>,
-}
-
-fn menu(this: usize) -> &'static mut MenuState {
-    state(cd!(ODMenuBarCClassData), this)
-}
-
-fn key(m: usize, i: usize) -> (u16, u16) {
-    (m as u16, i as u16)
-}
-
-methods! {
-    fn Display(this: usize, ev: usize) -> usize { 0 }
-    fn MCopy(this: usize, ev: usize) -> usize {
-        let m = new_of(cd!(ODMenuBarClassData), "ODMenuBar");
-        if m != 0 {
-            *menu(m) = menu(this).clone();
-        }
-        m
-    }
-    fn MenuOp2(this: usize, ev: usize, a: usize, b: usize) -> usize { 0 }
-    fn MenuOp3(this: usize, ev: usize, a: usize, b: usize, c: usize) -> usize { 0 }
-    fn SetMenuItemText(this: usize, ev: usize, m: usize, i: usize, t: usize) -> usize {
-        menu(this).items.entry(key(m, i)).or_insert((true, false, Vec::new())).2 = cstr(t).to_vec();
-        1
-    }
-    fn GetMenuItemText(this: usize, ev: usize, m: usize, i: usize) -> usize {
-        dup(menu(this).items.get(&key(m, i)).map_or(&b""[..], |e| &e.2))
-    }
-    fn CheckMenuItem(this: usize, ev: usize, m: usize, i: usize, b: usize) -> usize {
-        if let Some(e) = menu(this).items.get_mut(&key(m, i)) {
-            e.1 = b & 0xff != 0;
-        }
-        1
-    }
-    fn EnableMenuItem(this: usize, ev: usize, m: usize, i: usize, b: usize) -> usize {
-        if let Some(e) = menu(this).items.get_mut(&key(m, i)) {
-            e.0 = b & 0xff != 0;
-        }
-        1
-    }
-    fn AddMenuItemBefore(this: usize, ev: usize, m: usize, i: usize, item: usize, before: usize) -> usize {
-        menu(this).items.insert(key(m, i), (true, false, Vec::new()));
-        1
-    }
-    fn AddMenuItemLast(this: usize, ev: usize, m: usize, i: usize, item: usize) -> usize {
-        menu(this).items.insert(key(m, i), (true, false, Vec::new()));
-        1
-    }
-    fn GetMenuItem(this: usize, ev: usize, m: usize, i: usize, item: usize) -> usize { menu(this).items.contains_key(&key(m, i)) as usize }
-    fn MenuItemExists(this: usize, ev: usize, m: usize, i: usize) -> usize { menu(this).items.contains_key(&key(m, i)) as usize }
-    fn IsItemEnabled(this: usize, ev: usize, m: usize, i: usize) -> usize { menu(this).items.get(&key(m, i)).is_some_and(|e| e.0) as usize }
-    fn IsItemChecked(this: usize, ev: usize, m: usize, i: usize) -> usize { menu(this).items.get(&key(m, i)).is_some_and(|e| e.1) as usize }
-    fn RemoveMenuItem(this: usize, ev: usize, m: usize, i: usize) -> usize {
-        menu(this).items.remove(&key(m, i));
-        1
-    }
-    fn MSomUninit(this: usize) -> usize {
-        drop_state::<MenuState>(cd!(ODMenuBarCClassData), this);
-        call_parent(cd!(ODMenuBarCClassData), somsup::so(), somsup::om::SOM_UNINIT, &[this]);
-        0
-    }
-}
-
-pub static MENU_BAR_M: &[(&str, M)] = &[
-    ("Display", Display::t),
-    ("Copy", MCopy::t),
-    ("AddMenuLast", MenuOp3::t),
-    ("AddMenuBefore", MenuOp3::t),
-    ("RemoveMenu", MenuOp2::t),
-    ("GetMenu", MenuOp2::t),
-    ("IsValid", MenuOp2::t),
-    ("SetMenuItemText", SetMenuItemText::t),
-    ("GetMenuItemText", GetMenuItemText::t),
-    ("AddSubMenuLast", MenuOp3::t),
-    ("AddSubMenuBefore", MenuOp3::t),
-    ("CheckMenuItem", CheckMenuItem::t),
-    ("EnableMenuItem", EnableMenuItem::t),
-    ("AddMenuItemBefore", AddMenuItemBefore::t),
-    ("AddMenuItemLast", AddMenuItemLast::t),
-    ("GetMenuItem", GetMenuItem::t),
-    ("MenuItemExists", MenuItemExists::t),
-    ("IsItemEnabled", IsItemEnabled::t),
-    ("IsItemChecked", IsItemChecked::t),
-    ("GetPlatformMenuBar", MenuOp2::t),
-    ("ModifyMenuItemAttributes", MenuOp3::t),
-    ("RemoveMenuItem", RemoveMenuItem::t),
-];
-pub static MENU_BAR_O: &[(&str, M)] = &[("SOMObject::somUninit", MSomUninit::t)];
 
 // ---- Clipboard, drag and drop: a scratch draft's storage unit ----
 
@@ -1140,17 +1059,6 @@ pub static STATUS_LINE_M: &[(&str, M)] = &[
     ("SetStatusLineText", Nothing2::t),
     ("ClearStatusLineText", Nothing1::t),
     ("InitStatusLineExtension", InitStatusLineExtension::t),
-];
-pub static DISPATCHER_M: &[(&str, M)] = &[
-    ("InitDispatcher", Nothing0::t),
-    ("AddDispatchModule", Nothing2::t),
-    ("GetDispatchModule", Nothing1::t),
-    ("RemoveDispatchModule", Nothing1::t),
-    ("AddMonitor", Nothing2::t),
-    ("RemoveMonitor", Nothing2::t),
-    ("Dispatch", Nothing1::t),
-    ("Exit", Nothing0::t),
-    ("ShouldExit", Nothing0::t),
 ];
 pub static NAME_SPACE_MANAGER_M: &[(&str, M)] = &[
     ("InitNameSpaceManager", Nothing0::t),
