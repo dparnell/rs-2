@@ -228,7 +228,9 @@ Status markers: done, in progress, planned.
   Linux ones (index tables), inline and extent EAs; MBR type 0x35, GPT and
   `root=GUID` system volumes; checked with Linux jfs_fsck. No log replay:
   volumes another system left with a busy log open read-only
-- planned: OS/2 LVM metadata, JFS log replay and CHKDSK /F for JFS
+- done: OS/2 LVM drive letter tables (volumes get their LVM letters), CHKDSK
+  /F for HPFS and JFS (no JFS log replay: the repair marks the log redone)
+- planned: JFS log replay, LVM volumes spanning partitions
 
 ## Milestone 3: rs2 user space (in progress)
 
@@ -238,7 +240,11 @@ Status markers: done, in progress, planned.
 - done: LABEL, CHKDSK (FAT check and /F repair; HPFS read-only scan; JFS
   read-only check), FORMAT (FAT, HPFS, JFS) on DASD handles and the category 8 disk IOCtls, MODE
   (screen mode through a 16-bit VIO thunk), HELP
-- planned: CHKDSK repair for HPFS, FDISK/LVM and the rest of the base
+- done: the base utilities (docs/UTILITIES.md): BACKUP/RESTORE, PACK/UNPACK,
+  LVM/FDISK, COMP, DISKCOPY/DISKCOMP, EAUTIL, PATCH, PSTAT, REPLACE, SETBOOT,
+  SYSLEVEL, BLDLEVEL, CACHE, ANSI, EJECT, PRINT, RECOVER, HELPMSG, CHKDSK /F
+  for HPFS and JFS, FORMAT /P
+- planned: the rest of the base
   utilities; own message files (OSO001.MSG); Cyrillic/Greek/Hebrew
   keyboard layouts; REXX
 
