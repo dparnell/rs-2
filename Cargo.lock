@@ -79,6 +79,10 @@ name = "mmfmt"
 version = "0.1.0"
 
 [[package]]
+name = "os2-backup"
+version = "0.1.0"
+
+[[package]]
 name = "os2-exe"
 version = "0.1.0"
 

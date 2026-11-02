@@ -10,3 +10,5 @@ os2 = { path = "../os2" }
 fat = { path = "../../crates/fat" }
 hpfs = { path = "../../crates/hpfs" }
 jfs = { path = "../../crates/jfs" }
+os2-backup = { path = "../../crates/os2-backup" }
+os2-pack = { path = "../../crates/os2-pack" }
