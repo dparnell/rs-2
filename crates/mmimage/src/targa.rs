@@ -217,6 +217,29 @@ mod tests {
     }
 
     #[test]
+    fn sips_files() {
+        // sips's Targa of one of IBM's JPEGs against its BMP, and ours
+        // read back by sips.
+        let dir = scratch();
+        for p in work_files("unpacked/disk_21/MMTEMP", "jpg") {
+            let (t, b) = (dir.join("sips.tga"), dir.join("sips-tga.bmp"));
+            if !sips(&p, "tga", &t) || !sips(&t, "bmp", &b) { return; }
+            let data = std::fs::read(&t).unwrap();
+            assert!(matches!(crate::identify(&data, data.len() as u64), Some(crate::Format::Targa { .. })));
+            let d = decode(&data).unwrap();
+            let want = crate::bmp::decode(&std::fs::read(&b).unwrap()).unwrap();
+            assert!(same_pixels(&want, &d));
+            for c in [false, true] {
+                let ours = dir.join(format!("ours{c}.tga"));
+                std::fs::write(&ours, encode(&d, c)).unwrap();
+                let b2 = dir.join("ours-tga.bmp");
+                assert!(sips(&ours, "bmp", &b2));
+                assert!(same_pixels(&d, &crate::bmp::decode(&std::fs::read(&b2).unwrap()).unwrap()));
+            }
+        }
+    }
+
+    #[test]
     fn truncated() {
         let e = encode(&pattern24(8, 8), true);
         for n in 0..e.len() { let _ = decode(&e[..n]); }

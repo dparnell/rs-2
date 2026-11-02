@@ -148,7 +148,7 @@ impl Avi {
                     match &data[body..body + 4] {
                         b"hdrl" => {
                             if body_end < body + len { return Err(Error::Truncated); }
-                            a.parse_hdrl(&data[body + 4..body_end])?;
+                            a.parse_hdrl(data.get(body + 4..body_end).unwrap_or(&[]))?;
                             have_hdrl = true;
                         }
                         b"movi" => {

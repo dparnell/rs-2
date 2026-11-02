@@ -363,6 +363,36 @@ mod tests {
     }
 
     #[test]
+    fn mutations_never_panic() {
+        // Random byte changes and truncations of valid files of every
+        // format: decoding may fail but must not panic (debug builds
+        // also trap arithmetic overflow).
+        let i24 = testutil::pattern24(19, 13);
+        let i8 = testutil::pattern_pal(19, 13, 8);
+        let samples = [
+            bmp::encode(&i8, bmp::Kind::Win3), bmp::encode(&i24, bmp::Kind::Os13), bmp::encode(&testutil::pattern_pal(9, 9, 4), bmp::Kind::Os20),
+            jpeg::encode(&i24, 80), jpeg::encode(&i8, 50),
+            gif::encode(&i8), pcx::encode(&i24), pcx::encode(&i8), pcx::encode(&testutil::pattern_pal(9, 9, 4)),
+            tiff::encode(&i24, false, true), tiff::encode(&i8, true, false), tiff::encode_packbits(&i24, true),
+            targa::encode(&i24, true), targa::encode(&i8, false),
+        ];
+        let mut s = 0x1234_5678u32;
+        let mut rnd = || { s ^= s << 13; s ^= s >> 17; s ^= s << 5; s };
+        for f in &samples {
+            for _ in 0..400 {
+                let mut g = f.clone();
+                for _ in 0..1 + rnd() % 4 {
+                    let at = rnd() as usize % g.len();
+                    g[at] = match rnd() % 4 { 0 => 0, 1 => 0xFF, _ => rnd() as u8 };
+                }
+                if rnd() % 4 == 0 { g.truncate(rnd() as usize % g.len()); }
+                let _ = decode(&g);
+                let _ = identify(&g, g.len() as u64);
+            }
+        }
+    }
+
+    #[test]
     fn identify_garbage() {
         assert_eq!(identify(&[], 0), None);
         assert_eq!(identify(&[0u8; 64], 64), None);

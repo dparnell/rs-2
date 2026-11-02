@@ -247,6 +247,40 @@ mod tests {
     }
 
     #[test]
+    fn mutations_never_panic() {
+        let pal: Vec<[u8; 3]> = (0..=255u8).map(|v| [v; 3]).collect();
+        let mut ulti = vec![0x70, 0, 0xFF, 0x12, 0x80, 1, 2, 3, 0x81, 2, 3, 4, 5, 6, 0x5A, 0x3C, 7, 9, 0x70, 1, 0xAA, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0x71, 0x55, 1, 2, 3, 4, 5, 6, 7, 8, 0x74, 2, 0x73];
+        ulti.extend_from_slice(&[0xC3; 40]);
+        let files = [
+            build(16, 8, 8, b"CRAM", &pal, &[vec![0x01, 0x00, 5, 6, 0x00, 0x90, 1, 2, 3, 4, 5, 6, 7, 8, 7, 0x80, 0x03, 0x84, 0, 0]], &[vec![1; 9]], true),
+            build(16, 8, 16, b"CRAM", &[], &[vec![0x01, 0x00, 5, 0x80, 6, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 0x01, 0x81, 0x03, 0x84, 0, 0]], &[], false),
+            build(16, 8, 8, &[1, 0, 0, 0], &pal, &[vec![4, 1, 0, 3, 1, 2, 3, 0, 0, 2, 3, 1, 0, 1]], &[], true),
+            build(17, 9, 16, b"ULTI", &[], &[ulti], &[], true),
+            build(5, 3, 24, b"\0\0\0\0", &[], &[vec![7; 48]], &[], true),
+        ];
+        let mut s = 0x9E37_79B9u32;
+        let mut rnd = || { s ^= s << 13; s ^= s >> 17; s ^= s << 5; s };
+        for f in &files {
+            for _ in 0..3000 {
+                let mut g = f.clone();
+                for _ in 0..1 + rnd() % 4 {
+                    let at = rnd() as usize % g.len();
+                    g[at] = match rnd() % 4 { 0 => 0, 1 => 0xFF, _ => rnd() as u8 };
+                }
+                if rnd() % 4 == 0 { g.truncate(rnd() as usize % g.len()); }
+                let Ok(a) = Avi::parse(&g) else { continue };
+                let Ok(mut d) = VideoDecoder::new(&a) else { continue };
+                for n in 0..a.frame_count().min(4) {
+                    let Some((o, l)) = a.frame_chunk(n) else { break };
+                    let chunk = g.get(o as usize..(o as usize).saturating_add(l as usize)).unwrap_or(&[]);
+                    let _ = d.decode(chunk);
+                }
+                d.palette_change(&g[g.len().saturating_sub(12)..]);
+            }
+        }
+    }
+
+    #[test]
     fn unsupported() {
         let f = build(4, 4, 24, b"IV31", &[], &[vec![0; 4]], &[], true);
         assert_eq!(VideoDecoder::new(&Avi::parse(&f).unwrap()).err(), Some(Error::Unsupported));
