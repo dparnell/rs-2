@@ -573,7 +573,7 @@ pub fn find<'a>(c: &'a Class, key: usize, scope: Option<&[u8]>) -> Option<(&'a C
     for &(x, xb) in &c.blocks {
         let x = unsafe { &*x };
         if let Some(s) = scope {
-            if !name_eq(s, x.name_bytes()) {
+            if !scope_is(s, x.name_bytes()) {
                 continue;
             }
         }
@@ -595,6 +595,17 @@ pub fn find_dynamic<'a>(c: &'a Class, key: usize) -> Option<&'a MethodDef> {
         }
     }
     None
+}
+
+/// Whether a descriptor's scope (a class's name without its modules)
+/// names class `name`, which for a class in a module
+/// ("CosSecurityAuthn::Vault") has the module's name first.
+pub fn scope_is(scope: &[u8], name: &[u8]) -> bool {
+    let last = match name.windows(2).rposition(|w| w == b"::") {
+        Some(j) => &name[j + 2..],
+        None => name,
+    };
+    name_eq(scope, last)
 }
 
 /// Split "Class::method" into its scope and name.
@@ -993,7 +1004,7 @@ pub unsafe fn override_method(c: *mut Class, mid: SomId, proc_: usize) -> bool {
         let (x, xb) = cr.blocks[i];
         let xr = unsafe { &*x };
         if let Some(s) = scope {
-            if !name_eq(s, xr.name_bytes()) {
+            if !scope_is(s, xr.name_bytes()) {
                 continue;
             }
         }

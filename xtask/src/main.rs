@@ -693,6 +693,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("somtc", "OS2\\DLL\\SOMTC.DLL"),
         ("somu", "OS2\\DLL\\SOMU.DLL"),
         ("somir", "OS2\\DLL\\SOMIR.DLL"),
+        ("somd", "OS2\\DLL\\SOMD.DLL"),
         ("win16", "OS2\\DLL\\WIN16.DLL"),
         // rs2's own PM applets (userland/pmkit is what they share).
         ("clipos2", "OS2\\CLIPOS2.EXE"),

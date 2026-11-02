@@ -23,6 +23,7 @@ use alloc::vec::Vec;
 use os2::*;
 
 mod libs;
+mod somd;
 mod somir;
 mod somu;
 
@@ -1086,6 +1087,9 @@ fn main(s: &Startup) -> u32 {
         ir(args);
     } else if word.eq_ignore_ascii_case(b"BA") {
         before_after();
+    } else if word.eq_ignore_ascii_case(b"SOMD") {
+        unsafe { somEnvironmentNew() };
+        somd::run();
     } else {
         run();
     }
