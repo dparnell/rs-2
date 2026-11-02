@@ -2454,7 +2454,54 @@ are IBM's numbers (CLIPOS2.HLP).
 
 ### Klondike Solitaire (KLONDIKE.EXE)
 
-(to come)
+`userland/klondike`, `OS2\APPS\KLONDIKE.EXE` with `OS2\HELP\KLONDIKE.HLP`.
+As IBM's (its menus, dialogs, strings and help table read from the
+binary, its logic in Ghidra):
+
+- **Menus and keys**: Game (New deal, Auto play), Moves (Take back,
+  Replay, Cheat, Auto finish), Options (Timer, Score On/Off/Reset,
+  Color scheme Spring/Summer/Autumn/Winter, Settings..., Save
+  settings), Help; IBM's command ids (1151.., 1201.., 1302.., 3990,
+  1500) and accelerators (Ctrl+N, P, T, R, C, F; Alt+Backspace).
+- **Rules**: the four variations of IBM's Options page (Draw 3 Flip
+  none, Draw 3 Flip 3, Draw 3 Flip many, Draw 1 Flip many: cards turned
+  from the talon and how often the waste pile may be turned over), kings
+  to empty piles, auto-flip of uncovered cards (or a click).
+- **Scoring** as IBM's: a bank that starts at 500, 52 per deal, 5 per
+  card on a foundation (5 back when one comes off), 25 per turn of the
+  waste pile; Score > Reset sets 500.
+- **Moves**: a history (IBM keeps 1000) for Take back and Replay; Cheat
+  toggles a mode in which any face-up run may go anywhere, counted and
+  mentioned when the game is won; Auto finish sends every card it can to
+  the foundations (step by step with Animate cards, else at once); Auto
+  play plays the game from where it is, on a timer at the animation
+  speed, until it is stuck or has won.
+- **Settings** in `KLONDIKE.INI` (beside the program), application
+  `PATIENCE`, IBM's keys and values as decimal text (ColorSet 1302..,
+  Score, Timer, DragCards, Variation 1351.., CardBack 1451.., AutoFlip,
+  Animation, Speed, OpeningVideo) plus the window's place; Save settings
+  writes them, and closing with unsaved changes asks (Yes/No/Cancel).
+  The Settings notebook has IBM's Options page (with the same ids;
+  Opening video is shown disabled) and a Card backs page (nine designs);
+  changes apply at once, each page has Undo, Default and Help.
+- **Input**: dragging with button 1 (Drag cards on) or click-then-click,
+  a double click sends a card home, the keyboard plays (cursor keys pick
+  a pile, Space/Enter pick up and put down, Esc).
+- **The pictures** are rs2's own (`cards.rs`): faces with corner
+  indexes in Helvetica Bold, pips drawn as GPI areas and arcs, aces with
+  one large pip, court cards as a tinted frame with an emblem (crown,
+  coronet, plumed cap) and the letter in Times New Roman Bold; nine
+  patterned backs. They are drawn once per card size into an atlas (the
+  cards follow the window's size) and the board is painted off screen
+  and copied.
+
+`KLONDIKE /SELFTEST` checks dealing, the rules, each variation's
+drawing and turning, the score, Take back and Replay, auto-flip, Auto
+finish and Auto play on ten seeded deals, and drawing the cards at two
+sizes (56 checks); `KLONDIKE /DEAL n` deals from a fixed seed for
+scripted tests. Not done: IBM's opening video and sounds, the Sounds,
+Colors, Background bitmap and Card faces pages (other card decks),
+animated card movement (moves are shown step by step, not sliding).
 
 ### Mahjongg (MAHJONGG.EXE)
 

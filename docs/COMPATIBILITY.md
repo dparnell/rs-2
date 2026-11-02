@@ -320,7 +320,7 @@ copied from the CD.
 
 | `OS2\GLOCALE.EXE` | Locale | (to come) | |
 
-| `OS2\APPS\KLONDIKE.EXE` | Klondike Solitaire | (to come) | |
+| `OS2\APPS\KLONDIKE.EXE` | Klondike Solitaire | IBM's menus, variations, scoring, Take back/Replay, Cheat, Auto finish, Auto play, settings (KLONDIKE.INI) and Settings notebook (Options, Card backs), own cards; no video or sounds | `KLONDIKE /SELFTEST` (56 checks); QEMU screenshots of dealing, dragging, auto play, the notebook, help |
 
 | `OS2\APPS\MAHJONGG.EXE` | Mahjongg | (to come) | |
 
