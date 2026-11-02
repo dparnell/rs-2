@@ -50,7 +50,19 @@ extern "C" fn cat_open(obj: usize, rc: *mut i32, name: *const u8) {
 
 unsafe extern "C" {
     #[link_name = "SOM.80"]
-    fn somfixMsgTemplate(a: *mut u8, b: usize) -> *mut u8;
+    fn somfixMsgTemplate();
+}
+
+/// somfixMsgTemplate(template) is _Optlink: the template in EAX (its
+/// stack slot reserved).
+unsafe fn fix_template(buf: *mut u8) {
+    unsafe {
+        core::arch::asm!(
+            "push eax", "call {f}", "add esp, 4",
+            f = sym somfixMsgTemplate,
+            inout("eax") buf => _, out("ecx") _, out("edx") _,
+        );
+    }
 }
 
 /// somutMsgGetMessage(rc, set, number, buffer): message `number` of the
@@ -70,7 +82,7 @@ extern "C" fn get_message(obj: usize, rc: *mut i32, _set: u32, number: u32, buf:
     if r == 0 && len > 1 {
         unsafe {
             *buf.add(len as usize - 2) = 0;
-            somfixMsgTemplate(buf, 0);
+            fix_template(buf);
             *rc = 0;
         }
     }

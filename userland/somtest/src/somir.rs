@@ -118,7 +118,14 @@ pub fn run() {
         check_eq("SOMObject's operations", s.len as i64, 30);
         let mut s = Seq { max: 0, len: 0, buf: core::ptr::null() };
         contents(&mut s, repo, e, b"InterfaceDef\0".as_ptr(), 1);
-        check_eq("interfaces at the top level", s.len as i64, 123);
+        // SOM.IR alone has 123 (other files in SOMIR add theirs).
+        let mut v: *const u8 = core::ptr::null();
+        let only = os2::DosScanEnv(b"SOMIR\0".as_ptr(), &mut v) == 0 && !cstr(v).contains(&b';');
+        if only {
+            check_eq("interfaces at the top level", s.len as i64, 123);
+        } else {
+            check("interfaces at the top level (several files)", s.len > 123);
+        }
         let mut s = Seq { max: 0, len: 0, buf: core::ptr::null() };
         lookup_name(&mut s, obj, e, b"somInit\0".as_ptr(), -1, b"all\0".as_ptr(), 0);
         check("lookup_name somInit", s.len == 1 && cstr(get_id(*s.buf, e)) == b"::SOMObject::somInit");
