@@ -297,3 +297,103 @@ pub fn ext_send(kind: u32, handle: usize, msg: &[u8], args: &[ExtArg]) -> Result
         _ => Err(ExtErr::Error(r.handle, s)),
     }
 }
+
+// ---- activities ----
+//
+// Object REXX's activities (START, REPLY, alarms) are threads of the
+// process that take turns: an activity runs while it holds the process's
+// REXX lock, and lets the others run every few clauses and while it
+// waits (GUARD WHEN, a message's result, an alarm's time).
+
+use core::sync::atomic::{AtomicU32, Ordering};
+
+static mut LOCK: u32 = 0;
+/// Activities running besides the programs RexxStart runs.
+static ACTIVE: AtomicU32 = AtomicU32::new(0);
+/// Threads that are activities (by thread id).
+static SPAWNED: [core::sync::atomic::AtomicBool; 1024] = [const { core::sync::atomic::AtomicBool::new(false) }; 1024];
+
+pub fn lock() {
+    unsafe {
+        if LOCK == 0 {
+            let mut h = 0u32;
+            if DosCreateMutexSem(null_mut(), &mut h, 0, 0) == 0 {
+                LOCK = h;
+            }
+        }
+        if LOCK != 0 {
+            DosRequestMutexSem(LOCK, 0xffff_ffff);
+        }
+    }
+}
+
+pub fn unlock() {
+    unsafe {
+        if LOCK != 0 {
+            DosReleaseMutexSem(LOCK);
+        }
+    }
+}
+
+/// RexxStart's program ended: the activities it started end first.
+pub fn wait_activities() {
+    while ACTIVE.load(Ordering::SeqCst) > 0 {
+        unlock();
+        unsafe { DosSleep(10) };
+        lock();
+    }
+}
+
+struct Job(alloc::boxed::Box<dyn FnOnce(&mut dyn rexx::Host)>);
+
+unsafe extern "C" fn activity(p: u32) {
+    let job = unsafe { alloc::boxed::Box::from_raw(p as *mut Job) };
+    let tid = crate::stack::tid();
+    SPAWNED[tid as usize % 1024].store(true, Ordering::SeqCst);
+    lock();
+    crate::stack::deep(move || {
+        let mut h = crate::host::OsHost { exits: Default::default(), locals: Vec::new(), tid };
+        (job.0)(&mut h);
+    });
+    SPAWNED[tid as usize % 1024].store(false, Ordering::SeqCst);
+    ACTIVE.fetch_sub(1, Ordering::SeqCst);
+    unlock();
+}
+
+pub fn spawn(job: alloc::boxed::Box<dyn FnOnce(&mut dyn rexx::Host)>) -> bool {
+    let p = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(Job(job)));
+    ACTIVE.fetch_add(1, Ordering::SeqCst);
+    let mut tid = 0u32;
+    if unsafe { DosCreateThread(&mut tid, activity, p as u32, 0, 0x10000) } != 0 {
+        ACTIVE.fetch_sub(1, Ordering::SeqCst);
+        drop(unsafe { alloc::boxed::Box::from_raw(p) });
+        return false;
+    }
+    true
+}
+
+pub fn yield_now() {
+    if ACTIVE.load(Ordering::Relaxed) > 0 {
+        unlock();
+        unsafe { DosSleep(0) };
+        lock();
+    }
+}
+
+/// Wait a little for the other activities; false if there are none.
+pub fn wait() -> bool {
+    let me = SPAWNED[crate::stack::tid() as usize % 1024].load(Ordering::SeqCst);
+    if ACTIVE.load(Ordering::SeqCst) == 0 && !me {
+        return false;
+    }
+    unlock();
+    unsafe { DosSleep(1) };
+    lock();
+    true
+}
+
+pub fn sleep(ms: u32) {
+    unlock();
+    unsafe { DosSleep(ms) };
+    lock();
+}

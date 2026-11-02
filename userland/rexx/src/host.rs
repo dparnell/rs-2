@@ -955,6 +955,26 @@ impl Host for OsHost {
     }
 
     #[cfg(orexx)]
+    fn spawn(&mut self, job: alloc::boxed::Box<dyn FnOnce(&mut dyn rexx::Host)>) -> bool {
+        crate::oohost::spawn(job)
+    }
+
+    #[cfg(orexx)]
+    fn yield_now(&mut self) {
+        crate::oohost::yield_now()
+    }
+
+    #[cfg(orexx)]
+    fn wait_guard(&mut self, _st: &mut State) -> bool {
+        crate::oohost::wait()
+    }
+
+    #[cfg(orexx)]
+    fn sleep(&mut self, ms: u32) {
+        crate::oohost::sleep(ms)
+    }
+
+    #[cfg(orexx)]
     fn ext_lookup(&mut self, _st: &mut State, name: &[u8]) -> Option<(u32, usize, bool, Vec<u8>)> {
         crate::oohost::ext_lookup(name)
     }

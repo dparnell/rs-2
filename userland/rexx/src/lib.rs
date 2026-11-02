@@ -333,7 +333,18 @@ pub extern "C" fn rexx_start(
         let mut it = Interp::new_oo(&mut h);
         #[cfg(not(orexx))]
         let mut it = Interp::new(&mut h);
-        it.run_program(&src, &path, ct, args, &env)
+        #[cfg(orexx)]
+        oohost::lock();
+        let r = it.run_program(&src, &path, ct, args, &env);
+        // the program's activities end before RexxStart returns
+        #[cfg(orexx)]
+        {
+            if outer {
+                oohost::wait_activities();
+            }
+            oohost::unlock();
+        }
+        r
     });
     if outer {
         unsafe { DosUnsetExceptionHandler(&mut reg) };

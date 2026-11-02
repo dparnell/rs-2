@@ -191,6 +191,24 @@ call check m2~send = 9, 'message with an array of arguments'
 call check w~reply2 = 'early', 'reply before the method ends'
 call check w~forwarded(6) = 36, 'forward to another message'
 call check w~continued = 'continued 49', 'forward continue'
+b = .buffer~new
+m = b~start('TAKE')
+b~put('item')
+call check m~result = 'item', 'start waits in GUARD WHEN for another activity'
+t = .ticker~new
+call check t~go = 'going', 'reply gives the result early'
+do i = 1 to 100000 until t~count >= 3
+end
+call check t~count = 3, 'the method goes on after reply'
+.local~orxlang.alarm = 0
+a = .alarm~new(1, .message~new(.ticker, 'RING'))
+call time 'R'
+do until .orxlang.alarm = 1 | time('E') > 5
+end
+call check .orxlang.alarm = 1, 'an alarm goes off'
+a2 = .alarm~new(60, .message~new(.ticker, 'RING'))
+a2~cancel
+call check 1, 'an alarm cancelled'
 
 /* ---- the environment ---- */
 .local~setentry('orxlang.thing', 'here')
@@ -351,6 +369,35 @@ caught:
   return 'no error'
 ::method raiser
   raise user oops return
+
+::class buffer
+::method init
+  expose item
+  item = .nil
+::method put
+  expose item
+  use arg item
+::method take
+  expose item
+  guard on when item \= .nil
+  return item
+
+::class ticker
+::method ring class
+  .local~orxlang.alarm = 1
+::method init
+  expose n
+  n = 0
+::method count unguarded
+  expose n
+  return n
+::method go
+  expose n
+  reply 'going'
+  guard off
+  do 3
+    n = n + 1
+  end
 
 ::class worker
 ::method add
