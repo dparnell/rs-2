@@ -136,5 +136,24 @@ interface's derived interfaces).
 
 IBM's SOMIR allocates records from the free list (first fit, splitting
 larger blocks and merging neighbours, `irMalloc`/`irFree`) and rewrites a
-definition's records in place when they still fit. rs2's SOMIR reads
-repositories only.
+definition's records in place when they still fit. rs2's SOMIR
+(Repository::saveIR, userland/somir/src/save.rs) writes a changed
+definition's variable record again in space from the free list (first
+fit; a block split when the rest can hold a free block's 12 bytes, and
+then the record's size word says the space it got) or at the end of the
+file, makes the old record a free block at the head of the list (header
+offset 12), and rewrites the fixed record's mode, or a new name of the
+same length there and in the container's contents record. It does not
+merge neighbouring free blocks. Either SOMIR reads the other's updates.
+
+## rs2's SOM.IR
+
+xtask writes `\OS2\ETC\SOM.IR` from `userland/somir/som-ir.txt`
+(xtask/src/somir.rs; `tools/scripts/gen_som_ir.py` makes the text from
+the Toolkit's IDL). It lays the file out in one pass: the header, then
+each container's definitions (fixed record, variable record, and for an
+interface, module or operation its definitions and contents record), the
+container's contents record after them, the top level's last, and at the
+end the reference lists of the interfaces that have derived interfaces.
+The free list is empty. String constants keep their quotes (`"2.1"`), as
+in IBM's files.
