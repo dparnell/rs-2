@@ -1022,8 +1022,8 @@ fn paint_status(hps: u32, l: &Layout, packed: &[u8]) {
     gpi::draw_rgb(hps, packed, f.cx as i32, f.cy as i32, px, py, w, h);
     // The figures.
     let line_h = 16;
-    let lx = s.l + 150;
-    let vx = lx + 86;
+    let lx = s.l + 132;
+    let vx = lx + 104;
     let row = |i: i32| RectL::new(0, s.t - 6 - (i + 1) * line_h, 0, s.t - 6 - i * line_h);
     let label = |i: i32, t: &[u8]| {
         let r = row(i);
@@ -1050,7 +1050,7 @@ fn paint_status(hps: u32, l: &Layout, packed: &[u8]) {
         label(3, b"Hotspot :");
         value(3, vx, alloc::format!("{}x{}", f.hot.0, f.hot.1).as_bytes());
     }
-    let cx = vx + 86;
+    let cx = vx + 66;
     value(0, cx, &[&b"Figure type : "[..], kind_name(a.fig.kind)].concat());
     value(1, cx, &[&b"Form "[..], alloc::format!("{} of {} : ", a.cur + 1, a.fig.forms.len()).as_bytes(), &format::describe(f)].concat());
     value(2, cx, &form_device_name(a.cur));
