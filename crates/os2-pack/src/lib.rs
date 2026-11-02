@@ -15,12 +15,14 @@
 extern crate alloc;
 
 mod decode;
+mod encode;
 mod huffman;
 mod tables;
 
 use alloc::vec::Vec;
 
 pub use decode::{BLOCK_MAGIC, Decompressor};
+pub use encode::{add_entry, compress, pack, Source};
 
 /// Signature at the start of every entry header.
 pub const MAGIC: [u8; 4] = [0xa5, 0x96, 0xfd, 0xff];
@@ -274,5 +276,72 @@ mod tests {
     fn rejects_other_data() {
         assert_eq!(entries(b"MZ\0\0\0\0\0\0"), Err(Error::BadMagic));
         assert_eq!(entries(&MAGIC), Err(Error::Truncated));
+    }
+
+    /// Pseudo-random bytes with some repetition, 0x9E escapes and a block
+    /// signature inside.
+    fn mixed(n: usize) -> Vec<u8> {
+        let mut v = Vec::with_capacity(n);
+        let mut x = 0x1234_5678u32;
+        while v.len() < n {
+            x = x.wrapping_mul(1103515245).wrapping_add(12345);
+            match (x >> 24) % 5 {
+                0 => v.extend_from_slice(b"fT19 the quick brown fox "),
+                1 => v.push(0x9e),
+                2 => {
+                    let back = ((x >> 8) as usize % 300).min(v.len());
+                    let s = v.len() - back;
+                    let k = back.min(70);
+                    for i in 0..k {
+                        v.push(v[s + i]);
+                    }
+                }
+                _ => v.push((x >> 16) as u8),
+            }
+        }
+        v.truncate(n);
+        v
+    }
+
+    #[test]
+    fn streams_round_trip() {
+        let mut d = Decompressor::new();
+        for data in [Vec::new(), b"fT19".to_vec(), vec![0x9e; 5], vec![0u8; 100_000], mixed(70_000), b"DosOpen DosClose DosRead".repeat(50)] {
+            let s = compress(&data);
+            assert_eq!(d.stream(&s, data.len()).unwrap(), data);
+        }
+        // Repetitive input does shrink.
+        assert!(compress(&vec![b'a'; 50_000]).len() < 2_000);
+    }
+
+    #[test]
+    fn packed_files_round_trip() {
+        let eas = {
+            let mut l = vec![0u8; 4];
+            l.extend_from_slice(&[0, 0, 0, 0, 0, 5, 9, 0]);
+            l.extend_from_slice(b".TYPE\0\xfd\xff\x05\x00plain");
+            l.extend_from_slice(&[0, 0, 0]);
+            let n = l.len() as u32;
+            l[..4].copy_from_slice(&n.to_le_bytes());
+            l
+        };
+        let one = mixed(30_000);
+        let two = b"second".to_vec();
+        let f = pack(&[
+            Source { path: b"\\OS2\\ONE.EXE", date: 0x5d62, time: 0x1e63, attributes: 0x20, data: &one, eas: &eas },
+            Source { path: b"TWO.TXT", date: 1, time: 2, attributes: 0, data: &two, eas: &[] },
+        ]);
+        let e = entries(&f).unwrap();
+        assert_eq!(e.len(), 2);
+        assert_eq!(u32::from_le_bytes(f[f.len() - 4..].try_into().unwrap()), 2);
+        let mut d = Decompressor::new();
+        assert_eq!(e[0].path, b"\\OS2\\ONE.EXE");
+        assert_eq!((e[0].date, e[0].time, e[0].attributes), (0x5d62, 0x1e63, 0x20));
+        assert_eq!(e[0].decompress(&mut d).unwrap(), one);
+        assert_eq!(e[0].decompress_ea(&mut d).unwrap(), Some(eas.clone()));
+        assert_eq!(e[1].path, b"TWO.TXT");
+        assert_eq!(e[1].ea_size, 4);
+        assert_eq!(e[1].decompress(&mut d).unwrap(), two);
+        assert_eq!(e[1].decompress_ea(&mut d).unwrap(), None);
     }
 }

@@ -50,7 +50,17 @@ fn line(label: &str, v: &str) {
 fn show(sig: &str) -> bool {
     let Some(rest) = sig.strip_prefix("@#") else { return false };
     let Some(end) = rest.find("#@") else { return false };
-    let (vendor, revision) = rest[..end].split_once(':').unwrap_or((&rest[..end], ""));
+    let (vendor, raw) = rest[..end].split_once(':').unwrap_or((&rest[..end], ""));
+    // Shown as numbers, as IBM's BLDLEVEL does ("14.082" is 14.82).
+    let revision = match raw.split_once('.') {
+        Some((a, b)) if !a.is_empty() && !b.is_empty() && a.bytes().chain(b.bytes()).all(|c| c.is_ascii_digit()) => {
+            let t = |s: &str| String::from(s.trim_start_matches('0'));
+            let (a, b) = (t(a), t(b));
+            alloc::format!("{}.{}", if a.is_empty() { "0" } else { &a }, if b.is_empty() { "0" } else { &b })
+        }
+        _ => String::from(raw),
+    };
+    let revision = revision.as_str();
     let mut desc = &rest[end + 2..];
     line("Signature:", sig);
     line("Vendor:", vendor);
