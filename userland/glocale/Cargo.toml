@@ -1,0 +1,16 @@
+[package]
+name = "glocale"
+description = "GLOCALE.EXE: rs2's Locale settings program (the Country Palette)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "glocale"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+pmkit = { path = "../pmkit" }
+gpi = { path = "../../crates/gpi" }
+pmwin = { path = "../../crates/pmwin" }

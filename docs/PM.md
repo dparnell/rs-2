@@ -2393,6 +2393,608 @@ happens after the drop (posted), and the source hears
 **Not done**: the window's icon, Undo restoring a font or colours (rs2's MLE
 does not undo those), the Set tabs dialog E has but does not offer.
 
+## rs2's PM applets
+
+rs2 has its own versions of the PM programs OS/2 Warp 4.52 installs,
+so a system made only of rs2's files has them all: the Utilities
+folder's (`<WP_TOOLS>`: Picture Viewer, Icon Editor, Clipboard
+Viewer, Seek and Scan Files, Pulse), the drives' Check Disk and Format
+windows, Locale in System Setup and the games (Klondike Solitaire,
+Mahjongg, OS/2 Chess). Each was written after studying IBM's program
+(Ghidra, its resources, running it on rs2) and behaves like it: the
+same menus and commands, dialogs, settings and file formats, and the
+same help panel numbers, so the shell's HELPPANEL= references work;
+the code, the pictures and the help text (IPF, compiled by
+`crates/ipf` into `OS2\HELP`) are rs2's own. They keep no resources:
+menus, dialogs and accelerators are built in memory, as E.EXE's are,
+through `userland/pmkit` (the PM entry points and constants they use,
+menu and dialog templates, help instances made from tables of panel
+numbers, OS2.INI settings, GPI helpers).
+
+Where they are (xtask's USER_PROGRAMS, HELP_FILES and APP_DATA put
+them on the development and dist images): `\OS2` for CLIPOS2,
+MPCPUMON, ICONEDIT, GLOCALE, PMCHKDSK and PMFORMAT, `\OS2\APPS` for
+PICVIEW, PMSEEK, KLONDIKE, MAHJONGG (with its layouts, `*.MAH`) and
+OS2CHESS, their help in `\OS2\HELP`. The Workplace Shell's first start
+(desktop version 12, [WPS.md](WPS.md#the-shell-process)) makes IBM's
+objects for them, with INI.RC's titles, object IDs, help panels and
+associations: the Utilities folder (`<WP_TOOLS>`) in Programs with
+Picture Viewer (`<WP_PICV>`, `*.MET`, `*.PIF`), Seek and Scan Files
+(`<WP_SEEK>`), Icon Editor (`<WP_ICON>`, `*.BMP`, `*.PTR`, `*.ICO`),
+Pulse (`<WP_PULSE>`) and Clipboard Viewer (`<WP_CLIPV>`); the Games
+folder (`<WP_GAMES>`) with Klondike Solitaire (`<WP_KLDK>`), OS/2 Chess
+(`<WP_CHESS>`) and the Mahjongg Solitaire folder (`<MAH_FOLDER>`:
+Mahjongg, `<MAH_EXE>`, `*.MAH`, and shadows of the layouts); Locale
+(`<WP_LOCALE>`) in System Setup. A drive's pop-up menu has Check
+disk... and Format disk... (IBM's ids 128 and 124; not for CD drives),
+which start `\OS2\PMCHKDSK.EXE X:` and `\OS2\PMFORMAT.EXE X:`.
+
+### Clipboard Viewer (CLIPOS2.EXE)
+
+`userland/clipos2`. As IBM's: the window is the clipboard viewer
+(`WinSetClipbrdViewer`; a second copy says "Viewer already installed."
+and ends); the title names the format shown, "Clipboard (Text)",
+"Clipboard (empty)"; it follows the clipboard (`WM_DRAWCLIPBOARD`) and
+shows text, a bitmap or a metafile, the display formats first, with
+scroll bars (and the cursor keys) when the content is larger than the
+window. Metafiles are played once without drawing (`RES_RESET`,
+`SUP_SUPPRESS`) to learn their page size, then into a memory bitmap of
+that size. Data whose owner draws it (`CFI_OWNERDISPLAY`) is passed to
+the owner (`WM_PAINTCLIPBOARD`, `WM_SIZECLIPBOARD`, the scroll
+messages). File > Exit; Display > Render lists the formats on the
+clipboard by name (a registered format by its atom's name, else
+"unknown") and shows the one chosen; Help's items and the help panels
+are IBM's numbers (CLIPOS2.HLP).
+
+### Pulse (MPCPUMON.EXE)
+
+`userland/mpcpumon` ("CPU Monitor" in the Utilities folder). As IBM's
+"OS/2 SMP Monitor" (studied in Ghidra): one copy at a time (named
+shared memory `\SHAREMEM\MPCPUMON`); the menu bar Graph Mode (Bar,
+Line), Status, Options (Background Color and Processor Graph Color
+submenus of 16 colours, Horizontal and Vertical Labels, Freeze Screen,
+Grid, Sample Rate) and Help, IBM's command ids (1000, 1010, 1030,
+1062...) and Ctrl accelerators (B, L, S, R, V, F, G, A); the pop-up menu
+on mouse button 2 (Processor Time, Processor Status, Freeze, Grid,
+Sample Rate); a double-click hides the title bar, system menu, min/max
+buttons and menu bar (`WinSetParent` to `HWND_OBJECT`, `WM_UPDATEFRAME`)
+and shows them again; a colour dropped from the Color Palette
+(`WM_PRESPARAMCHANGED`) goes to the processor whose line or bar is under
+the pointer, else to the background; `HM_QUERY_KEYS_HELP` answers 6000.
+The window shows "% Processor Utilization", the 0-100 scale on the left,
+and along the bottom the processors with their colours ("1 -", "2 -")
+over "Processor"; in line mode a line per processor over the last 100
+samples (the newest at the right), in bar mode a bar per processor with
+its percentage and one for the average of the processors online. Each
+processor's default colour is the next of the colour list (CPU 1 brown,
+CPU 2 blue, the average after them).
+
+The load is read as IBM's reads it (`perf.rs`): DosConfigurePerf off
+then on (0, 4 and 0x28, 0), DosAliasPerfCtrs 0x0b walks the registered
+blocks' text blocks (handle at +4, flags 0x50, a name starting "CPU"),
+0x11 maps each processor's counter block; the not-idle timer at 0x18
+(negative while running: plus DosTmrQueryTime) grows by the busy time,
+so a sample's load is its growth over the time passed. Samples come from
+a PM timer at the sample rate (IBM's default, 150 ms; 50-30000 in the
+Sample Rate dialog); Freeze keeps sampling but shows the history as it
+was. Drawing goes through a memory bitmap (no flicker). Status lists
+the processors (DosGetProcessorStatus); Enter on one changes its wanted
+status and OK calls DosSetProcessorStatus, whose failure (rs2 keeps
+every processor online) is reported for that processor. Help is
+MPCPUMON.HLP with IBM's panel numbers (9000 general, 6000 keys, 1000-1070
+for the menu items, 4110/4210 for the colours). IBM's keeps no
+settings; rs2's keeps its window position and options in OS2.INI
+(`MPCPUMON`: `WINDOWPOS`, `SETTINGS`). IBM's toolbar of icon buttons
+(hidden in its usual window) and its unused "interrupts per sample" mode
+are not there. `MPCPUMON /SELFTEST` checks the load arithmetic, the hit
+testing of lines and bars, a counter block per processor
+(QSV_NUMPROCESSORS) and that the busy time and load rise while the test
+thread works.
+
+### Check Disk and Format (PMCHKDSK.EXE, PMFORMAT.EXE)
+
+`userland/pmchkdsk` and `userland/pmformat`, the windows a drive's
+"Check disk" and "Format disk" items start (`PMCHKDSK X:`, `PMFORMAT
+X:`). Like IBM's, both are front ends for the command-line tools: they
+run `CHKDSK.COM` or `FORMAT.COM` (found in `\OS2`, then along PATH;
+`.EXE` also does) with `/P`, standard input and output on pipes
+(`pmchkdsk/src/child.rs`, which pmformat includes: the handles 0 and 1
+pointed at the pipes for the start, the tool's lines read on a thread
+and posted to the dialog), and the tool reports as `MSG_<number>,<params>`
+lines numbered as OSO001.MSG, which the window turns into its display,
+questions (answered with a line `Y`, `N` or empty) and error boxes;
+every other line is ignored. The texts shown are rs2's own.
+
+- **Check Disk**: "Check Disk - X:" (IBM's dialog 100: "Write
+  corrections to disk", Check, Cancel, Help) runs `CHKDSK.COM X: [/F]
+  /P`. Results come from 1507 (file system), 1361-1365/1368/1819 (bytes:
+  total, bad, hidden, directories, files, free, EAs) or 568-571/632/633
+  (kilobytes); questions 1356, 1315, 1346 and 1820 are asked Yes/No;
+  errors (26, 108, 544-552, 565, 566, 589, 1210, 1341) are shown at once,
+  corrections (553-592...) together at the end. Then "Check Disk -
+  Results - X:" (dialog 900): the file system, total and available
+  bytes, and the "Current Disk Usage" pie (a `PieChart` window drawn with
+  `GpiPartialArc` areas and a shadow; slices counter-clockwise from 0
+  degrees for directories, user files, bad blocks, EAs and reserved
+  space; the free space is the slice left out), the legend naming only
+  the parts there are, each in its slice's colour (PP_FOREGROUNDCOLOR).
+- **Format** chooses IBM's dialog by the drive (`DSK_GETDEVICEPARAMS`:
+  attribute bit 0 fixed, device type 8 optical, 0/1/7 with the
+  cylinders and sectors per track for diskettes), all titled "Format
+  Disk X:": a hard disk (5001) the volume label and HPFS/JFS/FAT (the
+  current one selected), a diskette (100) the label and a capacity spin
+  button with the sizes the drive takes, an optical disk (903) "Long
+  format", another removable disk (902) the label only. Format runs
+  `FORMAT.COM X: /P /V:"label"` plus `/FS:HPFS|JFS|FAT`, or `/ONCE` and
+  `/F:size` or `/L`, under "Disk X: - Format Progress" (dialog 900): a
+  slider with 0/50/100 scale texts set from 538/1312 (percent) and
+  635/1294 (complete), the total space from 568 (KB) or 1283, the space
+  available from 537 (KB) or 1286, which also ends the formatting (OK
+  enabled and default, Stop disabled); 1271 (proceed?) is answered `Y`,
+  1288 (press Enter) with an empty line, 1309 (may take 20 minutes) asks
+  OK/Cancel; errors (19, 123, 525-540, 1210, 1274-1319, 1509) are shown.
+  Stop ends FORMAT. rs2 asks once more than IBM's program before a hard
+  disk is formatted ("All the data on drive X: will be lost").
+  `RS2FORMATTEST=script.cmd` in the environment runs the script under
+  CMD.EXE in FORMAT's place (to test the window without a disk).
+
+Help tables as IBM's (PMCHKDSK.HLP: 8061, 8068; PMFORMAT.HLP: 8063,
+8069, 8072, 8677, 8678; IBM keeps these panels in WPHELP.HLP).
+`PMCHKDSK /SELFTEST` and `PMFORMAT /SELFTEST` check the line parsing,
+the results, the command lines and the drive kinds. Checked in QEMU:
+CHKDSK of C: with and without /F to the Results window, the Format
+dialog of a FAT test disk, its help, the progress window through
+`RS2FORMATTEST` to its finished state, and FORMAT's failure being
+reported. Not done: rs2's FORMAT has no `/P` yet (so the window reports
+it failed), nor `/F:` (diskettes); the slider's "100" is clipped.
+
+### Picture Viewer (PICVIEW.EXE)
+
+`userland/picview`. As IBM's (studied in PICVIEW.EXE, its resource DLL
+PICVIEW.DLL and PMPIC.DLL): it shows metafiles (.MET) and spool files of
+the standard kind (.SPL, which are metafiles) fitted to the window with
+their proportions kept: the part of the page the picture covers ("Fit
+picture in window", the default) or the whole page ("Fit page in
+window"), on the window colour or black. `doc.rs` reads the file with
+`crates/gpi`'s metafile parser and cuts its orders at each NEWFRAME
+escape (`ESC_DEVESCAPE` with DEVESC_NEWFRAME, as a PM_Q_STD DC records
+it) into one metafile per page: a page after the first starts a segment
+of its own and repeats the logical fonts, colour table and code page set
+before it; a handle for those bytes is an empty metafile from a metafile
+DC grown with `GpiSetMetaFileBits`. `view.rs` draws a page on the
+window's normal PS: page units PU_ARBITRARY sized as the metafile's page,
+a page viewport placing the page (or the picture's bounds, found once by
+playing with boundary data on and the display off, then taken through
+the metafile's default viewing transform) in the window, the default
+viewing transform set by hand (GpiPlayMetaFile applies the metafile's
+only with RES_RESET, which would undo the page), then the metafile
+played with RES_NORESET. Printing scales through the default viewing
+transform alone, on a PS in pels: a queued DC records the drawing as a
+metafile, which keeps that transform but not a page set up in other
+units.
+
+- Menus, accelerators (Ctrl+O, S, F, B, N, Q; Shift+Delete, Ctrl+Insert,
+  Shift+Insert, Shift+Print Screen), dialog ids and help panels are
+  IBM's; the title is "Picture Viewer - NAME", with "page n of m" for
+  several pages (Page Up and Page Down page too).
+- File > Open is IBM's own window (id 400), not the standard file
+  dialog: current path, file name, drive, directory and file lists,
+  *.MET, *.PIF and *.SPL buttons, a typed pattern, directory or drive
+  changes the listing; several files (up to 50) make a sequence shown
+  interactively (Sequence > Next picture, Ctrl+N) or automatically
+  after a delay of 1-999 seconds. Save as (id 599) saves the page shown
+  as a metafile (".MET" added; replacing a file asks). Print asks for
+  copies (id 302) and prints every page on the default printer through a
+  PM_Q_STD queued DC; "There is no printer installed" without one. Edit
+  Cut/Copy put a copy on the clipboard as CF_METAFILE, Paste shows the
+  clipboard's ("Picture Viewer - Clipboard"). Page > Go to page (id 301).
+  Options > Code page (id 550) keeps the PIF country choice.
+- `PICVIEW file`; `PICVIEW /P file` prints and ends without a window
+  ("Picture Printer"); `/S` neither uses nor saves the window position.
+  OS2.INI `PicView`: WinPos (an SWP), BestFit (4 bytes: fit the picture;
+  IBM deletes the key for "fit page", which its next start reads as fit
+  the picture again: rs2 keeps a 1-byte value), BlkBackg (there: black).
+- `PICVIEW /SELFTEST` checks the page splitting, the page metafiles and
+  their bounds, the fitting, AAAAA.MET's bounds (when the image has it),
+  refused files, saving and the clipboard, and leaves `C:\PVPAGES.SPL`
+  (three pages); `PICVIEW /SELFTEST file` then goes on to show a file.
+
+**Not done**: PIF files (IBM converts them to metafiles with PMPIC.DLL's
+PicIchg, from GDDM's picture interchange format; there is no sample to
+test with, so rs2 says they are not metafiles), the window's icon, the
+drawing on a second thread (IBM's can be interrupted while a large
+picture draws).
+
+### Seek and Scan Files (PMSEEK.EXE)
+
+`userland/pmseek`, `OS2\APPS\PMSEEK.EXE` (help PMSEEK.HLP). Studied in
+IBM's PMSEEK.EXE (a 16-bit program) and its resource DLL PMSEEK.DLL.
+As IBM's, the window is a dialog with a sizing border and a menu bar:
+the file name to search for (`*.*` at first), the text to search for,
+the editor (`E.EXE`), the drives ("All fixed disks", which checks the
+hard disks: not A: or B:, CD-ROM (CDFS, UDF) or network drives, from
+DosQueryFSAttach; and a check box per drive DosQueryCurrentDisk
+reports), the status line, the list of files found and the Search,
+Stop, Open and Help buttons; IBM's control ids, menu ids,
+accelerators (F2 Save, F4 Clear list, F5 Search, F6 Stop, Ctrl+Insert
+Copy; IBM's F5/F6 commands 205/206 have no menu item, rs2 reads them as
+Search and Stop) and help panel numbers. When the window is sized the
+list grows and the fields keep their place under the menu (handled on
+WM_FORMATFRAME: rs2's frames get no WM_SIZE).
+
+- **Searching** runs on a second thread (with its own message queue;
+  it sends each file and the directory being searched to the window,
+  so only the window's thread touches the list) and Stop or closing the
+  window ends it. DosFindFirst/Next (FILEFINDBUF3, 64 entries a call)
+  match the name, hidden and system files included; with "Search
+  subdirectories" every directory below is walked. A pattern may name
+  a directory (`\OS2\HELP\*.HLP`) or a drive (`D:\*.INI`, then only
+  that drive). The text is looked for line by line (a match never
+  spans lines; very long "lines" of binary files are looked at in 4 KB
+  pieces), with or without "Ignore case". The status line shows
+  "Searching C:\OS2\" as it goes and at the end IBM's "Search
+  Complete... N file(s) found.  Search Time= S second(s)." (or "Search
+  Aborted..."); a full list box (32000 lines) stops the search with
+  IBM's "PM Listbox capacity exceeded."
+- **The list**: a line per file, `MM-DD-YY  HH:MM  size  path` (the
+  last write), and with "Display found text" the lines holding the
+  text below it (`-------> line`, at most 50 per file). Each line's
+  item handle leads to its file, so a found-text line opens its file.
+- **Selected** (and the Open button, and a double click): Open starts
+  the editor (looked for along PATH when it names no directory) with
+  the file in a session of its own (DosStartSession); Process starts a
+  program (.EXE, .COM) or gives any other file to `CMD.EXE /C` in an OS/2
+  window; Command... asks for a command line (IBM's "File Command"
+  dialog, filled in with the file's name) and runs it through
+  `CMD.EXE /C`.
+- **File** Save writes the list (CR LF lines) to the list file and Save
+  as asks for its name first ("N list entries saved in NAME"); **Edit**
+  Copy puts the selected line on the clipboard as text, Clear list
+  empties it.
+- **Settings**: OS2.INI application `PMSEEK`, IBM's keys: `Position`
+  ("x y cx cy", written when the program ends), `Editor`, `Saveas` and
+  `Options` ("subdirectories found-text ignore-case clear-on-search",
+  each 0 or 1), the last three written by Options > Set defaults
+  (Saveas also by Save as). Defaults: subdirectories, ignore case and
+  clear on search on.
+
+`PMSEEK /SELFTEST` checks the pattern splitting, the text matcher
+(case, matches split across reads, long lines), the list line format
+and searches of the boot drive (CONFIG.SYS holding LIBPATH, a text that
+is not there, PMSEEK.HLP found through subdirectories, a pattern with a
+directory), printing PASS/FAIL and `pmseek selftest done: N
+failure(s)`.
+
+Not done: IBM's drag and drop from the list (dragging a file to
+another program), its "Upload File" and 3270 file transfer helpers
+(SEND.EXE) and the search expressions its binary hints at (`&&`, `!!`).
+
+### Icon Editor (ICONEDIT.EXE)
+
+`userland/iconedit`. As IBM's (studied in its binary, its resources
+and by running it on rs2): one window, "Icon Editor - FILE", with a
+status area along the top (a mouse showing the colours of its two
+buttons, the figure at its real size, form size, pen location, pen
+size, hot spot or selection size, figure type, which form of how many,
+the form's device, the current mode), the magnified edit area (grid,
+X background for Screen pels, the hot spot's cross, the dotted
+selection) and the palette on the right: Screen and Inverse for icons
+and pointers, then the colours (16: dark ones left, their bright
+partners right; 256: a 16 by 16 grid); button 1 picks button 1's
+colour (framed red), button 2 button 2's (framed green), a double
+click edits the colour. IBM's menus, command ids and accelerators
+(File, Edit, Palette, Options with Pen size and Preferences, Device,
+Tools, Help), its dialogs with their ids (New Figure 101, Customize
+Device 201, Device List 301, Edit color 401, Edit Predefined Device
+Forms 501, Save Options 600, Add Device 700) and help panel numbers;
+the help is ICONEDIT.HLP. `ICONEDIT file` opens a file (a name that
+does not exist starts a new figure of the kind its extension says).
+
+- **Files** (`format.rs`, no PM): icons, pointers and bitmaps with
+  OS/2 1.x headers (BITMAPFILEHEADER + 12-byte BITMAPINFOHEADER, RGB
+  triples) and 2.0 headers (BITMAPINFOHEADER2, 16 to 64 bytes, RGB2),
+  single images and bitmap arrays (`BA`, with each form's display
+  size), black and white (`IC`/`PT`: XOR mask in the bottom half of a
+  double-height 1 bpp bitmap, AND mask in the top half) and colour
+  icons and pointers (`CI`/`CP`: the masks, then the colour bitmap),
+  1, 4, 8 and 24 bits per pel, reading RLE8/RLE4 compressed 2.0 files.
+  Every pel is kept as RGB, Screen or Inverse; writing maps colours to
+  the form's palette (Screen and Inverse pels get its black entry, as
+  IBM requires). Save as asks for the layout as IBM's Save Options
+  does: 1.1 (one form), 1.2 (array, 1.x headers), 2.0 (array, 2.0
+  headers) and packed 2.0 (4 and 8 bit pels RLE-compressed), the
+  layout read marked `<..>`, and which forms to write. A bitmap of one
+  form is a plain file (cbSize the file's size; icons, pointers and
+  array entries carry the header's size, as IBM's files do). Reading
+  and writing again IBM's icons, pointers and bitmaps from the CD gives
+  the same forms (ARROW.PTR and the two-form POOL.BMP even the same
+  bytes; icons differ only in the colour bits under transparent pels).
+- **Forms and devices** (`devices.rs`): a figure holds forms for
+  several devices; a new icon or pointer gets the "recommended"
+  predefined devices (independent 32x32 and 16x16, colour and black and
+  white; 1024x768 40x40 and 20x20), as IBM's files have them. Device >
+  List views, adds (rendered from the current form: scaled, colours
+  mapped), deletes and orders forms; Add Device offers the predefined
+  devices and Customize; Edit Predefined changes the list (sizes,
+  colours, inherited or predefined palette, recommended), kept in
+  OS2.INI `ICONEDIT` `DEVICES`.
+- **Tools** (`edit.rs`, no PM): the pen (1x1 to 9x9, any w x h with Set
+  pen shape and the arrow keys), lines with Draw straight, flood fill
+  (Color fill), Find color, the hot spot, Select / Select all, Cut,
+  Copy (the editor's own clipboard format "IconEdit Color Bits Format",
+  which keeps Screen and Inverse, and `CF_BITMAP` for other programs),
+  Paste and Stretch paste (also from other programs' bitmaps), Clear,
+  Fill, Flip horizontal and vertical, Circle (an ellipse in the
+  selection), one level of Undo that toggles; the keyboard moves the pen
+  location and paints (Space, Enter).
+- **Palette**: Edit color (RGB or HSV scroll bars and fields, a sample;
+  every pel of the old colour takes the new one), Swap colors
+  (preserving the figure or not), Load default palette, Set default
+  palette (OS2.INI `PALETTEn`), palette files (rs2's own small format,
+  `*.PAL`: IBM's is undocumented).
+- **Test** makes a PM pointer of the form (WinCreatePointerIndirect
+  with the mask and colour bitmaps) shown over the edit area.
+- **Settings**: the window position and the options (grid, X
+  background, draw straight, pen, safe prompting, warnings, save state,
+  status area) in OS2.INI `ICONEDIT`.
+
+`ICONEDIT /SELFTEST` round-trips every layout and depth, checks the
+tools and the device list's OS2.INI form, and prints PASS/FAIL lines
+and `iconedit selftest done: N failure(s)` (also on the serial port);
+format.rs and edit.rs also build on the host (`rustc` with a small
+harness) to read the CD's files.
+
+**Not done**: IBM's palette and profile file formats (its own
+binary layouts; rs2 keeps the profile in OS2.INI and its own `.PAL`),
+Huffman and RLE24 compressed bitmaps, the `.TYPE` extended attribute
+IBM's editor writes on saving, more than one level of undo.
+
+### Locale (GLOCALE.EXE)
+
+`userland/glocale`, on rs2's LIBUNI and UCONV
+([Locales](#locales-libuni-and-uconv)). As IBM's (studied in GLOCALE.EXE
+and GLOCMRI.DLL): the **Country Palette** window (300 by 260 pels where
+the shell puts programs) shows the user locales (`UniQueryLocaleList`)
+as globe icons in an icon-view container with an empty title line; on
+the first start the process's locale (the first name of
+`UniQueryLocaleObject(LC_ALL)` of the empty spec) is made a user locale
+and written (`UniMakeUserLocale`, `UniCompleteUserLocale`: USER.LOC).
+The menu bar (Locale: Open as > New locale / Locale, Exit Country
+Palette; Action: Create java locale, Delete..., Mark as default...; Help)
+and a locale's pop-up menu (Open as, Properties, Help, Create another,
+Create java locale, Delete..., Mark as default...) have IBM's ids.
+- **The notebook** (one window, made hidden at start and reused, titled
+  "Locale Configuration - name") is a tabbed notebook with IBM's eight
+  pages and dialog ids: Country/Region (the name, the base locale with
+  the language and country names from `UniQueryLanguageName` /
+  `UniQueryCountryName`, measurement, list separator), Collate
+  (sCollate's collations), Numeric (decimal and grouping symbols, signs,
+  digits, the negative format as samples such as `-1,000.11`), Monetary
+  (symbol, its placement and the sixteen negative formats as samples
+  such as `($1,000.11)`, digits, separators, leading zero), Date (the
+  four orders, separator, format string, today's date through
+  `UniStrftime`), Time (12/24 hours, AM/PM strings, separator, format
+  string, the time now, updated every second), Language (sLanguageID)
+  and Advanced (every item by its LOCI name, its value editable). Each
+  change is a `UniSetUserLocaleItem` at once and the page is filled
+  again from the locale (the date order and the clock rebuild sShortDate
+  and sTimeFormat with the separator, as IBM's; a time format strftime
+  cannot use is not taken); choosing another base locale makes the
+  locale again on it (`UniMakeUserLocale` with the base marked 0xFF00).
+  The notebook's buttons (`BKM_SETNOTEBOOKBUTTONS`, where IBM's pages
+  carry BS_NOTEBOOKBUTTON buttons, which rs2's notebook does not move
+  into its button area): Undo puts back the items the locale had when
+  the notebook opened, Default makes it again on its base, Help shows
+  the top page's panel (`BKN_HELP`). Closing writes USER.LOC.
+- **Create another** asks for a name (IBM's "Locale Name" dialog, 112)
+  and makes a user locale on the selected one's base (sName); a system
+  locale's name makes an override of that locale (ULS_BADOBJECT, then
+  the name as its own base), as IBM's; errors use IBM's texts in a
+  "Country Palette Error" box. The new locale's notebook opens.
+- **Delete** deletes the user locale (no question, as IBM's); deleting
+  the last one says "Restoring system default locale" and makes the
+  system's locale a user locale again.
+- **Mark as default** writes the locale's national settings to OS2.INI
+  `PM_National` and `PM_Default_National` (iCountry, iMeasurement,
+  iDate, iCurrency, iDigits, iTime, iLzero, s1159, s2359, sCurrency,
+  sThousand, sDecimal, sDate, sTime, sList), `\LANGUAGE\LOCALE\DEFAULT.LOC`
+  and, with WIN-OS/2 installed (`PM_INSTALL WINOS2_LOCATION`), WIN.INI's
+  [intl]. IBM's also tells the UNICODE$ driver the default code page and
+  country; rs2 has no such driver.
+- **Create java locale** says the Java locale was not created (rs2 has
+  no Java runtime).
+- Help: GLOCALE.HLP (rs2's text), with IBM's panel numbers for the
+  windows and pages (5010 the palette, 5020 the name dialog, 5030-5100
+  the pages) and rs2's 5011-5019 for the menu items.
+
+`GLOCALE /SELFTEST` checks the samples and format strings, makes a user
+locale on de_DE and changes it as the pages do (date order, clock,
+currency, measurement), checks the items, the date and time samples and
+USER.LOC, Default, the system-name rule and Mark as default (OS2.INI,
+DEFAULT.LOC), then deletes it: `cargo xtask run --init "OS2\GLOCALE.EXE
+/SELFTEST"` prints `glocale selftest done: 0 failure(s)`.
+
+### Klondike Solitaire (KLONDIKE.EXE)
+
+`userland/klondike`, `OS2\APPS\KLONDIKE.EXE` with `OS2\HELP\KLONDIKE.HLP`.
+As IBM's (its menus, dialogs, strings and help table read from the
+binary, its logic in Ghidra):
+
+- **Menus and keys**: Game (New deal, Auto play), Moves (Take back,
+  Replay, Cheat, Auto finish), Options (Timer, Score On/Off/Reset,
+  Color scheme Spring/Summer/Autumn/Winter, Settings..., Save
+  settings), Help; IBM's command ids (1151.., 1201.., 1302.., 3990,
+  1500) and accelerators (Ctrl+N, P, T, R, C, F; Alt+Backspace).
+- **Rules**: the four variations of IBM's Options page (Draw 3 Flip
+  none, Draw 3 Flip 3, Draw 3 Flip many, Draw 1 Flip many: cards turned
+  from the talon and how often the waste pile may be turned over), kings
+  to empty piles, auto-flip of uncovered cards (or a click).
+- **Scoring** as IBM's: a bank that starts at 500, 52 per deal, 5 per
+  card on a foundation (5 back when one comes off), 25 per turn of the
+  waste pile; Score > Reset sets 500.
+- **Moves**: a history (IBM keeps 1000) for Take back and Replay; Cheat
+  toggles a mode in which any face-up run may go anywhere, counted and
+  mentioned when the game is won; Auto finish sends every card it can to
+  the foundations (step by step with Animate cards, else at once); Auto
+  play plays the game from where it is, on a timer at the animation
+  speed, until it is stuck or has won.
+- **Settings** in `KLONDIKE.INI` (beside the program), application
+  `PATIENCE`, IBM's keys and values as decimal text (ColorSet 1302..,
+  Score, Timer, DragCards, Variation 1351.., CardBack 1451.., AutoFlip,
+  Animation, Speed, OpeningVideo) plus the window's place; Save settings
+  writes them, and closing with unsaved changes asks (Yes/No/Cancel).
+  The Settings notebook has IBM's Options page (with the same ids;
+  Opening video is shown disabled) and a Card backs page (nine designs);
+  changes apply at once, each page has Undo, Default and Help.
+- **Input**: dragging with button 1 (Drag cards on) or click-then-click,
+  a double click sends a card home, the keyboard plays (cursor keys pick
+  a pile, Space/Enter pick up and put down, Esc).
+- **The pictures** are rs2's own (`cards.rs`): faces with corner
+  indexes in Helvetica Bold, pips drawn as GPI areas and arcs, aces with
+  one large pip, court cards as a tinted frame with an emblem (crown,
+  coronet, plumed cap) and the letter in Times New Roman Bold; nine
+  patterned backs. They are drawn once per card size into an atlas (the
+  cards follow the window's size) and the board is painted off screen
+  and copied.
+
+`KLONDIKE /SELFTEST` checks dealing, the rules, each variation's
+drawing and turning, the score, Take back and Replay, auto-flip, Auto
+finish and Auto play on ten seeded deals, and drawing the cards at two
+sizes (56 checks); `KLONDIKE /DEAL n` deals from a fixed seed for
+scripted tests. Not done: IBM's opening video and sounds, the Sounds,
+Colors, Background bitmap and Card faces pages (other card decks),
+animated card movement (moves are shown step by step, not sliding).
+
+### Mahjongg (MAHJONGG.EXE)
+
+`userland/mahjongg`, in `OS2\APPS` with rs2's layouts beside it
+(`userland/mahjongg/layouts`: PYRAMID, FORTRESS and TWINPEAK.MAH, made by
+`gen.py`, and DEFAULT.MAH, which stands for the built-in layout as
+IBM's dummy file does). As IBM's (studied in its binary, resources and
+game files, and run on rs2 beside it):
+
+- **Play**: 144 tiles (34 faces four times, four flowers and four
+  seasons that pair with each other); a tile is free when nothing lies
+  on it, even partly, and its left or right side is open. Clicking
+  selects (yellow) and takes matching pairs; the status box at the
+  layout's `x_stat`/`y_stat` shows the matches (pairs takeable now) and
+  the time, which starts with the first pair. No pairs left asks New,
+  Retry, Exit or Cancel; a cleared board says how long it took and how
+  often the player cheated.
+- **Menus and keys** are IBM's ids and accelerators: Game (New deal:
+  Random Ctrl+N, Same, Select... a game number 1-30000; Default; Open...,
+  Save, Save as...; Auto play Ctrl+P), Moves (Take back Ctrl+T and
+  Alt+Backspace, Replay Ctrl+R, Show replay Ctrl+Y, Cheat Ctrl+C: the
+  next pair may be blocked, Show Ctrl+S: a pair, or one tile of it, for
+  a moment), View (Play, Edit), Options (Timer, Matches, Settings...,
+  Save settings), Help (Contents, General, Keys, Using help, Game
+  information, Product information); mouse button 2 gives IBM's pop-up
+  menu (with Show same).
+- **Deals** come from the game number (the same number, the same deal);
+  with "Deal only solvable games" the tiles are taken off the full
+  layout two free ones at a time and given matching faces, so the deal
+  plays out in that order (Auto play follows it).
+- **Game files** are IBM's `.MAH` format (`:GAME` name, help, tileset,
+  author, about; `:BOARD` dx, dy, x_stat, y_stat, color; `:LEVEL n.`
+  with positions in whole and half tiles, y upwards), read (IBM's eight
+  layouts load) and written; a new file can get a shadow in
+  `<MAH_FOLDER>` (WinCreateObject of a WPShadow, as IBM's). `MAHJONGG
+  file.MAH` opens one. The built-in layout is the traditional turtle.
+- **Edit mode** shows the layout without faces and IBM's Edit Mode
+  window (board size, level, Reset, OK, Cancel); clicks add and remove
+  tiles of the level, snapped to half tiles; OK needs 144 tiles without
+  overlaps.
+- **Settings** are kept as IBM keeps them, in `MAHJONGG.INI` (the
+  current directory, application `MAHJONGG`, values as text: ErrorBeep,
+  Solvable, HintMode, 3DView, Speed, BackClr `RGB(r,g,b)`, UseBackClr,
+  Timer, Status, and rs2's AutoHints); the first start asks for the hint
+  level (IBM's Select Initial Level). rs2's Settings dialog has IBM's
+  options as one page: beeps, solvable games, matching tiles shown,
+  hints, the side the tiles are seen from, auto play speed and the
+  background colour.
+- **Tiles** are rs2's own design, drawn with GPI into a back buffer
+  (`tiles.rs`: circles, bamboo, characters with a red seal, winds with
+  a letter and arrow, flame, pine and frame dragons, flowers, seasons);
+  each level is a seventh of a tile up and to the side.
+- `MAHJONGG /SELFTEST` checks the set, the free-tile rules, the layouts
+  (built-in, rs2's files, IBM's when in `C:\IBM\APPS`), writing and
+  reading game files (also on disk), deals by number and that solvable
+  deals play out on every layout, and taking back.
+
+Not done: IBM's tile set DLLs (TILEDEF.DLL), background bitmaps, sounds
+(rs2 ships no WAV files) and the opening movie, tile animation, the hand
+pointer, a per-layout help file shown by Game information (rs2 shows and
+edits the layout's title, author and comment there), the settings
+notebook's pages (rs2 has one dialog).
+
+### OS/2 Chess (OS2CHESS.EXE)
+
+`userland/os2chess`, in `OS2\APPS`. As IBM's OS/2 Chess (its resources
+and binary studied): it starts with Set Players (Human or Computer for
+each side, names; Network is greyed), then shows the board in a 3-D
+view; IBM's menus and command ids (Game: New, Load, Save, Delete,
+Print; Moves: Take back, Move status, Game record, Valid moves,
+Captured pieces; View: Rotate 3-D board, Flip board, Label board;
+Options: Timer, Keyboard input, Set players, Set position, Settings,
+Save settings; Network; Help: Contents, Index, General, Keys, Using,
+Product information), its Ctrl accelerators, the board's pop-up menu
+(button 2: Game, Moves, Label board, Show possible moves), its dialog
+ids and help panel numbers (OS2CHESS.HLP), and its messages ("Check!",
+"Checkmate!!!  White wins!", the three draw rules, "Invalid move:"
+with the reason: wrong piece colour, own piece, jumping over a piece,
+king in check or put in check, castling rules).
+
+- **Rules and computer** (`engine.rs`, rs2's own): a mailbox board
+  with Zobrist hashes, pseudo-legal moves filtered by a king-safety
+  check (castling through check, en passant, the four promotions),
+  checkmate, stalemate, 50 moves, threefold repetition and too little
+  material; long algebraic notation (`Ng1-f3`, `e4xd5`, `O-O`,
+  `e7-e8=Q`, `+`, `#`). The computer searches on its own thread
+  (alpha-beta with quiescence, a transposition table, killer moves,
+  iterative deepening under a time limit, answer posted to the window;
+  New, Take back and Load drop a search in progress). The five levels
+  of Set Computer Playing Level are 1 to 8 plies and 0.4 to 12 seconds
+  (Beginner sometimes plays a random move); "Use book openings" follows
+  a few standard openings of its own.
+- **The board** (`draw.rs`): a perspective view whose projection turns
+  with View > Rotate 3-D board (a scroll bar; Default), flipped, with
+  labels; Settings switches to a flat 2-D board. Pieces are rs2's own
+  outlines drawn with GPI areas (no bitmaps) in one of four colour
+  schemes; in 3-D the board is painted far to near and a click on a
+  piece's shape picks it up (it covers the squares behind it). Drawn
+  off screen (a memory PS) and copied.
+- **Dialogs**: Set Players and Set Computer Playing Level, Load Game /
+  Delete Game (the saved games with players and date), Pawn
+  Promotion, Player to Move (after Set position, which puts pieces
+  with a pop-up menu per square and checks the kings), Valid Moves
+  (Move plays the one chosen), Captured Pieces, Rotate Board, and the
+  modeless Game Record (White and Black columns, kept up to date),
+  Move Status (the computer's thinking time, then positions searched
+  and depth), Time Elapsed (each side's clock) and Keyboard (From/To
+  squares). Settings is one dialog (warnings, show possible moves,
+  2-D/3-D, colours) where IBM's has a notebook with sound and
+  background bitmap pages.
+- **Files**: Game > Save writes the game into its file or a new
+  `GAMEnnnn.PMC` in the current directory (the program object starts
+  it in `\OS2\APPS`), in rs2's own text format (`RS2 OS/2 Chess game
+  1`, the players, date, start position as FEN, the moves as
+  coordinates); IBM's binary `.PMC` files are not read. Print draws
+  the board and the record on the default printer (a PM_Q_STD queued
+  DC; not tried on a printer yet). Settings (players, levels, book, view, angle, labels, colours,
+  warnings, window position) are in OS2.INI under `OS2CHESS`, written
+  by Save settings.
+- **Not there**: network play (rs2 has no partner protocol for it),
+  sounds, the opening movie, animation of moving pieces, a background
+  bitmap, IBM's piece set DLLs.
+
+`OS2CHESS /SELFTEST` checks the engine: perft node counts from the
+start position (depths 3 and 4) and three standard test positions,
+make/unmake leaving the position as it was, mate in one and a back-rank
+mate found by the search, checkmate, stalemate, insufficient material,
+threefold repetition, en passant, castling and promotion moves, a book
+move (`[os2chess] os2chess selftest done: 0 failure(s)` in QEMU; the
+start position's depth 4, 197281 nodes, takes about 0.13 s).
+
 ## Installing OS/2's applications (APPINST.EXE)
 
 `C:\OS2\APPINST.EXE` (userland/appinst; "Install OS/2 Applications" in
@@ -2402,12 +3004,15 @@ CD. rs2 ships none of IBM's files; this puts the user's own copies where
 OS/2 itself keeps them.
 
 - **The catalogue** is `userland/appinst/apps.txt`, built into the
-  program: categories (Games, Productivity, REXX, Command line tools,
-  Information) with their applications, each with its files (the target
+  program: categories (Productivity, REXX, Command line tools,
+  Information...) with their applications, each with its files (the target
   path and the CD's packed file that holds it), the program objects to
   make and what else it needs (PM REXX needs REXX; the command line
   tools need OS/2's message files). An application is shown as installed
-  when all its files are on the boot drive.
+  when all its files are on the boot drive. The applets and games rs2
+  has its own versions of ([rs2's PM applets](#rs2s-pm-applets):
+  Klondike, Chess, Mahjongg, the Icon Editor, Pulse, Locale, the
+  Clipboard Viewer) are no longer in it.
 - **The window**: the source (the first drive with `\OS2IMAGE`, or
   `APPINST X:`), Refresh, a tree of the categories with check boxes
   (checking a category checks all its applications, a partly checked one
@@ -2421,21 +3026,20 @@ OS/2 itself keeps them.
   like TEDIT.EXE, are copied), written with its date, time, attributes
   and extended attributes (`DosSetPathInfo` levels 1 and 2), the
   directories made as needed, each packed file read once. Then the
-  program objects are made, a folder per category ("Games",
-  "Productivity", "REXX", "Information"; objects already there are
+  program objects are made, a folder per category ("Utilities",
+  "REXX", "Information"; objects already there are
   updated). With the Workplace Shell running they are Workplace Shell
   objects (WinCreateObject, which goes to the shell's process): the
   folders in the Programs folder, the books in the Assistance Center's
   folders (Reference and Commands, Tasks, Troubleshooting), with IBM's
-  INI.RC object IDs and places where it has them (`<WP_GAMES>`,
-  `<WP_TOOLS>`, `<WP_INFO>`; `<WP_KLDK>`, `<WP_CHESS>`, `<WP_EPM>`,
+  INI.RC object IDs and places where it has them (`<WP_TOOLS>`,
+  `<WP_INFO>`; `<WP_EPM>`,
   `<WP_CMDREF>`...; apps.txt's last fields). With RS2SHELL
   they are program groups, and the program broadcasts the registered
   message `RS2_ProgramListChanged` to the top-level frames, on which
   RS2SHELL refills its desktop and program group folders. When an application
   lives in `\OS2\APPS` and CONFIG.SYS's `SET PATH` or `LIBPATH` lacks
-  `C:\OS2\APPS`, it is added (Solitaire finds its card font along the
-  PATH) and the message says to restart; rs2's own CONFIG.SYS has it.
+  `C:\OS2\APPS`, it is added and the message says to restart; rs2's own CONFIG.SYS has it.
   A boot drive that cannot be written (rs2 running from the CD) is
   reported before anything is done.
 
@@ -2857,6 +3461,13 @@ it gets.
 
 ## Testing
 
+- rs2's applets ([rs2's PM applets](#rs2s-pm-applets)) check
+  themselves with `/SELFTEST` (KLONDIKE, MAHJONGG, OS2CHESS, ICONEDIT,
+  GLOCALE, MPCPUMON, PMCHKDSK, PMFORMAT, PICVIEW, PMSEEK: the game
+  rules and engines, file formats, searches, locales, counters...),
+  e.g. `cargo xtask run --init "OS2\APPS\KLONDIKE.EXE /SELFTEST"`,
+  printing PASS/FAIL and `NAME selftest done: N failure(s)` on the
+  serial port.
 - Host unit tests in `crates/gpi` (render into memory and compare pixels;
   the Toolkit's sample bitmaps when `work/media` is present) and
   `crates/pmwin` (window tree, region computation, message routing).

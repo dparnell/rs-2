@@ -1,0 +1,14 @@
+[package]
+name = "pmseek"
+description = "PMSEEK.EXE: rs2's Seek and Scan Files"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pmseek"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+pmkit = { path = "../pmkit" }

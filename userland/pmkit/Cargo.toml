@@ -1,0 +1,9 @@
+[package]
+name = "pmkit"
+description = "What rs2's own PM applets share: PM bindings, menus and dialogs built in memory, help, settings"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }

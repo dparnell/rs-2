@@ -5,11 +5,11 @@
 //! category checks all its applications, and each can be checked by
 //! itself; an application also brings what it needs (PM REXX: REXX).
 //! Install unpacks their files from the CD's packed files to where OS/2
-//! keeps them (`\OS2\APPS\KLONDIKE.EXE` ...), with their dates and
+//! keeps them (`\OS2\APPS\EPM.EXE` ...), with their dates and
 //! extended attributes, on a second thread with a progress bar; then it
 //! makes their program objects: with the Workplace Shell running, a
 //! folder per category in the Programs folder (WinCreateObject, with
-//! IBM's INI.RC object IDs where it has them: <WP_GAMES>, <WP_KLDK>...);
+//! IBM's INI.RC object IDs where it has them: <WP_TOOLS>, <WP_EPM>...);
 //! with RS2SHELL, program groups, which it shows as folders on the
 //! desktop (it is told to refresh with the registered message
 //! `RS2_ProgramListChanged`). Then it adds
@@ -592,7 +592,7 @@ fn finished(a: &mut App) {
         set_text(ID_STATUS, b"Installed with errors.");
     }
     if made > 0 {
-        // "Their objects are in the Games and Information folders."
+        // "Their objects are in the Utilities and Information folders."
         m.extend_from_slice(b"\n\nTheir objects are in the ");
         for (k, f) in used.iter().enumerate() {
             if k > 0 {

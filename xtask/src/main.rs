@@ -690,6 +690,18 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("somu", "OS2\\DLL\\SOMU.DLL"),
         ("somir", "OS2\\DLL\\SOMIR.DLL"),
         ("win16", "OS2\\DLL\\WIN16.DLL"),
+        // rs2's own PM applets (userland/pmkit is what they share).
+        ("clipos2", "OS2\\CLIPOS2.EXE"),
+        ("mpcpumon", "OS2\\MPCPUMON.EXE"),
+        ("pmchkdsk", "OS2\\PMCHKDSK.EXE"),
+        ("pmformat", "OS2\\PMFORMAT.EXE"),
+        ("iconedit", "OS2\\ICONEDIT.EXE"),
+        ("glocale", "OS2\\GLOCALE.EXE"),
+        ("picview", "OS2\\APPS\\PICVIEW.EXE"),
+        ("pmseek", "OS2\\APPS\\PMSEEK.EXE"),
+        ("klondike", "OS2\\APPS\\KLONDIKE.EXE"),
+        ("mahjongg", "OS2\\APPS\\MAHJONGG.EXE"),
+        ("os2chess", "OS2\\APPS\\OS2CHESS.EXE"),
     ];
 
 /// Help files compiled from IPF source in userland/, with their names.
@@ -701,6 +713,17 @@ const HELP_FILES: &[(&str, &str)] = &[
     ("help/WPHELP.IPF", "OS2\\HELP\\WPHELP.HLP"),
     ("help/CMDREF.IPF", "OS2\\BOOK\\CMDREF.INF"),
     ("help/START.IPF", "OS2\\BOOK\\START.INF"),
+    ("clipos2/CLIPOS2.IPF", "OS2\\HELP\\CLIPOS2.HLP"),
+    ("mpcpumon/MPCPUMON.IPF", "OS2\\HELP\\MPCPUMON.HLP"),
+    ("pmchkdsk/PMCHKDSK.IPF", "OS2\\HELP\\PMCHKDSK.HLP"),
+    ("pmformat/PMFORMAT.IPF", "OS2\\HELP\\PMFORMAT.HLP"),
+    ("iconedit/ICONEDIT.IPF", "OS2\\HELP\\ICONEDIT.HLP"),
+    ("glocale/GLOCALE.IPF", "OS2\\HELP\\GLOCALE.HLP"),
+    ("picview/PICVIEW.IPF", "OS2\\HELP\\PICVIEW.HLP"),
+    ("pmseek/PMSEEK.IPF", "OS2\\HELP\\PMSEEK.HLP"),
+    ("klondike/KLONDIKE.IPF", "OS2\\HELP\\KLONDIKE.HLP"),
+    ("mahjongg/MAHJONGG.IPF", "OS2\\HELP\\MAHJONGG.HLP"),
+    ("os2chess/OS2CHESS.IPF", "OS2\\HELP\\OS2CHESS.HLP"),
 ];
 
 /// Message files compiled from MKMSGF source in userland/msg (crates/msgf):
@@ -726,8 +749,16 @@ const MSG_FILES: &[(&str, &str, &[u16], (u16, u16))] = &[
     ("UCDFS.TXT", "OS2\\SYSTEM\\UCDFS.MSG", &[850], (0, 0)),
 ];
 
+/// The applets' data files in userland/, with their names.
+const APP_DATA: &[(&str, &str)] = &[
+    ("mahjongg/layouts/DEFAULT.MAH", "OS2\\APPS\\DEFAULT.MAH"),
+    ("mahjongg/layouts/PYRAMID.MAH", "OS2\\APPS\\PYRAMID.MAH"),
+    ("mahjongg/layouts/FORTRESS.MAH", "OS2\\APPS\\FORTRESS.MAH"),
+    ("mahjongg/layouts/TWINPEAK.MAH", "OS2\\APPS\\TWINPEAK.MAH"),
+];
+
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2"];
+const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "klondike", "mahjongg", "os2chess"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
@@ -822,6 +853,9 @@ fn build_userland() -> Option<image::FileList> {
     let ini = out_dir.join("MMPMMMIO.INI");
     std::fs::write(&ini, mmio_ini(&std::fs::read_to_string(ul.join("mmio/ioprocs.txt")).ok()?)).unwrap();
     files.push((ini, "MMOS2\\MMPMMMIO.INI".to_string()));
+    for (src, dest) in APP_DATA {
+        files.push((ul.join(src), dest.to_string()));
+    }
     Some(files)
 }
 

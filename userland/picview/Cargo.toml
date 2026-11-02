@@ -1,0 +1,16 @@
+[package]
+name = "picview"
+description = "PICVIEW.EXE: rs2's Picture Viewer"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "picview"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+pmkit = { path = "../pmkit" }
+
+gpi = { path = "../../crates/gpi" }

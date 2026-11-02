@@ -1,0 +1,14 @@
+[package]
+name = "clipos2"
+description = "CLIPOS2.EXE: rs2's Clipboard Viewer"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "clipos2"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+pmkit = { path = "../pmkit" }

@@ -88,7 +88,7 @@ fn main(s: &os2::Startup) -> u32 {
             PM.store(true, Ordering::Relaxed);
         } else if u == "/Q" {
             quick = true;
-        } else if u == "/ONCE" || u == "/L" || u.starts_with("/BS:") {
+        } else if u == "/ONCE" || u == "/L" || u.starts_with("/BS:") || u.starts_with("/F:") {
             // Diskette and optical options: nothing to do on a hard disk.
         } else if u.starts_with('/') {
             return usage_error();

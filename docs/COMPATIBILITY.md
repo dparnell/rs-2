@@ -302,6 +302,28 @@ features under `\OS2IMAGE\FI` (system management, printer utilities).
 | CALC, NOTEPAD, CLOCK, WRITE and the other Windows programs (`disk_w*`) | works (in Win-OS/2) | Windows 3.1 programs: they run in Win-OS/2 (see below and docs/WINOS2.md), seamless as windows on the PM desktop. Natively (docs/WIN16.md, without Win-OS/2) stage 2 has the controls, dialogs, menus and resources they use, stage 3 COMMDLG, printing, DDE and the clipboard. |
 | ATMCNTRL.EXE, FASTLOAD.EXE (disk 21), PROMIX.EXE, AUDIOVER.EXE | not supported | Also Windows 3.1 programs (NE modules for Windows, importing KERNEL, USER and GDI), not 16-bit PM ones: WIN-OS/2's Adobe Type Manager control panel, its fast loader and multimedia driver utilities. |
 
+### rs2's own versions of the applets
+
+rs2 ships its own programs under IBM's names in IBM's places, with
+their desktop objects ([PM.md](PM.md#rs2s-pm-applets)), so none of
+IBM's files is needed for them; IBM's still run (rows above) when
+copied from the CD (APPINST no longer offers them). Each was studied in
+IBM's binary and resources, and checked in QEMU with screenshots; most
+have a `/SELFTEST` mode (PASS/FAIL lines on the serial port).
+
+| rs2's program | Replaces | How far | Checked |
+|---------------|----------|---------|---------|
+| `OS2\CLIPOS2.EXE` | Clipboard Viewer | text, bitmaps, metafiles, owner-drawn data, Render, help | QEMU screenshots |
+| `OS2\MPCPUMON.EXE` | Pulse | per-processor load from the performance counters, line and bar graphs, labels, grid, freeze, sample rate, colours (menus and Color Palette drops), processor status, pop-up menu, double-click to hide the frame controls, help | `MPCPUMON /SELFTEST` (0 failures, `--smp 2`); QEMU screenshots of both graphs, the dialogs, the pop-up menu and help |
+| `OS2\PMCHKDSK.EXE`, `OS2\PMFORMAT.EXE` | Check Disk, Format | IBM's dialogs; CHKDSK /P and FORMAT /P on pipes with IBM's MSG_ protocol; Results window with the usage pie; Format Progress; help. Formatting needs FORMAT /P (not in rs2's FORMAT yet) | QEMU screenshots, /SELFTEST, RS2FORMATTEST script |
+| `OS2\APPS\PICVIEW.EXE` | Picture Viewer | metafiles and spool files (pages), fit picture/page, backgrounds, IBM's Open and Save As windows, sequences, print, clipboard Cut/Copy/Paste, `/P`, `/S`, help; PIF files are not read | `/SELFTEST` (0 failures); QEMU screenshots of AAAAA.MET, the Toolkit's GRAPHIC.MET and PRTSAMP.MET (as IBM's shows them), a three-page spool file, Cut and Paste, help; printed AAAAA.MET to the host LPD listener (Ghostscript renders it as on screen) |
+| `OS2\APPS\PMSEEK.EXE` | Seek and Scan Files | search by name and text on a second thread (Stop), drives, found text, Open/Process/Command, Save, Copy, settings, help | `PMSEEK /SELFTEST` (0 failures); QEMU screenshots: a search of `C:\*.CMD` for "say" with found text, Open in the editor, sizing, F1 help |
+| `OS2\ICONEDIT.EXE` | Icon Editor | icons, pointers and bitmaps (1.1, 1.2, 2.0 and packed 2.0 files, bitmap arrays of device forms, 2 to 16M colours); drawing, selection tools, clipboard, palette editing, device list, test pointer, help | `ICONEDIT /SELFTEST` (round trips, tools); QEMU screenshots: drawing, Save as and reopening, IBM's MAHJONGG.ICO opened and its forms edited, every dialog, help |
+| `OS2\GLOCALE.EXE` | Locale | the Country Palette of user locales, the notebook's eight pages with samples, Create another, Delete, Mark as default (OS2.INI, DEFAULT.LOC, WIN.INI), Undo and Default, help; Create java locale only says no (no Java) | `GLOCALE /SELFTEST` (0 failures); QEMU screenshots of the palette, every page, a change and Undo, Create another, the pop-up menu, Delete and help |
+| `OS2\APPS\KLONDIKE.EXE` | Klondike Solitaire | IBM's menus, variations, scoring, Take back/Replay, Cheat, Auto finish, Auto play, settings (KLONDIKE.INI) and Settings notebook (Options, Card backs), own cards; no video or sounds | `KLONDIKE /SELFTEST` (56 checks); QEMU screenshots of dealing, dragging, auto play, the notebook, help |
+| `OS2\APPS\MAHJONGG.EXE` | Mahjongg | play, IBM's menus/keys, numbered and solvable deals, hints, take back, replay, auto play, cheat, edit mode, `.MAH` files read and written (IBM's load), MAHJONGG.INI settings, own tiles and layouts, help; no sounds, tile set DLLs or background bitmaps | `MAHJONGG /SELFTEST` (33 checks), QEMU screenshots: play, hints, auto play to a won game, settings, edit mode, help |
+| `OS2\APPS\OS2CHESS.EXE` | OS/2 Chess | 3-D (rotatable) and 2-D boards, human or computer for each side (five levels, book openings), all rules and draws, IBM's menus, dialogs, messages and help panels, save/load (rs2's own `.PMC` text format), printing (not tried on a printer); no network play or sounds | `OS2CHESS /SELFTEST` (perft, mates, draw rules) in QEMU; screenshots of play by mouse and keyboard, computer against computer to checkmate, save and load, Set position, Rotate, help |
+
 ## SOM class libraries
 
 IBM's SOM libraries and their users on rs2's SOM.DLL, SOMTC, SOMU and
