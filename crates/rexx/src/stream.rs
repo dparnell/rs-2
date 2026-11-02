@@ -602,7 +602,11 @@ pub fn stream_fn(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
                         b"EXISTS" => Ok(it.host.f_exists(&name).unwrap_or_default()),
                         b"EXIST" if it.oo() => Ok(it.host.f_exists(&name).unwrap_or_default()),
                         b"SIZE" => Ok(it.host.f_info(&name).map(|i| crate::num::int_str(i.size as i64)).unwrap_or_default()),
-                        b"DATETIME" => Ok(it.host.f_info(&name).map(|i| i.datetime).unwrap_or_default()),
+                        b"DATETIME" => {
+                            let d = it.host.f_info(&name).map(|i| i.datetime).unwrap_or_default();
+                            // Object REXX: one blank between date and time
+                            if it.oo() { Ok(crate::exec::words(&d).join(&b" "[..])) } else { Ok(d) }
+                        }
                         _ => Err(Err::new(40)),
                     }
                 }

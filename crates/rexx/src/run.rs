@@ -814,14 +814,23 @@ impl Interp<'_> {
                 if !traced {
                     self.trace_clause(c, lvl);
                 }
-                let mut s = b"       +++".to_vec();
-                for _ in 0..(3 + 2 * lvl) {
-                    s.push(b' ');
+                if self.oo() {
+                    // Object REXX: the command, then its return code
+                    self.trace_val(b">>>", &cmd, lvl);
+                    let mut rc = b"RC(".to_vec();
+                    rc.extend_from_slice(&r.rc);
+                    rc.push(b')');
+                    self.trace_val(b"+++", &rc, lvl);
+                } else {
+                    let mut s = b"       +++".to_vec();
+                    for _ in 0..(3 + 2 * lvl) {
+                        s.push(b' ');
+                    }
+                    s.extend_from_slice(b"RC(");
+                    s.extend_from_slice(&r.rc);
+                    s.push(b')');
+                    self.trace_line(&s);
                 }
-                s.extend_from_slice(b"RC(");
-                s.extend_from_slice(&r.rc);
-                s.push(b')');
-                self.trace_line(&s);
             }
             let cond = if r.cond == 2 && f.traps[cond_index(Cond::Failure)].state != TrapState::Off {
                 Cond::Failure
