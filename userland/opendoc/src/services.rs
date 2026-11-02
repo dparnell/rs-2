@@ -347,8 +347,7 @@ extern "C" fn client_proc(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> usize 
                             let old = p.hps;
                             p.hps = hps;
                             let mut ev = somsup::Environment { major: 0, exception_name: core::ptr::null(), params: core::ptr::null_mut(), anchor: 0 };
-                            layout::Draw(f, &raw mut ev as usize, 0, 0);
-                            layout::DrawChildren(f, &raw mut ev as usize, 0, 0);
+                            crate::events::draw_tree(f, &raw mut ev as usize, hps);
                             crate::events::draw_active_border(w, hps);
                             layout::pcanvas(pc).hps = old;
                         }

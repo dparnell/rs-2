@@ -33,6 +33,12 @@ unsafe extern "C" {
     fn GpiSetColor(hps: u32, color: i32) -> u32;
     #[link_name = "PMGPI.404"]
     fn GpiMove(hps: u32, pt: *const [i32; 2]) -> u32;
+    #[link_name = "PMGPI.520"]
+    fn GpiSetDefaultViewMatrix(hps: u32, n: i32, m: *const i32, ty: i32) -> u32;
+    #[link_name = "PMGPI.501"]
+    fn GpiSavePS(hps: u32) -> i32;
+    #[link_name = "PMGPI.499"]
+    fn GpiRestorePS(hps: u32, id: i32) -> u32;
     #[link_name = "PMGPI.356"]
     fn GpiBox(hps: u32, ctl: i32, pt: *const [i32; 2], h: i32, v: i32) -> i32;
 }
@@ -349,6 +355,27 @@ pub fn std_dispatch(ev: usize, event: usize, info: usize) -> bool {
     }
 }
 
+/// The default view matrix back to identity (parts focusing on a facet
+/// set it to their content transform).
+fn reset_view(hps: u32) {
+    let m = [0x10000, 0, 0, 0, 0x10000, 0, 0, 0, 1];
+    unsafe { GpiSetDefaultViewMatrix(hps, 9, m.as_ptr(), 0) };
+}
+
+/// Draw a facet and the facets embedded in it, each with the paint PS as
+/// it was (parts change its view matrix, colours and clipping).
+pub fn draw_tree(f: usize, ev: usize, hps: u32) {
+    let id = unsafe { GpiSavePS(hps) };
+    layout::Draw(f, ev, 0, 0);
+    if id > 0 {
+        unsafe { GpiRestorePS(hps, id) };
+    }
+    reset_view(hps);
+    for c in layout::facet(f).children.clone() {
+        draw_tree(c, ev, hps);
+    }
+}
+
 /// The active frame's border: drawn round its facets when it is not the
 /// window's root frame.
 pub fn draw_active_border(w: usize, hps: u32) {
@@ -357,9 +384,7 @@ pub fn draw_active_border(w: usize, hps: u32) {
         return;
     }
     for fc in layout::frame(f).facets.clone() {
-        let s = layout::facet(fc);
-        let clip = s.clip.unwrap_or(layout::frame(f).frame_shape);
-        let r = layout::window_frame_xf(fc).rect(clip);
+        let r = layout::window_frame_xf(fc).rect(layout::shown_rect(fc));
         let (l, b, rt, t) = (r.left >> 16, r.bottom >> 16, (r.right >> 16) - 1, (r.top >> 16) - 1);
         unsafe {
             GpiCreateLogColorTable(hps, 0, 3, 0, 0, core::ptr::null());

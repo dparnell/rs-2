@@ -1189,8 +1189,7 @@ methods! {
         }
         let pt = window_frame_xf(this).invert(read(p));
         let s = facet(this);
-        let r = s.clip.unwrap_or_else(|| if s.frame != 0 { frame(s.frame).frame_shape } else { Rect::default() });
-        r.contains(pt) as usize
+        shown_rect(this).contains(pt) as usize
     }
     fn ActiveBorderContainsPoint(this: usize, ev: usize, p: usize, bias: usize) -> usize { 0 }
     fn IsSelected(this: usize, ev: usize) -> usize { facet(this).selected as usize }
@@ -1239,8 +1238,24 @@ methods! {
 }
 
 fn rect_of_clip(f: usize) -> Rect {
+    shown_rect(f)
+}
+
+/// What a facet shows, in frame coordinates: its clip shape, else its
+/// frame's shape placed at the frame's origin. IBM's OS/2 parts lay out
+/// and draw from the frame origin whatever the shape's own origin is
+/// (MMODPTS asks for frame shapes away from it), so hit-testing and the
+/// active border follow what they draw.
+pub fn shown_rect(f: usize) -> Rect {
     let s = facet(f);
-    s.clip.unwrap_or_else(|| if s.frame != 0 { frame(s.frame).frame_shape } else { Rect::default() })
+    if let Some(c) = s.clip {
+        return c;
+    }
+    if s.frame == 0 {
+        return Rect::default();
+    }
+    let r = frame(s.frame).frame_shape;
+    Rect { left: 0, bottom: 0, right: r.right - r.left, top: r.top - r.bottom }
 }
 
 pub static FACET_M: &[(&str, M)] = &[
