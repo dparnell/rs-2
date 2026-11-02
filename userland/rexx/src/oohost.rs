@@ -308,6 +308,11 @@ pub fn ext_send(kind: u32, handle: usize, msg: &[u8], args: &[ExtArg]) -> Result
 use core::sync::atomic::{AtomicU32, Ordering};
 
 static mut LOCK: u32 = 0;
+/// Threads waiting for the lock, and how many times it has been taken:
+/// yield_now waits until a waiting activity has had its turn (the mutex
+/// is not fair, and the yielding thread would otherwise take it again).
+static WAITERS: AtomicU32 = AtomicU32::new(0);
+static TAKEN: AtomicU32 = AtomicU32::new(0);
 /// Activities running besides the programs RexxStart runs.
 static ACTIVE: AtomicU32 = AtomicU32::new(0);
 /// Threads that are activities (by thread id).
@@ -322,7 +327,10 @@ pub fn lock() {
             }
         }
         if LOCK != 0 {
+            WAITERS.fetch_add(1, Ordering::SeqCst);
             DosRequestMutexSem(LOCK, 0xffff_ffff);
+            WAITERS.fetch_sub(1, Ordering::SeqCst);
+            TAKEN.fetch_add(1, Ordering::SeqCst);
         }
     }
 }
@@ -373,9 +381,15 @@ pub fn spawn(job: alloc::boxed::Box<dyn FnOnce(&mut dyn rexx::Host)>) -> bool {
 }
 
 pub fn yield_now() {
-    if ACTIVE.load(Ordering::Relaxed) > 0 {
+    if ACTIVE.load(Ordering::Relaxed) > 0 && WAITERS.load(Ordering::SeqCst) > 0 {
+        let taken = TAKEN.load(Ordering::SeqCst);
         unlock();
-        unsafe { DosSleep(0) };
+        // give the lock to a waiting activity (at most about 50 ms)
+        let mut n = 0;
+        while TAKEN.load(Ordering::SeqCst) == taken && n < 50 {
+            unsafe { DosSleep(if n < 5 { 0 } else { 1 }) };
+            n += 1;
+        }
         lock();
     }
 }
