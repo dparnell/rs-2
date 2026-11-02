@@ -104,9 +104,9 @@ pub fn load(
         let o = &lxobjs[obj];
         let base = bases[obj].0;
         if is16(o) {
-            Target::far16(vm::tile_selector(base), off as u16, base + off)
+            Target::far16(vm::tile_selector(base), off as u16, base.wrapping_add(off))
         } else {
-            Target::flat32(base + off, o.flags & oflags::EXEC != 0)
+            Target::flat32(base.wrapping_add(off), o.flags & oflags::EXEC != 0)
         }
     };
 
