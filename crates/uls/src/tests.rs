@@ -257,3 +257,17 @@ fn strptime_formats() {
     assert_eq!((tm.mon, tm.mday, tm.year), (1, 7, 101));
     assert_eq!(strptime(&item, &ucs("13/40/01"), &ucs("%m/%d/%y"), &mut Tm::default()), None);
 }
+
+#[test]
+fn translation_tables() {
+    assert_eq!(codepage_by_name("ISO8859-1"), Some(819));
+    assert_eq!(codepage_by_name("ibm-850"), Some(850));
+    assert_eq!(codepage_by_name("437"), Some(437));
+    assert_eq!(codepage_by_name("nonsense"), None);
+    let t = translation(850, 819, b'?').unwrap();
+    // e acute: 0x82 in 850, 0xE9 in 8859-1, and back.
+    assert_eq!(t[0x82], 0xe9);
+    assert_eq!(t[b'A' as usize], b'A');
+    let back = translation(819, 850, b'?').unwrap();
+    assert_eq!(back[0xe9], 0x82);
+}

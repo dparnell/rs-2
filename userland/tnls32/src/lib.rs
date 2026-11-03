@@ -7,9 +7,15 @@
 //! ordinal only, so the entries here are what the applications'
 //! disassembly shows them using (`_Optlink`: arguments in EAX, EDX, ECX,
 //! the rest on the stack after 12 reserved bytes; the caller cleans up).
-//! rs2 has no translation tables: initialisation reports "no
-//! translation", converters copy their input, the DBCS lead-byte table
-//! is empty.
+//! Translation (FTP's and TELNET's `-cp name`): init(app, name) with a
+//! code page name (`819`, `ISO8859-1`, `IBM-850`... any single-byte code
+//! page of rs2's NLS tables) builds two 256-byte tables between the
+//! process's code page and that one and reports "tables" (bit 1); query
+//! tables gives (inbound: network to local, outbound: local to network),
+//! as FTP applies them (the first to what it receives, the second to
+//! what it sends). An unknown name reports bit 0. Without a name there
+//! is no translation. DBCS conversion is not done: converters copy their
+//! input and the DBCS lead-byte table stays empty.
 //!
 //! | Ord | Use |
 //! |-----|-----|
@@ -96,12 +102,72 @@ extern "C" fn widen(_h: u32, dst: *mut u16, src: *const u8, len: i32) -> i32 {
     len
 }
 
-extern "C" fn init(_app: *const u8, _name: *const u8) -> u32 {
-    0
+/// The translation tables (per process: DLL data is), 256-aligned so a
+/// 16:16 alias of either never crosses a 64 KB tile.
+#[repr(C, align(256))]
+struct Tables {
+    inbound: [u8; 256],
+    outbound: [u8; 256],
 }
 
-extern "C" fn reinit(_name: *const u8) -> u32 {
-    0
+static mut TABLES: Tables = Tables { inbound: [0; 256], outbound: [0; 256] };
+static mut HAVE_TABLES: bool = false;
+
+fn cstr(p: *const u8) -> &'static str {
+    if p.is_null() {
+        return "";
+    }
+    let s = unsafe { core::ffi::CStr::from_ptr(p as *const core::ffi::c_char) };
+    core::str::from_utf8(s.to_bytes()).unwrap_or("")
+}
+
+fn process_cp() -> u16 {
+    let mut cps = [0u32; 4];
+    let mut n = 0;
+    unsafe { os2::DosQueryCp(16, cps.as_mut_ptr(), &mut n) };
+    if cps[0] == 0 { 850 } else { cps[0] as u16 }
+}
+
+/// Set up translation to and from the code page `name`: the init flags.
+pub fn set_up(name: &str) -> u32 {
+    unsafe { HAVE_TABLES = false };
+    if name.trim().is_empty() {
+        return 0;
+    }
+    let Some(net) = uls::codepage_by_name(name) else { return 1 };
+    let local = process_cp();
+    match (uls::translation(net, local, b'?'), uls::translation(local, net, b'?')) {
+        (Some(i), Some(o)) => {
+            unsafe {
+                TABLES.inbound = i;
+                TABLES.outbound = o;
+                HAVE_TABLES = true;
+                tnls_codepage2 = net as u32;
+            }
+            2
+        }
+        _ => 1,
+    }
+}
+
+/// (inbound, outbound) tables, or nulls without translation.
+pub fn table_ptrs() -> (*const u8, *const u8) {
+    unsafe {
+        if HAVE_TABLES {
+            let t = &raw const TABLES;
+            ((*t).inbound.as_ptr(), (*t).outbound.as_ptr())
+        } else {
+            (core::ptr::null(), core::ptr::null())
+        }
+    }
+}
+
+extern "C" fn init(_app: *const u8, name: *const u8) -> u32 {
+    set_up(cstr(name))
+}
+
+extern "C" fn reinit(name: *const u8) -> u32 {
+    set_up(cstr(name))
 }
 
 extern "C" fn close(_h: u32) -> u32 {
@@ -109,12 +175,13 @@ extern "C" fn close(_h: u32) -> u32 {
 }
 
 extern "C" fn tables(a: *mut u32, b: *mut u32) -> u32 {
+    let (i, o) = table_ptrs();
     unsafe {
         if !a.is_null() {
-            *a = 0;
+            *a = i as u32;
         }
         if !b.is_null() {
-            *b = 0;
+            *b = o as u32;
         }
     }
     0
@@ -141,15 +208,22 @@ thunk16::entries16! {
 
 extern "C" fn dispatch16(ord: u32, args: *const u8) -> u32 {
     let a = thunk16::Args(args);
-    if ord == 51 {
-        for off in [0, 4] {
-            let p = a.p(off) as *mut u32;
-            if !p.is_null() {
-                unsafe { p.write_unaligned(0) };
+    match ord {
+        // init(app, name), 16:16 pointers.
+        9 => set_up(cstr(a.p(4))),
+        // query tables(&in, &out): 16:16 pointers back.
+        51 => {
+            let (i, o) = table_ptrs();
+            for (off, t) in [(0, i), (4, o)] {
+                let p = a.p(off) as *mut u32;
+                if !p.is_null() {
+                    unsafe { p.write_unaligned(if t.is_null() { 0 } else { thunk16::far(t) }) };
+                }
             }
+            0
         }
+        _ => 0,
     }
-    0
 }
 
 #[unsafe(no_mangle)]
