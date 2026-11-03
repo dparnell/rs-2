@@ -106,6 +106,133 @@ fn header(r: Rd<'_>, fh: usize) -> Result<(Info, usize), Error> {
     Ok((info, fh + hdr + colours * entry))
 }
 
+/// A metafile record (`:artwork.` of a .MET file): the 0x12-byte header
+/// from `mF` (+4 u32 the metafile's length, +8 x and +0xA y (0), +0xC cx
+/// and +0xE cy, +0x10 their units: 0 cx or cy is IBM's default, half the
+/// screen each way), then `u32` size of the rest, `u16` bytes per
+/// uncompressed block and the blocks as in a `bM` record (IBM's
+/// LoadBitmap feeds each to GpiSetMetaFileBits).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MetaInfo {
+    pub len: u32,
+    pub cx: u16,
+    pub cy: u16,
+    pub units: u16,
+}
+
+pub const MF_HEADER: usize = 0x12;
+
+/// The metafile record at `offset`, if the image there is one.
+pub fn metafile_info(data: &[u8], image_start: u32, offset: u32) -> Option<MetaInfo> {
+    let r = Rd(data);
+    let at = image_start as usize + offset as usize;
+    if r.bytes(at, 2).ok()? != b"mF" {
+        return None;
+    }
+    Some(MetaInfo { len: r.u32(at + 4).ok()?, cx: r.u16(at + 0xc).ok()?, cy: r.u16(at + 0xe).ok()?, units: r.u16(at + 0x10).ok()? })
+}
+
+/// The metafile (a .MET file's bytes) of the metafile record at `offset`.
+pub fn metafile(data: &[u8], image_start: u32, offset: u32) -> Result<Vec<u8>, Error> {
+    let r = Rd(data);
+    let at = image_start as usize + offset as usize;
+    let mi = metafile_info(data, image_start, offset).ok_or(Error::Invalid("metafile record"))?;
+    let total = mi.len as usize;
+    if total > 0x0100_0000 {
+        return Err(Error::Invalid("metafile size"));
+    }
+    let mut out = vec![0u8; total];
+    let mut p = at + MF_HEADER + 4;
+    let block = r.u16(p)? as usize;
+    p += 2;
+    if block == 0 {
+        return Err(Error::Invalid("metafile block size"));
+    }
+    let mut done = 0;
+    while done < total {
+        let chunk = block.min(total - done);
+        let n = r.u16(p)? as usize;
+        p += 2;
+        let o = &mut out[done..done + chunk];
+        if n == 0 {
+            o.copy_from_slice(r.bytes(p, chunk)?);
+            p += chunk;
+        } else {
+            let src = r.bytes(p, n)?;
+            p += n;
+            match src[0] {
+                0 => {
+                    let m = (n - 1).min(chunk);
+                    o[..m].copy_from_slice(&src[1..1 + m]);
+                }
+                1 => {
+                    rle(&src[1..], o);
+                }
+                2 => {
+                    lzw(&src[1..], o);
+                }
+                _ => return Err(Error::Invalid("metafile compression")),
+            }
+        }
+        done += chunk;
+    }
+    Ok(out)
+}
+
+/// Bytes per block in the records the compiler writes.
+const BLOCK: usize = 0x4000;
+
+/// Stored (type 0) blocks of `data`, each `u16` n then the type byte and
+/// n - 1 bytes; the record's `u32` size and `u16` block size first.
+fn stored_blocks(data: &[u8]) -> Vec<u8> {
+    let mut b = Vec::new();
+    for c in data.chunks(BLOCK) {
+        b.extend_from_slice(&(c.len() as u16 + 1).to_le_bytes());
+        b.push(0);
+        b.extend_from_slice(c);
+    }
+    let mut out = Vec::new();
+    out.extend_from_slice(&(b.len() as u32 + 2).to_le_bytes());
+    out.extend_from_slice(&(BLOCK as u16).to_le_bytes());
+    out.extend_from_slice(&b);
+    out
+}
+
+/// The image record for an `:artwork.` file, as IBM's compiler stores
+/// it: a bitmap (an OS/2 or Windows .BMP, or a bitmap array's first
+/// image) as a `bM` record, a metafile (.MET: it starts with Begin
+/// Document) as an `mF` one shown at the help manager's default size.
+pub fn art_record(file: &[u8]) -> Result<Vec<u8>, Error> {
+    let r = Rd(file);
+    match r.bytes(0, 2)? {
+        b"BA" | b"BM" => {
+            let fh = if r.bytes(0, 2)? == b"BA" { 14 } else { 0 };
+            let (info, _) = header(r, fh)?;
+            let cb = r.u32(fh + 14)? as usize;
+            let entry = if cb == 12 { 3 } else { 4 };
+            let colours = if info.bpp >= 16 { 0 } else { 1usize << info.bpp };
+            let pal_end = fh + 14 + cb + colours * entry;
+            let total = row_bytes(info.cx, info.bpp) * info.cy as usize;
+            // The bits' offset is from the file's start (in arrays too).
+            let bits = r.bytes(r.u32(fh + 10)? as usize, total)?;
+            let mut out = b"bM".to_vec();
+            out.extend_from_slice(r.bytes(fh + 2, pal_end - fh - 2)?);
+            out.extend_from_slice(&stored_blocks(bits));
+            Ok(out)
+        }
+        // Begin Document (a structured field 0xD3A8A8).
+        _ if r.bytes(2, 3)? == [0xd3, 0xa8, 0xa8] => {
+            let mut out = b"mF".to_vec();
+            out.extend_from_slice(&0u16.to_le_bytes());
+            out.extend_from_slice(&(file.len() as u32).to_le_bytes());
+            out.extend_from_slice(&[0; 10]);
+            out.extend_from_slice(&stored_blocks(file));
+            Ok(out)
+        }
+        _ => Err(Error::Invalid("artwork: not a bitmap or metafile")),
+    }
+}
+
 /// Size of the bitmap at `offset` (from the header's bitmap offset).
 pub fn info(data: &[u8], image_start: u32, offset: u32) -> Result<Info, Error> {
     let r = Rd(data);

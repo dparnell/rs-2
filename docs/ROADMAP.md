@@ -399,8 +399,16 @@ Status markers: done, in progress, planned.
   a printer
 - done: PMGRE (programs calling the graphics engine directly: COMETRUN's
   comet trail)
-- planned: DDEML monitors, the Print Screen key, folder menu bars, IPF
-  metafile artwork
+- done (shell): Warp 4's folder menu bars (Folder, Edit, View, Selected,
+  Help), the System object's Folder pages (menus and menu bars, default
+  folder view, automatic close), Input page and 256-colour page, the
+  lockup's background image, file system handles that cannot collide
+  between processes (SysOpenObject of a path opened another folder)
+- done: DDEML monitors (APPCLASS_MONITOR, every MF_* kind, across
+  processes); IPF metafile artwork (`:artwork.` of .MET files in the
+  compiler, played by HELPMGR)
+- planned: the Print Screen key; the window manager acting on the Input
+  page's settings (full window drag, asynchronous focus change)
 - done: display driver model (GRADD-style) on the framebuffer, mouse
   pointer; PMWIN (windows, messages, controls, dialogs), PMGPI
   (graphics, fonts), PMSHAPI

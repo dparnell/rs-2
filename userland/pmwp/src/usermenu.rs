@@ -472,8 +472,17 @@ fn item_dialog(owner: u32, name: &[u8], program: &[u8]) -> Option<(Vec<u8>, Vec<
 pub const MENUS_SHORT: u32 = 0;
 pub const MENUS_LONG: u32 = 1;
 
+/// A System setting WPCONFIG keeps in `PM_Workplace` as text: `ON` or
+/// `OFF` (FolderMenuBar), `LONG` or `SHORT` (FolderMenus); none is the
+/// default.
 fn system_default(key: &[u8], default: u32) -> u32 {
-    prf_read(HINI_USER, b"PM_Workplace", key).and_then(|v| v.first().copied()).map_or(default, |c| (c == b'1') as u32)
+    let Some(v) = prf_read(HINI_USER, b"PM_Workplace", key) else { return default };
+    let v: Vec<u8> = v.into_iter().take_while(|&c| c != 0).map(|c| c.to_ascii_uppercase()).collect();
+    match v.as_slice() {
+        b"ON" | b"LONG" | b"1" => 1,
+        b"OFF" | b"SHORT" | b"0" => 0,
+        _ => default,
+    }
 }
 
 /// A folder's menus: its own, else the system's (`PM_Workplace`
@@ -486,12 +495,35 @@ pub fn menu_style(o: usize) -> u32 {
     }
 }
 
+/// Whether a folder's windows have a menu bar: its own setting, else
+/// the System object's (`PM_Workplace` `FolderMenuBar`, on unless set);
+/// the desktop has none by default (as IBM's fdr_wpQueryMenuBarVisibility).
 pub fn menu_bar(o: usize) -> bool {
     match crate::fs::folder_menu_flags(o) >> 2 & 3 {
         1 => false,
         2 => true,
-        _ => system_default(b"FolderMenuBar", 1) != 0,
+        _ if wps::is(o, "WPDesktop") => false,
+        _ => system_menu_bar(),
     }
+}
+
+/// The System object's Folder menu bar setting.
+pub fn system_menu_bar() -> bool {
+    system_default(b"FolderMenuBar", 1) != 0
+}
+
+pub fn set_system_menu_bar(on: bool) {
+    crate::util::prf_write(HINI_USER, b"PM_Workplace", b"FolderMenuBar", Some(if on { &b"ON\0"[..] } else { b"OFF\0" }));
+    crate::view::update_menu_bars();
+}
+
+/// The System object's menu style for folders (MENUS_LONG or _SHORT).
+pub fn system_menu_style() -> u32 {
+    system_default(b"FolderMenus", MENUS_LONG)
+}
+
+pub fn set_system_menu_style(style: u32) {
+    crate::util::prf_write(HINI_USER, b"PM_Workplace", b"FolderMenus", Some(if style == MENUS_SHORT { &b"SHORT\0"[..] } else { b"LONG\0" }));
 }
 
 extern "C" fn wpSetMenuStyle(o: usize, style: u32) -> u32 {
@@ -518,6 +550,7 @@ extern "C" fn wpSetMenuBarVisibility(o: usize, on: u32) -> u32 {
         1 => 2 << 2,
         _ => 0,
     });
+    crate::view::update_menu_bars();
     1
 }
 
@@ -585,13 +618,28 @@ pub const SELFCLOSE_ALL: u32 = 3;
 /// The folder's self-close setting (its own, else the system's).
 pub fn self_close(o: usize) -> u32 {
     match crate::fs::folder_menu_flags(o) >> 4 & 3 {
-        0 => match prf_read(HINI_USER, b"PM_Workplace:FolderAutoClose", b"Objects").map(|v| v.into_iter().take_while(|&c| c != 0).collect::<Vec<u8>>()) {
-            Some(v) if v.eq_ignore_ascii_case(b"SUBFOLDERS") => SELFCLOSE_SUBFOLDERS,
-            Some(v) if v.eq_ignore_ascii_case(b"ALL") => SELFCLOSE_ALL,
-            _ => SELFCLOSE_NEVER,
-        },
+        0 => system_self_close(),
         v => v,
     }
+}
+
+/// The System object's self-close setting (`PM_Workplace:FolderAutoClose`
+/// `Objects`: NONE, SUBFOLDERS or ALL, as WPCONFIG writes them).
+pub fn system_self_close() -> u32 {
+    match prf_read(HINI_USER, b"PM_Workplace:FolderAutoClose", b"Objects").map(|v| v.into_iter().take_while(|&c| c != 0).collect::<Vec<u8>>()) {
+        Some(v) if v.eq_ignore_ascii_case(b"SUBFOLDERS") => SELFCLOSE_SUBFOLDERS,
+        Some(v) if v.eq_ignore_ascii_case(b"ALL") => SELFCLOSE_ALL,
+        _ => SELFCLOSE_NEVER,
+    }
+}
+
+pub fn set_system_self_close(v: u32) {
+    let t: &[u8] = match v {
+        SELFCLOSE_SUBFOLDERS => b"SUBFOLDERS\0",
+        SELFCLOSE_ALL => b"ALL\0",
+        _ => b"NONE\0",
+    };
+    crate::util::prf_write(HINI_USER, b"PM_Workplace:FolderAutoClose", b"Objects", Some(t));
 }
 
 fn set_self_close(o: usize, v: u32) {
