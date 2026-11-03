@@ -452,12 +452,35 @@ Everything a Windows program sees is rs2's own:
   to Times New Roman; the rest to Helvetica) at the requested height
   (negative: the em, positive: the cell), with bold, italic and
   underline; a font is a PM logical font of the DC (local ID 1) while it
-  is selected. Font enumeration and Windows raster font files (.FON: NE
-  modules with RT_FONT resources) added with AddFontResource are
-  later.
+  is selected.
+- **Windows' faces.** WIN16 knows the faces Windows 3.1 has (`gdi::FACES`):
+  the raster faces System, Fixedsys, Terminal (OEM_CHARSET), MS Sans
+  Serif, MS Serif and Courier, and the TrueType faces Arial, Courier New
+  and Times New Roman, each drawn with one of rs2's PM faces; Windows
+  3.0's and PM's names (Helv, Tms Rmn, Helvetica, Times...) are aliases.
+  CreateFont remembers the face it matched, which GetTextFace gives back
+  ("Helv" is "MS Sans Serif"; an unknown face is the TrueType face of its
+  family). GetTextMetrics answers from PM's font metrics: the cell height,
+  ascent and descent, the internal leading (the cell above the em), the
+  average and widest widths, the weight, the charset and
+  tmPitchAndFamily as Windows sets it (the family, TMPF_FIXED_PITCH set
+  for a *variable* pitch, TMPF_VECTOR | TMPF_TRUETYPE for TrueType).
+- **Font enumeration.** EnumFonts and EnumFontFamilies with no face give
+  one font per face; with a face, a TrueType face's four styles (Regular,
+  Bold, Italic, Bold Italic: ENUMLOGFONT's full name and style,
+  NEWTEXTMETRIC's NTM_ flags, em size and cell height) and a raster
+  face's sizes; an unknown face gives nothing. Each font's TEXTMETRIC is
+  measured on a memory DC with the font selected, so programs that size
+  their layout from enumeration see the metrics their drawing gets. The
+  callback's 0 ends the enumeration and is the result. Windows raster
+  font files (.FON: NE modules with RT_FONT resources) added with
+  AddFontResource are later.
 - **Cursors.** The IDC_ cursors are PM's system pointers (rs2's own
   art): IDC_ARROW the arrow, IDC_IBEAM the text pointer, IDC_WAIT the
-  clock, the IDC_SIZE* the sizing pointers.
+  clock, the IDC_SIZE* the sizing pointers. A program's own cursors
+  (RT_GROUP_CURSOR resources, CreateCursor) become PM pointers when
+  SetCursor first shows them (their AND mask over their image, the hot
+  spot from the bottom); SetCursor returns the previous cursor.
 - **Icons and bitmaps.** IDI_APPLICATION and the message box icons are
   rs2's; the OBM_ bitmaps the controls use (check boxes, radio buttons,
   scroll bar arrows, combo box buttons) are drawn by WIN16's own code.
@@ -717,14 +740,52 @@ Windows; what they needed, in the order they asked for it:
   StretchBlt PM's GpiBitBlt with Windows' ROP3 codes, monochrome
   conversions in Windows' colours; DDB bits (SetBitmapBits, CreateBitmap),
   DIBs (CreateDIBitmap, Get/SetDIBits, SetDIBitsToDevice, StretchDIBits:
-  Windows' BITMAPINFO is PM's), LoadBitmap, palettes, pattern brushes
-  (their average colour). **Regions** (`region.rs`) are rectangle lists;
-  **mapping modes** and the window/viewport origins and extents
-  transform every coordinate GDI takes.
-- **Icons and cursors** (`icon.rs`) from RT_GROUP_ICON/RT_ICON,
-  CreateIcon, ExtractIcon, DrawIcon (mask and image).
+  Windows' BITMAPINFO is PM's; 1, 4, 8 and 24 bits with their colour
+  tables), LoadBitmap, palettes. **Brushes** that are not solid are PM
+  bitmap patterns (`gdi::set_area`): hatched brushes (CreateHatchBrush,
+  BS_HATCHED: the hatch in the brush's colour, the gaps in the
+  background colour, or left alone in TRANSPARENT mode), pattern brushes
+  of a monochrome bitmap (1 bits the background colour, 0 bits the text
+  colour, as Windows draws them) or a colour one, and DIB pattern
+  brushes, aligned with the DC's origin in every fill (FillRect,
+  Rectangle, RoundRect, Ellipse, Polygon, the region calls, PatBlt and
+  BitBlt's ROPs with a pattern). PatBlt's ROPs other than PATCOPY with a
+  solid brush, BLACKNESS, WHITENESS and DSTINVERT are PM's GpiBitBlt
+  with the brush as its pattern (PATINVERT XORs, it does not invert).
+  **Regions** (`region.rs`) are rectangle lists: rectangles, ellipses,
+  polygons, round rectangles, CombineRgn's five modes, FillRgn,
+  PaintRgn, FrameRgn (what is not in the region moved by the frame's
+  width and height), InvertRgn; SelectClipRgn makes a PM clip region
+  (GetClipBox gives its type, OffsetClipRgn moves it), and
+  InvalidateRgn/ValidateRgn add or take the region's rectangles to or
+  from the window's update area. **Mapping modes** (MM_TEXT, the fixed
+  ones at the display's 96 dpi with y up, MM_ISOTROPIC keeping units
+  square, MM_ANISOTROPIC) and the window/viewport origins and extents
+  transform every coordinate GDI takes (GetPixel's too).
+- **Icons and cursors** (`icon.rs`) from RT_GROUP_ICON/RT_ICON and
+  RT_GROUP_CURSOR/RT_CURSOR, CreateIcon, CreateCursor, ExtractIcon,
+  DrawIcon (mask and image), SetCursor (PM pointers made from them).
 - **MDI** (`mdi.rs`): MDI children are PM frame windows inside the
-  MDICLIENT's PM window.
+  MDICLIENT's PM window (PM maximizes a frame inside another window to
+  that window and minimizes it to an icon at its bottom). A maximized
+  child is Windows': its client area covers the MDI client (its border
+  and title bar outside), the frame's menu bar gets the child's system
+  menu (a pop-up of Windows' SC_ commands) at its start and a restore
+  button at its end (owner-drawn items WIN16 draws; their WM_COMMANDs go
+  to the child as WM_SYSCOMMAND through DefFrameProc), and the frame's
+  title is "Frame - [Child]" (DefFrameProc's WM_SETTEXT keeps the
+  frame's own part). Activating or creating another child while one is
+  maximized maximizes it; when the maximized child is destroyed the next
+  one is. The children's title bar buttons send WM_SYSCOMMAND, which
+  DefMDIChildProc carries out. WM_MDITILE (MDITILE_HORIZONTAL,
+  MDITILE_SKIPDISABLED) and WM_MDICASCADE restore a maximized child and
+  leave the icons' row free; WM_MDIICONARRANGE and ArrangeIconicWindows
+  line the icons up; WM_MDISETMENU moves a maximized child's items to
+  the new menu bar.
+- **Windows DLLs, more**: GetModuleUsage counts a DLL the program was
+  loaded with as one user plus each LoadLibrary; FreeLibrary and
+  FreeModule never unload such a DLL, and the last FreeLibrary of one
+  loaded with LoadLibrary calls its WEP (WEP_FREE_DLL) first.
 - **KERNEL**: the selector functions (AllocSelector, AllocCStoDSAlias,
   PrestoChangoSelector, SetSelectorBase...: RS2API 421), Catch/Throw,
   atoms (local, and PM's system atom table for global atoms and
@@ -1251,9 +1312,20 @@ on drive C: as `C:\RS2\*.EXE` when Open Watcom is installed.
   WM_DDE_* messages, two tasks (`ddesrv16.c`, `ddecli16.c`); `--init
   "RS2\DDECLI16.EXE"` starts the server (WinExec) and ends with
   `ddecli16 done: 0 failure(s)`.
-- `W16TEST.EXE`: checks (`w16test.c`, `w16test.rc`); `cargo xtask run
-  --release --headless --timeout 150 --init "RS2\W16TEST.EXE"` ends with
-  `w16test done: 0 failure(s)`.
+- `MDI16.EXE`: a multiple document interface program (`mdi16.c`,
+  `mdi16.rc`): text documents (an edit control each) and pictures (a
+  clock face in MM_ISOTROPIC, a hatched region, a stretched memory
+  bitmap), the Window menu, maximized documents in the menu bar, Ctrl+F4
+  and Ctrl+F6. `MDI16 DEMO` opens four documents tiled, `MDI16 MAX` one
+  maximized, `MDI16 ICONS` two as icons.
+- `W16TEST.EXE`: checks (`w16test.c`, `w16test.rc`, with `w16test.bmp`
+  and `w16test.cur`, rs2's own); `cargo xtask run --release --headless
+  --timeout 260 --init "RS2\W16TEST.EXE"` ends with `w16test done: 0
+  failure(s)`. `W16TEST GROUP...` runs only the named groups of stage
+  2's rest: MDI, GDI (bitmaps, brushes, ROPs, DIBs, bitmap and cursor
+  resources), RGN, MAP, FONT, DLL, INI. It imports `W16IMP.DLL`
+  (`w16imp.c`; its import library is made from the DLL by wlib), which
+  the loader loads with it.
 
 A program's resources are the `.rc` file of the same name, compiled and
 bound by Open Watcom's `wrc -bt=windows` (Windows 3.x resource syntax:
@@ -1265,10 +1337,14 @@ the DOS calls and fix-ups to the serial port.
 
 ## Later stages
 
-**Stage 2: what is left.** Pen and brush styles (hatches, patterns, dashed pens), owner-drawn combo
-boxes and LBS_OWNERDRAWVARIABLE, multi-column list boxes, DlgDirList,
-the non-client messages for programs that draw their
-own frame (Hyperoid), MessageBox as a WIN16 dialog.
+**Stage 2: what is left.** Dashed and wide pens' styles, owner-drawn
+combo boxes and LBS_OWNERDRAWVARIABLE, multi-column list boxes,
+DlgDirList, the non-client messages for programs that draw their own
+frame (Hyperoid), MessageBox as a WIN16 dialog, the MDI restore button
+at the right end of the menu bar (PM's menu bars put it after the
+program's menus), "More Windows..." in the Window menu (it lists nine
+children), raster font files (AddFontResource), metafiles, and font
+enumeration on printer DCs (they list the display's faces).
 
 **Stage 3** (COMMDLG, printing, DDE, the clipboard) is done; what it
 leaves is listed above. SHELL (ShellExecute, drag and drop of files)

@@ -560,8 +560,15 @@ Microsoft file (docs/WIN16.md).
   subclassing; window scroll bars; the caret; CF_TEXT on PM's clipboard;
   CreateFont; `RS2\MENU16.EXE`, `RS2\DLG16.EXE`, `RS2\NOTE16.EXE` and
   W16TEST's stage-2 checks
-- planned (rest of stage 2): MDI, bitmaps and DIBs, regions, mapping
-  modes, font enumeration, Windows DLLs, WIN.INI
+- done (rest of stage 2): MDI as Windows does it (maximized children in
+  the frame's menu bar and title, tiling, cascading, icons in the
+  client), bitmaps and DIBs (raster operations, hatched and pattern
+  brushes, 1/4/8/24-bit DIBs, bitmap and cursor resources), regions
+  (clipping, InvalidateRgn), mapping modes, font enumeration on Windows'
+  faces with real metrics, Windows DLLs (imports, LoadLibrary, usage
+  counts, WEP), WIN.INI and private profiles as files in C:\WINDOWS;
+  `RS2\MDI16.EXE`, W16TEST's MDI, GDI, RGN, MAP, FONT, DLL and INI groups;
+  Microsoft's Multipad sample runs
 - done (stage 3): COMMDLG (Open, Save As, Color, Font, Print, Print
   Setup, Find, Replace as WIN16 dialogs, hooks and templates); printing
   from Windows programs into rs2's spooler and PostScript driver

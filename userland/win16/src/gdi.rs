@@ -1227,6 +1227,7 @@ pub fn line(hdc: u16, x0: i32, y0: i32, x1: i32, y1: i32, c: u32) {
         unsafe {
             GpiSetColor(d.hps, rgb(c));
             GpiSetLineWidth(d.hps, 1 << 16);
+            GpiSetLineType(d.hps, 7);
             GpiMove(d.hps, &pm_pt(d, x0, y0));
             GpiLine(d.hps, &pm_pt(d, x1, y1));
         }
@@ -1364,9 +1365,23 @@ pub fn draw_text_bytes(hdc: u16, text: &[u8], rect: [i32; 4], fmt: u16) -> (i32,
 }
 
 /// A pen's colour, unless it is the null pen.
+/// The DC's pen: its colour and width (None for PS_NULL). The PS's line
+/// type becomes the pen's style (every caller draws with it next):
+/// PS_DASH, PS_DOT, PS_DASHDOT and PS_DASHDOTDOT are PM's long dashes,
+/// dots, dash-dot and dash-double-dot (thin pens only, as on Windows).
 fn pen_color(d: &Dc) -> Option<(u32, i32)> {
     match obj(d.s.pen) {
-        Some(Obj::Pen { style, color, width }) if style != 5 => Some((color, width.max(1) as i32)),
+        Some(Obj::Pen { style, color, width }) if style != 5 => {
+            let lt = match style {
+                1 if width <= 1 => 5,
+                2 if width <= 1 => 1,
+                3 if width <= 1 => 3,
+                4 if width <= 1 => 6,
+                _ => 7,
+            };
+            unsafe { GpiSetLineType(d.hps, lt) };
+            Some((color, width.max(1) as i32))
+        }
         _ => None,
     }
 }
