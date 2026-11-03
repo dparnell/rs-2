@@ -39,6 +39,9 @@ struct Ftp {
     passive: bool,
     binary: bool,
     sent_type: Option<bool>,
+    /// -cp: ASCII transfers translated (inbound: network to local,
+    /// outbound: local to network).
+    xlate: Option<([u8; 256], [u8; 256])>,
     autologin: bool,
     code: u32,
     /// The last reply's text (all lines).
@@ -269,6 +272,11 @@ impl Ftp {
                 if let Some(i) = conv.iter().position(|&b| b == 0x1a) {
                     conv.truncate(i);
                 }
+                if let Some((_, out)) = &self.xlate {
+                    for b in conv.iter_mut() {
+                        *b = out[*b as usize];
+                    }
+                }
                 &conv
             };
             for chunk in bytes.chunks(8192) {
@@ -297,6 +305,11 @@ impl Ftp {
                     chunk
                 } else {
                     to_crlf(chunk, &mut conv, &mut last);
+                    if let Some((inb, _)) = &self.xlate {
+                        for b in conv.iter_mut() {
+                            *b = inb[*b as usize];
+                        }
+                    }
                     &conv
                 };
                 match &mut sink {
@@ -852,12 +865,30 @@ fn main(s: &os2::Startup) -> u32 {
         passive: false,
         binary: false,
         sent_type: None,
+        xlate: None,
         autologin: true,
         code: 0,
         text: String::new(),
     };
     let mut rest = Vec::new();
-    for x in &a {
+    let mut it = a.iter();
+    while let Some(x) = it.next() {
+        // -cp name: translate ASCII transfers to and from that code page.
+        if rest.is_empty() && x.len() >= 3 && x[1..].to_ascii_lowercase().starts_with("cp") && (x.starts_with('-') || x.starts_with('/')) {
+            let name = if x.len() > 3 { String::from(&x[3..]) } else { it.next().cloned().unwrap_or_default() };
+            let mut cps = [0u32; 4];
+            let mut n = 0;
+            unsafe { os2::DosQueryCp(16, cps.as_mut_ptr(), &mut n) };
+            let local = if cps[0] == 0 { 850 } else { cps[0] as u16 };
+            match uls::codepage_by_name(&name).and_then(|net| Some((uls::translation(net, local, b'?')?, uls::translation(local, net, b'?')?))) {
+                Some(t) => f.xlate = Some(t),
+                None => {
+                    eprint(&alloc::format!("ftp: translation {name} is not available\r\n"));
+                    return 1;
+                }
+            }
+            continue;
+        }
         if x.len() >= 2 && (x.starts_with('-') || x.starts_with('/')) && rest.is_empty() {
             for ch in x[1..].chars() {
                 match ch.to_ascii_lowercase() {
@@ -868,7 +899,7 @@ fn main(s: &os2::Startup) -> u32 {
                     'g' => f.glob = false,
                     'p' => f.passive = true,
                     _ => {
-                        eprint("usage: ftp [-n] [-v] [-d] [-i] [-g] [-p] [host-name [port]]\r\n");
+                        eprint("usage: ftp [-n] [-v] [-d] [-i] [-g] [-p] [-cp codepage] [host-name [port]]\r\n");
                         return 1;
                     }
                 }

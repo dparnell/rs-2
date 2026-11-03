@@ -208,8 +208,8 @@ pub extern "C" fn gethostname(buf: *mut u8, len: i32) -> i32 {
     unsafe { netdb::gethostname(buf, len) }
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn rexec(_host: *mut *mut u8, _port: i32, _user: *const u8, _pass: *const u8, _cmd: *const u8, _fd2: *mut i32) -> i32 {
-    sock::unsupported()
+pub extern "C" fn rexec(host: *mut *mut u8, port: i32, user: *const u8, pass: *const u8, cmd: *const u8, fd2: *mut i32) -> i32 {
+    unsafe { tcpipcore::rexec::rexec(host, port, user, pass, cmd, fd2) }
 }
 /// The 4.0 h_errno: a function returning the value.
 #[unsafe(no_mangle)]

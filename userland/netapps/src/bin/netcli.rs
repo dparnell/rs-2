@@ -15,6 +15,52 @@ use os2::path::cstr;
 use os2::*;
 os2::entry!(main);
 
+unsafe extern "C" {
+    #[link_name = "PMSPL.393"]
+    fn SplCreateQueue(comp: *const u8, level: u32, buf: *const u8, cb: u32) -> u32;
+    #[link_name = "TCPIP32.145"]
+    fn rexec(host: *mut *mut u8, port: i32, user: *const u8, pass: *const u8, cmd: *const u8, fd2: *mut i32) -> i32;
+    #[link_name = "PMSPL.392"]
+    fn SplEnumJob(comp: *const u8, q: *const u8, level: u32, buf: *mut u8, cb: u32, ret: *mut u32, total: *mut u32, need: *mut u32, r: u32) -> u32;
+}
+
+/// A spooler queue with no printer: its jobs stay queued.
+fn make_queue(name: &[u8]) {
+    let mut q = Vec::new();
+    q.extend_from_slice(&(name.as_ptr() as u32).to_le_bytes());
+    for v in [5u16, 0, 0, 0] {
+        q.extend_from_slice(&v.to_le_bytes());
+    }
+    for p in [0u32, b"PMPRINT\0".as_ptr() as u32, 0, b"LPD test queue\0".as_ptr() as u32] {
+        q.extend_from_slice(&p.to_le_bytes());
+    }
+    q.extend_from_slice(&[0, 0, 0, 0]);
+    for p in [0u32, 0, 0] {
+        q.extend_from_slice(&p.to_le_bytes());
+    }
+    let rc = unsafe { SplCreateQueue(core::ptr::null(), 3, q.as_ptr(), q.len() as u32) };
+    if rc != 0 && rc != 2154 {
+        outln(&alloc::format!("NETCLI: SplCreateQueue: error {rc}"));
+    }
+}
+
+/// (job count, documents) of a queue.
+fn queue_jobs(name: &[u8]) -> (u32, String) {
+    let mut buf = alloc::vec![0u8; 8192];
+    let (mut ret, mut total, mut need) = (0, 0, 0);
+    unsafe { SplEnumJob(core::ptr::null(), name.as_ptr(), 2, buf.as_mut_ptr(), buf.len() as u32, &mut ret, &mut total, &mut need, 0) };
+    let mut docs = String::new();
+    for i in 0..ret as usize {
+        let p = u32::from_le_bytes([buf[i * 28 + 24], buf[i * 28 + 25], buf[i * 28 + 26], buf[i * 28 + 27]]);
+        if p != 0 {
+            let c = unsafe { core::ffi::CStr::from_ptr(p as *const core::ffi::c_char) };
+            docs.extend(c.to_bytes().iter().map(|&b| b as char));
+            docs.push(';');
+        }
+    }
+    (ret, docs)
+}
+
 static mut FAILS: u32 = 0;
 static mut PASSES: u32 = 0;
 
@@ -39,6 +85,25 @@ fn write_text(path: &str, s: &str) {
 /// standard output and error to `output`; `wait` = run to the end, else
 /// leave it running. Returns the output when it waited.
 fn run(prog: &str, args: &str, input: Option<&str>, output: &str, wait: bool) -> String {
+    run_env(prog, args, input, output, wait, &[])
+}
+
+/// `run` with more environment variables.
+fn run_env(prog: &str, args: &str, input: Option<&str>, output: &str, wait: bool, extra: &[&str]) -> String {
+    let mut envb: Vec<u8> = Vec::new();
+    for e in netapps::rcmd::environment() {
+        let k = e.split('=').next().unwrap_or("");
+        if extra.iter().any(|x| x.split('=').next().is_some_and(|xk| xk.eq_ignore_ascii_case(k))) {
+            continue;
+        }
+        envb.extend_from_slice(e.as_bytes());
+        envb.push(0);
+    }
+    for e in extra {
+        envb.extend_from_slice(e.as_bytes());
+        envb.push(0);
+    }
+    envb.push(0);
     let inp = input.unwrap_or("NUL");
     let c = cstr(inp);
     let (mut hin, mut act) = (0, 0);
@@ -64,7 +129,7 @@ fn run(prog: &str, args: &str, input: Option<&str>, output: &str, wait: bool) ->
             DosDupHandle(hout, &mut t);
         }
         let mut fail = [0u8; 64];
-        DosExecPgm(fail.as_mut_ptr(), 64, if wait { 0 } else { 1 }, argv.as_ptr(), core::ptr::null(), &mut res, p.as_ptr());
+        DosExecPgm(fail.as_mut_ptr(), 64, if wait { 0 } else { 1 }, argv.as_ptr(), envb.as_ptr(), &mut res, p.as_ptr());
         for (h, s) in saved.iter().enumerate() {
             let mut t = h as u32;
             DosDupHandle(*s, &mut t);
@@ -132,6 +197,12 @@ fn main(s: &os2::Startup) -> u32 {
     run("C:\\OS2\\FTPD.EXE", "-p 21", None, "C:\\NETT\\FTPD.LOG", false);
     run("C:\\OS2\\TFTPD.EXE", "C:\\NETT\\TFTP -l", None, "C:\\NETT\\TFTPD.LOG", false);
     run("C:\\OS2\\TELNETD.EXE", "", None, "C:\\NETT\\TELNETD.LOG", false);
+    make_queue(b"LPDQ\0");
+    write_text(&etc_path("RHOSTS"), "127.0.0.1\r\n10.0.2.2 hostuser\r\n");
+    run("C:\\OS2\\REXECD.EXE", "", None, "C:\\NETT\\REXECD.LOG", false);
+    run("C:\\OS2\\RSHD.EXE", "", None, "C:\\NETT\\RSHD.LOG", false);
+    run("C:\\OS2\\TALKD.EXE", "", None, "C:\\NETT\\TALKD.LOG", false);
+    run("C:\\OS2\\LPD.EXE", "-b", None, "C:\\NETT\\LPD.LOG", false);
     unsafe { DosSleep(1500) };
 
     // FTP against rs2's FTPD.
@@ -183,6 +254,75 @@ fn main(s: &os2::Startup) -> u32 {
     let o = run("C:\\OS2\\LPQ.EXE", "rawq@10.0.2.100", None, "C:\\NETT\\LPQ2.OUT", true);
     check(o.contains("no entries"), "LPQ printer@server: queue empty after LPRM");
 
+    // LPR, LPQ, LPRM against rs2's LPD (127.0.0.1): jobs land in the
+    // spooler queue LPDQ.
+    let o = run("C:\\OS2\\LPR.EXE", "-p lpdq -s 127.0.0.1 -J lprjob C:\\NETT\\TEXT.TXT", None, "C:\\NETT\\LPR2.OUT", true);
+    unsafe { DosSleep(500) };
+    let (n, docs) = queue_jobs(b"LPDQ\0");
+    check(o.contains("sent to lpdq") && n >= 1 && docs.contains("lprjob"), "LPR -> LPD: the job is in the spooler queue");
+    let o = run("C:\\OS2\\LPQ.EXE", "-p lpdq -s 127.0.0.1", None, "C:\\NETT\\LPQ3.OUT", true);
+    check(o.contains("lprjob") && o.to_ascii_lowercase().contains("lpdq"), "LPQ -> LPD: the queue's jobs");
+    let o = run("C:\\OS2\\LPRM.EXE", "-p lpdq -s 127.0.0.1 -a", None, "C:\\NETT\\LPRM2.OUT", true);
+    check(o.contains("dequeued") && !queue_jobs(b"LPDQ\0").1.contains("lprjob"), "LPRM -> LPD: the job is removed");
+
+    // REXEC, RSH and rexec() against rs2's REXECD and RSHD.
+    let o = run("C:\\OS2\\REXEC.EXE", "127.0.0.1 -l rs2 -p secret -n echo rexecd works", None, "C:\\NETT\\REXEC3.OUT", true);
+    check(o.contains("rexecd works"), "REXEC -> REXECD: the command's output");
+    let o = run("C:\\OS2\\REXEC.EXE", "127.0.0.1 -l rs2 -p wrong -n echo no", None, "C:\\NETT\\REXEC4.OUT", true);
+    check(o.contains("Login incorrect") && !o.contains("echo no"), "REXEC -> REXECD: a wrong password is refused");
+    write_text("C:\\NETT\\SORTIN.TXT", "pear\r\napple\r\nfig\r\n");
+    let o = run("C:\\OS2\\RSH.EXE", "127.0.0.1 -l bob sort", Some("C:\\NETT\\SORTIN.TXT"), "C:\\NETT\\RSH2.OUT", true);
+    check(o.contains("apple\r\nfig\r\npear"), "RSH -> RSHD: standard input to the command (sort)");
+    let o = run("C:\\OS2\\RSH.EXE", "127.0.0.1 -l bob -n set user", None, "C:\\NETT\\RSH3.OUT", true);
+    check(o.to_ascii_uppercase().contains("USER=BOB"), "RSH -> RSHD: USER is the local user");
+    {
+        let mut host = *b"127.0.0.1\0";
+        let mut hp = host.as_mut_ptr();
+        let mut fd2 = -1i32;
+        let s = unsafe { rexec(&mut hp, 512u16.to_be() as i32, b"rs2\0".as_ptr(), b"secret\0".as_ptr(), b"echo via rexec call & echo to stderr 1>&2\0".as_ptr(), &mut fd2) };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        if s >= 0 {
+            let so = Sock(s as u32);
+            let mut b = [0u8; 512];
+            while let Ok(n) = so.recv(&mut b) {
+                if n == 0 {
+                    break;
+                }
+                out.extend_from_slice(&b[..n]);
+            }
+            if fd2 >= 0 {
+                let se = Sock(fd2 as u32);
+                while let Ok(n) = se.recv(&mut b) {
+                    if n == 0 {
+                        break;
+                    }
+                    err.extend_from_slice(&b[..n]);
+                }
+            }
+        }
+        let o: String = out.iter().map(|&b| b as char).collect();
+        let e: String = err.iter().map(|&b| b as char).collect();
+        outln(&alloc::format!("---- rexec(): [{}] [{}]", o.trim(), e.trim()));
+        check(o.contains("via rexec call") && e.contains("to stderr"), "rexec() (TCPIP32) -> REXECD: output and standard error");
+    }
+
+    // TALK between two users through TALKD.
+    write_text("C:\\NETT\\TALKA.TXT", "hello bob\r\n");
+    write_text("C:\\NETT\\TALKB.TXT", "hi alice\r\n");
+    run_env("C:\\OS2\\TALK.EXE", "bob@127.0.0.1", Some("C:\\NETT\\TALKA.TXT"), "C:\\NETT\\TALKA.OUT", false, &["USER=alice"]);
+    unsafe { DosSleep(1500) };
+    let ob = run_env("C:\\OS2\\TALK.EXE", "alice@127.0.0.1", Some("C:\\NETT\\TALKB.TXT"), "C:\\NETT\\TALKB.OUT", true, &["USER=bob"]);
+    let mut oa = String::new();
+    for _ in 0..40 {
+        oa = read_file("C:\\NETT\\TALKA.OUT").unwrap_or_default().iter().map(|&b| b as char).collect();
+        if oa.contains("Exiting") {
+            break;
+        }
+        unsafe { DosSleep(500) };
+    }
+    outln(&alloc::format!("---- TALK alice:\r\n{oa}"));
+    check(ob.contains("hello bob") && oa.contains("hi alice"), "TALK <-> TALK through TALKD: both sides see the other's text");
+
     // FINGER, REXEC, RSH against the host (10.0.2.100).
     let o = run("C:\\OS2\\FINGER.EXE", "rs2@10.0.2.100", None, "C:\\NETT\\FINGER.OUT", true);
     check(o.contains("rs2 finger test: rs2"), "FINGER -> host");
@@ -216,5 +356,9 @@ fn main(s: &os2::Startup) -> u32 {
     os2::write(&log);
     let log = read_file("C:\\NETT\\TELNETD.LOG").unwrap_or_default();
     os2::write(&log);
+    for l in ["LPD", "REXECD", "RSHD", "TALKD"] {
+        let log = read_file(&alloc::format!("C:\\NETT\\{l}.LOG")).unwrap_or_default();
+        os2::write(&log);
+    }
     f
 }

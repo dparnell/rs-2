@@ -49,29 +49,13 @@ fn main(s: &os2::Startup) -> u32 {
         }
     };
     let port = service_port("shell", "tcp", 514);
-    let mut sock = None;
-    for lp in (512..1024u16).rev() {
-        let Ok(s) = Sock::tcp() else { break };
-        s.reuse();
-        if s.bind([0; 4], lp).is_err() {
-            continue;
+    let first = (ms() / 100 % 256) as u16;
+    let sock = match connect_from(addr, port, (0..256u16).map(|k| 1023 - (first + k) % 256)) {
+        Ok(s) => s,
+        Err(e) => {
+            eprint(&alloc::format!("RSH: {host}: {}\r\n", strerror(e)));
+            return 2;
         }
-        let sa = SockAddrIn::new(addr, port);
-        match unsafe { Rs2SockConnect(s.0, &sa, 16) } {
-            0 => {
-                sock = Some(s);
-                break;
-            }
-            48 | 49 => continue,
-            e => {
-                eprint(&alloc::format!("RSH: {host}: {}\r\n", strerror(e)));
-                return 2;
-            }
-        }
-    }
-    let Some(sock) = sock else {
-        eprint("RSH: no reserved port is free\r\n");
-        return 2;
     };
     let mut req = Vec::new();
     for f in ["0", &luser, &ruser, &cmd.join(" ")] {

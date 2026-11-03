@@ -842,6 +842,7 @@ version = "0.1.0"
 dependencies = [
  "os2",
  "thunk16",
+ "uls",
 ]
 
 [[package]]

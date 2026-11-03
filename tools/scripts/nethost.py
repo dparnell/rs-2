@@ -2,7 +2,7 @@
 (docs/NETWORK.md, "rs2's TCP/IP applications"): run it next to
 
   cargo xtask run --net --init "RS2\\NETCLI.EXE" \\
-      --hostfwd tcp::5521-:21 --hostfwd tcp::5523-:23 \\
+      --hostfwd tcp::5521-:21 --hostfwd tcp::5523-:23 --hostfwd tcp::5525-:515 \\
       --guestfwd tcp:10.0.2.100:515-tcp:127.0.0.1:5515 \\
       --guestfwd tcp:10.0.2.100:79-tcp:127.0.0.1:7979 \\
       --guestfwd tcp:10.0.2.100:512-tcp:127.0.0.1:5512 \\
@@ -22,8 +22,8 @@ FTP on 2121 is tools/scripts/sockhost.py's (run it too).
 
 Clients (--client): after the guest's servers are up, logs in to the
 guest's FTPD through 127.0.0.1:5521 (active mode: the PORT goes to
-10.0.2.2) and to its TELNETD through 127.0.0.1:5523, and prints PASS or
-FAIL lines.
+10.0.2.2), sends a job to its LPD through 127.0.0.1:5525 and drives its
+TELNETD through 127.0.0.1:5523, and prints PASS or FAIL lines.
 
 With --pty, only the TELNETD checks (a VT100 screen emulated here: CMD's
 prompt, colours and output, TEDIT full screen, cursor keys, exit), then
@@ -539,6 +539,49 @@ class TelnetTerm:
         return False
 
 
+def client_lpd():
+    """The guest's LPD (through 127.0.0.1:5525): a job for queue LPDQ, then
+    the queue's state shows it."""
+    def connect():
+        for _ in range(30):
+            try:
+                return socket.create_connection(('127.0.0.1', 5525), timeout=10)
+            except OSError:
+                time.sleep(2)
+        return None
+    c = connect()
+    if not c:
+        result(False, 'host -> LPD: no connection')
+        return
+    data = b'printed from the host through rs2 LPD\n' * 20
+    ctl = b'Hhosttest\nPhostuser\nJhostjob\nfdfA001hosttest\nUdfA001hosttest\nNhost.txt\n'
+    acks = b''
+    c.sendall(b'\x02lpdq\n')
+    acks += c.recv(1)
+    c.sendall(b'\x02%d cfA001hosttest\n' % len(ctl))
+    acks += c.recv(1)
+    c.sendall(ctl + b'\0')
+    acks += c.recv(1)
+    c.sendall(b'\x03%d dfA001hosttest\n' % len(data))
+    acks += c.recv(1)
+    c.sendall(data + b'\0')
+    acks += c.recv(1)
+    c.close()
+    result(acks == b'\0' * 5, 'host -> LPD: job accepted (%r)' % acks)
+    time.sleep(1)
+    c = connect()
+    c.sendall(b'\x03lpdq\n')
+    st = b''
+    while True:
+        b = c.recv(4096)
+        if not b:
+            break
+        st += b
+    log('lpd state:\n' + st.decode('latin1'))
+    result(b'hostjob' in st and b'hostuser' in st, 'host -> LPD: the job is in queue LPDQ')
+    c.close()
+
+
 def client_telnetd_pty(shots=None, font=None):
     """The guest's TELNETD with pseudo terminals: CMD's prompt and output,
     colours, a full-screen VIO program (TEDIT) and its keys, and the end
@@ -548,24 +591,41 @@ def client_telnetd_pty(shots=None, font=None):
     except OSError:
         result(False, 'host -> TELNETD: no connection')
         return
-    ok = t.wait_for(':\\', 30)
+    ok = t.wait_for(':\\', 60)
     result(ok, 'TELNETD pty: the command prompt shows')
-    t.send('echo hello from telnetd\r', 3)
+
+    def wait_screen(cond, secs=60):
+        end = time.time() + secs
+        while time.time() < end:
+            if cond(t.scr.text()):
+                return True
+            if not t.pump(0.5):
+                return cond(t.scr.text())
+        return False
+
+    t.send('echo hello from telnetd\r', 0.5)
+    wait_screen(lambda x: any(r.strip() == 'hello from telnetd' for r in x.split('\n')))
     rows = t.scr.text().split('\n')
     result(any(r.strip() == 'hello from telnetd' for r in rows), 'TELNETD pty: command output')
-    t.send('prompt $e[1;33;44m[pty $p]$e[0m\r', 3)
-    t.send('cls\r', 3)
+    t.send('prompt $e[1;33;44m[pty $p]$e[0m\r', 0.5)
+    wait_screen(lambda x: '[pty C:\\]' in x)
+    t.send('cls\r', 0.5)
     # The prompt is near the top after CLS.
+    wait_screen(lambda x: any(t.scr.row(r).startswith('[pty') for r in range(4)) and 'prompt' not in x, 30)
     pr = next((r for r in range(4) if t.scr.row(r).startswith('[pty')), 0)
     r0 = t.scr.cells[pr]
     txt = t.scr.row(pr)
     result(txt.startswith('[pty C:\\') and r0[1][1] == 0x1e, 'TELNETD pty: ANSI colours in the prompt (%r attr %x)' % (txt[:12], r0[1][1]))
-    t.send('dir C:\\OS2\\*.EXE\r', 4)
+    t.send('dir C:\\OS2\\*.EXE\r', 0.5)
+    wait_screen(lambda x: 'BYTES FREE' in x.upper() and x.rstrip().endswith(']'))
     result('FILE(S)' in t.scr.text().upper() and 'BYTES FREE' in t.scr.text().upper(), 'TELNETD pty: dir scrolls the screen')
     if shots:
         t.scr.png(os.path.join(shots, 'telnetd-cmd.png'), font)
-    t.send('cls\r', 2)
-    t.send('tedit C:\\CONFIG.SYS\r', 6)
+    t.send('cls\r', 0.5)
+    wait_screen(lambda x: 'BYTES FREE' not in x.upper(), 30)
+    t.send('tedit C:\\CONFIG.SYS\r', 0.5)
+    wait_screen(lambda x: 'TEDIT V' in x.upper() and 'END OF FILE' in x.upper())
+    t.pump(1)
     log('TEDIT over telnet:\n' + t.scr.text())
     scr = t.scr.text().upper()
     result('CONFIG.SYS' in scr and ('PROTSHELL' in scr or 'SET ' in scr or 'LIBPATH' in scr), 'TELNETD pty: TEDIT shows the file full screen')
@@ -573,16 +633,23 @@ def client_telnetd_pty(shots=None, font=None):
         t.scr.png(os.path.join(shots, 'telnetd-tedit.png'), font)
     # Cursor keys move TEDIT's cursor.
     before = (t.scr.r, t.scr.c)
-    t.send('\x1b[B\x1b[B\x1b[C', 2)
+    t.send('\x1b[B\x1b[B\x1b[C', 0.5)
+    wait_screen(lambda x: (t.scr.r, t.scr.c) != before, 20)
     result((t.scr.r, t.scr.c) != before, 'TELNETD pty: cursor keys reach the program (%s -> %s)' % (before, (t.scr.r, t.scr.c)))
     # Leave TEDIT: F3 (quit), then answer a "save?" question no.
-    t.send('\x1bOR', 2)
-    if ':\\' not in t.scr.text():
-        t.send('n', 2)
+    t.send('\x1bOR', 0.5)
+    if not wait_screen(lambda x: '[pty' in x, 10):
+        t.send('n', 0.5)
+        wait_screen(lambda x: '[pty' in x, 20)
     if shots:
         t.scr.png(os.path.join(shots, 'telnetd-after.png'), font)
-    t.send('exit\r', 1)
-    closed = not t.pump(4)
+    t.send('exit\r', 0.5)
+    end = time.time() + 30
+    closed = False
+    while time.time() < end:
+        if not t.pump(1):
+            closed = True
+            break
     result(closed, 'TELNETD pty: exit ends the connection')
     t.c.close()
 
@@ -599,6 +666,7 @@ if '--pty' in sys.argv:
 if '--client' in sys.argv:
     time.sleep(5)
     client_ftpd()
+    client_lpd()
     if '--pipes' in sys.argv:
         client_telnetd()
     else:

@@ -22,6 +22,7 @@ pub mod files;
 pub mod inet;
 pub mod netdb;
 pub mod resolv;
+pub mod rexec;
 pub mod sock;
 pub mod sync;
 pub mod tls;
