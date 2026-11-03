@@ -233,6 +233,62 @@ pub fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
     send(pm, MM_INSERTITEM, &mi as *const MenuItem as u32, t.as_ptr() as u32) != MIT_NONE
 }
 
+/// A new pop-up menu (CreatePopupMenu).
+pub fn create_popup() -> u16 {
+    create(false)
+}
+
+/// The PM menu window of an HMENU.
+pub fn pm_menu(h: u16) -> u32 {
+    pm_of(h)
+}
+
+/// An owner-drawn item WIN16 draws itself (the MDI items of a frame's
+/// menu bar while a child is maximized): `id`, with the pop-up `sub`
+/// (0: none), at `pos` (-1: the end).
+pub fn insert_owner(menu: u16, pos: i16, id: u16, sub: u16) -> bool {
+    let pm = pm_of(menu);
+    if pm == 0 {
+        return false;
+    }
+    let mut mi = MenuItem { pos, style: 0x0008, id, ..Default::default() };
+    if sub != 0 {
+        let sp = pm_of(sub);
+        if sp == 0 {
+            return false;
+        }
+        set_bar(sp, false);
+        mi.style |= MIS_SUBMENU;
+        mi.sub = sp;
+    }
+    send(pm, MM_INSERTITEM, &mi as *const MenuItem as u32, b"\0".as_ptr() as u32) != MIT_NONE
+}
+
+/// Take the item `id` out of a menu, keeping its pop-up (it goes back
+/// to the desktop).
+pub fn remove_keep(menu: u16, id: u16) -> bool {
+    remove(menu, id, 0, false)
+}
+
+/// DrawMenuBar: the window's menu bar is drawn again.
+pub fn draw_bar(h: u16) {
+    let pm = wnd(h).map_or(0, |w| pm_of(w.menu));
+    if pm != 0 {
+        // Its items' sizes may have changed: PM lays it out again.
+        let mut r = RectL::default();
+        unsafe {
+            WinQueryWindowRect(pm, &mut r);
+            WinInvalidateRect(pm, core::ptr::null(), 0);
+        }
+    }
+}
+
+/// Is `id` an item of the menu (at its top level)?
+pub fn has_item(menu: u16, id: u16) -> bool {
+    let pm = pm_of(menu);
+    pm != 0 && send(pm, MM_ITEMPOSITIONFROMID, mp(id as u32, 0), 0) != MIT_NONE
+}
+
 /// A window's system menu (the pop-up of its frame's FID_SYSMENU).
 fn system_menu(h: u16) -> u16 {
     let Some(f) = wnd(user::top_level(h)).filter(|w| w.framed).map(|w| w.frame) else { return 0 };
@@ -363,22 +419,25 @@ fn forget_tree(pm: u32) {
 
 /// A menu from a Windows menu template (MENUITEMTEMPLATEHEADER: version,
 /// offset; items: flags, ID (not for pop-ups), text; MF_END ends a level).
+/// Windows 2.x's templates have no header and their flags are a byte:
+/// their first byte is the first item's flags (a pop-up's MF_POPUP),
+/// never 3.x's version 0.
 fn from_template(t: &[u8]) -> u16 {
-    let off = res::w16(t, 2) as usize;
     let bar = create(true);
-    let mut p = 4 + off;
-    items(t, &mut p, bar);
+    let old = t.first().is_some_and(|&b| b != 0);
+    let mut p = if old { 0 } else { 4 + res::w16(t, 2) as usize };
+    items(t, &mut p, bar, old);
     bar
 }
 
-fn items(t: &[u8], p: &mut usize, menu: u16) {
+fn items(t: &[u8], p: &mut usize, menu: u16, old: bool) {
     while *p + 2 <= t.len() {
-        let flags = res::w16(t, *p);
-        *p += 2;
+        let flags = if old { t[*p] as u16 } else { res::w16(t, *p) };
+        *p += if old { 1 } else { 2 };
         if flags & MF_POPUP != 0 {
             let text = res::sz(t, p).to_vec();
             let sub = create(false);
-            items(t, p, sub);
+            items(t, p, sub, old);
             insert(menu, -1, flags & !MF_END, sub, &text);
         } else {
             let id = res::w16(t, *p);
@@ -390,6 +449,31 @@ fn items(t: &[u8], p: &mut usize, menu: u16) {
             return;
         }
     }
+}
+
+/// InsertMenu(hmenu, pos, flags, id, text): by command, before the item,
+/// in the (sub)menu that has it.
+fn insert_menu(h: u16, pos: u16, fl: u16, id: u16, text: u32) -> u32 {
+    let (h, at) = if fl & MF_BYPOSITION != 0 {
+        (h, pos as i16)
+    } else {
+        match holder(pm_of(h), pos) {
+            Some(m) => (handle_of(m), send(m, MM_ITEMPOSITIONFROMID, mp(pos as u32, 0), 0) as i16),
+            None => (h, -1),
+        }
+    };
+    insert(h, at, fl, id, &item_text(fl, text)) as u32
+}
+
+/// ModifyMenu(hmenu, pos, flags, id, text): the item stays in the
+/// (sub)menu that has it, where it was.
+fn modify_menu(h: u16, pos: u16, fl: u16, id: u16, text: u32) -> u32 {
+    let Some(old) = item_id(pm_of(h), pos, fl) else { return 0 };
+    let pm = holder(pm_of(h), old).unwrap_or(pm_of(h));
+    let h = handle_of(pm);
+    let at = send(pm, MM_ITEMPOSITIONFROMID, mp(old as u32, 0), 0) as i16;
+    remove(h, old, 0, false);
+    insert(h, at, fl & !MF_BYPOSITION, id, &item_text(fl, text)) as u32
 }
 
 /// LoadMenu from a module's resources.
@@ -559,11 +643,21 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             unsafe { WinDestroyWindow(pm) };
             1
         }
-        // ChangeMenu: the old way; as AppendMenu/ModifyMenu.
+        // ChangeMenu(hmenu, cmd, text, id, flags): Windows 2.x's one call
+        // for the rest: MF_APPEND (0x100), MF_DELETE (0x200), MF_REMOVE
+        // (0x1000), MF_CHANGE (0x80), else MF_INSERT.
         153 => {
-            let (h, _cmd, text, id, fl) = (a.w(), a.w(), a.l(), a.w(), a.w());
-            let t = far_str(text).unwrap_or(b"").to_vec();
-            insert(h, -1, fl, id, &t) as u32
+            let (h, cmd, text, id, fl) = (a.w(), a.w(), a.l(), a.w(), a.w());
+            let f = fl & !(0x80 | 0x100 | 0x200 | 0x1000);
+            if fl & 0x100 != 0 {
+                insert(h, -1, f, id, &item_text(f, text)) as u32
+            } else if fl & (0x200 | 0x1000) != 0 {
+                remove(h, cmd, f, fl & 0x200 != 0) as u32
+            } else if fl & 0x80 != 0 {
+                modify_menu(h, cmd, f, id, text)
+            } else {
+                insert_menu(h, cmd, f, id, text)
+            }
         }
         // CheckMenuItem(hmenu, id, flags)
         154 => {
@@ -666,16 +760,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // InsertMenu(hmenu, pos, flags, id, text)
         410 => {
             let (h, pos, fl, id, text) = (a.w(), a.w(), a.w(), a.w(), a.l());
-            // By command: before the item, in the (sub)menu that has it.
-            let (h, at) = if fl & MF_BYPOSITION != 0 {
-                (h, pos as i16)
-            } else {
-                match holder(pm_of(h), pos) {
-                    Some(m) => (handle_of(m), send(m, MM_ITEMPOSITIONFROMID, mp(pos as u32, 0), 0) as i16),
-                    None => (h, -1),
-                }
-            };
-            insert(h, at, fl, id, &item_text(fl, text)) as u32
+            insert_menu(h, pos, fl, id, text)
         }
         // AppendMenu(hmenu, flags, id, text)
         411 => {
@@ -690,13 +775,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         // ModifyMenu(hmenu, pos, flags, id, text)
         414 => {
             let (h, pos, fl, id, text) = (a.w(), a.w(), a.w(), a.w(), a.l());
-            let Some(old) = item_id(pm_of(h), pos, fl) else { return Some(0) };
-            // The item stays in the (sub)menu that has it, where it was.
-            let pm = holder(pm_of(h), old).unwrap_or(pm_of(h));
-            let h = handle_of(pm);
-            let at = send(pm, MM_ITEMPOSITIONFROMID, mp(old as u32, 0), 0) as i16;
-            remove(h, old, 0, false);
-            insert(h, at, fl & !MF_BYPOSITION, id, &item_text(fl, text)) as u32
+            modify_menu(h, pos, fl, id, text)
         }
         // TrackPopupMenu(hmenu, flags, x, y, reserved, hwnd, lpRect)
         416 => {

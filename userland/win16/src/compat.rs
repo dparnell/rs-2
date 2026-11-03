@@ -5,7 +5,7 @@
 use alloc::vec::Vec;
 use thunk16::{Pascal, PascalCall};
 
-use crate::Global;
+use crate::{gdi, Global};
 
 /// Installed hooks: (handle, type, procedure). WH_GETMESSAGE,
 /// WH_KEYBOARD, WH_CALLWNDPROC and WH_MSGFILTER hooks are called (user.rs);
@@ -38,68 +38,120 @@ pub fn has_hooks(kind: i16) -> bool {
     HOOKS.get().iter().any(|h| h.kind == kind)
 }
 
-/// The faces EnumFonts and EnumFontFamilies report: (face, pitch and
-/// family, TrueType).
-const FACES: &[(&[u8], u8, bool)] = &[
-    (b"System", 0x22, false),
-    (b"Fixedsys", 0x31, false),
-    (b"Terminal", 0x31, false),
-    (b"MS Sans Serif", 0x22, false),
-    (b"MS Serif", 0x12, false),
-    (b"Courier", 0x31, false),
-    (b"Arial", 0x22, true),
-    (b"Courier New", 0x31, true),
-    (b"Times New Roman", 0x12, true),
-];
+/// One font EnumFonts and EnumFontFamilies report: a face at a height
+/// (raster faces: each of their sizes) or in a style (TrueType faces:
+/// regular, bold, italic, bold italic), with its real metrics.
+struct Enumerated {
+    wface: u8,
+    height: i32,
+    weight: u16,
+    italic: bool,
+}
+
+/// The fonts to enumerate: one per face (no face given), or each size or
+/// style of the face asked for (none for a face rs2 does not have).
+fn fonts_to_enumerate(face: Option<&[u8]>) -> Vec<Enumerated> {
+    let mut v = Vec::new();
+    match face.filter(|f| !f.is_empty()) {
+        None => {
+            for (i, f) in gdi::FACES.iter().enumerate() {
+                let height = if f.tt { -16 } else { f.sizes[0] };
+                v.push(Enumerated { wface: i as u8, height, weight: if i == 0 { 700 } else { 400 }, italic: false });
+            }
+        }
+        Some(name) => {
+            // Only the faces' own names (not aliases) are enumerated.
+            let Some(i) = gdi::FACES.iter().position(|f| f.name.eq_ignore_ascii_case(name)) else { return v };
+            let f = &gdi::FACES[i];
+            if f.tt {
+                for (weight, italic) in [(400, false), (700, false), (400, true), (700, true)] {
+                    v.push(Enumerated { wface: i as u8, height: -16, weight, italic });
+                }
+            } else {
+                for &h in f.sizes {
+                    v.push(Enumerated { wface: i as u8, height: h, weight: if i == 0 { 700 } else { 400 }, italic: false });
+                }
+            }
+        }
+    }
+    v
+}
 
 /// EnumFonts(hdc, face, proc, data), EnumFontFamilies: the callback gets
 /// a LOGFONT (ENUMLOGFONT), a TEXTMETRIC (NEWTEXTMETRIC), the font type
-/// and the data, for each face (or the one asked for).
+/// and the data, for each font (`fonts_to_enumerate`), until it returns
+/// 0; the last callback's result.
 fn enum_fonts(face: u32, p: u32, data: u32) -> u32 {
-    let want = crate::far_str(face).map(|s| s.to_ascii_lowercase());
+    let list = fonts_to_enumerate(crate::far_str(face));
+    if list.is_empty() {
+        return 1;
+    }
+    // The metrics come from a memory DC with the font selected.
+    let mem = crate::bitmap::create_memory_dc();
     let mut r = 1;
-    for &(name, pitch, tt) in FACES {
-        if want.as_ref().is_some_and(|w| !w.is_empty() && *w != name.to_ascii_lowercase()) {
-            continue;
-        }
+    for e in list {
+        let wf = &gdi::FACES[e.wface as usize];
+        let font = gdi::new_obj(gdi::Obj::Font(gdi::face_font(e.wface, e.height, e.weight, e.italic)));
+        let old = gdi::select_font(mem, font);
+        let tm = gdi::text_metrics(mem);
+        gdi::select_font(mem, old);
+        gdi::delete_object(font);
+        let w = |o: usize| i16::from_le_bytes([tm[o], tm[o + 1]]);
+        let (height, internal, ave) = (w(0), w(6), w(10));
         // ENUMLOGFONT: LOGFONT (50) + full name (64) + style (32);
-        // NEWTEXTMETRIC: TEXTMETRIC (31) + flags, sizes (12).
+        // NEWTEXTMETRIC: TEXTMETRIC (31) + ntmFlags, ntmSizeEM,
+        // ntmCellHeight, ntmAvgWidth (10).
         r = crate::mem16::with(146 + 44, |far, buf| {
             if buf.is_null() {
                 return 0;
             }
             let lf = buf;
-            let tm = unsafe { buf.add(146) };
-            let height: i16 = 16;
+            let ntm = unsafe { buf.add(146) };
+            let style: &[u8] = match (e.weight >= 700, e.italic) {
+                (false, false) => b"Regular",
+                (true, false) => b"Bold",
+                (false, true) => b"Italic",
+                (true, true) => b"Bold Italic",
+            };
+            let mut full = wf.name.to_vec();
+            if wf.tt && style != b"Regular" {
+                full.push(b' ');
+                full.extend_from_slice(style);
+            }
             unsafe {
+                // LOGFONT: the cell height, the average width, the weight,
+                // italic, the charset, OUT_STROKE_PRECIS (3) for TrueType,
+                // CLIP_STROKE_PRECIS (2), PROOF_QUALITY (2), the pitch and
+                // family, the face.
                 (lf as *mut i16).write_unaligned(height);
-                (lf.add(2) as *mut i16).write_unaligned(if pitch & 3 == 1 { 8 } else { 7 });
-                (lf.add(8) as *mut i16).write_unaligned(400);
-                *lf.add(17) = pitch;
-                *lf.add(13) = 0; // ANSI_CHARSET
-                *lf.add(16) = if tt { 2 } else { 0 };
-                core::ptr::copy_nonoverlapping(name.as_ptr(), lf.add(18), name.len());
-                core::ptr::copy_nonoverlapping(name.as_ptr(), lf.add(50), name.len());
-                core::ptr::copy_nonoverlapping(b"Regular".as_ptr(), lf.add(114), 7);
-                for (i, v) in [height, 13, 3, 0, 0, if pitch & 3 == 1 { 8 } else { 7 }, 16, 400].iter().enumerate() {
-                    (tm.add(2 * i) as *mut i16).write_unaligned(*v);
-                }
-                *tm.add(19) = 0x20;
-                *tm.add(20) = 0xff;
-                *tm.add(21) = b'?';
-                *tm.add(22) = b' ';
-                *tm.add(23) = if pitch & 3 == 1 { 0x30 } else { pitch & 0xf0 | 1 } | if tt { 4 } else { 0 };
-                (tm.add(25) as *mut i16).write_unaligned(96);
-                (tm.add(27) as *mut i16).write_unaligned(96);
+                (lf.add(2) as *mut i16).write_unaligned(ave);
+                (lf.add(8) as *mut i16).write_unaligned(e.weight as i16);
+                *lf.add(10) = e.italic as u8;
+                *lf.add(13) = wf.charset;
+                *lf.add(14) = if wf.tt { 3 } else { 1 };
+                *lf.add(15) = 2;
+                *lf.add(16) = if wf.tt { 2 } else { 1 };
+                *lf.add(17) = wf.family;
+                core::ptr::copy_nonoverlapping(wf.name.as_ptr(), lf.add(18), wf.name.len());
+                core::ptr::copy_nonoverlapping(full.as_ptr(), lf.add(50), full.len().min(63));
+                core::ptr::copy_nonoverlapping(style.as_ptr(), lf.add(114), style.len());
+                core::ptr::copy_nonoverlapping(tm.as_ptr(), ntm, 31);
+                // ntmFlags: NTM_ITALIC 1, NTM_BOLD 0x20, NTM_REGULAR 0x40.
+                let flags: u32 = if e.italic { 1 } else { 0 } | if e.weight >= 700 { 0x20 } else { 0 } | if !e.italic && e.weight < 700 { 0x40 } else { 0 };
+                (ntm.add(31) as *mut u32).write_unaligned(if wf.tt { flags } else { 0 });
+                (ntm.add(35) as *mut u16).write_unaligned(if wf.tt { 2048 } else { 0 });
+                (ntm.add(37) as *mut u16).write_unaligned(if wf.tt { (height - internal) as u16 } else { 0 });
+                (ntm.add(39) as *mut u16).write_unaligned(if wf.tt { ave as u16 } else { 0 });
             }
             // RASTER_FONTTYPE 1, TRUETYPE_FONTTYPE 4.
-            let ty = if tt { 4 } else { 1 };
+            let ty = if wf.tt { 4 } else { 1 };
             PascalCall::new().l(far).l(far + 146).w(ty).l(data).call(p) as u16 as u32
         });
         if r == 0 {
             break;
         }
     }
+    gdi::release_dc(mem);
     r
 }
 

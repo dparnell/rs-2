@@ -28,6 +28,13 @@ for src in "$dir"/*.c; do
         wlink op q system windows_dll name W16D43.DLL op modname=W16DLL file W16D43.OBJ
         mv W16D43.DLL "$dir/bin/"
         continue ;;
+    # W16IMP.DLL is imported by W16TEST (its import library from the
+    # DLL).
+    W16IMP)
+        wcl -q -bt=windows -bd -l=windows_dll -zW -fe="$name.DLL" "$src"
+        wlib -q -n w16imp.lib +"$name.DLL"
+        mv "$name.DLL" "$dir/bin/"
+        continue ;;
     W16CYC1|W16CYC2)
         other=W16CYC2; imp=W16CYC2VALUE
         [ "$name" = W16CYC2 ] && other=W16CYC1 && imp=W16CYC1BASE
@@ -36,7 +43,9 @@ for src in "$dir"/*.c; do
         mv "$name.DLL" "$dir/bin/"
         continue ;;
     esac
-    wcl -q -bt=windows -l=windows -zW -fe="$name.EXE" "$src" lzexpand.lib ver.lib
+    imp=
+    [ "$name" = W16TEST ] && imp=w16imp.lib
+    wcl -q -bt=windows -l=windows -zW -fe="$name.EXE" "$src" lzexpand.lib ver.lib $imp
     # Resources (NAME.rc) are bound into the program.
     rc="$dir/$(basename "$src" .c).rc"
     [ -f "$rc" ] && wrc -q -bt=windows -i="$dir" "$rc" "$name.EXE"

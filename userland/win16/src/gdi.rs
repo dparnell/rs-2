@@ -38,6 +38,8 @@ pub enum DcKind {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Font {
     pub face: u8,
+    /// The Windows face it is (an index in `FACES`).
+    pub wface: u8,
     pub height: i32,
     pub width: i32,
     pub weight: u16,
@@ -45,9 +47,23 @@ pub struct Font {
     pub underline: bool,
 }
 
+/// The pattern of a brush that is not solid: a hatch style (HS_*), a
+/// monochrome 8 x 8 pattern (rows top-down, the high bit leftmost, 1s in
+/// the background colour and 0s in the text colour as Windows draws
+/// them) or a colour one (64 COLORREFs, rows top-down).
+#[derive(Clone, PartialEq)]
+pub enum Pat {
+    Hatch(u16),
+    Mono([u8; 8]),
+    Color(Vec<u32>),
+}
+
 #[derive(Clone)]
 pub enum Obj {
-    Brush { color: u32, null: bool },
+    /// A brush: its colour (a pattern's average), null (BS_NULL), its
+    /// pattern and the bitmap or DIB it was made from (GetObject's
+    /// lbHatch).
+    Brush { color: u32, null: bool, pat: Option<Pat>, src: u16 },
     Pen { style: u16, width: u16, color: u32 },
     Font(Font),
     /// A PM bitmap: width, height, bits per pixel (1: monochrome).
@@ -123,15 +139,76 @@ pub const ANSI_FIXED_FONT: u16 = OBJ_BASE + 2 * 11;
 const STOCK: usize = 17;
 
 fn sys_font() -> Font {
-    Font { face: 0, height: 0, width: 0, weight: 700, italic: false, underline: false }
+    Font { face: 0, wface: 0, height: 0, width: 0, weight: 700, italic: false, underline: false }
+}
+
+/// A Windows face: its name, the PM face it is drawn with (`Font::face`),
+/// LOGFONT's pitch and family, whether it is TrueType (scalable), its
+/// character set, and a raster face's cell heights at 96 dpi.
+pub struct WFace {
+    pub name: &'static [u8],
+    pub pm: u8,
+    pub family: u8,
+    pub tt: bool,
+    pub charset: u8,
+    pub sizes: &'static [i32],
+}
+
+/// The faces Windows 3.1 has and programs ask for, on rs2's own fonts
+/// (docs/WIN16.md "Fonts").
+pub const FACES: &[WFace] = &[
+    WFace { name: b"System", pm: 0, family: 0x22, tt: false, charset: 0, sizes: &[16] },
+    WFace { name: b"Fixedsys", pm: 1, family: 0x31, tt: false, charset: 0, sizes: &[15] },
+    WFace { name: b"Terminal", pm: 1, family: 0x31, tt: false, charset: 255, sizes: &[12, 15] },
+    WFace { name: b"MS Sans Serif", pm: 2, family: 0x22, tt: false, charset: 0, sizes: &[13, 16, 20, 24, 29, 37] },
+    WFace { name: b"MS Serif", pm: 3, family: 0x12, tt: false, charset: 0, sizes: &[13, 16, 19, 21, 27, 35] },
+    WFace { name: b"Courier", pm: 4, family: 0x31, tt: false, charset: 0, sizes: &[13, 16, 20] },
+    WFace { name: b"Arial", pm: 2, family: 0x22, tt: true, charset: 0, sizes: &[] },
+    WFace { name: b"Courier New", pm: 4, family: 0x31, tt: true, charset: 0, sizes: &[] },
+    WFace { name: b"Times New Roman", pm: 3, family: 0x12, tt: true, charset: 0, sizes: &[] },
+];
+
+/// Other names programs use for these faces: Windows 3.0's, PM's and
+/// the usual substitutes.
+const ALIASES: &[(&[u8], u8)] = &[
+    (b"Helv", 3),
+    (b"Tms Rmn", 4),
+    (b"Helvetica", 6),
+    (b"Times", 8),
+    (b"Times Roman", 8),
+    (b"System Proportional", 0),
+    (b"System Monospaced", 1),
+    (b"Modern", 7),
+    (b"Roman", 8),
+    (b"Swiss", 6),
+    (b"Small Fonts", 3),
+];
+
+/// The face index of a Windows face name (or alias).
+pub fn find_face(name: &[u8]) -> Option<u8> {
+    let n = trim_nul(name);
+    FACES.iter().position(|f| f.name.eq_ignore_ascii_case(n)).map(|i| i as u8).or_else(|| ALIASES.iter().find(|a| a.0.eq_ignore_ascii_case(n)).map(|a| a.1))
+}
+
+fn trim_nul(s: &[u8]) -> &[u8] {
+    &s[..s.iter().position(|&c| c == 0).unwrap_or(s.len())]
+}
+
+/// A font of a face at a cell height (raster faces) or em height
+/// (TrueType, negative), with a weight and slant (EnumFonts).
+pub fn face_font(wface: u8, height: i32, weight: u16, italic: bool) -> Font {
+    let f = &FACES[wface as usize];
+    // The system font is drawn as PM's at its own size.
+    let height = if wface == 0 { 0 } else { height };
+    Font { face: f.pm, wface, height, width: 0, weight, italic, underline: false }
 }
 
 fn g() -> &'static mut Gdi {
     let g = GDI.get();
     if g.objs.is_empty() {
-        let b = |c, null| Some(Obj::Brush { color: c, null });
+        let b = |c, null| Some(Obj::Brush { color: c, null, pat: None, src: 0 });
         let p = |c, style| Some(Obj::Pen { style, width: 1, color: c });
-        let mono = Some(Obj::Font(Font { face: 1, ..sys_font() }));
+        let mono = Some(Obj::Font(Font { face: 1, wface: 1, ..sys_font() }));
         g.objs = alloc::vec![
             b(0xffffff, false), // WHITE_BRUSH
             b(0xc0c0c0, false), // LTGRAY_BRUSH
@@ -170,6 +247,17 @@ pub fn delete_object(o: u16) -> bool {
     }
     if let Some(Obj::Palette(_)) = obj(o) {
         crate::bitmap::forget_palette(o);
+    }
+    // A deleted font's handle comes back for the next object: a DC whose
+    // PS has it as its font goes back to the system font.
+    if let Some(Obj::Font(_)) = obj(o) {
+        for d in g().dcs.iter_mut().filter(|d| d.applied == o) {
+            unsafe {
+                GpiSetCharSet(d.hps, 0);
+                GpiDeleteSetId(d.hps, 1);
+            }
+            d.applied = SYSTEM_FONT;
+        }
     }
     g().objs[i] = None;
     g().widths.remove(&o);
@@ -227,7 +315,7 @@ pub fn sys_brush(i: u16) -> u16 {
     if b != 0 {
         return b;
     }
-    let b = new_obj(Obj::Brush { color: sys_color(i as u16), null: false });
+    let b = new_obj(Obj::Brush { color: sys_color(i as u16), null: false, pat: None, src: 0 });
     g().sys_brushes[i] = b;
     b
 }
@@ -325,13 +413,135 @@ pub fn dc_size(hdc: u16) -> (i32, i32) {
 
 /// Fill a device rectangle with a brush.
 pub fn fill_rect_dev(hdc: u16, r: [i32; 4], br: u16) {
-    let Some(c) = brush_color(br) else { return };
     let Some(d) = dc(hdc) else { return };
     if r[2] <= r[0] || r[3] <= r[1] {
         return;
     }
     let rc = pm_rect_dev(d, r);
-    unsafe { WinFillRect(d.hps, &rc, rgb(c)) };
+    fill_pm(d, &rc, br);
+}
+
+/// The 8 x 8 bits of Windows' hatch styles (rows top-down, the high bit
+/// leftmost, 1s are the hatch's lines): HS_HORIZONTAL, HS_VERTICAL,
+/// HS_FDIAGONAL, HS_BDIAGONAL, HS_CROSS, HS_DIAGCROSS.
+pub fn hatch_bits(style: u16) -> [u8; 8] {
+    let h = [0, 0, 0, 0, 0xff, 0, 0, 0];
+    let v = [0x08; 8];
+    let f: [u8; 8] = core::array::from_fn(|i| 0x80 >> i);
+    let b: [u8; 8] = core::array::from_fn(|i| 0x01 << i);
+    match style {
+        0 => h,
+        1 => v,
+        2 => f,
+        3 => b,
+        4 => core::array::from_fn(|i| h[i] | v[i]),
+        _ => core::array::from_fn(|i| f[i] | b[i]),
+    }
+}
+
+/// The lcid WIN16 tags pattern bitmaps with.
+const LCID_PATTERN: i32 = 200;
+
+/// Make a brush the PS's area attributes: its colour, and its pattern
+/// for one that is not solid (aligned with the DC's origin, as Windows'
+/// brush origin is). False for a null brush. A pattern stays set until
+/// `end_pattern`.
+pub fn set_area(d: &Dc, br: u16) -> bool {
+    let Some(c) = brush_color(br) else { return false };
+    let pat = match obj(br) {
+        Some(Obj::Brush { pat: Some(p), .. }) => p,
+        _ => {
+            unsafe { GpiSetColor(d.hps, rgb(c)) };
+            return true;
+        }
+    };
+    // (PM's patterns: 1 bits in the area colour, 0 bits in its
+    // background colour; rows bottom-up.)
+    let opaque = d.s.bk_mode == OPAQUE;
+    let (bits, fg, bg, mix) = match &pat {
+        Pat::Hatch(s) => (Some(hatch_bits(*s)), c, d.s.bk, if opaque { BM_OVERPAINT } else { BM_LEAVEALONE }),
+        Pat::Mono(m) => (Some(*m), d.s.bk, d.s.text, BM_OVERPAINT),
+        Pat::Color(_) => (None, c, d.s.bk, BM_OVERPAINT),
+    };
+    let hbm = match (&pat, bits) {
+        (_, Some(bits)) => {
+            let mut rows = [0u8; 32];
+            for (i, b) in bits.iter().enumerate() {
+                rows[(7 - i) * 4] = *b;
+            }
+            crate::bitmap::pm_bitmap_from(8, 8, 1, &rows, &[0, 0xffffff])
+        }
+        (Pat::Color(px), None) => {
+            let mut rows = alloc::vec![0u8; 8 * 24];
+            for y in 0..8 {
+                for x in 0..8 {
+                    let c = px.get(y * 8 + x).copied().unwrap_or(0);
+                    let o = (7 - y) * 24 + x * 3;
+                    rows[o] = (c >> 16) as u8;
+                    rows[o + 1] = (c >> 8) as u8;
+                    rows[o + 2] = c as u8;
+                }
+            }
+            crate::bitmap::pm_bitmap_from(8, 8, 24, &rows, &[])
+        }
+        _ => 0,
+    };
+    unsafe {
+        GpiSetColor(d.hps, rgb(fg));
+        GpiSetBackColor(d.hps, rgb(bg));
+        GpiSetBackMix(d.hps, mix);
+        GpiSetPatternSet(d.hps, 0);
+        GpiDeleteSetId(d.hps, LCID_PATTERN);
+        if hbm != 0 && GpiSetBitmapId(d.hps, hbm, LCID_PATTERN) != 0 {
+            GpiSetPatternSet(d.hps, LCID_PATTERN);
+            // Windows' pattern rows start at the top of the DC.
+            GpiSetPatternRefPoint(d.hps, &PointL { x: 0, y: d.height });
+        }
+    }
+    if hbm != 0 {
+        PATTERN_BM.get().push(hbm);
+    }
+    true
+}
+
+/// The pattern bitmaps of `set_area`, deleted with `end_pattern`.
+static PATTERN_BM: Global<Vec<u32>> = Global::new(Vec::new());
+
+/// Back to solid areas after a pattern.
+pub fn end_pattern(d: &Dc) {
+    unsafe {
+        GpiSetPatternSet(d.hps, 0);
+        GpiDeleteSetId(d.hps, LCID_PATTERN);
+        GpiSetBackMix(d.hps, BM_LEAVEALONE);
+        for hbm in core::mem::take(PATTERN_BM.get()) {
+            GpiDeleteBitmap(hbm);
+        }
+    }
+}
+
+/// Is the brush a pattern (not solid)?
+pub fn is_pattern(br: u16) -> bool {
+    matches!(obj(br), Some(Obj::Brush { pat: Some(_), null: false, .. }))
+}
+
+/// Fill a PM rectangle (right and top exclusive) with a brush.
+pub fn fill_pm(d: &Dc, rc: &RectL, br: u16) {
+    if rc.r <= rc.l || rc.t <= rc.b {
+        return;
+    }
+    if !is_pattern(br) {
+        if let Some(c) = brush_color(br) {
+            unsafe { WinFillRect(d.hps, rc, rgb(c)) };
+        }
+        return;
+    }
+    if set_area(d, br) {
+        unsafe {
+            GpiMove(d.hps, &PointL { x: rc.l, y: rc.b });
+            GpiBox(d.hps, DRO_FILL, &PointL { x: rc.r - 1, y: rc.t - 1 }, 0, 0);
+        }
+        end_pattern(d);
+    }
 }
 
 /// Polygons (logical points): the brush inside (the DC's fill mode),
@@ -340,8 +550,7 @@ pub fn poly_poly(hdc: u16, polys: &[Vec<(i32, i32)>]) -> bool {
     let Some(d) = dc(hdc) else { return false };
     let pm: Vec<Vec<PointL>> = polys.iter().filter(|p| p.len() >= 2).map(|p| p.iter().map(|&(x, y)| pm_pt(d, x, y)).collect()).collect();
     unsafe {
-        if let Some(c) = brush_color(d.s.brush) {
-            GpiSetColor(d.hps, rgb(c));
+        if set_area(d, d.s.brush) {
             // BA_BOUNDARY | BA_ALTERNATE or BA_WINDING
             GpiBeginArea(d.hps, if d.s.poly_fill == 2 { 2 } else { 0 });
             for p in &pm {
@@ -349,6 +558,7 @@ pub fn poly_poly(hdc: u16, polys: &[Vec<(i32, i32)>]) -> bool {
                 GpiPolyLine(d.hps, p.len() as i32 - 1, p[1..].as_ptr());
             }
             GpiEndArea(d.hps);
+            end_pattern(d);
         }
         if let Some((c, w)) = pen_color(d) {
             GpiSetColor(d.hps, rgb(c));
@@ -760,8 +970,17 @@ pub fn brush_color(br: u16) -> Option<u32> {
 }
 
 pub fn fill_rect(hdc: u16, r: [i32; 4], br: u16) {
-    let Some(c) = brush_color(br) else { return };
-    fill(hdc, r, c);
+    if !is_pattern(br) {
+        let Some(c) = brush_color(br) else { return };
+        fill(hdc, r, c);
+        return;
+    }
+    let Some(d) = dc(hdc) else { return };
+    if r[2] <= r[0] || r[3] <= r[1] {
+        return;
+    }
+    let rc = pm_rect(d, r);
+    fill_pm(d, &rc, br);
 }
 
 /// Fill a rectangle with a colour.
@@ -783,14 +1002,16 @@ pub fn frame(hdc: u16, r: [i32; 4], c: u32) {
     fill(hdc, [rr - 1, t, rr, b], c);
 }
 
-/// Invert a rectangle.
+/// Invert a rectangle (DSTINVERT: every bit of the pels, in bitmaps
+/// too).
 pub fn invert(hdc: u16, r: [i32; 4]) {
     let Some(d) = dc(hdc) else { return };
     if r[2] <= r[0] || r[3] <= r[1] {
         return;
     }
     let rc = pm_rect(d, r);
-    unsafe { WinInvertRect(d.hps, &rc) };
+    let pts = [PointL { x: rc.l, y: rc.b }, PointL { x: rc.r, y: rc.t }];
+    unsafe { GpiBitBlt(d.hps, 0, 2, pts.as_ptr(), 0x55, 0) };
 }
 
 /// DrawFocusRect: a dotted outline, inverted (drawing it twice removes
@@ -1006,6 +1227,7 @@ pub fn line(hdc: u16, x0: i32, y0: i32, x1: i32, y1: i32, c: u32) {
         unsafe {
             GpiSetColor(d.hps, rgb(c));
             GpiSetLineWidth(d.hps, 1 << 16);
+            GpiSetLineType(d.hps, 7);
             GpiMove(d.hps, &pm_pt(d, x0, y0));
             GpiLine(d.hps, &pm_pt(d, x1, y1));
         }
@@ -1143,9 +1365,23 @@ pub fn draw_text_bytes(hdc: u16, text: &[u8], rect: [i32; 4], fmt: u16) -> (i32,
 }
 
 /// A pen's colour, unless it is the null pen.
+/// The DC's pen: its colour and width (None for PS_NULL). The PS's line
+/// type becomes the pen's style (every caller draws with it next):
+/// PS_DASH, PS_DOT, PS_DASHDOT and PS_DASHDOTDOT are PM's long dashes,
+/// dots, dash-dot and dash-double-dot (thin pens only, as on Windows).
 fn pen_color(d: &Dc) -> Option<(u32, i32)> {
     match obj(d.s.pen) {
-        Some(Obj::Pen { style, color, width }) if style != 5 => Some((color, width.max(1) as i32)),
+        Some(Obj::Pen { style, color, width }) if style != 5 => {
+            let lt = match style {
+                1 if width <= 1 => 5,
+                2 if width <= 1 => 1,
+                3 if width <= 1 => 3,
+                4 if width <= 1 => 6,
+                _ => 7,
+            };
+            unsafe { GpiSetLineType(d.hps, lt) };
+            Some((color, width.max(1) as i32))
+        }
         _ => None,
     }
 }
@@ -1158,9 +1394,9 @@ fn ellipse(d: &Dc, l: i32, t: i32, r: i32, b: i32) {
     unsafe {
         GpiSetArcParams(d.hps, &[rx.max(1), ry.max(1), 0, 0]);
         GpiMove(d.hps, &c);
-        if let Some(col) = brush_color(d.s.brush) {
-            GpiSetColor(d.hps, rgb(col));
+        if set_area(d, d.s.brush) {
             GpiFullArc(d.hps, DRO_FILL, 1 << 16);
+            end_pattern(d);
         }
         if let Some((col, w)) = pen_color(d) {
             GpiSetColor(d.hps, rgb(col));
@@ -1179,7 +1415,7 @@ fn points(p: *const i16, n: usize, d: &Dc) -> Vec<PointL> {
 fn font_of(height: i32, width: i32, weight: u16, italic: bool, underline: bool, family: u8, face: &[u8]) -> Font {
     let f = face.to_ascii_lowercase();
     let has = |s: &[u8]| f.windows(s.len()).any(|w| w == s);
-    let face = if has(b"courier") || has(b"fixed") || has(b"terminal") || (f.is_empty() && family & 3 == 1) {
+    let pm = if has(b"courier") || has(b"fixed") || has(b"terminal") || (f.is_empty() && family & 3 == 1) {
         4
     } else if has(b"times") || has(b"tms") || has(b"roman") || has(b"serif") && !has(b"sans") || (f.is_empty() && family & 0xf0 == 0x10) {
         3
@@ -1188,7 +1424,60 @@ fn font_of(height: i32, width: i32, weight: u16, italic: bool, underline: bool, 
     } else {
         2
     };
-    Font { face, height, width, weight, italic, underline }
+    // The Windows face it becomes: the one named, else the TrueType face
+    // of its family (the system font for no name, family and size).
+    let wface = find_face(face).unwrap_or(match pm {
+        0 => 0,
+        3 => 8,
+        4 => 7,
+        _ if f.is_empty() && family == 0 && height == 0 => 0,
+        _ => 6,
+    });
+    // A named face is drawn with its own PM face (Fixedsys and Terminal
+    // with the monospaced outline one, System at a size with Helvetica).
+    let pm = match FACES[wface as usize].pm {
+        0 if height != 0 => 2,
+        1 => 4,
+        p => p,
+    };
+    Font { face: pm, wface, height, width, weight, italic, underline }
+}
+
+/// TEXTMETRIC (31 bytes) of the DC's font.
+pub fn text_metrics(hdc: u16) -> [u8; 31] {
+    let mut b = [0u8; 31];
+    let Some(d) = dc(hdc) else { return b };
+    apply_font(d);
+    let mut fm = [0u8; 256];
+    unsafe { GpiQueryFontMetrics(d.hps, 208, fm.as_mut_ptr()) };
+    let l = |o: usize| i32::from_le_bytes(fm[o..o + 4].try_into().unwrap());
+    // lMaxAscender, lMaxDescender, lInternalLeading, lExternalLeading,
+    // lAveCharWidth, lMaxCharInc.
+    let (asc, desc) = (l(76).max(1), l(80).max(0));
+    let (ave, max) = (l(100).max(1), l(104).max(1));
+    // (The em: lEmHeight; what is above it in the cell is the internal
+    // leading.)
+    let internal = if l(92) > 0 { l(92) } else { asc + desc - l(68) }.clamp(0, asc);
+    let external = l(96).max(0);
+    let f = match obj(d.s.font) {
+        Some(Obj::Font(f)) => f,
+        _ => sys_font(),
+    };
+    let wf = &FACES[(f.wface as usize).min(FACES.len() - 1)];
+    let fixed = wf.family & 3 == 1 || f.face == 1 || f.face == 4;
+    // Fixed-pitch fonts' widest character is their width.
+    let max = if fixed { ave } else { max };
+    for (i, v) in [asc + desc, asc, desc, internal, external, ave, max, f.weight.max(100) as i32].iter().enumerate() {
+        b[i * 2..i * 2 + 2].copy_from_slice(&(*v as i16).to_le_bytes());
+    }
+    // tmPitchAndFamily: the family; TMPF_FIXED_PITCH (1) set for a
+    // variable pitch, TMPF_VECTOR 2 and TMPF_TRUETYPE 4 for TrueType.
+    let pitch = (wf.family & 0xf0) | if fixed { 0 } else { 1 } | if wf.tt { 6 } else { 0 };
+    b[16..25].copy_from_slice(&[f.italic as u8, f.underline as u8, 0, 0x20, 0xff, b'?', b' ', pitch, wf.charset]);
+    for (i, v) in [0i16, 96, 96].iter().enumerate() {
+        b[25 + i * 2..27 + i * 2].copy_from_slice(&v.to_le_bytes());
+    }
+    b
 }
 
 pub fn call(ord: u32, a: &mut Pascal) -> u32 {
@@ -1232,23 +1521,26 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             ellipse(d, l, t, r, b);
             1
         }
-        // RoundRect(hdc, l, t, r, b, w, h): a rectangle.
+        // RoundRect(hdc, l, t, r, b, w, h): corners of an ellipse w x h.
         28 => {
-            let (h, l, t, r, b, _, _) = (a.w(), a.i(), a.i(), a.i(), a.i(), a.i(), a.i());
-            rectangle(h, l, t, r, b)
+            let (h, l, t, r, b, w, hh) = (a.w(), a.i(), a.i(), a.i(), a.i(), a.i(), a.i());
+            round_rect(h, l, t, r, b, w, hh)
         }
         // PatBlt(hdc, x, y, w, h, rop)
         29 => {
             let (h, x, y, w, hh, rop) = (a.w(), a.i(), a.i(), a.i(), a.i(), a.l());
             let r = [x.min(x + w), y.min(y + hh), x.max(x + w), y.max(y + hh)];
+            let br = dc(h).map_or(0, |d| d.s.brush);
             match rop {
-                0x0055_0009 | 0x005a_0049 => invert(h, r), // DSTINVERT, PATINVERT
-                0x0000_0042 => fill(h, r, 0),              // BLACKNESS
-                0x00ff_0062 => fill(h, r, 0xffffff),       // WHITENESS
+                0x0055_0009 => invert(h, r),         // DSTINVERT
+                0x0000_0042 => fill(h, r, 0),        // BLACKNESS
+                0x00ff_0062 => fill(h, r, 0xffffff), // WHITENESS
+                // PATCOPY with a solid brush.
+                0x00f0_0021 if !is_pattern(br) => fill_rect(h, r, br),
+                // The rest (PATINVERT, patterns...) are PM's raster
+                // operations with the brush as the pattern.
                 _ => {
-                    if let Some(b) = dc(h).map(|d| d.s.brush) {
-                        fill_rect(h, r, b);
-                    }
+                    crate::bitmap::blit(h, r[0], r[1], r[2] - r[0], r[3] - r[1], 0, 0, 0, rop);
                 }
             }
             1
@@ -1321,14 +1613,12 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             }
             let pts = points(p, n as usize, d);
             unsafe {
-                if ord == 36 {
-                    if let Some(c) = brush_color(d.s.brush) {
-                        GpiSetColor(d.hps, rgb(c));
-                        GpiBeginArea(d.hps, 0);
-                        GpiMove(d.hps, &pts[0]);
-                        GpiPolyLine(d.hps, n - 1, pts[1..].as_ptr());
-                        GpiEndArea(d.hps);
-                    }
+                if ord == 36 && set_area(d, d.s.brush) {
+                    GpiBeginArea(d.hps, if d.s.poly_fill == 2 { 2 } else { 0 });
+                    GpiMove(d.hps, &pts[0]);
+                    GpiPolyLine(d.hps, n - 1, pts[1..].as_ptr());
+                    GpiEndArea(d.hps);
+                    end_pattern(d);
                 }
                 if let Some((c, w)) = pen_color(d) {
                     GpiSetColor(d.hps, rgb(c));
@@ -1383,7 +1673,17 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             }
             let style = unsafe { (p as *const u16).read_unaligned() };
             let c = unsafe { (p.add(2) as *const u32).read_unaligned() };
-            new_obj(Obj::Brush { color: c & 0xffffff, null: style == 1 }) as u32
+            let hatch = unsafe { (p.add(6) as *const u16).read_unaligned() };
+            match style {
+                // BS_HATCHED
+                2 => new_obj(Obj::Brush { color: c & 0xffffff, null: false, pat: Some(Pat::Hatch(hatch.min(5))), src: hatch }) as u32,
+                // BS_PATTERN (lbHatch a bitmap), BS_DIBPATTERN (a global
+                // block with a packed DIB, lbColor DIB_RGB_COLORS or
+                // DIB_PAL_COLORS).
+                3 => crate::bitmap::pattern_brush(hatch) as u32,
+                5 => crate::bitmap::dib_pattern_brush(hatch, c as u16) as u32,
+                _ => new_obj(Obj::Brush { color: c & 0xffffff, null: style == 1, pat: None, src: 0 }) as u32,
+            }
         }
         // CreateFont(height, width, esc, orient, weight, italic, underline,
         // strikeout, charset, outprec, clipprec, quality, pitch, face)
@@ -1421,13 +1721,11 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let c = unsafe { (p.add(6) as *const u32).read_unaligned() };
             new_obj(Obj::Pen { style, width, color: c & 0xffffff }) as u32
         }
-        // CreateSolidBrush(color), CreateHatchBrush(style, color): solid.
+        // CreateSolidBrush(color), CreateHatchBrush(style, color).
         58 | 66 => {
-            if ord == 58 {
-                a.w();
-            }
+            let hatch = if ord == 58 { Some(a.w().min(5)) } else { None };
             let c = a.l();
-            new_obj(Obj::Brush { color: c & 0xffffff, null: false }) as u32
+            new_obj(Obj::Brush { color: c & 0xffffff, null: false, pat: hatch.map(Pat::Hatch), src: hatch.unwrap_or(0) }) as u32
         }
         // DeleteObject(obj): not the stock ones.
         69 => {
@@ -1443,11 +1741,13 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let (h, r) = (a.w(), a.l());
             let Some(d) = dc(h) else { return 0 };
             let mut rc = RectL::default();
-            unsafe { GpiQueryClipBox(d.hps, &mut rc) };
+            // (PM's RGN_NULL, RGN_RECT and RGN_COMPLEX are Windows'
+            // NULLREGION, SIMPLEREGION and COMPLEXREGION.)
+            let kind = unsafe { GpiQueryClipBox(d.hps, &mut rc) };
             let (l, t) = to_log(d, rc.l, d.height - rc.t - 1);
             let (rr, b) = to_log(d, rc.r + 1, d.height - rc.b);
             write_rect(r, [l.min(rr), t.min(b), l.max(rr), t.max(b)]);
-            2
+            if (1..=3).contains(&kind) { kind as u32 } else { 2 }
         }
         // GetCurrentPosition(hdc): x in AX, y in DX.
         78 => {
@@ -1530,13 +1830,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         92 => {
             let (h, cb, buf) = (a.w(), a.i(), a.p());
             let face: &[u8] = match dc(h).and_then(|d| obj(d.s.font)) {
-                Some(Obj::Font(f)) => match f.face {
-                    0 => b"System",
-                    1 => b"Fixedsys",
-                    3 => b"Times New Roman",
-                    4 => b"Courier New",
-                    _ => b"Arial",
-                },
+                Some(Obj::Font(f)) => FACES[(f.wface as usize).min(FACES.len() - 1)].name,
                 _ => b"System",
             };
             if buf.is_null() || cb <= 0 {
@@ -1556,23 +1850,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             if p.is_null() {
                 return 0;
             }
-            let (asc, desc, ave, max) = metrics(d);
-            let (weight, italic, ul, fixed) = match obj(d.s.font) {
-                Some(Obj::Font(f)) => (f.weight.max(400), f.italic, f.underline, f.face == 1 || f.face == 4),
-                _ => (700, false, false, false),
-            };
-            let mut b = [0u8; 31];
-            for (i, v) in [asc + desc, asc, desc, 0, 0, ave, max, weight as i32].iter().enumerate() {
-                b[i * 2..i * 2 + 2].copy_from_slice(&(*v as i16).to_le_bytes());
-            }
-            // tmItalic.. tmCharSet: first char 0x20, last 0xff, default
-            // '?', break ' ', the pitch (bit 0: variable) and family,
-            // ANSI charset.
-            let pitch = if fixed { 0x30 } else { 0x21 };
-            b[16..25].copy_from_slice(&[italic as u8, ul as u8, 0, 0x20, 0xff, b'?', b' ', pitch, 0]);
-            for (i, v) in [0i16, 96, 96].iter().enumerate() {
-                b[25 + i * 2..27 + i * 2].copy_from_slice(&v.to_le_bytes());
-            }
+            let _ = d;
+            let b = text_metrics(h);
             unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), p, 31) };
             1
         }
@@ -1659,12 +1938,35 @@ fn text_out(h: u16, x: i32, y: i32, text: &[u8]) {
     }
 }
 
+fn round_rect(h: u16, l: i32, t: i32, r: i32, b: i32, w: i32, hh: i32) -> u32 {
+    let Some(d) = dc(h) else { return 0 };
+    let rc = pm_rect(d, [l, t, r, b]);
+    // The corner ellipse's size in device units.
+    let (dw, dh) = {
+        let (x0, y0) = to_dev(d, 0, 0);
+        let (x1, y1) = to_dev(d, w, hh);
+        ((x1 - x0).abs(), (y1 - y0).abs())
+    };
+    unsafe {
+        if set_area(d, d.s.brush) {
+            GpiMove(d.hps, &PointL { x: rc.l, y: rc.b });
+            GpiBox(d.hps, DRO_FILL, &PointL { x: rc.r - 1, y: rc.t - 1 }, dw, dh);
+            end_pattern(d);
+        }
+        if let Some((color, pw)) = pen_color(d) {
+            GpiSetColor(d.hps, rgb(color));
+            GpiSetLineWidth(d.hps, pw << 16);
+            GpiMove(d.hps, &PointL { x: rc.l, y: rc.b });
+            GpiBox(d.hps, DRO_OUTLINE, &PointL { x: rc.r - 1, y: rc.t - 1 }, dw, dh);
+        }
+    }
+    1
+}
+
 fn rectangle(h: u16, l: i32, t: i32, r: i32, b: i32) -> u32 {
     let Some(d) = dc(h) else { return 0 };
     let rc = pm_rect(d, [l, t, r, b]);
-    if let Some(c) = brush_color(d.s.brush) {
-        unsafe { WinFillRect(d.hps, &rc, rgb(c)) };
-    }
+    fill_pm(d, &rc, d.s.brush);
     if let Some((color, w)) = pen_color(d) {
         unsafe {
             GpiSetColor(d.hps, rgb(color));
@@ -1680,10 +1982,18 @@ fn rectangle(h: u16, l: i32, t: i32, r: i32, b: i32) -> u32 {
 fn get_object(o: u16, cb: i32, p: *mut u8) -> i32 {
     let mut b = Vec::new();
     match obj(o) {
-        Some(Obj::Brush { color, null }) => {
-            b.extend_from_slice(&(if null { 1u16 } else { 0 }).to_le_bytes());
+        Some(Obj::Brush { color, null, pat, src }) => {
+            // BS_SOLID 0, BS_NULL 1, BS_HATCHED 2, BS_PATTERN 3, BS_DIBPATTERN 5.
+            let style: u16 = match pat {
+                _ if null => 1,
+                None => 0,
+                Some(Pat::Hatch(_)) => 2,
+                Some(_) if crate::bitmap::bitmap_of(src).is_some() => 3,
+                Some(_) => 5,
+            };
+            b.extend_from_slice(&style.to_le_bytes());
             b.extend_from_slice(&color.to_le_bytes());
-            b.extend_from_slice(&0u16.to_le_bytes());
+            b.extend_from_slice(&(if style == 0 || style == 1 { 0 } else { src }).to_le_bytes());
         }
         Some(Obj::Pen { style, width, color }) => {
             b.extend_from_slice(&style.to_le_bytes());

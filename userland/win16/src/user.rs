@@ -1030,14 +1030,27 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             if ord == 125 { invalidate(h, read_rect(r)) } else { validate(h, read_rect(r)) }
             0
         }
-        // InvalidateRgn(hwnd, hrgn, erase), ValidateRgn(hwnd, hrgn): all.
+        // InvalidateRgn(hwnd, hrgn, erase), ValidateRgn(hwnd, hrgn): the
+        // region's rectangles (client coordinates); no region, the whole
+        // client area.
         126 | 128 => {
-            let (h, _r) = (a.w(), a.w());
+            let (h, r) = (a.w(), a.w());
             if ord == 126 {
                 a.w();
-                invalidate(h, None);
-            } else {
-                validate(h, None);
+            }
+            let rects = if r == 0 { None } else { crate::region::rects(r) };
+            match rects {
+                Some(rs) => {
+                    for q in rs {
+                        if ord == 126 {
+                            invalidate(h, Some(q));
+                        } else {
+                            validate(h, Some(q));
+                        }
+                    }
+                }
+                None if ord == 126 => invalidate(h, None),
+                None => validate(h, None),
             }
             0
         }
@@ -1837,6 +1850,15 @@ extern "C" fn std_frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             return send_inflight(h, W_SYSCOMMAND, mp1 as u16, 0, q);
         }
     }
+    // An MDI child's title bar buttons: Windows' WM_SYSCOMMAND to the
+    // child (DefMDIChildProc maximizes it the MDI way).
+    if msg == WM_SYSCOMMAND {
+        if let Some(h) = by_frame(pmh).filter(|w| w.created && w.style & WS_CHILD != 0).map(|w| w.hwnd) {
+            if crate::mdi::pm_syscommand(h, mp1 & 0xffff) {
+                return 0;
+            }
+        }
+    }
     let r = old(pmh, msg, mp1, mp2);
     if msg == WM_ACTIVATE {
         if let Some(h) = by_frame(pmh).filter(|w| w.created && w.frame != w.client).map(|w| w.hwnd) {
@@ -2311,6 +2333,16 @@ pub fn window_text(h: u16) -> Vec<u8> {
     w.text.clone()
 }
 
+/// Set a window's text without telling the window (MDI's frame title).
+pub fn set_text_raw(h: u16, t: &[u8]) {
+    let Some(w) = wnd(h) else { return };
+    if w.framed {
+        let s = z(t);
+        unsafe { WinSetWindowText(w.frame, s.as_ptr()) };
+    }
+    w.text = t.to_vec();
+}
+
 /// GetWindow(hwnd, GW_*).
 fn get_window(h: u16, cmd: u16) -> u16 {
     let siblings = |h: u16| -> Vec<u16> {
@@ -2400,6 +2432,16 @@ pub fn get_dc(h: u16) -> u16 {
 }
 
 fn set_cursor(c: u16) -> u16 {
+    let prev = core::mem::replace(CURSOR.get(), c);
+    // A program's own cursors (LoadCursor, CreateCursor) are PM pointers
+    // made from them.
+    if crate::icon::get(c).is_some() {
+        let p = crate::icon::pm_pointer(c);
+        if p != 0 {
+            unsafe { WinSetPointer(HWND_DESKTOP, p) };
+            return prev;
+        }
+    }
     // The built-in cursors are PM's system pointers.
     let sptr = match c {
         32513 => 2,          // IDC_IBEAM: SPTR_TEXT
@@ -2417,8 +2459,11 @@ fn set_cursor(c: u16) -> u16 {
     } else {
         unsafe { WinSetPointer(HWND_DESKTOP, 0) };
     }
-    32512
+    prev
 }
+
+/// The cursor SetCursor set last (IDC_ARROW at first).
+static CURSOR: crate::Global<u16> = crate::Global::new(32512);
 
 /// Break text into lines of at most `max` characters at blanks, as
 /// Windows' message box wraps long lines (PM's keeps them).
@@ -3069,6 +3114,12 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         // BeginPaint erases (WM_ERASEBKGND).
         WM_ERASEBACKGROUND => 0,
         WM_COMMAND | WM_INITMENU | WM_MENUSELECT | WM_MENUEND => crate::menu::pm_message(h, msg, mp1, mp2),
+        // The menu bar's MDI items (a maximized child's): WIN16 draws
+        // them.
+        0x0036 | 0x0037 => match crate::mdi::owner_item(msg, mp2 as *mut u8) {
+            Some(r) => r,
+            None => unsafe { WinDefWindowProc(pmh, msg, mp1, mp2) },
+        },
         WM_VSCROLL | WM_HSCROLL | WM_CONTROL => 0,
         _ => match translate_pm(h, &q) {
             Some((m, wp, lp)) => {

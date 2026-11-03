@@ -239,10 +239,23 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let p = a.l();
             crate::module::handle(p) as u32
         }
+        // Windows 2.x's AnsiNext, AnsiPrev, AnsiUpper, AnsiLower (USER's
+        // now).
+        77 => crate::misc::call(472, a),
+        78 => crate::misc::call(473, a),
+        79 => crate::misc::call(431, a),
+        80 => crate::misc::call(432, a),
         // GetModuleUsage(h)
         48 => {
-            a.w();
-            1
+            let h = a.w();
+            crate::module::usage(h)
+        }
+        // FreeModule(h): FreeLibrary.
+        46 => {
+            let h = a.w();
+            let users = crate::module::usage(h);
+            crate::module::free_library(h);
+            (users > 1) as u32
         }
         // GetModuleFileName(h, buf, cb)
         49 => {

@@ -29,3 +29,11 @@ HINSTANCE FAR PASCAL __export W16DllInstance(void)
 {
     return instance;
 }
+
+/* Windows calls WEP (WEP_FREE_DLL) when the last FreeLibrary unloads
+ * the DLL: W16TEST finds its mark in W16DLL.INI. */
+int FAR PASCAL __export WEP(int code)
+{
+    WritePrivateProfileString("run", "wep", code == WEP_FREE_DLL ? "free" : "exit", "W16DLL.INI");
+    return 1;
+}

@@ -92,3 +92,8 @@ BEGIN
         VALUE "Translation", 0x409, 1252
     END
 END
+
+/* Stage 2: a 4-bit bitmap (red, green, blue and white quarters) and a
+ * cursor (hot spot 5, 7). */
+IDB_QUAD BITMAP w16test.bmp
+IDCUR_TEST CURSOR w16test.cur
