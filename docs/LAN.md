@@ -209,6 +209,7 @@ state.
 ```
 cargo test -p smb                       # host: unit tests and live sessions with smbhost.py
 tools/scripts/lantest.sh [seconds]      # QEMU: LANTEST.EXE and LANTEST.CMD against smbhost.py
+tools/scripts/lanwps.sh                 # QEMU desktop: the Network folder down to a share, Drives
 ```
 
 `tools/scripts/smbhost.py` is a standard-library SMB server for the
@@ -251,6 +252,12 @@ drive and LPT3), DIR, MD, COPY in and out, COMP, XCOPY both ways, REN,
 ATTRIB, DEL of a read-only file (refused) and after ATTRIB -R, RD, COPY
 to LPT3, USE /D, CONFIG REQUESTER and LOGOFF; the host checks the 5 MB
 files byte for byte and the two print jobs.
+
+Results (2026-11-04): `cargo test -p smb` 18 passed; LANTEST 56 of 56
+and the host checks (7) pass; `lanwps.sh` shows WORKGROUP in the Network
+folder, SMBHOST in it, the DATA, PUBLIC and LASER (printer) shares, DATA's
+files, and drive Y: in the Drives folder. APITEST and NETTEST (its
+loopback, DHCP, ping and DNS checks) still pass with the requester in.
 
 ## Gaps
 
