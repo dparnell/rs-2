@@ -145,6 +145,7 @@ dependencies = [
  "hpfs",
  "jfs",
  "os2-exe",
+ "smb",
  "tcpip",
 ]
 

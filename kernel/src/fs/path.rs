@@ -20,10 +20,26 @@ impl FullPath {
 
     pub fn display(&self) -> String {
         let mut s = String::new();
-        s.push((b'A' + self.drive) as char);
-        s.push_str(":\\");
+        if let Some((server, share)) = super::redir::unc_name(self.drive) {
+            // A UNC path's pseudo-drive.
+            s.push_str("\\\\");
+            s.push_str(&server);
+            s.push('\\');
+            s.push_str(&share);
+            if !self.parts.is_empty() {
+                s.push('\\');
+            }
+        } else {
+            s.push((b'A' + self.drive) as char);
+            s.push_str(":\\");
+        }
         s.push_str(&self.rel());
         s
+    }
+
+    /// True for a `\\SERVER\SHARE` path.
+    pub fn is_unc(&self) -> bool {
+        self.drive >= super::redir::UNC_BASE
     }
 
     pub fn file_name(&self) -> &str {
@@ -44,17 +60,36 @@ impl FullPath {
 /// components, and trailing dots and blanks of a component are dropped.
 pub fn canonical(path: &str, cur_drive: u8, cwd: &[String; 26]) -> Result<FullPath, u32> {
     let b = path.as_bytes();
+    // \\SERVER\SHARE\...: the share's pseudo-drive (fs::redir).
+    if b.len() >= 2 && matches!(b[0], b'\\' | b'/') && matches!(b[1], b'\\' | b'/') {
+        let mut it = path[2..].splitn(3, ['\\', '/']);
+        let server = it.next().unwrap_or("");
+        let share = it.next().unwrap_or("");
+        if server.is_empty() || share.is_empty() || server.contains(['*', '?']) || share.contains(['*', '?']) {
+            return Err(53); // ERROR_BAD_NETPATH
+        }
+        let drive = super::redir::unc_drive(server, share)?;
+        let empty: [String; 26] = Default::default();
+        let rest = alloc::format!("\\{}", it.next().unwrap_or(""));
+        let p = canonical_in(&rest, drive, &empty)?;
+        return Ok(p);
+    }
+    canonical_in(path, cur_drive, cwd)
+}
+
+fn canonical_in(path: &str, cur_drive: u8, cwd: &[String; 26]) -> Result<FullPath, u32> {
+    let b = path.as_bytes();
     let (drive, rest) = if b.len() >= 2 && b[1] == b':' && b[0].is_ascii_alphabetic() {
         (b[0].to_ascii_uppercase() - b'A', &path[2..])
     } else {
         (cur_drive, path)
     };
-    if drive >= 26 {
+    if drive >= 26 && drive < super::redir::UNC_BASE {
         return Err(15); // ERROR_INVALID_DRIVE
     }
     let absolute = rest.starts_with(['\\', '/']);
     let mut all: Vec<&str> = Vec::new();
-    if !absolute {
+    if !absolute && (drive as usize) < cwd.len() {
         all.extend(cwd[drive as usize].split('\\').filter(|s| !s.is_empty()));
     }
     all.extend(rest.split(['\\', '/']));

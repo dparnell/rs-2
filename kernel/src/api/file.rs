@@ -351,6 +351,11 @@ fn open(c: &Ctx, name: &str, size: u64, attrib: u32, flags: u32, omode: u32, eas
             if let Some(end) = crate::chardev::lpt_spool_open(n) {
                 return Ok((add(c, Handle::Spool(n, end))?, 1));
             }
+            // A port NET USE redirected to a print share: a remote file.
+            if let Some(r) = fs::redir::open_printer(n) {
+                let (p, f) = r?;
+                return Ok((add(c, Handle::File(OpenFile::new(p, f, omode)?))?, 1));
+            }
         }
         let h = add(c, Handle::open_device(d)?)?;
         return Ok((h, 1));
@@ -744,6 +749,10 @@ pub fn dos_set_current_dir(c: &mut Ctx) -> u32 {
         Ok(p) => p,
         Err(e) => return e,
     };
+    // A UNC path cannot be a current directory.
+    if p.is_unc() {
+        return err::PATH_NOT_FOUND;
+    }
     match fs::stat(&p) {
         Ok(i) if i.is_dir() || p.parts.is_empty() => {
             c.process.cwd.lock().1[p.drive as usize] = p.rel();
@@ -1155,8 +1164,11 @@ pub fn dos_query_fs_attach(c: &mut Ctx) -> u32 {
     // szName szFSDName rgFSAData
     let name = alloc::format!("{}:", (b'A' + drv) as char);
     let fsd = f.name();
+    // A network drive: FSAT_REMOTEDRV, its \\SERVER\SHARE as the data.
+    let remote = f.remote_name();
+    let data: Vec<u8> = remote.as_ref().map(|r| r.bytes().chain(core::iter::once(0)).collect()).unwrap_or_default();
     let mut out = Vec::new();
-    out.extend_from_slice(&3u16.to_le_bytes()); // FSAT_LOCALDRV
+    out.extend_from_slice(&(if remote.is_some() { 4u16 } else { 3 }).to_le_bytes()); // FSAT_REMOTEDRV / FSAT_LOCALDRV
     out.extend_from_slice(&(name.len() as u16).to_le_bytes());
     if c.is16 {
         // DosQFSAttach fills an FSQBUFFER: each length precedes its string.
@@ -1165,15 +1177,19 @@ pub fn dos_query_fs_attach(c: &mut Ctx) -> u32 {
         out.extend_from_slice(&(fsd.len() as u16).to_le_bytes());
         out.extend_from_slice(fsd.as_bytes());
         out.push(0);
-        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u16).to_le_bytes());
+        out.extend_from_slice(&data);
     } else {
         out.extend_from_slice(&(fsd.len() as u16).to_le_bytes());
-        out.extend_from_slice(&0u16.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u16).to_le_bytes());
         out.extend_from_slice(name.as_bytes());
         out.push(0);
         out.extend_from_slice(fsd.as_bytes());
         out.push(0);
-        out.push(0);
+        if data.is_empty() {
+            out.push(0);
+        }
+        out.extend_from_slice(&data);
     }
     let have = if c.is16 { c.read_u16(pcb).map(|v| v as u32) } else { c.read_u32(pcb) }.unwrap_or(0);
     if (have as usize) < out.len() {

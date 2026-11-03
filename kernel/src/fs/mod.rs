@@ -12,6 +12,7 @@ pub mod hpfsfs;
 pub mod iso9660;
 pub mod jfsfs;
 pub mod path;
+pub mod redir;
 
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
@@ -118,6 +119,11 @@ pub trait FileSystem: Send + Sync {
     fn write_eas(&self, _path: &str, _eas: &[Ea]) -> Result<(), u32> {
         Err(err::EAS_NOT_SUPPORTED)
     }
+    /// A network drive's remote name (`\\SERVER\SHARE`): DosQueryFSAttach
+    /// reports it as FSAT_REMOTEDRV with this as its data.
+    fn remote_name(&self) -> Option<String> {
+        None
+    }
 }
 
 pub trait FsFile: Send + Sync {
@@ -180,6 +186,9 @@ pub fn unmount(drive: u8) {
 }
 
 pub fn drive(d: u8) -> Option<Arc<dyn FileSystem>> {
+    if d >= redir::UNC_BASE {
+        return redir::unc_fs(d);
+    }
     if locked_by_other(d) {
         return None;
     }
@@ -212,6 +221,12 @@ fn current_pid() -> u32 {
 pub fn locked_by_other(d: u8) -> bool {
     let owner = LOCKS.lock().get(d as usize).copied().unwrap_or(0);
     owner != 0 && owner != current_pid()
+}
+
+/// How many files are open on drive `d`.
+pub fn open_count(d: u8) -> usize {
+    let prefix = FullPath { drive: d, parts: Vec::new() }.display().to_ascii_uppercase();
+    SHARES.lock().iter().filter(|(k, v)| k.starts_with(&prefix) && !v.is_empty()).count()
 }
 
 /// DSK_LOCKDRIVE: fails while files are open on the drive.
