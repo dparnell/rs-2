@@ -700,7 +700,7 @@ fn status_and_help(session: usize, facet: usize, client: u32) {
     // ODHelp: the session's, showing a library's index (a help manager
     // instance on the library found on HELP).
     let help = m(cd!(ODSessionClassData), 4, &[session, e]);
-    let ok = help != 0 && m(cd!(ODHelpClassData), 2, &[help, e, b"MMPARTS.HLP\0".as_ptr() as usize]) & 0xff != 0;
+    let ok = help != 0 && m(cd!(ODHelpClassData), 2, &[help, e, b"E.HLP\0".as_ptr() as usize]) & 0xff != 0;
     check("ODHelp DisplayHelpIndex opens a help library's index", ok);
     let bad = help != 0 && m(cd!(ODHelpClassData), 2, &[help, e, b"NOSUCH.HLP\0".as_ptr() as usize]) & 0xff != 0;
     check("and fails for a missing library", !bad);
