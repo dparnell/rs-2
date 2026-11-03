@@ -186,6 +186,7 @@ pub fn apply_saved() {
         WinSetSysValue(HWND_DESKTOP, SV_PRINTSCREEN, print_screen() as i32);
     }
     apply_min_buttons();
+    apply_input();
 }
 
 /// M_WPSystem's wpclsQuerySetting(pszSetting, pValue, ulValueLen): one
@@ -540,10 +541,384 @@ extern "C" fn wpAddSystemConfirmationPage(o: usize, nb: u32) -> u32 {
     add_page(o, nb, confirm_page_proc, items, b"~Confirmations\0")
 }
 
+// ---- System: the Input page (WPCONFIG's PmInputDlgProc, dialog 1302) ----
+//
+// Each check box sets a system value at once and WPCONFIG keeps it in
+// `PM_ControlPanel` as a ULONG: FullWindowDrag (99, off), AltTabWindow
+// (100, on), VioMouseActions (101, on), AsyncFocusChange (102, on),
+// AFCSensitivity (103, tenths of a second, 20) and LockStartInput
+// (SV_LOCKSTARTINPUT 98, the Type-ahead box, off).
+
+const ID_FULLDRAG: u16 = 1510;
+const ID_ALTTAB: u16 = 1511;
+const ID_VIOMOUSE: u16 = 1512;
+const ID_ASYNCFOCUS: u16 = 1513;
+const ID_AFCSENS: u16 = 1514;
+const ID_TYPEAHEAD: u16 = 1515;
+const WM_SYSVALUECHANGED: u32 = 0x002d;
+
+/// (check box or spin button, key, system value, default).
+const INPUT: [(u16, &[u8], i32, u32); 6] = [
+    (ID_FULLDRAG, b"FullWindowDrag", 99, 0),
+    (ID_ALTTAB, b"AltTabWindow", 100, 1),
+    (ID_VIOMOUSE, b"VioMouseActions", 101, 1),
+    (ID_ASYNCFOCUS, b"AsyncFocusChange", 102, 1),
+    (ID_AFCSENS, b"AFCSensitivity", 103, 20),
+    (ID_TYPEAHEAD, b"LockStartInput", SV_LOCKSTARTINPUT, 0),
+];
+const SV_LOCKSTARTINPUT: i32 = 98;
+
+unsafe extern "C" {
+    #[link_name = "PMWIN.708"]
+    fn WinBroadcastMsg(h: u32, msg: u32, a: u32, b: u32, flags: u32) -> u32;
+}
+
+/// An Input setting (its ULONG in `PM_ControlPanel`, else the default).
+pub fn input_setting(key: &[u8]) -> u32 {
+    let def = INPUT.iter().find(|i| i.1 == key).map_or(0, |i| i.3);
+    match prf_read(HINI_USER, CP, key) {
+        Some(v) if v.len() == 4 => u32::from_le_bytes([v[0], v[1], v[2], v[3]]),
+        _ => def,
+    }
+}
+
+pub fn set_input_setting(key: &[u8], v: u32) {
+    let Some(&(_, _, sv, _)) = INPUT.iter().find(|i| i.1 == key) else { return };
+    prf_write(HINI_USER, CP, key, Some(&v.to_le_bytes()));
+    unsafe {
+        WinSetSysValue(HWND_DESKTOP, sv, v as i32);
+        // BMSG_POST | BMSG_DESCENDANTS: programs hear of the change.
+        WinBroadcastMsg(HWND_DESKTOP, WM_SYSVALUECHANGED, sv as u32, sv as u32, 0x0001 | 0x0008);
+    }
+}
+
+fn input_init(h: u32) {
+    for &(id, key, _, _) in &INPUT {
+        if id == ID_AFCSENS {
+            spin_init(h, id, 0, 99, input_setting(key) as i32);
+        } else {
+            check(h, id, input_setting(key) != 0);
+        }
+    }
+    enable(h, ID_AFCSENS, input_setting(b"AsyncFocusChange") != 0);
+}
+
+extern "C" fn input_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            input_init(h);
+            0
+        }
+        WM_CONTROL => {
+            let id = (a & 0xffff) as u16;
+            match (id, a >> 16) {
+                (ID_AFCSENS, SPBN_CHANGE) => {
+                    if let Some(v) = spin_value(h, ID_AFCSENS).filter(|v| (0..=99).contains(v)) {
+                        set_input_setting(b"AFCSensitivity", v as u32);
+                    }
+                }
+                (_, 1) => {
+                    let Some(&(_, key, _, _)) = INPUT.iter().find(|i| i.0 == id) else { return 0 };
+                    set_input_setting(key, checked(h, id) as u32);
+                    enable(h, ID_AFCSENS, input_setting(b"AsyncFocusChange") != 0);
+                }
+                _ => {}
+            }
+            0
+        }
+        WM_COMMAND => {
+            if (a & 0xffff) as u16 == ID_DEFAULT {
+                for &(_, key, _, def) in &INPUT {
+                    set_input_setting(key, def);
+                }
+                input_init(h);
+            }
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+fn checkbox(t: &[u8], (x, y, cx): (i16, i16, i16), id: u16) -> Item {
+    // BS_AUTOCHECKBOX
+    item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0001, (x, y, cx, 10), id)
+}
+
+extern "C" fn wpAddSystemInputPage(o: usize, nb: u32) -> u32 {
+    add_page(o, nb, input_page_proc, alloc::vec![
+        group(b"Window manipulation", (4, 50, 112, 66)),
+        checkbox(b"Full window ~dragging", (8, 94, 104), ID_FULLDRAG),
+        checkbox(b"~Alt+Tab switch window", (8, 80, 104), ID_ALTTAB),
+        checkbox(b"~VIO mouse actions", (8, 66, 104), ID_VIOMOUSE),
+        group(b"User input", (120, 22, 114, 94)),
+        checkbox(b"Asynchronous ~focus change", (124, 94, 106), ID_ASYNCFOCUS),
+        book::label(b"Focus change delay:", (124, 80, 106)),
+        spin((124, 66, 36), ID_AFCSENS),
+        book::label(b"tenths of a second", (164, 68, 66)),
+        checkbox(b"~Type-ahead", (124, 50, 106), ID_TYPEAHEAD),
+        push(b"~Default", (4, 2), ID_DEFAULT),
+    ], b"~Input\0")
+}
+
+// ---- System: the folder pages (WPCONFIG's dialogs 1307, 1303, 2107) ----
+
+const ID_LONGMENUS: u16 = 3;
+const ID_SHORTMENUS: u16 = 4;
+const ID_MENUBARS: u16 = 1;
+
+fn sys_menu_init(h: u32) {
+    let short = crate::usermenu::system_menu_style() == crate::usermenu::MENUS_SHORT;
+    check(h, if short { ID_SHORTMENUS } else { ID_LONGMENUS }, true);
+    check(h, ID_MENUBARS, crate::usermenu::system_menu_bar());
+}
+
+extern "C" fn sys_menu_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            sys_menu_init(h);
+            0
+        }
+        WM_CONTROL if (a >> 16) == 1 => {
+            match (a & 0xffff) as u16 {
+                ID_LONGMENUS => crate::usermenu::set_system_menu_style(crate::usermenu::MENUS_LONG),
+                ID_SHORTMENUS => crate::usermenu::set_system_menu_style(crate::usermenu::MENUS_SHORT),
+                ID_MENUBARS => crate::usermenu::set_system_menu_bar(checked(h, ID_MENUBARS)),
+                _ => {}
+            }
+            0
+        }
+        WM_COMMAND => {
+            if (a & 0xffff) as u16 == ID_DEFAULT {
+                crate::usermenu::set_system_menu_style(crate::usermenu::MENUS_LONG);
+                crate::usermenu::set_system_menu_bar(true);
+                sys_menu_init(h);
+            }
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+/// The Folder tab's first page: the menus of every folder that has no
+/// setting of its own.
+extern "C" fn wpAddSysFdrMenuPage(o: usize, nb: u32) -> u32 {
+    add_page(o, nb, sys_menu_page_proc, alloc::vec![
+        group(b"Menu style", (4, 58, 160, 58)),
+        radio(b"Display ~long menus", (10, 94, 150), ID_LONGMENUS, true),
+        radio(b"Display ~short menus", (10, 80, 150), ID_SHORTMENUS, false),
+        checkbox(b"Display ~folder menu bars", (8, 42, 160), ID_MENUBARS),
+        push(b"~Default", (4, 2), ID_DEFAULT),
+    ], b"~Folder\0")
+}
+
+const ID_DEFICON: u16 = 1304;
+const ID_DEFTREE: u16 = 1305;
+const ID_DEFDETAILS: u16 = 1306;
+
+/// The view folders open in when they have no default of their own
+/// (`PM_Workplace` `DefFolderView`: ICON, TREE or DETAILS).
+pub fn default_folder_view() -> u32 {
+    let v: Vec<u8> = prf_read(HINI_USER, b"PM_Workplace", b"DefFolderView").unwrap_or_default().into_iter().take_while(|&c| c != 0).collect();
+    match v.as_slice() {
+        b"TREE" => obj::OPEN_TREE,
+        b"DETAILS" => obj::OPEN_DETAILS,
+        _ => obj::OPEN_CONTENTS,
+    }
+}
+
+pub fn set_default_folder_view(view: u32) {
+    let t: &[u8] = match view {
+        obj::OPEN_TREE => b"TREE\0",
+        obj::OPEN_DETAILS => b"DETAILS\0",
+        _ => b"ICON\0",
+    };
+    prf_write(HINI_USER, b"PM_Workplace", b"DefFolderView", Some(t));
+}
+
+fn defview_init(h: u32) {
+    check(h, match default_folder_view() {
+        obj::OPEN_TREE => ID_DEFTREE,
+        obj::OPEN_DETAILS => ID_DEFDETAILS,
+        _ => ID_DEFICON,
+    }, true);
+}
+
+extern "C" fn defview_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            defview_init(h);
+            0
+        }
+        WM_CONTROL if (a >> 16) == 1 => {
+            match (a & 0xffff) as u16 {
+                ID_DEFICON => set_default_folder_view(obj::OPEN_CONTENTS),
+                ID_DEFTREE => set_default_folder_view(obj::OPEN_TREE),
+                ID_DEFDETAILS => set_default_folder_view(obj::OPEN_DETAILS),
+                _ => {}
+            }
+            0
+        }
+        WM_COMMAND => {
+            if (a & 0xffff) as u16 == ID_DEFAULT {
+                set_default_folder_view(obj::OPEN_CONTENTS);
+                defview_init(h);
+            }
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+extern "C" fn wpAddSysFdrDefViewPage(o: usize, nb: u32) -> u32 {
+    let tpl = crate::pm::template(book::page_frame(), alloc::vec![
+        group(b"Default folder view", (4, 58, 120, 58)),
+        radio(b"~Icon", (10, 94, 100), ID_DEFICON, true),
+        radio(b"~Tree", (10, 80, 100), ID_DEFTREE, false),
+        radio(b"~Details", (10, 66, 100), ID_DEFDETAILS, false),
+        push(b"~Default", (4, 2), ID_DEFAULT),
+    ]);
+    let page = book::make_page(nb, defview_page_proc, &tpl, o);
+    if page == 0 {
+        return 0;
+    }
+    book::insert_after(o, nb, page, b"Folder - View\0", b"~Folder")
+}
+
+const ID_CLOSE_NEVER: u16 = 2102;
+const ID_CLOSE_SUBFOLDERS: u16 = 2101;
+const ID_CLOSE_ALL: u16 = 2103;
+
+fn selfclose_init(h: u32) {
+    check(h, match crate::usermenu::system_self_close() {
+        crate::usermenu::SELFCLOSE_SUBFOLDERS => ID_CLOSE_SUBFOLDERS,
+        crate::usermenu::SELFCLOSE_ALL => ID_CLOSE_ALL,
+        _ => ID_CLOSE_NEVER,
+    }, true);
+}
+
+extern "C" fn selfclose_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            selfclose_init(h);
+            0
+        }
+        WM_CONTROL if (a >> 16) == 1 => {
+            match (a & 0xffff) as u16 {
+                ID_CLOSE_NEVER => crate::usermenu::set_system_self_close(crate::usermenu::SELFCLOSE_NEVER),
+                ID_CLOSE_SUBFOLDERS => crate::usermenu::set_system_self_close(crate::usermenu::SELFCLOSE_SUBFOLDERS),
+                ID_CLOSE_ALL => crate::usermenu::set_system_self_close(crate::usermenu::SELFCLOSE_ALL),
+                _ => {}
+            }
+            0
+        }
+        WM_COMMAND => {
+            if (a & 0xffff) as u16 == ID_DEFAULT {
+                crate::usermenu::set_system_self_close(crate::usermenu::SELFCLOSE_NEVER);
+                selfclose_init(h);
+            }
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+extern "C" fn wpAddSysFdrSelfClosePage(o: usize, nb: u32) -> u32 {
+    let tpl = crate::pm::template(book::page_frame(), alloc::vec![
+        group(b"Folder automatic close", (4, 44, 200, 72)),
+        book::label(b"Close a folder's window when an object in it is opened:", (8, 98, 192)),
+        radio(b"~Never", (10, 82, 150), ID_CLOSE_NEVER, true),
+        radio(b"~Subfolders only", (10, 68, 150), ID_CLOSE_SUBFOLDERS, false),
+        radio(b"~All objects", (10, 54, 150), ID_CLOSE_ALL, false),
+        push(b"~Default", (4, 2), ID_DEFAULT),
+    ]);
+    let page = book::make_page(nb, selfclose_page_proc, &tpl, o);
+    if page == 0 {
+        return 0;
+    }
+    book::insert_after(o, nb, page, b"Folder - Automatic close\0", b"~Folder")
+}
+
+// ---- System: the 256-colour page (dialog 1226) ----
+//
+// Only on a display of 256 colours, as IBM's: the Workplace Shell
+// realizes a palette for its icons and backgrounds
+// (`PM_WorkPlace:Options` `WPSPaletteAware`).
+
+const ID_PALETTEAWARE: u16 = 1010;
+
+/// Whether the screen has 256 colours (CAPS_COLOR_BITCOUNT of the
+/// desktop's device).
+fn screen_256() -> bool {
+    unsafe extern "C" {
+        #[link_name = "PMGPI.606"]
+        fn DevQueryCaps(hdc: u32, first: i32, n: i32, out: *mut i32) -> u32;
+        #[link_name = "PMWIN.795"]
+        fn WinOpenWindowDC(h: u32) -> u32;
+    }
+    let mut bits = 0i32;
+    unsafe {
+        let hdc = WinOpenWindowDC(HWND_DESKTOP);
+        DevQueryCaps(hdc, 40, 1, &mut bits);
+    }
+    bits == 8
+}
+
+pub fn palette_aware() -> bool {
+    prf_read(HINI_USER, b"PM_WorkPlace:Options", b"WPSPaletteAware").and_then(|v| v.first().copied()).is_some_and(|c| c != 0 && c != b'0')
+}
+
+fn set_palette_aware(on: bool) {
+    prf_write(HINI_USER, b"PM_WorkPlace:Options", b"WPSPaletteAware", Some(&(on as u32).to_le_bytes()));
+}
+
+extern "C" fn color256_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            check(h, ID_PALETTEAWARE, palette_aware());
+            0
+        }
+        WM_CONTROL if (a >> 16) == 1 && (a & 0xffff) as u16 == ID_PALETTEAWARE => {
+            set_palette_aware(checked(h, ID_PALETTEAWARE));
+            0
+        }
+        WM_COMMAND => {
+            if (a & 0xffff) as u16 == ID_DEFAULT {
+                set_palette_aware(false);
+                check(h, ID_PALETTEAWARE, false);
+            }
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+extern "C" fn wpAddSystem256ColorPage(o: usize, nb: u32) -> u32 {
+    if !screen_256() {
+        return 1;
+    }
+    add_page(o, nb, color256_page_proc, alloc::vec![
+        checkbox(b"Workplace Shell ~palette aware", (8, 100, 160), ID_PALETTEAWARE),
+        push(b"~Default", (4, 2), ID_DEFAULT),
+    ], b"~Screen\0")
+}
+
+/// The Input page's system values, set when the shell starts.
+fn apply_input() {
+    for &(_, key, sv, _) in &INPUT {
+        unsafe { WinSetSysValue(HWND_DESKTOP, sv, input_setting(key) as i32) };
+    }
+}
+
 /// IBM's order of the tabs: Confirmations, Title, Window, Print Screen,
-/// Logo (each page goes in front of those before it).
+/// Logo (each page goes in front of those before it); rs2 puts Folder
+/// and Input after Logo.
 extern "C" fn system_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPSystem"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddSystem256ColorPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddSystemInputPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddSysFdrMenuPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddSysFdrDefViewPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddSysFdrSelfClosePage, &[o, nb as usize]);
     wps::call("WPSystem", m::WPSystem::wpAddSystemLogoPage, &[o, nb as usize]);
     wps::call("WPSystem", m::WPSystem::wpAddSystemPrintScreenPage, &[o, nb as usize]);
     wps::call("WPSystem", m::WPSystem::wpAddSystemWindowPage, &[o, nb as usize]);
@@ -939,6 +1314,11 @@ methods! {
     __m_wpAddSystemLogoPage => wpAddSystemLogoPage, 2;
     __m_wpAddSystemPrintScreenPage => wpAddSystemPrintScreenPage, 2;
     __m_wpAddTitleConfirmationPage => wpAddTitleConfirmationPage, 2;
+    __m_wpAddSystemInputPage => wpAddSystemInputPage, 2;
+    __m_wpAddSysFdrMenuPage => wpAddSysFdrMenuPage, 2;
+    __m_wpAddSysFdrDefViewPage => wpAddSysFdrDefViewPage, 2;
+    __m_wpAddSysFdrSelfClosePage => wpAddSysFdrSelfClosePage, 2;
+    __m_wpAddSystem256ColorPage => wpAddSystem256ColorPage, 2;
     __m_sys_query_setting => sys_query_setting, 4;
     __m_sys_set_setting => sys_set_setting, 3;
     __m_system_add_pages => system_add_pages, 2;
@@ -961,6 +1341,11 @@ pub fn impl_system() -> Impl {
             ("wpAddSystemLogoPage", __m_wpAddSystemLogoPage as usize),
             ("wpAddSystemPrintScreenPage", __m_wpAddSystemPrintScreenPage as usize),
             ("wpAddTitleConfirmationPage", __m_wpAddTitleConfirmationPage as usize),
+            ("wpAddSystemInputPage", __m_wpAddSystemInputPage as usize),
+            ("wpAddSysFdrMenuPage", __m_wpAddSysFdrMenuPage as usize),
+            ("wpAddSysFdrDefViewPage", __m_wpAddSysFdrDefViewPage as usize),
+            ("wpAddSysFdrSelfClosePage", __m_wpAddSysFdrSelfClosePage as usize),
+            ("wpAddSystem256ColorPage", __m_wpAddSystem256ColorPage as usize),
         ],
         overrides: alloc::vec![("wpAddSettingsPages", __m_system_add_pages as usize), crate::pages::no_window_page_override()],
     }

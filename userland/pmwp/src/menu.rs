@@ -146,11 +146,39 @@ fn is(o: usize, c: &str) -> bool {
     wps::is(o, c)
 }
 
-/// wpDisplayMenu(hwndOwner, hwndClient, pptl, ulMenuType, ulReserved).
-extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const PointL, kind: u32, _res: u32) -> u32 {
+/// What an object's menus may offer (wpFilterPopupMenu).
+fn filter_flags(o: usize) -> u32 {
     let all = CTXT_OPEN | CTXT_SETTINGS | CTXT_HELP | CTXT_DELETE | CTXT_COPY | CTXT_MOVE | CTXT_SHADOW | CTXT_PROGRAM | CTXT_ICON | CTXT_TREE
         | CTXT_DETAILS | CTXT_ARRANGE | CTXT_REFRESH | CTXT_SORT | CTXT_NEW | CTXT_FIND | CTXT_PRINT;
-    let flags = obj::call(m::WPObject::wpFilterPopupMenu, &[o, all as usize, 0, 0]) as u32;
+    obj::call(m::WPObject::wpFilterPopupMenu, &[o, all as usize, 0, 0]) as u32
+}
+
+/// wpDisplayMenu(hwndOwner, hwndClient, pptl, ulMenuType, ulReserved).
+extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const PointL, kind: u32, _res: u32) -> u32 {
+    let items = popup_items(o, kind);
+    let menu = popup_menu(&items);
+    if menu == 0 {
+        return 0;
+    }
+    obj::call(m::WPObject::wpModifyPopupMenu, &[o, menu as usize, 0, 0xffff]);
+    // The user's items (the Menu page).
+    if is(o, "WPFileSystem") {
+        wps::call("WPFileSystem", m::WPFileSystem::wpAddUserItemsToPopupMenu, &[o, menu as usize, 0, 0xffff]);
+    }
+    let old = unsafe { view::POPUP.0 };
+    if old != 0 {
+        unsafe { WinDestroyWindow(old) };
+    }
+    unsafe { view::POPUP = (menu, o) };
+    let p = if ptl.is_null() { pointer_pos() } else { unsafe { *ptl } };
+    unsafe { WinPopupMenu(HWND_DESKTOP, client, menu, p.x, p.y, 0, PU_HCONSTRAIN | PU_VCONSTRAIN | PU_KEYBOARD | PU_MOUSEBUTTON1 | PU_MOUSEBUTTON2) };
+    menu
+}
+
+/// The items of an object's pop-up menu: the object's own
+/// (MENU_OBJECTPOPUP) or its open view's (MENU_OPENVIEWPOPUP).
+pub fn popup_items(o: usize, kind: u32) -> Vec<Menu<'static>> {
+    let flags = filter_flags(o);
     let folder = is(o, "WPFolder");
     // A drive's views are its root folder's.
     let views = folder || is(o, "WPDisk");
@@ -265,23 +293,192 @@ extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const Poin
             ],
         ));
     }
-    let menu = popup_menu(&items);
-    if menu == 0 {
-        return 0;
+    items
+}
+
+// ---- Folder menu bars ----
+//
+// As Warp 4's (IBM's resource 926 in PMWPMRI and ShlDisplayFolderMenu,
+// studied with Ghidra): Folder, Edit, View, Selected and Help, whose
+// pull-downs (ids 719-723) are filled each time they drop
+// (WM_INITMENU): Folder and View act on the folder, Edit and Selected
+// on the objects selected in the window, Help on the folder.
+
+pub const WPMENUID_FOLDERPULLDOWN: u32 = 719;
+pub const WPMENUID_EDITPULLDOWN: u32 = 720;
+pub const WPMENUID_VIEWPULLDOWN: u32 = 721;
+pub const WPMENUID_SELECTEDPULLDOWN: u32 = 722;
+pub const WPMENUID_HELPPULLDOWN: u32 = 723;
+pub const WPMENUID_SELALL: u32 = 114;
+pub const WPMENUID_DESELALL: u32 = 115;
+pub const WPMENUID_OPENPARENT: u32 = 714;
+pub const WPMENUID_PASTE: u32 = 715;
+pub const WPMENUID_CHANGETOICON: u32 = 716;
+pub const WPMENUID_CHANGETOTREE: u32 = 717;
+pub const WPMENUID_CHANGETODETAILS: u32 = 718;
+
+/// The items the Edit pull-down has and the Selected one leaves out.
+const EDIT_IDS: [u32; 6] = [WPMENUID_CREATEANOTHER, WPMENUID_MOVE, WPMENUID_COPY, WPMENUID_PASTE, WPMENUID_CREATESHADOW, WPMENUID_DELETE];
+
+/// The menu bar of a folder window (an action bar on the frame).
+pub fn menu_bar_template() -> Vec<u8> {
+    menu_template(&[
+        Menu::SubId(WPMENUID_FOLDERPULLDOWN as u16, b"~Folder", Vec::new()),
+        Menu::SubId(WPMENUID_EDITPULLDOWN as u16, b"~Edit", Vec::new()),
+        Menu::SubId(WPMENUID_VIEWPULLDOWN as u16, b"~View", Vec::new()),
+        Menu::SubId(WPMENUID_SELECTEDPULLDOWN as u16, b"~Selected", Vec::new()),
+        Menu::SubId(WPMENUID_HELPPULLDOWN as u16, b"~Help", Vec::new()),
+    ])
+}
+
+fn help_items() -> Vec<Menu<'static>> {
+    alloc::vec![
+        Menu::Item(WPMENUID_HELPINDEX as u16, b"Help ~index", true),
+        Menu::Item(WPMENUID_EXTENDEDHELP as u16, b"~General help", true),
+        Menu::Item(WPMENUID_HELP_FOR_HELP as u16, b"~Using help", true),
+        Menu::Item(WPMENUID_HELPKEYS as u16, b"~Keys help", true),
+    ]
+}
+
+/// The items of a pull-down of a folder window's menu bar: `folder` is
+/// the window's folder, `sel` the objects selected in it, `view` its
+/// view (OPEN_CONTENTS, OPEN_TREE or OPEN_DETAILS).
+pub fn pulldown_items(id: u32, folder: usize, sel: &[usize], view: u32) -> Vec<Menu<'static>> {
+    let ff = filter_flags(folder);
+    let style = obj::call(m::WPObject::wpQueryStyle, &[folder]) as u32;
+    match id {
+        WPMENUID_FOLDERPULLDOWN => {
+            let mut v = Vec::new();
+            let mut open = Vec::new();
+            if ff & CTXT_ICON != 0 {
+                open.push(Menu::Item(WPMENUID_ICON as u16, b"~Icon view", true));
+            }
+            if ff & CTXT_TREE != 0 {
+                open.push(Menu::Item(WPMENUID_TREE as u16, b"~Tree view", true));
+            }
+            if ff & CTXT_DETAILS != 0 {
+                open.push(Menu::Item(WPMENUID_DETAILS as u16, b"~Details view", true));
+            }
+            if ff & CTXT_OPEN != 0 && !open.is_empty() {
+                v.push(Menu::SubId(WPMENUID_OPEN as u16, b"~Open as", open));
+            }
+            if ff & CTXT_SETTINGS != 0 {
+                v.push(Menu::Item(WPMENUID_PROPERTIES as u16, b"Propertie~s", true));
+            }
+            v.push(Menu::Item(WPMENUID_OPENPARENT as u16, b"Open ~parent", obj::folder_of(folder) != 0));
+            v.push(Menu::Sep);
+            if ff & CTXT_NEW != 0 {
+                v.push(Menu::Item(WPMENUID_CREATEANOTHER as u16, b"Cre~ate another...", style & obj::OBJSTYLE_NOCOPY == 0));
+            }
+            if ff & CTXT_MOVE != 0 {
+                v.push(Menu::Item(WPMENUID_MOVE as u16, b"~Move...", style & obj::OBJSTYLE_NOMOVE == 0));
+            }
+            if ff & CTXT_COPY != 0 {
+                v.push(Menu::Item(WPMENUID_COPY as u16, b"~Copy...", style & obj::OBJSTYLE_NOCOPY == 0));
+            }
+            if ff & CTXT_SHADOW != 0 {
+                v.push(Menu::Item(WPMENUID_CREATESHADOW as u16, b"Create shado~w...", style & obj::OBJSTYLE_NOLINK == 0));
+            }
+            if ff & CTXT_DELETE != 0 {
+                v.push(Menu::Item(WPMENUID_DELETE as u16, b"~Delete...", style & obj::OBJSTYLE_NODELETE == 0));
+            }
+            v
+        }
+        WPMENUID_EDITPULLDOWN => {
+            // What every selected object allows.
+            let any = !sel.is_empty();
+            let all = |bit: u32, nostyle: u32| {
+                any && sel.iter().all(|&o| filter_flags(o) & bit != 0 && obj::call(m::WPObject::wpQueryStyle, &[o]) as u32 & nostyle == 0)
+            };
+            alloc::vec![
+                Menu::Item(WPMENUID_CREATEANOTHER as u16, b"Cre~ate another...", sel.len() == 1 && all(CTXT_NEW, obj::OBJSTYLE_NOCOPY)),
+                Menu::Item(WPMENUID_MOVE as u16, b"~Move...", all(CTXT_MOVE, obj::OBJSTYLE_NOMOVE)),
+                Menu::Item(WPMENUID_COPY as u16, b"~Copy...", all(CTXT_COPY, obj::OBJSTYLE_NOCOPY)),
+                // Objects are not put on the clipboard (rs2 has no
+                // object clipboard yet).
+                Menu::Item(WPMENUID_PASTE as u16, b"Paste...", false),
+                Menu::Item(WPMENUID_CREATESHADOW as u16, b"Create shado~w...", all(CTXT_SHADOW, obj::OBJSTYLE_NOLINK)),
+                Menu::Item(WPMENUID_DELETE as u16, b"~Delete...", all(CTXT_DELETE, obj::OBJSTYLE_NODELETE)),
+                Menu::Sep,
+                Menu::Item(WPMENUID_SELALL as u16, b"~Select all\tCtrl+/", true),
+                Menu::Item(WPMENUID_DESELALL as u16, b"Dese~lect all\tCtrl+\\", any),
+                Menu::Sep,
+                Menu::Item(WPMENUID_FIND as u16, b"~Find...", ff & CTXT_FIND != 0),
+            ]
+        }
+        WPMENUID_VIEWPULLDOWN => {
+            let mut v = alloc::vec![
+                Menu::Check(WPMENUID_CHANGETOICON as u16, b"~Icon view", view == OPEN_CONTENTS),
+                Menu::Check(WPMENUID_CHANGETOTREE as u16, b"~Tree view", view == OPEN_TREE),
+                Menu::Check(WPMENUID_CHANGETODETAILS as u16, b"~Details view", view == OPEN_DETAILS),
+                Menu::Sep,
+            ];
+            if ff & CTXT_SORT != 0 {
+                v.push(crate::sortinc::menu(folder));
+            }
+            if ff & CTXT_ARRANGE != 0 {
+                v.push(Menu::Item(WPMENUID_ARRANGE as u16, b"~Arrange", view == OPEN_CONTENTS));
+            }
+            v.push(Menu::Item(WPMENUID_REFRESH as u16, b"~Refresh now", true));
+            v
+        }
+        WPMENUID_SELECTEDPULLDOWN => {
+            // The first selected object's menu without the Edit items
+            // (IBM's ShlLoadPulldownMenu takes them out of menu 101).
+            let mut v: Vec<Menu> = match sel.first() {
+                Some(&o) => popup_items(o, MENU_OBJECTPOPUP),
+                None => alloc::vec![
+                    Menu::Item(WPMENUID_OPEN as u16, b"~Open", false),
+                    Menu::Item(WPMENUID_PROPERTIES as u16, b"Propertie~s", false),
+                    Menu::Item(WPMENUID_HELP as u16, b"~Help", false),
+                ],
+            };
+            v.retain(|it| !matches!(it, Menu::Item(id, _, _) if EDIT_IDS.contains(&(*id as u32))));
+            // No separators at the ends or twice.
+            let mut out: Vec<Menu> = Vec::new();
+            for it in v {
+                if matches!(it, Menu::Sep) && (out.is_empty() || matches!(out.last(), Some(Menu::Sep))) {
+                    continue;
+                }
+                out.push(it);
+            }
+            while matches!(out.last(), Some(Menu::Sep)) {
+                out.pop();
+            }
+            out
+        }
+        _ => help_items(),
     }
-    obj::call(m::WPObject::wpModifyPopupMenu, &[o, menu as usize, 0, 0xffff]);
-    // The user's items (the Menu page).
-    if is(o, "WPFileSystem") {
-        wps::call("WPFileSystem", m::WPFileSystem::wpAddUserItemsToPopupMenu, &[o, menu as usize, 0, 0xffff]);
+}
+
+/// MENUITEM as MM_INSERTITEM takes it.
+fn insert_item(menu: u32, style: u16, attr: u16, id: u16, sub: u32, text: &[u8]) {
+    let mi = MenuItem { pos: -1, style, attr, id, sub, item: 0 };
+    let t = crate::util::z(text);
+    send(menu, MM_INSERTITEM, &mi as *const MenuItem as u32, t.as_ptr() as u32);
+}
+
+/// Put `items` in an existing menu in place of what it had (a pull-down
+/// filled as it drops).
+pub fn fill_menu(menu: u32, items: &[Menu]) {
+    const MM_DELETEITEM: u32 = 0x0181;
+    while send(menu, MM_QUERYITEMCOUNT, 0, 0) > 0 {
+        let id = send(menu, MM_ITEMIDFROMPOSITION, 0, 0) & 0xffff;
+        let before = send(menu, MM_QUERYITEMCOUNT, 0, 0);
+        send(menu, MM_DELETEITEM, mp(id, 0), 0);
+        if send(menu, MM_QUERYITEMCOUNT, 0, 0) >= before {
+            break;
+        }
     }
-    let old = unsafe { view::POPUP.0 };
-    if old != 0 {
-        unsafe { WinDestroyWindow(old) };
+    for it in items {
+        match it {
+            Menu::Item(id, t, on) => insert_item(menu, MIS_TEXT, if *on { 0 } else { MIA_DISABLED }, *id, 0, t),
+            Menu::Check(id, t, on) => insert_item(menu, MIS_TEXT, if *on { MIA_CHECKED } else { 0 }, *id, 0, t),
+            Menu::Sep => insert_item(menu, MIS_SEPARATOR, 0, 0xffff, 0, b""),
+            Menu::Sub(t, s) => insert_item(menu, MIS_TEXT | MIS_SUBMENU, 0, 0xfff0, popup_menu(s), t),
+            Menu::SubId(id, t, s) => insert_item(menu, MIS_TEXT | MIS_SUBMENU, 0, *id, popup_menu(s), t),
+        }
     }
-    unsafe { view::POPUP = (menu, o) };
-    let p = if ptl.is_null() { pointer_pos() } else { unsafe { *ptl } };
-    unsafe { WinPopupMenu(HWND_DESKTOP, client, menu, p.x, p.y, 0, PU_HCONSTRAIN | PU_VCONSTRAIN | PU_KEYBOARD | PU_MOUSEBUTTON1 | PU_MOUSEBUTTON2) };
-    menu
 }
 
 fn view_of(o: usize, view: u32) {

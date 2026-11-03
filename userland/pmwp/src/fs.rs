@@ -686,8 +686,15 @@ extern "C" fn folder_uninit(obj: usize) {
     som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpUnInitData, &[obj]);
 }
 
+/// A folder without a default view of its own opens in the System
+/// object's (its Folder page: `PM_Workplace` `DefFolderView`); the
+/// desktop and the classes with their own default keep theirs.
 extern "C" fn folder_query_default_view(obj: usize) -> u32 {
-    som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpQueryDefaultView, &[obj]) as u32
+    let v = som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpQueryDefaultView, &[obj]) as u32;
+    if obj::d(obj).default_view == obj::OPEN_DEFAULT && v == obj::OPEN_CONTENTS && !wps::is(obj, "WPDesktop") {
+        return crate::system::default_folder_view();
+    }
+    v
 }
 
 extern "C" fn folder_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
