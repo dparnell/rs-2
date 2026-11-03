@@ -1117,7 +1117,17 @@ pub fn vio_prt_sc(_c: &mut Ctx) -> u32 {
     if crate::session::popup_active() && !crate::session::popup_owner(_c.process.pid) {
         return ERROR_VIO_ILLEGAL_DURING_POPUP;
     }
-    print_screen(sid());
+    // A program's VioPrtSc goes through the spooler as a job when it
+    // runs (the PrtSc key, from the keyboard path, writes to the port).
+    let text = screen_text(sid());
+    match crate::chardev::lpt_spool_open(0) {
+        Some(end) => {
+            let _ = end.write(&text);
+        }
+        None => {
+            crate::chardev::lpt_write(0, &text);
+        }
+    }
     0
 }
 
