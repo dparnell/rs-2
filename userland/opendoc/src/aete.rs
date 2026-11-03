@@ -13,7 +13,8 @@
 //!   the process of that name, whose reply's direct parameter is an
 //!   'aete'; 9 `SuiteCursor(*cursor)`; 12 `FindEvent(name, *event)`;
 //!   14 `FindClass(name, *class)` (names in any case).
-//! - **ODAETESuite** (1046), an ODAETEList: 7 `ClassCursor(*cursor)`.
+//! - **ODAETESuite** (1046), an ODAETEList: 7 `ClassCursor(*cursor)`;
+//!   19 `FindEventByID(id, *event)` (OSA recording).
 //! - **ODAETEClass** (1004): 3 `GetInfo(*info)` (name[256] at 0, code at
 //!   0x100, description[256] at 0x104); 10 `FindProperty(name, *prop)`.
 //! - **ODAETEProperty** (1043): 0 `GetInfo(*info)` (name[256], code at
@@ -21,7 +22,8 @@
 //! - **ODAETEEvent** (1019): 2 `GetInfo(*info)` (name[256] at 0,
 //!   description[256] at 0x100, class 0x200, ID 0x204, reply type 0x208,
 //!   reply description[256] 0x20C, reply flags 0x30C, direct parameter
-//!   type 0x310, its description[256] 0x314, flags 0x414); 6
+//!   type 0x310, its description[256] 0x314, flags 0x414, the number of
+//!   other parameters 0x416); 3 `ParamCursor(*cursor)`; 6
 //!   `FindParameter(name, *param)`.
 //! - **ODAETEParameter** (1040): 1 `GetInfo(*info)` (name[256], keyword
 //!   0x100, type 0x104, description[256] 0x108, flags 0x208).
@@ -240,11 +242,19 @@ fn read_event(r: &mut Rd) -> Option<usize> {
     fill(&mut info.reply_desc, &rd);
     info.reply_flags = r.u16()?;
     info.direct_type = r.u32()?;
+    // no direct parameter: OREXXSC's recording compares with 0x6E756C6C
+    // (where its other 'null' checks use 0x6C6C756E)
+    if info.direct_type == ae::code(b"null") {
+        info.direct_type = 0x6e75_6c6c;
+    }
     let dd = r.pstr_a()?;
     fill(&mut info.direct_desc, &dd);
     info.direct_flags = r.u16()?;
     let mut params = Vec::new();
-    for _ in 0..r.u16()? {
+    let np = r.u16()?;
+    // the number of other parameters (OREXXSC reads it at 0x416)
+    info.pad2 = np;
+    for _ in 0..np {
         let pi = param_info(r)?;
         let po = new_of(p!(ODAETEParameterClassData));
         *param(po) = Some(pi);
@@ -420,6 +430,16 @@ methods! {
             None => ERR_NOT_FOUND as usize,
         }
     }
+    // ODAETESuite::FindEventByID(id, *event) (method 19)
+    fn SuiteFindEventID(this: usize, ev: usize, id: usize, out: usize) -> usize {
+        match suite(this).events.iter().copied().find(|&e| event(e).info.as_ref().is_some_and(|i| i.id == id as u32)) {
+            Some(e) => {
+                write::<usize>(out, e);
+                0
+            }
+            None => ERR_NOT_FOUND as usize,
+        }
+    }
     // ODAETESuite::ClassCursor(*cursor)
     fn SuiteClassCursor(this: usize, ev: usize, out: usize) -> usize {
         make_cursor(suite(this).classes.clone(), out);
@@ -538,7 +558,7 @@ pub extern "C" fn dictionary_new_class(_major: i32, _minor: i32) -> usize {
     build("ODAETEProperty", MC, 4, &[(0, PropGetInfo::t)], p!(ODAETEPropertyClassData), p!(ODAETEPropertyCClassData));
     build("ODAETEEvent", MC, 8, &[(2, EventGetInfo::t), (3, EventParamCursor::t), (6, EventFindParam::t)], p!(ODAETEEventClassData), p!(ODAETEEventCClassData));
     build("ODAETEClass", MC, 12, &[(3, ClassGetInfo::t), (10, ClassFindProperty::t)], p!(ODAETEClassClassData), p!(ODAETEClassCClassData));
-    build("ODAETESuite", "ODAETEList", 26, &[(7, SuiteClassCursor::t)], p!(ODAETESuiteClassData), p!(ODAETESuiteCClassData));
+    build("ODAETESuite", "ODAETEList", 26, &[(7, SuiteClassCursor::t), (19, SuiteFindEventID::t)], p!(ODAETESuiteClassData), p!(ODAETESuiteCClassData));
     for (name, cd, ccd) in [
         ("ODAETETerm1013", p!(ODAETETerm1013ClassData), p!(ODAETETerm1013CClassData)),
         ("ODAETETerm1016", p!(ODAETETerm1016ClassData), p!(ODAETETerm1016CClassData)),

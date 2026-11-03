@@ -45,6 +45,10 @@ unsafe extern "C" {
     fn AEInstallObjectAccessor(class: u32, container: u32, f: usize, refcon: usize, sys: u32) -> i32;
     #[link_name = "OPENDOC.59"]
     fn AEResolve(spec: *const Desc, flags: u32, token: *mut Desc) -> i32;
+    #[link_name = "OPENDOC.10"]
+    fn AECreateAppleEvent(class: u32, id: u32, target: *const Desc, rid: i32, tid: i32, r: *mut Desc) -> i32;
+    #[link_name = "OPENDOC.61"]
+    fn AESend(e: *const Desc, reply: *mut Desc, mode: u32, prio: i32, timeout: i32, idle: usize, filter: usize) -> i32;
     #[link_name = "OPENDOC.51"]
     fn AEPutParamDesc(e: *const Desc, key: u32, d: *const Desc) -> i32;
     #[link_name = "OPENDOC.528"]
@@ -447,6 +451,89 @@ fn read_script() -> Option<Vec<u8>> {
     }
     v.truncate(n as usize);
     Some(v)
+}
+
+// ---- recording ----
+
+static mut RECORDING: Option<usize> = None;
+static mut RECORDED: Vec<u8> = Vec::new();
+
+/// 'ascr'/'recd': a line the scripting component recorded.
+extern "C" fn recorded(event: *const Desc, _reply: *mut Desc, _r: usize) -> i32 {
+    let mut buf = [0u8; 1024];
+    let (mut ty, mut n) = (0u32, 0u32);
+    let r = unsafe { AEGetParamPtr(event, c(b"----"), c(b"TEXT"), &mut ty, buf.as_mut_ptr(), buf.len(), &mut n) };
+    if r == 0 {
+        unsafe { (*(&raw mut RECORDED)).extend_from_slice(&buf[..(n as usize).min(1024)]) };
+    }
+    r
+}
+
+/// Document/Play sound: the 'play' event ODSHELL sends itself (so a
+/// recording has it).
+pub fn play_sound() {
+    let mut target = Desc::default();
+    let mut e = Desc::default();
+    let mut reply = Desc::default();
+    let mut tib = core::ptr::null_mut();
+    let mut pib: *mut os2::Pib = core::ptr::null_mut();
+    unsafe { DosGetInfoBlocks(&mut tib, &mut pib) };
+    let pid = unsafe { (*pib).pid }; // this process
+    unsafe {
+        AECreateDesc(c(b"PID "), &pid as *const u32 as *const u8, 4, &mut target);
+        AECreateAppleEvent(c(b"RS2S"), c(b"play"), &target, -1, 0, &mut e);
+        AESend(&e, &mut reply, 0x23, 0, -1, 0, 0);
+        AEDisposeDesc(&mut e);
+        AEDisposeDesc(&mut reply);
+        AEDisposeDesc(&mut target);
+    }
+}
+
+/// Document/Record script: OSAStartRecording; again: OSAStopRecording,
+/// the recorded REXX goes to C:\RECORDED.CMD and the status line.
+pub fn toggle_recording(frame: usize) {
+    let e = ev();
+    let sc = component();
+    if sc == 0 {
+        status_hint(e, frame, b"No scripting component (OREXXSC)");
+        return;
+    }
+    let osa = unsafe { (&raw const OSAScriptingComponentClassData) as *const usize };
+    unsafe {
+        match RECORDING.take() {
+            None => {
+                AEInstallEventHandler(c(b"ascr"), c(b"recd"), recorded as usize, 0, 0);
+                (*(&raw mut RECORDED)).clear();
+                let mut id = 0usize;
+                let r = somsup::call(osa, 36, &[sc, e, &mut id as *mut usize as usize]) as i32;
+                if r == 0 {
+                    RECORDING = Some(id);
+                    status_hint(e, frame, b"Recording...");
+                } else {
+                    status_hint(e, frame, alloc::format!("Recording failed: {r}").as_bytes());
+                }
+            }
+            Some(id) => {
+                somsup::call(osa, 37, &[sc, e, id]);
+                let text = (*(&raw const RECORDED)).clone();
+                let mut hf = 0u32;
+                let mut action = 0u32;
+                if DosOpen(b"C:\\RECORDED.CMD\0".as_ptr(), &mut hf, &mut action, 0, 0, 0x12, 0x41, core::ptr::null_mut()) == 0 {
+                    let mut n = 0u32;
+                    let head = b"/* recorded by ODSHELL (OSA recording) */\r\n";
+                    DosWrite(hf, head.as_ptr(), head.len() as u32, &mut n);
+                    let t: Vec<u8> = text.iter().flat_map(|&b| if b == b'\n' { alloc::vec![b'\r', b'\n'] } else { alloc::vec![b] }).collect();
+                    DosWrite(hf, t.as_ptr(), t.len() as u32, &mut n);
+                    DosClose(hf);
+                }
+                let mut m = b"Recorded (C:\\RECORDED.CMD): ".to_vec();
+                // the lines after the connection line
+                let body = text.iter().position(|&b| b == b'\n').map_or(&text[..], |i| &text[i + 1..]);
+                m.extend(body.iter().map(|&b| if b == b'\n' || b == b'\r' { b';' } else { b }));
+                status_hint(e, frame, &m);
+            }
+        }
+    }
 }
 
 /// Document/Run script: C:\ODSCRIPT.CMD's result on the status line.

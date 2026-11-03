@@ -638,6 +638,7 @@ return\r\n\
 ::method getdirparm;   expose dirparm; return dirparm\r\n\
 ::method setdirparm;   expose dirparm; use arg dirparm\r\n\
 ::method resetdirparm; expose dirparm; dirparm = .nil\r\n\
+::method connect class; use arg name; return self~new~connect(name)\r\n\
 ::method connect    external 'LIBRARY REXXSC ScriptableApp_Connect'\r\n\
 ::method disconnect external 'LIBRARY REXXSC ScriptableApp_Disconnect'\r\n\
 ::method novalue    external 'LIBRARY REXXSC ScriptableApp_Novalue'\r\n\

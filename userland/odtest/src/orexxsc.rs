@@ -35,6 +35,10 @@ unsafe extern "C" {
     fn AEInstallObjectAccessor(class: u32, container: u32, f: usize, refcon: usize, sys: u32) -> i32;
     #[link_name = "OPENDOC.59"]
     fn AEResolve(spec: *const Desc, flags: u32, token: *mut Desc) -> i32;
+    #[link_name = "OPENDOC.10"]
+    fn AECreateAppleEvent(class: u32, id: u32, target: *const Desc, rid: i32, tid: i32, r: *mut Desc) -> i32;
+    #[link_name = "OPENDOC.61"]
+    fn AESend(e: *const Desc, reply: *mut Desc, mode: u32, prio: i32, timeout: i32, idle: usize, filter: usize) -> i32;
     #[link_name = "OPENDOC.51"]
     fn AEPutParamDesc(e: *const Desc, key: u32, d: *const Desc) -> i32;
     #[link_name = "OPENDOC.528"]
@@ -372,6 +376,50 @@ fn scriptable_app(sc: usize) {
     check("set with a named parameter (to), then get", r.as_deref() == Ok(&b"changed"[..]));
     let r = run(sc, b"app = .ScriptableApp~new~connect('ODTEST')\r\nreturn app~get(text~of(part~index(9)))");
     check("an object that is not there: an error", r == Err(-1753));
+    recording(sc);
+}
+
+static mut RECORDED: Vec<u8> = Vec::new();
+
+/// 'ascr'/'recd': a recorded script line.
+extern "C" fn recorded(event: *const Desc, _reply: *mut Desc, _r: usize) -> i32 {
+    let mut buf = [0u8; 512];
+    let (mut ty, mut n) = (0u32, 0u32);
+    let r = unsafe { AEGetParamPtr(event, c(b"----"), c(b"TEXT"), &mut ty, buf.as_mut_ptr(), buf.len(), &mut n) };
+    if r == 0 {
+        unsafe { (*(&raw mut RECORDED)).extend_from_slice(&buf[..(n as usize).min(512)]) };
+    }
+    r
+}
+
+/// OSAStartRecording/OSAStopRecording: the events this program sends
+/// itself while recording come back as REXX lines.
+fn recording(sc: usize) {
+    let e = ev();
+    unsafe { AEInstallEventHandler(c(b"ascr"), c(b"recd"), recorded as usize, 0, 0) };
+    let mut id = 0usize;
+    let r1 = osa(36, &[sc, e, &mut id as *mut usize as usize]);
+    // the user's action: an event the program sends itself
+    let mut pid = 0u32;
+    let mut target = Desc::default();
+    let mut ev1 = Desc::default();
+    let mut reply = Desc::default();
+    unsafe {
+        let mut tib = core::ptr::null_mut();
+        let mut pib: *mut os2::Pib = core::ptr::null_mut();
+        DosGetInfoBlocks(&mut tib, &mut pib);
+        pid = (*pib).pid;
+        AECreateDesc(c(b"PID "), &pid as *const u32 as *const u8, 4, &mut target);
+        AECreateAppleEvent(c(b"RS2T"), c(b"hllo"), &target, -1, 0, &mut ev1);
+        AESend(&ev1, &mut reply, 0x23, 0, -1, 0, 0);
+        AEDisposeDesc(&mut ev1);
+        AEDisposeDesc(&mut reply);
+        AEDisposeDesc(&mut target);
+    }
+    let r2 = osa(37, &[sc, e, id]);
+    let text = unsafe { (*(&raw const RECORDED)).clone() };
+    os2::println!("recorded: {}", alloc::string::String::from_utf8_lossy(&text));
+    check("OSA recording: an event this program sends itself is recorded as REXX (OSAStart/StopRecording)", r1 == 0 && r2 == 0 && text.windows(5).any(|w| w.eq_ignore_ascii_case(b"hello")));
 }
 
 pub fn orexxsc() {

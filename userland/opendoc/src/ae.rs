@@ -547,18 +547,27 @@ fn own_name() -> Vec<u8> {
     base.to_vec()
 }
 
-/// Whether an event goes to this process: no target, or this PID.
+/// Whether an event goes to this process: no target, PID 0 (or none),
+/// or this PID.
 fn for_us(e: &Desc) -> bool {
     match attr(e, code(b"addr")) {
         None => true,
         Some(a) if a.ty == T_NULL => true,
         Some(a) if a.ty == T_PID => {
             let b = data(&a).map_or(Vec::new(), |x| x.bytes.clone());
-            b.len() >= 4 && u32::from_le_bytes([b[0], b[1], b[2], b[3]]) == own_pid()
+            b.len() < 4 || matches!(u32::from_le_bytes([b[0], b[1], b[2], b[3]]), 0) || u32::from_le_bytes([b[0], b[1], b[2], b[3]]) == own_pid()
         }
         _ => false,
     }
 }
+
+/// Recording (OSA): on after 'aevt'/'acer' (kAEStartRecording as OS/2
+/// OpenDoc's codes have it), off after 'aevt'/'ccer'. While it is on,
+/// every event a process gives its own handlers (but the Apple Event
+/// Manager's and the scripting component's: classes 'aevt', 'ascr') is
+/// passed to the 'aevt'/'rcer' handler too (the scripting component's,
+/// which turns it into a script line).
+static mut RECORDING: bool = false;
 
 pub extern "C" fn AESend(event: usize, reply: usize, mode: u32, _prio: i32, _timeout: i32, _idle: usize, _filter: usize) -> i32 {
     let e = get_desc(event);
@@ -587,6 +596,23 @@ pub extern "C" fn AESend(event: usize, reply: usize, mode: u32, _prio: i32, _tim
 pub fn deliver(event: usize, reply: usize, mode: u32) -> i32 {
     let e = get_desc(event);
     let (class, id) = (type_attr(&e, code(b"evcl")), type_attr(&e, code(b"evid")));
+    if class == code(b"aevt") && (id == code(b"acer") || id == code(b"ccer")) {
+        unsafe { RECORDING = id == code(b"acer") };
+        put_desc(reply, Desc { ty: T_NULL, h: 0 });
+        return 0;
+    }
+    let rc = dispatch(event, reply, mode, class, id);
+    if rc == 0 && unsafe { RECORDING } && class != code(b"aevt") && class != code(b"ascr") {
+        if let Some(h) = handlers().iter().find(|x| x.class == code(b"aevt") && x.id == code(b"rcer")) {
+            let f: extern "C" fn(usize, usize, usize) -> i32 = unsafe { core::mem::transmute(h.proc_) };
+            let mut none = Desc { ty: T_NULL, h: 0 };
+            f(event, &mut none as *mut Desc as usize, h.refcon);
+        }
+    }
+    rc
+}
+
+fn dispatch(event: usize, reply: usize, mode: u32, class: u32, id: u32) -> i32 {
     let h = handlers();
     let found = [(class, id), (class, T_WILD), (T_WILD, id), (T_WILD, T_WILD)]
         .iter()
@@ -636,7 +662,7 @@ pub extern "C" fn AEGetProcessName(pid: u32, buf: usize, _info: usize) -> i32 {
     if buf == 0 {
         return ERR_PROC_NOT_FOUND;
     }
-    let mut n = if pid == own_pid() {
+    let mut n = if pid == own_pid() || pid == 0 {
         own_name()
     } else {
         match crate::ipc::name_of(pid) {
