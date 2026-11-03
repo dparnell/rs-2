@@ -46,6 +46,7 @@ mod mindex;
 mod minwin;
 mod mm;
 mod obj;
+mod dosset;
 mod pages;
 mod printer;
 mod printobj;
