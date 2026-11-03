@@ -69,6 +69,62 @@ pub struct Config {
     pub seamless: bool,
     /// The session's id for VWIN's messages.
     pub session_id: u32,
+    /// DOS_RMSIZE: conventional memory in KB (128-640).
+    pub rm_kb: u32,
+    /// DOS_BREAK: Ctrl+C checked at every DOS call.
+    pub break_on: bool,
+    /// DOS_VERSION: the version some programs are told (program name
+    /// without extension, major, minor).
+    pub versions: Vec<(String, u8, u8)>,
+    /// HW_NOSOUND: the session makes no sound.
+    pub nosound: bool,
+    /// IDLE_SENSITIVITY (0-100): keyboard polls without a key before the
+    /// session counts as idle (75 = 200 polls; higher, sooner).
+    pub idle_polls: u32,
+    /// DPMI_DOS_API: whether DPMI clients may ask for the translated DOS
+    /// API (AUTO and ENABLED: yes; DISABLED: no).
+    pub dpmi_dos_api: bool,
+}
+
+impl Config {
+    /// Apply one of OS/2's DOS settings (`DOS_RMSIZE`, `640`); whether
+    /// the name is one.
+    pub fn set(&mut self, name: &str, v: &str) -> bool {
+        let v = v.trim();
+        let on = matches!(v.to_ascii_uppercase().as_str(), "1" | "ON" | "YES");
+        let num = || v.parse::<u32>().ok();
+        match name.to_ascii_uppercase().as_str() {
+            "DOS_HIGH" => self.high = on,
+            "DOS_UMB" => self.umb = on,
+            "DOS_BREAK" => self.break_on = on,
+            "DOS_RMSIZE" => self.rm_kb = num().map_or(self.rm_kb, |k| k.clamp(128, 640) & !15),
+            "EMS_MEMORY_LIMIT" => self.ems_kb = num().map_or(self.ems_kb, |k| k.min(32768)),
+            "XMS_MEMORY_LIMIT" => self.xms_kb = num().map_or(self.xms_kb, |k| k.min(65536)),
+            "DPMI_MEMORY_LIMIT" => self.dpmi_kb = num().map_or(self.dpmi_kb, |m| m.min(512) * 1024),
+            "DPMI_DOS_API" => self.dpmi_dos_api = !v.eq_ignore_ascii_case("DISABLED"),
+            "HW_NOSOUND" => self.nosound = on,
+            "IDLE_SENSITIVITY" => {
+                if let Some(s) = num() {
+                    self.idle_polls = 200 * (101 - s.min(100)) / 26;
+                }
+            }
+            "DOS_VERSION" => {
+                // Lines (or ; separated) "NAME.EXE,major,minor,count".
+                self.versions.clear();
+                for line in v.split(['\n', '\r', ';']).map(str::trim).filter(|l| !l.is_empty()) {
+                    let f: Vec<&str> = line.split(',').map(str::trim).collect();
+                    if f.len() < 3 {
+                        continue;
+                    }
+                    let (Ok(maj), Ok(min)) = (f[1].parse::<u8>(), f[2].parse::<u8>()) else { continue };
+                    let name = f[0].split('.').next().unwrap_or("").to_ascii_uppercase();
+                    self.versions.push((name, maj, min));
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
 }
 
 impl Default for Config {
@@ -87,6 +143,12 @@ impl Default for Config {
             codepage: 437,
             seamless: false,
             session_id: 1,
+            rm_kb: 640,
+            break_on: false,
+            versions: Vec::new(),
+            nosound: false,
+            idle_polls: 200,
+            dpmi_dos_api: true,
         }
     }
 }
@@ -184,6 +246,8 @@ impl Machine {
             }
         }
         m.hw.umb = m.cfg.umb;
+        m.dos.break_on = m.cfg.break_on;
+        m.hw.sb.muted = m.cfg.nosound;
         m.vwin.seamless = m.cfg.seamless;
         m.vwin.id = m.cfg.session_id;
         m.t0 = host.micros();

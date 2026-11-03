@@ -231,7 +231,9 @@ impl crate::Machine {
         a.out.clear();
         a.out.extend(mix.iter().flat_map(|f| [f[0].clamp(-32768, 32767) as i16, f[1].clamp(-32768, 32767) as i16]));
         a.mix = mix;
-        host.audio(RATE, &a.out);
+        if !self.hw.sb.muted {
+            host.audio(RATE, &a.out);
+        }
         self.sb_irq();
     }
 }

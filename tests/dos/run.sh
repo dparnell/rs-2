@@ -9,8 +9,8 @@ root=$(cd "$here/../.." && pwd)
 dosrun="$root/target/release/dosrun"
 fail=0
 check() {
-    prog=$1; want=$2; keys=$3
-    out=$(cd "$here/bin" && "$dosrun" --timeout 30 --keys "$keys" "$prog" 2>/dev/null || true)
+    prog=$1; want=$2; keys=$3; shift 3
+    out=$(cd "$here/bin" && "$dosrun" --timeout 30 "$@" --keys "$keys" "$prog" 2>/dev/null || true)
     if printf '%s' "$out" | grep -q "$want" && ! printf '%s' "$out" | grep -q FAILED; then
         echo "PASS $prog"
     else
@@ -40,5 +40,7 @@ checksnd SBTEST.COM "SB OK" B:441:1.0
 checksnd SB16TEST.COM "SB16 OK" L:1002:1.0 R:501:1.0
 checksnd FMTEST.COM "FM OK" L:440:0.5 R:880:0.5
 checksnd BEEP.COM "beep done" B:440:0.5 B:880:0.5
+check DOSSET.COM "DOSSET RM=640 VER=20.45 BREAK=0" ""
+check DOSSET.COM "DOSSET RM=512 VER=5.0 BREAK=1 FREE=31877" "" --set DOS_RMSIZE=512 --set DOS_VERSION=DOSSET.COM,5,0,255 --set DOS_BREAK=1
 check COMMAND.COM "rs2 DOS session, version" 'ver\nexit\n'
 exit $fail

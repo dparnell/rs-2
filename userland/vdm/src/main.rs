@@ -699,20 +699,12 @@ fn main(s: &os2::Startup) -> u32 {
         Some(i) => (&args[..i], &args[i..]),
         None => (args, ""),
     };
-    let prog = if prog.is_empty() { "C:\\OS2\\MDOS\\COMMAND.COM" } else { prog };
-    // A batch file runs under COMMAND.COM.
-    let batch_tail;
-    let (prog, tail) = if prog.to_ascii_uppercase().ends_with(".BAT") {
-        batch_tail = alloc::format!(" /C {prog}{tail}");
-        ("C:\\OS2\\MDOS\\COMMAND.COM", batch_tail.as_str())
-    } else {
-        (prog, tail)
-    };
     // DOS settings and the environment.
     let mut cfg = Config::default();
     let mut env: Vec<String> = Vec::new();
     let mut os2_path = String::new();
     let mut display = None;
+    let mut shell: Option<String> = None;
     unsafe {
         let mut p = s.env;
         while *p != 0 {
@@ -726,13 +718,18 @@ fn main(s: &os2::Startup) -> u32 {
             let Some((k, v)) = var.split_once('=') else { continue };
             let key = k.to_ascii_uppercase();
             let on = |v: &str| matches!(v.trim().to_ascii_uppercase().as_str(), "1" | "ON" | "YES");
+            if cfg.set(&key, v) {
+                continue;
+            }
             match key.as_str() {
-                "DOS_HIGH" => cfg.high = on(v),
-                "DOS_UMB" => cfg.umb = on(v),
-                "EMS_MEMORY_LIMIT" => cfg.ems_kb = num(v).unwrap_or(cfg.ems_kb),
-                "XMS_MEMORY_LIMIT" => cfg.xms_kb = num(v).unwrap_or(cfg.xms_kb),
-                "DPMI_MEMORY_LIMIT" => cfg.dpmi_kb = num(v).map_or(cfg.dpmi_kb, |m| m * 1024),
                 "HW_NOFPU" => cfg.fpu = !on(v),
+                "DOS_SHELL" => {
+                    // The command processor: its path, then its arguments.
+                    let v = v.trim();
+                    if !v.is_empty() {
+                        shell = Some(String::from(v));
+                    }
+                }
                 "VDM_TRACE" => cfg.trace = on(v),
                 "WINOS2_SEAMLESS" => cfg.seamless = on(v),
                 "WINOS2_SCREEN" => {
@@ -745,7 +742,24 @@ fn main(s: &os2::Startup) -> u32 {
             }
         }
     }
-    let mut dos_env = alloc::vec![String::from("COMSPEC=C:\\OS2\\MDOS\\COMMAND.COM"), alloc::format!("PATH=C:\\OS2\\MDOS;{}", os2_path), String::from("PROMPT=$P$G")];
+    // The command processor: DOS_SHELL's (path and arguments), or rs2's
+    // COMMAND.COM.
+    let shell = shell.unwrap_or_else(|| String::from("C:\\OS2\\MDOS\\COMMAND.COM"));
+    let (shell_exe, shell_args) = match shell.find(' ') {
+        Some(i) => (&shell[..i], &shell[i..]),
+        None => (shell.as_str(), ""),
+    };
+    let shell_tail = String::from(shell_args);
+    let (prog, tail) = if prog.is_empty() { (shell_exe, shell_tail.as_str()) } else { (prog, tail) };
+    // A batch file runs under the command processor.
+    let batch_tail;
+    let (prog, tail) = if prog.to_ascii_uppercase().ends_with(".BAT") {
+        batch_tail = alloc::format!(" /C {prog}{tail}");
+        (shell_exe, batch_tail.as_str())
+    } else {
+        (prog, tail)
+    };
+    let mut dos_env = alloc::vec![alloc::format!("COMSPEC={shell_exe}"), alloc::format!("PATH=C:\\OS2\\MDOS;{}", os2_path), String::from("PROMPT=$P$G")];
     dos_env.extend(env);
     cfg.env = dos_env;
     let mut freq = 0u32;

@@ -13,7 +13,8 @@
 //! the text screen is printed (or written to `--screen FILE`); `--png
 //! FILE` saves the screen of a graphics mode. `--timeout SECS` ends a
 //! program that runs too long, `--trace` logs every BIOS/DOS call,
-//! `--display WxH` sets the size of RS2DISP.DRV's screen (800x600).
+//! `--display WxH` sets the size of RS2DISP.DRV's screen (800x600),
+//! `--set NAME=VALUE` a DOS setting (`DOS_RMSIZE=512`) or variable.
 
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
@@ -597,6 +598,7 @@ fn main() {
     let mut display = (800, 600);
     let mut disp_trace = false;
     let mut vwin_trace = false;
+    let mut extra_env: Vec<String> = Vec::new();
     while let Some(a) = args.first().cloned() {
         if !a.starts_with("--") {
             break;
@@ -624,6 +626,14 @@ fn main() {
             "--vwin-trace" => vwin_trace = true,
             "--watch" => watch = u32::from_str_radix(val().trim_start_matches("0x"), 16).unwrap(),
             "--wav" => wav_out = Some(val()),
+            // A DOS setting (DOS_RMSIZE=512) or environment variable.
+            "--set" => {
+                let v = val();
+                let (k, x) = v.split_once('=').expect("--set NAME=VALUE");
+                if !cfg.set(k, x) {
+                    extra_env.push(v.clone());
+                }
+            }
             "--display" => {
                 let v = val();
                 let (w, h) = v.split_once('x').expect("--display WxH");
@@ -643,6 +653,7 @@ fn main() {
     fs::write(z.join("COMMAND.COM"), dos::shell::command_com()).unwrap();
     drives[25] = Some(z.clone());
     cfg.env = vec!["COMSPEC=Z:\\COMMAND.COM".into(), "PATH=Z:\\;C:\\".into(), "PROMPT=$P$G".into()];
+    cfg.env.extend(extra_env);
     let trace = cfg.trace;
     let mut host = Run {
         drives,

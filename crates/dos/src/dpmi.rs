@@ -859,7 +859,7 @@ impl Machine {
         for (i, b) in name.iter_mut().enumerate() {
             *b = self.hw.rd(a + i as u32);
         }
-        if &name != b"MS-DOS\0" && &name != b"WINOS2\0" {
+        if &name != b"MS-DOS\0" && &name != b"WINOS2\0" || !self.cfg.dpmi_dos_api {
             return false;
         }
         self.client().dos_api = true;

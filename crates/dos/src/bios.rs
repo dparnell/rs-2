@@ -186,7 +186,7 @@ impl Machine {
         // The BIOS data area.
         let equip: u16 = 0x0020 | if self.cfg.fpu { 2 } else { 0 } | 0x0400 * 0;
         self.hw.wr16(BDA + 0x10, equip);
-        self.hw.wr16(BDA + 0x13, 640);
+        self.hw.wr16(BDA + 0x13, self.cfg.rm_kb.clamp(128, 640) as u16);
         self.hw.wr16(BDA + 0x1a, 0x1e);
         self.hw.wr16(BDA + 0x1c, 0x1e);
         self.hw.wr16(BDA + 0x80, 0x1e);
@@ -543,7 +543,7 @@ impl Machine {
     /// in a row, wait for input (it is idle at a prompt).
     pub fn idle_poll(&mut self) {
         self.polls += 1;
-        if self.polls >= 200 {
+        if self.polls >= self.cfg.idle_polls.max(4) {
             self.polls = 0;
             self.waiting = true;
         }

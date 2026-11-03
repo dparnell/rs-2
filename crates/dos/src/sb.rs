@@ -189,6 +189,8 @@ pub struct SoundBlaster {
     /// The frame being played and the fraction of the next.
     pub cur: [i32; 2],
     pub frac: u32,
+    /// HW_NOSOUND: everything runs, nothing is heard.
+    pub muted: bool,
 }
 
 impl Default for SoundBlaster {
@@ -216,6 +218,7 @@ impl Default for SoundBlaster {
             dac: VecDeque::new(),
             cur: [0; 2],
             frac: 0,
+            muted: false,
         };
         s.mixer_reset();
         s
