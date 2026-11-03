@@ -36,6 +36,7 @@ pub struct Found {
 /// What the interpreter calls of Object REXX, through the world (so that
 /// a classic REXX that never makes one does not link it).
 pub struct Ops {
+    pub run_uninits: fn(&mut Interp<'_>, &mut Frame, bool),
     pub load_package: fn(&[u8], &[u8]) -> Result<Rc<Package>, LoadErr>,
     pub install_package: fn(&mut Interp<'_>, &mut Frame, &Rc<Package>) -> R<()>,
     pub obj_string: fn(&mut Interp<'_>, &mut Frame, &ObjRef) -> R<Val>,
@@ -57,6 +58,7 @@ fn install(it: &mut Interp<'_>, f: &mut Frame, p: &Rc<Package>) -> R<()> {
 }
 
 pub static OPS: Ops = Ops {
+    run_uninits,
     load_package,
     install_package: install,
     obj_string,
@@ -90,6 +92,12 @@ pub struct World {
     pub handed: RefCell<Vec<Value>>,
     /// The activities that ran (for GUARD bookkeeping).
     pub activities: Cell<u64>,
+    /// Objects whose last reference was dropped, waiting for UNINIT.
+    pub uninit_queue: UninitQueue,
+    /// Objects with an UNINIT method (sent UNINIT when the program ends if
+    /// still alive).
+    pub uninit_live: RefCell<Vec<alloc::rc::Weak<Object>>>,
+    in_uninit: Cell<bool>,
 }
 
 const BUILTINS: &[(Builtin, &[u8])] = &[
@@ -122,6 +130,7 @@ fn raw_obj(id: u64, class: Option<ObjRef>, data: Data) -> ObjRef {
         methods: RefCell::new(None),
         name: RefCell::new(None),
         guard: Cell::new((0, 0)),
+        uninit: RefCell::new(None),
     })
 }
 
@@ -178,6 +187,9 @@ impl World {
             ext_classes: RefCell::new(BTreeMap::new()),
             handed: RefCell::new(Vec::new()),
             activities: Cell::new(1),
+            uninit_queue: Rc::new(RefCell::new(Vec::new())),
+            uninit_live: RefCell::new(Vec::new()),
+            in_uninit: Cell::new(false),
         };
         {
             let mut e = w.env.data.borrow_mut();
@@ -260,6 +272,23 @@ impl World {
         c
     }
 
+    /// Watch an object for UNINIT if its class (or the object) has one.
+    pub fn watch_uninit(&self, o: &ObjRef) {
+        if o.uninit.borrow().is_some() {
+            return;
+        }
+        let v = Value::O(o.clone());
+        if !lookup(self, &v, b"UNINIT", &Start::Normal).is_some_and(|f| !matches!(f.m.body, Body::Null)) {
+            return;
+        }
+        *o.uninit.borrow_mut() = Some(self.uninit_queue.clone());
+        let mut live = self.uninit_live.borrow_mut();
+        if live.len() >= 64 && live.len().is_power_of_two() {
+            live.retain(|w| w.strong_count() > 0);
+        }
+        live.push(Rc::downgrade(o));
+    }
+
     /// The program ended: nothing to do yet (alarms and other activities
     /// end with it).
     pub fn finish(&self) {}
@@ -270,6 +299,46 @@ impl World {
             _ => None,
         }
     }
+}
+
+// ---- UNINIT ----
+
+/// Send UNINIT to the objects whose last reference was dropped; with
+/// `all` (the program ends), also to every object still alive that has
+/// one. Errors in UNINIT methods are ignored.
+fn run_uninits(it: &mut Interp<'_>, f: &mut Frame, all: bool) {
+    let Some(w) = it.w.clone() else { return };
+    if w.in_uninit.replace(true) {
+        return;
+    }
+    let mut live = Vec::new();
+    if all {
+        live = core::mem::take(&mut *w.uninit_live.borrow_mut());
+        live.reverse();
+    }
+    let saved = (it.raised.take(), core::mem::take(&mut it.err_msg), it.err_at.take(), core::mem::take(&mut it.tb));
+    loop {
+        let mut batch: Vec<ObjRef> = core::mem::take(&mut *w.uninit_queue.borrow_mut()).into_iter().map(Rc::new).collect();
+        if batch.is_empty() {
+            // then those still alive (the program ended)
+            while let Some(l) = live.pop() {
+                if let Some(o) = l.upgrade() {
+                    if o.uninit.borrow_mut().take().is_some() {
+                        batch.push(o);
+                        break;
+                    }
+                }
+            }
+        }
+        if batch.is_empty() {
+            break;
+        }
+        for o in batch {
+            let _ = it.send(f, &Value::O(o), b"UNINIT", Vec::new(), Start::Normal, 0);
+        }
+    }
+    (it.raised, it.err_msg, it.err_at, it.tb) = saved;
+    w.in_uninit.set(false);
 }
 
 // ---- classes ----

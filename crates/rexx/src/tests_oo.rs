@@ -40,6 +40,23 @@ fn basics() {
 }
 
 #[test]
+fn uninit() {
+    let out = run_oo(
+        "a = .res~new('A')\nb = .res~new('B')\ndrop a\nsay 'after drop'\nb = 'x'\nsay 'after assign'\n\
+         c = .res~new('C')\nd = .res~new('D'); d~other = d\nsay 'end'\n\
+         ::class res\n::method other attribute\n::method init\n  expose n\n  use arg n\n\
+         ::method uninit\n  expose n\n  say 'uninit' n\n",
+    );
+    assert_eq!(out, ["uninit A", "after drop", "uninit B", "after assign", "end", "uninit C", "uninit D"]);
+    // UNINIT given by SETMETHOD; an object only referenced from a dropped
+    // collection
+    let out = run_oo(
+        "o = .object~enhanced(.table~new~~put(\"say 'bye'\", 'UNINIT'))\nl = .array~of(o)\ndrop o\nsay 'held'\ndrop l\nsay 'gone'\n",
+    );
+    assert_eq!(out, ["held", "bye", "gone"]);
+}
+
+#[test]
 fn classes_and_methods() {
     let out = run_oo(
         "c = .counter~new(5)\nc~step\nc~step\nsay c~value c~class~id c\nd = .big~new(10)\nd~step\nsay d~value\n\

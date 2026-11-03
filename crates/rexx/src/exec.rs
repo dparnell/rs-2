@@ -562,6 +562,13 @@ impl<'h> Interp<'h> {
             Err(_) => Err(-16),
         };
         if top {
+            // UNINIT for the objects dropped, and for those alive when no
+            // other activity can use them any more
+            if let Some(w) = self.w.clone() {
+                let all = Rc::strong_count(&w) == 2;
+                drop(w);
+                (self.ops().run_uninits)(self, &mut f, all);
+            }
             let mut st = core::mem::replace(&mut self.st, State::empty());
             self.host.term(&mut st);
             self.st = st;

@@ -46,7 +46,11 @@ impl Interp<'_> {
         while pc < n {
             let lvl = f.base + extra + code.clauses[pc].level;
             let m = core::mem::replace(&mut mode, Mode::Seq);
-            if self.w.is_some() {
+            if let Some(w) = &self.w {
+                // objects no longer referenced get their UNINIT
+                if !w.uninit_queue.borrow().is_empty() {
+                    (self.ops().run_uninits)(self, f, false);
+                }
                 // activities take turns
                 self.ticks = self.ticks.wrapping_add(1);
                 if self.ticks % 64 == 0 {

@@ -418,6 +418,9 @@ fn object_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Arg
                     })
                     .collect();
                 *n.vars.borrow_mut() = vars;
+                if o.uninit.borrow().is_some() {
+                    w.watch_uninit(&n);
+                }
                 Ok(Some(Value::O(n)))
             }
         },
@@ -428,7 +431,11 @@ fn object_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Arg
                 Some(src) => to_method(it, f, &n, &src)?,
                 None => Method { body: Body::Null, private: false, guarded: true, protected: false },
             };
+            let un = n == b"UNINIT";
             o.methods.borrow_mut().get_or_insert_with(BTreeMap::new).insert(n, m);
+            if un {
+                w.watch_uninit(o);
+            }
             Ok(None)
         }
         b"UNSETMETHOD" => {
@@ -600,7 +607,9 @@ fn class_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Args
                 let c = w.new_class(id, alloc::vec![w.class(Builtin::Object)], cls.clone());
                 return Ok(Some(Value::O(c)));
             }
-            let o = Value::O(w.new_obj(&cls, new_data(b)));
+            let o = w.new_obj(&cls, new_data(b));
+            w.watch_uninit(&o);
+            let o = Value::O(o);
             it.send(f, &o, b"INIT", args, Start::Normal, lvl)?;
             Ok(Some(o))
         }
@@ -752,6 +761,7 @@ fn class_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Args
             }
             if let Value::O(oo) = &o {
                 *oo.methods.borrow_mut() = Some(t);
+                w.watch_uninit(oo);
             }
             let rest: Args = args.into_iter().skip(1).collect();
             it.send(f, &o, b"INIT", rest, Start::Normal, lvl)?;
