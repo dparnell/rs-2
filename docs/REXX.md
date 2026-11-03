@@ -347,9 +347,12 @@ the version, and Object REXX's one-blank `QUERY DATETIME`).
 same API and ordinals as IBM's OREXX.DLL for RexxStart, RexxVariablePool,
 the halt and trace calls and the 16-bit entries, plus
 RexxTranslateProgram (ordinal 24), which REXXC uses. Its LX module name is
-REXX (xtask's `LX_NAMES`), so it becomes REXX.DLL by renaming. IBM's other
-OREXX.DLL exports (the native-method API, RexxCreateMethod...) are not
-there: no program on the CD uses them.
+REXX (xtask's `LX_NAMES`), so it becomes REXX.DLL by renaming. It also has IBM's
+native-method API (REXX_SEND, REXX_STRING_NEW... with IBM's ordinals),
+the OSA support calls (RexxCreateMethod, RexxRunMethod, RexxStoreMethod,
+RexxLoadMethod...) and native methods (`::METHOD name EXTERNAL 'LIBRARY
+dll entry'`), which IBM's OpenDoc scripting component OREXXSC.DLL uses
+([OPENDOC.md](OPENDOC.md#orexxsc-object-rexx-scripting-milestone-4)).
 
 **REXXC.EXE** (`REXXC program [output] [/S]`) checks a program with
 RexxTranslateProgram and writes rs2's tokenized form: the program behind
@@ -383,9 +386,8 @@ Workplace Shell's method signatures are in `userland/rexxwps`.
 **Differences from IBM's Object REXX.** IBM's keeps its class library
 as REXX code in REXX.IMG and a tokenized image of each program in its
 extended attributes; rs2's needs neither (and does not read IBM's REXXC
-output). OREXX.DLL has no native-method API (REXX_* exports,
-RexxCreateMethod, RexxSendMessage...), so IBM's OREXXSC.DLL (OpenDoc) and
-other DLLs written against it do not load on it. SOM method signatures
+output). OREXX.DLL's native-method API is the part IBM's OREXXSC.DLL
+uses (no RexxSendMessage...). SOM method signatures
 come from rs2's tables, not the interface repository. SAY writes to
 standard output whatever `.OUTPUT` is set to. A stream object shares the
 open stream of its name with the stream functions. Objects collected by

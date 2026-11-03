@@ -475,8 +475,7 @@ Still stubs or missing:
   ODSHELL's flat Selected menu does not have (CheckMenuItem on it finds
   nothing).
 
-OREXXSC.DLL needs the Apple Event Manager, OSA and SOMUC.DLL. Calls with
-more than 12 words (ODWindowState::RegisterWindow takes 13) must be made
+Calls with more than 12 words (ODWindowState::RegisterWindow takes 13) must be made
 directly, not through `somsup::call`.
 
 Next steps:
@@ -484,7 +483,6 @@ Next steps:
 - the "View as" submenu (0x501b) as IBM's base menu has it
 - rendering exchange for parts dropped on other programs
 - MMVideoPart with an AVI file
-- the Apple Event Manager for OREXXSC
 
 ## OREXXSC: Object REXX scripting (milestone 4)
 
@@ -569,7 +567,7 @@ REXXScriptingComponent does the work through Object REXX:
 - OSACopyID: RexxCopyMethod. OSADispose: RexxDispose.
 - OSAGetScriptInfo/OSASetScriptInfo: RexxGetOSAInfo/RexxSetOSAInfo.
 - OSAScriptError: 'errn' (the error number / 1000), 'errs' (the message),
-  'errb' (the brief message), from the 6-word error information that
+  'errb' (the brief message), from the error information (36 bytes) that
   RexxCreateMethod/RexxRunMethod fill.
 
 Script IDs are Object REXX objects (REXXOBJECT handles).
@@ -601,19 +599,109 @@ GETDIRPARM, RESETDIRPARM). IBM keeps these in its Object REXX image
 - Otherwise `args[0]` points to the result and `args[1..]` are the
   arguments in signature order.
 
-### Plan
+### What rs2 has (milestone 4)
 
-1. SOMUC.DLL, rs2's own (`userland/somuc`): somf_MCollectible and the
-   utility classes.
-2. The Apple Event Manager in OPENDOC.DLL: descriptors, lists, records,
-   Apple events (attributes and parameters), coercion, event handlers
-   and AESend to handlers in the process.
-3. OSAScriptingComponent's methods in that order (errOSA... until a
-   subclass overrides them).
-4. OREXX.DLL: the OSA support calls (92-104), RexxSomInitialize and
-   RexxTerminate, the native-method API, and native methods
-   (`::METHOD name EXTERNAL 'LIBRARY dll entry'`).
-5. ODTEST: SOMUC and the AE Manager with rs2's files only;
-   `ODTEST OREXXSC` loads IBM's OREXXSC on rs2's OREXX (as REXX.DLL in
-   a directory of its own) and compiles, runs, shows, stores and loads
-   REXX scripts through OSA.
+**SOMUC.DLL** (`userland/somuc`, rs2's own) has the 25 classes of IBM's
+SOMUC.DLL, with IBM's export names, ordinals and release orders, from the
+Toolkit's IDL:
+
+- somf_MCollectible, MOrderableCollectible, MLinkable
+- TAssoc, TCollectibleLong
+- TCollection, TSequence, TDeque, TDequeLinkable, TSet, TDictionary,
+  THashTable, TPriorityQueue, TSortedSequence, TSortedSequenceNode,
+  TPrimitiveLinkedList
+- their iterators
+
+Test and hash functions are method tokens; somfIsEqual and somfHash are
+the defaults. SOM.IR describes the classes (`gen_som_ir.py` reads the IDL).
+
+**The Apple Event Manager** (`userland/opendoc/src/ae.rs`):
+
+- descriptors, lists, records and Apple events (parameters and
+  attributes), coercion, CreateObjSpecifier/Offset/Range
+- event handlers, and AESend to handlers in the same process (with a
+  reply when the mode waits for one)
+- a process by name and back (42, 71)
+
+OS/2 OpenDoc's four-character codes are the characters in memory order:
+'TEXT' is 0x54584554, as OREXXSC compares it. typeLongInteger
+(0x6C6F6E67) and typeShortInteger (0x73686F72) are the exceptions.
+
+**OSAScriptingComponent** has the method names REXXScriptingComponent
+overrides, so its overrides take. The composite calls (OSADoScript,
+OSACompileExecute, OSALoadExecute) are made from a subclass's own.
+
+**OREXX.DLL's OSA support and native-method API** (`userland/rexx/src/osa.rs`):
+
+- The objects live in one Object REXX world per process.
+- A REXXOBJECT is a handle into rs2's table, the same one for the same
+  object (OREXXSC compares results with REXX_NIL() and REXX_TRUE()).
+- Scripts run as Object REXX programs, directives included.
+- The error information is 9 words: the line, the error number × 1000 +
+  subcode, the message (word 3) and the secondary message (word 5).
+- REXX_INTEGER gives the value, not an object.
+
+**Native methods.** `::METHOD name EXTERNAL 'LIBRARY dll entry'` is a
+native method (crates/rexx `Body::External`, `Host::native_method`):
+
+- Called with NULL, the entry gives its signature.
+- Otherwise `args[0]` points to the result and `args[n]` points to the
+  nth argument's value.
+
+**The REXX classes** OREXXSC's natives work with are rs2's own REXX code,
+put into `.environment` by RexxSomInitialize (IBM keeps its classes in
+REXX.IMG):
+
+- ScriptableApp: CONNECT, DISCONNECT, NOVALUE, and UNKNOWN, which turns
+  a message into an Apple event. A single non-directory argument becomes
+  the direct parameter.
+- ObjectSpecifier, SCReference, SCRelativePosition, SCList, SCRange
+
+**The terminology classes** (`aete.rs`, rs2's names):
+
+- ODAETEDictionary's Load(app) asks the application for its terminology
+  with the Apple event 'ascr'/'gdte'. The reply's direct parameter is an
+  'aete' (Apple's layout, little-endian, events only so far).
+  FindEvent(name) looks an event up by name.
+- ODAETEEvent and ODAETEParameter give OREXXSC's records (the offsets
+  are in aete.rs).
+
+**Scripting a document.** ODSHELL's Document/Run script runs
+`C:\ODSCRIPT.CMD` (`tests/opendoc/odscript.cmd`) through OREXXSC and
+shows the result on the status line. ODSHELL's terminology has three
+events:
+
+- settext: the root part's text
+- gettext
+- play: the embedded MMAudioPart plays, by a click on its facet, because
+  its Play command needs the play palette that an activated frame has
+
+Screenshot: work/progress/opendoc/odshell-rexx-script-orexxsc.png.
+
+**Tests:**
+
+- `ODTEST`: 111 checks pass, with no IBM files. Among them are SOMUC
+  (12) and the Apple Event Manager (10).
+- `ODTEST OREXXSC`: 13 checks pass. IBM's OREXXSC.DLL and REXXCRT.DLL
+  are needed, with OREXXSC in `C:\ORX` (worktree modules.txt:
+  `work/unpacked/disk_4/OS2/DLL/OREXXSC.DLL -> ORX\OREXXSC.DLL`). The
+  checks:
+  - REXXScriptingComponent loads
+  - OSAScriptingComponentName
+  - compile, execute, display; OSADoScript
+  - directives
+  - OSAGetSource, OSACopyID, OSAStore and OSALoad
+  - syntax and run-time errors through OSAScriptError
+  - scripts that connect to ODTEST and send it events, with and without
+    a direct parameter
+- RXLANG (286) and ORXLANG (105) pass.
+
+**Not yet:**
+
+- Apple events to other processes (AESend delivers only in the process).
+- The terminology's classes, properties, enumerations and comparisons.
+  So ScriptableApp's NOVALUE, object specifiers in events, and named
+  parameters with the ODAETETerm classes do not work (those classes'
+  methods fail).
+- Recording (OSAStartRecording).
+- IBM's REXX.IMG classes themselves.
