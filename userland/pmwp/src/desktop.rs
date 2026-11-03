@@ -195,6 +195,121 @@ fn bitmap() -> Vec<u8> {
     prf_read(HINI_USER, APP, BITMAP).map(|v| v.into_iter().take_while(|&c| c != 0).collect()).unwrap_or_default()
 }
 
+// ---- The background image ----
+
+unsafe extern "C" {
+    #[link_name = "PMWIN.730"]
+    fn WinDrawBitmap(hps: u32, hbm: u32, src: *const RectL, dst: *const PointL, fore: i32, back: i32, fl: u32) -> u32;
+}
+
+/// The lockup's image while locked: (bitmap, width, height).
+static mut IMAGE: (u32, i32, i32) = (0, 0, 0);
+
+/// A bitmap from an OS/2 or Windows .BMP file (the first of a bitmap
+/// array; uncompressed): its BITMAPINFO(2) and bits as GpiCreateBitmap
+/// takes them.
+pub fn load_bmp(path: &[u8]) -> Option<(u32, i32, i32)> {
+    let d = crate::mindex::read_all(path)?;
+    let mut base = 0usize;
+    if d.get(0..2) == Some(b"BA") {
+        base = 14;
+    }
+    let f = d.get(base..)?;
+    if f.get(0..2) != Some(b"BM") || f.len() < 26 {
+        return None;
+    }
+    let u32_at = |o: usize| f.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let off_bits = u32_at(10)? as usize;
+    let cb = u32_at(14)? as usize;
+    let (cx, cy, bpp) = if cb == 12 {
+        let u16_at = |o: usize| u16::from_le_bytes([f[o], f[o + 1]]) as i32;
+        (u16_at(18), u16_at(20), u16_at(24))
+    } else {
+        // BITMAPINFOHEADER2 / Windows: cx, cy (i32), planes, bit count,
+        // compression.
+        if cb >= 20 && u32_at(30)? != 0 {
+            return None;
+        }
+        (u32_at(18)? as i32, (u32_at(22)? as i32).abs(), u16::from_le_bytes([f[28], f[29]]) as i32)
+    };
+    if cx <= 0 || cy <= 0 || !matches!(bpp, 1 | 4 | 8 | 24) {
+        return None;
+    }
+    let rows = (bpp as usize * cx as usize).div_ceil(32) * 4 * cy as usize;
+    // The bits' offset is from the file's start (in an array too).
+    let bits = d.get(off_bits..off_bits + rows)?;
+    // The header and its colour table, as in the file (a Windows
+    // BITMAPINFOHEADER is laid out as the start of OS/2's 2.x one).
+    let info = d.get(base + 14..off_bits.max(base + 14 + cb))?.to_vec();
+    let mut hdr = [0u8; 16];
+    hdr[0..4].copy_from_slice(&16u32.to_le_bytes());
+    hdr[4..8].copy_from_slice(&(cx as u32).to_le_bytes());
+    hdr[8..12].copy_from_slice(&(cy as u32).to_le_bytes());
+    hdr[12..14].copy_from_slice(&1u16.to_le_bytes());
+    hdr[14..16].copy_from_slice(&(bpp as u16).to_le_bytes());
+    // CBM_INIT
+    let hbm = unsafe { GpiCreateBitmap(0, hdr.as_ptr(), 4, bits.as_ptr(), info.as_ptr()) };
+    (hbm != 0).then_some((hbm, cx, cy))
+}
+
+/// The image drawn as the lockup's mode says: 306 normal (centred), 307
+/// tiled, 308 scaled (`scale` images across and down; 1 fills the
+/// window).
+fn draw_image(hps: u32, all: &RectL, mode: u16, scale: u16) {
+    let (hbm, bx, by) = unsafe { IMAGE };
+    if hbm == 0 {
+        return;
+    }
+    const DBM_NORMAL: u32 = 0;
+    const DBM_STRETCH: u32 = 4;
+    let (w, h) = (all.r - all.l, all.t - all.b);
+    match mode {
+        306 => {
+            let p = PointL { x: all.l + (w - bx) / 2, y: all.b + (h - by) / 2 };
+            unsafe { WinDrawBitmap(hps, hbm, core::ptr::null(), &p, 0, 0, DBM_NORMAL) };
+        }
+        307 => {
+            let mut y = all.b;
+            while y < all.t {
+                let mut x = all.l;
+                while x < all.r {
+                    unsafe { WinDrawBitmap(hps, hbm, core::ptr::null(), &PointL { x, y }, 0, 0, DBM_NORMAL) };
+                    x += bx;
+                }
+                y += by;
+            }
+        }
+        _ => {
+            let n = scale.clamp(1, 99) as i32;
+            for j in 0..n {
+                for i in 0..n {
+                    let r = RectL { l: all.l + w * i / n, b: all.b + h * j / n, r: all.l + w * (i + 1) / n, t: all.b + h * (j + 1) / n };
+                    unsafe { WinDrawBitmap(hps, hbm, core::ptr::null(), &r as *const RectL as *const PointL, 0, 0, DBM_STRETCH) };
+                }
+            }
+        }
+    }
+}
+
+fn load_image() {
+    free_image();
+    let f = bitmap();
+    if !f.is_empty() {
+        if let Some(i) = load_bmp(&f) {
+            unsafe { IMAGE = i };
+        }
+    }
+}
+
+fn free_image() {
+    unsafe {
+        if IMAGE.0 != 0 {
+            GpiDeleteBitmap(IMAGE.0);
+        }
+        IMAGE = (0, 0, 0);
+    }
+}
+
 fn color_rgb(c: i32) -> u32 {
     match c {
         // The desktop's own background.
@@ -318,6 +433,9 @@ fn paint_lock(h: u32) {
         WinFillRect(hps, &all, if dimmed { 0 } else { color_rgb(o.color) as i32 });
     }
     if !dimmed {
+        draw_image(hps, &all, o.mode, o.scale);
+    }
+    if !dimmed {
         let (cx, cy) = (all.r, all.t);
         // A padlock in the middle: the shackle (outlines), the body over
         // its lower half, the keyhole.
@@ -374,6 +492,7 @@ pub fn lock_now() -> bool {
     let o = options();
     // Partial screen: most of the screen, the desktop's edges showing.
     let (x, y, cx, cy) = if o.full { (0, 0, sw, sh) } else { (sw / 8, sh / 8, sw * 3 / 4, sh * 3 / 4) };
+    load_image();
     let h = unsafe { WinCreateWindow(HWND_DESKTOP, LOCK_CLASS.as_ptr() as u32, b"\0".as_ptr(), 0, x, y, cx, cy, 0, HWND_TOP, 0, core::ptr::null(), core::ptr::null()) };
     if h == 0 {
         return false;
@@ -404,6 +523,7 @@ fn try_unlock(typed: &[u8]) -> bool {
 
 fn unlock() {
     let Some(l) = (unsafe { LOCK.take() }) else { return };
+    free_image();
     unsafe {
         WinSetSysModalWindow(HWND_DESKTOP, 0);
         WinDestroyWindow(l.hwnd);
@@ -606,6 +726,15 @@ const LOCK_COLORS: [(&[u8], i32); 6] = [
 ];
 const ID_LCOLOR: u16 = 295;
 const ID_LFILE: u16 = 302;
+/// IBM's ids for the image's mode (LockupOptions keeps them) and scale.
+const ID_LNORMAL: u16 = 306;
+const ID_LTILED: u16 = 307;
+const ID_LSCALED: u16 = 308;
+const ID_LSCALE: u16 = 309;
+
+fn enable_item(h: u32, id: u16, on: bool) {
+    unsafe { WinEnableWindow(WinWindowFromID(h, id as u32), on as u32) };
+}
 
 extern "C" fn lockup2_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     match msg {
@@ -614,12 +743,26 @@ extern "C" fn lockup2_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             let i = LOCK_COLORS.iter().position(|&(_, v)| v == c).unwrap_or(0);
             check(h, ID_LCOLOR + i as u16, true);
             set_item_text(h, ID_LFILE as u32, &bitmap());
+            let o = options();
+            check(h, o.mode.clamp(ID_LNORMAL, ID_LSCALED), true);
+            spin_init(h, ID_LSCALE, 1, 99, o.scale.max(1) as i32);
+            enable_item(h, ID_LSCALE, o.mode == ID_LSCALED);
+            0
+        }
+        WM_CONTROL if a & 0xffff == ID_LSCALE as u32 && a >> 16 == SPBN_CHANGE => {
+            if let Some(v) = spin_value(h, ID_LSCALE).filter(|v| (1..=99).contains(v)) {
+                update(|o| o.scale = v as u16);
+            }
             0
         }
         WM_CONTROL if a >> 16 == 1 => {
             let id = (a & 0xffff) as u16;
             if (ID_LCOLOR..ID_LCOLOR + LOCK_COLORS.len() as u16).contains(&id) {
                 update(|o| o.color = LOCK_COLORS[(id - ID_LCOLOR) as usize].1);
+            }
+            if (ID_LNORMAL..=ID_LSCALED).contains(&id) {
+                update(|o| o.mode = id);
+                enable_item(h, ID_LSCALE, id == ID_LSCALED);
             }
             0
         }
@@ -635,14 +778,20 @@ extern "C" fn lockup2_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 }
 
 extern "C" fn wpAddDesktopLockup2Page(o: usize, nb: u32) -> u32 {
-    let mut items = alloc::vec![group(b"Color", (4, 34, 226, 82))];
+    let mut items = alloc::vec![group(b"Color", (4, 60, 226, 56))];
     for (i, &(t, _)) in LOCK_COLORS.iter().enumerate() {
         let (col, row) = (i as i16 % 2, i as i16 / 2);
-        items.push(radio(t, (10 + col * 110, 94 - row * 14, 104), ID_LCOLOR + i as u16, i == 0));
+        items.push(radio(t, (10 + col * 110, 94 - row * 12, 104), ID_LCOLOR + i as u16, i == 0));
     }
-    items.push(book::label(b"Image file (kept for LOCKUPBACKGROUND=):", (6, 22, 220)));
+    items.push(group(b"Image", (4, 2, 226, 56)));
+    items.push(book::label(b"File (a bitmap):", (10, 40, 70)));
     // ES_AUTOSCROLL | ES_MARGIN
-    items.push(item(WC_ENTRYFIELD, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0004 | 0x0008, (8, 10, 220, 8), ID_LFILE));
+    items.push(item(WC_ENTRYFIELD, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0004 | 0x0008, (82, 40, 140, 8), ID_LFILE));
+    items.push(radio(b"~Normal", (10, 22, 50), ID_LNORMAL, true));
+    items.push(radio(b"T~iled", (64, 22, 50), ID_LTILED, false));
+    items.push(radio(b"~Scaled", (118, 22, 50), ID_LSCALED, false));
+    items.push(crate::setup::spin((172, 20, 36), ID_LSCALE));
+    items.push(book::label(b"Images across and down", (118, 8, 110)));
     let page = {
         let tpl = template(book::page_frame(), items);
         book::make_page(nb, lockup2_proc, &tpl, o)
