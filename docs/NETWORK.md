@@ -8,9 +8,9 @@ programs (IBM FTP, TELNET, FINGER, RXSOCK, the Toolkit samples) run.
 ```
   OS/2 programs ── TCPIP32 / SO32DLL / TCP32DLL (+ TNLS32, PMSHAPI)
                           tcpipcore (user mode, per process)
-  rs2 programs (NETTEST, PING, IFCONFIG, NETSTAT) ──┐   │
+  rs2 programs (NETTEST, PING, IFCONFIG, NETSTAT, ROUTE, ARP) ──┐   │
                                  ▼                     ▼
-                    RS2API 200-219 gate (api/sockets.rs)
+                    RS2API 200-221, 240 gate (api/sockets.rs)
                                  │
                     net::socket: per-process handles,
                     blocking / non-blocking, select, options
@@ -62,8 +62,10 @@ link state, MTU, `send(frame)`, `receive(callback)` and `rx_pending()`.
   128-descriptor receive ring and a 64-descriptor transmit ring with
   2 KB buffers handed over by OWN bits, CSR0 TDMD to transmit at once.
   Link state from LED0 (BCR4) once it has been seen lit; until then the
-  link counts as up (VMware's vlance never lights it). No MSI and no INTx
-  routing: the interrupt stays disabled (IENA clear) and it is polled.
+  link counts as up (VMware's vlance never lights it). No MSI: the INTx
+  pin is routed through ACPI (below), CSR0 IENA set with the transmit and
+  initialisation interrupts masked in CSR3; the handler acknowledges
+  CSR0. Without a route it is polled.
 * **virtio-net** (`drivers/virtio/net.rs`) on the existing virtio PCI
   transport (modern and legacy): features MAC and STATUS, the 12-byte
   (1.x) or 10-byte (legacy) `virtio_net_hdr` without offloads, header and
@@ -73,8 +75,24 @@ link state, MTU, `send(frame)`, `receive(callback)` and `rx_pending()`.
 NICs with MSI (the 82574L) or MSI-X (virtio-net, vmxnet3) interrupt on received
 frames and link changes: the handler acknowledges the device and calls
 `net::kick()`, which wakes the network thread (`Nic::interrupt_driven`).
-PCI INTx cannot be routed (no ACPI _PRT), so the others (8254x, PCnet), and all
-of them with `nomsi`, keep interrupts masked: the timer tick (interrupt
+The 8254x and the PCnet have no MSI: their **INTx** pin is routed
+through the ACPI namespace (`msi::setup_intx`). `kernel/src/aml.rs`
+walks the DSDT and SSDTs (Scope, Device, Name, Method and the data
+objects; methods are not run) for the `_PRT` of the PCI root bridges
+(`_HID`/`_CID` PNP0A03/PNP0A08, bus `_BBN`) and of bridges below them;
+a `_PRT` method (QEMU q35's `If (PICF) Return (PRTA) ...`) is searched
+for the packages it returns and the APIC-mode one chosen. Entries name
+a GSI directly or a link device whose `_CRS` (else a single-choice
+`_PRS`) holds an IRQ or Extended Interrupt descriptor with its trigger
+and polarity; a computed `_CRS` (PIIX's LNKA-D) falls back to the
+interrupt line the firmware set. Devices behind bridges without a
+`_PRT` are swizzled up to one. The GSI gets an IOAPIC input and a
+vector, programmed and unmasked when the LAPICs are up (`msi::start`);
+level-triggered lines are acknowledged after the handlers ran, and
+devices on one line share it. On QEMU q35 the e1000 at 00:02.0 lands on
+GSI 22 (level, active high). `nointx` on the kernel command line turns
+this off. NICs without a vector (`nomsi` for the MSI ones, `nointx`
+for the others) keep interrupts masked: the timer tick (interrupt
 context) calls `rx_pending()` on them, which only peeks at a descriptor
 or the used ring under `try_lock`, and wakes the network thread when a
 frame is waiting. (vmxnet3 without MSI-X/MSI sets IC_DISABLE_ALL and
@@ -91,43 +109,70 @@ PCnet, the default for the OS/2 guest type, behind a PCI bridge at
 ## The stack: `crates/tcpip`
 
 A `no_std` + `alloc` crate with no kernel dependencies, so it is tested
-on the host (`cargo test -p tcpip`, 38 tests): packets in and out as
+on the host (`cargo test -p tcpip`, 56 tests): packets in and out as
 byte buffers, time as a millisecond count passed in, nothing blocks.
 
 | Module | What |
 |--------|------|
 | `wire` | byte order, RFC 1071 checksum, pseudo-header |
 | `eth` | Ethernet II framing |
-| `arp` | RFC 826 packets; neighbour cache (10 min), resolution with 3 requests 1 s apart, packets parked meanwhile |
+| `arp` | RFC 826 packets; neighbour cache (10 min), resolution with 3 requests 1 s apart, packets parked meanwhile; entries set by hand (permanent, or published: proxy ARP) |
 | `ipv4` | header, fragmentation on output, reassembly on input (range list, 30 s timeout, 16 datagrams) |
 | `icmp` | echo request/reply, destination unreachable |
 | `udp` | datagrams with checksum |
-| `tcp` | segment format (MSS option) and the `Tcb` state machine |
-| `dhcp` | client: INIT/SELECTING/REQUESTING/BOUND/RENEWING/REBINDING, back-off, T1/T2, lease expiry, NAK |
+| `tcp` | segment format (MSS, window scale, SACK-permitted, SACK, timestamps options) and the `Tcb` state machine |
+| `dhcp` | client: INIT/SELECTING/REQUESTING/BOUND/RENEWING/REBINDING, back-off, T1/T2, lease expiry, NAK, release and renewal on request |
 | `dns` | A queries, answers with compression and CNAME chains |
-| `stack` | interfaces and routing, IP input/output, sockets, listeners and accept queues, raw sockets, DHCP and the resolver |
+| `stack` | interfaces (addresses and aliases), the routing table, IP input/output and forwarding, sockets, listeners and accept queues, raw sockets, DHCP, the resolver, counters |
 
 **TCP** (RFC 9293) has the full state machine: active and passive open,
 simultaneous open and close, FIN handshake, TIME_WAIT (60 s), RST
 generation for closed ports and on abort, RFC 5961 checks (RSTs must hit
 RCV.NXT, SYNs in the window get a challenge ACK). Retransmission uses the
-RFC 6298 estimator (Karn's rule, back-off, 200 ms - 60 s), go-back-N from
-SND.UNA, fast retransmit on three duplicate ACKs; slow start and
-congestion avoidance (RFC 5681). Out-of-order segments are dropped and
-answered with a duplicate ACK. The receive window is the free space of a
-64 KB buffer (no window scaling), window updates go out as soon as the
-window opens by a segment; a zero send window is probed on the persist
-timer. A SYN gives up after 5 retransmissions (63 s), data after 12. A
-connection closed with unread data is reset, as BSD does; an orphaned
-connection in FIN_WAIT_2 is dropped after 60 s. Not implemented:
-keepalives, urgent data, window scaling, timestamps, SACK, Nagle and
-delayed ACKs (every segment is ACKed at once).
+RFC 6298 estimator (Karn's rule, or timestamp echoes; back-off, 200 ms -
+60 s), going back to SND.UNA but skipping what the peer reported with
+SACK blocks (RFC 2018), fast retransmit on three duplicate ACKs; slow
+start and congestion avoidance (RFC 5681). Out-of-order segments are kept
+(up to the window, 64 segments) and joined to the stream when the gap is
+filled; meanwhile duplicate ACKs carry SACK blocks for them, the most
+recent first. Window scaling and timestamps (RFC 7323, with PAWS) and
+SACK-permitted are offered in every SYN and used when the peer offers
+them too; the receive window is the free space of the receive buffer
+(64 KB by default, up to 1 MB with SO_RCVBUF: the window scale is chosen
+from it), window updates go out as soon as the window opens by a segment;
+a zero send window is probed on the persist timer. ACKs are delayed up
+to 100 ms unless two full segments are unacknowledged, data came out of
+order or filled a gap, or the window is about closed. Small segments
+wait while data is in flight (Nagle) unless TCP_NODELAY is set, urgent
+data is queued or the peer's window is small. Keepalives (SO_KEEPALIVE):
+after 2 hours idle, a probe every 75 s, 8 unanswered ones end the
+connection with ETIMEDOUT (all three settable through Rs2NetControl).
+Urgent data (BSD semantics): MSG_OOB sends with the urgent pointer just
+past the last byte; on input the urgent byte is taken out of the stream
+(left in with SO_OOBINLINE), reads stop at the mark, SIOCATMARK tells
+when the next read is there, and select's exception set reports pending
+urgent data. A SYN gives up after 5 retransmissions (63 s), data after
+12. A connection closed with unread data is reset, as BSD does; an
+orphaned connection in FIN_WAIT_2 is dropped after 60 s. A new SYN for a
+connection in TIME_WAIT (higher sequence number or newer timestamp)
+opens a new connection (RFC 6191); TIME_WAIT ignores resets (RFC 1337).
 
-**Routing**: one address per interface. 127/8 and our own addresses go
-over the loopback interface (interface 0, MTU 16384), which delivers
-before the sending call returns; on-link destinations directly; the rest
-through the first interface with a gateway. Limited and subnet
-broadcasts go to the Ethernet broadcast address.
+**Routing**: 127/8 and our own addresses (aliases included) go over the
+loopback interface (interface 0, MTU 16384), which delivers before the
+sending call returns. Otherwise the longest prefix wins among the
+networks of the interfaces' addresses and the routing table (network
+and host routes with a gateway, or directly on an interface; an
+interface's own network beats a route of the same length, then the
+lower metric). The default gateway of DHCP or `net=` is a default route
+of the table, replaced when that configuration changes; ROUTE ADD
+replaces it too. Only interfaces up and with link are used. Limited and
+subnet broadcasts go to the Ethernet broadcast address. With IP
+forwarding on (sysctl, off by default) datagrams for other hosts go on
+with their TTL lowered (ICMP time exceeded, unreachable, fragmentation
+needed otherwise). Interfaces can hold several addresses (aliases); an
+address, mask, MTU, metric, up/down state, DHCP renewal or release
+change at run time (Rs2NetControl). The stack counts IP, ICMP, UDP,
+TCP and ARP events for NETSTAT -s and the SIOSTAT ioctls.
 
 **Sockets in the stack**: TCP, UDP and raw (any IP protocol; sends the
 protocol payload, receives IP header + payload, as BSD raw sockets do —
@@ -157,28 +202,35 @@ once. Everything is thread context under the big kernel lock; only the
 tick and the NIC interrupt handlers run in interrupt context and only
 take driver spin locks with `try_lock`.
 
-**Waiting**: every change a socket waiter could care about (data, state
-changes, accept queue, DNS answers) bumps `net::EVENTS` and wakes
-`net::WAIT`, one wait queue for all sockets. A blocking call retries its
-stack operation whenever the counter moves; this keeps select() trivial.
-Per-socket queues are an optimisation for later.
+**Waiting**: the stack reports which sockets changed (data, state,
+accept queue, room to send) and whether something global did (DNS
+answers, interface configuration). A blocking call, or select(),
+subscribes a `net::Waiter` to the stack sockets it waits for and sleeps
+until one of them changes (a global change wakes every waiter;
+so_cancel wakes the socket's); it then retries its stack operation. A
+one-second recheck is the safety net. `net::EVENTS`/`net::WAIT` still
+see every change.
 
 **`net::socket`** is the kernel-internal socket API: per-process handle
 tables (handles from 3 up, unique in the system: as on OS/2 any process
 may use any socket, the tables only say whose it is and so which
 process's end closes it), each handle naming a stack socket plus
-FIONBIO, SO_RCVTIMEO/SO_SNDTIMEO, SO_LINGER, SO_KEEPALIVE (accepted, not
-acted on), SO_OOBINLINE. Calls: `create`, `bind`, `listen`, `accept`,
+FIONBIO, SO_RCVTIMEO/SO_SNDTIMEO, SO_LINGER (SO_KEEPALIVE, SO_OOBINLINE
+and TCP_NODELAY are the stack socket's; accepted connections inherit
+them). Calls: `create`, `bind`, `listen`, `accept`,
 `connect` (EINPROGRESS for non-blocking sockets, then select for
 writing), `send` (a blocking stream send returns when everything is
-queued), `recv` (MSG_PEEK, MSG_DONTWAIT), `shutdown`, `close`, `select`
+queued; MSG_OOB sends urgent data), `recv` (MSG_PEEK, MSG_DONTWAIT,
+MSG_OOB), `shutdown`, `close`, `select`
 (OS/2's form: one array of read, write and exception sockets, -1 for the
-ones not ready, millisecond timeout), `ioctl` (FIONBIO, FIONREAD),
+ones not ready, millisecond timeout), `ioctl` (FIONBIO, FIONREAD,
+SIOCATMARK),
 `set_option`/`get_option` (SO_REUSEADDR, SO_BROADCAST, SO_SNDBUF,
 SO_RCVBUF, SO_LINGER, timeouts, SO_ERROR, SO_TYPE, SO_ACCEPTCONN,
-TCP_NODELAY), `name` (getsockname/getpeername) and `resolve`. Blocking
-calls end with EINTR when the thread is killed or signalled. A process's
-sockets are closed when it ends.
+TCP_NODELAY, TCP_MAXSEG), `name` (getsockname/getpeername) and
+`resolve`. Blocking calls end with EINTR when the thread is killed or
+signalled. A process's sockets are closed when it ends. DosShutdown
+gives the DHCP leases back (`net::shutdown`).
 
 ## User interface: RS2API 200-219
 
@@ -201,6 +253,7 @@ is accepted as input.
 | 219 | Rs2NetQuerySockets (every socket of the stack, with its owner: netstat) |
 | 220 | Rs2SockTake (addsockettolist: the caller owns the socket) |
 | 221 | Rs2SockRelease (removesocketfromlist: the socket outlives its owner) |
+| 240 | Rs2NetControl (routes, ARP entries, interface settings, counters, stack variables: ROUTE, ARP, IFCONFIG, NETSTAT, TCPCFG2, the DLLs' ioctls and sysctl) |
 
 ## Configuration
 
@@ -215,6 +268,13 @@ net=10.0.2.15/24,10.0.2.2,10.0.2.3         static: address/prefix, gateway, DNS 
 ```
 
 The static form configures the first interface; others stay down.
+
+At run time IFCONFIG changes interfaces (address and mask, aliases,
+up/down, MTU, metric, DHCP renewal or release), ROUTE and ARP the
+routing and ARP tables, and TCPCFG2's Save applies its Network page to
+lan0 at once besides writing CONFIG.SYS; these changes last until the
+next start. DHCP leases are renewed at T1/T2 and lost at expiry, and
+released at shutdown (DosShutdown).
 
 ## Testing
 
@@ -248,20 +308,42 @@ pcnet (also behind a PCI bridge, and with its registers in 32-bit mode;
 IBM FTP's `get`/`put` of 300 KB byte-identical on each model too): all checks pass, about 5-7 MB/s each way under
 TCG; apitest and stress still pass with a NIC present.
 
+Further NETTEST sections: `tcp` (urgent data over loopback: MSG_OOB,
+select's exception set, SIOCATMARK, the read stopping at the mark,
+SO_OOBINLINE; TCP_NODELAY and SO_KEEPALIVE read back), `tables` (a
+network and a host route added, listed and deleted, an off-link gateway
+refused, a permanent ARP entry, an alias that answers pings, the
+counters, a stack variable) and `urgent` (urgent data to the host,
+which sees it out of band; urgent data from it, which QEMU's user
+network passes on in band, without URG, so that check is skipped then;
+keepalives on an idle connection: probes go out, QEMU's stack answers
+and the connection lives). The host side of `connect`, `bulk`, `urgent`
+and `listen` is `tools/scripts/nettesthost.py`:
+
+```
+python3 -I tools/scripts/nettesthost.py --port 5586 --client 5595 &
+cargo xtask run --net [MODEL] --init "RS2\NETTEST.EXE -port 5586 -listen 2323" --hostfwd tcp::5595-:2323
+```
+
+Out-of-order delivery, SACK, PAWS, window scaling, delayed ACKs, Nagle,
+keepalive timeouts, routing, forwarding, aliases, proxy ARP and DHCP
+release are covered by the host tests of `crates/tcpip`: QEMU's user
+network terminates TCP itself, so segments cannot be reordered on the
+way to the guest.
+
 `PING [-c count] [-s size] [-w ms] host` (`OS2\PING.EXE`) uses a raw ICMP
 socket.
 
 ## Gaps
 
-* NICs without MSI/MSI-X are polled from the tick; no multicast/IGMP, no IPv6, no
-  IP forwarding, one address per interface, no routing table beyond the
-  default gateway.
-* TCP: no keepalives, urgent data, window scaling, SACK, timestamps,
-  Nagle or delayed ACK; out-of-order data is dropped.
-* One wait queue for all socket waiters (every event wakes every waiter).
-* IFCONFIG and NETSTAT only show; there is no `route`/`arp`, no way to
-  change the configuration at run time (TCPCFG2's settings take effect
-  at the next start), no DHCP release at shutdown.
+* No multicast/IGMP (the NICs' multicast filters are empty; NetBIOS
+  over TCP/IP's name service uses broadcasts, which work), no IPv6, no
+  ICMP redirects or path MTU discovery, no routing protocols (RIP).
+* Interrupts of PCI devices other than the NICs still come through MSI
+  only; the AML walker runs no methods, so routing tables computed at
+  run time (other than QEMU's PICF choice) are not understood.
+* TCPCFG2 cannot change the host name or the kernel resolver's name
+  servers of a DHCP interface until the next start.
 * rs2's TELNETD gives clients pipes, not a terminal: full-screen VIO
   programs do not show; there is no LPD server (rs2's printers send to
   LPR/IPP servers, PRINTING.md), no TALK/TALKD, REXECD/RSHD, BOOTP or
@@ -295,8 +377,8 @@ result buffers are too.
   caller's layout (4.4: `sin_len` 16; 4.0: USHORT family) and come in
   either; a destination of INADDR_ANY means this host (loopback).
   Message flags are translated (4.1's MSG_WAITALL 0x80/MSG_DONTWAIT
-  0x100, 4.0's MSG_FULLREAD; MSG_WAITALL loops in the DLL); there is no
-  urgent data, so `recv(MSG_OOB)` gives EINVAL. `os2_select()` is the
+  0x100, 4.0's MSG_FULLREAD; MSG_WAITALL loops in the DLL); MSG_OOB
+  sends and receives urgent data. `os2_select()` is the
   kernel's select; BSD `select()` is built on it (TCPIP32's fd_set is
   {count, array}, SO32DLL's a bit mask). `readv`/`writev`/`sendmsg`/
   `recvmsg` gather and scatter in the DLL; `socketpair()` connects two
@@ -307,9 +389,25 @@ result buffers are too.
 * **ioctl/os2_ioctl**: FIONBIO, FIONREAD, FIOASYNC, SIOCATMARK; the
   interface queries SIOCGIFCONF, SIOCGIFADDR, SIOCGIFFLAGS,
   SIOCGIFBRDADDR, SIOCGIFNETMASK, SIOCGIFDSTADDR, SIOCGIFMETRIC,
-  SIOCGIFMTU (4.0 `ioc(g,n)` and 4.4 `_IOWR` numbers alike); the
-  routing table SIOSTATCNTRT/SIOSTATRT; SIOCSSYN accepted. Interfaces
+  SIOCGIFMTU (4.0 `ioc(g,n)` and 4.4 `_IOWR` numbers alike) and their
+  settings SIOCSIFADDR, SIOCSIFNETMASK, SIOCSIFFLAGS (IFF_UP),
+  SIOCSIFMTU, SIOCSIFMETRIC, SIOCAIFADDR, SIOCDIFADDR; routes
+  SIOCADDRT/SIOCDELRT (`ortentry`: the mask is a host's, the interface's
+  network's or the address class's), SIOFLUSHRT, SIOFLUSHRTIFP; ARP
+  SIOCSARP/SIOCGARP/SIOCDARP (`arpreq`, ATF_PERM/ATF_PUBL); statistics
+  SIOSTATTCP, SIOSTATUDP, SIOSTATIP, SIOSTATICMP (and their Z forms),
+  SIOSTATIF/SIOSTATIF42 (`ifmib`), SIOSTATAT, SIOSTATARP with
+  SIOSTATCNTAT, SIOSTATCNTRT/SIOSTATRT; SIOCSSYN accepted. Interfaces
   have OS/2's names: `lan0`, `lan1`, ... for the adapters, `lo`.
+  Layouts are the 4.5 Toolkit's; counters the stack does not keep are 0.
+* **sysctl()** (TCPIP32): CTL_NET.PF_INET IP forwarding
+  (IPCTL_FORWARDING/IPCTL_FORWARD, settable), TCP keepalive probes, send
+  and receive buffer sizes (settable), MSS, TTL, window scaling and
+  timestamps (on), the TCP/UDP/ICMP statistics structures; CTL_KERN host
+  name, host id and the stack version (KERNCTL_INETVER); CTL_OS2
+  OS2_MEMMAPIO (15 4 KB blocks for MSG_MAPIO sends; the semaphores in
+  the array are posted once a send has copied a block, which is at
+  once) and OS2_QUERY_MEMMAPIO.
 * **Names**: `gethostbyname` looks at the HOSTS file, the host name and
   then the kernel resolver (Rs2NetResolve, DNS servers from DHCP);
   `gethostbyaddr` at HOSTS, the own addresses, then a PTR query. The
@@ -358,11 +456,22 @@ result buffers are too.
 
 ### Utilities
 
-`IFCONFIG [interface]` shows the interfaces (addresses, flags, MAC,
-DHCP state, DNS servers, counters); `NETSTAT` the TCP connections, `-a`
-all sockets with owning process and handle, `-r` routes, `-i`
-interfaces, `-s` counters; `HOSTNAME`; `HOST name|address` resolves
-through TCPIP32.DLL (names and PTR lookups); `PING` as before.
+`IFCONFIG [interface]` shows the interfaces (addresses and aliases,
+flags, MAC, DHCP state, DNS servers, counters); `IFCONFIG interface
+[address] [netmask m] [mtu n] [metric n] [up|down] [alias|-alias]
+[delete address] [dhcp] [release]` changes one. `ROUTE [-n] [-v] [-f]
+ADD|DELETE [net|host] destination gateway [metric] [-netmask mask]`,
+`ROUTE -f`/`FLUSH`, `ROUTE PRINT` (TCP/IP 4.x's syntax: `default`,
+class masks, `address/bits` too). `ARP host`, `ARP -a`, `ARP -d host`,
+`ARP -s host ether [temp] [pub]`, `ARP -f file`. `NETSTAT` with OS/2's
+options: `-a` interface addresses, `-c` ICMP, `-i` IP, `-u` UDP counters
+and sockets, `-x` TCP counters (with keepalive and buffer settings),
+`-n` interfaces, `-p` ARP table, `-r` routes, `-s` all sockets with
+owning process and socket number, `-t` TCP connections (default; `-l`
+adds listeners), `-g`, `-m`. IBM's NETSTAT, ROUTE, ARP and IFCONFIG are
+MPTN programs, not on the Warp 4.52 media (only their `.sym` files), so
+these are rs2's own with their syntax. `HOSTNAME`; `HOST name|address`
+resolves through TCPIP32.DLL (names and PTR lookups); `PING` as before.
 
 ### rs2's TCP/IP applications
 
@@ -449,10 +558,8 @@ line ends):
   `_alarm`/`_xsignal` accept but never signal (TFTP's retransmission
   timer does not fire). Nothing on the media imports the 16-bit
   SOCKETS.DLL, which is not provided.
-* No urgent (out-of-band) data, no `sysctl()` (the Toolkit's HPS
-  memory-mapped I/O samples need it), no ARP/interface statistics
-  ioctls (SIOSTATAT, SIOSTATIF, SIOSTATTCP...), no setting of
-  interfaces or routes, `rexec()` is missing.
+* `rexec()` is missing; SIOSTATSO (sockets, layout unknown) and the
+  INETCFG sysctl variables (inetcfg_ctl) are not there.
 * TNLS32 does no code page translation (FTP's and TELNET's `-x`
   translation tables, DBCS countries); PMSHAPI does not read or write
   INI files.

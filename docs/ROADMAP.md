@@ -104,7 +104,8 @@ Status markers: done, in progress, planned.
   `Resolution_Set`), write-combining (PAT) mappings of framebuffers on
   real hardware
 - done: networking (docs/NETWORK.md; receive interrupts on e1000e,
-  vmxnet3 and virtio-net, the 8254x without MSI polled): Intel
+  vmxnet3 and virtio-net through MSI/MSI-X, on the 8254x and PCnet
+  through INTx routed by ACPI _PRT): Intel
   e1000/e1000e (8254x, 82574L), VMware vmxnet3, AMD PCnet (VMware's
   vlance) and virtio-net drivers (QEMU's e1000, e1000-82545em, e1000e,
   vmxnet3, pcnet and virtio-net tested;
@@ -132,9 +133,18 @@ Status markers: done, in progress, planned.
   checks them; a TCP/IP folder on the desktop
 - planned: TELNETD with pseudo terminals (VIO programs), an LPD server,
   TALK, REXECD/RSHD, code page translation (-cp) in FTP/TELNET
-- planned: route/arp and run-time configuration,
-  code page translation in TNLS32/TNLS16,
-  PCI INTx routing (ACPI _PRT) for the 8254x and PCnet, TCP keepalive/window scaling/SACK/urgent data
+- done: TCP out-of-order reassembly, SACK, window scaling and
+  timestamps (PAWS), delayed ACKs, Nagle, keepalives and urgent data
+  (MSG_OOB, SIOCATMARK, SO_OOBINLINE, select's exception set); a new
+  SYN reuses a connection in TIME_WAIT; per-socket wait queues; a
+  routing table (host/network routes, metrics), aliases, static and
+  proxy ARP entries, IP forwarding (sysctl); ROUTE and ARP, IFCONFIG
+  changing interfaces, NETSTAT with IBM's options, TCPCFG2 applying its
+  Network page at once, DHCP release at shutdown (Rs2NetControl, RS2API
+  240); the socket DLLs' route/ARP/interface/SIOSTAT ioctls and
+  sysctl() (the Toolkit's sysctl and HPS samples); PCI INTx routing
+  through a small ACPI namespace walker (`aml.rs`)
+- planned: code page translation in TNLS32/TNLS16, multicast/IGMP
 - planned: virtio-scsi hot-plug events, virtio-console multiport
 - done: sound output: Intel High Definition Audio (`drivers/hda.rs`, PCI
   class 04.03: ICH6+/ICH9, QEMU `intel-hda`/`ich9-intel-hda`, Proxmox,
@@ -222,7 +232,7 @@ Status markers: done, in progress, planned.
   every tick
 - planned: several requests in flight per disk (the drivers still run
   one command at a time), interrupt coalescing, per-CPU queues, INTx
-  routing through ACPI _PRT (AML) for devices without MSI
+  for the other devices without MSI (done for the NICs: `msi::setup_intx`)
 - done: HPFS (read/write/format)
 - done: extended attributes on FAT12/16 (`EA DATA. SF`), FAT32
   (FAT32.IFS-style EA files) and HPFS, with the EA APIs, DosCopy/DosMove
