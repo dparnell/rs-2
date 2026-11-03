@@ -22,6 +22,7 @@ use alloc::vec::Vec;
 use os2::*;
 use somsup::{ClassSpec, Environment};
 
+mod ae;
 mod somuc;
 
 os2::entry!(main);
@@ -1021,6 +1022,7 @@ fn main(st: &Startup) -> u32 {
 
 fn basic() {
     somuc::somuc_test();
+    ae::ae_test();
     let e = ev();
     let session = new_session();
     check("session", session != 0);

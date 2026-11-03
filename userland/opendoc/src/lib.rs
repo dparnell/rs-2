@@ -26,6 +26,7 @@ extern crate os2;
 
 #[macro_use]
 pub mod rt;
+pub mod ae;
 pub mod clipboard;
 pub mod dnd;
 pub mod events;
@@ -267,15 +268,34 @@ somsup::aligned! {
     __a_ODDeregisterPartHandlerClass => part::deregister_part_handler, 1;
 }
 
-/// The Apple Event Manager calls (ordinals 1-71): no Apple events.
-#[unsafe(no_mangle)]
-pub extern "C" fn __AENotHandled() -> usize {
-    services::ae_not_handled()
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn __AEDisposeDesc(desc: usize) -> usize {
-    services::ae_dispose_desc(desc)
+// The Apple Event Manager calls (ordinals 1-71: ae.rs).
+somsup::aligned! {
+    __a_AECoerceDesc => ae::AECoerceDesc, 3;
+    __a_AECountItems => ae::AECountItems, 2;
+    __a_AECreateDesc => ae::AECreateDesc, 4;
+    __a_AECreateList => ae::AECreateList, 4;
+    __a_AECreateAppleEvent => ae::AECreateAppleEvent, 6;
+    __a_CreateObjSpecifier => ae::CreateObjSpecifier, 6;
+    __a_CreateOffsetDescriptor => ae::CreateOffsetDescriptor, 2;
+    __a_CreateRangeDescriptor => ae::CreateRangeDescriptor, 4;
+    __a_AEDisposeDesc => ae::AEDisposeDesc, 1;
+    __a_AEDuplicateDesc => ae::AEDuplicateDesc, 2;
+    __a_AEGetAttributePtr => ae::AEGetAttributePtr, 7;
+    __a_AEGetDescData => ae::AEGetDescData, 5;
+    __a_AEGetNthDesc => ae::AEGetNthDesc, 5;
+    __a_AEGetParamDesc => ae::AEGetParamDesc, 4;
+    __a_AEGetParamPtr => ae::AEGetParamPtr, 7;
+    __a_AEInstallEventHandler => ae::AEInstallEventHandler, 5;
+    __a_AEGetProcessID => ae::AEGetProcessID, 3;
+    __a_AEPutDesc => ae::AEPutDesc, 3;
+    __a_AEPutParamDesc => ae::AEPutParamDesc, 3;
+    __a_AERemoveEventHandler => ae::AERemoveEventHandler, 4;
+    __a_AESend => ae::AESend, 7;
+    __a_AEGetDescDataSize => ae::AEGetDescDataSize, 2;
+    __a_AESizeOfNthItem => ae::AESizeOfNthItem, 4;
+    __a_AESizeOfParam => ae::AESizeOfParam, 4;
+    __a_AEGetProcessName => ae::AEGetProcessName, 3;
+    __a_AENotHandled => ae::AENotHandled, 0;
 }
 
 #[unsafe(no_mangle)]

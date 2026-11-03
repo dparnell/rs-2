@@ -1121,20 +1121,6 @@ pub static OSA_M: &[(&str, M)] = numbered!("OSAScriptingComponent",
     36 => Nothing0::t, 37 => Nothing0::t, 38 => Nothing0::t, 39 => Nothing0::t,
 );
 
-/// errAEEventNotHandled: what the Apple Event Manager calls return (rs2
-/// has no Apple events).
-pub extern "C" fn ae_not_handled() -> usize {
-    (-1708i32) as usize
-}
-
-/// AEDisposeDesc(desc): clears the descriptor.
-pub extern "C" fn ae_dispose_desc(desc: usize) -> usize {
-    if desc != 0 {
-        write::<[u32; 2]>(desc, [0x6e756c6c, 0]); // typeNull
-    }
-    0
-}
-
 pub extern "C" fn no_class(_major: i32, _minor: i32) -> usize {
     0
 }
