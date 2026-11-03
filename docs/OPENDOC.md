@@ -696,12 +696,117 @@ Screenshot: work/progress/opendoc/odshell-rexx-script-orexxsc.png.
     a direct parameter
 - RXLANG (286) and ORXLANG (105) pass.
 
+### Milestone 5: classes and properties, AEResolve, other processes, recording
+
+**The terminology's classes and properties** (`aete.rs`). OREXXSC's
+NOVALUE native walks the terminology through these methods (method
+numbers from its disassembly):
+
+- ODAETEList (1033/1034) has First(*cursor, *item) and Next over cursors
+  (ODAETECursor objects, which the caller frees with somDestruct). The
+  dictionary and the suites are ODAETELists.
+- The dictionary: SuiteCursor (9), FindClass(name) (14), EventCursor (6).
+- A suite: ClassCursor (7), FindEventByID (19).
+- ODAETEClass (1004): GetInfo (3) and FindProperty(name) (10).
+- ODAETEProperty (1043): GetInfo (0).
+- An event's record also gives its parameter count (at 0x416).
+- The 'aete' gives each suite its classes (properties, elements),
+  comparisons and enumerations.
+
+Each class's methods have names of its own: a subclass that
+reintroduces a parent's method name breaks the parent's tokens.
+
+**Using classes and properties from REXX:**
+
+- An unset variable named after a class is an SCClass (`part`); one
+  named after a property is an object specifier for it (`text`). This
+  works because Object REXX now asks `.local`'s NOVALUE object for
+  unset variables, and ScriptableApp~connect puts the application
+  there.
+- rs2's REXX classes add `SCClass~index(n)`, `SCClass~named(s)` and
+  `ObjectSpecifier~of(container)`. So `app~get(text~of(part~index(2)))`
+  sends 'core'/'getd' with the specifier "text of part 2".
+- Named parameters are a directory after the direct parameter:
+  `app~set(text~of(part~index(1)), .directory~new~~setentry('TO', 'x'))`.
+- The class ids 'ObjectSpecifier' and 'SCList' keep their case, as
+  OREXXSC compares them.
+
+**The Object Support Library** (rs2's ordinal assignments, in Apple's
+alphabetical order among the free ordinals):
+
+| Ordinal | Call |
+|---|---|
+| 39 | AEInstallObjectAccessor |
+| 56 | AERemoveObjectAccessor |
+| 59 | AEResolve |
+| 17 | AEDisposeToken |
+| 52 | AEPutParamPtr |
+| 53 | AEPutPtr |
+
+AEResolve works like this:
+
+1. It resolves the specifier's container first. No container is the
+   application, a typeNull token.
+2. It calls the accessor registered for the wanted class and the
+   container token's type ('****' matches any), as Apple's do:
+   `accessor(class, containerToken, containerClass, keyForm, keyData,
+   *token, refcon)`.
+3. It frees the container token.
+
+**Apple events between processes** (`ipc.rs`):
+
+- A process with Apple-event handlers and a session anchor block
+  (SetHAB: a thread with a message queue) receives events from others.
+  ODSHELL does this from startup.
+- Receivers are listed in a shared table by PID and program name, which
+  AEGetProcessID/Name read.
+- Each receiver has a 64 KB shared block, two named event semaphores
+  and a mutex. A thread of its own turns a request into a message to an
+  object window, so the handler runs in the program's event loop.
+- The sender needs no PM: a REXX program run by CMD can be one. It
+  writes the encoded event, posts, and waits up to 30 seconds for the
+  reply.
+- Test: `tests/opendoc/odremote.cmd`, run by CMD with `C:\ORX` in
+  BEGINLIBPATH, drives a running ODSHELL. It sets the text part's text,
+  plays the MMAudioPart, and gets the text and part 2's name back.
+  Screenshot: work/progress/opendoc/odshell-driven-from-cmd.png.
+- In a program that did not load OREXXSC, `.ScriptableApp` and the other
+  scripting classes come from OREXX when first named
+  (`Host::environment_source`). Their natives load OREXXSC.DLL (module
+  REXXSC).
+
+**Recording:**
+
+- The Apple Event Manager turns recording on and off with 'aevt'/'acer'
+  and 'ccer' (Apple's 'reca'/'recc', reversed as OS/2 OpenDoc's codes
+  are).
+- While it is on, each event a process gives its own handlers (classes
+  other than 'aevt' and 'ascr') also goes to the 'aevt'/'rcer' handler,
+  which is OREXXSC's.
+- OREXXSC writes REXX lines (`theapp = .ScriptableApp~connect(NAME)`,
+  `theapp~play`) and sends them as 'ascr'/'recd' events to PID 0 (this
+  process).
+- An event without a direct parameter must have 0x6E756C6C in its
+  record there, where OREXXSC's other checks use 0x6C6C756E.
+- ODSHELL's Document/Record script starts and stops recording, and
+  writes the result to `C:\RECORDED.CMD` and the status line.
+  Document/Play sound is an event ODSHELL sends itself.
+  Screenshot: odshell-osa-recording.png.
+
+**Tests:**
+
+- `ODTEST`: 116 checks pass. Among them are AEResolve (2) and
+  cross-process events (3: `ODTEST AERECV`, a second ODTEST that
+  receives them).
+- `ODTEST OREXXSC`: 18 checks pass, adding NOVALUE, get with an object
+  specifier, set with a named parameter, an object that is not there,
+  and recording.
+
 **Not yet:**
 
-- Apple events to other processes (AESend delivers only in the process).
-- The terminology's classes, properties, enumerations and comparisons.
-  So ScriptableApp's NOVALUE, object specifiers in events, and named
-  parameters with the ODAETETerm classes do not work (those classes'
-  methods fail).
-- Recording (OSAStartRecording).
+- Recording events that have parameters or object specifiers. OREXXSC
+  writes those through further terminology methods (1004 m11, 1013 m7,
+  1016 m0, 1046 m21/m24) that still fail.
+- Comparisons and enumerations as REXX values; 'whose' tests and
+  ranges in AEResolve (accessors get the key data as it is).
 - IBM's REXX.IMG classes themselves.

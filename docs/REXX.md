@@ -353,6 +353,9 @@ the OSA support calls (RexxCreateMethod, RexxRunMethod, RexxStoreMethod,
 RexxLoadMethod...) and native methods (`::METHOD name EXTERNAL 'LIBRARY
 dll entry'`), which IBM's OpenDoc scripting component OREXXSC.DLL uses
 ([OPENDOC.md](OPENDOC.md#orexxsc-object-rexx-scripting-milestone-4)).
+An object in `.local`'s NOVALUE entry gives unset variables their value
+(its NOVALUE method; `.nil`: none). The OpenDoc scripting classes
+(`.ScriptableApp`...) are loaded the first time a program names them.
 
 **REXXC.EXE** (`REXXC program [output] [/S]`) checks a program with
 RexxTranslateProgram and writes rs2's tokenized form: the program behind
