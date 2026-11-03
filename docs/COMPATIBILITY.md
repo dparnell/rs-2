@@ -382,7 +382,7 @@ DLLs) are not on the media, so rs2's own utilities take their place
 | Toolkit sysctl | works | Reads IP forwarding, turns it on and back off (`sysctl()` over Rs2NetControl). |
 | Toolkit rawex, geneserv/genesend | works | Sun RPC over UDP through the portmapper. |
 | Toolkit rgs/rgc (rpcgen) | fails | The sample calls RPC32DLL's `_Optlink` `svcudp_create` with `_System` linkage (socket -1 pushed, EAX read): `svcudp_create - cannot getsockname`. |
-| Toolkit echos/echoc (HPS) | fails | Need `sysctl()` memory-mapped I/O (OS2_MEMMAPIO), which rs2 does not have. |
+| Toolkit echos/echoc (HPS) | works | `sysctl()` OS2_MEMMAPIO blocks, `sendmsg(MSG_MAPIO)` with the release semaphores (`-s`), memory and data verification (`-m -d`), 3 iterations of 240 KB each way over loopback. |
 | SYSLOGD.EXE | works | Receives a UDP message (sent with RXSOCK to 127.0.0.1:514) and writes it to `%ETC%\\SYSLOG.MSG`. |
 | TFTP.EXE | works | 16-bit, on rs2's TCPIPDLL and TNLS16: `status`, `binary`, `get` of 300 KB and a text file from QEMU's TFTP server, byte-identical. Timeouts (`_alarm`) do not fire. |
 | INETD.EXE | works | 16-bit; listens for the services of `%ETC%\INETD.LST` and starts the server with the accepted socket's number (tested with a REXX echo server on RXSOCK, reached from the host). |
