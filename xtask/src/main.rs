@@ -676,6 +676,10 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("rexec", "OS2\\REXEC.EXE"),
         ("rsh", "OS2\\RSH.EXE"),
         ("tcpcfg2", "OS2\\TCPCFG2.EXE"),
+        ("net", "OS2\\NET.EXE"),
+        ("lantest", "RS2\\LANTEST.EXE"),
+        ("netapi32", "OS2\\DLL\\NETAPI32.DLL"),
+        ("netapi", "OS2\\DLL\\NETAPI.DLL"),
         ("tcpip32", "OS2\\DLL\\TCPIP32.DLL"),
         ("tnls32", "OS2\\DLL\\TNLS32.DLL"),
         ("pmshapi", "OS2\\DLL\\PMSHAPI.DLL"),
@@ -782,6 +786,7 @@ const HELP_FILES: &[(&str, &str)] = &[
 /// source, name on the disk, code pages, language family and sublanguage.
 const MSG_FILES: &[(&str, &str, &[u16], (u16, u16))] = &[
     ("OSO001.TXT", "OS2\\SYSTEM\\OSO001.MSG", &[850, 437], (9, 1)),
+    ("NET.TXT", "OS2\\SYSTEM\\NET.MSG", &[850, 437], (9, 1)),
     ("OSO001H.TXT", "OS2\\SYSTEM\\OSO001H.MSG", &[850, 437], (9, 1)),
     ("PMWP.TXT", "OS2\\SYSTEM\\PMWP.MSG", &[850], (0, 0)),
     ("REGISTRY.TXT", "OS2\\SYSTEM\\REGISTRY.MSG", &[850], (9, 1)),

@@ -1,0 +1,96 @@
+; rs2's NET.MSG: the messages of NET.EXE and the LAN requester, with the
+; numbers and insertion points of IBM's NET.MSG (a NERR_ code prints the
+; message of the same number) in rs2's own words.
+NET
+NET2102E: The network requester is not available on this system.
+NET2103E: The server cannot be found on the network.
+NET2105E: The network ran out of a resource it needs. Try again later.
+NET2106I: This command can only be used on a server.
+NET2107E: That device is not connected to a network resource.
+NET2117E: That path already goes through a network connection.
+NET2123E: The buffer given is too small.
+NET2136E: A network error occurred.
+NET2138E: The Requester service is not running.
+NET2182E: That service is already running.
+NET2184E: That service is not running.
+NET2185E: That is not the name of a service.
+NET2200E: This workstation is already logged on to the network.
+NET2201E: This workstation is not logged on to the network.
+NET2202E: That user name is not valid.
+NET2203E: That password is not valid.
+NET2250E: There is no such network connection.
+NET2341E: That device name cannot be used for this kind of resource.
+NET2401E: Files are open on this connection.
+NET2403E: The share name or its password is wrong.
+NET2404E: A process is using that device.
+NET2405E: That drive letter belongs to a local drive.
+NET2758E: The server could not be reached.
+NET3500I: The command finished successfully.
+NET3502E: OS/2 error %1 occurred.
+NET3504I: The command finished, but parts of it failed.
+NET3513I: There is more data than could be shown.
+NET3515I: For more information, type HELP NET%1.
+NET3521I: The %1 service is not running.
+NET3522I: The %1 service is starting%0
+NET3523E: The %1 service could not be started.
+NET3524I: The %1 service was started.
+NET3527I: The %1 service is stopping%0
+NET3528E: The %1 service could not be stopped.
+NET3529I: The %1 service was stopped.
+NET3532I: Stopping the Requester will log you off.
+NET3670I: These network connections are in use:
+NET3671I: Going on will cancel them.
+NET3672E: You are not logged on.
+NET3683I: The list has no entries.
+NET3689I: The Requester is already running; the options given were not used.
+NET3691I: Files are still open on the connection to %1.
+NET3716E: That kind of device is not known.
+NET3727E: That password is not valid.
+NET4357I: Password for %1:%0
+NET4360I: Your password:%0
+NET4377I: Shared resources on %1
+NET4378I: These running services can be configured:
+NET4450I: Computer name
+NET4451I: User name
+NET4452I: Software version
+NET4453I: Active on
+NET4454I: LAN root
+NET4455I: Requester domain
+NET4456I: Logon domain
+NET4457I: Other domains
+NET4650I: The connection %1 was deleted.
+NET4700I: Server name            Remark
+NET4701I: Sharename    Type         Used as  Comment
+NET4702I: (UNC)
+NET4710I: Disk
+NET4711I: Print
+NET4712I: Comm
+NET4713I: IPC
+NET4714I: Status          Local name      Remote name
+NET4715I: OK
+NET4716I: Dormant
+NET4717I: Paused
+NET4718I: Disconnected
+NET4719I: Error
+NET4720I: Connecting
+NET4721I: Reconnecting
+NET4722I: Status
+NET4723I: Local name
+NET4724I: Remote name
+NET4725I: Resource type
+NET4726I: Open files
+NET4727I: Connections
+NET5284I: Go on with this operation? (Y/N) [%1]:%0
+NET5286I: Go on with this operation? (Y/N) [%1]:%0
+NET5289I: Close them anyway? (Y/N) [%1]:%0
+NET8800I: %1 is logged on to %2.
+NET8801I: %1 was logged off.
+NET8802I: Workgroup %1
+NET8803I: rs2 NET commands:
+NET8804I:   NET USE [d: | LPTn:] [\\server\share] [password | *] [/USER:name] [/DELETE]
+NET8805I:   NET VIEW [\\server] [/DOMAIN[:name]]
+NET8806I:   NET START REQUESTER [/COMPUTERNAME:name] [/DOMAIN:name]
+NET8807I:   NET STOP REQUESTER
+NET8808I:   NET LOGON [user [password | *]] [/DOMAIN:name]
+NET8809I:   NET LOGOFF
+NET8810I:   NET CONFIG [REQUESTER]

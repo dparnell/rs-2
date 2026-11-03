@@ -1,0 +1,14 @@
+[package]
+name = "netapi32-dll"
+description = "NETAPI32.DLL: the 32-bit LAN Server API (Net32*) on rs2's LAN requester"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "netapi32"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+lanreq = { path = "../lanreq" }

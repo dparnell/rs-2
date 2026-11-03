@@ -1,0 +1,4 @@
+# LMHOSTS: NetBIOS names of servers the LAN requester can reach
+# (docs/LAN.md): an address, a name, and optionally #DOM:workgroup.
+#
+# 192.168.1.10    FILESRV     #DOM:WORKGROUP

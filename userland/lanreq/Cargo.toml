@@ -1,0 +1,10 @@
+[package]
+name = "lanreq"
+description = "rs2's LAN requester programs: NET.EXE, LANTEST.EXE and the code the NETAPI DLLs share"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+os2 = { path = "../os2" }
+utils = { path = "../utils" }
