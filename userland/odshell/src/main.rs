@@ -94,6 +94,8 @@ unsafe extern "C" {
     fn ODSettingsExtensionNewClass(major: i32, minor: i32) -> usize;
     #[link_name = "OPENDOC.453"]
     static ODSettingsExtensionClassData: [usize; 25];
+    #[link_name = "OPENDOC.462"]
+    static ODStatusLineExtensionClassData: [usize; 4];
     #[link_name = "OPENDOC.393"]
     static ODObjectClassData: [usize; 8];
     #[link_name = "OPENDOC.219"]
@@ -330,6 +332,50 @@ const CMD_DELETE: u32 = 0x500b;
 const CMD_OPEN: u32 = 0x500e;
 const CMD_SETTINGS: u32 = 0x501a;
 const CMD_ABOUT: u32 = 0x5200;
+const CMD_HELP_INDEX: u32 = 0x5022;
+const CMD_HELP_GENERAL: u32 = 0x5023;
+const WM_MENUSELECT: u32 = 0x34;
+
+/// The status line hint for a docshell menu item.
+fn menu_hint(id: u32) -> &'static [u8] {
+    match id {
+        CMD_SAVE => b"Saves the document",
+        CMD_CLOSE => b"Closes the document window",
+        CMD_CUT => b"Moves the selected part's text to the clipboard",
+        CMD_COPY => b"Copies the selected part's text to the clipboard",
+        CMD_PASTE => b"Inserts the clipboard's text",
+        CMD_DELETE => b"Deletes the selection",
+        CMD_COPY_PART => b"Copies the selected part to the clipboard",
+        CMD_PASTE_PART => b"Embeds the part on the clipboard",
+        CMD_OPEN => b"Opens the selected part in a window of its own",
+        CMD_SETTINGS => b"Shows the selected part's settings",
+        0x501f => b"Shows the part in a frame",
+        0x501d => b"Shows the part as a large icon",
+        0x501c => b"Shows the part as a small icon",
+        0x501e => b"Shows the part as a thumbnail",
+        CMD_HELP_INDEX => b"Shows the help index",
+        CMD_HELP_GENERAL => b"Shows general help",
+        CMD_ABOUT => b"Shows ODSHELL's version",
+        _ => b"",
+    }
+}
+
+/// Text on the status line of the frame's window (the session's
+/// "OpenDoc:Extension:StatusLine").
+fn status_hint(ev: usize, frame: usize, text: &[u8]) {
+    let name = b"OpenDoc:Extension:StatusLine\0";
+    unsafe {
+        if m(cd!(ODObjectClassData), 1, &[SESSION, ev, name.as_ptr() as usize]) & 0xff == 0 {
+            return;
+        }
+        let ext = m(cd!(ODObjectClassData), 2, &[SESSION, ev, name.as_ptr() as usize]);
+        if ext != 0 {
+            let t = z(text);
+            m(cd!(ODStatusLineExtensionClassData), 0, &[ext, ev, t.as_ptr() as usize, frame]);
+            release(ext);
+        }
+    }
+}
 
 /// RS2TextPart's events: typed characters edit its text (Backspace
 /// deletes), Edit/Cut empties it, a click is taken (OPENDOC.DLL has made
@@ -377,6 +423,12 @@ extern "C" fn part_handle_event(this: usize, ev: usize, event: usize, frame: usi
             }
         }
         0x71 | 0x72 | 0x74 | 0x75 => return 1,
+        WM_MENUSELECT => {
+            // The item's hint on the status line (the session's status
+            // line extension), as IBM's parts show theirs.
+            status_hint(ev, frame, menu_hint(mp1 & 0xffff));
+            return 0;
+        }
         _ => return 0,
     }
     if frame != 0 {
@@ -553,8 +605,13 @@ fn base_menu_bar(ws: usize) {
     item(mb, 0x11, 0x501d, b"View as ~large icon\0", false);
     item(mb, 0x11, 0x501c, b"View as ~small icon\0", false);
     item(mb, 0x11, 0x501e, b"View as t~humbnail\0", false);
-    m(c, 2, &[mb, e, 0x13, b"~Help\0".as_ptr() as usize, 0]);
-    item(mb, 0x13, CMD_ABOUT, b"~About ODSHELL\0", false);
+    // Help (IBM's menu 0x12): the index and general help are the
+    // active part's (IBM's parts enable them and show their library).
+    m(c, 2, &[mb, e, 0x12, b"~Help\0".as_ptr() as usize, 0]);
+    item(mb, 0x12, CMD_HELP_INDEX, b"Help ~index\0", true);
+    item(mb, 0x12, CMD_HELP_GENERAL, b"~General help\0", true);
+    item(mb, 0x12, 0x5201, b"\0", false);
+    item(mb, 0x12, CMD_ABOUT, b"~About ODSHELL\0", false);
     m(cd!(ODWindowStateClassData), 15, &[ws, e, mb]);
     // The popup: items at its top level.
     let pop = m(cd!(ODWindowStateClassData), 18, &[ws, e, 0]);

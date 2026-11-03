@@ -29,6 +29,7 @@ pub mod rt;
 pub mod clipboard;
 pub mod dnd;
 pub mod events;
+pub mod help;
 pub mod layout;
 pub mod obj;
 pub mod part;

@@ -94,6 +94,14 @@ unsafe extern "C" {
 
     #[link_name = "OPENDOC.393"]
     static ODObjectClassData: [usize; 8];
+    #[link_name = "OPENDOC.462"]
+    static ODStatusLineExtensionClassData: [usize; 4];
+    #[link_name = "OPENDOC.351"]
+    static ODHelpClassData: [usize; 5];
+    #[link_name = "PMWIN.841"]
+    fn WinQueryWindowText(h: u32, cch: i32, buf: *mut u8) -> i32;
+    #[link_name = "PMWIN.843"]
+    fn WinQueryWindowULong(h: u32, i: i32) -> u32;
     #[link_name = "OPENDOC.210"]
     static M_ODPartClassData: [usize; 6];
     #[link_name = "OPENDOC.444"]
@@ -662,6 +670,41 @@ fn dnd_test(session: usize, rf: usize) {
     check("DM_DROP moves the part's facet", at(nf) == Point { x: 200 * ONE, y: 90 * ONE } && facet_children(rfc).len() == kids.len());
     release(part);
     ok_ev("drag and drop");
+    status_and_help(session, nf, client);
+}
+
+/// The session's status line extension and ODHelp, as IBM's parts use them.
+fn status_and_help(session: usize, facet: usize, client: u32) {
+    let e = ev();
+    let frame = m(cd!(ODFacetClassData), FC_GET_FRAME, &[facet, e]);
+    let name = b"OpenDoc:Extension:StatusLine\0";
+    let has = m(cd!(ODObjectClassData), 1, &[session, e, name.as_ptr() as usize]) & 0xff != 0;
+    let ext = if has { m(cd!(ODObjectClassData), 2, &[session, e, name.as_ptr() as usize]) } else { 0 };
+    check("the session has the status line extension", has && ext != 0);
+    if ext == 0 {
+        return;
+    }
+    let line = || unsafe { WinWindowFromID(client, 0x8101) };
+    // WS_VISIBLE (the test window itself is not shown).
+    let shown = |h: u32| unsafe { WinQueryWindowULong(h, -2) } & 0x8000_0000 != 0;
+    let text = || {
+        let mut b = [0u8; 128];
+        let n = unsafe { WinQueryWindowText(line(), b.len() as i32, b.as_mut_ptr()) }.max(0) as usize;
+        b[..n].to_vec()
+    };
+    m(cd!(ODStatusLineExtensionClassData), 0, &[ext, e, b"Plays the sound\0".as_ptr() as usize, frame]);
+    check("SetStatusLineText shows the text in the frame's window", line() != 0 && shown(line()) && text() == b" Plays the sound");
+    m(cd!(ODStatusLineExtensionClassData), 0, &[ext, e, b"\0".as_ptr() as usize, frame]);
+    check("an empty text hides the status line", !shown(line()));
+    release(ext);
+    // ODHelp: the session's, showing a library's index (a help manager
+    // instance on the library found on HELP).
+    let help = m(cd!(ODSessionClassData), 4, &[session, e]);
+    let ok = help != 0 && m(cd!(ODHelpClassData), 2, &[help, e, b"MMPARTS.HLP\0".as_ptr() as usize]) & 0xff != 0;
+    check("ODHelp DisplayHelpIndex opens a help library's index", ok);
+    let bad = help != 0 && m(cd!(ODHelpClassData), 2, &[help, e, b"NOSUCH.HLP\0".as_ptr() as usize]) & 0xff != 0;
+    check("and fails for a missing library", !bad);
+    ok_ev("status line and help");
 }
 
 fn facet_children(f: usize) -> Vec<usize> {

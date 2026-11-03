@@ -75,6 +75,7 @@ pub struct SessionState {
     pub message: usize,
     pub resolver: usize,
     pub help: usize,
+    pub status_line: usize,
     pub types: Vec<Vec<u8>>,
     pub update_id: u32,
     pub hab: u32,
@@ -218,6 +219,8 @@ methods! {
             None => 0,
         }
     }
+    fn SessHasExtension(this: usize, ev: usize, name: usize) -> usize { crate::help::session_has_extension(name) as usize }
+    fn SessAcquireExtension(this: usize, ev: usize, name: usize) -> usize { crate::help::session_acquire_extension(this, ev, name) }
     fn SessSomUninit(this: usize) -> usize {
         unsafe {
             if SESSION == this {
@@ -273,7 +276,11 @@ pub static BASE_SESSION_M: &[(&str, M)] = &[
     ("RemoveEntry", RemoveEntry::t),
     ("GetType", GetType::t),
 ];
-pub static BASE_SESSION_O: &[(&str, M)] = &[("SOMObject::somUninit", SessSomUninit::t)];
+pub static BASE_SESSION_O: &[(&str, M)] = &[
+    ("SOMObject::somUninit", SessSomUninit::t),
+    ("ODObject::HasExtension", SessHasExtension::t),
+    ("ODObject::AcquireExtension", SessAcquireExtension::t),
+];
 pub static SESSION_M: &[(&str, M)] = &[
     ("InitSession", InitSession::t),
     ("GetHAB", GetHAB::t),
@@ -364,6 +371,7 @@ extern "C" fn client_proc(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> usize 
                 if w != 0 {
                     window_resized(w, hwnd);
                 }
+                crate::help::resized(hwnd);
                 WinDefWindowProc(hwnd, msg, mp1, mp2)
             }
             _ => WinDefWindowProc(hwnd, msg, mp1, mp2),
@@ -1038,9 +1046,9 @@ methods! {
 
 pub static HELP_M: &[(&str, M)] = &[
     ("InitHelp", Nothing0::t),
-    ("DisplayHelp", Nothing2::t),
-    ("DisplayHelpIndex", Nothing1::t),
-    ("DisplayHelpUsingHelp", Nothing1::t),
+    ("DisplayHelp", crate::help::DisplayHelp::t),
+    ("DisplayHelpIndex", crate::help::DisplayHelpIndex::t),
+    ("DisplayHelpUsingHelp", crate::help::DisplayHelpUsingHelp::t),
 ];
 pub static EXTENSION_M: &[(&str, M)] = &[
     ("InitExtension", InitExtension::t),
@@ -1083,8 +1091,8 @@ pub static SETTINGS_EXTENSION_M: &[(&str, M)] = &[
     ("ShowSettings", crate::settings::ShowSettings::t),
 ];
 pub static STATUS_LINE_M: &[(&str, M)] = &[
-    ("SetStatusLineText", Nothing2::t),
-    ("ClearStatusLineText", Nothing1::t),
+    ("SetStatusLineText", crate::help::SetStatusLineText::t),
+    ("ClearStatusLineText", crate::help::ClearStatusLineText::t),
     ("InitStatusLineExtension", InitStatusLineExtension::t),
 ];
 pub static NAME_SPACE_MANAGER_M: &[(&str, M)] = &[

@@ -51,7 +51,7 @@ unsafe extern "C" {
 
 pub const WM_ACTIVATE: u32 = 0x0d;
 pub const WM_COMMAND: u32 = 0x20;
-pub const WM_INITMENU: u32 = 0x31;
+pub const WM_INITMENU: u32 = 0x33;
 pub const WM_MENUSELECT: u32 = 0x34;
 pub const WM_MOUSEMOVE: u32 = 0x70;
 pub const WM_BUTTON1DOWN: u32 = 0x71;
@@ -481,6 +481,8 @@ const MIS_SUBMENU: u16 = 0x10;
 const MIA_CHECKED: u16 = 0x2000;
 const MIA_DISABLED: u16 = 0x4000;
 const MM_INSERTITEM: u32 = 0x180;
+const MM_SETITEMTEXT: u32 = 0x18e;
+const MM_SETITEMATTR: u32 = 0x192;
 const FID_MENU: u32 = 0x8005;
 const WC_MENU: usize = 0xffff_0004;
 const WM_UPDATEFRAME: u32 = 0x42;
@@ -557,6 +559,7 @@ fn build_pm(this: usize, frame: u32) {
         if bar == 0 {
             return;
         }
+        SHAPE = shape(this);
         for m in menu(this).menus.clone() {
             let sub = WinCreateWindow(2, WC_MENU, b"\0".as_ptr(), 0, 0, 0, 0, 0, bar, 3, m.id as u32, 0, 0);
             for it in &m.items {
@@ -574,11 +577,37 @@ fn build_pm(this: usize, frame: u32) {
     }
 }
 
-/// Show the menu bar again if it is the one on the screen.
+/// The menus and their items' IDs, as last built into PM menus.
+static mut SHAPE: Vec<(u16, Vec<u16>)> = Vec::new();
+
+fn shape(this: usize) -> Vec<(u16, Vec<u16>)> {
+    menu(this).menus.iter().map(|m| (m.id, m.items.iter().map(|i| i.id).collect())).collect()
+}
+
+/// Show the menu bar again if it is the one on the screen. When only
+/// items' states or texts changed (AdjustMenus while PM opens a menu:
+/// WM_INITMENU), the PM menus are updated in place, so the menu being
+/// opened stays open.
 fn refresh(this: usize) {
     unsafe {
-        if SHOWN == this && SHOWN_ON != 0 {
+        if SHOWN != this || SHOWN_ON == 0 {
+            return;
+        }
+        let bar = WinWindowFromID(SHOWN_ON, FID_MENU);
+        if bar == 0 || shape(this) != *(&raw const SHAPE) {
             build_pm(this, SHOWN_ON);
+            return;
+        }
+        for m in &menu(this).menus {
+            for it in &m.items {
+                let attr = if it.disabled { MIA_DISABLED } else { 0 } | if it.checked { MIA_CHECKED } else { 0 };
+                let mask = (MIA_DISABLED | MIA_CHECKED) as usize;
+                WinSendMsg(bar, MM_SETITEMATTR, it.id as usize | 1 << 16, mask | (attr as usize) << 16);
+                if it.style & MIS_SEPARATOR == 0 && !it.text.is_empty() {
+                    let t = z(&it.text);
+                    WinSendMsg(bar, MM_SETITEMTEXT, it.id as usize, t.as_ptr() as usize);
+                }
+            }
         }
     }
 }
