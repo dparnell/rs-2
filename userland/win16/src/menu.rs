@@ -233,6 +233,62 @@ pub fn insert(menu: u16, pos: i16, flags: u16, id: u16, text: &[u8]) -> bool {
     send(pm, MM_INSERTITEM, &mi as *const MenuItem as u32, t.as_ptr() as u32) != MIT_NONE
 }
 
+/// A new pop-up menu (CreatePopupMenu).
+pub fn create_popup() -> u16 {
+    create(false)
+}
+
+/// The PM menu window of an HMENU.
+pub fn pm_menu(h: u16) -> u32 {
+    pm_of(h)
+}
+
+/// An owner-drawn item WIN16 draws itself (the MDI items of a frame's
+/// menu bar while a child is maximized): `id`, with the pop-up `sub`
+/// (0: none), at `pos` (-1: the end).
+pub fn insert_owner(menu: u16, pos: i16, id: u16, sub: u16) -> bool {
+    let pm = pm_of(menu);
+    if pm == 0 {
+        return false;
+    }
+    let mut mi = MenuItem { pos, style: 0x0008, id, ..Default::default() };
+    if sub != 0 {
+        let sp = pm_of(sub);
+        if sp == 0 {
+            return false;
+        }
+        set_bar(sp, false);
+        mi.style |= MIS_SUBMENU;
+        mi.sub = sp;
+    }
+    send(pm, MM_INSERTITEM, &mi as *const MenuItem as u32, b"\0".as_ptr() as u32) != MIT_NONE
+}
+
+/// Take the item `id` out of a menu, keeping its pop-up (it goes back
+/// to the desktop).
+pub fn remove_keep(menu: u16, id: u16) -> bool {
+    remove(menu, id, 0, false)
+}
+
+/// DrawMenuBar: the window's menu bar is drawn again.
+pub fn draw_bar(h: u16) {
+    let pm = wnd(h).map_or(0, |w| pm_of(w.menu));
+    if pm != 0 {
+        // Its items' sizes may have changed: PM lays it out again.
+        let mut r = RectL::default();
+        unsafe {
+            WinQueryWindowRect(pm, &mut r);
+            WinInvalidateRect(pm, core::ptr::null(), 0);
+        }
+    }
+}
+
+/// Is `id` an item of the menu (at its top level)?
+pub fn has_item(menu: u16, id: u16) -> bool {
+    let pm = pm_of(menu);
+    pm != 0 && send(pm, MM_ITEMPOSITIONFROMID, mp(id as u32, 0), 0) != MIT_NONE
+}
+
 /// A window's system menu (the pop-up of its frame's FID_SYSMENU).
 fn system_menu(h: u16) -> u16 {
     let Some(f) = wnd(user::top_level(h)).filter(|w| w.framed).map(|w| w.frame) else { return 0 };

@@ -2600,15 +2600,223 @@ static void dll_cycle_tests(void)
     }
 }
 
+/* ---- Stage 2's rest: MDI, bitmaps, regions, mapping modes, fonts,
+ * DLLs and profiles in depth ---- */
+
+static HWND mdi2_client;
+static int mdi2_sizes, mdi2_maxsize;
+
+LONG FAR PASCAL _export Mdi2FrameProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_CREATE) {
+        CLIENTCREATESTRUCT ccs;
+
+        /* As Multipad makes its client: no size, scroll bars. */
+        ccs.hWindowMenu = GetSubMenu(GetMenu(hwnd), 1);
+        ccs.idFirstChild = 2000;
+        mdi2_client = CreateWindow("MDICLIENT", NULL, WS_CHILD | WS_CLIPCHILDREN | WS_VSCROLL | WS_HSCROLL, 0, 0, 0, 0, hwnd,
+                                   (HMENU)0xCAC, ((CREATESTRUCT FAR *)lp)->hInstance, (LPSTR)&ccs);
+        ShowWindow(mdi2_client, SW_SHOW);
+        return 0;
+    }
+    return DefFrameProc(hwnd, mdi2_client, msg, wp, lp);
+}
+
+LONG FAR PASCAL _export Mdi2ChildProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_SIZE) {
+        mdi2_sizes++;
+        if (wp == SIZE_MAXIMIZED)
+            mdi2_maxsize++;
+    }
+    return DefMDIChildProc(hwnd, msg, wp, lp);
+}
+
+static HWND mdi2_child(HINSTANCE hInst, LPCSTR title, DWORD style)
+{
+    MDICREATESTRUCT mcs;
+
+    memset(&mcs, 0, sizeof mcs);
+    mcs.szClass = "W16M2Child";
+    mcs.szTitle = title;
+    mcs.hOwner = hInst;
+    mcs.x = mcs.y = mcs.cx = mcs.cy = CW_USEDEFAULT;
+    mcs.style = style;
+    return (HWND)LOWORD(SendMessage(mdi2_client, WM_MDICREATE, 0, (LPARAM)(LPMDICREATESTRUCT)&mcs));
+}
+
+static void mdi2_tests(HINSTANCE hInst)
+{
+    WNDCLASS wc;
+    HWND frame, c1, c2, c3;
+    HMENU bar, win, bar2;
+    RECT r, rc, r2, r3;
+    POINT p, q;
+    char buf[80];
+    DWORD act;
+
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = Mdi2FrameProc;
+    wc.hInstance = hInst;
+    wc.hbrBackground = COLOR_APPWORKSPACE + 1;
+    wc.lpszClassName = "W16M2Frame";
+    RegisterClass(&wc);
+    wc.lpfnWndProc = Mdi2ChildProc;
+    wc.hbrBackground = GetStockObject(WHITE_BRUSH);
+    wc.lpszClassName = "W16M2Child";
+    RegisterClass(&wc);
+    bar = CreateMenu();
+    win = CreatePopupMenu();
+    AppendMenu(win, MF_STRING, 1, "&Tile");
+    AppendMenu(win, MF_STRING, 2, "&Cascade");
+    AppendMenu(bar, MF_POPUP, (UINT)CreatePopupMenu(), "&File");
+    AppendMenu(bar, MF_POPUP, (UINT)win, "&Window");
+    frame = CreateWindow("W16M2Frame", "MDI2", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, 20, 20, 500, 360, NULL, bar, hInst, NULL);
+    ShowWindow(frame, SW_SHOW);
+    UpdateWindow(frame);
+    check(mdi2_client != 0, "MDI: a client made in the frame's WM_CREATE (no size, scroll bars)");
+    GetClientRect(frame, &r);
+    GetClientRect(mdi2_client, &rc);
+    check(rc.right == r.right && rc.bottom == r.bottom, "MDI: DefFrameProc's WM_SIZE sizes the client to the frame's client area");
+
+    /* A child made maximized (Multipad's first). */
+    mdi2_maxsize = 0;
+    c1 = mdi2_child(hInst, "Doc1", WS_MAXIMIZE);
+    act = SendMessage(mdi2_client, WM_MDIGETACTIVE, 0, 0);
+    check(c1 && IsZoomed(c1) && LOWORD(act) == (WORD)c1 && HIWORD(act) == 1, "MDI: a child made with WS_MAXIMIZE is maximized (WM_MDIGETACTIVE says so)");
+    check(mdi2_maxsize > 0, "MDI: the maximized child gets WM_SIZE with SIZE_MAXIMIZED");
+    GetClientRect(c1, &r);
+    GetClientRect(mdi2_client, &rc);
+    wsprintf(line, "MDI: a maximized child's client area is the MDI client's (%d x %d, %d x %d)", r.right, r.bottom, rc.right, rc.bottom);
+    check(r.right == rc.right && r.bottom == rc.bottom, line);
+    p.x = p.y = q.x = q.y = 0;
+    ClientToScreen(c1, &p);
+    ClientToScreen(mdi2_client, &q);
+    check(p.x == q.x && p.y == q.y, "MDI: its title bar and border are outside the client");
+    GetWindowText(frame, buf, sizeof buf);
+    check(lstrcmp(buf, "MDI2 - [Doc1]") == 0, "MDI: the frame's title is \"Frame - [Child]\"");
+    check(GetMenuItemCount(bar) == 4 && GetSubMenu(bar, 0) != 0 && GetMenuItemID(bar, 3) == SC_RESTORE,
+          "MDI: the menu bar gets the child's system menu and a restore button");
+    check(GetSubMenu(bar, 2) == win, "MDI: the program's pop-ups move one place on");
+    c2 = mdi2_child(hInst, "Doc2", 0);
+    check(c2 && IsZoomed(c2) && !IsZoomed(c1), "MDI: a new child is maximized while one is (the other is restored)");
+    GetWindowText(frame, buf, sizeof buf);
+    check(lstrcmp(buf, "MDI2 - [Doc2]") == 0 && GetMenuItemCount(bar) == 4, "MDI: the title follows the maximized child, the menu items stay");
+    SendMessage(mdi2_client, WM_MDIACTIVATE, (WPARAM)c1, 0);
+    check(IsZoomed(c1) && !IsZoomed(c2), "MDI: activating another child maximizes it instead");
+    SetWindowText(c1, "Renamed");
+    GetWindowText(frame, buf, sizeof buf);
+    check(lstrcmp(buf, "MDI2 - [Renamed]") == 0, "MDI: a maximized child's new title is in the frame's");
+    GetMenuString(win, 2000, buf, sizeof buf, MF_BYCOMMAND);
+    check(lstrcmp(buf, "&1 Renamed") == 0, "MDI: and in the Window menu");
+    SetWindowText(frame, "MDI2b");
+    GetWindowText(frame, buf, sizeof buf);
+    check(lstrcmp(buf, "MDI2b - [Renamed]") == 0, "MDI: the frame's own new title keeps the child's");
+    /* The restore button: WM_COMMAND SC_RESTORE to the frame. */
+    SendMessage(frame, WM_COMMAND, SC_RESTORE, 0);
+    GetWindowText(frame, buf, sizeof buf);
+    check(!IsZoomed(c1) && GetMenuItemCount(bar) == 2 && lstrcmp(buf, "MDI2b") == 0,
+          "MDI: the restore button restores the child, the menu bar and the title");
+    check(HIWORD(SendMessage(mdi2_client, WM_MDIGETACTIVE, 0, 0)) == 0, "MDI: WM_MDIGETACTIVE: not maximized");
+    SendMessage(mdi2_client, WM_MDIMAXIMIZE, (WPARAM)c2, 0);
+    check(IsZoomed(c2) && LOWORD(SendMessage(mdi2_client, WM_MDIGETACTIVE, 0, 0)) == (WORD)c2, "MDI: WM_MDIMAXIMIZE");
+    SendMessage(mdi2_client, WM_MDIRESTORE, (WPARAM)c2, 0);
+    check(!IsZoomed(c2) && GetMenuItemCount(bar) == 2, "MDI: WM_MDIRESTORE");
+    SendMessage(c2, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+    check(IsZoomed(c2), "MDI: WM_SYSCOMMAND SC_MAXIMIZE to a child");
+    /* The program changes its menu (Multipad's short menu). */
+    bar2 = CreateMenu();
+    AppendMenu(bar2, MF_POPUP, (UINT)CreatePopupMenu(), "&Short");
+    SendMessage(mdi2_client, WM_MDISETMENU, 0, MAKELONG(bar2, 0));
+    check(GetMenu(frame) == bar2 && GetMenuItemCount(bar2) == 3 && GetMenuItemCount(bar) == 2, "MDI: WM_MDISETMENU moves the maximized child's items");
+    SendMessage(mdi2_client, WM_MDISETMENU, 0, MAKELONG(bar, 0));
+    check(GetMenuItemCount(bar) == 4 && GetMenuItemCount(bar2) == 1, "MDI: and back");
+    DestroyMenu(bar2);
+    /* Minimized: an icon at the bottom of the client. */
+    SendMessage(c2, WM_SYSCOMMAND, SC_RESTORE, 0);
+    SendMessage(c1, WM_SYSCOMMAND, SC_MINIMIZE, 0);
+    GetWindowRect(c1, &r);
+    GetWindowRect(mdi2_client, &rc);
+    wsprintf(line, "MDI: a minimized child is an icon at the bottom of the client (%d,%d-%d,%d in %d,%d-%d,%d)", r.left, r.top, r.right,
+             r.bottom, rc.left, rc.top, rc.right, rc.bottom);
+    check(IsIconic(c1) && r.left >= rc.left && r.right <= rc.right && r.bottom <= rc.bottom && r.top > rc.top + (rc.bottom - rc.top) / 2, line);
+    check(ArrangeIconicWindows(mdi2_client) > 0 && IsIconic(c1), "MDI: ArrangeIconicWindows");
+    SendMessage(mdi2_client, WM_MDIICONARRANGE, 0, 0);
+    /* Tiling: the icons keep their row. */
+    c3 = mdi2_child(hInst, "Doc3", 0);
+    SendMessage(mdi2_client, WM_MDITILE, MDITILE_VERTICAL, 0);
+    GetWindowRect(c2, &r2);
+    GetWindowRect(c3, &r3);
+    check(r2.top == r3.top && r2.left != r3.left && r2.bottom < r.top + 2, "MDI: WM_MDITILE (side by side, above the icons)");
+    SendMessage(mdi2_client, WM_MDITILE, MDITILE_HORIZONTAL, 0);
+    GetWindowRect(c2, &r2);
+    GetWindowRect(c3, &r3);
+    check(r2.left == r3.left && r2.top != r3.top, "MDI: WM_MDITILE MDITILE_HORIZONTAL (one above the other)");
+    check(SendMessage(mdi2_client, WM_MDICASCADE, 0, 0) != 0, "MDI: WM_MDICASCADE");
+    GetWindowRect(c2, &r2);
+    GetWindowRect(c3, &r3);
+    check(r3.left > r2.left && r3.top > r2.top && IsIconic(c1), "MDI: cascaded, each one lower right of the one before");
+    SendMessage(mdi2_client, WM_MDINEXT, 0, 0);
+    act = SendMessage(mdi2_client, WM_MDIGETACTIVE, 0, 0);
+    check(LOWORD(act) != (WORD)c3, "MDI: WM_MDINEXT");
+    /* The Window menu: a click on an icon's entry restores it. */
+    SendMessage(frame, WM_COMMAND, 2000, 0);
+    check(!IsIconic(c1) && LOWORD(SendMessage(mdi2_client, WM_MDIGETACTIVE, 0, 0)) == (WORD)c1, "MDI: the Window menu's entry restores and activates an icon");
+    /* The maximized child goes: the next one is maximized. */
+    SendMessage(mdi2_client, WM_MDIMAXIMIZE, (WPARAM)c1, 0);
+    SendMessage(mdi2_client, WM_MDIDESTROY, (WPARAM)c1, 0);
+    act = SendMessage(mdi2_client, WM_MDIGETACTIVE, 0, 0);
+    check(!IsWindow(c1) && LOWORD(act) != 0 && HIWORD(act) == 1 && GetMenuItemCount(bar) == 4, "MDI: when the maximized child goes, the next one is maximized");
+    DestroyWindow(frame);
+}
+
+/* W16TEST NAME...: only those groups of checks. */
+static LPSTR only;
+
+static int want(const char *name)
+{
+    char w[32];
+    LPSTR p = only;
+    int i;
+
+    if (only == NULL || *only == 0)
+        return 1;
+    while (*p) {
+        while (*p == ' ')
+            p++;
+        for (i = 0; *p && *p != ' ' && i < sizeof w - 1; )
+            w[i++] = *p++;
+        w[i] = 0;
+        if (i && lstrcmpi(w, name) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+/* Stage 2's rest, each group alone with W16TEST GROUP. */
+static void stage2b_tests(HINSTANCE hInst)
+{
+    if (want("MDI"))
+        mdi2_tests(hInst);
+}
+
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)
 {
     out("w16test: rs2's native Win16 layer\r\n");
+    only = cmd;
+    if (!want("ALL")) {
+        stage2b_tests(hInst);
+        sprintf(line, "w16test done: %d failure(s)\r\n", failures);
+        out(line);
+        return failures;
+    }
     kernel_tests();
     dos_tests();
     user_tests(hInst);
     stage2_tests(hInst);
     stage3_tests(hInst);
     real_app_tests(hInst);
+    stage2b_tests(hInst);
     palette_tests(hInst);
     delphi_tests(hInst);
     toolhelp_tests(hInst);

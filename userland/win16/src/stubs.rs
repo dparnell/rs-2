@@ -459,7 +459,6 @@ thunk16::entries16_pascal! {
     x_7715 = 7715, 0;
     x_2016 = 2016, 4;
     x_2123 = 2123, 6;
-    x_2170 = 2170, 2;
     x_2194 = 2194, 8;
     x_2195 = 2195, 12;
     x_2200 = 2200, 8;
@@ -951,7 +950,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (7715, "TYPELIB.15 OABUILDVERSION"),
     (2016, "USER.16 CLIPCURSOR"),
     (2123, "USER.123 CALLMSGFILTER"),
-    (2170, "USER.170 ARRANGEICONICWINDOWS"),
     (2194, "USER.194 DLGDIRSELECTCOMBOBOX"),
     (2195, "USER.195 DLGDIRLISTCOMBOBOX"),
     (2200, "USER.200 OPENCOMM"),

@@ -621,6 +621,7 @@ entries! {
     u_ischarlower = 2436, 2;
     u_ansiupperbuff = 2437, 6;
     u_ansilowerbuff = 2438, 6;
+    u_arrangeiconicwindows = 2170, 2;
     u_defframeproc = 2445, 12;
     u_defmdichildproc = 2447, 10;
     u_translatemdisysaccel = 2451, 6;

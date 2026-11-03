@@ -519,11 +519,16 @@ pub fn minimize(h: u32) {
     let pos = (w.x, w.y, w.cx, w.cy);
     let was_max = w.style & ws::MAXIMIZED != 0;
     let kids: alloc::vec::Vec<u32> = w.children.iter().copied().filter(|&k| s.desk.get(k).is_some_and(|x| x.visible_style())).collect();
-    let viewer = s.min_viewer != 0 && s.desk.exists(s.min_viewer);
+    // A frame inside another window (an MDI child) becomes an icon at
+    // the bottom of its parent, never the minimized window viewer's.
+    let child = is_child_frame(h);
+    let viewer = !child && s.min_viewer != 0 && s.desk.exists(s.min_viewer);
     let slot = min_slot(h);
     let from = Rect::new(pos.0, pos.1, pos.0 + pos.2, pos.1 + pos.3);
     let mid = from.left + from.width() / 2;
-    crate::animate::zoom(from, if viewer { Rect::new(mid - 16, 0, mid + 16, 32) } else { slot });
+    if !child {
+        crate::animate::zoom(from, if viewer { Rect::new(mid - 16, 0, mid + 16, 32) } else { slot });
+    }
     minmax_frame(h, SWP_MINIMIZE, (slot.left, slot.bottom, slot.width(), slot.height()));
     let s = st();
     for &k in &kids {
@@ -615,7 +620,9 @@ pub fn restore(h: u32) {
         Some(w) if !m.viewer => Rect::new(w.x, w.y, w.x + w.cx, w.y + w.cy),
         _ => Rect::new(to.left + to.width() / 2 - 16, 0, to.left + to.width() / 2 + 16, 32),
     };
-    crate::animate::zoom(from, to);
+    if !is_child_frame(h) {
+        crate::animate::zoom(from, to);
+    }
     if !m.viewer {
         let cur = st().desk.get(h).map(|w| (w.x, w.y));
         if let Some(f) = st().frames.get_mut(&h) {
@@ -673,17 +680,28 @@ pub fn draw_frame(c: &mut Canvas, f: u32, active: bool) {
 /// else the first free place along the bottom.
 fn min_slot(h: u32) -> Rect {
     let s = st();
-    let (sw, sh) = (s.surface.width, s.surface.height);
+    // A child frame's icons go along the bottom of its parent, among its
+    // siblings' icons.
+    let parent = ctl::parent(h);
+    let child = is_child_frame(h);
+    let (sw, sh) = if child { ctl::size(parent) } else { (s.surface.width, s.surface.height) };
+    let s = st();
     let taken: alloc::vec::Vec<Rect> = s
         .frames
         .iter()
-        .filter(|&(&f, x)| f != h && x.min.as_ref().is_some_and(|m| !m.viewer))
+        .filter(|&(&f, x)| f != h && x.min.as_ref().is_some_and(|m| !m.viewer) && ctl::parent(f) == parent)
         .filter_map(|(&f, _)| s.desk.get(f).map(|x| Rect::new(x.x, x.y, x.x + x.cx, x.y + x.cy)))
         .collect();
     match s.frames.get(&h).and_then(|f| f.icon_pos) {
         Some((x, y)) => Rect::new(x, y, x + pmwin::minimize::ICON_W, y + pmwin::minimize::ICON_H),
         None => pmwin::minimize::free_slot(&taken, sw, sh),
     }
+}
+
+/// Is `h` a frame inside another window (not the desktop's)?
+fn is_child_frame(h: u32) -> bool {
+    let p = ctl::parent(h);
+    p != 0 && p != HWND_DESKTOP && p != pmwin::HWND_OBJECT
 }
 
 /// SWP fields: fl, cy, cx, y, x, hwndInsertBehind, hwnd.
@@ -778,7 +796,10 @@ pub fn maximize(h: u32, on: bool) {
     let Some(w) = s.desk.get(h) else { return };
     let cur = (w.x, w.y, w.cx, w.cy);
     let b = border(fcf(h));
-    let (sw, sh) = (s.surface.width, s.surface.height);
+    // A frame inside another window fills that window.
+    let child = is_child_frame(h);
+    let (sw, sh) = if child { ctl::size(ctl::parent(h)) } else { (s.surface.width, s.surface.height) };
+    let s = st();
     let Some(f) = s.frames.get_mut(&h) else { return };
     let target = if on {
         if f.restore.is_none() {
@@ -798,7 +819,9 @@ pub fn maximize(h: u32, on: bool) {
             w.style &= !ws::MAXIMIZED;
         }
     }
-    crate::animate::zoom(Rect::new(cur.0, cur.1, cur.0 + cur.2, cur.1 + cur.3), Rect::new(target.0, target.1, target.0 + target.2, target.1 + target.3));
+    if !child {
+        crate::animate::zoom(Rect::new(cur.0, cur.1, cur.0 + cur.2, cur.1 + cur.3), Rect::new(target.0, target.1, target.0 + target.2, target.1 + target.3));
+    }
     let mm = WinWindowFromID(h, FID_MINMAX);
     if on {
         menu::replace_id(mm, SC_MAXIMIZE, SC_RESTORE);

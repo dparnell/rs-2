@@ -1837,6 +1837,15 @@ extern "C" fn std_frame_proc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             return send_inflight(h, W_SYSCOMMAND, mp1 as u16, 0, q);
         }
     }
+    // An MDI child's title bar buttons: Windows' WM_SYSCOMMAND to the
+    // child (DefMDIChildProc maximizes it the MDI way).
+    if msg == WM_SYSCOMMAND {
+        if let Some(h) = by_frame(pmh).filter(|w| w.created && w.style & WS_CHILD != 0).map(|w| w.hwnd) {
+            if crate::mdi::pm_syscommand(h, mp1 & 0xffff) {
+                return 0;
+            }
+        }
+    }
     let r = old(pmh, msg, mp1, mp2);
     if msg == WM_ACTIVATE {
         if let Some(h) = by_frame(pmh).filter(|w| w.created && w.frame != w.client).map(|w| w.hwnd) {
@@ -2309,6 +2318,16 @@ pub fn window_text(h: u16) -> Vec<u8> {
         return b[..n.max(0) as usize].to_vec();
     }
     w.text.clone()
+}
+
+/// Set a window's text without telling the window (MDI's frame title).
+pub fn set_text_raw(h: u16, t: &[u8]) {
+    let Some(w) = wnd(h) else { return };
+    if w.framed {
+        let s = z(t);
+        unsafe { WinSetWindowText(w.frame, s.as_ptr()) };
+    }
+    w.text = t.to_vec();
 }
 
 /// GetWindow(hwnd, GW_*).
@@ -3069,6 +3088,12 @@ extern "C" fn pm_wndproc(pmh: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         // BeginPaint erases (WM_ERASEBKGND).
         WM_ERASEBACKGROUND => 0,
         WM_COMMAND | WM_INITMENU | WM_MENUSELECT | WM_MENUEND => crate::menu::pm_message(h, msg, mp1, mp2),
+        // The menu bar's MDI items (a maximized child's): WIN16 draws
+        // them.
+        0x0036 | 0x0037 => match crate::mdi::owner_item(msg, mp2 as *mut u8) {
+            Some(r) => r,
+            None => unsafe { WinDefWindowProc(pmh, msg, mp1, mp2) },
+        },
         WM_VSCROLL | WM_HSCROLL | WM_CONTROL => 0,
         _ => match translate_pm(h, &q) {
             Some((m, wp, lp)) => {
