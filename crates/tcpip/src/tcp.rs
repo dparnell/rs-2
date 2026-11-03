@@ -852,6 +852,27 @@ impl Tcb {
         self.delack_at = None;
     }
 
+    /// A SYN for this connection's endpoints while it is in TIME_WAIT may
+    /// open a new connection (RFC 1122 4.2.2.13, RFC 6191): its sequence
+    /// number is beyond what the old one received, or its timestamp is
+    /// newer. The caller then ends this one and treats the SYN as new.
+    pub fn new_syn_in_time_wait(&self, seg: &Segment) -> bool {
+        if self.state != State::TimeWait || !seg.has(SYN) || seg.has(ACK) || seg.has(RST) {
+            return false;
+        }
+        // (Either test will do: timestamp clocks need not run on across
+        // connections, ours start at a per-connection offset.)
+        gt(seg.seq, self.rcv_nxt) || (self.ts_ok && seg.ts.is_some_and(|(v, _)| gt(v, self.ts_recent)))
+    }
+
+    /// End a connection in TIME_WAIT at once (its endpoints are reused).
+    pub fn end_time_wait(&mut self) {
+        if self.state == State::TimeWait {
+            self.state = State::Closed;
+            self.linger_at = None;
+        }
+    }
+
     /// Process an arriving segment (RFC 9293 3.10.7).
     pub fn input(&mut self, seg: &Segment, now: u64) {
         self.now = now;
@@ -977,6 +998,11 @@ impl Tcb {
         }
         // 2. Reset: only exactly at RCV.NXT (RFC 5961 3.2).
         if seg.has(RST) {
+            // TIME_WAIT ignores resets (RFC 1337): the peer's answer to a
+            // duplicate ACK must not cut TIME_WAIT short.
+            if self.state == State::TimeWait {
+                return;
+            }
             if seg.seq != self.rcv_nxt {
                 self.ack_now = true;
                 return;

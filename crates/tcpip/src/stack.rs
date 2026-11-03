@@ -1388,6 +1388,18 @@ impl Stack {
         let conn = self.sockets.iter().position(|s| {
             s.as_ref().is_some_and(|s| s.tcb.as_ref().is_some_and(|t| !t.is_closed() && t.local == local && t.remote == remote))
         });
+        // A new SYN for a connection in TIME_WAIT: the old one ends and the
+        // SYN goes to the listener.
+        let conn = match conn {
+            Some(id) if self.sockets[id].as_ref().and_then(|s| s.tcb.as_ref()).is_some_and(|t| t.new_syn_in_time_wait(&seg)) => {
+                if let Some(t) = self.sockets[id].as_mut().and_then(|s| s.tcb.as_mut()) {
+                    t.end_time_wait();
+                }
+                self.reap();
+                None
+            }
+            c => c,
+        };
         if let Some(id) = conn {
             let s = self.sockets[id].as_mut().unwrap();
             let t = s.tcb.as_mut().unwrap();

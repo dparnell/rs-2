@@ -630,3 +630,46 @@ fn urgent_data_and_options_through_sockets() {
     assert!(st.tcp_details(s).unwrap().timestamps);
     assert!(st.counters.tcp_active_opens == 1 && st.counters.tcp_passive_opens == 1);
 }
+
+#[test]
+fn new_syn_reuses_a_connection_in_time_wait() {
+    let mut n = Net::new();
+    let l = n.b.socket(Kind::Tcp).unwrap();
+    n.b.bind(l, ep(Ipv4::UNSPECIFIED, 514)).unwrap();
+    n.b.listen(l, 4).unwrap();
+    let connect = |n: &mut Net| {
+        let c = n.a.socket(Kind::Tcp).unwrap();
+        n.a.set_reuse_addr(c, true).unwrap();
+        n.a.bind(c, ep(Ipv4::UNSPECIFIED, 1000)).unwrap();
+        n.a.connect(c, ep(ip_b(), 514), n.now).unwrap();
+        for _ in 0..50 {
+            n.tick(10);
+            if n.a.connect_status(c) == Ok(true) {
+                break;
+            }
+        }
+        c
+    };
+    let c = connect(&mut n);
+    assert_eq!(n.a.connect_status(c), Ok(true));
+    let (s, _) = n.b.accept(l).unwrap();
+    // The server closes first: its end of the connection is in TIME_WAIT.
+    n.b.close(s, n.now).unwrap();
+    n.tick(10);
+    n.a.close(c, n.now).unwrap();
+    // A late step: the client's FIN is retransmitted, the second ACK finds
+    // it closed and draws a reset, which TIME_WAIT ignores (RFC 1337).
+    n.tick(300);
+    assert!(n.b.sockets().iter().any(|x| x.state == Some(tcp::State::TimeWait)));
+    // The same client port again, long before TIME_WAIT ends.
+    n.tick(1000);
+    let c2 = connect(&mut n);
+    assert_eq!(n.a.connect_status(c2), Ok(true));
+    let (s2, peer) = n.b.accept(l).unwrap();
+    assert_eq!(peer.port, 1000);
+    assert!(!n.b.sockets().iter().any(|x| x.state == Some(tcp::State::TimeWait)));
+    n.a.send(c2, b"again", n.now).unwrap();
+    n.tick(200);
+    let mut buf = [0u8; 8];
+    assert_eq!(n.b.recv(s2, &mut buf, false, n.now), Ok(5));
+}
