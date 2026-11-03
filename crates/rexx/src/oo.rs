@@ -1061,7 +1061,8 @@ pub fn invoke(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: V
         Body::External(spec) => {
             let spec = spec.clone();
             let mut st = core::mem::replace(&mut it.st, crate::exec::State::empty());
-            let r = it.host.native_method(&mut st, &spec, recv, name, &args);
+            let w = it.w.clone().unwrap();
+            let r = it.host.native_method(&mut st, &w, &spec, recv, name, &args);
             it.st = st;
             match r {
                 Some(Ok(v)) => Ok(v),
@@ -1206,6 +1207,17 @@ pub fn env_symbol(it: &mut Interp, f: &mut Frame, name: &[u8]) -> Value {
                 d.map.insert(name.to_vec(), v.clone());
             }
             return v;
+        }
+    }
+    // classes the host has as REXX code (OREXX.DLL: OpenDoc scripting's)
+    let mut st = core::mem::replace(&mut it.st, State::empty());
+    let src = it.host.environment_source(&mut st, name);
+    it.st = st;
+    if let Some((src, pkg)) = src {
+        if it.run_program_v(&src, &pkg, crate::CallType::Subroutine, Vec::new(), b"CMD").is_ok() {
+            if let Some(v) = w.dir_get(&w.env, name) {
+                return v;
+            }
         }
     }
     let mut v = b".".to_vec();

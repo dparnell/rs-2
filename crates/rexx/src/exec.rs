@@ -792,6 +792,18 @@ impl<'h> Interp<'h> {
         }
     }
 
+    /// The value `.local~NOVALUE~novalue(name)` gives an uninitialized
+    /// variable (Object REXX), unless it is .nil.
+    fn local_novalue(&mut self, f: &mut Frame, name: &[u8], lvl: u32) -> R<Option<Value>> {
+        let Some(w) = self.w.clone() else { return Ok(None) };
+        let Some(h @ Value::O(_)) = w.dir_get(&w.local, b"NOVALUE") else { return Ok(None) };
+        if f.traps[cond_index(Cond::NoValue)].state == TrapState::On {
+            return Ok(None);
+        }
+        let r = self.send(f, &h, b"NOVALUE", alloc::vec![Some(Value::S(name.to_vec()))], crate::oo::Start::Normal, lvl)?;
+        Ok(r.filter(|v| !matches!(v, Value::O(o) if Rc::ptr_eq(o, &w.nil))))
+    }
+
     pub(crate) fn novalue(&mut self, f: &mut Frame, name: &[u8]) -> R<()> {
         if f.traps[cond_index(Cond::NoValue)].state == TrapState::On {
             self.raise(f, Cond::NoValue, name.to_vec())?;
@@ -847,6 +859,11 @@ impl<'h> Interp<'h> {
                             self.trace_val(b">L>", &name, lvl);
                         }
                         self.novalue(f, &name)?;
+                        // Object REXX: an object in .local's NOVALUE entry
+                        // gives the value (its NOVALUE method; .nil: none)
+                        if let Some(v) = self.local_novalue(f, &name, lvl)? {
+                            return Ok(v);
+                        }
                         Ok(Value::S(name))
                     }
                 }

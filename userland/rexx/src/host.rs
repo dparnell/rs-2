@@ -991,8 +991,13 @@ impl Host for OsHost {
     }
 
     #[cfg(orexx)]
-    fn native_method(&mut self, _st: &mut State, spec: &[u8], recv: &rexx::value::Value, name: &[u8], args: &[Option<rexx::value::Value>]) -> Option<Result<Option<rexx::value::Value>, (u32, Vec<u8>)>> {
-        crate::osa::native_call(spec, recv, name, args)
+    fn native_method(&mut self, _st: &mut State, world: &alloc::rc::Rc<rexx::oo::World>, spec: &[u8], recv: &rexx::value::Value, name: &[u8], args: &[Option<rexx::value::Value>]) -> Option<Result<Option<rexx::value::Value>, (u32, Vec<u8>)>> {
+        crate::osa::native_call(world, spec, recv, name, args)
+    }
+
+    #[cfg(orexx)]
+    fn environment_source(&mut self, _st: &mut State, name: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+        crate::osa::environment_source(name)
     }
 
     fn init(&mut self, st: &mut State) {

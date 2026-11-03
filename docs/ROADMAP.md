@@ -456,9 +456,12 @@ Status markers: done, in progress, planned.
   Apple-event terminology classes, OREXX.DLL's OSA calls, native-method
   API and native methods; IBM's OREXXSC.DLL runs REXX scripts that send
   Apple events to the application (ODSHELL's Document/Run script)
+- done (milestone 5): OpenDoc scripting: the terminology's classes and
+  properties (NOVALUE, object specifiers, named parameters), AEResolve
+  with object accessors, Apple events between processes (CMD scripts
+  drive ODSHELL), OSA recording
 - planned: OpenDoc's links, undo, nested drafts, rendering exchange for
-  parts dropped on other programs; Apple events between processes and the
-  terminology's classes and properties
+  parts dropped on other programs; recording events with parameters
 - not planned: DSOM itself (distributed objects, the SOMDD daemon,
   SOMDSVR; SOMEM, SOMS, SOMSEC): nothing on the CD uses it; rs2's own Object REXX does not
   use SOMD

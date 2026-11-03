@@ -23,6 +23,7 @@ use os2::*;
 use somsup::{ClassSpec, Environment};
 
 mod ae;
+mod osl;
 mod orexxsc;
 mod somuc;
 
@@ -852,7 +853,11 @@ fn test_part_class() -> usize {
 
 // ---- The checks ----
 
-fn new_session() -> usize {
+pub fn session_cd() -> *const usize {
+    cd!(ODSessionClassData)
+}
+
+pub fn new_session() -> usize {
     let cls = unsafe { ODSessionNewClass(1, 0) };
     let s = somsup::new_object(cls);
     m(cd!(ODSessionClassData), SESS_INIT, &[s, ev()]);
@@ -1013,6 +1018,9 @@ fn main(st: &Startup) -> u32 {
     let args: Vec<u8> = args.iter().copied().skip_while(|&b| b == b' ').collect();
     if args.len() >= 7 && args[..7].eq_ignore_ascii_case(b"MMODPTS") {
         mmodpts();
+    } else if args.len() >= 6 && args[..6].eq_ignore_ascii_case(b"AERECV") {
+        osl::receiver();
+        return 0;
     } else if args.len() >= 7 && args[..7].eq_ignore_ascii_case(b"OREXXSC") {
         orexxsc::orexxsc();
     } else {
@@ -1026,6 +1034,7 @@ fn main(st: &Startup) -> u32 {
 fn basic() {
     somuc::somuc_test();
     ae::ae_test();
+    osl::osl_test();
     let e = ev();
     let session = new_session();
     check("session", session != 0);

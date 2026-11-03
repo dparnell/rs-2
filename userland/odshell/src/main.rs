@@ -325,6 +325,8 @@ const WM_CHAR: u32 = 0x7a;
 const CMD_SAVE: u32 = 0x5100;
 const CMD_CLOSE: u32 = 0x5101;
 const CMD_RUN_SCRIPT: u32 = 0x5102;
+const CMD_RECORD: u32 = 0x5103;
+const CMD_PLAY_SOUND: u32 = 0x5104;
 // IBM's OpenDoc command IDs (MMODPTS's EventMenuCommand handles these).
 const CMD_CUT: u32 = 0x5001;
 const CMD_COPY: u32 = 0x5003;
@@ -342,6 +344,8 @@ fn menu_hint(id: u32) -> &'static [u8] {
     match id {
         CMD_SAVE => b"Saves the document",
         CMD_CLOSE => b"Closes the document window",
+        CMD_RECORD => b"Starts or stops recording what you do as a REXX script (C:\\RECORDED.CMD)",
+        CMD_PLAY_SOUND => b"Plays the embedded sound (an Apple event to ODSHELL itself)",
         CMD_RUN_SCRIPT => b"Runs C:\\ODSCRIPT.CMD (Object REXX, through OpenDoc's scripting component)",
         CMD_CUT => b"Moves the selected part's text to the clipboard",
         CMD_COPY => b"Copies the selected part's text to the clipboard",
@@ -539,6 +543,14 @@ extern "C" fn shell_dispatch(this: usize, ev: usize, event: usize, info: usize) 
             script::run_script(menu_frame(ev));
             1
         }
+        CMD_RECORD => {
+            script::toggle_recording(menu_frame(ev));
+            1
+        }
+        CMD_PLAY_SOUND => {
+            script::play_sound();
+            1
+        }
         CMD_COPY_PART => {
             copy_part(ev);
             1
@@ -595,6 +607,8 @@ fn base_menu_bar(ws: usize) {
     m(c, 2, &[mb, e, 0x0c, b"~Document\0".as_ptr() as usize, 0]);
     item(mb, 0x0c, CMD_SAVE, b"~Save\0", false);
     item(mb, 0x0c, CMD_RUN_SCRIPT, b"~Run script\0", false);
+    item(mb, 0x0c, CMD_RECORD, b"Rec~ord script\0", false);
+    item(mb, 0x0c, CMD_PLAY_SOUND, b"~Play sound\0", false);
     item(mb, 0x0c, CMD_CLOSE, b"~Close\0", false);
     m(c, 2, &[mb, e, 0x0e, b"~Edit\0".as_ptr() as usize, 0]);
     item(mb, 0x0e, 0x5000, b"~Undo\0", true);
@@ -726,6 +740,8 @@ fn main(st: &Startup) -> u32 {
     let session = somsup::new_object(unsafe { ODSessionNewClass(1, 0) });
     m(cd!(ODSessionClassData), 0, &[session, e]);
     m(cd!(ODSessionClassData), 2, &[session, e, hab as usize]);
+    // Apple events: from scripts and from other processes
+    script::install();
     text_part_class();
     let ws = m(cd!(ODBaseSessionClassData), 13, &[session, e]);
     base_menu_bar(ws);

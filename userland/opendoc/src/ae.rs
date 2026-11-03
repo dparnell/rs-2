@@ -497,7 +497,18 @@ pub extern "C" fn AEInstallEventHandler(class: u32, id: u32, proc_: usize, refco
     let h = handlers();
     h.retain(|x| !(x.class == class && x.id == id));
     h.push(Handler { class, id, proc_, refcon });
+    // other processes can send it events (once the session has PM)
+    listen();
     0
+}
+
+/// Receive events from other processes, if there are handlers and the
+/// session has an anchor block (SetHAB: its thread has a message queue).
+pub fn listen() {
+    let s = crate::services::session();
+    if s != 0 && crate::services::sess(s).hab != 0 && !handlers().is_empty() {
+        crate::ipc::listen(&own_name());
+    }
 }
 
 pub extern "C" fn AERemoveEventHandler(class: u32, id: u32, proc_: usize, _sys: u32) -> i32 {
@@ -511,7 +522,7 @@ fn type_attr(e: &Desc, key: u32) -> u32 {
     attr(e, key).and_then(|d| data(&d).map(|x| x.bytes.clone())).filter(|b| b.len() >= 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
-fn own_pid() -> u32 {
+pub fn own_pid() -> u32 {
     let mut tib = core::ptr::null_mut();
     let mut pib = core::ptr::null_mut();
     unsafe {
@@ -536,18 +547,27 @@ fn own_name() -> Vec<u8> {
     base.to_vec()
 }
 
-/// Whether an event goes to this process: no target, or this PID.
+/// Whether an event goes to this process: no target, PID 0 (or none),
+/// or this PID.
 fn for_us(e: &Desc) -> bool {
     match attr(e, code(b"addr")) {
         None => true,
         Some(a) if a.ty == T_NULL => true,
         Some(a) if a.ty == T_PID => {
             let b = data(&a).map_or(Vec::new(), |x| x.bytes.clone());
-            b.len() >= 4 && u32::from_le_bytes([b[0], b[1], b[2], b[3]]) == own_pid()
+            b.len() < 4 || matches!(u32::from_le_bytes([b[0], b[1], b[2], b[3]]), 0) || u32::from_le_bytes([b[0], b[1], b[2], b[3]]) == own_pid()
         }
         _ => false,
     }
 }
+
+/// Recording (OSA): on after 'aevt'/'acer' (kAEStartRecording as OS/2
+/// OpenDoc's codes have it), off after 'aevt'/'ccer'. While it is on,
+/// every event a process gives its own handlers (but the Apple Event
+/// Manager's and the scripting component's: classes 'aevt', 'ascr') is
+/// passed to the 'aevt'/'rcer' handler too (the scripting component's,
+/// which turns it into a script line).
+static mut RECORDING: bool = false;
 
 pub extern "C" fn AESend(event: usize, reply: usize, mode: u32, _prio: i32, _timeout: i32, _idle: usize, _filter: usize) -> i32 {
     let e = get_desc(event);
@@ -555,9 +575,44 @@ pub extern "C" fn AESend(event: usize, reply: usize, mode: u32, _prio: i32, _tim
         return ERR_NOT_EVENT;
     }
     if !for_us(&e) {
-        return ERR_PROC_NOT_FOUND;
+        // another process's: through its receiver (ipc.rs)
+        let pid = attr(&e, code(b"addr")).and_then(|a| data(&a).map(|x| x.bytes.clone())).filter(|b| b.len() >= 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+        let mut buf = Vec::new();
+        encode(&e, &mut buf);
+        return match crate::ipc::send(pid, mode, &buf) {
+            Ok((rc, rbuf)) => {
+                let mut p = 0;
+                let r = decode(&rbuf, &mut p).unwrap_or(Desc { ty: T_NULL, h: 0 });
+                put_desc(reply, if mode & 3 == 3 { r } else { Desc { ty: T_NULL, h: 0 } });
+                rc
+            }
+            Err(e) => e,
+        };
     }
+    deliver(event, reply, mode)
+}
+
+/// Give an event of this process to its handler.
+pub fn deliver(event: usize, reply: usize, mode: u32) -> i32 {
+    let e = get_desc(event);
     let (class, id) = (type_attr(&e, code(b"evcl")), type_attr(&e, code(b"evid")));
+    if class == code(b"aevt") && (id == code(b"acer") || id == code(b"ccer")) {
+        unsafe { RECORDING = id == code(b"acer") };
+        put_desc(reply, Desc { ty: T_NULL, h: 0 });
+        return 0;
+    }
+    let rc = dispatch(event, reply, mode, class, id);
+    if rc == 0 && unsafe { RECORDING } && class != code(b"aevt") && class != code(b"ascr") {
+        if let Some(h) = handlers().iter().find(|x| x.class == code(b"aevt") && x.id == code(b"rcer")) {
+            let f: extern "C" fn(usize, usize, usize) -> i32 = unsafe { core::mem::transmute(h.proc_) };
+            let mut none = Desc { ty: T_NULL, h: 0 };
+            f(event, &mut none as *mut Desc as usize, h.refcon);
+        }
+    }
+    rc
+}
+
+fn dispatch(event: usize, reply: usize, mode: u32, class: u32, id: u32) -> i32 {
     let h = handlers();
     let found = [(class, id), (class, T_WILD), (T_WILD, id), (T_WILD, T_WILD)]
         .iter()
@@ -584,28 +639,155 @@ pub extern "C" fn AESend(event: usize, reply: usize, mode: u32, _prio: i32, _tim
 }
 
 /// Ordinal 42 (OS/2): the PID of a program by name (`ODSHELL` or
-/// `ODSHELL.EXE`; rs2 knows its own process only).
+/// `ODSHELL.EXE`): this process, else one that receives Apple events.
 pub extern "C" fn AEGetProcessID(name: usize, _timeout: i32, pid_out: usize) -> i32 {
     let want: Vec<u8> = cstr(name).iter().map(|c| c.to_ascii_uppercase()).collect();
     let own: Vec<u8> = own_name().iter().map(|c| c.to_ascii_uppercase()).collect();
     let stem = own.strip_suffix(b".EXE").unwrap_or(&own);
     if !want.is_empty() && (want == own || want == stem) {
         write::<u32>(pid_out, own_pid());
-        0
-    } else {
-        ERR_PROC_NOT_FOUND
+        return 0;
+    }
+    match crate::ipc::find_name(&want) {
+        Some(pid) => {
+            write::<u32>(pid_out, pid);
+            0
+        }
+        None => ERR_PROC_NOT_FOUND,
     }
 }
 
 /// Ordinal 71 (OS/2): a program's name by PID.
 pub extern "C" fn AEGetProcessName(pid: u32, buf: usize, _info: usize) -> i32 {
-    if pid != own_pid() || buf == 0 {
+    if buf == 0 {
         return ERR_PROC_NOT_FOUND;
     }
-    let mut n = own_name();
+    let mut n = if pid == own_pid() || pid == 0 {
+        own_name()
+    } else {
+        match crate::ipc::name_of(pid) {
+            Some(n) => n,
+            None => return ERR_PROC_NOT_FOUND,
+        }
+    };
     n.push(0);
     unsafe { core::ptr::copy_nonoverlapping(n.as_ptr(), buf as *mut u8, n.len()) };
     0
+}
+
+// ---- the Object Support Library: object accessors and AEResolve ----
+
+struct Accessor {
+    class: u32,
+    container: u32,
+    proc_: usize,
+    refcon: usize,
+}
+
+static mut ACCESSORS: Vec<Accessor> = Vec::new();
+
+fn accessors() -> &'static mut Vec<Accessor> {
+    unsafe { &mut *(&raw mut ACCESSORS) }
+}
+
+pub const ERR_NO_SUCH_OBJECT: i32 = -1728;
+pub const ERR_NOT_OBJ_SPEC: i32 = -1727;
+pub const ERR_ACCESSOR_NOT_FOUND: i32 = -1723;
+
+/// AEInstallObjectAccessor(desiredClass, containerType, accessor, refcon,
+/// isSystem) (ordinal 39, rs2's assignment).
+pub extern "C" fn AEInstallObjectAccessor(class: u32, container: u32, proc_: usize, refcon: usize, _sys: u32) -> i32 {
+    let a = accessors();
+    a.retain(|x| !(x.class == class && x.container == container));
+    a.push(Accessor { class, container, proc_, refcon });
+    0
+}
+
+/// AERemoveObjectAccessor(desiredClass, containerType, accessor, isSystem)
+/// (56).
+pub extern "C" fn AERemoveObjectAccessor(class: u32, container: u32, proc_: usize, _sys: u32) -> i32 {
+    let a = accessors();
+    let n = a.len();
+    a.retain(|x| !(x.class == class && x.container == container && (proc_ == 0 || x.proc_ == proc_)));
+    if a.len() == n { ERR_ACCESSOR_NOT_FOUND } else { 0 }
+}
+
+/// Resolve an object specifier to a token: its container first (none:
+/// the application, a typeNull token), then the accessor for the class
+/// wanted and the container token's type ('****' matches any), called as
+/// `accessor(desiredClass, containerToken, containerClass, keyForm,
+/// keyData, *token, refcon)`.
+fn resolve(spec: &Desc) -> Result<Desc, i32> {
+    if spec.ty == T_NULL {
+        return Ok(Desc { ty: T_NULL, h: 0 });
+    }
+    if kind(spec) != Kind::Record {
+        return Err(ERR_NOT_OBJ_SPEC);
+    }
+    let get = |k: &[u8; 4]| param(spec, code(k));
+    let code_of = |d: Option<Desc>| -> u32 {
+        d.and_then(|d| data(&d).map(|x| x.bytes.clone())).filter(|b| b.len() >= 4).map_or(0, |b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let want = code_of(get(b"want"));
+    let form = code_of(get(b"form"));
+    let seld = get(b"seld").unwrap_or(Desc { ty: T_NULL, h: 0 });
+    let from = get(b"from").unwrap_or(Desc { ty: T_NULL, h: 0 });
+    let container_class = if from.ty == T_NULL { T_NULL } else { param(&from, code(b"want")).map_or(T_NULL, |d| code_of(Some(d))) };
+    let mut ctok = resolve(&from)?;
+    let a = accessors();
+    let found = [(want, ctok.ty), (want, T_WILD), (T_WILD, ctok.ty), (T_WILD, T_WILD)]
+        .iter()
+        .find_map(|&(c, t)| a.iter().find(|x| x.class == c && x.container == t).map(|x| (x.proc_, x.refcon)));
+    let r = match found {
+        None => Err(ERR_ACCESSOR_NOT_FOUND),
+        Some((proc_, refcon)) => {
+            let f: extern "C" fn(u32, usize, u32, u32, usize, usize, usize) -> i32 = unsafe { core::mem::transmute(proc_) };
+            let mut tok = Desc { ty: T_NULL, h: 0 };
+            match f(want, &ctok as *const Desc as usize, container_class, form, &seld as *const Desc as usize, &mut tok as *mut Desc as usize, refcon) {
+                0 => Ok(tok),
+                e => Err(e),
+            }
+        }
+    };
+    dispose(&mut ctok);
+    r
+}
+
+/// AEResolve(objectSpecifier, callbackFlags, *token) (59).
+pub extern "C" fn AEResolve(spec: usize, _flags: u32, result: usize) -> i32 {
+    match resolve(&get_desc(spec)) {
+        Ok(t) => {
+            put_desc(result, t);
+            0
+        }
+        Err(e) => {
+            put_desc(result, Desc { ty: T_NULL, h: 0 });
+            e
+        }
+    }
+}
+
+/// AEDisposeToken(token) (17).
+pub extern "C" fn AEDisposeToken(token: usize) -> i32 {
+    AEDisposeDesc(token)
+}
+
+/// AEPutParamPtr(event, keyword, type, data, size) (52).
+pub extern "C" fn AEPutParamPtr(event: usize, key: u32, ty: u32, ptr: usize, size: usize) -> i32 {
+    let mut d = Desc::default();
+    AECreateDesc(ty, ptr, size, &mut d as *mut Desc as usize);
+    let r = AEPutParamDesc(event, key, &d as *const Desc as usize);
+    dispose(&mut d);
+    r
+}
+
+/// AEPutPtr(list, index, type, data, size) (53).
+pub extern "C" fn AEPutPtr(list: usize, index: i32, ty: u32, ptr: usize, size: usize) -> i32 {
+    let mut d = Desc::default();
+    AECreateDesc(ty, ptr, size, &mut d as *mut Desc as usize);
+    let r = AEPutDesc(list, index, &d as *const Desc as usize);
+    dispose(&mut d);
+    r
 }
 
 /// Every call OREXXSC may make that rs2 does not have.
@@ -616,4 +798,60 @@ pub extern "C" fn AENotHandled() -> i32 {
 #[allow(dead_code)]
 fn unused() -> i32 {
     rc(Ok(()))
+}
+
+// ---- descriptors as bytes (events between processes) ----
+
+/// type, kind (0xFF: no data), data (length, bytes), items (count;
+/// keyword and descriptor each), attributes (the same).
+pub fn encode(d: &Desc, out: &mut Vec<u8>) {
+    out.extend_from_slice(&d.ty.to_le_bytes());
+    match data(d) {
+        None => out.push(0xff),
+        Some(x) => {
+            out.push(x.kind as u8);
+            out.extend_from_slice(&(x.bytes.len() as u32).to_le_bytes());
+            out.extend_from_slice(&x.bytes);
+            for v in [&x.items, &x.attrs] {
+                out.extend_from_slice(&(v.len() as u32).to_le_bytes());
+                for (k, d) in v.iter() {
+                    out.extend_from_slice(&k.to_le_bytes());
+                    encode(d, out);
+                }
+            }
+        }
+    }
+}
+
+fn u32_at(b: &[u8], p: &mut usize) -> Option<u32> {
+    let v = b.get(*p..*p + 4)?;
+    *p += 4;
+    Some(u32::from_le_bytes([v[0], v[1], v[2], v[3]]))
+}
+
+pub fn decode(b: &[u8], p: &mut usize) -> Option<Desc> {
+    let ty = u32_at(b, p)?;
+    let k = *b.get(*p)?;
+    *p += 1;
+    if k == 0xff {
+        return Some(Desc { ty, h: 0 });
+    }
+    let n = u32_at(b, p)? as usize;
+    let bytes = b.get(*p..*p + n)?.to_vec();
+    *p += n;
+    let mut lists = [Vec::new(), Vec::new()];
+    for l in lists.iter_mut() {
+        for _ in 0..u32_at(b, p)? {
+            let key = u32_at(b, p)?;
+            l.push((key, decode(b, p)?));
+        }
+    }
+    let [items, attrs] = lists;
+    let kind = match k {
+        1 => Kind::List,
+        2 => Kind::Record,
+        3 => Kind::Event,
+        _ => Kind::Bytes,
+    };
+    Some(make(ty, Data { kind, bytes, items, attrs }))
 }

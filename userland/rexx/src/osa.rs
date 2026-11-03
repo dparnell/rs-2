@@ -156,7 +156,7 @@ fn whole(v: &Value) -> Option<i64> {
 // ---- the interpreter for a run ----
 
 fn with_interp<R>(f: impl FnOnce(&mut Interp) -> R) -> R {
-    let w = session().w.clone();
+    let w = w();
     crate::stack::deep(move || {
         let mut h = crate::host::OsHost { exits: Default::default(), locals: Vec::new(), tid: crate::stack::tid() };
         crate::oohost::lock();
@@ -360,8 +360,23 @@ pub extern "C" fn RexxGetOSAInfo(h: u32, sel: u32, out: *mut u32) -> u32 {
 
 // ---- the native-method API ----
 
+/// The world of the native method running now (its program's), else
+/// the OSA session's.
+static mut CURRENT: Option<Rc<World>> = None;
+
 fn w() -> Rc<World> {
-    session().w.clone()
+    match unsafe { (*(&raw const CURRENT)).clone() } {
+        Some(w) => w,
+        None => session().w.clone(),
+    }
+}
+
+/// `.ScriptableApp` and the other scripting classes in a program that
+/// did not get them from RexxSomInitialize (a REXX program run by CMD):
+/// rs2's REXX code for them.
+pub fn environment_source(name: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+    const NAMES: &[&[u8]] = &[b"SCRIPTABLEAPP", b"OBJECTSPECIFIER", b"SCREFERENCE", b"SCRELATIVEPOSITION", b"SCLIST", b"SCRANGE", b"SCCLASS"];
+    if NAMES.contains(&name) { Some((OPENDOC_CLASSES.to_vec(), b"OPENDOC".to_vec())) } else { None }
 }
 
 fn opt(h: u32) -> Option<Value> {
@@ -505,7 +520,10 @@ fn routine(spec: &[u8], name: &[u8]) -> Option<usize> {
     let mut h = 0u32;
     let mut fail = [0u8; 64];
     if unsafe { DosLoadModule(fail.as_mut_ptr(), fail.len() as u32, dll.as_ptr(), &mut h) } != 0 {
-        return None;
+        // REXXSC is the module of OREXXSC.DLL
+        if !words[1].eq_ignore_ascii_case(b"REXXSC") || unsafe { DosLoadModule(fail.as_mut_ptr(), fail.len() as u32, b"OREXXSC\0".as_ptr(), &mut h) } != 0 {
+            return None;
+        }
     }
     let mut f = 0usize;
     if unsafe { DosQueryProcAddr(h, 0, entry.as_ptr(), &mut f) } != 0 || f == 0 {
@@ -519,7 +537,14 @@ fn routine(spec: &[u8], name: &[u8]) -> Option<usize> {
 /// 7 the receiver, 8 the argument array, 9 the message name, 0x10 an
 /// optional object), `f(args)` runs it: `args[0]` points to the result,
 /// `args[n]` to the nth argument's value.
-pub fn native_call(spec: &[u8], recv: &Value, name: &[u8], args: &[Option<Value>]) -> Option<Result<Option<Value>, (u32, Vec<u8>)>> {
+pub fn native_call(world: &Rc<World>, spec: &[u8], recv: &Value, name: &[u8], args: &[Option<Value>]) -> Option<Result<Option<Value>, (u32, Vec<u8>)>> {
+    let saved = unsafe { core::mem::replace(&mut *(&raw mut CURRENT), Some(world.clone())) };
+    let r = native_call_in(spec, recv, name, args);
+    unsafe { *(&raw mut CURRENT) = saved };
+    r
+}
+
+fn native_call_in(spec: &[u8], recv: &Value, name: &[u8], args: &[Option<Value>]) -> Option<Result<Option<Value>, (u32, Vec<u8>)>> {
     let f = routine(spec, name)?;
     let call: extern "C" fn(*mut u32) -> *const u8 = unsafe { core::mem::transmute(f) };
     let sig = cstr(call(core::ptr::null_mut()));
@@ -591,12 +616,14 @@ pub fn native_call(spec: &[u8], recv: &Value, name: &[u8], args: &[Option<Value>
 /// classes OREXXSC makes from Apple-event replies. They go into
 /// `.environment` when RexxSomInitialize makes the world.
 const OPENDOC_CLASSES: &[u8] = b"\
+/* rs2's OpenDoc scripting classes */\r\n\
 .environment~setentry('SCRIPTABLEAPP', .ScriptableApp)\r\n\
 .environment~setentry('OBJECTSPECIFIER', .ObjectSpecifier)\r\n\
 .environment~setentry('SCREFERENCE', .SCReference)\r\n\
 .environment~setentry('SCRELATIVEPOSITION', .SCRelativePosition)\r\n\
 .environment~setentry('SCLIST', .SCList)\r\n\
 .environment~setentry('SCRANGE', .SCRange)\r\n\
+.environment~setentry('SCCLASS', .SCClass)\r\n\
 return\r\n\
 ::class ScriptableApp public\r\n\
 ::method init\r\n\
@@ -611,41 +638,61 @@ return\r\n\
 ::method getdirparm;   expose dirparm; return dirparm\r\n\
 ::method setdirparm;   expose dirparm; use arg dirparm\r\n\
 ::method resetdirparm; expose dirparm; dirparm = .nil\r\n\
+::method connect class; use arg name; return self~new~connect(name)\r\n\
 ::method connect    external 'LIBRARY REXXSC ScriptableApp_Connect'\r\n\
 ::method disconnect external 'LIBRARY REXXSC ScriptableApp_Disconnect'\r\n\
 ::method novalue    external 'LIBRARY REXXSC ScriptableApp_Novalue'\r\n\
 ::method sendevent  external 'LIBRARY REXXSC ScriptableApp_Unknown'\r\n\
+/* app~event([direct parameter] [, .directory of named parameters]) */\r\n\
 ::method unknown\r\n\
   expose dirparm\r\n\
   use arg msg, args\r\n\
-  if args~items = 1 then if args[1]~class \\== .directory then do\r\n\
-    dirparm = args[1]\r\n\
-    args = .array~new\r\n\
+  named = .array~new\r\n\
+  if args~items > 0 then do\r\n\
+    if args[1]~class \\== .directory then do\r\n\
+      dirparm = args[1]\r\n\
+      if args~items > 1 then named[1] = args[2]\r\n\
+    end\r\n\
+    else named[1] = args[1]\r\n\
   end\r\n\
-  return self~sendevent(msg, args)\r\n\
-::class ObjectSpecifier public\r\n\
-::method init; expose class key container; use arg class, key; container = .nil\r\n\
+  return self~sendevent(msg, named)\r\n\
+::class 'ObjectSpecifier' public\r\n\
+::method init; expose class reference container; use arg class, reference; container = .nil\r\n\
 ::method setcontainer; expose container; use arg container\r\n\
 ::method getcontainer; expose container; return container\r\n\
 ::method getclass; expose class; return class\r\n\
-::method getkey; expose key; return key\r\n\
+::method getreference; expose reference; return reference\r\n\
+/* text~of(part~index(1)): the specifier with that container */\r\n\
+::method of; expose container; use arg container; return self\r\n\
 ::method makeaedesc external 'LIBRARY REXXSC ObjectSpecifier_MakeAEDesc'\r\n\
 ::class SCReference public\r\n\
-::method init; expose form data type; use arg form, data, type\r\n\
+::method init; expose form data type; use arg form, data, type; if arg(3, 'o') then type = 0\r\n\
 ::method getkeyform; expose form; return form\r\n\
 ::method getkeydata; expose data; return data\r\n\
-::method getkeytype; expose type; return type\r\n\
+::method gettype; expose type; return type\r\n\
 ::method makeaedesc external 'LIBRARY REXXSC SCReference_MakeAEDesc'\r\n\
 ::class SCRelativePosition public\r\n\
 ::method init; expose pos; use arg pos\r\n\
 ::method getposition; expose pos; return pos\r\n\
-::class SCList public subclass array\r\n\
+::class 'SCList' public subclass array\r\n\
 ::method makeaedesc external 'LIBRARY REXXSC SCList_MakeAEDesc'\r\n\
 ::class SCRange public\r\n\
 ::method init; expose start stop; use arg start, stop\r\n\
 ::method getstart; expose start; return start\r\n\
 ::method getstop; expose stop; return stop\r\n\
 ::method makeaedesc external 'LIBRARY REXXSC SCRange_MakeAEDesc'\r\n\
+/* a class of the application's terminology (what NOVALUE gives for its\r\n\
+   name): part~index(1), part~named('x') */\r\n\
+::class SCClass public\r\n\
+::method init; expose name code; use arg name, code\r\n\
+::method getname; expose name; return name\r\n\
+::method getclass; expose code; return code\r\n\
+::method index\r\n\
+  expose code; use arg n\r\n\
+  return .ObjectSpecifier~new(code, .SCReference~new(2019847785, n, 2))  /* 'indx' */\r\n\
+::method named\r\n\
+  expose code; use arg s\r\n\
+  return .ObjectSpecifier~new(code, .SCReference~new(1701667182, s))  /* 'name' */\r\n\
 ";
 
 fn install_classes() {
