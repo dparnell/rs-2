@@ -55,6 +55,20 @@ unsafe extern "C" {
     fn WinInitialize(opts: u32) -> u32;
     #[link_name = "PMWIN.716"]
     fn WinCreateMsgQueue(hab: u32, cmsg: i32) -> u32;
+    #[link_name = "OPENDOC.330"]
+    static ODFacetIteratorClassData: [usize; 5];
+    #[link_name = "PMDRAG.34"]
+    fn DrgAllocDraginfo(n: u32) -> usize;
+    #[link_name = "PMDRAG.33"]
+    fn DrgAddStrHandle(s: *const u8) -> u32;
+    #[link_name = "PMDRAG.57"]
+    fn DrgSetDragitem(p: usize, item: *const [u32; 9], cb: u32, i: u32) -> u32;
+    #[link_name = "PMWIN.899"]
+    fn WinWindowFromID(hwnd: u32, id: u32) -> u32;
+    #[link_name = "PMWIN.788"]
+    fn WinMapWindowPoints(from: u32, to: u32, pts: *mut [i32; 2], n: i32) -> u32;
+    #[link_name = "PMSHAPI.116"]
+    fn PrfWriteProfileString(hini: u32, app: *const u8, key: *const u8, val: *const u8) -> u32;
     #[link_name = "PMWIN.793"]
     fn WinOpenClipbrd(hab: u32) -> u32;
     #[link_name = "PMWIN.707"]
@@ -581,6 +595,90 @@ fn clipboard_test(session: usize, root: usize) {
     ok_ev("clipboard");
 }
 
+/// A DRAGINFO with one item, as another program (a folder) makes it, with
+/// the drop point (client coordinates of `client`).
+fn draginfo(client: u32, rmf: &[u8], container: &[u8], source: &[u8], id: u32, at: [i32; 2]) -> usize {
+    let pd = unsafe { DrgAllocDraginfo(1) };
+    let h = |t: &[u8]| unsafe { DrgAddStrHandle(t.as_ptr()) };
+    // DRAGITEM: hwnd, id, type, rmf, container, source, target, offsets, control/ops.
+    let item = [0, id, h(b"Plain Text\0"), h(rmf), h(container), h(source), 0, 0, 0x0030_0000];
+    unsafe { DrgSetDragitem(pd, &item, 36, 0) };
+    let mut p = at;
+    unsafe { WinMapWindowPoints(client, 1, &mut p, 1) };
+    unsafe {
+        *((pd + 12) as *mut i16) = p[0] as i16;
+        *((pd + 14) as *mut i16) = p[1] as i16;
+    }
+    pd
+}
+
+fn dnd_test(session: usize, rf: usize) {
+    let e = ev();
+    let ws = m(cd!(ODBaseSessionClassData), BS_GET_WINDOW_STATE, &[session, e]);
+    let hwnd = m(cd!(ODSessionClassData), 3, &[session, e, 0]);
+    let w = m(cd!(ODWindowStateClassData), 1, &[ws, e, hwnd, rf, 1, 1, 0, 1, 1, 0]);
+    m(cd!(ODWindowClassData), 6, &[w, e]);
+    let rfc = m(cd!(ODWindowClassData), 2, &[w, e]);
+    let client = unsafe { WinWindowFromID(hwnd as u32, 0x8008) };
+    check("a document window (CreatePlatformWindow, RegisterWindowForFrame)", hwnd != 0 && client != 0 && rfc != 0);
+    if client == 0 {
+        return;
+    }
+    // A text file of a kind registered for RS2TestPart, dropped from a folder.
+    unsafe {
+        PrfWriteProfileString(0xffff_ffff, b"OpenDoc:PartKinds\0".as_ptr(), b"<DRM_OS2FILE,DRF_TXT>\0".as_ptr(), b"RS2TestPart\0".as_ptr());
+    }
+    let before = m(cd!(ODFrameClassData), FR_CREATE_FACET_ITERATOR, &[rf, e]);
+    somsup::free_object(before);
+    let n0 = facet_children(rfc);
+    let pd = draginfo(client, b"<DRM_OS2FILE,DRF_UNKNOWN>\0", b"C:\\\0", b"ODDROP.TXT\0", 0, [120, 30]);
+    let r = unsafe { WinSendMsg(client, 0x032e, pd, 0) };
+    check("DM_DRAGOVER: a file of a registered kind can be dropped", r & 0xffff == 1);
+    // The target freed its access in DM_DRAGOVER: the drop gets a new one.
+    let pd = draginfo(client, b"<DRM_OS2FILE,DRF_UNKNOWN>\0", b"C:\\\0", b"ODDROP.TXT\0", 0, [120, 30]);
+    unsafe { WinSendMsg(client, 0x032f, pd, 0) };
+    let kids = facet_children(rfc);
+    check("DM_DROP embeds a part made from the file", kids.len() == n0.len() + 1);
+    let Some(&nf) = kids.last() else { return };
+    let frame = m(cd!(ODFacetClassData), FC_GET_FRAME, &[nf, e]);
+    let part = m(cd!(ODFrameClassData), FR_ACQUIRE_PART, &[frame, e]);
+    let psu = m(cd!(ODPersistentObjectClassData), PO_GET_STORAGE_UNIT, &[part, e]);
+    let file = su_text(psu, b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Property:Contents\0", b"+//ISO 9070/ANSI::113722::US::CI LABS::OS2:Type:FileType\0");
+    check("the dropped part holds the file name as its contents", file.as_deref().map(|v| v.split(|&b| b == 0).next().unwrap()) == Some(&b"C:\\ODDROP.TXT"[..]));
+    let at = |f: usize| {
+        let t = m(cd!(ODFacetClassData), FC_ACQUIRE_WINDOW_FRAME_TRANSFORM, &[f, e, 0]);
+        let mut p = Point::default();
+        m(cd!(ODBaseTransformClassData), XF_TRANSFORM_POINT, &[t, e, &mut p as *mut Point as usize]);
+        release(t);
+        p
+    };
+    check("at the drop point", at(nf) == Point { x: 120 * ONE, y: 30 * ONE });
+    // The part dragged within its window moves there.
+    let pd = draginfo(client, b"<DRM_OPENDOC,DRF_PART>\0", b"\0", b"part\0", frame as u32, [200, 90]);
+    let r = unsafe { WinSendMsg(client, 0x032e, pd, 0) };
+    check("DM_DRAGOVER: a part of the document moves", r & 0xffff == 1 && (r >> 16) & 0xffff == 0x20);
+    let pd = draginfo(client, b"<DRM_OPENDOC,DRF_PART>\0", b"\0", b"part\0", frame as u32, [200, 90]);
+    unsafe { WinSendMsg(client, 0x032f, pd, 0) };
+    check("DM_DROP moves the part's facet", at(nf) == Point { x: 200 * ONE, y: 90 * ONE } && facet_children(rfc).len() == kids.len());
+    release(part);
+    ok_ev("drag and drop");
+}
+
+fn facet_children(f: usize) -> Vec<usize> {
+    let e = ev();
+    let it = m(cd!(ODFacetClassData), 6, &[f, e, 0, 0]);
+    let mut v = Vec::new();
+    let mut x = m(cd!(ODFacetIteratorClassData), 0, &[it, e]);
+    while x != 0 {
+        if x != f {
+            v.push(x);
+        }
+        x = m(cd!(ODFacetIteratorClassData), 1, &[it, e]);
+    }
+    somsup::free_object(it);
+    v
+}
+
 fn events_and_menus(session: usize, rf: usize, cf: usize, root: usize, child: usize) {
     let e = ev();
     let ws = m(cd!(ODBaseSessionClassData), BS_GET_WINDOW_STATE, &[session, e]);
@@ -980,6 +1078,8 @@ fn basic() {
     // The root part's unit must hold its reference to the embedded frame.
     part_externalize(root, ev());
     clipboard_test(session, root);
+    write_file(b"C:\\ODDROP.TXT\0", b"dropped");
+    dnd_test(session, rf);
 
     // The root part's storage unit goes in the draft's properties; save.
     let props = m(cd!(ODDraftClassData), DR_ACQUIRE_DRAFT_PROPERTIES, &[draft, e]);
@@ -1052,6 +1152,15 @@ fn basic() {
     release(cont);
     ok_ev("reopen");
     let _ = (REF_ACQUIRE, REF_GET_REF_COUNT, PART_INIT_PART);
+}
+
+fn write_file(name: &[u8], data: &[u8]) {
+    let (mut hf, mut action) = (0u32, 0u32);
+    if unsafe { DosOpen(name.as_ptr(), &mut hf, &mut action, 0, 0, 0x12, 0x11, core::ptr::null_mut()) } == 0 {
+        let mut n = 0u32;
+        unsafe { DosWrite(hf, data.as_ptr(), data.len() as u32, &mut n) };
+        unsafe { DosClose(hf) };
+    }
 }
 
 fn file_size(name: &[u8]) -> u32 {

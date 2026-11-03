@@ -329,6 +329,9 @@ fn window_of(frame_hwnd: u32) -> usize {
 extern "C" fn client_proc(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> usize {
     unsafe {
         let frame_hwnd = crate::pmparent(hwnd);
+        if let Some(r) = crate::dnd::client_message(hwnd, msg, mp1, mp2) {
+            return r;
+        }
         if msg != WM_PAINT && msg != WM_SIZE && crate::events::client_message(hwnd, msg, mp1, mp2) {
             return if msg == 0x7a || (0x70..=0x79).contains(&msg) { 1 } else { 0 };
         }
@@ -962,8 +965,11 @@ methods! {
     }
     fn DndGetContentStorageUnit(this: usize, ev: usize) -> usize { content(dnd(this), ev) }
     fn StartDrag(this: usize, ev: usize, src: usize, image_type: usize, image: usize, result: usize, refcon: usize) -> usize {
-        // rs2 has no OpenDoc drag yet: the drop is refused.
-        write::<usize>(result, 0);
+        // The source frame dragged on PM's (ODDropResult: 0 failed, 1 copy, 2 move).
+        let w = crate::dnd::window_of_frame(src);
+        let client = if w != 0 { win(w).client } else { 0 };
+        let target = crate::dnd::drag_frame(src, client);
+        write::<usize>(result, if target == 0 { 0 } else if target == client { 2 } else { 1 });
         0
     }
     fn DndNoArg(this: usize, ev: usize) -> usize { 0 }

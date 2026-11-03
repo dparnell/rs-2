@@ -59,6 +59,7 @@ pub const WM_BUTTON2DOWN: u32 = 0x74;
 pub const WM_BUTTON3DOWN: u32 = 0x77;
 pub const WM_CHAR: u32 = 0x7a;
 pub const WM_CONTEXTMENU: u32 = 0x424;
+pub const WM_BEGINDRAG: u32 = 0x420;
 
 fn is_mouse(msg: u32) -> bool {
     (0x70..=0x79).contains(&msg) || (0x410..=0x42f).contains(&msg)
@@ -324,6 +325,10 @@ pub fn std_dispatch(ev: usize, event: usize, info: usize) -> bool {
             activate(ev, frame);
         }
         let handled = send_up(ev, frame, facet, event, info);
+        if !handled && msg == WM_BEGINDRAG && frame != root_frame {
+            crate::dnd::drag_frame(frame, win(w).client);
+            return true;
+        }
         if !handled && msg == WM_CONTEXTMENU {
             base_popup(ev, w);
             return true;

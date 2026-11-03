@@ -1236,7 +1236,7 @@ methods! {
                 items.extend(c);
                 i += 1;
             }
-            iter(it).items = items;
+            fiter(it).items = items;
         }
         it
     }
