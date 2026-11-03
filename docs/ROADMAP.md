@@ -534,7 +534,15 @@ Status markers: done, in progress, planned.
   and graphics modes), raw keyboard and mouse, Alt+Home, from CMD
   (DosExecPgm of a DOS program), DosStartSession types 4/7, desktop
   objects (DOS Window, DOS Full Screen, PROG_VDM/PROG_WINDOWEDVDM)
-- planned: PC speaker and Sound Blaster sound, VESA, DOS settings, speed
+- done: PC speaker, Sound Blaster 16 (8/16-bit DMA, mixer, BLASTER),
+  OPL3/OPL2 FM synthesizer, MPU-401 UART to the GM synthesizer, all mixed
+  into one stream on the machine's clock; VESA direct colour modes (15
+  to 32 bits per pixel, dithered); DOS settings in WPProgram's Session
+  page (DOS properties dialog, kept in the program's environment) applied
+  by VDM.EXE (DOS_RMSIZE, DOS_VERSION, DOS_BREAK, DOS_SHELL, HW_NOSOUND,
+  memory sizes...)
+- planned: DPMI 1.0, a decode or block cache for the CPU, true colour
+  for VESA modes, more DOS settings (DOS_DEVICE, DOS_FILES, VIDEO_*)
 
 ## Native Win16 (stages 1 to 3 done)
 
@@ -587,7 +595,6 @@ Microsoft file (docs/WIN16.md).
 - NetBIOS, NFS/SMB clients
 - MMPM/2: MPEG and Indeo video, IBM's Ultimotion codebook (rs2 draws
   those blocks flat), multiple images per file, compound files (RIFF CF)
-- DOS sessions: Sound Blaster, VESA modes, DOS settings in the program
-  object notebook, CPU speed (a block cache), DPMI 1.0
+- DOS sessions: CPU speed (a block cache), DPMI 1.0
 - self-hosting (building rs2 on rs2): 64-bit processes with a Linux
   system-call layer for the Rust toolchain; see [SELF-HOSTING.md](SELF-HOSTING.md)
