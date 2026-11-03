@@ -279,6 +279,7 @@ fn nb_id() -> u16 {
 
 /// NBNS name query: through WINS, else a broadcast.
 pub fn nbns_query(c: &Config, name: &str, typ: u8) -> Option<Ipv4> {
+    wait_network();
     let id = nb_id();
     let (to, bcast) = match c.wins {
         Some((a, p)) => (Endpoint::new(a, p), false),

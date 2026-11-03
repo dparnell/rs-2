@@ -520,7 +520,8 @@ Status markers: done, in progress, planned.
   and working (docs/WPS.md)
 - done: printing (docs/PRINTING.md): the spooler, the PostScript
   driver, printer objects
-- planned: network groups and remote printers (a LAN requester); the
+- done: network groups, servers and shares, drives and printer ports
+  assigned from them (docs/LAN.md); planned: the
   rest of WPCONFIG and WPPRINT (docs/WPS.md, "What is not there")
 
 ## Printing (done: first version)
@@ -628,7 +629,11 @@ Microsoft file (docs/WIN16.md).
 
 ## Later
 
-- NetBIOS, NFS/SMB clients
+- LAN requester (first version done, docs/LAN.md): SMB 2.0.2/2.1 and
+  SMB1 client with NTLMv2 and signing, NetBIOS over TCP, the redirector
+  (network drives, UNC paths, LPTn), NET.EXE, NETAPI/NETAPI32, the
+  Network folder; planned: SMB 3 (encryption), oplocks and caching,
+  byte-range locks, IBM's NET.EXE on rs2's NETAPI, NFS
 - MMPM/2: MPEG and Indeo video, IBM's Ultimotion codebook (rs2 draws
   those blocks flat), multiple images per file, compound files (RIFF CF)
 - DOS sessions: CPU speed (a block cache), DPMI 1.0

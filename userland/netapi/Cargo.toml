@@ -1,0 +1,15 @@
+[package]
+name = "netapi-dll"
+description = "NETAPI.DLL: the 16-bit LAN Server API (_pascal far) on rs2's LAN requester"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "netapi"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+lanreq = { path = "../lanreq" }
+thunk16 = { path = "../thunk16" }

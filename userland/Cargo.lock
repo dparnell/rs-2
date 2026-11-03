@@ -295,6 +295,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "netapi-dll"
+version = "0.1.0"
+dependencies = [
+ "lanreq",
+ "os2",
+ "thunk16",
+]
+
+[[package]]
 name = "netapi32-dll"
 version = "0.1.0"
 dependencies = [
@@ -590,6 +599,7 @@ version = "0.1.0"
 dependencies = [
  "gpi",
  "ipf",
+ "lanreq",
  "os2",
  "pmwin",
 ]
