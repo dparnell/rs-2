@@ -267,6 +267,7 @@ entries! {
     k_getcurrenttask = 1036, 0;
     k_getcurrentpdb = 1037, 0;
     k_loadmodule = 1045, 8;
+    k_freemodule = 1046, 2;
     k_getmodulehandle = 1047, 4;
     k_getmoduleusage = 1048, 2;
     k_getmodulefilename = 1049, 8;

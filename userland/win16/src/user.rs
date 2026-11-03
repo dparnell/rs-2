@@ -1030,14 +1030,27 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             if ord == 125 { invalidate(h, read_rect(r)) } else { validate(h, read_rect(r)) }
             0
         }
-        // InvalidateRgn(hwnd, hrgn, erase), ValidateRgn(hwnd, hrgn): all.
+        // InvalidateRgn(hwnd, hrgn, erase), ValidateRgn(hwnd, hrgn): the
+        // region's rectangles (client coordinates); no region, the whole
+        // client area.
         126 | 128 => {
-            let (h, _r) = (a.w(), a.w());
+            let (h, r) = (a.w(), a.w());
             if ord == 126 {
                 a.w();
-                invalidate(h, None);
-            } else {
-                validate(h, None);
+            }
+            let rects = if r == 0 { None } else { crate::region::rects(r) };
+            match rects {
+                Some(rs) => {
+                    for q in rs {
+                        if ord == 126 {
+                            invalidate(h, Some(q));
+                        } else {
+                            validate(h, Some(q));
+                        }
+                    }
+                }
+                None if ord == 126 => invalidate(h, None),
+                None => validate(h, None),
             }
             0
         }
@@ -2419,6 +2432,16 @@ pub fn get_dc(h: u16) -> u16 {
 }
 
 fn set_cursor(c: u16) -> u16 {
+    let prev = core::mem::replace(CURSOR.get(), c);
+    // A program's own cursors (LoadCursor, CreateCursor) are PM pointers
+    // made from them.
+    if crate::icon::get(c).is_some() {
+        let p = crate::icon::pm_pointer(c);
+        if p != 0 {
+            unsafe { WinSetPointer(HWND_DESKTOP, p) };
+            return prev;
+        }
+    }
     // The built-in cursors are PM's system pointers.
     let sptr = match c {
         32513 => 2,          // IDC_IBEAM: SPTR_TEXT
@@ -2436,8 +2459,11 @@ fn set_cursor(c: u16) -> u16 {
     } else {
         unsafe { WinSetPointer(HWND_DESKTOP, 0) };
     }
-    32512
+    prev
 }
+
+/// The cursor SetCursor set last (IDC_ARROW at first).
+static CURSOR: crate::Global<u16> = crate::Global::new(32512);
 
 /// Break text into lines of at most `max` characters at blanks, as
 /// Windows' message box wraps long lines (PM's keeps them).

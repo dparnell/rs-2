@@ -72,7 +72,6 @@ thunk16::entries16_pascal! {
     x_3332 = 3332, 8;
     x_3349 = 3349, 6;
     x_3353 = 3353, 2;
-    x_1046 = 1046, 2;
     x_1066 = 1066, 8;
     x_1067 = 1067, 10;
     x_1100 = 1100, 0;
@@ -563,7 +562,6 @@ pub static NAMES: &[(u16, &str)] = &[
     (3332, "GDI.332 GETKERNINGPAIRS"),
     (3349, "GDI.349 SETMAPPERFLAGS"),
     (3353, "GDI.353 GETASPECTRATIOFILTER"),
-    (1046, "KERNEL.46 FREEMODULE"),
     (1066, "KERNEL.66 ALLOCRESOURCE"),
     (1067, "KERNEL.67 SETRESOURCEHANDLER"),
     (1100, "KERNEL.100 VALIDATECODESEGMENTS"),

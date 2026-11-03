@@ -64,6 +64,8 @@ unsafe extern "C" {
     pub fn WinRegisterClass(hab: u32, name: *const u8, proc_: WndProc, style: u32, words: u32) -> u32;
     #[link_name = "PMWIN.908"]
     pub fn WinCreateStdWindow(parent: u32, style: u32, fcf: *mut u32, class: *const u8, title: *const u8, cstyle: u32, hmod: u32, id: u32, client: *mut u32) -> u32;
+    #[link_name = "PMWIN.717"]
+    pub fn WinCreatePointer(desk: u32, hbm: u32, pointer: u32, x: i32, y: i32) -> u32;
     #[link_name = "PMWIN.909"]
     pub fn WinCreateWindow(parent: u32, class: *const u8, text: *const u8, style: u32, x: i32, y: i32, cx: i32, cy: i32, owner: u32, behind: u32, id: u32, ctl: *const u8, pres: *const u8) -> u32;
     #[link_name = "PMWIN.915"]
@@ -232,6 +234,8 @@ unsafe extern "C" {
     pub fn GpiSetCharSet(hps: u32, lcid: i32) -> u32;
     #[link_name = "PMGPI.378"]
     pub fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.405"]
+    pub fn GpiOffsetClipRegion(hps: u32, p: *const PointL) -> i32;
     #[link_name = "PMGPI.508"]
     pub fn GpiSetBitmapId(hps: u32, hbm: u32, lcid: i32) -> u32;
     #[link_name = "PMGPI.542"]

@@ -241,8 +241,15 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         }
         // GetModuleUsage(h)
         48 => {
-            a.w();
-            1
+            let h = a.w();
+            crate::module::usage(h)
+        }
+        // FreeModule(h): FreeLibrary.
+        46 => {
+            let h = a.w();
+            let users = crate::module::usage(h);
+            crate::module::free_library(h);
+            (users > 1) as u32
         }
         // GetModuleFileName(h, buf, cb)
         49 => {

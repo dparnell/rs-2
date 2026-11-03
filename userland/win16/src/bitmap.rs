@@ -588,6 +588,17 @@ pub fn pm_bitmap_from(w: i32, h: i32, bpp: u16, bits: &[u8], colors: &[u32]) -> 
     unsafe { GpiCreateBitmap(0, hdr.as_ptr(), CBM_INIT, bits.as_ptr(), hdr.as_ptr()) }
 }
 
+/// A bitmap's pels as 1 bit per pel, rows bottom-up and 4-byte aligned
+/// (PM's format): 1 for white.
+pub fn mono_rows(h: u16) -> Option<(i32, i32, Vec<u8>)> {
+    let (_, w, bh, _) = bitmap_of(h)?;
+    let mut bmi = info(w, bh, 1, &[0, 0xffffff]);
+    let stride = (w as usize).div_ceil(32) * 4;
+    let mut buf = alloc::vec![0u8; stride * bh as usize];
+    with_ps(h, |hps, _| unsafe { GpiQueryBitmapBits(hps, 0, bh, buf.as_mut_ptr(), bmi.as_mut_ptr()) });
+    Some((w, bh, buf))
+}
+
 /// The 8 x 8 pattern at the top left of a bitmap (repeated if it is
 /// smaller): monochrome for a monochrome bitmap.
 fn pattern_of(h: u16) -> Option<gdi::Pat> {
@@ -626,15 +637,22 @@ pub fn pattern_brush(h: u16) -> u16 {
 /// packed DIB in a global block.
 pub fn dib_pattern_brush(g: u16, _usage: u16) -> u16 {
     let n = crate::kernel::global_size(g) as usize;
-    let p = thunk16::flat((g as u32) << 16);
+    // (A global handle's selector is the handle with its low bits set.)
+    let p = thunk16::flat(((g | 7) as u32) << 16);
     if p.is_null() || n < 16 {
         return 0;
     }
-    let data = unsafe { core::slice::from_raw_parts(p, n) };
-    let b = from_dib(data);
+    // A colour bitmap of the DIB (a 1-bit DIB keeps its two colours).
+    let (w, h, _) = dib_size(p);
+    let (len, _) = dib_header(p, 0);
+    if w <= 0 || h <= 0 || len > n {
+        return 0;
+    }
+    let b = new_bitmap(w, h, 24);
     if b == 0 {
         return 0;
     }
+    with_ps(b, |hps, _| unsafe { GpiSetBitmapBits(hps, 0, h, p.add(len), p) });
     let pat = pattern_of(b);
     let color = average(b);
     gdi::delete_object(b);

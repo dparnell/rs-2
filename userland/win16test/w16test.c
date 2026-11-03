@@ -2770,6 +2770,652 @@ static void mdi2_tests(HINSTANCE hInst)
     DestroyWindow(frame);
 }
 
+/* A memory DC with a 24-bit bitmap of w x h, filled white. */
+static HDC mem_dc(int w, int h, HBITMAP *bm, HBITMAP *old)
+{
+    HDC dc = CreateCompatibleDC(NULL);
+
+    *bm = CreateBitmap(w, h, 1, 24, NULL);
+    *old = SelectObject(dc, *bm);
+    PatBlt(dc, 0, 0, w, h, WHITENESS);
+    return dc;
+}
+
+static void free_dc(HDC dc, HBITMAP bm, HBITMAP old)
+{
+    SelectObject(dc, old);
+    DeleteObject(bm);
+    DeleteDC(dc);
+}
+
+#define RED RGB(255, 0, 0)
+#define GREEN RGB(0, 255, 0)
+#define BLUE RGB(0, 0, 255)
+#define WHITE RGB(255, 255, 255)
+#define BLACK RGB(0, 0, 0)
+
+/* Bitmaps, brushes, raster operations and DIBs. */
+static void gdi2_tests(HINSTANCE hInst)
+{
+    HDC dc, src;
+    HBITMAP bm, old, sbm, sold, mono, b;
+    HBRUSH br, obr;
+    BITMAP info;
+    LOGBRUSH lb;
+    RECT r;
+    int i;
+    static BYTE checker[16] = { 0xaa, 0, 0x55, 0, 0xaa, 0, 0x55, 0, 0xaa, 0, 0x55, 0, 0xaa, 0, 0x55, 0 };
+    /* A 4 x 2 DIB, 8 bits: indexes 0..3 into red, green, blue, white. */
+    struct { BITMAPINFOHEADER h; RGBQUAD c[4]; } bi8;
+    static BYTE pix8[8] = { 0, 1, 2, 3, 3, 2, 1, 0 };
+    /* 2 x 2, 4 bits: rows bottom-up, 4-byte aligned. */
+    struct { BITMAPINFOHEADER h; RGBQUAD c[16]; } bi4;
+    static BYTE pix4[8] = { 0x01, 0, 0, 0, 0x23, 0, 0, 0 };
+    /* 8 x 8, 1 bit, for a DIB pattern brush: a packed DIB in a global block. */
+    HGLOBAL g;
+    BYTE FAR *pd;
+
+    dc = mem_dc(32, 32, &bm, &old);
+    src = mem_dc(32, 32, &sbm, &sold);
+    /* Raster operations on 24-bit pels are bitwise. */
+    PatBlt(dc, 0, 0, 32, 32, BLACKNESS);
+    br = CreateSolidBrush(RGB(0x0f, 0xf0, 0x33));
+    obr = SelectObject(dc, br);
+    PatBlt(dc, 0, 0, 4, 4, PATCOPY);
+    PatBlt(dc, 0, 0, 2, 2, PATINVERT);
+    check(GetPixel(dc, 3, 3) == RGB(0x0f, 0xf0, 0x33) && GetPixel(dc, 1, 1) == BLACK, "PatBlt PATCOPY, PATINVERT (XOR with the brush, not an inversion)");
+    PatBlt(dc, 4, 0, 2, 2, DSTINVERT);
+    check(GetPixel(dc, 4, 0) == WHITE, "PatBlt DSTINVERT");
+    SelectObject(dc, obr);
+    DeleteObject(br);
+    /* Destination 0x00ff00 (green), source 0xff00ff... per channel. */
+    for (i = 0; i < 7; i++) {
+        static DWORD rops[7] = { SRCPAINT, SRCAND, SRCINVERT, NOTSRCCOPY, MERGEPAINT, SRCERASE, NOTSRCERASE };
+        static COLORREF want[7];
+        COLORREF d = RGB(0x00, 0xf0, 0x3c), s = RGB(0x0f, 0xff, 0x30);
+        want[0] = d | s;
+        want[1] = d & s;
+        want[2] = d ^ s;
+        want[3] = ~s & 0xffffff;
+        want[4] = (~s | d) & 0xffffff;
+        want[5] = s & ~d & 0xffffff;
+        want[6] = ~(s | d) & 0xffffff;
+        SetPixel(dc, 10, 10, d);
+        SetPixel(src, 0, 0, s);
+        BitBlt(dc, 10, 10, 1, 1, src, 0, 0, rops[i]);
+        wsprintf(line, "BitBlt ROP %08lx: %06lx (%06lx)", rops[i], GetPixel(dc, 10, 10), want[i]);
+        check(GetPixel(dc, 10, 10) == want[i], line);
+    }
+    /* Hatched brushes: lines in the brush's colour, the rest the
+     * background colour (OPAQUE) or left alone (TRANSPARENT). */
+    PatBlt(dc, 0, 0, 32, 32, WHITENESS);
+    br = CreateHatchBrush(HS_CROSS, RED);
+    SetBkColor(dc, BLUE);
+    SetRect(&r, 0, 0, 16, 16);
+    FillRect(dc, &r, br);
+    {
+        int lines = 0, bk = 0, x, y;
+        for (y = 0; y < 16; y++)
+            for (x = 0; x < 16; x++) {
+                COLORREF c = GetPixel(dc, x, y);
+                lines += c == RED;
+                bk += c == BLUE;
+            }
+        wsprintf(line, "CreateHatchBrush HS_CROSS: a grid in its colour on the background colour (%d, %d of 256)", lines, bk);
+        check(lines >= 50 && lines <= 80 && bk + lines == 256, line);
+    }
+    SetBkMode(dc, TRANSPARENT);
+    PatBlt(dc, 16, 0, 16, 16, WHITENESS);
+    SetRect(&r, 16, 0, 32, 16);
+    FillRect(dc, &r, br);
+    {
+        int lines = 0, white = 0, x, y;
+        for (y = 0; y < 16; y++)
+            for (x = 16; x < 32; x++) {
+                COLORREF c = GetPixel(dc, x, y);
+                lines += c == RED;
+                white += c == WHITE;
+            }
+        check(lines >= 50 && white + lines == 256, "a hatched brush in TRANSPARENT mode leaves the gaps");
+    }
+    SetBkMode(dc, OPAQUE);
+    check(GetObject(br, sizeof lb, &lb) == sizeof lb && lb.lbStyle == BS_HATCHED && lb.lbHatch == HS_CROSS && lb.lbColor == RED,
+          "GetObject of a hatched brush");
+    DeleteObject(br);
+    lb.lbStyle = BS_HATCHED;
+    lb.lbColor = GREEN;
+    lb.lbHatch = HS_VERTICAL;
+    br = CreateBrushIndirect(&lb);
+    obr = SelectObject(dc, br);
+    PatBlt(dc, 0, 16, 16, 16, PATCOPY);
+    {
+        int x, cols = 0;
+        for (x = 0; x < 16; x++)
+            cols += GetPixel(dc, x, 20) == GREEN && GetPixel(dc, x, 27) == GREEN;
+        check(cols == 2, "CreateBrushIndirect BS_HATCHED HS_VERTICAL: two columns in 16 pels (PatBlt PATCOPY)");
+    }
+    SelectObject(dc, obr);
+    DeleteObject(br);
+    /* A pattern brush of a monochrome bitmap: 1 bits in the background
+     * colour, 0 bits in the text colour. */
+    mono = CreateBitmap(8, 8, 1, 1, checker);
+    br = CreatePatternBrush(mono);
+    SetTextColor(dc, RED);
+    SetBkColor(dc, BLUE);
+    SetRect(&r, 0, 0, 16, 16);
+    FillRect(dc, &r, br);
+    wsprintf(line, "CreatePatternBrush of a monochrome bitmap: 1 bits the background colour, 0 bits the text colour (%06lx %06lx)",
+             GetPixel(dc, 0, 0), GetPixel(dc, 1, 0));
+    check(GetPixel(dc, 0, 0) == BLUE && GetPixel(dc, 1, 0) == RED && GetPixel(dc, 0, 1) == RED && GetPixel(dc, 9, 1) == BLUE, line);
+    check(GetObject(br, sizeof lb, &lb) == sizeof lb && lb.lbStyle == BS_PATTERN, "GetObject of a pattern brush");
+    DeleteObject(br);
+    DeleteObject(mono);
+    /* A colour pattern: one green pel in white. */
+    b = CreateBitmap(8, 8, 1, 24, NULL);
+    sold = SelectObject(src, b);
+    PatBlt(src, 0, 0, 8, 8, WHITENESS);
+    SetPixel(src, 2, 3, GREEN);
+    SelectObject(src, sbm);
+    br = CreatePatternBrush(b);
+    SetRect(&r, 0, 0, 16, 16);
+    FillRect(dc, &r, br);
+    check(GetPixel(dc, 2, 3) == GREEN && GetPixel(dc, 10, 11) == GREEN && GetPixel(dc, 3, 3) == WHITE, "CreatePatternBrush of a colour bitmap, repeated every 8 pels");
+    obr = SelectObject(dc, br);
+    Ellipse(dc, 16, 16, 32, 32);
+    check(GetPixel(dc, 26, 27) == GREEN && GetPixel(dc, 16, 16) == WHITE, "Ellipse with a pattern brush");
+    SelectObject(dc, obr);
+    DeleteObject(br);
+    DeleteObject(b);
+    /* CreateDIBPatternBrush: a packed DIB, 1 bit, red and blue. */
+    g = GlobalAlloc(GMEM_MOVEABLE, sizeof(BITMAPINFOHEADER) + 8 + 32);
+    pd = GlobalLock(g);
+    _fmemset(pd, 0, sizeof(BITMAPINFOHEADER) + 8 + 32);
+    ((BITMAPINFOHEADER FAR *)pd)->biSize = sizeof(BITMAPINFOHEADER);
+    ((BITMAPINFOHEADER FAR *)pd)->biWidth = 8;
+    ((BITMAPINFOHEADER FAR *)pd)->biHeight = 8;
+    ((BITMAPINFOHEADER FAR *)pd)->biPlanes = 1;
+    ((BITMAPINFOHEADER FAR *)pd)->biBitCount = 1;
+    pd[40 + 2] = 0xff;           /* colour 0 red */
+    pd[44 + 0] = 0xff;           /* colour 1 blue */
+    for (i = 0; i < 8; i++)
+        pd[48 + i * 4] = 0xf0;   /* the left half 1 (blue) */
+    GlobalUnlock(g);
+    br = CreateDIBPatternBrush(g, DIB_RGB_COLORS);
+    SetRect(&r, 0, 0, 16, 8);
+    FillRect(dc, &r, br);
+    check(br != 0 && GetPixel(dc, 1, 1) == BLUE && GetPixel(dc, 6, 1) == RED && GetPixel(dc, 9, 5) == BLUE, "CreateDIBPatternBrush");
+    DeleteObject(br);
+    GlobalFree(g);
+    /* RoundRect: the corners stay outside. */
+    PatBlt(dc, 0, 0, 32, 32, WHITENESS);
+    obr = SelectObject(dc, GetStockObject(BLACK_BRUSH));
+    RoundRect(dc, 0, 0, 30, 30, 16, 16);
+    check(GetPixel(dc, 0, 0) == WHITE && GetPixel(dc, 15, 15) == BLACK && GetPixel(dc, 15, 1) == BLACK, "RoundRect has round corners");
+    SelectObject(dc, obr);
+
+    /* DIBs: 8 bits with a colour table, stretched. */
+    memset(&bi8, 0, sizeof bi8);
+    bi8.h.biSize = sizeof bi8.h;
+    bi8.h.biWidth = 4;
+    bi8.h.biHeight = 2;
+    bi8.h.biPlanes = 1;
+    bi8.h.biBitCount = 8;
+    bi8.h.biClrUsed = 4;
+    bi8.c[0].rgbRed = 255;
+    bi8.c[1].rgbGreen = 255;
+    bi8.c[2].rgbBlue = 255;
+    bi8.c[3].rgbRed = bi8.c[3].rgbGreen = bi8.c[3].rgbBlue = 255;
+    PatBlt(dc, 0, 0, 32, 32, BLACKNESS);
+    StretchDIBits(dc, 0, 0, 8, 4, 0, 0, 4, 2, pix8, (BITMAPINFO FAR *)&bi8, DIB_RGB_COLORS, SRCCOPY);
+    /* The DIB's first row (pix8[0..3]) is its bottom one. */
+    wsprintf(line, "StretchDIBits of an 8-bit DIB, doubled (%06lx %06lx %06lx)", GetPixel(dc, 0, 3), GetPixel(dc, 3, 3), GetPixel(dc, 1, 0));
+    check(GetPixel(dc, 0, 3) == RED && GetPixel(dc, 3, 3) == GREEN && GetPixel(dc, 1, 0) == WHITE && GetPixel(dc, 7, 0) == RED, line);
+    SetDIBitsToDevice(dc, 10, 10, 4, 2, 0, 0, 0, 2, pix8, (BITMAPINFO FAR *)&bi8, DIB_RGB_COLORS);
+    check(GetPixel(dc, 10, 11) == RED && GetPixel(dc, 12, 11) == BLUE && GetPixel(dc, 10, 10) == WHITE, "SetDIBitsToDevice of an 8-bit DIB");
+    memset(&bi4, 0, sizeof bi4);
+    bi4.h.biSize = sizeof bi4.h;
+    bi4.h.biWidth = 2;
+    bi4.h.biHeight = 2;
+    bi4.h.biPlanes = 1;
+    bi4.h.biBitCount = 4;
+    bi4.c[0].rgbRed = 255;
+    bi4.c[1].rgbGreen = 255;
+    bi4.c[2].rgbBlue = 255;
+    bi4.c[3].rgbRed = 255;
+    bi4.c[3].rgbBlue = 255;
+    SetDIBitsToDevice(dc, 20, 20, 2, 2, 0, 0, 0, 2, pix4, (BITMAPINFO FAR *)&bi4, DIB_RGB_COLORS);
+    check(GetPixel(dc, 20, 21) == RED && GetPixel(dc, 21, 21) == GREEN && GetPixel(dc, 20, 20) == BLUE && GetPixel(dc, 21, 20) == RGB(255, 0, 255),
+          "SetDIBitsToDevice of a 4-bit DIB");
+    b = CreateDIBitmap(dc, &bi8.h, CBM_INIT, pix8, (BITMAPINFO FAR *)&bi8, DIB_RGB_COLORS);
+    check(b != 0 && GetObject(b, sizeof info, &info) == sizeof info && info.bmWidth == 4 && info.bmHeight == 2 && info.bmBitsPixel > 1,
+          "CreateDIBitmap CBM_INIT: a colour bitmap of the DC's format");
+    sold = SelectObject(src, b);
+    check(GetPixel(src, 0, 1) == RED && GetPixel(src, 2, 0) == GREEN, "CreateDIBitmap's pels");
+    SelectObject(src, sbm);
+    {
+        /* GetDIBits back as 8 bits: a colour table and indexes. */
+        struct { BITMAPINFOHEADER h; RGBQUAD c[256]; } out;
+        BYTE px[8];
+        memset(&out, 0, sizeof out);
+        out.h.biSize = sizeof out.h;
+        out.h.biWidth = 4;
+        out.h.biHeight = 2;
+        out.h.biPlanes = 1;
+        out.h.biBitCount = 8;
+        i = GetDIBits(dc, b, 0, 2, px, (BITMAPINFO FAR *)&out, DIB_RGB_COLORS);
+        check(i == 2 && out.c[px[0]].rgbRed == 255 && out.c[px[0]].rgbGreen == 0 && out.c[px[1]].rgbGreen == 255 && out.c[px[3]].rgbBlue == 255,
+              "GetDIBits as an 8-bit DIB: the colour table and indexes");
+    }
+    DeleteObject(b);
+    /* Resources: a 4-bit bitmap, a cursor, an icon. */
+    b = LoadBitmap(hInst, MAKEINTRESOURCE(IDB_QUAD));
+    check(b != 0 && GetObject(b, sizeof info, &info) == sizeof info && info.bmWidth == 16 && info.bmHeight == 16, "LoadBitmap of a BITMAP resource");
+    sold = SelectObject(src, b);
+    check(GetPixel(src, 2, 2) == RED && GetPixel(src, 12, 2) == GREEN && GetPixel(src, 2, 12) == BLUE && GetPixel(src, 12, 12) == WHITE,
+          "the resource bitmap's pels (DIB rows bottom-up)");
+    StretchBlt(dc, 0, 0, 4, 4, src, 0, 0, 16, 16, SRCCOPY);
+    check(GetPixel(dc, 0, 0) == RED && GetPixel(dc, 3, 3) == WHITE, "StretchBlt shrinks");
+    SelectObject(src, sbm);
+    DeleteObject(b);
+    {
+        HCURSOR c = LoadCursor(hInst, MAKEINTRESOURCE(IDCUR_TEST));
+        HCURSOR prev;
+        HICON ic = LoadIcon(hInst, MAKEINTRESOURCE(IDI_TEST));
+        check(c != 0 && c != LoadCursor(NULL, IDC_ARROW), "LoadCursor of a CURSOR resource");
+        prev = SetCursor(c);
+        check(SetCursor(prev) == c, "SetCursor of it");
+        check(ic != 0 && GetSystemMetrics(SM_CXICON) == 32, "LoadIcon of an ICON resource");
+        PatBlt(dc, 0, 0, 32, 32, WHITENESS);
+        DrawIcon(dc, 0, 0, ic);
+        {
+            int x, y, drawn = 0;
+            for (y = 0; y < 32; y += 2)
+                for (x = 0; x < 32; x += 2)
+                    drawn += GetPixel(dc, x, y) != WHITE;
+            check(drawn > 20, "DrawIcon draws the icon");
+        }
+    }
+    free_dc(src, sbm, sold == sbm ? sold : sbm);
+    free_dc(dc, bm, old);
+}
+
+/* Regions in depth. */
+static int rgn_paints;
+static RECT rgn_update;
+
+LONG FAR PASCAL _export RgnWndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp)
+{
+    if (msg == WM_PAINT) {
+        PAINTSTRUCT ps;
+        BeginPaint(h, &ps);
+        rgn_update = ps.rcPaint;
+        rgn_paints++;
+        EndPaint(h, &ps);
+        return 0;
+    }
+    return DefWindowProc(h, msg, wp, lp);
+}
+
+static void rgn2_tests(HINSTANCE hInst)
+{
+    HDC dc;
+    HBITMAP bm, old;
+    HRGN a, b, c;
+    RECT r;
+    WNDCLASS wc;
+    HWND w;
+    static POINT tri[3] = { { 0, 0 }, { 20, 0 }, { 0, 20 } };
+    MSG msg;
+
+    a = CreatePolygonRgn(tri, 3, ALTERNATE);
+    check(a && PtInRegion(a, 2, 2) && !PtInRegion(a, 18, 18) && GetRgnBox(a, &r) && r.right <= 20 && r.bottom <= 20, "CreatePolygonRgn");
+    b = CreateRoundRectRgn(0, 0, 20, 20, 10, 10);
+    check(b && !PtInRegion(b, 0, 0) && PtInRegion(b, 10, 10) && PtInRegion(b, 10, 0), "CreateRoundRectRgn");
+    c = CreateRectRgn(0, 0, 0, 0);
+    check(CombineRgn(c, a, b, RGN_XOR) == COMPLEXREGION && PtInRegion(c, 15, 15) && !PtInRegion(c, 5, 5), "CombineRgn RGN_XOR");
+    check(CombineRgn(c, a, NULL, RGN_COPY) != ERROR && EqualRgn(c, a), "CombineRgn RGN_COPY");
+    SetRectRgn(c, 5, 5, 10, 10);
+    SetRect(&r, 8, 8, 20, 20);
+    check(RectInRegion(c, &r) && GetRgnBox(c, &r) == SIMPLEREGION && r.left == 5, "SetRectRgn, RectInRegion, GetRgnBox");
+    DeleteObject(a);
+    DeleteObject(b);
+
+    /* Drawing through a clip region. */
+    dc = mem_dc(32, 32, &bm, &old);
+    a = CreateEllipticRgn(0, 0, 32, 32);
+    check(SelectClipRgn(dc, a) == COMPLEXREGION, "SelectClipRgn: the region's type");
+    PatBlt(dc, 0, 0, 32, 32, BLACKNESS);
+    check(GetPixel(dc, 0, 0) == WHITE && GetPixel(dc, 16, 16) == BLACK, "SelectClipRgn clips drawing to the ellipse");
+    check(GetClipBox(dc, &r) == COMPLEXREGION && r.left >= 0 && r.right <= 32 && r.right > 16, "GetClipBox of a clip region");
+    OffsetClipRgn(dc, 16, 0);
+    PatBlt(dc, 0, 0, 32, 32, WHITENESS);
+    check(GetPixel(dc, 4, 16) == BLACK && GetPixel(dc, 20, 16) == WHITE, "OffsetClipRgn moves it");
+    SelectClipRgn(dc, NULL);
+    PatBlt(dc, 0, 0, 32, 32, WHITENESS);
+    SetRectRgn(a, 4, 4, 8, 8);
+    PaintRgn(dc, a);
+    check(GetPixel(dc, 5, 5) == WHITE, "PaintRgn with the DC's brush (white)");
+    FillRgn(dc, a, GetStockObject(BLACK_BRUSH));
+    check(GetPixel(dc, 5, 5) == BLACK && GetPixel(dc, 9, 9) == WHITE, "FillRgn");
+    InvertRgn(dc, a);
+    check(GetPixel(dc, 5, 5) == WHITE, "InvertRgn");
+    SetRectRgn(a, 10, 10, 20, 20);
+    FrameRgn(dc, a, GetStockObject(BLACK_BRUSH), 2, 2);
+    check(GetPixel(dc, 10, 10) == BLACK && GetPixel(dc, 11, 15) == BLACK && GetPixel(dc, 15, 15) == WHITE, "FrameRgn");
+    b = CreateEllipticRgn(0, 0, 30, 30);
+    PatBlt(dc, 0, 0, 32, 32, WHITENESS);
+    FrameRgn(dc, b, GetStockObject(BLACK_BRUSH), 1, 1);
+    check(GetPixel(dc, 15, 15) == WHITE && GetPixel(dc, 15, 0) == BLACK, "FrameRgn of an ellipse frames it (not fills it)");
+    DeleteObject(b);
+    free_dc(dc, bm, old);
+
+    /* InvalidateRgn invalidates the region, not the whole window. */
+    memset(&wc, 0, sizeof wc);
+    wc.lpfnWndProc = RgnWndProc;
+    wc.hInstance = hInst;
+    wc.hbrBackground = GetStockObject(WHITE_BRUSH);
+    wc.lpszClassName = "W16Rgn";
+    RegisterClass(&wc);
+    w = CreateWindow("W16Rgn", "W16TEST regions", WS_OVERLAPPEDWINDOW | WS_VISIBLE, 60, 60, 300, 200, NULL, NULL, hInst, NULL);
+    UpdateWindow(w);
+    SetRectRgn(a, 10, 20, 50, 60);
+    InvalidateRgn(w, a, TRUE);
+    check(GetUpdateRect(w, &r, FALSE) && r.left == 10 && r.top == 20 && r.right == 50 && r.bottom == 60, "InvalidateRgn: the update area is the region");
+    b = CreateRectRgn(0, 0, 0, 0);
+    check(GetUpdateRgn(w, b, FALSE) != NULLREGION && GetRgnBox(b, &r) && r.left == 10 && r.bottom == 60, "GetUpdateRgn");
+    rgn_paints = 0;
+    UpdateWindow(w);
+    check(rgn_paints == 1 && rgn_update.left == 10 && rgn_update.bottom == 60, "WM_PAINT's rcPaint is the region's box");
+    InvalidateRgn(w, a, TRUE);
+    ValidateRgn(w, a);
+    check(!GetUpdateRect(w, &r, FALSE), "ValidateRgn");
+    while (PeekMessage(&msg, w, 0, 0, PM_REMOVE))
+        DispatchMessage(&msg);
+    DestroyWindow(w);
+    DeleteObject(a);
+    DeleteObject(b);
+    DeleteObject(c);
+}
+
+/* Mapping modes in depth. */
+static void map2_tests(void)
+{
+    HDC dc;
+    HBITMAP bm, old;
+    POINT p;
+    DWORD v;
+    int dpi;
+
+    dc = mem_dc(200, 200, &bm, &old);
+    dpi = GetDeviceCaps(dc, LOGPIXELSX);
+    SetMapMode(dc, MM_LOMETRIC);
+    p.x = 254;
+    p.y = -254;
+    LPtoDP(dc, &p, 1);
+    wsprintf(line, "MM_LOMETRIC: 25.4 mm is an inch, y goes up (%d, %d at %d dpi)", p.x, p.y, dpi);
+    check(p.x == dpi && p.y == dpi, line);
+    SetMapMode(dc, MM_HIENGLISH);
+    p.x = 1000;
+    p.y = -500;
+    LPtoDP(dc, &p, 1);
+    check(p.x == dpi && p.y == dpi / 2, "MM_HIENGLISH");
+    SetMapMode(dc, MM_TWIPS);
+    p.x = 1440;
+    p.y = -1440;
+    LPtoDP(dc, &p, 1);
+    check(p.x == dpi && p.y == dpi, "MM_TWIPS");
+    v = GetWindowExt(dc);
+    check(LOWORD(v) == 1440 && GetMapMode(dc) == MM_TWIPS, "GetWindowExt of a fixed mode");
+    /* Drawing in MM_LOMETRIC: a rectangle half an inch from the top. */
+    SetMapMode(dc, MM_LOMETRIC);
+    SelectObject(dc, GetStockObject(BLACK_BRUSH));
+    Rectangle(dc, 127, -127, 254, -254);
+    SetMapMode(dc, MM_TEXT);
+    wsprintf(line, "Rectangle in MM_LOMETRIC lands where it should (%06lx %06lx)", GetPixel(dc, dpi * 3 / 4, dpi * 3 / 4), GetPixel(dc, dpi / 4, dpi / 4));
+    check(GetPixel(dc, dpi * 3 / 4, dpi * 3 / 4) == BLACK && GetPixel(dc, dpi / 4, dpi / 4) == WHITE, line);
+    /* MM_ISOTROPIC keeps units square: the larger viewport extent shrinks. */
+    SetMapMode(dc, MM_ISOTROPIC);
+    SetWindowExt(dc, 100, 100);
+    SetViewportExt(dc, 200, 100);
+    v = GetViewportExt(dc);
+    wsprintf(line, "MM_ISOTROPIC: the viewport extent shrinks to keep units square (%d, %d)", LOWORD(v), HIWORD(v));
+    check(LOWORD(v) == 100 && HIWORD(v) == 100, line);
+    SetViewportExt(dc, 200, -100);
+    v = GetViewportExt(dc);
+    check((short)LOWORD(v) == 100 && (short)HIWORD(v) == -100, "MM_ISOTROPIC keeps the extents' signs");
+    SetMapMode(dc, MM_ANISOTROPIC);
+    SetWindowExt(dc, 10, 10);
+    SetViewportExt(dc, 20, 30);
+    ScaleViewportExt(dc, 1, 2, 2, 3);
+    v = GetViewportExt(dc);
+    check(LOWORD(v) == 10 && HIWORD(v) == 20, "ScaleViewportExt");
+    ScaleWindowExt(dc, 2, 1, 1, 1);
+    v = GetWindowExt(dc);
+    check(LOWORD(v) == 20 && HIWORD(v) == 10, "ScaleWindowExt");
+    SetViewportOrg(dc, 0, 0);
+    OffsetViewportOrg(dc, 5, 6);
+    OffsetWindowOrg(dc, 2, 3);
+    v = GetViewportOrg(dc);
+    check(LOWORD(v) == 5 && HIWORD(v) == 6 && LOWORD(GetWindowOrg(dc)) == 2, "OffsetViewportOrg, OffsetWindowOrg");
+    p.x = 22;
+    p.y = 13;
+    LPtoDP(dc, &p, 1);
+    check(p.x == 15 && p.y == 26, "MM_ANISOTROPIC with origins: LPtoDP");
+    DPtoLP(dc, &p, 1);
+    check(p.x == 22 && p.y == 13, "and DPtoLP back");
+    MoveTo(dc, 4, 4);
+    v = GetCurrentPosition(dc);
+    check(LOWORD(v) == 4 && HIWORD(v) == 4, "GetCurrentPosition is logical");
+    SetMapMode(dc, MM_TEXT);
+    v = GetViewportExt(dc);
+    check(LOWORD(v) == 1 && HIWORD(v) == 1 && LOWORD(GetViewportOrg(dc)) == 5, "MM_TEXT: unit extents, the origins stay");
+    SetViewportOrg(dc, 0, 0);
+    SetWindowOrg(dc, 0, 0);
+    free_dc(dc, bm, old);
+}
+
+/* Fonts: enumeration and metrics with rs2's faces. */
+static int fonts_seen, tt_seen, styles_seen, sizes_seen;
+static char faces_seen[200];
+static int last_type;
+static char full_name[64];
+
+int FAR PASCAL _export EnumFaceProc(LOGFONT FAR *lf, TEXTMETRIC FAR *tm, int type, LPARAM data)
+{
+    fonts_seen++;
+    if (type & TRUETYPE_FONTTYPE)
+        tt_seen++;
+    if (lstrlen(faces_seen) + lstrlen(lf->lfFaceName) + 2 < sizeof faces_seen) {
+        lstrcat(faces_seen, lf->lfFaceName);
+        lstrcat(faces_seen, ";");
+    }
+    return tm->tmHeight > 0 && tm->tmAveCharWidth > 0 ? 1 : 0;
+}
+
+int FAR PASCAL _export EnumStyleProc(LOGFONT FAR *lf, TEXTMETRIC FAR *tm, int type, LPARAM data)
+{
+    ENUMLOGFONT FAR *elf = (ENUMLOGFONT FAR *)lf;
+    NEWTEXTMETRIC FAR *ntm = (NEWTEXTMETRIC FAR *)tm;
+    styles_seen++;
+    last_type = type;
+    if ((ntm->ntmFlags & (NTM_BOLD | NTM_ITALIC)) == NTM_BOLD)
+        lstrcpy(full_name, (LPSTR)elf->elfFullName);
+    return (int)data;
+}
+
+int FAR PASCAL _export EnumSizeProc(LOGFONT FAR *lf, TEXTMETRIC FAR *tm, int type, LPARAM data)
+{
+    sizes_seen++;
+    return 1;
+}
+
+static void font2_tests(HWND hwnd)
+{
+    HDC dc = GetDC(hwnd);
+    FONTENUMPROC fp;
+    HFONT f, old, fb;
+    TEXTMETRIC tm, tmb;
+    char face[40];
+    DWORD wi, ww;
+    int w[3];
+
+    fp = (FONTENUMPROC)MakeProcInstance((FARPROC)EnumFaceProc, GetWindowWord(hwnd, GWW_HINSTANCE));
+    faces_seen[0] = 0;
+    EnumFonts(dc, NULL, (OLDFONTENUMPROC)fp, 0);
+    wsprintf(line, "EnumFonts: one font per face (%d, %d TrueType: %s)", fonts_seen, tt_seen, (LPSTR)faces_seen);
+    check(fonts_seen >= 6 && tt_seen >= 3 && strstr(faces_seen, "Arial;") && strstr(faces_seen, "Courier New;") && strstr(faces_seen, "System;")
+          && strstr(faces_seen, "MS Sans Serif;"), line);
+    fonts_seen = 0;
+    EnumFontFamilies(dc, NULL, fp, 0);
+    check(fonts_seen >= 6, "EnumFontFamilies of all families");
+    fp = (FONTENUMPROC)MakeProcInstance((FARPROC)EnumStyleProc, GetWindowWord(hwnd, GWW_HINSTANCE));
+    EnumFontFamilies(dc, "Times New Roman", fp, 1);
+    wsprintf(line, "EnumFontFamilies of a TrueType family: its four styles (%d, \"%s\")", styles_seen, (LPSTR)full_name);
+    check(styles_seen == 4 && last_type == TRUETYPE_FONTTYPE && lstrcmp(full_name, "Times New Roman Bold") == 0, line);
+    styles_seen = 0;
+    check(EnumFontFamilies(dc, "Arial", fp, 0) == 0 && styles_seen == 1, "the callback's 0 ends the enumeration and is the result");
+    fp = (FONTENUMPROC)MakeProcInstance((FARPROC)EnumSizeProc, GetWindowWord(hwnd, GWW_HINSTANCE));
+    EnumFonts(dc, "MS Sans Serif", (OLDFONTENUMPROC)fp, 0);
+    check(sizes_seen > 1, "EnumFonts of a raster face: its sizes");
+    sizes_seen = 0;
+    check(EnumFonts(dc, "No Such Face", (OLDFONTENUMPROC)fp, 0) == 1 && sizes_seen == 0, "EnumFonts of a face rs2 lacks: nothing");
+
+    f = CreateFont(-20, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, VARIABLE_PITCH | FF_SWISS, "Arial");
+    old = SelectObject(dc, f);
+    GetTextMetrics(dc, &tm);
+    GetTextFace(dc, sizeof face, face);
+    wsprintf(line, "CreateFont Arial -20: TEXTMETRIC (height %d, ascent %d, internal leading %d, average %d, pitch %02x)", tm.tmHeight, tm.tmAscent,
+             tm.tmInternalLeading, tm.tmAveCharWidth, tm.tmPitchAndFamily);
+    check(lstrcmp(face, "Arial") == 0 && tm.tmHeight - tm.tmInternalLeading >= 18 && tm.tmHeight - tm.tmInternalLeading <= 22
+          && tm.tmAscent + tm.tmDescent == tm.tmHeight && (tm.tmPitchAndFamily & (TMPF_FIXED_PITCH | TMPF_TRUETYPE)) == (TMPF_FIXED_PITCH | TMPF_TRUETYPE)
+          && (tm.tmPitchAndFamily & 0xf0) == FF_SWISS, line);
+    wi = GetTextExtent(dc, "iiii", 4);
+    ww = GetTextExtent(dc, "WWWW", 4);
+    check(LOWORD(ww) > 2 * LOWORD(wi) && HIWORD(ww) == tm.tmHeight, "GetTextExtent: Arial is proportional, its height the cell's");
+    GetCharWidth(dc, 'i', 'k', w);
+    check(w[0] < w[2] && w[0] > 0, "GetCharWidth");
+    fb = CreateFont(-20, 0, 0, 0, FW_BOLD, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, VARIABLE_PITCH | FF_SWISS, "Arial");
+    SelectObject(dc, fb);
+    GetTextMetrics(dc, &tmb);
+    check(tmb.tmWeight == FW_BOLD && LOWORD(GetTextExtent(dc, "WWWW", 4)) >= LOWORD(ww), "a bold font: its weight, no narrower");
+    SelectObject(dc, old);
+    DeleteObject(fb);
+    DeleteObject(f);
+    f = CreateFont(-16, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, FIXED_PITCH | FF_MODERN, "Courier New");
+    SelectObject(dc, f);
+    GetTextMetrics(dc, &tm);
+    check((tm.tmPitchAndFamily & TMPF_FIXED_PITCH) == 0 && tm.tmMaxCharWidth == tm.tmAveCharWidth, "Courier New: fixed pitch (TMPF_FIXED_PITCH clear)");
+    SelectObject(dc, old);
+    DeleteObject(f);
+    f = CreateFont(0, 0, 0, 0, FW_NORMAL, 0, 0, 0, ANSI_CHARSET, 0, 0, 0, 0, "Helv");
+    SelectObject(dc, f);
+    GetTextFace(dc, sizeof face, face);
+    check(lstrcmp(face, "MS Sans Serif") == 0, "Helv is MS Sans Serif");
+    SelectObject(dc, old);
+    DeleteObject(f);
+    f = CreateFont(12, 0, 0, 0, FW_NORMAL, 0, 0, 0, OEM_CHARSET, 0, 0, 0, FIXED_PITCH, "Terminal");
+    SelectObject(dc, f);
+    GetTextMetrics(dc, &tm);
+    check(tm.tmCharSet == OEM_CHARSET, "Terminal: OEM_CHARSET");
+    SelectObject(dc, old);
+    DeleteObject(f);
+    SelectObject(dc, GetStockObject(SYSTEM_FONT));
+    GetTextMetrics(dc, &tm);
+    GetTextFace(dc, sizeof face, face);
+    check(lstrcmp(face, "System") == 0 && tm.tmWeight == FW_BOLD && tm.tmHeight > 10, "the system font");
+    ReleaseDC(hwnd, dc);
+}
+
+/* Windows DLLs: imports, usage counts, WEP. */
+int FAR PASCAL W16ImpValue(void);
+HINSTANCE FAR PASCAL W16ImpInstance(void);
+
+static void dll2_tests(void)
+{
+    HINSTANCE d, d2, imp;
+    char buf[80];
+    int i;
+    int (FAR PASCAL *f)(void);
+
+    check(W16ImpValue() == 7, "a DLL the program imports: loaded with it, its LibMain ran first");
+    imp = GetModuleHandle("W16IMP");
+    check(imp != 0 && W16ImpInstance() == imp && GetModuleUsage(imp) >= 1, "GetModuleHandle of an imported DLL: its LibMain's instance");
+    check(GetModuleFileName(imp, buf, sizeof buf) > 0 && strstr(buf, "W16IMP.DLL"), "GetModuleFileName of a DLL");
+    d = LoadLibrary("W16IMP.DLL");
+    check(d == imp && GetModuleUsage(imp) == 2, "LoadLibrary of an imported DLL: the same instance, one more user");
+    FreeLibrary(d);
+    check(GetModuleHandle("W16IMP") == imp && W16ImpValue() == 7, "FreeLibrary leaves an imported DLL loaded");
+    f = (int (FAR PASCAL *)(void))GetProcAddress(imp, MAKEINTRESOURCE(1));
+    check(f == NULL || f() == 7, "GetProcAddress by ordinal");
+    f = (int (FAR PASCAL *)(void))GetProcAddress(imp, "W16IMPVALUE");
+    check(f && f() == 7, "GetProcAddress by name");
+
+    WritePrivateProfileString("run", "wep", "", "W16DLL.INI");
+    d = LoadLibrary("W16DLL.DLL");
+    d2 = LoadLibrary("W16DLL.DLL");
+    wsprintf(line, "LoadLibrary twice: one instance, usage 2 (%04x %04x %d)", d, d2, GetModuleUsage(d));
+    check(d > HINSTANCE_ERROR && d2 == d && GetModuleUsage(d) == 2, line);
+    FreeLibrary(d);
+    GetPrivateProfileString("run", "wep", "", buf, sizeof buf, "W16DLL.INI");
+    check(GetModuleHandle("W16DLL") == d && buf[0] == 0, "the first FreeLibrary leaves it loaded");
+    FreeLibrary(d);
+    GetPrivateProfileString("run", "wep", "", buf, sizeof buf, "W16DLL.INI");
+    check(GetModuleHandle("W16DLL") == 0 && lstrcmp(buf, "free") == 0, "the last FreeLibrary calls WEP(WEP_FREE_DLL) and unloads it");
+    d = LoadLibrary("W16DLL.DLL");
+    i = GetModuleUsage(d);
+    FreeModule(d);
+    wsprintf(line, "FreeModule (%04x, usage %d, then %04x)", d, i, GetModuleHandle("W16DLL"));
+    check(GetModuleHandle("W16DLL") == 0, line);
+    check(LoadLibrary("NOSUCH.DLL") < HINSTANCE_ERROR, "LoadLibrary of a missing DLL: an error below 32");
+}
+
+/* WIN.INI and private profiles: real files in the Windows directory. */
+static int file_has(const char *path, const char *text)
+{
+    static char buf[2048];
+    int fd = open(path, O_RDONLY | O_BINARY), n;
+
+    if (fd < 0)
+        return 0;
+    n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    if (n < 0)
+        return 0;
+    buf[n] = 0;
+    return strstr(buf, text) != NULL;
+}
+
+static void ini2_tests(void)
+{
+    char buf[80], dir[80];
+    int fd;
+    static char ini[] = "; a comment\r\n[First]\r\nKey = spaced value  \r\nNum=12abc\r\n\r\n[Second]\r\nA=1\r\n";
+
+    check(GetWindowsDirectory(dir, sizeof dir) > 0 && lstrcmpi(dir, "C:\\WINDOWS") == 0, "GetWindowsDirectory");
+    check(GetSystemDirectory(buf, sizeof buf) > 0 && lstrcmpi(buf, "C:\\WINDOWS\\SYSTEM") == 0, "GetSystemDirectory");
+    WriteProfileString("W16Test2", "Colour", "blue");
+    check(file_has("C:\\WINDOWS\\WIN.INI", "[W16Test2]") && file_has("C:\\WINDOWS\\WIN.INI", "Colour=blue"), "WriteProfileString writes C:\\WINDOWS\\WIN.INI");
+    fd = open("C:\\WINDOWS\\W16T2.INI", O_CREAT | O_TRUNC | O_WRONLY | O_BINARY, 0666);
+    write(fd, ini, sizeof ini - 1);
+    close(fd);
+    check(GetPrivateProfileString("first", "KEY", "", buf, sizeof buf, "W16T2.INI") == 12 && lstrcmp(buf, "spaced value") == 0,
+          "GetPrivateProfileString: no case, the blanks around the value go");
+    check(GetPrivateProfileInt("First", "Num", 0, "W16T2.INI") == 12, "GetPrivateProfileInt: the leading digits");
+    check(GetPrivateProfileString("First", "Key", "", buf, 7, "W16T2.INI") == 6 && lstrcmp(buf, "spaced") == 0, "a value cut to the buffer");
+    check(GetPrivateProfileString("First", "None", "default  ", buf, sizeof buf, "W16T2.INI") == 7 && lstrcmp(buf, "default") == 0,
+          "the default without trailing blanks");
+    WritePrivateProfileString("First", "New", "x", "W16T2.INI");
+    check(file_has("C:\\WINDOWS\\W16T2.INI", "; a comment") && file_has("C:\\WINDOWS\\W16T2.INI", "Num=12abc\r\nNew=x"),
+          "WritePrivateProfileString keeps comments and adds a key at its section's end");
+    WritePrivateProfileString("Third", "B", "2", "C:\\W16T3.INI");
+    check(file_has("C:\\W16T3.INI", "[Third]") && GetPrivateProfileInt("Third", "B", 0, "C:\\W16T3.INI") == 2, "a profile with a path is that file");
+    check(WriteProfileString(NULL, NULL, NULL) || 1, "WriteProfileString(NULL, NULL, NULL) flushes");
+    WriteProfileString("W16Test2", NULL, NULL);
+    check(!file_has("C:\\WINDOWS\\WIN.INI", "[W16Test2]"), "WriteProfileString deletes its section");
+    unlink("C:\\WINDOWS\\W16T2.INI");
+    unlink("C:\\W16T3.INI");
+}
+
 /* W16TEST NAME...: only those groups of checks. */
 static LPSTR only;
 
@@ -2796,8 +3442,31 @@ static int want(const char *name)
 /* Stage 2's rest, each group alone with W16TEST GROUP. */
 static void stage2b_tests(HINSTANCE hInst)
 {
+    HWND hwnd;
+
     if (want("MDI"))
         mdi2_tests(hInst);
+    if (want("GDI"))
+        gdi2_tests(hInst);
+    if (want("RGN"))
+        rgn2_tests(hInst);
+    if (want("MAP"))
+        map2_tests();
+    if (want("FONT")) {
+        WNDCLASS wc;
+        memset(&wc, 0, sizeof wc);
+        wc.lpfnWndProc = DefWindowProc;
+        wc.hInstance = hInst;
+        wc.lpszClassName = "W16Plain";
+        RegisterClass(&wc);
+        hwnd = CreateWindow("W16Plain", "W16TEST fonts", WS_OVERLAPPEDWINDOW, 20, 20, 200, 100, NULL, NULL, hInst, NULL);
+        font2_tests(hwnd);
+        DestroyWindow(hwnd);
+    }
+    if (want("DLL"))
+        dll2_tests();
+    if (want("INI"))
+        ini2_tests();
 }
 
 int PASCAL WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR cmd, int show)

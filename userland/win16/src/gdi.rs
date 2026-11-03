@@ -38,6 +38,8 @@ pub enum DcKind {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Font {
     pub face: u8,
+    /// The Windows face it is (an index in `FACES`).
+    pub wface: u8,
     pub height: i32,
     pub width: i32,
     pub weight: u16,
@@ -137,7 +139,68 @@ pub const ANSI_FIXED_FONT: u16 = OBJ_BASE + 2 * 11;
 const STOCK: usize = 17;
 
 fn sys_font() -> Font {
-    Font { face: 0, height: 0, width: 0, weight: 700, italic: false, underline: false }
+    Font { face: 0, wface: 0, height: 0, width: 0, weight: 700, italic: false, underline: false }
+}
+
+/// A Windows face: its name, the PM face it is drawn with (`Font::face`),
+/// LOGFONT's pitch and family, whether it is TrueType (scalable), its
+/// character set, and a raster face's cell heights at 96 dpi.
+pub struct WFace {
+    pub name: &'static [u8],
+    pub pm: u8,
+    pub family: u8,
+    pub tt: bool,
+    pub charset: u8,
+    pub sizes: &'static [i32],
+}
+
+/// The faces Windows 3.1 has and programs ask for, on rs2's own fonts
+/// (docs/WIN16.md "Fonts").
+pub const FACES: &[WFace] = &[
+    WFace { name: b"System", pm: 0, family: 0x22, tt: false, charset: 0, sizes: &[16] },
+    WFace { name: b"Fixedsys", pm: 1, family: 0x31, tt: false, charset: 0, sizes: &[15] },
+    WFace { name: b"Terminal", pm: 1, family: 0x31, tt: false, charset: 255, sizes: &[12, 15] },
+    WFace { name: b"MS Sans Serif", pm: 2, family: 0x22, tt: false, charset: 0, sizes: &[13, 16, 20, 24, 29, 37] },
+    WFace { name: b"MS Serif", pm: 3, family: 0x12, tt: false, charset: 0, sizes: &[13, 16, 19, 21, 27, 35] },
+    WFace { name: b"Courier", pm: 4, family: 0x31, tt: false, charset: 0, sizes: &[13, 16, 20] },
+    WFace { name: b"Arial", pm: 2, family: 0x22, tt: true, charset: 0, sizes: &[] },
+    WFace { name: b"Courier New", pm: 4, family: 0x31, tt: true, charset: 0, sizes: &[] },
+    WFace { name: b"Times New Roman", pm: 3, family: 0x12, tt: true, charset: 0, sizes: &[] },
+];
+
+/// Other names programs use for these faces: Windows 3.0's, PM's and
+/// the usual substitutes.
+const ALIASES: &[(&[u8], u8)] = &[
+    (b"Helv", 3),
+    (b"Tms Rmn", 4),
+    (b"Helvetica", 6),
+    (b"Times", 8),
+    (b"Times Roman", 8),
+    (b"System Proportional", 0),
+    (b"System Monospaced", 1),
+    (b"Modern", 7),
+    (b"Roman", 8),
+    (b"Swiss", 6),
+    (b"Small Fonts", 3),
+];
+
+/// The face index of a Windows face name (or alias).
+pub fn find_face(name: &[u8]) -> Option<u8> {
+    let n = trim_nul(name);
+    FACES.iter().position(|f| f.name.eq_ignore_ascii_case(n)).map(|i| i as u8).or_else(|| ALIASES.iter().find(|a| a.0.eq_ignore_ascii_case(n)).map(|a| a.1))
+}
+
+fn trim_nul(s: &[u8]) -> &[u8] {
+    &s[..s.iter().position(|&c| c == 0).unwrap_or(s.len())]
+}
+
+/// A font of a face at a cell height (raster faces) or em height
+/// (TrueType, negative), with a weight and slant (EnumFonts).
+pub fn face_font(wface: u8, height: i32, weight: u16, italic: bool) -> Font {
+    let f = &FACES[wface as usize];
+    // The system font is drawn as PM's at its own size.
+    let height = if wface == 0 { 0 } else { height };
+    Font { face: f.pm, wface, height, width: 0, weight, italic, underline: false }
 }
 
 fn g() -> &'static mut Gdi {
@@ -145,7 +208,7 @@ fn g() -> &'static mut Gdi {
     if g.objs.is_empty() {
         let b = |c, null| Some(Obj::Brush { color: c, null, pat: None, src: 0 });
         let p = |c, style| Some(Obj::Pen { style, width: 1, color: c });
-        let mono = Some(Obj::Font(Font { face: 1, ..sys_font() }));
+        let mono = Some(Obj::Font(Font { face: 1, wface: 1, ..sys_font() }));
         g.objs = alloc::vec![
             b(0xffffff, false), // WHITE_BRUSH
             b(0xc0c0c0, false), // LTGRAY_BRUSH
@@ -184,6 +247,17 @@ pub fn delete_object(o: u16) -> bool {
     }
     if let Some(Obj::Palette(_)) = obj(o) {
         crate::bitmap::forget_palette(o);
+    }
+    // A deleted font's handle comes back for the next object: a DC whose
+    // PS has it as its font goes back to the system font.
+    if let Some(Obj::Font(_)) = obj(o) {
+        for d in g().dcs.iter_mut().filter(|d| d.applied == o) {
+            unsafe {
+                GpiSetCharSet(d.hps, 0);
+                GpiDeleteSetId(d.hps, 1);
+            }
+            d.applied = SYSTEM_FONT;
+        }
     }
     g().objs[i] = None;
     g().widths.remove(&o);
@@ -928,14 +1002,16 @@ pub fn frame(hdc: u16, r: [i32; 4], c: u32) {
     fill(hdc, [rr - 1, t, rr, b], c);
 }
 
-/// Invert a rectangle.
+/// Invert a rectangle (DSTINVERT: every bit of the pels, in bitmaps
+/// too).
 pub fn invert(hdc: u16, r: [i32; 4]) {
     let Some(d) = dc(hdc) else { return };
     if r[2] <= r[0] || r[3] <= r[1] {
         return;
     }
     let rc = pm_rect(d, r);
-    unsafe { WinInvertRect(d.hps, &rc) };
+    let pts = [PointL { x: rc.l, y: rc.b }, PointL { x: rc.r, y: rc.t }];
+    unsafe { GpiBitBlt(d.hps, 0, 2, pts.as_ptr(), 0x55, 0) };
 }
 
 /// DrawFocusRect: a dotted outline, inverted (drawing it twice removes
@@ -1324,7 +1400,7 @@ fn points(p: *const i16, n: usize, d: &Dc) -> Vec<PointL> {
 fn font_of(height: i32, width: i32, weight: u16, italic: bool, underline: bool, family: u8, face: &[u8]) -> Font {
     let f = face.to_ascii_lowercase();
     let has = |s: &[u8]| f.windows(s.len()).any(|w| w == s);
-    let face = if has(b"courier") || has(b"fixed") || has(b"terminal") || (f.is_empty() && family & 3 == 1) {
+    let pm = if has(b"courier") || has(b"fixed") || has(b"terminal") || (f.is_empty() && family & 3 == 1) {
         4
     } else if has(b"times") || has(b"tms") || has(b"roman") || has(b"serif") && !has(b"sans") || (f.is_empty() && family & 0xf0 == 0x10) {
         3
@@ -1333,7 +1409,60 @@ fn font_of(height: i32, width: i32, weight: u16, italic: bool, underline: bool, 
     } else {
         2
     };
-    Font { face, height, width, weight, italic, underline }
+    // The Windows face it becomes: the one named, else the TrueType face
+    // of its family (the system font for no name, family and size).
+    let wface = find_face(face).unwrap_or(match pm {
+        0 => 0,
+        3 => 8,
+        4 => 7,
+        _ if f.is_empty() && family == 0 && height == 0 => 0,
+        _ => 6,
+    });
+    // A named face is drawn with its own PM face (Fixedsys and Terminal
+    // with the monospaced outline one, System at a size with Helvetica).
+    let pm = match FACES[wface as usize].pm {
+        0 if height != 0 => 2,
+        1 => 4,
+        p => p,
+    };
+    Font { face: pm, wface, height, width, weight, italic, underline }
+}
+
+/// TEXTMETRIC (31 bytes) of the DC's font.
+pub fn text_metrics(hdc: u16) -> [u8; 31] {
+    let mut b = [0u8; 31];
+    let Some(d) = dc(hdc) else { return b };
+    apply_font(d);
+    let mut fm = [0u8; 256];
+    unsafe { GpiQueryFontMetrics(d.hps, 208, fm.as_mut_ptr()) };
+    let l = |o: usize| i32::from_le_bytes(fm[o..o + 4].try_into().unwrap());
+    // lMaxAscender, lMaxDescender, lInternalLeading, lExternalLeading,
+    // lAveCharWidth, lMaxCharInc.
+    let (asc, desc) = (l(76).max(1), l(80).max(0));
+    let (ave, max) = (l(100).max(1), l(104).max(1));
+    // (The em: lEmHeight; what is above it in the cell is the internal
+    // leading.)
+    let internal = if l(92) > 0 { l(92) } else { asc + desc - l(68) }.clamp(0, asc);
+    let external = l(96).max(0);
+    let f = match obj(d.s.font) {
+        Some(Obj::Font(f)) => f,
+        _ => sys_font(),
+    };
+    let wf = &FACES[(f.wface as usize).min(FACES.len() - 1)];
+    let fixed = wf.family & 3 == 1 || f.face == 1 || f.face == 4;
+    // Fixed-pitch fonts' widest character is their width.
+    let max = if fixed { ave } else { max };
+    for (i, v) in [asc + desc, asc, desc, internal, external, ave, max, f.weight.max(100) as i32].iter().enumerate() {
+        b[i * 2..i * 2 + 2].copy_from_slice(&(*v as i16).to_le_bytes());
+    }
+    // tmPitchAndFamily: the family; TMPF_FIXED_PITCH (1) set for a
+    // variable pitch, TMPF_VECTOR 2 and TMPF_TRUETYPE 4 for TrueType.
+    let pitch = (wf.family & 0xf0) | if fixed { 0 } else { 1 } | if wf.tt { 6 } else { 0 };
+    b[16..25].copy_from_slice(&[f.italic as u8, f.underline as u8, 0, 0x20, 0xff, b'?', b' ', pitch, wf.charset]);
+    for (i, v) in [0i16, 96, 96].iter().enumerate() {
+        b[25 + i * 2..27 + i * 2].copy_from_slice(&v.to_le_bytes());
+    }
+    b
 }
 
 pub fn call(ord: u32, a: &mut Pascal) -> u32 {
@@ -1597,11 +1726,13 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let (h, r) = (a.w(), a.l());
             let Some(d) = dc(h) else { return 0 };
             let mut rc = RectL::default();
-            unsafe { GpiQueryClipBox(d.hps, &mut rc) };
+            // (PM's RGN_NULL, RGN_RECT and RGN_COMPLEX are Windows'
+            // NULLREGION, SIMPLEREGION and COMPLEXREGION.)
+            let kind = unsafe { GpiQueryClipBox(d.hps, &mut rc) };
             let (l, t) = to_log(d, rc.l, d.height - rc.t - 1);
             let (rr, b) = to_log(d, rc.r + 1, d.height - rc.b);
             write_rect(r, [l.min(rr), t.min(b), l.max(rr), t.max(b)]);
-            2
+            if (1..=3).contains(&kind) { kind as u32 } else { 2 }
         }
         // GetCurrentPosition(hdc): x in AX, y in DX.
         78 => {
@@ -1684,13 +1815,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
         92 => {
             let (h, cb, buf) = (a.w(), a.i(), a.p());
             let face: &[u8] = match dc(h).and_then(|d| obj(d.s.font)) {
-                Some(Obj::Font(f)) => match f.face {
-                    0 => b"System",
-                    1 => b"Fixedsys",
-                    3 => b"Times New Roman",
-                    4 => b"Courier New",
-                    _ => b"Arial",
-                },
+                Some(Obj::Font(f)) => FACES[(f.wface as usize).min(FACES.len() - 1)].name,
                 _ => b"System",
             };
             if buf.is_null() || cb <= 0 {
@@ -1710,23 +1835,8 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             if p.is_null() {
                 return 0;
             }
-            let (asc, desc, ave, max) = metrics(d);
-            let (weight, italic, ul, fixed) = match obj(d.s.font) {
-                Some(Obj::Font(f)) => (f.weight.max(400), f.italic, f.underline, f.face == 1 || f.face == 4),
-                _ => (700, false, false, false),
-            };
-            let mut b = [0u8; 31];
-            for (i, v) in [asc + desc, asc, desc, 0, 0, ave, max, weight as i32].iter().enumerate() {
-                b[i * 2..i * 2 + 2].copy_from_slice(&(*v as i16).to_le_bytes());
-            }
-            // tmItalic.. tmCharSet: first char 0x20, last 0xff, default
-            // '?', break ' ', the pitch (bit 0: variable) and family,
-            // ANSI charset.
-            let pitch = if fixed { 0x30 } else { 0x21 };
-            b[16..25].copy_from_slice(&[italic as u8, ul as u8, 0, 0x20, 0xff, b'?', b' ', pitch, 0]);
-            for (i, v) in [0i16, 96, 96].iter().enumerate() {
-                b[25 + i * 2..27 + i * 2].copy_from_slice(&v.to_le_bytes());
-            }
+            let _ = d;
+            let b = text_metrics(h);
             unsafe { core::ptr::copy_nonoverlapping(b.as_ptr(), p, 31) };
             1
         }
