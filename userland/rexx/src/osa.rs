@@ -90,7 +90,18 @@ fn entry(h: u32) -> Option<&'static mut Entry> {
     session().objs.get_mut(((h - BASE) / 4) as usize)?.as_mut()
 }
 
+/// The handle of an object: the same one for the same object (and for
+/// equal strings), as native code compares REXXOBJECTs (with REXX_NIL(),
+/// REXX_TRUE()...).
 fn obj(v: Value) -> u32 {
+    let s = session();
+    for (i, e) in s.objs.iter().enumerate() {
+        if let Some(Entry { v: Some(x), src: None, .. }) = e {
+            if x.same(&v) {
+                return BASE + (i as u32) * 4;
+            }
+        }
+    }
     handle(Entry { v: Some(v), ..Entry::default() })
 }
 
@@ -182,9 +193,16 @@ pub extern "C" fn RexxTerminate() -> u32 {
 }
 
 pub extern "C" fn RexxSomInitialize() -> u32 {
+    let fresh = unsafe { (*(&raw const SESSION)).is_none() };
     session();
+    if fresh || !unsafe { CLASSES_IN } {
+        unsafe { CLASSES_IN = true };
+        install_classes();
+    }
     0
 }
+
+static mut CLASSES_IN: bool = false;
 
 pub extern "C" fn RexxCreateDirectory(name: *const u8) -> u32 {
     let n = cstr(name);
@@ -409,11 +427,10 @@ pub extern "C" fn REXX_UNSIGNED_INTEGER(h: u32) -> u32 {
     value(h).and_then(|v| whole(&v)).unwrap_or(0) as u32
 }
 
-pub extern "C" fn REXX_INTEGER(h: u32) -> u32 {
-    match value(h).and_then(|v| whole(&v)) {
-        Some(n) => REXX_INTEGER_NEW(n as i32),
-        None => 0,
-    }
+/// REXX_INTEGER(object): its value as a long (OREXXSC puts it straight
+/// into an AEDesc).
+pub extern "C" fn REXX_INTEGER(h: u32) -> i32 {
+    value(h).and_then(|v| whole(&v)).unwrap_or(0) as i32
 }
 
 pub extern "C" fn REXX_DOUBLE(h: u32) -> f64 {
@@ -470,4 +487,167 @@ pub extern "C" fn REXX_SEND(recv: u32, msg: *const u8, args: u32) -> u32 {
             0
         }
     }
+}
+
+// ---- native methods ----
+
+/// The routine of `EXTERNAL 'LIBRARY dll [entry]'` (the entry defaults to
+/// the method's name).
+fn routine(spec: &[u8], name: &[u8]) -> Option<usize> {
+    let words: Vec<&[u8]> = spec.split(|&c| c == b' ').filter(|w| !w.is_empty()).collect();
+    if words.len() < 2 || !words[0].eq_ignore_ascii_case(b"LIBRARY") {
+        return None;
+    }
+    let mut dll = words[1].to_vec();
+    dll.push(0);
+    let mut entry = words.get(2).map_or(name.to_vec(), |e| e.to_vec());
+    entry.push(0);
+    let mut h = 0u32;
+    let mut fail = [0u8; 64];
+    if unsafe { DosLoadModule(fail.as_mut_ptr(), fail.len() as u32, dll.as_ptr(), &mut h) } != 0 {
+        return None;
+    }
+    let mut f = 0usize;
+    if unsafe { DosQueryProcAddr(h, 0, entry.as_ptr(), &mut f) } != 0 || f == 0 {
+        return None;
+    }
+    Some(f)
+}
+
+/// Call a native method: `f(NULL)` gives its signature (the result's type,
+/// then the arguments': 2 object, 3 int, 4 long, 5 double, 6 C string,
+/// 7 the receiver, 8 the argument array, 9 the message name, 0x10 an
+/// optional object), `f(args)` runs it: `args[0]` points to the result,
+/// `args[n]` to the nth argument's value.
+pub fn native_call(spec: &[u8], recv: &Value, name: &[u8], args: &[Option<Value>]) -> Option<Result<Option<Value>, (u32, Vec<u8>)>> {
+    let f = routine(spec, name)?;
+    let call: extern "C" fn(*mut u32) -> *const u8 = unsafe { core::mem::transmute(f) };
+    let sig = cstr(call(core::ptr::null_mut()));
+    if sig.is_empty() {
+        return None;
+    }
+    let mark = session().objs.len();
+    let mut result = [0u32; 2];
+    // each argument is passed by its address: the values first
+    let mut words: Vec<u32> = Vec::new();
+    let mut next = args.iter();
+    let mut keep: Vec<Vec<u8>> = Vec::new();
+    for &t in &sig[1..] {
+        match t & 0x7f {
+            7 => words.push(obj(recv.clone())),
+            8 => words.push(obj(w().array_opt(args.to_vec()))),
+            9 => words.push(obj(Value::S(name.to_vec()))),
+            3 | 4 => words.push(next.next().cloned().flatten().and_then(|v| whole(&v)).unwrap_or(0) as u32),
+            5 => {
+                let d = next.next().cloned().flatten().and_then(|v| core::str::from_utf8(&fast(&v)).ok().and_then(|s| s.trim().parse::<f64>().ok())).unwrap_or(0.0);
+                let b = d.to_bits();
+                words.push(b as u32);
+                words.push((b >> 32) as u32);
+            }
+            6 => {
+                let mut s = next.next().cloned().flatten().map(|v| fast(&v)).unwrap_or_default();
+                s.push(0);
+                words.push(s.as_ptr() as u32);
+                keep.push(s);
+            }
+            _ => words.push(next.next().cloned().flatten().map_or(0, obj)),
+        }
+    }
+    // the argument list: the result's address, then each value's (a
+    // double takes two words)
+    let mut list: Vec<u32> = alloc::vec![result.as_mut_ptr() as u32];
+    let mut i = 0;
+    for &t in &sig[1..] {
+        list.push(unsafe { words.as_ptr().add(i) } as u32);
+        i += if t & 0x7f == 5 { 2 } else { 1 };
+    }
+    unsafe { RAISED = None };
+    call(list.as_mut_ptr());
+    let out = match sig[0] & 0x7f {
+        2 | 0x10 => value(result[0]),
+        3 | 4 => Some(Value::S(alloc::format!("{}", result[0] as i32).into_bytes())),
+        6 => Some(Value::S(cstr(result[0] as *const u8))),
+        _ => None,
+    };
+    // the handles the call made are done with
+    let s = session();
+    for e in s.objs.iter_mut().skip(mark) {
+        *e = None;
+    }
+    if let Some((code, a)) = unsafe { (*(&raw mut RAISED)).take() } {
+        let text = a.and_then(|a| World::array_items(&a)).map(|v| v.iter().flatten().map(fast).collect::<Vec<_>>().join(&b' ')).unwrap_or_default();
+        return Some(Err((code, text)));
+    }
+    drop(keep);
+    Some(Ok(out))
+}
+
+// ---- the REXX classes for scripting OpenDoc ----
+
+/// rs2's own REXX code for the classes OREXXSC's native methods work with
+/// (IBM keeps its in REXX.IMG): ScriptableApp (CONNECT, DISCONNECT and
+/// messages it does not know become Apple events to the application,
+/// natives of REXXSC, OREXXSC's module) and the object-specifier
+/// classes OREXXSC makes from Apple-event replies. They go into
+/// `.environment` when RexxSomInitialize makes the world.
+const OPENDOC_CLASSES: &[u8] = b"\
+.environment~setentry('SCRIPTABLEAPP', .ScriptableApp)\r\n\
+.environment~setentry('OBJECTSPECIFIER', .ObjectSpecifier)\r\n\
+.environment~setentry('SCREFERENCE', .SCReference)\r\n\
+.environment~setentry('SCRELATIVEPOSITION', .SCRelativePosition)\r\n\
+.environment~setentry('SCLIST', .SCList)\r\n\
+.environment~setentry('SCRANGE', .SCRange)\r\n\
+return\r\n\
+::class ScriptableApp public\r\n\
+::method init\r\n\
+  expose aete name currapp dirparm\r\n\
+  aete = 0; name = ''; currapp = .nil; dirparm = .nil\r\n\
+::method getaete;      expose aete;    return aete\r\n\
+::method setaete;      expose aete;    use arg aete\r\n\
+::method getname;      expose name;    return name\r\n\
+::method setname;      expose name;    use arg name\r\n\
+::method getcurrapp;   expose currapp; return currapp\r\n\
+::method setcurrapp;   expose currapp; use arg currapp\r\n\
+::method getdirparm;   expose dirparm; return dirparm\r\n\
+::method setdirparm;   expose dirparm; use arg dirparm\r\n\
+::method resetdirparm; expose dirparm; dirparm = .nil\r\n\
+::method connect    external 'LIBRARY REXXSC ScriptableApp_Connect'\r\n\
+::method disconnect external 'LIBRARY REXXSC ScriptableApp_Disconnect'\r\n\
+::method novalue    external 'LIBRARY REXXSC ScriptableApp_Novalue'\r\n\
+::method sendevent  external 'LIBRARY REXXSC ScriptableApp_Unknown'\r\n\
+::method unknown\r\n\
+  expose dirparm\r\n\
+  use arg msg, args\r\n\
+  if args~items = 1 then if args[1]~class \\== .directory then do\r\n\
+    dirparm = args[1]\r\n\
+    args = .array~new\r\n\
+  end\r\n\
+  return self~sendevent(msg, args)\r\n\
+::class ObjectSpecifier public\r\n\
+::method init; expose class key container; use arg class, key; container = .nil\r\n\
+::method setcontainer; expose container; use arg container\r\n\
+::method getcontainer; expose container; return container\r\n\
+::method getclass; expose class; return class\r\n\
+::method getkey; expose key; return key\r\n\
+::method makeaedesc external 'LIBRARY REXXSC ObjectSpecifier_MakeAEDesc'\r\n\
+::class SCReference public\r\n\
+::method init; expose form data type; use arg form, data, type\r\n\
+::method getkeyform; expose form; return form\r\n\
+::method getkeydata; expose data; return data\r\n\
+::method getkeytype; expose type; return type\r\n\
+::method makeaedesc external 'LIBRARY REXXSC SCReference_MakeAEDesc'\r\n\
+::class SCRelativePosition public\r\n\
+::method init; expose pos; use arg pos\r\n\
+::method getposition; expose pos; return pos\r\n\
+::class SCList public subclass array\r\n\
+::method makeaedesc external 'LIBRARY REXXSC SCList_MakeAEDesc'\r\n\
+::class SCRange public\r\n\
+::method init; expose start stop; use arg start, stop\r\n\
+::method getstart; expose start; return start\r\n\
+::method getstop; expose stop; return stop\r\n\
+::method makeaedesc external 'LIBRARY REXXSC SCRange_MakeAEDesc'\r\n\
+";
+
+fn install_classes() {
+    let _ = with_interp(|it| it.run_program_v(OPENDOC_CLASSES, b"OPENDOC", CallType::Subroutine, Vec::new(), b"CMD").map(|_| ()));
 }

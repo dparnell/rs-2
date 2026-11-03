@@ -25,6 +25,12 @@ unsafe extern "C" {
     fn AEDisposeDesc(d: *mut Desc) -> i32;
     #[link_name = "OPENDOC.24"]
     fn AEGetDescData(d: *const Desc, tyo: *mut u32, p: *mut u8, max: usize, n: *mut u32) -> i32;
+    #[link_name = "OPENDOC.33"]
+    fn AEGetParamPtr(e: *const Desc, key: u32, ty: u32, tyo: *mut u32, p: *mut u8, max: usize, n: *mut u32) -> i32;
+    #[link_name = "OPENDOC.38"]
+    fn AEInstallEventHandler(class: u32, id: u32, f: usize, refcon: usize, sys: u32) -> i32;
+    #[link_name = "OPENDOC.51"]
+    fn AEPutParamDesc(e: *const Desc, key: u32, d: *const Desc) -> i32;
     #[link_name = "OPENDOC.528"]
     static OSAScriptingComponentClassData: [usize; 44];
     #[link_name = "OPENDOC.529"]
@@ -113,6 +119,113 @@ fn script_error(sc: usize, sel: &[u8; 4], ty: &[u8; 4]) -> Option<(u32, Vec<u8>)
     Some(out)
 }
 
+// ---- an application to script: this program ----
+
+fn pstr(v: &mut Vec<u8>, s: &[u8]) {
+    v.push(s.len() as u8);
+    v.extend_from_slice(s);
+}
+
+fn align(v: &mut Vec<u8>) {
+    if v.len() & 1 != 0 {
+        v.push(0);
+    }
+}
+
+/// An event of the terminology: name, class, ID, reply type, direct
+/// parameter type ('null': none).
+fn aete_event(v: &mut Vec<u8>, name: &[u8], class: u32, id: u32, reply: u32, direct: u32) {
+    pstr(v, name);
+    pstr(v, b"");
+    align(v);
+    v.extend_from_slice(&class.to_le_bytes());
+    v.extend_from_slice(&id.to_le_bytes());
+    v.extend_from_slice(&reply.to_le_bytes());
+    pstr(v, b"");
+    align(v);
+    v.extend_from_slice(&0u16.to_le_bytes());
+    v.extend_from_slice(&direct.to_le_bytes());
+    pstr(v, b"");
+    align(v);
+    v.extend_from_slice(&0u16.to_le_bytes());
+    v.extend_from_slice(&0u16.to_le_bytes()); // no other parameters
+}
+
+/// ODTEST's terminology ('aete'): a suite with "hello" (reply TEXT) and
+/// "twice" (a long in, a long out).
+fn aete() -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(&1u16.to_le_bytes());
+    v.extend_from_slice(&0u16.to_le_bytes());
+    v.extend_from_slice(&0u16.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes()); // one suite
+    pstr(&mut v, b"ODTEST suite");
+    pstr(&mut v, b"");
+    align(&mut v);
+    v.extend_from_slice(&c(b"RS2T").to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes());
+    v.extend_from_slice(&1u16.to_le_bytes());
+    v.extend_from_slice(&2u16.to_le_bytes()); // events
+    aete_event(&mut v, b"hello", c(b"RS2T"), c(b"hllo"), c(b"TEXT"), c(b"null"));
+    aete_event(&mut v, b"twice", c(b"RS2T"), c(b"dubl"), c(b"long"), c(b"long"));
+    for _ in 0..4 {
+        v.extend_from_slice(&0u16.to_le_bytes()); // classes, comparisons, enumerations, ...
+    }
+    v
+}
+
+extern "C" fn get_aete(_event: *const Desc, reply: *mut Desc, _refcon: usize) -> i32 {
+    let a = aete();
+    let mut d = Desc::default();
+    unsafe {
+        AECreateDesc(c(b"aete"), a.as_ptr(), a.len(), &mut d);
+        AEPutParamDesc(reply, c(b"----"), &d);
+        AEDisposeDesc(&mut d);
+    }
+    0
+}
+
+extern "C" fn hello(_event: *const Desc, reply: *mut Desc, _refcon: usize) -> i32 {
+    let mut d = text(b"hello from ODTEST");
+    unsafe {
+        AEPutParamDesc(reply, c(b"----"), &d);
+        AEDisposeDesc(&mut d);
+    }
+    0
+}
+
+extern "C" fn twice(event: *const Desc, reply: *mut Desc, _refcon: usize) -> i32 {
+    let (mut ty, mut n, mut v) = (0u32, 0u32, 0i32);
+    let r = unsafe { AEGetParamPtr(event, c(b"----"), c(b"long"), &mut ty, &mut v as *mut i32 as *mut u8, 4, &mut n) };
+    if r != 0 {
+        return r;
+    }
+    let v2 = v * 2;
+    let mut d = Desc::default();
+    unsafe {
+        AECreateDesc(c(b"long"), &v2 as *const i32 as *const u8, 4, &mut d);
+        AEPutParamDesc(reply, c(b"----"), &d);
+        AEDisposeDesc(&mut d);
+    }
+    0
+}
+
+/// Scripts that send Apple events to this program through IBM's
+/// ScriptableApp natives and rs2's terminology classes.
+fn scriptable_app(sc: usize) {
+    unsafe {
+        AEInstallEventHandler(c(b"ascr"), c(b"gdte"), get_aete as usize, 0, 0);
+        AEInstallEventHandler(c(b"RS2T"), c(b"hllo"), hello as usize, 0, 0);
+        AEInstallEventHandler(c(b"RS2T"), c(b"dubl"), twice as usize, 0, 0);
+    }
+    let r = run(sc, b"app = .ScriptableApp~new~connect('ODTEST')\r\nreturn app~hello");
+    check("a script connects to this program and sends it an event (ScriptableApp, its terminology)", r.as_deref() == Ok(&b"hello from ODTEST"[..]));
+    let r = run(sc, b"return .ScriptableApp~new~connect('ODTEST')~twice(21)");
+    check("an event with a direct parameter and a reply", r.as_deref() == Ok(&b"42"[..]));
+    let r = run(sc, b"return .ScriptableApp~new~connect('ODTEST')~nosuchevent");
+    check("an event the terminology does not have is an error", r == Err(-1753));
+}
+
 pub fn orexxsc() {
     let e = ev();
     unsafe {
@@ -173,6 +286,7 @@ pub fn orexxsc() {
     let r = run(sc, b"x = 1\r\nreturn x / 0");
     let n = script_error(sc, b"errn", b"shor");
     check("a run-time error (division by zero: 42)", r == Err(-1753) && n.map(|x| x.1[..2].to_vec()) == Some(42i16.to_le_bytes().to_vec()));
+    scriptable_app(sc);
     for d in [&mut name, &mut s, &mut out, &mut src, &mut stored, &mut shown] {
         unsafe { AEDisposeDesc(d) };
     }

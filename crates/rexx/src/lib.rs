@@ -243,6 +243,12 @@ pub trait Host {
     }
     /// Object REXX: the host no longer needs an object's handle.
     fn ext_release(&mut self, _kind: u32, _handle: usize) {}
+    /// Object REXX: run a native method (`::METHOD name EXTERNAL 'LIBRARY
+    /// dll entry'`) for `recv`. None: there is no such routine; an error
+    /// is the REXX error number and the secondary message's text.
+    fn native_method(&mut self, _st: &mut State, _spec: &[u8], _recv: &value::Value, _name: &[u8], _args: &[Option<value::Value>]) -> Option<Result<Option<value::Value>, (u32, Vec<u8>)>> {
+        None
+    }
     /// Object REXX: GUARD ... WHEN is false; let other activities run.
     /// Returns false if there are none (the condition cannot change).
     fn wait_guard(&mut self, _st: &mut State) -> bool {

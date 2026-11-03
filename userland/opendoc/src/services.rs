@@ -1106,7 +1106,4 @@ pub static TYPE_LIST_M: &[(&str, M)] = &[
 pub static FACET_WINDOW_META_M: &[(&str, M)] = &[("IsFacetWindow", IsFacetWindow::t)];
 
 
-pub extern "C" fn no_class(_major: i32, _minor: i32) -> usize {
-    0
-}
 

@@ -620,6 +620,9 @@ fn method_of(pkg: &Rc<Package>, md: &MethodDir) -> Vec<(Vec<u8>, Method)> {
         set.push(b'=');
         return alloc::vec![(md.name.clone(), mk(Body::Get(md.name.clone()))), (set, mk(Body::Set(md.name.clone())))];
     }
+    if let Some(spec) = &md.external {
+        return alloc::vec![(md.name.clone(), mk(Body::External(spec.clone())))];
+    }
     alloc::vec![(md.name.clone(), mk(Body::Rexx(code_of(pkg, &md.name, &md.prog, &md.source))))]
 }
 
@@ -1055,6 +1058,21 @@ pub fn invoke(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: V
             crate::classes::native(it, f, b, found.class_side, recv, name, args, &found, lvl)
         }
         Body::Null => Ok(None),
+        Body::External(spec) => {
+            let spec = spec.clone();
+            let mut st = core::mem::replace(&mut it.st, crate::exec::State::empty());
+            let r = it.host.native_method(&mut st, &spec, recv, name, &args);
+            it.st = st;
+            match r {
+                Some(Ok(v)) => Ok(v),
+                Some(Err((code, text))) => {
+                    it.err_msg = text;
+                    Err(Err::Syntax(code))
+                }
+                // the routine (the library or its entry) is not there
+                None => Err(Err::Syntax(43)),
+            }
+        }
     }
 }
 

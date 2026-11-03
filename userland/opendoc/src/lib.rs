@@ -27,6 +27,7 @@ extern crate os2;
 #[macro_use]
 pub mod rt;
 pub mod ae;
+pub mod aete;
 pub mod clipboard;
 pub mod osa;
 pub mod dnd;
@@ -110,11 +111,6 @@ class_data! {
     ODWindowStateClassData, ODWindowStateCClassData, 32;
     OSAScriptingComponentClassData, OSAScriptingComponentCClassData, 44;
 }
-
-/// The Apple-event terminology classes (ordinals 1000-1046) are not
-/// built: their class data only exists so OREXXSC's imports resolve.
-#[unsafe(no_mangle)]
-pub static mut ODAETEClassDataStub: [usize; 64] = [0; 64];
 
 /// Every class: name, and its description.
 pub static CLASSES: &[(&str, fn() -> Def)] = &[
@@ -299,9 +295,8 @@ somsup::aligned! {
     __a_AENotHandled => ae::AENotHandled, 0;
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn __AETENoClass(major: i32, minor: i32) -> usize {
-    services::no_class(major, minor)
+somsup::aligned! {
+    __a_ODAETEDictionaryNewClass => aete::dictionary_new_class, 2;
 }
 
 // ---- PM helpers ----

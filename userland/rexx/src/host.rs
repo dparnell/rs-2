@@ -990,6 +990,11 @@ impl Host for OsHost {
         crate::with_state(st, || crate::oohost::ext_send(kind, handle, msg, args))
     }
 
+    #[cfg(orexx)]
+    fn native_method(&mut self, _st: &mut State, spec: &[u8], recv: &rexx::value::Value, name: &[u8], args: &[Option<rexx::value::Value>]) -> Option<Result<Option<rexx::value::Value>, (u32, Vec<u8>)>> {
+        crate::osa::native_call(spec, recv, name, args)
+    }
+
     fn init(&mut self, st: &mut State) {
         if self.exit(RXINI).is_some() {
             let _ = self.call_exit(st, RXINI, 1, null_mut());
