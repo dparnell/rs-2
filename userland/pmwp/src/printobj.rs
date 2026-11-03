@@ -71,6 +71,8 @@ unsafe extern "C" {
     fn DevPostDeviceModes(hab: u32, drv: *mut u8, name: *const u8, dev: *const u8, pname: *const u8, fl: u32) -> i32;
     #[link_name = "PMCTLS.4"]
     fn WinFileDlg(parent: u32, owner: u32, fild: *mut u8) -> u32;
+    #[link_name = "PMSPL.442"]
+    fn SplCopyJob(sc: *const u8, sq: *const u8, id: u32, tc: *const u8, tq: *const u8, out: *mut u32) -> u32;
 }
 
 const HINI_SYSTEM: u32 = 0xffff_fffe;
@@ -344,6 +346,28 @@ pub fn make_job(printer: usize, queue: &[u8], j: &JobInfo) -> usize {
         jd(o).printer = printer;
     }
     o
+}
+
+/// The queue a job object belongs to.
+pub fn job_queue(o: usize) -> Option<Vec<u8>> {
+    wps::is(o, "WPJob").then(|| str_bytes(&jd(o).queue).to_vec())
+}
+
+/// A job dropped on another printer moves to that printer's queue (IBM's
+/// wpMoveJobObject): a copy there (SplCopyJob, the same data, document
+/// and properties), then the job goes from its own queue. Both printers'
+/// job views follow.
+pub fn move_job(o: usize, to_printer: usize, to_queue: &[u8]) -> bool {
+    let (from, id, from_printer) = (z(str_bytes(&jd(o).queue)), jd(o).id, jd(o).printer);
+    let to = z(to_queue);
+    let mut new_id = 0u32;
+    let ok = unsafe { SplCopyJob(null(), from.as_ptr(), id, null(), to.as_ptr(), &mut new_id) } == 0;
+    if ok {
+        unsafe { SplDeleteJob(null(), from.as_ptr(), id) };
+    }
+    printer::jobs_changed(from_printer);
+    printer::jobs_changed(to_printer);
+    ok
 }
 
 pub fn free_job(o: usize) {

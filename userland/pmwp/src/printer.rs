@@ -757,6 +757,13 @@ extern "C" fn printer_drag_over(o: usize, _cnr: u32, pdinfo: u32) -> u32 {
     if queue_of(o).is_empty() {
         return mp(DOR_NEVERDROP, 0);
     }
+    // Jobs of other printers move here (IBM's wpMoveJobObject).
+    let items = crate::dnd::items(pdinfo);
+    let jobs: Vec<usize> = items.iter().map(|&it| crate::dnd::item_object(it)).filter(|&j| j != 0 && wps::is(j, "WPJob")).collect();
+    if !jobs.is_empty() && jobs.len() == items.len() {
+        let q = queue_of(o);
+        return if jobs.iter().all(|&j| crate::printobj::job_queue(j).is_some_and(|jq| !jq.eq_ignore_ascii_case(&q))) { mp(DOR_DROP, DO_MOVE) } else { mp(DOR_NODROP, DO_MOVE) };
+    }
     match crate::dnd::dropped_files(pdinfo) {
         Some(v) if !v.is_empty() => mp(DOR_DROP, DO_COPY),
         _ => mp(DOR_NODROPOP, 0),
@@ -765,6 +772,12 @@ extern "C" fn printer_drag_over(o: usize, _cnr: u32, pdinfo: u32) -> u32 {
 
 extern "C" fn printer_drop(o: usize, _cnr: u32, _pdinfo: u32, it: u32) -> u32 {
     let f = crate::dnd::item_object(it);
+    if f != 0 && wps::is(f, "WPJob") {
+        if !crate::printobj::move_job(f, o, &queue_of(o)) {
+            message(HWND_DESKTOP, b"The job could not be moved to this printer.", &one_line(&obj::title(o)), MB_OK | MB_ERROR);
+        }
+        return crate::delete::RC_DROP_DROPCOMPLETE;
+    }
     let path = if f != 0 { wps::path_of(f) } else { None };
     let q = queue_of(o);
     let ok = path.as_deref().is_some_and(|p| print_file(&q, p));
