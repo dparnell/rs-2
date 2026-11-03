@@ -276,8 +276,8 @@ pub fn codepage(cp: u16) -> Option<&'static [u16; 256]> {
 
 /// A code page named as the TCP/IP applications name translations
 /// (`-cp`): a number (`819`), `IBM-850`/`IBM850`/`CP850`, or an ISO
-/// 8859 part (`ISO8859-1`, `ISO-8859-2`, `8859-5`, `latin1`); only code
-/// pages with a table.
+/// 8859 part (`ISO8859-1`, `ISO-8859-2`, `8859-5`, `latin1`), or IBM's
+/// table names `TCP8859` and `TCPDECMU`; only code pages with a table.
 pub fn codepage_by_name(name: &str) -> Option<u16> {
     let n = name.trim().to_ascii_uppercase();
     let n = n.trim_end_matches(".TBL");
@@ -292,7 +292,11 @@ pub fn codepage_by_name(name: &str) -> Option<u16> {
             _ => return None,
         })
     };
-    let cp = if let Ok(v) = n.parse::<u16>() {
+    let cp = if n == "TCP8859" || n == "TCPDECMU" {
+        // IBM's TCP/IP table names: ISO 8859-1, and DEC's multinational
+        // set (8859-1's characters at the same positions, near enough).
+        Some(819)
+    } else if let Ok(v) = n.parse::<u16>() {
         Some(v)
     } else if let Some(r) = n.strip_prefix("ISO8859-").or_else(|| n.strip_prefix("ISO-8859-")).or_else(|| n.strip_prefix("8859-")).or_else(|| n.strip_prefix("ISO8859_")) {
         iso(r)

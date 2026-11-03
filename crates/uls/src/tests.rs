@@ -263,6 +263,7 @@ fn translation_tables() {
     assert_eq!(codepage_by_name("ISO8859-1"), Some(819));
     assert_eq!(codepage_by_name("ibm-850"), Some(850));
     assert_eq!(codepage_by_name("437"), Some(437));
+    assert_eq!(codepage_by_name("tcp8859"), Some(819));
     assert_eq!(codepage_by_name("nonsense"), None);
     let t = translation(850, 819, b'?').unwrap();
     // e acute: 0x82 in 850, 0xE9 in 8859-1, and back.
