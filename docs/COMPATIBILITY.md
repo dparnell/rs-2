@@ -382,12 +382,13 @@ on the media, so rs2's own utilities take their place.
 | Toolkit rgs/rgc (rpcgen) | fails | The sample calls RPC32DLL's `_Optlink` `svcudp_create` with `_System` linkage (socket -1 pushed, EAX read): `svcudp_create - cannot getsockname`. |
 | Toolkit echos/echoc (HPS) | fails | Need `sysctl()` memory-mapped I/O (OS2_MEMMAPIO), which rs2 does not have. |
 | SYSLOGD.EXE | works | Receives a UDP message (sent with RXSOCK to 127.0.0.1:514) and writes it to `%ETC%\\SYSLOG.MSG`. |
-| TFTP.EXE | works | 16-bit, on rs2's TCPIPDLL and TNLS16: `status`, `binary`, `get` of 300 KB and a text file from QEMU's TFTP server, byte-identical. Timeouts (`_alarm`) do not fire. |
+| TFTP.EXE | works | 16-bit, on rs2's TCPIPDLL and TNLS16: `status`, `binary`, `get` of 300 KB and a text file from QEMU's TFTP server, byte-identical. Retransmission: against `tools/scripts/tftplossy.py`, which drops a DATA block and an ACK, `get` and `put` of 300 KB finish byte-identical (`_alarm`/`_xsignal` interrupt the blocked `_recvfrom` and call TFTP's handler). |
 | INETD.EXE | works | 16-bit; listens for the services of `%ETC%\INETD.LST` and starts the server with the accepted socket's number (tested with a REXX echo server on RXSOCK, reached from the host). |
-| TELNETD.EXE, LPD.EXE, BOOTP.EXE | not tried | TELNETD needs pseudo terminals. |
+| TELNETD.EXE, LPD.EXE, BOOTP.EXE | not tried | rs2's own TELNETD (with pseudo terminals) and LPD replace them. |
 
-rs2 has its own FTP, FTPD, TELNET, TELNETD, LPR, LPQ, LPRM, FINGER,
-TFTP, TFTPD, REXEC, RSH and TCP/IP Configuration notebook (TCPCFG2),
+rs2 has its own FTP, FTPD, TELNET, TELNETD, LPR, LPQ, LPRM, LPD, FINGER,
+TFTP, TFTPD, REXEC, REXECD, RSH, RSHD, TALK, TALKD and TCP/IP
+Configuration notebook (TCPCFG2),
 so none of IBM's are needed ([NETWORK.md](NETWORK.md#rs2s-tcpip-applications));
 IBM's above still run in their place.
 
