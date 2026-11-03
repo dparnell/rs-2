@@ -221,7 +221,8 @@ pub enum Data {
     Supplier(SupplierData),
     Message(alloc::boxed::Box<MsgData>),
     Method(Method),
-    Monitor(Value),
+    /// The destinations, the current one last (DESTINATION pushes and pops).
+    Monitor(Vec<Value>),
     Stream(StreamData),
     Alarm(AlarmData),
     /// An object of another object system (SOM, the Workplace Shell):

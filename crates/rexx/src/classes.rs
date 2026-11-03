@@ -46,7 +46,7 @@ const QUEUE_M: &[&[u8]] = &[
 ];
 const DIR_M: &[&[u8]] = &[
     b"INIT", b"[]", b"[]=", b"AT", b"DIFFERENCE", b"ENTRY", b"HASENTRY", b"HASINDEX", b"INTERSECTION", b"ITEMS", b"MAKEARRAY", b"PUT",
-    b"REMOVE", b"SETENTRY", b"SETMETHOD", b"SUBSET", b"SUPPLIER", b"UNION", b"UNKNOWN", b"XOR",
+    b"REMOVE", b"SETENTRY", b"SETMETHOD", b"SUBSET", b"SUPPLIER", b"UNION", b"UNKNOWN", b"UNSETMETHOD", b"XOR",
 ];
 const TABLE_M: &[&[u8]] = &[
     b"INIT", b"[]", b"[]=", b"AT", b"DIFFERENCE", b"HASINDEX", b"INTERSECTION", b"ITEMS", b"MAKEARRAY", b"PUT", b"REMOVE", b"SUBSET",
@@ -64,7 +64,7 @@ const METHOD_M: &[&[u8]] = &[b"INIT", b"SETGUARDED", b"SETPRIVATE", b"SETPROTECT
 const MONITOR_M: &[&[u8]] = &[b"INIT", b"CURRENT", b"DESTINATION", b"UNKNOWN"];
 const STREAM_M: &[&[u8]] = &[
     b"INIT", b"ARRAYIN", b"ARRAYOUT", b"CHARIN", b"CHAROUT", b"CHARS", b"CLOSE", b"COMMAND", b"DESCRIPTION", b"FLUSH", b"LINEIN",
-    b"LINEOUT", b"LINES", b"MAKEARRAY", b"OPEN", b"POSITION", b"QUALIFY", b"QUERY", b"SEEK", b"STATE", b"SUPPLIER",
+    b"LINEOUT", b"LINES", b"MAKEARRAY", b"OPEN", b"POSITION", b"QUALIFY", b"QUERY", b"SAY", b"SEEK", b"STATE", b"SUPPLIER",
 ];
 const ALARM_M: &[&[u8]] = &[b"INIT", b"CANCEL"];
 
@@ -261,7 +261,7 @@ fn new_data(b: Option<Builtin>) -> Data {
             notify: Vec::new(),
         })),
         Some(Builtin::Method) => Data::Method(Method { body: Body::Null, private: false, guarded: true, protected: false }),
-        Some(Builtin::Monitor) => Data::Monitor(Value::S(Vec::new())),
+        Some(Builtin::Monitor) => Data::Monitor(Vec::new()),
         Some(Builtin::Stream) => Data::Stream(StreamData::default()),
         Some(Builtin::Alarm) => Data::Alarm(AlarmData { msg: Value::S(Vec::new()), cancelled: false }),
         Some(Builtin::String) => Data::Str(Vec::new()),
@@ -1337,6 +1337,18 @@ fn dir_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Args, 
             }
             Ok(None)
         }
+        b"UNSETMETHOD" => {
+            // removes a method SETMETHOD put in (IBM's REXX.IMG has it)
+            let k = upper(&str_arg(it, f, &args, 0)?);
+            if let Data::Directory(d) = &mut *o.data.borrow_mut() {
+                if k.as_slice() == b"UNKNOWN" {
+                    d.unknown = None;
+                } else {
+                    d.methods.remove(&k);
+                }
+            }
+            Ok(None)
+        }
         b"REMOVE" => {
             let k = str_arg(it, f, &args, 0)?;
             let (v, _) = get(&k);
@@ -1921,24 +1933,30 @@ fn method_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Arg
 
 fn monitor_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Args, _found: &Found, lvl: u32) -> RV {
     let Some(o) = obj_of(recv).cloned() else { return Ok(None) };
+    // the destinations, the current one last; none: .nil
+    let nilv = nil(it);
     let dest = || match &*o.data.borrow() {
-        Data::Monitor(v) => v.clone(),
-        _ => Value::S(Vec::new()),
+        Data::Monitor(v) => v.last().cloned().unwrap_or_else(|| nilv.clone()),
+        _ => nilv.clone(),
     };
     match name {
         b"INIT" => {
-            if let Some(v) = arg(&args, 0) {
-                *o.data.borrow_mut() = Data::Monitor(v);
-            }
+            *o.data.borrow_mut() = Data::Monitor(arg(&args, 0).into_iter().collect());
             Ok(None)
         }
         b"CURRENT" => Ok(Some(dest())),
         b"DESTINATION" => {
-            let old = dest();
-            if let Some(v) = arg(&args, 0) {
-                *o.data.borrow_mut() = Data::Monitor(v);
+            // as IBM's: a destination is pushed (and returned); none pops
+            // back to the one before (returned; .nil past the first)
+            if let Data::Monitor(v) = &mut *o.data.borrow_mut() {
+                match arg(&args, 0) {
+                    Some(d) => v.push(d),
+                    None => {
+                        v.pop();
+                    }
+                }
             }
-            Ok(Some(old))
+            Ok(Some(dest()))
         }
         b"UNKNOWN" => {
             let n = upper(&str_arg(it, f, &args, 0)?);
@@ -2011,6 +2029,8 @@ fn stream_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Arg
         b"DESCRIPTION" => s(crate::stream::stream_fn(it, f, &[Some(sname.clone()), Some(b"D".to_vec())])?),
         b"LINEIN" => s(crate::stream::linein(it, f, &sargs)?),
         b"LINEOUT" => s(crate::stream::lineout(it, f, &sargs)?),
+        // SAY's message to .OUTPUT: a line, 0 when written
+        b"SAY" => s(crate::stream::lineout(it, f, &sargs[..sargs.len().min(2)])?),
         b"LINES" => s(crate::stream::lines(it, f, &sargs)?),
         b"CHARS" => s(crate::stream::chars(it, f, &sargs)?),
         b"CHARIN" => s(crate::stream::charin(it, f, &sargs)?),
@@ -2035,7 +2055,11 @@ fn stream_m(it: &mut Interp, f: &mut Frame, recv: &Value, name: &[u8], args: Arg
             }
             if name == b"SUPPLIER" {
                 let idx = (1..=items.len()).map(|i| Value::S(int_str(i as i64))).collect();
-                return Ok(Some(w.obj(Builtin::Supplier, Data::Supplier(SupplierData { items, indexes: idx, pos: 0 }))));
+                let data = Data::Supplier(SupplierData { items, indexes: idx, pos: 0 });
+                return Ok(Some(match w.dir_get(&w.env, b"STREAM_SUPPLIER") {
+                    Some(Value::O(c)) if class_builtin(&c) == Some(Builtin::Supplier) => Value::O(w.new_obj(&c, data)),
+                    _ => w.obj(Builtin::Supplier, data),
+                }));
             }
             Ok(Some(w.array(items)))
         }

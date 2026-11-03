@@ -420,7 +420,7 @@ impl Interp<'_> {
                 };
                 // Object REXX: SAY writes to .OUTPUT
                 if self.w.is_some() {
-                    if let Some(r) = (self.ops().std_io)(self, Some(f), b"OUTPUT", b"LINEOUT", alloc::vec![Some(crate::value::Value::S(v.clone()))]) {
+                    if let Some(r) = (self.ops().std_io)(self, Some(f), b"OUTPUT", b"SAY", alloc::vec![Some(crate::value::Value::S(v.clone()))]) {
                         r?;
                         return Ok(Next::Go);
                     }

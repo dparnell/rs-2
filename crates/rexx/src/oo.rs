@@ -101,6 +101,7 @@ pub struct World {
     pub uninit_live: RefCell<Vec<alloc::rc::Weak<Object>>>,
     in_uninit: Cell<bool>,
     in_std_io: Cell<bool>,
+    prelude: Cell<bool>,
 }
 
 const BUILTINS: &[(Builtin, &[u8])] = &[
@@ -194,6 +195,7 @@ impl World {
             uninit_live: RefCell::new(Vec::new()),
             in_uninit: Cell::new(false),
             in_std_io: Cell::new(false),
+            prelude: Cell::new(false),
         };
         {
             let mut e = w.env.data.borrow_mut();
@@ -207,13 +209,24 @@ impl World {
                 d.map.insert(b"ENVIRONMENT".to_vec(), Value::O(w.env.clone()));
             }
         }
+        // .Stream_Supplier (what a stream's SUPPLIER gives): a supplier
+        // whose superclass is .Object, as in IBM's REXX.IMG
+        {
+            let ss = w.new_class(b"Stream_Supplier".to_vec(), alloc::vec![w.class(Builtin::Object)], w.class(Builtin::Class));
+            if let Data::Class(ci) = &mut *ss.data.borrow_mut() {
+                ci.builtin = Some(Builtin::Supplier);
+            }
+            if let Data::Directory(d) = &mut *w.env.data.borrow_mut() {
+                d.map.insert(b"STREAM_SUPPLIER".to_vec(), Value::O(ss));
+            }
+        }
         // the standard streams and the monitors on them
         let stream = w.classes[Builtin::Stream as usize].clone();
         let monitor = w.classes[Builtin::Monitor as usize].clone();
         let mut entries = Vec::new();
         for (name, mon) in [(&b"STDIN"[..], &b"INPUT"[..]), (b"STDOUT", b"OUTPUT"), (b"STDERR", b"ERROR")] {
             let s = w.new_obj(&stream, Data::Stream(StreamData { name: name.to_vec() }));
-            let m = w.new_obj(&monitor, Data::Monitor(Value::O(s.clone())));
+            let m = w.new_obj(&monitor, Data::Monitor(alloc::vec![Value::O(s.clone())]));
             entries.push((name.to_vec(), Value::O(s)));
             entries.push((mon.to_vec(), Value::O(m)));
         }
@@ -336,8 +349,8 @@ fn std_target(w: &World, which: &[u8]) -> Option<Value> {
     }
     if let Value::O(m) = &v {
         if plain(m, Builtin::Monitor) {
-            if let Data::Monitor(d) = &*m.data.borrow() {
-                if std_stream(d) {
+            if let Some(d) = match &*m.data.borrow() { Data::Monitor(d) => d.last().cloned(), _ => None } {
+                if std_stream(&d) {
                     return None;
                 }
             }
@@ -1334,6 +1347,25 @@ pub fn env_symbol(it: &mut Interp, f: &mut Frame, name: &[u8]) -> Value {
     for d in [&w.local, &w.env] {
         if let Some(v) = w.dir_get(d, name) {
             return v;
+        }
+    }
+    // classes IBM keeps as REXX code in REXX.IMG (crates/rexx/src/prelude.rex)
+    if matches!(name, b"RX_QUEUE" | b"STDQUE" | b"SYSTEM") && !w.prelude.replace(true) {
+        let mut src = Vec::new();
+        for &c in include_bytes!("prelude.rex").iter() {
+            if c == b'\n' {
+                src.push(b'\r');
+            }
+            if c != b'\r' {
+                src.push(c);
+            }
+        }
+        if it.run_program_v(&src, b"REXX.IMG", crate::CallType::Subroutine, Vec::new(), b"CMD").is_ok() {
+            for d in [&w.local, &w.env] {
+                if let Some(v) = w.dir_get(d, name) {
+                    return v;
+                }
+            }
         }
     }
     // the Workplace Shell, SOM...

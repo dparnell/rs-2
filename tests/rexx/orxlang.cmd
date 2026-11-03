@@ -233,9 +233,54 @@ call check f~lines > 0 & f~linein = 'one', 'stream lines and linein'
 call check f~supplier~item = 'one', 'stream supplier'
 f~close
 call check f~query('exists') \= '' & f~query('size') > 0, 'stream query'
-call check .stream~new('ORXLANG.TMP')~makearray~items = 3, 'stream makearray'
+sm = .stream~new('ORXLANG.TMP')
+call check sm~makearray~items = 3, 'stream makearray'
+call check sm~close = 'READY:', 'stream close after makearray'
 '@del ORXLANG.TMP'
 
+
+/* ---- UNINIT, .OUTPUT/.INPUT/.ERROR, REXX.IMG classes ---- */
+call lineout 'ORXUNI.CMD', '/* */'
+call lineout 'ORXUNI.CMD', 'o = .res~new; drop o; p = .res~new'
+call lineout 'ORXUNI.CMD', '::class res'
+call lineout 'ORXUNI.CMD', '::method uninit'
+call lineout 'ORXUNI.CMD', "  say 'uninit'"
+call lineout 'ORXUNI.CMD'
+'@cmd /c orxuni.cmd > ORXUNI.TMP'
+if stream('ORXUNI.TMP', 'c', 'query exists') \= '' then call check linein('ORXUNI.TMP') = 'uninit' & linein('ORXUNI.TMP') = 'uninit', 'UNINIT (dropped and at the end)'
+call stream 'ORXUNI.TMP', 'c', 'close'
+'@del ORXUNI.CMD ORXUNI.TMP'
+log = .recorder~new
+.local['OUTPUT'] = log
+say 'to the log'
+call lineout , 'lineout'
+call charout , 'charout'
+.local['OUTPUT'] = .stdout
+call check log~got = ' SAY(to the log) LINEOUT(lineout) CHAROUT(charout)', 'SAY and LINEOUT to .OUTPUT'
+log = .recorder~new
+.local['ERROR'] = log
+trace r
+tv = 5
+trace o
+.local['ERROR'] = .stderr
+call check log~got~pos('LINEOUT(') > 0 & log~got~pos('tv = 5') > 0, 'trace output to .ERROR'
+log = .recorder~new
+.local['INPUT'] = log
+if queued() = 0 then pull pv
+parse linein lv
+.local['INPUT'] = .stdin
+call check pv = 'INLINEIN' & lv = 'inLINEIN', 'PULL and PARSE LINEIN from .INPUT'
+mon = .monitor~new(.stdout)
+r1 = mon~destination(log)
+mon~say('via')
+call check log~got~pos('SAY(via)') > 0 & mon~destination == .stdout & mon~destination == .nil, 'monitor destinations pushed and popped'
+call check .stdout~say('') = 0, 'stream SAY method'
+call check .stdque~get = 'SESSION' & .stdque~string = 'SESSION' & .rx_queue~id = 'RX_QUEUE', '.STDQUE and .RX_QUEUE'
+call check .stdque~queue('q1') = 0 & .stdque~push('q0') = 0 & .stdque~query = 2, 'RX_QUEUE queue, push and query'
+call check .stdque~pull = 'q0' & .stdque~linein = 'q1' & .stdque~pull = .nil, 'RX_QUEUE pull and linein'
+call check .rx_queue~new~get = 'NAMED_QUEUE', 'RX_QUEUE without a name'
+call check .system~version = '2.30' & .system~name = 'OS/2', '.SYSTEM'
+call check .stream~new('C:\CONFIG.SYS')~supplier~class = .stream_supplier, 'stream supplier class'
 say 'ORXLANG:' passed 'passed,' failed 'failed'
 exit failed
 
@@ -414,3 +459,12 @@ caught:
 ::method continued
   forward message ('SQUARE') array (7) continue
   return 'continued' result
+
+::class recorder
+::method got attribute
+::method init; self~got = ''
+::method unknown
+  use arg m, a
+  if a~items > 0 then self~got = self~got m'('a[1]')'
+  else self~got = self~got m'()'
+  return 'in'm
