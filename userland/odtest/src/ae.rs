@@ -54,8 +54,14 @@ unsafe extern "C" {
     fn AEGetProcessName(pid: u32, buf: *mut u8, info: usize) -> i32;
 }
 
+/// Four-character codes as OS/2 OpenDoc has them (memory order; 'long'
+/// and 'shor' are reversed).
 const fn c(s: &[u8; 4]) -> u32 {
-    u32::from_be_bytes(*s)
+    match s {
+        b"long" => 0x6c6f_6e67,
+        b"shor" => 0x7368_6f72,
+        _ => u32::from_le_bytes(*s),
+    }
 }
 
 fn long(v: i32) -> Desc {

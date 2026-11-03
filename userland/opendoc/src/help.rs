@@ -50,7 +50,6 @@ unsafe extern "C" {
 }
 
 const WC_STATIC: usize = 0xffff_0005;
-const WS_VISIBLE: u32 = 0x8000_0000;
 const SS_TEXT: u32 = 0x0001;
 const DT_VCENTER: u32 = 0x0400;
 const HM_DISPLAY_HELP: u32 = 0x222;

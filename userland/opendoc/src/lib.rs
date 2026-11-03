@@ -28,6 +28,7 @@ extern crate os2;
 pub mod rt;
 pub mod ae;
 pub mod clipboard;
+pub mod osa;
 pub mod dnd;
 pub mod events;
 pub mod help;
@@ -161,7 +162,7 @@ pub static CLASSES: &[(&str, fn() -> Def)] = &[
     ("ODDispatchModule", || Def { name: "ODDispatchModule", parents: &["ODObject"], meta: None, data: 4, methods: events::DISPATCH_MODULE_M, overrides: &[], cd: p!(ODDispatchModuleClassData), ccd: p!(ODDispatchModuleCClassData) }),
     ("ODNameSpaceManager", || Def { name: "ODNameSpaceManager", parents: &["ODObject"], meta: None, data: 0, methods: services::NAME_SPACE_MANAGER_M, overrides: &[], cd: p!(ODNameSpaceManagerClassData), ccd: p!(ODNameSpaceManagerCClassData) }),
     ("ODTypeList", || Def { name: "ODTypeList", parents: &["ODObject"], meta: None, data: 0, methods: services::TYPE_LIST_M, overrides: &[], cd: p!(ODTypeListClassData), ccd: p!(ODTypeListCClassData) }),
-    ("OSAScriptingComponent", || Def { name: "OSAScriptingComponent", parents: &["SOMObject"], meta: None, data: 0, methods: services::OSA_M, overrides: &[], cd: p!(OSAScriptingComponentClassData), ccd: p!(OSAScriptingComponentCClassData) }),
+    ("OSAScriptingComponent", || Def { name: "OSAScriptingComponent", parents: &["SOMObject"], meta: None, data: 0, methods: osa::OSA_M, overrides: &[], cd: p!(OSAScriptingComponentClassData), ccd: p!(OSAScriptingComponentCClassData) }),
 ];
 
 /// Build a class of this DLL (its parents and metaclass first).

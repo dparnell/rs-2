@@ -24,6 +24,8 @@ mod api;
 mod host;
 #[cfg(orexx)]
 mod oohost;
+#[cfg(orexx)]
+mod osa;
 mod r16;
 mod stack;
 
@@ -103,6 +105,48 @@ exports! {
 #[cfg(orexx)]
 exports! {
     __a_RexxTranslateProgram => oohost::translate_program;
+}
+
+#[cfg(orexx)]
+exports! {
+    __a_RexxTerminate => osa::RexxTerminate;
+    __a_RexxSomInitialize => osa::RexxSomInitialize;
+    __a_REXX_ARRAY_AT => osa::REXX_ARRAY_AT;
+    __a_REXX_ARRAY_PUT => osa::REXX_ARRAY_PUT;
+    __a_REXX_ARRAY_SIZE => osa::REXX_ARRAY_SIZE;
+    __a_REXX_ARRAY_NEW => osa::REXX_ARRAY_NEW;
+    __a_REXX_ARRAY_NEW1 => osa::REXX_ARRAY_NEW1;
+    __a_REXX_ARRAY_NEW2 => osa::REXX_ARRAY_NEW2;
+    __a_REXX_BUFFER_NEW => osa::REXX_BUFFER_NEW;
+    __a_REXX_INTEGER_VALUE => osa::REXX_INTEGER_VALUE;
+    __a_REXX_INTEGER_NEW => osa::REXX_INTEGER_NEW;
+    __a_REXX_DOUBLE => osa::REXX_DOUBLE;
+    __a_REXX_EXCEPT => osa::REXX_EXCEPT;
+    __a_REXX_INTEGER => osa::REXX_INTEGER;
+    __a_REXX_ISINTEGER => osa::REXX_ISINTEGER;
+    __a_REXX_ISASTRING => osa::REXX_ISASTRING;
+    __a_REXX_SEND => osa::REXX_SEND;
+    __a_REXX_STRING_DATA => osa::REXX_STRING_DATA;
+    __a_REXX_STRING_NEW => osa::REXX_STRING_NEW;
+    __a_REXX_NIL => osa::REXX_NIL;
+    __a_REXX_TRUE => osa::REXX_TRUE;
+    __a_REXX_ENVIRONMENT => osa::REXX_ENVIRONMENT;
+    __a_REXX_LOCAL => osa::REXX_LOCAL;
+    __a_REXX_UNSIGNED_INTEGER => osa::REXX_UNSIGNED_INTEGER;
+    __a_REXX_ISDIRECTORY => osa::REXX_ISDIRECTORY;
+    __a_RexxCreateMethod => osa::RexxCreateMethod;
+    __a_RexxRunMethod => osa::RexxRunMethod;
+    __a_RexxStoreMethod => osa::RexxStoreMethod;
+    __a_RexxLoadMethod => osa::RexxLoadMethod;
+    __a_RexxCreateDirectory => osa::RexxCreateDirectory;
+    __a_RexxRemoveDirectory => osa::RexxRemoveDirectory;
+    __a_RexxDispose => osa::RexxDispose;
+    __a_RexxSetOSAInfo => osa::RexxSetOSAInfo;
+    __a_RexxGetOSAInfo => osa::RexxGetOSAInfo;
+    __a_RexxResultString => osa::RexxResultString;
+    __a_RexxGetSource => osa::RexxGetSource;
+    __a_RexxCopyMethod => osa::RexxCopyMethod;
+    __a_RexxValidObject => osa::RexxValidObject;
 }
 
 // ---- per-thread state ----

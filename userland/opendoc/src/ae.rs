@@ -25,8 +25,13 @@ use alloc::vec::Vec;
 
 use crate::rt::*;
 
+/// A four-character code as OS/2 OpenDoc's callers have it: the
+/// characters in memory order (IBM's OREXXSC compares 'TEXT' as
+/// 0x54584554). typeLongInteger and typeShortInteger are the exceptions:
+/// their values are 0x6C6F6E67 and 0x73686F72 (the characters reversed
+/// in memory).
 pub const fn code(s: &[u8; 4]) -> u32 {
-    u32::from_be_bytes(*s)
+    u32::from_le_bytes(*s)
 }
 
 const T_NULL: u32 = code(b"null");
@@ -35,8 +40,8 @@ const T_RECORD: u32 = code(b"reco");
 const T_EVENT: u32 = code(b"aevt");
 const T_WILD: u32 = code(b"****");
 const T_TEXT: u32 = code(b"TEXT");
-const T_LONG: u32 = code(b"long");
-const T_SHORT: u32 = code(b"shor");
+const T_LONG: u32 = 0x6c6f_6e67;
+const T_SHORT: u32 = 0x7368_6f72;
 const T_BOOL: u32 = code(b"bool");
 const T_TRUE: u32 = code(b"true");
 const T_FALSE: u32 = code(b"fals");
@@ -122,7 +127,7 @@ fn kind(d: &Desc) -> Kind {
 }
 
 fn is_code_type(t: u32) -> bool {
-    matches!(&t.to_be_bytes(), b"enum" | b"type" | b"keyw" | b"prop")
+    matches!(&t.to_le_bytes(), b"enum" | b"type" | b"keyw" | b"prop")
 }
 
 fn num_of(d: &Desc) -> Option<i64> {
@@ -171,8 +176,7 @@ fn coerce(d: &Desc, to: u32) -> Result<Desc, i32> {
                 return Ok(bytes(T_TEXT, alloc::format!("{v}").as_bytes()));
             }
             if is_code_type(d.ty) && b.len() >= 4 {
-                let c = u32::from_le_bytes([b[0], b[1], b[2], b[3]]).to_be_bytes();
-                let mut t = c.to_vec();
+                let mut t = b[..4].to_vec();
                 t.push(0);
                 return Ok(bytes(T_TEXT, &t));
             }
@@ -184,7 +188,7 @@ fn coerce(d: &Desc, to: u32) -> Result<Desc, i32> {
                 for (i, &x) in b.iter().take_while(|&&x| x != 0).take(4).enumerate() {
                     c[i] = x;
                 }
-                u32::from_be_bytes(c)
+                u32::from_le_bytes(c)
             } else if b.len() >= 4 {
                 u32::from_le_bytes([b[0], b[1], b[2], b[3]])
             } else {
@@ -197,7 +201,7 @@ fn coerce(d: &Desc, to: u32) -> Result<Desc, i32> {
 }
 
 fn is_record_type(t: u32) -> bool {
-    matches!(&t.to_be_bytes(), b"obj " | b"rang" | b"cmpd" | b"logi" | b"insl" | b"reco")
+    matches!(&t.to_le_bytes(), b"obj " | b"rang" | b"cmpd" | b"logi" | b"insl" | b"reco")
 }
 
 /// Copy a descriptor's data out (for the ...Ptr calls).

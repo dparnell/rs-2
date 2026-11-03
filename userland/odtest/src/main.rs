@@ -23,6 +23,7 @@ use os2::*;
 use somsup::{ClassSpec, Environment};
 
 mod ae;
+mod orexxsc;
 mod somuc;
 
 os2::entry!(main);
@@ -1012,6 +1013,8 @@ fn main(st: &Startup) -> u32 {
     let args: Vec<u8> = args.iter().copied().skip_while(|&b| b == b' ').collect();
     if args.len() >= 7 && args[..7].eq_ignore_ascii_case(b"MMODPTS") {
         mmodpts();
+    } else if args.len() >= 7 && args[..7].eq_ignore_ascii_case(b"OREXXSC") {
+        orexxsc::orexxsc();
     } else {
         basic();
     }

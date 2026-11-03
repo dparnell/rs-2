@@ -1058,12 +1058,6 @@ pub static EXTENSION_M: &[(&str, M)] = &[
     ("CheckValid", Nothing0::t),
 ];
 
-macro_rules! numbered {
-    ($cls:literal, $($i:literal => $f:expr,)*) => {
-        &[$((concat!($cls, "_m", $i), $f),)*]
-    };
-}
-
 pub static SETTINGS_EXTENSION_M: &[(&str, M)] = &[
     ("ODSettingsExtension_m0", Nothing0::t),
     ("ODSettingsExtension_m1", Nothing0::t),
@@ -1111,15 +1105,6 @@ pub static TYPE_LIST_M: &[(&str, M)] = &[
 ];
 pub static FACET_WINDOW_META_M: &[(&str, M)] = &[("IsFacetWindow", IsFacetWindow::t)];
 
-pub static OSA_M: &[(&str, M)] = numbered!("OSAScriptingComponent",
-    0 => Nothing0::t, 1 => Nothing0::t, 2 => Nothing0::t, 3 => Nothing0::t, 4 => Nothing0::t, 5 => Nothing0::t,
-    6 => Nothing0::t, 7 => Nothing0::t, 8 => Nothing0::t, 9 => Nothing0::t, 10 => Nothing0::t, 11 => Nothing0::t,
-    12 => Nothing0::t, 13 => Nothing0::t, 14 => Nothing0::t, 15 => Nothing0::t, 16 => Nothing0::t, 17 => Nothing0::t,
-    18 => Nothing0::t, 19 => Nothing0::t, 20 => Nothing0::t, 21 => Nothing0::t, 22 => Nothing0::t, 23 => Nothing0::t,
-    24 => Nothing0::t, 25 => Nothing0::t, 26 => Nothing0::t, 27 => Nothing0::t, 28 => Nothing0::t, 29 => Nothing0::t,
-    30 => Nothing0::t, 31 => Nothing0::t, 32 => Nothing0::t, 33 => Nothing0::t, 34 => Nothing0::t, 35 => Nothing0::t,
-    36 => Nothing0::t, 37 => Nothing0::t, 38 => Nothing0::t, 39 => Nothing0::t,
-);
 
 pub extern "C" fn no_class(_major: i32, _minor: i32) -> usize {
     0

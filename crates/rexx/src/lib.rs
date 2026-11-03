@@ -12,6 +12,7 @@ extern crate alloc;
 
 pub mod builtins;
 pub mod classes;
+pub mod embed;
 pub mod exec;
 pub mod lex;
 pub mod msgs;
