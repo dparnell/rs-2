@@ -68,7 +68,16 @@ pub fn start(sh: &mut Shell, path: &str, args: &str) {
 
 /// Next line of the innermost batch file, echoed if ECHO is on.
 pub fn next_line(sh: &mut Shell) -> Option<String> {
+    next_line_from(sh, 1)
+}
+
+/// Next line of the batch files from the `depth`th one in: None when
+/// those have ended (a CALLed file's caller is not read).
+fn next_line_from(sh: &mut Shell, depth: usize) -> Option<String> {
     loop {
+        if sh.batch.len() < depth {
+            return None;
+        }
         let b = sh.batch.last_mut()?;
         if b.pc >= b.lines.len() {
             let done = sh.batch.pop().unwrap();
@@ -132,7 +141,14 @@ pub fn call(sh: &mut Shell, s: &Simple) -> u32 {
             a.extend(crate::parse::split_words(&rest));
             let saved_echo = sh.echo;
             sh.batch.push(Batch { lines, pc: 0, args: a, shift: 0, saved_echo });
-            0
+            // It runs to its end before CALL returns, as OS/2's CMD does
+            // (in FOR or after & the next command waits for it).
+            let depth = sh.batch.len();
+            while sh.exit.is_none() {
+                let Some(line) = next_line_from(sh, depth) else { break };
+                sh.run_line(&line);
+            }
+            sh.rc
         }
         _ => {
             sh.run_line(&s.args);
