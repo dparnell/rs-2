@@ -109,7 +109,7 @@ PCnet, the default for the OS/2 guest type, behind a PCI bridge at
 ## The stack: `crates/tcpip`
 
 A `no_std` + `alloc` crate with no kernel dependencies, so it is tested
-on the host (`cargo test -p tcpip`, 56 tests): packets in and out as
+on the host (`cargo test -p tcpip`, 55 tests): packets in and out as
 byte buffers, time as a millisecond count passed in, nothing blocks.
 
 | Module | What |
