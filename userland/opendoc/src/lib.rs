@@ -31,6 +31,7 @@ pub mod layout;
 pub mod obj;
 pub mod part;
 pub mod services;
+pub mod settings;
 pub mod storage;
 
 use rt::Def;

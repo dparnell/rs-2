@@ -25,6 +25,12 @@ unsafe extern "C" {
     fn WinDestroyWindow(hwnd: u32) -> u32;
     #[link_name = "PMWIN.899"]
     fn WinWindowFromID(hwnd: u32, id: u32) -> u32;
+    #[link_name = "PMWIN.937"]
+    fn WinPopupMenu(parent: u32, owner: u32, menu: u32, x: i32, y: i32, id: i32, fs: u32) -> u32;
+    #[link_name = "PMWIN.823"]
+    fn WinQueryPointerPos(desktop: u32, pt: *mut [i32; 2]) -> u32;
+    #[link_name = "PMWIN.788"]
+    fn WinMapWindowPoints(from: u32, to: u32, pts: *mut [i32; 2], n: i32) -> u32;
     #[link_name = "PMWIN.765"]
     fn WinInvalidateRect(hwnd: u32, rect: usize, children: u32) -> u32;
     #[link_name = "PMGPI.592"]
@@ -52,6 +58,7 @@ pub const WM_BUTTON1DOWN: u32 = 0x71;
 pub const WM_BUTTON2DOWN: u32 = 0x74;
 pub const WM_BUTTON3DOWN: u32 = 0x77;
 pub const WM_CHAR: u32 = 0x7a;
+pub const WM_CONTEXTMENU: u32 = 0x424;
 
 fn is_mouse(msg: u32) -> bool {
     (0x70..=0x79).contains(&msg) || (0x410..=0x42f).contains(&msg)
@@ -316,7 +323,12 @@ pub fn std_dispatch(ev: usize, event: usize, info: usize) -> bool {
         if is_button_down(msg) && owner(b"Selection") != frame {
             activate(ev, frame);
         }
-        return send_up(ev, frame, facet, event, info);
+        let handled = send_up(ev, frame, facet, event, info);
+        if !handled && msg == WM_CONTEXTMENU {
+            base_popup(ev, w);
+            return true;
+        }
+        return handled;
     }
     match msg {
         WM_CHAR => {
@@ -435,6 +447,10 @@ pub struct Menu {
 pub struct MenuState {
     pub menus: Vec<Menu>,
     pub displayed: bool,
+    /// A popup menu (the window state's base popup and its copies): its
+    /// menus are the popup's items (those with items of their own are
+    /// submenus), shown at the pointer.
+    pub popup: bool,
 }
 
 pub fn menu(this: usize) -> &'static mut MenuState {
@@ -474,6 +490,56 @@ pub struct MenuItem {
     pub id: u16,
     pub submenu: u32,
     pub handle: u32,
+}
+
+fn insert_items(menu: u32, items: &[Item]) {
+    for it in items {
+        let style = if it.style & MIS_SEPARATOR != 0 { it.style } else { it.style | MIS_TEXT };
+        let attr = if it.disabled { MIA_DISABLED } else { 0 } | if it.checked { MIA_CHECKED } else { 0 };
+        let mi = MenuItem { pos: -1, style, attr, id: it.id, submenu: 0, handle: 0 };
+        let t = z(&it.text);
+        unsafe { WinSendMsg(menu, MM_INSERTITEM, &mi as *const MenuItem as usize, t.as_ptr() as usize) };
+    }
+}
+
+/// Show a popup menu bar at the pointer over a window's client.
+fn popup_pm(this: usize, client: u32) {
+    unsafe {
+        let pm = WinCreateWindow(1, WC_MENU, b"\0".as_ptr(), 0, 0, 0, 0, 0, client, 3, 0x7fff, 0, 0);
+        if pm == 0 {
+            return;
+        }
+        for m in menu(this).menus.clone() {
+            if m.items.is_empty() {
+                // An item of the popup itself.
+                let style = if m.title.is_empty() { MIS_SEPARATOR } else { MIS_TEXT };
+                let mi = MenuItem { pos: -1, style, attr: 0, id: m.id, submenu: 0, handle: 0 };
+                let t = z(&m.title);
+                WinSendMsg(pm, MM_INSERTITEM, &mi as *const MenuItem as usize, t.as_ptr() as usize);
+            } else {
+                let sub = WinCreateWindow(2, WC_MENU, b"\0".as_ptr(), 0, 0, 0, 0, 0, pm, 3, m.id as u32, 0, 0);
+                insert_items(sub, &m.items);
+                let mi = MenuItem { pos: -1, style: MIS_TEXT | MIS_SUBMENU, attr: 0, id: m.id, submenu: sub, handle: 0 };
+                let t = z(&m.title);
+                WinSendMsg(pm, MM_INSERTITEM, &mi as *const MenuItem as usize, t.as_ptr() as usize);
+            }
+        }
+        let mut pt = [0i32; 2];
+        WinQueryPointerPos(1, &mut pt);
+        WinMapWindowPoints(1, client, &mut pt, 1);
+        // PU_HCONSTRAIN | PU_VCONSTRAIN | PU_KEYBOARD | PU_MOUSEBUTTON1 | PU_MOUSEBUTTON2
+        WinPopupMenu(client, client, pm, pt[0], pt[1], 0, 0x2000 | 0x4000 | 0x0200 | 0x0040 | 0x0080);
+    }
+}
+
+/// Show the window state's base popup for a frame whose part shows none.
+pub fn base_popup(ev: usize, w: usize) {
+    let s = session();
+    let ws = if s == 0 { 0 } else { sess(s).window_state };
+    let p = if ws == 0 { 0 } else { wstate(ws).base_popup };
+    if p != 0 && w != 0 && win(w).client != 0 {
+        popup_pm(p, win(w).client);
+    }
 }
 
 fn build_pm(this: usize, frame: u32) {
@@ -521,6 +587,15 @@ fn title_of(platform: usize) -> Vec<u8> {
     if platform >= 0x10000 { cstr(platform).to_vec() } else { Vec::new() }
 }
 
+/// The ID of an item being added: the MENUITEM's (OS/2's
+/// AddMenuItemLast/Before take the menu, the submenu item to add to (0:
+/// the menu itself; rs2 adds to the menu either way) and the MENUITEM,
+/// as IBM's MMODPTS calls them), else the ID argument.
+fn item_id(i: usize, mi: usize) -> usize {
+    let m: MenuItem = if mi != 0 { read(mi) } else { MenuItem::default() };
+    if m.id != 0 { m.id as usize } else { i }
+}
+
 fn new_item(id: usize, mi: usize) -> Item {
     let m: MenuItem = if mi != 0 { read(mi) } else { MenuItem::default() };
     Item { id: id as u16, text: Vec::new(), style: m.style, disabled: m.attr & MIA_DISABLED != 0, checked: m.attr & MIA_CHECKED != 0 }
@@ -528,6 +603,14 @@ fn new_item(id: usize, mi: usize) -> Item {
 
 methods! {
     fn MDisplay(this: usize, ev: usize) -> usize {
+        if menu(this).popup {
+            let f = owner(b"Menu");
+            let w = if f != 0 && layout::frame(f).window != 0 { layout::frame(f).window } else { window_for(0) };
+            if w != 0 && win(w).client != 0 {
+                popup_pm(this, win(w).client);
+            }
+            return 0;
+        }
         let w = window_for(0);
         let w = {
             // The window of the frame with the menu focus, else the last one.
@@ -556,11 +639,14 @@ methods! {
         m
     }
     fn AddMenuLast(this: usize, ev: usize, id: usize, platform: usize, part: usize) -> usize {
+        let id = id & 0xffff;
         menu(this).menus.push(Menu { id: id as u16, title: title_of(platform), items: Vec::new() });
         refresh(this);
         0
     }
     fn AddMenuBefore(this: usize, ev: usize, id: usize, platform: usize, part: usize, before: usize) -> usize {
+        let id = id & 0xffff;
+        let before = before & 0xffff;
         let ms = &mut menu(this).menus;
         let at = ms.iter().position(|m| m.id as usize == before).unwrap_or(ms.len());
         ms.insert(at, Menu { id: id as u16, title: title_of(platform), items: Vec::new() });
@@ -568,13 +654,17 @@ methods! {
         0
     }
     fn RemoveMenu(this: usize, ev: usize, id: usize) -> usize {
+        let id = id & 0xffff;
         menu(this).menus.retain(|m| m.id as usize != id);
         refresh(this);
         0
     }
-    fn GetMenu(this: usize, ev: usize, id: usize) -> usize { menu(this).menus.iter().any(|m| m.id as usize == id) as usize }
+    fn GetMenu(this: usize, ev: usize, id: usize) -> usize {
+        let id = id & 0xffff; menu(this).menus.iter().any(|m| m.id as usize == id) as usize }
     fn MIsValid(this: usize, ev: usize) -> usize { 1 }
     fn SetMenuItemText(this: usize, ev: usize, m: usize, i: usize, t: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
         if m == 0 {
             if let Some(x) = menu(this).menus.iter_mut().find(|x| x.id as usize == i) {
                 x.title = cstr(t).to_vec();
@@ -588,14 +678,21 @@ methods! {
         1
     }
     fn GetMenuItemText(this: usize, ev: usize, m: usize, i: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
         if m == 0 {
             return dup(menu(this).menus.iter().find(|x| x.id as usize == i).map_or(&b""[..], |x| &x.title));
         }
         dup(find_item(this, m, i).map_or(&b""[..], |x| &x.text))
     }
-    fn AddSubMenuLast(this: usize, ev: usize, m: usize, sub: usize, platform: usize) -> usize { 0 }
-    fn AddSubMenuBefore(this: usize, ev: usize, m: usize, sub: usize, platform: usize, before: usize) -> usize { 0 }
+    fn AddSubMenuLast(this: usize, ev: usize, m: usize, sub: usize, platform: usize) -> usize {
+        let m = m & 0xffff; 0 }
+    fn AddSubMenuBefore(this: usize, ev: usize, m: usize, sub: usize, platform: usize, before: usize) -> usize {
+        let m = m & 0xffff;
+        let before = before & 0xffff; 0 }
     fn CheckMenuItem(this: usize, ev: usize, m: usize, i: usize, b: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
         match find_item(this, m, i) {
             Some(x) => x.checked = b & 0xff != 0,
             None => return 0,
@@ -604,6 +701,8 @@ methods! {
         1
     }
     fn EnableMenuItem(this: usize, ev: usize, m: usize, i: usize, b: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
         match find_item(this, m, i) {
             Some(x) => x.disabled = b & 0xff == 0,
             None => return 0,
@@ -612,6 +711,10 @@ methods! {
         1
     }
     fn AddMenuItemBefore(this: usize, ev: usize, m: usize, i: usize, mi: usize, before: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
+        let before = before & 0xffff;
+        let i = item_id(i, mi);
         if m == 0 {
             let ms = &mut menu(this).menus;
             let at = ms.iter().position(|x| x.id as usize == before).unwrap_or(ms.len());
@@ -625,6 +728,9 @@ methods! {
         1
     }
     fn AddMenuItemLast(this: usize, ev: usize, m: usize, i: usize, mi: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
+        let i = item_id(i, mi);
         if m == 0 {
             menu(this).menus.push(Menu { id: i as u16, title: Vec::new(), items: Vec::new() });
         } else {
@@ -635,6 +741,8 @@ methods! {
         1
     }
     fn GetMenuItem(this: usize, ev: usize, m: usize, i: usize, out: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
         match find_item(this, m, i) {
             Some(x) => {
                 let attr = if x.disabled { MIA_DISABLED } else { 0 } | if x.checked { MIA_CHECKED } else { 0 };
@@ -645,17 +753,25 @@ methods! {
         }
     }
     fn MenuItemExists(this: usize, ev: usize, m: usize, i: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
         if m == 0 {
             return menu(this).menus.iter().any(|x| x.id as usize == i) as usize;
         }
         find_item(this, m, i).is_some() as usize
     }
-    fn IsItemEnabled(this: usize, ev: usize, m: usize, i: usize) -> usize { find_item(this, m, i).is_some_and(|x| !x.disabled) as usize }
-    fn IsItemChecked(this: usize, ev: usize, m: usize, i: usize) -> usize { find_item(this, m, i).is_some_and(|x| x.checked) as usize }
+    fn IsItemEnabled(this: usize, ev: usize, m: usize, i: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff; find_item(this, m, i).is_some_and(|x| !x.disabled) as usize }
+    fn IsItemChecked(this: usize, ev: usize, m: usize, i: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff; find_item(this, m, i).is_some_and(|x| x.checked) as usize }
     fn GetPlatformMenuBar(this: usize, ev: usize) -> usize {
         unsafe { if SHOWN == this && SHOWN_ON != 0 { WinWindowFromID(SHOWN_ON, FID_MENU) as usize } else { 0 } }
     }
     fn ModifyMenuItemAttributes(this: usize, ev: usize, m: usize, i: usize, mask: usize, attr: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
         match find_item(this, m, i) {
             Some(x) => {
                 if mask as u16 & MIA_DISABLED != 0 {
@@ -671,6 +787,8 @@ methods! {
         1
     }
     fn RemoveMenuItem(this: usize, ev: usize, m: usize, i: usize) -> usize {
+        let m = m & 0xffff;
+        let i = i & 0xffff;
         if m == 0 {
             menu(this).menus.retain(|x| x.id as usize != i);
         } else if let Some(mm) = menu(this).menus.iter_mut().find(|x| x.id as usize == m) {

@@ -90,6 +90,14 @@ unsafe extern "C" {
     static ODDispatcherClassData: [usize; 11];
     #[link_name = "OPENDOC.375"]
     static ODMenuBarClassData: [usize; 24];
+    #[link_name = "OPENDOC.454"]
+    fn ODSettingsExtensionNewClass(major: i32, minor: i32) -> usize;
+    #[link_name = "OPENDOC.453"]
+    static ODSettingsExtensionClassData: [usize; 25];
+    #[link_name = "OPENDOC.393"]
+    static ODObjectClassData: [usize; 8];
+    #[link_name = "OPENDOC.219"]
+    static ODArbitratorClassData: [usize; 15];
     #[link_name = "PMWIN.919"]
     fn WinPostMsg(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> u32;
     #[link_name = "PMWIN.877"]
@@ -304,7 +312,13 @@ const WM_COMMAND: u32 = 0x20;
 const WM_CHAR: u32 = 0x7a;
 const CMD_SAVE: u32 = 0x5100;
 const CMD_CLOSE: u32 = 0x5101;
-const CMD_CUT: u32 = 0x5018;
+// IBM's OpenDoc command IDs (MMODPTS's EventMenuCommand handles these).
+const CMD_CUT: u32 = 0x5001;
+const CMD_COPY: u32 = 0x5003;
+const CMD_PASTE: u32 = 0x5006;
+const CMD_DELETE: u32 = 0x500b;
+const CMD_OPEN: u32 = 0x500e;
+const CMD_SETTINGS: u32 = 0x501a;
 const CMD_ABOUT: u32 = 0x5200;
 
 /// RS2TextPart's events: typed characters edit its text (Backspace
@@ -338,6 +352,7 @@ extern "C" fn part_handle_event(this: usize, ev: usize, event: usize, frame: usi
 }
 
 static mut DRAFT: usize = 0;
+static mut SESSION: usize = 0;
 static mut FRAME_HWND: u32 = 0;
 
 /// The shell's dispatch module: the Document menu's commands that the
@@ -358,6 +373,10 @@ extern "C" fn shell_dispatch(this: usize, ev: usize, event: usize, info: usize) 
             1
         }
         CMD_ABOUT => 1,
+        CMD_SETTINGS => {
+            show_settings(ev);
+            1
+        }
         _ => 0,
     }
 }
@@ -386,28 +405,73 @@ fn shell_module() -> usize {
 }
 
 /// The docshell's menus, the base menu bar every part's starts from:
-/// Document, Edit and Help (IBM's OpenDoc menu IDs 0x0e and 0x11 for the
-/// first two, which IBM's parts add their items to).
+/// Document (the shell's), Edit (0x0e) and Selected (0x11) with IBM's
+/// OpenDoc menu and command IDs, which IBM's parts edit and handle, and
+/// Help; and the base popup menu (button 2).
 fn base_menu_bar(ws: usize) {
     let e = ev();
     let c = cd!(ODMenuBarClassData);
     let mb = m(cd!(ODWindowStateClassData), 18, &[ws, e, 0]);
-    let item = |menu: usize, id: u32, text: &[u8], disabled: bool| {
-        let mi = [0xffffu16, 1, if disabled { 0x4000 } else { 0 }, id as u16, 0, 0, 0, 0];
+    let item = |mb: usize, menu: usize, id: u32, text: &[u8], disabled: bool| {
+        let style = if text.len() <= 1 { 4 } else { 1 };
+        let mi = [0xffffu16, style, if disabled { 0x4000 } else { 0 }, id as u16, 0, 0, 0, 0];
         m(c, 14, &[mb, e, menu, id as usize, mi.as_ptr() as usize]);
         m(c, 7, &[mb, e, menu, id as usize, text.as_ptr() as usize]);
     };
-    m(c, 2, &[mb, e, 0x0e, b"~Document\0".as_ptr() as usize, 0]);
-    item(0x0e, CMD_SAVE, b"~Save\0", false);
-    item(0x0e, CMD_CLOSE, b"~Close\0", false);
-    m(c, 2, &[mb, e, 0x11, b"~Edit\0".as_ptr() as usize, 0]);
-    item(0x11, 0x5016, b"~Undo\0", true);
-    item(0x11, CMD_CUT, b"Cu~t\0", false);
-    item(0x11, 0x5019, b"~Copy\0", true);
-    item(0x11, 0x5020, b"~Paste\0", true);
+    m(c, 2, &[mb, e, 0x0c, b"~Document\0".as_ptr() as usize, 0]);
+    item(mb, 0x0c, CMD_SAVE, b"~Save\0", false);
+    item(mb, 0x0c, CMD_CLOSE, b"~Close\0", false);
+    m(c, 2, &[mb, e, 0x0e, b"~Edit\0".as_ptr() as usize, 0]);
+    item(mb, 0x0e, 0x5000, b"~Undo\0", true);
+    item(mb, 0x0e, CMD_CUT, b"Cu~t\0", false);
+    item(mb, 0x0e, CMD_COPY, b"~Copy\0", false);
+    item(mb, 0x0e, CMD_PASTE, b"~Paste\0", false);
+    item(mb, 0x0e, CMD_DELETE, b"~Delete\0", false);
+    m(c, 2, &[mb, e, 0x11, b"~Selected\0".as_ptr() as usize, 0]);
+    item(mb, 0x11, CMD_OPEN, b"~Open\0", false);
+    item(mb, 0x11, CMD_SETTINGS, b"Se~ttings\0", false);
+    item(mb, 0x11, 0x5021, b"\0", false);
+    item(mb, 0x11, 0x501f, b"View as ~frame\0", false);
+    item(mb, 0x11, 0x501d, b"View as ~large icon\0", false);
+    item(mb, 0x11, 0x501c, b"View as ~small icon\0", false);
+    item(mb, 0x11, 0x501e, b"View as t~humbnail\0", false);
     m(c, 2, &[mb, e, 0x13, b"~Help\0".as_ptr() as usize, 0]);
-    item(0x13, CMD_ABOUT, b"~About ODSHELL\0", false);
+    item(mb, 0x13, CMD_ABOUT, b"~About ODSHELL\0", false);
     m(cd!(ODWindowStateClassData), 15, &[ws, e, mb]);
+    // The popup: items at its top level.
+    let pop = m(cd!(ODWindowStateClassData), 18, &[ws, e, 0]);
+    for (id, t) in [(CMD_OPEN, &b"~Open\0"[..]), (CMD_SETTINGS, b"Se~ttings\0"), (CMD_CUT, b"Cu~t\0"), (CMD_COPY, b"~Copy\0"), (CMD_PASTE, b"~Paste\0")] {
+        item(pop, 0, id, t, false);
+    }
+    m(cd!(ODWindowStateClassData), 27, &[ws, e, pop]);
+}
+
+/// The settings notebook of the part with the menu focus: its own
+/// settings extension, else a plain ODSettingsExtension.
+fn show_settings(ev: usize) {
+    unsafe {
+        let arb = m(cd!(ODBaseSessionClassData), 0, &[SESSION, ev]);
+        let menu = m(cd!(ODBaseSessionClassData), 30, &[SESSION, ev, b"Menu\0".as_ptr() as usize]);
+        let frame = m(cd!(ODArbitratorClassData), 6, &[arb, ev, menu]);
+        if frame == 0 {
+            return;
+        }
+        let part = m(cd!(ODFrameClassData), 18, &[frame, ev]);
+        let name = b"OpenDoc Extension Info Settings\0";
+        let mut ext = if m(cd!(ODObjectClassData), 1, &[part, ev, name.as_ptr() as usize]) & 0xff != 0 {
+            m(cd!(ODObjectClassData), 2, &[part, ev, name.as_ptr() as usize])
+        } else {
+            0
+        };
+        if ext == 0 {
+            ext = somsup::new_object(ODSettingsExtensionNewClass(1, 0));
+            m(cd!(ODSettingsExtensionClassData), 17, &[ext, ev, part]);
+        }
+        m(cd!(ODSettingsExtensionClassData), 23, &[ext, ev, frame]);
+        release(ext);
+        release(part);
+        release(frame);
+    }
 }
 
 extern "C" fn part_uninit(this: usize) -> usize {
@@ -505,6 +569,7 @@ fn main(st: &Startup) -> u32 {
     let view = m(cd!(ODBaseSessionClassData), 30, &[session, e, VIEW_FRAME.as_ptr() as usize]);
     let pres = m(cd!(ODBaseSessionClassData), 30, &[session, e, PRES_NORMAL.as_ptr() as usize]);
     unsafe { DRAFT = draft };
+    unsafe { SESSION = session };
     let root;
     if new {
         root = m(cd!(ODDraftClassData), 23, &[draft, e, 0, b"RS2TextPart\0".as_ptr() as usize]);

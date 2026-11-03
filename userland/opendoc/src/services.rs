@@ -546,6 +546,9 @@ methods! {
         if m == 0 { 0 } else { crate::events::MCopy(m, ev) }
     }
     fn SetBasePopup(this: usize, ev: usize, m: usize) -> usize {
+        if m != 0 {
+            crate::events::menu(m).popup = true;
+        }
         wstate(this).base_popup = acquire(m, ev);
         0
     }
@@ -1047,12 +1050,12 @@ pub static SETTINGS_EXTENSION_M: &[(&str, M)] = &[
     ("ODSettingsExtension_m15", Nothing0::t),
     ("ODSettingsExtension_m16", Nothing0::t),
     ("InitSettingsExtension", InitSettingsExtension::t),
-    ("AddNotebookPages", Nothing2::t),
-    ("TitleChanged", Nothing0::t),
+    ("AddNotebookPages", crate::settings::AddNotebookPages::t),
+    ("TitleChanged", crate::settings::TitleChanged::t),
     ("ODSettingsExtension_m20", Nothing0::t),
-    ("IconChanged", Nothing0::t),
-    ("ODSettingsExtension_m22", Nothing0::t),
-    ("ShowSettings", Nothing1::t),
+    ("IconChanged", crate::settings::IconChanged::t),
+    ("CloseSettings", crate::settings::CloseSettings::t),
+    ("ShowSettings", crate::settings::ShowSettings::t),
 ];
 pub static STATUS_LINE_M: &[(&str, M)] = &[
     ("SetStatusLineText", Nothing2::t),
