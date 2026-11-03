@@ -269,6 +269,16 @@ Status markers: done, in progress, planned.
   IBM's Object REXX 6.00 language and classes, activities on threads,
   SOM classes and Workplace Shell scripting; ORXTEST, ORXSOM, ORXWPS and
   ORXLANG pass without IBM's REXX files ([REXX.md](REXX.md#object-rexx))
+- done: Object REXX's remaining gaps: UNINIT (on the last reference and at
+  the end), SAY/PULL/LINEIN/LINEOUT/trace through .OUTPUT, .INPUT and
+  .ERROR as IBM's, IBM's REXX.IMG classes (.RX_QUEUE, .STDQUE, .SYSTEM,
+  .Stream_Supplier), monitor destinations as IBM's; IBM's tokenized
+  programs examined (flattened C++ object images) and refused with Error
+  3.904; the kernel clock monotonic and exact (TIME('E')), LAPIC timer
+  calibration and lost ticks fixed, DosDelete of an open file refused
+- open: IBM's Object REXX hangs when ORXTEST, ORXSOM and ORXTEST run in
+  one CMD (a race in IBM's interpreter restart, REXX.md); rs2's
+  .Stream objects share the stream functions' handles (no UNINIT close)
 
 ## Milestone 4: Presentation Manager (largely done)
 
