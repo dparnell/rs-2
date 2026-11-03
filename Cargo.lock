@@ -10,6 +10,7 @@ version = "0.1.0"
 name = "dos"
 version = "0.1.0"
 dependencies = [
+ "midi",
  "win16drv",
  "x86emu",
 ]
@@ -187,6 +188,7 @@ version = "0.1.0"
 dependencies = [
  "dos",
  "fat",
+ "gpi",
  "hpfs",
  "inifile",
  "ipf",

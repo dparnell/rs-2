@@ -300,6 +300,11 @@ fn make_view(folder: usize, view: u32, title: &[u8], desktop: bool, found: Optio
     if frame == 0 {
         return 0;
     }
+    // Warp 4's folder menu bar (the folder's setting, else the System
+    // object's).
+    if !desktop && folder != 0 && crate::usermenu::menu_bar(folder) {
+        add_menu_bar(frame);
+    }
     let cnr = unsafe {
         WinCreateWindow(client, WC_CONTAINER, b"\0".as_ptr(), WS_VISIBLE | CCS_EXTENDSEL, 0, 0, 10, 10, client, HWND_TOP, ID_CHILD, core::ptr::null(), core::ptr::null())
     };
@@ -968,6 +973,13 @@ fn draw_item(w: usize, oi: u32) -> u32 {
 
 /// The containers: Delete, F2, F5 and Shift+F10 from the keyboard.
 extern "C" fn cnr_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    if msg == WM_CHAR {
+        if let Some(w) = find_cnr(h) {
+            if select_keys(w, a, b) {
+                return 1;
+            }
+        }
+    }
     if msg == WM_CHAR && a & KC_VIRTUALKEY != 0 && a & KC_KEYUP == 0 {
         if let Some(w) = find_cnr(h) {
             let vk = b >> 16;
@@ -1017,10 +1029,185 @@ extern "C" fn cnr_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     old(h, msg, a, b)
 }
 
+// ---- Folder menu bars ----
+
+/// The pull-down of a folder window's menu bar that dropped last: its
+/// client, the pull-down's id and the objects selected then.
+static mut BAR: (u32, u32, Vec<usize>) = (0, 0, Vec::new());
+const WM_INITMENU: u32 = 0x0033;
+const WS_MAXIMIZED: u32 = 0x0080_0000;
+
+fn add_menu_bar(frame: u32) {
+    let tpl = crate::menu::menu_bar_template();
+    unsafe { WinCreateMenu(frame, tpl.as_ptr()) };
+    send(frame, WM_UPDATEFRAME, FCF_MENU, 0);
+}
+
+/// A folder window gets or loses its menu bar; as IBM's
+/// wpSetMenuBarVisibility, the frame grows or shrinks by the bar's
+/// height so that the folder's area keeps its size and place.
+fn set_menu_bar(w: usize, on: bool) {
+    let frame = wins()[w].frame;
+    let bar = unsafe { WinWindowFromID(frame, FID_MENU) };
+    if (bar != 0) == on {
+        return;
+    }
+    let cy = unsafe { WinQuerySysValue(HWND_DESKTOP, 35) }; // SV_CYMENU
+    let mut swp = Swp::default();
+    unsafe { WinQueryWindowPos(frame, &mut swp) };
+    let maxed = unsafe { WinQueryWindowULong(frame, QWL_STYLE) } & (WS_MAXIMIZED | WS_MINIMIZED) != 0;
+    if on {
+        add_menu_bar(frame);
+        if !maxed {
+            unsafe { WinSetWindowPos(frame, 0, swp.x, swp.y - cy, swp.cx, swp.cy + cy, SWP_MOVE | SWP_SIZE) };
+        }
+    } else {
+        unsafe { WinDestroyWindow(bar) };
+        send(frame, WM_UPDATEFRAME, FCF_MENU, 0);
+        if !maxed {
+            unsafe { WinSetWindowPos(frame, 0, swp.x, swp.y + cy, swp.cx, swp.cy - cy, SWP_MOVE | SWP_SIZE) };
+        }
+    }
+}
+
+/// The folders' menu bar settings changed (a folder's Menu page, or the
+/// System object's): their windows follow.
+pub fn update_menu_bars() {
+    for w in 0..wins().len() {
+        let win = &wins()[w];
+        if win.desktop || win.obj == 0 || !matches!(win.view, OPEN_CONTENTS | OPEN_DETAILS | OPEN_TREE) {
+            continue;
+        }
+        let on = crate::usermenu::menu_bar(win.obj);
+        set_menu_bar(w, on);
+    }
+}
+
+
+/// The objects selected in a folder window.
+fn selection(w: usize) -> Vec<usize> {
+    selected(w, 0)
+}
+
+/// A pull-down of the menu bar drops: its items for the folder and the
+/// selected objects.
+fn init_pulldown(w: usize, id: u32, menu: u32) {
+    let sel = selection(w);
+    let items = crate::menu::pulldown_items(id, wins()[w].obj, &sel, wins()[w].view);
+    crate::menu::fill_menu(menu, &items);
+    let o = sel.first().copied().unwrap_or(0);
+    if id == crate::menu::WPMENUID_SELECTEDPULLDOWN && o != 0 {
+        // The class's own items and the user's, as on its pop-up menu.
+        obj::call(m::WPObject::wpModifyPopupMenu, &[o, menu as usize, 0, 0xffff]);
+        if wps::is(o, "WPFileSystem") {
+            wps::call("WPFileSystem", m::WPFileSystem::wpAddUserItemsToPopupMenu, &[o, menu as usize, 0, 0xffff]);
+        }
+    }
+    unsafe {
+        BAR = (wins()[w].client, id, sel);
+        // A pop-up menu shown before and left without a choice is not
+        // the one this command comes from.
+        POPUP.1 = 0;
+    }
+}
+
+/// Change a folder window to another view (the View pull-down): the new
+/// view takes the old window's place.
+fn change_view(w: usize, view: u32) {
+    if wins()[w].view == view {
+        return;
+    }
+    let (folder, old) = (wins()[w].obj, wins()[w].frame);
+    let mut swp = Swp::default();
+    unsafe { WinQueryWindowPos(old, &mut swp) };
+    let f = open_folder(folder, 0, view, 0);
+    if f != 0 && f != old {
+        unsafe { WinSetWindowPos(f, HWND_TOP, swp.x, swp.y, swp.cx, swp.cy, SWP_MOVE | SWP_SIZE | SWP_ZORDER | SWP_ACTIVATE | SWP_SHOW) };
+        close_frame(old);
+    }
+}
+
+fn select_all(w: usize, on: bool) {
+    let cnr = wins()[w].child;
+    for r in wins()[w].recs.iter() {
+        send(cnr, CM_SETRECORDEMPHASIS, r.rec, mp(on as u32, CRA_SELECTED as u32));
+    }
+}
+
+/// A command from the menu bar.
+fn bar_command(w: usize, id: u32) {
+    use crate::menu::*;
+    let (folder, frame) = (wins()[w].obj, wins()[w].frame);
+    let (pulldown, sel) = unsafe {
+        let bar = &mut *(&raw mut BAR);
+        bar.0 = 0;
+        (bar.1, core::mem::take(&mut bar.2))
+    };
+    match id {
+        WPMENUID_SELALL => select_all(w, true),
+        WPMENUID_DESELALL => select_all(w, false),
+        WPMENUID_CHANGETOICON => change_view(w, OPEN_CONTENTS),
+        WPMENUID_CHANGETOTREE => change_view(w, OPEN_TREE),
+        WPMENUID_CHANGETODETAILS => change_view(w, OPEN_DETAILS),
+        WPMENUID_OPENPARENT => {
+            let p = obj::folder_of(folder);
+            if p != 0 {
+                obj::call(m::WPObject::wpViewObject, &[p, 0, OPEN_DEFAULT as usize, 0]);
+            }
+        }
+        MENUID_RENAME => {
+            if let Some(&o) = sel.first() {
+                rename(w, o);
+            }
+        }
+        _ => {
+            let on_selection = matches!(pulldown, WPMENUID_EDITPULLDOWN | WPMENUID_SELECTEDPULLDOWN) && id != WPMENUID_FIND;
+            if !on_selection {
+                obj::call(m::WPObject::wpMenuItemSelected, &[folder, frame as usize, id as usize]);
+                return;
+            }
+            let Some(&first) = sel.first() else { return };
+            // Copy, move, shadows and delete take the window's selection
+            // themselves (menu.rs); opening and the rest go to each
+            // selected object.
+            if matches!(id, WPMENUID_COPY | WPMENUID_MOVE | WPMENUID_CREATESHADOW | WPMENUID_DELETE | WPMENUID_CREATEANOTHER) {
+                obj::call(m::WPObject::wpMenuItemSelected, &[first, frame as usize, id as usize]);
+            } else {
+                for o in sel {
+                    obj::call(m::WPObject::wpMenuItemSelected, &[o, frame as usize, id as usize]);
+                }
+            }
+        }
+    }
+}
+
+/// Ctrl+/ and Ctrl+\ in a folder window: select and deselect all.
+fn select_keys(w: usize, a: u32, b: u32) -> bool {
+    if a & KC_CTRL == 0 || a & KC_KEYUP != 0 {
+        return false;
+    }
+    // The character, or (Ctrl may leave none) the scan code of / and \.
+    let (ch, scan) = (if a & KC_CHAR != 0 { b & 0xff } else { 0 }, a >> 24);
+    if ch == 0x2f || (ch == 0 && scan == 0x35) {
+        select_all(w, true);
+    } else if ch == 0x5c || (ch == 0 && scan == 0x2b) {
+        select_all(w, false);
+    } else {
+        return false;
+    }
+    true
+}
+
 // ---- The window procedure ----
 
 extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     match msg {
+        WM_INITMENU if (crate::menu::WPMENUID_FOLDERPULLDOWN..=crate::menu::WPMENUID_HELPPULLDOWN).contains(&(a & 0xffff)) => {
+            if let Some(w) = find_client(h) {
+                init_pulldown(w, a & 0xffff, b);
+            }
+            0
+        }
         // F1 reached the frame, whose help instance has no help table:
         // help on the object with the cursor, or the view's object.
         crate::help::HM_ERROR if a == crate::help::HMERR_HELPTABLE_UNDEFINE => {
@@ -1121,6 +1308,13 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
         WM_COMMAND => {
             let (_menu, o) = unsafe { POPUP };
             unsafe { POPUP = (0, 0) };
+            // The folder window's menu bar.
+            if o == 0 && unsafe { BAR.0 } == h {
+                if let Some(w) = find_client(h) {
+                    bar_command(w, a & 0xffff);
+                }
+                return 0;
+            }
             if o != 0 {
                 let w = find_client(h);
                 if a & 0xffff == crate::menu::MENUID_RENAME {

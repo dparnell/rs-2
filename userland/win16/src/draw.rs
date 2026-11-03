@@ -255,10 +255,14 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             }
             0
         }
-        // OffsetClipRgn(hdc, dx, dy)
+        // OffsetClipRgn(hdc, dx, dy): logical units; y down.
         3032 => {
-            let (_h, _x, _y) = (a.w(), a.i(), a.i());
-            2
+            let (h, x, y) = (a.w(), a.i(), a.i());
+            let Some(d) = gdi::dc(h) else { return Some(0) };
+            let (x0, y0) = gdi::to_dev(d, 0, 0);
+            let (x1, y1) = gdi::to_dev(d, x, y);
+            let p = PointL { x: x1 - x0, y: -(y1 - y0) };
+            unsafe { GpiOffsetClipRegion(d.hps, &p) as u32 }
         }
         // IsGDIObject(h)
         3462 => gdi::obj(a.w()).is_some() as u32,

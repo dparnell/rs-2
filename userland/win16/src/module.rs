@@ -27,6 +27,9 @@ pub struct Module {
     pub name: Vec<u8>,
     /// LoadLibrary calls not yet freed.
     pub loads: u32,
+    /// Loaded with the program (an import of it or of its DLLs): it
+    /// stays loaded whatever FreeLibrary does.
+    pub implicit: bool,
     /// The file, once a resource is needed.
     pub image: Option<crate::res::Image>,
 }
@@ -78,7 +81,7 @@ pub fn register_exe(hinst: u16) {
     }
     let hmod = unsafe { (*pib).hmte };
     let name = path_of(hmod).map(|p| base_name(&p)).unwrap_or_default();
-    MODULES.get().insert(0, Module { hinst, dgroup: hinst, hmod, name, loads: 0, image: None });
+    MODULES.get().insert(0, Module { hinst, dgroup: hinst, hmod, name, loads: 0, implicit: true, image: None });
 }
 
 /// The program and its DLLs: (handle, name, file) (TOOLHELP's
@@ -110,7 +113,7 @@ pub fn find(h: u16) -> Option<&'static mut Module> {
     if hmod == 0 {
         return None;
     }
-    register(hmod);
+    register(hmod, true);
     MODULES.get().iter_mut().find(|m| m.hmod == hmod)
 }
 
@@ -124,8 +127,9 @@ pub fn path_of(hmod: u32) -> Option<Vec<u8>> {
 }
 
 /// The instance handle of a loaded OS/2 module (registering it): its
-/// automatic data segment's selector.
-fn register(hmod: u32) -> u16 {
+/// automatic data segment's selector. `implicit`: loaded with the
+/// program, not by LoadLibrary.
+fn register(hmod: u32, implicit: bool) -> u16 {
     let ms = MODULES.get();
     if let Some(m) = ms.iter().find(|m| m.hmod == hmod) {
         return m.hinst;
@@ -145,8 +149,17 @@ fn register(hmod: u32) -> u16 {
     }
     let alias = if dgroup >= 0x8000 { unsafe { crate::pm::Rs2Win16Selector(0, dgroup as u32, 1) as u16 } } else { 0 };
     let hinst = if alias != 0 && alias < 0x8000 { alias } else { dgroup };
-    ms.push(Module { hinst, dgroup, hmod, name: base_name(&path), loads: 0, image: None });
+    ms.push(Module { hinst, dgroup, hmod, name: base_name(&path), loads: 0, implicit, image: None });
     hinst
+}
+
+/// GetModuleUsage: the program's references to a module (1 for one it
+/// was loaded with, plus its LoadLibrary calls).
+pub fn usage(h: u16) -> u32 {
+    if system(h).is_some() {
+        return 1;
+    }
+    find(h).map_or(0, |m| m.implicit as u32 + m.loads)
 }
 
 /// GetModuleHandle(name): the system modules', the program's, or a loaded
@@ -169,7 +182,7 @@ pub fn handle(name: u32) -> u16 {
     z.push(0);
     let mut hmod = 0;
     if unsafe { os2::DosQueryModuleHandle(z.as_ptr(), &mut hmod) } == 0 && unsafe { crate::pm::Rs2Win16Selector(11, hmod, 0) } != 0 {
-        return register(hmod);
+        return register(hmod, true);
     }
     0
 }
@@ -185,6 +198,19 @@ pub fn load_library(name: u32) -> u16 {
     if let Some(m) = MODULES.get().iter_mut().find(|m| m.name == base) {
         m.loads += 1;
         return m.hinst;
+    }
+    // A DLL the program was loaded with: one more reference.
+    let mut z = base.clone();
+    z.push(0);
+    let mut hm = 0u32;
+    if unsafe { os2::DosQueryModuleHandle(z.as_ptr(), &mut hm) } == 0 && unsafe { crate::pm::Rs2Win16Selector(11, hm, 0) } != 0 {
+        let h = register(hm, true);
+        if let Some(m) = MODULES.get().iter_mut().find(|m| m.hmod == hm) {
+            m.loads += 1;
+        }
+        if h != 0 {
+            return h;
+        }
     }
     // Windows looks in the current directory, the Windows directories,
     // the program's directory and the PATH; OS/2 takes a name with a dot
@@ -210,9 +236,12 @@ pub fn load_library(name: u32) -> u16 {
         let mut fail = [0u8; 64];
         let r = unsafe { os2::DosLoadModule(fail.as_mut_ptr(), fail.len() as u32, z.as_ptr(), &mut hmod) };
         if r == 0 {
-            let h = register(hmod);
+            let h = register(hmod, false);
             if let Some(m) = MODULES.get().iter_mut().find(|m| m.hmod == hmod) {
                 m.loads += 1;
+                // The DLL's start-up code (LocalInit...) may have made
+                // WIN16 find it while it loaded: it is LoadLibrary's.
+                m.implicit = false;
             }
             if h != 0 {
                 return h;
@@ -225,17 +254,27 @@ pub fn load_library(name: u32) -> u16 {
     2
 }
 
-/// FreeLibrary(h)
+/// FreeLibrary(h), FreeModule(h): the last free of a DLL loaded with
+/// LoadLibrary calls its WEP (WEP_FREE_DLL) and unloads it; a DLL the
+/// program was loaded with stays.
 pub fn free_library(h: u16) {
     let ms = MODULES.get();
-    let Some(i) = ms.iter().position(|m| m.hinst == h) else { return };
+    let Some(i) = ms.iter().position(|m| m.hinst == h || (m.dgroup | 7) == (h | 7)) else { return };
     if i == 0 || ms[i].loads == 0 {
         return;
     }
     ms[i].loads -= 1;
-    if ms[i].loads == 0 {
+    if ms[i].loads == 0 && !ms[i].implicit {
         let (hmod, hinst, dgroup) = (ms[i].hmod, ms[i].hinst, ms[i].dgroup);
-        ms.remove(i);
+        // WEP(WEP_FREE_DLL), with the DLL's own DS (its prologue loads it).
+        let mut f = 0usize;
+        if unsafe { os2::DosQueryProcAddr(hmod, 0, b"WEP\0".as_ptr(), &mut f) } == 0 && f != 0 {
+            thunk16::PascalCall::new().w(0).call(f as u32);
+        }
+        let ms = MODULES.get();
+        if let Some(i) = ms.iter().position(|m| m.hmod == hmod) {
+            ms.remove(i);
+        }
         if hinst != dgroup {
             unsafe { crate::pm::Rs2Win16Selector(4, hinst as u32, 0) };
         }

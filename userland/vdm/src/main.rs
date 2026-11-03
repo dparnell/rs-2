@@ -49,61 +49,6 @@ unsafe extern "C" {
     fn Rs2AudioWrite(h: u32, data: *const u8, cb: u32) -> u32;
     #[link_name = "RS2API.303"]
     fn Rs2AudioQueryPos(h: u32, bytes: *mut u32) -> u32;
-    #[link_name = "RS2API.306"]
-    fn Rs2AudioClose(h: u32) -> u32;
-}
-
-// ---- The PC speaker ----
-
-/// The speaker's frequency (0 = silent), set by the machine's thread.
-static SPEAKER_HZ: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
-/// 0 not started, 1 playing, 2 no audio.
-static SPEAKER_STATE: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
-const RATE: u32 = 22050;
-
-/// The speaker thread: a square wave at the current frequency, kept
-/// about 60 ms ahead of what has been played.
-unsafe extern "C" fn speaker_thread(h: u32) {
-    use core::sync::atomic::Ordering;
-    let mut phase = 0u32;
-    let mut written = 0u32;
-    let mut buf = [0x80u8; 441];
-    loop {
-        let mut played = 0;
-        unsafe { Rs2AudioQueryPos(h, &mut played) };
-        if written.wrapping_sub(played) > RATE * 60 / 1000 {
-            unsafe { DosSleep(10) };
-            continue;
-        }
-        let hz = SPEAKER_HZ.load(Ordering::Relaxed);
-        for b in buf.iter_mut() {
-            *b = if hz == 0 {
-                0x80
-            } else {
-                phase = phase.wrapping_add(hz * 2);
-                if (phase / RATE) % 2 == 0 { 0xa0 } else { 0x60 }
-            };
-        }
-        if unsafe { Rs2AudioWrite(h, buf.as_ptr(), buf.len() as u32) } != 0 {
-            return;
-        }
-        written = written.wrapping_add(buf.len() as u32);
-    }
-}
-
-fn speaker(hz: Option<u32>) {
-    use core::sync::atomic::Ordering;
-    SPEAKER_HZ.store(hz.unwrap_or(0), Ordering::Relaxed);
-    if hz.is_some() && SPEAKER_STATE.load(Ordering::Relaxed) == 0 {
-        let mut h = 0;
-        if unsafe { Rs2AudioOpen(RATE, 1, 8, &mut h) } != 0 {
-            SPEAKER_STATE.store(2, Ordering::Relaxed);
-            return;
-        }
-        let mut tid = 0;
-        unsafe { DosCreateThread(&mut tid, speaker_thread, h, 0, 16384) };
-        SPEAKER_STATE.store(1, Ordering::Relaxed);
-    }
 }
 
 #[repr(C)]
@@ -144,9 +89,10 @@ fn trace(s: &str) {
 }
 
 struct Os2Host {
-    /// The Sound Blaster's stream: (handle, rate); handle 0 = none,
-    /// u32::MAX = no audio hardware.
-    sb_stream: (u32, u32),
+    /// The sound stream (crate dos::audio): handle 0 = none, u32::MAX =
+    /// no audio hardware; and the bytes written to it.
+    audio: u32,
+    audio_written: u32,
     /// Input read while waiting, for the next poll.
     pending: VecDeque<Event>,
     tmr_freq: u64,
@@ -733,26 +679,38 @@ impl Host for Os2Host {
     fn log(&mut self, msg: &str) {
         trace(msg);
     }
-    fn speaker(&mut self, hz: Option<u32>) {
-        speaker(hz);
-    }
-    fn pcm(&mut self, rate: u32, data: &[u8]) {
-        let (h, r) = self.sb_stream;
-        if h == u32::MAX {
+    fn audio(&mut self, rate: u32, frames: &[i16]) {
+        if self.audio == u32::MAX {
             return;
         }
-        if h == 0 || r != rate {
-            if h != 0 {
-                unsafe { Rs2AudioClose(h) };
-            }
-            let mut nh = 0;
-            if unsafe { Rs2AudioOpen(rate.clamp(4000, 96000), 1, 8, &mut nh) } != 0 {
-                self.sb_stream = (u32::MAX, 0);
+        if self.audio == 0 {
+            let mut h = 0;
+            if unsafe { Rs2AudioOpen(rate, 2, 16, &mut h) } != 0 {
+                self.audio = u32::MAX;
                 return;
             }
-            self.sb_stream = (nh, rate);
+            self.audio = h;
         }
-        unsafe { Rs2AudioWrite(self.sb_stream.0, data.as_ptr(), data.len() as u32) };
+        let bytes = (frames.len() * 2) as u32;
+        let mut played = 0;
+        unsafe { Rs2AudioQueryPos(self.audio, &mut played) };
+        let queued = self.audio_written.wrapping_sub(played);
+        let ms = |b: u32| b / (rate * 4 / 1000).max(1);
+        // The system's mixer keeps about 100 ms mixed ahead of the
+        // hardware (counted as not yet played). Keep 60 ms more queued
+        // so that the next slices arrive before the queue runs dry,
+        // topping up with silence when it nearly has, and drop what
+        // would make the sound lag more than 400 ms.
+        if ms(queued) > 400 {
+            return;
+        }
+        if ms(queued) < 110 {
+            let pre = vec![0u8; (rate * 4 / 1000 * (160 - ms(queued))) as usize];
+            unsafe { Rs2AudioWrite(self.audio, pre.as_ptr(), pre.len() as u32) };
+            self.audio_written = self.audio_written.wrapping_add(pre.len() as u32);
+        }
+        unsafe { Rs2AudioWrite(self.audio, frames.as_ptr() as *const u8, bytes) };
+        self.audio_written = self.audio_written.wrapping_add(bytes);
     }
     fn font(&mut self, height: u8) -> Option<Vec<u8>> {
         let mut f = vec![0u8; 256 * height as usize];
@@ -787,21 +745,12 @@ fn main(s: &os2::Startup) -> u32 {
         Some(i) => (&args[..i], &args[i..]),
         None => (args, ""),
     };
-    let prog = if prog.is_empty() { "C:\\OS2\\MDOS\\COMMAND.COM" } else { prog };
-    // A batch file runs under COMMAND.COM.
-    let batch_tail;
-    let (prog, tail) = if prog.to_ascii_uppercase().ends_with(".BAT") {
-        batch_tail = alloc::format!(" /C {prog}{tail}");
-        ("C:\\OS2\\MDOS\\COMMAND.COM", batch_tail.as_str())
-    } else {
-        (prog, tail)
-    };
     // DOS settings and the environment.
     let mut cfg = Config::default();
     let mut env: Vec<String> = Vec::new();
     let mut os2_path = String::new();
     let mut display = None;
-    let (mut print_timeout, mut print_separate) = (15u32, true);
+    let mut shell: Option<String> = None;
     unsafe {
         let mut p = s.env;
         while *p != 0 {
@@ -815,16 +764,19 @@ fn main(s: &os2::Startup) -> u32 {
             let Some((k, v)) = var.split_once('=') else { continue };
             let key = k.to_ascii_uppercase();
             let on = |v: &str| matches!(v.trim().to_ascii_uppercase().as_str(), "1" | "ON" | "YES");
+            if cfg.set(&key, v) {
+                continue;
+            }
             match key.as_str() {
-                "DOS_HIGH" => cfg.high = on(v),
-                "DOS_UMB" => cfg.umb = on(v),
-                "EMS_MEMORY_LIMIT" => cfg.ems_kb = num(v).unwrap_or(cfg.ems_kb),
-                "XMS_MEMORY_LIMIT" => cfg.xms_kb = num(v).unwrap_or(cfg.xms_kb),
-                "DPMI_MEMORY_LIMIT" => cfg.dpmi_kb = num(v).map_or(cfg.dpmi_kb, |m| m * 1024),
                 "HW_NOFPU" => cfg.fpu = !on(v),
+                "DOS_SHELL" => {
+                    // The command processor: its path, then its arguments.
+                    let v = v.trim();
+                    if !v.is_empty() {
+                        shell = Some(String::from(v));
+                    }
+                }
                 "VDM_TRACE" => cfg.trace = on(v),
-                "PRINT_TIMEOUT" => print_timeout = num(v).unwrap_or(print_timeout).min(3600),
-                "PRINT_SEPARATE_OUTPUT" => print_separate = on(v),
                 "WINOS2_SEAMLESS" => cfg.seamless = on(v),
                 "WINOS2_SCREEN" => {
                     display = v.split_once(['x', 'X']).and_then(|(a, b)| Some((num(a)?, num(b)?)));
@@ -836,14 +788,31 @@ fn main(s: &os2::Startup) -> u32 {
             }
         }
     }
-    let mut dos_env = alloc::vec![String::from("COMSPEC=C:\\OS2\\MDOS\\COMMAND.COM"), alloc::format!("PATH=C:\\OS2\\MDOS;{}", os2_path), String::from("PROMPT=$P$G")];
+    // The command processor: DOS_SHELL's (path and arguments), or rs2's
+    // COMMAND.COM.
+    let shell = shell.unwrap_or_else(|| String::from("C:\\OS2\\MDOS\\COMMAND.COM"));
+    let (shell_exe, shell_args) = match shell.find(' ') {
+        Some(i) => (&shell[..i], &shell[i..]),
+        None => (shell.as_str(), ""),
+    };
+    let shell_tail = String::from(shell_args);
+    let (prog, tail) = if prog.is_empty() { (shell_exe, shell_tail.as_str()) } else { (prog, tail) };
+    // A batch file runs under the command processor.
+    let batch_tail;
+    let (prog, tail) = if prog.to_ascii_uppercase().ends_with(".BAT") {
+        batch_tail = alloc::format!(" /C {prog}{tail}");
+        (shell_exe, batch_tail.as_str())
+    } else {
+        (prog, tail)
+    };
+    let mut dos_env = alloc::vec![alloc::format!("COMSPEC={shell_exe}"), alloc::format!("PATH=C:\\OS2\\MDOS;{}", os2_path), String::from("PROMPT=$P$G")];
     dos_env.extend(env);
     cfg.env = dos_env;
     let mut freq = 0u32;
     unsafe { DosTmrQueryFreq(&mut freq) };
     let (mut cur, mut drives) = (0, 0);
     unsafe { DosQueryCurrentDisk(&mut cur, &mut drives) };
-    let mut host = Os2Host { sb_stream: (0, 0), pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display, seamless: cfg.seamless, place: None, run_text: Vec::new(), lpt: [(0, 0); 3], print_timeout: print_timeout as u64 * 1_000_000, print_separate };
+    let mut host = Os2Host { audio: 0, audio_written: 0, pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display, seamless: cfg.seamless, place: None, run_text: Vec::new(), lpt: [(0, 0); 3], print_timeout: cfg.print_timeout as u64 * 1_000_000, print_separate: cfg.print_separate };
     let mut m = Machine::new(&mut host, cfg);
     if cur >= 1 && cur <= 26 {
         m.dos.drive = (cur - 1) as u8;

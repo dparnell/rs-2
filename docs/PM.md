@@ -1563,15 +1563,39 @@ talk to plain DDE servers and the other way round:
   `WM_DDE_UNADVISE` for everything, then `WM_DDE_TERMINATE`); the
   partner's `WM_DDE_TERMINATE` gives XTYP_DISCONNECT and destroys the
   conversation window. `WinDdeReconnect` fails, as IBM's (its
-  DdeReconnect is empty). Not done: monitors (APPCLASS_MONITOR,
-  XTYP_MONITOR).
+  DdeReconnect is empty).
+- Monitors (`mon.rs`, as IBM's Win32DdeInitialize, DdeSendMsgHookProc,
+  DdePostMsgHookProc, AgentWmMonitor and MonBroadcast*): an instance
+  made with APPCLASS_MONITOR sets system hooks with PMDDEML (HK_SENDMSG
+  and HK_INPUT), so every PM process reports the DDE messages it sends
+  (WM_DDE_INITIATE, WM_DDE_INITIATEACK with the DDEINIT's application,
+  topic and CONVCONTEXT) and takes off its queue (WM_DDE_* with the
+  DDESTRUCT's status, format, item and first 32 bytes of data), once
+  each however many monitors there are; the DDEML instances of every
+  process report string handles made, kept and freed (MH_CREATE,
+  MH_KEEP, MH_DELETE), callbacks (type, format, handles, the
+  conversation's CONVCONTEXT and the data a request returned), errors,
+  advise links started and stopped and conversations made and ended,
+  when a monitor runs anywhere (a count in `\SHAREMEM\RS2DDEML.MON`,
+  IBM's cActiveMonitors). Each report is a MON*STRUCT with IBM's layout
+  sent to every frame on the desktop as message 0x4B3 (mp1 the MF_*
+  kind); a monitor's agent that asked for that kind (MF_* in afCmd) gets
+  XTYP_MONITOR with a data handle of the structure and the kind in
+  dwData2. IBM's handle table is shared memory; rs2's handles are each
+  process's own, so the structure travels in gettable shared memory and
+  the monitor's process makes the handle.
 
 PMXTEST checks it (`PMXTEST DDEML`): handles, then a DDEML server in
 another process (`PMXTEST DDEMLSERVER`): registration, connect,
 conversation info, synchronous and asynchronous requests, poke,
 execute, an advise loop, a refused request, a conversation list from a
 wild connect, a plain DDE client of the DDEML server and a DDEML client
-of PMXTEST's plain DDE server.
+of PMXTEST's plain DDE server. A monitor watches the conversation with
+the DDEML server: string handles, the sent WM_DDE_INITIATE with its
+service and topic, the posted request and data, the server's (another
+process's) XTYP_REQUEST callback and its data, the conversation, the
+advise link started and stopped and the refused request's error; after
+WinDdeUninitialize it hears no more.
 
 ## Owner drawing
 
@@ -3132,7 +3156,7 @@ Panels draw in the fonts of the file's font table (below), styles as
 logical fonts' fsSelection (real italic, bold, underscore), colours of
 `:hp4.`/`:color.` and links in SYSCLR_HELPHILITE;
 bitmaps are decompressed by `crates/ipf` and drawn with GpiDrawBits
-(stretched for `fit`). Up/Down/PgUp/PgDn/Home/End scroll; Tab and
+(stretched for `fit`); metafile artwork (an `mF` record: the .MET file in blocks, as IBM's LoadBitmap reads it) goes into a metafile handle (GpiSetMetaFileBits) and is played into a bitmap of the size its record gives, by default half the screen each way, as dynamic data's metafiles are (below). Up/Down/PgUp/PgDn/Home/End scroll; Tab and
 Shift+Tab move a box from link to link, Enter or a click follows it, Esc
 (or Backspace, or Previous) goes back; Esc with nothing to go back to
 closes the window. Links lead to panels of the file
@@ -3315,8 +3339,8 @@ Not done: the Search dialog's scopes (rs2 searches every
 section of the open libraries and of the marked ones), HMQW_INDEX/TOC/
 SEARCH/VIEWPAGES/LIBRARY, the panel placement of HM_DISPLAY_HELP and
 HM_HELP_CONTENTS by heading window data beyond the help window's own
-panel, metafile `:artwork.` and whole metafile panels (IBM's
-DisplayPage plays those into the window), and the help window's own
+panel, whole metafile panels (IBM's
+DisplayPage plays them into the window), and the help window's own
 panel in a frame of its own: IBM shows every panel in a page frame
 inside the cover page, so its title bar and border follow the style
 word too; rs2's help window takes only its scroll bars and rules.

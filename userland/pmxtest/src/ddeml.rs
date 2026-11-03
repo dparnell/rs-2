@@ -116,6 +116,68 @@ fn is(h: u32, s: &str) -> bool {
     h != 0 && query(h) == s.as_bytes()
 }
 
+// ---- A monitor (APPCLASS_MONITOR) ----
+
+const XTYP_MONITOR: u32 = 0x80f2;
+const APPCLASS_MONITOR: u32 = 1;
+const MF_HSZ_INFO: u32 = 0x0100_0000;
+const MF_SENDMSGS: u32 = 0x0200_0000;
+const MF_POSTMSGS: u32 = 0x0400_0000;
+const MF_CALLBACKS: u32 = 0x0800_0000;
+const MF_ERRORS: u32 = 0x1000_0000;
+const MF_LINKS: u32 = 0x2000_0000;
+const MF_CONV: u32 = 0x4000_0000;
+
+/// What the monitor saw: (MF_* kind, the MON*STRUCT).
+static mut MON: Vec<(u32, Vec<u8>)> = Vec::new();
+
+fn mon() -> &'static mut Vec<(u32, Vec<u8>)> {
+    unsafe { &mut *core::ptr::addr_of_mut!(MON) }
+}
+
+extern "C" fn monitor_cb(_inst: u32, typ: u32, _fmt: u32, _hconv: u32, _hsz1: u32, _hsz2: u32, hdata: u32, _d1: u32, kind: u32) -> u32 {
+    if typ == XTYP_MONITOR {
+        let mut cb = 0u32;
+        let p = unsafe { WinDdeAccessData(hdata, &mut cb) };
+        if !p.is_null() {
+            mon().push((kind, unsafe { core::slice::from_raw_parts(p, cb as usize) }.to_vec()));
+        }
+    }
+    0
+}
+
+fn u16_at(b: &[u8], o: usize) -> u32 {
+    b.get(o..o + 2).map_or(0, |x| u16::from_le_bytes([x[0], x[1]]) as u32)
+}
+
+fn u32_at(b: &[u8], o: usize) -> u32 {
+    b.get(o..o + 4).map_or(0, |x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
+}
+
+fn str_at(b: &[u8], o: usize) -> &[u8] {
+    let s = b.get(o..).unwrap_or(&[]);
+    &s[..s.iter().position(|&c| c == 0).unwrap_or(s.len())]
+}
+
+/// The monitor's records of a kind that satisfy `f`.
+fn mon_saw(kind: u32, f: impl Fn(&[u8]) -> bool) -> bool {
+    mon().iter().any(|(k, d)| *k == kind && f(d))
+}
+
+fn monitor_checks() {
+    // MONHSZSTRUCT: the string after cb, fsAction, dwTime, hsz, hTask.
+    check("monitor MF_HSZ_INFO: a string handle made (MH_CREATE)", mon_saw(MF_HSZ_INFO, |d| u16_at(d, 4) == 1 && str_at(d, 22) == b"Greeting"));
+    // MONMSGSTRUCT: wMsg at +16; the DDEINIT's application and topic.
+    check("monitor MF_SENDMSGS: WM_DDE_INITIATE with its service and topic", mon_saw(MF_SENDMSGS, |d| u32_at(d, 16) == 0xa0 && str_at(d, u16_at(d, 32) as usize) == b"PMXDDEML" && str_at(d, u16_at(d, 34) as usize) == b"Test"));
+    check("monitor MF_POSTMSGS: WM_DDE_REQUEST of Greeting", mon_saw(MF_POSTMSGS, |d| u32_at(d, 16) == 0xa1 && str_at(d, u16_at(d, 32) as usize) == b"Greeting"));
+    check("monitor MF_POSTMSGS: WM_DDE_DATA with the server's data", mon_saw(MF_POSTMSGS, |d| u32_at(d, 16) == 0xa3 && d.get(40..56) == Some(&b"hello from ddeml"[..])));
+    // MONCBSTRUCT: wType at +16 (the server's callbacks, another process).
+    check("monitor MF_CALLBACKS: the server's XTYP_REQUEST and its data", mon_saw(MF_CALLBACKS, |d| u16_at(d, 16) == XTYP_REQUEST && u32_at(d, 68) == 16 && d.get(72..88) == Some(&b"hello from ddeml"[..])));
+    check("monitor MF_CONV: the conversation made", mon_saw(MF_CONV, |d| u32_at(d, 4) == 1 && u32_at(d, 24) != 0 && u32_at(d, 28) != 0));
+    check("monitor MF_LINKS: the advise link started and stopped", mon_saw(MF_LINKS, |d| u32_at(d, 32) == 1) && mon_saw(MF_LINKS, |d| u32_at(d, 32) == 0));
+    check("monitor MF_ERRORS: DMLERR_NOTPROCESSED", mon_saw(MF_ERRORS, |d| u32_at(d, 4) == 0x7009));
+}
+
 // ---- The server (another process) ----
 
 static mut SERVER_INST: u32 = 0;
@@ -312,6 +374,10 @@ pub fn ddeml_checks(hab: u32, client: u32) {
     if inst == 0 {
         return;
     }
+    // A monitor of everything the conversations below do.
+    let mut monitor = 0;
+    let all = APPCLASS_MONITOR | MF_HSZ_INFO | MF_SENDMSGS | MF_POSTMSGS | MF_CALLBACKS | MF_ERRORS | MF_LINKS | MF_CONV;
+    check("WinDdeInitialize: a monitor (APPCLASS_MONITOR)", unsafe { WinDdeInitialize(&mut monitor, monitor_cb, all, 0) } == 0 && monitor != 0);
     let child = start(b"PMXTEST\0DDEMLSERVER\0\0");
     check("DDEML server process started", child != 0);
     let reg = wait_seen(hab, XTYP_REGISTER);
@@ -358,6 +424,12 @@ pub fn ddeml_checks(hab: u32, client: u32) {
     let ok = unsafe { WinDdeSubmitTransaction(null(), 0, hconv, counter, DDEFMT_TEXT, XTYP_ADVSTOP, 5000, null_mut()) };
     check("XTYP_ADVSTOP", ok == 1);
     check("WinDdeReconnect (IBM's never reconnects)", unsafe { WinDdeReconnect(hconv) } == 0);
+    pump_for(hab, 20);
+    monitor_checks();
+    unsafe { WinDdeUninitialize(monitor) };
+    let n = mon().len();
+    unsafe { WinDdeFreeStringHandle(hsz("After")) };
+    check("WinDdeUninitialize: the monitor hears no more", mon().len() == n);
 
     // A plain PM DDE client talks to the DDEML server.
     seen().clear();

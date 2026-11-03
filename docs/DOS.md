@@ -135,9 +135,12 @@ All served in Rust, on the guest's registers and memory:
   ERROR_OPEN_FAILED; the Delphi 1.01 patch's PATCH.EXE creates its
   temporary file on error 2), creating one that is there 80.
 - **INT 10h** video BIOS (modes 0-7, 0Dh-13h, cursor, scrolling, teletype,
-  palette and DAC, fonts 8x8/8x14/8x16; VBE 2.0 with 8-bit modes 100h,
-  101h, 103h, 105h through a banked window at A000h and a linear
-  framebuffer at E0000000h), **INT
+  palette and DAC, fonts 8x8/8x14/8x16; VBE 2.0 with 4 MB of video
+  memory: 8-bit modes 100h, 101h, 103h, 105h, 107h, 144h (320x240),
+  the VBE 1.2 direct colour modes 10Dh-11Ah (15-bit 5:5:5, 16-bit 5:6:5,
+  24-bit packed) and 32-bit modes 140h-143h, with their colour masks in
+  the mode information, through a banked window at A000h and a linear
+  framebuffer at E0000000h; display start and scan line length), **INT
   16h** keyboard (00h-12h, buffer in the BDA at 40:1E, fed by IRQ 1 / INT
   9 with real scan codes), **INT 13h** (floppy and hard disk: answers "no
   drive" for direct disk access — OS/2 does not let VDMs at raw disks by
@@ -171,10 +174,30 @@ Emulated in the machine, with the I/O ports programs touch directly:
   controller, DAC at 3C0h-3DFh, planar memory at A0000h with write modes
   0-3 and read modes 0-1, latches, chain-4, mode X) that also covers EGA
   and CGA modes, and MDA/CGA text at B000h/B800h.
-- **PC speaker** (61h + PIT channel 2) and a **Sound Blaster 2.0** (DSP
-  2.01 at 220h, IRQ 7, 8-bit single-cycle and auto-init DMA on channel 1
-  of an 8237; `BLASTER=A220 I7 D1 T3`), both as PCM to the host's audio.
-  No FM synthesizer (AdLib) yet.
+- **PC speaker** (61h + PIT channel 2, or bit 1 of 61h driven by hand).
+- **Sound Blaster 16** (`crates/dos::sb`): DSP 4.05 at 220h, IRQ 7, 8-bit
+  DMA on channel 1 and 16-bit DMA on channel 5 (the second 8237 at
+  C0h-DFh, page 8Bh): the SB 1.x/2.0 commands (direct DAC 10h, single
+  cycle 14h, auto-init 1Ch/48h, high speed 90h/91h, silence 80h, time
+  constant 40h), the SB16's 41h/42h rates and Bxh/Cxh transfers (8 or 16
+  bits, signed or unsigned, mono or stereo, single or auto-init),
+  pause/continue, exit auto-init D9h/DAh, the interrupt acknowledged at
+  22Eh (8-bit) and 22Fh (16-bit), recording as silence; the CT1745 mixer
+  at 224h/225h (master, voice and FM volumes, the SB Pro registers
+  mapped onto them, stereo bit of 0Eh for SB Pro stereo, IRQ and DMA
+  selection 80h/81h, interrupt status 82h). `BLASTER=A220 I7 D1 H5 P330
+  T6`; a BLASTER the session sets (its environment, the program object's
+  settings) picks the base port, IRQ, DMA channels and the model: `T1`/
+  `T3` an SB 2.0 (DSP 2.01, OPL2), `T2`/`T4` an SB Pro (3.02), `T6` the
+  SB16.
+- **FM synthesizer** (`crates/dos::opl`): a YMF262 (OPL3) at 388h-38Bh
+  and the Sound Blaster's base+0-3/8-9, which is an OPL2 (YM3812) while
+  its OPL3 bit is off: 18 two-operator channels or six four-operator
+  ones, the eight waveforms, envelopes with key scaling, tremolo and
+  vibrato, feedback, rhythm mode, stereo panning, and the two timers and
+  status register that programs find an AdLib by.
+- **MPU-401** in UART mode at 330h/331h, into rs2's General MIDI
+  synthesizer (`crates/midi`).
 - **Printer ports**: LPT1 at 378h and LPT2 at 278h (listed in the BIOS
   data area; data, status and control registers: a byte is printed when
   the program raises STROBE), `INT 17h` (print, initialise, status:
@@ -205,7 +228,9 @@ The machine keeps the video state; the VDM shows it through the session:
 - **Graphics modes** (CGA 4-6, EGA 0Dh-10h, VGA 11h-13h, mode X, VBE):
   the VDM renders the planar or packed video memory into an 8-bit
   indexed picture with a 256-entry palette (only scan lines whose memory
-  changed). The kernel gives the session a *pixel screen*, a shared
+  changed). The VESA direct colour modes (15 to 32 bits per pixel) are
+  shown through a fixed palette of 6x7x6 levels of red, green and blue
+  with 4x4 ordered dithering. The kernel gives the session a *pixel screen*, a shared
   object the VDM writes (`Rs2SetPixelMode` / `Rs2UpdatePixels`, RS2API):
   while the session is in the foreground the kernel scales it (integer
   factor, centred, aspect corrected for 200-line modes) into the
@@ -237,11 +262,19 @@ for INT 33h.
 
 ### Sound
 
-The speaker's square wave (PIT channel 2 gated by port 61h bits 0-1) is
-synthesised at 22050 Hz into a stream on rs2's mixer (`Rs2AudioOpen`,
-RS2API 300-308); the Sound Blaster's DMA blocks go to a stream of their
-own at the rate the program set.
-Without sound hardware the session is silent.
+The machine mixes its sound into one 16-bit stereo stream at 22050 Hz
+(`crates/dos::audio`): the speaker's square wave (PIT channel 2 gated by
+port 61h bits 0-1, or the levels a program puts on bit 1 itself), the
+DSP's samples, the FM synthesizer and the MIDI synthesizer, through the
+mixer's volumes. Output time is the machine's clock: between instruction
+slices the frames due since the last mix are rendered (the DSP takes its
+DMA samples as they pass, so its block interrupts come at the programmed
+rate) and handed to the host; nothing is sent while all is quiet. VDM.EXE
+plays them on a stream of rs2's mixer (`Rs2AudioOpen`, RS2API 300-308),
+keeping about 60 ms queued beyond what the mixer has taken (topping up
+with silence when the queue nearly runs dry, dropping what would make the
+sound lag more than 400 ms). `HW_NOSOUND=1` silences the session; without
+sound hardware it is silent.
 
 ### Timing and idle
 
@@ -305,6 +338,8 @@ INT 31h AX=0010h (VDPMI: allocate several selectors) is there too.
   session leader with the program and its arguments; the environment's
   DOS settings (`DOS_SETTING=value` lines, as OS/2 passes them in
   `PgmInputs` / the program object's environment) configure the machine.
+- **WinStartApp** (PROGDETAILS pszEnvironment) passes DOS settings the
+  same way.
 - **Program objects** of type `PROG_VDM` / `PROG_WINDOWEDVDM` on the
   desktop start the same way: the Workplace Shell's WPProgram with
   `PROGTYPE=VDM` or `WINDOWEDVDM` (its DOS Window and DOS Full Screen
@@ -329,6 +364,35 @@ started) exits; `EXIT` at rs2's COMMAND.COM ends it.
   the "common" ones: a program started while it runs is sent to it), the
   others full screen (docs/WINOS2.md).
 
+## DOS settings
+
+A program object's DOS settings are edited with the **DOS properties**
+button of WPProgram's Session page (for DOS and Win-OS/2 session types):
+a dialog laid out after IBM's, with the settings in a list, the selected
+one's value as an entry field, On/Off buttons, a list of choices or a
+multi-line field (DOS_DEVICE, DOS_VERSION) by its kind, its range or
+default and a description; Save, Cancel and Default. The shell keeps them
+as IBM's does, as `NAME=value` strings in the program's environment
+(PROGDETAILS pszEnvironment, `SET NAME=value` in setup strings), only
+those that differ from the default; they reach VDM.EXE in the session's
+environment, where `dos::Config::set` applies them:
+
+| Setting | Effect |
+|---------|--------|
+| DOS_HIGH, DOS_UMB | DOS in the HMA, upper memory blocks |
+| DOS_RMSIZE | conventional memory (128-640 KB: INT 12h, the BDA, the MCB chain) |
+| DOS_BREAK | Ctrl+Break checked at every DOS call (INT 21h 33h) |
+| DOS_VERSION | the version INT 21h 30h reports to the programs named (`NAME.EXE,major,minor,count` lines) |
+| DOS_SHELL | the command processor (and COMSPEC) |
+| EMS_MEMORY_LIMIT, XMS_MEMORY_LIMIT, DPMI_MEMORY_LIMIT | memory sizes |
+| DPMI_DOS_API | DISABLED refuses the translated DOS API to DPMI clients |
+| HW_NOSOUND | no sound (the devices still run) |
+| IDLE_SENSITIVITY | how soon a program polling the keyboard counts as idle |
+| PRINT_TIMEOUT, PRINT_SEPARATE_OUTPUT | when a print job ends: after that many idle seconds (15; 0 never), at each program's end (on) |
+
+The others (DOS_FILES, VIDEO_*, KBD_*, MEM_*_REGIONS...)
+are kept and passed on but have no effect yet.
+
 ## COMMAND.COM
 
 rs2's COMMAND.COM is a callback stub on disk (`C:\OS2\MDOS\COMMAND.COM`)
@@ -344,17 +408,20 @@ EXIST, ==, NOT), GOTO, FOR, CALL, SHIFT, PAUSE, REM, `@`; redirection
 ## Status
 
 Done (first version): the CPU (real and protected mode, x87), the
-machine (devices, VGA with VESA 2.0 8-bit modes, BIOS, DOS, XMS, EMS,
-mouse, PC speaker, Sound Blaster 2.0), rs2's COMMAND.COM, the DPMI 0.9
-host, DOS sessions full screen and windowed from CMD, DosStartSession and
-desktop objects, DOS settings on the program objects' DOS page,
-printing (LPT1/LPT2, INT 17h, PRN) into the OS/2 spooler.
+machine (devices, VGA with VESA 2.0 modes up to 32 bits per pixel, BIOS,
+DOS, XMS, EMS, mouse, PC speaker, Sound Blaster 16 with an OPL3 FM
+synthesizer and an MPU-401), rs2's COMMAND.COM, the DPMI 0.9 host, DOS
+sessions full screen and windowed from CMD, DosStartSession and desktop
+objects, DOS settings (the WPProgram Session page's DOS properties
+dialog, RS2SHELL's DOS page), printing (LPT1/LPT2, INT 17h, PRN) into
+the OS/2 spooler.
 
-Not yet: an FM synthesizer (AdLib/OPL), Sound Blaster 16, VESA modes
-above 8 bits per pixel, DPMI 1.0, paging and V86 mode in the CPU (a
-program that sets CR0.PG or uses VCPI gets no paging), task switches,
-direct disk access, a faster CPU core (a decode or block cache; the
-interpreter does about 100 MIPS on a current host).
+Not yet: DPMI 1.0, paging and V86 mode in the CPU (a program that sets
+CR0.PG or uses VCPI gets no paging), task switches, direct disk access,
+direct colour shown as true colour (it is dithered to 252 colours), the
+SB16's ASP and ADPCM decoding (ADPCM blocks play as 8-bit PCM), a faster
+CPU core (a decode or block cache; the interpreter does about 110 MIPS on
+a current host), and DOS settings beyond those in the table above.
 
 ## Testing
 
@@ -365,11 +432,15 @@ interpreter does about 100 MIPS on a current host).
 - `tests/dos/run.sh`: builds the DOS test programs (tests/dos/*.S, clang)
   and runs each on the host with `tools/dosrun`: HELLO (DOS and BIOS
   output, files), GFX (modes 13h and 12h), DPMITEST (a 32-bit DPMI
-  client), VESA, SBTEST (Sound Blaster DMA and IRQ), BEEP, PRINT (the
-  printer by handle 4, `LPT1` as a file, INT 21h 05h, INT 17h and the
-  378h registers: one job with all five lines, `dosrun --lpt`),
-  COMMAND.COM.
-  `dosrun --keys`, `--png`, `--wav`, `--trace` and `--stats` help with
+  client), VESA, VESAHI (16 and 32 bits per pixel), SBTEST (Sound
+  Blaster 8-bit DMA and IRQ), SB16TEST (16-bit stereo auto-init DMA,
+  the mixer), FMTEST (AdLib and OPL3 detection, two tones), BEEP, DOSSET
+  (DOS settings, with `--set`), PRINT (the printer by handle 4, `LPT1`
+  as a file, INT 21h 05h, INT 17h and the 378h registers: one job with
+  all five lines, `dosrun --lpt`), COMMAND.COM; the sound of SBTEST,
+  SB16TEST, FMTEST and BEEP is recorded (`dosrun --wav`, 16-bit stereo)
+  and its tones checked with `tools/scripts/doswav.py`.
+  `dosrun --keys`, `--png`, `--wav`, `--set NAME=VALUE`, `--trace` and `--stats` help with
   other programs; `--keys` also takes the mouse (`{mouse X Y}`,
   `{click X Y}`, `{press X Y}`, `{release X Y}`, `{dclick X Y}`),
   `{shot FILE}` and, for seamless Win-OS/2, `{run CMD}`; `--display WxH`,
@@ -377,7 +448,12 @@ interpreter does about 100 MIPS on a current host).
   (docs/WINOS2.md).
 - `cargo test -p dos --test winos2`: RS2DISP's raster operations and
   palette, VWIN's messages.
-- In QEMU: xtask puts the test programs in `C:\DOS` on development
+- In QEMU: `cargo xtask run --sound hda --sound-wav F.wav --init
+  "OS2\CMD.EXE /C C:\DOS\FMTEST.COM"` records a DOS session's sound
+  (doswav.py checks it; under QEMU's TCG the guest's clock runs behind
+  the audio clock, so the recording has gaps there). `WPSTEST DOSPROPS`
+  makes a DOS program object with DOS settings in PMSHELL, starts it and
+  opens its settings. xtask puts the test programs in `C:\DOS` on development
   images; `DESKTEST DOS W` (or `F`) starts GFX and DPMITEST as desktop
   objects in DOS windows (full screen).
 

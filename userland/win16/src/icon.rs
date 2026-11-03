@@ -29,6 +29,8 @@ pub struct Icon {
     pub and: u16,
     pub xor: u16,
     pub cursor: bool,
+    /// The PM pointer made for SetCursor (0: not yet).
+    pub pm: u32,
 }
 
 /// Icons by handle: 0xE000 + 2 * index (no selector, window or GDI
@@ -112,7 +114,7 @@ fn from_image(dib: &[u8], hot: (i32, i32), cursor: bool) -> u16 {
     if xor == 0 || and == 0 {
         return 0;
     }
-    add(Icon { w, h, hot, and, xor, cursor })
+    add(Icon { w, h, hot, and, xor, cursor, pm: 0 })
 }
 
 /// The best image of an icon or cursor group (the one nearest 32 x 32
@@ -136,6 +138,35 @@ fn pick(dir: &[u8], cursor: bool) -> Option<u16> {
         }
     }
     best.map(|b| b.1)
+}
+
+/// The PM pointer of a cursor or icon (made when first set): its AND
+/// mask over its image, as PM's monochrome pointers are, with the hot
+/// spot from the bottom.
+pub fn pm_pointer(h: u16) -> u32 {
+    let Some(i) = h.checked_sub(BASE).map(|i| i as usize / 2) else { return 0 };
+    let Some(Some(ic)) = ICONS.get().get(i) else { return 0 };
+    if ic.pm != 0 {
+        return ic.pm;
+    }
+    let (and, xor, hot, ih) = (ic.and, ic.xor, ic.hot, ic.h);
+    let (Some((w, h1, a)), Some((_, h2, x))) = (crate::bitmap::mono_rows(and), crate::bitmap::mono_rows(xor)) else { return 0 };
+    if h1 != h2 {
+        return 0;
+    }
+    // PM's pointer bitmap: the XOR image below, the AND mask above.
+    let mut bits = x;
+    bits.extend_from_slice(&a);
+    let hbm = crate::bitmap::pm_bitmap_from(w, 2 * h1, 1, &bits, &[0, 0xffffff]);
+    if hbm == 0 {
+        return 0;
+    }
+    let p = unsafe { crate::pm::WinCreatePointer(crate::pm::HWND_DESKTOP, hbm, 1, hot.0, ih - 1 - hot.1) };
+    unsafe { crate::pm::GpiDeleteBitmap(hbm) };
+    if let Some(Some(ic)) = ICONS.get().get_mut(i) {
+        ic.pm = p;
+    }
+    p
 }
 
 /// LoadIcon / LoadCursor from a module's resources.
@@ -178,7 +209,7 @@ fn create(w: i32, h: i32, planes: u16, bpp: u16, and: *const u8, xor: *const u8)
     if a == 0 || x == 0 {
         return 0;
     }
-    add(Icon { w, h, hot: (w / 2, h / 2), and: a, xor: x, cursor: false })
+    add(Icon { w, h, hot: (w / 2, h / 2), and: a, xor: x, cursor: false, pm: 0 })
 }
 
 /// DrawIcon(hdc, x, y, hicon)
@@ -244,7 +275,7 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             let Some(i) = get(h) else { return Some(h as u32) };
             let (w, ih, hot, cursor, and, xor) = (i.w, i.h, i.hot, i.cursor, i.and, i.xor);
             let (a2, x2) = (crate::bitmap::copy_bitmap(and), crate::bitmap::copy_bitmap(xor));
-            add(Icon { w, h: ih, hot, and: a2, xor: x2, cursor }) as u32
+            add(Icon { w, h: ih, hot, and: a2, xor: x2, cursor, pm: 0 }) as u32
         }
         // DestroyIcon(hicon), DestroyCursor(hcursor)
         2457 | 2458 => {

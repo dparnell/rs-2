@@ -508,8 +508,12 @@ desktop program objects. "dosrun" = on the host with `tools/dosrun`
 | tests/dos HELLO.COM | works | QEMU: DOS and BIOS output, the command tail, file create/write/read/delete, the exit code. |
 | tests/dos GFX.COM | works | QEMU: mode 13h (256 colours) and mode 12h (VGA write mode 2) full screen (scaled to the framebuffer) and in a window (resized to the mode), keys between them, Alt+Home both ways. |
 | tests/dos MOUSE.COM | works | QEMU, full screen: INT 33h reset, the pointer shown, positions from the (VMware absolute) pointer scaled to the 640x200 virtual screen (centre 320,100), left and right buttons. In a window the pointer's position over the window is used. |
-| tests/dos BENCH.COM | works | Speed: about 100 million instructions a second on dosrun (Apple M-series host, native), 5.7 million in a DOS session under QEMU's TCG on the same host (QEMU emulating x86-64 costs most of it; native x86 hardware runs VDM.EXE without that). |
-| tests/dos SBTEST.COM | works | dosrun (`--wav` captures the output): Sound Blaster 2.0 found at 220h (DSP reset, version 2.01), DMA channel 1 programmed, an 11025-sample block played at ~11 kHz by single-cycle 8-bit DMA, the IRQ 7 at its end. In VDM.EXE the samples go to rs2's audio mixer (not yet listened to in QEMU). |
+| tests/dos BENCH.COM | works | Speed: about 108 million instructions a second on dosrun (Apple M-series host, native), 5.7 million in a DOS session under QEMU's TCG on the same host (QEMU emulating x86-64 costs most of it; native x86 hardware runs VDM.EXE without that). |
+| tests/dos SBTEST.COM | works | dosrun (`--wav` captures the output): Sound Blaster found at 220h (DSP reset), DMA channel 1 programmed, an 11025-sample block played at ~11 kHz by single-cycle 8-bit DMA, the IRQ 7 at its end; the recording is a 441 Hz tone of 1.0 s (doswav.py). |
+| tests/dos SB16TEST.COM | works | dosrun: DSP version 4, mixer IRQ/DMA registers, a second of 16-bit signed stereo at 22050 Hz by auto-init DMA on channel 5, 10 interrupts acknowledged at 22Fh and one more after D9h; the recording has 1002 Hz left and 501 Hz right. QEMU (HD Audio, `--sound-wav`): right pitches, gaps (the guest's clock runs behind QEMU's audio clock under TCG). |
+| tests/dos FMTEST.COM | works | dosrun and QEMU: AdLib found by timer 1, OPL3 found, 440 Hz on the left then 880 Hz on the right from the FM synthesizer (doswav.py; in QEMU with gaps, as above). |
+| tests/dos VESAHI.COM | works | dosrun and QEMU (full screen): 640x480 with 16 bits (5:6:5) and 32 bits per pixel found through the mode list and 4F01h, colour ramps drawn through the banked window, shown dithered. |
+| tests/dos DOSSET.COM | works | dosrun `--set` and QEMU from a program object: DOS_RMSIZE=512 gives INT 12h 512 and 128 KB less free memory, DOS_VERSION=DOSSET.COM,5,0,255 gives 5.0, DOS_BREAK=1 turns the check on; changing DOS_RMSIZE to 384 in the DOS properties dialog shows in the next start. |
 | tests/dos VESA.COM | works | dosrun: VBE 2.0 controller and mode information, mode 101h (640x480, 256 colours) drawn through the banked window with 4F05h. Modes 100h, 101h, 103h, 105h; the linear framebuffer at E0000000h (DPMI 0800h maps it). |
 | tests/dos DPMITEST.COM | works | QEMU, full screen and windowed, and dosrun: a 32-bit DPMI client (INT 31h 0300h output, LDT descriptors, a flat 4 GB selector, 1 MB block, 32-bit code segment, #DE exception handler, protected-mode INT hook, real-mode callback via 0301h, DOS memory, IRQ 0 hooked in protected mode arriving during a real-mode BIOS wait). |
 | MEM.EXE (IBM, OS/2's DOS) | works | dosrun: MEM and MEM /C (MCB chain, UMBs, EMS, XMS, HMA). |
@@ -535,9 +539,12 @@ Windows 3.x programs also run without Win-OS/2, natively as OS/2
 processes on rs2's WIN16.DLL (docs/WIN16.md): windows, painting, text,
 message boxes, menus and accelerators, dialogs and the standard controls
 (`RS2\HELLO16.EXE`, `RS2\MENU16.EXE`, `RS2\DLG16.EXE`, `RS2\NOTE16.EXE`,
-`RS2\W16TEST.EXE`), bitmaps, MDI, Windows DLLs and profiles. Real
-programs run too: Delphi 1.0 (the IDE, designing, compiling and running
-a program), Calmira, PFE, GNU Chess and many CICA shareware programs;
+`RS2\W16TEST.EXE`), bitmaps and DIBs with Windows' raster operations
+and brushes, MDI as Windows does it (`RS2\MDI16.EXE`), regions, mapping
+modes, font enumeration, Windows DLLs and profiles. Real programs run
+too: Delphi 1.0 (the IDE, designing, compiling and running a program),
+Calmira, PFE, Multipad, GNU Chess, ProShape (a Windows 2.x program) and
+many CICA shareware programs;
 the compatibility table is in docs/WIN16.md ("Real programs"). The common
 dialogs, printing to rs2's printers, DDE and the clipboard's formats
 work too (`RS2\PRINT16.EXE`, `RS2\DDECLI16.EXE`).
@@ -619,6 +626,15 @@ Fixed for it:
   appended) still shows its icon (SHELLTST).
 
 ## Fixed while getting these to run
+
+- Workplace Shell: REXXUTIL's `SysOpenObject('C:\MMOS2\SOUNDS', ...)`
+  once opened the Multimedia Templates folder: a program's
+  WinQueryObject of a path, done while the shell was starting, gave the
+  path the file system handle number the shell had just given that
+  folder (both read OS2.INI's handle table and took the first free
+  number), and WinOpenObject found the folder by its number. Handles are
+  now given out under a system-wide mutex and OS2.INI's table decides
+  what a handle stands for ([WPS.md](WPS.md#persistence)).
 
 - KbdSetStatus rejected binary mode with echo on in one call; OS/2
   judges the echo bit by the mode the call starts from (IBM TELNET sets

@@ -194,6 +194,11 @@ extern "C" fn fs_set_title(obj: usize, title: *const u8) -> u32 {
 
 extern "C" fn fs_query_handle(obj: usize) -> u32 {
     let od = obj::d(obj);
+    // A number OS2.INI now gives another path is no longer this
+    // object's (wps::object_from_handle).
+    if od.handle != 0 && wps::path_of_handle(od.handle).is_some_and(|p| !eq_nocase(&p, &path(obj))) {
+        od.handle = 0;
+    }
     if od.handle == 0 {
         let p = path(obj);
         if !p.is_empty() {
@@ -681,8 +686,15 @@ extern "C" fn folder_uninit(obj: usize) {
     som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpUnInitData, &[obj]);
 }
 
+/// A folder without a default view of its own opens in the System
+/// object's (its Folder page: `PM_Workplace` `DefFolderView`); the
+/// desktop and the classes with their own default keep theirs.
 extern "C" fn folder_query_default_view(obj: usize) -> u32 {
-    som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpQueryDefaultView, &[obj]) as u32
+    let v = som::call_parent(wps::ccd("WPFolder"), wps::cd("WPObject"), m::WPObject::wpQueryDefaultView, &[obj]) as u32;
+    if obj::d(obj).default_view == obj::OPEN_DEFAULT && v == obj::OPEN_CONTENTS && !wps::is(obj, "WPDesktop") {
+        return crate::system::default_folder_view();
+    }
+    v
 }
 
 extern "C" fn folder_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {

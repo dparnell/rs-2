@@ -157,14 +157,14 @@ impl Machine {
         put(self, VIDEO_STATIC, &[0xff, 0xe0, 0x0f, 0, 0, 0, 0, 0x07, 0x08, 0x02, 0xff, 0x0e, 0, 0, 0x3f, 0]);
         put(self, VBE_TABLES, b"rs2 DOS session VGA\0");
         let mut list = alloc::vec::Vec::new();
-        for (m, _, _) in crate::video::VBE_MODES {
+        for (m, _, _, _) in crate::video::VBE_MODES {
             list.extend_from_slice(&m.to_le_bytes());
         }
         list.extend_from_slice(&0xffffu16.to_le_bytes());
-        put(self, VBE_TABLES + 0x20, &list);
-        put(self, VBE_TABLES + 0x30, b"rs2\0");
+        put(self, VBE_TABLES + 0x30, &list);
+        put(self, VBE_TABLES + 0x18, b"rs2\0");
         // mov ax,4F05h / int 10h / retf
-        put(self, VBE_TABLES + 0x40, &[0xb8, 0x05, 0x4f, 0xcd, 0x10, 0xcb]);
+        put(self, VBE_TABLES + 0x20, &[0xb8, 0x05, 0x4f, 0xcd, 0x10, 0xcb]);
         put(self, 0xfff0, &[0xea, 0x5b, 0xe0, 0x00, 0xf0]);
         put(self, 0xfff5, b"01/01/92");
         put(self, 0xfffe, &[0xfc, 0x00]);
@@ -191,7 +191,7 @@ impl Machine {
         self.hw.wr(BDA + 0x78, 20);
         self.hw.wr(BDA + 0x79, 20);
         self.hw.wr16(BDA + 0x10, equip);
-        self.hw.wr16(BDA + 0x13, 640);
+        self.hw.wr16(BDA + 0x13, self.cfg.rm_kb.clamp(128, 640) as u16);
         self.hw.wr16(BDA + 0x1a, 0x1e);
         self.hw.wr16(BDA + 0x1c, 0x1e);
         self.hw.wr16(BDA + 0x80, 0x1e);
@@ -569,7 +569,7 @@ impl Machine {
     /// in a row, wait for input (it is idle at a prompt).
     pub fn idle_poll(&mut self) {
         self.polls += 1;
-        if self.polls >= 200 {
+        if self.polls >= self.cfg.idle_polls.max(4) {
             self.polls = 0;
             self.waiting = true;
         }
@@ -1239,10 +1239,11 @@ impl Machine {
         }
     }
 
-    /// INT 10h AH=4Fh: VESA BIOS extensions 2.0 (8-bit modes, a banked
-    /// window at A000h and a linear framebuffer).
+    /// INT 10h AH=4Fh: VESA BIOS extensions 2.0 (8-bit palette modes and
+    /// 15-, 16-, 24- and 32-bit direct colour modes, a banked window at
+    /// A000h and a linear framebuffer).
     fn vbe(&mut self) {
-        use crate::video::{Vbe, LFB_BASE, VBE_MEM, VBE_MODES};
+        use crate::video::{vbe_bytes, Vbe, LFB_BASE, VBE_MEM, VBE_MODES};
         let al = self.cpu.al();
         let es_di = self.seg_lin(ES, self.cpu.di());
         let ok = |m: &mut Machine| m.cpu.set_ax(0x004f);
@@ -1258,12 +1259,12 @@ impl Machine {
                 self.hw.wr16(es_di + 6, VBE_TABLES);
                 self.hw.wr16(es_di + 8, ROM);
                 self.hw.wr32(es_di + 10, 0);
-                self.hw.wr16(es_di + 14, VBE_TABLES + 0x20);
+                self.hw.wr16(es_di + 14, VBE_TABLES + 0x30);
                 self.hw.wr16(es_di + 16, ROM);
                 self.hw.wr16(es_di + 18, (VBE_MEM / 65536) as u16);
                 if vbe2 {
                     self.hw.wr16(es_di + 20, 0x0100);
-                    for (o, t) in [(22u32, 0u16), (26, 0x30), (30, 0x30)] {
+                    for (o, t) in [(22u32, 0u16), (26, 0x18), (30, 0x18)] {
                         self.hw.wr16(es_di + o, VBE_TABLES + t);
                         self.hw.wr16(es_di + o + 2, ROM);
                     }
@@ -1272,33 +1273,47 @@ impl Machine {
             }
             0x01 => {
                 let cx = self.cpu.cx() & 0x1ff;
-                let Some(&(_, w, h)) = VBE_MODES.iter().find(|m| m.0 == cx) else {
+                let Some(&(_, w, h, bpp)) = VBE_MODES.iter().find(|m| m.0 == cx) else {
                     self.cpu.set_ax(0x014f);
                     return;
                 };
                 for i in 0..256 {
                     self.hw.wr(es_di + i, 0);
                 }
-                // Supported, colour graphics, linear framebuffer too.
+                let pitch = w as u32 * vbe_bytes(bpp);
+                // Supported, optional information, colour graphics, linear
+                // framebuffer too.
                 self.hw.wr16(es_di, 0x009b);
                 self.hw.wr(es_di + 2, 7);
                 self.hw.wr16(es_di + 4, 64);
                 self.hw.wr16(es_di + 6, 64);
                 self.hw.wr16(es_di + 8, 0xa000);
-                self.hw.wr16(es_di + 0x0c, VBE_TABLES + 0x40);
+                self.hw.wr16(es_di + 0x0c, VBE_TABLES + 0x20);
                 self.hw.wr16(es_di + 0x0e, ROM);
-                self.hw.wr16(es_di + 0x10, w);
+                self.hw.wr16(es_di + 0x10, pitch as u16);
                 self.hw.wr16(es_di + 0x12, w);
                 self.hw.wr16(es_di + 0x14, h);
                 self.hw.wr(es_di + 0x16, 8);
                 self.hw.wr(es_di + 0x17, 16);
                 self.hw.wr(es_di + 0x18, 1);
-                self.hw.wr(es_di + 0x19, 8);
+                self.hw.wr(es_di + 0x19, bpp);
                 self.hw.wr(es_di + 0x1a, 1);
-                self.hw.wr(es_di + 0x1b, 4);
-                let pages = (VBE_MEM / (w as usize * h as usize)).clamp(1, 255) - 1;
+                // Memory model: packed pixel, or direct colour.
+                self.hw.wr(es_di + 0x1b, if bpp == 8 { 4 } else { 6 });
+                let pages = (VBE_MEM / (pitch as usize * h as usize)).clamp(1, 255) - 1;
                 self.hw.wr(es_di + 0x1d, pages as u8);
                 self.hw.wr(es_di + 0x1e, 1);
+                // Red, green, blue and reserved: (size, position).
+                let masks: [u8; 8] = match bpp {
+                    15 => [5, 10, 5, 5, 5, 0, 1, 15],
+                    16 => [5, 11, 6, 5, 5, 0, 0, 0],
+                    24 => [8, 16, 8, 8, 8, 0, 0, 0],
+                    32 => [8, 16, 8, 8, 8, 0, 8, 24],
+                    _ => [0; 8],
+                };
+                for (i, v) in masks.iter().enumerate() {
+                    self.hw.wr(es_di + 0x1f + i as u32, *v);
+                }
                 self.hw.wr32(es_di + 0x28, LFB_BASE);
                 ok(self);
             }
@@ -1311,7 +1326,7 @@ impl Machine {
                     ok(self);
                     return;
                 }
-                let Some(&(_, w, h)) = VBE_MODES.iter().find(|m| m.0 == mode) else {
+                let Some(&(_, w, h, bpp)) = VBE_MODES.iter().find(|m| m.0 == mode) else {
                     self.cpu.set_ax(0x014f);
                     return;
                 };
@@ -1322,7 +1337,7 @@ impl Machine {
                 if bx & 0x8000 == 0 {
                     self.hw.vga.vbe_mem.iter_mut().for_each(|b| *b = 0);
                 }
-                self.hw.vga.vbe = Some(Vbe { mode, width: w, height: h, pitch: w as u32, bank: 0, start: 0 });
+                self.hw.vga.vbe = Some(Vbe { mode, width: w, height: h, bpp, pitch: w as u32 * vbe_bytes(bpp), bank: 0, start: 0 });
                 self.hw.wr(0x449, 0x13);
                 self.hw.vga.dirty = true;
                 ok(self);
@@ -1355,14 +1370,16 @@ impl Machine {
                     self.cpu.set_ax(0x034f);
                     return;
                 };
+                let bytes = vbe_bytes(b.bpp);
+                let min = b.width as u32 * bytes;
                 match self.cpu.bl() {
-                    0 => b.pitch = (self.cpu.cx() as u32).max(b.width as u32),
-                    2 => b.pitch = (self.cpu.cx() as u32).max(b.width as u32),
+                    0 => b.pitch = (self.cpu.cx() as u32 * bytes).max(min),
+                    2 => b.pitch = (self.cpu.cx() as u32).max(min),
                     _ => {}
                 }
                 let (pitch, h) = (b.pitch, b.height);
                 self.cpu.set_bx(pitch as u16);
-                self.cpu.set_cx(pitch as u16);
+                self.cpu.set_cx((pitch / bytes) as u16);
                 self.cpu.set_dx(((VBE_MEM as u32 / pitch) as u16).max(h));
                 self.hw.vga.dirty = true;
                 ok(self);
@@ -1372,10 +1389,11 @@ impl Machine {
                     self.cpu.set_ax(0x034f);
                     return;
                 };
+                let bytes = vbe_bytes(b.bpp);
                 match self.cpu.bl() & 0x7f {
-                    0 => b.start = self.cpu.dx() as u32 * b.pitch + self.cpu.cx() as u32,
+                    0 => b.start = self.cpu.dx() as u32 * b.pitch + self.cpu.cx() as u32 * bytes,
                     1 => {
-                        let (x, y) = (b.start % b.pitch, b.start / b.pitch);
+                        let (x, y) = (b.start % b.pitch / bytes, b.start / b.pitch);
                         self.cpu.set_cx(x as u16);
                         self.cpu.set_dx(y as u16);
                     }

@@ -53,6 +53,10 @@ pub struct Hw {
     pub irq_remap: Option<u8>,
     pub dma: crate::sb::Dma,
     pub sb: crate::sb::SoundBlaster,
+    pub opl: crate::opl::Opl,
+    pub mpu: crate::audio::Mpu,
+    /// Speaker levels written to port 61h with the gate off.
+    pub spk_levels: alloc::collections::VecDeque<bool>,
     /// The parallel ports at 378h and 278h (programs that drive the
     /// printer through its registers).
     pub lpt: [Lpt; 2],
@@ -119,6 +123,9 @@ impl Hw {
             irq_remap: None,
             dma: crate::sb::Dma::default(),
             sb: crate::sb::SoundBlaster::default(),
+            opl: crate::opl::Opl::new(),
+            mpu: crate::audio::Mpu::default(),
+            spk_levels: alloc::collections::VecDeque::new(),
         }
     }
 
@@ -136,7 +143,7 @@ impl Hw {
         self.ems_map[w].map(|p| p as usize * EMS_PAGE + (a as usize & (EMS_PAGE - 1)))
     }
 
-    #[inline]
+    #[inline(never)]
     pub fn rd(&mut self, a: u32) -> u8 {
         if a < 0xa0000 {
             return self.ram[a as usize];
@@ -348,10 +355,23 @@ impl Hw {
             }
             // Joystick: nothing connected.
             0x201 => 0xff,
-            0x00..=0x0f | 0x81..=0x8f => self.dma.io_read(port),
-            0x220..=0x22f => self.sb.io_read(port),
+            0x00..=0x0f | 0x81..=0x8f | 0xc0..=0xdf => self.dma.io_read(port),
             0x378..=0x37a => self.lpt[0].read(port - 0x378),
             0x278..=0x27a => self.lpt[1].read(port - 0x278),
+            0x388 | 0x38a => {
+                let opl3 = self.sb.model == crate::sb::Model::Sb16;
+                self.opl.status(self.us_now, opl3)
+            }
+            0x330 | 0x331 => self.mpu.io_read(port),
+            p if p.wrapping_sub(self.sb.base) < 16 => {
+                let r = p - self.sb.base;
+                if matches!(r, 0 | 2 | 8) {
+                    let opl3 = self.sb.model == crate::sb::Model::Sb16;
+                    self.opl.status(self.us_now, opl3)
+                } else {
+                    self.sb.io_read(port)
+                }
+            }
             _ => 0xff,
         }
     }
@@ -370,6 +390,10 @@ impl Hw {
                 if (self.port61 ^ v) & 3 != 0 {
                     self.speaker_changed = true;
                 }
+                // Driven by hand (gate off): the level is bit 1.
+                if v & 1 == 0 && (self.port61 ^ v) & 2 != 0 && self.spk_levels.len() < 16384 {
+                    self.spk_levels.push_back(v & 2 != 0);
+                }
                 self.port61 = v;
                 self.pit.ch[2].gate = v & 1 != 0;
             }
@@ -378,10 +402,19 @@ impl Hw {
             0x71 => self.cmos.write(v),
             0x92 => self.a20 = v & 2 != 0,
             0x3b0..=0x3df => self.vga.io_write(port, v),
-            0x00..=0x0f | 0x81..=0x8f => self.dma.io_write(port, v),
-            0x220..=0x22f => self.sb.io_write(port, v),
+            0x00..=0x0f | 0x81..=0x8f | 0xc0..=0xdf => self.dma.io_write(port, v),
             0x378..=0x37a => self.lpt[0].write(port - 0x378, v),
             0x278..=0x27a => self.lpt[1].write(port - 0x278, v),
+            0x388..=0x38b => self.opl_out(port & 3, v),
+            0x330 | 0x331 => self.mpu.io_write(port, v),
+            p if p.wrapping_sub(self.sb.base) < 16 => {
+                match p - self.sb.base {
+                    // The OPL3's two banks, and the OPL2-compatible pair.
+                    r @ 0..=3 => self.opl_out(r, v),
+                    8 | 9 => self.opl_out(port & 1, v),
+                    _ => self.sb.io_write(port, v),
+                }
+            }
             // POST codes, the delay port.
             0x80 | 0xed => {}
             _ => {
@@ -392,6 +425,18 @@ impl Hw {
         }
         if let Some(a) = self.kbc.a20_request.take() {
             self.a20 = a;
+        }
+    }
+
+    /// FM register ports: 0/2 select a register of bank 0/1, 1/3 write it.
+    fn opl_out(&mut self, r: u16, v: u8) {
+        let bank = (r >> 1) as usize;
+        if r & 1 == 0 {
+            self.opl.addr[bank] = v;
+        } else {
+            // An OPL2 (model before the SB16) has one bank.
+            let bank = if self.sb.model == crate::sb::Model::Sb16 { bank } else { 0 };
+            self.opl.write((bank as u16) << 8 | self.opl.addr[bank] as u16, v);
         }
     }
 
@@ -419,8 +464,13 @@ impl Default for Hw {
 }
 
 impl x86emu::Bus for Hw {
-    #[inline]
+    #[inline(always)]
     fn read8(&mut self, a: u32) -> u8 {
+        // Conventional memory (most code and data) without the device
+        // checks.
+        if a < 0xa0000 {
+            return self.ram[a as usize];
+        }
         self.rd(a)
     }
     #[inline]
@@ -482,6 +532,7 @@ impl x86emu::Bus for Hw {
             self.io_out(port.wrapping_add(i), (v >> (i * 8)) as u8);
         }
     }
+    #[inline(always)]
     fn irq_pending(&mut self) -> bool {
         self.pic.pending()
     }

@@ -399,8 +399,17 @@ Status markers: done, in progress, planned.
   a printer
 - done: PMGRE (programs calling the graphics engine directly: COMETRUN's
   comet trail)
+- done (shell): Warp 4's folder menu bars (Folder, Edit, View, Selected,
+  Help), the System object's Folder pages (menus and menu bars, default
+  folder view, automatic close), Input page and 256-colour page, the
+  lockup's background image, file system handles that cannot collide
+  between processes (SysOpenObject of a path opened another folder)
+- done: DDEML monitors (APPCLASS_MONITOR, every MF_* kind, across
+  processes); IPF metafile artwork (`:artwork.` of .MET files in the
+  compiler, played by HELPMGR)
 - done: the Print Screen key (docs/PRINTING.md)
-- planned: DDEML monitors, folder menu bars, IPF metafile artwork
+- planned: the window manager acting on the Input
+  page's settings (full window drag, asynchronous focus change)
 - done: display driver model (GRADD-style) on the framebuffer, mouse
   pointer; PMWIN (windows, messages, controls, dialogs), PMGPI
   (graphics, fonts), PMSHAPI
@@ -544,7 +553,15 @@ Status markers: done, in progress, planned.
   and graphics modes), raw keyboard and mouse, Alt+Home, from CMD
   (DosExecPgm of a DOS program), DosStartSession types 4/7, desktop
   objects (DOS Window, DOS Full Screen, PROG_VDM/PROG_WINDOWEDVDM)
-- planned: PC speaker and Sound Blaster sound, VESA, DOS settings, speed
+- done: PC speaker, Sound Blaster 16 (8/16-bit DMA, mixer, BLASTER),
+  OPL3/OPL2 FM synthesizer, MPU-401 UART to the GM synthesizer, all mixed
+  into one stream on the machine's clock; VESA direct colour modes (15
+  to 32 bits per pixel, dithered); DOS settings in WPProgram's Session
+  page (DOS properties dialog, kept in the program's environment) applied
+  by VDM.EXE (DOS_RMSIZE, DOS_VERSION, DOS_BREAK, DOS_SHELL, HW_NOSOUND,
+  memory sizes...)
+- planned: DPMI 1.0, a decode or block cache for the CPU, true colour
+  for VESA modes, more DOS settings (DOS_DEVICE, DOS_FILES, VIDEO_*)
 
 ## Native Win16 (stages 1 to 3 done)
 
@@ -570,8 +587,15 @@ Microsoft file (docs/WIN16.md).
   subclassing; window scroll bars; the caret; CF_TEXT on PM's clipboard;
   CreateFont; `RS2\MENU16.EXE`, `RS2\DLG16.EXE`, `RS2\NOTE16.EXE` and
   W16TEST's stage-2 checks
-- planned (rest of stage 2): MDI, bitmaps and DIBs, regions, mapping
-  modes, font enumeration, Windows DLLs, WIN.INI
+- done (rest of stage 2): MDI as Windows does it (maximized children in
+  the frame's menu bar and title, tiling, cascading, icons in the
+  client), bitmaps and DIBs (raster operations, hatched and pattern
+  brushes, 1/4/8/24-bit DIBs, bitmap and cursor resources), regions
+  (clipping, InvalidateRgn), mapping modes, font enumeration on Windows'
+  faces with real metrics, Windows DLLs (imports, LoadLibrary, usage
+  counts, WEP), WIN.INI and private profiles as files in C:\WINDOWS;
+  `RS2\MDI16.EXE`, W16TEST's MDI, GDI, RGN, MAP, FONT, DLL and INI groups;
+  Microsoft's Multipad sample runs
 - done (stage 3): COMMDLG (Open, Save As, Color, Font, Print, Print
   Setup, Find, Replace as WIN16 dialogs, hooks and templates); printing
   from Windows programs into rs2's spooler and PostScript driver
@@ -597,7 +621,6 @@ Microsoft file (docs/WIN16.md).
 - NetBIOS, NFS/SMB clients
 - MMPM/2: MPEG and Indeo video, IBM's Ultimotion codebook (rs2 draws
   those blocks flat), multiple images per file, compound files (RIFF CF)
-- DOS sessions: Sound Blaster, VESA modes, DOS settings in the program
-  object notebook, CPU speed (a block cache), DPMI 1.0
+- DOS sessions: CPU speed (a block cache), DPMI 1.0
 - self-hosting (building rs2 on rs2): 64-bit processes with a Linux
   system-call layer for the Rust toolchain; see [SELF-HOSTING.md](SELF-HOSTING.md)

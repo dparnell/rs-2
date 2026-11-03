@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 x86emu = { path = "../x86emu" }
 win16drv = { path = "../win16drv" }
+midi = { path = "../midi" }

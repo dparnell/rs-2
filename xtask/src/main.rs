@@ -894,7 +894,16 @@ fn build_userland() -> Option<image::FileList> {
     for (src, dest) in HELP_FILES {
         let path = ul.join(src);
         let text = std::fs::read(&path).ok()?;
-        let help = match ipf::compile::compile(&text, !dest.ends_with(".INF")) {
+        // `:artwork.` files: beside the IPF source, or made here.
+        let dir = path.parent().unwrap().to_path_buf();
+        let load = |name: &[u8]| -> Option<Vec<u8>> {
+            let name = String::from_utf8_lossy(name).into_owned();
+            if name.eq_ignore_ascii_case("HMART.MET") {
+                return Some(hmtest_metafile());
+            }
+            std::fs::read(dir.join(&name)).ok()
+        };
+        let help = match ipf::compile::compile_with(&text, !dest.ends_with(".INF"), &load) {
             Ok(h) => h,
             Err(e) => {
                 eprintln!("{}: {e}", path.display());
@@ -1558,4 +1567,51 @@ Boot this disc (or a USB stick it was written to) on a UEFI machine.\r\n"
     println!("wrote {} ({} MB)", out.display(), std::fs::metadata(&out).map(|m| m.len() >> 20).unwrap_or(0));
     let _ = Stdio::null();
     true
+}
+
+/// HMTEST.HLP's metafile artwork (`:artwork name='HMART.MET'.`), rs2's
+/// own picture built here with crates/gpi: a sky, a sun, hills and a
+/// house, as GPI orders in one segment of a PU_PELS page.
+fn hmtest_metafile() -> Vec<u8> {
+    use gpi::goca::{Attr, Order};
+    use gpi::Point;
+    let p = |x: i32, y: i32| Point { x, y };
+    // CLR_ indices: 1 blue, 2 red, 5 cyan, 6 yellow, -1 black, 12 dark
+    // green, 14 brown, 15 pale grey.
+    let colour = |c: i32| Order::Set(Attr::Color(c));
+    let filled = |c: i32, a: Point, b: Point| [colour(c), Order::Box { at: Some(a), flags: 0x40, corner: b, h: 0, v: 0 }];
+    let mut o: Vec<Order> = Vec::new();
+    o.extend(filled(5, p(0, 0), p(400, 300)));
+    // The sun: a filled full arc.
+    o.push(colour(6));
+    o.push(Order::Set(Attr::Position(p(330, 240))));
+    o.push(Order::BeginArea(0x40));
+    o.push(Order::FullArc { at: None, mult: 30 << 16 });
+    o.push(Order::EndArea);
+    // Hills: an area under a curve.
+    o.push(colour(12));
+    o.push(Order::BeginArea(0x40));
+    o.push(Order::Line { at: Some(p(0, 0)), pts: vec![p(0, 110)] });
+    o.push(Order::Fillet { at: None, pts: vec![p(100, 170), p(220, 60), p(320, 150), p(400, 90)] });
+    o.push(Order::Line { at: None, pts: vec![p(400, 0), p(0, 0)] });
+    o.push(Order::EndArea);
+    // The house: walls, a roof, a door and two windows.
+    o.extend(filled(15, p(140, 40), p(260, 130)));
+    o.push(colour(2));
+    o.push(Order::BeginArea(0x40));
+    o.push(Order::Line { at: Some(p(130, 130)), pts: vec![p(200, 185), p(270, 130), p(130, 130)] });
+    o.push(Order::EndArea);
+    o.extend(filled(14, p(185, 40), p(215, 95)));
+    o.extend(filled(1, p(150, 95), p(175, 120)));
+    o.extend(filled(1, p(225, 95), p(250, 120)));
+    // Outlines and a caption.
+    o.push(colour(-1));
+    o.push(Order::Box { at: Some(p(140, 40)), flags: 0x20, corner: p(260, 130), h: 0, v: 0 });
+    o.push(Order::Line { at: Some(p(130, 130)), pts: vec![p(200, 185), p(270, 130)] });
+    o.push(Order::CharString { at: Some(p(12, 280)), moving: false, text: b"rs2 metafile artwork".to_vec() });
+    let body = gpi::goca::encode_all(&o);
+    let mut data = Vec::new();
+    gpi::goca::encode(&Order::BeginSegment { id: 1, flags: 0x7000, len: body.len() as u32 }, &mut data);
+    data.extend_from_slice(&body);
+    gpi::metafile::build(&gpi::metafile::Metafile { units: gpi::xform::PU_PELS, page: (400, 300), data, ..Default::default() })
 }

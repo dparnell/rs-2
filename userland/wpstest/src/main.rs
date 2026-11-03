@@ -16,7 +16,9 @@
 //! a class DLL in the running shell and puts an object of it on the desktop.
 //! `WPSTEST OLDDESKTOP` marks the desktop as rs2's version 8 and `WPSTEST
 //! DUPES`, after the shell has started again, checks that the upgrade made
-//! nothing twice.
+//! nothing twice. `WPSTEST DOSPROPS` starts PMSHELL, makes a DOS program
+//! object with DOS settings (`SET DOS_RMSIZE=512`...), starts it (DOSSET.COM
+//! shows what the session got) and opens its settings.
 
 #![no_std]
 #![no_main]
@@ -71,6 +73,10 @@ unsafe extern "C" {
     fn WinCreateMsgQueue(hab: u32, cmsg: i32) -> u32;
     #[link_name = "PMWIN.726"]
     fn WinDestroyMsgQueue(hmq: u32) -> u32;
+    #[link_name = "PMWIN.899"]
+    fn WinWindowFromID(h: u32, id: u32) -> u32;
+    #[link_name = "PMWIN.920"]
+    fn WinSendMsg(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32;
     #[link_name = "PMWIN.702"]
     fn WinBeginEnumWindows(h: u32) -> u32;
     #[link_name = "PMWIN.756"]
@@ -266,6 +272,25 @@ fn prog_env(po: usize) -> Vec<u8> {
         q = unsafe { q.add(s.len() + 1) };
     }
     v
+}
+
+/// File system handles stand for the path OS2.INI gives them: a number
+/// the table gave to another path (as a process racing the shell once
+/// did: SysOpenObject('C:\MMOS2\SOUNDS') opened the Multimedia Templates
+/// folder) finds that path's object, and the object that held it gets a
+/// new handle.
+fn handle_collision() {
+    let (a, b) = (b"C:\\OS2\\HELP", b"C:\\OS2\\DLL");
+    let ha = query(a);
+    let oa = object(ha);
+    check("a folder's handle", ha >> 16 == 3 && oa != 0 && path(ha) == a);
+    // Another process gave that number to another path.
+    let (app, key, val) = (z(b"PM_Workplace:Handles"), z(&hex(ha & 0xffff)), z(b));
+    unsafe { PrfWriteProfileData(HINI_USER, app.as_ptr(), key.as_ptr(), val.as_ptr(), val.len() as u32) };
+    let ob = object(ha);
+    check("the handle opens the path the table gives it", ob != 0 && ob != oa && title(ob) == b"DLL");
+    let ha2 = query(a);
+    check("the old holder gets a new handle", ha2 != 0 && ha2 != ha && object(ha2) == oa && path(ha2) == a);
 }
 
 fn make() {
@@ -532,6 +557,56 @@ fn system_settings(o: usize) {
     check("MinButtonAppearance minimize", set(b"MinButtonAppearance", 2) && get(b"MinButtonAppearance") == Some(2));
     check("MinButtonBehavior hide, then viewer (HiddenMinWindows)", set(b"MinButtonBehavior", 1) && ini(b"HiddenMinWindows") == b"1" && set(b"MinButtonBehavior", 2) && get(b"MinButtonBehavior") == Some(2));
     check("an unknown setting", get(b"NoSuchSetting").is_none());
+
+    // Folder menus and menu bars (WPCONFIG keeps them in PM_Workplace as
+    // text).
+    let pw = |key: &[u8]| -> Vec<u8> {
+        let (a, k) = (z(b"PM_Workplace"), z(key));
+        let mut buf = [0u8; 16];
+        let mut n = 16u32;
+        if unsafe { PrfQueryProfileData(HINI_USER, a.as_ptr(), k.as_ptr(), buf.as_mut_ptr(), &mut n) } == 0 {
+            return Vec::new();
+        }
+        buf[..n as usize].iter().copied().take_while(|&c| c != 0).collect()
+    };
+    let f = object(query(b"C:\\OS2\\HELP"));
+    let desk = object(query(b"<WP_DESKTOP>"));
+    check("FolderMenuBar on by default; the desktop has none", get(b"FolderMenuBar") == Some(1) && call(f, b"wpQueryMenuBarVisibility", &[]) == 1 && call(desk, b"wpQueryMenuBarVisibility", &[]) == 0);
+    check("FolderMenuBar off (PM_Workplace OFF): folders follow", set(b"FolderMenuBar", 0) && get(b"FolderMenuBar") == Some(0) && pw(b"FolderMenuBar") == b"OFF" && call(f, b"wpQueryMenuBarVisibility", &[]) == 0);
+    check("a folder's own menu bar setting wins", call(f, b"wpSetMenuBarVisibility", &[1]) == 1 && call(f, b"wpQueryMenuBarVisibility", &[]) == 1);
+    call(f, b"wpSetMenuBarVisibility", &[2]);
+    check("FolderMenuBar on again", set(b"FolderMenuBar", 1) && pw(b"FolderMenuBar") == b"ON" && call(f, b"wpQueryMenuBarVisibility", &[]) == 1);
+    check("FolderMenus short (PM_Workplace SHORT), then long", set(b"FolderMenus", 0) && pw(b"FolderMenus") == b"SHORT" && call(f, b"wpQueryMenuStyle", &[]) == 0 && set(b"FolderMenus", 1) && call(f, b"wpQueryMenuStyle", &[]) == 1);
+    menu_bar_view(f);
+}
+
+/// A folder window's menu bar: there when the folder's window opens, its
+/// Edit pull-down filled as it drops, gone and back with
+/// wpSetMenuBarVisibility.
+fn menu_bar_view(f: usize) {
+    const FID_MENU: u32 = 0x8005;
+    const FID_CLIENT: u32 = 0x8008;
+    const MM_QUERYITEM: u32 = 0x0182;
+    const MM_QUERYITEMCOUNT: u32 = 0x0184;
+    const WM_INITMENU: u32 = 0x0033;
+    let hab = unsafe { WinInitialize(0) };
+    let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
+    // OPEN_CONTENTS
+    let frame = call(f, b"wpOpen", &[0, 1, 0]) as u32;
+    let bar = unsafe { WinWindowFromID(frame, FID_MENU) };
+    check("a folder window has a menu bar", frame != 0 && bar != 0 && unsafe { WinSendMsg(bar, MM_QUERYITEMCOUNT, 0, 0) } == 5);
+    // MENUITEM of the Edit pull-down (id 720): its submenu at +8.
+    let mut mi = [0u32; 4];
+    unsafe { WinSendMsg(bar, MM_QUERYITEM, 720 | 1 << 16, mi.as_mut_ptr() as u32) };
+    let sub = mi[2];
+    unsafe { WinSendMsg(WinWindowFromID(frame, FID_CLIENT), WM_INITMENU, 720, sub) };
+    check("its Edit pull-down is filled as it drops", sub != 0 && unsafe { WinSendMsg(sub, MM_QUERYITEMCOUNT, 0, 0) } == 11);
+    call(f, b"wpSetMenuBarVisibility", &[0]);
+    let gone = unsafe { WinWindowFromID(frame, FID_MENU) } == 0;
+    call(f, b"wpSetMenuBarVisibility", &[2]);
+    check("wpSetMenuBarVisibility takes it away and gives it back", gone && unsafe { WinWindowFromID(frame, FID_MENU) } != 0);
+    call(f, b"wpClose", &[]);
+    unsafe { WinDestroyMsgQueue(hmq) };
 }
 
 /// The desktop's lockup and drop settings (WPDesktop's methods, IBM's
@@ -813,6 +888,49 @@ fn remote() {
     check("WinDestroyObject of the program in the shell", unsafe { WinDestroyObject(h) } != 0);
 }
 
+/// `WPSTEST DOSPROPS`: a DOS program object with DOS settings in the
+/// running shell, started (its window shows DOSSET's line: RM=512
+/// VER=5.0 BREAK=1) and its settings notebook opened.
+fn dos_props() {
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let rc = unsafe { DosExecPgm(core::ptr::null_mut(), 0, 1, b"PMSHELL\0\0".as_ptr(), core::ptr::null(), &mut res, b"C:\\OS2\\PMSHELL.EXE\0".as_ptr()) };
+    check("PMSHELL started", rc == 0);
+    let mut up = false;
+    for _ in 0..120 {
+        let mut p: *mut u8 = core::ptr::null_mut();
+        if unsafe { DosGetNamedSharedMem(&mut p, b"\\SHAREMEM\\RS2WPS.MEM\0".as_ptr(), 1) } == 0 {
+            let (magic, hwnd) = unsafe { ((p as *const u32).read_volatile(), (p.add(4) as *const u32).read_volatile()) };
+            unsafe { DosFreeMem(p) };
+            if magic == 0x5350_5752 && hwnd != 0 {
+                up = true;
+                break;
+            }
+        }
+        unsafe { DosSleep(500) };
+    }
+    check("the shell answers", up);
+    if !up {
+        return;
+    }
+    let h = create(
+        b"WPProgram",
+        b"DOS Settings Test",
+        b"EXENAME=C:\\OS2\\MDOS\\COMMAND.COM;PARAMETERS=/K C:\\DOS\\DOSSET.COM;PROGTYPE=WINDOWEDVDM;SET DOS_RMSIZE=512;SET DOS_VERSION=DOSSET.COM,5,0,255;SET DOS_BREAK=1;OBJECTID=<RS2_DOSSET>",
+        b"<WP_DESKTOP>",
+    );
+    check("DOS program object with DOS settings", h != 0);
+    let o = z(b"OPEN=DEFAULT");
+    check("started", unsafe { WinSetObjectData(h, o.as_ptr()) } != 0);
+    unsafe { DosSleep(8000) };
+    let o = z(b"OPEN=SETTINGS");
+    check("settings opened", unsafe { WinSetObjectData(h, o.as_ptr()) } != 0);
+    // Time to change them by hand (or by typed keys), then once more with
+    // what was saved.
+    unsafe { DosSleep(60000) };
+    let o = z(b"OPEN=DEFAULT");
+    check("started again", unsafe { WinSetObjectData(h, o.as_ptr()) } != 0);
+}
+
 /// `WPSTEST SHELLREMOTE`: start PMSHELL, wait for its desktop, then the REMOTE
 /// checks from this process.
 fn shell_then_remote() {
@@ -988,12 +1106,13 @@ fn main(st: &Startup) -> u32 {
     if word.eq_ignore_ascii_case(b"SHELL") {
         return shell(args);
     }
-    if [&b"REMOTE"[..], b"REGISTER", b"SHELLREMOTE", b"OLDDESKTOP", b"DUPES"].iter().any(|w| word.eq_ignore_ascii_case(w)) {
+    if [&b"REMOTE"[..], b"REGISTER", b"SHELLREMOTE", b"OLDDESKTOP", b"DUPES", b"DOSPROPS"].iter().any(|w| word.eq_ignore_ascii_case(w)) {
         match word.to_ascii_uppercase().as_slice() {
             b"REMOTE" => remote(),
             b"SHELLREMOTE" => shell_then_remote(),
             b"REGISTER" => register_remote(args),
             b"OLDDESKTOP" => old_desktop(),
+            b"DOSPROPS" => dos_props(),
             _ => dupes(),
         }
         let n = unsafe { FAILS };
@@ -1014,6 +1133,7 @@ fn main(st: &Startup) -> u32 {
     } else {
         make();
         program_list();
+        handle_collision();
     }
     let n = unsafe { FAILS };
     println!("wpstest done: {} failure(s)", n);

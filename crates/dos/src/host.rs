@@ -144,13 +144,11 @@ pub trait Host {
     fn windows(&mut self, list: &[crate::vwin::Window], active: u16) {
         let _ = (list, active);
     }
-    /// The PC speaker: `Some(hz)` sounding, `None` silent.
-    fn speaker(&mut self, hz: Option<u32>) {
-        let _ = hz;
-    }
-    /// Sound Blaster output: 8-bit unsigned mono PCM at `rate` Hz.
-    fn pcm(&mut self, rate: u32, data: &[u8]) {
-        let _ = (rate, data);
+    /// Sound (crate::audio): 16-bit signed stereo frames (left, right
+    /// interleaved) at `rate` Hz, as output time passes; nothing while
+    /// the machine is quiet.
+    fn audio(&mut self, rate: u32, frames: &[i16]) {
+        let _ = (rate, frames);
     }
     /// Output to printer port `lpt` (0 = LPT1/PRN) from INT 17h, DOS
     /// writes to PRN/LPTn, INT 21h 05h or the parallel port's registers.

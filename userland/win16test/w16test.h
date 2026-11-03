@@ -21,3 +21,5 @@
 #define IDI_TEST     7
 #define IDC_RADICON     120
 #define IDC_ORD      121
+#define IDB_QUAD     130
+#define IDCUR_TEST   131

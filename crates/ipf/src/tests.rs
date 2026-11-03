@@ -409,3 +409,56 @@ fn acviewport() {
     assert_eq!((a.objid, a.name, a.dll), (1, &b"IPFMain"[..], &b"ipf"[..]));
     assert_eq!(a.data.unwrap().size, Some((0x11, 55, 100)));
 }
+
+/// `:artwork.`: a bitmap (an OS/2 1.x .BMP, 4 bits) and a metafile
+/// (.MET) compiled into image records the reader decodes again; the
+/// metafile lays out at half the screen (IBM's default size).
+#[test]
+fn artwork_bitmap_and_metafile() {
+    // 3 x 2 pels, 4 bpp: BITMAPFILEHEADER, BITMAPINFOHEADER (12), 16
+    // colours, two rows of 4 bytes.
+    let mut bmp = b"BM".to_vec();
+    let bits_at = 14 + 12 + 16 * 3;
+    bmp.extend_from_slice(&((bits_at + 8) as u32).to_le_bytes());
+    bmp.extend_from_slice(&[0, 0, 0, 0]);
+    bmp.extend_from_slice(&(bits_at as u32).to_le_bytes());
+    bmp.extend_from_slice(&[12, 0, 0, 0, 3, 0, 2, 0, 1, 0, 4, 0]);
+    for i in 0..16u8 {
+        bmp.extend_from_slice(&[i * 16, 0, 255 - i * 16]);
+    }
+    bmp.extend_from_slice(&[0x12, 0x30, 0, 0, 0x45, 0x60, 0, 0]);
+    // A metafile: anything that starts with Begin Document.
+    let met: Vec<u8> = [&[0x00, 0x10, 0xd3, 0xa8, 0xa8][..], &[7u8; 300]].concat();
+    let src = b":userdoc.\n:h1 res=1.Art\n:p.Before\n:artwork name='pic.bmp'.\n:artwork name='graph.met' align=center.\n:artwork name='PIC.BMP' runin.\n:euserdoc.\n";
+    let load = |n: &[u8]| match n.to_ascii_lowercase().as_slice() {
+        b"pic.bmp" => Some(bmp.clone()),
+        b"graph.met" => Some(met.clone()),
+        _ => None,
+    };
+    let data = crate::compile::compile_with(src, true, &load).unwrap();
+    let doc = Doc::parse(&data).unwrap();
+    let start = doc.header.image_start;
+    assert_ne!(start, 0);
+    let page = layout(&doc, 0, &Options { width: 80, keys: b"" }, &mut Grid);
+    let arts: Vec<(u32, u8, bool, i32, i32)> = page
+        .runs
+        .iter()
+        .filter_map(|r| match r.kind {
+            RunKind::Bitmap { offset, flags, metafile, cx, cy, .. } => Some((offset, flags, metafile, cx, cy)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(arts.len(), 3, "{arts:?}");
+    // One record per file; the runin flag.
+    assert_eq!(arts[0].0, arts[2].0);
+    assert_eq!((arts[0].1, arts[1].1, arts[2].1), (0x01, 0x05, 0x11));
+    assert_eq!((arts[0].2, arts[0].3, arts[0].4), (false, 3, 2));
+    assert_eq!((arts[1].2, arts[1].3, arts[1].4), (true, 512, 384));
+    let b = crate::bitmap::decode(&data, start, arts[0].0, (0, 0)).unwrap();
+    assert_eq!((b.cx, b.cy, b.bpp), (3, 2, 4));
+    assert_eq!(b.pixel(0, 0), (255 - 16) << 16 | 16);
+    assert_eq!(b.pixel(1, 1), (255 - 5 * 16) << 16 | 5 * 16);
+    assert_eq!(crate::bitmap::metafile(&data, start, arts[1].0).unwrap(), met);
+    // A missing file is an error.
+    assert!(crate::compile::compile_with(b":userdoc.\n:h1 res=1.A\n:artwork name='none.bmp'.\n:euserdoc.\n", true, &load).is_err());
+}

@@ -1,0 +1,35 @@
+/* MDI16's menu and accelerators. */
+#include <windows.h>
+#include "mdi16.h"
+
+Mdi16 MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "New &Text\tCtrl+T", IDM_NEWTEXT
+        MENUITEM "New &Picture\tCtrl+P", IDM_NEWPICT
+        MENUITEM "&Close\tCtrl+F4", IDM_CLOSE
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit", IDM_EXIT
+    END
+    POPUP "&Window"
+    BEGIN
+        MENUITEM "&Tile\tShift+F4", IDM_TILE
+        MENUITEM "Tile &Horizontally", IDM_TILEH
+        MENUITEM "&Cascade\tShift+F5", IDM_CASCADE
+        MENUITEM "&Arrange Icons", IDM_ARRANGE
+        MENUITEM "Close &All", IDM_CLOSEALL
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About MDI16...", IDM_ABOUT
+    END
+END
+
+Mdi16 ACCELERATORS
+BEGIN
+    "^T", IDM_NEWTEXT
+    "^P", IDM_NEWPICT
+    VK_F4, IDM_TILE, VIRTKEY, SHIFT
+    VK_F5, IDM_CASCADE, VIRTKEY, SHIFT
+END
