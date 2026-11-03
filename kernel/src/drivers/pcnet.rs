@@ -20,10 +20,14 @@
 //! chip strips nothing on receive (the length includes the FCS) and pads
 //! short frames on transmit (CSR4 APAD_XMT).
 //!
-//! The chip has no MSI, and rs2 cannot route PCI INTx lines (no ACPI
-//! _PRT), so its interrupt stays disabled (CSR0 IENA clear): the timer
-//! tick looks at the next receive descriptor's OWN bit and wakes the
-//! network thread, which also looks every 20 ms. Link state comes from
+//! The chip has no MSI: its INTx pin is routed through the ACPI
+//! namespace (`_PRT`, `msi::setup_intx`), and with CSR0 IENA set it
+//! interrupts on received frames (transmit and initialisation interrupts
+//! masked in CSR3); the handler acknowledges CSR0 and wakes the network
+//! thread. When the pin cannot be routed (`nointx`, no IOAPIC) the
+//! interrupt stays disabled: the timer tick looks at the next receive
+//! descriptor's OWN bit and wakes the network thread, which also looks
+//! every 20 ms. Link state comes from
 //! the link LED (BCR4 LEDOUT) once that LED has been seen lit; until then
 //! the link counts as up, since emulations without a link indicator
 //! (VMware's vlance reads BCR4 as 0xc0 throughout) would otherwise never
@@ -46,7 +50,12 @@ const INIT: u32 = 1 << 0;
 const STRT: u32 = 1 << 1;
 const STOP: u32 = 1 << 2;
 const TDMD: u32 = 1 << 3;
+const IENA: u32 = 1 << 6;
+const INTR: u32 = 1 << 7;
 const IDON: u32 = 1 << 8;
+// CSR3 interrupt masks.
+const TINTM: u32 = 1 << 9;
+const IDONM: u32 = 1 << 8;
 /// Status bits cleared by writing ones: BABL CERR MISS MERR RINT TINT IDON.
 const CSR0_W1C: u32 = 0x7f00;
 
@@ -83,6 +92,8 @@ pub fn is_pcnet(d: &pci::Device) -> bool {
 struct Io {
     base: u16,
     dwio: bool,
+    /// IENA, kept in every CSR0 write once interrupts are on.
+    ie: u32,
 }
 
 impl Io {
@@ -108,6 +119,7 @@ impl Io {
     }
 
     fn set_csr(&self, r: u32, v: u32) {
+        let v = if r == 0 { v | self.ie } else { v };
         self.rap(r);
         unsafe {
             if self.dwio {
@@ -220,6 +232,8 @@ pub struct Pcnet {
     rings: SpinLock<Rings>,
     /// Initialisation block (kept for the chip's lifetime).
     _init: Dma,
+    /// Receive interrupts through the INTx pin.
+    irq: AtomicBool,
 }
 
 /// Leave the chip quiet: stopped, no DMA, no interrupts.
@@ -254,7 +268,7 @@ pub fn probe(d: &pci::Device) {
     let base = (b0 & 0xfffc) as u16;
     // 16-bit, else 32-bit, else 16-bit again: a 32-bit reset leaves
     // 32-bit mode on some implementations (QEMU's), not on the chip.
-    let mut io = Io { base, dwio: false };
+    let mut io = Io { base, dwio: false, ie: 0 };
     if ![false, true, false].into_iter().any(|dwio| {
         io.dwio = dwio;
         io.check()
@@ -330,12 +344,12 @@ pub fn probe(d: &pci::Device) {
         shut_down(d, &io);
         return;
     }
-    // Start, interrupts left disabled (no IENA): polled.
+    // Start; interrupts are turned on below if the INTx pin is routed.
     io.set_csr(0, IDON | STRT);
     let bcr4 = io.bcr(4);
     let link_led = bcr4 & LED_LNKSTE != 0;
     crate::println!("{name}: {} I/O {base:#x}, chip id {id:#010x}, CSR0 {:#06x}, BCR4 {bcr4:#06x}", if io.dwio { "32-bit" } else { "16-bit" }, io.csr(0));
-    let nic = Pcnet {
+    let nic = Arc::new(Pcnet {
         name,
         mac,
         io: SpinLock::new(io),
@@ -343,8 +357,33 @@ pub fn probe(d: &pci::Device) {
         led_seen: AtomicBool::new(link_led && bcr4 & LED_OUT != 0),
         rings: SpinLock::new(rings),
         _init: init,
-    };
-    crate::net::register(Arc::new(nic));
+        irq: AtomicBool::new(false),
+    });
+    if let Some(gsi) = crate::msi::setup_intx(d, interrupt, Arc::as_ptr(&nic) as usize) {
+        let mut io = nic.io.lock();
+        let csr3 = io.csr(3);
+        io.set_csr(3, csr3 | TINTM | IDONM);
+        io.ie = IENA;
+        io.set_csr(0, 0);
+        drop(io);
+        nic.irq.store(true, Ordering::Relaxed);
+        crate::println!("{}: INTx on GSI {gsi}", nic.name);
+    }
+    crate::net::register(nic);
+}
+
+/// INTx handler (the context is the Pcnet): acknowledge CSR0 and wake
+/// the network thread.
+fn interrupt(ctx: usize) {
+    let nic = unsafe { &*(ctx as *const Pcnet) };
+    let io = nic.io.lock();
+    let csr0 = io.csr(0);
+    if csr0 & INTR == 0 {
+        return;
+    }
+    io.set_csr(0, csr0 & CSR0_W1C);
+    drop(io);
+    crate::net::kick();
 }
 
 impl Nic for Pcnet {
@@ -420,5 +459,9 @@ impl Nic for Pcnet {
 
     fn rx_pending(&self) -> bool {
         self.rings.try_lock().is_some_and(|r| r.rx_ready())
+    }
+
+    fn interrupt_driven(&self) -> bool {
+        self.irq.load(Ordering::Relaxed)
     }
 }

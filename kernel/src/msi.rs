@@ -1,7 +1,8 @@
-//! Message-signalled interrupts (PCI MSI and MSI-X).
+//! Message-signalled interrupts (PCI MSI and MSI-X), and PCI INTx lines
+//! routed through the IOAPIC by the ACPI namespace (`_PRT`, [`setup_intx`]).
 //!
-//! PCI INTx pins cannot be routed without the ACPI namespace (_PRT), so
-//! devices interrupt through messages: a memory write of `data` to
+//! Devices with MSI or MSI-X interrupt through messages:
+//! a memory write of `data` to
 //! `0xFEE0_0000 | destination APIC id << 12` that the LAPIC of that CPU
 //! takes as an edge-triggered, fixed-delivery interrupt on vector `data`.
 //! MSI (capability 05h) has one address/data pair for 1-32 vectors, MSI-X
@@ -101,6 +102,10 @@ pub fn alloc(handler: fn(usize), ctx: usize) -> Option<u8> {
     if !enabled() {
         return None;
     }
+    alloc_vector(handler, ctx)
+}
+
+fn alloc_vector(handler: fn(usize), ctx: usize) -> Option<u8> {
     let mut next = NEXT.lock();
     while *next <= LAST {
         let v = *next;
@@ -123,17 +128,96 @@ fn message(vector: u8, apic: u32) -> (u64, u32) {
 
 /// Interrupt on a device vector (from the trap dispatcher).
 pub fn dispatch(vector: u8) {
-    if crate::apic::active() {
+    // A level-triggered line (PCI INTx) is acknowledged after the handler
+    // has quietened the device, or the IOAPIC would deliver it again.
+    let level = LEVEL[vector as usize].load(Ordering::Relaxed);
+    if crate::apic::active() && !level {
         crate::apic::eoi();
     }
     let h = HANDLERS[vector as usize].load(Ordering::Acquire);
-    if h == 0 {
-        return;
+    if h != 0 {
+        COUNT[vector as usize].fetch_add(1, Ordering::Relaxed);
+        crate::api::perf::interrupt(crate::smp::this().index());
+        let f: fn(usize) = unsafe { core::mem::transmute(h) };
+        f(CONTEXT[vector as usize].load(Ordering::Relaxed));
     }
-    COUNT[vector as usize].fetch_add(1, Ordering::Relaxed);
-    crate::api::perf::interrupt(crate::smp::this().index());
-    let f: fn(usize) = unsafe { core::mem::transmute(h) };
-    f(CONTEXT[vector as usize].load(Ordering::Relaxed));
+    if crate::apic::active() && level {
+        crate::apic::eoi();
+    }
+}
+
+// ---- PCI INTx through the IOAPIC ----
+
+/// Vectors of level-triggered (INTx) lines.
+static LEVEL: [AtomicBool; 256] = [const { AtomicBool::new(false) }; 256];
+
+/// An INTx line: its GSI, how it is triggered, its vector and the
+/// handlers of the devices sharing it.
+struct Line {
+    gsi: u32,
+    level: bool,
+    active_low: bool,
+    vector: u8,
+    handlers: Vec<(fn(usize), usize)>,
+}
+
+static LINES: SpinLock<Vec<Line>> = SpinLock::new(Vec::new());
+
+/// Run the handlers of the devices on the INTx line of `vector`.
+fn intx_dispatch(vector: usize) {
+    let Some(g) = LINES.try_lock() else { return };
+    let hs: Vec<(fn(usize), usize)> = g.iter().filter(|l| l.vector as usize == vector).flat_map(|l| l.handlers.iter().copied()).collect();
+    drop(g);
+    for (h, c) in hs {
+        h(c);
+    }
+}
+
+/// Whether PCI INTx may be used (not `nointx`).
+pub fn intx_enabled() -> bool {
+    !crate::boot_info().cmdline().split_whitespace().any(|w| w.eq_ignore_ascii_case("nointx"))
+}
+
+/// Deliver `dev`'s INTx pin to `handler(ctx)`: the pin is routed through
+/// the ACPI namespace's `_PRT` to an IOAPIC input, which gets a vector
+/// (shared with the other devices on that input). The input is unmasked
+/// in [`start`]. Returns the GSI, or None when the pin cannot be routed
+/// (no IOAPIC, no `_PRT` entry, `nointx`): the driver polls then.
+pub fn setup_intx(dev: &pci::Device, handler: fn(usize), ctx: usize) -> Option<u32> {
+    if !intx_enabled() || crate::acpi::info().is_none_or(|i| i.ioapics.is_empty()) {
+        return None;
+    }
+    let pin = (dev.read(0x3c) >> 8) as u8;
+    let line = dev.read(0x3c) as u8;
+    let g = crate::acpi::pci_routing()?.route(dev.bus, dev.dev, pin, line)?;
+    let mut lines = LINES.lock();
+    if let Some(l) = lines.iter_mut().find(|l| l.gsi == g.gsi) {
+        l.handlers.push((handler, ctx));
+    } else {
+        let v = alloc_vector(intx_dispatch, 0)?;
+        CONTEXT[v as usize].store(v as usize, Ordering::Relaxed);
+        LEVEL[v as usize].store(g.level, Ordering::Relaxed);
+        lines.push(Line { gsi: g.gsi, level: g.level, active_low: g.active_low, vector: v, handlers: alloc::vec![(handler, ctx)] });
+    }
+    dev.set_intx_disabled(false);
+    Some(g.gsi)
+}
+
+/// Program and unmask the INTx lines (from [`start`]).
+fn start_intx() {
+    let lines = LINES.lock();
+    for l in lines.iter() {
+        if crate::apic::route_gsi(l.gsi, l.vector, l.level, l.active_low, false) {
+            crate::println!(
+                "intx: GSI {} ({}, active {}) on vector {:#x}, {} device(s)",
+                l.gsi,
+                if l.level { "level" } else { "edge" },
+                if l.active_low { "low" } else { "high" },
+                l.vector,
+                l.handlers.len()
+            );
+        }
+    }
 }
 
 /// Interrupts taken on `vector` so far.
@@ -379,6 +463,7 @@ pub fn start() {
     }
     let n = ts.len();
     drop(ts);
+    start_intx();
     LIVE.store(true, Ordering::Release);
     if n > 0 {
         crate::println!("msi: {n} vector(s) over {} CPU(s)", cpus.len());

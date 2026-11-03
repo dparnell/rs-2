@@ -348,7 +348,16 @@ pub fn probe(d: &pci::Device) {
             regs.w(IMS, INT_CAUSES);
             true
         }
-        None => false,
+        // No MSI (the 8254x): the INTx pin, routed by ACPI.
+        None => match crate::msi::setup_intx(d, interrupt, regs.0 as usize) {
+            Some(gsi) => {
+                crate::println!("{name}: INTx on GSI {gsi}");
+                let _ = regs.r(ICR);
+                regs.w(IMS, INT_CAUSES);
+                true
+            }
+            None => false,
+        },
     };
     let nic = E1000 { name, mac, regs, irq, rings: SpinLock::new(Rings { rx, rxbuf, rx_next: 0, tx, txbuf, tx_next: 0 }) };
     crate::net::register(Arc::new(nic));

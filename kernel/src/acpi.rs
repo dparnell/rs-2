@@ -1,5 +1,6 @@
 //! ACPI tables: MADT (interrupt controllers), FADT (power management,
-//! reset), DSDT (just enough to find the S5 sleep type), MCFG.
+//! reset), DSDT (just enough to find the S5 sleep type), MCFG; the DSDT
+//! and SSDTs are kept for the PCI interrupt routing ([`crate::aml`]).
 
 use alloc::vec::Vec;
 
@@ -36,9 +37,30 @@ pub struct Info {
     pub sci_irq: u16,
     /// PCI Express configuration space (base, first bus, last bus).
     pub ecam: Option<(u64, u8, u8)>,
+    /// AML definition blocks (DSDT first, then SSDTs): physical address
+    /// of the AML (after the header) and its length.
+    pub aml: Vec<(u64, usize)>,
 }
 
 static INFO: Once<Info> = Once::new();
+static ROUTING: Once<crate::aml::Routing> = Once::new();
+
+/// The PCI interrupt routing of the ACPI namespace (`_PRT`), built on
+/// first use (after PCI enumeration).
+pub fn pci_routing() -> Option<&'static crate::aml::Routing> {
+    if let Some(r) = ROUTING.get() {
+        return Some(r);
+    }
+    let i = info()?;
+    if i.aml.is_empty() {
+        return None;
+    }
+    let blocks: Vec<&[u8]> = i.aml.iter().map(|&(a, n)| unsafe { core::slice::from_raw_parts(phys_to_virt(a) as *const u8, n) }).collect();
+    let r = crate::aml::Routing::from_aml(&blocks);
+    crate::println!("acpi: PCI routing: {} table(s), {} entries", r.table_count(), r.entries());
+    ROUTING.set(r);
+    ROUTING.get()
+}
 
 pub fn info() -> Option<&'static Info> {
     INFO.get()
@@ -175,6 +197,10 @@ fn parse_fadt(t: u64, info: &mut Info) {
         let dsdt = if len >= 148 && u64_at(t + 140) != 0 { u64_at(t + 140) } else { u32_at(t + 40) as u64 };
         if dsdt != 0 && &sig(dsdt) == b"DSDT" {
             parse_s5(dsdt, info);
+            let n = u32_at(dsdt + 4) as usize;
+            if n > 36 {
+                info.aml.insert(0, (dsdt + 36, n - 36));
+            }
         }
     }
 }
@@ -189,6 +215,12 @@ pub fn init(rsdp: u64) {
         match &s {
             b"APIC" => parse_madt(t, &mut info),
             b"FACP" => parse_fadt(t, &mut info),
+            b"SSDT" => unsafe {
+                let n = u32_at(t + 4) as usize;
+                if n > 36 {
+                    info.aml.push((t + 36, n - 36));
+                }
+            },
             b"MCFG" => unsafe {
                 if u32_at(t + 4) >= 44 + 16 {
                     info.ecam = Some((u64_at(t + 44), u8_at(t + 54), u8_at(t + 55)));

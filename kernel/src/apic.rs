@@ -127,6 +127,35 @@ pub fn mask_irq(irq: u8) {
     ioapic_write(0x10 + pin * 2, lo | (1 << 16));
 }
 
+/// Inputs of the (first) IOAPIC.
+static PINS: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Program the IOAPIC input of `gsi` (a PCI interrupt routed by ACPI)
+/// for `vector` on this CPU: level or edge, active low or high, masked
+/// or not. False if the GSI is not on the IOAPIC the kernel drives.
+pub fn route_gsi(gsi: u32, vector: u8, level: bool, active_low: bool, masked: bool) -> bool {
+    let Some(info) = crate::acpi::info() else { return false };
+    let Some(io) = info.ioapics.first() else { return false };
+    if !active() || gsi < io.gsi_base || gsi - io.gsi_base >= PINS.load(Ordering::Relaxed) {
+        return false;
+    }
+    let pin = gsi - io.gsi_base;
+    let mut lo = vector as u32;
+    if active_low {
+        lo |= 1 << 13;
+    }
+    if level {
+        lo |= 1 << 15;
+    }
+    if masked {
+        lo |= 1 << 16;
+    }
+    let dest = (id() as u32) << 24;
+    ioapic_write(0x10 + pin * 2 + 1, dest);
+    ioapic_write(0x10 + pin * 2, lo);
+    true
+}
+
 /// Switch from the PICs to the APICs. The PIT keeps ticking through the
 /// PIC until the LAPIC timer is calibrated against it.
 pub fn init() -> bool {
@@ -138,6 +167,7 @@ pub fn init() -> bool {
     IOAPIC.store(crate::mm::mmio::map(info.ioapics[0].address, 4096) as u64, Ordering::Relaxed);
     // Mask every IOAPIC input first.
     let max = (ioapic_read(1) >> 16) & 0xff;
+    PINS.store(max + 1, Ordering::Relaxed);
     for pin in 0..=max {
         ioapic_write(0x10 + pin * 2, 1 << 16);
     }
