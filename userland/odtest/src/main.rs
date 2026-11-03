@@ -55,6 +55,18 @@ unsafe extern "C" {
     fn WinInitialize(opts: u32) -> u32;
     #[link_name = "PMWIN.716"]
     fn WinCreateMsgQueue(hab: u32, cmsg: i32) -> u32;
+    #[link_name = "PMWIN.793"]
+    fn WinOpenClipbrd(hab: u32) -> u32;
+    #[link_name = "PMWIN.707"]
+    fn WinCloseClipbrd(hab: u32) -> u32;
+    #[link_name = "PMWIN.733"]
+    fn WinEmptyClipbrd(hab: u32) -> u32;
+    #[link_name = "PMWIN.854"]
+    fn WinSetClipbrdData(hab: u32, data: usize, fmt: u32, info: u32) -> u32;
+    #[link_name = "PMWIN.806"]
+    fn WinQueryClipbrdData(hab: u32, fmt: u32) -> usize;
+    #[link_name = "OPENDOC.291"]
+    static ODClipboardClassData: [usize; 13];
     #[link_name = "PMWIN.920"]
     fn WinSendMsg(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> usize;
     #[link_name = "OPENDOC.810"]
@@ -523,6 +535,52 @@ fn settings_test(part: usize, frame: usize) {
     ok_ev("settings notebook");
 }
 
+fn clipboard_test(session: usize, root: usize) {
+    let e = ev();
+    let hab = unsafe { WinInitialize(0) };
+    unsafe { WinCreateMsgQueue(hab, 0) };
+    let clip = m(cd!(ODBaseSessionClassData), 2, &[session, e]);
+    let c = cd!(ODClipboardClassData);
+    // Copy text: into the clipboard's unit, then onto PM's clipboard.
+    m(c, 1, &[clip, e]);
+    let su = m(c, 2, &[clip, e]);
+    su_set(su, b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Property:Contents\0", b"rs2:Type:Text\0", b"copied text");
+    m(c, 7, &[clip, e]);
+    let pm_text = unsafe {
+        WinOpenClipbrd(hab);
+        let t = WinQueryClipbrdData(hab, 1);
+        let v = if t == 0 { Vec::new() } else { s(t).to_vec() };
+        WinCloseClipbrd(hab);
+        v
+    };
+    check("ExportClipboard puts the text on PM's clipboard (CF_TEXT)", pm_text == b"copied text");
+    // Another program's text comes back as the clipboard's contents.
+    unsafe {
+        WinOpenClipbrd(hab);
+        WinEmptyClipbrd(hab);
+        let mut p: *mut u8 = core::ptr::null_mut();
+        DosAllocSharedMem(&mut p, core::ptr::null(), 32, 0x1 | 0x2 | 0x10 | 0x200);
+        core::ptr::copy_nonoverlapping(b"from another app\0".as_ptr(), p, 17);
+        WinSetClipbrdData(hab, p as usize, 1, 0x400);
+        WinCloseClipbrd(hab);
+    }
+    let su = m(c, 2, &[clip, e]);
+    let got = su_text(su, b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Property:Contents\0", b"rs2:Type:Text\0");
+    check("GetContentStorageUnit reads another program's text", got.as_deref() == Some(&b"from another app"[..]));
+    // Copy a part: its unit cloned into the clipboard with the units it refers to.
+    m(c, 1, &[clip, e]);
+    let csu = m(c, 2, &[clip, e]);
+    let psu = m(cd!(ODPersistentObjectClassData), PO_GET_STORAGE_UNIT, &[root, e]);
+    m(cd!(ODStorageUnitClassData), 17, &[psu, e, 0, csu, 0]); // CloneInto
+    let editor = su_text(csu, b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Property:PreferredEditor\0", b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Type:ISOStr\0");
+    check("a part's unit cloned into the clipboard keeps its editor", editor.as_deref().map(|v| v.split(|&b| b == 0).next().unwrap()) == Some(&b"RS2TestPart"[..]));
+    let r = su_text(csu, PROP_CHILD, TYPE_REF).unwrap_or_default();
+    let cid = if r.len() == 4 { m(cd!(ODStorageUnitClassData), SU_GET_ID_FROM_REF, &[csu, e, r.as_ptr() as usize]) } else { 0 };
+    let orig = tp(root).child;
+    check("its strong reference names a copy in the clipboard's draft", cid != 0 && cid != orig);
+    ok_ev("clipboard");
+}
+
 fn events_and_menus(session: usize, rf: usize, cf: usize, root: usize, child: usize) {
     let e = ev();
     let ws = m(cd!(ODBaseSessionClassData), BS_GET_WINDOW_STATE, &[session, e]);
@@ -919,6 +977,9 @@ fn basic() {
     somsup::free_object(set);
     events_and_menus(session, rf, cf, root, child);
     settings_test(root, rf);
+    // The root part's unit must hold its reference to the embedded frame.
+    part_externalize(root, ev());
+    clipboard_test(session, root);
 
     // The root part's storage unit goes in the draft's properties; save.
     let props = m(cd!(ODDraftClassData), DR_ACQUIRE_DRAFT_PROPERTIES, &[draft, e]);

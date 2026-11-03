@@ -596,13 +596,15 @@ methods! {
         draft(this).stored.remove(&id);
         0
     }
-    fn BeginClone(this: usize, ev: usize, dest: usize, frame: usize, kind: usize) -> usize {
-        let d = draft(this);
-        d.key += 1;
-        d.key as usize
+    fn BeginClone(this: usize, ev: usize, dest: usize, frame: usize, kind: usize) -> usize { new_clone_key() }
+    fn EndClone(this: usize, ev: usize, key: usize) -> usize {
+        end_clone(key);
+        0
     }
-    fn EndClone(this: usize, ev: usize, key: usize) -> usize { 0 }
-    fn AbortClone(this: usize, ev: usize, key: usize) -> usize { 0 }
+    fn AbortClone(this: usize, ev: usize, key: usize) -> usize {
+        end_clone(key);
+        0
+    }
     fn WeakClone(this: usize, ev: usize, key: usize, from: usize, to: usize, scope: usize) -> usize { to }
     fn IsValidID(this: usize, ev: usize, id: usize) -> usize {
         let d = draft(this);
@@ -794,8 +796,62 @@ pub fn su_id(su: usize) -> u32 {
     sus(su).id
 }
 
-/// Copy every property of one unit into another (CloneInto).
+/// Copy every property of one unit into another (CloneInto), and with
+/// them the units its strong references name (copied into the
+/// destination's draft once per clone operation `key`; weak references
+/// keep their target when it was copied too, else go).
 pub fn copy_su(from: usize, to: usize) {
+    clone_into(from, to, 0);
+}
+
+/// Clone memos: per clone key, (source draft, source ID) -> new ID.
+static mut MEMOS: Vec<(usize, BTreeMap<(usize, u32), u32>)> = Vec::new();
+static mut NEXT_KEY: usize = 0;
+
+#[allow(static_mut_refs)]
+fn memo(key: usize) -> &'static mut BTreeMap<(usize, u32), u32> {
+    unsafe {
+        if let Some(i) = MEMOS.iter().position(|m| m.0 == key) {
+            return &mut MEMOS[i].1;
+        }
+        MEMOS.push((key, BTreeMap::new()));
+        &mut MEMOS.last_mut().unwrap().1
+    }
+}
+
+pub fn new_clone_key() -> usize {
+    unsafe {
+        NEXT_KEY += 1;
+        NEXT_KEY
+    }
+}
+
+#[allow(static_mut_refs)]
+pub fn end_clone(key: usize) {
+    unsafe { MEMOS.retain(|m| m.0 != key) };
+}
+
+/// The copy of unit `id` of draft `src` in draft `dest` (made now).
+fn clone_id(src: usize, id: u32, dest: usize, key: usize) -> u32 {
+    if let Some(&n) = memo(key).get(&(src, id)) {
+        return n;
+    }
+    let from = draft_su(src, 0, id);
+    if from == 0 {
+        return 0;
+    }
+    let to = new_su(dest, 0);
+    let nid = su_id(to);
+    memo(key).insert((src, id), nid);
+    clone_into(from, to, key);
+    release(to, 0);
+    release(from, 0);
+    nid
+}
+
+pub fn clone_into(from: usize, to: usize, key: usize) {
+    let key = if key == 0 { new_clone_key() } else { key };
+    let (src, dest) = (sus(from).draft, sus(to).draft);
     let props = sus(from).props.clone();
     let t = sus(to);
     for p in props {
@@ -804,6 +860,75 @@ pub fn copy_su(from: usize, to: usize) {
             None => t.props.push(p),
         }
     }
+    // The reference table: each strong target copied into the destination.
+    let old = refs(from);
+    let mut new = Vec::with_capacity(old.len());
+    for e in old {
+        let (id, weak) = (e & !WEAK, e & WEAK != 0);
+        let n = if id == 0 || src == 0 || dest == 0 {
+            0
+        } else if weak {
+            memo(key).get(&(src, id)).copied().unwrap_or(if src == dest { id } else { 0 })
+        } else {
+            clone_id(src, id, dest, key)
+        };
+        new.push(if n == 0 { 0 } else { n | if weak { WEAK } else { 0 } });
+    }
+    set_refs(to, &new);
+}
+
+/// A unit's storage unit reference table (rs2: the property
+/// `rs2:StorageUnitRefs`, one u32 per reference: the target's ID, the top
+/// bit set for a weak reference). An ODStorageUnitRef is its index + 1.
+pub const PROP_REFS: &[u8] = b"rs2:StorageUnitRefs";
+
+pub fn refs(su: usize) -> Vec<u32> {
+    let s = sus(su);
+    let Some(p) = s.props.iter().find(|p| p.name == PROP_REFS) else { return Vec::new() };
+    let Some(v) = p.vals.first() else { return Vec::new() };
+    v.data.chunks(4).map(bytes_u32).collect()
+}
+
+pub fn set_refs_pub(su: usize, r: &[u32]) {
+    set_refs(su, r)
+}
+
+fn set_refs(su: usize, r: &[u32]) {
+    let s = sus(su);
+    let mut d = Vec::new();
+    for e in r {
+        d.extend_from_slice(&e.to_le_bytes());
+    }
+    let v = Value { ty: b"rs2:Type:Refs".to_vec(), data: d };
+    match s.props.iter_mut().find(|p| p.name == PROP_REFS) {
+        Some(p) => p.vals = alloc::vec![v],
+        None if r.is_empty() => {}
+        None => s.props.push(Prop { name: PROP_REFS.to_vec(), vals: alloc::vec![v] }),
+    }
+}
+
+/// The reference for (id, weak) in a unit's table (added if new).
+fn make_ref(su: usize, id: u32, weak: bool) -> u32 {
+    let e = id | if weak { WEAK } else { 0 };
+    let mut r = refs(su);
+    let i = match r.iter().position(|&x| x == e) {
+        Some(i) => i,
+        None => {
+            r.push(e);
+            set_refs(su, &r);
+            r.len() - 1
+        }
+    };
+    i as u32 + 1
+}
+
+/// The table entry a reference names.
+fn ref_entry(su: usize, r: u32) -> Option<u32> {
+    let i = r as usize;
+    if i == 0 {
+        return None;
+    }
+    refs(su).get(i - 1).copied().filter(|&e| e & !WEAK != 0)
 }
 
 /// The bytes of the first value of a property (rs2's own bookkeeping).
@@ -1025,7 +1150,7 @@ methods! {
     }
     fn SuCloneInto(this: usize, ev: usize, key: usize, dest: usize, scope: usize) -> usize {
         if dest != 0 {
-            copy_su(this, dest);
+            clone_into(this, dest, key);
         }
         0
     }
@@ -1158,22 +1283,36 @@ methods! {
         }
     }
     fn IsValidStorageUnitRef(this: usize, ev: usize, r: usize) -> usize {
-        let id = read::<u32>(r) & !WEAK;
+        let id = if r == 0 { 0 } else { ref_entry(this, read::<u32>(r)).map_or(0, |e| e & !WEAK) };
         (id != 0 && draft_has(sus(this).draft, id)) as usize
     }
     fn GetStrongStorageUnitRef(this: usize, ev: usize, id: usize, r: usize) -> usize {
-        write::<u32>(r, id as u32 & !WEAK);
+        write::<u32>(r, make_ref(this, id as u32, false));
         0
     }
     fn GetWeakStorageUnitRef(this: usize, ev: usize, id: usize, r: usize) -> usize {
-        write::<u32>(r, id as u32 | WEAK);
+        write::<u32>(r, make_ref(this, id as u32, true));
         0
     }
-    fn IsStrongStorageUnitRef(this: usize, ev: usize, r: usize) -> usize { (read::<u32>(r) & WEAK == 0) as usize }
-    fn IsWeakStorageUnitRef(this: usize, ev: usize, r: usize) -> usize { (read::<u32>(r) & WEAK != 0) as usize }
-    fn RemoveStorageUnitRef(this: usize, ev: usize, r: usize) -> usize { this }
+    fn IsStrongStorageUnitRef(this: usize, ev: usize, r: usize) -> usize {
+        (r != 0 && ref_entry(this, read::<u32>(r)).is_some_and(|e| e & WEAK == 0)) as usize
+    }
+    fn IsWeakStorageUnitRef(this: usize, ev: usize, r: usize) -> usize {
+        (r != 0 && ref_entry(this, read::<u32>(r)).is_some_and(|e| e & WEAK != 0)) as usize
+    }
+    fn RemoveStorageUnitRef(this: usize, ev: usize, r: usize) -> usize {
+        if r != 0 {
+            let i = read::<u32>(r) as usize;
+            let mut t = refs(this);
+            if i >= 1 && i <= t.len() {
+                t[i - 1] = 0;
+                set_refs(this, &t);
+            }
+        }
+        this
+    }
     fn GetIDFromStorageUnitRef(this: usize, ev: usize, r: usize) -> usize {
-        let id = read::<u32>(r) & !WEAK;
+        let id = if r == 0 { 0 } else { ref_entry(this, read::<u32>(r)).map_or(0, |e| e & !WEAK) };
         if id == 0 || !draft_has(sus(this).draft, id) {
             od_error(ev, err::INVALID_STORAGE_UNIT_REF);
             return 0;

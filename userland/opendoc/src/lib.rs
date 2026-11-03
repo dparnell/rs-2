@@ -26,6 +26,7 @@ extern crate os2;
 
 #[macro_use]
 pub mod rt;
+pub mod clipboard;
 pub mod events;
 pub mod layout;
 pub mod obj;

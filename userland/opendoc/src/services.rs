@@ -930,7 +930,26 @@ methods! {
         t.update += 1;
         0
     }
-    fn ClipGetContentStorageUnit(this: usize, ev: usize) -> usize { content(transfer(this), ev) }
+    fn ClipGetContentStorageUnit(this: usize, ev: usize) -> usize {
+        let t = transfer(this);
+        if t.draft != 0 {
+            let su = crate::clipboard::import(t.draft, t.su);
+            if su != 0 {
+                t.su = su;
+            }
+        }
+        content(transfer(this), ev)
+    }
+    fn ExportClipboard(this: usize, ev: usize) -> usize {
+        let t = transfer(this);
+        let su = content(t, ev);
+        crate::clipboard::export(su);
+        0
+    }
+    fn RegisterClipboardFormat(this: usize, ev: usize, ty: usize, fmt: usize, info: usize) -> usize {
+        crate::clipboard::register(cstr(ty), fmt as u32 & 0xffff, info as u32);
+        1
+    }
     fn ClipNoArg(this: usize, ev: usize) -> usize { 0 }
     fn ClipOneArg(this: usize, ev: usize, a: usize) -> usize { 0 }
     fn ClipThreeArgs(this: usize, ev: usize, a: usize, b: usize, c: usize) -> usize { 0 }
@@ -962,11 +981,11 @@ pub static CLIPBOARD_M: &[(&str, M)] = &[
     ("ActionUndone", ClipOneArg::t),
     ("ActionRedone", ClipOneArg::t),
     ("SetPlatformClipboard", ClipOneArg::t),
-    ("ExportClipboard", ClipNoArg::t),
+    ("ExportClipboard", ExportClipboard::t),
     ("DraftClosing", ClipOneArg::t),
     ("DraftSaved", ClipOneArg::t),
     ("ShowPasteAsDialog", ClipThreeArgs::t),
-    ("RegisterClipboardFormat", ClipThreeArgs::t),
+    ("RegisterClipboardFormat", RegisterClipboardFormat::t),
 ];
 pub static BASE_DND_M: &[(&str, M)] = &[
     ("Clear", DndClear::t),
