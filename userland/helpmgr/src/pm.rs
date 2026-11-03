@@ -182,6 +182,10 @@ unsafe extern "C" {
     pub fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32;
     #[link_name = "PMGPI.610"]
     pub fn DevOpenDC(hab: u32, ty: i32, tok: *const u8, n: i32, dop: *const u32, comp: u32) -> u32;
+    #[link_name = "PMGPI.536"]
+    pub fn GpiSetMetaFileBits(hmf: u32, off: i32, cb: i32, p: *const u8) -> u32;
+    #[link_name = "PMGPI.375"]
+    pub fn GpiDeleteMetaFile(hmf: u32) -> u32;
     #[link_name = "PMGPI.604"]
     pub fn DevCloseDC(hdc: u32) -> u32;
     #[link_name = "PMGPI.369"]

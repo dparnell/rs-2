@@ -104,7 +104,13 @@ enum List {
     Defs { first: bool, tsize: u8, base: u8 },
 }
 
-struct Parser {
+struct Parser<'l> {
+    /// Reads an `:artwork.` file by its name.
+    load: &'l dyn Fn(&[u8]) -> Option<Vec<u8>>,
+    /// The image records (from the header's image offset) and the
+    /// offset each artwork file's record has.
+    images: Vec<u8>,
+    art: Vec<(Vec<u8>, u32)>,
     line: usize,
     title: Vec<u8>,
     panels: Vec<Panel>,
@@ -310,7 +316,7 @@ fn number(line: usize, v: &[u8]) -> Result<u16, CompileError> {
     n.or_else(|_| err(line, format!("bad number {s:?}")))
 }
 
-impl Parser {
+impl Parser<'_> {
     fn panel(&mut self) -> Result<&mut Panel, CompileError> {
         let line = self.line;
         match self.panels.last_mut() {
@@ -552,6 +558,46 @@ impl Parser {
                 }
                 self.push(Tok::Esc(esc(0x21, &d), true))?;
             }
+            b"artwork" => {
+                // `FF 07 0E flags offset`: the image record's offset from
+                // the header's image offset (one record per file).
+                let Some(name) = get(b"name") else { return err(line, ":artwork. needs name=") };
+                let key = name.to_ascii_uppercase();
+                let offset = match self.art.iter().find(|a| a.0 == key) {
+                    Some(a) => a.1,
+                    None => {
+                        let Some(file) = (self.load)(&name) else {
+                            return err(line, format!("artwork file {} not found", crate::latin1(&name)));
+                        };
+                        let rec = match crate::bitmap::art_record(&file) {
+                            Ok(r) => r,
+                            Err(e) => return err(line, format!("artwork file {}: {e:?}", crate::latin1(&name))),
+                        };
+                        let o = self.images.len() as u32;
+                        self.images.extend_from_slice(&rec);
+                        self.art.push((key, o));
+                        o
+                    }
+                };
+                // Flags (IBM's FormatCell): 0x02 right, 0x04 centre (with
+                // 0x01), 0x08 fit, 0x10 runin; else left (0x01).
+                let align = get(b"align").map(|v| v.to_ascii_lowercase()).unwrap_or_default();
+                let mut flags: u8 = match align.as_slice() {
+                    b"right" => 0x02,
+                    b"center" | b"centre" => 0x05,
+                    _ => 0x01,
+                };
+                if a.iter().any(|(n, _)| n == b"fit") {
+                    flags = 0x08 | 0x01;
+                }
+                let runin = a.iter().any(|(n, _)| n == b"runin");
+                if runin {
+                    flags |= 0x10;
+                }
+                let mut d = vec![flags];
+                d.extend_from_slice(&offset.to_le_bytes());
+                self.push(Tok::Esc(esc(0x0e, &d), !runin))?;
+            }
             b"ddf" => {
                 let Some(r) = get(b"res") else { return err(line, ":ddf. needs res=") };
                 let r = number(line, &r)?;
@@ -705,7 +751,25 @@ fn nls(codepage: u16) -> Vec<u8> {
 /// Compile IPF source (code page 437 text) into a help library
 /// (`help`) or a book.
 pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
-    let mut ps = Parser { line: 0, title: Vec::new(), panels: Vec::new(), index: Vec::new(), lists: Vec::new(), margin: 1, note: None, fonts: Vec::new() };
+    compile_with(src, help, &|_| None)
+}
+
+/// As [`compile`], with `load` reading the files `:artwork.` names
+/// (bitmaps and metafiles).
+pub fn compile_with(src: &[u8], help: bool, load: &dyn Fn(&[u8]) -> Option<Vec<u8>>) -> Result<Vec<u8>, CompileError> {
+    let mut ps = Parser {
+        load,
+        images: Vec::new(),
+        art: Vec::new(),
+        line: 0,
+        title: Vec::new(),
+        panels: Vec::new(),
+        index: Vec::new(),
+        lists: Vec::new(),
+        margin: 1,
+        note: None,
+        fonts: Vec::new(),
+    };
     for (i, l) in src.split(|&c| c == b'\n').enumerate() {
         ps.line = i + 1;
         let l = l.strip_suffix(b"\r").unwrap_or(l);
@@ -718,6 +782,7 @@ pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
         return err(ps.line, "a list is not ended");
     }
     let panels = ps.panels;
+    let images = core::mem::take(&mut ps.images);
     if panels.is_empty() {
         return err(ps.line, "no panels");
     }
@@ -1017,5 +1082,13 @@ pub fn compile(src: &[u8], help: bool) -> Result<Vec<u8>, CompileError> {
     set32(&mut f, ext + 0x28, ctrl_start as u32);
     set32(&mut f, ext + 0x2c, 8);
     set32(&mut f, 0x5b, ext as u32);
+
+    // The artwork's image records, back to back (header 0x4E: where
+    // they start).
+    if !images.is_empty() {
+        let x = f.len() as u32;
+        set32(&mut f, 0x4e, x);
+        f.extend_from_slice(&images);
+    }
     Ok(f)
 }

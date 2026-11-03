@@ -47,6 +47,11 @@ pub trait Metrics {
     fn image(&mut self, _handle: u32) -> (i32, i32) {
         (0, 0)
     }
+    /// The screen's size (SV_CXFULLSCREEN, SV_CYFULLSCREEN): metafile
+    /// artwork is shown at half of it.
+    fn screen(&mut self) -> (i32, i32) {
+        (1024, 768)
+    }
 }
 
 /// What a run shows.
@@ -54,7 +59,7 @@ pub trait Metrics {
 pub enum RunKind<'a> {
     Word(&'a [u8]),
     /// A bitmap; `fit`: stretched over the whole window.
-    Bitmap { offset: u32, flags: u8, cx: i32, cy: i32, fit: bool },
+    Bitmap { offset: u32, flags: u8, cx: i32, cy: i32, fit: bool, metafile: bool },
     /// An application's bitmap (HBITMAP) or metafile (HMF) of dynamic
     /// data.
     Image { handle: u32, metafile: bool, cx: i32, cy: i32, fit: bool },
@@ -580,8 +585,19 @@ fn step<'a>(
         }
         Item::EndLink => s.link = None,
         Item::Bitmap { flags, offset, areas } => {
-            let Ok(info) = bitmap::info(doc.data(), doc.header.image_start, *offset) else { return };
-            let (w, h) = (info.cx as i32, info.cy as i32);
+            // A metafile is played at the size its record gives, by
+            // default half the screen each way (IBM's LoadBitmap).
+            let meta = bitmap::metafile_info(doc.data(), doc.header.image_start, *offset);
+            let (w, h) = match meta {
+                Some(mi) => {
+                    let (sw, sh) = m.screen();
+                    (if mi.cx == 0 || mi.cy == 0 { sw / 2 } else { mi.cx as i32 }, if mi.cx == 0 || mi.cy == 0 { sh / 2 } else { mi.cy as i32 })
+                }
+                None => {
+                    let Ok(info) = bitmap::info(doc.data(), doc.header.image_start, *offset) else { return };
+                    (info.cx as i32, info.cy as i32)
+                }
+            };
             let (x, y, fit) = place_bitmap(s, page, w, h, *flags);
             page.runs.push(Run {
                 x,
@@ -594,7 +610,7 @@ fn step<'a>(
                 fg: s.fg,
                 bg: s.bg,
                 link: if *areas { None } else { s.link },
-                kind: RunKind::Bitmap { offset: *offset, flags: *flags, cx: w, cy: h, fit },
+                kind: RunKind::Bitmap { offset: *offset, flags: *flags, cx: w, cy: h, fit, metafile: meta.is_some() },
             });
             s.art = if *areas { Some(page.runs.len() - 1) } else { None };
         }

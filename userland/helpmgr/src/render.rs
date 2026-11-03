@@ -195,6 +195,34 @@ impl Metrics for Gpi {
         }
         (u16::from_le_bytes([b[4], b[5]]) as i32, u16::from_le_bytes([b[6], b[7]]) as i32)
     }
+
+    fn screen(&mut self) -> (i32, i32) {
+        // SV_CXFULLSCREEN, SV_CYFULLSCREEN
+        unsafe { (WinQuerySysValue(HWND_DESKTOP, 36), WinQuerySysValue(HWND_DESKTOP, 37)) }
+    }
+}
+
+/// An artwork metafile of a help file (an `mF` record) played into a
+/// bitmap of `cx` by `cy` pels: the record's metafile bytes go into a
+/// metafile handle (GpiSetMetaFileBits on an empty metafile, as IBM's
+/// LoadBitmap feeds its blocks) and that is played as dynamic data's
+/// metafiles are (IBM's MtaPlayMetaFile).
+fn art_metafile_bitmap(data: &[u8], image_start: u32, offset: u32, cx: i32, cy: i32) -> u32 {
+    let Ok(bytes) = ipf::bitmap::metafile(data, image_start, offset) else { return 0 };
+    // OD_METAFILE: an empty metafile once closed.
+    let dop: [u32; 2] = [0, b"DISPLAY\0".as_ptr() as u32];
+    let hdc = unsafe { DevOpenDC(0, 7, b"*\0".as_ptr(), 2, dop.as_ptr(), 0) };
+    if hdc == 0 {
+        return 0;
+    }
+    let hmf = unsafe { DevCloseDC(hdc) };
+    if hmf == 0 || hmf == u32::MAX {
+        return 0;
+    }
+    let ok = unsafe { GpiSetMetaFileBits(hmf, 0, bytes.len() as i32, bytes.as_ptr()) } != 0;
+    let hbm = if ok { metafile_bitmap(hmf, cx, cy) } else { 0 };
+    unsafe { GpiDeleteMetaFile(hmf) };
+    hbm
 }
 
 /// The system font's average character width and line height (the
@@ -416,7 +444,7 @@ impl Draw<'_, '_> {
                         unsafe { WinDrawBitmap(hps, handle, core::ptr::null(), &PointL { x: x0, y: y0 }, 0, 0, DBM_NORMAL) };
                     }
                 }
-                RunKind::Bitmap { offset, cx, cy, fit, .. } => {
+                RunKind::Bitmap { offset, cx, cy, fit, metafile, .. } => {
                     let (x0, y0, x1, y1) = if fit {
                         (0, 0, self.w, self.h)
                     } else {
@@ -424,6 +452,30 @@ impl Draw<'_, '_> {
                         (r.x - self.left, b, r.x - self.left + cx, b + cy)
                     };
                     if y1 < 0 || y0 > self.h {
+                        continue;
+                    }
+                    if metafile {
+                        // Played into a bitmap of the run's size, kept with
+                        // dynamic data's (until the page goes) under a key
+                        // no metafile handle has: the library and offset.
+                        let key = 0x8000_0000 | (self.lib as u32 & 0x7f) << 24 | (offset & 0xff_ffff);
+                        let (cx, cy) = (x1 - x0, y1 - y0);
+                        let hbm = match self.metafiles.iter().find(|m| (m.0, m.1, m.2) == (key, cx, cy)) {
+                            Some(m) => m.3,
+                            None => {
+                                if let Some(i) = self.metafiles.iter().position(|m| m.0 == key) {
+                                    unsafe { GpiDeleteBitmap(self.metafiles.remove(i).3) };
+                                }
+                                let hbm = art_metafile_bitmap(self.data, self.image_start, offset, cx, cy);
+                                if hbm != 0 {
+                                    self.metafiles.push((key, cx, cy, hbm));
+                                }
+                                hbm
+                            }
+                        };
+                        if hbm != 0 {
+                            unsafe { WinDrawBitmap(hps, hbm, core::ptr::null(), &PointL { x: x0, y: y0 }, 0, 0, DBM_NORMAL) };
+                        }
                         continue;
                     }
                     let key = (self.lib, offset);

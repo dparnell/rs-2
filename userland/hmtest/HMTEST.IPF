@@ -70,4 +70,11 @@ scroll bar (titlebar=sysmenu scroll=vertical on the link).
 :h1 res=17 scroll=none.No scroll bar
 :p.The help window's own panel without a vertical scroll bar (scroll=none
 on its heading).
+:h1 res=18.Metafile artwork
+:p.A metafile of the help library (&colon.artwork with a .MET file), played at
+the help manager's size for it, centred&colon.
+:artwork name='HMART.MET' align=center.
+:p.And a run-in copy at the start of this line&colon.
+:artwork name='HMART.MET' runin.
+Text after it.
 :euserdoc.
