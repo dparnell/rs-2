@@ -105,7 +105,7 @@ impl Hw {
         self.ems_map[w].map(|p| p as usize * EMS_PAGE + (a as usize & (EMS_PAGE - 1)))
     }
 
-    #[inline]
+    #[inline(never)]
     pub fn rd(&mut self, a: u32) -> u8 {
         if a < 0xa0000 {
             return self.ram[a as usize];
@@ -422,8 +422,13 @@ impl Default for Hw {
 }
 
 impl x86emu::Bus for Hw {
-    #[inline]
+    #[inline(always)]
     fn read8(&mut self, a: u32) -> u8 {
+        // Conventional memory (most code and data) without the device
+        // checks.
+        if a < 0xa0000 {
+            return self.ram[a as usize];
+        }
         self.rd(a)
     }
     #[inline]
@@ -485,6 +490,7 @@ impl x86emu::Bus for Hw {
             self.io_out(port.wrapping_add(i), (v >> (i * 8)) as u8);
         }
     }
+    #[inline(always)]
     fn irq_pending(&mut self) -> bool {
         self.pic.pending()
     }
