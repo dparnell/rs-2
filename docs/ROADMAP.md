@@ -444,9 +444,16 @@ Status markers: done, in progress, planned.
   rectangles with GPI regions; IBM's MMAudioPart imports a WAV file and
   plays it in ODSHELL, MMImagePart shows a JPEG (MMIO compound element
   names, MCIAPI's play-file palette)
-- planned: OpenDoc's help/status line/settings extensions, clipboard and
-  drag and drop, links, undo, nested drafts; the Apple Event Manager and
-  OSA (OREXXSC, which also needs SOMUC.DLL)
+- done (milestone 3): OpenDoc's settings notebook (ODSettingsExtension
+  pages, IBM's MMSettingsExtension's included), MMODPTS's own menus,
+  AdjustMenus and button-2 popups, the play palette's state observer and
+  position slider, ODClipboard on PM's clipboard (text and parts, storage
+  unit reference tables and CloneInto), drag and drop on PMDRAG (parts
+  moved within a document, a WAV dropped from a WPS folder becomes an
+  MMAudioPart), ODHelp through HELPMGR and the session's status line
+- planned: OpenDoc's links, undo, nested drafts, rendering exchange for
+  parts dropped on other programs; the Apple Event Manager and OSA
+  (OREXXSC, which also needs SOMUC.DLL)
 - not planned: DSOM itself (distributed objects, the SOMDD daemon,
   SOMDSVR; SOMEM, SOMS, SOMSEC): nothing on the CD uses it; rs2's own Object REXX does not
   use SOMD

@@ -341,25 +341,147 @@ Milestone 2 tests:
   - Screenshots: work/progress/opendoc/odshell-click-type-active-border.png,
     odshell-edit-menu.png, odshell-after-cut.png.
 
-Still stubs (the tokens are there, the methods do little or nothing):
+## Settings, clipboard, drag and drop, help (milestone 3)
 
-- help, the status line and settings extensions (MMODPTS's settings
-  notebook and its own menus' texts are not tried)
-- clipboard and drag and drop: their storage units exist, but nothing is
-  exported to PM
+- **Settings** (`settings.rs`). ODSettingsExtension's ShowSettings
+  (index 23) opens a PM notebook window and asks the extension for its
+  pages with AddNotebookPages(notebook, flags, reserved) (index 18)
+  through its token, so a subclass adds its own pages and calls its
+  parent for the standard ones. IBM's MMSettingsExtension passes
+  flags | 0x1f. rs2's standard pages, by flag:
+  - 0x01 Name: the part's `OpenDoc:Metadata:Name`; Apply stores it and
+    calls TitleChanged (19)
+  - 0x02 Type, 0x04 View (view-type buttons calling ChangeViewType),
+    0x08 Storage, 0x10 Presentation
+
+  IBM's parts pass a facet (or a frame) to ShowSettings. ODSHELL's
+  Selected/Settings (0x501a) opens the part's own extension
+  ("OpenDoc Extension Info Settings"), else a plain ODSettingsExtension.
+- **Menus and popups.** IBM's menu IDs are used: Edit 0x0e, Selected 0x11,
+  Help 0x12. The ODMenuBar fixes that made MMODPTS's own items show:
+  - OS/2's AddMenuItemLast/Before take the item ID from the MENUITEM.
+  - IDs are USHORTs; callers leave garbage in the high word, so IDs are
+    masked to 16 bits.
+
+  Popups:
+  - The window state's base popup (SetBasePopup) shows with WinPopupMenu
+    at the pointer on a button-2 context menu (WM_CONTEXTMENU) that no
+    part takes.
+  - A popup's items are its top-level entries.
+
+  Opening menus:
+  - WM_INITMENU is 0x33. The active part's AdjustMenus runs as a menu
+    opens, so MMODPTS enables, disables and renames its items.
+  - A refresh while a menu is open updates the PM items in place
+    (MM_SETITEMATTR/MM_SETITEMTEXT), so the open menu stays open.
+- **The play palette** (MCIAPI). The state observer is called as IBM's
+  PFPalSetState calls it: state 0 playing, 1 stopped. The palette also
+  has:
+  - Stop, enabled only while playing
+  - a position slider (0-100) that follows the file while it plays and
+    seeks when moved
+  - 0x100a/0x100b to set and query the position
+
+  At the end of the file the palette stops itself. MMAudioPart gets the
+  notifications and answers with 0x1006.
+- **Clipboard** (`clipboard.rs`). ODClipboard is on PM's clipboard:
+  - ExportClipboard (and the clipboard's update) puts out:
+    - the registered value types in their PM formats (RegisterClipboardFormat)
+    - text as CF_TEXT
+    - the contents unit and the units it refers to, in rs2's private
+      format "rs2 OpenDoc storage units" (a tag, the root ID and the
+      encoded units)
+  - GetContentStorageUnit reads back what another program put there.
+  - Storage unit references go through a per-unit reference table
+    (`rs2:StorageUnitRefs`). An ODStorageUnitRef is an index into it, as
+    in OpenDoc.
+  - CloneInto copies the units that strong references name into the
+    destination draft, once per clone key.
+
+  ODSHELL's Edit menu:
+  - Cut/Copy/Paste move RS2TextPart's text to and from other PM programs.
+  - Copy part externalizes the active part and clones it into the
+    clipboard.
+  - Paste part clones it into the document and embeds it.
+- **Drag and drop** (`dnd.rs`):
+  - **Starting a drag.** StartDrag, and a button-2 drag (WM_BEGINDRAG) of
+    an embedded part, run PMDRAG's DrgDrag. The part's frame goes as an
+    `<DRM_OPENDOC,DRF_PART>` item.
+  - **Dropping.** A document window's client answers DM_DRAGOVER and
+    DM_DROP:
+    - A part of the same document moves to the drop point.
+    - A part from another document is cloned and embedded there.
+    - An OS/2 file (`DRM_OS2FILE`) of a registered kind becomes a part.
+      The kind comes from `OpenDoc:PartKinds`, with aliases WAV→WAVE,
+      image extensions, MID→MIDI and AVI. Failing that, the file goes to
+      MMODPTS's parts when they are registered.
+  - **The part made from a file.** Its storage unit names the handler and
+    holds the file name as `OpenDoc:Property:Contents`/`OS2:Type:FileType`,
+    as IBM's parts import dropped files.
+  - **Tried.** DSK_STRT.WAV dragged from a WPS folder (rs2's PMWP) onto
+    ODSHELL becomes an IBM MMAudioPart at the drop point.
+- **Help and the status line** (`help.rs`):
+  - **Help.** ODHelp's DisplayHelp(file, panel), DisplayHelpIndex(file)
+    and DisplayHelpUsingHelp use HELPMGR. There is one help instance per
+    library, found on HELP and associated with the active window.
+    MMODPTS's Help index (0x5022) and General help (0x5023) show
+    MMPARTS.HLP. The file must be on the drive: the worktree's
+    modules.txt has `work/unpacked/disk_14/MMTEMP/MMPARTS.HLP ->
+    OS2\HELP\MMPARTS.HLP`.
+  - **The status line.** The session has IBM's
+    `OpenDoc:Extension:StatusLine`. MMODPTS acquires it in InitPart and
+    calls it without checking, so it must exist.
+    - ODStatusLineExtension's SetStatusLineText(text, frame) shows the
+      text in a line at the bottom of the frame's document window.
+    - The line is hidden while its text is empty.
+    - MMODPTS puts its menu hints there on WM_MENUSELECT; so does ODSHELL
+      for its own items.
+
+Milestone 3 tests:
+
+- **`ODTEST`: 89 checks, all pass.** New:
+  - the settings notebook: a subclass's AddNotebookPages gets the
+    notebook and its parent adds the standard pages
+  - the clipboard: text out as CF_TEXT and back in; another program's
+    text imported; a part with references cloned
+  - drag and drop: DM_DRAGOVER/DM_DROP of a registered file kind embeds
+    a part made from the file at the drop point; a part of the document
+    dragged within it moves
+  - the status line: SetStatusLineText shows and hides the line
+  - ODHelp opens a library's index, and fails for a missing library
+- **`ODTEST MMODPTS`: 12 checks, all pass.** MMIOTEST and AUDTEST pass.
+- **ODSHELL, driven with QEMU input.** Screenshots in
+  work/progress/opendoc/:
+  - mmaudiopart-settings-notebook.png, textpart-settings-notebook.png
+  - mmaudiopart-selected-menu.png
+  - clipboard-text-pasted.png, clipboard-part-pasted.png
+  - dnd-part-moved.png, dnd-wav-dropped-mmaudiopart.png
+  - statusline-mmaudiopart-menu-hint.png, help-mmparts-index.png
+
+Still stubs or missing:
+
 - links, undo, translation and name spaces
 - polygons as shapes
 - nested drafts and draft history
-- the window state's own persistence OREXXSC.DLL needs the
-Apple Event Manager, OSA and SOMUC.DLL. Calls with more than 12 words
-(ODWindowState::RegisterWindow takes 13) must be made directly, not
-through `somsup::call`.
+- the window state's own persistence
+- **Drag and drop:**
+  - the drag image is the system's file pointer, not a picture of the
+    part
+  - rendering exchange (DM_RENDER) for parts dragged to other programs
+    is not done
+- **Status line:** it stays until the next text (IBM clears it when the
+  `Statusline` focus moves); it overlaps the bottom of the root facet.
+- **Selected menu:** IBM's "View as" items live in a submenu 0x501b that
+  ODSHELL's flat Selected menu does not have (CheckMenuItem on it finds
+  nothing).
+
+OREXXSC.DLL needs the Apple Event Manager, OSA and SOMUC.DLL. Calls with
+more than 12 words (ODWindowState::RegisterWindow takes 13) must be made
+directly, not through `somsup::call`.
 
 Next steps:
 
-- the settings notebook (ODSettingsExtension pages through PMWP)
-- MMODPTS's own menu items and popup menus, tested
-- the play palette's state observer and position slider
-- clipboard and drag and drop with PM
+- the "View as" submenu (0x501b) as IBM's base menu has it
+- rendering exchange for parts dropped on other programs
 - MMVideoPart with an AVI file
 - the Apple Event Manager for OREXXSC
