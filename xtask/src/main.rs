@@ -661,6 +661,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("ping", "OS2\\PING.EXE"),
         ("ifconfig", "OS2\\IFCONFIG.EXE"),
         ("netstat", "OS2\\NETSTAT.EXE"),
+        ("route", "OS2\\ROUTE.EXE"),
+        ("arp", "OS2\\ARP.EXE"),
         ("hostname", "OS2\\HOSTNAME.EXE"),
         ("host", "OS2\\HOST.EXE"),
         ("ftp", "OS2\\FTP.EXE"),

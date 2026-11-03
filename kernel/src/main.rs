@@ -8,6 +8,7 @@
 extern crate alloc;
 
 mod acpi;
+mod aml;
 mod api;
 mod apic;
 mod arch;

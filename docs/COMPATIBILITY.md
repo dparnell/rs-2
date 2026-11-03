@@ -365,8 +365,9 @@ On rs2's TCPIP32/SO32DLL/TCP32DLL/TNLS32/PMSHAPI DLLs (see
 (`--net` e1000 or `--virtio-net`, also `--smp 4`), the host at 10.0.2.2
 running a test FTP/line/echo server. The TCP/IP 4.x applications come
 from `cid/server/tcpapps/install/base` on the client CD; MPTN's own
-programs (IBM's PING, NETSTAT, IFCONFIG, HOST, the stack DLLs) are not
-on the media, so rs2's own utilities take their place.
+programs (IBM's PING, NETSTAT, IFCONFIG, ROUTE, ARP, HOST, the stack
+DLLs) are not on the media, so rs2's own utilities take their place
+(with TCP/IP 4.x's command syntax).
 
 | Program | Status | Notes |
 |---------|--------|-------|
@@ -377,10 +378,11 @@ on the media, so rs2's own utilities take their place.
 | PORTMAP.EXE, RPCINFO.EXE (with RPC32DLL.DLL) | works | `rpcinfo -p localhost` lists the registered programs (SO32DLL/TCP32DLL). |
 | Toolkit tcps/tcpc, udpc, selects | works | TCP client/server, BSD `select()` server with TCP and UDP clients. |
 | Toolkit accept/recv | works | `accept_and_recv()`; the client connects to INADDR_ANY. |
-| Toolkit os2ioctl | works | SIOSTATCNTRT/SIOSTATRT routing table, SIOCSSYN. |
+| Toolkit os2ioctl | works | SIOSTATCNTRT/SIOSTATRT routing table (the routes ROUTE added too), SIOCSSYN. |
+| Toolkit sysctl | works | Reads IP forwarding, turns it on and back off (`sysctl()` over Rs2NetControl). |
 | Toolkit rawex, geneserv/genesend | works | Sun RPC over UDP through the portmapper. |
 | Toolkit rgs/rgc (rpcgen) | fails | The sample calls RPC32DLL's `_Optlink` `svcudp_create` with `_System` linkage (socket -1 pushed, EAX read): `svcudp_create - cannot getsockname`. |
-| Toolkit echos/echoc (HPS) | fails | Need `sysctl()` memory-mapped I/O (OS2_MEMMAPIO), which rs2 does not have. |
+| Toolkit echos/echoc (HPS) | works | `sysctl()` OS2_MEMMAPIO blocks, `sendmsg(MSG_MAPIO)` with the release semaphores (`-s`), memory and data verification (`-m -d`), 3 iterations of 240 KB each way over loopback. |
 | SYSLOGD.EXE | works | Receives a UDP message (sent with RXSOCK to 127.0.0.1:514) and writes it to `%ETC%\\SYSLOG.MSG`. |
 | TFTP.EXE | works | 16-bit, on rs2's TCPIPDLL and TNLS16: `status`, `binary`, `get` of 300 KB and a text file from QEMU's TFTP server, byte-identical. Retransmission: against `tools/scripts/tftplossy.py`, which drops a DATA block and an ACK, `get` and `put` of 300 KB finish byte-identical (`_alarm`/`_xsignal` interrupt the blocked `_recvfrom` and call TFTP's handler). |
 | INETD.EXE | works | 16-bit; listens for the services of `%ETC%\INETD.LST` and starts the server with the accepted socket's number (tested with a REXX echo server on RXSOCK, reached from the host). |

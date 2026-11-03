@@ -452,6 +452,7 @@ installers).
 :sl.
 :li.:link reftype=hd refid=ansi.ANSI:elink. (internal)
 :li.:link reftype=hd refid=appinst.APPINST:elink.
+:li.:link reftype=hd refid=arp.ARP:elink.
 :li.:link reftype=hd refid=attrib.ATTRIB:elink.
 :li.:link reftype=hd refid=call.CALL:elink. (internal)
 :li.:link reftype=hd refid=cd.CD, CHDIR:elink. (internal)
@@ -496,6 +497,7 @@ installers).
 :li.:link reftype=hd refid=rd.RD, RMDIR:elink. (internal)
 :li.:link reftype=hd refid=rem.REM:elink. (internal)
 :li.:link reftype=hd refid=ren.REN, RENAME:elink. (internal)
+:li.:link reftype=hd refid=route.ROUTE:elink.
 :li.:link reftype=hd refid=set.SET:elink. (internal)
 :li.:link reftype=hd refid=setlocal.SETLOCAL:elink. (internal)
 :li.:link reftype=hd refid=shift.SHIFT:elink. (internal)
@@ -554,6 +556,38 @@ Workplace Shell, a folder per category in the Programs folder. If an
 application needs C&colon.\OS2\APPS on the PATH or LIBPATH, APPINST adds it
 to CONFIG.SYS; restart the system to use it.
 :p.Related&colon. :link reftype=hd refid=install.INSTALL:elink..
+.*
+.* ---- ARP ----
+:h2 res=322 id=arp.ARP
+:i1.ARP
+:i1.address resolution table
+:p.Shows and changes the table of Ethernet addresses that TCP/IP has
+learnt for IP addresses.
+:p.:hp2.Syntax:ehp2.
+:sl.
+:li.:hp4.ARP:ehp4. host
+:li.:hp4.ARP:ehp4. -a
+:li.:hp4.ARP:ehp4. -d host
+:li.:hp4.ARP:ehp4. -s host ethernet-address [temp] [pub]
+:li.:hp4.ARP:ehp4. -f file
+:esl.
+:dl tsize=8.
+:dt.host
+:dd.Shows the entry of a host (a name or an address).
+:dt.-a
+:dd.Shows every entry, with its interface and how long it is kept.
+:dt.-d
+:dd.Deletes the entry of a host.
+:dt.-s
+:dd.Sets an entry: six hexadecimal bytes separated by colons or hyphens.
+It stays until deleted unless :hp1.temp:ehp1. is given; with :hp1.pub:ehp1.
+this computer answers requests for the host's address (proxy ARP).
+:dt.-f
+:dd.Sets the entries of a file, one :hp1.host ethernet-address [temp]
+[pub]:ehp1. per line.
+:edl.
+:p.Related&colon. :link reftype=hd refid=netstat.NETSTAT:elink.,
+:link reftype=hd refid=route.ROUTE:elink..
 .*
 .* ---- ATTRIB ----
 :h2 res=206 id=attrib.ATTRIB
@@ -1137,17 +1171,30 @@ first. Examples&colon.
 :p.:hp2.Syntax:ehp2.
 :sl.
 :li.:hp4.IFCONFIG:ehp4. [interface | -a]
+:li.:hp4.IFCONFIG:ehp4. interface [address] [netmask mask] [mtu n]
+[metric n] [up | down] [alias | -alias] [delete address] [dhcp] [release]
 :esl.
 :dl tsize=12.
 :dt.interface
 :dd.Only that interface, such as lan0 or lo.
 :dt.-a
 :dd.All interfaces (the same as no parameter).
+:dt.address
+:dd.Gives the interface this address (with the netmask after
+:hp1.netmask:ehp1.); DHCP stops on it. With :hp1.alias:ehp1. the address
+is added beside the others; :hp1.-alias:ehp1. or :hp1.delete:ehp1. removes
+one.
+:dt.up, down
+:dd.Turns the interface on or off.
+:dt.mtu, metric
+:dd.The largest packet and the interface's route metric.
+:dt.dhcp, release
+:dd.Starts DHCP (or renews the lease), or gives the lease back.
 :edl.
-:p.For each interface IFCONFIG shows its address, network mask, flags,
+:p.For each interface IFCONFIG shows its addresses, network mask, flags,
 hardware address, gateway, name servers and how many packets went in and
 out. rs2 sets the interfaces up when it starts (by DHCP, or as CONFIG.SYS
-says); IFCONFIG does not change them.
+says); changes made with IFCONFIG last until the next start.
 :p.Related&colon. :link reftype=hd refid=netstat.NETSTAT:elink.,
 :link reftype=hd refid=ping.PING:elink..
 .*
@@ -1375,24 +1422,34 @@ delete the originals instead.
 counters.
 :p.:hp2.Syntax:ehp2.
 :sl.
-:li.:hp4.NETSTAT:ehp4. [-a] [-t] [-u] [-r] [-i] [-s]
+:li.:hp4.NETSTAT:ehp4. [-a] [-c] [-i] [-l] [-n] [-p] [-r] [-s] [-t] [-u] [-x]
 :esl.
 :dl tsize=8.
 :dt.-a
-:dd.All sockets, including those listening and UDP and raw sockets.
-:dt.-t
-:dd.TCP sockets only.
-:dt.-u
-:dd.UDP sockets only.
+:dd.The addresses of the interfaces.
+:dt.-c
+:dd.ICMP counters.
+:dt.-i
+:dd.IP counters.
+:dt.-l
+:dd.TCP connections with the listening sockets.
+:dt.-n
+:dd.The interfaces: packets, bytes, link state.
+:dt.-p
+:dd.The ARP table.
 :dt.-r
 :dd.The routing table.
-:dt.-i
-:dd.The interfaces.
 :dt.-s
-:dd.Counters of the protocols.
+:dd.Every socket, with the process that owns it.
+:dt.-t
+:dd.TCP connections.
+:dt.-u
+:dd.UDP counters and sockets.
+:dt.-x
+:dd.TCP counters and settings.
 :edl.
-:p.Without options NETSTAT lists the TCP connections. The options may also
-be written with a slash.
+:p.Without options NETSTAT lists the TCP connections. The options may be
+combined and also written with a slash.
 :p.Related&colon. :link reftype=hd refid=ifconfig.IFCONFIG:elink.,
 :link reftype=hd refid=ping.PING:elink..
 .*
@@ -1598,6 +1655,42 @@ front of it, or use ECHO OFF, to hide it.
 :edl.
 :p.Example&colon. :hp4.REN \WORK\DRAFT.TXT FINAL.TXT:ehp4.
 :p.Related&colon. :link reftype=hd refid=move.MOVE:elink..
+.*
+.* ---- ROUTE ----
+:h2 res=324 id=route.ROUTE
+:i1.ROUTE
+:i1.routing table
+:i1.gateway
+:p.Adds routes to the routing table and deletes them.
+:p.:hp2.Syntax:ehp2.
+:sl.
+:li.:hp4.ROUTE:ehp4. [-n] [-v] [-f] ADD [net | host] destination gateway [metric] [-netmask mask]
+:li.:hp4.ROUTE:ehp4. [-n] [-v] [-f] DELETE [net | host] destination [gateway] [-netmask mask]
+:li.:hp4.ROUTE:ehp4. -f
+:li.:hp4.ROUTE:ehp4. PRINT
+:esl.
+:dl tsize=12.
+:dt.destination
+:dd.:hp1.default:ehp1., a host or network address, address/bits, or a
+name. A network route without -netmask has the address class's mask.
+:dt.gateway
+:dd.The router that reaches the destination; it must be on a network an
+interface is on. One of this computer's own addresses means the
+destination is reached directly on that interface.
+:dt.metric
+:dd.Preferred when two routes have the same length (lower first).
+:dt.-f
+:dd.Deletes every route through a gateway first (alone: only that).
+:dt.-n
+:dd.Takes no names, only addresses.
+:dt.-v
+:dd.Says more.
+:edl.
+:p.NETSTAT -r shows the table. Routes last until the next start.
+:p.Example&colon. :hp4.ROUTE ADD NET 192.168.5.0 10.0.2.2 1 -NETMASK 255.255.255.0:ehp4.
+:p.Related&colon. :link reftype=hd refid=netstat.NETSTAT:elink.,
+:link reftype=hd refid=arp.ARP:elink.,
+:link reftype=hd refid=ifconfig.IFCONFIG:elink..
 .*
 .* ---- SET ----
 :h2 res=294 id=set.SET

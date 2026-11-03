@@ -69,6 +69,23 @@ struct Entry {
     tries: u32,
     /// IP packets waiting for the address.
     parked: Vec<Vec<u8>>,
+    /// Set by hand: never expires, not replaced by what the network says.
+    permanent: bool,
+    /// Answer requests for the address with `mac` (proxy ARP).
+    publish: bool,
+}
+
+/// An entry of the cache, for `arp -a` and SIOCGARP.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Info {
+    pub iface: usize,
+    pub ip: Ipv4,
+    /// None while being resolved.
+    pub mac: Option<Mac>,
+    pub permanent: bool,
+    pub publish: bool,
+    /// Expiry time (u64::MAX for permanent entries).
+    pub expires: u64,
 }
 
 /// What the cache wants the stack to do after a timer run.
@@ -92,18 +109,16 @@ impl Cache {
     /// for it.
     pub fn update(&mut self, iface: usize, ip: Ipv4, mac: Mac, now: u64, create: bool) -> Vec<Vec<u8>> {
         if let Some(e) = self.entries.iter_mut().find(|e| e.iface == iface && e.ip == ip) {
+            if e.permanent {
+                return core::mem::take(&mut e.parked);
+            }
             e.mac = Some(mac);
             e.expires = now + TTL;
             return core::mem::take(&mut e.parked);
         }
         if create {
-            if self.entries.len() >= MAX_ENTRIES {
-                // Evict the entry closest to expiry.
-                if let Some(i) = (0..self.entries.len()).min_by_key(|&i| self.entries[i].expires) {
-                    self.entries.swap_remove(i);
-                }
-            }
-            self.entries.push(Entry { iface, ip, mac: Some(mac), expires: now + TTL, retry_at: 0, tries: 0, parked: Vec::new() });
+            self.make_room();
+            self.entries.push(Entry { iface, ip, mac: Some(mac), expires: now + TTL, retry_at: 0, tries: 0, parked: Vec::new(), permanent: false, publish: false });
         }
         Vec::new()
     }
@@ -133,6 +148,7 @@ impl Cache {
             }
             return false;
         }
+        self.make_room();
         self.entries.push(Entry {
             iface,
             ip,
@@ -141,8 +157,63 @@ impl Cache {
             retry_at: now + RETRY,
             tries: 1,
             parked: alloc::vec![packet],
+            permanent: false,
+            publish: false,
         });
         true
+    }
+
+    fn make_room(&mut self) {
+        if self.entries.len() >= MAX_ENTRIES {
+            // Evict the learnt entry closest to expiry.
+            if let Some(i) = (0..self.entries.len()).filter(|&i| !self.entries[i].permanent).min_by_key(|&i| self.entries[i].expires) {
+                self.entries.swap_remove(i);
+            }
+        }
+    }
+
+    /// Set an entry by hand (arp -s, SIOCSARP): `permanent` ones never
+    /// expire, `publish` ones answer requests for the address (proxy
+    /// ARP). Returns the packets that waited for the address.
+    pub fn set(&mut self, iface: usize, ip: Ipv4, mac: Mac, now: u64, permanent: bool, publish: bool) -> Vec<Vec<u8>> {
+        let expires = if permanent { u64::MAX } else { now + TTL };
+        if let Some(e) = self.entries.iter_mut().find(|e| e.ip == ip) {
+            e.iface = iface;
+            e.mac = Some(mac);
+            e.expires = expires;
+            e.permanent = permanent;
+            e.publish = publish;
+            return core::mem::take(&mut e.parked);
+        }
+        self.make_room();
+        self.entries.push(Entry { iface, ip, mac: Some(mac), expires, retry_at: 0, tries: 0, parked: Vec::new(), permanent, publish });
+        Vec::new()
+    }
+
+    /// Remove the entry for `ip` (arp -d, SIOCDARP).
+    pub fn remove(&mut self, ip: Ipv4) -> bool {
+        let n = self.entries.len();
+        self.entries.retain(|e| e.ip != ip);
+        self.entries.len() != n
+    }
+
+    /// The MAC address to answer a request for `ip` with, if it is a
+    /// published entry of `iface`.
+    pub fn published(&self, iface: usize, ip: Ipv4) -> Option<Mac> {
+        self.entries.iter().find(|e| e.iface == iface && e.ip == ip && e.publish).and_then(|e| e.mac)
+    }
+
+    /// Every entry.
+    pub fn list(&self) -> Vec<Info> {
+        self.entries
+            .iter()
+            .map(|e| Info { iface: e.iface, ip: e.ip, mac: e.mac, permanent: e.permanent, publish: e.publish, expires: e.expires })
+            .collect()
+    }
+
+    /// The entry for `ip`.
+    pub fn get(&self, ip: Ipv4) -> Option<Info> {
+        self.list().into_iter().find(|e| e.ip == ip)
     }
 
     /// Take the packets parked for an address that is resolved now.
@@ -168,13 +239,14 @@ impl Cache {
                 }
                 return true;
             }
-            e.expires > now
+            e.permanent || e.expires > now
         });
     }
 
-    /// Forget everything learnt on an interface (address change).
+    /// Forget everything learnt on an interface (address change); entries
+    /// set by hand stay.
     pub fn flush(&mut self, iface: usize) {
-        self.entries.retain(|e| e.iface != iface);
+        self.entries.retain(|e| e.iface != iface || e.permanent);
     }
 
     pub fn len(&self) -> usize {
@@ -217,6 +289,26 @@ mod tests {
         assert_eq!(parked, alloc::vec![alloc::vec![1], alloc::vec![2]]);
         assert_eq!(c.lookup(0, ip, 1200), Some([7; 6]));
         assert_eq!(c.lookup(0, ip, 1100 + TTL), None);
+    }
+
+    #[test]
+    fn static_and_published_entries() {
+        let mut c = Cache::default();
+        let ip = Ipv4::new(10, 0, 2, 7);
+        c.set(1, ip, [9; 6], 0, true, true);
+        // Learnt mappings do not replace it, flushes and time keep it.
+        c.update(1, ip, [8; 6], 10, true);
+        c.flush(1);
+        let mut acts = Vec::new();
+        c.poll(TTL * 5, &mut acts);
+        assert_eq!(c.lookup(1, ip, TTL * 5), Some([9; 6]));
+        assert_eq!(c.published(1, ip), Some([9; 6]));
+        assert_eq!(c.published(2, ip), None);
+        let i = c.get(ip).unwrap();
+        assert!(i.permanent && i.publish);
+        assert!(c.remove(ip));
+        assert!(!c.remove(ip));
+        assert!(c.is_empty());
     }
 
     #[test]

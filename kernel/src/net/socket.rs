@@ -13,17 +13,16 @@
 //! INETD hands accepted connections to the servers it starts this way).
 //! Calls return BSD error numbers
 //! (`tcpip::Error::errno`; OS/2's SOCBASEERR offset is the DLL's
-//! business). Blocking calls retry the stack operation whenever
-//! [`super::EVENTS`] moves, sleeping on [`super::WAIT`] in between; they
-//! end early with EINTR when the thread is killed or signalled, and with
-//! EWOULDBLOCK when a SO_RCVTIMEO/SO_SNDTIMEO timeout expires. A
-//! process's sockets are closed when it ends.
+//! business). Blocking calls retry the stack operation whenever one of
+//! the sockets they wait for changes (a [`super::Waiter`] subscribed to
+//! them); they end early with EINTR when the thread is killed or
+//! signalled, and with EWOULDBLOCK when a SO_RCVTIMEO/SO_SNDTIMEO timeout
+//! expires. A process's sockets are closed when it ends.
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
-use core::sync::atomic::Ordering;
 
-use tcpip::stack::{Error, Kind, Ready};
+use tcpip::stack::{Error, Kind, Ready, TcpFlag};
 use tcpip::{Endpoint, Ipv4, Stack};
 
 use crate::sync::SpinLock;
@@ -73,8 +72,6 @@ struct Handle {
     rcv_timeout: Option<u64>,
     snd_timeout: Option<u64>,
     linger: Option<u32>,
-    keepalive: bool,
-    oobinline: bool,
     /// Bumped by so_cancel(): blocked calls on the handle end with EINTR.
     cancel: u32,
 }
@@ -126,7 +123,7 @@ fn insert(pid: u32, id: usize, kind: Kind) -> Result<u32> {
     let t = g.entry(pid).or_default();
     t.map.insert(
         n,
-        Handle { id, kind, nonblock: false, rcv_timeout: None, snd_timeout: None, linger: None, keepalive: false, oobinline: false, cancel: 0 },
+        Handle { id, kind, nonblock: false, rcv_timeout: None, snd_timeout: None, linger: None, cancel: 0 },
     );
     Ok(n)
 }
@@ -135,47 +132,65 @@ fn stack<R>(f: impl FnOnce(&mut Stack, u64) -> R) -> Result<R> {
     super::with_stack(f).ok_or(ENETDOWN)
 }
 
+/// Longest sleep between two looks at a blocked call's condition (a
+/// safety net: events wake it long before).
+const RECHECK_MS: u64 = 1000;
+
 /// Run `op` until it does not say WouldBlock (or at once when
-/// `nonblock`), waiting for stack events in between. `on` names the
-/// handle (process, socket, its cancel count at the start): so_cancel()
-/// or soclose() of it from another thread ends the wait with EINTR.
+/// `nonblock`), waiting for changes of the stack sockets `ids` in
+/// between. `on` names the handle (process, socket, its cancel count at
+/// the start): so_cancel() or soclose() of it from another thread ends
+/// the wait with EINTR.
 fn blocking<T>(
     nonblock: bool,
     timeout_ms: Option<u64>,
     on: Option<(u32, u32, u32)>,
+    ids: &[usize],
     mut op: impl FnMut(&mut Stack, u64) -> core::result::Result<T, Error>,
 ) -> Result<T> {
     let deadline = timeout_ms.filter(|&t| t > 0).map(|t| crate::irq::ticks() + t * crate::irq::HZ / 1000);
-    loop {
-        let seen = super::EVENTS.load(Ordering::Acquire);
+    let w = super::Waiter::new();
+    if !nonblock {
+        super::subscribe(ids, &w);
+    }
+    let r = loop {
+        w.arm();
         if let Some((pid, s, at_start)) = on {
             if get(pid, s).map_or(true, |h| h.cancel != at_start) {
-                return Err(EINTR);
+                break Err(EINTR);
             }
         }
-        match stack(&mut op)? {
-            Ok(v) => return Ok(v),
-            Err(Error::WouldBlock) if !nonblock => {
-                if !super::WAIT.wait_until(deadline, || super::EVENTS.load(Ordering::Acquire) != seen) {
+        match stack(&mut op) {
+            Err(e) => break Err(e),
+            Ok(Ok(v)) => break Ok(v),
+            Ok(Err(Error::WouldBlock)) if !nonblock => {
+                let recheck = crate::irq::ticks() + RECHECK_MS * crate::irq::HZ / 1000;
+                let until = deadline.map_or(recheck, |d| d.min(recheck));
+                if !w.wait(Some(until)) {
                     if deadline.is_some_and(|d| crate::irq::ticks() >= d) {
-                        return Err(EWOULDBLOCK);
+                        break Err(EWOULDBLOCK);
                     }
                     let t = crate::task::sched::current();
                     if t.exit_requested() || t.interrupted() {
-                        return Err(EINTR);
+                        break Err(EINTR);
                     }
                 }
             }
-            Err(e) => return Err(e.errno()),
+            Ok(Err(e)) => break Err(e.errno()),
         }
+    };
+    if !nonblock {
+        super::unsubscribe(ids, &w);
     }
+    r
 }
 
 /// so_cancel(): calls blocked on the socket (in any thread of the
 /// process) end with EINTR.
 pub fn cancel(pid: u32, s: u32) -> Result<()> {
+    let h = get(pid, s)?;
     update(pid, s, |h| h.cancel = h.cancel.wrapping_add(1))?;
-    super::notify();
+    super::wake_socket(h.id);
     Ok(())
 }
 
@@ -219,12 +234,9 @@ pub fn accept(pid: u32, s: u32) -> Result<(u32, Endpoint)> {
     if h.kind != Kind::Tcp {
         return Err(EOPNOTSUPP);
     }
-    let (id, peer) = blocking(h.nonblock, h.rcv_timeout, Some((pid, s, h.cancel)), |st, _| st.accept(h.id))?;
+    let (id, peer) = blocking(h.nonblock, h.rcv_timeout, Some((pid, s, h.cancel)), &[h.id], |st, _| st.accept(h.id))?;
     match insert(pid, id, Kind::Tcp) {
-        Ok(n) => {
-            let _ = update(pid, n, |x| x.keepalive = h.keepalive);
-            Ok((n, peer))
-        }
+        Ok(n) => Ok((n, peer)),
         Err(e) => {
             let _ = stack(|st, now| st.close(id, now));
             Err(e)
@@ -247,7 +259,7 @@ pub fn connect(pid: u32, s: u32, ep: Endpoint) -> Result<()> {
             Err(e) => Err(e.errno()),
         };
     }
-    blocking(false, None, Some((pid, s, h.cancel)), |st, _| match st.connect_status(h.id) {
+    blocking(false, None, Some((pid, s, h.cancel)), &[h.id], |st, _| match st.connect_status(h.id) {
         Ok(true) => Ok(()),
         Ok(false) => Err(Error::WouldBlock),
         Err(e) => Err(e),
@@ -266,20 +278,25 @@ pub fn send(pid: u32, s: u32, data: &[u8], flags: u32, to: Option<Endpoint>) -> 
         return Err(EOPNOTSUPP);
     }
     let nb = nonblock(&h, flags);
+    let ids = [h.id];
     if h.kind != Kind::Tcp {
-        return blocking(nb, h.snd_timeout, Some((pid, s, h.cancel)), |st, now| match to {
+        return blocking(nb, h.snd_timeout, Some((pid, s, h.cancel)), &ids, |st, now| match to {
             Some(ep) => st.send_to(h.id, data, ep, now),
             None => st.send(h.id, data, now),
         });
     }
+    if flags & MSG_OOB != 0 {
+        // Urgent data goes in one piece.
+        return blocking(nb, h.snd_timeout, Some((pid, s, h.cancel)), &ids, |st, now| st.send_urgent(h.id, data, now));
+    }
     let mut done = 0;
     loop {
-        let r = blocking(nb || done > 0, h.snd_timeout, Some((pid, s, h.cancel)), |st, now| st.send(h.id, &data[done..], now));
+        let r = blocking(nb || done > 0, h.snd_timeout, Some((pid, s, h.cancel)), &ids, |st, now| st.send(h.id, &data[done..], now));
         match r {
             Ok(n) => done += n,
             Err(EWOULDBLOCK) if done > 0 && !nb => {
                 // Partly queued: wait for room for the rest.
-                let r = blocking(false, h.snd_timeout, Some((pid, s, h.cancel)), |st, _| match st.ready(h.id) {
+                let r = blocking(false, h.snd_timeout, Some((pid, s, h.cancel)), &ids, |st, _| match st.ready(h.id) {
                     Ok(Ready { write: true, .. }) => Ok(()),
                     Ok(_) => Err(Error::WouldBlock),
                     Err(e) => Err(e),
@@ -300,9 +317,19 @@ pub fn send(pid: u32, s: u32, data: &[u8], flags: u32, to: Option<Endpoint>) -> 
 /// recv()/recvfrom(): up to `len` bytes and the sender.
 pub fn recv(pid: u32, s: u32, len: usize, flags: u32) -> Result<(Vec<u8>, Endpoint)> {
     let h = get(pid, s)?;
-    let mut buf = alloc::vec![0u8; len];
     let peek = flags & MSG_PEEK != 0;
-    let (n, from) = blocking(nonblock(&h, flags), h.rcv_timeout, Some((pid, s, h.cancel)), |st, now| st.recv_from(h.id, &mut buf, peek, now))?;
+    if flags & MSG_OOB != 0 {
+        if h.kind != Kind::Tcp {
+            return Err(EOPNOTSUPP);
+        }
+        // The urgent byte: never waits for it (BSD).
+        let b = stack(|st, _| st.recv_urgent(h.id, peek))?.map_err(Error::errno)?;
+        let peer = stack(|st, _| st.peer_endpoint(h.id))?.unwrap_or_default();
+        return Ok((if len == 0 { alloc::vec![] } else { alloc::vec![b] }, peer));
+    }
+    let mut buf = alloc::vec![0u8; len];
+    let (n, from) =
+        blocking(nonblock(&h, flags), h.rcv_timeout, Some((pid, s, h.cancel)), &[h.id], |st, now| st.recv_from(h.id, &mut buf, peek, now))?;
     buf.truncate(n);
     Ok((buf, from))
 }
@@ -347,7 +374,10 @@ pub fn select(pid: u32, socks: &mut [u32], nread: usize, nwrite: usize, timeout_
         Ok(v)
     };
     let timeout = if timeout_ms < 0 { None } else { Some(timeout_ms as u64) };
-    let res = blocking(timeout == Some(0), timeout, None, |st, _| {
+    let mut uniq = ids.clone();
+    uniq.sort_unstable();
+    uniq.dedup();
+    let res = blocking(timeout == Some(0), timeout, None, &uniq, |st, _| {
         let v = check(st)?;
         if v.iter().any(|&b| b) || ids.is_empty() && timeout.is_none() {
             Ok(v)
@@ -375,13 +405,16 @@ pub fn select(pid: u32, socks: &mut [u32], nread: usize, nwrite: usize, timeout_
 // ioctl commands.
 pub const FIONBIO: u32 = 0x8004_667e;
 pub const FIONREAD: u32 = 0x4004_667f;
+pub const SIOCATMARK: u32 = 0x4004_7307;
 
-/// ioctl(): FIONBIO (`arg` 0 or 1) and FIONREAD (returns the count).
+/// ioctl(): FIONBIO (`arg` 0 or 1), FIONREAD (returns the count),
+/// SIOCATMARK (1 at the urgent mark).
 pub fn ioctl(pid: u32, s: u32, cmd: u32, arg: u32) -> Result<u32> {
     let h = get(pid, s)?;
     match cmd {
         FIONBIO => update(pid, s, |x| x.nonblock = arg != 0).map(|_| 0),
         FIONREAD => Ok(stack(|st, _| st.available(h.id))?.map_err(Error::errno)? as u32),
+        SIOCATMARK => Ok(stack(|st, _| st.at_mark(h.id))?.map_err(Error::errno)? as u32),
         _ => Err(EINVAL),
     }
 }
@@ -404,6 +437,7 @@ pub const SO_RCVTIMEO: u32 = 0x1006;
 pub const SO_ERROR: u32 = 0x1007;
 pub const SO_TYPE: u32 = 0x1008;
 pub const TCP_NODELAY: u32 = 1;
+pub const TCP_MAXSEG: u32 = 2;
 
 /// setsockopt(): `val` is the option's bytes (int, struct linger, or
 /// struct timeval).
@@ -424,13 +458,18 @@ pub fn set_option(pid: u32, s: u32, level: u32, opt: u32, val: &[u8]) -> Result<
             let (snd, rcv) = if opt == SO_SNDBUF { (Some(n), None) } else { (None, Some(n)) };
             stack(|st, _| st.set_buffers(h.id, snd, rcv))?.map_err(Error::errno)
         }
-        (SOL_SOCKET, SO_KEEPALIVE) => {
+        (SOL_SOCKET, SO_KEEPALIVE) | (SOL_SOCKET, SO_OOBINLINE) | (IPPROTO_TCP, TCP_NODELAY) => {
             let on = int(0)? != 0;
-            update(pid, s, |x| x.keepalive = on)
-        }
-        (SOL_SOCKET, SO_OOBINLINE) => {
-            let on = int(0)? != 0;
-            update(pid, s, |x| x.oobinline = on)
+            if h.kind != Kind::Tcp {
+                // Meaningless for datagrams; accepted as BSD does.
+                return if level == IPPROTO_TCP { Err(ENOPROTOOPT) } else { Ok(()) };
+            }
+            let f = match opt {
+                SO_KEEPALIVE => TcpFlag::KeepAlive,
+                SO_OOBINLINE => TcpFlag::OobInline,
+                _ => TcpFlag::NoDelay,
+            };
+            stack(|st, _| st.set_tcp_flag(h.id, f, on))?.map_err(Error::errno)
         }
         (SOL_SOCKET, SO_LINGER) => {
             let (on, secs) = (int(0)?, int(4)?);
@@ -442,7 +481,7 @@ pub fn set_option(pid: u32, s: u32, level: u32, opt: u32, val: &[u8]) -> Result<
             update(pid, s, |x| if opt == SO_SNDTIMEO { x.snd_timeout = t } else { x.rcv_timeout = t })
         }
         (SOL_SOCKET, SO_DONTROUTE | SO_SNDLOWAT | SO_RCVLOWAT) => Ok(()),
-        (IPPROTO_TCP, TCP_NODELAY) if h.kind == Kind::Tcp => Ok(()),
+        (IPPROTO_TCP, TCP_MAXSEG) if h.kind == Kind::Tcp => Ok(()),
         _ => Err(ENOPROTOOPT),
     }
 }
@@ -473,8 +512,22 @@ pub fn get_option(pid: u32, s: u32, level: u32, opt: u32) -> Result<Vec<u8>> {
             let (snd, rcv) = stack(|st, _| st.buffers(h.id))?.map_err(Error::errno)?;
             int(if opt == SO_SNDBUF { snd } else { rcv } as u32)
         }
-        (SOL_SOCKET, SO_KEEPALIVE) => int(h.keepalive as u32),
-        (SOL_SOCKET, SO_OOBINLINE) => int(h.oobinline as u32),
+        (SOL_SOCKET, SO_KEEPALIVE) | (SOL_SOCKET, SO_OOBINLINE) | (IPPROTO_TCP, TCP_NODELAY) => {
+            if h.kind != Kind::Tcp {
+                if level == IPPROTO_TCP {
+                    return Err(ENOPROTOOPT);
+                }
+                int(0)
+            } else {
+                let f = match opt {
+                    SO_KEEPALIVE => TcpFlag::KeepAlive,
+                    SO_OOBINLINE => TcpFlag::OobInline,
+                    _ => TcpFlag::NoDelay,
+                };
+                int(stack(|st, _| st.tcp_flag(h.id, f))?.map_err(Error::errno)? as u32)
+            }
+        }
+        (IPPROTO_TCP, TCP_MAXSEG) if h.kind == Kind::Tcp => int(1460),
         (SOL_SOCKET, SO_LINGER) => {
             let mut v = int(h.linger.is_some() as u32);
             v.extend_from_slice(&h.linger.unwrap_or(0).to_le_bytes());
@@ -483,7 +536,6 @@ pub fn get_option(pid: u32, s: u32, level: u32, opt: u32) -> Result<Vec<u8>> {
         (SOL_SOCKET, SO_SNDTIMEO) => tv(h.snd_timeout),
         (SOL_SOCKET, SO_RCVTIMEO) => tv(h.rcv_timeout),
         (SOL_SOCKET, SO_SNDLOWAT) | (SOL_SOCKET, SO_RCVLOWAT) => int(1),
-        (IPPROTO_TCP, TCP_NODELAY) if h.kind == Kind::Tcp => int(0),
         _ => return Err(ENOPROTOOPT),
     })
 }
@@ -498,7 +550,7 @@ pub fn name(pid: u32, s: u32, peer: bool) -> Result<Endpoint> {
 /// (1 HOST_NOT_FOUND, 2 TRY_AGAIN, 4 NO_DATA).
 pub fn resolve(name: &str) -> core::result::Result<Vec<Ipv4>, u32> {
     let q = stack(|st, now| st.resolve_start(name, now)).map_err(|_| 2u32)?.map_err(|e| e.h_errno())?;
-    let r = blocking(false, Some(RESOLVE_TIMEOUT_MS), None, |st, _| match st.resolve_result(q) {
+    let r = blocking(false, Some(RESOLVE_TIMEOUT_MS), None, &[super::ANY], |st, _| match st.resolve_result(q) {
         Some(r) => Ok(r),
         None => Err(Error::WouldBlock),
     });

@@ -656,8 +656,8 @@ pub extern "C" fn conv_sockaddr_parms(_a: u32, _b: u32) -> i32 {
     0
 }
 #[unsafe(no_mangle)]
-pub extern "C" fn sysctl(_name: *const i32, _namelen: u32, _old: *mut u8, _oldlen: *mut u32, _new: *const u8, _newlen: u32) -> i32 {
-    errno::fail(errno::EOPNOTSUPP)
+pub extern "C" fn sysctl(name: *const i32, namelen: u32, old: *mut u8, oldlen: *mut u32, new: *const u8, newlen: u32) -> i32 {
+    unsafe { tcpipcore::netctl::sysctl(name, namelen, old, oldlen, new, newlen) }
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn socketpair(domain: i32, typ: i32, proto: i32, sv: *mut i32) -> i32 {
