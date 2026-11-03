@@ -29,13 +29,67 @@ pub struct ProgData {
     /// The colours the program sees (the Compatibility page, RS2COLORS=):
     /// 0 the display's, 256 a 256-colour display.
     pub colors: u32,
+    /// The rest of the program's environment (PROGDETAILS pszEnvironment,
+    /// `SET NAME=value` setup strings): its DOS settings and variables,
+    /// "NAME=value" strings each ending in a NUL.
+    pub envs: Str,
 }
+
+/// The environment strings of a program object other than RS2COLORS.
+pub fn env_list(obj: usize) -> Vec<Vec<u8>> {
+    str_bytes(&pd(obj).envs).split(|&c| c == 0).filter(|e| !e.is_empty()).map(|e| e.to_vec()).collect()
+}
+
+fn store_envs(obj: usize, list: &[Vec<u8>]) {
+    let mut v = Vec::new();
+    for e in list {
+        v.extend_from_slice(e);
+        v.push(0);
+    }
+    pd(obj).envs = if v.is_empty() { None } else { Some(v.into_boxed_slice()) };
+}
+
+/// Set (or with an empty value, remove) one environment string.
+fn set_env(obj: usize, name: &[u8], value: &[u8]) {
+    let mut list: Vec<Vec<u8>> = env_list(obj).into_iter().filter(|e| !env_name_is(e, name)).collect();
+    if !value.is_empty() {
+        let mut e = name.to_ascii_uppercase();
+        e.push(b'=');
+        e.extend_from_slice(value);
+        list.push(e);
+    }
+    store_envs(obj, &list);
+}
+
+fn env_name_is(entry: &[u8], name: &[u8]) -> bool {
+    entry.len() > name.len() && entry[name.len()] == b'=' && entry[..name.len()].eq_ignore_ascii_case(name)
+}
+
+/// The program's DOS settings ("NAME=value", the ones that differ from
+/// OS/2's defaults).
+pub fn dos_settings(obj: usize) -> Vec<Vec<u8>> {
+    env_list(obj).into_iter().filter(|e| crate::dosset::is_setting(e)).collect()
+}
+
+/// Replace the program's DOS settings, keeping its other variables.
+pub fn set_dos_settings(obj: usize, settings: &[Vec<u8>]) {
+    let mut list: Vec<Vec<u8>> = env_list(obj).into_iter().filter(|e| !crate::dosset::is_setting(e)).collect();
+    list.extend(settings.iter().cloned());
+    store_envs(obj, &list);
+    obj::call(m::WPObject::wpSaveDeferred, &[obj]);
+}
+
+/// The environment separator in the saved state (the strings themselves
+/// end in NULs in memory; the state holds a C string).
+const SAVED_SEP: u8 = 0x1e;
 
 /// The environment strings a program object gives its program
 /// (PROGDETAILS pszEnvironment, without the final NUL): RS2COLORS=256
 /// for a 256-colour display (see PMWIN's `gpiobj::wants256`).
 pub fn prog_env(obj: usize) -> Vec<u8> {
-    if pd(obj).colors == 256 { b"RS2COLORS=256\0".to_vec() } else { Vec::new() }
+    let mut v = if pd(obj).colors == 256 { b"RS2COLORS=256\0".to_vec() } else { Vec::new() };
+    v.extend_from_slice(str_bytes(&pd(obj).envs));
+    v
 }
 
 /// The colours the program sees: 0 (the display's) or 256.
@@ -89,6 +143,15 @@ extern "C" fn prog_setup(obj: usize, setup: *const u8) -> u32 {
             b"PROGTYPE" => p.progc = progtype(&v),
             // rs2's own: the Compatibility page's colours.
             b"RS2COLORS" => p.colors = colors_value(&v),
+            // An environment variable or DOS setting: SET NAME=value.
+            k if k.starts_with(b"SET ") => {
+                let name = k[4..].trim_ascii().to_vec();
+                if name.eq_ignore_ascii_case(b"RS2COLORS") {
+                    p.colors = colors_value(&v);
+                } else if !name.is_empty() {
+                    set_env(obj, &name, &v);
+                }
+            }
             b"ASSOCTYPE" => crate::pages::associate_types(obj, &v),
             b"ASSOCFILTER" => {
                 // PMWP_ASSOC_FILTER: a pattern's programs (handles in
@@ -126,6 +189,11 @@ extern "C" fn prog_save_state(obj: usize) -> u32 {
     obj::wpSaveString(obj, c, 3, str_ptr(&p.dir));
     obj::wpSaveLong(obj, c, 4, p.progc);
     obj::wpSaveLong(obj, c, 5, p.colors);
+    let e: Vec<u8> = str_bytes(&p.envs).iter().map(|&b| if b == 0 { SAVED_SEP } else { b }).collect();
+    if !e.is_empty() {
+        let e = z(&e);
+        obj::wpSaveString(obj, c, 6, e.as_ptr());
+    }
     1
 }
 
@@ -147,6 +215,10 @@ extern "C" fn prog_restore_state(obj: usize, r: u32) -> u32 {
     if let Some(v) = restored_long(obj, b"WPProgram", 5) {
         p.colors = v;
     }
+    if let Some(v) = restored_string(obj, b"WPProgram", 6) {
+        let list: Vec<Vec<u8>> = v.split(|&c| c == SAVED_SEP).filter(|e| !e.is_empty()).map(|e| e.to_vec()).collect();
+        store_envs(obj, &list);
+    }
     1
 }
 
@@ -156,6 +228,7 @@ extern "C" fn prog_uninit(obj: usize) {
     p.params = None;
     p.dir = None;
     p.env = None;
+    p.envs = None;
     som::call_parent(wps::ccd("WPProgram"), wps::cd("WPObject"), m::WPObject::wpUnInitData, &[obj]);
 }
 
@@ -244,6 +317,13 @@ extern "C" fn wpSetProgDetails(obj: usize, det: *const u32) -> u32 {
                 .filter_map(|e| (e.len() >= 10 && e[..10].eq_ignore_ascii_case(b"RS2COLORS=")).then(|| colors_value(&e[10..])))
                 .last()
                 .unwrap_or(0);
+            // The rest: DOS settings and variables, as given.
+            let rest: Vec<Vec<u8>> = env
+                .split(|&c| c == 0)
+                .filter(|e| !e.is_empty() && !(e.len() >= 10 && e[..10].eq_ignore_ascii_case(b"RS2COLORS=")))
+                .map(|e| e.to_vec())
+                .collect();
+            store_envs(obj, &rest);
         }
         if *det.add(3) != 0 {
             let t = z(&s(3));

@@ -15,6 +15,7 @@
 
 extern crate alloc;
 
+pub mod audio;
 pub mod bios;
 pub mod devices;
 pub mod disp;
@@ -24,6 +25,7 @@ pub mod ems;
 pub mod host;
 pub mod hw;
 pub mod mouse;
+pub mod opl;
 pub mod sb;
 pub mod shell;
 pub mod vdd;
@@ -67,6 +69,62 @@ pub struct Config {
     pub seamless: bool,
     /// The session's id for VWIN's messages.
     pub session_id: u32,
+    /// DOS_RMSIZE: conventional memory in KB (128-640).
+    pub rm_kb: u32,
+    /// DOS_BREAK: Ctrl+C checked at every DOS call.
+    pub break_on: bool,
+    /// DOS_VERSION: the version some programs are told (program name
+    /// without extension, major, minor).
+    pub versions: Vec<(String, u8, u8)>,
+    /// HW_NOSOUND: the session makes no sound.
+    pub nosound: bool,
+    /// IDLE_SENSITIVITY (0-100): keyboard polls without a key before the
+    /// session counts as idle (75 = 200 polls; higher, sooner).
+    pub idle_polls: u32,
+    /// DPMI_DOS_API: whether DPMI clients may ask for the translated DOS
+    /// API (AUTO and ENABLED: yes; DISABLED: no).
+    pub dpmi_dos_api: bool,
+}
+
+impl Config {
+    /// Apply one of OS/2's DOS settings (`DOS_RMSIZE`, `640`); whether
+    /// the name is one.
+    pub fn set(&mut self, name: &str, v: &str) -> bool {
+        let v = v.trim();
+        let on = matches!(v.to_ascii_uppercase().as_str(), "1" | "ON" | "YES");
+        let num = || v.parse::<u32>().ok();
+        match name.to_ascii_uppercase().as_str() {
+            "DOS_HIGH" => self.high = on,
+            "DOS_UMB" => self.umb = on,
+            "DOS_BREAK" => self.break_on = on,
+            "DOS_RMSIZE" => self.rm_kb = num().map_or(self.rm_kb, |k| k.clamp(128, 640) & !15),
+            "EMS_MEMORY_LIMIT" => self.ems_kb = num().map_or(self.ems_kb, |k| k.min(32768)),
+            "XMS_MEMORY_LIMIT" => self.xms_kb = num().map_or(self.xms_kb, |k| k.min(65536)),
+            "DPMI_MEMORY_LIMIT" => self.dpmi_kb = num().map_or(self.dpmi_kb, |m| m.min(512) * 1024),
+            "DPMI_DOS_API" => self.dpmi_dos_api = !v.eq_ignore_ascii_case("DISABLED"),
+            "HW_NOSOUND" => self.nosound = on,
+            "IDLE_SENSITIVITY" => {
+                if let Some(s) = num() {
+                    self.idle_polls = 200 * (101 - s.min(100)) / 26;
+                }
+            }
+            "DOS_VERSION" => {
+                // Lines (or ; separated) "NAME.EXE,major,minor,count".
+                self.versions.clear();
+                for line in v.split(['\n', '\r', ';']).map(str::trim).filter(|l| !l.is_empty()) {
+                    let f: Vec<&str> = line.split(',').map(str::trim).collect();
+                    if f.len() < 3 {
+                        continue;
+                    }
+                    let (Ok(maj), Ok(min)) = (f[1].parse::<u8>(), f[2].parse::<u8>()) else { continue };
+                    let name = f[0].split('.').next().unwrap_or("").to_ascii_uppercase();
+                    self.versions.push((name, maj, min));
+                }
+            }
+            _ => return false,
+        }
+        true
+    }
 }
 
 impl Default for Config {
@@ -85,6 +143,12 @@ impl Default for Config {
             codepage: 437,
             seamless: false,
             session_id: 1,
+            rm_kb: 640,
+            break_on: false,
+            versions: Vec::new(),
+            nosound: false,
+            idle_polls: 200,
+            dpmi_dos_api: true,
         }
     }
 }
@@ -129,7 +193,7 @@ pub struct Machine {
     pub fonts: [(u16, u16); 3],
     /// Consecutive keyboard polls without a key (idle detection).
     pub polls: u32,
-    speaker_on: Option<u32>,
+    pub audio: audio::Audio,
     /// The user closed the session.
     pub close_requested: bool,
     /// A BEL sounds until then (microseconds).
@@ -160,7 +224,7 @@ impl Machine {
             events: Vec::new(),
             fonts: [(0, 0); 3],
             polls: 0,
-            speaker_on: None,
+            audio: audio::Audio::default(),
             close_requested: false,
             beep_until: 0,
             vwin_shown: 0,
@@ -169,11 +233,21 @@ impl Machine {
         if m.cfg.fpu {
             m.cpu.fpu = Some(Default::default());
         }
-        // Programs find the Sound Blaster through BLASTER.
-        if !m.cfg.env.iter().any(|v| v.len() > 8 && v[..8].eq_ignore_ascii_case("BLASTER=")) {
-            m.cfg.env.push(alloc::string::String::from("BLASTER=A220 I7 D1 T3"));
+        // Programs find the Sound Blaster through BLASTER; one the session
+        // sets configures the card.
+        match m.cfg.env.iter().find(|v| v.len() > 8 && v[..8].eq_ignore_ascii_case("BLASTER=")) {
+            Some(v) => {
+                let v = String::from(&v[8..]);
+                m.hw.sb.configure(&v);
+            }
+            None => {
+                let b = alloc::format!("BLASTER={}", m.hw.sb.blaster());
+                m.cfg.env.push(b);
+            }
         }
         m.hw.umb = m.cfg.umb;
+        m.dos.break_on = m.cfg.break_on;
+        m.hw.sb.muted = m.cfg.nosound;
         m.vwin.seamless = m.cfg.seamless;
         m.vwin.id = m.cfg.session_id;
         m.t0 = host.micros();
@@ -273,7 +347,6 @@ impl Machine {
     pub fn run<H: Host>(&mut self, host: &mut H) -> u8 {
         loop {
             if let Some(c) = self.exited {
-                host.speaker(None);
                 return c;
             }
             if self.close_requested {
@@ -288,12 +361,8 @@ impl Machine {
         self.tick(host);
         self.take_events(host);
         self.devices();
-        self.sb_tick(host);
-        let spk = self.hw.speaker().or((self.hw.us_now < self.beep_until).then_some(896));
-        if spk != self.speaker_on {
-            self.speaker_on = spk;
-            host.speaker(spk);
-        }
+        self.audio.spk_levels.extend(self.hw.spk_levels.drain(..));
+        self.audio_tick(host);
         if self.hw.us_now >= self.last_present + 15_000 {
             self.last_present = self.hw.us_now;
             self.present(host);

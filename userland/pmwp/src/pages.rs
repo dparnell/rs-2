@@ -706,6 +706,14 @@ const SESSIONS: [(u16, &[u8], u32); 7] = [
     (847, b"WIN-OS/2 full scr~een", 19),
 ];
 
+/// Session types that run in a DOS session (DOS and Win-OS/2), whose
+/// DOS settings the "DOS properties" button edits.
+fn is_dos(c: u32) -> bool {
+    matches!(c, 4 | 7 | 13..=20)
+}
+
+const ID_DOS_PROPS: u16 = 848;
+
 fn progc(o: usize) -> u32 {
     let mut buf = alloc::vec![0u8; 2048];
     let mut cb = buf.len() as u32;
@@ -729,6 +737,7 @@ extern "C" fn session_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             if c == crate::launch::PROG_PM {
                 set_item_text(h, 844, b"A Presentation Manager program runs in its own windows.");
             }
+            unsafe { WinEnableWindow(WinWindowFromID(h, ID_DOS_PROPS as u32), is_dos(c) as u32) };
             0
         }
         WM_CONTROL if (a >> 16) == 1 => {
@@ -739,6 +748,16 @@ extern "C" fn session_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                 pd[0] = 72;
                 pd[1] = pc;
                 wps::call("WPProgram", m::WPProgram::wpSetProgDetails, &[page_obj(h), pd.as_ptr() as usize]);
+                unsafe { WinEnableWindow(WinWindowFromID(h, ID_DOS_PROPS as u32), is_dos(pc) as u32) };
+            }
+            0
+        }
+        WM_COMMAND if a & 0xffff == ID_DOS_PROPS as u32 => {
+            let o = page_obj(h);
+            let cur = crate::abs::dos_settings(o);
+            let title = obj::title(o);
+            if let Some(new) = crate::dosset::run(h, &title, &cur) {
+                crate::abs::set_dos_settings(o, &new);
             }
             0
         }
@@ -750,7 +769,8 @@ extern "C" fn session_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 extern "C" fn wpAddProgramSessionPage(o: usize, nb: u32) -> u32 {
     let mut items: Vec<Item> = SESSIONS.iter().enumerate().map(|(i, &(id, t, _))| radio(t, (12, 92 - 11 * i as i16, 200), id, i == 0)).collect();
     items.insert(0, book::label(b"Session", (6, 106, 220)));
-    items.push(static_text(b"", (6, 6, 224), 844));
+    items.push(button(b"DOS ~properties...", (12, 12, 90), ID_DOS_PROPS));
+    items.push(static_text(b"", (6, 2, 224), 844));
     add_page(o, nb, session_proc, items, b"~Session\0")
 }
 

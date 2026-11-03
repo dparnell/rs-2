@@ -24,21 +24,47 @@ impl Machine {
         (self.hw.rd(a), self.hw.rd16(a + 1), self.hw.rd16(a + 3))
     }
 
+    /// The segment where conventional memory ends (DOS_RMSIZE).
+    pub fn mem_top(&self) -> u16 {
+        (self.cfg.rm_kb.clamp(128, 640) * 64) as u16
+    }
+
+    /// The version DOS reports to the running program: DOS_VERSION's for
+    /// its name, else the session's.
+    pub fn program_version(&mut self) -> (u8, u8) {
+        if !self.cfg.versions.is_empty() {
+            let a = Machine::lin(self.dos.psp.wrapping_sub(1), 8);
+            let mut name = alloc::string::String::new();
+            for i in 0..8 {
+                let c = self.hw.rd(a + i);
+                if c == 0 {
+                    break;
+                }
+                name.push(c.to_ascii_uppercase() as char);
+            }
+            if let Some(v) = self.cfg.versions.iter().find(|v| v.0 == name) {
+                return (v.1, v.2);
+            }
+        }
+        self.cfg.version
+    }
+
     /// Link or unlink the upper memory chain (5803h).
     pub fn set_umb_link(&mut self, on: bool) {
         if self.dos.umb_start == 0xffff {
             return;
         }
         // The last conventional block before the hole MCB at 9FFFh.
+        let hole = self.mem_top() - 1;
         let mut seg = FIRST_MCB;
         loop {
             let (k, _, size) = self.mcb(seg);
             let next = seg + size + 1;
-            if next == 0x9fff || k == b'Z' && next >= 0x9fff {
+            if next == hole || k == b'Z' && next >= hole {
                 self.hw.wr(Machine::lin(seg, 0), if on { b'M' } else { b'Z' });
                 break;
             }
-            if k != b'M' || next >= 0xa000 {
+            if k != b'M' || next > hole {
                 break;
             }
             seg = next;

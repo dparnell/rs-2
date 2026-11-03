@@ -16,7 +16,9 @@
 //! a class DLL in the running shell and puts an object of it on the desktop.
 //! `WPSTEST OLDDESKTOP` marks the desktop as rs2's version 8 and `WPSTEST
 //! DUPES`, after the shell has started again, checks that the upgrade made
-//! nothing twice.
+//! nothing twice. `WPSTEST DOSPROPS` starts PMSHELL, makes a DOS program
+//! object with DOS settings (`SET DOS_RMSIZE=512`...), starts it (DOSSET.COM
+//! shows what the session got) and opens its settings.
 
 #![no_std]
 #![no_main]
@@ -813,6 +815,49 @@ fn remote() {
     check("WinDestroyObject of the program in the shell", unsafe { WinDestroyObject(h) } != 0);
 }
 
+/// `WPSTEST DOSPROPS`: a DOS program object with DOS settings in the
+/// running shell, started (its window shows DOSSET's line: RM=512
+/// VER=5.0 BREAK=1) and its settings notebook opened.
+fn dos_props() {
+    let mut res = ResultCodes { code_terminate: 0, code_result: 0 };
+    let rc = unsafe { DosExecPgm(core::ptr::null_mut(), 0, 1, b"PMSHELL\0\0".as_ptr(), core::ptr::null(), &mut res, b"C:\\OS2\\PMSHELL.EXE\0".as_ptr()) };
+    check("PMSHELL started", rc == 0);
+    let mut up = false;
+    for _ in 0..120 {
+        let mut p: *mut u8 = core::ptr::null_mut();
+        if unsafe { DosGetNamedSharedMem(&mut p, b"\\SHAREMEM\\RS2WPS.MEM\0".as_ptr(), 1) } == 0 {
+            let (magic, hwnd) = unsafe { ((p as *const u32).read_volatile(), (p.add(4) as *const u32).read_volatile()) };
+            unsafe { DosFreeMem(p) };
+            if magic == 0x5350_5752 && hwnd != 0 {
+                up = true;
+                break;
+            }
+        }
+        unsafe { DosSleep(500) };
+    }
+    check("the shell answers", up);
+    if !up {
+        return;
+    }
+    let h = create(
+        b"WPProgram",
+        b"DOS Settings Test",
+        b"EXENAME=C:\\OS2\\MDOS\\COMMAND.COM;PARAMETERS=/K C:\\DOS\\DOSSET.COM;PROGTYPE=WINDOWEDVDM;SET DOS_RMSIZE=512;SET DOS_VERSION=DOSSET.COM,5,0,255;SET DOS_BREAK=1;OBJECTID=<RS2_DOSSET>",
+        b"<WP_DESKTOP>",
+    );
+    check("DOS program object with DOS settings", h != 0);
+    let o = z(b"OPEN=DEFAULT");
+    check("started", unsafe { WinSetObjectData(h, o.as_ptr()) } != 0);
+    unsafe { DosSleep(8000) };
+    let o = z(b"OPEN=SETTINGS");
+    check("settings opened", unsafe { WinSetObjectData(h, o.as_ptr()) } != 0);
+    // Time to change them by hand (or by typed keys), then once more with
+    // what was saved.
+    unsafe { DosSleep(60000) };
+    let o = z(b"OPEN=DEFAULT");
+    check("started again", unsafe { WinSetObjectData(h, o.as_ptr()) } != 0);
+}
+
 /// `WPSTEST SHELLREMOTE`: start PMSHELL, wait for its desktop, then the REMOTE
 /// checks from this process.
 fn shell_then_remote() {
@@ -988,12 +1033,13 @@ fn main(st: &Startup) -> u32 {
     if word.eq_ignore_ascii_case(b"SHELL") {
         return shell(args);
     }
-    if [&b"REMOTE"[..], b"REGISTER", b"SHELLREMOTE", b"OLDDESKTOP", b"DUPES"].iter().any(|w| word.eq_ignore_ascii_case(w)) {
+    if [&b"REMOTE"[..], b"REGISTER", b"SHELLREMOTE", b"OLDDESKTOP", b"DUPES", b"DOSPROPS"].iter().any(|w| word.eq_ignore_ascii_case(w)) {
         match word.to_ascii_uppercase().as_slice() {
             b"REMOTE" => remote(),
             b"SHELLREMOTE" => shell_then_remote(),
             b"REGISTER" => register_remote(args),
             b"OLDDESKTOP" => old_desktop(),
+            b"DOSPROPS" => dos_props(),
             _ => dupes(),
         }
         let n = unsafe { FAILS };

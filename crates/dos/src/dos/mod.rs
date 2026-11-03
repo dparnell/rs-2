@@ -258,8 +258,9 @@ impl Machine {
             self.write_cds(host, d);
         }
         self.country_init();
-        // Conventional memory: one free block up to 9FFFh.
-        let hole = 0x9fff;
+        // Conventional memory: one free block up to the top (DOS_RMSIZE)
+        // less one paragraph.
+        let hole = self.mem_top() - 1;
         self.mcb_write(FIRST_MCB, if self.cfg.umb { b'M' } else { b'Z' }, 0, hole - FIRST_MCB - 1);
         if self.cfg.umb {
             // The video and ROM hole, then the upper memory blocks.
@@ -620,14 +621,15 @@ impl Machine {
                 self.cpu.set_bx(o);
             }
             0x30 => {
-                let (maj, min) = self.cfg.version;
-                // OS/2's VDM: major 20 (or 10 for OS/2 1.x).
-                let (maj, min) = if self.cpu.al() == 1 { (maj, min) } else { (maj, min) };
+                // OS/2's VDM: major 20 (or 10 for OS/2 1.x), or what
+                // DOS_VERSION gives this program.
+                let al = self.cpu.al();
+                let (maj, min) = self.program_version();
                 self.cpu.set_al(maj);
                 self.cpu.set_ah(min);
                 // OEM number (BH): IBM; BL:CX serial 0. AL=01h: BH = flags
                 // (DOS in HMA).
-                if self.cpu.al() == 1 {
+                if al == 1 {
                     self.cpu.set_bh(if self.cfg.high { 0x10 } else { 0 });
                 } else {
                     self.cpu.set_bh(0x00);

@@ -13,7 +13,8 @@
 //! the text screen is printed (or written to `--screen FILE`); `--png
 //! FILE` saves the screen of a graphics mode. `--timeout SECS` ends a
 //! program that runs too long, `--trace` logs every BIOS/DOS call,
-//! `--display WxH` sets the size of RS2DISP.DRV's screen (800x600).
+//! `--display WxH` sets the size of RS2DISP.DRV's screen (800x600),
+//! `--set NAME=VALUE` a DOS setting (`DOS_RMSIZE=512`) or variable.
 
 use std::collections::VecDeque;
 use std::fs::{self, File, OpenOptions};
@@ -35,8 +36,11 @@ struct Run {
     last_gfx: Option<(usize, usize, Vec<u8>, [u32; 256])>,
     trace: bool,
     cp437: Vec<char>,
-    /// Sound Blaster output collected for --wav (rate, samples).
-    pcm: (u32, Vec<u8>),
+    /// Sound output collected for --wav (rate, 16-bit stereo samples),
+    /// with silence filled in for the time nothing played.
+    pcm: (u32, Vec<i16>),
+    /// Output time (seconds since the start) the collected sound reaches.
+    pcm_end: f64,
     /// --display: RS2DISP.DRV's screen size.
     display: (u32, u32),
     /// The mouse buttons held ({press} until {release}).
@@ -364,11 +368,16 @@ impl Host for Run {
         }
         self.last_gfx = Some((d.w, d.h, px, d.pal));
     }
-    fn pcm(&mut self, rate: u32, data: &[u8]) {
-        if self.pcm.0 == 0 {
-            self.pcm.0 = rate;
+    fn audio(&mut self, rate: u32, data: &[i16]) {
+        self.pcm.0 = rate;
+        // Silence for the time the machine sent nothing.
+        let t = now_secs(&self.start) - data.len() as f64 / 2.0 / rate as f64;
+        if self.pcm_end > 0.0 && t > self.pcm_end + 0.05 {
+            let gap = ((t - self.pcm_end) * rate as f64) as usize;
+            self.pcm.1.extend(std::iter::repeat_n(0, gap * 2));
         }
         self.pcm.1.extend_from_slice(data);
+        self.pcm_end = now_secs(&self.start);
     }
     fn log(&mut self, msg: &str) {
         if self.trace || !msg.starts_with("cb ") {
@@ -589,6 +598,7 @@ fn main() {
     let mut display = (800, 600);
     let mut disp_trace = false;
     let mut vwin_trace = false;
+    let mut extra_env: Vec<String> = Vec::new();
     while let Some(a) = args.first().cloned() {
         if !a.starts_with("--") {
             break;
@@ -616,6 +626,14 @@ fn main() {
             "--vwin-trace" => vwin_trace = true,
             "--watch" => watch = u32::from_str_radix(val().trim_start_matches("0x"), 16).unwrap(),
             "--wav" => wav_out = Some(val()),
+            // A DOS setting (DOS_RMSIZE=512) or environment variable.
+            "--set" => {
+                let v = val();
+                let (k, x) = v.split_once('=').expect("--set NAME=VALUE");
+                if !cfg.set(k, x) {
+                    extra_env.push(v.clone());
+                }
+            }
             "--display" => {
                 let v = val();
                 let (w, h) = v.split_once('x').expect("--display WxH");
@@ -635,6 +653,7 @@ fn main() {
     fs::write(z.join("COMMAND.COM"), dos::shell::command_com()).unwrap();
     drives[25] = Some(z.clone());
     cfg.env = vec!["COMSPEC=Z:\\COMMAND.COM".into(), "PATH=Z:\\;C:\\".into(), "PROMPT=$P$G".into()];
+    cfg.env.extend(extra_env);
     let trace = cfg.trace;
     let mut host = Run {
         drives,
@@ -648,6 +667,7 @@ fn main() {
         trace,
         cp437: cp437(),
         pcm: (0, Vec::new()),
+        pcm_end: 0.0,
         display,
         held: 0,
     };
@@ -691,24 +711,25 @@ fn main() {
     }
     let _ = fs::remove_dir_all(&z);
     if let Some(w) = &wav_out {
-        // 8-bit mono WAV.
+        // 16-bit stereo WAV.
         let (rate, data) = (host.pcm.0.max(1), &host.pcm.1);
+        let data: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
         let mut f = Vec::new();
         f.extend_from_slice(b"RIFF");
         f.extend_from_slice(&(36 + data.len() as u32).to_le_bytes());
         f.extend_from_slice(b"WAVEfmt ");
         f.extend_from_slice(&16u32.to_le_bytes());
         f.extend_from_slice(&1u16.to_le_bytes());
-        f.extend_from_slice(&1u16.to_le_bytes());
+        f.extend_from_slice(&2u16.to_le_bytes());
         f.extend_from_slice(&rate.to_le_bytes());
-        f.extend_from_slice(&rate.to_le_bytes());
-        f.extend_from_slice(&1u16.to_le_bytes());
-        f.extend_from_slice(&8u16.to_le_bytes());
+        f.extend_from_slice(&(rate * 4).to_le_bytes());
+        f.extend_from_slice(&4u16.to_le_bytes());
+        f.extend_from_slice(&16u16.to_le_bytes());
         f.extend_from_slice(b"data");
         f.extend_from_slice(&(data.len() as u32).to_le_bytes());
-        f.extend_from_slice(data);
+        f.extend_from_slice(&data);
         fs::write(w, f).unwrap();
-        eprintln!("dosrun: {} samples at {} Hz to {w}", data.len(), rate);
+        eprintln!("dosrun: {} frames at {} Hz to {w}", data.len() / 4, rate);
     }
     if let (Some(p), Some((w, h, px, pal))) = (&png_out, &host.last_gfx) {
         write_png(Path::new(p), *w, *h, px, pal);
