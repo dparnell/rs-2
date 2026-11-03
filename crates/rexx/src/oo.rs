@@ -577,7 +577,18 @@ fn sym_or_str(t: &Token) -> Option<(Vec<u8>, bool)> {
 }
 
 /// Parse a program file's directives into a package.
+/// Whether a program is IBM's tokenized form (REXXC's output): `/*OBJREXX*/@REXX`,
+/// a NUL and then a flattened image of IBM's interpreter objects, which rs2
+/// cannot run (docs/REXX.md, "IBM's tokenized programs").
+pub fn ibm_image(src: &[u8]) -> bool {
+    src.starts_with(b"/*OBJREXX*/@REXX\0")
+}
+
 pub fn load_package(src: &[u8], name: &[u8]) -> Result<Rc<Package>, LoadErr> {
+    if ibm_image(src) {
+        // Error 3.904: "This version of REXX cannot run the program"
+        return Err((Err::Syntax(3904), 1));
+    }
     let secs = crate::parse::sections(src)?;
     let mut it = secs.into_iter();
     let main = it.next().unwrap();

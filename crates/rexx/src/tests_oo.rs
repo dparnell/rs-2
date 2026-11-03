@@ -76,6 +76,16 @@ fn redirected_streams() {
 }
 
 #[test]
+fn ibm_tokenized_program() {
+    let mut h = MemHost::default();
+    let src = "/*OBJREXX*/@REXX\0\x67\x2b\x1e\0OS/2     OBJREXX 6.00 27 Oct 2000\0\0\0";
+    let (out, r) = crate::tests::run_oo_with(src, &mut h);
+    assert_eq!(r, Err(-3));
+    let all = out.join("|");
+    assert!(all.contains("Error 3") && all.contains("cannot run the program \"C:\\T.CMD\""), "{all}");
+}
+
+#[test]
 fn image_classes() {
     let out = run_oo(
         "say .stdque~string .stdque~get .stdque~query .rx_queue~id .rx_queue~new~string\n\

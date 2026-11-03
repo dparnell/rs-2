@@ -487,6 +487,23 @@ impl<'h> Interp<'h> {
                     Err::Syntax(c) => c,
                     _ => 49,
                 };
+                if code == 3904 {
+                    // IBM's tokenized program: its name in the message
+                    if let Some(t) = (self.ops().secondary)(code) {
+                        let mut m = Vec::new();
+                        let mut i = 0;
+                        while i < t.len() {
+                            if t[i..].starts_with(b"&1") {
+                                m.extend_from_slice(name);
+                                i += 2;
+                            } else {
+                                m.push(t[i]);
+                                i += 1;
+                            }
+                        }
+                        self.err_msg = m;
+                    }
+                }
                 if !top && self.oo() {
                     // the caller may trap it
                     self.err_at = Some((name.to_vec(), line));
