@@ -324,6 +324,7 @@ const WM_COMMAND: u32 = 0x20;
 const WM_CHAR: u32 = 0x7a;
 const CMD_SAVE: u32 = 0x5100;
 const CMD_CLOSE: u32 = 0x5101;
+const CMD_RUN_SCRIPT: u32 = 0x5102;
 // IBM's OpenDoc command IDs (MMODPTS's EventMenuCommand handles these).
 const CMD_CUT: u32 = 0x5001;
 const CMD_COPY: u32 = 0x5003;
@@ -341,6 +342,7 @@ fn menu_hint(id: u32) -> &'static [u8] {
     match id {
         CMD_SAVE => b"Saves the document",
         CMD_CLOSE => b"Closes the document window",
+        CMD_RUN_SCRIPT => b"Runs C:\\ODSCRIPT.CMD (Object REXX, through OpenDoc's scripting component)",
         CMD_CUT => b"Moves the selected part's text to the clipboard",
         CMD_COPY => b"Copies the selected part's text to the clipboard",
         CMD_PASTE => b"Inserts the clipboard's text",
@@ -533,6 +535,10 @@ extern "C" fn shell_dispatch(this: usize, ev: usize, event: usize, info: usize) 
             1
         }
         CMD_ABOUT => 1,
+        CMD_RUN_SCRIPT => {
+            script::run_script(menu_frame(ev));
+            1
+        }
         CMD_COPY_PART => {
             copy_part(ev);
             1
@@ -588,6 +594,7 @@ fn base_menu_bar(ws: usize) {
     };
     m(c, 2, &[mb, e, 0x0c, b"~Document\0".as_ptr() as usize, 0]);
     item(mb, 0x0c, CMD_SAVE, b"~Save\0", false);
+    item(mb, 0x0c, CMD_RUN_SCRIPT, b"~Run script\0", false);
     item(mb, 0x0c, CMD_CLOSE, b"~Close\0", false);
     m(c, 2, &[mb, e, 0x0e, b"~Edit\0".as_ptr() as usize, 0]);
     item(mb, 0x0e, 0x5000, b"~Undo\0", true);
@@ -826,3 +833,6 @@ fn main(st: &Startup) -> u32 {
     release(root);
     0
 }
+
+// Scripting the document from REXX (OREXXSC): Document/Run script.
+mod script;
