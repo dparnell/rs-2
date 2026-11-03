@@ -461,7 +461,14 @@ fn port_jobs() {
     let lpt_job = jobs.first().cloned().unwrap_or_default();
     check("the port's job: PM_Q_RAW, the bytes written, the program's name", lpt_job.1 == data.len() as u32 && lpt_job.2 == b"PM_Q_RAW" && has(&lpt_job.3, b"PRNTEST"));
     // A DOS program prints five ways (tests/dos/print.S) to LPT1: one
-    // job when it ends.
+    // job when it ends (tests/dos/build.sh puts it in C:\DOS).
+    if read_file(b"C:\\DOS\\PRINT.COM").is_none() {
+        println!("SKIP a DOS session's printing: no C:\\DOS\\PRINT.COM (tests/dos/build.sh)");
+        set_printer_port(&PORT[..PORT.len() - 1]);
+        unsafe { SplReleaseQueue(null(), Q.as_ptr()) };
+        check("the port's job prints", wait_printed(lpt_job.0, 30));
+        return;
+    }
     set_printer_port(b"LPT1");
     let sd = StartData {
         length: core::mem::size_of::<StartData>() as u16,
