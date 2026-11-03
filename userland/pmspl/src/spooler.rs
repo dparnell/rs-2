@@ -43,6 +43,7 @@ pub extern "C" fn SplQmInitialize(_r: *mut u32) -> u32 {
     if rc != 0 {
         return rc;
     }
+    crate::lptpipe::start();
     0
 }
 

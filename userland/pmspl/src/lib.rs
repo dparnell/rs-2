@@ -11,7 +11,9 @@
 //! - `qm`: SplQmOpen and the other queue manager calls (spooling a job);
 //! - `spooler`: the spooler thread, giving jobs to queue processors;
 //! - `port`: PrtOpen/PrtWrite/PrtClose and the ports (FILE, LPT, COM,
-//!   LPR, IPP).
+//!   LPR, IPP);
+//! - `lptpipe`: programs' printer port output (DosOpen of LPT1, DOS
+//!   sessions) as jobs.
 
 #![no_std]
 #![no_main]
@@ -24,6 +26,7 @@ mod api;
 mod exports;
 mod ini;
 mod jobs;
+mod lptpipe;
 mod port;
 mod qm;
 mod spooler;

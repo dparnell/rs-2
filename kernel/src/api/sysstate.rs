@@ -91,6 +91,7 @@ fn handle_name(h: &Handle) -> (String, u32, u16, u16) {
         Handle::DosDev => (String::from("\\DEV\\DOS$"), 0, 0x42, 0),
         Handle::Drive(_) => (String::from("DASD"), 0, 0x8042, 0),
         Handle::Char(d) => (d.name(), 0, 0x42, 0),
+        Handle::Spool(n, _) => (crate::fs::CharDev::Lpt(*n).name(), 0, 0x42, 0),
     }
 }
 
