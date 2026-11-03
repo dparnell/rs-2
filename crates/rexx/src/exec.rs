@@ -601,6 +601,13 @@ impl<'h> Interp<'h> {
     }
 
     pub(crate) fn trace_line(&mut self, line: &[u8]) {
+        // Object REXX: trace output goes to .ERROR
+        if self.w.is_some() {
+            if let Some(r) = (self.ops().std_io)(self, None, b"ERROR", b"LINEOUT", alloc::vec![Some(Value::S(line.to_vec()))]) {
+                let _ = r;
+                return;
+            }
+        }
         let mut st = core::mem::replace(&mut self.st, State::empty());
         self.host.trace_out(&mut st, line);
         self.st = st;

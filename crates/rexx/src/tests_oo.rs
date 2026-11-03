@@ -57,6 +57,25 @@ fn uninit() {
 }
 
 #[test]
+fn redirected_streams() {
+    let out = run_oo(
+        "say 'one'\nlog = .log~new\n.local['OUTPUT'] = log\nsay 'two'\ncall lineout , 'three'\n.output~lineout('four')\n\
+         .local['OUTPUT'] = .stdout\nsay 'lines:' log~lines~items log~lines[1] log~lines[3]\n\
+         .local['INPUT'] = .feed~new\npull a\nparse pull b\nparse linein c\nsay a b c linein()\n\
+         m = .monitor~new(.stdout)\n.local['OUTPUT'] = m\nsay 'via monitor'\nold = m~destination(log)\nsay 'to log'\n\
+         m~destination\n.local['OUTPUT'] = .stdout\nsay log~lines[log~lines~last]\n\
+         .local['ERROR'] = log\ntrace r\nx = 1\ntrace o\n.local['ERROR'] = .stderr\nsay log~lines[log~lines~last - 1]~space\n\
+         ::class log\n::method lines attribute\n::method init\n  self~lines = .array~new\n\
+         ::method lineout\n  use arg l\n  self~lines[self~lines~items+1] = l\n  return 0\n\
+         ::class feed\n::method linein\n  expose n\n  if symbol('n') <> 'VAR' then n = 0\n  n = n + 1\n  return 'line'n\n",
+    );
+    assert_eq!(
+        out,
+        ["one", "lines: 3 two four", "LINE1 line2 line3 line4", "via monitor", "to log", ">>> \"1\""]
+    );
+}
+
+#[test]
 fn classes_and_methods() {
     let out = run_oo(
         "c = .counter~new(5)\nc~step\nc~step\nsay c~value c~class~id c\nd = .big~new(10)\nd~step\nsay d~value\n\

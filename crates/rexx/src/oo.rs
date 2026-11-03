@@ -37,6 +37,7 @@ pub struct Found {
 /// a classic REXX that never makes one does not link it).
 pub struct Ops {
     pub run_uninits: fn(&mut Interp<'_>, &mut Frame, bool),
+    pub std_io: fn(&mut Interp<'_>, Option<&mut Frame>, &[u8], &[u8], Vec<Option<Value>>) -> Option<R<Val>>,
     pub load_package: fn(&[u8], &[u8]) -> Result<Rc<Package>, LoadErr>,
     pub install_package: fn(&mut Interp<'_>, &mut Frame, &Rc<Package>) -> R<()>,
     pub obj_string: fn(&mut Interp<'_>, &mut Frame, &ObjRef) -> R<Val>,
@@ -59,6 +60,7 @@ fn install(it: &mut Interp<'_>, f: &mut Frame, p: &Rc<Package>) -> R<()> {
 
 pub static OPS: Ops = Ops {
     run_uninits,
+    std_io,
     load_package,
     install_package: install,
     obj_string,
@@ -98,6 +100,7 @@ pub struct World {
     /// still alive).
     pub uninit_live: RefCell<Vec<alloc::rc::Weak<Object>>>,
     in_uninit: Cell<bool>,
+    in_std_io: Cell<bool>,
 }
 
 const BUILTINS: &[(Builtin, &[u8])] = &[
@@ -190,6 +193,7 @@ impl World {
             uninit_queue: Rc::new(RefCell::new(Vec::new())),
             uninit_live: RefCell::new(Vec::new()),
             in_uninit: Cell::new(false),
+            in_std_io: Cell::new(false),
         };
         {
             let mut e = w.env.data.borrow_mut();
@@ -299,6 +303,73 @@ impl World {
             _ => None,
         }
     }
+}
+
+// ---- .INPUT, .OUTPUT, .ERROR ----
+
+/// The object `.OUTPUT` (`which` = OUTPUT, INPUT or ERROR) stands for, if
+/// it is not the default: the monitor .local starts with, on the standard
+/// stream. SAY, PULL, LINEIN, trace output... use the host directly then.
+fn std_target(w: &World, which: &[u8]) -> Option<Value> {
+    let v = w.dir_get(&w.local, which).or_else(|| w.dir_get(&w.env, which))?;
+    let std: &[u8] = match which {
+        b"OUTPUT" => b"STDOUT",
+        b"INPUT" => b"STDIN",
+        _ => b"STDERR",
+    };
+    let plain = |o: &ObjRef, b: Builtin| Rc::ptr_eq(&o.class(), &w.class(b)) && o.methods.borrow().is_none();
+    let std_stream = |v: &Value| match v {
+        Value::O(s) if plain(s, Builtin::Stream) => match &*s.data.borrow() {
+            Data::Stream(sd) => {
+                let mut n = upper(&sd.name);
+                if n.last() == Some(&b':') {
+                    n.pop();
+                }
+                n == std
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    if std_stream(&v) {
+        return None;
+    }
+    if let Value::O(m) = &v {
+        if plain(m, Builtin::Monitor) {
+            if let Data::Monitor(d) = &*m.data.borrow() {
+                if std_stream(d) {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(v)
+}
+
+/// Send `msg` to `.OUTPUT`/`.INPUT`/`.ERROR` when it was redirected (None:
+/// it was not, use the standard stream).
+fn std_io(it: &mut Interp<'_>, f: Option<&mut Frame>, which: &[u8], msg: &[u8], args: Vec<Option<Value>>) -> Option<R<Val>> {
+    let w = it.w.clone()?;
+    let t = std_target(&w, which)?;
+    // output of the redirection's own methods (their trace...) goes to
+    // the standard streams
+    if w.in_std_io.replace(true) {
+        return None;
+    }
+    let mut own;
+    let f = match f {
+        Some(f) => f,
+        None => {
+            own = Frame::new(Rc::new(Program::empty()), b"", b"CMD", crate::CallType::Function, it.st.pools.pools.len());
+            &mut own
+        }
+    };
+    let r = it.send(f, &t, msg, args, Start::Normal, 0).and_then(|v| match v {
+        Some(v) => it.to_str(f, &v),
+        None => Ok(Vec::new()),
+    });
+    w.in_std_io.set(false);
+    Some(r)
 }
 
 // ---- UNINIT ----

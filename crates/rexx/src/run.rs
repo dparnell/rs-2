@@ -418,6 +418,13 @@ impl Interp<'_> {
                     Some(e) => self.eval_top(f, e, lvl)?,
                     None => Vec::new(),
                 };
+                // Object REXX: SAY writes to .OUTPUT
+                if self.w.is_some() {
+                    if let Some(r) = (self.ops().std_io)(self, Some(f), b"OUTPUT", b"LINEOUT", alloc::vec![Some(crate::value::Value::S(v.clone()))]) {
+                        r?;
+                        return Ok(Next::Go);
+                    }
+                }
                 let mut st = core::mem::replace(&mut self.st, State::empty());
                 self.host.say(&mut st, &v);
                 self.st = st;
@@ -1053,7 +1060,7 @@ impl Interp<'_> {
                 strings.push(l);
             }
             ParseSrc::Pull => {
-                let l = self.pull_line();
+                let l = self.pull_line_r()?;
                 strings.push(l);
             }
             ParseSrc::Source => strings.push(self.st.source.clone()),
@@ -1092,13 +1099,26 @@ impl Interp<'_> {
 
     /// PULL: the queue, else the terminal.
     pub fn pull_line(&mut self) -> Val {
+        self.pull_line_r().unwrap_or_default()
+    }
+
+    /// PULL: the queue, else the terminal (Object REXX: .INPUT).
+    pub(crate) fn pull_line_r(&mut self) -> R<Val> {
         let mut st = core::mem::replace(&mut self.st, State::empty());
-        let l = match self.host.queue_pull(&mut st) {
-            Some(l) => l,
-            None => self.host.pull_terminal(&mut st).unwrap_or_default(),
-        };
+        let q = self.host.queue_pull(&mut st);
         self.st = st;
-        l
+        if let Some(l) = q {
+            return Ok(l);
+        }
+        if self.w.is_some() {
+            if let Some(r) = (self.ops().std_io)(self, None, b"INPUT", b"LINEIN", Vec::new()) {
+                return r;
+            }
+        }
+        let mut st = core::mem::replace(&mut self.st, State::empty());
+        let l = self.host.pull_terminal(&mut st).unwrap_or_default();
+        self.st = st;
+        Ok(l)
     }
 
     fn assign_section(&mut self, f: &mut Frame, targets: &[Option<VarRef>], sec: &[u8], lvl: u32) {
