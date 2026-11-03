@@ -15,6 +15,7 @@
 
 extern crate alloc;
 
+pub mod audio;
 pub mod bios;
 pub mod devices;
 pub mod disp;
@@ -24,6 +25,7 @@ pub mod ems;
 pub mod host;
 pub mod hw;
 pub mod mouse;
+pub mod opl;
 pub mod sb;
 pub mod shell;
 pub mod vdd;
@@ -129,7 +131,7 @@ pub struct Machine {
     pub fonts: [(u16, u16); 3],
     /// Consecutive keyboard polls without a key (idle detection).
     pub polls: u32,
-    speaker_on: Option<u32>,
+    pub audio: audio::Audio,
     /// The user closed the session.
     pub close_requested: bool,
     /// A BEL sounds until then (microseconds).
@@ -160,7 +162,7 @@ impl Machine {
             events: Vec::new(),
             fonts: [(0, 0); 3],
             polls: 0,
-            speaker_on: None,
+            audio: audio::Audio::default(),
             close_requested: false,
             beep_until: 0,
             vwin_shown: 0,
@@ -169,9 +171,17 @@ impl Machine {
         if m.cfg.fpu {
             m.cpu.fpu = Some(Default::default());
         }
-        // Programs find the Sound Blaster through BLASTER.
-        if !m.cfg.env.iter().any(|v| v.len() > 8 && v[..8].eq_ignore_ascii_case("BLASTER=")) {
-            m.cfg.env.push(alloc::string::String::from("BLASTER=A220 I7 D1 T3"));
+        // Programs find the Sound Blaster through BLASTER; one the session
+        // sets configures the card.
+        match m.cfg.env.iter().find(|v| v.len() > 8 && v[..8].eq_ignore_ascii_case("BLASTER=")) {
+            Some(v) => {
+                let v = String::from(&v[8..]);
+                m.hw.sb.configure(&v);
+            }
+            None => {
+                let b = alloc::format!("BLASTER={}", m.hw.sb.blaster());
+                m.cfg.env.push(b);
+            }
         }
         m.hw.umb = m.cfg.umb;
         m.vwin.seamless = m.cfg.seamless;
@@ -273,7 +283,6 @@ impl Machine {
     pub fn run<H: Host>(&mut self, host: &mut H) -> u8 {
         loop {
             if let Some(c) = self.exited {
-                host.speaker(None);
                 return c;
             }
             if self.close_requested {
@@ -288,12 +297,8 @@ impl Machine {
         self.tick(host);
         self.take_events(host);
         self.devices();
-        self.sb_tick(host);
-        let spk = self.hw.speaker().or((self.hw.us_now < self.beep_until).then_some(896));
-        if spk != self.speaker_on {
-            self.speaker_on = spk;
-            host.speaker(spk);
-        }
+        self.audio.spk_levels.extend(self.hw.spk_levels.drain(..));
+        self.audio_tick(host);
         if self.hw.us_now >= self.last_present + 15_000 {
             self.last_present = self.hw.us_now;
             self.present(host);

@@ -69,6 +69,7 @@ dependencies = [
 name = "dos"
 version = "0.1.0"
 dependencies = [
+ "midi",
  "win16drv",
  "x86emu",
 ]

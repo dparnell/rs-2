@@ -17,12 +17,27 @@ check() {
         echo "FAIL $prog"; fail=$((fail + 1))
     fi
 }
+# A program's sound (dosrun --wav) must have these tones
+# (tools/scripts/doswav.py: CHANNEL:HZ:SECONDS).
+checksnd() {
+    prog=$1; want=$2; shift 2
+    wav=${TMPDIR:-/tmp}/rs2-dossnd.$$.wav
+    out=$(cd "$here/bin" && "$dosrun" --timeout 30 --wav "$wav" "$prog" 2>/dev/null || true)
+    if printf '%s' "$out" | grep -q "$want" && python3 -I "$root/tools/scripts/doswav.py" "$wav" "$@" >/dev/null; then
+        echo "PASS $prog (sound)"
+    else
+        echo "FAIL $prog (sound)"; fail=$((fail + 1))
+    fi
+    rm -f "$wav"
+}
 set +e
 check HELLO.COM "File I/O OK" ""
 check GFX.COM "GFX OK" "{wait}x{wait}y"
 check DPMITEST.COM "DPMI test done" ""
 check VESA.COM "VESA OK" "{wait}x"
-check SBTEST.COM "SB OK" ""
-check BEEP.COM "beep done" ""
+checksnd SBTEST.COM "SB OK" B:441:1.0
+checksnd SB16TEST.COM "SB16 OK" L:1002:1.0 R:501:1.0
+checksnd FMTEST.COM "FM OK" L:440:0.5 R:880:0.5
+checksnd BEEP.COM "beep done" B:440:0.5 B:880:0.5
 check COMMAND.COM "rs2 DOS session, version" 'ver\nexit\n'
 exit $fail
