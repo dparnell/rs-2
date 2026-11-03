@@ -10,8 +10,8 @@
 //! client. The instance and conversations are windows (conv.rs), string
 //! and data handles a table (handles.rs). Errors are the PM error ids
 //! IBM's DdeSetErrorInfo sets (WinGetLastError); there is no
-//! WinDdeGetLastError. Not done: monitors (APPCLASS_MONITOR, XTYP_MONITOR:
-//! IBM's send and post hooks report every DDE message to them).
+//! WinDdeGetLastError. Monitors (APPCLASS_MONITOR, XTYP_MONITOR) are in
+//! mon.rs.
 
 #![no_std]
 #![no_main]
@@ -27,6 +27,7 @@ use core::ptr::null;
 mod conv;
 mod exports;
 mod handles;
+mod mon;
 mod pm;
 
 use conv::*;
@@ -144,6 +145,8 @@ pub fn set_error(e: u32, _conv: u32) {
         DMLERR_SYS_ERROR | 0x7004 | 0x7006 => 0xc,
         _ => 4,
     };
+    // Monitors first: what they are sent must not change the error.
+    mon::error(e);
     unsafe { WinSetErrorInfo(sev << 16 | e, 0x6000) };
 }
 
@@ -163,7 +166,7 @@ static mut REGISTERED: bool = false;
 extern "C" fn frame_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         WM_CLOSE => 0,
-        AM_REGISTER | AM_UNREGISTER => {
+        AM_REGISTER | AM_UNREGISTER | mon::AM_MONITOR => {
             let client = unsafe { WinWindowFromID(h, FID_CLIENT) };
             if is_class(client, AGENT_CLASS) {
                 unsafe { WinSendMsg(client, msg, mp1, mp2) };
@@ -234,6 +237,13 @@ pub extern "C" fn WinDdeInitialize(pid: *mut u32, pfn: Option<Callback>, af: u32
         set_error(DMLERR_SYS_ERROR, 0);
         return DMLERR_SYS_ERROR;
     }
+    // A monitor: the system hooks that report every process's DDE
+    // messages (IBM's Win32DdeInitialize).
+    if af & APPCLASS_MONITOR != 0 && !mon::start() {
+        unsafe { WinDestroyWindow(frame) };
+        set_error(DMLERR_SYS_ERROR, 0);
+        return DMLERR_SYS_ERROR;
+    }
     let i = Box::new(Inst { flags: af | APPCMD_FILTERINITS, pfn, frame, names: Vec::new() });
     unsafe {
         WinSetWindowPtr(agent, 0, Box::into_raw(i) as u32);
@@ -249,6 +259,10 @@ pub extern "C" fn WinDdeInitialize(pid: *mut u32, pfn: Option<Callback>, af: u32
 pub extern "C" fn WinDdeUninitialize(inst: u32) -> u32 {
     let Some(i) = valid_instance(inst) else { return 0 };
     let frame = i.frame;
+    if i.flags & APPCLASS_MONITOR != 0 {
+        i.flags &= !APPCLASS_MONITOR;
+        mon::stop();
+    }
     for n in core::mem::take(&mut i.names) {
         broadcast_name(inst, AM_UNREGISTER, n);
         free_string(n);
@@ -731,7 +745,11 @@ pub extern "C" fn WinDdeCreateStringHandle(psz: *const u8, cp: u32) -> u32 {
         return 0;
     }
     let s: Vec<u8> = (0..).map(|i| unsafe { *psz.add(i) }).take_while(|&b| b != 0).collect();
-    string_handle(&s, cp, 0)
+    let h = string_handle(&s, cp, 0);
+    if h != 0 {
+        mon::hsz(h, mon::MH_CREATE);
+    }
+    h
 }
 
 /// WinDdeQueryString(hsz, pszBuf, cchMax, ulCodepage): the string's
@@ -753,6 +771,7 @@ pub extern "C" fn WinDdeFreeStringHandle(hsz: u32) -> u32 {
         set_error(DMLERR_INVALIDPARAMETER, 0);
         return 0;
     }
+    mon::hsz(hsz, mon::MH_DELETE);
     free_string(hsz);
     set_error(0, 0);
     1
@@ -765,6 +784,7 @@ pub extern "C" fn WinDdeKeepStringHandle(hsz: u32) -> u32 {
         return 0;
     }
     keep_string(hsz);
+    mon::hsz(hsz, mon::MH_KEEP);
     set_error(0, 0);
     1
 }

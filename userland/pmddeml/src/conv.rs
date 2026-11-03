@@ -192,6 +192,7 @@ pub fn dispatch(inst: u32, typ: u32, fmt: u32, hconv: u32, hsz1: u32, hsz2: u32,
     if hdata != 0 {
         lock_data(hdata, false);
     }
+    crate::mon::callback(r, typ, fmt, hconv, hsz1, hsz2, hdata, ul1, ul2);
     if hconv != 0
         && let Some(c) = conv(hconv)
     {
@@ -373,6 +374,7 @@ pub extern "C" fn agent_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         WM_CLOSE => 0,
         WM_DDE_INITIATE => agent_initiate(h, mp1, mp2 as *mut u8),
         AM_REGISTER | AM_UNREGISTER => agent_register(h, msg, mp1, mp2),
+        crate::mon::AM_MONITOR => crate::mon::agent_monitor(h, mp1, mp2 as *mut u8),
         _ => unsafe { WinDefWindowProc(h, msg, mp1, mp2) },
     }
 }
@@ -483,6 +485,7 @@ fn agent_initiate(h: u32, client: u32, p: *mut u8) -> u32 {
                 c.topic = t;
             }
             unsafe { WinDdeRespond(client, hc, sz.as_ptr(), tz.as_ptr(), cc_out.as_ptr()) };
+            crate::mon::conv(hc, true);
             if flags & CBF_SKIP_CONNECT_CONFIRMS == 0 && conv(hc).is_some() {
                 dispatch(h, XTYP_CONNECT_CONFIRM, 0, hc, t, s, 0, 0, me as u32);
             }
@@ -608,6 +611,7 @@ fn conv_initiate_ack(h: u32, server: u32, p: *mut u8) -> u32 {
         c.cc = cc;
         c.cc[0] = 24;
     }
+    crate::mon::conv(h, true);
     1
 }
 
@@ -624,6 +628,8 @@ fn conv_close(h: u32) -> u32 {
         return 0;
     }
     if c.status & ST_CONNECTED != 0 {
+        crate::mon::conv(h, false);
+        let Some(c) = conv(h) else { return 0 };
         c.status = (c.status & !ST_CONNECTED) | ST_TERMINATED;
         let partner = c.partner;
         if c.status & ST_CLIENT != 0 {
@@ -649,6 +655,8 @@ fn conv_terminate(h: u32, from: u32) -> u32 {
         return 0;
     }
     if c.status & ST_CONNECTED != 0 {
+        crate::mon::conv(h, false);
+        let Some(c) = conv(h) else { return 0 };
         c.status = (c.status & !ST_CONNECTED) | ST_TERMINATED;
         if c.status & ST_INSYNC != 0
             && let Some(x) = c.xacts.iter_mut().find(|x| x.id == QID_SYNC)
@@ -837,6 +845,7 @@ fn server_advise(h: u32, from: u32, p: *mut u8) -> u32 {
                 free_string(item);
             } else {
                 c.links.push(Link { item, fmt: d.fmt, flags: d.status & (DDE_FNODATA | DDE_FACKREQ), busy: 0 });
+                crate::mon::link(h, item, true, d.status & DDE_FNODATA != 0, d.fmt);
             }
             c.status |= ST_ADVISE;
             set_status(p, DDE_FACK);
@@ -872,6 +881,7 @@ fn server_unadvise(h: u32, from: u32, p: *mut u8) -> u32 {
                 && let Some(k) = c.links.iter().position(|l| l.item == li && l.fmt == lf)
             {
                 let l = c.links.remove(k);
+                crate::mon::link(h, l.item, false, l.flags & DDE_FNODATA != 0, l.fmt);
                 free_string(l.item);
                 set_status(p, DDE_FACK);
             }
