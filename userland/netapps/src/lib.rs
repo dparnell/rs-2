@@ -180,6 +180,9 @@ impl Sock {
 pub fn connect_from(addr: [u8; 4], port: u16, ports: impl Iterator<Item = u16>) -> Result<Sock, u32> {
     let mut last = 60; // ETIMEDOUT
     let mut slow = 0;
+    // A refusal may be for the port only (a NAT still holding the last
+    // connection from it): two more ports are tried.
+    let mut refused = 0;
     for lp in ports {
         let s = Sock::tcp()?;
         s.reuse();
@@ -210,14 +213,21 @@ pub fn connect_from(addr: [u8; 4], port: u16, ports: impl Iterator<Item = u16>) 
                     if err == 48 || err == 49 {
                         continue;
                     }
+                    if err == 61 && refused < 2 {
+                        refused += 1;
+                        last = err;
+                        continue;
+                    }
                     return Err(err);
                 }
             }
             48 | 49 => continue,
-            e => {
-                last = e;
-                return Err(last);
+            61 if refused < 2 => {
+                refused += 1;
+                last = 61;
+                continue;
             }
+            e => return Err(e),
         }
         let mut off = 0u32;
         unsafe { Rs2SockIoctl(s.0, FIONBIO, &mut off) };
