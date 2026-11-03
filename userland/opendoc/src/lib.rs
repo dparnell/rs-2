@@ -33,6 +33,7 @@ pub mod osa;
 pub mod dnd;
 pub mod events;
 pub mod help;
+pub mod ipc;
 pub mod layout;
 pub mod obj;
 pub mod part;
@@ -292,6 +293,12 @@ somsup::aligned! {
     __a_AESizeOfNthItem => ae::AESizeOfNthItem, 4;
     __a_AESizeOfParam => ae::AESizeOfParam, 4;
     __a_AEGetProcessName => ae::AEGetProcessName, 3;
+    __a_AEDisposeToken => ae::AEDisposeToken, 1;
+    __a_AEInstallObjectAccessor => ae::AEInstallObjectAccessor, 5;
+    __a_AEPutParamPtr => ae::AEPutParamPtr, 5;
+    __a_AEPutPtr => ae::AEPutPtr, 5;
+    __a_AERemoveObjectAccessor => ae::AERemoveObjectAccessor, 4;
+    __a_AEResolve => ae::AEResolve, 3;
     __a_AENotHandled => ae::AENotHandled, 0;
 }
 

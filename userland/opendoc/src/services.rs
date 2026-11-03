@@ -236,6 +236,7 @@ methods! {
     fn GetHAB(this: usize, ev: usize) -> usize { sess(this).hab as usize }
     fn SetHAB(this: usize, ev: usize, hab: usize) -> usize {
         sess(this).hab = hab as u32;
+        crate::ae::listen();
         0
     }
     fn CreatePlatformWindow(this: usize, ev: usize, flags: usize) -> usize { create_window(flags as u32) as usize }
