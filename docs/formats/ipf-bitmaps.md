@@ -138,6 +138,9 @@ then a full image record as above (BITMAPFILEHEADER at +14)
   at a running offset.
 * If cx or cy is 0, it uses `cx = CXSCREEN/2`, `cy = CYSCREEN/2`, units=0x22. PnlConvertUnit converts
   the record. cx/cy become the item's size, then MtaPlayMetaFile renders it into a bitmap.
+* rs2's compiler (`crates/ipf` compile.rs, `:artwork name=X.MET.`) writes such records: `+2` 0,
+  placement all 0 (the default size), the metafile in stored (type 0) blocks of 0x4000 bytes. rs2's
+  HELPMGR reads them back (`bitmap::metafile`) and plays them as above.
 
 ### 2.5 2.x header caveat [code]
 LoadBitmap computes rowBytes for `cbFix==0x40` with `cBitCount` read from **+0x18 (the high word

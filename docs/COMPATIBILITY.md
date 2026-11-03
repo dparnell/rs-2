@@ -618,6 +618,15 @@ Fixed for it:
 
 ## Fixed while getting these to run
 
+- Workplace Shell: REXXUTIL's `SysOpenObject('C:\MMOS2\SOUNDS', ...)`
+  once opened the Multimedia Templates folder: a program's
+  WinQueryObject of a path, done while the shell was starting, gave the
+  path the file system handle number the shell had just given that
+  folder (both read OS2.INI's handle table and took the first free
+  number), and WinOpenObject found the folder by its number. Handles are
+  now given out under a system-wide mutex and OS2.INI's table decides
+  what a handle stands for ([WPS.md](WPS.md#persistence)).
+
 - KbdSetStatus rejected binary mode with echo on in one call; OS/2
   judges the echo bit by the mode the call starts from (IBM TELNET sets
   binary, echo and shift reports together).

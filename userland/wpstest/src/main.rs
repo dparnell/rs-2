@@ -71,6 +71,10 @@ unsafe extern "C" {
     fn WinCreateMsgQueue(hab: u32, cmsg: i32) -> u32;
     #[link_name = "PMWIN.726"]
     fn WinDestroyMsgQueue(hmq: u32) -> u32;
+    #[link_name = "PMWIN.899"]
+    fn WinWindowFromID(h: u32, id: u32) -> u32;
+    #[link_name = "PMWIN.920"]
+    fn WinSendMsg(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32;
     #[link_name = "PMWIN.702"]
     fn WinBeginEnumWindows(h: u32) -> u32;
     #[link_name = "PMWIN.756"]
@@ -551,6 +555,56 @@ fn system_settings(o: usize) {
     check("MinButtonAppearance minimize", set(b"MinButtonAppearance", 2) && get(b"MinButtonAppearance") == Some(2));
     check("MinButtonBehavior hide, then viewer (HiddenMinWindows)", set(b"MinButtonBehavior", 1) && ini(b"HiddenMinWindows") == b"1" && set(b"MinButtonBehavior", 2) && get(b"MinButtonBehavior") == Some(2));
     check("an unknown setting", get(b"NoSuchSetting").is_none());
+
+    // Folder menus and menu bars (WPCONFIG keeps them in PM_Workplace as
+    // text).
+    let pw = |key: &[u8]| -> Vec<u8> {
+        let (a, k) = (z(b"PM_Workplace"), z(key));
+        let mut buf = [0u8; 16];
+        let mut n = 16u32;
+        if unsafe { PrfQueryProfileData(HINI_USER, a.as_ptr(), k.as_ptr(), buf.as_mut_ptr(), &mut n) } == 0 {
+            return Vec::new();
+        }
+        buf[..n as usize].iter().copied().take_while(|&c| c != 0).collect()
+    };
+    let f = object(query(b"C:\\OS2\\HELP"));
+    let desk = object(query(b"<WP_DESKTOP>"));
+    check("FolderMenuBar on by default; the desktop has none", get(b"FolderMenuBar") == Some(1) && call(f, b"wpQueryMenuBarVisibility", &[]) == 1 && call(desk, b"wpQueryMenuBarVisibility", &[]) == 0);
+    check("FolderMenuBar off (PM_Workplace OFF): folders follow", set(b"FolderMenuBar", 0) && get(b"FolderMenuBar") == Some(0) && pw(b"FolderMenuBar") == b"OFF" && call(f, b"wpQueryMenuBarVisibility", &[]) == 0);
+    check("a folder's own menu bar setting wins", call(f, b"wpSetMenuBarVisibility", &[1]) == 1 && call(f, b"wpQueryMenuBarVisibility", &[]) == 1);
+    call(f, b"wpSetMenuBarVisibility", &[2]);
+    check("FolderMenuBar on again", set(b"FolderMenuBar", 1) && pw(b"FolderMenuBar") == b"ON" && call(f, b"wpQueryMenuBarVisibility", &[]) == 1);
+    check("FolderMenus short (PM_Workplace SHORT), then long", set(b"FolderMenus", 0) && pw(b"FolderMenus") == b"SHORT" && call(f, b"wpQueryMenuStyle", &[]) == 0 && set(b"FolderMenus", 1) && call(f, b"wpQueryMenuStyle", &[]) == 1);
+    menu_bar_view(f);
+}
+
+/// A folder window's menu bar: there when the folder's window opens, its
+/// Edit pull-down filled as it drops, gone and back with
+/// wpSetMenuBarVisibility.
+fn menu_bar_view(f: usize) {
+    const FID_MENU: u32 = 0x8005;
+    const FID_CLIENT: u32 = 0x8008;
+    const MM_QUERYITEM: u32 = 0x0182;
+    const MM_QUERYITEMCOUNT: u32 = 0x0184;
+    const WM_INITMENU: u32 = 0x0033;
+    let hab = unsafe { WinInitialize(0) };
+    let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
+    // OPEN_CONTENTS
+    let frame = call(f, b"wpOpen", &[0, 1, 0]) as u32;
+    let bar = unsafe { WinWindowFromID(frame, FID_MENU) };
+    check("a folder window has a menu bar", frame != 0 && bar != 0 && unsafe { WinSendMsg(bar, MM_QUERYITEMCOUNT, 0, 0) } == 5);
+    // MENUITEM of the Edit pull-down (id 720): its submenu at +8.
+    let mut mi = [0u32; 4];
+    unsafe { WinSendMsg(bar, MM_QUERYITEM, 720 | 1 << 16, mi.as_mut_ptr() as u32) };
+    let sub = mi[2];
+    unsafe { WinSendMsg(WinWindowFromID(frame, FID_CLIENT), WM_INITMENU, 720, sub) };
+    check("its Edit pull-down is filled as it drops", sub != 0 && unsafe { WinSendMsg(sub, MM_QUERYITEMCOUNT, 0, 0) } == 11);
+    call(f, b"wpSetMenuBarVisibility", &[0]);
+    let gone = unsafe { WinWindowFromID(frame, FID_MENU) } == 0;
+    call(f, b"wpSetMenuBarVisibility", &[2]);
+    check("wpSetMenuBarVisibility takes it away and gives it back", gone && unsafe { WinWindowFromID(frame, FID_MENU) } != 0);
+    call(f, b"wpClose", &[]);
+    unsafe { WinDestroyMsgQueue(hmq) };
 }
 
 /// The desktop's lockup and drop settings (WPDesktop's methods, IBM's

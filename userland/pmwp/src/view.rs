@@ -1074,10 +1074,6 @@ pub fn update_menu_bars() {
     }
 }
 
-/// Whether a folder window has its menu bar.
-pub fn has_menu_bar(frame: u32) -> bool {
-    unsafe { WinWindowFromID(frame, FID_MENU) != 0 }
-}
 
 /// The objects selected in a folder window.
 fn selection(w: usize) -> Vec<usize> {

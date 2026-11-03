@@ -24,6 +24,10 @@
 //!   `vpx=` and so on;
 //! - `:font facename=F size=HxW.` (`facename=default`: the document's
 //!   font) and `:ddf res=N.` (the application's dynamic data);
+//! - `:artwork name=F.` with `align=` (left, center, right), `fit` and
+//!   `runin`: a bitmap (.BMP) or metafile (.MET) that `compile_with`'s
+//!   loader reads, stored once per file as IBM's compiler stores images
+//!   (`bM` and `mF` records, see the bitmap module);
 //! - symbols such as `&colon.`, `&amp.`, `&period.`.
 //!
 //! Text is in the file's code page (437); words are runs of letters and

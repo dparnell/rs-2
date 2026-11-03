@@ -205,6 +205,9 @@ extern "C" fn sys_query_setting(_cls: usize, name: *const u8, value: *mut u32, l
         b"NameClash" => name_clash(),
         // CCVIEW_ON 1, CCVIEW_OFF 2.
         b"ConcurrentView" => if concurrent_view() { 1 } else { 2 },
+        // MENUBAR_ON 1, MENUBAR_OFF 0; MENUS_LONG 1, MENUS_SHORT 0.
+        b"FolderMenuBar" => crate::usermenu::system_menu_bar() as u32,
+        b"FolderMenus" => crate::usermenu::system_menu_style(),
         _ => return 0,
     };
     unsafe { *value = v };
@@ -230,6 +233,9 @@ extern "C" fn sys_set_setting(_cls: usize, name: *const u8, value: *const u32) -
             _ => NAMECLASH_PROMPT,
         }),
         b"ConcurrentView" => set_concurrent_view(v == 1),
+        // *_DEFAULT (2): on, long.
+        b"FolderMenuBar" => crate::usermenu::set_system_menu_bar(v != 0),
+        b"FolderMenus" => crate::usermenu::set_system_menu_style(if v == 0 { crate::usermenu::MENUS_SHORT } else { crate::usermenu::MENUS_LONG }),
         _ => return 0,
     }
     1

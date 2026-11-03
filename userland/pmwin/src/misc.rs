@@ -131,7 +131,10 @@ pub extern "C" fn WinSetSysValue(_desk: u32, i: i32, v: i32) -> u32 {
     // SV_SWAPBUTTON, SV_DBLCLKTIME, SV_CX/CYDBLCLK, SV_ALARM,
     // SV_CURSORRATE, SV_FIRST/SCROLLRATE, SV_*FREQ, SV_*DURATION.
     // SV_ANIMATION, SV_PRINTSCREEN (the System object's settings).
-    if !matches!(i, 0..=3 | 6 | 9..=11 | 13..=18 | 93 | 97) {
+    // SV_LOCKSTARTINPUT and 99-103 (the System object's Input page:
+    // full window drag, Alt+Tab window, VIO mouse actions, asynchronous
+    // focus change and its delay), kept for programs that read them.
+    if !matches!(i, 0..=3 | 6 | 9..=11 | 13..=18 | 93 | 97..=103) {
         set_error(0x1303); // PMERR_INVALID_PARM
         return 0;
     }
@@ -208,6 +211,8 @@ pub extern "C" fn WinQuerySysValue(_desk: u32, i: i32) -> i32 {
         73 | 74 => 2,                // SV_CX/CYMOTIONSTART
         93 => 1,                     // SV_ANIMATION
         97 => 1,                     // SV_PRINTSCREEN
+        100..=102 => 1,              // Input page: Alt+Tab, VIO mouse, async focus
+        103 => 20,                   // asynchronous focus change delay (tenths)
         _ => 0,
     }
 }
