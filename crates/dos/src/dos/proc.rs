@@ -288,7 +288,7 @@ impl Machine {
         // Standard handles for the system PSP: CON x3, AUX, PRN.
         let con = self.new_sft(Sft { refs: 0, dev: Some(super::Device::Con), host: 0, path: String::new(), mode: 2, info: super::Device::Con.info(), owner: 0 })?;
         let aux = self.new_sft(Sft { refs: 0, dev: Some(super::Device::Aux), host: 0, path: String::new(), mode: 2, info: super::Device::Aux.info(), owner: 0 })?;
-        let prn = self.new_sft(Sft { refs: 0, dev: Some(super::Device::Prn), host: 0, path: String::new(), mode: 1, info: super::Device::Prn.info(), owner: 0 })?;
+        let prn = self.new_sft(Sft { refs: 0, dev: Some(super::Device::Lpt(0)), host: 0, path: String::new(), mode: 1, info: super::Device::Lpt(0).info(), owner: 0 })?;
         let t = Machine::lin(super::SYS_PSP, 0x18);
         for (h, i) in [con, con, con, aux, prn].iter().enumerate() {
             self.hw.wr(t + h as u32, *i as u8);
@@ -477,6 +477,7 @@ impl Machine {
     }
 
     fn finish<H: Host>(&mut self, host: &mut H, psp: u16, code: u8, kind: u8) {
+        self.print_end(host);
         self.dos.return_code = (kind as u16) << 8 | code as u16;
         let a = Machine::lin(psp, 0);
         // Restore INT 22h-24h from the PSP.

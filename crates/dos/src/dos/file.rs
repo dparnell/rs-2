@@ -16,7 +16,8 @@ pub enum Device {
     Con,
     Nul,
     Aux,
-    Prn,
+    /// LPT1-LPT3 (PRN is LPT1), 0-based.
+    Lpt(u8),
     Clock,
     Emm,
     Xms,
@@ -28,7 +29,9 @@ impl Device {
             b"CON" => Device::Con,
             b"NUL" => Device::Nul,
             b"AUX" | b"COM1" | b"COM2" | b"COM3" | b"COM4" => Device::Aux,
-            b"PRN" | b"LPT1" | b"LPT2" | b"LPT3" => Device::Prn,
+            b"PRN" | b"LPT1" => Device::Lpt(0),
+            b"LPT2" => Device::Lpt(1),
+            b"LPT3" => Device::Lpt(2),
             b"CLOCK$" => Device::Clock,
             b"EMMXXXX0" => Device::Emm,
             b"XMSXXXX0" => Device::Xms,
@@ -43,7 +46,7 @@ impl Device {
             Device::Nul => 0x80c4,
             Device::Clock => 0x80c8,
             Device::Aux => 0x80c0,
-            Device::Prn => 0xa0c0,
+            Device::Lpt(_) => 0xa0c0,
             Device::Emm | Device::Xms => 0xc0c0,
         }
     }
@@ -381,6 +384,10 @@ impl Machine {
         match s.dev {
             Some(Device::Con) => {
                 self.con_write(host, data);
+                Ok(data.len())
+            }
+            Some(Device::Lpt(n)) => {
+                host.print(n, data);
                 Ok(data.len())
             }
             Some(_) => Ok(data.len()),

@@ -85,7 +85,14 @@ impl Machine {
                 self.cpu.set_al(c);
             }
             0x03 => self.cpu.set_al(0),
-            0x04 | 0x05 => {}
+            0x04 => {}
+            // Printer output: to standard printer (handle 4).
+            0x05 => {
+                let c = [self.cpu.dl()];
+                if self.write_handle(host, 4, &c).is_err() {
+                    host.print(0, &c);
+                }
+            }
             0x06 => {
                 if self.cpu.dl() == 0xff {
                     if self.stdin_is_con() && !self.con_avail() && self.dos.con_ahead.is_empty() {

@@ -274,6 +274,7 @@ impl Machine {
         loop {
             if let Some(c) = self.exited {
                 host.speaker(None);
+                self.print_end(host);
                 return c;
             }
             if self.close_requested {
@@ -283,12 +284,30 @@ impl Machine {
         }
     }
 
+    /// Hand what the program wrote to the parallel ports' registers to
+    /// the host.
+    fn lpt_drain<H: Host>(&mut self, host: &mut H) {
+        for n in 0..2 {
+            if !self.hw.lpt[n].out.is_empty() {
+                let d = core::mem::take(&mut self.hw.lpt[n].out);
+                host.print(n as u8, &d);
+            }
+        }
+    }
+
+    /// The session ends: what was printed is a complete job.
+    pub fn print_end<H: Host>(&mut self, host: &mut H) {
+        self.lpt_drain(host);
+        host.print_end();
+    }
+
     /// One slice: some instructions and the device work between them.
     pub fn step<H: Host>(&mut self, host: &mut H) {
         self.tick(host);
         self.take_events(host);
         self.devices();
         self.sb_tick(host);
+        self.lpt_drain(host);
         let spk = self.hw.speaker().or((self.hw.us_now < self.beep_until).then_some(896));
         if spk != self.speaker_on {
             self.speaker_on = spk;
@@ -463,7 +482,7 @@ impl Machine {
             0x15 => self.int15(host),
             0x16 => self.int16(),
             0x17 => {
-                self.cpu.set_ah(0x90);
+                self.int17(host);
                 Cb::Done
             }
             0x19 => {

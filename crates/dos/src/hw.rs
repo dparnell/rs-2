@@ -53,6 +53,43 @@ pub struct Hw {
     pub irq_remap: Option<u8>,
     pub dma: crate::sb::Dma,
     pub sb: crate::sb::SoundBlaster,
+    /// The parallel ports at 378h and 278h (programs that drive the
+    /// printer through its registers).
+    pub lpt: [Lpt; 2],
+}
+
+/// A parallel port's registers: a byte is printed when the program
+/// raises STROBE (control bit 0) with the byte on the data lines.
+#[derive(Default)]
+pub struct Lpt {
+    pub data: u8,
+    pub ctrl: u8,
+    /// Bytes printed and not yet handed to the host.
+    pub out: Vec<u8>,
+}
+
+impl Lpt {
+    fn read(&self, reg: u16) -> u8 {
+        match reg {
+            0 => self.data,
+            // Not busy, no acknowledge pending, paper, selected, no error.
+            1 => 0xdf,
+            _ => self.ctrl | 0xe0,
+        }
+    }
+
+    fn write(&mut self, reg: u16, v: u8) {
+        match reg {
+            0 => self.data = v,
+            2 => {
+                if v & 1 != 0 && self.ctrl & 1 == 0 {
+                    self.out.push(self.data);
+                }
+                self.ctrl = v & 0x1f;
+            }
+            _ => {}
+        }
+    }
 }
 
 impl Hw {
@@ -78,6 +115,7 @@ impl Hw {
             unknown_ports: Vec::new(),
             speaker_changed: false,
             com_present: false,
+            lpt: Default::default(),
             irq_remap: None,
             dma: crate::sb::Dma::default(),
             sb: crate::sb::SoundBlaster::default(),
@@ -312,6 +350,8 @@ impl Hw {
             0x201 => 0xff,
             0x00..=0x0f | 0x81..=0x8f => self.dma.io_read(port),
             0x220..=0x22f => self.sb.io_read(port),
+            0x378..=0x37a => self.lpt[0].read(port - 0x378),
+            0x278..=0x27a => self.lpt[1].read(port - 0x278),
             _ => 0xff,
         }
     }
@@ -340,6 +380,8 @@ impl Hw {
             0x3b0..=0x3df => self.vga.io_write(port, v),
             0x00..=0x0f | 0x81..=0x8f => self.dma.io_write(port, v),
             0x220..=0x22f => self.sb.io_write(port, v),
+            0x378..=0x37a => self.lpt[0].write(port - 0x378, v),
+            0x278..=0x27a => self.lpt[1].write(port - 0x278, v),
             // POST codes, the delay port.
             0x80 | 0xed => {}
             _ => {

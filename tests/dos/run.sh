@@ -24,5 +24,11 @@ check DPMITEST.COM "DPMI test done" ""
 check VESA.COM "VESA OK" "{wait}x"
 check SBTEST.COM "SB OK" ""
 check BEEP.COM "beep done" ""
+check PRINT.COM "PRINT OK" ""
+# What PRINT.COM prints by its five ways is one job.
+lpt=${TMPDIR:-/tmp}/rs2-dosprint.$$
+(cd "$here/bin" && "$dosrun" --timeout 30 --lpt "$lpt" PRINT.COM >/dev/null 2>&1)
+if [ "$(grep -c '^[1-5] ' "$lpt.1" 2>/dev/null)" = 5 ] && [ ! -e "$lpt.2" ]; then echo "PASS PRINT.COM job"; else echo "FAIL PRINT.COM job"; fail=$((fail + 1)); fi
+rm -f "$lpt".*
 check COMMAND.COM "rs2 DOS session, version" 'ver\nexit\n'
 exit $fail

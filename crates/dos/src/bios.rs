@@ -184,7 +184,12 @@ impl Machine {
         self.set_vector(0x1f, VROM, self.fonts[0].1 + 128 * 8);
         self.set_vector(0x43, VROM, self.fonts[2].1);
         // The BIOS data area.
-        let equip: u16 = 0x0020 | if self.cfg.fpu { 2 } else { 0 } | 0x0400 * 0;
+        // Two printer ports (bits 14-15), at 378h and 278h.
+        let equip: u16 = 0x8020 | if self.cfg.fpu { 2 } else { 0 } | 0x0400 * 0;
+        self.hw.wr16(BDA + 0x08, 0x378);
+        self.hw.wr16(BDA + 0x0a, 0x278);
+        self.hw.wr(BDA + 0x78, 20);
+        self.hw.wr(BDA + 0x79, 20);
         self.hw.wr16(BDA + 0x10, equip);
         self.hw.wr16(BDA + 0x13, 640);
         self.hw.wr16(BDA + 0x1a, 0x1e);
@@ -474,6 +479,27 @@ impl Machine {
             return None;
         }
         Some(k)
+    }
+
+    /// INT 17h, the printer BIOS: 00h prints AL on port DX, 01h
+    /// initialises it, 02h reads its status. Printed bytes go to the host
+    /// (the spooler); the port is always ready (selected, not busy).
+    pub(crate) fn int17<H: Host>(&mut self, host: &mut H) {
+        let port = self.cpu.dx();
+        if port > 2 {
+            // No such port: time-out.
+            self.cpu.set_ah(0x01);
+            return;
+        }
+        match self.cpu.ah() {
+            0x00 => {
+                let c = [self.cpu.al()];
+                host.print(port as u8, &c);
+                self.cpu.set_ah(0x90);
+            }
+            0x01 | 0x02 => self.cpu.set_ah(0x90),
+            _ => {}
+        }
     }
 
     pub(crate) fn int16(&mut self) -> Cb {
