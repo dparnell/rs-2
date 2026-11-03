@@ -4,7 +4,7 @@ the format of both is in docs/formats/som-ir.md), read from IDL the way
 SOM's compiler reads it (__SOMIDL__ defined):
 
 - userland/somir/som-ir.txt (SOM.IR): SOM.DLL's SOMObject, SOMClass and
-  SOMClassMgr, SOMU.DLL's, SOMIR.DLL's and SOMD.DLL's classes and the
+  SOMClassMgr, SOMU.DLL's, SOMIR.DLL's, SOMD.DLL's and SOMUC.DLL's classes and the
   types they use, from the OS/2 Toolkit's IDL (os2tk45/som/include);
 - userland/somir/wpsh-ir.txt (WPSH.IR): the Workplace Shell's classes
   (os2tk45/idl) and their types;
@@ -43,6 +43,11 @@ SOM_FILES = [
     'stexcep.idl', 'somdtype.idl', 'somdobj.idl', 'somdcprx.idl', 'om.idl', 'somdom.idl',
     'somdserv.idl', 'servmgr.idl', 'impldef.idl', 'implrep.idl', 'nvlist.idl', 'request.idl',
     'cntxt.idl', 'principl.idl', 'orb.idl', 'boa.idl', 'somoa.idl',
+    # SOMUC.DLL (the utility classes)
+    'mcollect.idl', 'morder.idl', 'mlink.idl', 'tassoc.idl', 'tclong.idl', 'titeratr.idl',
+    'tcollect.idl', 'tseq.idl', 'tseqitr.idl', 'tdeqlink.idl', 'tdeq.idl', 'tdeqitr.idl',
+    'thash.idl', 'thashitr.idl', 'tdict.idl', 'tdictitr.idl', 'tpll.idl', 'tpllitr.idl',
+    'tpq.idl', 'tpqitr.idl', 'tset.idl', 'tsetitr.idl', 'tssnode.idl', 'tss.idl', 'tssitr.idl',
 ]
 # The Workplace Shell classes of PMWP.DLL that IBM's WPSH.IR describes, in
 # its order (wpimage.idl and wpminwin.idl are rs2's: the Toolkit includes

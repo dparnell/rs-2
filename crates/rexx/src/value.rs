@@ -260,6 +260,9 @@ pub enum Body {
     Native(Builtin),
     /// A method removed by DEFINE with no source (hides inherited ones).
     Null,
+    /// `::METHOD name EXTERNAL 'LIBRARY dll [entry]'`: a native method the
+    /// host calls (Host::native_method).
+    External(Vec<u8>),
 }
 
 #[derive(Clone)]

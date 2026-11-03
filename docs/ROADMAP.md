@@ -451,9 +451,14 @@ Status markers: done, in progress, planned.
   unit reference tables and CloneInto), drag and drop on PMDRAG (parts
   moved within a document, a WAV dropped from a WPS folder becomes an
   MMAudioPart), ODHelp through HELPMGR and the session's status line
+- done (milestone 4): OpenDoc scripting with Object REXX: rs2's own
+  SOMUC.DLL, the Apple Event Manager, OSAScriptingComponent, the
+  Apple-event terminology classes, OREXX.DLL's OSA calls, native-method
+  API and native methods; IBM's OREXXSC.DLL runs REXX scripts that send
+  Apple events to the application (ODSHELL's Document/Run script)
 - planned: OpenDoc's links, undo, nested drafts, rendering exchange for
-  parts dropped on other programs; the Apple Event Manager and OSA
-  (OREXXSC, which also needs SOMUC.DLL)
+  parts dropped on other programs; Apple events between processes and the
+  terminology's classes and properties
 - not planned: DSOM itself (distributed objects, the SOMDD daemon,
   SOMDSVR; SOMEM, SOMS, SOMSEC): nothing on the CD uses it; rs2's own Object REXX does not
   use SOMD

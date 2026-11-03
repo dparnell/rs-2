@@ -22,6 +22,10 @@ use alloc::vec::Vec;
 use os2::*;
 use somsup::{ClassSpec, Environment};
 
+mod ae;
+mod orexxsc;
+mod somuc;
+
 os2::entry!(main);
 
 // ---- OPENDOC.DLL's exports (IBM's ordinals) ----
@@ -289,7 +293,7 @@ fn rect(l: i32, b: i32, r: i32, t: i32) -> Rect {
 
 static mut FAILS: u32 = 0;
 
-fn check(name: &str, ok: bool) {
+pub fn check(name: &str, ok: bool) {
     if ok {
         println!("PASS {}", name);
     } else {
@@ -309,12 +313,12 @@ fn check_eq(name: &str, got: i64, want: i64) {
 
 static mut EV: Environment = Environment { major: 0, exception_name: core::ptr::null(), params: core::ptr::null_mut(), anchor: 0 };
 
-fn ev() -> usize {
+pub fn ev() -> usize {
     unsafe { &raw mut EV as usize }
 }
 
 /// Check (and clear) the environment after a step.
-fn ok_ev(name: &str) {
+pub fn ok_ev(name: &str) {
     let e = unsafe { &mut EV };
     if e.major != 0 {
         let id = unsafe { somsup::cstr(e.exception_name) };
@@ -1009,6 +1013,8 @@ fn main(st: &Startup) -> u32 {
     let args: Vec<u8> = args.iter().copied().skip_while(|&b| b == b' ').collect();
     if args.len() >= 7 && args[..7].eq_ignore_ascii_case(b"MMODPTS") {
         mmodpts();
+    } else if args.len() >= 7 && args[..7].eq_ignore_ascii_case(b"OREXXSC") {
+        orexxsc::orexxsc();
     } else {
         basic();
     }
@@ -1018,6 +1024,8 @@ fn main(st: &Startup) -> u32 {
 }
 
 fn basic() {
+    somuc::somuc_test();
+    ae::ae_test();
     let e = ev();
     let session = new_session();
     check("session", session != 0);

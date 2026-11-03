@@ -2462,3 +2462,1318 @@ operation	interrupt_server	1	void
 mod	line	99
 end
 end
+interface	somf_MCollectible	::SOMObject	null
+mod	file	mcollect.idl
+mod	line	38
+mod	releaseorder	somfClone,somfClonePointer,somfHash,somfIsEqual,somfIsSame,somfIsNotEqual
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	mcollect
+mod	dllname	somuc.dll
+mod	classinit	MCollectibleClassInit
+operation	somfClone	1	objref(::somf_MCollectible)		
+mod	line	66
+mod	nomodify	\0
+end
+operation	somfClonePointer	1	objref(::somf_MCollectible)		
+mod	line	76
+mod	nooverride	\0
+parameter	clonee	1	objref(::somf_MCollectible)
+mod	line	76
+end
+operation	somfHash	1	long		
+mod	line	81
+mod	nomodify	\0
+end
+operation	somfIsEqual	1	boolean		
+mod	line	92
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	92
+end
+operation	somfIsSame	1	boolean		
+mod	line	101
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	101
+end
+operation	somfIsNotEqual	1	boolean		
+mod	line	111
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	111
+end
+const	kReasonableLowerBound	long	5
+mod	file	mcollect.idl
+mod	line	41
+typedef	somf_MCollectibleCompareFn	pointer(void)
+mod	file	mcollect.idl
+mod	line	43
+typedef	somf_MCollectibleHashFn	pointer(void)
+mod	file	mcollect.idl
+mod	line	44
+end
+interface	somf_MOrderableCollectible	::somf_MCollectible	null
+mod	file	morder.idl
+mod	line	30
+mod	releaseorder	somfClone,somfClonePointer,somfHash,somfIsEqual,somfIsSame,somfIsNotEqual,somfIsGreaterThan,somfIsLessThan,somfCompare,somfIsGreaterThanOrEqualTo,somfIsLessThanOrEqualTo
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	morder
+mod	dllname	somuc.dll
+mod	classinit	MOrderableCollectibleClassInit
+operation	somfIsGreaterThan	1	boolean		
+mod	line	43
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	43
+end
+operation	somfIsLessThan	1	boolean		
+mod	line	47
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	47
+end
+operation	somfCompare	1	enum(EComparisonResult,kLessThan,kEqual,kGreaterThan)		
+mod	line	51
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	51
+end
+operation	somfIsGreaterThanOrEqualTo	1	boolean		
+mod	line	60
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	60
+end
+operation	somfIsLessThanOrEqualTo	1	boolean		
+mod	line	64
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	64
+end
+typedef	EComparisonResult	enum(EComparisonResult,kLessThan,kEqual,kGreaterThan)
+mod	file	morder.idl
+mod	line	32
+typedef	somf_MOrderableCompareFn	pointer(void)
+mod	file	morder.idl
+mod	line	34
+typedef	somf_MBetterOrderableCompareFn	pointer(void)
+mod	file	morder.idl
+mod	line	35
+typedef	somf_MOrderableCollectiblePtr	pointer(objref(::somf_MOrderableCollectible))
+mod	file	morder.idl
+mod	line	36
+end
+interface	somf_MLinkable	::SOMObject	struct(somf_MLinkableData,fNext,objref(::somf_MLinkable),fPrevious,objref(::somf_MLinkable))
+mod	file	mlink.idl
+mod	line	30
+mod	releaseorder	somfGetNext,somfSetNext,somfGetPrevious,somfSetPrevious,somfMLinkableInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	mlink
+mod	dllname	somuc.dll
+mod	override	somInit
+operation	somfMLinkableInit	1	objref(::somf_MLinkable)		
+mod	line	32
+mod	nooverride	\0
+parameter	n	1	objref(::somf_MLinkable)
+mod	line	32
+parameter	p	1	objref(::somf_MLinkable)
+mod	line	33
+end
+operation	somfGetNext	1	objref(::somf_MLinkable)		
+mod	line	43
+end
+operation	somfSetNext	1	void		
+mod	line	48
+parameter	aLink	1	objref(::somf_MLinkable)
+mod	line	48
+end
+operation	somfGetPrevious	1	objref(::somf_MLinkable)		
+mod	line	53
+end
+operation	somfSetPrevious	1	void		
+mod	line	58
+parameter	aLink	1	objref(::somf_MLinkable)
+mod	line	58
+end
+end
+interface	somf_TAssoc	::somf_MCollectible	struct(somf_TAssocData,fkey,objref(::somf_MCollectible),fvalue,objref(::somf_MCollectible))
+mod	file	tassoc.idl
+mod	line	35
+mod	releaseorder	somfGetKey,somfGetValue,somfSetKey,somfSetValue,somfTAssocInitMM,somfTAssocInitM
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tassoc
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit
+operation	somfTAssocInitMM	1	objref(::somf_TAssoc)		
+mod	line	37
+mod	nooverride	\0
+parameter	k	1	objref(::somf_MCollectible)
+mod	line	37
+parameter	v	1	objref(::somf_MCollectible)
+mod	line	38
+end
+operation	somfTAssocInitM	1	objref(::somf_TAssoc)		
+mod	line	43
+mod	nooverride	\0
+parameter	k	1	objref(::somf_MCollectible)
+mod	line	43
+end
+operation	somfGetKey	1	objref(::somf_MCollectible)		
+mod	line	48
+mod	nooverride	\0
+end
+operation	somfGetValue	1	objref(::somf_MCollectible)		
+mod	line	53
+mod	nooverride	\0
+end
+operation	somfSetKey	1	void		
+mod	line	58
+mod	nooverride	\0
+parameter	k	1	objref(::somf_MCollectible)
+mod	line	58
+end
+operation	somfSetValue	1	void		
+mod	line	63
+mod	nooverride	\0
+parameter	v	1	objref(::somf_MCollectible)
+mod	line	63
+end
+end
+interface	somf_TCollectibleLong	::somf_MCollectible	struct(somf_TCollectibleLongData,fvalue,long)
+mod	file	tclong.idl
+mod	line	29
+mod	releaseorder	somfGetValue,somfSetValue,somfTCollectibleLongInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tclong
+mod	dllname	somuc.dll
+mod	override	somInit,somfIsEqual,somfHash
+operation	somfTCollectibleLongInit	1	objref(::somf_TCollectibleLong)		
+mod	line	31
+mod	nooverride	\0
+parameter	v	1	long
+mod	line	31
+end
+operation	somfGetValue	1	long		
+mod	line	37
+end
+operation	somfSetValue	1	void		
+mod	line	43
+parameter	v	1	long
+mod	line	43
+end
+end
+interface	somf_TIterator	::SOMObject	null
+mod	file	titeratr.idl
+mod	line	38
+mod	releaseorder	somfNext,somfFirst,somfRemove
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	titeratr
+mod	dllname	somuc.dll
+operation	somfNext	1	objref(::somf_MCollectible)		
+mod	line	43
+end
+operation	somfFirst	1	objref(::somf_MCollectible)		
+mod	line	52
+end
+operation	somfRemove	1	void		
+mod	line	59
+end
+const	kIteratorOutOfSync	ulong	900
+mod	file	titeratr.idl
+mod	line	41
+end
+interface	somf_TCollection	::somf_MCollectible	struct(somf_TCollectionData,fTestfn,pointer(void))
+mod	file	tcollect.idl
+mod	line	37
+mod	releaseorder	somfAdd,somfAddAll,somfRemove,somfRemoveAll,somfDeleteAll,somfCount,somfMember,somfCreateIterator,somfTestFunction,somfSetTestFunction,somfTCollectionInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tcollect
+mod	dllname	somuc.dll
+mod	override	somfIsEqual
+operation	somfAdd	1	objref(::somf_MCollectible)		
+mod	line	47
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	47
+end
+operation	somfAddAll	1	void		
+mod	line	52
+parameter	col	1	objref(::somf_TCollection)
+mod	line	52
+end
+operation	somfRemove	1	objref(::somf_MCollectible)		
+mod	line	59
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	59
+end
+operation	somfRemoveAll	1	void		
+mod	line	66
+end
+operation	somfDeleteAll	1	void		
+mod	line	71
+end
+operation	somfCount	1	long		
+mod	line	78
+mod	nomodify	\0
+end
+operation	somfMember	1	objref(::somf_MCollectible)		
+mod	line	83
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	83
+end
+operation	somfCreateIterator	1	objref(::somf_TIterator)		
+mod	line	89
+mod	nomodify	\0
+end
+operation	somfTestFunction	1	pointer(void)		
+mod	line	103
+mod	nomodify	\0
+end
+operation	somfSetTestFunction	1	void		
+mod	line	109
+parameter	testfn	1	pointer(void)
+mod	line	109
+end
+operation	somfTCollectionInit	1	objref(::somf_TCollection)		
+mod	line	115
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	115
+end
+const	kCollectionSizeHint	long	8
+mod	file	tcollect.idl
+mod	line	40
+end
+interface	somf_TSequence	::somf_TCollection	null
+mod	file	tseq.idl
+mod	line	31
+mod	releaseorder	somfFirst,somfAfter,somfBefore,somfLast,somfOccurrencesOf,somfTSequenceInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tseq
+mod	dllname	somuc.dll
+mod	override	somfAdd,somfRemove,somfRemoveAll,somfDeleteAll,somfCount,somfCreateIterator,somInit
+operation	somfAfter	1	objref(::somf_MCollectible)		
+mod	line	33
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	33
+end
+operation	somfBefore	1	objref(::somf_MCollectible)		
+mod	line	38
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	38
+end
+operation	somfLast	1	objref(::somf_MCollectible)		
+mod	line	43
+mod	nomodify	\0
+end
+operation	somfFirst	1	objref(::somf_MCollectible)		
+mod	line	48
+mod	nomodify	\0
+end
+operation	somfOccurrencesOf	1	long		
+mod	line	53
+mod	nomodify	\0
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	53
+end
+operation	somfTSequenceInit	1	objref(::somf_TSequence)		
+mod	line	70
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	70
+end
+end
+interface	somf_TSequenceIterator	::somf_TIterator	null
+mod	file	tseqitr.idl
+mod	line	31
+mod	releaseorder	somfLast,somfPrevious
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tseqitr
+mod	dllname	somuc.dll
+mod	override	somfFirst,somfNext,somfRemove
+operation	somfLast	1	objref(::somf_MCollectible)		
+mod	line	42
+end
+operation	somfPrevious	1	objref(::somf_MCollectible)		
+mod	line	47
+end
+end
+interface	somf_TDequeLinkable	::somf_MLinkable	struct(somf_TDequeLinkableData,fValue,objref(::somf_MCollectible))
+mod	file	tdeqlink.idl
+mod	line	31
+mod	releaseorder	somfGetValue,somfSetValue,somfTDequeLinkableInitDDM,somfTDequeLinkableInitDD
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tdeqlink
+mod	dllname	somuc.dll
+mod	override	somInit
+operation	somfTDequeLinkableInitDDM	1	objref(::somf_TDequeLinkable)		
+mod	line	33
+mod	nooverride	\0
+parameter	previous	1	objref(::somf_TDequeLinkable)
+mod	line	33
+parameter	next	1	objref(::somf_TDequeLinkable)
+mod	line	34
+parameter	v	1	objref(::somf_MCollectible)
+mod	line	35
+end
+operation	somfTDequeLinkableInitDD	1	objref(::somf_TDequeLinkable)		
+mod	line	40
+mod	nooverride	\0
+parameter	previous	1	objref(::somf_TDequeLinkable)
+mod	line	40
+parameter	next	1	objref(::somf_TDequeLinkable)
+mod	line	41
+end
+operation	somfGetValue	1	objref(::somf_MCollectible)		
+mod	line	46
+end
+operation	somfSetValue	1	void		
+mod	line	51
+parameter	v	1	objref(::somf_MCollectible)
+mod	line	51
+end
+end
+interface	somf_TDeque	::somf_TSequence	struct(somf_TDequeData,fImplementation,objref(::somf_TPrimitiveLinkedList),fSeed,ulong)
+mod	file	tdeq.idl
+mod	line	35
+mod	releaseorder	somfAddAfter,somfAddBefore,somfAddLast,somfAddFirst,somfRemoveLast,somfRemoveFirst,somfCreateSequenceIterator,somfRemoveQ,somfInsert,somfPop,somfPush,somfCreateNewLink,somfAssign,somfTDequeInitF,somfTDequeInitD
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tdeq
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit,somfAdd,somfRemove,somfDeleteAll,somfRemoveAll,somfCount,somfAfter,somfBefore,somfLast,somfFirst,somfMember,somfCreateIterator
+operation	somfTDequeInitF	1	objref(::somf_TDeque)		
+mod	line	40
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	40
+end
+operation	somfTDequeInitD	1	objref(::somf_TDeque)		
+mod	line	45
+mod	nooverride	\0
+parameter	s	1	objref(::somf_TDeque)
+mod	line	45
+end
+operation	somfAssign	1	void		
+mod	line	54
+parameter	s	1	objref(::somf_TDeque)
+mod	line	54
+end
+operation	somfAddAfter	1	void		
+mod	line	69
+parameter	existingobj	1	objref(::somf_MCollectible)
+mod	line	69
+parameter	tobeadded	1	objref(::somf_MCollectible)
+mod	line	70
+end
+operation	somfAddBefore	1	void		
+mod	line	76
+parameter	existingobj	1	objref(::somf_MCollectible)
+mod	line	76
+parameter	tobeadded	1	objref(::somf_MCollectible)
+mod	line	77
+end
+operation	somfAddLast	1	void		
+mod	line	83
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	83
+end
+operation	somfAddFirst	1	void		
+mod	line	88
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	88
+end
+operation	somfRemoveLast	1	objref(::somf_MCollectible)		
+mod	line	98
+end
+operation	somfRemoveFirst	1	objref(::somf_MCollectible)		
+mod	line	103
+end
+operation	somfCreateSequenceIterator	1	objref(::somf_TSequenceIterator)		
+mod	line	113
+mod	nomodify	\0
+end
+operation	somfRemoveQ	1	objref(::somf_MCollectible)		
+mod	line	129
+end
+operation	somfInsert	1	void		
+mod	line	135
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	135
+end
+operation	somfPop	1	objref(::somf_MCollectible)		
+mod	line	141
+end
+operation	somfPush	1	void		
+mod	line	147
+parameter	obj	1	objref(::somf_MCollectible)
+mod	line	147
+end
+operation	somfCreateNewLink	1	objref(::somf_TDequeLinkable)		
+mod	line	159
+mod	nomodify	\0
+parameter	p	1	objref(::somf_TDequeLinkable)
+mod	line	159
+parameter	n	1	objref(::somf_TDequeLinkable)
+mod	line	160
+parameter	v	1	objref(::somf_MCollectible)
+mod	line	161
+end
+end
+interface	somf_TDequeIterator	::somf_TSequenceIterator	struct(somf_TDequeIteratorData,fSeed,ulong,fDeque,objref(::somf_TDeque),fNext,objref(::somf_TDequeLinkable),fCurrent,objref(::somf_TDequeLinkable),fPrevious,objref(::somf_TDequeLinkable),fSentinel,objref(::somf_TDequeLinkable),fBreakEmInD16,boolean)
+mod	file	tdeqitr.idl
+mod	line	33
+mod	releaseorder	somfTDequeIteratorInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tdeqitr
+mod	dllname	somuc.dll
+mod	override	somfFirst,somfNext,somfLast,somfPrevious,somfRemove
+operation	somfTDequeIteratorInit	1	objref(::somf_TDequeIterator)		
+mod	line	36
+mod	nooverride	\0
+parameter	h	1	objref(::somf_TDeque)
+mod	line	36
+end
+end
+interface	somf_THashTable	::somf_MCollectible	struct(somf_THashTableData,fTableSize,long,fSize,long,fGrowthRate,long,fRehashThreshold,long,fNextRehash,long,fTable,objref(::THAssoc),fTestfn,pointer(void),fHashfn,pointer(void),fSeed,ulong,fFast,enum(ETableClassification,kUnchecked,kNormal,kFast))
+mod	file	thash.idl
+mod	line	36
+mod	releaseorder	somfCount,somfRemove,somfDelete,somfMember,somfRemoveAll,somfDeleteAll,somfDeleteAllKeys,somfDeleteAllValues,somfAddMMB,somfAddMM,somfGrow,somfRetrieve,somfSetGrowthRate,somfSetRehashThreshold,somfGetGrowthRate,somfGetRehashThreshold,somfSetHashFunction,somfGetHashFunction,somfFind,somfMakeNewTable,somfCopyIn,somfAssign,somfTHashTableInitFLLL,somfTHashTableInitFLL,somfTHashTableInitFL,somfTHashTableInitH
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	thash
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit
+operation	somfTHashTableInitFLLL	1	objref(::somf_THashTable)		
+mod	line	45
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	45
+parameter	tablesize	1	long
+mod	line	46
+parameter	rate	1	long
+mod	line	47
+parameter	threshold	1	long
+mod	line	48
+end
+operation	somfTHashTableInitFLL	1	objref(::somf_THashTable)		
+mod	line	55
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	55
+parameter	tablesize	1	long
+mod	line	56
+parameter	rate	1	long
+mod	line	57
+end
+operation	somfTHashTableInitFL	1	objref(::somf_THashTable)		
+mod	line	64
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	64
+parameter	tablesize	1	long
+mod	line	65
+end
+operation	somfTHashTableInitH	1	objref(::somf_THashTable)		
+mod	line	72
+mod	nooverride	\0
+parameter	h	1	objref(::somf_THashTable)
+mod	line	72
+end
+operation	somfAssign	1	void		
+mod	line	77
+parameter	source	1	objref(::somf_THashTable)
+mod	line	77
+end
+operation	somfCount	1	long		
+mod	line	82
+mod	nooverride	\0
+mod	nomodify	\0
+end
+operation	somfRemove	1	objref(::somf_MCollectible)		
+mod	line	87
+mod	nooverride	\0
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	87
+end
+operation	somfDelete	1	objref(::somf_MCollectible)		
+mod	line	94
+mod	nooverride	\0
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	94
+end
+operation	somfMember	1	objref(::somf_MCollectible)		
+mod	line	103
+mod	nooverride	\0
+mod	nomodify	\0
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	103
+end
+operation	somfRemoveAll	1	void		
+mod	line	109
+mod	nooverride	\0
+end
+operation	somfDeleteAll	1	void		
+mod	line	114
+mod	nooverride	\0
+end
+operation	somfDeleteAllKeys	1	void		
+mod	line	121
+mod	nooverride	\0
+end
+operation	somfDeleteAllValues	1	void		
+mod	line	128
+mod	nooverride	\0
+end
+operation	somfAddMMB	1	objref(::somf_MCollectible)		
+mod	line	135
+mod	nooverride	\0
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	135
+parameter	value	1	objref(::somf_MCollectible)
+mod	line	136
+parameter	replace	1	boolean
+mod	line	137
+end
+operation	somfAddMM	1	objref(::somf_MCollectible)		
+mod	line	143
+mod	nooverride	\0
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	143
+parameter	value	1	objref(::somf_MCollectible)
+mod	line	144
+end
+operation	somfGrow	1	void		
+mod	line	149
+mod	nooverride	\0
+end
+operation	somfRetrieve	1	objref(::somf_MCollectible)		
+mod	line	154
+mod	nooverride	\0
+mod	nomodify	\0
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	154
+end
+operation	somfSetGrowthRate	1	void		
+mod	line	159
+mod	nooverride	\0
+parameter	rate	1	long
+mod	line	159
+end
+operation	somfSetRehashThreshold	1	void		
+mod	line	164
+mod	nooverride	\0
+parameter	threshold	1	long
+mod	line	164
+end
+operation	somfGetGrowthRate	1	long		
+mod	line	169
+mod	nooverride	\0
+mod	nomodify	\0
+end
+operation	somfGetRehashThreshold	1	long		
+mod	line	174
+mod	nooverride	\0
+mod	nomodify	\0
+end
+operation	somfSetHashFunction	1	void		
+mod	line	179
+mod	nooverride	\0
+parameter	fn	1	pointer(void)
+mod	line	179
+end
+operation	somfGetHashFunction	1	pointer(void)		
+mod	line	184
+mod	nooverride	\0
+mod	nomodify	\0
+end
+const	kDefaultHashTableSize	long	23
+mod	file	thash.idl
+mod	line	38
+const	kDefaultGrowthRate	long	20
+mod	file	thash.idl
+mod	line	39
+const	kDefaultRehashThreshold	long	80
+mod	file	thash.idl
+mod	line	40
+typedef	ETableClassification	enum(ETableClassification,kUnchecked,kNormal,kFast)
+mod	file	thash.idl
+mod	line	41
+end
+interface	somf_THashTableIterator	::somf_TIterator	struct(somf_THashTableIteratorData,fHashTable,objref(::somf_THashTable),fIndex,long,fEndTest,long,fNextAssoc,objref(::THAssoc),fSeed,ulong,fRetval,objref(::somf_TAssoc),fBreakEmInD16,boolean)
+mod	file	thashitr.idl
+mod	line	35
+mod	releaseorder	somfTHashTableIteratorInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	thashitr
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit,somfNext,somfFirst,somfRemove
+operation	somfTHashTableIteratorInit	1	objref(::somf_THashTableIterator)		
+mod	line	37
+mod	nooverride	\0
+parameter	h	1	objref(::somf_THashTable)
+mod	line	37
+end
+end
+interface	somf_TDictionary	::somf_TCollection	struct(somf_TDictionaryData,fImplementation,objref(::somf_THashTable))
+mod	file	tdict.idl
+mod	line	39
+mod	releaseorder	somfDeleteAllKeys,somfDeleteAllValues,somfValueAt,somfKeyAtMF,somfKeyAtM,somfDeleteKey,somfAddKeyValuePairMMB,somfAddKeyValuePairMM,somfSetHashFunction,somfGetHashFunction,somfCreateNewImplementationFLLL,somfCreateNewImplementationF,somfCreateNewImplementationFL,somfCreateNewImplementationFLL,somfCopyImplementation,somfAssign,somfTDictionaryInitFLL,somfTDictionaryInitFL,somfTDictionaryInitF,somfTDictionaryInitLLF,somfTDictionaryInitLL,somfTDictionaryInitL,somfTDictionaryInitD
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tdict
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit,somfCreateIterator,somfRemove,somfRemoveAll,somfDeleteAll,somfCount,somfMember,somfAdd
+operation	somfTDictionaryInitFLL	1	objref(::somf_TDictionary)		
+mod	line	44
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	44
+parameter	sizeHint	1	long
+mod	line	45
+parameter	growthRate	1	long
+mod	line	46
+end
+operation	somfTDictionaryInitFL	1	objref(::somf_TDictionary)		
+mod	line	51
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	51
+parameter	sizeHint	1	long
+mod	line	52
+end
+operation	somfTDictionaryInitF	1	objref(::somf_TDictionary)		
+mod	line	57
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	57
+end
+operation	somfTDictionaryInitLLF	1	objref(::somf_TDictionary)		
+mod	line	62
+mod	nooverride	\0
+parameter	sizeHint	1	long
+mod	line	62
+parameter	growthRate	1	long
+mod	line	63
+parameter	testfn	1	pointer(void)
+mod	line	64
+end
+operation	somfTDictionaryInitLL	1	objref(::somf_TDictionary)		
+mod	line	69
+mod	nooverride	\0
+parameter	sizeHint	1	long
+mod	line	69
+parameter	growthRate	1	long
+mod	line	70
+end
+operation	somfTDictionaryInitL	1	objref(::somf_TDictionary)		
+mod	line	75
+mod	nooverride	\0
+parameter	sizeHint	1	long
+mod	line	75
+end
+operation	somfTDictionaryInitD	1	objref(::somf_TDictionary)		
+mod	line	80
+mod	nooverride	\0
+parameter	dictionary	1	objref(::somf_TDictionary)
+mod	line	80
+end
+operation	somfAssign	1	void		
+mod	line	85
+parameter	source	1	objref(::somf_TDictionary)
+mod	line	85
+end
+operation	somfDeleteAllKeys	1	void		
+mod	line	90
+end
+operation	somfDeleteAllValues	1	void		
+mod	line	96
+end
+operation	somfValueAt	1	objref(::somf_MCollectible)		
+mod	line	105
+mod	nomodify	\0
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	105
+end
+operation	somfKeyAtMF	1	objref(::somf_MCollectible)		
+mod	line	111
+mod	nomodify	\0
+parameter	val	1	objref(::somf_MCollectible)
+mod	line	111
+parameter	testfn	1	pointer(void)
+mod	line	112
+end
+operation	somfKeyAtM	1	objref(::somf_MCollectible)		
+mod	line	118
+mod	nomodify	\0
+parameter	val	1	objref(::somf_MCollectible)
+mod	line	118
+end
+operation	somfDeleteKey	1	objref(::somf_MCollectible)		
+mod	line	125
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	125
+end
+operation	somfAddKeyValuePairMMB	1	objref(::somf_MCollectible)		
+mod	line	132
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	132
+parameter	val	1	objref(::somf_MCollectible)
+mod	line	133
+parameter	replace	1	boolean
+mod	line	134
+end
+operation	somfAddKeyValuePairMM	1	objref(::somf_MCollectible)		
+mod	line	144
+parameter	key	1	objref(::somf_MCollectible)
+mod	line	144
+parameter	val	1	objref(::somf_MCollectible)
+mod	line	145
+end
+operation	somfSetHashFunction	1	void		
+mod	line	153
+parameter	fn	1	pointer(void)
+mod	line	153
+end
+operation	somfGetHashFunction	1	pointer(void)		
+mod	line	162
+mod	nomodify	\0
+end
+operation	somfCreateNewImplementationFLLL	1	objref(::somf_THashTable)		
+mod	line	180
+parameter	testfn	1	pointer(void)
+mod	line	180
+parameter	tablesize	1	long
+mod	line	181
+parameter	rate	1	long
+mod	line	182
+parameter	threshold	1	long
+mod	line	183
+end
+operation	somfCreateNewImplementationF	1	objref(::somf_THashTable)		
+mod	line	194
+parameter	testfn	1	pointer(void)
+mod	line	194
+end
+operation	somfCreateNewImplementationFL	1	objref(::somf_THashTable)		
+mod	line	205
+parameter	testfn	1	pointer(void)
+mod	line	205
+parameter	tablesize	1	long
+mod	line	206
+end
+operation	somfCreateNewImplementationFLL	1	objref(::somf_THashTable)		
+mod	line	217
+parameter	testfn	1	pointer(void)
+mod	line	217
+parameter	tablesize	1	long
+mod	line	218
+parameter	rate	1	long
+mod	line	219
+end
+operation	somfCopyImplementation	1	objref(::somf_THashTable)		
+mod	line	230
+mod	nomodify	\0
+end
+end
+interface	somf_TDictionaryIterator	::somf_TIterator	struct(somf_TDictionaryIteratorData,fNext,objref(::somf_THashTableIterator))
+mod	file	tdictitr.idl
+mod	line	32
+mod	releaseorder	somfTDictionaryIteratorInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tdictitr
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit,somfNext,somfFirst,somfRemove
+operation	somfTDictionaryIteratorInit	1	objref(::somf_TDictionaryIterator)		
+mod	line	34
+mod	nooverride	\0
+parameter	h	1	objref(::somf_TDictionary)
+mod	line	34
+end
+end
+interface	somf_TPrimitiveLinkedList	::SOMObject	struct(somf_TPrimitiveLinkedListData,fSentinel,objref(::somf_MLinkable))
+mod	file	tpll.idl
+mod	line	32
+mod	releaseorder	somfCount,somfRemove,somfRemoveAll,somfRemoveFirst,somfRemoveLast,somfAddBefore,somfAddAfter,somfAddFirst,somfAddLast,somfAfter,somfBefore,somfFirst,somfLast
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tpll
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit
+operation	somfCount	1	ulong		
+mod	line	36
+mod	nomodify	\0
+end
+operation	somfRemove	1	void		
+mod	line	41
+parameter	aLink	1	objref(::somf_MLinkable)
+mod	line	41
+end
+operation	somfRemoveAll	1	void		
+mod	line	46
+end
+operation	somfRemoveFirst	1	objref(::somf_MLinkable)		
+mod	line	51
+end
+operation	somfRemoveLast	1	objref(::somf_MLinkable)		
+mod	line	56
+end
+operation	somfAddBefore	1	void		
+mod	line	61
+parameter	existing	1	objref(::somf_MLinkable)
+mod	line	61
+parameter	obj	1	objref(::somf_MLinkable)
+mod	line	62
+end
+operation	somfAddAfter	1	void		
+mod	line	67
+parameter	existing	1	objref(::somf_MLinkable)
+mod	line	67
+parameter	obj	1	objref(::somf_MLinkable)
+mod	line	68
+end
+operation	somfAddFirst	1	void		
+mod	line	73
+parameter	obj	1	objref(::somf_MLinkable)
+mod	line	73
+end
+operation	somfAddLast	1	void		
+mod	line	78
+parameter	obj	1	objref(::somf_MLinkable)
+mod	line	78
+end
+operation	somfAfter	1	objref(::somf_MLinkable)		
+mod	line	83
+mod	nomodify	\0
+parameter	existingobj	1	objref(::somf_MLinkable)
+mod	line	83
+end
+operation	somfBefore	1	objref(::somf_MLinkable)		
+mod	line	88
+mod	nomodify	\0
+parameter	existingobj	1	objref(::somf_MLinkable)
+mod	line	88
+end
+operation	somfFirst	1	objref(::somf_MLinkable)		
+mod	line	93
+mod	nomodify	\0
+end
+operation	somfLast	1	objref(::somf_MLinkable)		
+mod	line	98
+mod	nomodify	\0
+end
+end
+interface	somf_TPrimitiveLinkedListIterator	::SOMObject	struct(somf_TPrimitiveLinkedListIteratorData,fList,objref(::somf_TPrimitiveLinkedList),fCurrent,objref(::somf_MLinkable),fSentinel,objref(::somf_MLinkable))
+mod	file	tpllitr.idl
+mod	line	33
+mod	releaseorder	somfFirst,somfNext,somfLast,somfPrevious,somfTPrimitiveLinkedListIteratorInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tpllitr
+mod	dllname	somuc.dll
+mod	override	somUninit
+operation	somfTPrimitiveLinkedListIteratorInit	1	objref(::somf_TPrimitiveLinkedListIterator)		
+mod	line	35
+mod	nooverride	\0
+parameter	list	1	objref(::somf_TPrimitiveLinkedList)
+mod	line	35
+end
+operation	somfFirst	1	objref(::somf_MLinkable)		
+mod	line	40
+end
+operation	somfNext	1	objref(::somf_MLinkable)		
+mod	line	45
+end
+operation	somfLast	1	objref(::somf_MLinkable)		
+mod	line	50
+end
+operation	somfPrevious	1	objref(::somf_MLinkable)		
+mod	line	55
+end
+end
+interface	somf_TPriorityQueue	::somf_TCollection	struct(somf_TPriorityQueueData,fTable,pointer(objref(::somf_MOrderableCollectible)),fCount,long,fCurrentSize,long,fSequencingFn,pointer(void),fEqualityComparisonFn,pointer(void),fSeed,ulong)
+mod	file	tpq.idl
+mod	line	35
+mod	releaseorder	somfInsert,somfPop,somfPeek,somfReplace,somfChange,somfSetEqualityComparisonFunction,somfGetEqualityComparisonFunction,somfDownHeap,somfUpHeap,somfGrowHeap,somfMakeNewTable,somfCopyIn,somfAssign,somfTPriorityQueueInitF,somfTPriorityQueueInitP
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tpq
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit,somfRemove,somfAdd,somfRemoveAll,somfDeleteAll,somfCount,somfMember,somfCreateIterator
+operation	somfTPriorityQueueInitF	1	objref(::somf_TPriorityQueue)		
+mod	line	45
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	45
+end
+operation	somfTPriorityQueueInitP	1	objref(::somf_TPriorityQueue)		
+mod	line	49
+mod	nooverride	\0
+parameter	q	1	objref(::somf_TPriorityQueue)
+mod	line	49
+end
+operation	somfAssign	1	void		
+mod	line	56
+parameter	source	1	objref(::somf_TPriorityQueue)
+mod	line	56
+end
+operation	somfInsert	1	void		
+mod	line	60
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	60
+end
+operation	somfPop	1	objref(::somf_MOrderableCollectible)		
+mod	line	64
+end
+operation	somfPeek	1	objref(::somf_MOrderableCollectible)		
+mod	line	69
+mod	nomodify	\0
+end
+operation	somfReplace	1	objref(::somf_MOrderableCollectible)		
+mod	line	74
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	74
+end
+operation	somfChange	1	void		
+mod	line	79
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	79
+end
+operation	somfSetEqualityComparisonFunction	1	void		
+mod	line	92
+parameter	fn	1	pointer(void)
+mod	line	92
+end
+operation	somfGetEqualityComparisonFunction	1	pointer(void)		
+mod	line	96
+mod	nomodify	\0
+end
+const	kInitialPriorityQueueSize	long	20
+mod	file	tpq.idl
+mod	line	38
+end
+interface	somf_TPriorityQueueIterator	::somf_TIterator	struct(somf_TPriorityQueueIteratorData,fHeap,objref(::somf_TPriorityQueue),fCurrent,long,fDone,boolean,fRemovedCurrent,boolean,fSeed,ulong,fBreakEmInD16,boolean)
+mod	file	tpqitr.idl
+mod	line	31
+mod	releaseorder	somfTPriorityQueueIteratorInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tpqitr
+mod	dllname	somuc.dll
+mod	override	somfNext,somfFirst,somfRemove
+operation	somfTPriorityQueueIteratorInit	1	objref(::somf_TPriorityQueueIterator)		
+mod	line	33
+mod	nooverride	\0
+parameter	h	1	objref(::somf_TPriorityQueue)
+mod	line	33
+end
+end
+interface	somf_TSet	::somf_TCollection	struct(somf_TSetData,fTableSize,long,fSize,long,fNextRehash,long,fTable,objref(::TSAssoc),fHashfn,pointer(void),fSeed,ulong,fFast,enum(ESetClassification,kUnchecked,kNormal,kFast),fCache,objref(::somf_MCollectible))
+mod	file	tset.idl
+mod	line	39
+mod	releaseorder	somfDifferenceS,somfDifferenceSS,somfIntersectionS,somfIntersectionSS,somfUnionS,somfUnionSS,somfXorS,somfXorSS,somfSetHashFunction,somfGetHashFunction,somfRehash,somfFind,somfMakeNewTable,somfCopyIn,somfGrow,somfAssign,somfTSetInitFL,somfTSetInitF,somfTSetInitLF,somfTSetInitL,somfTSetInitS
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tset
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit,somfAdd,somfRemove,somfRemoveAll,somfDeleteAll,somfCount,somfMember,somfCreateIterator
+mod	nomodify	somfMember,somfCreateIterator
+operation	somfTSetInitFL	1	objref(::somf_TSet)		
+mod	line	46
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	46
+parameter	setSizeHint	1	long
+mod	line	47
+end
+operation	somfTSetInitF	1	objref(::somf_TSet)		
+mod	line	52
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	52
+end
+operation	somfTSetInitLF	1	objref(::somf_TSet)		
+mod	line	57
+mod	nooverride	\0
+parameter	setSizeHint	1	long
+mod	line	57
+parameter	testfn	1	pointer(void)
+mod	line	58
+end
+operation	somfTSetInitL	1	objref(::somf_TSet)		
+mod	line	63
+mod	nooverride	\0
+parameter	setSizeHint	1	long
+mod	line	63
+end
+operation	somfTSetInitS	1	objref(::somf_TSet)		
+mod	line	68
+mod	nooverride	\0
+parameter	s	1	objref(::somf_TSet)
+mod	line	68
+end
+operation	somfAssign	1	void		
+mod	line	73
+parameter	source	1	objref(::somf_TSet)
+mod	line	73
+end
+operation	somfDifferenceS	1	void		
+mod	line	78
+parameter	set1	1	objref(::somf_TSet)
+mod	line	78
+end
+operation	somfDifferenceSS	1	void		
+mod	line	84
+parameter	set1	1	objref(::somf_TSet)
+mod	line	84
+parameter	resultSet	1	objref(::somf_TSet)
+mod	line	85
+end
+operation	somfIntersectionS	1	void		
+mod	line	91
+parameter	set1	1	objref(::somf_TSet)
+mod	line	91
+end
+operation	somfIntersectionSS	1	void		
+mod	line	97
+mod	nomodify	\0
+parameter	set1	1	objref(::somf_TSet)
+mod	line	97
+parameter	resultSet	1	objref(::somf_TSet)
+mod	line	98
+end
+operation	somfUnionS	1	void		
+mod	line	104
+parameter	set1	1	objref(::somf_TSet)
+mod	line	104
+end
+operation	somfUnionSS	1	void		
+mod	line	110
+mod	nomodify	\0
+parameter	set1	1	objref(::somf_TSet)
+mod	line	110
+parameter	resultSet	1	objref(::somf_TSet)
+mod	line	111
+end
+operation	somfXorS	1	void		
+mod	line	117
+parameter	set1	1	objref(::somf_TSet)
+mod	line	117
+end
+operation	somfXorSS	1	void		
+mod	line	123
+mod	nomodify	\0
+parameter	set1	1	objref(::somf_TSet)
+mod	line	123
+parameter	resultSet	1	objref(::somf_TSet)
+mod	line	124
+end
+operation	somfSetHashFunction	1	void		
+mod	line	130
+parameter	fn	1	pointer(void)
+mod	line	130
+end
+operation	somfGetHashFunction	1	pointer(void)		
+mod	line	135
+mod	nomodify	\0
+end
+operation	somfRehash	1	void		
+mod	line	140
+mod	nooverride	\0
+end
+typedef	ESetClassification	enum(ESetClassification,kUnchecked,kNormal,kFast)
+mod	file	tset.idl
+mod	line	42
+end
+interface	somf_TSetIterator	::somf_TIterator	struct(somf_TSetIteratorData,fSet,objref(::somf_TSet),fIndex,long,fEndTest,long,fNextAssoc,objref(::TSAssoc),fSeed,ulong,fBreakEmInD16,boolean)
+mod	file	tsetitr.idl
+mod	line	32
+mod	releaseorder	somfTSetIteratorInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tsetitr
+mod	dllname	somuc.dll
+mod	override	somUninit,somfNext,somfFirst,somfRemove
+operation	somfTSetIteratorInit	1	objref(::somf_TSetIterator)		
+mod	line	34
+mod	nooverride	\0
+parameter	h	1	objref(::somf_TSet)
+mod	line	34
+end
+end
+interface	somf_TSortedSequenceNode	::SOMObject	struct(somf_TSortedSequenceNodeData,fLeftChild,objref(::somf_TSortedSequenceNode),fKey,objref(::somf_MOrderableCollectible),fRightChild,objref(::somf_TSortedSequenceNode),fParent,objref(::somf_TSortedSequenceNode),fRed,boolean)
+mod	file	tssnode.idl
+mod	line	34
+mod	releaseorder	somfGetLeftChild,somfGetRightChild,somfGetParent,somfGetKey,somfGetRed,somfSetParent,somfSetLeftChild,somfSetRightChild,somfSetKey,somfSetRed,somfSetRedOn,somfTSortedSequenceNodeInitTMT,somfTSortedSequenceNodeInitTM,somfTSortedSequenceNodeInitT
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tssnode
+mod	dllname	somuc.dll
+mod	override	somInit
+operation	somfTSortedSequenceNodeInitTMT	1	objref(::somf_TSortedSequenceNode)		
+mod	line	40
+mod	nooverride	\0
+parameter	n1	1	objref(::somf_TSortedSequenceNode)
+mod	line	40
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	41
+parameter	n2	1	objref(::somf_TSortedSequenceNode)
+mod	line	42
+end
+operation	somfTSortedSequenceNodeInitTM	1	objref(::somf_TSortedSequenceNode)		
+mod	line	46
+mod	nooverride	\0
+parameter	n1	1	objref(::somf_TSortedSequenceNode)
+mod	line	46
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	47
+end
+operation	somfTSortedSequenceNodeInitT	1	objref(::somf_TSortedSequenceNode)		
+mod	line	51
+mod	nooverride	\0
+parameter	n1	1	objref(::somf_TSortedSequenceNode)
+mod	line	51
+end
+operation	somfGetLeftChild	1	objref(::somf_TSortedSequenceNode)		
+mod	line	58
+mod	nooverride	\0
+end
+operation	somfGetRightChild	1	objref(::somf_TSortedSequenceNode)		
+mod	line	62
+mod	nooverride	\0
+end
+operation	somfGetParent	1	objref(::somf_TSortedSequenceNode)		
+mod	line	66
+mod	nooverride	\0
+end
+operation	somfGetKey	1	objref(::somf_MOrderableCollectible)		
+mod	line	70
+mod	nooverride	\0
+end
+operation	somfGetRed	1	boolean		
+mod	line	74
+mod	nooverride	\0
+end
+operation	somfSetParent	1	void		
+mod	line	78
+mod	nooverride	\0
+parameter	n	1	objref(::somf_TSortedSequenceNode)
+mod	line	78
+end
+operation	somfSetLeftChild	1	void		
+mod	line	82
+mod	nooverride	\0
+parameter	n	1	objref(::somf_TSortedSequenceNode)
+mod	line	82
+end
+operation	somfSetRightChild	1	void		
+mod	line	86
+mod	nooverride	\0
+parameter	n	1	objref(::somf_TSortedSequenceNode)
+mod	line	86
+end
+operation	somfSetKey	1	void		
+mod	line	90
+mod	nooverride	\0
+parameter	k	1	objref(::somf_MOrderableCollectible)
+mod	line	90
+end
+operation	somfSetRed	1	void		
+mod	line	94
+mod	nooverride	\0
+parameter	on	1	boolean
+mod	line	94
+end
+operation	somfSetRedOn	1	void		
+mod	line	98
+end
+end
+interface	somf_TSortedSequence	::somf_TSequence	struct(somf_TSortedSequenceData,fSeed,ulong,fSuperRoot,objref(::somf_TSortedSequenceNode),fNilNode,objref(::somf_TSortedSequenceNode),fCount,long,fSequencingFunction,pointer(void))
+mod	file	tss.idl
+mod	line	36
+mod	releaseorder	somfCreateSequenceIterator,somfGetSequencingFunction,somfSetSequencingFunction,somfCreateSortedSequenceNode,somfRotate,somfSplit,somfBalance,somfInternalRemoveAll,somfInternalDeleteAll,somfAssign,somfTSortedSequenceInitF,somfTSortedSequenceInitS
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tss
+mod	dllname	somuc.dll
+mod	override	somInit,somUninit,somfAdd,somfRemove,somfDeleteAll,somfRemoveAll,somfCount,somfAfter,somfBefore,somfLast,somfFirst,somfMember,somfCreateIterator,somfOccurrencesOf
+mod	nomodify	somfRotate,somfSplit,somfBalance,somfInternalRemoveAll,somfInternalDeleteAll
+operation	somfTSortedSequenceInitF	1	objref(::somf_TSortedSequence)		
+mod	line	44
+mod	nomodify	\0
+mod	nooverride	\0
+parameter	testfn	1	pointer(void)
+mod	line	44
+end
+operation	somfTSortedSequenceInitS	1	objref(::somf_TSortedSequence)		
+mod	line	48
+mod	nomodify	\0
+mod	nooverride	\0
+parameter	s	1	objref(::somf_TSortedSequence)
+mod	line	48
+end
+operation	somfAssign	1	void		
+mod	line	55
+mod	nomodify	\0
+parameter	s	1	objref(::somf_TSortedSequence)
+mod	line	55
+end
+operation	somfCreateSequenceIterator	1	objref(::somf_TSequenceIterator)		
+mod	line	75
+end
+operation	somfGetSequencingFunction	1	pointer(void)		
+mod	line	92
+mod	nomodify	\0
+end
+operation	somfSetSequencingFunction	1	void		
+mod	line	97
+mod	nomodify	\0
+parameter	fn	1	pointer(void)
+mod	line	97
+end
+operation	somfCreateSortedSequenceNode	1	objref(::somf_TSortedSequenceNode)		
+mod	line	102
+parameter	n1	1	objref(::somf_TSortedSequenceNode)
+mod	line	102
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	103
+parameter	n2	1	objref(::somf_TSortedSequenceNode)
+mod	line	104
+end
+end
+interface	somf_TSortedSequenceIterator	::somf_TSequenceIterator	struct(somf_TSortedSequenceIteratorData,fSeed,ulong,fTree,objref(::somf_TSortedSequence),fCurrent,objref(::somf_TSortedSequenceNode),fNilNode,objref(::somf_TSortedSequenceNode),fDirection,boolean,fBreakEmInD16,boolean,fParent,objref(::somf_TSortedSequenceNode),fGrandParent,objref(::somf_TSortedSequenceNode))
+mod	file	tssitr.idl
+mod	line	34
+mod	releaseorder	somfStartHere,somfTSortedSequenceIteratorInit
+mod	majorversion	2
+mod	minorversion	1
+mod	filestem	tssitr
+mod	dllname	somuc.dll
+mod	override	somfFirst,somfNext,somfLast,somfPrevious,somfRemove
+operation	somfTSortedSequenceIteratorInit	1	objref(::somf_TSortedSequenceIterator)		
+mod	line	36
+mod	nooverride	\0
+parameter	h	1	objref(::somf_TSortedSequence)
+mod	line	36
+end
+operation	somfStartHere	1	objref(::somf_MOrderableCollectible)		
+mod	line	51
+parameter	obj	1	objref(::somf_MOrderableCollectible)
+mod	line	51
+end
+end

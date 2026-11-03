@@ -26,7 +26,10 @@ extern crate os2;
 
 #[macro_use]
 pub mod rt;
+pub mod ae;
+pub mod aete;
 pub mod clipboard;
+pub mod osa;
 pub mod dnd;
 pub mod events;
 pub mod help;
@@ -109,11 +112,6 @@ class_data! {
     OSAScriptingComponentClassData, OSAScriptingComponentCClassData, 44;
 }
 
-/// The Apple-event terminology classes (ordinals 1000-1046) are not
-/// built: their class data only exists so OREXXSC's imports resolve.
-#[unsafe(no_mangle)]
-pub static mut ODAETEClassDataStub: [usize; 64] = [0; 64];
-
 /// Every class: name, and its description.
 pub static CLASSES: &[(&str, fn() -> Def)] = &[
     ("ODObject", || Def { name: "ODObject", parents: &["SOMObject"], meta: None, data: 0, methods: obj::OBJECT_M, overrides: &[], cd: p!(ODObjectClassData), ccd: p!(ODObjectCClassData) }),
@@ -160,7 +158,7 @@ pub static CLASSES: &[(&str, fn() -> Def)] = &[
     ("ODDispatchModule", || Def { name: "ODDispatchModule", parents: &["ODObject"], meta: None, data: 4, methods: events::DISPATCH_MODULE_M, overrides: &[], cd: p!(ODDispatchModuleClassData), ccd: p!(ODDispatchModuleCClassData) }),
     ("ODNameSpaceManager", || Def { name: "ODNameSpaceManager", parents: &["ODObject"], meta: None, data: 0, methods: services::NAME_SPACE_MANAGER_M, overrides: &[], cd: p!(ODNameSpaceManagerClassData), ccd: p!(ODNameSpaceManagerCClassData) }),
     ("ODTypeList", || Def { name: "ODTypeList", parents: &["ODObject"], meta: None, data: 0, methods: services::TYPE_LIST_M, overrides: &[], cd: p!(ODTypeListClassData), ccd: p!(ODTypeListCClassData) }),
-    ("OSAScriptingComponent", || Def { name: "OSAScriptingComponent", parents: &["SOMObject"], meta: None, data: 0, methods: services::OSA_M, overrides: &[], cd: p!(OSAScriptingComponentClassData), ccd: p!(OSAScriptingComponentCClassData) }),
+    ("OSAScriptingComponent", || Def { name: "OSAScriptingComponent", parents: &["SOMObject"], meta: None, data: 0, methods: osa::OSA_M, overrides: &[], cd: p!(OSAScriptingComponentClassData), ccd: p!(OSAScriptingComponentCClassData) }),
 ];
 
 /// Build a class of this DLL (its parents and metaclass first).
@@ -267,20 +265,38 @@ somsup::aligned! {
     __a_ODDeregisterPartHandlerClass => part::deregister_part_handler, 1;
 }
 
-/// The Apple Event Manager calls (ordinals 1-71): no Apple events.
-#[unsafe(no_mangle)]
-pub extern "C" fn __AENotHandled() -> usize {
-    services::ae_not_handled()
+// The Apple Event Manager calls (ordinals 1-71: ae.rs).
+somsup::aligned! {
+    __a_AECoerceDesc => ae::AECoerceDesc, 3;
+    __a_AECountItems => ae::AECountItems, 2;
+    __a_AECreateDesc => ae::AECreateDesc, 4;
+    __a_AECreateList => ae::AECreateList, 4;
+    __a_AECreateAppleEvent => ae::AECreateAppleEvent, 6;
+    __a_CreateObjSpecifier => ae::CreateObjSpecifier, 6;
+    __a_CreateOffsetDescriptor => ae::CreateOffsetDescriptor, 2;
+    __a_CreateRangeDescriptor => ae::CreateRangeDescriptor, 4;
+    __a_AEDisposeDesc => ae::AEDisposeDesc, 1;
+    __a_AEDuplicateDesc => ae::AEDuplicateDesc, 2;
+    __a_AEGetAttributePtr => ae::AEGetAttributePtr, 7;
+    __a_AEGetDescData => ae::AEGetDescData, 5;
+    __a_AEGetNthDesc => ae::AEGetNthDesc, 5;
+    __a_AEGetParamDesc => ae::AEGetParamDesc, 4;
+    __a_AEGetParamPtr => ae::AEGetParamPtr, 7;
+    __a_AEInstallEventHandler => ae::AEInstallEventHandler, 5;
+    __a_AEGetProcessID => ae::AEGetProcessID, 3;
+    __a_AEPutDesc => ae::AEPutDesc, 3;
+    __a_AEPutParamDesc => ae::AEPutParamDesc, 3;
+    __a_AERemoveEventHandler => ae::AERemoveEventHandler, 4;
+    __a_AESend => ae::AESend, 7;
+    __a_AEGetDescDataSize => ae::AEGetDescDataSize, 2;
+    __a_AESizeOfNthItem => ae::AESizeOfNthItem, 4;
+    __a_AESizeOfParam => ae::AESizeOfParam, 4;
+    __a_AEGetProcessName => ae::AEGetProcessName, 3;
+    __a_AENotHandled => ae::AENotHandled, 0;
 }
 
-#[unsafe(no_mangle)]
-pub extern "C" fn __AEDisposeDesc(desc: usize) -> usize {
-    services::ae_dispose_desc(desc)
-}
-
-#[unsafe(no_mangle)]
-pub extern "C" fn __AETENoClass(major: i32, minor: i32) -> usize {
-    services::no_class(major, minor)
+somsup::aligned! {
+    __a_ODAETEDictionaryNewClass => aete::dictionary_new_class, 2;
 }
 
 // ---- PM helpers ----
