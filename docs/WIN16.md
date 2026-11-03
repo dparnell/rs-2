@@ -28,7 +28,8 @@ files are involved. This is the media-free alternative to Win-OS/2
 | BUTTON, STATIC, EDIT (single and multi-line), LISTBOX, COMBOBOX, SCROLLBAR, drawn by WIN16 | works (stage 2) |
 | Subclassing (SetWindowLong GWL_WNDPROC, CallWindowProc), window scroll bars, the caret, the clipboard (CF_TEXT, PM's) | works (stage 2) |
 | CreateFont and the stock fonts, ellipses, polygons, clipping rectangles, SaveDC/RestoreDC | works (stage 2) |
-| MDI, bitmaps (CreateBitmap, BitBlt, DIBs), regions, mapping modes, Windows DLLs, WIN.INI and private profiles, icons, hooks, atoms and properties | works (real programs, below) |
+| MDI (maximized children in the frame's menu bar and title, tiling, cascading, icons), bitmaps and DIBs (ROPs, hatched and pattern brushes, 1/4/8/24-bit DIBs, bitmap and cursor resources), regions, mapping modes, font enumeration on Windows' faces, Windows DLLs (imports, LoadLibrary, WEP), WIN.INI and private profiles | works (stage 2's rest, below) |
+| Icons, hooks, atoms and properties, Windows 2.x menus and ChangeMenu | works (real programs, below) |
 | Every documented import (unimplemented ones are stubs), undocumented ones load | works (real programs) |
 | DPMI (the selector calls), the BIOS data area, WIN87EM, VER, LZEXPAND, COM's task allocator | works (what real programs asked for) |
 | COMMDLG: Open, Save As, Color, Font, Print, Print Setup, Find, Replace as WIN16 dialogs, with programs' hooks and templates; CommDlgExtendedError, GetFileTitle | works (stage 3) |
@@ -39,7 +40,9 @@ files are involved. This is the media-free alternative to Win-OS/2
 | Debugging another task (breakpoints, single steps, a stopped task's registers) | works through the kernel's debug interface ("TOOLHELP and debuggers") |
 | MMSYSTEM, OLE 2, the rest of the compatibility tail | stage 4 |
 
-Checked in QEMU: `RS2\HELLO16.EXE` (a classic hello world: a window
+Checked in QEMU: `RS2\MDI16.EXE` (an MDI program: text and picture
+documents tiled, maximized and as icons) and Microsoft's Multipad sample
+work as on Windows; `RS2\HELLO16.EXE` (a classic hello world: a window
 class, text painted in WM_PAINT, a MessageBox on a click) shows as a PM
 window, moves, repaints and closes; `RS2\MENU16.EXE` (a menu bar from
 its resources, check marks, a cascading pop-up, accelerators, a pop-up
@@ -822,6 +825,11 @@ Windows; what they needed, in the order they asked for it:
 | WinTrek | | C | works | Its DLL's hInstance compared signed: DLL selectors are below 8000h |
 | Euchre, Cribbage | | OWL | works | Window hooks |
 | Magic, WinCode, PEGIF, WinPong, FSR | | | works | CICA Dec 1993 |
+| Multipad | Windows 3.1 SDK sample | C | works | MDI: its first document maximized in the frame's menu bar, typing, File/New, Window/Tile (CICA Dec 1993, PROGRAMR) |
+| WinASCII | 1.0 | C | works | Character tables in the faces it enumerates |
+| ProShape | 1.1 | Windows 2.x | starts | Its menus (2.x templates, ChangeMenu) with the enumerated fonts |
+| Astronomy Clock, Icon Magic, Notebook, MegaEdit, ColorView | | | start | CICA Dec 1993; not checked in depth |
+| ANSIKEY | | Visual Basic 1 | no | Needs VBRUN100.DLL |
 | Neko | | | starts | Not checked in depth |
 | Jewels | | | starts | |
 | Hyperoid | | C | partly | Draws its own title bar with GetWindowDC: lands in the client area |
