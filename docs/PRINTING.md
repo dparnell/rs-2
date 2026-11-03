@@ -7,7 +7,9 @@ crates/gpi), port handlers for files, the parallel port and network
 printers (LPR and IPP), and the Workplace Shell's printer objects. No
 IBM file is shipped; IBM's PMSPL, PMPRINT, PMSPOOL and PSCRIPT.DRV were
 studied in Ghidra with their `.sym` files (`debug/symbols/os2/dll/pmspl.sym`,
-`os2/drivers/pmprint.sym`, `os2/pmspool.sym`, `os2/drivers/pscript/`).
+`os2/drivers/pmprint.sym`, `os2/pmspool.sym`, `os2/drivers/pscript/`),
+and for the Print Screen key PMMERGE's winprint.c (`os2/dll/pmmerge.sym`);
+WPPRTMRI.DLL's dialogs give the printer objects' pages.
 
 ## How OS/2 prints
 
@@ -123,7 +125,36 @@ printer's port.
 Programs that are not PM programs print with `DosOpen("LPT1")`; the
 kernel's printer device driver hands the data to the spooler through
 a pipe (`\PIPE\SPLRALRT`, `KernelPipeThread`), which makes it a
-PM_Q_RAW job on the queue that prints to LPT1.
+PM_Q_RAW job on the queue that prints to LPT1. In IBM's PMSPL the
+kernel's requests are records: open (SplFSOpen: the port's printer's
+queue, a job and its spool file name back), first write, close
+(SplFSClose: the job is ready), set title and others; the kernel then
+writes the data to the spool file itself. DOS sessions' printer output
+(VLPT.SYS: INT 17h, the ports, PRN) takes the same way; a DOS program's
+end closes its job (`PRINT_SEPARATE_OUTPUT`), and so does
+`PRINT_TIMEOUT` seconds without output (DOS settings).
+
+A queue's separator file (PRQINFO3 `pszSepFile`) is printed before each
+of its jobs (`PrintSep`, `DoPrintSep`): LAN Manager's format, whose
+first character is the escape character (OS/2 ships `SAMPLE.SEP`, text,
+and `PSCRIPT.SEP`, a PostScript page). Queue processors that print
+separators themselves say so with `QP_PRINT_SEPARATOR_PAGE`
+(SplQpQueryFlags) and get the separator's bytes with
+`SplQpPrintSeparator`; else the spooler sends them as DEVESC_RAWDATA.
+A queue prints only between its start and stop times (minutes after
+midnight; equal times: always), and a printer serves its queues by
+their priority (1 highest, 9 lowest).
+
+The Print Screen key (PMMERGE's winprint.c): `CheckPrintScreen` in
+WinPeekMsg turns a VK_PRINTSCRN key-down without Ctrl or Alt, while
+SV_PRINTSCREEN is on, into message 0x20F for the desktop window, whose
+`WinPrintScreen` starts a print thread (one at a time; a beep
+otherwise). The thread prints the top-level window under the mouse
+pointer (`SET PM_PRINTSCREEN_ACTIVE_WINDOW=ON`, or no mouse: the active
+window; the desktop: the whole screen): it copies the window's pels into
+a bitmap and blits it on a PM_Q_STD queued DC of the default queue
+(`PM_SPOOLER` `QUEUE`, `XFM=0`), as large as a whole multiple of its
+size that fits inside a margin of 1/39 of the page, centred.
 
 ## What rs2 can reach
 
@@ -193,7 +224,10 @@ can compare it.
   `image` operators. Raster operations that need the destination (XOR
   and the other mixes) are approximated by overpaint, as printers do.
   Each page is a DSC page (`%%Page:`); the job a DSC-conforming
-  PostScript level 2 document.
+  PostScript document (level 2, with level 3's FlateDecode for images
+  and ImageType 4 for masked ones). Images are compressed with rs2's
+  deflate (`gpi::deflate`: LZ77 with hash chains, fixed Huffman codes);
+  a full-screen Print Screen page is about 56 KB.
   The device is "PSCRIPT.Generic PostScript Printer" (300 dpi) with
   the forms Letter, A4 and Legal, portrait or landscape, and copies
   (the DRIVDATA rs2 keeps, `DevPostDeviceModes`'s job properties
@@ -218,7 +252,46 @@ can compare it.
   object (WPSpool) sets the spool path; dropping a file prints it (as
   text or PostScript), WPDataFile's Print does the same, and the
   Printers folder's template opens IBM's *Create a printer* (name,
-  driver, port), which makes a queue and a printer.
+  driver, port), which makes a queue and a printer. IBM's View page
+  (physical name, default view Icon or Detail, the details shown,
+  refresh interval) and Print options page (separator file with *Find
+  file...*, start and stop times) are there too; the job view's details
+  are document, status, job id, size and the time submitted; a job
+  dragged onto another printer moves there (`wpMoveJobObject`:
+  SplCopyJob, then the job leaves its queue).
+- **Programs that print to a port** (`DosOpen("LPT1")`, `PRN`, DOS
+  sessions, Win-OS/2): while the spooler runs, its thread serves the
+  port pipe `\PIPE\SPOOLER\PORT` (PMSPL `lptpipe.rs`, four connections).
+  The kernel (`chardev::lpt_spool_open`) connects each open of LPTn/PRN
+  to it and sends `LPTn\0program\0pid\0` (a DOS session sends its
+  title); the spooler answers 0 when a printer prints to that port (and
+  spooling is on), and the handle (`Handle::Spool`) then carries what
+  the program writes: from the first byte a PM_Q_RAW job on that
+  printer's first queue, ready when the last handle closes. Otherwise,
+  or when no spooler runs, the program writes to the port itself; the
+  spooler's own process (it serves the pipe) always does, so jobs reach
+  the parallel port. Printer status IOCtls on a spooled port answer
+  "selected, not busy". DOS sessions (docs/DOS.md) open `LPT1`/`LPT2`
+  for INT 17h, the 378h/278h registers, PRN and INT 21h 05h, and close
+  the job at each program's end (`PRINT_SEPARATE_OUTPUT`) or after
+  `PRINT_TIMEOUT` seconds without output; Win-OS/2's printer drivers
+  write to `LPT1:` (or `LPT1.OS2`) through DOS, so a Windows program's
+  print is a job too. VioPrtSc spools the screen's text the same way.
+- **Separator pages, print times, priorities** (PMSPL `sep.rs`,
+  `spooler.rs`): the queue's separator file in LAN Manager's format
+  (escapes `N` owner, `I` job id, `J` document, `Q` queue, `D` date,
+  `T` time, `L` text up to the next escape, `F` a file's contents, `H`nn
+  a byte, `W`nn page width, `0`-`9` new lines, `E` eject; `B`, `S`, `M`
+  block characters print as normal text) goes to PMPRINT's
+  SplQpPrintSeparator, which sends it as raw data right after
+  DEVESC_STARTDOC. rs2 ships its own `C:\OS2\SAMPLE.SEP` (text) and
+  `C:\OS2\PSCRIPT.SEP` (a PostScript banner page). A queue outside its
+  start/stop times keeps its jobs; a printer takes its queues by
+  priority.
+- **The Print Screen key** (PMWIN `prtscr.rs`, as IBM's above): the
+  input thread asks the PM server's desktop window, whose print thread
+  copies the window under the pointer (or the screen) from the screen
+  into a bitmap and prints it to the default printer.
 
 ### First targets
 
@@ -231,9 +304,12 @@ can compare it.
 4. The Workplace Shell's printer objects.
 5. Programs: rs2's E, IBM's E, EPM, Picture Viewer, the help manager.
 
-Not planned yet: DOS and Win-OS/2 printing through LPT1 into the
-spooler, remote (LAN Server) queues, separator pages, bidirectional
-printers, and other printer languages (PCL).
+6. Programs that print to a port, DOS sessions and Win-OS/2 through the
+   spooler; separator pages, print times and priorities; the Print
+   Screen key.
+
+Not planned yet: remote (LAN Server) queues, bidirectional printers,
+and other printer languages (PCL).
 
 ## Status
 
@@ -251,6 +327,13 @@ IPP), and the Workplace Shell's printer objects work:
 | Printer objects: job view, settings (queue, driver, job properties, port and settings, default printer), new printers from the template, deleting, files dropped and data files' Print | PMWP `printer.rs` | QEMU desktop runs (screenshots in the session's progress folder) |
 | Print in programs | rs2's E (File > Print), the help manager (Services > Print), IBM's Picture Viewer, the Toolkit's print sample (PRTSAMP: a metafile, sized to the page), EPM's formatted printing (File > Print file: its print thread draws each page on a `PU_TWIPS` presentation space of a queued DC) | QEMU runs, output rendered with Ghostscript |
 | Windows 3.x programs (native Win16): printer DCs, StartDoc...EndDoc and the escapes, PrintDlg, WIN.INI's printers (docs/WIN16.md) | WIN16 `print.rs`: queued PM_Q_RAW DCs | W16TEST, `RS2\PRINT16.EXE` (output rendered with Ghostscript), NOTE16's File > Print |
+| Programs that print to a port: `DosOpen("LPTn")`/`PRN` while the spooler runs is a PM_Q_RAW job on the port's printer's queue (nothing for an open without output); the spooler's own opens and ports without a printer go to the port; PRT_GETPRINTERSTATUS on a spooled port | kernel `chardev.rs` (`lpt_spool_open`, `Handle::Spool`), PMSPL `lptpipe.rs` | PRNTEST: LPT3 from an OS/2 program (job with the bytes and the program's name, printed unchanged) |
+| DOS sessions print: INT 17h, the 378h/278h registers, PRN/LPTn handles, INT 21h 05h; a job per DOS program, PRINT_TIMEOUT, PRINT_SEPARATE_OUTPUT | `crates/dos` (`Host::print`), VDM.EXE | PRNTEST: a DOS session's PRINT.COM (tests/dos/print.S) gives one 63-byte job named after the session; `tests/dos/run.sh` (dosrun --lpt) |
+| Win-OS/2 programs print through Windows' printer drivers to `LPT1:` (or `LPT1.OS2`) into the spooler | the DOS machine's printer path | dosrun: Notepad's File > Print with the CD's TTY.DRV as the default printer, with and without Print Manager (`tools/scripts/winos2_tree.py --printer`); not run in QEMU |
+| Separator pages (LAN Manager's .SEP format; rs2's SAMPLE.SEP and PSCRIPT.SEP), print times, queue priorities | PMSPL `sep.rs`, `spooler.rs`; PMPRINT SplQpPrintSeparator | PRNTEST: owner, job id, document, queue, width, hex, new lines and eject before the job's data; a queue outside its times keeps its job, which prints when the times allow |
+| Printer objects' View page (physical name, Icon/Detail, details shown, refresh interval; the job details view) and Print options page (separator file, Find file..., start and stop times); jobs dragged to another printer move | PMWP `printobj.rs`, `printer.rs`, `view.rs` | QEMU screenshots (pages, the details view of held jobs); the job move was not tried by dragging |
+| The Print Screen key: the window under the pointer, or the whole screen, to the default printer | PMWIN `prtscr.rs`, `input.rs`, `server.rs` | QEMU: PrtSc over the desktop and over System Setup to a host LPD listener, rendered with Ghostscript as the screen shows them |
+| Images in the PostScript Flate compressed | `crates/gpi/src/deflate.rs`, `psdev.rs` | `cargo test -p gpi` (round trip), Ghostscript renders the Print Screen pages unchanged (2.2 MB became 56 KB) |
 
 **Tests.** `RS2\PRNTEST.EXE` (userland/prntest) makes a queue on a
 printer on a file port and checks the spooler calls, a raw job (held,
@@ -268,12 +351,28 @@ the host as 10.0.2.2). `PRNTEST SETPORT printer port settings RUN
 program args` points a printer at a port and runs a program (how IBM
 programs were printed to the host listener). A PM_Q_STD queued DC keeps
 what was recorded before DEVESC_STARTDOC (colour tables, fonts: PRTSAMP
-plays its metafile once to size it first).
+plays its metafile once to size it first). PRNTEST also prints to its
+printer's port from an OS/2 program and from a DOS session (the
+printer is pointed at LPT3 and LPT1 while its queue is held, the jobs
+are checked, then printed on the file port), and checks separator
+files and print times. The Print Screen key was checked with `cargo
+xtask run --net --init "RS2\PRNTEST.EXE SETPORT PRINTER1 LPR1
+10.0.2.2;q;PORT; RUN RS2\WPSTEST.EXE SHELL OPEN <WP_CONFIG> 1"`,
+`{mouse_abs x y}{print}` typed and the LPD listener on the host.
 
 Not done yet:
-- DOS, Win-OS/2 and other programs that write to `LPT1` themselves go
-  straight to the parallel port; OS/2's kernel hands such output to
-  the spooler as raw jobs (EPM's Raw ASCII printing works that way).
+- The PrtSc key in a full-screen text session goes to LPT1 directly
+  (the keyboard path cannot wait for the spooler); VioPrtSc spools.
+  VioPrtScToggle's echo is not spooled either.
+- Separator files' block characters (`B`, `S`, `M`) print as normal
+  text; the Print options page has no Input bin (the PostScript driver
+  has one tray) and no "apply only to jobs that exceed size limits".
+  The Find file dialog starts in the root, not `\OS2`.
+- The PostScript header says LanguageLevel 2 while images use level 3's
+  FlateDecode (CUPS, Ghostscript and current printers take it).
+- Win-OS/2 printing was run in dosrun, not yet in a QEMU Win-OS/2
+  session (the same DOS machine and VDM path that PRNTEST's DOS check
+  covers).
 - The Toolkit's PRTSAMP.MET prints as rs2 draws it on the screen, a
   black silhouette: its colours are indices 0x800-0xE00 of its colour
   table, which rs2's metafile playing does not apply (a GPI matter; the
@@ -281,14 +380,13 @@ Not done yet:
   a metafile on a direct and a queued printer DC and lists the colours
   the PostScript sets. PRTSAMP's main window does not show (it prints
   from the keyboard); not looked at.
-- Separator pages, job retention, forms per queue, remote (LAN Server)
+- Job retention, forms per queue, remote (LAN Server)
   queues, IBM's port driver (.PDR) and queue processor interfaces for
   other vendors' modules, and IBM's spool files' (.SPL) device
   escape order (rs2 records DEVESC_NEWFRAME as its own escape order
   0x80 and blits as 0x81-0x83).
-- PostScript size: images are run-length and ASCII85 encoded (no
-  Flate); glyphs are Type 3 procedures without ToUnicode, so PDFs made
-  from the output have no searchable text.
+- Glyphs are Type 3 procedures without ToUnicode, so PDFs made from the
+  output have no searchable text.
 - WinFillRect on a PM_Q_STD queued DC is not recorded in the metafile
   (the fill is missing from the printout; found by Win16 printing, which
   uses PM_Q_RAW DCs for that and for fidelity).

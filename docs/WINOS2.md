@@ -310,7 +310,7 @@ used the same files (the probe's install script and mkrs2disp).
 | Drag outlines inside other Windows windows | small | Shown, as part of those windows' surface; outlines over PM windows are inverted on the screen and may leave marks if a PM window repaints meanwhile. |
 | Speed | medium | Starting takes seconds on dosrun (~100 MIPS) and about two minutes under QEMU TCG (~6 MIPS). The emulator has no decode cache yet (docs/DOS.md). |
 | Sound | small to medium | SOUND.DRV/MMSYSTEM work with no device; the CD's SNDBLST.DRV with rs2's Sound Blaster 2.0 emulation is untested. |
-| Printing | large | No printers in rs2's Win-OS/2. |
+| Printing | small | Windows' printer drivers print to `LPT1:` (or `LPT1.OS2`) through DOS (or INT 17h, the port registers), which the DOS machine hands to VDM.EXE and the spooler makes a job of (docs/PRINTING.md; the job ends after the session's PRINT_TIMEOUT idle seconds). Checked in dosrun: Notepad's File > Print with the CD's TTY.DRV as the default printer, with and without Print Manager (`python3 -I tools/scripts/winos2_tree.py MEDIA TREE --printer` lays out such a tree). APPINST installs no printer driver (Control Panel's Printers adds one from the CD's disk_w4); not run in a QEMU session yet. |
 | DOS programs from Windows (WINOLDAP, PIFs) | medium | INT 21h 4Bh (exec) from protected mode is still reflected without translation. |
 | 32-bit DPMI clients and the DOS API | small | The direct path is for 16-bit clients. |
 | RS2DISP | small each | No palette management (256-colour programs get the fixed palette), RLE DIBs, device fonts, ENUMOBJ. |
