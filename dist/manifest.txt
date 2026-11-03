@@ -10,6 +10,9 @@
 # classes).
 dist/CONFIG.SYS -> CONFIG.SYS
 dist/README.TXT -> README.TXT
+# Separator pages for printers (docs/PRINTING.md): text and PostScript.
+dist/spool/SAMPLE.SEP -> OS2\SAMPLE.SEP
+dist/spool/PSCRIPT.SEP -> OS2\PSCRIPT.SEP
 dist/etc/HOSTS -> MPTN\ETC\HOSTS
 dist/etc/SERVICES -> MPTN\ETC\SERVICES
 dist/etc/PROTOCOL -> MPTN\ETC\PROTOCOL

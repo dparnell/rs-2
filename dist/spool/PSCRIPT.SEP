@@ -1,0 +1,9 @@
+@
+@L%% rs2 separator page (PostScript)@0
+@Lgsave /Helvetica-Bold findfont 28 scalefont setfont 72 690 moveto (Job @I@L) show@0
+@L/Helvetica findfont 14 scalefont setfont@0
+@L72 650 moveto (Owner: @N@L) show@0
+@L72 630 moveto (Queue: @Q@L) show@0
+@L72 610 moveto (Printed: @D@L @T@L) show@0
+@L4 setlinewidth 72 590 moveto 540 590 lineto stroke@0
+@Lshowpage grestore@0

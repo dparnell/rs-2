@@ -767,7 +767,7 @@ pub fn archive_location() -> Vec<u8> {
     }
 }
 
-fn boot_drive() -> u8 {
+pub fn boot_drive() -> u8 {
     let mut d = 3u32;
     // QSV_BOOT_DRIVE
     unsafe { os2::DosQuerySysInfo(5, 5, &mut d, 4) };

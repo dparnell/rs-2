@@ -69,6 +69,8 @@ unsafe extern "C" {
     fn WinQueryAnchorBlock(h: u32) -> u32;
     #[link_name = "PMGPI.609"]
     fn DevPostDeviceModes(hab: u32, drv: *mut u8, name: *const u8, dev: *const u8, pname: *const u8, fl: u32) -> i32;
+    #[link_name = "PMCTLS.4"]
+    fn WinFileDlg(parent: u32, owner: u32, fild: *mut u8) -> u32;
 }
 
 const HINI_SYSTEM: u32 = 0xffff_fffe;
@@ -282,6 +284,38 @@ fn job_info(o: usize) -> Option<JobInfo> {
         return None;
     }
     Some(job_at(&buf, 0, true))
+}
+
+/// A printer's job details view: its columns (the icon, then those the
+/// View page can leave out).
+pub const JOB_COLUMNS: [&[u8]; 7] = [b"Icon\0", b"Document\0", b"Status\0", b"Job ID\0", b"Size\0", b"Date submitted\0", b"Time submitted\0"];
+
+/// A job object's details-view data: status, job id, size, the date
+/// and time submitted (CDATE/CTIME as u32s). None for other objects.
+pub fn job_details(o: usize) -> Option<(Vec<u8>, Vec<u8>, u32, u32, u32)> {
+    if !wps::is(o, "WPJob") {
+        return None;
+    }
+    let j = job_info(o)?;
+    let mut status = job_status(j.status).to_vec();
+    status.push(0);
+    let mut id = dec(j.id);
+    id.push(0);
+    // Seconds since 1970 (local time) to a civil date.
+    let days = (j.submitted / 86400) as i64;
+    let secs = j.submitted % 86400;
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let y = (yoe + era * 400 + if m <= 2 { 1 } else { 0 }) as u32;
+    let date = d | m << 8 | y << 16;
+    let time = secs / 3600 | (secs / 60 % 60) << 8 | (secs % 60) << 16;
+    Some((status, id, j.size, date, time))
 }
 
 /// IBM's status words (WPPRTMRI's strings).
@@ -1083,7 +1117,7 @@ pub extern "C" fn wpAddQueueOptionsPage(o: usize, nb: u32) -> u32 {
     // BS_AUTOCHECKBOX
     let cb = |t: &[u8], y: i16, id: u16| item(WC_BUTTON, t, WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0001, (6, y, 160, 10), id);
     add_page(o, nb, queue_page_proc, alloc::vec![
-        book::label(b"Queue priority (1 low - 9 high)", (6, 108, 120)),
+        book::label(b"Queue priority (1 high - 9 low)", (6, 108, 120)),
         spin((130, 106, 30), ID_QPRIO),
         book::label(b"Queue driver", (6, 94, 100)),
         container(ID_QDRV, (6, 52, 224, 40)),
@@ -1091,6 +1125,260 @@ pub extern "C" fn wpAddQueueOptionsPage(o: usize, nb: u32) -> u32 {
         cb(b"Printer-specific ~format", 24, ID_QRAW),
         cb(b"Print while ~spooling", 12, ID_QBYPASS),
     ], b"~Queue options\0")
+}
+
+// ---- Print options (IBM's dialog 20600) ----
+
+const ID_SEPFILE: u16 = 20601;
+const ID_FINDSEP: u16 = 1110;
+const ID_STARTH: u16 = 20604;
+const ID_STARTM: u16 = 20605;
+const ID_STOPH: u16 = 20606;
+const ID_STOPM: u16 = 20607;
+const ID_STARTAM: u16 = 20608;
+const ID_STARTPM: u16 = 20609;
+const ID_STOPAM: u16 = 20610;
+const ID_STOPPM: u16 = 20611;
+
+fn group(text: &[u8], (x, y, cx, cy): (i16, i16, i16, i16)) -> Item {
+    // SS_GROUPBOX
+    item(WC_STATIC, text, WS_VISIBLE | 0x0002, (x, y, cx, cy), 0xffff)
+}
+
+/// A time (minutes after midnight) into the page's hour and minute
+/// spin buttons and AM/PM buttons.
+fn show_time(h: u32, t: u16, (hid, mid, am, pm): (u16, u16, u16, u16)) {
+    let (hh, mm) = ((t % 1440) / 60, t % 60);
+    let h12 = if hh % 12 == 0 { 12 } else { hh % 12 };
+    spin_init(h, hid, 1, 12, h12 as i32);
+    spin_init(h, mid, 0, 59, mm as i32);
+    check(h, am, hh < 12);
+    check(h, pm, hh >= 12);
+}
+
+fn read_time(h: u32, (hid, mid, _am, pm): (u16, u16, u16, u16)) -> Option<u16> {
+    let hh = spin_value(h, hid).filter(|v| (1..=12).contains(v))? as u16;
+    let mm = spin_value(h, mid).filter(|v| (0..=59).contains(v))? as u16;
+    let hh = hh % 12 + if checked(h, pm) { 12 } else { 0 };
+    Some(hh * 60 + mm)
+}
+
+const START: (u16, u16, u16, u16) = (ID_STARTH, ID_STARTM, ID_STARTAM, ID_STARTPM);
+const STOP: (u16, u16, u16, u16) = (ID_STOPH, ID_STOPM, ID_STOPAM, ID_STOPPM);
+
+fn set_queue_u16(q: &[u8], parm: u32, v: u16) {
+    unsafe { printer::SplSetQueue(null(), z(q).as_ptr(), 3, v.to_le_bytes().as_ptr(), 2, parm) };
+}
+
+/// The separator file typed (or found): kept when it exists (IBM's
+/// message 7032 otherwise); empty: no separator.
+fn set_separator(h: u32, o: usize, path: &[u8]) {
+    let q = queue_of(o);
+    let path: Vec<u8> = path.iter().copied().filter(|c| !c.is_ascii_whitespace()).collect();
+    if info(o).is_some_and(|i| i.sepfile.eq_ignore_ascii_case(&path)) {
+        return;
+    }
+    if !path.is_empty() {
+        let p = z(&path);
+        let mut st = os2::FileStatus3::default();
+        if unsafe { os2::DosQueryPathInfo(p.as_ptr(), 1, &mut st as *mut _ as *mut u8, core::mem::size_of::<os2::FileStatus3>() as u32) } != 0 || st.attr & 0x10 != 0 {
+            message(h, b"An invalid separator file name was specified.", b"Print options", MB_OK | MB_ERROR);
+            return;
+        }
+    }
+    let p = z(&path);
+    unsafe { printer::SplSetQueue(null(), z(&q).as_ptr(), 3, p.as_ptr(), p.len() as u32, 5) };
+}
+
+/// Find file...: the standard file dialog on the separator files.
+fn find_separator(h: u32) -> Option<Vec<u8>> {
+    let mut fd = alloc::vec![0u8; 328];
+    let wr = |fd: &mut [u8], o: usize, v: u32| fd[o..o + 4].copy_from_slice(&v.to_le_bytes());
+    wr(&mut fd, 0, 328);
+    // FDS_CENTER | FDS_OPEN_DIALOG
+    wr(&mut fd, 4, 0x101);
+    wr(&mut fd, 20, b"Separator file\0".as_ptr() as u32);
+    let start = [&[crate::desktop::boot_drive()][..], b":\\OS2\\*.SEP"].concat();
+    fd[52..52 + start.len()].copy_from_slice(&start);
+    let ok = unsafe { WinFileDlg(HWND_DESKTOP, h, fd.as_mut_ptr()) } != 0;
+    let ret = u32::from_le_bytes([fd[12], fd[13], fd[14], fd[15]]);
+    if !ok || ret != DID_OK {
+        return None;
+    }
+    let l = fd[52..312].iter().position(|&c| c == 0).unwrap_or(260);
+    (l > 0).then(|| fd[52..52 + l].to_vec())
+}
+
+extern "C" fn print_options_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            unsafe { WinSetWindowULong(h, QWL_USER, b) };
+            let i = info(b as usize);
+            let (sep, start, until) = i.map_or((Vec::new(), 0, 0), |i| (i.sepfile, i.start, i.until));
+            set_item_text(h, ID_SEPFILE as u32, &sep);
+            show_time(h, start, START);
+            show_time(h, until, STOP);
+            0
+        }
+        // EN_KILLFOCUS: the separator file.
+        WM_CONTROL if (a & 0xffff) as u16 == ID_SEPFILE && a >> 16 == 2 => {
+            set_separator(h, page_obj(h), &item_text(h, ID_SEPFILE as u32));
+            0
+        }
+        WM_CONTROL => {
+            let id = (a & 0xffff) as u16;
+            let code = a >> 16;
+            let o = page_obj(h);
+            let start = matches!(id, ID_STARTH | ID_STARTM | ID_STARTAM | ID_STARTPM);
+            let stop = matches!(id, ID_STOPH | ID_STOPM | ID_STOPAM | ID_STOPPM);
+            let changed = (matches!(id, ID_STARTH | ID_STARTM | ID_STOPH | ID_STOPM) && code == SPBN_CHANGE) || (matches!(id, ID_STARTAM | ID_STARTPM | ID_STOPAM | ID_STOPPM) && code == 1);
+            if changed && (start || stop) {
+                let (which, parm) = if start { (START, 3) } else { (STOP, 4) };
+                if let Some(t) = read_time(h, which) {
+                    set_queue_u16(&queue_of(o), parm, t);
+                }
+            }
+            0
+        }
+        WM_COMMAND if (a & 0xffff) as u16 == ID_FINDSEP => {
+            if let Some(p) = find_separator(h) {
+                set_item_text(h, ID_SEPFILE as u32, &p);
+                set_separator(h, page_obj(h), &p);
+            }
+            0
+        }
+        WM_COMMAND => {
+            page_command(a & 0xffff);
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+/// IBM's Print options page: the separator file, the start and stop
+/// times.
+pub fn add_print_options_page(o: usize, nb: u32) -> u32 {
+    let time = |y: i16, hid: u16, mid: u16, am: u16, pm: u16| {
+        alloc::vec![
+            spin((10, y, 30), hid),
+            book::label(b"hours", (43, y + 2, 26)),
+            spin((76, y, 30), mid),
+            book::label(b"minutes", (110, y + 2, 34)),
+            crate::setup::radio(b"AM", (150, y + 5, 30), am, true),
+            crate::setup::radio(b"PM", (150, y - 4, 30), pm, false),
+        ]
+    };
+    let mut items = alloc::vec![
+        group(b"Separator page", (4, 78, 228, 40)),
+        book::label(b"File", (10, 100, 24)),
+        // ES_AUTOSCROLL | ES_MARGIN
+        item(WC_ENTRYFIELD, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0004 | 0x0008, (40, 100, 184, 8), ID_SEPFILE),
+        item(WC_BUTTON, b"~Find file...", WS_VISIBLE | WS_TABSTOP | WS_GROUP, (38, 83, 60, 12), ID_FINDSEP),
+        group(b"Start time", (4, 46, 228, 30)),
+    ];
+    items.extend(time(53, ID_STARTH, ID_STARTM, ID_STARTAM, ID_STARTPM));
+    items.push(group(b"Stop time", (4, 14, 228, 30)));
+    items.extend(time(21, ID_STOPH, ID_STOPM, ID_STOPAM, ID_STOPPM));
+    items.push(book::label(b"Equal start and stop times: the printer prints at any time.", (6, 2, 226)));
+    add_page(o, nb, print_options_proc, items, b"P~rint options\0")
+}
+
+// ---- View (IBM's dialog 20700) ----
+
+const ID_VDETAIL: u16 = 20701;
+const ID_VICON: u16 = 20702;
+const ID_VREFRESH: u16 = 20706;
+const ID_VNAME: u16 = 20710;
+const ID_VDETAILS: u16 = 20711;
+const LM_INSERTITEM: u32 = 0x0161;
+const LM_SELECTITEM: u32 = 0x0164;
+const LM_QUERYSELECTION: u32 = 0x0165;
+
+/// The listbox's selected rows (multiple selection).
+fn selected_rows(h: u32, id: u16) -> Vec<i32> {
+    let mut v = Vec::new();
+    let mut i = -1i32;
+    loop {
+        let r = unsafe { WinSendDlgItemMsg(h, id as u32, LM_QUERYSELECTION, i as u32, 0) } as i32;
+        if r < 0 || v.contains(&r) {
+            break;
+        }
+        v.push(r);
+        i = r;
+    }
+    v
+}
+
+/// The View page's settings to the printer (its next job view uses them).
+fn save_view_page(h: u32) {
+    let o = page_obj(h);
+    let shown = selected_rows(h, ID_VDETAILS);
+    // Rows are the columns after the icon.
+    let mut hidden = 0u32;
+    for c in 1..JOB_COLUMNS.len() as i32 {
+        if !shown.contains(&(c - 1)) {
+            hidden |= 1 << c;
+        }
+    }
+    let refresh = spin_value(h, ID_VREFRESH).filter(|v| (1..=3600).contains(v)).unwrap_or(printer::DEFAULT_REFRESH as i32) as u32;
+    printer::set_view_settings(o, checked(h, ID_VDETAIL), refresh, hidden);
+}
+
+static mut VIEW_INIT: bool = false;
+
+extern "C" fn view_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
+    match msg {
+        WM_INITDLG => {
+            unsafe { WinSetWindowULong(h, QWL_USER, b) };
+            let o = b as usize;
+            unsafe { VIEW_INIT = true };
+            set_item_text(h, ID_VNAME as u32, &queue_of(o));
+            let (details, refresh, hidden) = printer::view_settings(o);
+            check(h, ID_VDETAIL, details);
+            check(h, ID_VICON, !details);
+            for (i, c) in JOB_COLUMNS.iter().enumerate().skip(1) {
+                unsafe { WinSendDlgItemMsg(h, ID_VDETAILS as u32, LM_INSERTITEM, 0xffff_ffff, c.as_ptr() as u32) };
+                if hidden & (1 << i) == 0 {
+                    unsafe { WinSendDlgItemMsg(h, ID_VDETAILS as u32, LM_SELECTITEM, (i - 1) as u32, 1) };
+                }
+            }
+            spin_init(h, ID_VREFRESH, 1, 3600, refresh as i32);
+            unsafe { VIEW_INIT = false };
+            0
+        }
+        WM_CONTROL => {
+            let id = (a & 0xffff) as u16;
+            let code = a >> 16;
+            let changed = (matches!(id, ID_VDETAIL | ID_VICON) && code == 1) || (id == ID_VDETAILS && code == 1) || (id == ID_VREFRESH && code == SPBN_CHANGE);
+            if changed && unsafe { !VIEW_INIT } {
+                save_view_page(h);
+            }
+            0
+        }
+        WM_COMMAND => {
+            page_command(a & 0xffff);
+            0
+        }
+        _ => unsafe { WinDefDlgProc(h, msg, a, b) },
+    }
+}
+
+/// IBM's View page: the queue's physical name, the job view's default
+/// view and the details it shows, its refresh interval.
+pub fn add_printer_view_page(o: usize, nb: u32) -> u32 {
+    add_page(o, nb, view_page_proc, alloc::vec![
+        book::label(b"Physical name", (8, 104, 60)),
+        item(WC_STATIC, b"", WS_VISIBLE | 0x0001, (72, 104, 150, 8), ID_VNAME),
+        group(b"Default view", (4, 58, 90, 40)),
+        crate::setup::radio(b"D~etail", (10, 76, 60), ID_VDETAIL, true),
+        crate::setup::radio(b"~Icon", (10, 64, 60), ID_VICON, false),
+        book::label(b"Details to display", (100, 90, 100)),
+        // LS_MULTIPLESEL
+        item(WC_LISTBOX, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0001, (100, 26, 128, 62), ID_VDETAILS),
+        book::label(b"Refresh interval", (8, 6, 70)),
+        spin((80, 4, 40), ID_VREFRESH),
+        book::label(b"seconds", (124, 6, 40)),
+    ], b"~View\0")
 }
 
 // ---- The Spooler ----

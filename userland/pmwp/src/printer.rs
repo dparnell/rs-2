@@ -47,7 +47,7 @@ unsafe extern "C" {
     #[link_name = "PMSPL.393"]
     fn SplCreateQueue(comp: *const u8, level: u32, buf: *const u8, cb: u32) -> u32;
     #[link_name = "PMSPL.398"]
-    fn SplSetQueue(comp: *const u8, q: *const u8, level: u32, buf: *const u8, cb: u32, parm: u32) -> u32;
+    pub fn SplSetQueue(comp: *const u8, q: *const u8, level: u32, buf: *const u8, cb: u32, parm: u32) -> u32;
     #[link_name = "PMSPL.396"]
     fn SplDeleteQueue(comp: *const u8, q: *const u8) -> u32;
     #[link_name = "PMSPL.394"]
@@ -135,6 +135,10 @@ pub struct QueueInfo {
     pub flags: u16,
     pub priority: u16,
     pub qproc: Vec<u8>,
+    /// The separator file and the print times (minutes after midnight).
+    pub sepfile: Vec<u8>,
+    pub start: u16,
+    pub until: u16,
 }
 
 fn queue_info_at(b: &[u8], o: usize) -> QueueInfo {
@@ -156,6 +160,9 @@ fn queue_info_at(b: &[u8], o: usize) -> QueueInfo {
         drivdata,
         priority: rd16(b, o + 4),
         qproc: ptr_str(rd32(b, o + 16)),
+        sepfile: ptr_str(rd32(b, o + 12)),
+        start: rd16(b, o + 6),
+        until: rd16(b, o + 8),
     }
 }
 
@@ -341,7 +348,36 @@ pub fn print_object(o: usize) -> bool {
 #[repr(C)]
 pub struct PrinterData {
     queue: Str,
+    /// The View page: the job view in details (1) or icons (0), its
+    /// refresh interval in seconds, the details columns hidden (bits as
+    /// printobj::JOB_COLUMNS).
+    details: u32,
+    refresh: u32,
+    hidden: u32,
 }
+
+/// The job view's settings (the View page): details?, refresh seconds,
+/// hidden columns.
+pub fn view_settings(o: usize) -> (bool, u32, u32) {
+    let d = pd(o);
+    (d.details != 0, if d.refresh == 0 { DEFAULT_REFRESH } else { d.refresh }, d.hidden)
+}
+
+pub fn set_view_settings(o: usize, details: bool, refresh: u32, hidden: u32) {
+    let d = pd(o);
+    d.details = details as u32;
+    d.refresh = refresh.clamp(1, 3600);
+    d.hidden = hidden;
+    obj::call(m::WPObject::wpSaveDeferred, &[o]);
+}
+
+/// The details columns a printer's job view leaves out.
+pub fn hidden_columns(o: usize) -> u32 {
+    pd(o).hidden
+}
+
+/// The job view's refresh interval unless the View page sets one.
+pub const DEFAULT_REFRESH: u32 = 2;
 
 fn pd(o: usize) -> &'static mut PrinterData {
     som::data(wps::ccd("WPPrinter"), o)
@@ -355,12 +391,21 @@ fn one_line(t: &[u8]) -> Vec<u8> {
     t.iter().map(|&c| if c == b'\n' { b' ' } else { c }).collect()
 }
 
-/// Open job views (printer, frame) and the printers' job objects
-/// (printer, job id, object, the title it has).
-static mut JOB_VIEWS: Vec<(usize, u32)> = Vec::new();
+/// Open job views (printer, frame, when last brought up to date in ms)
+/// and the printers' job objects (printer, job id, object, the title it
+/// has).
+static mut JOB_VIEWS: Vec<(usize, u32, u32)> = Vec::new();
 static mut JOB_OBJS: Vec<(usize, u32, usize, Vec<u8>)> = Vec::new();
-/// The desktop's timer for the job views (every two seconds).
+/// The desktop's timer for the job views (every second; each view is
+/// brought up to date at its printer's refresh interval).
 pub const TID_JOBS: u32 = 0x5713;
+
+fn ms_now() -> u32 {
+    let mut ms = 0u32;
+    // QSV_MS_COUNT
+    unsafe { os2::DosQuerySysInfo(14, 14, &mut ms, 4) };
+    ms
+}
 
 fn dec(n: u32) -> Vec<u8> {
     alloc::format!("{n}").into_bytes()
@@ -466,10 +511,18 @@ fn refresh(o: usize) {
 /// The desktop's timer: the open job views follow their queues; the
 /// objects of closed views go.
 pub fn tick() {
-    let views: Vec<(usize, u32)> = unsafe { JOB_VIEWS.clone() };
-    for (o, frame) in views {
+    let views: Vec<(usize, u32, u32)> = unsafe { JOB_VIEWS.clone() };
+    let now = ms_now();
+    for (o, frame, last) in views {
         if crate::view::wins().iter().any(|w| w.frame == frame) {
-            refresh(o);
+            if now.wrapping_sub(last) + 500 >= view_settings(o).1 * 1000 {
+                unsafe {
+                    if let Some(v) = JOB_VIEWS.iter_mut().find(|v| v.1 == frame) {
+                        v.2 = now;
+                    }
+                }
+                refresh(o);
+            }
         } else {
             unsafe { JOB_VIEWS.retain(|v| v.1 != frame) };
             let mine: Vec<usize> = unsafe { JOB_OBJS.iter().filter(|e| e.0 == o).map(|e| e.2).collect() };
@@ -494,12 +547,13 @@ fn open_jobs(o: usize) -> u32 {
         return f;
     }
     let (objs, _) = job_objects(o);
-    let w = crate::view::open_owned(&view_title(o), objs, o);
+    let view = if view_settings(o).0 { obj::OPEN_DETAILS } else { obj::OPEN_CONTENTS };
+    let w = crate::view::open_owned(&view_title(o), objs, o, view);
     let frame = crate::view::wins()[w].frame;
-    unsafe { JOB_VIEWS.push((o, frame)) };
+    unsafe { JOB_VIEWS.push((o, frame, ms_now())) };
     let client = crate::view::desktop_client();
     if client != 0 {
-        unsafe { WinStartTimer(WinQueryAnchorBlock(HWND_DESKTOP), client, TID_JOBS, 2000) };
+        unsafe { WinStartTimer(WinQueryAnchorBlock(HWND_DESKTOP), client, TID_JOBS, 1000) };
     }
     frame
 }
@@ -651,6 +705,10 @@ extern "C" fn printer_save_state(o: usize) -> u32 {
     som::call_parent(wps::ccd("WPPrinter"), wps::cd("WPObject"), m::WPObject::wpSaveState, &[o]);
     let q = z(str_bytes(&pd(o).queue));
     obj::wpSaveString(o, b"WPPrinter\0".as_ptr(), 1, q.as_ptr());
+    let d = pd(o);
+    obj::wpSaveLong(o, b"WPPrinter\0".as_ptr(), 2, d.details);
+    obj::wpSaveLong(o, b"WPPrinter\0".as_ptr(), 3, d.refresh);
+    obj::wpSaveLong(o, b"WPPrinter\0".as_ptr(), 4, d.hidden);
     1
 }
 
@@ -659,6 +717,10 @@ extern "C" fn printer_restore_state(o: usize, r: u32) -> u32 {
     if let Some(q) = obj::restored_string(o, b"WPPrinter", 1) {
         pd(o).queue = str_new(q.strip_suffix(&[0]).unwrap_or(&q));
     }
+    let d = pd(o);
+    d.details = obj::restored_long(o, b"WPPrinter", 2).unwrap_or(0);
+    d.refresh = obj::restored_long(o, b"WPPrinter", 3).unwrap_or(0);
+    d.hidden = obj::restored_long(o, b"WPPrinter", 4).unwrap_or(0);
     1
 }
 
@@ -816,13 +878,16 @@ pub fn job_properties(o: usize) {
     }
 }
 
-/// IBM's printer pages: Printer driver, Output port, Queue options (in
-/// that order of tabs: each goes in front of the ones before it).
+/// IBM's printer pages: View, Printer driver, Output port, Queue options,
+/// Print options (in that order of tabs: each goes in front of the ones
+/// before it).
 extern "C" fn printer_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPPrinter"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
+    crate::printobj::add_print_options_page(o, nb);
     crate::printobj::wpAddQueueOptionsPage(o, nb);
     crate::printobj::wpAddPrinterPortPage(o, nb);
     crate::printobj::wpAddPrinterDriverPage(o, nb);
+    crate::printobj::add_printer_view_page(o, nb);
     1
 }
 

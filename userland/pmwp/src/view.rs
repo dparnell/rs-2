@@ -258,22 +258,25 @@ pub fn open_folder(folder: usize, _cnr: u32, view: u32, _param: u32) -> u32 {
     if !desktop {
         title.extend_from_slice(view_suffix(view));
     }
-    make_view(folder, view, &title, desktop, None)
+    make_view(folder, view, &title, desktop, None, 0)
 }
 
 /// A Find Results window: the objects found, shown as a folder's are.
 pub fn open_results(title: &[u8], found: Vec<usize>) -> usize {
     let mut t = title.to_vec();
     t.extend_from_slice(view_suffix(OPEN_CONTENTS));
-    make_view(0, OPEN_CONTENTS, &t, false, Some(found));
+    make_view(0, OPEN_CONTENTS, &t, false, Some(found), 0);
     wins().len() - 1
 }
 
 /// A window of objects that belongs to `owner` (a printer's job view:
-/// its jobs).
-pub fn open_owned(title: &[u8], objs: Vec<usize>, owner: usize) -> usize {
-    let w = open_results(title, objs);
-    wins()[w].owner = owner;
+/// its jobs), as icons or details (`view`: OPEN_CONTENTS or
+/// OPEN_DETAILS; a printer's details are its jobs').
+pub fn open_owned(title: &[u8], objs: Vec<usize>, owner: usize, view: u32) -> usize {
+    let mut t = title.to_vec();
+    t.extend_from_slice(view_suffix(view));
+    make_view(0, view, &t, false, Some(objs), owner);
+    let w = wins().len() - 1;
     let icon = obj::call(m::WPObject::wpQueryIcon, &[owner]) as u32;
     send(wins()[w].frame, 0x0047, icon, 0);
     w
@@ -292,7 +295,7 @@ pub fn set_results(w: usize, title: &[u8], found: Vec<usize>) {
 
 /// A view window (a frame with a container) of a folder or of found
 /// objects.
-fn make_view(folder: usize, view: u32, title: &[u8], desktop: bool, found: Option<Vec<usize>>) -> u32 {
+fn make_view(folder: usize, view: u32, title: &[u8], desktop: bool, found: Option<Vec<usize>>, owner: usize) -> u32 {
     let (frame, client) = new_frame(title, desktop);
     if frame == 0 {
         return 0;
@@ -301,7 +304,7 @@ fn make_view(folder: usize, view: u32, title: &[u8], desktop: bool, found: Optio
         WinCreateWindow(client, WC_CONTAINER, b"\0".as_ptr(), WS_VISIBLE | CCS_EXTENDSEL, 0, 0, 10, 10, client, HWND_TOP, ID_CHILD, core::ptr::null(), core::ptr::null())
     };
     unsafe { OLD_CNR = WinSubclassWindow(cnr, cnr_proc) as usize };
-    wins().push(Win { obj: folder, view, frame, client, child: cnr, recs: Vec::new(), desktop, fields: false, height: 0, found, owner: 0 });
+    wins().push(Win { obj: folder, view, frame, client, child: cnr, recs: Vec::new(), desktop, fields: false, height: 0, found, owner });
     let w = wins().len() - 1;
     let mut ci = [0u32; 23];
     ci[0] = 92;
@@ -346,12 +349,15 @@ fn view_suffix(view: u32) -> &'static [u8] {
 /// Details view columns: icon and title.
 fn add_fields(w: usize) {
     let cnr = wins()[w].child;
-    let cols = crate::viewset::COLUMNS;
+    // A printer's job view: the jobs' details, those its View page shows.
+    let owner = wins()[w].owner;
+    let jobs = owner != 0 && wps::is(owner, "WPPrinter");
+    let cols = if jobs { crate::printobj::JOB_COLUMNS } else { crate::viewset::COLUMNS };
     let first = send(cnr, CM_ALLOCDETAILFIELDINFO, cols.len() as u32, 0);
     if first == 0 {
         return;
     }
-    let hidden = crate::viewset::hidden_columns(crate::fs::view_flags(wins()[w].obj));
+    let hidden = if jobs { crate::printer::hidden_columns(owner) } else { crate::viewset::hidden_columns(crate::fs::view_flags(wins()[w].obj)) };
     // CFA_INVISIBLE, CFA_FIREADONLY on all; the data's type and offset.
     const CFA_INVISIBLE: u32 = 0x0040;
     let kinds: [(u32, usize); 7] = [
@@ -456,6 +462,9 @@ fn set_rec(r: u32, rec: &Rec, icon: u32) {
 /// Details view's data of an object: class title, real name, and for a
 /// file its size and last write date and time (CDATE, CTIME).
 fn details_of(o: usize) -> (Vec<u8>, Vec<u8>, u32, u32, u32) {
+    if let Some(d) = crate::printobj::job_details(o) {
+        return d;
+    }
     let cls = som::class_of(o);
     let t = wps::call("M_WPObject", m::M_WPObject::wpclsQueryTitle, &[cls]) as *const u8;
     let mut class = if t.is_null() { Vec::new() } else { util::cstr(t).to_vec() };
