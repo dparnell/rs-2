@@ -13,6 +13,7 @@ extern crate alloc;
 pub mod bitmap;
 pub mod color;
 pub mod damage;
+mod deflate;
 pub mod font;
 pub mod goca;
 pub mod icon;

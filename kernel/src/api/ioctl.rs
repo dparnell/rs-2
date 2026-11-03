@@ -172,6 +172,10 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
             Ok(d) => put_data(c, r, 0, &d),
             Err(e) => e,
         },
+        (Handle::Spool(..), 5) => match crate::chardev::lpt_spool_ioctl(r.function) {
+            Ok(d) => put_data(c, r, 0, &d),
+            Err(e) => e,
+        },
         (Handle::Char(CharDev::Mouse | CharDev::Pointer), 7) => mouse(c, r),
         (Handle::Screen, 3) => screen(c, r),
         _ => err::INVALID_CATEGORY,

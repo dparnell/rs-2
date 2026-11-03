@@ -493,6 +493,58 @@ pub fn lpt_write(n: usize, data: &[u8]) -> usize {
     data.len()
 }
 
+/// The spooler's port pipe (PMSPL's spooler thread serves it): a
+/// program that opens a printer port while the spooler runs prints a
+/// job, as OS/2's printer device driver hands such output to the
+/// spooler. The kernel connects, sends `LPTn\0program\0pid\0` and gets
+/// one byte back: 0 when the port's printer spools, else the port is
+/// used directly. The connection then carries the output; closing it
+/// (the handle's last close) ends the job.
+pub const SPOOL_PIPE: &str = "\\PIPE\\SPOOLER\\PORT";
+
+/// Connect a printer port opened by the current process to the spooler,
+/// None when the output goes to the port itself (no spooler, the port's
+/// printer is not spooled, or the spooler opening its own port).
+pub fn lpt_spool_open(n: u8) -> Option<alloc::sync::Arc<crate::npipe::End>> {
+    let p = crate::task::sched::current_opt().and_then(|t| t.process())?;
+    if crate::npipe::served_by(SPOOL_PIPE, p.pid) {
+        return None;
+    }
+    let end = match crate::npipe::open(SPOOL_PIPE) {
+        Ok(e) => e,
+        Err(crate::npipe::ERROR_PIPE_BUSY) => {
+            // Every instance busy: wait for one.
+            if crate::npipe::wait(SPOOL_PIPE, 5000) != 0 {
+                return None;
+            }
+            crate::npipe::open(SPOOL_PIPE).ok()?
+        }
+        Err(_) => return None,
+    };
+    // A DOS session's document is its title, other programs' their name.
+    let mut prog: alloc::string::String = p.exe.name.rsplit(['\\', '/']).next().unwrap_or("").into();
+    if prog.eq_ignore_ascii_case("VDM.EXE") || prog.eq_ignore_ascii_case("VDM") {
+        if let Some((_, t)) = crate::session::info(crate::session::current()) {
+            prog = t;
+        }
+    }
+    let req = alloc::format!("LPT{}\0{}\0{}\0", n + 1, prog, p.pid);
+    end.write(req.as_bytes()).ok()?;
+    match end.read(1) {
+        Ok((v, _)) if v.first() == Some(&0) => Some(end),
+        _ => None,
+    }
+}
+
+/// Category 5 IOCtls of a spooled printer port: always ready.
+pub fn lpt_spool_ioctl(f: u32) -> Result<Vec<u8>, u32> {
+    match f {
+        // Selected, not busy.
+        0x66 => Ok(alloc::vec![0x90]),
+        _ => lpt_ioctl(usize::MAX, f),
+    }
+}
+
 /// Category 5 (printer) IOCtls.
 pub fn lpt_ioctl(n: usize, f: u32) -> Result<Vec<u8>, u32> {
     match f {

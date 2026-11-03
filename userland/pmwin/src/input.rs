@@ -441,6 +441,12 @@ pub fn key(ev: &Input) {
     if vkey != 0 {
         set_key(s, vkey as usize, !up);
     }
+    // PrtSc prints a window (prtscr.rs) when SV_PRINTSCREEN is on; the
+    // key is not passed on (IBM's CheckPrintScreen).
+    if vkey == 0x19 && !up && fs & (KC_CTRL | KC_ALT) == 0 && s.sysvals.get(&97).is_none_or(|&v| v != 0) {
+        crate::server::print_screen();
+        return;
+    }
     let mut target = if s.focus != 0 { s.focus } else { s.active };
     if !in_sysmodal(target) {
         target = s.sysmodal;
@@ -495,6 +501,8 @@ fn virtual_key(scan: u32, ch: u32) -> u32 {
         (0x52, 0 | 0xe0) => 0x1a, // VK_INSERT
         (0x53, 0 | 0xe0) => 0x1b, // VK_DELETE
         (0x3b..=0x44, _) => 0x20 + scan - 0x3b, // VK_F1..VK_F10
+        // PrtSc (the keypad's * has its character).
+        (0x37, 0 | 0xe0) => 0x19, // VK_PRINTSCRN
         (0x57, _) => 0x2a, // VK_F11
         (0x58, _) => 0x2b, // VK_F12
         _ => 0,

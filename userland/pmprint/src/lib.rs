@@ -15,6 +15,11 @@
 //!
 //! SplQpControl(SPLC_ABORT) stops a job between pieces (raw) or with
 //! GpiSetStopDraw (metafiles).
+//!
+//! Separator pages: SplQpQueryFlags reports QP_PRINT_SEPARATOR_PAGE, the
+//! spooler hands the queue's separator (made from its separator file)
+//! to SplQpPrintSeparator before SplQpPrint, and it goes to the printer
+//! as raw data right after DEVESC_STARTDOC, in the job's own document.
 
 #![no_std]
 #![no_main]
@@ -75,6 +80,8 @@ struct Proc {
     drivdata: Vec<u8>,
     raw: bool,
     hps: AtomicU32,
+    /// The separator page's data (SplQpPrintSeparator), sent first.
+    sep: Vec<u8>,
 }
 
 const MAX: usize = 16;
@@ -130,7 +137,7 @@ pub extern "C" fn SplQpOpen(n: i32, data: *const u32) -> u32 {
         let cb = unsafe { (dd as *const u32).read_unaligned() } as usize;
         if (40..=0x10000).contains(&cb) { unsafe { core::slice::from_raw_parts(dd, cb) }.to_vec() } else { Vec::new() }
     };
-    let p = Proc { strs: [s(0), s(1), datatype, s(4), s(5), s(6), s(7), s(8)], drivdata, raw, hps: AtomicU32::new(0) };
+    let p = Proc { strs: [s(0), s(1), datatype, s(4), s(5), s(6), s(7), s(8)], drivdata, raw, hps: AtomicU32::new(0), sep: Vec::new() };
     unsafe {
         let t = &mut *core::ptr::addr_of_mut!(PROCS);
         let Some(i) = t.iter().position(Option::is_none) else { return 0 };
@@ -161,7 +168,16 @@ fn start_doc(hdc: u32, p: &Proc) -> bool {
     let doc = &p.strs[7];
     let d = z(doc);
     let n = if doc.is_empty() { 0 } else { d.len() as i32 };
-    unsafe { DevEscape(hdc, DEVESC_STARTDOC, n, d.as_ptr(), core::ptr::null_mut(), core::ptr::null_mut()) != DEVESC_ERROR }
+    if unsafe { DevEscape(hdc, DEVESC_STARTDOC, n, d.as_ptr(), core::ptr::null_mut(), core::ptr::null_mut()) } == DEVESC_ERROR {
+        return false;
+    }
+    // The separator page first.
+    for chunk in p.sep.chunks(4096) {
+        if unsafe { DevEscape(hdc, DEVESC_RAWDATA, chunk.len() as i32, chunk.as_ptr(), core::ptr::null_mut(), core::ptr::null_mut()) } == DEVESC_ERROR {
+            return false;
+        }
+    }
+    true
 }
 
 fn end_doc(hdc: u32, aborted: bool) -> bool {
@@ -291,21 +307,29 @@ pub extern "C" fn SplQpQueryDt(pc: *mut i32, types: *mut *mut u8) -> u32 {
     1
 }
 
-/// SplQpQueryFlags(pulFlags): no flags (raw jobs go through PMPRINT).
+/// SplQpQueryFlags(pulFlags): QP_PRINT_SEPARATOR_PAGE (raw jobs go
+/// through PMPRINT too: no QP_RAWDATA_BYPASS).
 #[unsafe(no_mangle)]
 pub extern "C" fn SplQpQueryFlags(pfl: *mut u32) -> u32 {
     if pfl.is_null() {
         return 0;
     }
-    unsafe { pfl.write_unaligned(0) };
+    unsafe { pfl.write_unaligned(2) };
     1
 }
 
-/// SplQpPrintSeparator(hproc, pBuf, cbBuf, ulFlags): rs2 prints no
-/// separator pages.
+/// SplQpPrintSeparator(hproc, pBuf, cbBuf, ulFlags): the separator page
+/// printed at the start of the job (SplQpPrint).
 #[unsafe(no_mangle)]
-pub extern "C" fn SplQpPrintSeparator(h: u32, _buf: *const u8, _cb: u32, _fl: u32) -> u32 {
-    get(h).is_some() as u32
+pub extern "C" fn SplQpPrintSeparator(h: u32, buf: *const u8, cb: u32, _fl: u32) -> u32 {
+    let Some((i, _)) = get(h) else { return 0 };
+    let data = if buf.is_null() || cb == 0 { Vec::new() } else { unsafe { core::slice::from_raw_parts(buf, cb as usize) }.to_vec() };
+    unsafe {
+        if let Some(p) = (*core::ptr::addr_of_mut!(PROCS))[i].as_mut() {
+            p.sep = data;
+        }
+    }
+    1
 }
 
 fn read_file(path: &[u8]) -> Option<Vec<u8>> {

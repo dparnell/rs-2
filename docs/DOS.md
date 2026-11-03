@@ -198,6 +198,20 @@ Emulated in the machine, with the I/O ports programs touch directly:
   status register that programs find an AdLib by.
 - **MPU-401** in UART mode at 330h/331h, into rs2's General MIDI
   synthesizer (`crates/midi`).
+- **Printer ports**: LPT1 at 378h and LPT2 at 278h (listed in the BIOS
+  data area; data, status and control registers: a byte is printed when
+  the program raises STROBE), `INT 17h` (print, initialise, status:
+  always selected and ready), the DOS devices PRN/LPT1-LPT3 (with any
+  extension, so Win-OS/2's `LPT1.OS2` too), standard printer handle 4
+  and `INT 21h 05h`. All of it goes to the host (`Host::print`); the
+  end of a DOS program ends the job (`Host::print_end`). VDM.EXE opens
+  the OS/2 port (`DosOpen("LPT1")`), which the spooler turns into a
+  print job (docs/PRINTING.md, "Programs that print to a port"): a job
+  per DOS program (`PRINT_SEPARATE_OUTPUT`, on by default; off: the
+  programs' output runs together) and, for programs that stay (Win-OS/2,
+  TSRs), when the port has been idle for `PRINT_TIMEOUT` seconds (15 by
+  default, 0 never). dosrun writes the jobs to `--lpt FILE`'s FILE.1,
+  FILE.2...
 - Ports nobody emulates read 0xFF and ignore writes (logged once).
 
 ### Screen
@@ -374,8 +388,9 @@ environment, where `dos::Config::set` applies them:
 | DPMI_DOS_API | DISABLED refuses the translated DOS API to DPMI clients |
 | HW_NOSOUND | no sound (the devices still run) |
 | IDLE_SENSITIVITY | how soon a program polling the keyboard counts as idle |
+| PRINT_TIMEOUT, PRINT_SEPARATE_OUTPUT | when a print job ends: after that many idle seconds (15; 0 never), at each program's end (on) |
 
-The others (DOS_FILES, VIDEO_*, KBD_*, MEM_*_REGIONS, PRINT_TIMEOUT...)
+The others (DOS_FILES, VIDEO_*, KBD_*, MEM_*_REGIONS...)
 are kept and passed on but have no effect yet.
 
 ## COMMAND.COM
@@ -398,7 +413,8 @@ DOS, XMS, EMS, mouse, PC speaker, Sound Blaster 16 with an OPL3 FM
 synthesizer and an MPU-401), rs2's COMMAND.COM, the DPMI 0.9 host, DOS
 sessions full screen and windowed from CMD, DosStartSession and desktop
 objects, DOS settings (the WPProgram Session page's DOS properties
-dialog, RS2SHELL's DOS page).
+dialog, RS2SHELL's DOS page), printing (LPT1/LPT2, INT 17h, PRN) into
+the OS/2 spooler.
 
 Not yet: DPMI 1.0, paging and V86 mode in the CPU (a program that sets
 CR0.PG or uses VCPI gets no paging), task switches, direct disk access,
@@ -419,7 +435,9 @@ a current host), and DOS settings beyond those in the table above.
   client), VESA, VESAHI (16 and 32 bits per pixel), SBTEST (Sound
   Blaster 8-bit DMA and IRQ), SB16TEST (16-bit stereo auto-init DMA,
   the mixer), FMTEST (AdLib and OPL3 detection, two tones), BEEP, DOSSET
-  (DOS settings, with `--set`), COMMAND.COM; the sound of SBTEST,
+  (DOS settings, with `--set`), PRINT (the printer by handle 4, `LPT1`
+  as a file, INT 21h 05h, INT 17h and the 378h registers: one job with
+  all five lines, `dosrun --lpt`), COMMAND.COM; the sound of SBTEST,
   SB16TEST, FMTEST and BEEP is recorded (`dosrun --wav`, 16-bit stereo)
   and its tones checked with `tools/scripts/doswav.py`.
   `dosrun --keys`, `--png`, `--wav`, `--set NAME=VALUE`, `--trace` and `--stats` help with

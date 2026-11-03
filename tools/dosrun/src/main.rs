@@ -45,6 +45,10 @@ struct Run {
     display: (u32, u32),
     /// The mouse buttons held ({press} until {release}).
     held: u8,
+    /// `--lpt FILE`: printed jobs go to FILE.1, FILE.2...
+    lpt: Option<String>,
+    lpt_buf: Vec<u8>,
+    lpt_jobs: u32,
 }
 
 enum KeyItem {
@@ -379,6 +383,24 @@ impl Host for Run {
         self.pcm.1.extend_from_slice(data);
         self.pcm_end = now_secs(&self.start);
     }
+    fn print(&mut self, lpt: u8, data: &[u8]) {
+        if self.trace {
+            eprintln!("print LPT{}: {} bytes", lpt + 1, data.len());
+        }
+        self.lpt_buf.extend_from_slice(data);
+    }
+    fn print_end(&mut self) {
+        if self.lpt_buf.is_empty() {
+            return;
+        }
+        let data = std::mem::take(&mut self.lpt_buf);
+        if let Some(f) = &self.lpt {
+            self.lpt_jobs += 1;
+            let path = format!("{f}.{}", self.lpt_jobs);
+            eprintln!("dosrun: print job {} ({} bytes) -> {path}", self.lpt_jobs, data.len());
+            fs::write(path, data).unwrap();
+        }
+    }
     fn log(&mut self, msg: &str) {
         if self.trace || !msg.starts_with("cb ") {
             eprintln!("{msg}");
@@ -598,6 +620,7 @@ fn main() {
     let mut display = (800, 600);
     let mut disp_trace = false;
     let mut vwin_trace = false;
+    let mut lpt = None;
     let mut extra_env: Vec<String> = Vec::new();
     while let Some(a) = args.first().cloned() {
         if !a.starts_with("--") {
@@ -626,6 +649,7 @@ fn main() {
             "--vwin-trace" => vwin_trace = true,
             "--watch" => watch = u32::from_str_radix(val().trim_start_matches("0x"), 16).unwrap(),
             "--wav" => wav_out = Some(val()),
+            "--lpt" => lpt = Some(val()),
             // A DOS setting (DOS_RMSIZE=512) or environment variable.
             "--set" => {
                 let v = val();
@@ -670,6 +694,9 @@ fn main() {
         pcm_end: 0.0,
         display,
         held: 0,
+        lpt,
+        lpt_buf: Vec::new(),
+        lpt_jobs: 0,
     };
     let mut m = Machine::new(&mut host, cfg);
     m.disp.trace = disp_trace;
@@ -705,6 +732,7 @@ fn main() {
         }
     };
     m.present(&mut host);
+    m.print_end(&mut host);
     if stats {
         let secs = t0.elapsed().as_secs_f64();
         eprintln!("dosrun: {} instructions in {:.2} s: {:.1} MIPS", m.cpu.icount, secs, m.cpu.icount as f64 / secs / 1e6);

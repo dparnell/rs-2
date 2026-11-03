@@ -84,6 +84,12 @@ pub struct Config {
     /// DPMI_DOS_API: whether DPMI clients may ask for the translated DOS
     /// API (AUTO and ENABLED: yes; DISABLED: no).
     pub dpmi_dos_api: bool,
+    /// PRINT_TIMEOUT (0-3600 s, 0 never): a printer port idle that long
+    /// ends its print job (the host's business, Host::print).
+    pub print_timeout: u32,
+    /// PRINT_SEPARATE_OUTPUT: each DOS program's printing is a job of its
+    /// own (Host::print_end at its end).
+    pub print_separate: bool,
 }
 
 impl Config {
@@ -103,6 +109,8 @@ impl Config {
             "DPMI_MEMORY_LIMIT" => self.dpmi_kb = num().map_or(self.dpmi_kb, |m| m.min(512) * 1024),
             "DPMI_DOS_API" => self.dpmi_dos_api = !v.eq_ignore_ascii_case("DISABLED"),
             "HW_NOSOUND" => self.nosound = on,
+            "PRINT_TIMEOUT" => self.print_timeout = num().map_or(self.print_timeout, |t| t.min(3600)),
+            "PRINT_SEPARATE_OUTPUT" => self.print_separate = on,
             "IDLE_SENSITIVITY" => {
                 if let Some(s) = num() {
                     self.idle_polls = 200 * (101 - s.min(100)) / 26;
@@ -149,6 +157,8 @@ impl Default for Config {
             nosound: false,
             idle_polls: 200,
             dpmi_dos_api: true,
+            print_timeout: 15,
+            print_separate: true,
         }
     }
 }
@@ -347,6 +357,7 @@ impl Machine {
     pub fn run<H: Host>(&mut self, host: &mut H) -> u8 {
         loop {
             if let Some(c) = self.exited {
+                self.print_end(host);
                 return c;
             }
             if self.close_requested {
@@ -356,6 +367,23 @@ impl Machine {
         }
     }
 
+    /// Hand what the program wrote to the parallel ports' registers to
+    /// the host.
+    fn lpt_drain<H: Host>(&mut self, host: &mut H) {
+        for n in 0..2 {
+            if !self.hw.lpt[n].out.is_empty() {
+                let d = core::mem::take(&mut self.hw.lpt[n].out);
+                host.print(n as u8, &d);
+            }
+        }
+    }
+
+    /// The session ends: what was printed is a complete job.
+    pub fn print_end<H: Host>(&mut self, host: &mut H) {
+        self.lpt_drain(host);
+        host.print_end();
+    }
+
     /// One slice: some instructions and the device work between them.
     pub fn step<H: Host>(&mut self, host: &mut H) {
         self.tick(host);
@@ -363,6 +391,7 @@ impl Machine {
         self.devices();
         self.audio.spk_levels.extend(self.hw.spk_levels.drain(..));
         self.audio_tick(host);
+        self.lpt_drain(host);
         if self.hw.us_now >= self.last_present + 15_000 {
             self.last_present = self.hw.us_now;
             self.present(host);
@@ -532,7 +561,7 @@ impl Machine {
             0x15 => self.int15(host),
             0x16 => self.int16(),
             0x17 => {
-                self.cpu.set_ah(0x90);
+                self.int17(host);
                 Cb::Done
             }
             0x19 => {

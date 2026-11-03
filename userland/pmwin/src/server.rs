@@ -96,6 +96,8 @@ const WM_RS2_WINLIST: u32 = 0x0ff1;
 /// A journal playback hook was set or released (WinSetHook in any
 /// process).
 const WM_RS2_JOURNAL: u32 = 0x0ff2;
+/// The PrtSc key (from the input thread): print a window.
+const WM_RS2_PRINTSCREEN: u32 = 0x0ff3;
 const TID_CHECK: u32 = 0x7f01;
 
 const EXEC_BACKGROUND: u32 = 4;
@@ -602,6 +604,10 @@ extern "C" fn desktop_proc(h: u32, m: u32, mp1: u32, _mp2: u32) -> u32 {
             start_journal();
             0
         }
+        WM_RS2_PRINTSCREEN => {
+            crate::prtscr::start();
+            0
+        }
         _ => {
             let _ = h;
             0
@@ -631,6 +637,12 @@ const ID_LIST: u32 = 1;
 const ID_SWITCH: u32 = 2;
 const ID_END: u32 = 3;
 const ID_CANCEL: u32 = 4;
+
+/// PrtSc (from the input thread): the desktop window prints a window.
+pub fn print_screen() {
+    let q = st().server_queue;
+    post_queue(q, qmsg(HWND_DESKTOP, WM_RS2_PRINTSCREEN, 0, 0));
+}
 
 /// Ctrl+Esc (from the input thread): open the window list, or close it.
 pub fn window_list() {

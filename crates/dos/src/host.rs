@@ -150,6 +150,15 @@ pub trait Host {
     fn audio(&mut self, rate: u32, frames: &[i16]) {
         let _ = (rate, frames);
     }
+    /// Output to printer port `lpt` (0 = LPT1/PRN) from INT 17h, DOS
+    /// writes to PRN/LPTn, INT 21h 05h or the parallel port's registers.
+    /// The host gathers it into print jobs (OS/2: the spooler).
+    fn print(&mut self, lpt: u8, data: &[u8]) {
+        let _ = (lpt, data);
+    }
+    /// A DOS program ended (or the session): what it printed is a
+    /// complete job (OS/2's PRINT_SEPARATE_OUTPUT).
+    fn print_end(&mut self) {}
     /// A diagnostic message.
     fn log(&mut self, msg: &str) {
         let _ = msg;

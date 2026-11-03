@@ -537,6 +537,10 @@ pub enum Handle {
     Drive(Arc<Dasd>),
     /// A serial or printer port, the mouse.
     Char(CharDev),
+    /// A printer port whose output goes to the spooler (0-based LPT
+    /// number and the connection to the spooler's port pipe:
+    /// `crate::chardev::lpt_spool_open`).
+    Spool(u8, Arc<crate::npipe::End>),
 }
 
 impl Handle {

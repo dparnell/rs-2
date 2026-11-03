@@ -42,5 +42,11 @@ checksnd FMTEST.COM "FM OK" L:440:0.5 R:880:0.5
 checksnd BEEP.COM "beep done" B:440:0.5 B:880:0.5
 check DOSSET.COM "DOSSET RM=640 VER=20.45 BREAK=0" ""
 check DOSSET.COM "DOSSET RM=512 VER=5.0 BREAK=1 FREE=31877" "" --set DOS_RMSIZE=512 --set DOS_VERSION=DOSSET.COM,5,0,255 --set DOS_BREAK=1
+check PRINT.COM "PRINT OK" ""
+# What PRINT.COM prints by its five ways is one job.
+lpt=${TMPDIR:-/tmp}/rs2-dosprint.$$
+(cd "$here/bin" && "$dosrun" --timeout 30 --lpt "$lpt" PRINT.COM >/dev/null 2>&1)
+if [ "$(grep -c '^[1-5] ' "$lpt.1" 2>/dev/null)" = 5 ] && [ ! -e "$lpt.2" ]; then echo "PASS PRINT.COM job"; else echo "FAIL PRINT.COM job"; fail=$((fail + 1)); fi
+rm -f "$lpt".*
 check COMMAND.COM "rs2 DOS session, version" 'ver\nexit\n'
 exit $fail

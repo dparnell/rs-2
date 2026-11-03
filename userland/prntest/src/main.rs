@@ -400,6 +400,174 @@ fn raw_job() {
     check("the raw job reaches the FILE port unchanged", out == data);
 }
 
+/// The jobs in the test queue: (id, size, data type, document) by
+/// SplEnumJob level 3 (PRJINFO3, 68 bytes each).
+fn queue_jobs() -> Vec<(u32, u32, Vec<u8>, Vec<u8>)> {
+    let mut buf = vec![0u8; 8192];
+    let (mut ret, mut total, mut need) = (0, 0, 0);
+    if unsafe { SplEnumJob(null(), Q.as_ptr(), 3, buf.as_mut_ptr(), buf.len() as u32, &mut ret, &mut total, &mut need, 0) } != 0 {
+        return Vec::new();
+    }
+    (0..ret as usize).map(|i| {
+        let o = i * 68;
+        (rd16(&buf, o) as u32, rd32(&buf, o + 16), cstr(rd32(&buf, o + 32)), cstr(rd32(&buf, o + 24)))
+    }).collect()
+}
+
+/// Wait up to `secs` for the test queue to hold `n` jobs.
+fn wait_jobs(n: usize, secs: u32) -> Vec<(u32, u32, Vec<u8>, Vec<u8>)> {
+    for _ in 0..secs * 10 {
+        let j = queue_jobs();
+        if j.len() >= n {
+            return j;
+        }
+        unsafe { DosSleep(100) };
+    }
+    queue_jobs()
+}
+
+/// Point the test printer at `port` (its INI entry, as the printer
+/// object's Output port page does).
+fn set_printer_port(port: &[u8]) {
+    let v = [port, b";PSCRIPT.Generic PostScript Printer;PRNTESTQ;;45;\0"].concat();
+    unsafe { PrfWriteProfileString(0xffff_fffe, b"PM_SPOOLER_PRINTER\0".as_ptr(), PRN.as_ptr(), v.as_ptr()) };
+}
+
+/// Programs that write to a printer port themselves (DosOpen of LPT3,
+/// a DOS program in a DOS session) while the spooler runs: each open
+/// that writes is a PM_Q_RAW job on the queue of the port's printer.
+fn port_jobs() {
+    unsafe { SplHoldQueue(null(), Q.as_ptr()) };
+    set_printer_port(b"LPT3");
+    // Opened and closed without output: no job.
+    let (mut hf, mut act) = (0, 0);
+    let rc = unsafe { DosOpen(b"LPT3\0".as_ptr(), &mut hf, &mut act, 0, 0, OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_WRITEONLY | OPEN_SHARE_DENYNONE, null_mut()) };
+    check("DosOpen LPT3", rc == 0);
+    unsafe { DosClose(hf) };
+    let data = b"LPT3 line one\r\nLPT3 line two\r\n\x0c";
+    let rc = unsafe { DosOpen(b"LPT3\0".as_ptr(), &mut hf, &mut act, 0, 0, OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_WRITEONLY | OPEN_SHARE_DENYNONE, null_mut()) };
+    let mut w = 0;
+    let ok = rc == 0 && unsafe { DosWrite(hf, data.as_ptr(), 15, &mut w) } == 0 && unsafe { DosWrite(hf, data[15..].as_ptr(), data.len() as u32 - 15, &mut w) } == 0;
+    // The port's status: a spooled port is always ready.
+    let mut st = [0u8; 1];
+    let (mut pl, mut dl) = (0u32, 1u32);
+    let rc = unsafe { DosDevIOCtl(hf, 5, 0x66, null_mut(), 0, &mut pl, st.as_mut_ptr(), 1, &mut dl) };
+    check("PRT_GETPRINTERSTATUS on a spooled port: selected, not busy", rc == 0 && st[0] == 0x90);
+    unsafe { DosClose(hf) };
+    let jobs = wait_jobs(1, 5);
+    unsafe { DosSleep(500) };
+    let jobs2 = queue_jobs();
+    check("DosOpen/DosWrite/DosClose of LPT3: one job, nothing for the open without output", ok && jobs.len() == 1 && jobs2.len() == 1);
+    let lpt_job = jobs.first().cloned().unwrap_or_default();
+    check("the port's job: PM_Q_RAW, the bytes written, the program's name", lpt_job.1 == data.len() as u32 && lpt_job.2 == b"PM_Q_RAW" && has(&lpt_job.3, b"PRNTEST"));
+    // A DOS program prints five ways (tests/dos/print.S) to LPT1: one
+    // job when it ends (tests/dos/build.sh puts it in C:\DOS).
+    if read_file(b"C:\\DOS\\PRINT.COM").is_none() {
+        println!("SKIP a DOS session's printing: no C:\\DOS\\PRINT.COM (tests/dos/build.sh)");
+        set_printer_port(&PORT[..PORT.len() - 1]);
+        unsafe { SplReleaseQueue(null(), Q.as_ptr()) };
+        check("the port's job prints", wait_printed(lpt_job.0, 30));
+        return;
+    }
+    set_printer_port(b"LPT1");
+    let sd = StartData {
+        length: core::mem::size_of::<StartData>() as u16,
+        related: 0,
+        fgbg: 1,
+        trace: 0,
+        title: b"DOS print test\0".as_ptr(),
+        name: b"C:\\DOS\\PRINT.COM\0".as_ptr(),
+        inputs: null(),
+        termq: null(),
+        env: null(),
+        inherit: 0,
+        session_type: 4,
+    };
+    let (mut sid, mut pid) = (0, 0);
+    let rc = unsafe { DosStartSession(&sd, &mut sid, &mut pid) };
+    check("DosStartSession of a DOS program (PRINT.COM)", rc == 0);
+    let jobs = wait_jobs(2, 30);
+    let dos = jobs.iter().find(|j| j.0 != lpt_job.0).cloned().unwrap_or_default();
+    println!("prntest: DOS job {} bytes {} type {} document {}", dos.0, dos.1, core::str::from_utf8(&dos.2).unwrap_or("?"), core::str::from_utf8(&dos.3).unwrap_or("?"));
+    check("the DOS session's output is one PM_Q_RAW job named after the session", jobs.len() == 2 && dos.1 == 63 && dos.2 == b"PM_Q_RAW" && dos.3 == b"DOS print test");
+    // Printed to the file port: the bytes unchanged.
+    set_printer_port(&PORT[..PORT.len() - 1]);
+    unsafe { SplDeleteJob(null(), Q.as_ptr(), dos.0) };
+    delete(OUT);
+    unsafe { SplReleaseQueue(null(), Q.as_ptr()) };
+    check("the port's job prints", wait_printed(lpt_job.0, 30));
+    let out = wait_output(10).unwrap_or_default();
+    check("the port's job reaches the printer unchanged", out == data);
+}
+
+/// A raw job of `data` on the test queue: its id.
+fn raw_job_of(doc: &[u8], data: &[u8]) -> u32 {
+    let h = qm_open(b"PM_Q_RAW");
+    let d = [doc, b"\0"].concat();
+    unsafe {
+        SplQmStartDoc(h, d.as_ptr());
+        SplQmWrite(h, data.len() as i32, data.as_ptr());
+    }
+    let id = unsafe { SplQmEndDoc(h) };
+    unsafe { SplQmClose(h) };
+    id
+}
+
+fn write_file(path: &[u8], data: &[u8]) {
+    let p = [path, b"\0"].concat();
+    let (mut hf, mut act) = (0, 0);
+    if unsafe { DosOpen(p.as_ptr(), &mut hf, &mut act, 0, 0, OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_WRITEONLY | OPEN_SHARE_DENYNONE, null_mut()) } == 0 {
+        let mut w = 0;
+        unsafe {
+            DosWrite(hf, data.as_ptr(), data.len() as u32, &mut w);
+            DosClose(hf);
+        }
+    }
+}
+
+/// The queue's separator file is printed before each job; a queue
+/// prints only inside its start and stop times.
+fn separators_and_times() {
+    // A separator file in LAN Manager's format (as OS/2's SAMPLE.SEP).
+    write_file(b"C:\\PRNTEST.SEP", b"@\r\n@L*** @N@L, job @I@L (@J@L) on @Q@L ***\r\n@W10\r\n@L0123456789ABCDEF@0@H41@1\r\n@E\r\n");
+    let sep = b"C:\\PRNTEST.SEP\0";
+    check("SplSetQueue separator file", unsafe { SplSetQueue(null(), Q.as_ptr(), 3, sep.as_ptr(), sep.len() as u32, 5) } == 0);
+    let mut buf = vec![0u8; 2048];
+    let mut need = 0;
+    unsafe { SplQueryQueue(null(), Q.as_ptr(), 3, buf.as_mut_ptr(), buf.len() as u32, &mut need) };
+    check("SplQueryQueue level 3: the separator file", cstr(rd32(&buf, 12)) == b"C:\\PRNTEST.SEP");
+    delete(OUT);
+    let data = b"after the separator\r\n";
+    let id = raw_job_of(b"sepdoc", data);
+    check("a job on a queue with a separator file prints", wait_printed(id, 30));
+    let out = wait_output(10).unwrap_or_default();
+    let want = alloc::format!("*** LOCAL, job {id} (sepdoc) on PRNTESTQ ***\r\n0123456789\r\nA\r\n\r\n\x0cafter the separator\r\n");
+    check("the separator (owner, job id, document, queue, width, hex, new lines, eject), then the job", out == want.as_bytes());
+    if out != want.as_bytes() {
+        println!("prntest: separator output {:?}", core::str::from_utf8(&out).unwrap_or("?"));
+    }
+    unsafe { SplSetQueue(null(), Q.as_ptr(), 3, b"\0".as_ptr(), 1, 5) };
+    // Print times: a window that starts two hours from now.
+    let mut dt = DateTime::default();
+    unsafe { DosGetDateTime(&mut dt) };
+    let now = dt.hours as u16 * 60 + dt.minutes as u16;
+    let (start, until) = ((now + 120) % 1440, (now + 180) % 1440);
+    let ok = unsafe { SplSetQueue(null(), Q.as_ptr(), 3, start.to_le_bytes().as_ptr(), 2, 3) } == 0 && unsafe { SplSetQueue(null(), Q.as_ptr(), 3, until.to_le_bytes().as_ptr(), 2, 4) } == 0;
+    unsafe { SplQueryQueue(null(), Q.as_ptr(), 3, buf.as_mut_ptr(), buf.len() as u32, &mut need) };
+    check("SplSetQueue start and stop times", ok && rd16(&buf, 6) == start && rd16(&buf, 8) == until);
+    delete(OUT);
+    let id = raw_job_of(b"later", b"printed in its time\r\n");
+    unsafe { DosSleep(4000) };
+    let mut b = [0u8; 64];
+    check("outside its print times the queue keeps the job", unsafe { SplQueryJob(null(), Q.as_ptr(), id, 0, b.as_mut_ptr(), b.len() as u32, &mut need) } == 0 && read_file(OUT).is_none());
+    // The window opened (start = stop: always).
+    unsafe {
+        SplSetQueue(null(), Q.as_ptr(), 3, 0u16.to_le_bytes().as_ptr(), 2, 3);
+        SplSetQueue(null(), Q.as_ptr(), 3, 0u16.to_le_bytes().as_ptr(), 2, 4);
+    }
+    check("inside its print times the job prints", wait_printed(id, 30) && wait_output(10).unwrap_or_default() == b"printed in its time\r\n");
+}
+
 /// DEVOPENSTRUC for the test queue.
 fn dop(datatype: &'static [u8]) -> [u32; 9] {
     [Q.as_ptr() as u32, b"PSCRIPT\0".as_ptr() as u32, 0, datatype.as_ptr() as u32, b"prntest\0".as_ptr() as u32, 0, 0, 0, 0]
@@ -707,6 +875,8 @@ fn main(s: &Startup) -> u32 {
     setup();
     spooler_calls();
     raw_job();
+    port_jobs();
+    separators_and_times();
     queued_std();
     queued_raw();
     direct();

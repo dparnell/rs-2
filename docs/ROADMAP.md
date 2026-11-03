@@ -407,7 +407,8 @@ Status markers: done, in progress, planned.
 - done: DDEML monitors (APPCLASS_MONITOR, every MF_* kind, across
   processes); IPF metafile artwork (`:artwork.` of .MET files in the
   compiler, played by HELPMGR)
-- planned: the Print Screen key; the window manager acting on the Input
+- done: the Print Screen key (docs/PRINTING.md)
+- planned: the window manager acting on the Input
   page's settings (full window drag, asynchronous focus change)
 - done: display driver model (GRADD-style) on the framebuffer, mouse
   pointer; PMWIN (windows, messages, controls, dialogs), PMGPI
@@ -522,9 +523,19 @@ Status markers: done, in progress, planned.
   a parallel port), LPR and IPP; Workplace Shell printer objects (job
   view, settings, new printers, printing files); Print in E, the help
   manager; IBM's Picture Viewer prints; PRNTEST
-- planned: DOS and Win-OS/2 printing through LPT into the spooler,
-  EPM's formatted printing (its print loop waits), separator pages,
-  remote queues, compressed images (Flate), other printer languages
+- done: EPM's formatted printing (frames pass WM_ACTIVATE to their
+  client, GpiQueryCharBox in world units)
+- done (second round): programs that print to a port (DosOpen of
+  LPTn/PRN) and DOS sessions (INT 17h, the parallel port registers,
+  PRN, PRINT_TIMEOUT and PRINT_SEPARATE_OUTPUT) print into the spooler;
+  Win-OS/2's printer drivers through LPT1 (checked in dosrun); separator
+  pages (LAN Manager's .SEP format, rs2's SAMPLE.SEP and PSCRIPT.SEP),
+  queue start/stop times and priorities; the printer objects' View and
+  Print options pages, the job details view, moving jobs between
+  printers; the Print Screen key; Flate-compressed images
+- planned: remote (LAN Server) queues, other printer languages (PCL),
+  Win-OS/2 printing checked in a QEMU session, block characters in
+  separator pages
 
 ## DOS sessions (done: first version)
 

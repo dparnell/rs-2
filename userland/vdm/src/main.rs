@@ -115,6 +115,14 @@ struct Os2Host {
     place: Option<(u16, i16, i16)>,
     /// A command line arriving in REQ_RUN_TEXT pieces.
     run_text: Vec<u8>,
+    /// The printer ports' handles (`DosOpen("LPTn")`: the spooler makes
+    /// a job of each open) and when each was last written (µs).
+    lpt: [(u32, u64); 3],
+    /// PRINT_TIMEOUT in µs (0: never): a port idle that long closes its
+    /// job.
+    print_timeout: u64,
+    /// PRINT_SEPARATE_OUTPUT: each DOS program's output is its own job.
+    print_separate: bool,
     /// WINOS2_SCREEN=WxH: the size of a windowed Win-OS/2 desktop.
     display: Option<(u32, u32)>,
 }
@@ -608,7 +616,32 @@ impl Host for Os2Host {
         unsafe { DosTmrQueryTime(&mut t) };
         (t as u128 * 1_000_000 / self.tmr_freq.max(1) as u128) as u64
     }
+    fn print(&mut self, lpt: u8, data: &[u8]) {
+        let n = (lpt as usize).min(2);
+        let now = self.micros();
+        if self.lpt[n].0 == 0 {
+            let name = alloc::format!("LPT{}\0", n + 1);
+            let (mut h, mut action) = (0, 0);
+            let m = OPEN_ACCESS_WRITEONLY | OPEN_SHARE_DENYNONE | OPEN_FLAGS_NOINHERIT;
+            if unsafe { DosOpen(name.as_ptr(), &mut h, &mut action, 0, 0, OPEN_ACTION_OPEN_IF_EXISTS, m, core::ptr::null_mut()) } != 0 {
+                return;
+            }
+            self.lpt[n].0 = h;
+        }
+        self.lpt[n].1 = now;
+        let mut w = 0;
+        unsafe { DosWrite(self.lpt[n].0, data.as_ptr(), data.len() as u32, &mut w) };
+    }
+    fn print_end(&mut self) {
+        if self.print_separate {
+            self.close_printers(None);
+        }
+    }
     fn poll(&mut self, out: &mut Vec<Event>) {
+        if self.print_timeout != 0 && self.lpt.iter().any(|l| l.0 != 0) {
+            let now = self.micros();
+            self.close_printers(Some(now));
+        }
         if self.pending.is_empty() {
             self.read_input(0);
         }
@@ -683,6 +716,19 @@ impl Host for Os2Host {
         let mut f = vec![0u8; 256 * height as usize];
         let rc = unsafe { Rs2VioQueryFont(0, height as u32, f.as_mut_ptr(), f.len() as u32) };
         (rc == 0).then_some(f)
+    }
+}
+
+impl Os2Host {
+    /// Close the printer ports (ending their jobs): all, or those idle
+    /// for PRINT_TIMEOUT at `now`.
+    fn close_printers(&mut self, now: Option<u64>) {
+        for l in self.lpt.iter_mut() {
+            if l.0 != 0 && now.is_none_or(|t| t.saturating_sub(l.1) >= self.print_timeout) {
+                unsafe { DosClose(l.0) };
+                l.0 = 0;
+            }
+        }
     }
 }
 
@@ -766,7 +812,7 @@ fn main(s: &os2::Startup) -> u32 {
     unsafe { DosTmrQueryFreq(&mut freq) };
     let (mut cur, mut drives) = (0, 0);
     unsafe { DosQueryCurrentDisk(&mut cur, &mut drives) };
-    let mut host = Os2Host { audio: 0, audio_written: 0, pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display, seamless: cfg.seamless, place: None, run_text: Vec::new() };
+    let mut host = Os2Host { audio: 0, audio_written: 0, pending: VecDeque::new(), tmr_freq: freq as u64, last_text: None, last_pix: None, pix: Vec::new(), drives, surf: None, surf_size: (0, 0), surf_pal: false, surf_ptr_gen: 0, fs_ptr: None, display, seamless: cfg.seamless, place: None, run_text: Vec::new(), lpt: [(0, 0); 3], print_timeout: cfg.print_timeout as u64 * 1_000_000, print_separate: cfg.print_separate };
     let mut m = Machine::new(&mut host, cfg);
     if cur >= 1 && cur <= 26 {
         m.dos.drive = (cur - 1) as u8;

@@ -684,14 +684,15 @@ impl Sink for PsWriter {
         let _ = write!(s, "gs {} {} translate {} {} scale\n", dst.left, dst.bottom, dst.right - dst.left, dst.top - dst.bottom);
         match key {
             None => {
-                let _ = write!(s, "{w} {h} 8 [{w} 0 0 {h} 0 0] currentfile /ASCII85Decode filter /RunLengthDecode filter false 3 colorimage\n");
+                let _ = write!(s, "{w} {h} 8 [{w} 0 0 {h} 0 0] currentfile /ASCII85Decode filter /FlateDecode filter false 3 colorimage\n");
             }
             Some(k) => {
-                self.level3 = true;
-                let _ = write!(s, "/DeviceRGB setcolorspace << /ImageType 4 /Width {w} /Height {h} /BitsPerComponent 8 /Decode [0 1 0 1 0 1] /ImageMatrix [{w} 0 0 {h} 0 0] /MaskColor [{} {} {}] /DataSource currentfile /ASCII85Decode filter /RunLengthDecode filter >> image\n", k >> 16, (k >> 8) & 0xff, k & 0xff);
+                let _ = write!(s, "/DeviceRGB setcolorspace << /ImageType 4 /Width {w} /Height {h} /BitsPerComponent 8 /Decode [0 1 0 1 0 1] /ImageMatrix [{w} 0 0 {h} 0 0] /MaskColor [{} {} {}] /DataSource currentfile /ASCII85Decode filter /FlateDecode filter >> image\n", k >> 16, (k >> 8) & 0xff, k & 0xff);
             }
         }
-        ascii85(&run_length(&data), &mut s);
+        // FlateDecode (LanguageLevel 3, as masked images are).
+        self.level3 = true;
+        ascii85(&crate::deflate::zlib(&data), &mut s);
         s.push_str("gr\n");
         self.out.push_str(&s);
         self.forget_color_only();
@@ -833,7 +834,7 @@ mod tests {
         w.image(&page, Rect::new(0, 0, 20, 20), 2, 2, &[Some(0), Some(0xffffff), Some(0xffffff), Some(0)]);
         w.image(&page, Rect::new(0, 0, 20, 20), 2, 1, &[Some(0xff), None]);
         let t = text(&mut w);
-        assert!(t.contains("2 2 8 [2 0 0 2 0 0] currentfile /ASCII85Decode filter /RunLengthDecode filter false 3 colorimage"));
+        assert!(t.contains("2 2 8 [2 0 0 2 0 0] currentfile /ASCII85Decode filter /FlateDecode filter false 3 colorimage"));
         assert!(t.contains("/ImageType 4"));
         assert!(w.uses_level3());
     }

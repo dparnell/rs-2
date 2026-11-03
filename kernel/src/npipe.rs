@@ -85,6 +85,8 @@ struct Inner {
 
 pub struct Instance {
     pub name: String,
+    /// The process that created it (the server).
+    pub owner: u32,
     open_mode: u32,
     pipe_mode: u32,
     pub out_size: usize,
@@ -154,8 +156,10 @@ pub fn create(name: String, open_mode: u32, pipe_mode: u32, out_size: u32, in_si
         d.retain(|(n, _)| *n != name);
         d.push((name.clone(), if wait_ms == 0 { 50 } else { wait_ms }));
     }
+    let owner = crate::task::sched::current_opt().and_then(|t| t.process()).map_or(0, |p| p.pid);
     let inst = Arc::new(Instance {
         name,
+        owner,
         open_mode,
         pipe_mode,
         out_size: (out_size as usize).max(1),
@@ -196,6 +200,11 @@ pub fn open(name: &str) -> Result<Arc<End>, u32> {
         return Ok(Arc::new(End { inst, server: false, generation, mode: AtomicU32::new(0) }));
     }
     Err(ERROR_PIPE_BUSY)
+}
+
+/// Whether process `pid` serves pipe `name` (created an instance of it).
+pub fn served_by(name: &str, pid: u32) -> bool {
+    PIPES.lock().iter().any(|i| i.name == name && i.owner == pid)
 }
 
 /// DosWaitNPipe: wait until an instance of `name` is listening.

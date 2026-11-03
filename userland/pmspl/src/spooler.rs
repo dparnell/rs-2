@@ -4,8 +4,13 @@
 //! one of the queue's printers is free.
 //!
 //! A printer prints one job at a time; the next job of a printer is the
-//! first ready job (not held, not spooling) of the first of its queues
-//! that is not held, in queue order (priority, then submission). The
+//! first ready job (not held, not spooling) of its queues that are not
+//! held and are inside their print times (PRQINFO3 uStartTime/uUntilTime,
+//! minutes after midnight; equal times: always), the queue of the
+//! highest priority first (1 highest, 9 lowest, as LAN Manager's), then
+//! in queue order (job priority, then submission). A queue with a
+//! separator file has a separator printed before each job
+//! (`crate::sep`, through the queue processor's SplQpPrintSeparator). The
 //! queue processor (PM_SPOOLER_QP: PMPRINT.QPR) gets the job as IBM's
 //! spooler hands it over: SplQpOpen with the twelve QPOPENDATA items
 //! (the printer's name as the logical address, the job's driver, job
@@ -25,6 +30,32 @@ static mut HEV: u32 = 0;
 type QpOpen = unsafe extern "C" fn(i32, *const u32) -> u32;
 type QpPrint = unsafe extern "C" fn(u32, *const u8) -> u32;
 type QpClose = unsafe extern "C" fn(u32) -> u32;
+type QpQueryFlags = unsafe extern "C" fn(*mut u32) -> u32;
+type QpPrintSeparator = unsafe extern "C" fn(u32, *const u8, u32, u32) -> u32;
+
+/// QP_PRINT_SEPARATOR_PAGE: the queue processor prints separators.
+const QP_PRINT_SEPARATOR_PAGE: u32 = 2;
+
+/// Minutes after midnight now (local time).
+fn minutes_now() -> u16 {
+    let mut dt = os2::DateTime::default();
+    unsafe { os2::DosGetDateTime(&mut dt) };
+    dt.hours as u16 * 60 + dt.minutes as u16
+}
+
+/// Whether a queue may print at `now`: always when its start and stop
+/// times are equal, else from start up to (not including) stop, through
+/// midnight when stop is earlier.
+pub fn in_print_time(q: &Queue, now: u16) -> bool {
+    let (s, u) = (q.start % 1440, q.until % 1440);
+    if s == u {
+        true
+    } else if s < u {
+        now >= s && now < u
+    } else {
+        now >= s || now < u
+    }
+}
 
 /// SPL32QMINITIALIZE(pulReserved): start the spooler in this process. 0
 /// when it runs; non-zero if a spooler is already running.
@@ -43,6 +74,7 @@ pub extern "C" fn SplQmInitialize(_r: *mut u32) -> u32 {
     if rc != 0 {
         return rc;
     }
+    crate::lptpipe::start();
     0
 }
 
@@ -78,15 +110,15 @@ extern "C" fn spooler_thread(_: u32) {
 /// The next job to print and its printer, marked as printing.
 fn next() -> Option<(Job, Printer)> {
     let all = jobs::all_jobs();
+    let now = minutes_now();
     for p in ini::printers() {
         if p.held || p.port.is_empty() || all.iter().any(|j| j.qstatus() == PRJ_QS_PRINTING && eq(&j.printer, &p.name)) {
             continue;
         }
-        for qn in &p.queues {
-            let Some(q) = Queue::load(qn) else { continue };
-            if q.held {
-                continue;
-            }
+        let mut queues: Vec<Queue> = p.queues.iter().filter_map(|qn| Queue::load(qn)).filter(|q| !q.held && in_print_time(q, now)).collect();
+        // Stable: equal priorities keep the printer's order.
+        queues.sort_by_key(|q| q.priority.clamp(1, 9));
+        for q in queues {
             let ready = jobs::queue_jobs(&q.name).into_iter().find(|j| j.qstatus() == PRJ_QS_QUEUED && !j.held && j.status & (PRJ_DELETED | PRJ_ERROR) == 0);
             if let Some(mut j) = ready {
                 j.status = (j.status & !3) | PRJ_QS_PRINTING;
@@ -125,6 +157,23 @@ fn run_qproc(j: &Job, p: &Printer) -> bool {
         return false;
     }
     let (open, prt, close): (QpOpen, QpPrint, QpClose) = unsafe { (core::mem::transmute(fo), core::mem::transmute(fp), core::mem::transmute(fc)) };
+    // The queue's separator, if the queue processor prints them.
+    let mut separator = Vec::new();
+    let (fq, fs) = (proc_addr(hmod, b"SplQpQueryFlags", 0), proc_addr(hmod, b"SplQpPrintSeparator", 0));
+    if fq != 0 && fs != 0 {
+        let mut fl = 0u32;
+        let query: QpQueryFlags = unsafe { core::mem::transmute(fq) };
+        if unsafe { query(&mut fl) } != 0 && fl & QP_PRINT_SEPARATOR_PAGE != 0 {
+            let file = jobs::locked(|| Queue::load(&j.queue).map(|q| q.sepfile)).unwrap_or_default();
+            if !file.is_empty() {
+                if let Some(d) = crate::util::read_file(&file) {
+                    let sj = crate::sep::SepJob { user: &j.user, id: j.id, document: &j.document, queue: &j.queue };
+                    separator = crate::sep::render(&d, &sj);
+                }
+            }
+        }
+    }
+    let print_sep: Option<QpPrintSeparator> = (fs != 0).then(|| unsafe { core::mem::transmute(fs) });
     let strs: Vec<Vec<u8>> = [&p.name, &j.driver, &Vec::new(), &j.datatype, &j.comment, &j.qproc_params, &j.spl_params, &j.net_params, &j.document, &j.queue, &j.token].iter().map(|s| z(s)).collect();
     let mut data: [u32; 12] = [0; 12];
     for (i, s) in strs.iter().enumerate() {
@@ -138,6 +187,9 @@ fn run_qproc(j: &Job, p: &Printer) -> bool {
         if h == 0 {
             false
         } else {
+            if let (Some(ps), false) = (print_sep, separator.is_empty()) {
+                ps(h, separator.as_ptr(), separator.len() as u32, 0);
+            }
             let r = prt(h, spl.as_ptr()) != 0;
             close(h);
             r
