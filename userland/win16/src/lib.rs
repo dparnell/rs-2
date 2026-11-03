@@ -269,6 +269,12 @@ entries! {
     k_loadmodule = 1045, 8;
     k_freemodule = 1046, 2;
     k_getmodulehandle = 1047, 4;
+    // KERNEL.77-80: Windows 2.x's AnsiNext, AnsiPrev, AnsiUpper, AnsiLower
+    // (Windows 3.x keeps them as Reserved1-4; USER has them now).
+    k_ansinext2 = 1077, 4;
+    k_ansiprev2 = 1078, 8;
+    k_ansiupper2 = 1079, 4;
+    k_ansilower2 = 1080, 4;
     k_getmoduleusage = 1048, 2;
     k_getmodulefilename = 1049, 8;
     k_getprocaddress = 1050, 6;

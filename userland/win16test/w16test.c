@@ -2768,6 +2768,17 @@ static void mdi2_tests(HINSTANCE hInst)
     act = SendMessage(mdi2_client, WM_MDIGETACTIVE, 0, 0);
     check(!IsWindow(c1) && LOWORD(act) != 0 && HIWORD(act) == 1 && GetMenuItemCount(bar) == 4, "MDI: when the maximized child goes, the next one is maximized");
     DestroyWindow(frame);
+
+    /* Windows 2.x's ChangeMenu (ProShape builds its menus with it). */
+    bar = CreatePopupMenu();
+    ChangeMenu(bar, 0, "One", 1, MF_APPEND);
+    ChangeMenu(bar, 0, "Two", 2, MF_APPEND);
+    ChangeMenu(bar, 2, "Zero", 3, MF_INSERT);
+    check(GetMenuItemCount(bar) == 3 && GetMenuItemID(bar, 1) == 3, "ChangeMenu MF_APPEND, MF_INSERT");
+    ChangeMenu(bar, 3, "Three", 4, MF_CHANGE);
+    ChangeMenu(bar, 0, NULL, 0, MF_DELETE | MF_BYPOSITION);
+    check(GetMenuItemCount(bar) == 2 && GetMenuItemID(bar, 0) == 4, "ChangeMenu MF_CHANGE, MF_DELETE");
+    DestroyMenu(bar);
 }
 
 /* A memory DC with a 24-bit bitmap of w x h, filled white. */
