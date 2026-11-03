@@ -305,6 +305,7 @@ pub fn handler(module: u8, ordinal: u16) -> Option<Handler> {
         (8, 219) => super::sockets::query_sockets,
         (8, 220) => super::sockets::take,
         (8, 221) => super::sockets::release,
+        (8, 240) => super::sockets::net_control,
         (8, 300) => super::audio::query,
         (8, 301) => super::audio::open,
         (8, 302) => super::audio::write,

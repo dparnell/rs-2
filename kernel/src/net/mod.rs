@@ -6,21 +6,25 @@
 //! lock, with the loopback interface as interface 0 and the NICs as
 //! interfaces 1.. in registration order.
 //!
-//! Nothing interrupts yet (no MSI/MSI-X, no INTx routing): the timer tick
-//! asks every NIC whether frames are waiting ([`Nic::rx_pending`], which
-//! only uses `try_lock`) and wakes the network thread, which takes the
-//! frames into the stack, runs its timers (at least every [`POLL_MS`]),
+//! NICs with interrupts (MSI, MSI-X or INTx routed through ACPI _PRT)
+//! call [`kick`] from their handler; the others are asked by the timer
+//! tick whether frames are waiting ([`Nic::rx_pending`], which only uses
+//! `try_lock`). Either wakes the network thread, which takes the frames
+//! into the stack, runs its timers (at least every [`POLL_MS`]),
 //! transmits what the stack produced and wakes the threads waiting on
-//! sockets. An interrupt handler would do exactly what the tick does.
-//! Socket calls run the stack in the calling thread ([`with_stack`]),
-//! transmitting at once.
+//! sockets. Socket calls run the stack in the calling thread
+//! ([`with_stack`]), transmitting at once.
 //!
-//! Waiting: every state change bumps [`EVENTS`] and wakes [`WAIT`]; a
-//! blocked socket call re-checks its condition then (one queue for all
-//! sockets keeps select() simple; per-socket queues can come later).
+//! Waiting: a blocked socket call (or select) registers a [`Waiter`] on
+//! the stack sockets it waits for ([`subscribe`]); the stack reports
+//! which sockets changed and only their waiters are woken. Changes that
+//! are not a socket's (DNS answers, interface configuration) wake every
+//! waiter. [`EVENTS`]/[`WAIT`] still see every change, for code that
+//! waits on the stack as a whole.
 
 pub mod socket;
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
@@ -62,8 +66,93 @@ static NICS: SpinLock<Vec<Arc<dyn Nic>>> = SpinLock::new(Vec::new());
 static STACK: Mutex<Option<Stack>> = Mutex::new(None);
 /// Bumped on every change socket waiters may care about.
 pub static EVENTS: AtomicU64 = AtomicU64::new(0);
-/// Threads waiting on sockets (and for DNS answers).
+/// Woken on every change (for code that waits on the stack as a whole).
 pub static WAIT: WaitQueue = WaitQueue::new();
+
+/// A blocked call: woken when one of the sockets it subscribed to
+/// changes (or anything global does).
+pub struct Waiter {
+    fired: AtomicBool,
+    queue: WaitQueue,
+}
+
+impl Waiter {
+    pub fn new() -> Arc<Waiter> {
+        Arc::new(Waiter { fired: AtomicBool::new(false), queue: WaitQueue::new() })
+    }
+
+    /// Forget earlier events: call before checking the condition.
+    pub fn arm(&self) {
+        self.fired.store(false, Ordering::Release);
+    }
+
+    fn fire(&self) {
+        self.fired.store(true, Ordering::Release);
+        self.queue.wake_all();
+    }
+
+    /// Sleep until an event since [`Waiter::arm`] or the deadline (ticks);
+    /// false on timeout, kill or signal.
+    pub fn wait(&self, deadline: Option<u64>) -> bool {
+        self.queue.wait_until(deadline, || self.fired.load(Ordering::Acquire))
+    }
+}
+
+/// Waiters by stack socket id; [`ANY`] for waiters of global events only.
+static WAITERS: SpinLock<BTreeMap<usize, Vec<Arc<Waiter>>>> = SpinLock::new(BTreeMap::new());
+/// The key of waiters that only want global events (name lookups).
+pub const ANY: usize = usize::MAX;
+
+/// Register `w` for changes of the stack sockets `ids`.
+pub fn subscribe(ids: &[usize], w: &Arc<Waiter>) {
+    let mut g = WAITERS.lock();
+    for &id in ids {
+        g.entry(id).or_default().push(w.clone());
+    }
+}
+
+pub fn unsubscribe(ids: &[usize], w: &Arc<Waiter>) {
+    let mut g = WAITERS.lock();
+    for &id in ids {
+        if let Some(v) = g.get_mut(&id) {
+            v.retain(|x| !Arc::ptr_eq(x, w));
+            if v.is_empty() {
+                g.remove(&id);
+            }
+        }
+    }
+}
+
+/// Wake the waiters of socket `id` (so_cancel, close).
+pub fn wake_socket(id: usize) {
+    let ws: Vec<Arc<Waiter>> = WAITERS.lock().get(&id).cloned().unwrap_or_default();
+    for w in ws {
+        w.fire();
+    }
+    EVENTS.fetch_add(1, Ordering::Release);
+    WAIT.wake_all();
+}
+
+/// Deliver the stack's events: every waiter for a global change, else
+/// the changed sockets' waiters.
+fn deliver(global: bool, ids: &[usize]) {
+    if !global && ids.is_empty() {
+        return;
+    }
+    let ws: Vec<Arc<Waiter>> = {
+        let g = WAITERS.lock();
+        if global {
+            g.values().flatten().cloned().collect()
+        } else {
+            ids.iter().filter_map(|id| g.get(id)).flatten().cloned().collect()
+        }
+    };
+    for w in ws {
+        w.fire();
+    }
+    EVENTS.fetch_add(1, Ordering::Release);
+    WAIT.wake_all();
+}
 /// Frames arrived (set by the tick, cleared by the network thread).
 static KICK: AtomicBool = AtomicBool::new(false);
 static THREAD_WAIT: WaitQueue = WaitQueue::new();
@@ -214,18 +303,16 @@ fn thread_main() {
 /// Transmit the stack's frames, print its messages, wake socket waiters.
 fn flush_and_log() {
     let nics = NICS.lock().clone();
-    let (log, changed) = {
+    let (log, (global, ids)) = {
         let mut g = STACK.lock();
         let Some(st) = g.as_mut() else { return };
         transmit(st, &nics);
-        (st.take_log(), st.take_changed())
+        (st.take_log(), st.take_events())
     };
     for l in log {
         crate::println!("net: {l}");
     }
-    if changed {
-        notify();
-    }
+    deliver(global, &ids);
 }
 
 fn transmit(st: &mut Stack, nics: &[Arc<dyn Nic>]) {
@@ -240,27 +327,46 @@ fn transmit(st: &mut Stack, nics: &[Arc<dyn Nic>]) {
 
 /// Wake everything waiting on sockets.
 pub fn notify() {
-    EVENTS.fetch_add(1, Ordering::Release);
-    WAIT.wake_all();
+    deliver(true, &[]);
 }
 
 /// Run `f` on the stack (thread context), then transmit and wake.
 pub fn with_stack<R>(f: impl FnOnce(&mut Stack, u64) -> R) -> Option<R> {
     let nics = NICS.lock().clone();
-    let (r, log, changed) = {
+    let (r, log, (global, ids)) = {
         let mut g = STACK.lock();
         let st = g.as_mut()?;
         let r = f(st, crate::irq::uptime_ms());
         transmit(st, &nics);
-        (r, st.take_log(), st.take_changed())
+        (r, st.take_log(), st.take_events())
     };
     for l in log {
         crate::println!("net: {l}");
     }
-    if changed {
-        notify();
-    }
+    deliver(global, &ids);
     Some(r)
+}
+
+/// The system is shutting down (DosShutdown): give DHCP leases back, and
+/// give the releases a moment to leave.
+pub fn shutdown() {
+    if !running() {
+        return;
+    }
+    let any = with_stack(|st, now| {
+        let leased = st.ifaces.iter().any(|i| i.dhcp.as_ref().is_some_and(|c| c.lease.is_some()));
+        st.dhcp_release_all(now);
+        leased
+    })
+    .unwrap_or(false);
+    if any {
+        // Long enough for an ARP exchange with the server, if its address
+        // was not cached.
+        static PAUSE: WaitQueue = WaitQueue::new();
+        let deadline = crate::irq::ticks() + 300 * crate::irq::HZ / 1000;
+        PAUSE.wait_uninterruptible_until(deadline, || false);
+        flush_and_log();
+    }
 }
 
 /// Interface information for Rs2NetQueryIface.

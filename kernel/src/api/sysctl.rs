@@ -260,6 +260,8 @@ pub fn dos_shutdown(c: &mut Ctx) -> u32 {
         }
     }
     if r == 0 {
+        // DHCP leases go back to their servers.
+        crate::net::shutdown();
         // Mark journaled volumes clean.
         for d in 0..26 {
             if let Some(fs) = crate::fs::drive(d) {

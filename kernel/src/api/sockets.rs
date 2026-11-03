@@ -35,6 +35,7 @@
 //! | 219 | Rs2NetQuerySockets(PRS2SOCKINFO, ULONG max, PULONG count) |
 //! | 220 | Rs2SockTake(ULONG s) |
 //! | 221 | Rs2SockRelease(ULONG s) |
+//! | 240 | Rs2NetControl(ULONG func, PVOID in, ULONG cbIn, PVOID out, PULONG pcbOut) |
 //!
 //! Rs2SockSelect has OS/2's `select()` semantics: `socks` lists the read,
 //! write and exception sockets in that order, entries that are not ready
@@ -56,6 +57,33 @@
 //! TIME_WAIT; 0 none), `BYTE flags` (bit 0 listening, 1 closed by its
 //! owner), `BYTE laddr[4]`, `USHORT lport, rport` (host order), `BYTE
 //! raddr[4]`, `ULONG pid, socket` of the owner (0 if none) (24 bytes).
+//!
+//! Rs2NetControl is the configuration interface (ROUTE, ARP, IFCONFIG,
+//! NETSTAT -s, the socket DLLs' SIOC* ioctls and sysctl). Its functions:
+//! 1 routes (out: 28-byte entries `ULONG dest, mask, gateway, iface;
+//! USHORT flags (RTF_*), auto; ULONG metric, uses`, the interfaces'
+//! networks first), 2 add a route (in: `dest, mask, gateway, metric`),
+//! 3 delete one (in: `dest, mask, gateway` or 0), 4 delete every route
+//! through a gateway (out: ULONG count), 5 the ARP table (out: 20-byte
+//! entries `ULONG ip; BYTE mac[6]; USHORT flags` (1 complete, 2
+//! permanent, 4 published) `ULONG iface, seconds left`), 6 set an entry
+//! (in: `ULONG ip; BYTE mac[6]; USHORT flags`), 7 delete one (in: ip),
+//! 8 change an interface (in: `ULONG index, op, a, b`; op 1 address a
+//! with mask b (0: keep or classful), 2 netmask a, 3 up, 4 down, 5 add
+//! alias a/b, 6 delete address a, 7 MTU a, 8 metric a, 9 DHCP renew (or
+//! start), 10 DHCP release), 9 an interface's addresses (in: index; out:
+//! address/mask pairs), 10 counters (out: 39 ULONGs: IP received, bad,
+//! delivered, sent, forwarded, no route, unknown protocol, fragments,
+//! reassembled, fragmented; ICMP received, sent, echo requests, unreachables
+//! received; UDP received, sent, no port, bad; TCP active and passive
+//! opens, failed attempts, resets sent, bad segments; ARP requests and
+//! replies sent; TCP segments sent and received, bytes sent and received,
+//! retransmissions, bytes retransmitted, timeouts, out-of-order segments,
+//! duplicates, delayed ACKs, keepalive probes and drops, SACK blocks,
+//! urgent notifications), 11 a variable (in: `ULONG id, set, value`;
+//! out: the value before; id 1 IP forwarding, 2-4 keepalive idle time,
+//! interval (seconds) and probes, 5-6 default send and receive buffer).
+//! Interface indexes are those of Rs2NetQueryIface (0 is loopback).
 //!
 //! Socket numbers are unique in the system and every process may use
 //! every socket (OS/2's model); a socket belongs to one process, which
@@ -416,4 +444,282 @@ pub fn take(c: &mut Ctx) -> u32 {
 /// Rs2SockRelease.
 pub fn release(c: &mut Ctx) -> u32 {
     done(so::release(pid(c), c.arg(0)))
+}
+
+// ---- Rs2NetControl (240): routes, ARP, interfaces, counters, sysctl ----
+
+pub const NC_ROUTES: u32 = 1;
+pub const NC_ROUTE_ADD: u32 = 2;
+pub const NC_ROUTE_DELETE: u32 = 3;
+pub const NC_ROUTE_FLUSH: u32 = 4;
+pub const NC_ARP_LIST: u32 = 5;
+pub const NC_ARP_SET: u32 = 6;
+pub const NC_ARP_DELETE: u32 = 7;
+pub const NC_IF_SET: u32 = 8;
+pub const NC_IF_ADDRS: u32 = 9;
+pub const NC_STATS: u32 = 10;
+pub const NC_SYSCTL: u32 = 11;
+
+// NC_IF_SET operations.
+const IF_ADDRESS: u32 = 1;
+const IF_NETMASK: u32 = 2;
+const IF_UP: u32 = 3;
+const IF_DOWN: u32 = 4;
+const IF_ALIAS_ADD: u32 = 5;
+const IF_ALIAS_DELETE: u32 = 6;
+const IF_MTU: u32 = 7;
+const IF_METRIC: u32 = 8;
+const IF_DHCP_RENEW: u32 = 9;
+const IF_DHCP_RELEASE: u32 = 10;
+
+// NC_SYSCTL variables.
+const SYS_FORWARDING: u32 = 1;
+const SYS_KEEPIDLE: u32 = 2;
+const SYS_KEEPINTVL: u32 = 3;
+const SYS_KEEPCNT: u32 = 4;
+const SYS_SENDSPACE: u32 = 5;
+const SYS_RECVSPACE: u32 = 6;
+
+fn le32(b: &[u8], o: usize) -> u32 {
+    b.get(o..o + 4).map_or(0, |x| u32::from_le_bytes([x[0], x[1], x[2], x[3]]))
+}
+
+fn ip_in(b: &[u8], o: usize) -> Ipv4 {
+    b.get(o..o + 4).map_or(Ipv4::UNSPECIFIED, |x| Ipv4([x[0], x[1], x[2], x[3]]))
+}
+
+/// Rs2NetControl(ULONG func, PVOID in, ULONG cbIn, PVOID out, PULONG
+/// pcbOut): `*pcbOut` holds the room at `out` and gets the bytes the
+/// answer takes (lists are cut at the room; call again with more).
+pub fn net_control(c: &mut Ctx) -> u32 {
+    let (func, in_at, in_len, out_at, len_at) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3), c.arg(4));
+    let input = if in_len == 0 {
+        Vec::new()
+    } else {
+        match c.read_vec(in_at, in_len.min(256)) {
+            Some(v) => v,
+            None => return EFAULT,
+        }
+    };
+    let room = if len_at == 0 { 0 } else { c.read_u32(len_at).unwrap_or(0) as usize };
+    let r = control(func, &input);
+    match r {
+        Ok(out) => {
+            let n = out.len().min(room);
+            if n > 0 && !c.write(out_at, &out[..n]) {
+                return EFAULT;
+            }
+            if len_at != 0 && !c.write_u32(len_at, out.len() as u32) {
+                return EFAULT;
+            }
+            0
+        }
+        Err(e) => e,
+    }
+}
+
+fn st_err(e: tcpip::Error) -> u32 {
+    e.errno()
+}
+
+fn control(func: u32, i: &[u8]) -> Result<Vec<u8>, u32> {
+    use crate::net::with_stack;
+    let need = |n: usize| if i.len() < n { Err(EINVAL) } else { Ok(()) };
+    let down: u32 = 50; // ENETDOWN
+    match func {
+        NC_ROUTES => {
+            let rs = with_stack(|st, _| st.routes()).ok_or(down)?;
+            let mut v = Vec::with_capacity(rs.len() * 28);
+            for r in rs {
+                v.extend_from_slice(&r.dest.0);
+                v.extend_from_slice(&r.mask.0);
+                v.extend_from_slice(&r.gateway.unwrap_or_default().0);
+                v.extend_from_slice(&(r.iface as u32).to_le_bytes());
+                v.extend_from_slice(&r.flags.to_le_bytes());
+                v.extend_from_slice(&(r.auto as u16).to_le_bytes());
+                v.extend_from_slice(&r.metric.to_le_bytes());
+                v.extend_from_slice(&(r.uses.get() as u32).to_le_bytes());
+            }
+            Ok(v)
+        }
+        NC_ROUTE_ADD => {
+            need(16)?;
+            let (d, m, g, metric) = (ip_in(i, 0), ip_in(i, 4), ip_in(i, 8), le32(i, 12));
+            with_stack(|st, _| st.add_route(d, m, g, metric)).ok_or(down)?.map_err(st_err)?;
+            Ok(Vec::new())
+        }
+        NC_ROUTE_DELETE => {
+            need(12)?;
+            let (d, m, g) = (ip_in(i, 0), ip_in(i, 4), ip_in(i, 8));
+            let g = (!g.is_unspecified()).then_some(g);
+            with_stack(|st, _| st.delete_route(d, m, g)).ok_or(down)?.map_err(st_err)?;
+            Ok(Vec::new())
+        }
+        NC_ROUTE_FLUSH => {
+            let n = with_stack(|st, _| st.flush_routes()).ok_or(down)?;
+            Ok((n as u32).to_le_bytes().to_vec())
+        }
+        NC_ARP_LIST => {
+            let (list, now) = with_stack(|st, now| (st.arp_list(), now)).ok_or(down)?;
+            let mut v = Vec::with_capacity(list.len() * 20);
+            for e in list {
+                v.extend_from_slice(&e.ip.0);
+                v.extend_from_slice(&e.mac.unwrap_or_default());
+                let flags = e.mac.is_some() as u16 | (e.permanent as u16) << 1 | (e.publish as u16) << 2;
+                v.extend_from_slice(&flags.to_le_bytes());
+                v.extend_from_slice(&(e.iface as u32).to_le_bytes());
+                let ttl = if e.permanent { 0 } else { (e.expires.saturating_sub(now) / 1000) as u32 };
+                v.extend_from_slice(&ttl.to_le_bytes());
+            }
+            Ok(v)
+        }
+        NC_ARP_SET => {
+            need(12)?;
+            let ip = ip_in(i, 0);
+            let mut mac = [0u8; 6];
+            mac.copy_from_slice(&i[4..10]);
+            let flags = u16::from_le_bytes([i[10], i[11]]);
+            with_stack(|st, now| st.arp_set(ip, mac, flags & 2 != 0, flags & 4 != 0, now)).ok_or(down)?.map_err(st_err)?;
+            Ok(Vec::new())
+        }
+        NC_ARP_DELETE => {
+            need(4)?;
+            let ip = ip_in(i, 0);
+            with_stack(|st, _| st.arp_delete(ip)).ok_or(down)?.map_err(st_err)?;
+            Ok(Vec::new())
+        }
+        NC_IF_SET => {
+            need(16)?;
+            let (n, op, a, b) = (le32(i, 0) as usize, le32(i, 4), ip_in(i, 8), ip_in(i, 12));
+            let (av, bv) = (le32(i, 8), le32(i, 12));
+            with_stack(|st, now| -> Result<(), tcpip::Error> {
+                if n >= st.ifaces.len() {
+                    return Err(tcpip::Error::NoDevice);
+                }
+                match op {
+                    IF_ADDRESS => st.set_address(n, a, (bv != 0).then_some(b), now),
+                    IF_NETMASK => st.set_netmask(n, a),
+                    IF_UP => {
+                        st.iface_up(n, true);
+                        Ok(())
+                    }
+                    IF_DOWN => {
+                        st.iface_up(n, false);
+                        Ok(())
+                    }
+                    IF_ALIAS_ADD => {
+                        let m = if bv == 0 { st.ifaces[n].mask } else { b };
+                        st.add_alias(n, a, m)
+                    }
+                    IF_ALIAS_DELETE => st.delete_alias(n, a),
+                    IF_MTU => st.set_mtu(n, av as usize),
+                    IF_METRIC => st.set_metric(n, av),
+                    IF_DHCP_RENEW => st.dhcp_renew(n, now),
+                    IF_DHCP_RELEASE => st.dhcp_release(n, now),
+                    _ => Err(tcpip::Error::InvalidArg),
+                }
+            })
+            .ok_or(down)?
+            .map_err(st_err)?;
+            Ok(Vec::new())
+        }
+        NC_IF_ADDRS => {
+            need(4)?;
+            let n = le32(i, 0) as usize;
+            let a = with_stack(|st, _| st.ifaces.get(n).map(|f| f.addresses())).ok_or(down)?.ok_or(6u32)?;
+            let mut v = Vec::new();
+            for (x, m) in a {
+                v.extend_from_slice(&x.0);
+                v.extend_from_slice(&m.0);
+            }
+            Ok(v)
+        }
+        NC_STATS => {
+            let (k, t) = with_stack(|st, _| (st.counters, st.tcp_stats())).ok_or(down)?;
+            let vals = [
+                k.ip_received,
+                k.ip_bad,
+                k.ip_delivered,
+                k.ip_sent,
+                k.ip_forwarded,
+                k.ip_no_route,
+                k.ip_no_proto,
+                k.ip_fragments,
+                k.ip_reassembled,
+                k.ip_fragmented,
+                k.icmp_received,
+                k.icmp_sent,
+                k.icmp_echo_received,
+                k.icmp_unreach_received,
+                k.udp_received,
+                k.udp_sent,
+                k.udp_no_port,
+                k.udp_bad,
+                k.tcp_active_opens,
+                k.tcp_passive_opens,
+                k.tcp_attempt_fails,
+                k.tcp_resets_sent,
+                k.tcp_bad,
+                k.arp_requests,
+                k.arp_replies,
+                t.segs_sent,
+                t.segs_received,
+                t.bytes_sent,
+                t.bytes_received,
+                t.retransmits,
+                t.retransmitted_bytes,
+                t.timeouts,
+                t.out_of_order,
+                t.duplicates,
+                t.delayed_acks,
+                t.keepalive_probes,
+                t.keepalive_drops,
+                t.sack_blocks,
+                t.urgent_received,
+            ];
+            let mut v = Vec::with_capacity(vals.len() * 4);
+            for x in vals {
+                v.extend_from_slice(&(x as u32).to_le_bytes());
+            }
+            Ok(v)
+        }
+        NC_SYSCTL => {
+            need(12)?;
+            let (id, set, val) = (le32(i, 0), le32(i, 4) != 0, le32(i, 8));
+            let r = with_stack(|st, _| -> Result<u32, u32> {
+                let mut k = st.keepalive;
+                let cur = match id {
+                    SYS_FORWARDING => st.forwarding as u32,
+                    SYS_KEEPIDLE => (k.idle / 1000) as u32,
+                    SYS_KEEPINTVL => (k.interval / 1000) as u32,
+                    SYS_KEEPCNT => k.count,
+                    SYS_SENDSPACE => st.default_send_buf as u32,
+                    SYS_RECVSPACE => st.default_recv_buf as u32,
+                    _ => return Err(2), // ENOENT
+                };
+                if set {
+                    match id {
+                        SYS_FORWARDING => st.forwarding = val != 0,
+                        SYS_KEEPIDLE | SYS_KEEPINTVL | SYS_KEEPCNT => {
+                            if val == 0 {
+                                return Err(EINVAL);
+                            }
+                            match id {
+                                SYS_KEEPIDLE => k.idle = val as u64 * 1000,
+                                SYS_KEEPINTVL => k.interval = val as u64 * 1000,
+                                _ => k.count = val,
+                            }
+                            st.set_keepalive_timing(k);
+                        }
+                        SYS_SENDSPACE => st.default_send_buf = (val as usize).clamp(512, 1 << 20),
+                        _ => st.default_recv_buf = (val as usize).clamp(512, tcpip::tcp::MAX_BUFFER),
+                    }
+                }
+                Ok(cur)
+            })
+            .ok_or(down)??;
+            Ok(r.to_le_bytes().to_vec())
+        }
+        _ => Err(EINVAL),
+    }
 }
