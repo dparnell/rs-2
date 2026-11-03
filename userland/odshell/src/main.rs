@@ -98,6 +98,8 @@ unsafe extern "C" {
     static ODObjectClassData: [usize; 8];
     #[link_name = "OPENDOC.219"]
     static ODArbitratorClassData: [usize; 15];
+    #[link_name = "OPENDOC.291"]
+    static ODClipboardClassData: [usize; 13];
     #[link_name = "PMWIN.919"]
     fn WinPostMsg(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> u32;
     #[link_name = "PMWIN.877"]
@@ -139,6 +141,8 @@ fn release(o: usize) {
 const ONE: i32 = 0x10000;
 const PROP_ROOT: &[u8] = b"+//ISO 9070/ANSI::113722::US::CI LABS::OpenDoc:Property:Draft:RootPart\0";
 const PROP_TEXT: &[u8] = b"rs2:TextPart:Text\0";
+const PROP_COLOR: &[u8] = b"rs2:TextPart:Color\0";
+const TYPE_COLOR: &[u8] = b"rs2:Type:RGB\0";
 const PROP_CHILD: &[u8] = b"rs2:TextPart:EmbeddedFrame\0";
 const TYPE_TEXT: &[u8] = b"rs2:Type:Text\0";
 const TYPE_REF: &[u8] = b"rs2:Type:StorageUnitRef\0";
@@ -225,6 +229,11 @@ extern "C" fn part_init(this: usize, ev: usize, su: usize, w: usize) -> usize {
 extern "C" fn part_init_storage(this: usize, ev: usize, su: usize, w: usize) -> usize {
     somsup::call_parent(ccd(), cd!(ODPartClassData), 1, &[this, ev, su, w]);
     tp(this).color = 0xd0d0d0;
+    if let Some(c) = su_get(su, PROP_COLOR, TYPE_COLOR) {
+        if c.len() == 4 {
+            tp(this).color = i32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+        }
+    }
     if let Some(t) = su_get(su, PROP_TEXT, TYPE_TEXT) {
         tp(this).text = t;
     }
@@ -243,6 +252,7 @@ extern "C" fn part_externalize(this: usize, ev: usize) -> usize {
     }
     let t = tp(this).text.clone();
     su_set(su, PROP_TEXT, TYPE_TEXT, &t);
+    su_set(su, PROP_COLOR, TYPE_COLOR, &tp(this).color.to_le_bytes());
     if tp(this).child != 0 {
         let mut r = [0u8; 4];
         m(cd!(ODStorageUnitClassData), 32, &[su, ev, tp(this).child, r.as_mut_ptr() as usize]);
@@ -341,7 +351,31 @@ extern "C" fn part_handle_event(this: usize, ev: usize, event: usize, frame: usi
                 t.push(c);
             }
         }
-        WM_COMMAND if mp1 & 0xffff == CMD_CUT => tp(this).text.clear(),
+        WM_COMMAND if matches!(mp1 & 0xffff, CMD_CUT | CMD_COPY) => {
+            // The text to PM's clipboard (through the OpenDoc clipboard).
+            let t = tp(this).text.clone();
+            unsafe {
+                let clip = m(cd!(ODBaseSessionClassData), 2, &[SESSION, ev]);
+                m(cd!(ODClipboardClassData), 1, &[clip, ev]);
+                let su = m(cd!(ODClipboardClassData), 2, &[clip, ev]);
+                su_set(su, PROP_CONTENTS, TYPE_CLIP_TEXT, &t);
+                m(cd!(ODClipboardClassData), 7, &[clip, ev]);
+            }
+            if mp1 & 0xffff == CMD_CUT {
+                tp(this).text.clear();
+            }
+        }
+        WM_COMMAND if mp1 & 0xffff == CMD_PASTE => {
+            let got = unsafe {
+                let clip = m(cd!(ODBaseSessionClassData), 2, &[SESSION, ev]);
+                let su = m(cd!(ODClipboardClassData), 2, &[clip, ev]);
+                su_get(su, PROP_CONTENTS, TYPE_CLIP_TEXT)
+            };
+            match got {
+                Some(t) => tp(this).text.extend(t.iter().copied().take_while(|&b| b != 0)),
+                None => return 0,
+            }
+        }
         0x71 | 0x72 | 0x74 | 0x75 => return 1,
         _ => return 0,
     }
@@ -354,6 +388,80 @@ extern "C" fn part_handle_event(this: usize, ev: usize, event: usize, frame: usi
 static mut DRAFT: usize = 0;
 static mut SESSION: usize = 0;
 static mut FRAME_HWND: u32 = 0;
+static mut WINDOW: usize = 0;
+const CMD_COPY_PART: u32 = 0x5110;
+const CMD_PASTE_PART: u32 = 0x5111;
+const TYPE_CLIP_TEXT: &[u8] = b"rs2:Type:Text\0";
+
+fn menu_frame(ev: usize) -> usize {
+    unsafe {
+        let arb = m(cd!(ODBaseSessionClassData), 0, &[SESSION, ev]);
+        let menu = m(cd!(ODBaseSessionClassData), 30, &[SESSION, ev, b"Menu\0".as_ptr() as usize]);
+        m(cd!(ODArbitratorClassData), 6, &[arb, ev, menu])
+    }
+}
+
+/// Edit/Copy part: the active part's unit (and what it refers to) cloned
+/// into the clipboard, which goes onto PM's clipboard.
+fn copy_part(ev: usize) {
+    let frame = menu_frame(ev);
+    if frame == 0 {
+        return;
+    }
+    unsafe {
+        let part = m(cd!(ODFrameClassData), 18, &[frame, ev]);
+        m(cd!(ODPersistentObjectClassData), 3, &[part, ev]); // Externalize first
+        let psu = m(cd!(ODPersistentObjectClassData), 4, &[part, ev]);
+        let clip = m(cd!(ODBaseSessionClassData), 2, &[SESSION, ev]);
+        m(cd!(ODClipboardClassData), 1, &[clip, ev]);
+        let csu = m(cd!(ODClipboardClassData), 2, &[clip, ev]);
+        m(cd!(ODStorageUnitClassData), 17, &[psu, ev, 0, csu, 0]); // CloneInto
+        m(cd!(ODClipboardClassData), 7, &[clip, ev]);
+        release(part);
+    }
+    release(frame);
+}
+
+static mut PASTED: i32 = 0;
+
+/// Edit/Paste part: a part on the clipboard cloned into the document and
+/// embedded in the root part's frame.
+fn paste_part(ev: usize) {
+    unsafe {
+        let clip = m(cd!(ODBaseSessionClassData), 2, &[SESSION, ev]);
+        let csu = m(cd!(ODClipboardClassData), 2, &[clip, ev]);
+        if su_get(csu, PROP_EDITOR, TYPE_ISOSTR).is_none() {
+            return;
+        }
+        let su = m(cd!(ODDraftClassData), 6, &[DRAFT, ev]);
+        m(cd!(ODStorageUnitClassData), 17, &[csu, ev, 0, su, 0]); // CloneInto
+        let id = m(cd!(ODStorageUnitClassData), 11, &[su, ev]);
+        release(su);
+        let part = m(cd!(ODDraftClassData), 24, &[DRAFT, ev, id]);
+        if part == 0 {
+            return;
+        }
+        let rf = m(cd!(ODWindowClassData), 1, &[WINDOW, ev]);
+        let shp = somsup::new_object(ODShapeNewClass(1, 0));
+        let r = [0, 100 * ONE, 160 * ONE, 0];
+        m(cd!(ODBaseShapeClassData), 3, &[shp, ev, r.as_ptr() as usize]);
+        let view = m(cd!(ODBaseSessionClassData), 30, &[SESSION, ev, VIEW_FRAME.as_ptr() as usize]);
+        let pres = m(cd!(ODBaseSessionClassData), 30, &[SESSION, ev, PRES_NORMAL.as_ptr() as usize]);
+        let cf = m(cd!(ODDraftClassData), 20, &[DRAFT, ev, FRAME_TYPE.as_ptr() as usize, rf, shp, 0, part, view, pres, 0, 0]);
+        release(shp);
+        let rfc = m(cd!(ODWindowClassData), 2, &[WINDOW, ev]);
+        let t = somsup::new_object(ODTransformNewClass(1, 0));
+        PASTED += 1;
+        let off = [(300 + 12 * (PASTED - 1)) * ONE, (60 + 12 * (PASTED - 1)) * ONE];
+        m(cd!(ODBaseTransformClassData), 11, &[t, ev, off.as_ptr() as usize]);
+        m(cd!(ODFacetClassData), 1, &[rfc, ev, cf, 0, t, 0, 0, 0, 0]);
+        release(t);
+        release(cf);
+        release(part);
+        release(rf);
+        m(cd!(ODWindowClassData), 23, &[WINDOW, ev]); // Update
+    }
+}
 
 /// The shell's dispatch module: the Document menu's commands that the
 /// active part did not take.
@@ -373,6 +481,14 @@ extern "C" fn shell_dispatch(this: usize, ev: usize, event: usize, info: usize) 
             1
         }
         CMD_ABOUT => 1,
+        CMD_COPY_PART => {
+            copy_part(ev);
+            1
+        }
+        CMD_PASTE_PART => {
+            paste_part(ev);
+            1
+        }
         CMD_SETTINGS => {
             show_settings(ev);
             1
@@ -427,6 +543,8 @@ fn base_menu_bar(ws: usize) {
     item(mb, 0x0e, CMD_COPY, b"~Copy\0", false);
     item(mb, 0x0e, CMD_PASTE, b"~Paste\0", false);
     item(mb, 0x0e, CMD_DELETE, b"~Delete\0", false);
+    item(mb, 0x0e, CMD_COPY_PART, b"Copy p~art\0", false);
+    item(mb, 0x0e, CMD_PASTE_PART, b"Paste pa~rt\0", false);
     m(c, 2, &[mb, e, 0x11, b"~Selected\0".as_ptr() as usize, 0]);
     item(mb, 0x11, CMD_OPEN, b"~Open\0", false);
     item(mb, 0x11, CMD_SETTINGS, b"Se~ttings\0", false);
@@ -598,6 +716,7 @@ fn main(st: &Startup) -> u32 {
         unsafe { core::mem::transmute(ODWindowStateClassData[1]) };
     let win = reg(ws, e, hwnd, FRAME_TYPE.as_ptr() as usize, 1, 1, 0, 1, 1, root, view, pres, 0);
     let rf = m(cd!(ODWindowClassData), 1, &[win, e]);
+    unsafe { WINDOW = win };
     if new {
         // An embedded part in a frame of its own inside the root frame.
         let child = match (args.get(3), args.get(4)) {
