@@ -174,6 +174,9 @@ pub enum State {
     Bound,
     Renewing,
     Rebinding,
+    /// The lease was given back (shutdown, IFCONFIG): nothing more
+    /// happens until [`Client::renew`].
+    Released,
 }
 
 /// What the client wants done.
@@ -318,6 +321,33 @@ impl Client {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// Give the lease back (RFC 2131 4.4.6): a DHCPRELEASE to the server.
+    /// The address goes with [`Action::Lost`].
+    pub fn release(&mut self, now: u64, out: &mut Vec<Action>) {
+        if let Some(l) = self.lease.take() {
+            self.next_xid();
+            let m = build(RELEASE, self.xid, self.secs(now), self.mac, l.addr, &self.hostname, None, Some(l.server));
+            out.push(Action::Unicast(l.server, m));
+            out.push(Action::Lost);
+        }
+        self.state = State::Released;
+    }
+
+    /// Renew now: a bound client asks its server again, any other starts
+    /// over.
+    pub fn renew(&mut self, now: u64, out: &mut Vec<Action>) {
+        match (self.state, &self.lease) {
+            (State::Bound | State::Renewing | State::Rebinding, Some(_)) => {
+                self.state = State::Renewing;
+                self.next_xid();
+                self.started = now;
+                self.retry_at = now + 4000;
+                self.request(now, out);
+            }
+            _ => self.restart(now, out),
         }
     }
 
@@ -474,6 +504,21 @@ mod tests {
         out.clear();
         c.input(&server_reply(ACK, xid2, MAC, lease().addr, server, &lease()), 20 + 43201 * 1000, &mut out);
         assert_eq!(c.state, State::Bound);
+        out.clear();
+        // Renewal on demand, then release: a DHCPRELEASE to the server.
+        c.renew(20 + 43300 * 1000, &mut out);
+        assert!(matches!(out[0], Action::Unicast(s, _) if s == server));
+        assert_eq!(c.state, State::Renewing);
+        out.clear();
+        c.release(20 + 43301 * 1000, &mut out);
+        let Action::Unicast(s, m) = &out[0] else { panic!() };
+        let p = parse(m).unwrap();
+        assert_eq!((*s, p.msg_type, crate::wire::ip_at(m, 12)), (server, RELEASE, lease().addr));
+        assert_eq!(out[1], Action::Lost);
+        assert_eq!(c.state, State::Released);
+        out.clear();
+        c.poll(20 + 90000 * 1000, &mut out);
+        assert!(out.is_empty());
     }
 
     #[test]
