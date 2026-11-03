@@ -429,6 +429,11 @@ pub fn object_from_location(loc: &[u8]) -> usize {
     if loc.len() >= 2 && loc[1] == b':' {
         return object_from_path(loc);
     }
+    // A network object (`\\GROUP`, `\\SERVER`, `\\SERVER\SHARE`), or a
+    // path below a share.
+    if loc.starts_with(b"\\\\") {
+        return by_path(&normalize(loc)).unwrap_or_else(|| object_from_path(loc));
+    }
     0
 }
 

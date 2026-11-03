@@ -121,7 +121,7 @@ extern "C" fn network_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 }
 
 extern "C" fn network_add_pages(o: usize, nb: u32) -> u32 {
-    som::call_parent(wps::ccd("WPNetwork"), wps::cd("WPFolder"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
+    som::call_parent(wps::ccd("WPNetwork"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
     let st = lanreq::status();
     let state = if st.started {
         let user = if st.user.is_empty() { String::from("nobody is logged on") } else { alloc::format!("{} is logged on to {}", st.user, st.domain) };
@@ -249,7 +249,7 @@ fn assigned(unc: &str) -> Option<String> {
 }
 
 extern "C" fn shared_modify_menu(o: usize, menu: u32, cnr: u32, pos: u32) -> u32 {
-    som::call_parent(wps::ccd("WPSharedDir"), wps::cd("WPFolder"), m::WPObject::wpModifyPopupMenu, &[o, menu as usize, cnr as usize, pos as usize]);
+    som::call_parent(wps::ccd("WPSharedDir"), wps::cd("WPObject"), m::WPObject::wpModifyPopupMenu, &[o, menu as usize, cnr as usize, pos as usize]);
     let unc = path_text(o);
     let printer = share_type(&unc) == 1;
     match assigned(&unc) {
@@ -300,7 +300,7 @@ extern "C" fn shared_menu_selected(o: usize, frame: u32, id: u32) -> u32 {
             }
             1
         }
-        _ => som::call_parent(wps::ccd("WPSharedDir"), wps::cd("WPFolder"), m::WPObject::wpMenuItemSelected, &[o, frame as usize, id as usize]) as u32,
+        _ => som::call_parent(wps::ccd("WPSharedDir"), wps::cd("WPObject"), m::WPObject::wpMenuItemSelected, &[o, frame as usize, id as usize]) as u32,
     }
 }
 
@@ -314,7 +314,7 @@ extern "C" fn shared_open(o: usize, cnr: u32, view: u32, param: u32) -> u32 {
         }
         return 1;
     }
-    som::call_parent(wps::ccd("WPSharedDir"), wps::cd("WPFolder"), m::WPObject::wpOpen, &[o, cnr as usize, view as usize, param as usize]) as u32
+    som::call_parent(wps::ccd("WPSharedDir"), wps::cd("WPObject"), m::WPObject::wpOpen, &[o, cnr as usize, view as usize, param as usize]) as u32
 }
 
 methods! {
