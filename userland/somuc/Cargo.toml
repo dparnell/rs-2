@@ -1,0 +1,14 @@
+[package]
+name = "somuc-dll"
+description = "SOMUC.DLL: SOM's utility classes (somf_MCollectible and the somf_T* collections), rs2's own"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "somuc"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+somsup = { path = "../somsup" }

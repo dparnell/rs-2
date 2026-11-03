@@ -723,6 +723,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("somu", "OS2\\DLL\\SOMU.DLL"),
         ("somir", "OS2\\DLL\\SOMIR.DLL"),
         ("somd", "OS2\\DLL\\SOMD.DLL"),
+        ("somuc", "OS2\\DLL\\SOMUC.DLL"),
         ("opendoc", "OS2\\DLL\\OPENDOC.DLL"),
         ("win16", "OS2\\DLL\\WIN16.DLL"),
         // rs2's own PM applets (userland/pmkit is what they share).
