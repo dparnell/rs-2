@@ -320,7 +320,7 @@ pub fn select(c: &mut Ctx) -> u32 {
     }
 }
 
-/// Rs2SockIoctl: FIONBIO reads *arg, FIONREAD writes it.
+/// Rs2SockIoctl: FIONBIO reads *arg, FIONREAD and SIOCATMARK write it.
 pub fn ioctl(c: &mut Ctx) -> u32 {
     let (s, cmd, arg) = (c.arg(0), c.arg(1), c.arg(2));
     let v = if cmd == so::FIONBIO {
@@ -333,7 +333,7 @@ pub fn ioctl(c: &mut Ctx) -> u32 {
     };
     match so::ioctl(pid(c), s, cmd, v) {
         Ok(r) => {
-            if cmd == so::FIONREAD {
+            if cmd == so::FIONREAD || cmd == so::SIOCATMARK {
                 c.write_u32(arg, r);
             }
             0

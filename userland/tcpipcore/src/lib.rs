@@ -20,6 +20,7 @@ pub mod cstr;
 pub mod errno;
 pub mod files;
 pub mod inet;
+pub mod netctl;
 pub mod netdb;
 pub mod resolv;
 pub mod sock;

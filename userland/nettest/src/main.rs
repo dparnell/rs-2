@@ -16,6 +16,13 @@
 //! * `listen`: accept one connection on port `-listen` (default 23)
 //!   within `-wait` seconds (default 60), echo a line back (QEMU
 //!   `hostfwd=tcp::5555-:23` and a host-side `nc localhost 5555`).
+//! * `tcp`: urgent data over loopback (MSG_OOB, select's exception set,
+//!   SIOCATMARK, SO_OOBINLINE), TCP_NODELAY and SO_KEEPALIVE.
+//! * `tables`: routes, ARP entries and an interface alias set and removed
+//!   at run time (Rs2NetControl), counters, a stack variable.
+//! * `urgent`: urgent data from and to the host (`-port`+3, +4) and
+//!   keepalives on an idle connection (`-port`+5); the host side of
+//!   these and of `connect`/`bulk`/`listen` is tools/scripts/nettesthost.py.
 
 #![no_std]
 #![no_main]
@@ -483,10 +490,249 @@ fn main(st: &os2::Startup) -> u32 {
             None => println!("  (no host for the bulk transfer)"),
         }
     }
+    if run("tcp") {
+        tcp_features();
+    }
+    if run("tables") {
+        config_tables(eth.as_ref());
+    }
+    if run("urgent") {
+        match o.host.or(gw) {
+            Some(h) => host_features(h, o.port),
+            None => println!("  (no host for the urgent data and keepalive checks)"),
+        }
+    }
     if run("listen") {
         listen(o.listen, o.wait);
     }
     let n = FAILS.load(Ordering::Relaxed);
     println!("nettest done: {n} failure(s)");
     n
+}
+
+const MSG_OOB: u32 = 1;
+const SIOCATMARK: u32 = 0x4004_7307;
+const SO_KEEPALIVE: u32 = 0x0008;
+const SO_OOBINLINE: u32 = 0x0100;
+const TCP_NODELAY: u32 = 1;
+
+fn send_flags(s: u32, d: &[u8], flags: u32) -> Result<usize, u32> {
+    let mut n = 0;
+    match unsafe { Rs2SockSend(s, d.as_ptr(), d.len() as u32, flags, &mut n) } {
+        0 => Ok(n as usize),
+        e => Err(e),
+    }
+}
+
+fn recv_flags(s: u32, buf: &mut [u8], flags: u32) -> Result<usize, u32> {
+    let mut n = 0;
+    match unsafe { Rs2SockRecv(s, buf.as_mut_ptr(), buf.len() as u32, flags, &mut n) } {
+        0 => Ok(n as usize),
+        e => Err(e),
+    }
+}
+
+fn at_mark(s: u32) -> bool {
+    let mut v = 0;
+    (unsafe { Rs2SockIoctl(s, SIOCATMARK, &mut v) }) == 0 && v != 0
+}
+
+fn wait_except(s: u32, ms: i32) -> bool {
+    let mut socks = [s];
+    let mut n = 0;
+    unsafe { Rs2SockSelect(socks.as_mut_ptr(), 0, 0, 1, ms, &mut n) == 0 && n == 1 }
+}
+
+/// A connected loopback pair (client, server) on `port`.
+fn lo_pair(port: u16) -> Option<(u32, u32, u32)> {
+    let a = SockAddrIn::new([127, 0, 0, 1], port);
+    let l = socket(SOCK_STREAM, 0).ok()?;
+    set_int(l, SO_REUSEADDR, 1);
+    if unsafe { Rs2SockBind(l, &a, 16) } != 0 || unsafe { Rs2SockListen(l, 2) } != 0 {
+        close(l);
+        return None;
+    }
+    let c = socket(SOCK_STREAM, 0).ok()?;
+    if unsafe { Rs2SockConnect(c, &a, 16) } != 0 {
+        return None;
+    }
+    let (mut peer, mut s) = (SockAddrIn::default(), 0);
+    if unsafe { Rs2SockAccept(l, &mut peer, &mut s) } != 0 {
+        return None;
+    }
+    Some((c, s, l))
+}
+
+/// Urgent data, TCP options and per-socket waits over loopback.
+fn tcp_features() {
+    let Some((c, s, l)) = lo_pair(7010) else {
+        check("tcp: loopback pair", false);
+        return;
+    };
+    // TCP_NODELAY and SO_KEEPALIVE are kept and read back.
+    let opt = |s: u32, level: u32, o: u32| {
+        let (mut v, mut n) = (0u32, 4u32);
+        unsafe { Rs2SockGetOpt(s, level, o, &mut v as *mut u32 as *mut u8, &mut n) };
+        v
+    };
+    let one = 1u32;
+    unsafe { Rs2SockSetOpt(c, IPPROTO_TCP, TCP_NODELAY, &one as *const u32 as *const u8, 4) };
+    set_int(c, SO_KEEPALIVE, 1);
+    check("tcp: TCP_NODELAY and SO_KEEPALIVE read back", opt(c, IPPROTO_TCP, TCP_NODELAY) == 1 && opt(c, SOL_SOCKET, SO_KEEPALIVE) == 1);
+    // Urgent data out of line: the reader stops at the mark.
+    send(c, b"ab").ok();
+    let oob = send_flags(c, b"!", MSG_OOB);
+    send(c, b"cd").ok();
+    check("tcp: send MSG_OOB", oob == Ok(1));
+    check("tcp: select reports the exception", wait_except(s, 2000));
+    set_timeout(s, 3000);
+    let mut buf = [0u8; 16];
+    let n = recv(s, &mut buf).unwrap_or(0);
+    check("tcp: read stops at the urgent mark", &buf[..n] == b"ab" && at_mark(s));
+    let n = recv_flags(s, &mut buf, MSG_OOB).unwrap_or(0);
+    check("tcp: recv MSG_OOB gets the urgent byte", n == 1 && buf[0] == b'!');
+    let n = recv(s, &mut buf).unwrap_or(0);
+    check("tcp: the rest after the mark", &buf[..n] == b"cd" && !at_mark(s));
+    // Inline: the urgent byte stays in the stream.
+    set_int(s, SO_OOBINLINE, 1);
+    send_flags(c, b"#", MSG_OOB).ok();
+    send(c, b"z").ok();
+    unsafe { os2::DosSleep(100) };
+    let mut got = Vec::new();
+    while got.len() < 2 {
+        match recv(s, &mut buf) {
+            Ok(n) if n > 0 => got.extend_from_slice(&buf[..n]),
+            _ => break,
+        }
+    }
+    check("tcp: SO_OOBINLINE keeps the urgent byte in the stream", got == b"#z");
+    close(c);
+    close(s);
+    close(l);
+}
+
+/// Routes, ARP entries and interface aliases through Rs2NetControl.
+fn config_tables(eth: Option<&IfInfo>) {
+    let Some(e) = eth else {
+        println!("  (no Ethernet interface for the table checks)");
+        return;
+    };
+    let gw = e.gateway;
+    let net = [192, 0, 2, 0];
+    let host = [198, 51, 100, 7];
+    check("route: add a network route", route_add(net, [255, 255, 255, 0], gw, 2).is_ok());
+    check("route: add a host route", route_add(host, [255; 4], gw, 1).is_ok());
+    check("route: a second add is refused", route_add(net, [255, 255, 255, 0], gw, 2) == Err(17));
+    let rt = routes();
+    check(
+        "route: both are in the table",
+        rt.iter().any(|r| r.dest == net && r.flags & 2 != 0) && rt.iter().any(|r| r.dest == host && r.flags & 4 != 0),
+    );
+    check("route: an off-link gateway is refused", route_add([203, 0, 113, 0], [255, 255, 255, 0], [203, 0, 113, 1], 1).is_err());
+    check("route: delete", route_delete(net, [255, 255, 255, 0], [0; 4]).is_ok() && route_delete(host, [255; 4], gw).is_ok());
+    check("route: gone", !routes().iter().any(|r| r.dest == net || r.dest == host));
+    // ARP: a static entry, then deleted.
+    let mut neigh = e.addr;
+    neigh[3] = neigh[3].wrapping_add(100);
+    check("arp: set a permanent entry", arp_set(neigh, [2, 0, 0, 0x12, 0x34, 0x56], true, false).is_ok());
+    check("arp: listed", arp_table().iter().any(|a| a.ip == neigh && a.permanent && a.mac == [2, 0, 0, 0x12, 0x34, 0x56]));
+    check("arp: the gateway was resolved", arp_table().iter().any(|a| a.ip == gw && a.complete));
+    check("arp: delete", arp_delete(neigh).is_ok() && !arp_table().iter().any(|a| a.ip == neigh));
+    // An alias: the stack answers on it (as a local address).
+    let Some(idx) = iface_index("lan0") else { return };
+    let mut alias = e.addr;
+    alias[3] = alias[3].wrapping_add(50);
+    check("ifconfig: add an alias", if_set(idx, IFOP_ALIAS_ADD, alias, e.mask).is_ok());
+    check("ifconfig: listed", if_addrs(idx).iter().any(|x| x.0 == alias));
+    if let Ok(s) = socket(SOCK_RAW, IPPROTO_ICMP) {
+        check("ifconfig: the alias answers pings", ping_once(s, alias, 0x4e55, 1, 16, 2000).is_ok());
+        close(s);
+    }
+    check("ifconfig: delete the alias", if_set(idx, IFOP_ALIAS_DELETE, alias, [0; 4]).is_ok() && !if_addrs(idx).iter().any(|x| x.0 == alias));
+    // Counters move.
+    let st = stats();
+    check("stats: counters", st.len() >= 39 && st[0] > 0 && st[25] > 0);
+    // A variable read and written back.
+    let old = net_var(NV_KEEPCNT, None).unwrap_or(0);
+    check("sysctl: keepalive probes", old == 8 && net_var(NV_KEEPCNT, Some(5)) == Ok(8) && net_var(NV_KEEPCNT, Some(old)) == Ok(5));
+}
+
+/// Urgent data and keepalives with the host (nettesthost.py's PORT+3 to
+/// PORT+5).
+fn host_features(host: [u8; 4], port: u16) {
+    // Urgent data from the host.
+    let urg0 = stats().get(38).copied().unwrap_or(0);
+    let s = socket(SOCK_STREAM, 0).unwrap_or(0);
+    if check("urgent: connect to the host's sender", unsafe { Rs2SockConnect(s, &SockAddrIn::new(host, port + 3), 16) } == 0) {
+        set_timeout(s, 5000);
+        let mut buf = [0u8; 16];
+        let (mut inband, mut oob) = (Vec::new(), Vec::new());
+        let t0 = ms();
+        while ms().wrapping_sub(t0) < 5000 {
+            if wait_except(s, 0) && oob.is_empty() {
+                if let Ok(1) = recv_flags(s, &mut buf, MSG_OOB) {
+                    oob.push(buf[0]);
+                }
+            }
+            if !wait_ready(s, false, 200) {
+                continue;
+            }
+            match recv(s, &mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => inband.extend_from_slice(&buf[..n]),
+            }
+        }
+        println!("  in band {:?}, urgent {:?}", text(&inband), text(&oob));
+        if oob.is_empty() && inband == b"ab!cd" && stats().get(38).copied().unwrap_or(0) == urg0 {
+            // No segment came with URG: QEMU's user network passes the
+            // host's out-of-band byte on as ordinary data.
+            println!("  (the host's network sent the byte without URG: not checked)");
+        } else {
+            check("urgent: the host's urgent byte arrived out of band", oob == b"!" && inband == b"abcd");
+        }
+    }
+    close(s);
+    // Urgent data to the host.
+    let s = socket(SOCK_STREAM, 0).unwrap_or(0);
+    if check("urgent: connect to the host's receiver", unsafe { Rs2SockConnect(s, &SockAddrIn::new(host, port + 4), 16) } == 0) {
+        send(s, b"xy").ok();
+        unsafe { os2::DosSleep(300) };
+        send_flags(s, b"#", MSG_OOB).ok();
+        unsafe { os2::DosSleep(300) };
+        send(s, b"z").ok();
+        unsafe { os2::DosSleep(300) };
+        unsafe { Rs2SockShutdown(s, 1) };
+        set_timeout(s, 15_000);
+        let mut reply = Vec::new();
+        let mut buf = [0u8; 128];
+        while let Ok(n) = recv(s, &mut buf) {
+            if n == 0 {
+                break;
+            }
+            reply.extend_from_slice(&buf[..n]);
+        }
+        let r = text(&reply);
+        println!("  host saw: {r}");
+        check("urgent: the host got the byte out of band", r.contains("oob=#") && r.contains("inband=xyz"));
+    }
+    close(s);
+    // Keepalives: 2 s idle, 1 s apart; QEMU's stack answers them.
+    let (idle, intvl) = (net_var(NV_KEEPIDLE, Some(2)).unwrap_or(7200), net_var(NV_KEEPINTVL, Some(1)).unwrap_or(75));
+    let before = stats().get(35).copied().unwrap_or(0);
+    let s = socket(SOCK_STREAM, 0).unwrap_or(0);
+    set_int(s, SO_KEEPALIVE, 1);
+    if check("keepalive: connect to the silent host", unsafe { Rs2SockConnect(s, &SockAddrIn::new(host, port + 5), 16) } == 0) {
+        unsafe { os2::DosSleep(7000) };
+        let probes = stats().get(35).copied().unwrap_or(0) - before;
+        println!("  {probes} keepalive probe(s) in 7 s");
+        check("keepalive: probes went out", probes >= 2);
+        check("keepalive: the connection lives", send(s, b"ping\n") == Ok(5));
+        set_timeout(s, 10_000);
+        let mut buf = [0u8; 64];
+        let n = recv(s, &mut buf).unwrap_or(0);
+        check("keepalive: the host answers after the idle time", text(&buf[..n]).contains("still here"));
+    }
+    close(s);
+    let _ = net_var(NV_KEEPIDLE, Some(idle));
+    let _ = net_var(NV_KEEPINTVL, Some(intvl));
 }

@@ -171,10 +171,7 @@ pub unsafe fn recvfrom(abi: Abi, s: i32, buf: *mut u8, len: i32, flags: i32, fro
         return fail(EFAULT);
     }
     let (k, waitall) = kflags(abi, flags);
-    if k & K_MSG_OOB != 0 {
-        // No urgent data is ever pending.
-        return fail(EINVAL);
-    }
+    let waitall = waitall && k & K_MSG_OOB == 0;
     let mut total = 0u32;
     loop {
         let mut a = SockAddrIn::default();
@@ -435,9 +432,9 @@ fn broadcast(i: &IfInfo) -> [u8; 4] {
 /// share; the 4.4 numbers of the interface queries (33-37) are accepted
 /// beside the old ones (13-21).
 /// The routing table: (destination, gateway, mask, RTF_* flags,
-/// interface name).
-pub fn routes() -> Vec<([u8; 4], [u8; 4], [u8; 4], u16, Vec<u8>)> {
-    os2::net::routes().into_iter().map(|r| (r.dest, r.gateway, r.mask, r.flags, r.iface.into_bytes())).collect()
+/// interface name, uses, metric).
+pub fn routes() -> Vec<([u8; 4], [u8; 4], [u8; 4], u16, Vec<u8>, u32, u32)> {
+    os2::net::routes().into_iter().map(|r| (r.dest, r.gateway, r.mask, r.flags, r.iface.into_bytes(), r.uses, r.metric)).collect()
 }
 
 /// SIOSTATRT: struct rtentries {short hostcount, netcount; then per
@@ -446,7 +443,7 @@ unsafe fn routing_table(abi: Abi, data: *mut u8, len: usize) -> i32 {
     let rt = routes();
     let mut out = vec![0u8; 4];
     let mut n = 0u16;
-    for (dst, gw, _mask, flags, name) in &rt {
+    for (dst, gw, _mask, flags, name, uses, metric) in &rt {
         let mut e = [0u8; 64];
         // rt_hash: 0 marks the default route.
         let hash = if *dst == [0; 4] { 0u32 } else { u32::from_le_bytes(*dst) | 1 };
@@ -454,7 +451,8 @@ unsafe fn routing_table(abi: Abi, data: *mut u8, len: usize) -> i32 {
         e[4..20].copy_from_slice(&sockaddr(abi, *dst));
         e[20..36].copy_from_slice(&sockaddr(abi, *gw));
         e[36..38].copy_from_slice(&flags.to_le_bytes());
-        e[48..52].copy_from_slice(&1u32.to_le_bytes());
+        e[40..44].copy_from_slice(&uses.to_le_bytes());
+        e[48..52].copy_from_slice(&(*metric).max(1).to_le_bytes());
         if out.len() + 64 + name.len() + 1 > len {
             break;
         }
@@ -502,11 +500,18 @@ pub unsafe fn ioctl_len(abi: Abi, s: i32, cmd: u32, data: *mut u8, len: i32) -> 
         }
         (b'f', 125) => 0,
         (b's', 7) => {
-            // SIOCATMARK: never at an urgent mark.
-            if !data.is_null() {
-                unsafe { (data as *mut u32).write_unaligned(0) };
+            // SIOCATMARK: at the urgent mark.
+            if data.is_null() {
+                return fail(EFAULT);
             }
-            0
+            let mut v = 0u32;
+            match unsafe { Rs2SockIoctl(s as u32, 0x4004_7307, &mut v) } {
+                0 => {
+                    unsafe { (data as *mut u32).write_unaligned(v) };
+                    0
+                }
+                e => fail(e),
+            }
         }
         (b'i', 20) | (b'i', 36) => {
             // SIOCGIFCONF: struct ifconf {long len; char *buf}.
@@ -575,8 +580,11 @@ pub unsafe fn ioctl_len(abi: Abi, s: i32, cmd: u32, data: *mut u8, len: i32) -> 
             }
             unsafe { routing_table(abi, data, if len < 4 { 65535 } else { len as usize }) }
         }
-        (b'i', _) | (b'r', _) => fail(errno::EPERM),
-        _ => fail(EINVAL),
+        _ => match unsafe { crate::netctl::ioctl(abi, group, num, data, len) } {
+            Some(r) => r,
+            None if group == b'i' || group == b'r' => fail(errno::EPERM),
+            None => fail(EINVAL),
+        },
     }
 }
 
@@ -639,7 +647,13 @@ pub unsafe fn sendmsg(abi: Abi, s: i32, msg: *const u32, flags: i32) -> i32 {
     let (name, namelen, iov, iovlen) = unsafe { (*msg as *const u8, *msg.add(1) as i32, *msg.add(2) as *const u32, *msg.add(3) as i32) };
     let Some(v) = (unsafe { iovecs(iov, iovlen) }) else { return fail(EINVAL) };
     let d = unsafe { gather(&v) };
-    unsafe { sendto(abi, s, d.as_ptr(), d.len() as i32, flags, name, if name.is_null() { 0 } else { namelen }) }
+    let n = unsafe { sendto(abi, s, d.as_ptr(), d.len() as i32, flags & !crate::netctl::MSG_MAPIO, name, if name.is_null() { 0 } else { namelen }) };
+    if flags & crate::netctl::MSG_MAPIO != 0 && n >= 0 {
+        // The data is copied: the mapped blocks are free again.
+        let bases: Vec<u32> = v.iter().map(|x| x.0 as u32).collect();
+        crate::netctl::mapio_sent(&bases);
+    }
+    n
 }
 
 pub unsafe fn recvmsg(abi: Abi, s: i32, msg: *mut u32, flags: i32) -> i32 {

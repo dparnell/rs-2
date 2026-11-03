@@ -136,6 +136,108 @@ unsafe extern "C" {
     pub fn Rs2SockTake(s: u32) -> u32;
     #[link_name = "RS2API.221"]
     pub fn Rs2SockRelease(s: u32) -> u32;
+    #[link_name = "RS2API.240"]
+    pub fn Rs2NetControl(func: u32, input: *const u8, cb_in: u32, out: *mut u8, cb_out: *mut u32) -> u32;
+}
+
+// Rs2NetControl functions (kernel/src/api/sockets.rs).
+pub const NC_ROUTES: u32 = 1;
+pub const NC_ROUTE_ADD: u32 = 2;
+pub const NC_ROUTE_DELETE: u32 = 3;
+pub const NC_ROUTE_FLUSH: u32 = 4;
+pub const NC_ARP_LIST: u32 = 5;
+pub const NC_ARP_SET: u32 = 6;
+pub const NC_ARP_DELETE: u32 = 7;
+pub const NC_IF_SET: u32 = 8;
+pub const NC_IF_ADDRS: u32 = 9;
+pub const NC_STATS: u32 = 10;
+pub const NC_SYSCTL: u32 = 11;
+
+// NC_IF_SET operations.
+pub const IFOP_ADDRESS: u32 = 1;
+pub const IFOP_NETMASK: u32 = 2;
+pub const IFOP_UP: u32 = 3;
+pub const IFOP_DOWN: u32 = 4;
+pub const IFOP_ALIAS_ADD: u32 = 5;
+pub const IFOP_ALIAS_DELETE: u32 = 6;
+pub const IFOP_MTU: u32 = 7;
+pub const IFOP_METRIC: u32 = 8;
+pub const IFOP_DHCP_RENEW: u32 = 9;
+pub const IFOP_DHCP_RELEASE: u32 = 10;
+
+// NC_SYSCTL variables.
+pub const NV_FORWARDING: u32 = 1;
+pub const NV_KEEPIDLE: u32 = 2;
+pub const NV_KEEPINTVL: u32 = 3;
+pub const NV_KEEPCNT: u32 = 4;
+pub const NV_SENDSPACE: u32 = 5;
+pub const NV_RECVSPACE: u32 = 6;
+
+/// Rs2NetControl with an output buffer that grows to the answer.
+pub fn net_control(func: u32, input: &[u8]) -> Result<alloc::vec::Vec<u8>, u32> {
+    let mut room = 1024u32;
+    loop {
+        let mut out = alloc::vec![0u8; room as usize];
+        let mut n = room;
+        let rc = unsafe { Rs2NetControl(func, input.as_ptr(), input.len() as u32, out.as_mut_ptr(), &mut n) };
+        if rc != 0 {
+            return Err(rc);
+        }
+        if n <= room {
+            out.truncate(n as usize);
+            return Ok(out);
+        }
+        room = n + 256;
+    }
+}
+
+fn le32(b: &[u8], o: usize) -> u32 {
+    u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+}
+
+fn q4(b: &[u8], o: usize) -> [u8; 4] {
+    [b[o], b[o + 1], b[o + 2], b[o + 3]]
+}
+
+fn words(v: &[u32]) -> alloc::vec::Vec<u8> {
+    v.iter().flat_map(|x| x.to_le_bytes()).collect()
+}
+
+/// The OS/2 name of the interface with kernel index `index` ("lo",
+/// "lan0", ...).
+pub fn iface_name(index: u32) -> String {
+    let ifs = interfaces();
+    match ifs.get(index as usize) {
+        Some(i) if i.flags & IF_LOOPBACK != 0 => String::from("lo"),
+        Some(_) => {
+            let n = ifs[..index as usize].iter().filter(|i| i.flags & IF_LOOPBACK == 0).count();
+            alloc::format!("lan{n}")
+        }
+        None => alloc::format!("if{index}"),
+    }
+}
+
+/// The kernel index of an interface named as OS/2 names it ("lan0",
+/// "lo"), or as the kernel does ("eth0").
+pub fn iface_index(name: &str) -> Option<u32> {
+    let ifs = interfaces();
+    let l = name.to_ascii_lowercase();
+    if l == "lo" || l == "lo0" || l == "loopback" {
+        return ifs.iter().position(|i| i.flags & IF_LOOPBACK != 0).map(|p| p as u32);
+    }
+    if let Some(n) = l.strip_prefix("lan").and_then(|x| x.parse::<usize>().ok()) {
+        let mut k = 0;
+        for (p, i) in ifs.iter().enumerate() {
+            if i.flags & IF_LOOPBACK == 0 {
+                if k == n {
+                    return Some(p as u32);
+                }
+                k += 1;
+            }
+        }
+        return None;
+    }
+    ifs.iter().position(|i| i.name().eq_ignore_ascii_case(name)).map(|p| p as u32)
 }
 
 /// One socket of the stack (Rs2NetQuerySockets).
@@ -210,32 +312,148 @@ pub fn os2_interfaces() -> alloc::vec::Vec<(String, IfInfo)> {
 pub struct Route {
     pub dest: [u8; 4],
     pub mask: [u8; 4],
+    /// The next hop; for a network the interface is on, the interface's
+    /// address (as OS/2's netstat shows it).
     pub gateway: [u8; 4],
-    /// RTF_UP 1, RTF_GATEWAY 2.
+    /// RTF_UP 1, RTF_GATEWAY 2, RTF_HOST 4, RTF_STATIC 0x800.
     pub flags: u16,
     pub iface: String,
+    pub index: u32,
+    pub metric: u32,
+    pub uses: u32,
+    /// Made from an interface's configuration, not by ROUTE.
+    pub auto: bool,
 }
 
-/// The routing table as the stack routes: the default route through the
-/// first gateway, then a network route per configured interface (the
-/// interface's address as gateway).
+/// The routing table: the networks of the interfaces' addresses, then
+/// the routes (default gateways, ROUTE's).
 pub fn routes() -> alloc::vec::Vec<Route> {
     let mut v = alloc::vec::Vec::new();
-    let ifs = os2_interfaces();
-    if let Some((name, i)) = ifs.iter().find(|(_, i)| i.gateway != [0; 4] && i.flags & IF_UP != 0) {
-        v.push(Route { dest: [0; 4], mask: [0; 4], gateway: i.gateway, flags: 3, iface: name.clone() });
-    }
-    for (name, i) in &ifs {
-        if i.addr == [0; 4] || i.flags & IF_UP == 0 {
-            continue;
+    let Ok(b) = net_control(NC_ROUTES, &[]) else { return v };
+    let ifs = interfaces();
+    for e in b.chunks_exact(28) {
+        let index = le32(e, 12);
+        let mut gateway = q4(e, 8);
+        let (dest, mask) = (q4(e, 0), q4(e, 4));
+        if gateway == [0; 4] {
+            // A directly reached network: the interface's address on it.
+            if let Some(i) = ifs.get(index as usize) {
+                gateway = if_addrs(index)
+                    .into_iter()
+                    .find(|(a, m)| (0..4).all(|k| a[k] & m[k] == dest[k] & mask[k]))
+                    .map_or(i.addr, |x| x.0);
+            }
         }
-        let mut net = [0u8; 4];
-        for k in 0..4 {
-            net[k] = i.addr[k] & i.mask[k];
-        }
-        v.push(Route { dest: net, mask: i.mask, gateway: i.addr, flags: 1, iface: name.clone() });
+        v.push(Route {
+            dest,
+            mask,
+            gateway,
+            flags: u16::from_le_bytes([e[16], e[17]]),
+            auto: e[18] != 0,
+            iface: iface_name(index),
+            index,
+            metric: le32(e, 20),
+            uses: le32(e, 24),
+        });
     }
     v
+}
+
+pub fn route_add(dest: [u8; 4], mask: [u8; 4], gateway: [u8; 4], metric: u32) -> Result<(), u32> {
+    let mut b = alloc::vec::Vec::new();
+    b.extend_from_slice(&dest);
+    b.extend_from_slice(&mask);
+    b.extend_from_slice(&gateway);
+    b.extend_from_slice(&metric.to_le_bytes());
+    net_control(NC_ROUTE_ADD, &b).map(|_| ())
+}
+
+/// Delete a route; a zero `gateway` matches any.
+pub fn route_delete(dest: [u8; 4], mask: [u8; 4], gateway: [u8; 4]) -> Result<(), u32> {
+    let mut b = alloc::vec::Vec::new();
+    b.extend_from_slice(&dest);
+    b.extend_from_slice(&mask);
+    b.extend_from_slice(&gateway);
+    net_control(NC_ROUTE_DELETE, &b).map(|_| ())
+}
+
+/// Delete every route through a gateway; returns how many went.
+pub fn route_flush() -> Result<u32, u32> {
+    net_control(NC_ROUTE_FLUSH, &[]).map(|b| if b.len() >= 4 { le32(&b, 0) } else { 0 })
+}
+
+/// An ARP table entry.
+pub struct ArpEntry {
+    pub ip: [u8; 4],
+    pub mac: [u8; 6],
+    /// Resolved (else a resolution is in progress).
+    pub complete: bool,
+    pub permanent: bool,
+    pub publish: bool,
+    pub index: u32,
+    /// Seconds until it expires (0: permanent).
+    pub ttl: u32,
+}
+
+pub fn arp_table() -> alloc::vec::Vec<ArpEntry> {
+    let Ok(b) = net_control(NC_ARP_LIST, &[]) else { return alloc::vec::Vec::new() };
+    b.chunks_exact(20)
+        .map(|e| {
+            let f = u16::from_le_bytes([e[10], e[11]]);
+            ArpEntry {
+                ip: q4(e, 0),
+                mac: [e[4], e[5], e[6], e[7], e[8], e[9]],
+                complete: f & 1 != 0,
+                permanent: f & 2 != 0,
+                publish: f & 4 != 0,
+                index: le32(e, 12),
+                ttl: le32(e, 16),
+            }
+        })
+        .collect()
+}
+
+pub fn arp_set(ip: [u8; 4], mac: [u8; 6], permanent: bool, publish: bool) -> Result<(), u32> {
+    let mut b = alloc::vec::Vec::new();
+    b.extend_from_slice(&ip);
+    b.extend_from_slice(&mac);
+    b.extend_from_slice(&((permanent as u16) << 1 | (publish as u16) << 2).to_le_bytes());
+    net_control(NC_ARP_SET, &b).map(|_| ())
+}
+
+pub fn arp_delete(ip: [u8; 4]) -> Result<(), u32> {
+    net_control(NC_ARP_DELETE, &ip).map(|_| ())
+}
+
+/// Change an interface (an IFOP_* operation with its arguments).
+pub fn if_set(index: u32, op: u32, a: [u8; 4], b: [u8; 4]) -> Result<(), u32> {
+    let mut v = words(&[index, op]);
+    v.extend_from_slice(&a);
+    v.extend_from_slice(&b);
+    net_control(NC_IF_SET, &v).map(|_| ())
+}
+
+/// An interface's addresses and masks (primary first).
+pub fn if_addrs(index: u32) -> alloc::vec::Vec<([u8; 4], [u8; 4])> {
+    match net_control(NC_IF_ADDRS, &index.to_le_bytes()) {
+        Ok(b) => b.chunks_exact(8).map(|e| (q4(e, 0), q4(e, 4))).collect(),
+        Err(_) => alloc::vec::Vec::new(),
+    }
+}
+
+/// The stack's counters (see Rs2NetControl NC_STATS for the order).
+pub fn stats() -> alloc::vec::Vec<u32> {
+    match net_control(NC_STATS, &[]) {
+        Ok(b) => b.chunks_exact(4).map(|e| le32(e, 0)).collect(),
+        Err(_) => alloc::vec::Vec::new(),
+    }
+}
+
+/// Read (and with `set`, change) a variable of the stack; returns the
+/// value before.
+pub fn net_var(id: u32, set: Option<u32>) -> Result<u32, u32> {
+    let b = words(&[id, set.is_some() as u32, set.unwrap_or(0)]);
+    net_control(NC_SYSCTL, &b).map(|v| if v.len() >= 4 { le32(&v, 0) } else { 0 })
 }
 
 /// The host name: %HOSTNAME%, else "rs2" (the name the kernel's resolver
