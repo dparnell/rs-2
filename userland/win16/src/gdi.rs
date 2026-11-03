@@ -45,9 +45,23 @@ pub struct Font {
     pub underline: bool,
 }
 
+/// The pattern of a brush that is not solid: a hatch style (HS_*), a
+/// monochrome 8 x 8 pattern (rows top-down, the high bit leftmost, 1s in
+/// the background colour and 0s in the text colour as Windows draws
+/// them) or a colour one (64 COLORREFs, rows top-down).
+#[derive(Clone, PartialEq)]
+pub enum Pat {
+    Hatch(u16),
+    Mono([u8; 8]),
+    Color(Vec<u32>),
+}
+
 #[derive(Clone)]
 pub enum Obj {
-    Brush { color: u32, null: bool },
+    /// A brush: its colour (a pattern's average), null (BS_NULL), its
+    /// pattern and the bitmap or DIB it was made from (GetObject's
+    /// lbHatch).
+    Brush { color: u32, null: bool, pat: Option<Pat>, src: u16 },
     Pen { style: u16, width: u16, color: u32 },
     Font(Font),
     /// A PM bitmap: width, height, bits per pixel (1: monochrome).
@@ -129,7 +143,7 @@ fn sys_font() -> Font {
 fn g() -> &'static mut Gdi {
     let g = GDI.get();
     if g.objs.is_empty() {
-        let b = |c, null| Some(Obj::Brush { color: c, null });
+        let b = |c, null| Some(Obj::Brush { color: c, null, pat: None, src: 0 });
         let p = |c, style| Some(Obj::Pen { style, width: 1, color: c });
         let mono = Some(Obj::Font(Font { face: 1, ..sys_font() }));
         g.objs = alloc::vec![
@@ -227,7 +241,7 @@ pub fn sys_brush(i: u16) -> u16 {
     if b != 0 {
         return b;
     }
-    let b = new_obj(Obj::Brush { color: sys_color(i as u16), null: false });
+    let b = new_obj(Obj::Brush { color: sys_color(i as u16), null: false, pat: None, src: 0 });
     g().sys_brushes[i] = b;
     b
 }
@@ -325,13 +339,135 @@ pub fn dc_size(hdc: u16) -> (i32, i32) {
 
 /// Fill a device rectangle with a brush.
 pub fn fill_rect_dev(hdc: u16, r: [i32; 4], br: u16) {
-    let Some(c) = brush_color(br) else { return };
     let Some(d) = dc(hdc) else { return };
     if r[2] <= r[0] || r[3] <= r[1] {
         return;
     }
     let rc = pm_rect_dev(d, r);
-    unsafe { WinFillRect(d.hps, &rc, rgb(c)) };
+    fill_pm(d, &rc, br);
+}
+
+/// The 8 x 8 bits of Windows' hatch styles (rows top-down, the high bit
+/// leftmost, 1s are the hatch's lines): HS_HORIZONTAL, HS_VERTICAL,
+/// HS_FDIAGONAL, HS_BDIAGONAL, HS_CROSS, HS_DIAGCROSS.
+pub fn hatch_bits(style: u16) -> [u8; 8] {
+    let h = [0, 0, 0, 0, 0xff, 0, 0, 0];
+    let v = [0x08; 8];
+    let f: [u8; 8] = core::array::from_fn(|i| 0x80 >> i);
+    let b: [u8; 8] = core::array::from_fn(|i| 0x01 << i);
+    match style {
+        0 => h,
+        1 => v,
+        2 => f,
+        3 => b,
+        4 => core::array::from_fn(|i| h[i] | v[i]),
+        _ => core::array::from_fn(|i| f[i] | b[i]),
+    }
+}
+
+/// The lcid WIN16 tags pattern bitmaps with.
+const LCID_PATTERN: i32 = 200;
+
+/// Make a brush the PS's area attributes: its colour, and its pattern
+/// for one that is not solid (aligned with the DC's origin, as Windows'
+/// brush origin is). False for a null brush. A pattern stays set until
+/// `end_pattern`.
+pub fn set_area(d: &Dc, br: u16) -> bool {
+    let Some(c) = brush_color(br) else { return false };
+    let pat = match obj(br) {
+        Some(Obj::Brush { pat: Some(p), .. }) => p,
+        _ => {
+            unsafe { GpiSetColor(d.hps, rgb(c)) };
+            return true;
+        }
+    };
+    // (PM's patterns: 1 bits in the area colour, 0 bits in its
+    // background colour; rows bottom-up.)
+    let opaque = d.s.bk_mode == OPAQUE;
+    let (bits, fg, bg, mix) = match &pat {
+        Pat::Hatch(s) => (Some(hatch_bits(*s)), c, d.s.bk, if opaque { BM_OVERPAINT } else { BM_LEAVEALONE }),
+        Pat::Mono(m) => (Some(*m), d.s.bk, d.s.text, BM_OVERPAINT),
+        Pat::Color(_) => (None, c, d.s.bk, BM_OVERPAINT),
+    };
+    let hbm = match (&pat, bits) {
+        (_, Some(bits)) => {
+            let mut rows = [0u8; 32];
+            for (i, b) in bits.iter().enumerate() {
+                rows[(7 - i) * 4] = *b;
+            }
+            crate::bitmap::pm_bitmap_from(8, 8, 1, &rows, &[0, 0xffffff])
+        }
+        (Pat::Color(px), None) => {
+            let mut rows = alloc::vec![0u8; 8 * 24];
+            for y in 0..8 {
+                for x in 0..8 {
+                    let c = px.get(y * 8 + x).copied().unwrap_or(0);
+                    let o = (7 - y) * 24 + x * 3;
+                    rows[o] = (c >> 16) as u8;
+                    rows[o + 1] = (c >> 8) as u8;
+                    rows[o + 2] = c as u8;
+                }
+            }
+            crate::bitmap::pm_bitmap_from(8, 8, 24, &rows, &[])
+        }
+        _ => 0,
+    };
+    unsafe {
+        GpiSetColor(d.hps, rgb(fg));
+        GpiSetBackColor(d.hps, rgb(bg));
+        GpiSetBackMix(d.hps, mix);
+        GpiSetPatternSet(d.hps, 0);
+        GpiDeleteSetId(d.hps, LCID_PATTERN);
+        if hbm != 0 && GpiSetBitmapId(d.hps, hbm, LCID_PATTERN) != 0 {
+            GpiSetPatternSet(d.hps, LCID_PATTERN);
+            // Windows' pattern rows start at the top of the DC.
+            GpiSetPatternRefPoint(d.hps, &PointL { x: 0, y: d.height });
+        }
+    }
+    if hbm != 0 {
+        PATTERN_BM.get().push(hbm);
+    }
+    true
+}
+
+/// The pattern bitmaps of `set_area`, deleted with `end_pattern`.
+static PATTERN_BM: Global<Vec<u32>> = Global::new(Vec::new());
+
+/// Back to solid areas after a pattern.
+pub fn end_pattern(d: &Dc) {
+    unsafe {
+        GpiSetPatternSet(d.hps, 0);
+        GpiDeleteSetId(d.hps, LCID_PATTERN);
+        GpiSetBackMix(d.hps, BM_LEAVEALONE);
+        for hbm in core::mem::take(PATTERN_BM.get()) {
+            GpiDeleteBitmap(hbm);
+        }
+    }
+}
+
+/// Is the brush a pattern (not solid)?
+pub fn is_pattern(br: u16) -> bool {
+    matches!(obj(br), Some(Obj::Brush { pat: Some(_), null: false, .. }))
+}
+
+/// Fill a PM rectangle (right and top exclusive) with a brush.
+pub fn fill_pm(d: &Dc, rc: &RectL, br: u16) {
+    if rc.r <= rc.l || rc.t <= rc.b {
+        return;
+    }
+    if !is_pattern(br) {
+        if let Some(c) = brush_color(br) {
+            unsafe { WinFillRect(d.hps, rc, rgb(c)) };
+        }
+        return;
+    }
+    if set_area(d, br) {
+        unsafe {
+            GpiMove(d.hps, &PointL { x: rc.l, y: rc.b });
+            GpiBox(d.hps, DRO_FILL, &PointL { x: rc.r - 1, y: rc.t - 1 }, 0, 0);
+        }
+        end_pattern(d);
+    }
 }
 
 /// Polygons (logical points): the brush inside (the DC's fill mode),
@@ -340,8 +476,7 @@ pub fn poly_poly(hdc: u16, polys: &[Vec<(i32, i32)>]) -> bool {
     let Some(d) = dc(hdc) else { return false };
     let pm: Vec<Vec<PointL>> = polys.iter().filter(|p| p.len() >= 2).map(|p| p.iter().map(|&(x, y)| pm_pt(d, x, y)).collect()).collect();
     unsafe {
-        if let Some(c) = brush_color(d.s.brush) {
-            GpiSetColor(d.hps, rgb(c));
+        if set_area(d, d.s.brush) {
             // BA_BOUNDARY | BA_ALTERNATE or BA_WINDING
             GpiBeginArea(d.hps, if d.s.poly_fill == 2 { 2 } else { 0 });
             for p in &pm {
@@ -349,6 +484,7 @@ pub fn poly_poly(hdc: u16, polys: &[Vec<(i32, i32)>]) -> bool {
                 GpiPolyLine(d.hps, p.len() as i32 - 1, p[1..].as_ptr());
             }
             GpiEndArea(d.hps);
+            end_pattern(d);
         }
         if let Some((c, w)) = pen_color(d) {
             GpiSetColor(d.hps, rgb(c));
@@ -760,8 +896,17 @@ pub fn brush_color(br: u16) -> Option<u32> {
 }
 
 pub fn fill_rect(hdc: u16, r: [i32; 4], br: u16) {
-    let Some(c) = brush_color(br) else { return };
-    fill(hdc, r, c);
+    if !is_pattern(br) {
+        let Some(c) = brush_color(br) else { return };
+        fill(hdc, r, c);
+        return;
+    }
+    let Some(d) = dc(hdc) else { return };
+    if r[2] <= r[0] || r[3] <= r[1] {
+        return;
+    }
+    let rc = pm_rect(d, r);
+    fill_pm(d, &rc, br);
 }
 
 /// Fill a rectangle with a colour.
@@ -1158,9 +1303,9 @@ fn ellipse(d: &Dc, l: i32, t: i32, r: i32, b: i32) {
     unsafe {
         GpiSetArcParams(d.hps, &[rx.max(1), ry.max(1), 0, 0]);
         GpiMove(d.hps, &c);
-        if let Some(col) = brush_color(d.s.brush) {
-            GpiSetColor(d.hps, rgb(col));
+        if set_area(d, d.s.brush) {
             GpiFullArc(d.hps, DRO_FILL, 1 << 16);
+            end_pattern(d);
         }
         if let Some((col, w)) = pen_color(d) {
             GpiSetColor(d.hps, rgb(col));
@@ -1232,23 +1377,26 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             ellipse(d, l, t, r, b);
             1
         }
-        // RoundRect(hdc, l, t, r, b, w, h): a rectangle.
+        // RoundRect(hdc, l, t, r, b, w, h): corners of an ellipse w x h.
         28 => {
-            let (h, l, t, r, b, _, _) = (a.w(), a.i(), a.i(), a.i(), a.i(), a.i(), a.i());
-            rectangle(h, l, t, r, b)
+            let (h, l, t, r, b, w, hh) = (a.w(), a.i(), a.i(), a.i(), a.i(), a.i(), a.i());
+            round_rect(h, l, t, r, b, w, hh)
         }
         // PatBlt(hdc, x, y, w, h, rop)
         29 => {
             let (h, x, y, w, hh, rop) = (a.w(), a.i(), a.i(), a.i(), a.i(), a.l());
             let r = [x.min(x + w), y.min(y + hh), x.max(x + w), y.max(y + hh)];
+            let br = dc(h).map_or(0, |d| d.s.brush);
             match rop {
-                0x0055_0009 | 0x005a_0049 => invert(h, r), // DSTINVERT, PATINVERT
-                0x0000_0042 => fill(h, r, 0),              // BLACKNESS
-                0x00ff_0062 => fill(h, r, 0xffffff),       // WHITENESS
+                0x0055_0009 => invert(h, r),         // DSTINVERT
+                0x0000_0042 => fill(h, r, 0),        // BLACKNESS
+                0x00ff_0062 => fill(h, r, 0xffffff), // WHITENESS
+                // PATCOPY with a solid brush.
+                0x00f0_0021 if !is_pattern(br) => fill_rect(h, r, br),
+                // The rest (PATINVERT, patterns...) are PM's raster
+                // operations with the brush as the pattern.
                 _ => {
-                    if let Some(b) = dc(h).map(|d| d.s.brush) {
-                        fill_rect(h, r, b);
-                    }
+                    crate::bitmap::blit(h, r[0], r[1], r[2] - r[0], r[3] - r[1], 0, 0, 0, rop);
                 }
             }
             1
@@ -1321,14 +1469,12 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             }
             let pts = points(p, n as usize, d);
             unsafe {
-                if ord == 36 {
-                    if let Some(c) = brush_color(d.s.brush) {
-                        GpiSetColor(d.hps, rgb(c));
-                        GpiBeginArea(d.hps, 0);
-                        GpiMove(d.hps, &pts[0]);
-                        GpiPolyLine(d.hps, n - 1, pts[1..].as_ptr());
-                        GpiEndArea(d.hps);
-                    }
+                if ord == 36 && set_area(d, d.s.brush) {
+                    GpiBeginArea(d.hps, if d.s.poly_fill == 2 { 2 } else { 0 });
+                    GpiMove(d.hps, &pts[0]);
+                    GpiPolyLine(d.hps, n - 1, pts[1..].as_ptr());
+                    GpiEndArea(d.hps);
+                    end_pattern(d);
                 }
                 if let Some((c, w)) = pen_color(d) {
                     GpiSetColor(d.hps, rgb(c));
@@ -1383,7 +1529,17 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             }
             let style = unsafe { (p as *const u16).read_unaligned() };
             let c = unsafe { (p.add(2) as *const u32).read_unaligned() };
-            new_obj(Obj::Brush { color: c & 0xffffff, null: style == 1 }) as u32
+            let hatch = unsafe { (p.add(6) as *const u16).read_unaligned() };
+            match style {
+                // BS_HATCHED
+                2 => new_obj(Obj::Brush { color: c & 0xffffff, null: false, pat: Some(Pat::Hatch(hatch.min(5))), src: hatch }) as u32,
+                // BS_PATTERN (lbHatch a bitmap), BS_DIBPATTERN (a global
+                // block with a packed DIB, lbColor DIB_RGB_COLORS or
+                // DIB_PAL_COLORS).
+                3 => crate::bitmap::pattern_brush(hatch) as u32,
+                5 => crate::bitmap::dib_pattern_brush(hatch, c as u16) as u32,
+                _ => new_obj(Obj::Brush { color: c & 0xffffff, null: style == 1, pat: None, src: 0 }) as u32,
+            }
         }
         // CreateFont(height, width, esc, orient, weight, italic, underline,
         // strikeout, charset, outprec, clipprec, quality, pitch, face)
@@ -1421,13 +1577,11 @@ pub fn call(ord: u32, a: &mut Pascal) -> u32 {
             let c = unsafe { (p.add(6) as *const u32).read_unaligned() };
             new_obj(Obj::Pen { style, width, color: c & 0xffffff }) as u32
         }
-        // CreateSolidBrush(color), CreateHatchBrush(style, color): solid.
+        // CreateSolidBrush(color), CreateHatchBrush(style, color).
         58 | 66 => {
-            if ord == 58 {
-                a.w();
-            }
+            let hatch = if ord == 58 { Some(a.w().min(5)) } else { None };
             let c = a.l();
-            new_obj(Obj::Brush { color: c & 0xffffff, null: false }) as u32
+            new_obj(Obj::Brush { color: c & 0xffffff, null: false, pat: hatch.map(Pat::Hatch), src: hatch.unwrap_or(0) }) as u32
         }
         // DeleteObject(obj): not the stock ones.
         69 => {
@@ -1659,12 +1813,35 @@ fn text_out(h: u16, x: i32, y: i32, text: &[u8]) {
     }
 }
 
+fn round_rect(h: u16, l: i32, t: i32, r: i32, b: i32, w: i32, hh: i32) -> u32 {
+    let Some(d) = dc(h) else { return 0 };
+    let rc = pm_rect(d, [l, t, r, b]);
+    // The corner ellipse's size in device units.
+    let (dw, dh) = {
+        let (x0, y0) = to_dev(d, 0, 0);
+        let (x1, y1) = to_dev(d, w, hh);
+        ((x1 - x0).abs(), (y1 - y0).abs())
+    };
+    unsafe {
+        if set_area(d, d.s.brush) {
+            GpiMove(d.hps, &PointL { x: rc.l, y: rc.b });
+            GpiBox(d.hps, DRO_FILL, &PointL { x: rc.r - 1, y: rc.t - 1 }, dw, dh);
+            end_pattern(d);
+        }
+        if let Some((color, pw)) = pen_color(d) {
+            GpiSetColor(d.hps, rgb(color));
+            GpiSetLineWidth(d.hps, pw << 16);
+            GpiMove(d.hps, &PointL { x: rc.l, y: rc.b });
+            GpiBox(d.hps, DRO_OUTLINE, &PointL { x: rc.r - 1, y: rc.t - 1 }, dw, dh);
+        }
+    }
+    1
+}
+
 fn rectangle(h: u16, l: i32, t: i32, r: i32, b: i32) -> u32 {
     let Some(d) = dc(h) else { return 0 };
     let rc = pm_rect(d, [l, t, r, b]);
-    if let Some(c) = brush_color(d.s.brush) {
-        unsafe { WinFillRect(d.hps, &rc, rgb(c)) };
-    }
+    fill_pm(d, &rc, d.s.brush);
     if let Some((color, w)) = pen_color(d) {
         unsafe {
             GpiSetColor(d.hps, rgb(color));
@@ -1680,10 +1857,18 @@ fn rectangle(h: u16, l: i32, t: i32, r: i32, b: i32) -> u32 {
 fn get_object(o: u16, cb: i32, p: *mut u8) -> i32 {
     let mut b = Vec::new();
     match obj(o) {
-        Some(Obj::Brush { color, null }) => {
-            b.extend_from_slice(&(if null { 1u16 } else { 0 }).to_le_bytes());
+        Some(Obj::Brush { color, null, pat, src }) => {
+            // BS_SOLID 0, BS_NULL 1, BS_HATCHED 2, BS_PATTERN 3, BS_DIBPATTERN 5.
+            let style: u16 = match pat {
+                _ if null => 1,
+                None => 0,
+                Some(Pat::Hatch(_)) => 2,
+                Some(_) if crate::bitmap::bitmap_of(src).is_some() => 3,
+                Some(_) => 5,
+            };
+            b.extend_from_slice(&style.to_le_bytes());
             b.extend_from_slice(&color.to_le_bytes());
-            b.extend_from_slice(&0u16.to_le_bytes());
+            b.extend_from_slice(&(if style == 0 || style == 1 { 0 } else { src }).to_le_bytes());
         }
         Some(Obj::Pen { style, width, color }) => {
             b.extend_from_slice(&style.to_le_bytes());

@@ -249,8 +249,14 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
         3041 => {
             let (h, r, br, w, hh) = (a.w(), a.w(), a.w(), a.i(), a.i());
             let Some(r) = region(r) else { return Some(0) };
-            let inner: Rects = r.iter().map(|q| [q[0] + w, q[1] + hh, q[2] - w, q[3] - hh]).filter(|q| q[2] > q[0] && q[3] > q[1]).collect();
-            for q in combine(&r, &combine(&inner, &Vec::new(), 2), 4) {
+            // The inside: what is still in the region w pels left and
+            // right and h pels up and down.
+            let shift = |dx: i32, dy: i32| -> Rects { r.iter().map(|q| [q[0] + dx, q[1] + dy, q[2] + dx, q[3] + dy]).collect() };
+            let mut inner = r.clone();
+            for (dx, dy) in [(w, 0), (-w, 0), (0, hh), (0, -hh)] {
+                inner = combine(&inner, &shift(dx, dy), 1);
+            }
+            for q in combine(&r, &inner, 4) {
                 gdi::fill_rect(h, q, br);
             }
             1

@@ -232,6 +232,12 @@ unsafe extern "C" {
     pub fn GpiSetCharSet(hps: u32, lcid: i32) -> u32;
     #[link_name = "PMGPI.378"]
     pub fn GpiDeleteSetId(hps: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.508"]
+    pub fn GpiSetBitmapId(hps: u32, hbm: u32, lcid: i32) -> u32;
+    #[link_name = "PMGPI.542"]
+    pub fn GpiSetPatternRefPoint(hps: u32, p: *const PointL) -> u32;
+    #[link_name = "PMGPI.543"]
+    pub fn GpiSetPatternSet(hps: u32, set: i32) -> u32;
     #[link_name = "PMGPI.368"]
     pub fn GpiCreateLogFont(hps: u32, name: *const u8, lcid: i32, fat: *const u8) -> i32;
     #[link_name = "PMGPI.510"]

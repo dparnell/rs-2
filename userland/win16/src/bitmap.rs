@@ -401,9 +401,19 @@ fn get_dib_bits(h: u16, start: i32, scans: i32, bits: *mut u8, bmi: *mut u8) -> 
 /// monochrome source's 1s the background colour and 0s the text colour.
 fn blit_colors(hdc: u16) {
     let Some(d) = gdi::dc(hdc) else { return };
-    let brush = gdi::brush_color(gdi::brush_of(hdc)).unwrap_or(0xffffff);
+    let br = gdi::brush_of(hdc);
+    let brush = gdi::brush_color(br).unwrap_or(0xffffff);
     let mut area = [0u8; 24];
     area[0..4].copy_from_slice(&gdi::rgb(brush).to_le_bytes());
+    // A hatched or pattern brush is the blit's pattern.
+    if gdi::is_pattern(br) {
+        gdi::set_area(d, br);
+        let mut image = [0u8; 12];
+        image[0..4].copy_from_slice(&gdi::rgb(gdi::bk_color(hdc)).to_le_bytes());
+        image[4..8].copy_from_slice(&gdi::rgb(gdi::text_color(hdc)).to_le_bytes());
+        unsafe { GpiSetAttrs(d.hps, PRIM_IMAGE, 3, 0, image.as_ptr()) };
+        return;
+    }
     let mut image = [0u8; 12];
     image[0..4].copy_from_slice(&gdi::rgb(gdi::bk_color(hdc)).to_le_bytes());
     image[4..8].copy_from_slice(&gdi::rgb(gdi::text_color(hdc)).to_le_bytes());
@@ -507,7 +517,11 @@ fn blt(dst: u16, x: i32, y: i32, w: i32, h: i32, src: u16, sx: i32, sy: i32, sw:
         (0, 2)
     };
     // BBO_IGNORE: stretching drops pels.
-    (unsafe { GpiBitBlt(dps, sps, n, pts.as_ptr(), rop3 as i32, 2) } == 1) as u32
+    let ok = (unsafe { GpiBitBlt(dps, sps, n, pts.as_ptr(), rop3 as i32, 2) } == 1) as u32;
+    if let Some(d) = gdi::dc(dst) {
+        gdi::end_pattern(d);
+    }
+    ok
 }
 
 /// Draw a DIB on a DC (SetDIBitsToDevice, StretchDIBits).
@@ -567,7 +581,68 @@ pub fn from_dib(data: &[u8]) -> u16 {
     b
 }
 
-/// The average colour of a bitmap (a pattern brush is that colour).
+/// A PM bitmap from bits (rows bottom-up, 4-byte aligned) and a colour
+/// table.
+pub fn pm_bitmap_from(w: i32, h: i32, bpp: u16, bits: &[u8], colors: &[u32]) -> u32 {
+    let hdr = info(w, h, bpp, colors);
+    unsafe { GpiCreateBitmap(0, hdr.as_ptr(), CBM_INIT, bits.as_ptr(), hdr.as_ptr()) }
+}
+
+/// The 8 x 8 pattern at the top left of a bitmap (repeated if it is
+/// smaller): monochrome for a monochrome bitmap.
+fn pattern_of(h: u16) -> Option<gdi::Pat> {
+    let (_, w, bh, bpp) = bitmap_of(h)?;
+    let mut bmi = info(w, bh, 24, &[]);
+    let stride = (w as usize * 3).div_ceil(4) * 4;
+    let mut buf = alloc::vec![0u8; stride * bh as usize];
+    with_ps(h, |hps, _| unsafe { GpiQueryBitmapBits(hps, 0, bh, buf.as_mut_ptr(), bmi.as_mut_ptr()) });
+    // Windows' row y is PM's row bh - 1 - y.
+    let px = |x: usize, y: usize| {
+        let (x, y) = (x % w as usize, y % bh as usize);
+        let o = (bh as usize - 1 - y) * stride + x * 3;
+        (buf[o + 2] as u32) | (buf[o + 1] as u32) << 8 | (buf[o] as u32) << 16
+    };
+    if bpp == 1 {
+        let mut m = [0u8; 8];
+        for (y, row) in m.iter_mut().enumerate() {
+            for x in 0..8 {
+                if px(x, y) & 0x808080 != 0 {
+                    *row |= 0x80 >> x;
+                }
+            }
+        }
+        return Some(gdi::Pat::Mono(m));
+    }
+    Some(gdi::Pat::Color((0..64).map(|k| px(k % 8, k / 8)).collect()))
+}
+
+/// CreatePatternBrush(hbm), LOGBRUSH BS_PATTERN.
+pub fn pattern_brush(h: u16) -> u16 {
+    let Some(pat) = pattern_of(h) else { return 0 };
+    gdi::new_obj(Obj::Brush { color: average(h), null: false, pat: Some(pat), src: h })
+}
+
+/// CreateDIBPatternBrush(hglobal, usage), LOGBRUSH BS_DIBPATTERN: a
+/// packed DIB in a global block.
+pub fn dib_pattern_brush(g: u16, _usage: u16) -> u16 {
+    let n = crate::kernel::global_size(g) as usize;
+    let p = thunk16::flat((g as u32) << 16);
+    if p.is_null() || n < 16 {
+        return 0;
+    }
+    let data = unsafe { core::slice::from_raw_parts(p, n) };
+    let b = from_dib(data);
+    if b == 0 {
+        return 0;
+    }
+    let pat = pattern_of(b);
+    let color = average(b);
+    gdi::delete_object(b);
+    let Some(pat) = pat else { return 0 };
+    gdi::new_obj(Obj::Brush { color, null: false, pat: Some(pat), src: g })
+}
+
+/// The average colour of a bitmap (a pattern brush's colour).
 fn average(h: u16) -> u32 {
     let Some((_, w, bh, _)) = bitmap_of(h) else { return 0 };
     let (w, bh) = (w.min(8), bh.min(8));
@@ -827,14 +902,14 @@ pub fn call(ord: u32, a: &mut Pascal) -> Option<u32> {
             scans as u32
         }
         // CreatePatternBrush(hbm), CreateDIBPatternBrush(hglobal, usage):
-        // a solid brush of the pattern's average colour.
+        // the top-left 8 x 8 pels of the bitmap.
         3060 => {
             let h = a.w();
-            gdi::new_obj(Obj::Brush { color: average(h), null: false }) as u32
+            pattern_brush(h) as u32
         }
         3445 => {
-            let (_g, _u) = (a.w(), a.w());
-            gdi::new_obj(Obj::Brush { color: 0x808080, null: false }) as u32
+            let (g, u) = (a.w(), a.w());
+            dib_pattern_brush(g, u) as u32
         }
         // CreatePalette(LOGPALETTE: version, count, entries)
         3360 => {
