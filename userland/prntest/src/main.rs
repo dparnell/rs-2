@@ -493,6 +493,74 @@ fn port_jobs() {
     check("the port's job reaches the printer unchanged", out == data);
 }
 
+/// A raw job of `data` on the test queue: its id.
+fn raw_job_of(doc: &[u8], data: &[u8]) -> u32 {
+    let h = qm_open(b"PM_Q_RAW");
+    let d = [doc, b"\0"].concat();
+    unsafe {
+        SplQmStartDoc(h, d.as_ptr());
+        SplQmWrite(h, data.len() as i32, data.as_ptr());
+    }
+    let id = unsafe { SplQmEndDoc(h) };
+    unsafe { SplQmClose(h) };
+    id
+}
+
+fn write_file(path: &[u8], data: &[u8]) {
+    let p = [path, b"\0"].concat();
+    let (mut hf, mut act) = (0, 0);
+    if unsafe { DosOpen(p.as_ptr(), &mut hf, &mut act, 0, 0, OPEN_ACTION_CREATE_IF_NEW | OPEN_ACTION_REPLACE_IF_EXISTS, OPEN_ACCESS_WRITEONLY | OPEN_SHARE_DENYNONE, null_mut()) } == 0 {
+        let mut w = 0;
+        unsafe {
+            DosWrite(hf, data.as_ptr(), data.len() as u32, &mut w);
+            DosClose(hf);
+        }
+    }
+}
+
+/// The queue's separator file is printed before each job; a queue
+/// prints only inside its start and stop times.
+fn separators_and_times() {
+    // A separator file in LAN Manager's format (as OS/2's SAMPLE.SEP).
+    write_file(b"C:\\PRNTEST.SEP", b"@\r\n@L*** @N@L, job @I@L (@J@L) on @Q@L ***\r\n@W10\r\n@L0123456789ABCDEF@0@H41@1\r\n@E\r\n");
+    let sep = b"C:\\PRNTEST.SEP\0";
+    check("SplSetQueue separator file", unsafe { SplSetQueue(null(), Q.as_ptr(), 3, sep.as_ptr(), sep.len() as u32, 5) } == 0);
+    let mut buf = vec![0u8; 2048];
+    let mut need = 0;
+    unsafe { SplQueryQueue(null(), Q.as_ptr(), 3, buf.as_mut_ptr(), buf.len() as u32, &mut need) };
+    check("SplQueryQueue level 3: the separator file", cstr(rd32(&buf, 12)) == b"C:\\PRNTEST.SEP");
+    delete(OUT);
+    let data = b"after the separator\r\n";
+    let id = raw_job_of(b"sepdoc", data);
+    check("a job on a queue with a separator file prints", wait_printed(id, 30));
+    let out = wait_output(10).unwrap_or_default();
+    let want = alloc::format!("*** LOCAL, job {id} (sepdoc) on PRNTESTQ ***\r\n0123456789\r\nA\r\n\r\n\x0cafter the separator\r\n");
+    check("the separator (owner, job id, document, queue, width, hex, new lines, eject), then the job", out == want.as_bytes());
+    if out != want.as_bytes() {
+        println!("prntest: separator output {:?}", core::str::from_utf8(&out).unwrap_or("?"));
+    }
+    unsafe { SplSetQueue(null(), Q.as_ptr(), 3, b"\0".as_ptr(), 1, 5) };
+    // Print times: a window that starts two hours from now.
+    let mut dt = DateTime::default();
+    unsafe { DosGetDateTime(&mut dt) };
+    let now = dt.hours as u16 * 60 + dt.minutes as u16;
+    let (start, until) = ((now + 120) % 1440, (now + 180) % 1440);
+    let ok = unsafe { SplSetQueue(null(), Q.as_ptr(), 3, start.to_le_bytes().as_ptr(), 2, 3) } == 0 && unsafe { SplSetQueue(null(), Q.as_ptr(), 3, until.to_le_bytes().as_ptr(), 2, 4) } == 0;
+    unsafe { SplQueryQueue(null(), Q.as_ptr(), 3, buf.as_mut_ptr(), buf.len() as u32, &mut need) };
+    check("SplSetQueue start and stop times", ok && rd16(&buf, 6) == start && rd16(&buf, 8) == until);
+    delete(OUT);
+    let id = raw_job_of(b"later", b"printed in its time\r\n");
+    unsafe { DosSleep(4000) };
+    let mut b = [0u8; 64];
+    check("outside its print times the queue keeps the job", unsafe { SplQueryJob(null(), Q.as_ptr(), id, 0, b.as_mut_ptr(), b.len() as u32, &mut need) } == 0 && read_file(OUT).is_none());
+    // The window opened (start = stop: always).
+    unsafe {
+        SplSetQueue(null(), Q.as_ptr(), 3, 0u16.to_le_bytes().as_ptr(), 2, 3);
+        SplSetQueue(null(), Q.as_ptr(), 3, 0u16.to_le_bytes().as_ptr(), 2, 4);
+    }
+    check("inside its print times the job prints", wait_printed(id, 30) && wait_output(10).unwrap_or_default() == b"printed in its time\r\n");
+}
+
 /// DEVOPENSTRUC for the test queue.
 fn dop(datatype: &'static [u8]) -> [u32; 9] {
     [Q.as_ptr() as u32, b"PSCRIPT\0".as_ptr() as u32, 0, datatype.as_ptr() as u32, b"prntest\0".as_ptr() as u32, 0, 0, 0, 0]
@@ -801,6 +869,7 @@ fn main(s: &Startup) -> u32 {
     spooler_calls();
     raw_job();
     port_jobs();
+    separators_and_times();
     queued_std();
     queued_raw();
     direct();
