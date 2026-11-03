@@ -22,6 +22,8 @@ extern crate alloc;
 use alloc::vec;
 use alloc::vec::Vec;
 
+pub mod server;
+
 /// A key the terminal turns into what it sends.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Key {
