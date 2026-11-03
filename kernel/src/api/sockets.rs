@@ -71,7 +71,7 @@
 //! 8 change an interface (in: `ULONG index, op, a, b`; op 1 address a
 //! with mask b (0: keep or classful), 2 netmask a, 3 up, 4 down, 5 add
 //! alias a/b, 6 delete address a, 7 MTU a, 8 metric a, 9 DHCP renew (or
-//! start), 10 DHCP release), 9 an interface's addresses (in: index; out:
+//! start), 10 DHCP release, 11 name servers a and b (0: none)), 9 an interface's addresses (in: index; out:
 //! address/mask pairs), 10 counters (out: 39 ULONGs: IP received, bad,
 //! delivered, sent, forwarded, no route, unknown protocol, fragments,
 //! reassembled, fragmented; ICMP received, sent, echo requests, unreachables
@@ -471,6 +471,7 @@ const IF_MTU: u32 = 7;
 const IF_METRIC: u32 = 8;
 const IF_DHCP_RENEW: u32 = 9;
 const IF_DHCP_RELEASE: u32 = 10;
+const IF_DNS: u32 = 11;
 
 // NC_SYSCTL variables.
 const SYS_FORWARDING: u32 = 1;
@@ -616,6 +617,10 @@ fn control(func: u32, i: &[u8]) -> Result<Vec<u8>, u32> {
                     IF_METRIC => st.set_metric(n, av),
                     IF_DHCP_RENEW => st.dhcp_renew(n, now),
                     IF_DHCP_RELEASE => st.dhcp_release(n, now),
+                    IF_DNS => {
+                        st.ifaces[n].dns = [a, b].into_iter().filter(|x| !x.is_unspecified()).collect();
+                        Ok(())
+                    }
                     _ => Err(tcpip::Error::InvalidArg),
                 }
             })

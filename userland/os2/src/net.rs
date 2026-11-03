@@ -164,6 +164,7 @@ pub const IFOP_MTU: u32 = 7;
 pub const IFOP_METRIC: u32 = 8;
 pub const IFOP_DHCP_RENEW: u32 = 9;
 pub const IFOP_DHCP_RELEASE: u32 = 10;
+pub const IFOP_DNS: u32 = 11;
 
 // NC_SYSCTL variables.
 pub const NV_FORWARDING: u32 = 1;

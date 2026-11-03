@@ -8,6 +8,10 @@
 //! and the programs take them at the next start), %ETC%\RESOLV2
 //! (`domain`, `nameserver`: the resolver calls of the socket DLLs) and
 //! %ETC%\HOSTS. The current state of the interfaces is shown too.
+//! Save also applies the Network page to lan0 at once (on or off, DHCP
+//! or the fixed address, mask and router, through IFCONFIG's and ROUTE's
+//! kernel calls, with its name servers); the host name follows at the
+//! next start.
 //!
 //! Without PM, or for scripts: `TCPCFG2 /QUERY` prints the settings,
 //! `TCPCFG2 setting=value ...` changes them without the window
@@ -277,6 +281,43 @@ fn save(s: &Settings) -> Result<(), String> {
     Ok(())
 }
 
+/// Apply the Network page to lan0 now. Ok says what was done.
+fn apply_now(s: &Settings) -> Result<String, String> {
+    let Some(i) = iface_index("lan0") else { return Ok(String::from("No network adapter: nothing to change now.")) };
+    let info = interfaces().get(i as usize).copied().unwrap_or_default();
+    let fail = |what: &str, e: u32| alloc::format!("Saved, but {what} could not be changed now ({}).", strerror(e));
+    if !s.enabled {
+        if info.flags & IF_UP != 0 {
+            if_set(i, IFOP_DOWN, [0; 4], [0; 4]).map_err(|e| fail("lan0", e))?;
+        }
+        return Ok(String::from("lan0 is off now."));
+    }
+    if info.flags & IF_UP == 0 {
+        if_set(i, IFOP_UP, [0; 4], [0; 4]).map_err(|e| fail("lan0", e))?;
+    }
+    if s.dhcp {
+        if info.flags & IF_DHCP == 0 {
+            if_set(i, IFOP_DHCP_RENEW, [0; 4], [0; 4]).map_err(|e| fail("lan0", e))?;
+            return Ok(String::from("lan0 asks DHCP for an address now."));
+        }
+        return Ok(String::from("lan0 keeps its DHCP lease."));
+    }
+    let (Some(a), Some(m)) = (parse_ip(s.addr.trim()), parse_ip(s.mask.trim())) else { return Ok(String::new()) };
+    if info.addr != a || info.mask != m || info.flags & IF_DHCP != 0 {
+        if_set(i, IFOP_ADDRESS, a, m).map_err(|e| fail("the address", e))?;
+    }
+    if let Some(r) = parse_ip(s.router.trim()) {
+        let has = routes().iter().any(|x| x.dest == [0; 4] && x.mask == [0; 4] && x.gateway == r);
+        if !has {
+            let _ = route_delete([0; 4], [0; 4], [0; 4]);
+            route_add([0; 4], [0; 4], r, 1).map_err(|e| fail("the router", e))?;
+        }
+    }
+    let ns: Vec<[u8; 4]> = s.ns.iter().filter_map(|n| parse_ip(n.trim())).collect();
+    let _ = if_set(i, IFOP_DNS, ns.first().copied().unwrap_or([0; 4]), ns.get(1).copied().unwrap_or([0; 4]));
+    Ok(alloc::format!("lan0 uses {} now.", ip(a)))
+}
+
 /// The interfaces as they are now.
 fn current() -> String {
     let mut t = String::new();
@@ -342,8 +383,12 @@ fn command_line(a: &[String]) -> u32 {
     }
     match save(&s) {
         Ok(()) => {
+            let now = apply_now(&s);
             query(&s);
-            outln("TCPCFG2: saved; the changes take effect when rs2 starts again.");
+            match now {
+                Ok(m) => outln(&alloc::format!("TCPCFG2: saved. {m} The host name takes effect when rs2 starts again.")),
+                Err(m) => outln(&alloc::format!("TCPCFG2: {m}")),
+            }
             0
         }
         Err(e) => {
@@ -606,8 +651,12 @@ fn command(id: u32) {
             let s = entered();
             match save(&s) {
                 Ok(()) => {
+                    let now = apply_now(&s);
                     app().saved = s;
-                    message("Saved. The changes take effect when rs2 starts again.");
+                    match now {
+                        Ok(m) => message(&alloc::format!("Saved. {m} The host name takes effect when rs2 starts again.")),
+                        Err(m) => message(&m),
+                    }
                 }
                 Err(e) => message(&e),
             }
