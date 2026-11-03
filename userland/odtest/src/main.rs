@@ -45,6 +45,18 @@ unsafe extern "C" {
     static ODWindowClassData: [usize; 26];
     #[link_name = "OPENDOC.375"]
     static ODMenuBarClassData: [usize; 24];
+    #[link_name = "OPENDOC.454"]
+    fn ODSettingsExtensionNewClass(major: i32, minor: i32) -> usize;
+    #[link_name = "OPENDOC.453"]
+    static ODSettingsExtensionClassData: [usize; 25];
+    #[link_name = "OPENDOC.452"]
+    static ODSettingsExtensionCClassData: [usize; 4];
+    #[link_name = "PMWIN.763"]
+    fn WinInitialize(opts: u32) -> u32;
+    #[link_name = "PMWIN.716"]
+    fn WinCreateMsgQueue(hab: u32, cmsg: i32) -> u32;
+    #[link_name = "PMWIN.920"]
+    fn WinSendMsg(hwnd: u32, msg: u32, mp1: usize, mp2: usize) -> usize;
     #[link_name = "OPENDOC.810"]
     fn StorageUnitGetValue(su: usize, ev: usize, size: usize, buf: *mut u8) -> usize;
     #[link_name = "OPENDOC.906"]
@@ -460,6 +472,57 @@ fn pt(x: i32, y: i32) -> u32 {
     (x as u16 as u32) | ((y as u16 as u32) << 16)
 }
 
+static mut PAGES_NB: u32 = 0;
+
+/// RS2TestSettings's AddNotebookPages: the notebook it got, then the
+/// standard Name and Type pages (flags 0x3) from its parent.
+extern "C" fn settings_pages(this: usize, ev: usize, nb: usize, flags: usize, r: usize) -> usize {
+    unsafe { PAGES_NB = nb as u32 };
+    let ccd = unsafe { (&raw const RS2TestSettingsCClassData) as *const usize };
+    somsup::call_parent(ccd, cd!(ODSettingsExtensionClassData), 18, &[this, ev, nb, 0x3, r])
+}
+
+#[unsafe(no_mangle)]
+pub static mut RS2TestSettingsClassData: [usize; 4] = [0; 4];
+#[unsafe(no_mangle)]
+pub static mut RS2TestSettingsCClassData: [usize; 8] = [0; 8];
+
+fn settings_test(part: usize, frame: usize) {
+    let e = ev();
+    let hab = unsafe { WinInitialize(0) };
+    let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
+    if hmq == 0 {
+        println!("SKIP settings notebook (no PM message queue)");
+        return;
+    }
+    unsafe { ODSettingsExtensionNewClass(1, 0) };
+    let cls = somsup::build_class(&ClassSpec {
+        name: "RS2TestSettings",
+        parents: &["ODSettingsExtension"],
+        meta: None,
+        major: 1,
+        minor: 0,
+        data: 0,
+        align: 0,
+        methods: &[],
+        overrides: &[("ODSettingsExtension::AddNotebookPages", t_pages as usize)],
+        cd: unsafe { (&raw mut RS2TestSettingsClassData) as *mut usize },
+        ccd: unsafe { (&raw mut RS2TestSettingsCClassData) as *mut usize },
+    });
+    let ext = somsup::new_object(cls);
+    let c = cd!(ODSettingsExtensionClassData);
+    m(c, 17, &[ext, e, part]);
+    let shown = m(c, 23, &[ext, e, frame]);
+    let nb = unsafe { PAGES_NB };
+    check("ShowSettings opens a notebook and asks the extension for its pages", shown & 0xff != 0 && nb != 0);
+    // BKM_QUERYPAGECOUNT from the first page to the end.
+    let pages = if nb != 0 { unsafe { WinSendMsg(nb, 0x358, 0, 0x200) } } else { 0 };
+    check_eq("the parent's standard pages (Name, Type)", pages as i64, 2);
+    m(c, 22, &[ext, e]); // CloseSettings
+    release(ext);
+    ok_ev("settings notebook");
+}
+
 fn events_and_menus(session: usize, rf: usize, cf: usize, root: usize, child: usize) {
     let e = ev();
     let ws = m(cd!(ODBaseSessionClassData), BS_GET_WINDOW_STATE, &[session, e]);
@@ -553,6 +616,7 @@ somsup::methods! {
     t_handle => part_handle_event, 6;
     t_focus => part_focus_acquired, 4;
     t_module => module_dispatch, 4;
+    t_pages => settings_pages, 5;
 }
 
 fn test_part_class() -> usize {
@@ -854,6 +918,7 @@ fn basic() {
     check("focus set Contains", m(cd!(ODFocusSetClassData), FS_CONTAINS, &[set, e, sel]) & 0xff != 0);
     somsup::free_object(set);
     events_and_menus(session, rf, cf, root, child);
+    settings_test(root, rf);
 
     // The root part's storage unit goes in the draft's properties; save.
     let props = m(cd!(ODDraftClassData), DR_ACQUIRE_DRAFT_PROPERTIES, &[draft, e]);
