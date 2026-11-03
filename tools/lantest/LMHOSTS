@@ -1,0 +1,3 @@
+# LMHOSTS for tools/scripts/lantest.sh: a second name for the host's
+# smbhost.py (SMBHOST itself is found through NBNS).
+10.0.2.2    LMHSRV    #DOM:WORKGROUP

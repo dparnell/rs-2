@@ -17,3 +17,4 @@ fat = { path = "../crates/fat" }
 hpfs = { path = "../crates/hpfs" }
 jfs = { path = "../crates/jfs" }
 tcpip = { path = "../crates/tcpip" }
+smb = { path = "../crates/smb" }

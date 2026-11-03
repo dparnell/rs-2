@@ -1,0 +1,157 @@
+//! NTSTATUS codes and their OS/2 error codes; SMB1 DOS error classes.
+
+pub const SUCCESS: u32 = 0;
+pub const PENDING: u32 = 0x0000_0103;
+pub const BUFFER_OVERFLOW: u32 = 0x8000_0005;
+pub const NO_MORE_FILES: u32 = 0x8000_0006;
+pub const INVALID_HANDLE: u32 = 0xC000_0008;
+pub const INVALID_PARAMETER: u32 = 0xC000_000D;
+pub const NO_SUCH_FILE: u32 = 0xC000_000F;
+pub const END_OF_FILE: u32 = 0xC000_0011;
+pub const MORE_PROCESSING_REQUIRED: u32 = 0xC000_0016;
+pub const ACCESS_DENIED: u32 = 0xC000_0022;
+pub const BUFFER_TOO_SMALL: u32 = 0xC000_0023;
+pub const OBJECT_NAME_INVALID: u32 = 0xC000_0033;
+pub const OBJECT_NAME_NOT_FOUND: u32 = 0xC000_0034;
+pub const OBJECT_NAME_COLLISION: u32 = 0xC000_0035;
+pub const OBJECT_PATH_INVALID: u32 = 0xC000_0039;
+pub const OBJECT_PATH_NOT_FOUND: u32 = 0xC000_003A;
+pub const OBJECT_PATH_SYNTAX_BAD: u32 = 0xC000_003B;
+pub const SHARING_VIOLATION: u32 = 0xC000_0043;
+pub const EAS_NOT_SUPPORTED: u32 = 0xC000_004F;
+pub const EA_TOO_LARGE: u32 = 0xC000_0050;
+pub const NONEXISTENT_EA_ENTRY: u32 = 0xC000_0051;
+pub const NO_EAS_ON_FILE: u32 = 0xC000_0052;
+pub const EA_CORRUPT_ERROR: u32 = 0xC000_0053;
+pub const FILE_LOCK_CONFLICT: u32 = 0xC000_0054;
+pub const LOCK_NOT_GRANTED: u32 = 0xC000_0055;
+pub const DELETE_PENDING: u32 = 0xC000_0056;
+pub const WRONG_PASSWORD: u32 = 0xC000_006A;
+pub const LOGON_FAILURE: u32 = 0xC000_006D;
+pub const ACCOUNT_RESTRICTION: u32 = 0xC000_006E;
+pub const PASSWORD_EXPIRED: u32 = 0xC000_0071;
+pub const ACCOUNT_DISABLED: u32 = 0xC000_0072;
+pub const DISK_FULL: u32 = 0xC000_007F;
+pub const INSUFFICIENT_RESOURCES: u32 = 0xC000_009A;
+pub const MEDIA_WRITE_PROTECTED: u32 = 0xC000_00A2;
+pub const FILE_IS_A_DIRECTORY: u32 = 0xC000_00BA;
+pub const NOT_SUPPORTED: u32 = 0xC000_00BB;
+pub const BAD_NETWORK_PATH: u32 = 0xC000_00BE;
+pub const NETWORK_NAME_DELETED: u32 = 0xC000_00C9;
+pub const NETWORK_ACCESS_DENIED: u32 = 0xC000_00CA;
+pub const BAD_NETWORK_NAME: u32 = 0xC000_00CC;
+pub const REQUEST_NOT_ACCEPTED: u32 = 0xC000_00D0;
+pub const NOT_SAME_DEVICE: u32 = 0xC000_00D4;
+pub const PIPE_EMPTY: u32 = 0xC000_00D9;
+pub const DIRECTORY_NOT_EMPTY: u32 = 0xC000_0101;
+pub const NOT_A_DIRECTORY: u32 = 0xC000_0103;
+pub const CANCELLED: u32 = 0xC000_0120;
+pub const CANNOT_DELETE: u32 = 0xC000_0121;
+pub const FILE_CLOSED: u32 = 0xC000_0128;
+pub const USER_SESSION_DELETED: u32 = 0xC000_0203;
+pub const NOT_FOUND: u32 = 0xC000_0225;
+pub const NETWORK_SESSION_EXPIRED: u32 = 0xC000_035C;
+
+// OS/2 error codes (bseerr.h).
+pub const ERROR_FILE_NOT_FOUND: u32 = 2;
+pub const ERROR_PATH_NOT_FOUND: u32 = 3;
+pub const ERROR_ACCESS_DENIED: u32 = 5;
+pub const ERROR_INVALID_HANDLE: u32 = 6;
+pub const ERROR_NOT_ENOUGH_MEMORY: u32 = 8;
+pub const ERROR_NO_MORE_FILES: u32 = 18;
+pub const ERROR_WRITE_PROTECT: u32 = 19;
+pub const ERROR_SHARING_VIOLATION: u32 = 32;
+pub const ERROR_LOCK_VIOLATION: u32 = 33;
+pub const ERROR_HANDLE_EOF: u32 = 38;
+pub const ERROR_NOT_SUPPORTED: u32 = 50;
+pub const ERROR_BAD_NETPATH: u32 = 53;
+pub const ERROR_NETWORK_BUSY: u32 = 54;
+pub const ERROR_UNEXP_NET_ERR: u32 = 59;
+pub const ERROR_NETNAME_DELETED: u32 = 64;
+pub const ERROR_NETWORK_ACCESS_DENIED: u32 = 65;
+pub const ERROR_BAD_NET_NAME: u32 = 67;
+pub const ERROR_FILE_EXISTS: u32 = 80;
+pub const ERROR_INVALID_PASSWORD: u32 = 86;
+pub const ERROR_INVALID_PARAMETER: u32 = 87;
+pub const ERROR_DISK_FULL: u32 = 112;
+pub const ERROR_INVALID_NAME: u32 = 123;
+pub const ERROR_DIR_NOT_EMPTY: u32 = 145;
+pub const ERROR_EA_LIST_INCONSISTENT: u32 = 255;
+pub const ERROR_EAS_DIDNT_FIT: u32 = 275;
+pub const ERROR_EAS_NOT_SUPPORTED: u32 = 282;
+
+/// OS/2 error code for an NTSTATUS.
+pub fn nt_to_os2(s: u32) -> u32 {
+    match s {
+        SUCCESS => 0,
+        NO_MORE_FILES | NO_SUCH_FILE => ERROR_NO_MORE_FILES,
+        END_OF_FILE => ERROR_HANDLE_EOF,
+        INVALID_HANDLE | FILE_CLOSED => ERROR_INVALID_HANDLE,
+        INVALID_PARAMETER => ERROR_INVALID_PARAMETER,
+        ACCESS_DENIED | CANNOT_DELETE | DELETE_PENDING | FILE_IS_A_DIRECTORY | ACCOUNT_RESTRICTION => ERROR_ACCESS_DENIED,
+        OBJECT_NAME_INVALID | OBJECT_PATH_SYNTAX_BAD => ERROR_INVALID_NAME,
+        OBJECT_NAME_NOT_FOUND | NOT_FOUND => ERROR_FILE_NOT_FOUND,
+        OBJECT_NAME_COLLISION => ERROR_ACCESS_DENIED,
+        OBJECT_PATH_INVALID | OBJECT_PATH_NOT_FOUND | NOT_A_DIRECTORY => ERROR_PATH_NOT_FOUND,
+        SHARING_VIOLATION => ERROR_SHARING_VIOLATION,
+        FILE_LOCK_CONFLICT | LOCK_NOT_GRANTED => ERROR_LOCK_VIOLATION,
+        EAS_NOT_SUPPORTED => ERROR_EAS_NOT_SUPPORTED,
+        EA_TOO_LARGE => ERROR_EAS_DIDNT_FIT,
+        EA_CORRUPT_ERROR | NONEXISTENT_EA_ENTRY => ERROR_EA_LIST_INCONSISTENT,
+        WRONG_PASSWORD | LOGON_FAILURE | PASSWORD_EXPIRED | ACCOUNT_DISABLED => ERROR_INVALID_PASSWORD,
+        DISK_FULL => ERROR_DISK_FULL,
+        INSUFFICIENT_RESOURCES => ERROR_NOT_ENOUGH_MEMORY,
+        MEDIA_WRITE_PROTECTED => ERROR_WRITE_PROTECT,
+        NOT_SUPPORTED => ERROR_NOT_SUPPORTED,
+        BAD_NETWORK_PATH => ERROR_BAD_NETPATH,
+        NETWORK_NAME_DELETED | USER_SESSION_DELETED | NETWORK_SESSION_EXPIRED => ERROR_NETNAME_DELETED,
+        NETWORK_ACCESS_DENIED => ERROR_NETWORK_ACCESS_DENIED,
+        BAD_NETWORK_NAME => ERROR_BAD_NET_NAME,
+        REQUEST_NOT_ACCEPTED => ERROR_NETWORK_BUSY,
+        DIRECTORY_NOT_EMPTY => ERROR_DIR_NOT_EMPTY,
+        NOT_SAME_DEVICE => 17,
+        _ => ERROR_ACCESS_DENIED,
+    }
+}
+
+/// OS/2 error code for an SMB1 DOS error (class, code).
+pub fn dos_to_os2(class: u8, code: u16) -> u32 {
+    match class {
+        // ERRDOS codes are OS/2's.
+        1 => match code {
+            183 => ERROR_ACCESS_DENIED,
+            c => c as u32,
+        },
+        // ERRSRV.
+        2 => match code {
+            2 => ERROR_INVALID_PASSWORD,
+            4 => ERROR_ACCESS_DENIED,
+            5 => ERROR_INVALID_HANDLE,
+            6 => ERROR_BAD_NET_NAME,
+            49 | 50 => ERROR_NETWORK_BUSY,
+            91 => ERROR_ACCESS_DENIED,
+            _ => ERROR_UNEXP_NET_ERR,
+        },
+        // ERRHRD: OS/2's hard error codes.
+        3 => code as u32,
+        _ => ERROR_UNEXP_NET_ERR,
+    }
+}
+
+/// The NTSTATUS an SMB1 DOS error stands for (for code paths that test
+/// statuses): only the ones callers check.
+pub fn dos_to_nt(class: u8, code: u16) -> u32 {
+    match (class, code) {
+        (1, 2) => OBJECT_NAME_NOT_FOUND,
+        (1, 3) => OBJECT_PATH_NOT_FOUND,
+        (1, 5) => ACCESS_DENIED,
+        (1, 18) => NO_MORE_FILES,
+        (1, 32) => SHARING_VIOLATION,
+        (1, 80) | (1, 183) => OBJECT_NAME_COLLISION,
+        (1, 145) => DIRECTORY_NOT_EMPTY,
+        (1, 282) => EAS_NOT_SUPPORTED,
+        (2, 2) => LOGON_FAILURE,
+        (2, 6) => BAD_NETWORK_NAME,
+        _ => ACCESS_DENIED,
+    }
+}

@@ -23,6 +23,10 @@ programs (IBM FTP, TELNET, FINGER, RXSOCK, the Toolkit samples) run.
   drivers/e1000.rs  drivers/vmxnet3.rs  drivers/pcnet.rs  drivers/virtio/net.rs
 ```
 
+The LAN requester (SMB file and print sharing: network drives, UNC
+names, NET.EXE, NETAPI, the Network folder) is described in
+[LAN.md](LAN.md); it uses the kernel socket calls below.
+
 ## Drivers
 
 All implement `net::Nic` (`kernel/src/net/mod.rs`): name, MAC address,

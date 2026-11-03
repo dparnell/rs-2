@@ -1,0 +1,6 @@
+[package]
+name = "smb"
+description = "no_std SMB client: SMB 2.0.2/2.1 and SMB1 (NT LM 0.12), NTLMv2, NetBIOS over TCP, srvsvc/RAP share lists"
+edition.workspace = true
+version.workspace = true
+license.workspace = true

@@ -145,8 +145,13 @@ dependencies = [
  "hpfs",
  "jfs",
  "os2-exe",
+ "smb",
  "tcpip",
 ]
+
+[[package]]
+name = "smb"
+version = "0.1.0"
 
 [[package]]
 name = "tcpip"

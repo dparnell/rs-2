@@ -399,6 +399,18 @@ Configuration notebook (TCPCFG2),
 so none of IBM's are needed ([NETWORK.md](NETWORK.md#rs2s-tcpip-applications));
 IBM's above still run in their place.
 
+## LAN requester
+
+rs2's own NET.EXE, NETAPI.DLL and NETAPI32.DLL ([LAN.md](LAN.md)) take
+the place of IBM's File and Print Client.
+
+| Server or program | Status | Notes |
+|-------------------|--------|-------|
+| tools/scripts/smbhost.py (SMB 2.1, 2.0.2, SMB1) | works | All dialects, signing, the NetBIOS session service and NBNS (host tests, and LANTEST/LANTEST.CMD in QEMU: NET USE, DIR, COPY, XCOPY, COMP, MD/RD, REN, ATTRIB, DEL, 5 MB files byte for byte, EAs, printing to a redirected LPT). |
+| IBM's XCOPY.EXE, CMD.EXE's COPY/DIR/MD/RD/REN/DEL | works | On a network drive (LANTEST.CMD). |
+| IBM NET.EXE (LAN Server 5.0 requester, 16-bit) | not working | Needs NETAPI internals rs2 does not provide (NetIMakeLMFileName for its NET.MSG path, NetISort, I_NetPathType) and IBM's NET.MSG. |
+| Windows, Samba, macOS servers | not tried | No real SMB server was reachable from the tests. |
+
 ## Messages and national language support
 
 rs2 ships its own system message files, written for rs2 and compiled

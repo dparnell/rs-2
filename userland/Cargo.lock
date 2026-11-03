@@ -172,6 +172,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lanreq"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "utils",
+]
+
+[[package]]
 name = "libm"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -283,6 +291,23 @@ dependencies = [
 name = "nbtest"
 version = "0.1.0"
 dependencies = [
+ "os2",
+]
+
+[[package]]
+name = "netapi-dll"
+version = "0.1.0"
+dependencies = [
+ "lanreq",
+ "os2",
+ "thunk16",
+]
+
+[[package]]
+name = "netapi32-dll"
+version = "0.1.0"
+dependencies = [
+ "lanreq",
  "os2",
 ]
 
@@ -575,6 +600,7 @@ version = "0.1.0"
 dependencies = [
  "gpi",
  "ipf",
+ "lanreq",
  "os2",
  "pmwin",
 ]

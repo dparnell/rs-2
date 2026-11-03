@@ -730,6 +730,32 @@ extern "C" fn drives_populate(obj: usize, r: u32, p: *const u8, folders_only: u3
     1
 }
 
+/// Drives came or went (a network drive assigned or unassigned): the
+/// Drives folder, if it is awake and populated, gets a WPDisk for each new
+/// drive and loses those of drives that are gone.
+pub fn refresh_drives() {
+    let Some(h) = wps::handle_of_id(b"<WP_DRIVES>") else { return };
+    let Some(obj) = wps::by_handle(h) else { return };
+    if fo(obj).populated == 0 {
+        return;
+    }
+    drives_populate(obj, 0, core::ptr::null(), 0);
+    let (mut cur, mut map) = (0u32, 0u32);
+    unsafe { os2::DosQueryCurrentDisk(&mut cur, &mut map) };
+    let gone: Vec<usize> = content(obj)
+        .iter()
+        .copied()
+        .filter(|&o| wps::is(o, "WPDisk"))
+        .filter(|&o| {
+            let d = wps::call("WPDisk", m::WPDisk::wpQueryLogicalDrive, &[o]) as u32;
+            d >= 3 && d <= 26 && map & (1 << (d - 1)) == 0
+        })
+        .collect();
+    for o in gone {
+        obj::call(m::WPObject::wpFree, &[o]);
+    }
+}
+
 // ---- The desktop ----
 
 /// The desktop folder: <WP_DESKTOP>, or the boot drive's DESKTOP
