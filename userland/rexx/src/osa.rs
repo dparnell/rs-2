@@ -156,7 +156,7 @@ fn whole(v: &Value) -> Option<i64> {
 // ---- the interpreter for a run ----
 
 fn with_interp<R>(f: impl FnOnce(&mut Interp) -> R) -> R {
-    let w = session().w.clone();
+    let w = w();
     crate::stack::deep(move || {
         let mut h = crate::host::OsHost { exits: Default::default(), locals: Vec::new(), tid: crate::stack::tid() };
         crate::oohost::lock();
@@ -360,8 +360,23 @@ pub extern "C" fn RexxGetOSAInfo(h: u32, sel: u32, out: *mut u32) -> u32 {
 
 // ---- the native-method API ----
 
+/// The world of the native method running now (its program's), else
+/// the OSA session's.
+static mut CURRENT: Option<Rc<World>> = None;
+
 fn w() -> Rc<World> {
-    session().w.clone()
+    match unsafe { (*(&raw const CURRENT)).clone() } {
+        Some(w) => w,
+        None => session().w.clone(),
+    }
+}
+
+/// `.ScriptableApp` and the other scripting classes in a program that
+/// did not get them from RexxSomInitialize (a REXX program run by CMD):
+/// rs2's REXX code for them.
+pub fn environment_source(name: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
+    const NAMES: &[&[u8]] = &[b"SCRIPTABLEAPP", b"OBJECTSPECIFIER", b"SCREFERENCE", b"SCRELATIVEPOSITION", b"SCLIST", b"SCRANGE", b"SCCLASS"];
+    if NAMES.contains(&name) { Some((OPENDOC_CLASSES.to_vec(), b"OPENDOC".to_vec())) } else { None }
 }
 
 fn opt(h: u32) -> Option<Value> {
@@ -505,7 +520,10 @@ fn routine(spec: &[u8], name: &[u8]) -> Option<usize> {
     let mut h = 0u32;
     let mut fail = [0u8; 64];
     if unsafe { DosLoadModule(fail.as_mut_ptr(), fail.len() as u32, dll.as_ptr(), &mut h) } != 0 {
-        return None;
+        // REXXSC is the module of OREXXSC.DLL
+        if !words[1].eq_ignore_ascii_case(b"REXXSC") || unsafe { DosLoadModule(fail.as_mut_ptr(), fail.len() as u32, b"OREXXSC\0".as_ptr(), &mut h) } != 0 {
+            return None;
+        }
     }
     let mut f = 0usize;
     if unsafe { DosQueryProcAddr(h, 0, entry.as_ptr(), &mut f) } != 0 || f == 0 {
@@ -519,7 +537,14 @@ fn routine(spec: &[u8], name: &[u8]) -> Option<usize> {
 /// 7 the receiver, 8 the argument array, 9 the message name, 0x10 an
 /// optional object), `f(args)` runs it: `args[0]` points to the result,
 /// `args[n]` to the nth argument's value.
-pub fn native_call(spec: &[u8], recv: &Value, name: &[u8], args: &[Option<Value>]) -> Option<Result<Option<Value>, (u32, Vec<u8>)>> {
+pub fn native_call(world: &Rc<World>, spec: &[u8], recv: &Value, name: &[u8], args: &[Option<Value>]) -> Option<Result<Option<Value>, (u32, Vec<u8>)>> {
+    let saved = unsafe { core::mem::replace(&mut *(&raw mut CURRENT), Some(world.clone())) };
+    let r = native_call_in(spec, recv, name, args);
+    unsafe { *(&raw mut CURRENT) = saved };
+    r
+}
+
+fn native_call_in(spec: &[u8], recv: &Value, name: &[u8], args: &[Option<Value>]) -> Option<Result<Option<Value>, (u32, Vec<u8>)>> {
     let f = routine(spec, name)?;
     let call: extern "C" fn(*mut u32) -> *const u8 = unsafe { core::mem::transmute(f) };
     let sig = cstr(call(core::ptr::null_mut()));

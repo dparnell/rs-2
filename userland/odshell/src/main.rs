@@ -726,6 +726,8 @@ fn main(st: &Startup) -> u32 {
     let session = somsup::new_object(unsafe { ODSessionNewClass(1, 0) });
     m(cd!(ODSessionClassData), 0, &[session, e]);
     m(cd!(ODSessionClassData), 2, &[session, e, hab as usize]);
+    // Apple events: from scripts and from other processes
+    script::install();
     text_part_class();
     let ws = m(cd!(ODBaseSessionClassData), 13, &[session, e]);
     base_menu_bar(ws);

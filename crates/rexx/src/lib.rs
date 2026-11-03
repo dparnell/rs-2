@@ -246,7 +246,12 @@ pub trait Host {
     /// Object REXX: run a native method (`::METHOD name EXTERNAL 'LIBRARY
     /// dll entry'`) for `recv`. None: there is no such routine; an error
     /// is the REXX error number and the secondary message's text.
-    fn native_method(&mut self, _st: &mut State, _spec: &[u8], _recv: &value::Value, _name: &[u8], _args: &[Option<value::Value>]) -> Option<Result<Option<value::Value>, (u32, Vec<u8>)>> {
+    fn native_method(&mut self, _st: &mut State, _world: &alloc::rc::Rc<oo::World>, _spec: &[u8], _recv: &value::Value, _name: &[u8], _args: &[Option<value::Value>]) -> Option<Result<Option<value::Value>, (u32, Vec<u8>)>> {
+        None
+    }
+    /// Object REXX: REXX code that puts `.NAME` into .environment, for an
+    /// environment symbol nothing else knows (the source and its name).
+    fn environment_source(&mut self, _st: &mut State, _name: &[u8]) -> Option<(Vec<u8>, Vec<u8>)> {
         None
     }
     /// Object REXX: GUARD ... WHEN is false; let other activities run.
