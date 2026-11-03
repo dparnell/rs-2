@@ -9,10 +9,76 @@ use alloc::vec::Vec;
 
 pub const PLANE: usize = 0x10000;
 
-/// VESA modes: number, width, height (8 bits per pixel).
-pub const VBE_MODES: [(u16, u16, u16); 4] = [(0x100, 640, 400), (0x101, 640, 480), (0x103, 800, 600), (0x105, 1024, 768)];
+/// VESA modes: number, width, height, bits per pixel. The VBE 1.2
+/// numbers (15-bit 5:5:5, 16-bit 5:6:5, 24-bit packed), 32-bit modes at
+/// 140h-143h as later cards number theirs, and 320x240 (144h, 145h).
+pub const VBE_MODES: [(u16, u16, u16, u8); 25] = [
+    (0x100, 640, 400, 8),
+    (0x101, 640, 480, 8),
+    (0x103, 800, 600, 8),
+    (0x105, 1024, 768, 8),
+    (0x107, 1280, 1024, 8),
+    (0x10d, 320, 200, 15),
+    (0x10e, 320, 200, 16),
+    (0x10f, 320, 200, 24),
+    (0x110, 640, 480, 15),
+    (0x111, 640, 480, 16),
+    (0x112, 640, 480, 24),
+    (0x113, 800, 600, 15),
+    (0x114, 800, 600, 16),
+    (0x115, 800, 600, 24),
+    (0x116, 1024, 768, 15),
+    (0x117, 1024, 768, 16),
+    (0x118, 1024, 768, 24),
+    (0x119, 1280, 1024, 15),
+    (0x11a, 1280, 1024, 16),
+    (0x140, 320, 200, 32),
+    (0x141, 640, 480, 32),
+    (0x142, 800, 600, 32),
+    (0x143, 1024, 768, 32),
+    (0x144, 320, 240, 8),
+    (0x145, 320, 240, 16),
+];
 /// Video memory of the VESA modes, and where the linear framebuffer is.
-pub const VBE_MEM: usize = 2 * 1024 * 1024;
+pub const VBE_MEM: usize = 4 * 1024 * 1024;
+
+/// Bytes per pixel of a VESA mode's depth.
+pub fn vbe_bytes(bpp: u8) -> u32 {
+    (bpp as u32).div_ceil(8)
+}
+
+/// Direct colour pictures are shown through an 8-bit palette: 6 levels
+/// of red, 7 of green, 6 of blue (252 colours) with ordered dithering.
+const BAYER4: [[u32; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+
+fn dither_level(v: u32, levels: u32, d: u32) -> u32 {
+    // v * (levels - 1) / 255, one more when its fraction passes the
+    // Bayer threshold.
+    let x = v * (levels - 1) * 16;
+    let q = x / (255 * 16);
+    let frac = (x % (255 * 16)) / 255;
+    (q + (frac > d) as u32).min(levels - 1)
+}
+
+/// The palette entry for a direct colour pixel at (x, y).
+#[inline]
+pub fn dither(r: u32, g: u32, b: u32, x: usize, y: usize) -> u8 {
+    let d = BAYER4[y & 3][x & 3];
+    (dither_level(r, 6, d) * 42 + dither_level(g, 7, d) * 6 + dither_level(b, 6, d)) as u8
+}
+
+/// The 252-colour palette of [`dither`].
+pub fn dither_palette() -> [u32; 256] {
+    let mut p = [0u32; 256];
+    for r in 0..6u32 {
+        for g in 0..7u32 {
+            for b in 0..6u32 {
+                p[(r * 42 + g * 6 + b) as usize] = (r * 255 / 5) << 16 | (g * 255 / 6) << 8 | (b * 255 / 5);
+            }
+        }
+    }
+    p
+}
 pub const LFB_BASE: u32 = 0xe000_0000;
 
 /// A VESA mode in use: its memory is `Vga::vbe_mem`.
@@ -21,6 +87,8 @@ pub struct Vbe {
     pub mode: u16,
     pub width: u16,
     pub height: u16,
+    /// Bits per pixel (8, 15, 16, 24, 32).
+    pub bpp: u8,
     /// Bytes per scan line.
     pub pitch: u32,
     /// The 64 KB bank the A000h window shows.
@@ -464,6 +532,9 @@ impl Vga {
     /// The palette of a graphics picture from [`Vga::render`]: 256 RGB
     /// entries for the indices it uses.
     pub fn palette(&self) -> [u32; 256] {
+        if self.vbe.is_some_and(|b| b.bpp > 8) {
+            return dither_palette();
+        }
         let mut p = [0; 256];
         if self.attr[0x10] & 0x40 != 0 || self.vbe.is_some() {
             for (i, c) in p.iter_mut().enumerate() {
@@ -486,10 +557,29 @@ impl Vga {
         out.clear();
         out.resize(w * h, 0);
         if let Some(b) = &self.vbe {
+            let bytes = vbe_bytes(b.bpp) as usize;
             for y in 0..h {
                 let a = b.start as usize + y * b.pitch as usize;
-                if let Some(src) = self.vbe_mem.get(a..a + w) {
-                    out[y * w..y * w + w].copy_from_slice(src);
+                let Some(src) = self.vbe_mem.get(a..a + w * bytes) else { continue };
+                let row = &mut out[y * w..y * w + w];
+                match b.bpp {
+                    8 => row.copy_from_slice(src),
+                    15 | 16 => {
+                        for (x, (o, p)) in row.iter_mut().zip(src.chunks_exact(2)).enumerate() {
+                            let v = u16::from_le_bytes([p[0], p[1]]) as u32;
+                            let (r, g, bl) = if b.bpp == 15 {
+                                ((v >> 10 & 31) * 255 / 31, (v >> 5 & 31) * 255 / 31, (v & 31) * 255 / 31)
+                            } else {
+                                ((v >> 11 & 31) * 255 / 31, (v >> 5 & 63) * 255 / 63, (v & 31) * 255 / 31)
+                            };
+                            *o = dither(r, g, bl, x, y);
+                        }
+                    }
+                    _ => {
+                        for (x, (o, p)) in row.iter_mut().zip(src.chunks_exact(bytes)).enumerate() {
+                            *o = dither(p[2] as u32, p[1] as u32, p[0] as u32, x, y);
+                        }
+                    }
                 }
             }
             return (w, h);

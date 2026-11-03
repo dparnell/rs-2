@@ -35,6 +35,7 @@ check HELLO.COM "File I/O OK" ""
 check GFX.COM "GFX OK" "{wait}x{wait}y"
 check DPMITEST.COM "DPMI test done" ""
 check VESA.COM "VESA OK" "{wait}x"
+check VESAHI.COM "VESAHI OK" "{wait}x{wait}x"
 checksnd SBTEST.COM "SB OK" B:441:1.0
 checksnd SB16TEST.COM "SB16 OK" L:1002:1.0 R:501:1.0
 checksnd FMTEST.COM "FM OK" L:440:0.5 R:880:0.5
