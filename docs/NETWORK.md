@@ -262,10 +262,11 @@ socket.
 * IFCONFIG and NETSTAT only show; there is no `route`/`arp`, no way to
   change the configuration at run time (TCPCFG2's settings take effect
   at the next start), no DHCP release at shutdown.
-* rs2's TELNETD gives clients pipes, not a terminal: full-screen VIO
-  programs do not show; there is no LPD server (rs2's printers send to
-  LPR/IPP servers, PRINTING.md), no TALK/TALKD, REXECD/RSHD, BOOTP or
-  SLIP/PPP dialer; FTP and TELNET do no code page translation (-cp).
+* No BOOTP/DHCP server and no SLIP/PPP dialer; TELNETD's sessions get
+  their size once (a client resized later keeps the first size); TALKD
+  announces calls on its own screen only (there is no per-user
+  terminal to write to); code page translation is single-byte only (no
+  DBCS conversion).
 
 ## The OS/2 socket API
 
@@ -277,9 +278,9 @@ Rust like PMWIN (`userland/`, i686, packed by `elf2lx`, in `C:\OS2\DLL`):
 | TCPIP32 | TCP/IP 4.1+ API: sockets, resolver, network database, 4.4BSD `sockaddr` (`sin_len`) | all 145 of the Toolkit's `tcpip32.lib` |
 | SO32DLL | TCP/IP 4.0 sockets: 4.3BSD `sockaddr`, `select()` in OS/2's form, `bsdselect()` with bit masks, 4-argument `ioctl()` | 32 of 61 (not the `_xxxMSC` variants) |
 | TCP32DLL | TCP/IP 4.0 network database and resolver, `h_errno` and `_res` variables | 56 of 101 (not the `MSC`/16-bit variants) |
-| TNLS32 | IBM's code page helper for its TCP/IP applications | the 15 ordinals FTP, TELNET, FINGER, TALK, REXEC, RSH use |
+| TNLS32 | IBM's code page helper for its TCP/IP applications | the 15 ordinals FTP, TELNET, FINGER, TALK, REXEC, RSH use; translation tables for `-cp` |
 | PMSHAPI | the `Prf*` profile calls (TELNET reads its options with them) | 20 |
-| TCPIPDLL | the 16-bit API (`_cdecl far`, 16-bit ints, far pointers) | 51 of 111, all 16-bit programs on the media import |
+| TCPIPDLL | the 16-bit API (`_cdecl far`, 16-bit ints, far pointers) | 82 of 111: all the calls (with the resolver, `_sendmsg`/`_recvmsg`, `_bsdselect`, the `get*ent` iterators, `_rexec`, `_alarm`/`_xsignal`); not the resolver's data and debugging exports (`__res`, `_p_*`, `_fp_query`, `__gethtby*`...) |
 | TNLS16 | the 16-bit code page and message catalog helper (replaces IBM's, which needs PMWIN's 16-bit API) | 15 |
 
 The work is in `userland/tcpipcore`, linked into each DLL; every export
@@ -333,10 +334,18 @@ result buffers are too.
   (`%COMSPEC% /c program socket`).
 * **TNLS32** has no import library or headers: the entries are what
   IBM's applications are seen to use in their disassembly (`_Optlink`
-  calls: arguments in EAX, EDX, ECX, then the stack). rs2 has no
-  translation tables, so its init reports "no translation", converters
-  copy (ordinal 16 widens bytes to the USHORT characters TELNET's
-  terminal emulators take), the DBCS table is empty.
+  calls: arguments in EAX, EDX, ECX, then the stack). Its init (24, or
+  re-init 40; 16-bit 9) takes the application's translation name (FTP's
+  and TELNET's `-cp name`): a code page of rs2's NLS tables by number or
+  name (`819`, `ISO8859-1`, `latin1`, `IBM-850`, `CP437`...). It then
+  builds two 256-byte tables between the process code page and that one
+  and reports "tables" (bit 1); an unknown name reports bit 0, no name no
+  translation. Query tables (39; 16-bit 51 with 16:16 pointers) returns
+  (inbound, outbound): IBM's FTP, studied in Ghidra, runs what it
+  receives through the first and what it sends through the second.
+  Converters copy (ordinal 16 widens bytes to the USHORT characters
+  TELNET's terminal emulators take) and the DBCS table is empty: there
+  is no DBCS conversion (the 932/EUC/JIS forms).
 * **PMSHAPI**: profiles are real INI files shared by all processes
   (see [PM.md](PM.md#profiles-ini-files)).
 * **16-bit programs** (`userland/thunk16`): `entries16!` puts 16-bit
@@ -354,7 +363,23 @@ result buffers are too.
   `catgets` returns the built-in text), `xpg_printf`/`xpg_fprintf`/
   `xpg_sprintf` format with 16-bit arguments and XPG `%n$` positions;
   TNLS32 also has the three 16-bit entries (9, 37, 51) these programs
-  call.
+  call. The resolver (`_res_*`, `_dn_*`, `__getlong`...), `_sendmsg`/
+  `_recvmsg` (the 16-bit `msghdr` of far pointers and ints),
+  `_bsdselect` (bit-mask `fd_set`s, as 32-bit) and the iterators
+  (`_gethostent`, `_getnetent`, ...; `netent` rebuilt like `hostent`)
+  go to tcpipcore; `_rexec` returns the host's name in a buffer 16-bit
+  code can address.
+* **`_alarm`/`_xsignal`**: IBM's 16-bit TFTP (seen in its disassembly)
+  calls `_xsignal(sig, handler)` and `_alarm(seconds)` before each
+  `_recvfrom`; the handler calls `_sock_cancel` and longjmps back to the
+  retransmission. TCPIPDLL keeps the deadline and the handler; a timer
+  thread (started by the first alarm) cancels the socket call the
+  alarm's thread is blocked in (`so_cancel`: EINTR), and that thread,
+  on its way out of TCPIPDLL (or into its next call, if it was not in
+  one), calls the handler with the signal number on its own 16-bit
+  stack (thunk16's `call16`), as a signal would arrive. The handler's
+  longjmp abandons the 32-bit frames, which thunk16 allows (it already
+  does for WinThrow).
 
 ### Utilities
 
@@ -371,15 +396,22 @@ rs2 has its own versions of Warp 4.52's base TCP/IP clients and servers
 TCP/IP: Rust programs on the RS2API socket calls, with IBM's names and
 command-line forms. Shared code (`src/lib.rs`): a socket type, line
 reading, files, the %ETC% directory and SERVICES ports, console input
-(`KbdCharIn` for keys and passwords), and the RFC 1179 and TFTP
-protocols (`lpd.rs`, `tftp.rs`).
+(`KbdCharIn` for keys and passwords), connects from reserved ports
+(`connect_from`: a port whose connection does not complete in 3 seconds,
+or is refused, gives way to the next), the RFC 1179, TFTP and talk
+protocols (`lpd.rs`, `tftp.rs`, `talk.rs`) and the server side of rexec
+and rsh (`rcmd.rs`: the request, the standard error connection, TRUSERS,
+the command on pipes).
 
 | Program | What |
 |---------|------|
-| FTP | `FTP [-n] [-v] [-d] [-i] [-g] [-p] [host [port]]`: IBM's and BSD's commands (open, user, close, bye/quit, ascii, binary, type, cd, cdup, lcd, pwd, ls, dir, get/recv, put/send, append, mget, mput, mdelete, delete, mkdir, rmdir, rename, size, system, quote/literal, site, rhelp, status, verbose, debug, hash, prompt, glob, passive/sendport, `!`, help/?). Data connections are active (PORT to a port FTP listens on, as IBM's FTP makes them) or passive (`passive`, `-p`). Logs in at once unless -n, with the host's entry in %ETC%\NETRC or by asking (the password without echo). ASCII transfers give CR LF line ends; Ctrl+Z ends a text file sent. Commands come from standard input: `FTP -n host < script`. |
+| FTP | `FTP [-n] [-v] [-d] [-i] [-g] [-p] [-cp codepage] [host [port]]`: IBM's and BSD's commands (open, user, close, bye/quit, ascii, binary, type, cd, cdup, lcd, pwd, ls, dir, get/recv, put/send, append, mget, mput, mdelete, delete, mkdir, rmdir, rename, size, system, quote/literal, site, rhelp, status, verbose, debug, hash, prompt, glob, passive/sendport, `!`, help/?). Data connections are active (PORT to a port FTP listens on, as IBM's FTP makes them) or passive (`passive`, `-p`). Logs in at once unless -n, with the host's entry in %ETC%\NETRC or by asking (the password without echo). ASCII transfers give CR LF line ends; Ctrl+Z ends a text file sent; with `-cp` (819, ISO8859-1, IBM-850...) ASCII transfers and listings are translated between that code page and the local one. Commands come from standard input: `FTP -n host < script`. |
 | FTPD | `FTPD [-p port]`: each client on a thread. Users and their directories from %ETC%\TRUSERS (`user: name password`, then `rw: dirs` and `r: dirs`; neither means the whole system; `anonymous`/`ftp` with any password when listed, never writing). USER, PASS, QUIT, NOOP, SYST, FEAT, HELP, TYPE, MODE, STRU, ALLO, PORT, PASV, LIST (Unix `ls -l` form), NLST, RETR, STOR, APPE, SIZE, MDTM, DELE, RNFR/RNTO, CWD/CDUP, PWD, MKD, RMD and their X forms. Paths are OS/2 paths, shown with `/`. |
-| TELNET | `TELNET [-p port] [-t termtype] [-l logfile] [host [port]]`: the host's output goes through `crates/vt100` (a host-tested VT100/VT220/ANSI emulator: cursor movement and erasing, scrolling regions, insert/delete lines and characters, tab stops, the DEC line-drawing set as CP437 box characters, SGR colours and attributes, UTF-8 to CP437, device attribute and cursor reports) onto the VIO screen with VioWrtCellStr; a keyboard thread sends keys as a VT220's (cursor keys after DECCKM, F1-F12, editing keys). Options: ECHO and SUPPRESS GO AHEAD (local echo while the host does not echo), TERMINAL TYPE (VT100 unless -t) and NAWS (the screen's size). Ctrl+] ends the session; without a host it asks (`open host [port]`). |
-| TELNETD | `TELNETD [-p port]`: each client gets a command prompt (%COMSPEC%) whose standard handles are pipes; TELNETD says WILL ECHO/SGA, echoes, handles Backspace and passes lines on at Enter, converts the output's line ends; Ctrl+C starts a new prompt. `SET TELNET.PASSWORD=` asks clients for a password, as IBM's TELNETD does. Programs that write through VIO instead of their standard output are not seen by the client. |
+| TELNET | `TELNET [-p port] [-t termtype] [-l logfile] [host [port]]`: the host's output goes through `crates/vt100` (a host-tested VT100/VT220/ANSI emulator: cursor movement and erasing, scrolling regions, insert/delete lines and characters, tab stops, the DEC line-drawing set as CP437 box characters, SGR colours and attributes, UTF-8 to CP437, device attribute and cursor reports) onto the VIO screen with VioWrtCellStr; a keyboard thread sends keys as a VT220's (cursor keys after DECCKM, F1-F12, editing keys). Options: ECHO and SUPPRESS GO AHEAD (local echo while the host does not echo), TERMINAL TYPE (VT100 unless -t) and NAWS (the screen's size). Ctrl+] ends the session; without a host it asks (`open host [port]`). `-cp codepage`: the host sends and takes single bytes of that code page (not UTF-8), translated to and from the local one. |
+| TELNETD | `TELNETD [-p port] [-cp codepage] [-n]`: each client gets a command prompt (%COMSPEC%) in a pseudo terminal session (below): full-screen VIO programs (TEDIT, CMD's ANSI colours, anything that draws with VIO or KBD) show on the client as VT100/ANSI, with colours and the cursor; cursor, editing and function keys work; the client's window size (NAWS) sets the session's. Characters go out as UTF-8, or as single bytes of `-cp`'s code page. `exit` ends the connection. `-n` (or a kernel without pseudo terminals): the old line mode, the command processor on pipes. `SET TELNET.PASSWORD=` asks clients for a password, as IBM's TELNETD does. |
+| LPD | `LPD [-b [banner]] [-c] [-f] [-s] [-cp codepage] [-p port]` (IBM's options): an RFC 1179 server for rs2's spooler queues. A job sent to a queue name becomes a raw job (PM_Q_RAW) of that PM queue through SplQmOpen/SplQmStartDoc/SplQmWrite/SplQmEndDoc, named after the job (J line) or file, with `user@host` as its comment; formatted text (`f`/`p`, or every file with -f) gets CR LF and -cp translation; -b a banner page (host, user, job, class; or the banner file); -s only reserved client ports; %ETC%\HOSTS.LPD (when it lists hosts) says who may print. Queue state (short and long) lists the queue's jobs (SplEnumJob); remove deletes jobs by number or owner (SplDeleteJob). |
+| REXECD, RSHD | `REXECD [-t seconds \| -1] [-p port]`, `RSHD [-t seconds \| -1] [-p port]` (port 512, 514): the command runs under `%COMSPEC% /c` with the connection as its standard input and output and, when the client asks, standard error on a second connection (RSHD's from a reserved port); `USER` is set for it; it is ended after `-t` seconds (180; -1 no limit). REXECD checks the user and password against %ETC%\TRUSERS (FTPD's `user:` lines) or, for users TRUSERS does not name, the USER and PASSWORD environment variables (as IBM's). RSHD takes only reserved client ports and the hosts (and users) of %ETC%\RHOSTS (`host [user]`, `+` for any). |
+| TALK, TALKD | `TALK user[@host] [tty]`, `TALKD [-p port]`: the 4.3BSD ntalk protocol (UDP 518). TALK looks up an invitation at the other host's daemon and connects, or leaves one with its own daemon and has the other announce the call (again every 30 s) until the other side answers; a split VIO screen (you above, them below; Backspace, Ctrl+U, Ctrl+W edit, Esc ends). With redirected standard input it sends that and prints what arrives (for scripts). TALKD keeps the invitations (a minute) and shows announcements on its screen with a beep. The local user name is %USER%. |
 | LPR, LPQ, LPRM | `LPR [-p printer] [-s server] [-b\|-f\|-o] [-C class] [-J job] [-T title] [-# copies] [-h] [file...]`, `LPQ [-p printer] [-s server] [-l]`, `LPRM [-p printer] [-s server] [-a\|job...]`: RFC 1179 from a reserved port (721-731, a different one each time), the printer and server also as `printer@server` or from LPR_PRINTER and LPR_SERVER, `server:port` for an LPD on another port. |
 | FINGER | `FINGER [-l] [user]@host`. |
 | TFTP | `TFTP [-b blocksize] host [port]`, then connect, mode, ascii, binary, get, put (`host:file` names), verbose, trace, status, rexmt, timeout, blksize, quit. RFC 1350 with the block size option (RFC 2348), netascii conversion, retransmission. |
@@ -387,8 +419,46 @@ protocols (`lpd.rs`, `tftp.rs`).
 | REXEC, RSH | `REXEC host [-l user] [-p password] [-n] command` (port 512; the user and password also from NETRC or asked for), `RSH host [-l user] [-n] command` (port 514 from a reserved port; the local user is %USER%). Redirected standard input goes to the command. |
 | TCPCFG2 | The TCP/IP Configuration notebook (PM): Network (lan0 on or off, DHCP or a fixed address, subnet mask and router, and the interfaces' state now), Host Names (host name, local domain, three name servers), Hosts (the HOSTS file in an MLE). Save writes `NETWORK=` and `SET HOSTNAME=` in CONFIG.SYS (for the next start; the name servers of a fixed address go into NETWORK=), %ETC%\RESOLV2 (`domain`, `nameserver`) and %ETC%\HOSTS. `TCPCFG2 /QUERY` and `TCPCFG2 NETWORK=... HOSTNAME=... DOMAIN=... NAMESERVERS=a,b` do the same from scripts. The desktop's Programs folder has a TCP/IP folder with it, FTP and Telnet. |
 
-**Testing.** `RS2\NETCLI.EXE` starts FTPD, TFTPD and TELNETD and runs
-the clients with scripted input (27 checks): FTP against rs2's FTPD
+**Pseudo terminals.** IBM's TELNETD hands each connection to a helper
+(TELNETDC) that starts the command processor. rs2's gives each client a
+*pseudo terminal session* (`kernel/src/pty.rs`, `api/pty.rs`): an ordinary session with
+its own `Screen` and keyboard queue, flagged `pty`, that no screen shows.
+It never comes to the foreground (`session::select` refuses it), is in
+no window list (Ctrl+Esc, Alt+Esc, Rs2VioQuerySessions leave it out)
+and is not windowable, so PMVIOWIN never sees it; everything else (VIO,
+KBD, the console handles, ANSI, Ctrl+C and Ctrl+Break signals,
+DosStartSession from inside it) works as in any session. The server side is what PMVIOWIN
+does for a windowed session, without PM:
+
+| RS2API | Call |
+|--------|------|
+| 18 | `Rs2PtyStart(PSZ pszProgram, PSZ pszArgs, PSZ pszEnv, ULONG ulSize, PULONG psid, PULONG ppid)`: start a program (found as DosStartSession finds it) in a new pseudo terminal session of LOWORD x HIWORD(ulSize) cells (0: 80x25), console handles, the caller's environment unless pszEnv |
+| 19 | `Rs2PtyWait(ULONG sid, PULONG pulChanges, ULONG ulTimeout)`: wait until the session's screen changed since *pulChanges (its `changes` count; every change of a pty screen wakes the waiters); ERROR_SMG_SESSION_NOT_FOUND once the session ended |
+| 12 | `Rs2VioReadScreen`: its cells, cursor, code page (as for windowed sessions) |
+| 14 | `Rs2VioKey`: a keystroke into its keyboard queue |
+| 16 | `Rs2VioControl(sid, 3, 0)`: end it (its processes are killed) |
+
+TELNETD reads the screen after each change (20 ms to let a burst
+settle) and `crates/vt100`'s `server::Renderer` sends the differences:
+it keeps the screen the client shows, turns a screen that moved up into
+line feeds at the bottom, rewrites changed runs (short unchanged gaps
+included) with cursor positioning and SGR colours (PC attribute:
+foreground, background, intensity as bold, blink or bright background),
+erases blank tails with EL, and shows or hides the cursor. Control
+positions go out as their PC pictures in UTF-8. `server::KeyDecoder`
+turns the client's bytes into PC keystrokes (scan codes of the US
+layout, Ctrl+letter, Enter, Tab, Backspace, Esc, the VT100/VT220/xterm
+sequences of the cursor, editing and F1-F12 keys with xterm modifiers,
+UTF-8 back through the code page). Both are host-tested (round trips
+through the crate's own emulator).
+
+**Testing.** `RS2\NETCLI.EXE` starts FTPD, TFTPD, TELNETD, LPD, REXECD,
+RSHD and TALKD and runs the clients with scripted input (36 checks):
+LPR/LPQ/LPRM against rs2's LPD (the job lands in a spooler queue, is
+listed, is removed), REXEC and RSH against REXECD/RSHD (output, a wrong
+password, standard input to `sort`, USER), `rexec()` through TCPIP32
+(output and standard error on the second connection), two TALKs
+talking through TALKD; FTP against rs2's FTPD
 (login, put and get of 300 KB in active and passive mode, compared byte
 for byte; pwd, size, mkdir, rename, ls, dir, delete, rmdir; anonymous
 read-only, a wrong password refused) and against the host's FTP server
@@ -397,13 +467,17 @@ read-only, a wrong password refused) and against the host's FTP server
 REXEC and RSH against servers on the host; TCPCFG2's command-line form.
 On the host, `tools/scripts/sockhost.py` (FTP) and
 `tools/scripts/nethost.py` (LPD, finger, rexec, rsh, a VT100 test
-screen; with `--client` it logs in to the guest's FTPD in active mode
-and runs commands through its TELNETD) serve and check;
+screen; with `--client` it logs in to the guest's FTPD in active mode,
+sends a job to the guest's LPD and drives its TELNETD through a small
+VT100 emulator of its own: CMD's prompt with ANSI colours, `dir`
+scrolling, IBM's TEDIT full screen, cursor keys, `exit`; `--pty` runs
+only those, `--shots DIR` saves the emulated screens as PNGs drawn with
+the kernel's font) serve and check;
 `tools/scripts/netcli.sh` runs the guest with the port forwards: the
 guest reaches the host's servers as 10.0.2.100 on their standard ports
 (`xtask run --guestfwd tcp:10.0.2.100:515-cmd:nc 127.0.0.1 5515`: QEMU
 runs nc for each connection), the host reaches FTPD and TELNETD on 5521
-and 5523. TELNET was checked against nethost.py's VT100 screen (colours,
+and 5523 (and LPD on 5525). TELNET was checked against nethost.py's VT100 screen (colours,
 line-drawing box, scrolling region, terminal type VT100 and size 80x25
 negotiated, cursor and function keys sent) and TCPCFG2 with screenshots.
 
@@ -430,7 +504,10 @@ line ends):
   SockGetHostByAddr, a TCP echo through the host, UDP to itself.
 * TFTP (16-bit, TCPIPDLL/TNLS16): `tftp 10.0.2.2`, `binary`, `get` of a
   300 KB file and a text file from QEMU's TFTP server (`xtask run
-  --tftp DIR`), byte-identical.
+  --tftp DIR`), byte-identical. Lost packets: `tools/scripts/tftplossy.py
+  ROOT` (port 6969) drops a DATA block of each read and an ACK of each
+  write; `tools/socktests/tftploss.cmd` gets and puts 300 KB through it,
+  which finishes only because TFTP's `_alarm` fires and it retransmits.
 * INETD (16-bit): with `echo tcp C:\INETECHO.CMD` in `%ETC%\INETD.LST` it
   listens on port 7; a host client (through `--hostfwd tcp::5507-:7`)
   is served by the REXX script INETD starts with the socket number,
@@ -444,18 +521,17 @@ line ends):
 
 ## Gaps in the socket API
 
-* TCPIPDLL lacks the 16-bit resolver (`_res_*`, `_dn_*`), `_sendmsg`/
-  `_recvmsg`, `_bsdselect` and the `_gethostent`-style iterators;
-  `_alarm`/`_xsignal` accept but never signal (TFTP's retransmission
-  timer does not fire). Nothing on the media imports the 16-bit
-  SOCKETS.DLL, which is not provided.
+* TCPIPDLL lacks the resolver's data and debugging exports (`__res`,
+  `_p_*`, `_fp_query`, `__gethtby*`, `_hostalias`); `_alarm` reaches a
+  thread only when it is in, or next enters, TCPIPDLL (not in a busy
+  loop elsewhere). Nothing on the media imports the 16-bit SOCKETS.DLL,
+  which is not provided.
 * No urgent (out-of-band) data, no `sysctl()` (the Toolkit's HPS
   memory-mapped I/O samples need it), no ARP/interface statistics
   ioctls (SIOSTATAT, SIOSTATIF, SIOSTATTCP...), no setting of
-  interfaces or routes, `rexec()` is missing.
-* TNLS32 does no code page translation (FTP's and TELNET's `-x`
-  translation tables, DBCS countries); PMSHAPI does not read or write
-  INI files.
+  interfaces or routes.
+* TNLS32 translates single-byte code pages only (no DBCS conversion
+  for the 932/EUC/JIS countries).
 * The Toolkit's rpcgen sample server (rgs) fails: it calls RPC32DLL's
   `svcudp_create`/`svctcp_create` (`_Optlink`, socket in EAX) with
   `_System` linkage, so the socket argument is whatever EAX holds (here

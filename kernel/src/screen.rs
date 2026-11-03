@@ -211,6 +211,9 @@ pub struct Screen {
     pub watched: bool,
     /// Shown in a PM window now (the text-mode mouse pointer is not drawn).
     pub windowed: bool,
+    /// A pseudo terminal session's screen (crate::pty): changes wake the
+    /// server that reads it.
+    pub pty: bool,
     /// A DOS session's graphics mode picture (text cells are not shown
     /// meanwhile).
     pub pixmap: Option<Pixmap>,
@@ -295,6 +298,7 @@ impl Screen {
             core::ptr::addr_of_mut!((*s).font_gen).write(0);
             core::ptr::addr_of_mut!((*s).watched).write(false);
             core::ptr::addr_of_mut!((*s).windowed).write(false);
+            core::ptr::addr_of_mut!((*s).pty).write(false);
             core::ptr::addr_of_mut!((*s).pixmap).write(None);
             core::ptr::addr_of_mut!((*s).surface).write(None);
             core::ptr::addr_of_mut!((*s).history).write(VecDeque::new());
@@ -324,6 +328,9 @@ impl Screen {
         self.changes = self.changes.wrapping_add(1);
         if self.watched {
             crate::viowin::changed();
+        }
+        if self.pty {
+            crate::pty::changed();
         }
     }
 

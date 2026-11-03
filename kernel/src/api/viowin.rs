@@ -11,6 +11,9 @@
 //! | 15 | `Rs2VioMouse(ULONG sid, LONG row, LONG col, ULONG fsButtons)` |
 //! | 16 | `Rs2VioControl(ULONG sid, ULONG cmd, ULONG arg)` |
 //! | 17 | `Rs2VioReadHistory(ULONG sid, ULONG ulEnd, ULONG cLines, ULONG cCols, PUSHORT pCells, ULONG cbCells)` |
+//!
+//! Rs2VioReadScreen, Rs2VioKey and Rs2VioControl's stop also serve
+//! pseudo terminal sessions (api/pty.rs).
 
 use alloc::vec::Vec;
 use core::sync::atomic::Ordering;
@@ -262,7 +265,7 @@ pub fn query_font(c: &mut Ctx) -> u32 {
 pub fn key(c: &mut Ctx) -> u32 {
     let (sid, p) = (c.arg(0), c.arg(1));
     let Some(raw) = c.read_vec(p, 16) else { return err::INVALID_ADDRESS };
-    if !session::is_windowable(sid) {
+    if !session::is_windowable(sid) && !session::is_pty(sid) {
         return ERROR_SMG_SESSION_NOT_FOUND;
     }
     let u32_at = |o: usize| u32::from_le_bytes([raw[o], raw[o + 1], raw[o + 2], raw[o + 3]]);

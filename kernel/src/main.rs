@@ -28,6 +28,7 @@ mod kbd;
 mod loader;
 mod pipe;
 mod power;
+mod pty;
 mod log;
 mod mm;
 mod monitor;

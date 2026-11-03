@@ -274,6 +274,58 @@ pub fn codepage(cp: u16) -> Option<&'static [u16; 256]> {
     nls::CODEPAGES.iter().find(|(n, _)| *n == cp).map(|(_, t)| t)
 }
 
+/// A code page named as the TCP/IP applications name translations
+/// (`-cp`): a number (`819`), `IBM-850`/`IBM850`/`CP850`, or an ISO
+/// 8859 part (`ISO8859-1`, `ISO-8859-2`, `8859-5`, `latin1`), or IBM's
+/// table names `TCP8859` and `TCPDECMU`; only code pages with a table.
+pub fn codepage_by_name(name: &str) -> Option<u16> {
+    let n = name.trim().to_ascii_uppercase();
+    let n = n.trim_end_matches(".TBL");
+    let iso = |part: &str| -> Option<u16> {
+        Some(match part.parse::<u8>().ok()? {
+            1 => 819,
+            2 => 912,
+            5 => 915,
+            7 => 813,
+            9 => 920,
+            13 => 921,
+            _ => return None,
+        })
+    };
+    let cp = if n == "TCP8859" || n == "TCPDECMU" {
+        // IBM's TCP/IP table names: ISO 8859-1, and DEC's multinational
+        // set (8859-1's characters at the same positions, near enough).
+        Some(819)
+    } else if let Ok(v) = n.parse::<u16>() {
+        Some(v)
+    } else if let Some(r) = n.strip_prefix("ISO8859-").or_else(|| n.strip_prefix("ISO-8859-")).or_else(|| n.strip_prefix("8859-")).or_else(|| n.strip_prefix("ISO8859_")) {
+        iso(r)
+    } else if let Some(r) = n.strip_prefix("LATIN") {
+        match r {
+            "1" => Some(819),
+            "2" => Some(912),
+            _ => None,
+        }
+    } else if let Some(r) = n.strip_prefix("IBM-").or_else(|| n.strip_prefix("IBM")).or_else(|| n.strip_prefix("CP")) {
+        r.parse().ok()
+    } else {
+        None
+    };
+    cp.filter(|&c| codepage(c).is_some())
+}
+
+/// A byte translation table from code page `from` to `to`: each byte of
+/// `from` becomes the byte of `to` for the same character, `sub` where
+/// `to` has none; ASCII (below 0x80) stays.
+pub fn translation(from: u16, to: u16, sub: u8) -> Option<[u8; 256]> {
+    let (a, b) = (codepage(from)?, codepage(to)?);
+    let mut t = [0u8; 256];
+    for (i, v) in t.iter_mut().enumerate() {
+        *v = if i < 0x80 || from == to { i as u8 } else { (0x80..256usize).find(|&j| b[j] == a[i]).map_or(sub, |j| j as u8) };
+    }
+    Some(t)
+}
+
 /// DBCS lead byte ranges of a double-byte code page.
 pub fn dbcs_ranges(cp: u16) -> Option<&'static [(u8, u8)]> {
     nls::DBCS.iter().find(|(n, _)| *n == cp).map(|(_, r)| *r)

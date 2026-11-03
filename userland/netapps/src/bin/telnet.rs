@@ -8,6 +8,9 @@
 //! AHEAD (the host echoes; else TELNET echoes locally), TERMINAL TYPE
 //! (-t, VT100 by default) and NAWS (the window's size). Ctrl+] ends the
 //! session. Without a host name it asks for one (`open host [port]`).
+//! `-cp codepage` (819, ISO8859-1, IBM-850...): the host sends and takes
+//! single bytes of that code page rather than UTF-8; they are translated
+//! to and from the local code page.
 #![no_std]
 #![no_main]
 extern crate alloc;
@@ -39,6 +42,12 @@ unsafe extern "C" {
 }
 
 static SOCK: AtomicU32 = AtomicU32::new(0);
+/// -cp: (inbound, outbound) translation tables.
+static mut XLATE: Option<([u8; 256], [u8; 256])> = None;
+
+fn xlate() -> Option<&'static ([u8; 256], [u8; 256])> {
+    unsafe { (*(&raw const XLATE)).as_ref() }
+}
 static REMOTE_ECHO: AtomicBool = AtomicBool::new(false);
 static ENTER_CRLF: AtomicBool = AtomicBool::new(true);
 static APP_CURSOR: AtomicBool = AtomicBool::new(false);
@@ -115,7 +124,7 @@ unsafe extern "C" fn keyboard(_: u32) {
                 b'\r' => out.extend_from_slice(if ENTER_CRLF.load(Ordering::Relaxed) { b"\r\n" } else { b"\r\0" }),
                 8 => out.push(0x7f),
                 IAC => out.extend_from_slice(&[IAC, IAC]),
-                c => out.push(c),
+                c => out.push(xlate().map_or(c, |t| t.1[c as usize])),
             }
         }
         if out.is_empty() {
@@ -296,6 +305,9 @@ fn session(host: &str, port: u16, ttype: &str, log: Option<u32>) -> u32 {
     let mut block: *mut u8 = core::ptr::null_mut();
     unsafe { os2::DosAllocMem(&mut block as *mut *mut u8 as *mut _, 65536, 0x13) };
     let mut scr = Screen { term: Term::new(cols, rows), buf: block };
+    if xlate().is_some() {
+        scr.term.utf8_enabled = false;
+    }
     let mut tn = Telnet { sb: None, state: 0, cmd: 0, ttype: String::from(ttype), cols: cols as u16, rows: rows as u16, will: [false; 256], do_: [false; 256] };
     SOCK.store(sock.0, Ordering::Relaxed);
     scr.term.feed(alloc::format!("Connected to {host}.\r\nEscape character is 'Ctrl+]'.\r\n").as_bytes());
@@ -329,7 +341,12 @@ fn session(host: &str, port: u16, ttype: &str, log: Option<u32>) -> u32 {
         if ready {
             match sock.recv(&mut buf) {
                 Ok(n) if n > 0 => {
-                    let d = tn.input(&buf[..n]);
+                    let mut d = tn.input(&buf[..n]);
+                    if let Some(t) = xlate() {
+                        for b in d.iter_mut() {
+                            *b = t.0[*b as usize];
+                        }
+                    }
                     if let Some(hf) = log {
                         let _ = write_file(hf, &d);
                     }
@@ -368,12 +385,26 @@ fn main(s: &os2::Startup) -> u32 {
             "-p" => port = val(&mut i).map(|p| service_port(&p, "tcp", 23)),
             "-t" => ttype = val(&mut i).unwrap_or(ttype).to_ascii_uppercase(),
             "-l" => logfile = val(&mut i),
-            "-a" | "-cp" | "-d" | "-e" | "-f" | "-h" | "-k" | "-o" | "-u" | "-w" => {
+            "-cp" => {
+                let name = val(&mut i).unwrap_or_default();
+                let mut cps = [0u32; 4];
+                let mut n = 0;
+                unsafe { os2::DosQueryCp(16, cps.as_mut_ptr(), &mut n) };
+                let local = if cps[0] == 0 { 850 } else { cps[0] as u16 };
+                match uls::codepage_by_name(&name).and_then(|net| Some((uls::translation(net, local, b'?')?, uls::translation(local, net, b'?')?))) {
+                    Some(t) => unsafe { XLATE = Some(t) },
+                    None => {
+                        eprint(&alloc::format!("telnet: translation {name} is not available\r\n"));
+                        return 1;
+                    }
+                }
+            }
+            "-a" | "-d" | "-e" | "-f" | "-h" | "-k" | "-o" | "-u" | "-w" => {
                 val(&mut i);
             }
             "-n" => {}
             "-?" | "/?" => {
-                eprint("Usage: telnet [-p port] [-t termtype] [-l filename] [hostname [port]]\r\n");
+                eprint("Usage: telnet [-p port] [-t termtype] [-l filename] [-cp codepage] [hostname [port]]\r\n");
                 return 1;
             }
             _ => rest.push(a[i].clone()),

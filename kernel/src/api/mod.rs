@@ -29,6 +29,7 @@ pub mod nls;
 pub mod perf;
 pub mod npipe;
 pub mod proc;
+pub mod pty;
 pub mod queue;
 pub mod resource;
 pub mod rs2api;

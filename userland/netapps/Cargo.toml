@@ -1,6 +1,6 @@
 [package]
 name = "netapps"
-description = "rs2's TCP/IP applications: FTP, TELNET, LPR, LPQ, LPRM, FINGER, TFTP, REXEC, RSH and the FTPD, TELNETD and TFTPD servers"
+description = "rs2's TCP/IP applications: FTP, TELNET, LPR, LPQ, LPRM, FINGER, TFTP, REXEC, RSH, TALK and the FTPD, TELNETD, TFTPD, LPD, REXECD, RSHD and TALKD servers"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -9,3 +9,4 @@ license.workspace = true
 os2 = { path = "../os2" }
 utils = { path = "../utils" }
 vt100 = { path = "../../crates/vt100" }
+uls = { path = "../../crates/uls" }

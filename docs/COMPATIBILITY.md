@@ -382,12 +382,20 @@ on the media, so rs2's own utilities take their place.
 | Toolkit rgs/rgc (rpcgen) | fails | The sample calls RPC32DLL's `_Optlink` `svcudp_create` with `_System` linkage (socket -1 pushed, EAX read): `svcudp_create - cannot getsockname`. |
 | Toolkit echos/echoc (HPS) | fails | Need `sysctl()` memory-mapped I/O (OS2_MEMMAPIO), which rs2 does not have. |
 | SYSLOGD.EXE | works | Receives a UDP message (sent with RXSOCK to 127.0.0.1:514) and writes it to `%ETC%\\SYSLOG.MSG`. |
-| TFTP.EXE | works | 16-bit, on rs2's TCPIPDLL and TNLS16: `status`, `binary`, `get` of 300 KB and a text file from QEMU's TFTP server, byte-identical. Timeouts (`_alarm`) do not fire. |
+| TFTP.EXE | works | 16-bit, on rs2's TCPIPDLL and TNLS16: `status`, `binary`, `get` of 300 KB and a text file from QEMU's TFTP server, byte-identical. Retransmission: against `tools/scripts/tftplossy.py`, which drops a DATA block and an ACK, `get` and `put` of 300 KB finish byte-identical (`_alarm`/`_xsignal` interrupt the blocked `_recvfrom` and call TFTP's handler). |
 | INETD.EXE | works | 16-bit; listens for the services of `%ETC%\INETD.LST` and starts the server with the accepted socket's number (tested with a REXX echo server on RXSOCK, reached from the host). |
-| TELNETD.EXE, LPD.EXE, BOOTP.EXE | not tried | TELNETD needs pseudo terminals. |
+| IBM clients against rs2's servers (`tools/socktests/ibmapps.cmd`) | works | FTP to rs2's FTPD (binary `get` of 300 KB, `put`, `dir`), TFTP to TFTPD (300 KB), REXEC to REXECD, RSH to RSHD (output of the command), LPQ to LPD (the queue's state), FINGER (a refused connection reported). |
+| LPR.EXE, LPRM.EXE | fails | LPR: `LPR32.DLL won't initialize, rc = -20039` (not investigated); LPRM takes `-a agent` rather than rs2's `-` (usage only). rs2's LPR/LPRM do the job. |
+| TELNETD.EXE, REXECD.EXE, RSHD.EXE, TFTPD.EXE, FTPD.EXE | starts | Print their usage (`-?`; REXECD notes that SECEXT.DLL, LAN Server's, is missing); not run as servers (rs2's own hold the ports). IBM's TELNETD's `-cp` takes table names (TCP8859, TCPDECMU), which rs2's TNLS32 and programs also accept. |
+| LPD.EXE | fails | Imports the 16-bit spooler calls (PMSPL ordinals 1-8, 90-97: SPLQMOPEN... and DosPrint*), which rs2's PMSPL does not have; rs2's LPD replaces it. |
+| BOOTP.EXE | fails | `ioctl error SIOSTATIF` (the interface statistics ioctl rs2 lacks). |
+| TIMED.EXE, TIMEDC.EXE | fails | Need PMWSOCK.DLL, which is not on the media. |
+| PING.EXE (TCP/IP's) | starts | A DOS program (runs in a DOS session); rs2's own PING is the OS/2 one. |
+| SENDMAIL.EXE | not tried | `-?` did not return within the test's time. |
 
-rs2 has its own FTP, FTPD, TELNET, TELNETD, LPR, LPQ, LPRM, FINGER,
-TFTP, TFTPD, REXEC, RSH and TCP/IP Configuration notebook (TCPCFG2),
+rs2 has its own FTP, FTPD, TELNET, TELNETD, LPR, LPQ, LPRM, LPD, FINGER,
+TFTP, TFTPD, REXEC, REXECD, RSH, RSHD, TALK, TALKD and TCP/IP
+Configuration notebook (TCPCFG2),
 so none of IBM's are needed ([NETWORK.md](NETWORK.md#rs2s-tcpip-applications));
 IBM's above still run in their place.
 

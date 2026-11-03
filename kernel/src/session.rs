@@ -29,6 +29,8 @@ pub struct Session {
     pub windowable: bool,
     /// Shown in its PM window now (not on the framebuffer).
     pub windowed: bool,
+    /// A pseudo terminal session (crate::pty): never shown, in no list.
+    pub pty: bool,
 }
 
 /// The Presentation Manager session, if one has been started.
@@ -183,8 +185,25 @@ fn end_popup_of(pid: u32) -> Result<(), u32> {
 pub fn create(title: String, parent_session: u32, parent_pid: Option<u32>, termq: Option<String>) -> u32 {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
     crate::screen::create(id);
-    SESSIONS.lock().push(Session { id, title, leader: 0, parent_session, parent_pid, termq, windowable: false, windowed: false });
+    SESSIONS.lock().push(Session { id, title, leader: 0, parent_session, parent_pid, termq, windowable: false, windowed: false, pty: false });
     id
+}
+
+/// Make `sid` a pseudo terminal session of `cols` x `rows` (crate::pty).
+pub fn make_pty(sid: u32, cols: usize, rows: usize) {
+    if let Some(s) = SESSIONS.lock().iter_mut().find(|s| s.id == sid) {
+        s.pty = true;
+    }
+    crate::screen::with_session(sid, |s| {
+        s.pty = true;
+        if (cols, rows) != (s.cols, s.rows) && s.mode_fits(cols, rows) {
+            s.set_mode(cols, rows);
+        }
+    });
+}
+
+pub fn is_pty(sid: u32) -> bool {
+    sid != 1 && SESSIONS.lock().iter().any(|s| s.id == sid && s.pty)
 }
 
 /// Make `sid` a windowable VIO session, shown in its window.
@@ -251,7 +270,7 @@ pub fn info(sid: u32) -> Option<(u32, String)> {
 /// (id, title, windowable, windowed) of the sessions other than the boot
 /// session.
 pub fn list_full() -> Vec<(u32, String, bool, bool)> {
-    SESSIONS.lock().iter().map(|s| (s.id, s.title.clone(), s.windowable, s.windowed)).collect()
+    SESSIONS.lock().iter().filter(|s| !s.pty).map(|s| (s.id, s.title.clone(), s.windowable, s.windowed)).collect()
 }
 
 pub fn set_leader(sid: u32, pid: u32) {
@@ -283,7 +302,7 @@ pub fn exists(sid: u32) -> bool {
 /// (id, title) of every session, the boot session first.
 pub fn list() -> Vec<(u32, String)> {
     let mut v = alloc::vec![(1, boot_title())];
-    v.extend(SESSIONS.lock().iter().map(|s| (s.id, s.title.clone())));
+    v.extend(SESSIONS.lock().iter().filter(|s| !s.pty).map(|s| (s.id, s.title.clone())));
     v
 }
 
@@ -303,7 +322,7 @@ pub fn parent_pid(sid: u32) -> Option<u32> {
 /// Bring session `sid` to the foreground. A windowed session's window
 /// comes to the front in PM.
 pub fn select(sid: u32) -> bool {
-    if !exists(sid) {
+    if !exists(sid) || is_pty(sid) {
         return false;
     }
     if is_windowed(sid) {
@@ -392,6 +411,9 @@ pub fn process_ended(pid: u32, code: u32) {
     crate::vdm::drop_session(s.id);
     if s.windowable {
         crate::viowin::session_ended(s.id);
+    }
+    if s.pty {
+        crate::pty::changed();
     }
 }
 

@@ -7,6 +7,8 @@
 extern crate alloc;
 
 pub mod lpd;
+pub mod rcmd;
+pub mod talk;
 pub mod tftp;
 
 use alloc::string::String;
@@ -169,6 +171,69 @@ impl Sock {
         unsafe { Rs2SockGetName(self.0, 1, &mut a) };
         a
     }
+}
+
+/// Connect to `addr:port` from one of the local `ports` (reserved ports
+/// for the r-commands and LPD), the first that is free. A port whose
+/// connection does not complete within 3 seconds (the server may still
+/// hold an earlier connection from it) is given up for the next one.
+pub fn connect_from(addr: [u8; 4], port: u16, ports: impl Iterator<Item = u16>) -> Result<Sock, u32> {
+    let mut last = 60; // ETIMEDOUT
+    let mut slow = 0;
+    // A refusal may be for the port only (a NAT still holding the last
+    // connection from it): two more ports are tried.
+    let mut refused = 0;
+    for lp in ports {
+        let s = Sock::tcp()?;
+        s.reuse();
+        if s.bind([0; 4], lp).is_err() {
+            continue;
+        }
+        let mut on = 1u32;
+        unsafe { Rs2SockIoctl(s.0, FIONBIO, &mut on) };
+        let a = SockAddrIn::new(addr, port);
+        let rc = unsafe { Rs2SockConnect(s.0, &a, 16) };
+        match rc {
+            0 => {}
+            EINPROGRESS => {
+                let mut v = [s.0];
+                let mut n = 0;
+                unsafe { Rs2SockSelect(v.as_mut_ptr(), 0, 1, 0, 3000, &mut n) };
+                if n == 0 {
+                    slow += 1;
+                    if slow >= 4 {
+                        return Err(60);
+                    }
+                    continue;
+                }
+                let mut err = 0u32;
+                let mut cb = 4u32;
+                unsafe { Rs2SockGetOpt(s.0, SOL_SOCKET, SO_ERROR, &mut err as *mut u32 as *mut u8, &mut cb) };
+                if err != 0 {
+                    if err == 48 || err == 49 {
+                        continue;
+                    }
+                    if err == 61 && refused < 2 {
+                        refused += 1;
+                        last = err;
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+            48 | 49 => continue,
+            61 if refused < 2 => {
+                refused += 1;
+                last = 61;
+                continue;
+            }
+            e => return Err(e),
+        }
+        let mut off = 0u32;
+        unsafe { Rs2SockIoctl(s.0, FIONBIO, &mut off) };
+        return Ok(s);
+    }
+    Err(last)
 }
 
 /// An address for a host name or dotted quad; the error is a message.

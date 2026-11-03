@@ -129,7 +129,7 @@ fn env_value(env: &[String], key: &str) -> Option<String> {
 }
 
 /// Find a program: as given, with .EXE (or .COM) added, then along PATH.
-fn find_program(c: &Ctx, name: &str, env: &[String]) -> Option<String> {
+pub(super) fn find_program(c: &Ctx, name: &str, env: &[String]) -> Option<String> {
     let exists = |p: &str| super::file::resolve(c, p).ok().filter(|f| crate::fs::stat(f).is_ok()).map(|f| f.display());
     let has_ext = name.rsplit(['\\', '/']).next().is_some_and(|b| b.contains('.'));
     let candidates = |base: &str| {

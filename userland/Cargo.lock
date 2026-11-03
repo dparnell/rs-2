@@ -291,6 +291,7 @@ name = "netapps"
 version = "0.1.0"
 dependencies = [
  "os2",
+ "uls",
  "utils",
  "vt100",
 ]
@@ -841,6 +842,7 @@ version = "0.1.0"
 dependencies = [
  "os2",
  "thunk16",
+ "uls",
 ]
 
 [[package]]

@@ -12,3 +12,4 @@ path = "src/lib.rs"
 [dependencies]
 os2 = { path = "../os2" }
 thunk16 = { path = "../thunk16" }
+uls = { path = "../../crates/uls" }

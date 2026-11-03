@@ -130,10 +130,16 @@ Status markers: done, in progress, planned.
   FINGER, TFTP/TFTPD, REXEC, RSH and the TCPCFG2 notebook (NETWORK=,
   SET HOSTNAME=, RESOLV2, HOSTS); NETCLI with tools/scripts/nethost.py
   checks them; a TCP/IP folder on the desktop
-- planned: TELNETD with pseudo terminals (VIO programs), an LPD server,
-  TALK, REXECD/RSHD, code page translation (-cp) in FTP/TELNET
+- done: TELNETD with pseudo terminal sessions (kernel pty sessions,
+  RS2API 18/19; VIO programs over telnet as VT100/ANSI), an LPD server
+  into the spooler queues, TALK/TALKD, REXECD/RSHD, `rexec()` (TCPIP32,
+  TCP32DLL, TCPIPDLL), code page translation (-cp) in FTP/TELNET/TELNETD/
+  LPD and TNLS32's tables; TCPIPDLL's resolver, sendmsg/recvmsg,
+  bsdselect, iterators and a real `_alarm`/`_xsignal` (IBM TFTP
+  retransmits)
+- planned: DBCS translation in TNLS32/TNLS16, a BOOTP/DHCP server, a
+  SLIP/PPP dialer
 - planned: route/arp and run-time configuration,
-  code page translation in TNLS32/TNLS16,
   PCI INTx routing (ACPI _PRT) for the 8254x and PCnet, TCP keepalive/window scaling/SACK/urgent data
 - planned: virtio-scsi hot-plug events, virtio-console multiport
 - done: sound output: Intel High Definition Audio (`drivers/hda.rs`, PCI
