@@ -495,19 +495,19 @@ methods! {
     fn NotFound3(this: usize, ev: usize, a: usize, b: usize, c: usize) -> usize { ERR_NOT_FOUND as usize }
 }
 
-fn methods_with(n: usize, set: &[(usize, M)]) -> Vec<(&'static str, usize)> {
-    const NAMES: [&str; 28] = [
-        "Term_m0", "Term_m1", "Term_m2", "Term_m3", "Term_m4", "Term_m5", "Term_m6", "Term_m7", "Term_m8", "Term_m9",
-        "Term_m10", "Term_m11", "Term_m12", "Term_m13", "Term_m14", "Term_m15", "Term_m16", "Term_m17", "Term_m18",
-        "Term_m19", "Term_m20", "Term_m21", "Term_m22", "Term_m23", "Term_m24", "Term_m25", "Term_m26", "Term_m27",
-    ];
+/// The methods of a class, in release order: each name is the class's
+/// own (a subclass may not introduce a name its parent has).
+fn methods_with(class: &str, n: usize, set: &[(usize, M)]) -> Vec<(&'static str, usize)> {
     (0..n)
-        .map(|i| (NAMES[i], set.iter().find(|x| x.0 == i).map_or(NotFound3::t as usize, |x| x.1 as usize)))
+        .map(|i| {
+            let name: &'static str = alloc::boxed::Box::leak(alloc::format!("{class}_m{i}").into_boxed_str());
+            (name, set.iter().find(|x| x.0 == i).map_or(NotFound3::t as usize, |x| x.1 as usize))
+        })
         .collect()
 }
 
 fn build(name: &str, parent: &str, n: usize, set: &[(usize, M)], cd: *mut usize, ccd: *mut usize) -> usize {
-    let m = methods_with(n, set);
+    let m = methods_with(name, n, set);
     somsup::build_class(&somsup::ClassSpec {
         name,
         parents: &[parent],

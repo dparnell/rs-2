@@ -29,6 +29,12 @@ unsafe extern "C" {
     fn AEGetParamPtr(e: *const Desc, key: u32, ty: u32, tyo: *mut u32, p: *mut u8, max: usize, n: *mut u32) -> i32;
     #[link_name = "OPENDOC.38"]
     fn AEInstallEventHandler(class: u32, id: u32, f: usize, refcon: usize, sys: u32) -> i32;
+    #[link_name = "OPENDOC.32"]
+    fn AEGetParamDesc(e: *const Desc, key: u32, ty: u32, r: *mut Desc) -> i32;
+    #[link_name = "OPENDOC.39"]
+    fn AEInstallObjectAccessor(class: u32, container: u32, f: usize, refcon: usize, sys: u32) -> i32;
+    #[link_name = "OPENDOC.59"]
+    fn AEResolve(spec: *const Desc, flags: u32, token: *mut Desc) -> i32;
     #[link_name = "OPENDOC.51"]
     fn AEPutParamDesc(e: *const Desc, key: u32, d: *const Desc) -> i32;
     #[link_name = "OPENDOC.528"]
@@ -132,46 +138,175 @@ fn align(v: &mut Vec<u8>) {
     }
 }
 
+fn u16le(v: &mut Vec<u8>, x: u16) {
+    v.extend_from_slice(&x.to_le_bytes());
+}
+
+fn u32le(v: &mut Vec<u8>, x: u32) {
+    v.extend_from_slice(&x.to_le_bytes());
+}
+
 /// An event of the terminology: name, class, ID, reply type, direct
-/// parameter type ('null': none).
-fn aete_event(v: &mut Vec<u8>, name: &[u8], class: u32, id: u32, reply: u32, direct: u32) {
+/// parameter type ('null': none), other parameters (name, keyword, type).
+fn aete_event(v: &mut Vec<u8>, name: &[u8], class: u32, id: u32, reply: u32, direct: u32, params: &[(&[u8], u32, u32)]) {
     pstr(v, name);
     pstr(v, b"");
     align(v);
-    v.extend_from_slice(&class.to_le_bytes());
-    v.extend_from_slice(&id.to_le_bytes());
-    v.extend_from_slice(&reply.to_le_bytes());
+    u32le(v, class);
+    u32le(v, id);
+    u32le(v, reply);
     pstr(v, b"");
     align(v);
-    v.extend_from_slice(&0u16.to_le_bytes());
-    v.extend_from_slice(&direct.to_le_bytes());
+    u16le(v, 0);
+    u32le(v, direct);
     pstr(v, b"");
     align(v);
-    v.extend_from_slice(&0u16.to_le_bytes());
-    v.extend_from_slice(&0u16.to_le_bytes()); // no other parameters
+    u16le(v, 0);
+    u16le(v, params.len() as u16);
+    for &(n, k, t) in params {
+        pstr(v, n);
+        align(v);
+        u32le(v, k);
+        u32le(v, t);
+        pstr(v, b"");
+        align(v);
+        u16le(v, 0);
+    }
 }
 
-/// ODTEST's terminology ('aete'): a suite with "hello" (reply TEXT) and
-/// "twice" (a long in, a long out).
+/// ODTEST's terminology ('aete'): "hello" (reply TEXT), "twice" (a long
+/// in, a long out), the core suite's "get" and "set" (to), and the class
+/// "part" with the properties "text" and "name".
 fn aete() -> Vec<u8> {
     let mut v = Vec::new();
-    v.extend_from_slice(&1u16.to_le_bytes());
-    v.extend_from_slice(&0u16.to_le_bytes());
-    v.extend_from_slice(&0u16.to_le_bytes());
-    v.extend_from_slice(&1u16.to_le_bytes()); // one suite
+    for x in [1u16, 0, 0, 1] {
+        u16le(&mut v, x);
+    }
     pstr(&mut v, b"ODTEST suite");
     pstr(&mut v, b"");
     align(&mut v);
-    v.extend_from_slice(&c(b"RS2T").to_le_bytes());
-    v.extend_from_slice(&1u16.to_le_bytes());
-    v.extend_from_slice(&1u16.to_le_bytes());
-    v.extend_from_slice(&2u16.to_le_bytes()); // events
-    aete_event(&mut v, b"hello", c(b"RS2T"), c(b"hllo"), c(b"TEXT"), c(b"null"));
-    aete_event(&mut v, b"twice", c(b"RS2T"), c(b"dubl"), c(b"long"), c(b"long"));
-    for _ in 0..4 {
-        v.extend_from_slice(&0u16.to_le_bytes()); // classes, comparisons, enumerations, ...
+    u32le(&mut v, c(b"RS2T"));
+    u16le(&mut v, 1);
+    u16le(&mut v, 1);
+    u16le(&mut v, 4); // events
+    aete_event(&mut v, b"hello", c(b"RS2T"), c(b"hllo"), c(b"TEXT"), c(b"null"), &[]);
+    aete_event(&mut v, b"twice", c(b"RS2T"), c(b"dubl"), c(b"long"), c(b"long"), &[]);
+    aete_event(&mut v, b"get", c(b"core"), c(b"getd"), c(b"****"), c(b"obj "), &[]);
+    aete_event(&mut v, b"set", c(b"core"), c(b"setd"), c(b"null"), c(b"obj "), &[(b"to", c(b"data"), c(b"****"))]);
+    u16le(&mut v, 1); // classes
+    pstr(&mut v, b"part");
+    align(&mut v);
+    u32le(&mut v, c(b"cpar"));
+    pstr(&mut v, b"");
+    align(&mut v);
+    u16le(&mut v, 2); // properties
+    for (n, code) in [(&b"text"[..], c(b"ctxt")), (&b"name"[..], c(b"pnam"))] {
+        pstr(&mut v, n);
+        align(&mut v);
+        u32le(&mut v, code);
+        u32le(&mut v, c(b"TEXT"));
+        pstr(&mut v, b"");
+        align(&mut v);
+        u16le(&mut v, 0);
     }
+    u16le(&mut v, 0); // elements
+    u16le(&mut v, 0); // comparisons
+    u16le(&mut v, 0); // enumerations
     v
+}
+
+// ---- the parts ODTEST's scripts get and set (object accessors) ----
+
+static mut TEXTS: [&[u8]; 3] = [b"first part", b"second part", b"third part"];
+static mut CHANGED: Option<Vec<u8>> = None;
+
+fn part_text(i: i32) -> Vec<u8> {
+    if i == 1 {
+        if let Some(t) = unsafe { (*(&raw const CHANGED)).clone() } {
+            return t;
+        }
+    }
+    unsafe { TEXTS.get((i - 1) as usize).map_or(Vec::new(), |t| t.to_vec()) }
+}
+
+fn long_of(d: &Desc) -> i32 {
+    let b = data(d).1;
+    if b.len() >= 4 { i32::from_le_bytes([b[0], b[1], b[2], b[3]]) } else { -1 }
+}
+
+extern "C" fn part_accessor(_class: u32, _ctok: *const Desc, _cclass: u32, form: u32, key: *const Desc, tok: *mut Desc, _refcon: usize) -> i32 {
+    if form != c(b"indx") {
+        return -1708;
+    }
+    let i = long_of(unsafe { &*key });
+    if !(1..=3).contains(&i) {
+        return -1728;
+    }
+    unsafe { AECreateDesc(c(b"cpar"), &i as *const i32 as *const u8, 4, tok) }
+}
+
+extern "C" fn prop_accessor(_class: u32, ctok: *const Desc, _cclass: u32, form: u32, key: *const Desc, tok: *mut Desc, _refcon: usize) -> i32 {
+    if form != c(b"prop") {
+        return -1708;
+    }
+    let v = [long_of(unsafe { &*ctok }), long_of(unsafe { &*key })];
+    unsafe { AECreateDesc(c(b"prop"), v.as_ptr() as *const u8, 8, tok) }
+}
+
+/// The direct parameter's object: (part, property).
+fn resolve_direct(event: *const Desc) -> Result<(i32, u32), i32> {
+    let mut spec = Desc::default();
+    let mut tok = Desc::default();
+    unsafe {
+        let r = AEGetParamDesc(event, c(b"----"), c(b"****"), &mut spec);
+        if r != 0 {
+            return Err(r);
+        }
+        let r = AEResolve(&spec, 0, &mut tok);
+        AEDisposeDesc(&mut spec);
+        if r != 0 {
+            return Err(r);
+        }
+    }
+    let b = data(&tok).1;
+    unsafe { AEDisposeDesc(&mut tok) };
+    if b.len() < 8 {
+        return Err(-1728);
+    }
+    Ok((i32::from_le_bytes([b[0], b[1], b[2], b[3]]), u32::from_le_bytes([b[4], b[5], b[6], b[7]])))
+}
+
+extern "C" fn get_data(event: *const Desc, reply: *mut Desc, _r: usize) -> i32 {
+    let (part, prop) = match resolve_direct(event) {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    let v = if prop == c(b"ctxt") { part_text(part) } else { b"RS2TestPart".to_vec() };
+    let mut d = text(&v);
+    unsafe {
+        AEPutParamDesc(reply, c(b"----"), &d);
+        AEDisposeDesc(&mut d);
+    }
+    0
+}
+
+extern "C" fn set_data(event: *const Desc, _reply: *mut Desc, _r: usize) -> i32 {
+    let (part, prop) = match resolve_direct(event) {
+        Ok(x) => x,
+        Err(e) => return e,
+    };
+    let mut buf = [0u8; 128];
+    let (mut ty, mut n) = (0u32, 0u32);
+    let r = unsafe { AEGetParamPtr(event, c(b"data"), c(b"TEXT"), &mut ty, buf.as_mut_ptr(), buf.len(), &mut n) };
+    if r != 0 {
+        return r;
+    }
+    if part != 1 || prop != c(b"ctxt") {
+        return -10003; // errAEWriteDenied
+    }
+    // (OREXXSC sends text with its NUL)
+    unsafe { CHANGED = Some(buf[..(n as usize).min(128)].iter().copied().take_while(|&b| b != 0).collect()) };
+    0
 }
 
 extern "C" fn get_aete(_event: *const Desc, reply: *mut Desc, _refcon: usize) -> i32 {
@@ -217,6 +352,10 @@ fn scriptable_app(sc: usize) {
         AEInstallEventHandler(c(b"ascr"), c(b"gdte"), get_aete as usize, 0, 0);
         AEInstallEventHandler(c(b"RS2T"), c(b"hllo"), hello as usize, 0, 0);
         AEInstallEventHandler(c(b"RS2T"), c(b"dubl"), twice as usize, 0, 0);
+        AEInstallEventHandler(c(b"core"), c(b"getd"), get_data as usize, 0, 0);
+        AEInstallEventHandler(c(b"core"), c(b"setd"), set_data as usize, 0, 0);
+        AEInstallObjectAccessor(c(b"cpar"), c(b"null"), part_accessor as usize, 0, 0);
+        AEInstallObjectAccessor(c(b"prop"), c(b"cpar"), prop_accessor as usize, 0, 0);
     }
     let r = run(sc, b"app = .ScriptableApp~new~connect('ODTEST')\r\nreturn app~hello");
     check("a script connects to this program and sends it an event (ScriptableApp, its terminology)", r.as_deref() == Ok(&b"hello from ODTEST"[..]));
@@ -224,6 +363,15 @@ fn scriptable_app(sc: usize) {
     check("an event with a direct parameter and a reply", r.as_deref() == Ok(&b"42"[..]));
     let r = run(sc, b"return .ScriptableApp~new~connect('ODTEST')~nosuchevent");
     check("an event the terminology does not have is an error", r == Err(-1753));
+    // the terminology's classes and properties: NOVALUE, object specifiers
+    let r = run(sc, b"app = .ScriptableApp~new~connect('ODTEST')\r\nreturn part~getclass");
+    check("an unset variable named as a class is the class (ScriptableApp's NOVALUE)", r.as_deref() == Ok(alloc::format!("{}", c(b"cpar") as i32).as_bytes()));
+    let r = run(sc, b"app = .ScriptableApp~new~connect('ODTEST')\r\nreturn app~get(text~of(part~index(2)))");
+    check("get: an object specifier ('text of part 2') resolved by the application's accessors", r.as_deref() == Ok(&b"second part"[..]));
+    let r = run(sc, b"app = .ScriptableApp~new~connect('ODTEST')\r\napp~set(text~of(part~index(1)), .directory~new~~setentry('TO', 'changed'))\r\nreturn app~get(text~of(part~index(1)))");
+    check("set with a named parameter (to), then get", r.as_deref() == Ok(&b"changed"[..]));
+    let r = run(sc, b"app = .ScriptableApp~new~connect('ODTEST')\r\nreturn app~get(text~of(part~index(9)))");
+    check("an object that is not there: an error", r == Err(-1753));
 }
 
 pub fn orexxsc() {
