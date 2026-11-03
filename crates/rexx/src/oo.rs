@@ -36,6 +36,8 @@ pub struct Found {
 /// What the interpreter calls of Object REXX, through the world (so that
 /// a classic REXX that never makes one does not link it).
 pub struct Ops {
+    pub run_uninits: fn(&mut Interp<'_>, &mut Frame, bool),
+    pub std_io: fn(&mut Interp<'_>, Option<&mut Frame>, &[u8], &[u8], Vec<Option<Value>>) -> Option<R<Val>>,
     pub load_package: fn(&[u8], &[u8]) -> Result<Rc<Package>, LoadErr>,
     pub install_package: fn(&mut Interp<'_>, &mut Frame, &Rc<Package>) -> R<()>,
     pub obj_string: fn(&mut Interp<'_>, &mut Frame, &ObjRef) -> R<Val>,
@@ -57,6 +59,8 @@ fn install(it: &mut Interp<'_>, f: &mut Frame, p: &Rc<Package>) -> R<()> {
 }
 
 pub static OPS: Ops = Ops {
+    run_uninits,
+    std_io,
     load_package,
     install_package: install,
     obj_string,
@@ -90,6 +94,14 @@ pub struct World {
     pub handed: RefCell<Vec<Value>>,
     /// The activities that ran (for GUARD bookkeeping).
     pub activities: Cell<u64>,
+    /// Objects whose last reference was dropped, waiting for UNINIT.
+    pub uninit_queue: UninitQueue,
+    /// Objects with an UNINIT method (sent UNINIT when the program ends if
+    /// still alive).
+    pub uninit_live: RefCell<Vec<alloc::rc::Weak<Object>>>,
+    in_uninit: Cell<bool>,
+    in_std_io: Cell<bool>,
+    prelude: Cell<bool>,
 }
 
 const BUILTINS: &[(Builtin, &[u8])] = &[
@@ -122,6 +134,7 @@ fn raw_obj(id: u64, class: Option<ObjRef>, data: Data) -> ObjRef {
         methods: RefCell::new(None),
         name: RefCell::new(None),
         guard: Cell::new((0, 0)),
+        uninit: RefCell::new(None),
     })
 }
 
@@ -178,6 +191,11 @@ impl World {
             ext_classes: RefCell::new(BTreeMap::new()),
             handed: RefCell::new(Vec::new()),
             activities: Cell::new(1),
+            uninit_queue: Rc::new(RefCell::new(Vec::new())),
+            uninit_live: RefCell::new(Vec::new()),
+            in_uninit: Cell::new(false),
+            in_std_io: Cell::new(false),
+            prelude: Cell::new(false),
         };
         {
             let mut e = w.env.data.borrow_mut();
@@ -191,13 +209,24 @@ impl World {
                 d.map.insert(b"ENVIRONMENT".to_vec(), Value::O(w.env.clone()));
             }
         }
+        // .Stream_Supplier (what a stream's SUPPLIER gives): a supplier
+        // whose superclass is .Object, as in IBM's REXX.IMG
+        {
+            let ss = w.new_class(b"Stream_Supplier".to_vec(), alloc::vec![w.class(Builtin::Object)], w.class(Builtin::Class));
+            if let Data::Class(ci) = &mut *ss.data.borrow_mut() {
+                ci.builtin = Some(Builtin::Supplier);
+            }
+            if let Data::Directory(d) = &mut *w.env.data.borrow_mut() {
+                d.map.insert(b"STREAM_SUPPLIER".to_vec(), Value::O(ss));
+            }
+        }
         // the standard streams and the monitors on them
         let stream = w.classes[Builtin::Stream as usize].clone();
         let monitor = w.classes[Builtin::Monitor as usize].clone();
         let mut entries = Vec::new();
         for (name, mon) in [(&b"STDIN"[..], &b"INPUT"[..]), (b"STDOUT", b"OUTPUT"), (b"STDERR", b"ERROR")] {
             let s = w.new_obj(&stream, Data::Stream(StreamData { name: name.to_vec() }));
-            let m = w.new_obj(&monitor, Data::Monitor(Value::O(s.clone())));
+            let m = w.new_obj(&monitor, Data::Monitor(alloc::vec![Value::O(s.clone())]));
             entries.push((name.to_vec(), Value::O(s)));
             entries.push((mon.to_vec(), Value::O(m)));
         }
@@ -260,6 +289,23 @@ impl World {
         c
     }
 
+    /// Watch an object for UNINIT if its class (or the object) has one.
+    pub fn watch_uninit(&self, o: &ObjRef) {
+        if o.uninit.borrow().is_some() {
+            return;
+        }
+        let v = Value::O(o.clone());
+        if !lookup(self, &v, b"UNINIT", &Start::Normal).is_some_and(|f| !matches!(f.m.body, Body::Null)) {
+            return;
+        }
+        *o.uninit.borrow_mut() = Some(self.uninit_queue.clone());
+        let mut live = self.uninit_live.borrow_mut();
+        if live.len() >= 64 && live.len().is_power_of_two() {
+            live.retain(|w| w.strong_count() > 0);
+        }
+        live.push(Rc::downgrade(o));
+    }
+
     /// The program ended: nothing to do yet (alarms and other activities
     /// end with it).
     pub fn finish(&self) {}
@@ -270,6 +316,113 @@ impl World {
             _ => None,
         }
     }
+}
+
+// ---- .INPUT, .OUTPUT, .ERROR ----
+
+/// The object `.OUTPUT` (`which` = OUTPUT, INPUT or ERROR) stands for, if
+/// it is not the default: the monitor .local starts with, on the standard
+/// stream. SAY, PULL, LINEIN, trace output... use the host directly then.
+fn std_target(w: &World, which: &[u8]) -> Option<Value> {
+    let v = w.dir_get(&w.local, which).or_else(|| w.dir_get(&w.env, which))?;
+    let std: &[u8] = match which {
+        b"OUTPUT" => b"STDOUT",
+        b"INPUT" => b"STDIN",
+        _ => b"STDERR",
+    };
+    let plain = |o: &ObjRef, b: Builtin| Rc::ptr_eq(&o.class(), &w.class(b)) && o.methods.borrow().is_none();
+    let std_stream = |v: &Value| match v {
+        Value::O(s) if plain(s, Builtin::Stream) => match &*s.data.borrow() {
+            Data::Stream(sd) => {
+                let mut n = upper(&sd.name);
+                if n.last() == Some(&b':') {
+                    n.pop();
+                }
+                n == std
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    if std_stream(&v) {
+        return None;
+    }
+    if let Value::O(m) = &v {
+        if plain(m, Builtin::Monitor) {
+            if let Some(d) = match &*m.data.borrow() { Data::Monitor(d) => d.last().cloned(), _ => None } {
+                if std_stream(&d) {
+                    return None;
+                }
+            }
+        }
+    }
+    Some(v)
+}
+
+/// Send `msg` to `.OUTPUT`/`.INPUT`/`.ERROR` when it was redirected (None:
+/// it was not, use the standard stream).
+fn std_io(it: &mut Interp<'_>, f: Option<&mut Frame>, which: &[u8], msg: &[u8], args: Vec<Option<Value>>) -> Option<R<Val>> {
+    let w = it.w.clone()?;
+    let t = std_target(&w, which)?;
+    // output of the redirection's own methods (their trace...) goes to
+    // the standard streams
+    if w.in_std_io.replace(true) {
+        return None;
+    }
+    let mut own;
+    let f = match f {
+        Some(f) => f,
+        None => {
+            own = Frame::new(Rc::new(Program::empty()), b"", b"CMD", crate::CallType::Function, it.st.pools.pools.len());
+            &mut own
+        }
+    };
+    let r = it.send(f, &t, msg, args, Start::Normal, 0).and_then(|v| match v {
+        Some(v) => it.to_str(f, &v),
+        None => Ok(Vec::new()),
+    });
+    w.in_std_io.set(false);
+    Some(r)
+}
+
+// ---- UNINIT ----
+
+/// Send UNINIT to the objects whose last reference was dropped; with
+/// `all` (the program ends), also to every object still alive that has
+/// one. Errors in UNINIT methods are ignored.
+fn run_uninits(it: &mut Interp<'_>, f: &mut Frame, all: bool) {
+    let Some(w) = it.w.clone() else { return };
+    if w.in_uninit.replace(true) {
+        return;
+    }
+    let mut live = Vec::new();
+    if all {
+        live = core::mem::take(&mut *w.uninit_live.borrow_mut());
+        live.reverse();
+    }
+    let saved = (it.raised.take(), core::mem::take(&mut it.err_msg), it.err_at.take(), core::mem::take(&mut it.tb));
+    loop {
+        let mut batch: Vec<ObjRef> = core::mem::take(&mut *w.uninit_queue.borrow_mut()).into_iter().map(Rc::new).collect();
+        if batch.is_empty() {
+            // then those still alive (the program ended)
+            while let Some(l) = live.pop() {
+                if let Some(o) = l.upgrade() {
+                    if o.uninit.borrow_mut().take().is_some() {
+                        batch.push(o);
+                        break;
+                    }
+                }
+            }
+        }
+        if batch.is_empty() {
+            break;
+        }
+        for o in batch {
+            let _ = it.send(f, &Value::O(o), b"UNINIT", Vec::new(), Start::Normal, 0);
+        }
+    }
+    (it.raised, it.err_msg, it.err_at, it.tb) = saved;
+    w.in_uninit.set(false);
 }
 
 // ---- classes ----
@@ -424,7 +577,18 @@ fn sym_or_str(t: &Token) -> Option<(Vec<u8>, bool)> {
 }
 
 /// Parse a program file's directives into a package.
+/// Whether a program is IBM's tokenized form (REXXC's output): `/*OBJREXX*/@REXX`,
+/// a NUL and then a flattened image of IBM's interpreter objects, which rs2
+/// cannot run (docs/REXX.md, "IBM's tokenized programs").
+pub fn ibm_image(src: &[u8]) -> bool {
+    src.starts_with(b"/*OBJREXX*/@REXX\0")
+}
+
 pub fn load_package(src: &[u8], name: &[u8]) -> Result<Rc<Package>, LoadErr> {
+    if ibm_image(src) {
+        // Error 3.904: "This version of REXX cannot run the program"
+        return Err((Err::Syntax(3904), 1));
+    }
     let secs = crate::parse::sections(src)?;
     let mut it = secs.into_iter();
     let main = it.next().unwrap();
@@ -1194,6 +1358,25 @@ pub fn env_symbol(it: &mut Interp, f: &mut Frame, name: &[u8]) -> Value {
     for d in [&w.local, &w.env] {
         if let Some(v) = w.dir_get(d, name) {
             return v;
+        }
+    }
+    // classes IBM keeps as REXX code in REXX.IMG (crates/rexx/src/prelude.rex)
+    if matches!(name, b"RX_QUEUE" | b"STDQUE" | b"SYSTEM") && !w.prelude.replace(true) {
+        let mut src = Vec::new();
+        for &c in include_bytes!("prelude.rex").iter() {
+            if c == b'\n' {
+                src.push(b'\r');
+            }
+            if c != b'\r' {
+                src.push(c);
+            }
+        }
+        if it.run_program_v(&src, b"REXX.IMG", crate::CallType::Subroutine, Vec::new(), b"CMD").is_ok() {
+            for d in [&w.local, &w.env] {
+                if let Some(v) = w.dir_get(d, name) {
+                    return v;
+                }
+            }
         }
     }
     // the Workplace Shell, SOM...

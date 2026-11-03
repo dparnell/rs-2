@@ -479,6 +479,13 @@ impl Drop for OpenFile {
 /// Sharing state of open files: key = upper-case full path.
 static SHARES: SpinLock<BTreeMap<String, Vec<(u32, u32)>>> = SpinLock::new(BTreeMap::new());
 
+/// Whether a file is open (DosDelete refuses to delete it then, as OS/2
+/// does: the open handle would otherwise go on using clusters a new file
+/// gets).
+pub fn is_open(path: &FullPath) -> bool {
+    SHARES.lock().get(&path.display().to_ascii_uppercase()).is_some_and(|v| !v.is_empty())
+}
+
 fn allows(share: u32, access: u32) -> bool {
     let reads = access != mode::WRITEONLY;
     let writes = access != mode::READONLY;

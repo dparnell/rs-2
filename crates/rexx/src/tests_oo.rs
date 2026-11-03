@@ -40,6 +40,81 @@ fn basics() {
 }
 
 #[test]
+fn uninit() {
+    let out = run_oo(
+        "a = .res~new('A')\nb = .res~new('B')\ndrop a\nsay 'after drop'\nb = 'x'\nsay 'after assign'\n\
+         c = .res~new('C')\nd = .res~new('D'); d~other = d\nsay 'end'\n\
+         ::class res\n::method other attribute\n::method init\n  expose n\n  use arg n\n\
+         ::method uninit\n  expose n\n  say 'uninit' n\n",
+    );
+    assert_eq!(out, ["uninit A", "after drop", "uninit B", "after assign", "end", "uninit C", "uninit D"]);
+    // UNINIT given by SETMETHOD; an object only referenced from a dropped
+    // collection
+    let out = run_oo(
+        "o = .object~enhanced(.table~new~~put(\"say 'bye'\", 'UNINIT'))\nl = .array~of(o)\ndrop o\nsay 'held'\ndrop l\nsay 'gone'\n",
+    );
+    assert_eq!(out, ["held", "bye", "gone"]);
+}
+
+#[test]
+fn redirected_streams() {
+    let out = run_oo(
+        "say 'one'\nlog = .log~new\n.local['OUTPUT'] = log\nsay 'two'\ncall lineout , 'three'\n.output~lineout('four')\n\
+         .local['OUTPUT'] = .stdout\nsay 'lines:' log~lines~items log~lines[1] log~lines[3]\n\
+         .local['INPUT'] = .feed~new\npull a\nparse pull b\nparse linein c\nsay a b c linein()\n\
+         m = .monitor~new(.stdout)\n.local['OUTPUT'] = m\nsay 'via monitor'\nold = m~destination(log)\nsay 'to log'\n\
+         m~destination\n.local['OUTPUT'] = .stdout\nsay log~lines[log~lines~last]\n\
+         .local['ERROR'] = log\ntrace r\nx = 1\ntrace o\n.local['ERROR'] = .stderr\nsay log~lines[log~lines~last - 1]~space\n\
+         ::class log\n::method lines attribute\n::method init\n  self~lines = .array~new\n\
+         ::method say\n  forward message ('LINEOUT')\n::method lineout\n  use arg l\n  self~lines[self~lines~items+1] = l\n  return 0\n\
+         ::class feed\n::method linein\n  expose n\n  if symbol('n') <> 'VAR' then n = 0\n  n = n + 1\n  return 'line'n\n",
+    );
+    assert_eq!(
+        out,
+        ["one", "lines: 3 two four", "LINE1 line2 line3 line4", "via monitor", "to log", ">>> \"1\""]
+    );
+}
+
+#[test]
+fn ibm_tokenized_program() {
+    let mut h = MemHost::default();
+    let src = "/*OBJREXX*/@REXX\0\x67\x2b\x1e\0OS/2     OBJREXX 6.00 27 Oct 2000\0\0\0";
+    let (out, r) = crate::tests::run_oo_with(src, &mut h);
+    assert_eq!(r, Err(-3));
+    let all = out.join("|");
+    assert!(all.contains("Error 3") && all.contains("cannot run the program \"C:\\T.CMD\""), "{all}");
+}
+
+#[test]
+fn image_classes() {
+    let out = run_oo(
+        "say .stdque~string .stdque~get .stdque~query .rx_queue~id .rx_queue~new~string\n\
+         say .stdque~queue('a') .stdque~push('b') .stdque~query queued()\n\
+         say .stdque~pull .stdque~linein .stdque~pull~string\n\
+         q = .rx_queue~new\nsay q~get q~set('SESSION') q~get\n\
+         say .system~version .system~name .system~intname\n\
+         say .stream_supplier~id .stream_supplier~superclasses[1]~id\n\
+         d = .directory~new\nd~setmethod('X', 'return 7')\nsay d~x\nd~unsetmethod('X')\nsay d~hasindex('X')\n\
+         say .stdout~say('said')\n",
+    );
+    assert_eq!(
+        out,
+        [
+            "SESSION SESSION 0 RX_QUEUE a RX_QUEUE",
+            "0 0 2 2",
+            "b a The NIL object",
+            "NAMED_QUEUE NAMED_QUEUE SESSION",
+            "2.30 OS/2 OS/2 Intel",
+            "Stream_Supplier Object",
+            "7",
+            "0",
+            "said\r\n",
+            "0",
+        ]
+    );
+}
+
+#[test]
 fn classes_and_methods() {
     let out = run_oo(
         "c = .counter~new(5)\nc~step\nc~step\nsay c~value c~class~id c\nd = .big~new(10)\nd~step\nsay d~value\n\

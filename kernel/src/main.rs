@@ -85,6 +85,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     arch::init_fpu();
     mm::init(info);
     acpi::init(info.rsdp);
+    rtc::start();
     irq::init();
     task::sched::init();
     fs::init(info);

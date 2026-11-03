@@ -286,7 +286,20 @@ pub fn linein_default(it: &mut Interp, f: &mut Frame) -> R<Val> {
     linein(it, f, &[]).map(|v| v)
 }
 
+/// Object REXX: LINEIN, LINEOUT, CHARIN and CHAROUT without a stream name
+/// use .INPUT and .OUTPUT, which may have been redirected.
+fn redirected(it: &mut Interp, f: &mut Frame, a: &[Option<Val>], which: &[u8], msg: &[u8]) -> Option<R<Val>> {
+    if it.w.is_none() || a.len() > 3 || a.first().is_some_and(|n| n.as_ref().is_some_and(|n| !n.is_empty())) {
+        return None;
+    }
+    let args = a.iter().skip(1).map(|v| v.clone().map(crate::value::Value::S)).collect();
+    (it.ops().std_io)(it, Some(f), which, msg, args)
+}
+
 pub fn linein(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
+    if let Some(r) = redirected(it, f, a, b"INPUT", b"LINEIN") {
+        return r;
+    }
     if a.len() > 3 {
         return Err(Err::new(40));
     }
@@ -300,7 +313,7 @@ pub fn linein(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
         if count == 0 {
             return Ok(Vec::new());
         }
-        return Ok(it.pull_line());
+        return it.pull_line_r();
     }
     let i = match it.stream(&name, false) {
         Ok(i) => i,
@@ -329,6 +342,9 @@ pub fn linein(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
 }
 
 pub fn lineout(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
+    if let Some(r) = redirected(it, f, a, b"OUTPUT", b"LINEOUT") {
+        return r;
+    }
     if a.len() > 3 {
         return Err(Err::new(40));
     }
@@ -419,6 +435,9 @@ pub fn chars(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
 }
 
 pub fn charin(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
+    if let Some(r) = redirected(it, f, a, b"INPUT", b"CHARIN") {
+        return r;
+    }
     if a.len() > 3 {
         return Err(Err::new(40));
     }
@@ -456,6 +475,9 @@ pub fn charin(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
 }
 
 pub fn charout(it: &mut Interp, f: &mut Frame, a: &[Option<Val>]) -> R<Val> {
+    if let Some(r) = redirected(it, f, a, b"OUTPUT", b"CHAROUT") {
+        return r;
+    }
     if a.len() > 3 {
         return Err(Err::new(40));
     }

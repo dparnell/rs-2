@@ -80,7 +80,11 @@ Strings are byte strings, one character per byte.
   BEEP, VALUE with the OS2ENVIRONMENT selector, and the DBCS functions
   (on a single-byte system). DATE takes B D E M N O S U W (IBM's 4.00
   has no C or J: error 40); TIME takes C E H L M N R S, `L` with
-  microseconds.
+  microseconds. The clock is DosGetDateTime's, to the hundredth of a
+  second; the kernel keeps it monotonic and in step with the real time
+  (`kernel/src/rtc.rs`: the CMOS clock read at boot, put in phase with
+  its second edge, plus the time-stamp counter), so `TIME('E')` around
+  `SysSleep 1` gives 1.
 - **Streams.** CHARIN, CHAROUT, CHARS, LINEIN, LINEOUT, LINES and STREAM
   (OPEN [READ|WRITE], CLOSE, SEEK =/</+/-, QUERY EXISTS/SIZE/DATETIME,
   'S' and 'D' states READY/NOTREADY/ERROR/UNKNOWN). Streams open on first
@@ -325,6 +329,45 @@ the version, and Object REXX's one-blank `QUERY DATETIME`).
   .Method, .Monitor, .Stream, .Alarm, and .environment, .local (.STDIN,
   .STDOUT, .STDERR and the .INPUT, .OUTPUT, .ERROR monitors), .nil, .true,
   .false, .methods. CHANGESTR and COUNTSTR are built-in functions.
+- **The rest of IBM's REXX.IMG.** IBM keeps part of its class library as
+  REXX code in REXX.IMG; a survey of `.environment` and `.local` on IBM's
+  Object REXX (run on rs2) gave the classes and objects rs2 lacked, now
+  rs2's own (`crates/rexx/src/prelude.rex`, loaded the first time a
+  program names one of them, and `oo.rs`): `.RX_QUEUE` (an external data
+  queue as an object: GET, SET (returns the old name), CREATE, DELETE,
+  QUERY, PUSH, QUEUE (return 0), PULL and LINEIN (.nil when empty); a new
+  object has no name until SET, and GET then gives `NAMED_QUEUE`, as
+  IBM's does), `.STDQUE` in .local (the session queue, string `SESSION`),
+  `.SYSTEM` (VERSION 2.30, NAME, INTNAME `OS/2 Intel`, SOMVERSION),
+  `.Stream_Supplier` (what a stream's SUPPLIER returns; superclass
+  .Object), the stream SAY method and Directory UNSETMETHOD. IBM's 6.00 has
+  no .MutableBuffer. Its internal entries (`!SERVER`, `!SOMPROXY`,
+  `STATIC_REQUIRES`, `PUBLIC_ROUTINES`...) and undocumented methods
+  (Object STARTAT, Method SETSECURITYMANAGER/SETINTERFACE/INTERFACE) are
+  not provided. A monitor's DESTINATION works as IBM's (not as OREXX.INF
+  says): a destination given is pushed and returned, none pops back to
+  the previous one and returns it (.nil past the first).
+- **UNINIT.** Objects are reference counted (`Rc`). An object whose class
+  (or the object itself, through SETMETHOD or ENHANCED) has an UNINIT
+  method is watched: when its last reference is dropped, `Drop` moves it,
+  identity and all, to the world's queue, and the interpreter sends it
+  UNINIT at the next clause; when the program and its activities end,
+  every watched object still alive (cycles included) gets its UNINIT.
+  Errors in UNINIT methods are ignored. IBM's collects garbage at times of
+  its own (dropped objects get UNINIT at the latest when the program
+  ends), so programs cannot rely on the moment either way.
+- **.OUTPUT, .INPUT, .ERROR.** As IBM's: SAY sends SAY to `.OUTPUT`;
+  LINEOUT and CHAROUT without a stream name send LINEOUT/CHAROUT to it;
+  PULL and PARSE PULL (when the queue is empty), PARSE LINEIN and LINEIN
+  or CHARIN without a stream name send LINEIN/CHARIN to `.INPUT`; trace
+  output is sent to `.ERROR` with LINEOUT. `.OUTPUT` is looked up as an
+  environment symbol (.local, then .environment), so a program may put
+  any object there (`.local['OUTPUT'] = obj`) or send the monitor
+  elsewhere (`.output~destination(.stream~new('LOG'))`). While they are
+  the monitors .local starts with (on the standard streams), or the
+  standard stream objects themselves, the host does the I/O directly
+  (RXSIO exits and PMREXX keep working). Error reports go to standard
+  error.
 - **Activities.** START, REPLY (the rest of the method on a new
   activity), alarms and the waits of GUARD WHEN and Message~RESULT go
   through the host: OREXX.DLL runs activities on threads that take turns
@@ -361,7 +404,27 @@ An object in `.local`'s NOVALUE entry gives unset variables their value
 RexxTranslateProgram and writes rs2's tokenized form: the program behind
 a `/**/` line and a Ctrl+Z (so CMD runs it as REXX and TYPE shows
 nothing), scrambled. REXX.DLL runs such files (RexxStart, external
-routines, ::REQUIRES); IBM's tokenized images are not read.
+routines, ::REQUIRES).
+
+**IBM's tokenized programs** are not run, by decision. IBM's REXXC
+output (a 3-line program tokenized on rs2 by IBM's REXXC.EXE, 757 bytes)
+is `/*OBJREXX*/@REXX`, a NUL, a version line (`OS/2 OBJREXX 6.00 27 Oct
+2000`) and then a flattened image of the interpreter's C++ objects for
+the program: the method, its code and one object per instruction and
+expression term, each with an object header whose first word is the
+absolute address of the object's virtual function table in IBM's
+OREXX.DLL (0x1FE6xxxx when it ran), sizes and internal behaviour
+numbers, and the program's strings; there is no source. It is the same
+mechanism as REXX.IMG (`kernelRestore`/`memoryRestore` rebuild the
+objects and their function tables), and the extended attributes IBM
+writes for `.CMD` files hold the same images. Running them would mean
+re-creating IBM's object layouts for the 6.00 build's hundred-odd
+instruction, expression and class types (none published; ooRexx's later
+sources differ) and mapping its addresses back to types, for files that
+come with their source in every case but REXXC's. rs2 recognises the
+header and reports Error 3.904 (REX0560: this version of REXX cannot run
+the program, IBM's message for an image it cannot use) instead of
+syntax errors; programs run from their source, and EAs are ignored.
 
 **REXXSOM.DLL** (`userland/rexxsom`): `.SOM~import('Class')` gives a SOM
 class (the class manager finds or loads it; the interface repository's
@@ -391,11 +454,32 @@ as REXX code in REXX.IMG and a tokenized image of each program in its
 extended attributes; rs2's needs neither (and does not read IBM's REXXC
 output). OREXX.DLL's native-method API is the part IBM's OREXXSC.DLL
 uses (no RexxSendMessage...). SOM method signatures
-come from rs2's tables, not the interface repository. SAY writes to
-standard output whatever `.OUTPUT` is set to. A stream object shares the
-open stream of its name with the stream functions. Objects collected by
-reference counting: cycles are kept until the program ends, and UNINIT is
-not run.
+come from rs2's tables, not the interface repository. A stream object
+shares the open stream of its name with the stream functions (and has no
+UNINIT of its own). Objects are collected by reference counting: cycles
+are kept (and get UNINIT) until the program ends.
+
+**IBM's Object REXX on rs2: the second program in a process.** With IBM's
+OREXX.DLL, CMD running ORXTEST, ORXSOM and ORXTEST again in one process
+hangs at the second ORXTEST's START (and earlier runs saw ORXSOM report
+`.!SOM` not understanding MAKE_PROXY after ORXTEST, about one run in
+four); any command between the programs (`ver`), or a separate `CMD /C`
+for each, avoids it, and rs2's own Object REXX passes the same sequence
+(10 rounds). Studied in Ghidra with `orexx.sym`: when a program ends with
+activity threads still alive, IBM's RexxTerminate (`kernelTerminate`)
+only marks the interpreter as ending, wakes the free activities and
+returns; the last activity thread to finish runs `kernelShutdown`
+itself, and the next RexxStart re-initialises the interpreter
+(`restoreImage`, `RexxActivityClass::init`). The SOM server's activity
+(ORXSOM's `.!SOM`, waiting in `RexxServer::messageWait`) is woken after
+the free activities were terminated, puts itself back in the free table
+and exits; the next program's START then takes a free activity whose
+thread is gone and waits for it for ever. The API trace shows rs2 doing
+what the calls ask in that order (mutexes, event semaphores and thread
+exit), so it looks like a race in IBM's code that rs2's timing exposes;
+it is not a kernel or SOM fault as far as the evidence goes. The kernel
+did have a real problem nearby (deleting an open file, now refused) and
+the clock jumps fixed in this round.
 
 **Switching.** rs2 installs classic REXX as the system's REXX and Object
 REXX beside it. `SWITCHRX.CMD` (rs2's own; `SWITCHRX Y` without asking)
@@ -427,12 +511,16 @@ interpreter's own tests on the host.
 Object REXX: `tests/rexx/ORXTEST.CMD` (52 checks, with `ORXREQ.CMD`),
 `ORXSOM.CMD` (14, SOM), `ORXWPS.CMD` (8, the Workplace Shell: run with
 `RS2\WPSTEST.EXE SHELL RUN C:\OS2\CMD.EXE /C ORXWPS.CMD`) and rs2's own
-`ORXLANG.CMD` (105: message syntax, classes and mixins, private methods,
+`ORXLANG.CMD` (118: message syntax, classes and mixins, private methods,
 SETMETHOD, DEFINE, ENHANCED, UNKNOWN and NOMETHOD, the collections,
-conditions and RAISE, messages and activities, the environment, streams)
+conditions and RAISE, messages and activities, the environment, streams,
+UNINIT (in a program run by `CMD /C`), SAY/LINEOUT/trace/PULL through
+redirected .OUTPUT, .ERROR and .INPUT, monitors, .RX_QUEUE, .STDQUE,
+.SYSTEM, .Stream_Supplier)
 pass on rs2's Object REXX with no IBM REXX files; ORXLANG passes on
 IBM's too. The host tests (`crates/rexx/src/tests_oo.rs`) run ORXTEST's
-language checks, ORXLANG (activities on threads), and
+language checks, ORXLANG (activities on threads), UNINIT, redirected
+.OUTPUT/.INPUT/.ERROR, the REXX.IMG classes, IBM's tokenized form, and
 `crates/rexx/testdata/probe2.cmd`, whose output is compared with IBM's
 (`probe2.out`, IBM's message texts left out). To run a program on
 Object REXX without switching: put OREXX.DLL (as REXX.DLL), OREXUTIL.DLL

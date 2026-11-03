@@ -81,9 +81,21 @@ pub fn handle(irq: u8, f: &mut TrapFrame) {
         // their time slice.
         crate::bench::account();
         if crate::smp::this().index() == 0 {
-            TICKS.fetch_add(1, Ordering::Relaxed);
+            // Ticks lost (interrupts that came late: QEMU without KVM
+            // drops about a third of them) are made up from the time-stamp
+            // counter, a few per interrupt, so that sleeps and timers keep
+            // to the clock.
+            let behind = crate::rtc::mono_ms().saturating_sub(ticks() * 1000 / HZ + 1);
+            if behind > 1000 {
+                TICKS.fetch_add(behind - 1000, Ordering::Relaxed);
+            }
+            let n = 1 + behind.min(4);
             let t0 = crate::arch::rdtsc();
-            crate::task::timer_tick(f);
+            for _ in 0..n {
+                TICKS.fetch_add(1, Ordering::Relaxed);
+                crate::rtc::tick();
+                crate::task::timer_tick(f);
+            }
             crate::bench::add_tick_cycles(crate::arch::rdtsc().wrapping_sub(t0));
         } else {
             crate::task::sched::tick();

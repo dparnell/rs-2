@@ -786,6 +786,9 @@ pub fn dos_delete(c: &mut Ctx) -> u32 {
         if path::has_wildcards(p.file_name()) {
             return Err(err::FILE_NOT_FOUND);
         }
+        if crate::fs::is_open(p) {
+            return Err(err::SHARING_VIOLATION);
+        }
         f.delete(&p.rel())
     })
 }

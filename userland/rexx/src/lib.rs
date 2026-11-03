@@ -385,6 +385,7 @@ pub extern "C" fn rexx_start(
         {
             if outer {
                 oohost::wait_activities();
+                it.end_uninits();
             }
             oohost::unlock();
         }

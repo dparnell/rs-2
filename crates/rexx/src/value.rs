@@ -118,6 +118,34 @@ pub struct Object {
     /// Exclusive use of the variable pool (GUARD): the activity holding it
     /// and how often.
     pub guard: Cell<(u64, u32)>,
+    /// Objects with an UNINIT method: where the object goes when its last
+    /// reference is dropped (the world's queue, World::uninit_queue), to
+    /// be sent UNINIT at the next clause.
+    pub uninit: RefCell<Option<UninitQueue>>,
+}
+
+/// Objects waiting for their UNINIT method.
+pub type UninitQueue = Rc<RefCell<Vec<Object>>>;
+
+impl Drop for Object {
+    fn drop(&mut self) {
+        let Some(q) = self.uninit.get_mut().take() else { return };
+        // The last reference is gone: the object lives on in the queue
+        // (with the same identity) until UNINIT has run.
+        let o = Object {
+            id: self.id,
+            class: RefCell::new(self.class.get_mut().take()),
+            data: RefCell::new(core::mem::replace(self.data.get_mut(), Data::Plain)),
+            vars: RefCell::new(core::mem::take(self.vars.get_mut())),
+            methods: RefCell::new(self.methods.get_mut().take()),
+            name: RefCell::new(self.name.get_mut().take()),
+            guard: Cell::new((0, 0)),
+            uninit: RefCell::new(None),
+        };
+        if let Ok(mut v) = q.try_borrow_mut() {
+            v.push(o);
+        }
+    }
 }
 
 impl Object {
@@ -193,7 +221,8 @@ pub enum Data {
     Supplier(SupplierData),
     Message(alloc::boxed::Box<MsgData>),
     Method(Method),
-    Monitor(Value),
+    /// The destinations, the current one last (DESTINATION pushes and pops).
+    Monitor(Vec<Value>),
     Stream(StreamData),
     Alarm(AlarmData),
     /// An object of another object system (SOM, the Workplace Shell):

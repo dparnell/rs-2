@@ -36,6 +36,15 @@ impl<'h> Interp<'h> {
         Frame::new(Rc::new(Program::empty()), b"", b"CMD", CallType::Function, self.st.pools.pools.len())
     }
 
+    /// The program and its activities have ended: UNINIT for the objects
+    /// still alive that have one.
+    pub fn end_uninits(&mut self) {
+        if self.w.is_some() {
+            let mut f = self.top_frame();
+            (self.ops().run_uninits)(self, &mut f, true);
+        }
+    }
+
     /// Send a message from outside any REXX code. Errors are the REXX
     /// error number.
     pub fn send_value(&mut self, recv: &Value, name: &[u8], args: Vec<Option<Value>>) -> Result<Option<Value>, u32> {

@@ -86,6 +86,18 @@ not preemptive: a thread runs until it blocks, yields or returns to user
 mode with its time slice used up, and SpinLocks disable interrupts, so a
 lock must never be held across a wait.
 
+**Time.** The LAPIC timer (1 kHz) is calibrated against the PIT's
+channel 2, polled, and the time-stamp counter is measured in the same
+50 ms. The boot processor's timer interrupt counts the ticks and makes
+up ticks that came late (QEMU without KVM loses about a third) from the
+TSC, a few per interrupt, so sleeps and timers keep to real time. The
+system clock (`rtc.rs`) is the CMOS clock read at boot, put in phase
+with the CMOS second edge (watched by the timer interrupt in the first
+second), plus TSC milliseconds; four times a second it is compared with
+the CMOS clock and moved forward if behind or held back if ahead, and
+the times handed out (DosGetDateTime, the infoseg, file stamps) never go
+backwards except through DosSetDateTime.
+
 **Interrupts.** The LAPIC timer drives the scheduler tick on every
 CPU; legacy ISA interrupts (keyboard, mouse, serial) go through the
 IOAPIC to vectors 0x20-0x2F; IPIs use 0xF0-0xF2. PCI INTx cannot be
