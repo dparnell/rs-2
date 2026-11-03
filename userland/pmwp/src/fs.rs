@@ -194,6 +194,11 @@ extern "C" fn fs_set_title(obj: usize, title: *const u8) -> u32 {
 
 extern "C" fn fs_query_handle(obj: usize) -> u32 {
     let od = obj::d(obj);
+    // A number OS2.INI now gives another path is no longer this
+    // object's (wps::object_from_handle).
+    if od.handle != 0 && wps::path_of_handle(od.handle).is_some_and(|p| !eq_nocase(&p, &path(obj))) {
+        od.handle = 0;
+    }
     if od.handle == 0 {
         let p = path(obj);
         if !p.is_empty() {

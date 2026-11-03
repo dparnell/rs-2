@@ -281,9 +281,55 @@ pub fn new_abstract_handle() -> u32 {
     0x20000 | n
 }
 
+/// The mutex every process takes while it gives a path a new handle
+/// (`\SEM32\RS2WPS\HANDLES`). Without it two processes reading the
+/// table at once both took the first free number, the later write gave
+/// that number to its path, and the other process's object kept it: a
+/// program's WinQueryObject of `C:\MMOS2\SOUNDS` while the shell was
+/// starting (and making its Multimedia Templates folder) got the
+/// folder's number, and WinOpenObject opened that folder.
+struct HandleLock(u32);
+
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.332"]
+    fn DosOpenMutexSem(name: *const u8, phmtx: *mut u32) -> u32;
+}
+
+impl HandleLock {
+    fn take() -> HandleLock {
+        const NAME: &[u8] = b"\\SEM32\\RS2WPS\\HANDLES\0";
+        let mut h = 0u32;
+        unsafe {
+            if os2::DosCreateMutexSem(NAME.as_ptr(), &mut h, 0, 0) != 0 {
+                h = 0;
+                if DosOpenMutexSem(NAME.as_ptr(), &mut h) != 0 {
+                    h = 0;
+                }
+            }
+            if h != 0 && os2::DosRequestMutexSem(h, 10_000) != 0 {
+                os2::DosCloseMutexSem(h);
+                h = 0;
+            }
+        }
+        HandleLock(h)
+    }
+}
+
+impl Drop for HandleLock {
+    fn drop(&mut self) {
+        if self.0 != 0 {
+            unsafe {
+                os2::DosReleaseMutexSem(self.0);
+                os2::DosCloseMutexSem(self.0);
+            }
+        }
+    }
+}
+
 /// The handle of a path (made and kept in OS2.INI if new).
 pub fn fs_handle(path: &[u8]) -> u32 {
     let path = normalize(path);
+    let _lock = HandleLock::take();
     let keys = prf_keys(HINI_USER, APP_HANDLES);
     let mut used = Vec::new();
     for k in &keys {
@@ -311,8 +357,25 @@ pub fn path_of_handle(h: u32) -> Option<Vec<u8>> {
     Some(v.strip_suffix(&[0]).unwrap_or(&v).to_vec())
 }
 
-/// The object a handle stands for (woken if need be).
+/// The object a handle stands for (woken if need be). A file system
+/// handle stands for the path OS2.INI gives it: an awake object that
+/// still holds the number after the table gave it to another path (see
+/// HandleLock) is not that object; it gets a new handle when next asked.
 pub fn object_from_handle(h: u32) -> usize {
+    if h >> 16 == 3 {
+        if let Some(p) = path_of_handle(h) {
+            let o = object_from_path(&p);
+            if let Some(old) = by_handle(h).filter(|&x| x != o) {
+                crate::obj::set_handle(old, 0);
+                if let Some(e) = awake().iter_mut().find(|e| e.obj == old) {
+                    e.handle = 0;
+                }
+            }
+            if o != 0 {
+                return o;
+            }
+        }
+    }
     if let Some(o) = by_handle(h) {
         return o;
     }

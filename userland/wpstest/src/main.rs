@@ -268,6 +268,25 @@ fn prog_env(po: usize) -> Vec<u8> {
     v
 }
 
+/// File system handles stand for the path OS2.INI gives them: a number
+/// the table gave to another path (as a process racing the shell once
+/// did: SysOpenObject('C:\MMOS2\SOUNDS') opened the Multimedia Templates
+/// folder) finds that path's object, and the object that held it gets a
+/// new handle.
+fn handle_collision() {
+    let (a, b) = (b"C:\\OS2\\HELP", b"C:\\OS2\\DLL");
+    let ha = query(a);
+    let oa = object(ha);
+    check("a folder's handle", ha >> 16 == 3 && oa != 0 && path(ha) == a);
+    // Another process gave that number to another path.
+    let (app, key, val) = (z(b"PM_Workplace:Handles"), z(&hex(ha & 0xffff)), z(b));
+    unsafe { PrfWriteProfileData(HINI_USER, app.as_ptr(), key.as_ptr(), val.as_ptr(), val.len() as u32) };
+    let ob = object(ha);
+    check("the handle opens the path the table gives it", ob != 0 && ob != oa && title(ob) == b"DLL");
+    let ha2 = query(a);
+    check("the old holder gets a new handle", ha2 != 0 && ha2 != ha && object(ha2) == oa && path(ha2) == a);
+}
+
 fn make() {
     let desk = query(b"<WP_DESKTOP>");
     check("desktop handle", desk >> 16 == 3);
@@ -1014,6 +1033,7 @@ fn main(st: &Startup) -> u32 {
     } else {
         make();
         program_list();
+        handle_collision();
     }
     let n = unsafe { FAILS };
     println!("wpstest done: {} failure(s)", n);
