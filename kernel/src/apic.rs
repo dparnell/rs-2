@@ -9,7 +9,7 @@
 use core::ptr::{read_volatile, write_volatile};
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
-use crate::arch::outb;
+use crate::arch::{inb, outb};
 use crate::trap::IRQ_BASE;
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
@@ -144,20 +144,37 @@ pub fn init() -> bool {
     // Enable the LAPIC.
     lapic_write(0x80, 0);
     lapic_write(0xf0, 0x100 | SPURIOUS as u32);
-    // Calibrate the timer: count down during 50 PIT ticks.
+    // Calibrate the timer: count down during 50 ms timed by the PIT's
+    // channel 2, polled (counting PIT interrupts is not reliable: under
+    // emulation they can arrive late, and the timer then ran 1.5 times
+    // slow under QEMU).
     lapic_write(0x3e0, 0x3); // divide by 16
     lapic_write(0x320, 1 << 16); // masked, one shot
-    let start = crate::irq::ticks();
-    while crate::irq::ticks() == start {
-        core::hint::spin_loop();
-    }
-    lapic_write(0x380, 0xffff_ffff);
-    let t0 = crate::irq::ticks();
-    while crate::irq::ticks() < t0 + 50 {
-        core::hint::spin_loop();
-    }
-    let elapsed = 0xffff_ffff - lapic_read(0x390);
-    let per_tick = elapsed / 50;
+    const MS: u32 = 50;
+    let elapsed = unsafe {
+        // Gate low (speaker off), channel 2 mode 0, the count for 50 ms.
+        let p61 = inb(0x61) & !0x03;
+        outb(0x61, p61);
+        outb(0x43, 0xb0);
+        let count = (1_193_182 * MS / 1000) as u16;
+        outb(0x42, count as u8);
+        outb(0x42, (count >> 8) as u8);
+        // Gate high starts the count; OUT (bit 5) rises at zero.
+        outb(0x61, p61 | 0x01);
+        lapic_write(0x380, 0xffff_ffff);
+        let tsc0 = crate::arch::rdtsc();
+        let mut spins = 0u64;
+        while inb(0x61) & 0x20 == 0 && spins < 200_000_000 {
+            spins += 1;
+            core::hint::spin_loop();
+        }
+        let e = 0xffff_ffff - lapic_read(0x390);
+        // The time-stamp counter's rate too: the system clock counts with it.
+        crate::rtc::set_tsc_rate(crate::arch::rdtsc().wrapping_sub(tsc0) / MS as u64);
+        outb(0x61, p61);
+        e
+    };
+    let per_tick = elapsed / MS;
     // Retire the PICs.
     crate::arch::disable_interrupts();
     unsafe {

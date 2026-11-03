@@ -563,7 +563,7 @@ pub fn clock_write(b: &[u8]) -> Result<(), u32> {
     }
     let d = (days - (days_from_1980(y, m, 1) - days_from_1980(y, 1, 1)) + 1) as u8;
     let t = crate::rtc::DateTime { year: y, month: m, day: d, hour: b[3], minute: b[2], second: b[5], weekday: crate::rtc::weekday(y, m, d) };
-    crate::rtc::set(&t);
+    crate::rtc::set(&t, 0);
     Ok(())
 }
 

@@ -133,9 +133,13 @@ pub fn update() {
     if OBJ.get().is_none() {
         return;
     }
-    let t = crate::rtc::now();
+    if crate::irq::ticks() % 256 == 0 {
+        crate::rtc::resync();
+    }
     let ms = crate::irq::uptime_ms();
-    let day = ((t.hour as u64 * 60 + t.minute as u64) * 60 + t.second as u64) * 1000;
+    let now = crate::rtc::now_ms();
+    let t = crate::rtc::from_unix((now / 1000) as u32);
+    let day = now % 86_400_000;
     DAY_OFFSET.store((day + 86_400_000 - ms % 86_400_000) % 86_400_000, Ordering::Relaxed);
     let p = page();
     unsafe {
@@ -144,7 +148,7 @@ pub fn update() {
         *p.add(8) = t.hour;
         *p.add(9) = t.minute;
         *p.add(10) = t.second;
-        *p.add(11) = crate::rtc::hundredths(&t);
+        *p.add(11) = ((now % 1000) / 10) as u8;
         (p.add(12) as *mut u16).write_unaligned(0xffff);
         *p.add(16) = t.day;
         *p.add(17) = t.month;

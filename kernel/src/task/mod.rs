@@ -180,7 +180,7 @@ pub fn timer_tick(_f: &mut TrapFrame) {
     crate::drivers::svga::tick(crate::irq::ticks());
     crate::drivers::virtio::gpu::tick(crate::irq::ticks());
     crate::display::tick();
-    if crate::irq::ticks() % 250 == 0 {
+    if crate::irq::ticks() % 32 == 0 {
         crate::infoseg::update();
     }
     if crate::irq::ticks() % 50 == 0 {
