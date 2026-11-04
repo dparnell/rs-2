@@ -13,6 +13,7 @@
 //!                  [--virtio-legacy] [--boot-virtio]
 //!                  [--net [MODEL]] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--guestfwd RULE]... [--tftp DIR]
 //!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE] [--sound-in FILE|tone:HZ]
+//!                  [--smp N] [--mem SIZE]
 //!                  [-- QEMU ARGS]
 //! cargo xtask iso [--release] [-o FILE]    build the hybrid install/live ISO
 //! cargo xtask ir                            write the interface repositories
@@ -121,6 +122,8 @@ struct Opts {
     nvme: Option<PathBuf>,
     /// `run`: number of processors.
     smp: u32,
+    /// Guest RAM (QEMU -m), "512M" unless --mem.
+    mem: String,
     /// `disk`: make an installed-system disk.
     system: bool,
     /// `run`: boot from the --hdd disk only (no ESP directory).
@@ -196,6 +199,7 @@ fn parse(args: &[String]) -> Opts {
         hdd: None,
         nvme: None,
         smp: 2,
+        mem: "512M".into(),
         system: false,
         boot_hdd: false,
         dist: false,
@@ -353,6 +357,10 @@ fn parse(args: &[String]) -> Opts {
             "--nvme" => {
                 i += 1;
                 o.nvme = Some(PathBuf::from(&args[i]));
+            }
+            "--mem" => {
+                i += 1;
+                o.mem = args[i].clone();
             }
             "--smp" => {
                 i += 1;
@@ -897,6 +905,23 @@ fn build_userland() -> Option<image::FileList> {
                 return None;
             }
             files.push((lx, "RS2\\TESTDLLB.DLL".to_string()));
+            // And marked for high memory (OBJHIGHMEM): it loads above
+            // 512 MB (APITEST).
+            let lx = out_dir.join("TESTDLLH.DLL");
+            let ok = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
+                .current_dir(root())
+                .args(["run", "-q", "--release", "-p", "elf2lx", "--"])
+                .arg(&elf)
+                .arg(&lx)
+                .args(["--dll", "--highmem", "--name", "TESTDLLH", "--exports"])
+                .arg(ul.join(bin).join("exports.def"))
+                .status()
+                .ok()?
+                .success();
+            if !ok {
+                return None;
+            }
+            files.push((lx, "RS2\\TESTDLLH.DLL".to_string()));
         }
     }
     check_dll_ranges(&ul)?;
@@ -1357,7 +1382,7 @@ fn run(o: &Opts) -> bool {
     let qmp_sock = socket_path(&work, "qemu-qmp.sock");
     let _ = std::fs::remove_file(&qmp_sock);
     let mut c = Command::new("qemu-system-x86_64");
-    c.args(["-machine", "q35", "-cpu", "max", "-m", "512M", "-no-reboot", "-smp", &o.smp.to_string()])
+    c.args(["-machine", "q35", "-cpu", "max", "-m", &o.mem, "-no-reboot", "-smp", &o.smp.to_string()])
         .arg("-drive")
         .arg(format!("if=pflash,format=raw,readonly=on,file={}", code.display()))
         .arg("-drive")

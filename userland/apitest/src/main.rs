@@ -13,6 +13,7 @@ use os2::*;
 extern crate alloc;
 
 mod eas;
+mod highmem;
 mod klibc;
 mod t16;
 
@@ -40,6 +41,9 @@ fn main(s: &Startup) -> u32 {
     if core::str::from_utf8(s.args()).is_ok_and(|a| a.trim() == "dbgchild") {
         return debug_child();
     }
+    if s.args().trim_ascii().starts_with(b"highchild") {
+        return highmem::child(s.args().trim_ascii());
+    }
     info_blocks();
     memory();
     suballoc();
@@ -55,6 +59,7 @@ fn main(s: &Startup) -> u32 {
     timers();
     perf_counters();
     shared_memory();
+    highmem::run();
     queues();
     sessions();
     debugging();

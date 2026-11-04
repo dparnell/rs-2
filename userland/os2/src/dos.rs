@@ -15,6 +15,9 @@ pub const PAG_GUARD: u32 = 0x0008;
 pub const PAG_COMMIT: u32 = 0x0010;
 pub const PAG_DECOMMIT: u32 = 0x0020;
 pub const OBJ_TILE: u32 = 0x0040;
+/// Anywhere, also above 512 MB ("high memory") when the system has it.
+pub const OBJ_ANY: u32 = 0x0400;
+pub const PAG_SHARED: u32 = 0x2000;
 pub const PAG_FREE: u32 = 0x4000;
 pub const PAG_BASE: u32 = 0x10000;
 
@@ -426,6 +429,8 @@ unsafe extern "C" {
     pub fn DosAllocSharedMem(ppb: *mut *mut u8, name: *const u8, cb: u32, flags: u32) -> APIRET;
     #[link_name = "DOSCALLS.301"]
     pub fn DosGetNamedSharedMem(ppb: *mut *mut u8, name: *const u8, flags: u32) -> APIRET;
+    #[link_name = "DOSCALLS.302"]
+    pub fn DosGetSharedMem(pb: *mut u8, flags: u32) -> APIRET;
     #[link_name = "QUECALLS.16"]
     pub fn DosCreateQueue(phq: *mut u32, order: u32, name: *const u8) -> APIRET;
     #[link_name = "QUECALLS.15"]
