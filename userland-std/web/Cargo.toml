@@ -1,0 +1,10 @@
+[package]
+name = "web"
+description = "WEB.EXE: WebRS2, rs2's Presentation Manager web browser"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rs2libc = { path = "../rs2libc" }
+webcore = { path = "../webcore" }

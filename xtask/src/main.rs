@@ -957,6 +957,7 @@ fn build_userland() -> Option<image::FileList> {
 const STD_PROGRAMS: &[(&str, &str, bool)] = &[
     ("stdtest", "RS2\\STDTEST.EXE", false),
     ("webtext", "OS2\\APPS\\WEBTEXT.EXE", false),
+    ("web", "OS2\\APPS\\WEB.EXE", true),
 ];
 
 /// Build the userland-std workspace and convert its programs to LX.

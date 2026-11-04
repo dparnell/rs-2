@@ -11,6 +11,12 @@ pub mod about;
 pub mod codepage;
 pub mod dom;
 pub mod http;
+pub mod image;
+pub mod page;
+pub mod layout;
+pub mod css;
+pub mod select;
+pub mod style;
 pub mod text;
 
 pub use url::Url;

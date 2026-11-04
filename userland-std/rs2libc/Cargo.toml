@@ -10,5 +10,6 @@ path = "src/lib.rs"
 
 [dependencies]
 libc = { version = "0.2", default-features = false }
+libm = "0.2"
 dlmalloc = { version = "0.2", default-features = false }
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "dwarf-expr", "hide-trace", "fde-gnu-eh-frame-hdr"] }

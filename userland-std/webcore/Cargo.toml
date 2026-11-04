@@ -12,3 +12,10 @@ url = "2"
 html5ever = "0.40"
 encoding_rs = "0.8"
 flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+cssparser = "0.38"
+selectors = "0.42"
+precomputed-hash = "0.1"
+taffy = { version = "0.15", default-features = false, features = ["std", "taffy_tree", "flexbox", "grid", "block_layout", "float_layout", "content_size"] }
+png = "0.18"
+jpeg-decoder = { version = "0.3", default-features = false }
+gif = "0.14"

@@ -35,6 +35,7 @@ pub mod errno;
 pub mod tls;
 pub mod start;
 pub mod malloc;
+pub mod math;
 pub mod string;
 pub mod thread;
 pub mod futex;
