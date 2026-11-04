@@ -140,6 +140,11 @@ fn main() {
     let t1 = std::time::Instant::now();
     let laid = layout::layout(&page.dom, &page.styles, &page.url, width, &mut fonts, &sizes);
     eprintln!("laid out in {:?}: {} items, height {}", t1.elapsed(), laid.items.len(), laid.height);
+    if std::env::var("WEBSHOT_ITEMS").is_ok() {
+        for it in &laid.items {
+            eprintln!("{it:?}");
+        }
+    }
     let h = height.min(laid.height.ceil() as usize + 1).max(1);
     let mut c = Canvas { w: width as usize, h, px: vec![laid.background & 0xffffff; width as usize * h], clips: Vec::new() };
     for it in &laid.items {

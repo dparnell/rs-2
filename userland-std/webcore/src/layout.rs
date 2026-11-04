@@ -1639,7 +1639,8 @@ impl Painter<'_, '_> {
         let strut_d = self.b.ifcs[i].strut.2;
         for f in &lines.frags {
             let p = &pieces[f.piece];
-            if p.style.hidden {
+            // font-size: 0 hides text.
+            if p.style.hidden || (p.style.font_size < 1.5 && matches!(p.kind, Kind::Word | Kind::Space)) {
                 continue;
             }
             let fx = cx + f.x;
