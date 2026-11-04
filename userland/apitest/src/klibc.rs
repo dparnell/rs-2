@@ -51,6 +51,14 @@ pub fn run() {
         // GINFOSEG: major/minor version at 21/22.
         check("DosGlobalInfo: GINFOSEG version", *gis.add(21) == 20 && *gis.add(22) == 45);
 
+        // The tiled selector of an address in a 32-bit code object is a
+        // code selector (kLIBC's 16-bit thunk RETFs through it).
+        let sel = ((run as usize as u32) >> 13) | 7;
+        let ar: u32;
+        let zf: u8;
+        core::arch::asm!("lar {0:e}, {1:e}", "setz {2}", out(reg) ar, in(reg) sel, out(reg_byte) zf);
+        check("tile of 32-bit code is a code selector", zf == 1 && ar & 0x0800 != 0);
+
         // A private event semaphore opened again by its handle in the
         // creating process (kLIBC's heap: _fmutex_open).
         let mut hev = 0u32;

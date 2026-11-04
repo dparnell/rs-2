@@ -233,10 +233,11 @@ pub fn load(
             prot |= pag::EXECUTE | pag::READ;
         }
         let code = o.flags & oflags::EXEC != 0;
-        // 16:16 aliases of code are code selectors, also for 32-bit
-        // objects that ask for them (thunks return through them).
-        let alias16 = o.flags & oflags::ALIAS_16_16 != 0 && o.flags & oflags::WRITE == 0;
-        let seg = match (is16(o) || alias16, code) {
+        // The tiles of read-only code objects are 16-bit code selectors,
+        // also for 32-bit objects that do not ask for 16:16 aliases:
+        // thunks return through them, and kLIBC's 16-bit thunk (LIBCN0)
+        // RETFs into the DosFlatToSel of an address in its 32-bit code.
+        let seg = match (code, o.flags & oflags::WRITE == 0 || is16(o)) {
             (true, true) => SegKind::Code16,
             _ => SegKind::Data,
         };
