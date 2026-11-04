@@ -145,8 +145,10 @@ WEB [URL]
 A frame with Back, Forward, Reload, Home, the address field and Go, the
 page with its scroll bar, and a status line (what is loading, then where
 the link under the pointer goes). Keys: arrows, Page Up/Down, Space,
-Home/End; Alt+Left or Backspace back, Alt+Right forward, F5 reload, Ctrl+L
-the address field.
+Home/End; Tab and Shift+Tab move a dotted focus through the links, Enter
+follows it; Alt+Left or Backspace back, Alt+Right forward, F5 reload,
+Ctrl+L the address field. A panic in the engine does not end the program:
+the status line says so and the message goes to WEB.LOG.
 
 How a page is shown:
 
@@ -187,8 +189,12 @@ alignment, `text-indent`, `text-transform`, list markers (bullets drawn,
 numbers, letters and roman numerals as text), inline boxes' margins,
 borders and padding, backgrounds behind inline text, sub/superscript, and
 atomic inlines: images (sized from attributes, CSS or the image), form
-controls and inline-blocks (laid out as separate Taffy trees). Floats
-are left to Taffy's float support. The result is a display list
+controls and inline-blocks (laid out as separate Taffy trees). Taffy
+places floats; a second pass shortens the lines of inline contexts beside
+them (each context gets the floats before it that overlap it as
+exclusions). `overflow: hidden` clips (GPI clip rectangles); boxes with
+`opacity: 0`, clipped to nothing (`clip: rect(0 0 0 0)`, `clip-path:
+inset(50%)`) or hidden by a 1-pel overflow box are not drawn. The result is a display list
 (rectangles, text runs, images, markers, controls) with link rectangles
 and element positions for `#fragment` links.
 
@@ -217,8 +223,7 @@ Under QEMU (screenshots in `work/progress/browser-rust/`):
 - https://example.com/;
 - https://en.wikipedia.org/wiki/OS/2 (9000 elements, 1700 rules; styled in
   about 60 ms on the host): vector-2022's grid areas put the table of
-  contents beside the article; the infobox floats right but the text does
-  not wrap around it;
+  contents beside the article and the text wraps around the infobox;
 - a WPUrl object on the desktop (made with WPSTEST's CREATE), selected
   with the arrow keys and opened with Enter, starts WEB.EXE on its URL
   (OS2.INI names no browser).
@@ -237,9 +242,8 @@ WEBCORE_MEASURE=1 ...   # trace inline measurements
 ### Not done
 
 JavaScript (Boa, stage 4), `position: fixed` (laid out as absolute),
-background images, named grid lines (areas work), text wrapping around
-floats (Taffy places floats, but its measure function for leaves gets no
-float context), `::before`/`::after` content,
+background images, named grid lines (areas work), boxes avoiding floats
+(only lines do), `::before`/`::after` content,
 web fonts, borders' styles (all are solid), rounded corners, transforms,
 `:hover`, HTTP keep-alive and caching, persistent cookies, IPv6, frames.
 Italic GPI faces look smaller than the upright ones at the same size (an
