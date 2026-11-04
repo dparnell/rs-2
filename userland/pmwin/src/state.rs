@@ -291,6 +291,10 @@ pub fn get() -> Option<&'static mut State> {
 }
 
 pub fn st() -> &'static mut State {
+    if let Some(s) = get() {
+        return s;
+    }
+    crate::misc::ensure_mapped();
     get().expect("PM not initialised")
 }
 
