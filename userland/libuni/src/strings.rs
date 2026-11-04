@@ -96,34 +96,41 @@ pub extern "C" fn UniStrcoll(_lo: u32, a: *const u16, b: *const u16) -> i32 {
     }
 }
 
-/// The collation key of `s` (UniStrxfrm): its case-folded characters, a
-/// 0x0001 separator, then the characters themselves, so that comparing
-/// keys with UniStrcmp orders as UniStrcoll does. Writes the key (and its
-/// NUL) when `n` leaves room for them; returns the key's length.
+/// The collation key of `s`: its case-folded characters, a 0x0001
+/// separator, then the characters themselves, so that comparing keys
+/// with UniStrcmp orders as UniStrcoll does. Writes as much of the key as
+/// `n` units hold (NUL-terminated); returns the key's length.
 fn xfrm(d: *mut u16, s: *const u16, n: u32) -> u32 {
     let v = unsafe { from_ptr(s) };
     let key = v.len() * 2 + 1;
-    if !d.is_null() && (n as usize) > key {
-        unsafe {
-            for (i, &c) in v.iter().enumerate() {
-                d.add(i).write(uls::to_lower(c));
-                d.add(v.len() + 1 + i).write(c);
-            }
-            d.add(v.len()).write(1);
-            d.add(key).write(0);
+    if !d.is_null() && n > 0 {
+        let room = (n as usize - 1).min(key);
+        for k in 0..room {
+            let c = if k < v.len() {
+                uls::to_lower(v[k])
+            } else if k == v.len() {
+                1
+            } else {
+                v[k - v.len() - 1]
+            };
+            unsafe { d.add(k).write(c) };
         }
+        unsafe { d.add(room).write(0) };
     }
     key as u32
 }
 
+/// UniStrxfrm(locale, ucs1, ucs2, n). IBM's returns about half the
+/// length of the key it writes (kLIBC and Mozilla double it, then drop
+/// trailing zeros), so this returns half, rounded up.
 #[unsafe(no_mangle)]
 pub extern "C" fn UniStrxfrm(_lo: u32, d: *mut u16, s: *const u16, n: u32) -> u32 {
-    xfrm(d, s, n)
+    xfrm(d, s, n).div_ceil(2)
 }
 
 /// LIBUNI 145 of later OS/2 versions (kLIBC's unicode.imp names it
-/// __wcsxfrm_unistd): wcsxfrm on UCS-2 for the current locale; GLib's
-/// collation keys use it.
+/// __wcsxfrm_unistd): C wcsxfrm on UCS-2 for the current locale (the
+/// key's length); GLib's collation keys use it.
 #[unsafe(no_mangle)]
 pub extern "C" fn __wcsxfrm_unistd(d: *mut u16, s: *const u16, n: u32) -> u32 {
     xfrm(d, s, n)

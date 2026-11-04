@@ -30,6 +30,21 @@ unsafe extern "system" {
     fn DosOpenEventSem(name: *const u8, phev: *mut u32) -> APIRET;
 }
 
+unsafe extern "C" {
+    #[link_name = "UCONV.1"]
+    fn UniCreateUconvObject(name: *const u16, obj: *mut u32) -> i32;
+    #[link_name = "UCONV.2"]
+    fn UniUconvToUcs(obj: u32, inp: *mut *const u8, inb: *mut u32, out: *mut *mut u16, outc: *mut u32, nonid: *mut u32) -> i32;
+    #[link_name = "UCONV.4"]
+    fn UniFreeUconvObject(obj: u32) -> i32;
+    #[link_name = "LIBUNI.58"]
+    fn UniTransUpper(lo: u32, uc: u32) -> u32;
+    #[link_name = "LIBUNI.53"]
+    fn UniStrxfrm(lo: u32, d: *mut u16, s: *const u16, n: u32) -> u32;
+    #[link_name = "LIBUNI.74"]
+    fn UniQueryAttr(name: *const u16) -> u32;
+}
+
 pub fn run() {
     unsafe {
         let v = |p: &u8| p as *const u8 as u32;
@@ -78,5 +93,26 @@ pub fn run() {
         check("private sem handle reused lowest first", c == a && b != a);
         DosCloseMutexSem(b);
         DosCloseMutexSem(c);
+
+        // kLIBC's locale set-up: one byte at a time through UCONV (its
+        // count of substitutions left uninitialised), UniTransUpper,
+        // UniStrxfrm into a 7-character buffer.
+        let mut uo = 0u32;
+        let name: [u16; 1] = [0];
+        let ok = UniCreateUconvObject(name.as_ptr(), &mut uo) == 0;
+        let byte = [b'1'];
+        let (mut ip, mut il) = (byte.as_ptr(), 1u32);
+        let mut out = [0u16; 1];
+        let (mut op, mut ol, mut nonid) = (out.as_mut_ptr(), 1u32, 0x5555u32);
+        let rc = UniUconvToUcs(uo, &mut ip, &mut il, &mut op, &mut ol, &mut nonid);
+        check("UniUconvToUcs one byte (nonid set to 0)", ok && rc == 0 && out[0] == b'1' as u16 && il == 0 && ol == 0 && nonid == 0);
+        UniFreeUconvObject(uo);
+        check("UniTransUpper", UniTransUpper(0, b'a' as u32) == b'A' as u32);
+        let src: [u16; 2] = [b'B' as u16, 0];
+        let mut w = [0xffffu16; 7];
+        let n = UniStrxfrm(0, w.as_mut_ptr(), src.as_ptr(), 7);
+        check("UniStrxfrm one character", n * 2 <= 7 && w[0] == b'b' as u16 && w[3] == 0);
+        let xd: [u16; 7] = [b'x' as u16, b'd' as u16, b'i' as u16, b'g' as u16, b'i' as u16, b't' as u16, 0];
+        check("UniQueryAttr xdigit", UniQueryAttr(xd.as_ptr()) == 0x80);
     }
 }

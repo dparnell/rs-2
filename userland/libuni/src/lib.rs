@@ -22,6 +22,7 @@ extern crate os2;
 mod exports;
 mod table;
 mod strings;
+mod xform;
 
 use alloc::boxed::Box;
 use alloc::string::String;

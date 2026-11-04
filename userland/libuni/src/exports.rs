@@ -80,4 +80,15 @@ aligned! {
     __a_UniStrlwr => crate::strings::UniStrlwr, 1;
     __a_UniStrtol => crate::strings::UniStrtol, 5;
     __a_UniStrtoul => crate::strings::UniStrtoul, 5;
+    __a_UniQueryAttr => crate::xform::UniQueryAttr, 1;
+    __a_UniCreateAttrObject => crate::xform::UniCreateAttrObject, 3;
+    __a_UniFreeAttrObject => crate::xform::UniFreeAttrObject, 1;
+    __a_UniQueryCharAttr => crate::xform::UniQueryCharAttr, 2;
+    __a_UniScanForAttr => crate::xform::UniScanForAttr, 5;
+    __a_UniCreateTransformObject => crate::xform::UniCreateTransformObject, 3;
+    __a_UniFreeTransformObject => crate::xform::UniFreeTransformObject, 1;
+    __a_UniTransformStr => crate::xform::UniTransformStr, 5;
+    __a_UniTransUpper => crate::xform::UniTransUpper, 2;
+    __a_UniTransLower => crate::xform::UniTransLower, 2;
+    __a_UniStrtod => crate::xform::UniStrtod, 4;
 }
