@@ -67,6 +67,8 @@ aligned! {
     __a_UniStrcmpi => crate::strings::UniStrcmpi, 3;
     __a_UniStrncmpi => crate::strings::UniStrncmpi, 4;
     __a_UniStrcoll => crate::strings::UniStrcoll, 3;
+    __a_UniStrxfrm => crate::strings::UniStrxfrm, 4;
+    __a___wcsxfrm_unistd => crate::strings::__wcsxfrm_unistd, 3;
     __a_UniStrchr => crate::strings::UniStrchr, 2;
     __a_UniStrrchr => crate::strings::UniStrrchr, 2;
     __a_UniStrspn => crate::strings::UniStrspn, 2;
