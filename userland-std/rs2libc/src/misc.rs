@@ -328,7 +328,7 @@ pub unsafe extern "C" fn mmap64(addr: *mut c_void, len: size_t, prot: c_int, fla
         return libc::MAP_FAILED;
     }
     let mut p = null_mut();
-    let rc = unsafe { DosAllocMem(&mut p, len as u32, PAG_READ | PAG_WRITE | PAG_COMMIT) };
+    let rc = unsafe { alloc_any(&mut p, len as u32) };
     if rc != 0 {
         fail_os2(rc);
         return libc::MAP_FAILED;

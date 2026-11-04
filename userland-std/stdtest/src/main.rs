@@ -8,7 +8,7 @@
 //! - `time`, `env` (arguments, variables, current_exe/current_dir)
 //! - `panic`: catch_unwind, drops during unwinding, a panicking thread
 //! - `mem`: a large HashMap and Vec, then the address space limit (how many
-//!   MB can be allocated in 16 MB pieces)
+//!   MB can be allocated in 16 MB pieces; more than 512 with high memory)
 //! - `net`: loopback TCP (1 MB echoed), UDP, a refused connection, timeouts,
 //!   name lookup
 //! - `process`: Command with piped output (CMD /C ECHO)
@@ -357,6 +357,20 @@ fn panics(t: &mut T) {
     let _ = std::panic::take_hook();
 }
 
+unsafe extern "C" {
+    #[link_name = "DOSCALLS.348"]
+    fn DosQuerySysInfo(first: u32, last: u32, buf: *mut u32, cb: u32) -> u32;
+}
+
+/// QSV_VIRTUALADDRESSLIMIT (MB), 512 if unknown.
+fn virtual_address_limit() -> u32 {
+    let mut v = 0u32;
+    match unsafe { DosQuerySysInfo(30, 30, &mut v, 4) } {
+        0 => v,
+        _ => 512,
+    }
+}
+
 fn mem(t: &mut T) {
     let mut m = HashMap::new();
     for i in 0..1_000_000u32 {
@@ -384,8 +398,15 @@ fn mem(t: &mut T) {
         blocks.push(b);
     }
     let mb = blocks.len() * 16;
-    println!("     (allocated {mb} MB in 16 MB blocks before failing)");
+    let high = blocks.iter().filter(|b| b.as_ptr() as usize >= 0x2000_0000).count() * 16;
+    println!("     (allocated {mb} MB in 16 MB blocks before failing, {high} MB of them above 512 MB)");
     t.check("at least 256 MB of address space", mb >= 256, mb);
+    // With high memory (VIRTUALADDRESSLIMIT above 512) the allocator gets
+    // more than the low arena's 512 MB can hold.
+    let limit = virtual_address_limit();
+    if limit > 512 {
+        t.check("more than 512 MB with high memory", mb > 512 && high > 0, format!("{mb} MB, limit {limit}"));
+    }
     drop(blocks);
     let mut v: Vec<u8> = Vec::new();
     let r = v.try_reserve_exact(64 << 20);
