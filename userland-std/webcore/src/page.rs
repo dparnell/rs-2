@@ -46,6 +46,16 @@ pub fn load_post(url: &Url, content_type: &str, data: &[u8], size: (f32, f32), p
 }
 
 fn load_with(url: &Url, body: Option<http::Body>, size: (f32, f32), progress: &dyn Fn(&str)) -> Result<Page, http::Error> {
+    let (u, dom, status) = fetch_dom(url, body, progress)?;
+    let mut page = from_dom(u, dom, size, progress);
+    page.status = status;
+    Ok(page)
+}
+
+/// Fetch a URL and parse it (non-HTML content is wrapped in a document):
+/// the URL it came from, the document and the HTTP status. Scripts can
+/// then change the document before [`from_dom`] styles it.
+pub fn fetch_dom(url: &Url, body: Option<http::Body>, progress: &dyn Fn(&str)) -> Result<(Url, Dom, u16), http::Error> {
     progress(&format!("Connecting to {}...", url.host_str().unwrap_or(url.as_str())));
     let r = http::fetch(url, body)?;
     let mime = r.mime();
@@ -61,9 +71,7 @@ fn load_with(url: &Url, body: Option<http::Body>, size: (f32, f32), progress: &d
     };
     progress("Reading the page...");
     let dom = crate::dom::parse(&html);
-    let mut page = from_dom(final_url, dom, size, progress);
-    page.status = r.status;
-    Ok(page)
+    Ok((final_url, dom, r.status))
 }
 
 /// Prepare a parsed document (fetching its style sheets).

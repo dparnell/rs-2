@@ -89,6 +89,7 @@ struct App {
 
 static GENERATION: AtomicU32 = AtomicU32::new(0);
 static RETRY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static NO_JS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 static mut APP: Option<App> = None;
 
 fn app() -> &'static mut App {
@@ -118,6 +119,8 @@ fn main() {
     // coming up when WEB is the first program, as in tests).
     let args: Vec<String> = std::env::args().skip(1).collect();
     RETRY.store(args.iter().any(|a| a.eq_ignore_ascii_case("-retry")), Ordering::Relaxed);
+    // -nojs: do not run pages' scripts.
+    NO_JS.store(args.iter().any(|a| a.eq_ignore_ascii_case("-nojs")), Ordering::Relaxed);
     let start = args.iter().find(|a| !a.starts_with('-')).and_then(|a| webcore::parse_user_url(a)).unwrap_or_else(|| Url::parse(HOME).unwrap());
     let hab = unsafe { WinInitialize(0) };
     let hmq = unsafe { WinCreateMsgQueue(hab, 0) };
@@ -335,10 +338,7 @@ fn navigate(url: Url, record: bool, body: Option<(String, Vec<u8>)>) {
         let t0 = std::time::Instant::now();
         let r = loop {
             // A bug in the engine must not take the browser with it.
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &body {
-                None => webcore::page::load(&url, size, &progress),
-                Some((ctype, data)) => webcore::page::load_post(&url, ctype, data, size, &progress),
-            }))
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| load_page(&url, body.as_ref(), size, &progress)))
             .unwrap_or_else(|_| Err(webcore::http::Error::Protocol("WebRS2 failed on this page (a panic)".into())));
             if r.is_err() && RETRY.load(Ordering::Relaxed) && t0.elapsed().as_secs() < 60 {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -352,6 +352,36 @@ fn navigate(url: Url, record: bool, body: Option<(String, Vec<u8>)>) {
         };
         post(client, WMU_LOADED, Box::into_raw(Box::new(l)) as u32, generation);
     });
+}
+
+/// Fetch, parse, run the scripts (unless -nojs), style.
+fn load_page(url: &Url, body: Option<&(String, Vec<u8>)>, size: (f32, f32), progress: &dyn Fn(&str)) -> Result<Page, webcore::http::Error> {
+    let b = body.map(|(ctype, data)| webcore::http::Body { content_type: ctype, data });
+    let (u, dom, status) = webcore::page::fetch_dom(url, b, progress)?;
+    let dom = if NO_JS.load(Ordering::Relaxed) {
+        dom
+    } else {
+        progress("Running scripts...");
+        let fetch = |s: &Url| -> Option<String> {
+            progress(&format!("Fetching script {s}..."));
+            let r = webcore::http::get(s).ok()?;
+            (r.status < 400).then(|| webcore::http::decode_text(&r))
+        };
+        let (dom, out) = webjs::run(dom, &u, &fetch);
+        if !out.log.is_empty() {
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("WEB.LOG") {
+                use std::io::Write;
+                let _ = writeln!(f, "{u}: {} scripts, {} errors", out.scripts, out.errors);
+                for l in out.log.iter().take(50) {
+                    let _ = writeln!(f, "  {l}");
+                }
+            }
+        }
+        dom
+    };
+    let mut page = webcore::page::from_dom(u, dom, size, progress);
+    page.status = status;
+    Ok(page)
 }
 
 fn push_history(u: Url) {

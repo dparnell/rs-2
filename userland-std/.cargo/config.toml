@@ -2,7 +2,8 @@
 target = "i686-unknown-linux-gnu"
 
 [target.i686-unknown-linux-gnu]
-linker = "rust-lld"
+# lld.sh: rust-lld with link.ld and syslib/ (paths from its own directory).
+linker = "./lld.sh"
 rustflags = [
     "-C", "linker-flavor=ld.lld",
     "-C", "relocation-model=static",
@@ -10,8 +11,6 @@ rustflags = [
     "-C", "link-arg=--unresolved-symbols=ignore-all",
     "-C", "link-arg=-nostdlib",
     "-C", "link-arg=--no-pie",
-    "-C", "link-arg=-Lsyslib",
-    "-C", "link-arg=-Tlink.ld",
     "-C", "link-arg=--eh-frame-hdr",
 ]
 

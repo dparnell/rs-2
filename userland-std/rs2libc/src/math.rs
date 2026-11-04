@@ -14,6 +14,12 @@ macro_rules! export {
 
 export! {
     acos(x: f64) -> f64;
+    acosh(x: f64) -> f64;
+    acoshf(x: f32) -> f32;
+    asinh(x: f64) -> f64;
+    asinhf(x: f32) -> f32;
+    atanh(x: f64) -> f64;
+    atanhf(x: f32) -> f32;
     acosf(x: f32) -> f32;
     asin(x: f64) -> f64;
     asinf(x: f32) -> f32;

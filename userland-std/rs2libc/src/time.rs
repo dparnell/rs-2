@@ -168,3 +168,57 @@ pub unsafe extern "C" fn sleep(s: u32) -> u32 {
     sleep_ns(s as u64 * 1_000_000_000);
     0
 }
+
+/// Seconds east of UTC of OS/2's local time (its time zone, if set).
+fn local_offset() -> i64 {
+    let mut dt = DateTime::default();
+    unsafe { DosGetDateTime(&mut dt) };
+    if dt.timezone == -1 { 0 } else { -(dt.timezone as i64) * 60 }
+}
+
+fn civil_from_days(z: i64) -> (i64, u32, u32) {
+    let z = z + 719468;
+    let era = if z >= 0 { z } else { z - 146096 } / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+unsafe fn fill_tm(t: i64, off: i64, tm: *mut libc::tm) -> *mut libc::tm {
+    let s = t + off;
+    let days = s.div_euclid(86400);
+    let rem = s.rem_euclid(86400);
+    let (y, m, d) = civil_from_days(days);
+    let yday = days - days_from_civil(y, 1, 1);
+    unsafe {
+        core::ptr::write_bytes(tm, 0, 1);
+        (*tm).tm_sec = (rem % 60) as i32;
+        (*tm).tm_min = (rem / 60 % 60) as i32;
+        (*tm).tm_hour = (rem / 3600) as i32;
+        (*tm).tm_mday = d as i32;
+        (*tm).tm_mon = m as i32 - 1;
+        (*tm).tm_year = (y - 1900) as i32;
+        (*tm).tm_wday = (days + 4).rem_euclid(7) as i32;
+        (*tm).tm_yday = yday as i32;
+        (*tm).tm_gmtoff = off as _;
+    }
+    tm
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gmtime_r(t: *const libc::time_t, tm: *mut libc::tm) -> *mut libc::tm {
+    unsafe { fill_tm(*t as i64, 0, tm) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn localtime_r(t: *const libc::time_t, tm: *mut libc::tm) -> *mut libc::tm {
+    unsafe { fill_tm(*t as i64, local_offset(), tm) }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn tzset() {}

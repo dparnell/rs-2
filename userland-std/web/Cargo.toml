@@ -8,3 +8,4 @@ license.workspace = true
 [dependencies]
 rs2libc = { path = "../rs2libc" }
 webcore = { path = "../webcore" }
+webjs = { path = "../webjs" }
