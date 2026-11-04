@@ -395,6 +395,11 @@ SET TEMP=E:\TMP
 SET MOZILLA_HOME=E:\HOME
 ```
 
+Take those LIBPATH entries out when the disk is not attached. E: is then
+the empty CD drive: as on OS/2, a DLL search that reaches it shows the
+SYS0021 pop-up and, if that is answered with "return error", ends with
+error 21 instead of trying the next directory.
+
 Firefox runs as the boot program:
 `cargo xtask run --hdd work/ff.img --init "E:\USR\LIB\FIREFOX-45.9.0\FIREFOX.EXE -no-remote about:blank" -- -m 1536`
 (1.5 GB of memory: its DLLs alone are 80 MB).

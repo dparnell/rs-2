@@ -64,6 +64,7 @@ fn main(s: &Startup) -> u32 {
     sessions();
     debugging();
     cmd_beginlibpath();
+    libpath_errors();
     messages();
     nls();
     console::run();
@@ -508,6 +509,31 @@ fn cmd_beginlibpath() {
         DosDelete(b"C:\\RS2LP.CMD\0".as_ptr());
         DosDelete(b"C:\\RS2LP.TXT\0".as_ptr());
         check("CMD: SET BEGINLIBPATH is the extended LIBPATH", rc == 0 && rc2 == 0 && buf[..got as usize].starts_with(b"C:\\RS2LP\r\n"));
+    }
+}
+
+/// The DLL search passes a drive that does not exist, and stops with the
+/// error at one that is not ready (the empty CD drive, when there is one).
+fn libpath_errors() {
+    unsafe {
+        let mut h = 0;
+        let begin = |dir: &[u8]| DosSetExtLIBPATH(dir.as_ptr(), 1);
+        DosError(0);
+        let rc = begin(b"Q:\\NOPE\0");
+        let rc2 = DosLoadModule(null_mut(), 0, b"NOSUCH\0".as_ptr(), &mut h);
+        check("DLL search passes a drive that does not exist", rc == 0 && rc2 == 126);
+        let mut hf = 0;
+        let mut action = 0;
+        let rc = DosOpen(b"E:\\X\0".as_ptr(), &mut hf, &mut action, 0, FILE_NORMAL, OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_READONLY | OPEN_SHARE_DENYWRITE, null_mut());
+        if rc == 21 {
+            begin(b"E:\\USR\\LIB\0");
+            let rc = DosLoadModule(null_mut(), 0, b"NOSUCH\0".as_ptr(), &mut h);
+            check("DLL search stops at a drive that is not ready", rc == 21);
+        } else {
+            println!("E: is not an empty drive ({rc}): not-ready search not tested");
+        }
+        begin(b"\0");
+        DosError(1);
     }
 }
 

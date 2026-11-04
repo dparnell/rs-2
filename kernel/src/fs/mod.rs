@@ -615,14 +615,18 @@ pub fn libpath() -> Vec<String> {
 
 /// Read a whole file given a fully qualified path.
 pub fn read_file(path: &str) -> Option<Arc<[u8]>> {
+    load_file(path).ok()
+}
+
+/// [`read_file`], saying why it failed.
+fn load_file(path: &str) -> Result<Arc<[u8]>, u32> {
     let empty: [String; 26] = Default::default();
-    let p = path::canonical(path, 2, &empty).ok()?;
-    let fs = fs_of(&p).ok()?;
-    let f = fs.open(&p.rel()).ok()?;
+    let p = path::canonical(path, 2, &empty)?;
+    let f = fs_of(&p)?.open(&p.rel())?;
     let mut v = alloc::vec![0u8; f.size() as usize];
-    let n = f.read(0, &mut v).ok()?;
+    let n = f.read(0, &mut v)?;
     v.truncate(n);
-    Some(Arc::from(v))
+    Ok(Arc::from(v))
 }
 
 /// Read up to `n` bytes at `off` of a file given a fully qualified path.
@@ -641,11 +645,22 @@ pub fn stat(path: &FullPath) -> Result<FileInfo, u32> {
     fs_of(path)?.stat(&path.rel())
 }
 
+/// Whether the LIBPATH search goes on to the next directory after error
+/// `e`, as in OS/2's loader: the module is not there, or that place cannot
+/// be used. Anything else (a drive that is not ready, once its pop-up has
+/// been answered) ends the search with that error, even if a later
+/// directory has the module.
+fn not_here(e: u32) -> bool {
+    matches!(e, 2 | 3 | 5 | 12 | 15 | 26 | 51 | 53..=60 | 64..=67 | 69 | 71 | 86 | 110 | 123 | 206 | 240)
+}
+
 /// Locate a DLL for the loader: a path, or `NAME.DLL` along the LIBPATH.
-pub fn find_module(name: &str) -> Option<(String, Arc<[u8]>)> {
+/// `Err(2)` means it is not there; other errors stopped the search.
+pub fn find_module(name: &str) -> Result<(String, Arc<[u8]>), u32> {
+    const NOT_FOUND: u32 = 2;
     let has_path = name.contains(['\\', '/', ':']);
     if has_path {
-        return read_file(name).map(|d| (name.to_string(), d));
+        return load_file(name).map(|d| (name.to_string(), d)).map_err(|e| if not_here(e) { NOT_FOUND } else { e });
     }
     let file = if name.contains('.') { name.to_string() } else { alloc::format!("{name}.DLL") };
     // BeginLIBPATH, LIBPATH, EndLIBPATH of the loading process.
@@ -667,11 +682,13 @@ pub fn find_module(name: &str) -> Option<(String, Arc<[u8]>)> {
         // "." is the loading process's current directory.
         let dir = if dir == "." { cwd.clone().unwrap_or_else(|| String::from("C:\\")) } else { dir };
         let full = alloc::format!("{}\\{}", dir.trim_end_matches('\\'), file);
-        if let Some(d) = read_file(&full) {
-            return Some((full.to_ascii_uppercase(), d));
+        match load_file(&full) {
+            Ok(d) => return Ok((full.to_ascii_uppercase(), d)),
+            Err(e) if !not_here(e) => return Err(e),
+            Err(_) => {}
         }
     }
-    None
+    Err(NOT_FOUND)
 }
 
 /// Mount the boot volumes handed over by the loader: a module named

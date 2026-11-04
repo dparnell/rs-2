@@ -383,10 +383,10 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
             return Ok(m);
         }
     }
-    let (path, data) = crate::fs::find_module(name).ok_or_else(|| {
-        crate::trace!("loader: module {name} not found");
+    let (path, data) = crate::fs::find_module(name).map_err(|e| {
+        crate::trace!("loader: module {name} not found (error {e})");
         set_fail(name);
-        err::MOD_NOT_FOUND
+        if e == err::FILE_NOT_FOUND { err::MOD_NOT_FOUND } else { e }
     })?;
     let m = load_image(&path, data, true, None).inspect_err(|e| crate::trace!("loader: {path}: error {e}"))?;
     register(m.clone());

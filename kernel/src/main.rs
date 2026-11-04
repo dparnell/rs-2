@@ -223,7 +223,7 @@ pub mod boot {
         }
         // The PM shell's SYS_DLLS LoadOneTime list: REXXINIT starts the
         // REXX API server thread. SYSDLLS keeps such modules resident.
-        let sys_dlls: Vec<&str> = ["REXXINIT"].into_iter().filter(|m| crate::fs::find_module(m).is_some()).collect();
+        let sys_dlls: Vec<&str> = ["REXXINIT"].into_iter().filter(|m| crate::fs::find_module(m).is_ok()).collect();
         let loader = find_program("SYSDLLS.EXE");
         if !sys_dlls.is_empty() && crate::fs::read_file(&loader).is_some() {
             spawn(&loader, &sys_dlls.join(" "), &env, true);
