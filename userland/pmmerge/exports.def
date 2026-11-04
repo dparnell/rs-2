@@ -7,6 +7,7 @@ WinSetLangViewer=__a_WinSetLangViewer @3504
 WinQueryLangViewer=__a_WinQueryLangViewer @3505
 PmMergeHelpHook=__a_PmMergeHelpHook @5119
 WinQueryCpType=__a_WinQueryCpType @5480
+WinQueryDesktopWorkArea=__a_WinQueryDesktopWorkArea @5469
 AAB32GetReg=__a_AAB32GetReg @5000
 AAB32SetReg=__a_AAB32SetReg @5001
 WinSetProperty=__a_WinSetProperty @5452

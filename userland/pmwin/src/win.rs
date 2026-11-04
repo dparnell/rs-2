@@ -20,6 +20,9 @@ pub const WM_DESTROY: u32 = 0x0002;
 pub const WM_SHOW: u32 = 0x0005;
 pub const WM_MOVE: u32 = 0x0006;
 pub const WM_SIZE: u32 = 0x0007;
+pub const WM_ADJUSTWINDOWPOS: u32 = 0x0008;
+pub const WM_WINDOWPOSCHANGED: u32 = 0x0055;
+const SWP_NOADJUST: u32 = 0x8000;
 pub const WM_ACTIVATE: u32 = 0x000d;
 pub const WM_SETFOCUS: u32 = 0x000f;
 pub const WM_SYSCOMMAND: u32 = 0x0021;
@@ -678,9 +681,21 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
     } else {
         fl
     };
-    let s = st();
-    let Some(w) = s.desk.get(h) else { return 0 };
+    let Some(w) = st().desk.get(h) else { return 0 };
     let (ox, oy, ocx, ocy) = (w.x, w.y, w.cx, w.cy);
+    let was_visible = w.style & ws::VISIBLE != 0;
+    // The window may change the new position (WM_ADJUSTWINDOWPOS, mp1 a
+    // SWP: fl, cy, cx, y, x, hwndInsertBehind, hwnd), as PM asks it.
+    let (mut x, mut y, mut cx, mut cy) = (x, y, cx, cy);
+    if fl & (SWP_MOVE | SWP_SIZE) != 0 && fl & SWP_NOADJUST == 0 {
+        let mut swp: [u32; 9] = [fl, cy as u32, cx as u32, y as u32, x as u32, behind, h, 0, 0];
+        send(h, WM_ADJUSTWINDOWPOS, swp.as_mut_ptr() as u32, 0);
+        (cy, cx, y, x) = (swp[1] as i32, swp[2] as i32, swp[3] as i32, swp[4] as i32);
+    }
+    let s = st();
+    if s.desk.get(h).is_none() {
+        return 0;
+    }
     let (nx, ny) = if fl & SWP_MOVE != 0 { (x, y) } else { (ox, oy) };
     let (ncx, ncy) = if fl & SWP_SIZE != 0 { (cx, cy) } else { (ocx, ocy) };
     if (nx, ny, ncx, ncy) != (ox, oy, ocx, ocy) {
@@ -714,6 +729,16 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
     }
     if fl & SWP_ACTIVATE != 0 {
         activate_window(h);
+    }
+    // WM_WINDOWPOSCHANGED: mp1 the new and the old SWP (Firefox's frame
+    // keeps its window's bounds from it).
+    let visible = st().desk.get(h).is_some_and(|w| w.style & ws::VISIBLE != 0);
+    if (nx, ny, ncx, ncy) != (ox, oy, ocx, ocy) || visible != was_visible || fl & SWP_ZORDER != 0 {
+        let pair: [u32; 18] = [
+            fl, ncy as u32, ncx as u32, ny as u32, nx as u32, behind, h, 0, 0,
+            fl, ocy as u32, ocx as u32, oy as u32, ox as u32, behind, h, 0, 0,
+        ];
+        send(h, WM_WINDOWPOSCHANGED, pair.as_ptr() as u32, 0);
     }
     1
 }

@@ -60,6 +60,19 @@ pub extern "C" fn WinQueryCpType(_hmq: u32) -> u32 {
 unsafe extern "C" {
     #[link_name = "PMWIN.977"]
     fn WinSetErrorInfo(e: u32, fs: u32) -> u32;
+    #[link_name = "PMWIN.840"]
+    fn WinQueryWindowRect(h: u32, r: *mut i32) -> u32;
+}
+
+/// WinQueryDesktopWorkArea(hwndDesktop, prcl) (ordinal 5469, later
+/// Toolkits): the part of the desktop windows should use; rs2 reserves
+/// none of it, so the whole desktop. Firefox asks for it.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryDesktopWorkArea(desk: u32, r: *mut i32) -> u32 {
+    if r.is_null() {
+        return 0;
+    }
+    unsafe { WinQueryWindowRect(if desk == 0 { 1 } else { desk }, r) }
 }
 
 /// Per-thread blocks of AAB32GetReg register 3 (by thread id).
