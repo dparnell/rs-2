@@ -233,6 +233,8 @@ GpiPolygons @650
 GpiCreateRoundRectRegion @661
 GpiCreateEllipticRegion @662
 GpiAbortPath @722
+GpiEnableYInversion @723
+GpiQueryYInversion @726
 DEVOPENDC=PMWIN.4001 @1
 DEVCLOSEDC=PMWIN.4002 @2
 DEVPOSTDEVICEMODES=PMWIN.4003 @3

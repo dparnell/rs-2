@@ -516,6 +516,25 @@ pub extern "C" fn GpiResetPS(hps: u32, opts: u32) -> u32 {
     1
 }
 
+/// GpiEnableYInversion(hps, lHeight) (PMGPI 723, in later Toolkits):
+/// device y becomes lHeight - y after all the other transforms (so y
+/// grows downwards from lHeight); 0 turns it off. Cairo draws its
+/// top-down images with it, blitting to an inverted target rectangle.
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiEnableYInversion(hps: u32, height: i32) -> u32 {
+    let s = st();
+    refresh(s, hps);
+    let Some(e) = entry(s, hps) else { return 0 };
+    e.ps.set_y_inversion(height);
+    1
+}
+
+/// GpiQueryYInversion(hps) (PMGPI 726): the Y inversion height, 0 = off.
+#[unsafe(no_mangle)]
+pub extern "C" fn GpiQueryYInversion(hps: u32) -> i32 {
+    query(hps, |e| e.ps.yinv, 0)
+}
+
 /// GpiSetPS(hps, psizlSize, flOptions): new page size and units.
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiSetPS(hps: u32, size: *const i32, opts: u32) -> u32 {

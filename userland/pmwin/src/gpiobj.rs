@@ -654,6 +654,22 @@ pub extern "C" fn WinQueryClipRegion(h: u32, hrgn: u32) -> u32 {
     1
 }
 
+/// WinQueryVisibleRegion(hwnd, hrgn) (PMWIN 1000): the part of the
+/// window that can be seen (clipped by its ancestors, the siblings above
+/// it and, with WS_CLIPCHILDREN, its children), in desktop coordinates as
+/// DIVE wants its visible rectangles; returns the region's complexity
+/// (RGN_NULL for a hidden window), RGN_ERROR for a bad handle.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryVisibleRegion(h: u32, hrgn: u32) -> i32 {
+    let s = st();
+    let Some(w) = s.desk.get(h) else { return RGN_ERROR };
+    let vis = s.desk.visible_region(h, w.style & pmwin::ws::CLIPCHILDREN != 0);
+    let g = Region::from_rects(&vis.rects);
+    let Some(d) = region(hrgn) else { return RGN_ERROR };
+    *d = g;
+    d.complexity()
+}
+
 /// WinQueryUpdateRegion(hwnd, hrgn): the window's update region.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryUpdateRegion(h: u32, hrgn: u32) -> i32 {
@@ -1360,6 +1376,43 @@ pub(crate) fn blit_to(hps: u32, t: Rect, src: Option<(Vec<Option<u32>>, bool, u3
     .map_or(GPI_ERROR, |_| GPI_OK)
 }
 
+/// Whether a world rectangle from `a` to `b` is turned over on the
+/// device in x and in y (Y inversion, or corners given the wrong way
+/// round): the image then lands mirrored, as on OS/2.
+fn world_flip(hps: u32, a: Point, b: Point) -> (bool, bool) {
+    let s = st();
+    let Some(e) = entry(s, hps) else { return (false, false) };
+    let m = e.ps.world_to_device();
+    let (ax, ay) = m.apply(a.x as f64, a.y as f64);
+    let (bx, by) = m.apply(b.x as f64, b.y as f64);
+    (bx < ax, by < ay)
+}
+
+/// Mirror `w` x `h` samples in x and/or y.
+fn mirror(v: &mut [Option<u32>], w: i32, h: i32, fx: bool, fy: bool) {
+    let (w, h) = (w.max(0) as usize, h.max(0) as usize);
+    if v.len() < w * h {
+        return;
+    }
+    if fy {
+        for y in 0..h / 2 {
+            for x in 0..w {
+                v.swap(y * w + x, (h - 1 - y) * w + x);
+            }
+        }
+    }
+    if fx {
+        for y in 0..h {
+            v[y * w..y * w + w].reverse();
+        }
+    }
+}
+
+/// The flips of a source rectangle given by two corners.
+fn src_flip(a: Point, b: Point) -> (bool, bool) {
+    (b.x < a.x, b.y < a.y)
+}
+
 fn norm(a: Point, b: Point) -> Rect {
     Rect::new(a.x.min(b.x), a.y.min(b.y), a.x.max(b.x), a.y.max(b.y))
 }
@@ -1422,7 +1475,11 @@ pub extern "C" fn GpiWCBitBlt(dst: u32, hbm: u32, n: i32, p: *const PointL, rop:
         };
         let surf = b.bm.surface();
         let (w, h) = samples(dst, t, sr);
-        Some(((bitmap::sample(&surf, sr, w, h), b.bm.is_mono(), 0xffffff), (w, h)))
+        let mut v = bitmap::sample(&surf, sr, w, h);
+        let (tx, ty) = world_flip(dst, pts[0], pts[1]);
+        let (sx, sy) = if pts.len() >= 4 { src_flip(pts[2], pts[3]) } else { (false, false) };
+        mirror(&mut v, w, h, tx != sx, ty != sy);
+        Some(((v, b.bm.is_mono(), 0xffffff), (w, h)))
     } else {
         None
     };
@@ -1452,7 +1509,10 @@ pub extern "C" fn GpiDrawBits(dst: u32, bits: *const u8, bmi: *const u8, n: i32,
     };
     let surf = b.surface();
     let dims = samples(dst, t, sr);
-    let v = bitmap::sample(&surf, sr, dims.0, dims.1);
+    let mut v = bitmap::sample(&surf, sr, dims.0, dims.1);
+    let (tx, ty) = world_flip(dst, pts[0], pts[1]);
+    let (sx, sy) = if pts.len() >= 4 { src_flip(pts[2], pts[3]) } else { (false, false) };
+    mirror(&mut v, dims.0, dims.1, tx != sx, ty != sy);
     blit_to(dst, t, Some((v, false, 0xffffff)), rop, dims)
 }
 

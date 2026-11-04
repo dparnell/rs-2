@@ -119,7 +119,10 @@ print(f'{len(funcs)} exports')
 if module == 'PMWIN':
     import os
     gpi_dir = os.path.join(os.path.dirname(dll_dir.rstrip('/')), 'pmgpi')
-    fwd = sorted(((ords[('PMGPI', n)], n) for n, _, _ in funcs if (n.startswith('Gpi') or n.startswith('Dev'))), key=lambda x: x[0])
+    # Gpi functions the Toolkit's library lacks (later OS/2 versions'):
+    # their PMWIN ordinal in exports.private is 4000 + the PMGPI one.
+    fwd = sorted(((ords[('PMGPI', n)] if ('PMGPI', n) in ords else private[n] - 4000, n)
+                  for n, _, _ in funcs if (n.startswith('Gpi') or n.startswith('Dev'))), key=lambda x: x[0])
     lib = os.path.join(gpi_dir, 'src', 'lib.rs')
     src = open(lib).read()
     head, rest = src.split('forward! {\n', 1)

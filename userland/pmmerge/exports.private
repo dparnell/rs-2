@@ -3,3 +3,6 @@ PmMergeHelpHook 5119
 WinQueryCpType 5480
 AAB32GetReg 5000
 AAB32SetReg 5001
+WinQueryProperty 5450
+WinRemoveProperty 5451
+WinSetProperty 5452

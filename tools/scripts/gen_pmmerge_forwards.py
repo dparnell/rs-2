@@ -1,6 +1,6 @@
 """Generate PMMERGE.DLL's forwarders.
 
-On OS/2 Warp 4 PMWIN, PMGPI and PMSHAPI forward most of their entry
+On OS/2 Warp 4 PMWIN, PMGPI, PMSHAPI and PMGRE forward most of their entry
 points to PMMERGE.DLL, and some programs (KLONDIKE, OS2CHESS) import
 PMMERGE's ordinals directly. userland/pmmerge/ibm-forwards.txt maps
 `DLL ordinal PMMERGE-ordinal`; for every one of those entries that rs2's
@@ -29,7 +29,7 @@ def exports(dll):
     return out
 
 
-win, shapi = exports('PMWIN'), exports('PMSHAPI')
+win, shapi, gre = exports('PMWIN'), exports('PMSHAPI'), exports('PMGRE')
 fwd = []
 for l in open(os.path.join(pmm, 'ibm-forwards.txt')):
     if not l.strip() or l.startswith(';'):
@@ -42,6 +42,8 @@ for l in open(os.path.join(pmm, 'ibm-forwards.txt')):
         fwd.append((po, win[o + 4000], f'PMWIN.{o + 4000}'))
     elif dll == 'PMSHAPI' and o in shapi:
         fwd.append((po, shapi[o], f'PMSHAPI.{o}'))
+    elif dll == 'PMGRE' and o in gre:
+        fwd.append((po, gre[o], f'PMGRE.{o}'))
 fwd.sort()
 # 16-bit entry points (exported under upper-case names, WINCREATEWINDOW)
 # become LX forwarders: a 32-bit jump would run as 16-bit code.

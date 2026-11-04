@@ -95,3 +95,5 @@ pub extern "C" fn AAB32SetReg(reg: u32, v: u32) -> u32 {
     }
     1
 }
+
+mod props;
