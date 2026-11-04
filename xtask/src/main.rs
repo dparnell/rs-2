@@ -899,6 +899,7 @@ fn build_userland() -> Option<image::FileList> {
             files.push((lx, "RS2\\TESTDLLB.DLL".to_string()));
         }
     }
+    check_dll_ranges(&ul)?;
     // rs2's COMMAND.COM for DOS sessions: the stub of crates/dos.
     let command = out_dir.join("COMMAND.COM");
     std::fs::write(&command, dos::shell::command_com()).unwrap();
@@ -950,6 +951,65 @@ fn build_userland() -> Option<image::FileList> {
     }
     files.extend(build_userland_std()?);
     Some(files)
+}
+
+/// DLLs that share an address range on purpose: only one of each pair is
+/// loaded (Object REXX replaces REXX).
+const DLL_SHARED_RANGES: &[(&str, &str)] = &[("rexx", "orexx")];
+
+/// The DLLs' images are linked at fixed bases (each build.rs): fail the
+/// build when one has grown into the next, which otherwise breaks only at
+/// run time in a process that loads both (PMWP into PMSPL, TCPIPDLL into
+/// PMSHAPI).
+fn check_dll_ranges(ul: &Path) -> Option<()> {
+    let mut ranges = Vec::new();
+    for (bin, dest) in USER_PROGRAMS {
+        // A crate installed under two names (REXXUTIL, OREXUTIL) once.
+        if !(dest.ends_with(".DLL") || dest.ends_with(".QPR") || dest.ends_with(".DRV")) || ranges.iter().any(|r: &(u32, u32, &str)| r.2 == *bin) {
+            continue;
+        }
+        let elf = std::fs::read(ul.join("target/i686-unknown-linux-gnu/release").join(bin)).ok()?;
+        if let Some((start, end)) = elf32_alloc_range(&elf) {
+            ranges.push((start, end, *bin));
+        }
+    }
+    ranges.sort();
+    let mut ok = true;
+    // The range reaching highest so far, and whose it is.
+    let mut top = (0, 0, "");
+    for &(s, e, b) in &ranges {
+        let (s0, e0, a) = top;
+        let shared = DLL_SHARED_RANGES.iter().any(|&(x, y)| (x, y) == (a, b) || (y, x) == (a, b));
+        if e0 > s && !(shared && s0 == s) {
+            eprintln!("{a}.dll ({s0:#x}..{e0:#x}) overlaps {b}.dll at {s:#x}: move one of them (__image_base in its build.rs)");
+            ok = false;
+        }
+        if e > e0 {
+            top = (s, e, b);
+        }
+    }
+    ok.then_some(())
+}
+
+/// The lowest and highest addresses of an ELF32 file's allocated sections.
+fn elf32_alloc_range(elf: &[u8]) -> Option<(u32, u32)> {
+    let u16_at = |o: usize| Some(u16::from_le_bytes(elf.get(o..o + 2)?.try_into().ok()?));
+    let u32_at = |o: usize| Some(u32::from_le_bytes(elf.get(o..o + 4)?.try_into().ok()?));
+    if elf.get(..5)? != b"\x7fELF\x01" {
+        return None;
+    }
+    let (shoff, shentsize, shnum) = (u32_at(0x20)? as usize, u16_at(0x2e)? as usize, u16_at(0x30)? as usize);
+    let (mut lo, mut hi) = (u32::MAX, 0);
+    for i in 0..shnum {
+        let sh = shoff + i * shentsize;
+        const SHF_ALLOC: u32 = 2;
+        let (flags, addr, size) = (u32_at(sh + 8)?, u32_at(sh + 12)?, u32_at(sh + 20)?);
+        if flags & SHF_ALLOC != 0 && addr != 0 {
+            lo = lo.min(addr);
+            hi = hi.max(addr + size);
+        }
+    }
+    (lo < hi).then_some((lo, hi))
 }
 
 /// Programs in userland-std/ (Rust's std on rs2libc, docs/BROWSER.md):
