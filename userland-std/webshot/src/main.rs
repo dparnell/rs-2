@@ -62,6 +62,7 @@ struct Canvas {
     w: usize,
     h: usize,
     px: Vec<u32>,
+    clips: Vec<(f32, f32, f32, f32)>,
 }
 
 impl Canvas {
@@ -79,12 +80,35 @@ impl Canvas {
         if x >= self.w || y >= self.h {
             return;
         }
+        let (fx, fy) = (x as f32, y as f32);
+        if self.clips.iter().any(|&(l, t, r, b)| fx < l || fx >= r || fy < t || fy >= b) {
+            return;
+        }
         let d = self.px[y * self.w + x];
         let mix = |s: u32, d: u32| (s * a + d * (255 - a)) / 255;
         let r = mix(c >> 16 & 255, d >> 16 & 255);
         let g = mix(c >> 8 & 255, d >> 8 & 255);
         let b = mix(c & 255, d & 255);
         self.px[y * self.w + x] = r << 16 | g << 8 | b;
+    }
+}
+
+fn text(c: &mut Canvas, fonts: &HostFonts, x: f32, y: f32, s: &str, font: FontKey, color: u32) {
+    let face = fonts.face(font);
+    let mut pen = x;
+    for ch in s.chars() {
+        let (m, bmp) = face.rasterize(ch, font.size as f32);
+        let gx = (pen + m.xmin as f32).round() as i32;
+        let gy = (y - m.height as f32 - m.ymin as f32).round() as i32;
+        for yy in 0..m.height {
+            for xx in 0..m.width {
+                let a = bmp[yy * m.width + xx] as u32 * (color >> 24) / 255;
+                if a > 0 && gx + (xx as i32) >= 0 && gy + (yy as i32) >= 0 {
+                    c.blend((gx + xx as i32) as usize, (gy + yy as i32) as usize, color & 0xffffff, a);
+                }
+            }
+        }
+        pen += m.advance_width;
     }
 }
 
@@ -117,11 +141,29 @@ fn main() {
     let laid = layout::layout(&page.dom, &page.styles, &page.url, width, &mut fonts, &sizes);
     eprintln!("laid out in {:?}: {} items, height {}", t1.elapsed(), laid.items.len(), laid.height);
     let h = height.min(laid.height.ceil() as usize + 1).max(1);
-    let mut c = Canvas { w: width as usize, h, px: vec![laid.background & 0xffffff; width as usize * h] };
+    let mut c = Canvas { w: width as usize, h, px: vec![laid.background & 0xffffff; width as usize * h], clips: Vec::new() };
     for it in &laid.items {
         match it {
             Item::Fill { r, color } => c.fill(r.x, r.y, r.w, r.h, *color),
-            Item::PushClip { .. } | Item::PopClip => {}
+            Item::PushClip { r } => c.clips.push((r.x.round(), r.y.round(), (r.x + r.w).round(), (r.y + r.h).round())),
+            Item::PopClip => {
+                c.clips.pop();
+            }
+            Item::RoundRect { r, color, radii, ring } => layout::round_spans(*r, *radii, *ring, |x, y, w, h| c.fill(x, y, w, h, *color)),
+            Item::Svg { r, node, .. } => {
+                let (w, h) = (r.w.round().max(1.0) as u32, r.h.round().max(1.0) as u32);
+                let img = webcore::svg::render(&page.dom, &page.styles, *node, w, h);
+                let (x0, y0) = (r.x.round() as i64, r.y.round() as i64);
+                for yy in 0..h as i64 {
+                    for xx in 0..w as i64 {
+                        let s = ((yy * w as i64 + xx) * 4) as usize;
+                        let p = &img.rgba[s..s + 4];
+                        if p[3] != 0 && x0 + xx >= 0 && y0 + yy >= 0 {
+                            c.blend((x0 + xx) as usize, (y0 + yy) as usize, (p[0] as u32) << 16 | (p[1] as u32) << 8 | p[2] as u32, p[3] as u32);
+                        }
+                    }
+                }
+            }
             Item::Marker { r, kind, color } => {
                 if *kind == ListStyle::Circle {
                     c.fill(r.x, r.y, r.w, 1.0, *color);
@@ -132,9 +174,26 @@ fn main() {
                     c.fill(r.x, r.y, r.w, r.h, *color);
                 }
             }
-            Item::Control { r, .. } => {
-                c.fill(r.x, r.y, r.w, r.h, 0xff808080);
-                c.fill(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, 0xfff0f0f0);
+            Item::Control { r, node, kind, font, color, pad } => {
+                use webcore::layout::ControlKind as K;
+                if matches!(kind, K::Checkbox | K::Radio) {
+                    c.fill(r.x, r.y, r.w, r.h, 0xff808080);
+                    c.fill(r.x + 1.0, r.y + 1.0, r.w - 2.0, r.h - 2.0, 0xfff0f0f0);
+                    continue;
+                }
+                if *kind == K::ButtonBox {
+                    continue;
+                }
+                let e = page.dom.element(*node).unwrap();
+                let (value, col) = match e.attr("value").filter(|v| !v.is_empty()) {
+                    Some(v) => (v, *color),
+                    None => (e.attr("placeholder").unwrap_or(""), 0xff808080),
+                };
+                let (a, d) = fonts.metrics(*font);
+                let base = r.y + (r.h + a - d) / 2.0;
+                let tw = fonts.width(*font, value);
+                let x = if matches!(kind, K::Submit | K::Button) { r.x + (r.w - tw) / 2.0 } else { r.x + pad };
+                text(&mut c, &fonts, x, base, value, *font, col);
             }
             Item::Image { r, node } => {
                 if let Some(img) = decoded.get(node) {
@@ -151,23 +210,8 @@ fn main() {
                     }
                 }
             }
-            Item::Text { x, y, text, font, color, decoration, w } => {
-                let face = fonts.face(*font);
-                let mut pen = *x;
-                for ch in text.chars() {
-                    let (m, bmp) = face.rasterize(ch, font.size as f32);
-                    let gx = (pen + m.xmin as f32).round() as i32;
-                    let gy = (y - m.height as f32 - m.ymin as f32).round() as i32;
-                    for yy in 0..m.height {
-                        for xx in 0..m.width {
-                            let a = bmp[yy * m.width + xx] as u32 * (color >> 24) / 255;
-                            if a > 0 && gx + (xx as i32) >= 0 && gy + (yy as i32) >= 0 {
-                                c.blend((gx + xx as i32) as usize, (gy + yy as i32) as usize, color & 0xffffff, a);
-                            }
-                        }
-                    }
-                    pen += m.advance_width;
-                }
+            Item::Text { x, y, text: text_s, font, color, decoration, w } => {
+                text(&mut c, &fonts, *x, *y, text_s, *font, *color);
                 if decoration & 1 != 0 {
                     c.fill(*x, y + 1.0, *w, 1.0, *color);
                 }

@@ -61,6 +61,9 @@ pub enum ControlKind {
     Select,
     TextArea,
     Image,
+    /// A `<button>`: its content is laid out and painted like any box's;
+    /// this only marks where it is.
+    ButtonBox,
 }
 
 #[derive(Clone, Debug)]
@@ -68,11 +71,58 @@ pub enum Item {
     Fill { r: Rect, color: Color },
     Text { x: f32, y: f32, w: f32, text: String, font: FontKey, color: Color, decoration: u8 },
     Image { r: Rect, node: DomId },
+    /// An inline `<svg>`; `bg` is the colour behind it.
+    Svg { r: Rect, node: DomId, bg: Color },
+    /// A box with rounded corners, or only its outline `ring` pels wide.
+    RoundRect { r: Rect, color: Color, radii: [f32; 4], ring: f32 },
     Marker { r: Rect, kind: ListStyle, color: Color },
-    Control { r: Rect, node: DomId, kind: ControlKind, font: FontKey },
+    /// A form control; its box has been painted. `pad` is the room left of
+    /// its text.
+    Control { r: Rect, node: DomId, kind: ControlKind, font: FontKey, color: Color, pad: f32 },
     /// Items up to the matching PopClip are clipped to `r`.
     PushClip { r: Rect },
     PopClip,
+}
+
+/// A rounded box as rectangles (x, y, w, h), row by row where the corners
+/// need it; with `ring` only an outline that wide.
+pub fn round_spans(r: Rect, radii: [f32; 4], ring: f32, mut out: impl FnMut(f32, f32, f32, f32)) {
+    let (x, y, w, h) = (r.x.round(), r.y.round(), (r.x + r.w).round() - r.x.round(), (r.y + r.h).round() - r.y.round());
+    let inset = |row: f32, top: f32, bottom: f32, h: f32| -> f32 {
+        let c = |rad: f32, d: f32| if rad > 0.0 && d < rad { rad - (rad * rad - (rad - d) * (rad - d)).max(0.0).sqrt() } else { 0.0 };
+        c(top, row + 0.5).max(c(bottom, h - row - 0.5))
+    };
+    let mut run: Option<(f32, [f32; 4], f32)> = None; // start row, spans, end row
+    let flush = |run: &mut Option<(f32, [f32; 4], f32)>, out: &mut dyn FnMut(f32, f32, f32, f32)| {
+        if let Some((start, s, end)) = run.take() {
+            out(x + s[0], y + start, s[1] - s[0], end - start);
+            if s[3] > s[2] {
+                out(x + s[2], y + start, s[3] - s[2], end - start);
+            }
+        }
+    };
+    let (iw, ih) = (w - 2.0 * ring, h - 2.0 * ring);
+    let ir = radii.map(|v| (v - ring).max(0.0));
+    for row in 0..h as i32 {
+        let row = row as f32;
+        let l = inset(row, radii[0], radii[3], h).round();
+        let rt = w - inset(row, radii[1], radii[2], h).round();
+        let spans = if ring > 0.0 && row >= ring && row < h - ring && iw > 0.0 && ih > 0.0 {
+            let il = ring + inset(row - ring, ir[0], ir[3], ih).round();
+            let irt = ring + iw - inset(row - ring, ir[1], ir[2], ih).round();
+            [l, il.max(l), irt.min(rt), rt]
+        } else {
+            [l, rt, 0.0, 0.0]
+        };
+        match &mut run {
+            Some((_, s, end)) if *s == spans => *end = row + 1.0,
+            _ => {
+                flush(&mut run, &mut out);
+                run = Some((row, spans, row + 1.0));
+            }
+        }
+    }
+    flush(&mut run, &mut out);
 }
 
 /// What a page looks like at a width.
@@ -97,6 +147,7 @@ pub type ImageSizes = HashMap<DomId, (u32, u32)>;
 enum Atom {
     Image(DomId),
     Control(DomId, ControlKind),
+    Svg(DomId),
     /// An inline-block: a separately laid out subtree.
     Subtree(NodeId),
 }
@@ -108,7 +159,9 @@ enum Kind {
     Gap,
     Space,
     Break,
-    Atomic(Atom, f32, f32),
+    /// Width, height, baseline below its top, and a percentage of the
+    /// line's width in place of the width (0 for none).
+    Atomic(Atom, f32, f32, f32, f32),
     Marker(ListStyle),
 }
 
@@ -165,7 +218,7 @@ struct IfcBuilder {
 enum Raw {
     Text(String, Arc<Style>, Option<usize>, Color),
     Break(Arc<Style>),
-    Atomic(Atom, f32, f32, Arc<Style>, Option<usize>),
+    Atomic(Atom, f32, f32, f32, f32, Arc<Style>, Option<usize>),
     /// Horizontal space of an inline box's edge; `true` on its left.
     Gap(f32, Arc<Style>, bool),
 }
@@ -303,8 +356,8 @@ fn build_ifc(b: IfcBuilder, block: &Style, fonts: &mut dyn Fonts, cw: f32) -> If
                     last_space = false;
                 }
             }
-            Raw::Atomic(atom, w, h, st, link) => {
-                pieces.push(Piece { kind: Kind::Atomic(atom, w, h), text: String::new(), w, font: font_of(&st), style: st, link, bg: TRANSPARENT, wrap: true });
+            Raw::Atomic(atom, w, h, base, pct, st, link) => {
+                pieces.push(Piece { kind: Kind::Atomic(atom, w, h, base, pct), text: String::new(), w, font: font_of(&st), style: st, link, bg: TRANSPARENT, wrap: true });
                 last_space = false;
             }
         }
@@ -319,8 +372,8 @@ fn build_ifc(b: IfcBuilder, block: &Style, fonts: &mut dyn Fonts, cw: f32) -> If
         match p.kind {
             Kind::Space if p.wrap => run = 0.0,
             Kind::Break => run = 0.0,
-            Kind::Atomic(..) => {
-                min_content = min_content.max(p.w);
+            Kind::Atomic(_, _, _, _, pct) => {
+                min_content = if pct > 0.0 { min_content } else { min_content.max(p.w) };
                 run = 0.0;
             }
             _ => {
@@ -385,6 +438,20 @@ fn lay_lines(ifc: &Ifc, width_all: Option<f32>, fonts: &mut dyn Fonts) -> Lines 
             Kind::Marker(_) => {
                 // Outside the content box, before the first line.
                 line.push((i, -p.w, p.text.clone(), p.w));
+            }
+            Kind::Atomic(_, _, _, _, pct) if *pct > 0.0 && width.is_some() => {
+                // Sized by the line: a field of width 100%.
+                let w = width.unwrap() * pct / 100.0;
+                if !line.is_empty() && x + pending + w > width.unwrap() + 0.5 {
+                    finish(ifc, width, left, fonts, &mut line, x, &mut y, &mut out);
+                    (left, width) = band(ifc, width_all, y);
+                    x = 0.0;
+                    pending = 0.0;
+                }
+                x += pending;
+                pending = 0.0;
+                line.push((i, x, String::new(), w));
+                x += w;
             }
             _ => {
                 let can_break = p.wrap && !line.is_empty() && (pending > 0.0 || matches!(p.kind, Kind::Atomic(..)) || matches!(pieces[i - 1].kind, Kind::Atomic(..)));
@@ -465,14 +532,18 @@ fn finish(ifc: &Ifc, width: Option<f32>, left: f32, fonts: &mut dyn Fonts, line:
     for (i, ..) in line.iter() {
         let p = &pieces[*i];
         match &p.kind {
-            Kind::Atomic(_, _, h) => {
-                if p.style.vertical_align == 1 {
+            Kind::Atomic(_, _, h, base, _) => match p.style.vertical_align {
+                1 => {
                     above = above.max(h / 2.0 + sa * 0.3);
                     below = below.max(h / 2.0 - sa * 0.3);
-                } else {
-                    above = above.max(*h);
                 }
-            }
+                2 => below = below.max(h - sa),
+                3 => above = above.max(h - sd),
+                _ => {
+                    above = above.max(*base);
+                    below = below.max(h - base);
+                }
+            },
             _ => {
                 let (a, d) = fonts.metrics(p.font);
                 let l = p.style.line_height_px();
@@ -514,6 +585,8 @@ fn ifc_layout<'a>(ifc: &'a mut Ifc, width: f32, fonts: &mut dyn Fonts) -> &'a Li
 #[derive(Clone, Debug)]
 enum Leaf {
     Ifc(usize),
+    /// A block-level replaced element, and its content size.
+    Atom(Atom, f32, f32),
 }
 
 struct BoxInfo {
@@ -616,6 +689,7 @@ fn taffy_style(s: &Style) -> taffy::Style {
         flex_grow: s.flex_grow,
         flex_shrink: s.flex_shrink,
         flex_basis: len_dim(s.flex_basis),
+        aspect_ratio: s.aspect_ratio,
         gap: Size { width: len_lp(s.gap.1), height: len_lp(s.gap.0) },
         justify_content: match s.justify {
             1 => JustifyContent::FLEX_START,
@@ -632,6 +706,21 @@ fn taffy_style(s: &Style) -> taffy::Style {
             3 => AlignItems::CENTER,
             7 => AlignItems::BASELINE,
             _ => taffy::AlignItems::NORMAL,
+        },
+        align_content: match s.align_content {
+            1 => AlignContent::FLEX_START,
+            2 => AlignContent::FLEX_END,
+            3 => AlignContent::CENTER,
+            4 => AlignContent::SPACE_BETWEEN,
+            5 => AlignContent::SPACE_AROUND,
+            6 => AlignContent::SPACE_EVENLY,
+            _ => AlignContent::NORMAL,
+        },
+        justify_self: match s.justify_self {
+            1 => Some(AlignSelf::FLEX_START),
+            2 => Some(AlignSelf::FLEX_END),
+            3 => Some(AlignSelf::CENTER),
+            _ => None,
         },
         align_self: match s.align_self {
             1 => Some(AlignSelf::FLEX_START),
@@ -729,7 +818,7 @@ fn is_block_level(d: D) -> bool {
 }
 
 fn replaced(name: &str) -> bool {
-    matches!(name, "img" | "input" | "button" | "select" | "textarea" | "video" | "iframe")
+    matches!(name, "img" | "input" | "select" | "textarea" | "video" | "iframe" | "svg")
 }
 
 impl Builder<'_> {
@@ -850,6 +939,19 @@ impl Builder<'_> {
                         _ => {}
                     }
                     let name: &str = &e.name.local;
+                    if is_block_level(st.display) && replaced(name) {
+                        if let Some((atom, w, h)) = self.atom(c, name, &st) {
+                            self.flush(block, kids, b);
+                            let mut t = taffy_style(&st);
+                            if matches!(atom, Atom::Image(_) | Atom::Svg(_)) && t.aspect_ratio.is_none() && h > 0.0 {
+                                t.aspect_ratio = Some(w / h);
+                            }
+                            let n = self.tree.new_leaf_with_context(t, Leaf::Atom(atom, w, h)).unwrap();
+                            self.info.insert(n, BoxInfo { node: Some(c), style: st.clone(), bg_override: TRANSPARENT });
+                            kids.push(n);
+                        }
+                        continue;
+                    }
                     if is_block_level(st.display) && !replaced(name) {
                         // A marker waiting for content goes into the block.
                         if b.marker.is_some() && !b.has_content() {
@@ -866,29 +968,30 @@ impl Builder<'_> {
                         "img" => {
                             let (w, h) = self.image_size(c, &st);
                             if w > 0.0 && h > 0.0 {
-                                b.raw.push(Raw::Atomic(Atom::Image(c), w, h, st, link));
+                                b.raw.push(Raw::Atomic(Atom::Image(c), w, h, h, 0.0, st, link));
                             } else if let Some(alt) = e.attr("alt").filter(|a| !a.trim().is_empty()) {
                                 b.raw.push(Raw::Text(alt.to_string(), st, link, bg));
                             }
                         }
-                        "input" | "button" | "select" | "textarea" => {
-                            let kind = match name {
-                                "button" => ControlKind::Button,
-                                "select" => ControlKind::Select,
-                                "textarea" => ControlKind::TextArea,
-                                _ => match e.attr("type").unwrap_or("text").to_ascii_lowercase().as_str() {
-                                    "hidden" => continue,
-                                    "submit" | "reset" => ControlKind::Submit,
-                                    "button" => ControlKind::Button,
-                                    "checkbox" => ControlKind::Checkbox,
-                                    "radio" => ControlKind::Radio,
-                                    "password" => ControlKind::Password,
-                                    "image" => ControlKind::Image,
-                                    _ => ControlKind::Text,
-                                },
+                        "svg" => {
+                            let (w, h) = self.svg_size(c, &st);
+                            let edge = |i: usize| st.margin[i].px(0.0);
+                            let wm = w + edge(style::LEFT) + edge(style::RIGHT);
+                            b.raw.push(Raw::Atomic(Atom::Svg(c), wm, h, h, 0.0, st, link));
+                        }
+                        "input" | "select" | "textarea" => {
+                            let Some((atom, cw, ch)) = self.atom(c, name, &st) else { continue };
+                            let edge = |i: usize| st.padding[i].px(0.0) + st.border(i);
+                            let (pw, ph) = (edge(style::LEFT) + edge(style::RIGHT), edge(style::TOP) + edge(style::BOTTOM));
+                            let size = |l: Len, content: f32, pad: f32| match l {
+                                Len::Px(v) if st.border_box => v,
+                                Len::Px(v) => v + pad,
+                                _ => content + pad,
                             };
-                            let (w, h) = self.control_size(c, kind, &st);
-                            b.raw.push(Raw::Atomic(Atom::Control(c, kind), w, h, st, link));
+                            let (w, h) = (size(st.width, cw, pw), size(st.height, ch, ph));
+                            let pct = if let Len::Pct(p) = st.width { p } else { 0.0 };
+                            let base = h - edge(style::BOTTOM) - 4.0;
+                            b.raw.push(Raw::Atomic(atom, w, h, base, pct, st, link));
                         }
                         "video" | "iframe" => {}
                         _ if matches!(st.display, D::InlineBlock | D::InlineFlex | D::InlineGrid) => {
@@ -910,8 +1013,10 @@ impl Builder<'_> {
                             let h = self.tree.layout(sub).map(|l| l.size.height).unwrap_or(h);
                             let m = |l: Len| l.px(0.0);
                             let w = w + m(st.margin[style::LEFT]) + m(st.margin[style::RIGHT]);
+                            let base = self.first_baseline(sub).map_or(h, |v| v) + m(st.margin[style::TOP]);
                             let h = h + m(st.margin[style::TOP]) + m(st.margin[style::BOTTOM]);
-                            b.raw.push(Raw::Atomic(Atom::Subtree(sub), w, h, st, link));
+                            let base = base.min(h);
+                            b.raw.push(Raw::Atomic(Atom::Subtree(sub), w, h, base, 0.0, st, link));
                         }
                         _ => {
                             let bg = if st.background >> 24 != 0 { st.background } else { bg };
@@ -929,6 +1034,74 @@ impl Builder<'_> {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// The first line's baseline, below the top of `n`.
+    fn first_baseline(&mut self, n: NodeId) -> Option<f32> {
+        let l = *self.tree.layout(n).ok()?;
+        if let Some(Leaf::Ifc(i)) = self.tree.get_node_context(n).cloned() {
+            let cw = (l.size.width - l.padding.left - l.padding.right - l.border.left - l.border.right).max(0.0);
+            let lines = ifc_layout(&mut self.ifcs[i], cw, self.fonts);
+            return lines.frags.first().map(|f| f.baseline + l.padding.top + l.border.top);
+        }
+        for k in self.tree.children(n).ok()? {
+            if self.tree.style(k).is_ok_and(|s| s.position == Position::Absolute) {
+                continue;
+            }
+            if let Some(b) = self.first_baseline(k) {
+                return Some(b + self.tree.layout(k).ok()?.location.y);
+            }
+        }
+        None
+    }
+
+    /// A replaced element and its content size; None for what shows nothing.
+    fn atom(&mut self, id: DomId, name: &str, st: &Style) -> Option<(Atom, f32, f32)> {
+        let e = self.dom.element(id).unwrap();
+        match name {
+            "img" => {
+                let (w, h) = self.image_size(id, st);
+                (w > 0.0 && h > 0.0).then_some((Atom::Image(id), w, h))
+            }
+            "svg" => {
+                let (w, h) = crate::svg::natural_size(self.dom, id);
+                Some((Atom::Svg(id), w, h))
+            }
+            "input" | "select" | "textarea" => {
+                let kind = match name {
+                    "select" => ControlKind::Select,
+                    "textarea" => ControlKind::TextArea,
+                    _ => match e.attr("type").unwrap_or("text").to_ascii_lowercase().as_str() {
+                        "hidden" => return None,
+                        "submit" | "reset" => ControlKind::Submit,
+                        "button" => ControlKind::Button,
+                        "checkbox" => ControlKind::Checkbox,
+                        "radio" => ControlKind::Radio,
+                        "password" => ControlKind::Password,
+                        "image" => ControlKind::Image,
+                        _ => ControlKind::Text,
+                    },
+                };
+                let (w, h) = self.control_size(id, kind, st);
+                Some((Atom::Control(id, kind), w, h))
+            }
+            _ => None,
+        }
+    }
+
+    fn svg_size(&self, id: DomId, st: &Style) -> (f32, f32) {
+        let (nw, nh) = crate::svg::natural_size(self.dom, id);
+        let ratio = if nh > 0.0 { nw / nh } else { 1.0 };
+        match (st.width, st.height) {
+            (Len::Px(w), Len::Px(h)) => (w, h),
+            (Len::Px(w), _) => (w, w / ratio),
+            (_, Len::Px(h)) => (h * ratio, h),
+            (Len::Pct(p), _) => {
+                let w = self.viewport.min(nw) * p / 100.0;
+                (w, w / ratio)
+            }
+            _ => (nw, nh),
         }
     }
 
@@ -962,10 +1135,9 @@ impl Builder<'_> {
         let e = self.dom.element(id).unwrap();
         let f = font_of(st);
         let (a, d) = self.fonts.metrics(f);
-        let h = a + d + 8.0;
+        let h = a + d + 2.0;
         let label = |s: &mut Self| -> String {
             match kind {
-                ControlKind::Button => s.dom.text_content(id).trim().to_string(),
                 ControlKind::Select => {
                     let opts: Vec<DomId> = s.dom.descendants(id).filter(|&n| s.dom.element(n).is_some_and(|e| e.is("option"))).collect();
                     let sel = opts.iter().copied().find(|&o| s.dom.element(o).unwrap().attr("selected").is_some()).or(opts.first().copied());
@@ -976,17 +1148,16 @@ impl Builder<'_> {
                 _ => e.attr("value").map(String::from).unwrap_or_else(|| if kind == ControlKind::Submit { "Submit".into() } else { String::new() }),
             }
         };
-        let px = |l: Len| if let Len::Px(v) = l { Some(v) } else { None };
-        let (w, h) = match kind {
+        match kind {
             ControlKind::Checkbox | ControlKind::Radio => (13.0, 13.0),
             ControlKind::Text | ControlKind::Password => {
                 let size: f32 = e.attr("size").and_then(|s| s.parse().ok()).unwrap_or(20.0);
-                (self.fonts.width(f, "n") * size + 8.0, h)
+                (self.fonts.width(f, "n") * size, h)
             }
             ControlKind::TextArea => {
                 let cols: f32 = e.attr("cols").and_then(|s| s.parse().ok()).unwrap_or(20.0);
                 let rows: f32 = e.attr("rows").and_then(|s| s.parse().ok()).unwrap_or(2.0);
-                (self.fonts.width(f, "n") * cols + 8.0, (a + d) * rows + 8.0)
+                (self.fonts.width(f, "n") * cols, (a + d) * rows)
             }
             ControlKind::Image => (32.0, 32.0),
             ControlKind::Select => {
@@ -995,10 +1166,9 @@ impl Builder<'_> {
             }
             _ => {
                 let t = label(self);
-                (self.fonts.width(f, &t) + 16.0, h)
+                (self.fonts.width(f, &t), h)
             }
-        };
-        (px(st.width).unwrap_or(w), px(st.height).unwrap_or(h))
+        }
     }
 
     /// A table as a grid: a track per column, cells placed by row.
@@ -1006,25 +1176,23 @@ impl Builder<'_> {
         let dom = self.dom;
         let mut rows: Vec<DomId> = Vec::new();
         let mut caption = None;
-        let mut collect = |n: DomId, rows: &mut Vec<DomId>| {
-            for &c in &dom.nodes[n].children {
-                if let Some(e) = dom.element(c) {
-                    match &*e.name.local {
-                        "tr" => rows.push(c),
-                        "thead" | "tbody" | "tfoot" => {
-                            for &r in &dom.nodes[c].children {
-                                if dom.element(r).is_some_and(|e| e.is("tr")) {
-                                    rows.push(r);
-                                }
-                            }
-                        }
-                        "caption" => caption = Some(c),
-                        _ => {}
-                    }
-                }
+        let mut loose = false;
+        for &c in &dom.nodes[id].children {
+            if dom.element(c).is_none() {
+                continue;
             }
-        };
-        collect(id, &mut rows);
+            match self.style(c).display {
+                D::TableRow => rows.push(c),
+                D::TableRowGroup => rows.extend(dom.nodes[c].children.iter().copied().filter(|&r| self.style(r).display == D::TableRow && dom.element(r).is_some())),
+                D::TableCaption => caption = Some(c),
+                D::TableCell => loose = true,
+                _ => {}
+            }
+        }
+        // Cells straight in the table are a row of their own.
+        if loose {
+            rows.insert(0, id);
+        }
         let mut kids = Vec::new();
         let mut ncols = 1u16;
         let mut row_index = 1i16;
@@ -1037,17 +1205,18 @@ impl Builder<'_> {
             if rst.display == D::None {
                 continue;
             }
+            let row_bg = if r == id { TRANSPARENT } else { rst.background };
             let mut col = 1u16;
             for &c in &dom.nodes[r].children {
                 let Some(e) = dom.element(c) else { continue };
-                if !(e.is("td") || e.is("th")) || self.style(c).display == D::None {
+                if self.style(c).display != D::TableCell {
                     continue;
                 }
                 let span: u16 = e.attr("colspan").and_then(|s| s.trim().parse().ok()).unwrap_or(1u16).clamp(1, 64);
                 let n = self.block(c);
-                if rst.background >> 24 != 0 {
+                if row_bg >> 24 != 0 {
                     if let Some(i) = self.info.get_mut(&n) {
-                        i.bg_override = rst.background;
+                        i.bg_override = row_bg;
                     }
                 }
                 kids.push((n, row_index, col, span));
@@ -1072,10 +1241,10 @@ impl Builder<'_> {
         }
         t.display = Display::Grid;
         t.grid_template_columns = (0..ncols).map(|_| GridTemplateComponent::Single(style_helpers::auto())).collect();
-        t.gap = Size { width: LengthPercentage::length(2.0), height: LengthPercentage::length(2.0) };
-        t.justify_content = JustifyContent::START;
+        let gap = if st.border_collapse { 0.0 } else { st.border_spacing };
+        t.gap = Size { width: LengthPercentage::length(gap), height: LengthPercentage::length(gap) };
+        t.justify_content = if st.width == Len::Auto { JustifyContent::START } else { JustifyContent::STRETCH };
         t.align_items = AlignItems::STRETCH;
-        let _ = st;
         self.tree.new_with_children(t, &nodes).unwrap()
     }
 }
@@ -1102,6 +1271,7 @@ fn measure<'a>(
                 }
                 Size { width: w, height: known.height.unwrap_or(h) }
             }
+            Some(Leaf::Atom(_, w, h)) => Size { width: known.width.unwrap_or(*w), height: known.height.unwrap_or(*h) },
             None => Size { width: known.width.unwrap_or(0.0), height: known.height.unwrap_or(0.0) },
         })
     }
@@ -1183,7 +1353,8 @@ pub fn layout(dom: &Dom, styles: &Styles, base: &Url, width: f32, fonts: &mut dy
     } else {
         bodys.as_ref().map(|s| s.background).filter(|c| c >> 24 != 0).unwrap_or(0xffff_ffff)
     };
-    let mut p = Painter { b: &mut b, laid: &mut laid, skip_bg: [Some(html), if hs.background >> 24 != 0 { None } else { body }] };
+    let page_bg = laid.background;
+    let mut p = Painter { bg: page_bg, b: &mut b, laid: &mut laid, skip_bg: [Some(html), if hs.background >> 24 != 0 { None } else { body }] };
     p.paint(root, 0.0, 0.0, 0);
     let rl = b.tree.layout(root).unwrap();
     laid.height = laid.height.max(rl.size.height);
@@ -1223,6 +1394,8 @@ struct Painter<'a, 'b> {
     b: &'a mut Builder<'b>,
     laid: &'a mut Laid,
     skip_bg: [Option<DomId>; 2],
+    /// The colour behind what is being painted.
+    bg: Color,
 }
 
 fn blend(c: Color) -> Option<Color> {
@@ -1241,6 +1414,7 @@ impl Painter<'_, '_> {
         self.laid.height = self.laid.height.max(y + h);
         let info = self.b.info.get(&n).map(|i| (i.node, i.style.clone(), i.bg_override));
         let mut clip = false;
+        let outer_bg = self.bg;
         if let Some((node, st, bgo)) = &info {
             if st.display == D::None || st.invisible {
                 return;
@@ -1257,22 +1431,35 @@ impl Painter<'_, '_> {
             if visible {
                 let skip = node.is_some() && self.skip_bg.contains(node);
                 let bg = blend(st.background).or(blend(*bgo));
+                let rect = Rect { x, y, w, h };
+                let radii = st.radii(w, h);
+                let round = radii.iter().any(|&v| v >= 1.0);
                 if let (Some(c), false) = (bg, skip) {
-                    self.laid.items.push(Item::Fill { r: Rect { x, y, w, h }, color: c });
+                    if c >> 24 >= 200 {
+                        self.bg = c;
+                    }
+                    self.laid.items.push(if round { Item::RoundRect { r: rect, color: c, radii, ring: 0.0 } } else { Item::Fill { r: rect, color: c } });
                 }
-                // Borders as four rectangles.
+                // Borders as four rectangles, or one ring if alike.
                 let bw = [st.border(style::TOP), st.border(style::RIGHT), st.border(style::BOTTOM), st.border(style::LEFT)];
                 if bw.iter().any(|&v| v > 0.0) {
-                    let rects = [
-                        Rect { x, y, w, h: bw[0] },
-                        Rect { x: x + w - bw[1], y, w: bw[1], h },
-                        Rect { x, y: y + h - bw[2], w, h: bw[2] },
-                        Rect { x, y, w: bw[3], h },
-                    ];
-                    for (i, r) in rects.iter().enumerate() {
-                        if bw[i] > 0.0 {
-                            if let Some(c) = blend(st.border_color(i)) {
-                                self.laid.items.push(Item::Fill { r: *r, color: c });
+                    let colors = [st.border_color(0), st.border_color(1), st.border_color(2), st.border_color(3)];
+                    if round && bw.iter().all(|&v| v == bw[0]) && colors.iter().all(|&c| c == colors[0]) {
+                        if let Some(c) = blend(colors[0]) {
+                            self.laid.items.push(Item::RoundRect { r: rect, color: c, radii, ring: bw[0] });
+                        }
+                    } else {
+                        let rects = [
+                            Rect { x, y, w, h: bw[0] },
+                            Rect { x: x + w - bw[1], y, w: bw[1], h },
+                            Rect { x, y: y + h - bw[2], w, h: bw[2] },
+                            Rect { x, y, w: bw[3], h },
+                        ];
+                        for (i, r) in rects.iter().enumerate() {
+                            if bw[i] > 0.0 {
+                                if let Some(c) = blend(colors[i]) {
+                                    self.laid.items.push(Item::Fill { r: *r, color: c });
+                                }
                             }
                         }
                     }
@@ -1292,6 +1479,25 @@ impl Painter<'_, '_> {
             let cw = (w - l.padding.left - l.padding.right - l.border.left - l.border.right).max(0.0);
             self.inline(i, cx, cy, cw, depth);
         }
+        if let Some(Leaf::Atom(atom, ..)) = self.b.tree.get_node_context(n).cloned() {
+            if let Some((_, st, _)) = &info {
+                let inner = Rect {
+                    x: x + l.padding.left + l.border.left,
+                    y: y + l.padding.top + l.border.top,
+                    w: (w - l.padding.left - l.padding.right - l.border.left - l.border.right).max(0.0),
+                    h: (h - l.padding.top - l.padding.bottom - l.border.top - l.border.bottom).max(0.0),
+                };
+                if !st.hidden {
+                    let boxr = Rect { x, y, w, h };
+                    self.atom(&atom, if matches!(atom, Atom::Control(..)) { boxr } else { inner }, st, l.padding.left + l.border.left);
+                }
+            }
+        }
+        if let Some((Some(id), st, _)) = &info {
+            if self.b.dom.element(*id).is_some_and(|e| e.is("button")) && !st.hidden {
+                self.laid.items.push(Item::Control { r: Rect { x, y, w, h }, node: *id, kind: ControlKind::ButtonBox, font: font_of(st), color: st.color, pad: 0.0 });
+            }
+        }
         let kids: Vec<NodeId> = self.b.tree.children(n).unwrap_or_default();
         for k in kids {
             self.paint(k, x, y, depth + 1);
@@ -1299,11 +1505,36 @@ impl Painter<'_, '_> {
         if clip {
             self.laid.items.push(Item::PopClip);
         }
+        self.bg = outer_bg;
+    }
+
+    /// Paint a replaced element in `r`; `pad` is a control's left padding.
+    fn atom(&mut self, atom: &Atom, r: Rect, st: &Style, pad: f32) {
+        match atom {
+            Atom::Image(node) => self.laid.items.push(Item::Image { r, node: *node }),
+            Atom::Svg(node) => self.laid.items.push(Item::Svg { r, node: *node, bg: self.bg }),
+            Atom::Control(node, kind) => self.laid.items.push(Item::Control { r, node: *node, kind: *kind, font: font_of(st), color: st.color, pad }),
+            Atom::Subtree(_) => {}
+        }
+    }
+
+    /// An inline control's box (block-level ones are boxes of their own).
+    fn control_box(&mut self, r: Rect, st: &Style) {
+        let radii = st.radii(r.w, r.h);
+        let round = radii.iter().any(|&v| v >= 1.0);
+        if let Some(c) = blend(st.background) {
+            self.laid.items.push(if round { Item::RoundRect { r, color: c, radii, ring: 0.0 } } else { Item::Fill { r, color: c } });
+        }
+        let bw = st.border(style::TOP).max(st.border(style::LEFT));
+        if let (true, Some(c)) = (bw > 0.0, blend(st.border_color(style::TOP))) {
+            self.laid.items.push(Item::RoundRect { r, color: c, radii, ring: bw });
+        }
     }
 
     fn inline(&mut self, i: usize, cx: f32, cy: f32, cw: f32, depth: u32) {
         let lines = ifc_layout(&mut self.b.ifcs[i], cw, self.b.fonts).clone();
         let pieces = self.b.ifcs[i].pieces.clone();
+        let strut_d = self.b.ifcs[i].strut.2;
         for f in &lines.frags {
             let p = &pieces[f.piece];
             if p.style.hidden {
@@ -1336,12 +1567,30 @@ impl Painter<'_, '_> {
                         self.laid.items.push(Item::Text { x: fx, y: cy + f.baseline, w: f.w, text: f.text.clone(), font: p.font, color: p.style.color, decoration: 0 });
                     }
                 }
-                Kind::Atomic(atom, w, h) => {
-                    let top = if p.style.vertical_align == 1 { cy + f.top + (f.line_h - h) / 2.0 } else { cy + f.baseline - h };
-                    let r = Rect { x: fx, y: top, w: *w, h: *h };
+                Kind::Atomic(atom, w, h, base, pct) => {
+                    if p.style.invisible {
+                        continue;
+                    }
+                    let top = match p.style.vertical_align {
+                        1 => cy + f.top + (f.line_h - h) / 2.0,
+                        2 => cy + f.top,
+                        3 => cy + f.baseline + strut_d - h,
+                        _ => cy + f.baseline - base,
+                    };
+                    let w = if *pct > 0.0 { f.w } else { *w };
+                    let r = Rect { x: fx, y: top, w, h: *h };
+                    let st = p.style.clone();
                     match atom {
-                        Atom::Image(node) => self.laid.items.push(Item::Image { r, node: *node }),
-                        Atom::Control(node, kind) => self.laid.items.push(Item::Control { r, node: *node, kind: *kind, font: p.font }),
+                        Atom::Control(..) => {
+                            self.control_box(r, &st);
+                            self.atom(atom, r, &st, st.padding[style::LEFT].px(0.0) + st.border(style::LEFT));
+                        }
+                        Atom::Svg(_) => {
+                            let ml = st.margin[style::LEFT].px(0.0);
+                            let mr = st.margin[style::RIGHT].px(0.0);
+                            self.atom(atom, Rect { x: r.x + ml, w: r.w - ml - mr, ..r }, &st, 0.0);
+                        }
+                        Atom::Image(_) => self.atom(atom, r, &st, 0.0),
                         Atom::Subtree(sub) => {
                             let ml = p.style.margin[style::LEFT].px(0.0);
                             let mt = p.style.margin[style::TOP].px(0.0);

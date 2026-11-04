@@ -17,6 +17,7 @@ pub mod layout;
 pub mod css;
 pub mod select;
 pub mod style;
+pub mod svg;
 pub mod text;
 
 pub use url::Url;

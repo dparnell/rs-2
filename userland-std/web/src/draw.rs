@@ -313,6 +313,12 @@ impl Painter<'_> {
                         self.fill(*x, y - fs * 0.9, *w, lw, c);
                     }
                 }
+                Item::RoundRect { r, color, radii, ring } => {
+                    if r.y < bottom && r.y + r.h > top {
+                        let c = rgb(*color, bg);
+                        webcore::layout::round_spans(*r, *radii, *ring, |x, y, w, h| self.fill(x, y, w, h, c));
+                    }
+                }
                 Item::Marker { r, kind, color } => {
                     if r.y < bottom && r.y + r.h > top {
                         let c = rgb(*color, bg);
@@ -323,7 +329,7 @@ impl Painter<'_> {
                         }
                     }
                 }
-                Item::Image { r, node } => {
+                Item::Image { r, node } | Item::Svg { r, node, .. } => {
                     if r.y >= bottom || r.y + r.h <= top {
                         continue;
                     }
@@ -337,15 +343,16 @@ impl Painter<'_> {
                                 GpiDrawBits(self.hps, b.bits.as_ptr(), &bih as *const BitmapInfoHeader2 as *const u8, 4, p.as_ptr(), ROP_SRCCOPY, BBO_IGNORE);
                             }
                         }
-                        None => self.frame(r.x, r.y, r.w, r.h, 0xc0c0c0, 0x808080),
+                        None if matches!(it, Item::Image { .. }) => self.frame(r.x, r.y, r.w, r.h, 0xc0c0c0, 0x808080),
+                        None => {}
                     }
                 }
-                Item::Control { r, node, kind, font } => {
+                Item::Control { r, node, kind, font, color, pad } => {
                     if r.y >= bottom || r.y + r.h <= top {
                         continue;
                     }
                     let st = controls.get(node).cloned().unwrap_or_default();
-                    self.control(r.x, r.y, r.w, r.h, *kind, *font, &st, *node, dom);
+                    self.control(r.x, r.y, r.w, r.h, *kind, *font, &st, *node, dom, rgb(*color, bg), *pad);
                 }
             }
         }
@@ -360,17 +367,22 @@ impl Painter<'_> {
         }
     }
 
+    /// A control's content; its box comes from CSS and is painted already.
     #[allow(clippy::too_many_arguments)]
-    fn control(&mut self, x: f32, y: f32, w: f32, h: f32, kind: ControlKind, font: FontKey, st: &ControlState, node: usize, dom: &webcore::dom::Dom) {
+    fn control(&mut self, x: f32, y: f32, w: f32, h: f32, kind: ControlKind, font: FontKey, st: &ControlState, node: usize, dom: &webcore::dom::Dom, color: i32, pad: f32) {
         let (a, d) = self.fonts.metrics(font);
         let base = y + (h + a - d) / 2.0;
         match kind {
             ControlKind::Text | ControlKind::Password | ControlKind::TextArea => {
-                self.fill(x, y, w, h, 0xffffff);
-                self.frame(x, y, w, h, 0xe0e0e0, 0x707070);
-                let shown = if kind == ControlKind::Password { "*".repeat(st.value.chars().count()) } else { st.value.clone() };
-                let ty = if kind == ControlKind::TextArea { y + 4.0 + a } else { base };
-                self.text(x + 4.0, ty, &shown, font, 0);
+                let ty = if kind == ControlKind::TextArea { y + pad + a } else { base };
+                if st.value.is_empty() {
+                    if let Some(p) = dom.element(node).and_then(|e| e.attr("placeholder")) {
+                        self.text(x + pad, ty, p, font, 0x808080);
+                    }
+                } else {
+                    let shown = if kind == ControlKind::Password { "*".repeat(st.value.chars().count()) } else { st.value.clone() };
+                    self.text(x + pad, ty, &shown, font, color);
+                }
             }
             ControlKind::Checkbox | ControlKind::Radio => {
                 self.fill(x, y, w, h, 0xffffff);
@@ -380,27 +392,19 @@ impl Painter<'_> {
                 }
             }
             ControlKind::Select => {
-                self.fill(x, y, w, h, 0xffffff);
-                self.frame(x, y, w, h, 0xe0e0e0, 0x707070);
                 self.fill(x + w - 18.0, y + 1.0, 17.0, h - 2.0, 0xd8d8d8);
                 // A small down arrow.
                 for i in 0..4 {
                     let f = i as f32;
                     self.fill(x + w - 13.0 + f, y + h / 2.0 - 2.0 + f, 8.0 - 2.0 * f, 1.0, 0x202020);
                 }
-                self.text(x + 4.0, base, &st.value, font, 0);
+                self.text(x + pad, base, &st.value, font, color);
             }
             ControlKind::Submit | ControlKind::Button | ControlKind::Image => {
-                self.fill(x, y, w, h, 0xdcdcdc);
-                self.frame(x, y, w, h, 0x606060, 0xffffff);
-                let label = if kind == ControlKind::Button && dom.element(node).is_some_and(|e| e.is("button")) {
-                    dom.text_content(node).split_whitespace().collect::<Vec<_>>().join(" ")
-                } else {
-                    st.value.clone()
-                };
-                let tw = self.fonts.width(font, &label);
-                self.text(x + (w - tw) / 2.0, base, &label, font, 0);
+                let tw = self.fonts.width(font, &st.value);
+                self.text(x + (w - tw) / 2.0, base, &st.value, font, color);
             }
+            ControlKind::ButtonBox => {}
         }
     }
 }

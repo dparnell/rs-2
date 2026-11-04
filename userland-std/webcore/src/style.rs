@@ -118,6 +118,14 @@ pub enum ListStyle {
     UpperRoman,
 }
 
+/// An SVG fill or stroke.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Paint {
+    None,
+    Color(Color),
+    Current,
+}
+
 /// A grid track size.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Track {
@@ -190,6 +198,19 @@ pub struct Style {
     pub grid_row_lines: (i16, i16),
     pub grid_col_lines: (i16, i16),
     pub vars: Arc<Vars>,
+    /// A child of a flex or grid container (they are blocks).
+    pub in_flex: bool,
+    /// Corners: top left, top right, bottom right, bottom left.
+    pub border_radius: [Len; 4],
+    pub border_spacing: f32,
+    pub border_collapse: bool,
+    pub align_content: u8,
+    pub justify_self: u8,
+    pub aspect_ratio: Option<f32>,
+    pub fill: Paint,
+    pub stroke: Paint,
+    pub stroke_width: f32,
+    pub fill_evenodd: bool,
 }
 
 /// Custom properties: what an element declares, then its ancestors'.
@@ -275,6 +296,17 @@ impl Default for Style {
             grid_row_lines: (0, 0),
             grid_col_lines: (0, 0),
             vars: Arc::default(),
+            in_flex: false,
+            border_radius: [Len::Px(0.0); 4],
+            border_spacing: 2.0,
+            border_collapse: false,
+            align_content: 0,
+            justify_self: 0,
+            aspect_ratio: None,
+            fill: Paint::Color(BLACK),
+            stroke: Paint::None,
+            stroke_width: 1.0,
+            fill_evenodd: false,
         }
     }
 }
@@ -297,6 +329,12 @@ impl Style {
             list_style: self.list_style,
             hidden: self.hidden,
             vars: self.vars.clone(),
+            border_spacing: self.border_spacing,
+            border_collapse: self.border_collapse,
+            fill: self.fill,
+            stroke: self.stroke,
+            stroke_width: self.stroke_width,
+            fill_evenodd: self.fill_evenodd,
             ..Style::default()
         }
     }
@@ -307,6 +345,16 @@ impl Style {
 
     pub fn border_color(&self, side: usize) -> Color {
         self.border_color[side].unwrap_or(self.color)
+    }
+
+    /// The corners' radii for a box of this size, scaled down to fit.
+    pub fn radii(&self, w: f32, h: f32) -> [f32; 4] {
+        let mut r = [0.0; 4];
+        for (i, c) in self.border_radius.iter().enumerate() {
+            r[i] = c.px(w.min(h));
+        }
+        let over = [(r[0] + r[1]) / w, (r[2] + r[3]) / w, (r[0] + r[3]) / h, (r[1] + r[2]) / h].into_iter().fold(1.0f32, f32::max);
+        r.map(|v| v / over)
     }
 
     pub fn line_height_px(&self) -> f32 {
@@ -324,7 +372,7 @@ noframes, ol, p, ul, center, dir, hr, menu, pre, header, footer, nav, article, s
 figcaption, details, summary, legend, hgroup, search, optgroup, address, dialog, noscript { display: block }
 li { display: list-item }
 head, script, style, link, meta, title, template, datalist, area, base, param, [hidden], option, map, track,
-source, audio:not([controls]), embed, object, iframe, svg, canvas, noembed, colgroup, col { display: none }
+source, audio:not([controls]), embed, object, iframe, canvas, noembed, colgroup, col { display: none }
 dialog:not([open]), [popover], details:not([open]) > :not(summary) { display: none }
 table { display: table; border-collapse: separate }
 tr { display: table-row }
@@ -366,6 +414,9 @@ th { text-align: center }
 mark { background-color: yellow }
 img, input, button, select, textarea, video { display: inline-block }
 input, button, select, textarea { font-family: sans-serif; font-size: 13px }
+input, select, textarea { border: 1px solid #767676; background-color: #fff; padding: 2px 3px }
+button, input[type=submit], input[type=button], input[type=reset] { border: 2px outset #a0a0a0; background-color: #dcdcdc; padding: 1px 6px; text-align: center }
+input[type=checkbox], input[type=radio] { border: 0; padding: 0; background: none }
 fieldset { margin: 0 2px; padding: .35em .75em .625em; border: 2px groove #c0c0c0 }
 legend { padding: 0 2px }
 nobr { white-space: nowrap }
@@ -450,7 +501,7 @@ fn element_style(
         if v.ends_with('%') { v.to_string() } else { format!("{}px", v.trim_end_matches("px")) }
     };
     match &*e.name.local {
-        "img" | "table" | "td" | "th" | "iframe" | "video" | "canvas" | "hr" | "col" => {
+        "img" | "table" | "td" | "th" | "iframe" | "video" | "canvas" | "hr" | "col" | "svg" => {
             if let Some(w) = e.attr("width") {
                 hint("width", dim(w));
             }
@@ -459,6 +510,13 @@ fn element_style(
             }
         }
         _ => {}
+    }
+    if &*e.name.ns == "http://www.w3.org/2000/svg" {
+        for n in ["fill", "stroke", "stroke-width", "fill-rule", "display", "color"] {
+            if let Some(v) = e.attr(n) {
+                hint(n, v.to_string());
+            }
+        }
     }
     if let Some(c) = e.attr("bgcolor") {
         hint("background-color", c.to_string());
@@ -504,8 +562,8 @@ fn element_style(
                 hint("border", format!("{w}px outset #808080"));
             }
         }
-        if let Some(c) = e.attr("cellpadding") {
-            let _ = c;
+        if let Some(c) = e.attr("cellspacing") {
+            hint("border-spacing", dim(c));
         }
     }
     if matches!(&*e.name.local, "td" | "th") {
@@ -585,8 +643,10 @@ fn element_style(
         let t = css::tokens(&v);
         apply(&mut s, &d.name, &t, &cx);
     }
-    // Blockification: floated and absolutely positioned boxes are blocks.
-    if s.float != Float::None || matches!(s.position, Position::Absolute | Position::Fixed) {
+    // Blockification: floated and absolutely positioned boxes are blocks,
+    // and so are the children of flex and grid containers.
+    s.in_flex = matches!(parent.display, Display::Flex | Display::InlineFlex | Display::Grid | Display::InlineGrid) || parent.display == Display::Contents && parent.in_flex;
+    if s.in_flex || s.float != Float::None || matches!(s.position, Position::Absolute | Position::Fixed) {
         s.display = match s.display {
             Display::Inline | Display::InlineBlock | Display::TableCell | Display::TableRow => Display::Block,
             Display::InlineFlex => Display::Flex,
@@ -1082,7 +1142,9 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
             }
         }
         "background" => {
-            // The colour is the last layer's.
+            // The shorthand resets what it does not name. The colour is the last layer's.
+            s.background = TRANSPARENT;
+            s.background_image = None;
             let last = t.rsplit(|x| *x == Tok::Comma).next().unwrap_or(t);
             for x in last {
                 if let Some(c) = css::parse_color(std::slice::from_ref(x), s.color) {
@@ -1226,7 +1288,62 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
         "max-height" => s.max_height = if matches!(first, Tok::Ident(k) if k == "none") { Len::Auto } else { len(first).unwrap_or(s.max_height) },
         "inline-size" => s.width = len(first).unwrap_or(s.width),
         "block-size" => s.height = len(first).unwrap_or(s.height),
-        "max-inline-size" => s.max_width = len(first).unwrap_or(s.max_width),
+        "min-inline-size" => s.min_width = len(first).unwrap_or(s.min_width),
+        "min-block-size" => s.min_height = len(first).unwrap_or(s.min_height),
+        "max-inline-size" => s.max_width = if matches!(first, Tok::Ident(k) if k == "none") { Len::Auto } else { len(first).unwrap_or(s.max_width) },
+        "max-block-size" => s.max_height = if matches!(first, Tok::Ident(k) if k == "none") { Len::Auto } else { len(first).unwrap_or(s.max_height) },
+        "aspect-ratio" => {
+            let v: Vec<f32> = t.iter().filter_map(|x| if let Tok::Num(n) = x { Some(*n) } else { None }).collect();
+            s.aspect_ratio = match v[..] {
+                [a] if a > 0.0 => Some(a),
+                [a, b] if b > 0.0 => Some(a / b),
+                _ => None,
+            };
+        }
+        "border-radius" => {
+            let first_half = t.split(|x| *x == Tok::Slash).next().unwrap_or(t);
+            let v: Vec<Len> = first_half.iter().filter_map(|x| len(x)).collect();
+            s.border_radius = match v[..] {
+                [a] => [a; 4],
+                [a, b] => [a, b, a, b],
+                [a, b, c] => [a, b, c, b],
+                [a, b, c, d] => [a, b, c, d],
+                _ => return,
+            };
+        }
+        "border-top-left-radius" | "border-start-start-radius" => s.border_radius[0] = len(first).unwrap_or(s.border_radius[0]),
+        "border-top-right-radius" | "border-start-end-radius" => s.border_radius[1] = len(first).unwrap_or(s.border_radius[1]),
+        "border-bottom-right-radius" | "border-end-end-radius" => s.border_radius[2] = len(first).unwrap_or(s.border_radius[2]),
+        "border-bottom-left-radius" | "border-end-start-radius" => s.border_radius[3] = len(first).unwrap_or(s.border_radius[3]),
+        "border-spacing" => {
+            if let Some(Len::Px(v)) = len(first) {
+                s.border_spacing = v;
+            }
+        }
+        "border-collapse" => s.border_collapse = matches!(first, Tok::Ident(k) if k == "collapse"),
+        "fill" | "stroke" => {
+            let p = match first {
+                Tok::Ident(k) if k == "none" => Paint::None,
+                Tok::Ident(k) if k == "currentcolor" => Paint::Current,
+                // Gradients and patterns are not drawn.
+                Tok::Url(_) => Paint::Color(0xff80_8080),
+                _ => match css::parse_color(t, s.color) {
+                    Some(c) => Paint::Color(c),
+                    None => return,
+                },
+            };
+            if name == "fill" {
+                s.fill = p;
+            } else {
+                s.stroke = p;
+            }
+        }
+        "stroke-width" => {
+            if let Some(Len::Px(v)) = len(first) {
+                s.stroke_width = v;
+            }
+        }
+        "fill-rule" => s.fill_evenodd = matches!(first, Tok::Ident(k) if k == "evenodd"),
         "list-style" | "list-style-type" => {
             for x in t {
                 if let Tok::Ident(k) = x {
@@ -1307,6 +1424,17 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
         "justify-content" => s.justify = align_kw(t),
         "align-items" => s.align_items = align_kw(t),
         "align-self" => s.align_self = align_kw(t),
+        "align-content" => s.align_content = align_kw(t),
+        "justify-self" => s.justify_self = align_kw(t),
+        "place-items" => s.align_items = align_kw(t),
+        "place-self" => {
+            s.align_self = align_kw(t);
+            s.justify_self = align_kw(&t[t.len() - 1..]);
+        }
+        "place-content" => {
+            s.align_content = align_kw(t);
+            s.justify = align_kw(&t[t.len() - 1..]);
+        }
         "order" => {
             if let Tok::Num(n) = first {
                 s.order = *n as i32
@@ -1327,6 +1455,18 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
         "inset" => {
             if let Some(e) = edges(t, cx) {
                 s.inset = e;
+            }
+        }
+        "inset-inline-start" => s.inset[LEFT] = len(first).unwrap_or(Len::Auto),
+        "inset-inline-end" => s.inset[RIGHT] = len(first).unwrap_or(Len::Auto),
+        "inset-block-start" => s.inset[TOP] = len(first).unwrap_or(Len::Auto),
+        "inset-block-end" => s.inset[BOTTOM] = len(first).unwrap_or(Len::Auto),
+        "inset-inline" | "inset-block" => {
+            let v: Vec<Len> = t.iter().filter_map(|x| len(x)).collect();
+            if let Some(&a) = v.first() {
+                let (i, j) = if name == "inset-inline" { (LEFT, RIGHT) } else { (TOP, BOTTOM) };
+                s.inset[i] = a;
+                s.inset[j] = v.get(1).copied().unwrap_or(a);
             }
         }
         "opacity" => {
@@ -1405,6 +1545,15 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
                     s.grid_row_lines = (num(0), num(2));
                     s.grid_col_lines = (num(1), num(3));
                 }
+            }
+        }
+        "grid-column-end" | "grid-row-end" => {
+            let row = name.starts_with("grid-row");
+            match t {
+                [Tok::Num(n)] if row => s.grid_row_lines.1 = *n as i16,
+                [Tok::Num(n)] => s.grid_col_lines.1 = *n as i16,
+                [Tok::Ident(k), Tok::Num(n)] if k == "span" && !row => s.grid_column_span = (*n as u16).clamp(1, 64),
+                _ => {}
             }
         }
         "grid-column" | "grid-column-start" | "grid-row" | "grid-row-start" => {

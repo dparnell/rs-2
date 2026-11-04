@@ -505,6 +505,15 @@ fn relayout(restyle: bool) {
     let laid = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| webcore::layout::layout(&page.dom, &page.styles, &page.url, width, fonts, &a.image_sizes)));
     match laid {
         Ok(l) => {
+            // Inline SVG is drawn at its laid out size, over what is behind it.
+            for it in &l.items {
+                if let Item::Svg { r, node, bg } = it {
+                    let (w, h) = (r.w.round().max(1.0) as u32, r.h.round().max(1.0) as u32);
+                    if a.images.get(node).is_none_or(|b| b.w != w || b.h != h) {
+                        a.images.insert(*node, Bitmap::from_image(&webcore::svg::render(&page.dom, &page.styles, *node, w, h), *bg));
+                    }
+                }
+            }
             a.laid = Some(l);
             a.layout_ms = t0.elapsed().as_millis();
         }
@@ -661,7 +670,7 @@ fn click(mp1: u32) {
                 invalidate(a.view);
             }
             ControlKind::Submit | ControlKind::Image => submit(node),
-            ControlKind::Button => {
+            ControlKind::Button | ControlKind::ButtonBox => {
                 let is_submit = a.page.as_ref().and_then(|p| p.dom.element(node)).is_some_and(|e| e.is("button") && e.attr("type").is_none_or(|t| t.eq_ignore_ascii_case("submit")));
                 if is_submit {
                     submit(node);
