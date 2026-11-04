@@ -213,7 +213,10 @@ fn main() -> ExitCode {
 
     // Objects: gather allocated sections into code, data and shared data
     // (sections named .shared*, one copy for all processes of a DLL).
-    let alloc: Vec<&Section> = elf.sections.iter().filter(|s| s.flags & 2 != 0 && s.size > 0).collect();
+    // .tbss (thread-local, no bits) takes no room in the image: the TLS
+    // template's zero part (userland-std/rs2libc allocates it per thread).
+    let alloc: Vec<&Section> =
+        elf.sections.iter().filter(|s| s.flags & 2 != 0 && s.size > 0 && !(s.flags & 0x400 != 0 && s.ty == 8)).collect();
     let kind = |s: &Section| -> u8 {
         if s.name.starts_with(".shared") {
             2
@@ -303,6 +306,10 @@ fn main() -> ExitCode {
             let cur = u32le(&objects[oi].data, in_obj);
             let sym = &elf.symbols[symi];
             let undefined = sym.shndx == 0 && symi != 0;
+            // An undefined weak symbol is 0 (programs test for it).
+            if undefined && sym.bind == 2 {
+                continue;
+            }
             match ty {
                 1 => {
                     // R_386_32: S + A, already applied for defined symbols.
@@ -327,7 +334,11 @@ fn main() -> ExitCode {
                 // GOT-relative forms produced by position-independent
                 // library code: constants once the image sits at its
                 // linked base, which is where executables are loaded.
-                3 | 9 | 10 => {}
+                3 | 9 | 10 | 43 => {}
+                // Thread-local storage: the linker has relaxed every access
+                // to the local-exec form (offsets from GS's base), which
+                // needs no fixups.
+                14..=19 | 24..=37 | 39..=41 => {}
                 2 | 4 => {
                     // R_386_PC32 / R_386_PLT32: S + A - P.
                     if undefined {

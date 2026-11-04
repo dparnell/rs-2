@@ -1,0 +1,20 @@
+[build]
+target = "i686-unknown-linux-gnu"
+
+[target.i686-unknown-linux-gnu]
+# lld.sh: rust-lld with link.ld and syslib/ (paths from its own directory).
+linker = "./lld.sh"
+rustflags = [
+    "-C", "linker-flavor=ld.lld",
+    "-C", "relocation-model=static",
+    "-C", "link-arg=--emit-relocs",
+    "-C", "link-arg=--unresolved-symbols=ignore-all",
+    "-C", "link-arg=-nostdlib",
+    "-C", "link-arg=--no-pie",
+    "-C", "link-arg=--eh-frame-hdr",
+]
+
+[env]
+# C code (ring) is compiled by clang with rs2libc's headers.
+CC_i686_unknown_linux_gnu = { value = "cc.sh", relative = true }
+AR_i686_unknown_linux_gnu = { value = "ar.sh", relative = true }

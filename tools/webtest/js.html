@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html><head><title>Before scripts</title>
+<style>
+body { font-family: Helvetica, sans-serif; margin: 20px; }
+.ok { color: #060; font-weight: bold; }
+.box { padding: 10px; border: 2px solid #369; background: #def; margin: 8px 0; }
+</style>
+<script src="lib.js"></script>
+</head><body>
+<h1 id="head">Static heading</h1>
+<p id="status">JavaScript did not run.</p>
+<ul id="list"></ul>
+<div id="box" class="box" style="display:none">This box is shown by a script.</div>
+<p>Fibonacci by script: <span id="fib"></span></p>
+<noscript><p>This text is for browsers without JavaScript.</p></noscript>
+<script>
+  document.getElementById('head').textContent = 'Changed by JavaScript (Boa on rs2)';
+  var s = document.getElementById('status');
+  s.innerHTML = 'Scripts ran: <span class="ok">yes</span>, ' + navigator.userAgent;
+  var l = document.getElementById('list');
+  ['One', 'Two', 'Three'].forEach(function (t, i) {
+    var li = document.createElement('li');
+    li.textContent = t + ' (item ' + (i + 1) + ')';
+    l.appendChild(li);
+  });
+  document.title = 'JavaScript test - ' + greeting();
+  document.addEventListener('DOMContentLoaded', function () {
+    document.getElementById('box').style.display = 'block';
+  });
+  function fib(n) { return n < 2 ? n : fib(n - 1) + fib(n - 2); }
+  setTimeout(function () { document.getElementById('fib').textContent = [10, 15, 20].map(fib).join(', '); }, 100);
+  console.log('js.html done');
+</script>
+</body></html>
