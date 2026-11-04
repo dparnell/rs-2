@@ -1,0 +1,12 @@
+[package]
+name = "webshot"
+description = "Host tool: renders a page with webcore to a PNG (fontdue and rs2's Liberation fonts), for working on layout without QEMU"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+webcore = { path = "../webcore" }
+fontdue = "0.9"
+png = "0.18"

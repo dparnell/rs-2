@@ -3,7 +3,8 @@
 //! `URL=`, the URL settings page). Opening it starts the web browser set
 //! up in OS2.INI (`WPURLDEFAULTSETTINGS`: `DefaultBrowserExe`,
 //! `DefaultParameters`, `DefaultWorkingDir`, as IBM's shell keeps it)
-//! with the URL; without one it says so and shows the URL. Its icon is
+//! with the URL; without one, rs2's own browser (OS2\APPS\WEB.EXE on the
+//! boot drive), else it says so and shows the URL. Its icon is
 //! a globe (rs2's own). WPUrlFolder is a folder of them.
 
 use alloc::vec::Vec;
@@ -73,7 +74,14 @@ extern "C" fn url_open(obj: usize, cnr: u32, view: u32, param: u32) -> u32 {
         return som::call_parent(wps::ccd("WPUrl"), wps::cd("WPDataFile"), m::WPObject::wpOpen, &[obj, cnr as usize, view as usize, param as usize]) as u32;
     }
     let url = url_of(obj);
-    let exe = setting(b"DefaultBrowserExe");
+    let mut exe = setting(b"DefaultBrowserExe");
+    if exe.is_empty() {
+        // None set up: rs2's own browser, WebRS2 (userland-std/web).
+        let own = alloc::format!("{}:\\OS2\\APPS\\WEB.EXE", crate::desktop::boot_drive() as char).into_bytes();
+        if crate::util::file_exists(&own) {
+            exe = own;
+        }
+    }
     if exe.is_empty() {
         let mut t = b"No web browser is set up (OS2.INI's WPURLDEFAULTSETTINGS DefaultBrowserExe).\n\nThe URL is:\n".to_vec();
         t.extend_from_slice(&url);

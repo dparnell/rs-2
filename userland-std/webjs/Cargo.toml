@@ -1,0 +1,13 @@
+[package]
+name = "webjs"
+description = "JavaScript for rs2's web browser: Boa with a minimal DOM over webcore's document"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+webcore = { path = "../webcore" }
+boa_engine = { version = "0.22", default-features = false, features = ["annex-b"] }
+html5ever = "0.40"
+cssparser = "0.38"
+selectors = "0.42"

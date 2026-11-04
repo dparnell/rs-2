@@ -1,0 +1,10 @@
+[package]
+name = "webtext"
+description = "WEBTEXT.EXE: rs2's text-mode web browser"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rs2libc = { path = "../rs2libc" }
+webcore = { path = "../webcore" }

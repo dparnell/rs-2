@@ -130,6 +130,27 @@ fn draw(name: &str, size: i32) -> Option<Image> {
             p.polygon(&[(19.0, 12.0), (24.0, 14.0), (26.0, 9.0), (21.0, 6.0)], GREEN, rgb(0x207030));
             p.line((2.5, 16.0), (29.5, 16.0), 0.6, rgb(0xc0d8f0));
         }
+        // WebRS2: a globe in front of a browser window.
+        "WEB" => {
+            p.rect(2.0, 6.0, 30.0, 30.0, WHITE);
+            p.rect(2.0, 25.0, 30.0, 30.0, NAVY);
+            p.frame(2.0, 6.0, 30.0, 30.0, DARK);
+            p.disc(15.0, 13.0, 10.5, rgb(0x3070d0), DARK);
+            p.disc(11.0, 15.0, 4.0, GREEN, GREEN);
+            p.disc(19.0, 9.0, 3.5, GREEN, GREEN);
+            p.line((5.0, 13.0), (25.0, 13.0), 0.7, rgb(0xd0e0f0));
+            p.line((15.0, 3.0), (15.0, 23.0), 0.7, rgb(0xd0e0f0));
+        }
+        // WEBTEXT: the globe on a text screen.
+        "WEBTEXT" => {
+            monitor(&mut p, rgb(0x000000));
+            for i in 0..3 {
+                let y = 22.0 - 4.0 * i as f64;
+                p.rect(6.0, y, 14.0, y + 1.5, rgb(0xc0c0c0));
+            }
+            p.disc(21.0, 18.0, 5.5, rgb(0x3070d0), rgb(0xc0c0c0));
+            p.disc(19.5, 19.5, 2.0, GREEN, GREEN);
+        }
         // Klondike Solitaire: two fanned cards.
         "KLONDIKE" => {
             card(&mut p, 3.0, 8.0, 6, DARK);
@@ -238,7 +259,7 @@ fn draw(name: &str, size: i32) -> Option<Image> {
 /// The names of the programs with an icon here.
 pub const PROGRAMS: &[&str] = &[
     "CLIPOS2", "MPCPUMON", "PMCHKDSK", "PMFORMAT", "PICVIEW", "PMSEEK", "ICONEDIT", "GLOCALE", "KLONDIKE", "MAHJONGG", "OS2CHESS", "MPPM", "WEPM",
-    "CDPM", "MMVOLUME", "STPM", "TCPCFG2", "E", "VIEW", "APPINST", "PMINSTAL", "DISPLAY",
+    "CDPM", "MMVOLUME", "STPM", "TCPCFG2", "E", "VIEW", "APPINST", "PMINSTAL", "DISPLAY", "WEB", "WEBTEXT",
 ];
 
 /// Program `name`'s icon as an OS/2 icon file (32 x 32 and 16 x 16).
