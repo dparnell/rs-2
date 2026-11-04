@@ -31,7 +31,8 @@ pub(super) fn read_block(c: &Ctx, addr: u32, max: usize) -> Option<Vec<String>> 
         if s.is_empty() {
             break;
         }
-        a += s.len() as u32 + 1;
+        // One char per byte (read_str).
+        a += s.chars().count() as u32 + 1;
         v.push(s);
         if v.len() > max {
             break;
@@ -67,11 +68,14 @@ fn exec(c: &mut Ctx) -> u32 {
         crate::trace!("    exec {name}");
     }
     // Arguments: "program\0arguments\0\0" (either part may be missing).
+    // The child gets every string up to the double NUL: kLIBC passes
+    // "\x7fkLIBC\x7f\0" and then one string per argument (each after a
+    // flag byte).
     let (argv0, args) = if pargs == 0 {
         (name.clone(), String::new())
     } else {
         let a0 = c.read_str(pargs, 4096).unwrap_or_default();
-        let rest = c.read_str(pargs + a0.len() as u32 + 1, 4096).unwrap_or_default();
+        let rest = read_block(c, pargs + a0.chars().count() as u32 + 1, 4096).unwrap_or_default().join("\0");
         (a0, rest)
     };
     if super::tracing() {

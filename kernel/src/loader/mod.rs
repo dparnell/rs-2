@@ -70,6 +70,11 @@ impl Target {
     pub fn constant(v: u16) -> Self {
         Target { flat: v as u32, sel: 0, off: v, flat_sel: 0, is16: true }
     }
+
+    /// A 32-bit absolute value (an entry in no object).
+    pub fn absolute(v: u32) -> Self {
+        Target { flat: v, sel: 0, off: v as u16, flat_sel: 0, is16: false }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -187,6 +192,27 @@ impl Module {
             }
             if m == 0 && ordinal == 136 {
                 return Ok(Target::constant(8));
+            }
+            // DOSCALLS' other constants (the "?" imports of kLIBC's
+            // dos-data.imp): DosMaxPathLen (214), DosPageSize (215), the
+            // local (216) and global (217) information segments' tiled
+            // selectors (programs turn them into flat pointers),
+            // DosFlatCS (369) and DOS32TIB (419), the TIB selector.
+            if m == 0 {
+                let v = match ordinal {
+                    214 => Some(260),
+                    215 => Some(crate::vm::PAGE as u16),
+                    // Each thread's own copy (mm::tlm), so that tidCurrent
+                    // is right with threads on several CPUs.
+                    216 => Some(crate::vm::tile_selector(crate::mm::tlm::LIS_BASE)),
+                    217 => Some(crate::vm::tile_selector(crate::infoseg::base())),
+                    369 => Some(crate::arch::gdt::USER_CS),
+                    419 => Some(crate::arch::gdt::TIB_SEL),
+                    _ => None,
+                };
+                if let Some(v) = v {
+                    return Ok(Target::constant(v));
+                }
             }
             let a = gate::slot_address(m, ordinal);
             // Kernel APIs reachable both flat and 16:16.

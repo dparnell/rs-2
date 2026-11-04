@@ -285,6 +285,9 @@ pub struct Ps {
     pub page: Matrix,
     pub page_units: u32,
     pub page_size: (i32, i32),
+    /// Y inversion (GpiEnableYInversion): device y = yinv - y after all
+    /// the other transforms; 0 = off.
+    pub yinv: i32,
     xf: Matrix,
     /// Visible region in surface coordinates.
     vis: Vec<Rect>,
@@ -337,6 +340,7 @@ impl Ps {
             page: Matrix::IDENTITY,
             page_units: xform::PU_PELS,
             page_size: (0, 0),
+            yinv: 0,
             xf: Matrix::IDENTITY,
             clip_region: None,
             clip_path: None,
@@ -614,6 +618,15 @@ impl Ps {
 
     fn update_xf(&mut self) {
         self.xf = self.model.then(&self.viewing).then(&self.view).then(&self.page);
+        if self.yinv != 0 {
+            self.xf = self.xf.then(&Matrix::scale(1.0, -1.0)).then(&Matrix::translate(0.0, self.yinv as f64));
+        }
+    }
+
+    /// GpiEnableYInversion: `height` 0 turns it off.
+    pub fn set_y_inversion(&mut self, height: i32) {
+        self.yinv = height;
+        self.update_xf();
     }
 
     pub fn world_to_device(&self) -> Matrix {

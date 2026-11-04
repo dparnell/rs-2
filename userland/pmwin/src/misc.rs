@@ -46,10 +46,19 @@ pub static LAST_ERROR: AtomicU32 = AtomicU32::new(0);
 /// session); the first one creates the shared state.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinInitialize(_fl: u32) -> u32 {
+    if ensure_mapped() { HAB } else { 0 }
+}
+
+/// Map the display into the process and set PM up in the system if no
+/// process has yet. WinInitialize does it, and so does the first call
+/// that needs PM's state before it: on OS/2 the GPI and device calls
+/// work without an anchor block (Firefox's XUL opens an information DC
+/// with DevOpenDC(NULLHANDLE, ...) in a static constructor).
+pub fn ensure_mapped() -> bool {
     if !MAPPED.load(Ordering::Relaxed) {
         let mut info = DisplayInfo::default();
         if unsafe { Rs2MapDisplay(&mut info) } != 0 {
-            return 0;
+            return false;
         }
         // Built before anything shared points at it.
         gpi::font::system();
@@ -63,7 +72,7 @@ pub extern "C" fn WinInitialize(_fl: u32) -> u32 {
         }
         crate::fonts::init();
     }
-    HAB
+    true
 }
 
 #[unsafe(no_mangle)]

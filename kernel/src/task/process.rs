@@ -31,6 +31,21 @@ pub mod info {
     pub const SIZE: u32 = 0x2_0000;
 }
 
+/// Address of every process's information area: the same in all
+/// processes (each has its own pages there), reserved in the shared
+/// arena at the first process. DOSCALLS exports the local information
+/// segment's selector as a constant (DosLocalInfo, ordinal 216) that
+/// shared DLL code such as kLIBC's LIBCN0 turns into a flat pointer, so
+/// it cannot depend on the program's layout.
+pub fn info_base() -> u32 {
+    static BASE: SpinLock<u32> = SpinLock::new(0);
+    let mut b = BASE.lock();
+    if *b == 0 {
+        *b = vm::reserve_shared(info::SIZE, None).expect("process information area");
+    }
+    *b
+}
+
 /// Why and how a process ended (for DosCWait / DosWaitChild).
 #[derive(Clone, Copy, Debug)]
 pub struct ExitInfo {
@@ -153,8 +168,10 @@ pub fn try_all() -> Option<Vec<Arc<Process>>> {
 /// command line.
 fn env_block(env: &[String], path: &str, program: &str, args: &str) -> (Vec<u8>, u32) {
     let mut b = Vec::new();
+    // The strings hold one char per byte (Ctx::read_str).
+    let put = |b: &mut Vec<u8>, s: &str| b.extend(s.chars().map(|c| c as u8));
     for e in env {
-        b.extend_from_slice(e.as_bytes());
+        put(&mut b, e);
         b.push(0);
     }
     if env.is_empty() {
@@ -164,12 +181,14 @@ fn env_block(env: &[String], path: &str, program: &str, args: &str) -> (Vec<u8>,
     // OS/2 puts the program's full path between the environment and the
     // command line; CMD.EXE finds the end of the environment by walking
     // back over it from the command line.
-    b.extend_from_slice(path.as_bytes());
+    put(&mut b, path);
     b.push(0);
     let cmd = b.len() as u32;
-    b.extend_from_slice(program.as_bytes());
+    put(&mut b, program);
     b.push(0);
-    b.extend_from_slice(args.as_bytes());
+    // The arguments may be several strings (NUL-separated), as the
+    // caller of DosExecPgm gave them.
+    put(&mut b, args);
     b.push(0);
     b.push(0);
     (b, cmd)
@@ -210,7 +229,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
 
     // Information area: PIB, TIBs, local infoseg.
     let info = space
-        .alloc(info::SIZE, pag::READ | pag::WRITE | pag::COMMIT, SegKind::Data, None)
+        .alloc_instance(info_base(), info::SIZE, pag::READ | pag::WRITE | pag::COMMIT, SegKind::Data)
         .map_err(|e| e.code())?;
     let pid = NEXT_PID.fetch_add(1, Ordering::Relaxed);
     let ppid = p.parent.as_ref().map_or(0, |q| q.pid);

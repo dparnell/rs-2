@@ -415,7 +415,41 @@ fn count(m: &Mem, w: i32, h: i32, c: u32) -> i32 {
     n
 }
 
+/// GpiEnableYInversion/GpiQueryYInversion and an inverted DrawBits
+/// target (cairo's blit of its top-down images).
+fn y_inversion(hab: u32) {
+    unsafe extern "C" {
+        #[link_name = "PMGPI.723"]
+        fn GpiEnableYInversion(hps: u32, height: i32) -> u32;
+        #[link_name = "PMGPI.726"]
+        fn GpiQueryYInversion(hps: u32) -> i32;
+    }
+    unsafe {
+        let m = mem(hab, 8, 8, PU_PELS);
+        GpiErase(m.hps);
+        // A 2x2 bitmap: bottom row red, top row blue (BGR, rows of 8 bytes).
+        let bmi = header2(2, 2, 24);
+        let mut bits = [0u8; 16];
+        for x in 0..2 {
+            bits[x * 3 + 2] = 0xff;
+            bits[8 + x * 3] = 0xff;
+        }
+        let src = [pt(0, 0), pt(2, 2)];
+        GpiDrawBits(m.hps, bits.as_ptr(), bmi.as_ptr(), 4, [pt(0, 0), pt(1, 1), src[0], src[1]].as_ptr(), ROP_SRCCOPY, 0);
+        check("GpiDrawBits upright", pel(&m, 0, 0) == 0xff0000 && pel(&m, 0, 1) == 0x0000ff);
+        check("GpiEnableYInversion", GpiEnableYInversion(m.hps, 7) == 1 && GpiQueryYInversion(m.hps) == 7);
+        // World y 6..7 is device y 1..0: turned over, so the image lands
+        // mirrored (the bottom row at the first corner, device y 1).
+        GpiDrawBits(m.hps, bits.as_ptr(), bmi.as_ptr(), 4, [pt(4, 6), pt(5, 7), src[0], src[1]].as_ptr(), ROP_SRCCOPY, 0);
+        check("Y-inverted GpiDrawBits mirrors", pel(&m, 4, 0) == 0x0000ff && pel(&m, 4, 1) == 0xff0000);
+        GpiEnableYInversion(m.hps, 0);
+        check("GpiQueryYInversion off", GpiQueryYInversion(m.hps) == 0);
+        free(m);
+    }
+}
+
 fn self_checks(hab: u32) {
+    y_inversion(hab);
     unsafe {
         // Drawing into a memory bitmap, read back with GpiQueryPel and
         // GpiQueryBitmapBits.

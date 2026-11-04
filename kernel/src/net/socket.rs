@@ -107,6 +107,14 @@ fn update(pid: u32, s: u32, f: impl FnOnce(&mut Handle)) -> Result<()> {
     let o = owner(&g, pid, s).ok_or(ENOTSOCK)?;
     let h = g.get_mut(&o).and_then(|t| t.map.get_mut(&s)).ok_or(ENOTSOCK)?;
     f(h);
+    // The socket's settings are the socket's: the same in every process
+    // that has it in its list.
+    let h = *h;
+    for t in g.values_mut() {
+        if let Some(x) = t.map.get_mut(&s) {
+            *x = h;
+        }
+    }
     Ok(())
 }
 
@@ -345,8 +353,12 @@ pub fn close(pid: u32, s: u32) -> Result<()> {
     let h = {
         let mut g = TABLES.lock();
         let o = owner(&g, pid, s).ok_or(ENOTSOCK)?;
-        let t = g.get_mut(&o).ok_or(ENOTSOCK)?;
-        t.map.remove(&s).ok_or(ENOTSOCK)?
+        let h = g.get_mut(&o).and_then(|t| t.map.remove(&s)).ok_or(ENOTSOCK)?;
+        // Closed for every process that had it in its list.
+        for t in g.values_mut() {
+            t.map.remove(&s);
+        }
+        h
     };
     stack(|st, now| if h.linger == Some(0) { st.abort(h.id, now) } else { st.close(h.id, now) })?.map_err(Error::errno)
 }
@@ -564,15 +576,22 @@ pub fn resolve(name: &str) -> core::result::Result<Vec<Ipv4>, u32> {
     }
 }
 
-/// addsockettolist(): socket `s` (of any process, or released) now
-/// belongs to `pid`.
+/// addsockettolist(): socket `s` (of any process, or released) is in
+/// `pid`'s list too. A process that had it keeps it: kLIBC's fork adds
+/// the parent's sockets to the child's list, and both go on using them
+/// (pipes are socket pairs); released sockets leave the released list.
 pub fn take(pid: u32, s: u32) -> Result<()> {
     let mut g = TABLES.lock();
     let o = owner(&g, pid, s).ok_or(ENOTSOCK)?;
     if o == pid {
         return Ok(());
     }
-    let h = g.get_mut(&o).and_then(|t| t.map.remove(&s)).ok_or(ENOTSOCK)?;
+    let h = if o == UNOWNED {
+        g.get_mut(&o).and_then(|t| t.map.remove(&s))
+    } else {
+        g.get(&o).and_then(|t| t.map.get(&s).copied())
+    };
+    let h = h.ok_or(ENOTSOCK)?;
     g.entry(pid).or_default().map.insert(s, h);
     Ok(())
 }
@@ -582,16 +601,23 @@ pub fn take(pid: u32, s: u32) -> Result<()> {
 pub fn release(pid: u32, s: u32) -> Result<()> {
     let mut g = TABLES.lock();
     let h = g.get_mut(&pid).and_then(|t| t.map.remove(&s)).ok_or(ENOTSOCK)?;
-    g.entry(UNOWNED).or_default().map.insert(s, h);
+    if !g.values().any(|t| t.map.contains_key(&s)) {
+        g.entry(UNOWNED).or_default().map.insert(s, h);
+    }
     Ok(())
 }
 
 /// The process ended: close its sockets.
 pub fn process_ended(pid: u32) {
-    let Some(t) = TABLES.lock().remove(&pid) else { return };
+    let ids: Vec<usize> = {
+        let mut g = TABLES.lock();
+        let Some(t) = g.remove(&pid) else { return };
+        // Sockets another process has in its list stay open.
+        t.map.iter().filter(|(s, _)| !g.values().any(|o| o.map.contains_key(s))).map(|(_, h)| h.id).collect()
+    };
     let _ = stack(|st, now| {
-        for h in t.map.values() {
-            let _ = st.close(h.id, now);
+        for id in ids {
+            let _ = st.close(id, now);
         }
     });
 }

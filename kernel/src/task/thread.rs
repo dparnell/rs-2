@@ -93,6 +93,8 @@ pub struct Thread {
     /// The thread's own page for thread-local memory (mm::tlm), 0 until
     /// first needed.
     pub tlm_page: AtomicU64,
+    /// The thread's copy of the local information segment (mm::tlm).
+    pub lis_page: AtomicU64,
     /// DosEnterMustComplete nesting: signals wait while it is non-zero.
     pub must_complete: AtomicU32,
     /// Watchpoints (debug register numbers, bits 0-3) the thread hit and
@@ -121,9 +123,10 @@ pub static LIVE: AtomicU32 = AtomicU32::new(0);
 impl Drop for Thread {
     fn drop(&mut self) {
         LIVE.fetch_sub(1, Ordering::Relaxed);
-        let p = self.tlm_page.load(Ordering::Relaxed);
-        if p != 0 {
-            crate::mm::phys::free(p);
+        for p in [self.tlm_page.load(Ordering::Relaxed), self.lis_page.load(Ordering::Relaxed)] {
+            if p != 0 {
+                crate::mm::phys::free(p);
+            }
         }
     }
 }
@@ -159,6 +162,7 @@ impl Thread {
             boosted: AtomicBool::new(false),
             owned_stack: AtomicU32::new(0),
             tlm_page: AtomicU64::new(0),
+            lis_page: AtomicU64::new(0),
             must_complete: AtomicU32::new(0),
             watch_hits: AtomicU8::new(0),
             win16_hi: crate::sync::SpinLock::new(alloc::vec::Vec::new()),

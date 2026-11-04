@@ -179,6 +179,7 @@ forward! {
     WinQueryUpdateRect = "PMWIN.831";
     WinQueryUpdateRegion = "PMWIN.832";
     WinQueryVersion = "PMWIN.833";
+    WinQueryVisibleRegion = "PMWIN.1000";
     WinQueryWindow = "PMWIN.834";
     WinQueryWindowDC = "PMWIN.835";
     WinQueryWindowPos = "PMWIN.837";

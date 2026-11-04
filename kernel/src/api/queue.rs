@@ -92,10 +92,10 @@ fn write(c: &Ctx, h: u32, request: u32, len: u32, addr: u32, priority: u32) -> u
             }
             _ => q.elements.push(e),
         }
-        q.notify.clone()
+        (q.owner, q.notify.clone())
     };
-    for s in notify {
-        super::sem::post_event_handle(s);
+    for s in notify.1 {
+        super::sem::post_event_handle(notify.0, s);
     }
     ARRIVALS.wake_all();
     0
@@ -121,10 +121,10 @@ pub fn post_kernel(name: &str, request: u32, data: &[u8]) {
         let code = q.next_code;
         q.next_code = q.next_code.wrapping_add(1).max(1);
         q.elements.push(Element { pid: 0, request, len: data.len() as u32, addr, priority: 0, code });
-        q.notify.clone()
+        (q.owner, q.notify.clone())
     };
-    for s in notify {
-        super::sem::post_event_handle(s);
+    for s in notify.1 {
+        super::sem::post_event_handle(notify.0, s);
     }
     ARRIVALS.wake_all();
 }

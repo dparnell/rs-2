@@ -21,6 +21,11 @@ static BIOS: Once<Arc<SharedMem>> = Once::new();
 static DAY_OFFSET: core::sync::atomic::AtomicU64 = core::sync::atomic::AtomicU64::new(0);
 static SELECTOR: AtomicU16 = AtomicU16::new(0);
 
+/// The global information segment's flat address.
+pub fn base() -> u32 {
+    OBJ.get().map_or(0, |o| o.base)
+}
+
 pub fn global_selector() -> u16 {
     SELECTOR.load(Ordering::Relaxed)
 }

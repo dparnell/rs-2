@@ -265,4 +265,6 @@ forward! {
     GpiCreateRoundRectRegion = 4661;
     GpiCreateEllipticRegion = 4662;
     GpiAbortPath = 4722;
+    GpiEnableYInversion = 4723;
+    GpiQueryYInversion = 4726;
 }

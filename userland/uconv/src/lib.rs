@@ -87,6 +87,11 @@ pub extern "C" fn UniFreeUconvObject(u: u32) -> i32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn UniUconvToUcs(u: u32, inp: *mut *const u8, inb: *mut u32, out: *mut *mut u16, outc: *mut u32, subst: *mut u32) -> i32 {
     let Some(o) = object(u) else { return ULS_BADOBJECT };
+    // The count of substitutions is an output (callers such as kLIBC
+    // leave it uninitialised).
+    if !subst.is_null() {
+        unsafe { *subst = 0 };
+    }
     unsafe {
         let (mut i, mut n, mut d, mut m) = (*inp, *inb, *out, *outc);
         let mut rc = ULS_SUCCESS;
@@ -111,6 +116,11 @@ pub extern "C" fn UniUconvToUcs(u: u32, inp: *mut *const u8, inb: *mut u32, out:
 #[unsafe(no_mangle)]
 pub extern "C" fn UniUconvFromUcs(u: u32, inp: *mut *const u16, inc: *mut u32, out: *mut *mut u8, outb: *mut u32, subst: *mut u32) -> i32 {
     let Some(o) = object(u) else { return ULS_BADOBJECT };
+    // The count of substitutions is an output (callers such as kLIBC
+    // leave it uninitialised).
+    if !subst.is_null() {
+        unsafe { *subst = 0 };
+    }
     unsafe {
         let (mut i, mut n, mut d, mut m) = (*inp, *inc, *out, *outb);
         let mut rc = ULS_SUCCESS;

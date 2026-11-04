@@ -418,6 +418,14 @@ fn place(h: u32, r: Rect) {
     if at != (r.left, r.bottom) && st().desk.get(placed).is_some_and(|f| f.cx > 0 || f.cy > 0) {
         win::moved(h);
     }
+    // As PM's WinSetMultWindowPos does: Mozilla's windows follow their
+    // size by WM_WINDOWPOSCHANGED (mp1 the new and the old SWP).
+    let fl = 0x0003; // SWP_SIZE | SWP_MOVE
+    let pair: [u32; 18] = [
+        fl, r.height() as u32, r.width() as u32, r.bottom as u32, r.left as u32, 0, h, 0, 0,
+        fl, old.1 as u32, old.0 as u32, at.1 as u32, at.0 as u32, 0, h, 0, 0,
+    ];
+    send(h, win::WM_WINDOWPOSCHANGED, pair.as_ptr() as u32, 0);
 }
 
 /// Client rectangle of a frame, in frame coordinates.

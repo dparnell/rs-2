@@ -216,6 +216,12 @@ static SYSCTL_SEEN: AtomicU32 = AtomicU32::new(0);
 /// range, ERROR_INVALID_FUNCTION otherwise. Each function is logged once.
 pub fn dos_sys_ctl(c: &mut Ctx) -> u32 {
     let f = c.arg(0);
+    // DOSSYSCTL_AM_I_DEBUGGED (2): TRUE when a debugger is attached
+    // (kLIBC's panic code breaks into the debugger then, and compares the
+    // result with TRUE, so "invalid function" (1) would mean yes).
+    if f == 2 {
+        return super::debug::connected(&c.process) as u32;
+    }
     if f < 32 && SYSCTL_SEEN.fetch_or(1 << f, Ordering::Relaxed) & (1 << f) == 0 {
         crate::println!("[DosSysCtl function {} from {} not supported]", f, c.process.exe.name);
     }

@@ -30,3 +30,5 @@ Rs2GreEntry 9033
 WinXxCreateHeap2 1072
 WinBuildPtrHandle 964
 WinJiggleMouse 1005
+GpiEnableYInversion 4723
+GpiQueryYInversion 4726
