@@ -160,7 +160,8 @@ enum Kind {
     Space,
     Break,
     /// Width, height, baseline below its top, and a percentage of the
-    /// line's width in place of the width (0 for none).
+    /// line's width in place of the width (0 for none, negative for a
+    /// maximum width).
     Atomic(Atom, f32, f32, f32, f32),
     Marker(ListStyle),
 }
@@ -373,7 +374,7 @@ fn build_ifc(b: IfcBuilder, block: &Style, fonts: &mut dyn Fonts, cw: f32) -> If
             Kind::Space if p.wrap => run = 0.0,
             Kind::Break => run = 0.0,
             Kind::Atomic(_, _, _, _, pct) => {
-                min_content = if pct > 0.0 { min_content } else { min_content.max(p.w) };
+                min_content = if pct != 0.0 { min_content } else { min_content.max(p.w) };
                 run = 0.0;
             }
             _ => {
@@ -439,9 +440,9 @@ fn lay_lines(ifc: &Ifc, width_all: Option<f32>, fonts: &mut dyn Fonts) -> Lines 
                 // Outside the content box, before the first line.
                 line.push((i, -p.w, p.text.clone(), p.w));
             }
-            Kind::Atomic(_, _, _, _, pct) if *pct > 0.0 && width.is_some() => {
+            Kind::Atomic(_, aw, _, _, pct) if *pct != 0.0 && width.is_some() && (*pct > 0.0 || *aw > width.unwrap() * -pct / 100.0) => {
                 // Sized by the line: a field of width 100%.
-                let w = width.unwrap() * pct / 100.0;
+                let w = width.unwrap() * pct.abs() / 100.0;
                 if !line.is_empty() && x + pending + w > width.unwrap() + 0.5 {
                     finish(ifc, width, left, fonts, &mut line, x, &mut y, &mut out);
                     (left, width) = band(ifc, width_all, y);
@@ -522,6 +523,18 @@ fn lay_lines(ifc: &Ifc, width_all: Option<f32>, fonts: &mut dyn Fonts) -> Lines 
     out
 }
 
+/// An atomic piece's height and baseline at the width `w` its line gave
+/// it: images keep their shape.
+fn atomic_height(p: &Piece, w: f32) -> (f32, f32) {
+    let Kind::Atomic(atom, aw, h, base, _) = &p.kind else { return (0.0, 0.0) };
+    if matches!(atom, Atom::Image(_)) && *aw > 0.0 && p.style.height == Len::Auto {
+        let s = w / aw;
+        (h * s, base * s)
+    } else {
+        (*h, *base)
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn finish(ifc: &Ifc, width: Option<f32>, left: f32, fonts: &mut dyn Fonts, line: &mut Vec<(usize, f32, String, f32)>, x: f32, y: &mut f32, out: &mut Lines) {
     let pieces = &ifc.pieces;
@@ -529,18 +542,18 @@ fn finish(ifc: &Ifc, width: Option<f32>, left: f32, fonts: &mut dyn Fonts, line:
     let hl = (lh - (sa + sd)) / 2.0;
     let mut above = sa + hl;
     let mut below = sd + hl;
-    for (i, ..) in line.iter() {
+    for (i, _, _, fw) in line.iter() {
         let p = &pieces[*i];
         match &p.kind {
-            Kind::Atomic(_, _, h, base, _) => match p.style.vertical_align {
-                1 => {
+            Kind::Atomic(..) => match (p.style.vertical_align, atomic_height(p, *fw)) {
+                (1, (h, _)) => {
                     above = above.max(h / 2.0 + sa * 0.3);
                     below = below.max(h / 2.0 - sa * 0.3);
                 }
-                2 => below = below.max(h - sa),
-                3 => above = above.max(h - sd),
-                _ => {
-                    above = above.max(*base);
+                (2, (h, _)) => below = below.max(h - sa),
+                (3, (h, _)) => above = above.max(h - sd),
+                (_, (h, base)) => {
+                    above = above.max(base);
                     below = below.max(h - base);
                 }
             },
@@ -744,6 +757,7 @@ fn taffy_style(s: &Style) -> taffy::Style {
             .map(|tr| {
                 let f: TrackSizingFunction = match tr {
                     Track::Fr(f) => style_helpers::fr(*f),
+                    Track::Share(f) => style_helpers::minmax(style_helpers::length(0.0), style_helpers::fr(*f)),
                     Track::Len(Len::Px(v)) => style_helpers::length(*v),
                     Track::Len(Len::Pct(p)) => style_helpers::percent(*p / 100.0),
                     Track::Len(Len::Auto) => style_helpers::auto(),
@@ -757,6 +771,7 @@ fn taffy_style(s: &Style) -> taffy::Style {
     let tr = |tr: &Track| -> TrackSizingFunction {
         match tr {
             Track::Fr(f) => style_helpers::fr(*f),
+            Track::Share(f) => style_helpers::minmax(style_helpers::length(0.0), style_helpers::fr(*f)),
             Track::Len(Len::Px(v)) => style_helpers::length(*v),
             Track::Len(Len::Pct(p)) => style_helpers::percent(*p / 100.0),
             Track::Len(Len::Auto) => style_helpers::auto(),
@@ -796,19 +811,22 @@ fn taffy_style(s: &Style) -> taffy::Style {
         t.grid_column = Line { start: GridPlacement::NamedLine(a.clone(), 0), end: GridPlacement::NamedLine(a.clone(), 0) };
     }
     let lines = |(a, b): (i16, i16), span: u16| -> Option<Line<GridPlacement>> {
-        if a == 0 {
-            return None;
+        let spanned = || if span > 1 { style_helpers::span(span) } else { GridPlacement::Auto };
+        match (a, b) {
+            (0, 0) if span > 1 => Some(Line { start: style_helpers::span(span), end: GridPlacement::Auto }),
+            (0, 0) => None,
+            (0, b) => Some(Line { start: spanned(), end: style_helpers::line(b) }),
+            (a, 0) => Some(Line { start: style_helpers::line(a), end: spanned() }),
+            (a, b) => Some(Line { start: style_helpers::line(a), end: style_helpers::line(b) }),
         }
-        let end = if b != 0 { style_helpers::line(b) } else if span > 1 { style_helpers::span(span) } else { GridPlacement::Auto };
-        Some(Line { start: style_helpers::line(a), end })
     };
-    if let Some(l) = lines(s.grid_row_lines, 1) {
-        t.grid_row = l;
-    }
-    if let Some(l) = lines(s.grid_col_lines, s.grid_column_span) {
-        t.grid_column = l;
-    } else if s.grid_column_span > 1 && s.grid_area.is_none() {
-        t.grid_column = Line { start: style_helpers::span(s.grid_column_span), end: GridPlacement::Auto };
+    if s.grid_area.is_none() {
+        if let Some(l) = lines(s.grid_row_lines, s.grid_row_span) {
+            t.grid_row = l;
+        }
+        if let Some(l) = lines(s.grid_col_lines, s.grid_column_span) {
+            t.grid_column = l;
+        }
     }
     t
 }
@@ -920,6 +938,7 @@ impl Builder<'_> {
 
     fn walk(&mut self, id: DomId, block: &Arc<Style>, kids: &mut Vec<NodeId>, b: &mut IfcBuilder, link: Option<usize>, bg: Color) {
         let dom = self.dom;
+        self.generated(id, 0, block, kids, b, link, bg);
         for &c in &dom.nodes[id].children {
             match &dom.nodes[c].data {
                 NodeData::Text(t) => {
@@ -952,7 +971,18 @@ impl Builder<'_> {
                         }
                         continue;
                     }
-                    if is_block_level(st.display) && !replaced(name) {
+                    if matches!(st.position, P::Absolute | P::Fixed) && !replaced(name) {
+                        // Out of the flow: lines go on around it.
+                        let saved = self.pending_marker.take();
+                        let n = self.block(c);
+                        self.pending_marker = saved;
+                        kids.push(n);
+                        continue;
+                    }
+                    // An inline-block as wide as its line might as well be a block
+                    // (a percentage needs the line's width, unknown here).
+                    let full = st.display == D::InlineBlock && matches!(st.width, Len::Pct(p) if p >= 99.0);
+                    if (is_block_level(st.display) || full) && !replaced(name) {
                         // A marker waiting for content goes into the block.
                         if b.marker.is_some() && !b.has_content() {
                             self.pending_marker = b.marker.take();
@@ -968,7 +998,12 @@ impl Builder<'_> {
                         "img" => {
                             let (w, h) = self.image_size(c, &st);
                             if w > 0.0 && h > 0.0 {
-                                b.raw.push(Raw::Atomic(Atom::Image(c), w, h, h, 0.0, st, link));
+                                let pct = match (st.width, st.max_width) {
+                                    (Len::Pct(p), _) => p,
+                                    (_, Len::Pct(p)) => -p,
+                                    _ => 0.0,
+                                };
+                                b.raw.push(Raw::Atomic(Atom::Image(c), w, h, h, pct, st, link));
                             } else if let Some(alt) = e.attr("alt").filter(|a| !a.trim().is_empty()) {
                                 b.raw.push(Raw::Text(alt.to_string(), st, link, bg));
                             }
@@ -998,25 +1033,7 @@ impl Builder<'_> {
                             let saved = self.pending_marker.take();
                             let sub = self.block(c);
                             self.pending_marker = saved;
-                            self.tree
-                                .compute_layout_with_measure(sub, Size { width: AvailableSpace::MaxContent, height: AvailableSpace::MaxContent }, measure(&mut self.ifcs, self.fonts))
-                                .ok();
-                            let l = *self.tree.layout(sub).unwrap();
-                            let (mut w, h) = (l.size.width, l.size.height);
-                            if w > self.viewport {
-                                // Too wide at max-content: lay it out at the viewport's width.
-                                self.tree
-                                    .compute_layout_with_measure(sub, Size { width: AvailableSpace::Definite(self.viewport), height: AvailableSpace::MaxContent }, measure(&mut self.ifcs, self.fonts))
-                                    .ok();
-                                w = self.tree.layout(sub).unwrap().size.width;
-                            }
-                            let h = self.tree.layout(sub).map(|l| l.size.height).unwrap_or(h);
-                            let m = |l: Len| l.px(0.0);
-                            let w = w + m(st.margin[style::LEFT]) + m(st.margin[style::RIGHT]);
-                            let base = self.first_baseline(sub).map_or(h, |v| v) + m(st.margin[style::TOP]);
-                            let h = h + m(st.margin[style::TOP]) + m(st.margin[style::BOTTOM]);
-                            let base = base.min(h);
-                            b.raw.push(Raw::Atomic(Atom::Subtree(sub), w, h, base, 0.0, st, link));
+                            self.inline_block(sub, st, link, b);
                         }
                         _ => {
                             let bg = if st.background >> 24 != 0 { st.background } else { bg };
@@ -1035,6 +1052,64 @@ impl Builder<'_> {
                 _ => {}
             }
         }
+        self.generated(id, 1, block, kids, b, link, bg);
+    }
+
+    /// An element's ::before (0) or ::after (1).
+    #[allow(clippy::too_many_arguments)]
+    fn generated(&mut self, id: DomId, which: usize, block: &Arc<Style>, kids: &mut Vec<NodeId>, b: &mut IfcBuilder, link: Option<usize>, bg: Color) {
+        let Some((st, text)) = self.styles.generated.get(&id).and_then(|g| g[which].clone()) else { return };
+        if st.hidden {
+            return;
+        }
+        let inline = st.display == D::Inline;
+        if inline {
+            let bg = if st.background >> 24 != 0 { st.background } else { bg };
+            b.raw.push(Raw::Text(text, st, link, bg));
+            return;
+        }
+        // A box with the text in it.
+        let mut ib = IfcBuilder::default();
+        ib.raw.push(Raw::Text(text, st.clone(), None, TRANSPARENT));
+        let t = taffy_style(&st);
+        let n = if ib.has_content() {
+            let i = self.make_ifc(ib, &st);
+            self.tree.new_leaf_with_context(t, Leaf::Ifc(i)).unwrap()
+        } else {
+            self.tree.new_leaf(t).unwrap()
+        };
+        self.info.insert(n, BoxInfo { node: None, style: st.clone(), bg_override: TRANSPARENT });
+        if matches!(st.position, P::Absolute | P::Fixed) {
+            kids.push(n);
+        } else if is_block_level(st.display) {
+            self.flush(block, kids, b);
+            kids.push(n);
+        } else {
+            self.inline_block(n, st, link, b);
+        }
+    }
+
+    /// Size a separately laid out box and add it to the line.
+    fn inline_block(&mut self, sub: NodeId, st: Arc<Style>, link: Option<usize>, b: &mut IfcBuilder) {
+        self.tree
+            .compute_layout_with_measure(sub, Size { width: AvailableSpace::MaxContent, height: AvailableSpace::MaxContent }, measure(&mut self.ifcs, self.fonts))
+            .ok();
+        let l = *self.tree.layout(sub).unwrap();
+        let (mut w, h) = (l.size.width, l.size.height);
+        if w > self.viewport {
+            // Too wide at max-content: lay it out at the viewport's width.
+            self.tree
+                .compute_layout_with_measure(sub, Size { width: AvailableSpace::Definite(self.viewport), height: AvailableSpace::MaxContent }, measure(&mut self.ifcs, self.fonts))
+                .ok();
+            w = self.tree.layout(sub).unwrap().size.width;
+        }
+        let h = self.tree.layout(sub).map(|l| l.size.height).unwrap_or(h);
+        let m = |l: Len| l.px(0.0);
+        let w = w + m(st.margin[style::LEFT]) + m(st.margin[style::RIGHT]);
+        let base = self.first_baseline(sub).map_or(h, |v| v) + m(st.margin[style::TOP]);
+        let h = h + m(st.margin[style::TOP]) + m(st.margin[style::BOTTOM]);
+        let base = base.min(h);
+        b.raw.push(Raw::Atomic(Atom::Subtree(sub), w, h, base, 0.0, st, link));
     }
 
     /// The first line's baseline, below the top of `n`.
@@ -1112,7 +1187,9 @@ impl Builder<'_> {
             Len::Pct(p) => Some(of * p / 100.0),
             Len::Auto => None,
         };
-        let (w, h) = (px(st.width, self.viewport), px(st.height, 0.0).filter(|&h| h > 0.0));
+        // A percentage is of the line (see lay_lines).
+        let width = if let Len::Pct(_) = st.width { Len::Auto } else { st.width };
+        let (w, h) = (px(width, self.viewport), px(st.height, 0.0).filter(|&h| h > 0.0));
         let (w, h) = match (w, h, nat) {
             (Some(w), Some(h), _) => (w, h),
             (Some(w), None, Some((nw, nh))) if nw > 0.0 => (w, w * nh / nw),
@@ -1125,8 +1202,7 @@ impl Builder<'_> {
         // max-width: 100% and friends.
         let maxw = match st.max_width {
             Len::Px(v) => v,
-            Len::Pct(p) => self.viewport * p / 100.0,
-            Len::Auto => f32::MAX,
+            Len::Pct(_) | Len::Auto => f32::MAX,
         };
         if w > maxw && w > 0.0 { (maxw, h * maxw / w) } else { (w, h) }
     }
@@ -1567,18 +1643,20 @@ impl Painter<'_, '_> {
                         self.laid.items.push(Item::Text { x: fx, y: cy + f.baseline, w: f.w, text: f.text.clone(), font: p.font, color: p.style.color, decoration: 0 });
                     }
                 }
-                Kind::Atomic(atom, w, h, base, pct) => {
+                Kind::Atomic(atom, w, _, _, pct) => {
                     if p.style.invisible {
                         continue;
                     }
+                    let w = if *pct != 0.0 { &f.w } else { w };
+                    let (h, base) = atomic_height(p, *w);
+                    let (h, base) = (&h, &base);
                     let top = match p.style.vertical_align {
                         1 => cy + f.top + (f.line_h - h) / 2.0,
                         2 => cy + f.top,
                         3 => cy + f.baseline + strut_d - h,
                         _ => cy + f.baseline - base,
                     };
-                    let w = if *pct > 0.0 { f.w } else { *w };
-                    let r = Rect { x: fx, y: top, w, h: *h };
+                    let r = Rect { x: fx, y: top, w: *w, h: *h };
                     let st = p.style.clone();
                     match atom {
                         Atom::Control(..) => {

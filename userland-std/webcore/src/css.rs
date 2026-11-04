@@ -40,6 +40,9 @@ pub struct Rule {
     pub origin: Origin,
     /// Cascade layer: its place in `Rules::layers`, or UNLAYERED.
     pub layer: u32,
+    /// 0 for the element; 1 and 2 style its ::before and ::after (`selector`
+    /// then matches the element itself).
+    pub pseudo: u8,
 }
 
 /// Rules outside any @layer come after all layers.
@@ -55,6 +58,8 @@ pub struct Rules {
     pub universal: Vec<usize>,
     /// Layer names, in cascade order (first seen, first).
     pub layers: Vec<String>,
+    /// The ::before and ::after rules, indexed the same way.
+    pub generated: Option<Box<Rules>>,
 }
 
 /// The environment @media queries are evaluated in.
@@ -72,13 +77,18 @@ impl Rules {
         let mut out = Vec::new();
         let mut sheet = Sheet { media, out: &mut out, imports: &mut imports, layers: &mut self.layers };
         sheet.rule_list(&mut p, None, 0);
-        for (list, decls, layer) in out {
+        for (list, decls, layer, pseudo) in out {
             let decls = Arc::new(decls);
             for sel in list.slice().iter() {
-                let order = self.rules.len();
-                let rule = Rule { selector: sel.clone(), specificity: sel.specificity(), decls: decls.clone(), order, origin, layer };
-                self.index(order, &rule.selector);
-                self.rules.push(rule);
+                // Other pseudo-elements are not drawn.
+                if sel.has_pseudo_element() {
+                    continue;
+                }
+                let rules = if pseudo != 0 { &mut **self.generated.get_or_insert_default() } else { &mut *self };
+                let order = rules.rules.len();
+                let rule = Rule { selector: sel.clone(), specificity: sel.specificity(), decls: decls.clone(), order, origin, layer, pseudo };
+                rules.index(order, &rule.selector);
+                rules.rules.push(rule);
             }
         }
         imports
@@ -110,7 +120,7 @@ impl Rules {
     }
 }
 
-type Parsed = Vec<(SelectorList<Impl>, Vec<Decl>, u32)>;
+type Parsed = Vec<(SelectorList<Impl>, Vec<Decl>, u32, u8)>;
 
 struct Sheet<'a> {
     media: Media,
@@ -138,6 +148,32 @@ impl Sheet<'_> {
         match parent {
             Some(p) => format!("{p}.{name}"),
             None => name,
+        }
+    }
+
+    /// The selectors of a list that end in ::before or ::after, as rules
+    /// for the generated box of the element they would otherwise match.
+    fn generated(&mut self, text: &str, decls: &[Decl], layer: u32) {
+        for part in split_top(text, ",") {
+            let part = part.trim();
+            let lower = part.to_ascii_lowercase();
+            let (cut, pseudo) = if lower.ends_with("::before") {
+                (8, 1)
+            } else if lower.ends_with(":before") {
+                (7, 1)
+            } else if lower.ends_with("::after") {
+                (7, 2)
+            } else if lower.ends_with(":after") {
+                (6, 2)
+            } else {
+                continue;
+            };
+            let base = &part[..part.len() - cut];
+            let base = if base.is_empty() || base.ends_with([' ', '>', '+', '~']) { format!("{base}*") } else { base.to_string() };
+            let mut p = Parser::new(&base);
+            if let Ok(list) = SelectorList::parse(&SelParser, &mut p, ParseRelative::No) {
+                self.out.push((list, decls.to_vec(), layer, pseudo));
+            }
         }
     }
 
@@ -196,15 +232,20 @@ impl Sheet<'_> {
                 }
                 _ => {
                     p.reset(&state);
+                    let start = p.position();
                     let sel: Result<SelectorList<Impl>, _> =
                         p.parse_until_before(Delimiter::CurlyBracketBlock, |p| SelectorList::parse(&SelParser, p, ParseRelative::No));
+                    let text = p.slice_from(start).to_string();
                     match p.next() {
                         Ok(Token::CurlyBracketBlock) => {
                             let decls: Result<Vec<Decl>, ParseError<()>> = p.parse_nested_block(|p| Ok(parse_decls(p)));
                             if let (Ok(sel), Ok(decls)) = (sel, decls) {
                                 if !decls.is_empty() {
                                     let id = layer.map_or(UNLAYERED, |l| self.layer(l.to_string()));
-                                    self.out.push((sel, decls, id));
+                                    if sel.slice().iter().any(|s| s.has_pseudo_element()) {
+                                        self.generated(&text, &decls, id);
+                                    }
+                                    self.out.push((sel, decls, id, 0));
                                 }
                             }
                         }
