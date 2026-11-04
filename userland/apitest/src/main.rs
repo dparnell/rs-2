@@ -13,6 +13,7 @@ use os2::*;
 extern crate alloc;
 
 mod eas;
+mod klibc;
 mod t16;
 
 os2::entry!(main);
@@ -46,6 +47,7 @@ fn main(s: &Startup) -> u32 {
     eas::run();
     threads_and_sems();
     t16::run();
+    klibc::run();
     exceptions();
     pipes();
     named_pipes();
