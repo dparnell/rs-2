@@ -393,6 +393,13 @@ pub fn parse_color(t: &[Tok], current: Color) -> Option<Color> {
                     Some(&v) => (v * 255.0).round().clamp(0.0, 255.0) as u32,
                 }
             };
+            if f == "light-dark" {
+                let first: Vec<Tok> = args.split(|t| *t == Tok::Comma).next().unwrap_or(&[]).to_vec();
+                return parse_color(&first, current);
+            }
+            if f == "var" || f == "env" {
+                return None;
+            }
             match f.as_str() {
                 "rgb" | "rgba" if nums.len() >= 3 => Some(alpha(nums.get(3)) << 24 | chan(nums[0]) << 16 | chan(nums[1]) << 8 | chan(nums[2])),
                 "hsl" | "hsla" if nums.len() >= 3 => {
