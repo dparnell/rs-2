@@ -189,7 +189,27 @@ pub struct Style {
     pub grid_area: Option<String>,
     pub grid_row_lines: (i16, i16),
     pub grid_col_lines: (i16, i16),
-    pub vars: Arc<HashMap<String, String>>,
+    pub vars: Arc<Vars>,
+}
+
+/// Custom properties: what an element declares, then its ancestors'.
+/// Values have no var() left in them.
+#[derive(Default, Debug)]
+pub struct Vars {
+    map: HashMap<String, String>,
+    parent: Option<Arc<Vars>>,
+}
+
+impl Vars {
+    fn get(&self, name: &str) -> Option<&str> {
+        let mut v = self;
+        loop {
+            if let Some(s) = v.map.get(name) {
+                return Some(s);
+            }
+            v = v.parent.as_deref()?;
+        }
+    }
 }
 
 // Edges: top, right, bottom, left (CSS order).
@@ -254,7 +274,7 @@ impl Default for Style {
             grid_area: None,
             grid_row_lines: (0, 0),
             grid_col_lines: (0, 0),
-            vars: Arc::new(HashMap::new()),
+            vars: Arc::default(),
         }
     }
 }
@@ -305,6 +325,7 @@ figcaption, details, summary, legend, hgroup, search, optgroup, address, dialog,
 li { display: list-item }
 head, script, style, link, meta, title, template, datalist, area, base, param, [hidden], option, map, track,
 source, audio:not([controls]), embed, object, iframe, svg, canvas, noembed, colgroup, col { display: none }
+dialog:not([open]), [popover], details:not([open]) > :not(summary) { display: none }
 table { display: table; border-collapse: separate }
 tr { display: table-row }
 td, th { display: table-cell; padding: 1px; vertical-align: middle }
@@ -419,7 +440,7 @@ fn element_style(
         .map(|i| &rules.rules[i])
         .filter(|r| selectors::matching::matches_selector(&r.selector, 0, None, el, &mut ctx))
         .collect();
-    matched.sort_by_key(|r| (r.origin, r.specificity, r.order));
+    matched.sort_by_key(|r| (r.origin, r.layer, r.specificity, r.order));
     let attr_decls = e.attr("style").map(css::parse_style_attr).unwrap_or_default();
     // Presentational attributes, below any CSS.
     let mut pres: Vec<Decl> = Vec::new();
@@ -514,20 +535,30 @@ fn element_style(
         }
     }
     let mut order: Vec<&Decl> = Vec::new();
+    let is_ua = |r: &&&css::Rule| r.origin == Origin::UserAgent;
+    order.extend(matched.iter().filter(is_ua).flat_map(|r| r.decls.iter()).filter(|d| !d.important));
     order.extend(pres.iter());
-    order.extend(matched.iter().flat_map(|r| r.decls.iter()).filter(|d| !d.important));
+    order.extend(matched.iter().filter(|r| r.origin == Origin::Author).flat_map(|r| r.decls.iter()).filter(|d| !d.important));
     order.extend(attr_decls.iter().filter(|d| !d.important));
-    order.extend(matched.iter().filter(|r| r.origin == Origin::Author).flat_map(|r| r.decls.iter()).filter(|d| d.important));
+    // !important runs the other way between layers: earlier ones win.
+    let mut strong: Vec<&&css::Rule> = matched.iter().filter(|r| r.origin == Origin::Author).collect();
+    strong.sort_by_key(|r| (std::cmp::Reverse(r.layer), r.specificity, r.order));
+    order.extend(strong.iter().flat_map(|r| r.decls.iter()).filter(|d| d.important));
     order.extend(attr_decls.iter().filter(|d| d.important));
     order.extend(matched.iter().filter(|r| r.origin == Origin::UserAgent).flat_map(|r| r.decls.iter()).filter(|d| d.important));
 
     let mut s = parent.inherit();
     // Custom properties first.
     if order.iter().any(|d| d.name.starts_with("--")) {
-        let mut vars = (*s.vars).clone();
+        // All of them before any is resolved: one may refer to a later one.
+        let mut vars = Vars { map: HashMap::new(), parent: Some(s.vars.clone()) };
         for d in order.iter().filter(|d| d.name.starts_with("--")) {
-            let v = substitute(&d.value, &vars, 0);
-            vars.insert(d.name.clone(), v);
+            vars.map.insert(d.name.clone(), d.value.clone());
+        }
+        let names: Vec<String> = vars.map.iter().filter(|(_, v)| v.contains("var(")).map(|(k, _)| k.clone()).collect();
+        for n in names {
+            let v = substitute(&vars.map[&n], &vars, 0);
+            vars.map.insert(n, v);
         }
         s.vars = Arc::new(vars);
     }
@@ -571,8 +602,8 @@ fn value_of(d: &Decl, s: &Style) -> String {
 }
 
 /// Replace var(--name, fallback) references.
-fn substitute(v: &str, vars: &HashMap<String, String>, depth: u32) -> String {
-    if depth > 8 || !v.contains("var(") {
+fn substitute(v: &str, vars: &Vars, depth: u32) -> String {
+    if depth > 32 || !v.contains("var(") {
         return v.to_string();
     }
     let mut out = String::new();
@@ -601,7 +632,7 @@ fn substitute(v: &str, vars: &HashMap<String, String>, depth: u32) -> String {
             Some(c) => (inner[..c].trim(), Some(inner[c + 1..].trim())),
             None => (inner.trim(), None),
         };
-        let val = vars.get(name).map(|s| s.as_str()).or(fallback).unwrap_or("");
+        let val = vars.get(name).or(fallback).unwrap_or("");
         out.push_str(&substitute(val, vars, depth + 1));
         rest = if end < after.len() { &after[end + 1..] } else { "" };
     }
@@ -714,6 +745,8 @@ fn length(t: &Tok, cx: &Cx) -> Option<Len> {
             "q" => v * 96.0 / 101.6,
             "vw" => v * cx.vw / 100.0,
             "vh" => v * cx.vh / 100.0,
+            "dvw" | "svw" | "lvw" => v * cx.vw / 100.0,
+            "dvh" | "svh" | "lvh" => v * cx.vh / 100.0,
             "vmin" => v * cx.vw.min(cx.vh) / 100.0,
             "vmax" => v * cx.vw.max(cx.vh) / 100.0,
             "lh" => v * cx.em * 1.2,

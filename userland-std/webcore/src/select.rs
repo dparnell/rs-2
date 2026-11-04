@@ -69,10 +69,16 @@ pub enum PseudoClass {
     Checked,
     Disabled,
     Enabled,
+    /// Understood, but no element ever is one of these.
+    Never(String),
 }
 
 impl ToCss for PseudoClass {
     fn to_css<W: fmt::Write>(&self, dest: &mut W) -> fmt::Result {
+        if let PseudoClass::Never(n) = self {
+            dest.write_str(":")?;
+            return dest.write_str(n);
+        }
         dest.write_str(match self {
             PseudoClass::Link => ":link",
             PseudoClass::AnyLink => ":any-link",
@@ -85,6 +91,7 @@ impl ToCss for PseudoClass {
             PseudoClass::Checked => ":checked",
             PseudoClass::Disabled => ":disabled",
             PseudoClass::Enabled => ":enabled",
+            PseudoClass::Never(_) => "",
         })
     }
 }
@@ -134,6 +141,10 @@ impl<'i> selectors::parser::Parser<'i> for Parser {
         true
     }
 
+    fn parse_has(&self) -> bool {
+        true
+    }
+
     fn parse_non_ts_pseudo_class(&self, name: &str) -> Result<PseudoClass, ParseError<Self::Error>> {
         let p = match name.to_ascii_lowercase().as_str() {
             "link" => PseudoClass::Link,
@@ -147,6 +158,7 @@ impl<'i> selectors::parser::Parser<'i> for Parser {
             "checked" => PseudoClass::Checked,
             "disabled" => PseudoClass::Disabled,
             "enabled" => PseudoClass::Enabled,
+            n @ ("popover-open" | "modal" | "fullscreen" | "target" | "open" | "user-invalid" | "user-valid" | "invalid" | "autofill" | "placeholder-shown" | "indeterminate") => PseudoClass::Never(n.to_string()),
             _ => {
                 return Err(ParseError::custom(SelectorParseErrorKind::UnsupportedPseudoClassOrElement));
             }

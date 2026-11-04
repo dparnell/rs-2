@@ -4,9 +4,12 @@
 //! values.
 //!
 //! `@media` blocks apply when their query holds for a screen of the
-//! viewport's width (`min-width`/`max-width` in px or em, `screen`, `all`,
-//! not `print`); `@supports` blocks apply; `@import` is reported to the
-//! caller; other at-rules are skipped.
+//! viewport's size (`min-width`/`max-width`, the range forms `(width >= 48rem)`
+//! and `(400px <= width < 800px)`, `screen`, `all`, not `print`); `@supports`
+//! conditions are evaluated against what the engine does; `@container`
+//! queries are evaluated as if the container were the viewport; `@layer`
+//! blocks order the cascade; `@import` is reported to the caller; other
+//! at-rules are skipped.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -35,7 +38,12 @@ pub struct Rule {
     pub decls: Arc<Vec<Decl>>,
     pub order: usize,
     pub origin: Origin,
+    /// Cascade layer: its place in `Rules::layers`, or UNLAYERED.
+    pub layer: u32,
 }
+
+/// Rules outside any @layer come after all layers.
+pub const UNLAYERED: u32 = u32::MAX;
 
 /// Rules from any number of style sheets, indexed.
 #[derive(Default)]
@@ -45,6 +53,8 @@ pub struct Rules {
     pub by_class: HashMap<String, Vec<usize>>,
     pub by_tag: HashMap<String, Vec<usize>>,
     pub universal: Vec<usize>,
+    /// Layer names, in cascade order (first seen, first).
+    pub layers: Vec<String>,
 }
 
 /// The environment @media queries are evaluated in.
@@ -60,12 +70,13 @@ impl Rules {
         let mut p = Parser::new(css);
         let mut imports = Vec::new();
         let mut out = Vec::new();
-        parse_rule_list(&mut p, media, &mut out, &mut imports, 0);
-        for (list, decls) in out {
+        let mut sheet = Sheet { media, out: &mut out, imports: &mut imports, layers: &mut self.layers };
+        sheet.rule_list(&mut p, None, 0);
+        for (list, decls, layer) in out {
             let decls = Arc::new(decls);
             for sel in list.slice().iter() {
                 let order = self.rules.len();
-                let rule = Rule { selector: sel.clone(), specificity: sel.specificity(), decls: decls.clone(), order, origin };
+                let rule = Rule { selector: sel.clone(), specificity: sel.specificity(), decls: decls.clone(), order, origin, layer };
                 self.index(order, &rule.selector);
                 self.rules.push(rule);
             }
@@ -99,66 +110,133 @@ impl Rules {
     }
 }
 
-type Parsed = Vec<(SelectorList<Impl>, Vec<Decl>)>;
+type Parsed = Vec<(SelectorList<Impl>, Vec<Decl>, u32)>;
 
-fn parse_rule_list(p: &mut Parser, media: Media, out: &mut Parsed, imports: &mut Vec<String>, depth: u32) {
-    loop {
-        let state = p.state();
-        let tok = match p.next() {
-            Ok(t) => t.clone(),
-            Err(_) => break,
-        };
-        match tok {
-            Token::CDO | Token::CDC | Token::Semicolon => {}
-            Token::AtKeyword(name) => {
-                let name = name.to_ascii_lowercase();
-                let prelude: Result<String, ParseError<()>> = p.parse_until_before(Delimiter::CurlyBracketBlock | Delimiter::Semicolon, |p| {
-                    let start = p.position();
-                    while p.next().is_ok() {}
-                    Ok(p.slice_from(start).to_string())
-                });
-                let prelude = prelude.unwrap_or_default();
-                match p.next() {
-                    Ok(Token::CurlyBracketBlock) => {
-                        let apply = match name.as_str() {
-                            "media" => media_applies(&prelude, media),
-                            "supports" | "layer" | "document" | "-moz-document" | "container" | "scope" | "starting-style" => true,
-                            _ => false,
-                        };
-                        if apply && depth < 8 {
-                            let _: Result<(), ParseError<()>> = p.parse_nested_block(|p| {
-                                parse_rule_list(p, media, out, imports, depth + 1);
-                                Ok(())
-                            });
+struct Sheet<'a> {
+    media: Media,
+    out: &'a mut Parsed,
+    imports: &'a mut Vec<String>,
+    layers: &'a mut Vec<String>,
+}
+
+impl Sheet<'_> {
+    /// A layer's place in the cascade (named on first sight).
+    fn layer(&mut self, name: String) -> u32 {
+        match self.layers.iter().position(|l| *l == name) {
+            Some(i) => i as u32,
+            None => {
+                self.layers.push(name);
+                self.layers.len() as u32 - 1
+            }
+        }
+    }
+
+    /// A layer's full name inside `parent`; anonymous layers get one of their own.
+    fn layer_name(&self, name: &str, parent: Option<&str>) -> String {
+        let name = name.trim();
+        let name = if name.is_empty() { format!("#{}", self.layers.len()) } else { name.to_string() };
+        match parent {
+            Some(p) => format!("{p}.{name}"),
+            None => name,
+        }
+    }
+
+    fn rule_list(&mut self, p: &mut Parser, layer: Option<&str>, depth: u32) {
+        loop {
+            let state = p.state();
+            let tok = match p.next() {
+                Ok(t) => t.clone(),
+                Err(_) => break,
+            };
+            match tok {
+                Token::CDO | Token::CDC | Token::Semicolon => {}
+                Token::AtKeyword(name) => {
+                    let name = name.to_ascii_lowercase();
+                    let prelude: Result<String, ParseError<()>> = p.parse_until_before(Delimiter::CurlyBracketBlock | Delimiter::Semicolon, |p| {
+                        let start = p.position();
+                        while p.next().is_ok() {}
+                        Ok(p.slice_from(start).to_string())
+                    });
+                    let prelude = prelude.unwrap_or_default();
+                    match p.next() {
+                        Ok(Token::CurlyBracketBlock) => {
+                            let apply = match name.as_str() {
+                                "media" => media_applies(&prelude, self.media),
+                                "supports" => supports_applies(&prelude),
+                                "container" => container_applies(&prelude, self.media),
+                                "layer" | "document" | "-moz-document" | "scope" => true,
+                                _ => false,
+                            };
+                            if apply && depth < 8 {
+                                let inner = (name == "layer").then(|| self.layer_name(&prelude, layer));
+                                if let Some(n) = &inner {
+                                    self.layer(n.clone());
+                                }
+                                let inner = inner.as_deref().or(layer);
+                                let _: Result<(), ParseError<()>> = p.parse_nested_block(|p| {
+                                    self.rule_list(p, inner, depth + 1);
+                                    Ok(())
+                                });
+                            }
                         }
-                    }
-                    _ => {
-                        if name == "import" {
-                            if let Some(u) = import_url(&prelude) {
-                                imports.push(u);
+                        _ => {
+                            if name == "import" {
+                                if let Some(u) = import_url(&prelude) {
+                                    self.imports.push(u);
+                                }
+                            } else if name == "layer" {
+                                // The statement form fixes the layers' order.
+                                for n in prelude.split(',') {
+                                    let n = self.layer_name(n, layer);
+                                    self.layer(n);
+                                }
                             }
                         }
                     }
                 }
-            }
-            _ => {
-                p.reset(&state);
-                let sel: Result<SelectorList<Impl>, _> =
-                    p.parse_until_before(Delimiter::CurlyBracketBlock, |p| SelectorList::parse(&SelParser, p, ParseRelative::No));
-                match p.next() {
-                    Ok(Token::CurlyBracketBlock) => {
-                        let decls: Result<Vec<Decl>, ParseError<()>> = p.parse_nested_block(|p| Ok(parse_decls(p)));
-                        if let (Ok(sel), Ok(decls)) = (sel, decls) {
-                            if !decls.is_empty() {
-                                out.push((sel, decls));
+                _ => {
+                    p.reset(&state);
+                    let sel: Result<SelectorList<Impl>, _> =
+                        p.parse_until_before(Delimiter::CurlyBracketBlock, |p| SelectorList::parse(&SelParser, p, ParseRelative::No));
+                    match p.next() {
+                        Ok(Token::CurlyBracketBlock) => {
+                            let decls: Result<Vec<Decl>, ParseError<()>> = p.parse_nested_block(|p| Ok(parse_decls(p)));
+                            if let (Ok(sel), Ok(decls)) = (sel, decls) {
+                                if !decls.is_empty() {
+                                    let id = layer.map_or(UNLAYERED, |l| self.layer(l.to_string()));
+                                    self.out.push((sel, decls, id));
+                                }
                             }
                         }
+                        _ => break,
                     }
-                    _ => break,
                 }
             }
         }
     }
+}
+
+/// The @imports of a style sheet (they come before its rules).
+pub fn imports_of(css: &str) -> Vec<String> {
+    let mut p = Parser::new(css);
+    let mut out = Vec::new();
+    while let Ok(t) = p.next() {
+        match t.clone() {
+            Token::CDO | Token::CDC | Token::Semicolon => {}
+            Token::AtKeyword(name) if name.eq_ignore_ascii_case("import") || name.eq_ignore_ascii_case("charset") || name.eq_ignore_ascii_case("layer") => {
+                let prelude: Result<String, ParseError<()>> = p.parse_until_after(Delimiter::Semicolon, |p| {
+                    let start = p.position();
+                    while p.next().is_ok() {}
+                    Ok(p.slice_from(start).to_string())
+                });
+                if name.eq_ignore_ascii_case("import") {
+                    out.extend(prelude.ok().and_then(|s| import_url(s.trim_end_matches(';'))));
+                }
+            }
+            _ => break,
+        }
+    }
+    out
 }
 
 fn import_url(prelude: &str) -> Option<String> {
@@ -180,50 +258,170 @@ fn import_url(prelude: &str) -> Option<String> {
     }
 }
 
+/// Split at `sep` outside parentheses.
+fn split_top<'a>(s: &'a str, sep: &str) -> Vec<&'a str> {
+    let mut out = Vec::new();
+    let (mut level, mut start, mut i) = (0, 0, 0);
+    while i < s.len() {
+        match s.as_bytes()[i] {
+            b'(' => level += 1,
+            b')' => level -= 1,
+            _ => {}
+        }
+        if level == 0 && s[i..].starts_with(sep) {
+            out.push(&s[start..i]);
+            i += sep.len();
+            start = i;
+            continue;
+        }
+        i += 1;
+    }
+    out.push(&s[start..]);
+    out
+}
+
+/// `(...)` without its parentheses, when they enclose all of it.
+fn unwrap_parens(s: &str) -> Option<&str> {
+    let inner = s.strip_prefix('(')?.strip_suffix(')')?;
+    let mut level = 0;
+    for c in inner.bytes() {
+        match c {
+            b'(' => level += 1,
+            b')' => level -= 1,
+            _ => {}
+        }
+        if level < 0 {
+            return None;
+        }
+    }
+    Some(inner)
+}
+
+/// A boolean condition of `not`, `and`, `or` and parentheses over `leaf`.
+fn condition(s: &str, leaf: &dyn Fn(&str) -> bool) -> bool {
+    let s = s.trim();
+    if let Some(r) = s.strip_prefix("not ").or(s.strip_prefix("not(").and_then(|_| s.strip_prefix("not"))) {
+        return !condition(r, leaf);
+    }
+    let parts = split_top(s, " or ");
+    if parts.len() > 1 {
+        return parts.iter().any(|p| condition(p, leaf));
+    }
+    let parts = split_top(s, " and ");
+    if parts.len() > 1 {
+        return parts.iter().all(|p| condition(p, leaf));
+    }
+    match unwrap_parens(s) {
+        Some(inner) if inner.trim_start().starts_with(['(', 'n']) && (inner.contains(" and ") || inner.contains(" or ") || inner.trim_start().starts_with('(') || inner.trim_start().starts_with("not ")) => condition(inner, leaf),
+        _ => leaf(s),
+    }
+}
+
 /// Does an @media query list hold for a screen of this size?
 pub fn media_applies(q: &str, m: Media) -> bool {
     let q = q.to_ascii_lowercase();
     if q.trim().is_empty() {
         return true;
     }
-    q.split(',').any(|part| {
+    split_top(&q, ",").iter().any(|part| {
         let part = part.trim();
         let (neg, part) = match part.strip_prefix("not ") {
             Some(r) => (true, r),
             None => (false, part),
         };
         let part = part.strip_prefix("only ").unwrap_or(part);
-        let mut ok = true;
-        for term in part.split(" and ") {
-            let t = term.trim();
-            if t.is_empty() {
-                continue;
-            }
-            if let Some(inner) = t.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
-                ok &= feature(inner, m);
-            } else {
-                ok &= matches!(t, "screen" | "all");
-            }
-        }
-        ok != neg
+        condition(part, &|t| match unwrap_parens(t.trim()) {
+            Some(inner) => feature(inner, m),
+            None => matches!(t.trim(), "screen" | "all"),
+        }) != neg
     })
 }
 
+/// A length in a media query, in pels (`em`s are the initial 16 px).
+fn media_len(v: &str) -> Option<f32> {
+    fn one(t: &Tok) -> Option<f32> {
+        match t {
+            Tok::Num(n) => Some(*n),
+            Tok::Dim(n, u) => match u.as_str() {
+                "px" => Some(*n),
+                "em" | "rem" => Some(n * 16.0),
+                "pt" => Some(n * 96.0 / 72.0),
+                _ => None,
+            },
+            Tok::Func(f, a) if f == "calc" => sum(a),
+            _ => None,
+        }
+    }
+    fn sum(t: &[Tok]) -> Option<f32> {
+        let (mut acc, mut sign) = (0.0, 1.0);
+        for x in t {
+            match x {
+                Tok::Delim('+') => sign = 1.0,
+                Tok::Delim('-') => sign = -1.0,
+                x => {
+                    acc += sign * one(x)?;
+                    sign = 1.0;
+                }
+            }
+        }
+        Some(acc)
+    }
+    sum(&tokens(v))
+}
+
+/// `width >= 48rem`, `400px <= width < 800px`, `48rem < height`.
+fn range_feature(f: &str, m: Media) -> Option<bool> {
+    let b = f.as_bytes();
+    let (mut parts, mut ops, mut start, mut i, mut level) = (Vec::new(), Vec::new(), 0, 0, 0);
+    while i < b.len() {
+        match b[i] {
+            b'(' => level += 1,
+            b')' => level -= 1,
+            b'<' | b'>' | b'=' if level == 0 => {
+                let n = if b.get(i + 1) == Some(&b'=') { 2 } else { 1 };
+                parts.push(f[start..i].trim());
+                ops.push(&f[i..i + n]);
+                i += n;
+                start = i;
+                continue;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    parts.push(f[start..].trim());
+    if ops.is_empty() {
+        return None;
+    }
+    let val = |s: &str| match s {
+        "width" => Some(m.width),
+        "height" => Some(m.height),
+        s => media_len(s),
+    };
+    let mut ok = true;
+    for (i, op) in ops.iter().enumerate() {
+        let (a, b) = (val(parts[i])?, val(parts[i + 1])?);
+        ok &= match *op {
+            "<" => a < b,
+            "<=" => a <= b,
+            ">" => a > b,
+            ">=" => a >= b,
+            _ => a == b,
+        };
+    }
+    Some(ok)
+}
+
 fn feature(f: &str, m: Media) -> bool {
+    if let Some(r) = range_feature(f, m) {
+        return r;
+    }
     let Some((name, value)) = f.split_once(':') else {
         // (color), (hover)...
-        return !matches!(f.trim(), "prefers-reduced-motion" | "forced-colors" | "inverted-colors");
+        return !matches!(f.trim(), "prefers-reduced-motion" | "forced-colors" | "inverted-colors" | "prefers-reduced-transparency" | "prefers-reduced-data" | "prefers-contrast" | "grid");
     };
     let v = value.trim();
-    let px = |v: &str| -> Option<f32> {
-        if let Some(n) = v.strip_suffix("px") {
-            n.trim().parse().ok()
-        } else if let Some(n) = v.strip_suffix("rem").or(v.strip_suffix("em")) {
-            n.trim().parse::<f32>().ok().map(|n| n * 16.0)
-        } else {
-            v.parse().ok()
-        }
-    };
+    let px = media_len;
     match name.trim() {
         "min-width" => px(v).is_some_and(|x| m.width >= x),
         "max-width" => px(v).is_some_and(|x| m.width <= x),
@@ -242,11 +440,52 @@ fn feature(f: &str, m: Media) -> bool {
     }
 }
 
+/// An @supports condition.
+pub fn supports_applies(q: &str) -> bool {
+    condition(q, &|t| {
+        let t = t.trim();
+        if let Some(sel) = t.strip_prefix("selector(").and_then(|s| s.strip_suffix(')')) {
+            let mut p = Parser::new(sel);
+            return SelectorList::parse(&SelParser, &mut p, ParseRelative::No).is_ok();
+        }
+        match unwrap_parens(t).and_then(|d| d.split_once(':')) {
+            Some((name, value)) => supported(name.trim(), value.trim()),
+            None => false,
+        }
+    })
+}
+
+/// Would this declaration be understood?
+fn supported(name: &str, value: &str) -> bool {
+    let name = name.to_ascii_lowercase();
+    let value = value.to_ascii_lowercase();
+    const NOT_VALUES: [&str; 8] = ["subgrid", "mod(", "rem(", "conic-gradient", "anchor(", "round(", "linear-gradient", "scroll("];
+    !name.starts_with('-')
+        && !matches!(name.as_str(), "anchor-name" | "position-anchor" | "position-area" | "animation-timeline" | "interpolate-size" | "field-sizing" | "content-visibility" | "scroll-timeline" | "view-timeline" | "backdrop-filter" | "mask" | "mask-image")
+        && !NOT_VALUES.iter().any(|v| value.contains(v))
+}
+
+/// An @container query, with the viewport standing in for the container.
+fn container_applies(q: &str, m: Media) -> bool {
+    let q = q.trim().to_ascii_lowercase();
+    // An optional container name comes first.
+    let q = match q.find('(') {
+        Some(i) if !q[..i].trim_end().ends_with("not") && !q[..i].trim().is_empty() => &q[i..],
+        _ => &q[..],
+    };
+    condition(q, &|t| match unwrap_parens(t.trim()) {
+        Some(inner) => feature(inner, m),
+        None => false,
+    })
+}
+
 /// The declarations of a block (also a `style` attribute's text).
 pub fn parse_decls(p: &mut Parser) -> Vec<Decl> {
     let mut out = Vec::new();
     loop {
         let name = match p.next() {
+            // Custom properties' names are case-sensitive.
+            Ok(Token::Ident(n)) if n.starts_with("--") => n.to_string(),
             Ok(Token::Ident(n)) => n.to_ascii_lowercase(),
             Ok(Token::Semicolon) => continue,
             Ok(_) => {
@@ -278,7 +517,7 @@ pub fn parse_decls(p: &mut Parser) -> Vec<Decl> {
             }
         }
         let value = value.trim().to_string();
-        if !value.is_empty() {
+        if !value.is_empty() || name.starts_with("--") {
             out.push(Decl { name, value, important });
         }
     }
@@ -400,6 +639,9 @@ pub fn parse_color(t: &[Tok], current: Color) -> Option<Color> {
             if f == "var" || f == "env" {
                 return None;
             }
+            if f == "color-mix" {
+                return color_mix(args, current);
+            }
             match f.as_str() {
                 "rgb" | "rgba" if nums.len() >= 3 => Some(alpha(nums.get(3)) << 24 | chan(nums[0]) << 16 | chan(nums[1]) << 8 | chan(nums[2])),
                 "hsl" | "hsla" if nums.len() >= 3 => {
@@ -427,6 +669,38 @@ pub fn parse_color(t: &[Tok], current: Color) -> Option<Color> {
         }
         _ => None,
     }
+}
+
+/// color-mix(in srgb, A p%, B q%): mixed as sRGB whatever the space named.
+fn color_mix(args: &[Tok], current: Color) -> Option<Color> {
+    let parts: Vec<&[Tok]> = args.split(|t| *t == Tok::Comma).collect();
+    let [_, a, b] = parts[..] else { return None };
+    let side = |t: &[Tok]| -> Option<(Color, Option<f32>)> {
+        let pct = t.iter().find_map(|x| if let Tok::Pct(p) = x { Some(*p / 100.0) } else { None });
+        let c: Vec<Tok> = t.iter().filter(|x| !matches!(x, Tok::Pct(_))).cloned().collect();
+        Some((parse_color(&c, current)?, pct))
+    };
+    let ((ca, pa), (cb, pb)) = (side(a)?, side(b)?);
+    let (pa, pb) = match (pa, pb) {
+        (None, None) => (0.5, 0.5),
+        (Some(p), None) => (p, 1.0 - p),
+        (None, Some(p)) => (1.0 - p, p),
+        (Some(p), Some(q)) => (p, q),
+    };
+    let total = pa + pb;
+    if total <= 0.0 {
+        return None;
+    }
+    let (wa, wb) = (pa / total, pb / total);
+    let ch = |c: Color, s: u32| (c >> s & 255) as f32;
+    let (aa, ab) = (ch(ca, 24) / 255.0, ch(cb, 24) / 255.0);
+    let alpha = aa * wa + ab * wb;
+    if alpha <= 0.0 {
+        return Some(TRANSPARENT);
+    }
+    let mix = |s: u32| ((ch(ca, s) * aa * wa + ch(cb, s) * ab * wb) / alpha).round().clamp(0.0, 255.0) as u32;
+    let scale = total.min(1.0);
+    Some(((alpha * scale * 255.0).round() as u32) << 24 | mix(16) << 16 | mix(8) << 8 | mix(0))
 }
 
 fn hex_color(h: &str) -> Option<Color> {
