@@ -306,6 +306,11 @@ Status markers: done, in progress, planned.
   JavaScript through Boa while a page loads; WPUrl objects open it.
   planned: scripts after loading (events, XMLHttpRequest), background
   images, position: fixed, HTTP keep-alive and a cache
+- done: GCC/kLIBC programs of the ArcaOS RPM repository, unmodified:
+  coreutils, grep, bash (fork, pipes), curl, and bitwiseworks' Firefox
+  45.9 (its UI, HTTP and HTTPS pages) (BROWSER.md, "OS/2 open-source
+  browsers"). planned: memory above 512 MB (OBJ_ANY, DLLs loaded high)
+  for QtWebEngine; Qt 5 programs (Designer dies in QtCore)
 
 ## Milestone 4: Presentation Manager (largely done)
 

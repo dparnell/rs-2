@@ -651,6 +651,21 @@ Fixed for it:
   executable longer than 8 MB (the installer: 84 MB with its ZIP
   appended) still shows its icon (SHELLTST).
 
+## GCC and kLIBC programs (the ArcaOS RPM ports)
+
+Unmodified OS/2 builds from bitwiseworks' and netlabs' RPM repository
+(GCC 4.9/9, kLIBC 0.1.14), on an HPFS test disk (UNIXROOT). How to get
+them, the details and the fixes they needed: [BROWSER.md, OS/2
+open-source browsers](BROWSER.md#os2-open-source-browsers).
+
+| What | Status | Notes |
+|------|--------|-------|
+| coreutils 8.31, grep 3.4, unzip 6.0, curl 7.75 (`--version`) | works | Also with `LANG=en_US`. |
+| bash 5.0 | works | Scripts, pipelines and `$(...)` (kLIBC's fork and spawn). |
+| Firefox 45.9 ESR (bitwiseworks GA2) | works | Its window and UI, an HTTP page from the host with CSS and JavaScript, HTTPS to example.com. About 8 minutes to start under TCG. |
+| Qt 5.15 Designer | fails | Qt and its OS/2 platform plugin load; it dies in QtCore on its second thread. |
+| Dooble (QtWebEngine) | fails | Its RPM dependencies do not resolve with the public repository's PTHR01.DLL; QtWebEngine would need DLLs loaded above 512 MB. |
+
 ## Fixed while getting these to run
 
 - Workplace Shell: REXXUTIL's `SysOpenObject('C:\MMOS2\SOUNDS', ...)`

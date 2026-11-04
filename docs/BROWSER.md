@@ -297,3 +297,142 @@ selectors, dtoa-short (MPL-2.0, used unmodified), foldhash and slotmap
 (Zlib), subtle (BSD-3-Clause), ICU4X data crates (Unicode-3.0), Boa
 (boa_engine and its crates: Unlicense or MIT). webshot (host only) adds
 fontdue (MIT/Apache-2.0/Zlib).
+
+<!-- Separate section (browser-os2 work): unmodified OS/2 ports of
+     open-source browsers. -->
+
+## OS/2 open-source browsers
+
+The OS/2 ports of open-source programs that bitwiseworks and netlabs
+build with GCC and kLIBC (the C library of the ArcaOS ecosystem) are
+unmodified OS/2 programs, so they are a test of how far rs2's kernel,
+DOSCALLS and PM go beyond what IBM's own programs use. The goal was
+bitwiseworks' Firefox 45.9 ESR for OS/2; on the way, the command-line
+programs of the same RPM repository.
+
+None of these files are part of the repository or of rs2's images. They
+are test inputs, downloaded from their official sources and unpacked on
+the host with tools that only read them (bsdtar reads both RPM and 7z
+archives), never run on the host.
+
+### Getting the files
+
+| Package | Where | Notes |
+|---------|-------|-------|
+| `firefox-45.9.0-4.oc00.pentium4.7z` | github.com/bitwiseworks/mozilla-os2, release FIREFOX_45_9_0esr_RELEASE_OS2_GA2 | Firefox itself; its `RPM_REQUIREMENTS` lists the RPMs it needs. |
+| `libc-0_1_14-1_oc00.zip` | rpm.netlabs.org/release/00/zip | kLIBC: LIBCN0.DLL, and LIBC06x.DLL forwarders to it. Do **not** also unpack the old `libc-0.6.6` packages over it: their LIBC066.DLL is a whole second C library, and programs mixing the two die with SIGABRT. Its `usr/lib/log/libcn0.dll` is the logging build (see Debugging). |
+| `libcx-0_7_5-1_oc00.zip` | same | LIBCX0.DLL (mmap, select, shared file handles). |
+| RPMs from rpm.netlabs.org/release/00/i386/i686 | `libgcc-9.2.0-5`, `libstdc++-9.2.0-5`, `libsupc++6-4.9.2.1-3` and the `libgcc-fwd`/`libstdc++-fwd` 9.2.0-5 packages | GCC 9 runtimes (GCC1.DLL, STDCPP6.DLL, GCC4xx.DLL forwarders); Firefox's GCC 4.9 build runs on them. Do not unpack `libgcc1`/`libstdc++6` 4.9 over them (same DLL names, too old for the Qt ports). |
+| Firefox's `RPM_REQUIREMENTS` (same directory; `pentium4/` for the pentium4 ones) | `cairo-1.12.18-3`, `fontconfig-2.12.4-1`, `freetype-2.8.0-1`, `hunspell-1.6.2-1`, `libcx`, `libicu-56.1-2`, `libjpeg-turbo-1.5.1-1`, `libkai-1.2.0-1`, `libpng-1.6.31-1`, `libvpx-1.6.1-1`, `nspr-4.12.0-4`, `nss-3.23.0-4`, `nss-util-3.23.0-4`, `os2-base-0.0.0-18`, `os2-mpts-0.0.0-2`, `pango-1.28.4-2`, `pixman-0.32.8-3`, `pthread` (20190130-23 from pentium4/ instead of the listed 20171227-22), `zlib-1.2.11-2`, `bww-resources-rpm-1.1.2-1` | |
+| What those need in turn | `expat-2.2.9-1`, `bzip2-libs-1.0.8-1`, `libglib-2_0-0`, `libgmodule-2_0-0`, `libgobject-2_0-0`, `libgthread-2_0-0` (all 2.33.12-3), `urpo-20160630-12`, `pcre-8.45-1`, `gettext-libs-0.19.8.1-3`, `libffi-3.0.11-1`, `libiconv-1.15-1`, `nss-softokn-3.23.0-4`, `nss-softokn-freebl-3.23.0-4` | Found by walking the import tables of Firefox's DLLs (the GLib DLLs are in the `lib*-2_0-0` packages, not `glib2`). |
+| Qt 5 (pentium4/; a separate tree `work/dlqt` with `libicu-68.1-1` and `freetype-2.10.0-2` in place of Firefox's ICU 56 and FreeType 2.8, disk `work/qt.img`) | `qt5-qtbase-5.15.2-2`, `qt5-qtbase-gui-5.15.2-2`, `qt5-qtdeclarative`, `qt5-qtsvg`, `qt5-qtwebchannel`, `qt5-qtwebengine` (5.15.2-1), `qt5-designer`, `qt5-qttools` and its `-libs-*`, `dooble-2022.10.15-1`, and for QtWebEngine `ffmpeg-libs-4.2.2-4`, `cups-libs-2.2.13-1`, `libevent-2.1.11-4`, `libkai-2.1.0-1`, `lcms2-2.11-1`, `libvpx-1.8.2-1`, `minizip-1.2.11-2`, `opus-1.3.1-2`, `pcre2-10.37-1`, `pcre2-utf16-10.37-1`, `libssp-9.2.0-5`, `libwebp-1.1.0-1`, `libxml2-2.9.10-3`, `libxslt-1.1.34-2`, `gnutls-3.6.12-1`, `nettle-3.5.1-1`, `gmp-6.2.0-2`, `p11-kit-0.23.21-1`, `libtasn1-4.14-1`, `lame-libs-3.100-1`, `openjpeg2-2.3.0-2`, `libtheora-1.1.1-1`, `libvorbis-1.3.7-2`, `libogg-1.3.4-1`, `x264-libs-0.160-1`, `xvidcore-1.3.7-2`, `xz-libs-5.2.3-3` | |
+| Command-line tests | `coreutils-8.31-1`, `coreutils-common-8.31-1`, `bash-5.0.11-3`, `ncurses-libs-5.9-1`, `readline-8.0-3`, `grep-3.4-1`, `pcre-legacy-8-8.12-2` (PCRE8.DLL for grep), `curl-7.75.0-2`, `libcurl-7.75.0-2`, `openssl-libs-1.1.1l-1`, `libidn2-2.3.0-1`, `libunistring-0.9.10-1`, `libpsl-0.21.1-1`, `unzip-6.0-9`, `gzip-1.8-1`, `tar-1.23-7`, `wget-1.20.3-2`, `sqlite-libs-3.28.0-1` | |
+
+Everything is unpacked into one tree, whose `@unixroot` directory
+becomes an HPFS test disk (long file names: Firefox's files do not fit
+8.3 names). The disk is built with `cargo xtask disk --hpfs --size 600
+-o work/ff.img` from a `work/disk.txt` that lists every file of the tree
+(`SRC -> usr\lib\...`; debug info, docs, man pages, headers and
+translations left out), plus the Liberation fonts from `dist/fonts` in
+`usr\share\fonts\ttf` and empty `HOME`, `TMP` and `var\cache\fontconfig`
+directories. It is attached with `--hdd work/ff.img` and becomes drive
+E: (the ESP is D:). The CONFIG.SYS of the test (`work/cfg/config.sys`)
+adds:
+
+```
+LIBPATH=.;C:\OS2\DLL;C:\OS2;C:\RS2;C:\;E:\USR\LIB;E:\USR\LIB\FIREFOX-45.9.0
+SET PATH=E:\USR\BIN;...
+SET UNIXROOT=E:
+SET HOME=E:\HOME
+SET TMP=E:\TMP
+SET TEMP=E:\TMP
+SET MOZILLA_HOME=E:\HOME
+```
+
+Firefox runs as the boot program:
+`cargo xtask run --hdd work/ff.img --init "E:\USR\LIB\FIREFOX-45.9.0\FIREFOX.EXE -no-remote about:blank" -- -m 1536`
+(1.5 GB of memory: its DLLs alone are 80 MB).
+
+### Results
+
+| Program | Status | Notes |
+|---------|--------|-------|
+| coreutils (`ls`, `cat`, `echo`, `wc`, `uname`, `head`, `tr`) | works | Also with `LANG=en_US` (kLIBC then builds its ctype tables through UCONV and LIBUNI). |
+| `grep` 3.4 | works | Character classes (`[[:xdigit:]]`) in en_US. |
+| `bash` 5.0 | works | `-c` scripts, loops, arithmetic, pipelines (`ls \| head`) and command substitution: kLIBC's fork (the child is the same program started again, which rebuilds the parent's memory, semaphores and sockets) and its spawn. Only "ttyname() not implemented" is printed: kLIBC's own message for a console. |
+| `curl --version`, `unzip -v` | works | OpenSSL 1.1, libidn2, libpsl, zlib, bzip2 load. |
+| Firefox 45.9 | works | Starts (about 8 minutes under QEMU's TCG on an Apple Silicon host, the first time; its profile is made in `E:\HOME`), shows its whole window (menus, tab bar, navigation and search bars, icons), loads an HTTP page from the host (`http://10.0.2.2:8088/`: CSS, a list, JavaScript changing the page) and an HTTPS site (`https://example.com`, DNS through QEMU, TLS with NSS, the padlock shown). Scripts the Liberation fonts lack (CJK, Arabic...) show as boxes. DIVE, the IM module (OS2IM) and the SNAP/Panorama pointer workaround are absent and Firefox goes on without them. Screenshots: work/progress/browser-os2. |
+| Qt 5.15 Designer | fails | QtCore, QtGui and the OS/2 platform plugin (QOS2.DLL) load and PM starts; the program dies in QtCore on its second thread (a lock in a null private object), not yet looked into. |
+| Dooble (Qt 5 WebEngine browser) | fails | The RPMs' DLLs do not fit together: LZMA5.DLL and QT5WEBC.DLL import pthread functions (`pthread_sigmask`, `pthread_condattr_*`) that no PTHR01.DLL in the public repository exports, and QtWebEngine needs ICU 68 and FreeType 2.10 where Firefox needs ICU 56 (separate disks: `work/dlqt`). QT5WEBC.DLL alone is 141 MB of code: without loading DLLs above 512 MB (OBJ_ANY, "high memory") it fills most of the shared arena. |
+
+### Firefox 45.9
+
+What it took, in the order Firefox met it (each a separate commit; the
+kernel ones are small and can be taken on their own):
+
+1. **DOSCALLS' constants.** kLIBC imports DOSCALLS 214-217, 369 and 419 as
+   values, not entry points (its `dos-data.imp`): DosMaxPathLen,
+   DosPageSize, DosLocalInfo and DosGlobalInfo (tiled selectors of the
+   information segments, turned into flat pointers), DosFlatCS and
+   DOS32TIB (it loads FS from it). The loader now resolves them.
+2. **Private semaphores opened by handle.** kLIBC's heap opens the
+   private event semaphore it has just created again with
+   DosOpenEventSem; OS/2 counts the open.
+3. **Code selectors for 32-bit code tiles.** kLIBC's 16-bit call path
+   switches to a 16:16 stack and RETFs into the 16:16 alias of an
+   address in its 32-bit code object, which carries no 16:16 alias flag.
+4. **Exceptions on a 16-bit stack** in 32-bit code (the same path) are
+   dispatched on the stack's flat address.
+5. **Per-process private semaphore handles**, the lowest free number
+   first: kLIBC's fork recreates the parent's semaphores in the child
+   by creating semaphores until it gets the same handles.
+6. **DosSysCtl(DOSSYSCTL_AM_I_DEBUGGED)** answers FALSE without a debugger.
+7. **Sockets in several processes' lists**: kLIBC's pipes are socket
+   pairs, and its fork adds the parent's sockets to the child's list
+   (`addsockettolist`) while the parent keeps them.
+8. **DosExecPgm passes all the argument strings** up to the double NUL,
+   byte for byte: kLIBC passes "\x7fkLIBC\x7f" and one flag-prefixed
+   string per argument.
+9. **UCONV and LIBUNI for kLIBC's locales**: the substitution count of
+   UniUconvToUcs is an output (kLIBC leaves it uninitialised and saw
+   every character fail), UniTransUpper/Lower, transformation and
+   attribute objects, UniQueryAttr, UniStrtod, UniStrxfrm (and
+   ordinal 145 of later LIBUNIs, which GLib imports).
+10. **The loader**: GCC's runtime DLLs export a value from a bundle with
+    object 0 (the kernel panicked); ICU's 13 MB data DLL is linked at
+    0x10000 with the "internal fixups removed" flag and no fixups, and
+    may load anywhere.
+11. **PM**: window properties (WinSetProperty and friends, PMMERGE
+    5450-5452), PMMERGE's Gre32Entry forwarders, WinQueryVisibleRegion,
+    GpiEnableYInversion/GpiQueryYInversion with mirrored blits to a
+    turned-over target (cairo draws its top-down images that way), and
+    PM set up on the first call that needs it (XUL opens an information
+    DC before WinInitialize).
+12. **Each thread its own local information segment.** kLIBC owns its
+    mutexes by the LINFOSEG's tidCurrent; with two CPUs one shared page
+    held only one thread's ID ("LIBC Heap release not owner").
+    DosLocalInfo now names a page that is each thread's own, mapped
+    through the per-CPU page tables of thread-local memory.
+
+### Not done
+
+- **High memory.** rs2 has no address space above 512 MB: DosAllocMem
+  ignores OBJ_ANY and DLLs are loaded below 512 MB. Firefox 45 fits (its
+  DLLs take about 120 MB of the shared arena); QtWebEngine would not run
+  alongside much else. The `firefox-highmem` package (marking Firefox's
+  DLLs to load high) is not needed and was not tried.
+- Firefox's sound (KAI: DART/UNIAUD), DIVE and printing were not tested.
+
+### Debugging kLIBC programs
+
+- `SET LIBC_LOGGING=-all+LOCALE` (groups: PROCESS, HEAP, LOCALE, FORK,
+  BACK_FS, SOCKET ... or `+all`) with `SET LIBC_LOGGING_OUTPUT=stderr`
+  and `SET BEGINLIBPATH=E:\USR\LIB\LOG` (the logging LIBCN0.DLL of the
+  libc zip) puts kLIBC's own trace on the serial log.
+- `apitrace=PROG` on the kernel command line (work/cmdline.txt) traces
+  the DOSCALLS of one program; `apitrace=CMD,PROG` also shows where the
+  loader put each DLL (load happens in the parent).
+- `SET PMTRACE=1` traces PM calls.
+- kLIBC prints its panics ("LIBC PANIC!!", "Killed by SIGxxx") with the
+  module and offset of the fault: `XUL 0:020E41B7` is object 0 offset
+  0x20E41B7.
