@@ -14,3 +14,8 @@ rustflags = [
     "-C", "link-arg=-Tlink.ld",
     "-C", "link-arg=--eh-frame-hdr",
 ]
+
+[env]
+# C code (ring) is compiled by clang with rs2libc's headers.
+CC_i686_unknown_linux_gnu = { value = "cc.sh", relative = true }
+AR_i686_unknown_linux_gnu = { value = "ar.sh", relative = true }
