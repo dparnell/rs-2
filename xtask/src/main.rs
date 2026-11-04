@@ -987,6 +987,12 @@ fn build_userland_std() -> Option<image::FileList> {
         if *pm {
             cmd.arg("--pm");
         }
+        let stem = dest.rsplit('\\').next().unwrap().split('.').next().unwrap();
+        if let Some(ico) = pmwin::appicons::icon_file(stem) {
+            let path = out_dir.join(format!("{stem}.ICO"));
+            std::fs::write(&path, ico).unwrap();
+            cmd.arg("--res").arg("1").arg("1").arg(&path);
+        }
         if !cmd.status().ok()?.success() {
             return None;
         }
