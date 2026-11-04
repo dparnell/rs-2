@@ -39,6 +39,8 @@ pub struct Config {
     /// VIDEO=WxHxCOLORS: 256 makes PM's display a palette-managed
     /// 256-colour one.
     pub video_colors: Option<u32>,
+    /// VIRTUALADDRESSLIMIT=MB: the end of the high memory arenas.
+    pub virtual_address_limit: Option<String>,
     /// Driver statements we do not load (BASEDEV/DEVICE/IFS).
     pub drivers: Vec<String>,
 }
@@ -99,6 +101,7 @@ pub fn parse(text: &str) -> Config {
                 c.video = bootinfo::video_mode(&v);
                 c.video_colors = bootinfo::video_colors(&v);
             }
+            "VIRTUALADDRESSLIMIT" => c.virtual_address_limit = Some(val.to_string()),
             "BASEDEV" | "DEVICE" | "IFS" => c.drivers.push(alloc::format!("{key}={val}")),
             _ => {}
         }
@@ -128,6 +131,25 @@ pub fn apply_nls(c: &Config) {
         }
     }
     crate::nls::configure(c.country, &c.codepage);
+}
+
+/// VIRTUALADDRESSLIMIT=n (MB): as IBM's kernel takes it, a decimal number
+/// from 512 (no high memory) up, rounded up to a multiple of 64; a value
+/// out of range leaves the default (1024). IBM's kernels stop at 3072,
+/// rs2 accepts up to 4032 (docs/ARCHITECTURE.md "Memory layout").
+pub fn apply_memory(c: &Config) {
+    let Some(v) = &c.virtual_address_limit else { return };
+    let n = v.trim().parse::<u32>().ok();
+    match n.map(crate::vm::set_limit_mb) {
+        Some(Ok(_)) => {}
+        _ => crate::println!(
+            "CONFIG.SYS: VIRTUALADDRESSLIMIT={}: not a number from {} to {}; {} is used",
+            v.trim(),
+            crate::vm::LIMIT_MIN_MB,
+            crate::vm::LIMIT_MAX_MB,
+            crate::vm::limit() >> 20
+        ),
+    }
 }
 
 /// Apply PRIORITY=, MAXWAIT= and TIMESLICE=.

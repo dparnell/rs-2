@@ -169,7 +169,7 @@ pub fn enable(p: &Process) {
 /// page directory entry the process has since added, copy it. Returns true
 /// if the access can be retried.
 pub fn sync_fault(addr: u64) -> bool {
-    if addr >= 1 << 30 {
+    if addr >= 1 << 32 {
         return false;
     }
     let Some(t) = crate::task::sched::current_opt() else { return false };
@@ -179,6 +179,19 @@ pub fn sync_fault(addr: u64) -> bool {
     let cpu = crate::smp::this().index();
     let Some(tables) = tlm.cpus.lock()[cpu] else { return false };
     if cr3 != tables.pml4 {
+        return false;
+    }
+    // High memory (above 1 GB): the copied PDPT points at the process's
+    // own page directories there, but lacks those it added since.
+    if addr >= 1 << 30 {
+        let gi = (addr >> 30) as usize;
+        let orig = table(table(p.cr3)[0] & ADDR_MASK)[gi];
+        let copy = &mut table(tables.pdpt)[gi];
+        let same = (*copy ^ orig) & !(super::paging::ACCESSED | super::paging::DIRTY) == 0;
+        if orig & PRESENT != 0 && !same {
+            *copy = orig;
+            return true;
+        }
         return false;
     }
     let i = (addr >> 21) as usize & 511;

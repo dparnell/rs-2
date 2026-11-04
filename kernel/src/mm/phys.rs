@@ -13,7 +13,12 @@ struct Frames {
     free: u64,
     /// Search hint: first word that may contain a free bit.
     hint: usize,
+    /// The same for frames above 4 GB.
+    hint_high: usize,
 }
+
+/// First bitmap word of the frames above 4 GB.
+const HIGH_WORD: usize = ((1u64 << 32) / PAGE / 64) as usize;
 
 static FRAMES: SpinLock<Option<Frames>> = SpinLock::new(None);
 
@@ -56,7 +61,7 @@ pub fn init(info: &BootInfo) {
     let bitmap =
         unsafe { core::slice::from_raw_parts_mut(phys_to_virt(bitmap_phys) as *mut u64, words) };
     bitmap.fill(!0);
-    let mut f = Frames { bitmap, frames, free: 0, hint: 0 };
+    let mut f = Frames { bitmap, frames, free: 0, hint: 0, hint_high: HIGH_WORD };
     for r in info.memory().iter().filter(|r| r.kind == MemoryKind::Usable) {
         let start = r.start.div_ceil(PAGE);
         let end = (r.start + r.len) / PAGE;
@@ -102,6 +107,9 @@ impl Frames {
             self.bitmap[w] &= !(1 << b);
             self.free += 1;
             self.hint = self.hint.min(w);
+            if w >= HIGH_WORD {
+                self.hint_high = self.hint_high.min(w);
+            }
         }
     }
 
@@ -120,6 +128,26 @@ impl Frames {
             }
         }
         None
+    }
+
+    /// A frame above 4 GB if there is one free (user memory: frames below
+    /// 4 GB stay for devices that can only reach those).
+    fn alloc_high(&mut self) -> Option<u64> {
+        for w in self.hint_high.max(HIGH_WORD)..self.bitmap.len() {
+            let v = self.bitmap[w];
+            if v != !0 {
+                let b = (!v).trailing_zeros() as u64;
+                let fr = w as u64 * 64 + b;
+                if fr >= self.frames {
+                    break;
+                }
+                self.set(fr);
+                self.hint_high = w;
+                return Some(fr * PAGE);
+            }
+        }
+        self.hint_high = self.bitmap.len();
+        self.alloc()
     }
 
     /// Allocate `n` contiguous frames below `limit` aligned to `align` frames.
@@ -166,7 +194,7 @@ pub fn alloc_user() -> Option<u64> {
         if f.free <= USER_RESERVE {
             return None;
         }
-        f.alloc()?
+        f.alloc_high()?
     };
     unsafe { core::ptr::write_bytes(phys_to_virt(p), 0, PAGE as usize) };
     Some(p)

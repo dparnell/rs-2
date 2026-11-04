@@ -1,6 +1,7 @@
 //! OS/2 process address spaces.
 //!
-//! Layout of the 512 MB compatibility region (identical to OS/2 2.x+):
+//! Layout (as OS/2 Warp 4.5 kernels arrange it, docs/ARCHITECTURE.md
+//! "Memory layout"):
 //!
 //! ```text
 //! 0x00000000  unused first 64 KB (null pointer trap)
@@ -8,12 +9,17 @@
 //!     ...
 //!             shared arena, allocated top down, same addresses in every
 //!             process (system DLLs, shared memory, the API gate)
-//! 0x20000000  end of the tiled region
+//! 0x20000000  end of the tiled region; high private arena, bottom up
+//!     ...
+//!             high shared arena, top down
+//! limit       VIRTUALADDRESSLIMIT (default 1 GB): nothing above
 //! ```
 //!
 //! Every memory object starts on a 64 KB boundary. LDT entry `n` describes
 //! the 64 KB tile at linear `n << 16`, so a 16:16 pointer `sel:off` and the
-//! flat address `(sel >> 3) << 16 | off` are interchangeable.
+//! flat address `(sel >> 3) << 16 | off` are interchangeable. Objects above
+//! 512 MB ("high memory", DosAllocMem's OBJ_ANY) have no tiles: 16-bit code
+//! cannot reach them.
 
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -38,6 +44,72 @@ pub const SHARED_FLOOR: u32 = 0x0400_0000;
 pub const GATE_BASE: u32 = 0x1ffe_0000;
 pub const GATE_SIZE: u32 = 0x2_0000;
 pub const LDT_ENTRIES: usize = 8192;
+
+/// Start of the high arenas.
+pub const HIGH_BASE: u32 = TILED_TOP;
+
+/// CONFIG.SYS VIRTUALADDRESSLIMIT, in MB: IBM's default, the smallest
+/// value (no high memory) and rs2's largest (IBM's kernels stop at 3072,
+/// as their own system arena lies above the limit; rs2 keeps nothing in
+/// the low 4 GB, and leaves the top 64 MB unused so that no object's end
+/// wraps to 0).
+pub const LIMIT_DEFAULT_MB: u32 = 1024;
+pub const LIMIT_MIN_MB: u32 = 512;
+pub const LIMIT_MAX_MB: u32 = 4032;
+
+static LIMIT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(LIMIT_DEFAULT_MB << 20);
+
+/// The virtual address limit: the end of the high arenas (0x20000000 when
+/// there is no high memory).
+pub fn limit() -> u32 {
+    LIMIT.load(core::sync::atomic::Ordering::Relaxed)
+}
+
+/// True if the system has high memory (VIRTUALADDRESSLIMIT above 512).
+pub fn has_high() -> bool {
+    limit() > HIGH_BASE
+}
+
+/// Set VIRTUALADDRESSLIMIT (MB) at start-up, as IBM's kernel takes it:
+/// decimal, 512 to the maximum (else rejected), rounded up to 64 MB.
+pub fn set_limit_mb(mb: u32) -> Result<u32, ()> {
+    if !(LIMIT_MIN_MB..=LIMIT_MAX_MB).contains(&mb) {
+        return Err(());
+    }
+    let bytes = (mb << 20).next_multiple_of(0x400_0000);
+    LIMIT.store(bytes, core::sync::atomic::Ordering::Relaxed);
+    Ok(bytes >> 20)
+}
+
+/// IBM keeps an eighth of the high region for each side: the high private
+/// arena never reaches the top eighth, the high shared arena never the
+/// bottom one; between them the boundary moves with use.
+fn high_reserve() -> u32 {
+    ((limit() - HIGH_BASE) / 8) & !(TILE - 1)
+}
+
+/// Highest end of the high private arena.
+pub fn high_private_top() -> u32 {
+    limit() - high_reserve()
+}
+
+/// Lowest address of the high shared arena.
+pub fn high_shared_floor() -> u32 {
+    HIGH_BASE + high_reserve()
+}
+
+/// End of each address space's high private objects (by page-table
+/// root), so the high shared arena keeps above all of them. Taken after
+/// the shared arena lock, never before.
+fn high_private_ends() -> &'static SpinLock<BTreeMap<u64, u32>> {
+    static ENDS: SpinLock<BTreeMap<u64, u32>> = SpinLock::new(BTreeMap::new());
+    &ENDS
+}
+
+/// Lowest high shared reservation (the ceiling of high private objects).
+fn lowest_high_shared(a: &BTreeMap<u32, u32>) -> u32 {
+    a.range(HIGH_BASE..).next().map_or(limit(), |(&b, _)| b)
+}
 
 /// `DosAllocMem` and friends: protection and allocation flags.
 pub mod pag {
@@ -195,21 +267,45 @@ fn shared_arena() -> &'static SpinLock<BTreeMap<u32, u32>> {
 /// Reserve `size` bytes (rounded to 64 KB) in the shared arena. With
 /// `at = Some(addr)` the exact address is required.
 pub fn reserve_shared(size: u32, at: Option<u32>) -> Option<u32> {
+    reserve_shared_in(size, at, false)
+}
+
+/// Reserve in the high shared arena (DosAllocSharedMem with OBJ_ANY, DLL
+/// objects marked for high memory). None when there is no room there (or
+/// no high memory): callers fall back to the low arena, as IBM's do.
+pub fn reserve_shared_high(size: u32) -> Option<u32> {
+    if !has_high() {
+        return None;
+    }
+    reserve_shared_in(size, None, true)
+}
+
+fn reserve_shared_in(size: u32, at: Option<u32>, high: bool) -> Option<u32> {
     let size = size.next_multiple_of(TILE);
     let mut a = shared_arena().lock();
     let overlaps =
         |a: &BTreeMap<u32, u32>, base: u32| a.iter().any(|(&b, &s)| base < b + s && b < base + size);
+    // The high shared arena stays above every high private object.
+    let high_floor = || {
+        let ends = high_private_ends().lock();
+        ends.values().copied().max().unwrap_or(0).max(high_shared_floor())
+    };
     if let Some(base) = at {
-        if base % TILE != 0 || base < SHARED_FLOOR || base + size > TILED_TOP || overlaps(&a, base) {
+        if base % TILE != 0 || base < SHARED_FLOOR || overlaps(&a, base) {
+            return None;
+        }
+        let end = base.checked_add(size)?;
+        let ok = if base >= HIGH_BASE { base >= high_floor() && end <= limit() } else { end <= TILED_TOP };
+        if !ok {
             return None;
         }
         a.insert(base, size);
         return Some(base);
     }
-    let mut top = GATE_BASE;
+    let (mut top, floor) = if high { (limit(), high_floor()) } else { (GATE_BASE, SHARED_FLOOR) };
     loop {
         let base = top.checked_sub(size)?;
-        if base < SHARED_FLOOR {
+        if base < floor {
             return None;
         }
         match a.iter().find(|&(&b, &s)| base < b + s && b < base + size) {
@@ -289,6 +385,15 @@ pub enum VmError {
     InvalidParameter,
 }
 
+/// The arenas DosQuerySysInfo reports on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Arena {
+    Private,
+    Shared,
+    HighPrivate,
+    HighShared,
+}
+
 impl VmError {
     pub fn code(self) -> u32 {
         match self {
@@ -345,8 +450,10 @@ impl AddressSpace {
     }
 
     fn free_in_private(&self, base: u32, size: u32) -> bool {
-        let end = base + size.next_multiple_of(TILE);
-        if base < ARENA_START || end > TILED_TOP {
+        let Some(end) = base.checked_add(size.next_multiple_of(TILE)) else { return false };
+        // Within one arena: the low one, or the high private one.
+        let ok = if base < HIGH_BASE { base >= ARENA_START && end <= TILED_TOP } else { end <= high_private_top() };
+        if !ok {
             return false;
         }
         let clash = self.regions.values().any(|r| base < r.reserved_end() && r.base < end);
@@ -376,10 +483,125 @@ impl AddressSpace {
         None
     }
 
-    /// Insert a region and write its LDT descriptors.
-    pub fn insert(&mut self, r: Region) {
+    /// Insert a region and write its LDT descriptors (none above 512 MB).
+    pub fn insert(&mut self, mut r: Region) {
+        if r.base >= HIGH_BASE {
+            r.seg = SegKind::None;
+            r.seg_limit = None;
+        }
         self.write_descriptors(&r);
         self.regions.insert(r.base, r);
+    }
+
+    /// Allocate a private object in the high arena (DosAllocMem with
+    /// OBJ_ANY): from 512 MB up, below every high shared object. No LDT
+    /// tiles. NoMemory when it does not fit (or there is no high memory).
+    pub fn alloc_high(&mut self, size: u32, flags: u32) -> Result<u32, VmError> {
+        if size == 0 {
+            return Err(VmError::InvalidParameter);
+        }
+        if !has_high() {
+            return Err(VmError::NoMemory);
+        }
+        let size = size.next_multiple_of(PAGE);
+        // Choose and record under the shared arena lock, so a shared
+        // reservation made meanwhile cannot take the same range.
+        let a = shared_arena().lock();
+        let ceiling = high_private_top().min(lowest_high_shared(&a));
+        let span = size.next_multiple_of(TILE);
+        let mut base = HIGH_BASE;
+        let found = loop {
+            let Some(end) = base.checked_add(span) else { break None };
+            if end > ceiling {
+                break None;
+            }
+            match self.regions.range(..end).next_back() {
+                Some((_, r)) if r.reserved_end() > base => base = r.reserved_end().next_multiple_of(TILE),
+                _ => break Some(base),
+            }
+        };
+        let Some(base) = found else { return Err(VmError::NoMemory) };
+        {
+            let mut ends = high_private_ends().lock();
+            let e = ends.entry(self.root).or_insert(0);
+            *e = (*e).max(base + span);
+        }
+        drop(a);
+        let state = if flags & pag::COMMIT != 0 {
+            if flags & pag::GUARD != 0 { PageState::Guard } else { PageState::Committed }
+        } else {
+            PageState::Reserved
+        };
+        self.insert(Region {
+            base,
+            size,
+            flags,
+            pages: vec![state; (size / PAGE) as usize],
+            backing: Backing::Private,
+            seg: SegKind::None,
+            seg_limit: None,
+        });
+        Ok(base)
+    }
+
+    /// Free address space in one of the arenas, as DosQuerySysInfo's
+    /// QSV_MAXPRMEM / QSV_MAXSHMEM / QSV_MAXHPRMEM / QSV_MAXHSHMEM report
+    /// it (IBM's kernel adds up the gaps between the objects and the room
+    /// up to the arena's boundary): in 64 KB units, for this process.
+    pub fn arena_avail(&self, which: Arena) -> u32 {
+        let a = shared_arena().lock();
+        let (lo, hi, private) = match which {
+            Arena::Private => (ARENA_START, TILED_TOP, true),
+            Arena::Shared => (SHARED_FLOOR, GATE_BASE, false),
+            Arena::HighPrivate if has_high() => (HIGH_BASE, high_private_top().min(lowest_high_shared(&a)), true),
+            Arena::HighShared if has_high() => {
+                let ends = high_private_ends().lock().values().copied().max().unwrap_or(0);
+                (ends.max(high_shared_floor()), limit(), false)
+            }
+            _ => return 0,
+        };
+        let mut used: Vec<(u32, u32)> = a.iter().map(|(&b, &s)| (b, b + s)).collect();
+        if private {
+            used.extend(self.regions.values().map(|r| (r.base, r.reserved_end())));
+        }
+        drop(a);
+        used.sort_unstable();
+        let mut free = 0u32;
+        let mut at = lo;
+        for (b, e) in used {
+            if e <= at || b >= hi {
+                continue;
+            }
+            if b > at {
+                free += (b - at) & !(TILE - 1);
+            }
+            at = at.max(e);
+        }
+        if hi > at {
+            free += (hi - at) & !(TILE - 1);
+        }
+        free
+    }
+
+    /// Recompute the end of this space's high private objects after one
+    /// went away.
+    fn update_high_end(&self) {
+        let a = shared_arena().lock();
+        let end = self
+            .regions
+            .range(HIGH_BASE..)
+            .filter(|(_, r)| matches!(r.backing, Backing::Private) && !a.iter().any(|(&b, &s)| r.base < b + s && b < r.reserved_end()))
+            .map(|(_, r)| r.reserved_end())
+            .max();
+        let mut ends = high_private_ends().lock();
+        match end {
+            Some(e) => {
+                ends.insert(self.root, e);
+            }
+            None => {
+                ends.remove(&self.root);
+            }
+        }
     }
 
     fn write_descriptors(&mut self, r: &Region) {
@@ -425,6 +647,13 @@ impl AddressSpace {
             }
             None => self.find_private(size).ok_or(VmError::NoMemory)?,
         };
+        if base >= HIGH_BASE {
+            let a = shared_arena().lock();
+            let mut ends = high_private_ends().lock();
+            let e = ends.entry(self.root).or_insert(0);
+            *e = (*e).max(base + size.next_multiple_of(TILE));
+            drop(a);
+        }
         let state = if flags & pag::COMMIT != 0 {
             if flags & pag::GUARD != 0 { PageState::Guard } else { PageState::Committed }
         } else {
@@ -479,6 +708,9 @@ impl AddressSpace {
     /// Release the object starting at `base`.
     pub fn free(&mut self, base: u32) -> Result<(), VmError> {
         let r = self.regions.remove(&base).ok_or(VmError::InvalidAddress)?;
+        if r.base >= HIGH_BASE && matches!(r.backing, Backing::Private) {
+            self.update_high_end();
+        }
         // A debugger's aliases of the pages go first (DBG_N_AliasFree).
         if matches!(r.backing, Backing::Private) {
             crate::api::debug::memory_freed(self.root, r.base, r.base + r.size);
@@ -773,8 +1005,14 @@ impl AddressSpace {
     pub fn query(&self, addr: u32, max: u32) -> Option<(u32, u32)> {
         let addr = addr & !(PAGE - 1);
         let Some(r) = self.region(addr) else {
-            // Free memory: report up to the next region.
-            let next = self.regions.range(addr..).next().map_or(TILED_TOP, |(&b, _)| b);
+            // Free memory: report up to the next region, within the arena
+            // (the low one ends at 512 MB, the high one at the limit;
+            // nothing is above the limit).
+            let arena_end = if addr < HIGH_BASE { TILED_TOP } else { limit() };
+            if addr >= arena_end {
+                return None;
+            }
+            let next = self.regions.range(addr..).next().map_or(arena_end, |(&b, _)| b.min(arena_end));
             return Some(((next - addr).min(max.max(PAGE)), pag::FREE));
         };
         let first = ((addr - r.base) / PAGE) as usize;
@@ -924,6 +1162,7 @@ impl Drop for AddressSpace {
         for b in bases {
             let _ = self.free(b);
         }
+        high_private_ends().lock().remove(&self.root);
         paging::free_user_tables(self.root);
         phys::free(self.root);
     }
@@ -968,8 +1207,12 @@ pub fn seg_descriptor(base: u32, limit: u32, kind: SegKind, flags: u32) -> u64 {
     descriptor(base, limit, a, f)
 }
 
-/// The tiled selector for a linear address in the compatibility region.
+/// The tiled selector for a linear address in the compatibility region;
+/// 0 (no selector) above it, where nothing is tiled.
 pub fn tile_selector(addr: u32) -> u16 {
+    if addr >= TILED_TOP {
+        return 0;
+    }
     ((addr >> 13) | 7) as u16
 }
 
