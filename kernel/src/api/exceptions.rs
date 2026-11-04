@@ -188,8 +188,21 @@ fn load_context(sp: &mut vm::AddressSpace, at: u32, f: &mut TrapFrame) {
 }
 
 /// Is the thread running 32-bit flat code?
-fn flat32(sp: &vm::AddressSpace, f: &TrapFrame) -> bool {
-    vm::desc_big(sp.descriptor(f.cs as u16)) && vm::desc_big(sp.descriptor(f.ss as u16))
+/// The flat stack pointer for exception records when 32-bit code faulted:
+/// ESP, or, on a 16-bit stack (32-bit code in the middle of a thunk, as
+/// kLIBC's 16-bit call path), the flat address of SS:SP.
+fn flat_stack(sp: &vm::AddressSpace, f: &TrapFrame) -> Option<u32> {
+    if !vm::desc_big(sp.descriptor(f.cs as u16)) {
+        return None;
+    }
+    let ss = sp.descriptor(f.ss as u16);
+    if vm::desc_big(ss) {
+        Some(f.rsp as u32)
+    } else if f.ss & 4 != 0 {
+        Some(vm::desc_base(ss).wrapping_add(f.rsp as u32 & 0xffff))
+    } else {
+        None
+    }
 }
 
 /// Entry point for CPU exceptions raised by user code.
@@ -212,11 +225,11 @@ pub fn deliver(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
 pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, flags: u32, info: &[u32], address: u32) -> bool {
     let tib = t.tib();
     let mut sp = p.space.lock();
-    if !flat32(&sp, f) {
+    let Some(stack) = flat_stack(&sp, f) else {
         // Exceptions in 16-bit code are not dispatched to 32-bit handlers
         // here; 16-bit programs use DosSetVec.
         return false;
-    }
+    };
     let Some(head) = rd(&mut sp, tib) else { return false };
     if head == xcpt::END_OF_CHAIN || head == 0 {
         return false;
@@ -225,11 +238,11 @@ pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, fl
     // ShlExceptionHandler goes back to ShlSaveEnv's caller, as longjmp)
     // left its dispatch: one whose records are below the stack pointer
     // now is over.
-    let esp = f.rsp as u32;
+    let esp = stack;
     t.xcpt.lock().retain(|d| d.report > esp);
     let nested = !t.xcpt.lock().is_empty();
     let flags = flags | if nested { xcpt::EH_NESTED_CALL } else { 0 };
-    let Some((report, context)) = build_records(&mut sp, f, code, flags, info, address) else { return false };
+    let Some((report, context)) = build_records(&mut sp, f, stack, code, flags, info, address) else { return false };
     let d = Dispatch { report, context, reg: head, unwind: None, code };
     call_handler(&mut sp, f, &d, report.wrapping_sub(16));
     drop(sp);
@@ -239,8 +252,8 @@ pub fn raise(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code: u32, fl
 
 /// Build the exception report and context records below the thread's
 /// stack pointer; returns their addresses.
-fn build_records(sp: &mut vm::AddressSpace, f: &TrapFrame, code: u32, flags: u32, info: &[u32], address: u32) -> Option<(u32, u32)> {
-    let esp = (f.rsp as u32).wrapping_sub(256) & !15;
+fn build_records(sp: &mut vm::AddressSpace, f: &TrapFrame, stack: u32, code: u32, flags: u32, info: &[u32], address: u32) -> Option<(u32, u32)> {
+    let esp = stack.wrapping_sub(256) & !15;
     let context = esp.wrapping_sub(CONTEXT_SIZE);
     let report = context.wrapping_sub(REPORT_SIZE) & !15;
     let mut r = alloc::vec![0u8; REPORT_SIZE as usize];
@@ -264,11 +277,9 @@ fn build_records(sp: &mut vm::AddressSpace, f: &TrapFrame, code: u32, flags: u32
 /// and Len), on the stack of 32-bit code; None for 16-bit code.
 pub fn records(p: &Arc<Process>, t: &Arc<Thread>, f: &TrapFrame, code: u32, info: &[u32], address: u32) -> Option<(u32, u32)> {
     let mut sp = p.space.lock();
-    if !flat32(&sp, f) {
-        return None;
-    }
+    let stack = flat_stack(&sp, f)?;
     let nested = !t.xcpt.lock().is_empty();
-    build_records(&mut sp, f, code, if nested { xcpt::EH_NESTED_CALL } else { 0 }, info, address)
+    build_records(&mut sp, f, stack, code, if nested { xcpt::EH_NESTED_CALL } else { 0 }, info, address)
 }
 
 /// Set up the frame to call the handler of `d.reg`.
@@ -469,15 +480,15 @@ pub fn exit_unwind(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) -> bool
         return false;
     }
     let mut sp = p.space.lock();
-    if !flat32(&sp, f) {
+    let Some(stack) = flat_stack(&sp, f) else {
         return false;
-    }
+    };
     let Some(head) = rd(&mut sp, tib) else { return false };
     if head == xcpt::END_OF_CHAIN || head == 0 {
         return false;
     }
     let code = if t.sync_exit.load(Ordering::Relaxed) { xcpt::PROCESS_TERMINATE } else { xcpt::ASYNC_PROCESS_TERMINATE };
-    let esp = (f.rsp as u32).wrapping_sub(512) & !15;
+    let esp = stack.wrapping_sub(512) & !15;
     let report = esp.wrapping_sub(REPORT_SIZE) & !15;
     let mut r = alloc::vec![0u8; REPORT_SIZE as usize];
     r[0..4].copy_from_slice(&code.to_le_bytes());
