@@ -46,8 +46,10 @@ pub fn classify(fd: c_int) -> Option<Fd> {
         None
     } else if fd < SOCK_BASE {
         Some(Fd::File(fd as u32))
-    } else if fd < DIR_BASE {
+    } else if fd < crate::net::ALIAS_BASE {
         Some(Fd::Socket((fd - SOCK_BASE) as u32))
+    } else if fd < DIR_BASE {
+        crate::net::alias(fd).map(Fd::Socket)
     } else {
         Some(Fd::Dir((fd - DIR_BASE) as usize))
     }
@@ -240,7 +242,7 @@ pub unsafe extern "C" fn close(fd: c_int) -> c_int {
             let rc = unsafe { DosClose(h) };
             if rc != 0 { fail_os2(rc) } else { 0 }
         }
-        Some(Fd::Socket(s)) => crate::net::close_socket(s),
+        Some(Fd::Socket(s)) => crate::net::close_socket(fd, s),
         Some(Fd::Dir(i)) => {
             let mut d = DIRS.lock();
             match d.get_mut(i) {
@@ -929,6 +931,9 @@ pub unsafe extern "C" fn ioctl(fd: c_int, req: core::ffi::c_ulong, arg: *mut c_v
         (None, _) => fail(libc::EBADF),
         (Some(Fd::Socket(s)), libc::FIONBIO) => crate::net::set_nonblocking(s, unsafe { *(arg as *const c_int) } != 0),
         (Some(Fd::Socket(s)), libc::FIONREAD) => crate::net::nread(s, arg as *mut c_int),
+        // Anonymous pipes cannot be non-blocking: reads block (std's
+        // Command::output then reads standard output to its end first).
+        (Some(Fd::File(_)), libc::FIONBIO) => 0,
         (Some(_), libc::FIOCLEX) => unsafe { fcntl(fd, libc::F_SETFD, 1) },
         (Some(_), libc::FIONCLEX) => unsafe { fcntl(fd, libc::F_SETFD, 0) },
         (Some(Fd::File(h)), libc::TCGETS) if flags(h) & F_CHARDEV != 0 => 0,
@@ -1110,4 +1115,22 @@ pub unsafe extern "C" fn closedir(d: *mut Dir) -> c_int {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn dirfd(d: *mut Dir) -> c_int {
     unsafe { (*d).fd }
+}
+
+// Zero-copy transfers std tries first (fs::copy, io::copy): not here, so
+// std copies through a buffer.
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sendfile64(_out: c_int, _in: c_int, _off: *mut off64_t, _n: size_t) -> ssize_t {
+    fail(libc::ENOSYS) as ssize_t
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn splice(_a: c_int, _ao: *mut off64_t, _b: c_int, _bo: *mut off64_t, _n: size_t, _f: u32) -> ssize_t {
+    fail(libc::ENOSYS) as ssize_t
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn copy_file_range(_a: c_int, _ao: *mut off64_t, _b: c_int, _bo: *mut off64_t, _n: size_t, _f: u32) -> ssize_t {
+    fail(libc::ENOSYS) as ssize_t
 }

@@ -6,12 +6,13 @@
 
 use alloc::vec::Vec;
 use core::ffi::{c_char, c_int, c_void};
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use libc::{addrinfo, size_t, sockaddr, socklen_t, ssize_t};
 
 use crate::errno::{fail, fail_bsd};
 use crate::file::{Fd, SOCK_BASE, classify};
+use crate::spin::SpinLock;
 use crate::sys::*;
 
 const MAX_SOCKETS: usize = 4096;
@@ -64,16 +65,65 @@ pub fn nread(s: u32, out: *mut c_int) -> c_int {
     0
 }
 
-pub fn close_socket(s: u32) -> c_int {
+/// Duplicates of socket descriptors (`dup`, std's `try_clone`): rs2's
+/// sockets have no duplicate handles, so further descriptors from
+/// [`ALIAS_BASE`] name the same socket, which is closed with the last one.
+pub const ALIAS_BASE: c_int = 0x1_8000;
+static ALIASES: SpinLock<Vec<Option<u32>>> = SpinLock::new(Vec::new());
+static REFS: [AtomicU32; MAX_SOCKETS] = [const { AtomicU32::new(0) }; MAX_SOCKETS];
+
+pub fn alias(fd: c_int) -> Option<u32> {
+    ALIASES.lock().get((fd - ALIAS_BASE) as usize).copied().flatten()
+}
+
+pub fn close_socket(fd: c_int, s: u32) -> c_int {
+    if fd >= ALIAS_BASE {
+        let mut a = ALIASES.lock();
+        match a.get_mut((fd - ALIAS_BASE) as usize) {
+            Some(e @ Some(_)) => *e = None,
+            _ => return fail(libc::EBADF),
+        }
+    }
+    if let Some(r) = REFS.get(s as usize) {
+        if r.fetch_sub(1, Ordering::AcqRel) > 1 {
+            return 0;
+        }
+    }
     if let Some(b) = NONBLOCK.get(s as usize) {
         b.store(false, Ordering::Relaxed);
     }
     check(unsafe { Rs2SockClose(s) })
 }
 
-pub fn dup_socket(_s: u32) -> c_int {
-    // rs2's sockets have no duplicate handles.
-    fail(libc::EOPNOTSUPP)
+pub fn dup_socket(s: u32) -> c_int {
+    let mut a = ALIASES.lock();
+    let i = match a.iter().position(|e| e.is_none()) {
+        Some(i) => {
+            a[i] = Some(s);
+            i
+        }
+        None => {
+            a.push(Some(s));
+            a.len() - 1
+        }
+    };
+    if i >= (crate::file::DIR_BASE - ALIAS_BASE) as usize {
+        a[i] = None;
+        return fail(libc::EMFILE);
+    }
+    if let Some(r) = REFS.get(s as usize) {
+        r.fetch_add(1, Ordering::AcqRel);
+    }
+    ALIAS_BASE + i as c_int
+}
+
+fn new_socket(s: u32) {
+    if let Some(b) = NONBLOCK.get(s as usize) {
+        b.store(false, Ordering::Relaxed);
+    }
+    if let Some(r) = REFS.get(s as usize) {
+        r.store(1, Ordering::Release);
+    }
 }
 
 fn sockaddr_in(addr: *const sockaddr, len: socklen_t) -> Result<SockAddrIn, c_int> {
@@ -113,13 +163,11 @@ pub unsafe extern "C" fn socket(domain: c_int, ty: c_int, proto: c_int) -> c_int
     if rc != 0 {
         return fail_bsd(rc);
     }
-    if s as usize >= (crate::file::DIR_BASE - SOCK_BASE) as usize {
+    if s as usize >= MAX_SOCKETS {
         unsafe { Rs2SockClose(s) };
         return fail(libc::EMFILE);
     }
-    if let Some(b) = NONBLOCK.get(s as usize) {
-        b.store(false, Ordering::Relaxed);
-    }
+    new_socket(s);
     if ty & libc::SOCK_NONBLOCK != 0 {
         set_nonblocking(s, true);
     }
@@ -166,9 +214,7 @@ pub unsafe extern "C" fn accept4(fd: c_int, addr: *mut sockaddr, len: *mut sockl
     if rc != 0 {
         return fail_bsd(rc);
     }
-    if let Some(b) = NONBLOCK.get(ns as usize) {
-        b.store(false, Ordering::Relaxed);
-    }
+    new_socket(ns);
     if flags & libc::SOCK_NONBLOCK != 0 {
         set_nonblocking(ns, true);
     }
