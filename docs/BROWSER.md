@@ -82,7 +82,7 @@ memory: above 512 MB while the high private arena has room
 (VIRTUALADDRESSLIMIT, docs/ARCHITECTURE.md "Memory layout"), then below
 (on a kernel without high memory OBJ_ANY is refused and it asks again
 without). STDTEST's `mem` gets 896 MB in 16 MB blocks at the default
-limit (1024: 464 MB low, 432 MB high) and about 3 GB with
+limit (1024: 464 MB low, 432 MB high) and 2688 MB with
 VIRTUALADDRESSLIMIT=3072; with VIRTUALADDRESSLIMIT=512 it is the 464 MB
 of the low private arena (less the program and the shared DLLs).
 
@@ -367,7 +367,7 @@ Firefox runs as the boot program:
 | `curl --version`, `unzip -v` | works | OpenSSL 1.1, libidn2, libpsl, zlib, bzip2 load. |
 | Firefox 45.9 | works | Starts (about 8 minutes under QEMU's TCG on an Apple Silicon host, the first time; its profile is made in `E:\HOME`), shows its whole window (menus, tab bar, navigation and search bars, icons), loads an HTTP page from the host (`http://10.0.2.2:8088/`: CSS, a list, JavaScript changing the page) and an HTTPS site (`https://example.com`, DNS through QEMU, TLS with NSS, the padlock shown). Scripts the Liberation fonts lack (CJK, Arabic...) show as boxes. DIVE, the IM module (OS2IM) and the SNAP/Panorama pointer workaround are absent and Firefox goes on without them. Screenshots: work/progress/browser-os2. |
 | Qt 5.15 Designer | fails | QtCore, QtGui and the OS/2 platform plugin (QOS2.DLL) load and PM starts; the program dies in QtCore on its second thread (a lock in a null private object), not yet looked into. |
-| Dooble (Qt 5 WebEngine browser) | fails | The RPMs' DLLs do not fit together: LZMA5.DLL and QT5WEBC.DLL import pthread functions (`pthread_sigmask`, `pthread_condattr_*`) that no PTHR01.DLL in the public repository exports, and QtWebEngine needs ICU 68 and FreeType 2.10 where Firefox needs ICU 56 (separate disks: `work/dlqt`). QT5WEBC.DLL alone is 141 MB of code: without loading DLLs above 512 MB (OBJ_ANY, "high memory") it fills most of the shared arena. |
+| Dooble (Qt 5 WebEngine browser) | fails | The RPMs' DLLs do not fit together: LZMA5.DLL and QT5WEBC.DLL import pthread functions (`pthread_sigmask`, `pthread_condattr_*`) that no PTHR01.DLL in the public repository exports, and QtWebEngine needs ICU 68 and FreeType 2.10 where Firefox needs ICU 56 (separate disks: `work/dlqt`). QT5WEBC.DLL's 136 MB code object carries the OBJHIGHMEM flag, so rs2 would now load it above 512 MB; with VIRTUALADDRESSLIMIT=3072 loading still stops at LZMA5.DLL's missing import, before QT5WEBC.DLL is placed. |
 
 ### Firefox 45.9
 
@@ -424,11 +424,14 @@ kernel ones are small and can be taken on their own):
 
 ### Not done
 
-- **High memory.** rs2 has no address space above 512 MB: DosAllocMem
-  ignores OBJ_ANY and DLLs are loaded below 512 MB. Firefox 45 fits (its
-  DLLs take about 120 MB of the shared arena); QtWebEngine would not run
-  alongside much else. The `firefox-highmem` package (marking Firefox's
-  DLLs to load high) is not needed and was not tried.
+- **High memory** (done since; ARCHITECTURE.md "Memory layout"): kLIBC
+  takes its high heap with OBJ_ANY (above 512 MB at the default
+  VIRTUALADDRESSLIMIT of 1024: `apitrace` shows its 16 MB heap at
+  0x20030000), and its fork rebuilds it at the same addresses in the
+  child. bash, coreutils, grep and curl work at 1024 and 3072, and
+  Firefox 45.9 starts with VIRTUALADDRESSLIMIT=3072 (`--mem 3G`). The
+  `firefox-highmem` package (marking Firefox's DLLs to load high) was
+  not tried.
 - Firefox's sound (KAI: DART/UNIAUD), DIVE and printing were not tested.
 
 ### Debugging kLIBC programs

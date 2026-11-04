@@ -664,7 +664,7 @@ open-source browsers](BROWSER.md#os2-open-source-browsers).
 | bash 5.0 | works | Scripts, pipelines and `$(...)` (kLIBC's fork and spawn). |
 | Firefox 45.9 ESR (bitwiseworks GA2) | works | Its window and UI, an HTTP page from the host with CSS and JavaScript, HTTPS to example.com. About 8 minutes to start under TCG. |
 | Qt 5.15 Designer | fails | Qt and its OS/2 platform plugin load; it dies in QtCore on its second thread. |
-| Dooble (QtWebEngine) | fails | Its RPM dependencies do not resolve with the public repository's PTHR01.DLL; QtWebEngine would need DLLs loaded above 512 MB. |
+| Dooble (QtWebEngine) | fails | Its RPM dependencies do not resolve with the public repository's PTHR01.DLL (LZMA5.DLL imports `pthread_condattr_init`), so QT5WEBC.DLL is never placed; its 136 MB code object is marked OBJHIGHMEM and would now load above 512 MB. |
 
 ## Fixed while getting these to run
 
