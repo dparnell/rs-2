@@ -71,3 +71,6 @@ pub fn parse_user_url(s: &str) -> Option<Url> {
     }
     Url::parse(&format!("http://{s}")).ok()
 }
+
+#[cfg(test)]
+mod tests;

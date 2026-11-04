@@ -82,6 +82,8 @@ struct App {
     pending_fragment: Option<String>,
     /// The link Tab has moved to (a link number).
     focus_link: Option<usize>,
+    started: Option<std::time::Instant>,
+    layout_ms: u128,
     scroll_scale: i32,
 }
 
@@ -150,6 +152,8 @@ fn main() {
             relayout_pending: false,
             pending_fragment: None,
             focus_link: None,
+            started: None,
+            layout_ms: 0,
             scroll_scale: 1,
         });
     }
@@ -314,6 +318,7 @@ fn navigate(url: Url, record: bool, body: Option<(String, Vec<u8>)>) {
     }
     set_text(a.url_field, url.as_str());
     a.loading = true;
+    a.started = Some(std::time::Instant::now());
     a.pending_fragment = url.fragment().map(String::from);
     let generation = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
     set_status(&format!("Loading {url}..."));
@@ -400,11 +405,13 @@ fn loaded(l: Loaded) {
         scroll_to_fragment(&f);
     }
     invalidate(a.view);
+    let took = a.started.map(|t| t.elapsed().as_secs_f32()).unwrap_or(0.0);
+    let done = format!("Done ({took:.1} s; laid out in {} ms)", a.layout_ms);
     if images.is_empty() {
-        set_status("Done");
+        set_status(&done);
         return;
     }
-    set_status(&format!("Done; loading {} images...", images.len()));
+    set_status(&format!("{done}; loading {} images...", images.len()));
     let generation = GENERATION.load(Ordering::SeqCst);
     let client = a.client;
     std::thread::spawn(move || {
@@ -464,9 +471,13 @@ fn relayout(restyle: bool) {
     }
     let fonts = a.fonts.as_mut().unwrap();
     fonts.forget_current();
+    let t0 = std::time::Instant::now();
     let laid = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| webcore::layout::layout(&page.dom, &page.styles, &page.url, width, fonts, &a.image_sizes)));
     match laid {
-        Ok(l) => a.laid = Some(l),
+        Ok(l) => {
+            a.laid = Some(l);
+            a.layout_ms = t0.elapsed().as_millis();
+        }
         Err(_) => {
             a.laid = None;
             set_status("WebRS2 failed to lay out this page (a panic)");
@@ -941,7 +952,9 @@ extern "C" fn client_proc(hwnd: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WMU_IMAGES_DONE => {
             if mp2 == GENERATION.load(Ordering::SeqCst) {
-                set_status("Done");
+                let a = app();
+                let took = a.started.map(|t| t.elapsed().as_secs_f32()).unwrap_or(0.0);
+                set_status(&format!("Done ({took:.1} s with images; laid out in {} ms)", a.layout_ms));
             }
             0
         }

@@ -233,15 +233,28 @@ impl Painter<'_> {
         }
     }
 
-    fn ellipse(&self, x: f32, y: f32, w: f32, h: f32, color: i32, filled: bool) {
-        let (cx, cy) = ((x + w / 2.0).round() as i32 + self.x_off, self.y(y + h / 2.0));
-        let r = (w / 2.0).max(1.0) as i32;
-        let params = [r, r, 0, 0];
-        unsafe {
-            GpiSetColor(self.hps, color);
-            GpiSetArcParams(self.hps, params.as_ptr());
-            GpiMove(self.hps, &pt(cx, cy));
-            GpiFullArc(self.hps, if filled { DRO_FILL } else { 2 }, 0x10000);
+    /// A disc or a ring, drawn row by row (crisper than an arc at this
+    /// size).
+    fn ellipse(&self, x: f32, y: f32, w: f32, _h: f32, color: i32, filled: bool) {
+        let d = w.round().max(3.0);
+        let r = d / 2.0;
+        let (x0, y0) = (x.round(), y.round());
+        for row in 0..d as i32 {
+            let dy = row as f32 + 0.5 - r;
+            let half = (r * r - dy * dy).max(0.0).sqrt();
+            let (l, rr) = ((r - half).round(), (r + half).round());
+            if rr <= l {
+                continue;
+            }
+            if filled {
+                self.fill(x0 + l, y0 + row as f32, rr - l, 1.0, color);
+            } else {
+                self.fill(x0 + l, y0 + row as f32, 1.0, 1.0, color);
+                self.fill(x0 + rr - 1.0, y0 + row as f32, 1.0, 1.0, color);
+                if row == 0 || row == d as i32 - 1 {
+                    self.fill(x0 + l, y0 + row as f32, rr - l, 1.0, color);
+                }
+            }
         }
     }
 
