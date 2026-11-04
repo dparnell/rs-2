@@ -101,6 +101,8 @@ enum Atom {
 #[derive(Clone, Debug)]
 enum Kind {
     Word,
+    /// An inline box's margin, border and padding (left or right).
+    Gap,
     Space,
     Break,
     Atomic(Atom, f32, f32),
@@ -158,6 +160,8 @@ enum Raw {
     Text(String, Arc<Style>, Option<usize>, Color),
     Break(Arc<Style>),
     Atomic(Atom, f32, f32, Arc<Style>, Option<usize>),
+    /// Horizontal space of an inline box's edge; `true` on its left.
+    Gap(f32, Arc<Style>, bool),
 }
 
 impl IfcBuilder {
@@ -166,6 +170,7 @@ impl IfcBuilder {
             Raw::Text(t, s, ..) => !t.trim().is_empty() || matches!(s.white_space, WhiteSpace::Pre | WhiteSpace::PreWrap) && !t.is_empty(),
             Raw::Break(_) => true,
             Raw::Atomic(..) => true,
+            Raw::Gap(..) => false,
         })
     }
 }
@@ -286,6 +291,12 @@ fn build_ifc(b: IfcBuilder, block: &Style, fonts: &mut dyn Fonts, cw: f32) -> If
                 pieces.push(Piece { kind: Kind::Break, text: String::new(), w: 0.0, font: font_of(&st), style: st, link: None, bg: TRANSPARENT, wrap: true });
                 last_space = true;
             }
+            Raw::Gap(w, st, left) => {
+                pieces.push(Piece { kind: Kind::Gap, text: String::new(), w, font: font_of(&st), style: st, link: None, bg: TRANSPARENT, wrap: left });
+                if left {
+                    last_space = false;
+                }
+            }
             Raw::Atomic(atom, w, h, st, link) => {
                 pieces.push(Piece { kind: Kind::Atomic(atom, w, h), text: String::new(), w, font: font_of(&st), style: st, link, bg: TRANSPARENT, wrap: true });
                 last_space = false;
@@ -357,13 +368,13 @@ fn lay_lines(ifc: &Ifc, width: Option<f32>, fonts: &mut dyn Fonts) -> Lines {
                         pending = 0.0;
                     }
                     // A word wider than the line: break it between characters.
-                    if matches!(p.kind, Kind::Word) && p.wrap && x + pending == 0.0 && p.w > w && w > 0.0 {
+                    if matches!(p.kind, Kind::Word) && p.wrap && x + pending == 0.0 && p.w > w + 0.5 && w > 0.0 {
                         let mut part = String::new();
                         for c in p.text.chars() {
                             let mut t = part.clone();
                             t.push(c);
                             let tw = fonts.width(p.font, &t);
-                            if tw > w && !part.is_empty() {
+                            if tw > w + 0.5 && !part.is_empty() {
                                 let pw = fonts.width(p.font, &part);
                                 line.push((i, x, std::mem::take(&mut part), pw));
                                 x += pw;
@@ -456,7 +467,7 @@ fn finish(ifc: &Ifc, width: Option<f32>, fonts: &mut dyn Fonts, line: &mut Vec<(
 }
 
 fn ifc_layout<'a>(ifc: &'a mut Ifc, width: f32, fonts: &mut dyn Fonts) -> &'a Lines {
-    let w = (width * 4.0).round() / 4.0;
+    let w = (width * 4.0).ceil() / 4.0;
     if let Some(i) = ifc.cache.iter().position(|(cw, _)| *cw == w) {
         return &ifc.cache[i].1;
     }
@@ -821,7 +832,15 @@ impl Builder<'_> {
                         }
                         _ => {
                             let bg = if st.background >> 24 != 0 { st.background } else { bg };
+                            let edge = |i: usize| st.margin[i].px(0.0) + st.padding[i].px(0.0) + st.border(i);
+                            let (l, r) = (edge(style::LEFT), edge(style::RIGHT));
+                            if l != 0.0 {
+                                b.raw.push(Raw::Gap(l, st.clone(), true));
+                            }
                             self.walk(c, block, kids, b, link, bg);
+                            if r != 0.0 {
+                                b.raw.push(Raw::Gap(r, st.clone(), false));
+                            }
                         }
                     }
                 }
@@ -995,6 +1014,9 @@ fn measure<'a>(
                     },
                 };
                 let h = ifc_layout(ifc, w, fonts).height;
+                if std::env::var("WEBCORE_MEASURE").is_ok() {
+                    eprintln!("measure ifc {i} known {known:?} avail {avail:?} -> {w} x {h} ({} pieces, strut {:?})", ifc.pieces.len(), ifc.strut);
+                }
                 Size { width: w, height: known.height.unwrap_or(h) }
             }
             None => Size { width: known.width.unwrap_or(0.0), height: known.height.unwrap_or(0.0) },
@@ -1033,6 +1055,9 @@ pub fn layout(dom: &Dom, styles: &Styles, base: &Url, width: f32, fonts: &mut dy
     b.tree
         .compute_layout_with_measure(root, Size { width: AvailableSpace::Definite(width), height: AvailableSpace::MaxContent }, measure(&mut b.ifcs, b.fonts))
         .ok();
+    if std::env::var("WEBCORE_TREE").is_ok() {
+        b.tree.print_tree(root);
+    }
     // The canvas: the root's background, else the body's.
     let hs = b.style(html);
     let body = dom.find("body");
@@ -1170,7 +1195,7 @@ impl Painter<'_, '_> {
                         self.laid.link_rects.push((r, li));
                     }
                 }
-                Kind::Break => {}
+                Kind::Break | Kind::Gap => {}
             }
         }
     }
