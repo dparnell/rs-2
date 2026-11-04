@@ -70,6 +70,9 @@ pub enum Item {
     Image { r: Rect, node: DomId },
     Marker { r: Rect, kind: ListStyle, color: Color },
     Control { r: Rect, node: DomId, kind: ControlKind, font: FontKey },
+    /// Items up to the matching PopClip are clipped to `r`.
+    PushClip { r: Rect },
+    PopClip,
 }
 
 /// What a page looks like at a width.
@@ -635,7 +638,60 @@ fn taffy_style(s: &Style) -> taffy::Style {
             })
             .collect();
     }
-    if s.grid_column_span > 1 {
+    let tr = |tr: &Track| -> TrackSizingFunction {
+        match tr {
+            Track::Fr(f) => style_helpers::fr(*f),
+            Track::Len(Len::Px(v)) => style_helpers::length(*v),
+            Track::Len(Len::Pct(p)) => style_helpers::percent(*p / 100.0),
+            Track::Len(Len::Auto) => style_helpers::auto(),
+            Track::MinContent => style_helpers::min_content(),
+            Track::MaxContent => style_helpers::max_content(),
+        }
+    };
+    if matches!(s.display, D::Grid | D::InlineGrid) {
+        if !s.grid_rows.is_empty() {
+            t.grid_template_rows = s.grid_rows.iter().map(|x| GridTemplateComponent::Single(tr(x))).collect();
+        }
+        if !s.grid_areas.is_empty() {
+            let mut areas: Vec<taffy::GridTemplateArea<String>> = Vec::new();
+            for (r, row) in s.grid_areas.iter().enumerate() {
+                for (c, name) in row.iter().enumerate() {
+                    if name.starts_with('.') {
+                        continue;
+                    }
+                    let (r, c) = (r as u16 + 1, c as u16 + 1);
+                    match areas.iter_mut().find(|a| a.name == *name) {
+                        Some(a) => {
+                            a.row_start = a.row_start.min(r);
+                            a.row_end = a.row_end.max(r + 1);
+                            a.column_start = a.column_start.min(c);
+                            a.column_end = a.column_end.max(c + 1);
+                        }
+                        None => areas.push(taffy::GridTemplateArea { name: name.clone(), row_start: r, row_end: r + 1, column_start: c, column_end: c + 1 }),
+                    }
+                }
+            }
+            let cols = s.grid_areas.iter().map(|r| r.len()).max().unwrap_or(0) as u16;
+            t.grid_template_areas = Some(taffy::GridTemplateAreas { areas: areas.into_iter().collect(), row_count: s.grid_areas.len() as u16, column_count: cols });
+        }
+    }
+    if let Some(a) = &s.grid_area {
+        t.grid_row = Line { start: GridPlacement::NamedLine(a.clone(), 0), end: GridPlacement::NamedLine(a.clone(), 0) };
+        t.grid_column = Line { start: GridPlacement::NamedLine(a.clone(), 0), end: GridPlacement::NamedLine(a.clone(), 0) };
+    }
+    let lines = |(a, b): (i16, i16), span: u16| -> Option<Line<GridPlacement>> {
+        if a == 0 {
+            return None;
+        }
+        let end = if b != 0 { style_helpers::line(b) } else if span > 1 { style_helpers::span(span) } else { GridPlacement::Auto };
+        Some(Line { start: style_helpers::line(a), end })
+    };
+    if let Some(l) = lines(s.grid_row_lines, 1) {
+        t.grid_row = l;
+    }
+    if let Some(l) = lines(s.grid_col_lines, s.grid_column_span) {
+        t.grid_column = l;
+    } else if s.grid_column_span > 1 && s.grid_area.is_none() {
         t.grid_column = Line { start: style_helpers::span(s.grid_column_span), end: GridPlacement::Auto };
     }
     t
@@ -1096,8 +1152,12 @@ impl Painter<'_, '_> {
         let (w, h) = (l.size.width, l.size.height);
         self.laid.height = self.laid.height.max(y + h);
         let info = self.b.info.get(&n).map(|i| (i.node, i.style.clone(), i.bg_override));
+        let mut clip = false;
         if let Some((node, st, bgo)) = &info {
-            if st.display == D::None {
+            if st.display == D::None || st.invisible {
+                return;
+            }
+            if st.overflow_hidden && (w <= 1.5 || h <= 1.5) {
                 return;
             }
             if let Some(id) = node {
@@ -1131,6 +1191,13 @@ impl Painter<'_, '_> {
                 }
             }
         }
+        if let Some((_, st, _)) = &info {
+            if st.overflow_hidden && depth > 0 {
+                clip = true;
+                let r = Rect { x: x + l.border.left, y: y + l.border.top, w: (w - l.border.left - l.border.right).max(0.0), h: (h - l.border.top - l.border.bottom).max(0.0) };
+                self.laid.items.push(Item::PushClip { r });
+            }
+        }
         if let Some(Leaf::Ifc(i)) = self.b.tree.get_node_context(n).cloned() {
             let cx = x + l.padding.left + l.border.left;
             let cy = y + l.padding.top + l.border.top;
@@ -1140,6 +1207,9 @@ impl Painter<'_, '_> {
         let kids: Vec<NodeId> = self.b.tree.children(n).unwrap_or_default();
         for k in kids {
             self.paint(k, x, y, depth + 1);
+        }
+        if clip {
+            self.laid.items.push(Item::PopClip);
         }
     }
 

@@ -121,6 +121,7 @@ fn main() {
     for it in &laid.items {
         match it {
             Item::Fill { r, color } => c.fill(r.x, r.y, r.w, r.h, *color),
+            Item::PushClip { .. } | Item::PopClip => {}
             Item::Marker { r, kind, color } => {
                 if *kind == ListStyle::Circle {
                     c.fill(r.x, r.y, r.w, 1.0, *color);

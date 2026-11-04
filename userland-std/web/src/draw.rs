@@ -240,8 +240,27 @@ impl Painter<'_> {
         dom: &webcore::dom::Dom,
     ) {
         let bg = laid.background;
+        let mut clips: Vec<RectL> = Vec::new();
         for it in &laid.items {
             match it {
+                Item::PushClip { r } => {
+                    let pr = RectL::new(r.x.round() as i32 + self.x_off, self.y(r.y + r.h), (r.x + r.w).round() as i32 + self.x_off, self.y(r.y));
+                    clips.push(pr);
+                    unsafe { GpiIntersectClipRectangle(self.hps, &pr) };
+                }
+                Item::PopClip => {
+                    clips.pop();
+                    let mut old = 0;
+                    unsafe {
+                        GpiSetClipRegion(self.hps, 0, &mut old);
+                        if old != 0 {
+                            GpiDestroyRegion(self.hps, old);
+                        }
+                    }
+                    for c in &clips {
+                        unsafe { GpiIntersectClipRectangle(self.hps, c) };
+                    }
+                }
                 Item::Fill { r, color } => {
                     if r.y < bottom && r.y + r.h > top {
                         self.fill(r.x, r.y, r.w, r.h, rgb(*color, bg));
@@ -298,6 +317,15 @@ impl Painter<'_> {
                     }
                     let st = controls.get(node).cloned().unwrap_or_default();
                     self.control(r.x, r.y, r.w, r.h, *kind, *font, &st, *node, dom);
+                }
+            }
+        }
+        if !clips.is_empty() {
+            let mut old = 0;
+            unsafe {
+                GpiSetClipRegion(self.hps, 0, &mut old);
+                if old != 0 {
+                    GpiDestroyRegion(self.hps, old);
                 }
             }
         }

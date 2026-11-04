@@ -177,9 +177,18 @@ pub struct Style {
     pub order: i32,
     pub inset: [Len; 4],
     pub overflow_hidden: bool,
+    /// Not drawn with what it holds (opacity 0, clipped away).
+    pub invisible: bool,
     pub vertical_align: u8,
     pub grid_columns: Vec<Track>,
     pub grid_column_span: u16,
+    pub grid_rows: Vec<Track>,
+    /// grid-template-areas: the names of each row's cells.
+    pub grid_areas: Vec<Vec<String>>,
+    /// grid-area: name, or lines (row start, column start, row end, column end; 0 auto).
+    pub grid_area: Option<String>,
+    pub grid_row_lines: (i16, i16),
+    pub grid_col_lines: (i16, i16),
     pub vars: Arc<HashMap<String, String>>,
 }
 
@@ -236,9 +245,15 @@ impl Default for Style {
             order: 0,
             inset: [Len::Auto; 4],
             overflow_hidden: false,
+            invisible: false,
             vertical_align: 0,
             grid_columns: Vec::new(),
             grid_column_span: 1,
+            grid_rows: Vec::new(),
+            grid_areas: Vec::new(),
+            grid_area: None,
+            grid_row_lines: (0, 0),
+            grid_col_lines: (0, 0),
             vars: Arc::new(HashMap::new()),
         }
     }
@@ -1281,6 +1296,31 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
                 s.inset = e;
             }
         }
+        "opacity" => {
+            if let Tok::Num(n) = first {
+                s.invisible = *n <= 0.01;
+            } else if let Tok::Pct(p) = first {
+                s.invisible = *p <= 1.0;
+            }
+        }
+        "clip" => {
+            // rect(0 0 0 0), rect(1px, 1px, 1px, 1px): the visually-hidden idiom.
+            if let Tok::Func(f, args) = first {
+                if f == "rect" {
+                    let v: Vec<f32> = args.iter().filter_map(|a| match length(a, cx) { Some(Len::Px(p)) => Some(p), _ => None }).collect();
+                    if v.len() == 4 && (v[2] - v[0]).abs() <= 1.0 {
+                        s.invisible = true;
+                    }
+                }
+            }
+        }
+        "clip-path" => {
+            if let Tok::Func(f, args) = first {
+                if f == "inset" && matches!(args.first(), Some(Tok::Pct(p)) if *p >= 50.0) {
+                    s.invisible = true;
+                }
+            }
+        }
         "overflow" | "overflow-x" | "overflow-y" => s.overflow_hidden = matches!(first, Tok::Ident(k) if k == "hidden" || k == "clip" || k == "auto" || k == "scroll"),
         "vertical-align" => {
             s.vertical_align = match first {
@@ -1297,11 +1337,71 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
             tracks(t, cx, &mut v);
             s.grid_columns = v;
         }
-        "grid-column" | "grid-column-start" => {
-            if let (Some(Tok::Ident(k)), Some(Tok::Num(n))) = (t.first(), t.get(1)) {
-                if k == "span" {
-                    s.grid_column_span = (*n as u16).clamp(1, 64);
+        "grid-template-rows" => {
+            let mut v = Vec::new();
+            tracks(t, cx, &mut v);
+            s.grid_rows = v;
+        }
+        "grid-template-areas" => {
+            s.grid_areas = t.iter().filter_map(|x| if let Tok::Str(r) = x { Some(r.split_whitespace().map(|n| n.to_ascii_lowercase()).collect()) } else { None }).collect();
+        }
+        "grid-template" => {
+            let mut parts = t.split(|x| *x == Tok::Slash);
+            let rows = parts.next().unwrap_or(&[]);
+            let areas: Vec<Vec<String>> = rows.iter().filter_map(|x| if let Tok::Str(r) = x { Some(r.split_whitespace().map(|n| n.to_ascii_lowercase()).collect()) } else { None }).collect();
+            let mut rv = Vec::new();
+            let sizes: Vec<Tok> = rows.iter().filter(|x| !matches!(x, Tok::Str(_))).cloned().collect();
+            tracks(&sizes, cx, &mut rv);
+            s.grid_rows = rv;
+            s.grid_areas = areas;
+            if let Some(cols) = parts.next() {
+                let mut cv = Vec::new();
+                tracks(cols, cx, &mut cv);
+                s.grid_columns = cv;
+            }
+        }
+        "grid-area" => {
+            let parts: Vec<&[Tok]> = t.split(|x| *x == Tok::Slash).collect();
+            match parts.first().and_then(|p| p.first()) {
+                Some(Tok::Ident(name)) if name != "auto" => s.grid_area = Some(name.clone()),
+                _ => {
+                    let num = |i: usize| match parts.get(i).and_then(|p| p.first()) {
+                        Some(Tok::Num(n)) => *n as i16,
+                        _ => 0,
+                    };
+                    s.grid_row_lines = (num(0), num(2));
+                    s.grid_col_lines = (num(1), num(3));
                 }
+            }
+        }
+        "grid-column" | "grid-column-start" | "grid-row" | "grid-row-start" => {
+            let parts: Vec<&[Tok]> = t.split(|x| *x == Tok::Slash).collect();
+            let row = name.starts_with("grid-row");
+            let first = parts.first().copied().unwrap_or(&[]);
+            match (first.first(), first.get(1)) {
+                (Some(Tok::Ident(k)), Some(Tok::Num(n))) if k == "span" => {
+                    if !row {
+                        s.grid_column_span = (*n as u16).clamp(1, 64);
+                    }
+                }
+                (Some(Tok::Ident(k)), _) if k != "auto" && !row => s.grid_area = Some(k.clone()),
+                (Some(Tok::Num(a)), _) => {
+                    let end = match parts.get(1).and_then(|p| p.first()) {
+                        Some(Tok::Num(b)) => *b as i16,
+                        _ => 0,
+                    };
+                    if let (Some(Tok::Ident(k)), Some(Tok::Num(n))) = (parts.get(1).and_then(|p| p.first()), parts.get(1).and_then(|p| p.get(1))) {
+                        if k == "span" && !row {
+                            s.grid_column_span = (*n as u16).clamp(1, 64);
+                        }
+                    }
+                    if row {
+                        s.grid_row_lines = (*a as i16, end);
+                    } else {
+                        s.grid_col_lines = (*a as i16, end);
+                    }
+                }
+                _ => {}
             }
         }
         _ => {
