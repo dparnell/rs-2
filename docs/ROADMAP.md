@@ -302,9 +302,10 @@ Status markers: done, in progress, planned.
   ([BROWSER.md](BROWSER.md))
 - done: web browsers (BROWSER.md): WEBTEXT (text mode) and WebRS2
   (WEB.EXE, PM): HTTP/HTTPS (rustls, ring), html5ever, CSS with Servo's
-  selectors and cssparser, Taffy layout, GPI painting, images, forms;
-  WPUrl objects open it. planned: JavaScript (Boa), background images,
-  position: fixed, HTTP keep-alive and a cache
+  selectors and cssparser, Taffy layout, GPI painting, images, forms,
+  JavaScript through Boa while a page loads; WPUrl objects open it.
+  planned: scripts after loading (events, XMLHttpRequest), background
+  images, position: fixed, HTTP keep-alive and a cache
 
 ## Milestone 4: Presentation Manager (largely done)
 

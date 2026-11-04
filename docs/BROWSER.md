@@ -14,8 +14,8 @@ usable on its own:
    layout (Taffy for blocks, flexbox, grid and tables; inline text of its
    own), painting with GPI and rs2's outline fonts, images, links, history,
    forms. WPUrl objects open it.
-
-JavaScript (Boa) is not done.
+4. **JavaScript** through Boa with a small DOM (`userland-std/webjs`):
+   scripts run once while a page loads.
 
 Porting Servo whole was ruled out: it needs SpiderMonkey (C++), WebRender
 on OpenGL and a 64-bit address space.
@@ -51,9 +51,10 @@ profile with `panic = "unwind"` and link script) next to `userland/`:
 | Piece | What it does |
 |-------|--------------|
 | `rs2libc` | The C library: `start` (LX entry point, argv from the command line as OS/2 C runtimes split it, `environ` from the environment block, `.init_array` called with argc/argv/envp as glibc does: std's `env::args` gets them that way), `tls`, `malloc` (dlmalloc over DosAllocMem in 1 MB steps), `thread` (pthreads over DosCreateThread; keys; `__cxa_thread_atexit_impl`; pthread mutexes for C), `futex` (std's Mutex, Condvar, RwLock, Once and parking are `syscall(SYS_futex)`: wait queues hashed by address, each thread sleeping on its own event semaphore), `file` (descriptors, files, directories, `openat`/`unlinkat` family, pipes), `net` (BSD sockets over RS2API 201-218, `poll`, `getaddrinfo` over Rs2NetResolve), `time`, `process` (`posix_spawn` over DosExecPgm, `waitpid`, `kill`), `misc` (environment, `sysconf`, signals as no-ops, anonymous `mmap`, a ChaCha20 `getrandom` seeded from RDRAND, the timers and the TSC), `math` (libm's functions under C names), `string` |
+| `lld.sh` | The linker: rustup's rust-lld with `link.ld` and `syslib/`, paths found from the script's own directory (rustc links crates.io crates' cdylibs in their own directories; those are not used on rs2 and come out empty) |
 | `link.ld` | Code, read-only data and the unwind tables (`.eh_frame` found through `.eh_frame_hdr`) at 64 KB; data, `.init_array` and the TLS template in the next object |
 | `syslib/` | Empty `libc.a`, `libpthread.a`... for the `-l` options std's link line carries |
-| `include/`, `cc.sh`, `ar.sh` | C code: clang for i686, freestanding, rs2libc's headers; llvm-ar from rustup's llvm-tools |
+| `include/`, `cc.sh`, `ar.sh` | C code: clang for i686, freestanding, rs2libc's headers; llvm-ar from rustup's llvm-tools (`rustup component add llvm-tools`), else `llvm-ar` on PATH. Building needs `clang` on PATH (Xcode's does) |
 | `tools/elf2lx` | Also skips TLS relocations (the linker has resolved them), undefined weak symbols (0) and `.tbss` |
 | xtask | `STD_PROGRAMS`: builds the workspace, converts with a 4 MB stack |
 
@@ -224,6 +225,9 @@ Under QEMU (screenshots in `work/progress/browser-rust/`):
 - https://en.wikipedia.org/wiki/OS/2 (9000 elements, 1700 rules; styled in
   about 60 ms on the host): vector-2022's grid areas put the table of
   contents beside the article and the text wraps around the infobox;
+- a test page whose scripts (inline and from a file) rewrite a heading,
+  build a list, show a box on DOMContentLoaded and fill in a timer's
+  result;
 - a WPUrl object on the desktop (made with WPSTEST's CREATE), selected
   with the arrow keys and opened with Enter, starts WEB.EXE on its URL
   (OS2.INI names no browser).
@@ -239,9 +243,33 @@ WEBCORE_TREE=1 ...      # print Taffy's tree
 WEBCORE_MEASURE=1 ...   # trace inline measurements
 ```
 
+## Stage 4: JavaScript
+
+`userland-std/webjs` runs a page's scripts with **Boa** (a JavaScript
+engine in Rust) after the page is parsed and before it is styled, so what
+they change is what is shown. Scripts run in document order (inline and
+`src`; not modules or JSON), then DOMContentLoaded and load listeners,
+then the timers they set (in time order, a timer's own timers too). The
+DOM is JavaScript (`webjs/src/prelude.js`) over about thirty native
+functions on webcore's node ids: `document.getElementById`,
+`querySelector(All)` (Servo's selectors), `getElementsByTagName/ClassName`,
+`createElement`, `createTextNode`, `textContent`, `innerHTML` and
+`insertAdjacentHTML` (parsed by html5ever), `outerHTML`, attributes, `id`,
+`className`, `classList`, `dataset`, `style` (a proxy writing the `style`
+attribute), `appendChild`/`insertBefore`/`removeChild`/`remove`/`append`,
+the tree's links, `document.title`, `document.write` (appends to the
+body), `console` (to `WEB.LOG` with the scripts' errors), `location`,
+`navigator`, `localStorage` (per page), `setTimeout`. Events after loading
+(clicks, input) run nothing, there is no XMLHttpRequest or fetch, and
+`<noscript>` content goes. A loop iteration limit (1 million), a recursion
+limit and 2 MB of script per page keep pages from hanging the browser;
+`WEB -nojs` runs no scripts. The host tests (`cargo test -p webjs --target
+aarch64-apple-darwin`) change a document through most of the DOM and
+check errors and limits.
+
 ### Not done
 
-JavaScript (Boa, stage 4), `position: fixed` (laid out as absolute),
+Scripts after loading (events, XMLHttpRequest/fetch), `position: fixed` (laid out as absolute),
 background images, named grid lines (areas work), boxes avoiding floats
 (only lines do), `::before`/`::after` content,
 web fonts, borders' styles (all are solid), rounded corners, transforms,
@@ -258,5 +286,6 @@ markup5ever, string_cache, url, idna, flate2, miniz_oxide, png, gif,
 jpeg-decoder, taffy, dlmalloc, unwinding, gimli, libm, libc (MIT and/or
 Apache-2.0), encoding_rs (MIT/Apache-2.0 and BSD-3-Clause), cssparser,
 selectors, dtoa-short (MPL-2.0, used unmodified), foldhash and slotmap
-(Zlib), subtle (BSD-3-Clause), ICU4X data crates (Unicode-3.0). webshot
-(host only) adds fontdue (MIT/Apache-2.0/Zlib).
+(Zlib), subtle (BSD-3-Clause), ICU4X data crates (Unicode-3.0), Boa
+(boa_engine and its crates: Unlicense or MIT). webshot (host only) adds
+fontdue (MIT/Apache-2.0/Zlib).
