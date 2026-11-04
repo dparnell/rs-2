@@ -1,0 +1,9 @@
+[package]
+name = "stdtest"
+description = "Tests of the Rust standard library on rs2 (threads, files, sockets, time, panics, memory)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+rs2libc = { path = "../rs2libc" }

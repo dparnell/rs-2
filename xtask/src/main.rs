@@ -948,6 +948,48 @@ fn build_userland() -> Option<image::FileList> {
     for (src, dest) in APP_DATA {
         files.push((ul.join(src), dest.to_string()));
     }
+    files.extend(build_userland_std()?);
+    Some(files)
+}
+
+/// Programs in userland-std/ (Rust's std on rs2libc, docs/BROWSER.md):
+/// cargo package, LX name, PM program.
+const STD_PROGRAMS: &[(&str, &str, bool)] = &[
+    ("stdtest", "RS2\\STDTEST.EXE", false),
+];
+
+/// Build the userland-std workspace and convert its programs to LX.
+fn build_userland_std() -> Option<image::FileList> {
+    let dir = root().join("userland-std");
+    let status = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
+        .current_dir(&dir)
+        .args(["build", "--release"])
+        .env_remove("CARGO_TARGET_DIR")
+        .status()
+        .ok()?;
+    if !status.success() {
+        return None;
+    }
+    let out_dir = root().join("work/userland");
+    let mut files = Vec::new();
+    for (bin, dest, pm) in STD_PROGRAMS {
+        let elf = dir.join("target/i686-unknown-linux-gnu/release").join(bin);
+        let lx = out_dir.join(dest.rsplit('\\').next().unwrap());
+        let mut cmd = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
+        // A 4 MB stack for thread 1 (Linux gives programs 8 MB).
+        cmd.current_dir(root())
+            .args(["run", "-q", "--release", "-p", "elf2lx", "--"])
+            .arg(&elf)
+            .arg(&lx)
+            .args(["--stack", "4194304"]);
+        if *pm {
+            cmd.arg("--pm");
+        }
+        if !cmd.status().ok()?.success() {
+            return None;
+        }
+        files.push((lx, dest.to_string()));
+    }
     Some(files)
 }
 
