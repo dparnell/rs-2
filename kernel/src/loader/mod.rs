@@ -202,9 +202,9 @@ impl Module {
                 let v = match ordinal {
                     214 => Some(260),
                     215 => Some(crate::vm::PAGE as u16),
-                    216 => Some(crate::vm::tile_selector(
-                        crate::task::process::info_base() + crate::task::process::info::LINFOSEG,
-                    )),
+                    // Each thread's own copy (mm::tlm), so that tidCurrent
+                    // is right with threads on several CPUs.
+                    216 => Some(crate::vm::tile_selector(crate::mm::tlm::LIS_BASE)),
                     217 => Some(crate::vm::tile_selector(crate::infoseg::base())),
                     369 => Some(crate::arch::gdt::USER_CS),
                     419 => Some(crate::arch::gdt::TIB_SEL),

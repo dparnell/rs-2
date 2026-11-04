@@ -45,6 +45,29 @@ unsafe extern "C" {
     fn UniQueryAttr(name: *const u16) -> u32;
 }
 
+static LIS_BAD: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+static LIS_SEEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// A thread that compares the local information segment's tidCurrent
+/// with its TIB's thread ID for a while.
+unsafe extern "C" fn lis_reader(_: u32) {
+    unsafe {
+        let lis = (((&DosLocalInfo as *const u8 as u32) & 0xfff8) << 13) as *const u16;
+        let (mut tib, mut pib): (*mut Tib, *mut Pib) = (core::ptr::null_mut(), core::ptr::null_mut());
+        DosGetInfoBlocks(&mut tib, &mut pib);
+        let me = (*(*tib).ptib2).tid as u16;
+        for i in 0..20000u32 {
+            if core::ptr::read_volatile(lis.add(3)) != me {
+                LIS_BAD.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+            }
+            if i % 1000 == 0 {
+                DosSleep(0);
+            }
+        }
+        LIS_SEEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 pub fn run() {
     unsafe {
         let v = |p: &u8| p as *const u8 as u32;
@@ -63,6 +86,16 @@ pub fn run() {
         DosGetInfoBlocks(&mut tib, &mut pib);
         check("DosLocalInfo: LINFOSEG pid", *lis == (*pib).pid as u16);
         check("DosLocalInfo: LINFOSEG tid", *lis.add(3) == 1);
+        // Each thread sees its own ID there, also with threads running
+        // on several CPUs (kLIBC's mutexes are owned by it).
+        let mut tids = [0u32; 4];
+        for t in tids.iter_mut() {
+            DosCreateThread(t, lis_reader, 0, 0, 16384);
+        }
+        for t in tids.iter_mut() {
+            DosWaitThread(t, 0);
+        }
+        check("DosLocalInfo: every thread its own tidCurrent", LIS_BAD.load(core::sync::atomic::Ordering::Relaxed) == 0 && LIS_SEEN.load(core::sync::atomic::Ordering::Relaxed) == 4);
         // GINFOSEG: major/minor version at 21/22.
         check("DosGlobalInfo: GINFOSEG version", *gis.add(21) == 20 && *gis.add(22) == 45);
 

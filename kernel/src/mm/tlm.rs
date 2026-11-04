@@ -19,7 +19,6 @@
 //! Entries are only ever added during the life of a process, never changed
 //! or removed, so this is the only synchronisation needed.
 
-use alloc::sync::Arc;
 
 use super::paging::{ADDR_MASK, PRESENT, USER, WRITABLE};
 use super::phys::{self, phys_to_virt};
@@ -33,6 +32,14 @@ pub const TLM_BASE: u32 = 0x1fc0_0000;
 pub const TLM_SIZE: u32 = 0x20_0000;
 /// Page directory index of the reserved range (in the low 1 GB).
 const TLM_PD_INDEX: usize = (TLM_BASE >> 21) as usize & 511;
+/// Each thread's own copy of the local information segment, in its own
+/// tile of the reserved range: DOSCALLS exports its selector as the
+/// constant DosLocalInfo, and kLIBC reads the running thread's ID from
+/// it (tidCurrent). With threads of a process on several CPUs one
+/// shared page cannot hold every CPU's thread, so each thread has its
+/// own page here, mapped as the thread-local memory page is.
+pub const LIS_BASE: u32 = TLM_BASE + 0x1_0000;
+const LIS_PT_INDEX: usize = ((LIS_BASE - TLM_BASE) >> 12) as usize;
 
 /// One CPU's copies (physical addresses).
 #[derive(Clone, Copy)]
@@ -108,6 +115,23 @@ pub fn thread_page(t: &Thread) -> Option<u64> {
     Some(p)
 }
 
+/// The thread's copy of the local information segment: the process's,
+/// with the thread's ID as tidCurrent (made on first use).
+fn lis_page(p: &Process, t: &Thread) -> Option<u64> {
+    let pg = t.lis_page.load(core::sync::atomic::Ordering::Relaxed);
+    if pg != 0 {
+        return Some(pg);
+    }
+    let pg = phys::alloc()?;
+    let lis = (p.info + crate::task::process::info::LINFOSEG) as u64;
+    if let Some(src) = super::paging::translate(p.cr3, lis) {
+        unsafe { core::ptr::copy_nonoverlapping(phys_to_virt(src & ADDR_MASK) as *const u8, phys_to_virt(pg) as *mut u8, 64) };
+    }
+    unsafe { (phys_to_virt(pg) as *mut u16).add(3).write_unaligned(t.tid as u16) };
+    t.lis_page.store(pg, core::sync::atomic::Ordering::Relaxed);
+    Some(pg)
+}
+
 /// Switching to `t`, a thread of `p`, which uses thread-local memory: map
 /// its page in this CPU's table and return the page-table root to load
 /// (None: keep the process's own tables).
@@ -121,12 +145,21 @@ pub fn switch_in(p: &Process, t: &Thread) -> Option<u64> {
         *pte = want;
         crate::arch::invlpg(TLM_BASE as u64);
     }
+    let lis = lis_page(p, t)?;
+    let pte = &mut table(tables.pt)[LIS_PT_INDEX];
+    let want = lis | PRESENT | USER | super::paging::NO_EXEC;
+    if *pte != want {
+        *pte = want;
+        crate::arch::invlpg(LIS_BASE as u64);
+    }
     Some(tables.pml4)
 }
 
-/// Start using thread-local memory in `p` (DosAllocThreadLocalMemory).
-pub fn enable(p: &Arc<Process>) {
-    // Callers hold the kernel lock.
+/// Start using thread-local memory in `p` (DosAllocThreadLocalMemory,
+/// or the first touch of the thread's local information segment).
+pub fn enable(p: &Process) {
+    static ENABLING: SpinLock<()> = SpinLock::new(());
+    let _g = ENABLING.lock();
     if p.tlm.get().is_none() {
         p.tlm.set(Tlm::new());
     }
@@ -174,6 +207,11 @@ pub fn activate_fault(addr: u64) -> bool {
     }
     let Some(t) = crate::task::sched::current_opt() else { return false };
     let Some(p) = t.process() else { return false };
+    // The local information segment's page: the process starts using
+    // the per-CPU tables now.
+    if (LIS_BASE as u64..LIS_BASE as u64 + 0x1000).contains(&addr) {
+        enable(&p);
+    }
     let Some(tlm) = p.tlm.get() else { return false };
     // Already on this CPU's copies: a real fault (only the first page of
     // the range is ever mapped).
