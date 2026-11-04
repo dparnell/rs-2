@@ -45,24 +45,55 @@ struct Sem {
 }
 
 struct Table {
-    sems: BTreeMap<u32, Arc<Sem>>,
+    /// By key(): shared semaphores by handle, private ones by process
+    /// and handle.
+    sems: BTreeMap<u64, Arc<Sem>>,
     next: u32,
 }
 
 static TABLE: SpinLock<Table> = SpinLock::new(Table { sems: BTreeMap::new(), next: 1 });
 
-/// Handles: shared semaphores get bit 31 set (as OS/2 does), private ones
-/// do not.
-fn new_handle(shared: bool) -> u32 {
+const SHARED_BIT: u32 = 0x8000_0000;
+const PRIVATE_BASE: u32 = 0x0001_0000;
+
+/// Table key of handle `h` as process `pid` sees it.
+fn key(pid: u32, h: u32) -> u64 {
+    if h & SHARED_BIT != 0 { h as u64 } else { (pid as u64) << 32 | h as u64 }
+}
+
+/// Handles: shared semaphores get bit 31 set (as OS/2 does) and are
+/// unique in the system; private ones are numbered per process, the
+/// lowest free number first, as on OS/2 (kLIBC's fork recreates the
+/// parent's private semaphores in the child by creating semaphores until
+/// it gets the same handles).
+fn new_handle(t: &mut Table, shared: bool, pid: u32) -> u32 {
+    if shared {
+        let h = t.next;
+        t.next += 1;
+        return h | SHARED_BIT;
+    }
+    let lo = (pid as u64) << 32;
+    let mut want = PRIVATE_BASE + 1;
+    for (&k, _) in t.sems.range(lo..lo + SHARED_BIT as u64) {
+        if k as u32 != want {
+            break;
+        }
+        want += 1;
+    }
+    want
+}
+
+/// Add a semaphore; returns its handle.
+fn insert(shared: bool, pid: u32, s: Arc<Sem>) -> u32 {
     let mut t = TABLE.lock();
-    let h = t.next;
-    t.next += 1;
-    if shared { h | 0x8000_0000 } else { h | 0x0001_0000 }
+    let h = new_handle(&mut t, shared, pid);
+    t.sems.insert(key(pid, h), s);
+    h
 }
 
 fn get(c: &Ctx, h: u32) -> Option<Arc<Sem>> {
-    let s = TABLE.lock().sems.get(&h).cloned()?;
     let pid = c.process.pid;
+    let s = TABLE.lock().sems.get(&key(pid, h)).cloned()?;
     if !s.shared && s.creator != pid {
         return None;
     }
@@ -83,7 +114,7 @@ fn name_arg(c: &Ctx, p: u32) -> Result<Option<String>, u32> {
 }
 
 fn find_named(name: &str) -> Option<(u32, Arc<Sem>)> {
-    TABLE.lock().sems.iter().find(|(_, s)| s.name.as_deref() == Some(name)).map(|(&h, s)| (h, s.clone()))
+    TABLE.lock().sems.iter().find(|(_, s)| s.name.as_deref() == Some(name)).map(|(&h, s)| (h as u32, s.clone()))
 }
 
 fn create(c: &mut Ctx, kind: Kind) -> u32 {
@@ -98,7 +129,6 @@ fn create(c: &mut Ctx, kind: Kind) -> u32 {
         }
     }
     let shared = name.is_some() || attr & DC_SEM_SHARED != 0;
-    let h = new_handle(shared);
     let s = Arc::new(Sem {
         name,
         shared,
@@ -107,7 +137,7 @@ fn create(c: &mut Ctx, kind: Kind) -> u32 {
         waiters: WaitQueue::new(),
         opens: SpinLock::new(alloc::vec![(c.process.pid, 1)]),
     });
-    TABLE.lock().sems.insert(h, s);
+    let h = insert(shared, c.process.pid, s);
     c.write_u32(ph, h);
     0
 }
@@ -130,7 +160,7 @@ fn open(c: &mut Ctx, want_event: Option<bool>) -> u32 {
         // process (OS/2 counts the open; kLIBC's _fmutex_open opens its
         // own private event semaphores again this way).
         let pid = c.process.pid;
-        match TABLE.lock().sems.get(&h).cloned() {
+        match TABLE.lock().sems.get(&key(pid, h)).cloned() {
             Some(s) if s.shared || (s.creator == pid && s.opens.lock().iter().any(|&(p, _)| p == pid)) => (h, s),
             _ => return err::INVALID_HANDLE,
         }
@@ -183,7 +213,7 @@ fn close(c: &mut Ctx) -> u32 {
         o.is_empty()
     };
     if empty {
-        TABLE.lock().sems.remove(&h);
+        TABLE.lock().sems.remove(&key(pid, h));
     }
     0
 }
@@ -406,9 +436,9 @@ pub fn dos_create_mux_wait_sem(c: &mut Ctx) -> u32 {
         Err(e) => return e,
     };
     let shared = name.is_some() || attr & DC_SEM_SHARED != 0;
-    let h = new_handle(shared);
-    TABLE.lock().sems.insert(
-        h,
+    let h = insert(
+        shared,
+        c.process.pid,
         Arc::new(Sem {
             name,
             shared,
@@ -593,7 +623,7 @@ pub struct Sem32Info {
 }
 
 pub fn snapshot32() -> Vec<Sem32Info> {
-    let sems: Vec<(u32, Arc<Sem>)> = TABLE.lock().sems.iter().map(|(&h, s)| (h, s.clone())).collect();
+    let sems: Vec<(u32, Arc<Sem>)> = TABLE.lock().sems.iter().map(|(&h, s)| (h as u32, s.clone())).collect();
     let mut out = Vec::new();
     for (h, s) in sems {
         let mut flags = if s.shared { 0x0001 } else { 0 };
@@ -914,7 +944,7 @@ pub fn dos16_close_sem(c: &mut Ctx) -> u32 {
 /// Post the named event semaphore `name` (upper case) if it exists.
 pub fn post_named(name: &str) -> bool {
     let Some((h, _)) = find_named(name) else { return false };
-    post_event_handle(h);
+    post_event_handle(0, h);
     true
 }
 
@@ -927,8 +957,10 @@ pub fn mutex_owner(name: &str) -> Option<(u32, u32)> {
     }
 }
 
-pub fn post_event_handle(h: u32) {
-    let Some(s) = TABLE.lock().sems.get(&h).cloned() else { return };
+/// Post event semaphore `h` of process `pid` (any process for a shared
+/// semaphore).
+pub fn post_event_handle(pid: u32, h: u32) {
+    let Some(s) = TABLE.lock().sems.get(&key(pid, h)).cloned() else { return };
     if let Kind::Event { posts } = &mut *s.kind.lock() {
         if *posts < 0xffff {
             *posts += 1;

@@ -67,5 +67,16 @@ pub fn run() {
         check("DosOpenEventSem private by handle", DosOpenEventSem(null(), &mut h2) == 0 && h2 == hev);
         check("close opened private sem twice", DosCloseEventSem(hev) == 0 && DosCloseEventSem(hev) == 0);
         check("private sem gone after last close", DosCloseEventSem(hev) == 6);
+
+        // Private handles are per process, the lowest free one first
+        // (kLIBC's fork recreates them in the child by number).
+        let (mut a, mut b, mut c) = (0u32, 0u32, 0u32);
+        DosCreateMutexSem(null(), &mut a, 0, 0);
+        DosCreateMutexSem(null(), &mut b, 0, 0);
+        DosCloseMutexSem(a);
+        DosCreateMutexSem(null(), &mut c, 0, 0);
+        check("private sem handle reused lowest first", c == a && b != a);
+        DosCloseMutexSem(b);
+        DosCloseMutexSem(c);
     }
 }

@@ -9,8 +9,8 @@ use crate::sync::SpinLock;
 
 #[derive(Clone, Copy)]
 enum Action {
-    /// Post a 32-bit event semaphore.
-    PostEvent(u32),
+    /// Post a 32-bit event semaphore (process, handle).
+    PostEvent(u32, u32),
     /// Clear a 16-bit RAM semaphore: process and linear address (looked up
     /// when the timer fires: the memory may have been freed meanwhile).
     ClearRam(u32, u32),
@@ -72,7 +72,7 @@ pub fn tick() {
     }
     for a in fire {
         match a {
-            Action::PostEvent(h) => super::sem::post_event_handle(h),
+            Action::PostEvent(pid, h) => super::sem::post_event_handle(pid, h),
             Action::ClearRam(pid, lin) => {
                 if let Some(p) = crate::task::process::by_pid(pid) {
                     let sp = p.space.lock();
@@ -97,7 +97,7 @@ fn start32(c: &mut Ctx, repeat: bool) -> u32 {
     if !super::sem::is_event_handle(c, hsem) {
         return err::INVALID_HANDLE;
     }
-    let h = add(c.process.pid, ms, repeat, Action::PostEvent(hsem));
+    let h = add(c.process.pid, ms, repeat, Action::PostEvent(c.process.pid, hsem));
     c.write_u32(ph, h);
     0
 }
