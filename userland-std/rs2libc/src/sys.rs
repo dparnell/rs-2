@@ -10,6 +10,19 @@ pub const PAG_WRITE: u32 = 0x0002;
 pub const PAG_EXECUTE: u32 = 0x0004;
 pub const PAG_COMMIT: u32 = 0x0010;
 pub const PAG_DECOMMIT: u32 = 0x0020;
+/// Anywhere, also above 512 MB ("high memory", OS/2 4.5 kernels and rs2).
+pub const OBJ_ANY: u32 = 0x0400;
+
+/// DosAllocMem of committed read/write memory, above 512 MB when the
+/// system has room there; kernels without high memory (before OS/2 4.5)
+/// refuse OBJ_ANY with ERROR_INVALID_PARAMETER: then below.
+pub unsafe fn alloc_any(ppb: *mut *mut u8, cb: u32) -> APIRET {
+    let rc = unsafe { DosAllocMem(ppb, cb, PAG_READ | PAG_WRITE | PAG_COMMIT | OBJ_ANY) };
+    if rc != 87 {
+        return rc;
+    }
+    unsafe { DosAllocMem(ppb, cb, PAG_READ | PAG_WRITE | PAG_COMMIT) }
+}
 pub const OBJ_TILE: u32 = 0x0040;
 
 pub const SEM_INDEFINITE_WAIT: u32 = 0xffff_ffff;

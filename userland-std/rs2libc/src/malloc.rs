@@ -1,7 +1,10 @@
 //! malloc and friends: dlmalloc (the `dlmalloc` crate) taking its memory
 //! from DosAllocMem in 1 MB steps (OS/2 memory objects start on 64 KB
 //! boundaries, so small steps would waste address space). Large blocks get
-//! objects of their own and go back to the system when freed.
+//! objects of their own and go back to the system when freed. The memory
+//! is asked for with OBJ_ANY: above 512 MB when the system has high
+//! memory (VIRTUALADDRESSLIMIT), so programs are not held to the 512 MB
+//! of the low arena.
 
 use core::ffi::{c_int, c_void};
 use core::ptr::null_mut;
@@ -18,7 +21,7 @@ unsafe impl Allocator for Os2System {
     fn alloc(&self, size: usize) -> (*mut u8, usize, u32) {
         let size = (size + 0xffff) & !0xffff;
         let mut p = null_mut();
-        let rc = unsafe { DosAllocMem(&mut p, size as u32, PAG_READ | PAG_WRITE | PAG_COMMIT) };
+        let rc = unsafe { alloc_any(&mut p, size as u32) };
         if rc != 0 {
             return (null_mut(), 0, 0);
         }

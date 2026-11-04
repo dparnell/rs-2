@@ -180,6 +180,7 @@ pub mod boot {
             crate::display::set_colors256(n == 256);
         }
         let cfg = crate::config::load().unwrap_or_default();
+        crate::config::apply_memory(&cfg);
         crate::config::apply_nls(&cfg);
         crate::config::apply_sched(&cfg);
         crate::config::apply_video(&cfg);

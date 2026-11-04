@@ -309,8 +309,11 @@ Status markers: done, in progress, planned.
 - done: GCC/kLIBC programs of the ArcaOS RPM repository, unmodified:
   coreutils, grep, bash (fork, pipes), curl, and bitwiseworks' Firefox
   45.9 (its UI, HTTP and HTTPS pages) (BROWSER.md, "OS/2 open-source
-  browsers"). planned: memory above 512 MB (OBJ_ANY, DLLs loaded high)
-  for QtWebEngine; Qt 5 programs (Designer dies in QtCore)
+  browsers"). done: memory above 512 MB as OS/2 4.5 has it
+  (VIRTUALADDRESSLIMIT, OBJ_ANY, DLL objects marked OBJHIGHMEM loaded
+  high; ARCHITECTURE.md "Memory layout"); kLIBC's high heap and Firefox
+  run with it. planned: Qt 5 programs (Designer dies in QtCore;
+  QtWebEngine waits for PTHR01 functions)
 
 ## Milestone 4: Presentation Manager (largely done)
 

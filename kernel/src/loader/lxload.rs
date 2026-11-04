@@ -50,7 +50,17 @@ pub fn load(
     let mut bases = Vec::with_capacity(lxobjs.len());
     for o in &lxobjs {
         let size = o.virtual_size.max(1);
-        let base = if dll {
+        // Objects marked for high memory (OBJHIGHMEM) go to the high shared
+        // arena if the module can be relocated; never 16-bit objects or
+        // ones that need 16:16 aliases (IBM's later kernels do the same).
+        let high = dll
+            && o.flags & oflags::HIGHMEM != 0
+            && o.flags & (oflags::ALIAS_16_16 | oflags::RESOURCE) == 0
+            && o.flags & oflags::BIG != 0
+            && (!fixups_stripped || no_fixups);
+        let base = if let Some(b) = high.then(|| vm::reserve_shared_high(size)).flatten() {
+            b
+        } else if dll {
             match vm::reserve_shared(size, Some(o.base)) {
                 Some(b) => b,
                 // Resource objects are never fixed up: they may go

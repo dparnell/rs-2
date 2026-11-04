@@ -20,7 +20,9 @@ maps linear `n * 64K` with a 64K limit, so the 16:16 pointer `sel:off` and the
 flat address `(sel >> 3) << 16 | off` name the same byte. This is what makes
 mixed 16/32-bit code and thunking work. The private arena grows up from
 64K, the shared arena grows down from 512 MB, and shared objects and system
-DLLs have the same address in every process. The GDT uses the OS/2 selector
+DLLs have the same address in every process. Above 512 MB, up to
+VIRTUALADDRESSLIMIT, are the untiled high arenas of OS/2 4.5 (OBJ_ANY);
+see "Memory layout". The GDT uses the OS/2 selector
 values that applications rely on: flat code `0x5B`, flat data `0x53` and the
 per-thread TIB selector loaded into FS (`0x150B`).
 
@@ -218,6 +220,89 @@ each CPU is. Symbolise the addresses against the kernel ELF
 (`target/x86_64-unknown-none/{debug,release}/rs2-kernel`, e.g. with
 `llvm-nm -n`). Locks are only tried, so the dump works when something
 holds them.
+
+## Memory layout
+
+A process's address space (`kernel/src/vm.rs`) is the user half of its
+own x86-64 page tables. The kernel lives in the upper half (`-2 GB`, and
+physical memory at `0xFFFF_8000_0000_0000`); nothing of it is mapped below
+4 GB, so the whole 32-bit range is the program's. The layout follows
+IBM's Warp 4.5 kernels (studied in the debug kernel `os2krnld` of Warp
+4.52, 14.086: `PGSetupUserAddressSpace`, `VMAllocMem`,
+`VMQueryArenaAvailMem`, `vmRecalcShrBound`, `VR32AllocMem`,
+`VM32ApiAllocSharedMem`, the CONFIG.SYS handler, and DOSCALL1's
+`DOS32FLATTOSEL`):
+
+```text
+0x00000000  first 64 KB: never mapped (null pointers)
+0x00010000  private arena, bottom up                   \  tiled: LDT entry n
+            ...                                         |  is the 64 KB at
+0x04000000  lowest the shared arena goes                |  n << 16, so 16:16
+            shared arena, top down (DLLs, shared memory)|  and flat pointers
+0x1ffe0000  the API gate (128 KB)                       /  convert
+0x20000000  high private arena, bottom up              \  "high memory":
+            ...                                         |  no tiles, 32-bit
+            high shared arena, top down                 |  code only
+limit       VIRTUALADDRESSLIMIT (default 1 GB)         /
+```
+
+Objects start on 64 KB boundaries in every arena. Shared objects (named
+and unnamed shared memory, DLL objects) have one address in every
+process: their ranges are reserved in one system-wide map.
+
+**VIRTUALADDRESSLIMIT** (CONFIG.SYS, in MB) sets the top of the high
+arenas. As in IBM's kernel: a decimal number, default 1024, from 512 (no
+high memory at all); a value out of range is reported and the default
+kept; the value is rounded up to a multiple of 64 MB, and
+DosQuerySysInfo(QSV_VIRTUALADDRESSLIMIT) returns the rounded value. IBM
+accepts up to 3072, because its own system arena lies above the limit;
+rs2's kernel needs no room there, so rs2 accepts up to 4032 (the top
+64 MB stay unused so that no object's end wraps to 0). Programs that
+treat addresses above 2 GB as negative fail on IBM's kernel with 3072 as
+well.
+
+**The high arenas.** IBM gives each side an eighth of the high region
+(limit − 512 MB) for itself: the high private arena never reaches the top
+eighth, the high shared arena never the bottom one; between them the
+boundary moves. rs2 does the same: a high private object goes below the
+lowest high shared object (and below the top eighth), a high shared
+object above the highest high private object of any process (and above
+the bottom eighth). Nothing above 512 MB has LDT tiles: 16:16 pointers
+cannot reach it, `DosFlatToSel` of an address there returns 0 (as IBM's
+DOSCALL1 does: addresses below 64 KB come back unchanged), and the kernel
+gives such objects no selector.
+
+**OBJ_ANY.** `DosAllocMem` with OBJ_ANY takes memory from the high
+private arena when it has room there, else from the low one (tiled), as
+`VR32AllocMem` does; OBJ_ANY with OBJ_TILE is ERROR_INVALID_PARAMETER.
+`DosAllocSharedMem` with OBJ_ANY tries the high shared arena first. All
+other memory calls (DosFreeMem, DosSetMem, DosQueryMem,
+DosGetSharedMem/DosGiveSharedMem/DosGetNamedSharedMem, DosAliasMem,
+DosQueryMemState, DosDebug's aliases) work on high objects unchanged;
+DosAliasMem's alias is always low and tiled.
+
+**DosQuerySysInfo**: QSV_MAXPRMEM, QSV_MAXSHMEM, QSV_MAXHPRMEM and
+QSV_MAXHSHMEM add up the free 64 KB units of the calling process's
+private arena, the shared arena, and the two high arenas (between their
+moving boundaries), as `VMQueryArenaAvailMem` does; the high ones are 0
+without high memory.
+
+**DLLs in high memory.** Later OS/2 4.5 kernels load DLL objects whose LX
+object flag 0x00010000 (OBJHIGHMEM, set by the community `highmem` tool)
+is set into the high shared arena. Warp 4.52's own kernel (14.086) does
+not yet: its loader's flag table (`_objflags`) has no such entry. rs2
+does as the later kernels: a 32-bit DLL object with OBJHIGHMEM goes high
+if the module can be moved (it carries its internal fixups), unless it
+needs 16:16 aliases (OBJALIAS16) or is a resource; everything else, and
+every EXE object, stays low. `elf2lx --highmem` marks rs2 DLLs so
+(APITEST's TESTDLLH).
+
+**Physical memory.** The frame allocator is a bitmap over all RAM (more
+than 4 GB is fine). User pages come from frames above 4 GB first, so the
+low ones stay for devices that can only address 32 bits. Thread-local
+memory's per-CPU page-table copies pick up page directories added above
+1 GB on the first fault there, as they do below. `cargo xtask run --mem
+SIZE` sets QEMU's memory (512 MB by default).
 
 ## Boot
 

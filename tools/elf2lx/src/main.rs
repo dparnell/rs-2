@@ -164,6 +164,7 @@ const OBJ_EXEC: u32 = 0x0004;
 const OBJ_RESOURCE: u32 = 0x0008;
 const OBJ_SHARED: u32 = 0x0020;
 const OBJ_BIG: u32 = 0x2000;
+const OBJ_HIGHMEM: u32 = 0x1_0000;
 const OBJ_ALIAS16: u32 = 0x1000;
 
 fn main() -> ExitCode {
@@ -177,6 +178,9 @@ fn main() -> ExitCode {
     // Mark the module as having had its internal fixups removed (it keeps
     // them: for testing loaders, as some IBM DLLs are).
     let mut fixups_removed = false;
+    // Mark the objects for high memory (OBJHIGHMEM, as the `highmem` tool
+    // does): code then gets no 16:16 aliases.
+    let mut highmem = false;
     let mut name = std::path::Path::new(&args[1]).file_stem().unwrap().to_string_lossy().to_ascii_uppercase();
     let mut stack = 0x10000u32;
     let mut exports_file = None;
@@ -189,6 +193,7 @@ fn main() -> ExitCode {
             "--dll" => dll = true,
             "--pm" => pm = true,
             "--fixups-removed" => fixups_removed = true,
+            "--highmem" => highmem = true,
             "--name" => {
                 i += 1;
                 name = args[i].to_ascii_uppercase();
@@ -251,8 +256,11 @@ fn main() -> ExitCode {
         }
         // Code gets 16:16 (code) aliases so programs can thunk to 16-bit APIs.
         let flags = OBJ_READ | OBJ_BIG | match g.0 {
+            0 if highmem => OBJ_EXEC | OBJ_HIGHMEM,
             0 => OBJ_EXEC | OBJ_ALIAS16,
+            1 if highmem => OBJ_WRITE | OBJ_HIGHMEM,
             1 => OBJ_WRITE,
+            _ if highmem => OBJ_WRITE | OBJ_SHARED | OBJ_HIGHMEM,
             _ => OBJ_WRITE | OBJ_SHARED,
         };
         objects.push(Object { base, size, flags, data });
