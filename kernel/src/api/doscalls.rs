@@ -893,6 +893,9 @@ fn dos_alloc_mem(c: &mut Ctx) -> u32 {
             false => sp.alloc(cb, flags, SegKind::Data, None),
         }
     };
+    if c.trace {
+        crate::trace!("    DosAllocMem {cb:#x} flags {flags:#x}: {r:x?}");
+    }
     match r {
         Ok(base) => {
             c.write_u32(ppb, base);
