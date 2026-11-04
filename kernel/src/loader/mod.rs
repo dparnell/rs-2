@@ -70,6 +70,11 @@ impl Target {
     pub fn constant(v: u16) -> Self {
         Target { flat: v as u32, sel: 0, off: v, flat_sel: 0, is16: true }
     }
+
+    /// A 32-bit absolute value (an entry in no object).
+    pub fn absolute(v: u32) -> Self {
+        Target { flat: v, sel: 0, off: v as u16, flat_sel: 0, is16: false }
+    }
 }
 
 #[derive(Clone, Debug)]

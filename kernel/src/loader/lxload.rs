@@ -45,6 +45,8 @@ pub fn load(
                 m.fixups(o.page_index + i).is_ok_and(|f| f.iter().any(|f| matches!(f.target, lx::Target::Internal { .. } | lx::Target::InternalEntry { .. })))
             })
         });
+    let no_fixups = fixups_stripped
+        && lxobjs.iter().all(|o| (0..o.page_count).all(|i| m.fixups(o.page_index + i).is_ok_and(|f| f.is_empty())));
     let mut bases = Vec::with_capacity(lxobjs.len());
     for o in &lxobjs {
         let size = o.virtual_size.max(1);
@@ -52,8 +54,14 @@ pub fn load(
             match vm::reserve_shared(size, Some(o.base)) {
                 Some(b) => b,
                 // Resource objects are never fixed up: they may go
-                // anywhere (resource-only DLLs have base 0 and no fixups).
-                None if !fixups_stripped || o.flags & oflags::RESOURCE != 0 => vm::reserve_shared(size, None).ok_or(err::NOT_ENOUGH_MEMORY)?,
+                // anywhere (resource-only DLLs have base 0 and no fixups),
+                // and so may DLLs without a single fixup record (data
+                // DLLs such as ICU's ICUDT.DLL, linked at 0x10000 with
+                // the "internal fixups removed" flag: nothing in them
+                // depends on their address).
+                None if !fixups_stripped || o.flags & oflags::RESOURCE != 0 || no_fixups => {
+                    vm::reserve_shared(size, None).ok_or(err::NOT_ENOUGH_MEMORY)?
+                }
                 None => return Err(err::NOT_ENOUGH_MEMORY),
             }
         } else {
@@ -116,6 +124,16 @@ pub fn load(
     for e in &entries {
         exports.push(match *e {
             Entry::Unused => Export::None,
+            // An entry in no object (a bundle with object 0, as GCC
+            // runtime DLLs export ___popcount_tab) is an absolute value.
+            Entry::Entry16 { object, offset, .. } | Entry::CallGate { object, offset, .. }
+                if object == 0 || object as usize > lxobjs.len() =>
+            {
+                Export::At(Target::absolute(offset as u32))
+            }
+            Entry::Entry32 { object, offset, .. } if object == 0 || object as usize > lxobjs.len() => {
+                Export::At(Target::absolute(offset))
+            }
             Entry::Entry16 { object, offset, .. } | Entry::CallGate { object, offset, .. } => {
                 Export::At(target_in(object as usize - 1, offset as u32))
             }
