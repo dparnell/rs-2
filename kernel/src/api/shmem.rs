@@ -36,7 +36,15 @@ fn find_at(addr: u32) -> Option<Arc<SharedMem>> {
 /// Create a shared object and map it into the caller.
 fn create(c: &Ctx, size: u32, flags: u32, name: Option<String>, seg: SegKind, limit: Option<u32>) -> Result<u32, u32> {
     let size = size.next_multiple_of(vm::PAGE);
-    let base = vm::reserve_shared(size, None).ok_or(err::NOT_ENOUGH_MEMORY)?;
+    // OBJ_ANY: the high shared arena when it has room, else the low one,
+    // as IBM's DosAllocSharedMem does. Only low objects are tiled.
+    let high = flags & pag::OBJ_ANY != 0 && seg == SegKind::Data && limit.is_none();
+    let base = high
+        .then(|| vm::reserve_shared_high(size))
+        .flatten()
+        .or_else(|| vm::reserve_shared(size, None))
+        .ok_or(err::NOT_ENOUGH_MEMORY)?;
+    let flags = flags & !pag::OBJ_ANY;
     let obj = SharedMem::new(base, size, flags, name);
     if flags & pag::COMMIT != 0 {
         obj.pages.lock().fill(PageState::Committed);

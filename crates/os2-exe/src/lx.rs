@@ -44,6 +44,9 @@ pub mod oflags {
     pub const BIG: u32 = 0x2000;
     pub const CONFORMING: u32 = 0x4000;
     pub const IOPL: u32 = 0x8000;
+    /// OBJHIGHMEM: load the object above 512 MB when the system has high
+    /// memory (later OS/2 4.5 kernels; set by the `highmem` tool).
+    pub const HIGHMEM: u32 = 0x0001_0000;
 }
 
 /// Parsed LX header (the subset of fields the loader needs).

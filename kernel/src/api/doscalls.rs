@@ -877,7 +877,22 @@ fn dos_alloc_mem(c: &mut Ctx) -> u32 {
     if flags & (pag::READ | pag::WRITE | pag::EXECUTE) == 0 {
         return err::INVALID_PARAMETER;
     }
-    let r = c.space().alloc(cb, flags, SegKind::Data, None);
+    // OBJ_ANY asks for memory anywhere, OBJ_TILE for tiles: both is wrong.
+    if flags & pag::OBJ_ANY != 0 && flags & pag::OBJ_TILE != 0 {
+        return err::INVALID_PARAMETER;
+    }
+    // OBJ_ANY: the high private arena when it has room, else the low one
+    // (tiled), as IBM's DosAllocMem does.
+    let r = {
+        let mut sp = c.space();
+        match flags & pag::OBJ_ANY != 0 {
+            true => match sp.alloc_high(cb, flags) {
+                Err(vm::VmError::NoMemory) => sp.alloc(cb, flags, SegKind::Data, None),
+                r => r,
+            },
+            false => sp.alloc(cb, flags, SegKind::Data, None),
+        }
+    };
     match r {
         Ok(base) => {
             c.write_u32(ppb, base);
@@ -921,8 +936,16 @@ fn dos_query_mem(c: &mut Ctx) -> u32 {
 
 fn dos_flat_to_sel(c: &mut Ctx) -> u32 {
     // Register-based in real OS/2 (EAX in, EAX out); our gate passes the
-    // value on the stack for _System callers.
+    // value on the stack for _System callers. As IBM's DOSCALL1: values
+    // below 64 KB come back unchanged, addresses above 512 MB (high
+    // memory, never tiled) give 0.
     let a = c.f.rax as u32;
+    if a < 0x1_0000 {
+        return a;
+    }
+    if a >= vm::TILED_TOP && a != u32::MAX {
+        return 0;
+    }
     (vm::tile_selector(a) as u32) << 16 | (a & 0xffff)
 }
 
@@ -1031,7 +1054,7 @@ fn dos16_get_mod_handle(c: &mut Ctx) -> u32 {
 
 // ---- System information ----
 
-fn sys_info_value(i: u32) -> u32 {
+fn sys_info_value(c: &Ctx, i: u32) -> u32 {
     let total = crate::mm::phys::total_frames() * 4096;
     let free = crate::mm::phys::free_count() * 4096;
     match i {
@@ -1054,17 +1077,17 @@ fn sys_info_value(i: u32) -> u32 {
         17 => total.min(u32::MAX as u64) as u32, // QSV_TOTPHYSMEM
         18 => 0,               // QSV_TOTRESMEM
         19 => free.min(u32::MAX as u64) as u32, // QSV_TOTAVAILMEM
-        20 => 0x1c00_0000,     // QSV_MAXPRMEM
-        21 => 0x0c00_0000,     // QSV_MAXSHMEM
+        20 => c.space().arena_avail(vm::Arena::Private), // QSV_MAXPRMEM
+        21 => c.space().arena_avail(vm::Arena::Shared), // QSV_MAXSHMEM
         22 => 31,              // QSV_TIMER_INTERVAL (tenths of ms)
         23 => 255,             // QSV_MAX_COMP_LENGTH
         24 => 1,               // QSV_FOREGROUND_FS_SESSION
         25 => 1,               // QSV_FOREGROUND_PROCESS
         26 => crate::smp::online_count(), // QSV_NUMPROCESSORS
-        27 => 0,               // QSV_MAXHPRMEM
-        28 => 0,               // QSV_MAXHSHMEM
+        27 => c.space().arena_avail(vm::Arena::HighPrivate), // QSV_MAXHPRMEM
+        28 => c.space().arena_avail(vm::Arena::HighShared), // QSV_MAXHSHMEM
         29 => 1000,            // QSV_MAXPROCESSES
-        30 => 512,             // QSV_VIRTUALADDRESSLIMIT (MB)
+        30 => vm::limit() >> 20, // QSV_VIRTUALADDRESSLIMIT (MB)
         _ => 0,
     }
 }
@@ -1078,7 +1101,7 @@ fn dos_query_sys_info(c: &mut Ctx) -> u32 {
         return err::BUFFER_OVERFLOW;
     }
     for (n, i) in (first..=last).enumerate() {
-        c.write_u32(buf + 4 * n as u32, sys_info_value(i));
+        c.write_u32(buf + 4 * n as u32, sys_info_value(c, i));
     }
     0
 }
