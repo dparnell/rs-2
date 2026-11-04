@@ -296,6 +296,15 @@ Status markers: done, in progress, planned.
 - open: IBM's Object REXX hangs when ORXTEST, ORXSOM and ORXTEST run in
   one CMD (a race in IBM's interpreter restart, REXX.md); rs2's
   .Stream objects share the stream functions' handles (no UNINIT close)
+- done: Rust's standard library for rs2 programs (`userland-std/`,
+  rs2libc: the glibc subset std calls, over the OS/2 API; TLS through a
+  per-thread GS selector; unwinding panics); STDTEST passes 69 checks
+  ([BROWSER.md](BROWSER.md))
+- done: web browsers (BROWSER.md): WEBTEXT (text mode) and WebRS2
+  (WEB.EXE, PM): HTTP/HTTPS (rustls, ring), html5ever, CSS with Servo's
+  selectors and cssparser, Taffy layout, GPI painting, images, forms;
+  WPUrl objects open it. planned: JavaScript (Boa), background images,
+  position: fixed, HTTP keep-alive and a cache
 
 ## Milestone 4: Presentation Manager (largely done)
 

@@ -198,6 +198,22 @@ impl Painter<'_> {
         }
     }
 
+    /// A dotted rectangle (the keyboard focus).
+    pub fn focus_rect(&self, x: f32, y: f32, w: f32, h: f32) {
+        let mut i = 0.0;
+        while i < w {
+            self.fill(x + i, y, 1.0, 1.0, 0x000000);
+            self.fill(x + i, y + h - 1.0, 1.0, 1.0, 0x000000);
+            i += 2.0;
+        }
+        let mut j = 0.0;
+        while j < h {
+            self.fill(x, y + j, 1.0, 1.0, 0x000000);
+            self.fill(x + w - 1.0, y + j, 1.0, 1.0, 0x000000);
+            j += 2.0;
+        }
+    }
+
     fn frame(&self, x: f32, y: f32, w: f32, h: f32, light: i32, dark: i32) {
         self.fill(x, y, w, 1.0, dark);
         self.fill(x, y, 1.0, h, dark);

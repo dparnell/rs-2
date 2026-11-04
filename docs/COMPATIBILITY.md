@@ -360,6 +360,10 @@ PMWP.DLL ([WPS.md](WPS.md#rs2s-workplace-shell-classes)).
 
 ## Network programs
 
+rs2's own web browsers, WEBTEXT and WebRS2 (WEB.EXE), are described in
+[BROWSER.md](BROWSER.md): HTTPS sites such as example.com and Wikipedia
+load and render (no JavaScript).
+
 On rs2's TCPIP32/SO32DLL/TCP32DLL/TNLS32/PMSHAPI DLLs (see
 [NETWORK.md](NETWORK.md#the-os2-socket-api)), QEMU user networking
 (`--net` e1000 or `--virtio-net`, also `--smp 4`), the host at 10.0.2.2

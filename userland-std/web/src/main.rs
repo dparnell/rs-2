@@ -80,6 +80,8 @@ struct App {
     hover: Option<usize>,
     relayout_pending: bool,
     pending_fragment: Option<String>,
+    /// The link Tab has moved to (a link number).
+    focus_link: Option<usize>,
     scroll_scale: i32,
 }
 
@@ -101,6 +103,15 @@ enum Loaded {
 }
 
 fn main() {
+    // Panics are reported in the status line, not on a console.
+    std::panic::set_hook(Box::new(|info| {
+        let msg = format!("{info}");
+        let mut f = std::fs::OpenOptions::new().create(true).append(true).open("WEB.LOG");
+        if let Ok(f) = f.as_mut() {
+            use std::io::Write;
+            let _ = writeln!(f, "{msg}");
+        }
+    }));
     // -retry: retry failed loads for a minute (the network may still be
     // coming up when WEB is the first program, as in tests).
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -138,6 +149,7 @@ fn main() {
             hover: None,
             relayout_pending: false,
             pending_fragment: None,
+            focus_link: None,
             scroll_scale: 1,
         });
     }
@@ -317,10 +329,12 @@ fn navigate(url: Url, record: bool, body: Option<(String, Vec<u8>)>) {
         };
         let t0 = std::time::Instant::now();
         let r = loop {
-            let r = match &body {
+            // A bug in the engine must not take the browser with it.
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &body {
                 None => webcore::page::load(&url, size, &progress),
                 Some((ctype, data)) => webcore::page::load_post(&url, ctype, data, size, &progress),
-            };
+            }))
+            .unwrap_or_else(|_| Err(webcore::http::Error::Protocol("WebRS2 failed on this page (a panic)".into())));
             if r.is_err() && RETRY.load(Ordering::Relaxed) && t0.elapsed().as_secs() < 60 {
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 continue;
@@ -376,6 +390,7 @@ fn loaded(l: Loaded) {
     a.images.clear();
     a.image_sizes.clear();
     a.controls.clear();
+    a.focus_link = None;
     init_controls(&page);
     let images = page.images.clone();
     a.page = Some(page);
@@ -449,8 +464,14 @@ fn relayout(restyle: bool) {
     }
     let fonts = a.fonts.as_mut().unwrap();
     fonts.forget_current();
-    let laid = webcore::layout::layout(&page.dom, &page.styles, &page.url, width, fonts, &a.image_sizes);
-    a.laid = Some(laid);
+    let laid = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| webcore::layout::layout(&page.dom, &page.styles, &page.url, width, fonts, &a.image_sizes)));
+    match laid {
+        Ok(l) => a.laid = Some(l),
+        Err(_) => {
+            a.laid = None;
+            set_status("WebRS2 failed to lay out this page (a panic)");
+        }
+    }
     clamp_scroll();
     update_scrollbar();
     invalidate(a.view);
@@ -514,6 +535,13 @@ fn paint_view(hwnd: u32) {
         let fonts = a.fonts.as_mut().unwrap();
         let mut p = Painter { hps, fonts, height: a.view_h, scroll: a.scroll, x_off: 0 };
         p.paint(laid, top, bottom, &a.images, &a.controls, &page.dom);
+        if let Some(f) = a.focus_link {
+            for (r, i) in &laid.link_rects {
+                if *i == f {
+                    p.focus_rect(r.x - 1.0, r.y, r.w + 2.0, r.h);
+                }
+            }
+        }
     }
     unsafe { WinEndPaint(hps) };
 }
@@ -755,6 +783,40 @@ fn command(id: u32) {
     }
 }
 
+/// Move the focus to the next (or previous) link in document order.
+fn next_link(forward: bool) {
+    let a = app();
+    let Some(l) = &a.laid else { return };
+    // Links in the order they appear.
+    let mut order: Vec<usize> = Vec::new();
+    for (_, i) in &l.link_rects {
+        if !order.contains(i) {
+            order.push(*i);
+        }
+    }
+    if order.is_empty() {
+        return;
+    }
+    let pos = a.focus_link.and_then(|f| order.iter().position(|&i| i == f));
+    let next = match (pos, forward) {
+        (None, true) => 0,
+        (None, false) => order.len() - 1,
+        (Some(p), true) => (p + 1) % order.len(),
+        (Some(p), false) => (p + order.len() - 1) % order.len(),
+    };
+    let link = order[next];
+    a.focus_link = Some(link);
+    let url = l.links[link].to_string();
+    if let Some((r, _)) = l.link_rects.iter().find(|(_, i)| *i == link) {
+        let (top, bottom) = (r.y as i32, (r.y + r.h) as i32);
+        if top < a.scroll || bottom > a.scroll + a.view_h {
+            scroll_to(top - a.view_h / 3);
+        }
+    }
+    set_status(&url);
+    invalidate(a.view);
+}
+
 fn key(mp1: u32, mp2: u32) -> bool {
     let a = app();
     let fl = lo(mp1);
@@ -776,6 +838,15 @@ fn key(mp1: u32, mp2: u32) -> bool {
             VK_RIGHT if fl & KC_ALT != 0 => command(ID_FORWARD),
             VK_BACKSPACE => command(ID_BACK),
             VK_F5 => command(ID_RELOAD),
+            VK_TAB => next_link(fl & KC_SHIFT == 0),
+            VK_ENTER | VK_NEWLINE => {
+                let target = a.focus_link.and_then(|i| a.laid.as_ref().map(|l| l.links[i].clone()));
+                match target {
+                    Some(u) => navigate(u, true, None),
+                    None => return false,
+                }
+            }
+            0x07 /* VK_BACKTAB */ => next_link(false),
             _ => return false,
         }
         return true;

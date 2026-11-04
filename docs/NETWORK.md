@@ -241,6 +241,11 @@ gives the DHCP leases back (`net::shutdown`).
 Exposed through the rs2-private gate module RS2API (32-bit `_System`,
 return 0 or a BSD errno); the table and structure layouts are in
 `kernel/src/api/sockets.rs`, the bindings in `userland/os2/src/net.rs`.
+Programs built with Rust's std (`userland-std/`, [BROWSER.md](BROWSER.md))
+reach the same calls through rs2libc's BSD socket functions
+(`std::net`, `getaddrinfo` over Rs2NetResolve, `poll` over
+Rs2SockSelect); WEBTEXT and WEB (rs2's web browsers) use them with rustls
+for HTTPS.
 Addresses are `sockaddr_in` in the 4.3BSD layout (USHORT family); the
 4.4BSD layout (`sin_len`, `sin_family` bytes) of the 4.5 Toolkit headers
 is accepted as input.
