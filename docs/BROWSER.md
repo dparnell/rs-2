@@ -407,7 +407,11 @@ kernel ones are small and can be taken on their own):
     GpiEnableYInversion/GpiQueryYInversion with mirrored blits to a
     turned-over target (cairo draws its top-down images that way), and
     PM set up on the first call that needs it (XUL opens an information
-    DC before WinInitialize).
+    DC before WinInitialize), WM_ADJUSTWINDOWPOS and WM_WINDOWPOSCHANGED
+    from WinSetWindowPos and the frame's layout (Mozilla's windows
+    follow their size by WM_WINDOWPOSCHANGED: without it the window was
+    off the screen and the content window stayed 1x1),
+    WinQueryDesktopWorkArea, WinQueryKbdLayout (Qt).
 12. **Each thread its own local information segment.** kLIBC owns its
     mutexes by the LINFOSEG's tidCurrent; with two CPUs one shared page
     held only one thread's ID ("LIBC Heap release not owner").
