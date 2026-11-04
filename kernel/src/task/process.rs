@@ -168,8 +168,10 @@ pub fn try_all() -> Option<Vec<Arc<Process>>> {
 /// command line.
 fn env_block(env: &[String], path: &str, program: &str, args: &str) -> (Vec<u8>, u32) {
     let mut b = Vec::new();
+    // The strings hold one char per byte (Ctx::read_str).
+    let put = |b: &mut Vec<u8>, s: &str| b.extend(s.chars().map(|c| c as u8));
     for e in env {
-        b.extend_from_slice(e.as_bytes());
+        put(&mut b, e);
         b.push(0);
     }
     if env.is_empty() {
@@ -179,12 +181,14 @@ fn env_block(env: &[String], path: &str, program: &str, args: &str) -> (Vec<u8>,
     // OS/2 puts the program's full path between the environment and the
     // command line; CMD.EXE finds the end of the environment by walking
     // back over it from the command line.
-    b.extend_from_slice(path.as_bytes());
+    put(&mut b, path);
     b.push(0);
     let cmd = b.len() as u32;
-    b.extend_from_slice(program.as_bytes());
+    put(&mut b, program);
     b.push(0);
-    b.extend_from_slice(args.as_bytes());
+    // The arguments may be several strings (NUL-separated), as the
+    // caller of DosExecPgm gave them.
+    put(&mut b, args);
     b.push(0);
     b.push(0);
     (b, cmd)
