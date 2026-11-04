@@ -126,8 +126,12 @@ fn open(c: &mut Ctx, want_event: Option<bool>) -> u32 {
         }
     } else {
         let Some(h) = c.read_u32(ph) else { return err::INVALID_ADDRESS };
+        // By handle: a shared semaphore, or a private one of this
+        // process (OS/2 counts the open; kLIBC's _fmutex_open opens its
+        // own private event semaphores again this way).
+        let pid = c.process.pid;
         match TABLE.lock().sems.get(&h).cloned() {
-            Some(s) if s.shared => (h, s),
+            Some(s) if s.shared || (s.creator == pid && s.opens.lock().iter().any(|&(p, _)| p == pid)) => (h, s),
             _ => return err::INVALID_HANDLE,
         }
     };
