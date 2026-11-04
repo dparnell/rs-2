@@ -319,6 +319,12 @@ impl Painter<'_> {
                         webcore::layout::round_spans(*r, *radii, *ring, |x, y, w, h| self.fill(x, y, w, h, c));
                     }
                 }
+                Item::Corners { r, color, radii } => {
+                    if r.y < bottom && r.y + r.h > top {
+                        let c = rgb(*color, bg);
+                        webcore::layout::corner_spans(*r, *radii, |x, y, w, h| self.fill(x, y, w, h, c));
+                    }
+                }
                 Item::Marker { r, kind, color } => {
                     if r.y < bottom && r.y + r.h > top {
                         let c = rgb(*color, bg);

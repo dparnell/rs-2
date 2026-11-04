@@ -150,6 +150,7 @@ fn main() {
                 c.clips.pop();
             }
             Item::RoundRect { r, color, radii, ring } => layout::round_spans(*r, *radii, *ring, |x, y, w, h| c.fill(x, y, w, h, *color)),
+            Item::Corners { r, color, radii } => layout::corner_spans(*r, *radii, |x, y, w, h| c.fill(x, y, w, h, *color)),
             Item::Svg { r, node, .. } => {
                 let (w, h) = (r.w.round().max(1.0) as u32, r.h.round().max(1.0) as u32);
                 let img = webcore::svg::render(&page.dom, &page.styles, *node, w, h);

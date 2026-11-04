@@ -1117,6 +1117,13 @@ fn tracks(t: &[Tok], cx: &Cx, out: &mut Vec<Track>) {
                 let mut one = Vec::new();
                 tracks(max, cx, &mut one);
                 let zero = matches!(min, [Tok::Num(n)] if *n == 0.0) || matches!(min, [Tok::Dim(n, _)] if *n == 0.0);
+                // calc(100% - 300px) after fixed tracks: what is left.
+                if let (true, [Tok::Func(f, a)]) = (zero, max) {
+                    if f == "calc" && a.iter().any(|t| matches!(t, Tok::Pct(_))) && a.iter().any(|t| matches!(t, Tok::Dim(..) | Tok::Func(..))) {
+                        out.push(Track::Share(1.0));
+                        continue;
+                    }
+                }
                 out.push(match one.first().copied() {
                     Some(Track::Fr(f)) if zero => Track::Share(f),
                     t => t.unwrap_or(Track::Len(Len::Auto)),
@@ -1589,6 +1596,13 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
                 if f == "inset" && matches!(args.first(), Some(Tok::Pct(p)) if *p >= 50.0) {
                     s.invisible = true;
                 }
+            }
+        }
+        // A container's size is not known while styling (cq units are taken
+        // from the viewport), so what is sized by it stays inside.
+        "container" | "container-type" => {
+            if !matches!(first, Tok::Ident(k) if k == "normal" || k == "none") {
+                s.overflow_hidden = true;
             }
         }
         "overflow" | "overflow-x" | "overflow-y" => s.overflow_hidden = matches!(first, Tok::Ident(k) if k == "hidden" || k == "clip" || k == "auto" || k == "scroll"),

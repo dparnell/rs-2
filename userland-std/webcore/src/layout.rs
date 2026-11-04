@@ -75,6 +75,8 @@ pub enum Item {
     Svg { r: Rect, node: DomId, bg: Color },
     /// A box with rounded corners, or only its outline `ring` pels wide.
     RoundRect { r: Rect, color: Color, radii: [f32; 4], ring: f32 },
+    /// What is outside rounded corners, over an image.
+    Corners { r: Rect, color: Color, radii: [f32; 4] },
     Marker { r: Rect, kind: ListStyle, color: Color },
     /// A form control; its box has been painted. `pad` is the room left of
     /// its text.
@@ -123,6 +125,24 @@ pub fn round_spans(r: Rect, radii: [f32; 4], ring: f32, mut out: impl FnMut(f32,
         }
     }
     flush(&mut run, &mut out);
+}
+
+/// The parts of a box outside its rounded corners, as rectangles.
+pub fn corner_spans(r: Rect, radii: [f32; 4], mut out: impl FnMut(f32, f32, f32, f32)) {
+    let (x, y, w, h) = (r.x.round(), r.y.round(), (r.x + r.w).round() - r.x.round(), (r.y + r.h).round() - r.y.round());
+    let cut = |rad: f32, d: f32| if rad > 0.0 && d < rad { (rad - (rad * rad - (rad - d) * (rad - d)).max(0.0).sqrt()).round() } else { 0.0 };
+    for row in 0..h as i32 {
+        let row = row as f32;
+        let (top, bottom) = (row + 0.5, h - row - 0.5);
+        let l = cut(radii[0], top).max(cut(radii[3], bottom));
+        let rt = cut(radii[1], top).max(cut(radii[2], bottom));
+        if l > 0.0 {
+            out(x, y + row, l, 1.0);
+        }
+        if rt > 0.0 {
+            out(x + w - rt, y + row, rt, 1.0);
+        }
+    }
 }
 
 /// What a page looks like at a width.
@@ -1587,7 +1607,13 @@ impl Painter<'_, '_> {
     /// Paint a replaced element in `r`; `pad` is a control's left padding.
     fn atom(&mut self, atom: &Atom, r: Rect, st: &Style, pad: f32) {
         match atom {
-            Atom::Image(node) => self.laid.items.push(Item::Image { r, node: *node }),
+            Atom::Image(node) => {
+                self.laid.items.push(Item::Image { r, node: *node });
+                let radii = st.radii(r.w, r.h);
+                if radii.iter().any(|&v| v >= 1.0) {
+                    self.laid.items.push(Item::Corners { r, color: self.bg, radii });
+                }
+            }
             Atom::Svg(node) => self.laid.items.push(Item::Svg { r, node: *node, bg: self.bg }),
             Atom::Control(node, kind) => self.laid.items.push(Item::Control { r, node: *node, kind: *kind, font: font_of(st), color: st.color, pad }),
             Atom::Subtree(_) => {}
