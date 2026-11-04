@@ -132,6 +132,9 @@ struct Ifc {
     cache: Vec<(f32, Lines)>,
     min_content: f32,
     max_content: f32,
+    /// Floats beside this context: (top, bottom, left inset, right inset)
+    /// relative to its content box (from a first layout pass).
+    excl: Vec<(f32, f32, f32, f32)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -334,22 +337,43 @@ fn build_ifc(b: IfcBuilder, block: &Style, fonts: &mut dyn Fonts, cw: f32) -> If
         cache: Vec::new(),
         min_content,
         max_content: 0.0,
+        excl: Vec::new(),
     };
     ifc.max_content = lay_lines(&ifc, None, fonts).width;
     ifc
 }
 
-fn lay_lines(ifc: &Ifc, width: Option<f32>, fonts: &mut dyn Fonts) -> Lines {
+/// The left inset and width of a line starting at `y` (floats beside it).
+fn band(ifc: &Ifc, width: Option<f32>, y: f32) -> (f32, Option<f32>) {
+    let Some(w) = width else { return (0.0, None) };
+    let h = ifc.strut.0.max(1.0);
+    let (mut l, mut r) = (0.0f32, 0.0f32);
+    for &(top, bottom, li, ri) in &ifc.excl {
+        if y < bottom && y + h > top {
+            l = l.max(li);
+            r = r.max(ri);
+        }
+    }
+    if l + r > w - 20.0 {
+        // No room beside the floats: lines go below them (approximately).
+        return (0.0, Some(w));
+    }
+    (l, Some(w - l - r))
+}
+
+fn lay_lines(ifc: &Ifc, width_all: Option<f32>, fonts: &mut dyn Fonts) -> Lines {
     let mut out = Lines::default();
     let mut line: Vec<(usize, f32, String, f32)> = Vec::new(); // piece, x, text, w
     let mut x = ifc.indent;
     let mut pending = 0.0f32;
     let mut y = 0.0f32;
+    let (mut left, mut width) = band(ifc, width_all, 0.0);
     let pieces = &ifc.pieces;
     for (i, p) in pieces.iter().enumerate() {
         match &p.kind {
             Kind::Break => {
-                finish(ifc, width, fonts, &mut line, x, &mut y, &mut out);
+                finish(ifc, width, left, fonts, &mut line, x, &mut y, &mut out);
+                (left, width) = band(ifc, width_all, y);
                 x = 0.0;
                 pending = 0.0;
             }
@@ -366,7 +390,8 @@ fn lay_lines(ifc: &Ifc, width: Option<f32>, fonts: &mut dyn Fonts) -> Lines {
                 let can_break = p.wrap && !line.is_empty() && (pending > 0.0 || matches!(p.kind, Kind::Atomic(..)) || matches!(pieces[i - 1].kind, Kind::Atomic(..)));
                 if let Some(w) = width {
                     if can_break && x + pending + p.w > w + 0.5 {
-                        finish(ifc, width, fonts, &mut line, x, &mut y, &mut out);
+                        finish(ifc, width, left, fonts, &mut line, x, &mut y, &mut out);
+                (left, width) = band(ifc, width_all, y);
                         x = 0.0;
                         pending = 0.0;
                     }
@@ -381,7 +406,8 @@ fn lay_lines(ifc: &Ifc, width: Option<f32>, fonts: &mut dyn Fonts) -> Lines {
                                 let pw = fonts.width(p.font, &part);
                                 line.push((i, x, std::mem::take(&mut part), pw));
                                 x += pw;
-                                finish(ifc, width, fonts, &mut line, x, &mut y, &mut out);
+                                finish(ifc, width, left, fonts, &mut line, x, &mut y, &mut out);
+                (left, width) = band(ifc, width_all, y);
                                 x = 0.0;
                                 part.push(c);
                             } else {
@@ -423,13 +449,14 @@ fn lay_lines(ifc: &Ifc, width: Option<f32>, fonts: &mut dyn Fonts) -> Lines {
         }
     }
     if !line.is_empty() {
-        finish(ifc, width, fonts, &mut line, x, &mut y, &mut out);
+        finish(ifc, width, left, fonts, &mut line, x, &mut y, &mut out);
     }
     out.height = y;
     out
 }
 
-fn finish(ifc: &Ifc, width: Option<f32>, fonts: &mut dyn Fonts, line: &mut Vec<(usize, f32, String, f32)>, x: f32, y: &mut f32, out: &mut Lines) {
+#[allow(clippy::too_many_arguments)]
+fn finish(ifc: &Ifc, width: Option<f32>, left: f32, fonts: &mut dyn Fonts, line: &mut Vec<(usize, f32, String, f32)>, x: f32, y: &mut f32, out: &mut Lines) {
     let pieces = &ifc.pieces;
     let (lh, sa, sd) = ifc.strut;
     let hl = (lh - (sa + sd)) / 2.0;
@@ -463,9 +490,9 @@ fn finish(ifc: &Ifc, width: Option<f32>, fonts: &mut dyn Fonts, line: &mut Vec<(
         _ => 0.0,
     };
     for (i, fx, text, w) in line.drain(..) {
-        out.frags.push(Frag { x: fx + shift, top: *y, baseline: *y + above, line_h: h, piece: i, text, w });
+        out.frags.push(Frag { x: fx + shift + left, top: *y, baseline: *y + above, line_h: h, piece: i, text, w });
     }
-    out.width = out.width.max(used);
+    out.width = out.width.max(used + left);
     *y += h;
 }
 
@@ -1111,6 +1138,39 @@ pub fn layout(dom: &Dom, styles: &Styles, base: &Url, width: f32, fonts: &mut dy
     b.tree
         .compute_layout_with_measure(root, Size { width: AvailableSpace::Definite(width), height: AvailableSpace::MaxContent }, measure(&mut b.ifcs, b.fonts))
         .ok();
+    // Floats beside inline content: lay out again with the lines beside
+    // them shortened.
+    let mut floats = Vec::new();
+    let mut leaves = Vec::new();
+    let mut order = 0;
+    gather(&b, root, 0.0, 0.0, &mut order, &mut floats, &mut leaves);
+    if !floats.is_empty() {
+        let mut changed = false;
+        for (i, node, c, o) in &leaves {
+            let mut e = Vec::new();
+            for (f, left, fo, fend) in &floats {
+                if fo >= o || (o > fo && o <= fend) {
+                    continue;
+                }
+                if f.x < c.x + c.w && f.x + f.w > c.x && f.y < c.y + c.h + 2000.0 && f.y + f.h > c.y {
+                    let li = if *left { (f.x + f.w - c.x).max(0.0) } else { 0.0 };
+                    let ri = if *left { 0.0 } else { (c.x + c.w - f.x).max(0.0) };
+                    e.push((f.y - c.y, f.y + f.h - c.y, li, ri));
+                }
+            }
+            if !e.is_empty() {
+                b.ifcs[*i].excl = e;
+                b.ifcs[*i].cache.clear();
+                b.tree.mark_dirty(*node).ok();
+                changed = true;
+            }
+        }
+        if changed {
+            b.tree
+                .compute_layout_with_measure(root, Size { width: AvailableSpace::Definite(width), height: AvailableSpace::MaxContent }, measure(&mut b.ifcs, b.fonts))
+                .ok();
+        }
+    }
     if std::env::var("WEBCORE_TREE").is_ok() {
         b.tree.print_tree(root);
     }
@@ -1129,6 +1189,34 @@ pub fn layout(dom: &Dom, styles: &Styles, base: &Url, width: f32, fonts: &mut dy
     laid.height = laid.height.max(rl.size.height);
     laid.links = b.links;
     laid
+}
+
+/// Floats (margin boxes, left?, tree order, end of their subtree's order)
+/// and inline formatting contexts (index, node, content box, order), in
+/// page coordinates.
+#[allow(clippy::type_complexity)]
+fn gather(b: &Builder, n: NodeId, ox: f32, oy: f32, order: &mut usize, floats: &mut Vec<(Rect, bool, usize, usize)>, leaves: &mut Vec<(usize, NodeId, Rect, usize)>) {
+    let Ok(l) = b.tree.layout(n) else { return };
+    let (x, y) = (ox + l.location.x, oy + l.location.y);
+    *order += 1;
+    let me = *order;
+    let float = b.info.get(&n).map(|i| i.style.float).unwrap_or(style::Float::None);
+    if let Some(Leaf::Ifc(i)) = b.tree.get_node_context(n) {
+        let c = Rect {
+            x: x + l.padding.left + l.border.left,
+            y: y + l.padding.top + l.border.top,
+            w: (l.size.width - l.padding.left - l.padding.right - l.border.left - l.border.right).max(0.0),
+            h: (l.size.height - l.padding.top - l.padding.bottom - l.border.top - l.border.bottom).max(0.0),
+        };
+        leaves.push((*i, n, c, me));
+    }
+    for k in b.tree.children(n).unwrap_or_default() {
+        gather(b, k, x, y, order, floats, leaves);
+    }
+    if float != style::Float::None {
+        let r = Rect { x: x - l.margin.left, y: y - l.margin.top, w: l.size.width + l.margin.left + l.margin.right, h: l.size.height + l.margin.top + l.margin.bottom };
+        floats.push((r, float == style::Float::Left, me, *order));
+    }
 }
 
 struct Painter<'a, 'b> {
