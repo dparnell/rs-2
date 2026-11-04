@@ -217,6 +217,13 @@ none is set up it now starts `OS2\APPS\WEB.EXE` from the boot drive.
 
 ### Tested
 
+`tools/scripts/webtest.sh` serves `tools/webtest` (flexbox header, a grid
+of cards, a sidebar, an alpha PNG, a form, a JavaScript page) and drives
+WEB under QEMU: a mouse click on a link, Alt+Left, Tab Tab Enter, a word
+typed into the form's field and Enter (the server sees
+`GET /second.html?q=hello`), Ctrl+L and an address. Screenshots
+`work/webtest1.png`...
+
 Under QEMU (screenshots in `work/progress/browser-rust/`):
 
 - the host test site (flexbox header, a three-column grid, a sidebar,
@@ -225,6 +232,7 @@ Under QEMU (screenshots in `work/progress/browser-rust/`):
 - https://en.wikipedia.org/wiki/OS/2 (9000 elements, 1700 rules; styled in
   about 60 ms on the host): vector-2022's grid areas put the table of
   contents beside the article and the text wraps around the infobox;
+  with its scripts run, 22 s with images under TCG (layout 180 ms);
 - a test page whose scripts (inline and from a file) rewrite a heading,
   build a list, show a box on DOMContentLoaded and fill in a timer's
   result;
