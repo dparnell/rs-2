@@ -82,3 +82,22 @@ export! {
     trunc(x: f64) -> f64;
     truncf(x: f32) -> f32;
 }
+
+// LLVM merges sin() and cos() of one value into these.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sincos(x: f64, s: *mut f64, c: *mut f64) {
+    let (sin, cos) = libm::sincos(x);
+    unsafe {
+        *s = sin;
+        *c = cos;
+    }
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn sincosf(x: f32, s: *mut f32, c: *mut f32) {
+    let (sin, cos) = libm::sincosf(x);
+    unsafe {
+        *s = sin;
+        *c = cos;
+    }
+}

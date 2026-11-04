@@ -141,8 +141,7 @@ fn fetch_sheet(u: &Url, sheets: &mut Vec<(String, Url)>, fetched: &mut HashMap<U
     }
     let css = http::decode_text(&r);
     // @imports come first.
-    let mut probe = Rules::default();
-    for imp in probe.add_sheet(&css, Origin::Author, media) {
+    for imp in crate::css::imports_of(&css) {
         if let Ok(iu) = r.url.join(&imp) {
             fetch_sheet(&iu, sheets, fetched, media, progress, depth + 1);
         }

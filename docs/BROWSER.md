@@ -171,21 +171,38 @@ How a page is shown:
 **Styles** (`css.rs`, `select.rs`, `style.rs`): `cssparser` tokenizes;
 Servo's `selectors` crate parses and matches selectors (the `Element`
 trait over the arena DOM; `:link`, `:checked`, `:disabled`, `:is()`,
-`:where()`, `:not()`, `:nth-child()` and the rest of what it supports;
-`:hover` and pseudo-elements never match). Rules are indexed by the id,
+`:where()`, `:not()`, `:has()`, `:nth-child()` and the rest of what it
+supports; `:hover` never matches). Rules are indexed by the id,
 class or element name of their rightmost compound selector. The cascade
 orders the user-agent sheet (HTML's defaults), presentational attributes
 (`width`, `bgcolor`, `align`, `<font>`, table `border` and `cellpadding`),
-author rules and `style` attributes by origin, importance, specificity and
-order. `@media` is evaluated for the window (`min-width`, `max-width`,
-orientation, `prefers-color-scheme: light`...); custom properties and
-`var()` are substituted; lengths take px, em, rem, %, pt, vw/vh and
-`calc()`/`min()`/`max()`/`clamp()`. Colours: hex, `rgb()`, `hsl()`, the
-named colours, `light-dark()`. Restyled when the window's width changes.
+author rules and `style` attributes by origin, importance, `@layer`,
+specificity and order (unlayered rules beat layers, and `!important` turns
+the layers round). `@media` is evaluated for the window (`min-width`,
+`max-width`, the range forms `(width >= 48rem)` and `(400px <= width <
+800px)`, orientation, `prefers-color-scheme: light`...); `@supports` against
+what the engine does; `@container` and the `cq*` units with the viewport
+standing in for the container, whose size is not known while styling (a
+container clips, so what is sized wrongly stays inside it). Custom
+properties keep the case of their names and may refer to ones declared
+after them; they are resolved where they are declared, in a chain of scopes
+(GitHub's theme alone is thousands of them). Lengths take px, em, rem, %,
+pt, vw/vh and their d/s/l forms, and `calc()`/`min()`/`max()`/`clamp()`.
+Colours: hex, `rgb()`, `hsl()`, the named colours, `light-dark()`,
+`color-mix()` (always in sRGB). `::before` and `::after` are rules of their
+own (the selector without the pseudo-element, in `Rules::generated`):
+text, `attr()` and empty boxes, inline or positioned, so tab underlines
+work; counters do not. Content that only something missing here would
+reveal is shown: `opacity: 0` with an animation, and inline `opacity: 0` on
+pages with module scripts (React's initial state for its transitions).
+Restyled when the window's width changes.
 
 **Layout** (`layout.rs`): a box tree is built from the styled DOM —
-block-level elements become Taffy nodes (block, flex, grid; tables become
-grids with a column per cell position; `display: contents` is flattened),
+block-level elements become Taffy nodes (block, flex, grid; tables, by
+`display` and so also `div`s, become grids with a column per cell position,
+gaps from `border-spacing` and `border-collapse`; `display: contents` is
+flattened; the children of flex and grid containers are blockified, so each
+is an item; block-level replaced elements are leaves of their own),
 inline content between them becomes inline formatting contexts, which
 are Taffy leaves measured and laid out by webcore itself: white space
 (normal, nowrap, pre, pre-wrap, pre-line), line breaking at spaces (long
@@ -193,8 +210,13 @@ words broken between letters), line boxes with half-leading, text
 alignment, `text-indent`, `text-transform`, list markers (bullets drawn,
 numbers, letters and roman numerals as text), inline boxes' margins,
 borders and padding, backgrounds behind inline text, sub/superscript, and
-atomic inlines: images (sized from attributes, CSS or the image), form
-controls and inline-blocks (laid out as separate Taffy trees). Taffy
+atomic inlines: images (sized from attributes, CSS or the image; a
+percentage width or `max-width` is of the line), inline SVG, form controls
+and inline-blocks (laid out as separate Taffy trees, on the baseline of
+their first line; `text-bottom`, `middle` and `top` too; one of width 100%
+is treated as a block, as a percentage needs the line's width). `<button>`
+is an ordinary box holding what is in it, marked with a `ButtonBox` control
+for clicks. Boxes out of the flow do not end a line. Taffy
 places floats; a second pass shortens the lines of inline contexts beside
 them (each context gets the floats before it that overlap it as
 exclusions). `overflow: hidden` clips (GPI clip rectangles); boxes with
@@ -208,9 +230,22 @@ and element positions for `#fragment` links.
 italic faces, which rs2 draws from the Liberation fonts), text in code page
 850, `GpiBox` for backgrounds and borders, `GpiDrawBits` for images (alpha
 blended over the page background), `GpiFullArc` for bullets. Text widths
-come from `GpiQueryTextBox`, a table of 256 per font.
+come from `GpiQueryTextBox`, a table of 256 per font. Rounded corners are
+`GpiBox` rows from `layout::round_spans`, not antialiased; rounded images
+have the corners painted over in the colour behind them.
 
-**Forms:** text and password fields (an entry field is put over the field
+**SVG** (`webcore/src/svg.rs`): inline `<svg>` is drawn to an RGBA bitmap at
+its laid out size: paths (all commands), rectangles, circles, ellipses,
+lines, polylines and polygons in groups with `transform`, `viewBox`, flat
+fills (nonzero and even-odd, four scanlines per row with exact coverage
+along each) and strokes, `currentColor`. GpiDrawBits has no alpha, so it is
+blended over the colour behind it, which the layout tracks. Not drawn:
+gradients (grey), clip paths, masks, `<use>`, text. `<img>` of an SVG file
+is not decoded.
+
+**Forms:** controls get their boxes from CSS (the user-agent sheet gives
+them a border and a background, which pages restyle); text and password
+fields show their `placeholder`; text and password fields (an entry field is put over the field
 while it is edited), checkboxes, radio buttons, selects (a click shows the
 next option), submit buttons; sent with GET or POST
 (`application/x-www-form-urlencoded`).
@@ -237,6 +272,10 @@ Under QEMU (screenshots in `work/progress/browser-rust/`):
   about 60 ms on the host): vector-2022's grid areas put the table of
   contents beside the article and the text wraps around the infobox;
   with its scripts run, 22 s with images under TCG (layout 180 ms);
+- GitHub (https://github.com/rust-lang/rust, a README, a user's page and
+  the front page; 37 style sheets, 5 MB of CSS, 17000 rules, `@layer`, range
+  queries, camelCase design tokens). Commit messages in the file list and
+  the like stay empty or grey: GitHub fills them in with fetch();
 - a test page whose scripts (inline and from a file) rewrite a heading,
   build a list, show a box on DOMContentLoaded and fill in a timer's
   result;
@@ -253,6 +292,7 @@ cd userland-std
 cargo run --release -p webshot --target aarch64-apple-darwin -- https://example.com/ /tmp/shot.png 900 1200
 WEBCORE_TREE=1 ...      # print Taffy's tree
 WEBCORE_MEASURE=1 ...   # trace inline measurements
+WEBSHOT_ITEMS=1 ...     # print the display list
 ```
 
 ## Stage 4: JavaScript
@@ -282,9 +322,11 @@ check errors and limits.
 ### Not done
 
 Scripts after loading (events, XMLHttpRequest/fetch), `position: fixed` (laid out as absolute),
-background images, named grid lines (areas work), boxes avoiding floats
-(only lines do), `::before`/`::after` content,
-web fonts, borders' styles (all are solid), rounded corners, transforms,
+background images and gradients, named grid lines (areas work), boxes
+avoiding floats (only lines do), CSS counters, `::placeholder`, containers'
+real sizes, `object-fit`, video, canvas, `box-shadow`,
+web fonts, borders' styles (all are solid), transforms, ellipses for
+`text-overflow`, positioned boxes' containing blocks past their parent,
 `:hover`, HTTP keep-alive and caching, persistent cookies, IPv6, frames.
 Italic GPI faces look smaller than the upright ones at the same size (an
 rs2 font issue).

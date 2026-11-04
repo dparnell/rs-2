@@ -118,11 +118,21 @@ pub enum ListStyle {
     UpperRoman,
 }
 
+/// An SVG fill or stroke.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Paint {
+    None,
+    Color(Color),
+    Current,
+}
+
 /// A grid track size.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Track {
     Len(Len),
     Fr(f32),
+    /// minmax(0, Nfr): a share that its content cannot widen.
+    Share(f32),
     MinContent,
     MaxContent,
 }
@@ -179,9 +189,13 @@ pub struct Style {
     pub overflow_hidden: bool,
     /// Not drawn with what it holds (opacity 0, clipped away).
     pub invisible: bool,
+    /// opacity: 0, which an animation may lift.
+    pub transparent: bool,
+    pub animated: bool,
     pub vertical_align: u8,
     pub grid_columns: Vec<Track>,
     pub grid_column_span: u16,
+    pub grid_row_span: u16,
     pub grid_rows: Vec<Track>,
     /// grid-template-areas: the names of each row's cells.
     pub grid_areas: Vec<Vec<String>>,
@@ -189,7 +203,40 @@ pub struct Style {
     pub grid_area: Option<String>,
     pub grid_row_lines: (i16, i16),
     pub grid_col_lines: (i16, i16),
-    pub vars: Arc<HashMap<String, String>>,
+    pub vars: Arc<Vars>,
+    /// A child of a flex or grid container (they are blocks).
+    pub in_flex: bool,
+    /// Corners: top left, top right, bottom right, bottom left.
+    pub border_radius: [Len; 4],
+    pub border_spacing: f32,
+    pub border_collapse: bool,
+    pub align_content: u8,
+    pub justify_self: u8,
+    pub aspect_ratio: Option<f32>,
+    pub fill: Paint,
+    pub stroke: Paint,
+    pub stroke_width: f32,
+    pub fill_evenodd: bool,
+}
+
+/// Custom properties: what an element declares, then its ancestors'.
+/// Values have no var() left in them.
+#[derive(Default, Debug)]
+pub struct Vars {
+    map: HashMap<String, String>,
+    parent: Option<Arc<Vars>>,
+}
+
+impl Vars {
+    fn get(&self, name: &str) -> Option<&str> {
+        let mut v = self;
+        loop {
+            if let Some(s) = v.map.get(name) {
+                return Some(s);
+            }
+            v = v.parent.as_deref()?;
+        }
+    }
 }
 
 // Edges: top, right, bottom, left (CSS order).
@@ -246,15 +293,29 @@ impl Default for Style {
             inset: [Len::Auto; 4],
             overflow_hidden: false,
             invisible: false,
+            transparent: false,
+            animated: false,
             vertical_align: 0,
             grid_columns: Vec::new(),
             grid_column_span: 1,
+            grid_row_span: 1,
             grid_rows: Vec::new(),
             grid_areas: Vec::new(),
             grid_area: None,
             grid_row_lines: (0, 0),
             grid_col_lines: (0, 0),
-            vars: Arc::new(HashMap::new()),
+            vars: Arc::default(),
+            in_flex: false,
+            border_radius: [Len::Px(0.0); 4],
+            border_spacing: 2.0,
+            border_collapse: false,
+            align_content: 0,
+            justify_self: 0,
+            aspect_ratio: None,
+            fill: Paint::Color(BLACK),
+            stroke: Paint::None,
+            stroke_width: 1.0,
+            fill_evenodd: false,
         }
     }
 }
@@ -277,6 +338,12 @@ impl Style {
             list_style: self.list_style,
             hidden: self.hidden,
             vars: self.vars.clone(),
+            border_spacing: self.border_spacing,
+            border_collapse: self.border_collapse,
+            fill: self.fill,
+            stroke: self.stroke,
+            stroke_width: self.stroke_width,
+            fill_evenodd: self.fill_evenodd,
             ..Style::default()
         }
     }
@@ -287,6 +354,16 @@ impl Style {
 
     pub fn border_color(&self, side: usize) -> Color {
         self.border_color[side].unwrap_or(self.color)
+    }
+
+    /// The corners' radii for a box of this size, scaled down to fit.
+    pub fn radii(&self, w: f32, h: f32) -> [f32; 4] {
+        let mut r = [0.0; 4];
+        for (i, c) in self.border_radius.iter().enumerate() {
+            r[i] = c.px(w.min(h));
+        }
+        let over = [(r[0] + r[1]) / w, (r[2] + r[3]) / w, (r[0] + r[3]) / h, (r[1] + r[2]) / h].into_iter().fold(1.0f32, f32::max);
+        r.map(|v| v / over)
     }
 
     pub fn line_height_px(&self) -> f32 {
@@ -304,7 +381,8 @@ noframes, ol, p, ul, center, dir, hr, menu, pre, header, footer, nav, article, s
 figcaption, details, summary, legend, hgroup, search, optgroup, address, dialog, noscript { display: block }
 li { display: list-item }
 head, script, style, link, meta, title, template, datalist, area, base, param, [hidden], option, map, track,
-source, audio:not([controls]), embed, object, iframe, svg, canvas, noembed, colgroup, col { display: none }
+source, audio:not([controls]), embed, object, iframe, canvas, noembed, colgroup, col { display: none }
+dialog:not([open]), [popover], details:not([open]) > :not(summary) { display: none }
 table { display: table; border-collapse: separate }
 tr { display: table-row }
 td, th { display: table-cell; padding: 1px; vertical-align: middle }
@@ -345,6 +423,9 @@ th { text-align: center }
 mark { background-color: yellow }
 img, input, button, select, textarea, video { display: inline-block }
 input, button, select, textarea { font-family: sans-serif; font-size: 13px }
+input, select, textarea { border: 1px solid #767676; background-color: #fff; padding: 2px 3px }
+button, input[type=submit], input[type=button], input[type=reset] { border: 2px outset #a0a0a0; background-color: #dcdcdc; padding: 1px 6px; text-align: center }
+input[type=checkbox], input[type=radio] { border: 0; padding: 0; background: none }
 fieldset { margin: 0 2px; padding: .35em .75em .625em; border: 2px groove #c0c0c0 }
 legend { padding: 0 2px }
 nobr { white-space: nowrap }
@@ -354,6 +435,8 @@ nobr { white-space: nowrap }
 /// parent's.
 pub struct Styles {
     pub of: Vec<Option<Arc<Style>>>,
+    /// Elements' ::before and ::after: style and content.
+    pub generated: HashMap<NodeId, [Option<(Arc<Style>, String)>; 2]>,
 }
 
 /// Compute the style of every element of the document.
@@ -363,12 +446,21 @@ pub fn compute(dom: &Dom, rules: &Rules, viewport: (f32, f32)) -> Styles {
     let mut caches = SelectorCaches::default();
     let mut stack: Vec<(NodeId, Arc<Style>)> = dom.nodes[Dom::DOCUMENT].children.iter().rev().map(|&c| (c, root.clone())).collect();
     let root_font = std::cell::Cell::new(16.0f32);
+    let mut generated = HashMap::new();
+    // Module scripts do not run here, so what they would reveal stays out.
+    let modules = dom.descendants(Dom::DOCUMENT).any(|n| dom.element(n).is_some_and(|e| e.is("script") && e.attr("type") == Some("module")));
     while let Some((id, parent)) = stack.pop() {
         let st = match &dom.nodes[id].data {
             NodeData::Element(_) => {
-                let s = Arc::new(element_style(dom, rules, id, &parent, &mut caches, viewport, &root_font));
+                let s = Arc::new(element_style(dom, rules, id, &parent, &mut caches, viewport, &root_font, modules));
                 if dom.nodes[id].parent == Some(Dom::DOCUMENT) {
                     root_font.set(s.font_size);
+                }
+                if let (Some(g), true) = (&rules.generated, s.display != Display::None) {
+                    let boxes = generated_styles(dom, g, id, &s, &mut caches, viewport, root_font.get());
+                    if boxes.iter().any(|b| b.is_some()) {
+                        generated.insert(id, boxes);
+                    }
                 }
                 s
             }
@@ -380,19 +472,11 @@ pub fn compute(dom: &Dom, rules: &Rules, viewport: (f32, f32)) -> Styles {
         }
         of[id] = Some(st);
     }
-    Styles { of }
+    Styles { of, generated }
 }
 
-fn element_style(
-    dom: &Dom,
-    rules: &Rules,
-    id: NodeId,
-    parent: &Style,
-    caches: &mut SelectorCaches,
-    viewport: (f32, f32),
-    root_font: &std::cell::Cell<f32>,
-) -> Style {
-    let e = dom.element(id).unwrap();
+/// The rules of `rules` that may match `e`, in index order.
+fn candidates(rules: &Rules, e: &crate::dom::Element) -> Vec<usize> {
     let mut cand: Vec<usize> = Vec::new();
     if let Some(i) = e.attr("id") {
         if let Some(v) = rules.by_id.get(i) {
@@ -412,6 +496,69 @@ fn element_style(
     cand.extend(&rules.universal);
     cand.sort_unstable();
     cand.dedup();
+    cand
+}
+
+/// The element's ::before and ::after, where `content` makes them boxes.
+fn generated_styles(dom: &Dom, rules: &Rules, id: NodeId, parent: &Style, caches: &mut SelectorCaches, viewport: (f32, f32), root_font: f32) -> [Option<(Arc<Style>, String)>; 2] {
+    let e = dom.element(id).unwrap();
+    let el = El { dom, id };
+    let mut ctx = MatchingContext::new(MatchingMode::Normal, None, caches, QuirksMode::NoQuirks, NeedsSelectorFlags::No, MatchingForInvalidation::No);
+    let mut matched: Vec<&css::Rule> = candidates(rules, e)
+        .into_iter()
+        .map(|i| &rules.rules[i])
+        .filter(|r| r.decls.iter().any(|d| d.name != "box-sizing") && selectors::matching::matches_selector(&r.selector, 0, None, el, &mut ctx))
+        .collect();
+    let mut out = [None, None];
+    if matched.is_empty() {
+        return out;
+    }
+    matched.sort_by_key(|r| (r.origin, r.layer, r.specificity, r.order));
+    for pseudo in [1u8, 2] {
+        let mine: Vec<&css::Rule> = matched.iter().copied().filter(|r| r.pseudo == pseudo).collect();
+        let order: Vec<&Decl> = mine.iter().flat_map(|r| r.decls.iter()).filter(|d| !d.important).chain(mine.iter().flat_map(|r| r.decls.iter()).filter(|d| d.important)).collect();
+        let Some(content) = order.iter().rev().find(|d| d.name == "content") else { continue };
+        let s = cascade(order.clone(), parent, viewport, root_font, false);
+        let Some(text) = content_text(&css::tokens(&value_of(content, &s)), e) else { continue };
+        if s.display != Display::None {
+            out[pseudo as usize - 1] = Some((Arc::new(s), text));
+        }
+    }
+    out
+}
+
+/// The text of a `content` value; None for no box at all.
+fn content_text(t: &[Tok], e: &crate::dom::Element) -> Option<String> {
+    let mut out = String::new();
+    for x in t {
+        match x {
+            Tok::Ident(k) if k == "none" || k == "normal" => return None,
+            Tok::Str(v) => out.push_str(v),
+            Tok::Func(f, a) if f == "attr" => {
+                if let Some(Tok::Ident(n)) = a.first() {
+                    out.push_str(e.attr(n).unwrap_or(""));
+                }
+            }
+            // An alternative text after a slash is not shown.
+            Tok::Slash => break,
+            _ => {}
+        }
+    }
+    Some(out)
+}
+
+fn element_style(
+    dom: &Dom,
+    rules: &Rules,
+    id: NodeId,
+    parent: &Style,
+    caches: &mut SelectorCaches,
+    viewport: (f32, f32),
+    root_font: &std::cell::Cell<f32>,
+    modules: bool,
+) -> Style {
+    let e = dom.element(id).unwrap();
+    let cand = candidates(rules, e);
     let el = El { dom, id };
     let mut ctx = MatchingContext::new(MatchingMode::Normal, None, caches, QuirksMode::NoQuirks, NeedsSelectorFlags::No, MatchingForInvalidation::No);
     let mut matched: Vec<&css::Rule> = cand
@@ -419,7 +566,7 @@ fn element_style(
         .map(|i| &rules.rules[i])
         .filter(|r| selectors::matching::matches_selector(&r.selector, 0, None, el, &mut ctx))
         .collect();
-    matched.sort_by_key(|r| (r.origin, r.specificity, r.order));
+    matched.sort_by_key(|r| (r.origin, r.layer, r.specificity, r.order));
     let attr_decls = e.attr("style").map(css::parse_style_attr).unwrap_or_default();
     // Presentational attributes, below any CSS.
     let mut pres: Vec<Decl> = Vec::new();
@@ -429,7 +576,7 @@ fn element_style(
         if v.ends_with('%') { v.to_string() } else { format!("{}px", v.trim_end_matches("px")) }
     };
     match &*e.name.local {
-        "img" | "table" | "td" | "th" | "iframe" | "video" | "canvas" | "hr" | "col" => {
+        "img" | "table" | "td" | "th" | "iframe" | "video" | "canvas" | "hr" | "col" | "svg" => {
             if let Some(w) = e.attr("width") {
                 hint("width", dim(w));
             }
@@ -438,6 +585,13 @@ fn element_style(
             }
         }
         _ => {}
+    }
+    if &*e.name.ns == "http://www.w3.org/2000/svg" {
+        for n in ["fill", "stroke", "stroke-width", "fill-rule", "display", "color"] {
+            if let Some(v) = e.attr(n) {
+                hint(n, v.to_string());
+            }
+        }
     }
     if let Some(c) = e.attr("bgcolor") {
         hint("background-color", c.to_string());
@@ -483,8 +637,8 @@ fn element_style(
                 hint("border", format!("{w}px outset #808080"));
             }
         }
-        if let Some(c) = e.attr("cellpadding") {
-            let _ = c;
+        if let Some(c) = e.attr("cellspacing") {
+            hint("border-spacing", dim(c));
         }
     }
     if matches!(&*e.name.local, "td" | "th") {
@@ -514,24 +668,47 @@ fn element_style(
         }
     }
     let mut order: Vec<&Decl> = Vec::new();
+    let is_ua = |r: &&&css::Rule| r.origin == Origin::UserAgent;
+    order.extend(matched.iter().filter(is_ua).flat_map(|r| r.decls.iter()).filter(|d| !d.important));
     order.extend(pres.iter());
-    order.extend(matched.iter().flat_map(|r| r.decls.iter()).filter(|d| !d.important));
+    order.extend(matched.iter().filter(|r| r.origin == Origin::Author).flat_map(|r| r.decls.iter()).filter(|d| !d.important));
     order.extend(attr_decls.iter().filter(|d| !d.important));
-    order.extend(matched.iter().filter(|r| r.origin == Origin::Author).flat_map(|r| r.decls.iter()).filter(|d| d.important));
+    // !important runs the other way between layers: earlier ones win.
+    let mut strong: Vec<&&css::Rule> = matched.iter().filter(|r| r.origin == Origin::Author).collect();
+    strong.sort_by_key(|r| (std::cmp::Reverse(r.layer), r.specificity, r.order));
+    order.extend(strong.iter().flat_map(|r| r.decls.iter()).filter(|d| d.important));
     order.extend(attr_decls.iter().filter(|d| d.important));
     order.extend(matched.iter().filter(|r| r.origin == Origin::UserAgent).flat_map(|r| r.decls.iter()).filter(|d| d.important));
 
+    let root = dom.nodes[id].parent == Some(Dom::DOCUMENT);
+    let mut s = cascade(order, parent, viewport, root_font.get(), root);
+    // Animations are not played, and scripts that clear an inline
+    // opacity: 0 may not run.
+    let scripted = modules && attr_decls.iter().any(|d| d.name == "opacity") && !matches!(&*e.name.local, "input" | "select" | "textarea");
+    if s.transparent && !s.animated && !scripted {
+        s.invisible = true;
+    }
+    s
+}
+
+/// A style from declarations in cascade order.
+fn cascade(order: Vec<&Decl>, parent: &Style, viewport: (f32, f32), root_font: f32, root: bool) -> Style {
     let mut s = parent.inherit();
     // Custom properties first.
     if order.iter().any(|d| d.name.starts_with("--")) {
-        let mut vars = (*s.vars).clone();
+        // All of them before any is resolved: one may refer to a later one.
+        let mut vars = Vars { map: HashMap::new(), parent: Some(s.vars.clone()) };
         for d in order.iter().filter(|d| d.name.starts_with("--")) {
-            let v = substitute(&d.value, &vars, 0);
-            vars.insert(d.name.clone(), v);
+            vars.map.insert(d.name.clone(), d.value.clone());
+        }
+        let names: Vec<String> = vars.map.iter().filter(|(_, v)| v.contains("var(")).map(|(k, _)| k.clone()).collect();
+        for n in names {
+            let v = substitute(&vars.map[&n], &vars, 0);
+            vars.map.insert(n, v);
         }
         s.vars = Arc::new(vars);
     }
-    let mut cx = Cx { parent, root_font: root_font.get(), vw: viewport.0, vh: viewport.1, em: parent.font_size };
+    let mut cx = Cx { parent, root_font, vw: viewport.0, vh: viewport.1, em: parent.font_size };
     // Then the font size (em units depend on it).
     for d in order.iter().filter(|d| d.name == "font-size" || d.name == "font") {
         let v = value_of(d, &s);
@@ -542,7 +719,7 @@ fn element_style(
             s.font_size = sz;
         }
     }
-    if dom.nodes[id].parent == Some(Dom::DOCUMENT) {
+    if root {
         cx.root_font = s.font_size;
     }
     cx.em = s.font_size;
@@ -554,8 +731,10 @@ fn element_style(
         let t = css::tokens(&v);
         apply(&mut s, &d.name, &t, &cx);
     }
-    // Blockification: floated and absolutely positioned boxes are blocks.
-    if s.float != Float::None || matches!(s.position, Position::Absolute | Position::Fixed) {
+    // Blockification: floated and absolutely positioned boxes are blocks,
+    // and so are the children of flex and grid containers.
+    s.in_flex = matches!(parent.display, Display::Flex | Display::InlineFlex | Display::Grid | Display::InlineGrid) || parent.display == Display::Contents && parent.in_flex;
+    if s.in_flex || s.float != Float::None || matches!(s.position, Position::Absolute | Position::Fixed) {
         s.display = match s.display {
             Display::Inline | Display::InlineBlock | Display::TableCell | Display::TableRow => Display::Block,
             Display::InlineFlex => Display::Flex,
@@ -571,8 +750,8 @@ fn value_of(d: &Decl, s: &Style) -> String {
 }
 
 /// Replace var(--name, fallback) references.
-fn substitute(v: &str, vars: &HashMap<String, String>, depth: u32) -> String {
-    if depth > 8 || !v.contains("var(") {
+fn substitute(v: &str, vars: &Vars, depth: u32) -> String {
+    if depth > 32 || !v.contains("var(") {
         return v.to_string();
     }
     let mut out = String::new();
@@ -601,7 +780,7 @@ fn substitute(v: &str, vars: &HashMap<String, String>, depth: u32) -> String {
             Some(c) => (inner[..c].trim(), Some(inner[c + 1..].trim())),
             None => (inner.trim(), None),
         };
-        let val = vars.get(name).map(|s| s.as_str()).or(fallback).unwrap_or("");
+        let val = vars.get(name).or(fallback).unwrap_or("");
         out.push_str(&substitute(val, vars, depth + 1));
         rest = if end < after.len() { &after[end + 1..] } else { "" };
     }
@@ -714,6 +893,10 @@ fn length(t: &Tok, cx: &Cx) -> Option<Len> {
             "q" => v * 96.0 / 101.6,
             "vw" => v * cx.vw / 100.0,
             "vh" => v * cx.vh / 100.0,
+            // Containers are taken to be as wide as the viewport.
+            "dvw" | "svw" | "lvw" | "cqw" | "cqi" | "cqmax" => v * cx.vw / 100.0,
+            "cqh" | "cqb" | "cqmin" => v * cx.vh / 100.0,
+            "dvh" | "svh" | "lvh" => v * cx.vh / 100.0,
             "vmin" => v * cx.vw.min(cx.vh) / 100.0,
             "vmax" => v * cx.vw.max(cx.vh) / 100.0,
             "lh" => v * cx.em * 1.2,
@@ -928,10 +1111,23 @@ fn tracks(t: &[Tok], cx: &Cx, out: &mut Vec<Track>) {
                 }
             }
             Tok::Func(f, inner) if f == "minmax" => {
-                let max = inner.split(|t| *t == Tok::Comma).nth(1).unwrap_or(&[]);
+                let mut args = inner.split(|t| *t == Tok::Comma);
+                let min = args.next().unwrap_or(&[]);
+                let max = args.next().unwrap_or(&[]);
                 let mut one = Vec::new();
                 tracks(max, cx, &mut one);
-                out.push(one.first().copied().unwrap_or(Track::Len(Len::Auto)));
+                let zero = matches!(min, [Tok::Num(n)] if *n == 0.0) || matches!(min, [Tok::Dim(n, _)] if *n == 0.0);
+                // calc(100% - 300px) after fixed tracks: what is left.
+                if let (true, [Tok::Func(f, a)]) = (zero, max) {
+                    if f == "calc" && a.iter().any(|t| matches!(t, Tok::Pct(_))) && a.iter().any(|t| matches!(t, Tok::Dim(..) | Tok::Func(..))) {
+                        out.push(Track::Share(1.0));
+                        continue;
+                    }
+                }
+                out.push(match one.first().copied() {
+                    Some(Track::Fr(f)) if zero => Track::Share(f),
+                    t => t.unwrap_or(Track::Len(Len::Auto)),
+                });
             }
             Tok::Func(f, inner) if f == "fit-content" => {
                 let _ = inner;
@@ -1049,7 +1245,9 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
             }
         }
         "background" => {
-            // The colour is the last layer's.
+            // The shorthand resets what it does not name. The colour is the last layer's.
+            s.background = TRANSPARENT;
+            s.background_image = None;
             let last = t.rsplit(|x| *x == Tok::Comma).next().unwrap_or(t);
             for x in last {
                 if let Some(c) = css::parse_color(std::slice::from_ref(x), s.color) {
@@ -1193,7 +1391,62 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
         "max-height" => s.max_height = if matches!(first, Tok::Ident(k) if k == "none") { Len::Auto } else { len(first).unwrap_or(s.max_height) },
         "inline-size" => s.width = len(first).unwrap_or(s.width),
         "block-size" => s.height = len(first).unwrap_or(s.height),
-        "max-inline-size" => s.max_width = len(first).unwrap_or(s.max_width),
+        "min-inline-size" => s.min_width = len(first).unwrap_or(s.min_width),
+        "min-block-size" => s.min_height = len(first).unwrap_or(s.min_height),
+        "max-inline-size" => s.max_width = if matches!(first, Tok::Ident(k) if k == "none") { Len::Auto } else { len(first).unwrap_or(s.max_width) },
+        "max-block-size" => s.max_height = if matches!(first, Tok::Ident(k) if k == "none") { Len::Auto } else { len(first).unwrap_or(s.max_height) },
+        "aspect-ratio" => {
+            let v: Vec<f32> = t.iter().filter_map(|x| if let Tok::Num(n) = x { Some(*n) } else { None }).collect();
+            s.aspect_ratio = match v[..] {
+                [a] if a > 0.0 => Some(a),
+                [a, b] if b > 0.0 => Some(a / b),
+                _ => None,
+            };
+        }
+        "border-radius" => {
+            let first_half = t.split(|x| *x == Tok::Slash).next().unwrap_or(t);
+            let v: Vec<Len> = first_half.iter().filter_map(|x| len(x)).collect();
+            s.border_radius = match v[..] {
+                [a] => [a; 4],
+                [a, b] => [a, b, a, b],
+                [a, b, c] => [a, b, c, b],
+                [a, b, c, d] => [a, b, c, d],
+                _ => return,
+            };
+        }
+        "border-top-left-radius" | "border-start-start-radius" => s.border_radius[0] = len(first).unwrap_or(s.border_radius[0]),
+        "border-top-right-radius" | "border-start-end-radius" => s.border_radius[1] = len(first).unwrap_or(s.border_radius[1]),
+        "border-bottom-right-radius" | "border-end-end-radius" => s.border_radius[2] = len(first).unwrap_or(s.border_radius[2]),
+        "border-bottom-left-radius" | "border-end-start-radius" => s.border_radius[3] = len(first).unwrap_or(s.border_radius[3]),
+        "border-spacing" => {
+            if let Some(Len::Px(v)) = len(first) {
+                s.border_spacing = v;
+            }
+        }
+        "border-collapse" => s.border_collapse = matches!(first, Tok::Ident(k) if k == "collapse"),
+        "fill" | "stroke" => {
+            let p = match first {
+                Tok::Ident(k) if k == "none" => Paint::None,
+                Tok::Ident(k) if k == "currentcolor" => Paint::Current,
+                // Gradients and patterns are not drawn.
+                Tok::Url(_) => Paint::Color(0xff80_8080),
+                _ => match css::parse_color(t, s.color) {
+                    Some(c) => Paint::Color(c),
+                    None => return,
+                },
+            };
+            if name == "fill" {
+                s.fill = p;
+            } else {
+                s.stroke = p;
+            }
+        }
+        "stroke-width" => {
+            if let Some(Len::Px(v)) = len(first) {
+                s.stroke_width = v;
+            }
+        }
+        "fill-rule" => s.fill_evenodd = matches!(first, Tok::Ident(k) if k == "evenodd"),
         "list-style" | "list-style-type" => {
             for x in t {
                 if let Tok::Ident(k) = x {
@@ -1274,6 +1527,17 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
         "justify-content" => s.justify = align_kw(t),
         "align-items" => s.align_items = align_kw(t),
         "align-self" => s.align_self = align_kw(t),
+        "align-content" => s.align_content = align_kw(t),
+        "justify-self" => s.justify_self = align_kw(t),
+        "place-items" => s.align_items = align_kw(t),
+        "place-self" => {
+            s.align_self = align_kw(t);
+            s.justify_self = align_kw(&t[t.len() - 1..]);
+        }
+        "place-content" => {
+            s.align_content = align_kw(t);
+            s.justify = align_kw(&t[t.len() - 1..]);
+        }
         "order" => {
             if let Tok::Num(n) = first {
                 s.order = *n as i32
@@ -1296,13 +1560,26 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
                 s.inset = e;
             }
         }
-        "opacity" => {
-            if let Tok::Num(n) = first {
-                s.invisible = *n <= 0.01;
-            } else if let Tok::Pct(p) = first {
-                s.invisible = *p <= 1.0;
+        "inset-inline-start" => s.inset[LEFT] = len(first).unwrap_or(Len::Auto),
+        "inset-inline-end" => s.inset[RIGHT] = len(first).unwrap_or(Len::Auto),
+        "inset-block-start" => s.inset[TOP] = len(first).unwrap_or(Len::Auto),
+        "inset-block-end" => s.inset[BOTTOM] = len(first).unwrap_or(Len::Auto),
+        "inset-inline" | "inset-block" => {
+            let v: Vec<Len> = t.iter().filter_map(|x| len(x)).collect();
+            if let Some(&a) = v.first() {
+                let (i, j) = if name == "inset-inline" { (LEFT, RIGHT) } else { (TOP, BOTTOM) };
+                s.inset[i] = a;
+                s.inset[j] = v.get(1).copied().unwrap_or(a);
             }
         }
+        "opacity" => {
+            if let Tok::Num(n) = first {
+                s.transparent = *n <= 0.01;
+            } else if let Tok::Pct(p) = first {
+                s.transparent = *p <= 1.0;
+            }
+        }
+        "animation" | "animation-name" => s.animated = !matches!(t, [Tok::Ident(k)] if k == "none"),
         "clip" => {
             // rect(0 0 0 0), rect(1px, 1px, 1px, 1px): the visually-hidden idiom.
             if let Tok::Func(f, args) = first {
@@ -1319,6 +1596,13 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
                 if f == "inset" && matches!(args.first(), Some(Tok::Pct(p)) if *p >= 50.0) {
                     s.invisible = true;
                 }
+            }
+        }
+        // A container's size is not known while styling (cq units are taken
+        // from the viewport), so what is sized by it stays inside.
+        "container" | "container-type" => {
+            if !matches!(first, Tok::Ident(k) if k == "normal" || k == "none") {
+                s.overflow_hidden = true;
             }
         }
         "overflow" | "overflow-x" | "overflow-y" => s.overflow_hidden = matches!(first, Tok::Ident(k) if k == "hidden" || k == "clip" || k == "auto" || k == "scroll"),
@@ -1374,34 +1658,35 @@ fn apply(s: &mut Style, name: &str, t: &[Tok], cx: &Cx) {
                 }
             }
         }
-        "grid-column" | "grid-column-start" | "grid-row" | "grid-row-start" => {
+        "grid-column" | "grid-column-start" | "grid-column-end" | "grid-row" | "grid-row-start" | "grid-row-end" => {
             let parts: Vec<&[Tok]> = t.split(|x| *x == Tok::Slash).collect();
             let row = name.starts_with("grid-row");
-            let first = parts.first().copied().unwrap_or(&[]);
-            match (first.first(), first.get(1)) {
-                (Some(Tok::Ident(k)), Some(Tok::Num(n))) if k == "span" => {
-                    if !row {
-                        s.grid_column_span = (*n as u16).clamp(1, 64);
+            // Each side: a line, a span, or a name (an area's).
+            let (mut start, mut end, mut span, mut area) = (None, None, None, None);
+            for (i, part) in parts.iter().enumerate().take(2) {
+                let is_end = i == 1 || name.ends_with("-end");
+                match part {
+                    [Tok::Num(n)] => {
+                        if is_end { end = Some(*n as i16) } else { start = Some(*n as i16) }
                     }
+                    [Tok::Ident(k), Tok::Num(n)] if k == "span" => span = Some((*n as u16).clamp(1, 64)),
+                    [Tok::Ident(k)] if k != "auto" && !row => area = Some(k.clone()),
+                    _ => {}
                 }
-                (Some(Tok::Ident(k)), _) if k != "auto" && !row => s.grid_area = Some(k.clone()),
-                (Some(Tok::Num(a)), _) => {
-                    let end = match parts.get(1).and_then(|p| p.first()) {
-                        Some(Tok::Num(b)) => *b as i16,
-                        _ => 0,
-                    };
-                    if let (Some(Tok::Ident(k)), Some(Tok::Num(n))) = (parts.get(1).and_then(|p| p.first()), parts.get(1).and_then(|p| p.get(1))) {
-                        if k == "span" && !row {
-                            s.grid_column_span = (*n as u16).clamp(1, 64);
-                        }
-                    }
-                    if row {
-                        s.grid_row_lines = (*a as i16, end);
-                    } else {
-                        s.grid_col_lines = (*a as i16, end);
-                    }
-                }
-                _ => {}
+            }
+            let lines = if row { &mut s.grid_row_lines } else { &mut s.grid_col_lines };
+            if name.ends_with("-end") {
+                lines.1 = end.unwrap_or(lines.1);
+            } else if name.ends_with("-start") {
+                lines.0 = start.unwrap_or(lines.0);
+            } else {
+                *lines = (start.unwrap_or(0), end.unwrap_or(0));
+            }
+            if let Some(n) = span {
+                if row { s.grid_row_span = n } else { s.grid_column_span = n }
+            }
+            if let Some(a) = area {
+                s.grid_area = Some(a);
             }
         }
         _ => {
