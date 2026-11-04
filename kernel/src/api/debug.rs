@@ -465,7 +465,7 @@ pub extern "C" fn first_user_return(f: &mut TrapFrame) {
     crate::smp::bkl_release();
 }
 
-fn connected(p: &Process) -> bool {
+pub(crate) fn connected(p: &Process) -> bool {
     p.debugged.load(Ordering::Relaxed) && with(p.pid, |d| d.debugger != 0 && !d.term).unwrap_or(false)
 }
 
