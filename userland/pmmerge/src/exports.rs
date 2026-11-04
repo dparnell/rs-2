@@ -26,6 +26,8 @@ aligned! {
     __a_WinQueryKbdLayer => crate::bidi::WinQueryKbdLayer, 1;
     __a_WinSetLangViewer => crate::bidi::WinSetLangViewer, 2;
     __a_WinQueryLangViewer => crate::bidi::WinQueryLangViewer, 2;
+    __a_WinQueryKbdLayout => crate::bidi::WinQueryKbdLayout, 1;
+    __a_WinSetKbdLayout => crate::bidi::WinSetKbdLayout, 2;
     __a_PmMergeHelpHook => crate::PmMergeHelpHook, 4;
     __a_WinQueryCpType => crate::WinQueryCpType, 1;
     __a_WinQueryDesktopWorkArea => crate::WinQueryDesktopWorkArea, 2;

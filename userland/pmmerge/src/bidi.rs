@@ -130,3 +130,25 @@ pub extern "C" fn WinSetLangViewer(_hab: u32, h: u32) -> u32 {
 pub extern "C" fn WinQueryLangViewer(_hab: u32, _cp: u32) -> u32 {
     bidi().viewer
 }
+
+/// The keyboard layout set with WinSetKbdLayout (0: none set yet).
+static KBD_LAYOUT: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// WinQueryKbdLayout(hwndDesktop): the system's keyboard layout, a KBDL_
+/// value (pmbidi.h); rs2's is the US one (KBDL_US, 18) unless set. Qt's
+/// OS/2 platform plugin asks for it.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQueryKbdLayout(_desk: u32) -> u32 {
+    match KBD_LAYOUT.load(core::sync::atomic::Ordering::Relaxed) {
+        0 => 18,
+        l => l,
+    }
+}
+
+/// WinSetKbdLayout(hwndDesktop, idKbdLayout): remembered (rs2 has one
+/// keyboard layout for PM).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinSetKbdLayout(_desk: u32, layout: u32) -> u32 {
+    KBD_LAYOUT.store(layout, core::sync::atomic::Ordering::Relaxed);
+    1
+}
