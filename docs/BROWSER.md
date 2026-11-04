@@ -77,10 +77,14 @@ personality routine does the rest. `catch_unwind`, drops while unwinding and
 `JoinHandle::join` of a panicking thread work; backtraces print addresses
 (no symbols: there is no `dl_iterate_phdr` information).
 
-**Memory.** A process can allocate 464 MB in 16 MB blocks (the private
-arena below the 512 MB line, less the program and the shared DLLs);
-memory above 512 MB (OBJ_ANY) is not asked for, as rs2 does not offer it
-yet.
+**Memory.** rs2libc's `malloc` and `mmap` ask DosAllocMem for OBJ_ANY
+memory: above 512 MB while the high private arena has room
+(VIRTUALADDRESSLIMIT, docs/ARCHITECTURE.md "Memory layout"), then below
+(on a kernel without high memory OBJ_ANY is refused and it asks again
+without). STDTEST's `mem` gets 896 MB in 16 MB blocks at the default
+limit (1024: 464 MB low, 432 MB high) and about 3 GB with
+VIRTUALADDRESSLIMIT=3072; with VIRTUALADDRESSLIMIT=512 it is the 464 MB
+of the low private arena (less the program and the shared DLLs).
 
 **What does not work or differs:** `fork` (ENOSYS; std's `Command` uses
 `posix_spawn`, which works, with redirections, a working directory and an

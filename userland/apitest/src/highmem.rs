@@ -18,6 +18,10 @@ const NAME: &[u8] = b"\\SHAREMEM\\APIHIGH\0";
 unsafe extern "C" {
     #[link_name = "DOSCALLS.425"]
     fn DosFlatToSel();
+    #[link_name = "DOSCALLS.298"]
+    fn DosAliasMem(pb: *mut u8, cb: u32, ppb: *mut *mut u8, fl: u32) -> u32;
+    #[link_name = "DOSCALLS.307"]
+    fn DosQueryMemState(pb: *mut u8, pcb: *mut u32, pfl: *mut u32) -> u32;
 }
 
 /// DosFlatToSel: register-based (EAX in, EAX out).
@@ -85,6 +89,19 @@ pub fn run() {
         let (mut cb, mut fl) = (0x10_0000u32, 0u32);
         DosQueryMem(q, &mut cb, &mut fl);
         check("DosQueryMem committed high run", fl & PAG_COMMIT != 0 && fl & PAG_WRITE != 0 && cb == 0x2000);
+        let (mut cb, mut st) = (0x2000u32, 0u32);
+        let rc = DosQueryMemState(q, &mut cb, &mut st);
+        check("DosQueryMemState high pages present", rc == 0 && st & 1 != 0 && cb == 0x2000);
+        // An alias (low, tiled) of high pages sees the same memory.
+        let mut al = null_mut();
+        let rc = DosAliasMem(q, 0x2000, &mut al, 0);
+        check(
+            "DosAliasMem of high pages",
+            rc == 0 && (al as u32) < HIGH && (al as *const u32).read_volatile() == MAGIC && (al.add(0x1ffc) as *const u32).read_volatile() == !MAGIC,
+        );
+        if rc == 0 {
+            DosFreeMem(al);
+        }
         let rc = DosSetMem(q, 0x2000, PAG_READ);
         let (mut cb, mut fl) = (0x2000u32, 0u32);
         DosQueryMem(q, &mut cb, &mut fl);
