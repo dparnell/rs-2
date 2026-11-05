@@ -241,6 +241,11 @@ pub extern "C" fn WinProcessDlg(h: u32) -> u32 {
 /// message filter hooks (MSGF_DIALOGBOX, MSGF_MESSAGEBOX) process is not
 /// dispatched.
 pub fn process(h: u32, msgf: u32) -> u32 {
+    // Any frame can be a dialog: the XWP helpers make theirs with
+    // WinCreateWindow and subclass it with their dialog procedure.
+    if data(h).is_none() && crate::frame::is_frame(h) {
+        ctl::set_data(h, Dlg { result: 0, dismissed: false, disabled_owner: 0 });
+    }
     let Some(d) = data(h) else { return DID_ERROR };
     // Dismissed before the loop (the Open Watcom installer measures a
     // dialog's font this way): IBM's loop returns at once and the dialog
