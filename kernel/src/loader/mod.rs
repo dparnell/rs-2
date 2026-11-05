@@ -291,8 +291,11 @@ pub fn find_loaded(name: &str) -> Option<Arc<Module>> {
 
 /// A loaded DLL by the path of its file.
 pub fn find_loaded_path(path: &str) -> Option<Arc<Module>> {
-    let path = path.replace('/', "\\");
-    REGISTRY.lock().modules.iter().find(|m| m.is_dll && m.path.eq_ignore_ascii_case(&path)).cloned()
+    let same = |m: &str| m.len() == path.len() && m.bytes().zip(path.bytes()).all(|(x, y)| {
+        let f = |c: u8| if c == b'/' { b'\\' } else { c.to_ascii_uppercase() };
+        f(x) == f(y)
+    });
+    REGISTRY.lock().modules.iter().find(|m| m.is_dll && same(&m.path)).cloned()
 }
 
 /// Every module loaded in the system (DosQuerySysState).
