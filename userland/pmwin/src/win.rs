@@ -1050,7 +1050,21 @@ pub extern "C" fn WinMapWindowPoints(from: u32, to: u32, pts: *mut PointL, n: i3
 
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetWindowText(h: u32, text: *const u8) -> u32 {
-    set_text(h, &cstr(text))
+    let t = cstr(text);
+    let r = set_text(h, &t);
+    // A window of a program's own class hears of it (the XWP helpers' text
+    // view keeps the text it shows from WM_SETWINDOWPARAMS).
+    if r != 0 && !text.is_null() {
+        let s = st();
+        let own = s.desk.get(h).is_some_and(|w| w.queue == s.my_queue() && s.classes.get(w.class as usize).is_some_and(|c| !c.name.starts_with(b"#")));
+        if own {
+            const WPM_TEXT: u32 = 1;
+            const WPM_CCHTEXT: u32 = 8;
+            let wp = [WPM_TEXT | WPM_CCHTEXT, t.len() as u32, text as u32, 0, 0, 0, 0];
+            crate::msg::send(h, 0x000a, wp.as_ptr() as u32, 0);
+        }
+    }
+    r
 }
 
 /// Set a window's text; a frame and its title bar share theirs.
