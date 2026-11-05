@@ -48,6 +48,19 @@ fn run_startup() -> u32 {
     n
 }
 
+/// \STARTUP.CMD of the boot drive, if there is one, in a window of its own.
+fn run_startup_cmd() {
+    let mut drive = 3u32;
+    unsafe { os2::DosQuerySysInfo(5, 5, &mut drive, 4) };
+    let mut path = *b"C:\\STARTUP.CMD\0";
+    path[0] = b'@' + drive as u8;
+    let mut info = [0u8; 64];
+    // FIL_STANDARD
+    if unsafe { os2::DosQueryPathInfo(path.as_ptr(), 1, info.as_mut_ptr(), 24) } == 0 {
+        crate::launch::start_session(&path[..path.len() - 1], b"", b"", b"STARTUP.CMD", 0, b"");
+    }
+}
+
 // ---- WinWaitForShell ----
 //
 // The shell posts an event semaphore for each stage of its start: the
@@ -170,6 +183,7 @@ pub extern "C" fn ShlStartWorkplace(hab: u32, _hmq: u32) -> u32 {
     crate::desktop::archive_at_startup();
     if startup_wanted() {
         run_startup();
+        run_startup_cmd();
     }
     crate::desktop::started();
     1
