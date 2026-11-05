@@ -314,6 +314,9 @@ Status markers: done, in progress, planned.
   high; ARCHITECTURE.md "Memory layout"); kLIBC's high heap and Firefox
   run with it. planned: Qt 5 programs (Designer dies in QtCore;
   QtWebEngine waits for PTHR01 functions)
+- done: OS/2 package managers, unmodified (PACKAGES.md): RPM, yum
+  (installing from rpm.netlabs.org inside rs2) and WarpIN (WPI archives
+  under the Workplace Shell). planned: ANPM (VX-REXX: SOM 1 classes)
 
 ## Milestone 4: Presentation Manager (largely done)
 
