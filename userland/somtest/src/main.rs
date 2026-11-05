@@ -37,6 +37,8 @@ unsafe extern "C" {
     fn SOMObjectNewClass(major: i32, minor: i32) -> usize;
     #[link_name = "SOM.21"]
     fn SOMClassNewClass(major: i32, minor: i32) -> usize;
+    #[link_name = "SOM.28"]
+    fn somConstructClass(init: usize, parent: usize, meta: usize, cds: *mut usize);
     #[link_name = "SOM.49"]
     fn somBuildClass(inherit: i32, sci: *const u32, major: i32, minor: i32) -> usize;
     #[link_name = "SOM.50"]
@@ -576,7 +578,33 @@ fn take_log() -> Vec<u8> {
     unsafe { core::mem::take(&mut LOG) }
 }
 
+static mut CONSTRUCTED: [usize; 3] = [0; 3];
+
+extern "C" fn class_init(parent: usize, meta: usize) {
+    unsafe {
+        CONSTRUCTED[0] += 1;
+        CONSTRUCTED[1] = parent;
+        CONSTRUCTED[2] = meta;
+    }
+}
+
+/// SOM 1 bindings: somConstructClass calls classInit(parent, metaclass),
+/// which makes the class, unless the class data has one already.
+fn construct_checks() {
+    let mut cds = [0usize; 2];
+    unsafe {
+        somConstructClass(class_init as *const () as usize, 0x1234, 0x5678, cds.as_mut_ptr());
+        check_eq("somConstructClass calls the routine", CONSTRUCTED[0] as i64, 1);
+        check("somConstructClass passes parent, metaclass", CONSTRUCTED[1] == 0x1234 && CONSTRUCTED[2] == 0x5678);
+        check("somConstructClass leaves the class data to it", cds[0] == 0);
+        cds[0] = 1;
+        somConstructClass(class_init as *const () as usize, 0x1234, 0x5678, cds.as_mut_ptr());
+        check_eq("somConstructClass with a class made", CONSTRUCTED[0] as i64, 1);
+    }
+}
+
 fn run() {
+    construct_checks();
     unsafe {
         let mgr = somEnvironmentNew();
         check("environment", mgr != 0 && mgr == SOMClassMgrObject);
