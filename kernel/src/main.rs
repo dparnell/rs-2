@@ -92,6 +92,9 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     task::sched::init();
     fs::init(info);
     vmware::init();
+    if info.cmdline().split_whitespace().any(|w| w == "nocache") {
+        fs::cache::DISABLED.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
     drivers::init();
     fs::cdaudio::simulate();
     loader::init();

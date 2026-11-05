@@ -725,9 +725,13 @@ impl Drop for Cache {
     }
 }
 
+/// `nocache` on the kernel command line: no volume gets a cache, for
+/// comparing.
+pub static DISABLED: AtomicBool = AtomicBool::new(false);
+
 /// `dev` behind a cache, if its kind of device has one.
 pub fn wrap(dev: Arc<dyn BlockDev>) -> Arc<dyn BlockDev> {
-    if dev.cache_kind() == CacheKind::None || dev.sector_size() != SECTOR {
+    if dev.cache_kind() == CacheKind::None || dev.sector_size() != SECTOR || DISABLED.load(Ordering::Relaxed) {
         return dev;
     }
     let kind = dev.cache_kind();
