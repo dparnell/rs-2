@@ -744,3 +744,28 @@ fn chkdsk_finds_and_repairs_bitmap_damage() {
     assert!(r.ok() && !r.was_dirty, "{:?}", r.problems);
     assert_eq!(read_all(&mut v, "DIR\\F39.DAT"), pattern(1000 + 39 * 700, 39));
 }
+
+#[test]
+fn dirty_flag_follows_the_mount() {
+    let flag = |v: &Volume<Mem>| {
+        let mut b = [0u8; 512];
+        v.dev.read(SPARE_LBA as u64, &mut b).unwrap();
+        b[sp::FLAGS] & 1
+    };
+    let mut v = fresh(8);
+    v.track_dirty();
+    assert_eq!(flag(&v), 0);
+    v.create_file("A.TXT", 0, NOW).unwrap();
+    assert_eq!(flag(&v), 1);
+    v.mark_clean().unwrap();
+    assert_eq!(flag(&v), 0);
+    // A write after shutdown sets it again.
+    v.create_file("B.TXT", 0, NOW).unwrap();
+    assert_eq!(flag(&v), 1);
+    // Dirty at mount: only CHKDSK clears it.
+    let mut w = Volume::mount(v.dev).unwrap();
+    w.track_dirty();
+    w.create_file("C.TXT", 0, NOW).unwrap();
+    w.mark_clean().unwrap();
+    assert_eq!(flag(&w), 1);
+}

@@ -542,6 +542,7 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
     if forced.is_none() && route && subsys::route(&mut ctx, module as u8, ordinal as u16) {
         return;
     }
+    let timed = crate::fs::iostat::begin();
     let result = match (forced, doscalls::handler(module as u8, ordinal as u16)) {
         (Some(r), _) => r,
         (None, Some(h)) => h(&mut ctx),
@@ -560,6 +561,7 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
             err::CALL_NOT_IMPLEMENTED
         }
     };
+    crate::fs::iostat::api(timed, module as u8, ordinal as u16);
     if trace {
         crate::trace!("    -> {}", result);
     }

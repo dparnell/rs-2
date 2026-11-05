@@ -92,6 +92,9 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     task::sched::init();
     fs::init(info);
     vmware::init();
+    if info.cmdline().split_whitespace().any(|w| w == "nocache") {
+        fs::cache::DISABLED.store(true, core::sync::atomic::Ordering::Relaxed);
+    }
     drivers::init();
     fs::cdaudio::simulate();
     loader::init();
@@ -120,6 +123,7 @@ extern "C" fn kernel_main(info: &'static BootInfo) -> ! {
     smp::start_aps();
     msi::start();
     drivers::hotplug::start();
+    fs::cache::start();
     bench::start(cmdline);
     boot::start(cmdline);
     // This boot context is now CPU 0's idle thread.
@@ -183,6 +187,7 @@ pub mod boot {
         crate::config::apply_memory(&cfg);
         crate::config::apply_nls(&cfg);
         crate::config::apply_sched(&cfg);
+        crate::config::apply_cache(&cfg);
         crate::config::apply_video(&cfg);
         if let Some(lp) = &cfg.libpath {
             crate::fs::set_libpath(lp);
@@ -303,6 +308,8 @@ pub mod boot {
     pub fn process_ended(pid: u32) {
         let ours = STATE.lock().as_ref().is_some_and(|b| b.current == pid);
         if ours {
+            // The machine may be switched off now (test runs are).
+            crate::fs::cache::sync_all();
             next();
         }
     }

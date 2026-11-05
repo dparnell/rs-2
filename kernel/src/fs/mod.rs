@@ -4,6 +4,8 @@
 //! handed to them are relative to the volume root with `\` separators.
 
 pub mod block;
+pub mod cache;
+pub mod iostat;
 pub mod cdaudio;
 pub mod cdrom;
 pub mod ea;
@@ -180,7 +182,11 @@ pub fn mount(drive: u8, fs: Arc<dyn FileSystem>) {
 /// Remove drive `d` (its medium went away). Open files keep the file
 /// system object; their I/O fails once the device is gone.
 pub fn unmount(drive: u8) {
-    if DRIVES.lock()[drive as usize].take().is_some() {
+    let fs = DRIVES.lock()[drive as usize].take();
+    if let Some(fs) = fs {
+        if let Some(c) = fs.device().as_deref().and_then(|d| d.cache()) {
+            c.detach();
+        }
         crate::println!("drive {}: removed", (b'A' + drive) as char);
     }
 }
@@ -280,9 +286,22 @@ pub fn probe_volume(dev: Arc<dyn block::BlockDev>) -> Arc<dyn FileSystem> {
     Arc::new(Unformatted(dev))
 }
 
+/// Write out what the block cache holds for the volume of `p`.
+pub fn sync_volume(p: &FullPath) -> Result<(), u32> {
+    match fs_of(p)?.device().as_deref().and_then(|d| d.cache()) {
+        Some(c) => c.sync(),
+        None => Ok(()),
+    }
+}
+
 /// Mount drive `d` again after its volume was rewritten (FORMAT, CHKDSK /F).
 pub fn remount(d: u8) -> Result<(), u32> {
     let dev = DRIVES.lock()[d as usize].as_ref().and_then(|f| f.device()).ok_or(err::INVALID_DRIVE)?;
+    // A new medium, or a volume rewritten behind the file system's back.
+    if let Some(c) = dev.cache() {
+        let _ = c.sync();
+        c.invalidate();
+    }
     let fs = probe_volume(dev);
     crate::trace!("drive {}: remounted ({})", (b'A' + d) as char, fs.name());
     DRIVES.lock()[d as usize] = Some(fs);

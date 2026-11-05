@@ -24,7 +24,9 @@ pub extern "C" fn dispatch(f: &mut TrapFrame) {
             if user {
                 // Kernel code runs under the big kernel lock (smp.rs).
                 smp::bkl_acquire();
+                let t = crate::fs::iostat::begin();
                 crate::task::user_exception(f);
+                crate::fs::iostat::fault(t);
             } else if !crate::mm::fault::kernel_fault(f) && !crate::api::debug::kernel_trap(f) {
                 kernel_exception(f);
             }

@@ -14,7 +14,7 @@ both ways.
 | ATTRIB, FIND, MORE, SORT, TREE, XCOPY, LABEL, MODE, KEYB, HELP | (earlier) | |
 | BACKUP, RESTORE | Backup sets in `\BACKUP` of the target drive | IBM's `BKUPJFS` format (`crates/os2-backup`, below); file and directory EAs; /S /M /A /D /T /L, RESTORE /S /P /B /A /E /L /M /N /D. IBM's RESTORE reads rs2's sets and rs2's RESTORE reads IBM's (checked in QEMU). |
 | BLDLEVEL | Shows a module's `@#vendor:revision#@description` signature | Module description of LX/NE files (revision shown as numbers, as IBM's); other files are searched |
-| CACHE | HPFS cache parameters | DosFSCtl 0x9001-0x9003 |
+| CACHE | Block cache parameters; `-STATS:RESET`, `-STATS:SHOW` report on the log | DosFSCtl 0x9001-0x9003, 0x9f00-0x9f01 |
 | CHKDSK | Checks a volume; /F repairs | FAT (earlier); HPFS: bitmaps and directory band bitmap against what the tree owns, leaks freed outside the fixed structures, dirty flag cleared (`hpfs::Volume::check`); JFS: block map, block and link counts, parents, inode map counts, orphans into `FOUND.nnn`, inline log marked redone so a volume another system left busy becomes writable (`jfs::Volume::repair`). /P for PMCHKDSK. |
 | COMP | Compares files byte by byte | Wildcards, ten differences per pair, Y/N questions as IBM's |
 | DISKCOPY, DISKCOMP | Whole diskettes | rs2 has no diskette drives: either side may be a diskette image file (`DISKCOPY A: DISK1.IMG`), a drive any volume of diskette size; hard disks are refused (SYS1231) |

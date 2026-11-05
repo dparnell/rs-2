@@ -433,6 +433,10 @@ pub(super) fn rw_cdb(write: bool, lba: u64, n: u32) -> Vec<u8> {
 }
 
 impl BlockDev for Lun {
+    fn cache_kind(&self) -> crate::fs::block::CacheKind {
+        crate::fs::block::CacheKind::WriteThrough
+    }
+
     fn sector_size(&self) -> usize {
         self.block
     }

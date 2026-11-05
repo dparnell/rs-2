@@ -45,6 +45,20 @@ pub struct Config {
     pub drivers: Vec<String>,
 }
 
+/// `IFS=...HPFS.IFS /CACHE:n /CRECL:n`: the size of the block cache and
+/// the largest request it keeps, in KB (`/CACHE:D` is the default). IBM's
+/// limit of 2048 KB is not kept: it was a 16-bit driver's.
+pub fn apply_cache(c: &Config) {
+    let Some(ifs) = c.drivers.iter().find(|d| d.to_ascii_uppercase().contains("HPFS.IFS")) else { return };
+    let arg = |name: &str| {
+        ifs.split_ascii_whitespace().find_map(|w| {
+            let (k, v) = w.split_once(':')?;
+            k.eq_ignore_ascii_case(name).then(|| v.parse::<u64>().ok()).flatten()
+        })
+    };
+    crate::fs::cache::configure(arg("/CACHE").map(|k| k.max(64)), arg("/CRECL"));
+}
+
 fn split_cmd(v: &str) -> (String, String) {
     let v = v.trim();
     match v.split_once(char::is_whitespace) {

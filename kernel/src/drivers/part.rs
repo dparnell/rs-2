@@ -34,6 +34,10 @@ impl BlockDev for Partition {
         self.dev.usb_device()
     }
 
+    fn cache_kind(&self) -> crate::fs::block::CacheKind {
+        self.dev.cache_kind()
+    }
+
     fn flush(&self) -> Result<(), u32> {
         self.dev.flush()
     }

@@ -281,6 +281,11 @@ pub fn set_tsc_rate(per_ms: u64) {
     TSC_PER_MS.store(per_ms, Ordering::Release);
 }
 
+/// Time-stamp counts per millisecond (0 until measured).
+pub fn tsc_per_ms() -> u64 {
+    TSC_PER_MS.load(Ordering::Acquire)
+}
+
 /// Milliseconds since boot, from the time-stamp counter when measured.
 pub fn mono_ms() -> u64 {
     let per = TSC_PER_MS.load(Ordering::Acquire);

@@ -217,9 +217,96 @@ prints to the serial port the device interrupt counts, every process's
 threads with their state, priority, last user-mode address and the
 kernel return addresses on their stacks, and then (through an IPI) where
 each CPU is. Symbolise the addresses against the kernel ELF
-(`target/x86_64-unknown-none/{debug,release}/rs2-kernel`, e.g. with
+(`target/x86_64-unknown-none/{checked,release}/rs2-kernel`, e.g. with
 `llvm-nm -n`). Locks are only tried, so the dump works when something
 holds them.
+
+## The block cache
+
+Every volume on a fixed disk or USB stick reaches its device through
+`fs/cache.rs`, which `harderr::wrap` puts below the hard-error pop-ups, so
+HPFS, FAT, JFS and DASD handles all share it and see the same blocks.
+Blocks are 4 KB page frames with a bit per sector for valid and dirty. The
+frames are a budget shared by the volumes: an eighth of memory (at most
+256 MB), or `IFS=...HPFS.IFS /CACHE:n` in KB. IBM's limit of 2048 KB is not
+kept, so a CONFIG.SYS written for IBM's driver gets a small cache. A volume
+under its share takes frames from one over it. Memory the cache holds does
+not come back when programs run short of it.
+
+Measured with yum and RPM under QEMU TCG, 95% of the sectors read were read
+before, because every path lookup walks the directory B-tree from the root:
+`yum repolist` made 530569 read requests, and with the cache 1764 of them
+reach the disk.
+
+| Command, release kernel, seconds | `nocache` | cache |
+|---------|------|------|
+| `rpm -qa`, second run | 0.51 | 0.37 |
+| `rpm -e --nodeps --justdb cube` | 1.35 | 0.72 |
+| `rpm -ivh --justdb --force E:/rpms/[a-c]*.rpm` | 2.56 | 1.11 |
+| `rpm -ivh --justdb --force E:/rpms/*.rpm` | 10.8 | 5.2 |
+| `yum repolist` | 27.2 | 8.2 |
+| `yum -y install zip` | 36.8 | 12.2 |
+
+Those are single runs, and the yum ones include the network. `xtask run`
+without `--release` builds the `checked` profile: optimised like release, with
+the overflow checks and `debug_assert`s of a debug build. It is close to
+release (`yum repolist` 9.8 s, `yum -y install zip` 13.1 s, `rpm -ivh` of all
+6.2 s). A kernel with no optimisation at all took 83 s, 83 s and 31 s, and
+gained only about 20% from the cache, so don't time anything on one.
+After the cache, about half of what remains in yum is the file system code:
+DosFindFirst and DosQueryPathInfo walking cached blocks.
+
+**Reads.** A miss reads its 4 KB block; a miss right after the last one
+reads up to 32 KB. Requests over `/CRECL:n` (default here 64 KB; IBM's is
+4 KB) go straight to the device, with any dirty sectors laid over a read
+and any cached sectors of a write forgotten.
+
+**Writes.** The lazy writer (a kernel thread, every 100 ms) follows
+HPFS.IFS: a block is written when the disk has been idle for DiskIdle
+(1000 ms), when it has not changed for BufferIdle (500 ms), or when it has
+been dirty for MaxAge (5000 ms), all of it when more than DirtyMax blocks
+(four fifths of a share) are dirty. The writer's own requests do not count
+as the disk being busy. Writes merge into requests of up to 64 KB, in disk
+order. `CACHE` sets the times and `-LAZY:OFF` stops it; there is no need for
+IBM's `RUN=CACHE.EXE`, lazy writing is on from the start. FAT follows the same
+settings, and `DISKCACHE=` is not read. Under QEMU writes and flushes are
+under 2% of these workloads (the host's page cache takes them), so lazy
+writing gains little there; it is for real disks.
+
+What forces blocks out:
+
+- **DosResetBuffer** writes the whole volume and then flushes the disk.
+  IBM's FS_COMMIT writes one file and issues no device flush; rs2 keeps no
+  owner per block, so a commit is a superset of IBM's.
+- **OPEN_FLAGS_WRITE_THROUGH and OPEN_FLAGS_NO_CACHE**: each DosWrite ends
+  with the volume written out, for the same reason.
+- **Closing a file does not**, as in IBM's HPFS: data stays lazy.
+- **DosShutdown**, Rs2PowerOff, the reboot request and the end of the
+  `init=` program write everything. After DosShutdown lazy writing is off.
+- **DosPhysicalDisk** goes past the volumes: everything is written first, and
+  a write forgets all cached blocks.
+- **Remounting** (FORMAT, CHKDSK /F, a new medium) writes out and forgets.
+
+**What does not write lazily.** JFS: its log depends on the order of writes,
+so it stays write-through under the read cache. USB disks can be pulled out,
+so they are write-through too, and `fs::unmount` drops their blocks: reads
+fail, and the next stick on that letter starts empty. Optical drives, RAM
+disks and devices without 512-byte sectors have no cache.
+
+**After a crash.** Anything not forced out is lost, up to MaxAge old, in no
+particular order: nothing orders metadata, as in IBM's HPFS. HPFS keeps the
+spare block's dirty flag as IBM does: set and flushed before the first write
+of a mount, cleared by DosShutdown after everything is out, and left alone if
+it was set at mount (CHKDSK /F clears it). rs2 has no AUTOCHECK yet: nothing
+looks at the flag at boot, so after a crash run CHKDSK by hand. FAT has no
+such flag here.
+
+`CACHE -STATS:RESET` and `-STATS:SHOW` (`fs/iostat.rs`) report on the log
+what a workload did: requests at the file systems and at the devices, sectors
+read again, time in each API call and in exceptions. `nocache` on the kernel
+command line runs without the cache, for comparing. `CACHETST` (RS2\) tests
+it: `MODEL dir` checks random I/O of every size against a copy in memory,
+`MARK dir` leaves files for looking at a disk image after a crash.
 
 ## Memory layout
 

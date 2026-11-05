@@ -361,6 +361,10 @@ impl Port {
 }
 
 impl BlockDev for Port {
+    fn cache_kind(&self) -> crate::fs::block::CacheKind {
+        if self.kind == Kind::Ata { crate::fs::block::CacheKind::Lazy } else { crate::fs::block::CacheKind::None }
+    }
+
     fn sector_size(&self) -> usize {
         self.sector_size
     }

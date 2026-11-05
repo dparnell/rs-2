@@ -262,6 +262,10 @@ impl<H: Hba> Unit<H> {
 }
 
 impl<H: Hba> BlockDev for Unit<H> {
+    fn cache_kind(&self) -> crate::fs::block::CacheKind {
+        if self.optical { crate::fs::block::CacheKind::None } else { crate::fs::block::CacheKind::Lazy }
+    }
+
     fn sector_size(&self) -> usize {
         self.block
     }

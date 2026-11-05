@@ -2,8 +2,9 @@
 //! CACHE [/DISKIDLE:n] [/MAXAGE:n] [/BUFFERIDLE:n] [/LAZY:ON|OFF|n] [/READAHEAD:ON|OFF|n]
 //!
 //! Through DosFSCtl to the HPFS file system: 0x9003 reads the parameter
-//! block (DiskIdle, MaxAge, BufferIdle in milliseconds, the cache size in
-//! bytes, then words with the lazy-write and read-ahead worker counts),
+//! block (DiskIdle, MaxAge, BufferIdle in milliseconds, the size of write
+//! that goes past the cache in bytes, then words: DirtyMax, the cache size
+//! in 2 KB buffers, the lazy-write and read-ahead worker counts),
 //! 0x9002 sets it and 0x9001 stops lazy writing. Options may start with
 //! `-` or `/`.
 #![no_std]
@@ -64,6 +65,10 @@ fn main(s: &os2::Startup) -> u32 {
             usage(prog);
             return 1;
         };
+        // rs2's own: a report on the log of where a workload's time went.
+        if k == "STATS" {
+            return fsctl(if v == "RESET" { 0x9f00 } else { 0x9f01 }, &mut [], &mut []);
+        }
         let num = |v: &str| v.parse::<u32>().ok();
         let slot = match k {
             "DISKIDLE" => Some(0),
@@ -126,7 +131,7 @@ fn main(s: &os2::Startup) -> u32 {
         let f = |v: u32| alloc::format!("{v:>8}");
         say(
             621,
-            &[&f(u32at(&block, 0)), &f(u32at(&block, 4)), &f(u32at(&block, 8)), &f(u32at(&block, 12) / 1024)],
+            &[&f(u32at(&block, 0)), &f(u32at(&block, 4)), &f(u32at(&block, 8)), &f(u16::from_le_bytes([block[18], block[19]]) as u32 * 2)],
             "\r\n          DiskIdle: %1 milliseconds\r\n            MaxAge: %2 milliseconds\r\n        BufferIdle: %3 milliseconds\r\n        Cache size: %4 kbytes\r\n",
         );
         let lazy = u16::from_le_bytes([block[20], block[21]]);

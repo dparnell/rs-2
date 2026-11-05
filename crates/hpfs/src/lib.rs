@@ -71,6 +71,10 @@ pub trait BlockDevice {
     fn sector_count(&self) -> u64;
     fn read(&self, lba: u64, buf: &mut [u8]) -> Result<()>;
     fn write(&self, lba: u64, buf: &[u8]) -> Result<()>;
+    /// Everything written so far reaches the disk before anything later.
+    fn sync(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// DIRENT attribute bits (the DOS attributes plus the long-name flag).
@@ -138,6 +142,7 @@ pub(crate) struct DirBand {
 
 pub struct Volume<D: BlockDevice> {
     pub dev: D,
+    pub(crate) dirty: core::cell::Cell<DirtyState>,
     pub(crate) total: u32,
     pub(crate) root: u32,
     /// Bitmap location for each band.
@@ -167,6 +172,19 @@ fn components(path: &str) -> Result<Vec<Vec<u8>>> {
 /// The `..` entry's name.
 pub(crate) const DOTDOT: &[u8] = &[1, 1];
 
+/// The spare block's dirty flag, for a mounted volume that keeps it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DirtyState {
+    /// Nobody asked: tools that write with the volume unmounted.
+    Untracked,
+    /// To be set before the next write.
+    Clean,
+    /// Set by this mount.
+    Marked,
+    /// Was set at mount: a clean shutdown does not clear it, only CHKDSK.
+    WasDirty,
+}
+
 impl<D: BlockDevice> Volume<D> {
     pub fn mount(dev: D) -> Result<Self> {
         if dev.sector_size() != SECTOR {
@@ -185,6 +203,7 @@ impl<D: BlockDevice> Volume<D> {
         let total = rd32(&s, sb::SECTORS).min(dev.sector_count().min(u32::MAX as u64) as u32);
         let mut v = Volume {
             dev,
+            dirty: core::cell::Cell::new(DirtyState::Untracked),
             total,
             root: rd32(&s, sb::ROOT),
             bitmap_secs: Vec::new(),
@@ -285,9 +304,48 @@ impl<D: BlockDevice> Volume<D> {
         Ok(())
     }
 
+    /// Keep the dirty flag from now on: set on the disk before the first
+    /// write of the mount, cleared by [`Volume::mark_clean`], as IBM's
+    /// HPFS does. With writes held back in a cache, a volume can only be
+    /// trusted after a crash if the flag got there first.
+    pub fn track_dirty(&mut self) {
+        self.dirty.set(DirtyState::Clean);
+    }
+
+    fn mark_dirty(&self) -> Result<()> {
+        let mut sp = vec![0u8; SECTOR];
+        self.dev.read(SPARE_LBA as u64, &mut sp)?;
+        if sp[sp::FLAGS] & 1 != 0 {
+            self.dirty.set(DirtyState::WasDirty);
+            return Ok(());
+        }
+        sp[sp::FLAGS] |= 1;
+        self.dev.write(SPARE_LBA as u64, &sp)?;
+        self.dev.sync()?;
+        self.dirty.set(DirtyState::Marked);
+        Ok(())
+    }
+
+    /// Everything is on the disk: clear the dirty flag, if this mount set
+    /// it. A later write sets it again.
+    pub fn mark_clean(&mut self) -> Result<()> {
+        if self.dirty.get() == DirtyState::Marked {
+            let mut sp = vec![0u8; SECTOR];
+            self.dev.read(SPARE_LBA as u64, &mut sp)?;
+            sp[sp::FLAGS] &= !1;
+            self.dev.write(SPARE_LBA as u64, &sp)?;
+            self.dev.sync()?;
+            self.dirty.set(DirtyState::Clean);
+        }
+        Ok(())
+    }
+
     pub(crate) fn write_secs(&self, lba: u32, buf: &[u8]) -> Result<()> {
         if self.readonly {
             return Err(Error::ReadOnly);
+        }
+        if self.dirty.get() == DirtyState::Clean {
+            self.mark_dirty()?;
         }
         let n = (buf.len() / SECTOR) as u64;
         if lba as u64 + n > self.total as u64 {

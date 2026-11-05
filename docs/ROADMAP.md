@@ -241,6 +241,13 @@ Status markers: done, in progress, planned.
   one command at a time), interrupt coalescing, per-CPU queues, INTx
   for the other devices without MSI (done for the NICs: `msi::setup_intx`)
 - done: HPFS (read/write/format)
+- done: a block cache under HPFS, FAT and JFS, lazy writing under the
+  rules of IBM's HPFS (HPFS and FAT on fixed disks), the HPFS dirty flag,
+  `IFS=...HPFS.IFS /CACHE:n /CRECL:n`, CACHE's controls (docs/ARCHITECTURE.md)
+- planned: AUTOCHECK (nothing looks at the HPFS dirty flag at boot), giving
+  cache memory back to programs, a path or directory cache above the
+  block cache (DosFindFirst and DosQueryPathInfo are half of what is left in
+  yum), lazy writing for JFS in the order its log needs
 - done: extended attributes on FAT12/16 (`EA DATA. SF`), FAT32
   (FAT32.IFS-style EA files) and HPFS, with the EA APIs, DosCopy/DosMove
   and CHKDSK checks

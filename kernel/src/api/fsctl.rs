@@ -3,8 +3,8 @@
 //!
 //! rs2's file systems are built into the kernel: the generic functions
 //! (FSCTL_ERROR_INFO, FSCTL_MAX_EASIZE, FSCTL_GET_NEXT_ROUTE_NAME) are
-//! answered here, and so are the HPFS cache controls of CACHE.EXE (lazy
-//! writing is reported off: rs2's HPFS writes through). There is no JFS:
+//! answered here, and so are the HPFS cache controls of CACHE.EXE, which
+//! act on the block cache of all volumes (fs/cache.rs). There is no JFS:
 //! routing to it fails with ERROR_INVALID_FSD_NAME, so CACHEJFS,
 //! DEFRAGFS, EXTENDFS and CLRBBLKS report that no JFS drive is mounted.
 //! Other FSD-private functions (0x8000 and up) get ERROR_INVALID_FUNCTION,
@@ -35,8 +35,9 @@ const HPFS_LAZY_STOP: u32 = 0x9001;
 const HPFS_CACHE_SET: u32 = 0x9002;
 const HPFS_CACHE_GET: u32 = 0x9003;
 
-/// DiskIdle, MaxAge, BufferIdle as last set (OS/2's defaults).
-static HPFS_TIMES: crate::sync::SpinLock<(u32, u32, u32)> = crate::sync::SpinLock::new((1000, 5000, 500));
+/// rs2's own: `CACHE -STATS:RESET` and `-STATS:SHOW` (fs/iostat.rs).
+const RS2_IOSTAT_RESET: u32 = 0x9f00;
+const RS2_IOSTAT_SHOW: u32 = 0x9f01;
 
 /// The file system names a request can be routed to (FSCTL_FSDNAME),
 /// as DosQueryFSAttach reports them.
@@ -141,27 +142,44 @@ fn fsctl(c: &Ctx, io: &Io, func: u32, method: u32, proute: u32, hfile: u32) -> u
             // No FSD daemon threads to start.
             io.reply(c, &[0, 0, 0, 0])
         }
-        HPFS_LAZY_STOP if fsd == "HPFS" => 0,
+        RS2_IOSTAT_RESET => {
+            crate::fs::iostat::reset();
+            0
+        }
+        RS2_IOSTAT_SHOW => {
+            crate::fs::iostat::show();
+            0
+        }
+        HPFS_LAZY_STOP if fsd == "HPFS" => {
+            crate::fs::cache::set_lazy(false);
+            0
+        }
         HPFS_CACHE_SET if fsd == "HPFS" => {
             let Some(b) = c.read_vec(io.parm, io.cb_parm.min(26)) else { return err::INVALID_ADDRESS };
             if b.len() < 12 {
                 return err::INVALID_PARAMETER;
             }
             let g = |o: usize| u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]]);
-            *HPFS_TIMES.lock() = (g(0), g(4), g(8));
+            crate::fs::cache::set_times((g(0), g(4), g(8)));
+            // IBM's HPFS has CACHE.EXE's threads as its lazy writers; here
+            // the count in the block turns the kernel's on again.
+            if b.len() >= 22 && u16::from_le_bytes([b[20], b[21]]) != 0 {
+                crate::fs::cache::set_lazy(true);
+            }
             0
         }
         HPFS_CACHE_GET if fsd == "HPFS" => {
-            // DiskIdle, MaxAge, BufferIdle (ms), WriteCache (bytes),
-            // DirtyMax, cache buffers (2 KB), lazy-write and read-ahead
-            // details, lazy writing on. rs2's HPFS writes through and has
-            // no buffer cache of its own: lazy writing is off.
-            let (idle, age, bidle) = *HPFS_TIMES.lock();
+            // DiskIdle, MaxAge, BufferIdle (ms), WriteCache (the size of
+            // write that goes past the cache, bytes), DirtyMax, cache
+            // buffers (2 KB), lazy writers, read-ahead workers, daemons.
+            let (idle, age, bidle) = crate::fs::cache::times();
+            let (dirty_max, buffers) = crate::fs::cache::sizes();
+            let lazy = crate::fs::cache::lazy_on() as u16;
             let mut b = Vec::new();
-            for v in [idle, age, bidle, 0] {
+            for v in [idle, age, bidle, 65536] {
                 b.extend_from_slice(&v.to_le_bytes());
             }
-            for v in [0u16, 0, 0, 0, 0] {
+            for v in [dirty_max, buffers, lazy, 1, lazy] {
                 b.extend_from_slice(&v.to_le_bytes());
             }
             io.reply(c, &b)

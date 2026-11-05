@@ -195,7 +195,7 @@ pub fn wrap(dev: Arc<dyn BlockDev>) -> Arc<dyn BlockDev> {
     if WRAPPED.lock().iter().any(|e| e.0 == addr) {
         return dev;
     }
-    let w: Arc<dyn BlockDev> = Arc::new(HardErrDev(dev));
+    let w: Arc<dyn BlockDev> = Arc::new(HardErrDev(crate::fs::cache::wrap(dev)));
     WRAPPED.lock().push((Arc::as_ptr(&w) as *const () as usize, 0xff));
     w
 }
@@ -215,16 +215,28 @@ impl BlockDev for HardErrDev {
         self.0.sector_count()
     }
     fn read(&self, lba: u64, buf: &mut [u8]) -> Result<(), u32> {
-        retry(|| self.drive(), || self.0.read(lba, buf))
+        let t = crate::fs::iostat::begin();
+        let r = retry(|| self.drive(), || self.0.read(lba, buf));
+        crate::fs::iostat::read(t, lba, (buf.len() / self.0.sector_size().max(1)) as u64);
+        r
     }
     fn write(&self, lba: u64, buf: &[u8]) -> Result<(), u32> {
-        retry(|| self.drive(), || self.0.write(lba, buf))
+        let t = crate::fs::iostat::begin();
+        let r = retry(|| self.drive(), || self.0.write(lba, buf));
+        crate::fs::iostat::write(t, lba, (buf.len() / self.0.sector_size().max(1)) as u64);
+        r
     }
     fn flush(&self) -> Result<(), u32> {
         self.0.flush()
     }
     fn packet(&self, cdb: &[u8], buf: &mut [u8]) -> Result<usize, u32> {
         self.0.packet(cdb, buf)
+    }
+    fn cache(&self) -> Option<&crate::fs::cache::Cache> {
+        self.0.cache()
+    }
+    fn usb_device(&self) -> Option<crate::drivers::xhci::Handle> {
+        self.0.usb_device()
     }
 }
 

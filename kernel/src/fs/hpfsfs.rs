@@ -32,6 +32,10 @@ impl hpfs::BlockDevice for HpfsDev {
     fn write(&self, lba: u64, buf: &[u8]) -> hpfs::Result<()> {
         self.0.write(lba, buf).map_err(|_| hpfs::Error::Io)
     }
+
+    fn sync(&self) -> hpfs::Result<()> {
+        self.0.flush().map_err(|_| hpfs::Error::Io)
+    }
 }
 
 type Vol = hpfs::Volume<HpfsDev>;
@@ -113,7 +117,11 @@ pub fn probe(dev: &Arc<dyn BlockDev>) -> bool {
 
 impl HpfsFs {
     pub fn mount(dev: Arc<dyn BlockDev>) -> Result<Arc<dyn FileSystem>, u32> {
-        let vol = hpfs::Volume::mount(HpfsDev(dev)).map_err(map)?;
+        let mut vol = hpfs::Volume::mount(HpfsDev(dev.clone())).map_err(map)?;
+        vol.track_dirty();
+        if let Some(c) = dev.cache() {
+            c.allow_lazy();
+        }
         Ok(Arc::new(HpfsFs { inner: Arc::new(Inner { vol: Mutex::new(vol), open: SpinLock::new(BTreeMap::new()) }) }))
     }
 
@@ -228,6 +236,15 @@ impl FileSystem for HpfsFs {
 
     fn set_label(&self, label: &str) -> Result<(), u32> {
         self.inner.vol.lock().set_label(label).map_err(map)
+    }
+
+    /// Everything out, then the volume is clean.
+    fn shutdown(&self) {
+        let mut v = self.inner.vol.lock();
+        if let Some(c) = v.dev.0.cache() {
+            let _ = c.sync();
+        }
+        let _ = v.mark_clean();
     }
 
     fn device(&self) -> Option<Arc<dyn BlockDev>> {
