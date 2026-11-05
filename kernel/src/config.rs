@@ -59,6 +59,28 @@ pub fn apply_cache(c: &Config) {
     crate::fs::cache::configure(arg("/CACHE").map(|k| k.max(64)), arg("/CRECL"));
 }
 
+/// `IFS=...HPFS.IFS /AUTOCHECK:DE`, `IFS=...JFS.IFS /AUTOCHECK:*`: the
+/// drives CHKDSK looks at during boot if they were not shut down cleanly
+/// (`*`: all). A drive of another file system is left alone.
+pub fn autocheck(c: &Config) -> Vec<u8> {
+    let mut drives = Vec::new();
+    for ifs in c.drivers.iter().filter(|d| d.to_ascii_uppercase().contains(".IFS")) {
+        for w in ifs.split_ascii_whitespace() {
+            let Some((k, v)) = w.split_once(':') else { continue };
+            if !k.eq_ignore_ascii_case("/AUTOCHECK") && !k.eq_ignore_ascii_case("-AUTOCHECK") {
+                continue;
+            }
+            if v.contains('*') {
+                drives.extend(2..26);
+            }
+            drives.extend(v.bytes().filter(u8::is_ascii_alphabetic).map(|l| l.to_ascii_uppercase() - b'A'));
+        }
+    }
+    drives.sort_unstable();
+    drives.dedup();
+    drives
+}
+
 fn split_cmd(v: &str) -> (String, String) {
     let v = v.trim();
     match v.split_once(char::is_whitespace) {

@@ -105,6 +105,10 @@ pub trait FileSystem: Send + Sync {
     fn max_component(&self) -> usize {
         255
     }
+    /// The volume was not shut down cleanly: CHKDSK has to look at it.
+    fn needs_check(&self) -> bool {
+        false
+    }
     /// The system is shutting down: write everything out and mark the
     /// volume clean.
     fn shutdown(&self) {}

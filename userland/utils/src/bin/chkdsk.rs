@@ -1,5 +1,8 @@
 //! CHKDSK: check a disk and report its use. CHKDSK [drive:] [/F] [/V] [/C] [/P]
 //!
+//! /AUTOCHECK: the system runs it during boot, on a volume not shut down
+//! cleanly (`IFS=... /AUTOCHECK:drives`): as /F, and nobody is there to ask.
+//!
 //! FAT volumes are read through DASD track IOCtls and checked with
 //! `fat::check`; /F repairs them (the drive is locked meanwhile, and the
 //! system remounts it when CHKDSK unlocks it). HPFS volumes get the
@@ -28,6 +31,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 os2::entry!(main);
 
 static PM: AtomicBool = AtomicBool::new(false);
+static AUTO: AtomicBool = AtomicBool::new(false);
 
 fn pm() -> bool {
     PM.load(Ordering::Relaxed)
@@ -61,6 +65,10 @@ fn main(s: &os2::Startup) -> u32 {
             "/V" => verbose = true,
             "/C" => {}
             "/P" => PM.store(true, Ordering::Relaxed),
+            "/AUTOCHECK" => {
+                fix = true;
+                AUTO.store(true, Ordering::Relaxed);
+            }
             _ if u.starts_with("/F:") => fix = true,
             _ if u.starts_with('/') => {
                 eprint(&alloc::format!("SYS1330: The system cannot accept the {u} parameter.\r\n"));
@@ -173,7 +181,7 @@ fn check_fat(d: u8, fix: bool, verbose: bool) -> u32 {
             pm_msg(1356, &[lost as u64, chains as u64]);
             convert = matches!(ask("").chars().next(), Some('Y' | 'y'));
         } else if fix {
-            convert = yes(&alloc::format!(
+            convert = AUTO.load(Ordering::Relaxed) || yes(&alloc::format!(
                 "\r\n{lost} lost clusters found in {chains} chains.\r\nConvert the lost chains to files (Y/N)? "
             ));
         } else {
