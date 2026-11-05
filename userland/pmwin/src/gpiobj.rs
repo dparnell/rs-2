@@ -549,6 +549,10 @@ pub extern "C" fn GpiIntersectClipRectangle(hps: u32, p: *const RectL) -> i32 {
     if let Some(r) = read(p) {
         crate::gpiseg::rec_meta(hps, gpi::goca::ESC_INTERSECTCLIPRECT, || [r.left, r.bottom, r.right, r.top].iter().flat_map(|v| v.to_le_bytes()).collect());
     }
+    // A PS kept since the window was hidden has no visible region yet,
+    // and the clip region starts from that one (WarpIN's text view keeps
+    // a micro PS and clips it to the update rectangle).
+    crate::gpiapi::refresh(st(), hps);
     let (Some(e), Some(r)) = (entry(st(), hps), read(p)) else { return RGN_ERROR };
     e.ps.clip_rect(r.rect(), false);
     e.ps.clip_region.as_ref().map_or(gpi::region::RGN_NULL, |g| g.complexity())
@@ -559,6 +563,10 @@ pub extern "C" fn GpiExcludeClipRectangle(hps: u32, p: *const RectL) -> i32 {
     if let Some(r) = read(p) {
         crate::gpiseg::rec_meta(hps, gpi::goca::ESC_EXCLUDECLIPRECT, || [r.left, r.bottom, r.right, r.top].iter().flat_map(|v| v.to_le_bytes()).collect());
     }
+    // A PS kept since the window was hidden has no visible region yet,
+    // and the clip region starts from that one (WarpIN's text view keeps
+    // a micro PS and clips it to the update rectangle).
+    crate::gpiapi::refresh(st(), hps);
     let (Some(e), Some(r)) = (entry(st(), hps), read(p)) else { return RGN_ERROR };
     e.ps.clip_rect(r.rect(), true);
     e.ps.clip_region.as_ref().map_or(gpi::region::RGN_NULL, |g| g.complexity())
@@ -869,6 +877,12 @@ pub fn window_of_dc(hdc: u32) -> Option<u32> {
         Some(DcKind::Window(w)) => Some(*w),
         _ => None,
     }
+}
+
+/// WinWindowFromDC(hdc): the window of a window DC.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWindowFromDC(hdc: u32) -> u32 {
+    window_of_dc(hdc).unwrap_or(0)
 }
 
 #[unsafe(no_mangle)]

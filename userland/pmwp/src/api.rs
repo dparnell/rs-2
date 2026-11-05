@@ -371,3 +371,10 @@ pub extern "C" fn WinEnumObjectClasses(buf: *mut u8, size: *mut u32) -> u32 {
     }
     1
 }
+
+/// WinRestartWorkplace(): XWorkplace's way of restarting the shell. rs2's
+/// shell does not restart in place: FALSE, as when IBM's cannot.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinRestartWorkplace() -> u32 {
+    0
+}

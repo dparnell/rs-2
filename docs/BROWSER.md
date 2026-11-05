@@ -361,6 +361,9 @@ are test inputs, downloaded from their official sources and unpacked on
 the host with tools that only read them (bsdtar reads both RPM and 7z
 archives), never run on the host.
 
+The package managers of the same repository are in
+[PACKAGES.md](PACKAGES.md).
+
 ### Getting the files
 
 | Package | Where | Notes |

@@ -50,8 +50,8 @@ pub fn code_set(name: &str) -> Option<u16> {
     if name.is_empty() {
         return Some(process_cp());
     }
-    let digits = ["IBM-", "IBM", "CP", "ibm-", "cp"].iter().find_map(|p| name.strip_prefix(p)).unwrap_or(name);
-    let cp: u16 = digits.parse().ok()?;
+    // Also ISO names: kLIBC's "C" locale asks for ISO8859-1.
+    let cp = uls::codepage_by_name(name)?;
     uls::codepage(cp).map(|_| cp)
 }
 

@@ -90,6 +90,13 @@ fn info_blocks() {
     let mut v = [0u32; 2];
     let rc = unsafe { DosQuerySysInfo(11, 12, v.as_mut_ptr(), 8) };
     check("DosQuerySysInfo version 20.45", rc == 0 && v == [20, 45]);
+    // Python's os2 module reads the Toolkit's whole range, 1 to QSV_MAX
+    // (31); IBM's kernel takes up to 32.
+    let mut all = [0u32; 32];
+    let rc = unsafe { DosQuerySysInfo(1, 32, all.as_mut_ptr(), 128) };
+    check("DosQuerySysInfo 1..32", rc == 0 && all[0] == 260);
+    let rc = unsafe { DosQuerySysInfo(1, 33, all.as_mut_ptr(), 128) };
+    check("DosQuerySysInfo past the last index", rc == 87);
     let mut name: *const u8 = null();
     let rc = unsafe { DosScanEnv(b"PATH\0".as_ptr(), &mut name) };
     check("DosScanEnv PATH", rc == 0 && !name.is_null());
@@ -574,6 +581,19 @@ fn dlls() {
         check("init not repeated", TestInitCount() == 1);
         let rc = DosLoadModule(null_mut(), 0, b"NOSUCH\0".as_ptr(), &mut h2);
         check("DosLoadModule missing", rc == 2 || rc == 126);
+        // Loaded by its path, a DLL is a module of its own even with the
+        // name of another (Python's lib-dynload\bz2.pyd and BZ2.DLL).
+        let copied = DosCopy(b"C:\\RS2\\TESTDLL.DLL\0".as_ptr(), b"C:\\TESTDLL.PYD\0".as_ptr(), 1);
+        let (mut hs, mut hs2, mut hn) = (0, 0, 0);
+        let rc = DosLoadModule(null_mut(), 0, b"C:\\TESTDLL.PYD\0".as_ptr(), &mut hs);
+        check("a DLL by its path is another module", copied == 0 && rc == 0 && hs != 0 && hs != h);
+        let rc = DosLoadModule(null_mut(), 0, b"C:\\TESTDLL.PYD\0".as_ptr(), &mut hs2);
+        check("the same path finds it again", rc == 0 && hs2 == hs);
+        let rc = DosLoadModule(null_mut(), 0, b"TESTDLL\0".as_ptr(), &mut hn);
+        check("the name still finds the DLL found by name", rc == 0 && hn == h);
+        DosFreeModule(hs);
+        DosFreeModule(hs2);
+        DosFreeModule(hn);
         check("DosFreeModule", DosFreeModule(h) == 0);
         // TESTDLL's twin flagged as having its internal fixups removed
         // (yet carrying them), its preferred bases taken by TESTDLL: moved

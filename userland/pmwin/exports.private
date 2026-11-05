@@ -32,3 +32,7 @@ WinBuildPtrHandle 964
 WinJiggleMouse 1005
 GpiEnableYInversion 4723
 GpiQueryYInversion 4726
+WinWindowFromDC 898
+WinGetFrameTreePPSize 972
+WinGetFrameTreePPs 973
+WinIsThreadActive 771

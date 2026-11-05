@@ -296,6 +296,12 @@ fn call_handler(sp: &mut vm::AddressSpace, f: &mut TrapFrame, d: &Dispatch, stac
     sp.poke_bytes(esp, &b);
     f.rsp = esp as u64;
     f.rip = handler as u64;
+    // IBM's dispatcher (DOSCALL1) calls with the report in EAX and the
+    // registration in ECX, and Watcom's handlers read EAX and EDX (the VX-REXX
+    // runtime's: it faulted on 0 when its thread ended).
+    f.rax = d.report as u64;
+    f.rcx = d.reg as u64;
+    f.rdx = d.reg as u64;
     f.cs = USER_CS as u64;
     f.ss = USER_DS as u64;
     f.ds = USER_DS as u64;

@@ -30,6 +30,7 @@ aligned! {
     __a_WinCopyObject => crate::api::WinCopyObject, 3;
     __a_WinCreateShadow => crate::api::WinCreateShadow, 3;
     __a_WinQueryObjectPath => crate::api::WinQueryObjectPath, 3;
+    __a_WinRestartWorkplace => crate::api::WinRestartWorkplace, 0;
     __a_WinQueryActiveDesktopPathname => crate::api::WinQueryActiveDesktopPathname, 2;
     __a_WinRegisterObjectClass => crate::api::WinRegisterObjectClass, 2;
     __a_WinDeregisterObjectClass => crate::api::WinDeregisterObjectClass, 1;

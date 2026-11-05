@@ -114,7 +114,7 @@ fn env_block(extra: &[u8]) -> Option<Vec<u8>> {
     Some(b)
 }
 
-fn start_session(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32, env: &[u8]) -> u32 {
+pub fn start_session(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc: u32, env: &[u8]) -> u32 {
     let up = exe.to_ascii_uppercase();
     let dos = progc == PROG_VDM || progc == PROG_WINDOWEDVDM;
     let batch = !dos && (up.ends_with(b".CMD") || up.ends_with(b".BAT"));

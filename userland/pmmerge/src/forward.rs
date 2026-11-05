@@ -87,6 +87,8 @@ forward! {
     WinGetClipPS = "PMWIN.749";
     WinGetCurrentTime = "PMWIN.750";
     WinGetErrorInfo = "PMWIN.751";
+    WinGetFrameTreePPs = "PMWIN.973";
+    WinGetFrameTreePPSize = "PMWIN.972";
     WinGetKeyState = "PMWIN.752";
     WinGetLastError = "PMWIN.753";
     WinGetMaxPosition = "PMWIN.754";
@@ -105,6 +107,7 @@ forward! {
     WinInvertRect = "PMWIN.767";
     WinIsChild = "PMWIN.768";
     WinIsRectEmpty = "PMWIN.770";
+    WinIsThreadActive = "PMWIN.771";
     WinIsWindow = "PMWIN.772";
     WinIsWindowEnabled = "PMWIN.773";
     WinIsWindowShowing = "PMWIN.774";
@@ -165,6 +168,7 @@ forward! {
     WinQueryQueueInfo = "PMWIN.824";
     WinQueryQueueStatus = "PMWIN.825";
     WinQuerySendMsg = "PMWIN.990";
+    WinQuerySessionTitle = "PMSHAPI.122";
     WinQuerySwitchEntry = "PMSHAPI.124";
     WinQuerySwitchHandle = "PMSHAPI.125";
     WinQuerySwitchList = "PMSHAPI.126";
@@ -258,6 +262,7 @@ forward! {
     WinValidateRegion = "PMWIN.896";
     WinWaitEventSem = "PMWIN.978";
     WinWaitMsg = "PMWIN.897";
+    WinWindowFromDC = "PMWIN.898";
     WinWindowFromID = "PMWIN.899";
     WinWindowFromPoint = "PMWIN.900";
     WinSetClipRegion = "PMWIN.1043";

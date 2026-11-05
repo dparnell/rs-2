@@ -901,10 +901,10 @@ fn drag_msg(h: u32, msg: u32, pdinfo: u32, mp2: u32) -> u32 {
     let old = data(h).map_or(0, |c| core::mem::replace(&mut c.drop_on, new));
     if old != new {
         if old != 0 && data(h).is_some_and(|c| contains(c, old)) {
-            emphasize(h, old, CRA_TARGET, false, false);
+            emphasize(h, old, CRA_TARGET, false);
         }
         if new != 0 {
-            emphasize(h, new, CRA_TARGET, true, false);
+            emphasize(h, new, CRA_TARGET, true);
         }
     }
     let code = match msg {
@@ -939,9 +939,11 @@ fn notify_enter(h: u32, r: u32, key: bool) {
     send(ctl::owner(h), WM_CONTROL, mp(ctl::id(h), CN_ENTER), n.as_ptr() as u32);
 }
 
-/// Change emphasis bits of a record; repaints, and tells the owner if
-/// `user` (a change the user made).
-fn emphasize(h: u32, r: u32, bits: u32, on: bool, user: bool) {
+/// Change emphasis bits of a record; repaints and tells the owner, whoever
+/// made the change, except for target emphasis and filtering (IBM's
+/// SetEmphasisBits; WarpIN's package page learns its record that way).
+fn emphasize(h: u32, r: u32, bits: u32, on: bool) {
+    const CRA_FILTERED: u32 = 0x10;
     let a = attr(r);
     let n = if on { a | bits } else { a & !bits };
     if n == a {
@@ -949,8 +951,8 @@ fn emphasize(h: u32, r: u32, bits: u32, on: bool, user: bool) {
     }
     set_attr(r, n);
     invalidate_record(h, r);
-    if user {
-        notify_emphasis(h, r, (a ^ n) & (CRA_SELECTED | CRA_CURSORED | CRA_INUSE | CRA_SOURCE));
+    if bits & (CRA_TARGET | CRA_FILTERED) == 0 {
+        notify_emphasis(h, r, (a ^ n) & 0xffff);
     }
 }
 
@@ -976,7 +978,7 @@ fn invalidate_record(h: u32, r: u32) {
 }
 
 /// Move the cursor to `r` (one record has it).
-fn set_cursor(h: u32, r: u32, user: bool) {
+fn set_cursor(h: u32, r: u32) {
     let Some(c) = data(h) else { return };
     let old = c.cursor;
     if old == r {
@@ -984,10 +986,10 @@ fn set_cursor(h: u32, r: u32, user: bool) {
     }
     c.cursor = r;
     if contains(c, old) {
-        emphasize(h, old, CRA_CURSORED, false, user);
+        emphasize(h, old, CRA_CURSORED, false);
     }
     if r != 0 {
-        emphasize(h, r, CRA_CURSORED, true, user);
+        emphasize(h, r, CRA_CURSORED, true);
     }
 }
 
@@ -1004,22 +1006,22 @@ fn pick(h: u32, r: u32, how: Pick) {
     if let Some(c) = data(h) {
         c.anchor = anchor.map_or(0, |a| order[a]);
     }
-    set_cursor(h, r, true);
+    set_cursor(h, r);
     // Deselections first.
     for &k in changed.iter().filter(|&&k| !sel[k]) {
-        emphasize(h, order[k], CRA_SELECTED, false, true);
+        emphasize(h, order[k], CRA_SELECTED, false);
     }
     for &k in changed.iter().filter(|&&k| sel[k]) {
-        emphasize(h, order[k], CRA_SELECTED, true, true);
+        emphasize(h, order[k], CRA_SELECTED, true);
     }
     reveal(h, r);
 }
 
-fn deselect_all(h: u32, user: bool) {
+fn deselect_all(h: u32) {
     let Some(c) = data(h) else { return };
     for r in all(c) {
         if attr(r) & CRA_SELECTED != 0 {
-            emphasize(h, r, CRA_SELECTED, false, user);
+            emphasize(h, r, CRA_SELECTED, false);
         }
     }
 }
@@ -1072,6 +1074,22 @@ fn insert(h: u32, recs: &[u32], ri: *const u32) -> u32 {
         // The next one goes after this one (unless they go to the end).
         if !matches!(order, CMA_END | CMA_LAST | 0) {
             order = r;
+        }
+    }
+    // The first record of an empty container gets the cursor, and selection
+    // unless many can be selected (IBM's CnrInsertRecord; the owner hears
+    // of it: WarpIN's package page counts on that).
+    if let (0, Some(&first), Some(c)) = (parent, recs.first(), data(h)) {
+        if c.cursor == 0 {
+            const CCS_MULTIPLESEL: u32 = 2;
+            c.cursor = first;
+            let bits = if view(c) != View::Tree && ctl::style(h) & CCS_MULTIPLESEL != 0 {
+                CRA_CURSORED
+            } else {
+                c.anchor = first;
+                CRA_SELECTED | CRA_CURSORED
+            };
+            emphasize(h, first, bits, true);
         }
     }
     if ctl::style(h) & CCS_AUTOPOSITION != 0 {
@@ -1333,7 +1351,7 @@ fn button1(h: u32, mp1: u32, mp2: u32, dbl: bool) {
             if dbl {
                 notify_enter(h, 0, false);
             } else if SelMode::from_style(ctl::style(h)) != SelMode::Multiple && !ctrl {
-                deselect_all(h, true);
+                deselect_all(h);
             }
         }
     }
@@ -1433,7 +1451,7 @@ fn key(h: u32, mp1: u32, mp2: u32) -> bool {
     let mv = |h: u32, r: u32| {
         if r != 0 {
             if mode == SelMode::Multiple {
-                set_cursor(h, r, true);
+                set_cursor(h, r);
                 reveal(h, r);
             } else {
                 pick(h, r, Pick::Move { shift: k.shift(), ctrl: k.ctrl() });
@@ -1509,12 +1527,12 @@ fn key(h: u32, mp1: u32, mp2: u32) -> bool {
             // and collapse a tree record.
             if k.ctrl() && k.ch == b'/' && mode != SelMode::Single {
                 for r in order {
-                    emphasize(h, r, CRA_SELECTED, true, true);
+                    emphasize(h, r, CRA_SELECTED, true);
                 }
                 return true;
             }
             if k.ctrl() && k.ch == b'\\' {
-                deselect_all(h, true);
+                deselect_all(h);
                 return true;
             }
             if (k.ch == b'+' || k.ch == b'-') && cur != 0 && data(h).is_some_and(|c| view(c) == View::Tree) {
@@ -1859,7 +1877,7 @@ pub extern "C" fn container_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             if data(h).is_some_and(|c| c.cursor == 0) {
                 let first = data(h).map(|c| item_order(c).first().copied().unwrap_or(0)).unwrap_or(0);
                 if first != 0 {
-                    set_cursor(h, first, false);
+                    set_cursor(h, first);
                 }
             }
             send(ctl::owner(h), WM_CONTROL, mp(ctl::id(h), if mp2 & 0xffff != 0 { CN_SETFOCUS } else { CN_KILLFOCUS }), h);
@@ -1967,9 +1985,9 @@ pub extern "C" fn container_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
                 return 1;
             }
             if bits & CRA_CURSORED != 0 && on {
-                set_cursor(h, mp1, false);
+                set_cursor(h, mp1);
             } else if bits & CRA_CURSORED != 0 {
-                emphasize(h, mp1, CRA_CURSORED, false, false);
+                emphasize(h, mp1, CRA_CURSORED, false);
                 if let Some(c) = data(h) {
                     if c.cursor == mp1 {
                         c.cursor = 0;
@@ -1978,10 +1996,10 @@ pub extern "C" fn container_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             }
             let rest = bits & !CRA_CURSORED;
             if rest & CRA_SELECTED != 0 && on && SelMode::from_style(ctl::style(h)) == SelMode::Single {
-                deselect_all(h, false);
+                deselect_all(h);
             }
             if rest != 0 {
-                emphasize(h, mp1, rest, on, false);
+                emphasize(h, mp1, rest, on);
             }
             1
         }

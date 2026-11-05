@@ -349,6 +349,12 @@ pub extern "C" fn WinQueryTaskSizePos(_hab: u32, _pid: u32, pswp: *mut u32) -> u
     0
 }
 
+/// WinQuerySessionTitle(hab, session, buffer, cb): as WinQueryTaskTitle.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinQuerySessionTitle(_hab: u32, session: u32, buf: *mut u8, cb: u32) -> u32 {
+    WinQueryTaskTitle(session, buf, cb)
+}
+
 /// WinQueryTaskTitle(ulSession, pszTitle, cbTitle): the title of the
 /// caller's session: its program name.
 #[unsafe(no_mangle)]
