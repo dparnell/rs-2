@@ -215,10 +215,16 @@ impl BlockDev for HardErrDev {
         self.0.sector_count()
     }
     fn read(&self, lba: u64, buf: &mut [u8]) -> Result<(), u32> {
-        retry(|| self.drive(), || self.0.read(lba, buf))
+        let t = crate::fs::iostat::begin();
+        let r = retry(|| self.drive(), || self.0.read(lba, buf));
+        crate::fs::iostat::read(t, lba, (buf.len() / self.0.sector_size().max(1)) as u64);
+        r
     }
     fn write(&self, lba: u64, buf: &[u8]) -> Result<(), u32> {
-        retry(|| self.drive(), || self.0.write(lba, buf))
+        let t = crate::fs::iostat::begin();
+        let r = retry(|| self.drive(), || self.0.write(lba, buf));
+        crate::fs::iostat::write(t, lba, (buf.len() / self.0.sector_size().max(1)) as u64);
+        r
     }
     fn flush(&self) -> Result<(), u32> {
         self.0.flush()

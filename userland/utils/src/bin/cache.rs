@@ -64,6 +64,10 @@ fn main(s: &os2::Startup) -> u32 {
             usage(prog);
             return 1;
         };
+        // rs2's own: a report on the log of where a workload's time went.
+        if k == "STATS" {
+            return fsctl(if v == "RESET" { 0x9f00 } else { 0x9f01 }, &mut [], &mut []);
+        }
         let num = |v: &str| v.parse::<u32>().ok();
         let slot = match k {
             "DISKIDLE" => Some(0),

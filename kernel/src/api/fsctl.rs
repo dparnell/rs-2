@@ -35,6 +35,10 @@ const HPFS_LAZY_STOP: u32 = 0x9001;
 const HPFS_CACHE_SET: u32 = 0x9002;
 const HPFS_CACHE_GET: u32 = 0x9003;
 
+/// rs2's own: `CACHE -STATS:RESET` and `-STATS:SHOW` (fs/iostat.rs).
+const RS2_IOSTAT_RESET: u32 = 0x9f00;
+const RS2_IOSTAT_SHOW: u32 = 0x9f01;
+
 /// DiskIdle, MaxAge, BufferIdle as last set (OS/2's defaults).
 static HPFS_TIMES: crate::sync::SpinLock<(u32, u32, u32)> = crate::sync::SpinLock::new((1000, 5000, 500));
 
@@ -140,6 +144,14 @@ fn fsctl(c: &Ctx, io: &Io, func: u32, method: u32, proute: u32, hfile: u32) -> u
         FSCTL_DAEMON_QUERY => {
             // No FSD daemon threads to start.
             io.reply(c, &[0, 0, 0, 0])
+        }
+        RS2_IOSTAT_RESET => {
+            crate::fs::iostat::reset();
+            0
+        }
+        RS2_IOSTAT_SHOW => {
+            crate::fs::iostat::show();
+            0
         }
         HPFS_LAZY_STOP if fsd == "HPFS" => 0,
         HPFS_CACHE_SET if fsd == "HPFS" => {

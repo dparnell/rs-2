@@ -38,7 +38,9 @@ pub static DISKS: SpinLock<Vec<Arc<dyn BlockDev>>> = SpinLock::new(Vec::new());
 pub fn flush_disks() {
     let disks = DISKS.lock().clone();
     for d in disks {
+        let t = crate::fs::iostat::begin();
         let _ = d.flush();
+        crate::fs::iostat::flush(t);
     }
 }
 
