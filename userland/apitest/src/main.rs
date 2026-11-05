@@ -589,6 +589,10 @@ fn dlls() {
         check("a DLL by its path is another module", copied == 0 && rc == 0 && hs != 0 && hs != h);
         let rc = DosLoadModule(null_mut(), 0, b"C:\\TESTDLL.PYD\0".as_ptr(), &mut hs2);
         check("the same path finds it again", rc == 0 && hs2 == hs);
+        let mut hs3 = 0;
+        let rc = DosLoadModule(null_mut(), 0, b"c:/testdll.pyd\0".as_ptr(), &mut hs3);
+        check("so does the path with slashes", rc == 0 && hs3 == hs);
+        DosFreeModule(hs3);
         let rc = DosLoadModule(null_mut(), 0, b"TESTDLL\0".as_ptr(), &mut hn);
         check("the name still finds the DLL found by name", rc == 0 && hn == h);
         DosFreeModule(hs);
