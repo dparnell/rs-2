@@ -871,6 +871,12 @@ pub fn window_of_dc(hdc: u32) -> Option<u32> {
     }
 }
 
+/// WinWindowFromDC(hdc): the window of a window DC.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinWindowFromDC(hdc: u32) -> u32 {
+    window_of_dc(hdc).unwrap_or(0)
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn WinQueryWindowDC(h: u32) -> u32 {
     let o = objects();

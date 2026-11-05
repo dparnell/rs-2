@@ -251,6 +251,67 @@ pub extern "C" fn WinRemovePresParam(h: u32, id: u32) -> u32 {
     1
 }
 
+/// A window's parameters and those of its children, which are not frames:
+/// `ULONG cb`, the PARAMs, `ULONG children`, then for each child with any
+/// its `USHORT id` and the same again (IBM's GetWindowTreePPs). Nothing for
+/// a window without any.
+fn tree(h: u32, out: &mut Vec<u8>) {
+    let mut own = Vec::new();
+    for (id, b) in list(h).map_or(&[][..], |l| &l[..]) {
+        own.extend_from_slice(&id.to_le_bytes());
+        own.extend_from_slice(&(b.len() as u32).to_le_bytes());
+        own.extend_from_slice(b);
+    }
+    let mut kids = Vec::new();
+    let mut n = 0u32;
+    for c in st().desk.get(h).map_or(Vec::new(), |w| w.children.clone()) {
+        if crate::frame::is_frame(c) {
+            continue;
+        }
+        let mut k = Vec::new();
+        tree(c, &mut k);
+        if !k.is_empty() {
+            kids.extend_from_slice(&(crate::ctl::id(c) as u16).to_le_bytes());
+            kids.extend_from_slice(&k);
+            n += 1;
+        }
+    }
+    if !own.is_empty() || n != 0 {
+        out.extend_from_slice(&(own.len() as u32).to_le_bytes());
+        out.extend_from_slice(&own);
+        out.extend_from_slice(&n.to_le_bytes());
+        out.extend_from_slice(&kids);
+    }
+}
+
+/// WinGetFrameTreePPSize(hwnd): the bytes WinGetFrameTreePPs needs
+/// (undocumented; XWP helpers' winhStoreWindowPos, as WinStoreWindowPos).
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetFrameTreePPSize(h: u32) -> u32 {
+    if !st().desk.exists(h) {
+        return 0;
+    }
+    let mut v = Vec::new();
+    tree(h, &mut v);
+    v.len() as u32
+}
+
+/// WinGetFrameTreePPs(hwnd, cb, buffer): the bytes written, 0 if they do
+/// not fit.
+#[unsafe(no_mangle)]
+pub extern "C" fn WinGetFrameTreePPs(h: u32, cb: u32, pv: u32) -> u32 {
+    if !st().desk.exists(h) {
+        return 0;
+    }
+    let mut v = Vec::new();
+    tree(h, &mut v);
+    if v.len() > cb as usize {
+        return 0;
+    }
+    unsafe { core::ptr::copy_nonoverlapping(v.as_ptr(), pv as *mut u8, v.len()) };
+    v.len() as u32
+}
+
 /// The PRESPARAMS (cb, then PARAMs: id, cb, bytes) a window being made
 /// gets before WM_CREATE (`take_pending`).
 static PENDING: AtomicU32 = AtomicU32::new(0);

@@ -83,6 +83,8 @@ WinFreeErrorInfo @5180
 WinGetClipPS @5181
 WinGetCurrentTime @5182
 WinGetErrorInfo @5185
+WinGetFrameTreePPs @5186
+WinGetFrameTreePPSize @5187
 WinGetKeyState @5188
 WinGetLastError @5189
 WinGetMaxPosition @5190
@@ -254,6 +256,7 @@ WinValidateRect @5406
 WinValidateRegion @5407
 WinWaitEventSem @5409
 WinWaitMsg @5410
+WinWindowFromDC @5413
 WinWindowFromID @5414
 WinWindowFromPoint @5415
 WinSetClipRegion @5440

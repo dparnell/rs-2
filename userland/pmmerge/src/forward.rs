@@ -87,6 +87,8 @@ forward! {
     WinGetClipPS = "PMWIN.749";
     WinGetCurrentTime = "PMWIN.750";
     WinGetErrorInfo = "PMWIN.751";
+    WinGetFrameTreePPs = "PMWIN.973";
+    WinGetFrameTreePPSize = "PMWIN.972";
     WinGetKeyState = "PMWIN.752";
     WinGetLastError = "PMWIN.753";
     WinGetMaxPosition = "PMWIN.754";
@@ -258,6 +260,7 @@ forward! {
     WinValidateRegion = "PMWIN.896";
     WinWaitEventSem = "PMWIN.978";
     WinWaitMsg = "PMWIN.897";
+    WinWindowFromDC = "PMWIN.898";
     WinWindowFromID = "PMWIN.899";
     WinWindowFromPoint = "PMWIN.900";
     WinSetClipRegion = "PMWIN.1043";
