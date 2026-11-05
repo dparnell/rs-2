@@ -70,6 +70,19 @@ unsafe extern "C" fn lis_reader(_: u32) {
 
 pub fn run() {
     unsafe {
+        // kLIBC resolves /dev/null a component at a time.
+        let mut fb = [0u8; 300];
+        for (name, dir) in [(&b"C:/dev\0"[..], true), (&b"C:/dev/nul\0"[..], false)] {
+            let (mut h, mut n) = (0xffff_ffffu32, 1u32);
+            // MUST_HAVE nothing: any file or directory, level 1.
+            let rc = DosFindFirst(name.as_ptr(), &mut h, 0x37, fb.as_mut_ptr(), 300, &mut n, 1);
+            // FILEFINDBUF3's attrFile.
+            let a = u32::from_le_bytes([fb[24], fb[25], fb[26], fb[27]]);
+            check("DosFindFirst in \\DEV", rc == 0 && n == 1 && (a & 0x10 != 0) == dir);
+            if rc == 0 {
+                DosFindClose(h);
+            }
+        }
         let v = |p: &u8| p as *const u8 as u32;
         check("DOSCALLS.214 DosMaxPathLen", v(&DosMaxPathLen) == 260);
         check("DOSCALLS.215 DosPageSize", v(&DosPageSize) == 4096);

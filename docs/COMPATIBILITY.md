@@ -662,7 +662,8 @@ open-source browsers](BROWSER.md#os2-open-source-browsers).
 |------|--------|-------|
 | coreutils 8.31, grep 3.4, unzip 6.0, curl 7.75 (`--version`) | works | Also with `LANG=en_US`. |
 | bash 5.0 | works | Scripts, pipelines and `$(...)` (kLIBC's fork and spawn). |
-| RPM 4.15.1, Python 2.7.18, yum 3.4.3 | works | Package database, `yum repolist`, `list`, `search`, `info`, `install`, `remove` against rpm.netlabs.org, over the network from inside rs2 ([PACKAGES.md](PACKAGES.md)). |
+| RPM 4.15.1, Python 2.7.18, yum 3.4.3 | works | Package database, `yum repolist`, `list`, `search`, `info`, `install`, `remove`, `history` against rpm.netlabs.org, over the network from inside rs2 ([PACKAGES.md](PACKAGES.md)). |
+| zip, unzip, tar, wget, less, diffutils, git 2.50 | works | Installed by yum inside rs2, then run. |
 | WarpIN 1.0.19 | works | The wizard under PM; a WPI built by WIC installed under the Workplace Shell: files, CONFIG.SYS, objects, its database. |
 | ANPM 1.1.2 (VX-REXX) | fails | Its runtime stops in SOM: error 20169, M_VRCore's parent class. |
 | Firefox 45.9 ESR (bitwiseworks GA2) | works | Its window and UI, an HTTP page from the host with CSS and JavaScript, HTTPS to example.com. About 8 minutes to start under TCG. |

@@ -99,6 +99,8 @@ zip z.zip z.txt
 yum -y install less wget tar unzip diffutils uclip
 yum -y remove zip                                # and what depends on it
 yum info zip
+yum -y install git                               # 23 packages, 33 MB: Perl, git
+yum history
 ```
 
 All of it runs in rs2: yum takes `primary.sqlite.bz2` from the repository
@@ -107,7 +109,9 @@ fetches with pycurl, checks with RPM, installs with Berkeley DB and
 `librpm`, and the programs installed then run (`zip`, `unzip`, `tar`,
 `wget -O` from the same server, `less --version`, `diff --version`).
 `rpm -V bash` reports the files `rpmdisk.py` left out (documentation,
-locales) and modes and times the HPFS image does not keep.
+locales) and modes and times the HPFS image does not keep. git 2.50 from
+the same `yum install` works in a repository (`init`, `add`, `commit`, `log`,
+`diff --stat`, `status`; `SET GIT_PAGER=cat` on a serial console).
 
 `loader: module libproviders.dll not found` at each start is OpenSSL 3
 looking for a provider DLL; it goes on without it.
@@ -226,5 +230,11 @@ In the order the programs met them (each a separate commit):
     read their arguments from registers. They faulted on 0, and again in the
     nested dispatch, when the thread ended.
 
-RPM, Berkeley DB, kLIBC's fork for scriptlets, sqlite's locks, pycurl and
-HPFS needed nothing new.
+11. **UCONV** takes code sets by ISO name: kLIBC's `setlocale(LC_ALL, "C")`
+    asks for `ISO8859-1`, and yum does that after `setlocale(LC_ALL, "")`
+    (with `LANG` set it died; without it, it printed "Failed to set locale").
+12. **\DEV and its devices are found by DosFindFirst** on any drive: kLIBC
+    resolves `/dev/null` (`/dev/nul`) a component at a time, and git opens it
+    at its start. This follows from what kLIBC needs, not from IBM's kernel.
+
+RPM, Berkeley DB, sqlite's locks, pycurl and HPFS needed nothing new.

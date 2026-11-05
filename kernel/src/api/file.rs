@@ -1229,6 +1229,16 @@ fn search(c: &Ctx, spec: &str, attrib: u32) -> Result<(Vec<FileInfo>, FullPath),
         return Err(err::NO_MORE_FILES);
     }
     if !path::has_wildcards(&pattern) {
+        // \DEV and the devices in it are there on every drive: kLIBC
+        // resolves /dev/null (its /dev/nul) a component at a time.
+        let dev = p.parts.first().is_some_and(|d| d.eq_ignore_ascii_case("DEV"));
+        if dev && p.parts.len() <= 2 && fsys.stat(&p.rel()).is_err() {
+            let is_dir = p.parts.len() == 1;
+            if is_dir || fs::device_name(&pattern).is_some() {
+                let i = FileInfo { name: pattern, attr: if is_dir { attr::DIRECTORY } else { 0 }, ..FileInfo::default() };
+                return if ok(&i) { Ok((alloc::vec![i], dir)) } else { Err(err::NO_MORE_FILES) };
+            }
+        }
         let mut i = fsys.stat(&p.rel()).map_err(|e| if e == err::FILE_NOT_FOUND { err::NO_MORE_FILES } else { e })?;
         if i.name.is_empty() {
             i.name = pattern;
