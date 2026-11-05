@@ -90,6 +90,13 @@ fn info_blocks() {
     let mut v = [0u32; 2];
     let rc = unsafe { DosQuerySysInfo(11, 12, v.as_mut_ptr(), 8) };
     check("DosQuerySysInfo version 20.45", rc == 0 && v == [20, 45]);
+    // Python's os2 module reads the Toolkit's whole range, 1 to QSV_MAX
+    // (31); IBM's kernel takes up to 32.
+    let mut all = [0u32; 32];
+    let rc = unsafe { DosQuerySysInfo(1, 32, all.as_mut_ptr(), 128) };
+    check("DosQuerySysInfo 1..32", rc == 0 && all[0] == 260);
+    let rc = unsafe { DosQuerySysInfo(1, 33, all.as_mut_ptr(), 128) };
+    check("DosQuerySysInfo past the last index", rc == 87);
     let mut name: *const u8 = null();
     let rc = unsafe { DosScanEnv(b"PATH\0".as_ptr(), &mut name) };
     check("DosScanEnv PATH", rc == 0 && !name.is_null());

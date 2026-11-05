@@ -1097,7 +1097,7 @@ fn sys_info_value(c: &Ctx, i: u32) -> u32 {
 
 fn dos_query_sys_info(c: &mut Ctx) -> u32 {
     let (first, last, buf, cb) = (c.arg(0), c.arg(1), c.arg(2), c.arg(3));
-    if first == 0 || last < first || last > 30 {
+    if first == 0 || last < first || last > 32 {
         return err::INVALID_PARAMETER;
     }
     if (last - first + 1) * 4 > cb {
