@@ -140,6 +140,13 @@ pub fn run() {
         let rc = UniUconvToUcs(uo, &mut ip, &mut il, &mut op, &mut ol, &mut nonid);
         check("UniUconvToUcs one byte (nonid set to 0)", ok && rc == 0 && out[0] == b'1' as u16 && il == 0 && ol == 0 && nonid == 0);
         UniFreeUconvObject(uo);
+        // setlocale(LC_ALL, "C") after another locale.
+        let iso = b"ISO8859-1\0".map(|c| c as u16);
+        let ok = UniCreateUconvObject(iso.as_ptr(), &mut uo) == 0;
+        check("UniCreateUconvObject ISO8859-1", ok);
+        if ok {
+            UniFreeUconvObject(uo);
+        }
         check("UniTransUpper", UniTransUpper(0, b'a' as u32) == b'A' as u32);
         let src: [u16; 2] = [b'B' as u16, 0];
         let mut w = [0xffffu16; 7];
