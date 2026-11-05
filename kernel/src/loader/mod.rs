@@ -486,6 +486,39 @@ pub fn load_dll<G: core::ops::DerefMut<Target = AddressSpace>>(name: &str, space
     Ok(m)
 }
 
+/// `load_dll` for a process that uses the modules `used`. Instance data
+/// still mapped for a DLL (or an import of it) the process let go of starts
+/// over: the C runtime of a DLL freed its heap at termination and keeps the
+/// pointers in that data (RXULS.DLL, loaded by REXX for each RxFuncAdd).
+pub fn load_dll_again<G: core::ops::DerefMut<Target = AddressSpace>>(name: &str, used: &[u16], space: impl FnOnce() -> G) -> Result<Arc<Module>, u32> {
+    let m = load_global(name)?;
+    let mut sp = space();
+    refresh_instance(&m, used, &mut Vec::new(), &mut sp);
+    attach(&m, &mut sp)?;
+    Ok(m)
+}
+
+fn refresh_instance(m: &Arc<Module>, used: &[u16], seen: &mut Vec<u16>, space: &mut AddressSpace) {
+    if used.contains(&m.hmte) || seen.contains(&m.hmte) {
+        return;
+    }
+    seen.push(m.hmte);
+    for o in m.objects.iter().filter(|o| o.shared.is_none()) {
+        if !m.is_dll || space.region(o.base).is_none() {
+            continue;
+        }
+        let mut img = alloc::vec![0u8; o.size as usize];
+        if let Some(p) = &o.pristine {
+            let n = p.len().min(img.len());
+            img[..n].copy_from_slice(&p[..n]);
+        }
+        space.poke_bytes(o.base, &img);
+    }
+    for d in &m.deps() {
+        refresh_instance(d, used, seen, space);
+    }
+}
+
 /// Map a module's objects into an address space (if not already) and attach
 /// its imports.
 pub fn attach(m: &Arc<Module>, space: &mut AddressSpace) -> Result<(), u32> {

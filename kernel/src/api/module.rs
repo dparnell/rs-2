@@ -256,7 +256,10 @@ fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
         crate::trace!("    load {name}");
     }
     let _ = loader::take_fail();
-    let r = loader::load_dll(&name, || c.space());
+    // What this process uses now: a DLL it let go of comes back with fresh
+    // data, as OS/2 reads it in again.
+    let used: Vec<u16> = term_order(&c.process).iter().map(|x| x.module.hmte).collect();
+    let r = loader::load_dll_again(&name, &used, || c.space());
     let m = match r {
         Ok(m) => m,
         Err(e) => {
