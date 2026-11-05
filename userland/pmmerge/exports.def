@@ -120,6 +120,7 @@ WinInvalidateRegion @5205
 WinInvertRect @5206
 WinIsChild @5207
 WinIsRectEmpty @5209
+WinIsThreadActive @5210
 WinIsWindow @5211
 WinIsWindowEnabled @5212
 WinIsWindowShowing @5213
@@ -180,6 +181,7 @@ WinQueryPresParam @5280
 WinQueryQueueInfo @5282
 WinQueryQueueStatus @5283
 WinQuerySendMsg @5284
+WinQuerySessionTitle @5285
 WinQuerySwitchEntry @5286
 WinQuerySwitchHandle @5287
 WinQuerySwitchList @5288

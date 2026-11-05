@@ -107,6 +107,7 @@ forward! {
     WinInvertRect = "PMWIN.767";
     WinIsChild = "PMWIN.768";
     WinIsRectEmpty = "PMWIN.770";
+    WinIsThreadActive = "PMWIN.771";
     WinIsWindow = "PMWIN.772";
     WinIsWindowEnabled = "PMWIN.773";
     WinIsWindowShowing = "PMWIN.774";
@@ -167,6 +168,7 @@ forward! {
     WinQueryQueueInfo = "PMWIN.824";
     WinQueryQueueStatus = "PMWIN.825";
     WinQuerySendMsg = "PMWIN.990";
+    WinQuerySessionTitle = "PMSHAPI.122";
     WinQuerySwitchEntry = "PMSHAPI.124";
     WinQuerySwitchHandle = "PMSHAPI.125";
     WinQuerySwitchList = "PMSHAPI.126";

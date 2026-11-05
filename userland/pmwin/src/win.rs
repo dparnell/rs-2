@@ -799,6 +799,13 @@ pub extern "C" fn WinQueryActiveWindow(_desk: u32) -> u32 {
     st().active
 }
 
+/// WinIsThreadActive(hab): does this thread own the active window?
+#[unsafe(no_mangle)]
+pub extern "C" fn WinIsThreadActive(_hab: u32) -> u32 {
+    let s = st();
+    s.desk.get(s.active).is_some_and(|w| w.queue == s.my_queue()) as u32
+}
+
 #[unsafe(no_mangle)]
 pub extern "C" fn WinSetFocus(_desk: u32, h: u32) -> u32 {
     let top = top_level(h);

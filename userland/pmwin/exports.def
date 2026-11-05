@@ -449,6 +449,7 @@ WinSetWindowPos=__a_WinSetWindowPos @875
 WinShowWindow=__a_WinShowWindow @883
 WinSetActiveWindow=__a_WinSetActiveWindow @851
 WinQueryActiveWindow=__a_WinQueryActiveWindow @799
+WinIsThreadActive=__a_WinIsThreadActive @771
 WinSetFocus=__a_WinSetFocus @860
 WinFocusChange=__a_WinFocusChange @746
 WinQueryFocus=__a_WinQueryFocus @817

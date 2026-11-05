@@ -476,53 +476,54 @@ aligned! {
     __a_WinShowWindow => crate::win::WinShowWindow, 2, 447;
     __a_WinSetActiveWindow => crate::win::WinSetActiveWindow, 2, 448;
     __a_WinQueryActiveWindow => crate::win::WinQueryActiveWindow, 1, 449;
-    __a_WinSetFocus => crate::win::WinSetFocus, 2, 450;
-    __a_WinFocusChange => crate::win::WinFocusChange, 3, 451;
-    __a_WinQueryFocus => crate::win::WinQueryFocus, 1, 452;
-    __a_WinQueryWindowRect => crate::win::WinQueryWindowRect, 2, 453;
-    __a_WinQueryWindowPos => crate::win::WinQueryWindowPos, 2, 454;
-    __a_WinSetMultWindowPos => crate::win::WinSetMultWindowPos, 3, 455;
-    __a_WinIsWindow => crate::win::WinIsWindow, 2, 456;
-    __a_WinIsWindowVisible => crate::win::WinIsWindowVisible, 1, 457;
-    __a_WinEnableWindow => crate::win::WinEnableWindow, 2, 458;
-    __a_WinIsWindowEnabled => crate::win::WinIsWindowEnabled, 1, 459;
-    __a_WinIsChild => crate::win::WinIsChild, 2, 460;
-    __a_WinWindowFromID => crate::win::WinWindowFromID, 2, 461;
-    __a_WinQueryWindow => crate::win::WinQueryWindow, 2, 462;
-    __a_WinBeginEnumWindows => crate::win::WinBeginEnumWindows, 1, 463;
-    __a_WinGetNextWindow => crate::win::WinGetNextWindow, 1, 464;
-    __a_WinEndEnumWindows => crate::win::WinEndEnumWindows, 1, 465;
-    __a_WinQueryClassName => crate::win::WinQueryClassName, 3, 466;
-    __a_WinQueryDesktopWindow => crate::win::WinQueryDesktopWindow, 2, 467;
-    __a_WinSetParent => crate::win::WinSetParent, 3, 468;
-    __a_WinMapWindowPoints => crate::win::WinMapWindowPoints, 4, 469;
-    __a_WinSetWindowText => crate::win::WinSetWindowText, 2, 470;
-    __a_WinQueryWindowText => crate::win::WinQueryWindowText, 3, 471;
-    __a_WinQueryWindowTextLength => crate::win::WinQueryWindowTextLength, 1, 472;
-    __a_WinQueryWindowULong => crate::win::WinQueryWindowULong, 2, 473;
-    __a_WinSetWindowULong => crate::win::WinSetWindowULong, 3, 474;
-    __a_WinSetWindowBits => crate::win::WinSetWindowBits, 4, 475;
-    __a_WinQueryWindowPtr => crate::win::WinQueryWindowPtr, 2, 476;
-    __a_WinSetWindowPtr => crate::win::WinSetWindowPtr, 3, 477;
-    __a_WinQueryWindowUShort => crate::win::WinQueryWindowUShort, 2, 478;
-    __a_WinSetWindowUShort => crate::win::WinSetWindowUShort, 3, 479;
-    __a_WinBeginPaint => crate::win::WinBeginPaint, 3, 480;
-    __a_WinEndPaint => crate::win::WinEndPaint, 1, 481;
-    __a_WinSetSysModalWindow => crate::win::WinSetSysModalWindow, 2, 482;
-    __a_WinQuerySysModalWindow => crate::win::WinQuerySysModalWindow, 1, 483;
-    __a_WinGetPS => crate::win::WinGetPS, 1, 484;
-    __a_WinGetClipPS => crate::win::WinGetClipPS, 3, 485;
-    __a_WinReleasePS => crate::win::WinReleasePS, 1, 486;
-    __a_WinFillRect => crate::win::WinFillRect, 3, 487;
-    __a_WinInvalidateRect => crate::win::WinInvalidateRect, 3, 488;
-    __a_WinInvalidateRegion => crate::win::WinInvalidateRegion, 3, 489;
-    __a_WinValidateRect => crate::win::WinValidateRect, 3, 490;
-    __a_WinUpdateWindow => crate::win::WinUpdateWindow, 1, 491;
-    __a_WinDrawText => crate::win::WinDrawText, 7, 492;
+    __a_WinIsThreadActive => crate::win::WinIsThreadActive, 1, 450;
+    __a_WinSetFocus => crate::win::WinSetFocus, 2, 451;
+    __a_WinFocusChange => crate::win::WinFocusChange, 3, 452;
+    __a_WinQueryFocus => crate::win::WinQueryFocus, 1, 453;
+    __a_WinQueryWindowRect => crate::win::WinQueryWindowRect, 2, 454;
+    __a_WinQueryWindowPos => crate::win::WinQueryWindowPos, 2, 455;
+    __a_WinSetMultWindowPos => crate::win::WinSetMultWindowPos, 3, 456;
+    __a_WinIsWindow => crate::win::WinIsWindow, 2, 457;
+    __a_WinIsWindowVisible => crate::win::WinIsWindowVisible, 1, 458;
+    __a_WinEnableWindow => crate::win::WinEnableWindow, 2, 459;
+    __a_WinIsWindowEnabled => crate::win::WinIsWindowEnabled, 1, 460;
+    __a_WinIsChild => crate::win::WinIsChild, 2, 461;
+    __a_WinWindowFromID => crate::win::WinWindowFromID, 2, 462;
+    __a_WinQueryWindow => crate::win::WinQueryWindow, 2, 463;
+    __a_WinBeginEnumWindows => crate::win::WinBeginEnumWindows, 1, 464;
+    __a_WinGetNextWindow => crate::win::WinGetNextWindow, 1, 465;
+    __a_WinEndEnumWindows => crate::win::WinEndEnumWindows, 1, 466;
+    __a_WinQueryClassName => crate::win::WinQueryClassName, 3, 467;
+    __a_WinQueryDesktopWindow => crate::win::WinQueryDesktopWindow, 2, 468;
+    __a_WinSetParent => crate::win::WinSetParent, 3, 469;
+    __a_WinMapWindowPoints => crate::win::WinMapWindowPoints, 4, 470;
+    __a_WinSetWindowText => crate::win::WinSetWindowText, 2, 471;
+    __a_WinQueryWindowText => crate::win::WinQueryWindowText, 3, 472;
+    __a_WinQueryWindowTextLength => crate::win::WinQueryWindowTextLength, 1, 473;
+    __a_WinQueryWindowULong => crate::win::WinQueryWindowULong, 2, 474;
+    __a_WinSetWindowULong => crate::win::WinSetWindowULong, 3, 475;
+    __a_WinSetWindowBits => crate::win::WinSetWindowBits, 4, 476;
+    __a_WinQueryWindowPtr => crate::win::WinQueryWindowPtr, 2, 477;
+    __a_WinSetWindowPtr => crate::win::WinSetWindowPtr, 3, 478;
+    __a_WinQueryWindowUShort => crate::win::WinQueryWindowUShort, 2, 479;
+    __a_WinSetWindowUShort => crate::win::WinSetWindowUShort, 3, 480;
+    __a_WinBeginPaint => crate::win::WinBeginPaint, 3, 481;
+    __a_WinEndPaint => crate::win::WinEndPaint, 1, 482;
+    __a_WinSetSysModalWindow => crate::win::WinSetSysModalWindow, 2, 483;
+    __a_WinQuerySysModalWindow => crate::win::WinQuerySysModalWindow, 1, 484;
+    __a_WinGetPS => crate::win::WinGetPS, 1, 485;
+    __a_WinGetClipPS => crate::win::WinGetClipPS, 3, 486;
+    __a_WinReleasePS => crate::win::WinReleasePS, 1, 487;
+    __a_WinFillRect => crate::win::WinFillRect, 3, 488;
+    __a_WinInvalidateRect => crate::win::WinInvalidateRect, 3, 489;
+    __a_WinInvalidateRegion => crate::win::WinInvalidateRegion, 3, 490;
+    __a_WinValidateRect => crate::win::WinValidateRect, 3, 491;
+    __a_WinUpdateWindow => crate::win::WinUpdateWindow, 1, 492;
+    __a_WinDrawText => crate::win::WinDrawText, 7, 493;
 }
 
 /// Export names and argument counts by trampoline index.
-pub static NAMES: [(&str, u8); 493] = [
+pub static NAMES: [(&str, u8); 494] = [
     ("WinLoadAccelTable", 3),
     ("WinCreateAccelTable", 2),
     ("WinDestroyAccelTable", 1),
@@ -973,6 +974,7 @@ pub static NAMES: [(&str, u8); 493] = [
     ("WinShowWindow", 2),
     ("WinSetActiveWindow", 2),
     ("WinQueryActiveWindow", 1),
+    ("WinIsThreadActive", 1),
     ("WinSetFocus", 2),
     ("WinFocusChange", 3),
     ("WinQueryFocus", 1),

@@ -31,6 +31,7 @@ aligned! {
     __a_PrfQueryProfile => crate::PrfQueryProfile, 2;
     __a_PrfReset => crate::PrfReset, 2;
     __a_WinQueryTaskSizePos => crate::WinQueryTaskSizePos, 3;
+    __a_WinQuerySessionTitle => crate::WinQuerySessionTitle, 4;
     __a_WinQueryTaskTitle => crate::WinQueryTaskTitle, 3;
     __a_PrfAddProgram => crate::proglist::PrfAddProgram, 3;
     __a_PrfChangeProgram => crate::proglist::PrfChangeProgram, 3;
