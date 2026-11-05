@@ -350,7 +350,7 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
     let handles = if sd.inherit { super::proc::inherited_handles(&c.process) } else { super::file::console_handles() };
     let r = process::exec(process::ExecParams {
         path: &path,
-        program: &program,
+        program: &path,
         args: &inputs,
         env,
         parent: Some(c.process.clone()),

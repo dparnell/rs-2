@@ -247,10 +247,9 @@ pub mod boot {
     }
 
     fn spawn(path: &str, args: &str, env: &[String], detached: bool) -> Option<u32> {
-        let program = path.rsplit('\\').next().unwrap_or(path).to_string();
         let r = crate::task::process::exec(crate::task::process::ExecParams {
             path,
-            program: &program,
+            program: path,
             args,
             env: env.to_vec(),
             parent: None,

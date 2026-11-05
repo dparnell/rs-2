@@ -328,22 +328,17 @@ pub extern "C" fn somBuildClass(inherit_vars: i32, sci: *const env::Sci, major: 
     unsafe { env::build_class(inherit_vars, sci, major, minor) }
 }
 
-/// SOM 1's class construction: the class init routine does the work.
+/// SOM 1's class construction: the bindings' routine classInit(parent,
+/// metaclass) makes the class (somNew of the metaclass, somInitClass and the
+/// rest); IBM's somConstructClass only guards it. VX-REXX's classes are built
+/// this way.
 #[unsafe(no_mangle)]
 pub extern "C" fn somConstructClass(init: usize, parent: usize, meta: usize, cds: *mut usize) {
     env::env_new();
-    if cds.is_null() || unsafe { *cds } != 0 {
-        return;
-    }
-    let meta = if meta != 0 { meta } else { unsafe { (*SOMCLASS).obj } };
-    let cls = call_cm(meta, class::cm::NEW, &[meta as u32]) as usize;
-    if init != 0 {
+    if init != 0 && (cds.is_null() || unsafe { *cds } == 0) {
         let f: extern "C" fn(usize, usize) = unsafe { core::mem::transmute(init) };
-        f(cls, parent);
+        f(parent, meta);
     }
-    call_cm(cls, class::cm::SET_CLASS_DATA, &[cls as u32, cds as u32]);
-    unsafe { *cds = cls };
-    call_cm(cls, class::cm::CLASS_READY, &[cls as u32]);
 }
 
 /// somCreateDynamicClass(className, parentName, file, major, minor) (an

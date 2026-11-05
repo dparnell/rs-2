@@ -15,7 +15,7 @@ only read it (`bsdtar`), and run only inside QEMU.
 | Python 2.7.18 | works | The interpreter yum needs, with its `.pyd` modules (bz2, sqlite3, pycurl, ...). |
 | yum 3.4.3 | works | `repolist`, `list`, `search`, `info`, `install` and `remove` against `rpm.netlabs.org`, downloading over HTTP through rs2's network stack. See below. |
 | WarpIN 1.0.19 | works | The self-installer unpacks itself and shows its wizard; `WARPIN.EXE` installs a WPI under the Workplace Shell (files, CONFIG.SYS with a backup, a program object on the desktop, its own folder and objects, its database). `WIC.EXE` builds, lists and unpacks archives. |
-| ANPM 1.1.2 | fails | Needs WarpIN 1.0.24 to install; unpacked with WIC, its VX-REXX runtime loads and stops in SOM (see below). |
+| ANPM 1.1.2 | works | Unpacked with WIC (it needs WarpIN 1.0.24 to install). Its window, the installed and available lists through yum, and an install from its Install button. See below. |
 
 ## The test disk
 
@@ -181,15 +181,47 @@ registration (`REGISTERCLASS`).
 
 `repos.arcanoae.com/anpm/anpm_1_1_2.exe` is a free download without a login,
 and its script has no licence page. It says `<WARPIN VERSION="1.0.24">`,
-newer than the official 1.0.19, so it was not installed but unpacked with
-WIC inside rs2 (`WIC anpm.exe -x 1` to `-x 9`). `anpm.exe` is a VX-REXX
-program: `PMEXE` and VROBJ.DLL (Watcom C, SOM 1 classes) with the REXX code in
-its resources. Run with those on the LIBPATH it loads VROBJ.DLL, REXX and the
-SOM classes, and ends with `SOM error 20169` (`somOverrideSMethod: no method
-somClassReady in class M_VRCore`): `somInitClass` gets a parent (a 16-byte
-object next to the class's own) that rs2's SOM does not take for a class, so
-M_VRCore descends from SOMObject instead of SOMClass. The next step is to see
-in Ghidra what VROBJ passes there and what IBM's SOMClass does with it.
+newer than the official 1.0.19, so it is not installed but unpacked with WIC
+inside rs2 (`WIC anpm.exe -x 1` in `E:\ANPM\P1`, `-x 2` to `-x 9`, its runtime
+DLLs, in `E:\ANPM\DLL`). `anpm.exe` is a VX-REXX program: `PMEXE`, and
+VROBJ.DLL (Watcom C, SOM 1 classes, its own controls), running REXX. It needs:
+
+- `RXSOCK.DLL`, which rs2 does not have: IBM's goes on C: for the test
+  (`work/media/client/cid/server/tcpapps/install/base/rxsock.dll ->
+  OS2\DLL\RXSOCK.DLL` in work/modules.txt). rs2 has no RXSOCK of its own yet.
+- CONFIG.SYS: `LIBPATH=.;E:\USR\LOCAL\LIB;E:\USR\LIB;...` in that order (else
+  it asks to change it), the two ANPM directories on the LIBPATH, `SET
+  LOGFILES=E:\VAR\LOG`.
+- To be started by its full path from its directory: it finds its files through
+  the first string of its command line. `E:`, `cd \ANPM\P1`,
+  `E:\ANPM\P1\ANPM.EXE /DEB` (`/DEB`: its log in `%LOGFILES%\ANPM.DBG` and a
+  console window; `%LOGFILES%\ANPM.LOG` has what yum printed).
+
+It says OPENSSL.EXE is missing (no saved credentials) and that WarpIN is not
+installed (C:'s OS2.INI starts afresh on each boot); both are OK buttons. Then
+its window comes up. It runs its Python scripts through REXX (`CMD /C
+python2.7.exe script 2>&1 | RXQUEUE`), which call yum's Python API:
+`yum_populate.py` and `yum_list.py` take about 5 minutes under TCG, and the
+lists fill: 114 installed, 2649 available in 1415 records. Clicking Available
+RPM shows them. Selecting a package and pressing the Install button runs
+`yum_install_dep.py` (about 5 minutes) and shows the Download Package(s) dialog
+with the package, version, repository and size; OK runs `yum_install.py`.
+
+That installed `adobe-source-code-pro-fonts` (1.24 MB) and then
+`adobe-source-sans-pro-fonts` from rpm.netlabs.org: the first installs driven
+from a PM program on rs2. `rpm -q` knows them, the files are on the disk, and
+ANPM's lists refresh by themselves (117 installed, 2644 available). A package
+already installed gets "Nothing to Do". All the Python takes minutes under TCG,
+so a run is about 20 minutes. The run was driven with `--type-file`: OK to
+the two warnings, clicks on Available RPM (twice: the first can fall in while
+the list fills), the Install tool button, the dialog's OK.
+Screenshots: work/progress/pkgmgr.
+
+Not looked at: the toolbar's top is cut off under the menu bar, `\PIPE\YUMPROGRESS`
+often reports busy to `yum_populate.py` (it goes on without the progress bar;
+ANPM's own comment says it does that on OS/2 too), removing and updating from the
+GUI, the WarpIN side of ANPM, and starting it from a program object (`START /PM`
+through DosStartSession was tried).
 
 ## What rs2 needed
 
@@ -237,5 +269,26 @@ In the order the programs met them (each a separate commit):
 12. **\DEV and its devices are found by DosFindFirst** on any drive: kLIBC
     resolves `/dev/null` (`/dev/nul`) a component at a time, and git opens it
     at its start. This follows from what kLIBC needs, not from IBM's kernel.
+
+13. **SOM's somConstructClass** only calls the bindings' class init routine
+    with (parent, metaclass), if the class data has no class yet, as IBM's
+    does. VX-REXX's SOM 1 classes are made in that routine (it was SOM error
+    20169: M_VRCore built from a stray object, descending from SOMObject).
+14. **Instance data starts over** when a process loads a DLL again after
+    letting go of it, as OS/2 reads the DLL in again: RXULS.DLL's C runtime
+    freed its heap at termination and kept the pointers.
+15. **BS_AUTOSIZE** buttons take the size of their text (IBM's ButtonAutoSize;
+    side 0 only), and **WinDrawText** answers 0 for an empty rectangle (IBM's
+    DrawText). VX-REXX's message boxes depend on both.
+16. **Paths** in the loader compare with `/` and `\` alike: Python's paths have
+    forward slashes, and each process loaded its `.pyd` files again, taking
+    the shared arena down by their size. ANPM's install ended in an
+    unexpected exception in Python, in a loop, and REX0121 in ANPM; it has not
+    come back with this fix, though the exception's cause was not pinned down.
+    A trap's log now names the modules of its stack.
+17. **Sessions and boot programs** get their full path as the first string of
+    the command (`pib_pchcmd`): VRGet("Application", "Program") returns it,
+    and ANPM takes its directory from there. From what ANPM needs; not checked
+    against IBM's session manager.
 
 RPM, Berkeley DB, sqlite's locks, pycurl and HPFS needed nothing new.

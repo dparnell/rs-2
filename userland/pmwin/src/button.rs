@@ -13,6 +13,7 @@ use crate::state::st;
 use crate::win::{WM_BUTTON1DOWN, WM_BUTTON1UP, WM_CHAR, WM_MOUSEMOVE, WM_PAINT, WM_SETFOCUS, WM_SYSCOMMAND};
 
 const WM_CREATE: u32 = 0x0001;
+const BS_AUTOSIZE: u32 = 0x4000;
 
 pub const BS_PUSHBUTTON: u32 = 0;
 pub const BS_AUTOCHECKBOX: u32 = 2;
@@ -305,12 +306,38 @@ fn label(c: &mut Canvas, r: Rect, text: &[u8], fg: u32, focus: bool) {
     }
 }
 
+/// BS_AUTOSIZE: a side given as 0 follows the text (IBM's ButtonAutoSize; a
+/// push button is at least as wide as "Cancel"). VX-REXX's message boxes
+/// make their buttons this way.
+fn autosize(h: u32) {
+    const BS_AUTOSIZE_CHECK: i32 = 12;
+    let (mut cx, mut cy) = ctl::size(h);
+    if cx > 0 && cy > 0 {
+        return;
+    }
+    let f = draw::font_of(h);
+    let text = ctl::text(h);
+    let width = f.text_width(&draw::strip_mnemonic(&text).0);
+    let avg = f.text_width(b"x");
+    let push = matches!(kind(h), 0 | 8);
+    if cx <= 0 {
+        cx = if push { width.max(f.text_width(b"Cancel")) + 10 + avg } else { width + BS_AUTOSIZE_CHECK + avg / 2 };
+    }
+    if cy <= 0 {
+        cy = f.height + 2 + if push { 10 } else { 2 };
+    }
+    crate::win::WinSetWindowPos(h, 0, 0, 0, cx, cy, 1);
+}
+
 // ---- The window procedure ----
 
 pub extern "C" fn button_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
     match msg {
         WM_CREATE => {
             ctl::set_data(h, Button::default());
+            if ctl::style(h) & BS_AUTOSIZE != 0 {
+                autosize(h);
+            }
             0
         }
         WM_PAINT => {

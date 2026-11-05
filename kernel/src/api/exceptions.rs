@@ -597,6 +597,16 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
             ebp = next;
         }
         crate::trace!("callers: {:08x?}", &chain[..n]);
+        drop(sp);
+        // Which modules those are.
+        for a in core::iter::once(f.rip as u32).chain(chain[..n].iter().copied()) {
+            for m in crate::loader::all_modules() {
+                if let Some((i, o)) = m.objects.iter().enumerate().find(|(_, o)| a >= o.base && a < o.base + o.size) {
+                    crate::trace!("  {a:08x}: {} object {} + {:x}", m.name, i + 1, a - o.base);
+                    break;
+                }
+            }
+        }
     }
     p.exit(2, 0xffff);
 }
