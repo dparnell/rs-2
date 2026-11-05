@@ -170,7 +170,6 @@ pub fn resolve_user_fault(addr: u64, error: u64) -> bool {
 
 pub fn timer_tick(_f: &mut TrapFrame) {
     sched::tick();
-    crate::api::sysctl::tick();
     crate::api::timer::tick();
     crate::drivers::xhci::tick();
     crate::drivers::virtio::tick();

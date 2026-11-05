@@ -295,6 +295,17 @@ pub fn mono_ms() -> u64 {
     MONO0.load(Ordering::Relaxed) + crate::arch::rdtsc().saturating_sub(TSC0.load(Ordering::Relaxed)) / per
 }
 
+/// Time since boot in units of `freq` per second: `mono_ms` at the
+/// time-stamp counter's resolution, or the uptime counter's until measured.
+pub fn mono_scaled(freq: u64) -> u64 {
+    let per = TSC_PER_MS.load(Ordering::Acquire);
+    if per == 0 {
+        return crate::irq::uptime_ms() * freq / 1000;
+    }
+    let d = crate::arch::rdtsc().saturating_sub(TSC0.load(Ordering::Relaxed));
+    (MONO0.load(Ordering::Relaxed) + d / per) * freq / 1000 + d % per * freq / (per * 1000)
+}
+
 /// Day of week, 0 = Sunday (Sakamoto's method).
 pub fn weekday(y: u16, m: u8, d: u8) -> u8 {
     const T: [u16; 12] = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
