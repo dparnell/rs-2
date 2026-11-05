@@ -113,8 +113,9 @@ locales) and modes and times the HPFS image does not keep. git 2.50 from
 the same `yum install` works in a repository (`init`, `add`, `commit`, `log`,
 `diff --stat`, `status`; `SET GIT_PAGER=cat` on a serial console).
 
-`loader: module libproviders.dll not found` at each start is OpenSSL 3
-looking for a provider DLL; it goes on without it.
+`loader: module libproviders.dll not found` is printed at each start and
+yum carries on. It may be OpenSSL 3 looking for a provider DLL; that has
+not been confirmed.
 
 ## WarpIN
 
