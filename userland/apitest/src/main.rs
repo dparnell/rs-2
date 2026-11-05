@@ -595,6 +595,20 @@ fn dlls() {
         DosFreeModule(hs3);
         let rc = DosLoadModule(null_mut(), 0, b"TESTDLL\0".as_ptr(), &mut hn);
         check("the name still finds the DLL found by name", rc == 0 && hn == h);
+        // Still in use, without a termination routine: its data stays.
+        let (mut hg, mut hg2) = (0, 0);
+        let mut pg: usize = 0;
+        let rc = DosLoadModule(null_mut(), 0, b"TESTDLLN\0".as_ptr(), &mut hg);
+        let ok = rc == 0 && DosQueryProcAddr(hg, 2, null(), &mut pg) == 0;
+        check("a DLL with global init loads", ok);
+        if ok {
+            let count: extern "C" fn() -> u32 = core::mem::transmute(pg);
+            let before = count();
+            let rc = DosLoadModule(null_mut(), 0, b"TESTDLLN\0".as_ptr(), &mut hg2);
+            check("loading a DLL in use keeps its data", rc == 0 && before == 1 && count() == 1);
+            DosFreeModule(hg2);
+            DosFreeModule(hg);
+        }
         DosFreeModule(hs);
         DosFreeModule(hs2);
         DosFreeModule(hn);

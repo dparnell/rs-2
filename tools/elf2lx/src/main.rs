@@ -170,7 +170,7 @@ const OBJ_ALIAS16: u32 = 0x1000;
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.len() < 2 {
-        eprintln!("usage: elf2lx INPUT OUTPUT [--dll] [--name NAME] [--stack BYTES] [--exports FILE] [--pm] [--fixups-removed] [--res TYPE ID FILE]...");
+        eprintln!("usage: elf2lx INPUT OUTPUT [--dll] [--name NAME] [--stack BYTES] [--exports FILE] [--pm] [--fixups-removed] [--global-init] [--res TYPE ID FILE]...");
         return ExitCode::FAILURE;
     }
     let mut dll = false;
@@ -178,6 +178,7 @@ fn main() -> ExitCode {
     // Mark the module as having had its internal fixups removed (it keeps
     // them: for testing loaders, as some IBM DLLs are).
     let mut fixups_removed = false;
+    let mut global_init = false;
     // Mark the objects for high memory (OBJHIGHMEM, as the `highmem` tool
     // does): code then gets no 16:16 aliases.
     let mut highmem = false;
@@ -194,6 +195,7 @@ fn main() -> ExitCode {
             "--pm" => pm = true,
             "--fixups-removed" => fixups_removed = true,
             "--highmem" => highmem = true,
+            "--global-init" => global_init = true,
             "--name" => {
                 i += 1;
                 name = args[i].to_ascii_uppercase();
@@ -477,6 +479,12 @@ fn main() -> ExitCode {
         // Module flags of the LX header (after the MZ stub).
         let o = u32le(&lx, 0x3c) as usize;
         lx[o + 0x10] |= 0x10;
+    }
+    if global_init {
+        // Neither per-process init nor term in the module flags.
+        let o = u32le(&lx, 0x3c) as usize;
+        let flags = u32le(&lx, o + 0x10) & !0x4000_0004;
+        lx[o + 0x10..o + 0x14].copy_from_slice(&flags.to_le_bytes());
     }
     std::fs::write(&args[1], lx).expect("write output");
     ExitCode::SUCCESS

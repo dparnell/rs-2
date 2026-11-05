@@ -922,6 +922,23 @@ fn build_userland() -> Option<image::FileList> {
                 return None;
             }
             files.push((lx, "RS2\\TESTDLLH.DLL".to_string()));
+            // And with global initialisation and no termination routine, as
+            // many DLLs of other compilers are (APITEST).
+            let lx = out_dir.join("TESTDLLN.DLL");
+            let ok = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()))
+                .current_dir(root())
+                .args(["run", "-q", "--release", "-p", "elf2lx", "--"])
+                .arg(&elf)
+                .arg(&lx)
+                .args(["--dll", "--global-init", "--name", "TESTDLLN", "--exports"])
+                .arg(ul.join(bin).join("exports.def"))
+                .status()
+                .ok()?
+                .success();
+            if !ok {
+                return None;
+            }
+            files.push((lx, "RS2\\TESTDLLN.DLL".to_string()));
         }
     }
     check_dll_ranges(&ul)?;

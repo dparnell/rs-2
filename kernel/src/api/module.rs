@@ -83,6 +83,12 @@ pub fn init_order(roots: &[Arc<Module>], p: &Process) -> Vec<InitCall> {
 /// DLL termination calls due when `p` ends: modules with per-process
 /// termination whose initialisation ran, dependents before dependencies.
 pub fn term_order(p: &Process) -> Vec<InitCall> {
+    in_use(p).into_iter().rev().filter(|m| needs_term(m, p)).map(|module| InitCall { module, flag: 1 }).collect()
+}
+
+/// The modules a process uses (its program, what it loaded, their imports),
+/// imports first.
+fn in_use(p: &Process) -> Vec<Arc<Module>> {
     let mut roots = alloc::vec![p.exe.clone()];
     roots.extend(p.loaded.lock().iter().map(|(m, _)| m.clone()));
     let mut seen: Vec<u16> = Vec::new();
@@ -100,7 +106,7 @@ pub fn term_order(p: &Process) -> Vec<InitCall> {
     for r in &roots {
         visit(r, &mut seen, &mut order);
     }
-    order.into_iter().rev().filter(|m| needs_term(m, p)).map(|module| InitCall { module, flag: 1 }).collect()
+    order
 }
 
 fn needs_term(m: &Module, p: &Process) -> bool {
@@ -258,7 +264,7 @@ fn load(c: &mut Ctx, fail: u32, cbfail: u32, pname: u32, phmod: u32) -> u32 {
     let _ = loader::take_fail();
     // What this process uses now: a DLL it let go of comes back with fresh
     // data, as OS/2 reads it in again.
-    let used: Vec<u16> = term_order(&c.process).iter().map(|x| x.module.hmte).collect();
+    let used: Vec<u16> = in_use(&c.process).iter().map(|m| m.hmte).collect();
     let r = loader::load_dll_again(&name, &used, || c.space());
     let m = match r {
         Ok(m) => m,
