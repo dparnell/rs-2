@@ -378,7 +378,8 @@ DLLs) are not on the media, so rs2's own utilities take their place
 | FTP.EXE | works | Login, `dir`, `get` (ASCII and binary, 300 KB), `put` (byte-identical on the host), `quit`; active-mode data connections (PORT, Raccept/Rbind/Rlisten). About 2-3 MB/s each way under TCG. |
 | TELNET.EXE | works | Connects, shows the remote side (TNLS32 16-bit character conversion into its VT emulator), sends typed lines, ends when the host closes. Needed KbdSetStatus to accept binary mode with echo when switching from ASCII, and PMSHAPI for its profile reads (`%ETC%\TCPIP.INI` through `PrfOpenProfile`; still works with the INI-file PMSHAPI, also when that directory does not exist). |
 | FINGER.EXE | partial | Runs; names resolve through DNS (10.0.2.3); no finger server was reachable to test the exchange. |
-| RXSOCK.DLL (REXX) | works | SockInit, SockGetHostId, SockGetHostByName/ByAddr, SockSocket, SockConnect, SockSend/Recv (TCP echo through the host), SockGetPeerName, SockBind, SockSendTo/RecvFrom (UDP), SockSoClose. |
+| RXSOCK.DLL (rs2) | works | rs2's own (`userland/rxsock`): IBM's two exports and all 26 functions, with their argument checks, stems, `errno` names. `tests/rexx/RXSOTEST.CMD` (TCP and UDP on the loopback, select, options, ioctls, error 40 cases) prints the same with IBM's DLL and rs2's. One difference: IBM's always sets `h_errno` to 1541 (it reads a constant); rs2's sets the value its documentation describes. |
+| RXSOCK.DLL (IBM's) | works | SockInit, SockGetHostId, SockGetHostByName/ByAddr, SockSocket, SockConnect, SockSend/Recv (TCP echo through the host), SockGetPeerName, SockBind, SockSendTo/RecvFrom (UDP), SockSoClose. |
 | PORTMAP.EXE, RPCINFO.EXE (with RPC32DLL.DLL) | works | `rpcinfo -p localhost` lists the registered programs (SO32DLL/TCP32DLL). |
 | Toolkit tcps/tcpc, udpc, selects | works | TCP client/server, BSD `select()` server with TCP and UDP clients. |
 | Toolkit accept/recv | works | `accept_and_recv()`; the client connects to INADDR_ANY. |
@@ -665,7 +666,7 @@ open-source browsers](BROWSER.md#os2-open-source-browsers).
 | RPM 4.15.1, Python 2.7.18, yum 3.4.3 | works | Package database, `yum repolist`, `list`, `search`, `info`, `install`, `remove`, `history` against rpm.netlabs.org, over the network from inside rs2 ([PACKAGES.md](PACKAGES.md)). |
 | zip, unzip, tar, wget, less, diffutils, git 2.50 | works | Installed by yum inside rs2, then run. |
 | WarpIN 1.0.19 | works | The wizard under PM; a WPI built by WIC installed under the Workplace Shell: files, CONFIG.SYS, objects, its database. |
-| ANPM 1.1.2 (VX-REXX) | works | Its window, package lists through yum, an install from its Install button ([PACKAGES.md](PACKAGES.md#anpm)); needs IBM's RXSOCK.DLL. |
+| ANPM 1.1.2 (VX-REXX) | works | Its window, package lists through yum, an install from its Install button ([PACKAGES.md](PACKAGES.md#anpm)), on rs2's RXSOCK.DLL. |
 | Firefox 45.9 ESR (bitwiseworks GA2) | works | Its window and UI, an HTTP page from the host with CSS and JavaScript, HTTPS to example.com. About 8 minutes to start under TCG. |
 | Qt 5.15 Designer | fails | Qt and its OS/2 platform plugin load; it dies in QtCore on its second thread. |
 | Dooble (QtWebEngine) | fails | Its RPM dependencies do not resolve with the public repository's PTHR01.DLL (LZMA5.DLL imports `pthread_condattr_init`), so QT5WEBC.DLL is never placed; its 136 MB code object is marked OBJHIGHMEM and would now load above 512 MB. |

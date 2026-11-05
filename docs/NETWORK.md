@@ -618,7 +618,8 @@ line ends):
   sent.
 * FINGER: resolves names through DNS (10.0.2.3), connects (port 79 is
   not reachable on the test host).
-* RXSOCK.DLL from REXX: SockInit, SockGetHostId, SockGetHostByName,
+* rs2's RXSOCK.DLL gives the same output as IBM's in `tests/rexx/RXSOTEST.CMD`.
+* IBM's RXSOCK.DLL from REXX: SockInit, SockGetHostId, SockGetHostByName,
   SockGetHostByAddr, a TCP echo through the host, UDP to itself.
 * TFTP (16-bit, TCPIPDLL/TNLS16): `tftp 10.0.2.2`, `binary`, `get` of a
   300 KB file and a text file from QEMU's TFTP server (`xtask run

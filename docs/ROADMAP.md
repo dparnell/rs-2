@@ -317,7 +317,7 @@ Status markers: done, in progress, planned.
 - done: OS/2 package managers, unmodified (PACKAGES.md): RPM, yum
   (installing from rpm.netlabs.org inside rs2) and WarpIN (WPI archives
   under the Workplace Shell), ANPM (VX-REXX: lists and an install from its
-  window). planned: rs2's own RXSOCK.DLL
+  window) on rs2's own RXSOCK.DLL
 
 ## Milestone 4: Presentation Manager (largely done)
 

@@ -186,9 +186,7 @@ inside rs2 (`WIC anpm.exe -x 1` in `E:\ANPM\P1`, `-x 2` to `-x 9`, its runtime
 DLLs, in `E:\ANPM\DLL`). `anpm.exe` is a VX-REXX program: `PMEXE`, and
 VROBJ.DLL (Watcom C, SOM 1 classes, its own controls), running REXX. It needs:
 
-- `RXSOCK.DLL`, which rs2 does not have: IBM's goes on C: for the test
-  (`work/media/client/cid/server/tcpapps/install/base/rxsock.dll ->
-  OS2\DLL\RXSOCK.DLL` in work/modules.txt). rs2 has no RXSOCK of its own yet.
+- `RXSOCK.DLL`, which is rs2's own (`userland/rxsock`).
 - CONFIG.SYS: `LIBPATH=.;E:\USR\LOCAL\LIB;E:\USR\LIB;...` in that order (else
   it asks to change it), the two ANPM directories on the LIBPATH, `SET
   LOGFILES=E:\VAR\LOG`.
@@ -210,7 +208,9 @@ with the package, version, repository and size; OK runs `yum_install.py`.
 That installed `adobe-source-code-pro-fonts` (1.24 MB) and then
 `adobe-source-sans-pro-fonts` from rpm.netlabs.org: the first installs driven
 from a PM program on rs2. `rpm -q` knows them, the files are on the disk, and
-ANPM's lists refresh by themselves (117 installed, 2644 available). A package
+ANPM's lists refresh by themselves (117 installed, 2644 available). A later
+run on rs2's RXSOCK, with no IBM copy on the disk, installed `apr` and its
+dependency `mmap` the same way (119 installed, 2638 available). A package
 already installed gets "Nothing to Do". All the Python takes minutes under TCG,
 so a run is about 20 minutes. The run was driven with `--type-file`: OK to
 the two warnings, clicks on Available RPM (twice: the first can fall in while
