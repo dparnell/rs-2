@@ -172,6 +172,21 @@ pub fn counters() -> Counters {
     }
 }
 
+/// SYSDLLS, started at boot beside us, loads REXXINIT, which creates
+/// REXXAPI's semaphores and shared memory. With more than one processor
+/// that happens while we run: wait for its last object, or the leak checks
+/// would count them as ours. Images without REXXINIT cost 10 s here.
+fn wait_for_boot_programs() {
+    for _ in 0..200 {
+        let mut h = 0;
+        if unsafe { api::DosOpenEventSem(b"\\SEM32\\RS2\\REXXAPI.EV\0".as_ptr(), &mut h) } == 0 {
+            unsafe { DosCloseEventSem(h) };
+            return;
+        }
+        unsafe { DosSleep(50) };
+    }
+}
+
 /// Wait until no other process of ours is alive (children reaped).
 pub fn settle() {
     unsafe { DosSleep(100) };
@@ -224,6 +239,7 @@ fn main(s: &Startup) -> u32 {
     }
     println!("rs2 stress test");
     thread(watchdog, 0);
+    wait_for_boot_programs();
     let before = counters();
     let mem0 = avail_mem();
     for (i, (name, f)) in SECTIONS.iter().enumerate() {

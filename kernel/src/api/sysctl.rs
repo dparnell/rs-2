@@ -7,7 +7,6 @@
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use super::{err, Ctx};
-use crate::irq;
 use crate::sync::SpinLock;
 
 // ---- High-resolution timer ----
