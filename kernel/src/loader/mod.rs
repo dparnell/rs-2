@@ -138,6 +138,10 @@ pub struct Module {
     pub name: String,
     /// Full path of the file.
     pub path: String,
+    /// Loaded by its path (OS/2's CLASS_SPECIFIC): imports and loads by
+    /// name do not find it. Python's `lib-dynload\\bz2.pyd` has the internal
+    /// name of the `BZ2.DLL` it imports.
+    pub specific: bool,
     pub format: Format,
     pub is_dll: bool,
     pub is16: bool,
@@ -280,7 +284,15 @@ fn alloc_hmte() -> u16 {
 }
 
 pub fn find_loaded(name: &str) -> Option<Arc<Module>> {
-    REGISTRY.lock().modules.iter().find(|m| m.name.eq_ignore_ascii_case(name)).cloned()
+    let r = REGISTRY.lock();
+    let named = |m: &&Arc<Module>| m.name.eq_ignore_ascii_case(name);
+    r.modules.iter().filter(named).find(|m| !m.specific).or(r.modules.iter().find(named)).cloned()
+}
+
+/// A loaded DLL by the path of its file.
+pub fn find_loaded_path(path: &str) -> Option<Arc<Module>> {
+    let path = path.replace('/', "\\");
+    REGISTRY.lock().modules.iter().find(|m| m.is_dll && m.path.eq_ignore_ascii_case(&path)).cloned()
 }
 
 /// Every module loaded in the system (DosQuerySysState).
@@ -312,6 +324,7 @@ pub fn init() {
             hmte: alloc_hmte(),
             name: name.to_string(),
             path: alloc::format!("<kernel>\\{name}"),
+            specific: false,
             format: Format::Virtual,
             is_dll: true,
             is16: false,
@@ -358,9 +371,25 @@ pub fn take_fail() -> Option<String> {
 /// Load (or find) a DLL system-wide without attaching it anywhere. A
 /// program of the same name is not it: OS/2's PMFORMAT.EXE loads
 /// PMFORMAT.DLL for its resources by that name.
+///
+/// As in OS/2 (_ldrFindModule's classes), a name finds the modules that
+/// were found by name, and a path the module of that file: a DLL loaded by
+/// its path may have the name of another, and both stay loaded.
 pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
     let mname = module_name(name);
-    let found = REGISTRY.lock().modules.iter().find(|m| m.is_dll && m.name.eq_ignore_ascii_case(&mname)).cloned();
+    let by_path = name.contains(['\\', '/', ':']);
+    let found = {
+        let r = REGISTRY.lock();
+        let named = |m: &&Arc<Module>| m.is_dll && m.name.eq_ignore_ascii_case(&mname);
+        let m = if by_path {
+            // The kernel's API modules have no file.
+            r.modules.iter().filter(named).find(|m| m.format == Format::Virtual)
+        } else {
+            r.modules.iter().filter(named).find(|m| !m.specific)
+        };
+        m.cloned()
+    }
+    .or_else(|| if by_path { find_loaded_path(name) } else { None });
     if let Some(m) = found {
         if rewritten(&m) {
             // A 16-bit DLL whose file was written since it was loaded (Delphi
@@ -383,12 +412,24 @@ pub fn load_global(name: &str) -> Result<Arc<Module>, u32> {
             return Ok(m);
         }
     }
-    let (path, data) = crate::fs::find_module(name).map_err(|e| {
-        crate::trace!("loader: module {name} not found (error {e})");
-        set_fail(name);
-        if e == err::FILE_NOT_FOUND { err::MOD_NOT_FOUND } else { e }
-    })?;
-    let m = load_image(&path, data, true, None).inspect_err(|e| crate::trace!("loader: {path}: error {e}"))?;
+    let (path, data) = match crate::fs::find_module(name) {
+        Ok(x) => x,
+        Err(e) => {
+            // Not on the LIBPATH: one of that name loaded by its path will do.
+            let specific = if by_path { None } else { find_loaded(&mname).filter(|m| m.is_dll) };
+            if let Some(m) = specific {
+                return Ok(m);
+            }
+            crate::trace!("loader: module {name} not found (error {e})");
+            set_fail(name);
+            return Err(if e == err::FILE_NOT_FOUND { err::MOD_NOT_FOUND } else { e });
+        }
+    };
+    // The LIBPATH led to a file already loaded by its path.
+    if let Some(m) = find_loaded_path(&path) {
+        return Ok(m);
+    }
+    let m = load_image(&path, data, true, by_path, None).inspect_err(|e| crate::trace!("loader: {path}: error {e}"))?;
     register(m.clone());
     Pending::loaded(&m);
     Ok(m)
@@ -488,7 +529,7 @@ pub fn attach(m: &Arc<Module>, space: &mut AddressSpace) -> Result<(), u32> {
 
 /// Load an executable into a fresh process address space.
 pub fn load_exe(path: &str, data: Arc<[u8]>, space: &mut AddressSpace) -> Result<Arc<Module>, u32> {
-    let m = load_image(path, data, false, Some(space))?;
+    let m = load_image(path, data, false, false, Some(space))?;
     register(m.clone());
     attach(&m, space)?;
     Ok(m)
@@ -496,10 +537,10 @@ pub fn load_exe(path: &str, data: Arc<[u8]>, space: &mut AddressSpace) -> Result
 
 /// Parse and relocate a module. DLLs go to the shared arena (`space` is
 /// None); an EXE is loaded straight into `space`.
-fn load_image(path: &str, data: Arc<[u8]>, dll: bool, space: Option<&mut AddressSpace>) -> Result<Arc<Module>, u32> {
+fn load_image(path: &str, data: Arc<[u8]>, dll: bool, specific: bool, space: Option<&mut AddressSpace>) -> Result<Arc<Module>, u32> {
     match os2_exe::detect(&data) {
-        Ok(os2_exe::Format::Lx { header }) => lxload::load(path, data.clone(), header, dll, space),
-        Ok(os2_exe::Format::Ne { header }) => neload::load(path, data.clone(), header, dll, space),
+        Ok(os2_exe::Format::Lx { header }) => lxload::load(path, data.clone(), header, dll, specific, space),
+        Ok(os2_exe::Format::Ne { header }) => neload::load(path, data.clone(), header, dll, specific, space),
         Ok(_) => Err(err::BAD_EXE_FORMAT),
         Err(_) => Err(err::INVALID_EXE_SIGNATURE),
     }

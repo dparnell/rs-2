@@ -1020,7 +1020,8 @@ fn dos16_get_mod_name(c: &mut Ctx) -> u32 {
 }
 
 fn find_module_handle(name: &str) -> Option<u16> {
-    loader::find_loaded(&loader::module_name(name)).map(|m| m.hmte)
+    let m = if name.contains(['\\', '/', ':']) { loader::find_loaded_path(name) } else { None };
+    m.or_else(|| loader::find_loaded(&loader::module_name(name))).map(|m| m.hmte)
 }
 
 /// A loaded module's handle if the calling process uses it (its program,

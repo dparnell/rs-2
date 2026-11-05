@@ -20,6 +20,7 @@ pub fn load(
     data: Arc<[u8]>,
     header: usize,
     dll: bool,
+    specific: bool,
     mut space: Option<&mut AddressSpace>,
 ) -> Result<Arc<Module>, u32> {
     let m = lx::Module::parse(&data, header).map_err(|_| err::BAD_EXE_FORMAT)?;
@@ -167,7 +168,8 @@ pub fn load(
     // The imported modules, loaded now that this DLL's exports are known:
     // DLLs may import each other (loader::Pending).
     let own = m.name().map(s).unwrap_or_else(|_| super::module_name(path)).to_ascii_uppercase();
-    let _pending = dll.then(|| Pending::add(&own, &exports, &names));
+    // A DLL loaded by its path is not what imports of its name mean.
+    let _pending = (dll && !specific).then(|| Pending::add(&own, &exports, &names));
     let mut imports = Imports::load(&own, &import_names)?;
     // Forwarder targets are dependencies.
     for e in &exports {
@@ -349,6 +351,7 @@ pub fn load(
         init: if dll { start_info } else { None },
         per_process_init: h.module_flags & mflags::PER_PROCESS_INIT != 0,
         per_process_term: h.module_flags & mflags::PER_PROCESS_TERM != 0,
+        specific,
         global_init_done: core::sync::atomic::AtomicBool::new(false),
         image: Some(data.clone()),
     }))

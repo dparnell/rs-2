@@ -20,6 +20,7 @@ pub fn load(
     data: Arc<[u8]>,
     header: usize,
     dll: bool,
+    specific: bool,
     mut space: Option<&mut AddressSpace>,
 ) -> Result<Arc<Module>, u32> {
     let m = ne::Module::parse(&data, header).map_err(|_| err::BAD_EXE_FORMAT)?;
@@ -177,7 +178,8 @@ pub fn load(
 
     // The imported modules; DLLs may import each other (loader::Pending).
     let own = m.name().map(s).unwrap_or_else(|_| super::module_name(path)).to_ascii_uppercase();
-    let _pending = dll.then(|| Pending::add(&own, &exports, &names));
+    // A DLL loaded by its path is not what imports of its name mean.
+    let _pending = (dll && !specific).then(|| Pending::add(&own, &exports, &names));
     let imports = Imports::load(&own, &load_names)?;
 
     // Relocations.
@@ -371,6 +373,7 @@ pub fn load(
         init: if dll { start } else { None },
         per_process_init: windows || h.flags & flags::PER_PROCESS_INIT != 0,
         per_process_term: false,
+        specific,
         global_init_done: core::sync::atomic::AtomicBool::new(false),
         image: Some(data.clone()),
     }))
