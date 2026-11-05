@@ -88,9 +88,7 @@ rpm -qa | wc -l                                  # 83
 rpm -qf E:/usr/bin/bash.exe                      # bash-5.0.11-3.oc00.pentium4
 ```
 
-Run these with a `--release` kernel when time matters: the debug kernel is
-about four times slower. Figures are in docs/ARCHITECTURE.md, "The block
-cache". `patch`, which is not in the closure above, is not on this disk.
+Figures are in docs/ARCHITECTURE.md, "The block cache". `patch`, which is not in the closure above, is not on this disk.
 
 ## yum
 

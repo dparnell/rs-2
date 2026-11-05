@@ -15,3 +15,10 @@ panic = "abort"
 [profile.release]
 panic = "abort"
 debug = true
+
+# What xtask builds the loader and kernel with unless given --release: the
+# checks of a debug build (overflow, debug_assert) on optimised code. Unoptimised
+# the kernel is about four times slower.
+[profile.checked]
+inherits = "dev"
+opt-level = 2

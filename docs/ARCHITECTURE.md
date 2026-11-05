@@ -217,7 +217,7 @@ prints to the serial port the device interrupt counts, every process's
 threads with their state, priority, last user-mode address and the
 kernel return addresses on their stacks, and then (through an IPI) where
 each CPU is. Symbolise the addresses against the kernel ELF
-(`target/x86_64-unknown-none/{debug,release}/rs2-kernel`, e.g. with
+(`target/x86_64-unknown-none/{checked,release}/rs2-kernel`, e.g. with
 `llvm-nm -n`). Locks are only tried, so the dump works when something
 holds them.
 
@@ -247,11 +247,13 @@ reach the disk.
 | `yum repolist` | 27.2 | 8.2 |
 | `yum -y install zip` | 36.8 | 12.2 |
 
-Those are single runs, and the yum ones include the network. On the debug
-kernel `xtask run` builds by default, the same commands are about four times
-slower and gain only about 20% (`yum repolist` 104 s to 83 s), because the
-time there is the unoptimised file system code. Measure with `--release`.
-After the cache, about half of what remains in yum is that code again:
+Those are single runs, and the yum ones include the network. `xtask run`
+without `--release` builds the `checked` profile: optimised like release, with
+the overflow checks and `debug_assert`s of a debug build. It is close to
+release (`yum repolist` 9.8 s, `yum -y install zip` 13.1 s, `rpm -ivh` of all
+6.2 s). A kernel with no optimisation at all took 83 s, 83 s and 31 s, and
+gained only about 20% from the cache, so don't time anything on one.
+After the cache, about half of what remains in yum is the file system code:
 DosFindFirst and DosQueryPathInfo walking cached blocks.
 
 **Reads.** A miss reads its 4 KB block; a miss right after the last one

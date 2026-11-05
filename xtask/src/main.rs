@@ -465,14 +465,11 @@ fn main() -> ExitCode {
 
 fn cargo_build(package: &str, target: &str, release: bool) -> Option<PathBuf> {
     let mut c = Command::new(std::env::var("CARGO").unwrap_or("cargo".into()));
-    c.current_dir(root()).args(["build", "-p", package, "--target", target]);
-    if release {
-        c.arg("--release");
-    }
+    let profile = if release { "release" } else { "checked" };
+    c.current_dir(root()).args(["build", "-p", package, "--target", target, "--profile", profile]);
     if !c.status().ok()?.success() {
         return None;
     }
-    let profile = if release { "release" } else { "debug" };
     Some(root().join("target").join(target).join(profile))
 }
 
