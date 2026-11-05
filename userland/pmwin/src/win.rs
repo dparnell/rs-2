@@ -1552,6 +1552,11 @@ pub extern "C" fn WinDrawText(hps: u32, cch: i32, text: *const u8, prcl: *mut Re
     }
     let all = if cch < 0 { cstr(text) } else { unsafe { core::slice::from_raw_parts(text, cch as usize) }.to_vec() };
     let r = unsafe { prcl.read_unaligned() }.rect();
+    // Nothing fits in an empty rectangle (IBM's DrawText): VX-REXX's message
+    // box measures its text by shrinking one until this says so.
+    if (r.right <= r.left || r.top <= r.bottom) && fl & 0x8000_0002 != 0x8000_0002 {
+        return 0;
+    }
     let Some(e) = gpiapi::entry(st(), hps) else { return 0 };
     // An outline font at the character box's size; others as they are.
     let font = match e.ps.text_font() {
