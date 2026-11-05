@@ -244,8 +244,9 @@ Status markers: done, in progress, planned.
 - done: a block cache under HPFS, FAT and JFS, lazy writing under the
   rules of IBM's HPFS (HPFS and FAT on fixed disks), the HPFS dirty flag,
   `IFS=...HPFS.IFS /CACHE:n /CRECL:n`, CACHE's controls (docs/ARCHITECTURE.md)
-- planned: AUTOCHECK (nothing looks at the HPFS dirty flag at boot), giving
-  cache memory back to programs, a path or directory cache above the
+- done: AUTOCHECK (`/AUTOCHECK:drives`, `DISKCACHE=...,AC:drives`), the FAT
+  dirty flag
+- planned: giving cache memory back to programs, a path or directory cache above the
   block cache (DosFindFirst and DosQueryPathInfo are half of what is left in
   yum), lazy writing for JFS in the order its log needs
 - done: extended attributes on FAT12/16 (`EA DATA. SF`), FAT32
