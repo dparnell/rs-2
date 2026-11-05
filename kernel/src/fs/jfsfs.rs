@@ -227,6 +227,11 @@ impl FileSystem for JfsFs {
         self.inner.vol.lock().set_label(label).map_err(map)
     }
 
+    /// A volume that was not unmounted is mounted read-only.
+    fn needs_check(&self) -> bool {
+        self.inner.vol.lock().is_readonly()
+    }
+
     fn shutdown(&self) {
         let _ = self.inner.vol.lock().mark_clean();
     }

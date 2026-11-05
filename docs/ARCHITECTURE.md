@@ -297,9 +297,19 @@ disks and devices without 512-byte sectors have no cache.
 particular order: nothing orders metadata, as in IBM's HPFS. HPFS keeps the
 spare block's dirty flag as IBM does: set and flushed before the first write
 of a mount, cleared by DosShutdown after everything is out, and left alone if
-it was set at mount (CHKDSK /F clears it). rs2 has no AUTOCHECK yet: nothing
-looks at the flag at boot, so after a crash run CHKDSK by hand. FAT has no
-such flag here.
+it was set at mount (CHKDSK /F clears it). FAT keeps the boot sector's flag
+the same way, on volumes that write lazily: bit 0 of byte 25h, where OS/2's
+kernel has it (FatDirtyBitToggle), byte 41h on FAT32. JFS mounts such a volume
+read-only.
+
+**AUTOCHECK.** During boot, before RUN and CALL programs and the shell, the
+kernel runs `CHKDSK d: /F /AUTOCHECK` on each volume that is dirty and listed
+in CONFIG.SYS: `IFS=...HPFS.IFS /AUTOCHECK:DE`, `IFS=...JFS.IFS /AUTOCHECK:*`
+or `DISKCACHE=...,AC:C`. The IFS line does not decide the file system: any
+listed drive is checked. A dirty drive not listed gets a line on the console.
+IBM's CHKDSK.SYS runs before the volumes are in use; rs2's CHKDSK is an
+ordinary program, which works on the boot drive because the loader keeps no
+files open.
 
 `CACHE -STATS:RESET` and `-STATS:SHOW` (`fs/iostat.rs`) report on the log
 what a workload did: requests at the file systems and at the devices, sectors

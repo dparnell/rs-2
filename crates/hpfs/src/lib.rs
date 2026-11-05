@@ -312,6 +312,14 @@ impl<D: BlockDevice> Volume<D> {
         self.dirty.set(DirtyState::Clean);
     }
 
+    /// The spare block's dirty flag: the volume was not shut down cleanly,
+    /// or this mount has written to it.
+    pub fn is_dirty(&self) -> Result<bool> {
+        let mut sp = vec![0u8; SECTOR];
+        self.dev.read(SPARE_LBA as u64, &mut sp)?;
+        Ok(sp[sp::FLAGS] & 1 != 0)
+    }
+
     fn mark_dirty(&self) -> Result<()> {
         let mut sp = vec![0u8; SECTOR];
         self.dev.read(SPARE_LBA as u64, &mut sp)?;

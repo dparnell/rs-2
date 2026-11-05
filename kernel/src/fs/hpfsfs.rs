@@ -238,6 +238,10 @@ impl FileSystem for HpfsFs {
         self.inner.vol.lock().set_label(label).map_err(map)
     }
 
+    fn needs_check(&self) -> bool {
+        self.inner.vol.lock().is_dirty().unwrap_or(false)
+    }
+
     /// Everything out, then the volume is clean.
     fn shutdown(&self) {
         let mut v = self.inner.vol.lock();

@@ -147,6 +147,10 @@ pub mod boot {
         current: u32,
         /// Restart the shell when it exits (not for an init= override).
         restart: bool,
+        /// CHKDSK runs at the head of the queue.
+        checks: usize,
+        /// What starts in the background once they are done.
+        background: Vec<(String, String)>,
     }
 
     static STATE: SpinLock<Option<Boot>> = SpinLock::new(None);
@@ -223,20 +227,31 @@ pub mod boot {
         if !cfg.drivers.is_empty() {
             crate::println!("config.sys: {} driver statements handled by native drivers", cfg.drivers.len());
         }
-        for (p, a) in &cfg.run {
-            spawn(&find_program(p), a, &env, true);
-        }
+        let mut background: Vec<(String, String)> = cfg.run.iter().map(|(p, a)| (find_program(p), a.clone())).collect();
         // The PM shell's SYS_DLLS LoadOneTime list: REXXINIT starts the
         // REXX API server thread. SYSDLLS keeps such modules resident.
         let sys_dlls: Vec<&str> = ["REXXINIT"].into_iter().filter(|m| crate::fs::find_module(m).is_ok()).collect();
         let loader = find_program("SYSDLLS.EXE");
         if !sys_dlls.is_empty() && crate::fs::read_file(&loader).is_some() {
-            spawn(&loader, &sys_dlls.join(" "), &env, true);
+            background.push((loader, sys_dlls.join(" ")));
         }
-        let mut queue: VecDeque<(String, String)> = cfg.call.iter().map(|(p, a)| (find_program(p), a.clone())).collect();
+        // Before anything else writes to them: what is on them may be half
+        // done. The drives the IFS lines do not list only get a warning.
+        let listed = crate::config::autocheck(&cfg);
+        let mut checks = Vec::new();
+        for d in (0..26).filter(|&d| crate::fs::drive(d).is_some_and(|f| f.needs_check())) {
+            let letter = (b'A' + d) as char;
+            if listed.contains(&d) {
+                checks.push((find_program("CHKDSK.EXE"), alloc::format!("{letter}: /F /AUTOCHECK")));
+            } else {
+                crate::println!("boot: drive {letter}: was not shut down cleanly; run CHKDSK {letter}: /F");
+            }
+        }
+        let mut queue: VecDeque<(String, String)> = checks.iter().cloned().collect();
+        queue.extend(cfg.call.iter().map(|(p, a)| (find_program(p), a.clone())));
         queue.push_back((shell_path.clone(), shell.1.clone()));
         let restart = init.is_none();
-        *STATE.lock() = Some(Boot { env, queue, shell: (shell_path, shell.1), current: 0, restart });
+        *STATE.lock() = Some(Boot { env, queue, shell: (shell_path, shell.1), current: 0, restart, checks: checks.len(), background });
         next();
     }
 
@@ -275,16 +290,23 @@ pub mod boot {
     /// Start the next boot program (or restart the shell).
     fn next() {
         loop {
-            let (item, env, last) = {
+            let (item, env, last, background) = {
                 let mut g = STATE.lock();
                 let Some(b) = g.as_mut() else { return };
                 let last = b.queue.len() <= 1;
+                let background = if b.checks == 0 { core::mem::take(&mut b.background) } else { Vec::new() };
+                b.checks = b.checks.saturating_sub(1);
                 if b.queue.is_empty() && !b.restart {
-                    return;
+                    (None, b.env.clone(), last, background)
+                } else {
+                    let item = b.queue.pop_front().unwrap_or_else(|| b.shell.clone());
+                    (Some(item), b.env.clone(), last, background)
                 }
-                let item = b.queue.pop_front().unwrap_or_else(|| b.shell.clone());
-                (item, b.env.clone(), last)
             };
+            for (p, a) in &background {
+                spawn(p, a, &env, true);
+            }
+            let Some(item) = item else { return };
             match spawn(&item.0, &item.1, &env, false) {
                 Some(pid) => {
                     if let Some(b) = STATE.lock().as_mut() {

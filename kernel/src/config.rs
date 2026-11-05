@@ -43,6 +43,8 @@ pub struct Config {
     pub virtual_address_limit: Option<String>,
     /// Driver statements we do not load (BASEDEV/DEVICE/IFS).
     pub drivers: Vec<String>,
+    /// DISKCACHE=, whose block cache is the one under every volume.
+    pub diskcache: Option<String>,
 }
 
 /// `IFS=...HPFS.IFS /CACHE:n /CRECL:n`: the size of the block cache and
@@ -57,6 +59,28 @@ pub fn apply_cache(c: &Config) {
         })
     };
     crate::fs::cache::configure(arg("/CACHE").map(|k| k.max(64)), arg("/CRECL"));
+}
+
+/// `IFS=...HPFS.IFS /AUTOCHECK:DE`, `IFS=...JFS.IFS /AUTOCHECK:*`,
+/// `DISKCACHE=...,AC:C` for FAT: the drives CHKDSK looks at during boot if
+/// they were not shut down cleanly (`*`: all).
+pub fn autocheck(c: &Config) -> Vec<u8> {
+    let mut drives = Vec::new();
+    for line in c.drivers.iter().filter(|d| d.to_ascii_uppercase().contains(".IFS")).chain(&c.diskcache) {
+        for w in line.split([' ', '\t', ',']) {
+            let Some((k, v)) = w.split_once(':') else { continue };
+            if !["/AUTOCHECK", "-AUTOCHECK", "AC"].iter().any(|n| k.eq_ignore_ascii_case(n)) {
+                continue;
+            }
+            if v.contains('*') {
+                drives.extend(2..26);
+            }
+            drives.extend(v.bytes().filter(u8::is_ascii_alphabetic).map(|l| l.to_ascii_uppercase() - b'A'));
+        }
+    }
+    drives.sort_unstable();
+    drives.dedup();
+    drives
 }
 
 fn split_cmd(v: &str) -> (String, String) {
@@ -95,6 +119,7 @@ pub fn parse(text: &str) -> Config {
             "PROTSHELL" => c.protshell = Some(split_cmd(val)),
             "CALL" => c.call.push(split_cmd(val)),
             "RUN" => c.run.push(split_cmd(val)),
+            "DISKCACHE" => c.diskcache = Some(val.to_string()),
             "CODEPAGE" => {
                 c.codepage = val.split(',').filter_map(|s| s.trim().parse().ok()).collect();
             }

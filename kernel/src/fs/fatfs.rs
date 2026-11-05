@@ -82,9 +82,9 @@ fn slot_key(e: &fat::Entry) -> Option<(u32, u32)> {
 
 impl FatFs {
     pub fn mount(dev: Arc<dyn BlockDev>) -> Result<Arc<dyn FileSystem>, u32> {
-        let vol = fat::Volume::mount(FatDev(dev.clone())).map_err(map)?;
-        if let Some(c) = dev.cache() {
-            c.allow_lazy();
+        let mut vol = fat::Volume::mount(FatDev(dev.clone())).map_err(map)?;
+        if dev.cache().is_some_and(|c| c.allow_lazy()) {
+            vol.track_dirty();
         }
         Ok(Arc::new(FatFs { inner: Arc::new(Inner { vol: Mutex::new(vol), open: SpinLock::new(BTreeMap::new()) }) }))
     }
@@ -193,6 +193,19 @@ impl FileSystem for FatFs {
             free_units: i.free_clusters,
             bytes_per_sector: i.sector_size,
         })
+    }
+
+    fn needs_check(&self) -> bool {
+        self.inner.vol.lock().is_dirty().unwrap_or(false)
+    }
+
+    /// Everything out, then the volume is clean.
+    fn shutdown(&self) {
+        let mut v = self.inner.vol.lock();
+        if let Some(c) = v.dev.0.cache() {
+            let _ = c.sync();
+        }
+        let _ = v.mark_clean();
     }
 
     fn set_label(&self, label: &str) -> Result<(), u32> {

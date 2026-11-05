@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use super::thread::Thread;
 use super::{sched, WaitQueue};
@@ -81,6 +81,8 @@ pub struct Process {
     pub cwd: SpinLock<(u8, [String; 26])>,
     pub exit: SpinLock<Option<ExitInfo>>,
     pub exit_waiters: WaitQueue,
+    /// Everything the process had is gone (its files are closed).
+    pub finished: AtomicBool,
     /// Woken when a child of this process ends.
     pub child_waiters: WaitQueue,
     /// Woken when one of this process's threads ends, resumes or the
@@ -314,6 +316,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
         cwd: SpinLock::new(cwd),
         exit: SpinLock::new(None),
         exit_waiters: WaitQueue::new(),
+        finished: AtomicBool::new(false),
         child_waiters: WaitQueue::new(),
         thread_waiters: WaitQueue::new(),
         critsec: SpinLock::new((0, 0)),
@@ -562,6 +565,14 @@ impl Process {
             }
         }
         self.threads.lock().clear();
+        // The rest can wait for things (a file closing, the disk), which a
+        // thread already dead must not: it would come back to life.
+        let p = self.clone();
+        crate::task::kthread::spawn("procexit", move || p.finish());
+    }
+
+    /// The last thread is gone: everything else the process had.
+    fn finish(self: &Arc<Self>) {
         crate::api::sem::process_ended(self.pid);
         crate::api::timer::process_ended(self.pid);
         crate::api::queue::process_ended(self.pid);
@@ -578,6 +589,7 @@ impl Process {
         // Close handles (pipes see their writers disappear).
         let hs = core::mem::take(&mut *self.handles.lock());
         drop(hs);
+        self.finished.store(true, Ordering::Release);
         self.exit_waiters.wake_all();
         let parent = by_pid(self.ppid);
         match &parent {
@@ -588,7 +600,7 @@ impl Process {
         let keep = parent.as_ref().is_some_and(|pp| pp.exit_info().is_none()) && !self.detached.load(Ordering::Relaxed);
         // Our own children that ended and were never collected go now.
         for q in all() {
-            if q.ppid == self.pid && q.exit_info().is_some() && q.threads.lock().is_empty() {
+            if q.ppid == self.pid && q.finished.load(Ordering::Acquire) {
                 reap(q.pid);
             }
         }

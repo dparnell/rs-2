@@ -142,7 +142,7 @@ fn exec(c: &mut Ctx) -> u32 {
         }
     };
     if mode == EXEC_SYNC {
-        child.exit_waiters.wait_until(None, || child.exit_info().is_some());
+        child.exit_waiters.wait_until(None, || child.finished.load(Ordering::Acquire));
         let info = child.exit_info().unwrap_or(process::ExitInfo { cause: 0, code: 0 });
         process::reap(child.pid);
         write_result(c, pres, info.cause, info.code);
@@ -186,7 +186,7 @@ pub fn dos_wait_child(c: &mut Ctx) -> u32 {
     if children().is_empty() {
         return if pid == 0 { err::WAIT_NO_CHILDREN } else { err::INVALID_PROCID };
     }
-    let done = || children().into_iter().find(|p| p.exit_info().is_some() && p.threads.lock().is_empty());
+    let done = || children().into_iter().find(|p| p.finished.load(Ordering::Acquire));
     let found = if nowait != 0 {
         match done() {
             Some(p) => p,
