@@ -1652,7 +1652,7 @@ mod tests {
         let now = Timestamp::new(2026, 10, 18, 12, 0, 0);
         let free0 = v.info().unwrap().free_clusters;
         v.mkdir("DIR", now).unwrap();
-        let mut a = v.create_file("DQ1.TXT", 0, now).unwrap();
+        let mut a = v.create_file("A.TXT", 0, now).unwrap();
         v.write(&mut a, 0, b"hello", now).unwrap();
         v.create_file("DIR\\B.TXT", 0, now).unwrap();
         let a = v.lookup("A.TXT").unwrap();
