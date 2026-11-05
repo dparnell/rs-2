@@ -36,6 +36,7 @@ pub static DISKS: SpinLock<Vec<Arc<dyn BlockDev>>> = SpinLock::new(Vec::new());
 
 /// Commit the write caches of all disks (DosResetBuffer, DosShutdown).
 pub fn flush_disks() {
+    crate::fs::cache::sync_all();
     let disks = DISKS.lock().clone();
     for d in disks {
         let t = crate::fs::iostat::begin();

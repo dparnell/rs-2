@@ -261,6 +261,10 @@ impl Unit {
 }
 
 impl BlockDev for Unit {
+    fn cache_kind(&self) -> crate::fs::block::CacheKind {
+        crate::fs::block::CacheKind::Lazy
+    }
+
     fn sector_size(&self) -> usize {
         self.block
     }

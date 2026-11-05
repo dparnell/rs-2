@@ -195,7 +195,7 @@ pub fn wrap(dev: Arc<dyn BlockDev>) -> Arc<dyn BlockDev> {
     if WRAPPED.lock().iter().any(|e| e.0 == addr) {
         return dev;
     }
-    let w: Arc<dyn BlockDev> = Arc::new(HardErrDev(dev));
+    let w: Arc<dyn BlockDev> = Arc::new(HardErrDev(crate::fs::cache::wrap(dev)));
     WRAPPED.lock().push((Arc::as_ptr(&w) as *const () as usize, 0xff));
     w
 }
@@ -231,6 +231,9 @@ impl BlockDev for HardErrDev {
     }
     fn packet(&self, cdb: &[u8], buf: &mut [u8]) -> Result<usize, u32> {
         self.0.packet(cdb, buf)
+    }
+    fn cache(&self) -> Option<&crate::fs::cache::Cache> {
+        self.0.cache()
     }
 }
 

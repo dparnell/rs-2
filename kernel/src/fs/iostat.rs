@@ -42,6 +42,9 @@ impl Op {
 static READ: Op = Op::new();
 static WRITE: Op = Op::new();
 static FLUSH: Op = Op::new();
+/// What got past the block cache.
+static DEV_READ: Op = Op::new();
+static DEV_WRITE: Op = Op::new();
 static FAULT: Op = Op::new();
 static API: [Op; MAX_ORDINAL] = [const { Op::new() }; MAX_ORDINAL];
 static OTHER_API: Op = Op::new();
@@ -93,6 +96,18 @@ pub fn write(t0: Option<u64>, lba: u64, sectors: u64) {
     }
 }
 
+pub fn dev_read(t0: Option<u64>, sectors: u64) {
+    if let Some(t) = t0 {
+        add(&DEV_READ, t, sectors);
+    }
+}
+
+pub fn dev_write(t0: Option<u64>, sectors: u64) {
+    if let Some(t) = t0 {
+        add(&DEV_WRITE, t, sectors);
+    }
+}
+
 pub fn flush(t0: Option<u64>) {
     if let Some(t) = t0 {
         add(&FLUSH, t, 0);
@@ -115,7 +130,7 @@ pub fn api(t0: Option<u64>, module: u8, ordinal: u16) {
 /// Start counting from zero.
 pub fn reset() {
     ON.store(false, Ordering::Relaxed);
-    for op in [&READ, &WRITE, &FLUSH, &FAULT, &OTHER_API].into_iter().chain(API.iter()) {
+    for op in [&READ, &WRITE, &DEV_READ, &DEV_WRITE, &FLUSH, &FAULT, &OTHER_API].into_iter().chain(API.iter()) {
         op.clear();
     }
     match map() {
@@ -146,6 +161,10 @@ pub fn show() {
             "iostat: {}: {} requests, {} sectors ({} again), {} ms ({}.{}%), {} us each",
             name, n, s, a, ms(c), share(c) / 10, share(c) % 10, c * 1000 / per_ms / n.max(1)
         );
+    }
+    for (name, op) in [("device read", &DEV_READ), ("device write", &DEV_WRITE)] {
+        let (n, s, c) = (get(&op.n), get(&op.sectors), get(&op.cycles));
+        crate::println!("iostat: {}: {} requests, {} sectors, {} ms ({}.{}%)", name, n, s, ms(c), share(c) / 10, share(c) % 10);
     }
     let (n, c) = (get(&FLUSH.n), get(&FLUSH.cycles));
     crate::println!("iostat: flush: {} requests, {} ms ({}.{}%)", n, ms(c), share(c) / 10, share(c) % 10);

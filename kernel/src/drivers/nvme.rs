@@ -297,6 +297,10 @@ impl Namespace {
 }
 
 impl BlockDev for Namespace {
+    fn cache_kind(&self) -> crate::fs::block::CacheKind {
+        crate::fs::block::CacheKind::Lazy
+    }
+
     fn sector_size(&self) -> usize {
         self.sector_size
     }

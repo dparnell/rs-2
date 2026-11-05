@@ -204,7 +204,18 @@ pub(super) fn set_lens(c: &Ctx, r: &Req, p: u32, d: u32) {
     }
 }
 
+/// A request on a physical disk goes past the volumes' block caches: they
+/// write out first, and forget what a write may have changed.
 fn phys(c: &Ctx, n: u32, r: &Req) -> u32 {
+    crate::fs::cache::sync_all();
+    let rc = phys_request(c, n, r);
+    if matches!(r.function, 0x44 | 0x45) {
+        crate::fs::cache::invalidate_all();
+    }
+    rc
+}
+
+fn phys_request(c: &Ctx, n: u32, r: &Req) -> u32 {
     let Some(d) = disk(n) else { return err::INVALID_HANDLE };
     let ss = d.sector_size() as u32;
     match r.function {

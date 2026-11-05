@@ -136,6 +136,11 @@ impl<T> Mutex<T> {
         Self { locked: AtomicBool::new(false), waiters: crate::task::WaitQueue::new(), value: UnsafeCell::new(value) }
     }
 
+    /// The lock, if nobody holds it.
+    pub fn try_lock(&self) -> Option<MutexGuard<'_, T>> {
+        self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok().then(|| MutexGuard { m: self })
+    }
+
     pub fn lock(&self) -> MutexGuard<'_, T> {
         loop {
             if self.locked.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_ok() {

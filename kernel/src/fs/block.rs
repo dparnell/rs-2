@@ -4,6 +4,17 @@ use alloc::sync::Arc;
 
 use crate::api::err;
 
+/// What the block cache may do for a device.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CacheKind {
+    /// Nothing: the medium can change unseen, or it is memory anyway.
+    None,
+    /// Keep what was read; writes go straight to the device.
+    WriteThrough,
+    /// Writes may wait too (the disk stays in the machine).
+    Lazy,
+}
+
 pub trait BlockDev: Send + Sync {
     fn sector_size(&self) -> usize;
     fn sector_count(&self) -> u64;
@@ -12,6 +23,13 @@ pub trait BlockDev: Send + Sync {
     /// Commit the device's volatile write cache, if it has one.
     fn flush(&self) -> Result<(), u32> {
         Ok(())
+    }
+    fn cache_kind(&self) -> CacheKind {
+        CacheKind::None
+    }
+    /// The block cache in front of this device, if this is one.
+    fn cache(&self) -> Option<&super::cache::Cache> {
+        None
     }
     /// The USB device holding the medium, if it is on one (removal).
     fn usb_device(&self) -> Option<crate::drivers::xhci::Handle> {
