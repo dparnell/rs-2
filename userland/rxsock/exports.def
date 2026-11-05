@@ -1,0 +1,3 @@
+; RXSOCK.DLL: IBM's two entry points, mixed case as IBM's are.
+SockLoadFuncs=__a_SockLoadFuncs @1
+SockFunctionGateWay=__a_SockFunctionGateWay @2

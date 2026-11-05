@@ -717,6 +717,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("rexxapi", "OS2\\DLL\\REXXAPI.DLL"),
         ("rexxutil", "OS2\\DLL\\REXXUTIL.DLL"),
         ("rexxinit", "OS2\\DLL\\REXXINIT.DLL"),
+        ("rxsock", "OS2\\DLL\\RXSOCK.DLL"),
         // Object REXX (docs/REXX.md): SWITCHRX.CMD makes these REXX.DLL and
         // REXXUTIL.DLL (and REXXSOM, REXXWPS).
         ("orexx", "OS2\\DLL\\OREXX.DLL"),
