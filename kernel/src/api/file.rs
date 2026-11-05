@@ -88,6 +88,14 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
             match f.file.write(*pos, &data) {
                 Ok(n) => {
                     *pos += n as u64;
+                    drop(pos);
+                    // OPEN_FLAGS_WRITE_THROUGH, OPEN_FLAGS_NO_CACHE: the
+                    // call ends with the data on the disk.
+                    if f.mode.load(core::sync::atomic::Ordering::Relaxed) & (mode::WRITE_THROUGH | 0x1000) != 0 {
+                        if let Err(e) = fs::sync_volume(&f.path) {
+                            return (e, 0);
+                        }
+                    }
                     (0, n as u32)
                 }
                 Err(e) => (e, 0),

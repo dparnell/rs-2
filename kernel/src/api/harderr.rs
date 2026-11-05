@@ -235,6 +235,9 @@ impl BlockDev for HardErrDev {
     fn cache(&self) -> Option<&crate::fs::cache::Cache> {
         self.0.cache()
     }
+    fn usb_device(&self) -> Option<crate::drivers::xhci::Handle> {
+        self.0.usb_device()
+    }
 }
 
 impl Drop for HardErrDev {

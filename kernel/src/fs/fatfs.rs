@@ -82,7 +82,10 @@ fn slot_key(e: &fat::Entry) -> Option<(u32, u32)> {
 
 impl FatFs {
     pub fn mount(dev: Arc<dyn BlockDev>) -> Result<Arc<dyn FileSystem>, u32> {
-        let vol = fat::Volume::mount(FatDev(dev)).map_err(map)?;
+        let vol = fat::Volume::mount(FatDev(dev.clone())).map_err(map)?;
+        if let Some(c) = dev.cache() {
+            c.allow_lazy();
+        }
         Ok(Arc::new(FatFs { inner: Arc::new(Inner { vol: Mutex::new(vol), open: SpinLock::new(BTreeMap::new()) }) }))
     }
 

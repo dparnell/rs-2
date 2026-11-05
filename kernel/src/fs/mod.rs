@@ -286,6 +286,14 @@ pub fn probe_volume(dev: Arc<dyn block::BlockDev>) -> Arc<dyn FileSystem> {
     Arc::new(Unformatted(dev))
 }
 
+/// Write out what the block cache holds for the volume of `p`.
+pub fn sync_volume(p: &FullPath) -> Result<(), u32> {
+    match fs_of(p)?.device().as_deref().and_then(|d| d.cache()) {
+        Some(c) => c.sync(),
+        None => Ok(()),
+    }
+}
+
 /// Mount drive `d` again after its volume was rewritten (FORMAT, CHKDSK /F).
 pub fn remount(d: u8) -> Result<(), u32> {
     let dev = DRIVES.lock()[d as usize].as_ref().and_then(|f| f.device()).ok_or(err::INVALID_DRIVE)?;

@@ -11,10 +11,20 @@
 //! The lock is held across device requests: file systems have one request
 //! going at a time anyway, and it leaves nothing in flight to reason about.
 //!
+//! A dirty block is written by the lazy writer, under the rules of IBM's
+//! HPFS: when the disk has been idle for DiskIdle, when the block has not
+//! changed for BufferIdle or has been dirty for MaxAge, and at once when
+//! more than DirtyMax blocks are dirty. Closing a file leaves its blocks to
+//! the writer; DosResetBuffer, write-through opens and shutdown do not.
+//! Only volumes whose file system says so ([`Cache::allow_lazy`]) and that
+//! stay in the machine ([`CacheKind::Lazy`]) write lazily: the others, JFS
+//! with its log and USB sticks that can be pulled out, write through.
+//!
 //! Requests over the limit (`/CRECL:n`) go straight to the device, as
 //! IBM's HPFS does with large transfers: they would only push out what is
 //! worth keeping.
 
+use alloc::collections::BTreeSet;
 use alloc::sync::{Arc, Weak};
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -35,6 +45,16 @@ const READ_AHEAD: u64 = 8;
 const MIN_BLOCKS: usize = 16;
 /// Blocks taken from another volume at a time.
 const STEAL: usize = 64;
+
+/// Blocks written in one go by the lazy writer.
+const BATCH: usize = 64;
+/// How often the lazy writer looks (ms).
+const PERIOD: u64 = 100;
+
+/// DiskIdle, MaxAge, BufferIdle (ms), OS/2's defaults.
+static TIMES: SpinLock<(u32, u32, u32)> = SpinLock::new((1000, 5000, 500));
+/// Lazy writing is on (`CACHE -LAZY:OFF`, shutdown).
+static LAZY: AtomicBool = AtomicBool::new(true);
 
 /// Frames all caches may hold, and hold.
 static BUDGET: AtomicU64 = AtomicU64::new(0);
@@ -96,7 +116,8 @@ struct Inner {
     head: u32,
     tail: u32,
     count: usize,
-    dirty: usize,
+    /// Dirty blocks, in disk order.
+    dirty: BTreeSet<u64>,
     /// The block after the last miss: a miss there is sequential.
     next_miss: u64,
 }
@@ -108,6 +129,12 @@ pub struct Cache {
     lazy: AtomicBool,
     /// The medium went away: nothing is kept any more.
     gone: AtomicBool,
+    /// The lazy writer is at work: its requests do not make the disk busy.
+    writing: AtomicBool,
+    /// When the disk last had a request (ms).
+    last_io: AtomicU64,
+    /// A lazy write failed: when to try again (ms).
+    retry_at: AtomicU64,
     inner: Mutex<Inner>,
 }
 
@@ -129,7 +156,7 @@ impl Inner {
             head: NIL,
             tail: NIL,
             count: 0,
-            dirty: 0,
+            dirty: BTreeSet::new(),
             next_miss: u64::MAX,
         }
     }
@@ -191,9 +218,9 @@ impl Inner {
     /// Take block `i` out: its frame.
     fn remove(&mut self, i: u32) -> u64 {
         self.unlink(i);
-        let (block, next, frame, dirty) = {
+        let (block, next, frame) = {
             let e = &self.e[i as usize];
-            (e.block, e.hash_next, e.frame, e.dirty)
+            (e.block, e.hash_next, e.frame)
         };
         let b = hash(block);
         if self.buckets[b] == i {
@@ -205,9 +232,7 @@ impl Inner {
             }
             self.e[p as usize].hash_next = next;
         }
-        if dirty != 0 {
-            self.dirty -= 1;
-        }
+        self.dirty.remove(&block);
         self.free.push(i);
         self.count -= 1;
         frame
@@ -230,18 +255,19 @@ impl Inner {
 
     fn set_clean(&mut self, i: u32) {
         let e = &mut self.e[i as usize];
-        if e.dirty != 0 {
-            e.dirty = 0;
-            self.dirty -= 1;
-        }
+        e.dirty = 0;
+        let block = e.block;
+        self.dirty.remove(&block);
     }
 
     fn set_dirty(&mut self, i: u32, m: u8, now: u64) {
         let e = &mut self.e[i as usize];
         if e.dirty == 0 {
             e.dirtied = now;
-            self.dirty += 1;
+            let block = e.block;
+            self.dirty.insert(block);
         }
+        let e = &mut self.e[i as usize];
         e.dirty |= m;
         e.written = now;
     }
@@ -251,6 +277,11 @@ impl Inner {
 fn share() -> usize {
     let n = CACHES.lock().len().max(1) as u64;
     (budget() / n) as usize
+}
+
+/// DirtyMax: four fifths of a share, as IBM's HPFS has of its buffers.
+fn dirty_max() -> usize {
+    share() * 8 / 10
 }
 
 /// Frames from a volume over its share, if one is not busy.
@@ -281,6 +312,9 @@ impl Cache {
             kind,
             lazy: AtomicBool::new(false),
             gone: AtomicBool::new(false),
+            writing: AtomicBool::new(false),
+            last_io: AtomicU64::new(0),
+            retry_at: AtomicU64::new(0),
             inner: Mutex::new(Inner::new()),
         });
         let mut l = CACHES.lock();
@@ -289,7 +323,14 @@ impl Cache {
         c
     }
 
+    fn note_io(&self) {
+        if !self.writing.load(Ordering::Relaxed) {
+            self.last_io.store(crate::rtc::mono_ms(), Ordering::Relaxed);
+        }
+    }
+
     fn dev_read(&self, lba: u64, buf: &mut [u8]) -> Result<(), u32> {
+        self.note_io();
         let t = super::iostat::begin();
         let r = self.dev.read(lba, buf);
         super::iostat::dev_read(t, (buf.len() / SECTOR) as u64);
@@ -297,6 +338,7 @@ impl Cache {
     }
 
     fn dev_write(&self, lba: u64, buf: &[u8]) -> Result<(), u32> {
+        self.note_io();
         let t = super::iostat::begin();
         let r = self.dev.write(lba, buf);
         super::iostat::dev_write(t, (buf.len() / SECTOR) as u64);
@@ -420,10 +462,9 @@ impl Cache {
             let m = mask(first as usize, (last - first) as usize);
             let e = &mut g.e[i as usize];
             e.valid &= !m;
-            let was = e.dirty;
             e.dirty &= !m;
-            if was != 0 && e.dirty == 0 {
-                g.dirty -= 1;
+            if e.dirty == 0 {
+                g.dirty.remove(&block);
             }
         }
     }
@@ -459,16 +500,9 @@ impl Cache {
         Ok(())
     }
 
+    /// The dirty blocks, in disk order.
     fn dirty_blocks(g: &Inner) -> Vec<u32> {
-        let mut v = Vec::with_capacity(g.dirty);
-        let mut i = g.tail;
-        while i != NIL {
-            if g.e[i as usize].dirty != 0 {
-                v.push(i);
-            }
-            i = g.e[i as usize].prev;
-        }
-        v
+        g.dirty.iter().filter_map(|&b| g.find(b)).collect()
     }
 
     /// Write out the `n` blocks that have been dirty longest.
@@ -483,11 +517,10 @@ impl Cache {
     /// Write out everything dirty.
     pub fn sync(&self) -> Result<(), u32> {
         let mut g = self.inner.lock();
-        if g.dirty == 0 {
+        if g.dirty.is_empty() {
             return Ok(());
         }
-        let mut v = Self::dirty_blocks(&g);
-        v.sort_unstable_by_key(|&i| g.e[i as usize].block);
+        let v = Self::dirty_blocks(&g);
         self.write_blocks(&mut g, &v)
     }
 
@@ -507,11 +540,46 @@ impl Cache {
     /// not written is lost.
     pub fn detach(&self) {
         self.gone.store(true, Ordering::Relaxed);
-        let lost = self.inner.lock().dirty;
+        let lost = self.inner.lock().dirty.len();
         if lost != 0 {
             crate::println!("cache: {lost} blocks not written: the medium was removed");
         }
         self.invalidate();
+    }
+
+    /// One look by the lazy writer.
+    fn lazy_pass(&self) {
+        let (idle, age, buffer_idle) = *TIMES.lock();
+        loop {
+            let now = crate::rtc::mono_ms();
+            if now < self.retry_at.load(Ordering::Relaxed) {
+                return;
+            }
+            let mut g = self.inner.lock();
+            if g.dirty.is_empty() {
+                return;
+            }
+            let quiet = now.saturating_sub(self.last_io.load(Ordering::Relaxed)) >= idle as u64;
+            let force = quiet || g.dirty.len() > dirty_max();
+            let due = |e: &Entry| force || now.saturating_sub(e.written) >= buffer_idle as u64 || now.saturating_sub(e.dirtied) >= age as u64;
+            let mut v = Self::dirty_blocks(&g);
+            v.retain(|&i| due(&g.e[i as usize]));
+            v.truncate(BATCH);
+            if v.is_empty() {
+                return;
+            }
+            self.writing.store(true, Ordering::Relaxed);
+            let r = self.write_blocks(&mut g, &v);
+            self.writing.store(false, Ordering::Relaxed);
+            if let Err(e) = r {
+                crate::println!("cache: lazy write failed ({e}), {} blocks wait", g.dirty.len());
+                self.retry_at.store(now + 5000, Ordering::Relaxed);
+                return;
+            }
+            if v.len() < BATCH {
+                return;
+            }
+        }
     }
 
     /// May this volume's writes wait? The file system says it can live
@@ -587,7 +655,7 @@ impl BlockDev for Cache {
             self.forget(&mut g, lba, n);
             return r;
         }
-        let lazy = self.lazy.load(Ordering::Relaxed);
+        let lazy = self.lazy.load(Ordering::Relaxed) && LAZY.load(Ordering::Relaxed);
         if !lazy {
             if let Err(e) = self.dev_write(lba, buf) {
                 self.forget(&mut g, lba, n);
@@ -625,6 +693,10 @@ impl BlockDev for Cache {
             at += count as u64;
         }
         Self::give_back(spare);
+        // Too much waiting: the writer of it waits now.
+        if g.dirty.len() > dirty_max() {
+            self.write_oldest(&mut g, BATCH)?;
+        }
         Ok(())
     }
 
@@ -673,6 +745,49 @@ pub fn sync_all() {
             crate::println!("cache: write failed ({e})");
         }
     }
+}
+
+/// DiskIdle, MaxAge, BufferIdle, in milliseconds.
+pub fn times() -> (u32, u32, u32) {
+    *TIMES.lock()
+}
+
+/// `CACHE -DISKIDLE`, `-MAXAGE`, `-BUFFERIDLE`: new times, and everything
+/// out, as IBM's HPFS does on any change of the parameters.
+pub fn set_times(t: (u32, u32, u32)) {
+    *TIMES.lock() = t;
+    sync_all();
+}
+
+pub fn lazy_on() -> bool {
+    LAZY.load(Ordering::Relaxed)
+}
+
+/// Turn lazy writing on or off. Off: from now on writes go to the disk.
+pub fn set_lazy(on: bool) {
+    LAZY.store(on, Ordering::Relaxed);
+    if !on {
+        sync_all();
+    }
+}
+
+/// What `CACHE` shows: DirtyMax and the cache size, in blocks of 2 KB as
+/// in IBM's HPFS (it counts in 16 bits).
+pub fn sizes() -> (u16, u16) {
+    let two_kb = |blocks: u64| (blocks * 2).min(65535) as u16;
+    (two_kb(budget() * 8 / 10), two_kb(budget()))
+}
+
+/// Start the lazy writer.
+pub fn start() {
+    crate::task::kthread::spawn("lazywrite", || loop {
+        crate::task::sched::sleep_ms(PERIOD);
+        if lazy_on() {
+            for c in all() {
+                c.lazy_pass();
+            }
+        }
+    });
 }
 
 /// Forget every volume's blocks.
