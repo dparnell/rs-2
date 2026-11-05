@@ -584,10 +584,12 @@ impl Cache {
 
     /// May this volume's writes wait? The file system says it can live
     /// with blocks reaching the disk in another order.
-    pub fn allow_lazy(&self) {
-        if self.kind == CacheKind::Lazy {
+    pub fn allow_lazy(&self) -> bool {
+        let lazy = self.kind == CacheKind::Lazy;
+        if lazy {
             self.lazy.store(true, Ordering::Relaxed);
         }
+        lazy
     }
 }
 

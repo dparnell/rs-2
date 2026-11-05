@@ -53,6 +53,10 @@ pub trait BlockDevice {
     fn sector_count(&self) -> u64;
     fn read(&self, lba: u64, buf: &mut [u8]) -> Result<()>;
     fn write(&self, lba: u64, buf: &[u8]) -> Result<()>;
+    /// Everything written so far reaches the disk before anything later.
+    fn sync(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub mod attr {
@@ -179,6 +183,20 @@ pub struct Volume<D: BlockDevice> {
     /// Recently read FAT sectors (lba, contents), most recent last: chain
     /// walks touch the same sector for many clusters in a row.
     fat_cache: core::cell::RefCell<Vec<(u64, Vec<u8>)>>,
+    dirty: core::cell::Cell<DirtyState>,
+}
+
+/// The boot sector's dirty flag, for a mounted volume that keeps it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DirtyState {
+    /// Nobody asked: tools that write with the volume unmounted.
+    Untracked,
+    /// To be set before the next write.
+    Clean,
+    /// Set by this mount.
+    Marked,
+    /// Was set at mount: a clean shutdown does not clear it, only CHKDSK.
+    WasDirty,
 }
 
 /// FAT sectors kept in [`Volume::fat_cache`].
@@ -262,6 +280,7 @@ impl<D: BlockDevice> Volume<D> {
             free_count: None,
             readonly: false,
             fat_cache: core::cell::RefCell::new(Vec::new()),
+            dirty: core::cell::Cell::new(DirtyState::Untracked),
         };
         // The label proper is the root directory entry; the boot sector
         // holds a copy.
@@ -306,9 +325,66 @@ impl<D: BlockDevice> Volume<D> {
         Ok(())
     }
 
+    /// Where the boot sector has the flag: bit 0 of byte 25h, as OS/2's
+    /// kernel keeps it (FatDirtyBitToggle), in the FAT32 layout byte 41h.
+    fn dirty_offset(&self) -> usize {
+        if self.fat_type == FatType::Fat32 { 0x41 } else { 0x25 }
+    }
+
+    /// Keep the dirty flag from now on: set on the disk before the first
+    /// write of the mount, cleared by [`Volume::mark_clean`].
+    pub fn track_dirty(&mut self) {
+        self.dirty.set(DirtyState::Clean);
+    }
+
+    /// The flag: the volume was not shut down cleanly, or this mount has
+    /// written to it.
+    pub fn is_dirty(&self) -> Result<bool> {
+        let mut b = vec![0u8; self.bps as usize];
+        self.dev.read(0, &mut b)?;
+        Ok(b[self.dirty_offset()] & 1 != 0)
+    }
+
+    fn write_dirty(&self, on: bool) -> Result<()> {
+        let mut b = vec![0u8; self.bps as usize];
+        self.dev.read(0, &mut b)?;
+        let o = self.dirty_offset();
+        b[o] = b[o] & !1 | on as u8;
+        self.dev.write(0, &b)?;
+        self.dev.sync()
+    }
+
+    fn mark_dirty(&self) -> Result<()> {
+        if self.is_dirty()? {
+            self.dirty.set(DirtyState::WasDirty);
+            return Ok(());
+        }
+        self.write_dirty(true)?;
+        self.dirty.set(DirtyState::Marked);
+        Ok(())
+    }
+
+    /// Everything is on the disk: clear the flag, if this mount set it. A
+    /// later write sets it again.
+    pub fn mark_clean(&mut self) -> Result<()> {
+        if self.dirty.get() == DirtyState::Marked {
+            self.write_dirty(false)?;
+            self.dirty.set(DirtyState::Clean);
+        }
+        Ok(())
+    }
+
+    /// CHKDSK /F has been over the volume.
+    pub fn clear_dirty(&self) -> Result<()> {
+        self.write_dirty(false)
+    }
+
     fn write_sector(&self, lba: u64, buf: &[u8]) -> Result<()> {
         if self.readonly {
             return Err(Error::ReadOnly);
+        }
+        if self.dirty.get() == DirtyState::Clean {
+            self.mark_dirty()?;
         }
         // Keep cached FAT sectors in step (whole-sector writes only reach
         // the FAT; drop anything a larger write covers).
@@ -1438,6 +1514,34 @@ mod tests {
     }
 
     #[test]
+    fn dirty_flag_follows_the_mount() {
+        for (ty, size, at) in [(FatType::Fat16, 32 << 20, 0x25), (FatType::Fat32, 80 << 20, 0x41)] {
+            let mut v = sample(ty, size);
+            let before = v.dev.0.borrow()[at];
+            let now = Timestamp::new(2026, 11, 6, 12, 0, 0);
+            v.track_dirty();
+            assert!(!v.is_dirty().unwrap());
+            v.create_file("DQ1.TXT", 0, now).unwrap();
+            assert!(v.is_dirty().unwrap());
+            assert_eq!(v.dev.0.borrow()[at], before | 1);
+            v.mark_clean().unwrap();
+            assert!(!v.is_dirty().unwrap());
+            assert_eq!(v.dev.0.borrow()[at], before);
+            // A write after shutdown sets it again.
+            v.create_file("DQ2.TXT", 0, now).unwrap();
+            assert!(v.is_dirty().unwrap());
+            // Dirty at mount: only CHKDSK clears it.
+            let mut w = Volume::mount(v.dev).unwrap();
+            w.track_dirty();
+            w.create_file("DQ3.TXT", 0, now).unwrap();
+            w.mark_clean().unwrap();
+            assert!(w.is_dirty().unwrap());
+            w.clear_dirty().unwrap();
+            assert!(!w.is_dirty().unwrap());
+        }
+    }
+
+    #[test]
     fn check_clean_and_damaged() {
         for (ty, size) in [(FatType::Fat12, 1_474_560), (FatType::Fat16, 32 << 20), (FatType::Fat32, 80 << 20)] {
             let mut v = sample(ty, size);
@@ -1548,7 +1652,7 @@ mod tests {
         let now = Timestamp::new(2026, 10, 18, 12, 0, 0);
         let free0 = v.info().unwrap().free_clusters;
         v.mkdir("DIR", now).unwrap();
-        let mut a = v.create_file("A.TXT", 0, now).unwrap();
+        let mut a = v.create_file("DQ1.TXT", 0, now).unwrap();
         v.write(&mut a, 0, b"hello", now).unwrap();
         v.create_file("DIR\\B.TXT", 0, now).unwrap();
         let a = v.lookup("A.TXT").unwrap();

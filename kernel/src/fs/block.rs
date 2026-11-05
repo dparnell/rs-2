@@ -105,4 +105,8 @@ impl fat::BlockDevice for FatDev {
     fn write(&self, lba: u64, buf: &[u8]) -> fat::Result<()> {
         self.0.write(lba, buf).map_err(|_| fat::Error::Io)
     }
+
+    fn sync(&self) -> fat::Result<()> {
+        self.0.flush().map_err(|_| fat::Error::Io)
+    }
 }

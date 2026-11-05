@@ -217,6 +217,9 @@ fn check_fat(d: u8, fix: bool, verbose: bool) -> u32 {
     if pm() {
         pm_fat_totals(&t, cs, c.total_clusters(), c.free_clusters());
         drop(c);
+        if fix {
+            let _ = vol.clear_dirty();
+        }
         drop(vol);
         if fix {
             disk.unlock();
@@ -245,6 +248,9 @@ fn check_fat(d: u8, fix: bool, verbose: bool) -> u32 {
     outln(&alloc::format!("{} total allocation units.", num(c.total_clusters() as u64, 12)));
     outln(&alloc::format!("{} available allocation units on disk.", num(c.free_clusters() as u64, 12)));
     drop(c);
+    if fix {
+        let _ = vol.clear_dirty();
+    }
     drop(vol);
     if fix {
         disk.unlock();
