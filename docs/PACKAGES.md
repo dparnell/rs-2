@@ -40,6 +40,23 @@ then on the installed system `yum -y install zip`, `rpm -q`, `zip -v` and the
 desktop. The list is fixed; if the server drops a version the download stops,
 and the list has to be made again.
 
+## The Package Manager
+
+`OS2\APPS\PKGMGR.EXE` ("Package Manager" in the Programs folder) is rs2's own
+window over yum and RPM, there because ANPM needs WarpIN 1.0.24, Arca Noae's
+files and VX-REXX's runtime. Installed, Available and Updates lists with a
+search over names and descriptions; Details (`yum info`); Install, Remove,
+Update and Update all. Before anything changes the same yum command runs with
+"N" as its answer, so the lower pane shows what else would be installed or
+removed, and a box asks. yum's output then appears as it works.
+
+Each yum command starts Python (about 10 seconds under TCG, the Available list
+12), so the lists are kept in `\VAR\CACHE\PKGMGR` and only Refresh asks again;
+what is installed comes from `rpm -qa` each time. Without yum the window offers
+Set up yum, which runs PKGSETUP. Checked with the mouse in QEMU: search, Install,
+Details and Remove of a package. Update and Update all have not had an update to
+work on. WarpIN packages are not shown.
+
 ## The test disk
 
 ```

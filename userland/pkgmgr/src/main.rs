@@ -246,7 +246,8 @@ fn update_controls() {
     enable(c, ID_SETUP, idle && !have);
     let shown = a.shown.len();
     if idle && have {
-        say(&format!("{shown} packages. {} installed, {} updates.", a.installed.len(), a.updates.len()));
+        let s = if shown == 1 { "" } else { "s" };
+        say(&format!("{shown} package{s} listed. {} installed, {} updates.", a.installed.len(), a.updates.len()));
     }
 }
 
@@ -405,7 +406,8 @@ fn ended(code: u32) {
             }
         }
         Job::Run(verb, names) => {
-            pane(&lines[lines.len().saturating_sub(KEEP)..].join("\r\n"));
+            // How it ended, not how it began.
+            pane(&lines[lines.len().saturating_sub(8)..].join("\r\n"));
             trace("pkgmgr: ", format!("yum {verb} {names} ended {code}").as_bytes());
             a.queue.push(Job::Installed);
             if verb != "install" {

@@ -328,6 +328,7 @@ Status markers: done, in progress, planned.
   window) on rs2's own RXSOCK.DLL
 - done: PKGSETUP and the installer's option: RPM and yum downloaded and set
   up on the first start (docs/PACKAGES.md)
+- done: PKGMGR.EXE, rs2's Package Manager window over yum and RPM
 
 ## Milestone 4: Presentation Manager (largely done)
 
