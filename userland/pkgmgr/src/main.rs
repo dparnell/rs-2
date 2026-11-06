@@ -11,12 +11,12 @@
 //! pane, and asks. Without yum (no UNIXROOT with `\USR\BIN\BASH.EXE`) the
 //! window offers PKGSETUP.
 //!
-//! The progress bar is `pmkit::progress`. On a pipe yum shows no download
-//! meter, but it does say "Total download size" first, so the downloads are
-//! measured: what yum's cache has gained since "Downloading Packages:",
-//! against that total. After them, `n/m` at the end of each step of the
-//! transaction moves it, and PKGSETUP's `[n/m, x of y MB]`. What has no
-//! count at all (lists, a preview) sweeps. Python gets
+//! The progress bar is `pmkit::progress`. yum shows no progress on a pipe, so
+//! `\OS2\RS2PROG.PY`, a yum plugin put in place here, gives it a meter and
+//! follows the transaction, printing `@DL` and `@TX` lines. Should it not run,
+//! the downloads are measured by what yum's cache gains against "Total
+//! download size", and the transaction by the `n/m` of yum's lines. PKGSETUP's
+//! `[n/m, x of y MB]` moves the bar too. What has no count sweeps. Python gets
 //! PYTHONUNBUFFERED, or its output would arrive all at once at the end.
 //!
 //! `PKGMGR /TEST:cmd name`: a button pressed without a person, for tests
@@ -118,6 +118,8 @@ struct App {
     /// yum is downloading.
     downloading: bool,
     ticks: u32,
+    /// The plugin is reporting: nothing needs measuring.
+    exact: bool,
 }
 
 static mut APP: Option<App> = None;
@@ -166,6 +168,7 @@ fn count(line: &str) -> Option<(u32, u32)> {
 
 /// The share of the bar the downloads take.
 const DOWNLOAD_END: u64 = 40;
+const TRANSACTION_END: u64 = 85;
 
 /// `21 M`, `322 k`, `1.5 G` as yum prints sizes.
 fn size(t: &str) -> Option<u64> {
@@ -190,6 +193,40 @@ fn cached_bytes() -> u64 {
     v.iter().map(|(_, f)| f.size as u64).sum()
 }
 
+fn mb(n: u64) -> String {
+    format!("{}.{}", n >> 20, (n & 0xfffff) * 10 >> 20)
+}
+
+/// A line of the plugin's. True if it was one.
+fn plugin_line(line: &str) -> bool {
+    let Some(l) = line.strip_prefix('@') else { return false };
+    let mut w = l.splitn(5, ' ');
+    let a = app();
+    match w.next() {
+        Some("DL") => {
+            let (Some(got), Some(all)) = (w.next().and_then(|x| x.parse::<u64>().ok()), w.next().and_then(|x| x.parse::<u64>().ok())) else { return true };
+            a.exact = true;
+            a.counted = true;
+            a.downloading = false;
+            if all > 0 {
+                set_bar((got.min(all) * DOWNLOAD_END / all) as u32);
+                say(&format!("Downloading: {} of {} MB", mb(got), mb(all)));
+            }
+        }
+        Some("TX") => {
+            let num = |x: Option<&str>| x.and_then(|x| x.parse::<u64>().ok());
+            let (Some(n), Some(m), Some(permille)) = (num(w.next()), num(w.next()), num(w.next())) else { return true };
+            a.exact = true;
+            a.counted = true;
+            a.downloading = false;
+            set_bar((DOWNLOAD_END + (TRANSACTION_END - DOWNLOAD_END) * permille.min(1000) / 1000) as u32);
+            say(&format!("{n} of {m}: {}", w.next().unwrap_or("")));
+        }
+        _ => {}
+    }
+    true
+}
+
 /// How far the downloads are.
 fn poll_download() {
     let a = app();
@@ -198,7 +235,6 @@ fn poll_download() {
     }
     let got = cached_bytes().saturating_sub(a.download_base).min(a.download_total);
     set_bar((got * DOWNLOAD_END / a.download_total) as u32);
-    let mb = |n: u64| format!("{}.{}", n >> 20, (n & 0xfffff) * 10 >> 20);
     say(&format!("Downloading: {} of {} MB", mb(got), mb(a.download_total)));
 }
 
@@ -215,6 +251,10 @@ fn progress(line: &str) {
         a.download_base = cached_bytes();
         a.downloading = a.download_total > 0;
         a.counted = a.downloading;
+        return;
+    }
+    // Its numbers are better than a line's.
+    if a.exact && !t.starts_with("Verifying") {
         return;
     }
     if t.starts_with("Running Transaction") {
@@ -391,7 +431,7 @@ fn script(job: &Job) -> String {
         Job::Updates => String::from("yum -q check-update; true"),
         Job::Info(n) => format!("yum -q info {n}"),
         Job::Preview(v, n) => format!("PYTHONUNBUFFERED=1 yum {v} {n}"),
-        Job::Run(v, n) => format!("PYTHONUNBUFFERED=1 yum -y {v} {n}"),
+        Job::Run(v, n) => format!("RS2_YUM_PROGRESS=1 PYTHONUNBUFFERED=1 yum -y {v} {n}"),
         Job::Setup => String::new(),
     }
 }
@@ -420,6 +460,7 @@ fn next() {
     a.counted = false;
     a.downloading = false;
     a.download_total = 0;
+    a.exact = false;
     set_bar(0);
     unsafe { WinStartTimer(a.hab, a.client, TIMER, 150) };
     say(&describe(&job));
@@ -451,15 +492,30 @@ fn add(job: Job) {
 
 fn save_list(file: &str, lines: &[String]) {
     let text = lines.join("\r\n");
-    let dir = cache("");
-    let mut at = String::new();
-    for part in dir.trim_end_matches('\\').split('\\') {
-        at.push_str(part);
-        let d = z(at.as_bytes());
-        unsafe { os2::DosCreateDir(d.as_ptr(), core::ptr::null_mut()) };
-        at.push('\\');
-    }
+    utils::files::make_dirs(cache("").trim_end_matches('\\'));
     let _ = write_file(cache(file).as_bytes(), text.as_bytes());
+}
+
+/// Put the plugin where yum looks, and turn plugins on (yum's default is off).
+fn install_plugin(root: &str) {
+    let Some(new) = read_file(format!("{}:\\OS2\\RS2PROG.PY", boot_drive() as char).as_bytes()) else { return };
+    let dest = format!("{root}\\USR\\LIB\\YUM-PLUGINS\\rs2progress.py");
+    if read_file(dest.as_bytes()).as_ref() != Some(&new) {
+        utils::files::make_dirs(&format!("{root}\\USR\\LIB\\YUM-PLUGINS"));
+        let _ = write_file(dest.as_bytes(), &new);
+    }
+    let conf = format!("{root}\\ETC\\YUM\\PLUGINCONF.D\\rs2progress.conf");
+    if read_file(conf.as_bytes()).is_none() {
+        utils::files::make_dirs(&format!("{root}\\ETC\\YUM\\PLUGINCONF.D"));
+        let _ = write_file(conf.as_bytes(), b"[main]\nenabled=1\n");
+    }
+    let yum = format!("{root}\\ETC\\YUM\\YUM.CONF");
+    if let Some(c) = read_file(yum.as_bytes()) {
+        let t = String::from_utf8_lossy(&c);
+        if !t.lines().any(|l| l.trim_start().starts_with("plugins")) {
+            let _ = write_file(yum.as_bytes(), t.replacen("[main]", "[main]\nplugins=1", 1).as_bytes());
+        }
+    }
 }
 
 fn load_list(file: &str) -> Option<Vec<String>> {
@@ -471,7 +527,7 @@ fn append(line: String) {
     let a = app();
     let live = matches!(a.job, Some(Job::Run(..) | Job::Setup));
     // Lines end in CR LF, and yum's progress bars in CR.
-    if line.trim().is_empty() {
+    if line.trim().is_empty() || plugin_line(&line) {
         return;
     }
     a.lines.push(line);
@@ -480,7 +536,7 @@ fn append(line: String) {
         pane(&a.lines[from..].join("\r\n"));
         if let Some(l) = a.lines.last().cloned() {
             progress(&l);
-            if !app().downloading {
+            if !app().downloading && !app().exact {
                 say(&l);
             }
         }
@@ -743,6 +799,7 @@ fn main(s: &os2::Startup) -> u32 {
             download_base: 0,
             downloading: false,
             ticks: 0,
+            exact: false,
         });
     }
     let (frame, client) = std_window(hab, CLASS, client_proc, 0, 0, FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST, b"Package Manager", 0);
@@ -752,7 +809,8 @@ fn main(s: &os2::Startup) -> u32 {
     build();
     set_menu(frame, &[Menu::Sub(IDM_FILE, b"~File", alloc::vec![Menu::Item(IDM_REFRESH, b"~Refresh"), Menu::Sep, Menu::Item(IDM_EXIT, b"E~xit")])]);
     show_at_saved(hab, frame, b"PKGMGR", b"Position", Some((760, 560)));
-    if app().root.is_some() {
+    if let Some(root) = app().root.clone() {
+        install_plugin(&root);
         if let Some(l) = load_list("AVAIL.TXT") {
             app().available = parse_yum(&l);
         } else {

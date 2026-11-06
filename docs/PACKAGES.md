@@ -52,17 +52,15 @@ removed, and a box asks. yum's output then appears as it works.
 
 The output pane follows its end. The progress bar is `pmkit::progress`, a
 control of rs2's own (PM has none; OS/2's programs use a read-only slider):
-blocks filling a trough with the percentage beside it, moved by the `n/m`
-counts of yum's Installing and Verifying lines, and a run of blocks going to
-and fro for what has no count. On a pipe yum shows no download meter, so the
-window measures what its cache gains against "Total download size".
-
-Each yum command starts Python (about 10 seconds under TCG, the Available list
-12), so the lists are kept in `\VAR\CACHE\PKGMGR` and only Refresh asks again;
-what is installed comes from `rpm -qa` each time. Without yum the window offers
-Set up yum, which runs PKGSETUP. Checked with the mouse in QEMU: search, Install,
-Details and Remove of a package. Update and Update all have not had an update to
-work on. WarpIN packages are not shown.
+blocks filling a trough with the percentage beside it, moved by
+figures from a yum plugin of rs2's, and a run of blocks going to and fro for
+what has no count. yum shows no meter on a pipe, so `dist/yum/rs2progress.py`
+(`\OS2\RS2PROG.PY`; PKGMGR puts it in `\USR\LIB\YUM-PLUGINS` and sets
+`plugins=1` in `yum.conf`) attaches a urlgrabber meter in `predownload` and wraps
+`YumCliRPMCallBack.event`, printing `@DL` and `@TX` lines. It does nothing without
+`RS2_YUM_PROGRESS=1`. That wrapper reaches into yum 3.4.3's command-line code; if
+the lines stop coming, the window falls back on what the cache gains against
+"Total download size" and on the `n/m` of yum's lines.
 
 ## The test disk
 

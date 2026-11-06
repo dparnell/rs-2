@@ -12,6 +12,8 @@ dist/CONFIG.SYS -> CONFIG.SYS
 dist/README.TXT -> README.TXT
 # What PKGSETUP downloads: names and SHA-256 sums, no packages
 dist/PKGLIST.TXT -> OS2\PKGLIST.TXT
+# The Package Manager's yum plugin; it goes where yum looks when first used
+dist/yum/rs2progress.py -> OS2\RS2PROG.PY
 # Separator pages for printers (docs/PRINTING.md): text and PostScript.
 dist/spool/SAMPLE.SEP -> OS2\SAMPLE.SEP
 dist/spool/PSCRIPT.SEP -> OS2\PSCRIPT.SEP
