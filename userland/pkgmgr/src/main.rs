@@ -11,6 +11,10 @@
 //! pane, and asks. Without yum (no UNIXROOT with `\USR\BIN\BASH.EXE`) the
 //! window offers PKGSETUP.
 //!
+//! The list is owner-drawn, with a check box on each line: a click on the box
+//! or the space bar marks a package, and Install, Remove or Update takes all
+//! that are marked in the tab, or the selected one if none is.
+//!
 //! The progress bar is `pmkit::progress`. yum shows no progress on a pipe, so
 //! `\OS2\RS2PROG.PY`, a yum plugin put in place here, gives it a meter and
 //! follows the transaction, printing `@DL` and `@TX` lines. Should it not run,
@@ -66,6 +70,10 @@ const WM_ENDED: u32 = WM_USER + 2;
 /// Lines kept in the lower pane.
 const KEEP: usize = 300;
 const CLASS: &[u8] = b"Rs2PackageManager";
+/// List lines, and the width of the check box column.
+const ROW: i32 = 18;
+const BOX_COLUMN: i32 = 22;
+const LM_QUERYTOPINDEX: u32 = 0x016d;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Tab {
@@ -120,6 +128,10 @@ struct App {
     ticks: u32,
     /// The plugin is reporting: nothing needs measuring.
     exact: bool,
+    /// The names marked in each tab.
+    marked: [Vec<String>; 3],
+    /// The list box's own window procedure.
+    list_proc: u32,
 }
 
 static mut APP: Option<App> = None;
@@ -392,6 +404,81 @@ fn show_list() {
     update_controls();
 }
 
+fn marks() -> &'static mut Vec<String> {
+    let a = app();
+    &mut a.marked[a.tab as usize]
+}
+
+/// Mark the selected package, or take the mark away.
+fn toggle() {
+    let Some(p) = selected() else { return };
+    let m = marks();
+    match m.iter().position(|n| *n == p.name) {
+        Some(i) => {
+            m.remove(i);
+        }
+        None => m.push(p.name.clone()),
+    }
+    invalidate(ctl(ID_LIST));
+    update_controls();
+}
+
+/// Clicks on the check boxes and the space bar, on top of the list box.
+extern "C" fn list_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
+    let old: WndProc = unsafe { core::mem::transmute(app().list_proc) };
+    let r = old(h, msg, mp1, mp2);
+    match msg {
+        WM_BUTTON1DOWN => {
+            let (x, y) = mouse_xy(mp1);
+            let mut rect = RectL::default();
+            unsafe { WinQueryWindowRect(h, &mut rect) };
+            let row = send(h, LM_QUERYTOPINDEX, 0, 0) as i32 + (rect.t - 2 - y) / ROW;
+            if x < BOX_COLUMN && row == send(h, LM_QUERYSELECTION, LIT_FIRST, 0) as i32 {
+                toggle();
+            }
+        }
+        WM_CHAR if mp1 & KC_CHAR != 0 && mp1 & KC_KEYUP == 0 && mp2 & 0xff == b' ' as u32 => toggle(),
+        _ => {}
+    }
+    r
+}
+
+/// WM_DRAWITEM: an OWNERITEM (hwnd, hps, fsState, fsAttribute, fsStateOld,
+/// fsAttributeOld, rclItem, idItem, hItem).
+fn draw_item(oi: *mut u32) -> u32 {
+    let hps = unsafe { *oi.add(1) };
+    let on = unsafe { *oi.add(2) } != 0;
+    let (l, b, r, t) = unsafe { (*oi.add(6) as i32, *oi.add(7) as i32, *oi.add(8) as i32, *oi.add(9) as i32) };
+    let Some(p) = app().shown.get(unsafe { *oi.add(10) } as usize).and_then(|&i| list().get(i)) else { return 0 };
+    let (bg, fg) = if on { (SYSCLR_HILITEBACKGROUND, SYSCLR_HILITEFOREGROUND) } else { (SYSCLR_WINDOW, SYSCLR_WINDOWTEXT) };
+    let line = z(format!("{} {} {}", fit(&p.name, 30), fit(&p.version, 20), p.text).as_bytes());
+    let mut text = RectL { l: l + BOX_COLUMN, b, r, t };
+    let rect = RectL { l, b, r, t };
+    let (x, y) = (l + 4, b + (t - b - 12) / 2);
+    let outer = RectL { l: x, b: y, r: x + 12, t: y + 12 };
+    let inner = RectL { l: x + 1, b: y + 1, r: x + 11, t: y + 11 };
+    unsafe {
+        WinFillRect(hps, &rect, bg);
+        WinFillRect(hps, &outer, SYSCLR_BUTTONDARK);
+        WinFillRect(hps, &inner, SYSCLR_WINDOW);
+        if marks().contains(&p.name) {
+            // A tick, three pixels thick.
+            for d in 0..3 {
+                let (a, m, e) = (PointL { x: x + 2, y: y + 5 + d }, PointL { x: x + 5, y: y + 2 + d }, PointL { x: x + 10, y: y + 7 + d });
+                GpiSetColor(hps, 0);
+                GpiMove(hps, &a);
+                GpiLine(hps, &m);
+                GpiLine(hps, &e);
+            }
+        }
+        WinDrawText(hps, -1, line.as_ptr(), &mut text, fg, bg, DT_LEFT | DT_VCENTER);
+        // Drawn: nothing for the list box to invert.
+        *oi.add(2) = 0;
+        *oi.add(4) = 0;
+    }
+    1
+}
+
 fn selected() -> Option<&'static Pkg> {
     let i = send(ctl(ID_LIST), LM_QUERYSELECTION, LIT_FIRST, 0) as i32;
     let n = *app().shown.get(usize::try_from(i).ok()?)?;
@@ -409,8 +496,10 @@ fn update_controls() {
         Tab::Available => "~Install",
         Tab::Updates => "~Update",
     };
-    set_text(ctl(ID_ACTION), verb.as_bytes());
-    enable(c, ID_ACTION, idle && have && sel);
+    let marked = a.marked[a.tab as usize].len();
+    let label = if marked > 0 { format!("{verb} {marked}") } else { verb.to_string() };
+    set_text(ctl(ID_ACTION), label.as_bytes());
+    enable(c, ID_ACTION, idle && have && (sel || marked > 0));
     enable(c, ID_DETAILS, idle && have && sel);
     enable(c, ID_REFRESH, idle && have);
     enable(c, ID_UPDATE_ALL, idle && have && !a.updates.is_empty());
@@ -418,7 +507,8 @@ fn update_controls() {
     let shown = a.shown.len();
     if idle && have {
         let s = if shown == 1 { "" } else { "s" };
-        say(&format!("{shown} package{s} listed. {} installed, {} updates.", a.installed.len(), a.updates.len()));
+        let m = if marked > 0 { format!(" {marked} marked.") } else { String::new() };
+        say(&format!("{shown} package{s} listed. {} installed, {} updates.{m}", a.installed.len(), a.updates.len()));
     }
 }
 
@@ -603,6 +693,9 @@ fn ended(code: u32) {
         Job::Run(verb, names) => {
             pane(&lines[lines.len().saturating_sub(KEEP)..].join("\r\n"));
             trace("pkgmgr: ", format!("yum {verb} {names} ended {code}").as_bytes());
+            if code == 0 {
+                a.marked.iter_mut().for_each(|m| m.clear());
+            }
             a.queue.push(Job::Installed);
             if verb != "install" {
                 a.queue.push(Job::Updates);
@@ -624,13 +717,18 @@ fn ended(code: u32) {
 }
 
 fn act() {
-    let Some(p) = selected() else { return };
+    let names = if marks().is_empty() {
+        let Some(p) = selected() else { return };
+        p.name.clone()
+    } else {
+        marks().join(" ")
+    };
     let verb = match app().tab {
         Tab::Installed => "remove",
         Tab::Available => "install",
         Tab::Updates => "update",
     };
-    add(Job::Preview(verb.to_string(), p.name.clone()));
+    add(Job::Preview(verb.to_string(), names));
 }
 
 fn details() {
@@ -663,7 +761,8 @@ fn build() {
     control(WC_BUTTON, "U~pdates", BS_AUTORADIOBUTTON, ID_UPDATES);
     control(WC_STATIC, "~Search:", SS_TEXT | DT_RIGHT | DT_VCENTER | DT_MNEMONIC, ID_SEARCH_LABEL);
     control(WC_ENTRYFIELD, "", ES_MARGIN | ES_AUTOSCROLL | WS_TABSTOP | WS_GROUP, ID_SEARCH);
-    let lb = control(WC_LISTBOX, "", LS_NOADJUSTPOS | LS_HORZSCROLL | WS_TABSTOP, ID_LIST);
+    let lb = control(WC_LISTBOX, "", LS_NOADJUSTPOS | LS_OWNERDRAW | WS_TABSTOP, ID_LIST);
+    app().list_proc = unsafe { WinSubclassWindow(lb, list_proc) };
     set_font(lb, b"10.System Monospaced");
     let mle = control(WC_MLE, "", MLS_BORDER | MLS_VSCROLL | MLS_READONLY | MLS_WORDWRAP, ID_TEXT);
     set_font(mle, b"10.System Monospaced");
@@ -718,6 +817,8 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
             }
             0
         }
+        WM_MEASUREITEM => ROW as u32,
+        WM_DRAWITEM if mp1 & 0xffff == ID_LIST && mp2 != 0 => draw_item(mp2 as *mut u32),
         WM_SIZE => {
             layout((mp2 & 0xffff) as i32, (mp2 >> 16) as i32);
             0
@@ -800,6 +901,8 @@ fn main(s: &os2::Startup) -> u32 {
             downloading: false,
             ticks: 0,
             exact: false,
+            marked: [Vec::new(), Vec::new(), Vec::new()],
+            list_proc: 0,
         });
     }
     let (frame, client) = std_window(hab, CLASS, client_proc, 0, 0, FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST, b"Package Manager", 0);

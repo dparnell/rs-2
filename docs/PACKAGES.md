@@ -45,8 +45,9 @@ and the list has to be made again.
 `OS2\APPS\PKGMGR.EXE` ("Package Manager" in the Programs folder) is rs2's own
 window over yum and RPM, there because ANPM needs WarpIN 1.0.24, Arca Noae's
 files and VX-REXX's runtime. Installed, Available and Updates lists with a
-search over names and descriptions; Details (`yum info`); Install, Remove,
-Update and Update all. Before anything changes the same yum command runs with
+search over names and descriptions; a check box on each line (a click on it, or
+the space bar) so that one Install, Remove or Update takes all the packages
+marked in the tab; Details (`yum info`); Update all. Before anything changes the same yum command runs with
 "N" as its answer, so the lower pane shows what else would be installed or
 removed, and a box asks. yum's output then appears as it works.
 
