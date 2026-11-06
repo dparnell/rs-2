@@ -312,6 +312,18 @@ install went from 62.8 to 40.3 seconds, and block requests from 5.0 million to
 410,000. `name_cache_stays_true` checks answers against the disk through random
 changes.
 
+Above the file systems, `fs::mount` wraps FAT, HPFS and JFS volumes in
+`namecache::CachedFs` (`crates/pathcache`), which answers `stat` for directories
+and for names that do not exist. Files are left out: their size and times also
+change through handles, which it does not see. Every path operation forgets the
+path, what is below it and its directory; an answer a change has overtaken is
+dropped by its generation number. Keys fold ASCII case only, so a path that could
+have another spelling (not ASCII, a trailing dot or space, on FAT anything but
+8.3) is not kept, and a change through one forgets everything. Network drives are
+not wrapped. With both caches the install above takes 31.6 seconds on HPFS; on
+JFS, which has only this one, 83 seconds. `CACHETST NAMES dir` checks a volume
+against a model.
+
 **AUTOCHECK.** During boot, before RUN and CALL programs and the shell, the
 kernel runs `CHKDSK d: /F /AUTOCHECK` on each volume that is dirty and listed
 in CONFIG.SYS: `IFS=...HPFS.IFS /AUTOCHECK:DE`, `IFS=...JFS.IFS /AUTOCHECK:*`
