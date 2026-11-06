@@ -3,6 +3,7 @@
 //! DosPerfSysCall, DosQueryModFromEIP, DosErrClass, DosFSCtl, DosSysCtl,
 //! file locks, RAS and ABIOS queries.
 
+use alloc::vec;
 use core::ptr::{null, null_mut};
 use core::sync::atomic::{AtomicU32, Ordering};
 
@@ -10,6 +11,9 @@ use os2::*;
 
 use crate::api::*;
 use crate::{check, join, thread};
+
+/// What the buffers passed to DosPerfSysCall hold before the call.
+const GUARD: u32 = 0xa5a5_a5a5;
 
 static TLS: AtomicU32 = AtomicU32::new(0);
 static TLS_OK: AtomicU32 = AtomicU32::new(0);
@@ -193,16 +197,17 @@ pub fn run() {
         let (mut t0, mut t1) = (0u64, 0u64);
         DosTmrQueryTime(&mut t0);
         DosTmrQueryTime(&mut t1);
-        let mut t2 = 0u64;
-        let mut spins = 0;
-        loop {
+        // A clock that only moves at timer ticks changes about once a
+        // millisecond: count its changes over 20 ms. One large step proves
+        // nothing, the processor can be taken away between two reads.
+        let (mut t2, mut changes, mut spins) = (t1, 0, 0);
+        while t2 - t1 < f as u64 / 50 && spins < 10_000_000 {
+            let last = t2;
             DosTmrQueryTime(&mut t2);
+            changes += (t2 != last) as u32;
             spins += 1;
-            if t2 != t1 || spins > 100_000 {
-                break;
-            }
         }
-        check("DosTmrQueryTime finer than a millisecond", f > 1000 && t1 >= t0 && t2 > t1 && (t2 - t1) * 1000 < f as u64);
+        check("DosTmrQueryTime finer than a millisecond", f > 1000 && t1 >= t0 && changes > 100);
         let mut tlast = t2;
         let mut mono = true;
         for _ in 0..1000 {
@@ -214,16 +219,22 @@ pub fn run() {
         check("DosTmrQueryTime monotonic", mono);
 
         // DosPerfSysCall: CPU utilisation snapshot (CMD_KI_RDCNT).
-        // CPUUTIL: time, idle, busy, interrupt time (64-bit each).
-        let q = |c: &[u32; 8], i: usize| c[i * 2] as u64 | (c[i * 2 + 1] as u64) << 32;
-        let mut cpu = [0u32; 8];
+        // CPUUTIL: time, idle, busy, interrupt time (64-bit each), one for
+        // each processor, as IBM's _PerfKIRdCnt: the buffer must hold them
+        // all. A guard after the last one shows that nothing more is written.
+        let mut ncpu = 0u32;
+        DosQuerySysInfo(26, 26, &mut ncpu, 4);
+        let n = ncpu as usize * 8;
+        let q = |c: &[u32], i: usize| c[i * 2] as u64 | (c[i * 2 + 1] as u64) << 32;
+        let mut cpu = vec![GUARD; n + 8];
         let rc = DosPerfSysCall(0x63, cpu.as_mut_ptr() as u32, 0, 0);
         DosSleep(100);
-        let mut cpu2 = [0u32; 8];
+        let mut cpu2 = vec![GUARD; n + 8];
         DosPerfSysCall(0x63, cpu2.as_mut_ptr() as u32, 0, 0);
         let dt = q(&cpu2, 0) - q(&cpu, 0);
         let parts = (q(&cpu2, 1) - q(&cpu, 1)) + (q(&cpu2, 2) - q(&cpu, 2)) + (q(&cpu2, 3) - q(&cpu, 3));
         check("DosPerfSysCall CMD_KI_RDCNT", rc == 0 && dt * 1000 / f as u64 >= 90 && parts <= dt + dt / 50 && parts + dt / 10 >= dt);
+        check("DosPerfSysCall CMD_KI_RDCNT fills one CPUUTIL per processor", ncpu >= 1 && cpu2[n - 8] != GUARD && cpu2[n..].iter().all(|&v| v == GUARD));
         check("DosPerfSysCall unknown command", DosPerfSysCall(0x7777, 0, 0, 0) != 0);
 
         // DosQueryModFromEIP on our own code.

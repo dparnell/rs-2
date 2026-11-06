@@ -7,7 +7,6 @@
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 
 use super::{err, Ctx};
-use crate::irq;
 use crate::sync::SpinLock;
 
 // ---- High-resolution timer ----
@@ -15,43 +14,13 @@ use crate::sync::SpinLock;
 /// Frequency of DosTmrQueryTime (the 8254 input clock, as OS/2 reports).
 pub const TMR_FREQ: u64 = 1_193_167;
 
-/// TSC at the last timer tick and TSC counts per tick (running estimate).
-static TICK_TSC: AtomicU64 = AtomicU64::new(0);
-static TSC_PER_TICK: AtomicU64 = AtomicU64::new(0);
 static LAST_TMR: AtomicU64 = AtomicU64::new(0);
 
-/// Called from the timer interrupt.
-pub fn tick() {
-    let now = crate::arch::rdtsc();
-    let last = TICK_TSC.swap(now, Ordering::Relaxed);
-    if last != 0 && now > last {
-        let d = now - last;
-        let est = TSC_PER_TICK.load(Ordering::Relaxed);
-        // Ignore ticks that were delayed (interrupts off for a while).
-        let new = if est == 0 { d } else if d < est * 2 { (est * 7 + d) / 8 } else { est };
-        TSC_PER_TICK.store(new, Ordering::Relaxed);
-    }
-}
-
-/// Time since boot in units of TMR_FREQ: timer ticks plus the TSC
-/// interpolation within the current tick. Never goes backwards.
+/// Time since boot in units of TMR_FREQ, a free-running count like IBM's:
+/// from the time-stamp counter, as the system clock is, because timer ticks
+/// come late and in bursts. Never goes backwards, whichever processor reads.
 pub fn tmr_now() -> u64 {
-    let per_tick = TMR_FREQ / irq::HZ;
-    // A consistent snapshot: retry if a tick came in between.
-    let (t, base, per) = loop {
-        let t = irq::ticks();
-        let base = TICK_TSC.load(Ordering::Relaxed);
-        let per = TSC_PER_TICK.load(Ordering::Relaxed);
-        if irq::ticks() == t {
-            break (t, base, per);
-        }
-    };
-    let mut v = t * TMR_FREQ / irq::HZ;
-    if per != 0 && base != 0 {
-        let d = crate::arch::rdtsc().saturating_sub(base);
-        v += (d * per_tick / per).min(per_tick - 1);
-    }
-    // Monotonic across ticks whose interpolation ran ahead.
+    let v = crate::rtc::mono_scaled(TMR_FREQ);
     let prev = LAST_TMR.fetch_max(v, Ordering::Relaxed);
     v.max(prev)
 }
