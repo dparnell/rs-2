@@ -19,6 +19,11 @@ SET COMSPEC=C:\OS2\CMD.EXE
 SET OS2_SHELL=C:\OS2\CMD.EXE
 REM PM: milliseconds before a program that does not take its input is "not responding"
 SET PM_HANGTIME=2000
+REM During boot, CHKDSK /F runs on every volume that was not shut down cleanly
+REM (HPFS, FAT and JFS: rs2 has no separate drivers, this line is for all of
+REM them). To choose drives list their letters, as /AUTOCHECK:CD; without the
+REM /AUTOCHECK parameter a dirty drive only gets a warning.
+IFS=C:\OS2\HPFS.IFS /AUTOCHECK:*
 REM Ctrl+Alt+W: the rescue screen (end a process that hangs, save a report).
 RUN=C:\OS2\RESCUE.EXE
 REM The shell: the desktop (Presentation Manager with the Workplace Shell).
