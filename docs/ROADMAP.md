@@ -246,9 +246,9 @@ Status markers: done, in progress, planned.
   `IFS=...HPFS.IFS /CACHE:n /CRECL:n`, CACHE's controls (docs/ARCHITECTURE.md)
 - done: AUTOCHECK (`/AUTOCHECK:drives`, `DISKCACHE=...,AC:drives`), the FAT
   dirty flag
-- planned: giving cache memory back to programs, a path or directory cache above the
-  block cache (DosFindFirst and DosQueryPathInfo are half of what is left in
-  yum), lazy writing for JFS in the order its log needs
+- done: HPFS's name cache (`crates/hpfs`): names found or not, kept per DNODE
+- planned: giving cache memory back to programs, the same for JFS, the cost
+  left in DosFindFirst, lazy writing for JFS in the order its log needs
 - done: extended attributes on FAT12/16 (`EA DATA. SF`), FAT32
   (FAT32.IFS-style EA files) and HPFS, with the EA APIs, DosCopy/DosMove
   and CHKDSK checks

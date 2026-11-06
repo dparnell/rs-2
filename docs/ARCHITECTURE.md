@@ -302,6 +302,16 @@ the same way, on volumes that write lazily: bit 0 of byte 25h, where OS/2's
 kernel has it (FatDirtyBitToggle), byte 41h on FAT32. JFS mounts such a volume
 read-only.
 
+**Names.** kLIBC checks every component of every path, so installing 3,800
+files made 203,000 DosFindFirst calls, half of the time, and each took apart
+the DNODEs from the root down. `hpfs::Volume` keeps the answers, found or not,
+each under the DNODE that decides it: the one holding the DIRENT, or the leaf
+where the name would be inserted. All DNODE writes go through `write_dnode`,
+which forgets what that DNODE decided, so nothing else has to know. The same
+install went from 62.8 to 40.3 seconds, and block requests from 5.0 million to
+410,000. `name_cache_stays_true` checks answers against the disk through random
+changes.
+
 **AUTOCHECK.** During boot, before RUN and CALL programs and the shell, the
 kernel runs `CHKDSK d: /F /AUTOCHECK` on each volume that is dirty and listed
 in CONFIG.SYS: `IFS=...HPFS.IFS /AUTOCHECK:DE`, `IFS=...JFS.IFS /AUTOCHECK:*`
