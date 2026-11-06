@@ -119,6 +119,10 @@ name = "os2-pack"
 version = "0.1.0"
 
 [[package]]
+name = "pathcache"
+version = "0.1.0"
+
+[[package]]
 name = "pmwin"
 version = "0.1.0"
 dependencies = [
@@ -145,6 +149,7 @@ dependencies = [
  "hpfs",
  "jfs",
  "os2-exe",
+ "pathcache",
  "smb",
  "tcpip",
 ]

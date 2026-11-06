@@ -6,6 +6,7 @@
 pub mod block;
 pub mod cache;
 pub mod iostat;
+pub mod namecache;
 pub mod cdaudio;
 pub mod cdrom;
 pub mod ea;
@@ -180,7 +181,7 @@ pub fn mount(drive: u8, fs: Arc<dyn FileSystem>) {
     if let Some(dev) = fs.device() {
         crate::api::harderr::note_drive(Arc::as_ptr(&dev) as *const () as usize, drive);
     }
-    DRIVES.lock()[drive as usize] = Some(fs);
+    DRIVES.lock()[drive as usize] = Some(namecache::wrap(fs));
 }
 
 /// Remove drive `d` (its medium went away). Open files keep the file
@@ -308,7 +309,7 @@ pub fn remount(d: u8) -> Result<(), u32> {
     }
     let fs = probe_volume(dev);
     crate::trace!("drive {}: remounted ({})", (b'A' + d) as char, fs.name());
-    DRIVES.lock()[d as usize] = Some(fs);
+    DRIVES.lock()[d as usize] = Some(namecache::wrap(fs));
     Ok(())
 }
 

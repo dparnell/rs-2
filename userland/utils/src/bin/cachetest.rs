@@ -5,6 +5,8 @@
 //! CACHETEST MARK d:\dir    MARKA.DAT committed by DosResetBuffer, MARKB.DAT
 //!                          only written, MARKC.DAT opened write-through:
 //!                          a look at the disk image tells which arrived
+//! CACHETEST NAMES d:\dir   random file and directory changes, each path
+//!                          asked for twice in both cases against a model
 //! CACHETEST SHUTDOWN       DosShutdown
 #![no_std]
 #![no_main]
@@ -14,6 +16,7 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use os2::dos::*;
+use os2::path::cstr;
 use os2::APIRET;
 use utils::*;
 os2::entry!(main);
@@ -142,18 +145,99 @@ fn mark(dir: &str) -> u32 {
     0
 }
 
+/// What is in the tree: upper-case paths below `dir`; directories end in `\\`.
+fn names(dir: &str) -> u32 {
+    use alloc::collections::BTreeSet;
+    use utils::files::{make_dirs, status};
+    make_dirs(dir);
+    let mut seed = 2026u32;
+    let mut rnd = move |n: u32| {
+        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        (seed >> 8) % n
+    };
+    let comps = ["AA", "BB", "CC.TXT", "DIR1", "DIR2"];
+    let mut made: BTreeSet<String> = BTreeSet::new();
+    let (mut bad, mut steps) = (0, 0);
+    let exists = |m: &BTreeSet<String>, p: &str| m.contains(p) || m.contains(&format!("{p}\\"));
+    for _ in 0..ROUNDS {
+        let mut rel = String::from(comps[rnd(5) as usize]);
+        for _ in 0..rnd(3) {
+            rel = format!("{rel}\\{}", comps[rnd(5) as usize]);
+        }
+        let (parent, _) = rel.rsplit_once('\\').unwrap_or(("", &rel));
+        let parent_ok = parent.is_empty() || made.contains(&format!("{parent}\\"));
+        let full = cstr(&format!("{dir}\\{rel}"));
+        match rnd(5) {
+            0 if parent_ok && !exists(&made, &rel) => {
+                if unsafe { DosCreateDir(full.as_ptr(), core::ptr::null_mut()) } == 0 {
+                    made.insert(format!("{rel}\\"));
+                }
+            }
+            1 if parent_ok && !exists(&made, &rel) => {
+                if let Ok(h) = utils::files::create(&format!("{dir}\\{rel}"), 0) {
+                    unsafe { DosClose(h) };
+                    made.insert(rel.clone());
+                }
+            }
+            2 if made.contains(&rel) => {
+                if unsafe { DosDelete(full.as_ptr()) } == 0 {
+                    made.remove(&rel);
+                }
+            }
+            3 if made.contains(&format!("{rel}\\")) => {
+                let prefix = format!("{rel}\\");
+                if !made.iter().any(|x| x.len() > prefix.len() && x.starts_with(&prefix)) && unsafe { DosDeleteDir(full.as_ptr()) } == 0 {
+                    made.remove(&prefix);
+                }
+            }
+            4 if exists(&made, &rel) => {
+                // Somewhere free in the same directory, with what is below it.
+                let last = comps[rnd(5) as usize];
+                let to = if parent.is_empty() { String::from(last) } else { format!("{parent}\\{last}") };
+                let target = cstr(&format!("{dir}\\{to}"));
+                if !exists(&made, &to) && unsafe { DosMove(full.as_ptr(), target.as_ptr()) } == 0 {
+                    let was = format!("{rel}\\");
+                    let moved: Vec<String> = made.iter().filter(|x| **x == rel || x.starts_with(&was)).cloned().collect();
+                    for x in moved {
+                        made.remove(&x);
+                        made.insert(format!("{to}{}", &x[rel.len()..]));
+                    }
+                }
+            }
+            _ => {}
+        }
+        for _ in 0..4 {
+            let mut p = String::from(comps[rnd(5) as usize]);
+            for _ in 0..rnd(3) {
+                p = format!("{p}\\{}", comps[rnd(5) as usize]);
+            }
+            let want = exists(&made, &p);
+            for q in [format!("{dir}\\{p}"), format!("{dir}\\{p}").to_ascii_lowercase(), format!("{dir}\\{p}")] {
+                steps += 1;
+                if status(&q).is_some() != want {
+                    bad += 1;
+                    outln(&format!("cachetest names: {q}: {}", if want { "gone" } else { "still there" }));
+                }
+            }
+        }
+    }
+    outln(&format!("cachetest names {dir}: {steps} lookups, {bad} failure(s)"));
+    bad
+}
+
 fn main(s: &os2::Startup) -> u32 {
     let a: Vec<String> = args(s);
     match (a.first().map(|x| x.to_ascii_uppercase()).as_deref(), a.get(1)) {
         (Some("MODEL"), Some(d)) => model(d),
         (Some("MARK"), Some(d)) => mark(d),
+        (Some("NAMES"), Some(d)) => names(d),
         (Some("SHUTDOWN"), _) => {
             let rc = unsafe { DosShutdown(0) };
             outln(&format!("cachetest shutdown: {rc}"));
             rc
         }
         _ => {
-            outln("CACHETEST MODEL dir | MARK dir | SHUTDOWN");
+            outln("CACHETEST MODEL dir | MARK dir | NAMES dir | SHUTDOWN");
             1
         }
     }

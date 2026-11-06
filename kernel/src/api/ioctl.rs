@@ -211,6 +211,7 @@ fn phys(c: &Ctx, n: u32, r: &Req) -> u32 {
     let rc = phys_request(c, n, r);
     if matches!(r.function, 0x44 | 0x45) {
         crate::fs::cache::invalidate_all();
+        crate::fs::namecache::clear_all();
     }
     rc
 }

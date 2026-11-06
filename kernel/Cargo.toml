@@ -15,6 +15,7 @@ bootinfo = { path = "../crates/bootinfo" }
 os2-exe = { path = "../crates/os2-exe" }
 fat = { path = "../crates/fat" }
 hpfs = { path = "../crates/hpfs" }
+pathcache = { path = "../crates/pathcache" }
 jfs = { path = "../crates/jfs" }
 tcpip = { path = "../crates/tcpip" }
 smb = { path = "../crates/smb" }

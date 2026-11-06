@@ -1,0 +1,6 @@
+[package]
+name = "pathcache"
+description = "What the kernel remembers of path lookups, for every local file system"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
