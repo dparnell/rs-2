@@ -1,0 +1,14 @@
+[package]
+name = "pkgmgr"
+description = "PKGMGR.EXE: rs2's Package Manager, a window over yum and RPM"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pkgmgr"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+pmkit = { path = "../pmkit" }

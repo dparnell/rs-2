@@ -21,6 +21,8 @@ struct Reader {
     hwnd: u32,
     msg_line: u32,
     msg_end: u32,
+    /// Every line goes to the window, not only those with `MSG_`.
+    all: bool,
 }
 
 /// The full name of the first of `names` found in `<boot>:\OS2`, then
@@ -50,6 +52,11 @@ unsafe extern "C" {
 /// which the window must take back with `take_line`); when it ends,
 /// `msg_end` (mp1: its result code).
 pub fn start(path: &[u8], args: &[u8], hwnd: u32, msg_line: u32, msg_end: u32) -> Result<Child, u32> {
+    start_lines(path, args, hwnd, msg_line, msg_end, false)
+}
+
+/// `start`; with `all`, every line of its output goes to `hwnd` (mp1 0).
+pub fn start_lines(path: &[u8], args: &[u8], hwnd: u32, msg_line: u32, msg_end: u32, all: bool) -> Result<Child, u32> {
     let (mut in_r, mut in_w, mut out_r, mut out_w) = (0u32, 0u32, 0u32, 0u32);
     unsafe {
         let rc = os2::DosCreatePipe(&mut in_r, &mut in_w, 2048);
@@ -112,7 +119,7 @@ pub fn start(path: &[u8], args: &[u8], hwnd: u32, msg_line: u32, msg_end: u32) -
         return Err(rc);
     }
     let pid = res.code_terminate;
-    let r = Box::into_raw(Box::new(Reader { out: out_r, pid, hwnd, msg_line, msg_end }));
+    let r = Box::into_raw(Box::new(Reader { out: out_r, pid, hwnd, msg_line, msg_end, all }));
     let mut tid = 0;
     unsafe { os2::DosCreateThread(&mut tid, reader, r as u32, 0, 0x8000) };
     Ok(Child { pid, input: in_w })
@@ -159,7 +166,9 @@ unsafe extern "C" fn reader(p: u32) {
         }
         for &c in &buf[..got as usize] {
             if c == b'\n' || c == b'\r' {
-                if let Some((n, rest)) = parse(&line) {
+                if r.all {
+                    post(r.hwnd, r.msg_line, 0, Box::into_raw(Box::new(core::mem::take(&mut line))) as u32);
+                } else if let Some((n, rest)) = parse(&line) {
                     let b = Box::into_raw(Box::new(rest));
                     post(r.hwnd, r.msg_line, n, b as u32);
                 }
@@ -169,7 +178,9 @@ unsafe extern "C" fn reader(p: u32) {
             }
         }
     }
-    if let Some((n, rest)) = parse(&line) {
+    if r.all {
+        post(r.hwnd, r.msg_line, 0, Box::into_raw(Box::new(line)) as u32);
+    } else if let Some((n, rest)) = parse(&line) {
         post(r.hwnd, r.msg_line, n, Box::into_raw(Box::new(rest)) as u32);
     }
     unsafe { os2::DosClose(r.out) };

@@ -395,6 +395,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pkgmgr"
+version = "0.1.0"
+dependencies = [
+ "os2",
+ "pmkit",
+]
+
+[[package]]
 name = "pmbidi-dll"
 version = "0.1.0"
 dependencies = [

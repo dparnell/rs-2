@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"13";
+const DESKTOP_VERSION: &[u8] = b"14";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -115,6 +115,7 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"OS2\\APPINST.EXE", b"Install OS/2 Applications", b"<RS2_APPINST>", b"<WP_PROGRAMSFOLDER>", b""),
         (b"OS2\\DISPLAY.EXE", b"Display", b"<RS2_DISPLAY>", b"<WP_CONFIG>", b""),
         (b"OS2\\PMINSTAL.EXE", b"Install rs2", b"<RS2_INSTALL>", b"<WP_PROGRAMSFOLDER>", b""),
+        (b"OS2\\APPS\\PKGMGR.EXE", b"Package Manager", b"<RS2_PKGMGR>", b"<WP_PROGRAMSFOLDER>", b""),
         // rs2's applets (version 12): IBM's titles, object IDs, folders,
         // help panels and associations (INI.RC).
         (b"OS2\\APPS\\PICVIEW.EXE", b"Picture Viewer", b"<WP_PICV>", b"<WP_TOOLS>", b"ASSOCTYPE=Metafile,PIF file,,;ASSOCFILTER=*.MET,*.PIF,,;"),
