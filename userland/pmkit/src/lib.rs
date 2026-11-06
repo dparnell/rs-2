@@ -18,6 +18,7 @@ pub mod consts;
 pub mod gpi;
 pub mod help;
 pub mod ini;
+pub mod progress;
 pub mod sys;
 pub mod tpl;
 

@@ -11,8 +11,7 @@
 //! pane, and asks. Without yum (no UNIXROOT with `\USR\BIN\BASH.EXE`) the
 //! window offers PKGSETUP.
 //!
-//! The slider under the list is the progress bar, as in OS/2's own programs
-//! (SLS_READONLY with a ribbon strip). yum's counts move it: `(n/m):` for each
+//! yum's counts move the progress bar (`pmkit::progress`): `(n/m):` for each
 //! download, `n/m` at the end of each step of the transaction, and PKGSETUP's
 //! `[n/m`; until one comes, and for what has no count, it sweeps. Python gets
 //! PYTHONUNBUFFERED, or its output would arrive all at once at the end.
@@ -53,8 +52,6 @@ const ID_REFRESH: u32 = 21;
 const ID_SETUP: u32 = 22;
 const ID_PROGRESS: u32 = 23;
 const TIMER: u32 = 1;
-/// SLS_BOTTOM | SLS_READONLY | SLS_RIBBONSTRIP.
-const PROGRESS_STYLE: u32 = 0x182;
 
 const IDM_FILE: u16 = 100;
 const IDM_REFRESH: u16 = 101;
@@ -110,8 +107,6 @@ struct App {
     /// The test's yes.
     auto: bool,
     hab: u32,
-    /// Where the bar is (percent).
-    bar: u32,
     /// A count has come for this job: the sweep stops.
     counted: bool,
 }
@@ -144,8 +139,7 @@ fn pane(t: &str) {
 }
 
 fn set_bar(percent: u32) {
-    app().bar = percent;
-    send(ctl(ID_PROGRESS), SLM_SETSLIDERINFO, mp(SMA_SLIDERARMPOSITION, SMA_INCREMENTVALUE), percent.min(100));
+    progress::set(ctl(ID_PROGRESS), percent);
 }
 
 /// `n/m` from the end of a line, or after `(` or `[` at its start.
@@ -542,13 +536,7 @@ fn build() {
     let mle = control(WC_MLE, "", MLS_BORDER | MLS_VSCROLL | MLS_READONLY | MLS_WORDWRAP, ID_TEXT);
     set_font(mle, b"10.System Monospaced");
     control(WC_STATIC, "", SS_TEXT | DT_LEFT | DT_VCENTER, ID_STATUS);
-    // SLDCDATA: cbSize, 101 increments, spaced to fit.
-    let mut sld = Vec::new();
-    for v in [12u16, 0, 101, 0, 101, 0] {
-        sld.extend_from_slice(&v.to_le_bytes());
-    }
-    let (t, p) = (z(b""), app().client);
-    unsafe { WinCreateWindow(p, wc(WC_SLIDER), t.as_ptr(), PROGRESS_STYLE | WS_VISIBLE, 0, 0, 200, 22, p, HWND_TOP, ID_PROGRESS, sld.as_ptr(), core::ptr::null()) };
+    progress::create(app().client, ID_PROGRESS);
     control(WC_BUTTON, "~Install", BS_PUSHBUTTON | WS_TABSTOP | WS_GROUP, ID_ACTION);
     control(WC_BUTTON, "~Details", BS_PUSHBUTTON | WS_TABSTOP, ID_DETAILS);
     control(WC_BUTTON, "Update a~ll", BS_PUSHBUTTON | WS_TABSTOP, ID_UPDATE_ALL);
@@ -605,7 +593,7 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         WM_TIMER => {
             let a = app();
             if !a.counted && a.job.is_some() {
-                set_bar((a.bar + 4) % 101);
+                progress::sweep(ctl(ID_PROGRESS));
             }
             0
         }
@@ -668,13 +656,13 @@ fn main(s: &os2::Startup) -> u32 {
             lines: Vec::new(),
             auto: false,
             hab,
-            bar: 0,
             counted: false,
         });
     }
     let (frame, client) = std_window(hab, CLASS, client_proc, 0, 0, FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST, b"Package Manager", 0);
     app().client = client;
     app().root = find_root();
+    progress::register(hab);
     build();
     set_menu(frame, &[Menu::Sub(IDM_FILE, b"~File", alloc::vec![Menu::Item(IDM_REFRESH, b"~Refresh"), Menu::Sep, Menu::Item(IDM_EXIT, b"E~xit")])]);
     show_at_saved(hab, frame, b"PKGMGR", b"Position", Some((760, 560)));
