@@ -333,7 +333,8 @@ fn load_list(file: &str) -> Option<Vec<String>> {
 fn append(line: String) {
     let a = app();
     let live = matches!(a.job, Some(Job::Run(..) | Job::Setup));
-    if live && line.is_empty() {
+    // Lines end in CR LF, and yum's progress bars in CR.
+    if line.trim().is_empty() {
         return;
     }
     a.lines.push(line);
@@ -388,11 +389,14 @@ fn ended(code: u32) {
         }
         Job::Info(_) => pane(&lines.join("\r\n")),
         Job::Preview(verb, names) => {
-            pane(&lines[lines.len().saturating_sub(KEEP)..].join("\r\n"));
+            // From yum's table of what it would do.
+            let from = lines.iter().position(|l| l.starts_with("Dependencies Resolved")).map_or(0, |i| i + 1);
+            pane(&lines[from..].join("\r\n"));
             let s = summary(&lines);
             if s.is_empty() {
                 say("Nothing to do: see below.");
             } else {
+                say("Waiting for your answer.");
                 let q = z(format!("{s}\nGo ahead? The list is in the window.").as_bytes());
                 let yes = a.auto || message(a.client, &q, b"Package Manager", MB_YESNO | MB_ICONQUESTION | MB_MOVEABLE) == MBID_YES;
                 if yes {
