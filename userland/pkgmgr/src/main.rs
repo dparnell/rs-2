@@ -464,9 +464,9 @@ fn build() {
     control(WC_STATIC, "~Search:", SS_TEXT | DT_RIGHT | DT_VCENTER | DT_MNEMONIC, ID_SEARCH_LABEL);
     control(WC_ENTRYFIELD, "", ES_MARGIN | ES_AUTOSCROLL | WS_TABSTOP | WS_GROUP, ID_SEARCH);
     let lb = control(WC_LISTBOX, "", LS_NOADJUSTPOS | LS_HORZSCROLL | WS_TABSTOP, ID_LIST);
-    set_font(lb, b"10.System VIO");
+    set_font(lb, b"10.System Monospaced");
     let mle = control(WC_MLE, "", MLS_BORDER | MLS_VSCROLL | MLS_READONLY | MLS_WORDWRAP, ID_TEXT);
-    set_font(mle, b"10.System VIO");
+    set_font(mle, b"10.System Monospaced");
     control(WC_STATIC, "", SS_TEXT | DT_LEFT | DT_VCENTER, ID_STATUS);
     control(WC_BUTTON, "~Install", BS_PUSHBUTTON | WS_TABSTOP | WS_GROUP, ID_ACTION);
     control(WC_BUTTON, "~Details", BS_PUSHBUTTON | WS_TABSTOP, ID_DETAILS);
