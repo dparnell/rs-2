@@ -11,9 +11,12 @@
 //! pane, and asks. Without yum (no UNIXROOT with `\USR\BIN\BASH.EXE`) the
 //! window offers PKGSETUP.
 //!
-//! yum's counts move the progress bar (`pmkit::progress`): `(n/m):` for each
-//! download, `n/m` at the end of each step of the transaction, and PKGSETUP's
-//! `[n/m`; until one comes, and for what has no count, it sweeps. Python gets
+//! The progress bar is `pmkit::progress`. On a pipe yum shows no download
+//! meter, but it does say "Total download size" first, so the downloads are
+//! measured: what yum's cache has gained since "Downloading Packages:",
+//! against that total. After them, `n/m` at the end of each step of the
+//! transaction moves it, and PKGSETUP's `[n/m, x of y MB]`. What has no
+//! count at all (lists, a preview) sweeps. Python gets
 //! PYTHONUNBUFFERED, or its output would arrive all at once at the end.
 //!
 //! `PKGMGR /TEST:cmd name`: a button pressed without a person, for tests
@@ -109,6 +112,12 @@ struct App {
     hab: u32,
     /// A count has come for this job: the sweep stops.
     counted: bool,
+    /// Bytes yum said it would download, and what its cache held before.
+    download_total: u64,
+    download_base: u64,
+    /// yum is downloading.
+    downloading: bool,
+    ticks: u32,
 }
 
 static mut APP: Option<App> = None;
@@ -155,9 +164,74 @@ fn count(line: &str) -> Option<(u32, u32)> {
     num(a, b)
 }
 
+/// The share of the bar the downloads take.
+const DOWNLOAD_END: u64 = 40;
+
+/// `21 M`, `322 k`, `1.5 G` as yum prints sizes.
+fn size(t: &str) -> Option<u64> {
+    let mut w = t.split_whitespace();
+    let n: &str = w.next()?;
+    let unit = match w.next() {
+        Some("k") => 1 << 10,
+        Some("M") => 1 << 20,
+        Some("G") => 1 << 30,
+        _ => 1,
+    };
+    let (whole, part) = n.split_once('.').unwrap_or((n, "0"));
+    let tenths = part.chars().next()?.to_digit(10)? as u64;
+    Some(whole.parse::<u64>().ok()? * unit + tenths * unit / 10)
+}
+
+/// The bytes in yum's cache.
+fn cached_bytes() -> u64 {
+    let mut v = Vec::new();
+    let dir = format!("{}\VAR\CACHE\YUM", app().root.as_deref().unwrap_or("C:"));
+    utils::files::walk(&dir, "*", true, false, 0, &mut v);
+    v.iter().map(|(_, f)| f.size as u64).sum()
+}
+
+/// How far the downloads are.
+fn poll_download() {
+    let a = app();
+    if a.download_total == 0 {
+        return;
+    }
+    let got = cached_bytes().saturating_sub(a.download_base).min(a.download_total);
+    set_bar((got * DOWNLOAD_END / a.download_total) as u32);
+    let mb = |n: u64| format!("{}.{}", n >> 20, (n & 0xfffff) * 10 >> 20);
+    say(&format!("Downloading: {} of {} MB", mb(got), mb(a.download_total)));
+}
+
 /// What a line of output says of the progress: a job's steps are parts of
 /// the bar, as (first percent, last percent).
 fn progress(line: &str) {
+    let a = app();
+    let t = line.trim();
+    if let Some(s) = t.strip_prefix("Total download size:") {
+        a.download_total = size(s).unwrap_or(0);
+        return;
+    }
+    if t.starts_with("Downloading Packages") {
+        a.download_base = cached_bytes();
+        a.downloading = a.download_total > 0;
+        a.counted = a.downloading;
+        return;
+    }
+    if t.starts_with("Running Transaction") {
+        a.downloading = false;
+    }
+    // PKGSETUP's `[n/m, x of y MB]`: by the bytes.
+    if let (Some(r), Some(i)) = (t.strip_prefix('['), t.find(" of ")) {
+        let got = r[..i - 1].rsplit(' ').next().and_then(|x| x.parse::<u32>().ok());
+        let all = t[i + 4..].split(' ').next().and_then(|x| x.parse::<u32>().ok());
+        if let (Some(g), Some(n)) = (got, all) {
+            if n > 0 {
+                a.counted = true;
+                set_bar(g * 60 / n);
+                return;
+            }
+        }
+    }
     let Some((n, m)) = count(line) else { return };
     if m == 0 || n > m {
         return;
@@ -167,8 +241,6 @@ fn progress(line: &str) {
         (0, 40)
     } else if t.starts_with("Verifying") {
         (85, 100)
-    } else if t.starts_with('[') && t.contains(" of ") {
-        (0, 60)
     } else if t.starts_with('[') {
         (60, 100)
     } else {
@@ -346,6 +418,8 @@ fn next() {
     let job = a.queue.remove(0);
     a.lines.clear();
     a.counted = false;
+    a.downloading = false;
+    a.download_total = 0;
     set_bar(0);
     unsafe { WinStartTimer(a.hab, a.client, TIMER, 150) };
     say(&describe(&job));
@@ -404,9 +478,11 @@ fn append(line: String) {
     if live {
         let from = a.lines.len().saturating_sub(KEEP);
         pane(&a.lines[from..].join("\r\n"));
-        if let Some(l) = a.lines.last() {
-            progress(l);
-            say(l);
+        if let Some(l) = a.lines.last().cloned() {
+            progress(&l);
+            if !app().downloading {
+                say(&l);
+            }
         }
     }
 }
@@ -592,7 +668,13 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_TIMER => {
             let a = app();
-            if !a.counted && a.job.is_some() {
+            a.ticks += 1;
+            if a.downloading {
+                // About once a second: it walks a directory tree.
+                if a.ticks % 7 == 0 {
+                    poll_download();
+                }
+            } else if !a.counted && a.job.is_some() {
                 progress::sweep(ctl(ID_PROGRESS));
             }
             0
@@ -657,6 +739,10 @@ fn main(s: &os2::Startup) -> u32 {
             auto: false,
             hab,
             counted: false,
+            download_total: 0,
+            download_base: 0,
+            downloading: false,
+            ticks: 0,
         });
     }
     let (frame, client) = std_window(hab, CLASS, client_proc, 0, 0, FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST, b"Package Manager", 0);

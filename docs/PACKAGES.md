@@ -54,8 +54,8 @@ The output pane follows its end. The progress bar is `pmkit::progress`, a
 control of rs2's own (PM has none; OS/2's programs use a read-only slider):
 blocks filling a trough with the percentage beside it, moved by the `n/m`
 counts of yum's Installing and Verifying lines, and a run of blocks going to
-and fro for what has no count. Over a pipe yum printed no per-file count for
-the downloads in the run checked, so they show the moving blocks.
+and fro for what has no count. On a pipe yum shows no download meter, so the
+window measures what its cache gains against "Total download size".
 
 Each yum command starts Python (about 10 seconds under TCG, the Available list
 12), so the lists are kept in `\VAR\CACHE\PKGMGR` and only Refresh asks again;
