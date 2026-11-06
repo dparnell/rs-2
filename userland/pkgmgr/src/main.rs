@@ -212,6 +212,9 @@ fn mb(n: u64) -> String {
 /// A line of the plugin's. True if it was one.
 fn plugin_line(line: &str) -> bool {
     let Some(l) = line.strip_prefix('@') else { return false };
+    if !app().exact {
+        trace("pkgmgr: plugin: ", l.as_bytes());
+    }
     let mut w = l.splitn(5, ' ');
     let a = app();
     match w.next() {
@@ -462,13 +465,11 @@ fn draw_item(oi: *mut u32) -> u32 {
         WinFillRect(hps, &outer, SYSCLR_BUTTONDARK);
         WinFillRect(hps, &inner, SYSCLR_WINDOW);
         if marks().contains(&p.name) {
-            // A tick, three pixels thick.
-            for d in 0..3 {
-                let (a, m, e) = (PointL { x: x + 2, y: y + 5 + d }, PointL { x: x + 5, y: y + 2 + d }, PointL { x: x + 10, y: y + 7 + d });
-                GpiSetColor(hps, 0);
-                GpiMove(hps, &a);
-                GpiLine(hps, &m);
-                GpiLine(hps, &e);
+            // A tick, in small squares (the item's presentation space has
+            // no lines to offer).
+            for (dx, dy) in [(2, 5), (3, 4), (4, 3), (5, 2), (6, 3), (7, 4), (8, 5), (9, 6)] {
+                let r = RectL { l: x + dx, b: y + dy, r: x + dx + 2, t: y + dy + 3 };
+                WinFillRect(hps, &r, SYSCLR_WINDOWTEXT);
             }
         }
         WinDrawText(hps, -1, line.as_ptr(), &mut text, fg, bg, DT_LEFT | DT_VCENTER);
@@ -626,7 +627,7 @@ fn append(line: String) {
         pane(&a.lines[from..].join("\r\n"));
         if let Some(l) = a.lines.last().cloned() {
             progress(&l);
-            if !app().downloading && !app().exact {
+            if !app().downloading {
                 say(&l);
             }
         }
