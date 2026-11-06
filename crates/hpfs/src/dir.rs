@@ -252,6 +252,7 @@ impl<D: BlockDevice> Volume<D> {
     }
 
     pub(crate) fn write_dnode(&self, d: &Dnode) -> Result<()> {
+        self.names.borrow_mut().forget(d.sec);
         if !d.fits() {
             return Err(Error::Corrupt);
         }
@@ -278,16 +279,22 @@ impl<D: BlockDevice> Volume<D> {
 
     /// Find `name`: the DNODE holding it and the entry's index.
     pub(crate) fn find_dirent(&self, top: u32, name: &[u8]) -> Result<Option<(Dnode, usize)>> {
+        Ok(self.find_dirent_at(top, name)?.0)
+    }
+
+    /// `find_dirent`, and the DNODE that decided it: the one holding the
+    /// name, or the leaf where it would go.
+    pub(crate) fn find_dirent_at(&self, top: u32, name: &[u8]) -> Result<(Option<(Dnode, usize)>, u32)> {
         let mut sec = top;
         for _ in 0..MAX_DEPTH {
             let d = self.read_dnode(sec)?;
             let (i, found) = d.position(&self.case, name);
             if found {
-                return Ok(Some((d, i)));
+                return Ok((Some((d, i)), sec));
             }
             match d.entries[i].down {
                 Some(c) => sec = c,
-                None => return Ok(None),
+                None => return Ok((None, sec)),
             }
         }
         Err(Error::Corrupt)

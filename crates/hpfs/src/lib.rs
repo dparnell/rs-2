@@ -29,6 +29,7 @@ pub mod time;
 #[cfg(test)]
 mod tests;
 
+use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
@@ -140,6 +141,48 @@ pub(crate) struct DirBand {
     pub bits: Vec<u8>,
 }
 
+/// A key of the name cache: the directory's F-node, the name in upper case.
+type NameKey = (u32, Vec<u8>);
+
+/// Names looked up, found or not, each under the DNODE that decides it: the
+/// one holding its DIRENT, or the leaf where the search for it ended, which
+/// is where it would be inserted. Reading a DNODE takes it apart, and kLIBC
+/// asks for every component of every path, so this is what keeps lookups
+/// cheap; any write of a DNODE forgets what it decided.
+#[derive(Default)]
+pub(crate) struct NameCache {
+    names: BTreeMap<NameKey, Option<Entry>>,
+    by_dnode: BTreeMap<u32, Vec<NameKey>>,
+}
+
+/// Names kept; at this many it starts over.
+const NAMES_KEPT: usize = 8192;
+
+impl NameCache {
+    fn get(&self, key: &NameKey) -> Option<&Option<Entry>> {
+        self.names.get(key)
+    }
+
+    fn put(&mut self, key: NameKey, dnode: u32, entry: Option<Entry>) {
+        if self.names.len() >= NAMES_KEPT {
+            self.clear();
+        }
+        self.by_dnode.entry(dnode).or_default().push(key.clone());
+        self.names.insert(key, entry);
+    }
+
+    pub(crate) fn forget(&mut self, dnode: u32) {
+        for k in self.by_dnode.remove(&dnode).unwrap_or_default() {
+            self.names.remove(&k);
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.names.clear();
+        self.by_dnode.clear();
+    }
+}
+
 pub struct Volume<D: BlockDevice> {
     pub dev: D,
     pub(crate) dirty: core::cell::Cell<DirtyState>,
@@ -159,6 +202,7 @@ pub struct Volume<D: BlockDevice> {
     readonly: bool,
     /// Extents of the most recently used file: (F-node, extents, ALSECs).
     pub(crate) cache: Option<(u32, Vec<Extent>, Vec<u32>)>,
+    pub(crate) names: core::cell::RefCell<NameCache>,
 }
 
 /// Name components of a path ("." skipped, ".." kept).
@@ -221,6 +265,7 @@ impl<D: BlockDevice> Volume<D> {
             label: [b' '; 11],
             readonly: false,
             cache: None,
+            names: Default::default(),
         };
         v.load_hotfixes(&sp)?;
         v.load_bitmaps(rd32(&s, sb::BITMAPS))?;
@@ -276,6 +321,7 @@ impl<D: BlockDevice> Volume<D> {
         let off = rd16(&c, 20 + index * 2) as usize + 6;
         if off + 128 <= SECTOR {
             self.case = CaseMap::from_high(cp, &c[off..off + 128]);
+            self.names.borrow_mut().clear();
         }
         Ok(())
     }
@@ -404,9 +450,8 @@ impl<D: BlockDevice> Volume<D> {
 
     /// The root directory (its times live in the root's `..` entry).
     pub fn root_entry(&mut self) -> Result<Entry> {
-        let dn = self.dir_root(self.root)?;
-        let mut e = match self.find_dirent(dn, DOTDOT)? {
-            Some((d, i)) => self.entry_of(&d.entries[i], self.root),
+        let mut e = match self.find_cached(self.root, DOTDOT)? {
+            Some(e) => e,
             None => Entry {
                 name: String::new(),
                 attr: 0,
@@ -439,8 +484,19 @@ impl<D: BlockDevice> Volume<D> {
         if !name::valid_name(n) {
             return Ok(None);
         }
-        let dn = self.dir_root(dir)?;
-        Ok(self.find_dirent(dn, n)?.map(|(d, i)| self.entry_of(&d.entries[i], dir)))
+        self.find_cached(dir, n)
+    }
+
+    /// `n` in directory `dir`, through the name cache.
+    fn find_cached(&self, dir: u32, n: &[u8]) -> Result<Option<Entry>> {
+        let key = (dir, n.iter().map(|&c| self.case.upper(c)).collect::<Vec<u8>>());
+        if let Some(e) = self.names.borrow().get(&key) {
+            return Ok(e.clone());
+        }
+        let (found, dnode) = self.find_dirent_at(self.dir_root(dir)?, n)?;
+        let e = found.map(|(d, i)| self.entry_of(&d.entries[i], dir));
+        self.names.borrow_mut().put(key, dnode, e.clone());
+        Ok(e)
     }
 
     /// Look up a path; the empty path is the root directory.

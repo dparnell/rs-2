@@ -769,3 +769,66 @@ fn dirty_flag_follows_the_mount() {
     w.mark_clean().unwrap();
     assert_eq!(flag(&w), 1);
 }
+
+/// Every change, and what the cache answers against the disk.
+#[test]
+fn name_cache_stays_true() {
+    let mut v = fresh(8);
+    let mut seed = 12345u32;
+    let mut rnd = move |n: u32| {
+        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        (seed >> 8) % n
+    };
+    v.mkdir("D0", NOW).unwrap();
+    v.mkdir("D1", NOW).unwrap();
+    v.mkdir("D1\\SUB", NOW).unwrap();
+    let dirs = ["", "D0\\", "D1\\", "D1\\SUB\\", "D2\\", "D2\\SUB\\"];
+    let name = |d: u32, n: u32| format!("{}FILE-WITH-A-LONG-NAME-{n}.TXT", dirs[d as usize]);
+    let same = |a: &Result<Entry>, b: &Result<Entry>| match (a, b) {
+        (Ok(x), Ok(y)) => (x.name.as_str(), x.size, x.fnode, x.parent, x.attr, x.modified) == (y.name.as_str(), y.size, y.fnode, y.parent, y.attr, y.modified),
+        (Err(x), Err(y)) => x == y,
+        _ => false,
+    };
+    for step in 0..6000 {
+        let (d, n) = (rnd(6), rnd(300));
+        let p = name(d, n);
+        match rnd(8) {
+            0..=2 => {
+                let _ = v.create_file(&p, 0, NOW + step);
+            }
+            3 => {
+                let _ = v.delete(&p);
+            }
+            4 => {
+                let _ = v.rename(&p, &name(rnd(6), rnd(300)));
+            }
+            5 => {
+                if let Ok(mut e) = v.lookup(&p) {
+                    let _ = v.write(&mut e, 0, &pattern(700, step), NOW + step);
+                    e.modified = NOW + step;
+                    let _ = v.update_entry(&e);
+                }
+            }
+            6 => {
+                // A whole directory goes elsewhere and comes back.
+                let _ = if v.lookup("D1").is_ok() { v.rename("D1", "D2") } else { v.rename("D2", "D1") };
+            }
+            _ => {
+                let _ = v.mkdir("D0\\TMP", NOW);
+                let _ = v.create_file("D0\\TMP\\A", 0, NOW);
+                let _ = v.lookup("D0\\TMP\\B");
+                let _ = v.delete("D0\\TMP\\A");
+                let _ = v.rmdir("D0\\TMP");
+                assert!(v.lookup("D0\\TMP\\A").is_err());
+            }
+        }
+        // Asked twice, so the cache has an answer to give.
+        let probes: Vec<_> = (0..6).map(|_| name(rnd(6), rnd(300))).chain([p.clone(), p.to_ascii_lowercase()]).collect();
+        let cached: Vec<_> = probes.iter().map(|q| { let _ = v.lookup(q); v.lookup(q) }).collect();
+        v.names.borrow_mut().clear();
+        for (q, c) in probes.iter().zip(&cached) {
+            assert!(same(c, &v.lookup(q)), "step {step}: {q}");
+        }
+    }
+    assert!(v.check(false).unwrap().ok());
+}

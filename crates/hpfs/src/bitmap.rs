@@ -143,6 +143,7 @@ impl<D: BlockDevice> Volume<D> {
     }
 
     pub(crate) fn free_dnode(&mut self, s: u32) -> Result<()> {
+        self.names.borrow_mut().forget(s);
         let b = &self.band;
         if s >= b.start && s < b.start + b.count * DNODE_SECTORS {
             let k = ((s - b.start) / DNODE_SECTORS) as usize;
