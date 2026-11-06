@@ -185,7 +185,7 @@ fn size(t: &str) -> Option<u64> {
 /// The bytes in yum's cache.
 fn cached_bytes() -> u64 {
     let mut v = Vec::new();
-    let dir = format!("{}\VAR\CACHE\YUM", app().root.as_deref().unwrap_or("C:"));
+    let dir = format!("{}\\VAR\\CACHE\\YUM", app().root.as_deref().unwrap_or("C:"));
     utils::files::walk(&dir, "*", true, false, 0, &mut v);
     v.iter().map(|(_, f)| f.size as u64).sum()
 }
