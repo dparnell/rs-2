@@ -394,7 +394,9 @@ fn format_hpfs(part: Disk, serial: u32) -> Result<Vol, String> {
 }
 
 /// Erase the disk and install rs2 with the layout `fs`.
-pub fn install_fresh(d: &Disk, fs: Fs, p: &mut dyn Progress) -> Result<(), String> {
+/// With `packages` (HPFS and JFS only: they need long names) the first boot
+/// runs PKGSETUP, which downloads RPM and yum.
+pub fn install_fresh(d: &Disk, fs: Fs, packages: bool, p: &mut dyn Progress) -> Result<(), String> {
     if d.mb() < MIN_MB {
         return Err(alloc::format!("The disk is too small ({MIN_MB} MB or more is needed)."));
     }
@@ -434,6 +436,12 @@ pub fn install_fresh(d: &Disk, fs: Fs, p: &mut dyn Progress) -> Result<(), Strin
     p.step("Copying the system");
     let mut files = 0;
     copy_tree(sys.as_mut().unwrap_or(&mut esp), "C:", "", &mut files, false, p)?;
+    if packages && fs != Fs::Fat {
+        let target = sys.as_mut().unwrap_or(&mut esp);
+        let mut config = target.get("CONFIG.SYS").ok_or("CONFIG.SYS was not copied.")?;
+        config.extend_from_slice(b"\r\nCALL=C:\\OS2\\PKGSETUP.EXE /FIRSTBOOT\r\n");
+        target.put("CONFIG.SYS", &config)?;
+    }
     p.step("Writing the boot files");
     boot_files(&mut esp)?;
     if let Some(sp) = &sys_part {

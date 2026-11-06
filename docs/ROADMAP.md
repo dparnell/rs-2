@@ -326,6 +326,8 @@ Status markers: done, in progress, planned.
   (installing from rpm.netlabs.org inside rs2) and WarpIN (WPI archives
   under the Workplace Shell), ANPM (VX-REXX: lists and an install from its
   window) on rs2's own RXSOCK.DLL
+- done: PKGSETUP and the installer's option: RPM and yum downloaded and set
+  up on the first start (docs/PACKAGES.md)
 
 ## Milestone 4: Presentation Manager (largely done)
 

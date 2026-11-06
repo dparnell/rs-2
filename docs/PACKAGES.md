@@ -17,6 +17,29 @@ only read it (`bsdtar`), and run only inside QEMU.
 | WarpIN 1.0.19 | works | The self-installer unpacks itself and shows its wizard; `WARPIN.EXE` installs a WPI under the Workplace Shell (files, CONFIG.SYS with a backup, a program object on the desktop, its own folder and objects, its database). `WIC.EXE` builds, lists and unpacks archives. |
 | ANPM 1.1.2 | works | Unpacked with WIC (it needs WarpIN 1.0.24 to install). Its window, the installed and available lists through yum, and an install from its Install button. See below. |
 
+## Installing RPM and yum on rs2
+
+PMINSTAL's "Download RPM and yum at the first start" and `INSTALL /PACKAGES`
+(HPFS and JFS layouts: the files need long names) leave
+`CALL=C:\OS2\PKGSETUP.EXE /FIRSTBOOT` in the new CONFIG.SYS. `PKGSETUP [drive:]`
+also runs by hand, on any installation. Nothing of RPM's or yum's ships with
+rs2: `\OS2\PKGLIST.TXT` (`dist/PKGLIST.TXT`, made by `tools/scripts/pkglist.py`)
+names the 83 packages of the test disk below, about 80 MB, with their sizes
+and SHA-256 sums from the repository's metadata. The download is plain HTTP
+from rpm.netlabs.org, so those sums are what makes it safe, and a package that
+does not match is refused.
+
+PKGSETUP needs 600 MB free. It unpacks each RPM's gzip-compressed cpio archive
+below the drive, leaving out documentation as `rpmdisk.py` does, and turns
+symbolic links into copies. It adds `LIBPATH`, `PATH`, `UNIXROOT` and the
+other settings below to CONFIG.SYS and runs `rpm --justdb`. Downloads are kept
+until the end, so running it again resumes. With /FIRSTBOOT it removes its
+CALL line whatever happens, and on success restarts the computer. Under TCG it
+takes about 25 minutes. Checked: `INSTALL /NEW:HPFS /PACKAGES`, the first boot,
+then on the installed system `yum -y install zip`, `rpm -q`, `zip -v` and the
+desktop. The list is fixed; if the server drops a version the download stops,
+and the list has to be made again.
+
 ## The test disk
 
 ```

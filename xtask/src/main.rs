@@ -679,6 +679,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("lpq", "OS2\\LPQ.EXE"),
         ("lprm", "OS2\\LPRM.EXE"),
         ("finger", "OS2\\FINGER.EXE"),
+        ("pkgsetup", "OS2\\PKGSETUP.EXE"),
         ("tftp", "OS2\\TFTP.EXE"),
         ("tftpd", "OS2\\TFTPD.EXE"),
         ("rexec", "OS2\\REXEC.EXE"),

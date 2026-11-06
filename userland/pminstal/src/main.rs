@@ -27,6 +27,7 @@ os2::entry!(main);
 const WC_BUTTON: &[u8] = b"#3\0";
 const WC_STATIC: &[u8] = b"#5\0";
 const WC_LISTBOX: &[u8] = b"#7\0";
+const BS_AUTOCHECKBOX: u32 = 2;
 const BS_AUTORADIOBUTTON: u32 = 4;
 const BM_QUERYCHECK: u32 = 0x0124;
 const BM_SETCHECK: u32 = 0x0125;
@@ -49,6 +50,7 @@ const ID_JFS: u32 = 18;
 const ID_STATUS: u32 = 19;
 const ID_INSTALL: u32 = 20;
 const ID_CLOSE: u32 = 21;
+const ID_PACKAGES: u32 = 22;
 
 /// From the installing thread: mp1 a Box<String> (a step), or 0 for a
 /// file (mp2 the count).
@@ -161,7 +163,8 @@ fn build(h: u32) {
     control(h, WC_BUTTON, "One ~FAT32 partition for everything", BS_AUTORADIOBUTTON | WS_GROUP | WS_TABSTOP, ID_FAT, 28, 152, 520, 24);
     control(h, WC_BUTTON, "FAT32 boot partition, system on ~HPFS (at most 64 GB)", BS_AUTORADIOBUTTON, ID_HPFS, 28, 126, 520, 24);
     control(h, WC_BUTTON, "FAT32 boot partition, system on ~JFS (journaled)", BS_AUTORADIOBUTTON, ID_JFS, 28, 100, 520, 24);
-    control(h, WC_STATIC, "", SS_TEXT | DT_LEFT | DT_WORDBREAK, ID_STATUS, 12, 48, 536, 44);
+    control(h, WC_BUTTON, "~Download RPM and yum at the first start (about 80 MB from rpm.netlabs.org)", BS_AUTOCHECKBOX | WS_TABSTOP, ID_PACKAGES, 12, 72, 536, 24);
+    control(h, WC_STATIC, "", SS_TEXT | DT_LEFT | DT_WORDBREAK, ID_STATUS, 12, 44, 536, 26);
     control(h, WC_BUTTON, "~Install", BS_PUSHBUTTON | WS_TABSTOP | WS_GROUP, ID_INSTALL, 344, 10, 98, 30);
     control(h, WC_BUTTON, "Close", BS_PUSHBUTTON | WS_TABSTOP, ID_CLOSE, 450, 10, 98, 30);
     for d in &app().disks {
@@ -201,6 +204,7 @@ fn update_controls() {
     for (id, fs) in [(ID_FAT, Fs::Fat), (ID_HPFS, Fs::Hpfs), (ID_JFS, Fs::Jfs)] {
         enable(id, erase && !a.busy && available.contains(&fs));
     }
+    enable(ID_PACKAGES, erase && !a.busy && !checked(ID_FAT));
     enable(ID_ERASE, !a.busy && disk.is_some());
     enable(ID_DISKS, !a.busy);
     enable(ID_INSTALL, !a.busy && disk.is_some());
@@ -232,6 +236,7 @@ struct Job {
     disk: usize,
     update: bool,
     fs: Fs,
+    packages: bool,
 }
 
 fn start() {
@@ -254,7 +259,7 @@ fn start() {
     }
     app().busy = true;
     update_controls();
-    let job = Box::new(Job { client: app().client, disk: i, update, fs });
+    let job = Box::new(Job { client: app().client, disk: i, update, fs, packages: checked(ID_PACKAGES) });
     let mut tid = 0;
     unsafe { os2::DosCreateThread(&mut tid, worker, Box::into_raw(job) as u32, 0, 256 * 1024) };
 }
@@ -289,7 +294,7 @@ unsafe extern "C" fn worker(p: u32) {
             None => Err(String::from("There is no rs2 to update on that disk.")),
         }
     } else {
-        engine::install_fresh(&d.disk, job.fs, &mut r)
+        engine::install_fresh(&d.disk, job.fs, job.packages, &mut r)
     };
     let out: Box<Result<Vec<String>, String>> = Box::new(res.map(|_| core::mem::take(&mut r.notes)));
     unsafe { WinPostMsg(job.client, WM_DONE, Box::into_raw(out) as u32, 0) };
@@ -342,7 +347,7 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_CONTROL => {
             let (id, code) = (mp1 & 0xffff, mp1 >> 16);
-            if (id == ID_DISKS && code == LN_SELECT) || (matches!(id, ID_UPDATE | ID_ERASE) && code == BN_CLICKED) {
+            if (id == ID_DISKS && code == LN_SELECT) || (matches!(id, ID_UPDATE | ID_ERASE | ID_FAT | ID_HPFS | ID_JFS) && code == BN_CLICKED) {
                 update_controls();
             }
             0

@@ -2,7 +2,7 @@
 //! same installer under Presentation Manager; both use `engine`).
 //!
 //! ```text
-//! INSTALL [/LIST] [/DISK:n] [/NEW[:FAT32|HPFS|JFS] | /UPDATE] [/YES] [/NORESTART]
+//! INSTALL [/LIST] [/DISK:n] [/NEW[:FAT32|HPFS|JFS] | /UPDATE] [/PACKAGES] [/YES] [/NORESTART]
 //! ```
 //!
 //! Without options it asks: which disk, and for a disk that has rs2
@@ -73,6 +73,7 @@ struct Opts {
     update: bool,
     yes: bool,
     no_restart: bool,
+    packages: bool,
 }
 
 fn parse(args: &str) -> Result<Opts, String> {
@@ -98,6 +99,7 @@ fn parse(args: &str) -> Result<Opts, String> {
             "UPDATE" => o.update = true,
             "YES" | "Y" => o.yes = true,
             "NORESTART" => o.no_restart = true,
+            "PACKAGES" => o.packages = true,
             "?" | "HELP" => return Err(String::new()),
             _ => return Err(alloc::format!("Unknown option {w}.")),
         }
@@ -111,7 +113,7 @@ fn parse(args: &str) -> Result<Opts, String> {
 fn usage() {
     outln("Installs rs2 from this disc onto a hard disk, or updates it there.");
     outln("");
-    outln("INSTALL [/LIST] [/DISK:n] [/NEW[:FAT32|HPFS|JFS] | /UPDATE] [/YES] [/NORESTART]");
+    outln("INSTALL [/LIST] [/DISK:n] [/NEW[:FAT32|HPFS|JFS] | /UPDATE] [/PACKAGES] [/YES] [/NORESTART]");
     outln("");
     outln("  /LIST       list the hard disks and what is on them");
     outln("  /DISK:n     the disk to install on");
@@ -121,6 +123,7 @@ fn usage() {
     outln("  /NEW:JFS    erase the disk: a FAT32 boot partition and a JFS");
     outln("              system partition");
     outln("  /UPDATE     update the rs2 on the disk, keeping settings and files");
+    outln("  /PACKAGES   at the first start, download RPM and yum (HPFS or JFS layouts)");
     outln("  /YES        do not ask for confirmation");
     outln("  /NORESTART  do not restart the computer afterwards");
 }
@@ -260,6 +263,13 @@ fn run(o: Opts) -> u32 {
             outln(&alloc::format!("{} is not available yet.", fs.name()));
             return 1;
         }
+        let mut packages = o.packages;
+        if !o.yes && !packages && fs != Fs::Fat {
+            outln("");
+            outln("RPM and yum install more software from the internet. They are not part of");
+            outln("rs2: at the first start about 80 MB would be downloaded from rpm.netlabs.org.");
+            packages = ask("Download them (Y or N)? ").eq_ignore_ascii_case("Y");
+        }
         if !o.yes {
             outln("");
             outln(&alloc::format!("ALL DATA ON DISK {number} WILL BE ERASED."));
@@ -268,7 +278,7 @@ fn run(o: Opts) -> u32 {
                 return 1;
             }
         }
-        engine::install_fresh(&d.disk, fs, &mut p)
+        engine::install_fresh(&d.disk, fs, packages, &mut p)
     };
     outln("");
     if let Err(e) = res {
