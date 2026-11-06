@@ -11,6 +11,12 @@
 //! pane, and asks. Without yum (no UNIXROOT with `\USR\BIN\BASH.EXE`) the
 //! window offers PKGSETUP.
 //!
+//! The slider under the list is the progress bar, as in OS/2's own programs
+//! (SLS_READONLY with a ribbon strip). yum's counts move it: `(n/m):` for each
+//! download, `n/m` at the end of each step of the transaction, and PKGSETUP's
+//! `[n/m`; until one comes, and for what has no count, it sweeps. Python gets
+//! PYTHONUNBUFFERED, or its output would arrive all at once at the end.
+//!
 //! `PKGMGR /TEST:cmd name`: a button pressed without a person, for tests
 //! (cmd is INSTALL or REMOVE; the question is answered Yes).
 
@@ -45,6 +51,10 @@ const ID_DETAILS: u32 = 19;
 const ID_UPDATE_ALL: u32 = 20;
 const ID_REFRESH: u32 = 21;
 const ID_SETUP: u32 = 22;
+const ID_PROGRESS: u32 = 23;
+const TIMER: u32 = 1;
+/// SLS_BOTTOM | SLS_READONLY | SLS_RIBBONSTRIP.
+const PROGRESS_STYLE: u32 = 0x182;
 
 const IDM_FILE: u16 = 100;
 const IDM_REFRESH: u16 = 101;
@@ -99,6 +109,11 @@ struct App {
     lines: Vec<String>,
     /// The test's yes.
     auto: bool,
+    hab: u32,
+    /// Where the bar is (percent).
+    bar: u32,
+    /// A count has come for this job: the sweep stops.
+    counted: bool,
 }
 
 static mut APP: Option<App> = None;
@@ -115,8 +130,58 @@ fn say(t: &str) {
     set_text(ctl(ID_STATUS), t.as_bytes());
 }
 
-fn pane(t: &str) {
+/// The lower pane, from the top (a description).
+fn pane_top(t: &str) {
     set_text(ctl(ID_TEXT), t.as_bytes());
+}
+
+/// The lower pane, showing its end (output as it grows).
+fn pane(t: &str) {
+    let mle = ctl(ID_TEXT);
+    set_text(mle, t.as_bytes());
+    let end = send(mle, MLM_QUERYTEXTLENGTH, 0, 0);
+    send(mle, MLM_SETSEL, end, end);
+}
+
+fn set_bar(percent: u32) {
+    app().bar = percent;
+    send(ctl(ID_PROGRESS), SLM_SETSLIDERINFO, mp(SMA_SLIDERARMPOSITION, SMA_INCREMENTVALUE), percent.min(100));
+}
+
+/// `n/m` from the end of a line, or after `(` or `[` at its start.
+fn count(line: &str) -> Option<(u32, u32)> {
+    let t = line.trim();
+    let num = |a: &str, b: &str| Some((a.parse().ok()?, b.parse().ok()?));
+    if let Some(r) = t.strip_prefix(['(', '[']) {
+        let end = r.find(|c: char| !c.is_ascii_digit() && c != '/')?;
+        let (a, b) = r[..end].split_once('/')?;
+        return num(a, b);
+    }
+    let (a, b) = t.rsplit(' ').next()?.split_once('/')?;
+    num(a, b)
+}
+
+/// What a line of output says of the progress: a job's steps are parts of
+/// the bar, as (first percent, last percent).
+fn progress(line: &str) {
+    let Some((n, m)) = count(line) else { return };
+    if m == 0 || n > m {
+        return;
+    }
+    let t = line.trim();
+    let (from, to) = if t.starts_with('(') {
+        (0, 40)
+    } else if t.starts_with("Verifying") {
+        (85, 100)
+    } else if t.starts_with('[') && t.contains(" of ") {
+        (0, 60)
+    } else if t.starts_with('[') {
+        (60, 100)
+    } else {
+        (40, 85)
+    };
+    app().counted = true;
+    set_bar(from + (to - from) * n / m);
 }
 
 fn env(name: &str) -> Option<String> {
@@ -259,8 +324,8 @@ fn script(job: &Job) -> String {
         Job::Available => String::from("yum -q list available"),
         Job::Updates => String::from("yum -q check-update; true"),
         Job::Info(n) => format!("yum -q info {n}"),
-        Job::Preview(v, n) => format!("yum {v} {n}"),
-        Job::Run(v, n) => format!("yum -y {v} {n}"),
+        Job::Preview(v, n) => format!("PYTHONUNBUFFERED=1 yum {v} {n}"),
+        Job::Run(v, n) => format!("PYTHONUNBUFFERED=1 yum -y {v} {n}"),
         Job::Setup => String::new(),
     }
 }
@@ -286,6 +351,9 @@ fn next() {
     }
     let job = a.queue.remove(0);
     a.lines.clear();
+    a.counted = false;
+    set_bar(0);
+    unsafe { WinStartTimer(a.hab, a.client, TIMER, 150) };
     say(&describe(&job));
     let (prog, args) = if job == Job::Setup {
         (format!("{}:\\OS2\\PKGSETUP.EXE", boot_drive() as char), String::new())
@@ -341,10 +409,9 @@ fn append(line: String) {
     a.lines.push(line);
     if live {
         let from = a.lines.len().saturating_sub(KEEP);
-        if a.lines.len() % 4 == 0 || a.lines.len() < 8 {
-            pane(&a.lines[from..].join("\r\n"));
-        }
+        pane(&a.lines[from..].join("\r\n"));
         if let Some(l) = a.lines.last() {
+            progress(l);
             say(l);
         }
     }
@@ -371,6 +438,8 @@ fn ended(code: u32) {
         c.close();
     }
     let lines = core::mem::take(&mut a.lines);
+    unsafe { WinStopTimer(a.hab, a.client, TIMER) };
+    set_bar(0);
     match job {
         Job::Installed => {
             a.installed = parse_rpm(&lines);
@@ -388,7 +457,7 @@ fn ended(code: u32) {
             save_list("UPDATES.TXT", &lines);
             show_list();
         }
-        Job::Info(_) => pane(&lines.join("\r\n")),
+        Job::Info(_) => pane_top(&lines.join("\r\n")),
         Job::Preview(verb, names) => {
             // From yum's table of what it would do.
             let from = lines.iter().position(|l| l.starts_with("Dependencies Resolved")).map_or(0, |i| i + 1);
@@ -406,8 +475,7 @@ fn ended(code: u32) {
             }
         }
         Job::Run(verb, names) => {
-            // How it ended, not how it began.
-            pane(&lines[lines.len().saturating_sub(8)..].join("\r\n"));
+            pane(&lines[lines.len().saturating_sub(KEEP)..].join("\r\n"));
             trace("pkgmgr: ", format!("yum {verb} {names} ended {code}").as_bytes());
             a.queue.push(Job::Installed);
             if verb != "install" {
@@ -474,6 +542,13 @@ fn build() {
     let mle = control(WC_MLE, "", MLS_BORDER | MLS_VSCROLL | MLS_READONLY | MLS_WORDWRAP, ID_TEXT);
     set_font(mle, b"10.System Monospaced");
     control(WC_STATIC, "", SS_TEXT | DT_LEFT | DT_VCENTER, ID_STATUS);
+    // SLDCDATA: cbSize, 101 increments, spaced to fit.
+    let mut sld = Vec::new();
+    for v in [12u16, 0, 101, 0, 101, 0] {
+        sld.extend_from_slice(&v.to_le_bytes());
+    }
+    let (t, p) = (z(b""), app().client);
+    unsafe { WinCreateWindow(p, wc(WC_SLIDER), t.as_ptr(), PROGRESS_STYLE | WS_VISIBLE, 0, 0, 200, 22, p, HWND_TOP, ID_PROGRESS, sld.as_ptr(), core::ptr::null()) };
     control(WC_BUTTON, "~Install", BS_PUSHBUTTON | WS_TABSTOP | WS_GROUP, ID_ACTION);
     control(WC_BUTTON, "~Details", BS_PUSHBUTTON | WS_TABSTOP, ID_DETAILS);
     control(WC_BUTTON, "Update a~ll", BS_PUSHBUTTON | WS_TABSTOP, ID_UPDATE_ALL);
@@ -502,7 +577,9 @@ fn layout(cx: i32, cy: i32) {
         x += w + 6;
     }
     let status = m + bh + 4;
-    place(ID_STATUS, m, status, cx - m * 2, sh);
+    let bar = (cx / 3).clamp(120, 260);
+    place(ID_STATUS, m, status, cx - m * 2 - bar - 8, sh);
+    place(ID_PROGRESS, cx - m - bar, status, bar, sh);
     let body = status + sh + 4;
     let rest = (top - 6 - body).max(40);
     let low = rest * 3 / 10;
@@ -523,6 +600,13 @@ extern "C" fn client_proc(h: u32, msg: u32, mp1: u32, mp2: u32) -> u32 {
         }
         WM_SIZE => {
             layout((mp2 & 0xffff) as i32, (mp2 >> 16) as i32);
+            0
+        }
+        WM_TIMER => {
+            let a = app();
+            if !a.counted && a.job.is_some() {
+                set_bar((a.bar + 4) % 101);
+            }
             0
         }
         WM_LINE => {
@@ -583,6 +667,9 @@ fn main(s: &os2::Startup) -> u32 {
             child: None,
             lines: Vec::new(),
             auto: false,
+            hab,
+            bar: 0,
+            counted: false,
         });
     }
     let (frame, client) = std_window(hab, CLASS, client_proc, 0, 0, FCF_TITLEBAR | FCF_SYSMENU | FCF_SIZEBORDER | FCF_MINMAX | FCF_TASKLIST, b"Package Manager", 0);
@@ -611,7 +698,7 @@ fn main(s: &os2::Startup) -> u32 {
         }
         next();
     } else {
-        pane("RPM and yum are not installed.\r\n\r\nSet up yum downloads about 80 MB from rpm.netlabs.org: they are not part of rs2. It needs an HPFS or JFS system drive, and the computer has to restart afterwards.");
+        pane_top("RPM and yum are not installed.\r\n\r\nSet up yum downloads about 80 MB from rpm.netlabs.org: they are not part of rs2. It needs an HPFS or JFS system drive, and the computer has to restart afterwards.");
         say("RPM and yum are not installed.");
         update_controls();
     }

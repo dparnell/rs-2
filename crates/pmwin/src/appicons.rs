@@ -101,6 +101,14 @@ fn draw(name: &str, size: i32) -> Option<Image> {
             p.frame(2.0, 8.0, 26.0, 29.0, DARK);
             magnifier(&mut p, 22.0, 9.0, 5.0);
         }
+        // Package Manager: a parcel, and an arrow going into it.
+        "PKGMGR" => {
+            let tan = rgb(0xd8a860);
+            p.polygon(&[(3.0, 20.0), (16.0, 26.0), (29.0, 20.0), (16.0, 14.0)], rgb(0xf0cc88), DARK);
+            p.polygon(&[(3.0, 20.0), (16.0, 14.0), (16.0, 2.0), (3.0, 8.0)], tan, DARK);
+            p.polygon(&[(16.0, 14.0), (29.0, 20.0), (29.0, 8.0), (16.0, 2.0)], rgb(0xb08040), DARK);
+            p.polygon(&[(13.0, 31.0), (19.0, 31.0), (19.0, 23.0), (24.0, 23.0), (16.0, 15.0), (8.0, 23.0), (13.0, 23.0)], GREEN, DARK);
+        }
         // Seek and Scan Files: a page under a magnifier.
         "PMSEEK" => {
             page(&mut p);
@@ -258,7 +266,7 @@ fn draw(name: &str, size: i32) -> Option<Image> {
 
 /// The names of the programs with an icon here.
 pub const PROGRAMS: &[&str] = &[
-    "CLIPOS2", "MPCPUMON", "PMCHKDSK", "PMFORMAT", "PICVIEW", "PMSEEK", "ICONEDIT", "GLOCALE", "KLONDIKE", "MAHJONGG", "OS2CHESS", "MPPM", "WEPM",
+    "CLIPOS2", "MPCPUMON", "PMCHKDSK", "PMFORMAT", "PICVIEW", "PMSEEK", "PKGMGR", "ICONEDIT", "GLOCALE", "KLONDIKE", "MAHJONGG", "OS2CHESS", "MPPM", "WEPM",
     "CDPM", "MMVOLUME", "STPM", "TCPCFG2", "E", "VIEW", "APPINST", "PMINSTAL", "DISPLAY", "WEB", "WEBTEXT",
 ];
 
