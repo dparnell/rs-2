@@ -212,7 +212,9 @@ pub fn before_user_return(f: &mut TrapFrame) -> bool {
     if crate::api::proc::exit_list_step(&t, &p, f) || t.exit_requested() {
         return true;
     }
-    crate::api::signal::deliver(&t, &p, f);
+    if !crate::api::signal::deliver(&t, &p, f) {
+        crate::api::proc::deliver_kill(&t, &p, f);
+    }
     if t.exit_requested() {
         return true;
     }

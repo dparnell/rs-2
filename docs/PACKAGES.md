@@ -339,4 +339,17 @@ In the order the programs met them (each a separate commit):
     and ANPM takes its directory from there. From what ANPM needs; not checked
     against IBM's session manager.
 
+18. **DosKillThread** raises XCPT_ASYNC_PROCESS_TERMINATE in the thread as an
+    ordinary exception first (a wait it is in returns ERROR_INTERRUPT); the
+    thread ends only if no handler continues it. kLIBC delivers a signal to
+    another thread by DosSuspendThread, DosKillThread and DosResumeThread, and
+    its handler continues: dash (`sh`) lost thread 1 at the SIGCHLD of every
+    program it ran and waited for ever, so any RPM scriptlet that runs a
+    program (fontconfig's, qt5-qtbase's) hung the install until DASH was
+    killed.
+19. **MZ stubs** with a relocation table offset other than 40h still lead to
+    their LX header, as in IBM's `_ldrOpenNewExe`: RPM's `wps-object.exe` (a
+    wrapped REXX program, run by qt5-qtbase's `%post`) has 0 there and was
+    started in a DOS session.
+
 RPM, Berkeley DB, sqlite's locks, pycurl and HPFS needed nothing new.

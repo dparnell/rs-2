@@ -10,7 +10,7 @@ use crate::arch::gdt::{TIB_SEL, USER_CS, USER_DS};
 use crate::arch::idt::TrapFrame;
 use crate::fs::Handle;
 use crate::loader;
-use crate::task::thread::State;
+use crate::task::thread::{State, Thread};
 use crate::task::{process, sched, Process};
 use crate::vm::{self, pag, SegKind};
 
@@ -442,10 +442,34 @@ pub fn dos_kill_thread(c: &mut Ctx) -> u32 {
     let t = c.process.threads.lock().iter().find(|t| t.tid == tid && t.state() != State::Dead && !t.exit_requested()).cloned();
     match t {
         Some(t) => {
-            sched::kill(&t);
+            // As OS/2: the thread first sees XCPT_ASYNC_PROCESS_TERMINATE
+            // as an ordinary exception (a wait it is in returns
+            // ERROR_INTERRUPT), and goes on if a handler continues it.
+            // kLIBC delivers its signals that way (DosSuspendThread,
+            // DosKillThread, DosResumeThread): dash lost thread 1 at each
+            // SIGCHLD. With no handler taking it the thread ends.
+            t.kill_pending.store(true, Ordering::Release);
+            t.interrupt();
+            if t.state() == State::Blocked || t.state() == State::Suspended {
+                sched::wake(&t);
+            }
             0
         }
         None => err::INVALID_THREADID,
+    }
+}
+
+/// A DosKillThread for this thread: raise XCPT_ASYNC_PROCESS_TERMINATE on
+/// the way back to user mode (after a must-complete section).
+pub fn deliver_kill(t: &Arc<Thread>, p: &Arc<Process>, f: &mut TrapFrame) {
+    if t.must_complete.load(Ordering::Relaxed) > 0 || !t.kill_pending.swap(false, Ordering::AcqRel) {
+        return;
+    }
+    t.clear_interrupt();
+    let code = super::exceptions::xcpt::ASYNC_PROCESS_TERMINATE;
+    t.kill_raised.store(true, Ordering::Release);
+    if !super::exceptions::raise(f, p, t, code, 0, &[], f.rip as u32) {
+        super::exceptions::default_action(f, p, t, code);
     }
 }
 

@@ -70,6 +70,33 @@ unsafe extern "C" fn crit_then_spin(_: u32) {
     }
 }
 
+static POKED: AtomicU32 = AtomicU32::new(0);
+
+/// Continues XCPT_ASYNC_PROCESS_TERMINATE, as kLIBC's handler does for the
+/// DosKillThread it uses to deliver signals to another thread.
+unsafe extern "C" fn keep_alive(rep: *mut ExceptionReportRecord, _: *mut ExceptionRegistrationRecord, _: *mut ContextRecord, _: *mut u8) -> u32 {
+    unsafe {
+        if (*rep).num == XCPT_ASYNC_PROCESS_TERMINATE && (*rep).flags & EH_UNWINDING == 0 && POKED.load(Ordering::Relaxed) == 0 {
+            POKED.store(1, Ordering::Relaxed);
+            return XCPT_CONTINUE_EXECUTION;
+        }
+    }
+    XCPT_CONTINUE_SEARCH
+}
+
+/// Waits on the event under `keep_alive`: the first DosKillThread ends the
+/// wait with ERROR_INTERRUPT and the thread goes on.
+unsafe extern "C" fn block_kept(_: u32) {
+    let mut r = ExceptionRegistrationRecord { prev: null_mut(), handler: keep_alive };
+    unsafe {
+        DosSetExceptionHandler(&mut r);
+        let rc = DosWaitEventSem(H.load(Ordering::Relaxed), SEM_INDEFINITE_WAIT);
+        RC.store(rc, Ordering::Relaxed);
+        DosWaitEventSem(H.load(Ordering::Relaxed), SEM_INDEFINITE_WAIT);
+        DosUnsetExceptionHandler(&mut r);
+    }
+}
+
 /// Kill a thread blocked in `f` and check it goes away quickly without
 /// having returned from its call normally.
 fn kill_blocked(name: &str, f: ThreadFn) {
@@ -93,6 +120,25 @@ pub fn run() {
         DosCreateEventSem(null(), &mut ev, 0, 0);
         H.store(ev, Ordering::Relaxed);
         kill_blocked("DosWaitEventSem", block_event);
+
+        // A handler that continues XCPT_ASYNC_PROCESS_TERMINATE keeps the
+        // thread (suspended, killed, resumed: kLIBC's signal delivery);
+        // the second DosKillThread, not continued, ends it.
+        RC.store(0xffff, Ordering::Relaxed);
+        POKED.store(0, Ordering::Relaxed);
+        let k = thread(block_kept, 0);
+        DosSleep(30);
+        let s1 = DosSuspendThread(k);
+        let k1 = DosKillThread(k);
+        let r1 = DosResumeThread(k);
+        DosSleep(100);
+        let (poked, rc1) = (POKED.load(Ordering::Relaxed), RC.load(Ordering::Relaxed));
+        let k2 = DosKillThread(k);
+        let j = join(k);
+        if !(s1 == 0 && k1 == 0 && r1 == 0 && poked == 1 && rc1 == 95 && k2 == 0 && j == 0) {
+            println!("  kept: suspend {s1} kill {k1} resume {r1} handler {poked} wait {rc1} kill {k2} join {j}");
+        }
+        check("DosKillThread continued by a handler", s1 == 0 && k1 == 0 && r1 == 0 && poked == 1 && rc1 == 95 && k2 == 0 && j == 0);
 
         let mut mtx = 0;
         DosCreateMutexSem(null(), &mut mtx, 0, 1);

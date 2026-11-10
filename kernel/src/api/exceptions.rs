@@ -531,6 +531,11 @@ pub fn default_action(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>, code
             p.exit(3, 0);
             return;
         }
+        // DosKillThread that no handler continued: now the thread ends.
+        xcpt::ASYNC_PROCESS_TERMINATE if t.kill_raised.swap(false, core::sync::atomic::Ordering::AcqRel) => {
+            t.request_exit();
+            return;
+        }
         xcpt::PROCESS_TERMINATE | xcpt::ASYNC_PROCESS_TERMINATE | xcpt::UNWIND => return,
         _ => {}
     }

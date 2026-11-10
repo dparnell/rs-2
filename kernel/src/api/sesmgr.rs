@@ -180,10 +180,11 @@ fn is_mz_only(path: &str) -> bool {
     if h.len() < 0x40 || &h[..2] != b"MZ" && &h[..2] != b"ZM" {
         return false;
     }
-    // A new header needs a relocation table offset of 40h and its signature.
-    let reloc = u16::from_le_bytes([h[0x18], h[0x19]]);
+    // As IBM's _ldrOpenNewExe: the new header is wherever 3Ch points,
+    // whatever the relocation table offset says (bitwiseworks' wrapped
+    // REXX programs, such as RPM's wps-object.exe, have 0 there).
     let lfanew = u32::from_le_bytes([h[0x3c], h[0x3d], h[0x3e], h[0x3f]]);
-    if reloc >= 0x40 && lfanew >= 0x40 {
+    if lfanew != 0 {
         if let Some(sig) = crate::fs::read_range(path, lfanew as u64, 2) {
             if matches!(&sig[..], b"NE" | b"LE" | b"LX" | b"PE") {
                 return false;

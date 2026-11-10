@@ -44,7 +44,8 @@ pub fn detect(data: &[u8]) -> Result<Format, Error> {
     if sig != u16::from_le_bytes(*b"MZ") {
         return Err(Error::BadMagic);
     }
-    // New-style executables have e_lfarlc >= 0x40 and a pointer at 0x3C.
+    // The new header is wherever 0x3C points; like OS/2's loader, e_lfarlc
+    // is not looked at.
     let lfanew = r.u32(0x3c).unwrap_or(0) as usize;
     if lfanew == 0 || lfanew + 2 > data.len() {
         return Ok(Format::Mz);

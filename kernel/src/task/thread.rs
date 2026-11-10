@@ -110,6 +110,12 @@ pub struct Thread {
     /// The thread ends itself (DosExit, returning from its function): its
     /// handlers see XCPT_PROCESS_TERMINATE rather than the asynchronous one.
     pub sync_exit: AtomicBool,
+    /// DosKillThread from another thread: XCPT_ASYNC_PROCESS_TERMINATE is
+    /// raised on its way back to user mode, and the thread ends only if no
+    /// handler continues it.
+    pub kill_pending: AtomicBool,
+    /// That exception is being dispatched.
+    pub kill_raised: AtomicBool,
 }
 
 unsafe impl Send for Thread {}
@@ -168,6 +174,8 @@ impl Thread {
             win16_hi: crate::sync::SpinLock::new(alloc::vec::Vec::new()),
             exit_unwind: AtomicU8::new(0),
             sync_exit: AtomicBool::new(false),
+            kill_pending: AtomicBool::new(false),
+            kill_raised: AtomicBool::new(false),
         }
     }
 
