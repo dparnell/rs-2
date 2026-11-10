@@ -369,6 +369,13 @@ In the order the programs met them (each a separate commit):
     empty. With both fixes Designer runs: its main window, docks, Widget Box
     and New Form dialog.
 
+22. **PM_Fonts** in OS2.INI lists the public font files, as IBM's install
+    writes it from INI.RC: PMSHELL gives every font file in the boot drive's
+    `\PSFONTS` (rs2's Liberation fonts, and any TrueType, OpenType or Type 1
+    file put there) an entry with its full path when it has none. fontconfig
+    takes its OS/2 fonts from PM_Fonts (`fc-list` shows them); without fonts
+    in `/usr/share/fonts` Qt programs drew no text.
+
 Qt's OS/2 platform plugin sets no window icons, and `designer.exe` has no
 icon resource: like IBM's frame (WM_QUERYICON answers the icon set, else 0),
 the system menu then shows the plain bar.

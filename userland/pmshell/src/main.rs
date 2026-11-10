@@ -20,6 +20,10 @@ use os2::*;
 os2::entry!(main);
 
 unsafe extern "C" {
+    #[link_name = "PMSHAPI.115"]
+    fn PrfQueryProfileString(hini: u32, app: *const u8, key: *const u8, def: *const u8, buf: *mut u8, len: u32) -> u32;
+    #[link_name = "PMSHAPI.116"]
+    fn PrfWriteProfileString(hini: u32, app: *const u8, key: *const u8, data: *const u8) -> u32;
     #[link_name = "PMWIN.763"]
     fn WinInitialize(fs: u32) -> u32;
     #[link_name = "PMWIN.716"]
@@ -81,7 +85,51 @@ fn shell_running() -> bool {
 /// classes only in that process), and starts it again when it ends
 /// abnormally (a trap, or ended from the rescue screen). While another
 /// shell runs, it waits for it to end.
+const HINI_USERPROFILE: u32 = 0xffff_ffff;
+
+/// OS2.INI's PM_Fonts lists the public font files (IBM's install writes it
+/// from INI.RC: "\PSFONTS\HELV.OFM" and so on). rs2's own fonts in the
+/// boot drive's PSFONTS, and any font file put there, get an entry (key the
+/// file name, value its full path) unless they have one. PM's own font list
+/// does not need it, but OS/2 ports find fonts there: fontconfig reads
+/// PM_Fonts, and without it Qt programs (Qt Designer) drew no text.
+fn register_fonts() {
+    let mut v = [0u32; 1];
+    // QSV_BOOT_DRIVE
+    unsafe { DosQuerySysInfo(5, 5, v.as_mut_ptr(), 4) };
+    let drive = if (1..=26).contains(&v[0]) { b'A' + v[0] as u8 - 1 } else { b'C' };
+    let dir = [drive, b':', b'\\', b'P', b'S', b'F', b'O', b'N', b'T', b'S', b'\\'];
+    for ext in [&b"TTF"[..], b"OTF", b"PFB"] {
+        let mut spec = dir.to_vec();
+        spec.extend_from_slice(b"*.");
+        spec.extend_from_slice(ext);
+        spec.push(0);
+        let mut h = 0xffff_ffffu32; // HDIR_CREATE
+        let mut buf = FileFindBuf3 { next: 0, fdate_creation: 0, ftime_creation: 0, fdate_access: 0, ftime_access: 0, fdate_write: 0, ftime_write: 0, cb_file: 0, cb_alloc: 0, attr: 0, cch_name: 0, name: [0; 256] };
+        let mut n = 1;
+        // FIL_STANDARD, normal and read-only files.
+        let mut rc = unsafe { DosFindFirst(spec.as_ptr(), &mut h, 0x01, &mut buf as *mut _ as *mut u8, core::mem::size_of::<FileFindBuf3>() as u32, &mut n, 1) };
+        while rc == 0 && n > 0 {
+            let name = buf.name[..buf.cch_name as usize].to_ascii_uppercase();
+            let mut key = name.clone();
+            key.push(0);
+            let mut have = [0u8; 4];
+            let got = unsafe { PrfQueryProfileString(HINI_USERPROFILE, b"PM_Fonts\0".as_ptr(), key.as_ptr(), b"\0".as_ptr(), have.as_mut_ptr(), have.len() as u32) };
+            if got <= 1 {
+                let mut path = dir.to_vec();
+                path.extend_from_slice(&name);
+                path.push(0);
+                unsafe { PrfWriteProfileString(HINI_USERPROFILE, b"PM_Fonts\0".as_ptr(), key.as_ptr(), path.as_ptr()) };
+            }
+            n = 1;
+            rc = unsafe { DosFindNext(h, &mut buf as *mut _ as *mut u8, core::mem::size_of::<FileFindBuf3>() as u32, &mut n) };
+        }
+        unsafe { DosFindClose(h) };
+    }
+}
+
 fn system_shell() -> u32 {
+    register_fonts();
     let mut p: *const u8 = core::ptr::null();
     let mut prog = if unsafe { DosScanEnv(b"RUNWORKPLACE\0".as_ptr(), &mut p) } == 0 && !p.is_null() && !cstr(p).is_empty() {
         cstr(p)
