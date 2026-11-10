@@ -203,13 +203,20 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
     }
     // The LaunchPad, after the objects it shows (open at each start: its
     // shadow is in Startup).
-    out.push((b"LaunchPad;WPLaunchPad;<WP_DESKTOP>;PRESERVEOLD".to_vec(), b"FPOBJECTS=<WP_DRIVES>,<WP_OS2WIN>,<WP_SYSED>,<WP_ASSISTANCE>;DRAWEROBJECTS=2,<WP_OS2FS>;OBJECTID=<WP_LAUNCHPAD>".to_vec()));
-    out.push((b"LaunchPad;WPShadow;<WP_START>;PRESERVEOLD".to_vec(), b"SHADOWID=<WP_LAUNCHPAD>;OBJECTID=<RS2_LAUNCHPADSTART>".to_vec()));
+    // It does not float over other windows (rs2's choice; IBM's floats).
+    out.push((b"LaunchPad;WPLaunchPad;<WP_DESKTOP>;PRESERVEOLD".to_vec(), b"FPOBJECTS=<WP_DRIVES>,<WP_OS2WIN>,<WP_SYSED>,<WP_ASSISTANCE>;DRAWEROBJECTS=2,<WP_OS2FS>;LPFLOAT=NO;OBJECTID=<WP_LAUNCHPAD>".to_vec()));
+    // Not when the user closed it (launchpad.rs).
+    if prf_read(HINI_USER, b"PM_Workplace", crate::launchpad::CLOSED_KEY).is_none() {
+        out.push((LP_START.0.to_vec(), LP_START.1.to_vec()));
+    }
     out
 }
 
+/// The LaunchPad's shadow in the Startup folder: it opens at each start.
+pub const LP_START: (&[u8], &[u8]) = (b"LaunchPad;WPShadow;<WP_START>;PRESERVEOLD", b"SHADOWID=<WP_LAUNCHPAD>;OBJECTID=<RS2_LAUNCHPADSTART>");
+
 /// One entry: done (true), or its location is not there yet (false).
-fn install_object(key: &[u8], setup: &[u8]) -> bool {
+pub fn install_object(key: &[u8], setup: &[u8]) -> bool {
     let parts: Vec<&[u8]> = key.split(|&c| c == b';').collect();
     let (title, class, location) = (parts.first().copied().unwrap_or(b""), parts.get(1).copied().unwrap_or(b""), parts.get(2).copied().unwrap_or(b""));
     let flags = parts.get(3).map(|f| f.to_ascii_uppercase()).unwrap_or_default();
@@ -306,6 +313,11 @@ pub fn run() {
         let mut v = DESKTOP_VERSION.to_vec();
         v.push(0);
         prf_write(HINI_USER, b"PM_Workplace", b"Rs2Desktop", Some(&v));
+    }
+    // Once: LaunchPads made before rs2 stopped floating them stop too.
+    if prf_read(HINI_USER, b"PM_Workplace", b"Rs2LaunchPadNoFloat").is_none() {
+        pending.push((b"LaunchPad;WPLaunchPad;<WP_DESKTOP>;UPDATEONLY".to_vec(), b"LPFLOAT=NO;OBJECTID=<WP_LAUNCHPAD>".to_vec()));
+        prf_write(HINI_USER, b"PM_Workplace", b"Rs2LaunchPadNoFloat", Some(b"1\0"));
     }
     for k in prf_keys(HINI_USER, APP_OBJECTS) {
         let v = prf_read(HINI_USER, APP_OBJECTS, &k).unwrap_or_default();

@@ -13,6 +13,13 @@
 //! LPTEXT, LPDRAWERTEXT, LPSMALLICONS, LPHIDECTLS, LPFLOAT; the settings
 //! notebook has IBM's two LaunchPad pages (wpAddLaunchPadPage1, 2). The
 //! lists are kept as object handles.
+//!
+//! rs2's additions: LPAUTOHIDE (and "Hide automatically" on the Options
+//! page) slides the bar off the nearest screen edge a second after the
+//! pointer leaves it, leaving a strip that brings it back; closing the
+//! LaunchPad takes its shadow out of the Startup folder (OS2.INI's
+//! PM_Workplace Rs2LaunchPadClosed remembers that) and opening it puts the
+//! shadow back, so it stays closed or open across restarts.
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -38,6 +45,8 @@ const F_NODRAWERTEXT: u32 = 8;
 const F_SMALL: u32 = 16;
 const F_SHOWCTLS: u32 = 32;
 const F_NOFLOAT: u32 = 64;
+/// rs2's: hide at the screen edge when the pointer is not on it.
+const F_AUTOHIDE: u32 = 128;
 /// Action button styles.
 const ST_TEXT: u32 = 0;
 const ST_OFF: u32 = 1;
@@ -120,6 +129,7 @@ extern "C" fn lp_setup(o: usize, setup: *const u8) -> u32 {
             b"LPSMALLICONS" => flag(d, F_SMALL, yes(&v)),
             b"LPHIDECTLS" => flag(d, F_SHOWCTLS, !yes(&v)),
             b"LPFLOAT" => flag(d, F_NOFLOAT, !yes(&v)),
+            b"LPAUTOHIDE" => flag(d, F_AUTOHIDE, yes(&v)),
             b"LPACTIONSTYLE" => {
                 d.style = match v.to_ascii_uppercase().as_slice() {
                     b"OFF" => ST_OFF,
@@ -186,8 +196,32 @@ extern "C" fn lp_open(o: usize, cnr: u32, view: u32, param: u32) -> u32 {
     if view == OPEN_SETTINGS {
         return som::call_parent(wps::ccd("WPLaunchPad"), wps::cd("WPObject"), m::WPObject::wpOpen, &[o, cnr as usize, view as usize, param as usize]) as u32;
     }
+    set_closed(false);
     open_bar(o)
 }
+
+/// The LaunchPad closed (or opened) by the user: it stays so after a
+/// restart. Closed, its shadow leaves the Startup folder; opened again,
+/// the shadow comes back.
+fn set_closed(closed: bool) {
+    use crate::util::{prf_read, prf_write, HINI_USER};
+    let was = prf_read(HINI_USER, b"PM_Workplace", CLOSED_KEY).is_some();
+    if closed == was {
+        return;
+    }
+    if closed {
+        prf_write(HINI_USER, b"PM_Workplace", CLOSED_KEY, Some(b"1\0"));
+        if let Some(sh) = wps::handle_of_id(b"<RS2_LAUNCHPADSTART>").map(wps::object_from_handle).filter(|&x| x != 0) {
+            obj::call(m::WPObject::wpFree, &[sh]);
+        }
+    } else {
+        prf_write(HINI_USER, b"PM_Workplace", CLOSED_KEY, None);
+        crate::install::install_object(crate::install::LP_START.0, crate::install::LP_START.1);
+    }
+}
+
+/// PM_Workplace's key for a LaunchPad the user closed.
+pub const CLOSED_KEY: &[u8] = b"Rs2LaunchPadClosed";
 
 // ---- The windows ----
 
@@ -208,6 +242,10 @@ struct LpWin {
     pressed: Option<Hit>,
     /// The object the pop-up menu is about.
     menu_on: Option<usize>,
+    /// Hidden at the screen edge (auto-hide): where it was shown.
+    hidden: Option<(i32, i32)>,
+    /// How long the pointer has been off the bar (ms).
+    idle: u32,
 }
 
 static mut WINS: Vec<LpWin> = Vec::new();
@@ -219,6 +257,10 @@ fn wins() -> &'static mut Vec<LpWin> {
 
 const CLASS: &[u8] = b"WPS_LaunchPad\0";
 const TID_FLOAT: u32 = 0x5704;
+const TID_HIDE: u32 = 0x5705;
+/// The auto-hide timer's period, and how long the pointer must be away.
+const HIDE_TICK: u32 = 200;
+const HIDE_AFTER: u32 = 1000;
 const FCF_BORDER: u32 = 0x0200;
 const DP_MINI: u32 = 0x0004;
 const DT_CENTER: u32 = 0x0100;
@@ -237,6 +279,8 @@ unsafe extern "C" {
     fn WinDrawPointer(hps: u32, x: i32, y: i32, h: u32, fs: u32) -> u32;
     #[link_name = "PMWIN.890"]
     fn WinTrackRect(h: u32, hps: u32, pti: *mut i32) -> u32;
+    #[link_name = "PMWIN.804"]
+    fn WinQueryCapture(desk: u32) -> u32;
 }
 
 fn hab() -> u32 {
@@ -401,12 +445,64 @@ fn open_bar(o: usize) -> u32 {
     if frame == 0 {
         return 0;
     }
-    wins().push(LpWin { obj: o, frame, client, drawer: 0, items, pressed: None, menu_on: None });
+    wins().push(LpWin { obj: o, frame, client, drawer: 0, items, pressed: None, menu_on: None, hidden: None, idle: 0 });
     if ld(o).flags & F_NOFLOAT == 0 {
         unsafe { WinStartTimer(hab(), client, TID_FLOAT, 1000) };
     }
+    if ld(o).flags & F_AUTOHIDE != 0 {
+        unsafe { WinStartTimer(hab(), client, TID_HIDE, HIDE_TICK) };
+    }
     frame
 }
+
+/// Auto-hide: the bar goes to the nearest screen edge (a strip of it
+/// stays on the screen) when the pointer has been off it for a second,
+/// and comes back, on top, when the pointer is on that strip.
+fn autohide_tick(w: usize) {
+    let (o, frame) = (wins()[w].obj, wins()[w].frame);
+    let s = window_pos(frame);
+    let p = pointer_pos();
+    let (sw, sh) = screen();
+    match wins()[w].hidden {
+        None => {
+            let near = p.x >= s.x - 4 && p.x < s.x + s.cx + 4 && p.y >= s.y - 4 && p.y < s.y + s.cy + 4;
+            let busy = wins()[w].pressed.is_some()
+                || wins().iter().any(|x| x.obj == o && x.drawer != 0)
+                || unsafe { WinQueryCapture(HWND_DESKTOP) } != 0
+                || crate::desktop::locked();
+            if near || busy {
+                wins()[w].idle = 0;
+                return;
+            }
+            wins()[w].idle += HIDE_TICK;
+            if wins()[w].idle < HIDE_AFTER {
+                return;
+            }
+            // Bottom, top, left, right: the nearest edge.
+            let d = [s.y, sh - (s.y + s.cy), s.x, sw - (s.x + s.cx)];
+            let e = (0..4).min_by_key(|&i| d[i]).unwrap_or(0);
+            let (x, y) = match e {
+                0 => (s.x, STRIP - s.cy),
+                1 => (s.x, sh - STRIP),
+                2 => (STRIP - s.cx, s.y),
+                _ => (sw - STRIP, s.y),
+            };
+            wins()[w].hidden = Some((s.x, s.y));
+            unsafe { WinSetWindowPos(frame, 0, x, y, 0, 0, SWP_MOVE) };
+        }
+        Some((x, y)) => {
+            let on = p.x >= s.x.max(0) - 1 && p.x < (s.x + s.cx).min(sw) + 1 && p.y >= s.y.max(0) - 1 && p.y < (s.y + s.cy).min(sh) + 1;
+            if on {
+                wins()[w].hidden = None;
+                wins()[w].idle = 0;
+                unsafe { WinSetWindowPos(frame, HWND_TOP, x, y, 0, 0, SWP_MOVE | SWP_ZORDER) };
+            }
+        }
+    }
+}
+
+/// What stays on the screen of a hidden LaunchPad.
+const STRIP: i32 = 3;
 
 /// Close the LaunchPad's windows and open the bar again (its settings or
 /// lists changed).
@@ -452,7 +548,7 @@ fn toggle_drawer(o: usize, bar: usize, n: usize, at: RectL) {
     title.extend_from_slice(b" - drawer");
     let (frame, client) = new_frame(o, &title, w, h, x, y);
     if frame != 0 {
-        wins().push(LpWin { obj: o, frame, client, drawer: n, items, pressed: None, menu_on: None });
+        wins().push(LpWin { obj: o, frame, client, drawer: n, items, pressed: None, menu_on: None, hidden: None, idle: 0 });
     }
 }
 
@@ -732,9 +828,16 @@ extern "C" fn lp_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                 CMD_SETTINGS => {
                     obj::call(m::WPObject::wpViewObject, &[o, 0, OPEN_SETTINGS as usize, 0]);
                 }
-                CMD_CLOSE => close_all(o),
+                CMD_CLOSE => {
+                    close_all(o);
+                    set_closed(true);
+                }
                 _ => {}
             }
+            0
+        }
+        WM_TIMER if a == TID_HIDE => {
+            autohide_tick(w);
             0
         }
         WM_TIMER if a == TID_FLOAT => {
@@ -761,7 +864,14 @@ extern "C" fn lp_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
         }
         WM_CLOSE => {
             let o = wins()[w].obj;
-            if wins()[w].drawer == 0 { close_all(o) } else { close_drawers(o) }
+            if wins()[w].drawer == 0 {
+                // Only the user closes it: shut down leaves the shell's
+                // own windows alone.
+                close_all(o);
+                set_closed(true);
+            } else {
+                close_drawers(o)
+            }
             0
         }
         _ => unsafe { WinDefWindowProc(h, msg, a, b) },
@@ -773,7 +883,7 @@ extern "C" fn lp_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 const ID_OPTS: u16 = 580; // .. 586
 const ID_STYLE: u16 = 590; // .. 593
 /// The first page's check boxes: (text, flag, flag set means checked).
-const OPTS: [(&[u8], u32, bool); 7] = [
+const OPTS: [(&[u8], u32, bool); 8] = [
     (b"Display ~vertically", F_VERTICAL, true),
     (b"~Small icons", F_SMALL, true),
     (b"Show ~titles on the LaunchPad", F_TEXT, true),
@@ -781,6 +891,7 @@ const OPTS: [(&[u8], u32, bool); 7] = [
     (b"~Close a drawer after opening an object", F_KEEPDRAWER, false),
     (b"~Float on top", F_NOFLOAT, false),
     (b"Show the title ~bar", F_SHOWCTLS, true),
+    (b"~Hide automatically", F_AUTOHIDE, true),
 ];
 
 extern "C" fn page1_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
