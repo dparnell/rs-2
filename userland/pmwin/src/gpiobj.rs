@@ -975,7 +975,7 @@ fn caps(i: i32) -> i32 {
         11 | 13 | 36 => 16,
         14 | 33 => 1 << 24,                    // COLORS, PHYS_COLORS
         15 => 1,                               // COLOR_PLANES
-        16 => 24,                              // COLOR_BITCOUNT
+        16 => 32,                              // COLOR_BITCOUNT
         17 => 1 | 4,                           // COLOR_TABLE_SUPPORT: RGB_8, TRUE_MIX
         18 => 3,                               // MOUSE_BUTTONS
         19 => 1 | 2 | 8 | 16 | 32 | 64,        // FOREGROUND_MIX_SUPPORT
@@ -1266,7 +1266,10 @@ pub extern "C" fn GpiQueryBitmapBits(hps: u32, start: i32, scans: i32, buf: *mut
 /// others for it (QueryDeviceBitmaps32).
 #[unsafe(no_mangle)]
 pub extern "C" fn GpiQueryDeviceBitmapFormats(_hps: u32, n: i32, out: *mut i32) -> u32 {
-    let f = if palette8().is_some() { [1, 8, 1, 24, 1, 4, 1, 1] } else { [1, 24, 1, 8, 1, 4, 1, 1] };
+    // True colour is the 32 bits a pixel the screen has (as Panorama and
+    // SNAP report it): Qt draws with its 24-bit format in red, green, blue
+    // order, so on a 24-bit device its reds and blues traded places.
+    let f: &[i32] = if palette8().is_some() { &[1, 8, 1, 24, 1, 4, 1, 1] } else { &[1, 32, 1, 24, 1, 8, 1, 4, 1, 1] };
     if out.is_null() || n < 2 {
         return 0;
     }

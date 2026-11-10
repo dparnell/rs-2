@@ -204,7 +204,11 @@ engine describes one:
   TRUE_MIX at 8 bits).
 - `GpiQueryDeviceBitmapFormats`: the device's format first, then the
   others in PMMERGE's order (its `QueryDeviceBitmaps32`): (1,8), (1,24),
-  (1,4), (1,1); in true colour (1,24), (1,8), (1,4), (1,1).
+  (1,4), (1,1); in true colour (1,32), (1,24), (1,8), (1,4), (1,1), with
+  `CAPS_COLOR_BITCOUNT` 32, as display drivers with a 32-bit screen
+  (Panorama, SNAP) report it: Qt's OS/2 plugin takes its image format from
+  the first entry, and its 24-bit one is red, green, blue in memory where
+  PM's is blue, green, red (Qt Designer's highlights came out red).
 - The hardware palette (`gpi::palette::Physical`, in PM's shared state)
   starts as PMMERGE's 256-entry default palette (a 7x8x4 colour cube with
   32 greys); every pel PM draws on the screen gets the nearest of its

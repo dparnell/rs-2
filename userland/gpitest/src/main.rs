@@ -642,7 +642,7 @@ fn self_checks(hab: u32) {
         let hdc = DevOpenDC(hab, OD_MEMORY, b"*\0".as_ptr(), 0, null(), 0);
         let mut caps = [0i32; 2];
         DevQueryCaps(hdc, 16, 1, caps.as_mut_ptr());
-        check("DevQueryCaps CAPS_COLOR_BITCOUNT", caps[0] == if C256.load(Ordering::Relaxed) != 0 { 8 } else { 24 });
+        check("DevQueryCaps CAPS_COLOR_BITCOUNT", caps[0] == if C256.load(Ordering::Relaxed) != 0 { 8 } else { 32 });
         DevCloseDC(hdc);
 
         // The screen PS is on the screen's DC (VisualAge Smalltalk's font
@@ -705,8 +705,8 @@ fn display_checks(hab: u32) {
             check("256 colours: GpiQueryRealColors lists the hardware palette", nreal == 256 && real[0] == 0 && real[255] == 0xffffff && real[112] == 0x080808);
             check("256 colours: GpiQueryNearestColor", GpiQueryNearestColor(sps, 0, 0x808080) == 0x838383 && GpiQueryNearestColor(sps, 0, 0xffffff) == 0xffffff);
         } else {
-            check("true colour: CAPS_COLOR_BITCOUNT 24, CAPS_COLORS 16M", caps[16] == 24 && caps[14] == 1 << 24);
-            check("true colour: GpiQueryDeviceBitmapFormats 24 bits first", fok && f == [1, 24, 1, 8, 1, 4, 1, 1]);
+            check("true colour: CAPS_COLOR_BITCOUNT 32, CAPS_COLORS 16M", caps[16] == 32 && caps[14] == 1 << 24);
+            check("true colour: GpiQueryDeviceBitmapFormats 32 bits first", fok && f == [1, 32, 1, 24, 1, 8, 1, 4]);
             check("true colour: GpiQueryNearestColor", GpiQueryNearestColor(sps, 0, 0x123456) == 0x123456);
         }
         WinReleasePS(sps);
@@ -1259,7 +1259,7 @@ fn main(s: &Startup) -> u32 {
             let sps = WinGetScreenPS(1);
             let mut bits = 0;
             DevQueryCaps(GpiQueryDevice(sps), 16, 1, &mut bits);
-            check("RS2COLORS=256: other programs still see true colour", bits == 24 && GpiQueryNearestColor(sps, 0, 0x123456) == 0x123456);
+            check("RS2COLORS=256: other programs still see true colour", bits == 32 && GpiQueryNearestColor(sps, 0, 0x123456) == 0x123456);
             WinReleasePS(sps);
         }
     }

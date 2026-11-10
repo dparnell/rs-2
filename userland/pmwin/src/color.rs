@@ -53,6 +53,8 @@ pub fn default(i: i32) -> Rgb {
         -27 | -18 | -35 | -38 => 0x000000, // OUTPUTTEXT, MENUTEXT, ICONTEXT, BUTTONDEFAULT
         -26 => 0x000080,                    // WINDOWSTATICTEXT
         -46 => 0xa0a0a0,                    // MENUDISABLEDTEXT
+        -45 => 0xffffff,                    // MENUHILITE (MenuHiliteText)
+        -44 => 0x2b00aa,                    // MENUHILITEBGND (MenuHilite)
         -36 | -37 | -48 | -50 => 0x808080,  // SHADOW, TITLEBOTTOM, SHADOWTEXT, SHADOWHILITEBGND
         -49 => 0xffff00,                    // SHADOWHILITEFGND
         -16 | -43 | -47 => 0xffffff,        // TITLETEXT, PAGEBACKGROUND, ENTRYFIELD
