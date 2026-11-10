@@ -231,6 +231,44 @@ pub fn run() {
         DosCloseEventSem(h);
         check("name released after close", DosOpenEventSem(b"\\SEM32\\STRESS\\EV\0".as_ptr(), &mut h2) == 187);
 
+        // DCE_POSTONE: each post lets one waiter through and is used up
+        // (Qt's mutexes hand the lock over this way).
+        let mut h1 = 0;
+        DosCreateEventSem(null(), &mut h1, 0x0800, 0);
+        EV.store(h1, Ordering::Relaxed);
+        RELEASED.store(0, Ordering::Relaxed);
+        let (a, b) = (thread(count_ev, 0), thread(count_ev, 0));
+        DosSleep(100);
+        DosPostEventSem(h1);
+        DosSleep(200);
+        let one = RELEASED.load(Ordering::Relaxed);
+        DosPostEventSem(h1);
+        join(a);
+        join(b);
+        let used = DosWaitEventSem(h1, 0);
+        DosPostEventSem(h1);
+        let kept = DosWaitEventSem(h1, 0);
+        let gone = DosWaitEventSem(h1, 0);
+        check("DCE_POSTONE releases one waiter per post", one == 1 && RELEASED.load(Ordering::Relaxed) == 2 && used == ERROR_TIMEOUT && kept == 0 && gone == ERROR_TIMEOUT);
+        DosCloseEventSem(h1);
+
+        // DCE_AUTORESET: a post releases the threads waiting then and resets.
+        DosCreateEventSem(null(), &mut h1, 0x1000, 0);
+        EV.store(h1, Ordering::Relaxed);
+        RELEASED.store(0, Ordering::Relaxed);
+        let (a, b) = (thread(count_ev, 0), thread(count_ev, 0));
+        DosSleep(100);
+        DosPostEventSem(h1);
+        join(a);
+        join(b);
+        let mut n = 9;
+        let reset = DosQueryEventSem(h1, &mut n);
+        DosPostEventSem(h1);
+        let kept = DosWaitEventSem(h1, 0);
+        let gone = DosWaitEventSem(h1, 0);
+        check("DCE_AUTORESET releases the waiters and resets", RELEASED.load(Ordering::Relaxed) == 2 && reset == 0 && n == 0 && kept == 0 && gone == ERROR_TIMEOUT);
+        DosCloseEventSem(h1);
+
         // A child that owns a shared mutex and dies.
         let mut hm = 0;
         DosCreateMutexSem(b"\\SEM32\\STRESS\\MTX\0".as_ptr(), &mut hm, 0, 0);
@@ -239,6 +277,14 @@ pub fn run() {
         check("owner process died: OWNER_DIED", DosRequestMutexSem(hm, 1000) == ERROR_SEM_OWNER_DIED);
         DosReleaseMutexSem(hm);
         DosCloseMutexSem(hm);
+    }
+}
+
+static RELEASED: AtomicU32 = AtomicU32::new(0);
+
+unsafe extern "C" fn count_ev(_: u32) {
+    if unsafe { DosWaitEventSem(EV.load(Ordering::Relaxed), 3000) } == 0 {
+        RELEASED.fetch_add(1, Ordering::Relaxed);
     }
 }
 

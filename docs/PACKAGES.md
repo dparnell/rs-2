@@ -352,4 +352,17 @@ In the order the programs met them (each a separate commit):
     wrapped REXX program, run by qt5-qtbase's `%post`) has 0 there and was
     started in a DOS session.
 
+20. **DCE_POSTONE and DCE_AUTORESET** event semaphores (DosCreateEventSem's
+    0800h and 1000h): a post-one semaphore lets one waiting thread through
+    per post, an auto-reset one releases the threads waiting at the post and
+    resets; a wait that is satisfied uses the post up. Qt's mutexes hand the
+    lock over with post-one semaphores: rs2 kept the post, a later wait went
+    through without the lock, and Qt Designer died in
+    `QBasicMutex::unlockInternal` (SIGSEGV in its event dispatcher thread).
+    Found with EXCEPTQ (`yum install exceptq`; reports in `\VAR\LOG\APP`).
+
+Qt's OS/2 platform plugin sets no window icons, and `designer.exe` has no
+icon resource: like IBM's frame (WM_QUERYICON answers the icon set, else 0),
+the system menu then shows the plain bar.
+
 RPM, Berkeley DB, sqlite's locks, pycurl and HPFS needed nothing new.

@@ -27,9 +27,15 @@ const ERROR_TOO_MANY_POSTS: u32 = 298;
 const ERROR_EMPTY_MUXWAIT: u32 = 286;
 const ERROR_WRONG_TYPE: u32 = 292;
 const ERROR_EXCL_SEM_ALREADY_OWNED: u32 = 101;
+/// DosCreateEventSem flags (OS/2 4.5 kernels): a post releases one waiting
+/// thread, or the semaphore resets itself when a wait is satisfied.
+const DCE_POSTONE: u32 = 0x0800;
+const DCE_AUTORESET: u32 = 0x1000;
 
 enum Kind {
-    Event { posts: u32 },
+    /// `mode`: DCE_POSTONE / DCE_AUTORESET; `round` counts auto-reset posts
+    /// that released the threads waiting at the time.
+    Event { posts: u32, mode: u32, round: u32 },
     Mutex { owner: Option<(u32, u32)>, count: u32, died: bool },
     MuxWait { recs: Vec<(u32, u32)>, all: bool },
 }
@@ -227,7 +233,8 @@ fn deadline(ms: u32) -> Option<u64> {
 
 pub fn dos_create_event_sem(c: &mut Ctx) -> u32 {
     let posted = c.arg(3) != 0;
-    create(c, Kind::Event { posts: posted as u32 })
+    let mode = c.arg(2) & (DCE_POSTONE | DCE_AUTORESET);
+    create(c, Kind::Event { posts: posted as u32, mode, round: 0 })
 }
 
 pub fn dos_open_event_sem(c: &mut Ctx) -> u32 {
@@ -240,26 +247,66 @@ pub fn dos_close_event_sem(c: &mut Ctx) -> u32 {
 
 pub fn dos_post_event_sem(c: &mut Ctx) -> u32 {
     let Some(s) = get(c, c.arg(0)) else { return err::INVALID_HANDLE };
-    let r = match &mut *s.kind.lock() {
-        Kind::Event { posts } => {
-            if *posts >= 0xffff {
-                ERROR_TOO_MANY_POSTS
-            } else {
-                *posts += 1;
-                if *posts > 1 { ERROR_ALREADY_POSTED } else { 0 }
-            }
+    post(&s).unwrap_or(err::INVALID_HANDLE)
+}
+
+/// Post an event semaphore: None if it is not one. Qt's mutexes rely on
+/// DCE_POSTONE (each post hands the lock to one waiter); with it ignored
+/// a stale post let a waiter through and Qt Designer crashed unlocking.
+fn post(s: &Sem) -> Option<u32> {
+    let r = {
+        let waiting = s.waiters.has_waiter(|_| true);
+        let mut k = s.kind.lock();
+        let Kind::Event { posts, mode, round } = &mut *k else { return None };
+        if *mode & DCE_POSTONE == 0 && *mode & DCE_AUTORESET != 0 && waiting && *posts == 0 {
+            // Release the threads waiting now; the semaphore stays reset.
+            *round = round.wrapping_add(1);
+            0
+        } else if *posts >= 0xffff {
+            ERROR_TOO_MANY_POSTS
+        } else {
+            *posts += 1;
+            if *posts > 1 { ERROR_ALREADY_POSTED } else { 0 }
         }
-        _ => return err::INVALID_HANDLE,
     };
     s.waiters.wake_all();
     wake_muxwaits();
-    r
+    Some(r)
+}
+
+/// Whether a wait that started at auto-reset generation `g0` is satisfied;
+/// takes the post when the semaphore resets itself.
+fn take_event(s: &Sem, g0: u32) -> bool {
+    let mut k = s.kind.lock();
+    let Kind::Event { posts, mode, round } = &mut *k else { return false };
+    if *mode == 0 {
+        return *posts > 0;
+    }
+    if *round != g0 {
+        return true;
+    }
+    if *posts == 0 {
+        return false;
+    }
+    if *mode & DCE_POSTONE != 0 {
+        *posts -= 1;
+    } else {
+        *posts = 0;
+    }
+    true
+}
+
+fn event_round(s: &Sem) -> u32 {
+    match &*s.kind.lock() {
+        Kind::Event { round, .. } => *round,
+        _ => 0,
+    }
 }
 
 pub fn dos_reset_event_sem(c: &mut Ctx) -> u32 {
     let Some(s) = get(c, c.arg(0)) else { return err::INVALID_HANDLE };
     let mut k = s.kind.lock();
-    let Kind::Event { posts } = &mut *k else { return err::INVALID_HANDLE };
+    let Kind::Event { posts, .. } = &mut *k else { return err::INVALID_HANDLE };
     let n = *posts;
     *posts = 0;
     drop(k);
@@ -270,7 +317,7 @@ pub fn dos_reset_event_sem(c: &mut Ctx) -> u32 {
 pub fn dos_query_event_sem(c: &mut Ctx) -> u32 {
     let Some(s) = get(c, c.arg(0)) else { return err::INVALID_HANDLE };
     let n = match &*s.kind.lock() {
-        Kind::Event { posts } => *posts,
+        Kind::Event { posts, .. } => *posts,
         _ => return err::INVALID_HANDLE,
     };
     c.write_u32(c.arg(1), n);
@@ -278,16 +325,17 @@ pub fn dos_query_event_sem(c: &mut Ctx) -> u32 {
 }
 
 fn event_posted(s: &Sem) -> bool {
-    matches!(&*s.kind.lock(), Kind::Event { posts } if *posts > 0)
+    matches!(&*s.kind.lock(), Kind::Event { posts, .. } if *posts > 0)
 }
 
 pub fn dos_wait_event_sem(c: &mut Ctx) -> u32 {
     let Some(s) = get(c, c.arg(0)) else { return err::INVALID_HANDLE };
     let ms = c.arg(1);
+    let g0 = event_round(&s);
     if ms == 0 {
-        return if event_posted(&s) { 0 } else { ERROR_TIMEOUT };
+        return if take_event(&s, g0) { 0 } else { ERROR_TIMEOUT };
     }
-    if s.waiters.wait_until(deadline(ms), || event_posted(&s)) {
+    if s.waiters.wait_until(deadline(ms), || take_event(&s, g0)) {
         0
     } else if c.thread.exit_requested() || c.thread.interrupted() {
         err::INTERRUPT
@@ -476,7 +524,7 @@ pub fn dos_wait_mux_wait_sem(c: &mut Ctx) -> u32 {
         if all {
             // All events posted / all mutexes obtainable.
             let ready = sems.iter().all(|(s, _)| match &*s.kind.lock() {
-                Kind::Event { posts } => *posts > 0,
+                Kind::Event { posts, .. } => *posts > 0,
                 Kind::Mutex { owner, .. } => owner.is_none() || *owner == Some(me),
                 _ => false,
             });
@@ -492,7 +540,7 @@ pub fn dos_wait_mux_wait_sem(c: &mut Ctx) -> u32 {
         } else {
             for (s, u) in &sems {
                 let hit = match &*s.kind.lock() {
-                    Kind::Event { posts } => *posts > 0,
+                    Kind::Event { posts, .. } => *posts > 0,
                     Kind::Mutex { .. } => false,
                     _ => false,
                 };
@@ -628,7 +676,7 @@ pub fn snapshot32() -> Vec<Sem32Info> {
     for (h, s) in sems {
         let mut flags = if s.shared { 0x0001 } else { 0 };
         let (count, extra) = match &*s.kind.lock() {
-            Kind::Event { posts } => {
+            Kind::Event { posts, .. } => {
                 flags |= 0x0010;
                 if *posts > 0 {
                     flags |= 0x0040;
@@ -961,13 +1009,7 @@ pub fn mutex_owner(name: &str) -> Option<(u32, u32)> {
 /// semaphore).
 pub fn post_event_handle(pid: u32, h: u32) {
     let Some(s) = TABLE.lock().sems.get(&key(pid, h)).cloned() else { return };
-    if let Kind::Event { posts } = &mut *s.kind.lock() {
-        if *posts < 0xffff {
-            *posts += 1;
-        }
-    }
-    s.waiters.wake_all();
-    wake_muxwaits();
+    let _ = post(&s);
 }
 
 pub fn is_event_handle(c: &Ctx, h: u32) -> bool {
