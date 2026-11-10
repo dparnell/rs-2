@@ -25,7 +25,11 @@ pub fn rs2_map_display(c: &mut Ctx) -> u32 {
     if c.process.exe.app_type == 3 {
         let pm = session::pm_session_or_create();
         c.process.session.store(pm, Ordering::Relaxed);
-        session::select(pm);
+        // Already in front (a program started from PM): selecting again
+        // would repaint every window.
+        if session::foreground() != pm {
+            session::select(pm);
+        }
     }
     write_info(c, &d);
     0

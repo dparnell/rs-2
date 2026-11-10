@@ -105,6 +105,11 @@ process (the window list).
 The session manager gains a PM session type: the first PM program starts
 (or joins) the PM session, which owns the framebuffer while it is in the
 foreground and receives raw input instead of the text keyboard queue.
+DosStartSession still gives a PM program a session of its own (for
+termination queues and the switch list), but never shows it: the PM
+session comes to the front instead (if it exists; else the program's
+`Rs2MapDisplay` brings it up), so starting a program from the desktop
+no longer flashes that session's empty, black screen.
 Switching to a text session and back makes the kernel queue a repaint
 event so the PM server repaints everything. Switching away (Alt+Esc, the
 text window list, Alt+Home on a VIO window, a pop-up) queues

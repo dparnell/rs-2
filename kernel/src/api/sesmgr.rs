@@ -373,10 +373,19 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
         crate::viowin::changed();
     }
     if !sd.background {
-        if caller_in_front(caller_session) {
-            session::select(sid);
-        } else {
+        if !caller_in_front(caller_session) {
             rc = ERROR_SMG_START_IN_BACKGROUND;
+        } else if app & 7 == 3 {
+            // A PM program joins the PM session when it maps the display
+            // (Rs2MapDisplay brings PM to the front then): its own session
+            // never has a picture, and showing it put a blank screen up
+            // until then.
+            let pm = session::pm_session();
+            if pm != 0 && session::foreground() != pm {
+                session::select(pm);
+            }
+        } else {
+            session::select(sid);
         }
     }
     Ok((sid, child.pid, rc))
