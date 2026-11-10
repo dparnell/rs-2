@@ -500,6 +500,50 @@ impl Desktop {
         }
     }
 
+    /// The siblings a window owns, directly or through other siblings it
+    /// owns, come just above it, in the order they had (IBM's frame does
+    /// this when it changes z-order: FrameAdjustFramePos,
+    /// FrameAddSelfAndOwnees). Qt's popup menus are owned by their frame,
+    /// which a click on the menu bar activates after the menu opened.
+    pub fn lift_ownees(&mut self, h: Hwnd) {
+        let Some(p) = self.get(h).map(|w| w.parent) else { return };
+        let Some(kids) = self.windows.get(&p).map(|pw| pw.children.clone()) else { return };
+        let owned = |w: Hwnd| {
+            let mut o = self.get(w).map_or(0, |x| x.owner);
+            for _ in 0..kids.len() {
+                if o == h {
+                    return true;
+                }
+                if o == 0 || o == w || !kids.contains(&o) {
+                    return false;
+                }
+                o = self.get(o).map_or(0, |x| x.owner);
+            }
+            false
+        };
+        let Some(at) = kids.iter().position(|&c| c == h) else { return };
+        let ownees: Vec<Hwnd> = kids.iter().copied().filter(|&c| c != h && owned(c)).collect();
+        // Already right above it, in order?
+        if ownees.is_empty() || kids.get(at + 1..at + 1 + ownees.len()) == Some(&ownees[..]) {
+            return;
+        }
+        let mut rest: Vec<Hwnd> = kids.iter().copied().filter(|c| !ownees.contains(c)).collect();
+        let at = rest.iter().position(|&c| c == h).unwrap_or(0);
+        for (i, &o) in ownees.iter().enumerate() {
+            rest.insert(at + 1 + i, o);
+        }
+        if let Some(pw) = self.windows.get_mut(&p) {
+            pw.children = rest;
+        }
+        self.generation = self.generation.wrapping_add(1);
+        for o in ownees {
+            if self.get(o).is_some_and(|w| w.visible_style()) {
+                let r = self.screen_rect(o);
+                self.invalidate_screen(r);
+            }
+        }
+    }
+
     /// Put a window just below a sibling (WinCreateWindow's and
     /// WinSetWindowPos' hwndInsertBehind when it names a window).
     pub fn place_behind(&mut self, h: Hwnd, behind: Hwnd) {

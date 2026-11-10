@@ -581,14 +581,30 @@ pub fn top_level(h: u32) -> u32 {
 }
 
 /// Make a top-level window active: on top, focus on its client.
+/// A frame's owned windows stay above it when its z-order changes.
+fn ownees_follow(h: u32) {
+    if st().frames.contains_key(&h) {
+        st().desk.lift_ownees(h);
+    }
+}
+
 pub fn activate(h: u32) {
+    activate_ex(h, true);
+}
+
+/// Make the top-level window of `h` active; `raise`: bring it to the top
+/// (not when WM_ADJUSTWINDOWPOS took SWP_ZORDER out or put it elsewhere).
+fn activate_ex(h: u32, raise: bool) {
     let top = top_level(h);
     if top == HWND_DESKTOP || top == 0 {
         return;
     }
     let s = st();
     let old = s.active;
-    s.desk.to_top(top);
+    if raise {
+        s.desk.to_top(top);
+        ownees_follow(top);
+    }
     s.active = top;
     let saved = s.frames.get(&top).map_or(0, |f| f.focus_save);
     let client = s.frames.get(&top).map_or(top, |f| if f.client != 0 { f.client } else { top });
@@ -685,12 +701,21 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
     let (ox, oy, ocx, ocy) = (w.x, w.y, w.cx, w.cy);
     let was_visible = w.style & ws::VISIBLE != 0;
     // The window may change the new position (WM_ADJUSTWINDOWPOS, mp1 a
-    // SWP: fl, cy, cx, y, x, hwndInsertBehind, hwnd), as PM asks it.
-    let (mut x, mut y, mut cx, mut cy) = (x, y, cx, cy);
-    if fl & (SWP_MOVE | SWP_SIZE) != 0 && fl & SWP_NOADJUST == 0 {
+    // SWP: fl, cy, cx, y, x, hwndInsertBehind, hwnd). As IBM's
+    // XCalcValidRects: for every change without SWP_NOADJUST (z-order and
+    // activation too), and its flags and hwndInsertBehind count as well.
+    // Qt's frame takes SWP_ACTIVATE out and puts itself behind its open
+    // popup menu there; without that a click on the menu bar raised the
+    // frame over the menu it had just opened.
+    let asked = fl;
+    let (mut x, mut y, mut cx, mut cy, mut fl, mut behind) = (x, y, cx, cy, fl, behind);
+    if fl & SWP_NOADJUST == 0 {
         let mut swp: [u32; 9] = [fl, cy as u32, cx as u32, y as u32, x as u32, behind, h, 0, 0];
         send(h, WM_ADJUSTWINDOWPOS, swp.as_mut_ptr() as u32, 0);
         (cy, cx, y, x) = (swp[1] as i32, swp[2] as i32, swp[3] as i32, swp[4] as i32);
+        // The minimize/maximize bits were dealt with above.
+        fl = (swp[0] & !(frame::SWP_MINIMIZE | frame::SWP_MAXIMIZE | frame::SWP_RESTORE)) | (fl & (frame::SWP_MINIMIZE | frame::SWP_MAXIMIZE | frame::SWP_RESTORE));
+        behind = swp[5];
     }
     let s = st();
     if s.desk.get(h).is_none() {
@@ -727,8 +752,14 @@ pub extern "C" fn WinSetWindowPos(h: u32, behind: u32, x: i32, y: i32, cx: i32, 
     if fl & SWP_ZORDER != 0 && behind != HWND_TOP && behind != 4 && st().desk.exists(behind) {
         st().desk.place_behind(h, behind);
     }
+    if fl & SWP_ZORDER != 0 {
+        ownees_follow(h);
+    }
     if fl & SWP_ACTIVATE != 0 {
-        activate_window(h);
+        // Activation brings the window to the top unless the request
+        // asked for the z-order and the window changed that.
+        let raise = asked & SWP_ZORDER == 0 || (fl & SWP_ZORDER != 0 && behind == HWND_TOP);
+        activate_window_ex(h, raise);
     }
     // WM_WINDOWPOSCHANGED: mp1 the new and the old SWP (Firefox's frame
     // keeps its window's bounds from it).
@@ -761,7 +792,9 @@ pub extern "C" fn WinSetActiveWindow(_desk: u32, h: u32) -> u32 {
     while f != 0 && f != HWND_DESKTOP && !s.frames.contains_key(&f) {
         f = s.desk.get(f).map_or(0, |w| w.parent);
     }
-    activate_window(if f == 0 || f == HWND_DESKTOP { h } else { f });
+    // IBM's is WinSetWindowPos(frame, HWND_TOP, SWP_ACTIVATE |
+    // SWP_ZORDER), so the frame hears of it (WM_ADJUSTWINDOWPOS) first.
+    WinSetWindowPos(if f == 0 || f == HWND_DESKTOP { h } else { f }, HWND_TOP, 0, 0, 0, 0, SWP_ACTIVATE | SWP_ZORDER);
     1
 }
 
@@ -772,12 +805,19 @@ pub extern "C" fn WinSetActiveWindow(_desk: u32, h: u32) -> u32 {
 /// WM_ADJUSTWINDOWPOS, FrameSetFocus), and so its top-level frame
 /// becomes active.
 pub fn activate_window(h: u32) {
+    activate_window_ex(h, true);
+}
+
+fn activate_window_ex(h: u32, raise: bool) {
     let top = top_level(h);
     if top == h || !st().frames.contains_key(&h) {
-        activate(h);
+        activate_ex(h, raise);
         return;
     }
-    st().desk.to_top(h);
+    if raise {
+        st().desk.to_top(h);
+        ownees_follow(h);
+    }
     let f = st().focus;
     if f != 0 && (f == h || st().desk.is_ancestor(h, f)) {
         if top != st().active {

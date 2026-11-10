@@ -376,6 +376,15 @@ In the order the programs met them (each a separate commit):
     takes its OS/2 fonts from PM_Fonts (`fc-list` shows them); without fonts
     in `/usr/share/fonts` Qt programs drew no text.
 
+23. **Owned windows stay above their frame.** As IBM's frame
+    (FrameAdjustFramePos, FrameAddSelfAndOwnees), when a frame's z-order
+    changes the sibling windows it owns come just above it. WinSetActiveWindow
+    is WinSetWindowPos(SWP_ACTIVATE | SWP_ZORDER) as IBM's, and
+    WM_ADJUSTWINDOWPOS goes to the window for every change without
+    SWP_NOADJUST (its flags and hwndInsertBehind count): Qt's frame uses it to
+    stay behind a modal window. A click on Qt's menu bar opens the popup menu
+    (owned by the frame) and then activates the frame, which covered the menu.
+
 Qt's OS/2 platform plugin sets no window icons, and `designer.exe` has no
 icon resource: like IBM's frame (WM_QUERYICON answers the icon set, else 0),
 the system menu then shows the plain bar.
