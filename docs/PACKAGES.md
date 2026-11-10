@@ -361,6 +361,14 @@ In the order the programs met them (each a separate commit):
     `QBasicMutex::unlockInternal` (SIGSEGV in its event dispatcher thread).
     Found with EXCEPTQ (`yum install exceptq`; reports in `\VAR\LOG\APP`).
 
+21. **Frame formatting shows the frame controls**: as IBM's (FrameFormatFrame),
+    the default WM_FORMATFRAME gives each control and the client SWP_SIZE,
+    SWP_MOVE, SWP_SHOW and SWP_NOADJUST (4Bh), or SWP_HIDE when it has no
+    room. Qt makes its client without WS_VISIBLE and paints only while
+    WinIsWindowShowing says the client shows; Qt Designer's windows stayed
+    empty. With both fixes Designer runs: its main window, docks, Widget Box
+    and New Form dialog.
+
 Qt's OS/2 platform plugin sets no window icons, and `designer.exe` has no
 icon resource: like IBM's frame (WM_QUERYICON answers the icon set, else 0),
 the system menu then shows the plain bar.

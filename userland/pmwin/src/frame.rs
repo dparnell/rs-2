@@ -297,6 +297,15 @@ fn format(frame: u32) -> (alloc::vec::Vec<(u32, Rect)>, Rect) {
     (out, rc)
 }
 
+/// The SWP flags IBM's frame formatting gives a control: SWP_SIZE,
+/// SWP_MOVE, SWP_SHOW and SWP_NOADJUST (4Bh), or SWP_SIZE, SWP_HIDE and
+/// SWP_NOADJUST (51h) when it has no room. Formatting is what shows a
+/// client made without WS_VISIBLE (Qt's): Qt Designer stayed blank, its
+/// client never "showing".
+fn format_fl(r: &Rect) -> u32 {
+    if r.width() < 1 || r.height() < 1 { 0x51 } else { 0x4b }
+}
+
 /// WM_FORMATFRAME (mp1 = an SWP array, mp2 = PRECTL for the client
 /// rectangle or 0): the default fills one SWP per standard control and
 /// the client, and returns how many.
@@ -309,7 +318,7 @@ fn format_frame(frame: u32, swps: *mut Swp, prcl: *mut crate::gpiapi::RectL) -> 
         return 0;
     }
     for (i, (h, r)) in v.iter().enumerate() {
-        let swp = Swp { fl: 0x0003, cy: r.height(), cx: r.width(), y: r.bottom, x: r.left, behind: 3, hwnd: *h, reserved: [0; 2] };
+        let swp = Swp { fl: format_fl(r), cy: r.height(), cx: r.width(), y: r.bottom, x: r.left, behind: 3, hwnd: *h, reserved: [0; 2] };
         unsafe { swps.add(i).write_unaligned(swp) };
     }
     v.len() as u32
@@ -328,7 +337,7 @@ pub fn layout(frame: u32) {
     }
     let own = s.desk.get(frame).is_some_and(|w| w.proc_ == frame_entry as *const () as u32);
     let placed: alloc::vec::Vec<(u32, Rect, u32)> = if own || s.queue_of(frame) != s.my_queue() {
-        format(frame).0.into_iter().map(|(h, r)| (h, r, 0x0003)).collect()
+        format(frame).0.into_iter().map(|(h, r)| (h, r, format_fl(&r))).collect()
     } else {
         let n = (send(frame, WM_QUERYFRAMECTLCOUNT, 0, 0) as usize).clamp(1, 64) + 1;
         let mut swps = alloc::vec![Swp::default(); n];
@@ -336,7 +345,7 @@ pub fn layout(frame: u32) {
         let got = send(frame, WM_FORMATFRAME, swps.as_mut_ptr() as u32, &mut rc as *mut _ as u32) as usize;
         swps.iter()
             .take(got.min(n))
-            .filter(|w| w.fl & 0x0003 != 0 && w.hwnd != 0)
+            .filter(|w| w.fl & 0x001b != 0 && w.hwnd != 0)
             .map(|w| (w.hwnd, Rect::new(w.x, w.y, w.x + w.cx.max(0), w.y + w.cy.max(0)), w.fl))
             .collect()
     };
