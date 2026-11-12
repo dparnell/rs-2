@@ -439,6 +439,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (386, 385, 387),
     },
     ClassDef {
+        name: "M_WPCountry",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPDesktop",
         parents: &["M_WPFolder"],
         meta: None,
@@ -619,6 +628,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
+        name: "M_WPPower",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPPrinter",
         parents: &["M_WPAbstract"],
         meta: None,
@@ -700,6 +718,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
+        name: "M_WPSpecialNeeds",
+        parents: &["M_WPAbstract"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPSpool",
         parents: &["M_WPAbstract"],
         meta: None,
@@ -747,6 +774,15 @@ pub static CLASSES: &[ClassDef] = &[
     ClassDef {
         name: "M_WPUrlFolder",
         parents: &["M_WPFolder"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPWinConfig",
+        parents: &["M_WPAbstract"],
         meta: None,
         major: 1,
         minor: 2,
@@ -851,6 +887,15 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (86, 85, 87),
+    },
+    ClassDef {
+        name: "WPCountry",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPCountry"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddCountryTimePage", "wpAddCountryDatePage", "withdrawn", "wpAddCountryPage", "wpAddCountryNumbersPage"],
+        ords: (0, 0, 0),
     },
     ClassDef {
         name: "WPDesktop",
@@ -1042,6 +1087,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
+        name: "WPPower",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPPower"),
+        major: 1,
+        minor: 2,
+        methods: &["wpChangePowerState", "wpSetPowerManagement", "wpQueryPowerManagement", "wpSetPowerConfirmation", "wpQueryPowerConfirmation", "wpAddPowerPage", "wpAddPowerViewPage", "wpSetAutoRefresh", "wpQueryAutoRefresh", "wpQueryRefreshRate", "wpSetRefreshRate", "wpPowerPrivate1", "wpPowerPrivate2", "wpQueryDefStatusView", "wpSetDefStatusView", "wpAddPowerResumePage", "wpPowerPrivate3", "wpQueryAPMLevel", "wpQueryBIOSPowerManagementSupport", "wpSetBIOSPowerManagementSupport", "wpQueryOS2PowerManagementSupport", "wpSetOS2PowerManagementSupport", "wpQueryTimerBasedRequests", "wpSetTimerBasedRequests", "wpQueryResumeOnRing", "wpSetResumeOnRing", "wpQueryResumeOnTimer", "wpSetResumeOnTimer", "wpQueryCapabilities", "wpPowerOff", "wpSuspend", "wpRefreshNotebookPages", "wpAddGeyservillePage"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPPrinter",
         parents: &["WPAbstract"],
         meta: Some("M_WPPrinter"),
@@ -1123,6 +1177,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
+        name: "WPSpecialNeeds",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPSpecialNeeds"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPSpool",
         parents: &["WPAbstract"],
         meta: Some("M_WPSpool"),
@@ -1174,6 +1237,15 @@ pub static CLASSES: &[ClassDef] = &[
         major: 1,
         minor: 2,
         methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPWinConfig",
+        parents: &["WPAbstract"],
+        meta: Some("M_WPWinConfig"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddDDEPage", "wpAddSessionPage", "wpAddSession31Page"],
         ords: (0, 0, 0),
     },
 ];
@@ -1686,6 +1758,8 @@ pub mod m {
     }
     pub mod M_WPCommandFile {
     }
+    pub mod M_WPCountry {
+    }
     pub mod M_WPDesktop {
         pub const wpclsQueryObjectFromFrame: usize = 0;
         pub const wpclsQueryActiveDesktop: usize = 1;
@@ -1732,6 +1806,8 @@ pub mod m {
     }
     pub mod M_WPPort {
     }
+    pub mod M_WPPower {
+    }
     pub mod M_WPPrinter {
     }
     pub mod M_WPProgram {
@@ -1750,6 +1826,8 @@ pub mod m {
     }
     pub mod M_WPSound {
     }
+    pub mod M_WPSpecialNeeds {
+    }
     pub mod M_WPSpool {
     }
     pub mod M_WPStartup {
@@ -1761,6 +1839,8 @@ pub mod m {
     pub mod M_WPUrl {
     }
     pub mod M_WPUrlFolder {
+    }
+    pub mod M_WPWinConfig {
     }
     pub mod Mindex {
     }
@@ -1831,6 +1911,13 @@ pub mod m {
         pub const wpUndoCpSettings: usize = 22;
     }
     pub mod WPCommandFile {
+    }
+    pub mod WPCountry {
+        pub const wpAddCountryTimePage: usize = 0;
+        pub const wpAddCountryDatePage: usize = 1;
+        pub const withdrawn: usize = 2;
+        pub const wpAddCountryPage: usize = 3;
+        pub const wpAddCountryNumbersPage: usize = 4;
     }
     pub mod WPDesktop {
         pub const wpIsCurrentDesktop: usize = 0;
@@ -2014,6 +2101,41 @@ pub mod m {
         pub const prtDecThreadCnt: usize = 19;
         pub const prtSetDevicename: usize = 20;
     }
+    pub mod WPPower {
+        pub const wpChangePowerState: usize = 0;
+        pub const wpSetPowerManagement: usize = 1;
+        pub const wpQueryPowerManagement: usize = 2;
+        pub const wpSetPowerConfirmation: usize = 3;
+        pub const wpQueryPowerConfirmation: usize = 4;
+        pub const wpAddPowerPage: usize = 5;
+        pub const wpAddPowerViewPage: usize = 6;
+        pub const wpSetAutoRefresh: usize = 7;
+        pub const wpQueryAutoRefresh: usize = 8;
+        pub const wpQueryRefreshRate: usize = 9;
+        pub const wpSetRefreshRate: usize = 10;
+        pub const wpPowerPrivate1: usize = 11;
+        pub const wpPowerPrivate2: usize = 12;
+        pub const wpQueryDefStatusView: usize = 13;
+        pub const wpSetDefStatusView: usize = 14;
+        pub const wpAddPowerResumePage: usize = 15;
+        pub const wpPowerPrivate3: usize = 16;
+        pub const wpQueryAPMLevel: usize = 17;
+        pub const wpQueryBIOSPowerManagementSupport: usize = 18;
+        pub const wpSetBIOSPowerManagementSupport: usize = 19;
+        pub const wpQueryOS2PowerManagementSupport: usize = 20;
+        pub const wpSetOS2PowerManagementSupport: usize = 21;
+        pub const wpQueryTimerBasedRequests: usize = 22;
+        pub const wpSetTimerBasedRequests: usize = 23;
+        pub const wpQueryResumeOnRing: usize = 24;
+        pub const wpSetResumeOnRing: usize = 25;
+        pub const wpQueryResumeOnTimer: usize = 26;
+        pub const wpSetResumeOnTimer: usize = 27;
+        pub const wpQueryCapabilities: usize = 28;
+        pub const wpPowerOff: usize = 29;
+        pub const wpSuspend: usize = 30;
+        pub const wpRefreshNotebookPages: usize = 31;
+        pub const wpAddGeyservillePage: usize = 32;
+    }
     pub mod WPPrinter {
         pub const pdvNew: usize = 0;
         pub const pdvOpen: usize = 1;
@@ -2174,6 +2296,8 @@ pub mod m {
         pub const wpAddSoundWarningBeepPage: usize = 0;
         pub const wpAddSoundSchemePage: usize = 1;
     }
+    pub mod WPSpecialNeeds {
+    }
     pub mod WPSpool {
         pub const wpAddSetPathPage: usize = 0;
         pub const wpAddSetPriorityPage: usize = 1;
@@ -2212,5 +2336,10 @@ pub mod m {
         pub const WPUrlPrivate5: usize = 4;
     }
     pub mod WPUrlFolder {
+    }
+    pub mod WPWinConfig {
+        pub const wpAddDDEPage: usize = 0;
+        pub const wpAddSessionPage: usize = 1;
+        pub const wpAddSession31Page: usize = 2;
     }
 }

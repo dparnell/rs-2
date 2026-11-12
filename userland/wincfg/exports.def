@@ -1,0 +1,9 @@
+; WINCFG.DLL: the WIN-OS/2 Setup class, which rs2 has in PMWP.DLL
+; (forwarders to its private ordinals), with IBM's ordinals
+SOMInitModule=SOMInitModule @1
+WPWinConfigNewClass=PMWP.9318 @2
+WPWinConfigClassData=PMWP.9319 @3
+WPWinConfigCClassData=PMWP.9320 @4
+M_WPWinConfigNewClass=PMWP.9321 @5
+M_WPWinConfigClassData=PMWP.9322 @6
+M_WPWinConfigCClassData=PMWP.9323 @7

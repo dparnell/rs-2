@@ -18,6 +18,7 @@ pub mod minimize;
 pub mod appicons;
 pub mod mmicons;
 pub mod shellicons;
+pub mod setupicons;
 mod region;
 pub mod sysptr;
 pub mod winpos;

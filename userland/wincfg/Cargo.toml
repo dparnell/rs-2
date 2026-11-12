@@ -1,0 +1,13 @@
+[package]
+name = "wincfg-dll"
+description = "WINCFG.DLL: IBM's WIN-OS/2 Setup class library, whose class rs2 has in PMWP.DLL (forwarders to it)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "wincfg"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

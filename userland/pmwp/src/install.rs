@@ -314,6 +314,9 @@ pub fn run() {
         v.push(0);
         prf_write(HINI_USER, b"PM_Workplace", b"Rs2Desktop", Some(&v));
     }
+    // Once: the System Setup objects IBM keeps in WPCONFIG and WINCFG
+    // (Country, Power, Special Needs, WIN-OS/2 Setup; syssetup.rs).
+    pending.extend(crate::syssetup::install_entries());
     // Once: LaunchPads made before rs2 stopped floating them stop too.
     if prf_read(HINI_USER, b"PM_Workplace", b"Rs2LaunchPadNoFloat").is_none() {
         pending.push((b"LaunchPad;WPLaunchPad;<WP_DESKTOP>;UPDATEONLY".to_vec(), b"LPFLOAT=NO;OBJECTID=<WP_LAUNCHPAD>".to_vec()));

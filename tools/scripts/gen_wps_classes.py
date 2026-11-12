@@ -37,7 +37,8 @@ def preprocess(src):
     return '\n'.join(out)
 
 classes = {}
-for path in sorted(glob.glob(os.path.join(idl_dir, 'wp*.idl'))):
+# wincfg.idl: WINCFG.DLL's WIN-OS/2 Setup object (WPWinConfig).
+for path in sorted(glob.glob(os.path.join(idl_dir, 'wp*.idl'))) + [os.path.join(idl_dir, 'wincfg.idl')]:
     src = preprocess(open(path, errors='replace').read().replace('\r', ''))
     src = re.sub(r'//[^\n]*', '', src)
     src = re.sub(r'/\*.*?\*/', '', src, flags=re.S)
@@ -98,6 +99,11 @@ EXTRA = {
     'WPFontPalette': ['WPPalette'],
     'WPSystem': ['WPAbstract'],
     'WPClock': ['WPAbstract'],
+    'WPCountry': ['WPAbstract'],
+    'WPPower': ['WPAbstract'],
+    'WPSpecialNeeds': ['WPAbstract'],
+    # WINCFG.DLL's WIN-OS/2 Setup object (the IDL describes it).
+    'WPWinConfig': ['WPAbstract'],
     # WPPRINT.DLL's print destination, its job, printer driver, queue
     # driver and port objects and the Spooler (the IDL describes them).
     'WPPrinter': ['WPAbstract'],

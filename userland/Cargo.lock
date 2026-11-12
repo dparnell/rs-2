@@ -950,6 +950,13 @@ name = "win16drv"
 version = "0.1.0"
 
 [[package]]
+name = "wincfg-dll"
+version = "0.1.0"
+dependencies = [
+ "os2",
+]
+
+[[package]]
 name = "wpconfig-dll"
 version = "0.1.0"
 dependencies = [

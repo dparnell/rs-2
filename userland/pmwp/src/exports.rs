@@ -121,4 +121,12 @@ aligned! {
     __a_M_WPSchemePaletteNewClass => crate::classdata_gen::M_WPSchemePaletteNewClass, 2;
     __a_WPSystemNewClass => crate::classdata_gen::WPSystemNewClass, 2;
     __a_M_WPSystemNewClass => crate::classdata_gen::M_WPSystemNewClass, 2;
+    __a_WPCountryNewClass => crate::classdata_gen::WPCountryNewClass, 2;
+    __a_M_WPCountryNewClass => crate::classdata_gen::M_WPCountryNewClass, 2;
+    __a_WPPowerNewClass => crate::classdata_gen::WPPowerNewClass, 2;
+    __a_M_WPPowerNewClass => crate::classdata_gen::M_WPPowerNewClass, 2;
+    __a_WPSpecialNeedsNewClass => crate::classdata_gen::WPSpecialNeedsNewClass, 2;
+    __a_M_WPSpecialNeedsNewClass => crate::classdata_gen::M_WPSpecialNeedsNewClass, 2;
+    __a_WPWinConfigNewClass => crate::classdata_gen::WPWinConfigNewClass, 2;
+    __a_M_WPWinConfigNewClass => crate::classdata_gen::M_WPWinConfigNewClass, 2;
 }

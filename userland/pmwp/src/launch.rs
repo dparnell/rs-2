@@ -159,7 +159,9 @@ pub fn start_session(exe: &[u8], params: &[u8], dir: &[u8], title: &[u8], progc:
     }
     let title = if title.is_empty() { split_path(exe).1 } else { title.to_vec() };
     let (t, i) = (z(&title), z(&inputs));
-    let env = env_block(env);
+    // Win-OS/2 sessions get the WIN-OS/2 Setup object's DOS settings.
+    let env = crate::wincfg::session_env(progc, env);
+    let env = env_block(&env);
     let sd = os2::StartData {
         length: core::mem::size_of::<os2::StartData>() as u16,
         related: 0,

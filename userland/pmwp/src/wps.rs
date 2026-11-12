@@ -92,6 +92,7 @@ fn implementation(name: &str) -> Impl {
         "WPFontPalette" => crate::setup::impl_font_palette(),
         "WPShredder" => crate::delete::impl_shredder(),
         "M_WPShredder" => crate::delete::impl_m_shredder(),
+        n if crate::syssetup::has(n) => crate::syssetup::implementation(n),
         _ => Impl::none(),
     }
 }

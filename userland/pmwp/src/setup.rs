@@ -84,12 +84,12 @@ fn set_sysval(i: i32, key: &[u8], v: i32) {
 }
 
 /// The key repeat (delay ms, rate cps) as last set (or the defaults).
-fn typematic() -> (i32, i32) {
+pub(crate) fn typematic() -> (i32, i32) {
     (read_num(b"KeyRepeatDelay").unwrap_or(500), read_num(b"KeyRepeatRate").unwrap_or(20))
 }
 
 /// KBD$'s KBD_SETTYPAMATICRATE.
-fn set_typematic(delay: i32, rate: i32) {
+pub(crate) fn set_typematic(delay: i32, rate: i32) {
     let (mut h, mut act) = (0u32, 0u32);
     // OPEN_ACTION_OPEN_IF_EXISTS, OPEN_SHARE_DENYNONE | OPEN_ACCESS_READWRITE
     if unsafe { os2::DosOpen(b"\\DEV\\KBD$\0".as_ptr(), &mut h, &mut act, 0, 0, 1, 0x42, core::ptr::null_mut()) } != 0 {
@@ -171,6 +171,7 @@ pub fn apply_saved() {
         let (d, r) = typematic();
         set_typematic(d, r);
     }
+    crate::spneeds::apply();
     let pairs: Vec<(i32, u32)> = COLORS.iter().filter_map(|&(n, i)| Some((i, parse_rgb(&prf_read(HINI_USER, b"PM_Colors", n)?)?))).collect();
     if !pairs.is_empty() {
         set_colors(&pairs);
@@ -348,6 +349,8 @@ extern "C" fn wpAddKeyboardTimingPage(o: usize, nb: u32) -> u32 {
 
 extern "C" fn kbd_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPKeyboard"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
+    // IBM's order: Special Needs, then Timing in front of it.
+    wps::call("WPKeyboard", m::WPKeyboard::wpAddKeyboardSpecialNeedsPage, &[o, nb as usize]);
     wpAddKeyboardTimingPage(o, nb);
     1
 }
@@ -714,7 +717,7 @@ pub fn impl_mouse() -> Impl {
 pub fn impl_keyboard() -> Impl {
     Impl {
         data: 0,
-        methods: alloc::vec![("wpAddKeyboardTimingPage", __m_wpAddKeyboardTimingPage as usize)],
+        methods: alloc::vec![("wpAddKeyboardTimingPage", __m_wpAddKeyboardTimingPage as usize), crate::spneeds::keyboard_method()],
         overrides: alloc::vec![("wpAddSettingsPages", __m_kbd_add_pages as usize), crate::pages::no_window_page_override()],
     }
 }

@@ -81,3 +81,12 @@ M_WPSchemePaletteNewClass 9146
 WPSystemNewClass 9149
 M_WPSystemNewClass 9152
 WinRestartWorkplace 221
+; System Setup classes of WPCONFIG.DLL and WINCFG.DLL (syssetup.rs; they forward to these)
+WPCountryNewClass 9300
+M_WPCountryNewClass 9303
+WPPowerNewClass 9306
+M_WPPowerNewClass 9309
+WPSpecialNeedsNewClass 9312
+M_WPSpecialNeedsNewClass 9315
+WPWinConfigNewClass 9318
+M_WPWinConfigNewClass 9321
