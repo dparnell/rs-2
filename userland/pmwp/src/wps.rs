@@ -96,6 +96,10 @@ fn implementation(name: &str) -> Impl {
         "WPShredder" => crate::delete::impl_shredder(),
         "M_WPShredder" => crate::delete::impl_m_shredder(),
         n if crate::syssetup::has(n) => crate::syssetup::implementation(n),
+        "WPHwManager" => crate::hwmgr::impl_manager(),
+        "M_WPHwManager" => crate::hwmgr::impl_m_manager(),
+        "WPDevice" => crate::hwmgr::impl_device(),
+        "M_WPDevice" => crate::hwmgr::impl_m_device(),
         _ => Impl::none(),
     }
 }

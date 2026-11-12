@@ -358,15 +358,32 @@ fn add_fields(w: usize) {
     // A printer's job view: the jobs' details, those its View page shows.
     let owner = wins()[w].owner;
     let jobs = owner != 0 && wps::is(owner, "WPPrinter");
-    let cols = if jobs { crate::printobj::JOB_COLUMNS } else { crate::viewset::COLUMNS };
+    // The Hardware Manager: its devices' type and resources (hwmgr.rs).
+    let hw = crate::hwmgr::is_manager(wins()[w].obj);
+    let cols = if jobs {
+        crate::printobj::JOB_COLUMNS
+    } else if hw {
+        crate::hwmgr::COLUMNS
+    } else {
+        crate::viewset::COLUMNS
+    };
     let first = send(cnr, CM_ALLOCDETAILFIELDINFO, cols.len() as u32, 0);
     if first == 0 {
         return;
     }
-    let hidden = if jobs { crate::printer::hidden_columns(owner) } else { crate::viewset::hidden_columns(crate::fs::view_flags(wins()[w].obj)) };
+    let hidden = if jobs {
+        crate::printer::hidden_columns(owner)
+    } else if hw {
+        0
+    } else {
+        crate::viewset::hidden_columns(crate::fs::view_flags(wins()[w].obj))
+    };
     // CFA_INVISIBLE, CFA_FIREADONLY on all; the data's type and offset.
     const CFA_INVISIBLE: u32 = 0x0040;
-    let kinds: [(u32, usize); 7] = [
+    let text = CFA_STRING | CFA_SEPARATOR | CFA_FIREADONLY;
+    let hw_kinds: [(u32, usize); 7] =
+        [(CFA_BITMAPORICON, R_HPTR), (CFA_STRING | CFA_SEPARATOR | CFA_FIREADONLY, R_PSZNAME), (text, R_CLASS), (text, R_REAL), (text, R_SIZE), (text, R_DATE), (text, R_TIME)];
+    let kinds: [(u32, usize); 7] = if hw { hw_kinds } else { [
         (CFA_BITMAPORICON, R_HPTR),
         (CFA_STRING | CFA_SEPARATOR, R_PSZNAME),
         (CFA_STRING | CFA_SEPARATOR | CFA_FIREADONLY, R_CLASS),
@@ -374,7 +391,7 @@ fn add_fields(w: usize) {
         (CFA_ULONG | CFA_RIGHT | CFA_SEPARATOR | CFA_FIREADONLY, R_SIZE),
         (CFA_DATE | CFA_SEPARATOR | CFA_FIREADONLY, R_DATE),
         (CFA_TIME | CFA_SEPARATOR | CFA_FIREADONLY, R_TIME),
-    ];
+    ] };
     let mut f = first;
     for (i, &(kind, off)) in kinds.iter().enumerate() {
         let inv = if hidden & (1 << i) != 0 { CFA_INVISIBLE } else { 0 };
@@ -501,7 +518,13 @@ fn insert_recs(w: usize, list: &[(usize, u32)]) -> Vec<u32> {
             break;
         }
         let mut rec = Rec { obj: o, rec: r, title: if o == 0 { alloc::vec![0] } else { title_bytes(o) }, parent, class: Vec::new(), real: Vec::new() };
-        if o != 0 && wins()[w].view == OPEN_DETAILS {
+        // A device of the Hardware Manager: its texts (kept with it).
+        let hw = if o != 0 && wins()[w].view == OPEN_DETAILS { crate::hwmgr::detail_strings(o) } else { None };
+        if let Some(s) = hw {
+            for (off, p) in [R_CLASS, R_REAL, R_SIZE, R_DATE, R_TIME].into_iter().zip(s) {
+                wr(r, off, p);
+            }
+        } else if o != 0 && wins()[w].view == OPEN_DETAILS {
             let (class, real, size, date, time) = details_of(o);
             rec.class = class;
             rec.real = real;
@@ -582,6 +605,21 @@ fn fill_tree(w: usize) {
 }
 
 fn add_subfolders(w: usize, folder: usize, parent: u32) {
+    // The Hardware Manager: its devices under the adapters they are on,
+    // all open.
+    if let Some(list) = crate::hwmgr::tree(folder, &visible_content(folder)) {
+        let mut made: Vec<(usize, u32)> = Vec::new();
+        for (o, p) in list {
+            let pr = made.iter().find(|x| x.0 == p && p != 0).map_or(parent, |x| x.1);
+            if let Some(&r) = insert_recs(w, &[(o, pr)]).first() {
+                made.push((o, r));
+            }
+        }
+        for &(_, r) in &made {
+            send(wins()[w].child, CM_EXPANDTREE, r, 0);
+        }
+        return;
+    }
     // A tree whose folder says SHOWALLINTREEVIEW=YES shows every object.
     let all = crate::fs::shows_all_in_tree(wins()[w].obj);
     let kids: Vec<usize> = visible_content(folder).into_iter().filter(|&o| all || tree_folder(o) != 0).collect();

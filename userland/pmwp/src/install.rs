@@ -24,7 +24,7 @@ use crate::{clsmgr, obj, wps};
 const APP_OBJECTS: &[u8] = b"PM_InstallObject";
 const APP_CLASSES: &[u8] = b"PM_InstallClass";
 /// `PM_Workplace` `Rs2Desktop`: the version of rs2's desktop made.
-const DESKTOP_VERSION: &[u8] = b"14";
+const DESKTOP_VERSION: &[u8] = b"15";
 
 pub fn boot_drive() -> u8 {
     let mut d = 3u32;
@@ -67,6 +67,8 @@ fn defaults() -> Vec<(Vec<u8>, Vec<u8>)> {
         (b"Keyboard;WPKeyboard;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_KEYB>"),
         (b"Mouse;WPMouse;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_MOUSE>"),
         (b"Sound;WPSound;<WP_CONFIG>;PRESERVEOLD", b"NOCOPY=YES;NODELETE=YES;OBJECTID=<WP_SOUND>"),
+        // Version 15: the Hardware Manager (IBM's PNP.DLL class).
+        (b"Hardware Manager;WPHwManager;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_HWMGR>"),
         (b"Color Palette;WPColorPalette;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_HIRESCLRPAL>"),
         (b"Scheme Palette;WPSchemePalette;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_SCHPAL96>"),
         (b"Font Palette;WPFontPalette;<WP_CONFIG>;PRESERVEOLD", b"OBJECTID=<WP_FNTPAL>"),

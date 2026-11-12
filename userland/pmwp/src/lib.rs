@@ -32,6 +32,7 @@ mod filejob;
 mod fileops;
 mod find;
 mod help;
+mod hwmgr;
 mod fs;
 mod icons;
 mod image;

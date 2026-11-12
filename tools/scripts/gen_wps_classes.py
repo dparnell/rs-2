@@ -146,8 +146,28 @@ EXTRA = {
     'MMCDDevice': ['MMDevice'],
     'MMLVDDevice': ['MMDevice'],
     'MMVolume': ['WPAbstract'],
+    # PNP.DLL's Hardware Manager and device classes (the IDL describes
+    # them all but WPDevCDRom, which introduces no methods).
+    'WPHwManager': ['WPFolder'],
+    'WPDevice': ['WPTransient'],
+    'WPDevAudio': ['WPDevice'],
+    'WPDevBus': ['WPDevice'],
+    'WPDevCPU': ['WPDevice'],
+    'WPDevDisplay': ['WPDevice'],
+    'WPDevDiskette': ['WPDevice'],
+    'WPDevHarddrive': ['WPDevice'],
+    'WPDevKeyboard': ['WPDevice'],
+    'WPDevMemory': ['WPDevice'],
+    'WPDevMouse': ['WPDevice'],
+    'WPDevParallel': ['WPDevice'],
+    'WPDevPeriph': ['WPDevice'],
+    'WPDevSerial': ['WPDevice'],
+    'WPDevTape': ['WPDevice'],
+    'WPDevTimer': ['WPDevice'],
+    'M_WPDevCDRom': ['M_WPDevice'],
+    'WPDevCDRom': ['WPDevice'],
 }
-EXTRA_META = {'MMDataFile': 'M_MMDataFile'}
+EXTRA_META = {'MMDataFile': 'M_MMDataFile', 'WPDevCDRom': 'M_WPDevCDRom'}
 for n, parents in EXTRA.items():
     classes.setdefault(n, dict(parents=parents, methods=[], meta=EXTRA_META.get(n), major=1, minor=1, overrides=[], dll='pmwp', file=''))
 

@@ -457,6 +457,159 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (356, 355, 357),
     },
     ClassDef {
+        name: "M_WPTransient",
+        parents: &["M_WPObject"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &["wpclsTransientPrivate1", "wpclsTransientPrivate2"],
+        ords: (338, 337, 339),
+    },
+    ClassDef {
+        name: "M_WPDevice",
+        parents: &["M_WPTransient"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevAudio",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevBus",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevCDRom",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevCPU",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevDiskette",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevDisplay",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevHarddrive",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevKeyboard",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevMemory",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevMouse",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevParallel",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevPeriph",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevSerial",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevTape",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "M_WPDevTimer",
+        parents: &["M_WPDevice"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPDisk",
         parents: &["M_WPAbstract"],
         meta: None,
@@ -484,6 +637,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
+        name: "M_WPHwManager",
+        parents: &["M_WPFolder"],
+        meta: None,
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPIcon",
         parents: &["M_WPDataFile"],
         meta: None,
@@ -491,15 +653,6 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (362, 361, 363),
-    },
-    ClassDef {
-        name: "M_WPTransient",
-        parents: &["M_WPObject"],
-        meta: None,
-        major: 1,
-        minor: 2,
-        methods: &["wpclsTransientPrivate1", "wpclsTransientPrivate2"],
-        ords: (338, 337, 339),
     },
     ClassDef {
         name: "M_WPJob",
@@ -907,6 +1060,159 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (56, 55, 57),
     },
     ClassDef {
+        name: "WPTransient",
+        parents: &["WPObject"],
+        meta: Some("M_WPTransient"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (41, 40, 42),
+    },
+    ClassDef {
+        name: "WPDevice",
+        parents: &["WPTransient"],
+        meta: Some("M_WPDevice"),
+        major: 1,
+        minor: 2,
+        methods: &["wpDevicePrivate1", "wpDevicePrivate2", "wpDevicePrivate3", "wpDevicePrivate4", "wpDevicePrivate5", "wpDevicePrivate6", "wpDevicePrivate7", "wpDevicePrivate8", "wpDevicePrivate9", "wpDevicePrivate10", "wpDevicePrivate11", "wpDevicePrivate12", "wpDevicePrivate13", "wpDevicePrivate14", "wpDevicePrivate15", "wpDevicePrivate16", "wpDevicePrivate17", "wpDevicePrivate18", "wpDevicePrivate19", "wpDevicePrivate20", "wpDevicePrivate21", "wpDevicePrivate22", "wpDevicePrivate23", "wpDevicePrivate24", "wpDevicePrivate25", "wpDevicePrivate26", "wpDevicePrivate27", "wpDevicePrivate28", "wpDevicePrivate29", "wpDevicePrivate30", "wpDevicePrivate31", "wpDevicePrivate32", "wpDevicePrivate33", "wpDevicePrivate34", "wpDevicePrivate35", "wpDevicePrivate36", "wpDevicePrivate37", "wpDevicePrivate38", "wpDevicePrivate39", "wpDevicePrivate40", "wpDevicePrivate41", "wpDevicePrivate42", "wpDevicePrivate43", "wpDevicePrivate44", "wpDevicePrivate45", "wpDevicePrivate46", "wpDevicePrivate47", "wpDevicePrivate48", "wpDevicePrivate49", "wpDevicePrivate50", "wpDevicePrivate51", "wpDevicePrivate52", "wpAddDeviceDevice1Page", "wpAddDeviceDevice2Page", "wpAddDeviceDMA1Page", "wpAddDeviceIRQ1Page", "wpAddDeviceMemory1Page", "wpAddDeviceIO1Page"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevAudio",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevAudio"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevBus",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevBus"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevCDRom",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevCDRom"),
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevCPU",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevCPU"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevDiskette",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevDiskette"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevDisplay",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevDisplay"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevHarddrive",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevHarddrive"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevKeyboard",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevKeyboard"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevMemory",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevMemory"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevMouse",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevMouse"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevParallel",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevParallel"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevPeriph",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevPeriph"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevSerial",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevSerial"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevTape",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevTape"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPDevTimer",
+        parents: &["WPDevice"],
+        meta: Some("M_WPDevTimer"),
+        major: 1,
+        minor: 2,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPDisk",
         parents: &["WPAbstract"],
         meta: Some("M_WPDisk"),
@@ -934,6 +1240,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
+        name: "WPHwManager",
+        parents: &["WPFolder"],
+        meta: Some("M_WPHwManager"),
+        major: 1,
+        minor: 2,
+        methods: &["wpAddSnoop1Page", "wpHwManagerPrivate1", "wpHwManagerPrivate2", "wpHwManagerPrivate3", "wpHwManagerPrivate4"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "WPIcon",
         parents: &["WPDataFile"],
         meta: Some("M_WPIcon"),
@@ -941,15 +1256,6 @@ pub static CLASSES: &[ClassDef] = &[
         minor: 2,
         methods: &[],
         ords: (62, 61, 63),
-    },
-    ClassDef {
-        name: "WPTransient",
-        parents: &["WPObject"],
-        meta: Some("M_WPTransient"),
-        major: 1,
-        minor: 2,
-        methods: &[],
-        ords: (41, 40, 42),
     },
     ClassDef {
         name: "WPJob",
@@ -1765,17 +2071,51 @@ pub mod m {
         pub const wpclsQueryActiveDesktop: usize = 1;
         pub const wpclsQueryActiveDesktopHWND: usize = 2;
     }
+    pub mod M_WPTransient {
+        pub const wpclsTransientPrivate1: usize = 0;
+        pub const wpclsTransientPrivate2: usize = 1;
+    }
+    pub mod M_WPDevice {
+    }
+    pub mod M_WPDevAudio {
+    }
+    pub mod M_WPDevBus {
+    }
+    pub mod M_WPDevCDRom {
+    }
+    pub mod M_WPDevCPU {
+    }
+    pub mod M_WPDevDiskette {
+    }
+    pub mod M_WPDevDisplay {
+    }
+    pub mod M_WPDevHarddrive {
+    }
+    pub mod M_WPDevKeyboard {
+    }
+    pub mod M_WPDevMemory {
+    }
+    pub mod M_WPDevMouse {
+    }
+    pub mod M_WPDevParallel {
+    }
+    pub mod M_WPDevPeriph {
+    }
+    pub mod M_WPDevSerial {
+    }
+    pub mod M_WPDevTape {
+    }
+    pub mod M_WPDevTimer {
+    }
     pub mod M_WPDisk {
     }
     pub mod M_WPDrives {
     }
     pub mod M_WPFontPalette {
     }
-    pub mod M_WPIcon {
+    pub mod M_WPHwManager {
     }
-    pub mod M_WPTransient {
-        pub const wpclsTransientPrivate1: usize = 0;
-        pub const wpclsTransientPrivate2: usize = 1;
+    pub mod M_WPIcon {
     }
     pub mod M_WPJob {
         pub const prtclsManageSelected: usize = 0;
@@ -1941,6 +2281,98 @@ pub mod m {
         pub const wpQueryLockupBackground: usize = 18;
         pub const wpSetLockupBackground: usize = 19;
     }
+    pub mod WPTransient {
+    }
+    pub mod WPDevice {
+        pub const wpDevicePrivate1: usize = 0;
+        pub const wpDevicePrivate2: usize = 1;
+        pub const wpDevicePrivate3: usize = 2;
+        pub const wpDevicePrivate4: usize = 3;
+        pub const wpDevicePrivate5: usize = 4;
+        pub const wpDevicePrivate6: usize = 5;
+        pub const wpDevicePrivate7: usize = 6;
+        pub const wpDevicePrivate8: usize = 7;
+        pub const wpDevicePrivate9: usize = 8;
+        pub const wpDevicePrivate10: usize = 9;
+        pub const wpDevicePrivate11: usize = 10;
+        pub const wpDevicePrivate12: usize = 11;
+        pub const wpDevicePrivate13: usize = 12;
+        pub const wpDevicePrivate14: usize = 13;
+        pub const wpDevicePrivate15: usize = 14;
+        pub const wpDevicePrivate16: usize = 15;
+        pub const wpDevicePrivate17: usize = 16;
+        pub const wpDevicePrivate18: usize = 17;
+        pub const wpDevicePrivate19: usize = 18;
+        pub const wpDevicePrivate20: usize = 19;
+        pub const wpDevicePrivate21: usize = 20;
+        pub const wpDevicePrivate22: usize = 21;
+        pub const wpDevicePrivate23: usize = 22;
+        pub const wpDevicePrivate24: usize = 23;
+        pub const wpDevicePrivate25: usize = 24;
+        pub const wpDevicePrivate26: usize = 25;
+        pub const wpDevicePrivate27: usize = 26;
+        pub const wpDevicePrivate28: usize = 27;
+        pub const wpDevicePrivate29: usize = 28;
+        pub const wpDevicePrivate30: usize = 29;
+        pub const wpDevicePrivate31: usize = 30;
+        pub const wpDevicePrivate32: usize = 31;
+        pub const wpDevicePrivate33: usize = 32;
+        pub const wpDevicePrivate34: usize = 33;
+        pub const wpDevicePrivate35: usize = 34;
+        pub const wpDevicePrivate36: usize = 35;
+        pub const wpDevicePrivate37: usize = 36;
+        pub const wpDevicePrivate38: usize = 37;
+        pub const wpDevicePrivate39: usize = 38;
+        pub const wpDevicePrivate40: usize = 39;
+        pub const wpDevicePrivate41: usize = 40;
+        pub const wpDevicePrivate42: usize = 41;
+        pub const wpDevicePrivate43: usize = 42;
+        pub const wpDevicePrivate44: usize = 43;
+        pub const wpDevicePrivate45: usize = 44;
+        pub const wpDevicePrivate46: usize = 45;
+        pub const wpDevicePrivate47: usize = 46;
+        pub const wpDevicePrivate48: usize = 47;
+        pub const wpDevicePrivate49: usize = 48;
+        pub const wpDevicePrivate50: usize = 49;
+        pub const wpDevicePrivate51: usize = 50;
+        pub const wpDevicePrivate52: usize = 51;
+        pub const wpAddDeviceDevice1Page: usize = 52;
+        pub const wpAddDeviceDevice2Page: usize = 53;
+        pub const wpAddDeviceDMA1Page: usize = 54;
+        pub const wpAddDeviceIRQ1Page: usize = 55;
+        pub const wpAddDeviceMemory1Page: usize = 56;
+        pub const wpAddDeviceIO1Page: usize = 57;
+    }
+    pub mod WPDevAudio {
+    }
+    pub mod WPDevBus {
+    }
+    pub mod WPDevCDRom {
+    }
+    pub mod WPDevCPU {
+    }
+    pub mod WPDevDiskette {
+    }
+    pub mod WPDevDisplay {
+    }
+    pub mod WPDevHarddrive {
+    }
+    pub mod WPDevKeyboard {
+    }
+    pub mod WPDevMemory {
+    }
+    pub mod WPDevMouse {
+    }
+    pub mod WPDevParallel {
+    }
+    pub mod WPDevPeriph {
+    }
+    pub mod WPDevSerial {
+    }
+    pub mod WPDevTape {
+    }
+    pub mod WPDevTimer {
+    }
     pub mod WPDisk {
         pub const wpAddDiskDetailsPage: usize = 0;
         pub const wpSetCorrectDiskIcon: usize = 1;
@@ -1960,9 +2392,14 @@ pub mod m {
     pub mod WPFontPalette {
         pub const wpGetFattrsFromPsz: usize = 0;
     }
-    pub mod WPIcon {
+    pub mod WPHwManager {
+        pub const wpAddSnoop1Page: usize = 0;
+        pub const wpHwManagerPrivate1: usize = 1;
+        pub const wpHwManagerPrivate2: usize = 2;
+        pub const wpHwManagerPrivate3: usize = 3;
+        pub const wpHwManagerPrivate4: usize = 4;
     }
-    pub mod WPTransient {
+    pub mod WPIcon {
     }
     pub mod WPJob {
         pub const prtGetJobID: usize = 0;

@@ -16,6 +16,7 @@ pub mod notebook;
 mod queue;
 pub mod minimize;
 pub mod appicons;
+pub mod hwicons;
 pub mod mmicons;
 pub mod shellicons;
 pub mod setupicons;

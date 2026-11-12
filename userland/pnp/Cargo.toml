@@ -1,0 +1,13 @@
+[package]
+name = "pnp-dll"
+description = "PNP.DLL: IBM's Hardware Manager class library, whose classes rs2 has in PMWP.DLL (forwarders to it)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pnp"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
