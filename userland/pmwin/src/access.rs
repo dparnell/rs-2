@@ -75,7 +75,10 @@ pub fn special_needs(ev: &Input) -> Vec<Input> {
     let t = now();
     // The time-out: no keyboard input for that long turns it off.
     let timeout = sysval(SV_RS2_SPNEEDS_TIMEOUT);
-    let last = st().last_input;
+    // (PM's last_input already counts this key: the time of the last
+    // key is kept here.)
+    static mut LAST_KEY: u32 = 0;
+    let last = unsafe { core::mem::replace(&mut *core::ptr::addr_of_mut!(LAST_KEY), t) };
     if timeout > 0 && last != 0 && t.wrapping_sub(last) > timeout as u32 * 1000 {
         crate::misc::WinSetSysValue(1, SV_RS2_SPNEEDS, 0);
         *pending() = None;

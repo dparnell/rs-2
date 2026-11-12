@@ -470,8 +470,15 @@ Status markers: done, in progress, planned.
   processes); IPF metafile artwork (`:artwork.` of .MET files in the
   compiler, played by HELPMGR)
 - done: the Print Screen key (docs/PRINTING.md)
-- planned: the window manager acting on the Input
-  page's settings (full window drag, asynchronous focus change)
+- done: the window manager acting on the Input page's settings (outline
+  dragging without full window drag, the Alt+Tab switching window, VIO
+  mouse actions, asynchronous focus change) and on Special Needs (the
+  acceptance delay and time-out), docs/WPS.md
+- done (shell): the rest of System Setup's WPCONFIG and WINCFG objects:
+  Country (PM_National), Power (ACPI power off, status view), Special
+  Needs, WIN-OS/2 Setup (data exchange, session type, WIN-OS/2 settings),
+  the System object's Screen pages (resolution and colours, display
+  type) and Fonts page; WINCFG.DLL's forwarders
 - done: display driver model (GRADD-style) on the framebuffer, mouse
   pointer; PMWIN (windows, messages, controls, dialogs), PMGPI
   (graphics, fonts), PMSHAPI
@@ -574,7 +581,8 @@ Status markers: done, in progress, planned.
   driver, printer objects
 - done: network groups, servers and shares, drives and printer ports
   assigned from them (docs/LAN.md); planned: the
-  rest of WPCONFIG and WPPRINT (docs/WPS.md, "What is not there")
+  rest of WPPRINT and Touch, Hardware Manager, Selective Install
+  (docs/WPS.md, "What is not there")
 
 ## Printing (done: first version)
 

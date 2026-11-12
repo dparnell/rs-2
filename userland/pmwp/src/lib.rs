@@ -55,6 +55,7 @@ mod printobj;
 #[allow(dead_code, unused_imports, clippy::all)]
 mod pm;
 mod rs2obj;
+mod screen;
 mod setup;
 mod country;
 mod power;

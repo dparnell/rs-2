@@ -567,14 +567,15 @@ that the Toolkit describes, M_WPMinWinViewer, IBM's WPMinWindow (which
 the Toolkit does not describe), classes IBM keeps in other DLLs (WPUrl
 and WPUrlFolder from WPINET.DLL, Mindex from MINXOBJ.DLL, WPCONFIG.DLL's
 WPMouse, WPKeyboard, WPSound, WPPalette, WPColorPalette,
-WPSchemePalette, WPFontPalette, WPSystem and WPClock, and WPPRINT.DLL's
+WPSchemePalette, WPFontPalette, WPSystem, WPClock, WPCountry, WPPower and
+WPSpecialNeeds, WINCFG.DLL's WPWinConfig, and WPPRINT.DLL's
 WPPrinter, WPJob, WPPdr, WPQdr, WPPort and WPSpool) and rs2's own
 RS2Shutdown and RS2WindowList (and RS2System,
 the System object of rs2's desktops before version 9, kept so that it
 can wake to be replaced).
 
 **Class tables.** `tools/scripts/gen_wps_classes.py` reads the Toolkit's
-IDL. It writes `src/classes_gen.rs` (each class's parents, metaclass,
+IDL (`wp*.idl` and `wincfg.idl`). It writes `src/classes_gen.rs` (each class's parents, metaclass,
 version and methods in release order, plus index constants). It also
 writes `src/classdata_gen.rs`: the exported `<Class>ClassData` and
 `<Class>CClassData` variables and the `<Class>NewClass` functions, with
@@ -598,7 +599,13 @@ The rest comes from the class modules:
 |--------|---------|
 | `obj.rs` | WPObject (title, style, icon (an `ICONFILE=` or `ICONRESOURCE=` icon is kept with the object's state and loaded again when it is restored), folder, default view, handle, object ID, setup strings, save/restore, copy, move, shadow; the lazy writer: wpSaveDeferred queues the object and the desktop's timer saves the queue a second later, shutdown saves what is left, and without a desktop objects save at once; the use list as IBM's: USEITEMs added with wpAddToObjUseList and found with wpFindUseItem, wpAllocMem's blocks, open views that wpSwitchTo and wpViewObject find; wpRegisterView gives a class's own view the object's title, icon and a window list entry; the open behavior, CCVIEW= and wpQuery/SetConcurrentView, else the System object's) and M_WPObject (wpclsNew, class titles, icons and views, objects from handles and locations; somClassReady calls wpclsInitData) |
 | `delete.rs` | Deleting as IBM's PMWP does (studied with Ghidra): wpQueryConfirmations reads `PM_ControlPanel` ConfirmDelete, ConfirmSubDelete, ConfirmRenameFilesWithExt, ConfirmKeepAssoc, ConfirmCopyMoveEtc, DisplayProgressInd, AllowForceDelete and ConfirmForceDelete (all on when missing but ConfirmCopyMoveEtc); the Delete menu item, the Delete key and drops on the Shredder show the Delete Object(s) dialog (location, objects, Confirm on folder delete, Confirm on object delete), then call each object's wpDelete, whose wpConfirmDelete asks with IBM's texts (an object; a folder "and all of its contents"; a shadow, and what it is a shadow of) with Yes, Yes to all (with more objects to come), No (the default) and Cancel; a folder deletes its contents (wpDeleteContents, each asked about) before itself. The other confirmations: a data file renamed to another extension asks whether to keep it (IBM's texts for data and program files), a drop asks before copying or moving, and the copy and move progress window shows only with "Display progress indication dialog". WPShredder (`<WP_SHRED>`): objects dragged onto it are deleted that way once the drop is answered; other programs' items that offer DRM_DISCARD get DM_DISCARDOBJECT (DRR_ABORT stops the asking), as IBM's ShredderThread does; its only view is its settings, without a Window page |
-| `system.rs` | WPCONFIG's WPSystem (`<WP_SYSTEM>`, studied with Ghidra; IBM's tabs and dialogs: Confirmations (IBM's five check boxes), Title (duplicate titles: prompt, auto-rename or replace, `PM_ControlPanel` NameClash, which copies and moves follow: filejob.rs renames or replaces without asking), Window (button appearance: hide or minimize button, `MinButtonType`, PMWIN's Rs2SetMinButtonType gives frames a hide button where they ask for a minimize button; minimize button behavior: hide the window, the viewer or the desktop, `HiddenMinWindows`; animation, `Animation` and SV_ANIMATION; object open behavior, ConcurrentView), Print Screen (`PrintScreen`, SV_PRINTSCREEN) and Logo (indefinite, none or timed in seconds and tenths, `LogoDisplayTime` in ms, as programs read it), Folder (three pages, WPCONFIG's dialogs 1307, 1303 and 2107: long or short menus and folder menu bars, `PM_Workplace` FolderMenus `LONG`/`SHORT` and FolderMenuBar `ON`/`OFF`, which open folder windows follow at once; the default folder view, DefFolderView `ICON`/`TREE`/`DETAILS`, for folders without a default view of their own; automatic close, `PM_Workplace:FolderAutoClose` Objects `NONE`/`SUBFOLDERS`/`ALL`), Input (WPCONFIG's PmInputDlgProc, dialog 1302: full window dragging, Alt+Tab switching window, VIO mouse actions, asynchronous focus change and its delay in tenths, type-ahead; each a system value (99-103, SV_LOCKSTARTINPUT) set at once with WM_SYSVALUECHANGED broadcast, and a ULONG in `PM_ControlPanel` FullWindowDrag, AltTabWindow, VioMouseActions, AsyncFocusChange, AFCSensitivity, LockStartInput; IBM's defaults off, on, on, on, 20, off; PMWIN keeps the values, rs2's window manager does not act on them yet) and Screen (dialog 1226, only on a 256-colour screen: Workplace Shell palette aware, `PM_WorkPlace:Options` WPSPaletteAware); M_WPSystem's wpclsQuerySetting/wpclsSetSetting with WPCONFIG's setting names and wpsystem.h's values; the shell gives PMWIN the settings when it starts) and WPClock (`<WP_CLOCK>`: a clock window, analog with hour and minute marks and a second hand, or digital, with the time, the date or both; its View page, kept with the object, and its Date/Time page, which sets the computer's clock with DosSetDateTime) |
+| `system.rs` | WPCONFIG's WPSystem (`<WP_SYSTEM>`, studied with Ghidra; IBM's tabs and dialogs: Confirmations (IBM's five check boxes), Title (duplicate titles: prompt, auto-rename or replace, `PM_ControlPanel` NameClash, which copies and moves follow: filejob.rs renames or replaces without asking), Window (button appearance: hide or minimize button, `MinButtonType`, PMWIN's Rs2SetMinButtonType gives frames a hide button where they ask for a minimize button; minimize button behavior: hide the window, the viewer or the desktop, `HiddenMinWindows`; animation, `Animation` and SV_ANIMATION; object open behavior, ConcurrentView), Print Screen (`PrintScreen`, SV_PRINTSCREEN) and Logo (indefinite, none or timed in seconds and tenths, `LogoDisplayTime` in ms, as programs read it), Folder (three pages, WPCONFIG's dialogs 1307, 1303 and 2107: long or short menus and folder menu bars, `PM_Workplace` FolderMenus `LONG`/`SHORT` and FolderMenuBar `ON`/`OFF`, which open folder windows follow at once; the default folder view, DefFolderView `ICON`/`TREE`/`DETAILS`, for folders without a default view of their own; automatic close, `PM_Workplace:FolderAutoClose` Objects `NONE`/`SUBFOLDERS`/`ALL`), Input (WPCONFIG's PmInputDlgProc, dialog 1302: full window dragging, Alt+Tab switching window, VIO mouse actions, asynchronous focus change and its delay in tenths, type-ahead; each a system value (99-103, SV_LOCKSTARTINPUT) set at once with WM_SYSVALUECHANGED broadcast, and a ULONG in `PM_ControlPanel` FullWindowDrag, AltTabWindow, VioMouseActions, AsyncFocusChange, AFCSensitivity, LockStartInput; IBM's defaults off, on, on, on, 20, off; rs2's window manager acts on them: PMWIN's access.rs, see "The Input page in the window manager" below), Screen (`screen.rs`: the resolutions the display driver can switch to, RS2API Rs2QueryDisplayModes, and the colours, 16 million or 256; Apply switches at once with Rs2SetDisplayMode and keeps the new resolution only if Keep is chosen within 15 seconds, as the Display program does, saving it as CONFIG.SYS `VIDEO=WxH[x256]`; page 2, IBM's DMQS display type page, shows the display's resolution, colours, line length and whether its driver can switch; page 3, dialog 1226, only on a 256-colour screen: Workplace Shell palette aware, `PM_WorkPlace:Options` WPSPaletteAware) and Fonts (wpAddSystemFontSettingPages, rs2's page: the icon text font of folders and the desktop that have none of their own, `PM_SystemFonts` IconText, which open folder windows follow); M_WPSystem's wpclsQuerySetting/wpclsSetSetting with WPCONFIG's setting names and wpsystem.h's values; the shell gives PMWIN the settings when it starts) and WPClock (`<WP_CLOCK>`: a clock window, analog with hour and minute marks and a second hand, or digital, with the time, the date or both; its View page, kept with the object, and its Date/Time page, which sets the computer's clock with DosSetDateTime) |
+| `syssetup.rs` | The System Setup classes IBM keeps in WPCONFIG.DLL and WINCFG.DLL that the modules below implement: their metaclasses' titles and rs2's own icons (pmwin::setupicons: a globe, a plug with a bolt, a key with a hand, a window in a window), and the entries that put Country (`<WP_CNTRY>`), Power (`<WP_POWER>`) and Special Needs (`<WP_SPECIALNEEDS>`) in System Setup once (`PM_Workplace` Rs2SystemSetup2), and WIN-OS/2 Setup (`<WP_WINCFG>`) once WIN-OS/2 is installed (Rs2WinOS2Setup), as IBM's INI.RC places Power and WIN-OS/2 Setup (Warp 3's placed Country; Warp 4's has GLOCALE's Locale, which rs2 also has) |
+| `country.rs` | WPCountry (studied with Ghidra: cou_wpAddSettingsPages, CountryDlg, SetCountryData, WriteIntlWin): the Country page (the countries of rs2's NLS table by name; choosing one takes its conventions from DosQueryCtryInfo, as IBM's SetCountryData), Time (12- or 24-hour, separator, AM and PM strings), Date (order, separator) and Numbers (thousands and decimal separators, decimal places, list separator, leading zero, currency symbol and where it goes), with samples; Undo (as when the notebook opened) and Default (the country's own) on each; every change is written at once to OS2.INI `PM_National` (IBM's keys iCountry, iDate, iCurrency, iDigits, iTime, iLzero, s1159, s2359, sCurrency, sThousand, sDecimal, sDate, sTime, sList) and, with WIN-OS/2 installed, to WIN.INI's `[intl]` |
+| `power.rs` | WPPower (the IDL's 33 methods in IBM's release order and its instance data first, as IBM lays it out): IBM's drives APM; rs2 has ACPI, which can turn the computer off but not suspend it. The Power page (power management on or off, wpSet/QueryPowerManagement, also `PM_ControlPanel` APM_BIOS_Enabled; confirm power state changes), the View page (refresh the status view automatically, every N seconds); the status view (OPEN_STATUS, its default view: power source, battery, power management, what it can do) and the menu's Status, Suspend and Power off (wpPowerOff asks when confirmations are on, then the shell shuts down and turns the computer off; wpSuspend says it cannot); wpChangePowerState with APM's states (3 off, 2 suspend); POWER= and CONFIRM= setup strings; the Resume and Geyserville pages are left out (APM wake-up events and SpeedStep) |
+| `spneeds.rs` | Special Needs (WPSpecialNeeds, which IBM's Warp 4 no longer places, and the Keyboard object's Special Needs page, wpAddKeyboardSpecialNeedsPage; after IBM's SpecialDlgProc): on or off, the time-out after which it turns itself off without key presses, the acceptance delay, and the key repeat rate and delay while on. IBM's gives these to the keyboard driver (IMP32SetAIMProfile); rs2's to PMWIN as rs2-private system values 4000-4002 (its input thread ignores keys let go before the acceptance delay, see below) and the repeat to KBD$; kept in `PM_ControlPanel` (SpecialNeeds, SpecialNeedsTimeOut, SpecialNeedsAccept, SpecialNeedsRepeatRate, SpecialNeedsRepeatDelay) and applied when the shell starts |
+| `wincfg.rs` | WIN-OS/2 Setup (WPWinConfig, studied with Ghidra in WINCFG.DLL: win_wpAddSettingsPages, WinDDEDlgProc, WinSessionDlgProc, ProgCatFromSessionButtons), only where WIN-OS/2 is installed (`PM_INSTALL` WINOS2_LOCATION): the Data Exchange page (DDE and clipboard public or private, OS2.INI `WINOS2` PM_DDESupport and PM_ClipboardSupport; kept: rs2's Win-OS/2 has no clipboard or DDE bridge yet, WINOS2.md) and the WIN-OS/2 Session page (the session type of WIN-OS/2 programs that do not choose one, PM_Global31SessionType: full screen PROG_31_ENH, a window in the common session PROG_31_ENHSEAMLESSCOMMON or in one of its own PROG_31_ENHSEAMLESSVDM; fast load, PM_Global31FastLoad, kept; WIN-OS/2 settings..., the DOS Properties dialog on PM_GlobalWindows31Settings, which rs2's launcher gives every Win-OS/2 session under the program's own settings); IBM's Session page for WIN-OS/2 3.0 shows the 3.1 page |
+| `screen.rs` | The System object's Screen pages and Fonts page (see `system.rs`) |
 | `connections.rs` | The LAN requester's objects ([LAN.md](LAN.md)): WPNetwork (`<WP_NETWORK>`: starts the requester, holds a WPNetgrp per workgroup; its Network page shows the requester's state), WPNetgrp (`\\GROUP`: the group's servers), WPServer (`\\SERVER`: its disk shares and print queues), WPSharedDir (`\\SERVER\SHARE`: a folder on the UNC name, which shows the share's files; Assign drive / Assign port and Unassign in its menu, the Drives folder refreshed) |
 | `printer.rs` | WPPrinter on rs2's spooler ([PRINTING.md](PRINTING.md)): a printer object is a queue (QUEUENAME=, wpQuery/SetPrinterName, saved with the object; its title is the queue's description). It opens on its job view: the queue's jobs as job objects (WPJob, printobj.rs) in a view window whose title carries IBM's status (queue held, number of jobs), as icons or (View page) details: document, status, job id, size, date and time submitted, brought up to date at the View page's refresh interval (two seconds by default); the window's own pop-up menu is the printer's (Hold or Release, Delete all jobs, Set default). IBM's pages: View (physical name, default view Detail or Icon, the details to display, refresh interval; WPPRTMRI's dialog 20700), Printer driver (the installed drivers' objects, the default one, Job properties: DevPostDeviceModes, kept with the queue; Default printer), Output port (port objects: choosing one sets the printer's port, opening one edits its settings; Output to file; Install new port), Queue options (priority, the queue driver objects, job dialog before print, printer-specific format, print while spooling: PRQINFO3's fsType) and Print options (dialog 20600: the separator file, typed or found with Find file..., and the start and stop times in hours, minutes and AM/PM; equal times print at any time). Files dropped on it print (PostScript as it is, other files as text), as data files' Print menu item does on the default printer; jobs dragged from another printer's job view move to it (wpMoveJobObject: SplCopyJob, SplDeleteJob); opening or dragging the template shows IBM's Create a printer (name, driver, port or Output to file; Install new printer driver), which makes a queue and a printer (Cancel drops the object); deleting the object deletes its queue; when the shell starts every queue gets an object (`<RS2_PRINTER_queue>`) in the Printers folder |
 | `printobj.rs` | WPPRINT's other classes (the IDL describes them): WPJob (transient, one per spool job: titled with its document and status; Change status (Hold, Release, Start again, Print next) and Delete in its menu; Submission data and Queue options pages (date, time, owner, size, comment; job id, position, priority, status); wpDeleteJob, wpHoldJob, wpReleaseJob, wpPrintJobNext, wpStartJobAgain, wpQueryPrintObject, wpQueryJobId, wpQueryJobFile, wpQueryJobType), WPPdr (a printer driver's device, from `PM_SPOOLER_DD`; opening it shows its printer properties), WPQdr (a queue processor, SplEnumQueueProcessor), WPPort (a spooler port; opening it edits its settings: FILE's output file, LPR's host;queue;port, IPP's host;path;port, COM's line settings), WPSpool (`<WP_SPOOL>` in System Setup, desktop version 10: Spool path, `PM_SPOOLER` DIR; Print priority, `PRIORITY`; Enable/Disable spooler in its menu, `SPOOL`), the Create a printer, Install New Port (LPRn, IPPn, FILEn) and Install New Printer Driver dialogs |
@@ -884,6 +891,42 @@ Shutting down (`shutdown.rs`, RS2SHELL's sequence) asks first, then:
 - the Startup folder (`WPSTEST STARTUP`, then PMSHELL in the same boot:
   the System Editor started).
 
+### The Input page in the window manager
+
+PMWIN acts on the System object's Input page (system values 99-103)
+and on Special Needs (rs2-private 4000-4002), in `userland/pmwin/src/access.rs`:
+
+- **Full window drag** (99, IBM's default off): without it, moving or
+  sizing a frame with the mouse shows an inverted outline that follows
+  the pointer, and the window moves (or takes its new size) when the
+  button goes up.
+- **Alt+Tab switching window** (100, default on): Alt+Tab activates the
+  next window (frames of programs with a title bar, visible or
+  minimized, in z-order); with the switching window on, a box in the
+  middle of the screen shows the window it would switch to (icon and
+  title) while Alt is held, each Tab (Shift+Tab: back) moving on, and
+  the switch happens when Alt goes up (the kernel now passes PM the Alt
+  key's release; PMWIN keeps it from programs). Alt+Esc stays the
+  kernel's (the next session).
+- **VIO mouse actions** (101, default on): off, the mouse no longer
+  marks text in VIO windows (PMVIOWIN; the menu's Mark still does).
+- **Asynchronous focus change** (102, default on) and its delay (103,
+  tenths of a second, default 20): a thread that takes longer than the
+  delay to come for its input is treated as not responding (PMWIN
+  then activates, moves and sizes its windows itself), instead of only
+  after PM_HANGTIME.
+- **Special Needs**: with it on, a key counts only when held down for the
+  acceptance delay (a press is held back until a repeat or the release
+  shows it was held long enough; a shorter one is dropped; Shift, Ctrl,
+  Alt and the lock keys always count), and it turns itself off after
+  the time-out without key presses.
+
+Checked in QEMU (`WPSTEST SHELL OPEN <WP_CONFIG> 1; OPEN <WP_SYSTEM> 2;
+OPEN <WP_POWER> 131` with `--type "{keydown alt}{tab}...{keyup alt}"`
+and pointer drags): the switching window going through the windows and
+the switch when Alt went up; a title bar drag showing the outline and
+the window moving at the end.
+
 ## rs2's multimedia classes
 
 `mm.rs` gives PMWP the multimedia classes, with the names of IBM's
@@ -1073,16 +1116,18 @@ reports `Could not find routine "WPUSER"` in the shell (not found yet).
 
 Compared with IBM's System Setup (INI.RC's `<WP_CONFIG>`) and its other
 WPCONFIG and WPPRINT objects, rs2 leaves out, for now:
-- the System object's Screen and display type pages (rs2's Display
-  program sets the mode) and its font pages (WPCONFIG's Sys*FontDlgProc:
-  the device, video and text-mode fonts of DBCS systems); the Input
-  page's settings are kept and given to PMWIN as system values, but
-  rs2's window manager does not act on them yet;
-- Country (WPCountry, which Warp 4 replaced by the Locale program; IBM's
-  GLOCALE runs on rs2: COMPATIBILITY.md), Power (WPPower: rs2 turns off
-  through ACPI without APM's settings), WIN-OS/2 Setup (WPWinConfig: the
-  WIN-OS/2 settings are in WINOS2.md's own files), Touch, Hardware
-  Manager and Selective Install (IBM's installer's);
+- the System object's display type page shows the display rather than
+  listing monitor types (rs2's drivers report their own resolutions,
+  without refresh rates), and its Fonts page has only the icon text font
+  (IBM's Sys*FontDlgProc pages set the device, video and text-mode fonts
+  of DBCS systems); the Input page's type-ahead (SV_LOCKSTARTINPUT) is
+  kept but not acted on;
+- Power cannot suspend (rs2's ACPI only turns the computer off) and
+  reads no batteries; WIN-OS/2 Setup's data exchange and fast load are
+  kept but have nothing to act on yet (WINOS2.md); Special Needs has no
+  sticky keys (IBM's has none either in Warp 4's page) and its time-out
+  only applies when the next key comes; Touch, Hardware Manager and
+  Selective Install (IBM's installer's);
 - printing: remote printers (WPRPrinter objects) are not made: a print
   queue on a server is a WPSharedDir whose Assign port redirects LPT1-3
   to it (NET USE LPTn), and a local printer object on that port prints

@@ -212,7 +212,8 @@ fn set_colors(w: usize) {
         WinSetPresParam(cnr, 1, 4, &fg);
     }
     // PP_FONTNAMESIZE: the folder's font (the Font Palette).
-    match crate::fs::folder_font(wins()[w].obj) {
+    // Else the System object's icon text font (screen.rs).
+    match crate::fs::folder_font(wins()[w].obj).or_else(crate::screen::icon_text_font) {
         Some(n) => {
             let z = crate::util::z(&n);
             unsafe { WinSetPresParam(cnr, 15, z.len() as u32, z.as_ptr() as *const u32) };

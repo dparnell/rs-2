@@ -902,10 +902,16 @@ extern "C" fn wpAddSystem256ColorPage(o: usize, nb: u32) -> u32 {
     if !screen_256() {
         return 1;
     }
-    add_page(o, nb, color256_page_proc, alloc::vec![
+    // Under the Screen tab (screen.rs), as IBM's third Screen page.
+    let tpl = crate::pm::template(book::page_frame(), alloc::vec![
         checkbox(b"Workplace Shell ~palette aware", (8, 100, 160), ID_PALETTEAWARE),
         push(b"~Default", (4, 2), ID_DEFAULT),
-    ], b"~Screen\0")
+    ]);
+    let page = book::make_page(nb, color256_page_proc, &tpl, o);
+    if page == 0 {
+        return 0;
+    }
+    book::insert_after(o, nb, page, b"Screen - Palette\0", b"~Screen")
 }
 
 /// The Input page's system values, set when the shell starts.
@@ -920,7 +926,12 @@ fn apply_input() {
 /// and Input after Logo.
 extern "C" fn system_add_pages(o: usize, nb: u32) -> u32 {
     som::call_parent(wps::ccd("WPSystem"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
+    // Screen (resolution, display type, 256-colour palette) and Fonts
+    // (screen.rs) after Input.
+    wps::call("WPSystem", m::WPSystem::wpAddSystemScreenPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddDMQSDisplayTypePage, &[o, nb as usize]);
     wps::call("WPSystem", m::WPSystem::wpAddSystem256ColorPage, &[o, nb as usize]);
+    wps::call("WPSystem", m::WPSystem::wpAddSystemFontSettingPages, &[o, nb as usize]);
     wps::call("WPSystem", m::WPSystem::wpAddSystemInputPage, &[o, nb as usize]);
     wps::call("WPSystem", m::WPSystem::wpAddSysFdrMenuPage, &[o, nb as usize]);
     wps::call("WPSystem", m::WPSystem::wpAddSysFdrDefViewPage, &[o, nb as usize]);
@@ -1325,6 +1336,9 @@ methods! {
     __m_wpAddSysFdrDefViewPage => wpAddSysFdrDefViewPage, 2;
     __m_wpAddSysFdrSelfClosePage => wpAddSysFdrSelfClosePage, 2;
     __m_wpAddSystem256ColorPage => wpAddSystem256ColorPage, 2;
+    __m_wpAddSystemScreenPage => crate::screen::wpAddSystemScreenPage, 2;
+    __m_wpAddDMQSDisplayTypePage => crate::screen::wpAddDMQSDisplayTypePage, 2;
+    __m_wpAddSystemFontSettingPages => crate::screen::wpAddSystemFontSettingPages, 2;
     __m_sys_query_setting => sys_query_setting, 4;
     __m_sys_set_setting => sys_set_setting, 3;
     __m_system_add_pages => system_add_pages, 2;
@@ -1352,6 +1366,9 @@ pub fn impl_system() -> Impl {
             ("wpAddSysFdrDefViewPage", __m_wpAddSysFdrDefViewPage as usize),
             ("wpAddSysFdrSelfClosePage", __m_wpAddSysFdrSelfClosePage as usize),
             ("wpAddSystem256ColorPage", __m_wpAddSystem256ColorPage as usize),
+            ("wpAddSystemScreenPage", __m_wpAddSystemScreenPage as usize),
+            ("wpAddDMQSDisplayTypePage", __m_wpAddDMQSDisplayTypePage as usize),
+            ("wpAddSystemFontSettingPages", __m_wpAddSystemFontSettingPages as usize),
         ],
         overrides: alloc::vec![("wpAddSettingsPages", __m_system_add_pages as usize), crate::pages::no_window_page_override()],
     }

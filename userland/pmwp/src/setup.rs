@@ -418,7 +418,7 @@ const SCHEMES: [(&[u8], [u32; 16]); 6] = [
 ];
 
 /// The font palette's fonts (PP_FONTNAMESIZE names).
-const FONTS: [&[u8]; 12] = [
+pub(crate) const FONTS: [&[u8]; 12] = [
     b"8.Helv", b"10.Helv", b"12.Helv", b"10.Helvetica Bold", b"14.Helvetica", b"18.Helvetica Bold",
     b"10.Times New Roman", b"12.Times New Roman", b"14.Times New Roman Bold", b"10.Courier", b"12.Courier", b"9.WarpSans",
 ];
