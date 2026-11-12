@@ -12,3 +12,4 @@ extern crate alloc;
 
 pub mod text;
 pub mod vdagent;
+pub mod vmware;

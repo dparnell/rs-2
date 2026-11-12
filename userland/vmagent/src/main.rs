@@ -6,7 +6,10 @@
 //!   window (qemu-vdagent), SPICE clients (virt-viewer, Proxmox, libvirt),
 //!   UTM ([`vdagent`]);
 //! - VirtualBox's shared clipboard service, through the kernel's VMMDev
-//!   driver (`\DEV\VBOXGST$`, [`vbox`]).
+//!   driver (`\DEV\VBOXGST$`, [`vbox`]);
+//! - VMware's GuestRPC and copy/paste (version 4, else the legacy
+//!   backdoor commands), through the kernel's backdoor calls
+//!   (`\DEV\VMWARE$`, [`vmware`]).
 //!
 //! The Workplace Shell starts it once per PM session; a second copy, or
 //! one in a machine without such a channel, ends at once. A thread reads
@@ -22,6 +25,7 @@ extern crate alloc;
 
 mod vbox;
 mod vdagent;
+mod vmware;
 
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -54,6 +58,7 @@ const POLL_MS: u32 = 250;
 pub enum Backend {
     Vdagent(vdagent::Vdagent),
     VBox(vbox::VBox),
+    VMware(vmware::VMware),
 }
 
 impl Backend {
@@ -62,6 +67,7 @@ impl Backend {
         match self {
             Backend::Vdagent(v) => v.local_changed(text),
             Backend::VBox(v) => v.local_changed(text),
+            Backend::VMware(v) => v.local_changed(text),
         }
     }
 
@@ -70,6 +76,7 @@ impl Backend {
         match self {
             Backend::Vdagent(v) => v.reply(text),
             Backend::VBox(v) => v.reply(text),
+            Backend::VMware(v) => v.reply(text),
         }
     }
 
@@ -78,6 +85,7 @@ impl Backend {
         match self {
             Backend::Vdagent(v) => v.read_loop(),
             Backend::VBox(v) => v.read_loop(),
+            Backend::VMware(v) => v.read_loop(),
         }
     }
 }
@@ -255,7 +263,8 @@ fn main(s: &os2::Startup) -> u32 {
     if unsafe { os2::DosCreateMutexSem(b"\\SEM32\\RS2\\VMAGENT\0".as_ptr(), &mut mtx, 0, 0) } != 0 {
         return 0;
     }
-    let backend = vdagent::Vdagent::open().map(Backend::Vdagent).or_else(|| vbox::VBox::open().map(Backend::VBox));
+    let backend = vdagent::Vdagent::open().map(Backend::Vdagent).or_else(|| vbox::VBox::open().map(Backend::VBox))
+        .or_else(|| vmware::VMware::open().map(Backend::VMware));
     let Some(backend) = backend else {
         // No hypervisor channel.
         if test {
@@ -300,6 +309,7 @@ impl Backend {
         match self {
             Backend::Vdagent(v) => v.start(),
             Backend::VBox(v) => v.start(),
+            Backend::VMware(v) => v.start(),
         }
     }
 }

@@ -91,6 +91,32 @@ pub fn present() -> bool {
     }
 }
 
+/// A backdoor call with all registers given (EAX is the magic number and
+/// DX the backdoor port whatever the caller says; EDX's high half is
+/// GuestRPC's channel): `\\DEV\\VMWARE$` for the guest agent, which does
+/// GuestRPC and the clipboard commands (docs/AGENT.md).
+pub fn call_regs(r: Regs) -> Option<Regs> {
+    if !present() {
+        return None;
+    }
+    let (eax, ebx, ecx, edx, esi, edi): (u32, u64, u32, u32, u32, u32);
+    unsafe {
+        core::arch::asm!(
+            "xchg {b}, rbx",
+            "in eax, dx",
+            "xchg {b}, rbx",
+            b = inout(reg) r.ebx as u64 => ebx,
+            inout("eax") MAGIC => eax,
+            inout("ecx") r.ecx => ecx,
+            inout("edx") (r.edx & 0xffff_0000) | PORT as u32 => edx,
+            inout("esi") r.esi => esi,
+            inout("edi") r.edi => edi,
+            options(nostack),
+        );
+    }
+    Some(Regs { eax, ebx: ebx as u32, ecx, edx, esi, edi })
+}
+
 /// A backdoor call, if the backdoor exists.
 pub fn command(cmd: u32, arg: u32) -> Option<Regs> {
     present().then(|| call(cmd, arg))

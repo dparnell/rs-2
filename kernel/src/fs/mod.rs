@@ -433,6 +433,8 @@ pub enum CharDev {
     ResMgr,
     /// VBOXGST$: VirtualBox's shared clipboard (crate::drivers::vbox).
     VBox,
+    /// VMWARE$: VMware's backdoor calls (crate::vmware::call_regs).
+    VMware,
 }
 
 impl CharDev {
@@ -450,6 +452,7 @@ impl CharDev {
             }),
             CharDev::ResMgr => String::from("\\DEV\\RESMGR$"),
             CharDev::VBox => String::from("\\DEV\\VBOXGST$"),
+            CharDev::VMware => String::from("\\DEV\\VMWARE$"),
         }
     }
 }
@@ -478,6 +481,7 @@ pub fn device_name(path: &str) -> Option<Device> {
         "QEMUGA$" => Device::Char(CharDev::VioPort(crate::drivers::virtio::console::QEMU_GA)),
         "RESMGR$" => Device::Char(CharDev::ResMgr),
         "VBOXGST$" => Device::Char(CharDev::VBox),
+        "VMWARE$" => Device::Char(CharDev::VMware),
         b => match (b.strip_prefix("COM"), b.strip_prefix("LPT")) {
             (Some(n), _) if matches!(n, "1" | "2" | "3" | "4") => Device::Char(CharDev::Com(n.as_bytes()[0] - b'1')),
             (_, Some(n)) if matches!(n, "1" | "2" | "3") => Device::Char(CharDev::Lpt(n.as_bytes()[0] - b'1')),
@@ -634,6 +638,7 @@ impl Handle {
             Device::Char(CharDev::Random) => !crate::chardev::random_present(),
             Device::Char(CharDev::VioPort(k)) => !crate::drivers::virtio::console::port_present(k),
             Device::Char(CharDev::VBox) => !crate::drivers::vbox::present(),
+            Device::Char(CharDev::VMware) => !crate::vmware::present(),
             _ => false,
         };
         if missing {

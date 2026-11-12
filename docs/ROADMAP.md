@@ -85,7 +85,11 @@ Status markers: done, in progress, planned.
   named ports \DEV\VDAGENT$ and \DEV\QEMUGA$; every controller)
 - done: guest agent VMAGENT.EXE (docs/AGENT.md): clipboard text shared with
   the host through the SPICE agent protocol (QEMU's window, Proxmox, libvirt,
-  UTM)
+  UTM), VirtualBox's shared clipboard (VMMDev driver, HGCM) and VMware's
+  copy/paste (GuestRPC, version 4 and the legacy version 1)
+- next: run the VirtualBox and VMware backends on those hosts; bitmaps;
+  the QEMU guest agent (org.qemu.guest_agent.0: Proxmox's shutdown, IP
+  addresses, file system freeze)
 - done: virtio-gpu 2D (`virtio-vga`, `virtio-gpu-pci`): guest-RAM
   framebuffer for the text screens and PM, `video=WxH` (any size)
 - done: virtio-gpu hardware cursor (cursor queue) for PM

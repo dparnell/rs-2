@@ -15,6 +15,24 @@ not start another.
 | Proxmox VE | SPICE agent | Display "SPICE" (the clipboard is the SPICE client's: virt-viewer/remote-viewer), or the VNC console's clipboard option (Display → Clipboard: VNC, Proxmox 8.1 and later) |
 | libvirt / virt-manager, oVirt | SPICE agent | a SPICE display with its `spicevmc` channel (virt-manager adds it) |
 | UTM (macOS) | SPICE agent | QEMU backend with "Clipboard Sharing" on (the default) |
+| VirtualBox | VMMDev, HGCM shared clipboard service | the machine's Shared Clipboard set to Bidirectional (Disabled by default): Settings → General → Advanced, Devices → Shared Clipboard while it runs, or `VBoxManage controlvm VM clipboard mode bidirectional` |
+| VMware Workstation, Fusion, Player | backdoor: GuestRPC, copy/paste version 4 (else the legacy version 1) | "Enable copy and paste" (Options → Guest Isolation; on by default) |
+| VMware ESXi | as Workstation | `isolation.tools.copy.disable` and `isolation.tools.paste.disable` set to FALSE in the VM's advanced settings, then a cold boot; the clipboard is VMRC's (the web console has none) |
+
+The agent tries the channels in that order: the SPICE agent's port, then
+VirtualBox's device, then VMware's backdoor (only if GuestRPC answers: QEMU's
+`vmport` answers the backdoor's version query too but has no GuestRPC).
+
+Not covered, as these hypervisors have no clipboard channel a guest can
+use: Hyper-V (only Windows guests, or the RDP of an enhanced session),
+Parallels Desktop (Parallels Tools' protocol is not public), Xen and
+XCP-ng (none). Their consoles can still type text into the guest.
+
+**Checked so far**: the SPICE agent channel (QEMU, below). The VirtualBox
+and VMware backends are written from their protocols as VirtualBox's
+(7.1, 7.2) and open-vm-tools' sources define them, and the VMware protocol
+is tested on the host against a simulated host (`cargo test -p
+guestagent`), but neither has run on VirtualBox or VMware yet.
 
 ## How it works
 
@@ -54,6 +72,57 @@ It announces neither the selection nor the grab serial capability, so
 messages carry no prefix for them, nor a line-end capability: the agent
 converts line ends itself.
 
+### VirtualBox
+
+VirtualBox's VMMDev (PCI 80EE:CAFE) takes requests whose physical address
+the guest writes to its I/O port. The kernel's driver
+(`kernel/src/drivers/vbox.rs`) reports the guest (interface 1.4, OS/2 Warp
+4.5; nothing reaches the host's services before that), and calls the
+shared clipboard service through HGCM (Call64 requests with embedded
+buffers, below 4 GB). It polls each request's DONE flag and keeps the
+device's interrupt off (the PCI command register's INTx disable), as the
+host turns the HGCM interrupt on by itself.
+
+A VirtualBox host allows one clipboard client per machine, and frees a
+request only when it has written its result back. So the kernel owns the
+client for good, and keeps the request that waits for host messages
+(MSG_OLD_GET_WAIT) even when the thread waiting for it ends: a restarted
+agent carries on with the same client and wait. `\DEV\VBOXGST$` gives the
+agent the service's four calls as IOCtls (category 0x80: 1 wait, 2 report
+formats, 3 read, 4 write; parameters `{format, rc, a, b}`).
+
+The protocol is the service's legacy one, which VirtualBox's own OS/2
+additions use and current hosts still take: the host reports formats when
+its clipboard changes and the agent reads the text (UTF-16LE, CR LF, NUL
+counted); the agent reports its formats when the OS/2 clipboard has text,
+and the host asks for the data when something is pasted on its side.
+
+### VMware
+
+The VMware backdoor is an `in eax, dx` on port 0x5658 with the magic
+number in EAX. The kernel makes the call for the agent (`\DEV\VMWARE$`,
+IOCtl 0x80/1: the six registers in and out; EAX and the port are always
+the backdoor's), and the protocol is in `crates/guestagent` (from
+open-vm-tools):
+
+- GuestRPC's message layer (command 0x1E: open, send size and payload,
+  receive size and payload and status, close; four bytes per call);
+- RPCI, the guest's commands to the host (`tools.set.versiontype`,
+  `tools.capability.copypaste_version 4`, `copypaste.transport ...`);
+- two TCLO channels (`toolbox` and `toolbox-dnd`) on which the host's
+  commands arrive when the guest polls (every 10 to 100 ms): `reset`,
+  `ping`, `Capabilities_Register`, `Set_Option copypaste 1`, and
+  `copypaste.transport` packets;
+- copy/paste version 4: after the version is agreed and copy/paste turned
+  on, the guest sends a ping (text capabilities); the host sends its
+  clipboard (RECV_CLIPBOARD, a CPClipboard whose first slot is
+  NUL-terminated UTF-8; large ones in pieces the guest asks for), and asks
+  for the guest's (REQUEST_CLIPBOARD, answered with SEND_CLIPBOARD);
+- version 1, if the host does not take version 4 (or nothing is agreed
+  within about 30 seconds): the host's selection is read with backdoor
+  commands 6 and 7 every second, the guest's given with 8 and 9 when it
+  changes (UTF-8, at most 65436 bytes).
+
 ### The OS/2 side
 
 The agent is a PM program with an object window and a second thread that
@@ -75,6 +144,11 @@ Only text is shared for now; bitmaps (`CF_BITMAP`, which the SPICE agent
 could carry as PNG or BMP) are not.
 
 ## Testing
+
+`cargo test -p guestagent`: text conversions, the SPICE agent's framing,
+and VMware's protocol against a simulated VMX (handshake, version 4 both
+ways, a 100 KB clipboard in pieces, the version 1 fallback, unknown
+commands).
 
 `cargo xtask run --agent` adds the channel, with QEMU's clipboard shared with
 the Mac's through its window. `VMAGENT /TEST` (as the boot program:
@@ -98,4 +172,6 @@ page 850 text (`\x81ber na\x8bve "quotes" -- ok`) and the guest's
 `rs2 got 37 bytes: café` reached the host as UTF-8; in QEMU's Cocoa window,
 `Grüße “hi”` copied on the Mac (pbcopy) arrived in OS/2 and the guest's
 `café` could be pasted on the Mac (pbpaste). Booted to the desktop, the
-Workplace Shell starts the agent and it opens its port.
+Workplace Shell starts the agent and it opens its port. Without
+`--agent`, QEMU's `vmport` answers the VMware backdoor but not GuestRPC, and
+the agent ends ("no channel to a host").

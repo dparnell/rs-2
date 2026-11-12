@@ -179,6 +179,7 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
         (Handle::Char(CharDev::Mouse | CharDev::Pointer), 7) => mouse(c, r),
         (Handle::Char(CharDev::ResMgr), 0x80) => crate::resmgr::ioctl(c, r),
         (Handle::Char(CharDev::VBox), 0x80) => vbox(c, r),
+        (Handle::Char(CharDev::VMware), 0x80) if r.function == 1 => vmware(c, r),
         (Handle::Screen, 3) => screen(c, r),
         _ => err::INVALID_CATEGORY,
     }
@@ -670,5 +671,23 @@ fn vbox(c: &mut Ctx, r: &Req) -> u32 {
         return err::INVALID_ADDRESS;
     }
     set_lens(c, r, 16, rep.data.len() as u32);
+    0
+}
+
+/// \\DEV\\VMWARE$ function 1: a backdoor call; parameters EAX, EBX, ECX,
+/// EDX, ESI, EDI in and out (crate::vmware::call_regs).
+fn vmware(c: &mut Ctx, r: &Req) -> u32 {
+    let Some(p) = c.read_vec(r.params, 24) else { return err::INVALID_ADDRESS };
+    let w = |i: usize| u32::from_le_bytes([p[4 * i], p[4 * i + 1], p[4 * i + 2], p[4 * i + 3]]);
+    let regs = crate::vmware::Regs { eax: w(0), ebx: w(1), ecx: w(2), edx: w(3), esi: w(4), edi: w(5) };
+    let Some(o) = crate::vmware::call_regs(regs) else { return err::INVALID_CATEGORY };
+    let mut out = [0u8; 24];
+    for (i, v) in [o.eax, o.ebx, o.ecx, o.edx, o.esi, o.edi].iter().enumerate() {
+        out[4 * i..4 * i + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    if !c.write(r.params, &out) {
+        return err::INVALID_ADDRESS;
+    }
+    set_lens(c, r, 24, 0);
     0
 }
