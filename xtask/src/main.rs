@@ -9,7 +9,7 @@
 //!                  [--vmware] [--pvscsi IMG] [--pvscsi-cd ISO] [--scsi-hba MODEL]
 //!                  [--virtio-disk IMG]... [--virtio-scsi IMG]... [--virtio-cd ISO]...
 //!                  [--virtio-input|--virtio-kbd|--virtio-mouse|--virtio-tablet]
-//!                  [--virtio-rng] [--virtio-console PATH] [--virtio-gpu|--virtio-gpu-pci]
+//!                  [--virtio-rng] [--virtio-console PATH] [--agent] [--virtio-gpu|--virtio-gpu-pci]
 //!                  [--virtio-legacy] [--boot-virtio]
 //!                  [--net [MODEL]] [--virtio-net] [--net-model MODEL] [--hostfwd RULE]... [--guestfwd RULE]... [--tftp DIR]
 //!                  [--sound [hda|ac97|es1370]] [--sound-wav FILE] [--sound-in FILE|tone:HZ]
@@ -51,6 +51,11 @@
 //! `--virtio-mouse`, `--virtio-tablet`), `--virtio-rng` an entropy source,
 //! `--virtio-console PATH` a console whose output goes to file PATH, or,
 //! if the FIFOs PATH.in and PATH.out exist, connected to them.
+//! `--agent` adds the guest agent's channel: QEMU's SPICE agent
+//! (`qemu-vdagent`, clipboard shared with the host's through QEMU's
+//! window) on a virtio-serial port named `com.redhat.spice.0`, for
+//! VMAGENT.EXE (docs/AGENT.md). Headless, the host's side is a VNC
+//! server on work/qemu-vnc.sock (QEMU's VNC clipboard is the same).
 //! `--virtio-gpu` replaces the standard VGA with `virtio-vga` (the
 //! firmware draws on its VGA side until the kernel's virtio-gpu driver
 //! takes over), `--virtio-gpu-pci` with `virtio-gpu-pci` (no firmware
@@ -155,6 +160,8 @@ struct Opts {
     virtio_tablet: bool,
     virtio_rng: bool,
     virtio_console: Option<PathBuf>,
+    /// `run`: the guest agent's virtio-serial port (qemu-vdagent).
+    agent: bool,
     virtio_legacy: bool,
     boot_virtio: bool,
     /// `run`: virtio-gpu display: "virtio-vga" or "virtio-gpu-pci".
@@ -221,6 +228,7 @@ fn parse(args: &[String]) -> Opts {
         virtio_tablet: false,
         virtio_rng: false,
         virtio_console: None,
+        agent: false,
         virtio_legacy: false,
         boot_virtio: false,
         virtio_gpu: None,
@@ -318,6 +326,7 @@ fn parse(args: &[String]) -> Opts {
                 o.virtio_console = Some(PathBuf::from(&args[i]));
             }
             "--virtio-legacy" => o.virtio_legacy = true,
+            "--agent" => o.agent = true,
             "--virtio-gpu" => o.virtio_gpu = Some("virtio-vga"),
             "--virtio-gpu-pci" => o.virtio_gpu = Some("virtio-gpu-pci"),
             "--boot-virtio" => o.boot_virtio = true,
@@ -763,6 +772,9 @@ const USER_PROGRAMS: &[(&str, &str)] =
         // rs2's own PM applets (userland/pmkit is what they share).
         ("clipos2", "OS2\\CLIPOS2.EXE"),
         ("mpcpumon", "OS2\\MPCPUMON.EXE"),
+        // The guest agent (docs/AGENT.md): the clipboard shared with the
+        // host of a virtual machine; the shell starts it.
+        ("vmagent", "OS2\\VMAGENT.EXE"),
         ("pmchkdsk", "OS2\\PMCHKDSK.EXE"),
         ("pmformat", "OS2\\PMFORMAT.EXE"),
         ("iconedit", "OS2\\ICONEDIT.EXE"),
@@ -851,7 +863,7 @@ const APP_DATA: &[(&str, &str)] = &[
 ];
 
 /// Programs marked as PM applications (WINDOWAPI).
-const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "pkgmgr", "klondike", "mahjongg", "os2chess", "pmrexx", "odshell"];
+const PM_PROGRAMS: &[&str] = &["mppm", "wepm", "cdpm", "mmvolume", "stpm", "pmsrv", "pmhang", "pmbusy", "pmviowin", "rs2shell", "e", "view", "appinst", "pminstal", "hmtest", "display", "wpshell", "pmshell", "pmspool", "tcpcfg2", "clipos2", "mpcpumon", "vmagent", "pmchkdsk", "pmformat", "iconedit", "glocale", "picview", "pmseek", "pkgmgr", "klondike", "mahjongg", "os2chess", "pmrexx", "odshell"];
 
 /// Build the userland workspace and convert each program to LX.
 fn build_userland() -> Option<image::FileList> {
@@ -1313,8 +1325,16 @@ fn virtio_devices(o: &Opts, c: &mut Command) {
         let fifos = Path::new(&format!("{}.in", out.display())).exists();
         let backend = if fifos { "pipe" } else { "file" };
         c.arg("-chardev").arg(format!("{backend},id=vcon,path={}", out.display()));
+    }
+    if o.virtio_console.is_some() || o.agent {
         c.arg("-device").arg(format!("virtio-serial-pci{legacy}"));
+    }
+    if o.virtio_console.is_some() {
         c.args(["-device", "virtconsole,chardev=vcon"]);
+    }
+    if o.agent {
+        c.args(["-chardev", "qemu-vdagent,id=vdagent,clipboard=on,mouse=off"]);
+        c.args(["-device", "virtserialport,chardev=vdagent,name=com.redhat.spice.0"]);
     }
 }
 
@@ -1444,6 +1464,13 @@ fn run(o: &Opts) -> bool {
     if o.headless {
         if o.sound_in.is_none() {
             c.args(["-display", "none"]);
+        }
+        if o.agent {
+            // The host's side of the shared clipboard without a window:
+            // a VNC client on this socket (tools/scripts/vnc_clipboard.py).
+            let vnc = socket_path(&work, "qemu-vnc.sock");
+            let _ = std::fs::remove_file(&vnc);
+            c.arg("-vnc").arg(format!("unix:{}", vnc.display()));
         }
         c.arg("-serial").arg(format!("file:{}", serial.display()));
     } else {

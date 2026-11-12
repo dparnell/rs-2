@@ -107,6 +107,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "guestagent"
+version = "0.1.0"
+dependencies = [
+ "uls",
+]
+
+[[package]]
 name = "helpmgr-dll"
 version = "0.1.0"
 dependencies = [
@@ -946,6 +953,15 @@ dependencies = [
 [[package]]
 name = "viocell"
 version = "0.1.0"
+
+[[package]]
+name = "vmagent"
+version = "0.1.0"
+dependencies = [
+ "guestagent",
+ "os2",
+ "pmkit",
+]
 
 [[package]]
 name = "vt100"

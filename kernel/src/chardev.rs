@@ -675,7 +675,7 @@ pub fn read(d: CharDev, len: usize) -> Vec<u8> {
     match d {
         CharDev::Com(n) => com_read(n as usize, len),
         CharDev::Random => random_read(len),
-        CharDev::VioCon => crate::drivers::virtio::console::read(len),
+        CharDev::VioPort(k) => crate::drivers::virtio::console::read(k, len),
         _ => Vec::new(),
     }
 }
@@ -685,7 +685,7 @@ pub fn write(d: CharDev, data: &[u8]) -> usize {
     match d {
         CharDev::Com(n) => com_write(n as usize, data),
         CharDev::Lpt(n) => lpt_write(n as usize, data),
-        CharDev::VioCon => crate::drivers::virtio::console::write(data),
+        CharDev::VioPort(k) => crate::drivers::virtio::console::write(k, data),
         CharDev::Random => 0,
         _ => data.len(),
     }

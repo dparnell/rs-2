@@ -1,0 +1,9 @@
+[package]
+name = "guestagent"
+description = "no_std protocol code of rs2's guest agent (VMAGENT.EXE): the SPICE agent protocol, VMware's and VirtualBox's clipboard messages, clipboard text between OS/2 code pages and UTF-8"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+uls = { path = "../uls" }

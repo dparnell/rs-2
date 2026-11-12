@@ -36,6 +36,13 @@ name = "gpi"
 version = "0.1.0"
 
 [[package]]
+name = "guestagent"
+version = "0.1.0"
+dependencies = [
+ "uls",
+]
+
+[[package]]
 name = "hpfs"
 version = "0.1.0"
 

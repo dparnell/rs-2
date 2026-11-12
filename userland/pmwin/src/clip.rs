@@ -66,6 +66,8 @@ pub struct Clipboard {
     pub changed: bool,
     /// Bitmap handles given out for CF_BITMAP items: (pid, hbm).
     pub given: Vec<(u32, u32)>,
+    /// Counts changes of the contents (Rs2QueryClipbrdSeq).
+    pub seq: u32,
 }
 
 unsafe extern "C" {
@@ -223,6 +225,9 @@ pub extern "C" fn WinCloseClipbrd(_hab: u32) -> u32 {
     c.open_by = 0;
     let (changed, viewer) = (c.changed, c.viewer);
     c.changed = false;
+    if changed {
+        c.seq = c.seq.wrapping_add(1);
+    }
     if changed && viewer != 0 && st().desk.exists(viewer) {
         let owner = st().clip.owner;
         crate::msg::notify(viewer, WM_DRAWCLIPBOARD, owner, 0);
@@ -364,6 +369,15 @@ pub extern "C" fn WinSetClipbrdViewer(_hab: u32, h: u32) -> u32 {
         crate::msg::notify(h, WM_DRAWCLIPBOARD, owner, 0);
     }
     1
+}
+
+/// Rs2QueryClipbrdSeq() (rs2-private): a number that changes whenever
+/// the clipboard's contents do (when it is closed after a change), so
+/// that a program can follow the clipboard without being its viewer
+/// (there is one viewer, CLIPOS2 wants it): the guest agent, VMAGENT.
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2QueryClipbrdSeq() -> u32 {
+    clip().seq
 }
 
 #[unsafe(no_mangle)]

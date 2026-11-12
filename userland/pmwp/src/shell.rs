@@ -61,6 +61,22 @@ fn run_startup_cmd() {
     }
 }
 
+/// The guest agent, \OS2\VMAGENT.EXE of the boot drive (docs/AGENT.md):
+/// it ends at once outside a virtual machine, or when it already runs (a
+/// restarted shell).
+fn start_agent() {
+    let mut drive = 3u32;
+    unsafe { os2::DosQuerySysInfo(5, 5, &mut drive, 4) };
+    let mut path = *b"C:\\OS2\\VMAGENT.EXE\0";
+    path[0] = b'@' + drive as u8;
+    let mut args = path.to_vec();
+    args.push(0);
+    let mut fail = [0u8; 32];
+    let mut res = os2::ResultCodes { code_terminate: 0, code_result: 0 };
+    // EXEC_ASYNC
+    unsafe { os2::DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, 1, args.as_ptr(), core::ptr::null(), &mut res, path.as_ptr()) };
+}
+
 // ---- WinWaitForShell ----
 //
 // The shell posts an event semaphore for each stage of its start: the
@@ -181,6 +197,7 @@ pub extern "C" fn ShlStartWorkplace(hab: u32, _hmq: u32) -> u32 {
     }
     crate::minwin::apply();
     crate::desktop::archive_at_startup();
+    start_agent();
     if startup_wanted() {
         run_startup();
         run_startup_cmd();

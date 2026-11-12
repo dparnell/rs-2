@@ -425,8 +425,10 @@ pub enum CharDev {
     Pointer,
     /// RANDOM$: the entropy source (virtio-rng, else RDRAND).
     Random,
-    /// VIOCON$: port 0 of a virtio console.
-    VioCon,
+    /// A virtio-serial port: VIOCON$ (the console), VDAGENT$ (the SPICE
+    /// agent's port), QEMUGA$ (the QEMU guest agent's); the kinds are
+    /// crate::drivers::virtio::console's.
+    VioPort(u8),
     /// RESMGR$: the resource manager (crate::resmgr).
     ResMgr,
 }
@@ -439,7 +441,11 @@ impl CharDev {
             CharDev::Mouse => String::from("\\DEV\\MOUSE$"),
             CharDev::Pointer => String::from("\\DEV\\POINTER$"),
             CharDev::Random => String::from("\\DEV\\RANDOM$"),
-            CharDev::VioCon => String::from("\\DEV\\VIOCON$"),
+            CharDev::VioPort(k) => String::from(match *k {
+                crate::drivers::virtio::console::SPICE => "\\DEV\\VDAGENT$",
+                crate::drivers::virtio::console::QEMU_GA => "\\DEV\\QEMUGA$",
+                _ => "\\DEV\\VIOCON$",
+            }),
             CharDev::ResMgr => String::from("\\DEV\\RESMGR$"),
         }
     }
@@ -464,7 +470,9 @@ pub fn device_name(path: &str) -> Option<Device> {
         "MOUSE$" => Device::Char(CharDev::Mouse),
         "POINTER$" => Device::Char(CharDev::Pointer),
         "RANDOM$" => Device::Char(CharDev::Random),
-        "VIOCON$" => Device::Char(CharDev::VioCon),
+        "VIOCON$" => Device::Char(CharDev::VioPort(crate::drivers::virtio::console::CONSOLE)),
+        "VDAGENT$" => Device::Char(CharDev::VioPort(crate::drivers::virtio::console::SPICE)),
+        "QEMUGA$" => Device::Char(CharDev::VioPort(crate::drivers::virtio::console::QEMU_GA)),
         "RESMGR$" => Device::Char(CharDev::ResMgr),
         b => match (b.strip_prefix("COM"), b.strip_prefix("LPT")) {
             (Some(n), _) if matches!(n, "1" | "2" | "3" | "4") => Device::Char(CharDev::Com(n.as_bytes()[0] - b'1')),
@@ -620,11 +628,14 @@ impl Handle {
         }
         let missing = match d {
             Device::Char(CharDev::Random) => !crate::chardev::random_present(),
-            Device::Char(CharDev::VioCon) => !crate::drivers::virtio::console::present(),
+            Device::Char(CharDev::VioPort(k)) => !crate::drivers::virtio::console::port_present(k),
             _ => false,
         };
         if missing {
             return Err(err::FILE_NOT_FOUND);
+        }
+        if let Device::Char(CharDev::VioPort(k)) = d {
+            crate::drivers::virtio::console::open(k);
         }
         Ok(Handle::device(d))
     }

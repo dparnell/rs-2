@@ -1,0 +1,15 @@
+[package]
+name = "vmagent"
+description = "VMAGENT.EXE: rs2's guest agent, the clipboard shared with the hypervisor's host (SPICE agent, VMware, VirtualBox)"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "vmagent"
+path = "src/main.rs"
+
+[dependencies]
+os2 = { path = "../os2" }
+pmkit = { path = "../pmkit" }
+guestagent = { path = "../../crates/guestagent" }

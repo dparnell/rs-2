@@ -17,6 +17,7 @@ WinEnumClipbrdFmts=__a_WinEnumClipbrdFmts @739
 WinSetClipbrdOwner=__a_WinSetClipbrdOwner @855
 WinQueryClipbrdOwner=__a_WinQueryClipbrdOwner @808
 WinSetClipbrdViewer=__a_WinSetClipbrdViewer @856
+Rs2QueryClipbrdSeq=__a_Rs2QueryClipbrdSeq @9034
 WinQueryClipbrdViewer=__a_WinQueryClipbrdViewer @809
 WinQuerySystemAtomTable=__a_WinQuerySystemAtomTable @830
 WinCreateAtomTable=__a_WinCreateAtomTable @714
