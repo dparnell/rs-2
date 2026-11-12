@@ -1038,7 +1038,9 @@ Checked in QEMU: RMVIEW's views (`/P /D /L /IRQ /IOA /MEM /DMA /HW`),
 with rs2's and with IBM's RMINFO.DLL; the Hardware Manager's details
 and tree views (with NVMe, virtio, HD Audio and e1000 devices too) and
 a serial port's Device and I/O pages (`WPSTEST SHELL OPEN <WP_HWMGR>
-102`, then double-clicks).
+102`, then double-clicks); `WPSTEST CLASS PNP WPHwManager` registers
+the class through PNP.DLL (its forwarders load) and makes an object of
+it.
 
 ## rs2's multimedia classes
 
