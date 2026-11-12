@@ -16,6 +16,7 @@ extern crate os2;
 
 mod abs;
 mod api;
+mod arrange;
 mod book;
 pub mod classdata_gen;
 pub mod classes_gen;

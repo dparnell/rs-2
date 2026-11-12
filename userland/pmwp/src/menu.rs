@@ -155,6 +155,7 @@ fn filter_flags(o: usize) -> u32 {
 
 /// wpDisplayMenu(hwndOwner, hwndClient, pptl, ulMenuType, ulReserved).
 extern "C" fn wpDisplayMenu(o: usize, _owner: u32, client: u32, ptl: *const PointL, kind: u32, _res: u32) -> u32 {
+    crate::arrange::set_menu_client(client);
     let items = popup_items(o, kind);
     let menu = popup_menu(&items);
     if menu == 0 {
@@ -239,7 +240,7 @@ pub fn popup_items(o: usize, kind: u32) -> Vec<Menu<'static>> {
             items.push(crate::sortinc::menu(o));
         }
         if flags & CTXT_ARRANGE != 0 {
-            items.push(Menu::Item(WPMENUID_ARRANGE as u16, b"~Arrange", true));
+            items.extend(crate::arrange::menu_items(o, crate::arrange::menu_view_is_icon()));
         }
         if is(o, "WPDesktop") {
             items.push(Menu::Sep);
@@ -417,7 +418,7 @@ pub fn pulldown_items(id: u32, folder: usize, sel: &[usize], view: u32) -> Vec<M
                 v.push(crate::sortinc::menu(folder));
             }
             if ff & CTXT_ARRANGE != 0 {
-                v.push(Menu::Item(WPMENUID_ARRANGE as u16, b"~Arrange", view == OPEN_CONTENTS));
+                v.extend(crate::arrange::menu_items(folder, view == OPEN_CONTENTS));
             }
             v.push(Menu::Item(WPMENUID_REFRESH as u16, b"~Refresh now", true));
             v
@@ -514,13 +515,6 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
         WPMENUID_WINDOWLIST => {
             post(HWND_DESKTOP, WM_RS2_WINLIST, 0, 0);
         }
-        WPMENUID_ARRANGE => {
-            for w in 0..view::wins().len() {
-                if view::wins()[w].obj == o {
-                    view::arrange(w);
-                }
-            }
-        }
         WPMENUID_FIND => {
             // A drive searches its root folder.
             let f = if is(o, "WPDisk") { crate::abs::root_of(o) } else { o };
@@ -574,7 +568,11 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
             let objs = view::wins().iter().position(|w| w.frame == frame).map_or(alloc::vec![o], |w| view::selected(w, o));
             crate::delete::delete_objects(frame, &objs);
         }
-        _ if crate::sortinc::menu_selected(o, id) => {}
+        _ if crate::arrange::selected(o, frame, id) => {}
+        _ if crate::sortinc::is_menu_item(id) => {
+            crate::arrange::before_sort(o);
+            crate::sortinc::menu_selected(o, id);
+        }
         _ if crate::usermenu::selected(o, id) => {}
         _ => return 0,
     }

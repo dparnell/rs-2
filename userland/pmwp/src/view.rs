@@ -657,7 +657,7 @@ pub fn save_positions(w: usize) {
     util::ea_write(&path, b".ICONPOS", Some((util::EAT_BINARY, &b)));
 }
 
-fn cell(w: usize) -> (i32, i32) {
+pub fn cell(w: usize) -> (i32, i32) {
     if wins()[w].desktop { (96, 86) } else { (88, 70) }
 }
 
@@ -846,6 +846,7 @@ pub fn refresh(folder: usize) {
 pub fn close_frame(frame: u32) {
     if let Some(i) = wins().iter().position(|w| w.frame == frame) {
         let w = wins().remove(i);
+        crate::arrange::forget(w.client);
         if w.view != OPEN_SETTINGS {
             send(w.child, CM_REMOVERECORD, 0, mp(0, CMA_FREE));
         }
@@ -1094,6 +1095,7 @@ fn selection(w: usize) -> Vec<usize> {
 /// selected objects.
 fn init_pulldown(w: usize, id: u32, menu: u32) {
     let sel = selection(w);
+    crate::arrange::set_menu_client(wins()[w].client);
     let items = crate::menu::pulldown_items(id, wins()[w].obj, &sel, wins()[w].view);
     crate::menu::fill_menu(menu, &items);
     let o = sel.first().copied().unwrap_or(0);

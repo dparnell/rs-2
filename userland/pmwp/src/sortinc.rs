@@ -144,6 +144,11 @@ pub fn menu(folder: usize) -> Menu<'static> {
 }
 
 /// A Sort menu item: sort by it now (and from now on).
+/// Is `id` an item of the Sort menu?
+pub fn is_menu_item(id: u32) -> bool {
+    ATTRIBUTES.iter().any(|a| a.0 == id.wrapping_sub(SORT_MENU))
+}
+
 pub fn menu_selected(folder: usize, id: u32) -> bool {
     let by = id.wrapping_sub(SORT_MENU);
     if !ATTRIBUTES.iter().any(|a| a.0 == by) {
