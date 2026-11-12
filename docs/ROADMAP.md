@@ -586,14 +586,16 @@ Status markers: done, in progress, planned.
 - done: printing (docs/PRINTING.md): the spooler, the PostScript
   driver, printer objects
 - done: network groups, servers and shares, drives and printer ports
-  assigned from them (docs/LAN.md)
+  assigned from them (docs/LAN.md); network printers (WPRPrinter), the
+  network objects' Network/Server/Resource pages, Logon and Logoff,
+  Access another server/directory/printer, Access control, rs2's
+  network icons
 - done: the Hardware Manager (IBM's PNP.DLL classes WPHwManager and the
   WPDevice classes, in PMWP) on the kernel's resource manager
   (`RESMGR$`, IBM's IOCtls; RMINFO.DLL; IBM's RMVIEW runs): the
   machine's processors, memory, PCI functions, disks, ISA devices and
-  their IRQ, DMA, I/O and memory (docs/WPS.md); planned: the
-  rest of WPPRINT and Touch, Selective Install
-  (docs/WPS.md, "What is not there")
+  their IRQ, DMA, I/O and memory (docs/WPS.md); planned: Touch,
+  Selective Install (docs/WPS.md, "What is not there")
 
 ## Printing (done: first version)
 
@@ -615,7 +617,13 @@ Status markers: done, in progress, planned.
   queue start/stop times and priorities; the printer objects' View and
   Print options pages, the job details view, moving jobs between
   printers; the Print Screen key; Flate-compressed images
-- planned: remote (LAN Server) queues, other printer languages (PCL),
+- done (third round): network printers on SMB print shares (local
+  alias queues, PRQINFO6, `\\SERVER\QUEUE` ports), Start again of a
+  printing job (PRD_RESTART), a disabled spooler printing PM jobs at
+  once, the separator's input bin (PrtQuery/PrtSet), print times for
+  large jobs only (PRQINFO8), the network job view
+- planned: the server's own queue listing for network printers (RAP or
+  MS-RPRN), other printer languages (PCL),
   Win-OS/2 printing checked in a QEMU session, block characters in
   separator pages
 

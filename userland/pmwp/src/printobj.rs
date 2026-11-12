@@ -946,7 +946,18 @@ fn info(o: usize) -> Option<QueueInfo> {
     printer::queue_info(&queue_of(o))
 }
 
+/// The driver containers are being filled: their selection notifications
+/// are the filling's, not the user's (each fill makes new records, whose
+/// selection would otherwise set the driver and fill again, without end).
+static mut FILLING_DRIVERS: bool = false;
+
 fn fill_drivers(h: u32, o: usize) {
+    unsafe { FILLING_DRIVERS = true };
+    fill_drivers_now(h, o);
+    unsafe { FILLING_DRIVERS = false };
+}
+
+fn fill_drivers_now(h: u32, o: usize) {
     let devs = installed_devices();
     let objs: Vec<usize> = devs.iter().map(|d| make_pdr(d)).filter(|&x| x != 0).collect();
     fill(unsafe { WinWindowFromID(h, ID_INSTALLED as u32) }, &objs);
@@ -979,8 +990,8 @@ extern "C" fn driver_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             let c = unsafe { WinWindowFromID(h, a & 0xffff) };
             if let Some(d) = notify(h, c, a >> 16, b) {
                 // A driver chosen in the installed ones: the printer's.
-                if (a & 0xffff) as u16 == ID_INSTALLED {
-                    let o = page_obj(h);
+                let o = page_obj(h);
+                if (a & 0xffff) as u16 == ID_INSTALLED && unsafe { !FILLING_DRIVERS } && info(o).is_none_or(|i| i.driver != pdr_name(d)) {
                     printer::set_driver(&queue_of(o), &pdr_name(d));
                     fill_drivers(h, o);
                 }

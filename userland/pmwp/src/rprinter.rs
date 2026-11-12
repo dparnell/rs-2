@@ -507,6 +507,25 @@ extern "C" fn rprt_restore_state(o: usize, r: u32) -> u32 {
     1
 }
 
+/// A server folder's network printer is not kept: it has a handle as a
+/// transient object has (IBM's trn_wpQueryHandle form, with numbers
+/// from 0x8000 up), not an abstract object's number.
+static mut BROWSE_SEQ: u32 = 0x8000;
+
+extern "C" fn rprt_query_handle(o: usize) -> u32 {
+    if rd(o).browse != 0 && obj::d(o).handle == 0 {
+        let n = unsafe {
+            BROWSE_SEQ += 1;
+            BROWSE_SEQ
+        };
+        let h = (n & 0xff_0000) << 8 | 0x4_0000 | (n & 0xffff);
+        obj::set_handle(o, h);
+        wps::register(o, h, b"");
+        return h;
+    }
+    som::call_parent(wps::ccd("WPRPrinter"), wps::cd("WPObject"), m::WPObject::wpQueryHandle, &[o]) as u32
+}
+
 /// Objects in a server's folder are not kept.
 extern "C" fn rprt_save_immediate(o: usize) -> u32 {
     if rd(o).browse != 0 {
@@ -704,6 +723,7 @@ methods! {
     __m_rprt_save => rprt_save_state, 1;
     __m_rprt_restore => rprt_restore_state, 2;
     __m_rprt_saveimm => rprt_save_immediate, 1;
+    __m_rprt_handle => rprt_query_handle, 1;
     __m_rprt_uninit => rprt_uninit, 1;
     __m_rprt_copy => rprt_copy, 3;
     __m_rprt_open => rprt_open, 4;
@@ -744,6 +764,7 @@ pub fn impl_rprinter() -> Impl {
             ("wpSaveState", __m_rprt_save as usize),
             ("wpRestoreState", __m_rprt_restore as usize),
             ("wpSaveImmediate", __m_rprt_saveimm as usize),
+            ("wpQueryHandle", __m_rprt_handle as usize),
             ("wpUnInitData", __m_rprt_uninit as usize),
             ("wpCopyObject", __m_rprt_copy as usize),
             ("wpOpen", __m_rprt_open as usize),
