@@ -217,6 +217,11 @@ pub mod boot {
         if textmode {
             crate::println!("boot: text mode (textmode): shell {}", shell.0);
         }
+        // "recovery" (the boot loader adds it when R is pressed): the
+        // desktop's first PMSHELL offers the Recovery Choices.
+        if cmdline.split_whitespace().any(|w| w.eq_ignore_ascii_case("recovery")) {
+            env.push("RS2RECOVERY=YES".to_string());
+        }
         let shell_path = find_program(&shell.0);
         if !env.iter().any(|e| e.starts_with("COMSPEC=")) {
             env.push(alloc::format!("COMSPEC={shell_path}"));

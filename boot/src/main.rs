@@ -362,8 +362,10 @@ fn setup_framebuffer(want: Option<(u32, u32)>) -> Framebuffer {
 }
 
 /// Wait a moment for T (a text-mode boot: the command prompt instead of
-/// the desktop), which adds "textmode" to the kernel command line.
-/// "bootwait=MS" on the command line sets the wait (0: none).
+/// the desktop), which adds "textmode" to the kernel command line, or R
+/// (or F1, as OS/2's Alt+F1) for the Recovery Choices before the desktop
+/// starts, which adds "recovery". "bootwait=MS" on the command line sets
+/// the wait (0: none).
 fn boot_key(info: &mut BootInfo) {
     let cmd = info.cmdline();
     let ms = cmd.split_whitespace().find_map(|w| w.strip_prefix("bootwait=")).and_then(|v| v.parse::<usize>().ok()).unwrap_or(1000);
@@ -374,26 +376,31 @@ fn boot_key(info: &mut BootInfo) {
     if input.is_null() {
         return;
     }
-    println!("Press T for a text-mode boot (a command prompt instead of the desktop).");
-    let mut text = false;
+    println!("Press T for a text-mode boot (a command prompt instead of the desktop), R for Recovery Choices.");
+    let mut add: Option<&[u8]> = None;
     for _ in 0..ms.div_ceil(20) {
         let mut k = efi::InputKey::default();
         while unsafe { ((*input).read_key_stroke)(input, &mut k) } == 0 {
-            if k.unicode_char == b't' as u16 || k.unicode_char == b'T' as u16 {
-                text = true;
+            match k.unicode_char {
+                0x74 | 0x54 => add = Some(b"textmode"),
+                0x72 | 0x52 => add = Some(b"recovery"),
+                // SCAN_F1
+                0 if k.scan_code == 0x0b => add = Some(b"recovery"),
+                _ => {}
             }
         }
-        if text {
+        if add.is_some() {
             break;
         }
         (bs().stall)(20_000);
     }
-    if text {
-        println!("  text-mode boot");
+    if let Some(word) = add {
+        println!("  {}", if word == b"textmode" { "text-mode boot" } else { "Recovery Choices" });
         let n = info.cmdline.iter().position(|&b| b == 0).unwrap_or(info.cmdline.len());
-        let add = if n == 0 { &b"textmode"[..] } else { b" textmode" };
-        if n + add.len() < info.cmdline.len() {
-            info.cmdline[n..n + add.len()].copy_from_slice(add);
+        let sep: &[u8] = if n == 0 { b"" } else { b" " };
+        if n + sep.len() + word.len() < info.cmdline.len() {
+            info.cmdline[n..n + sep.len()].copy_from_slice(sep);
+            info.cmdline[n + sep.len()..n + sep.len() + word.len()].copy_from_slice(word);
         }
     }
 }

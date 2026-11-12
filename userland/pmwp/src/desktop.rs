@@ -23,7 +23,8 @@
 //!   OS2SYS.INI, CONFIG.SYS, STARTUP.CMD and the desktop directory into
 //!   the archive location (`\OS2\ARCHIVES\nnnnn`, the last three kept,
 //!   with ARCHIVES.LOG listing them) when the shell starts; the Recovery
-//!   Choices settings are kept (rs2's loader has no recovery screen).
+//!   Choices settings are kept for PMSHELL, which shows the choices and
+//!   restores an archive before PM starts (userland/pmshell/src/recovery.rs).
 //! - **Desktop**: "Save Desktop properties" (`PM_Workplace`
 //!   `PreserveDTSettings`) and the default drop operation of objects
 //!   dropped on the desktop from other folders (create shadow or move;

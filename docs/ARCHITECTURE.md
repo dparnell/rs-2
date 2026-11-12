@@ -430,7 +430,13 @@ SIZE` sets QEMU's memory (512 MB by default).
 1. UEFI firmware loads `\EFI\BOOT\BOOTX64.EFI` (`boot/`, Rust, `x86_64-unknown-uefi`).
 2. The loader reads `\RS2\KERNEL` (ELF) and the boot volume image, records the
    memory map, GOP framebuffer and ACPI RSDP, builds the kernel page tables,
-   exits boot services and jumps to the kernel.
+   exits boot services and jumps to the kernel. Before that it waits a
+   moment (`bootwait=MS`, SETBOOT /T) for a key: T adds `textmode` to the
+   kernel command line (the command prompt instead of PROTSHELL's
+   desktop), R or F1 adds `recovery` (the kernel gives the boot programs
+   `RS2RECOVERY=YES`, and the first PMSHELL shows the Recovery Choices,
+   [WPS.md](WPS.md#the-shell-process)). The loader itself reads nothing
+   but the EFI partition.
 3. The kernel (`kernel/`, `x86_64-unknown-none`) lives at `-2 GB`; all physical
    memory is mapped at `0xFFFF_8000_0000_0000`.
 

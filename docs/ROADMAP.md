@@ -466,6 +466,12 @@ Status markers: done, in progress, planned.
   folder view, automatic close), Input page and 256-colour page, the
   lockup's background image, file system handles that cannot collide
   between processes (SysOpenObject of a path opened another folder)
+- done (shell): the View menu's Arrange submenu with IBM's directions and
+  Undo arrange/Undo sort, Pickup and Drop (lazy drag) on object and folder
+  menus, Paste in folders (IBM's dialog: clipboard format and class) and
+  rs2's object clipboard (Ctrl+C/X/V), the lockup image in any format MMIO
+  reads, the Recovery Choices (R at boot: restore an archive of the desktop
+  and system files) ([WPS.md](WPS.md))
 - done: DDEML monitors (APPCLASS_MONITOR, every MF_* kind, across
   processes); IPF metafile artwork (`:artwork.` of .MET files in the
   compiler, played by HELPMGR)

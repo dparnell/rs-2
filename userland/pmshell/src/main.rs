@@ -17,6 +17,25 @@ use alloc::vec::Vec;
 
 use os2::*;
 
+#[path = "../../rs2shell/src/fileops.rs"]
+mod fileops;
+mod recovery;
+
+/// What fileops.rs takes from rs2shell's PM bindings.
+mod pm {
+    pub use crate::z;
+    pub fn until_nul(b: &[u8]) -> &[u8] {
+        &b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())]
+    }
+}
+
+/// A string with a NUL.
+pub fn z(t: &[u8]) -> Vec<u8> {
+    let mut v = t.to_vec();
+    v.push(0);
+    v
+}
+
 os2::entry!(main);
 
 unsafe extern "C" {
@@ -156,7 +175,8 @@ fn system_shell() -> u32 {
         while !q.is_null() && *q != 0 {
             let s = cstr(q);
             q = q.add(s.len() + 1);
-            if !s.to_ascii_uppercase().starts_with(b"WORKPLACE_PROCESS=") {
+            let up = s.to_ascii_uppercase();
+            if !up.starts_with(b"WORKPLACE_PROCESS=") && !up.starts_with(b"RS2RECOVERY=") {
                 env.extend_from_slice(&s);
                 env.push(0);
             }
@@ -183,6 +203,14 @@ fn system_shell() -> u32 {
 }
 
 fn main(_s: &Startup) -> u32 {
+    // The first PMSHELL: the Recovery Choices (recovery.rs), when asked
+    // for, before Presentation Manager starts.
+    let mut p: *const u8 = core::ptr::null();
+    if unsafe { DosScanEnv(b"WORKPLACE_PROCESS\0".as_ptr(), &mut p) } != 0 {
+        if let recovery::Choice::CommandPrompt = recovery::run() {
+            text_shell();
+        }
+    }
     let hab = unsafe { WinInitialize(0) };
     let hmq = if hab != 0 { unsafe { WinCreateMsgQueue(hab, 0) } } else { 0 };
     if hmq == 0 {
