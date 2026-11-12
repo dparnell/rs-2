@@ -41,6 +41,42 @@ pub struct Iface {
     pub rx_dropped: u64,
 }
 
+/// What `guest-exec` captures (`capture-output`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Capture {
+    None,
+    Stdout,
+    Stderr,
+    /// Standard output and error apart.
+    Separated,
+    /// Standard error with standard output.
+    Merged,
+}
+
+/// A program to start (`guest-exec`).
+#[derive(Clone, Debug)]
+pub struct Exec {
+    pub path: String,
+    pub args: Vec<String>,
+    /// `NAME=value` strings added to (or replacing) the agent's own.
+    pub env: Vec<String>,
+    /// Standard input (None: empty).
+    pub input: Option<Vec<u8>>,
+    pub capture: Capture,
+}
+
+/// A started program's state (`guest-exec-status`).
+#[derive(Clone, Debug, Default)]
+pub struct ExecStatus {
+    pub exited: bool,
+    pub exitcode: Option<i64>,
+    /// How it ended when it did not exit (a POSIX signal number).
+    pub signal: Option<i64>,
+    /// What it wrote, and whether more was dropped (once exited).
+    pub out: Option<(Vec<u8>, bool)>,
+    pub err: Option<(Vec<u8>, bool)>,
+}
+
 pub struct OsInfo {
     pub version: String,
     pub machine: &'static str,
@@ -70,6 +106,10 @@ pub trait Guest {
     fn file_seek(&mut self, h: u32, offset: i64, whence: u32) -> Result<(u64, bool), String>;
     fn file_flush(&mut self, h: u32) -> Result<(), String>;
     fn file_close(&mut self, h: u32) -> Result<(), String>;
+    /// Start a program; its process ID.
+    fn exec(&mut self, e: &Exec) -> Result<u32, String>;
+    /// A program's state; an exited one is forgotten once reported.
+    fn exec_status(&mut self, pid: u32) -> Result<ExecStatus, String>;
 }
 
 /// Commands and whether they reply when they work.
@@ -98,6 +138,8 @@ const COMMANDS: &[(&str, bool)] = &[
     ("guest-file-write", true),
     ("guest-file-seek", true),
     ("guest-file-flush", true),
+    ("guest-exec", true),
+    ("guest-exec-status", true),
 ];
 
 /// Largest file read in one command (qemu-ga's limit is 48 MB; the port
@@ -307,6 +349,20 @@ impl Agent {
                     None => generic("Parameter 'handle' is missing"),
                 }
             }
+            "guest-exec" => match exec_request(&args) {
+                Ok(e) => match g.exec(&e) {
+                    Ok(pid) => ret(obj([("pid", Value::Int(pid as i64))])),
+                    Err(e) => generic(&e),
+                },
+                Err(e) => generic(&e),
+            },
+            "guest-exec-status" => match arg("pid").and_then(Value::as_int) {
+                Some(pid) => match g.exec_status(pid as u32) {
+                    Ok(st) => ret(exec_status(&st)),
+                    Err(e) => generic(&e),
+                },
+                None => generic("Parameter 'pid' is missing"),
+            },
             _ => err("CommandNotFound", &alloc::format!("The command {name} has not been found")),
         };
         Some((false, with_id(r)))
@@ -349,6 +405,96 @@ impl Agent {
             Err(e) => generic(&e),
         }
     }
+}
+
+fn strings(v: Option<&Value>, what: &str) -> Result<Vec<String>, String> {
+    match v {
+        None | Some(Value::Null) => Ok(Vec::new()),
+        Some(Value::Arr(a)) => a.iter().map(|x| x.as_str().map(String::from).ok_or_else(|| alloc::format!("Invalid parameter '{what}'"))).collect(),
+        _ => Err(alloc::format!("Invalid parameter '{what}'")),
+    }
+}
+
+/// `guest-exec`'s arguments.
+fn exec_request(args: &Value) -> Result<Exec, String> {
+    let path = args.get("path").and_then(Value::as_str).ok_or_else(|| String::from("Parameter 'path' is missing"))?;
+    let input = match args.get("input-data") {
+        None | Some(Value::Null) => None,
+        Some(v) => Some(v.as_str().and_then(unbase64).ok_or_else(|| String::from("Invalid parameter 'input-data'"))?),
+    };
+    // A boolean (older hosts) or a mode.
+    let capture = match args.get("capture-output") {
+        None | Some(Value::Null) | Some(Value::Bool(false)) => Capture::None,
+        Some(Value::Bool(true)) => Capture::Separated,
+        Some(Value::Str(m)) => match m.as_str() {
+            "none" => Capture::None,
+            "stdout" => Capture::Stdout,
+            "stderr" => Capture::Stderr,
+            "separated" => Capture::Separated,
+            "merged" => Capture::Merged,
+            _ => return Err(alloc::format!("Invalid parameter 'capture-output': {m}")),
+        },
+        _ => return Err(String::from("Invalid parameter 'capture-output'")),
+    };
+    Ok(Exec { path: String::from(path), args: strings(args.get("arg"), "arg")?, env: strings(args.get("env"), "env")?, input, capture })
+}
+
+fn exec_status(st: &ExecStatus) -> Value {
+    let mut m = vec![(String::from("exited"), Value::Bool(st.exited))];
+    if let Some(c) = st.exitcode {
+        m.push((String::from("exitcode"), Value::Int(c)));
+    }
+    if let Some(sig) = st.signal {
+        m.push((String::from("signal"), Value::Int(sig)));
+    }
+    for (name, d) in [("out", &st.out), ("err", &st.err)] {
+        if let Some((data, truncated)) = d {
+            if !data.is_empty() {
+                m.push((alloc::format!("{name}-data"), Value::Str(base64(data))));
+            }
+            if *truncated {
+                m.push((alloc::format!("{name}-truncated"), Value::Bool(true)));
+            }
+        }
+    }
+    Value::Obj(m)
+}
+
+/// Joins a program's arguments into an OS/2 command line (after the
+/// program's name): quoted where they hold spaces, tabs or quotes, with
+/// the C runtime's rules for backslashes before a quote.
+pub fn command_line(args: &[String]) -> String {
+    let mut o = String::new();
+    for (i, a) in args.iter().enumerate() {
+        if i > 0 {
+            o.push(' ');
+        }
+        if !a.is_empty() && !a.contains([' ', '\t', '"']) {
+            o.push_str(a);
+            continue;
+        }
+        o.push('"');
+        let mut slashes = 0;
+        for c in a.chars() {
+            match c {
+                '\\' => slashes += 1,
+                '"' => {
+                    o.extend(core::iter::repeat_n('\\', slashes * 2 + 1));
+                    slashes = 0;
+                }
+                _ => {
+                    o.extend(core::iter::repeat_n('\\', slashes));
+                    slashes = 0;
+                }
+            }
+            if c != '\\' {
+                o.push(c);
+            }
+        }
+        o.extend(core::iter::repeat_n('\\', slashes * 2));
+        o.push('"');
+    }
+    o
 }
 
 fn line(v: &Value) -> Vec<u8> {
@@ -448,6 +594,7 @@ mod tests {
         flushes: u32,
         file: Vec<u8>,
         pos: usize,
+        exec: Option<Exec>,
     }
 
     impl Guest for G {
@@ -502,6 +649,17 @@ mod tests {
         }
         fn file_close(&mut self, _h: u32) -> Result<(), String> {
             Ok(())
+        }
+        fn exec(&mut self, e: &Exec) -> Result<u32, String> {
+            self.exec = Some(e.clone());
+            Ok(42)
+        }
+        fn exec_status(&mut self, pid: u32) -> Result<ExecStatus, String> {
+            match pid {
+                42 => Ok(ExecStatus { exited: true, exitcode: Some(3), out: Some((b"hi\r\n".to_vec(), false)), err: Some((Vec::new(), true)), ..Default::default() }),
+                43 => Ok(ExecStatus::default()),
+                _ => Err("Invalid parameter 'pid'".to_string()),
+            }
         }
     }
 
@@ -558,5 +716,27 @@ mod tests {
         );
         assert!(talk(&mut a, &mut g, r#"{"execute":"guest-file-open","arguments":{"path":"C:\\NO"}}"#).contains("cannot find"));
         assert_eq!(unbase64(&base64(b"ab")), Some(b"ab".to_vec()));
+    }
+
+    #[test]
+    fn exec() {
+        let (mut a, mut g) = (Agent::new(), G::default());
+        let r = talk(&mut a, &mut g, r#"{"execute":"guest-exec","arguments":{"path":"cmd","arg":["/c","dir C:\\"],"env":["X=1"],"input-data":"aGk=","capture-output":true}}"#);
+        assert_eq!(r, "{\"return\": {\"pid\": 42}}\n");
+        let e = g.exec.take().unwrap();
+        assert_eq!((e.path.as_str(), e.args.len(), e.env[0].as_str(), e.input.as_deref(), e.capture), ("cmd", 2, "X=1", Some(&b"hi"[..]), Capture::Separated));
+        talk(&mut a, &mut g, r#"{"execute":"guest-exec","arguments":{"path":"x","capture-output":"merged"}}"#);
+        assert_eq!(g.exec.take().unwrap().capture, Capture::Merged);
+        assert!(talk(&mut a, &mut g, r#"{"execute":"guest-exec","arguments":{"path":"x","capture-output":"odd"}}"#).contains("GenericError"));
+        assert!(talk(&mut a, &mut g, r#"{"execute":"guest-exec","arguments":{"arg":[]}}"#).contains("'path' is missing"));
+        assert_eq!(
+            talk(&mut a, &mut g, r#"{"execute":"guest-exec-status","arguments":{"pid":42}}"#),
+            "{\"return\": {\"exited\": true, \"exitcode\": 3, \"out-data\": \"aGkNCg==\", \"err-truncated\": true}}\n"
+        );
+        assert_eq!(talk(&mut a, &mut g, r#"{"execute":"guest-exec-status","arguments":{"pid":43}}"#), "{\"return\": {\"exited\": false}}\n");
+        assert!(talk(&mut a, &mut g, r#"{"execute":"guest-exec-status","arguments":{"pid":7}}"#).contains("'pid'"));
+        let cl = |a: &[&str]| command_line(&a.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        assert_eq!(cl(&["/c", "dir C:\\"]), "/c \"dir C:\\\\\"");
+        assert_eq!(cl(&["a b", "", "x\"y", "C:\\OS2"]), "\"a b\" \"\" \"x\\\"y\" C:\\OS2");
     }
 }

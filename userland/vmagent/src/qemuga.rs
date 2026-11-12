@@ -1,8 +1,8 @@
 //! QEMUGA.EXE: the QEMU guest agent (docs/AGENT.md), for Proxmox VE,
 //! libvirt and `virsh qemu-agent-command`: shutting down and restarting
 //! cleanly, the network addresses, the OS, host name, time and processors,
-//! file system "freezes" around backups (the caches written out), and files
-//! read and written. The protocol is guestagent::qga; this is the system's
+//! file system "freezes" around backups (the caches written out), files
+//! read and written, and programs run (`guest-exec`, their output kept). The protocol is guestagent::qga; this is the system's
 //! side. CONFIG.SYS starts it (`RUN=C:\OS2\QEMUGA.EXE`); without the port
 //! `org.qemu.guest_agent.0` (`\DEV\QEMUGA$`) it ends at once.
 //!
@@ -18,7 +18,9 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use guestagent::qga::{self, Agent, Guest, Iface, OsInfo, Shutdown};
+use core::sync::atomic::{AtomicBool, Ordering};
+
+use guestagent::qga::{self, Agent, Capture, Exec, ExecStatus, Guest, Iface, OsInfo, Shutdown};
 
 os2::entry!(main);
 
@@ -29,10 +31,163 @@ unsafe extern "C" {
     fn DosResetBuffer(h: u32) -> u32;
     #[link_name = "RS2API.7"]
     fn Rs2PowerOff(action: u32) -> u32;
+    #[link_name = "DOSCALLS.228"]
+    fn DosSearchPath(flags: u32, path: *const u8, name: *const u8, buf: *mut u8, cb: u32) -> u32;
+}
+
+/// Output kept per stream (qemu-ga's limit).
+const MAX_OUTPUT: usize = 16 * 1024 * 1024;
+
+/// A child's output pipe, read by a thread of its own until it ends.
+struct Sink {
+    pipe: u32,
+    data: Vec<u8>,
+    truncated: bool,
+    done: AtomicBool,
+}
+
+unsafe extern "C" fn drain(p: u32) {
+    let s = unsafe { &mut *(p as *mut Sink) };
+    let mut buf = alloc::vec![0u8; 4096];
+    loop {
+        let mut n = 0;
+        if unsafe { os2::DosRead(s.pipe, buf.as_mut_ptr(), buf.len() as u32, &mut n) } != 0 || n == 0 {
+            break;
+        }
+        let room = MAX_OUTPUT - s.data.len();
+        s.data.extend_from_slice(&buf[..(n as usize).min(room)]);
+        s.truncated |= n as usize > room;
+    }
+    unsafe { os2::DosClose(s.pipe) };
+    s.done.store(true, Ordering::Release);
+}
+
+struct Feed {
+    pipe: u32,
+    data: Vec<u8>,
+}
+
+/// A child's standard input, written by a thread and then closed.
+unsafe extern "C" fn feed(p: u32) {
+    let f = unsafe { alloc::boxed::Box::from_raw(p as *mut Feed) };
+    let mut at = 0;
+    while at < f.data.len() {
+        let mut w = 0;
+        if unsafe { os2::DosWrite(f.pipe, f.data[at..].as_ptr(), (f.data.len() - at) as u32, &mut w) } != 0 || w == 0 {
+            break;
+        }
+        at += w as usize;
+    }
+    unsafe { os2::DosClose(f.pipe) };
+}
+
+fn thread(f: unsafe extern "C" fn(u32), param: u32) -> bool {
+    let mut tid = 0;
+    unsafe { os2::DosCreateThread(&mut tid, f, param, 2, 65536) == 0 }
+}
+
+/// A program started by guest-exec. The sinks belong to their threads
+/// until `done`.
+struct Child {
+    pid: u32,
+    out: *mut Sink,
+    err: Option<*mut Sink>,
+    capture: Capture,
+    ended: Option<os2::ResultCodes>,
 }
 
 struct Os2 {
     files: Vec<u32>,
+    children: Vec<Child>,
+}
+
+fn pipe() -> Result<(u32, u32), String> {
+    let (mut r, mut w) = (0, 0);
+    match unsafe { os2::DosCreatePipe(&mut r, &mut w, 4096) } {
+        0 => Ok((r, w)),
+        rc => Err(rc_text("DosCreatePipe", rc)),
+    }
+}
+
+fn cstr(s: &str) -> Vec<u8> {
+    let mut v: Vec<u8> = os2::text_bytes(s).into_owned();
+    v.push(0);
+    v
+}
+
+/// Code page bytes as a `str`, one character per byte (as os2::text_bytes
+/// takes them back).
+fn text_string(b: &[u8]) -> String {
+    b.iter().map(|&c| c as char).collect()
+}
+
+fn env(name: &str) -> Option<String> {
+    let mut v: *const u8 = core::ptr::null();
+    if unsafe { os2::DosScanEnv(cstr(name).as_ptr(), &mut v) } != 0 || v.is_null() {
+        return None;
+    }
+    let mut n = 0;
+    while unsafe { *v.add(n) } != 0 {
+        n += 1;
+    }
+    Some(text_string(unsafe { core::slice::from_raw_parts(v, n) }))
+}
+
+/// The agent's environment block as strings.
+fn environment() -> Vec<Vec<u8>> {
+    let (mut tib, mut pib): (*mut os2::Tib, *mut os2::Pib) = (core::ptr::null_mut(), core::ptr::null_mut());
+    let mut v = Vec::new();
+    unsafe {
+        os2::DosGetInfoBlocks(&mut tib, &mut pib);
+        if pib.is_null() {
+            return v;
+        }
+        let mut p = (*pib).pchenv;
+        while !p.is_null() && *p != 0 {
+            let mut e = Vec::new();
+            while *p != 0 {
+                e.push(*p);
+                p = p.add(1);
+            }
+            p = p.add(1);
+            v.push(e);
+        }
+    }
+    v
+}
+
+/// The program's file: as given, or found along PATH (and the current
+/// directory) with .EXE, .COM, .CMD or .BAT when it has no extension.
+fn find_program(path: &str) -> Option<String> {
+    let path = path.replace('/', "\\");
+    let file = path.rsplit(['\\', ':']).next().unwrap_or("");
+    let names: Vec<String> = if file.contains('.') {
+        alloc::vec![path.clone()]
+    } else {
+        [".EXE", ".COM", ".CMD", ".BAT"].iter().map(|e| alloc::format!("{path}{e}")).collect()
+    };
+    let bare = !path.contains(['\\', ':']);
+    for n in names {
+        if bare {
+            let mut buf = [0u8; 260];
+            // SEARCH_CUR_DIRECTORY | SEARCH_ENVIRONMENT
+            if unsafe { DosSearchPath(3, b"PATH\0".as_ptr(), cstr(&n).as_ptr(), buf.as_mut_ptr(), buf.len() as u32) } == 0 {
+                let len = buf.iter().position(|&c| c == 0).unwrap_or(0);
+                return Some(text_string(&buf[..len]));
+            }
+        } else {
+            let mut st = [0u8; 64];
+            if unsafe { os2::DosQueryPathInfo(cstr(&n).as_ptr(), 1, st.as_mut_ptr(), st.len() as u32) } == 0 {
+                return Some(n);
+            }
+        }
+    }
+    None
+}
+
+fn is_command_processor(prog: &str) -> bool {
+    let f = prog.rsplit(['\\', ':']).next().unwrap_or("").to_ascii_uppercase();
+    matches!(f.as_str(), "CMD.EXE" | "4OS2.EXE")
 }
 
 fn rc_text(what: &str, rc: u32) -> String {
@@ -261,6 +416,166 @@ impl Guest for Os2 {
             rc => Err(rc_text("DosClose", rc)),
         }
     }
+
+    fn exec(&mut self, e: &Exec) -> Result<u32, String> {
+        let found = find_program(&e.path).ok_or_else(|| alloc::format!("Failed to execute child process \u{201c}{}\u{201d} (No such file or directory)", e.path))?;
+        let ext = found.rsplit('.').next().unwrap_or("").to_ascii_uppercase();
+        // Batch files through the command processor.
+        let (prog, mut tail) = if ext == "CMD" || ext == "BAT" {
+            let comspec = env("COMSPEC").filter(|s| !s.is_empty()).unwrap_or_else(|| String::from("C:\\OS2\\CMD.EXE"));
+            (comspec, alloc::format!("/c {found} "))
+        } else {
+            (found, String::new())
+        };
+        // The command processor takes its command line as typed; other
+        // programs split it as the C runtime does.
+        if is_command_processor(&prog) {
+            tail.push_str(&e.args.join(" "));
+        } else {
+            tail.push_str(&qga::command_line(&e.args));
+        }
+        let progz = cstr(&prog);
+        let mut argv = progz.clone();
+        argv.extend_from_slice(&os2::text_bytes(tail.trim_end()));
+        argv.extend_from_slice(&[0, 0]);
+        // Our environment with the host's variables over it.
+        let key = |v: &[u8]| -> Vec<u8> { v.split(|&c| c == b'=').next().unwrap_or(&[]).to_ascii_uppercase() };
+        let extra: Vec<Vec<u8>> = e.env.iter().map(|v| os2::text_bytes(v).into_owned()).collect();
+        let mut envb = Vec::new();
+        for v in environment().into_iter().filter(|v| !extra.iter().any(|x| key(x) == key(v))).chain(extra.iter().cloned()) {
+            envb.extend_from_slice(&v);
+            envb.push(0);
+        }
+        envb.push(0);
+
+        let (in_r, in_w) = pipe()?;
+        let (out_r, out_w) = pipe()?;
+        let err = if e.capture == Capture::Merged { None } else { Some(pipe()?) };
+        let mut res = os2::ResultCodes { code_terminate: 0, code_result: 0 };
+        let mut fail = [0u8; 64];
+        let rc = unsafe {
+            for h in [in_w, out_r].into_iter().chain(err.map(|p| p.0)) {
+                os2::DosSetFHState(h, os2::OPEN_FLAGS_NOINHERIT);
+            }
+            // The child's standard handles, then ours back.
+            let mut saved = [0xffff_ffffu32; 3];
+            for (h, s) in saved.iter_mut().enumerate() {
+                if os2::DosDupHandle(h as u32, s) == 0 {
+                    os2::DosSetFHState(*s, os2::OPEN_FLAGS_NOINHERIT);
+                }
+            }
+            for (h, from) in [(0u32, in_r), (1, out_w), (2, err.map_or(out_w, |p| p.1))] {
+                let mut t = h;
+                os2::DosDupHandle(from, &mut t);
+            }
+            // EXEC_ASYNCRESULT
+            let rc = os2::DosExecPgm(fail.as_mut_ptr(), fail.len() as u32, 2, argv.as_ptr(), envb.as_ptr(), &mut res, progz.as_ptr());
+            for (h, s) in saved.iter().enumerate() {
+                let mut t = h as u32;
+                if *s != 0xffff_ffff {
+                    os2::DosDupHandle(*s, &mut t);
+                    os2::DosClose(*s);
+                } else {
+                    os2::DosClose(t);
+                }
+            }
+            os2::DosClose(in_r);
+            os2::DosClose(out_w);
+            if let Some((_, w)) = err {
+                os2::DosClose(w);
+            }
+            rc
+        };
+        if rc != 0 {
+            unsafe {
+                for h in [in_w, out_r].into_iter().chain(err.map(|p| p.0)) {
+                    os2::DosClose(h);
+                }
+            }
+            return Err(rc_text(&alloc::format!("Failed to execute child process \u{201c}{}\u{201d}", e.path), rc));
+        }
+        let pid = res.code_terminate;
+        os2::println!("QEMUGA: started {prog} (process {pid})");
+        // Standard input: the host's data, or none.
+        match &e.input {
+            Some(d) if !d.is_empty() => {
+                let f = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(Feed { pipe: in_w, data: d.clone() }));
+                if !thread(feed, f as u32) {
+                    unsafe {
+                        drop(alloc::boxed::Box::from_raw(f));
+                        os2::DosClose(in_w);
+                    }
+                }
+            }
+            _ => unsafe {
+                os2::DosClose(in_w);
+            },
+        }
+        let sink = |pipe: u32| {
+            let s = alloc::boxed::Box::into_raw(alloc::boxed::Box::new(Sink { pipe, data: Vec::new(), truncated: false, done: AtomicBool::new(false) }));
+            if !thread(drain, s as u32) {
+                unsafe {
+                    os2::DosClose(pipe);
+                    (*s).done.store(true, Ordering::Release);
+                }
+            }
+            s
+        };
+        let out = sink(out_r);
+        let err = err.map(|p| sink(p.0));
+        self.children.push(Child { pid, out, err, capture: e.capture, ended: None });
+        Ok(pid)
+    }
+
+    fn exec_status(&mut self, pid: u32) -> Result<ExecStatus, String> {
+        let i = self.children.iter().position(|c| c.pid == pid).ok_or_else(|| String::from("Invalid parameter 'pid'"))?;
+        let c = &mut self.children[i];
+        if c.ended.is_none() {
+            let mut res = os2::ResultCodes { code_terminate: 0, code_result: 0 };
+            let mut who = 0;
+            // DCWA_PROCESS, DCWW_NOWAIT
+            match unsafe { os2::DosWaitChild(0, os2::DCWW_NOWAIT, &mut res, &mut who, pid) } {
+                0 => c.ended = Some(res),
+                // ERROR_CHILD_NOT_COMPLETE
+                129 => {}
+                // Gone without a result (already collected).
+                _ => c.ended = Some(os2::ResultCodes { code_terminate: 0, code_result: 0 }),
+            }
+        }
+        let done = |s: *mut Sink| unsafe { (*s).done.load(Ordering::Acquire) };
+        let Some((term, code)) = c.ended.as_ref().map(|r| (r.code_terminate, r.code_result)) else { return Ok(ExecStatus::default()) };
+        // Exited once its output has ended too.
+        if !done(c.out) || c.err.is_some_and(|s| !done(s)) {
+            return Ok(ExecStatus::default());
+        }
+        let mut st = ExecStatus { exited: true, ..Default::default() };
+        match term {
+            // TC_EXIT
+            0 => st.exitcode = Some(code as i32 as i64),
+            // TC_HARDERROR: SIGABRT
+            1 => st.signal = Some(6),
+            // TC_KILLPROCESS: SIGKILL
+            3 => st.signal = Some(9),
+            // TC_TRAP, TC_EXCEPTION: SIGSEGV
+            _ => st.signal = Some(11),
+        }
+        let c = self.children.remove(i);
+        let out = unsafe { alloc::boxed::Box::from_raw(c.out) };
+        let err = c.err.map(|s| unsafe { alloc::boxed::Box::from_raw(s) });
+        let take = |s: alloc::boxed::Box<Sink>| (s.data, s.truncated);
+        match c.capture {
+            Capture::None => {}
+            Capture::Stdout => st.out = Some(take(out)),
+            Capture::Stderr => st.err = err.map(take),
+            Capture::Separated => {
+                st.out = Some(take(out));
+                st.err = err.map(take);
+            }
+            Capture::Merged => st.out = Some(take(out)),
+        }
+        os2::println!("QEMUGA: process {pid} ended ({term}, {code})");
+        Ok(st)
+    }
 }
 
 fn main(_s: &os2::Startup) -> u32 {
@@ -273,7 +588,7 @@ fn main(_s: &os2::Startup) -> u32 {
     if unsafe { os2::DosCreateMutexSem(b"\\SEM32\\RS2\\QEMUGA\0".as_ptr(), &mut mtx, 0, 0) } != 0 {
         return 0;
     }
-    let mut g = Os2 { files: Vec::new() };
+    let mut g = Os2 { files: Vec::new(), children: Vec::new() };
     let mut a = Agent::new();
     let mut buf = alloc::vec![0u8; 4096];
     loop {

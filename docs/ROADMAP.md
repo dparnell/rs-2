@@ -89,9 +89,8 @@ Status markers: done, in progress, planned.
   copy/paste (GuestRPC, version 4 and the legacy version 1)
 - done: QEMU guest agent QEMUGA.EXE (org.qemu.guest_agent.0): shutdown and
   restart through the Workplace Shell, addresses, OS, time, file system
-  freeze (flush), files (docs/AGENT.md)
-- next: run the VirtualBox and VMware backends on those hosts; bitmaps;
-  guest-exec
+  freeze (flush), files, programs run (guest-exec) (docs/AGENT.md)
+- next: run the VirtualBox and VMware backends on those hosts; bitmaps
 - done: virtio-gpu 2D (`virtio-vga`, `virtio-gpu-pci`): guest-RAM
   framebuffer for the text screens and PM, `video=WxH` (any size)
 - done: virtio-gpu hardware cursor (cursor queue) for PM

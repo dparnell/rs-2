@@ -217,9 +217,35 @@ Commands (`guest-info` lists them):
 | `guest-fsfreeze-freeze`, `-freeze-list`, `-thaw`, `-status` | rs2 cannot hold writes back: a "freeze" writes every file system's cache out (DosResetBuffer) and so does the thaw; the status follows. Enough for a consistent snapshot of what was written before it |
 | `guest-fstrim` | nothing to trim |
 | `guest-file-open`, `-read`, `-write`, `-seek`, `-flush`, `-close` | files of the guest (modes `r`, `r+`, `w`, `w+`, `a`, `a+`); only handles the agent opened |
+| `guest-exec`, `guest-exec-status` | a program started (below); its state, exit code and output |
 
-Not there: `guest-exec` (running programs), memory blocks, SSH keys, disk
-and file system details.
+Not there: memory blocks, SSH keys, disk and file system details.
+
+`guest-exec` (Proxmox's `qm guest exec`, `virsh qemu-agent-command`):
+
+- The program: `path` as given, or, when it is a bare name, found in the
+  current directory (C:\) and along PATH; without an extension .EXE, .COM,
+  .CMD and .BAT are tried. Slashes are taken as backslashes. Batch files run
+  through %COMSPEC% `/c`.
+- `arg`: joined into the command line, quoted as the C runtime splits it;
+  for CMD.EXE (and 4OS2) as typed, so `cmd /c dir C:\ | sort` works as at
+  the prompt.
+- `env`: `NAME=value` strings over the agent's own environment (qemu-ga on
+  Linux replaces it; a program here without PATH and COMSPEC is of little
+  use).
+- `input-data`: the program's standard input (base64); without it the
+  input is empty.
+- `capture-output`: `true` or `separated`, `stdout`, `stderr`, `merged`
+  (standard error into standard output), `false` or `none`. Up to 16 MB
+  each is kept (`out-truncated`, `err-truncated` beyond); what is not
+  captured is read and dropped, so the program never waits on a full pipe.
+- `guest-exec-status` answers `exited: false` until the program has ended
+  and its output pipes have closed; then `exitcode` (or `signal`: 9 when
+  killed, 11 for a trap, 6 for a hard error), `out-data`, `err-data`, and
+  the program is forgotten.
+- Text-mode programs: QEMUGA runs detached (CONFIG.SYS's `RUN=`), as do the
+  programs it starts. The standard handles are switched to pipes around
+  DosExecPgm (EXEC_ASYNCRESULT); a thread per pipe reads it.
 
 The Workplace Shell's shutdown is reached through PMWP's private
 `Rs2ShutdownSystem(restart)` (ordinal 9101), which hands it to the shell's
@@ -228,12 +254,21 @@ process when called from another (its object call server, operation 15);
 command line shuts down through the shell too.
 
 The protocol is in `crates/guestagent` (`qga`, `json`; host tests: sync and
-errors, the information commands, shutdown and freeze, files), the system's
-side in `userland/vmagent/src/qemuga.rs`. `tools/scripts/qga.py SOCKET
-COMMAND [JSON]` asks as Proxmox does (a delimited sync, then the command).
+errors, the information commands, shutdown and freeze, files, exec), the
+system's side in `userland/vmagent/src/qemuga.rs`. `tools/scripts/qga.py
+SOCKET COMMAND [JSON]` asks as Proxmox does (a delimited sync, then the
+command); `qga.py SOCKET --exec PROGRAM ARG...` runs a program as `qm guest
+exec` does (our standard input as its input, its output printed, its exit
+code ours).
 
 Checked in QEMU (`--agent`): every information command; a file written
 through the agent read back; freeze, status, thaw; `guest-shutdown` booted
 to the command prompt (flushed, powered off) and with the desktop (through
 the Workplace Shell: powered off, and `reboot` restarted); with `--net`,
-`lan0` 52:54:00:12:34:56 10.0.2.15/24 from DHCP.
+`lan0` 52:54:00:12:34:56 10.0.2.15/24 from DHCP. `guest-exec`: `cmd /c
+ver` and `dir` (output, exit code 18 for a missing file, standard error
+apart), `sort` fed from the host's standard input, a batch file written
+through `guest-file-*` run with arguments (merged and standard-error-only
+capture), 23 KB of `dir /s` output, a variable from `env`, a program not
+found. (IBM's CMD.EXE, which the development image runs, answers `exit N`
+with 255.)
