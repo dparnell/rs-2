@@ -108,7 +108,8 @@ writes the ISO itself, and the live ISO contains only rs2's own code.
 Each [GitHub release](https://github.com/dparnell/rs-2/releases) has a
 ready-built `rs2-live.iso` (and its SHA-256), made by
 [.github/workflows/release-iso.yml](.github/workflows/release-iso.yml)
-when the release is published. To build one yourself, from the
+when a `v*` tag is pushed (`git tag v0.0.2 && git push origin v0.0.2`
+creates the release). To build one yourself, from the
 repository root:
 
 ```bash
