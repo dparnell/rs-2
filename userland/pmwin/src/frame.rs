@@ -911,6 +911,17 @@ pub fn track(p: Point, buttons: u8) {
             cy = (cy + dy).max(minh);
         }
     }
+    // Without full window drag (the System object's Input page) an
+    // outline follows the pointer and the window moves at the end.
+    if !crate::access::full_drag() {
+        if buttons & 1 != 0 {
+            let parent = st().desk.get(h).map_or(HWND_DESKTOP, |w| w.parent);
+            let o = st().desk.origin(parent);
+            crate::access::outline(Some((x + o.x, y + o.y, cx, cy)));
+            return;
+        }
+        crate::access::outline(None);
+    }
     WinSetWindowPos(h, 0, x, y, cx, cy, 0x0003);
 }
 

@@ -391,7 +391,10 @@ fn check_hung() {
     LAST_CHECK.store(t, Ordering::Relaxed);
     let s = st();
     let me = pid();
-    let limit = s.hang_ms;
+    // With the System object's asynchronous focus change on, a thread
+    // that takes longer than its delay (tenths of a second) to come for
+    // its input no longer holds up activation and moving its windows.
+    let limit = crate::access::hang_limit(s.hang_ms);
     let mut changed = Vec::new();
     for (&h, q) in s.queues.iter_mut() {
         if q.pid == me {
@@ -606,6 +609,10 @@ extern "C" fn desktop_proc(h: u32, m: u32, mp1: u32, _mp2: u32) -> u32 {
         }
         WM_RS2_PRINTSCREEN => {
             crate::prtscr::start();
+            0
+        }
+        crate::access::WM_RS2_ALTTAB => {
+            crate::access::server_alttab(mp1);
             0
         }
         _ => {

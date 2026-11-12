@@ -391,6 +391,17 @@ fn input_enabled(h: u32) -> bool {
 /// window), whether or not its thread keeps up. Ctrl+Esc opens the
 /// window list.
 pub fn key(ev: &Input) {
+    // Special Needs' acceptance delay may hold a press back (access.rs).
+    for e in crate::access::special_needs(ev) {
+        // Alt+Tab and Alt+Esc switch windows.
+        if crate::access::switch_key(&e) {
+            continue;
+        }
+        key_now(&e);
+    }
+}
+
+fn key_now(ev: &Input) {
     const KC_CHAR: u32 = 0x0001;
     const KC_VIRTUALKEY: u32 = 0x0002;
     const KC_SCANCODE: u32 = 0x0004;

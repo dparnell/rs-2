@@ -143,7 +143,8 @@ pub extern "C" fn WinSetSysValue(_desk: u32, i: i32, v: i32) -> u32 {
     // SV_LOCKSTARTINPUT and 99-103 (the System object's Input page:
     // full window drag, Alt+Tab window, VIO mouse actions, asynchronous
     // focus change and its delay), kept for programs that read them.
-    if !matches!(i, 0..=3 | 6 | 9..=11 | 13..=18 | 93 | 97..=103) {
+    // rs2's private 4000-4002: Special Needs (access.rs).
+    if !matches!(i, 0..=3 | 6 | 9..=11 | 13..=18 | 93 | 97..=103 | 4000..=4002) {
         set_error(0x1303); // PMERR_INVALID_PARM
         return 0;
     }

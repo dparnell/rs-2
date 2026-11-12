@@ -9,6 +9,7 @@ extern crate alloc;
 extern crate os2;
 
 mod accel;
+mod access;
 mod animate;
 mod avio;
 mod bitmap;

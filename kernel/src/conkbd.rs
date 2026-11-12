@@ -415,7 +415,9 @@ pub fn key_event(sc: u8, before: u16, after: u16, ev: Option<KeyInfo>) {
     if sid == crate::session::pm_session() && sid != 0 {
         match &ev {
             Some(k) => crate::display::key(k, false),
-            None if release && !is_shift_key(code, ext) => {
+            // Alt going up reaches PM too: it ends Alt+Tab switching
+            // (PMWIN's access.rs), which takes it.
+            None if release && (!is_shift_key(code, ext) || code == 0x38) => {
                 let k = KeyInfo { ch: 0, scan: code, status: if ext { 0x02 } else { 0 }, shift: after, time: crate::irq::uptime_ms() as u32 };
                 crate::display::key(&k, true);
             }

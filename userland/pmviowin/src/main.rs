@@ -1292,6 +1292,15 @@ fn mouse(i: usize, msg: u32, mp1: u32, mp2: u32) -> bool {
         }
         return msg != WM_MOUSEMOVE;
     }
+    // The System object's "VIO mouse actions" (system value 101) off:
+    // the mouse does not mark text (the menu's Mark still does).
+    if unsafe { WinQuerySysValue(HWND_DESKTOP, 101) } == 0 {
+        if msg == WM_BUTTON1DOWN {
+            unsafe { WinSetFocus(HWND_DESKTOP, wins()[i].client) };
+            return true;
+        }
+        return false;
+    }
     match msg {
         WM_BUTTON1DOWN => {
             // A click clears the mark; dragging from here makes a new one.
