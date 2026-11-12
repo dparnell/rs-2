@@ -178,6 +178,7 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
         },
         (Handle::Char(CharDev::Mouse | CharDev::Pointer), 7) => mouse(c, r),
         (Handle::Char(CharDev::ResMgr), 0x80) => crate::resmgr::ioctl(c, r),
+        (Handle::Char(CharDev::VBox), 0x80) => vbox(c, r),
         (Handle::Screen, 3) => screen(c, r),
         _ => err::INVALID_CATEGORY,
     }
@@ -644,4 +645,30 @@ fn screen(c: &Ctx, r: &Req) -> u32 {
         0x71 => 0,
         _ => err::INVALID_FUNCTION,
     }
+}
+
+/// \\DEV\\VBOXGST$ (crate::drivers::vbox): parameters {format, rc, a, b},
+/// data the buffer.
+fn vbox(c: &mut Ctx, r: &Req) -> u32 {
+    let Some(p) = c.read_vec(r.params, 16) else { return err::INVALID_ADDRESS };
+    let format = u32::from_le_bytes([p[0], p[1], p[2], p[3]]);
+    let input = if r.function == 4 {
+        match c.read_vec(r.data, r.data_len.min(1024 * 1024)) {
+            Some(d) => d,
+            None => return err::INVALID_ADDRESS,
+        }
+    } else {
+        alloc::vec::Vec::new()
+    };
+    let rep = crate::drivers::vbox::clipboard(r.function, format, &input, r.data_len as usize);
+    let mut out = [0u8; 16];
+    out[0..4].copy_from_slice(&format.to_le_bytes());
+    out[4..8].copy_from_slice(&rep.rc.to_le_bytes());
+    out[8..12].copy_from_slice(&rep.a.to_le_bytes());
+    out[12..16].copy_from_slice(&rep.b.to_le_bytes());
+    if !c.write(r.params, &out) || (!rep.data.is_empty() && !c.write(r.data, &rep.data)) {
+        return err::INVALID_ADDRESS;
+    }
+    set_lens(c, r, 16, rep.data.len() as u32);
+    0
 }

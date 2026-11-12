@@ -20,6 +20,7 @@ pub mod scsi;
 pub mod storage;
 pub mod svga;
 pub mod usb;
+pub mod vbox;
 pub mod vmmouse;
 pub mod virtio;
 pub mod vmxnet3;
@@ -207,6 +208,9 @@ pub fn init() {
         }
         if (d.vendor, d.device) == (0x15ad, 0x0405) {
             svga::probe(d);
+        }
+        if vbox::is_vmmdev(d) {
+            vbox::probe(d);
         }
         let units = match (d.vendor, d.device) {
             (0x15ad, 0x07c0) => pvscsi::probe(d),

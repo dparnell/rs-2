@@ -4,7 +4,9 @@
 //!
 //! - the SPICE agent's virtio-serial port (`\DEV\VDAGENT$`): QEMU's own
 //!   window (qemu-vdagent), SPICE clients (virt-viewer, Proxmox, libvirt),
-//!   UTM ([`vdagent`]).
+//!   UTM ([`vdagent`]);
+//! - VirtualBox's shared clipboard service, through the kernel's VMMDev
+//!   driver (`\DEV\VBOXGST$`, [`vbox`]).
 //!
 //! The Workplace Shell starts it once per PM session; a second copy, or
 //! one in a machine without such a channel, ends at once. A thread reads
@@ -18,6 +20,7 @@
 
 extern crate alloc;
 
+mod vbox;
 mod vdagent;
 
 use alloc::boxed::Box;
@@ -50,6 +53,7 @@ const POLL_MS: u32 = 250;
 /// The channel to the host.
 pub enum Backend {
     Vdagent(vdagent::Vdagent),
+    VBox(vbox::VBox),
 }
 
 impl Backend {
@@ -57,6 +61,7 @@ impl Backend {
     fn local_changed(&self, text: Option<&[u8]>) {
         match self {
             Backend::Vdagent(v) => v.local_changed(text),
+            Backend::VBox(v) => v.local_changed(text),
         }
     }
 
@@ -64,6 +69,7 @@ impl Backend {
     fn reply(&self, text: Option<&[u8]>) {
         match self {
             Backend::Vdagent(v) => v.reply(text),
+            Backend::VBox(v) => v.reply(text),
         }
     }
 
@@ -71,6 +77,7 @@ impl Backend {
     fn read_loop(&self) {
         match self {
             Backend::Vdagent(v) => v.read_loop(),
+            Backend::VBox(v) => v.read_loop(),
         }
     }
 }
@@ -248,7 +255,8 @@ fn main(s: &os2::Startup) -> u32 {
     if unsafe { os2::DosCreateMutexSem(b"\\SEM32\\RS2\\VMAGENT\0".as_ptr(), &mut mtx, 0, 0) } != 0 {
         return 0;
     }
-    let Some(backend) = vdagent::Vdagent::open().map(Backend::Vdagent) else {
+    let backend = vdagent::Vdagent::open().map(Backend::Vdagent).or_else(|| vbox::VBox::open().map(Backend::VBox));
+    let Some(backend) = backend else {
         // No hypervisor channel.
         if test {
             os2::println!("VMAGENT: no channel to a host");
@@ -291,6 +299,7 @@ impl Backend {
     fn start(&self) {
         match self {
             Backend::Vdagent(v) => v.start(),
+            Backend::VBox(v) => v.start(),
         }
     }
 }

@@ -431,6 +431,8 @@ pub enum CharDev {
     VioPort(u8),
     /// RESMGR$: the resource manager (crate::resmgr).
     ResMgr,
+    /// VBOXGST$: VirtualBox's shared clipboard (crate::drivers::vbox).
+    VBox,
 }
 
 impl CharDev {
@@ -447,6 +449,7 @@ impl CharDev {
                 _ => "\\DEV\\VIOCON$",
             }),
             CharDev::ResMgr => String::from("\\DEV\\RESMGR$"),
+            CharDev::VBox => String::from("\\DEV\\VBOXGST$"),
         }
     }
 }
@@ -474,6 +477,7 @@ pub fn device_name(path: &str) -> Option<Device> {
         "VDAGENT$" => Device::Char(CharDev::VioPort(crate::drivers::virtio::console::SPICE)),
         "QEMUGA$" => Device::Char(CharDev::VioPort(crate::drivers::virtio::console::QEMU_GA)),
         "RESMGR$" => Device::Char(CharDev::ResMgr),
+        "VBOXGST$" => Device::Char(CharDev::VBox),
         b => match (b.strip_prefix("COM"), b.strip_prefix("LPT")) {
             (Some(n), _) if matches!(n, "1" | "2" | "3" | "4") => Device::Char(CharDev::Com(n.as_bytes()[0] - b'1')),
             (_, Some(n)) if matches!(n, "1" | "2" | "3") => Device::Char(CharDev::Lpt(n.as_bytes()[0] - b'1')),
@@ -629,6 +633,7 @@ impl Handle {
         let missing = match d {
             Device::Char(CharDev::Random) => !crate::chardev::random_present(),
             Device::Char(CharDev::VioPort(k)) => !crate::drivers::virtio::console::port_present(k),
+            Device::Char(CharDev::VBox) => !crate::drivers::vbox::present(),
             _ => false,
         };
         if missing {
