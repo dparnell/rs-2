@@ -1,4 +1,5 @@
 Rs2WpsStart 9100
+Rs2ShutdownSystem 9101
 ShlStartWorkplace 211
 ShlExceptionHandler 212
 M_WPObjectNewClass 324

@@ -55,6 +55,8 @@ pub const OP_DEREGISTER: u32 = 11;
 pub const OP_LOCKUP: u32 = 12;
 pub const OP_UNLOCK: u32 = 13;
 pub const OP_REPLACE: u32 = 14;
+/// Shut down (n0: 1 to restart), as the desktop's Shut down.
+pub const OP_SHUTDOWN: u32 = 15;
 
 static mut BLOCK: u32 = 0;
 static mut DONE_SEM: u32 = 0;
@@ -171,6 +173,10 @@ fn serve() {
             let (o, nw) = (z(s(0)), z(s(1)));
             crate::api::WinReplaceObjectClass(o.as_ptr(), nw.as_ptr(), n(0))
         }
+        OP_SHUTDOWN => {
+            crate::shutdown::begin(n(0) != 0);
+            1
+        }
         _ => 0,
     };
     wr(base, O_RESULT, r);
@@ -188,6 +194,11 @@ fn shell() -> Option<u32> {
     }
     let base = p as u32;
     (rd(base, O_MAGIC) == MAGIC && rd(base, O_PID) != my_pid() && unsafe { WinIsWindow(0, rd(base, O_HWND)) } != 0).then_some(base)
+}
+
+/// Whether this process is the shell (its server runs here).
+pub fn serving() -> bool {
+    unsafe { BLOCK != 0 }
 }
 
 /// Whether a Workplace Shell runs in another process.

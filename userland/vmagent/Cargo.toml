@@ -1,6 +1,6 @@
 [package]
 name = "vmagent"
-description = "VMAGENT.EXE: rs2's guest agent, the clipboard shared with the hypervisor's host (SPICE agent, VMware, VirtualBox)"
+description = "VMAGENT.EXE (the clipboard shared with the hypervisor's host: SPICE agent, VMware, VirtualBox) and QEMUGA.EXE (the QEMU guest agent)"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -8,6 +8,10 @@ license.workspace = true
 [[bin]]
 name = "vmagent"
 path = "src/main.rs"
+
+[[bin]]
+name = "qemuga"
+path = "src/qemuga.rs"
 
 [dependencies]
 os2 = { path = "../os2" }

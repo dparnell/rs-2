@@ -54,7 +54,9 @@
 //! `--agent` adds the guest agent's channel: QEMU's SPICE agent
 //! (`qemu-vdagent`, clipboard shared with the host's through QEMU's
 //! window) on a virtio-serial port named `com.redhat.spice.0`, for
-//! VMAGENT.EXE (docs/AGENT.md). Headless, the host's side is a VNC
+//! VMAGENT.EXE (docs/AGENT.md), and the QEMU guest agent's port
+//! (`org.qemu.guest_agent.0`, QEMUGA.EXE) on the socket work/qemu-ga.sock
+//! (tools/scripts/qga.py). Headless, the host's side is a VNC
 //! server on work/qemu-vnc.sock (QEMU's VNC clipboard is the same).
 //! `--virtio-gpu` replaces the standard VGA with `virtio-vga` (the
 //! firmware draws on its VGA side until the kernel's virtio-gpu driver
@@ -775,6 +777,8 @@ const USER_PROGRAMS: &[(&str, &str)] =
         // The guest agent (docs/AGENT.md): the clipboard shared with the
         // host of a virtual machine; the shell starts it.
         ("vmagent", "OS2\\VMAGENT.EXE"),
+        // The QEMU guest agent; CONFIG.SYS's RUN= starts it.
+        ("qemuga", "OS2\\QEMUGA.EXE"),
         ("pmchkdsk", "OS2\\PMCHKDSK.EXE"),
         ("pmformat", "OS2\\PMFORMAT.EXE"),
         ("iconedit", "OS2\\ICONEDIT.EXE"),
@@ -1335,6 +1339,12 @@ fn virtio_devices(o: &Opts, c: &mut Command) {
     if o.agent {
         c.args(["-chardev", "qemu-vdagent,id=vdagent,clipboard=on,mouse=off"]);
         c.args(["-device", "virtserialport,chardev=vdagent,name=com.redhat.spice.0"]);
+        // The QEMU guest agent's port: a socket for tools/scripts/qga.py
+        // (as Proxmox's and libvirt's).
+        let qga = socket_path(&root().join("work"), "qemu-ga.sock");
+        let _ = std::fs::remove_file(&qga);
+        c.arg("-chardev").arg(format!("socket,id=qga0,path={},server=on,wait=off", qga.display()));
+        c.args(["-device", "virtserialport,chardev=qga0,name=org.qemu.guest_agent.0"]);
     }
 }
 

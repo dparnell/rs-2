@@ -338,7 +338,22 @@ pub extern "C" fn ShlExceptionHandler(report: *const u32, rec: u32, context: *co
 /// WinShutdownSystem(hab, hmq): close the programs and turn off.
 #[unsafe(no_mangle)]
 pub extern "C" fn WinShutdownSystem(_hab: u32, _hmq: u32) -> u32 {
-    crate::shutdown::begin(false);
+    Rs2ShutdownSystem(0)
+}
+
+/// Rs2ShutdownSystem(restart) (rs2-private, PMWP 9101): close the
+/// programs and turn off (restart: 1 restarts), without asking, as
+/// WinShutdownSystem; from another process (REXX's SysShutDownSystem, the
+/// QEMU guest agent) the shell's process does it. FALSE without a shell.
+#[unsafe(no_mangle)]
+pub extern "C" fn Rs2ShutdownSystem(restart: u32) -> u32 {
+    if ipc::shell_running() {
+        return ipc::call(ipc::OP_SHUTDOWN, &[restart], &[]).unwrap_or(0);
+    }
+    if !ipc::serving() {
+        return 0;
+    }
+    crate::shutdown::begin(restart != 0);
     1
 }
 

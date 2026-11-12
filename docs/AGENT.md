@@ -1,4 +1,11 @@
-# The guest agent (VMAGENT.EXE)
+# The guest agents (VMAGENT.EXE, QEMUGA.EXE)
+
+rs2 has two: VMAGENT shares the clipboard with the host (below), and
+QEMUGA is the QEMU guest agent, through which Proxmox, libvirt and other
+QEMU/KVM managers shut the guest down, see its addresses and freeze its
+file systems for backups ([The QEMU guest agent](#the-qemu-guest-agent-qemugaexe)).
+
+## Sharing the clipboard (VMAGENT.EXE)
 
 When rs2 runs in a virtual machine, `\OS2\VMAGENT.EXE` shares the
 clipboard's text with the host: text copied on the host can be pasted in
@@ -52,7 +59,7 @@ devices:
 
 - `\DEV\VIOCON$`: the first console port (port 0 without MULTIPORT);
 - `\DEV\VDAGENT$`: `com.redhat.spice.0`;
-- `\DEV\QEMUGA$`: `org.qemu.guest_agent.0` (not used yet).
+- `\DEV\QEMUGA$`: `org.qemu.guest_agent.0` (QEMUGA.EXE).
 
 Opening a named port tells the host the guest's side is open (closed, then
 open, so that the host's side starts afresh after an agent ended). A
@@ -175,3 +182,58 @@ page 850 text (`\x81ber na\x8bve "quotes" -- ok`) and the guest's
 Workplace Shell starts the agent and it opens its port. Without
 `--agent`, QEMU's `vmport` answers the VMware backdoor but not GuestRPC, and
 the agent ends ("no channel to a host").
+
+## The QEMU guest agent (QEMUGA.EXE)
+
+`\OS2\QEMUGA.EXE` speaks the QEMU guest agent's protocol (JSON commands
+and replies, as QEMU's own qemu-ga) on the virtio-serial port
+`org.qemu.guest_agent.0` (`\DEV\QEMUGA$`). CONFIG.SYS starts it
+(`RUN=C:\OS2\QEMUGA.EXE`, before the desktop, so it also works when
+booted to the command prompt); without the port it ends at once.
+
+On the host's side:
+
+- Proxmox VE: Options → QEMU Guest Agent → Use QEMU Guest Agent. The VM's
+  Shutdown and Reboot buttons then go through the agent, its Summary shows
+  the IP addresses, and backups freeze and thaw the file systems.
+- libvirt: a `<channel type='unix'>` with `<target type='virtio'
+  name='org.qemu.guest_agent.0'/>` (virt-manager adds it);
+  `virsh shutdown --mode agent`, `virsh domifaddr --source agent`,
+  `virsh qemu-agent-command`.
+- QEMU: `-device virtio-serial-pci -chardev socket,path=qga.sock,server=on,wait=off,id=qga0
+  -device virtserialport,chardev=qga0,name=org.qemu.guest_agent.0` (`cargo
+  xtask run --agent` adds it beside the SPICE agent's port, on
+  `work/qemu-ga.sock`).
+
+Commands (`guest-info` lists them):
+
+| Command | What rs2 does |
+|---------|---------------|
+| `guest-sync-delimited`, `guest-sync`, `guest-ping`, `guest-info` | the protocol's own: a 0xFF from the host resets the reader; the delimited sync's reply starts with 0xFF |
+| `guest-shutdown` (`powerdown`, `halt`, `reboot`) | with the Workplace Shell running, its Shut down (programs are asked to close, objects saved), without asking; otherwise the file systems are flushed and the machine turned off or restarted at once. No reply when it works, as qemu-ga |
+| `guest-network-get-interfaces` | the adapters as OS/2 names them (`lan0`.., `lo`): hardware address, IPv4 address and prefix, counters |
+| `guest-get-osinfo`, `guest-get-host-name` (%HOSTNAME%), `guest-get-vcpus`, `guest-get-users` (none) | |
+| `guest-get-time`, `guest-set-time`, `guest-get-timezone` | the system clock (its time zone offset from DosGetDateTime, UTC when not set) |
+| `guest-fsfreeze-freeze`, `-freeze-list`, `-thaw`, `-status` | rs2 cannot hold writes back: a "freeze" writes every file system's cache out (DosResetBuffer) and so does the thaw; the status follows. Enough for a consistent snapshot of what was written before it |
+| `guest-fstrim` | nothing to trim |
+| `guest-file-open`, `-read`, `-write`, `-seek`, `-flush`, `-close` | files of the guest (modes `r`, `r+`, `w`, `w+`, `a`, `a+`); only handles the agent opened |
+
+Not there: `guest-exec` (running programs), memory blocks, SSH keys, disk
+and file system details.
+
+The Workplace Shell's shutdown is reached through PMWP's private
+`Rs2ShutdownSystem(restart)` (ordinal 9101), which hands it to the shell's
+process when called from another (its object call server, operation 15);
+`WinShutdownSystem` does the same now, so REXX's `SysShutDownSystem` from a
+command line shuts down through the shell too.
+
+The protocol is in `crates/guestagent` (`qga`, `json`; host tests: sync and
+errors, the information commands, shutdown and freeze, files), the system's
+side in `userland/vmagent/src/qemuga.rs`. `tools/scripts/qga.py SOCKET
+COMMAND [JSON]` asks as Proxmox does (a delimited sync, then the command).
+
+Checked in QEMU (`--agent`): every information command; a file written
+through the agent read back; freeze, status, thaw; `guest-shutdown` booted
+to the command prompt (flushed, powered off) and with the desktop (through
+the Workplace Shell: powered off, and `reboot` restarted); with `--net`,
+`lan0` 52:54:00:12:34:56 10.0.2.15/24 from DHCP.

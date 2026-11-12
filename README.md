@@ -207,7 +207,8 @@ RS2SHELL (`C:\OS2\RS2SHELL.EXE`), rs2's earlier desktop, is still there:
 ([docs/PM.md](docs/PM.md#the-desktop-shell-rs2shell)).
 In a virtual machine (QEMU, Proxmox, libvirt, UTM, VirtualBox, VMware) the clipboard's text is
 shared with the host's by the guest agent, which the desktop starts by
-itself: [docs/AGENT.md](docs/AGENT.md).
+itself, and Proxmox and libvirt can shut it down, see its addresses and back
+it up through the QEMU guest agent: [docs/AGENT.md](docs/AGENT.md).
 F1 shows help in PM programs that have it (rs2's help manager reads
 OS/2 `.HLP` files along HELP), and `VIEW book [topic]` shows OS/2 books
 (`.INF`, along BOOKSHELF): [docs/PM.md](docs/PM.md#the-help-manager-helpmgrdll-and-viewexe).

@@ -99,6 +99,7 @@ aligned! {
     __a_ShlExceptionHandler => crate::shell::ShlExceptionHandler, 4;
     __a_WinWaitForShell => crate::shell::WinWaitForShell, 1;
     __a_WinShutdownSystem => crate::shell::WinShutdownSystem, 2;
+    __a_Rs2ShutdownSystem => crate::shell::Rs2ShutdownSystem, 1;
     __a_WinLockupSystem => crate::desktop::WinLockupSystem, 1;
     __a_WinUnlockSystem => crate::desktop::WinUnlockSystem, 2;
     __a_WinStoreWindowPos => crate::winpos::WinStoreWindowPos, 3;

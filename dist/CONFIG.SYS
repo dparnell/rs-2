@@ -26,6 +26,9 @@ REM /AUTOCHECK parameter a dirty drive only gets a warning.
 IFS=C:\OS2\HPFS.IFS /AUTOCHECK:*
 REM Ctrl+Alt+W: the rescue screen (end a process that hangs, save a report).
 RUN=C:\OS2\RESCUE.EXE
+REM The QEMU guest agent (Proxmox, libvirt): shutdown, addresses, backups.
+REM It ends at once outside such a virtual machine.
+RUN=C:\OS2\QEMUGA.EXE
 REM The shell: the desktop (Presentation Manager with the Workplace Shell).
 REM For the text-mode command prompt instead, put REM before the first
 REM PROTSHELL line and remove it from the second. Pressing T while the boot
