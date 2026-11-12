@@ -308,8 +308,60 @@ can compare it.
    spooler; separator pages, print times and priorities; the Print
    Screen key.
 
-Not planned yet: remote (LAN Server) queues, bidirectional printers,
-and other printer languages (PCL).
+7. Network printers (LAN Server queues on SMB servers), the Spooler's
+   Disable for PM programs, Start again of a printing job, the
+   separator's input bin and print times for large jobs only.
+
+Not planned yet: bidirectional printers and other printer languages
+(PCL).
+
+### Network printers
+
+IBM's Workplace Shell makes a network printer (WPRPrinter) a **local
+alias**: a queue whose PRQINFO6 names the server and its queue
+(pszRemoteComputerName, pszRemoteQueueName; WPPRINT's AddRemotePrintDest
+creates it with SplCreateQueue level 6). rs2's PMSPL keeps the two names
+(`PM_SPOOLER_QUEUE_REMOTE`, rs2's own key: `\\SERVER;QUEUE;`), and a
+level-6 queue created without printers gets a printer of its own, named
+after the queue, whose port is the UNC name `\\SERVER\QUEUE` (a port
+without settings: `ini::is_unc`); deleting the queue deletes it. The
+spooler prints the alias's jobs as any other (the queue processor, rs2's
+PostScript driver) and PrtClose writes the job as a print file on the
+server's print share (`\\SERVER\QUEUE\document`, through the LAN
+requester: the kernel's redirector creates the file on the share, and the
+server prints it when it is closed). The data is collected and written at
+PrtClose, so a job stopped while printing leaves nothing on the server.
+The redirector answers "not found" for a name looked up on a print share
+(every CREATE there is a new job on SMB servers, so DosOpen's look-up
+printed an empty job). Jobs record the user logged on to the network as
+their owner (LOCAL when nobody is), which the network job view's "Show
+own jobs" uses.
+
+### More spooler controls
+
+- **Start again** of a printing job: SplControlDevice(PRD_RESTART) on
+  the printer printing it (as IBM's WPPRINT does) stops it (the port
+  writes fail, as for a deleted job) and the spooler puts it back first
+  in its queue to print from the start (`jobs::set_restart`).
+- **Spooler disabled** (`PM_SPOOLER` `SPOOL` 0, the Spooler object's
+  Disable): PM programs' jobs do not wait in the queue: SplQmEndDoc
+  prints the job in the program's own process, at once, through the
+  queue processor on the queue's printer, and returns when it is
+  printed (IBM's disabled spooler likewise lets programs print straight
+  to the printer). Programs' port output already went to the port.
+- **Separator input bin**: PrtQuery/PrtSet (PMSPL 603/604) with IBM's
+  commands 0xA017 (the printer's input bins: ULONG cb, ULONG count, 96-byte
+  records with the name at 32) and 0xA018 (the separator page's bin),
+  as WPPRINT's Print options page uses them. rs2's PostScript printers
+  have "Automatic selection" and "Manual feed"; a PostScript separator
+  page from manual feed gets `<< /ManualFeed true >> setpagedevice`
+  (`PM_SPOOLER_QUEUE_SEPBIN`).
+- **Limits** (PRQINFO8, level 8 of SplQuery/SetQueue; IBM's structure is
+  not in the Toolkit, WPPRINT reads the flags at 8 and the job limit at
+  16; rs2's has the page and kilobyte limits at 20 and 24,
+  `PM_SPOOLER_QUEUE_LIMITS`): with flag 0x10 the start and stop times
+  hold only the jobs over the limits (IBM's PMSPL TestJobLimits); the
+  others print at any time.
 
 ## Status
 
@@ -365,9 +417,7 @@ Not done yet:
   (the keyboard path cannot wait for the spooler); VioPrtSc spools.
   VioPrtScToggle's echo is not spooled either.
 - Separator files' block characters (`B`, `S`, `M`) print as normal
-  text; the Print options page has no Input bin (the PostScript driver
-  has one tray) and no "apply only to jobs that exceed size limits".
-  The Find file dialog starts in the root, not `\OS2`.
+  text. The Find file dialog starts in the root, not `\OS2`.
 - The PostScript header says LanguageLevel 2 while images use level 3's
   FlateDecode (CUPS, Ghostscript and current printers take it).
 - Win-OS/2 printing was run in dosrun, not yet in a QEMU Win-OS/2
@@ -380,8 +430,11 @@ Not done yet:
   a metafile on a direct and a queued printer DC and lists the colours
   the PostScript sets. PRTSAMP's main window does not show (it prints
   from the keyboard); not looked at.
-- Job retention, forms per queue, remote (LAN Server)
-  queues, IBM's port driver (.PDR) and queue processor interfaces for
+- Job retention, forms per queue, the server's own queue listing for
+  network printers (RAP DosPrintJobEnum or MS-RPRN; the job view shows
+  the local alias's jobs), job and size limits that refuse jobs (IBM's
+  PMSPL refuses a job over its queue's limits unless only the print
+  times apply), IBM's port driver (.PDR) and queue processor interfaces for
   other vendors' modules, and IBM's spool files' (.SPL) device
   escape order (rs2 records DEVESC_NEWFRAME as its own escape order
   0x80 and blits as 0x81-0x83).

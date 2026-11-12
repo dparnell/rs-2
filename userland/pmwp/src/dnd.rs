@@ -283,7 +283,13 @@ fn drive_of(o: usize) -> u8 {
 
 /// The operation for an item dropped into a folder by default.
 fn default_op(src: usize, folder: usize) -> u32 {
-    if wps::is(src, "WPFileSystem") && drive_of(src) != drive_of(folder) { DO_COPY } else { DO_MOVE }
+    if wps::is(src, "WPFileSystem") && drive_of(src) != drive_of(folder) {
+        return DO_COPY;
+    }
+    // Objects that cannot move but can be copied (a server's network
+    // printers) are copied.
+    let style = obj::d(src).style;
+    if style & OBJSTYLE_NOMOVE != 0 && style & OBJSTYLE_NOCOPY == 0 { DO_COPY } else { DO_MOVE }
 }
 
 fn allowed(it: u32, op: u32) -> bool {

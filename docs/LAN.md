@@ -204,12 +204,31 @@ a printer object on that port prints to the server's queue through
 rs2's spooler), and Unassign. The Network page shows the requester's
 state.
 
+Print queues show in a server's folder as **network printers**
+(WPRPrinter, `userland/pmwp/src/rprinter.rs`): dragged out they become
+printers kept on the desktop or in the Printers folder, printing through
+a local alias queue whose printer's port is `\\SERVER\QUEUE`
+([PRINTING.md](PRINTING.md) "Network printers"); their menu has Assign
+port (NET USE LPTn) and Unassign port, Logon, Logoff and Access another
+network printer; the Printers folder has a "Network printer" template.
+The network objects have IBM's pages (`netpages.rs`): a group's Network
+page, a server's Server page, a shared directory's Resource page and a
+network printer's Network page (the network, server, resource, its
+remark, the status and the assigned drive or port); Logon and Logoff
+(a group's: the requester's NET LOGON; a server's or resource's: a
+connection to the server's IPC$ with that user and password, which its
+other connections use), Access another server / network directory, and a
+shared directory's Access control (what the user may do there, tried on
+the server). Groups, servers, shares and network printers have rs2's own
+icons.
+
 ## Testing
 
 ```
 cargo test -p smb                       # host: unit tests and live sessions with smbhost.py
 tools/scripts/lantest.sh [seconds]      # QEMU: LANTEST.EXE and LANTEST.CMD against smbhost.py
 tools/scripts/lanwps.sh                 # QEMU desktop: the Network folder down to a share, Drives
+tools/scripts/lanprint.sh               # QEMU desktop: a network printer, a job on the server's queue
 ```
 
 `tools/scripts/smbhost.py` is a standard-library SMB server for the

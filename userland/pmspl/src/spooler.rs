@@ -17,7 +17,11 @@
 //! properties, data type, comment, parameters, document and queue
 //! names, token and job id), SplQpPrint with the spool file, SplQpClose.
 //! A printed (or deleted) job is removed; a job the queue processor
-//! could not print is held with an error status.
+//! could not print is held with an error status; a job stopped by Start
+//! again (SplControlDevice PRD_RESTART) goes back to the front of its
+//! queue and prints again. A queue whose limits say so
+//! (ini::LIMIT_TIMES_ONLY_LARGE) holds only the jobs larger than its
+//! page or kilobyte limits to its print times; the others print at once.
 
 use alloc::vec::Vec;
 
@@ -115,11 +119,12 @@ fn next() -> Option<(Job, Printer)> {
         if p.held || p.port.is_empty() || all.iter().any(|j| j.qstatus() == PRJ_QS_PRINTING && eq(&j.printer, &p.name)) {
             continue;
         }
-        let mut queues: Vec<Queue> = p.queues.iter().filter_map(|qn| Queue::load(qn)).filter(|q| !q.held && in_print_time(q, now)).collect();
+        let mut queues: Vec<Queue> = p.queues.iter().filter_map(|qn| Queue::load(qn)).filter(|q| !q.held && (in_print_time(q, now) || q.limit_flags & ini::LIMIT_TIMES_ONLY_LARGE != 0)).collect();
         // Stable: equal priorities keep the printer's order.
         queues.sort_by_key(|q| q.priority.clamp(1, 9));
         for q in queues {
-            let ready = jobs::queue_jobs(&q.name).into_iter().find(|j| j.qstatus() == PRJ_QS_QUEUED && !j.held && j.status & (PRJ_DELETED | PRJ_ERROR) == 0);
+            let open = in_print_time(&q, now);
+            let ready = jobs::queue_jobs(&q.name).into_iter().find(|j| j.qstatus() == PRJ_QS_QUEUED && !j.held && j.status & (PRJ_DELETED | PRJ_ERROR) == 0 && (open || !over_limits(&q, j)));
             if let Some(mut j) = ready {
                 j.status = (j.status & !3) | PRJ_QS_PRINTING;
                 j.printer = p.name.clone();
@@ -129,6 +134,13 @@ fn next() -> Option<(Job, Printer)> {
         }
     }
     None
+}
+
+/// Whether a job is larger than its queue's page or size limits (the
+/// jobs that wait for the print times when only those do).
+pub fn over_limits(q: &Queue, j: &Job) -> bool {
+    let size = if j.size != 0 { j.size } else { jobs::spl_size(j) };
+    (q.max_kb != 0 && size > q.max_kb.saturating_mul(1024)) || (q.max_pages != 0 && j.pages > q.max_pages) || (q.max_kb == 0 && q.max_pages == 0)
 }
 
 fn proc_addr(hmod: u32, name: &[u8], ord: u32) -> usize {
@@ -164,11 +176,11 @@ fn run_qproc(j: &Job, p: &Printer) -> bool {
         let mut fl = 0u32;
         let query: QpQueryFlags = unsafe { core::mem::transmute(fq) };
         if unsafe { query(&mut fl) } != 0 && fl & QP_PRINT_SEPARATOR_PAGE != 0 {
-            let file = jobs::locked(|| Queue::load(&j.queue).map(|q| q.sepfile)).unwrap_or_default();
-            if !file.is_empty() {
-                if let Some(d) = crate::util::read_file(&file) {
+            let q = jobs::locked(|| Queue::load(&j.queue)).unwrap_or_default();
+            if !q.sepfile.is_empty() {
+                if let Some(d) = crate::util::read_file(&q.sepfile) {
                     let sj = crate::sep::SepJob { user: &j.user, id: j.id, document: &j.document, queue: &j.queue };
-                    separator = crate::sep::render(&d, &sj);
+                    separator = crate::prtquery::separator_for_bin(&q, crate::sep::render(&d, &sj));
                 }
             }
         }
@@ -199,11 +211,20 @@ fn run_qproc(j: &Job, p: &Printer) -> bool {
     ok
 }
 
-fn print(j: Job, p: Printer) {
+pub fn print(j: Job, p: Printer) {
     let ok = run_qproc(&j, &p);
     jobs::locked(|| {
         let Some(mut now) = jobs::find_in(&j.queue, j.id) else { return };
         let aborted = jobs::abort_requested(j.id);
+        if aborted && jobs::take_restart(j.id) && now.status & PRJ_DELETED == 0 {
+            // Start again: first in its queue, to print from the start.
+            now.status = (now.status & !(3 | PRJ_ERROR)) | PRJ_QS_QUEUED;
+            now.printer.clear();
+            now.seq = jobs::queue_jobs(&now.queue).iter().map(|x| x.seq).min().unwrap_or(1).saturating_sub(1);
+            now.save();
+            jobs::set_abort(0);
+            return;
+        }
         if ok || now.status & PRJ_DELETED != 0 || aborted {
             now.destroy();
         } else {

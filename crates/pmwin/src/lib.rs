@@ -18,6 +18,7 @@ pub mod minimize;
 pub mod appicons;
 pub mod hwicons;
 pub mod mmicons;
+pub mod neticons;
 pub mod shellicons;
 pub mod setupicons;
 mod region;

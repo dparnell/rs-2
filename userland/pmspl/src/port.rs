@@ -12,6 +12,12 @@
 //!   one data file, sent when the job is closed.
 //! - `IPPn`: settings `host;path;port;` (port 631, path `/ipp/print` by
 //!   default): an IPP/1.1 Print-Job over HTTP/1.1.
+//! - `\\SERVER\QUEUE` (a network printer's port, ini.rs): a print file
+//!   on the server's print share, created through the LAN requester (the
+//!   kernel's redirector opens `\\SERVER\QUEUE\name` on the share as a
+//!   new print job), which the server prints when it is closed. The job
+//!   is collected and sent at PrtClose, so a job stopped while printing
+//!   (deleted, or Start again) leaves nothing half printed on the server.
 //!
 //! A job deleted while it prints (SplDeleteJob, SplControlDevice) makes
 //! PrtWrite fail, which ends the queue processor's work.
@@ -33,6 +39,9 @@ enum Sink {
     Handle(u32),
     /// Collected for a network port, sent at close.
     Net { lpr: bool, settings: Vec<u8>, data: Vec<u8> },
+    /// Collected for a print file on a server's print share (its UNC
+    /// name), written at close.
+    Share { path: Vec<u8>, data: Vec<u8> },
 }
 
 struct Out {
@@ -55,6 +64,20 @@ fn open_handle(name: &[u8]) -> Result<u32, u32> {
     match unsafe { os2::DosOpen(p.as_ptr(), &mut hf, &mut act, 0, 0, os2::OPEN_ACTION_CREATE_IF_NEW | os2::OPEN_ACTION_REPLACE_IF_EXISTS, os2::OPEN_ACCESS_READWRITE | 0x0010 /* deny read/write */, core::ptr::null_mut()) } {
         0 => Ok(hf),
         e => Err(e),
+    }
+}
+
+/// The name of a job's print file on a server's print share: the
+/// document's name (letters, digits, blanks, `.`, `-`, `_`; 64 at most),
+/// else `RS2JOBnnnnn`.
+fn share_file_name(document: &[u8], id: u32) -> Vec<u8> {
+    let leaf = document.rsplit(|&c| c == b'\\' || c == b'/').next().unwrap_or(b"");
+    let name: Vec<u8> = leaf.iter().copied().filter(|c| c.is_ascii_alphanumeric() || b" .-_".contains(c)).take(64).collect();
+    let name = crate::util::trim(&name).to_vec();
+    if name.is_empty() || name.iter().all(|&c| c == b'.') {
+        cat(&[b"RS2JOB", &dec(id, 5)])
+    } else {
+        name
     }
 }
 
@@ -93,7 +116,10 @@ pub extern "C" fn PrtOpen(dev: *const u8, ph: *mut u32, action: *mut u32, _size:
     let Some((port, settings, job)) = found else { return ERROR_PATH_NOT_FOUND };
     let id = job.as_ref().map_or(0, |j| j.id);
     let document = job.map(|j| j.document).unwrap_or_default();
-    let sink = if port.starts_with(b"LPR") || port.starts_with(b"IPP") {
+    let sink = if ini::is_unc(&port) {
+        let id = if id == 0 { jobs::locked(jobs::next_id) } else { id };
+        Sink::Share { path: cat(&[&port, b"\\", &share_file_name(&document, id)]), data: Vec::new() }
+    } else if port.starts_with(b"LPR") || port.starts_with(b"IPP") {
         Sink::Net { lpr: port.starts_with(b"LPR"), settings, data: Vec::new() }
     } else if port.starts_with(b"FILE") {
         let id = if id == 0 { jobs::locked(jobs::next_id) } else { id };
@@ -133,7 +159,7 @@ pub extern "C" fn PrtWrite(h: u32, data: *const u8, cb: u32, written: *mut u32) 
                     return ERROR_WRITE_FAULT;
                 }
             }
-            Sink::Net { data, .. } => data.extend_from_slice(d),
+            Sink::Net { data, .. } | Sink::Share { data, .. } => data.extend_from_slice(d),
         }
         put(written, cb);
         0
@@ -160,6 +186,23 @@ pub extern "C" fn PrtClose(h: u32) -> u32 {
                 Err(e) => e,
             }
         }
+        Sink::Share { path, data } => {
+            if o.failed || jobs::abort_requested(o.job) {
+                return ERROR_PRINT_ABORTED;
+            }
+            match open_handle(&path) {
+                Ok(hf) => {
+                    let ok = write_all(hf, &data);
+                    let rc = unsafe { os2::DosClose(hf) };
+                    if !ok {
+                        ERROR_WRITE_FAULT
+                    } else {
+                        rc
+                    }
+                }
+                Err(e) => e,
+            }
+        }
     }
 }
 
@@ -177,7 +220,7 @@ pub extern "C" fn PrtAbort(h: u32) -> u32 {
 #[unsafe(no_mangle)]
 pub extern "C" fn PrtAbortDoc(h: u32, _data: *const u8, _cb: u32, _fl: u32) -> u32 {
     with(h, |o| {
-        if let Sink::Net { data, .. } = &mut o.sink {
+        if let Sink::Net { data, .. } | Sink::Share { data, .. } = &mut o.sink {
             data.clear();
         }
         o.failed = true;

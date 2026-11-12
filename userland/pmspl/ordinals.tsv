@@ -48,3 +48,5 @@ PMSPL	402	SplSetDevice
 PMSPL	391	SplSetJob
 PMSPL	411	SplSetPort
 PMSPL	398	SplSetQueue
+PMSPL	603	PrtQuery
+PMSPL	604	PrtSet

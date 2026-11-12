@@ -112,6 +112,8 @@ EXTRA = {
     'WPQdr': ['WPTransient'],
     'WPPort': ['WPTransient'],
     'WPSpool': ['WPAbstract'],
+    # WPPRINT.DLL's network printer (a print queue on a LAN server).
+    'WPRPrinter': ['WPPrinter'],
     # rs2's multimedia classes, with the names of IBM's MMPARTS.DLL ones
     # (no IDL: they introduce no methods). Their metaclass M_MMDataFile
     # gives each data file class its instance filter, type and title.

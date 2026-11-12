@@ -354,6 +354,9 @@ pub struct PrinterData {
     details: u32,
     refresh: u32,
     hidden: u32,
+    /// A network printer's job view (wpSetRemoteOptions): only the jobs
+    /// of the user logged on (1) or all (0).
+    own_jobs: u32,
 }
 
 /// The job view's settings (the View page): details?, refresh seconds,
@@ -385,6 +388,48 @@ fn pd(o: usize) -> &'static mut PrinterData {
 
 fn queue_of(o: usize) -> Vec<u8> {
     str_bytes(&pd(o).queue).to_vec()
+}
+
+/// The printer's queue (a network printer's local alias).
+pub fn queue_name(o: usize) -> Vec<u8> {
+    queue_of(o)
+}
+
+pub fn set_queue_name(o: usize, q: &[u8]) {
+    pd(o).queue = str_new(q);
+}
+
+/// The user whose jobs a network printer's "own jobs" view shows: the
+/// one logged on to the network (jobs say LOCAL when nobody is).
+fn own_user() -> Vec<u8> {
+    let u = lanreq::status().user;
+    if u.is_empty() { b"LOCAL".to_vec() } else { u.bytes().collect() }
+}
+
+/// wpSetRemoteOptions(ulRefreshInterval, flAllJobs): a network printer's
+/// job view.
+extern "C" fn wpSetRemoteOptions(o: usize, refresh: u32, all: u32) -> u32 {
+    let d = pd(o);
+    if refresh != 0 {
+        d.refresh = refresh.clamp(1, 3600);
+    }
+    d.own_jobs = (all == 0) as u32;
+    obj::call(m::WPObject::wpSaveDeferred, &[o]);
+    jobs_changed(o);
+    1
+}
+
+extern "C" fn wpQueryRemoteOptions(o: usize, refresh: *mut u32, all: *mut u32) -> u32 {
+    let (_, r, _) = view_settings(o);
+    unsafe {
+        if !refresh.is_null() {
+            *refresh = r;
+        }
+        if !all.is_null() {
+            *all = (pd(o).own_jobs == 0) as u32;
+        }
+    }
+    1
 }
 
 fn one_line(t: &[u8]) -> Vec<u8> {
@@ -433,7 +478,11 @@ fn view_title(o: usize) -> Vec<u8> {
 /// (objects, whether some came or went).
 fn job_objects(o: usize) -> (Vec<usize>, bool) {
     let q = queue_of(o);
-    let js = crate::printobj::jobs(&q);
+    let mut js = crate::printobj::jobs(&q);
+    if pd(o).own_jobs != 0 && wps::is(o, "WPRPrinter") {
+        let me = own_user();
+        js.retain(|j| j.user.eq_ignore_ascii_case(&me));
+    }
     let objs = unsafe { &mut JOB_OBJS };
     let mut changed = false;
     // Jobs that are gone.
@@ -648,6 +697,10 @@ extern "C" fn printer_setup(o: usize, setup: *const u8) -> u32 {
 /// A printer made from the template gets a queue of its own (templates.rs
 /// calls this for the new object).
 pub fn copied_from_template(o: usize) {
+    if wps::is(o, "WPRPrinter") {
+        crate::rprinter::copied_from_template(o);
+        return;
+    }
     let q = queue_of(o);
     if !q.is_empty() && queue_info(&q).is_some() {
         return;
@@ -709,6 +762,7 @@ extern "C" fn printer_save_state(o: usize) -> u32 {
     obj::wpSaveLong(o, b"WPPrinter\0".as_ptr(), 2, d.details);
     obj::wpSaveLong(o, b"WPPrinter\0".as_ptr(), 3, d.refresh);
     obj::wpSaveLong(o, b"WPPrinter\0".as_ptr(), 4, d.hidden);
+    obj::wpSaveLong(o, b"WPPrinter\0".as_ptr(), 5, d.own_jobs);
     1
 }
 
@@ -721,6 +775,7 @@ extern "C" fn printer_restore_state(o: usize, r: u32) -> u32 {
     d.details = obj::restored_long(o, b"WPPrinter", 2).unwrap_or(0);
     d.refresh = obj::restored_long(o, b"WPPrinter", 3).unwrap_or(0);
     d.hidden = obj::restored_long(o, b"WPPrinter", 4).unwrap_or(0);
+    d.own_jobs = obj::restored_long(o, b"WPPrinter", 5).unwrap_or(0);
     1
 }
 
@@ -961,9 +1016,17 @@ extern "C" fn printer_menu_selected(o: usize, frame: u32, id: u32) -> u32 {
     1
 }
 
-/// Every queue without a printer object gets one (the shell starts).
+/// Every queue without a printer object gets one (the shell starts);
+/// network printers' local aliases belong to their network printer
+/// objects (rprinter.rs). The Printers folder gets its network printer
+/// template.
 pub fn sync_printers() {
+    let remote: Vec<Vec<u8>> = crate::rprinter::remote_queues().into_iter().map(|q| q.0).collect();
+    crate::rprinter::ensure_template();
     for q in queues() {
+        if remote.iter().any(|r| r.eq_ignore_ascii_case(&q.name)) {
+            continue;
+        }
         let id = [b"<RS2_PRINTER_", &q.name[..], b">"].concat();
         if wps::handle_of_id(&id).is_some() {
             continue;
@@ -991,6 +1054,8 @@ methods! {
     __m_wpQueryPrinterName => wpQueryPrinterName, 2;
     __m_wpSetPrinterName => wpSetPrinterName, 2;
     __m_wpDeleteAllJobs => wpDeleteAllJobs, 1;
+    __m_wpSetRemoteOptions => wpSetRemoteOptions, 3;
+    __m_wpQueryRemoteOptions => wpQueryRemoteOptions, 3;
 }
 
 pub fn impl_printer() -> Impl {
@@ -1000,6 +1065,8 @@ pub fn impl_printer() -> Impl {
             ("wpQueryPrinterName", __m_wpQueryPrinterName as usize),
             ("wpSetPrinterName", __m_wpSetPrinterName as usize),
             ("wpDeleteAllJobs", __m_wpDeleteAllJobs as usize),
+            ("wpSetRemoteOptions", __m_wpSetRemoteOptions as usize),
+            ("wpQueryRemoteOptions", __m_wpQueryRemoteOptions as usize),
         ],
         overrides: vec![
             ("wpOpen", __m_printer_open as usize),

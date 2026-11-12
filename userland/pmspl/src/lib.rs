@@ -13,7 +13,8 @@
 //! - `port`: PrtOpen/PrtWrite/PrtClose and the ports (FILE, LPT, COM,
 //!   LPR, IPP);
 //! - `lptpipe`: programs' printer port output (DosOpen of LPT1, DOS
-//!   sessions) as jobs.
+//!   sessions) as jobs;
+//! - `prtquery`: PrtQuery/PrtSet (the separator page's input bin).
 
 #![no_std]
 #![no_main]
@@ -29,6 +30,7 @@ mod jobs;
 mod lptpipe;
 mod sep;
 mod port;
+mod prtquery;
 mod qm;
 mod spooler;
 mod util;

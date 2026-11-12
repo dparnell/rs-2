@@ -620,6 +620,12 @@ impl FileSystem for RedirFs {
             self.with(|s, tid, _| s.fs_size(tid).map(|_| ()))?;
             return Ok(FileInfo { name: String::new(), attr: attr::DIRECTORY, ..Default::default() });
         }
+        // A print share has no files: every CREATE there starts a print
+        // job on the server, so looking a name up (DosOpen does before it
+        // creates) would print an empty job. A name there is a new file.
+        if matches!(self.server.tree(&self.share), Ok(smb::ShareKind::Print)) {
+            return Err(crate::api::err::FILE_NOT_FOUND);
+        }
         let a = self.with(|s, tid, _| s.stat_path(tid, path))?;
         Ok(info_of(path.rsplit('\\').next().unwrap_or(""), &a))
     }

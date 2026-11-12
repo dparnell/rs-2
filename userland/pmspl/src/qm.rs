@@ -2,7 +2,12 @@
 //! SplQmOpen, SplQmStartDoc, SplQmWrite, SplQmEndDoc, SplQmClose and the
 //! abort calls. The job's data goes straight to its spool file in the
 //! calling process; SplQmEndDoc makes the job ready and wakes the
-//! spooler, starting PMSPOOL.EXE when none is running.
+//! spooler, starting PMSPOOL.EXE when none is running. With spooling
+//! disabled (the Spooler object's Disable) the program does not wait in
+//! the queue: SplQmEndDoc prints the job itself, at once, through the
+//! queue processor on the queue's printer (as IBM's spooler, disabled,
+//! lets programs print straight to the printer), and returns when it is
+//! printed.
 
 use alloc::vec::Vec;
 
@@ -118,7 +123,7 @@ fn start(o: &mut Open, doc: &[u8]) -> bool {
             seq: jobs::next_seq(),
             status: PRJ_QS_SPOOLING,
             submitted: crate::util::now(),
-            user: b"LOCAL".to_vec(),
+            user: lan_user(),
             datatype: o.datatype.clone(),
             comment: o.comment.clone(),
             document: doc.to_vec(),
@@ -147,6 +152,31 @@ fn start(o: &mut Open, doc: &[u8]) -> bool {
         }
         None => false,
     }
+}
+
+unsafe extern "C" {
+    #[link_name = "RS2API.602"]
+    fn Rs2LanQuery(buf: *mut u8, cb: u32, pcb: *mut u32) -> u32;
+}
+
+/// A job's owner: the user logged on to the network (the LAN
+/// requester's logon), else LOCAL, as IBM's spooler names jobs of a
+/// computer nobody is logged on to.
+fn lan_user() -> Vec<u8> {
+    let mut buf = [0u8; 1024];
+    let mut need = 0u32;
+    if unsafe { Rs2LanQuery(buf.as_mut_ptr(), buf.len() as u32, &mut need) } == 0 {
+        let n = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+        for l in buf[..n].split(|&c| c == b'\n') {
+            if let Some(u) = l.strip_prefix(b"user=") {
+                let u = crate::util::trim(u);
+                if !u.is_empty() {
+                    return upper(u);
+                }
+            }
+        }
+    }
+    b"LOCAL".to_vec()
 }
 
 /// SplQmStartDoc(hspl, pszDocName)
@@ -204,10 +234,33 @@ fn end(o: &mut Open) -> u32 {
         return 0;
     }
     o.last_job = id;
+    if !ini::spooling_enabled() {
+        print_now(&o.queue, id);
+        return id;
+    }
     if !jobs::wake() {
         start_spooler();
     }
     id
+}
+
+/// Spooling disabled: print the job in this process now, on the first of
+/// its queue's printers that has a port (the spooler's thread leaves it
+/// alone: it is printing).
+fn print_now(queue: &[u8], id: u32) {
+    let take = jobs::locked(|| {
+        let mut j = jobs::find_in(queue, id)?;
+        let q = Queue::load(queue)?;
+        let p = q.printers().into_iter().find(|p| !p.port.is_empty())?;
+        j.status = (j.status & !3) | crate::jobs::PRJ_QS_PRINTING;
+        j.printer = p.name.clone();
+        j.save().then_some((j, p))
+    });
+    if let Some((j, p)) = take {
+        crate::spooler::print(j, p);
+    } else if !jobs::wake() {
+        start_spooler();
+    }
 }
 
 /// SplQmEndDoc(hspl): the job id (0 on error).

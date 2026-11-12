@@ -14,7 +14,7 @@
 use alloc::vec::Vec;
 
 use crate::ini::{self, Printer};
-use crate::util::{eq, fields, trim, z};
+use crate::util::{eq, z};
 
 const PIPE: &[u8] = b"\\PIPE\\SPOOLER\\PORT\0";
 /// Connections served at once (one thread each).
@@ -48,7 +48,7 @@ extern "C" fn pipe_thread(_: u32) {
 /// The printer printing to `port`, if spooling is on.
 fn spooled_printer(port: &[u8]) -> Option<Printer> {
     crate::jobs::locked(|| {
-        if ini::get_str(ini::SPOOLER, b"SPOOL").is_some_and(|v| trim(fields(&v).first().copied().unwrap_or(b"1")) == b"0") {
+        if !ini::spooling_enabled() {
             return None;
         }
         ini::printers().into_iter().find(|p| eq(&p.port, port) && !p.queues.is_empty())

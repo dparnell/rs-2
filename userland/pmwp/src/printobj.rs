@@ -71,6 +71,8 @@ unsafe extern "C" {
     fn DevPostDeviceModes(hab: u32, drv: *mut u8, name: *const u8, dev: *const u8, pname: *const u8, fl: u32) -> i32;
     #[link_name = "PMCTLS.4"]
     fn WinFileDlg(parent: u32, owner: u32, fild: *mut u8) -> u32;
+    #[link_name = "PMSPL.380"]
+    fn SplControlDevice(comp: *const u8, dev: *const u8, ctl: u32) -> u32;
     #[link_name = "PMSPL.442"]
     fn SplCopyJob(sc: *const u8, sq: *const u8, id: u32, tc: *const u8, tq: *const u8, out: *mut u32) -> u32;
 }
@@ -402,11 +404,37 @@ extern "C" fn wpPrintJobNext(o: usize) -> u32 {
     r
 }
 
-/// Start again: the job goes back to the front, released (rs2's spooler
-/// cannot stop a job that is printing).
+/// Start again (IBM's job_wpStartJobAgain and oa_JobStartAgain): a job
+/// that is printing stops and prints again from the start (the printer
+/// printing it gets SplControlDevice PRD_RESTART); a job waiting goes to
+/// the front of its queue, released.
 extern "C" fn wpStartJobAgain(o: usize) -> u32 {
+    if let Some(dev) = printing_on(o) {
+        let r = unsafe { SplControlDevice(null(), z(&dev).as_ptr(), 3) };
+        printer::jobs_changed(jd(o).printer);
+        if r == 0 {
+            return 1;
+        }
+    }
     wpPrintJobNext(o);
     wpReleaseJob(o)
+}
+
+/// The printer (device) printing the job, if it is printing (PRJINFO3's
+/// pszPrinterName).
+fn printing_on(o: usize) -> Option<Vec<u8>> {
+    let q = z(str_bytes(&jd(o).queue));
+    let mut buf = alloc::vec![0u8; 4096];
+    let mut need = 0;
+    if unsafe { SplQueryJob(null(), q.as_ptr(), jd(o).id, 3, buf.as_mut_ptr(), buf.len() as u32, &mut need) } != 0 {
+        return None;
+    }
+    // PRJ_QS_PRINTING
+    if rd16(&buf, 10) & 3 != 3 {
+        return None;
+    }
+    let dev = pstr(rd32(&buf, 64));
+    (!dev.is_empty()).then_some(dev)
 }
 
 extern "C" fn wpQueryPrintObject(o: usize) -> usize {
@@ -1233,6 +1261,8 @@ fn find_separator(h: u32) -> Option<Vec<u8>> {
     (l > 0).then(|| fd[52..52 + l].to_vec())
 }
 
+static mut OPTS_INIT: bool = false;
+
 extern "C" fn print_options_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     match msg {
         WM_INITDLG => {
@@ -1242,6 +1272,9 @@ extern "C" fn print_options_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             set_item_text(h, ID_SEPFILE as u32, &sep);
             show_time(h, start, START);
             show_time(h, until, STOP);
+            unsafe { OPTS_INIT = true };
+            crate::printext::init_print_options(h, &queue_of(b as usize));
+            unsafe { OPTS_INIT = false };
             0
         }
         // EN_KILLFOCUS: the separator file.
@@ -1249,6 +1282,7 @@ extern "C" fn print_options_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             set_separator(h, page_obj(h), &item_text(h, ID_SEPFILE as u32));
             0
         }
+        WM_CONTROL if crate::printext::print_options_control(h, &queue_of(page_obj(h)), (a & 0xffff) as u16, a >> 16, unsafe { OPTS_INIT }) => 0,
         WM_CONTROL => {
             let id = (a & 0xffff) as u16;
             let code = a >> 16;
@@ -1279,8 +1313,9 @@ extern "C" fn print_options_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     }
 }
 
-/// IBM's Print options page: the separator file, the start and stop
-/// times.
+/// IBM's Print options page: the separator file and its input bin, the
+/// start and stop times, and whether they hold only large jobs
+/// (printext.rs).
 pub fn add_print_options_page(o: usize, nb: u32) -> u32 {
     let time = |y: i16, hid: u16, mid: u16, am: u16, pm: u16| {
         alloc::vec![
@@ -1298,12 +1333,13 @@ pub fn add_print_options_page(o: usize, nb: u32) -> u32 {
         // ES_AUTOSCROLL | ES_MARGIN
         item(WC_ENTRYFIELD, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0004 | 0x0008, (40, 100, 184, 8), ID_SEPFILE),
         item(WC_BUTTON, b"~Find file...", WS_VISIBLE | WS_TABSTOP | WS_GROUP, (38, 83, 60, 12), ID_FINDSEP),
-        group(b"Start time", (4, 46, 228, 30)),
     ];
+    items.extend(crate::printext::bin_items());
+    items.push(group(b"Start time", (4, 46, 228, 30)));
     items.extend(time(53, ID_STARTH, ID_STARTM, ID_STARTAM, ID_STARTPM));
-    items.push(group(b"Stop time", (4, 14, 228, 30)));
+    items.push(group(b"Stop time (same as the start time: any time)", (4, 14, 228, 30)));
     items.extend(time(21, ID_STOPH, ID_STOPM, ID_STOPAM, ID_STOPPM));
-    items.push(book::label(b"Equal start and stop times: the printer prints at any time.", (6, 2, 226)));
+    items.extend(crate::printext::limit_items());
     add_page(o, nb, print_options_proc, items, b"P~rint options\0")
 }
 
@@ -1367,9 +1403,11 @@ extern "C" fn view_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
                 }
             }
             spin_init(h, ID_VREFRESH, 1, 3600, refresh as i32);
+            crate::printext::init_view(h, o);
             unsafe { VIEW_INIT = false };
             0
         }
+        WM_CONTROL if crate::printext::view_control(h, page_obj(h), (a & 0xffff) as u16, a >> 16, unsafe { VIEW_INIT }) => 0,
         WM_CONTROL => {
             let id = (a & 0xffff) as u16;
             let code = a >> 16;
@@ -1390,7 +1428,7 @@ extern "C" fn view_page_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
 /// IBM's View page: the queue's physical name, the job view's default
 /// view and the details it shows, its refresh interval.
 pub fn add_printer_view_page(o: usize, nb: u32) -> u32 {
-    add_page(o, nb, view_page_proc, alloc::vec![
+    let mut items = alloc::vec![
         book::label(b"Physical name", (8, 104, 60)),
         item(WC_STATIC, b"", WS_VISIBLE | 0x0001, (72, 104, 150, 8), ID_VNAME),
         group(b"Default view", (4, 58, 90, 40)),
@@ -1402,7 +1440,9 @@ pub fn add_printer_view_page(o: usize, nb: u32) -> u32 {
         book::label(b"Refresh interval", (8, 6, 70)),
         spin((80, 4, 40), ID_VREFRESH),
         book::label(b"seconds", (124, 6, 40)),
-    ], b"~View\0")
+    ];
+    items.extend(crate::printext::network_view_items());
+    add_page(o, nb, view_page_proc, items, b"~View\0")
 }
 
 // ---- The Spooler ----

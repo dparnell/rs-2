@@ -59,6 +59,8 @@ aligned! {
     __a_PrtResetAbort => crate::port::PrtResetAbort, 1;
     __a_PrtNewPage => crate::port::PrtNewPage, 2;
     __a_PrtDevIOCtl => crate::port::PrtDevIOCtl, 5;
+    __a_PrtQuery => crate::prtquery::PrtQuery, 8;
+    __a_PrtSet => crate::prtquery::PrtSet, 6;
     __a_SplQmOpen => crate::qm::SplQmOpen, 3;
     __a_SplQmStartDoc => crate::qm::SplQmStartDoc, 2;
     __a_SplQmWrite => crate::qm::SplQmWrite, 3;

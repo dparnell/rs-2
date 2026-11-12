@@ -14,6 +14,9 @@
 //! | PM_SPOOLER_PORT | port | the port's settings (`host;queue;port;` for LPR) |
 //! | PM_SPOOLER_QP | queue processor | `C:\OS2\DLL\PMPRINT.QPR;;` |
 //! | PM_SPOOLER_DD | driver | `PSCRIPT.DRV;;;` |
+//! | PM_SPOOLER_QUEUE_REMOTE | queue | rs2: a network printer's local queue: `\\SERVER;QUEUE;` (PRQINFO6) |
+//! | PM_SPOOLER_QUEUE_LIMITS | queue | rs2: `flags,jobs,pages,KB,` (PRQINFO8) |
+//! | PM_SPOOLER_QUEUE_SEPBIN | queue | rs2: the separator page's input bin |
 //!
 //! A system without these entries gets them on first use: the ports
 //! (LPT1-3, COM1-4, FILE, LPR1, IPP1), PMPRINT, the PostScript driver,
@@ -52,6 +55,9 @@ pub const PRINTER_DESCR: &[u8] = b"PM_SPOOLER_PRINTER_DESCR";
 pub const PORT: &[u8] = b"PM_SPOOLER_PORT";
 pub const QP: &[u8] = b"PM_SPOOLER_QP";
 pub const DD: &[u8] = b"PM_SPOOLER_DD";
+pub const QUEUE_REMOTE: &[u8] = b"PM_SPOOLER_QUEUE_REMOTE";
+pub const QUEUE_LIMITS: &[u8] = b"PM_SPOOLER_QUEUE_LIMITS";
+pub const QUEUE_SEPBIN: &[u8] = b"PM_SPOOLER_QUEUE_SEPBIN";
 
 /// Raw profile data (None when missing).
 pub fn get(app: &[u8], key: &[u8]) -> Option<Vec<u8>> {
@@ -128,7 +134,24 @@ pub struct Queue {
     pub held: bool,
     /// PRQ3_TYPE_* bits.
     pub flags: u16,
+    /// A network printer's local queue (PRQINFO6): the server
+    /// (`\\SERVER`) and its queue; the queue's printer prints to the
+    /// UNC name `\\SERVER\QUEUE`.
+    pub remote_computer: Vec<u8>,
+    pub remote_queue: Vec<u8>,
+    /// The limits (PRQINFO8): LIMIT_TIMES_ONLY_LARGE, the most jobs the
+    /// queue holds, pages and kilobytes a job may have (0: no limit).
+    pub limit_flags: u32,
+    pub max_jobs: u32,
+    pub max_pages: u32,
+    pub max_kb: u32,
+    /// The separator page's input bin (PrtSet), empty for the default.
+    pub sep_bin: Vec<u8>,
 }
+
+/// PRQINFO8 flags: the start and stop times hold only the jobs larger
+/// than the queue's limits; a job over a limit is not refused.
+pub const LIMIT_TIMES_ONLY_LARGE: u32 = 0x10;
 
 #[derive(Clone, Default)]
 pub struct Printer {
@@ -180,7 +203,19 @@ impl Queue {
         if default_queue().is_some_and(|d| d == name) {
             flags |= PRQ3_TYPE_APPDEFAULT;
         }
+        let remote = get_str(QUEUE_REMOTE, &name).unwrap_or_default();
+        let rf = fields(&remote);
+        let limits = get_str(QUEUE_LIMITS, &name).unwrap_or_default();
+        let lim: Vec<u32> = limits.split(|&c| c == b',').filter_map(parse_dec).collect();
+        let sep_bin = get_str(QUEUE_SEPBIN, &name).map(|b| fields(&b).first().map(|x| x.to_vec()).unwrap_or_default()).unwrap_or_default();
         Some(Queue {
+            remote_computer: rf.first().map(|x| x.to_vec()).unwrap_or_default(),
+            remote_queue: rf.get(1).map(|x| x.to_vec()).unwrap_or_default(),
+            limit_flags: lim.first().copied().unwrap_or(0),
+            max_jobs: lim.get(1).copied().unwrap_or(0),
+            max_pages: lim.get(2).copied().unwrap_or(0),
+            max_kb: lim.get(3).copied().unwrap_or(0),
+            sep_bin,
             qproc: if g(0).is_empty() { b"PMPRINT".to_vec() } else { g(0) },
             sepfile: g(1),
             params: g(2),
@@ -217,10 +252,26 @@ impl Queue {
         if self.flags & PRQ3_TYPE_APPDEFAULT != 0 {
             set_str(SPOOLER, b"QUEUE", Some(&cat(&[n, b";"])));
         }
+        let remote = cat(&[&self.remote_computer, b";", &self.remote_queue, b";"]);
+        set_str(QUEUE_REMOTE, n, (!self.remote_computer.is_empty()).then_some(&remote[..]));
+        let lim = [self.limit_flags, self.max_jobs, self.max_pages, self.max_kb];
+        let limits: Vec<u8> = lim.iter().flat_map(|&v| cat(&[&dec(v, 1), b","])).collect();
+        set_str(QUEUE_LIMITS, n, lim.iter().any(|&v| v != 0).then_some(&limits[..]));
+        let bin = cat(&[&self.sep_bin, b";"]);
+        set_str(QUEUE_SEPBIN, n, (!self.sep_bin.is_empty()).then_some(&bin[..]));
+    }
+
+    /// A network printer's queue: `\\SERVER\QUEUE`, the name its
+    /// printer's port has.
+    pub fn remote_unc(&self) -> Option<Vec<u8>> {
+        (!self.remote_computer.is_empty() && !self.remote_queue.is_empty()).then(|| {
+            let server = self.remote_computer.strip_prefix(b"\\\\").unwrap_or(&self.remote_computer);
+            cat(&[b"\\\\", server, b"\\", &self.remote_queue])
+        })
     }
 
     pub fn remove(name: &[u8]) {
-        for app in [QUEUE, QUEUE_DESCR, QUEUE_DD, QUEUE_DDDATA, QUEUE_STATUS, QUEUE_TYPE] {
+        for app in [QUEUE, QUEUE_DESCR, QUEUE_DD, QUEUE_DDDATA, QUEUE_STATUS, QUEUE_TYPE, QUEUE_REMOTE, QUEUE_LIMITS, QUEUE_SEPBIN] {
             set_str(app, name, None);
         }
     }
@@ -281,9 +332,25 @@ pub fn spool_dir() -> Vec<u8> {
 }
 
 /// The port's settings (the INI value without its NUL), None if there
-/// is no such port.
+/// is no such port. A UNC name (`\\SERVER\QUEUE`, a network printer's
+/// port) is a port without settings.
 pub fn port_settings(port: &[u8]) -> Option<Vec<u8>> {
+    if is_unc(port) {
+        return Some(Vec::new());
+    }
     get_str(PORT, &upper(port))
+}
+
+/// Whether the spooler spools (`PM_SPOOLER` `SPOOL`, the Spooler
+/// object's Enable/Disable): when it does not, programs print straight
+/// to the printer.
+pub fn spooling_enabled() -> bool {
+    !get_str(SPOOLER, b"SPOOL").is_some_and(|v| trim(fields(&v).first().copied().unwrap_or(b"1")) == b"0")
+}
+
+/// Whether a port is a print queue on a server (`\\SERVER\QUEUE`).
+pub fn is_unc(port: &[u8]) -> bool {
+    port.starts_with(b"\\\\") && port.len() > 4 && port[2..].contains(&b'\\')
 }
 
 pub fn ports() -> Vec<Vec<u8>> {

@@ -40,6 +40,8 @@ struct Shared {
     next_id: u32,
     /// The job being printed that should stop (0 none).
     abort: u32,
+    /// The job that stops to print again from the start (PRD_RESTART).
+    restart: u32,
 }
 
 static mut HMTX: u32 = 0;
@@ -62,6 +64,7 @@ fn shared() -> &'static mut Shared {
                 s.magic = 0x4c50_5352;
                 s.next_id = 0;
                 s.abort = 0;
+                s.restart = 0;
             }
         }
         &mut *SHARED
@@ -107,6 +110,23 @@ pub fn set_abort(id: u32) {
 
 pub fn abort_requested(id: u32) -> bool {
     shared().abort == id && id != 0
+}
+
+/// Stop job `id` printing and print it again from the start (Start
+/// again: SplControlDevice PRD_RESTART).
+pub fn set_restart(id: u32) {
+    shared().restart = id;
+    shared().abort = id;
+}
+
+/// Whether the job that stopped is to print again (and forget it).
+pub fn take_restart(id: u32) -> bool {
+    let s = shared();
+    let r = s.restart == id && id != 0;
+    if r {
+        s.restart = 0;
+    }
+    r
 }
 
 #[derive(Clone, Default)]

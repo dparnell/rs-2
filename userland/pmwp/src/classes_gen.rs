@@ -817,6 +817,15 @@ pub static CLASSES: &[ClassDef] = &[
         ords: (0, 0, 0),
     },
     ClassDef {
+        name: "M_WPRPrinter",
+        parents: &["M_WPPrinter"],
+        meta: None,
+        major: 1,
+        minor: 1,
+        methods: &[],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
         name: "M_WPRootFolder",
         parents: &["M_WPFolder"],
         meta: None,
@@ -1426,6 +1435,15 @@ pub static CLASSES: &[ClassDef] = &[
         major: 1,
         minor: 1,
         methods: &["prtGetQDriverInfo", "prtSetQDriverInfo", "prtSetQdrIcon", "prtSetQDriverDiscardhwndDlg", "prtSetQDriverInstallhwndDlg"],
+        ords: (0, 0, 0),
+    },
+    ClassDef {
+        name: "WPRPrinter",
+        parents: &["WPPrinter"],
+        meta: Some("M_WPRPrinter"),
+        major: 1,
+        minor: 1,
+        methods: &["wpSetResNetIdentity", "wpQueryResNetIdentity", "wpAddNetworkPage", "wpCreateAnotherPrinter", "wpNetworkConnect", "wpNetworkDisconnect", "wpNetworkLogoff", "wpNetworkLogon", "wpAuthenticate", "wpQueryNetworkName", "wpQueryServerName", "wpQueryResourceName", "wpParseNetId", "wpAddObjectGeneralPage", "wpQueryNetworkId", "wpQueryLocalAlias"],
         ords: (0, 0, 0),
     },
     ClassDef {
@@ -2154,6 +2172,8 @@ pub mod m {
     }
     pub mod M_WPQdr {
     }
+    pub mod M_WPRPrinter {
+    }
     pub mod M_WPRootFolder {
     }
     pub mod M_WPSchemePalette {
@@ -2713,6 +2733,24 @@ pub mod m {
         pub const prtSetQdrIcon: usize = 2;
         pub const prtSetQDriverDiscardhwndDlg: usize = 3;
         pub const prtSetQDriverInstallhwndDlg: usize = 4;
+    }
+    pub mod WPRPrinter {
+        pub const wpSetResNetIdentity: usize = 0;
+        pub const wpQueryResNetIdentity: usize = 1;
+        pub const wpAddNetworkPage: usize = 2;
+        pub const wpCreateAnotherPrinter: usize = 3;
+        pub const wpNetworkConnect: usize = 4;
+        pub const wpNetworkDisconnect: usize = 5;
+        pub const wpNetworkLogoff: usize = 6;
+        pub const wpNetworkLogon: usize = 7;
+        pub const wpAuthenticate: usize = 8;
+        pub const wpQueryNetworkName: usize = 9;
+        pub const wpQueryServerName: usize = 10;
+        pub const wpQueryResourceName: usize = 11;
+        pub const wpParseNetId: usize = 12;
+        pub const wpAddObjectGeneralPage: usize = 13;
+        pub const wpQueryNetworkId: usize = 14;
+        pub const wpQueryLocalAlias: usize = 15;
     }
     pub mod WPRootFolder {
         pub const wpRootFolderPrivate1: usize = 0;

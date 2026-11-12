@@ -5,8 +5,12 @@
 //! (PRQINFO3, PRJINFO2...) from the start of the caller's buffer, their
 //! strings from its end. Enumerations return as many whole entries as
 //! fit (ERROR_MORE_DATA when not all do); queries need room for the whole
-//! answer (NERR_BufTooSmall). The computer name must be NULL or empty:
-//! there are no remote queues.
+//! answer (NERR_BufTooSmall). The computer name must be NULL or empty.
+//! A network printer is a local queue whose PRQINFO6 names the server and
+//! its queue (pszRemoteComputerName, pszRemoteQueueName, as IBM's
+//! Workplace Shell makes them for its network printer objects): its
+//! printer's port is that queue's UNC name, and the spooler sends the
+//! jobs there through the LAN requester (port.rs).
 
 use alloc::vec::Vec;
 
@@ -54,9 +58,26 @@ fn prq3(q: &Queue, jobs: &[Job], six: bool) -> Rec {
         .str(q.drivers.first().map_or(&b""[..], |d| d))
         .block(&q.drivdata);
     if six {
-        r.str(b"").str(b"");
+        r.str(&q.remote_computer).str(&q.remote_queue);
     }
     r
+}
+
+/// rs2's PRQINFO8 (60 bytes; IBM's is not in the Toolkit, its Workplace
+/// Shell reads ULONG flags at 8 and the job limit at 16): pszName, a
+/// reserved ULONG, flags (LIMIT_TIMES_ONLY_LARGE), a reserved ULONG, the
+/// most jobs, pages and kilobytes, then eight reserved string pointers.
+fn prq8(q: &Queue) -> Rec {
+    let mut r = Rec::new();
+    r.str(&q.name).u32(0).u32(q.limit_flags).u32(0).u32(q.max_jobs).u32(q.max_pages).u32(q.max_kb);
+    for _ in 0..8 {
+        r.str(b"");
+    }
+    r
+}
+
+fn rd32(p: *const u8, off: usize) -> u32 {
+    unsafe { (p.add(off) as *const u32).read_unaligned() }
 }
 
 fn prq1(q: &Queue, jobs: &[Job]) -> Rec {
@@ -145,6 +166,7 @@ fn queue_rec(q: &Queue, level: u32) -> Option<Rec> {
             r
         }
         6 => prq3(q, &js, true),
+        8 => prq8(q),
         _ => return None,
     })
 }
@@ -287,6 +309,12 @@ fn link_printers(q: &[u8], names: &[Vec<u8>]) {
     }
 }
 
+/// A PRQINFO6's server and queue names.
+fn set_remote(qu: &mut Queue, b: *const u8) {
+    qu.remote_computer = cstr(rdp(b, 44)).to_vec();
+    qu.remote_queue = upper(cstr(rdp(b, 48)));
+}
+
 /// Apply PRQINFO3 fields to a queue.
 fn set_from_prq3(qu: &mut Queue, b: *const u8) {
     qu.priority = rd16(b, 4);
@@ -330,6 +358,9 @@ pub extern "C" fn SplCreateQueue(comp: *const u8, level: u32, buf: *const u8, cb
         }
         let mut q = Queue { name: name.clone(), qproc: b"PMPRINT".to_vec(), priority: 5, ..Queue::default() };
         set_from_prq3(&mut q, buf);
+        if level == 6 && cb >= 52 {
+            set_remote(&mut q, buf);
+        }
         if q.priority == 0 {
             q.priority = 5;
         }
@@ -342,9 +373,40 @@ pub extern "C" fn SplCreateQueue(comp: *const u8, level: u32, buf: *const u8, cb
         q.save();
         crate::util::mkdir(&ini::spool_dir());
         crate::util::mkdir(&jobs::queue_dir(&name));
-        link_printers(&name, &list(cstr(rdp(buf, 32))));
+        let printers = list(cstr(rdp(buf, 32)));
+        link_printers(&name, &printers);
+        if printers.is_empty() {
+            remote_printer(&q);
+        }
         NO_ERROR
     })
+}
+
+/// A network printer's queue without a printer gets one of its own
+/// (named after the queue) whose port is the server's queue; one it has
+/// follows the server and queue names.
+fn remote_printer(q: &Queue) {
+    let Some(unc) = q.remote_unc() else { return };
+    let mine: Vec<Printer> = q.printers().into_iter().filter(|p| ini::is_unc(&p.port)).collect();
+    if !mine.is_empty() {
+        for mut p in mine {
+            p.port = upper(&unc);
+            p.save();
+        }
+        return;
+    }
+    if !q.printers().is_empty() {
+        return;
+    }
+    let base: Vec<u8> = q.name.iter().copied().take(28).collect();
+    let mut name = base.clone();
+    let mut n = 1u32;
+    while Printer::load(&name).is_some() {
+        name = crate::util::cat(&[&base, &crate::util::dec(n, 1)]);
+        n += 1;
+    }
+    let p = Printer { name, descr: q.descr.clone(), port: upper(&unc), drivers: q.drivers.clone(), queues: alloc::vec![q.name.clone()], held: false, timeout: 45 };
+    p.save();
 }
 
 /// SplSetQueue(pszComputerName, pszQueueName, ulLevel, pBuf, cbBuf,
@@ -361,11 +423,23 @@ pub extern "C" fn SplSetQueue(comp: *const u8, q: *const u8, level: u32, buf: *c
     jobs::locked(|| {
         let Some(mut qu) = Queue::load(cstr(q)) else { return NERR_QNOTFOUND };
         match parm {
+            0 if level == 8 => {
+                if cb < 28 {
+                    return ERROR_INVALID_PARAMETER;
+                }
+                qu.limit_flags = rd32(buf, 8);
+                qu.max_jobs = rd32(buf, 16);
+                qu.max_pages = rd32(buf, 20);
+                qu.max_kb = rd32(buf, 24);
+            }
             0 => {
                 if (level != 3 && level != 6) || cb < 44 {
                     return ERROR_INVALID_LEVEL;
                 }
                 set_from_prq3(&mut qu, buf);
+                if level == 6 && cb >= 52 {
+                    set_remote(&mut qu, buf);
+                }
                 link_printers(&qu.name, &list(cstr(rdp(buf, 32))));
             }
             2 => qu.priority = rd16(buf, 0),
@@ -385,9 +459,14 @@ pub extern "C" fn SplSetQueue(comp: *const u8, q: *const u8, level: u32, buf: *c
                 }
                 qu.drivdata = d;
             }
+            15 => qu.remote_computer = cstr(buf).to_vec(),
+            16 => qu.remote_queue = upper(cstr(buf)),
             _ => return ERROR_INVALID_PARAMETER,
         }
         qu.save();
+        if (level == 6 && parm == 0) || parm == 15 || parm == 16 {
+            remote_printer(&qu);
+        }
         jobs::wake();
         NO_ERROR
     })
@@ -410,6 +489,12 @@ pub extern "C" fn SplDeleteQueue(comp: *const u8, q: *const u8) -> u32 {
         }
         let dir = crate::util::z(&jobs::queue_dir(&qu.name));
         unsafe { os2::DosDeleteDir(dir.as_ptr()) };
+        // A network printer's own printer goes with it.
+        for p in qu.printers() {
+            if ini::is_unc(&p.port) && p.queues.len() == 1 {
+                Printer::remove(&p.name);
+            }
+        }
         link_printers(&qu.name, &[]);
         Queue::remove(&qu.name);
         if ini::default_queue().is_some_and(|d| d == qu.name) {
@@ -801,8 +886,11 @@ pub extern "C" fn SplControlDevice(comp: *const u8, dev: *const u8, ctl: u32) ->
                     if ctl == 0 {
                         j.status |= PRJ_DELETED;
                         j.save();
+                        jobs::set_abort(j.id);
+                    } else {
+                        // PRD_RESTART: it stops and prints again.
+                        jobs::set_restart(j.id);
                     }
-                    jobs::set_abort(j.id);
                 }
                 None => return 2158, // NERR_DestIdle
             },
