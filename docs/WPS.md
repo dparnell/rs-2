@@ -1008,6 +1008,8 @@ RMGetSnoopLevel and RMSetSnoopLevel (the detection levels, in
 it, and on IBM's RMINFO.DLL (which opens `"RESMGR$ "`, blank-padded:
 rs2's device names now drop trailing blanks): all its views but the
 detected ones.
+rs2's own `OS2\RMVIEW.EXE` (`userland/utils`, [UTILITIES.md](UTILITIES.md))
+shows the same views in its own words.
 
 **The classes.** WPHwManager is a folder (`<WP_HWMGR>` in System Setup,
 desktop version 15) whose default view is its details view, as IBM's.

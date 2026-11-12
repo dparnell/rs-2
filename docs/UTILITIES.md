@@ -27,6 +27,7 @@ both ways.
 | PATCH | Patches files | Interactive, or /A with a control file (`FILE`, `VER`, `CHA` lines) |
 | PRINT | Prints files to LPTn, cancels jobs | Through the kernel's LPT device into the spooler; /C and /T through PMSPL |
 | PSTAT | Processes, threads, semaphores, shared memory, libraries | DosQuerySysState; /C /S /L /M /P /A |
+| RMVIEW | The hardware as the resource manager knows it: adapters, devices, drivers, logical devices, the hardware tree; the IRQs, I/O ports, DMA channels and memory in use with their owners | RESMGR$ (WPS.md, "The Hardware Manager"); /P /D /L /HW /IRQ /IO /IOA /DMA /MEM |
 | RECOVER | Saves the readable part of a damaged file | Whole-drive recovery is CHKDSK /F's |
 | REPLACE | Replaces or adds files | /A /P /R /S /U /W /F, DosCopy (EAs kept) |
 | SETBOOT | Start-up settings and restart | rs2's UEFI loader: `/T:x` sets `bootwait` in `\RS2\CMDLINE`, `/Q` shows it, `/B` and `/IBD:d` restart; Boot Manager options answer as IBM's SETBOOT without Boot Manager |
@@ -85,7 +86,7 @@ for errors (1276, 1279, 1281, 1303, 1313, 1319, 19, 123, ...).
 From IBM's `\OS2`: XDFCOPY and VMDISK (XDF diskette images and the XDF
 filter: no diskette drives), CACHEJFS, DEFRAGFS, EXTENDFS and CLRBBLKS
 (JFS tools), EXECMODE, PSFILES, PSSEMS, STRACE, MAKEINI, SPOOL, SYSLOG,
-RMVIEW, LD2FIX, ARCINST/ARCRECOV (desktop archives), APMDAEMN, the
+LD2FIX, ARCINST/ARCRECOV (desktop archives), APMDAEMN, the
 removable-media drivers' FCHECK2/FFORMAT2/ATAMNT2/AUTOUTL2, and
 CHKDSK32/JFSCHK32 (IBM's file-system modules behind CHKDSK). PM programs,
 REXX tools and network clients are covered elsewhere.
