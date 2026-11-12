@@ -925,7 +925,9 @@ Checked in QEMU (`WPSTEST SHELL OPEN <WP_CONFIG> 1; OPEN <WP_SYSTEM> 2;
 OPEN <WP_POWER> 131` with `--type "{keydown alt}{tab}...{keyup alt}"`
 and pointer drags): the switching window going through the windows and
 the switch when Alt went up; a title bar drag showing the outline and
-the window moving at the end.
+the window moving at the end; with Special Needs on, quick taps of a
+and b in an OS/2 window dropped and x and y held for 0.7 s typed (the
+default acceptance delay, 250 ms).
 
 ## rs2's multimedia classes
 
