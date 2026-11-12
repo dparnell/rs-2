@@ -41,17 +41,15 @@ const DC_CONTAINER: u16 = 0x0002;
 
 // ---- The source ----
 
-pub fn begin(w: usize, cdi: u32) -> u32 {
-    let o = view::obj_of_rec(w, rd(cdi, 4));
-    if o == 0 {
-        return 0;
-    }
-    let list = view::selected(w, o);
+/// A DRAGINFO for objects of a view (DrgDrag's, or a lazy drag's): a
+/// DRAGITEM per object with the view's client window and the object as
+/// its id, which each object may change (wpFormatDragItem).
+pub fn make_draginfo(w: usize, list: &[usize]) -> u32 {
     let pdinfo = unsafe { DrgAllocDraginfo(list.len() as u32) };
     if pdinfo == 0 {
         return 0;
     }
-    let (client, cnr) = (wins()[w].client, wins()[w].child);
+    let client = wins()[w].client;
     for (k, &o) in list.iter().enumerate() {
         let mut d = [0u8; DRAGITEM_SIZE as usize];
         let w32 = |d: &mut [u8], off: usize, x: u32| d[off..off + 4].copy_from_slice(&x.to_le_bytes());
@@ -85,6 +83,22 @@ pub fn begin(w: usize, cdi: u32) -> u32 {
         d[DI_OPS..DI_OPS + 2].copy_from_slice(&ops.to_le_bytes());
         obj::call(m::WPObject::wpFormatDragItem, &[o, d.as_mut_ptr() as usize]);
         unsafe { DrgSetDragitem(pdinfo, d.as_ptr(), DRAGITEM_SIZE, k as u32) };
+    }
+    pdinfo
+}
+
+pub fn begin(w: usize, cdi: u32) -> u32 {
+    let o = view::obj_of_rec(w, rd(cdi, 4));
+    if o == 0 {
+        return 0;
+    }
+    let list = view::selected(w, o);
+    let pdinfo = make_draginfo(w, &list);
+    if pdinfo == 0 {
+        return 0;
+    }
+    let (client, cnr) = (wins()[w].client, wins()[w].child);
+    for &o in &list {
         send(cnr, CM_SETRECORDEMPHASIS, view::record_of(w, o), mp(1, CRA_SOURCE));
     }
     let icon = if list.len() > 1 {
@@ -181,6 +195,12 @@ pub fn drop(w: usize, cdi: u32) {
         return;
     }
     let to = target(w, rec);
+    drop_to(w, to, pdinfo);
+}
+
+/// A drop on an object (or the view's folder) of a view: the DRAGINFO
+/// is accessed; it is let go of at the end.
+pub fn drop_to(w: usize, to: usize, pdinfo: u32) {
     let list = items(pdinfo);
     let mut ok = true;
     if repositioning(w, pdinfo, to) {

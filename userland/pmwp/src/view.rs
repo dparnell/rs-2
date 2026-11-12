@@ -847,6 +847,7 @@ pub fn close_frame(frame: u32) {
     if let Some(i) = wins().iter().position(|w| w.frame == frame) {
         let w = wins().remove(i);
         crate::arrange::forget(w.client);
+        crate::lazy::view_closing(w.client);
         if w.view != OPEN_SETTINGS {
             send(w.child, CM_REMOVERECORD, 0, mp(0, CMA_FREE));
         }
@@ -1173,7 +1174,7 @@ fn bar_command(w: usize, id: u32) {
             // Copy, move, shadows and delete take the window's selection
             // themselves (menu.rs); opening and the rest go to each
             // selected object.
-            if matches!(id, WPMENUID_COPY | WPMENUID_MOVE | WPMENUID_CREATESHADOW | WPMENUID_DELETE | WPMENUID_CREATEANOTHER) {
+            if matches!(id, WPMENUID_COPY | WPMENUID_MOVE | WPMENUID_CREATESHADOW | WPMENUID_DELETE | WPMENUID_CREATEANOTHER) || (crate::lazy::WPMENUID_PICKUP..=crate::lazy::WPMENUID_PUTDOWN_CANCEL).contains(&id) {
                 obj::call(m::WPObject::wpMenuItemSelected, &[first, frame as usize, id as usize]);
             } else {
                 for o in sel {
@@ -1363,6 +1364,10 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             crate::shutdown::tick();
             0
         }
+        // A Drop chosen from a menu (DrgLazyDrop), and the end of a lazy
+        // drag of this view's objects (lazy.rs).
+        DM_DROP => crate::lazy::client_drop(h, a),
+        crate::lazy::DM_DROPNOTIFY => crate::lazy::drop_notify(h, a, b),
         DM_RENDERPREPARE => 1,
         DM_ENDCONVERSATION => 0,
         DM_DRAGOVERNOTIFY => 0,

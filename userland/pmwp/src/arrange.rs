@@ -51,6 +51,11 @@ pub fn set_menu_client(client: u32) {
     unsafe { MENU_CLIENT = client };
 }
 
+/// The frame of the view whose menu is being made (0: none known).
+pub fn menu_frame() -> u32 {
+    view::find_client(unsafe { MENU_CLIENT }).map_or(0, |w| wins()[w].frame)
+}
+
 /// Is the view of the menu an icon view (or not known)?
 pub fn menu_view_is_icon() -> bool {
     view::find_client(unsafe { MENU_CLIENT }).is_none_or(|w| wins()[w].view == OPEN_CONTENTS)

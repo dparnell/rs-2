@@ -112,6 +112,7 @@ const CRA_SELECTED: u32 = layout::CRA_SELECTED;
 const CRA_TARGET: u32 = layout::CRA_TARGET;
 const CRA_CURSORED: u32 = layout::CRA_CURSORED;
 const CRA_INUSE: u32 = layout::CRA_INUSE;
+const CRA_PICKED: u32 = 0x0200;
 const CRA_FILTERED: u32 = layout::CRA_FILTERED;
 const CRA_RECORDREADONLY: u32 = 0x0040;
 const CRA_EXPANDED: u32 = 0x0080;
@@ -769,7 +770,8 @@ fn paint(h: u32) {
                 continue;
             }
             let sel = row.attr & CRA_SELECTED != 0;
-            let disabled = row.attr & CRA_DISABLED != 0 || !enabled;
+            // Picked up for a lazy drag (CRA_PICKED): the icon halftoned.
+            let disabled = row.attr & (CRA_DISABLED | CRA_PICKED) != 0 || !enabled;
             let fg = if disabled { draw::GRAY_TEXT } else if sel { draw::hilite_text() } else { text };
             if v == View::Detail {
                 if sel {

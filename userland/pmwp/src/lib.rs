@@ -42,6 +42,7 @@ mod url;
 mod usermenu;
 mod launch;
 mod launchpad;
+mod lazy;
 mod menu;
 mod mindex;
 mod minwin;

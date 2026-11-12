@@ -236,6 +236,13 @@ pub fn popup_items(o: usize, kind: u32) -> Vec<Menu<'static>> {
         items.push(Menu::Item(WPMENUID_REFRESH as u16, b"Refresh ~now", true));
     }
     if kind == MENU_OPENVIEWPOPUP {
+        // Drop into the folder while objects are picked up (lazy.rs).
+        let lazy = crate::lazy::menu_items(o, false, crate::arrange::menu_frame());
+        if !lazy.is_empty() {
+            items.push(Menu::Sep);
+            items.extend(lazy);
+            items.push(Menu::Sep);
+        }
         if folder && flags & CTXT_SORT != 0 {
             items.push(crate::sortinc::menu(o));
         }
@@ -277,6 +284,12 @@ pub fn popup_items(o: usize, kind: u32) -> Vec<Menu<'static>> {
         // Data files print on the default printer (printer.rs).
         if flags & CTXT_PRINT != 0 && is(o, "WPDataFile") && !folder {
             items.push(Menu::Item(WPMENUID_PRINT as u16, b"~Print", true));
+        }
+        // Pickup and Drop (lazy.rs).
+        let lazy = crate::lazy::menu_items(o, true, crate::arrange::menu_frame());
+        if !lazy.is_empty() {
+            items.push(Menu::Sep);
+            items.extend(lazy);
         }
     }
     // Help, as on OS/2: its index, the object's help, help for help and
@@ -382,6 +395,12 @@ pub fn pulldown_items(id: u32, folder: usize, sel: &[usize], view: u32) -> Vec<M
             }
             if ff & CTXT_DELETE != 0 {
                 v.push(Menu::Item(WPMENUID_DELETE as u16, b"~Delete...", style & obj::OBJSTYLE_NODELETE == 0));
+            }
+            // Pickup and Drop of the folder itself (lazy.rs).
+            let lazy = crate::lazy::menu_items(folder, true, crate::arrange::menu_frame());
+            if !lazy.is_empty() {
+                v.push(Menu::Sep);
+                v.extend(lazy);
             }
             v
         }
@@ -569,6 +588,7 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
             crate::delete::delete_objects(frame, &objs);
         }
         _ if crate::arrange::selected(o, frame, id) => {}
+        _ if crate::lazy::selected(o, frame, id) => {}
         _ if crate::sortinc::is_menu_item(id) => {
             crate::arrange::before_sort(o);
             crate::sortinc::menu_selected(o, id);
