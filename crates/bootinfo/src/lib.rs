@@ -10,7 +10,11 @@ pub const PHYS_MAP_BASE: u64 = 0xFFFF_8000_0000_0000;
 /// Virtual base of the kernel image.
 pub const KERNEL_BASE: u64 = 0xFFFF_FFFF_8000_0000;
 /// `BootInfo::magic`.
-pub const MAGIC: u64 = u64::from_le_bytes(*b"RS2BOOT1");
+pub const MAGIC: u64 = u64::from_le_bytes(*b"RS2BOOT2");
+
+/// Room for the kernel command line, its NUL included (RS2BOOT1 had 256,
+/// which cut long `init=` argument lists short without a word).
+pub const CMDLINE_MAX: usize = 1024;
 
 pub const MAX_MEMORY_REGIONS: usize = 512;
 pub const MAX_MODULES: usize = 16;
@@ -95,7 +99,7 @@ pub struct BootInfo {
     /// Physical address of the ACPI RSDP, 0 if unknown.
     pub rsdp: u64,
     /// Kernel command line (NUL padded).
-    pub cmdline: [u8; 256],
+    pub cmdline: [u8; CMDLINE_MAX],
     pub memory_count: u64,
     pub memory: [MemoryRegion; MAX_MEMORY_REGIONS],
     pub module_count: u64,
@@ -116,7 +120,7 @@ impl BootInfo {
     }
 
     pub fn cmdline(&self) -> &str {
-        let n = self.cmdline.iter().position(|&b| b == 0).unwrap_or(256);
+        let n = self.cmdline.iter().position(|&b| b == 0).unwrap_or(CMDLINE_MAX);
         core::str::from_utf8(&self.cmdline[..n]).unwrap_or("")
     }
 }

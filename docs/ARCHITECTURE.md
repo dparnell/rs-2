@@ -436,7 +436,10 @@ SIZE` sets QEMU's memory (512 MB by default).
    desktop), R or F1 adds `recovery` (the kernel gives the boot programs
    `RS2RECOVERY=YES`, and the first PMSHELL shows the Recovery Choices,
    [WPS.md](WPS.md#the-shell-process)). The loader itself reads nothing
-   but the EFI partition.
+   but the EFI partition. The command line comes from `\RS2\CMDLINE`; the
+   boot information (`crates/bootinfo`, magic `RS2BOOT2`) has room for
+   1023 bytes of it, so a kernel and a loader must come from the same
+   build (the kernel stops with "bad boot info" otherwise).
 3. The kernel (`kernel/`, `x86_64-unknown-none`) lives at `-2 GB`; all physical
    memory is mapped at `0xFFFF_8000_0000_0000`.
 

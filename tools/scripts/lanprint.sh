@@ -3,9 +3,7 @@
 # a network printer made with NETID=, a raw job on its local alias that
 # must arrive in the server's LASER spool directory, the printer's
 # settings, then the server's folder (DATA, PUBLIC, the LASER queue as a
-# network printer) and its settings. (Objects are made before the server's
-# folder opens: WPSTEST's later calls stall once a server folder is open
-# and an object is created, also before this branch.) Screenshots work/lanprint1.png ...
+# network printer) and its settings. Screenshots work/lanprint1.png ...
 # Needs tools/lantest/IBMLAN.INI and LMHOSTS in work/modules.txt.
 R=$(cd "$(dirname "$0")/../.." && pwd)
 D=$R/work/lanprint

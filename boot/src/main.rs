@@ -436,7 +436,7 @@ pub extern "efiapi" fn efi_main(image: Handle, system_table: *mut SystemTable) -
 
     if let Some(f) = root.open("\\RS2\\CMDLINE") {
         let (base, len) = read_file(f);
-        let n = (len as usize).min(255);
+        let n = (len as usize).min(bootinfo::CMDLINE_MAX - 1);
         let src = unsafe { core::slice::from_raw_parts(base as *const u8, n) };
         for (d, &s) in info.cmdline.iter_mut().zip(src) {
             *d = if s == b'\r' || s == b'\n' { b' ' } else { s };

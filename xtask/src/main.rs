@@ -479,6 +479,10 @@ fn copy(from: &Path, to: &Path) {
 }
 
 /// Build everything and lay out the EFI system partition tree.
+/// The boot loader's room for the kernel command line (crates/bootinfo
+/// CMDLINE_MAX).
+const CMDLINE_MAX: usize = 1024;
+
 fn build(o: &Opts) -> Option<PathBuf> {
     let boot = cargo_build("rs2-boot", "x86_64-unknown-uefi", o.release)?;
     let kernel = cargo_build("rs2-kernel", "x86_64-unknown-none", o.release)?;
@@ -503,8 +507,15 @@ fn build(o: &Opts) -> Option<PathBuf> {
             None => "init=OS2\\PMSHELL.EXE".into(),
         };
         words.push(&init);
+        let line = words.join(" ");
+        // The boot loader keeps CMDLINE_MAX - 1 bytes (and may add a word
+        // for a key held at boot): a longer line would lose its tail.
+        if line.len() > CMDLINE_MAX - 32 {
+            eprintln!("kernel command line is {} bytes, more than {}: shorten --init", line.len(), CMDLINE_MAX - 32);
+            return None;
+        }
         std::fs::create_dir_all(esp.join("RS2")).unwrap();
-        std::fs::write(esp.join("RS2/CMDLINE"), words.join(" ")).unwrap();
+        std::fs::write(esp.join("RS2/CMDLINE"), line).unwrap();
     } else if cmdline.exists() && !o.dist {
         copy(&cmdline, &esp.join("RS2/CMDLINE"));
     }
