@@ -568,8 +568,9 @@ the Toolkit does not describe), classes IBM keeps in other DLLs (WPUrl
 and WPUrlFolder from WPINET.DLL, Mindex from MINXOBJ.DLL, WPCONFIG.DLL's
 WPMouse, WPKeyboard, WPSound, WPPalette, WPColorPalette,
 WPSchemePalette, WPFontPalette, WPSystem, WPClock, WPCountry, WPPower and
-WPSpecialNeeds, WINCFG.DLL's WPWinConfig, and WPPRINT.DLL's
-WPPrinter, WPJob, WPPdr, WPQdr, WPPort and WPSpool) and rs2's own
+WPSpecialNeeds, WINCFG.DLL's WPWinConfig, WPPRINT.DLL's
+WPPrinter, WPJob, WPPdr, WPQdr, WPPort and WPSpool, and PNP.DLL's
+WPHwManager and WPDevice classes) and rs2's own
 RS2Shutdown and RS2WindowList (and RS2System,
 the System object of rs2's desktops before version 9, kept so that it
 can wake to be replaced).
@@ -629,6 +630,7 @@ The rest comes from the class modules:
 | `templates.rs` | Templates (TEMPLATE style, the General page's check box): opening one makes a new object beside it, dragging one makes it at the drop, Create another... makes one where the user says; the new object's title is edited in place |
 | `find.rs` | Find... on folders, drives and the desktop: a name pattern, all subfolders; a worker thread walks the directories, and a Find Results window shows the objects (and the matching abstract objects of awake folders) |
 | `mindex.rs` | Mindex (IBM's MINXOBJ.DLL, studied with Ghidra): the Help Index and Glossary. INDEX= names an environment variable (HELP, GLOSSARY) whose directories hold the help files (`*.HLP` starting "HS"), or the files themselves separated by `+`; opening merges their indexes (sorted, an entry several panels share followed by the panel's title, as MindexAppendDupIndexTitle does) into a window with a search field; choosing an entry shows its panel through a help instance and HM_SHOW_TOC; letter tabs down the right jump to the entries starting with that letter, and second-level entries are indented under theirs |
+| `hwmgr.rs` | PNP.DLL's Hardware Manager (WPHwManager, `<WP_HWMGR>` in System Setup) and its device classes (WPDevice; WPDevAudio, WPDevBus, WPDevCDRom, WPDevCPU, WPDevDisplay, WPDevDiskette, WPDevHarddrive, WPDevKeyboard, WPDevMemory, WPDevMouse, WPDevParallel, WPDevPeriph, WPDevSerial, WPDevTape, WPDevTimer): see [The Hardware Manager](#the-hardware-manager) |
 | `url.rs` | WPUrl (IBM's WPINET.DLL): a data file whose content is the URL (URL=, the URL page; `*.URL` files); opening starts the browser OS2.INI's WPURLDEFAULTSETTINGS names (DefaultBrowserExe, DefaultParameters, DefaultWorkingDir), else rs2's own WebRS2 (OS2\APPS\WEB.EXE, [BROWSER.md](BROWSER.md)), else says none is set up; a globe icon |
 | `clsmgr.rs` | WPClassManager (merged in as SOM's class manager; finds classes in the DLLs registered in OS2SYS.INI's PM_Objects ClassTable) |
 | `api.rs` | WinCreateObject, WinQueryObject, WinSetObjectData, WinDestroyObject, WinOpenObject, WinSaveObject, WinMove/CopyObject, WinCreateShadow, WinQueryObjectPath, WinRegister/Deregister/Enum/ReplaceObjectClass |
@@ -958,6 +960,84 @@ the window moving at the end; with Special Needs on, quick taps of a
 and b in an OS/2 window dropped and x and y held for 0.7 s typed (the
 default acceptance delay, 250 ms).
 
+## The Hardware Manager
+
+IBM keeps the Hardware Manager in PNP.DLL (its IDL: `wphwmgr.idl`,
+`wpdevice.idl` and one file per device class); rs2 has its classes in
+PMWP.DLL, with the Toolkit's release orders, and a PNP.DLL whose
+exports (IBM's ordinals, by name too) forward to PMWP's private ordinals
+12000 + IBM's (`userland/pnp`), as WPCONFIG.DLL's do. IBM's PNP.DLL,
+RMINFO.DLL and RMVIEW.EXE were studied with Ghidra.
+
+**The resource manager.** IBM's RESOURCE.SYS keeps a tree of nodes
+(adapters, the devices on them, logical devices, drivers, detected
+hardware) with the resources each holds; programs read it through
+RMINFO.DLL, which opens `RESMGR$` and makes IOCtls of category 0x80.
+rs2's kernel provides the same device (`kernel/src/resmgr.rs`), with
+IBM's structures (rmbase.h's RMNODE, ADAPTERSTRUCT, DEVICESTRUCT,
+LDEVSTRUCT, DRIVERSTRUCT, RESOURCELIST, as RMVIEW reads them):
+
+| IOCtl | Parameters | Data |
+|-------|------------|------|
+| 0 | | ULONG: RM's entry point for 16-bit drivers (0) |
+| 1 GetNodeInfo | RMHANDLE, linear address of the data | RMNodeSize, RMNODE, the node's structure, strings and resource list (linear addresses) |
+| 2 EnumNodes | USHORT: 0 physical, 1 logical, 2 drivers, 3/4 detected | NumEntries (all of them, also when they do not fit), { RMHANDLE, depth } each |
+
+The tree is built when first asked for, from what the kernel knows:
+the processors (`CPU_n` and CPUID's name), the memory, the I/O APICs,
+the PCI functions under their buses (a bridge's bus under it) with
+their BARs (sized when the bus is scanned at boot, before any driver
+starts) and their routed interrupt, the disks and CD drives on their
+controllers (`HD_n`, `CDROM_n`), an ISA bus under the PCI-to-ISA bridge
+with the ACPI namespace's standard devices that have a hardware ID and
+fixed current resources (`_CRS` that is data: keyboard controller,
+PS/2 mouse port, serial and parallel ports that answer, real-time
+clock, HPET, diskette controller), the PC devices ACPI leaves out (PIC,
+DMA controller, timer, RTC, keyboard controller), logical disks and
+ports, and the kernel's drivers (by module: AHCI, NVME, VIRTIO, COM,
+KBD, ...) owning their adapters. Names follow IBM's (`CPU_`, `PCI_`,
+`ISA_`, `HD_`, `DSKT_`, `KBD_`, `MOUSE_`), as the Hardware Manager picks
+classes by them.
+
+`OS2\DLL\RMINFO.DLL` (`userland/rminfo`) is rs2's: IBM's names and
+ordinals, _Optlink entries (EAX, EDX, ECX) on a 16-byte aligned stack:
+RMEnumNodes, RMGetNodeInfo, RMConvertID (EISA IDs to text and back),
+RMGetSnoopLevel and RMSetSnoopLevel (the detection levels, in
+`\OS2\BOOT\PREVIOUS.DAT` as IBM keeps them) and RMSaveDetectedData
+(nothing detected); the drivers' calls fail. IBM's RMVIEW.EXE runs on
+it, and on IBM's RMINFO.DLL (which opens `"RESMGR$ "`, blank-padded:
+rs2's device names now drop trailing blanks): all its views but the
+detected ones.
+
+**The classes.** WPHwManager is a folder (`<WP_HWMGR>` in System Setup,
+desktop version 15) whose default view is its details view, as IBM's.
+Populating it reads the physical view and the drivers and makes a
+transient object for each adapter and device it does not show yet
+(UNIQUEID= the node's handle, PARENTID= the node a level up before it),
+of the class IBM's DetermineNameAndClass picks: by an adapter's base
+type and subtype (hard disk or diskette controller, display, audio,
+memory, serial, parallel, timer, system peripheral, keyboard, mouse),
+by its name (`CPU_` a processor, `ISA_`/`PCI_`/`MCA_` a bus), by a
+device's type and name (`HD_`, `DSKT_`, CD-ROM, `MOUSE_`, `KBD_`,
+audio); planar chipset devices get none. The title is the node's
+description. The details view shows each device's type, IRQs, DMA
+channels, I/O port and memory ranges (IBM adds the four columns with
+wpclsQueryDetailsInfo; rs2's views take them from `hwmgr.rs`); the tree
+view shows the devices under what they are on, all open. A device
+opens on its settings: Device (the device type and the driver: module,
+description, vendor, version, date), IRQ, DMA, I/O and Memory (a list
+each; IBM's page order), General. WPDevice's private methods are IBM's
+(wpDevicePrivate1 is wpGetUniqueID, 2 wpGetParentID, 3-5 the node's
+type, base type and subtype, 22-26 the driver's file, name, vendor,
+version and date, 28-29 wpSetUniqueID/wpSetParentID); the getters and
+those setters are there. Icons are rs2's own (`pmwin::hwicons`).
+
+Checked in QEMU: RMVIEW's views (`/P /D /L /IRQ /IOA /MEM /DMA /HW`),
+with rs2's and with IBM's RMINFO.DLL; the Hardware Manager's details
+and tree views (with NVMe, virtio, HD Audio and e1000 devices too) and
+a serial port's Device and I/O pages (`WPSTEST SHELL OPEN <WP_HWMGR>
+102`, then double-clicks).
+
 ## rs2's multimedia classes
 
 `mm.rs` gives PMWP the multimedia classes, with the names of IBM's
@@ -1157,7 +1237,7 @@ WPCONFIG and WPPRINT objects, rs2 leaves out, for now:
   reads no batteries; WIN-OS/2 Setup's data exchange and fast load are
   kept but have nothing to act on yet (WINOS2.md); Special Needs has no
   sticky keys (IBM's has none either in Warp 4's page) and its time-out
-  only applies when the next key comes; Touch, Hardware Manager and
+  only applies when the next key comes; Touch and
   Selective Install (IBM's installer's);
 - printing: remote printers (WPRPrinter objects) are not made: a print
   queue on a server is a WPSharedDir whose Assign port redirects LPT1-3
@@ -1176,3 +1256,13 @@ WPCONFIG and WPPRINT objects, rs2 leaves out, for now:
 - the network objects have no pages of their own (wpAddNetworkPage,
   wpAddServerPage, wpAddResourcePage), no Access Control or logon
   dialogs, and IBM's network icons (they show folder icons).
+- the Hardware Manager: no hardware detection page (IBM's wpAddSnoop1Page
+  sets the snoop level of the next boots' detection; rs2 detects nothing
+  at boot, so the detected views are empty and its levels are only kept
+  by RMSetSnoopLevel), no "next boot" resources to change, and the
+  drivers are the kernel's modules (no driver files, dates or
+  parameters). The resource manager knows the devices the kernel found:
+  USB devices behind xHCI, a USB keyboard or mouse, and resources ACPI
+  computes in methods (`_CRS` methods, `_STA`) are not in its tree;
+  interrupts are the PCI functions' routed lines, also when a driver
+  uses MSI.

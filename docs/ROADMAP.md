@@ -586,8 +586,13 @@ Status markers: done, in progress, planned.
 - done: printing (docs/PRINTING.md): the spooler, the PostScript
   driver, printer objects
 - done: network groups, servers and shares, drives and printer ports
-  assigned from them (docs/LAN.md); planned: the
-  rest of WPPRINT and Touch, Hardware Manager, Selective Install
+  assigned from them (docs/LAN.md)
+- done: the Hardware Manager (IBM's PNP.DLL classes WPHwManager and the
+  WPDevice classes, in PMWP) on the kernel's resource manager
+  (`RESMGR$`, IBM's IOCtls; RMINFO.DLL; IBM's RMVIEW runs): the
+  machine's processors, memory, PCI functions, disks, ISA devices and
+  their IRQ, DMA, I/O and memory (docs/WPS.md); planned: the
+  rest of WPPRINT and Touch, Selective Install
   (docs/WPS.md, "What is not there")
 
 ## Printing (done: first version)

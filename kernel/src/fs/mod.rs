@@ -449,7 +449,9 @@ impl CharDev {
 pub fn device_name(path: &str) -> Option<Device> {
     let path = path.strip_suffix(':').unwrap_or(path);
     let base = path.rsplit(['\\', '/', ':']).next().unwrap_or(path);
-    let base = base.split('.').next().unwrap_or(base).to_ascii_uppercase();
+    // Device names are blank-padded to eight characters ("RESMGR$ ", as
+    // IBM's RMINFO.DLL opens it).
+    let base = base.split('.').next().unwrap_or(base).trim_end_matches(' ').to_ascii_uppercase();
     let dev = match base.as_str() {
         "CON" => Device::Con,
         "NUL" => Device::Nul,
