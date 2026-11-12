@@ -34,6 +34,7 @@ mod find;
 mod help;
 mod fs;
 mod icons;
+mod image;
 mod install;
 mod ipc;
 mod shell;

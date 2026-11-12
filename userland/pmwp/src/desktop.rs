@@ -295,7 +295,8 @@ fn load_image() {
     free_image();
     let f = bitmap();
     if !f.is_empty() {
-        if let Some(i) = load_bmp(&f) {
+        // A .BMP directly, any other picture through MMIO (image.rs).
+        if let Some(i) = load_bmp(&f).or_else(|| crate::image::load(&f)) {
             unsafe { IMAGE = i };
         }
     }
@@ -784,7 +785,7 @@ extern "C" fn wpAddDesktopLockup2Page(o: usize, nb: u32) -> u32 {
         items.push(radio(t, (10 + col * 110, 94 - row * 12, 104), ID_LCOLOR + i as u16, i == 0));
     }
     items.push(group(b"Image", (4, 2, 226, 56)));
-    items.push(book::label(b"File (a bitmap):", (10, 40, 70)));
+    items.push(book::label(b"File (an image):", (10, 40, 70)));
     // ES_AUTOSCROLL | ES_MARGIN
     items.push(item(WC_ENTRYFIELD, b"", WS_VISIBLE | WS_TABSTOP | WS_GROUP | 0x0004 | 0x0008, (82, 40, 140, 8), ID_LFILE));
     items.push(radio(b"~Normal", (10, 22, 50), ID_LNORMAL, true));
