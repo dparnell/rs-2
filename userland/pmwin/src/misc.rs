@@ -141,8 +141,9 @@ pub extern "C" fn WinSetSysValue(_desk: u32, i: i32, v: i32) -> u32 {
     // SV_CURSORRATE, SV_FIRST/SCROLLRATE, SV_*FREQ, SV_*DURATION.
     // SV_ANIMATION, SV_PRINTSCREEN (the System object's settings).
     // SV_LOCKSTARTINPUT and 99-103 (the System object's Input page:
-    // full window drag, Alt+Tab window, VIO mouse actions, asynchronous
-    // focus change and its delay), kept for programs that read them.
+    // type-ahead, full window drag, Alt+Tab window, VIO mouse actions,
+    // asynchronous focus change and its delay; input.rs and access.rs
+    // act on them).
     // rs2's private 4000-4002: Special Needs (access.rs).
     if !matches!(i, 0..=3 | 6 | 9..=11 | 13..=18 | 93 | 97..=103 | 4000..=4002) {
         set_error(0x1303); // PMERR_INVALID_PARM

@@ -654,6 +654,12 @@ pub fn set_focus(h: u32) {
         return;
     }
     st().focus = h;
+    // Type-ahead: the keys held for a starting program go to the first
+    // window of a new top-level window that takes the focus (not to a
+    // frame, which passes it on).
+    if h != 0 && !st().frames.contains_key(&h) {
+        crate::input::start_activated(top_level(h));
+    }
     // The frames around it remember it (QWL_HWNDFOCUSSAVE): a frame
     // inside another window (an MDI document) as well as the top-level
     // one.

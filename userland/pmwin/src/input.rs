@@ -36,6 +36,9 @@ pub const EV_PROCEXIT: u16 = 4;
 pub const EV_BACKGROUND: u16 = 5;
 pub const EV_MODE: u16 = 6;
 pub const EV_HOSTSIZE: u16 = 7;
+/// A session was started in front of PM's (`a` = its process): with
+/// type-ahead on, keys are held for it (`StartLock`).
+pub const EV_STARTED: u16 = 8;
 
 fn pack(x: i32, y: i32) -> u32 {
     (x as u32 & 0xffff) | (y as u32) << 16
@@ -397,6 +400,9 @@ pub fn key(ev: &Input) {
         if crate::access::switch_key(&e) {
             continue;
         }
+        if hold(&e) {
+            continue;
+        }
         key_now(&e);
     }
 }
@@ -526,6 +532,11 @@ pub fn event(ev: &Input) {
         st().last_input = crate::state::now();
     }
     match ev.kind {
+        EV_MOUSE if ev.flags & 0xff != 0 && st().start_lock.is_some() => {
+            // A click ends type-ahead: the keys typed before it first.
+            release_start();
+            mouse(Point::new(ev.a as i32, ev.b as i32), ev.flags as u8, (ev.flags >> 8) as u8, ev.time)
+        }
         EV_MOUSE => mouse(Point::new(ev.a as i32, ev.b as i32), ev.flags as u8, (ev.flags >> 8) as u8, ev.time),
         EV_KEY => key(ev),
         EV_BACKGROUND => crate::state::to_shadow(),
@@ -540,7 +551,13 @@ pub fn event(ev: &Input) {
             }
             pointer::draw(s);
         }
-        EV_PROCEXIT => crate::server::process_gone(ev.a),
+        EV_PROCEXIT => {
+            if st().start_lock.as_ref().is_some_and(|l| l.pid == ev.a) {
+                release_start();
+            }
+            crate::server::process_gone(ev.a)
+        }
+        EV_STARTED => lock_start(ev.a),
         EV_MODE => crate::display::mode_changed(),
         EV_HOSTSIZE => crate::display::host_size(),
         _ => {}
@@ -601,4 +618,90 @@ pub extern "C" fn WinSetKeyboardStateTable(_desk: u32, table: *mut u8, set: u32)
 /// SV_DBLCLKTIME in milliseconds.
 fn dbl_time() -> u32 {
     crate::misc::WinQuerySysValue(1, 1) as u32
+}
+
+// ---- Type-ahead (SV_LOCKSTARTINPUT, the System object's Input page) ----
+//
+// IBM's PM (PMMERGE's LockStartInput) stops taking input off the system
+// queue when the session manager starts a session in the foreground, and
+// takes it again when the started program first reads its new message
+// queue, so what was typed while it started goes to its window instead of
+// the one that had the focus. rs2 holds the keys the same way (the
+// pointer keeps moving): they go on, in order, when the focus goes into a
+// top-level window that was not there before (a PM program's or the
+// session's VIO window), when the started process first reads a message queue it
+// created, when it ends, on a mouse click, on Ctrl+Esc, or after
+// START_LOCK_MS.
+
+const SV_LOCKSTARTINPUT: i32 = 98;
+const START_LOCK_MS: u32 = 15_000;
+
+pub struct StartLock {
+    /// The started process.
+    pub pid: u32,
+    pub since: u32,
+    /// The top-level windows there were when it started.
+    pub known: alloc::vec::Vec<u32>,
+    pub held: alloc::collections::VecDeque<Input>,
+}
+
+/// EV_STARTED: hold the keys for the started program if type-ahead is on.
+fn lock_start(pid: u32) {
+    let s = st();
+    if s.sysvals.get(&SV_LOCKSTARTINPUT).is_none_or(|&v| v == 0) {
+        return;
+    }
+    // It may already be reading its queue (it ran before this event).
+    if s.queues.values().any(|q| q.pid == pid && q.read) {
+        return;
+    }
+    // A program started while another one was starting: the keys held
+    // so far stay held for the new one.
+    let held = s.start_lock.take().map(|l| l.held).unwrap_or_default();
+    let known = s.desk.get(HWND_DESKTOP).map_or(alloc::vec::Vec::new(), |w| w.children.clone());
+    s.start_lock = Some(StartLock { pid, since: crate::state::now(), known, held });
+}
+
+/// Hold the key while a started program comes up; false: pass it on.
+fn hold(ev: &Input) -> bool {
+    let Some(l) = st().start_lock.as_mut() else { return false };
+    let scan = (ev.a >> 8) & 0xff;
+    let ctrl_esc = scan == 0x01 && ev.flags & 0x4 != 0;
+    if ctrl_esc || crate::state::now().wrapping_sub(l.since) > START_LOCK_MS {
+        release_start();
+        return false;
+    }
+    l.held.push_back(*ev);
+    true
+}
+
+/// The started program is up (or gave up): the held keys go to the
+/// window that has the focus now.
+pub fn release_start() {
+    let Some(l) = st().start_lock.take() else { return };
+    for e in l.held {
+        key_now(&e);
+    }
+}
+
+/// A window took the focus: one in a new top-level window ends
+/// type-ahead.
+pub fn start_activated(top: u32) {
+    if st().start_lock.as_ref().is_some_and(|l| !l.known.contains(&top)) {
+        release_start();
+    }
+}
+
+/// The calling thread reads its message queue: the started program's
+/// first read is IBM's release; any read checks the time-out too, for
+/// keys held with nothing coming to release them.
+pub fn start_queue_read(q: u32) {
+    let s = st();
+    let Some(queue) = s.queues.get_mut(&q) else { return };
+    let first = !core::mem::replace(&mut queue.read, true);
+    let pid = queue.pid;
+    let Some(l) = s.start_lock.as_ref() else { return };
+    if (first && l.pid == pid) || crate::state::now().wrapping_sub(l.since) > START_LOCK_MS {
+        release_start();
+    }
 }

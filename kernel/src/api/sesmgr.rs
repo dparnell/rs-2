@@ -252,6 +252,9 @@ fn start_dos(c: &Ctx, sd: &StartData, path: Option<String>, inputs: &str, env: V
     if !sd.background {
         if caller_in_front(caller_session) {
             session::select(sid);
+            if windowed {
+                crate::display::post_started(child.pid);
+            }
         } else {
             rc = ERROR_SMG_START_IN_BACKGROUND;
         }
@@ -376,6 +379,7 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
         if !caller_in_front(caller_session) {
             rc = ERROR_SMG_START_IN_BACKGROUND;
         } else if app & 7 == 3 {
+            crate::display::post_started(child.pid);
             // A PM program joins the PM session when it maps the display
             // (Rs2MapDisplay brings PM to the front then): its own session
             // never has a picture, and showing it put a blank screen up
@@ -386,6 +390,9 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
             }
         } else {
             session::select(sid);
+            if windowed {
+                crate::display::post_started(child.pid);
+            }
         }
     }
     Ok((sid, child.pid, rc))

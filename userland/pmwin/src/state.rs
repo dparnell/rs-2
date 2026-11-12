@@ -56,6 +56,8 @@ pub struct Queue {
     pub awaiting: Option<(u32, u32)>,
     /// The queue's code page (WinSetCp).
     pub cp: u32,
+    /// The thread has read its queue (type-ahead's release: input.rs).
+    pub read: bool,
 }
 
 pub struct PsEntry {
@@ -182,6 +184,8 @@ pub struct State {
     pub min_hides: bool,
     /// When the last keyboard or mouse input came (ms, `now()`).
     pub last_input: u32,
+    /// Type-ahead: keys held while a started program comes up.
+    pub start_lock: Option<crate::input::StartLock>,
     /// The window the pointer was last over.
     pub ptr_window: u32,
     pub ptr_hidden: u32,
@@ -326,6 +330,7 @@ pub fn init(surface: Surface, colors256: bool) {
         hide_buttons: false,
         min_hides: false,
         last_input: 0,
+        start_lock: None,
         pp: BTreeMap::new(),
         sysvals: BTreeMap::new(),
         syscolors: BTreeMap::new(),

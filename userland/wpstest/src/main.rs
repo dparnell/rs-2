@@ -49,6 +49,8 @@ unsafe extern "C" {
     fn WinUnlockSystem(hab: u32, pw: *const u8) -> u32;
     #[link_name = "PMWIN.829"]
     fn WinQuerySysValue(desk: u32, i: i32) -> i32;
+    #[link_name = "PMWIN.873"]
+    fn WinSetSysValue(desk: u32, i: i32, v: i32) -> u32;
     #[link_name = "PMSPL.394"]
     fn SplHoldQueue(comp: *const u8, q: *const u8) -> u32;
     #[link_name = "PMSPL.301"]
@@ -987,7 +989,8 @@ fn program_list() {
 /// desktop is there, then runs the commands against the running shell:
 /// `OPEN id view` (WinOpenObject: 0 default, 2 settings, 1 contents),
 /// `SET id setup` (WinSetObjectData), `LOCK` (WinLockupSystem), `UNLOCK
-/// password` (WinUnlockSystem), `SLEEP n` (seconds), `RUN program
+/// password` (WinUnlockSystem), `SLEEP n` (seconds), `SYSVAL i v`
+/// (WinSetSysValue), `RUN program
 /// args` (DosExecPgm, waiting for it). Then it waits for PMSHELL to end.
 fn shell(args: &[u8]) -> u32 {
     let rest = args.trim_ascii_start();
@@ -1092,6 +1095,11 @@ fn shell(args: &[u8]) -> u32 {
             b"SLEEP" => unsafe {
                 DosSleep(num(1) * 1000);
             },
+            // SYSVAL index value: WinSetSysValue (type-ahead is 98).
+            b"SYSVAL" => unsafe {
+                WinInitialize(0);
+                println!("wpstest: sysval {} = {}: {}", num(1), num(2), WinSetSysValue(1, num(1) as i32, num(2) as i32));
+            },
             _ => println!("wpstest: what is {}?", s(verb)),
         }
     }
@@ -1139,3 +1147,4 @@ fn main(st: &Startup) -> u32 {
     println!("wpstest done: {} failure(s)", n);
     n
 }
+

@@ -361,6 +361,7 @@ pub extern "C" fn WinCreateMsgQueue(_hab: u32, _cmsg: i32) -> u32 {
         modal: alloc::vec::Vec::new(),
         awaiting: None,
         cp: 850,
+        read: false,
     };
     s.queues.insert(h, q);
     // A PM program: the PM server runs while there are any.
@@ -604,6 +605,7 @@ fn next_message(filter: u32, first: u32, last: u32, remove: bool, wait: bool) ->
         if q == 0 {
             return None;
         }
+        crate::input::start_queue_read(q);
         crate::avio::poll();
         let wait_ms = run_timers(q);
         let hooked = !st().hooks.is_empty();

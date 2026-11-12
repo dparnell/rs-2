@@ -302,7 +302,9 @@ desktop window (painting the background) and runs:
   and posts each event at once to the queue of the thread that owns the
   target window (WM_MOUSEMOVE coalesced with one still waiting at the end
   of that queue; WM_CHAR to the window that has the focus at that moment,
-  so type-ahead goes where the focus was when the key was pressed). Mouse
+  so type-ahead goes where the focus was when the key was pressed; with
+  the System object's type-ahead on, keys typed while a program starts
+  are held for it, WPS.md). Mouse
   capture, the disabled owners of modal dialogs and activation on click
   are handled here; frame moves and sizes started by a title bar or
   sizing border are tracked here too (the thread that owns the frame only
@@ -3694,3 +3696,8 @@ it gets.
   moving, the other program keeps getting keys and clicks, the stopped
   frame can be moved, sized, hidden and brought back, the window list
   ends it, and a program that comes back repaints.
+- `RS2\PMSLOW.EXE` (userland/pmhang): waits eight seconds before it makes
+  its message queue and a window with an entry field: what is typed
+  while it starts goes into the field with type-ahead on and to the
+  window that had the focus with it off (WPS.md, "The Input page in the
+  window manager").

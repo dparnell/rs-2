@@ -38,6 +38,11 @@ pub const EV_MODE: u16 = 6;
 /// The host asks for another display size (virtio-gpu's display
 /// configuration changed): PM calls Rs2SetDisplayMode(0, 0).
 pub const EV_HOSTSIZE: u16 = 7;
+/// A session was started in front of PM's (`a` = its process): with
+/// type-ahead on (SV_LOCKSTARTINPUT) PM holds the keys typed until the
+/// program is up, as IBM's PM does on the session manager's start
+/// notification.
+pub const EV_STARTED: u16 = 8;
 
 /// One raw input event (INPUTEVENT, 16 bytes).
 #[derive(Clone, Copy, Default)]
@@ -289,6 +294,10 @@ fn push(e: Input) {
         q.push_back(e);
     }
     WAITERS.wake_all();
+}
+
+pub fn post_started(pid: u32) {
+    push(Input { kind: EV_STARTED, a: pid, time: crate::irq::uptime_ms() as u32, ..Default::default() });
 }
 
 pub fn post_background() {

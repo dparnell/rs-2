@@ -1,6 +1,6 @@
 [package]
 name = "pmhang"
-description = "PM test programs that stop reading their message queue: PMHANG (blocked in DosSleep) and PMBUSY (spinning)"
+description = "PM test programs: PMHANG (blocked in DosSleep) and PMBUSY (spinning) stop reading their message queue, PMSLOW takes eight seconds to start (type-ahead)"
 edition.workspace = true
 version.workspace = true
 license.workspace = true
@@ -12,6 +12,10 @@ path = "src/hang.rs"
 [[bin]]
 name = "pmbusy"
 path = "src/busy.rs"
+
+[[bin]]
+name = "pmslow"
+path = "src/slow.rs"
 
 [dependencies]
 os2 = { path = "../os2" }
