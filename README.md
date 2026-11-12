@@ -66,6 +66,21 @@ programs tested so far.
   rustup target add x86_64-unknown-uefi x86_64-unknown-none i686-unknown-linux-gnu
   ```
 
+  and the `llvm-tools` component (its `llvm-ar` archives the C code
+  below; an `llvm-ar` on `PATH` also works):
+
+  ```bash
+  rustup component add llvm-tools
+  ```
+
+- **clang**, for the C code in `userland-std` (the `ring` crate, compiled
+  freestanding for i686 against rs2's own C library headers):
+  - macOS: the Xcode command line tools (`xcode-select --install`) or
+    `brew install llvm`.
+  - Debian/Ubuntu: `sudo apt install clang`.
+  - Fedora: `sudo dnf install clang`.
+  - Arch: `sudo pacman -S clang`.
+
 - **QEMU** (`qemu-system-x86_64`) and its **UEFI firmware** (OVMF, from
   the EDK II project), only for running rs2 here:
   - macOS: `brew install qemu` (the firmware comes with it).
@@ -85,12 +100,16 @@ programs tested so far.
   unpack them with `bunzip2`); put them in a folder and point
   `RS2_OVMF_DIR` at it. Any x86-64 OVMF build without Secure Boot works.
 
-Nothing else: no C compiler, no ISO tools and no IBM files. The build
+Nothing else: no ISO tools and no IBM files. The build
 writes the ISO itself, and the live ISO contains only rs2's own code.
 
 ### Building the live ISO
 
-From the repository root:
+Each [GitHub release](https://github.com/dparnell/rs-2/releases) has a
+ready-built `rs2-live.iso` (and its SHA-256), made by
+[.github/workflows/release-iso.yml](.github/workflows/release-iso.yml)
+when the release is published. To build one yourself, from the
+repository root:
 
 ```bash
 cargo xtask iso --dist --release -o rs2.iso
