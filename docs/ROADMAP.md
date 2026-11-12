@@ -81,7 +81,11 @@ Status markers: done, in progress, planned.
   virtqueues; virtio-blk (read-only, block size, flush; booting from it),
   virtio-scsi (disks, CD-ROMs, unit attentions), virtio-input (keyboards,
   mice, tablets through an absolute pointer path for text mode and PM),
-  virtio-rng (\DEV\RANDOM$), virtio-console port 0 (\DEV\VIOCON$)
+  virtio-rng (\DEV\RANDOM$), virtio-console with MULTIPORT (\DEV\VIOCON$,
+  named ports \DEV\VDAGENT$ and \DEV\QEMUGA$; every controller)
+- done: guest agent VMAGENT.EXE (docs/AGENT.md): clipboard text shared with
+  the host through the SPICE agent protocol (QEMU's window, Proxmox, libvirt,
+  UTM)
 - done: virtio-gpu 2D (`virtio-vga`, `virtio-gpu-pci`): guest-RAM
   framebuffer for the text screens and PM, `video=WxH` (any size)
 - done: virtio-gpu hardware cursor (cursor queue) for PM

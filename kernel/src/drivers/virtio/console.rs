@@ -351,6 +351,7 @@ pub fn open(kind: u8) {
     let Some(i) = find(&rx, kind) else { return };
     let (dev, id) = (rx.ports[i].dev, rx.ports[i].id);
     rx.ports[i].data.clear();
+    crate::println!("virtio-console: port {dev}.{id} (\"{}\") opened", kind_name(kind));
     send_ctl(&mut rx, dev, id, PORT_OPEN, 0);
     send_ctl(&mut rx, dev, id, PORT_OPEN, 1);
 }
