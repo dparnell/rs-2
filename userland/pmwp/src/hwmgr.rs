@@ -14,6 +14,13 @@
 //!   name a processor or a bus), by the device's type and name (`HD_`,
 //!   `DSKT_`, `MOUSE_`, `KBD_`, CD-ROM, audio); planar chipset devices
 //!   are left out. The title is the node's description.
+//! - USB devices (rs2's resource manager has them under their controller
+//!   or hub) are typed like the others: keyboards and mice by their
+//!   adapter types, hubs (`USBHUB_`) as buses. While a view of the
+//!   Hardware Manager is open it asks the resource manager every two
+//!   seconds whether the physical view changed and, when it did, makes
+//!   the objects of the new devices and drops those of the devices that
+//!   went (IBM's needed Refresh).
 //! - Its details view (the default view, as IBM's) shows each device's
 //!   type, interrupts, DMA channels, I/O ports and memory; its tree view
 //!   shows the devices under the adapters and buses they are on.
@@ -236,7 +243,7 @@ fn class_for(n: &Node) -> Option<&'static str> {
             (9, 3) => "WPDevMouse",
             (1 | 4 | 7 | 8 | 9, _) => "WPDevice",
             _ if starts(b"CPU_") => "WPDevCPU",
-            _ if starts(b"ISA_") || starts(b"PCI_") || starts(b"MCA_") => "WPDevBus",
+            _ if starts(b"ISA_") || starts(b"PCI_") || starts(b"MCA_") || starts(b"USBHUB_") => "WPDevBus",
             _ => "WPDevice",
         },
         _ => match n.base {
@@ -414,17 +421,39 @@ fn set_from(o: usize, n: &Node, parent: u32, drivers: &[Driver]) {
     i.texts = [z(&class_title_of(o)), res_column(&i.res, 0), res_column(&i.res, 1), res_column(&i.res, 2), res_column(&i.res, 3)];
 }
 
-/// Make the objects of the devices the folder does not show yet.
+/// Make the objects of the devices the folder does not show yet, drop
+/// those of devices that are gone.
 fn populate_devices(folder: usize) {
     let (nodes, drivers) = snapshot();
+    if nodes.is_empty() {
+        return;
+    }
+    set_seen(nodes.iter().map(|n| n.handle).collect());
+    let gone: Vec<usize> = devices()
+        .iter()
+        .filter(|&&(u, o)| obj::d(o).folder == folder && !nodes.iter().any(|n| n.handle == u && class_for(n).is_some()))
+        .map(|&(_, o)| o)
+        .collect();
+    for o in gone {
+        wps::call("WPFolder", m::WPFolder::wpDeleteFromContent, &[folder, o]);
+        // Its records go from every view first, those deep in the tree
+        // view too (they stand under the hub or adapter, not the folder).
+        crate::view::removed(0, o);
+        if let Some(w) = crate::view::find(o, OPEN_SETTINGS) {
+            crate::view::close_frame(crate::view::wins()[w].frame);
+        }
+        som::so_call(som::so::SOM_FREE, &[o]);
+    }
     // Each node's parent: the nearest one before it a level up (IBM's
     // GetParentHandle).
     for (k, n) in nodes.iter().enumerate() {
         let parent = nodes[..k].iter().rev().find(|p| p.depth + 1 == n.depth).map_or(0, |p| p.handle);
         let Some(class) = class_for(n) else { continue };
         if let Some(&(_, o)) = devices().iter().find(|(u, o)| *u == n.handle && obj::d(*o).folder == folder) {
-            // Known: brought up to date.
+            // Known: brought up to date (and back in the content, which
+            // the folder's own populate made again without it).
             set_from(o, n, parent, &drivers);
+            crate::fs::keep_in_content(folder, o);
             continue;
         }
         let cls = wps::class(class);
@@ -441,6 +470,53 @@ fn populate_devices(folder: usize) {
         obj::d(o).folder = folder;
         devices().push((n.handle, o));
         wps::call("WPFolder", m::WPFolder::wpAddToContent, &[folder, o]);
+    }
+}
+
+// ---- Watching for devices that come and go ----
+
+pub const TID_HWMGR: u32 = 0x5731;
+
+unsafe extern "C" {
+    #[link_name = "PMWIN.800"]
+    fn WinQueryAnchorBlock(h: u32) -> u32;
+}
+
+/// The physical view's handles when the objects were last made.
+static mut SEEN: Vec<u32> = Vec::new();
+
+#[allow(static_mut_refs)]
+fn set_seen(v: Vec<u32>) {
+    unsafe { SEEN = v };
+}
+
+/// Start the check (a Hardware Manager view is open).
+fn watch() {
+    let client = crate::view::desktop_client();
+    if client != 0 {
+        unsafe { WinStartTimer(WinQueryAnchorBlock(HWND_DESKTOP), client, TID_HWMGR, 2000) };
+    }
+}
+
+/// The timer: refresh the open Hardware Manager views when the physical
+/// view changed; stop once none is open.
+#[allow(static_mut_refs)]
+pub fn tick() {
+    let mut folders: Vec<usize> = crate::view::wins().iter().filter(|w| is_manager(w.obj)).map(|w| w.obj).collect();
+    folders.dedup();
+    if folders.is_empty() {
+        let client = crate::view::desktop_client();
+        unsafe { WinStopTimer(WinQueryAnchorBlock(HWND_DESKTOP), client, TID_HWMGR) };
+        return;
+    }
+    let Some(h) = rm_open() else { return };
+    let now: Vec<u32> = enum_nodes(h, 0).into_iter().map(|(x, _)| x).collect();
+    unsafe { os2::DosClose(h) };
+    if now.is_empty() || unsafe { SEEN == now } {
+        return;
+    }
+    for f in folders {
+        crate::view::refresh(f);
     }
 }
 
@@ -496,6 +572,7 @@ extern "C" fn mgr_populate(obj: usize, r: u32, p: *const u8, folders_only: u32) 
     let ok = som::call_parent(wps::ccd("WPHwManager"), wps::cd("WPFolder"), m::WPFolder::wpPopulate, &[obj, r as usize, p as usize, folders_only as usize]);
     if ok != 0 {
         populate_devices(obj);
+        watch();
     }
     1
 }

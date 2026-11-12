@@ -88,6 +88,11 @@ pub fn with<R>(sid: u32, f: impl FnOnce(&mut Session) -> R) -> R {
     f(s.sessions.entry(sid).or_insert_with(Session::new))
 }
 
+/// Whether a PS/2 mouse answered (the resource manager's PS2M port).
+pub fn ps2_present() -> bool {
+    STATE.lock().ps2
+}
+
 pub fn present() -> bool {
     let ps2 = STATE.lock().ps2;
     ps2 || crate::drivers::hid::mouse_present() || crate::drivers::virtio::input::pointer_present()

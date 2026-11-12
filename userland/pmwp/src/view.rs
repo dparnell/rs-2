@@ -1390,6 +1390,10 @@ extern "C" fn client_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
             crate::minwin::check();
             0
         }
+        WM_TIMER if a == crate::hwmgr::TID_HWMGR => {
+            crate::hwmgr::tick();
+            0
+        }
         WM_TIMER if a == crate::printer::TID_JOBS => {
             crate::printer::tick();
             0

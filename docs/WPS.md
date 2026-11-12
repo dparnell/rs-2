@@ -1001,6 +1001,21 @@ KBD, ...) owning their adapters. Names follow IBM's (`CPU_`, `PCI_`,
 `ISA_`, `HD_`, `DSKT_`, `KBD_`, `MOUSE_`), as the Hardware Manager picks
 classes by them.
 
+Last come the USB devices the xHCI driver configured, each an adapter
+under its controller or the hub it is on: hubs (`USBHUB_n`, their
+ports), keyboards and mice (`USBKBD_n`, `USBMOUSE_n`, with the input
+adapter types the PS/2 ones have), mass storage (`USBMSD_n`, its disks
+and CD drives below it as devices, with logical devices) and the
+devices it has no driver for (`USB_n`, typed by their class: audio,
+printer, video...); the description gives the vendor and product IDs,
+the USB version, the speed and the port path. The tree is built again
+when a USB device comes or goes (the driver counts the changes) or a
+hot-plugged stick's units are set up. Handles stay the same from one
+build to the next: the nodes before the USB ones are made in the same
+order every time (the PS/2 mouse port is shown by what the PS/2 port
+answered, not by any mouse being there), and a USB node keeps its
+handle (from 0x00100000 up) for as long as its device stays connected.
+
 `OS2\DLL\RMINFO.DLL` (`userland/rminfo`) is rs2's: IBM's names and
 ordinals, _Optlink entries (EAX, EDX, ECX) on a 16-byte aligned stack:
 RMEnumNodes, RMGetNodeInfo, RMConvertID (EISA IDs to text and back),
@@ -1027,7 +1042,12 @@ audio); planar chipset devices get none. The title is the node's
 description. The details view shows each device's type, IRQs, DMA
 channels, I/O port and memory ranges (IBM adds the four columns with
 wpclsQueryDetailsInfo; rs2's views take them from `hwmgr.rs`); the tree
-view shows the devices under what they are on, all open. A device
+view shows the devices under what they are on, all open. While a view
+of it is open, the Hardware Manager asks for the physical view every
+two seconds and, when it changed, populates again: objects for the new
+devices, the gone ones' objects taken out of every view (in the tree
+view they are under their hub, not the folder) and freed, the views
+filled again; `USBHUB_` names a bus. A device
 opens on its settings: Device (the device type and the driver: module,
 description, vendor, version, date), IRQ, DMA, I/O and Memory (a list
 each; IBM's page order), General. WPDevice's private methods are IBM's
@@ -1042,7 +1062,12 @@ and tree views (with NVMe, virtio, HD Audio and e1000 devices too) and
 a serial port's Device and I/O pages (`WPSTEST SHELL OPEN <WP_HWMGR>
 102`, then double-clicks); `WPSTEST CLASS PNP WPHwManager` registers
 the class through PNP.DLL (its forwarders load) and makes an object of
-it.
+it. With a USB hub, keyboard, mouse and stick
+(`--usb-hub --usb-kbd --usb-mouse --usb-disk`): RMVIEW `/HW` and both
+views show them under the hub; removing the mouse and the stick with
+QEMU's `device_del` takes them (and the stick's disk) out of the open
+tree view within two seconds, and a mouse or stick added with
+`device_add` appears.
 
 ## rs2's multimedia classes
 
@@ -1270,7 +1295,8 @@ WPCONFIG and WPPRINT objects, rs2 leaves out, for now:
   by RMSetSnoopLevel), no "next boot" resources to change, and the
   drivers are the kernel's modules (no driver files, dates or
   parameters). The resource manager knows the devices the kernel found:
-  USB devices behind xHCI, a USB keyboard or mouse, and resources ACPI
-  computes in methods (`_CRS` methods, `_STA`) are not in its tree;
+  devices on USB controllers other than xHCI (rs2 drives none) and
+  resources ACPI computes in methods (`_CRS` methods, `_STA`) are not in
+  its tree;
   interrupts are the PCI functions' routed lines, also when a driver
   uses MSI.

@@ -5,13 +5,19 @@
 //! RESOURCE.SYS shows its own, so that IBM's RMINFO.DLL and RMVIEW.EXE,
 //! rs2's RMINFO.DLL and the Hardware Manager (PMWP's WPHwManager) read it.
 //!
-//! The tree is built when it is first asked for, from what the kernel
-//! found: the PCI functions (their BARs, sized when the bus was scanned
+//! The tree is built when it is first asked for, and again after a USB
+//! device came or went, from what the kernel found: the PCI functions (their BARs, sized when the bus was scanned
 //! at boot, before any driver started, and their interrupt), the disks
 //! and CD drives on them, the ACPI namespace's devices with a hardware
 //! ID and fixed current resources (the keyboard controller, serial and
 //! parallel ports, the clock...), the standard PC devices that ACPI
-//! leaves out, the processors, I/O APICs and the memory.
+//! leaves out, the processors, I/O APICs and the memory, and last the
+//! USB devices the xHCI driver configured (hubs, keyboards, mice, mass
+//! storage with its disks and CD drives, and the devices it has no
+//! driver for), each under the controller or hub it is on. Handles are
+//! the same from one build to the next: the nodes before the USB ones
+//! are always made in the same order, and a USB node keeps the handle
+//! it was first given for as long as its device stays connected.
 //!
 //! `RESMGR$` IOCtls (category 0x80), with IBM's structures (rmbase.h,
 //! as RMINFO.DLL and RMVIEW.EXE use them, studied with Ghidra):
@@ -33,7 +39,8 @@ use alloc::vec::Vec;
 use crate::api::{err, Ctx};
 use crate::drivers::pci;
 use crate::fs::block::BlockDev;
-use crate::sync::{Once, SpinLock};
+use crate::drivers::xhci;
+use crate::sync::SpinLock;
 
 // ---- IBM's values (rmbase.h) ----
 
@@ -147,7 +154,7 @@ impl Tree {
     }
 
     fn by_handle(&self, h: u32) -> Option<&Node> {
-        h.checked_sub(HANDLE_BASE).and_then(|i| self.nodes.get(i as usize))
+        self.nodes.iter().find(|n| n.handle == h)
     }
 
     /// The driver node called `name` (made on first use).
@@ -219,8 +226,21 @@ struct Storage {
 
 static PCI: SpinLock<Vec<PciFn>> = SpinLock::new(Vec::new());
 static STORAGE: SpinLock<Vec<Storage>> = SpinLock::new(Vec::new());
-static TREE: Once<Tree> = Once::new();
-static BUILD: SpinLock<()> = SpinLock::new(());
+/// The tree and the change count it was built at.
+static TREE: SpinLock<Option<(u32, Arc<Tree>)>> = SpinLock::new(None);
+
+/// The logical units of a USB mass storage device: (device, optical,
+/// bytes).
+static USB_STORAGE: SpinLock<Vec<(xhci::Handle, bool, u64)>> = SpinLock::new(Vec::new());
+/// Bumped when USB_STORAGE changes (its units are set up after the
+/// device is configured).
+static USB_STORAGE_GEN: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+/// Handles of USB nodes: (device, role: 0 the device, 1 + n its unit n,
+/// 0x80 + n the unit's logical device) and the handle given.
+static USB_HANDLES: SpinLock<(u32, Vec<((xhci::Handle, u8), u32)>)> = SpinLock::new((0, Vec::new()));
+/// USB handles are counted from here (far above the index-based ones).
+const USB_HANDLE_BASE: u32 = 0x0010_0000;
 
 /// Size the BARs of every function (memory and I/O decoding off while
 /// the all-ones pattern is in the register). Called right after the bus
@@ -287,6 +307,18 @@ pub fn note_storage(d: &pci::Device, disks: &[Arc<dyn BlockDev>], optical: &[Arc
             s.push(Storage { bdf: (d.bus, d.dev, d.func), optical: opt, bytes: b.sector_count() * b.sector_size() as u64 });
         }
     }
+}
+
+/// The logical units of a USB mass storage device (at boot or when it
+/// is connected later).
+pub fn note_usb_storage(h: xhci::Handle, units: &[(Arc<dyn BlockDev>, bool)]) {
+    let mut s = USB_STORAGE.lock();
+    s.retain(|(x, _, _)| *x != h);
+    for (b, optical) in units {
+        s.push((h, *optical, b.sector_count() * b.sector_size() as u64));
+    }
+    drop(s);
+    USB_STORAGE_GEN.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 }
 
 // ---- Building the tree ----
@@ -704,7 +736,7 @@ fn build() -> Tree {
                 lpts |= 1 << i;
             }
             "FDC" if crate::rtc::cmos(0x10) == 0 => continue,
-            "PS2M" if !crate::mouse::present() => continue,
+            "PS2M" if !crate::mouse::ps2_present() => continue,
             _ => {}
         }
         let n = add_isa(&mut t, prefix, text, base, sub, res);
@@ -745,7 +777,121 @@ fn build() -> Tree {
         let class = if sub == 1 { LDEV_CLASS_SERIAL } else { LDEV_CLASS_PARALLEL };
         t.add(None, Kind::LDev { ty: class, host: h }, desc, drv, Vec::new());
     }
+    usb_devices(&mut t, disks, cds);
     t
+}
+
+/// The text and RM types of a USB device: (name prefix, text, base type,
+/// subtype).
+fn usb_text(d: &xhci::UsbInfo) -> (&'static str, String, u16, u16) {
+    use crate::drivers::hid::Kind as Hid;
+    match &d.kind {
+        xhci::UsbKind::Hub { ports, usb3 } => ("USBHUB", alloc::format!("USB {} hub, {ports} ports", if *usb3 { 3 } else { 2 }), AS_BASE_RESERVED, 0),
+        xhci::UsbKind::Storage => ("USBMSD", s("USB mass storage device"), AS_BASE_MSD, 0x80),
+        xhci::UsbKind::Hid(k) => match k.as_slice() {
+            [Hid::Keyboard] => ("USBKBD", s("USB keyboard"), AS_BASE_INPUT, 1),
+            [Hid::Mouse] => ("USBMOUSE", s("USB mouse"), AS_BASE_INPUT, 3),
+            _ => ("USBKBD", s("USB keyboard and mouse"), AS_BASE_INPUT, 1),
+        },
+        xhci::UsbKind::Other { class } => {
+            let (text, base, sub) = match class {
+                1 => ("audio device", AS_BASE_MMEDIA, 2),
+                2 | 0x0a => ("communications device", AS_BASE_COMM, 0x80),
+                3 => ("input device", AS_BASE_INPUT, 0x80),
+                6 => ("imaging device", AS_BASE_MMEDIA, 0x80),
+                7 => ("printer", AS_BASE_PERIPH, 0x80),
+                8 => ("mass storage device", AS_BASE_MSD, 0x80),
+                0x0b => ("smart card reader", AS_BASE_PERIPH, 0x80),
+                0x0e => ("video device", AS_BASE_MMEDIA, 1),
+                0xe0 => ("wireless controller", AS_BASE_COMM, 0x80),
+                _ => ("device", AS_BASE_RESERVED, 0),
+            };
+            ("USB", alloc::format!("USB {text} (no driver)"), base, sub)
+        }
+    }
+}
+
+fn speed_text(speed: u8) -> &'static str {
+    use crate::drivers::usb::speed;
+    match speed {
+        speed::LOW => "1.5 Mb/s",
+        speed::FULL => "12 Mb/s",
+        speed::HIGH => "480 Mb/s",
+        speed::SUPER => "5 Gb/s",
+        _ => "10 Gb/s",
+    }
+}
+
+/// The USB devices, under their controller or hub, with the disks and CD
+/// drives of mass storage devices below them. `disks` and `cds` are the
+/// numbers of those already in the tree.
+fn usb_devices(t: &mut Tree, mut disks: u32, mut cds: u32) {
+    let devs = xhci::devices();
+    let units = USB_STORAGE.lock().clone();
+    let mut handles = USB_HANDLES.lock();
+    // Forget the handles of devices that went.
+    handles.1.retain(|((h, _), _)| devs.iter().any(|d| d.handle == *h));
+    let mut handle = |h: xhci::Handle, role: u8| -> u32 {
+        if let Some(&(_, x)) = handles.1.iter().find(|(k, _)| *k == (h, role)) {
+            return x;
+        }
+        let x = USB_HANDLE_BASE + handles.0;
+        handles.0 += 1;
+        handles.1.push(((h, role), x));
+        x
+    };
+    let mut count: Vec<(&'static str, u32)> = Vec::new();
+    let mut placed: Vec<(xhci::Handle, usize)> = Vec::new();
+    for d in &devs {
+        // The controller's adapter, or the hub's.
+        let parent = match d.parent {
+            Some(p) => placed.iter().find(|(h, _)| *h == p).map(|&(_, n)| n),
+            None => t.nodes.iter().position(|n| {
+                matches!(n.kind, Kind::Adapter { .. }) && n.desc.starts_with(&alloc::format!("PCI {:02x}:{:02x}.{} ", d.bdf.0, d.bdf.1, d.bdf.2))
+            }),
+        };
+        let Some(parent) = parent else { continue };
+        let (prefix, text, base, sub) = usb_text(d);
+        let n = match count.iter_mut().find(|(p, _)| *p == prefix) {
+            Some((_, c)) => {
+                *c += 1;
+                *c - 1
+            }
+            None => {
+                count.push((prefix, 1));
+                0
+            }
+        };
+        let driver = if matches!(d.kind, xhci::UsbKind::Other { .. }) { 0 } else { t.nodes[parent].driver };
+        let desc = alloc::format!(
+            "{prefix}_{n} {text}, {:04x}:{:04x}, USB {}.{}, {}, port {}",
+            d.vendor,
+            d.product,
+            d.usb >> 8,
+            (d.usb >> 4) & 0xf,
+            speed_text(d.speed),
+            d.path
+        );
+        let i = t.add(Some(parent), Kind::Adapter { base, sub, intf: 0, bus: AS_HOSTBUS_OTHER, width: AS_BUSWIDTH_32 }, desc, driver, Vec::new());
+        t.nodes[i].handle = handle(d.handle, 0);
+        placed.push((d.handle, i));
+        // Its disks and CD drives.
+        for (u, &(_, optical, bytes)) in units.iter().filter(|(h, _, _)| *h == d.handle).enumerate().take(0x7f) {
+            let (desc, ty, flags, class) = if optical {
+                cds += 1;
+                (alloc::format!("CDROM_{} CD-ROM drive", cds - 1), DS_TYPE_CDROM, DS_REMOVABLE_MEDIA, LDEV_CLASS_CDROM)
+            } else {
+                disks += 1;
+                (alloc::format!("HD_{} Hard disk, {}", disks - 1, size_text(bytes)), DS_TYPE_DISK, DS_REMOVABLE_MEDIA, LDEV_CLASS_DASD)
+            };
+            let dev = t.device(i, desc.clone(), ty, flags);
+            t.nodes[dev].handle = handle(d.handle, 1 + u as u8);
+            let host = t.nodes[dev].handle;
+            let drv = t.nodes[dev].driver;
+            let l = t.add(None, Kind::LDev { ty: class, host }, desc, drv, Vec::new());
+            t.nodes[l].handle = handle(d.handle, 0x80 + u as u8);
+        }
+    }
 }
 
 /// The devices below a standard adapter: the keyboard on its
@@ -770,18 +916,19 @@ fn child_devices(t: &mut Tree, prefix: &str, n: usize) {
     }
 }
 
-/// The tree (built on first use).
-pub fn tree() -> &'static Tree {
-    if let Some(t) = TREE.get() {
-        return t;
+/// The tree (built on first use, and again once USB devices changed).
+pub fn tree() -> Arc<Tree> {
+    let count = xhci::generation().wrapping_add(USB_STORAGE_GEN.load(core::sync::atomic::Ordering::Relaxed));
+    let mut g = TREE.lock();
+    if let Some((at, t)) = &*g {
+        if *at == count {
+            return t.clone();
+        }
     }
-    let _g = BUILD.lock();
-    if TREE.get().is_none() {
-        let t = build();
-        crate::trace!("resmgr: {} nodes", t.nodes.len());
-        TREE.set(t);
-    }
-    TREE.get().unwrap()
+    let t = Arc::new(build());
+    crate::trace!("resmgr: {} nodes", t.nodes.len());
+    *g = Some((count, t.clone()));
+    t
 }
 
 // ---- RESMGR$ ----
@@ -884,7 +1031,7 @@ pub(crate) fn ioctl(c: &mut Ctx, r: &crate::api::ioctl::Req) -> u32 {
             let t = tree();
             let Some(n) = t.by_handle(h) else { return 0xff13 };
             let base = if lin != 0 { lin } else { r.data };
-            let body = node_info(t, n, base + 4);
+            let body = node_info(&t, n, base + 4);
             let need = body.len() as u32 + 4;
             if r.data_len < 4 || !c.write_u32(r.data, need) {
                 return err::INVALID_ADDRESS;

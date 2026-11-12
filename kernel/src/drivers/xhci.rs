@@ -401,6 +401,9 @@ struct Device {
     status_trb: u64,
     desc: usb::DeviceDesc,
     config: u8,
+    /// The device's class, or its first interface's when the device
+    /// leaves it to the interfaces (for the resource manager).
+    iface_class: u8,
     /// Root hub port (1-based) the device is reached through.
     root_port: u8,
     /// Route string: the hub port of each tier, one nibble per tier.
@@ -437,6 +440,7 @@ impl Device {
             status_trb: 0,
             desc: usb::DeviceDesc::default(),
             config: 0,
+            iface_class: 0,
             root_port,
             route: 0,
             depth: 0,
@@ -526,6 +530,8 @@ enum Cmd {
 
 struct Ctrl {
     name: String,
+    /// The PCI function (bus, device, function).
+    bdf: (u8, u8, u8),
     /// Position in CTRLS.
     index: usize,
     op: *mut u8,
@@ -686,7 +692,10 @@ pub fn probe(dev: &pci::Device) -> Vec<(Arc<dyn BlockDev>, bool)> {
     let mut out = Vec::new();
     for i in pending {
         if let Some(info) = storage_info(idx, i) {
-            out.extend(storage::attach(info));
+            let h = info.handle;
+            let units = storage::attach(info);
+            crate::resmgr::note_usb_storage(h, &units);
+            out.extend(units);
         }
     }
     out
@@ -783,6 +792,7 @@ fn start(dev: &pci::Device) -> Option<Ctrl> {
 
     let c = Ctrl {
         name,
+        bdf: (dev.bus, dev.dev, dev.func),
         op,
         rt,
         db,
@@ -995,6 +1005,9 @@ impl Ctrl {
     /// Forget device `i` (and everything behind it) and release its slot.
     fn remove(&mut self, i: usize) {
         let Some(d) = self.devs[i].take() else { return };
+        if matches!(d.step, Step::Running | Step::Unused) {
+            changed();
+        }
         match d.parent {
             None => {
                 let p = d.root_port as usize - 1;
@@ -1500,6 +1513,7 @@ impl Ctrl {
             Step::Config => {
                 let (value, ifaces) = usb::parse_interfaces(d.data_slice(REPORT_BUF));
                 d.config = value;
+                d.iface_class = if d.desc.class != 0 { d.desc.class } else { ifaces.iter().find(|f| f.alt == 0).map_or(0, |f| f.class) };
                 if !self.choose_driver(i, &ifaces) {
                     let name = self.name.clone();
                     let d = self.dev(i);
@@ -1511,6 +1525,7 @@ impl Ctrl {
                         d.desc.class
                     );
                     d.step = Step::Unused;
+                    changed();
                     return;
                 }
                 self.dev(i).step = Step::SetConfig;
@@ -1677,6 +1692,7 @@ impl Ctrl {
     fn start_running(&mut self, i: usize) {
         let name = self.name.clone();
         let (booting, index) = (self.booting, self.index);
+        changed();
         let d = self.dev(i);
         d.step = Step::Running;
         let (path, vendor, product, slot) = (d.path(), d.desc.vendor, d.desc.product, d.slot);
@@ -1790,7 +1806,7 @@ impl Ctrl {
 }
 
 /// A configured device, as thread-context callers name it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Handle {
     ctrl: usize,
     dev: usize,
@@ -1806,6 +1822,91 @@ pub enum XferError {
     Timeout,
     /// Another completion code.
     Failed(u8),
+}
+
+/// Bumped whenever a device is configured, found to have no driver or
+/// removed: the resource manager rebuilds its tree when it changes.
+static GENERATION: core::sync::atomic::AtomicU32 = core::sync::atomic::AtomicU32::new(0);
+
+fn changed() {
+    GENERATION.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn generation() -> u32 {
+    GENERATION.load(Ordering::Relaxed)
+}
+
+/// What a USB device is driven as.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UsbKind {
+    Hub { ports: u8, usb3: bool },
+    Storage,
+    /// HID boot interfaces (keyboard, mouse or both).
+    Hid(Vec<hid::Kind>),
+    /// No driver; the device's (or first interface's) class.
+    Other { class: u8 },
+}
+
+/// A device as the resource manager shows it.
+#[derive(Clone, Debug)]
+pub struct UsbInfo {
+    /// The controller's PCI function.
+    pub bdf: (u8, u8, u8),
+    pub handle: Handle,
+    /// The hub it is on (None: a root port).
+    pub parent: Option<Handle>,
+    /// "1" for root port 1, "1.3" behind a hub.
+    pub path: String,
+    pub vendor: u16,
+    pub product: u16,
+    /// bcdUSB.
+    pub usb: u16,
+    pub speed: u8,
+    pub kind: UsbKind,
+}
+
+/// The devices of every controller that were configured (or read and
+/// found to have no driver), parents before their children.
+pub fn devices() -> Vec<UsbInfo> {
+    let cs = CTRLS.lock();
+    let mut out = Vec::new();
+    for c in cs.iter() {
+        let handle = |i: usize| c.devs.get(i).and_then(|d| d.as_ref()).map(|d| Handle { ctrl: c.index, dev: i, epoch: d.epoch });
+        // Parents first: by depth.
+        let mut list: Vec<(u8, usize)> = c
+            .devs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, d)| d.as_ref().filter(|d| matches!(d.step, Step::Running | Step::Unused)).map(|d| (d.depth, i)))
+            .collect();
+        list.sort();
+        for (_, i) in list {
+            let d = c.devs[i].as_ref().unwrap();
+            let kind = if let Some(h) = &d.hub {
+                UsbKind::Hub { ports: h.hub.desc.ports, usb3: h.hub.usb3 }
+            } else if d.msc.is_some() {
+                UsbKind::Storage
+            } else if !d.hids.is_empty() {
+                let mut k: Vec<hid::Kind> = d.hids.iter().map(|h| h.kind).collect();
+                k.dedup();
+                UsbKind::Hid(k)
+            } else {
+                UsbKind::Other { class: d.iface_class }
+            };
+            out.push(UsbInfo {
+                bdf: c.bdf,
+                handle: handle(i).unwrap(),
+                parent: d.parent.and_then(|(h, _)| handle(h)),
+                path: d.path(),
+                vendor: d.desc.vendor,
+                product: d.desc.product,
+                usb: d.desc.usb,
+                speed: d.speed,
+                kind,
+            });
+        }
+    }
+    out
 }
 
 /// What the mass storage driver needs about a Bulk-Only interface.

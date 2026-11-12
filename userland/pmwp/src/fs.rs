@@ -637,6 +637,16 @@ extern "C" fn wpPopulate(obj: usize, _reserved: u32, _path: *const u8, folders_o
     1
 }
 
+/// Put back into a folder's content an object that its populate does
+/// not find (on disk or among its abstract objects), without telling the
+/// views: they are filled again after a populate.
+pub fn keep_in_content(folder: usize, o: usize) {
+    let c = content(folder);
+    if !c.contains(&o) {
+        c.push(o);
+    }
+}
+
 fn ensure_populated(obj: usize) {
     if fo(obj).populated < 2 {
         wps::call("WPFolder", m::WPFolder::wpPopulate, &[obj, 0, 0, 0]);

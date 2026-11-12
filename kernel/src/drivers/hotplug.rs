@@ -51,6 +51,7 @@ fn added(h: Handle) {
     let Some(info) = xhci::hotplug_storage(h) else { return };
     let name = info.name.clone();
     let units = storage::attach(info);
+    crate::resmgr::note_usb_storage(h, &units);
     let mut letters = Vec::new();
     let mut devs = Vec::new();
     for (dev, optical) in units {

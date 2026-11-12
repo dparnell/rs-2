@@ -603,7 +603,9 @@ Status markers: done, in progress, planned.
   WPDevice classes, in PMWP) on the kernel's resource manager
   (`RESMGR$`, IBM's IOCtls; RMINFO.DLL; IBM's RMVIEW runs): the
   machine's processors, memory, PCI functions, disks, ISA devices and
-  their IRQ, DMA, I/O and memory (docs/WPS.md); planned: Touch,
+  their IRQ, DMA, I/O and memory, the USB devices under their xHCI
+  controller and hubs (kept up to date as they come and go while it is
+  open) (docs/WPS.md); planned: Touch,
   Selective Install (docs/WPS.md, "What is not there")
 
 ## Printing (done: first version)

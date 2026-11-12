@@ -154,7 +154,8 @@ pub fn init() {
     // USB storage comes after the built-in drives.
     let (mut usb_disks, mut usb_optical) = (Vec::new(), Vec::new());
     for d in &devs {
-        let seen = (disks.len(), optical.len(), usb_disks.len(), usb_optical.len());
+        // USB disks are shown under their USB device (xhci::probe).
+        let seen = (disks.len(), optical.len());
         if (d.class, d.subclass, d.progif) == (1, 6, 1) {
             for p in ahci::probe(d) {
                 match p.kind {
@@ -222,7 +223,6 @@ pub fn init() {
             if is_optical { optical.push(dev) } else { disks.push(dev) }
         }
         crate::resmgr::note_storage(d, &disks[seen.0..], &optical[seen.1..]);
-        crate::resmgr::note_storage(d, &usb_disks[seen.2..], &usb_optical[seen.3..]);
     }
     // Paravirtual (virtio) storage counts as built in.
     let mut vio = virtio::probe(&devs);
