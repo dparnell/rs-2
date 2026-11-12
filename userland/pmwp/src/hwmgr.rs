@@ -583,7 +583,7 @@ extern "C" fn dev_cls_view(_cls: usize) -> u32 {
 }
 
 extern "C" fn dev_init(obj: usize) -> u32 {
-    som::call_parent(wps::ccd("WPDevice"), wps::cd("WPTransient"), m::WPObject::wpInitData, &[obj]);
+    som::call_parent(wps::ccd("WPDevice"), wps::cd("WPObject"), m::WPObject::wpInitData, &[obj]);
     dd(obj).info = core::ptr::null_mut();
     0
 }
@@ -595,13 +595,13 @@ extern "C" fn dev_uninit(obj: usize) -> u32 {
         drop(unsafe { Box::from_raw(p) });
     }
     devices().retain(|&(_, o)| o != obj);
-    som::call_parent(wps::ccd("WPDevice"), wps::cd("WPTransient"), m::WPObject::wpUnInitData, &[obj]);
+    som::call_parent(wps::ccd("WPDevice"), wps::cd("WPObject"), m::WPObject::wpUnInitData, &[obj]);
     0
 }
 
 /// UNIQUEID= and PARENTID= (the resource manager's handles), as IBM's.
 extern "C" fn dev_setup(obj: usize, setup: *const u8) -> u32 {
-    som::call_parent(wps::ccd("WPDevice"), wps::cd("WPTransient"), m::WPObject::wpSetup, &[obj, setup as usize]);
+    som::call_parent(wps::ccd("WPDevice"), wps::cd("WPObject"), m::WPObject::wpSetup, &[obj, setup as usize]);
     if setup.is_null() {
         return 1;
     }
@@ -799,7 +799,7 @@ extern "C" fn wpAddDeviceMemory1Page(o: usize, nb: u32) -> u32 {
 /// The pages as IBM adds them (each in front): Device, IRQ, DMA, I/O,
 /// Memory, then the object's own.
 extern "C" fn dev_add_pages(o: usize, nb: u32) -> u32 {
-    som::call_parent(wps::ccd("WPDevice"), wps::cd("WPTransient"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
+    som::call_parent(wps::ccd("WPDevice"), wps::cd("WPObject"), m::WPObject::wpAddSettingsPages, &[o, nb as usize]);
     for i in [m::WPDevice::wpAddDeviceMemory1Page, m::WPDevice::wpAddDeviceIO1Page, m::WPDevice::wpAddDeviceDMA1Page, m::WPDevice::wpAddDeviceIRQ1Page, m::WPDevice::wpAddDeviceDevice1Page] {
         if wps::call("WPDevice", i, &[o, nb as usize]) == 0 {
             return 0;

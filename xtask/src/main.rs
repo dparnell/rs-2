@@ -714,6 +714,7 @@ const USER_PROGRAMS: &[(&str, &str)] =
         ("wpconfig", "OS2\\DLL\\WPCONFIG.DLL"),
         ("wincfg", "OS2\\DLL\\WINCFG.DLL"),
         ("rminfo", "OS2\\DLL\\RMINFO.DLL"),
+        ("pnp", "OS2\\DLL\\PNP.DLL"),
         ("rexx", "OS2\\DLL\\REXX.DLL"),
         ("rexxapi", "OS2\\DLL\\REXXAPI.DLL"),
         ("rexxutil", "OS2\\DLL\\REXXUTIL.DLL"),
