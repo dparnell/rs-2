@@ -18,6 +18,7 @@ mod abs;
 mod api;
 mod arrange;
 mod book;
+mod clip;
 pub mod classdata_gen;
 pub mod classes_gen;
 mod clsmgr;

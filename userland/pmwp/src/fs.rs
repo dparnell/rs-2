@@ -921,7 +921,7 @@ pub fn impl_m_file_system() -> Impl {
 pub fn impl_data_file() -> Impl {
     Impl {
         data: 0,
-        methods: crate::pages::data_file_methods(),
+        methods: crate::pages::data_file_methods().into_iter().chain(crate::clip::data_file_methods()).collect(),
         overrides: [("wpOpen", __m_df_open as usize)].into_iter().chain(crate::pages::data_file_overrides()).collect(),
     }
 }

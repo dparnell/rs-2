@@ -235,6 +235,9 @@ pub fn popup_items(o: usize, kind: u32) -> Vec<Menu<'static>> {
     if folder && flags & CTXT_REFRESH != 0 {
         items.push(Menu::Item(WPMENUID_REFRESH as u16, b"Refresh ~now", true));
     }
+    if kind == MENU_OPENVIEWPOPUP && views && crate::clip::has_data() {
+        items.push(Menu::Item(WPMENUID_PASTE as u16, b"~Paste...", true));
+    }
     if kind == MENU_OPENVIEWPOPUP {
         // Drop into the folder while objects are picked up (lazy.rs).
         let lazy = crate::lazy::menu_items(o, false, crate::arrange::menu_frame());
@@ -271,6 +274,10 @@ pub fn popup_items(o: usize, kind: u32) -> Vec<Menu<'static>> {
         }
         if flags & CTXT_MOVE != 0 {
             items.push(Menu::Item(WPMENUID_MOVE as u16, b"~Move...", style & obj::OBJSTYLE_NOMOVE == 0));
+        }
+        // A folder takes what the clipboard holds (clip.rs).
+        if views && crate::clip::has_data() {
+            items.push(Menu::Item(WPMENUID_PASTE as u16, b"~Paste...", true));
         }
         if flags & CTXT_NEW != 0 && !is(o, "WPDisk") && !is(o, "WPMinWindow") {
             items.push(Menu::Item(WPMENUID_CREATEANOTHER as u16, b"Create ~another...", style & obj::OBJSTYLE_NOCOPY == 0));
@@ -414,9 +421,8 @@ pub fn pulldown_items(id: u32, folder: usize, sel: &[usize], view: u32) -> Vec<M
                 Menu::Item(WPMENUID_CREATEANOTHER as u16, b"Cre~ate another...", sel.len() == 1 && all(CTXT_NEW, obj::OBJSTYLE_NOCOPY)),
                 Menu::Item(WPMENUID_MOVE as u16, b"~Move...", all(CTXT_MOVE, obj::OBJSTYLE_NOMOVE)),
                 Menu::Item(WPMENUID_COPY as u16, b"~Copy...", all(CTXT_COPY, obj::OBJSTYLE_NOCOPY)),
-                // Objects are not put on the clipboard (rs2 has no
-                // object clipboard yet).
-                Menu::Item(WPMENUID_PASTE as u16, b"Paste...", false),
+                // Into the folder, whatever the clipboard holds (clip.rs).
+                Menu::Item(WPMENUID_PASTE as u16, b"~Paste...", crate::clip::has_data()),
                 Menu::Item(WPMENUID_CREATESHADOW as u16, b"Create shado~w...", all(CTXT_SHADOW, obj::OBJSTYLE_NOLINK)),
                 Menu::Item(WPMENUID_DELETE as u16, b"~Delete...", all(CTXT_DELETE, obj::OBJSTYLE_NODELETE)),
                 Menu::Sep,
@@ -533,6 +539,11 @@ extern "C" fn wpMenuItemSelected(o: usize, frame: u32, id: u32) -> u32 {
         }
         WPMENUID_WINDOWLIST => {
             post(HWND_DESKTOP, WM_RS2_WINLIST, 0, 0);
+        }
+        WPMENUID_PASTE => {
+            // A drive pastes into its root folder.
+            let f = if is(o, "WPDisk") { crate::abs::root_of(o) } else { o };
+            crate::clip::paste(f);
         }
         WPMENUID_FIND => {
             // A drive searches its root folder.

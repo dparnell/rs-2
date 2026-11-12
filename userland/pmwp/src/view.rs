@@ -978,7 +978,7 @@ fn draw_item(w: usize, oi: u32) -> u32 {
 extern "C" fn cnr_proc(h: u32, msg: u32, a: u32, b: u32) -> u32 {
     if msg == WM_CHAR {
         if let Some(w) = find_cnr(h) {
-            if select_keys(w, a, b) {
+            if select_keys(w, a, b) || crate::clip::keys(w, a, b) {
                 return 1;
             }
         }
@@ -1165,7 +1165,7 @@ fn bar_command(w: usize, id: u32) {
             }
         }
         _ => {
-            let on_selection = matches!(pulldown, WPMENUID_EDITPULLDOWN | WPMENUID_SELECTEDPULLDOWN) && id != WPMENUID_FIND;
+            let on_selection = matches!(pulldown, WPMENUID_EDITPULLDOWN | WPMENUID_SELECTEDPULLDOWN) && id != WPMENUID_FIND && id != WPMENUID_PASTE;
             if !on_selection {
                 obj::call(m::WPObject::wpMenuItemSelected, &[folder, frame as usize, id as usize]);
                 return;
