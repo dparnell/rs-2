@@ -22,7 +22,7 @@ const HEADS: u64 = 255;
 const SPT: u64 = 63;
 
 /// Arguments common to the 16- and 32-bit forms.
-pub(super) struct Req {
+pub(crate) struct Req {
     handle: u32,
     pub category: u32,
     pub function: u32,
@@ -177,6 +177,7 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
             Err(e) => e,
         },
         (Handle::Char(CharDev::Mouse | CharDev::Pointer), 7) => mouse(c, r),
+        (Handle::Char(CharDev::ResMgr), 0x80) => crate::resmgr::ioctl(c, r),
         (Handle::Screen, 3) => screen(c, r),
         _ => err::INVALID_CATEGORY,
     }
@@ -184,7 +185,7 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
 
 /// Copy IOCtl result data to the caller (ERROR_BUFFER_OVERFLOW if it does
 /// not fit) and report the lengths used.
-pub(super) fn put_data(c: &Ctx, r: &Req, plen: u32, d: &[u8]) -> u32 {
+pub(crate) fn put_data(c: &Ctx, r: &Req, plen: u32, d: &[u8]) -> u32 {
     if d.len() as u32 > r.data_len {
         return err::BUFFER_OVERFLOW;
     }
@@ -195,7 +196,7 @@ pub(super) fn put_data(c: &Ctx, r: &Req, plen: u32, d: &[u8]) -> u32 {
     0
 }
 
-pub(super) fn set_lens(c: &Ctx, r: &Req, p: u32, d: u32) {
+pub(crate) fn set_lens(c: &Ctx, r: &Req, p: u32, d: u32) {
     if r.pcb_params != 0 {
         c.write_u32(r.pcb_params, p);
     }

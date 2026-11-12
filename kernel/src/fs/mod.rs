@@ -427,6 +427,8 @@ pub enum CharDev {
     Random,
     /// VIOCON$: port 0 of a virtio console.
     VioCon,
+    /// RESMGR$: the resource manager (crate::resmgr).
+    ResMgr,
 }
 
 impl CharDev {
@@ -438,6 +440,7 @@ impl CharDev {
             CharDev::Pointer => String::from("\\DEV\\POINTER$"),
             CharDev::Random => String::from("\\DEV\\RANDOM$"),
             CharDev::VioCon => String::from("\\DEV\\VIOCON$"),
+            CharDev::ResMgr => String::from("\\DEV\\RESMGR$"),
         }
     }
 }
@@ -460,6 +463,7 @@ pub fn device_name(path: &str) -> Option<Device> {
         "POINTER$" => Device::Char(CharDev::Pointer),
         "RANDOM$" => Device::Char(CharDev::Random),
         "VIOCON$" => Device::Char(CharDev::VioCon),
+        "RESMGR$" => Device::Char(CharDev::ResMgr),
         b => match (b.strip_prefix("COM"), b.strip_prefix("LPT")) {
             (Some(n), _) if matches!(n, "1" | "2" | "3" | "4") => Device::Char(CharDev::Com(n.as_bytes()[0] - b'1')),
             (_, Some(n)) if matches!(n, "1" | "2" | "3") => Device::Char(CharDev::Lpt(n.as_bytes()[0] - b'1')),

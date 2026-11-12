@@ -6,7 +6,7 @@
 use super::pci::Device;
 
 /// Names of devices commonly found in VMware, VirtualBox and QEMU VMs.
-fn name(vendor: u16, device: u16) -> Option<&'static str> {
+pub(crate) fn name(vendor: u16, device: u16) -> Option<&'static str> {
     Some(match (vendor, device) {
         (0x15ad, 0x0405) => "VMware SVGA II",
         (0x15ad, 0x0710) => "VMware SVGA (legacy)",

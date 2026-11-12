@@ -1,0 +1,13 @@
+[package]
+name = "rminfo-dll"
+description = "RMINFO.DLL: the resource manager's information calls (RMEnumNodes, RMGetNodeInfo, ...), on the kernel's RESMGR$ device"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "rminfo"
+path = "src/lib.rs"
+
+[dependencies]
+os2 = { path = "../os2" }

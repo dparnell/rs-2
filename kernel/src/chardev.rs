@@ -421,7 +421,7 @@ const PARA_CTR_SELECT: u8 = 0x08;
 const PARA_STS_BUSY: u8 = 0x80;
 
 /// Whether port `n` exists (the data latch reads back), set up once.
-fn lpt_present(n: usize) -> bool {
+pub(crate) fn lpt_present(n: usize) -> bool {
     use core::sync::atomic::Ordering;
     let Some(&base) = LPT_BASES.get(n) else { return false };
     match LPT_STATE[n].load(Ordering::Relaxed) {

@@ -29,6 +29,7 @@ mod kbd;
 mod loader;
 mod pipe;
 mod power;
+mod resmgr;
 mod pty;
 mod log;
 mod mm;

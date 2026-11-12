@@ -1,0 +1,19 @@
+; RMINFO.DLL with IBM's ordinals (its resident names; programs import
+; by name). _Optlink entries: the first arguments in EAX, EDX, ECX.
+RMConvertID=__o_RMConvertID @1
+RMEnumNodes=__o_RMEnumNodes @2
+RMGetNodeInfo=__o_RMGetNodeInfo @5
+RMCreateDriver=RMNotHere @6
+RMAllocResource=RMNotHere @8
+RMCreateAdapter=RMNotHere @9
+RMCreateDetected=RMNotHere @12
+RMGetSnoopLevel=__o_RMGetSnoopLevel @13
+RMDestroyAdapter=RMNotHere @14
+RMDestroyDriver=RMNotHere @15
+RMSetSnoopLevel=__o_RMSetSnoopLevel @16
+RMDeallocResource=RMNotHere @21
+RMDestroyDetected=RMNotHere @23
+RMSaveDetectedData=__o_RMSaveDetectedData @25
+RMHandleToResourceHandleList=RMNotHere @28
+RMDevIDToHandleList=RMNotHere @30
+RMDeleteDetectedData=RMNotHere @32

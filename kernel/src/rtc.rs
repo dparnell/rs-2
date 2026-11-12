@@ -27,7 +27,7 @@ pub struct DateTime {
     pub weekday: u8,
 }
 
-fn cmos(reg: u8) -> u8 {
+pub(crate) fn cmos(reg: u8) -> u8 {
     unsafe {
         outb(0x70, reg);
         inb(0x71)

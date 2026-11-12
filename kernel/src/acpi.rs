@@ -266,3 +266,11 @@ pub fn reset() {
         }
     }
 }
+
+/// The devices of the ACPI namespace that have a hardware ID (for the
+/// resource manager).
+pub fn devices() -> Vec<crate::aml::AcpiDevice> {
+    let Some(i) = info() else { return Vec::new() };
+    let blocks: Vec<&[u8]> = i.aml.iter().map(|&(a, n)| unsafe { core::slice::from_raw_parts(phys_to_virt(a) as *const u8, n) }).collect();
+    crate::aml::devices(&blocks)
+}

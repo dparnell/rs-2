@@ -581,3 +581,61 @@ fn bridge_of(bus: u8) -> Option<(u8, u8)> {
     }
     None
 }
+
+/// A device of the ACPI namespace, for the resource manager
+/// ([`crate::resmgr`]): its path, hardware ID (`_HID`, an EISA ID shown
+/// as text such as "PNP0501"), `_UID` and its current resources when
+/// `_CRS` is data (a method's are not known: methods are not run), and
+/// whether `_STA` says it is absent.
+pub struct AcpiDevice {
+    pub path: String,
+    pub hid: String,
+    pub uid: Option<u64>,
+    pub crs: Option<Vec<u8>>,
+    pub absent: bool,
+}
+
+/// An EISA ID (`EisaId ("PNP0303")` compressed into a dword) as text.
+pub fn eisa_id(v: u32) -> String {
+    let b = v.to_le_bytes();
+    let hex = |n: u8| char::from_digit(n as u32, 16).unwrap_or('0').to_ascii_uppercase();
+    let mut s = String::new();
+    s.push((((b[0] >> 2) & 0x1f) + 0x40) as char);
+    s.push(((((b[0] & 3) << 3) | (b[1] >> 5)) + 0x40) as char);
+    s.push(((b[1] & 0x1f) + 0x40) as char);
+    for n in [b[2] >> 4, b[2] & 0xf, b[3] >> 4, b[3] & 0xf] {
+        s.push(hex(n));
+    }
+    s
+}
+
+/// The devices of the definition blocks (DSDT first, then the SSDTs) that
+/// have a hardware ID.
+pub fn devices(blocks: &[&[u8]]) -> Vec<AcpiDevice> {
+    let mut w = Walker { objs: Vec::new() };
+    for b in blocks {
+        w.terms(b, 0, b.len(), "");
+    }
+    let mut v = Vec::new();
+    for (path, o) in &w.objs {
+        if !matches!(o, Obj::Device) {
+            continue;
+        }
+        let hid = match w.get(&alloc::format!("{path}._HID")) {
+            Some(Obj::Int(n)) => eisa_id(*n as u32),
+            Some(Obj::Str(s)) => s.clone(),
+            _ => continue,
+        };
+        let uid = match w.get(&alloc::format!("{path}._UID")) {
+            Some(Obj::Int(n)) => Some(*n),
+            _ => None,
+        };
+        let crs = match w.get(&alloc::format!("{path}._CRS")) {
+            Some(Obj::Buffer(b)) => Some(b.clone()),
+            _ => None,
+        };
+        let absent = matches!(w.get(&alloc::format!("{path}._STA")), Some(Obj::Int(0)));
+        v.push(AcpiDevice { path: path.clone(), hid, uid, crs, absent });
+    }
+    v
+}

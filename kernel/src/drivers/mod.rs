@@ -147,11 +147,13 @@ pub fn init() {
     let devs = pci::enumerate();
     crate::println!("pci: {} functions", devs.len());
     pcilist::log(&devs);
+    crate::resmgr::scan_pci(&devs);
     let mut disks: Vec<Arc<dyn BlockDev>> = Vec::new();
     let mut optical: Vec<Arc<dyn BlockDev>> = Vec::new();
     // USB storage comes after the built-in drives.
     let (mut usb_disks, mut usb_optical) = (Vec::new(), Vec::new());
     for d in &devs {
+        let seen = (disks.len(), optical.len(), usb_disks.len(), usb_optical.len());
         if (d.class, d.subclass, d.progif) == (1, 6, 1) {
             for p in ahci::probe(d) {
                 match p.kind {
@@ -215,9 +217,19 @@ pub fn init() {
         for (dev, is_optical) in units {
             if is_optical { optical.push(dev) } else { disks.push(dev) }
         }
+        crate::resmgr::note_storage(d, &disks[seen.0..], &optical[seen.1..]);
+        crate::resmgr::note_storage(d, &usb_disks[seen.2..], &usb_optical[seen.3..]);
     }
     // Paravirtual (virtio) storage counts as built in.
     let mut vio = virtio::probe(&devs);
+    // The resource manager shows virtio disks on the first virtio block
+    // function, CD drives on the first virtio SCSI one.
+    if let Some(d) = devs.iter().find(|d| d.vendor == 0x1af4 && matches!(d.device, 0x1001 | 0x1042)) {
+        crate::resmgr::note_storage(d, &vio.disks, &[]);
+    }
+    if let Some(d) = devs.iter().find(|d| d.vendor == 0x1af4 && matches!(d.device, 0x1004 | 0x1048)) {
+        crate::resmgr::note_storage(d, &[], &vio.optical);
+    }
     disks.append(&mut vio.disks);
     optical.append(&mut vio.optical);
     disks.append(&mut usb_disks);
