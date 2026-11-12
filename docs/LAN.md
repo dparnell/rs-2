@@ -272,6 +272,17 @@ ATTRIB, DEL of a read-only file (refused) and after ATTRIB -R, RD, COPY
 to LPT3, USE /D, CONFIG REQUESTER and LOGOFF; the host checks the 5 MB
 files byte for byte and the two print jobs.
 
+`lanprint.sh` (2026-11-12): a network printer made with
+NETID=WORKGROUP\\SMBHOST\LASER gets its local alias (LASER, with a
+printer on `\\SMBHOST\LASER`), a raw job on it arrives in smbhost.py's
+LASER spool directory byte for byte (80 bytes, one job), and its
+settings show the Network page. Known: in a WPSTEST SHELL run, once an
+object has been created (WinCreateObject) a later OPEN of a network
+folder, or a creation after a server's folder opened, stalls WPSTEST's
+calls into the shell; the same happens on the commit before the
+network printers (a plain WPPrinter created with a server folder open),
+so it is not theirs. Not looked into further.
+
 Results (2026-11-04): `cargo test -p smb` 18 passed; LANTEST 56 of 56
 and the host checks (7) pass; `lanwps.sh` shows WORKGROUP in the Network
 folder, SMBHOST in it, the DATA, PUBLIC and LASER (printer) shares, DATA's
