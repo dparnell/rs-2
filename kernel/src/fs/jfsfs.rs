@@ -189,17 +189,17 @@ impl FileSystem for JfsFs {
     }
 
     fn rename(&self, from: &str, to: &str) -> Result<(), u32> {
-        let moved = {
-            let mut v = self.inner.vol.lock();
-            v.rename(from, to).map_err(map)?;
-            v.lookup(to).ok()
-        };
-        // Keep open handles' entries pointing at the new name (the volume
-        // lock is released first: file operations take entry, then volume).
-        if let Some(e) = moved {
-            let f = self.inner.open.lock().get(&e.ino).and_then(|w| w.upgrade());
-            if let Some(f) = f {
-                let mut fe = f.entry.lock();
+        // An open file's entry is locked before the volume (the order of
+        // its writes) and updated with the rename in one critical section:
+        // a write waiting for the volume must not then store the entry
+        // under the old name.
+        let key = self.inner.vol.lock().lookup(from).ok().map(|e| e.ino);
+        let f = key.and_then(|k| self.inner.open.lock().get(&k).and_then(|w| w.upgrade()));
+        let mut fe = f.as_ref().map(|f| f.entry.lock());
+        let mut v = self.inner.vol.lock();
+        v.rename(from, to).map_err(map)?;
+        if let (Some(fe), Ok(e)) = (fe.as_mut(), v.lookup(to)) {
+            if e.ino == fe.ino {
                 fe.name = e.name;
                 fe.parent = e.parent;
             }

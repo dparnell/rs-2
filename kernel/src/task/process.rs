@@ -115,7 +115,10 @@ pub struct Process {
     /// 16-bit signal handlers: (far handler, action) per signal number.
     pub signals: SpinLock<[(u32, u32); 8]>,
     /// Open directory searches (DosFindFirst handles).
-    pub searches: SpinLock<alloc::collections::BTreeMap<u32, crate::api::file::Search>>,
+    /// Each search has its own lock: DosFindNext fills the caller's buffer
+    /// (reading EAs from the disk) with it, DosFindClose takes it out of
+    /// the table meanwhile.
+    pub searches: SpinLock<alloc::collections::BTreeMap<u32, Arc<crate::sync::Mutex<crate::api::file::Search>>>>,
     /// XCPT_SIGNAL kinds delivered and not yet acknowledged (bit per
     /// 16-bit signal number): further ones wait.
     pub sig_held: AtomicU32,
@@ -657,7 +660,19 @@ impl Process {
 
 /// Remove a terminated process from the table (its memory is released once
 /// nothing references it any more).
+/// Processes whose reference an interrupt handler held (a 16-bit timer
+/// clearing a RAM semaphore): if that was the last one, the process is
+/// freed here later, in thread context, not in the handler.
+static DEFERRED: SpinLock<Vec<Arc<Process>>> = SpinLock::new(Vec::new());
+
+/// Let go of `p` from interrupt context.
+pub fn drop_later(p: Arc<Process>) {
+    DEFERRED.lock().push(p);
+}
+
 pub fn reap(pid: u32) -> bool {
+    let later = core::mem::take(&mut *DEFERRED.lock());
+    drop(later);
     // The last reference may go with it: drop it after the table lock
     // (freeing an address space takes other locks and may wait).
     let gone: Vec<Arc<Process>> = {

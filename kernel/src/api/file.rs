@@ -1437,7 +1437,7 @@ fn find_first(c: &mut Ctx, spec_addr: u32, phdir: u32, attrib: u32, buf: u32, cb
         } else {
             1 // HDIR_SYSTEM (or a caller-supplied handle is reused)
         };
-        sr.insert(h, s);
+        sr.insert(h, Arc::new(crate::sync::Mutex::new(s)));
         h
     };
     if c.is16 {
@@ -1471,11 +1471,10 @@ pub fn dos16_find_first2(c: &mut Ctx) -> u32 {
 fn find_next(c: &mut Ctx, h: u32, buf: u32, cb: u32, pcount: u32) -> u32 {
     let want = if c.is16 { c.read_u16(pcount).map(|v| v as u32) } else { c.read_u32(pcount) };
     let Some(want) = want else { return err::INVALID_ADDRESS };
-    let Some(mut s) = c.process.searches.lock().remove(&h) else { return err::INVALID_HANDLE };
+    let Some(s) = c.process.searches.lock().get(&h).cloned() else { return err::INVALID_HANDLE };
+    let mut s = s.lock();
     let r = if s.next >= s.results.len() { Err(err::NO_MORE_FILES) } else { fill(c, &mut s, buf, cb, want.max(1)) };
-    // Back, unless another thread's DosFindFirst took the number while it
-    // was out (its search must not be overwritten).
-    c.process.searches.lock().entry(h).or_insert(s);
+    drop(s);
     match r {
         Ok((n, rc)) => {
             if c.is16 { c.write_u16(pcount, n as u16) } else { c.write_u32(pcount, n) };

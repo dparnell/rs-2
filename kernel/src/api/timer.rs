@@ -77,10 +77,18 @@ pub fn tick() {
             Action::PostEvent(pid, h) => super::sem::post_event_handle(pid, h),
             Action::ClearRam(pid, lin) => {
                 if let Some(p) = crate::task::process::by_pid(pid) {
-                    let sp = p.space.lock();
-                    let present = sp.region(lin).is_some();
-                    if let (true, Some(phys)) = (present, crate::mm::paging::translate(sp.root, lin as u64)) {
-                        unsafe { (crate::mm::phys::phys_to_virt(phys) as *mut u32).write_volatile(0) };
+                    {
+                        let sp = p.space.lock();
+                        let present = sp.region(lin).is_some();
+                        if let (true, Some(phys)) = (present, crate::mm::paging::translate(sp.root, lin as u64)) {
+                            unsafe { (crate::mm::phys::phys_to_virt(phys) as *mut u32).write_volatile(0) };
+                        }
+                    }
+                    // A process that has ended may lose its last other
+                    // reference meanwhile: not freed in the interrupt
+                    // handler.
+                    if p.finished.load(core::sync::atomic::Ordering::Acquire) {
+                        crate::task::process::drop_later(p);
                     }
                 }
                 super::sem::wake_16bit();
