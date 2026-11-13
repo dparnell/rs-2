@@ -647,7 +647,7 @@ pub enum Handle {
     /// A printer port whose output goes to the spooler (0-based LPT
     /// number and the connection to the spooler's port pipe:
     /// `crate::chardev::lpt_spool_open`).
-    Spool(u8, Arc<crate::npipe::End>),
+    Spool(u8, Arc<crate::chardev::SpoolConn>),
 }
 
 impl Handle {

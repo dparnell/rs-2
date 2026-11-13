@@ -160,6 +160,7 @@ dependencies = [
  "hpfs",
  "jfs",
  "os2-exe",
+ "parport",
  "pathcache",
  "smb",
  "tcpip",

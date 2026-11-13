@@ -121,6 +121,8 @@ pub fn run(n: u8) {
 
     let (rc, _) = ioctl(hf, 0x7f, &[], 0);
     check("an unknown printer function: ERROR_INVALID_FUNCTION", rc == 1);
+    let (rc, _) = ioctl(hf, 0x21, &[], 2);
+    check("PRT_QUERYJOBHANDLE on the port itself (no spooler): ERROR_INVALID_FUNCTION", rc == 1);
     let mut d = [0u8; 2];
     let (mut pl, mut dl) = (0u32, 2u32);
     let rc = unsafe { DosDevIOCtl(hf, 1, 0x61, null_mut(), 0, &mut pl, d.as_mut_ptr(), 2, &mut dl) };

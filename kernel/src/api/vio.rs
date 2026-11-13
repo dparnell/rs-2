@@ -1121,8 +1121,8 @@ pub fn vio_prt_sc(_c: &mut Ctx) -> u32 {
     // runs (the PrtSc key, from the keyboard path, writes to the port).
     let text = screen_text(sid());
     match crate::chardev::lpt_spool_open(0) {
-        Some(end) => {
-            let _ = end.write(&text);
+        Some(conn) => {
+            conn.write(&text);
         }
         None => {
             crate::chardev::lpt_write(0, &text);

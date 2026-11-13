@@ -505,14 +505,73 @@ pub fn lpt_write(n: usize, data: &[u8]) -> usize {
 /// job, as OS/2's printer device driver hands such output to the
 /// spooler. The kernel connects, sends `LPTn\0program\0pid\0` and gets
 /// one byte back: 0 when the port's printer spools, else the port is
-/// used directly. The connection then carries the output; closing it
-/// (the handle's last close) ends the job.
+/// used directly. The connection then carries messages, each a kind
+/// byte, a 32-bit length and that many bytes: `SPOOL_DATA` the output,
+/// `SPOOL_JOB` (no bytes) asks for the job's id, which the spooler
+/// answers with 4 bytes (0: no job could be made). Closing the
+/// connection (the handle's last close) ends the job.
 pub const SPOOL_PIPE: &str = "\\PIPE\\SPOOLER\\PORT";
+pub const SPOOL_DATA: u8 = 0;
+pub const SPOOL_JOB: u8 = 1;
+
+/// A printer port handle the spooler serves: the connection, and a lock
+/// keeping each message whole (threads of a process share the handle);
+/// the flag says the connection was given up.
+pub struct SpoolConn {
+    end: alloc::sync::Arc<crate::npipe::End>,
+    io: crate::sync::Mutex<bool>,
+}
+
+impl SpoolConn {
+    /// One message, under the lock; false (and the connection given up)
+    /// if it did not go whole.
+    fn send(&self, broken: &mut bool, kind: u8, data: &[u8]) -> bool {
+        if *broken {
+            return false;
+        }
+        let mut m = Vec::with_capacity(5 + data.len());
+        m.push(kind);
+        m.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        m.extend_from_slice(data);
+        if self.end.write(&m) != Ok(m.len()) {
+            *broken = true;
+        }
+        !*broken
+    }
+
+    /// Output for the job. The spooler gone, the output is dropped, as a
+    /// port that went away.
+    pub fn write(&self, data: &[u8]) -> usize {
+        let mut broken = self.io.lock();
+        self.send(&mut broken, SPOOL_DATA, data);
+        data.len()
+    }
+
+    /// The spooler's job id for this handle (PRT_QUERYJOBHANDLE); the
+    /// spooler starts the job if no byte has come yet.
+    pub fn job(&self) -> Option<u32> {
+        let mut broken = self.io.lock();
+        if !self.send(&mut broken, SPOOL_JOB, &[]) {
+            return None;
+        }
+        let mut v = Vec::new();
+        while v.len() < 4 {
+            match self.end.read(4 - v.len()) {
+                Ok((d, _)) if !d.is_empty() => v.extend_from_slice(&d),
+                _ => {
+                    *broken = true;
+                    return None;
+                }
+            }
+        }
+        Some(u32::from_le_bytes([v[0], v[1], v[2], v[3]])).filter(|&j| j != 0)
+    }
+}
 
 /// Connect a printer port opened by the current process to the spooler,
 /// None when the output goes to the port itself (no spooler, the port's
 /// printer is not spooled, or the spooler opening its own port).
-pub fn lpt_spool_open(n: u8) -> Option<alloc::sync::Arc<crate::npipe::End>> {
+pub fn lpt_spool_open(n: u8) -> Option<alloc::sync::Arc<SpoolConn>> {
     let p = crate::task::sched::current_opt().and_then(|t| t.process())?;
     if crate::npipe::served_by(SPOOL_PIPE, p.pid) {
         return None;
@@ -538,7 +597,7 @@ pub fn lpt_spool_open(n: u8) -> Option<alloc::sync::Arc<crate::npipe::End>> {
     let req = alloc::format!("LPT{}\0{}\0{}\0", n + 1, prog, p.pid);
     end.write(req.as_bytes()).ok()?;
     match end.read(1) {
-        Ok((v, _)) if v.first() == Some(&0) => Some(end),
+        Ok((v, _)) if v.first() == Some(&0) => Some(alloc::sync::Arc::new(SpoolConn { end, io: crate::sync::Mutex::new(false) })),
         _ => None,
     }
 }

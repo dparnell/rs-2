@@ -1,6 +1,7 @@
 //! Parallel ports: the hardware behind LPT1-LPT3, as IBM's PRINT01.SYS
 //! drives it (its disassembly studied with print01.sym; the notes are in
-//! docs/PRINTING.md "The parallel port driver").
+//! docs/PRINTING.md "The parallel port driver"), with the IEEE 1284
+//! modes of IBM's PAR1284.SYS (known here from its symbol file).
 //!
 //! Ports are found through ACPI (PNP0400/PNP0401 devices: the I/O range
 //! of `_CRS`, a second range at base+400h for the ECP registers, the
@@ -24,11 +25,16 @@
 //! waits as long as it takes.
 //!
 //! Ports with an ECP chip (an extended control register at base+402h
-//! that behaves as one) can be switched to FIFO transfers
-//! (PRT_SETDATAXFERMODE 1: the chip handshakes each byte itself) and to
-//! ECP mode (IEEE 1284 negotiation, then the FIFO); EPP ports write
-//! through the EPP data register. The IEEE 1284 device ID is read in
-//! nibble mode (PRT_QUERDEVICEID).
+//! that behaves as one) write through the chip's FIFO by default
+//! (PRT_SETDATAXFERMODE 1: the chip handshakes each byte itself) and in
+//! ECP mode when asked (PRT_SETCOMMMODE 4: IEEE 1284 negotiation, then
+//! the ECP data FIFO; the compatibility FIFO when the printer refuses);
+//! EPP ports write through the EPP data register (compatibility mode
+//! when nothing answers). The IEEE 1284 device ID is read in byte mode
+//! on bidirectional ports, else in nibble mode (PRT_QUERDEVICEID). The
+//! protocol steps are in crates/parport (`ieee1284` here), host-tested
+//! against a simulated port; this file gives them port I/O, sleeping
+//! and the interrupt.
 //!
 //! Kernel command line: `lptpoll` polls every port (no interrupts);
 //! `lptstall=BYTES,MS` makes the ports report "out of paper" for MS ms
@@ -39,6 +45,8 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 
+use ieee1284::{CAP_BYTE, CAP_ECP, CAP_EPP, CTR_IDLE, CTR_INTEN, CTR_SELECT, ECR_NOINTR, ECR_PS2, STS_ACK, STS_BUSY, STS_ERROR, STS_PAPER, STS_SELECT, Waited};
+
 use crate::arch::idt::TrapFrame;
 use crate::arch::{inb, outb};
 use crate::sync::SpinLock;
@@ -46,42 +54,6 @@ use crate::task::WaitQueue;
 
 pub const NPORTS: usize = 3;
 const STD_BASES: [u16; NPORTS] = [0x378, 0x278, 0x3bc];
-
-// Control register (base+2). STROBE, AUTOFD and SELECTIN are inverted
-// on the cable: a 1 drives the line low.
-const CTR_STROBE: u8 = 0x01;
-const CTR_AUTOFD: u8 = 0x02;
-const CTR_INIT: u8 = 0x04;
-const CTR_SELECT: u8 = 0x08;
-const CTR_INTEN: u8 = 0x10;
-const CTR_DIR: u8 = 0x20;
-/// Idle: not resetting, printer selected.
-const CTR_IDLE: u8 = CTR_INIT | CTR_SELECT;
-
-// Status register (base+1), as read: BUSY reads 0 while busy, ACK and
-// ERROR are active low.
-const STS_EPP_TIMEOUT: u8 = 0x01;
-const STS_ERROR: u8 = 0x08;
-const STS_SELECT: u8 = 0x10;
-const STS_PAPER: u8 = 0x20;
-const STS_ACK: u8 = 0x40;
-const STS_BUSY: u8 = 0x80;
-
-// Extended control register modes (bits 7-5) and bits.
-const ECR_SPP: u8 = 0x00;
-const ECR_PS2: u8 = 0x20;
-const ECR_FIFO: u8 = 0x40;
-const ECR_ECP: u8 = 0x60;
-const ECR_EPP: u8 = 0x80;
-/// nErrIntrEn and serviceIntr set: no ECP interrupts.
-const ECR_NOINTR: u8 = 0x14;
-const ECR_EMPTY: u8 = 0x01;
-const ECR_FULL: u8 = 0x02;
-
-/// Capabilities beyond compatibility and nibble mode (every port).
-pub const CAP_BYTE: u8 = 0x01;
-pub const CAP_EPP: u8 = 0x02;
-pub const CAP_ECP: u8 = 0x04;
 
 /// PRT_SETCOMMMODE / PRT_QUERYCOMMMODE values.
 pub const COMM_COMPAT: u8 = 0;
@@ -96,18 +68,12 @@ pub const XFER_FIFO: u8 = 1;
 // Errors (OS/2 error codes; device errors are 19 + the driver's code).
 const INVALID_FUNCTION: u32 = 1;
 const INVALID_HANDLE: u32 = 6;
-/// Device error 1 (unknown unit): PRINT01's for a printer that answers
-/// with "not busy" but is not ready.
-const BAD_UNIT: u32 = 20;
-const BAD_COMMAND: u32 = 22;
-const OUT_OF_PAPER: u32 = 28;
-const WRITE_FAULT: u32 = 29;
+const BAD_COMMAND: u32 = ieee1284::BAD_COMMAND;
 const INVALID_PARAMETER: u32 = 87;
-const INTERRUPT: u32 = 95;
+const INTERRUPT: u32 = ieee1284::INTERRUPT;
 
 /// PRT_GETPRINTERSTATUS bits.
 const PRINTER_TIMEOUT: u8 = 0x01;
-const PRINTER_IO_ERROR: u8 = 0x08;
 const PRINTER_SELECTED: u8 = 0x10;
 const PRINTER_NOT_BUSY: u8 = 0x80;
 
@@ -128,6 +94,12 @@ pub struct Info {
     pub caps: u8,
 }
 
+impl Info {
+    fn regs(&self) -> ieee1284::Port {
+        ieee1284::Port { base: self.base, ecr: self.ecr }
+    }
+}
+
 struct Port {
     info: Option<Info>,
     /// Characters per line, lines per inch (PRT_SETFRAMECTL).
@@ -141,6 +113,11 @@ struct Port {
     xfer: u8,
     /// The last write ended on the timeout (PRINTER_TIMEOUT).
     timed_out: bool,
+    /// The printer did not negotiate ECP mode, or no EPP peripheral
+    /// answered: output in compatibility mode until the mode is set again
+    /// or the printer is initialised.
+    ecp_refused: bool,
+    epp_failed: bool,
 }
 
 const fn port() -> Port {
@@ -154,6 +131,8 @@ const fn port() -> Port {
         comm: COMM_COMPAT,
         xfer: XFER_PIO,
         timed_out: false,
+        ecp_refused: false,
+        epp_failed: false,
     }
 }
 
@@ -201,113 +180,69 @@ fn stall_check(sent: u64) {
     }
 }
 
-/// PRINT01's view of the status lines: ACK and ERROR made active high.
-fn ibm_status(raw: u8) -> u8 {
-    (raw & 0xf8) ^ (STS_ACK | STS_ERROR)
+/// The port I/O the protocol code (crates/parport) runs on: the port's
+/// registers (the status read through the test stall), waits that sleep
+/// until the port's interrupt or a timer tick.
+struct Hw {
+    /// The LPT index (interrupt signals), or NPORTS while probing.
+    n: usize,
+    base: u16,
+    /// Bytes sent before this write (the test stalls count them).
+    sent: u64,
 }
 
-/// The data latch reads back what was written.
-fn latch_ok(base: u16) -> bool {
-    unsafe {
-        let ctr = inb(base + 2);
-        outb(base + 2, ctr & !CTR_DIR);
-        outb(base, 0x55);
-        let a = inb(base);
-        outb(base, 0xaa);
-        let b = inb(base);
-        a == 0x55 && b == 0xaa
+impl Hw {
+    fn new(n: usize, base: u16) -> Hw {
+        Hw { n, base, sent: if n < NPORTS { SENT[n].load(Ordering::Relaxed) } else { 0 } }
     }
 }
 
-/// An ECP chip's extended control register at `ecr` (the test Linux's
-/// parport_pc uses: a register that only mirrors the control register is
-/// not one; after a reset the FIFO is empty and mode writes read back).
-fn ecr_ok(base: u16, ecr: u16) -> bool {
-    unsafe {
-        let ctr = inb(base + 2);
-        let e = inb(ecr);
-        if e & 3 == ctr & 3 {
-            outb(base + 2, ctr ^ CTR_AUTOFD);
-            let c2 = inb(base + 2);
-            let mirrors = inb(ecr) & 2 == c2 & 2;
-            outb(base + 2, ctr);
-            if mirrors {
-                return false;
-            }
-        }
-        if inb(ecr) & 3 != ECR_EMPTY {
-            return false;
-        }
-        outb(ecr, 0x34);
-        let ok = inb(ecr) == 0x35;
-        outb(ecr, ECR_PS2 | ECR_NOINTR);
-        ok
+impl ieee1284::Io for Hw {
+    fn inb(&mut self, port: u16) -> u8 {
+        if port == self.base + 1 { status(self.base) } else { unsafe { inb(port) } }
     }
-}
 
-/// Clear the EPP timeout bit (chips clear it on a read, by writing 1, or
-/// by writing 0); whether it is clear now.
-fn clear_epp_timeout(base: u16) -> bool {
-    unsafe {
-        if inb(base + 1) & STS_EPP_TIMEOUT == 0 {
+    fn outb(&mut self, port: u16, v: u8) {
+        unsafe { outb(port, v) }
+    }
+
+    fn deadline(&mut self, ms: u64) -> u64 {
+        crate::irq::ticks() + (ms * crate::irq::HZ / 1000).max(1)
+    }
+
+    fn expired(&mut self, d: u64) -> bool {
+        crate::irq::ticks() >= d
+    }
+
+    fn mark(&mut self) -> u64 {
+        if self.n < NPORTS { SIGNALS[self.n].load(Ordering::Acquire) } else { 0 }
+    }
+
+    /// Sleep until the port's interrupt (re-checking every 50 ms) or,
+    /// polled, a timer tick; yield where sleeping is not allowed.
+    fn pause(&mut self, d: u64, mark: u64) -> bool {
+        if !may_sleep() {
+            crate::task::sched::yield_now();
             return true;
         }
-        let _ = inb(base + 1);
-        let r = inb(base + 1);
-        outb(base + 1, r | STS_EPP_TIMEOUT);
-        outb(base + 1, r & !STS_EPP_TIMEOUT);
-        inb(base + 1) & STS_EPP_TIMEOUT == 0
-    }
-}
-
-/// EPP: an address cycle with nobody answering times out (the status
-/// timeout bit sets), which an SPP port never reports.
-fn epp_ok(base: u16) -> bool {
-    if !clear_epp_timeout(base) {
-        return false;
-    }
-    unsafe {
-        outb(base + 2, CTR_INIT);
-        let _ = inb(base + 3);
-        let t = inb(base + 1) & STS_EPP_TIMEOUT != 0;
-        clear_epp_timeout(base);
-        outb(base + 2, CTR_IDLE);
-        t
-    }
-}
-
-/// Bidirectional (PS/2 byte mode): with the direction bit set the data
-/// lines float and no longer read back the latch.
-fn byte_ok(base: u16) -> bool {
-    unsafe {
-        let ctr = inb(base + 2);
-        outb(base + 2, ctr | CTR_DIR);
-        outb(base, 0x55);
-        let a = inb(base);
-        outb(base, 0xaa);
-        let b = inb(base);
-        outb(base + 2, ctr & !CTR_DIR);
-        !(a == 0x55 && b == 0xaa)
-    }
-}
-
-/// What the port can do (the ECP chip set to PS/2 mode for the tests).
-fn capabilities(base: u16, ecr: u16) -> u8 {
-    let mut caps = 0;
-    if ecr != 0 {
-        caps |= CAP_ECP;
-        unsafe { outb(ecr, ECR_EPP | ECR_NOINTR) };
-        if epp_ok(base) {
-            caps |= CAP_EPP;
+        if crate::task::sched::current().exit_requested() {
+            return false;
         }
-        unsafe { outb(ecr, ECR_PS2 | ECR_NOINTR) };
-    } else if epp_ok(base) {
-        caps |= CAP_EPP;
+        let n = self.n;
+        let now = crate::irq::ticks();
+        if n >= NPORTS {
+            crate::task::sched::sleep_ms(1);
+            return true;
+        }
+        let irq = IRQ_ON[n].load(Ordering::Acquire);
+        let until = if irq { d.min(now + 50 * crate::irq::HZ / 1000) } else { now + 1 };
+        WAIT[n].wait_uninterruptible_until(until, || SIGNALS[n].load(Ordering::Acquire) != mark);
+        true
     }
-    if byte_ok(base) {
-        caps |= CAP_BYTE;
+
+    fn before_byte(&mut self, i: usize) {
+        stall_check(self.sent + i as u64);
     }
-    caps
 }
 
 fn caps_text(caps: u8) -> String {
@@ -337,6 +272,31 @@ fn acpi_ports() -> Vec<(u16, u16, Option<u8>)> {
     v
 }
 
+/// A PCI parallel port: class 07h subclass 01h with a programming
+/// interface of a register-compatible port (00h SPP, 01h bidirectional,
+/// 02h ECP; 03h, an IEEE 1284 controller, and FEh, a 1284 target, have
+/// other registers). BAR 0 is the port, BAR 1 (when an I/O BAR) the ECP
+/// registers: the ECR at its third byte, as on the NetMos/MosChip
+/// 9805/9865 and Oxford OX16PCI952/OXPCIe952 parallel functions.
+/// (base, ECR) or why not.
+pub fn pci_port(class: u8, subclass: u8, progif: u8, bar0: u32, bar1: u32) -> Result<(u16, u16), &'static str> {
+    if (class, subclass) != (7, 1) {
+        return Err("not a parallel port");
+    }
+    if progif > 2 {
+        return Err("not register-compatible (IEEE 1284 controller or target)");
+    }
+    if bar0 & 1 == 0 {
+        return Err("memory-mapped registers");
+    }
+    let base = (bar0 & 0xfffc) as u16;
+    if base == 0 {
+        return Err("BAR 0 not assigned");
+    }
+    let ecr = if bar1 & 1 != 0 && bar1 & 0xfffc != 0 { (bar1 & 0xfffc) as u16 + 2 } else { 0 };
+    Ok((base, ecr))
+}
+
 /// Find the ports (once, at boot after ACPI and PCI).
 pub fn init() {
     // One probe; a caller on another CPU waits for it to finish.
@@ -351,46 +311,49 @@ pub fn init() {
         STALL_NEXT.store(every, Ordering::Relaxed);
         STALL_MS.store(ms, Ordering::Relaxed);
     }
+    let probe = |base: u16| ieee1284::latch_ok(&mut Hw::new(NPORTS, base), &ieee1284::Port { base, ecr: 0 });
     let mut found: Vec<Info> = Vec::new();
     for (base, ecr, irq) in acpi_ports() {
-        if latch_ok(base) {
+        if probe(base) {
             found.push(Info { base, ecr, irq, source: "ACPI", pci: None, caps: 0 });
         }
     }
     for d in crate::drivers::pci::enumerate() {
-        if (d.class, d.subclass) != (7, 1) {
+        if d.class != 7 || d.subclass != 1 {
             continue;
         }
-        let b0 = d.read(0x10);
-        if b0 & 1 == 0 {
-            continue;
-        }
-        let base = (b0 & 0xfffc) as u16;
+        let (bar0, bar1) = (d.read(0x10), d.read(0x14));
+        let (base, ecr) = match pci_port(d.class, d.subclass, d.progif, bar0, bar1) {
+            Ok(x) => x,
+            Err(why) => {
+                crate::println!("PCI parallel port {:04x}:{:04x} at {:02x}:{:02x}.{}: {why}, not used", d.vendor, d.device, d.bus, d.dev, d.func);
+                continue;
+            }
+        };
         if found.iter().any(|f| f.base == base) {
             continue;
         }
-        let b1 = d.read(0x14);
-        let ecr = if b1 & 1 != 0 && b1 & 0xfffc != 0 { (b1 & 0xfffc) as u16 + 2 } else { 0 };
         d.enable();
-        if latch_ok(base) {
+        if probe(base) {
             found.push(Info { base, ecr, irq: None, source: "PCI", pci: Some(d), caps: 0 });
         }
     }
     for (i, &base) in STD_BASES.iter().enumerate() {
-        if !found.iter().any(|f| f.base == base) && latch_ok(base) {
+        if !found.iter().any(|f| f.base == base) && probe(base) {
             // PRINT01: IRQ 5 for 278h, 7 for the others.
             found.push(Info { base, ecr: 0, irq: Some(if i == 1 { 5 } else { 7 }), source: "probe", pci: None, caps: 0 });
         }
     }
-    // ECP registers where ACPI or the card did not say: at base+402h.
+    // ECP registers where ACPI or the card did not say: at base+402h
+    // (not on a PCI card, whose base+400h may be anything).
     for f in found.iter_mut() {
-        if f.ecr == 0 && f.pci.is_none() && ecr_ok(f.base, f.base + 0x402) {
+        let mut hw = Hw::new(NPORTS, f.base);
+        if f.ecr == 0 && f.pci.is_none() && ieee1284::ecr_ok(&mut hw, f.base, f.base + 0x402) {
             f.ecr = f.base + 0x402;
-        } else if f.ecr != 0 && !ecr_ok(f.base, f.ecr) {
+        } else if f.ecr != 0 && !ieee1284::ecr_ok(&mut hw, f.base, f.ecr) {
             f.ecr = 0;
         }
-        f.caps = capabilities(f.base, f.ecr);
-        unsafe { outb(f.base + 2, CTR_IDLE) };
+        f.caps = ieee1284::capabilities(&mut hw, &f.regs());
     }
     // Names: the standard addresses keep theirs, others take free ones.
     let mut slots: [Option<Info>; NPORTS] = [None, None, None];
@@ -419,7 +382,10 @@ pub fn init() {
             f.irq.map_or(String::from("none"), |q| alloc::format!("{q}")),
             status(f.base)
         );
-        PORTS[i].lock().info = Some(f);
+        let mut p = PORTS[i].lock();
+        // An ECP chip writes through its FIFO unless told otherwise.
+        p.xfer = if f.caps & CAP_ECP != 0 { XFER_FIFO } else { XFER_PIO };
+        p.info = Some(f);
     }
 }
 
@@ -501,47 +467,6 @@ fn may_sleep() -> bool {
         && crate::task::sched::current_opt().is_some_and(|t| !t.is_idle())
 }
 
-enum Waited {
-    Ready,
-    Timeout,
-    Killed,
-}
-
-/// Wait up to `ms` for `cond` (which reads the port): a few quick polls,
-/// then sleeping until the port's interrupt (re-checking every 50 ms) or,
-/// polled, a timer tick at a time.
-fn wait_for(n: usize, ms: u64, mut cond: impl FnMut() -> bool) -> Waited {
-    for _ in 0..32 {
-        if cond() {
-            return Waited::Ready;
-        }
-    }
-    let hz = crate::irq::HZ;
-    let deadline = crate::irq::ticks() + (ms * hz / 1000).max(1);
-    let irq = IRQ_ON[n].load(Ordering::Acquire);
-    loop {
-        // The signal count before the look at the port: an acknowledge
-        // after the look wakes the wait below.
-        let seen = SIGNALS[n].load(Ordering::Acquire);
-        if cond() {
-            return Waited::Ready;
-        }
-        let now = crate::irq::ticks();
-        if now >= deadline {
-            return if cond() { Waited::Ready } else { Waited::Timeout };
-        }
-        if !may_sleep() {
-            crate::task::sched::yield_now();
-            continue;
-        }
-        if crate::task::sched::current().exit_requested() {
-            return Waited::Killed;
-        }
-        let until = if irq { deadline.min(now + 50 * hz / 1000) } else { now + 1 };
-        WAIT[n].wait_uninterruptible_until(until, || SIGNALS[n].load(Ordering::Acquire) != seen);
-    }
-}
-
 // ---- Output ----
 
 struct Owner(usize);
@@ -566,28 +491,25 @@ impl Drop for Owner {
     }
 }
 
-/// PRINT01's error for a printer that stopped (`prterp`): its status
-/// lines say out of paper (28), a fault or nothing answering (29 write
-/// fault), or a printer that is not busy but not ready either (20).
-fn stop_error(raw: u8) -> u32 {
-    let ah = ibm_status(raw);
-    let (nb, pe, sel, fault) = (ah & 0x80 != 0, ah & 0x20 != 0, ah & 0x10 != 0, ah & 0x08 != 0);
-    if nb && pe && sel {
-        BAD_UNIT
-    } else if !nb && pe && ((sel && !fault) || (!sel && fault)) {
-        OUT_OF_PAPER
-    } else if !nb && (sel || fault) || ah == 0 {
-        WRITE_FAULT
-    } else {
-        BAD_UNIT
-    }
+/// How the next bytes go out.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Path {
+    Spp,
+    Fifo,
+    Ecp,
+    Epp,
 }
 
-/// The printer takes a byte: not busy, selected, paper, no fault (or
-/// not selected while sending DC1, which selects it).
-fn ready(raw: u8, byte: u8) -> bool {
-    let ah = ibm_status(raw);
-    ah == 0x90 || (ah == 0x80 && byte == 0x11)
+/// The transfer for the port's modes: ECP mode (unless the printer
+/// refused it: then the FIFO), EPP (unless nothing answered), the ECP
+/// chip's compatibility FIFO, or a byte at a time.
+fn path(p: &Port, caps: u8) -> Path {
+    match p.comm {
+        COMM_ECP if caps & CAP_ECP != 0 && !p.ecp_refused => Path::Ecp,
+        COMM_EPP if caps & CAP_EPP != 0 && !p.epp_failed => Path::Epp,
+        _ if p.xfer == XFER_FIFO && caps & CAP_ECP != 0 => Path::Fifo,
+        _ => Path::Spp,
+    }
 }
 
 /// Output to LPTn (0-based): (error, bytes taken). Without a port the
@@ -596,17 +518,40 @@ pub fn write(n: usize, data: &[u8]) -> (u32, usize) {
     let Some(f) = info(n) else { return (0, data.len()) };
     setup_irq(n, &f);
     let _own = Owner::take(n);
+    let regs = f.regs();
     let mut done = 0;
     loop {
-        let (mode, xfer, timeout, infinite) = {
+        let (path, timeout, infinite) = {
             let p = PORTS[n].lock();
-            (p.comm, p.xfer, p.timeout_s.max(1) as u64 * 1000, p.infinite_retry)
+            (path(&p, f.caps), p.timeout_s.max(1) as u64 * 1000, p.infinite_retry)
         };
-        let (k, r) = match mode {
-            COMM_ECP if f.caps & CAP_ECP != 0 => ecp_write(n, &f, &data[done..], timeout, true),
-            COMM_EPP if f.caps & CAP_EPP != 0 => epp_write(&f, &data[done..]),
-            _ if xfer == XFER_FIFO && f.caps & CAP_ECP != 0 => ecp_write(n, &f, &data[done..], timeout, false),
-            _ => spp_write(n, &f, &data[done..], timeout, infinite),
+        let mut hw = Hw::new(n, f.base);
+        let rest = &data[done..];
+        let (k, r) = match path {
+            Path::Ecp => match ieee1284::ecp_write(&mut hw, &regs, rest, timeout) {
+                // The printer does not negotiate ECP: the compatibility
+                // FIFO from now on.
+                (0, Err(BAD_COMMAND)) => {
+                    crate::println!("LPT{}: the printer does not negotiate ECP mode; compatibility mode through the FIFO", n + 1);
+                    PORTS[n].lock().ecp_refused = true;
+                    continue;
+                }
+                x => x,
+            },
+            Path::Epp => match ieee1284::epp_write(&mut hw, &regs, rest) {
+                // No EPP peripheral answered: compatibility mode.
+                (0, Err(_)) if done == 0 => {
+                    crate::println!("LPT{}: no EPP peripheral answers; compatibility mode", n + 1);
+                    PORTS[n].lock().epp_failed = true;
+                    continue;
+                }
+                x => x,
+            },
+            Path::Fifo => ieee1284::fifo_write(&mut hw, &regs, rest, timeout),
+            Path::Spp => {
+                let ctr = CTR_IDLE | if IRQ_ON[n].load(Ordering::Acquire) { CTR_INTEN } else { 0 };
+                ieee1284::spp_write(&mut hw, &regs, ctr, rest, timeout, infinite)
+            }
         };
         done += k;
         let before = SENT[n].fetch_add(k as u64, Ordering::Relaxed);
@@ -645,226 +590,22 @@ pub fn write(n: usize, data: &[u8]) -> (u32, usize) {
     }
 }
 
-/// Compatibility mode, a byte at a time: wait until the printer is
-/// ready, data, strobe; the acknowledge pulse interrupts.
-fn spp_write(n: usize, f: &Info, data: &[u8], timeout_ms: u64, infinite: bool) -> (usize, Result<(), u32>) {
-    let base = f.base;
-    let ctr = CTR_IDLE | if IRQ_ON[n].load(Ordering::Acquire) { CTR_INTEN } else { 0 };
-    if f.ecr != 0 {
-        unsafe { outb(f.ecr, ECR_PS2 | ECR_NOINTR) };
-    }
-    unsafe { outb(base + 2, ctr) };
-    let sent = SENT[n].load(Ordering::Relaxed);
-    for (i, &b) in data.iter().enumerate() {
-        stall_check(sent + i as u64);
-        loop {
-            match wait_for(n, timeout_ms, || ready(status(base), b)) {
-                Waited::Ready => break,
-                Waited::Killed => return (i, Err(INTERRUPT)),
-                // Infinite retry: PRINT01 keeps waiting and says nothing.
-                Waited::Timeout if infinite => continue,
-                Waited::Timeout => return (i, Err(stop_error(status(base)))),
-            }
-        }
-        unsafe {
-            outb(base, b);
-            // The data settles (at least 0.5 us), a strobe of at least
-            // 0.5 us: port reads take about a microsecond.
-            let _ = inb(base + 1);
-            outb(base + 2, ctr | CTR_STROBE);
-            let _ = inb(base + 1);
-            let _ = inb(base + 1);
-            outb(base + 2, ctr);
-        }
-    }
-    // The last byte taken (or the interrupt), briefly.
-    let _ = wait_for(n, 10, || status(base) & STS_BUSY != 0);
-    (data.len(), Ok(()))
-}
-
-/// EPP: each byte through the EPP data register; the chip handshakes
-/// and reports a peripheral that does not answer as a timeout.
-fn epp_write(f: &Info, data: &[u8]) -> (usize, Result<(), u32>) {
-    let base = f.base;
-    if f.ecr != 0 {
-        unsafe { outb(f.ecr, ECR_EPP | ECR_NOINTR) };
-    }
-    unsafe { outb(base + 2, CTR_INIT) };
-    clear_epp_timeout(base);
-    for (i, &b) in data.iter().enumerate() {
-        unsafe { outb(base + 4, b) };
-        if status(base) & STS_EPP_TIMEOUT != 0 {
-            clear_epp_timeout(base);
-            unsafe { outb(base + 2, CTR_IDLE) };
-            return (i, Err(WRITE_FAULT));
-        }
-    }
-    unsafe { outb(base + 2, CTR_IDLE) };
-    (data.len(), Ok(()))
-}
-
-/// Through the ECP chip's FIFO: compatibility mode with the hardware
-/// handshake (ECR mode 010), or ECP mode (011) after negotiating it.
-fn ecp_write(n: usize, f: &Info, data: &[u8], timeout_ms: u64, ecp: bool) -> (usize, Result<(), u32>) {
-    let (base, ecr) = (f.base, f.ecr);
-    let fifo = ecr - 2;
-    unsafe { outb(ecr, ECR_PS2 | ECR_NOINTR) };
-    if ecp {
-        if negotiate(n, base, 0x10).is_err() {
-            terminate(n, base);
-            return (0, Err(WRITE_FAULT));
-        }
-        // Setup phase: HostAck high (forward data), then the FIFO
-        // runs the transfers.
-        unsafe { outb(base + 2, CTR_INIT) };
-        if !matches!(wait_for(n, 35, || status(base) & STS_PAPER != 0), Waited::Ready) {
-            terminate(n, base);
-            return (0, Err(WRITE_FAULT));
-        }
-        unsafe { outb(ecr, ECR_ECP | ECR_NOINTR) };
-    } else {
-        unsafe {
-            outb(base + 2, CTR_IDLE);
-            outb(ecr, ECR_FIFO | ECR_NOINTR);
-        }
-    }
-    let mut sent = 0;
-    let mut r = Ok(());
-    for &b in data {
-        match wait_for(n, timeout_ms, || unsafe { inb(ecr) } & ECR_FULL == 0) {
-            Waited::Ready => {}
-            Waited::Killed => {
-                r = Err(INTERRUPT);
-                break;
-            }
-            Waited::Timeout => {
-                r = Err(stop_error(status(base)));
-                break;
-            }
-        }
-        unsafe { outb(fifo, b) };
-        sent += 1;
-    }
-    if r.is_ok() {
-        // Drained, and the printer took the last byte.
-        let empty = wait_for(n, timeout_ms, || unsafe { inb(ecr) } & ECR_EMPTY != 0 && status(base) & STS_BUSY != 0);
-        if !matches!(empty, Waited::Ready) {
-            r = Err(stop_error(status(base)));
-        }
-    }
-    unsafe { outb(ecr, ECR_PS2 | ECR_NOINTR) };
-    if ecp {
-        terminate(n, base);
-    }
-    unsafe { outb(base + 2, CTR_IDLE) };
-    (sent, r)
-}
-
-// ---- IEEE 1284 ----
-
-/// Negotiate extensibility mode `xflag` (events 0-6): the peripheral
-/// answers within 35 ms (nAck low, PError, Select and nFault high) and
-/// says with Select whether it supports the mode.
-fn negotiate(n: usize, base: u16, xflag: u8) -> Result<(), u32> {
-    unsafe {
-        outb(base + 2, CTR_IDLE);
-        outb(base, xflag);
-        // nSelectIn high, nAutoFd low.
-        outb(base + 2, CTR_INIT | CTR_AUTOFD);
-    }
-    let answer = |s: u8| s & (STS_ACK | STS_PAPER | STS_SELECT | STS_ERROR) == (STS_PAPER | STS_SELECT | STS_ERROR);
-    if !matches!(wait_for(n, 35, || answer(status(base))), Waited::Ready) {
-        unsafe { outb(base + 2, CTR_IDLE) };
-        return Err(BAD_COMMAND);
-    }
-    unsafe {
-        // Strobe the extensibility byte in, then nStrobe and nAutoFd high.
-        outb(base + 2, CTR_INIT | CTR_AUTOFD | CTR_STROBE);
-        let _ = inb(base + 1);
-        outb(base + 2, CTR_INIT);
-    }
-    if !matches!(wait_for(n, 35, || status(base) & STS_ACK != 0), Waited::Ready) {
-        unsafe { outb(base + 2, CTR_IDLE) };
-        return Err(BAD_COMMAND);
-    }
-    let sel = status(base) & STS_SELECT != 0;
-    // Nibble mode (0) is accepted with Select low, the others high.
-    if (xflag == 0) == sel {
-        terminate(n, base);
-        return Err(BAD_COMMAND);
-    }
-    Ok(())
-}
-
-/// Back to compatibility mode (events 22-28).
-fn terminate(n: usize, base: u16) {
-    unsafe { outb(base + 2, CTR_INIT | CTR_SELECT) };
-    let _ = wait_for(n, 35, || status(base) & STS_ACK == 0);
-    unsafe { outb(base + 2, CTR_INIT | CTR_SELECT | CTR_AUTOFD) };
-    let _ = wait_for(n, 35, || status(base) & STS_ACK != 0);
-    unsafe { outb(base + 2, CTR_IDLE) };
-}
-
-/// One byte in nibble mode (low nibble first): HostBusy low, wait for
-/// PtrClk (nAck) low, the nibble on nFault, Select, PError and Busy.
-fn nibble_byte(n: usize, base: u16) -> Option<u8> {
-    let mut v = 0u8;
-    for half in 0..2 {
-        unsafe { outb(base + 2, CTR_INIT | CTR_AUTOFD) };
-        if !matches!(wait_for(n, 35, || status(base) & STS_ACK == 0), Waited::Ready) {
-            return None;
-        }
-        let s = status(base);
-        let nib = (s >> 3 & 1) | (s >> 4 & 1) << 1 | (s >> 5 & 1) << 2 | ((s & STS_BUSY == 0) as u8) << 3;
-        v |= nib << (4 * half);
-        unsafe { outb(base + 2, CTR_INIT) };
-        if !matches!(wait_for(n, 35, || status(base) & STS_ACK != 0), Waited::Ready) {
-            return None;
-        }
-    }
-    Some(v)
-}
-
-/// The IEEE 1284 device ID: two bytes of length (big-endian, counting
-/// themselves), then `MFG:...;MDL:...;`.
-fn device_id(n: usize, f: &Info) -> Result<Vec<u8>, u32> {
-    let base = f.base;
-    if f.ecr != 0 {
-        unsafe { outb(f.ecr, ECR_PS2 | ECR_NOINTR) };
-    }
-    // Device ID in nibble mode.
-    negotiate(n, base, 0x04)?;
-    let mut out = Vec::new();
-    let r = (|| {
-        let hi = nibble_byte(n, base).ok_or(BAD_COMMAND)?;
-        let lo = nibble_byte(n, base).ok_or(BAD_COMMAND)?;
-        let len = u16::from_be_bytes([hi, lo]).clamp(2, 4096) as usize;
-        out.extend_from_slice(&[hi, lo]);
-        while out.len() < len {
-            // nFault high: no more data.
-            if status(base) & STS_ERROR != 0 && out.len() > 2 {
-                break;
-            }
-            out.push(nibble_byte(n, base).ok_or(BAD_COMMAND)?);
-        }
-        Ok(())
-    })();
-    terminate(n, base);
-    r.map(|_| out)
-}
-
 /// Pulse INIT low (PRINT01's `initialprt`: about 50 us), then wait up to
 /// a second for the printer to come back not busy.
 fn init_printer(n: usize, f: &Info) {
     let base = f.base;
     unsafe {
+        if f.ecr != 0 {
+            outb(f.ecr, ECR_PS2 | ECR_NOINTR);
+        }
         outb(base + 2, CTR_SELECT);
         for _ in 0..60 {
             let _ = inb(base + 1);
         }
         outb(base + 2, CTR_IDLE | if IRQ_ON[n].load(Ordering::Acquire) { CTR_INTEN } else { 0 });
     }
-    let _ = wait_for(n, 1000, || status(base) & STS_BUSY != 0);
+    let mut hw = Hw::new(n, base);
+    let _: Waited = ieee1284::wait_for(&mut hw, 1000, 32, |io| ieee1284::Io::inb(io, base + 1) & STS_BUSY != 0);
 }
 
 // ---- Category 5 IOCtls ----
@@ -943,7 +684,10 @@ pub fn ioctl(n: usize, f: u32, input: &[u8], title: Option<&[u8]>, out_max: u32)
                 let _own = Owner::take(n);
                 init_printer(n, info);
             }
-            PORTS[n].lock().frame = [80, 6];
+            let mut p = PORTS[n].lock();
+            p.frame = [80, 6];
+            p.ecp_refused = false;
+            p.epp_failed = false;
             Ok(Vec::new())
         }
         // PRT_ACTIVATEFONT, PRT_QUERYACTIVEFONT, PRT_VERIFYFONT: CPID
@@ -997,7 +741,11 @@ pub fn ioctl(n: usize, f: u32, input: &[u8], title: Option<&[u8]>, out_max: u32)
             if !ok {
                 return Err(INVALID_PARAMETER);
             }
-            PORTS[n].lock().comm = input[0];
+            let mut p = PORTS[n].lock();
+            p.comm = input[0];
+            // The printer may take the mode now.
+            p.ecp_refused = false;
+            p.epp_failed = false;
             Ok(Vec::new())
         }
         0x72 => Ok(alloc::vec![PORTS[n].lock().comm]),
@@ -1014,12 +762,16 @@ pub fn ioctl(n: usize, f: u32, input: &[u8], title: Option<&[u8]>, out_max: u32)
             Ok(Vec::new())
         }
         0x73 => Ok(alloc::vec![PORTS[n].lock().xfer]),
-        // PRT_QUERDEVICEID: the IEEE 1284 device ID (nibble mode).
+        // PRT_QUERDEVICEID: the IEEE 1284 device ID (byte or nibble mode).
         0x74 => {
             let Some(info) = &hw else { return Err(BAD_COMMAND) };
             setup_irq(n, info);
             let _own = Owner::take(n);
-            let mut id = device_id(n, info)?;
+            let mut id = ieee1284::device_id(&mut Hw::new(n, info.base), &info.regs(), info.caps)?;
+            if crate::api::tracing() {
+                let text = id.get(2..).unwrap_or(&[]);
+                crate::trace!("LPT{}: device ID {:?}", n + 1, String::from_utf8_lossy(text));
+            }
             id.truncate(out_max as usize);
             Ok(id)
         }
@@ -1029,12 +781,12 @@ pub fn ioctl(n: usize, f: u32, input: &[u8], title: Option<&[u8]>, out_max: u32)
         0x66 => {
             let timed_out = PORTS[n].lock().timed_out as u8 * PRINTER_TIMEOUT;
             let st = match &hw {
-                Some(i) => ibm_status(status(i.base)) & 0xfc,
+                Some(i) => ieee1284::ibm_status(status(i.base)) & 0xfc,
                 None => PRINTER_NOT_BUSY | PRINTER_SELECTED,
             };
             Ok(alloc::vec![st | timed_out])
         }
-        // PRT_QUERYJOBHANDLE: only spooled handles have a job.
+        // PRT_QUERYJOBHANDLE: only spooled handles have a job (api/ioctl.rs).
         0x21 => Err(INVALID_FUNCTION),
         _ => Err(INVALID_FUNCTION),
     }

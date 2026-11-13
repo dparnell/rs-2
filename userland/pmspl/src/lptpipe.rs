@@ -9,7 +9,10 @@
 //! when a printer prints to that port (the job is then made from what
 //! follows, from the first byte written, and ends when the program
 //! closes the port), 1 when the port is to be used directly (no printer
-//! on it, or spooling disabled).
+//! on it, or spooling disabled). What follows are messages: a kind byte,
+//! a 32-bit length and the bytes; kind 0 is output, kind 1 (no bytes)
+//! asks for the job's id (PRT_QUERYJOBHANDLE on the program's handle),
+//! answered with 4 bytes, the job started if nothing was written yet.
 
 use alloc::vec::Vec;
 
@@ -63,6 +66,23 @@ fn read(h: u32, buf: &mut [u8]) -> usize {
     n as usize
 }
 
+/// The kernel's messages after the answer (`chardev::SpoolConn`): output
+/// for the job, or a request for its id (answered with 4 bytes).
+const MSG_DATA: u8 = 0;
+const MSG_JOB: u8 = 1;
+
+fn read_exact(h: u32, buf: &mut [u8]) -> bool {
+    let mut got = 0;
+    while got < buf.len() {
+        let n = read(h, &mut buf[got..]);
+        if n == 0 {
+            return false;
+        }
+        got += n;
+    }
+    true
+}
+
 fn serve(h: u32) {
     // The request: three strings.
     let mut req = Vec::new();
@@ -88,19 +108,56 @@ fn serve(h: u32) {
     let doc = if prog.is_empty() { z(port) } else { z(prog) };
     let dop: [u32; 4] = [queue.as_ptr() as u32, 0, 0, datatype.as_ptr() as u32];
     let mut hspl = 0;
+    // The job starts with the first byte (or a job id asked for).
+    let start = |hspl: &mut u32| {
+        if *hspl == 0 {
+            *hspl = crate::qm::SplQmOpen(b"*\0".as_ptr(), 4, dop.as_ptr());
+            if *hspl != 0 {
+                crate::qm::SplQmStartDoc(*hspl, doc.as_ptr());
+            }
+        }
+        *hspl != 0
+    };
     loop {
-        let n = read(h, &mut buf);
-        if n == 0 {
+        // A message: kind, length, data.
+        let mut hdr = [0u8; 5];
+        if !read_exact(h, &mut hdr) {
             break;
         }
-        if hspl == 0 {
-            hspl = crate::qm::SplQmOpen(b"*\0".as_ptr(), 4, dop.as_ptr());
-            if hspl == 0 {
-                break;
+        let mut left = u32::from_le_bytes([hdr[1], hdr[2], hdr[3], hdr[4]]) as usize;
+        match hdr[0] {
+            MSG_DATA => {
+                while left > 0 {
+                    let k = left.min(buf.len());
+                    let n = read(h, &mut buf[..k]);
+                    if n == 0 {
+                        break;
+                    }
+                    left -= n;
+                    if start(&mut hspl) {
+                        crate::qm::SplQmWrite(hspl, n as i32, buf.as_ptr());
+                    }
+                }
+                if left > 0 {
+                    break;
+                }
             }
-            crate::qm::SplQmStartDoc(hspl, doc.as_ptr());
+            MSG_JOB => {
+                // PRT_QUERYJOBHANDLE: the job's id (0: none).
+                let mut id = 0u32;
+                if start(&mut hspl) {
+                    // A QMJOBINFO: the job id first.
+                    let mut info = [0u8; 300];
+                    let mut need = 0u32;
+                    if crate::qm::SplQmGetJobID(hspl, 0, info.as_mut_ptr(), info.len() as u32, &mut need) == 0 {
+                        id = u32::from_le_bytes([info[0], info[1], info[2], info[3]]);
+                    }
+                }
+                let mut w = 0;
+                unsafe { os2::DosWrite(h, id.to_le_bytes().as_ptr(), 4, &mut w) };
+            }
+            _ => break,
         }
-        crate::qm::SplQmWrite(hspl, n as i32, buf.as_ptr());
     }
     if hspl != 0 {
         crate::qm::SplQmEndDoc(hspl);

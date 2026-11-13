@@ -457,8 +457,15 @@ fn port_jobs() {
     let (mut pl, mut dl) = (0u32, 1u32);
     let rc = unsafe { DosDevIOCtl(hf, 5, 0x66, null_mut(), 0, &mut pl, st.as_mut_ptr(), 1, &mut dl) };
     check("PRT_GETPRINTERSTATUS on a spooled port: selected, not busy", rc == 0 && st[0] == 0x90);
+    // PRT_QUERYJOBHANDLE: the spooler's job for this handle (a WORD).
+    let mut jh = [0u8; 2];
+    let (mut pl, mut dl) = (0u32, 2u32);
+    let rc_jh = unsafe { DosDevIOCtl(hf, 5, 0x21, null_mut(), 0, &mut pl, jh.as_mut_ptr(), 2, &mut dl) };
+    let job_handle = u16::from_le_bytes(jh) as u32;
+    println!("PRT_QUERYJOBHANDLE: rc {rc_jh}, job {job_handle}");
     unsafe { DosClose(hf) };
     let jobs = wait_jobs(1, 5);
+    check("PRT_QUERYJOBHANDLE on a spooled port: the job's id", rc_jh == 0 && dl == 2 && job_handle != 0 && jobs.first().is_some_and(|j| j.0 == job_handle));
     unsafe { DosSleep(500) };
     let jobs2 = queue_jobs();
     check("DosOpen/DosWrite/DosClose of LPT3: one job, nothing for the open without output", ok && jobs.len() == 1 && jobs2.len() == 1);

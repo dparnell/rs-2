@@ -19,3 +19,4 @@ pathcache = { path = "../crates/pathcache" }
 jfs = { path = "../crates/jfs" }
 tcpip = { path = "../crates/tcpip" }
 smb = { path = "../crates/smb" }
+ieee1284 = { package = "parport", path = "../crates/parport" }

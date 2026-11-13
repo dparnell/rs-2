@@ -81,7 +81,7 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
         }
         Handle::Char(d) => (0, crate::chardev::write(d, &data) as u32),
         // The spooler gone: the output is dropped, as a port that went away.
-        Handle::Spool(_, p) => (0, p.write(&data).unwrap_or(data.len()) as u32),
+        Handle::Spool(_, p) => (0, p.write(&data) as u32),
         Handle::Nul | Handle::Kbd | Handle::DosDev | Handle::Drive(_) => (0, len),
         Handle::PhysDisk(..) => (err::ACCESS_DENIED, 0),
         Handle::File(f) => {

@@ -255,8 +255,8 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
             }
         }
         (Handle::Char(CharDev::Com(n)), 0xb) => crate::chardev::com_general(n as usize, r.function).err().unwrap_or(0),
-        (Handle::Char(CharDev::Lpt(n)), 5) => printer(c, r, n as usize, false),
-        (Handle::Spool(n, _), 5) => printer(c, r, n as usize, true),
+        (Handle::Char(CharDev::Lpt(n)), 5) => printer(c, r, n as usize, None),
+        (Handle::Spool(n, conn), 5) => printer(c, r, n as usize, Some(&conn)),
         (Handle::Char(CharDev::Mouse | CharDev::Pointer), 7) => mouse(c, r),
         (Handle::Char(CharDev::ResMgr), 0x80) => crate::resmgr::ioctl(c, r),
         (Handle::Char(CharDev::VBox), 0x80) => vbox(c, r),
@@ -275,8 +275,19 @@ fn dispatch(c: &mut Ctx, r: &Req) -> u32 {
 }
 
 /// Category 5 (printer) on LPTn, the port itself or (`spooled`) a
-/// handle the spooler serves (`parport::ioctl`).
-fn printer(c: &Ctx, r: &Req, n: usize, spooled: bool) -> u32 {
+/// handle the spooler serves (`parport::ioctl`). PRT_QUERYJOBHANDLE on a
+/// spooled handle asks the spooler for the job's id (a WORD; the job
+/// starts if nothing was written yet); on the port itself it is
+/// ERROR_INVALID_FUNCTION, as PRINT01 does not know it.
+fn printer(c: &Ctx, r: &Req, n: usize, spooled: Option<&crate::chardev::SpoolConn>) -> u32 {
+    if r.function == 0x21 {
+        if let Some(conn) = spooled {
+            return match conn.job() {
+                Some(id) => put_data(c, r, 0, &(id as u16).to_le_bytes()),
+                None => 31, // ERROR_GEN_FAILURE
+            };
+        }
+    }
     let need = crate::parport::input_len(r.function);
     let input = if need > 0 {
         match c.read_vec(r.data, need) {
@@ -294,7 +305,7 @@ fn printer(c: &Ctx, r: &Req, n: usize, spooled: bool) -> u32 {
     } else {
         None
     };
-    let rc = if spooled {
+    let rc = if spooled.is_some() {
         crate::parport::spool_ioctl(n, r.function, &input, title.as_deref(), r.data_len)
     } else {
         crate::parport::ioctl(n, r.function, &input, title.as_deref(), r.data_len)
