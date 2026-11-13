@@ -50,7 +50,7 @@ programs unmodified, natively, on 64-bit PCs.
 *Booted straight into PM: IBM's CMD.EXE in an OS/2 window and the System Editor (E.EXE), both unmodified.*
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design,
-[docs/ROADMAP.md](docs/ROADMAP.md) for what is done and what is next, and
+[docs/COMPLETED.md](docs/COMPLETED.md) for what is done, [docs/ROADMAP.md](docs/ROADMAP.md) for what is next, and
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) for the original OS/2
 programs tested so far.
 

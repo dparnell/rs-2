@@ -6,7 +6,7 @@ model they are built on, the class tree, persistence and start-up.
 IBM's files are only studied (under `work/`), never shipped.
 
 rs2 today has its own desktop, RS2SHELL.EXE. It is not object-oriented
-but covers the everyday desktop (see ROADMAP, Milestone 4). rs2's
+but covers the everyday desktop (see COMPLETED.md, Milestone 4). rs2's
 PMWP.DLL holds only the calls programs use without a WPS:
 WinCreateObject for program objects and the file icon calls.
 
