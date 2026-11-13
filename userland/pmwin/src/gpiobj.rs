@@ -736,28 +736,26 @@ pub extern "C" fn WinScrollWindow(h: u32, dx: i32, dy: i32, scroll: *const RectL
     let mut moved = vis.intersect_rect(sr);
     moved.offset(dx, dy);
     let copy = area.combine(&moved, Op::And);
-    // Read every source pel first: the rectangles may overlap their sources.
+    // Raw rows. One rectangle (the usual case) moves in place; with more,
+    // one's destination may be another's source, so every source is
+    // read first.
     let mut surf = s.surface;
     pointer::hide(s);
-    let mut saved: Vec<(Rect, Vec<u32>)> = Vec::new();
-    for r in copy.rects() {
-        let src = r.offset(o.x - dx, o.y - dy);
-        let mut px = Vec::with_capacity((r.width() * r.height()) as usize);
-        for y in src.bottom..src.top {
-            for x in src.left..src.right {
-                px.push(surf.get(x, y).unwrap_or(0));
-            }
-        }
-        saved.push((r, px));
-    }
-    for (r, px) in saved {
-        let d = r.offset(o.x, o.y);
-        let mut i = 0;
-        for y in d.bottom..d.top {
-            for x in d.left..d.right {
-                surf.set(x, y, px[i]);
-                i += 1;
-            }
+    let rects = copy.rects();
+    if let [r] = rects[..] {
+        surf.copy_within(r.offset(o.x, o.y), dx, dy);
+    } else {
+        let mut px = Vec::new();
+        let saved: Vec<(Rect, usize)> = rects
+            .iter()
+            .map(|r| {
+                let at = px.len();
+                let got = surf.read_raw(r.offset(o.x - dx, o.y - dy), &mut px);
+                (got.offset(dx, dy), at)
+            })
+            .collect();
+        for (d, at) in saved {
+            surf.write_raw(d, &px[at..]);
         }
     }
     pointer::show(st());

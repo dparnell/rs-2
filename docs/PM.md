@@ -162,6 +162,20 @@ every 5 s): an idle desktop went from 24.5 million (the whole screen 31
 times a second) to 0; dragging a folder window around sends 1-3
 million.
 
+**Where the time goes** (`RS2\PMBENCH.EXE`, with `dispstat`, which
+also logs the share of a CPU spent copying the back buffer to the
+screen). A 640x420 window of text scrolled a line 150 times, and moved
+8 pixels 150 times, in QEMU (TCG on an arm64 Mac) on SVGA II at
+1024x768: the copy to the screen is 0.3-0.6% of a CPU, so handing it
+to the display (SVGA II's RECT_COPY and RECT_FILL; virtio-gpu has no
+2D drawing commands) would gain next to nothing. Scrolling was 22 ms a
+step, 91% of it in WinScrollWindow, which moved the pels one at a time
+(read, colour conversion, write, noting each as damage); it now moves
+raw rows (`Surface::copy_within`; with more than one rectangle every
+source is read first): 3.7 ms a step, 2 of them in WinScrollWindow.
+Moving is 20 ms a step, 99% of it repainting: a moved window is
+invalidated and painted again, not copied.
+
 **Changing the resolution.** `Rs2SetDisplayMode` switches the driver
 (virtio-gpu makes a new resource on the same backing; SVGA II programs
 the mode in the same VRAM) and queues `EV_MODE` (6). The server's

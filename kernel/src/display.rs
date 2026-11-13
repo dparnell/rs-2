@@ -133,6 +133,11 @@ static STAT_CMDS: AtomicU64 = AtomicU64::new(0);
 /// 0: `dispstat` not looked for yet, 1: off, 2: on.
 static STAT_ON: AtomicU32 = AtomicU32::new(0);
 static STAT_LAST: AtomicU64 = AtomicU64::new(0);
+/// TSC at the last log, and the cycles and pixels PM's presents copied
+/// from the back buffer since.
+static STAT_TSC: AtomicU64 = AtomicU64::new(0);
+static STAT_COPY_CYC: AtomicU64 = AtomicU64::new(0);
+static STAT_COPY_PX: AtomicU64 = AtomicU64::new(0);
 
 /// Damaged rectangles kept at most (more are merged).
 pub const DAMAGE_MAX: usize = 16;
@@ -272,9 +277,22 @@ fn log_stats() {
         return;
     }
     let ms = now - STAT_LAST.swap(now, Ordering::Relaxed);
+    let tsc = crate::arch::rdtsc();
+    let cyc = tsc.wrapping_sub(STAT_TSC.swap(tsc, Ordering::Relaxed)).max(1);
     let px = STAT_PX.swap(0, Ordering::Relaxed);
     let cmds = STAT_CMDS.swap(0, Ordering::Relaxed);
-    crate::println!("dispstat: {} px/s, {} updates/s", px * 1000 / ms.max(1), cmds * 1000 / ms.max(1));
+    let copy_cyc = STAT_COPY_CYC.swap(0, Ordering::Relaxed);
+    let copy_px = STAT_COPY_PX.swap(0, Ordering::Relaxed);
+    // Time spent copying, in µs per second (of the interval's TSC).
+    let copy_us = (copy_cyc as u128 * 1_000_000 / cyc as u128) as u64;
+    crate::println!(
+        "dispstat: {} px/s, {} updates/s, back buffer copy {} px/s, {}.{}% of a CPU",
+        px * 1000 / ms.max(1),
+        cmds * 1000 / ms.max(1),
+        copy_px * 1000 / ms.max(1),
+        copy_us / 10_000,
+        copy_us / 1000 % 10
+    );
 }
 
 fn push(e: Input) {
@@ -557,7 +575,10 @@ pub fn present(rects: &[R]) {
             if !shown {
                 continue;
             }
+            let t0 = crate::arch::rdtsc();
             copy_back(m, &fb, (x0, y0, x1, y1));
+            STAT_COPY_CYC.fetch_add(crate::arch::rdtsc().wrapping_sub(t0), Ordering::Relaxed);
+            STAT_COPY_PX.fetch_add((x1 - x0) as u64 * (y1 - y0) as u64, Ordering::Relaxed);
         }
         damage(x0, y0, x1, y1);
     }
