@@ -160,6 +160,12 @@ fn live(serial: u64) -> bool {
     TABLES.lock().values().any(|t| t.map.values().any(|x| x.serial == serial))
 }
 
+/// Whether the sockets of all of `serials` are still open.
+fn all_live(serials: &[u64]) -> bool {
+    let g = TABLES.lock();
+    serials.iter().all(|&n| g.values().any(|t| t.map.values().any(|x| x.serial == n)))
+}
+
 /// `f` on the stack for socket handle `h`, if it is still open: checked
 /// with the stack locked, under which soclose takes it out of the tables
 /// and closes its stack socket (ENOTSOCK otherwise).
@@ -401,10 +407,23 @@ pub fn close(pid: u32, s: u32) -> Result<()> {
 /// `timeout_ms` < 0 waits forever. Returns the number ready.
 pub fn select(pid: u32, socks: &mut [u32], nread: usize, nwrite: usize, timeout_ms: i32) -> Result<u32> {
     let mut ids = Vec::with_capacity(socks.len());
+    let mut serials = Vec::with_capacity(socks.len());
     for &s in socks.iter() {
-        ids.push(get(pid, s)?.id);
+        let h = get(pid, s)?;
+        ids.push(h.id);
+        serials.push(h.serial);
     }
+    // Each look at the sockets is made with the stack locked, and only
+    // while every one of them is still open (as `stack_h`): a soclose on
+    // another CPU takes a socket out under the same lock, and the stack
+    // gives its id to the next socket at once, which select must not
+    // poll in its place.
+    let closed = core::cell::Cell::new(false);
     let check = |st: &mut Stack| -> core::result::Result<Vec<bool>, Error> {
+        if !all_live(&serials) {
+            closed.set(true);
+            return Err(Error::BadSocket);
+        }
         let mut v = Vec::with_capacity(ids.len());
         for (i, &id) in ids.iter().enumerate() {
             let r = st.ready(id)?;
@@ -434,6 +453,8 @@ pub fn select(pid: u32, socks: &mut [u32], nread: usize, nwrite: usize, timeout_
         Ok(v) => v,
         // Timed out (or a zero timeout): nothing is ready.
         Err(EWOULDBLOCK) => alloc::vec![false; ids.len()],
+        // One was closed meanwhile: as for any call on a closed socket.
+        Err(_) if closed.get() => return Err(ENOTSOCK),
         Err(e) => return Err(e),
     };
     let mut n = 0;

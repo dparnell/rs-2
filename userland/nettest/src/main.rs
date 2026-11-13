@@ -16,6 +16,8 @@
 //! * `listen`: accept one connection on port `-listen` (default 23)
 //!   within `-wait` seconds (default 60), echo a line back (QEMU
 //!   `hostfwd=tcp::5555-:23` and a host-side `nc localhost 5555`).
+//! * `race`: select() on a socket that another thread closes while a new
+//!   socket takes its place (and its stack id), made readable at once.
 //! * `tcp`: urgent data over loopback (MSG_OOB, select's exception set,
 //!   SIOCATMARK, SO_OOBINLINE), TCP_NODELAY and SO_KEEPALIVE.
 //! * `tables`: routes, ARP entries and an interface alias set and removed
@@ -267,6 +269,54 @@ fn loopback() {
     close(r);
 }
 
+static RACE_SOCK: AtomicU32 = AtomicU32::new(0);
+static RACE_NEW: AtomicU32 = AtomicU32::new(0);
+
+/// Close the socket a select() in the main thread waits for, then at once
+/// open another (it gets the stack's id the closed one had, and often its
+/// number) and make it readable.
+unsafe extern "C" fn race_closer(round: u32) {
+    unsafe { os2::DosSleep(20 + round % 7) };
+    close(RACE_SOCK.load(Ordering::Relaxed));
+    let Ok(u) = socket(SOCK_DGRAM, 0) else { return };
+    let a = SockAddrIn::new([127, 0, 0, 1], 7020);
+    unsafe { Rs2SockBind(u, &a, 16) };
+    let mut n = 0;
+    unsafe { Rs2SockSendTo(u, b"x".as_ptr(), 1, 0, &a, &mut n) };
+    RACE_NEW.store(u, Ordering::Relaxed);
+}
+
+/// select() resolves its sockets when called; one closed by another
+/// thread meanwhile must not be reported through the socket that took
+/// its place (the call ends with ENOTSOCK or EBADF, or the socket is not
+/// ready), as every other socket call.
+fn select_close_race() {
+    let mut wrong = 0;
+    let mut rounds = 0;
+    for round in 0..20 {
+        let Ok(u) = socket(SOCK_DGRAM, 0) else { break };
+        let a = SockAddrIn::new([127, 0, 0, 1], 7019);
+        set_int(u, SO_REUSEADDR, 1);
+        unsafe { Rs2SockBind(u, &a, 16) };
+        RACE_SOCK.store(u, Ordering::Relaxed);
+        RACE_NEW.store(0, Ordering::Relaxed);
+        let mut tid = 0;
+        unsafe { os2::DosCreateThread(&mut tid, race_closer, round, 0, 65536) };
+        let mut socks = [u];
+        let mut n = 0;
+        let rc = unsafe { Rs2SockSelect(socks.as_mut_ptr(), 1, 0, 0, 1000, &mut n) };
+        let mut t = tid;
+        unsafe { os2::DosWaitThread(&mut t, 0) };
+        if rc == 0 && n == 1 {
+            println!("  round {round}: select reported socket {u} ready after another thread closed it (now socket {})", RACE_NEW.load(Ordering::Relaxed));
+            wrong += 1;
+        }
+        rounds += 1;
+        close(RACE_NEW.load(Ordering::Relaxed));
+    }
+    check("race: select never sees a socket closed meanwhile through its successor", rounds == 20 && wrong == 0);
+}
+
 static mut CANCEL_SOCK: u32 = 0;
 static mut CANCEL_RC: u32 = 0;
 
@@ -468,6 +518,9 @@ fn main(st: &os2::Startup) -> u32 {
         loopback();
     }
     let gw = eth.as_ref().map(|e| e.gateway).filter(|g| *g != [0; 4]);
+    if run("race") {
+        select_close_race();
+    }
     if run("ping") {
         ping([127, 0, 0, 1], "loopback");
         match gw {
