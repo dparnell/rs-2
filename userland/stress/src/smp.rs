@@ -558,6 +558,113 @@ fn dll_init_once() {
     timed("DLL init race", t0);
 }
 
+#[allow(non_upper_case_globals)]
+unsafe extern "C" {
+    // The global information segment's tiled selector (a constant
+    // import: the "address" is the value).
+    #[link_name = "DOSCALLS.217"]
+    static DosGlobalInfo: u8;
+}
+
+/// The global information segment's time fields' sequence count (the
+/// kernel's infoseg::SEQ_OFFSET).
+const GIS_SEQ: usize = 0x7c;
+static TIME_STOP: AtomicU32 = AtomicU32::new(0);
+static TIME_READS: AtomicU32 = AtomicU32::new(0);
+static TIME_TORN: AtomicU32 = AtomicU32::new(0);
+static TIME_BACK: AtomicU32 = AtomicU32::new(0);
+static TIME_RETRY: AtomicU32 = AtomicU32::new(0);
+
+fn gis() -> *const u8 {
+    (((&raw const DosGlobalInfo) as u32 & 0xfff8) << 13) as *const u8
+}
+
+/// Days since 1970-01-01 to (year, month, day).
+fn civil(days: u32) -> (u32, u32, u32) {
+    let z = days as i64 + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + (m <= 2) as i64;
+    (y as u32, m as u32, d as u32)
+}
+
+unsafe extern "C" fn time_reader(_: u32) {
+    wait_gate();
+    let g = gis();
+    let rd = |o: usize| unsafe { (g.add(o) as *const u32).read_volatile() };
+    let mut last = 0u32;
+    while TIME_STOP.load(Ordering::Relaxed) == 0 {
+        // As IBM's DosGetDateTime reads it: the time-of-day dword alone,
+        // no lock. It never goes back by half a second or more (but at
+        // midnight; setting the clock to itself takes it back by less).
+        // Stored byte by byte it did: a new second with the old
+        // hundredths (.97), then the new hundredths.
+        let tod = rd(8).to_le_bytes();
+        let v = tod[0] as u32 * 360_000 + tod[1] as u32 * 6000 + tod[2] as u32 * 100 + tod[3] as u32;
+        if v + 50 < last && !(last > 8_500_000 && v < 100_000) {
+            TIME_BACK.fetch_add(1, Ordering::Relaxed);
+        }
+        last = v;
+        // All fields between two equal, even sequence counts.
+        let s0 = rd(GIS_SEQ);
+        core::sync::atomic::fence(Ordering::Acquire);
+        let (secs, tod, date, wd) = (rd(0), rd(8).to_le_bytes(), rd(16).to_le_bytes(), unsafe { g.add(20).read_volatile() });
+        core::sync::atomic::fence(Ordering::Acquire);
+        if s0 & 1 != 0 || rd(GIS_SEQ) != s0 {
+            TIME_RETRY.fetch_add(1, Ordering::Relaxed);
+            continue;
+        }
+        TIME_READS.fetch_add(1, Ordering::Relaxed);
+        let days = secs / 86_400;
+        let (y, m, d) = civil(days);
+        let ok = secs % 86_400 == tod[0] as u32 * 3600 + tod[1] as u32 * 60 + tod[2] as u32
+            && (y, m, d) == (u16::from_le_bytes([date[2], date[3]]) as u32, date[1] as u32, date[0] as u32)
+            && (days + 4) % 7 == wd as u32;
+        if !ok {
+            TIME_TORN.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+}
+
+/// Programs read the global information segment's time fields while the
+/// timer (and DosSetDateTime on another CPU) rewrites them: a time of
+/// day read as one dword never goes back, and a read bracketed by the
+/// sequence count sees one consistent time and date.
+fn infoseg_time() {
+    let t0 = ms();
+    for c in [&TIME_STOP, &TIME_READS, &TIME_TORN, &TIME_BACK, &TIME_RETRY] {
+        c.store(0, Ordering::Relaxed);
+    }
+    let gate = start_gate();
+    let ts: Vec<u32> = (0..THREADS - 1).map(|_| thread(time_reader, 0)).collect();
+    unsafe { DosPostEventSem(gate) };
+    // Set the clock to itself now and then (a second writer).
+    let mut set_ok = true;
+    for _ in 0..12 {
+        unsafe { DosSleep(170) };
+        let mut dt = DateTime::default();
+        unsafe {
+            DosGetDateTime(&mut dt);
+            set_ok &= DosSetDateTime(&dt) == 0;
+        }
+    }
+    TIME_STOP.store(1, Ordering::Relaxed);
+    for t in ts {
+        join(t);
+    }
+    unsafe { DosCloseEventSem(gate) };
+    let (reads, torn, back) = (TIME_READS.load(Ordering::Relaxed), TIME_TORN.load(Ordering::Relaxed), TIME_BACK.load(Ordering::Relaxed));
+    println!("  infoseg time: {reads} consistent reads ({} retried during an update), {torn} torn, {back} times the time of day went back", TIME_RETRY.load(Ordering::Relaxed));
+    check("smp: DosSetDateTime while the infoseg is read", set_ok);
+    check("smp: the infoseg's time fields are never torn", reads > 0 && torn == 0 && back == 0);
+    timed("infoseg time", t0);
+}
+
 pub fn run() {
     let t0 = ms();
     dll_init_once();
@@ -569,5 +676,6 @@ pub fn run() {
     kernel_calls();
     shared_file();
     exec_storm();
+    infoseg_time();
     println!("  smp section: {} ms", ms().wrapping_sub(t0));
 }

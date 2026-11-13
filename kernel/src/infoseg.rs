@@ -4,10 +4,10 @@
 //! described by a GDT selector, updated from the timer.
 
 use alloc::sync::Arc;
-use core::sync::atomic::{AtomicU16, Ordering};
+use core::sync::atomic::{AtomicU16, AtomicU32, AtomicU8, Ordering};
 
 use crate::arch::gdt::{self, access, descriptor};
-use crate::sync::Once;
+use crate::sync::{Once, SpinLock};
 use crate::vm::{self, AddressSpace, PageState, SegKind, SharedMem, PAGE};
 
 static OBJ: Once<Arc<SharedMem>> = Once::new();
@@ -50,6 +50,7 @@ pub fn init() {
     let p = page();
     unsafe {
         let w16 = |o: usize, v: u16| (p.add(o) as *mut u16).write_unaligned(v);
+        w16(12, 0xffff); // timezone: unknown
         w16(14, 310); // cusecTimerInterval (tenths of ms * 10)
         *p.add(21) = 20; // major version
         *p.add(22) = 45; // minor version
@@ -133,7 +134,25 @@ pub fn attach(space: &mut AddressSpace) {
     }
 }
 
+/// Offset of the time fields' sequence count in the page: past IBM's
+/// GINFOSEG (0x48 bytes), inside the selector's limit. Odd while the
+/// timer (or DosSetDateTime) rewrites the time fields.
+pub const SEQ_OFFSET: usize = 0x7c;
+
+/// One writer of the time fields at a time: the timer on CPU 0 and
+/// DosSetDateTime on any CPU.
+static WRITER: SpinLock<()> = SpinLock::new(());
+
 /// Refresh the time fields.
+///
+/// Programs read them with no lock, as IBM's DOSCALL1 does (DosGetDateTime
+/// copies the hour..hundredths dword at 8 and the day..year dword at
+/// 0x10). Each group is therefore stored as one aligned dword, never byte
+/// by byte, so such a read sees a whole time or a whole date; the groups
+/// go in the order of IBM's clock driver (seconds since 1970, then the
+/// time of day, then the date and weekday). A reader that wants all of
+/// them consistent (rs2's own) brackets its reads with the sequence count
+/// at [`SEQ_OFFSET`]: even and unchanged means no update ran in between.
 pub fn update() {
     if OBJ.get().is_none() {
         return;
@@ -141,23 +160,26 @@ pub fn update() {
     if crate::irq::ticks() % 256 == 0 {
         crate::rtc::resync();
     }
+    let _w = WRITER.lock();
     let ms = crate::irq::uptime_ms();
     let now = crate::rtc::now_ms();
     let t = crate::rtc::from_unix((now / 1000) as u32);
     let day = now % 86_400_000;
     DAY_OFFSET.store((day + 86_400_000 - ms % 86_400_000) % 86_400_000, Ordering::Relaxed);
     let p = page();
-    unsafe {
-        (p as *mut u32).write_unaligned(crate::rtc::unix_time(&t));
-        (p.add(4) as *mut u32).write_unaligned(ms as u32);
-        *p.add(8) = t.hour;
-        *p.add(9) = t.minute;
-        *p.add(10) = t.second;
-        *p.add(11) = ((now % 1000) / 10) as u8;
-        (p.add(12) as *mut u16).write_unaligned(0xffff);
-        *p.add(16) = t.day;
-        *p.add(17) = t.month;
-        (p.add(18) as *mut u16).write_unaligned(t.year);
-        *p.add(20) = t.weekday;
-    }
+    // The page is mapped into every process; the fields are aligned
+    // dwords (GINFOSEG's layout), stored whole.
+    let field = |o: usize| unsafe { &*(p.add(o) as *const AtomicU32) };
+    let seq = field(SEQ_OFFSET);
+    let n = seq.load(Ordering::Relaxed).wrapping_add(1);
+    seq.store(n, Ordering::Relaxed);
+    core::sync::atomic::fence(Ordering::Release);
+    field(0).store(crate::rtc::unix_time(&t), Ordering::Relaxed);
+    field(4).store(ms as u32, Ordering::Relaxed);
+    let hund = ((now % 1000) / 10) as u8;
+    field(8).store(u32::from_le_bytes([t.hour, t.minute, t.second, hund]), Ordering::Relaxed);
+    let y = t.year.to_le_bytes();
+    field(16).store(u32::from_le_bytes([t.day, t.month, y[0], y[1]]), Ordering::Relaxed);
+    unsafe { &*(p.add(20) as *const AtomicU8) }.store(t.weekday, Ordering::Relaxed);
+    seq.store(n.wrapping_add(1), Ordering::Release);
 }
