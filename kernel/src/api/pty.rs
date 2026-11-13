@@ -38,6 +38,7 @@ pub fn start(c: &mut Ctx) -> u32 {
     };
     let caller = c.process.session.load(Ordering::Relaxed);
     let sid = session::create(program.clone(), caller, None, None);
+    session::expect_leader(sid);
     session::make_pty(sid, cols, rows);
     let r = process::exec(process::ExecParams {
         path: &path,

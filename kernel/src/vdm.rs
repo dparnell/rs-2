@@ -70,10 +70,15 @@ pub fn drop_session(sid: u32) {
 }
 
 fn push(sid: u32, e: Event) -> bool {
+    push_all(sid, &[e])
+}
+
+/// Queue events together (nothing from another CPU comes between them).
+fn push_all(sid: u32, es: &[Event]) -> bool {
     let mut g = VDMS.lock();
     let Some(v) = g.get_mut(&sid) else { return false };
-    if v.events.len() < QUEUE_MAX {
-        v.events.push_back(e);
+    if v.events.len() + es.len() <= QUEUE_MAX {
+        v.events.extend(es.iter().copied());
     }
     drop(g);
     WAIT.wake_all();
@@ -87,10 +92,8 @@ pub fn key(sid: u32, code: u8, ext: bool, ch: u8) -> bool {
     if !is_dos(sid) {
         return false;
     }
-    if ext {
-        push(sid, Event { kind: EV_KEY, flags: 0, a: 0xe0, b: 0 });
-    }
-    push(sid, Event { kind: EV_KEY, flags: ch as u16, a: code as i32, b: 0 })
+    let k = Event { kind: EV_KEY, flags: ch as u16, a: code as i32, b: 0 };
+    if ext { push_all(sid, &[Event { kind: EV_KEY, flags: 0, a: 0xe0, b: 0 }, k]) } else { push(sid, k) }
 }
 
 /// The modifiers' scan codes (left Shift, Ctrl, Alt) and their bits in
@@ -147,16 +150,17 @@ pub fn seamless_common() -> Option<u32> {
 /// Ask Win-OS/2 in session `sid` to start `cmd` (REQ_RUN_TEXT pieces,
 /// then REQ_RUN).
 pub fn run_in(sid: u32, cmd: &str) -> bool {
-    let b = cmd.as_bytes();
-    for chunk in b.chunks(8) {
+    // All pieces in one go: two programs started into the common session
+    // at once must not interleave.
+    let mut es = alloc::vec::Vec::new();
+    for chunk in cmd.as_bytes().chunks(8) {
         let mut v = [0u8; 8];
         v[..chunk.len()].copy_from_slice(chunk);
         let (a, bb) = (i32::from_le_bytes([v[0], v[1], v[2], v[3]]), i32::from_le_bytes([v[4], v[5], v[6], v[7]]));
-        if !request(sid, 9, a, bb) {
-            return false;
-        }
+        es.push(Event { kind: EV_REQUEST, flags: 9, a, b: bb });
     }
-    request(sid, 8, -1, 0)
+    es.push(Event { kind: EV_REQUEST, flags: 8, a: -1, b: 0 });
+    is_dos(sid) && push_all(sid, &es)
 }
 
 /// A request of the seamless PM host (win16drv::surface::REQ_*).

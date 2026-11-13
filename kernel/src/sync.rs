@@ -222,3 +222,68 @@ impl<T> Drop for MutexGuard<'_, T> {
         self.m.waiters.wake_one();
     }
 }
+
+/// A sleeping lock without data that the thread holding it may take
+/// again (the loader lock, the session lock): thread context only. Its
+/// guard must be dropped by the thread that took it.
+pub struct RecursiveLock {
+    /// Thread id + 1 of the holder, 0 = free.
+    owner: core::sync::atomic::AtomicU32,
+    depth: core::sync::atomic::AtomicU32,
+    waiters: crate::task::WaitQueue,
+}
+
+pub struct RecursiveGuard<'a> {
+    l: &'a RecursiveLock,
+    held: bool,
+}
+
+impl RecursiveLock {
+    #[track_caller]
+    pub const fn new() -> Self {
+        Self {
+            owner: core::sync::atomic::AtomicU32::new(0),
+            depth: core::sync::atomic::AtomicU32::new(0),
+            waiters: crate::task::WaitQueue::new(),
+        }
+    }
+
+    fn me() -> Option<u32> {
+        crate::task::sched::current_opt().map(|t| t.id + 1)
+    }
+
+    /// Whether the calling thread holds it.
+    pub fn held(&self) -> bool {
+        Self::me().is_some_and(|me| self.owner.load(Ordering::Acquire) == me)
+    }
+
+    pub fn lock(&self) -> RecursiveGuard<'_> {
+        // Before the scheduler runs (boot) there is nobody to exclude.
+        let Some(me) = Self::me() else { return RecursiveGuard { l: self, held: false } };
+        // It sleeps: never under a spin lock or in an interrupt handler.
+        debug_assert!(
+            held_spin_locks() == 0 && crate::smp::this().irq_depth.load(Ordering::Relaxed) == 0,
+            "sleeping lock taken with a spin lock held or in an interrupt"
+        );
+        if self.owner.load(Ordering::Acquire) == me {
+            self.depth.fetch_add(1, Ordering::Relaxed);
+            return RecursiveGuard { l: self, held: true };
+        }
+        loop {
+            if self.owner.compare_exchange(0, me, Ordering::AcqRel, Ordering::Acquire).is_ok() {
+                self.depth.store(1, Ordering::Relaxed);
+                return RecursiveGuard { l: self, held: true };
+            }
+            self.waiters.wait_uninterruptible(|| self.owner.load(Ordering::Acquire) == 0);
+        }
+    }
+}
+
+impl Drop for RecursiveGuard<'_> {
+    fn drop(&mut self) {
+        if self.held && self.l.depth.fetch_sub(1, Ordering::Relaxed) == 1 {
+            self.l.owner.store(0, Ordering::Release);
+            self.l.waiters.wake_one();
+        }
+    }
+}

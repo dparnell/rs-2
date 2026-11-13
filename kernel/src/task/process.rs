@@ -361,6 +361,7 @@ pub fn exec(p: ExecParams<'_>) -> Result<Arc<Process>, u32> {
     let calls = crate::api::module::init_order(core::slice::from_ref(&exe), &proc);
     crate::api::module::start(&proc, &t, t.user_frame(), calls, true, None);
     PROCESSES.lock().push(proc.clone());
+    crate::session::claim_leader(p.session, pid);
     if p.traced {
         crate::api::debug::traced(&proc);
     }
@@ -598,12 +599,7 @@ impl Process {
         // The rest can wait for things (a file closing, the disk), which a
         // thread already dead must not: it would come back to life.
         let p = self.clone();
-        crate::task::kthread::spawn("procexit", move || {
-            // Its session's end (switching the screen, ending pop-ups) is
-            // in the corner still under the legacy lock (smp.rs).
-            crate::smp::legacy_acquire();
-            p.finish();
-        });
+        crate::task::kthread::spawn("procexit", move || p.finish());
     }
 
     /// The last thread is gone: everything else the process had.

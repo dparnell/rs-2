@@ -222,6 +222,7 @@ fn start_dos(c: &Ctx, sd: &StartData, path: Option<String>, inputs: &str, env: V
     }
     let parent_pid = sd.related.then_some(c.process.pid);
     let sid = session::create(title, caller_session, parent_pid, sd.termq.clone());
+    session::expect_leader(sid);
     session::make_windowable(sid, windowed);
     crate::vdm::register(sid);
     let args = if inputs.is_empty() { prog.clone() } else { alloc::format!("{prog} {inputs}") };
@@ -348,6 +349,7 @@ fn start(c: &Ctx, sd: StartData) -> Result<(u32, u32, u32), u32> {
         windowed = false;
     }
     let sid = session::create(title, caller_session, parent_pid, sd.termq.clone());
+    session::expect_leader(sid);
     if windowed {
         session::make_windowed(sid);
     }

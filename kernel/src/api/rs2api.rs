@@ -23,6 +23,9 @@ pub fn rs2_map_display(c: &mut Ctx) -> u32 {
     // SysIni calls WinInitialize) stays in its session: moving it took its
     // keyboard away, and CMD.EXE never saw another key.
     if c.process.exe.app_type == 3 {
+        // Joining and the end of the PM session's last process are
+        // decided under the session lock.
+        let _g = session::SWITCH.lock();
         let pm = session::pm_session_or_create();
         c.process.session.store(pm, Ordering::Relaxed);
         // Already in front (a program started from PM): selecting again
