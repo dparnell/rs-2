@@ -290,8 +290,27 @@ it is declared.
   network I/O), DosShutdown, DosSetDateTime.
 - DosDebug: the debugger reads and writes a debuggee thread's saved
   registers only under `DEBUGGEES` while the thread is parked or blocked
-  in another kernel wait (`with_frame`); coprocessor registers it writes
-  are loaded by the thread itself when it wakes.
+  in another kernel wait (`with_frame`). Any other thread (one running
+  user code on another CPU, even while another debugger thread lets the
+  debuggee run) is stopped first, as IBM's debuggee threads are when
+  DosDebug reads them: it is marked (`peek`), so it parks on its next
+  return to user mode, and the CPUs are kicked until it does; one that
+  does not stop within a second gives ERROR_INVALID_THREADID, never its
+  stale frame. Coprocessor registers it writes are loaded by the thread
+  itself when it wakes.
+- The keyboard: each source keeps its own E0 prefix (the PS/2 interrupt
+  handler; USB HID and virtio-input pass whole keys to `kbd::key`), and
+  a key's whole shift-state change (modifiers, locks, the lock keys held
+  down, Insert) is made under kbd's `STATE`, so keys from several
+  keyboards on several CPUs cannot tear it. The LEDs are set from the
+  state read with the PS/2 port locked.
+- The global infoseg's time fields: one writer at a time (`WRITER`: the
+  timer on CPU 0, DosSetDateTime anywhere; the clock is read inside it).
+  Programs read the fields with no lock (IBM's DosGetDateTime copies
+  the hour..hundredths and day..year dwords), so each group is stored as
+  one aligned dword, in the order of IBM's clock driver (seconds since
+  1970, the time of day, the date); a sequence count at 0x7C, odd during
+  an update, lets a reader (rs2's own) take all of them consistently.
 
 There is no big kernel lock. Until this was finished the API gate took
 one for the calls not converted yet (and `bkl` on the command line for
@@ -339,7 +358,8 @@ process" and "the last open of a semaphore" are decided under the list's
 lock, a dead thread or child is collected by whoever takes it out of the
 list, a session's leader is recorded by exec before the process runs, a
 socket call reaches the stack only if its handle is still open (checked
-with the stack locked, under which soclose closes it), a drive letter is
+with the stack locked, under which soclose closes it; select checks every
+handle it was given at each look), a drive letter is
 picked and mounted under the mount lock.
 
 **Checking.** In builds with debug assertions (`xtask run`'s `checked`
@@ -352,7 +372,8 @@ CPUs, is reported once on the serial port with both creation sites and a
 backtrace, and so is a spin lock taken again by its holder (which would
 otherwise hang silently). Same-class nesting (two processes' locks) is not
 checked. `RS2\STRESS.EXE smp` races threads and processes on the same
-kernel objects and times a kernel-call load; `STRESS corner` runs
+kernel objects (and reads the infoseg's time while it is written) and
+times a kernel-call load; `STRESS corner` runs
 pop-ups, sessions started, selected and stopped, and keyboard and disk
 IOCtls from several processes at once.
 

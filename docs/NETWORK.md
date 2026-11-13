@@ -319,7 +319,10 @@ pcnet (also behind a PCI bridge, and with its registers in 32-bit mode;
 IBM FTP's `get`/`put` of 300 KB byte-identical on each model too): all checks pass, about 5-7 MB/s each way under
 TCG; apitest and stress still pass with a NIC present.
 
-Further NETTEST sections: `tcp` (urgent data over loopback: MSG_OOB,
+Further NETTEST sections: `race` (select() on a UDP socket that
+another thread closes and at once replaces with a readable one, which
+takes its stack id: select must end with ENOTSOCK, not report the
+closed socket ready), `tcp` (urgent data over loopback: MSG_OOB,
 select's exception set, SIOCATMARK, the read stopping at the mark,
 SO_OOBINLINE; TCP_NODELAY and SO_KEEPALIVE read back), `tables` (a
 network and a host route added, listed and deleted, an off-link gateway
