@@ -94,6 +94,12 @@ unsafe extern "C" {
     fn DOSMONOPEN();
     #[link_name = "MONCALLS.5"]
     fn DOSMONREG();
+    #[link_name = "DOSCALLS.53"]
+    fn DOSDEVIOCTL();
+    #[link_name = "DOSCALLS.99"]
+    fn DOSDEVIOCTL2();
+    #[link_name = "DOSCALLS.287"]
+    fn DosPhysicalDisk(function: u32, buf: *mut u8, cb: u32, params: *mut u8, cb_params: u32) -> u32;
 }
 
 /// A 64 KB block for 16-bit buffers, carved up by offset.
@@ -206,6 +212,7 @@ pub fn run() {
     monitors(&b);
     subsystem(&b);
     devices(&b);
+    ioctls(&b);
     unsafe { DosFreeMem(mem) };
 }
 
@@ -632,4 +639,232 @@ pub fn keys() {
     println!("KbdCharIn after the monitor: char {ch:02x} scan {scan:02x} status {st:02x}");
     call(DOSMONCLOSE, &[hm]);
     unsafe { DosFreeMem(mem) };
+}
+
+/// DosDevIOCtl (32-bit) with parameter and data buffers (empty: NULL);
+/// the return code and the lengths it reported.
+fn ioctl(h: u32, cat: u32, func: u32, p: &mut [u8], d: &mut [u8]) -> (u32, u32, u32) {
+    let (mut cbp, mut cbd) = (0xdead_0000u32, 0xdead_0000u32);
+    let pp = if p.is_empty() { null_mut() } else { p.as_mut_ptr() };
+    let dp = if d.is_empty() { null_mut() } else { d.as_mut_ptr() };
+    let rc = unsafe { DosDevIOCtl(h, cat, func, pp, p.len() as u32, &mut cbp, dp, d.len() as u32, &mut cbd) };
+    (rc, cbp, cbd)
+}
+
+/// IOCtl coverage: IBM's routing and error codes, OEMHLP$, TESTCFG$,
+/// APM$, the general category, monitors, mouse and disk functions.
+fn ioctls(b: &Buf) {
+    if let Ok(h) = open(b"\\DEV\\KBD$\0") {
+        // Functions below 0x40 are the kernel's: invalid function in
+        // categories 1-13, invalid category elsewhere; a device's unknown
+        // function is ERROR_BAD_COMMAND.
+        let r1 = ioctl(h, 4, 0x10, &mut [], &mut []).0;
+        let r2 = ioctl(h, 0x20, 0x10, &mut [], &mut []).0;
+        let r3 = ioctl(h, 4, 0x7f, &mut [], &mut []).0;
+        let r4 = ioctl(h, 0x40, 0x60, &mut [], &mut []).0;
+        check("DosDevIOCtl errors: kernel function, category, unknown device function", r1 == 1 && r2 == 117 && r3 == 22 && r4 == 22);
+        // A buffer with a zero maximum length must be NULL.
+        let mut m = 0u8;
+        let mut m2 = 0u8;
+        let (mut cbp, mut cbd) = (0, 0);
+        let rc = unsafe { DosDevIOCtl(h, 4, 0x71, &mut m, 0, &mut cbp, &mut m2, 1, &mut cbd) };
+        check("DosDevIOCtl non-NULL buffer of length 0", rc == 87);
+        // General category: flush input, monitors supported.
+        let g1 = ioctl(h, 0xb, 1, &mut [], &mut []).0;
+        let g2 = ioctl(h, 0xb, 0x60, &mut [], &mut []).0;
+        check("KBD$ DEV_FLUSHINPUT, DEV_QUERYMONSUPPORT", g1 == 0 && g2 == 0);
+        // MON_REGISTERMONITOR: in and out buffers in one segment.
+        set16(b, 0x6000, 64);
+        set16(b, 0x6100, 64);
+        let inp = b.p(0x6000);
+        let (sel, off) = (inp[0], inp[1]);
+        let mut mp = [0u8; 10];
+        mp[2..4].copy_from_slice(&0xffffu16.to_le_bytes());
+        mp[4..6].copy_from_slice(&off.to_le_bytes());
+        mp[6..8].copy_from_slice(&sel.to_le_bytes());
+        mp[8..10].copy_from_slice(&off.wrapping_add(0x100).to_le_bytes());
+        let mon = ioctl(h, 0xa, 0x40, &mut mp, &mut []).0;
+        check("KBD$ MON_REGISTERMONITOR", mon == 0);
+        unsafe { DosClose(h) };
+    }
+    if let Ok(h) = open(b"\\DEV\\CLOCK$\0") {
+        let g = ioctl(h, 0xb, 0x60, &mut [], &mut []).0;
+        check("CLOCK$ DEV_QUERYMONSUPPORT: monitors not supported", g == 165);
+        unsafe { DosClose(h) };
+    }
+
+    match open(b"OEMHLP$\0") {
+        Ok(h) => {
+            let mut d = [0u8; 30];
+            let (rc, _, cbd) = ioctl(h, 0x80, 0, &mut [], &mut d);
+            check("OEMHLP$ adaptation info", rc == 0 && &d[..3] == b"rs2" && &d[20..25] == b"20.45" && cbd & 0xffff == 30);
+            let mut dcc = [0u8; 4];
+            let (rc, _, cbd) = ioctl(h, 0x80, 2, &mut [], &mut dcc);
+            // IBM's kernel reports the maximum length, not the used one.
+            check("OEMHLP$ display combination code, data length", rc == 0 && dcc[0] == 8 && cbd & 0xffff == 4);
+            let mut mem = [0u8; 6];
+            let rc = ioctl(h, 0x80, 9, &mut [], &mut mem).0;
+            let high = u32::from_le_bytes([mem[2], mem[3], mem[4], mem[5]]);
+            check("OEMHLP$ memory info", rc == 0 && u16::from_le_bytes([mem[0], mem[1]]) == 640 && high > 64 * 1024);
+            let r1 = ioctl(h, 0x80, 4, &mut [], &mut [0u8; 4]).0;
+            let r2 = ioctl(h, 0x80, 0x30, &mut [], &mut [0u8; 4]).0;
+            let r3 = ioctl(h, 0x81, 0, &mut [], &mut [0u8; 30]).0;
+            check("OEMHLP$ no EISA, unknown function, category", r1 == 0xff03 && r2 == 0xff03 && r3 == 0xff03);
+            // PCI: the BIOS, the host bridge at 0:0.0 read and found.
+            let mut bi = [0xffu8; 5];
+            let rc = ioctl(h, 0x80, 0xb, &mut [0], &mut bi).0;
+            check("OEMHLP$ PCI BIOS info", rc == 0 && bi[0] == 0 && bi[1] == 1 && bi[2] == 2);
+            let mut rd = [0u8; 5];
+            let rc = ioctl(h, 0x80, 0xb, &mut [3, 0, 0, 0, 4], &mut rd).0;
+            let id = u32::from_le_bytes([rd[1], rd[2], rd[3], rd[4]]);
+            let (vendor, device) = (id as u16, (id >> 16) as u16);
+            let mut fp = [1u8, 0, 0, 0, 0, 0];
+            fp[1..3].copy_from_slice(&device.to_le_bytes());
+            fp[3..5].copy_from_slice(&vendor.to_le_bytes());
+            let mut fd = [0xffu8; 3];
+            let rc2 = ioctl(h, 0x80, 0xb, &mut fp, &mut fd).0;
+            let mut word = [0u8; 5];
+            let rc3 = ioctl(h, 0x80, 0xb, &mut [3, 0, 0, 2, 2], &mut word).0;
+            check(
+                "OEMHLP$ PCI read configuration, find device",
+                rc == 0 && vendor != 0xffff && rc2 == 0 && fd == [0, 0, 0] && rc3 == 0 && u16::from_le_bytes([word[1], word[2]]) == device,
+            );
+            let mut nf = [0u8; 3];
+            let mut np = [1u8, 0x34, 0x12, 0x34, 0x12, 0];
+            let rc = ioctl(h, 0x80, 0xb, &mut np, &mut nf).0;
+            let rc2 = ioctl(h, 0x80, 0xb, &mut [3, 0, 0, 1, 2], &mut [0u8; 5]).0;
+            check("OEMHLP$ PCI device not found, bad register", rc == 0xff0c && nf[0] == 0x86 && rc2 == 0xff0c);
+            let mut di = [0u8; 46];
+            let rc = ioctl(h, 0x80, 0xe, &mut [0x80], &mut di).0;
+            let rc2 = ioctl(h, 0x80, 0xe, &mut [0x7f], &mut [0u8; 46]).0;
+            check("OEMHLP$ disk info", rc == 0 && u16::from_le_bytes([di[24], di[25]]) == 512 && di[16..24].iter().any(|&x| x != 0) && rc2 == 0xff13);
+            // The 16-bit DosDevIOCtl and DosDevIOCtl2.
+            set16(b, 0x6200, 0);
+            let (dp, pp) = (b.p(0x6200), b.p(0x6210));
+            let rc = call(DOSDEVIOCTL, &[dp[0], dp[1], pp[0], pp[1], 2, 0x80, h as u16]);
+            let ok16 = rc == 0 && b.bytes(0x6200, 1)[0] == 8;
+            let rc = call(DOSDEVIOCTL2, &[dp[0], dp[1], 6, pp[0], pp[1], 0, 9, 0x80, h as u16]);
+            check("OEMHLP$ through the 16-bit DosDevIOCtl and DosDevIOCtl2", ok16 && rc == 0 && w16(b, 0x6200) == 640);
+            unsafe { DosClose(h) };
+        }
+        Err(e) => check(&alloc::format!("OEMHLP$ open ({e})"), false),
+    }
+
+    match open(b"TESTCFG$\0") {
+        Ok(h) => {
+            let mut bus = [0xffu8; 4];
+            let rc = ioctl(h, 0x80, 0x60, &mut [0, 0, 0, 0], &mut bus).0;
+            check("TESTCFG$ bus type ISA", rc == 0 && bus == [0, 0, 0, 0]);
+            let mut rom = [0u8; 16];
+            let mut rp = [0u8; 10];
+            rp[4..8].copy_from_slice(&0xf0000u32.to_le_bytes());
+            rp[8..10].copy_from_slice(&16u16.to_le_bytes());
+            let rc = ioctl(h, 0x80, 0x40, &mut rp, &mut rom).0;
+            rp[4..8].copy_from_slice(&0xb8000u32.to_le_bytes());
+            let rc2 = ioctl(h, 0x80, 0x40, &mut rp, &mut rom).0;
+            check("TESTCFG$ ROM copy (F0000 yes, B8000 no)", rc == 0 && rc2 == 0xff13);
+            let mut v = [0u8; 4];
+            let mut ip = [0u8; 8];
+            ip[0..2].copy_from_slice(&0x300u16.to_le_bytes());
+            ip[2] = 1;
+            let rc = ioctl(h, 0x80, 0x41, &mut ip, &mut v).0;
+            ip[0..2].copy_from_slice(&0x80u16.to_le_bytes());
+            let rc2 = ioctl(h, 0x80, 0x41, &mut ip, &mut v).0;
+            ip[0..2].copy_from_slice(&0xcfcu16.to_le_bytes());
+            ip[2] = 4;
+            let rc3 = ioctl(h, 0x80, 0x41, &mut ip, &mut v).0;
+            check("TESTCFG$ IN (free port, below 0x100, the kernel's)", rc == 0 && rc2 == 0xff13 && rc3 == 0xff13);
+            let r1 = ioctl(h, 0x80, 0x61, &mut [0u8; 4], &mut [0u8; 18]).0;
+            let r2 = ioctl(h, 0x80, 0x50, &mut [0u8; 4], &mut [0u8; 4]).0;
+            let r3 = ioctl(h, 0x8, 0x60, &mut [0u8; 4], &mut [0u8; 4]).0;
+            check("TESTCFG$ no POS IDs, unknown function, other category", r1 == 0xff13 && r2 == 0xff13 && r3 == 87);
+            unsafe { DosClose(h) };
+        }
+        Err(e) => check(&alloc::format!("TESTCFG$ open ({e})"), false),
+    }
+
+    match open(b"APM$\0") {
+        Ok(h) => {
+            let mut ps = [0u8; 13];
+            ps[0] = 13;
+            let mut rcw = [0xffu8; 2];
+            let rc = ioctl(h, 0xc, 0x60, &mut ps, &mut rcw).0;
+            check("APM$ power status: on line, no battery", rc == 0 && rcw == [0, 0] && ps[0] == 13 && ps[4] == 1 && ps[10] == 0x80);
+            let mut pi = [0u8; 10];
+            pi[0] = 10;
+            let rc = ioctl(h, 0xc, 0x62, &mut pi, &mut rcw).0;
+            check("APM$ power info: APM 1.2", rc == 0 && pi[4] == 1 && pi[5] == 2);
+            let mut ev = [0u8; 8];
+            ev[0] = 0x55;
+            let rc = ioctl(h, 0xc, 0x40, &mut ev, &mut rcw).0;
+            let bad_subid = rcw == [1, 0];
+            let rc2 = ioctl(h, 0xc, 0x50, &mut ev, &mut rcw).0;
+            check("APM$ bad power event, unknown function", rc == 87 && bad_subid && rc2 == 87 && rcw == [1, 0]);
+            unsafe { DosClose(h) };
+        }
+        Err(e) => check(&alloc::format!("APM$ open ({e})"), false),
+    }
+
+    // MOUSE$ when there is a mouse.
+    if let Ok(h) = open(b"\\DEV\\MOUSE$\0") {
+        let mut ev = [0u8; 10];
+        let rc = ioctl(h, 7, 0x63, &mut [0, 0], &mut ev).0;
+        let rc2 = ioctl(h, 7, 0x6a, &mut [], &mut []).0;
+        let rc3 = ioctl(h, 7, 0x54, &mut [0x05, 0], &mut []).0;
+        let mut got = [0u8; 2];
+        let rc4 = ioctl(h, 7, 0x65, &mut [], &mut got).0;
+        let mut shape = [0u8; 10];
+        shape[0] = 4;
+        let mut masks = [0u8; 4];
+        let rc5 = ioctl(h, 7, 0x68, &mut masks, &mut shape).0;
+        let rc6 = ioctl(h, 7, 0x53, &mut [0, 0, 0, 0], &mut []).0;
+        check(
+            "MOUSE$ read event, version, event mask, pointer shape, bad scale",
+            rc == 0 && rc2 == 0 && rc3 == 0 && rc4 == 0 && got == [5, 0] && rc5 == 0 && shape[2] == 1 && masks == [0xff, 0xff, 0, 0x77] && rc6 == 87,
+        );
+        ioctl(h, 7, 0x54, &mut [0x7f, 0], &mut []);
+        unsafe { DosClose(h) };
+    }
+
+    // Logical and physical disk.
+    let (mut hd, mut act) = (0, 0);
+    if unsafe { DosOpen(b"C:\0".as_ptr(), &mut hd, &mut act, 0, 0, 1, 0x8040, null_mut()) } == 0 {
+        let mut map = [0xffu8];
+        let r1 = ioctl(hd, 8, 0x21, &mut [0], &mut map).0;
+        let mut ls = [0u8; 2];
+        let r2 = ioctl(hd, 8, 0x66, &mut [0], &mut ls).0;
+        let r3 = ioctl(hd, 8, 0x05, &mut [0], &mut []).0;
+        check("DSK_GETLOGICALMAP, DSK_GETLOCKSTATUS, kernel function 5", r1 == 0 && map[0] == 0 && r2 == 0 && ls == [4, 0] && r3 == 1);
+        let mut bpb = [0u8; 36];
+        ioctl(hd, 8, 0x63, &mut [0], &mut bpb);
+        let mut set = bpb;
+        set[13] = 32; // sectors per track
+        let r1 = ioctl(hd, 8, 0x43, &mut [1], &mut set).0;
+        let mut got = [0u8; 36];
+        ioctl(hd, 8, 0x63, &mut [0], &mut got);
+        let r2 = ioctl(hd, 8, 0x43, &mut [0], &mut set).0;
+        let mut back = [0u8; 36];
+        ioctl(hd, 8, 0x63, &mut [0], &mut back);
+        check("DSK_SETDEVICEPARAMS replaces the device BPB until reset", r1 == 0 && got[13] == 32 && r2 == 0 && back == bpb);
+        // DSK_VERIFYTRACK: sector 1 of track 0.
+        let mut tl = [0u8; 9 + 4];
+        tl[7] = 1;
+        tl[9] = 1;
+        tl[11..13].copy_from_slice(&512u16.to_le_bytes());
+        let r = ioctl(hd, 8, 0x65, &mut tl, &mut []).0;
+        check("DSK_VERIFYTRACK", r == 0);
+        unsafe { DosClose(hd) };
+    }
+    let mut hp = [0u8; 2];
+    if unsafe { DosPhysicalDisk(2, hp.as_mut_ptr(), 2, b"1:\0".as_ptr() as *mut u8, 3) } == 0 {
+        let h = u16::from_le_bytes(hp) as u32;
+        let r1 = ioctl(h, 9, 0, &mut [0], &mut []).0;
+        let mut tl = [0u8; 9 + 4];
+        tl[7] = 2;
+        let r2 = ioctl(h, 9, 0x65, &mut tl, &mut []).0;
+        let r3 = ioctl(h, 9, 1, &mut [0], &mut []).0;
+        let r4 = ioctl(h, 9, 0x30, &mut [0], &mut []).0;
+        check("PDSK lock, verify track, unlock, kernel function", r1 == 0 && r2 == 0 && r3 == 0 && r4 == 1);
+        unsafe { DosPhysicalDisk(3, null_mut(), 0, hp.as_mut_ptr(), 2) };
+    }
 }

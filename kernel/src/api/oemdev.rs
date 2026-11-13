@@ -362,8 +362,10 @@ pub fn apm(c: &Ctx, r: &Req) -> u32 {
     if r.category != 0xc {
         return dd_error(r.category, status::UNKNOWN_COMMAND);
     }
-    if c.read_u16(r.data).is_none() || !c.write_u16(r.data, 0) {
-        return bad;
+    // The return code word must be writable.
+    match c.read_u16(r.data) {
+        Some(v) if c.write_u16(r.data, v) => {}
+        _ => return bad,
     }
     let size = match r.function {
         0x40 | 0x43 => 8,

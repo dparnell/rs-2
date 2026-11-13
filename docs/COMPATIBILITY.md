@@ -522,6 +522,38 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   (category 7 queries), `KBD$` category 4 IOCtls (input mode, interim
   flags, shift state, typematic rate, read/peek, code page, translate,
   hardware ID). COM1 also carries the kernel log.
+- DosDevIOCtl (16-bit, DosDevIOCtl2, 32-bit) routes requests as IBM's
+  kernel does (OS2KRNL's w_DevIOCtl and ErrorTriage, studied with
+  Ghidra): functions below 0x40 of categories below 0x80 are the
+  kernel's own (logical disk lock, unlock, redetermine media, logical
+  map, begin format, removable; physical disk lock and unlock; flush
+  input and output), any other there is ERROR_INVALID_FUNCTION in
+  categories 1-13 and ERROR_INVALID_CATEGORY outside them; a device's
+  unknown function is ERROR_BAD_COMMAND, or 0xFF00 + the driver's error
+  code in categories 0x80 and up (0xFF03, 0xFF13, 0xFF0C). The 32-bit
+  form refuses a non-NULL buffer with a zero maximum length and, like
+  IBM's, stores the maximum lengths in the length words before the device
+  runs (rs2's handlers then store the lengths they used). Coverage of
+  bsedev.h: category 1 all (stop/start transmit, comm status, modem
+  change events; enhanced mode cannot be enabled on a 16550); 3
+  SCR_ALLOCLDT, SCR_ALLOCLDTOFF, SCR_DEALLOCLDT (PTR_GETPTRDRAWADDRESS
+  is refused: rs2 has no ring-0 pointer draw routine to give a mouse
+  driver); 4 all; 7 all of IBM MOUSE.SYS's on the session's mouse state
+  (MOU_VER answers without data, as IBM's does); 8 all but the diskette
+  ones (DSK_UNLOCKEJECTMEDIA, DSK_DISKETTECONTROL, DSK_QUERYMEDIASENSE);
+  9 lock, unlock, verify and the track functions; 0xA
+  MON_REGISTERMONITOR on KBD$ and MOUSE$; 0xB flush input/output and
+  DEV_QUERYMONSUPPORT on the character devices; 0xC on `APM$` (IBM
+  APM.SYS's interface on rs2's ACPI power code: power status on line
+  with no battery, power info APM 1.2, the power-off event); 0x80 on
+  `OEMHLP$` (IBM's is in OS2LDR: functions 0-0xF; OEM name "rs2",
+  revision 20.45, no machine ID, VGA display combination, memory, disk
+  information from rs2's disks with the synthetic 255/63 geometry, the
+  PCI BIOS functions on PCI configuration space; no EISA, and no ROM
+  fonts under UEFI) and `TESTCFG$` (IBM TESTCFG.SYS's: ISA bus, copies
+  of the adapter ROM area C0000-FFFFF, port IN/OUT at 0x100 and above,
+  refused on ports a driver owns and on PCI configuration 0xCF8-0xCFF;
+  no POS or EISA IDs; an empty SCSI inquiry). APITEST checks them.
 
 ## DOS sessions
 

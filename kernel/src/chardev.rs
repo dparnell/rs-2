@@ -82,6 +82,10 @@ struct Port {
     errors: u16,
     events: u16,
     irq_on: bool,
+    /// Transmission stopped (ASYNC_STOPTRANSMIT, as if XOFF came).
+    tx_stopped: bool,
+    /// Enhanced mode flags (ASYNC_SETENHANCEDMODEPARMS).
+    enhanced: u8,
 }
 
 const DEFAULT_DCB: Dcb = Dcb {
@@ -110,6 +114,8 @@ const fn port() -> Port {
         errors: 0,
         events: 0,
         irq_on: false,
+        tx_stopped: false,
+        enhanced: 0,
     }
 }
 
@@ -286,6 +292,18 @@ pub fn com_read(i: usize, len: usize) -> Vec<u8> {
 pub fn com_write(i: usize, data: &[u8]) -> usize {
     let b = BASES[i];
     let mut n = 0;
+    // Stopped transmission waits for ASYNC_STARTTRANSMIT up to the write
+    // timeout (hundredths of a second, plus one).
+    let (stopped, timeout) = {
+        let p = PORTS[i].lock();
+        (p.tx_stopped, (p.dcb.write_timeout as u64 + 1) * 10)
+    };
+    if stopped && !data.is_empty() {
+        let deadline = crate::irq::ticks() + timeout * crate::irq::HZ / 1000;
+        if !RX_WAIT.wait_until(Some(deadline), || !PORTS[i].lock().tx_stopped) {
+            return 0;
+        }
+    }
     for &c in data {
         let mut spins = 0u32;
         while unsafe { inb(b + 5) } & 0x20 == 0 {
@@ -298,7 +316,22 @@ pub fn com_write(i: usize, data: &[u8]) -> usize {
         unsafe { outb(b, c) };
         n += 1;
     }
+    if n > 0 {
+        PORTS[i].lock().events |= 0x0004; // LAST_CHAR_SENT
+    }
     n
+}
+
+/// The modem status register, its change bits folded into the COM
+/// events (reading it clears them).
+fn msr(p: &mut Port, base: u16) -> u8 {
+    let m = unsafe { inb(base + 6) };
+    for (bit, ev) in [(0x01, 0x0008), (0x02, 0x0010), (0x08, 0x0020), (0x04, 0x0100)] {
+        if m & bit != 0 {
+            p.events |= ev; // CTS, DSR, DCD changed, RI
+        }
+    }
+    m
 }
 
 /// Category 1 (ASYNC) IOCtls on COMn; returns the data to give back.
@@ -362,19 +395,39 @@ pub fn com_ioctl(i: usize, f: u32, params: &[u8]) -> Result<Vec<u8>, u32> {
             p.mcr = (p.mcr | on) & off;
             word(0)
         }
-        0x47 | 0x48 => Vec::new(),
+        0x47 | 0x48 => {
+            p.tx_stopped = f == 0x47;
+            if f == 0x48 {
+                drop(p);
+                RX_WAIT.wake_all();
+                return Ok(Vec::new());
+            }
+            Vec::new()
+        }
         0x53 => {
             need(11)?;
             p.dcb = Dcb::from_bytes(params);
             Vec::new()
         }
         0x73 => p.dcb.bytes().to_vec(),
-        0x54 => Vec::new(),
-        0x74 => alloc::vec![0],
-        0x64 => alloc::vec![0],
+        // Enhanced mode (DMA, on the UARTs that have it): a 16550 has
+        // none, so it cannot be enabled. Parameters and data: BYTE flags,
+        // ULONG reserved.
+        0x54 => {
+            need(5)?;
+            if params[0] & 0x02 != 0 {
+                return Err(err::INVALID_PARAMETER);
+            }
+            p.enhanced = params[0] & !0x03;
+            Vec::new()
+        }
+        0x74 => alloc::vec![p.enhanced, 0, 0, 0, 0],
+        // COMMSTATUS: waiting for XON (stopped), waiting while the break
+        // is on.
+        0x64 => alloc::vec![if p.tx_stopped { 0x08 } else { 0 } | if p.brk { 0x20 } else { 0 }],
         0x65 => alloc::vec![if unsafe { inb(b + 5) } & 0x40 == 0 { 0x04 } else { 0 }],
         0x66 => alloc::vec![p.mcr & 3],
-        0x67 => alloc::vec![unsafe { inb(b + 6) } & 0xf0],
+        0x67 => alloc::vec![msr(&mut p, b) & 0xf0],
         0x68 => {
             let mut v = word(p.rx.len() as u16);
             v.extend_from_slice(&(RX_MAX as u16).to_le_bytes());
@@ -386,7 +439,10 @@ pub fn com_ioctl(i: usize, f: u32, params: &[u8]) -> Result<Vec<u8>, u32> {
             v
         }
         0x6d => word(core::mem::take(&mut p.errors)),
-        0x72 => word(core::mem::take(&mut p.events)),
+        0x72 => {
+            msr(&mut p, b);
+            word(core::mem::take(&mut p.events))
+        }
         _ => return Err(err::INVALID_FUNCTION),
     };
     // COM1 carries the kernel log too; it changes all the same.
@@ -396,7 +452,8 @@ pub fn com_ioctl(i: usize, f: u32, params: &[u8]) -> Result<Vec<u8>, u32> {
     Ok(r)
 }
 
-/// Category 0xB (general) IOCtls: flush the input (1) or output (2) buffer.
+/// Category 0xB (general) IOCtls: flush the input (1) or output (2)
+/// buffer; the serial ports take no monitors (0x60).
 pub fn com_general(i: usize, f: u32) -> Result<(), u32> {
     match f {
         1 => {
@@ -404,6 +461,7 @@ pub fn com_general(i: usize, f: u32) -> Result<(), u32> {
             Ok(())
         }
         2 => Ok(()),
+        0x60 => Err(165), // ERROR_MONITORS_NOT_SUPPORTED
         _ => Err(err::INVALID_FUNCTION),
     }
 }
