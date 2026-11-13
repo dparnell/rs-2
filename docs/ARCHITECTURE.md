@@ -66,8 +66,8 @@ idle thread and per-CPU block, reached through the GS base: the trap path
 runs `swapgs` on every transition, so OS/2 code can keep using GS as an
 ordinary selector. User code and kernel code run on all CPUs at once:
 API calls, exceptions and kernel threads take the locks of the data they
-touch, as described under "Locking" below (there is no big kernel lock any
-more, apart from a small legacy corner). Run queues are shared; a thread is
+touch, as described under "Locking" below (there is no big kernel lock).
+Run queues are shared; a thread is
 never resumed on one CPU while another is still switching away from it.
 Unmapping or write-protecting pages flushes the TLBs of the other CPUs
 that have the address space loaded (IPI shootdown, see "Locking").
@@ -243,11 +243,35 @@ it is declared.
   the block cache (`Cache.inner`), each disk controller, the network
   stack, the LAN redirector's connections, DosSub* heaps. Thread context
   only.
-- The loader lock (`loader::lock()`): a recursive sleeping lock held
-  across a whole load (lookup, file reads, the image, its imports, the
-  registry) and until the module is recorded in the process that asked
-  for it (DosExecPgm until the process is listed, DosLoadModule until
-  `p.loaded` is updated), as IBM's loader semaphore.
+- `RecursiveLock`: a sleeping lock without data that its holder may take
+  again (thread context only, never under a spin lock: checked builds
+  assert it). Four of them:
+  - the loader lock (`loader::lock()`), held across a whole load
+    (lookup, file reads, the image, its imports, the registry) and until
+    the module is recorded in the process that asked for it (DosExecPgm
+    until the process is listed, DosLoadModule until `p.loaded` is
+    updated), as IBM's loader semaphore. DLL init routines run in user
+    mode, outside it: the thread about to run one claims it
+    (`api/module.rs`), and another that reaches the same routine waits in
+    the kernel (gate slot (0, 2046)) until it has returned, so a global
+    initialisation runs once however many processes load the DLL at once;
+  - the session lock (`session::SWITCH`), around everything that changes
+    which session exists or is shown: selecting, Alt+Esc, the window
+    list, pop-ups put up and taken down (VioPopUp, hard errors), creating
+    and ending sessions, windowed/full screen, the PM session's creation,
+    joining and end;
+  - the mount lock (`fs::MOUNTING`), around mount, unmount and remount,
+    and held by whoever picks a free drive letter until it is mounted
+    (the hot-plug thread, NET USE);
+  - the boot chain's (`boot::CHAIN`): starting the next CALL=/RUN=
+    program or the shell, and checking an ended process against it.
+- The keyboard's hot keys (Ctrl+Esc, Alt+Esc, Alt+Home, the window
+  list's keys, PrtSc) arrive in interrupt context but switch sessions,
+  which may start PMVIOWIN or print: the interrupt hands them to the
+  session thread (`session::post`, an `Inbox`), and so every key typed
+  while such work is queued or the window list is open, so keys stay in
+  order. The session thread also starts the windowed sessions' PM host
+  when a select needs it, outside the session lock.
 - `WaitQueue`: not a lock, but `wait_until(ready)` calls `ready` with the
   queue's own spin lock held, so a condition that takes another lock
   makes an order "queue -> that lock"; code that holds that lock must
@@ -257,51 +281,52 @@ it is declared.
   one set on another CPU between the check and the sleep is not lost.
 - Atomics, with `fetch_update`/`compare_exchange` for read-modify-write
   (counters, nesting counts, the clock base).
-- The legacy lock (`smp::legacy_acquire`): what is left of the big
-  kernel lock. A thread holds it from taking it until it blocks (taken
-  back on wake-up) or returns to user mode, so it only makes the
-  stretches between waits atomic against other holders. It covers the
-  session and device corner, whose state the keyboard's hot keys also
-  change from interrupt context: VioPopUp/VioEndPopUp, the session
-  manager calls, the replacement subsystems' registration, Rs2MapDisplay
-  (the PM session), Rs2SetDisplayMode, Rs2PowerOff, windowed-session
-  control, Rs2PtyStart, DOS session registration and start requests, the
-  LAN requester, DosDebug and the kernel entries of its debuggees (the
-  debugger edits their saved registers), DosDevIOCtl, DosFSCtl,
-  DosFSAttach, DosPhysicalDisk, DosShutdown, a process's final cleanup
-  (`procexit`, which ends its session) and the hot-plug thread's mounts.
-  The API gate takes it for those calls only (`api/legacy.rs` lists
-  them); everything else runs without it. `bkl` on the kernel command
-  line makes every path take it again, which is the old big kernel lock:
-  the A/B switch for measuring and for hunting a locking bug.
+- Device locks: each UART's registers (`chardev`; COM1's is the kernel
+  log's too), the parallel ports' owner and settings, the PCI
+  configuration port (`pci::modify32` for read-modify-write), the CMOS
+  port pair (held with interrupts off), the display's mode and PM
+  mapping (`display::MODE`), the LAN requester's administration
+  (`redir::ADMIN`: start, stop, logon, NET USE, held across a use's
+  network I/O), DosShutdown, DosSetDateTime.
+- DosDebug: the debugger reads and writes a debuggee thread's saved
+  registers only under `DEBUGGEES` while the thread is parked or blocked
+  in another kernel wait (`with_frame`); coprocessor registers it writes
+  are loaded by the thread itself when it wakes.
+
+There is no big kernel lock. Until this was finished the API gate took
+one for the calls not converted yet (and `bkl` on the command line for
+all of them, which is how the measurements below were made).
 
 **Lock order** (outer before inner; a lock is never taken while one
 further down is held):
 
-1. The legacy lock (only with no spin lock held; a holder that waits
-   for anything gives it up meanwhile).
-2. The loader lock.
+1. The boot chain lock, the LAN requester's `ADMIN`, the windowed
+   sessions' host start (`viowin::STARTING`).
+2. The loader lock, then the mount lock.
 3. Sleeping locks, outside in: an open file's position (`OpenFile.pos`,
    `Dasd.pos`), the LAN redirector's server connection, a file's
    `entry`, the volume (`vol`), the block cache (`Cache.inner`; another
    cache's only by `try_lock`), the network stack, a disk controller or
    USB storage unit (`Lun.cache` before `Bot.state`), DosSub*'s lock.
-4. Spin locks of named objects and tables: semaphores (`TABLE` before a
+4. The session lock: taken inside all of the above (a hard-error pop-up
+   comes from a disk read under `vol`), so nothing under it reads a
+   disk, starts a program or takes the loader lock.
+5. Spin locks of named objects and tables: semaphores (`TABLE` before a
    semaphore's `opens`, `SYS16`), queues, timers (`TIMERS` before the
    semaphore table: a timer posts with its list locked), file locks, the
    loader's registry, shared memory (`OBJECTS`), named pipes, sessions
    (`LIST` before `SCREEN`, the mouse before `SCREEN`, the console's
    `TTY` before `SCREEN`, `SCREEN` before `DAMAGE` and the viowin and
    pty wait queues), xHCI's `CTRLS` before the HID and keyboard state.
-5. Per-process locks: `handles`, `threads` (before `exit`), `critsec`,
+6. Per-process locks: `handles`, `threads` (before `exit`), `critsec`,
    `exitlist`, `loaded`, `inited`, then the address space (`space`).
    Two address spaces are only nested in DosDebug's alias bookkeeping,
    the debuggee's before the debugger's.
-6. Memory: the shared arena (`ARENA`) before the high private ends
+7. Memory: the shared arena (`ARENA`) before the high private ends
    (`ENDS`); a shared object's `pages` and `frames`.
-7. Wait queues' own locks (`waiters`): inside whatever the waker holds,
+8. Wait queues' own locks (`waiters`): inside whatever the waker holds,
    outside whatever a `ready` condition takes.
-8. Leaves, taken inside anything: the process table (`PROCESSES`), the
+9. Leaves, taken inside anything: the process table (`PROCESSES`), the
    scheduler (`SCHED`), the kernel heap (`HEAP`), the frame allocator
    (`FRAMES`), the log.
 
@@ -312,7 +337,10 @@ up and created under its volume's lock and the open map's lock, a thread's
 ID is chosen and the thread listed together, "the last thread of a
 process" and "the last open of a semaphore" are decided under the list's
 lock, a dead thread or child is collected by whoever takes it out of the
-list.
+list, a session's leader is recorded by exec before the process runs, a
+socket call reaches the stack only if its handle is still open (checked
+with the stack locked, under which soclose closes it), a drive letter is
+picked and mounted under the mount lock.
 
 **Checking.** In builds with debug assertions (`xtask run`'s `checked`
 profile) `kernel/src/lockdep.rs` tracks the spin locks each CPU holds and
@@ -324,14 +352,16 @@ CPUs, is reported once on the serial port with both creation sites and a
 backtrace, and so is a spin lock taken again by its holder (which would
 otherwise hang silently). Same-class nesting (two processes' locks) is not
 checked. `RS2\STRESS.EXE smp` races threads and processes on the same
-kernel objects and times a kernel-call load.
+kernel objects and times a kernel-call load; `STRESS corner` runs
+pop-ups, sessions started, selected and stopped, and keyboard and disk
+IOCtls from several processes at once.
 
 **TLB shootdowns.** Changing a mapping that other CPUs may have cached
 bumps each target CPU's request count, sends it an IPI and waits until
 its done count catches up. A CPU spinning for a lock has interrupts off
 (API calls run with IF=0) and may be spinning for a lock the initiator
 holds, so every spin loop (`SpinLock::lock`, the shootdown wait itself,
-the legacy lock) does the flush asked of it (`smp::service_tlb`); several
+the CMOS lock) does the flush asked of it (`smp::service_tlb`); several
 CPUs may shoot down at once. A CPU leaves an address space's CPU mask
 only after CR3 has moved on, and freeing an address space waits until no
 other CPU has it loaded.
@@ -340,7 +370,8 @@ other CPU has it loaded.
 tcg,thread=multi`; without it QEMU runs one CPU at a time and nothing can
 be faster): `STRESS smp`'s kernel-call mix (DosAllocMem/touch/DosFreeMem,
 event post/reset, DosQuerySysInfo), 1500 rounds each in four processes,
-took 123 ms against 420 ms with `bkl` (one process alone: 93 ms); four
+took 123 ms against 420 ms with everything under the big kernel lock
+(`bkl`, before it was removed; one process alone: 93 ms); four
 threads contending for one mutex 256 ms against 460 ms, four processes
 157 ms against 349 ms. In one process
 the same mix on four threads stays slower than one thread either way:
