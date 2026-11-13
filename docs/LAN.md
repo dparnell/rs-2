@@ -295,7 +295,8 @@ loopback, DHCP, ping and DNS checks) still pass with the requester in.
   is not used (NTLMv2 only), nor DFS referrals.
 * One request at a time per server, 64 KB each; no oplocks or leases (no
   client-side caching), byte-range locks (DosSetFileLocks on network
-  files) are not sent to the server, sharing modes are checked locally
+  files) are not sent to the server (they are checked between this
+  machine's opens only, as local files' locks), sharing modes are checked locally
   only.
 * LAN Manager dialects older than NT LM 0.12 (LANMAN2.1 and before) are
   not spoken.

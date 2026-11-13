@@ -761,6 +761,24 @@ open-source browsers](BROWSER.md#os2-open-source-browsers).
   `DosOpenL`, `DosOpen2`, `DosCreateDir`, `DosMkDir2`, `DosFindFirst`
   levels 2 and 3, `DosEnumAttribute`; `DosCopy` copies EAs and `DosMove`
   keeps them; CHKDSK checks EA references.
+- Byte-range file locks are mandatory, as on OS/2 (rules from IBM's
+  kernel, listed in `kernel/src/api/filelock.rs`): a lock belongs to the
+  open file and the process that set it; `DosRead` is stopped by another
+  owner's exclusive lock, `DosWrite` and `DosSetFileSize` by any other
+  owner's lock and by the caller's own shared lock, with
+  ERROR_LOCK_VIOLATION (33). A 16-bit call transfers nothing; a 32-bit
+  call transfers the 64 KB pieces (of the buffer's address) before the
+  locked one, as IBM's kernel splits it. New locks conflict with the
+  caller's own locks too (shared with shared excepted); `LOCK_ATOMIC`
+  changes a lock between shared and exclusive in place; waits end with
+  ERROR_LOCK_VIOLATION on time-out and ERROR_INTERRUPT on a signal or
+  `DosCancelLockRequest`. A process's locks go with its last handle to
+  the open file and when it ends (a child's inherited handle does not
+  own them). DOS programs' INT 21h AH=5Ch locks are the same locks
+  (`tests/dos` LOCKTEST.COM); `DosCopy` fails on a locked source or
+  target. `STRESS locks` checks all of this; not done: the DOS sharing
+  retry count and the INT 24h hard error IBM raises for a DOS
+  compatibility-mode or FCB open (rs2's DOS fails the call with 33).
 
 - `DosGetMessage`: an insertion table slot holding NULL made the call fail
   with ERROR_INVALID_ADDRESS; OS/2 only reads the strings the message uses
@@ -808,8 +826,6 @@ open-source browsers](BROWSER.md#os2-open-source-browsers).
 - IBM KEYB.COM needs PMMERGE; its KEYBOARD.DCP tables are not read (rs2
   has its own layouts and KEYB.EXE).
 - Message files with DBCS text: DosPutMessage writes them unwrapped.
-- File locks (`DosSetFileLocks`) are advisory: they conflict with each
-  other but reads and writes are not checked against them.
 - The `DosProtect*` functions hand out a file handle lock ID but do not
   check it.
 
