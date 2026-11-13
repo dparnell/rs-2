@@ -176,7 +176,26 @@ fn delay_ms(ms: u64) {
     if crate::irq::ticks() > 0 && crate::task::sched::current_opt().is_some() {
         crate::task::sched::sleep_ms(ms);
     } else {
-        crate::msi::poll(ms, || {}, || false);
+        wait_until(ms, || {}, || false);
+    }
+}
+
+/// Wait up to `ms` milliseconds for `cond`, busy: by the time-stamp
+/// counter clock, which runs with interrupts off (API calls), and a spin
+/// count while it is not measured yet (early boot).
+fn wait_until(ms: u64, mut pace: impl FnMut(), mut cond: impl FnMut() -> bool) -> bool {
+    let end = crate::rtc::mono_ms() + ms;
+    let mut n = 0u64;
+    loop {
+        if cond() {
+            return true;
+        }
+        pace();
+        n += 1;
+        if crate::rtc::mono_ms() > end || n > ms * 20_000 {
+            return cond();
+        }
+        core::hint::spin_loop();
     }
 }
 
@@ -188,7 +207,7 @@ fn msr() -> u8 {
 /// Ok(true): as asked; Ok(false): it is in the other direction (the
 /// result phase started early).
 fn wait_rqm(dio: bool) -> Result<bool, u32> {
-    if !crate::msi::poll(2000, || {}, || msr() & MSR_RQM != 0) {
+    if !wait_until(2000, || {}, || msr() & MSR_RQM != 0) {
         return Err(err::NOT_READY);
     }
     Ok((msr() & MSR_DIO != 0) == dio)
@@ -239,7 +258,7 @@ fn sense_int() -> Result<(u8, u8), u32> {
 /// Wait for the end of a seek or recalibration on `unit`.
 fn wait_seek(unit: u8) -> Result<u8, u32> {
     let mut out = Err(err::NOT_READY);
-    crate::msi::poll(3000, || {}, || match sense_int() {
+    wait_until(3000, || {}, || match sense_int() {
         Ok((st0, pcn)) if st0 != 0x80 && st0 & 3 == unit && st0 & 0x20 != 0 => {
             out = if st0 & 0xd0 != 0 { Err(err::NOT_READY) } else { Ok(pcn) };
             true
@@ -358,7 +377,7 @@ impl Fdc {
     fn read_id(&mut self, unit: u8, head: u8) -> Result<bool, u32> {
         command(&[CMD_READ_ID, (head << 2) | unit])?;
         // The controller looks for a header for up to two revolutions.
-        if !crate::msi::poll(1500, || {}, || msr() & (MSR_RQM | MSR_DIO) == (MSR_RQM | MSR_DIO)) {
+        if !wait_until(1500, || {}, || msr() & (MSR_RQM | MSR_DIO) == (MSR_RQM | MSR_DIO)) {
             // No index pulses: no diskette. Reset to end the command.
             self.reset()?;
             return Ok(false);
@@ -380,7 +399,7 @@ impl Fdc {
         while i < len {
             // The data phase is over early when the controller turns to
             // its result (an error) or leaves non-DMA transfer mode.
-            if !crate::msi::poll(2000, || {}, || msr() & MSR_RQM != 0) {
+            if !wait_until(2000, || {}, || msr() & MSR_RQM != 0) {
                 self.reset()?;
                 return Err(err::NOT_READY);
             }
@@ -410,7 +429,7 @@ impl Fdc {
             let have = if STUCK_WRITES.load(Ordering::Relaxed) {
                 msr() & MSR_RQM != 0
             } else {
-                crate::msi::poll(300, || {}, || msr() & MSR_RQM != 0)
+                wait_until(300, || {}, || msr() & MSR_RQM != 0)
             };
             if !have {
                 STUCK_WRITES.store(true, Ordering::Relaxed);
