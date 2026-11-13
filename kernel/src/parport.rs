@@ -1,5 +1,5 @@
 //! Parallel ports: the hardware behind LPT1-LPT3, as IBM's PRINT01.SYS
-//! drives it (studied in Ghidra with print01.sym; the notes are in
+//! drives it (its disassembly studied with print01.sym; the notes are in
 //! docs/PRINTING.md "The parallel port driver").
 //!
 //! Ports are found through ACPI (PNP0400/PNP0401 devices: the I/O range
@@ -29,6 +29,11 @@
 //! ECP mode (IEEE 1284 negotiation, then the FIFO); EPP ports write
 //! through the EPP data register. The IEEE 1284 device ID is read in
 //! nibble mode (PRT_QUERDEVICEID).
+//!
+//! Kernel command line: `lptpoll` polls every port (no interrupts);
+//! `lptstall=BYTES,MS` makes the ports report "out of paper" for MS ms
+//! after every BYTES bytes (testing the timeout: QEMU's port is never
+//! busy).
 
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -603,6 +608,17 @@ pub fn write(n: usize, data: &[u8]) -> (u32, usize) {
                 return (0, done);
             }
             Err(e) if e == INTERRUPT => return (e, done),
+            // Infinite retry (the FIFO and EPP paths stop on errors):
+            // try again a little later, without a pop-up.
+            Err(_) if infinite => {
+                if crate::task::sched::current_opt().is_some_and(|t| t.exit_requested()) {
+                    return (INTERRUPT, done);
+                }
+                if may_sleep() {
+                    crate::task::sched::sleep_ms(100);
+                }
+                continue;
+            }
             Err(e) => {
                 PORTS[n].lock().timed_out = true;
                 crate::println!("LPT{}: printer stopped after {} of {} bytes, status {:#04x}: error {}", n + 1, done, data.len(), status(f.base), e);

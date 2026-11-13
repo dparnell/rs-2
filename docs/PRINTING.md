@@ -161,7 +161,7 @@ size that fits inside a margin of 1/39 of the page, centred.
 | Output | QEMU | VMware | How |
 |--------|------|--------|-----|
 | A file on rs2's disk | yes | yes | the FILE port: the job's bytes go to a file (`C:\SPOOL\OUTPUT\*.PS` unless the port names one) |
-| The parallel port | `-parallel file:out.prn` (or a host pipe/socket) | `parallel0.fileName` (a file or a host printer on Windows hosts) | LPT1-LPT3: the kernel's LPT driver writes bytes to the port's data register with the strobe |
+| The parallel port | `-parallel file:out.prn` (or a host pipe/socket) | `parallel0.fileName` (a file or a host printer on Windows hosts) | LPT1-LPT3: the kernel's parallel port driver (below) |
 | A network printer, LPR | user networking reaches the host at 10.0.2.2 (port forwarding not needed for outgoing connections) | NAT or bridged | RFC 1179 to port 515 (or any port), over rs2's TCP/IP |
 | A network printer, IPP | the same; macOS/Linux hosts run CUPS on port 631, which prints to the host's printers | the same | an HTTP POST of an IPP Print-Job with the PostScript |
 | A PDF | through the host (CUPS's PDF printer, or ps2pdf on the FILE output) | the same | |
@@ -237,7 +237,7 @@ can compare it.
   - `FILE`: to the file the port's settings name, or
     `C:\SPOOL\OUTPUT\<job>.PS`.
   - `LPT1`-`LPT3`: `DosOpen` of the kernel's LPTn device, which drives
-    the parallel port (data, strobe, busy/ack).
+    the parallel port ("The parallel port driver" below).
   - `LPR1`...: settings `host;queue;port;` (port 515 by default); the
     job is sent with RFC 1179's *receive job* (control file, data file).
   - `IPP1`...: settings `host;path;port;` (631 and `/ipp/print` by
@@ -363,6 +363,95 @@ own jobs" uses.
   hold only the jobs over the limits (IBM's PMSPL TestJobLimits); the
   others print at any time.
 
+## The parallel port driver
+
+The kernel's LPT1-LPT3 (`kernel/src/parport.rs`) work as IBM's
+PRINT01.SYS does (its disassembly studied with `print01.sym`; Warp 4.52's
+driver, 13.8 KB, 16-bit NE):
+
+- **Ports.** PRINT01 takes the port addresses from the BIOS data area
+  (40:08), which UEFI does not fill. rs2 takes them from ACPI
+  (PNP0400/PNP0401 devices: the first I/O range of `_CRS`, a range at
+  base+400h for the ECP registers, the interrupt), from PCI parallel
+  cards (class 07h subclass 01h: BAR 0 the port, BAR 1 the ECP
+  registers, the interrupt through ACPI's routing) and by probing 378h,
+  278h and 3BCh (a port is there when its data latch reads back; IRQ 7,
+  or 5 for 278h as in PRINT01). 378h is LPT1, 278h LPT2, 3BCh LPT3;
+  other ports take the free names. Each port is checked for an ECP chip
+  (an extended control register at base+402h that is not a mirror of
+  the control register, FIFO empty after reset, modes read back), EPP
+  (an address cycle nobody answers sets the timeout bit) and byte mode
+  (the data lines float with the direction bit set). The serial log
+  says what was found (`LPT1: parallel port at 0x378 (ACPI), SPP,
+  nibble, byte, IRQ 7`); the resource manager (RMVIEW, the Hardware
+  Manager) lists each port with its I/O ranges and interrupt.
+- **Output.** Compatibility mode: a byte goes out when the printer
+  reports ready (PRINT01's test: not busy, selected, paper, no fault;
+  DC1 also when not selected), on the data lines with a strobe. The
+  printer's acknowledge pulse interrupts (control bit 10h; the port's
+  ISA IRQ through the IOAPIC, or the card's PCI interrupt), and the
+  writing thread sleeps until then instead of polling. Ports without a
+  usable interrupt (none, or the level taken by another driver;
+  `lptpoll` on the kernel command line forces it) are polled a timer
+  tick at a time. PRINT01 itself polls unless its DEVICE line says
+  `/IRQ`. One writer at a time per port; others sleep. Every 4 KB the
+  log counts the bytes and acknowledge interrupts. Under QEMU the port
+  is ready after two status reads, so a writer rarely sleeps and the
+  interrupts arrive in bursts (IF is off during an API call); a real
+  printer makes the thread sleep on each byte.
+- **Timeout and errors.** As PRINT01: a printer that takes no byte for
+  the port's timeout (seconds, 120 by default, PRT_SETIRQTIMEOUT) ends
+  the write with an error from its status lines (PRINT01's `prterp`):
+  out of paper (28), a fault or a printer that is off (29, write fault)
+  or a port that answers "not busy" without being ready (20). The
+  error goes through the hard-error pop-up ("SYS0028: The printer is
+  out of paper. Device LPT1"): Retry continues where the output
+  stopped, Return error gives the program the error and the bytes
+  written, End ends it; a program with DosError(FERR_DISABLEHARDERR)
+  gets the error at once. With infinite retry on (PRT_SETINFINITERETRY)
+  the write waits as long as the printer needs, without an error, as
+  PRINT01. PRT_GETPRINTERSTATUS then has the timeout bit (01h) until a
+  write succeeds. QEMU's port is never busy, so `lptstall=BYTES,MS` on
+  the kernel command line makes the ports report "out of paper" for MS
+  milliseconds after every BYTES bytes, for testing.
+- **Category 5 IOCtls** (per port, as PRINT01 keeps them; the data
+  packet holds the values):
+
+  | Function | rs2 |
+  |----------|-----|
+  | 42h PRT_SETFRAMECTL / 62h PRT_GETFRAMECTL | FRAME (characters per line, lines per inch): PRINT01's four, 80 or 132 by 6 or 8; others ERROR_INVALID_PARAMETER. Setting one sends it to the printer as PRINT01 does: DC2 (10 cpi) or SI (condensed), then ESC 2 (1/6 inch) or ESC 0 (1/8 inch). Default 80/6 |
+  | 44h PRT_SETINFINITERETRY / 64h PRT_GETINFINITERETRY | a byte, 0 or 1 (other values ERROR_INVALID_PARAMETER; PRINT01 answers "unknown command") |
+  | 46h PRT_INITPRINTER | INIT low for about 50 us, then up to a second for the printer to be ready; the frame is 80/6 again |
+  | 48h PRT_ACTIVATEFONT / 69h PRT_QUERYACTIVEFONT / 6Ah PRT_VERIFYFONT | CPID (code page, font id): the printer's own (0, 0) or a prepared code page with font 0; others the device-specific error FF03h, PRINT01's answer when no code-page font switching is set up (DEVINFO=LPTn with the spooler's font monitor, which rs2 does not have) |
+  | 4Dh PRT_SETPRINTJOBTITLE | ASCIIZ, up to 127 characters kept (PRINT01 passes it to the spooler's monitor) |
+  | 4Eh PRT_SETIRQTIMEOUT / 6Eh PRT_QUERYIRQTIMEOUT | USHORT seconds (PRINT01's `/TOU:`), default 120 |
+  | 52h PRT_SETCOMMMODE / 72h PRT_QUERYCOMMMODE | a byte: 0 compatibility, 1 nibble, 2 byte, 3 EPP, 4 ECP; a mode the port lacks is ERROR_INVALID_PARAMETER. Output in nibble and byte mode is compatibility mode (they are reverse channels); EPP writes the EPP data register; ECP negotiates ECP mode (IEEE 1284 extensibility byte 10h) and writes the chip's FIFO |
+  | 53h PRT_SETDATAXFERMODE / 73h PRT_QUERYDATAXFERMODE | a byte: 0 programmed I/O, 1 FIFO (the ECP chip's compatibility FIFO, ECR mode 010: the chip strobes each byte); FIFO without an ECP chip, and DMA (2), are ERROR_INVALID_PARAMETER |
+  | 74h PRT_QUERDEVICEID | the IEEE 1284 device ID in nibble mode (extensibility byte 04h): two bytes of length, big-endian, then `MFG:...;MDL:...;`, cut to the data packet. A peripheral that does not negotiate (QEMU's) gives ERROR_BAD_COMMAND |
+  | 66h PRT_GETPRINTERSTATUS | PRINT01's status byte: not busy 80h, acknowledge 40h, out of paper 20h, selected 10h, I/O error 08h (from the status lines, ACK and ERROR active high), plus the timeout bit 01h after a write that timed out (PRINT01 never sets it). Without a port: selected, not busy |
+  | 21h PRT_QUERYJOBHANDLE | not on a port (ERROR_INVALID_FUNCTION) |
+
+  Other functions are ERROR_INVALID_FUNCTION and other categories
+  ERROR_INVALID_CATEGORY. Warp 4.52's PRINT01 knows 42h-4Eh and
+  62h-6Eh (and its own 47h/67h, 51h/71h); 21h and 52h-74h are in the
+  Toolkit's bsedev.h for later drivers, and their data packets here are
+  rs2's (a byte for the modes). On a handle the spooler serves
+  (`Handle::Spool`) the status is always "selected, not busy",
+  PRT_SETFRAMECTL only remembers the frame, PRT_INITPRINTER does
+  nothing, PRT_QUERDEVICEID is ERROR_BAD_COMMAND and the rest act on the
+  port's settings as above.
+- **DOS sessions** reach the driver through VDM.EXE, which opens
+  `LPT1`/`LPT2` and writes what INT 17h, the 378h/278h registers, PRN
+  and INT 21h 05h produce (or the spooler takes it as a job).
+- **Tests.** `cargo xtask run --init "RS2\PRNTEST.EXE LPT [n]" --
+  -parallel file:$PWD/work/lpt1.bin` checks every IOCtl above and
+  writes 4110 bytes; the file must then hold SI ESC 0 (the frame
+  132/8 the test sets) and the pattern ("RS2 LPT TEST" CR LF, 16 times
+  the bytes 0-255). `PRNTEST LPT 1 STALL` with `lptstall=2000,4000` in
+  work/cmdline.txt checks the timeout (ERROR_OUT_OF_PAPER after 2 s,
+  the timeout bit) and infinite retry; with `POPUP` the hard-error
+  pop-up shows instead.
+
 ## Status
 
 **Printing works.** A program prints a page through the spooler to a
@@ -376,6 +465,7 @@ IPP), and the Workplace Shell's printer objects work:
 | The queue processor: PM_Q_STD (the metafile played on an OD_DIRECT DC, page setup from the metafile) and PM_Q_RAW (DEVESC_RAWDATA) | `userland/pmprint` | PRNTEST |
 | The PostScript driver: DevOpenDC OD_QUEUED/OD_DIRECT/OD_INFO, STARTDOC/NEWFRAME/ENDDOC/ABORTDOC/RAWDATA/GETJOBID/job properties escapes, DevQueryCaps (300 dpi, CAPS_TECH_POSTSCRIPT), DevQueryHardcopyCaps (Letter, A4, Legal, A3, A5, Executive), DevQueryDeviceNames, DevPostDeviceModes (a job properties dialog: form, orientation, copies) | PMWIN `printer.rs`, `crates/gpi/src/psdev.rs` | PRNTEST, host unit tests (`cargo test -p gpi`), Ghostscript renders the output as the screen shows it |
 | Ports: FILE (FILEn), LPT1-3 (the kernel drives the parallel port), COM1-4, LPRn (RFC 1179), IPPn (IPP/1.1 Print-Job) | PMSPL `port.rs`, kernel `chardev.rs` | PRNTEST LPR/IPP with `tools/scripts/printer_listen.py`; LPT1 with QEMU's `-parallel file:` |
+| The parallel port driver: ports from ACPI, PCI cards and probing; output on the acknowledge interrupt (polled without one), PRINT01's timeout and infinite retry, hard errors; the category 5 IOCtls | kernel `parport.rs` | PRNTEST LPT (LPT1, LPT2, `lptpoll`) and LPT STALL (`lptstall=`) with QEMU's `-parallel file:`, the host file compared byte for byte |
 | Printer objects: job view, settings (queue, driver, job properties, port and settings, default printer), new printers from the template, deleting, files dropped and data files' Print | PMWP `printer.rs` | QEMU desktop runs (screenshots in the session's progress folder) |
 | Print in programs | rs2's E (File > Print), the help manager (Services > Print), IBM's Picture Viewer, the Toolkit's print sample (PRTSAMP: a metafile, sized to the page), EPM's formatted printing (File > Print file: its print thread draws each page on a `PU_TWIPS` presentation space of a queued DC) | QEMU runs, output rendered with Ghostscript |
 | Windows 3.x programs (native Win16): printer DCs, StartDoc...EndDoc and the escapes, PrintDlg, WIN.INI's printers (docs/WIN16.md) | WIN16 `print.rs`: queued PM_Q_RAW DCs | W16TEST, `RS2\PRINT16.EXE` (output rendered with Ghostscript), NOTE16's File > Print |

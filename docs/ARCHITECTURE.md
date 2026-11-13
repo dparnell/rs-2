@@ -101,8 +101,8 @@ the times handed out (DosGetDateTime, the infoseg, file stamps) never go
 backwards except through DosSetDateTime.
 
 **Interrupts.** The LAPIC timer drives the scheduler tick on every
-CPU; legacy ISA interrupts (keyboard, mouse, serial) go through the
-IOAPIC to vectors 0x20-0x2F; IPIs use 0xF0-0xF2. PCI INTx cannot be
+CPU; legacy ISA interrupts (keyboard, mouse, serial, the parallel
+ports' acknowledge) go through the IOAPIC to vectors 0x20-0x2F; IPIs use 0xF0-0xF2. PCI INTx cannot be
 routed without ACPI's AML (_PRT), so PCI devices interrupt through MSI
 or MSI-X (`msi`): vectors 0x30-0xEF (except the API gate 0x99) are
 handed out with a handler and a context word, the message (address
