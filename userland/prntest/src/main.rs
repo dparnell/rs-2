@@ -869,7 +869,11 @@ fn main(s: &Startup) -> u32 {
     let words: Vec<&[u8]> = s.args().split(|&c| c == b' ').filter(|a| !a.is_empty()).collect();
     if words.first().is_some_and(|a| a.eq_ignore_ascii_case(b"LPT")) {
         let n = words.get(1).and_then(|a| a.first().copied()).filter(|c| (b'1'..=b'3').contains(c)).map_or(1, |c| c - b'0');
-        lpt::run(n);
+        if words.iter().any(|a| a.eq_ignore_ascii_case(b"STALL")) {
+            lpt::stall(n, words.iter().any(|a| a.eq_ignore_ascii_case(b"POPUP")));
+        } else {
+            lpt::run(n);
+        }
         let f = FAILS.load(Ordering::Relaxed);
         println!("prntest done: {f} failure(s)");
         return f;

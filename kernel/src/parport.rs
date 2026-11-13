@@ -170,7 +170,29 @@ static SENT: [AtomicU64; NPORTS] = [const { AtomicU64::new(0) }; NPORTS];
 static ACKED: [AtomicU64; NPORTS] = [const { AtomicU64::new(0) }; NPORTS];
 
 fn status(base: u16) -> u8 {
+    if STALL_EVERY.load(Ordering::Relaxed) != 0 && crate::irq::ticks() < STALL_UNTIL.load(Ordering::Relaxed) {
+        // A stalled printer (test): busy, out of paper, selected.
+        return STS_PAPER | STS_SELECT | STS_ERROR | STS_ACK;
+    }
     unsafe { inb(base + 1) }
+}
+
+// Testing the timeout without a printer that runs out of paper:
+// `lptstall=BYTES,MS` on the kernel command line makes every port report
+// "out of paper" for MS milliseconds after each BYTES bytes.
+static STALL_EVERY: AtomicU64 = AtomicU64::new(0);
+static STALL_MS: AtomicU64 = AtomicU64::new(0);
+static STALL_UNTIL: AtomicU64 = AtomicU64::new(0);
+static STALL_NEXT: AtomicU64 = AtomicU64::new(0);
+
+/// Before byte number `sent` of a port: start a test stall when due.
+fn stall_check(sent: u64) {
+    let every = STALL_EVERY.load(Ordering::Relaxed);
+    if every != 0 && sent >= STALL_NEXT.load(Ordering::Relaxed) {
+        STALL_NEXT.store(sent + every, Ordering::Relaxed);
+        STALL_UNTIL.store(crate::irq::ticks() + STALL_MS.load(Ordering::Relaxed) * crate::irq::HZ / 1000, Ordering::Relaxed);
+        crate::println!("parport: test stall at byte {sent}");
+    }
 }
 
 /// PRINT01's view of the status lines: ACK and ERROR made active high.
@@ -313,6 +335,13 @@ fn acpi_ports() -> Vec<(u16, u16, Option<u8>)> {
 pub fn init() {
     if FOUND.swap(true, Ordering::AcqRel) {
         return;
+    }
+    if let Some(v) = crate::boot_info().cmdline().split_whitespace().find_map(|w| w.strip_prefix("lptstall=")) {
+        let mut it = v.split(',').map(|x| x.parse::<u64>().unwrap_or(0));
+        let (every, ms) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
+        STALL_EVERY.store(every, Ordering::Relaxed);
+        STALL_NEXT.store(every, Ordering::Relaxed);
+        STALL_MS.store(ms, Ordering::Relaxed);
     }
     let mut found: Vec<Info> = Vec::new();
     for (base, ecr, irq) in acpi_ports() {
@@ -597,7 +626,9 @@ fn spp_write(n: usize, f: &Info, data: &[u8], timeout_ms: u64, infinite: bool) -
         unsafe { outb(f.ecr, ECR_PS2 | ECR_NOINTR) };
     }
     unsafe { outb(base + 2, ctr) };
+    let sent = SENT[n].load(Ordering::Relaxed);
     for (i, &b) in data.iter().enumerate() {
+        stall_check(sent + i as u64);
         loop {
             match wait_for(n, timeout_ms, || ready(status(base), b)) {
                 Waited::Ready => break,

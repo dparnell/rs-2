@@ -146,3 +146,51 @@ pub fn run(n: u8) {
     ioctl(hf, 0x48, &[0, 0, 0, 0], 0);
     unsafe { DosClose(hf) };
 }
+
+fn ms_count() -> u32 {
+    let mut v = 0u32;
+    unsafe { DosQuerySysInfo(14, 14, &mut v, 4) };
+    v
+}
+
+/// `PRNTEST LPT n STALL`, with `lptstall=2000,4000` on the kernel command
+/// line (the port reports "out of paper" for 4 s after every 2000
+/// bytes): a write ends on the timeout with ERROR_OUT_OF_PAPER and the
+/// status says timeout; with infinite retry the rest waits the stalls
+/// out. The host file holds the pattern once.
+pub fn stall(n: u8, popup: bool) {
+    let name = [b'L', b'P', b'T', b'0' + n, 0];
+    let (mut hf, mut act) = (0, 0);
+    let rc = unsafe { DosOpen(name.as_ptr(), &mut hf, &mut act, 0, 0, OPEN_ACTION_OPEN_IF_EXISTS, OPEN_ACCESS_WRITEONLY | OPEN_SHARE_DENYNONE, null_mut()) };
+    if !check("DosOpen", rc == 0) {
+        return;
+    }
+    if !popup {
+        unsafe { DosError(0) };
+    }
+    ioctl(hf, 0x4e, &[2, 0], 0);
+    ioctl(hf, 0x44, &[0], 0);
+    let data = pattern();
+    let t0 = ms_count();
+    let mut w = 0u32;
+    let rc = unsafe { DosWrite(hf, data.as_ptr(), data.len() as u32, &mut w) };
+    let dt = ms_count().wrapping_sub(t0);
+    println!("stalled write: rc {rc}, {w} of {} bytes, {dt} ms", data.len());
+    check("a printer out of paper past the timeout: ERROR_OUT_OF_PAPER, part written, after about 2 s", rc == 28 && w > 0 && (w as usize) < data.len() && (1500..4000).contains(&dt));
+    let (rc2, st) = ioctl(hf, 0x66, &[], 1);
+    println!("status {:#04x}", st.first().copied().unwrap_or(0));
+    check("PRT_GETPRINTERSTATUS: timeout, out of paper, busy", rc2 == 0 && st.len() == 1 && st[0] & 0xa1 == 0x21);
+    ioctl(hf, 0x44, &[1], 0);
+    let rest = &data[w as usize..];
+    let t0 = ms_count();
+    let mut w2 = 0u32;
+    let rc = unsafe { DosWrite(hf, rest.as_ptr(), rest.len() as u32, &mut w2) };
+    let dt = ms_count().wrapping_sub(t0);
+    println!("infinite retry: rc {rc}, {w2} of {} bytes, {dt} ms", rest.len());
+    check("infinite retry: the rest written after the stalls, no error", rc == 0 && w2 as usize == rest.len() && dt >= 1500);
+    let (_, st) = ioctl(hf, 0x66, &[], 1);
+    check("PRT_GETPRINTERSTATUS: the timeout bit cleared", st.len() == 1 && st[0] & 0x01 == 0);
+    ioctl(hf, 0x44, &[0], 0);
+    ioctl(hf, 0x4e, &[120, 0], 0);
+    unsafe { DosClose(hf) };
+}
