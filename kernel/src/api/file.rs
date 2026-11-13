@@ -89,7 +89,14 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
                 return (err::ACCESS_DENIED, 0);
             }
             let mut pos = f.pos.lock();
-            match f.file.write(*pos, &data) {
+            // Byte-range locks (mandatory): a write stops before the
+            // first piece that hits one (api/filelock.rs).
+            let (want, locked) = super::filelock::io_allowed(&f, c.process.pid, *pos, len, buf, true, !c.is16);
+            let fail = if locked { super::filelock::ERROR_LOCK_VIOLATION } else { 0 };
+            if want == 0 && locked {
+                return (fail, 0);
+            }
+            match f.file.write(*pos, &data[..want as usize]) {
                 Ok(n) => {
                     *pos += n as u64;
                     drop(pos);
@@ -100,7 +107,7 @@ pub fn write_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
                             return (e, 0);
                         }
                     }
-                    (0, n as u32)
+                    (if n == want as usize { fail } else { 0 }, n as u32)
                 }
                 Err(e) => (e, 0),
             }
@@ -135,9 +142,19 @@ pub fn read_handle(c: &Ctx, hf: u32, buf: u32, len: u32) -> (u32, u32) {
                 return (err::ACCESS_DENIED, 0);
             }
             let mut pos = f.pos.lock();
-            let mut v = alloc::vec![0u8; len as usize];
+            // Byte-range locks (mandatory): a read stops before the
+            // first piece that hits one (api/filelock.rs).
+            let (want, locked) = super::filelock::io_allowed(&f, c.process.pid, *pos, len, buf, false, !c.is16);
+            if want == 0 && locked {
+                return (super::filelock::ERROR_LOCK_VIOLATION, 0);
+            }
+            let mut v = alloc::vec![0u8; want as usize];
             match f.file.read(*pos, &mut v) {
                 Ok(n) => {
+                    // Short of the locked piece only at the end of the file.
+                    if locked && n == want as usize {
+                        status = super::filelock::ERROR_LOCK_VIOLATION;
+                    }
                     v.truncate(n);
                     *pos += n as u64;
                     v
@@ -220,6 +237,9 @@ pub fn dos_close(c: &mut Ctx) -> u32 {
         }
     };
     c.process.noinherit.lock().remove(&(hf as u32));
+    if let Some(Handle::File(f)) = &old {
+        super::filelock::handle_closed(&c.process, f);
+    }
     drop(old);
     0
 }
@@ -304,6 +324,9 @@ fn set_size(c: &Ctx, hf: u32, size: u64) -> u32 {
         Some(Handle::File(f)) => {
             if f.access() == mode::READONLY {
                 return err::ACCESS_DENIED;
+            }
+            if !super::filelock::size_allowed(&f, c.process.pid, f.file.size(), size) {
+                return super::filelock::ERROR_LOCK_VIOLATION;
             }
             f.file.set_size(size).err().unwrap_or(0)
         }
@@ -631,6 +654,9 @@ pub fn dos_dup_handle(c: &mut Ctx) -> u32 {
             }
             hs[want as usize].replace(h)
         };
+        if let Some(Handle::File(f)) = &old_h {
+            super::filelock::handle_closed(&c.process, f);
+        }
         drop(old_h);
         want
     };
@@ -1831,8 +1857,20 @@ pub fn copy_path(src: &FullPath, dst: &FullPath, opt: u32) -> Result<(), u32> {
         }
         return Ok(());
     }
+    // DosCopy reads and writes through handles of its own, which other
+    // processes' byte-range locks stop (api/filelock.rs).
+    let key = |p: &FullPath| p.display().to_ascii_uppercase();
+    if super::filelock::path_blocked(&key(src), 0, info.size, false) {
+        return Err(super::filelock::ERROR_LOCK_VIOLATION);
+    }
     let from = sfs.open(&src.rel())?;
     let existing = dfs.stat(&dst.rel()).ok();
+    if let Some(d) = existing.as_ref().filter(|d| !d.is_dir()) {
+        let at = if opt & DCPY_APPEND != 0 { d.size } else { 0 };
+        if super::filelock::path_blocked(&key(dst), at, info.size, true) {
+            return Err(super::filelock::ERROR_LOCK_VIOLATION);
+        }
+    }
     if existing.as_ref().is_some_and(|d| d.is_dir()) {
         return copy_path(src, &child(dst, src.file_name()), opt);
     }

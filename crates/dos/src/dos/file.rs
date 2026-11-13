@@ -636,7 +636,27 @@ impl Machine {
                     }
                     Err(err::ACCESS_DENIED)
                 }
-                0x5c => Ok(()),
+                0x5c => {
+                    // Lock (AL=0) or unlock (AL=1) CX:DX for SI:DI bytes.
+                    // OS/2's checks (w_LockOper): a file handle, a
+                    // non-empty range; the lock is the session's and does
+                    // not wait.
+                    let al = self.cpu.al();
+                    if al > 1 {
+                        return Err(err::INVALID_FUNCTION);
+                    }
+                    let i = self.sft_of(self.cpu.bx()).ok_or(err::INVALID_HANDLE)?;
+                    let s = self.dos.sft[i].clone().unwrap();
+                    if s.dev.is_some() {
+                        return Err(err::INVALID_HANDLE);
+                    }
+                    let off = (self.cpu.cx() as u32) << 16 | self.cpu.dx() as u32;
+                    let len = (self.cpu.si() as u32) << 16 | self.cpu.di() as u32;
+                    if len == 0 {
+                        return Err(err::LOCK_VIOLATION);
+                    }
+                    host.lock(s.host, al == 1, off, len)
+                }
                 0x60 => {
                     let raw = self.hw.cstr(self.seg_lin(DS, self.cpu.si()), 128);
                     let s = match self.resolve(&raw)? {

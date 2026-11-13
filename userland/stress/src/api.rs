@@ -85,6 +85,8 @@ unsafe extern "C" {
     ) -> APIRET;
     #[link_name = "DOSCALLS.428"]
     pub fn DosSetFileLocks(hf: u32, unlock: *const u32, lock: *const u32, timeout: u32, flags: u32) -> APIRET;
+    #[link_name = "DOSCALLS.429"]
+    pub fn DosCancelLockRequest(hf: u32, lock: *const u32) -> APIRET;
     #[link_name = "DOSCALLS.112"]
     pub fn DosQueryRASInfo(index: u32, addr: *mut *mut u8) -> APIRET;
     #[link_name = "DOSCALLS.371"]

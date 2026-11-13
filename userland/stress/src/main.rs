@@ -13,6 +13,7 @@ mod api;
 mod files;
 mod ipc;
 mod kill;
+mod locks;
 mod mem;
 mod misc;
 mod more;
@@ -221,6 +222,7 @@ const SECTIONS: &[(&str, fn())] = &[
     ("files", files::run),
     ("ipc", ipc::run),
     ("misc", misc::run),
+    ("locks", locks::run),
     ("more", more::run),
     ("sched", sched::run),
 ];

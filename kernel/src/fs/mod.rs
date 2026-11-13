@@ -519,6 +519,8 @@ pub struct OpenFile {
     /// Open mode (access, sharing, flags). Mutable by DosSetFHState.
     pub mode: AtomicU32,
     share_key: String,
+    /// The file's byte-range locks, shared by every open of it.
+    pub locks: Arc<crate::api::filelock::FileLocks>,
 }
 
 impl Drop for OpenFile {
@@ -577,7 +579,8 @@ impl OpenFile {
             }
             v.push((access, share));
         }
-        Ok(Arc::new(OpenFile { path, file, pos: crate::sync::Mutex::new(0), mode: AtomicU32::new(open_mode), share_key: key }))
+        let locks = crate::api::filelock::for_file(&key);
+        Ok(Arc::new(OpenFile { path, file, pos: crate::sync::Mutex::new(0), mode: AtomicU32::new(open_mode), share_key: key, locks }))
     }
 
     pub fn access(&self) -> u32 {
