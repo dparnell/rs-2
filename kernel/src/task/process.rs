@@ -567,6 +567,7 @@ impl Process {
             // Mutexes it owned: waiters get ERROR_SEM_OWNER_DIED now.
             crate::api::sem::thread_ended(self.pid, me);
             crate::api::xproc::thread_ended(self, me);
+            crate::api::module::thread_ended(sched::current().id);
             // The stack DosCreateThread allocated (the thread is in the
             // kernel now and never touches it again).
             let stack = sched::current().owned_stack.swap(0, Ordering::Relaxed);

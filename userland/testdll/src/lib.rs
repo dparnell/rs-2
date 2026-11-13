@@ -24,6 +24,9 @@ pub extern "C" fn _start(_hmod: u32, flag: u32) -> u32 {
     if flag == 0 {
         INITS.fetch_add(1, Ordering::Relaxed);
         SHARED_INITS.fetch_add(1, Ordering::Relaxed);
+        // A slow initialisation, so that STRESS's loads from several
+        // processes at once would see a second one start meanwhile.
+        unsafe { os2::DosSleep(100) };
     } else {
         // Termination: visible in the output so tests can check it ran.
         let msg = b"TESTDLL terminated\r\n";

@@ -20,6 +20,112 @@ use crate::vm;
 
 /// Gate slot (0, 18): DLL init/term routines return here.
 pub const INIT_RETURN_ORDINAL: u32 = 18;
+/// Gate slot (0, 2046): a thread whose next init routine another thread
+/// is running (or has run) enters the kernel here and waits for it.
+pub const INIT_WAIT_ORDINAL: u32 = 2046;
+
+// ---- One initialisation at a time ----
+//
+// A DLL's global initialisation runs once, its per-process one once per
+// process, although several processes (or threads of one) may load it at
+// once: the routines run in user mode, so the loader lock cannot cover
+// them. The thread about to run one claims it here; another that comes to
+// the same routine waits in the kernel (INIT_WAIT_ORDINAL) until it has
+// returned, then goes on without it, or runs it itself if it failed or
+// its thread ended. IBM's loader serialises this with its semaphore.
+
+struct Claim {
+    hmte: u16,
+    /// 0 for a global initialisation, else the process.
+    pid: u32,
+    /// The thread running it (Thread::id).
+    thread: u32,
+}
+
+static CLAIMS: crate::sync::SpinLock<Vec<Claim>> = crate::sync::SpinLock::new(Vec::new());
+static CLAIM_DONE: crate::task::WaitQueue = crate::task::WaitQueue::new();
+
+enum Turn {
+    /// This thread runs it.
+    Run,
+    /// Done already: skip it.
+    Done,
+    /// Another thread runs it now.
+    Busy,
+}
+
+fn scope(m: &Module, p: &Process) -> u32 {
+    if m.per_process_init { p.pid } else { 0 }
+}
+
+fn done(m: &Module, p: &Process) -> bool {
+    if m.per_process_init { p.inited.lock().contains(&m.hmte) } else { m.global_init_done.load(Ordering::Acquire) }
+}
+
+fn claim(m: &Module, p: &Process, t: &Thread) -> Turn {
+    let mut c = CLAIMS.lock();
+    if done(m, p) {
+        return Turn::Done;
+    }
+    let pid = scope(m, p);
+    match c.iter().find(|x| x.hmte == m.hmte && x.pid == pid) {
+        Some(x) if x.thread == t.id => Turn::Run,
+        Some(_) => Turn::Busy,
+        None => {
+            c.push(Claim { hmte: m.hmte, pid, thread: t.id });
+            Turn::Run
+        }
+    }
+}
+
+fn unclaim(m: &Module, p: &Process) {
+    let pid = scope(m, p);
+    CLAIMS.lock().retain(|x| !(x.hmte == m.hmte && x.pid == pid));
+    CLAIM_DONE.wake_all();
+}
+
+/// A thread ended: what it was initialising is free for others.
+pub fn thread_ended(thread: u32) {
+    let mut c = CLAIMS.lock();
+    let n = c.len();
+    c.retain(|x| x.thread != thread);
+    if c.len() != n {
+        drop(c);
+        CLAIM_DONE.wake_all();
+    }
+}
+
+/// Gate slot INIT_WAIT_ORDINAL: wait until the next init routine is done
+/// or ours to run.
+pub fn init_wait(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
+    loop {
+        let Some((call, top)) = t.init_run.lock().as_ref().and_then(|r| r.calls.front().cloned().map(|c| (c, r.stack_top))) else {
+            return;
+        };
+        match claim(&call.module, p, t) {
+            Turn::Run => {
+                setup_call(p, t, f, &call, top);
+                return;
+            }
+            Turn::Done => {
+                // As if it had run and succeeded.
+                f.rax = 1;
+                returned(f, p, t);
+                return;
+            }
+            Turn::Busy => {
+                let m = call.module.clone();
+                let ok = CLAIM_DONE.wait_until(None, || {
+                    let pid = scope(&m, p);
+                    !CLAIMS.lock().iter().any(|x| x.hmte == m.hmte && x.pid == pid)
+                });
+                if !ok && t.exit_requested() {
+                    return;
+                }
+            }
+        }
+    }
+}
 const ERROR_INIT_ROUTINE_FAILED: u32 = 295;
 
 #[derive(Clone)]
@@ -127,9 +233,24 @@ pub fn start_term(p: &Process, t: &Thread, f: &mut TrapFrame, calls: Vec<InitCal
     true
 }
 
-/// Point `f` at the init routine of `call`, returning to the gate.
-fn setup_call(p: &Process, f: &mut TrapFrame, call: &InitCall, top: u32) {
+/// Point `f` at the init routine of `call`, returning to the gate (or at
+/// INIT_WAIT_ORDINAL when the initialisation is another thread's or done).
+fn setup_call(p: &Process, t: &Thread, f: &mut TrapFrame, call: &InitCall, top: u32) {
     let m = &call.module;
+    if call.flag == 0 && !matches!(claim(m, p, t), Turn::Run) {
+        // The thread decides in the kernel, on its own (at exec this runs
+        // on the parent's thread).
+        let esp = top.wrapping_sub(0x40) & !0xf;
+        f.ss = USER_DS as u64;
+        f.rsp = esp as u64;
+        f.cs = USER_CS as u64;
+        f.rip = gate::slot_address(0, INIT_WAIT_ORDINAL) as u64;
+        f.ds = USER_DS as u64;
+        f.es = USER_DS as u64;
+        f.fs = TIB_SEL as u64;
+        f.rflags = 0x202;
+        return;
+    }
     let start = m.init.unwrap();
     let ret = gate::slot_address(0, INIT_RETURN_ORDINAL);
     let mut sp = p.space.lock();
@@ -197,8 +318,9 @@ pub fn start(p: &Process, t: &Thread, f: &mut TrapFrame, calls: Vec<InitCall>, a
     };
     let outer = t.init_run.lock().take().map(alloc::boxed::Box::new);
     let run = InitRun { calls: calls.into(), resume: *f, at_start, result_handle, stack_top, then_exit: false, outer };
-    setup_call(p, f, run.calls.front().unwrap(), stack_top);
+    let first = run.calls.front().unwrap().clone();
     *t.init_run.lock() = Some(run);
+    setup_call(p, t, f, &first, stack_top);
     true
 }
 
@@ -212,6 +334,7 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
     if call.flag == 0 {
         if !ok {
             crate::println!("DLL {} failed to initialise", call.module.name);
+            unclaim(&call.module, p);
             let mut run = guard.take().unwrap();
             *guard = run.outer.take().map(|b| *b);
             drop(guard);
@@ -224,15 +347,19 @@ pub fn returned(f: &mut TrapFrame, p: &Arc<Process>, t: &Arc<Thread>) {
             return;
         }
         if call.module.per_process_init {
-            p.inited.lock().push(call.module.hmte);
+            let mut i = p.inited.lock();
+            if !i.contains(&call.module.hmte) {
+                i.push(call.module.hmte);
+            }
         } else {
-            call.module.global_init_done.store(true, Ordering::Relaxed);
+            call.module.global_init_done.store(true, Ordering::Release);
         }
+        unclaim(&call.module, p);
     }
     if let Some(next) = run.calls.front().cloned() {
         let top = run.stack_top;
         drop(guard);
-        setup_call(p, f, &next, top);
+        setup_call(p, t, f, &next, top);
         return;
     }
     let mut run = guard.take().unwrap();

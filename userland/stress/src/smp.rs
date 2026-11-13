@@ -498,8 +498,69 @@ fn exec_storm() {
     timed("exec storm", t0);
 }
 
+/// Child: wait for the start, load TESTDLLN (global initialisation),
+/// report how many global initialisations it has seen, hold it until told.
+pub fn child_dll() -> u32 {
+    unsafe {
+        let (mut go, mut hold) = (0, 0);
+        if DosOpenEventSem(b"\\SEM32\\STRESS\\DLLGO\0".as_ptr(), &mut go) != 0
+            || DosOpenEventSem(b"\\SEM32\\STRESS\\DLLHOLD\0".as_ptr(), &mut hold) != 0
+        {
+            return 100;
+        }
+        DosWaitEventSem(go, SEM_INDEFINITE_WAIT);
+        let mut h = 0;
+        if DosLoadModule(null_mut(), 0, b"TESTDLLN\0".as_ptr(), &mut h) != 0 {
+            return 101;
+        }
+        let mut pf: usize = 0;
+        if DosQueryProcAddr(h, 5, null(), &mut pf) != 0 {
+            return 102;
+        }
+        let shared: extern "C" fn() -> u32 = core::mem::transmute(pf);
+        let n = shared();
+        DosWaitEventSem(hold, SEM_INDEFINITE_WAIT);
+        n
+    }
+}
+
+/// A DLL with a global initialisation loaded by several processes at
+/// once: it runs once.
+fn dll_init_once() {
+    let t0 = ms();
+    let mut ok = true;
+    for round in 0..3 {
+        let (mut go, mut hold) = (0, 0);
+        unsafe {
+            DosCreateEventSem(b"\\SEM32\\STRESS\\DLLGO\0".as_ptr(), &mut go, 0, 0);
+            DosCreateEventSem(b"\\SEM32\\STRESS\\DLLHOLD\0".as_ptr(), &mut hold, 0, 0);
+        }
+        let pids: Vec<u32> = (0..THREADS).map(|_| crate::start_child("smpdll")).collect();
+        unsafe {
+            DosSleep(300);
+            DosPostEventSem(go);
+            DosSleep(1500);
+            DosPostEventSem(hold);
+        }
+        for pid in pids {
+            let (rc, cause, code, _) = crate::wait_child(pid);
+            if rc != 0 || cause != 0 || code != 1 {
+                println!("  round {round}: child rc {rc} cause {cause} saw {code} global inits");
+                ok = false;
+            }
+        }
+        unsafe {
+            DosCloseEventSem(go);
+            DosCloseEventSem(hold);
+        }
+    }
+    check("smp: a DLL's global init runs once for processes loading it at once", ok);
+    timed("DLL init race", t0);
+}
+
 pub fn run() {
     let t0 = ms();
+    dll_init_once();
     named_create_race();
     mutex_exclusion();
     thread_ids();

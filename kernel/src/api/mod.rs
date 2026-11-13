@@ -438,6 +438,10 @@ pub fn dispatch_with(f: &mut TrapFrame, route: bool, forced: Option<u32>) {
         module::returned(f, &process, &thread);
         return;
     }
+    if module == 0 && ordinal == module::INIT_WAIT_ORDINAL {
+        module::init_wait(f, &process, &thread);
+        return;
+    }
     if module == 0 && ordinal == thunk::UNITHUNK_RETURN_ORDINAL {
         thunk::returned(f, thread.id);
         return;
