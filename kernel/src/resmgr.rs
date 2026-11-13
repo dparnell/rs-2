@@ -451,6 +451,7 @@ fn pci_driver(d: &pci::Device) -> Option<(&'static str, &'static str, u16)> {
         (1, 8, 2) => ("NVME", "NVM Express disks", DRS_BLOCK),
         (0x0c, 3, 0x30) => ("XHCI", "USB 3 (xHCI): keyboards, mice, disks", DRS_SERVICE),
         (4, 3, _) => ("HDA", "High Definition Audio", DRS_AUDIO),
+        (7, 1, _) => ("LPT", "Parallel ports LPT1-LPT3", DRS_CHAR),
         _ if ac97::is_ac97(d) => ("AC97", "AC'97 audio", DRS_AUDIO),
         _ if es137x::is_es137x(d) => ("ES1371", "Ensoniq AudioPCI", DRS_AUDIO),
         _ if e1000::model(d).is_some() => ("E1000", "Intel PRO/1000 Ethernet", DRS_NETWORK),
@@ -466,7 +467,7 @@ fn pci_driver(d: &pci::Device) -> Option<(&'static str, &'static str, u16)> {
 }
 
 /// The resources of an ACPI resource template (`_CRS`).
-fn crs_resources(b: &[u8]) -> Vec<Res> {
+pub(crate) fn crs_resources(b: &[u8]) -> Vec<Res> {
     let mut v = Vec::new();
     let mut i = 0;
     let u16_at = |o: usize| b.get(o..o + 2).map_or(0, |x| u16::from_le_bytes([x[0], x[1]]));
@@ -728,10 +729,7 @@ fn build() -> Tree {
                 coms |= 1 << i;
             }
             "PAR" => {
-                let Some(i) = first_io.and_then(|b| [0x378u16, 0x278, 0x3bc].iter().position(|&x| x == b)) else { continue };
-                if !crate::chardev::lpt_present(i) {
-                    continue;
-                }
+                let Some(i) = first_io.and_then(|b| (0..3).find(|&i| crate::parport::info(i).is_some_and(|f| f.base == b))) else { continue };
                 text = alloc::format!("{text} LPT{}", i + 1);
                 lpts |= 1 << i;
             }
@@ -758,10 +756,18 @@ fn build() -> Tree {
             add_isa(&mut t, "SERIAL", alloc::format!("Serial port COM{}", i + 1), AS_BASE_COMM, 1, alloc::vec![io(base, 8), irq(level)]);
         }
     }
+    // Parallel ports found by probing (PCI cards are PCI functions).
     for i in 0..3 {
-        if lpts & (1 << i) == 0 && crate::chardev::lpt_present(i) {
-            let base = [0x378u16, 0x278, 0x3bc][i];
-            add_isa(&mut t, "PAR", alloc::format!("Parallel port LPT{}", i + 1), AS_BASE_COMM, 2, alloc::vec![io(base, 8), irq(7)]);
+        let Some(f) = crate::parport::info(i).filter(|f| f.pci.is_none()) else { continue };
+        if lpts & (1 << i) == 0 {
+            let mut res = alloc::vec![io(f.base, if f.base == 0x3bc { 4 } else { 8 })];
+            if f.ecr != 0 {
+                res.push(io(f.ecr - 2, 8));
+            }
+            if let Some(q) = f.irq {
+                res.push(irq(q as u16));
+            }
+            add_isa(&mut t, "PAR", alloc::format!("Parallel port LPT{}", i + 1), AS_BASE_COMM, 2, res);
         }
     }
     // Logical serial and parallel ports.

@@ -1,4 +1,5 @@
-//! Hard errors: DosError and the "drive not ready" pop-up.
+//! Hard errors: DosError and the "drive not ready" pop-up (also for
+//! printer ports: out of paper, write fault).
 //!
 //! When a file system operation fails with a hard error (not ready, write
 //! protected, CRC, seek, sector not found, read/write fault, general
@@ -86,6 +87,16 @@ const CHOICES: [(&str, Action); 3] =
 
 /// Ask the user what to do about hard error `e` on drive `drive`.
 pub fn popup(e: u32, drive: Option<u8>) -> Action {
+    popup_at(e, drive.map(|d| alloc::format!("Drive {}:", (b'A' + d) as char)))
+}
+
+/// Ask the user what to do about hard error `e` on character device
+/// `dev` (a printer port: out of paper, write fault).
+pub fn popup_device(e: u32, dev: &str) -> Action {
+    popup_at(e, Some(alloc::format!("Device {dev}")))
+}
+
+fn popup_at(e: u32, place: Option<String>) -> Action {
     let pid = current_pid();
     if pid == 0 || !enabled(pid) || crate::session::popup_owner(pid) {
         return Action::Fail;
@@ -100,7 +111,7 @@ pub fn popup(e: u32, drive: Option<u8>) -> Action {
     let prog = crate::task::sched::current_opt().and_then(|t| t.process()).map(|p| p.exe.name.clone()).unwrap_or_default();
     let mut sel = 1;
     let action = loop {
-        draw(e, drive, &title, &prog, sel);
+        draw(e, place.as_deref(), &title, &prog, sel);
         let Some(k) = crate::kbd::get_key_from(crate::session::POPUP_SID, true) else { break Action::Fail };
         match (k.ch.to_ascii_uppercase(), k.scan) {
             (b'R', _) => break Action::Retry,
@@ -121,7 +132,7 @@ pub fn popup(e: u32, drive: Option<u8>) -> Action {
     action
 }
 
-fn draw(e: u32, drive: Option<u8>, title: &str, prog: &str, sel: usize) {
+fn draw(e: u32, place: Option<&str>, title: &str, prog: &str, sel: usize) {
     const BOX: u16 = 0x4f00;
     const HI: u16 = 0x2f00;
     crate::screen::with_session(crate::session::POPUP_SID, |s| {
@@ -136,8 +147,8 @@ fn draw(e: u32, drive: Option<u8>, title: &str, prog: &str, sel: usize) {
         lines.push((alloc::format!("Session Title: {title}"), BOX));
         lines.push((String::new(), BOX));
         lines.push((alloc::format!("SYS{e:04}: {}", text(e)), BOX));
-        if let Some(d) = drive {
-            lines.push((alloc::format!("Drive {}:", (b'A' + d) as char), BOX));
+        if let Some(d) = place {
+            lines.push((String::from(d), BOX));
         }
         if !prog.is_empty() {
             lines.push((alloc::format!("Program: {prog}"), BOX));

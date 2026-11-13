@@ -516,9 +516,16 @@ it is checked (`rs2\apitest` runs the VIO/KBD/monitor/device checks;
   read timeouts; category 1 IOCtls for baud rate, line control, modem
   control, DCB, queues, errors; tested with QEMU's second serial port:
   `-- -chardev socket,id=c2,path=...,server=on,wait=off -serial
-  chardev:c2`), `LPT1`-`LPT3` and `PRN` (the parallel port, with
-  printer status IOCtls; while the spooler runs and a printer prints to
-  the port, what a program writes is a print job: docs/PRINTING.md), `CLOCK$` (read/write the clock record), `MOUSE$`/`POINTER$`
+  chardev:c2`), `LPT1`-`LPT3` and `PRN` (the parallel ports, found
+  through ACPI, PCI parallel cards or the standard addresses; output
+  driven by the printer's acknowledge interrupt, PRINT01's timeout,
+  infinite retry and out-of-paper/write-fault hard errors, and the
+  category 5 IOCtls with IBM's semantics: frame control, infinite
+  retry, INIT, fonts, job title, IRQ timeout, communication and data
+  transfer modes, the IEEE 1284 device ID, status; tested with PRNTEST
+  LPT and QEMU's `-parallel file:`, docs/PRINTING.md "The parallel port
+  driver"; while the spooler runs and a printer prints to the port,
+  what a program writes is a print job: docs/PRINTING.md), `CLOCK$` (read/write the clock record), `MOUSE$`/`POINTER$`
   (category 7 queries), `KBD$` category 4 IOCtls (input mode, interim
   flags, shift state, typematic rate, read/peek, code page, translate,
   hardware ID). COM1 also carries the kernel log.

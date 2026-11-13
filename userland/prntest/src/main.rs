@@ -15,6 +15,8 @@
 //! host:port and `PRNTEST IPP host port [path]` to an IPP printer; the
 //! listener checks what arrives.
 //!
+//! `PRNTEST LPT [n]` checks the parallel port driver on LPTn (lpt.rs).
+//!
 //! `PRNTEST SETPORT printer port settings [RUN program args]` only sets a
 //! printer's port (and the port's settings), then runs the program: how
 //! the tests point the default printer at a host listener before an IBM
@@ -32,6 +34,8 @@ use core::ptr::{null, null_mut};
 use core::sync::atomic::{AtomicU32, Ordering};
 
 use os2::*;
+
+mod lpt;
 
 os2::entry!(main);
 
@@ -862,6 +866,18 @@ fn set_port_and_run(args: &[&[u8]]) -> u32 {
 }
 
 fn main(s: &Startup) -> u32 {
+    let words: Vec<&[u8]> = s.args().split(|&c| c == b' ').filter(|a| !a.is_empty()).collect();
+    if words.first().is_some_and(|a| a.eq_ignore_ascii_case(b"LPT")) {
+        let n = words.get(1).and_then(|a| a.first().copied()).filter(|c| (b'1'..=b'3').contains(c)).map_or(1, |c| c - b'0');
+        if words.iter().any(|a| a.eq_ignore_ascii_case(b"STALL")) {
+            lpt::stall(n, words.iter().any(|a| a.eq_ignore_ascii_case(b"POPUP")));
+        } else {
+            lpt::run(n);
+        }
+        let f = FAILS.load(Ordering::Relaxed);
+        println!("prntest done: {f} failure(s)");
+        return f;
+    }
     let hab = unsafe { WinInitialize(0) };
     unsafe { WinCreateMsgQueue(hab, 0) };
     let args: Vec<&[u8]> = s.args().split(|&c| c == b' ').filter(|a| !a.is_empty()).collect();

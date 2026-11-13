@@ -40,6 +40,7 @@ mod net;
 mod nls;
 mod nls_data;
 mod npipe;
+mod parport;
 mod rtc;
 mod screen;
 mod serial;

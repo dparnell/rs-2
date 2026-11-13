@@ -31,6 +31,11 @@ pub fn register(irq: u8, h: Handler) {
     unmask(irq);
 }
 
+/// Whether a handler is installed for `irq`.
+pub fn registered(irq: u8) -> bool {
+    irq < 16 && unsafe { (*core::ptr::addr_of!(HANDLERS))[irq as usize].is_some() }
+}
+
 pub fn unmask(irq: u8) {
     if crate::apic::active() {
         crate::apic::route_irq(irq);
